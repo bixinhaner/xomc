@@ -1,0 +1,896 @@
+-- MML 配置树补充标准参数 path 脚本
+-- 生成日期：2026-07-03
+-- 来源：migrations/seed/000007_add_direct_standard_params_to_mml_tree.sql
+-- 作用：将 350 个可直接加入现有 MML 树分组的 standard_params path 写入 mml_command_sub_fields。
+-- 结果：新增/刷新 659 条命令-path 绑定；重复执行幂等。
+-- 执行示例：psql "$DATABASE_URL" -f omcgo/scripts/mml_add_direct_standard_params_to_tree_20260703.sql
+
+BEGIN;
+
+-- 将标准参数树中可直接挂到现有 MML 命令节点的 350 条参数加入 MML 配置树。
+-- 来源：omcgo/data/model-library/standard-params-to-mml-tree-analysis-20260703.detail.csv
+-- 范围：mml_action = add_parameter_to_existing_command。
+-- 350 条标准 path 按真实现有 LST/MOD 命令展开为 659 条 mml_command_sub_fields 绑定。
+-- 说明：Device.FAP.GPS.LockedAltitude / Device.FAP.GPS.SyncSource 没有现成 MOD FAP_GPS 命令，
+--       本脚本只加入已有的 LST FAP_GPS；如需 MOD 入口，应另建 MOD 命令节点。
+-- 仅新增/刷新命令-参数绑定；不新增 standard_params，不新增 mml_commands/mml_command_groups。
+
+CREATE TEMP TABLE tmp_mml_direct_standard_sub_fields (
+    command_code text NOT NULL,
+    standard_path text NOT NULL,
+    base_mml_code text NOT NULL,
+    label_i18n jsonb NOT NULL,
+    default_selected boolean NOT NULL,
+    is_required boolean NOT NULL,
+    sort_order integer NOT NULL,
+    access_type varchar(4) NOT NULL
+) ON COMMIT DROP;
+
+INSERT INTO tmp_mml_direct_standard_sub_fields (
+    command_code, standard_path, base_mml_code, label_i18n,
+    default_selected, is_required, sort_order, access_type
+) VALUES
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.1588_Status', '1588_STATUS', '{"zh-CN":"1588_STATUS","en-US":"1588 Status"}'::jsonb, true, false, 10001, 'RO'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.AddEndPoint', 'ADD_END_POINT', '{"zh-CN":"ADD_END_POINT","en-US":"Add End Point"}'::jsonb, true, false, 10002, 'RO'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.AmbrLimitSwitch', 'AMBR_LIMIT_SWITCH', '{"zh-CN":"AMBR_LIMIT_SWITCH","en-US":"Ambr Limit Switch"}'::jsonb, true, true, 10003, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.AmbrLimitSwitch', 'AMBR_LIMIT_SWITCH', '{"zh-CN":"AMBR_LIMIT_SWITCH","en-US":"Ambr Limit Switch"}'::jsonb, true, true, 10001, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.BDS_Status', 'BDS_STATUS', '{"zh-CN":"BDS_STATUS","en-US":"BDS Status"}'::jsonb, true, false, 10004, 'RO'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.CloudKey', 'CLOUD_KEY', '{"zh-CN":"CLOUD_KEY","en-US":"Cloud Key"}'::jsonb, true, false, 10005, 'RO'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.DNS_CONFIG_IPMODE', 'DNS_CONFIG_IPMODE', '{"zh-CN":"DNS_CONFIG_IPMODE","en-US":"DNS CONFIG IPMODE"}'::jsonb, true, true, 10006, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.DNS_CONFIG_IPMODE', 'DNS_CONFIG_IPMODE', '{"zh-CN":"DNS_CONFIG_IPMODE","en-US":"DNS CONFIG IPMODE"}'::jsonb, true, true, 10002, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.DelEndPonit', 'DEL_END_PONIT', '{"zh-CN":"DEL_END_PONIT","en-US":"Del End Ponit"}'::jsonb, true, false, 10007, 'RO'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ETH1_STATUS_SPEED', 'ETH1_STATUS_SPEED', '{"zh-CN":"ETH1_STATUS_SPEED","en-US":"ETH1 STATUS SPEED"}'::jsonb, true, false, 10008, 'RO'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ElectronicDowntilt', 'ELECTRONIC_DOWNTILT', '{"zh-CN":"ELECTRONIC_DOWNTILT","en-US":"Electronic Downtilt"}'::jsonb, true, false, 10009, 'RO'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.Enable256QAM', 'ENABLE256QAM', '{"zh-CN":"ENABLE256QAM","en-US":"Enable256QAM"}'::jsonb, true, true, 10010, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.Enable256QAM', 'ENABLE256QAM', '{"zh-CN":"ENABLE256QAM","en-US":"Enable256QAM"}'::jsonb, true, true, 10003, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.FaultLogURL', 'FAULT_LOG_URL', '{"zh-CN":"FAULT_LOG_URL","en-US":"Fault Log URL"}'::jsonb, true, true, 10011, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.FaultLogURL', 'FAULT_LOG_URL', '{"zh-CN":"FAULT_LOG_URL","en-US":"Fault Log URL"}'::jsonb, true, true, 10004, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.GPS_Satellite_level', 'GPS_SATELLITE_LEVEL', '{"zh-CN":"GPS_SATELLITE_LEVEL","en-US":"GPS Satellite level"}'::jsonb, true, false, 10012, 'RO'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.GPS_Status', 'GPS_STATUS', '{"zh-CN":"GPS_STATUS","en-US":"GPS Status"}'::jsonb, true, false, 10013, 'RO'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.HOST_CONFIG_DNS1', 'HOST_CONFIG_DNS1', '{"zh-CN":"HOST_CONFIG_DNS1","en-US":"HOST CONFIG DNS1"}'::jsonb, true, true, 10014, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.HOST_CONFIG_DNS1', 'HOST_CONFIG_DNS1', '{"zh-CN":"HOST_CONFIG_DNS1","en-US":"HOST CONFIG DNS1"}'::jsonb, true, true, 10005, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.HOST_CONFIG_DNS2', 'HOST_CONFIG_DNS2', '{"zh-CN":"HOST_CONFIG_DNS2","en-US":"HOST CONFIG DNS2"}'::jsonb, true, true, 10015, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.HOST_CONFIG_DNS2', 'HOST_CONFIG_DNS2', '{"zh-CN":"HOST_CONFIG_DNS2","en-US":"HOST CONFIG DNS2"}'::jsonb, true, true, 10006, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.HardwareVersion_OLD', 'HARDWARE_VERSION_OLD', '{"zh-CN":"HARDWARE_VERSION_OLD","en-US":"Hardware Version OLD"}'::jsonb, true, false, 10016, 'RO'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.KERNAL_Version', 'KERNAL_VERSION', '{"zh-CN":"KERNAL_VERSION","en-US":"KERNAL Version"}'::jsonb, true, false, 10017, 'RO'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.LAN_CONFIG_IPADDR', 'LAN_CONFIG_IPADDR', '{"zh-CN":"LAN_CONFIG_IPADDR","en-US":"LAN CONFIG IPADDR"}'::jsonb, true, true, 10018, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.LAN_CONFIG_IPADDR', 'LAN_CONFIG_IPADDR', '{"zh-CN":"LAN_CONFIG_IPADDR","en-US":"LAN CONFIG IPADDR"}'::jsonb, true, true, 10007, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.LAN_CONFIG_NETMASK', 'LAN_CONFIG_NETMASK', '{"zh-CN":"LAN_CONFIG_NETMASK","en-US":"LAN CONFIG NETMASK"}'::jsonb, true, true, 10019, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.LAN_CONFIG_NETMASK', 'LAN_CONFIG_NETMASK', '{"zh-CN":"LAN_CONFIG_NETMASK","en-US":"LAN CONFIG NETMASK"}'::jsonb, true, true, 10008, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.LTE_LGW_TRANSFER_Mode', 'LTE_LGW_TRANSFER_MODE', '{"zh-CN":"LTE_LGW_TRANSFER_MODE","en-US":"LTE LGW TRANSFER Mode"}'::jsonb, true, true, 10020, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.LTE_LGW_TRANSFER_Mode', 'LTE_LGW_TRANSFER_MODE', '{"zh-CN":"LTE_LGW_TRANSFER_MODE","en-US":"LTE LGW TRANSFER Mode"}'::jsonb, true, true, 10009, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.LTE_S1C_IFNAME', 'LTE_S1C_IFNAME', '{"zh-CN":"LTE_S1C_IFNAME","en-US":"LTE S1C IFNAME"}'::jsonb, true, true, 10021, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.LTE_S1C_IFNAME', 'LTE_S1C_IFNAME', '{"zh-CN":"LTE_S1C_IFNAME","en-US":"LTE S1C IFNAME"}'::jsonb, true, true, 10010, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.LTE_S1U_IFNAME', 'LTE_S1U_IFNAME', '{"zh-CN":"LTE_S1U_IFNAME","en-US":"LTE S1U IFNAME"}'::jsonb, true, true, 10022, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.LTE_S1U_IFNAME', 'LTE_S1U_IFNAME', '{"zh-CN":"LTE_S1U_IFNAME","en-US":"LTE S1U IFNAME"}'::jsonb, true, true, 10011, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.LTE_TR069_IFNAME', 'LTE_TR069_IFNAME', '{"zh-CN":"LTE_TR069_IFNAME","en-US":"LTE TR069 IFNAME"}'::jsonb, true, true, 10023, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.LTE_TR069_IFNAME', 'LTE_TR069_IFNAME', '{"zh-CN":"LTE_TR069_IFNAME","en-US":"LTE TR069 IFNAME"}'::jsonb, true, true, 10012, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.MME_Status', 'MME_STATUS', '{"zh-CN":"MME_STATUS","en-US":"MME Status"}'::jsonb, true, false, 10024, 'RO'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.MODULE_TYPE', 'MODULE_TYPE', '{"zh-CN":"MODULE_TYPE","en-US":"MODULE TYPE"}'::jsonb, true, false, 10025, 'RO'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.MODULE_TYPE_OLD', 'MODULE_TYPE_OLD', '{"zh-CN":"MODULE_TYPE_OLD","en-US":"MODULE TYPE OLD"}'::jsonb, true, false, 10026, 'RO'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.NET_IFCONFIG_INTERFACE', 'NET_IFCONFIG_INTERFACE', '{"zh-CN":"NET_IFCONFIG_INTERFACE","en-US":"NET IFCONFIG INTERFACE"}'::jsonb, true, true, 10027, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.NET_IFCONFIG_INTERFACE', 'NET_IFCONFIG_INTERFACE', '{"zh-CN":"NET_IFCONFIG_INTERFACE","en-US":"NET IFCONFIG INTERFACE"}'::jsonb, true, true, 10013, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.PowerSpectralDensity', 'POWER_SPECTRAL_DENSITY', '{"zh-CN":"POWER_SPECTRAL_DENSITY","en-US":"Power Spectral Density"}'::jsonb, true, true, 10028, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.PowerSpectralDensity', 'POWER_SPECTRAL_DENSITY', '{"zh-CN":"POWER_SPECTRAL_DENSITY","en-US":"Power Spectral Density"}'::jsonb, true, true, 10014, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.PowerSpectralDensity1', 'POWER_SPECTRAL_DENSITY1', '{"zh-CN":"POWER_SPECTRAL_DENSITY1","en-US":"Power Spectral Density1"}'::jsonb, true, true, 10029, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.PowerSpectralDensity1', 'POWER_SPECTRAL_DENSITY1', '{"zh-CN":"POWER_SPECTRAL_DENSITY1","en-US":"Power Spectral Density1"}'::jsonb, true, true, 10015, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.PowerSpectralDensity2', 'POWER_SPECTRAL_DENSITY2', '{"zh-CN":"POWER_SPECTRAL_DENSITY2","en-US":"Power Spectral Density2"}'::jsonb, true, true, 10030, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.PowerSpectralDensity2', 'POWER_SPECTRAL_DENSITY2', '{"zh-CN":"POWER_SPECTRAL_DENSITY2","en-US":"Power Spectral Density2"}'::jsonb, true, true, 10016, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.PowerSpectralDensity3', 'POWER_SPECTRAL_DENSITY3', '{"zh-CN":"POWER_SPECTRAL_DENSITY3","en-US":"Power Spectral Density3"}'::jsonb, true, true, 10031, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.PowerSpectralDensity3', 'POWER_SPECTRAL_DENSITY3', '{"zh-CN":"POWER_SPECTRAL_DENSITY3","en-US":"Power Spectral Density3"}'::jsonb, true, true, 10017, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.REM_Status', 'REM_STATUS', '{"zh-CN":"REM_STATUS","en-US":"REM Status"}'::jsonb, true, false, 10032, 'RO'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROLLBACK_CONTROL', 'ROLLBACK_CONTROL', '{"zh-CN":"ROLLBACK_CONTROL","en-US":"ROLLBACK CONTROL"}'::jsonb, true, true, 10033, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROLLBACK_CONTROL', 'ROLLBACK_CONTROL', '{"zh-CN":"ROLLBACK_CONTROL","en-US":"ROLLBACK CONTROL"}'::jsonb, true, true, 10018, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROLLBACK_ENABLE', 'ROLLBACK_ENABLE', '{"zh-CN":"ROLLBACK_ENABLE","en-US":"ROLLBACK ENABLE"}'::jsonb, true, false, 10034, 'RO'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG10_GW', 'ROUTE_CONFIG10_GW', '{"zh-CN":"ROUTE_CONFIG10_GW","en-US":"ROUTE CONFIG10 GW"}'::jsonb, true, true, 10035, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG10_GW', 'ROUTE_CONFIG10_GW', '{"zh-CN":"ROUTE_CONFIG10_GW","en-US":"ROUTE CONFIG10 GW"}'::jsonb, true, true, 10019, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG10_NETADDR', 'ROUTE_CONFIG10_NETADDR', '{"zh-CN":"ROUTE_CONFIG10_NETADDR","en-US":"ROUTE CONFIG10 NETADDR"}'::jsonb, true, true, 10036, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG10_NETADDR', 'ROUTE_CONFIG10_NETADDR', '{"zh-CN":"ROUTE_CONFIG10_NETADDR","en-US":"ROUTE CONFIG10 NETADDR"}'::jsonb, true, true, 10020, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG10_NETMASK', 'ROUTE_CONFIG10_NETMASK', '{"zh-CN":"ROUTE_CONFIG10_NETMASK","en-US":"ROUTE CONFIG10 NETMASK"}'::jsonb, true, true, 10037, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG10_NETMASK', 'ROUTE_CONFIG10_NETMASK', '{"zh-CN":"ROUTE_CONFIG10_NETMASK","en-US":"ROUTE CONFIG10 NETMASK"}'::jsonb, true, true, 10021, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG10_ONBOOTENB', 'ROUTE_CONFIG10_ONBOOTENB', '{"zh-CN":"ROUTE_CONFIG10_ONBOOTENB","en-US":"ROUTE CONFIG10 ONBOOTENB"}'::jsonb, true, true, 10038, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG10_ONBOOTENB', 'ROUTE_CONFIG10_ONBOOTENB', '{"zh-CN":"ROUTE_CONFIG10_ONBOOTENB","en-US":"ROUTE CONFIG10 ONBOOTENB"}'::jsonb, true, true, 10022, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG10_V6_GW', 'ROUTE_CONFIG10_V6_GW', '{"zh-CN":"ROUTE_CONFIG10_V6_GW","en-US":"ROUTE CONFIG10 V6 GW"}'::jsonb, true, true, 10039, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG10_V6_GW', 'ROUTE_CONFIG10_V6_GW', '{"zh-CN":"ROUTE_CONFIG10_V6_GW","en-US":"ROUTE CONFIG10 V6 GW"}'::jsonb, true, true, 10023, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG10_V6_NETADDR', 'ROUTE_CONFIG10_V6_NETADDR', '{"zh-CN":"ROUTE_CONFIG10_V6_NETADDR","en-US":"ROUTE CONFIG10 V6 NETADDR"}'::jsonb, true, true, 10040, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG10_V6_NETADDR', 'ROUTE_CONFIG10_V6_NETADDR', '{"zh-CN":"ROUTE_CONFIG10_V6_NETADDR","en-US":"ROUTE CONFIG10 V6 NETADDR"}'::jsonb, true, true, 10024, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG10_V6_ONBOOT', 'ROUTE_CONFIG10_V6_ONBOOT', '{"zh-CN":"ROUTE_CONFIG10_V6_ONBOOT","en-US":"ROUTE CONFIG10 V6 ONBOOT"}'::jsonb, true, true, 10041, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG10_V6_ONBOOT', 'ROUTE_CONFIG10_V6_ONBOOT', '{"zh-CN":"ROUTE_CONFIG10_V6_ONBOOT","en-US":"ROUTE CONFIG10 V6 ONBOOT"}'::jsonb, true, true, 10025, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG10_V6_PREFIX', 'ROUTE_CONFIG10_V6_PREFIX', '{"zh-CN":"ROUTE_CONFIG10_V6_PREFIX","en-US":"ROUTE CONFIG10 V6 PREFIX"}'::jsonb, true, true, 10042, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG10_V6_PREFIX', 'ROUTE_CONFIG10_V6_PREFIX', '{"zh-CN":"ROUTE_CONFIG10_V6_PREFIX","en-US":"ROUTE CONFIG10 V6 PREFIX"}'::jsonb, true, true, 10026, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG11_GW', 'ROUTE_CONFIG11_GW', '{"zh-CN":"ROUTE_CONFIG11_GW","en-US":"ROUTE CONFIG11 GW"}'::jsonb, true, true, 10043, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG11_GW', 'ROUTE_CONFIG11_GW', '{"zh-CN":"ROUTE_CONFIG11_GW","en-US":"ROUTE CONFIG11 GW"}'::jsonb, true, true, 10027, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG11_NETADDR', 'ROUTE_CONFIG11_NETADDR', '{"zh-CN":"ROUTE_CONFIG11_NETADDR","en-US":"ROUTE CONFIG11 NETADDR"}'::jsonb, true, true, 10044, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG11_NETADDR', 'ROUTE_CONFIG11_NETADDR', '{"zh-CN":"ROUTE_CONFIG11_NETADDR","en-US":"ROUTE CONFIG11 NETADDR"}'::jsonb, true, true, 10028, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG11_NETMASK', 'ROUTE_CONFIG11_NETMASK', '{"zh-CN":"ROUTE_CONFIG11_NETMASK","en-US":"ROUTE CONFIG11 NETMASK"}'::jsonb, true, true, 10045, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG11_NETMASK', 'ROUTE_CONFIG11_NETMASK', '{"zh-CN":"ROUTE_CONFIG11_NETMASK","en-US":"ROUTE CONFIG11 NETMASK"}'::jsonb, true, true, 10029, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG11_ONBOOTENB', 'ROUTE_CONFIG11_ONBOOTENB', '{"zh-CN":"ROUTE_CONFIG11_ONBOOTENB","en-US":"ROUTE CONFIG11 ONBOOTENB"}'::jsonb, true, true, 10046, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG11_ONBOOTENB', 'ROUTE_CONFIG11_ONBOOTENB', '{"zh-CN":"ROUTE_CONFIG11_ONBOOTENB","en-US":"ROUTE CONFIG11 ONBOOTENB"}'::jsonb, true, true, 10030, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG11_V6_GW', 'ROUTE_CONFIG11_V6_GW', '{"zh-CN":"ROUTE_CONFIG11_V6_GW","en-US":"ROUTE CONFIG11 V6 GW"}'::jsonb, true, true, 10047, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG11_V6_GW', 'ROUTE_CONFIG11_V6_GW', '{"zh-CN":"ROUTE_CONFIG11_V6_GW","en-US":"ROUTE CONFIG11 V6 GW"}'::jsonb, true, true, 10031, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG11_V6_NETADDR', 'ROUTE_CONFIG11_V6_NETADDR', '{"zh-CN":"ROUTE_CONFIG11_V6_NETADDR","en-US":"ROUTE CONFIG11 V6 NETADDR"}'::jsonb, true, true, 10048, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG11_V6_NETADDR', 'ROUTE_CONFIG11_V6_NETADDR', '{"zh-CN":"ROUTE_CONFIG11_V6_NETADDR","en-US":"ROUTE CONFIG11 V6 NETADDR"}'::jsonb, true, true, 10032, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG11_V6_ONBOOT', 'ROUTE_CONFIG11_V6_ONBOOT', '{"zh-CN":"ROUTE_CONFIG11_V6_ONBOOT","en-US":"ROUTE CONFIG11 V6 ONBOOT"}'::jsonb, true, true, 10049, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG11_V6_ONBOOT', 'ROUTE_CONFIG11_V6_ONBOOT', '{"zh-CN":"ROUTE_CONFIG11_V6_ONBOOT","en-US":"ROUTE CONFIG11 V6 ONBOOT"}'::jsonb, true, true, 10033, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG11_V6_PREFIX', 'ROUTE_CONFIG11_V6_PREFIX', '{"zh-CN":"ROUTE_CONFIG11_V6_PREFIX","en-US":"ROUTE CONFIG11 V6 PREFIX"}'::jsonb, true, true, 10050, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG11_V6_PREFIX', 'ROUTE_CONFIG11_V6_PREFIX', '{"zh-CN":"ROUTE_CONFIG11_V6_PREFIX","en-US":"ROUTE CONFIG11 V6 PREFIX"}'::jsonb, true, true, 10034, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG12_GW', 'ROUTE_CONFIG12_GW', '{"zh-CN":"ROUTE_CONFIG12_GW","en-US":"ROUTE CONFIG12 GW"}'::jsonb, true, true, 10051, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG12_GW', 'ROUTE_CONFIG12_GW', '{"zh-CN":"ROUTE_CONFIG12_GW","en-US":"ROUTE CONFIG12 GW"}'::jsonb, true, true, 10035, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG12_NETADDR', 'ROUTE_CONFIG12_NETADDR', '{"zh-CN":"ROUTE_CONFIG12_NETADDR","en-US":"ROUTE CONFIG12 NETADDR"}'::jsonb, true, true, 10052, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG12_NETADDR', 'ROUTE_CONFIG12_NETADDR', '{"zh-CN":"ROUTE_CONFIG12_NETADDR","en-US":"ROUTE CONFIG12 NETADDR"}'::jsonb, true, true, 10036, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG12_NETMASK', 'ROUTE_CONFIG12_NETMASK', '{"zh-CN":"ROUTE_CONFIG12_NETMASK","en-US":"ROUTE CONFIG12 NETMASK"}'::jsonb, true, true, 10053, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG12_NETMASK', 'ROUTE_CONFIG12_NETMASK', '{"zh-CN":"ROUTE_CONFIG12_NETMASK","en-US":"ROUTE CONFIG12 NETMASK"}'::jsonb, true, true, 10037, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG12_ONBOOTENB', 'ROUTE_CONFIG12_ONBOOTENB', '{"zh-CN":"ROUTE_CONFIG12_ONBOOTENB","en-US":"ROUTE CONFIG12 ONBOOTENB"}'::jsonb, true, true, 10054, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG12_ONBOOTENB', 'ROUTE_CONFIG12_ONBOOTENB', '{"zh-CN":"ROUTE_CONFIG12_ONBOOTENB","en-US":"ROUTE CONFIG12 ONBOOTENB"}'::jsonb, true, true, 10038, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG12_V6_GW', 'ROUTE_CONFIG12_V6_GW', '{"zh-CN":"ROUTE_CONFIG12_V6_GW","en-US":"ROUTE CONFIG12 V6 GW"}'::jsonb, true, true, 10055, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG12_V6_GW', 'ROUTE_CONFIG12_V6_GW', '{"zh-CN":"ROUTE_CONFIG12_V6_GW","en-US":"ROUTE CONFIG12 V6 GW"}'::jsonb, true, true, 10039, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG12_V6_NETADDR', 'ROUTE_CONFIG12_V6_NETADDR', '{"zh-CN":"ROUTE_CONFIG12_V6_NETADDR","en-US":"ROUTE CONFIG12 V6 NETADDR"}'::jsonb, true, true, 10056, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG12_V6_NETADDR', 'ROUTE_CONFIG12_V6_NETADDR', '{"zh-CN":"ROUTE_CONFIG12_V6_NETADDR","en-US":"ROUTE CONFIG12 V6 NETADDR"}'::jsonb, true, true, 10040, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG12_V6_ONBOOT', 'ROUTE_CONFIG12_V6_ONBOOT', '{"zh-CN":"ROUTE_CONFIG12_V6_ONBOOT","en-US":"ROUTE CONFIG12 V6 ONBOOT"}'::jsonb, true, true, 10057, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG12_V6_ONBOOT', 'ROUTE_CONFIG12_V6_ONBOOT', '{"zh-CN":"ROUTE_CONFIG12_V6_ONBOOT","en-US":"ROUTE CONFIG12 V6 ONBOOT"}'::jsonb, true, true, 10041, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG12_V6_PREFIX', 'ROUTE_CONFIG12_V6_PREFIX', '{"zh-CN":"ROUTE_CONFIG12_V6_PREFIX","en-US":"ROUTE CONFIG12 V6 PREFIX"}'::jsonb, true, true, 10058, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG12_V6_PREFIX', 'ROUTE_CONFIG12_V6_PREFIX', '{"zh-CN":"ROUTE_CONFIG12_V6_PREFIX","en-US":"ROUTE CONFIG12 V6 PREFIX"}'::jsonb, true, true, 10042, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG1_GW', 'ROUTE_CONFIG1_GW', '{"zh-CN":"ROUTE_CONFIG1_GW","en-US":"ROUTE CONFIG1 GW"}'::jsonb, true, true, 10059, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG1_GW', 'ROUTE_CONFIG1_GW', '{"zh-CN":"ROUTE_CONFIG1_GW","en-US":"ROUTE CONFIG1 GW"}'::jsonb, true, true, 10043, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG1_NETADDR', 'ROUTE_CONFIG1_NETADDR', '{"zh-CN":"ROUTE_CONFIG1_NETADDR","en-US":"ROUTE CONFIG1 NETADDR"}'::jsonb, true, true, 10060, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG1_NETADDR', 'ROUTE_CONFIG1_NETADDR', '{"zh-CN":"ROUTE_CONFIG1_NETADDR","en-US":"ROUTE CONFIG1 NETADDR"}'::jsonb, true, true, 10044, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG1_NETMASK', 'ROUTE_CONFIG1_NETMASK', '{"zh-CN":"ROUTE_CONFIG1_NETMASK","en-US":"ROUTE CONFIG1 NETMASK"}'::jsonb, true, true, 10061, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG1_NETMASK', 'ROUTE_CONFIG1_NETMASK', '{"zh-CN":"ROUTE_CONFIG1_NETMASK","en-US":"ROUTE CONFIG1 NETMASK"}'::jsonb, true, true, 10045, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG1_ONBOOTENB', 'ROUTE_CONFIG1_ONBOOTENB', '{"zh-CN":"ROUTE_CONFIG1_ONBOOTENB","en-US":"ROUTE CONFIG1 ONBOOTENB"}'::jsonb, true, true, 10062, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG1_ONBOOTENB', 'ROUTE_CONFIG1_ONBOOTENB', '{"zh-CN":"ROUTE_CONFIG1_ONBOOTENB","en-US":"ROUTE CONFIG1 ONBOOTENB"}'::jsonb, true, true, 10046, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG1_V6_GW', 'ROUTE_CONFIG1_V6_GW', '{"zh-CN":"ROUTE_CONFIG1_V6_GW","en-US":"ROUTE CONFIG1 V6 GW"}'::jsonb, true, true, 10063, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG1_V6_GW', 'ROUTE_CONFIG1_V6_GW', '{"zh-CN":"ROUTE_CONFIG1_V6_GW","en-US":"ROUTE CONFIG1 V6 GW"}'::jsonb, true, true, 10047, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG1_V6_NETADDR', 'ROUTE_CONFIG1_V6_NETADDR', '{"zh-CN":"ROUTE_CONFIG1_V6_NETADDR","en-US":"ROUTE CONFIG1 V6 NETADDR"}'::jsonb, true, true, 10064, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG1_V6_NETADDR', 'ROUTE_CONFIG1_V6_NETADDR', '{"zh-CN":"ROUTE_CONFIG1_V6_NETADDR","en-US":"ROUTE CONFIG1 V6 NETADDR"}'::jsonb, true, true, 10048, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG1_V6_ONBOOT', 'ROUTE_CONFIG1_V6_ONBOOT', '{"zh-CN":"ROUTE_CONFIG1_V6_ONBOOT","en-US":"ROUTE CONFIG1 V6 ONBOOT"}'::jsonb, true, true, 10065, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG1_V6_ONBOOT', 'ROUTE_CONFIG1_V6_ONBOOT', '{"zh-CN":"ROUTE_CONFIG1_V6_ONBOOT","en-US":"ROUTE CONFIG1 V6 ONBOOT"}'::jsonb, true, true, 10049, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG1_V6_PREFIX', 'ROUTE_CONFIG1_V6_PREFIX', '{"zh-CN":"ROUTE_CONFIG1_V6_PREFIX","en-US":"ROUTE CONFIG1 V6 PREFIX"}'::jsonb, true, true, 10066, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG1_V6_PREFIX', 'ROUTE_CONFIG1_V6_PREFIX', '{"zh-CN":"ROUTE_CONFIG1_V6_PREFIX","en-US":"ROUTE CONFIG1 V6 PREFIX"}'::jsonb, true, true, 10050, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG2_GW', 'ROUTE_CONFIG2_GW', '{"zh-CN":"ROUTE_CONFIG2_GW","en-US":"ROUTE CONFIG2 GW"}'::jsonb, true, true, 10067, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG2_GW', 'ROUTE_CONFIG2_GW', '{"zh-CN":"ROUTE_CONFIG2_GW","en-US":"ROUTE CONFIG2 GW"}'::jsonb, true, true, 10051, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG2_NETADDR', 'ROUTE_CONFIG2_NETADDR', '{"zh-CN":"ROUTE_CONFIG2_NETADDR","en-US":"ROUTE CONFIG2 NETADDR"}'::jsonb, true, true, 10068, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG2_NETADDR', 'ROUTE_CONFIG2_NETADDR', '{"zh-CN":"ROUTE_CONFIG2_NETADDR","en-US":"ROUTE CONFIG2 NETADDR"}'::jsonb, true, true, 10052, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG2_NETMASK', 'ROUTE_CONFIG2_NETMASK', '{"zh-CN":"ROUTE_CONFIG2_NETMASK","en-US":"ROUTE CONFIG2 NETMASK"}'::jsonb, true, true, 10069, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG2_NETMASK', 'ROUTE_CONFIG2_NETMASK', '{"zh-CN":"ROUTE_CONFIG2_NETMASK","en-US":"ROUTE CONFIG2 NETMASK"}'::jsonb, true, true, 10053, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG2_ONBOOTENB', 'ROUTE_CONFIG2_ONBOOTENB', '{"zh-CN":"ROUTE_CONFIG2_ONBOOTENB","en-US":"ROUTE CONFIG2 ONBOOTENB"}'::jsonb, true, true, 10070, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG2_ONBOOTENB', 'ROUTE_CONFIG2_ONBOOTENB', '{"zh-CN":"ROUTE_CONFIG2_ONBOOTENB","en-US":"ROUTE CONFIG2 ONBOOTENB"}'::jsonb, true, true, 10054, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG2_V6_GW', 'ROUTE_CONFIG2_V6_GW', '{"zh-CN":"ROUTE_CONFIG2_V6_GW","en-US":"ROUTE CONFIG2 V6 GW"}'::jsonb, true, true, 10071, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG2_V6_GW', 'ROUTE_CONFIG2_V6_GW', '{"zh-CN":"ROUTE_CONFIG2_V6_GW","en-US":"ROUTE CONFIG2 V6 GW"}'::jsonb, true, true, 10055, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG2_V6_NETADDR', 'ROUTE_CONFIG2_V6_NETADDR', '{"zh-CN":"ROUTE_CONFIG2_V6_NETADDR","en-US":"ROUTE CONFIG2 V6 NETADDR"}'::jsonb, true, true, 10072, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG2_V6_NETADDR', 'ROUTE_CONFIG2_V6_NETADDR', '{"zh-CN":"ROUTE_CONFIG2_V6_NETADDR","en-US":"ROUTE CONFIG2 V6 NETADDR"}'::jsonb, true, true, 10056, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG2_V6_ONBOOT', 'ROUTE_CONFIG2_V6_ONBOOT', '{"zh-CN":"ROUTE_CONFIG2_V6_ONBOOT","en-US":"ROUTE CONFIG2 V6 ONBOOT"}'::jsonb, true, true, 10073, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG2_V6_ONBOOT', 'ROUTE_CONFIG2_V6_ONBOOT', '{"zh-CN":"ROUTE_CONFIG2_V6_ONBOOT","en-US":"ROUTE CONFIG2 V6 ONBOOT"}'::jsonb, true, true, 10057, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG2_V6_PREFIX', 'ROUTE_CONFIG2_V6_PREFIX', '{"zh-CN":"ROUTE_CONFIG2_V6_PREFIX","en-US":"ROUTE CONFIG2 V6 PREFIX"}'::jsonb, true, true, 10074, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG2_V6_PREFIX', 'ROUTE_CONFIG2_V6_PREFIX', '{"zh-CN":"ROUTE_CONFIG2_V6_PREFIX","en-US":"ROUTE CONFIG2 V6 PREFIX"}'::jsonb, true, true, 10058, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG3_GW', 'ROUTE_CONFIG3_GW', '{"zh-CN":"ROUTE_CONFIG3_GW","en-US":"ROUTE CONFIG3 GW"}'::jsonb, true, true, 10075, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG3_GW', 'ROUTE_CONFIG3_GW', '{"zh-CN":"ROUTE_CONFIG3_GW","en-US":"ROUTE CONFIG3 GW"}'::jsonb, true, true, 10059, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG3_NETADDR', 'ROUTE_CONFIG3_NETADDR', '{"zh-CN":"ROUTE_CONFIG3_NETADDR","en-US":"ROUTE CONFIG3 NETADDR"}'::jsonb, true, true, 10076, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG3_NETADDR', 'ROUTE_CONFIG3_NETADDR', '{"zh-CN":"ROUTE_CONFIG3_NETADDR","en-US":"ROUTE CONFIG3 NETADDR"}'::jsonb, true, true, 10060, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG3_NETMASK', 'ROUTE_CONFIG3_NETMASK', '{"zh-CN":"ROUTE_CONFIG3_NETMASK","en-US":"ROUTE CONFIG3 NETMASK"}'::jsonb, true, true, 10077, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG3_NETMASK', 'ROUTE_CONFIG3_NETMASK', '{"zh-CN":"ROUTE_CONFIG3_NETMASK","en-US":"ROUTE CONFIG3 NETMASK"}'::jsonb, true, true, 10061, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG3_ONBOOTENB', 'ROUTE_CONFIG3_ONBOOTENB', '{"zh-CN":"ROUTE_CONFIG3_ONBOOTENB","en-US":"ROUTE CONFIG3 ONBOOTENB"}'::jsonb, true, true, 10078, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG3_ONBOOTENB', 'ROUTE_CONFIG3_ONBOOTENB', '{"zh-CN":"ROUTE_CONFIG3_ONBOOTENB","en-US":"ROUTE CONFIG3 ONBOOTENB"}'::jsonb, true, true, 10062, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG3_V6_GW', 'ROUTE_CONFIG3_V6_GW', '{"zh-CN":"ROUTE_CONFIG3_V6_GW","en-US":"ROUTE CONFIG3 V6 GW"}'::jsonb, true, true, 10079, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG3_V6_GW', 'ROUTE_CONFIG3_V6_GW', '{"zh-CN":"ROUTE_CONFIG3_V6_GW","en-US":"ROUTE CONFIG3 V6 GW"}'::jsonb, true, true, 10063, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG3_V6_NETADDR', 'ROUTE_CONFIG3_V6_NETADDR', '{"zh-CN":"ROUTE_CONFIG3_V6_NETADDR","en-US":"ROUTE CONFIG3 V6 NETADDR"}'::jsonb, true, true, 10080, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG3_V6_NETADDR', 'ROUTE_CONFIG3_V6_NETADDR', '{"zh-CN":"ROUTE_CONFIG3_V6_NETADDR","en-US":"ROUTE CONFIG3 V6 NETADDR"}'::jsonb, true, true, 10064, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG3_V6_ONBOOT', 'ROUTE_CONFIG3_V6_ONBOOT', '{"zh-CN":"ROUTE_CONFIG3_V6_ONBOOT","en-US":"ROUTE CONFIG3 V6 ONBOOT"}'::jsonb, true, true, 10081, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG3_V6_ONBOOT', 'ROUTE_CONFIG3_V6_ONBOOT', '{"zh-CN":"ROUTE_CONFIG3_V6_ONBOOT","en-US":"ROUTE CONFIG3 V6 ONBOOT"}'::jsonb, true, true, 10065, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG3_V6_PREFIX', 'ROUTE_CONFIG3_V6_PREFIX', '{"zh-CN":"ROUTE_CONFIG3_V6_PREFIX","en-US":"ROUTE CONFIG3 V6 PREFIX"}'::jsonb, true, true, 10082, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG3_V6_PREFIX', 'ROUTE_CONFIG3_V6_PREFIX', '{"zh-CN":"ROUTE_CONFIG3_V6_PREFIX","en-US":"ROUTE CONFIG3 V6 PREFIX"}'::jsonb, true, true, 10066, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG4_GW', 'ROUTE_CONFIG4_GW', '{"zh-CN":"ROUTE_CONFIG4_GW","en-US":"ROUTE CONFIG4 GW"}'::jsonb, true, true, 10083, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG4_GW', 'ROUTE_CONFIG4_GW', '{"zh-CN":"ROUTE_CONFIG4_GW","en-US":"ROUTE CONFIG4 GW"}'::jsonb, true, true, 10067, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG4_NETADDR', 'ROUTE_CONFIG4_NETADDR', '{"zh-CN":"ROUTE_CONFIG4_NETADDR","en-US":"ROUTE CONFIG4 NETADDR"}'::jsonb, true, true, 10084, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG4_NETADDR', 'ROUTE_CONFIG4_NETADDR', '{"zh-CN":"ROUTE_CONFIG4_NETADDR","en-US":"ROUTE CONFIG4 NETADDR"}'::jsonb, true, true, 10068, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG4_NETMASK', 'ROUTE_CONFIG4_NETMASK', '{"zh-CN":"ROUTE_CONFIG4_NETMASK","en-US":"ROUTE CONFIG4 NETMASK"}'::jsonb, true, true, 10085, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG4_NETMASK', 'ROUTE_CONFIG4_NETMASK', '{"zh-CN":"ROUTE_CONFIG4_NETMASK","en-US":"ROUTE CONFIG4 NETMASK"}'::jsonb, true, true, 10069, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG4_ONBOOTENB', 'ROUTE_CONFIG4_ONBOOTENB', '{"zh-CN":"ROUTE_CONFIG4_ONBOOTENB","en-US":"ROUTE CONFIG4 ONBOOTENB"}'::jsonb, true, true, 10086, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG4_ONBOOTENB', 'ROUTE_CONFIG4_ONBOOTENB', '{"zh-CN":"ROUTE_CONFIG4_ONBOOTENB","en-US":"ROUTE CONFIG4 ONBOOTENB"}'::jsonb, true, true, 10070, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG4_V6_GW', 'ROUTE_CONFIG4_V6_GW', '{"zh-CN":"ROUTE_CONFIG4_V6_GW","en-US":"ROUTE CONFIG4 V6 GW"}'::jsonb, true, true, 10087, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG4_V6_GW', 'ROUTE_CONFIG4_V6_GW', '{"zh-CN":"ROUTE_CONFIG4_V6_GW","en-US":"ROUTE CONFIG4 V6 GW"}'::jsonb, true, true, 10071, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG4_V6_NETADDR', 'ROUTE_CONFIG4_V6_NETADDR', '{"zh-CN":"ROUTE_CONFIG4_V6_NETADDR","en-US":"ROUTE CONFIG4 V6 NETADDR"}'::jsonb, true, true, 10088, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG4_V6_NETADDR', 'ROUTE_CONFIG4_V6_NETADDR', '{"zh-CN":"ROUTE_CONFIG4_V6_NETADDR","en-US":"ROUTE CONFIG4 V6 NETADDR"}'::jsonb, true, true, 10072, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG4_V6_ONBOOT', 'ROUTE_CONFIG4_V6_ONBOOT', '{"zh-CN":"ROUTE_CONFIG4_V6_ONBOOT","en-US":"ROUTE CONFIG4 V6 ONBOOT"}'::jsonb, true, true, 10089, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG4_V6_ONBOOT', 'ROUTE_CONFIG4_V6_ONBOOT', '{"zh-CN":"ROUTE_CONFIG4_V6_ONBOOT","en-US":"ROUTE CONFIG4 V6 ONBOOT"}'::jsonb, true, true, 10073, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG4_V6_PREFIX', 'ROUTE_CONFIG4_V6_PREFIX', '{"zh-CN":"ROUTE_CONFIG4_V6_PREFIX","en-US":"ROUTE CONFIG4 V6 PREFIX"}'::jsonb, true, true, 10090, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG4_V6_PREFIX', 'ROUTE_CONFIG4_V6_PREFIX', '{"zh-CN":"ROUTE_CONFIG4_V6_PREFIX","en-US":"ROUTE CONFIG4 V6 PREFIX"}'::jsonb, true, true, 10074, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG5_GW', 'ROUTE_CONFIG5_GW', '{"zh-CN":"ROUTE_CONFIG5_GW","en-US":"ROUTE CONFIG5 GW"}'::jsonb, true, true, 10091, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG5_GW', 'ROUTE_CONFIG5_GW', '{"zh-CN":"ROUTE_CONFIG5_GW","en-US":"ROUTE CONFIG5 GW"}'::jsonb, true, true, 10075, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG5_NETADDR', 'ROUTE_CONFIG5_NETADDR', '{"zh-CN":"ROUTE_CONFIG5_NETADDR","en-US":"ROUTE CONFIG5 NETADDR"}'::jsonb, true, true, 10092, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG5_NETADDR', 'ROUTE_CONFIG5_NETADDR', '{"zh-CN":"ROUTE_CONFIG5_NETADDR","en-US":"ROUTE CONFIG5 NETADDR"}'::jsonb, true, true, 10076, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG5_NETMASK', 'ROUTE_CONFIG5_NETMASK', '{"zh-CN":"ROUTE_CONFIG5_NETMASK","en-US":"ROUTE CONFIG5 NETMASK"}'::jsonb, true, true, 10093, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG5_NETMASK', 'ROUTE_CONFIG5_NETMASK', '{"zh-CN":"ROUTE_CONFIG5_NETMASK","en-US":"ROUTE CONFIG5 NETMASK"}'::jsonb, true, true, 10077, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG5_ONBOOTENB', 'ROUTE_CONFIG5_ONBOOTENB', '{"zh-CN":"ROUTE_CONFIG5_ONBOOTENB","en-US":"ROUTE CONFIG5 ONBOOTENB"}'::jsonb, true, true, 10094, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG5_ONBOOTENB', 'ROUTE_CONFIG5_ONBOOTENB', '{"zh-CN":"ROUTE_CONFIG5_ONBOOTENB","en-US":"ROUTE CONFIG5 ONBOOTENB"}'::jsonb, true, true, 10078, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG5_V6_GW', 'ROUTE_CONFIG5_V6_GW', '{"zh-CN":"ROUTE_CONFIG5_V6_GW","en-US":"ROUTE CONFIG5 V6 GW"}'::jsonb, true, true, 10095, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG5_V6_GW', 'ROUTE_CONFIG5_V6_GW', '{"zh-CN":"ROUTE_CONFIG5_V6_GW","en-US":"ROUTE CONFIG5 V6 GW"}'::jsonb, true, true, 10079, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG5_V6_NETADDR', 'ROUTE_CONFIG5_V6_NETADDR', '{"zh-CN":"ROUTE_CONFIG5_V6_NETADDR","en-US":"ROUTE CONFIG5 V6 NETADDR"}'::jsonb, true, true, 10096, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG5_V6_NETADDR', 'ROUTE_CONFIG5_V6_NETADDR', '{"zh-CN":"ROUTE_CONFIG5_V6_NETADDR","en-US":"ROUTE CONFIG5 V6 NETADDR"}'::jsonb, true, true, 10080, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG5_V6_ONBOOT', 'ROUTE_CONFIG5_V6_ONBOOT', '{"zh-CN":"ROUTE_CONFIG5_V6_ONBOOT","en-US":"ROUTE CONFIG5 V6 ONBOOT"}'::jsonb, true, true, 10097, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG5_V6_ONBOOT', 'ROUTE_CONFIG5_V6_ONBOOT', '{"zh-CN":"ROUTE_CONFIG5_V6_ONBOOT","en-US":"ROUTE CONFIG5 V6 ONBOOT"}'::jsonb, true, true, 10081, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG5_V6_PREFIX', 'ROUTE_CONFIG5_V6_PREFIX', '{"zh-CN":"ROUTE_CONFIG5_V6_PREFIX","en-US":"ROUTE CONFIG5 V6 PREFIX"}'::jsonb, true, true, 10098, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG5_V6_PREFIX', 'ROUTE_CONFIG5_V6_PREFIX', '{"zh-CN":"ROUTE_CONFIG5_V6_PREFIX","en-US":"ROUTE CONFIG5 V6 PREFIX"}'::jsonb, true, true, 10082, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG6_GW', 'ROUTE_CONFIG6_GW', '{"zh-CN":"ROUTE_CONFIG6_GW","en-US":"ROUTE CONFIG6 GW"}'::jsonb, true, true, 10099, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG6_GW', 'ROUTE_CONFIG6_GW', '{"zh-CN":"ROUTE_CONFIG6_GW","en-US":"ROUTE CONFIG6 GW"}'::jsonb, true, true, 10083, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG6_NETADDR', 'ROUTE_CONFIG6_NETADDR', '{"zh-CN":"ROUTE_CONFIG6_NETADDR","en-US":"ROUTE CONFIG6 NETADDR"}'::jsonb, true, true, 10100, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG6_NETADDR', 'ROUTE_CONFIG6_NETADDR', '{"zh-CN":"ROUTE_CONFIG6_NETADDR","en-US":"ROUTE CONFIG6 NETADDR"}'::jsonb, true, true, 10084, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG6_NETMASK', 'ROUTE_CONFIG6_NETMASK', '{"zh-CN":"ROUTE_CONFIG6_NETMASK","en-US":"ROUTE CONFIG6 NETMASK"}'::jsonb, true, true, 10101, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG6_NETMASK', 'ROUTE_CONFIG6_NETMASK', '{"zh-CN":"ROUTE_CONFIG6_NETMASK","en-US":"ROUTE CONFIG6 NETMASK"}'::jsonb, true, true, 10085, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG6_ONBOOTENB', 'ROUTE_CONFIG6_ONBOOTENB', '{"zh-CN":"ROUTE_CONFIG6_ONBOOTENB","en-US":"ROUTE CONFIG6 ONBOOTENB"}'::jsonb, true, true, 10102, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG6_ONBOOTENB', 'ROUTE_CONFIG6_ONBOOTENB', '{"zh-CN":"ROUTE_CONFIG6_ONBOOTENB","en-US":"ROUTE CONFIG6 ONBOOTENB"}'::jsonb, true, true, 10086, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG6_V6_GW', 'ROUTE_CONFIG6_V6_GW', '{"zh-CN":"ROUTE_CONFIG6_V6_GW","en-US":"ROUTE CONFIG6 V6 GW"}'::jsonb, true, true, 10103, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG6_V6_GW', 'ROUTE_CONFIG6_V6_GW', '{"zh-CN":"ROUTE_CONFIG6_V6_GW","en-US":"ROUTE CONFIG6 V6 GW"}'::jsonb, true, true, 10087, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG6_V6_NETADDR', 'ROUTE_CONFIG6_V6_NETADDR', '{"zh-CN":"ROUTE_CONFIG6_V6_NETADDR","en-US":"ROUTE CONFIG6 V6 NETADDR"}'::jsonb, true, true, 10104, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG6_V6_NETADDR', 'ROUTE_CONFIG6_V6_NETADDR', '{"zh-CN":"ROUTE_CONFIG6_V6_NETADDR","en-US":"ROUTE CONFIG6 V6 NETADDR"}'::jsonb, true, true, 10088, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG6_V6_ONBOOT', 'ROUTE_CONFIG6_V6_ONBOOT', '{"zh-CN":"ROUTE_CONFIG6_V6_ONBOOT","en-US":"ROUTE CONFIG6 V6 ONBOOT"}'::jsonb, true, true, 10105, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG6_V6_ONBOOT', 'ROUTE_CONFIG6_V6_ONBOOT', '{"zh-CN":"ROUTE_CONFIG6_V6_ONBOOT","en-US":"ROUTE CONFIG6 V6 ONBOOT"}'::jsonb, true, true, 10089, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG6_V6_PREFIX', 'ROUTE_CONFIG6_V6_PREFIX', '{"zh-CN":"ROUTE_CONFIG6_V6_PREFIX","en-US":"ROUTE CONFIG6 V6 PREFIX"}'::jsonb, true, true, 10106, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG6_V6_PREFIX', 'ROUTE_CONFIG6_V6_PREFIX', '{"zh-CN":"ROUTE_CONFIG6_V6_PREFIX","en-US":"ROUTE CONFIG6 V6 PREFIX"}'::jsonb, true, true, 10090, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG7_GW', 'ROUTE_CONFIG7_GW', '{"zh-CN":"ROUTE_CONFIG7_GW","en-US":"ROUTE CONFIG7 GW"}'::jsonb, true, true, 10107, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG7_GW', 'ROUTE_CONFIG7_GW', '{"zh-CN":"ROUTE_CONFIG7_GW","en-US":"ROUTE CONFIG7 GW"}'::jsonb, true, true, 10091, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG7_NETADDR', 'ROUTE_CONFIG7_NETADDR', '{"zh-CN":"ROUTE_CONFIG7_NETADDR","en-US":"ROUTE CONFIG7 NETADDR"}'::jsonb, true, true, 10108, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG7_NETADDR', 'ROUTE_CONFIG7_NETADDR', '{"zh-CN":"ROUTE_CONFIG7_NETADDR","en-US":"ROUTE CONFIG7 NETADDR"}'::jsonb, true, true, 10092, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG7_NETMASK', 'ROUTE_CONFIG7_NETMASK', '{"zh-CN":"ROUTE_CONFIG7_NETMASK","en-US":"ROUTE CONFIG7 NETMASK"}'::jsonb, true, true, 10109, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG7_NETMASK', 'ROUTE_CONFIG7_NETMASK', '{"zh-CN":"ROUTE_CONFIG7_NETMASK","en-US":"ROUTE CONFIG7 NETMASK"}'::jsonb, true, true, 10093, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG7_ONBOOTENB', 'ROUTE_CONFIG7_ONBOOTENB', '{"zh-CN":"ROUTE_CONFIG7_ONBOOTENB","en-US":"ROUTE CONFIG7 ONBOOTENB"}'::jsonb, true, true, 10110, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG7_ONBOOTENB', 'ROUTE_CONFIG7_ONBOOTENB', '{"zh-CN":"ROUTE_CONFIG7_ONBOOTENB","en-US":"ROUTE CONFIG7 ONBOOTENB"}'::jsonb, true, true, 10094, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG7_V6_GW', 'ROUTE_CONFIG7_V6_GW', '{"zh-CN":"ROUTE_CONFIG7_V6_GW","en-US":"ROUTE CONFIG7 V6 GW"}'::jsonb, true, true, 10111, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG7_V6_GW', 'ROUTE_CONFIG7_V6_GW', '{"zh-CN":"ROUTE_CONFIG7_V6_GW","en-US":"ROUTE CONFIG7 V6 GW"}'::jsonb, true, true, 10095, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG7_V6_NETADDR', 'ROUTE_CONFIG7_V6_NETADDR', '{"zh-CN":"ROUTE_CONFIG7_V6_NETADDR","en-US":"ROUTE CONFIG7 V6 NETADDR"}'::jsonb, true, true, 10112, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG7_V6_NETADDR', 'ROUTE_CONFIG7_V6_NETADDR', '{"zh-CN":"ROUTE_CONFIG7_V6_NETADDR","en-US":"ROUTE CONFIG7 V6 NETADDR"}'::jsonb, true, true, 10096, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG7_V6_ONBOOT', 'ROUTE_CONFIG7_V6_ONBOOT', '{"zh-CN":"ROUTE_CONFIG7_V6_ONBOOT","en-US":"ROUTE CONFIG7 V6 ONBOOT"}'::jsonb, true, true, 10113, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG7_V6_ONBOOT', 'ROUTE_CONFIG7_V6_ONBOOT', '{"zh-CN":"ROUTE_CONFIG7_V6_ONBOOT","en-US":"ROUTE CONFIG7 V6 ONBOOT"}'::jsonb, true, true, 10097, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG7_V6_PREFIX', 'ROUTE_CONFIG7_V6_PREFIX', '{"zh-CN":"ROUTE_CONFIG7_V6_PREFIX","en-US":"ROUTE CONFIG7 V6 PREFIX"}'::jsonb, true, true, 10114, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG7_V6_PREFIX', 'ROUTE_CONFIG7_V6_PREFIX', '{"zh-CN":"ROUTE_CONFIG7_V6_PREFIX","en-US":"ROUTE CONFIG7 V6 PREFIX"}'::jsonb, true, true, 10098, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG8_GW', 'ROUTE_CONFIG8_GW', '{"zh-CN":"ROUTE_CONFIG8_GW","en-US":"ROUTE CONFIG8 GW"}'::jsonb, true, true, 10115, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG8_GW', 'ROUTE_CONFIG8_GW', '{"zh-CN":"ROUTE_CONFIG8_GW","en-US":"ROUTE CONFIG8 GW"}'::jsonb, true, true, 10099, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG8_NETADDR', 'ROUTE_CONFIG8_NETADDR', '{"zh-CN":"ROUTE_CONFIG8_NETADDR","en-US":"ROUTE CONFIG8 NETADDR"}'::jsonb, true, true, 10116, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG8_NETADDR', 'ROUTE_CONFIG8_NETADDR', '{"zh-CN":"ROUTE_CONFIG8_NETADDR","en-US":"ROUTE CONFIG8 NETADDR"}'::jsonb, true, true, 10100, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG8_NETMASK', 'ROUTE_CONFIG8_NETMASK', '{"zh-CN":"ROUTE_CONFIG8_NETMASK","en-US":"ROUTE CONFIG8 NETMASK"}'::jsonb, true, true, 10117, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG8_NETMASK', 'ROUTE_CONFIG8_NETMASK', '{"zh-CN":"ROUTE_CONFIG8_NETMASK","en-US":"ROUTE CONFIG8 NETMASK"}'::jsonb, true, true, 10101, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG8_ONBOOTENB', 'ROUTE_CONFIG8_ONBOOTENB', '{"zh-CN":"ROUTE_CONFIG8_ONBOOTENB","en-US":"ROUTE CONFIG8 ONBOOTENB"}'::jsonb, true, true, 10118, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG8_ONBOOTENB', 'ROUTE_CONFIG8_ONBOOTENB', '{"zh-CN":"ROUTE_CONFIG8_ONBOOTENB","en-US":"ROUTE CONFIG8 ONBOOTENB"}'::jsonb, true, true, 10102, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG8_V6_GW', 'ROUTE_CONFIG8_V6_GW', '{"zh-CN":"ROUTE_CONFIG8_V6_GW","en-US":"ROUTE CONFIG8 V6 GW"}'::jsonb, true, true, 10119, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG8_V6_GW', 'ROUTE_CONFIG8_V6_GW', '{"zh-CN":"ROUTE_CONFIG8_V6_GW","en-US":"ROUTE CONFIG8 V6 GW"}'::jsonb, true, true, 10103, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG8_V6_NETADDR', 'ROUTE_CONFIG8_V6_NETADDR', '{"zh-CN":"ROUTE_CONFIG8_V6_NETADDR","en-US":"ROUTE CONFIG8 V6 NETADDR"}'::jsonb, true, true, 10120, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG8_V6_NETADDR', 'ROUTE_CONFIG8_V6_NETADDR', '{"zh-CN":"ROUTE_CONFIG8_V6_NETADDR","en-US":"ROUTE CONFIG8 V6 NETADDR"}'::jsonb, true, true, 10104, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG8_V6_ONBOOT', 'ROUTE_CONFIG8_V6_ONBOOT', '{"zh-CN":"ROUTE_CONFIG8_V6_ONBOOT","en-US":"ROUTE CONFIG8 V6 ONBOOT"}'::jsonb, true, true, 10121, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG8_V6_ONBOOT', 'ROUTE_CONFIG8_V6_ONBOOT', '{"zh-CN":"ROUTE_CONFIG8_V6_ONBOOT","en-US":"ROUTE CONFIG8 V6 ONBOOT"}'::jsonb, true, true, 10105, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG8_V6_PREFIX', 'ROUTE_CONFIG8_V6_PREFIX', '{"zh-CN":"ROUTE_CONFIG8_V6_PREFIX","en-US":"ROUTE CONFIG8 V6 PREFIX"}'::jsonb, true, true, 10122, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG8_V6_PREFIX', 'ROUTE_CONFIG8_V6_PREFIX', '{"zh-CN":"ROUTE_CONFIG8_V6_PREFIX","en-US":"ROUTE CONFIG8 V6 PREFIX"}'::jsonb, true, true, 10106, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG9_GW', 'ROUTE_CONFIG9_GW', '{"zh-CN":"ROUTE_CONFIG9_GW","en-US":"ROUTE CONFIG9 GW"}'::jsonb, true, true, 10123, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG9_GW', 'ROUTE_CONFIG9_GW', '{"zh-CN":"ROUTE_CONFIG9_GW","en-US":"ROUTE CONFIG9 GW"}'::jsonb, true, true, 10107, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG9_NETADDR', 'ROUTE_CONFIG9_NETADDR', '{"zh-CN":"ROUTE_CONFIG9_NETADDR","en-US":"ROUTE CONFIG9 NETADDR"}'::jsonb, true, true, 10124, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG9_NETADDR', 'ROUTE_CONFIG9_NETADDR', '{"zh-CN":"ROUTE_CONFIG9_NETADDR","en-US":"ROUTE CONFIG9 NETADDR"}'::jsonb, true, true, 10108, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG9_NETMASK', 'ROUTE_CONFIG9_NETMASK', '{"zh-CN":"ROUTE_CONFIG9_NETMASK","en-US":"ROUTE CONFIG9 NETMASK"}'::jsonb, true, true, 10125, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG9_NETMASK', 'ROUTE_CONFIG9_NETMASK', '{"zh-CN":"ROUTE_CONFIG9_NETMASK","en-US":"ROUTE CONFIG9 NETMASK"}'::jsonb, true, true, 10109, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG9_ONBOOTENB', 'ROUTE_CONFIG9_ONBOOTENB', '{"zh-CN":"ROUTE_CONFIG9_ONBOOTENB","en-US":"ROUTE CONFIG9 ONBOOTENB"}'::jsonb, true, true, 10126, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG9_ONBOOTENB', 'ROUTE_CONFIG9_ONBOOTENB', '{"zh-CN":"ROUTE_CONFIG9_ONBOOTENB","en-US":"ROUTE CONFIG9 ONBOOTENB"}'::jsonb, true, true, 10110, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG9_V6_GW', 'ROUTE_CONFIG9_V6_GW', '{"zh-CN":"ROUTE_CONFIG9_V6_GW","en-US":"ROUTE CONFIG9 V6 GW"}'::jsonb, true, true, 10127, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG9_V6_GW', 'ROUTE_CONFIG9_V6_GW', '{"zh-CN":"ROUTE_CONFIG9_V6_GW","en-US":"ROUTE CONFIG9 V6 GW"}'::jsonb, true, true, 10111, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG9_V6_NETADDR', 'ROUTE_CONFIG9_V6_NETADDR', '{"zh-CN":"ROUTE_CONFIG9_V6_NETADDR","en-US":"ROUTE CONFIG9 V6 NETADDR"}'::jsonb, true, true, 10128, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG9_V6_NETADDR', 'ROUTE_CONFIG9_V6_NETADDR', '{"zh-CN":"ROUTE_CONFIG9_V6_NETADDR","en-US":"ROUTE CONFIG9 V6 NETADDR"}'::jsonb, true, true, 10112, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG9_V6_ONBOOT', 'ROUTE_CONFIG9_V6_ONBOOT', '{"zh-CN":"ROUTE_CONFIG9_V6_ONBOOT","en-US":"ROUTE CONFIG9 V6 ONBOOT"}'::jsonb, true, true, 10129, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG9_V6_ONBOOT', 'ROUTE_CONFIG9_V6_ONBOOT', '{"zh-CN":"ROUTE_CONFIG9_V6_ONBOOT","en-US":"ROUTE CONFIG9 V6 ONBOOT"}'::jsonb, true, true, 10113, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG9_V6_PREFIX', 'ROUTE_CONFIG9_V6_PREFIX', '{"zh-CN":"ROUTE_CONFIG9_V6_PREFIX","en-US":"ROUTE CONFIG9 V6 PREFIX"}'::jsonb, true, true, 10130, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.ROUTE_CONFIG9_V6_PREFIX', 'ROUTE_CONFIG9_V6_PREFIX', '{"zh-CN":"ROUTE_CONFIG9_V6_PREFIX","en-US":"ROUTE CONFIG9 V6 PREFIX"}'::jsonb, true, true, 10114, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.RunningStatus', 'RUNNING_STATUS', '{"zh-CN":"RUNNING_STATUS","en-US":"Running Status"}'::jsonb, true, true, 10131, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.RunningStatus', 'RUNNING_STATUS', '{"zh-CN":"RUNNING_STATUS","en-US":"Running Status"}'::jsonb, true, true, 10115, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.SERVING_UNIT1_IPSEC_Address', 'SERVING_UNIT1_IPSEC_ADDRESS', '{"zh-CN":"SERVING_UNIT1_IPSEC_ADDRESS","en-US":"SERVING UNIT1 IPSEC Address"}'::jsonb, true, false, 10132, 'RO'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.STATIC_DNS_ENABLE', 'STATIC_DNS_ENABLE', '{"zh-CN":"STATIC_DNS_ENABLE","en-US":"STATIC DNS ENABLE"}'::jsonb, true, true, 10133, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.STATIC_DNS_ENABLE', 'STATIC_DNS_ENABLE', '{"zh-CN":"STATIC_DNS_ENABLE","en-US":"STATIC DNS ENABLE"}'::jsonb, true, true, 10116, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.SiteId', 'SITE_ID', '{"zh-CN":"SITE_ID","en-US":"Site Id"}'::jsonb, true, true, 10134, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.SiteId', 'SITE_ID', '{"zh-CN":"SITE_ID","en-US":"Site Id"}'::jsonb, true, true, 10117, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.SlaveInterface', 'SLAVE_INTERFACE', '{"zh-CN":"SLAVE_INTERFACE","en-US":"Slave Interface"}'::jsonb, true, true, 10135, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.SlaveInterface', 'SLAVE_INTERFACE', '{"zh-CN":"SLAVE_INTERFACE","en-US":"Slave Interface"}'::jsonb, true, true, 10118, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.SlaveInterfaceIP', 'SLAVE_INTERFACE_IP', '{"zh-CN":"SLAVE_INTERFACE_IP","en-US":"Slave Interface IP"}'::jsonb, true, true, 10136, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.SlaveInterfaceIP', 'SLAVE_INTERFACE_IP', '{"zh-CN":"SLAVE_INTERFACE_IP","en-US":"Slave Interface IP"}'::jsonb, true, true, 10119, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.SoftwareVersion_OLD', 'SOFTWARE_VERSION_OLD', '{"zh-CN":"SOFTWARE_VERSION_OLD","en-US":"Software Version OLD"}'::jsonb, true, false, 10137, 'RO'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.SupportedPowerRange', 'SUPPORTED_POWER_RANGE', '{"zh-CN":"SUPPORTED_POWER_RANGE","en-US":"Supported Power Range"}'::jsonb, true, true, 10138, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.SupportedPowerRange', 'SUPPORTED_POWER_RANGE', '{"zh-CN":"SUPPORTED_POWER_RANGE","en-US":"Supported Power Range"}'::jsonb, true, true, 10120, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.UE_Count', 'UE_COUNT', '{"zh-CN":"UE_COUNT","en-US":"UE Count"}'::jsonb, true, false, 10139, 'RO'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.UE_SPEED_STATISTICS', 'UE_SPEED_STATISTICS', '{"zh-CN":"UE_SPEED_STATISTICS","en-US":"UE SPEED STATISTICS"}'::jsonb, true, false, 10140, 'RO'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.U_BOOT_Version', 'U_BOOT_VERSION', '{"zh-CN":"U_BOOT_VERSION","en-US":"U BOOT Version"}'::jsonb, true, false, 10141, 'RO'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.UeAmbrDl', 'UE_AMBR_DL', '{"zh-CN":"UE_AMBR_DL","en-US":"Ue Ambr Dl"}'::jsonb, true, true, 10142, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.UeAmbrDl', 'UE_AMBR_DL', '{"zh-CN":"UE_AMBR_DL","en-US":"Ue Ambr Dl"}'::jsonb, true, true, 10121, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.UeAmbrUl', 'UE_AMBR_UL', '{"zh-CN":"UE_AMBR_UL","en-US":"Ue Ambr Ul"}'::jsonb, true, true, 10143, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.UeAmbrUl', 'UE_AMBR_UL', '{"zh-CN":"UE_AMBR_UL","en-US":"Ue Ambr Ul"}'::jsonb, true, true, 10122, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.UpTime_OLD', 'UP_TIME_OLD', '{"zh-CN":"UP_TIME_OLD","en-US":"Up Time OLD"}'::jsonb, true, false, 10144, 'RO'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG10_DEFAULTGW', 'WAN_CONFIG10_DEFAULTGW', '{"zh-CN":"WAN_CONFIG10_DEFAULTGW","en-US":"WAN CONFIG10 DEFAULTGW"}'::jsonb, true, true, 10145, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG10_DEFAULTGW', 'WAN_CONFIG10_DEFAULTGW', '{"zh-CN":"WAN_CONFIG10_DEFAULTGW","en-US":"WAN CONFIG10 DEFAULTGW"}'::jsonb, true, true, 10123, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG10_ENABLE', 'WAN_CONFIG10_ENABLE', '{"zh-CN":"WAN_CONFIG10_ENABLE","en-US":"WAN CONFIG10 ENABLE"}'::jsonb, true, true, 10146, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG10_ENABLE', 'WAN_CONFIG10_ENABLE', '{"zh-CN":"WAN_CONFIG10_ENABLE","en-US":"WAN CONFIG10 ENABLE"}'::jsonb, true, true, 10124, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG10_IPADDR', 'WAN_CONFIG10_IPADDR', '{"zh-CN":"WAN_CONFIG10_IPADDR","en-US":"WAN CONFIG10 IPADDR"}'::jsonb, true, true, 10147, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG10_IPADDR', 'WAN_CONFIG10_IPADDR', '{"zh-CN":"WAN_CONFIG10_IPADDR","en-US":"WAN CONFIG10 IPADDR"}'::jsonb, true, true, 10125, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG10_IPMODE', 'WAN_CONFIG10_IPMODE', '{"zh-CN":"WAN_CONFIG10_IPMODE","en-US":"WAN CONFIG10 IPMODE"}'::jsonb, true, true, 10148, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG10_IPMODE', 'WAN_CONFIG10_IPMODE', '{"zh-CN":"WAN_CONFIG10_IPMODE","en-US":"WAN CONFIG10 IPMODE"}'::jsonb, true, true, 10126, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG10_NETMASK', 'WAN_CONFIG10_NETMASK', '{"zh-CN":"WAN_CONFIG10_NETMASK","en-US":"WAN CONFIG10 NETMASK"}'::jsonb, true, true, 10149, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG10_NETMASK', 'WAN_CONFIG10_NETMASK', '{"zh-CN":"WAN_CONFIG10_NETMASK","en-US":"WAN CONFIG10 NETMASK"}'::jsonb, true, true, 10127, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG10_OPTION60', 'WAN_CONFIG10_OPTION60', '{"zh-CN":"WAN_CONFIG10_OPTION60","en-US":"WAN CONFIG10 OPTION60"}'::jsonb, true, true, 10150, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG10_OPTION60', 'WAN_CONFIG10_OPTION60', '{"zh-CN":"WAN_CONFIG10_OPTION60","en-US":"WAN CONFIG10 OPTION60"}'::jsonb, true, true, 10128, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG10_V6_GW', 'WAN_CONFIG10_V6_GW', '{"zh-CN":"WAN_CONFIG10_V6_GW","en-US":"WAN CONFIG10 V6 GW"}'::jsonb, true, true, 10151, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG10_V6_GW', 'WAN_CONFIG10_V6_GW', '{"zh-CN":"WAN_CONFIG10_V6_GW","en-US":"WAN CONFIG10 V6 GW"}'::jsonb, true, true, 10129, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG10_V6_IPADDR', 'WAN_CONFIG10_V6_IPADDR', '{"zh-CN":"WAN_CONFIG10_V6_IPADDR","en-US":"WAN CONFIG10 V6 IPADDR"}'::jsonb, true, true, 10152, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG10_V6_IPADDR', 'WAN_CONFIG10_V6_IPADDR', '{"zh-CN":"WAN_CONFIG10_V6_IPADDR","en-US":"WAN CONFIG10 V6 IPADDR"}'::jsonb, true, true, 10130, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG10_V6_PREFIX', 'WAN_CONFIG10_V6_PREFIX', '{"zh-CN":"WAN_CONFIG10_V6_PREFIX","en-US":"WAN CONFIG10 V6 PREFIX"}'::jsonb, true, true, 10153, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG10_V6_PREFIX', 'WAN_CONFIG10_V6_PREFIX', '{"zh-CN":"WAN_CONFIG10_V6_PREFIX","en-US":"WAN CONFIG10 V6 PREFIX"}'::jsonb, true, true, 10131, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG10_VLAN', 'WAN_CONFIG10_VLAN', '{"zh-CN":"WAN_CONFIG10_VLAN","en-US":"WAN CONFIG10 VLAN"}'::jsonb, true, true, 10154, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG10_VLAN', 'WAN_CONFIG10_VLAN', '{"zh-CN":"WAN_CONFIG10_VLAN","en-US":"WAN CONFIG10 VLAN"}'::jsonb, true, true, 10132, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG11_DEFAULTGW', 'WAN_CONFIG11_DEFAULTGW', '{"zh-CN":"WAN_CONFIG11_DEFAULTGW","en-US":"WAN CONFIG11 DEFAULTGW"}'::jsonb, true, true, 10155, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG11_DEFAULTGW', 'WAN_CONFIG11_DEFAULTGW', '{"zh-CN":"WAN_CONFIG11_DEFAULTGW","en-US":"WAN CONFIG11 DEFAULTGW"}'::jsonb, true, true, 10133, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG11_ENABLE', 'WAN_CONFIG11_ENABLE', '{"zh-CN":"WAN_CONFIG11_ENABLE","en-US":"WAN CONFIG11 ENABLE"}'::jsonb, true, true, 10156, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG11_ENABLE', 'WAN_CONFIG11_ENABLE', '{"zh-CN":"WAN_CONFIG11_ENABLE","en-US":"WAN CONFIG11 ENABLE"}'::jsonb, true, true, 10134, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG11_IPADDR', 'WAN_CONFIG11_IPADDR', '{"zh-CN":"WAN_CONFIG11_IPADDR","en-US":"WAN CONFIG11 IPADDR"}'::jsonb, true, true, 10157, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG11_IPADDR', 'WAN_CONFIG11_IPADDR', '{"zh-CN":"WAN_CONFIG11_IPADDR","en-US":"WAN CONFIG11 IPADDR"}'::jsonb, true, true, 10135, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG11_IPMODE', 'WAN_CONFIG11_IPMODE', '{"zh-CN":"WAN_CONFIG11_IPMODE","en-US":"WAN CONFIG11 IPMODE"}'::jsonb, true, true, 10158, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG11_IPMODE', 'WAN_CONFIG11_IPMODE', '{"zh-CN":"WAN_CONFIG11_IPMODE","en-US":"WAN CONFIG11 IPMODE"}'::jsonb, true, true, 10136, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG11_NETMASK', 'WAN_CONFIG11_NETMASK', '{"zh-CN":"WAN_CONFIG11_NETMASK","en-US":"WAN CONFIG11 NETMASK"}'::jsonb, true, true, 10159, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG11_NETMASK', 'WAN_CONFIG11_NETMASK', '{"zh-CN":"WAN_CONFIG11_NETMASK","en-US":"WAN CONFIG11 NETMASK"}'::jsonb, true, true, 10137, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG11_OPTION60', 'WAN_CONFIG11_OPTION60', '{"zh-CN":"WAN_CONFIG11_OPTION60","en-US":"WAN CONFIG11 OPTION60"}'::jsonb, true, true, 10160, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG11_OPTION60', 'WAN_CONFIG11_OPTION60', '{"zh-CN":"WAN_CONFIG11_OPTION60","en-US":"WAN CONFIG11 OPTION60"}'::jsonb, true, true, 10138, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG11_V6_GW', 'WAN_CONFIG11_V6_GW', '{"zh-CN":"WAN_CONFIG11_V6_GW","en-US":"WAN CONFIG11 V6 GW"}'::jsonb, true, true, 10161, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG11_V6_GW', 'WAN_CONFIG11_V6_GW', '{"zh-CN":"WAN_CONFIG11_V6_GW","en-US":"WAN CONFIG11 V6 GW"}'::jsonb, true, true, 10139, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG11_V6_IPADDR', 'WAN_CONFIG11_V6_IPADDR', '{"zh-CN":"WAN_CONFIG11_V6_IPADDR","en-US":"WAN CONFIG11 V6 IPADDR"}'::jsonb, true, true, 10162, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG11_V6_IPADDR', 'WAN_CONFIG11_V6_IPADDR', '{"zh-CN":"WAN_CONFIG11_V6_IPADDR","en-US":"WAN CONFIG11 V6 IPADDR"}'::jsonb, true, true, 10140, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG11_V6_PREFIX', 'WAN_CONFIG11_V6_PREFIX', '{"zh-CN":"WAN_CONFIG11_V6_PREFIX","en-US":"WAN CONFIG11 V6 PREFIX"}'::jsonb, true, true, 10163, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG11_V6_PREFIX', 'WAN_CONFIG11_V6_PREFIX', '{"zh-CN":"WAN_CONFIG11_V6_PREFIX","en-US":"WAN CONFIG11 V6 PREFIX"}'::jsonb, true, true, 10141, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG11_VLAN', 'WAN_CONFIG11_VLAN', '{"zh-CN":"WAN_CONFIG11_VLAN","en-US":"WAN CONFIG11 VLAN"}'::jsonb, true, true, 10164, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG11_VLAN', 'WAN_CONFIG11_VLAN', '{"zh-CN":"WAN_CONFIG11_VLAN","en-US":"WAN CONFIG11 VLAN"}'::jsonb, true, true, 10142, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG12_DEFAULTGW', 'WAN_CONFIG12_DEFAULTGW', '{"zh-CN":"WAN_CONFIG12_DEFAULTGW","en-US":"WAN CONFIG12 DEFAULTGW"}'::jsonb, true, true, 10165, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG12_DEFAULTGW', 'WAN_CONFIG12_DEFAULTGW', '{"zh-CN":"WAN_CONFIG12_DEFAULTGW","en-US":"WAN CONFIG12 DEFAULTGW"}'::jsonb, true, true, 10143, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG12_ENABLE', 'WAN_CONFIG12_ENABLE', '{"zh-CN":"WAN_CONFIG12_ENABLE","en-US":"WAN CONFIG12 ENABLE"}'::jsonb, true, true, 10166, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG12_ENABLE', 'WAN_CONFIG12_ENABLE', '{"zh-CN":"WAN_CONFIG12_ENABLE","en-US":"WAN CONFIG12 ENABLE"}'::jsonb, true, true, 10144, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG12_IPADDR', 'WAN_CONFIG12_IPADDR', '{"zh-CN":"WAN_CONFIG12_IPADDR","en-US":"WAN CONFIG12 IPADDR"}'::jsonb, true, true, 10167, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG12_IPADDR', 'WAN_CONFIG12_IPADDR', '{"zh-CN":"WAN_CONFIG12_IPADDR","en-US":"WAN CONFIG12 IPADDR"}'::jsonb, true, true, 10145, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG12_IPMODE', 'WAN_CONFIG12_IPMODE', '{"zh-CN":"WAN_CONFIG12_IPMODE","en-US":"WAN CONFIG12 IPMODE"}'::jsonb, true, true, 10168, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG12_IPMODE', 'WAN_CONFIG12_IPMODE', '{"zh-CN":"WAN_CONFIG12_IPMODE","en-US":"WAN CONFIG12 IPMODE"}'::jsonb, true, true, 10146, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG12_NETMASK', 'WAN_CONFIG12_NETMASK', '{"zh-CN":"WAN_CONFIG12_NETMASK","en-US":"WAN CONFIG12 NETMASK"}'::jsonb, true, true, 10169, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG12_NETMASK', 'WAN_CONFIG12_NETMASK', '{"zh-CN":"WAN_CONFIG12_NETMASK","en-US":"WAN CONFIG12 NETMASK"}'::jsonb, true, true, 10147, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG12_OPTION60', 'WAN_CONFIG12_OPTION60', '{"zh-CN":"WAN_CONFIG12_OPTION60","en-US":"WAN CONFIG12 OPTION60"}'::jsonb, true, true, 10170, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG12_OPTION60', 'WAN_CONFIG12_OPTION60', '{"zh-CN":"WAN_CONFIG12_OPTION60","en-US":"WAN CONFIG12 OPTION60"}'::jsonb, true, true, 10148, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG12_V6_GW', 'WAN_CONFIG12_V6_GW', '{"zh-CN":"WAN_CONFIG12_V6_GW","en-US":"WAN CONFIG12 V6 GW"}'::jsonb, true, true, 10171, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG12_V6_GW', 'WAN_CONFIG12_V6_GW', '{"zh-CN":"WAN_CONFIG12_V6_GW","en-US":"WAN CONFIG12 V6 GW"}'::jsonb, true, true, 10149, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG12_V6_IPADDR', 'WAN_CONFIG12_V6_IPADDR', '{"zh-CN":"WAN_CONFIG12_V6_IPADDR","en-US":"WAN CONFIG12 V6 IPADDR"}'::jsonb, true, true, 10172, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG12_V6_IPADDR', 'WAN_CONFIG12_V6_IPADDR', '{"zh-CN":"WAN_CONFIG12_V6_IPADDR","en-US":"WAN CONFIG12 V6 IPADDR"}'::jsonb, true, true, 10150, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG12_V6_PREFIX', 'WAN_CONFIG12_V6_PREFIX', '{"zh-CN":"WAN_CONFIG12_V6_PREFIX","en-US":"WAN CONFIG12 V6 PREFIX"}'::jsonb, true, true, 10173, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG12_V6_PREFIX', 'WAN_CONFIG12_V6_PREFIX', '{"zh-CN":"WAN_CONFIG12_V6_PREFIX","en-US":"WAN CONFIG12 V6 PREFIX"}'::jsonb, true, true, 10151, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG12_VLAN', 'WAN_CONFIG12_VLAN', '{"zh-CN":"WAN_CONFIG12_VLAN","en-US":"WAN CONFIG12 VLAN"}'::jsonb, true, true, 10174, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG12_VLAN', 'WAN_CONFIG12_VLAN', '{"zh-CN":"WAN_CONFIG12_VLAN","en-US":"WAN CONFIG12 VLAN"}'::jsonb, true, true, 10152, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG1_CONNECT_TYPE', 'WAN_CONFIG1_CONNECT_TYPE', '{"zh-CN":"WAN_CONFIG1_CONNECT_TYPE","en-US":"WAN CONFIG1 CONNECT TYPE"}'::jsonb, true, true, 10175, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG1_CONNECT_TYPE', 'WAN_CONFIG1_CONNECT_TYPE', '{"zh-CN":"WAN_CONFIG1_CONNECT_TYPE","en-US":"WAN CONFIG1 CONNECT TYPE"}'::jsonb, true, true, 10153, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG1_DEFAULTGW', 'WAN_CONFIG1_DEFAULTGW', '{"zh-CN":"WAN_CONFIG1_DEFAULTGW","en-US":"WAN CONFIG1 DEFAULTGW"}'::jsonb, true, true, 10176, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG1_DEFAULTGW', 'WAN_CONFIG1_DEFAULTGW', '{"zh-CN":"WAN_CONFIG1_DEFAULTGW","en-US":"WAN CONFIG1 DEFAULTGW"}'::jsonb, true, true, 10154, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG1_IPADDR', 'WAN_CONFIG1_IPADDR', '{"zh-CN":"WAN_CONFIG1_IPADDR","en-US":"WAN CONFIG1 IPADDR"}'::jsonb, true, true, 10177, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG1_IPADDR', 'WAN_CONFIG1_IPADDR', '{"zh-CN":"WAN_CONFIG1_IPADDR","en-US":"WAN CONFIG1 IPADDR"}'::jsonb, true, true, 10155, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG1_IPMODE', 'WAN_CONFIG1_IPMODE', '{"zh-CN":"WAN_CONFIG1_IPMODE","en-US":"WAN CONFIG1 IPMODE"}'::jsonb, true, true, 10178, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG1_IPMODE', 'WAN_CONFIG1_IPMODE', '{"zh-CN":"WAN_CONFIG1_IPMODE","en-US":"WAN CONFIG1 IPMODE"}'::jsonb, true, true, 10156, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG1_NETMASK', 'WAN_CONFIG1_NETMASK', '{"zh-CN":"WAN_CONFIG1_NETMASK","en-US":"WAN CONFIG1 NETMASK"}'::jsonb, true, true, 10179, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG1_NETMASK', 'WAN_CONFIG1_NETMASK', '{"zh-CN":"WAN_CONFIG1_NETMASK","en-US":"WAN CONFIG1 NETMASK"}'::jsonb, true, true, 10157, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG1_OPTION60', 'WAN_CONFIG1_OPTION60', '{"zh-CN":"WAN_CONFIG1_OPTION60","en-US":"WAN CONFIG1 OPTION60"}'::jsonb, true, true, 10180, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG1_OPTION60', 'WAN_CONFIG1_OPTION60', '{"zh-CN":"WAN_CONFIG1_OPTION60","en-US":"WAN CONFIG1 OPTION60"}'::jsonb, true, true, 10158, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG1_V6_GW', 'WAN_CONFIG1_V6_GW', '{"zh-CN":"WAN_CONFIG1_V6_GW","en-US":"WAN CONFIG1 V6 GW"}'::jsonb, true, true, 10181, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG1_V6_GW', 'WAN_CONFIG1_V6_GW', '{"zh-CN":"WAN_CONFIG1_V6_GW","en-US":"WAN CONFIG1 V6 GW"}'::jsonb, true, true, 10159, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG1_V6_IPADDR', 'WAN_CONFIG1_V6_IPADDR', '{"zh-CN":"WAN_CONFIG1_V6_IPADDR","en-US":"WAN CONFIG1 V6 IPADDR"}'::jsonb, true, true, 10182, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG1_V6_IPADDR', 'WAN_CONFIG1_V6_IPADDR', '{"zh-CN":"WAN_CONFIG1_V6_IPADDR","en-US":"WAN CONFIG1 V6 IPADDR"}'::jsonb, true, true, 10160, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG1_V6_PREFIX', 'WAN_CONFIG1_V6_PREFIX', '{"zh-CN":"WAN_CONFIG1_V6_PREFIX","en-US":"WAN CONFIG1 V6 PREFIX"}'::jsonb, true, true, 10183, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG1_V6_PREFIX', 'WAN_CONFIG1_V6_PREFIX', '{"zh-CN":"WAN_CONFIG1_V6_PREFIX","en-US":"WAN CONFIG1 V6 PREFIX"}'::jsonb, true, true, 10161, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG1_VLAN', 'WAN_CONFIG1_VLAN', '{"zh-CN":"WAN_CONFIG1_VLAN","en-US":"WAN CONFIG1 VLAN"}'::jsonb, true, true, 10184, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG1_VLAN', 'WAN_CONFIG1_VLAN', '{"zh-CN":"WAN_CONFIG1_VLAN","en-US":"WAN CONFIG1 VLAN"}'::jsonb, true, true, 10162, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG2_DEFAULTGW', 'WAN_CONFIG2_DEFAULTGW', '{"zh-CN":"WAN_CONFIG2_DEFAULTGW","en-US":"WAN CONFIG2 DEFAULTGW"}'::jsonb, true, true, 10185, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG2_DEFAULTGW', 'WAN_CONFIG2_DEFAULTGW', '{"zh-CN":"WAN_CONFIG2_DEFAULTGW","en-US":"WAN CONFIG2 DEFAULTGW"}'::jsonb, true, true, 10163, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG2_ENABLE', 'WAN_CONFIG2_ENABLE', '{"zh-CN":"WAN_CONFIG2_ENABLE","en-US":"WAN CONFIG2 ENABLE"}'::jsonb, true, true, 10186, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG2_ENABLE', 'WAN_CONFIG2_ENABLE', '{"zh-CN":"WAN_CONFIG2_ENABLE","en-US":"WAN CONFIG2 ENABLE"}'::jsonb, true, true, 10164, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG2_IPADDR', 'WAN_CONFIG2_IPADDR', '{"zh-CN":"WAN_CONFIG2_IPADDR","en-US":"WAN CONFIG2 IPADDR"}'::jsonb, true, true, 10187, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG2_IPADDR', 'WAN_CONFIG2_IPADDR', '{"zh-CN":"WAN_CONFIG2_IPADDR","en-US":"WAN CONFIG2 IPADDR"}'::jsonb, true, true, 10165, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG2_IPMODE', 'WAN_CONFIG2_IPMODE', '{"zh-CN":"WAN_CONFIG2_IPMODE","en-US":"WAN CONFIG2 IPMODE"}'::jsonb, true, true, 10188, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG2_IPMODE', 'WAN_CONFIG2_IPMODE', '{"zh-CN":"WAN_CONFIG2_IPMODE","en-US":"WAN CONFIG2 IPMODE"}'::jsonb, true, true, 10166, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG2_NETMASK', 'WAN_CONFIG2_NETMASK', '{"zh-CN":"WAN_CONFIG2_NETMASK","en-US":"WAN CONFIG2 NETMASK"}'::jsonb, true, true, 10189, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG2_NETMASK', 'WAN_CONFIG2_NETMASK', '{"zh-CN":"WAN_CONFIG2_NETMASK","en-US":"WAN CONFIG2 NETMASK"}'::jsonb, true, true, 10167, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG2_OPTION60', 'WAN_CONFIG2_OPTION60', '{"zh-CN":"WAN_CONFIG2_OPTION60","en-US":"WAN CONFIG2 OPTION60"}'::jsonb, true, true, 10190, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG2_OPTION60', 'WAN_CONFIG2_OPTION60', '{"zh-CN":"WAN_CONFIG2_OPTION60","en-US":"WAN CONFIG2 OPTION60"}'::jsonb, true, true, 10168, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG2_V6_GW', 'WAN_CONFIG2_V6_GW', '{"zh-CN":"WAN_CONFIG2_V6_GW","en-US":"WAN CONFIG2 V6 GW"}'::jsonb, true, true, 10191, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG2_V6_GW', 'WAN_CONFIG2_V6_GW', '{"zh-CN":"WAN_CONFIG2_V6_GW","en-US":"WAN CONFIG2 V6 GW"}'::jsonb, true, true, 10169, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG2_V6_IPADDR', 'WAN_CONFIG2_V6_IPADDR', '{"zh-CN":"WAN_CONFIG2_V6_IPADDR","en-US":"WAN CONFIG2 V6 IPADDR"}'::jsonb, true, true, 10192, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG2_V6_IPADDR', 'WAN_CONFIG2_V6_IPADDR', '{"zh-CN":"WAN_CONFIG2_V6_IPADDR","en-US":"WAN CONFIG2 V6 IPADDR"}'::jsonb, true, true, 10170, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG2_V6_PREFIX', 'WAN_CONFIG2_V6_PREFIX', '{"zh-CN":"WAN_CONFIG2_V6_PREFIX","en-US":"WAN CONFIG2 V6 PREFIX"}'::jsonb, true, true, 10193, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG2_V6_PREFIX', 'WAN_CONFIG2_V6_PREFIX', '{"zh-CN":"WAN_CONFIG2_V6_PREFIX","en-US":"WAN CONFIG2 V6 PREFIX"}'::jsonb, true, true, 10171, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG2_VLAN', 'WAN_CONFIG2_VLAN', '{"zh-CN":"WAN_CONFIG2_VLAN","en-US":"WAN CONFIG2 VLAN"}'::jsonb, true, true, 10194, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG2_VLAN', 'WAN_CONFIG2_VLAN', '{"zh-CN":"WAN_CONFIG2_VLAN","en-US":"WAN CONFIG2 VLAN"}'::jsonb, true, true, 10172, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG3_DEFAULTGW', 'WAN_CONFIG3_DEFAULTGW', '{"zh-CN":"WAN_CONFIG3_DEFAULTGW","en-US":"WAN CONFIG3 DEFAULTGW"}'::jsonb, true, true, 10195, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG3_DEFAULTGW', 'WAN_CONFIG3_DEFAULTGW', '{"zh-CN":"WAN_CONFIG3_DEFAULTGW","en-US":"WAN CONFIG3 DEFAULTGW"}'::jsonb, true, true, 10173, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG3_ENABLE', 'WAN_CONFIG3_ENABLE', '{"zh-CN":"WAN_CONFIG3_ENABLE","en-US":"WAN CONFIG3 ENABLE"}'::jsonb, true, true, 10196, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG3_ENABLE', 'WAN_CONFIG3_ENABLE', '{"zh-CN":"WAN_CONFIG3_ENABLE","en-US":"WAN CONFIG3 ENABLE"}'::jsonb, true, true, 10174, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG3_IPADDR', 'WAN_CONFIG3_IPADDR', '{"zh-CN":"WAN_CONFIG3_IPADDR","en-US":"WAN CONFIG3 IPADDR"}'::jsonb, true, true, 10197, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG3_IPADDR', 'WAN_CONFIG3_IPADDR', '{"zh-CN":"WAN_CONFIG3_IPADDR","en-US":"WAN CONFIG3 IPADDR"}'::jsonb, true, true, 10175, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG3_IPMODE', 'WAN_CONFIG3_IPMODE', '{"zh-CN":"WAN_CONFIG3_IPMODE","en-US":"WAN CONFIG3 IPMODE"}'::jsonb, true, true, 10198, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG3_IPMODE', 'WAN_CONFIG3_IPMODE', '{"zh-CN":"WAN_CONFIG3_IPMODE","en-US":"WAN CONFIG3 IPMODE"}'::jsonb, true, true, 10176, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG3_NETMASK', 'WAN_CONFIG3_NETMASK', '{"zh-CN":"WAN_CONFIG3_NETMASK","en-US":"WAN CONFIG3 NETMASK"}'::jsonb, true, true, 10199, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG3_NETMASK', 'WAN_CONFIG3_NETMASK', '{"zh-CN":"WAN_CONFIG3_NETMASK","en-US":"WAN CONFIG3 NETMASK"}'::jsonb, true, true, 10177, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG3_OPTION60', 'WAN_CONFIG3_OPTION60', '{"zh-CN":"WAN_CONFIG3_OPTION60","en-US":"WAN CONFIG3 OPTION60"}'::jsonb, true, true, 10200, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG3_OPTION60', 'WAN_CONFIG3_OPTION60', '{"zh-CN":"WAN_CONFIG3_OPTION60","en-US":"WAN CONFIG3 OPTION60"}'::jsonb, true, true, 10178, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG3_V6_GW', 'WAN_CONFIG3_V6_GW', '{"zh-CN":"WAN_CONFIG3_V6_GW","en-US":"WAN CONFIG3 V6 GW"}'::jsonb, true, true, 10201, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG3_V6_GW', 'WAN_CONFIG3_V6_GW', '{"zh-CN":"WAN_CONFIG3_V6_GW","en-US":"WAN CONFIG3 V6 GW"}'::jsonb, true, true, 10179, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG3_V6_IPADDR', 'WAN_CONFIG3_V6_IPADDR', '{"zh-CN":"WAN_CONFIG3_V6_IPADDR","en-US":"WAN CONFIG3 V6 IPADDR"}'::jsonb, true, true, 10202, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG3_V6_IPADDR', 'WAN_CONFIG3_V6_IPADDR', '{"zh-CN":"WAN_CONFIG3_V6_IPADDR","en-US":"WAN CONFIG3 V6 IPADDR"}'::jsonb, true, true, 10180, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG3_V6_PREFIX', 'WAN_CONFIG3_V6_PREFIX', '{"zh-CN":"WAN_CONFIG3_V6_PREFIX","en-US":"WAN CONFIG3 V6 PREFIX"}'::jsonb, true, true, 10203, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG3_V6_PREFIX', 'WAN_CONFIG3_V6_PREFIX', '{"zh-CN":"WAN_CONFIG3_V6_PREFIX","en-US":"WAN CONFIG3 V6 PREFIX"}'::jsonb, true, true, 10181, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG3_VLAN', 'WAN_CONFIG3_VLAN', '{"zh-CN":"WAN_CONFIG3_VLAN","en-US":"WAN CONFIG3 VLAN"}'::jsonb, true, true, 10204, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG3_VLAN', 'WAN_CONFIG3_VLAN', '{"zh-CN":"WAN_CONFIG3_VLAN","en-US":"WAN CONFIG3 VLAN"}'::jsonb, true, true, 10182, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG4_DEFAULTGW', 'WAN_CONFIG4_DEFAULTGW', '{"zh-CN":"WAN_CONFIG4_DEFAULTGW","en-US":"WAN CONFIG4 DEFAULTGW"}'::jsonb, true, true, 10205, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG4_DEFAULTGW', 'WAN_CONFIG4_DEFAULTGW', '{"zh-CN":"WAN_CONFIG4_DEFAULTGW","en-US":"WAN CONFIG4 DEFAULTGW"}'::jsonb, true, true, 10183, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG4_ENABLE', 'WAN_CONFIG4_ENABLE', '{"zh-CN":"WAN_CONFIG4_ENABLE","en-US":"WAN CONFIG4 ENABLE"}'::jsonb, true, true, 10206, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG4_ENABLE', 'WAN_CONFIG4_ENABLE', '{"zh-CN":"WAN_CONFIG4_ENABLE","en-US":"WAN CONFIG4 ENABLE"}'::jsonb, true, true, 10184, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG4_IPADDR', 'WAN_CONFIG4_IPADDR', '{"zh-CN":"WAN_CONFIG4_IPADDR","en-US":"WAN CONFIG4 IPADDR"}'::jsonb, true, true, 10207, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG4_IPADDR', 'WAN_CONFIG4_IPADDR', '{"zh-CN":"WAN_CONFIG4_IPADDR","en-US":"WAN CONFIG4 IPADDR"}'::jsonb, true, true, 10185, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG4_IPMODE', 'WAN_CONFIG4_IPMODE', '{"zh-CN":"WAN_CONFIG4_IPMODE","en-US":"WAN CONFIG4 IPMODE"}'::jsonb, true, true, 10208, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG4_IPMODE', 'WAN_CONFIG4_IPMODE', '{"zh-CN":"WAN_CONFIG4_IPMODE","en-US":"WAN CONFIG4 IPMODE"}'::jsonb, true, true, 10186, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG4_NETMASK', 'WAN_CONFIG4_NETMASK', '{"zh-CN":"WAN_CONFIG4_NETMASK","en-US":"WAN CONFIG4 NETMASK"}'::jsonb, true, true, 10209, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG4_NETMASK', 'WAN_CONFIG4_NETMASK', '{"zh-CN":"WAN_CONFIG4_NETMASK","en-US":"WAN CONFIG4 NETMASK"}'::jsonb, true, true, 10187, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG4_OPTION60', 'WAN_CONFIG4_OPTION60', '{"zh-CN":"WAN_CONFIG4_OPTION60","en-US":"WAN CONFIG4 OPTION60"}'::jsonb, true, true, 10210, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG4_OPTION60', 'WAN_CONFIG4_OPTION60', '{"zh-CN":"WAN_CONFIG4_OPTION60","en-US":"WAN CONFIG4 OPTION60"}'::jsonb, true, true, 10188, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG4_V6_GW', 'WAN_CONFIG4_V6_GW', '{"zh-CN":"WAN_CONFIG4_V6_GW","en-US":"WAN CONFIG4 V6 GW"}'::jsonb, true, true, 10211, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG4_V6_GW', 'WAN_CONFIG4_V6_GW', '{"zh-CN":"WAN_CONFIG4_V6_GW","en-US":"WAN CONFIG4 V6 GW"}'::jsonb, true, true, 10189, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG4_V6_IPADDR', 'WAN_CONFIG4_V6_IPADDR', '{"zh-CN":"WAN_CONFIG4_V6_IPADDR","en-US":"WAN CONFIG4 V6 IPADDR"}'::jsonb, true, true, 10212, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG4_V6_IPADDR', 'WAN_CONFIG4_V6_IPADDR', '{"zh-CN":"WAN_CONFIG4_V6_IPADDR","en-US":"WAN CONFIG4 V6 IPADDR"}'::jsonb, true, true, 10190, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG4_V6_PREFIX', 'WAN_CONFIG4_V6_PREFIX', '{"zh-CN":"WAN_CONFIG4_V6_PREFIX","en-US":"WAN CONFIG4 V6 PREFIX"}'::jsonb, true, true, 10213, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG4_V6_PREFIX', 'WAN_CONFIG4_V6_PREFIX', '{"zh-CN":"WAN_CONFIG4_V6_PREFIX","en-US":"WAN CONFIG4 V6 PREFIX"}'::jsonb, true, true, 10191, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG4_VLAN', 'WAN_CONFIG4_VLAN', '{"zh-CN":"WAN_CONFIG4_VLAN","en-US":"WAN CONFIG4 VLAN"}'::jsonb, true, true, 10214, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG4_VLAN', 'WAN_CONFIG4_VLAN', '{"zh-CN":"WAN_CONFIG4_VLAN","en-US":"WAN CONFIG4 VLAN"}'::jsonb, true, true, 10192, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG5_DEFAULTGW', 'WAN_CONFIG5_DEFAULTGW', '{"zh-CN":"WAN_CONFIG5_DEFAULTGW","en-US":"WAN CONFIG5 DEFAULTGW"}'::jsonb, true, true, 10215, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG5_DEFAULTGW', 'WAN_CONFIG5_DEFAULTGW', '{"zh-CN":"WAN_CONFIG5_DEFAULTGW","en-US":"WAN CONFIG5 DEFAULTGW"}'::jsonb, true, true, 10193, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG5_ENABLE', 'WAN_CONFIG5_ENABLE', '{"zh-CN":"WAN_CONFIG5_ENABLE","en-US":"WAN CONFIG5 ENABLE"}'::jsonb, true, true, 10216, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG5_ENABLE', 'WAN_CONFIG5_ENABLE', '{"zh-CN":"WAN_CONFIG5_ENABLE","en-US":"WAN CONFIG5 ENABLE"}'::jsonb, true, true, 10194, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG5_IPADDR', 'WAN_CONFIG5_IPADDR', '{"zh-CN":"WAN_CONFIG5_IPADDR","en-US":"WAN CONFIG5 IPADDR"}'::jsonb, true, true, 10217, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG5_IPADDR', 'WAN_CONFIG5_IPADDR', '{"zh-CN":"WAN_CONFIG5_IPADDR","en-US":"WAN CONFIG5 IPADDR"}'::jsonb, true, true, 10195, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG5_IPMODE', 'WAN_CONFIG5_IPMODE', '{"zh-CN":"WAN_CONFIG5_IPMODE","en-US":"WAN CONFIG5 IPMODE"}'::jsonb, true, true, 10218, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG5_IPMODE', 'WAN_CONFIG5_IPMODE', '{"zh-CN":"WAN_CONFIG5_IPMODE","en-US":"WAN CONFIG5 IPMODE"}'::jsonb, true, true, 10196, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG5_NETMASK', 'WAN_CONFIG5_NETMASK', '{"zh-CN":"WAN_CONFIG5_NETMASK","en-US":"WAN CONFIG5 NETMASK"}'::jsonb, true, true, 10219, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG5_NETMASK', 'WAN_CONFIG5_NETMASK', '{"zh-CN":"WAN_CONFIG5_NETMASK","en-US":"WAN CONFIG5 NETMASK"}'::jsonb, true, true, 10197, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG5_OPTION60', 'WAN_CONFIG5_OPTION60', '{"zh-CN":"WAN_CONFIG5_OPTION60","en-US":"WAN CONFIG5 OPTION60"}'::jsonb, true, true, 10220, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG5_OPTION60', 'WAN_CONFIG5_OPTION60', '{"zh-CN":"WAN_CONFIG5_OPTION60","en-US":"WAN CONFIG5 OPTION60"}'::jsonb, true, true, 10198, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG5_V6_GW', 'WAN_CONFIG5_V6_GW', '{"zh-CN":"WAN_CONFIG5_V6_GW","en-US":"WAN CONFIG5 V6 GW"}'::jsonb, true, true, 10221, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG5_V6_GW', 'WAN_CONFIG5_V6_GW', '{"zh-CN":"WAN_CONFIG5_V6_GW","en-US":"WAN CONFIG5 V6 GW"}'::jsonb, true, true, 10199, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG5_V6_IPADDR', 'WAN_CONFIG5_V6_IPADDR', '{"zh-CN":"WAN_CONFIG5_V6_IPADDR","en-US":"WAN CONFIG5 V6 IPADDR"}'::jsonb, true, true, 10222, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG5_V6_IPADDR', 'WAN_CONFIG5_V6_IPADDR', '{"zh-CN":"WAN_CONFIG5_V6_IPADDR","en-US":"WAN CONFIG5 V6 IPADDR"}'::jsonb, true, true, 10200, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG5_V6_PREFIX', 'WAN_CONFIG5_V6_PREFIX', '{"zh-CN":"WAN_CONFIG5_V6_PREFIX","en-US":"WAN CONFIG5 V6 PREFIX"}'::jsonb, true, true, 10223, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG5_V6_PREFIX', 'WAN_CONFIG5_V6_PREFIX', '{"zh-CN":"WAN_CONFIG5_V6_PREFIX","en-US":"WAN CONFIG5 V6 PREFIX"}'::jsonb, true, true, 10201, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG5_VLAN', 'WAN_CONFIG5_VLAN', '{"zh-CN":"WAN_CONFIG5_VLAN","en-US":"WAN CONFIG5 VLAN"}'::jsonb, true, true, 10224, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG5_VLAN', 'WAN_CONFIG5_VLAN', '{"zh-CN":"WAN_CONFIG5_VLAN","en-US":"WAN CONFIG5 VLAN"}'::jsonb, true, true, 10202, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG6_DEFAULTGW', 'WAN_CONFIG6_DEFAULTGW', '{"zh-CN":"WAN_CONFIG6_DEFAULTGW","en-US":"WAN CONFIG6 DEFAULTGW"}'::jsonb, true, true, 10225, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG6_DEFAULTGW', 'WAN_CONFIG6_DEFAULTGW', '{"zh-CN":"WAN_CONFIG6_DEFAULTGW","en-US":"WAN CONFIG6 DEFAULTGW"}'::jsonb, true, true, 10203, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG6_ENABLE', 'WAN_CONFIG6_ENABLE', '{"zh-CN":"WAN_CONFIG6_ENABLE","en-US":"WAN CONFIG6 ENABLE"}'::jsonb, true, true, 10226, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG6_ENABLE', 'WAN_CONFIG6_ENABLE', '{"zh-CN":"WAN_CONFIG6_ENABLE","en-US":"WAN CONFIG6 ENABLE"}'::jsonb, true, true, 10204, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG6_IPADDR', 'WAN_CONFIG6_IPADDR', '{"zh-CN":"WAN_CONFIG6_IPADDR","en-US":"WAN CONFIG6 IPADDR"}'::jsonb, true, true, 10227, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG6_IPADDR', 'WAN_CONFIG6_IPADDR', '{"zh-CN":"WAN_CONFIG6_IPADDR","en-US":"WAN CONFIG6 IPADDR"}'::jsonb, true, true, 10205, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG6_IPMODE', 'WAN_CONFIG6_IPMODE', '{"zh-CN":"WAN_CONFIG6_IPMODE","en-US":"WAN CONFIG6 IPMODE"}'::jsonb, true, true, 10228, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG6_IPMODE', 'WAN_CONFIG6_IPMODE', '{"zh-CN":"WAN_CONFIG6_IPMODE","en-US":"WAN CONFIG6 IPMODE"}'::jsonb, true, true, 10206, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG6_NETMASK', 'WAN_CONFIG6_NETMASK', '{"zh-CN":"WAN_CONFIG6_NETMASK","en-US":"WAN CONFIG6 NETMASK"}'::jsonb, true, true, 10229, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG6_NETMASK', 'WAN_CONFIG6_NETMASK', '{"zh-CN":"WAN_CONFIG6_NETMASK","en-US":"WAN CONFIG6 NETMASK"}'::jsonb, true, true, 10207, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG6_OPTION60', 'WAN_CONFIG6_OPTION60', '{"zh-CN":"WAN_CONFIG6_OPTION60","en-US":"WAN CONFIG6 OPTION60"}'::jsonb, true, true, 10230, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG6_OPTION60', 'WAN_CONFIG6_OPTION60', '{"zh-CN":"WAN_CONFIG6_OPTION60","en-US":"WAN CONFIG6 OPTION60"}'::jsonb, true, true, 10208, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG6_V6_GW', 'WAN_CONFIG6_V6_GW', '{"zh-CN":"WAN_CONFIG6_V6_GW","en-US":"WAN CONFIG6 V6 GW"}'::jsonb, true, true, 10231, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG6_V6_GW', 'WAN_CONFIG6_V6_GW', '{"zh-CN":"WAN_CONFIG6_V6_GW","en-US":"WAN CONFIG6 V6 GW"}'::jsonb, true, true, 10209, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG6_V6_IPADDR', 'WAN_CONFIG6_V6_IPADDR', '{"zh-CN":"WAN_CONFIG6_V6_IPADDR","en-US":"WAN CONFIG6 V6 IPADDR"}'::jsonb, true, true, 10232, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG6_V6_IPADDR', 'WAN_CONFIG6_V6_IPADDR', '{"zh-CN":"WAN_CONFIG6_V6_IPADDR","en-US":"WAN CONFIG6 V6 IPADDR"}'::jsonb, true, true, 10210, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG6_V6_PREFIX', 'WAN_CONFIG6_V6_PREFIX', '{"zh-CN":"WAN_CONFIG6_V6_PREFIX","en-US":"WAN CONFIG6 V6 PREFIX"}'::jsonb, true, true, 10233, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG6_V6_PREFIX', 'WAN_CONFIG6_V6_PREFIX', '{"zh-CN":"WAN_CONFIG6_V6_PREFIX","en-US":"WAN CONFIG6 V6 PREFIX"}'::jsonb, true, true, 10211, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG6_VLAN', 'WAN_CONFIG6_VLAN', '{"zh-CN":"WAN_CONFIG6_VLAN","en-US":"WAN CONFIG6 VLAN"}'::jsonb, true, true, 10234, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG6_VLAN', 'WAN_CONFIG6_VLAN', '{"zh-CN":"WAN_CONFIG6_VLAN","en-US":"WAN CONFIG6 VLAN"}'::jsonb, true, true, 10212, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG7_DEFAULTGW', 'WAN_CONFIG7_DEFAULTGW', '{"zh-CN":"WAN_CONFIG7_DEFAULTGW","en-US":"WAN CONFIG7 DEFAULTGW"}'::jsonb, true, true, 10235, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG7_DEFAULTGW', 'WAN_CONFIG7_DEFAULTGW', '{"zh-CN":"WAN_CONFIG7_DEFAULTGW","en-US":"WAN CONFIG7 DEFAULTGW"}'::jsonb, true, true, 10213, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG7_ENABLE', 'WAN_CONFIG7_ENABLE', '{"zh-CN":"WAN_CONFIG7_ENABLE","en-US":"WAN CONFIG7 ENABLE"}'::jsonb, true, true, 10236, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG7_ENABLE', 'WAN_CONFIG7_ENABLE', '{"zh-CN":"WAN_CONFIG7_ENABLE","en-US":"WAN CONFIG7 ENABLE"}'::jsonb, true, true, 10214, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG7_IPADDR', 'WAN_CONFIG7_IPADDR', '{"zh-CN":"WAN_CONFIG7_IPADDR","en-US":"WAN CONFIG7 IPADDR"}'::jsonb, true, true, 10237, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG7_IPADDR', 'WAN_CONFIG7_IPADDR', '{"zh-CN":"WAN_CONFIG7_IPADDR","en-US":"WAN CONFIG7 IPADDR"}'::jsonb, true, true, 10215, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG7_IPMODE', 'WAN_CONFIG7_IPMODE', '{"zh-CN":"WAN_CONFIG7_IPMODE","en-US":"WAN CONFIG7 IPMODE"}'::jsonb, true, true, 10238, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG7_IPMODE', 'WAN_CONFIG7_IPMODE', '{"zh-CN":"WAN_CONFIG7_IPMODE","en-US":"WAN CONFIG7 IPMODE"}'::jsonb, true, true, 10216, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG7_NETMASK', 'WAN_CONFIG7_NETMASK', '{"zh-CN":"WAN_CONFIG7_NETMASK","en-US":"WAN CONFIG7 NETMASK"}'::jsonb, true, true, 10239, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG7_NETMASK', 'WAN_CONFIG7_NETMASK', '{"zh-CN":"WAN_CONFIG7_NETMASK","en-US":"WAN CONFIG7 NETMASK"}'::jsonb, true, true, 10217, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG7_OPTION60', 'WAN_CONFIG7_OPTION60', '{"zh-CN":"WAN_CONFIG7_OPTION60","en-US":"WAN CONFIG7 OPTION60"}'::jsonb, true, true, 10240, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG7_OPTION60', 'WAN_CONFIG7_OPTION60', '{"zh-CN":"WAN_CONFIG7_OPTION60","en-US":"WAN CONFIG7 OPTION60"}'::jsonb, true, true, 10218, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG7_V6_GW', 'WAN_CONFIG7_V6_GW', '{"zh-CN":"WAN_CONFIG7_V6_GW","en-US":"WAN CONFIG7 V6 GW"}'::jsonb, true, true, 10241, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG7_V6_GW', 'WAN_CONFIG7_V6_GW', '{"zh-CN":"WAN_CONFIG7_V6_GW","en-US":"WAN CONFIG7 V6 GW"}'::jsonb, true, true, 10219, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG7_V6_IPADDR', 'WAN_CONFIG7_V6_IPADDR', '{"zh-CN":"WAN_CONFIG7_V6_IPADDR","en-US":"WAN CONFIG7 V6 IPADDR"}'::jsonb, true, true, 10242, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG7_V6_IPADDR', 'WAN_CONFIG7_V6_IPADDR', '{"zh-CN":"WAN_CONFIG7_V6_IPADDR","en-US":"WAN CONFIG7 V6 IPADDR"}'::jsonb, true, true, 10220, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG7_V6_PREFIX', 'WAN_CONFIG7_V6_PREFIX', '{"zh-CN":"WAN_CONFIG7_V6_PREFIX","en-US":"WAN CONFIG7 V6 PREFIX"}'::jsonb, true, true, 10243, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG7_V6_PREFIX', 'WAN_CONFIG7_V6_PREFIX', '{"zh-CN":"WAN_CONFIG7_V6_PREFIX","en-US":"WAN CONFIG7 V6 PREFIX"}'::jsonb, true, true, 10221, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG7_VLAN', 'WAN_CONFIG7_VLAN', '{"zh-CN":"WAN_CONFIG7_VLAN","en-US":"WAN CONFIG7 VLAN"}'::jsonb, true, true, 10244, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG7_VLAN', 'WAN_CONFIG7_VLAN', '{"zh-CN":"WAN_CONFIG7_VLAN","en-US":"WAN CONFIG7 VLAN"}'::jsonb, true, true, 10222, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG8_DEFAULTGW', 'WAN_CONFIG8_DEFAULTGW', '{"zh-CN":"WAN_CONFIG8_DEFAULTGW","en-US":"WAN CONFIG8 DEFAULTGW"}'::jsonb, true, true, 10245, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG8_DEFAULTGW', 'WAN_CONFIG8_DEFAULTGW', '{"zh-CN":"WAN_CONFIG8_DEFAULTGW","en-US":"WAN CONFIG8 DEFAULTGW"}'::jsonb, true, true, 10223, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG8_ENABLE', 'WAN_CONFIG8_ENABLE', '{"zh-CN":"WAN_CONFIG8_ENABLE","en-US":"WAN CONFIG8 ENABLE"}'::jsonb, true, true, 10246, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG8_ENABLE', 'WAN_CONFIG8_ENABLE', '{"zh-CN":"WAN_CONFIG8_ENABLE","en-US":"WAN CONFIG8 ENABLE"}'::jsonb, true, true, 10224, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG8_IPADDR', 'WAN_CONFIG8_IPADDR', '{"zh-CN":"WAN_CONFIG8_IPADDR","en-US":"WAN CONFIG8 IPADDR"}'::jsonb, true, true, 10247, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG8_IPADDR', 'WAN_CONFIG8_IPADDR', '{"zh-CN":"WAN_CONFIG8_IPADDR","en-US":"WAN CONFIG8 IPADDR"}'::jsonb, true, true, 10225, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG8_IPMODE', 'WAN_CONFIG8_IPMODE', '{"zh-CN":"WAN_CONFIG8_IPMODE","en-US":"WAN CONFIG8 IPMODE"}'::jsonb, true, true, 10248, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG8_IPMODE', 'WAN_CONFIG8_IPMODE', '{"zh-CN":"WAN_CONFIG8_IPMODE","en-US":"WAN CONFIG8 IPMODE"}'::jsonb, true, true, 10226, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG8_NETMASK', 'WAN_CONFIG8_NETMASK', '{"zh-CN":"WAN_CONFIG8_NETMASK","en-US":"WAN CONFIG8 NETMASK"}'::jsonb, true, true, 10249, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG8_NETMASK', 'WAN_CONFIG8_NETMASK', '{"zh-CN":"WAN_CONFIG8_NETMASK","en-US":"WAN CONFIG8 NETMASK"}'::jsonb, true, true, 10227, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG8_OPTION60', 'WAN_CONFIG8_OPTION60', '{"zh-CN":"WAN_CONFIG8_OPTION60","en-US":"WAN CONFIG8 OPTION60"}'::jsonb, true, true, 10250, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG8_OPTION60', 'WAN_CONFIG8_OPTION60', '{"zh-CN":"WAN_CONFIG8_OPTION60","en-US":"WAN CONFIG8 OPTION60"}'::jsonb, true, true, 10228, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG8_V6_GW', 'WAN_CONFIG8_V6_GW', '{"zh-CN":"WAN_CONFIG8_V6_GW","en-US":"WAN CONFIG8 V6 GW"}'::jsonb, true, true, 10251, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG8_V6_GW', 'WAN_CONFIG8_V6_GW', '{"zh-CN":"WAN_CONFIG8_V6_GW","en-US":"WAN CONFIG8 V6 GW"}'::jsonb, true, true, 10229, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG8_V6_IPADDR', 'WAN_CONFIG8_V6_IPADDR', '{"zh-CN":"WAN_CONFIG8_V6_IPADDR","en-US":"WAN CONFIG8 V6 IPADDR"}'::jsonb, true, true, 10252, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG8_V6_IPADDR', 'WAN_CONFIG8_V6_IPADDR', '{"zh-CN":"WAN_CONFIG8_V6_IPADDR","en-US":"WAN CONFIG8 V6 IPADDR"}'::jsonb, true, true, 10230, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG8_V6_PREFIX', 'WAN_CONFIG8_V6_PREFIX', '{"zh-CN":"WAN_CONFIG8_V6_PREFIX","en-US":"WAN CONFIG8 V6 PREFIX"}'::jsonb, true, true, 10253, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG8_V6_PREFIX', 'WAN_CONFIG8_V6_PREFIX', '{"zh-CN":"WAN_CONFIG8_V6_PREFIX","en-US":"WAN CONFIG8 V6 PREFIX"}'::jsonb, true, true, 10231, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG8_VLAN', 'WAN_CONFIG8_VLAN', '{"zh-CN":"WAN_CONFIG8_VLAN","en-US":"WAN CONFIG8 VLAN"}'::jsonb, true, true, 10254, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG8_VLAN', 'WAN_CONFIG8_VLAN', '{"zh-CN":"WAN_CONFIG8_VLAN","en-US":"WAN CONFIG8 VLAN"}'::jsonb, true, true, 10232, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG9_DEFAULTGW', 'WAN_CONFIG9_DEFAULTGW', '{"zh-CN":"WAN_CONFIG9_DEFAULTGW","en-US":"WAN CONFIG9 DEFAULTGW"}'::jsonb, true, true, 10255, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG9_DEFAULTGW', 'WAN_CONFIG9_DEFAULTGW', '{"zh-CN":"WAN_CONFIG9_DEFAULTGW","en-US":"WAN CONFIG9 DEFAULTGW"}'::jsonb, true, true, 10233, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG9_ENABLE', 'WAN_CONFIG9_ENABLE', '{"zh-CN":"WAN_CONFIG9_ENABLE","en-US":"WAN CONFIG9 ENABLE"}'::jsonb, true, true, 10256, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG9_ENABLE', 'WAN_CONFIG9_ENABLE', '{"zh-CN":"WAN_CONFIG9_ENABLE","en-US":"WAN CONFIG9 ENABLE"}'::jsonb, true, true, 10234, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG9_IPADDR', 'WAN_CONFIG9_IPADDR', '{"zh-CN":"WAN_CONFIG9_IPADDR","en-US":"WAN CONFIG9 IPADDR"}'::jsonb, true, true, 10257, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG9_IPADDR', 'WAN_CONFIG9_IPADDR', '{"zh-CN":"WAN_CONFIG9_IPADDR","en-US":"WAN CONFIG9 IPADDR"}'::jsonb, true, true, 10235, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG9_IPMODE', 'WAN_CONFIG9_IPMODE', '{"zh-CN":"WAN_CONFIG9_IPMODE","en-US":"WAN CONFIG9 IPMODE"}'::jsonb, true, true, 10258, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG9_IPMODE', 'WAN_CONFIG9_IPMODE', '{"zh-CN":"WAN_CONFIG9_IPMODE","en-US":"WAN CONFIG9 IPMODE"}'::jsonb, true, true, 10236, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG9_NETMASK', 'WAN_CONFIG9_NETMASK', '{"zh-CN":"WAN_CONFIG9_NETMASK","en-US":"WAN CONFIG9 NETMASK"}'::jsonb, true, true, 10259, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG9_NETMASK', 'WAN_CONFIG9_NETMASK', '{"zh-CN":"WAN_CONFIG9_NETMASK","en-US":"WAN CONFIG9 NETMASK"}'::jsonb, true, true, 10237, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG9_OPTION60', 'WAN_CONFIG9_OPTION60', '{"zh-CN":"WAN_CONFIG9_OPTION60","en-US":"WAN CONFIG9 OPTION60"}'::jsonb, true, true, 10260, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG9_OPTION60', 'WAN_CONFIG9_OPTION60', '{"zh-CN":"WAN_CONFIG9_OPTION60","en-US":"WAN CONFIG9 OPTION60"}'::jsonb, true, true, 10238, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG9_V6_GW', 'WAN_CONFIG9_V6_GW', '{"zh-CN":"WAN_CONFIG9_V6_GW","en-US":"WAN CONFIG9 V6 GW"}'::jsonb, true, true, 10261, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG9_V6_GW', 'WAN_CONFIG9_V6_GW', '{"zh-CN":"WAN_CONFIG9_V6_GW","en-US":"WAN CONFIG9 V6 GW"}'::jsonb, true, true, 10239, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG9_V6_IPADDR', 'WAN_CONFIG9_V6_IPADDR', '{"zh-CN":"WAN_CONFIG9_V6_IPADDR","en-US":"WAN CONFIG9 V6 IPADDR"}'::jsonb, true, true, 10262, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG9_V6_IPADDR', 'WAN_CONFIG9_V6_IPADDR', '{"zh-CN":"WAN_CONFIG9_V6_IPADDR","en-US":"WAN CONFIG9 V6 IPADDR"}'::jsonb, true, true, 10240, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG9_V6_PREFIX', 'WAN_CONFIG9_V6_PREFIX', '{"zh-CN":"WAN_CONFIG9_V6_PREFIX","en-US":"WAN CONFIG9 V6 PREFIX"}'::jsonb, true, true, 10263, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG9_V6_PREFIX', 'WAN_CONFIG9_V6_PREFIX', '{"zh-CN":"WAN_CONFIG9_V6_PREFIX","en-US":"WAN CONFIG9 V6 PREFIX"}'::jsonb, true, true, 10241, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG9_VLAN', 'WAN_CONFIG9_VLAN', '{"zh-CN":"WAN_CONFIG9_VLAN","en-US":"WAN CONFIG9 VLAN"}'::jsonb, true, true, 10264, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WAN_CONFIG9_VLAN', 'WAN_CONFIG9_VLAN', '{"zh-CN":"WAN_CONFIG9_VLAN","en-US":"WAN CONFIG9 VLAN"}'::jsonb, true, true, 10242, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.WanLinkSpeed', 'WAN_LINK_SPEED', '{"zh-CN":"WAN_LINK_SPEED","en-US":"Wan Link Speed"}'::jsonb, true, true, 10265, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.WanLinkSpeed', 'WAN_LINK_SPEED', '{"zh-CN":"WAN_LINK_SPEED","en-US":"Wan Link Speed"}'::jsonb, true, true, 10243, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_ApLteturboEnable', 'X_COM_AP_LTETURBO_ENABLE', '{"zh-CN":"X_COM_AP_LTETURBO_ENABLE","en-US":"X COM Ap Lteturbo Enable"}'::jsonb, true, false, 10266, 'RO'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LBO_First_Static_Ip_Address', 'X_COM_LTE_LBO_FIRST_STATIC_IP_ADDRESS', '{"zh-CN":"X_COM_LTE_LBO_FIRST_STATIC_IP_ADDRESS","en-US":"X COM LTE LBO First Static Ip Address"}'::jsonb, true, true, 10267, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LBO_First_Static_Ip_Address', 'X_COM_LTE_LBO_FIRST_STATIC_IP_ADDRESS', '{"zh-CN":"X_COM_LTE_LBO_FIRST_STATIC_IP_ADDRESS","en-US":"X COM LTE LBO First Static Ip Address"}'::jsonb, true, true, 10244, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LBO_IMSI_IP_List', 'X_COM_LTE_LBO_IMSI_IP_LIST', '{"zh-CN":"X_COM_LTE_LBO_IMSI_IP_LIST","en-US":"X COM LTE LBO IMSI IP List"}'::jsonb, true, true, 10268, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LBO_IMSI_IP_List', 'X_COM_LTE_LBO_IMSI_IP_LIST', '{"zh-CN":"X_COM_LTE_LBO_IMSI_IP_LIST","en-US":"X COM LTE LBO IMSI IP List"}'::jsonb, true, true, 10245, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LBO_Ifname', 'X_COM_LTE_LBO_IFNAME', '{"zh-CN":"X_COM_LTE_LBO_IFNAME","en-US":"X COM LTE LBO Ifname"}'::jsonb, true, true, 10269, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LBO_Ifname', 'X_COM_LTE_LBO_IFNAME', '{"zh-CN":"X_COM_LTE_LBO_IFNAME","en-US":"X COM LTE LBO Ifname"}'::jsonb, true, true, 10246, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LBO_Last_Static_Ip_Address', 'X_COM_LTE_LBO_LAST_STATIC_IP_ADDRESS', '{"zh-CN":"X_COM_LTE_LBO_LAST_STATIC_IP_ADDRESS","en-US":"X COM LTE LBO Last Static Ip Address"}'::jsonb, true, true, 10270, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LBO_Last_Static_Ip_Address', 'X_COM_LTE_LBO_LAST_STATIC_IP_ADDRESS', '{"zh-CN":"X_COM_LTE_LBO_LAST_STATIC_IP_ADDRESS","en-US":"X COM LTE LBO Last Static Ip Address"}'::jsonb, true, true, 10247, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LBO_NET_Mask', 'X_COM_LTE_LBO_NET_MASK', '{"zh-CN":"X_COM_LTE_LBO_NET_MASK","en-US":"X COM LTE LBO NET Mask"}'::jsonb, true, true, 10271, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LBO_NET_Mask', 'X_COM_LTE_LBO_NET_MASK', '{"zh-CN":"X_COM_LTE_LBO_NET_MASK","en-US":"X COM LTE LBO NET Mask"}'::jsonb, true, true, 10248, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LBO_START_UE_Addr', 'X_COM_LTE_LBO_START_UE_ADDR', '{"zh-CN":"X_COM_LTE_LBO_START_UE_ADDR","en-US":"X COM LTE LBO START UE Addr"}'::jsonb, true, true, 10272, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LBO_START_UE_Addr', 'X_COM_LTE_LBO_START_UE_ADDR', '{"zh-CN":"X_COM_LTE_LBO_START_UE_ADDR","en-US":"X COM LTE LBO START UE Addr"}'::jsonb, true, true, 10249, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LBO_Static_Ip_Addr_Switch', 'X_COM_LTE_LBO_STATIC_IP_ADDR_SWITCH', '{"zh-CN":"X_COM_LTE_LBO_STATIC_IP_ADDR_SWITCH","en-US":"X COM LTE LBO Static Ip Addr Switch"}'::jsonb, true, true, 10273, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LBO_Static_Ip_Addr_Switch', 'X_COM_LTE_LBO_STATIC_IP_ADDR_SWITCH', '{"zh-CN":"X_COM_LTE_LBO_STATIC_IP_ADDR_SWITCH","en-US":"X COM LTE LBO Static Ip Addr Switch"}'::jsonb, true, true, 10250, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LBO_Switch', 'X_COM_LTE_LBO_SWITCH', '{"zh-CN":"X_COM_LTE_LBO_SWITCH","en-US":"X COM LTE LBO Switch"}'::jsonb, true, true, 10274, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LBO_Switch', 'X_COM_LTE_LBO_SWITCH', '{"zh-CN":"X_COM_LTE_LBO_SWITCH","en-US":"X COM LTE LBO Switch"}'::jsonb, true, true, 10251, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LGW_First_Static_Ip_Address', 'X_COM_LTE_LGW_FIRST_STATIC_IP_ADDRESS', '{"zh-CN":"X_COM_LTE_LGW_FIRST_STATIC_IP_ADDRESS","en-US":"X COM LTE LGW First Static Ip Address"}'::jsonb, true, true, 10275, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LGW_First_Static_Ip_Address', 'X_COM_LTE_LGW_FIRST_STATIC_IP_ADDRESS', '{"zh-CN":"X_COM_LTE_LGW_FIRST_STATIC_IP_ADDRESS","en-US":"X COM LTE LGW First Static Ip Address"}'::jsonb, true, true, 10252, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LGW_IMSI_IP_List', 'X_COM_LTE_LGW_IMSI_IP_LIST', '{"zh-CN":"X_COM_LTE_LGW_IMSI_IP_LIST","en-US":"X COM LTE LGW IMSI IP List"}'::jsonb, true, true, 10276, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LGW_IMSI_IP_List', 'X_COM_LTE_LGW_IMSI_IP_LIST', '{"zh-CN":"X_COM_LTE_LGW_IMSI_IP_LIST","en-US":"X COM LTE LGW IMSI IP List"}'::jsonb, true, true, 10253, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LGW_Ifname', 'X_COM_LTE_LGW_IFNAME', '{"zh-CN":"X_COM_LTE_LGW_IFNAME","en-US":"X COM LTE LGW Ifname"}'::jsonb, true, true, 10277, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LGW_Ifname', 'X_COM_LTE_LGW_IFNAME', '{"zh-CN":"X_COM_LTE_LGW_IFNAME","en-US":"X COM LTE LGW Ifname"}'::jsonb, true, true, 10254, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LGW_Last_Static_Ip_Address', 'X_COM_LTE_LGW_LAST_STATIC_IP_ADDRESS', '{"zh-CN":"X_COM_LTE_LGW_LAST_STATIC_IP_ADDRESS","en-US":"X COM LTE LGW Last Static Ip Address"}'::jsonb, true, true, 10278, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LGW_Last_Static_Ip_Address', 'X_COM_LTE_LGW_LAST_STATIC_IP_ADDRESS', '{"zh-CN":"X_COM_LTE_LGW_LAST_STATIC_IP_ADDRESS","en-US":"X COM LTE LGW Last Static Ip Address"}'::jsonb, true, true, 10255, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LGW_NET_Mask', 'X_COM_LTE_LGW_NET_MASK', '{"zh-CN":"X_COM_LTE_LGW_NET_MASK","en-US":"X COM LTE LGW NET Mask"}'::jsonb, true, true, 10279, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LGW_NET_Mask', 'X_COM_LTE_LGW_NET_MASK', '{"zh-CN":"X_COM_LTE_LGW_NET_MASK","en-US":"X COM LTE LGW NET Mask"}'::jsonb, true, true, 10256, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LGW_START_UE_Addr', 'X_COM_LTE_LGW_START_UE_ADDR', '{"zh-CN":"X_COM_LTE_LGW_START_UE_ADDR","en-US":"X COM LTE LGW START UE Addr"}'::jsonb, true, true, 10280, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LGW_START_UE_Addr', 'X_COM_LTE_LGW_START_UE_ADDR', '{"zh-CN":"X_COM_LTE_LGW_START_UE_ADDR","en-US":"X COM LTE LGW START UE Addr"}'::jsonb, true, true, 10257, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LGW_Static_Ip_Addr_Switch', 'X_COM_LTE_LGW_STATIC_IP_ADDR_SWITCH', '{"zh-CN":"X_COM_LTE_LGW_STATIC_IP_ADDR_SWITCH","en-US":"X COM LTE LGW Static Ip Addr Switch"}'::jsonb, true, true, 10281, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LGW_Static_Ip_Addr_Switch', 'X_COM_LTE_LGW_STATIC_IP_ADDR_SWITCH', '{"zh-CN":"X_COM_LTE_LGW_STATIC_IP_ADDR_SWITCH","en-US":"X COM LTE LGW Static Ip Addr Switch"}'::jsonb, true, true, 10258, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LGW_Switch', 'X_COM_LTE_LGW_SWITCH', '{"zh-CN":"X_COM_LTE_LGW_SWITCH","en-US":"X COM LTE LGW Switch"}'::jsonb, true, true, 10282, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_LGW_Switch', 'X_COM_LTE_LGW_SWITCH', '{"zh-CN":"X_COM_LTE_LGW_SWITCH","en-US":"X COM LTE LGW Switch"}'::jsonb, true, true, 10259, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_WAN_CHECK_ENABLE', 'X_COM_LTE_WAN_CHECK_ENABLE', '{"zh-CN":"X_COM_LTE_WAN_CHECK_ENABLE","en-US":"X COM LTE WAN CHECK ENABLE"}'::jsonb, true, true, 10283, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_WAN_CHECK_ENABLE', 'X_COM_LTE_WAN_CHECK_ENABLE', '{"zh-CN":"X_COM_LTE_WAN_CHECK_ENABLE","en-US":"X COM LTE WAN CHECK ENABLE"}'::jsonb, true, true, 10260, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_WAN_CHECK_TIMER_LEN', 'X_COM_LTE_WAN_CHECK_TIMER_LEN', '{"zh-CN":"X_COM_LTE_WAN_CHECK_TIMER_LEN","en-US":"X COM LTE WAN CHECK TIMER LEN"}'::jsonb, true, true, 10284, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_LTE_WAN_CHECK_TIMER_LEN', 'X_COM_LTE_WAN_CHECK_TIMER_LEN', '{"zh-CN":"X_COM_LTE_WAN_CHECK_TIMER_LEN","en-US":"X COM LTE WAN CHECK TIMER LEN"}'::jsonb, true, true, 10261, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_LmtEnable', 'X_COM_LMT_ENABLE', '{"zh-CN":"X_COM_LMT_ENABLE","en-US":"X COM Lmt Enable"}'::jsonb, true, true, 10285, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_LmtEnable', 'X_COM_LMT_ENABLE', '{"zh-CN":"X_COM_LMT_ENABLE","en-US":"X COM Lmt Enable"}'::jsonb, true, true, 10262, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_MME_Status', 'X_COM_MME_STATUS', '{"zh-CN":"X_COM_MME_STATUS","en-US":"X COM MME Status"}'::jsonb, true, false, 10286, 'RO'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_OMC_ETH_CONFIG_MTU', 'X_COM_OMC_ETH_CONFIG_MTU', '{"zh-CN":"X_COM_OMC_ETH_CONFIG_MTU","en-US":"X COM OMC ETH CONFIG MTU"}'::jsonb, true, true, 10287, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_OMC_ETH_CONFIG_MTU', 'X_COM_OMC_ETH_CONFIG_MTU', '{"zh-CN":"X_COM_OMC_ETH_CONFIG_MTU","en-US":"X COM OMC ETH CONFIG MTU"}'::jsonb, true, true, 10263, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_PTP1588DomainNum', 'X_COM_PTP1588DOMAIN_NUM', '{"zh-CN":"X_COM_PTP1588DOMAIN_NUM","en-US":"X COM PTP1588Domain Num"}'::jsonb, true, true, 10288, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_PTP1588DomainNum', 'X_COM_PTP1588DOMAIN_NUM', '{"zh-CN":"X_COM_PTP1588DOMAIN_NUM","en-US":"X COM PTP1588Domain Num"}'::jsonb, true, true, 10264, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_PTP1588Interface', 'X_COM_PTP1588INTERFACE', '{"zh-CN":"X_COM_PTP1588INTERFACE","en-US":"X COM PTP1588Interface"}'::jsonb, true, true, 10289, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_PTP1588Interface', 'X_COM_PTP1588INTERFACE', '{"zh-CN":"X_COM_PTP1588INTERFACE","en-US":"X COM PTP1588Interface"}'::jsonb, true, true, 10265, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_PTP1588Profile', 'X_COM_PTP1588PROFILE', '{"zh-CN":"X_COM_PTP1588PROFILE","en-US":"X COM PTP1588Profile"}'::jsonb, true, true, 10290, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_PTP1588Profile', 'X_COM_PTP1588PROFILE', '{"zh-CN":"X_COM_PTP1588PROFILE","en-US":"X COM PTP1588Profile"}'::jsonb, true, true, 10266, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_PTP1588TRANS_PORT', 'X_COM_PTP1588TRANS_PORT', '{"zh-CN":"X_COM_PTP1588TRANS_PORT","en-US":"X COM PTP1588TRANS PORT"}'::jsonb, true, true, 10291, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_PTP1588TRANS_PORT', 'X_COM_PTP1588TRANS_PORT', '{"zh-CN":"X_COM_PTP1588TRANS_PORT","en-US":"X COM PTP1588TRANS PORT"}'::jsonb, true, true, 10267, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_PTP1588Trigger', 'X_COM_PTP1588TRIGGER', '{"zh-CN":"X_COM_PTP1588TRIGGER","en-US":"X COM PTP1588Trigger"}'::jsonb, true, true, 10292, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_PTP1588Trigger', 'X_COM_PTP1588TRIGGER', '{"zh-CN":"X_COM_PTP1588TRIGGER","en-US":"X COM PTP1588Trigger"}'::jsonb, true, true, 10268, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_PTP1588UnicastAddr', 'X_COM_PTP1588UNICAST_ADDR', '{"zh-CN":"X_COM_PTP1588UNICAST_ADDR","en-US":"X COM PTP1588Unicast Addr"}'::jsonb, true, true, 10293, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_PTP1588UnicastAddr', 'X_COM_PTP1588UNICAST_ADDR', '{"zh-CN":"X_COM_PTP1588UNICAST_ADDR","en-US":"X COM PTP1588Unicast Addr"}'::jsonb, true, true, 10269, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_PTP1588syncsMode', 'X_COM_PTP1588SYNCS_MODE', '{"zh-CN":"X_COM_PTP1588SYNCS_MODE","en-US":"X COM PTP1588syncs Mode"}'::jsonb, true, true, 10294, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_PTP1588syncsMode', 'X_COM_PTP1588SYNCS_MODE', '{"zh-CN":"X_COM_PTP1588SYNCS_MODE","en-US":"X COM PTP1588syncs Mode"}'::jsonb, true, true, 10270, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_SCTP_CONFIG_MTU', 'X_COM_SCTP_CONFIG_MTU', '{"zh-CN":"X_COM_SCTP_CONFIG_MTU","en-US":"X COM SCTP CONFIG MTU"}'::jsonb, true, true, 10295, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_SCTP_CONFIG_MTU', 'X_COM_SCTP_CONFIG_MTU', '{"zh-CN":"X_COM_SCTP_CONFIG_MTU","en-US":"X COM SCTP CONFIG MTU"}'::jsonb, true, true, 10271, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.X_COM_Toggle_Switch', 'X_COM_TOGGLE_SWITCH', '{"zh-CN":"X_COM_TOGGLE_SWITCH","en-US":"X COM Toggle Switch"}'::jsonb, true, true, 10296, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.X_COM_Toggle_Switch', 'X_COM_TOGGLE_SWITCH', '{"zh-CN":"X_COM_TOGGLE_SWITCH","en-US":"X COM Toggle Switch"}'::jsonb, true, true, 10272, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.cbsdCategory', 'CBSD_CATEGORY', '{"zh-CN":"CBSD_CATEGORY","en-US":"cbsd Category"}'::jsonb, true, true, 10297, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.cbsdCategory', 'CBSD_CATEGORY', '{"zh-CN":"CBSD_CATEGORY","en-US":"cbsd Category"}'::jsonb, true, true, 10273, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.cellModeIdx', 'CELL_MODE_IDX', '{"zh-CN":"CELL_MODE_IDX","en-US":"cell Mode Idx"}'::jsonb, true, false, 10298, 'RO'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.highFrequency', 'HIGH_FREQUENCY', '{"zh-CN":"HIGH_FREQUENCY","en-US":"high Frequency"}'::jsonb, true, true, 10299, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.highFrequency', 'HIGH_FREQUENCY', '{"zh-CN":"HIGH_FREQUENCY","en-US":"high Frequency"}'::jsonb, true, true, 10274, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.iForcedSyncControlSwitch', 'I_FORCED_SYNC_CONTROL_SWITCH', '{"zh-CN":"I_FORCED_SYNC_CONTROL_SWITCH","en-US":"i Forced Sync Control Switch"}'::jsonb, true, true, 10300, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.iForcedSyncControlSwitch', 'I_FORCED_SYNC_CONTROL_SWITCH', '{"zh-CN":"I_FORCED_SYNC_CONTROL_SWITCH","en-US":"i Forced Sync Control Switch"}'::jsonb, true, true, 10275, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.indoorDeployment', 'INDOOR_DEPLOYMENT', '{"zh-CN":"INDOOR_DEPLOYMENT","en-US":"indoor Deployment"}'::jsonb, true, true, 10301, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.indoorDeployment', 'INDOOR_DEPLOYMENT', '{"zh-CN":"INDOOR_DEPLOYMENT","en-US":"indoor Deployment"}'::jsonb, true, true, 10276, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.lowFrequency', 'LOW_FREQUENCY', '{"zh-CN":"LOW_FREQUENCY","en-US":"low Frequency"}'::jsonb, true, true, 10302, 'RW'),
+    ('MOD DEVICE_INFO', 'Device.DeviceInfo.lowFrequency', 'LOW_FREQUENCY', '{"zh-CN":"LOW_FREQUENCY","en-US":"low Frequency"}'::jsonb, true, true, 10277, 'RW'),
+    ('LST DEVICE_INFO', 'Device.DeviceInfo.supportedN48N78SharedRf', 'SUPPORTED_N48N78SHARED_RF', '{"zh-CN":"SUPPORTED_N48N78SHARED_RF","en-US":"supported N48N78Shared Rf"}'::jsonb, true, false, 10303, 'RO'),
+    ('LST SOFTWARE_CTRL', 'Device.SoftwareCtrl.AccCard1PpsDelay', 'ACC_CARD1PPS_DELAY', '{"zh-CN":"ACC_CARD1PPS_DELAY","en-US":"Acc Card1Pps Delay"}'::jsonb, true, true, 10001, 'RW'),
+    ('MOD SOFTWARE_CTRL', 'Device.SoftwareCtrl.AccCard1PpsDelay', 'ACC_CARD1PPS_DELAY', '{"zh-CN":"ACC_CARD1PPS_DELAY","en-US":"Acc Card1Pps Delay"}'::jsonb, true, true, 10001, 'RW'),
+    ('LST SOFTWARE_CTRL', 'Device.SoftwareCtrl.N48N78SharedRfEnable', 'N48N78SHARED_RF_ENABLE', '{"zh-CN":"N48N78SHARED_RF_ENABLE","en-US":"N48N78Shared Rf Enable"}'::jsonb, true, false, 10002, 'RO'),
+    ('LST MANAGEMENT_SERVER', 'Device.ManagementServer.X_COM_tr069_port', 'X_COM_TR069_PORT', '{"zh-CN":"X_COM_TR069_PORT","en-US":"X COM tr069 port"}'::jsonb, true, true, 10001, 'RW'),
+    ('MOD MANAGEMENT_SERVER', 'Device.ManagementServer.X_COM_tr069_port', 'X_COM_TR069_PORT', '{"zh-CN":"X_COM_TR069_PORT","en-US":"X COM tr069 port"}'::jsonb, true, true, 10001, 'RW'),
+    ('LST MANAGEMENT_SERVER', 'Device.ManagementServer.tfcsManagerPrimsrc', 'TFCS_MANAGER_PRIMSRC', '{"zh-CN":"TFCS_MANAGER_PRIMSRC","en-US":"tfcs Manager Primsrc"}'::jsonb, true, true, 10002, 'RW'),
+    ('MOD MANAGEMENT_SERVER', 'Device.ManagementServer.tfcsManagerPrimsrc', 'TFCS_MANAGER_PRIMSRC', '{"zh-CN":"TFCS_MANAGER_PRIMSRC","en-US":"tfcs Manager Primsrc"}'::jsonb, true, true, 10002, 'RW'),
+    ('LST MANAGEMENT_SERVER', 'Device.ManagementServer.tfcsSyncState', 'TFCS_SYNC_STATE', '{"zh-CN":"TFCS_SYNC_STATE","en-US":"tfcs Sync State"}'::jsonb, true, true, 10003, 'RW'),
+    ('MOD MANAGEMENT_SERVER', 'Device.ManagementServer.tfcsSyncState', 'TFCS_SYNC_STATE', '{"zh-CN":"TFCS_SYNC_STATE","en-US":"tfcs Sync State"}'::jsonb, true, true, 10003, 'RW'),
+    ('LST FAULT_MGMT_HISTORY_EVENT', 'Device.FaultMgmt.HistoryEvent.{i}.OUI', 'OUI', '{"zh-CN":"OUI","en-US":"OUI"}'::jsonb, true, false, 10001, 'RO'),
+    ('LST FAULT_MGMT_HISTORY_EVENT', 'Device.FaultMgmt.HistoryEvent.{i}.SerialNumber', 'SERIAL_NUMBER', '{"zh-CN":"SERIAL_NUMBER","en-US":"Serial Number"}'::jsonb, true, false, 10002, 'RO'),
+    ('LST FAULT_MGMT_EXPEDITED_EVENT', 'Device.FaultMgmt.ExpeditedEvent.{i}.OUI', 'OUI', '{"zh-CN":"OUI","en-US":"OUI"}'::jsonb, true, false, 10001, 'RO'),
+    ('LST FAULT_MGMT_EXPEDITED_EVENT', 'Device.FaultMgmt.ExpeditedEvent.{i}.SerialNumber', 'SERIAL_NUMBER', '{"zh-CN":"SERIAL_NUMBER","en-US":"Serial Number"}'::jsonb, true, false, 10002, 'RO'),
+    ('LST FAULT_MGMT_CURRENT_ALARM', 'Device.FaultMgmt.CurrentAlarm.{i}.OUI', 'OUI', '{"zh-CN":"OUI","en-US":"OUI"}'::jsonb, true, false, 10001, 'RO'),
+    ('LST FAULT_MGMT_CURRENT_ALARM', 'Device.FaultMgmt.CurrentAlarm.{i}.SerialNumber', 'SERIAL_NUMBER', '{"zh-CN":"SERIAL_NUMBER","en-US":"Serial Number"}'::jsonb, true, false, 10002, 'RO'),
+    ('LST FAULT_MGMT_QUEUED_EVENT', 'Device.FaultMgmt.QueuedEvent.{i}.OUI', 'OUI', '{"zh-CN":"OUI","en-US":"OUI"}'::jsonb, true, false, 10001, 'RO'),
+    ('LST FAULT_MGMT_QUEUED_EVENT', 'Device.FaultMgmt.QueuedEvent.{i}.SerialNumber', 'SERIAL_NUMBER', '{"zh-CN":"SERIAL_NUMBER","en-US":"Serial Number"}'::jsonb, true, false, 10002, 'RO'),
+    ('LST PLMN_LIST', 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.Enable', 'ENABLE', '{"zh-CN":"ENABLE","en-US":"Enable"}'::jsonb, true, true, 10001, 'RW'),
+    ('MOD PLMN_LIST', 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.Enable', 'ENABLE', '{"zh-CN":"ENABLE","en-US":"Enable"}'::jsonb, true, true, 10001, 'RW'),
+    ('LST PLMN_LIST', 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.IsPrimary', 'IS_PRIMARY', '{"zh-CN":"IS_PRIMARY","en-US":"Is Primary"}'::jsonb, true, true, 10002, 'RW'),
+    ('MOD PLMN_LIST', 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.IsPrimary', 'IS_PRIMARY', '{"zh-CN":"IS_PRIMARY","en-US":"Is Primary"}'::jsonb, true, true, 10002, 'RW'),
+    ('LST LTE_EPC', 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.AllowedCipheringAlgorithmList', 'ALLOWED_CIPHERING_ALGORITHM_LIST', '{"zh-CN":"ALLOWED_CIPHERING_ALGORITHM_LIST","en-US":"Allowed Ciphering Algorithm List"}'::jsonb, true, true, 10001, 'RW'),
+    ('MOD LTE_EPC', 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.AllowedCipheringAlgorithmList', 'ALLOWED_CIPHERING_ALGORITHM_LIST', '{"zh-CN":"ALLOWED_CIPHERING_ALGORITHM_LIST","en-US":"Allowed Ciphering Algorithm List"}'::jsonb, true, true, 10001, 'RW'),
+    ('LST LTE_EPC', 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.AllowedIntegrityProtectionAlgorithmList', 'ALLOWED_INTEGRITY_PROTECTION_ALGORITHM_LIST', '{"zh-CN":"ALLOWED_INTEGRITY_PROTECTION_ALGORITHM_LIST","en-US":"Allowed Integrity Protection Algorithm List"}'::jsonb, true, true, 10002, 'RW'),
+    ('MOD LTE_EPC', 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.AllowedIntegrityProtectionAlgorithmList', 'ALLOWED_INTEGRITY_PROTECTION_ALGORITHM_LIST', '{"zh-CN":"ALLOWED_INTEGRITY_PROTECTION_ALGORITHM_LIST","en-US":"Allowed Integrity Protection Algorithm List"}'::jsonb, true, true, 10002, 'RW'),
+    ('LST FAP_SERVICE', 'Device.Services.FAPService.{i}.AmfsStatus', 'AMFS_STATUS', '{"zh-CN":"AMFS_STATUS","en-US":"Amfs Status"}'::jsonb, true, false, 10001, 'RO'),
+    ('LST FAP_SERVICE', 'Device.Services.FAPService.{i}.EnableX2', 'ENABLE_X2', '{"zh-CN":"ENABLE_X2","en-US":"Enable X2"}'::jsonb, true, true, 10002, 'RW'),
+    ('MOD FAP_SERVICE', 'Device.Services.FAPService.{i}.EnableX2', 'ENABLE_X2', '{"zh-CN":"ENABLE_X2","en-US":"Enable X2"}'::jsonb, true, true, 10001, 'RW'),
+    ('LST FAP_SERVICE_CAPABILITIES', 'Device.Services.FAPService.{i}.Capabilities.MaxTxPower', 'MAX_TX_POWER', '{"zh-CN":"MAX_TX_POWER","en-US":"Max Tx Power"}'::jsonb, true, false, 10001, 'RO'),
+    ('LST INTER_RAT_CELL_GSM', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.Enable', 'ENABLE', '{"zh-CN":"ENABLE","en-US":"Enable"}'::jsonb, true, true, 10001, 'RW'),
+    ('MOD INTER_RAT_CELL_GSM', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.Enable', 'ENABLE', '{"zh-CN":"ENABLE","en-US":"Enable"}'::jsonb, true, true, 10001, 'RW'),
+    ('LST LTE_CELL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.Enable', 'ENABLE', '{"zh-CN":"ENABLE","en-US":"Enable"}'::jsonb, true, true, 10001, 'RW'),
+    ('MOD LTE_CELL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.Enable', 'ENABLE', '{"zh-CN":"ENABLE","en-US":"Enable"}'::jsonb, true, true, 10001, 'RW'),
+    ('LST LTE_CELL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.NeighCellAddReason', 'NEIGH_CELL_ADD_REASON', '{"zh-CN":"NEIGH_CELL_ADD_REASON","en-US":"Neigh Cell Add Reason"}'::jsonb, true, true, 10002, 'RW'),
+    ('MOD LTE_CELL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.NeighCellAddReason', 'NEIGH_CELL_ADD_REASON', '{"zh-CN":"NEIGH_CELL_ADD_REASON","en-US":"Neigh Cell Add Reason"}'::jsonb, true, true, 10002, 'RW'),
+    ('LST LTE_CELL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.NeighCellTypeContainer', 'NEIGH_CELL_TYPE_CONTAINER', '{"zh-CN":"NEIGH_CELL_TYPE_CONTAINER","en-US":"Neigh Cell Type Container"}'::jsonb, true, true, 10003, 'RW'),
+    ('MOD LTE_CELL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.NeighCellTypeContainer', 'NEIGH_CELL_TYPE_CONTAINER', '{"zh-CN":"NEIGH_CELL_TYPE_CONTAINER","en-US":"Neigh Cell Type Container"}'::jsonb, true, true, 10003, 'RW'),
+    ('LST LTE_CELL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.X2Flag', 'X2FLAG', '{"zh-CN":"X2FLAG","en-US":"X2Flag"}'::jsonb, true, true, 10004, 'RW'),
+    ('MOD LTE_CELL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.X2Flag', 'X2FLAG', '{"zh-CN":"X2FLAG","en-US":"X2Flag"}'::jsonb, true, true, 10004, 'RW'),
+    ('LST LTE_CELL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.X2IP', 'X2IP', '{"zh-CN":"X2IP","en-US":"X2IP"}'::jsonb, true, true, 10005, 'RW'),
+    ('MOD LTE_CELL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.X2IP', 'X2IP', '{"zh-CN":"X2IP","en-US":"X2IP"}'::jsonb, true, true, 10005, 'RW'),
+    ('LST LTE_CELL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.X2Status', 'X2STATUS', '{"zh-CN":"X2STATUS","en-US":"X2Status"}'::jsonb, true, true, 10006, 'RW'),
+    ('MOD LTE_CELL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.X2Status', 'X2STATUS', '{"zh-CN":"X2STATUS","en-US":"X2Status"}'::jsonb, true, true, 10006, 'RW'),
+    ('LST LTE_CELL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.X_COM_TAC', 'X_COM_TAC', '{"zh-CN":"X_COM_TAC","en-US":"X COM TAC"}'::jsonb, true, true, 10007, 'RW'),
+    ('MOD LTE_CELL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.X_COM_TAC', 'X_COM_TAC', '{"zh-CN":"X_COM_TAC","en-US":"X COM TAC"}'::jsonb, true, true, 10007, 'RW'),
+    ('LST CARRIER', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.Enable', 'ENABLE', '{"zh-CN":"ENABLE","en-US":"Enable"}'::jsonb, true, true, 10001, 'RW'),
+    ('MOD CARRIER', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.Enable', 'ENABLE', '{"zh-CN":"ENABLE","en-US":"Enable"}'::jsonb, true, true, 10001, 'RW'),
+    ('LST CONN_MODE_EUTRA', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1ThresholdRSRP', 'A1THRESHOLD_RSRP', '{"zh-CN":"A1THRESHOLD_RSRP","en-US":"A1Threshold RSRP"}'::jsonb, true, true, 10001, 'RW'),
+    ('MOD CONN_MODE_EUTRA', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1ThresholdRSRP', 'A1THRESHOLD_RSRP', '{"zh-CN":"A1THRESHOLD_RSRP","en-US":"A1Threshold RSRP"}'::jsonb, true, true, 10001, 'RW'),
+    ('LST CONN_MODE_EUTRA', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2ThresholdRSRP', 'A2THRESHOLD_RSRP', '{"zh-CN":"A2THRESHOLD_RSRP","en-US":"A2Threshold RSRP"}'::jsonb, true, true, 10002, 'RW'),
+    ('MOD CONN_MODE_EUTRA', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2ThresholdRSRP', 'A2THRESHOLD_RSRP', '{"zh-CN":"A2THRESHOLD_RSRP","en-US":"A2Threshold RSRP"}'::jsonb, true, true, 10002, 'RW'),
+    ('LST CONN_MODE_EUTRA', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.Hysteresis', 'HYSTERESIS', '{"zh-CN":"HYSTERESIS","en-US":"Hysteresis"}'::jsonb, true, true, 10003, 'RW'),
+    ('MOD CONN_MODE_EUTRA', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.Hysteresis', 'HYSTERESIS', '{"zh-CN":"HYSTERESIS","en-US":"Hysteresis"}'::jsonb, true, true, 10003, 'RW'),
+    ('LST CONN_MODE_EUTRA', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.TimeToTrigger', 'TIME_TO_TRIGGER', '{"zh-CN":"TIME_TO_TRIGGER","en-US":"Time To Trigger"}'::jsonb, true, true, 10004, 'RW'),
+    ('MOD CONN_MODE_EUTRA', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.TimeToTrigger', 'TIME_TO_TRIGGER', '{"zh-CN":"TIME_TO_TRIGGER","en-US":"Time To Trigger"}'::jsonb, true, true, 10004, 'RW'),
+    ('LST ETHERNET_INTERFACE', 'Device.Ethernet.Interface.{i}.PortType', 'PORT_TYPE', '{"zh-CN":"PORT_TYPE","en-US":"Port Type"}'::jsonb, true, false, 10001, 'RO'),
+    ('LST ETHERNET_INTERFACE', 'Device.Ethernet.Interface.{i}.interfaceType', 'INTERFACE_TYPE', '{"zh-CN":"INTERFACE_TYPE","en-US":"interface Type"}'::jsonb, true, true, 10002, 'RW'),
+    ('MOD ETHERNET_INTERFACE', 'Device.Ethernet.Interface.{i}.interfaceType', 'INTERFACE_TYPE', '{"zh-CN":"INTERFACE_TYPE","en-US":"interface Type"}'::jsonb, true, true, 10001, 'RW'),
+    ('LST TIME', 'Device.Time.LTE_X_COM_NTP_SYNC_INTERVAL', 'LTE_X_COM_NTP_SYNC_INTERVAL', '{"zh-CN":"LTE_X_COM_NTP_SYNC_INTERVAL","en-US":"LTE X COM NTP SYNC INTERVAL"}'::jsonb, true, true, 10001, 'RW'),
+    ('MOD TIME', 'Device.Time.LTE_X_COM_NTP_SYNC_INTERVAL', 'LTE_X_COM_NTP_SYNC_INTERVAL', '{"zh-CN":"LTE_X_COM_NTP_SYNC_INTERVAL","en-US":"LTE X COM NTP SYNC INTERVAL"}'::jsonb, true, true, 10001, 'RW'),
+    ('LST TIME', 'Device.Time.LocalTimeZoneName', 'LOCAL_TIME_ZONE_NAME', '{"zh-CN":"LOCAL_TIME_ZONE_NAME","en-US":"Local Time Zone Name"}'::jsonb, true, true, 10002, 'RW'),
+    ('MOD TIME', 'Device.Time.LocalTimeZoneName', 'LOCAL_TIME_ZONE_NAME', '{"zh-CN":"LOCAL_TIME_ZONE_NAME","en-US":"Local Time Zone Name"}'::jsonb, true, true, 10002, 'RW'),
+    ('LST TIME', 'Device.Time.NTPPort1', 'NTPPORT1', '{"zh-CN":"NTPPORT1","en-US":"NTPPort1"}'::jsonb, true, true, 10003, 'RW'),
+    ('MOD TIME', 'Device.Time.NTPPort1', 'NTPPORT1', '{"zh-CN":"NTPPORT1","en-US":"NTPPort1"}'::jsonb, true, true, 10003, 'RW'),
+    ('LST TIME', 'Device.Time.NTPPort2', 'NTPPORT2', '{"zh-CN":"NTPPORT2","en-US":"NTPPort2"}'::jsonb, true, true, 10004, 'RW'),
+    ('MOD TIME', 'Device.Time.NTPPort2', 'NTPPORT2', '{"zh-CN":"NTPPORT2","en-US":"NTPPort2"}'::jsonb, true, true, 10004, 'RW'),
+    ('LST TIME', 'Device.Time.NTPPort3', 'NTPPORT3', '{"zh-CN":"NTPPORT3","en-US":"NTPPort3"}'::jsonb, true, true, 10005, 'RW'),
+    ('MOD TIME', 'Device.Time.NTPPort3', 'NTPPORT3', '{"zh-CN":"NTPPORT3","en-US":"NTPPort3"}'::jsonb, true, true, 10005, 'RW'),
+    ('LST TIME', 'Device.Time.NTPPort4', 'NTPPORT4', '{"zh-CN":"NTPPORT4","en-US":"NTPPort4"}'::jsonb, true, true, 10006, 'RW'),
+    ('MOD TIME', 'Device.Time.NTPPort4', 'NTPPORT4', '{"zh-CN":"NTPPORT4","en-US":"NTPPort4"}'::jsonb, true, true, 10006, 'RW'),
+    ('LST FAP_GPS', 'Device.FAP.GPS.Height', 'HEIGHT', '{"zh-CN":"HEIGHT","en-US":"Height"}'::jsonb, true, false, 10001, 'RO'),
+    ('LST FAP_GPS', 'Device.FAP.GPS.LockedAltitude', 'LOCKED_ALTITUDE', '{"zh-CN":"LOCKED_ALTITUDE","en-US":"Locked Altitude"}'::jsonb, true, true, 10002, 'RW'),
+    ('LST FAP_GPS', 'Device.FAP.GPS.SyncSource', 'SYNC_SOURCE', '{"zh-CN":"SYNC_SOURCE","en-US":"Sync Source"}'::jsonb, true, true, 10003, 'RW'),
+    ('LST MR_MGMT_CONFIG', 'Device.FAP.MRMgmt.Config.{i}.MrGnssReportEnable', 'MR_GNSS_REPORT_ENABLE', '{"zh-CN":"MR_GNSS_REPORT_ENABLE","en-US":"Mr Gnss Report Enable"}'::jsonb, true, true, 10001, 'RW'),
+    ('MOD MR_MGMT_CONFIG', 'Device.FAP.MRMgmt.Config.{i}.MrGnssReportEnable', 'MR_GNSS_REPORT_ENABLE', '{"zh-CN":"MR_GNSS_REPORT_ENABLE","en-US":"Mr Gnss Report Enable"}'::jsonb, true, true, 10001, 'RW'),
+    ('LST MR_MGMT_CONFIG', 'Device.FAP.MRMgmt.Config.{i}.PeriodicReportInterval', 'PERIODIC_REPORT_INTERVAL', '{"zh-CN":"PERIODIC_REPORT_INTERVAL","en-US":"Periodic Report Interval"}'::jsonb, true, true, 10002, 'RW'),
+    ('MOD MR_MGMT_CONFIG', 'Device.FAP.MRMgmt.Config.{i}.PeriodicReportInterval', 'PERIODIC_REPORT_INTERVAL', '{"zh-CN":"PERIODIC_REPORT_INTERVAL","en-US":"Periodic Report Interval"}'::jsonb, true, true, 10002, 'RW'),
+    ('LST MR_MGMT_CONFIG', 'Device.FAP.MRMgmt.Config.{i}.Vendor', 'VENDOR', '{"zh-CN":"VENDOR","en-US":"Vendor"}'::jsonb, true, true, 10003, 'RW'),
+    ('MOD MR_MGMT_CONFIG', 'Device.FAP.MRMgmt.Config.{i}.Vendor', 'VENDOR', '{"zh-CN":"VENDOR","en-US":"Vendor"}'::jsonb, true, true, 10003, 'RW');
+
+DO $$
+DECLARE
+    v_binding_count integer;
+    v_path_count integer;
+    v_missing_commands text;
+    v_missing_paths text;
+BEGIN
+    SELECT COUNT(*) INTO v_binding_count FROM tmp_mml_direct_standard_sub_fields;
+    IF v_binding_count <> 659 THEN
+        RAISE EXCEPTION 'expected 659 command/path bindings, got %', v_binding_count;
+    END IF;
+
+    SELECT COUNT(DISTINCT standard_path) INTO v_path_count FROM tmp_mml_direct_standard_sub_fields;
+    IF v_path_count <> 350 THEN
+        RAISE EXCEPTION 'expected 350 distinct standard paths, got %', v_path_count;
+    END IF;
+
+    SELECT string_agg(t.command_code, ', ' ORDER BY t.command_code)
+      INTO v_missing_commands
+    FROM (
+        SELECT DISTINCT i.command_code
+        FROM tmp_mml_direct_standard_sub_fields i
+        LEFT JOIN public.mml_commands c
+          ON c.command_code = i.command_code
+         AND c.deprecated_at IS NULL
+        WHERE c.id IS NULL
+    ) t;
+    IF v_missing_commands IS NOT NULL THEN
+        RAISE EXCEPTION 'missing mml_commands for command_code: %', v_missing_commands;
+    END IF;
+
+    SELECT string_agg(t.standard_path, ', ' ORDER BY t.standard_path)
+      INTO v_missing_paths
+    FROM (
+        SELECT DISTINCT i.standard_path
+        FROM tmp_mml_direct_standard_sub_fields i
+        LEFT JOIN public.standard_params sp
+          ON sp.standard_path = i.standard_path
+         AND sp.entry_type = 'parameter'
+        WHERE sp.id IS NULL
+    ) t;
+    IF v_missing_paths IS NOT NULL THEN
+        RAISE EXCEPTION 'missing standard_params parameter path: %', v_missing_paths;
+    END IF;
+END $$;
+
+DO $$
+DECLARE
+    v_dup_final_code integer;
+    v_existing_code_conflict text;
+BEGIN
+    WITH resolved AS (
+        SELECT
+            i.*,
+            c.id AS command_id,
+            sp.id AS standard_path_id
+        FROM tmp_mml_direct_standard_sub_fields i
+        JOIN public.mml_commands c
+          ON c.command_code = i.command_code
+         AND c.deprecated_at IS NULL
+        JOIN public.standard_params sp
+          ON sp.standard_path = i.standard_path
+         AND sp.entry_type = 'parameter'
+    ), normalized AS (
+        SELECT
+            r.*,
+            COALESCE(NULLIF(LEFT(r.base_mml_code, 100), ''), 'PATH_' || substr(md5(r.standard_path), 1, 8)) AS base_code
+        FROM resolved r
+    ), prepared AS (
+        SELECT
+            n.*,
+            CASE
+                WHEN COUNT(*) OVER (PARTITION BY n.command_id, n.base_code) > 1
+                  OR EXISTS (
+                      SELECT 1
+                      FROM public.mml_command_sub_fields e
+                      WHERE e.command_id = n.command_id
+                        AND e.mml_code = n.base_code
+                        AND e.standard_path_id <> n.standard_path_id
+                  )
+                THEN LEFT(n.base_code, 91) || '_' || substr(md5(n.standard_path), 1, 8)
+                ELSE n.base_code
+            END AS final_mml_code
+        FROM normalized n
+    )
+    SELECT COUNT(*) - COUNT(DISTINCT (command_id, final_mml_code))
+      INTO v_dup_final_code
+    FROM prepared;
+
+    IF v_dup_final_code <> 0 THEN
+        RAISE EXCEPTION 'generated duplicate final mml_code count: %', v_dup_final_code;
+    END IF;
+
+    WITH resolved AS (
+        SELECT
+            i.*,
+            c.id AS command_id,
+            sp.id AS standard_path_id
+        FROM tmp_mml_direct_standard_sub_fields i
+        JOIN public.mml_commands c
+          ON c.command_code = i.command_code
+         AND c.deprecated_at IS NULL
+        JOIN public.standard_params sp
+          ON sp.standard_path = i.standard_path
+         AND sp.entry_type = 'parameter'
+    ), normalized AS (
+        SELECT
+            r.*,
+            COALESCE(NULLIF(LEFT(r.base_mml_code, 100), ''), 'PATH_' || substr(md5(r.standard_path), 1, 8)) AS base_code
+        FROM resolved r
+    ), prepared AS (
+        SELECT
+            n.*,
+            CASE
+                WHEN COUNT(*) OVER (PARTITION BY n.command_id, n.base_code) > 1
+                  OR EXISTS (
+                      SELECT 1
+                      FROM public.mml_command_sub_fields e
+                      WHERE e.command_id = n.command_id
+                        AND e.mml_code = n.base_code
+                        AND e.standard_path_id <> n.standard_path_id
+                  )
+                THEN LEFT(n.base_code, 91) || '_' || substr(md5(n.standard_path), 1, 8)
+                ELSE n.base_code
+            END AS final_mml_code
+        FROM normalized n
+    )
+    SELECT string_agg(p.command_code || ' / ' || p.standard_path || ' -> ' || p.final_mml_code, E'
+' ORDER BY p.command_code, p.standard_path)
+      INTO v_existing_code_conflict
+    FROM prepared p
+    JOIN public.mml_command_sub_fields e
+      ON e.command_id = p.command_id
+     AND e.mml_code = p.final_mml_code
+     AND e.standard_path_id <> p.standard_path_id;
+
+    IF v_existing_code_conflict IS NOT NULL THEN
+        RAISE EXCEPTION 'final mml_code conflicts with existing rows:%', E'
+' || v_existing_code_conflict;
+    END IF;
+END $$;
+
+WITH resolved AS (
+    SELECT
+        i.*,
+        c.id AS command_id,
+        sp.id AS standard_path_id
+    FROM tmp_mml_direct_standard_sub_fields i
+    JOIN public.mml_commands c
+      ON c.command_code = i.command_code
+     AND c.deprecated_at IS NULL
+    JOIN public.standard_params sp
+      ON sp.standard_path = i.standard_path
+     AND sp.entry_type = 'parameter'
+), normalized AS (
+    SELECT
+        r.*,
+        COALESCE(NULLIF(LEFT(r.base_mml_code, 100), ''), 'PATH_' || substr(md5(r.standard_path), 1, 8)) AS base_code
+    FROM resolved r
+), prepared AS (
+    SELECT
+        n.*,
+        CASE
+            WHEN COUNT(*) OVER (PARTITION BY n.command_id, n.base_code) > 1
+              OR EXISTS (
+                  SELECT 1
+                  FROM public.mml_command_sub_fields e
+                  WHERE e.command_id = n.command_id
+                    AND e.mml_code = n.base_code
+                    AND e.standard_path_id <> n.standard_path_id
+              )
+            THEN LEFT(n.base_code, 91) || '_' || substr(md5(n.standard_path), 1, 8)
+            ELSE n.base_code
+        END AS final_mml_code
+    FROM normalized n
+)
+INSERT INTO public.mml_command_sub_fields (
+    id, command_id, standard_path_id, mml_code, label_i18n,
+    default_selected, is_required, sort_order, access_type, is_supported
+)
+SELECT
+    gen_random_uuid(),
+    p.command_id,
+    p.standard_path_id,
+    p.final_mml_code,
+    p.label_i18n,
+    p.default_selected,
+    p.is_required,
+    p.sort_order,
+    p.access_type,
+    true
+FROM prepared p
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code         = EXCLUDED.mml_code,
+    label_i18n       = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required      = EXCLUDED.is_required,
+    sort_order       = EXCLUDED.sort_order,
+    access_type      = EXCLUDED.access_type,
+    is_supported     = true,
+    deprecated_at    = NULL,
+    updated_at       = NOW();
+
+COMMIT;
