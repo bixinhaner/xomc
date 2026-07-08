@@ -14,9 +14,28 @@ beforeEach(() => {
 });
 
 describe('agentApi', () => {
+  it('reads visibility config from the authenticated API', async () => {
+    getMock.mockResolvedValue({
+      data: {
+        visible: true,
+        enabled: false,
+        status: 'not_configured',
+        lastValidatedAt: '',
+        lastError: '',
+      },
+    });
+
+    const result = await agentApi.getVisibilityConfig();
+
+    expect(getMock).toHaveBeenCalledWith('/agent/visibility');
+    expect(result.visible).toBe(true);
+    expect(result.enabled).toBe(false);
+  });
+
   it('reads runtime config from the authenticated API', async () => {
     getMock.mockResolvedValue({
       data: {
+        visible: true,
         enabled: true,
         endpoint: '/api/v1/agent/chat/stream',
         connectorId: 'c1',

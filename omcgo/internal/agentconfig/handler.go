@@ -28,6 +28,7 @@ func (h *Handler) RegisterPublicRoutes(rg *gin.RouterGroup) {
 }
 
 func (h *Handler) RegisterRuntimeRoutes(rg *gin.RouterGroup) {
+	rg.GET("/agent/visibility", h.GetVisibilityConfig)
 	rg.GET("/agent/config", h.GetRuntimeConfig)
 }
 
@@ -56,6 +57,15 @@ func (h *Handler) GetAdminConfig(c *gin.Context) {
 
 func (h *Handler) GetRuntimeConfig(c *gin.Context) {
 	cfg, err := h.service.GetRuntimeConfig(c.Request.Context())
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	response.OK(c, cfg)
+}
+
+func (h *Handler) GetVisibilityConfig(c *gin.Context) {
+	cfg, err := h.service.GetVisibilityConfig(c.Request.Context())
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
@@ -108,8 +118,9 @@ func (h *Handler) bindUpdate(c *gin.Context) (UpdateRequest, bool) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return UpdateRequest{}, false
 	}
-	if strings.TrimSpace(req.OMCPublicBaseURL) == "" {
-		req.OMCPublicBaseURL = inferPublicBaseURL(c)
+	if req.OMCPublicBaseURL != nil && strings.TrimSpace(*req.OMCPublicBaseURL) == "" {
+		inferred := inferPublicBaseURL(c)
+		req.OMCPublicBaseURL = &inferred
 	}
 	return req, true
 }

@@ -9,11 +9,12 @@ import { useT } from '@/hooks/useT'
 const DYNAMIC_MENU = import.meta.env.VITE_DYNAMIC_MENU === 'true'
 
 interface CockpitDockProps {
+  agentVisible?: boolean
   agentOpen?: boolean
   onAgentToggle?: () => void
 }
 
-export function CockpitDock({ agentOpen = false, onAgentToggle }: CockpitDockProps) {
+export function CockpitDock({ agentVisible = false, agentOpen = false, onAgentToggle }: CockpitDockProps) {
   const t = useT()
   // 数据驱动：每个模块取首个路由作为停靠入口；按菜单可见性过滤（对齐 v1 菜单驱动侧栏）。
   const moduleVisible = useModuleVisibility(DYNAMIC_MENU)
@@ -43,25 +44,27 @@ export function CockpitDock({ agentOpen = false, onAgentToggle }: CockpitDockPro
                 )}
               </NavLink>
             ))}
-            <button
-              type="button"
-              className="relative"
-              onClick={onAgentToggle}
-              aria-pressed={agentOpen}
-              aria-label={t('agent.open')}
-              title={t('agent.open')}
-            >
-              <div
-                className={cn('dock-cell', agentOpen && 'active')}
-                style={{ transform: `translateY(${arcOffset(items.length, items.length + 1)}px)` }}
+            {agentVisible && (
+              <button
+                type="button"
+                className="relative"
+                onClick={onAgentToggle}
+                aria-pressed={agentOpen}
+                aria-label={t('agent.open')}
+                title={t('agent.open')}
               >
-                <span className="hex-bg hex" />
-                <span className="icon-wrap">
-                  <Bot className="size-5" />
-                </span>
-                <span className="label">{t('agent.short')}</span>
-              </div>
-            </button>
+                <div
+                  className={cn('dock-cell', agentOpen && 'active')}
+                  style={{ transform: `translateY(${arcOffset(items.length, items.length + 1)}px)` }}
+                >
+                  <span className="hex-bg hex" />
+                  <span className="icon-wrap">
+                    <Bot className="size-5" />
+                  </span>
+                  <span className="label">{t('agent.short')}</span>
+                </div>
+              </button>
+            )}
           </div>
         </div>
       </div>

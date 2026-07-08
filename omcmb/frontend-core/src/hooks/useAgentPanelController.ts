@@ -19,6 +19,7 @@ import { useAgentRuntimeClient } from './useAgentRuntimeClient';
 
 export interface UseAgentPanelControllerOptions {
   context: AgentPageContext;
+  active?: boolean;
 }
 
 export interface UseAgentPanelControllerResult {
@@ -115,7 +116,9 @@ export function useAgentPanelController(
   const locale = useAppStore((s) => s.locale);
   const systemTimezone = useAppStore((s) => s.systemTimezone);
   const currentUserId = useUserStore((s) => s.currentUser?.id);
-  const { enabled, client, config } = useAgentRuntimeClient();
+  const { enabled, client, config } = useAgentRuntimeClient(undefined, {
+    queryEnabled: options.active ?? true,
+  });
   const [messages, setMessages] = useState<AgentPanelMessage[]>([]);
   const [activities, setActivities] = useState<AgentPanelActivity[]>([]);
   const [pendingAction, setPendingAction] = useState<AgentPendingAction | null>(null);

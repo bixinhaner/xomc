@@ -23,6 +23,7 @@ import UserDropdown from './UserDropdown';
 import styles from './Header.module.css';
 
 interface HeaderProps {
+  agentVisible?: boolean;
   agentOpen?: boolean;
   onAgentToggle?: () => void;
 }
@@ -35,7 +36,7 @@ const DEVICE_TYPE_KEY: Record<string, string> = {
   eGW: 'device.type.eGW',
 };
 
-export default function Header({ agentOpen = false, onAgentToggle }: HeaderProps) {
+export default function Header({ agentVisible = false, agentOpen = false, onAgentToggle }: HeaderProps) {
   const deviceType = useAppStore((s) => s.deviceType);
   const theme = useAppStore((s) => s.theme);
   const toggleTheme = useAppStore((s) => s.toggleTheme);
@@ -151,16 +152,18 @@ export default function Header({ agentOpen = false, onAgentToggle }: HeaderProps
           {theme === 'tech' ? <SunOutlined style={{ fontSize: 16 }} /> : <MoonOutlined style={{ fontSize: 16 }} />}
         </button>
 
-        <button
-          className={`${styles.headerAction} ${agentOpen ? styles.headerActionActive : ''}`}
-          onClick={onAgentToggle}
-          title={t('agent.open')}
-          type="button"
-          aria-pressed={agentOpen}
-          aria-label={t('agent.open')}
-        >
-          <RobotOutlined style={{ fontSize: 16 }} />
-        </button>
+        {agentVisible && (
+          <button
+            className={`${styles.headerAction} ${agentOpen ? styles.headerActionActive : ''}`}
+            onClick={onAgentToggle}
+            title={t('agent.open')}
+            type="button"
+            aria-pressed={agentOpen}
+            aria-label={t('agent.open')}
+          >
+            <RobotOutlined style={{ fontSize: 16 }} />
+          </button>
+        )}
 
         <div className={styles.divider} />
 

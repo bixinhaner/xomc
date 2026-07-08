@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Activity, Bot, Clock, LogOut, ShieldAlert } from 'lucide-react'
 
@@ -8,6 +8,7 @@ import { useUserStore } from '@core/store/userStore'
 import { useAppStore } from '@core/store/appStore'
 import { usePublicOmcName, resolveOmcName } from '@core/hooks/api/useOmcName'
 import { useSystemTimezone } from '@core/hooks/api/useSystemTimezone'
+import { useAgentVisibilityConfig } from '@core/hooks/api/useAgentConfig'
 import { useSystemClock } from '@core/hooks/useSystemClock'
 import { useRouteAccessGuard, useModuleVisibility } from '@core/hooks/useRouteGuard'
 import { MODULES, SECTIONS } from '@/router/navConfig'
@@ -56,6 +57,8 @@ export function AppShell() {
   const location = useLocation()
   const t = useT()
   const [agentOpen, setAgentOpen] = useState(false)
+  const agentVisibility = useAgentVisibilityConfig()
+  const agentVisible = agentVisibility.data?.visible === true
   const user = useUserStore((s) => s.currentUser)
   const clearAuth = useUserStore((s) => s.clearAuth)
   // 路由门禁（admin 恒放行）：拉用户菜单 + 判定当前路由可访问性
@@ -77,6 +80,12 @@ export function AppShell() {
 
   // 系统时区（#459 子单 D）：登录后拉取写入 appStore，供顶部时钟 + 时间筛选/显示。
   useSystemTimezone()
+
+  useEffect(() => {
+    if (!agentVisible && agentOpen) {
+      setAgentOpen(false)
+    }
+  }, [agentVisible, agentOpen])
 
   const linkClass = ({ isActive }: { isActive: boolean }) =>
     cn(
@@ -153,16 +162,18 @@ export function AppShell() {
       <div className="flex flex-1 flex-col">
         <header className="sticky top-0 z-10 flex h-14 items-center justify-end gap-3 border-b border-border/60 bg-card/40 px-6 backdrop-blur">
           <SystemClockBadge />
-          <Button
-            size="sm"
-            variant={agentOpen ? 'default' : 'outline'}
-            onClick={() => setAgentOpen((open) => !open)}
-            aria-pressed={agentOpen}
-            aria-label={t('agent.open')}
-            title={t('agent.open')}
-          >
-            <Bot className="size-4" />
-          </Button>
+          {agentVisible && (
+            <Button
+              size="sm"
+              variant={agentOpen ? 'default' : 'outline'}
+              onClick={() => setAgentOpen((open) => !open)}
+              aria-pressed={agentOpen}
+              aria-label={t('agent.open')}
+              title={t('agent.open')}
+            >
+              <Bot className="size-4" />
+            </Button>
+          )}
           <span className="text-sm text-muted-foreground">{userLabel}</span>
           <Button size="sm" variant="ghost" onClick={onLogout}>
             <LogOut /> 退出
@@ -173,7 +184,7 @@ export function AppShell() {
           {allowed ? <Outlet /> : <Forbidden />}
         </main>
       </div>
-      <AgentPanel open={agentOpen} onClose={() => setAgentOpen(false)} />
+      {agentVisible && agentOpen && <AgentPanel open={agentOpen} onClose={() => setAgentOpen(false)} />}
     </div>
   )
 }

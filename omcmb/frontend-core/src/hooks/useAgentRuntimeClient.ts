@@ -13,8 +13,17 @@ export interface UseAgentRuntimeClientResult {
   client: AgentRuntimeClient | null;
 }
 
-export function useAgentRuntimeClient(configOverride?: AgentRuntimeConfig): UseAgentRuntimeClientResult {
-  const runtimeConfigQuery = useAgentRuntimeConfig(configOverride === undefined);
+export interface UseAgentRuntimeClientOptions {
+  queryEnabled?: boolean;
+}
+
+export function useAgentRuntimeClient(
+  configOverride?: AgentRuntimeConfig,
+  options: UseAgentRuntimeClientOptions = {}
+): UseAgentRuntimeClientResult {
+  const runtimeConfigQuery = useAgentRuntimeConfig(
+    configOverride === undefined && (options.queryEnabled ?? true)
+  );
   const serverConfig = runtimeConfigQuery.isSuccess && runtimeConfigQuery.data
     ? {
         enabled: runtimeConfigQuery.data.enabled && Boolean(runtimeConfigQuery.data.endpoint),

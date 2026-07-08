@@ -52,6 +52,7 @@ type AdminConfig struct {
 }
 
 type RuntimeConfig struct {
+	Visible          bool   `json:"visible"`
 	Enabled          bool   `json:"enabled"`
 	Endpoint         string `json:"endpoint"`
 	ConnectorID      string `json:"connectorId"`
@@ -59,6 +60,14 @@ type RuntimeConfig struct {
 	LastValidatedAt  string `json:"lastValidatedAt"`
 	LastError        string `json:"lastError"`
 	ConfiguredSource string `json:"configuredSource"`
+}
+
+type VisibilityConfig struct {
+	Visible         bool   `json:"visible"`
+	Enabled         bool   `json:"enabled"`
+	Status          string `json:"status"`
+	LastValidatedAt string `json:"lastValidatedAt"`
+	LastError       string `json:"lastError"`
 }
 
 type RuntimeTarget struct {
@@ -70,11 +79,11 @@ type RuntimeTarget struct {
 }
 
 type UpdateRequest struct {
-	Enabled                 *bool  `json:"enabled"`
-	AgentStudioBaseURL      string `json:"agentStudioBaseUrl"`
-	AgentStudioServiceToken string `json:"agentStudioServiceToken"`
-	OMCPublicBaseURL        string `json:"omcPublicBaseUrl"`
-	ConnectorSlug           string `json:"connectorSlug"`
+	Enabled                 *bool   `json:"enabled"`
+	AgentStudioBaseURL      *string `json:"agentStudioBaseUrl"`
+	AgentStudioServiceToken *string `json:"agentStudioServiceToken"`
+	OMCPublicBaseURL        *string `json:"omcPublicBaseUrl"`
+	ConnectorSlug           *string `json:"connectorSlug"`
 }
 
 type ProvisionResult struct {

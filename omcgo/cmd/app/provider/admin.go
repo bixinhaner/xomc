@@ -170,7 +170,8 @@ func initAdminModule(c *Container) error {
 	sysConfigRepo := admin.NewPgSysConfigRepository(c.PgPool)
 	sysConfigService := admin.NewSysConfigService(sysConfigRepo)
 	sysConfigHandler := admin.NewSysConfigHandler(sysConfigService)
-	agentConfigService := agentconfig.NewService(sysConfigRepo, sysConfigService, http.DefaultClient, logger)
+	agentConfigHTTPClient := &http.Client{Timeout: 10 * time.Second}
+	agentConfigService := agentconfig.NewService(sysConfigRepo, sysConfigService, agentConfigHTTPClient, logger)
 	agentConfigHandler := agentconfig.NewHandler(agentConfigService)
 
 	// 系统时区统一入口（issue #456，子单 A）+ 响应出口时区转换接通（issue #457，子单 B）。

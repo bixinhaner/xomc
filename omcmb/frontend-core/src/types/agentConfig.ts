@@ -26,6 +26,7 @@ export interface AgentAdminConfig {
 }
 
 export interface AgentRuntimeServerConfig {
+  visible: boolean;
   enabled: boolean;
   endpoint: string;
   connectorId: string;
@@ -35,11 +36,19 @@ export interface AgentRuntimeServerConfig {
   configuredSource: 'server' | string;
 }
 
-export interface AgentAdminConfigUpdate {
+export interface AgentVisibilityConfig {
+  visible: boolean;
   enabled: boolean;
-  agentStudioBaseUrl: string;
+  status: AgentConfigStatus;
+  lastValidatedAt: string;
+  lastError: string;
+}
+
+export interface AgentAdminConfigUpdate {
+  enabled?: boolean;
+  agentStudioBaseUrl?: string;
   agentStudioServiceToken?: string;
-  omcPublicBaseUrl: string;
+  omcPublicBaseUrl?: string;
   connectorSlug?: string;
 }
 

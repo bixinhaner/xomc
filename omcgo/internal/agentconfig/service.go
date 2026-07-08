@@ -70,6 +70,7 @@ func (s *Service) GetRuntimeConfig(ctx context.Context) (*RuntimeConfig, error) 
 	}
 	enabled := cfg.Enabled && cfg.Status == StatusConnected && cfg.ConnectorID != "" && cfg.AgentStudioBaseURL != ""
 	return &RuntimeConfig{
+		Visible:          cfg.Enabled,
 		Enabled:          enabled,
 		Endpoint:         DefaultRuntimeStreamPath,
 		ConnectorID:      cfg.ConnectorID,
@@ -77,6 +78,21 @@ func (s *Service) GetRuntimeConfig(ctx context.Context) (*RuntimeConfig, error) 
 		LastValidatedAt:  cfg.LastValidatedAt,
 		LastError:        cfg.LastError,
 		ConfiguredSource: "server",
+	}, nil
+}
+
+func (s *Service) GetVisibilityConfig(ctx context.Context) (*VisibilityConfig, error) {
+	cfg, err := s.GetAdminConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	enabled := cfg.Enabled && cfg.Status == StatusConnected && cfg.ConnectorID != "" && cfg.AgentStudioBaseURL != ""
+	return &VisibilityConfig{
+		Visible:         cfg.Enabled,
+		Enabled:         enabled,
+		Status:          cfg.Status,
+		LastValidatedAt: cfg.LastValidatedAt,
+		LastError:       cfg.LastError,
 	}, nil
 }
 
@@ -204,29 +220,35 @@ func (s *Service) mergeSettings(ctx context.Context, req UpdateRequest) (map[str
 	if req.Enabled != nil {
 		settings.Enabled = *req.Enabled
 	}
-	if strings.TrimSpace(req.AgentStudioBaseURL) != "" {
-		base, err := normalizeHTTPURL(req.AgentStudioBaseURL)
-		if err != nil {
-			return nil, mergedSettings{}, fmt.Errorf("%w: invalid agentStudioBaseUrl: %v", commonerrors.ErrInvalidInput, err)
+	if req.AgentStudioBaseURL != nil {
+		raw := strings.TrimSpace(*req.AgentStudioBaseURL)
+		if raw != "" {
+			base, err := normalizeHTTPURL(raw)
+			if err != nil {
+				return nil, mergedSettings{}, fmt.Errorf("%w: invalid agentStudioBaseUrl: %v", commonerrors.ErrInvalidInput, err)
+			}
+			settings.AgentStudioBaseURL = base
+		} else {
+			settings.AgentStudioBaseURL = ""
 		}
-		settings.AgentStudioBaseURL = base
-	} else if req.AgentStudioBaseURL == "" {
-		settings.AgentStudioBaseURL = ""
 	}
-	if strings.TrimSpace(req.AgentStudioServiceToken) != "" {
-		settings.AgentStudioServiceToken = strings.TrimSpace(req.AgentStudioServiceToken)
+	if req.AgentStudioServiceToken != nil && strings.TrimSpace(*req.AgentStudioServiceToken) != "" {
+		settings.AgentStudioServiceToken = strings.TrimSpace(*req.AgentStudioServiceToken)
 	}
-	if strings.TrimSpace(req.OMCPublicBaseURL) != "" {
-		base, err := normalizeHTTPURL(req.OMCPublicBaseURL)
-		if err != nil {
-			return nil, mergedSettings{}, fmt.Errorf("%w: invalid omcPublicBaseUrl: %v", commonerrors.ErrInvalidInput, err)
+	if req.OMCPublicBaseURL != nil {
+		raw := strings.TrimSpace(*req.OMCPublicBaseURL)
+		if raw != "" {
+			base, err := normalizeHTTPURL(raw)
+			if err != nil {
+				return nil, mergedSettings{}, fmt.Errorf("%w: invalid omcPublicBaseUrl: %v", commonerrors.ErrInvalidInput, err)
+			}
+			settings.OMCPublicBaseURL = base
+		} else {
+			settings.OMCPublicBaseURL = ""
 		}
-		settings.OMCPublicBaseURL = base
-	} else if req.OMCPublicBaseURL == "" {
-		settings.OMCPublicBaseURL = ""
 	}
-	if strings.TrimSpace(req.ConnectorSlug) != "" {
-		settings.ConnectorSlug = strings.TrimSpace(req.ConnectorSlug)
+	if req.ConnectorSlug != nil {
+		settings.ConnectorSlug = strings.TrimSpace(*req.ConnectorSlug)
 	}
 	if settings.ConnectorSlug == "" {
 		settings.ConnectorSlug = defaultConnectorSlug(settings.OMCPublicBaseURL)

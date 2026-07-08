@@ -123,6 +123,16 @@ docker compose -f deployments/docker/docker-compose.yml up -d --build app
 
 > **注意**：`restart` 只是停止并重启已有容器，不会重新编译代码。修改了 Go 源码或前端代码后，必须使用 `up -d --build` 才能生效。
 
+### 4.6 本地 bridge 网络覆盖
+
+默认 `web` 服务使用 host network，以保留设备/浏览器真实来源地址。本机开发如果需要 `web` 容器通过 Compose 服务名访问 `app`、`acs`，叠加本地覆盖文件：
+
+```bash
+docker compose -f deployments/docker/docker-compose.yml -f deployments/docker/docker-compose.local.yml up -d --build web
+```
+
+该覆盖会使用 `default.local.conf`，把 Nginx 上游切到 `app:8081` 和 `acs:7557`，不改变默认部署拓扑。
+
 ---
 
 ## 5. 环境变量

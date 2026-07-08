@@ -1,0 +1,15 @@
+# 本地开发覆盖：让 web 加入 Compose 默认 bridge 网络，使用服务名访问 app/acs。
+#
+# 默认 docker-compose.yml 保持 host network，用于保留真实客户端 IP 的既有部署形态。
+# 本文件只用于本机开发/验证：
+#   docker compose -f deployments/docker/docker-compose.yml -f deployments/docker/docker-compose.local.yml up -d --build web
+
+services:
+  web:
+    network_mode: !reset null
+    build:
+      args:
+        NGINX_DEFAULT_CONF: deployments/docker/default.local.conf
+    ports:
+      - "8081:8081"
+      - "8080:8080"

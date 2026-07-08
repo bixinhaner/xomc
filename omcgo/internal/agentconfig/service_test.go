@@ -66,6 +66,10 @@ func jsonResponse(status int, body string) *http.Response {
 	}
 }
 
+func stringPtr(value string) *string {
+	return &value
+}
+
 func TestAdminConfigMasksServiceToken(t *testing.T) {
 	store := newFakeConfigStore(map[string]string{
 		KeyEnabled:                 "true",
@@ -90,14 +94,56 @@ func TestSaveKeepsExistingServiceTokenWhenOmitted(t *testing.T) {
 	enabled := true
 	_, err := svc.Save(context.Background(), UpdateRequest{
 		Enabled:            &enabled,
-		AgentStudioBaseURL: "https://agent.example.com/",
-		OMCPublicBaseURL:   "https://ops.example.com/",
+		AgentStudioBaseURL: stringPtr("https://agent.example.com/"),
+		OMCPublicBaseURL:   stringPtr("https://ops.example.com/"),
 	})
 
 	require.NoError(t, err)
 	require.Equal(t, "old-token", store.values[KeyAgentStudioServiceToken])
 	require.Equal(t, "https://agent.example.com", store.values[KeyAgentStudioBaseURL])
 	require.Equal(t, "https://ops.example.com", store.values[KeyOMCPublicBaseURL])
+}
+
+func TestSavePatchDoesNotClearExistingValuesWhenFieldsAreOmitted(t *testing.T) {
+	store := newFakeConfigStore(map[string]string{
+		KeyEnabled:                 "true",
+		KeyAgentStudioBaseURL:      "https://agent.example.com",
+		KeyAgentStudioServiceToken: "old-token",
+		KeyOMCPublicBaseURL:        "https://ops.example.com",
+		KeyConnectorSlug:           "ops",
+	})
+	svc := NewService(store, store, nil, nil)
+
+	enabled := false
+	cfg, err := svc.Save(context.Background(), UpdateRequest{
+		Enabled: &enabled,
+	})
+
+	require.NoError(t, err)
+	require.False(t, cfg.Enabled)
+	require.Equal(t, "https://agent.example.com", store.values[KeyAgentStudioBaseURL])
+	require.Equal(t, "old-token", store.values[KeyAgentStudioServiceToken])
+	require.Equal(t, "https://ops.example.com", store.values[KeyOMCPublicBaseURL])
+	require.Equal(t, "ops", store.values[KeyConnectorSlug])
+}
+
+func TestRuntimeVisibilitySeparatesSwitchFromConnectedRuntime(t *testing.T) {
+	store := newFakeConfigStore(map[string]string{
+		KeyEnabled:            "true",
+		KeyAgentStudioBaseURL: "https://agent.example.com",
+		KeyStatus:             StatusNotConfigured,
+	})
+	svc := NewService(store, store, nil, nil)
+
+	visibility, err := svc.GetVisibilityConfig(context.Background())
+	require.NoError(t, err)
+	require.True(t, visibility.Visible)
+	require.False(t, visibility.Enabled)
+
+	runtime, err := svc.GetRuntimeConfig(context.Background())
+	require.NoError(t, err)
+	require.True(t, runtime.Visible)
+	require.False(t, runtime.Enabled)
 }
 
 func TestSyncProvisionsConnectorAndPersistsRuntimeConfig(t *testing.T) {
@@ -124,8 +170,8 @@ func TestSyncProvisionsConnectorAndPersistsRuntimeConfig(t *testing.T) {
 	enabled := true
 	cfg, err := svc.Sync(context.Background(), UpdateRequest{
 		Enabled:            &enabled,
-		AgentStudioBaseURL: "https://agent.example.com/",
-		OMCPublicBaseURL:   "https://ops.example.com/",
+		AgentStudioBaseURL: stringPtr("https://agent.example.com/"),
+		OMCPublicBaseURL:   stringPtr("https://ops.example.com/"),
 	})
 
 	require.NoError(t, err)
@@ -154,8 +200,8 @@ func TestSyncFailurePersistsErrorWithoutClearingExistingConnector(t *testing.T) 
 	enabled := true
 	_, err := svc.Sync(context.Background(), UpdateRequest{
 		Enabled:            &enabled,
-		AgentStudioBaseURL: "https://agent.example.com/",
-		OMCPublicBaseURL:   "https://ops.example.com/",
+		AgentStudioBaseURL: stringPtr("https://agent.example.com/"),
+		OMCPublicBaseURL:   stringPtr("https://ops.example.com/"),
 	})
 
 	require.Error(t, err)

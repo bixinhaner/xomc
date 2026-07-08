@@ -5,6 +5,7 @@ import { useTabStore } from '@core/store/tabStore';
 import { useSecuritySettings } from '@core/hooks/api/useSecuritySettings';
 import { useSystemTimezone } from '@core/hooks/api/useSystemTimezone';
 import { useIdleLogout } from '@core/hooks/useIdleLogout';
+import { useAgentVisibilityConfig } from '@core/hooks/api/useAgentConfig';
 import { SIDEBAR_WIDTH, SIDEBAR_COLLAPSED_WIDTH } from '@/theme/tokens';
 import { useResponsive } from '@/hooks/useResponsive';
 import { useIsTouchDevice } from '@/hooks/useIsTouchDevice';
@@ -27,6 +28,8 @@ export default function AppShell() {
   const setMobileOverlayOpen = useAppStore((s) => s.setMobileOverlayOpen);
   const locale = useAppStore((s) => s.locale);
   const [agentOpen, setAgentOpen] = useState(false);
+  const agentVisibility = useAgentVisibilityConfig();
+  const agentVisible = agentVisibility.data?.visible === true;
 
   const { isMobile, isTablet } = useResponsive();
   const { isTouchPrimary } = useIsTouchDevice();
@@ -53,6 +56,12 @@ export default function AppShell() {
   // 系统时区（#459 子单 D）：登录后拉取 sys_configs basic/timezoneCode 写入 appStore，
   // 供顶部只读时钟、时间筛选输入按系统时区构造、epoch/Date 时间显示落系统钟面。
   useSystemTimezone();
+
+  useEffect(() => {
+    if (!agentVisible && agentOpen) {
+      setAgentOpen(false);
+    }
+  }, [agentVisible, agentOpen]);
 
   // 隐藏任务面板
   const hideTaskPanel = true;
@@ -101,8 +110,11 @@ export default function AppShell() {
         <QuickSettingsSyncWatcher />
         <div className={styles.header}>
           <Header
+            agentVisible={agentVisible}
             agentOpen={agentOpen}
-            onAgentToggle={() => setAgentOpen((open) => !open)}
+            onAgentToggle={() => {
+              if (agentVisible) setAgentOpen((open) => !open);
+            }}
           />
         </div>
         <div className={styles.sidebar}>
@@ -132,7 +144,9 @@ export default function AppShell() {
             <TaskPanel />
           </div>
         )}
-        <AgentPanel open={agentOpen} onClose={() => setAgentOpen(false)} />
+        {agentVisible && agentOpen && (
+          <AgentPanel open={agentOpen} onClose={() => setAgentOpen(false)} />
+        )}
       </div>
 
       {/* Mobile sidebar drawer overlay */}

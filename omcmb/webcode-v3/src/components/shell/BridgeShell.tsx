@@ -8,6 +8,7 @@ import { TelemetryStream } from '@/components/shell/TelemetryStream'
 import { AgentConsole } from '@/components/agent/AgentConsole'
 import { cn } from '@/lib/utils'
 import { MODULES } from '@/router/navConfig'
+import { useAgentVisibilityConfig } from '@core/hooks/api/useAgentConfig'
 import { useRouteAccessGuard } from '@core/hooks/useRouteGuard'
 
 // 动态菜单门禁开关（与 v1/v2 对齐）。admin/超管恒放行，非 admin 按模块级菜单门禁。
@@ -67,8 +68,16 @@ export function BridgeShell() {
   const root = useRef<HTMLDivElement>(null)
   const { pathname } = useLocation()
   const [agentOpen, setAgentOpen] = useState(false)
+  const agentVisibility = useAgentVisibilityConfig()
+  const agentVisible = agentVisibility.data?.visible === true
   // 路由门禁（admin 恒放行）：拉用户菜单 + 判定当前路由可访问性
   const allowed = useRouteAccessGuard(pathname, DYNAMIC_MENU)
+
+  useEffect(() => {
+    if (!agentVisible && agentOpen) {
+      setAgentOpen(false)
+    }
+  }, [agentVisible, agentOpen])
 
   // 鼠标光斑（CSS 变量驱动）
   useEffect(() => {
@@ -141,8 +150,12 @@ export function BridgeShell() {
           </aside>
         </div>
 
-        <AgentConsole open={agentOpen} onClose={() => setAgentOpen(false)} />
-        <CockpitDock agentOpen={agentOpen} onAgentToggle={() => setAgentOpen((open) => !open)} />
+        {agentVisible && agentOpen && <AgentConsole open={agentOpen} onClose={() => setAgentOpen(false)} />}
+        <CockpitDock
+          agentVisible={agentVisible}
+          agentOpen={agentOpen}
+          onAgentToggle={() => setAgentOpen((open) => !open)}
+        />
       </div>
     </div>
   )

@@ -288,7 +288,7 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
     }),
     [location.pathname, location.search]
   )
-  const controller = useAgentPanelController({ context })
+  const controller = useAgentPanelController({ context, active: open })
 
   if (!open) return null
 
