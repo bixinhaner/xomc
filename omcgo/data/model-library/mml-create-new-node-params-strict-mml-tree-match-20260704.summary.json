@@ -1,0 +1,30 @@
+{
+  "generated_at": "2026-07-04",
+  "input_csv": "omcgo/data/model-library/mml-create-new-node-params-rematch-existing-groups-20260704.csv",
+  "input_scope": "previous 950 rows with rematch_decision starting YES_",
+  "input_950_count": 950,
+  "strict_mml_tree_match_yes": 802,
+  "strict_mml_tree_match_no": 148,
+  "decision_counts": {
+    "YES_PARAM_MAPPING_XML_OBJECT": 55,
+    "YES_QUICKSETTINGS_XML_GROUP": 93,
+    "YES_SAME_EXISTING_GROUP_CODE": 36,
+    "YES_EXISTING_JSON_PARENT_GROUP": 766
+  },
+  "strict_level_counts": {
+    "not_mml_tree_param_mapping_object_only": 55,
+    "not_mml_tree_quicksettings_only": 93,
+    "direct_existing_mml_group": 36,
+    "existing_mml_parent_object_group": 766
+  },
+  "output_csv": "omcgo/data/model-library/mml-create-new-node-params-strict-mml-tree-match-20260704.csv",
+  "group_summary_csv": "omcgo/data/model-library/mml-create-new-node-params-strict-mml-tree-match-20260704.group-summary.csv",
+  "strict_yes_decisions": [
+    "YES_EXISTING_JSON_PARENT_GROUP",
+    "YES_SAME_EXISTING_GROUP_CODE"
+  ],
+  "strict_no_decisions": [
+    "YES_QUICKSETTINGS_XML_GROUP",
+    "YES_PARAM_MAPPING_XML_OBJECT"
+  ]
+}
