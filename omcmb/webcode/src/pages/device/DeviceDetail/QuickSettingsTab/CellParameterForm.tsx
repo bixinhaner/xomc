@@ -21,7 +21,10 @@ import {
   applyInstanceContext,
   getEffectiveEnumMeta,
   getFeedbackScopeContext,
+  validateMmeIp,
   validateMmeIpPlmnLimit,
+  validateMmeIpPlmnRows,
+  validatePlmn,
   validateValue,
   type QuickSettingsInstanceContext,
 } from './validators';
@@ -399,12 +402,15 @@ function MmeIpPlmnTable({ value = [], onChange, disabled = false, locale, maxRow
       dataIndex: 'mmeIp',
       key: 'mmeIp',
       render: (_: unknown, row: MmeIpPlmnRow) => (
-        <Input
-          value={row.mmeIp}
-          disabled={disabled}
-          placeholder="127.0.0.1"
-          onChange={(e) => updateCell(row.key, 'mmeIp', e.target.value)}
-        />
+        <Tooltip title={validateMmeIp(row.mmeIp) ?? ''}>
+          <Input
+            value={row.mmeIp}
+            disabled={disabled}
+            status={validateMmeIp(row.mmeIp) ? 'error' : undefined}
+            placeholder="127.0.0.1"
+            onChange={(e) => updateCell(row.key, 'mmeIp', e.target.value)}
+          />
+        </Tooltip>
       ),
     },
     {
@@ -412,12 +418,15 @@ function MmeIpPlmnTable({ value = [], onChange, disabled = false, locale, maxRow
       dataIndex: 'plmn',
       key: 'plmn',
       render: (_: unknown, row: MmeIpPlmnRow) => (
-        <Input
-          value={row.plmn}
-          disabled={disabled}
-          placeholder="46000"
-          onChange={(e) => updateCell(row.key, 'plmn', e.target.value)}
-        />
+        <Tooltip title={validatePlmn(row.plmn) ?? ''}>
+          <Input
+            value={row.plmn}
+            disabled={disabled}
+            status={validatePlmn(row.plmn) ? 'error' : undefined}
+            placeholder="46000"
+            onChange={(e) => updateCell(row.key, 'plmn', e.target.value)}
+          />
+        </Tooltip>
       ),
     },
     {
@@ -978,9 +987,10 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
       if (special?.kind === 'mme-ip-plmn-table') {
         const normalizedRows = normalizeMmeIpPlmnRows(toMmeIpPlmnRows(values[p.name]));
         values[p.name] = normalizedRows;
+        const rowsErr = validateMmeIpPlmnRows(normalizedRows);
         const limitErr = validateMmeIpPlmnLimit(normalizedRows, p.maxValue);
-        if (limitErr) {
-          errors[p.name] = limitErr;
+        if (rowsErr || limitErr) {
+          errors[p.name] = rowsErr ?? limitErr ?? '';
           continue;
         }
       }
@@ -1288,13 +1298,16 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
               const mmeLimitErr = special?.kind === 'mme-ip-plmn-table'
                 ? validateMmeIpPlmnLimit(toMmeIpPlmnRows(value), p.maxValue)
                 : null;
+              const mmeRowsErr = special?.kind === 'mme-ip-plmn-table'
+                ? validateMmeIpPlmnRows(toMmeIpPlmnRows(value))
+                : null;
               // XML 驱动的 extraInfoPath 范围校验:在 schema 校验之后追加;
               // schema 已报错时优先展示 schema 错误,避免双错信息互盖。
               const extraBounds = extraInfoBoundsByName.get(name);
-              const rangeErr = !err && !mmeLimitErr && extraBounds
+              const rangeErr = !err && !mmeRowsErr && !mmeLimitErr && extraBounds
                 ? validateExtraInfoBounds(normalizedValue, extraBounds)
                 : null;
-              const finalErr = err ?? mmeLimitErr ?? rangeErr;
+              const finalErr = err ?? mmeRowsErr ?? mmeLimitErr ?? rangeErr;
               if (finalErr) next[name] = finalErr;
               else delete next[name];
               // 镜像字段同时清/重新校验（值刚被程序性写入，旧 error 应失效）
