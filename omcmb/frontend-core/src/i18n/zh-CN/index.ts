@@ -1405,7 +1405,7 @@ const messages: Record<string, string> = {
   'device.csv.column.macAddress':     'MAC地址',
   'device.csv.column.deviceGrouping': '设备分组',
   'device.csv.column.sourceType':     '归属来源',
-  'device.csv.template.comment':      '# 必填: {required} | 可选: {optional} | 说明: 按 SN 匹配已注册设备，更新名称/备注并归入当前分组；SN 不存在的行会失败',
+  'device.csv.template.comment':      '# 必填: {required} | 可选: {optional} | 说明: 按 SN 匹配已注册设备，仅更新名称/备注（不改变设备归属分组）；SN 不存在的行会失败',
   // 批量导入后端错误码
   'device.batchImport.error.device_not_found':    '设备不存在（导入仅更新已注册设备的名称/备注，并归入当前分组）',
   'device.batchImport.error.update_name_failed':  '更新设备名称失败',
