@@ -36,6 +36,9 @@
 .connected,
 .disconnected,
 .readOnly {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border-radius: 999px;
   padding: 2px 8px;
   font-size: 12px;
@@ -55,6 +58,24 @@
 .readOnly {
   border: 1px solid rgba(24, 144, 255, 0.35);
   color: #69b1ff;
+}
+
+.liveDot {
+  position: relative;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #52c41a;
+  box-shadow: 0 0 0 3px rgba(82, 196, 26, 0.14);
+}
+
+.liveDot::after {
+  position: absolute;
+  inset: -4px;
+  border: 1px solid rgba(82, 196, 26, 0.52);
+  border-radius: inherit;
+  animation: agentLiveRing 1.8s ease-out infinite;
+  content: '';
 }
 
 .iconBtn {
@@ -112,6 +133,7 @@
 }
 
 .avatar {
+  position: relative;
   display: grid;
   width: 30px;
   height: 30px;
@@ -121,6 +143,19 @@
   background: #2d3038;
   color: #c7d0dd;
   font-size: 13px;
+}
+
+.avatarActive {
+  color: #e8f3ff;
+}
+
+.avatarActive::after {
+  position: absolute;
+  inset: -4px;
+  border: 1px solid rgba(105, 177, 255, 0.46);
+  border-radius: inherit;
+  animation: agentLiveRing 1.6s ease-out infinite;
+  content: '';
 }
 
 .userMessage .avatar {
@@ -169,6 +204,11 @@
   padding: 8px 10px;
 }
 
+.thoughtActive {
+  border-left-color: rgba(105, 177, 255, 0.92);
+  box-shadow: inset 0 0 0 1px rgba(105, 177, 255, 0.08);
+}
+
 .thoughtSummary,
 .processSummary {
   display: flex;
@@ -188,6 +228,19 @@
   color: #9dc8ff;
   font-size: 12px;
   font-weight: 600;
+}
+
+.statusPulse {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: rgba(157, 200, 255, 0.68);
+}
+
+.thoughtActive .statusPulse {
+  animation: agentStatusPulse 1.2s ease-in-out infinite;
+  background: #69b1ff;
 }
 
 .thoughtSummary::after,
@@ -211,6 +264,24 @@
   font-size: 11px;
   line-height: 16px;
   padding: 0 6px;
+}
+
+.thoughtActivityLine {
+  position: relative;
+  height: 1px;
+  margin-top: 8px;
+  overflow: hidden;
+  background: rgba(105, 177, 255, 0.16);
+}
+
+.thoughtActivityLine::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 38%;
+  background: linear-gradient(90deg, transparent, rgba(105, 177, 255, 0.96), transparent);
+  animation: agentActivitySweep 1.7s ease-in-out infinite;
+  content: '';
 }
 
 .thoughtList {
@@ -239,7 +310,30 @@
 }
 
 .pendingAnswer {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: #aeb8c7;
+}
+
+.answerCaret {
+  width: 6px;
+  height: 14px;
+  border-radius: 2px;
+  background: #69b1ff;
+  animation: agentCaretBlink 1s steps(2, start) infinite;
+}
+
+.streamingAnswer::after {
+  display: inline-block;
+  width: 6px;
+  height: 13px;
+  margin-left: 4px;
+  border-radius: 2px;
+  background: #69b1ff;
+  animation: agentCaretBlink 1s steps(2, start) infinite;
+  content: '';
+  vertical-align: -2px;
 }
 
 .markdown {
@@ -335,8 +429,26 @@
 
 .processItem {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto auto minmax(0, 1fr);
   gap: 8px;
+}
+
+.processDot {
+  width: 6px;
+  height: 6px;
+  align-self: start;
+  margin-top: 6px;
+  border-radius: 999px;
+  background: rgba(157, 200, 255, 0.44);
+}
+
+.processItemActive .processDot {
+  animation: agentStatusPulse 1.2s ease-in-out infinite;
+  background: #69b1ff;
+}
+
+.processItemError .processDot {
+  background: #ff7875;
 }
 
 .processKind {
@@ -376,11 +488,26 @@
 }
 
 .activity {
+  position: relative;
   margin: 14px 0;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.035);
   overflow: hidden;
+}
+
+.activityActive {
+  border-color: rgba(105, 177, 255, 0.34);
+  box-shadow: 0 0 0 1px rgba(105, 177, 255, 0.05), 0 12px 28px rgba(22, 119, 255, 0.08);
+}
+
+.activityActive::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: linear-gradient(180deg, transparent, #69b1ff, transparent);
+  animation: agentVerticalScan 1.8s ease-in-out infinite;
+  content: '';
 }
 
 .activityHeader {
@@ -548,5 +675,70 @@
   .panel {
     left: 0;
     width: 100vw;
+  }
+}
+
+@keyframes agentLiveRing {
+  0% {
+    opacity: 0.7;
+    transform: scale(0.72);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.55);
+  }
+}
+
+@keyframes agentStatusPulse {
+  0%,
+  100% {
+    opacity: 0.46;
+    transform: scale(0.86);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+}
+
+@keyframes agentActivitySweep {
+  0% {
+    left: -42%;
+  }
+  100% {
+    left: 104%;
+  }
+}
+
+@keyframes agentCaretBlink {
+  0%,
+  45% {
+    opacity: 1;
+  }
+  46%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes agentVerticalScan {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .liveDot::after,
+  .avatarActive::after,
+  .thoughtActive .statusPulse,
+  .thoughtActivityLine::after,
+  .answerCaret,
+  .streamingAnswer::after,
+  .processItemActive .processDot,
+  .activityActive::before {
+    animation: none;
   }
 }

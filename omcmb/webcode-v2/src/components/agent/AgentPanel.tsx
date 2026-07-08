@@ -50,15 +50,27 @@ function ThoughtBlock({
   return (
     <details
       className={cn(
-        'rounded-lg border border-blue-100 bg-blue-50/70 p-3 text-xs text-muted-foreground',
-        isStreaming && 'border-blue-200 bg-blue-50'
+        'relative overflow-hidden rounded-lg border border-blue-100 bg-blue-50/70 p-3 text-xs text-muted-foreground',
+        isStreaming && 'border-blue-200 bg-blue-50 shadow-[0_10px_24px_rgba(37,99,235,0.08)]'
       )}
       open={isStreaming}
     >
       <summary className="flex cursor-pointer list-none items-center gap-2 font-medium text-blue-800 [&::-webkit-details-marker]:hidden">
+        <span
+          className={cn(
+            'size-1.5 rounded-full bg-blue-300',
+            isStreaming && 'animate-pulse bg-blue-500 motion-reduce:animate-none'
+          )}
+          aria-hidden="true"
+        />
         <span>{isStreaming ? t('agent.thinking') : t('agent.thoughtDone')}</span>
         {!isStreaming && <span className="rounded-full bg-white px-1.5 py-0.5 text-[11px] text-muted-foreground">{lineCount}</span>}
       </summary>
+      {isStreaming && (
+        <div className="mt-2 h-px overflow-hidden bg-blue-200/70" aria-hidden="true">
+          <div className="h-full w-full animate-pulse bg-blue-500/70 motion-reduce:animate-none" />
+        </div>
+      )}
       <div className="mt-2 space-y-2 border-t border-blue-100 pt-2">
         {thoughts.map((thought) => (
           <div key={thought.id} className="space-y-1">
@@ -85,18 +97,30 @@ function ProcessTrace({ entries }: { entries: AgentProcessEntry[] | undefined })
         <span className="rounded-full bg-background px-2 py-0.5">{entries.length}</span>
       </summary>
       <div className="space-y-2 p-3">
-        {entries.map((entry) => {
+        {entries.map((entry, index) => {
           const detail = formatAgentDetail(entry.detail)
+          const isActive = index === entries.length - 1 && entry.kind !== 'error'
           return (
             <div key={entry.id} className="grid grid-cols-[auto_minmax(0,1fr)] gap-2">
-              <span
-                className={cn(
-                  'self-start rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700',
-                  entry.kind === 'error' && 'bg-destructive/10 text-destructive'
-                )}
-              >
-                {entry.kind}
-              </span>
+              <div className="flex items-start gap-2">
+                <span
+                  className={cn(
+                    'mt-1.5 size-1.5 rounded-full bg-blue-200',
+                    isActive && 'animate-pulse bg-blue-500 motion-reduce:animate-none',
+                    entry.kind === 'error' && 'bg-destructive'
+                  )}
+                  aria-hidden="true"
+                />
+                <span
+                  className={cn(
+                    'self-start rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700',
+                    isActive && 'ring-1 ring-blue-200',
+                    entry.kind === 'error' && 'bg-destructive/10 text-destructive'
+                  )}
+                >
+                  {entry.kind}
+                </span>
+              </div>
               <div className="min-w-0">
                 <div className="truncate text-xs font-medium text-foreground">{entry.title}</div>
                 {detail && (
@@ -120,9 +144,14 @@ function AssistantContent({ message }: { message: AgentPanelMessage }) {
     <div className="flex min-w-0 flex-col gap-3">
       <ThoughtBlock thoughts={message.thoughts} running={running} />
       {message.text ? (
-        <AgentMarkdown className={markdownClassName} content={message.text} />
+        <div className={cn(running && 'after:ml-1 after:inline-block after:h-3.5 after:w-1.5 after:rounded-sm after:bg-blue-500 after:align-[-2px] after:content-[""] after:animate-pulse motion-reduce:after:animate-none')}>
+          <AgentMarkdown className={markdownClassName} content={message.text} />
+        </div>
       ) : running ? (
-        <span className="text-muted-foreground">{t('agent.streaming')}</span>
+        <span className="inline-flex items-center gap-2 text-muted-foreground">
+          {t('agent.streaming')}
+          <span className="h-3.5 w-1.5 animate-pulse rounded-sm bg-blue-500 motion-reduce:animate-none" aria-hidden="true" />
+        </span>
       ) : null}
       <ProcessTrace entries={message.process} />
     </div>
@@ -146,9 +175,16 @@ function ActivityCard({
   const inputRows = Object.entries(activity.request?.input ?? {})
   const rows = extractAgentRows(activity.output ?? activity.preview, 6)
   const isError = activity.status === 'error'
+  const isActive = activity.status === 'calling' || activity.status === 'running' || isPending
 
   return (
-    <section className="rounded-lg border border-border bg-card">
+    <section
+      className={cn(
+        'relative overflow-hidden rounded-lg border border-border bg-card',
+        isActive && 'border-blue-200 shadow-[0_12px_28px_rgba(37,99,235,0.08)]'
+      )}
+    >
+      {isActive && <div className="absolute inset-y-0 left-0 w-0.5 animate-pulse bg-blue-500 motion-reduce:animate-none" aria-hidden="true" />}
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex items-center gap-2 text-sm font-semibold">
           <Sparkles className="size-4 text-primary" />
@@ -262,10 +298,13 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
         </div>
         <span
           className={cn(
-            'rounded-full px-2 py-0.5 text-xs font-medium',
+            'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium',
             controller.enabled ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
           )}
         >
+          {controller.enabled && (
+            <span className="relative size-1.5 rounded-full bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.14)] after:absolute after:inset-[-4px] after:rounded-full after:border after:border-emerald-400/50 after:content-[''] after:animate-ping motion-reduce:after:animate-none" aria-hidden="true" />
+          )}
           {controller.enabled ? t('agent.connected') : t('agent.disconnected')}
         </span>
         <button
@@ -309,7 +348,10 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
             <div
               className={cn(
                 'grid size-8 shrink-0 place-items-center rounded-full',
-                message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-primary'
+                message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-primary',
+                message.role === 'assistant' &&
+                  message.status === 'streaming' &&
+                  'animate-pulse ring-2 ring-blue-200 ring-offset-2 ring-offset-background motion-reduce:animate-none'
               )}
             >
               {message.role === 'user' ? <User className="size-4" /> : <Bot className="size-4" />}

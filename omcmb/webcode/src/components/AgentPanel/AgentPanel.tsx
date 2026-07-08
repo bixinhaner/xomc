@@ -39,11 +39,13 @@ function ThoughtBlock({
   const lineCount = thoughts.reduce((total, thought) => total + Math.max(thought.lines.length, 1), 0);
 
   return (
-    <details className={styles.thought} open={isStreaming}>
+    <details className={`${styles.thought} ${isStreaming ? styles.thoughtActive : ''}`} open={isStreaming}>
       <summary className={styles.thoughtSummary}>
+        <span className={styles.statusPulse} aria-hidden="true" />
         <span>{isStreaming ? t('agent.thinking') : t('agent.thoughtDone')}</span>
         {!isStreaming && <span className={styles.thoughtCount}>{lineCount}</span>}
       </summary>
+      {isStreaming && <div className={styles.thoughtActivityLine} aria-hidden="true" />}
       <div className={styles.thoughtList}>
         {thoughts.map((thought) => (
           <div key={thought.id} className={styles.thoughtEntry}>
@@ -68,10 +70,17 @@ function ProcessTrace({ entries }: { entries: AgentProcessEntry[] | undefined })
         <span className={styles.processCount}>{entries.length}</span>
       </summary>
       <div className={styles.processList}>
-        {entries.map((entry) => {
+        {entries.map((entry, index) => {
           const detail = formatAgentDetail(entry.detail);
+          const isActive = index === entries.length - 1 && entry.kind !== 'error';
           return (
-            <div key={entry.id} className={styles.processItem}>
+            <div
+              key={entry.id}
+              className={`${styles.processItem} ${isActive ? styles.processItemActive : ''} ${
+                entry.kind === 'error' ? styles.processItemError : ''
+              }`}
+            >
+              <span className={styles.processDot} aria-hidden="true" />
               <span className={`${styles.processKind} ${entry.kind === 'error' ? styles.processKindError : ''}`}>
                 {entry.kind}
               </span>
@@ -94,9 +103,14 @@ function AssistantContent({ message }: { message: AgentPanelMessage }) {
     <div className={styles.assistantContent}>
       <ThoughtBlock thoughts={message.thoughts} running={running} />
       {message.text ? (
-        <AgentMarkdown className={styles.markdown} content={message.text} />
+        <div className={running ? styles.streamingAnswer : undefined}>
+          <AgentMarkdown className={styles.markdown} content={message.text} />
+        </div>
       ) : running ? (
-        <span className={styles.pendingAnswer}>{t('agent.streaming')}</span>
+        <span className={styles.pendingAnswer}>
+          {t('agent.streaming')}
+          <span className={styles.answerCaret} aria-hidden="true" />
+        </span>
       ) : null}
       <ProcessTrace entries={message.process} />
     </div>
@@ -121,9 +135,10 @@ function ActivityCard({
   const inputRows = Object.entries(input);
   const resultRows = extractAgentRows(activity.output ?? activity.preview, 6);
   const isError = activity.status === 'error';
+  const isActive = activity.status === 'calling' || activity.status === 'running' || isPending;
 
   return (
-    <section className={styles.activity}>
+    <section className={`${styles.activity} ${isActive ? styles.activityActive : ''}`}>
       <div className={styles.activityHeader}>
         <span className={styles.activityTitle}>
           <ThunderboltOutlined /> {activity.status === 'preview' ? t('agent.actionPreview') : t('agent.callingTool')}
@@ -224,6 +239,7 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
           <span>{t('agent.title')}</span>
         </div>
         <span className={controller.enabled ? styles.connected : styles.disconnected}>
+          {controller.enabled && <span className={styles.liveDot} aria-hidden="true" />}
           {controller.enabled ? t('agent.connected') : t('agent.disconnected')}
         </span>
         <button
@@ -256,7 +272,13 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
         )}
         {controller.messages.map((message) => (
           <div key={message.id} className={message.role === 'user' ? styles.userMessage : styles.assistantMessage}>
-            <div className={styles.avatar}>{message.role === 'user' ? t('agent.userShort') : <RobotOutlined />}</div>
+            <div
+              className={`${styles.avatar} ${
+                message.role === 'assistant' && message.status === 'streaming' ? styles.avatarActive : ''
+              }`}
+            >
+              {message.role === 'user' ? t('agent.userShort') : <RobotOutlined />}
+            </div>
             <div className={styles.bubble}>
               {message.role === 'assistant' ? (
                 <AssistantContent message={message} />

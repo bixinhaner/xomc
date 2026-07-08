@@ -50,15 +50,27 @@ function ThoughtBlock({
   return (
     <details
       className={cn(
-        'border border-cyan-400/25 bg-cyan-500/[0.04] p-3 text-cyan-100/70',
-        isStreaming && 'border-cyan-300/45 bg-cyan-300/[0.08]'
+        'relative overflow-hidden border border-cyan-400/25 bg-cyan-500/[0.04] p-3 text-cyan-100/70',
+        isStreaming && 'border-cyan-300/45 bg-cyan-300/[0.08] shadow-[0_0_18px_rgba(0,240,255,0.12)]'
       )}
       open={isStreaming}
     >
       <summary className="flex cursor-pointer list-none items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-200 [&::-webkit-details-marker]:hidden">
+        <span
+          className={cn(
+            'size-1.5 rounded-full bg-cyan-500/60',
+            isStreaming && 'animate-pulse bg-cyan-200 shadow-[0_0_10px_rgba(103,232,249,0.65)] motion-reduce:animate-none'
+          )}
+          aria-hidden="true"
+        />
         <span>{isStreaming ? t('agent.thinking') : t('agent.thoughtDone')}</span>
         {!isStreaming && <span className="border border-cyan-400/30 px-1.5 py-0.5 text-cyan-300/75">{lineCount}</span>}
       </summary>
+      {isStreaming && (
+        <div className="mt-2 h-px bg-cyan-400/20" aria-hidden="true">
+          <div className="h-full w-full animate-pulse bg-cyan-200/80 shadow-[0_0_12px_rgba(103,232,249,0.45)] motion-reduce:animate-none" />
+        </div>
+      )}
       <div className="mt-2 space-y-2 border-t border-cyan-400/20 pt-2">
         {thoughts.map((thought) => (
           <div key={thought.id} className="space-y-1">
@@ -85,18 +97,30 @@ function ProcessTrace({ entries }: { entries: AgentProcessEntry[] | undefined })
         <span className="border border-cyan-400/30 px-2 py-0.5">{entries.length}</span>
       </summary>
       <div className="space-y-2 p-3">
-        {entries.map((entry) => {
+        {entries.map((entry, index) => {
           const detail = formatAgentDetail(entry.detail)
+          const isActive = index === entries.length - 1 && entry.kind !== 'error'
           return (
             <div key={entry.id} className="grid grid-cols-[auto_minmax(0,1fr)] gap-2">
-              <span
-                className={cn(
-                  'self-start border border-cyan-400/30 bg-cyan-400/10 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-cyan-200',
-                  entry.kind === 'error' && 'border-rose-400/40 bg-rose-400/10 text-rose-200'
-                )}
-              >
-                {entry.kind}
-              </span>
+              <div className="flex items-start gap-2">
+                <span
+                  className={cn(
+                    'mt-1.5 size-1.5 rounded-full bg-cyan-500/50',
+                    isActive && 'animate-pulse bg-cyan-200 shadow-[0_0_10px_rgba(103,232,249,0.65)] motion-reduce:animate-none',
+                    entry.kind === 'error' && 'bg-rose-300 shadow-none'
+                  )}
+                  aria-hidden="true"
+                />
+                <span
+                  className={cn(
+                    'self-start border border-cyan-400/30 bg-cyan-400/10 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-cyan-200',
+                    isActive && 'border-cyan-200/60 bg-cyan-300/15',
+                    entry.kind === 'error' && 'border-rose-400/40 bg-rose-400/10 text-rose-200'
+                  )}
+                >
+                  {entry.kind}
+                </span>
+              </div>
               <div className="min-w-0">
                 <div className="truncate font-mono text-[11px] text-cyan-100">{entry.title}</div>
                 {detail && (
@@ -120,9 +144,14 @@ function AssistantContent({ message }: { message: AgentPanelMessage }) {
     <div className="flex min-w-0 flex-col gap-3">
       <ThoughtBlock thoughts={message.thoughts} running={running} />
       {message.text ? (
-        <AgentMarkdown className={markdownClassName} content={message.text} />
+        <div className={cn(running && 'after:ml-1 after:inline-block after:h-3.5 after:w-1.5 after:bg-cyan-200 after:align-[-2px] after:shadow-[0_0_8px_rgba(103,232,249,0.6)] after:content-[""] after:animate-pulse motion-reduce:after:animate-none')}>
+          <AgentMarkdown className={markdownClassName} content={message.text} />
+        </div>
       ) : running ? (
-        <span className="text-cyan-300/65">{t('agent.streaming')}</span>
+        <span className="inline-flex items-center gap-2 text-cyan-300/65">
+          {t('agent.streaming')}
+          <span className="h-3.5 w-1.5 animate-pulse bg-cyan-200 shadow-[0_0_8px_rgba(103,232,249,0.6)] motion-reduce:animate-none" aria-hidden="true" />
+        </span>
       ) : null}
       <ProcessTrace entries={message.process} />
     </div>
@@ -146,9 +175,16 @@ function ActivityCard({
   const inputRows = Object.entries(activity.request?.input ?? {})
   const rows = extractAgentRows(activity.output ?? activity.preview, 6)
   const isError = activity.status === 'error'
+  const isActive = activity.status === 'calling' || activity.status === 'running' || isPending
 
   return (
-    <section className="border border-cyan-400/35 bg-cyan-500/[0.04] shadow-[0_0_18px_rgba(0,240,255,0.12)]">
+    <section
+      className={cn(
+        'relative overflow-hidden border border-cyan-400/35 bg-cyan-500/[0.04] shadow-[0_0_18px_rgba(0,240,255,0.12)]',
+        isActive && 'border-cyan-200/60 shadow-[0_0_24px_rgba(0,240,255,0.18)]'
+      )}
+    >
+      {isActive && <div className="absolute inset-y-0 left-0 w-0.5 animate-pulse bg-cyan-200 shadow-[0_0_14px_rgba(103,232,249,0.6)] motion-reduce:animate-none" aria-hidden="true" />}
       <div className="flex items-center justify-between border-b border-cyan-400/25 px-3 py-2">
         <div className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-cyan-200">
           <Sparkles className="size-3.5" />
@@ -260,10 +296,13 @@ export function AgentConsole({ open, onClose }: AgentConsoleProps) {
         </div>
         <span
           className={cn(
-            'font-mono text-[10px] uppercase tracking-[0.18em]',
+            'inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.18em]',
             controller.enabled ? 'text-emerald-300' : 'text-amber-300'
           )}
         >
+          {controller.enabled && (
+            <span className="relative size-1.5 rounded-full bg-emerald-300 shadow-[0_0_10px_rgba(110,231,183,0.65)] after:absolute after:inset-[-4px] after:rounded-full after:border after:border-emerald-300/50 after:content-[''] after:animate-ping motion-reduce:after:animate-none" aria-hidden="true" />
+          )}
           {controller.enabled ? t('agent.connected') : t('agent.disconnected')}
         </span>
         <button
@@ -309,7 +348,10 @@ export function AgentConsole({ open, onClose }: AgentConsoleProps) {
                 'grid size-8 shrink-0 place-items-center border',
                 message.role === 'user'
                   ? 'border-cyan-300/50 bg-cyan-300/15 text-cyan-100'
-                  : 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300'
+                  : 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300',
+                message.role === 'assistant' &&
+                  message.status === 'streaming' &&
+                  'animate-pulse border-cyan-200/60 shadow-[0_0_14px_rgba(103,232,249,0.22)] motion-reduce:animate-none'
               )}
             >
               {message.role === 'user' ? <User className="size-4" /> : <Bot className="size-4" />}
