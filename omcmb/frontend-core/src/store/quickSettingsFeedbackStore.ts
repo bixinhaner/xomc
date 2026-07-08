@@ -22,11 +22,15 @@ export interface MultiFeedback {
   notifiedFailedTaskId?: string;
   /** 终态 task → 查询失效仅做一次的去重标记(避免 useEffect 反复触发)。 */
   invalidatedForTaskId?: string;
+  /** 终态 task → 相关多实例参数已回读并刷新列表后才允许展示成功态。 */
+  syncedForTaskId?: string;
   /** save 动作专用:记录被保存的实例号,task=completed 时据此清掉对应行的 rowEdits + draft,
       避免切 tab 走回后乐观显示的旧用户输入覆盖 schema 新值。 */
   savedInstId?: string;
   /** 批量 save 动作:一次保存多个新增实例时,在任务完成后一起清掉乐观编辑态。 */
   savedInstIds?: string[];
+  /** save 动作来源:区分新增后的 SPV 与编辑已有实例的 SPV,避免把编辑失败误当新增失败回滚。 */
+  saveMode?: 'add' | 'edit';
   /** BSC add 动作:AddObject 创建出来的实例号,用于 SPV 失败时自动回滚 DeleteObject。 */
   instanceNumber?: number;
   /** add_rollback 动作:从被回滚的原 SPV 失败任务中提取的简短被拒原因,用于 Tag 文案。 */
