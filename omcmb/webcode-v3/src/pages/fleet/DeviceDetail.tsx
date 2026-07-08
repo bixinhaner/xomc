@@ -22,6 +22,7 @@ import { activationStatusLabelOf } from '@core/utils/activationStatus'
 import { formatAlarmSeverityBadgeLabel } from '@core/utils/alarmSeverity'
 import { DEVICE_SYNC_STATUS_LABELS_EN, formatDeviceSyncStatus } from '@core/utils/deviceSyncStatus'
 import { computeCumulativeOnlineDurationSeconds } from '@core/utils/onlineDuration'
+import { rfStatusLabelOf } from '@core/utils/rfStatus'
 import type { Device } from '@core/types/device'
 import { KV, StatCard, StateGate, formatDuration } from './_shared'
 
@@ -89,6 +90,7 @@ function DetailBody({ d, onUe }: { d: Device; onUe: () => void }) {
     active: '激活',
     inactive: '未激活',
   }, appLocale)
+  const rfStatusLabel = rfStatusLabelOf(d.rfStatus, { on: 'RF On', off: 'RF Off', error: 'Fault' }) ?? d.rfStatus ?? '—'
   return (
     <div className="space-y-4">
       {/* 头部状态条 */}
@@ -207,7 +209,7 @@ function DetailBody({ d, onUe }: { d: Device; onUe: () => void }) {
           </div>
           <KV label="CELL STATUS">{d.cellStatus}</KV>
           <KV label="OP / ADMIN STATE">{`${opStateLabel || '—'} · ${d.adminState || '—'}`}</KV>
-          <KV label="RF / SYNC">{`${d.rfStatus || '—'} · ${formatDeviceSyncStatus(d.syncStatus, DEVICE_SYNC_STATUS_LABELS_EN) || '—'}`}</KV>
+          <KV label="RF / SYNC">{`${rfStatusLabel} · ${formatDeviceSyncStatus(d.syncStatus, DEVICE_SYNC_STATUS_LABELS_EN) || '—'}`}</KV>
           <KV label="SERVICE STATUS">{d.serviceStatus}</KV>
           <KV label="LAST ONLINE">{formatTime(d.lastOnlineTime)}</KV>
           <KV label="LAST INFORM">{formatTime(d.lastInformTime)}</KV>

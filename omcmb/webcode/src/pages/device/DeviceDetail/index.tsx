@@ -58,6 +58,7 @@ import { formatSystemTime } from '@core/utils/systemTime';
 import { useAppStore } from '@core/store/appStore';
 import { formatDeviceSyncStatus, getDeviceSyncStatusKind, normalizeDeviceSyncStatus } from '@core/utils/deviceSyncStatus';
 import { computeCumulativeOnlineDurationSeconds, computeCurrentOnlineDurationSeconds } from '@core/utils/onlineDuration';
+import { rfStatusLabelOf, rfStatusOf } from '@core/utils/rfStatus';
 
 const { Title, Text } = Typography;
 
@@ -814,15 +815,17 @@ const renderCellOpState = (
   return <Tag color={status === 'active' ? 'success' : 'error'}>{label}</Tag>;
 };
 
-const renderCellRfStatus = (value: string | undefined, t: ReturnType<typeof useT>) =>
-  renderStatusTag(value, {
-    on: { label: t('status.rfOn'), color: 'success' },
-    off: { label: t('status.rfOff'), color: 'error' },
-    '1': { label: t('status.rfOn'), color: 'success' },
-    '0': { label: t('status.rfOff'), color: 'error' },
-    true: { label: t('status.rfOn'), color: 'success' },
-    false: { label: t('status.rfOff'), color: 'error' },
-  });
+const renderCellRfStatus = (value: string | undefined, t: ReturnType<typeof useT>) => {
+  const kind = rfStatusOf(value);
+  if (!kind) return '-';
+  const labels = {
+    on: t('status.rfOn'),
+    off: t('status.rfOff'),
+    error: t('status.failed'),
+  };
+  const color = kind === 'on' ? 'success' : 'error';
+  return <Tag color={color}>{rfStatusLabelOf(value, labels)}</Tag>;
+};
 
 const renderCellAdminState = (
   value: string | undefined,

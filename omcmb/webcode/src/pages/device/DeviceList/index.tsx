@@ -1354,7 +1354,7 @@ export default function DeviceList() {
         // 原始 JSP: 支持多小区 "on,off,on"，汇总 + [N/M] Popover
         render: (_val, record) => renderMultiCellStatus(
           record.rfStatus,
-          ['on', '1'],
+          ['on', '1', '3'],
           { on: t('status.rfOn'), off: t('status.rfOff'), title: t('device.multiCellStatus') },
           { on: 'success', off: 'error', mixed: 'warning' },
         ),
