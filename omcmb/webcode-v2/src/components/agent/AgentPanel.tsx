@@ -23,16 +23,27 @@ interface AgentPanelProps {
 
 const markdownClassName = [
   'overflow-x-hidden break-words',
+  '[&_h1]:mb-2 [&_h1]:mt-3 [&_h1]:text-lg [&_h1]:font-semibold [&_h1]:leading-tight',
+  '[&_h2]:mb-2 [&_h2]:mt-3 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:leading-tight',
+  '[&_h3]:mb-2 [&_h3]:mt-3 [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:leading-tight',
   '[&_p]:mb-2 [&_p:last-child]:mb-0',
   '[&_ul]:mb-2 [&_ul]:list-disc [&_ul]:pl-5',
   '[&_ol]:mb-2 [&_ol]:list-decimal [&_ol]:pl-5',
+  '[&_li]:pl-0.5',
   '[&_li+li]:mt-1',
+  '[&_blockquote]:mb-2 [&_blockquote]:border-l-2 [&_blockquote]:border-blue-200 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground',
+  '[&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2',
+  '[&_strong]:font-semibold [&_strong]:text-foreground',
   '[&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.92em]',
   '[&_pre]:mb-2 [&_pre]:max-w-full [&_pre]:overflow-auto [&_pre]:rounded-md [&_pre]:bg-slate-950 [&_pre]:p-3 [&_pre]:text-slate-100',
   '[&_pre_code]:bg-transparent [&_pre_code]:p-0',
+  '[&_.agent-render-table-scroll]:mb-2 [&_.agent-render-table-scroll]:max-w-full [&_.agent-render-table-scroll]:overflow-auto',
   '[&_table]:mb-2 [&_table]:w-full [&_table]:min-w-max [&_table]:border-collapse [&_table]:text-xs',
   '[&_th]:border [&_th]:border-border [&_th]:bg-muted/60 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left',
   '[&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1.5 [&_td]:align-top',
+  '[&_.agent-render-image-card]:my-1 [&_.agent-render-image-card]:inline-block [&_.agent-render-image-card]:max-w-full',
+  '[&_.agent-render-image]:max-h-80 [&_.agent-render-image]:max-w-full [&_.agent-render-image]:rounded-md [&_.agent-render-image]:border [&_.agent-render-image]:border-border [&_.agent-render-image]:object-contain',
+  '[&_.agent-render-image-missing]:inline-block [&_.agent-render-image-missing]:rounded-md [&_.agent-render-image-missing]:bg-muted [&_.agent-render-image-missing]:px-2 [&_.agent-render-image-missing]:py-1 [&_.agent-render-image-missing]:text-xs [&_.agent-render-image-missing]:text-muted-foreground',
 ].join(' ')
 
 function ThoughtBlock({
@@ -343,11 +354,11 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
         {controller.messages.map((message) => (
           <div
             key={message.id}
-            className={cn('flex gap-3', message.role === 'user' && 'flex-row-reverse')}
+            className={cn('flex items-start gap-3', message.role === 'user' && 'flex-row-reverse')}
           >
             <div
               className={cn(
-                'grid size-8 shrink-0 place-items-center rounded-full',
+                'grid size-8 shrink-0 place-items-center rounded-full leading-none [&_svg]:block',
                 message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-primary',
                 message.role === 'assistant' &&
                   message.status === 'streaming' &&

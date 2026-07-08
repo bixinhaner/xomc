@@ -23,16 +23,27 @@ interface AgentConsoleProps {
 
 const markdownClassName = [
   'break-words font-mono',
+  '[&_h1]:mb-2 [&_h1]:mt-3 [&_h1]:text-sm [&_h1]:font-semibold [&_h1]:leading-tight [&_h1]:text-cyan-50',
+  '[&_h2]:mb-2 [&_h2]:mt-3 [&_h2]:text-xs [&_h2]:font-semibold [&_h2]:leading-tight [&_h2]:text-cyan-50',
+  '[&_h3]:mb-2 [&_h3]:mt-3 [&_h3]:text-xs [&_h3]:font-semibold [&_h3]:leading-tight [&_h3]:text-cyan-100',
   '[&_p]:mb-2 [&_p:last-child]:mb-0',
   '[&_ul]:mb-2 [&_ul]:list-disc [&_ul]:pl-5',
   '[&_ol]:mb-2 [&_ol]:list-decimal [&_ol]:pl-5',
+  '[&_li]:pl-0.5',
   '[&_li+li]:mt-1',
+  '[&_blockquote]:mb-2 [&_blockquote]:border-l-2 [&_blockquote]:border-cyan-400/35 [&_blockquote]:pl-3 [&_blockquote]:text-cyan-100/60',
+  '[&_a]:text-cyan-200 [&_a]:underline [&_a]:underline-offset-2',
+  '[&_strong]:font-semibold [&_strong]:text-cyan-50',
   '[&_code]:border [&_code]:border-cyan-400/20 [&_code]:bg-cyan-400/10 [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-cyan-50',
   '[&_pre]:mb-2 [&_pre]:max-w-full [&_pre]:overflow-auto [&_pre]:border [&_pre]:border-cyan-400/20 [&_pre]:bg-black/45 [&_pre]:p-3 [&_pre]:text-cyan-50',
   '[&_pre_code]:border-0 [&_pre_code]:bg-transparent [&_pre_code]:p-0',
+  '[&_.agent-render-table-scroll]:mb-2 [&_.agent-render-table-scroll]:max-w-full [&_.agent-render-table-scroll]:overflow-auto',
   '[&_table]:mb-2 [&_table]:w-full [&_table]:min-w-max [&_table]:border-collapse [&_table]:text-[11px]',
   '[&_th]:border [&_th]:border-cyan-400/25 [&_th]:bg-cyan-400/10 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-cyan-100',
   '[&_td]:border [&_td]:border-cyan-400/20 [&_td]:px-2 [&_td]:py-1.5 [&_td]:align-top',
+  '[&_.agent-render-image-card]:my-1 [&_.agent-render-image-card]:inline-block [&_.agent-render-image-card]:max-w-full',
+  '[&_.agent-render-image]:max-h-80 [&_.agent-render-image]:max-w-full [&_.agent-render-image]:border [&_.agent-render-image]:border-cyan-400/25 [&_.agent-render-image]:object-contain',
+  '[&_.agent-render-image-missing]:inline-block [&_.agent-render-image-missing]:border [&_.agent-render-image-missing]:border-cyan-400/20 [&_.agent-render-image-missing]:bg-cyan-400/10 [&_.agent-render-image-missing]:px-2 [&_.agent-render-image-missing]:py-1 [&_.agent-render-image-missing]:text-[11px] [&_.agent-render-image-missing]:text-cyan-100/65',
 ].join(' ')
 
 function ThoughtBlock({
@@ -341,11 +352,11 @@ export function AgentConsole({ open, onClose }: AgentConsoleProps) {
         {controller.messages.map((message) => (
           <div
             key={message.id}
-            className={cn('flex gap-2', message.role === 'user' && 'flex-row-reverse')}
+            className={cn('flex items-start gap-2', message.role === 'user' && 'flex-row-reverse')}
           >
             <div
               className={cn(
-                'grid size-8 shrink-0 place-items-center border',
+                'grid size-8 shrink-0 place-items-center border leading-none [&_svg]:block',
                 message.role === 'user'
                   ? 'border-cyan-300/50 bg-cyan-300/15 text-cyan-100'
                   : 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300',
