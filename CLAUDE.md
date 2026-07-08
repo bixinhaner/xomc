@@ -59,7 +59,7 @@ omc/                                # 根仓库（单一 git）
 └── docs/                           # 设计 / 评审 / 流程 / PRD / Runbook（总索引见 docs/README.md）
 ```
 
-**仓库组成**：**单一 git 仓库**（根 `goomc/.git`），`omcgo/` 和 `omcmb/` 是源码子目录，**不含独立 `.git`**。所有 git 操作在 `goomc/` 根目录执行。
+**仓库组成**：**单一 git 仓库**（根 `xomc/.git`），`omcgo/` 和 `omcmb/` 是源码子目录，**不含独立 `.git`**。所有 git 操作在 `xomc/` 根目录执行。
 
 **前端三包关系**：业务层（API / Hook / Store / Types / i18n / Mock）全部在 `omcmb/frontend-core/`，三个 UI 包通过 `@core → ../frontend-core/src` 共享同一份业务层。日常以 `webcode/` 为主皮肤；**新增 API / Hook / Store / Types 必须写在 `frontend-core/`**，UI 壳里只放页面与组件。
 
@@ -211,7 +211,7 @@ API / Hook / Store / Types / i18n / Mock 全在 `omcmb/frontend-core/`；页面 
 
 ## 9. 开发流程
 
-> **任务源（活）= GitHub Issues**（`github.com/569423176-sketch/goomc`，`gh` CLI）。新需求/缺陷登记到 GitHub Issues，经 triage（`needs-triage` → `ready-for-agent` 等）后拉起开发。
+> **任务源（活）= GitLab Issues**（GitLab host `192.168.10.16`，项目 `netmanager/xomc`，优先用 `glab` CLI）。新需求/缺陷登记到 GitLab Issues，经 triage（`needs-triage` → `ready-for-agent` 等）后拉起开发。
 > `docs/project/backlog.md` 已**冻结为历史审计归档**（保留旧 S0–S7 流水线的 closing-evidence 追溯链，不再新增任务）。
 > **全流程编排 = `/ship`**：一键贯穿 对齐→立项→切片→分诊→实现→验证→审查→提交→收尾，**只调度不实现**（委派 grill-with-docs / to-prd / to-issues / triage / tdd / review / commit 等），详见 `.claude/commands/ship.md`。旧 `/dev-pipeline` 与 BaiBM `issue:*` 已下线。
 
@@ -291,10 +291,10 @@ API / Hook / Store / Types / i18n / Mock 全在 `omcmb/frontend-core/`；页面 
 ### 服务重启规则（CRITICAL — 统一用 docker compose）
 
 > **重启/重建后端服务（app/acs/worker）一律走 docker compose，禁止用 `run/scripts/restart-all.sh`。** 运行态是 docker compose 编排的容器栈；`run/scripts/*` 是裸进程跑法，与容器栈并存会端口冲突、状态不一致。
-> **所有 compose 命令在仓库根 `goomc/` 下执行**（build context 是 `../..` 仓库根，且读根目录 `.env`），用 `-f` 指定 compose 文件。完整命令见 `deployments/docker/README.md`。
+> **所有 compose 命令在仓库根 `xomc/` 下执行**（build context 是 `../..` 仓库根，且读根目录 `.env`），用 `-f` 指定 compose 文件。完整命令见 `deployments/docker/README.md`。
 
 ```bash
-# 在仓库根 goomc/ 下执行
+# 在仓库根 xomc/ 下执行
 export COMPOSE="docker compose -f deployments/docker/docker-compose.yml"
 $COMPOSE up -d --build app worker     # 改了 Go 代码后重建并重启（最常用）
 $COMPOSE up -d --build acs            # ACS 同理
@@ -331,7 +331,7 @@ cd omcmb/webcode && npm run {dev,dev:mock,build,typecheck,lint,test,test:e2e}
 | 领域术语表 | `CONTEXT.md` |
 | 全流程编排 Skill | `.claude/commands/ship.md`（`/ship`，一键贯穿全流程，只调度不实现）|
 | 标准工程套件 | matt-pocock skills：`grill-with-docs` / `to-prd` / `to-issues` / `triage` / `tdd` / `diagnose` / `improve-codebase-architecture` / `handoff`（`/ship` 编排调用）|
-| 任务源（活）| GitHub Issues `github.com/569423176-sketch/goomc`（详见 `docs/agents/issue-tracker.md`）|
+| 任务源（活）| GitLab Issues `192.168.10.16/netmanager/xomc`（详见 `docs/agents/issue-tracker.md`）|
 | 历史任务归档 | `docs/project/backlog.md`（已冻结）· 旧流水线设计 `docs/project/dev-pipeline-design-20260420.md` |
 | 项目自有 Skill | `.claude/commands/{e2e,acs-stress-test,review,commit}.md` |
 | 前端多皮肤架构（v1=唯一标准，v2/v3 路由+菜单由 skin-parity 守卫强制对齐 v1） | `docs/project/frontend-multi-skin-plan-20260422.md` · 守卫 `omcmb/scripts/skin-parity.mjs` |
@@ -353,6 +353,6 @@ AI 处理不同领域代码时应自动激活对应专家视角审查。**完整
 
 > 由 `/ship` 编排器按阶段调用（§9），是本仓的标准工程主干。约定文件在 `docs/agents/`。
 
-- **Issue tracker（任务源）**：Issues / PRDs 走 GitHub Issues（`github.com/569423176-sketch/goomc`，`gh` CLI）——已采纳为活任务源（§9）。详见 `docs/agents/issue-tracker.md`。
+- **Issue tracker（任务源）**：Issues / PRDs 走 GitLab Issues（GitLab host `192.168.10.16`，项目 `netmanager/xomc`，优先用 `glab` CLI）——已采纳为活任务源（§9）。详见 `docs/agents/issue-tracker.md`。
 - **Triage labels**：5 个标准 triage 角色标签（`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`）。详见 `docs/agents/triage-labels.md`。
 - **Domain docs（单上下文）**：根级 `CONTEXT.md`（术语表）+ `docs/adr/`（决策记录）。详见 `docs/agents/domain.md`。

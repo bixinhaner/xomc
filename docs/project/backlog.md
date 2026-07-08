@@ -1,6 +1,6 @@
 # OMC 需求池（Backlog）— 任务状态表
 
-> ⛔ **已冻结为历史审计归档（2026-06-09）** —— 本文件**不再是活任务源**。新需求 / 缺陷 / PRD 一律走 **GitHub Issues**（`github.com/569423176-sketch/goomc`，`gh` CLI），约定见 [`docs/agents/issue-tracker.md`](../agents/issue-tracker.md)。
+> ⛔ **已冻结为历史审计归档（2026-06-09）** —— 本文件**不再是活任务源**。新需求 / 缺陷 / PRD 一律走 **GitLab Issues**（GitLab host `192.168.10.16`，项目 `netmanager/xomc`，优先用 `glab` CLI），约定见 [`docs/agents/issue-tracker.md`](../agents/issue-tracker.md)。
 > 本文件保留为历史归档：dev-pipeline 的 closing-evidence 追溯链（T-NNNN ↔ review-report）仍在此可查，但**不再新增 / 更新任务**。迁移在途细节见 issue-tracker.md。
 >
 > ——以下为冻结时点（2026-06-09）的历史快照，仅供追溯，不代表当前活跃工作——

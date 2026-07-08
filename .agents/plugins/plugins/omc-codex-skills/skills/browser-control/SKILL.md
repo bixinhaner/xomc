@@ -54,7 +54,7 @@ nodeRepl.write(await browser.documentation());
 
 当 Codex 运行在终端中，或没有桌面 app 可控的内置 Browser surface 时，优先使用 MCP + 可见系统 Chrome + Playwright 控制浏览器：
 
-- 给 Codex 自身控制浏览器时，优先使用 workspace 级独立工具目录 `$WORKSPACE_ROOT/.codex-tools/playwright`，不要改业务项目依赖。`$WORKSPACE_ROOT` 指当前团队 workspace 根目录，通常是包含 `goomc/` 和 `.codex-tools/` 的目录；如果实际目录不同，按当前机器的 workspace root 推导。
+- 给 Codex 自身控制浏览器时，优先使用 workspace 级独立工具目录 `$WORKSPACE_ROOT/.codex-tools/playwright`，不要改业务项目依赖。`$WORKSPACE_ROOT` 指当前团队 workspace 根目录，通常是包含 `xomc/` 和 `.codex-tools/` 的目录；如果实际目录不同，按当前机器的 workspace root 推导。
 - 只有在验证项目自身 Playwright 测试或复现项目依赖问题时，才使用项目内 Playwright。
 - 在 macOS 终端 Codex 中，只要任务需要打开可见系统 Chrome、连接 GUI、访问 browser profile、保留最终现场，默认直接使用提权两段式；不要先用 MCP 内 `chromium.launch()` 试错。
 - 在 macOS 终端 Codex 中，凡是访问 Chrome CDP 端口 `127.0.0.1:9222`、读取/导航标签页、启动可见 Chrome、检查或清理托管 Chrome 进程，默认直接用 `require_escalated` 执行固定脚本或窄命令，不要先在普通沙箱里试一次再处理 `EPERM`。
@@ -196,7 +196,7 @@ const { chromium } = require('./omcmb/node_modules/playwright');
 本地约定：
 
 - Codex 浏览器控制默认使用 `$WORKSPACE_ROOT/.codex-tools/playwright/node_modules/playwright`。
-- 使用 OMC hoisted 依赖时，从 `$WORKSPACE_ROOT/goomc` 或当前 OMC 仓库根目录运行脚本。
+- 使用 OMC hoisted 依赖时，从 `$WORKSPACE_ROOT/xomc` 或当前 OMC 仓库根目录运行脚本。
 - 如果任务是验证 OMC 项目自身测试，才使用 `./omcmb/node_modules/playwright` 或 `./omcmb/node_modules/@playwright/test`。
 - OMC Docker 部署默认验证 `http://127.0.0.1:8081`，除非用户指定其他地址。
 - 除非明确需要并获批，不要运行 `npx playwright install`。
