@@ -16,39 +16,52 @@ import (
 	"go.uber.org/zap"
 )
 
-// runTimeRegex matches TR069 run time format like "40d 4h 58m" or "4h 58m" or "58m"
-// Captures: days, hours, minutes, seconds (each optional)
-var runTimeRegex = regexp.MustCompile(`(?:(\d+)d\s*)?(?:(\d+)h\s*)?(?:(\d+)m\s*)?(?:(\d+)s)?`)
+// runTimeTokenRegex matches TR069 run time tokens such as "40d", "4 hours",
+// "58m" or "30秒". Some Baicells firmwares report vendor uptime as formatted
+// text instead of the standard numeric Device.DeviceInfo.UpTime.
+var runTimeTokenRegex = regexp.MustCompile(`(?i)(\d+)\s*(days?|d|天|hours?|hrs?|hr|h|小时|minutes?|mins?|min|m|分钟|seconds?|secs?|sec|s|秒)`)
+var runTimeColonRegex = regexp.MustCompile(`^(\d+):(\d{1,2})(?::(\d{1,2}))?$`)
 
 // parseRunTimeToSeconds parses TR069 run time format to seconds.
-// Supported formats: "40d 4h 58m", "4h 58m", "58m", "40d 4h 58m 30s"
+// Supported formats: "40d 4h 58m", "2 days 5 hours", "58m",
+// "1天2小时3分钟4秒", "49:03:04" and plain numeric seconds.
 // Returns 0 if parsing fails.
 func parseRunTimeToSeconds(val string) int64 {
-	matches := runTimeRegex.FindStringSubmatch(strings.TrimSpace(val))
-	if matches == nil {
+	trimmed := strings.TrimSpace(val)
+	if trimmed == "" {
 		return 0
 	}
 
+	if seconds, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+		return seconds
+	}
+
+	if matches := runTimeColonRegex.FindStringSubmatch(trimmed); matches != nil {
+		first, _ := strconv.ParseInt(matches[1], 10, 64)
+		second, _ := strconv.ParseInt(matches[2], 10, 64)
+		if matches[3] == "" {
+			return first*3600 + second*60
+		}
+		third, _ := strconv.ParseInt(matches[3], 10, 64)
+		return first*3600 + second*60 + third
+	}
+
 	var totalSeconds int64
-	// matches[0] is the full match, matches[1-4] are days, hours, minutes, seconds
-	if matches[1] != "" {
-		if days, err := strconv.ParseInt(matches[1], 10, 64); err == nil {
-			totalSeconds += days * 86400
+	matches := runTimeTokenRegex.FindAllStringSubmatch(trimmed, -1)
+	for _, match := range matches {
+		n, err := strconv.ParseInt(match[1], 10, 64)
+		if err != nil {
+			continue
 		}
-	}
-	if matches[2] != "" {
-		if hours, err := strconv.ParseInt(matches[2], 10, 64); err == nil {
-			totalSeconds += hours * 3600
-		}
-	}
-	if matches[3] != "" {
-		if minutes, err := strconv.ParseInt(matches[3], 10, 64); err == nil {
-			totalSeconds += minutes * 60
-		}
-	}
-	if matches[4] != "" {
-		if seconds, err := strconv.ParseInt(matches[4], 10, 64); err == nil {
-			totalSeconds += seconds
+		switch strings.ToLower(match[2]) {
+		case "d", "day", "days", "天":
+			totalSeconds += n * 86400
+		case "h", "hr", "hrs", "hour", "hours", "小时":
+			totalSeconds += n * 3600
+		case "m", "min", "mins", "minute", "minutes", "分钟":
+			totalSeconds += n * 60
+		case "s", "sec", "secs", "second", "seconds", "秒":
+			totalSeconds += n
 		}
 	}
 
@@ -306,10 +319,10 @@ var universalInformMapping = map[string]string{
 	"Device.DeviceInfo.BTS.CurrentLac": "lac",
 	"Device.DeviceInfo.GSM.CurrentLac": "lac",
 	// migration 000003：GSM/BTS 专属（DeviceGSM.* TR069 路径同步）
-	"DeviceGSM.BscSelect":     "bsc_select",
-	"DeviceGSM.OmlRemoteIp":   "oml_remote_ip",
+	"DeviceGSM.BscSelect":      "bsc_select",
+	"DeviceGSM.OmlRemoteIp":    "oml_remote_ip",
 	"DeviceGSM.OmlRemoteIpBak": "oml_remote_ip_bak",
-	"DeviceGSM.IpaUnitId":     "ipa_unit_id",
+	"DeviceGSM.IpaUnitId":      "ipa_unit_id",
 	"Device.Services.FAPService.1.CellConfig.LTE.RAN.PHY.TDDFrame.SubFrameAssignment":      "subframe_assignment",
 	"Device.Services.FAPService.1.CellConfig.LTE.RAN.PHY.TDDFrame.SpecialSubframePatterns": "special_subframe",
 	"Device.Services.FAPService.1.CellConfig.LTE.RAN.PHY.PRACH.ZeroCorrelationZoneConfig":  "root_index",

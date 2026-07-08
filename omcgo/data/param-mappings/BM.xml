@@ -149,7 +149,7 @@
         <param name="Device.DeviceInfo.X_COM_ROLLBACK_CONTROL" standardPath="Device.DeviceInfo.ROLLBACK_CONTROL" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.X_COM_ROLLBACK_ENABLE" standardPath="Device.DeviceInfo.ROLLBACK_ENABLE" access="READ_ONLY" type="BOOLEAN" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.X_COM_SERVING_UNIT1_IPSEC_Address" standardPath="Device.DeviceInfo.SERVING_UNIT1_IPSEC_Address" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.DeviceInfo.X_COM_STATION_RUN_Time" standardPath="Device.DeviceInfo.UpTime" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.UpTime" standardPath="Device.DeviceInfo.UpTime" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.X_COM_UE_Count" standardPath="Device.DeviceInfo.UE_Count" access="READ_ONLY" type="INT" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.X_COM_U_BOOT_Version" standardPath="Device.DeviceInfo.U_BOOT_Version" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.cbsdCategory" standardPath="Device.DeviceInfo.cbsdCategory" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>

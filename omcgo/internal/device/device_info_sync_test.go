@@ -218,7 +218,7 @@ func TestLookupGPSHeight(t *testing.T) {
 		{
 			name: "BaiBNQ locked altitude wins over synchronization altitude",
 			paths: map[string]string{
-				"Device.FAP.GPS.LockedAltitude":            "168",
+				"Device.FAP.GPS.LockedAltitude":       "168",
 				"Device.FAP.Synchronization.Altitude": "514.49",
 			},
 			want: "168", ok: true,
@@ -718,11 +718,11 @@ func instanceTemplatesFor(t *testing.T, column string) []string {
 // 历史行为(BaiBNQ 等 1 个 cell 设备 sync 后 list 列仍是单值字符串)。
 func TestAggregateInstanceFields_SingleCell(t *testing.T) {
 	params := map[string]string{
-		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.PhyCellID":             "21",
-		"Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.TAC":                  "81",
-		"Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.NrcellIdentity":       "1153",
-		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.CellEnable.AdminState":    "1",
-		"Device.FAP.Ipsec.1.TUNNEL_GATEWAY":                                         "192.168.13.180",
+		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.PhyCellID":          "21",
+		"Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.TAC":               "81",
+		"Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.NrcellIdentity":    "1153",
+		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.CellEnable.AdminState": "1",
+		"Device.FAP.Ipsec.1.TUNNEL_GATEWAY":                                      "192.168.13.180",
 	}
 	fields := map[string]interface{}{}
 	aggregateInstanceFields(params, fields)
@@ -740,14 +740,14 @@ func TestAggregateInstanceFields_SingleCell(t *testing.T) {
 func TestAggregateInstanceFields_MultiCell(t *testing.T) {
 	params := map[string]string{
 		// cell 1 / cell 2：两个 PCI、两个 TAC、两个 NR Cell Identity、两个 admin_state
-		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.PhyCellID":             "21",
-		"Device.Services.FAPService.1.CellConfig.2.NR.RAN.RF.PhyCellID":             "22",
-		"Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.TAC":                  "81",
-		"Device.Services.FAPService.1.CellConfig.2.NR.CN.TA.1.TAC":                  "82",
-		"Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.NrcellIdentity":       "1153",
-		"Device.Services.FAPService.1.CellConfig.2.NR.CN.TA.1.NrcellIdentity":       "1154",
-		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.CellEnable.AdminState":    "1",
-		"Device.Services.FAPService.1.CellConfig.2.NR.RAN.CellEnable.AdminState":    "2",
+		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.PhyCellID":          "21",
+		"Device.Services.FAPService.1.CellConfig.2.NR.RAN.RF.PhyCellID":          "22",
+		"Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.TAC":               "81",
+		"Device.Services.FAPService.1.CellConfig.2.NR.CN.TA.1.TAC":               "82",
+		"Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.NrcellIdentity":    "1153",
+		"Device.Services.FAPService.1.CellConfig.2.NR.CN.TA.1.NrcellIdentity":    "1154",
+		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.CellEnable.AdminState": "1",
+		"Device.Services.FAPService.1.CellConfig.2.NR.RAN.CellEnable.AdminState": "2",
 		// IPSec 多隧道
 		"Device.FAP.Ipsec.1.TUNNEL_GATEWAY": "10.0.0.1",
 		"Device.FAP.Ipsec.2.TUNNEL_GATEWAY": "10.0.0.2",
@@ -833,6 +833,26 @@ func TestInfoSyncer_SyncFromParameters_OverlongIpsecCSVDoesNotAbortOtherFields(t
 	assert.NoError(t, err)
 }
 
+func TestInfoSyncer_SyncFromParameters_VendorRunTimeFallback(t *testing.T) {
+	deviceID := uuid.New()
+	params := []model.DeviceParameter{
+		{ParameterPath: ParamStationRunTime, ParameterValue: "2 days 5 hours 4 minutes"},
+	}
+
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+
+	infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, _ uuid.UUID, fields map[string]interface{}) error {
+		assert.Equal(t, int64(2*86400+5*3600+4*60), fields["run_time"])
+		return nil
+	}}
+	paramRepo := stubDeviceParamRepo{params: params}
+	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
+
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE)
+	assert.NoError(t, err)
+}
+
 func TestParseRunTimeToSeconds(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -858,6 +878,26 @@ func TestParseRunTimeToSeconds(t *testing.T) {
 			name:  "full format with seconds",
 			input: "1d 2h 3m 4s",
 			want:  86400 + 2*3600 + 3*60 + 4, // 93784
+		},
+		{
+			name:  "english long units",
+			input: "2 days 5 hours 4 minutes",
+			want:  2*86400 + 5*3600 + 4*60,
+		},
+		{
+			name:  "chinese units",
+			input: "2天5小时4分钟3秒",
+			want:  2*86400 + 5*3600 + 4*60 + 3,
+		},
+		{
+			name:  "plain numeric seconds",
+			input: "190800",
+			want:  190800,
+		},
+		{
+			name:  "colon hours minutes seconds",
+			input: "53:04:03",
+			want:  53*3600 + 4*60 + 3,
 		},
 		{
 			name:  "days only",
