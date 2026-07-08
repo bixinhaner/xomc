@@ -68,6 +68,8 @@ export interface BatchImportRequest {
 export interface BatchImportRowError {
   row: number;
   sn?: string;
+  /** 机器可读错误码（如 "device_not_found"），前端据此查 i18n；为空时降级展示 reason。 */
+  errorCode?: string;
   reason: string;
 }
 

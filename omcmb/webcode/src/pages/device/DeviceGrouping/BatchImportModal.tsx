@@ -399,7 +399,11 @@ export default function BatchImportModal({
               #{item.row}
             </Text>
             {item.sn ? <Tag style={{ marginRight: 8 }}>{item.sn}</Tag> : null}
-            <Text>{item.reason}</Text>
+            <Text>
+              {item.errorCode
+                ? t(`device.batchImport.error.${item.errorCode}`)
+                : item.reason}
+            </Text>
           </div>
         ))}
       </Flex>
