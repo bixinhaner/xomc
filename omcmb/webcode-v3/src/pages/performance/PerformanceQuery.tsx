@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { LineChart, Loader2, Play, RefreshCcw, Search } from 'lucide-react'
+import { Download, LineChart, Loader2, Play, RefreshCcw, Search } from 'lucide-react'
 
 import { PageShell } from '@/components/shell/PageShell'
 import { GlassPanel } from '@/components/ui/GlassPanel'
@@ -8,6 +8,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { cn } from '@/lib/utils'
 import { useIndicatorList } from '@core/hooks/api/useIndicatorsLibrary'
 import { useAggregatedMetricsByDevices, useMetricObjectsByDevices } from '@core/hooks/api/usePmQuery'
+import { useCreateKpiExport } from '@core/hooks/api/useKpiExport'
 import { useDeviceList } from '@core/hooks/api/useDevices'
 import type { DeviceType } from '@core/types/indicatorLibrary'
 import { deviceTypeToNetworkTech } from '@core/types/indicatorLibrary'
@@ -15,6 +16,7 @@ import type { Granularity } from '@core/types/pmDashboard'
 import type { Device } from '@core/types/device'
 import { getDefaultRangeHoursForGranularity } from '@core/utils/granularityTimeRange'
 import { getEffectiveLdns, type CellSelection } from '@core/utils/cellDrilldownUtils'
+import { buildDashboardExportParams, defaultExportTaskName } from '@core/utils/kpiExportParams'
 import { MetricTrendChart } from './MetricTrendChart'
 import { useT } from '@/hooks/useT'
 
@@ -73,15 +75,18 @@ export default function PerformanceQuery() {
   const [metricKeyword, setMetricKeyword] = useState('')
   const [deviceKeyword, setDeviceKeyword] = useState('')
   const [submitted, setSubmitted] = useState<Submitted | null>(null)
+  const [exportNotice, setExportNotice] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null)
   // #619：测量对象下钻。
   const [cellSel, setCellSel] = useState<CellSelection>({})
   // #619：提交后才生效的快照——勾选变化不立即重查，等点「查询」才同步。
   const [submittedCellSel, setSubmittedCellSel] = useState<CellSelection>({})
+  const createExport = useCreateKpiExport()
 
   useEffect(() => {
     setDeviceSn('')
     setSelectedMetrics([])
     setSubmitted(null)
+    setExportNotice(null)
     setRangeHoursDirty(false)
     setCellSel({})
     setSubmittedCellSel({})
@@ -191,6 +196,31 @@ export default function PerformanceQuery() {
       startTime: start.toISOString(),
       endTime: end.toISOString(),
     })
+    setExportNotice(null)
+  }
+
+  const exportSubmitted = () => {
+    if (!submitted) return
+    const params = buildDashboardExportParams({
+      technology: tech,
+      deviceSns: [submitted.deviceSn],
+      metricPaths: submitted.metricPaths,
+      granularity: submitted.granularity,
+      startTime: submitted.startTime,
+      endTime: submitted.endTime,
+      objectLdns: effectiveLdns.length > 0 ? effectiveLdns : undefined,
+    })
+    createExport.mutate(
+      {
+        sourceType: 'kpi_query',
+        params,
+        taskName: defaultExportTaskName('kpi_query'),
+      },
+      {
+        onSuccess: () => setExportNotice({ kind: 'ok', msg: t('kpiExport.export.submitted') }),
+        onError: (e) => setExportNotice({ kind: 'err', msg: e instanceof Error ? e.message : t('kpiExport.export.submitFailed', { reason: '' }) }),
+      },
+    )
   }
 
   return (
@@ -413,7 +443,22 @@ export default function PerformanceQuery() {
             <NeonButton icon={<RefreshCcw />} onClick={() => refetch()} disabled={!submitted}>
               {t('perf.kpiQuery.refresh')}
             </NeonButton>
+            <NeonButton icon={<Download />} onClick={exportSubmitted} disabled={!submitted || createExport.isPending}>
+              {t('kpiExport.export.button')}
+            </NeonButton>
           </div>
+          {exportNotice ? (
+            <div
+              className={cn(
+                'border px-3 py-2 font-mono text-[11px]',
+                exportNotice.kind === 'ok'
+                  ? 'border-emerald-400/40 bg-emerald-500/8 text-emerald-300'
+                  : 'border-rose-500/40 bg-rose-500/8 text-rose-300',
+              )}
+            >
+              {exportNotice.msg}
+            </div>
+          ) : null}
         </div>
 
         {/* 右：结果 */}

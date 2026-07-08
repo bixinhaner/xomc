@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { RefreshCcw, Search } from 'lucide-react'
+import { Download, RefreshCcw, Search } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -24,7 +24,9 @@ import {
 import { cn } from '@/lib/utils'
 
 import { useQueryTemplates, useAggregatedMetricsByDevices, useMetricObjectsByDevices } from '@core/hooks/api/usePmQuery'
+import { useCreateKpiExport } from '@core/hooks/api/useKpiExport'
 import { pivotLongToWide, formatPivotNumber } from '@core/utils/pmPivotTransform'
+import { buildDashboardExportParams, defaultExportTaskName } from '@core/utils/kpiExportParams'
 import type { QueryTemplate } from '@core/types/pmQuery'
 import type { AggregatedRow, Granularity } from '@core/types/pmDashboard'
 import { useT, type TranslateFn } from '@/hooks/useT'
@@ -148,6 +150,8 @@ export function KPIQueryPage() {
   const [cellSel, setCellSel] = useState<CellSelection>({})
   // #619：提交后才生效的快照——勾选变化不立即重查，等点「查询」才同步。
   const [submittedCellSel, setSubmittedCellSel] = useState<CellSelection>({})
+  const [exportNotice, setExportNotice] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null)
+  const createExport = useCreateKpiExport()
 
   const {
     data: templates,
@@ -204,6 +208,31 @@ export function KPIQueryPage() {
     setRun(false)
     setCellSel({})
     setSubmittedCellSel({})
+    setExportNotice(null)
+  }
+
+  const handleExport = () => {
+    if (!selected || !range || deviceSns.length === 0 || metricPaths.length === 0) return
+    const params = buildDashboardExportParams({
+      technology: selected.payload.deviceType ? deviceTypeToNetworkTech(selected.payload.deviceType as 'ENB' | 'GNB' | 'GSM') : '',
+      deviceSns,
+      metricPaths,
+      granularity,
+      startTime: range.start,
+      endTime: range.end,
+      objectLdns: effectiveLdns.length > 0 ? effectiveLdns : undefined,
+    })
+    createExport.mutate(
+      {
+        sourceType: 'kpi_query',
+        params,
+        taskName: defaultExportTaskName('kpi_query'),
+      },
+      {
+        onSuccess: () => setExportNotice({ kind: 'ok', msg: t('kpiExport.export.submitted') }),
+        onError: (e) => setExportNotice({ kind: 'err', msg: e instanceof Error ? e.message : t('kpiExport.export.submitFailed', { reason: '' }) }),
+      },
+    )
   }
 
   return (
@@ -297,10 +326,20 @@ export function KPIQueryPage() {
                       // #619：点查询时才把勾选起到快照。
                       setSubmittedCellSel(cellSel)
                       setRun(true)
+                      setExportNotice(null)
                       if (run) agg.refetch()
                     }}
                   >
                     {t('perf.kpiQuery.runQuery')}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!run || deviceSns.length === 0 || metricPaths.length === 0 || createExport.isPending}
+                    onClick={handleExport}
+                  >
+                    <Download className="size-4" />
+                    {t('kpiExport.export.button')}
                   </Button>
                 </div>
                 <div className="flex flex-wrap gap-1.5 text-xs">
@@ -314,6 +353,18 @@ export function KPIQueryPage() {
                     {t('perf.kpiQuery.noDeviceLinked')}
                   </div>
                 )}
+                {exportNotice ? (
+                  <div
+                    className={cn(
+                      'mt-2 rounded-md border px-3 py-2 text-xs',
+                      exportNotice.kind === 'ok'
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300'
+                        : 'border-destructive/30 bg-destructive/10 text-destructive',
+                    )}
+                  >
+                    {exportNotice.msg}
+                  </div>
+                ) : null}
                 {/* #619：测量对象下钻 */}
                 {deviceSns.length > 0 && Object.keys(byDevice).length > 0 && (
                   <div className="mt-3 border-t pt-3">

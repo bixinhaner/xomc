@@ -96,7 +96,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 // ── 请求/响应 DTO ─────────────────────────────────────────────────────────
 
 type createRequestDTO struct {
-	SourceType string          `json:"source_type" binding:"required,oneof=dashboard adhoc"`
+	SourceType string          `json:"source_type" binding:"required,oneof=dashboard kpi_query adhoc"`
 	Params     json.RawMessage `json:"params"`
 	TaskName   string          `json:"task_name"`
 }
@@ -365,7 +365,9 @@ func defaultTaskName(name string, source SourceType) string {
 		return name
 	}
 	label := "仪表盘"
-	if source == SourceAdhoc {
+	if source == SourceKpiQuery {
+		label = "指标查询"
+	} else if source == SourceAdhoc {
 		label = "任务结果"
 	}
 	return "KPI导出_" + label + "_" + time.Now().Format("20060102_150405")

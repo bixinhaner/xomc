@@ -108,6 +108,7 @@ describe('defaultExportTaskName', () => {
   it('按来源 + 时间戳生成可读名', () => {
     const d = new Date(2026, 5, 4, 21, 23, 8); // 2026-06-04 21:23:08 本地
     expect(defaultExportTaskName('dashboard', d)).toBe('KPI导出_仪表盘_20260604_212308');
+    expect(defaultExportTaskName('kpi_query', d)).toBe('KPI导出_指标查询_20260604_212308');
     expect(defaultExportTaskName('adhoc', d)).toBe('KPI导出_任务结果_20260604_212308');
   });
 });

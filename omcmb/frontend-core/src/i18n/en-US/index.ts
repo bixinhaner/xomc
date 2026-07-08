@@ -5061,6 +5061,7 @@ const messages: Record<string, string> = {
   // ── KPI data export (KPI-EXPORT) ──────────────────────────────────────────
   'kpiExport.tab.title':                      'KPI Export',
   'kpiExport.source.dashboard':               'Dashboard',
+  'kpiExport.source.kpiQuery':                'KPI Query',
   'kpiExport.source.adhoc':                   'Task Result',
   'kpiExport.status.pending':                 'Pending',
   'kpiExport.status.running':                 'Running',

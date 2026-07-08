@@ -7,6 +7,7 @@ import type { KpiExportSource, KpiExportStatus, KpiExportTask } from '@core/type
 /** 来源标签 i18n key。 */
 export const SOURCE_LABEL_KEY: Record<KpiExportSource, string> = {
   dashboard: 'kpiExport.source.dashboard',
+  kpi_query: 'kpiExport.source.kpiQuery',
   adhoc: 'kpiExport.source.adhoc',
 };
 

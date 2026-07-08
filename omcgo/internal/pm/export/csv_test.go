@@ -81,6 +81,59 @@ func TestWideCSVWriter_PivotSameKey(t *testing.T) {
 	assert.Equal(t, "2.5", row[6])                 // C002 列
 }
 
+func TestWideCSVWriter_KpiQueryMeasurementObjectColumn(t *testing.T) {
+	var buf bytes.Buffer
+	cw, err := newWideCSVWriterWithMeasurementObject(&buf, "设备 SN", false, true, wideTestCols(), "-", nil)
+	require.NoError(t, err)
+
+	tm := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
+	rows := []ExportRow{
+		{
+			Device:     "LTE-SN",
+			CellPLMN:   "Cellid=111,PLMN=46068",
+			Time:       tm,
+			StartTime:  tm,
+			EndTime:    tm.Add(time.Hour),
+			MetricCode: "K001",
+			Value:      1.5,
+		},
+		{
+			Device:     "NR-SN",
+			CellPLMN:   "Type=Cell,Mode=SA,gNBID=123,NrCGI=46068123456",
+			Time:       tm,
+			StartTime:  tm,
+			EndTime:    tm.Add(time.Hour),
+			MetricCode: "K001",
+			Value:      2.5,
+		},
+		{
+			Device:     "GSM-SN",
+			CellPLMN:   "",
+			Time:       tm,
+			StartTime:  tm,
+			EndTime:    tm.Add(time.Hour),
+			MetricCode: "K001",
+			Value:      3.5,
+		},
+	}
+	for _, row := range rows {
+		require.NoError(t, cw.AddRow(row))
+	}
+	require.NoError(t, cw.Flush())
+
+	recs, err := csv.NewReader(strings.NewReader(strings.TrimPrefix(buf.String(), string(utf8BOM)))).ReadAll()
+	require.NoError(t, err)
+	require.Len(t, recs, 4)
+	assert.Equal(t, []string{"开始时间", "结束时间", "设备 SN", "测量对象", "上行吞吐", "下行包数"}, recs[0])
+	byDevice := map[string][]string{}
+	for _, row := range recs[1:] {
+		byDevice[row[2]] = row
+	}
+	assert.Equal(t, "Cellid=111,PLMN=46068", byDevice["LTE-SN"][3])
+	assert.Equal(t, "Type=Cell,Mode=SA,gNBID=123,NrCGI=46068123456", byDevice["NR-SN"][3])
+	assert.Equal(t, "-", byDevice["GSM-SN"][3])
+}
+
 func TestWideCSVWriter_FormatsTimeInOutputLocation(t *testing.T) {
 	var buf bytes.Buffer
 	shanghai, err := time.LoadLocation("Asia/Shanghai")

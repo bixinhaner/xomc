@@ -115,14 +115,14 @@ export function validateDashboardExportSelection(
 
 /** 默认导出任务名：KPI导出_{来源}_{时间戳}。后端不传也会自动生成，这里前端给个可读名。 */
 export function defaultExportTaskName(
-  source: 'dashboard' | 'adhoc',
+  source: 'dashboard' | 'kpi_query' | 'adhoc',
   now: Date = new Date(),
 ): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   const ts = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(
     now.getHours(),
   )}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-  const label = source === 'dashboard' ? '仪表盘' : '任务结果';
+  const label = source === 'dashboard' ? '仪表盘' : source === 'kpi_query' ? '指标查询' : '任务结果';
   return `KPI导出_${label}_${ts}`;
 }
 

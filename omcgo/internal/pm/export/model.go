@@ -3,10 +3,10 @@
 // 设计文档：~/Documents/notes/PM功能设计/kpi-export-design-20260604.md
 //
 // 导出走异步任务：
-//   1. 建任务（POST /pm/exports）→ 落表 status=pending + 入队 async_jobs（job_type=pm_kpi_export）
-//   2. worker 抢 job → 取数 → 流式写 CSV → 传对象存储 → 回填 file_path/file_size/row_count，status=succeeded
-//      （T1 本阶段只建 worker 桩：认领 job→标 running→暂不真生成，真生成留 T2）
-//   3. 任务管理 Tab 看状态；文件管理 Tab（只列已成功 + 文件就绪）下载
+//  1. 建任务（POST /pm/exports）→ 落表 status=pending + 入队 async_jobs（job_type=pm_kpi_export）
+//  2. worker 抢 job → 取数 → 流式写 CSV → 传对象存储 → 回填 file_path/file_size/row_count，status=succeeded
+//     （T1 本阶段只建 worker 桩：认领 job→标 running→暂不真生成，真生成留 T2）
+//  3. 任务管理 Tab 看状态；文件管理 Tab（只列已成功 + 文件就绪）下载
 //
 // 一张表 pm_kpi_export_tasks 喂两个视图，区别在过滤条件（文件管理只筛 succeeded 且 file_path 非空）。
 package export
@@ -19,17 +19,19 @@ import (
 
 // SourceType 导出来源。
 //   - dashboard：仪表盘曲线导出（带当前筛选，全量不受 5000 行上限约束）
+//   - kpi_query：指标查询页导出（复用 dashboard 取数，CSV 固定列贴近查询页表格）
 //   - adhoc：adhoc 聚合任务结果导出
 type SourceType string
 
 const (
 	SourceDashboard SourceType = "dashboard"
+	SourceKpiQuery  SourceType = "kpi_query"
 	SourceAdhoc     SourceType = "adhoc"
 )
 
 // Valid 校验来源是否受支持。
 func (s SourceType) Valid() bool {
-	return s == SourceDashboard || s == SourceAdhoc
+	return s == SourceDashboard || s == SourceKpiQuery || s == SourceAdhoc
 }
 
 // Status 导出任务生命周期状态。

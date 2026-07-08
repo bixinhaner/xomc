@@ -61,8 +61,8 @@ func (s *stubRepo) MarkSucceeded(_ context.Context, _ uuid.UUID, _, _ string, _,
 func (s *stubRepo) MarkFailed(_ context.Context, _ uuid.UUID, _ string) error { return nil }
 
 type stubEnqueuer struct {
-	inserted []asyncjob.InsertRequest
-	insertID uuid.UUID
+	inserted  []asyncjob.InsertRequest
+	insertID  uuid.UUID
 	insertErr error
 }
 
@@ -114,6 +114,20 @@ func TestService_Create_InvalidSourceType(t *testing.T) {
 	// 非法来源不落表、不入队
 	assert.Nil(t, repo.created)
 	assert.Empty(t, enq.inserted)
+}
+
+func TestService_Create_KpiQuerySourceType(t *testing.T) {
+	taskID := uuid.New()
+	repo := &stubRepo{createID: taskID, getTask: &Task{ID: taskID, Status: StatusPending, SourceType: SourceKpiQuery}}
+	enq := &stubEnqueuer{insertID: uuid.New()}
+	svc := NewService(repo, enq)
+
+	task, err := svc.Create(context.Background(), CreateRequest{SourceType: SourceKpiQuery})
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	require.NotNil(t, repo.created)
+	assert.Equal(t, SourceKpiQuery, repo.created.SourceType)
+	require.Len(t, enq.inserted, 1)
 }
 
 func TestService_Create_NilJobRepo_Rejects(t *testing.T) {

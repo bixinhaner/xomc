@@ -362,7 +362,7 @@ export default function KPIQuery() {
   };
 
   // 导出取「最近一次实际查询」的快照（submittedPayload/submittedRange），而非表单实时值，
-  // 保证"导出=屏幕所见"。复用 dashboard 异步导出链路：建任务 → 文件管理下载，后端零改。
+  // 保证"导出=屏幕所见"。复用 dashboard 取数链路，但用 kpi_query 来源输出查询页表格列。
   const handleExport = () => {
     if (!submittedPayload || !submittedRange) return; // 按钮已禁用，双保险
     const sel = {
@@ -372,7 +372,7 @@ export default function KPIQuery() {
     const ts = dayjs().format('YYYYMMDD_HHmmss');
     createExport.mutate(
       {
-        sourceType: 'dashboard',
+        sourceType: 'kpi_query',
         params: buildDashboardExportParams(sel),
         taskName: t('perf.kpiQuery.exportTaskName', { ts }), // 与仪表盘导出区分，便于任务列表辨识
       },

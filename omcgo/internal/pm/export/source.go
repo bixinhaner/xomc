@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -287,8 +288,13 @@ type colKey struct {
 	mtype string
 }
 
-// discoverMetricColumns 发现 dashboard 源（device / aggregate 维度）的指标列集，按编号升序。
+// discoverMetricColumns 发现 dashboard 源（device / aggregate 维度）的指标列集。
+// 前端明确传 metric_paths 时，导出列必须按请求全集保留：页面 fill_empty 会让“窗口内无真实行但已选择”的指标仍显示为占位列。
+// 未传 metric_paths（全量导出）才回退到数据侧 DISTINCT 发现。
 func discoverMetricColumns(ctx context.Context, db PgQuerier, table string, metricPaths []string, start, end time.Time) ([]colKey, error) {
+	if len(metricPaths) > 0 {
+		return requestedMetricColumns(metricPaths), nil
+	}
 	sqlStr, args := buildDistinctMetricsSQL(table, metricPaths, start, end)
 	rows, err := db.Query(ctx, sqlStr, args...)
 	if err != nil {
@@ -296,6 +302,30 @@ func discoverMetricColumns(ctx context.Context, db PgQuerier, table string, metr
 	}
 	defer rows.Close()
 	return scanColKeys(rows)
+}
+
+func requestedMetricColumns(metricPaths []string) []colKey {
+	out := make([]colKey, 0, len(metricPaths))
+	seen := make(map[string]struct{}, len(metricPaths))
+	for _, raw := range metricPaths {
+		code := strings.TrimSpace(raw)
+		if code == "" {
+			continue
+		}
+		if _, ok := seen[code]; ok {
+			continue
+		}
+		seen[code] = struct{}{}
+		out = append(out, colKey{code: code, mtype: metricColumnType(code)})
+	}
+	return out
+}
+
+func metricColumnType(code string) string {
+	if strings.HasPrefix(strings.ToUpper(code), "C") {
+		return string(metrics.MetricTypeCounter)
+	}
+	return string(metrics.MetricTypeKPI)
 }
 
 // discoverAdhocColumns 发现 adhoc 源的指标列集，按编号升序。
