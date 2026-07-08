@@ -1223,6 +1223,8 @@ const messages: Record<string, string> = {
   'device.cell.dispatching':              'Dispatching...',
   'device.cell.currentIp':                'Current IP: {ip}',
   'device.cell.mmeIpPlmnExtra':           'Each row is one MME IP + PLMN pair (add/delete/edit supported)',
+  'device.cell.mmeIpPlmnLimitHint':       'This device supports at most {max} MMEs; values above the limit cannot be dispatched',
+  'device.cell.mmeIpPlmnLimitReached':    'At most {max} MMEs can be configured',
   'device.cell.bindSelectPlaceholder':    'Select a WAN/VLAN IP address',
   'device.type.eNB':        'eNB Base Station',
   'device.type.gNB':        'gNB Base Station',

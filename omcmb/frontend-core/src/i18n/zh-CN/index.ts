@@ -1225,6 +1225,8 @@ const messages: Record<string, string> = {
   'device.cell.dispatching':              '下发中...',
   'device.cell.currentIp':                '当前 IP: {ip}',
   'device.cell.mmeIpPlmnExtra':           '每行一组 MME IP + PLMN，支持新增/删除/编辑',
+  'device.cell.mmeIpPlmnLimitHint':       '当前设备最多支持 {max} 个 MME，超过上限无法下发',
+  'device.cell.mmeIpPlmnLimitReached':    '最多只能配置 {max} 个 MME',
   'device.cell.bindSelectPlaceholder':    '请选择 WAN/VLAN IP 地址',
   'device.type.eNB':        'eNB基站',
   'device.type.gNB':        'gNB基站',
