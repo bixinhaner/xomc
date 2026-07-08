@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from 'react';
-import { Button, Card, Col, Form, Input, Row, Select, Space, Spin, Table, Tag, Tooltip, Typography, message, notification } from 'antd';
+import { Alert, Button, Card, Col, Form, Input, Row, Select, Space, Spin, Table, Tag, Tooltip, Typography, message, notification } from 'antd';
 import type { FormInstance } from 'antd';
 import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, DeleteOutlined, PlusOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
@@ -17,7 +17,14 @@ import {
 import type { DeviceParameter, ParameterSchemaItem, ParameterUpdateRequest } from '@core/types/deviceParameter';
 import type { DeviceTaskStatus } from '@core/types/deviceTask';
 import type { QuickSettingsGroup, QuickSettingsParam } from '@core/types/quicksettings';
-import { applyInstanceContext, getEffectiveEnumMeta, getFeedbackScopeContext, validateValue, type QuickSettingsInstanceContext } from './validators';
+import {
+  applyInstanceContext,
+  getEffectiveEnumMeta,
+  getFeedbackScopeContext,
+  validateMmeIpPlmnLimit,
+  validateValue,
+  type QuickSettingsInstanceContext,
+} from './validators';
 import { inferDeviceTimeMode, isNrNetworkType, mapDeviceTimeModeLabel } from './deviceTimeMode';
 import { formatDeviceFaultBrief } from './MultiInstanceTable';
 import { useT } from '@/hooks/useT';
@@ -304,6 +311,7 @@ interface MmeIpPlmnTableProps {
   onChange?: (value: MmeIpPlmnRow[]) => void;
   disabled?: boolean;
   locale: 'zh-CN' | 'en-US';
+  maxRows?: number;
 }
 
 function normalizeMmeIpPlmnRows(rows: MmeIpPlmnRow[]): MmeIpPlmnRow[] {
@@ -356,10 +364,11 @@ function toMmeIpPlmnRows(value: unknown): MmeIpPlmnRow[] {
   return parseMmeIpPlmnList(value);
 }
 
-function MmeIpPlmnTable({ value = [], onChange, disabled = false, locale }: MmeIpPlmnTableProps) {
+function MmeIpPlmnTable({ value = [], onChange, disabled = false, locale, maxRows }: MmeIpPlmnTableProps) {
   void locale;
   const t = useT();
   const rows = isMmeIpPlmnRows(value) ? value : [];
+  const maxReached = maxRows !== undefined && normalizeMmeIpPlmnRows(rows).length >= maxRows;
 
   const setRows = (nextRows: MmeIpPlmnRow[]) => {
     onChange?.(nextRows);
@@ -370,6 +379,10 @@ function MmeIpPlmnTable({ value = [], onChange, disabled = false, locale }: MmeI
   };
 
   const addRow = () => {
+    if (maxReached) {
+      message.warning(t('device.cell.mmeIpPlmnLimitReached', { max: maxRows ?? 0 }));
+      return;
+    }
     setRows([
       ...rows,
       { key: `row-${Date.now()}-${rows.length}`, mmeIp: '', plmn: '' },
@@ -435,10 +448,17 @@ function MmeIpPlmnTable({ value = [], onChange, disabled = false, locale }: MmeI
       <Button
         icon={<PlusOutlined />}
         onClick={addRow}
-        disabled={disabled}
+        disabled={disabled || maxReached}
       >
         {t('device.cell.addRow')}
       </Button>
+      {maxRows !== undefined && (
+        <Alert
+          type={maxReached ? 'warning' : 'info'}
+          showIcon
+          message={t('device.cell.mmeIpPlmnLimitHint', { max: maxRows })}
+        />
+      )}
     </Space>
   );
 }
@@ -956,7 +976,13 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
             : undefined);
 
       if (special?.kind === 'mme-ip-plmn-table') {
-        values[p.name] = normalizeMmeIpPlmnRows(toMmeIpPlmnRows(values[p.name]));
+        const normalizedRows = normalizeMmeIpPlmnRows(toMmeIpPlmnRows(values[p.name]));
+        values[p.name] = normalizedRows;
+        const limitErr = validateMmeIpPlmnLimit(normalizedRows, p.maxValue);
+        if (limitErr) {
+          errors[p.name] = limitErr;
+          continue;
+        }
       }
 
       const newVal = special?.kind === 'mme-ip-plmn-table'
@@ -1259,13 +1285,16 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                 (sItem?.type as never) ?? 'string',
                 sItem?.constraints,
               );
+              const mmeLimitErr = special?.kind === 'mme-ip-plmn-table'
+                ? validateMmeIpPlmnLimit(toMmeIpPlmnRows(value), p.maxValue)
+                : null;
               // XML 驱动的 extraInfoPath 范围校验:在 schema 校验之后追加;
               // schema 已报错时优先展示 schema 错误,避免双错信息互盖。
               const extraBounds = extraInfoBoundsByName.get(name);
-              const rangeErr = !err && extraBounds
+              const rangeErr = !err && !mmeLimitErr && extraBounds
                 ? validateExtraInfoBounds(normalizedValue, extraBounds)
                 : null;
-              const finalErr = err ?? rangeErr;
+              const finalErr = err ?? mmeLimitErr ?? rangeErr;
               if (finalErr) next[name] = finalErr;
               else delete next[name];
               // 镜像字段同时清/重新校验（值刚被程序性写入，旧 error 应失效）
@@ -1468,7 +1497,11 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                       options={effectiveBindOptions}
                     />
                   ) : special?.kind === 'mme-ip-plmn-table' ? (
-                    <MmeIpPlmnTable disabled={!finalWritable} locale={locale} />
+                    <MmeIpPlmnTable
+                      disabled={!finalWritable}
+                      locale={locale}
+                      maxRows={p.maxValue}
+                    />
                   ) : isEnum ? (
                     <Select
                       disabled={!finalWritable}
