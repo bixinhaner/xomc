@@ -128,7 +128,7 @@ export function defaultExportTaskName(
 
 /**
  * 指标查询页"最近一次查询快照"→ dashboard 导出筛选。维度固定 device（页面就是按设备查）。
- * - 不发 object_ldns（指标查询页不做小区下钻，导该设备全部小区/PLMN，与页面一致）。
+ * - 指标查询页如做小区下钻，调用方会把 object_ldns 合并进返回的 selection，保证导出与页面一致。
  * - 不发 metric_type（与出图同口径，counter/kpi 由 metric_paths 隐含）。
  *   这两点由 buildDashboardExportParams 天然处理。
  */

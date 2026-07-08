@@ -5,6 +5,8 @@
  * 本文件仅保留 /pm/metrics/aggregated 聚合查询所需类型，被指标查询页 / 设备详情 KPI 等复用。
  */
 
+import { normalizePmMetricValue } from '../utils/pmMetricValue';
+
 // 数据维度
 export type Dimension = 'device' | 'device_group';
 
@@ -95,7 +97,7 @@ export function mapBackendAggregatedRow(b: BackendAggregatedRow): AggregatedRow 
     displayName: b.display_name || undefined,
     metricType: (b.metric_type as 'counter' | 'kpi') ?? 'counter',
     // filled=true 是 fill_empty 占位行；metric_value=null 是入库缺值行，前端统一显示 "-"。
-    metricValue: b.filled ? null : b.metric_value,
+    metricValue: b.filled ? null : normalizePmMetricValue(b.metric_value),
     statisType: b.statis_type,
     granularity: b.granularity as Granularity,
     time: b.time,

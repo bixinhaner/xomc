@@ -365,7 +365,10 @@ export default function KPIQuery() {
   // 保证"导出=屏幕所见"。复用 dashboard 异步导出链路：建任务 → 文件管理下载，后端零改。
   const handleExport = () => {
     if (!submittedPayload || !submittedRange) return; // 按钮已禁用，双保险
-    const sel = kpiQueryToDashboardSelection(submittedPayload, submittedRange);
+    const sel = {
+      ...kpiQueryToDashboardSelection(submittedPayload, submittedRange),
+      objectLdns: effectiveLdns.length > 0 ? effectiveLdns : undefined,
+    };
     const ts = dayjs().format('YYYYMMDD_HHmmss');
     createExport.mutate(
       {

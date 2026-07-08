@@ -17,6 +17,7 @@
  */
 
 import type { AdhocResultRow, AdhocDimension } from '@core/types/pmAdhoc';
+import { isFinitePmMetricValue } from '@core/utils/pmMetricValue';
 
 export type MetricSeriesValue = number | '-';
 
@@ -182,7 +183,9 @@ export function buildMetricCharts(
       m.seriesName.set(key, seriesLabelOf(key, dimension, readableName));
     }
     // 同 (系列, 桶) 多行取后到值（正常一行一值）。
-    pts.set(r.startTime, r.metricValue);
+    if (isFinitePmMetricValue(r.metricValue)) {
+      pts.set(r.startTime, r.metricValue);
+    }
   });
 
   // #194：legend 固定全集——某指标公式分母 counter 缺失 / 为 0 时该 (组×桶) 整条被后端跳过

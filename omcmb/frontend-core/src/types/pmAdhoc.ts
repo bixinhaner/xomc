@@ -1,3 +1,5 @@
+import { normalizePmMetricValue } from '../utils/pmMetricValue';
+
 /**
  * T-0164-P7 / G7 自定义聚合任务前端类型 + Backend wire types。
  */
@@ -113,7 +115,7 @@ export interface AdhocResultRow {
   // KPI 行 metricPath 是 K 编号；displayName 为后端回填的友好名（PLMN 级带标记）。counter 行 = metricPath。
   displayName?: string;
   metricType: string;
-  metricValue: number;
+  metricValue: number | null;
   statisType?: string;
   granularity: string;
   time: string;
@@ -194,7 +196,7 @@ export interface BackendAdhocResultRow {
   metric_path: string;
   display_name?: string;
   metric_type: string;
-  metric_value: number;
+  metric_value: number | null;
   statis_type?: string;
   granularity: string;
   time: string;
@@ -277,7 +279,7 @@ export function mapBackendAdhocResult(b: BackendAdhocResultRow): AdhocResultRow 
     metricPath: b.metric_path,
     displayName: b.display_name || undefined,
     metricType: b.metric_type,
-    metricValue: b.metric_value,
+    metricValue: normalizePmMetricValue(b.metric_value),
     statisType: b.statis_type,
     granularity: b.granularity,
     time: b.time,

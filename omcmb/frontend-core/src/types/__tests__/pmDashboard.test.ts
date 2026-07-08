@@ -54,6 +54,11 @@ describe('mapBackendAggregatedRow — 占位行 / 全零 UUID / 类型漂移', (
     expect(r.filled).toBeUndefined();
   });
 
+  it('metric_value 为 NaN/Infinity 时按缺值规整为 null', () => {
+    expect(mapBackendAggregatedRow(row({ metric_value: Number.NaN })).metricValue).toBeNull();
+    expect(mapBackendAggregatedRow(row({ metric_value: Number.POSITIVE_INFINITY })).metricValue).toBeNull();
+  });
+
   it('object_ldn null 透传；extra 缺省 → {}', () => {
     const r = mapBackendAggregatedRow(row({ object_ldn: null }));
     expect(r.objectLdn).toBeNull();
