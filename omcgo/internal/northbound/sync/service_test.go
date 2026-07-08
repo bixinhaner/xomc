@@ -29,6 +29,9 @@ func (m *mockDeviceRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.Devi
 func (m *mockDeviceRepo) GetBySerialNumber(ctx context.Context, sn string) (*model.Device, error) {
 	return nil, nil
 }
+func (m *mockDeviceRepo) GetDeletedBySerialNumber(_ context.Context, _ string, _ model.CarrierCode) (*model.Device, error) {
+	return nil, nil
+}
 func (m *mockDeviceRepo) Update(ctx context.Context, d *model.Device) error { return nil }
 func (m *mockDeviceRepo) Delete(ctx context.Context, id uuid.UUID) error    { return nil }
 func (m *mockDeviceRepo) List(ctx context.Context, filter device.DeviceFilter) (*model.ListResponse[model.Device], error) {
@@ -134,14 +137,24 @@ func (m *mockAlarmStore) ListHistory(ctx context.Context, filter alarm.AlarmFilt
 func (m *mockAlarmStore) Statistics(ctx context.Context, filter alarm.AlarmFilter) (*alarm.AlarmStatistics, error) {
 	return &alarm.AlarmStatistics{}, nil
 }
-func (m *mockAlarmStore) BatchAcknowledge(_ context.Context, _ []uuid.UUID, _ string, _ string) error { return nil }
-func (m *mockAlarmStore) BatchClear(_ context.Context, _ []uuid.UUID, _ string, _ string) error { return nil }
-func (m *mockAlarmStore) HistoryStatistics(_ context.Context, _ alarm.AlarmFilter) (*alarm.AlarmStatistics, error) { return nil, nil }
+func (m *mockAlarmStore) BatchAcknowledge(_ context.Context, _ []uuid.UUID, _ string, _ string) error {
+	return nil
+}
+func (m *mockAlarmStore) BatchClear(_ context.Context, _ []uuid.UUID, _ string, _ string) error {
+	return nil
+}
+func (m *mockAlarmStore) HistoryStatistics(_ context.Context, _ alarm.AlarmFilter) (*alarm.AlarmStatistics, error) {
+	return nil, nil
+}
 func (m *mockAlarmStore) BatchUnacknowledge(_ context.Context, _ []uuid.UUID) error { return nil }
-func (m *mockAlarmStore) BatchHistoryAcknowledge(_ context.Context, _ []uuid.UUID, _ string, _ string) error { return nil }
-func (m *mockAlarmStore) BatchHistoryUnacknowledge(_ context.Context, _ []uuid.UUID) error { return nil }
+func (m *mockAlarmStore) BatchHistoryAcknowledge(_ context.Context, _ []uuid.UUID, _ string, _ string) error {
+	return nil
+}
+func (m *mockAlarmStore) BatchHistoryUnacknowledge(_ context.Context, _ []uuid.UUID) error {
+	return nil
+}
 func (m *mockAlarmStore) BatchHistoryDelete(_ context.Context, _ []uuid.UUID) error { return nil }
-func (m *mockAlarmStore) MarkRead(_ context.Context, _ uuid.UUID) error { return nil }
+func (m *mockAlarmStore) MarkRead(_ context.Context, _ uuid.UUID) error             { return nil }
 
 type mockCounterRepo struct {
 	counters []model.PMCounter
@@ -267,11 +280,11 @@ func TestFullSync_Device(t *testing.T) {
 func TestFullSync_Alarm(t *testing.T) {
 	alarms := []model.Alarm{
 		{
-			ID:        uuid.New(),
-			DeviceSN:  "SN001",
+			ID:              uuid.New(),
+			DeviceSN:        "SN001",
 			AlarmIdentifier: "A001",
-			Severity:  model.AlarmCritical,
-			Status:    model.AlarmActive,
+			Severity:        model.AlarmCritical,
+			Status:          model.AlarmActive,
 		},
 	}
 
@@ -333,10 +346,10 @@ func TestFullSync_UnsupportedType(t *testing.T) {
 func TestIncrementalSync_Alarm(t *testing.T) {
 	alarms := []model.Alarm{
 		{
-			ID:        uuid.New(),
-			DeviceSN:  "SN001",
+			ID:              uuid.New(),
+			DeviceSN:        "SN001",
 			AlarmIdentifier: "A002",
-			Status:    model.AlarmActive,
+			Status:          model.AlarmActive,
 		},
 	}
 

@@ -27,6 +27,8 @@ const (
 	DefaultActionDescribePath = "/api/v1/agent-actions/actions/describe"
 	DefaultActionPreviewPath  = "/api/v1/agent-actions/actions/preview"
 	DefaultActionExecutePath  = "/api/v1/agent-actions/actions/execute"
+	DefaultIdentityPath       = "/api/v1/agent-actions/identity"
+	DefaultRuntimeStreamPath  = "/api/v1/agent/chat/stream"
 )
 
 type AdminConfig struct {
@@ -46,6 +48,7 @@ type AdminConfig struct {
 	ActionDescribePath     string `json:"actionDescribePath"`
 	ActionPreviewPath      string `json:"actionPreviewPath"`
 	ActionExecutePath      string `json:"actionExecutePath"`
+	IdentityPath           string `json:"identityPath"`
 }
 
 type RuntimeConfig struct {
@@ -56,6 +59,14 @@ type RuntimeConfig struct {
 	LastValidatedAt  string `json:"lastValidatedAt"`
 	LastError        string `json:"lastError"`
 	ConfiguredSource string `json:"configuredSource"`
+}
+
+type RuntimeTarget struct {
+	Enabled            bool
+	AgentStudioBaseURL string
+	ConnectorID        string
+	Status             string
+	LastError          string
 }
 
 type UpdateRequest struct {

@@ -37,6 +37,7 @@ func (h *Handler) RegisterDelegationRoutes(rg *gin.RouterGroup) {
 }
 
 func (h *Handler) RegisterActionRoutes(rg *gin.RouterGroup) {
+	rg.GET("/identity", h.Identity)
 	rg.GET("/actions", h.ListActions)
 	rg.POST("/actions/search", h.SearchActions)
 	rg.POST("/actions/describe", h.DescribeAction)
@@ -65,6 +66,25 @@ func (h *Handler) CreateDelegation(c *gin.Context) {
 
 func (h *Handler) ListActions(c *gin.Context) {
 	response.OK(c, h.service.ListActions())
+}
+
+func (h *Handler) Identity(c *gin.Context) {
+	claimsVal, exists := c.Get(admin.CtxKeyClaims)
+	claims, ok := claimsVal.(*admin.Claims)
+	if !exists || !ok || claims == nil {
+		commonerrors.AbortWithError(c, http.StatusUnauthorized, commonerrors.ErrUnauthorized)
+		return
+	}
+	response.OK(c, IdentityResponse{
+		ExternalUserID:   claims.UserID.String(),
+		ExternalUserName: claims.Username,
+		Roles:            claims.Roles,
+		Scopes:           claims.Scopes,
+		Metadata: map[string]any{
+			"isSuperAdmin":  claims.IsSuperAdmin,
+			"currentRoleId": claims.CurrentRoleID,
+		},
+	})
 }
 
 func (h *Handler) SearchActions(c *gin.Context) {

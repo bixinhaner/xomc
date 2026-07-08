@@ -107,3 +107,38 @@ func TestCreateDelegationIssuesScopedToken(t *testing.T) {
 	assert.Equal(t, userID, claims.UserID)
 	assert.Equal(t, []string{"agent-actions"}, claims.Scopes)
 }
+
+func TestIdentityReturnsDelegatedExternalIdentity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	jwtSvc, err := admin.NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
+	userID := uuid.New()
+	token, _, err := jwtSvc.GenerateAgentDelegationToken(&admin.Claims{
+		UserID:       userID,
+		Username:     "agent-user",
+		IsSuperAdmin: true,
+		Roles:        []string{"operator"},
+	})
+	require.NoError(t, err)
+	handler := NewHandler(jwtSvc, NewService(nil, nil, zap.NewNop()), nil, zap.NewNop())
+
+	r := gin.New()
+	group := r.Group("/api/v1/agent-actions")
+	group.Use(RequireDelegation(jwtSvc))
+	handler.RegisterActionRoutes(group)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/agent-actions/identity", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var envelope struct {
+		Data IdentityResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &envelope))
+	assert.Equal(t, userID.String(), envelope.Data.ExternalUserID)
+	assert.Equal(t, "agent-user", envelope.Data.ExternalUserName)
+	assert.Equal(t, []string{"operator"}, envelope.Data.Roles)
+	assert.Contains(t, envelope.Data.Scopes, "agent-actions")
+}

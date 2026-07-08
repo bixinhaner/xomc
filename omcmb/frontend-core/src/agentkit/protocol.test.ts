@@ -9,6 +9,15 @@ describe('agentkit protocol guards', () => {
   it('accepts all supported stream event variants', () => {
     const events = [
       { type: 'start', runId: 'run-1', conversationId: 'conv-1' },
+      {
+        type: 'thought',
+        id: 'thought-1',
+        text: 'Checking available actions.',
+        append: true,
+        status: 'streaming',
+        at: '2026-07-08T00:00:00.000Z',
+        lastEventAt: 1783449600000,
+      },
       { type: 'delta', text: 'hello' },
       {
         type: 'tool_call',
@@ -31,6 +40,14 @@ describe('agentkit protocol guards', () => {
         status: 'ok',
         output: { rows: [] },
       },
+      {
+        type: 'process',
+        id: 'process-1',
+        kind: 'process',
+        title: 'Workspace operation completed',
+        detail: { total: 1 },
+        at: '2026-07-08T00:00:01.000Z',
+      },
       { type: 'done', usage: { inputTokens: 1, outputTokens: 2 } },
       {
         type: 'error',
@@ -43,6 +60,8 @@ describe('agentkit protocol guards', () => {
 
   it('rejects malformed stream events', () => {
     expect(isAgentStreamEvent({ type: 'delta' })).toBe(false);
+    expect(isAgentStreamEvent({ type: 'thought', text: 'ok', status: 'open' })).toBe(false);
+    expect(isAgentStreamEvent({ type: 'process', kind: 'unknown', title: 'x' })).toBe(false);
     expect(
       isAgentStreamEvent({
         type: 'action_preview',
@@ -85,4 +104,3 @@ describe('agentkit protocol guards', () => {
     ).toBe(true);
   });
 });
-

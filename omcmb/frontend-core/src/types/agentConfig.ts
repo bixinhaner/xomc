@@ -22,6 +22,7 @@ export interface AgentAdminConfig {
   actionDescribePath: string;
   actionPreviewPath: string;
   actionExecutePath: string;
+  identityPath: string;
 }
 
 export interface AgentRuntimeServerConfig {

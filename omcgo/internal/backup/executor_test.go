@@ -72,6 +72,9 @@ func (m *execDeviceRepo) GetBySerialNumber(ctx context.Context, sn string) (*mod
 	}
 	return nil, nil
 }
+func (m *execDeviceRepo) GetDeletedBySerialNumber(_ context.Context, _ string, _ model.CarrierCode) (*model.Device, error) {
+	return nil, nil
+}
 func (m *execDeviceRepo) List(_ context.Context, _ device.DeviceFilter) (*model.ListResponse[model.Device], error) {
 	return nil, nil
 }

@@ -1,11 +1,16 @@
 import { useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Bot, Send, ShieldCheck, Sparkles, User, X } from 'lucide-react'
+import { Bot, Plus, Send, ShieldCheck, Sparkles, User, X } from 'lucide-react'
 
 import {
+  AgentMarkdown,
   extractAgentRows,
+  formatAgentDetail,
   formatAgentValue,
   type AgentPanelActivity,
+  type AgentPanelMessage,
+  type AgentProcessEntry,
+  type AgentThoughtEntry,
 } from '@core/agentkit'
 import { useAgentPanelController } from '@core/hooks/useAgentPanelController'
 import { useT } from '@/hooks/useT'
@@ -14,6 +19,114 @@ import { cn } from '@/lib/utils'
 interface AgentConsoleProps {
   open: boolean
   onClose: () => void
+}
+
+const markdownClassName = [
+  'break-words font-mono',
+  '[&_p]:mb-2 [&_p:last-child]:mb-0',
+  '[&_ul]:mb-2 [&_ul]:list-disc [&_ul]:pl-5',
+  '[&_ol]:mb-2 [&_ol]:list-decimal [&_ol]:pl-5',
+  '[&_li+li]:mt-1',
+  '[&_code]:border [&_code]:border-cyan-400/20 [&_code]:bg-cyan-400/10 [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-cyan-50',
+  '[&_pre]:mb-2 [&_pre]:max-w-full [&_pre]:overflow-auto [&_pre]:border [&_pre]:border-cyan-400/20 [&_pre]:bg-black/45 [&_pre]:p-3 [&_pre]:text-cyan-50',
+  '[&_pre_code]:border-0 [&_pre_code]:bg-transparent [&_pre_code]:p-0',
+  '[&_table]:mb-2 [&_table]:w-full [&_table]:min-w-max [&_table]:border-collapse [&_table]:text-[11px]',
+  '[&_th]:border [&_th]:border-cyan-400/25 [&_th]:bg-cyan-400/10 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-cyan-100',
+  '[&_td]:border [&_td]:border-cyan-400/20 [&_td]:px-2 [&_td]:py-1.5 [&_td]:align-top',
+].join(' ')
+
+function ThoughtBlock({
+  thoughts,
+  running,
+}: {
+  thoughts: AgentThoughtEntry[] | undefined
+  running: boolean
+}) {
+  const t = useT()
+  if (!thoughts?.length) return null
+  const isStreaming = running || thoughts.some((thought) => thought.status === 'streaming')
+  const lineCount = thoughts.reduce((total, thought) => total + Math.max(thought.lines.length, 1), 0)
+
+  return (
+    <details
+      className={cn(
+        'border border-cyan-400/25 bg-cyan-500/[0.04] p-3 text-cyan-100/70',
+        isStreaming && 'border-cyan-300/45 bg-cyan-300/[0.08]'
+      )}
+      open={isStreaming}
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-200 [&::-webkit-details-marker]:hidden">
+        <span>{isStreaming ? t('agent.thinking') : t('agent.thoughtDone')}</span>
+        {!isStreaming && <span className="border border-cyan-400/30 px-1.5 py-0.5 text-cyan-300/75">{lineCount}</span>}
+      </summary>
+      <div className="mt-2 space-y-2 border-t border-cyan-400/20 pt-2">
+        {thoughts.map((thought) => (
+          <div key={thought.id} className="space-y-1">
+            {(thought.lines.length ? thought.lines : [thought.text]).map((line, index) => (
+              <p key={`${thought.id}-${index}`} className="m-0 whitespace-pre-wrap font-mono text-[11px] leading-5">
+                {line}
+              </p>
+            ))}
+          </div>
+        ))}
+      </div>
+    </details>
+  )
+}
+
+function ProcessTrace({ entries }: { entries: AgentProcessEntry[] | undefined }) {
+  const t = useT()
+  if (!entries?.length) return null
+
+  return (
+    <details className="border border-cyan-400/25" open={entries.some((entry) => entry.kind === 'error')}>
+      <summary className="flex cursor-pointer list-none items-center justify-between bg-cyan-400/[0.05] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-300 [&::-webkit-details-marker]:hidden">
+        <span>{t('agent.processTrace')}</span>
+        <span className="border border-cyan-400/30 px-2 py-0.5">{entries.length}</span>
+      </summary>
+      <div className="space-y-2 p-3">
+        {entries.map((entry) => {
+          const detail = formatAgentDetail(entry.detail)
+          return (
+            <div key={entry.id} className="grid grid-cols-[auto_minmax(0,1fr)] gap-2">
+              <span
+                className={cn(
+                  'self-start border border-cyan-400/30 bg-cyan-400/10 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-cyan-200',
+                  entry.kind === 'error' && 'border-rose-400/40 bg-rose-400/10 text-rose-200'
+                )}
+              >
+                {entry.kind}
+              </span>
+              <div className="min-w-0">
+                <div className="truncate font-mono text-[11px] text-cyan-100">{entry.title}</div>
+                {detail && (
+                  <pre className="mt-1 max-h-40 overflow-auto border border-cyan-400/15 bg-black/25 p-2 font-mono text-[11px] leading-5 text-cyan-100/65">
+                    {detail}
+                  </pre>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </details>
+  )
+}
+
+function AssistantContent({ message }: { message: AgentPanelMessage }) {
+  const t = useT()
+  const running = message.status === 'streaming'
+  return (
+    <div className="flex min-w-0 flex-col gap-3">
+      <ThoughtBlock thoughts={message.thoughts} running={running} />
+      {message.text ? (
+        <AgentMarkdown className={markdownClassName} content={message.text} />
+      ) : running ? (
+        <span className="text-cyan-300/65">{t('agent.streaming')}</span>
+      ) : null}
+      <ProcessTrace entries={message.process} />
+    </div>
+  )
 }
 
 function ActivityCard({
@@ -155,6 +268,16 @@ export function AgentConsole({ open, onClose }: AgentConsoleProps) {
         </span>
         <button
           type="button"
+          className="grid size-7 place-items-center text-cyan-300/70 hover:bg-cyan-400/10 hover:text-cyan-100 disabled:cursor-not-allowed disabled:opacity-40"
+          onClick={controller.clear}
+          disabled={controller.isStreaming}
+          aria-label={t('agent.newConversation')}
+          title={t('agent.newConversation')}
+        >
+          <Plus className="size-4" />
+        </button>
+        <button
+          type="button"
           className="grid size-7 place-items-center text-cyan-300/70 hover:bg-cyan-400/10 hover:text-cyan-100"
           onClick={onClose}
           aria-label={t('agent.close')}
@@ -193,13 +316,17 @@ export function AgentConsole({ open, onClose }: AgentConsoleProps) {
             </div>
             <div
               className={cn(
-                'max-w-[292px] whitespace-pre-wrap border px-3 py-2 font-mono text-xs leading-5',
+                'max-w-[292px] border px-3 py-2 font-mono text-xs leading-5',
                 message.role === 'user'
-                  ? 'border-cyan-300/40 bg-cyan-300/10 text-cyan-50'
+                  ? 'whitespace-pre-wrap border-cyan-300/40 bg-cyan-300/10 text-cyan-50'
                   : 'border-cyan-500/25 bg-cyan-500/[0.04] text-cyan-100/80'
               )}
             >
-              {message.text || (message.status === 'streaming' ? t('agent.streaming') : '')}
+              {message.role === 'assistant' ? (
+                <AssistantContent message={message} />
+              ) : (
+                message.text || (message.status === 'streaming' ? t('agent.streaming') : '')
+              )}
             </div>
           </div>
         ))}

@@ -68,15 +68,30 @@ func (s *Service) GetRuntimeConfig(ctx context.Context) (*RuntimeConfig, error) 
 	if err != nil {
 		return nil, err
 	}
-	enabled := cfg.Enabled && cfg.Status == StatusConnected && cfg.ConnectorID != "" && cfg.RuntimeStreamURL != ""
+	enabled := cfg.Enabled && cfg.Status == StatusConnected && cfg.ConnectorID != "" && cfg.AgentStudioBaseURL != ""
 	return &RuntimeConfig{
 		Enabled:          enabled,
-		Endpoint:         cfg.RuntimeStreamURL,
+		Endpoint:         DefaultRuntimeStreamPath,
 		ConnectorID:      cfg.ConnectorID,
 		Status:           cfg.Status,
 		LastValidatedAt:  cfg.LastValidatedAt,
 		LastError:        cfg.LastError,
 		ConfiguredSource: "server",
+	}, nil
+}
+
+func (s *Service) GetRuntimeTarget(ctx context.Context) (*RuntimeTarget, error) {
+	cfg, err := s.GetAdminConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	enabled := cfg.Enabled && cfg.Status == StatusConnected && cfg.AgentStudioBaseURL != "" && cfg.ConnectorID != ""
+	return &RuntimeTarget{
+		Enabled:            enabled,
+		AgentStudioBaseURL: cfg.AgentStudioBaseURL,
+		ConnectorID:        cfg.ConnectorID,
+		Status:             cfg.Status,
+		LastError:          cfg.LastError,
 	}, nil
 }
 
@@ -141,10 +156,7 @@ func (s *Service) Sync(ctx context.Context, req UpdateRequest) (*AdminConfig, er
 		return nil, err
 	}
 
-	runtimeURL := result.RuntimeStreamURL
-	if runtimeURL == "" {
-		runtimeURL = buildRuntimeStreamURL(settings.AgentStudioBaseURL, result.ConnectorID)
-	}
+	runtimeURL := DefaultRuntimeStreamPath
 	if err := s.persistStatus(ctx, result.ConnectorID, runtimeURL, StatusConnected, ""); err != nil {
 		return nil, err
 	}
@@ -303,6 +315,7 @@ func (s *Service) provision(ctx context.Context, settings mergedSettings) (*Prov
 			"actionDescribePath": DefaultActionDescribePath,
 			"actionPreviewPath":  DefaultActionPreviewPath,
 			"actionExecutePath":  DefaultActionExecutePath,
+			"identityPath":       DefaultIdentityPath,
 			"delegationHeader":   "Authorization",
 			"policy": map[string]any{
 				"allowReadActions":     true,
@@ -381,6 +394,7 @@ func adminConfigFromValues(values map[string]string) *AdminConfig {
 		ActionDescribePath:     DefaultActionDescribePath,
 		ActionPreviewPath:      DefaultActionPreviewPath,
 		ActionExecutePath:      DefaultActionExecutePath,
+		IdentityPath:           DefaultIdentityPath,
 	}
 }
 

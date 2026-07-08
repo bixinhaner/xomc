@@ -74,6 +74,11 @@
   color: #fff;
 }
 
+.iconBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
 .body {
   min-height: 0;
   flex: 1;
@@ -135,10 +140,239 @@
   white-space: pre-wrap;
 }
 
+.assistantMessage .bubble {
+  white-space: normal;
+}
+
 .userMessage .bubble {
   border-color: rgba(24, 144, 255, 0.35);
   background: rgba(24, 144, 255, 0.18);
   color: #eef6ff;
+}
+
+.assistantContent {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.thought,
+.process {
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+.thought {
+  border-left: 3px solid rgba(105, 177, 255, 0.55);
+  background: rgba(22, 119, 255, 0.08);
+  padding: 8px 10px;
+}
+
+.thoughtSummary,
+.processSummary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.thoughtSummary::-webkit-details-marker,
+.processSummary::-webkit-details-marker {
+  display: none;
+}
+
+.thoughtSummary {
+  color: #9dc8ff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.thoughtSummary::after,
+.processSummary::after {
+  margin-left: auto;
+  color: #8b95a5;
+  content: '+';
+  font-size: 11px;
+}
+
+.thought[open] .thoughtSummary::after,
+.process[open] .processSummary::after {
+  content: '-';
+}
+
+.thoughtCount,
+.processCount {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #c8d2df;
+  font-size: 11px;
+  line-height: 16px;
+  padding: 0 6px;
+}
+
+.thoughtList {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.thoughtEntry {
+  border-top: 1px solid rgba(157, 200, 255, 0.16);
+  padding-top: 7px;
+}
+
+.thoughtEntry:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.thoughtEntry p {
+  margin: 0;
+  color: #aeb8c7;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.pendingAnswer {
+  color: #aeb8c7;
+}
+
+.markdown {
+  overflow-wrap: anywhere;
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown blockquote,
+.markdown pre,
+.markdown table {
+  margin: 0 0 10px;
+}
+
+.markdown ul,
+.markdown ol {
+  padding-left: 18px;
+}
+
+.markdown li + li {
+  margin-top: 4px;
+}
+
+.markdown code {
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #d6e8ff;
+  font-family: SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  font-size: 0.92em;
+  padding: 1px 4px;
+}
+
+.markdown pre {
+  max-width: 100%;
+  overflow: auto;
+  border-radius: 6px;
+  background: rgba(5, 10, 18, 0.82);
+  padding: 10px 12px;
+}
+
+.markdown pre code {
+  background: transparent;
+  color: #d8e3ef;
+  padding: 0;
+}
+
+.markdown table {
+  width: 100%;
+  min-width: max-content;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.markdown th,
+.markdown td {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown th {
+  background: rgba(255, 255, 255, 0.06);
+  color: #f0f5ff;
+}
+
+.process {
+  border: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.processSummary {
+  background: rgba(255, 255, 255, 0.045);
+  color: #cfd6df;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 10px;
+}
+
+.processList {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.processItem {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+}
+
+.processKind {
+  align-self: start;
+  border-radius: 999px;
+  background: rgba(22, 119, 255, 0.16);
+  color: #9dc8ff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  padding: 1px 7px;
+}
+
+.processKindError {
+  background: rgba(255, 77, 79, 0.14);
+  color: #ff9c9e;
+}
+
+.processTitle {
+  color: #dce3ec;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.processDetail {
+  max-height: 160px;
+  overflow: auto;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.045);
+  color: #aeb8c7;
+  font-family: SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  margin: 6px 0 0;
+  padding: 8px;
+  white-space: pre-wrap;
 }
 
 .activity {
@@ -316,4 +550,3 @@
     width: 100vw;
   }
 }
-

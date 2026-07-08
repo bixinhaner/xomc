@@ -56,6 +56,14 @@ type DelegationTokenResponse struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
+type IdentityResponse struct {
+	ExternalUserID   string         `json:"externalUserId"`
+	ExternalUserName string         `json:"externalUserName"`
+	Roles            []string       `json:"roles,omitempty"`
+	Scopes           []string       `json:"scopes,omitempty"`
+	Metadata         map[string]any `json:"metadata,omitempty"`
+}
+
 type RequestContext struct {
 	UserID        uuid.UUID
 	Username      string

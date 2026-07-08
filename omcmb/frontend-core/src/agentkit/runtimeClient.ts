@@ -9,6 +9,7 @@ export interface AgentStreamHandlers {
   onEvent?: (event: AgentStreamEvent) => void;
   onStart?: (event: Extract<AgentStreamEvent, { type: 'start' }>) => void;
   onDelta?: (event: Extract<AgentStreamEvent, { type: 'delta' }>) => void;
+  onThought?: (event: Extract<AgentStreamEvent, { type: 'thought' }>) => void;
   onToolCall?: (
     event: Extract<AgentStreamEvent, { type: 'tool_call' }>
   ) => void;
@@ -18,13 +19,14 @@ export interface AgentStreamHandlers {
   onToolResult?: (
     event: Extract<AgentStreamEvent, { type: 'tool_result' }>
   ) => void;
+  onProcess?: (event: Extract<AgentStreamEvent, { type: 'process' }>) => void;
   onDone?: (event: Extract<AgentStreamEvent, { type: 'done' }>) => void;
   onError?: (error: AgentError) => void;
 }
 
 export interface AgentRuntimeClientOptions {
   endpoint: string;
-  getDelegationToken: () => Promise<string>;
+  getAuthHeaders?: () => Promise<Record<string, string>> | Record<string, string>;
   fetchImpl?: typeof fetch;
 }
 
@@ -74,6 +76,9 @@ function emitEvent(handlers: AgentStreamHandlers, event: AgentStreamEvent) {
     case 'delta':
       handlers.onDelta?.(event);
       break;
+    case 'thought':
+      handlers.onThought?.(event);
+      break;
     case 'tool_call':
       handlers.onToolCall?.(event);
       break;
@@ -82,6 +87,9 @@ function emitEvent(handlers: AgentStreamHandlers, event: AgentStreamEvent) {
       break;
     case 'tool_result':
       handlers.onToolResult?.(event);
+      break;
+    case 'process':
+      handlers.onProcess?.(event);
       break;
     case 'done':
       handlers.onDone?.(event);
@@ -119,20 +127,52 @@ function splitNextFrame(buffer: string): [string | undefined, string] {
   return [buffer.slice(0, lfIndex), buffer.slice(lfIndex + 2)];
 }
 
-function parseFrameData(frame: string): string | undefined {
+function parseFrame(frame: string): { eventName?: string; data?: string } {
   const lines = frame.split(/\r?\n/);
   const dataLines: string[] = [];
+  let eventName: string | undefined;
 
   for (const line of lines) {
+    if (line.startsWith('event:')) {
+      const nextEventName = line.slice(6).trim();
+      if (nextEventName) eventName = nextEventName;
+    }
     if (line.startsWith('data:')) {
       dataLines.push(line.slice(5).trimStart());
     }
   }
 
-  return dataLines.length > 0 ? dataLines.join('\n') : undefined;
+  return {
+    eventName,
+    data: dataLines.length > 0 ? dataLines.join('\n') : undefined,
+  };
 }
 
-function parseEventPayload(payload: string): AgentStreamEvent {
+function normalizeEventPayload(eventName: string | undefined, parsed: unknown): unknown {
+  if (isAgentStreamEvent(parsed)) return parsed;
+  if (!eventName || eventName === 'message' || eventName === 'agent') return parsed;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return parsed;
+
+  const record = parsed as Record<string, unknown>;
+  if (eventName === 'error') {
+    return {
+      type: 'error',
+      error: {
+        code: typeof record.code === 'string' ? record.code : 'AGENT_STREAM_ERROR',
+        message: typeof record.message === 'string'
+          ? record.message
+          : typeof record.detail === 'string'
+            ? record.detail
+            : 'Agent stream failed.',
+        retryable: typeof record.retryable === 'boolean' ? record.retryable : true,
+      },
+    };
+  }
+
+  return { type: eventName, ...record };
+}
+
+function parseEventPayload(payload: string, eventName?: string): AgentStreamEvent {
   let parsed: unknown;
   try {
     parsed = JSON.parse(payload);
@@ -145,16 +185,21 @@ function parseEventPayload(payload: string): AgentStreamEvent {
     });
   }
 
-  if (!isAgentStreamEvent(parsed)) {
+  const normalized = normalizeEventPayload(eventName, parsed);
+  if (!isAgentStreamEvent(normalized)) {
     throw new AgentRuntimeError({
       code: 'INVALID_STREAM_EVENT',
       message: 'Agent stream event has an invalid shape.',
       retryable: false,
-      details: parsed,
+      details: normalized,
     });
   }
 
-  return parsed;
+  return normalized;
+}
+
+function shouldIgnoreFrame(eventName: string | undefined): boolean {
+  return eventName === 'ping' || eventName === 'heartbeat';
 }
 
 async function consumeStream(
@@ -197,11 +242,11 @@ async function consumeStream(
         }
         buffer = rest;
 
-        const payload = parseFrameData(frame);
-        if (!payload || payload === '[DONE]') continue;
+        const { eventName, data: payload } = parseFrame(frame);
+        if (shouldIgnoreFrame(eventName) || !payload || payload === '[DONE]') continue;
 
         try {
-          emitEvent(handlers, parseEventPayload(payload));
+          emitEvent(handlers, parseEventPayload(payload, eventName));
         } catch (error) {
           if (error instanceof AgentRuntimeError) {
             emitError(handlers, error);
@@ -212,10 +257,10 @@ async function consumeStream(
     }
 
     buffer += decoder.decode();
-    const trailing = parseFrameData(buffer);
-    if (trailing && trailing !== '[DONE]') {
+    const trailing = parseFrame(buffer);
+    if (!shouldIgnoreFrame(trailing.eventName) && trailing.data && trailing.data !== '[DONE]') {
       try {
-        emitEvent(handlers, parseEventPayload(trailing));
+        emitEvent(handlers, parseEventPayload(trailing.data, trailing.eventName));
       } catch (error) {
         if (error instanceof AgentRuntimeError) {
           emitError(handlers, error);
@@ -238,11 +283,11 @@ export function createAgentRuntimeClient(
       let response: Response;
 
       try {
-        const token = await options.getDelegationToken();
+        const authHeaders = options.getAuthHeaders ? await options.getAuthHeaders() : {};
         response = await fetchImpl(options.endpoint, {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${token}`,
+            ...authHeaders,
             'Content-Type': 'application/json',
             Accept: 'text/event-stream',
           },

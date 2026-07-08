@@ -14,6 +14,22 @@ export interface AgentUsage {
   totalTokens?: number;
 }
 
+export type AgentThoughtStatus = 'streaming' | 'completed';
+export type AgentProcessKind =
+  | 'status'
+  | 'thought'
+  | 'tool_call'
+  | 'action_preview'
+  | 'tool_result'
+  | 'artifact'
+  | 'ui_intent'
+  | 'reasoning'
+  | 'source'
+  | 'process'
+  | 'done'
+  | 'debug'
+  | 'error';
+
 export interface AgentPageContext {
   path: string;
   title?: string;
@@ -52,6 +68,15 @@ export interface AgentRuntimeRequest {
 
 export type AgentStreamEvent =
   | { type: 'start'; runId: string; conversationId: string }
+  | {
+      type: 'thought';
+      id?: string;
+      text: string;
+      append?: boolean;
+      status?: AgentThoughtStatus;
+      at?: string;
+      lastEventAt?: number;
+    }
   | { type: 'delta'; text: string }
   | {
       type: 'tool_call';
@@ -75,6 +100,14 @@ export type AgentStreamEvent =
       output?: unknown;
       error?: AgentError;
     }
+  | {
+      type: 'process';
+      id?: string;
+      kind: AgentProcessKind;
+      title: string;
+      detail?: unknown;
+      at?: string;
+    }
   | { type: 'done'; usage?: AgentUsage }
   | { type: 'error'; error: AgentError };
 
@@ -96,6 +129,28 @@ function isRisk(value: unknown): value is AgentRiskLevel {
 
 function isToolResultStatus(value: unknown): value is 'ok' | 'error' {
   return value === 'ok' || value === 'error';
+}
+
+function isThoughtStatus(value: unknown): value is AgentThoughtStatus {
+  return value === 'streaming' || value === 'completed';
+}
+
+function isProcessKind(value: unknown): value is AgentProcessKind {
+  return (
+    value === 'status' ||
+    value === 'thought' ||
+    value === 'tool_call' ||
+    value === 'action_preview' ||
+    value === 'tool_result' ||
+    value === 'artifact' ||
+    value === 'ui_intent' ||
+    value === 'reasoning' ||
+    value === 'source' ||
+    value === 'process' ||
+    value === 'done' ||
+    value === 'debug' ||
+    value === 'error'
+  );
 }
 
 export function isAgentError(value: unknown): value is AgentError {
@@ -128,6 +183,15 @@ export function isAgentStreamEvent(value: unknown): value is AgentStreamEvent {
   switch (value.type) {
     case 'start':
       return isString(value.runId) && isString(value.conversationId);
+    case 'thought':
+      return (
+        isString(value.text) &&
+        (value.id === undefined || isString(value.id)) &&
+        (value.append === undefined || typeof value.append === 'boolean') &&
+        (value.status === undefined || isThoughtStatus(value.status)) &&
+        (value.at === undefined || isString(value.at)) &&
+        (value.lastEventAt === undefined || typeof value.lastEventAt === 'number')
+      );
     case 'delta':
       return isString(value.text);
     case 'tool_call':
@@ -150,6 +214,13 @@ export function isAgentStreamEvent(value: unknown): value is AgentStreamEvent {
         isString(value.callId) &&
         isToolResultStatus(value.status) &&
         (value.error === undefined || isAgentError(value.error))
+      );
+    case 'process':
+      return (
+        isProcessKind(value.kind) &&
+        isString(value.title) &&
+        (value.id === undefined || isString(value.id)) &&
+        (value.at === undefined || isString(value.at))
       );
     case 'done':
       return value.usage === undefined || isRecord(value.usage);

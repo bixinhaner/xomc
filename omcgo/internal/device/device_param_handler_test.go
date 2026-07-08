@@ -204,14 +204,25 @@ func TestParameterTreeHandler_UsesDefaultParamModelForTreeAndChildren(t *testing
 			Total      int                   `json:"total"`
 		}
 		response.DecodeData(t, w.Body, &payload)
-		require.Len(t, payload.Parameters, 1)
+		require.Len(t, payload.Parameters, 2)
 		assert.Empty(t, payload.Objects)
-		assert.Equal(t, 1, payload.Total)
-		assert.Equal(t, "Device.DeviceInfo.SerialNumber", payload.Parameters[0].Path)
-		require.NotNil(t, payload.Parameters[0].CurrentValue)
-		assert.Equal(t, "SN-PARAM-001", *payload.Parameters[0].CurrentValue)
-		assert.False(t, payload.Parameters[0].Writable)
-		assert.Equal(t, string(model.ParamString), payload.Parameters[0].Type)
+		assert.Equal(t, 2, payload.Total)
+
+		byPath := make(map[string]ParameterSchemaItem, len(payload.Parameters))
+		for _, item := range payload.Parameters {
+			byPath[item.Path] = item
+		}
+
+		serial := byPath["Device.DeviceInfo.SerialNumber"]
+		require.NotNil(t, serial.CurrentValue)
+		assert.Equal(t, "SN-PARAM-001", *serial.CurrentValue)
+		assert.False(t, serial.Writable)
+		assert.Equal(t, string(model.ParamString), serial.Type)
+
+		manufacturerOUI := byPath["Device.DeviceInfo.ManufacturerOUI"]
+		assert.Nil(t, manufacturerOUI.CurrentValue)
+		assert.True(t, manufacturerOUI.Writable)
+		assert.Equal(t, string(model.ParamString), manufacturerOUI.Type)
 	})
 }
 

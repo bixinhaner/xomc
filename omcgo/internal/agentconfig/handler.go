@@ -19,6 +19,10 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
+func (h *Handler) Service() *Service {
+	return h.service
+}
+
 func (h *Handler) RegisterPublicRoutes(rg *gin.RouterGroup) {
 	rg.GET("/agent/health", h.Health)
 }

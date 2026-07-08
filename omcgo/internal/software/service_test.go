@@ -241,6 +241,9 @@ func (m *svcMockDeviceRepo) GetBySerialNumber(ctx context.Context, sn string) (*
 	}
 	return nil, commonerrors.ErrNotFound
 }
+func (m *svcMockDeviceRepo) GetDeletedBySerialNumber(_ context.Context, _ string, _ model.CarrierCode) (*model.Device, error) {
+	return nil, nil
+}
 func (m *svcMockDeviceRepo) Update(_ context.Context, _ *model.Device) error { return nil }
 func (m *svcMockDeviceRepo) Delete(_ context.Context, _ uuid.UUID) error     { return nil }
 func (m *svcMockDeviceRepo) List(_ context.Context, _ device.DeviceFilter) (*model.ListResponse[model.Device], error) {

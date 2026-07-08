@@ -2,14 +2,20 @@ import { useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
   CloseOutlined,
+  PlusOutlined,
   RobotOutlined,
   SendOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
 import {
+  AgentMarkdown,
   extractAgentRows,
+  formatAgentDetail,
   formatAgentValue,
   type AgentPanelActivity,
+  type AgentPanelMessage,
+  type AgentProcessEntry,
+  type AgentThoughtEntry,
 } from '@core/agentkit';
 import { useAgentPanelController } from '@core/hooks/useAgentPanelController';
 import { useT } from '@/hooks/useT';
@@ -18,6 +24,83 @@ import styles from './AgentPanel.module.css';
 interface AgentPanelProps {
   open: boolean;
   onClose: () => void;
+}
+
+function ThoughtBlock({
+  thoughts,
+  running,
+}: {
+  thoughts: AgentThoughtEntry[] | undefined;
+  running: boolean;
+}) {
+  const t = useT();
+  if (!thoughts?.length) return null;
+  const isStreaming = running || thoughts.some((thought) => thought.status === 'streaming');
+  const lineCount = thoughts.reduce((total, thought) => total + Math.max(thought.lines.length, 1), 0);
+
+  return (
+    <details className={styles.thought} open={isStreaming}>
+      <summary className={styles.thoughtSummary}>
+        <span>{isStreaming ? t('agent.thinking') : t('agent.thoughtDone')}</span>
+        {!isStreaming && <span className={styles.thoughtCount}>{lineCount}</span>}
+      </summary>
+      <div className={styles.thoughtList}>
+        {thoughts.map((thought) => (
+          <div key={thought.id} className={styles.thoughtEntry}>
+            {(thought.lines.length ? thought.lines : [thought.text]).map((line, index) => (
+              <p key={`${thought.id}-${index}`}>{line}</p>
+            ))}
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function ProcessTrace({ entries }: { entries: AgentProcessEntry[] | undefined }) {
+  const t = useT();
+  if (!entries?.length) return null;
+
+  return (
+    <details className={styles.process} open={entries.some((entry) => entry.kind === 'error')}>
+      <summary className={styles.processSummary}>
+        <span>{t('agent.processTrace')}</span>
+        <span className={styles.processCount}>{entries.length}</span>
+      </summary>
+      <div className={styles.processList}>
+        {entries.map((entry) => {
+          const detail = formatAgentDetail(entry.detail);
+          return (
+            <div key={entry.id} className={styles.processItem}>
+              <span className={`${styles.processKind} ${entry.kind === 'error' ? styles.processKindError : ''}`}>
+                {entry.kind}
+              </span>
+              <div className={styles.processBody}>
+                <div className={styles.processTitle}>{entry.title}</div>
+                {detail && <pre className={styles.processDetail}>{detail}</pre>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </details>
+  );
+}
+
+function AssistantContent({ message }: { message: AgentPanelMessage }) {
+  const t = useT();
+  const running = message.status === 'streaming';
+  return (
+    <div className={styles.assistantContent}>
+      <ThoughtBlock thoughts={message.thoughts} running={running} />
+      {message.text ? (
+        <AgentMarkdown className={styles.markdown} content={message.text} />
+      ) : running ? (
+        <span className={styles.pendingAnswer}>{t('agent.streaming')}</span>
+      ) : null}
+      <ProcessTrace entries={message.process} />
+    </div>
+  );
 }
 
 function ActivityCard({
@@ -143,6 +226,16 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
         <span className={controller.enabled ? styles.connected : styles.disconnected}>
           {controller.enabled ? t('agent.connected') : t('agent.disconnected')}
         </span>
+        <button
+          type="button"
+          className={styles.iconBtn}
+          onClick={controller.clear}
+          disabled={controller.isStreaming}
+          aria-label={t('agent.newConversation')}
+          title={t('agent.newConversation')}
+        >
+          <PlusOutlined />
+        </button>
         <button type="button" className={styles.iconBtn} onClick={onClose} aria-label={t('agent.close')}>
           <CloseOutlined />
         </button>
@@ -165,7 +258,11 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
           <div key={message.id} className={message.role === 'user' ? styles.userMessage : styles.assistantMessage}>
             <div className={styles.avatar}>{message.role === 'user' ? t('agent.userShort') : <RobotOutlined />}</div>
             <div className={styles.bubble}>
-              {message.text || (message.status === 'streaming' ? t('agent.streaming') : '')}
+              {message.role === 'assistant' ? (
+                <AssistantContent message={message} />
+              ) : (
+                message.text || (message.status === 'streaming' ? t('agent.streaming') : '')
+              )}
             </div>
           </div>
         ))}

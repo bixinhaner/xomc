@@ -46,7 +46,7 @@ describe('createAgentRuntimeClient', () => {
 
     const client = createAgentRuntimeClient({
       endpoint: '/runtime',
-      getDelegationToken: async () => 'delegated',
+      getAuthHeaders: async () => ({ Authorization: 'Bearer web-token' }),
       fetchImpl,
     });
 
@@ -62,18 +62,92 @@ describe('createAgentRuntimeClient', () => {
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({
-          Authorization: 'Bearer delegated',
+          Authorization: 'Bearer web-token',
           Accept: 'text/event-stream',
         }),
       })
     );
   });
 
+  it('ignores named heartbeat frames from SSE streams', async () => {
+    const events: AgentStreamEvent[] = [];
+    const fetchImpl = vi.fn().mockResolvedValue(
+      streamResponse([
+        'event: agent\n',
+        'data: {"type":"start","runId":"run-1","conversationId":"conv-1"}\n\n',
+        'event: ping\n',
+        'data: {"now":"2026-07-08T00:00:00.000Z"}\n\n',
+        'event: agent\n',
+        'data: {"type":"delta","text":"hello"}\n\n',
+        'event: agent\n',
+        'data: {"type":"done"}\n\n',
+      ])
+    ) as unknown as typeof fetch;
+
+    const client = createAgentRuntimeClient({
+      endpoint: '/runtime',
+      fetchImpl,
+    });
+
+    await client.stream(request, { onEvent: (event) => events.push(event) });
+
+    expect(events.map((event) => event.type)).toEqual([
+      'start',
+      'delta',
+      'done',
+    ]);
+  });
+
+  it('maps named SSE events to runtime event payloads', async () => {
+    const events: AgentStreamEvent[] = [];
+    const fetchImpl = vi.fn().mockResolvedValue(
+      streamResponse([
+        'event: start\n',
+        'data: {"runId":"run-1","conversationId":"conv-1"}\n\n',
+        'event: thought\n',
+        'data: {"id":"thought-1","text":"thinking","append":true,"status":"streaming"}\n\n',
+        'event: process\n',
+        'data: {"id":"process-1","kind":"process","title":"Workspace operation completed","detail":{"total":1}}\n\n',
+        'event: delta\n',
+        'data: {"text":"hello"}\n\n',
+        'event: done\n',
+        'data: {}\n\n',
+      ])
+    ) as unknown as typeof fetch;
+
+    const client = createAgentRuntimeClient({
+      endpoint: '/runtime',
+      fetchImpl,
+    });
+
+    await client.stream(request, { onEvent: (event) => events.push(event) });
+
+    expect(events).toEqual([
+      { type: 'start', runId: 'run-1', conversationId: 'conv-1' },
+      {
+        type: 'thought',
+        id: 'thought-1',
+        text: 'thinking',
+        append: true,
+        status: 'streaming',
+      },
+      {
+        type: 'process',
+        id: 'process-1',
+        kind: 'process',
+        title: 'Workspace operation completed',
+        detail: { total: 1 },
+      },
+      { type: 'delta', text: 'hello' },
+      { type: 'done' },
+    ]);
+  });
+
   it('rejects malformed SSE payloads', async () => {
     const onError = vi.fn();
     const client = createAgentRuntimeClient({
       endpoint: '/runtime',
-      getDelegationToken: async () => 'delegated',
+      getAuthHeaders: async () => ({ Authorization: 'Bearer web-token' }),
       fetchImpl: vi
         .fn()
         .mockResolvedValue(streamResponse(['data: {"type":"delta"}\n\n'])) as unknown as typeof fetch,
@@ -91,7 +165,7 @@ describe('createAgentRuntimeClient', () => {
     const onError = vi.fn();
     const client = createAgentRuntimeClient({
       endpoint: '/runtime',
-      getDelegationToken: async () => 'delegated',
+      getAuthHeaders: async () => ({ Authorization: 'Bearer web-token' }),
       fetchImpl: vi.fn().mockResolvedValue(
         new Response(JSON.stringify({ error: 'bad gateway' }), {
           status: 502,
@@ -126,7 +200,7 @@ describe('createAgentRuntimeClient', () => {
 
     const client = createAgentRuntimeClient({
       endpoint: '/runtime',
-      getDelegationToken: async () => 'delegated',
+      getAuthHeaders: async () => ({ Authorization: 'Bearer web-token' }),
       fetchImpl,
     });
 

@@ -3,8 +3,8 @@ import {
   createAgentRuntimeClient,
   type AgentRuntimeClient,
 } from '../agentkit';
-import { resolveAgentRuntimeConfig, type AgentRuntimeConfig } from '../config/agent';
-import { agentApi } from '../services/api/agentApi';
+import { disabledAgentRuntimeConfig, type AgentRuntimeConfig } from '../config/agent';
+import { useUserStore } from '../store/userStore';
 import { useAgentRuntimeConfig } from './api/useAgentConfig';
 
 export interface UseAgentRuntimeClientResult {
@@ -15,7 +15,6 @@ export interface UseAgentRuntimeClientResult {
 
 export function useAgentRuntimeClient(configOverride?: AgentRuntimeConfig): UseAgentRuntimeClientResult {
   const runtimeConfigQuery = useAgentRuntimeConfig(configOverride === undefined);
-  const envConfig = useMemo(() => resolveAgentRuntimeConfig(), []);
   const serverConfig = runtimeConfigQuery.isSuccess && runtimeConfigQuery.data
     ? {
         enabled: runtimeConfigQuery.data.enabled && Boolean(runtimeConfigQuery.data.endpoint),
@@ -23,15 +22,16 @@ export function useAgentRuntimeClient(configOverride?: AgentRuntimeConfig): UseA
         connectorId: runtimeConfigQuery.data.connectorId || '',
       }
     : null;
-  const config = configOverride ?? serverConfig ?? envConfig;
+  const config = configOverride ?? serverConfig ?? disabledAgentRuntimeConfig();
 
   const client = useMemo(() => {
     if (!config.enabled || !config.endpoint) return null;
     return createAgentRuntimeClient({
       endpoint: config.endpoint,
-      getDelegationToken: async () => {
-        const response = await agentApi.requestDelegationToken();
-        return response.token;
+      getAuthHeaders: (): Record<string, string> => {
+        const token = useUserStore.getState().accessToken;
+        if (!token) return {};
+        return { Authorization: `Bearer ${token}` };
       },
     });
   }, [config.enabled, config.endpoint]);

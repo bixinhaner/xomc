@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type AgentApprovedAction,
   type AgentError,
@@ -9,8 +9,12 @@ import {
   type AgentPanelActivity,
   type AgentPanelMessage,
   type AgentPendingAction,
+  completeAgentThoughts,
+  mergeAgentThought,
+  upsertAgentProcess,
 } from '../agentkit';
 import { useAppStore } from '../store/appStore';
+import { useUserStore } from '../store/userStore';
 import { useAgentRuntimeClient } from './useAgentRuntimeClient';
 
 export interface UseAgentPanelControllerOptions {
@@ -31,6 +35,7 @@ export interface UseAgentPanelControllerResult {
 }
 
 let nextAgentPanelId = 0;
+const AGENT_CONVERSATION_STORAGE_PREFIX = 'omc-agent-conversation';
 
 function createId(prefix: string): string {
   nextAgentPanelId += 1;
@@ -59,6 +64,36 @@ function now() {
   return Date.now();
 }
 
+function buildConversationStorageKey(input: {
+  connectorId?: string;
+  userId?: string;
+}): string | undefined {
+  if (!input.connectorId || !input.userId) return undefined;
+  return `${AGENT_CONVERSATION_STORAGE_PREFIX}:${input.connectorId}:${input.userId}`;
+}
+
+function readConversationId(storageKey: string | undefined): string | undefined {
+  if (!storageKey || typeof window === 'undefined') return undefined;
+  try {
+    return window.localStorage.getItem(storageKey) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeConversationId(storageKey: string | undefined, conversationId: string | undefined) {
+  if (!storageKey || typeof window === 'undefined') return;
+  try {
+    if (conversationId) {
+      window.localStorage.setItem(storageKey, conversationId);
+    } else {
+      window.localStorage.removeItem(storageKey);
+    }
+  } catch {
+    // Ignore storage quota/privacy-mode failures; in-memory state still works.
+  }
+}
+
 function upsertActivity(
   activities: AgentPanelActivity[],
   next: AgentPanelActivity
@@ -70,12 +105,17 @@ function upsertActivity(
   return copy;
 }
 
+function processId(prefix: string, sourceId?: string): string {
+  return sourceId ? `${prefix}-${sourceId}` : createId(prefix);
+}
+
 export function useAgentPanelController(
   options: UseAgentPanelControllerOptions
 ): UseAgentPanelControllerResult {
   const locale = useAppStore((s) => s.locale);
   const systemTimezone = useAppStore((s) => s.systemTimezone);
-  const { enabled, client } = useAgentRuntimeClient();
+  const currentUserId = useUserStore((s) => s.currentUser?.id);
+  const { enabled, client, config } = useAgentRuntimeClient();
   const [messages, setMessages] = useState<AgentPanelMessage[]>([]);
   const [activities, setActivities] = useState<AgentPanelActivity[]>([]);
   const [pendingAction, setPendingAction] = useState<AgentPendingAction | null>(null);
@@ -87,12 +127,33 @@ export function useAgentPanelController(
 
   const timezone = systemTimezone || 'UTC';
   const context = useMemo(() => options.context, [options.context]);
+  const conversationStorageKey = useMemo(
+    () => buildConversationStorageKey({ connectorId: config.connectorId, userId: currentUserId }),
+    [config.connectorId, currentUserId]
+  );
+
+  useEffect(() => {
+    setConversationId(readConversationId(conversationStorageKey));
+  }, [conversationStorageKey]);
+
+  const updateConversationId = useCallback(
+    (nextConversationId: string | undefined) => {
+      setConversationId(nextConversationId);
+      writeConversationId(conversationStorageKey, nextConversationId);
+    },
+    [conversationStorageKey]
+  );
 
   const appendAssistantDelta = useCallback((messageId: string, text: string) => {
     setMessages((current) =>
       current.map((message) =>
         message.id === messageId
-          ? { ...message, text: `${message.text}${text}`, status: 'streaming' }
+          ? {
+              ...message,
+              text: `${message.text}${text}`,
+              status: 'streaming',
+              thoughts: completeAgentThoughts(message.thoughts),
+            }
           : message
       )
     );
@@ -101,10 +162,61 @@ export function useAgentPanelController(
   const finishAssistant = useCallback((messageId: string, status: AgentPanelMessage['status']) => {
     setMessages((current) =>
       current.map((message) =>
-        message.id === messageId ? { ...message, status } : message
+        message.id === messageId
+          ? { ...message, status, thoughts: completeAgentThoughts(message.thoughts) }
+          : message
       )
     );
   }, []);
+
+  const appendAssistantThought = useCallback(
+    (messageId: string, event: Extract<AgentStreamEvent, { type: 'thought' }>) => {
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === messageId
+            ? {
+                ...message,
+                thoughts: mergeAgentThought(message.thoughts, {
+                  id: event.id || createId('agent-thought'),
+                  text: event.text,
+                  append: event.append,
+                  status: event.status,
+                  source: 'thought',
+                  at:
+                    event.at ||
+                    (typeof event.lastEventAt === 'number'
+                      ? new Date(event.lastEventAt).toISOString()
+                      : undefined),
+                }),
+              }
+            : message
+        )
+      );
+    },
+    []
+  );
+
+  const appendAssistantProcess = useCallback(
+    (messageId: string, event: Extract<AgentStreamEvent, { type: 'process' }>) => {
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === messageId
+            ? {
+                ...message,
+                process: upsertAgentProcess(message.process, {
+                  id: event.id || createId('agent-process'),
+                  kind: event.kind,
+                  title: event.title,
+                  detail: event.detail,
+                  at: event.at,
+                }),
+              }
+            : message
+        )
+      );
+    },
+    []
+  );
 
   const stream = useCallback(
     async (input: {
@@ -164,7 +276,10 @@ export function useAgentPanelController(
       const handleEvent = (event: AgentStreamEvent) => {
         switch (event.type) {
           case 'start':
-            setConversationId(event.conversationId);
+            updateConversationId(event.conversationId);
+            break;
+          case 'thought':
+            appendAssistantThought(assistantId, event);
             break;
           case 'delta':
             appendAssistantDelta(assistantId, event.text);
@@ -183,6 +298,13 @@ export function useAgentPanelController(
                 updatedAt: now(),
               })
             );
+            appendAssistantProcess(assistantId, {
+              type: 'process',
+              id: processId('tool-call', event.callId),
+              kind: 'tool_call',
+              title: event.title,
+              detail: event.input,
+            });
             break;
           }
           case 'action_preview': {
@@ -211,6 +333,13 @@ export function useAgentPanelController(
                 preview: event.preview,
               });
             }
+            appendAssistantProcess(assistantId, {
+              type: 'process',
+              id: processId('action-preview', event.callId),
+              kind: 'action_preview',
+              title: event.title,
+              detail: event.preview,
+            });
             break;
           }
           case 'tool_result':
@@ -226,6 +355,16 @@ export function useAgentPanelController(
               })
             );
             setPendingAction((current) => (current?.callId === event.callId ? null : current));
+            appendAssistantProcess(assistantId, {
+              type: 'process',
+              id: processId('tool-result', event.callId),
+              kind: event.status === 'ok' ? 'tool_result' : 'error',
+              title: event.callId,
+              detail: event.status === 'ok' ? event.output : event.error,
+            });
+            break;
+          case 'process':
+            appendAssistantProcess(assistantId, event);
             break;
           case 'error':
             setError(event.error);
@@ -263,7 +402,18 @@ export function useAgentPanelController(
         setIsStreaming(false);
       }
     },
-    [appendAssistantDelta, client, context, conversationId, finishAssistant, locale, timezone]
+    [
+      appendAssistantDelta,
+      appendAssistantProcess,
+      appendAssistantThought,
+      client,
+      context,
+      conversationId,
+      finishAssistant,
+      locale,
+      timezone,
+      updateConversationId,
+    ]
   );
 
   const sendMessage = useCallback(
@@ -311,10 +461,10 @@ export function useAgentPanelController(
     setMessages([]);
     setActivities([]);
     setPendingAction(null);
-    setConversationId(undefined);
+    updateConversationId(undefined);
     setIsStreaming(false);
     setError(null);
-  }, []);
+  }, [updateConversationId]);
 
   return {
     enabled,
@@ -329,4 +479,3 @@ export function useAgentPanelController(
     clear,
   };
 }
-

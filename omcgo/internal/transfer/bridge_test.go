@@ -52,6 +52,9 @@ func (m *mockDeviceRepo) GetBySerialNumber(_ context.Context, sn string) (*model
 	}
 	return d, nil
 }
+func (m *mockDeviceRepo) GetDeletedBySerialNumber(_ context.Context, _ string, _ model.CarrierCode) (*model.Device, error) {
+	return nil, nil
+}
 func (m *mockDeviceRepo) Update(_ context.Context, _ *model.Device) error { return nil }
 func (m *mockDeviceRepo) Delete(_ context.Context, _ uuid.UUID) error     { return nil }
 func (m *mockDeviceRepo) List(_ context.Context, _ device.DeviceFilter) (*model.ListResponse[model.Device], error) {

@@ -131,9 +131,10 @@ func TestSyncProvisionsConnectorAndPersistsRuntimeConfig(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "Bearer provision-token", capturedAuth)
 	require.Contains(t, capturedBody, `"healthPath":"/api/v1/agent/health"`)
+	require.Contains(t, capturedBody, `"identityPath":"/api/v1/agent-actions/identity"`)
 	require.Equal(t, StatusConnected, cfg.Status)
 	require.Equal(t, "connector-1", cfg.ConnectorID)
-	require.Equal(t, "https://agent.example.com/api/action-connectors/connector-1/chat/stream", cfg.RuntimeStreamURL)
+	require.Equal(t, DefaultRuntimeStreamPath, cfg.RuntimeStreamURL)
 	require.Equal(t, StatusConnected, store.values[KeyStatus])
 	require.Equal(t, "2026-07-07T10:00:00Z", store.values[KeyLastValidatedAt])
 }

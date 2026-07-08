@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   extractAgentRows,
   formatAgentValue,
+  mergeAgentThought,
   parseApprovedAction,
+  completeAgentThoughts,
+  upsertAgentProcess,
 } from './panel';
 
 describe('agent panel helpers', () => {
@@ -48,5 +51,55 @@ describe('agent panel helpers', () => {
       { key: 'items', value: '2' },
     ]);
   });
-});
 
+  it('merges streaming thought chunks and marks them completed', () => {
+    const streaming = mergeAgentThought([], {
+      id: 'thought-1',
+      text: 'Checking',
+      append: true,
+      source: 'thought',
+    });
+    const merged = mergeAgentThought(streaming, {
+      id: 'thought-1',
+      text: ' actions',
+      append: true,
+      source: 'thought',
+    });
+
+    expect(merged).toEqual([
+      {
+        id: 'thought-1',
+        text: 'Checking actions',
+        lines: ['Checking actions'],
+        status: 'streaming',
+        source: 'thought',
+        at: undefined,
+      },
+    ]);
+    expect(completeAgentThoughts(merged)?.[0]?.status).toBe('completed');
+  });
+
+  it('upserts process entries by id', () => {
+    const entries = upsertAgentProcess([], {
+      id: 'process-1',
+      kind: 'process',
+      title: 'Started',
+    });
+
+    expect(
+      upsertAgentProcess(entries, {
+        id: 'process-1',
+        kind: 'process',
+        title: 'Completed',
+        detail: { ok: true },
+      })
+    ).toEqual([
+      {
+        id: 'process-1',
+        kind: 'process',
+        title: 'Completed',
+        detail: { ok: true },
+      },
+    ]);
+  });
+});

@@ -1,7 +1,9 @@
 import type {
   AgentApprovedAction,
   AgentError,
+  AgentProcessKind,
   AgentRiskLevel,
+  AgentThoughtStatus,
 } from './protocol';
 
 export type AgentPanelMessageRole = 'user' | 'assistant';
@@ -20,6 +22,25 @@ export interface AgentPanelMessage {
   text: string;
   status: AgentPanelMessageStatus;
   createdAt: number;
+  thoughts?: AgentThoughtEntry[];
+  process?: AgentProcessEntry[];
+}
+
+export interface AgentThoughtEntry {
+  id: string;
+  text: string;
+  lines: string[];
+  status: AgentThoughtStatus;
+  source?: 'thought' | 'status' | 'delta';
+  at?: string;
+}
+
+export interface AgentProcessEntry {
+  id: string;
+  kind: AgentProcessKind;
+  title: string;
+  detail?: unknown;
+  at?: string;
 }
 
 export interface AgentPanelActivity {
@@ -76,6 +97,108 @@ export function formatAgentValue(value: unknown): string {
   return String(value);
 }
 
+export function formatAgentDetail(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function thoughtLines(text: string): string[] {
+  return text
+    .split(/\n{2,}/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function normalizeText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+export function mergeAgentThought(
+  thoughts: AgentThoughtEntry[] | undefined,
+  input: {
+    id: string;
+    text: string;
+    append?: boolean;
+    status?: AgentThoughtStatus;
+    source?: AgentThoughtEntry['source'];
+    at?: string;
+  }
+): AgentThoughtEntry[] {
+  const normalized = input.append === true ? input.text : input.text.trim();
+  if (!normalized) return thoughts ?? [];
+  const next = [...(thoughts ?? [])];
+  const matchedIndex = next.findIndex((thought) => thought.id === input.id);
+  const duplicateIndex =
+    matchedIndex >= 0
+      ? -1
+      : next.findIndex(
+          (thought) =>
+            thought.source === input.source &&
+            normalizeText(thought.text) === normalizeText(normalized)
+        );
+  const last = next[next.length - 1];
+  const targetIndex =
+    matchedIndex >= 0
+      ? matchedIndex
+      : duplicateIndex >= 0
+        ? duplicateIndex
+        : input.append === true && last?.status === 'streaming' && last.source === input.source
+          ? next.length - 1
+          : -1;
+  const status = input.status ?? 'streaming';
+
+  if (targetIndex >= 0) {
+    const current = next[targetIndex];
+    if (!current) return next;
+    const text = input.append === true ? `${current.text}${normalized}` : normalized;
+    next[targetIndex] = {
+      ...current,
+      text,
+      lines: input.append === true ? [text] : thoughtLines(text),
+      status,
+      source: input.source ?? current.source,
+      at: current.at ?? input.at,
+    };
+    return next;
+  }
+
+  return [
+    ...next,
+    {
+      id: input.id,
+      text: normalized,
+      lines: thoughtLines(normalized),
+      status,
+      source: input.source,
+      at: input.at,
+    },
+  ];
+}
+
+export function completeAgentThoughts(
+  thoughts: AgentThoughtEntry[] | undefined
+): AgentThoughtEntry[] | undefined {
+  if (!thoughts?.length) return thoughts;
+  return thoughts.map((thought) => ({ ...thought, status: 'completed' }));
+}
+
+export function upsertAgentProcess(
+  entries: AgentProcessEntry[] | undefined,
+  nextEntry: AgentProcessEntry
+): AgentProcessEntry[] {
+  const current = entries ?? [];
+  const index = current.findIndex((entry) => entry.id === nextEntry.id);
+  if (index === -1) return [...current, nextEntry];
+  const copy = current.slice();
+  copy[index] = { ...copy[index], ...nextEntry };
+  return copy;
+}
+
 function unwrapResult(value: unknown): unknown {
   if (!isRecord(value)) return value;
   const nested = value.result;
@@ -98,4 +221,3 @@ export function extractAgentRows(value: unknown, maxRows = 6): AgentDisplayRow[]
   }
   return rows;
 }
-

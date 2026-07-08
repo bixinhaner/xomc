@@ -6,13 +6,7 @@ import type {
   AgentRuntimeServerConfig,
 } from '../../types/agentConfig';
 
-export interface DelegationTokenResponse {
-  token: string;
-  expires_at: string;
-}
-
 export interface AgentApi {
-  requestDelegationToken(): Promise<DelegationTokenResponse>;
   getRuntimeConfig(): Promise<AgentRuntimeServerConfig>;
   getAdminConfig(): Promise<AgentAdminConfig>;
   saveAdminConfig(payload: AgentAdminConfigUpdate): Promise<AgentAdminConfig>;
@@ -21,10 +15,6 @@ export interface AgentApi {
 }
 
 export const agentApi: AgentApi = {
-  async requestDelegationToken() {
-    const { data } = await http.post<DelegationTokenResponse>('/agent/delegation');
-    return data;
-  },
   async getRuntimeConfig() {
     const { data } = await http.get<AgentRuntimeServerConfig>('/agent/config');
     return data;

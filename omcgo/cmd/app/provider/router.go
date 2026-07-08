@@ -11,6 +11,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/agentaction"
+	"github.com/omcgo/omcgo/internal/agentruntime"
 	"github.com/omcgo/omcgo/internal/alarm"
 	"github.com/omcgo/omcgo/internal/authz"
 	"github.com/omcgo/omcgo/internal/bundle"
@@ -363,8 +364,9 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	agentActionService := agentaction.NewService(c.DeviceService, c.AlarmPgStore, c.Logger)
 	agentActionHandler := agentaction.NewHandler(c.JWTService, agentActionService, c.PermService, c.Logger)
+	agentRuntimeHandler := agentruntime.NewHandler(ad.agentConfigHandler.Service(), c.JWTService, http.DefaultClient, c.Logger)
 	ad.agentConfigHandler.RegisterRuntimeRoutes(v1)
-	agentActionHandler.RegisterDelegationRoutes(v1)
+	agentRuntimeHandler.RegisterRoutes(v1)
 
 	agentActions := r.Group("/api/v1/agent-actions")
 	agentActions.Use(agentaction.RequireDelegation(c.JWTService))

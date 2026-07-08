@@ -14,25 +14,11 @@ beforeEach(() => {
 });
 
 describe('agentApi', () => {
-  it('requests a short-lived agent delegation token from the authenticated API', async () => {
-    postMock.mockResolvedValue({
-      data: {
-        token: 'delegated',
-        expires_at: '2026-07-06T10:00:00Z',
-      },
-    });
-
-    const result = await agentApi.requestDelegationToken();
-
-    expect(postMock).toHaveBeenCalledWith('/agent/delegation');
-    expect(result.token).toBe('delegated');
-  });
-
   it('reads runtime config from the authenticated API', async () => {
     getMock.mockResolvedValue({
       data: {
         enabled: true,
-        endpoint: 'https://agent.example.com/api/action-connectors/c1/chat/stream',
+        endpoint: '/api/v1/agent/chat/stream',
         connectorId: 'c1',
         status: 'connected',
         lastValidatedAt: '2026-07-07T10:00:00Z',
@@ -62,7 +48,7 @@ describe('agentApi', () => {
         omcPublicBaseUrl: payload.omcPublicBaseUrl,
         connectorSlug: 'external-agent',
         connectorId: 'c1',
-        runtimeStreamUrl: 'https://agent.example.com/api/action-connectors/c1/chat/stream',
+        runtimeStreamUrl: '/api/v1/agent/chat/stream',
         status: 'connected',
         lastValidatedAt: '2026-07-07T10:00:00Z',
         lastError: '',

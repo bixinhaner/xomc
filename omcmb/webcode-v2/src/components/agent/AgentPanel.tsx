@@ -1,11 +1,16 @@
 import { useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Bot, CheckCircle2, Send, ShieldCheck, Sparkles, User, X } from 'lucide-react'
+import { Bot, CheckCircle2, Plus, Send, ShieldCheck, Sparkles, User, X } from 'lucide-react'
 
 import {
+  AgentMarkdown,
   extractAgentRows,
+  formatAgentDetail,
   formatAgentValue,
   type AgentPanelActivity,
+  type AgentPanelMessage,
+  type AgentProcessEntry,
+  type AgentThoughtEntry,
 } from '@core/agentkit'
 import { useAgentPanelController } from '@core/hooks/useAgentPanelController'
 import { useT } from '@/hooks/useT'
@@ -14,6 +19,114 @@ import { cn } from '@/lib/utils'
 interface AgentPanelProps {
   open: boolean
   onClose: () => void
+}
+
+const markdownClassName = [
+  'overflow-x-hidden break-words',
+  '[&_p]:mb-2 [&_p:last-child]:mb-0',
+  '[&_ul]:mb-2 [&_ul]:list-disc [&_ul]:pl-5',
+  '[&_ol]:mb-2 [&_ol]:list-decimal [&_ol]:pl-5',
+  '[&_li+li]:mt-1',
+  '[&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.92em]',
+  '[&_pre]:mb-2 [&_pre]:max-w-full [&_pre]:overflow-auto [&_pre]:rounded-md [&_pre]:bg-slate-950 [&_pre]:p-3 [&_pre]:text-slate-100',
+  '[&_pre_code]:bg-transparent [&_pre_code]:p-0',
+  '[&_table]:mb-2 [&_table]:w-full [&_table]:min-w-max [&_table]:border-collapse [&_table]:text-xs',
+  '[&_th]:border [&_th]:border-border [&_th]:bg-muted/60 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left',
+  '[&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1.5 [&_td]:align-top',
+].join(' ')
+
+function ThoughtBlock({
+  thoughts,
+  running,
+}: {
+  thoughts: AgentThoughtEntry[] | undefined
+  running: boolean
+}) {
+  const t = useT()
+  if (!thoughts?.length) return null
+  const isStreaming = running || thoughts.some((thought) => thought.status === 'streaming')
+  const lineCount = thoughts.reduce((total, thought) => total + Math.max(thought.lines.length, 1), 0)
+
+  return (
+    <details
+      className={cn(
+        'rounded-lg border border-blue-100 bg-blue-50/70 p-3 text-xs text-muted-foreground',
+        isStreaming && 'border-blue-200 bg-blue-50'
+      )}
+      open={isStreaming}
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-2 font-medium text-blue-800 [&::-webkit-details-marker]:hidden">
+        <span>{isStreaming ? t('agent.thinking') : t('agent.thoughtDone')}</span>
+        {!isStreaming && <span className="rounded-full bg-white px-1.5 py-0.5 text-[11px] text-muted-foreground">{lineCount}</span>}
+      </summary>
+      <div className="mt-2 space-y-2 border-t border-blue-100 pt-2">
+        {thoughts.map((thought) => (
+          <div key={thought.id} className="space-y-1">
+            {(thought.lines.length ? thought.lines : [thought.text]).map((line, index) => (
+              <p key={`${thought.id}-${index}`} className="m-0 whitespace-pre-wrap leading-5">
+                {line}
+              </p>
+            ))}
+          </div>
+        ))}
+      </div>
+    </details>
+  )
+}
+
+function ProcessTrace({ entries }: { entries: AgentProcessEntry[] | undefined }) {
+  const t = useT()
+  if (!entries?.length) return null
+
+  return (
+    <details className="overflow-hidden rounded-lg border border-border" open={entries.some((entry) => entry.kind === 'error')}>
+      <summary className="flex cursor-pointer list-none items-center justify-between bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
+        <span>{t('agent.processTrace')}</span>
+        <span className="rounded-full bg-background px-2 py-0.5">{entries.length}</span>
+      </summary>
+      <div className="space-y-2 p-3">
+        {entries.map((entry) => {
+          const detail = formatAgentDetail(entry.detail)
+          return (
+            <div key={entry.id} className="grid grid-cols-[auto_minmax(0,1fr)] gap-2">
+              <span
+                className={cn(
+                  'self-start rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700',
+                  entry.kind === 'error' && 'bg-destructive/10 text-destructive'
+                )}
+              >
+                {entry.kind}
+              </span>
+              <div className="min-w-0">
+                <div className="truncate text-xs font-medium text-foreground">{entry.title}</div>
+                {detail && (
+                  <pre className="mt-1 max-h-40 overflow-auto rounded-md bg-muted/60 p-2 text-[11px] leading-5 text-muted-foreground">
+                    {detail}
+                  </pre>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </details>
+  )
+}
+
+function AssistantContent({ message }: { message: AgentPanelMessage }) {
+  const t = useT()
+  const running = message.status === 'streaming'
+  return (
+    <div className="flex min-w-0 flex-col gap-3">
+      <ThoughtBlock thoughts={message.thoughts} running={running} />
+      {message.text ? (
+        <AgentMarkdown className={markdownClassName} content={message.text} />
+      ) : running ? (
+        <span className="text-muted-foreground">{t('agent.streaming')}</span>
+      ) : null}
+      <ProcessTrace entries={message.process} />
+    </div>
+  )
 }
 
 function ActivityCard({
@@ -157,6 +270,16 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
         </span>
         <button
           type="button"
+          className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-45"
+          onClick={controller.clear}
+          disabled={controller.isStreaming}
+          aria-label={t('agent.newConversation')}
+          title={t('agent.newConversation')}
+        >
+          <Plus className="size-4" />
+        </button>
+        <button
+          type="button"
           className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
           onClick={onClose}
           aria-label={t('agent.close')}
@@ -193,13 +316,17 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
             </div>
             <div
               className={cn(
-                'max-w-[292px] whitespace-pre-wrap rounded-lg border px-3 py-2 text-sm leading-6',
+                'max-w-[292px] rounded-lg border px-3 py-2 text-sm leading-6',
                 message.role === 'user'
-                  ? 'border-primary/20 bg-primary/10'
+                  ? 'whitespace-pre-wrap border-primary/20 bg-primary/10'
                   : 'border-border bg-card'
               )}
             >
-              {message.text || (message.status === 'streaming' ? t('agent.streaming') : '')}
+              {message.role === 'assistant' ? (
+                <AssistantContent message={message} />
+              ) : (
+                message.text || (message.status === 'streaming' ? t('agent.streaming') : '')
+              )}
             </div>
           </div>
         ))}
@@ -240,4 +367,3 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
     </aside>
   )
 }
-

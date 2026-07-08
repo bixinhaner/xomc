@@ -5,6 +5,8 @@
   "type": "module",
   "description": "OMC 前端共享业务层：services / hooks / store / types / i18n / mock。通过 @core/* 路径别名被 UI 壳（webcode）消费。",
   "dependencies": {
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "zustand": "^5.0.0"
   },
   "peerDependencies": {
