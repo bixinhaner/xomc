@@ -46,6 +46,22 @@ func Test_queryNetworkTable_SQLShape(t *testing.T) {
 	assert.Contains(t, sql, "WHEN 'sum' THEN SUM(metric_value)")
 }
 
+func Test_queryNetworkTable_15MinRawDeduplicatesBeforeNetworkGroup(t *testing.T) {
+	db := &recordingDB{results: []pgx.Rows{&fakeRows{}}}
+	a := New(db, nil, nil)
+	_, err := a.queryNetworkTable(context.Background(), "pm_metrics", QueryRequest{
+		Granularity: metrics.Granularity15Min,
+		MetricPaths: []string{"C000060011"},
+		MetricType:  counterType(),
+	})
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(db.sqls), 1)
+	sql := db.sqls[0]
+	assert.Contains(t, sql, `DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
+	assert.Contains(t, sql, `ORDER BY device_oui, device_sn, metric_path, granularity, "time", object_ldn, ingest_time DESC`)
+	assert.Contains(t, sql, "GROUP BY metric_path, granularity, time")
+}
+
 // Test_queryNetworkTable_EmptyMetricPaths_NoFilter（KPI-ALL-IND 阶段1）：
 // 全网任务放开到全库后，MetricPaths 留空 = 不下推任何 metric_path 过滤（全库全聚）。
 // 这是「内置全网任务清空指标列表 → 全聚语义」的底层依据。
