@@ -1,6 +1,7 @@
 package adhoc
 
 import (
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -112,4 +113,20 @@ func Test_onConflictResultsBusiness_MatchesIndexExpression(t *testing.T) {
 	// 冲突键 time 不出现在 SET 中
 	assert.NotContains(t, c, "SET ... time =")
 	assert.False(t, strings.Contains(c, `"time" = EXCLUDED`))
+}
+
+func Test_buildInsertResultsSQL_NullMetricValueBindsNull(t *testing.T) {
+	task := uuid.New()
+	t0 := time.Date(2026, 6, 3, 10, 0, 0, 0, time.UTC)
+	rows := []ResultRow{{
+		TaskID: task, Granularity: "hourly", MetricPath: "C-NULL",
+		DeviceSN: "SN-A", MetricType: "counter", MetricValue: math.NaN(),
+		Time: t0, StartTime: t0, EndTime: t0,
+	}}
+
+	_, args, err := buildInsertResultsSQL(rows)
+
+	require.NoError(t, err)
+	require.Len(t, args, len(resultInsertCols))
+	assert.Nil(t, args[6], "metric_value 的 NaN 应绑定为 SQL NULL，而不是写 PostgreSQL NaN")
 }

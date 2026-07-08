@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -382,6 +383,9 @@ func (e *Executor) normalizeResultRows(ctx context.Context, rows []ResultRow) ([
 		meta, ok := metaByPath[row.MetricPath]
 		if !ok {
 			return nil, fmt.Errorf("normalize adhoc result %s: %w", row.MetricPath, resultnorm.ErrMissingMetadata)
+		}
+		if math.IsNaN(row.MetricValue) {
+			continue
 		}
 		statisType := meta.StatisType
 		if row.StatisType != nil && *row.StatisType != "" {
