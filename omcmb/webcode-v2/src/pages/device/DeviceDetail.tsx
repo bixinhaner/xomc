@@ -43,6 +43,7 @@ import { activationStatusLabelOf } from '@core/utils/activationStatus'
 import { DEFAULT_ALARM_SEVERITY_LABELS_ZH, formatAlarmSeverityBadgeLabel, getAlarmSeverityBadgeVariant } from '@core/utils/alarmSeverity'
 import { DEVICE_SYNC_STATUS_LABELS_ZH, formatDeviceSyncStatus } from '@core/utils/deviceSyncStatus'
 import { computeCumulativeOnlineDurationSeconds } from '@core/utils/onlineDuration'
+import { rfStatusLabelOf } from '@core/utils/rfStatus'
 import type { Device } from '@core/types/device'
 
 // ============================================================
@@ -210,6 +211,8 @@ export default function DeviceDetail() {
   const { data: opStateDict } = useDictionary('op_state')
   const reboot = useRebootDevice()
   const syncParams = useSyncDeviceParams()
+  const rfStatusLabel = (value: string | undefined) =>
+    rfStatusLabelOf(value, { on: '射频开', off: '射频关', error: '异常' }) ?? value ?? '—'
 
   const basicFields = (d: Device): Field[] => [
     { label: 'SN', value: d.sn, mono: true },
@@ -244,7 +247,7 @@ export default function DeviceDetail() {
         }, appLocale) || '-',
     },
     { label: '同步状态', value: formatDeviceSyncStatus(d.syncStatus, DEVICE_SYNC_STATUS_LABELS_ZH) || d.syncStatus },
-    { label: 'RF 状态', value: d.rfStatus },
+    { label: 'RF 状态', value: rfStatusLabel(d.rfStatus) },
     { label: 'MME/AMF', value: d.mmeStatus || d.amfStatus },
     { label: 'UE 数', value: d.ueCount },
     { label: 'CPE 数', value: d.cpeCount },
