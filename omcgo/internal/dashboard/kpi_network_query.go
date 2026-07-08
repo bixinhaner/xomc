@@ -22,7 +22,7 @@ func buildNetworkKPISeriesQuery(codes []string, startTimeArg, endTimeArg any) (s
 	const aggValueExpr = `
 		CASE MIN(statis_type)
 			WHEN 'sum' THEN SUM(sum_val)
-			WHEN 'avg' THEN SUM(sum_val) / NULLIF(SUM(sample_count), 0)
+			WHEN 'avg' THEN AVG(avg_val)
 			WHEN 'max' THEN MAX(max_val)
 			WHEN 'min' THEN MIN(min_val)
 			WHEN 'pct' THEN AVG(avg_val)
