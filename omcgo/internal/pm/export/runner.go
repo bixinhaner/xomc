@@ -24,6 +24,12 @@ type taskRepo interface {
 	MarkFailed(ctx context.Context, id uuid.UUID, errMsg string) error
 }
 
+// TimezoneProvider 是系统时区读取的最小契约。
+// Provider 或 Location 为 nil 时，Runner 在导出展示层回退 UTC。
+type TimezoneProvider interface {
+	Location(ctx context.Context) *time.Location
+}
+
 // Runner 是 pm_kpi_export 的 asyncjob.JobRunner 实现（T2 真生成）。
 //
 // 流程：载任务 → MarkRunning → 按 source_type 取数 → 流式写 CSV 直传对象存储 →
@@ -39,6 +45,7 @@ type Runner struct {
 	uploader   Uploader // 对象存储上传（流式）
 	bucket     string   // 导出文件落地桶
 	logger     *zap.Logger
+	timezone   TimezoneProvider
 
 	// buildSourceFn 取数源构造入口；默认 r.buildSource，单测可注入 stub 源绕过 DB。
 	// 返回取数源 + 横表指标列集（列名已解析）+ CSV 列布局（首列表头 / 是否含小区列），
@@ -53,14 +60,15 @@ type Runner struct {
 //     adhoc 查 pm_adhoc_aggregation_results（两表均在时序库）。
 //   - TaskMetaDB = 主库（PgPool）：loadAdhocDimension 读 pm_tasks（任务元数据留主库）。
 type RunnerDeps struct {
-	Repo       taskRepo
-	Aggr       *aggregator.Aggregator
-	MetricDB   PgQuerier
-	AdhocDB    PgQuerier
-	TaskMetaDB PgQuerier
-	Uploader   Uploader
-	Bucket     string
-	Logger     *zap.Logger
+	Repo             taskRepo
+	Aggr             *aggregator.Aggregator
+	MetricDB         PgQuerier
+	AdhocDB          PgQuerier
+	TaskMetaDB       PgQuerier
+	Uploader         Uploader
+	Bucket           string
+	Logger           *zap.Logger
+	TimezoneProvider TimezoneProvider
 }
 
 // NewRunner 构造 T2 Runner。
@@ -78,6 +86,7 @@ func NewRunner(d RunnerDeps) *Runner {
 		uploader:   d.Uploader,
 		bucket:     d.Bucket,
 		logger:     logger.Named("pm.export.runner"),
+		timezone:   d.TimezoneProvider,
 	}
 	r.buildSourceFn = r.buildSource
 	return r
@@ -168,11 +177,22 @@ func (r *Runner) generate(ctx context.Context, task *Task) (genResult, error) {
 	}
 
 	object := objectPath(task)
-	out, err := streamCSVToObject(ctx, r.uploader, r.bucket, object, src, cols, layout)
+	out, err := streamCSVToObject(ctx, r.uploader, r.bucket, object, src, cols, layout, r.outputLocation(ctx))
 	if err != nil {
 		return genResult{}, err
 	}
 	return genResult{filePath: object, fileSize: out.FileSize, rowCount: out.RowCount}, nil
+}
+
+func (r *Runner) outputLocation(ctx context.Context) *time.Location {
+	if r.timezone == nil {
+		return time.UTC
+	}
+	loc := r.timezone.Location(ctx)
+	if loc == nil {
+		return time.UTC
+	}
+	return loc
 }
 
 // buildSource 按 source_type 构造取数源 + 横表指标列集（含已解析列名）。

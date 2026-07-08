@@ -120,14 +120,15 @@ func startPMAggregatorPipeline(
 	//   - aggr 复用上面的 device 级聚合查询入口（dashboard 聚合维度 + KPI 反算）
 	//   - bucket 复用报表桶（设计 §5.6）
 	exportRunner := pmexport.NewRunner(pmexport.RunnerDeps{
-		Repo:       pmexport.NewPgRepository(w.PgPool),
-		Aggr:       aggr,
-		MetricDB:   w.TsPool,
-		AdhocDB:    w.TsPool,
-		TaskMetaDB: w.PgPool,
-		Uploader:   w.MinIO,
-		Bucket:     exportBucket,
-		Logger:     logger,
+		Repo:             pmexport.NewPgRepository(w.PgPool),
+		Aggr:             aggr,
+		MetricDB:         w.TsPool,
+		AdhocDB:          w.TsPool,
+		TaskMetaDB:       w.PgPool,
+		Uploader:         w.MinIO,
+		Bucket:           exportBucket,
+		Logger:           logger,
+		TimezoneProvider: exportTimezoneProvider(tz),
 	})
 	registry.Register(exportRunner)
 	logger.Info("registered pm kpi export runner (T2)",
@@ -204,6 +205,13 @@ func runJobTypeWorker(ctx context.Context, registry *asyncjob.Registry, jobType 
 			}
 		}
 	}
+}
+
+func exportTimezoneProvider(tz *tzManager) pmexport.TimezoneProvider {
+	if tz == nil {
+		return nil
+	}
+	return tz.provider
 }
 
 // cronEntry 是单条 cron 调度配置（含启动补跑用的 advance）。

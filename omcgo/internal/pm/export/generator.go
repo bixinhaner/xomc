@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 )
@@ -43,6 +44,7 @@ func streamCSVToObject(
 	src RowSource,
 	cols []WideColumn,
 	layout csvLayout,
+	outputLocation *time.Location,
 ) (GenerateResult, error) {
 	pr, pw := io.Pipe()
 
@@ -50,7 +52,7 @@ func streamCSVToObject(
 	var rowCount int64
 	writeErrCh := make(chan error, 1)
 	go func() {
-		cw, err := newWideCSVWriter(pw, layout.FirstColHeader, layout.IncludeTechnology, layout.IncludeCell, cols, layout.MissingMetricValuePlaceholder)
+		cw, err := newWideCSVWriterWithLocation(pw, layout.FirstColHeader, layout.IncludeTechnology, layout.IncludeCell, cols, layout.MissingMetricValuePlaceholder, outputLocation)
 		if err != nil {
 			pw.CloseWithError(err)
 			writeErrCh <- err

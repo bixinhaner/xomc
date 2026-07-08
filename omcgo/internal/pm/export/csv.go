@@ -76,6 +76,7 @@ type WideCSVWriter struct {
 	includeCell                   bool           // 是否含「小区/PLMN」列（仅 device 维度为 true）
 	fixedCount                    int            // 固定行键列数（含/不含制式列与小区列各态），用于行容量预分配
 	missingMetricValuePlaceholder string         // 指标缺失时的单元格占位符；空串表示沿用 CSV 空单元格。
+	outputLocation                *time.Location // CSV 时间列输出时区；nil 入口统一回退 UTC。
 
 	// 当前时间桶状态。
 	active              bool
@@ -94,8 +95,15 @@ func NewWideCSVWriter(out io.Writer, firstColHeader string, includeTech, include
 }
 
 func newWideCSVWriter(out io.Writer, firstColHeader string, includeTech, includeCell bool, cols []WideColumn, missingPlaceholder string) (*WideCSVWriter, error) {
+	return newWideCSVWriterWithLocation(out, firstColHeader, includeTech, includeCell, cols, missingPlaceholder, nil)
+}
+
+func newWideCSVWriterWithLocation(out io.Writer, firstColHeader string, includeTech, includeCell bool, cols []WideColumn, missingPlaceholder string, outputLocation *time.Location) (*WideCSVWriter, error) {
 	if _, err := out.Write(utf8BOM); err != nil {
 		return nil, err
+	}
+	if outputLocation == nil {
+		outputLocation = time.UTC
 	}
 	cw := csv.NewWriter(out)
 	fixed := []string{"开始时间", "结束时间", firstColHeader}
@@ -119,6 +127,7 @@ func newWideCSVWriter(out io.Writer, firstColHeader string, includeTech, include
 		w: cw, cols: cols, colIdx: idx,
 		firstHeader: firstColHeader, includeTech: includeTech, includeCell: includeCell, fixedCount: len(fixed),
 		missingMetricValuePlaceholder: missingPlaceholder,
+		outputLocation:                outputLocation,
 	}
 	return writer, nil
 }
@@ -171,11 +180,11 @@ func (c *WideCSVWriter) flushBucket() error {
 		return c.order[i].cellPLMN < c.order[j].cellPLMN
 	})
 	// 开始时间取时窗起（与页面"开始时间"同口径）；缺失时回退桶时间。
-	startStr := formatTime(c.bStart)
+	startStr := c.formatTime(c.bStart)
 	if c.bStart.IsZero() {
-		startStr = formatTime(c.bTime)
+		startStr = c.formatTime(c.bTime)
 	}
-	endStr := formatTime(c.bEnd)
+	endStr := c.formatTime(c.bEnd)
 	for _, k := range c.order {
 		rec := make([]string, 0, c.fixedCount+len(c.cols))
 		rec = append(rec, startStr, endStr, k.device)
@@ -238,10 +247,14 @@ func (c *WideCSVWriter) Flush() error {
 // RowCount 返回已写出的横行数（不含表头）。
 func (c *WideCSVWriter) RowCount() int64 { return c.rowCount }
 
-// formatTime 空时间输出空串，否则本地可读格式。
-func formatTime(t time.Time) string {
+// formatTime 空时间输出空串，否则按导出时区输出本地可读格式。
+func (c *WideCSVWriter) formatTime(t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
-	return t.Format(csvTimeLayout)
+	loc := c.outputLocation
+	if loc == nil {
+		loc = time.UTC
+	}
+	return t.In(loc).Format(csvTimeLayout)
 }
