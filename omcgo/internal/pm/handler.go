@@ -510,6 +510,9 @@ func fillEmptyBuckets(rows []aggregator.Row, req aggregator.QueryRequest) []aggr
 		if r.Filled {
 			continue // 只看真实行（防御性：正常此时 rows 全为真实行）
 		}
+		if req.MetricType != nil && r.MetricType != *req.MetricType {
+			continue
+		}
 		if r.DisplayName != "" {
 			nameByPath[r.MetricPath] = r.DisplayName
 		}
@@ -535,6 +538,7 @@ func fillEmptyBuckets(rows []aggregator.Row, req aggregator.QueryRequest) []aggr
 				DeviceSN:    g.rep.DeviceSN,
 				MetricPath:  mp,
 				DisplayName: nameByPath[mp],
+				MetricType:  fillMetricType(g.rep.MetricType, req.MetricType),
 				Granularity: g.rep.Granularity,
 				Time:        g.rep.Time,
 				StartTime:   g.rep.StartTime,
@@ -545,6 +549,13 @@ func fillEmptyBuckets(rows []aggregator.Row, req aggregator.QueryRequest) []aggr
 		}
 	}
 	return rows
+}
+
+func fillMetricType(repType metrics.MetricType, requested *metrics.MetricType) metrics.MetricType {
+	if requested != nil {
+		return *requested
+	}
+	return repType
 }
 
 // groupKey 构造 (object_ldn, time) 分组键。object_ldn=nil（设备级）归一为固定空键，
