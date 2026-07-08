@@ -83,18 +83,20 @@ func (s *RedisAlarmStore) GetAlarmCountsPipeline(ctx context.Context, deviceIDs 
 		return nil, nil
 	}
 
+	
 	pipe := s.client.Pipeline()
 	var cmds []*redis.StringCmd
-
+	
 	for _, id := range deviceIDs {
 		cmds = append(cmds, pipe.HGet(ctx, alarmStatsKey(id), "active_count"))
 	}
-
+	
 	_, err := pipe.Exec(ctx)
 	if err != nil && err != redis.Nil {
 		// Pipeline returns redis.Nil if ANY of the keys does not exist. We can ignore it safely.
 	}
 
+	
 	res := make(map[string]int, len(deviceIDs))
 	for i, id := range deviceIDs {
 		val, _ := cmds[i].Int() // if error or redis.Nil, val will be 0
@@ -104,5 +106,6 @@ func (s *RedisAlarmStore) GetAlarmCountsPipeline(ctx context.Context, deviceIDs 
 		res[id] = val
 	}
 
+	
 	return res, nil
 }
