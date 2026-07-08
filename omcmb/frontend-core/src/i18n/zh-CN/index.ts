@@ -5066,6 +5066,7 @@ const messages: Record<string, string> = {
   // ── KPI 数据导出（KPI-EXPORT）─────────────────────────────────────────────
   'kpiExport.tab.title':                      'KPI 导出',
   'kpiExport.source.dashboard':               '仪表盘',
+  'kpiExport.source.kpiQuery':                '指标查询',
   'kpiExport.source.adhoc':                   '任务结果',
   'kpiExport.status.pending':                 '待处理',
   'kpiExport.status.running':                 '进行中',

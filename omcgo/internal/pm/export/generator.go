@@ -21,13 +21,15 @@ type GenerateResult struct {
 	FileSize int64
 }
 
-// csvLayout 描述横表 CSV 的列布局（按 adhoc 维度自适应）：首列表头 + 是否含「制式」列 + 是否含「小区/PLMN」列。
-// dashboard 路径恒为「设备」+ 含小区列、不含制式列（保持现状）；
+// csvLayout 描述横表 CSV 的列布局：首列表头 + 是否含「制式」列 + 测量对象列形态。
+// dashboard 路径恒为「设备」+ 含 Cell ID/PLMN 列、不含制式列（保持现状）；
+// kpi_query 路径恒为「设备 SN」+ 含「测量对象」列、不含制式列（贴近指标查询页）；
 // adhoc device_group 维度含制式列（与页面表格一致），device 维度含小区列。
 type csvLayout struct {
 	FirstColHeader                string
 	IncludeTechnology             bool
 	IncludeCell                   bool
+	IncludeMeasurementObject      bool
 	MissingMetricValuePlaceholder string
 }
 
@@ -52,7 +54,16 @@ func streamCSVToObject(
 	var rowCount int64
 	writeErrCh := make(chan error, 1)
 	go func() {
-		cw, err := newWideCSVWriterWithLocation(pw, layout.FirstColHeader, layout.IncludeTechnology, layout.IncludeCell, cols, layout.MissingMetricValuePlaceholder, outputLocation)
+		cw, err := newWideCSVWriterWithLayout(
+			pw,
+			layout.FirstColHeader,
+			layout.IncludeTechnology,
+			layout.IncludeCell,
+			layout.IncludeMeasurementObject,
+			cols,
+			layout.MissingMetricValuePlaceholder,
+			outputLocation,
+		)
 		if err != nil {
 			pw.CloseWithError(err)
 			writeErrCh <- err

@@ -201,42 +201,24 @@ func (r *Runner) outputLocation(ctx context.Context) *time.Location {
 // 表头开头即知；流式阶段只摊行不再查名。
 func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, []WideColumn, csvLayout, error) {
 	loc := appcontext.GetLocale(ctx)
-	// dashboard 路径恒为 device 维度：首列「设备 SN」+ 含 Cell ID/PLMN 列（与页面表格一致）。
+	// dashboard 路径恒为 device 维度：首列「设备 SN」+ 含 Cell ID/PLMN 列（保持仪表盘既有导出口径）。
 	// 缺值与 adhoc 导出保持一致写 "-"，避免 CSV 空单元格被误读为未导出。
 	dashboardLayout := csvLayout{
 		FirstColHeader:                "设备 SN",
 		IncludeCell:                   true,
 		MissingMetricValuePlaceholder: missingMetricValuePlaceholder,
 	}
+	kpiQueryLayout := csvLayout{
+		FirstColHeader:                "设备 SN",
+		IncludeMeasurementObject:      true,
+		MissingMetricValuePlaceholder: missingMetricValuePlaceholder,
+	}
 	switch task.SourceType {
 	case SourceDashboard:
-		req, objectLDNs, err := parseDashboardParams(task.Params)
-		if err != nil {
-			return nil, nil, csvLayout{}, err
-		}
-		dim := req.Dimension
-		if dim == "" {
-			dim = aggregator.DimensionDevice
-		}
-		table, terr := aggregator.SelectTable(req.Granularity, dim)
-		if terr != nil {
-			return nil, nil, csvLayout{}, terr
-		}
-		// 发现列集（编号+类型，与设备/小区无关）→ 解析本地化列名。
-		keys, derr := discoverMetricColumns(ctx, r.metricDB, table, req.MetricPaths, req.StartTime, req.EndTime)
-		if derr != nil {
-			return nil, nil, csvLayout{}, derr
-		}
-		cols := newNameResolver(r.metricDB, loc).resolveColumns(ctx, keys)
+		return r.buildDashboardLikeSource(ctx, task, loc, dashboardLayout)
 
-		// device 维度且表含行级 id → (time,id) keyset 直查；否则（聚合维度 / 无 id 的 device 表）走聚合批次游标。
-		if dim == aggregator.DimensionDevice && tableHasIDColumn(table) {
-			return newDashboardDeviceSource(r.metricDB, table, req, objectLDNs), cols, dashboardLayout, nil
-		}
-		if r.aggr == nil {
-			return nil, nil, csvLayout{}, fmt.Errorf("aggregator not wired for dashboard aggregate export")
-		}
-		return newDashboardAggregateSource(r.aggr, req, objectLDNs), cols, dashboardLayout, nil
+	case SourceKpiQuery:
+		return r.buildDashboardLikeSource(ctx, task, loc, kpiQueryLayout)
 
 	case SourceAdhoc:
 		taskID, startTime, endTime, err := parseAdhocParams(task.Params)
@@ -265,6 +247,36 @@ func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, []Wide
 	default:
 		return nil, nil, csvLayout{}, fmt.Errorf("export runner: unsupported source_type %q", task.SourceType)
 	}
+}
+
+func (r *Runner) buildDashboardLikeSource(ctx context.Context, task *Task, loc appcontext.Locale, layout csvLayout) (RowSource, []WideColumn, csvLayout, error) {
+	req, objectLDNs, err := parseDashboardParams(task.Params)
+	if err != nil {
+		return nil, nil, csvLayout{}, err
+	}
+	dim := req.Dimension
+	if dim == "" {
+		dim = aggregator.DimensionDevice
+	}
+	table, terr := aggregator.SelectTable(req.Granularity, dim)
+	if terr != nil {
+		return nil, nil, csvLayout{}, terr
+	}
+	// 发现列集（编号+类型，与设备/小区无关）→ 解析本地化列名。
+	keys, derr := discoverMetricColumns(ctx, r.metricDB, table, req.MetricPaths, req.StartTime, req.EndTime)
+	if derr != nil {
+		return nil, nil, csvLayout{}, derr
+	}
+	cols := newNameResolver(r.metricDB, loc).resolveColumns(ctx, keys)
+
+	// device 维度且表含行级 id → (time,id) keyset 直查；否则（聚合维度 / 无 id 的 device 表）走聚合批次游标。
+	if dim == aggregator.DimensionDevice && tableHasIDColumn(table) {
+		return newDashboardDeviceSource(r.metricDB, table, req, objectLDNs), cols, layout, nil
+	}
+	if r.aggr == nil {
+		return nil, nil, csvLayout{}, fmt.Errorf("aggregator not wired for dashboard aggregate export")
+	}
+	return newDashboardAggregateSource(r.aggr, req, objectLDNs), cols, layout, nil
 }
 
 // loadAdhocDimension 读 adhoc 任务的聚合维度与圈选设备数（用于首列表头 / 对象名标签）。

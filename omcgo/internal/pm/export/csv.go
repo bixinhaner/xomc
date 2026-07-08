@@ -24,7 +24,7 @@ const missingMetricValuePlaceholder = "-"
 type ExportRow struct {
 	Device      string // 设备：device 维度为 SN（与页面一致），聚合维度为对象标识（设备组名 / 产品名 / 全网 等）
 	Technology  string // 制式：仅 device_group 维度从 object_ldn 解析出（LTE/NR/GSM，大写），其余维度空串
-	CellPLMN    string // 小区/PLMN：object_ldn 原文（输出时拆成 Cell ID / PLMN 两列；空 → 空串）
+	CellPLMN    string // 测量对象：object_ldn 原文（dashboard/adhoc 可拆成 Cell ID / PLMN；kpi_query 原样输出）
 	MetricCode  string // 指标编号：metric_path（K/C 编号）
 	MetricName  string // 指标名：DisplayName（横表里不进单元格，列名解析另走列发现）
 	MetricType  string // 类型：counter / kpi
@@ -74,6 +74,7 @@ type WideCSVWriter struct {
 	firstHeader                   string         // 首列表头（随 adhoc 维度变：设备 / 设备组 / 产品 / 频段 / 全网 / 聚合组）
 	includeTech                   bool           // 是否含「制式」列（仅 device_group 维度为 true）
 	includeCell                   bool           // 是否含「小区/PLMN」列（仅 device 维度为 true）
+	includeMeasurementObject      bool           // 是否把 object_ldn 原样输出为「测量对象」列（指标查询页导出）
 	fixedCount                    int            // 固定行键列数（含/不含制式列与小区列各态），用于行容量预分配
 	missingMetricValuePlaceholder string         // 指标缺失时的单元格占位符；空串表示沿用 CSV 空单元格。
 	outputLocation                *time.Location // CSV 时间列输出时区；nil 入口统一回退 UTC。
@@ -99,6 +100,14 @@ func newWideCSVWriter(out io.Writer, firstColHeader string, includeTech, include
 }
 
 func newWideCSVWriterWithLocation(out io.Writer, firstColHeader string, includeTech, includeCell bool, cols []WideColumn, missingPlaceholder string, outputLocation *time.Location) (*WideCSVWriter, error) {
+	return newWideCSVWriterWithLayout(out, firstColHeader, includeTech, includeCell, false, cols, missingPlaceholder, outputLocation)
+}
+
+func newWideCSVWriterWithMeasurementObject(out io.Writer, firstColHeader string, includeTech, includeMeasurementObject bool, cols []WideColumn, missingPlaceholder string, outputLocation *time.Location) (*WideCSVWriter, error) {
+	return newWideCSVWriterWithLayout(out, firstColHeader, includeTech, false, includeMeasurementObject, cols, missingPlaceholder, outputLocation)
+}
+
+func newWideCSVWriterWithLayout(out io.Writer, firstColHeader string, includeTech, includeCell, includeMeasurementObject bool, cols []WideColumn, missingPlaceholder string, outputLocation *time.Location) (*WideCSVWriter, error) {
 	if _, err := out.Write(utf8BOM); err != nil {
 		return nil, err
 	}
@@ -113,6 +122,9 @@ func newWideCSVWriterWithLocation(out io.Writer, firstColHeader string, includeT
 	if includeCell {
 		fixed = append(fixed, "Cell ID", "PLMN")
 	}
+	if includeMeasurementObject {
+		fixed = append(fixed, "测量对象")
+	}
 	header := make([]string, 0, len(fixed)+len(cols))
 	header = append(header, fixed...)
 	idx := make(map[string]int, len(cols))
@@ -125,7 +137,7 @@ func newWideCSVWriterWithLocation(out io.Writer, firstColHeader string, includeT
 	}
 	writer := &WideCSVWriter{
 		w: cw, cols: cols, colIdx: idx,
-		firstHeader: firstColHeader, includeTech: includeTech, includeCell: includeCell, fixedCount: len(fixed),
+		firstHeader: firstColHeader, includeTech: includeTech, includeCell: includeCell, includeMeasurementObject: includeMeasurementObject, fixedCount: len(fixed),
 		missingMetricValuePlaceholder: missingPlaceholder,
 		outputLocation:                outputLocation,
 	}
@@ -194,6 +206,13 @@ func (c *WideCSVWriter) flushBucket() error {
 		if c.includeCell {
 			cellID, plmn := parseObjectLDN(k.cellPLMN)
 			rec = append(rec, cellID, plmn)
+		}
+		if c.includeMeasurementObject {
+			objectLDN := k.cellPLMN
+			if objectLDN == "" {
+				objectLDN = c.missingMetricValuePlaceholder
+			}
+			rec = append(rec, objectLDN)
 		}
 		rec = append(rec, c.cells[k]...)
 		if err := c.w.Write(rec); err != nil {
