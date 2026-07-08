@@ -172,7 +172,7 @@ func TestSyncProvisionsConnectorAndPersistsRuntimeConfig(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "Bearer provision-token", capturedAuth)
 	require.NotContains(t, capturedBody, "agent-actions")
-	require.Contains(t, capturedBody, `"runtimeInstruction"`)
+	require.NotContains(t, capturedBody, `"runtimeInstruction"`)
 	require.Contains(t, capturedBody, `"allowedMethods":["GET"]`)
 	require.Equal(t, StatusConnected, cfg.Status)
 	require.Equal(t, "connector-1", cfg.ConnectorID)

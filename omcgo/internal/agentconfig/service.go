@@ -329,9 +329,8 @@ func (s *Service) provision(ctx context.Context, settings mergedSettings) (*Prov
 		"status":         "active",
 		"runtimeBaseUrl": settings.AgentStudioBaseURL,
 		"config": map[string]any{
-			"displayName":        "External Operations",
-			"delegationHeader":   "Authorization",
-			"runtimeInstruction": "Use the generic REST tool bridge. Search the API catalog, describe the selected operation, then request /api/v1 paths through the bridge. Do not invent data.",
+			"displayName":      "External Operations",
+			"delegationHeader": "Authorization",
 			"policy": map[string]any{
 				"allowReadActions":     methodAllowed(settings.Policy, http.MethodGet),
 				"allowLowRiskActions":  hasWriteMethod(settings.Policy),
