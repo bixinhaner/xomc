@@ -399,11 +399,13 @@ export default function MenuManagement() {
   // 生成树形选择数据
   const menuTreeData = useMemo(() => {
     const buildTree = (items: MenuItem[]): { value: string; title: string; children?: { value: string; title: string }[] }[] => {
-      return items.map((item) => ({
-        value: item.id,
-        title: item.name,
-        children: item.children ? buildTree(item.children) : undefined,
-      }));
+      return items
+        .filter((item) => item.type !== 'button')
+        .map((item) => ({
+          value: item.id,
+          title: item.name,
+          children: item.children ? buildTree(item.children) : undefined,
+        }));
     };
     return [{ value: '0', title: t('menu.treeRoot'), children: buildTree(menus) }];
   }, [menus, t]);
