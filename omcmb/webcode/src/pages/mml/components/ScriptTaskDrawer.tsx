@@ -266,6 +266,10 @@ export default function ScriptTaskDrawer({
           toast.warning(t('mml.noPlanItems'));
           throw new Error('PLAN_REQUIRED');
         }
+        if (isDeviceBound && parseResult.warnings.length > 0) {
+          toast.warning('按设备计划行模式下，每条有效脚本行都需要携带 SN。');
+          throw new Error('PLAN_MIXED');
+        }
         if (!isDeviceBound && deviceSns.length === 0) {
           toast.warning(t('mml.snRequired'));
           throw new Error('SN_REQUIRED');
@@ -318,7 +322,7 @@ export default function ScriptTaskDrawer({
         // 表单校验失败 / guard 抛出的业务前置错误会落到这里。antd 的
         // 校验错误 err 没有 message，静默即可；其它错误统一通过 toast 暴露。
         if (err && (err as { errorFields?: unknown }).errorFields) return;
-        if (err instanceof Error && ['SN_REQUIRED', 'PLAN_REQUIRED', 'COMMAND_REQUIRED'].includes(err.message)) return;
+        if (err instanceof Error && ['SN_REQUIRED', 'PLAN_REQUIRED', 'PLAN_MIXED', 'COMMAND_REQUIRED'].includes(err.message)) return;
         toast.error(err, t('mml.taskCreateFailedPrefix'));
       });
   }, [
@@ -393,27 +397,37 @@ export default function ScriptTaskDrawer({
           </div>
         </div>
 
-        <div style={{ marginLeft: 12, marginBottom: 16 }}>
-          <label style={{ display: 'block', marginBottom: 4, fontSize: 14 }}>
-            {t('mml.deviceSn')}
-          </label>
-          <Space.Compact style={{ width: '100%' }}>
-            <Select
-              mode="tags"
-              value={deviceSns}
-              onChange={setDeviceSns}
-              placeholder={t('mml.inputDeviceSn')}
-              style={{ flex: 1 }}
-              tokenSeparators={[',', ';', '\n']}
-              open={false}
-              disabled={isDeviceBound}
-            />
-            <Button icon={<PlusOutlined />} disabled={isDeviceBound} onClick={() => setDeviceSelectOpen(true)}>
-              {t('mml.selectDevice')}
-            </Button>
-          </Space.Compact>
-          <span style={{ color: '#999', fontSize: 12 }}>{t('mml.deviceSnTip')}</span>
-        </div>
+        {isDeviceBound ? (
+          <div style={{ marginLeft: 12, marginBottom: 16 }}>
+            <label style={{ display: 'block', marginBottom: 4, fontSize: 14 }}>
+              {t('mml.deviceSn')}
+            </label>
+            <div style={{ color: '#999', fontSize: 12 }}>
+              按设备计划行模式已从脚本解析 {parseResult.deviceSns.length} 台设备，不需要单独选择 SN。
+            </div>
+          </div>
+        ) : (
+          <div style={{ marginLeft: 12, marginBottom: 16 }}>
+            <label style={{ display: 'block', marginBottom: 4, fontSize: 14 }}>
+              {t('mml.deviceSn')}
+            </label>
+            <Space.Compact style={{ width: '100%' }}>
+              <Select
+                mode="tags"
+                value={deviceSns}
+                onChange={setDeviceSns}
+                placeholder={t('mml.inputDeviceSn')}
+                style={{ flex: 1 }}
+                tokenSeparators={[',', ';', '\n']}
+                open={false}
+              />
+              <Button icon={<PlusOutlined />} onClick={() => setDeviceSelectOpen(true)}>
+                {t('mml.selectDevice')}
+              </Button>
+            </Space.Compact>
+            <span style={{ color: '#999', fontSize: 12 }}>{t('mml.deviceSnTip')}</span>
+          </div>
+        )}
 
         {prefillContent !== undefined ? (
           // MML Console 入口：预填的命令也允许用户手动微调（to-do-list 当轮 #6）。
