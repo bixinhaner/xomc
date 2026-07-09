@@ -60,6 +60,9 @@ import { formatDeviceSyncStatus, getDeviceSyncStatusKind, normalizeDeviceSyncSta
 import { computeCumulativeOnlineDurationSeconds, computeCurrentOnlineDurationSeconds } from '@core/utils/onlineDuration';
 import { rfStatusLabelOf, rfStatusOf } from '@core/utils/rfStatus';
 import { buildDeviceGroupDisplayName } from '@core/utils/deviceGroupDisplay';
+import { resolveNetworkTypeLabel } from '@core/utils/networkType';
+import { localizeDeviceProductName } from '@core/utils/deviceDisplay';
+import type { Locale } from '@core/utils/i18nText';
 
 const { Title, Text } = Typography;
 
@@ -562,6 +565,8 @@ const getStationFields = (
   t: ReturnType<typeof useT>,
   networkType: string,
   onResolveNameSync?: (action: 'use_lmt' | 'use_omc' | 'ignore') => void,
+  renderNetworkType?: FieldItem['render'],
+  locale: Locale = 'zh-CN',
 ): FieldGroup => {
   const fields: FieldItem[] = [
     // 公共字段
@@ -602,9 +607,13 @@ const getStationFields = (
         return d.name || '-';
       },
     },
-    { key: 'networkType', label: t('device.radioMode'), render: (d) => <Tag color={{ eNB: 'blue', gNB: 'green', GSM: 'orange' }[d.networkType ?? '']}>{d.networkType || '-'}</Tag> },
+    {
+      key: 'networkType',
+      label: t('device.radioMode'),
+      render: renderNetworkType ?? ((d) => <Tag color={{ eNB: 'blue', gNB: 'green', GSM: 'orange' }[d.networkType ?? '']}>{d.networkType || '-'}</Tag>),
+    },
     { key: 'productClass', label: t('device.productClass'), render: (d) => d.productClass || '-' },
-    { key: 'deviceModel', label: t('device.model'), render: (d) => d.deviceModel || '-' },
+    { key: 'deviceModel', label: t('device.model'), render: (d) => localizeDeviceProductName(d.deviceModel, locale) },
     { key: 'softwareVersion', label: t('device.softwareVersion'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.softwareVersion || '-'}</Text> },
     { key: 'macAddress', label: t('device.macAddress'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.macAddress || '-'}</Text> },
     { key: 'groupName', label: t('device.groupName'), render: (d) => d.groupName || '-' },
@@ -984,6 +993,7 @@ interface KPITabContentProps {
 
 function KPITabContent({ device, t }: KPITabContentProps) {
   const [timeMode, setTimeMode] = useState<'day' | 'week'>('day');
+  const appLocale = useAppStore((s) => s.locale);
   // 下钻对象集（多选，默认全选）：'' = 设备级伪项 + metricObjects 返回的实实在在 ldn。
   // 设备级行 (object_ldn='') 不在后端 metricObjects 返回集里（SQL 有 `object_ldn <> ''`），
   // 但 5G KGNB05xx 这类 KPI 原生在设备级行，不带上会全选后什么都不出，所以手动在集首加个 '' 伪项。
@@ -1087,7 +1097,7 @@ function KPITabContent({ device, t }: KPITabContentProps) {
     { label: t('device.kpi.deviceLevel'), value: '' },
     ...metricObjects.map((o) => ({
       // 下拉标签走 formatObjectLdn 友好名；legend / series.name 却按拍板决定显示原始 LDN。
-      label: formatObjectLdn(o.objectLdn),
+      label: formatObjectLdn(o.objectLdn, appLocale),
       value: o.objectLdn,
     })),
   ];
@@ -1283,6 +1293,7 @@ export default function DeviceDetail() {
   const { data: device, isLoading, refetch } = useDeviceBySn(sn);
   const { data: deviceGroupsData } = useDeviceGroups();
   const { data: opStateDict } = useDictionary('op_state');
+  const { data: networkTypeDict } = useDictionary('network_type');
   const syncMutation = useSyncDeviceParams();
   const { data: paramSyncStatus, refetch: refetchParamSyncStatus } = useSyncStatus(device?.id ?? '');
   const [quickSettingsSyncTargetPaths, setQuickSettingsSyncTargetPaths] = useState<string[]>([]);
@@ -1750,19 +1761,27 @@ export default function DeviceDetail() {
     [displayDevice?.id, message, queryClient, t]
   );
 
+  const renderDeviceNetworkType = useCallback<FieldItem['render']>(
+    (d) => {
+      const label = resolveNetworkTypeLabel(d.networkType, networkTypeDict?.sysDictionaryDetails, appLocale);
+      return <Tag color={{ eNB: 'blue', gNB: 'green', GSM: 'orange' }[d.networkType ?? '']}>{label}</Tag>;
+    },
+    [appLocale, networkTypeDict?.sysDictionaryDetails],
+  );
+
   // 根据设备制式获取字段组
   const detailGroups = useMemo((): FieldGroup[] => {
     if (!displayDevice) return [];
     const networkType = normalizeNetworkType(displayDevice.networkType);
 
     // BSC（独立 GSM 设备，paramModel === 'BSC'）按需求隐藏「状态信息」组；BTS 保留显示。
-    const groups: FieldGroup[] = [getStationFields(t, networkType, handleResolveNameSync)];
+    const groups: FieldGroup[] = [getStationFields(t, networkType, handleResolveNameSync, renderDeviceNetworkType, appLocale)];
     if (!detailResolved.isBSC) {
       groups.push(getStatusFields(t, networkType));
     }
     groups.push(getOtherFields(t, networkType, displayDevice));
     return groups;
-  }, [detailResolved.isBSC, displayDevice, handleResolveNameSync, t]);
+  }, [appLocale, detailResolved.isBSC, displayDevice, handleResolveNameSync, renderDeviceNetworkType, t]);
 
   const cellGroup = useMemo((): FieldGroup | null => {
     if (!displayDevice) return null;

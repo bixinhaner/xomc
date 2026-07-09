@@ -50,6 +50,7 @@ import type { QuickSettingsGroup, QuickSettingsParam } from '@core/types/quickse
 import {
   applyInstanceContext,
   getEffectiveEnumMeta,
+  localizeEnumLabel,
   validateValue,
   type QuickSettingsInstanceContext,
 } from './validators';
@@ -130,32 +131,36 @@ function formatTime(at: number): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-function statusTagSpec(action: MultiFeedback, taskStatus: DeviceTaskStatus | undefined): StatusTagSpec {
-  const actionLabel = action.action === 'save' ? '保存' : action.action === 'add' ? '新增' : '删除';
+function statusTagSpec(action: MultiFeedback, taskStatus: DeviceTaskStatus | undefined, locale: 'zh-CN' | 'en-US'): StatusTagSpec {
+  const actionLabel = action.action === 'save'
+    ? (locale === 'zh-CN' ? '保存' : 'Save')
+    : action.action === 'add'
+      ? (locale === 'zh-CN' ? '新增' : 'Add')
+      : (locale === 'zh-CN' ? '删除' : 'Delete');
   if (action.submitStatus === 'failed_to_queue') {
-    return { color: 'error', icon: <CloseCircleOutlined />, label: `${actionLabel}入队失败` };
+    return { color: 'error', icon: <CloseCircleOutlined />, label: locale === 'zh-CN' ? `${actionLabel}入队失败` : `${actionLabel} queue failed` };
   }
   if (!action.taskId) {
-    return { color: 'processing', icon: <SyncOutlined spin />, label: `${actionLabel}已入队` };
+    return { color: 'processing', icon: <SyncOutlined spin />, label: locale === 'zh-CN' ? `${actionLabel}已入队` : `${actionLabel} queued` };
   }
   switch (taskStatus) {
     case 'completed':
-      return { color: 'success', icon: <CheckCircleOutlined />, label: `${actionLabel}成功` };
+      return { color: 'success', icon: <CheckCircleOutlined />, label: locale === 'zh-CN' ? `${actionLabel}成功` : `${actionLabel} succeeded` };
     case 'failed':
-      return { color: 'error', icon: <CloseCircleOutlined />, label: `${actionLabel}基站应答失败` };
+      return { color: 'error', icon: <CloseCircleOutlined />, label: locale === 'zh-CN' ? `${actionLabel}基站应答失败` : `${actionLabel} device response failed` };
     case 'expired':
-      return { color: 'warning', icon: <ClockCircleOutlined />, label: `${actionLabel}超时` };
+      return { color: 'warning', icon: <ClockCircleOutlined />, label: locale === 'zh-CN' ? `${actionLabel}超时` : `${actionLabel} timed out` };
     case 'cancelled':
-      return { color: 'default', icon: <CloseCircleOutlined />, label: `${actionLabel}已取消` };
+      return { color: 'default', icon: <CloseCircleOutlined />, label: locale === 'zh-CN' ? `${actionLabel}已取消` : `${actionLabel} cancelled` };
     case 'sent':
-      return { color: 'processing', icon: <SendOutlined />, label: `${actionLabel}已发送给基站` };
+      return { color: 'processing', icon: <SendOutlined />, label: locale === 'zh-CN' ? `${actionLabel}已发送给基站` : `${actionLabel} sent to device` };
     case 'pending':
     default:
-      return { color: 'processing', icon: <SyncOutlined spin />, label: `${actionLabel}已入队,等待下发` };
+      return { color: 'processing', icon: <SyncOutlined spin />, label: locale === 'zh-CN' ? `${actionLabel}已入队,等待下发` : `${actionLabel} queued, waiting to send` };
   }
 }
 
-function formatConstraintHint(schema?: ParameterSchemaItem): string {
+function formatConstraintHint(schema: ParameterSchemaItem | undefined, locale: 'zh-CN' | 'en-US'): string {
   if (!schema?.constraints) return '';
   const c = schema.constraints;
   if (c.enumValues && c.enumValues.length > 0) return '';
@@ -165,21 +170,21 @@ function formatConstraintHint(schema?: ParameterSchemaItem): string {
   if (min !== undefined || max !== undefined) {
     const lo = min ?? '-∞';
     const hi = max ?? '∞';
-    return isString ? `[长度 ${lo} ~ ${hi}]` : `[${lo} ~ ${hi}]`;
+    return isString ? (locale === 'zh-CN' ? `[长度 ${lo} ~ ${hi}]` : `[length ${lo} ~ ${hi}]`) : `[${lo} ~ ${hi}]`;
   }
   return '';
 }
 
 /** 按 BscFieldDef 做最小校验：required / int 范围。返回 '' 表示通过。 */
-function validateFieldDef(def: BscFieldDef, value: string): string {
+function validateFieldDef(def: BscFieldDef, value: string, locale: 'zh-CN' | 'en-US'): string {
   if (def.readonly) return '';
-  if (def.required && value === '') return '不能为空';
+  if (def.required && value === '') return locale === 'zh-CN' ? '不能为空' : 'Required';
   if (value === '') return '';
   if (def.type === 'int') {
     const n = Number(value);
-    if (!Number.isInteger(n)) return '需要整数';
-    if (def.minValue !== undefined && n < def.minValue) return `不能小于 ${def.minValue}`;
-    if (def.maxValue !== undefined && n > def.maxValue) return `不能大于 ${def.maxValue}`;
+    if (!Number.isInteger(n)) return locale === 'zh-CN' ? '需要整数' : 'Integer required';
+    if (def.minValue !== undefined && n < def.minValue) return locale === 'zh-CN' ? `不能小于 ${def.minValue}` : `Must be at least ${def.minValue}`;
+    if (def.maxValue !== undefined && n > def.maxValue) return locale === 'zh-CN' ? `不能大于 ${def.maxValue}` : `Must be at most ${def.maxValue}`;
   }
   return '';
 }
@@ -193,6 +198,7 @@ function renderFieldGrid(
   setValue: (path: string, value: string, validator?: (v: string) => string) => void,
   errors: Record<string, string>,
   getWritable: (path: string) => boolean,
+  locale: 'zh-CN' | 'en-US',
 ): React.ReactNode {
   return (
     <div
@@ -208,7 +214,7 @@ function renderFieldGrid(
         const path = `${objectPath}${selectedInstId}.${def.leaf}`;
         const rawValue = getValue(path);
         const err = errors[path] ?? '';
-        const validator = (v: string) => validateFieldDef(def, v);
+        const validator = (v: string) => validateFieldDef(def, v, locale);
         // 以 schema 为准：后端 writable=false 严格只读；def.readonly 是本地补充只读（如 ID 虚拟字段）。
         const isReadOnly = def.readonly === true || getWritable(path) === false;
         const labelNode = (
@@ -219,7 +225,7 @@ function renderFieldGrid(
               )}
               {def.label}
               {isReadOnly && (
-                <span style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 6 }}>(只读)</span>
+                <span style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 6 }}>{locale === 'zh-CN' ? '(只读)' : '(read-only)'}</span>
               )}
             </span>
           </div>
@@ -232,7 +238,7 @@ function renderFieldGrid(
         ) : null;
 
         if (isReadOnly) {
-          const displayValue = rawValue !== '' && rawValue != null ? rawValue : '未上报';
+          const displayValue = rawValue !== '' && rawValue != null ? rawValue : (locale === 'zh-CN' ? '未上报' : 'Not reported');
           return (
             <div key={def.leaf} style={{ minWidth: 0 }}>
               {labelNode}
@@ -251,7 +257,10 @@ function renderFieldGrid(
                 onChange={(next) => setValue(path, String(next), validator)}
                 style={{ width: '100%' }}
                 status={err ? 'error' : undefined}
-                options={def.enumOptions ?? []}
+                options={(def.enumOptions ?? []).map((option) => ({
+                  ...option,
+                  label: localizeEnumLabel(option.label, option.value, locale),
+                }))}
                 allowClear
               />
               {hintNode}
@@ -306,6 +315,7 @@ function renderSubTable(
   addPending: boolean,
   deletePending: boolean,
   getWritable: (path: string) => boolean,
+  locale: 'zh-CN' | 'en-US',
 ): React.ReactNode {
   const dataSource = rowIds.map((id) => ({ key: id, id }));
   const columns = [
@@ -337,7 +347,7 @@ function renderSubTable(
       width: 90,
       render: (_: unknown, row: { id: number }) => (
         <Popconfirm
-          title={`确认删除 ${def.subObject}.${row.id} ？`}
+          title={locale === 'zh-CN' ? `确认删除 ${def.subObject}.${row.id} ？` : `Delete ${def.subObject}.${row.id}?`}
           onConfirm={() => onDelete(row.id)}
           disabled={deletePending}
         >
@@ -368,7 +378,7 @@ function renderSubTable(
         rowKey="key"
         dataSource={dataSource}
         columns={columns}
-        locale={{ emptyText: '暂无数据' }}
+        locale={{ emptyText: locale === 'zh-CN' ? '暂无数据' : 'No data' }}
       />
     </div>
   );
@@ -542,13 +552,15 @@ export default function InstanceSelectorForm({
       lastAction.notifiedFailedTaskId !== lastTask.id
     ) {
       notification.error({
-        message: `基站应答失败(${selectorGroup.titleZh})`,
-        description: lastTask.errorMessage || '未知错误,可在通知中心查看任务详情',
+        message: locale === 'zh-CN'
+          ? `基站应答失败(${selectorGroup.titleZh})`
+          : `Device response failed(${selectorGroup.titleEn})`,
+        description: lastTask.errorMessage || (locale === 'zh-CN' ? '未知错误,可在通知中心查看任务详情' : 'Unknown error. Check Notification Center for task details.'),
         duration: ERROR_FEEDBACK_DURATION_SECONDS,
       });
       patchFeedback(fbKey, { notifiedFailedTaskId: lastTask.id });
     }
-  }, [lastTask, lastAction, selectorGroup.titleZh, patchFeedback, fbKey]);
+  }, [lastTask, lastAction, selectorGroup.titleZh, selectorGroup.titleEn, patchFeedback, fbKey, locale]);
 
   const fieldValueByPath = useCallback(
     (path: string): string => {
@@ -603,8 +615,8 @@ export default function InstanceSelectorForm({
       if (isDeviceTaskTerminal(task.status)) return task;
       await new Promise((resolve) => window.setTimeout(resolve, 1000));
     }
-    throw new Error('等待任务完成超时');
-  }, []);
+    throw new Error(locale === 'zh-CN' ? '等待任务完成超时' : 'Timed out waiting for task completion');
+  }, [locale]);
 
   // 新增实例：用 Modal 收集新值 → AddObject → 等待 → 取新实例号 → SetParameterValues
   type AddModalState = { values: Record<string, string>; errors: Record<string, string> } | null;
@@ -658,7 +670,7 @@ export default function InstanceSelectorForm({
     }
     if (Object.keys(errors).length > 0) {
       setAddModal((prev) => (prev ? { ...prev, errors } : prev));
-      message.error({ content: '校验失败,请修正后再保存', duration: ERROR_FEEDBACK_DURATION_SECONDS });
+      message.error({ content: locale === 'zh-CN' ? '校验失败,请修正后再保存' : 'Validation failed. Please fix the fields and save again.', duration: ERROR_FEEDBACK_DURATION_SECONDS });
       return;
     }
 
@@ -667,7 +679,7 @@ export default function InstanceSelectorForm({
       const addResult = await addMutation.mutateAsync({ deviceId, objectPath });
       const addTask = await waitForTaskTerminal(addResult.taskId);
       if (addTask.status !== 'completed') {
-        throw new Error(addTask.errorMessage || `新增实例失败(${addTask.status})`);
+        throw new Error(addTask.errorMessage || (locale === 'zh-CN' ? `新增实例失败(${addTask.status})` : `Add instance failed(${addTask.status})`));
       }
       const refreshed = await refetch();
       const nextObject = refreshed.data?.objects.find((o) => o.path === objectPath);
@@ -675,11 +687,11 @@ export default function InstanceSelectorForm({
       newInstanceId = nextObject?.currentInstances
         .map((n) => String(n))
         .find((id) => !knownInstances.has(id));
-      if (!newInstanceId) throw new Error('新增实例成功,但未能识别新实例号');
+      if (!newInstanceId) throw new Error(locale === 'zh-CN' ? '新增实例成功,但未能识别新实例号' : 'Instance added, but the new instance ID could not be identified');
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       notification.error({
-        message: `新增失败(${selectorGroup.titleZh})`,
+        message: locale === 'zh-CN' ? `新增失败(${selectorGroup.titleZh})` : `Add failed(${selectorGroup.titleEn})`,
         description: errMsg,
         duration: ERROR_FEEDBACK_DURATION_SECONDS,
       });
@@ -987,7 +999,7 @@ export default function InstanceSelectorForm({
       extra={
         lastAction
           ? (() => {
-              const spec = statusTagSpec(lastAction, lastTask?.status);
+              const spec = statusTagSpec(lastAction, lastTask?.status, locale);
               return (
                 <Tag icon={spec.icon} color={spec.color}>
                   {spec.label} · {lastAction.detail} · {formatTime(lastAction.at)}
@@ -1005,23 +1017,27 @@ export default function InstanceSelectorForm({
           style={{ width: 240 }}
           loading={isLoading}
           disabled={isLoading || instanceIds.length === 0}
-          placeholder={isLoading ? '加载中...' : instanceIds.length === 0 ? '暂无实例,请新增' : '请选择实例'}
+          placeholder={isLoading
+            ? (locale === 'zh-CN' ? '加载中...' : 'Loading...')
+            : instanceIds.length === 0
+              ? (locale === 'zh-CN' ? '暂无实例,请新增' : 'No instances. Add one first.')
+              : (locale === 'zh-CN' ? '请选择实例' : 'Select an instance')}
           options={instanceIds.map((id) => {
             const unitId = schemaByPath.get(`${objectPath}${id}.IpaUnitId`)?.currentValue;
             const label = unitId ? `Index:${id}  IpaUnitId:${unitId}` : `Index:${id}`;
             return { value: id, label };
           })}
-          notFoundContent="暂无实例"
+          notFoundContent={locale === 'zh-CN' ? '暂无实例' : 'No instances'}
         />
         {reachedMax ? (
-          <Tooltip title={`已达上限 ${maxInstances}，如需新增请先删除其它实例`}>
+          <Tooltip title={locale === 'zh-CN' ? `已达上限 ${maxInstances}，如需新增请先删除其它实例` : `Limit ${maxInstances} reached. Delete another instance before adding.`}>
             <span style={{ display: 'inline-block', cursor: 'not-allowed' }}>{addBtn}</span>
           </Tooltip>
         ) : (
           addBtn
         )}
         <Popconfirm
-          title={`确认删除实例 ${selectedInstId ?? ''}？`}
+          title={locale === 'zh-CN' ? `确认删除实例 ${selectedInstId ?? ''}？` : `Delete instance ${selectedInstId ?? ''}?`}
           onConfirm={() => void handleDelete()}
           disabled={!canDelete || !selectedInstId || deleteMutation.isPending}
         >
@@ -1031,7 +1047,7 @@ export default function InstanceSelectorForm({
             disabled={!canDelete || !selectedInstId || deleteMutation.isPending}
             loading={deleteMutation.isPending}
           >
-            删 除
+            {locale === 'zh-CN' ? '删 除' : 'Delete'}
           </Button>
         </Popconfirm>
         <Button
@@ -1040,11 +1056,11 @@ export default function InstanceSelectorForm({
           onClick={() => void refetch()}
           loading={isFetching}
         >
-          获取信息
+          {locale === 'zh-CN' ? '获取信息' : 'Refresh Info'}
         </Button>
         {isFetching ? (
           <Tag icon={<SyncOutlined spin />} color="processing">
-            正在更新…
+            {locale === 'zh-CN' ? '正在更新…' : 'Updating...'}
           </Tag>
         ) : lastSyncedAt ? (
           <Tag
@@ -1055,7 +1071,7 @@ export default function InstanceSelectorForm({
               boxShadow: justRefreshed ? '0 0 0 3px rgba(82,196,26,0.25)' : 'none',
             }}
           >
-            已更新 {formatTime(lastSyncedAt.getTime())}
+            {locale === 'zh-CN' ? '已更新' : 'Updated'} {formatTime(lastSyncedAt.getTime())}
           </Tag>
         ) : null}
       </Space>
@@ -1066,10 +1082,12 @@ export default function InstanceSelectorForm({
         </div>
       ) : !selectedInstId ? (
         <div style={{ color: '#8c8c8c', textAlign: 'center', padding: 24 }}>
-          {instanceIds.length === 0 ? '当前没有实例，点击"新增"创建' : '请在上方选择一个实例'}
+          {instanceIds.length === 0
+            ? (locale === 'zh-CN' ? '当前没有实例，点击"新增"创建' : 'No instances. Click Add to create one.')
+            : (locale === 'zh-CN' ? '请在上方选择一个实例' : 'Select an instance above')}
         </div>
       ) : (
-        <Spin spinning={isFetching} tip="正在更新…" delay={150}>
+        <Spin spinning={isFetching} tip={locale === 'zh-CN' ? '正在更新…' : 'Updating...'} delay={150}>
           <Collapse
             defaultActiveKey={childGroups.map((g) => g.id)}
             items={childGroups.map((cg) => {
@@ -1100,6 +1118,7 @@ export default function InstanceSelectorForm({
                     addMutation.isPending,
                     deleteMutation.isPending,
                     getWritableByPath,
+                    locale,
                   ),
                 };
               }
@@ -1116,6 +1135,7 @@ export default function InstanceSelectorForm({
                   setFieldValueByPath,
                   formErrors,
                   getWritableByPath,
+                  locale,
                 ),
               };
             })}
@@ -1128,19 +1148,19 @@ export default function InstanceSelectorForm({
               loading={updateMutation.isPending}
               disabled={Object.keys(formEdits).length === 0}
             >
-              保 存
+              {locale === 'zh-CN' ? '保 存' : 'Save'}
             </Button>
           </div>
         </Spin>
       )}
 
       <Modal
-        title={`${title} · 新增实例`}
+        title={locale === 'zh-CN' ? `${title} · 新增实例` : `${title} · Add Instance`}
         open={Boolean(addModal)}
         onOk={() => void handleConfirmAdd()}
         onCancel={closeAddModal}
-        okText="确认新增"
-        cancelText="取消"
+        okText={locale === 'zh-CN' ? '确认新增' : 'Add'}
+        cancelText={locale === 'zh-CN' ? '取消' : 'Cancel'}
         confirmLoading={addMutation.isPending || updateMutation.isPending}
         width={760}
         destroyOnHidden
@@ -1163,7 +1183,7 @@ export default function InstanceSelectorForm({
               const value = addModal.values[leaf] ?? '';
               const err = addModal.errors[leaf] || '';
               const label = locale === 'zh-CN' ? param.titleZh : param.titleEn;
-              const hint = formatConstraintHint(item);
+              const hint = formatConstraintHint(item, locale);
 
               return (
                 <div key={leaf} style={{ minWidth: 0 }}>
@@ -1185,7 +1205,7 @@ export default function InstanceSelectorForm({
                       status={err ? 'error' : undefined}
                       options={enumMeta.values.map((v, idx) => ({
                         value: v,
-                        label: enumMeta.labels[idx] ?? v,
+                        label: localizeEnumLabel(enumMeta.labels[idx] ?? v, v, locale),
                       }))}
                     />
                   ) : (

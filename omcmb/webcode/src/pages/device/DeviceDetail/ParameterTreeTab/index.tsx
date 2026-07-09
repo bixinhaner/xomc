@@ -1,9 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Alert, Button, Input, Space, Tooltip, Typography, message, theme } from 'antd';
 import { SearchOutlined, SyncOutlined, LoadingOutlined } from '@ant-design/icons';
-import dayjs from 'dayjs';
-import relativeTime from 'dayjs/plugin/relativeTime';
-import 'dayjs/locale/zh-cn';
 import {
   useObjectTree,
   useDirectChildren,
@@ -15,9 +12,7 @@ import { useSyncDeviceParams } from '@core/hooks/api/useDevices';
 import ObjectTreePanel from './ObjectTreePanel';
 import ChildParamTable from './ChildParamTable';
 import { useT } from '@/hooks/useT';
-
-dayjs.extend(relativeTime);
-dayjs.locale('zh-cn');
+import { formatTimeAgo } from '@core/utils/format';
 
 function formatDuration(seconds?: number) {
   if (seconds === undefined || !Number.isFinite(seconds) || seconds < 0) return undefined;
@@ -75,6 +70,7 @@ export default function ParameterTreeTab({ deviceId, lastScopedSync, syncBusy: e
   const { data: syncStatus, refetch: refetchSyncStatus } = useSyncStatus(deviceId);
   const isSyncing = syncStatus?.status === 'syncing';
   const effectiveLastParamSyncAt = syncStatus?.lastParamSyncAt ?? syncStatus?.lastSyncGpv?.lastCompletedAt;
+  const formatSyncAge = useCallback((value: string) => formatTimeAgo(new Date(value), t), [t]);
 
   // Mutations
   // T-0126: 切换到 useSyncDeviceParams（Path B + reason="manual"），替代旧 useSyncParameters (Path A)
@@ -184,12 +180,12 @@ export default function ParameterTreeTab({ deviceId, lastScopedSync, syncBusy: e
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 {isLastScopedSync
                   ? t('device.paramTree.lastScopedSync', {
-                    time: dayjs(effectiveLastParamSyncAt).fromNow(),
+                    time: formatSyncAge(effectiveLastParamSyncAt),
                     count: lastScopedSync?.targetCount ?? 0,
                     gpvCount: lastScopedSync?.gpvTaskCount ?? 0,
                     duration: formatDuration(lastScopedSync?.wallClockSeconds) ?? '-',
                   })
-                  : t('device.paramTree.lastSync', { time: dayjs(effectiveLastParamSyncAt).fromNow() })}
+                  : t('device.paramTree.lastSync', { time: formatSyncAge(effectiveLastParamSyncAt) })}
                 {!isLastScopedSync && syncStatus.lastSyncGpv?.taskCount
                   ? t('device.paramTree.lastSyncGpvSummary', {
                     count: syncStatus.lastSyncGpv.taskCount,
@@ -223,7 +219,7 @@ export default function ParameterTreeTab({ deviceId, lastScopedSync, syncBusy: e
           type="error"
           showIcon
           style={{ marginBottom: 16 }}
-          message={t('device.paramTree.lastSyncFailed', { time: dayjs(syncStatus.lastParamSyncFailedAt).fromNow() })}
+          message={t('device.paramTree.lastSyncFailed', { time: formatSyncAge(syncStatus.lastParamSyncFailedAt) })}
           description={syncStatus.lastParamSyncError || t('device.paramTree.noErrorDetail')}
         />
       )}

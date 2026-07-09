@@ -52,13 +52,13 @@ describe('activationStatusOf — 三皮肤共享的"激活状态"判定单一来
     expect(activationStatusLabelOf('unknown', [], { active: '激活', inactive: '未激活' })).toBeNull();
   });
 
-  it('英文 locale 优先使用 labelI18n，缺失时回退中文 label', () => {
+  it('英文 locale 优先使用 labelI18n，缺失英文翻译且 label 是中文时回退默认英文标签', () => {
     const details = [
       { value: '0', label: '未开通', labelI18n: { 'en-US': 'Not Activated' }, status: true },
-      { value: '1', label: '已开通', labelI18n: { 'en-US': 'Activated' }, status: true },
+      { value: '1', label: '已开通', status: true },
     ];
 
-    expect(activationStatusLabelOf('1', details, { active: 'Active', inactive: 'Inactive' }, 'en-US')).toBe('Activated');
+    expect(activationStatusLabelOf('1', details, { active: 'Active', inactive: 'Inactive' }, 'en-US')).toBe('Active');
     expect(activationStatusLabelOf('0', details, { active: 'Active', inactive: 'Inactive' }, 'en-US')).toBe('Not Activated');
   });
 });

@@ -30,29 +30,29 @@ interface HandoverTask {
 
 const MOCK_HANDOVER_TASKS: HandoverTask[] = [
   {
-    id: '1', taskId: 'HO-2024-001', deviceName: '北京朝阳基站-001', deviceSn: 'SN-BJ001',
-    handoverStatus: 'completed', handoverTime: '2024-03-01 10:00:00', operator: '张工',
-    remarks: '设备运行正常，完成交维', fromTeam: '建设组', toTeam: '运维组',
+    id: '1', taskId: 'HO-2024-001', deviceName: 'Beijing Chaoyang Site-001', deviceSn: 'SN-BJ001',
+    handoverStatus: 'completed', handoverTime: '2024-03-01 10:00:00', operator: 'Engineer Zhang',
+    remarks: 'Device is operating normally. Handover completed.', fromTeam: 'Construction Team', toTeam: 'Operations Team',
   },
   {
-    id: '2', taskId: 'HO-2024-002', deviceName: '上海浦东基站-002', deviceSn: 'SN-SH002',
-    handoverStatus: 'in-progress', handoverTime: '2024-03-01 14:00:00', operator: '李工',
-    remarks: '正在进行现场检查', fromTeam: '建设组', toTeam: '运维组',
+    id: '2', taskId: 'HO-2024-002', deviceName: 'Shanghai Pudong Site-002', deviceSn: 'SN-SH002',
+    handoverStatus: 'in-progress', handoverTime: '2024-03-01 14:00:00', operator: 'Engineer Li',
+    remarks: 'Site inspection in progress.', fromTeam: 'Construction Team', toTeam: 'Operations Team',
   },
   {
-    id: '3', taskId: 'HO-2024-003', deviceName: '广州天河基站-003', deviceSn: 'SN-GZ003',
-    handoverStatus: 'pending', handoverTime: '2024-03-02 09:00:00', operator: '王工',
-    remarks: '', fromTeam: '建设组', toTeam: '运维组',
+    id: '3', taskId: 'HO-2024-003', deviceName: 'Guangzhou Tianhe Site-003', deviceSn: 'SN-GZ003',
+    handoverStatus: 'pending', handoverTime: '2024-03-02 09:00:00', operator: 'Engineer Wang',
+    remarks: '', fromTeam: 'Construction Team', toTeam: 'Operations Team',
   },
   {
-    id: '4', taskId: 'HO-2024-004', deviceName: '深圳南山基站-004', deviceSn: 'SN-SZ004',
-    handoverStatus: 'rejected', handoverTime: '2024-02-28 15:00:00', operator: '赵工',
-    remarks: '设备存在天线故障，退回整改', fromTeam: '建设组', toTeam: '运维组',
+    id: '4', taskId: 'HO-2024-004', deviceName: 'Shenzhen Nanshan Site-004', deviceSn: 'SN-SZ004',
+    handoverStatus: 'rejected', handoverTime: '2024-02-28 15:00:00', operator: 'Engineer Zhao',
+    remarks: 'Antenna fault found. Returned for rectification.', fromTeam: 'Construction Team', toTeam: 'Operations Team',
   },
   {
-    id: '5', taskId: 'HO-2024-005', deviceName: '成都武侯基站-005', deviceSn: 'SN-CD005',
-    handoverStatus: 'completed', handoverTime: '2024-02-29 11:00:00', operator: '陈工',
-    remarks: '顺利完成交维，签署验收单', fromTeam: '建设组', toTeam: '运维组',
+    id: '5', taskId: 'HO-2024-005', deviceName: 'Chengdu Wuhou Site-005', deviceSn: 'SN-CD005',
+    handoverStatus: 'completed', handoverTime: '2024-02-29 11:00:00', operator: 'Engineer Chen',
+    remarks: 'Handover completed and acceptance form signed.', fromTeam: 'Construction Team', toTeam: 'Operations Team',
   },
 ];
 

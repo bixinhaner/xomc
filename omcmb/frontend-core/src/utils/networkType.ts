@@ -19,8 +19,11 @@
  */
 
 /** network_type 字典项的最小形状（只关心 value→label）。 */
+import { getI18nText, type Locale } from './i18nText';
+
 export interface NetworkTypeDictDetail {
   label: string;
+  labelI18n?: Record<string, string>;
   value: string;
 }
 
@@ -68,6 +71,7 @@ export function normalizeNetworkTypeFilter(networkType: string): string {
 export function resolveNetworkTypeLabel(
   networkType: string | undefined | null,
   details: NetworkTypeDictDetail[] | undefined,
+  locale: Locale = 'zh-CN',
 ): string {
   if (!networkType) return '-';
 
@@ -75,5 +79,5 @@ export function resolveNetworkTypeLabel(
   const matched = (details ?? []).find(
     (d) => d.value === dictValue || d.value === networkType,
   );
-  return matched?.label ?? networkType;
+  return matched ? getI18nText(matched.labelI18n, locale, matched.label) : networkType;
 }
