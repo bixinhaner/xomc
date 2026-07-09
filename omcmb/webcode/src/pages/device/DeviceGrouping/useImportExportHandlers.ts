@@ -109,7 +109,11 @@ export function useImportExportHandlers(deps: {
     const csvComment = t('device.csv.template.comment', { required, optional });
     const csvHeader = IMPORT_COLUMNS.map((c) => csvField(t(c.i18nKey))).join(',');
     const csvExamples = [0, 1, 2].map((rowIdx) =>
-      IMPORT_COLUMNS.map((c) => csvField(c.example[rowIdx] ?? '')).join(','),
+      IMPORT_COLUMNS.map((c) => {
+        // 优先用 exampleI18nKeys 查 i18n（英文等多语言展示对应语言示例），无 key 则降级用 example。
+        const key = c.exampleI18nKeys?.[rowIdx];
+        return csvField(key ? t(key) : (c.example[rowIdx] ?? ''));
+      }).join(','),
     );
     const csvContent = csvComment + '\n' + csvHeader + '\n' + csvExamples.join('\n') + '\n';
     // UTF-8 BOM (U+FEFF) prefix 让 Excel 正确识别编码。

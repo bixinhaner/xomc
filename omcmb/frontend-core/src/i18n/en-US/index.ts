@@ -1426,6 +1426,12 @@ const messages: Record<string, string> = {
   'device.csv.column.deviceGrouping': 'Device Group',
   'device.csv.column.sourceType':     'Source',
   'device.csv.template.comment':      '# Required: {required} | Optional: {optional} | Note: Match registered devices by SN, update name/remark only (group membership is not changed); rows with non-existent SN will fail',
+  // CSV 模板示例数据 i18n（随 locale 渲染）
+  'device.csv.example.stationA':  'Beijing Haidian Station',
+  'device.csv.example.stationB':  'Beijing Chaoyang Station',
+  'device.csv.example.stationC':  'Shanghai Pudong Station',
+  'device.csv.example.remarkA':   'Phase 1',
+  'device.csv.example.remarkB':   'Phase 2',
   // Batch import backend error codes
   'device.batchImport.error.device_not_found':    'Device not found (import only updates registered devices, assigning to current group)',
   'device.batchImport.error.update_name_failed':  'Update device name failed',

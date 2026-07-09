@@ -25,8 +25,10 @@ export interface ImportColumn {
   snake: string;
   /** 是否必填 */
   required: boolean;
-  /** 模板第 i 行示例（i=0/1/2） */
+  /** 模板第 i 行示例（i=0/1/2），默认中文 */
   example: readonly string[];
+  /** 可选 i18n key 列表，若提供则优先用 t(key) 渲染示例（英文等多语言场景）；为空则降级用 example */
+  exampleI18nKeys?: readonly string[];
 }
 
 // 产品要求：导入只保留 SN（必填）+ 设备名称 + 备注三列。
@@ -35,9 +37,19 @@ export const IMPORT_COLUMNS: readonly ImportColumn[] = [
   { zh: 'SN', i18nKey: 'device.csv.column.sn', snake: 'serial_number', required: true,
     example: ['120288069823C4B0060', '1202000690241FB0010', '120200087125BJB0002'] },
   { zh: '设备名称', i18nKey: 'device.csv.column.deviceName', snake: 'device_name', required: false,
-    example: ['北京海淠中关村站', '北京朝阳CBD站', '上海浦东陆家嘴站'] },
+    example: ['北京海淀中关村站', '北京朝阳CBD站', '上海浦东陆家嘴站'],
+    exampleI18nKeys: [
+      'device.csv.example.stationA',
+      'device.csv.example.stationB',
+      'device.csv.example.stationC',
+    ] },
   { zh: '备注', i18nKey: 'device.csv.column.remark', snake: 'remark', required: false,
-    example: ['一期', '二期', ''] },
+    example: ['一期', '二期', ''],
+    exampleI18nKeys: [
+      'device.csv.example.remarkA',
+      'device.csv.example.remarkB',
+      '',
+    ] },
 ] as const;
 
 /** 导入端：把"中文表头"或"老 snake_case 表头"统一映射到 snake_case。 */
