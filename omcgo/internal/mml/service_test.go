@@ -785,6 +785,102 @@ func TestService_ExecuteCommand_WithoutCode(t *testing.T) {
 	assert.Equal(t, "RAW_CMD_2", capturedTask.Commands[1]["command_code"])
 }
 
+func TestService_ExecuteCommand_DeviceBoundPlanItemsDeriveDevicesAndCommands(t *testing.T) {
+	lstID := uuid.New()
+	modID := uuid.New()
+	cmdRepo := &mockCommandRepo{
+		getByCodeFn: func(_ context.Context, code string) (*MMLCommand, error) {
+			switch code {
+			case "LST DEVICE_INFO":
+				return &MMLCommand{
+					ID:            lstID,
+					CommandCode:   "LST DEVICE_INFO",
+					RPCMethod:     "GetParameterValues",
+					OperationType: "LST",
+				}, nil
+			case "MOD DEVICE_INFO":
+				return &MMLCommand{
+					ID:            modID,
+					CommandCode:   "MOD DEVICE_INFO",
+					RPCMethod:     "SetParameterValues",
+					OperationType: "MOD",
+				}, nil
+			default:
+				return nil, commonerrors.ErrNotFound
+			}
+		},
+	}
+
+	var capturedTask *MMLTask
+	taskRepo := &mockTaskRepo{
+		createFn: func(ctx context.Context, task *MMLTask) error {
+			capturedTask = task
+			task.ID = uuid.New()
+			return nil
+		},
+	}
+
+	svc := newTestService(cmdRepo, &mockScriptRepo{}, taskRepo)
+	svc.SetCmdParamRepo(&stubCmdParamRepo{
+		refs: map[uuid.UUID][]MMLParamRef{
+			lstID: {{ParamCode: "HW", Tr069Path: "Device.DeviceInfo.HardwareVersion", ValueType: "string"}},
+			modID: {{ParamCode: "USER_LABEL", Tr069Path: "Device.X.UserLabel", ValueType: "string", IsWritable: true}},
+		},
+	})
+
+	result, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		ExecuteMode: "device_bound",
+		TaskName:    "device-bound maintenance",
+		Creator:     "admin",
+		PlanItems: []MMLPlanItem{
+			{
+				LineNo:   1,
+				DeviceSN: "SN001",
+				RawLine:  "LST DEVICE_INFO;SN001",
+				Command: map[string]interface{}{
+					"command_code":   "LST DEVICE_INFO",
+					"operation_type": "LST",
+				},
+			},
+			{
+				LineNo:   2,
+				DeviceSN: "SN002",
+				RawLine:  "MOD DEVICE_INFO:USER_LABEL=Site-A;SN002",
+				Command: map[string]interface{}{
+					"command_code":   "MOD DEVICE_INFO",
+					"operation_type": "MOD",
+					"parameters":     map[string]interface{}{"USER_LABEL": "Site-A"},
+				},
+			},
+			{
+				LineNo:   3,
+				DeviceSN: "SN002",
+				RawLine:  "LST DEVICE_INFO;SN002",
+				Command: map[string]interface{}{
+					"command_code":   "LST DEVICE_INFO",
+					"operation_type": "LST",
+				},
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, capturedTask)
+	assert.Equal(t, TaskExecuteModeDeviceBound, capturedTask.ExecuteMode)
+	assert.Equal(t, []string{"SN001", "SN002"}, capturedTask.DeviceSNs)
+	assert.Equal(t, 2, capturedTask.TotalDevices)
+	require.Len(t, capturedTask.PlanItems, 3)
+	require.Len(t, capturedTask.Commands, 3)
+	assert.Equal(t, 1, capturedTask.PlanItems[0].Order)
+	assert.Equal(t, 1, capturedTask.PlanItems[1].Order)
+	assert.Equal(t, 2, capturedTask.PlanItems[2].Order)
+	assert.Equal(t, "SN002", capturedTask.Commands[1]["plan_device_sn"])
+	assert.Equal(t, 2, capturedTask.Commands[2]["plan_order"])
+	assert.Equal(t, "SetParameterValues", capturedTask.Commands[1]["rpc_method"])
+	assert.Contains(t, capturedTask.Commands[0], "param_refs")
+}
+
 func TestService_ExecuteCommand_NilCommandsDefaultsToEmpty(t *testing.T) {
 	var capturedTask *MMLTask
 	taskRepo := &mockTaskRepo{

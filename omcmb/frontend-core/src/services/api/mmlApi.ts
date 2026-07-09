@@ -1,6 +1,6 @@
 import http from '../http';
 import { generateUid } from '../../utils/uid';
-import type { MMLCommand, MMLScript, MMLTask, MMLTaskCommandDetail, MMLTaskCommandInput, MMLParam, MMLCustomCommand, ParamPath, MMLOperationType, DeviceTaskResultItem, MMLParamRef, MMLTaskResultsStats, MMLPathTranslationView, PathTranslationSource } from '../../types/mml';
+import type { MMLCommand, MMLScript, MMLTask, MMLTaskCommandDetail, MMLTaskCommandInput, MMLParam, MMLCustomCommand, ParamPath, MMLOperationType, DeviceTaskResultItem, MMLParamRef, MMLTaskResultsStats, MMLPathTranslationView, PathTranslationSource, MMLTaskPlanItem, MMLTaskCreateInput } from '../../types/mml';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 import type {
   BackendStatement,
@@ -93,6 +93,8 @@ interface BackendMMLTask {
   script_id: string;
   device_sns: string[] | null;
   commands: Array<Record<string, unknown>> | null;
+  execute_mode?: string | null;
+  plan_items?: BackendMMLPlanItem[] | null;
   status: string;
   results: Array<Record<string, unknown>> | null;
   creator: string;
@@ -133,6 +135,17 @@ interface BackendMMLTask {
   matched_product_id?: string | null;
   matched_product_class?: string | null;
   path_translation_source?: string | null;
+}
+
+interface BackendMMLPlanItem {
+  line_no?: number;
+  device_sn?: string;
+  order?: number;
+  raw_line?: string;
+  command?: Record<string, unknown> | null;
+  command_code?: string;
+  operation_type?: string;
+  parameters?: Record<string, unknown> | null;
 }
 
 // T-0168: GET /mml/tasks/{id}/results 响应 stats 字段（后端 TaskResultsStats）
@@ -375,6 +388,12 @@ function mapBackendResult(br: Record<string, unknown>): DeviceTaskResultItem {
     deviceSn: (br.device_sn as string) || '',
     deviceTaskId: (br.device_task_id as string) || undefined,
     commandIndex: typeof br.command_index === 'number' ? (br.command_index as number) : undefined,
+    planLineNo: typeof br.plan_line_no === 'number' ? (br.plan_line_no as number) : undefined,
+    planDeviceSn: (br.plan_device_sn as string) || undefined,
+    planOrder: typeof br.plan_order === 'number' ? (br.plan_order as number) : undefined,
+    planRawLine: (br.plan_raw_line as string) || undefined,
+    commandCode: (br.command_code as string) || undefined,
+    operationType: (br.operation_type as string) || undefined,
     deviceName: (br.device_name as string) || undefined,
     mmlScript: (br.mml_script as string) || (br.command as string) || undefined,
     status: (br.status as DeviceTaskResultItem['status']) || undefined,
@@ -391,6 +410,59 @@ function mapBackendResult(br: Record<string, unknown>): DeviceTaskResultItem {
   };
 }
 
+function mapBackendCommandInput(c: Record<string, unknown> | null | undefined): MMLTaskCommandInput {
+  const src = c ?? {};
+  return {
+    commandCode: typeof src.command_code === 'string' ? src.command_code : JSON.stringify(src),
+    operationType: typeof src.operation_type === 'string' ? src.operation_type : undefined,
+    paramPaths: Array.isArray(src.param_paths)
+      ? (src.param_paths as unknown[]).filter((p): p is string => typeof p === 'string')
+      : undefined,
+    parameters:
+      src.parameters && typeof src.parameters === 'object'
+        ? (src.parameters as Record<string, unknown>)
+        : undefined,
+  };
+}
+
+function mapBackendPlanItem(item: BackendMMLPlanItem): MMLTaskPlanItem {
+  const commandSource = item.command ?? {
+    command_code: item.command_code,
+    operation_type: item.operation_type,
+    parameters: item.parameters,
+  };
+  return {
+    lineNo: item.line_no ?? 0,
+    deviceSn: item.device_sn ?? '',
+    order: item.order ?? 0,
+    rawLine: item.raw_line || undefined,
+    command: mapBackendCommandInput(commandSource),
+  };
+}
+
+function mapCommandToBackend(cmd: string | MMLTaskCommandInput | MMLTaskCommandDetail): Record<string, unknown> {
+  if (typeof cmd === 'string') return { command_code: cmd };
+  const detail = cmd as MMLTaskCommandInput & MMLTaskCommandDetail;
+  const entry: Record<string, unknown> = {
+    command_code: detail.commandCode,
+  };
+  if (detail.operationType) entry.operation_type = detail.operationType;
+  if (detail.paramPaths) entry.param_paths = detail.paramPaths;
+  if (detail.paramValues) entry.param_values = detail.paramValues;
+  if (detail.parameters) entry.parameters = detail.parameters;
+  return entry;
+}
+
+function mapPlanItemToBackend(item: MMLTaskPlanItem): Record<string, unknown> {
+  return {
+    line_no: item.lineNo,
+    device_sn: item.deviceSn,
+    order: item.order,
+    raw_line: item.rawLine,
+    command: mapCommandToBackend(item.command),
+  };
+}
+
 function mapBackendTask(bt: BackendMMLTask): MMLTask {
   // Sprint B-6：扫 commands 数组中 orphan=true 的条目，提取其 command_code
   // 让 UI 给用户清晰提示"命令已下线"，否则 0 设备派发让人疑惑。
@@ -400,6 +472,8 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
       orphanCommandCodes.push(c.command_code as string);
     }
   }
+
+  const planItems = (bt.plan_items || []).map(mapBackendPlanItem);
 
   // commandsDetail：保留 operation_type + param_paths + param_values，供"任务记录-查看"
   // 页展示用户当时勾选了哪些 path。
@@ -438,6 +512,10 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
         c.parameters && typeof c.parameters === 'object'
           ? (c.parameters as Record<string, unknown>)
           : undefined,
+      planLineNo: typeof c.plan_line_no === 'number' ? (c.plan_line_no as number) : undefined,
+      planDeviceSn: typeof c.plan_device_sn === 'string' ? c.plan_device_sn : undefined,
+      planOrder: typeof c.plan_order === 'number' ? (c.plan_order as number) : undefined,
+      planRawLine: typeof c.plan_raw_line === 'string' ? c.plan_raw_line : undefined,
     };
   });
 
@@ -452,6 +530,15 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
       if (typeof c.command_code === 'string') return c.command_code as string;
       return JSON.stringify(c);
     }),
+    executeMode: (bt.execute_mode || 'common') as MMLTask['executeMode'],
+    planItems: planItems.length > 0 ? planItems : undefined,
+    planStats:
+      planItems.length > 0
+        ? {
+            totalPlanItems: planItems.length,
+            totalDevices: new Set(planItems.map((p) => p.deviceSn).filter(Boolean)).size,
+          }
+        : undefined,
     commandsDetail: commandsDetail.length > 0 ? commandsDetail : undefined,
     orphanCommandCodes: orphanCommandCodes.length > 0 ? orphanCommandCodes : undefined,
     status: bt.status as MMLTask['status'],
@@ -772,30 +859,19 @@ export const mmlApi = {
     };
   },
 
-  async createTask(
-    data: Partial<Omit<MMLTask, 'id' | 'status' | 'results' | 'createdAt' | 'updatedAt' | 'commands'>> &
-    Pick<MMLTask, 'taskName' | 'deviceSns'> & {
-      commands: Array<string | MMLTaskCommandInput | MMLTaskCommandDetail>;
-    }
-  ): Promise<MMLTask> {
-    const commands = data.commands.map((cmd) => {
-      if (typeof cmd === 'string') return { command_code: cmd };
-      const commandCode = 'commandCode' in cmd ? cmd.commandCode : undefined;
-      const detail = cmd as MMLTaskCommandInput & MMLTaskCommandDetail;
-      const entry: Record<string, unknown> = {
-        command_code: commandCode ?? detail.commandCode,
-      };
-      if (detail.operationType) entry.operation_type = detail.operationType;
-      if (detail.paramPaths) entry.param_paths = detail.paramPaths;
-      if (detail.parameters) entry.parameters = detail.parameters;
-      return entry;
-    });
+  async createTask(data: MMLTaskCreateInput): Promise<MMLTask> {
+    const commands = (data.commands || []).map(mapCommandToBackend);
+    const planItems = (data.planItems || []).map(mapPlanItemToBackend);
+    const deviceSns = data.deviceSns?.length
+      ? data.deviceSns
+      : Array.from(new Set((data.planItems || []).map((p) => p.deviceSn).filter(Boolean)));
+    const executeMode = data.executeMode || (planItems.length > 0 ? 'device_bound' : 'common');
     const payload: Record<string, unknown> = {
       task_name: data.taskName,
       script_id: data.scriptId,
-      device_sns: data.deviceSns,
-      commands,
-      total_devices: data.deviceSns?.length ?? 0,
+      device_sns: deviceSns,
+      execute_mode: executeMode,
+      total_devices: deviceSns.length,
       creator: data.creator || '',
       execute_type: data.executeType || 'immediate',
       offline_retry: data.offlineRetry || false,
@@ -804,6 +880,8 @@ export const mmlApi = {
       failed_retry_count: data.failedRetryCount || 3,
       failed_retry_interval: data.failedRetryInterval || 5,
     };
+    if (commands.length > 0) payload.commands = commands;
+    if (planItems.length > 0) payload.plan_items = planItems;
     if (data.scheduledAt) payload.scheduled_at = data.scheduledAt;
     if (data.periodStart) payload.period_start = data.periodStart;
     if (data.periodEnd) payload.period_end = data.periodEnd;

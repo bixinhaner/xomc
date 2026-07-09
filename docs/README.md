@@ -65,7 +65,7 @@
 | **参数 / KPI / 告警 三库平台化** | `参数-KPI-告警-整合设计方案.md` · `three-library-xml-import-redesign-20260604.md` | 三库统一平台化 + XML 导入重设计；演进史见 `ref/three-library-xml-import-history.md` |
 | **产品中心** | `product-center-pages-redesign-20260528.md` | 产品装配件 + ProductRegistry 页面重设计（配图 `design/assets/product-*.png`）|
 | **PM / KPI 管线** | `pm-kpi-pipeline-improvements.md` · `pm-metric-aggregation-dashboard-redesign-20260529.md` | 采集→多级聚合→仪表盘；实施计划 `project/plan-T-0164-*.md` |
-| **MML 控制台** | `mml-console-redesign-20260603.md` · `mml-console-architecture-overview-20260521.md` · `mml-empty-path-commands-spec-mapping-20260609.md` | 控制台重设计 + 架构总览 + 空 PATH 命令规范映射（MML 多代历史方案见归档区）|
+| **MML 控制台 / 脚本任务** | `mml-console-redesign-20260603.md` · `mml-console-architecture-overview-20260521.md` · `mml-script-task-device-bound-redesign-20260708.md` · `mml-empty-path-commands-spec-mapping-20260609.md` | 控制台重设计 + 架构总览 + 脚本任务按设备编排 + 空 PATH 命令规范映射（MML 多代历史方案见归档区）|
 | **设备管理** | `device-lifecycle-online-status-decouple-20260520.md` · `device-list-and-group-improvements-20260520.md` · `device-detail-basic-fields-from-parameters-20260525.md` | 生命周期/在线状态解耦 + 列表分组 + 详情字段 |
 | **跨域基础设施** | `统一文件传输任务引擎-设计方案.md` · `notification-center-design-20260519.md` | 统一文件传输任务引擎 / 通知中心 |
 | **模块设计回填** | `参数设置页-设计.md`（↔ quicksettings）· `TR069报文跟踪-设计.md`（↔ trace）| 模块代码与设计对应 |

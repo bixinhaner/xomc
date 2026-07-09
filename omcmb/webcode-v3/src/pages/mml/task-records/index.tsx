@@ -16,6 +16,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Sparkline } from '@/components/viz/Sparkline'
 import { formatTime } from '@/lib/format'
 import { useMMLTasks, useMMLTaskResults } from '@core/hooks/api/useMML'
+import { getMmlTaskProgress } from '@core/utils/mmlTaskProgress'
 import type {
   MMLTask,
   MMLTaskStatus,
@@ -56,12 +57,6 @@ const TASK_STATUS_ORDER: MMLTaskStatus[] = [
 
 function statusLabel(s: MMLTaskStatus): string {
   return STATUS_BADGE[s]?.label ?? s
-}
-
-function progressOf(t: MMLTask): { done: number; total: number } {
-  const done = (t.successCount ?? 0) + (t.failedCount ?? 0)
-  const total = (t.totalDevices ?? 0) * Math.max(1, t.commands?.length ?? 1)
-  return { done, total }
 }
 
 const PAGE_SIZE = 20
@@ -231,7 +226,7 @@ export function MMLTaskRecordsPage() {
               </CenterState>
             ) : (
               tasks.map((t) => {
-                const { done, total: tot } = progressOf(t)
+                const { done, total: tot } = getMmlTaskProgress(t)
                 const pct = tot > 0 ? Math.round((done / tot) * 100) : 0
                 const et = EXEC_TYPE_LABEL[t.executeType]
                 return (
@@ -405,6 +400,11 @@ function TaskDetailDrawer({ task, onClose }: { task: MMLTask; onClose: () => voi
                         )}
                         <span className="font-mono text-xs text-cyan-100">{r.deviceSn}</span>
                         {r.deviceName ? <span className="text-[11px] text-cyan-300/55">{r.deviceName}</span> : null}
+                        {r.planLineNo ? (
+                          <span className="rounded-sm border border-cyan-500/25 bg-cyan-500/8 px-1.5 py-0.5 font-mono text-[10px] text-cyan-300/75">
+                            #{r.planLineNo}/{r.planOrder ?? '-'} {r.commandCode ?? ''}
+                          </span>
+                        ) : null}
                       </div>
                       <StatusBadge status={ok ? 'ok' : 'critical'} label={ok ? '成功' : '失败'} />
                     </div>

@@ -22,6 +22,7 @@ import {
   useMMLTasks,
   useMMLTaskResults,
 } from '@core/hooks/api/useMML';
+import { getMmlTaskProgress } from '@core/utils/mmlTaskProgress';
 
 // -------------------------------------------------------------------------
 // Display mappings — mml_tasks columns
@@ -191,10 +192,7 @@ export default function TaskRecord() {
       title: t('mml.progress'),
       width: 100,
       render: (_: unknown, record: MMLTask) => {
-        const done = (record.successCount ?? 0) + (record.failedCount ?? 0);
-        // 进度分母 = 总 device_task 数 = 设备数 × 命令数（逐 PATH 拆成 N 条命令 → N 个 device_task，
-        // 故 12 path 逐 PATH 单设备应为 12/12，而非 12/1）。
-        const total = (record.totalDevices ?? 0) * Math.max(1, record.commands?.length ?? 1);
+        const { done, total } = getMmlTaskProgress(record);
         return `${done}/${total}`;
       },
     },

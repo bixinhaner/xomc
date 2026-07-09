@@ -510,6 +510,108 @@ func buildDeviceCSVMulti(
 	return buf.Bytes(), nil
 }
 
+var deviceBoundPlanHeader = []string{
+	"任务ID", "任务名称", "行号", "设备SN", "顺序", "原始脚本行",
+	"命令码", "RPC方法", "操作类型", "参数摘要", "子任务ID", "状态",
+	"故障码", "失败原因", "下发时间", "响应时间", "结果报文(XML)",
+}
+
+func buildDeviceBoundPlanCSV(task *MMLTask, rows []DeviceTaskResultRowView, deviceSN string) ([]byte, error) {
+	rowByPlanIndex := make(map[int]DeviceTaskResultRowView, len(rows))
+	for _, row := range rows {
+		if row.CommandIndex < 0 {
+			continue
+		}
+		if deviceSN != "" && row.DeviceSN != deviceSN {
+			continue
+		}
+		if _, exists := rowByPlanIndex[row.CommandIndex]; !exists {
+			rowByPlanIndex[row.CommandIndex] = row
+		}
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString(utf8BOM)
+	w := csv.NewWriter(&buf)
+	if err := w.Write(deviceBoundPlanHeader); err != nil {
+		return nil, err
+	}
+
+	written := 0
+	for idx, item := range task.PlanItems {
+		if deviceSN != "" && item.DeviceSN != deviceSN {
+			continue
+		}
+		row, hasRow := rowByPlanIndex[idx]
+		status := "待执行"
+		faultCode, faultMsg, sentAt, completedAt, raw, deviceTaskID := "", "", "", "", "", ""
+		if hasRow {
+			status = deviceStatusText(row.Status, row.ErrorCode)
+			if row.ErrorCode != 0 {
+				faultCode = strconv.Itoa(row.ErrorCode)
+				faultMsg = row.ErrorMessage
+			}
+			if row.SentAt != nil {
+				sentAt = row.SentAt.Format("2006-01-02 15:04:05")
+			}
+			if row.CompletedAt != nil {
+				completedAt = row.CompletedAt.Format("2006-01-02 15:04:05")
+			}
+			raw = flattenXML(rawResponseOf(row.Result))
+			deviceTaskID = row.DeviceTaskID
+		}
+		rec := []string{
+			task.ID.String(),
+			task.TaskName,
+			strconv.Itoa(item.LineNo),
+			item.DeviceSN,
+			strconv.Itoa(item.Order),
+			item.RawLine,
+			commandString(item.Command, "command_code"),
+			commandString(item.Command, "rpc_method"),
+			commandString(item.Command, "operation_type"),
+			commandParametersSummary(item.Command),
+			deviceTaskID,
+			status,
+			faultCode,
+			faultMsg,
+			sentAt,
+			completedAt,
+			raw,
+		}
+		if err := w.Write(rec); err != nil {
+			return nil, err
+		}
+		written++
+	}
+	if written == 0 {
+		return nil, commonDeviceResultNotFound
+	}
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func commandParametersSummary(command map[string]interface{}) string {
+	if params, ok := command["parameters"]; ok && params != nil {
+		if b, err := json.Marshal(params); err == nil {
+			return string(b)
+		}
+	}
+	if paths, ok := command["param_paths"].([]interface{}); ok && len(paths) > 0 {
+		parts := make([]string, 0, len(paths))
+		for _, p := range paths {
+			if s, ok := p.(string); ok && s != "" {
+				parts = append(parts, s)
+			}
+		}
+		return strings.Join(parts, ";")
+	}
+	return ""
+}
+
 // ── Service 导出方法 ──────────────────────────────────────────────────────────
 
 // resolvePathNames 解析 standardPath → 友好名（CSV「参数名称」列）。优先 pathNameResolver
@@ -570,6 +672,9 @@ func (s *Service) AggregateCSVBytes(ctx context.Context, taskID uuid.UUID) ([]by
 	if err != nil {
 		return nil, err
 	}
+	if task.ExecuteMode == TaskExecuteModeDeviceBound {
+		return buildDeviceBoundPlanCSV(task, rows, "")
+	}
 	nameMap := s.resolvePathNames(ctx, cols, task.Commands)
 	return buildLongFormatCSV(cols, rows, task.Commands, nameMap, read)
 }
@@ -588,6 +693,9 @@ func (s *Service) DeviceCSVBytes(ctx context.Context, taskID uuid.UUID, deviceSN
 	rows, err := s.allDeviceResults(ctx, taskID)
 	if err != nil {
 		return nil, err
+	}
+	if task.ExecuteMode == TaskExecuteModeDeviceBound {
+		return buildDeviceBoundPlanCSV(task, rows, deviceSN)
 	}
 	var devRows []DeviceTaskResultRowView
 	for i := range rows {

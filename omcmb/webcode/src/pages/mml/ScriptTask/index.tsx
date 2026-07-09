@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import { Button, Descriptions, Drawer, Empty, Form, Input, Modal, Select, Space, Spin, Tag, Typography, message, theme } from 'antd';
+import { Button, Descriptions, Drawer, Empty, Form, Input, Modal, Radio, Space, Spin, Table, Tag, Typography, message, theme } from 'antd';
+import type { RadioChangeEvent } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 
@@ -11,7 +12,8 @@ import ScriptTaskDrawer from '../components/ScriptTaskDrawer';
 import CommandSelectModal from '../Console/components/CommandSelectModal';
 import { useT } from '@/hooks/useT';
 
-import type { MMLScript } from '@core/types/mml';
+import type { MMLScript, MMLTaskExecuteMode, MMLTaskPlanItem } from '@core/types/mml';
+import { parseMmlScriptPlan } from '@core/utils/mmlScriptPlanParser';
 import type { CommandItem, CommandParamPath } from '../Console/types';
 import {
   useMMLScripts,
@@ -29,11 +31,10 @@ function formatTime(iso?: string | null): string {
 }
 
 // 新增/编辑脚本弹窗的表单结构 —— 字段与后端 createScript/updateScript
-// 实际接收的列对齐（script_name / description / content / tags）。
+// 实际接收的核心列对齐（script_name / description / content）。
 interface ScriptForm {
   scriptName: string;
   description?: string;
-  tags?: string[];
   content: string;
 }
 
@@ -74,6 +75,18 @@ export default function ScriptTask() {
   const [formVisible, setFormVisible] = useState(false);
   const [form] = Form.useForm<ScriptForm>();
   const contentValue = Form.useWatch('content', form) ?? '';
+  const hasScriptContent = String(contentValue || '').trim().length > 0;
+  const [scriptMode, setScriptMode] = useState<MMLTaskExecuteMode>('device_bound');
+  const scriptPlanPreview = useMemo(
+    () => parseMmlScriptPlan(String(contentValue || ''), { format: 'auto' }),
+    [contentValue]
+  );
+  const detectedDeviceBound = hasScriptContent && scriptPlanPreview.executeMode === 'device_bound';
+  const effectiveScriptMode: MMLTaskExecuteMode = detectedDeviceBound ? 'device_bound' : scriptMode;
+  const isScriptDeviceBound = effectiveScriptMode === 'device_bound';
+  const scriptContentPlaceholder = isScriptDeviceBound
+    ? 'LST DEVICE_INFO;1202000091177SP0005\nMOD DEVICE_INFO:USER_LABEL=Site-A;1202000091177SP0006\nLST DEVICE_INFO;1202000091177SP0006'
+    : 'LST DEVICE_INFO;\nLST TIME;';
   const [commandSelectOpen, setCommandSelectOpen] = useState(false);
   const [selectedCommand, setSelectedCommand] = useState<CommandItem | null>(null);
   const [commandParamValues, setCommandParamValues] = useState<Record<string, string>>({});
@@ -82,19 +95,42 @@ export default function ScriptTask() {
     () => selectedCommand ? writableScriptParams(selectedCommand) : [],
     [selectedCommand]
   );
+  const scriptPlanPreviewColumns = useMemo(() => [
+    {
+      key: 'lineNo',
+      title: '#',
+      width: 72,
+      render: (_: unknown, item: MMLTaskPlanItem) => `${item.lineNo}/${item.order}`,
+    },
+    {
+      key: 'deviceSn',
+      title: t('mml.deviceSn'),
+      dataIndex: 'deviceSn',
+      ellipsis: true,
+    },
+    {
+      key: 'command',
+      title: 'MML',
+      render: (_: unknown, item: MMLTaskPlanItem) => (
+        <Typography.Text code>{item.command.commandCode}</Typography.Text>
+      ),
+    },
+  ], [t]);
 
   // 弹窗打开后再回填表单：Modal 子节点惰性挂载，openEdit 时 Form 实例可能尚未连接，
   // 因此把回填放进 formVisible 的副作用里，确保 Form 已挂载。
   useEffect(() => {
     if (!formVisible) return;
     if (editing) {
+      const editingMode = parseMmlScriptPlan(editing.content || '', { format: 'auto' }).executeMode;
+      setScriptMode(editingMode);
       form.setFieldsValue({
         scriptName: editing.scriptName,
         description: editing.description,
-        tags: editing.tags,
         content: editing.content,
       });
     } else {
+      setScriptMode('device_bound');
       form.resetFields();
     }
   }, [formVisible, editing, form]);
@@ -144,10 +180,46 @@ export default function ScriptTask() {
     form.validateFields(['content']).catch(() => undefined);
   }, [selectedCommand, commandParamValues, contentValue, form]);
 
+  const handleScriptModeChange = useCallback((event: RadioChangeEvent) => {
+    setScriptMode(event.target.value as MMLTaskExecuteMode);
+    if (!String(form.getFieldValue('content') || '').trim()) return;
+    window.setTimeout(() => {
+      form.validateFields(['content']).catch(() => undefined);
+    }, 0);
+  }, [form]);
+
+  const validateScriptContent = useCallback((_: unknown, value?: string) => {
+    const content = String(value || '');
+    if (!content.trim()) return Promise.resolve();
+    const nextPlan = parseMmlScriptPlan(content, { format: 'auto' });
+    const nextMode: MMLTaskExecuteMode = nextPlan.executeMode === 'device_bound' ? 'device_bound' : scriptMode;
+    if (nextMode === 'device_bound') {
+      if (nextPlan.planItems.length === 0) {
+        return Promise.reject(new Error('按设备计划行模式需要脚本行携带 SN；请使用“命令;SN”格式，或切换为普通模式。'));
+      }
+      if (nextPlan.warnings.length > 0) {
+        return Promise.reject(new Error('按设备计划行模式下，每条有效脚本行都需要携带 SN。'));
+      }
+    }
+    return Promise.resolve();
+  }, [scriptMode]);
+
   const handleSave = useCallback(() => {
     form
       .validateFields()
       .then((vals) => {
+        const nextPlan = parseMmlScriptPlan(vals.content, { format: 'auto' });
+        const nextMode: MMLTaskExecuteMode = nextPlan.executeMode === 'device_bound' ? 'device_bound' : scriptMode;
+        if (nextMode === 'device_bound') {
+          if (nextPlan.planItems.length === 0) {
+            void message.error('按设备计划行模式需要脚本行携带 SN；请使用“命令;SN”格式，或切换为普通模式。');
+            return;
+          }
+          if (nextPlan.warnings.length > 0) {
+            void message.error('按设备计划行模式下，每条有效脚本行都需要携带 SN。');
+            return;
+          }
+        }
         // BUG-13 修复：确保 onSuccess 中刷新列表 + 关闭弹窗
         const onDone = () => {
           void message.success(t('mml.scriptSaved'));
@@ -168,7 +240,7 @@ export default function ScriptTask() {
                 scriptName: vals.scriptName.trim(),
                 description: vals.description ?? '',
                 content: vals.content,
-                tags: vals.tags ?? [],
+                tags: [],
               },
             },
             { onSuccess: onDone, onError: onFail }
@@ -179,7 +251,7 @@ export default function ScriptTask() {
               scriptName: vals.scriptName.trim(),
               description: vals.description ?? '',
               content: vals.content,
-              tags: vals.tags ?? [],
+              tags: [],
               creator: username,
               status: 'active',
               type: 'manual',
@@ -190,7 +262,7 @@ export default function ScriptTask() {
         }
       })
       .catch(() => undefined);
-  }, [form, editing, username, createScriptMutation, updateScriptMutation, closeForm, refetch, t]);
+  }, [form, editing, username, scriptMode, createScriptMutation, updateScriptMutation, closeForm, refetch, t]);
 
   // 删除脚本：敏感操作，走 Modal.confirm 二次确认。
   const handleDelete = useCallback((script: MMLScript) => {
@@ -215,13 +287,36 @@ export default function ScriptTask() {
     });
   }, [deleteScriptsMutation, t]);
 
+  const renderScriptMode = useCallback((content?: string | null) => {
+    const parsed = parseMmlScriptPlan(String(content || ''), { format: 'auto' });
+    if (parsed.executeMode === 'device_bound') {
+      return (
+        <Space size={4} wrap>
+          <Tag color="processing">{t('mml.executeModeDeviceBound')}</Tag>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {t('mml.planItemCount', { count: parsed.planItems.length })}
+            {' / '}
+            {t('mml.planDeviceCount', { count: parsed.deviceSns.length })}
+          </Typography.Text>
+        </Space>
+      );
+    }
+    return (
+      <Space size={4} wrap>
+        <Tag>{t('mml.executeModeCommon')}</Tag>
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          {t('mml.commandsParsed', { count: parsed.commands.length })}
+        </Typography.Text>
+      </Space>
+    );
+  }, [t]);
+
   const columns: DataTableColumn<MMLScript>[] = useMemo(() => [
     {
       key: 'operation',
       title: t('table.operation'),
       dataIndex: 'id',
       width: 220,
-      fixed: 'right',
       render: (_, record) => (
         <Space size={4}>
           <Button type="link" size="small" onClick={() => setViewing(record)}>{t('mml.info')}</Button>
@@ -233,10 +328,15 @@ export default function ScriptTask() {
     },
     { key: 'scriptName', title: t('mml.scriptName'), dataIndex: 'scriptName', ellipsis: true },
     { key: 'description', title: t('mml.description'), dataIndex: 'description', ellipsis: true, render: (v: unknown) => (v as string) || '-' },
+    {
+      key: 'executeMode',
+      title: t('mml.executeMode'),
+      width: 190,
+      render: (_: unknown, record) => renderScriptMode(record.content),
+    },
     { key: 'creator', title: t('mml.creator'), dataIndex: 'creator', width: 100 },
-    { key: 'tags', title: t('mml.tags'), dataIndex: 'tags', width: 180, render: (tags: unknown) => Array.isArray(tags) && tags.length ? (tags as string[]).map((tag) => <Tag key={tag}>{tag}</Tag>) : '-' },
     { key: 'updatedAt', title: t('mml.updateTime'), dataIndex: 'updateTime', width: 160, render: (val: unknown) => formatTime(val as string) },
-  ], [t, openEdit, handleDelete]);
+  ], [t, renderScriptMode, openEdit, handleDelete]);
 
   return (
     <ListPageLayout
@@ -293,9 +393,6 @@ export default function ScriptTask() {
           </Form.Item>
           <Form.Item label={t('mml.description')} name="description">
             <Input maxLength={256} placeholder={t('mml.description')} />
-          </Form.Item>
-          <Form.Item label={t('mml.tags')} name="tags">
-            <Select mode="tags" tokenSeparators={[',']} placeholder={t('mml.tags')} open={false} />
           </Form.Item>
           <Form.Item label={t('mml.scriptCommandBuilder')}>
             <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -380,17 +477,72 @@ export default function ScriptTask() {
               )}
             </Space>
           </Form.Item>
+          <Form.Item label={t('mml.executeMode')}>
+            <Space direction="vertical" size={10} style={{ width: '100%' }}>
+              <Radio.Group
+                optionType="button"
+                buttonStyle="solid"
+                value={effectiveScriptMode}
+                onChange={handleScriptModeChange}
+              >
+                <Radio.Button value="device_bound">{t('mml.executeModeDeviceBound')}</Radio.Button>
+                <Radio.Button value="common" disabled={detectedDeviceBound}>{t('mml.executeModeCommon')}</Radio.Button>
+              </Radio.Group>
+              {hasScriptContent ? (
+                <Space wrap>
+                  {isScriptDeviceBound ? (
+                    <Tag color="processing">{t('mml.planItemCount', { count: scriptPlanPreview.planItems.length })}</Tag>
+                  ) : (
+                    <Tag>{t('mml.commandsParsed', { count: scriptPlanPreview.commands.length })}</Tag>
+                  )}
+                  {isScriptDeviceBound ? (
+                    <Tag color="blue">{t('mml.planDeviceCount', { count: scriptPlanPreview.deviceSns.length })}</Tag>
+                  ) : null}
+                  {detectedDeviceBound ? (
+                    <Typography.Text type="secondary">
+                      检测到脚本中包含设备 SN，已切换为按设备计划行。
+                    </Typography.Text>
+                  ) : null}
+                </Space>
+              ) : null}
+            </Space>
+          </Form.Item>
           <Form.Item
             label={t('mml.scriptContent')}
             name="content"
-            rules={[{ required: true, message: t('mml.scriptContent') }]}
+            rules={[
+              { required: true, message: t('mml.scriptContent') },
+              { validator: validateScriptContent },
+            ]}
           >
             <Input.TextArea
               rows={10}
-              placeholder={'LST CELL;\nACT CELL:CELLID=0;'}
+              placeholder={scriptContentPlaceholder}
               style={{ fontFamily: "'SFMono-Regular', Consolas, Menlo, monospace", fontSize: 12 }}
             />
           </Form.Item>
+          {hasScriptContent && isScriptDeviceBound ? (
+            <Form.Item label={t('mml.planPreview')}>
+              <Space direction="vertical" size={10} style={{ width: '100%' }}>
+              {scriptPlanPreview.warnings.length > 0 ? (
+                <Typography.Text type="warning">
+                  已同时检测到带 SN 和不带 SN 的脚本行；执行时将按设备计划行处理。
+                </Typography.Text>
+              ) : null}
+              <Table<MMLTaskPlanItem>
+                size="small"
+                rowKey={(item) => `${item.lineNo}-${item.deviceSn}-${item.order}`}
+                columns={scriptPlanPreviewColumns}
+                dataSource={scriptPlanPreview.planItems}
+                pagination={
+                  scriptPlanPreview.planItems.length > 5
+                    ? { pageSize: 5, size: 'small', showSizeChanger: false }
+                    : false
+                }
+              />
+              </Space>
+            </Form.Item>
+          ) : null}
         </Form>
       </Modal>
 
@@ -420,10 +572,8 @@ export default function ScriptTask() {
                 <Descriptions.Item label={t('mml.createTime')}>
                   {formatTime(detailScript.createTime)}
                 </Descriptions.Item>
-                <Descriptions.Item label={t('mml.tags')}>
-                  {detailScript.tags?.length
-                    ? detailScript.tags.map((tag) => <Tag key={tag}>{tag}</Tag>)
-                    : '-'}
+                <Descriptions.Item label={t('mml.executeMode')}>
+                  {renderScriptMode(detailScript.content)}
                 </Descriptions.Item>
               </Descriptions>
 

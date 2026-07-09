@@ -4,6 +4,8 @@ import {
   RefreshCcw,
   Loader2,
   Inbox,
+  Play,
+  Plus,
   XCircle,
   X,
   ScrollText,
@@ -16,8 +18,10 @@ import { GlassPanel } from '@/components/ui/GlassPanel'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Sparkline } from '@/components/viz/Sparkline'
 import { formatTime } from '@/lib/format'
-import { useMMLScriptById, useMMLScripts } from '@core/hooks/api/useMML'
-import type { MMLScript, MMLScriptStatus } from '@core/types/mml'
+import { useCreateMMLScript, useCreateMMLTask, useMMLScriptById, useMMLScripts } from '@core/hooks/api/useMML'
+import { useUserStore } from '@core/store/userStore'
+import type { MMLScript, MMLScriptStatus, MMLTaskPlanItem } from '@core/types/mml'
+import { parseMmlScriptPlan } from '@core/utils/mmlScriptPlanParser'
 
 // ─────────────────────────────────────────────────────────────
 // SCRIPT VAULT · mml_scripts 脚本库（real：useMMLScripts）
@@ -45,6 +49,8 @@ export function MMLScriptPage() {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const [viewing, setViewing] = useState<MMLScript | null>(null)
+  const [executing, setExecuting] = useState<MMLScript | null>(null)
+  const [creating, setCreating] = useState(false)
 
   const params = useMemo(
     () => ({ page, pageSize: PAGE_SIZE, ...(search.trim() ? { search: search.trim() } : {}) }),
@@ -85,6 +91,9 @@ export function MMLScriptPage() {
           </div>
           <NeonButton icon={<RefreshCcw />} onClick={() => refetch()}>
             {isFetching ? 'SYNC…' : 'REFRESH'}
+          </NeonButton>
+          <NeonButton icon={<Plus />} onClick={() => setCreating(true)}>
+            新建脚本
           </NeonButton>
         </div>
       }
@@ -173,12 +182,189 @@ export function MMLScriptPage() {
         <Pager page={page} totalPages={totalPages} total={total} onPage={setPage} />
       </div>
 
-      {viewing && <ScriptDetailDrawer script={viewing} onClose={() => setViewing(null)} />}
+      {viewing && (
+        <ScriptDetailDrawer
+          script={viewing}
+          onClose={() => setViewing(null)}
+          onExecute={(scriptToRun) => setExecuting(scriptToRun)}
+        />
+      )}
+      {creating && (
+        <ScriptCreateDialog
+          onClose={() => setCreating(false)}
+          onCreated={() => {
+            setCreating(false)
+            void refetch()
+          }}
+        />
+      )}
+      {executing && <ScriptExecuteDialog script={executing} onClose={() => setExecuting(null)} />}
     </PageShell>
   )
 }
 
-function ScriptDetailDrawer({ script, onClose }: { script: MMLScript; onClose: () => void }) {
+function ScriptCreateDialog({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const username = useUserStore((s) => s.currentUser?.username) ?? ''
+  const createScript = useCreateMMLScript()
+  const [scriptName, setScriptName] = useState('')
+  const [description, setDescription] = useState('')
+  const [tagsText, setTagsText] = useState('')
+  const [content, setContent] = useState('')
+  const [error, setError] = useState('')
+
+  const parsed = useMemo(() => parseMmlScriptPlan(content, { format: 'auto' }), [content])
+
+  const submit = async () => {
+    setError('')
+    if (!scriptName.trim()) {
+      setError('请输入脚本名称')
+      return
+    }
+    if (!content.trim()) {
+      setError('请输入脚本内容')
+      return
+    }
+    try {
+      await createScript.mutateAsync({
+        scriptName: scriptName.trim(),
+        description: description.trim(),
+        content,
+        creator: username,
+        tags: tagsText
+          .split(/[,\s;]+/)
+          .map((tag) => tag.trim())
+          .filter(Boolean),
+        status: 'active',
+        type: 'manual',
+        progress: 0,
+      })
+      onCreated()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '保存失败')
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="glass-strong flex max-h-[90vh] w-[min(860px,calc(100vw-32px))] flex-col overflow-hidden border border-cyan-500/30"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-cyan-500/20 px-4 py-3">
+          <div className="min-w-0">
+            <div className="font-display text-base font-bold text-cyan-100">新建脚本</div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-sm border border-cyan-500/25 p-1.5 text-cyan-300/70 hover:border-cyan-400/60 hover:text-cyan-100"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 space-y-3 overflow-auto px-4 py-3">
+          <label className="block">
+            <span className="mb-1 block font-mono text-[9px] uppercase tracking-[0.18em] text-cyan-300/55">脚本名称</span>
+            <input className="neon-input w-full" value={scriptName} onChange={(e) => setScriptName(e.target.value)} />
+          </label>
+          <label className="block">
+            <span className="mb-1 block font-mono text-[9px] uppercase tracking-[0.18em] text-cyan-300/55">描述</span>
+            <input className="neon-input w-full" value={description} onChange={(e) => setDescription(e.target.value)} />
+          </label>
+          <label className="block">
+            <span className="mb-1 block font-mono text-[9px] uppercase tracking-[0.18em] text-cyan-300/55">标签</span>
+            <input className="neon-input w-full" value={tagsText} placeholder="逗号或空格分隔" onChange={(e) => setTagsText(e.target.value)} />
+          </label>
+          <label className="block">
+            <span className="mb-1 block font-mono text-[9px] uppercase tracking-[0.18em] text-cyan-300/55">脚本内容</span>
+            <textarea
+              className="neon-input min-h-44 w-full resize-y font-mono text-xs leading-relaxed"
+              value={content}
+              placeholder={'LST DEVICE_INFO;1202000091177SP0005\nMOD DEVICE_INFO:USER_LABEL=Site-A;1202000091177SP0006\nLST DEVICE_INFO;1202000091177SP0006'}
+              onChange={(e) => setContent(e.target.value)}
+            />
+          </label>
+
+          {content.trim() ? (
+            <ScriptPlanPreview parsedMode={parsed.executeMode} planItems={parsed.planItems} commandCount={parsed.commands.length} deviceCount={parsed.deviceSns.length} warnings={parsed.warnings} />
+          ) : null}
+
+          {error ? <div className="font-mono text-[11px] text-rose-300">{error}</div> : null}
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-cyan-500/20 px-4 py-3">
+          <NeonButton onClick={onClose}>CANCEL</NeonButton>
+          <NeonButton icon={createScript.isPending ? <Loader2 className="animate-spin" /> : <Plus />} onClick={() => void submit()} disabled={createScript.isPending}>
+            SAVE
+          </NeonButton>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ScriptPlanPreview({
+  parsedMode,
+  planItems,
+  commandCount,
+  deviceCount,
+  warnings,
+}: {
+  parsedMode: 'common' | 'device_bound'
+  planItems: MMLTaskPlanItem[]
+  commandCount: number
+  deviceCount: number
+  warnings: string[]
+}) {
+  const isDeviceBound = parsedMode === 'device_bound'
+  return (
+    <div className="border border-cyan-500/15 bg-cyan-500/4">
+      <div className="flex items-center justify-between border-b border-cyan-500/15 px-3 py-2">
+        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-300/55">解析预览</span>
+        <span className="font-mono text-[10px] text-cyan-100/80">
+          {isDeviceBound ? '按设备编排' : '公共脚本'}
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-2 px-3 py-2">
+        <MiniStat label="MODE" value={isDeviceBound ? 'DEVICE-BOUND' : 'COMMON'} />
+        <MiniStat
+          label="PLAN"
+          value={isDeviceBound ? `${planItems.length} ROWS / ${deviceCount} DEVICES` : `${commandCount} COMMANDS`}
+        />
+      </div>
+      {warnings.length > 0 ? (
+        <div className="px-3 pb-2 font-mono text-[11px] text-amber-200">
+          已同时检测到带 SN 和不带 SN 的脚本行；执行时将按设备计划行处理。
+        </div>
+      ) : null}
+      {isDeviceBound ? (
+        <div className="max-h-56 overflow-auto border-t border-cyan-500/15">
+          {planItems.slice(0, 30).map((item) => (
+            <div
+              key={`${item.lineNo}-${item.deviceSn}-${item.order}`}
+              className="grid grid-cols-[76px_160px_1fr] gap-2 border-b border-cyan-500/8 px-3 py-1.5 font-mono text-[11px] text-cyan-100/85 last:border-b-0"
+            >
+              <span>#{item.lineNo}/{item.order}</span>
+              <span className="truncate text-cyan-300/75">{item.deviceSn}</span>
+              <span className="truncate">{item.command.commandCode}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function ScriptDetailDrawer({
+  script,
+  onClose,
+  onExecute,
+}: {
+  script: MMLScript
+  onClose: () => void
+  onExecute: (script: MMLScript) => void
+}) {
   const { data, isFetching } = useMMLScriptById(script.id)
   const detailScript = data ?? script
   return (
@@ -192,13 +378,18 @@ function ScriptDetailDrawer({ script, onClose }: { script: MMLScript; onClose: (
             <div className="truncate font-display text-base font-bold text-cyan-100">{detailScript.scriptName}</div>
             <div className="truncate font-mono text-[10px] text-cyan-300/50">{detailScript.id}</div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-sm border border-cyan-500/25 p-1.5 text-cyan-300/70 hover:border-cyan-400/60 hover:text-cyan-100"
-          >
-            <X className="size-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            <NeonButton icon={<Play />} onClick={() => onExecute(detailScript)}>
+              EXEC
+            </NeonButton>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-sm border border-cyan-500/25 p-1.5 text-cyan-300/70 hover:border-cyan-400/60 hover:text-cyan-100"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-3 border-b border-cyan-500/15 px-4 py-3">
@@ -252,6 +443,135 @@ function ScriptDetailDrawer({ script, onClose }: { script: MMLScript; onClose: (
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+function ScriptExecuteDialog({ script, onClose }: { script: MMLScript; onClose: () => void }) {
+  const { data, isFetching } = useMMLScriptById(script.id)
+  const detailScript = data ?? script
+  const [taskName, setTaskName] = useState(`执行脚本: ${script.scriptName}`)
+  const [deviceInput, setDeviceInput] = useState('')
+  const [error, setError] = useState('')
+  const createTask = useCreateMMLTask()
+  const parsed = useMemo(
+    () => parseMmlScriptPlan(detailScript.content ?? '', { format: 'auto' }),
+    [detailScript.content]
+  )
+  const isDeviceBound = parsed.executeMode === 'device_bound'
+
+  const submit = async () => {
+    setError('')
+    const deviceSns = isDeviceBound ? parsed.deviceSns : parseDeviceInput(deviceInput)
+    if (!isDeviceBound && deviceSns.length === 0) {
+      setError('请输入设备 SN')
+      return
+    }
+    if (parsed.commands.length === 0) {
+      setError('脚本内容为空')
+      return
+    }
+    await createTask.mutateAsync({
+      taskName: taskName.trim() || `执行脚本: ${detailScript.scriptName}`,
+      scriptId: detailScript.id,
+      deviceSns,
+      commands: parsed.commands,
+      executeMode: parsed.executeMode,
+      planItems: isDeviceBound ? parsed.planItems : undefined,
+      creator: '',
+      executeType: 'immediate',
+      offlineRetry: false,
+      offlineRetryWait: 60,
+      failedRetry: false,
+      failedRetryCount: 3,
+      failedRetryInterval: 5,
+    })
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="glass-strong flex max-h-[86vh] w-[min(760px,calc(100vw-32px))] flex-col overflow-hidden border border-cyan-500/30"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-cyan-500/20 px-4 py-3">
+          <div className="min-w-0">
+            <div className="font-display text-base font-bold text-cyan-100">EXEC SCRIPT</div>
+            <div className="truncate font-mono text-[10px] text-cyan-300/50">{detailScript.scriptName}</div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-sm border border-cyan-500/25 p-1.5 text-cyan-300/70 hover:border-cyan-400/60 hover:text-cyan-100"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 space-y-3 overflow-auto px-4 py-3">
+          <label className="block">
+            <span className="mb-1 block font-mono text-[9px] uppercase tracking-[0.18em] text-cyan-300/55">任务名</span>
+            <input className="neon-input w-full" value={taskName} onChange={(e) => setTaskName(e.target.value)} />
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <MiniStat label="MODE" value={isDeviceBound ? 'DEVICE-BOUND' : 'COMMON'} />
+            <MiniStat
+              label="PLAN"
+              value={isDeviceBound ? `${parsed.planItems.length} ROWS / ${parsed.deviceSns.length} DEVICES` : `${parsed.commands.length} COMMANDS`}
+            />
+          </div>
+
+          {!isDeviceBound ? (
+            <label className="block">
+              <span className="mb-1 block font-mono text-[9px] uppercase tracking-[0.18em] text-cyan-300/55">设备 SN</span>
+              <input
+                className="neon-input w-full"
+                value={deviceInput}
+                placeholder="SN1,SN2"
+                onChange={(e) => setDeviceInput(e.target.value)}
+              />
+            </label>
+          ) : (
+            <div className="border border-cyan-500/15 bg-cyan-500/4">
+              <div className="border-b border-cyan-500/15 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-300/55">
+                PLAN PREVIEW
+              </div>
+              <div className="max-h-56 overflow-auto">
+                {parsed.planItems.slice(0, 20).map((item) => (
+                  <div key={`${item.lineNo}-${item.deviceSn}-${item.order}`} className="grid grid-cols-[76px_160px_1fr] gap-2 border-b border-cyan-500/8 px-3 py-1.5 font-mono text-[11px] text-cyan-100/85 last:border-b-0">
+                    <span>#{item.lineNo}/{item.order}</span>
+                    <span className="truncate text-cyan-300/75">{item.deviceSn}</span>
+                    <span className="truncate">{item.command.commandCode}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {error ? <div className="font-mono text-[11px] text-rose-300">{error}</div> : null}
+          {isFetching ? <div className="font-mono text-[10px] text-cyan-300/55">LOADING SCRIPT…</div> : null}
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-cyan-500/20 px-4 py-3">
+          <NeonButton onClick={onClose}>CANCEL</NeonButton>
+          <NeonButton icon={createTask.isPending ? <Loader2 className="animate-spin" /> : <Play />} onClick={() => void submit()} disabled={createTask.isPending}>
+            EXEC
+          </NeonButton>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function parseDeviceInput(value: string): string[] {
+  return Array.from(new Set(value.split(/[,\s;]+/).map((v) => v.trim()).filter(Boolean)))
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="border border-cyan-500/15 bg-cyan-500/4 px-3 py-2">
+      <div className="font-mono text-[9px] uppercase tracking-[0.18em] text-cyan-300/50">{label}</div>
+      <div className="mt-0.5 truncate font-mono text-xs text-cyan-100/90">{value}</div>
     </div>
   )
 }

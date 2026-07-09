@@ -102,6 +102,13 @@ export interface DeviceTaskResultItem {
   deviceTaskId?: string;
   /** device_tasks.command_index —— 逐 PATH 模式下定位该条结果属于哪个 path（命令序号） */
   commandIndex?: number;
+  /** device_bound 计划行追溯字段。 */
+  planLineNo?: number;
+  planDeviceSn?: string;
+  planOrder?: number;
+  planRawLine?: string;
+  commandCode?: string;
+  operationType?: string;
   deviceName?: string;
   mmlScript?: string;
   status?: DeviceResultStatus;
@@ -156,6 +163,8 @@ export type MMLExecuteType = 'immediate' | 'scheduled' | 'periodic' | 'suspended
 
 export type MMLTaskResult = 'success' | 'partial' | 'failed';
 
+export type MMLTaskExecuteMode = 'common' | 'device_bound';
+
 /**
  * 任务 commands JSONB 数组中每条命令的"明细"形态（含 op_type 与勾选 path）。
  *
@@ -177,6 +186,10 @@ export interface MMLTaskCommandDetail {
    * 取下发值时优先 paramValues[i]，缺则回退 parameters[path]。
    */
   parameters?: Record<string, unknown>;
+  planLineNo?: number;
+  planDeviceSn?: string;
+  planOrder?: number;
+  planRawLine?: string;
 }
 
 export interface MMLTaskCommandInput {
@@ -186,12 +199,37 @@ export interface MMLTaskCommandInput {
   parameters?: Record<string, unknown>;
 }
 
+export interface MMLTaskPlanItem {
+  lineNo: number;
+  deviceSn: string;
+  order: number;
+  rawLine?: string;
+  command: MMLTaskCommandInput;
+}
+
+export interface MMLTaskPlanStats {
+  totalPlanItems: number;
+  totalDevices: number;
+}
+
+export type MMLTaskCreateInput =
+  Partial<Omit<MMLTask, 'id' | 'status' | 'results' | 'createdAt' | 'updatedAt' | 'commands'>> &
+  Pick<MMLTask, 'taskName'> & {
+    deviceSns?: string[];
+    commands?: Array<string | MMLTaskCommandInput | MMLTaskCommandDetail>;
+    executeMode?: MMLTaskExecuteMode;
+    planItems?: MMLTaskPlanItem[];
+  };
+
 export interface MMLTask {
   id: string;
   taskName: string;
   scriptId?: string;
   deviceSns: string[];
   commands: string[];
+  executeMode?: MMLTaskExecuteMode;
+  planItems?: MMLTaskPlanItem[];
+  planStats?: MMLTaskPlanStats;
   /** 命令明细（含 op_type / param_paths）；老接口可能不返回，UI 需做 fallback */
   commandsDetail?: MMLTaskCommandDetail[];
   status: MMLTaskStatus;

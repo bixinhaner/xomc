@@ -144,13 +144,17 @@ func (f *Fanouter) Fanout(ctx context.Context, mmlTask *MMLTask) (int, error) {
 
 	// Sprint B Q-V3-3: sequentialMode 下只入队 command_index=0 那批
 	if f.sequentialMode && len(mmlTask.Commands) > 1 {
-		first := make([]*task.CreateTaskRequest, 0, len(mmlTask.DeviceSNs))
-		for _, r := range reqs {
-			if r.CommandIndex == 0 {
-				first = append(first, r)
+		if mmlTask.ExecuteMode == TaskExecuteModeDeviceBound {
+			reqs = firstDeviceBoundRequests(mmlTask, reqs)
+		} else {
+			first := make([]*task.CreateTaskRequest, 0, len(mmlTask.DeviceSNs))
+			for _, r := range reqs {
+				if r.CommandIndex == 0 {
+					first = append(first, r)
+				}
 			}
+			reqs = first
 		}
-		reqs = first
 		f.logger.Info("mml fanout sequential mode: enqueue first line only",
 			zap.String("mml_task_id", mmlTask.ID.String()),
 			zap.Int("first_line_tasks", len(reqs)),
@@ -186,97 +190,179 @@ func (f *Fanouter) Fanout(ctx context.Context, mmlTask *MMLTask) (int, error) {
 // device_task 打 miss 标记，前端任务详情可见警告（用户决策 Q1=B）。
 func (f *Fanouter) buildDeviceTaskRequests(ctx context.Context, mmlTask *MMLTask) []*task.CreateTaskRequest {
 	var reqs []*task.CreateTaskRequest
-	parentID := mmlTask.ID.String()
+
+	if mmlTask.ExecuteMode == TaskExecuteModeDeviceBound {
+		return f.buildDeviceBoundTaskRequests(ctx, mmlTask)
+	}
 
 	for cmdIdx, cmd := range mmlTask.Commands {
-		rpcMethod, _ := cmd["rpc_method"].(string)
-		if rpcMethod == "" {
-			f.logger.Warn("skip command without rpc_method",
-				zap.String("mml_task_id", parentID),
-				zap.Int("cmd_idx", cmdIdx),
-				zap.Any("command_code", cmd["command_code"]),
-			)
-			continue
-		}
-
-		paramRefs := paramRefsFromEntry(cmd)
-		formValues, _ := cmd["parameters"].(map[string]interface{})
-		operationType, _ := cmd["operation_type"].(string)
-		commandCode, _ := cmd["command_code"].(string)
-
-		description := fmt.Sprintf("MML %s", commandCode)
-		if mmlTask.TaskName != "" {
-			description = fmt.Sprintf("MML %s: %s", commandCode, mmlTask.TaskName)
-		}
-
 		for devIdx, sn := range mmlTask.DeviceSNs {
-			translated, missCount, translator := f.translateParamRefs(ctx, sn, paramRefs)
-
-			// v1.2 测试报告 §3 P0：ADD/RMV 的 object_name 走独立翻译。
-			// translateParamRefs 仅处理 param_refs[].Tr069Path；ADD/RMV 命令的
-			// parameters.object_name 是父对象路径（如 .../Carrier.），同样需要
-			// standardPath → privatePath；否则 BaiBLQ 等私有 path 设备必返 9005。
-			perDeviceFormValues := f.translateObjectName(ctx, sn, formValues)
-
-			params, err := BuildTR069Params(rpcMethod, translated, perDeviceFormValues, operationType)
-			if err != nil {
-				f.logger.Warn("build tr069 params failed, skip device",
-					zap.String("mml_task_id", parentID),
-					zap.Int("cmd_idx", cmdIdx),
-					zap.String("device_sn", sn),
-					zap.String("command_code", commandCode),
-					zap.String("rpc_method", rpcMethod),
-					zap.String("operation_type", operationType),
-					zap.Int("param_refs_count", len(translated)),
-					zap.Int("form_values_count", len(formValues)),
-					zap.Error(err),
-				)
+			req := f.buildDeviceTaskRequest(ctx, mmlTask, cmd, cmdIdx, sn, devIdx, devIdx == 0)
+			if req == nil {
 				continue
 			}
-
-			if devIdx == 0 {
-				// 一条 command 打一次 schema 摘要日志（per-cmd 而非 per-device）。
-				summary := SummarizeSchema(params)
-				f.logger.Info("device_task params built",
-					zap.String("mml_task_id", parentID),
-					zap.Int("cmd_idx", cmdIdx),
-					zap.String("command_code", commandCode),
-					zap.String("rpc_method", rpcMethod),
-					zap.String("operation_type", operationType),
-					zap.String("translator_source", translatorSourceLabel(translator)),
-					zap.Int("payload_size", summary.PayloadSize),
-					zap.Bool("has_names", summary.HasNames),
-					zap.Int("names_count", summary.NamesCount),
-					zap.Bool("has_values", summary.HasValues),
-					zap.Int("values_count", summary.ValuesCount),
-				)
-			}
-
-			reqs = append(reqs, &task.CreateTaskRequest{
-				DeviceSN:             sn,
-				Method:               rpcMethod,
-				Params:               params,
-				Priority:             10,
-				ExpiresIn:            offlineRetryExpiresIn(mmlTask),
-				Source:               task.TaskSourceMML,
-				CreatorID:            mmlTask.Creator,
-				Description:          description,
-				MaxRetries:           failedRetryMaxRetries(mmlTask),
-				RetryIntervalSeconds: failedRetryIntervalSeconds(mmlTask),
-
-				SourceID:     parentID,
-				CommandIndex: cmdIdx,
-				DeviceIndex:  devIdx,
-
-				HasPathTranslationMiss:   missCount > 0,
-				PathTranslationMissCount: missCount,
-				// T-0168: per-device 翻译来源继承 task 维度（D2 决策：R-8.4 保证一致）。
-				PathTranslationSource: mmlTask.PathTranslationSource,
-			})
+			reqs = append(reqs, req)
 		}
 	}
 
 	return reqs
+}
+
+func (f *Fanouter) buildDeviceBoundTaskRequests(ctx context.Context, mmlTask *MMLTask) []*task.CreateTaskRequest {
+	reqs := make([]*task.CreateTaskRequest, 0, len(mmlTask.PlanItems))
+	deviceIndexes := make(map[string]int, len(mmlTask.DeviceSNs))
+	for idx, sn := range mmlTask.DeviceSNs {
+		if _, exists := deviceIndexes[sn]; !exists {
+			deviceIndexes[sn] = idx
+		}
+	}
+
+	for planIdx, item := range mmlTask.PlanItems {
+		if planIdx >= len(mmlTask.Commands) {
+			f.logger.Warn("skip plan item without matching command",
+				zap.String("mml_task_id", mmlTask.ID.String()),
+				zap.Int("plan_idx", planIdx),
+				zap.Int("line_no", item.LineNo),
+				zap.String("device_sn", item.DeviceSN),
+			)
+			continue
+		}
+		devIdx, ok := deviceIndexes[item.DeviceSN]
+		if !ok {
+			devIdx = len(deviceIndexes)
+			deviceIndexes[item.DeviceSN] = devIdx
+		}
+		req := f.buildDeviceTaskRequest(ctx, mmlTask, mmlTask.Commands[planIdx], planIdx, item.DeviceSN, devIdx, true)
+		if req == nil {
+			continue
+		}
+		reqs = append(reqs, req)
+	}
+	return reqs
+}
+
+func (f *Fanouter) buildDeviceTaskRequest(
+	ctx context.Context,
+	mmlTask *MMLTask,
+	cmd map[string]interface{},
+	cmdIdx int,
+	sn string,
+	devIdx int,
+	logSchema bool,
+) *task.CreateTaskRequest {
+	parentID := mmlTask.ID.String()
+	rpcMethod, _ := cmd["rpc_method"].(string)
+	if rpcMethod == "" {
+		f.logger.Warn("skip command without rpc_method",
+			zap.String("mml_task_id", parentID),
+			zap.Int("cmd_idx", cmdIdx),
+			zap.String("device_sn", sn),
+			zap.Any("command_code", cmd["command_code"]),
+		)
+		return nil
+	}
+
+	paramRefs := paramRefsFromEntry(cmd)
+	formValues, _ := cmd["parameters"].(map[string]interface{})
+	operationType, _ := cmd["operation_type"].(string)
+	commandCode, _ := cmd["command_code"].(string)
+
+	description := fmt.Sprintf("MML %s", commandCode)
+	if mmlTask.TaskName != "" {
+		description = fmt.Sprintf("MML %s: %s", commandCode, mmlTask.TaskName)
+	}
+
+	translated, missCount, translator := f.translateParamRefs(ctx, sn, paramRefs)
+
+	// v1.2 测试报告 §3 P0：ADD/RMV 的 object_name 走独立翻译。
+	// translateParamRefs 仅处理 param_refs[].Tr069Path；ADD/RMV 命令的
+	// parameters.object_name 是父对象路径（如 .../Carrier.），同样需要
+	// standardPath → privatePath；否则 BaiBLQ 等私有 path 设备必返 9005。
+	perDeviceFormValues := f.translateObjectName(ctx, sn, formValues)
+
+	params, err := BuildTR069Params(rpcMethod, translated, perDeviceFormValues, operationType)
+	if err != nil {
+		f.logger.Warn("build tr069 params failed, skip device",
+			zap.String("mml_task_id", parentID),
+			zap.Int("cmd_idx", cmdIdx),
+			zap.String("device_sn", sn),
+			zap.String("command_code", commandCode),
+			zap.String("rpc_method", rpcMethod),
+			zap.String("operation_type", operationType),
+			zap.Int("param_refs_count", len(translated)),
+			zap.Int("form_values_count", len(formValues)),
+			zap.Error(err),
+		)
+		return nil
+	}
+
+	if logSchema {
+		// 一条 command 打一次 schema 摘要日志（per-cmd 而非 per-device）。
+		summary := SummarizeSchema(params)
+		f.logger.Info("device_task params built",
+			zap.String("mml_task_id", parentID),
+			zap.Int("cmd_idx", cmdIdx),
+			zap.String("command_code", commandCode),
+			zap.String("rpc_method", rpcMethod),
+			zap.String("operation_type", operationType),
+			zap.String("translator_source", translatorSourceLabel(translator)),
+			zap.Int("payload_size", summary.PayloadSize),
+			zap.Bool("has_names", summary.HasNames),
+			zap.Int("names_count", summary.NamesCount),
+			zap.Bool("has_values", summary.HasValues),
+			zap.Int("values_count", summary.ValuesCount),
+		)
+	}
+
+	return &task.CreateTaskRequest{
+		DeviceSN:             sn,
+		Method:               rpcMethod,
+		Params:               params,
+		Priority:             10,
+		ExpiresIn:            offlineRetryExpiresIn(mmlTask),
+		Source:               task.TaskSourceMML,
+		CreatorID:            mmlTask.Creator,
+		Description:          description,
+		MaxRetries:           failedRetryMaxRetries(mmlTask),
+		RetryIntervalSeconds: failedRetryIntervalSeconds(mmlTask),
+
+		SourceID:     parentID,
+		CommandIndex: cmdIdx,
+		DeviceIndex:  devIdx,
+
+		HasPathTranslationMiss:   missCount > 0,
+		PathTranslationMissCount: missCount,
+		// T-0168: per-device 翻译来源继承 task 维度（D2 决策：R-8.4 保证一致）。
+		PathTranslationSource: mmlTask.PathTranslationSource,
+	}
+}
+
+func firstDeviceBoundRequests(mmlTask *MMLTask, reqs []*task.CreateTaskRequest) []*task.CreateTaskRequest {
+	bestByDevice := make(map[string]*task.CreateTaskRequest, len(reqs))
+	for _, req := range reqs {
+		current := bestByDevice[req.DeviceSN]
+		if current == nil || planOrderForCommand(mmlTask, req.CommandIndex) < planOrderForCommand(mmlTask, current.CommandIndex) {
+			bestByDevice[req.DeviceSN] = req
+		}
+	}
+	out := make([]*task.CreateTaskRequest, 0, len(bestByDevice))
+	for _, sn := range mmlTask.DeviceSNs {
+		if req := bestByDevice[sn]; req != nil {
+			out = append(out, req)
+			delete(bestByDevice, sn)
+		}
+	}
+	for _, req := range bestByDevice {
+		out = append(out, req)
+	}
+	return out
+}
+
+func planOrderForCommand(mmlTask *MMLTask, cmdIdx int) int {
+	if cmdIdx >= 0 && cmdIdx < len(mmlTask.PlanItems) && mmlTask.PlanItems[cmdIdx].Order > 0 {
+		return mmlTask.PlanItems[cmdIdx].Order
+	}
+	return cmdIdx + 1
 }
 
 // translateParamRefs 已退化为 noop（T-XXX 改造）。
