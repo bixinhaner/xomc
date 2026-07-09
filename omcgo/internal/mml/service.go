@@ -583,6 +583,79 @@ type ExecuteRequest struct {
 	FailedRetryInterval int  `json:"failed_retry_interval"`
 }
 
+func applyExecuteSchedule(task *MMLTask, req ExecuteRequest) error {
+	scheduledAt, err := parseExecuteTime("scheduled_at", req.ScheduledAt)
+	if err != nil {
+		return err
+	}
+	periodStart, err := parseExecuteTime("period_start", req.PeriodStart)
+	if err != nil {
+		return err
+	}
+	periodEnd, err := parseExecuteTime("period_end", req.PeriodEnd)
+	if err != nil {
+		return err
+	}
+
+	task.ScheduledAt = scheduledAt
+	task.PeriodStart = periodStart
+	task.PeriodEnd = periodEnd
+	task.PeriodTime = strings.TrimSpace(req.PeriodTime)
+
+	switch req.ExecuteType {
+	case ExecuteScheduled:
+		if task.ScheduledAt == nil {
+			return fmt.Errorf("scheduled_at required for scheduled task: %w", commonerrors.ErrInvalidInput)
+		}
+	case ExecutePeriodic:
+		if task.PeriodStart == nil {
+			return fmt.Errorf("period_start required for periodic task: %w", commonerrors.ErrInvalidInput)
+		}
+		if task.PeriodEnd == nil {
+			return fmt.Errorf("period_end required for periodic task: %w", commonerrors.ErrInvalidInput)
+		}
+		if task.PeriodTime == "" {
+			return fmt.Errorf("period_time required for periodic task: %w", commonerrors.ErrInvalidInput)
+		}
+		if _, _, _, err := parsePeriodTime(task.PeriodTime); err != nil {
+			return fmt.Errorf("invalid period_time %q: %w", task.PeriodTime, commonerrors.ErrInvalidInput)
+		}
+		if task.PeriodEnd.Before(*task.PeriodStart) {
+			return fmt.Errorf("period_end must be after period_start: %w", commonerrors.ErrInvalidInput)
+		}
+		if computeNextPeriodicTrigger(task, time.Now()) == nil {
+			return fmt.Errorf("periodic schedule has no future trigger: %w", commonerrors.ErrInvalidInput)
+		}
+	}
+
+	return nil
+}
+
+func parseExecuteTime(field string, raw *string) (*time.Time, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	value := strings.TrimSpace(*raw)
+	if value == "" {
+		return nil, nil
+	}
+
+	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return &parsed, nil
+	}
+	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+		return &parsed, nil
+	}
+
+	for _, layout := range []string{"2006-01-02T15:04:05", "2006-01-02 15:04:05"} {
+		if parsed, err := time.ParseInLocation(layout, value, time.Local); err == nil {
+			return &parsed, nil
+		}
+	}
+
+	return nil, fmt.Errorf("invalid %s %q: %w", field, value, commonerrors.ErrInvalidInput)
+}
+
 // ExecuteGroupRequest 批量执行某 mml_param_group 下所有命令的入参
 // （Sprint B Q-V3-1 决议）。
 type ExecuteGroupRequest struct {
@@ -920,6 +993,10 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 		FailedRetryCount:    req.FailedRetryCount,
 		FailedRetryInterval: req.FailedRetryInterval,
 		TotalDevices:        len(req.DeviceSNs),
+	}
+
+	if err := applyExecuteSchedule(task, req); err != nil {
+		return nil, err
 	}
 
 	// Map execute_type to initial status + next_trigger_at.

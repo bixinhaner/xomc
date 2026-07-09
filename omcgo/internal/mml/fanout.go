@@ -30,7 +30,7 @@ type ProductMatcher interface {
 
 // ParamModelTranslatorFactory builds a Translator for (productID, swVersion).
 //
-// Implemented by *parammodel.Registry (its ``Translator`` method) — the
+// Implemented by *parammodel.Registry (its Translator method) — the
 // per-(product, sw) MappingSet is fetched & cached internally.
 type ParamModelTranslatorFactory interface {
 	Translator(ctx context.Context, productID uuid.UUID, swVersion string) (*parammodel.Translator, error)
@@ -55,10 +55,10 @@ type DeviceLookup interface {
 // standard_params（系统级标准 path 字典）。fanout 阶段需把 standardPath
 // 翻译为 device 对应的 privatePath 后再入 device_tasks.params；翻译路径：
 //
-//   device.SerialNumber → DeviceLookup.GetBySerialNumber → Device.ProductClass
-//   → ProductMatcher.MatchProductClass → Product.ParamModelID
-//   → ParamModelTranslatorFactory.Translator(productID, swVersion)
-//   → Translator.ToPrivate(standardPath)
+//	device.SerialNumber → DeviceLookup.GetBySerialNumber → Device.ProductClass
+//	→ ProductMatcher.MatchProductClass → Product.ParamModelID
+//	→ ParamModelTranslatorFactory.Translator(productID, swVersion)
+//	→ Translator.ToPrivate(standardPath)
 //
 // 任何一步失败（设备未注册 / product 未匹配 / mapping 不存在 / path 未命中）
 // 都 fallback：用 standardPath 直接当 privatePath 下发，并在 device_task 上
@@ -104,6 +104,17 @@ func (f *Fanouter) SetSequentialMode(enabled bool) { f.sequentialMode = enabled 
 // Stage 1 整改方案 §3：每次 path 翻译 fallback 都需累加 mml_path_translation_miss_total
 // 供 alert 监控（详见 deployments/monitoring/alerts/omc-rules.yml）。
 func (f *Fanouter) SetMetrics(m *FanoutMetrics) { f.metrics = m }
+
+func failedRetryMaxRetries(mmlTask *MMLTask) *int {
+	retries := 0
+	if mmlTask != nil && mmlTask.FailedRetry {
+		retries = mmlTask.FailedRetryCount
+		if retries < 0 {
+			retries = 0
+		}
+	}
+	return &retries
+}
 
 // Fanout creates device_tasks for each (command, device) pair in the MML task.
 // Only called for immediate execution; scheduled/periodic tasks are fan-outed when started.
@@ -235,6 +246,7 @@ func (f *Fanouter) buildDeviceTaskRequests(ctx context.Context, mmlTask *MMLTask
 				Source:      task.TaskSourceMML,
 				CreatorID:   mmlTask.Creator,
 				Description: description,
+				MaxRetries:  failedRetryMaxRetries(mmlTask),
 
 				SourceID:     parentID,
 				CommandIndex: cmdIdx,
