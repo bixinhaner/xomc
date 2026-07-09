@@ -110,15 +110,15 @@ export function useDeviceColumns({ t }: UseDeviceColumnsOptions) {
       {
         // T-0027 D9：分组归属来源列（PRD §12.6）
         // 后端 device_group_members.source_type → camelCase Device.sourceType
-        // 'manual' / 'rule' / undefined（旧数据未填）；undefined 视作 'manual'
-        // 与 schema DEFAULT 一致（migration 000051）
+        // 'manual' / 'rule' / 'auto' / undefined（旧接口未填）；undefined 不伪装成手工来源。
         key: 'sourceType',
         title: t('device.sourceType'),
         dataIndex: 'sourceType',
         width: 100,
         render: (_val, record) => {
-          const src = record.sourceType ?? 'manual';
-          const color = src === 'rule' ? 'blue' : 'default';
+          const src = record.sourceType;
+          if (!src) return <Tag>-</Tag>;
+          const color = src === 'rule' ? 'blue' : src === 'auto' ? 'green' : 'default';
           const label = t(`device.sourceType.${src}`);
           return <Tag color={color}>{label}</Tag>;
         },

@@ -23,6 +23,9 @@ type DeviceWithInfo struct {
 	// GroupName 设备分组名称
 	GroupName *string `json:"group_name"`
 
+	// SourceType 分组归属来源。无真实归属行的默认组视图由查询层派生为 auto。
+	SourceType *string `json:"source_type,omitempty"`
+
 	// ===== device_info 运维标识（可能为空）=====
 
 	// InfoDeviceName device_info 表的运维设备名。

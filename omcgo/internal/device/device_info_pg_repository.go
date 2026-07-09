@@ -811,6 +811,7 @@ func deviceWithInfoSelectColumns() []string {
 		// device_groups columns
 		"dg.id as group_id",
 		"dg.name as group_name",
+		"COALESCE(dgm.source_type, 'auto') as source_type",
 		// device_info columns
 		"di.device_name", "di.address", "di.remark", "di.project_status", "di.height",
 		"di.eci", "di.pci", "di.cell_id", "di.freq_point", "di.bandwidth", "di.transmit_power", "di.plmn",
@@ -906,8 +907,8 @@ const alarmsActiveAggJoin = `(
 	GROUP BY device_id
 ) aa ON aa.device_id = d.id`
 
-	// alarmSeverityTextToCodes 把前端 AlarmSeverity 文本映成 alarms_active.severity。
-	// 兼容历史 1..4 与现行 31001..31004 两套编码。未知文本返回空切片（跳过过滤）。
+// alarmSeverityTextToCodes 把前端 AlarmSeverity 文本映成 alarms_active.severity。
+// 兼容历史 1..4 与现行 31001..31004 两套编码。未知文本返回空切片（跳过过滤）。
 func alarmSeverityTextToCodes(text string) []int {
 	switch strings.ToLower(strings.TrimSpace(text)) {
 	case "critical":
@@ -1064,6 +1065,7 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		// device_groups field (nullable from LEFT JOIN)
 		&d.GroupID,
 		&d.GroupName,
+		&d.SourceType,
 		// device_info fields (all nullable from LEFT JOIN)
 		&diDeviceName, &diAddress, &diRemark, &diProjectStatus, &diHeight,
 		&diECI, &diPCI, &diCellID, &diFreqPoint, &diBandwidth, &diTransmitPower, &diPLMN,

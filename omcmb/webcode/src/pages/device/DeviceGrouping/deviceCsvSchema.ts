@@ -82,8 +82,8 @@ export const EXPORT_COLUMNS: readonly ExportColumn[] = [
     getValue: (d) => d.groupName ?? '' },
   { zh: '归属来源', i18nKey: 'device.csv.column.sourceType',
     getValue: (d, { t }) => {
-      const src = d.sourceType ?? 'manual';
-      return src === 'rule' ? t('device.sourceType.rule') : t('device.sourceType.manual');
+      const src = d.sourceType;
+      return src ? t(`device.sourceType.${src}`) : '';
     } },
   { zh: '备注', i18nKey: 'device.csv.column.remark',
     getValue: (d) => d.remark ?? '' },
