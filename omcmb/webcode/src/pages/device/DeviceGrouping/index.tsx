@@ -286,6 +286,8 @@ export default function DeviceGrouping() {
     refetch,
     refetchGroups,
     selectedGroupName: selectedGroupNameText,
+    groups,
+    locale,
   });
 
   // 搜索：回车/点搜索时应用，并回到第 1 页。

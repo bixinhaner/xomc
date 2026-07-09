@@ -1,8 +1,10 @@
 import { useCallback } from 'react';
 import type { App as AppNS } from 'antd';
-import type { BatchImportResponse, BatchPreRegisterResponse, Device } from '@core/types/device';
+import type { BatchImportResponse, BatchPreRegisterResponse, Device, DeviceGroup } from '@core/types/device';
+import type { Locale } from '@core/utils/i18nText';
 import { deviceApi } from '@core/services/api/deviceApi';
-import { EXPORT_COLUMNS, IMPORT_COLUMNS } from './deviceCsvSchema';
+import { IMPORT_COLUMNS } from './deviceCsvSchema';
+import { buildCsvForDeviceList, csvField, normalizeDevicesForExport } from './deviceExportCsv';
 import { fetchAllPaged } from '../exportPaging';
 
 type DeviceListParams = Parameters<typeof deviceApi.getList>[0];
@@ -32,8 +34,12 @@ export function useImportExportHandlers(deps: {
   refetchGroups: () => Promise<unknown>;
   /** 当前选中分组名（拼文件名用），undefined 时用「all」。 */
   selectedGroupName?: string;
+  /** 当前分组树，用于把后端 groupId 归一成与页面一致的父子分组展示名。 */
+  groups: DeviceGroup[];
+  /** 当前语言，用于设备组路径展示名。 */
+  locale: Locale;
 }) {
-  const { message, t, refetch, refetchGroups, selectedGroupName } = deps;
+  const { message, t, refetch, refetchGroups, selectedGroupName, groups, locale } = deps;
 
   // selected 模式直接导出已勾选对象；filtered/groupAll 模式按调用方给出的 params 分页拉全量。
   // 列字段与 DeviceListPanel 表格一致。
@@ -80,7 +86,8 @@ export function useImportExportHandlers(deps: {
         return;
       }
 
-      const csv = buildCsvForDeviceList(all, t);
+      const exportRows = normalizeDevicesForExport(all, groups, locale);
+      const csv = buildCsvForDeviceList(exportRows, t);
       const fileName = buildExportFileName(selectedGroupName);
       triggerCsvDownload(csv, fileName);
       message.open({
@@ -94,7 +101,7 @@ export function useImportExportHandlers(deps: {
       const msg = err instanceof Error ? err.message : String(err);
       message.open({ key: msgKey, type: 'error', content: t('common.exportFailed', { reason: msg }) });
     }
-  }, [message, t, selectedGroupName]);
+  }, [message, t, selectedGroupName, groups, locale]);
 
   const handleImport = useCallback(
     async (result: BatchImportResponse) => {
@@ -198,43 +205,6 @@ export function useImportExportHandlers(deps: {
   }, [message, t]);
 
   return { handleExport, handleImport, handleDownloadTemplate, handlePreRegister, handleDownloadPreRegisterTemplate };
-}
-
-// ─── CSV 导出工具 ───────────────────────────────────────────────────────────
-
-/** 把一个 CSV 字段值转字符串并按需要加引号转义（含逗号 / 换行 / 引号）。 */
-function csvField(value: unknown): string {
-  if (value === null || value === undefined) return '';
-  const s = typeof value === 'string' ? value : String(value);
-  // 包含逗号 / 双引号 / 换行符 → 用双引号包起来，并把双引号 → 双双引号。
-  if (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r')) {
-    return `"${s.replace(/"/g, '""')}"`;
-  }
-  return s;
-}
-
-/**
- * 按 deviceCsvSchema.EXPORT_COLUMNS 顺序拼 CSV。
- *
- * 列覆盖：
- *   - 设备列表 useDeviceColumns 的全部展示列（连接状态 / 安装状态 / 基站编码 /
- *     基站名称 / MAC地址 / 设备分组 / 归属来源 / 经度 / 纬度 / 高度 / 离线天数 / 备注）
- *   - 加上 OUI / 运营商 / 制式 3 列，让用户直接拿这份 CSV 编辑后回灌也能通过
- *     导入校验（roundtrip 友好）
- *
- * 状态/枚举字段走 i18n 文案。共享字段（基站编码 / OUI / 运营商 / 制式 / ...）
- * 与 IMPORT_COLUMNS 同名同序，让用户体验一致。
- */
-function buildCsvForDeviceList(
-  devices: Device[],
-  t: (id: string, values?: Record<string, string | number>) => string,
-): string {
-  const headers = EXPORT_COLUMNS.map((c) => csvField(t(c.i18nKey))).join(',');
-  const rows = devices.map((d) =>
-    EXPORT_COLUMNS.map((c) => csvField(c.getValue(d, { t }))).join(','),
-  );
-  // UTF-8 BOM 前缀让 Excel 正确识别编码。
-  return '\uFEFF' + headers + '\n' + rows.join('\n') + '\n';
 }
 
 function buildExportFileName(selectedGroupName?: string): string {

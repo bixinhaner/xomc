@@ -1,9 +1,9 @@
 // 设备 CSV schema：导入模板 / 列表导出 / 导入解析 三处共用一份列定义。
 //
 // 设计目标：
-//   - 表头统一用中文（SN 列与「设备列表/设备分组」页一致用 'SN'），便于运营在 Excel 看；
-//   - 导入字段（snake_case）由 zh → snake 别名表 [[HEADER_ALIAS]] 给出，parseCsv 把中文
-//     表头和老的 snake_case 表头都归一到 snake_case，向后兼容；
+//   - 模板和导出表头随当前语言渲染；SN 列与「设备列表/设备分组」页一致用 'SN'；
+//   - 导入解析继续通过 zh → snake 别名表 [[HEADER_ALIAS]] 接受中文表头和老的
+//     snake_case 表头，向后兼容；
 //   - 导入模板列 = 仅 SN（必填）+ 设备名称 + 备注（产品要求：导入只需这三项）；
 //   - 导出列 = /device/group 页面实际展示的列（SN / 设备名称 / 连接状态 / MAC地址 /
 //     设备分组 / 归属来源 / 备注），顺序与页面一致。
@@ -68,11 +68,9 @@ export const REQUIRED_IMPORT_SNAKE: readonly string[] = IMPORT_COLUMNS
 
 export const KNOWN_IMPORT_SNAKE: ReadonlySet<string> = new Set(IMPORT_COLUMNS.map((c) => c.snake));
 
-// ─── 2) 导出列：设备列表展示字段 + OUI/运营商/制式（便于 roundtrip） ─────────
+// ─── 2) 导出列：设备分组页展示字段 ─────────────────────────────────────────
 
 export interface ExportColumn {
-  /** 中文表头（解析器向后兼容用） */
-  zh: string;
   /** i18n key，导出表头随当前语言渲染 */
   i18nKey: string;
   /** 取值器 */
@@ -82,21 +80,21 @@ export interface ExportColumn {
 // 导出列 = /device/group 页面实际展示列，顺序与页面一致：
 //   SN / 设备名称 / 连接状态 / MAC地址 / 设备分组 / 归属来源 / 备注
 export const EXPORT_COLUMNS: readonly ExportColumn[] = [
-  { zh: 'SN', i18nKey: 'device.csv.column.sn',
+  { i18nKey: 'device.csv.column.sn',
     getValue: (d) => d.sn ?? '' },
-  { zh: '设备名称', i18nKey: 'device.csv.column.deviceName',
+  { i18nKey: 'device.csv.column.deviceName',
     getValue: (d) => d.name ?? '' },
-  { zh: '连接状态', i18nKey: 'device.csv.column.connStatus',
+  { i18nKey: 'device.csv.column.connStatus',
     getValue: (d, { t }) => d.connStatus === 'online' ? t('status.online') : t('status.offline') },
-  { zh: 'MAC地址', i18nKey: 'device.csv.column.macAddress',
+  { i18nKey: 'device.csv.column.macAddress',
     getValue: (d) => d.macAddress ?? '' },
-  { zh: '设备分组', i18nKey: 'device.csv.column.deviceGrouping',
+  { i18nKey: 'device.csv.column.deviceGrouping',
     getValue: (d) => d.groupName ?? '' },
-  { zh: '归属来源', i18nKey: 'device.csv.column.sourceType',
+  { i18nKey: 'device.csv.column.sourceType',
     getValue: (d, { t }) => {
       const src = d.sourceType;
       return src ? t(`device.sourceType.${src}`) : '';
     } },
-  { zh: '备注', i18nKey: 'device.csv.column.remark',
+  { i18nKey: 'device.csv.column.remark',
     getValue: (d) => d.remark ?? '' },
 ] as const;
