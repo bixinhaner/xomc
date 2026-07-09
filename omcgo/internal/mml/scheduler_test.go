@@ -111,6 +111,33 @@ func Test_Scheduler_RunOnceClaimsAndDispatches(t *testing.T) {
 	assert.Equal(t, 1, repo.claims, "应认领一次")
 }
 
+func Test_Scheduler_DispatchPeriodicImmediateChildFansOut(t *testing.T) {
+	parentID := uuid.New()
+	stub := &stubDeviceTaskCreator{}
+	svc := &Service{logger: zap.NewNop()}
+	svc.SetFanouter(NewFanouter(stub, nil, nil, nil, zap.NewNop()))
+	repo := &fakeScheduledRepo{}
+	s := NewScheduler(svc, repo, &fakeClock{now: time.Now()}, time.Minute, zap.NewNop())
+
+	s.dispatch(context.Background(), &MMLTask{
+		ID:               uuid.New(),
+		ExecuteType:      ExecuteImmediate,
+		Status:           TaskRunning,
+		PeriodicParentID: &parentID,
+		DeviceSNs:        []string{"SN-PERIODIC-CHILD"},
+		Commands: []map[string]interface{}{
+			{"command_code": "REBOOT", "rpc_method": "Reboot"},
+		},
+		FailedRetry:      true,
+		FailedRetryCount: 2,
+	}, time.Now())
+
+	require.Len(t, stub.calls, 1, "periodic child execute_type=immediate 时也必须 fanout")
+	require.Len(t, stub.calls[0], 1)
+	assert.Equal(t, 2, *stub.calls[0][0].MaxRetries)
+	assert.Equal(t, 1, repo.finalize, "periodic child fanout 后应触发父模板 finalize 兜底")
+}
+
 func Test_Scheduler_StartStop(t *testing.T) {
 	clock := &fakeClock{now: time.Now()}
 	repo := &fakeScheduledRepo{}
