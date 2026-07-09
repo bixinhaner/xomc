@@ -35,6 +35,7 @@ import LineChart from '@/components/Charts/LineChart';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import { useSyncStatus } from '@core/hooks/api/useDeviceParameters';
 import { useDeviceBySn, useDeviceGroups, useSyncDeviceParams } from '@core/hooks/api/useDevices';
+import { deviceParameterApi } from '@core/services/api/deviceParameterApi';
 import { deviceApi } from '@core/services/api/deviceApi';
 import { useDictionary } from '@core/hooks/api/useSystem';
 import { activationStatusLabelOf, activationStatusOf } from '@core/utils/activationStatus';
@@ -1300,6 +1301,7 @@ export default function DeviceDetail() {
   const quickSettingsSync = useQuickSettingsFeedbackStore((s) => (device?.id ? s.quickSettingsSyncs[device.id] : undefined));
   const quickSettingsSyncPending = Boolean(quickSettingsSync);
   const lastQuickSettingsParamSync = useQuickSettingsFeedbackStore((s) => (device?.id ? s.lastScopedSyncs[device.id] : undefined)) ?? null;
+  const observedParamSyncAtRef = useRef<Record<string, string>>({});
   const isDeviceParamSyncBusy = paramSyncStatus?.status === 'syncing' || quickSettingsSyncPending || syncMutation.isPending;
   const isQuickSettingsRefreshSubmitting = syncMutation.isPending;
   const { data: detailComposite } = useQuery({
@@ -1321,6 +1323,19 @@ export default function DeviceDetail() {
       groupName: buildDeviceGroupDisplayName(merged, groups, appLocale),
     };
   }, [appLocale, detailComposite?.info, device, deviceGroupsData?.groups]);
+
+  useEffect(() => {
+    const deviceId = device?.id;
+    const syncedAt = paramSyncStatus?.lastParamSyncAt;
+    if (!deviceId || !syncedAt) return;
+
+    const prev = observedParamSyncAtRef.current[deviceId];
+    observedParamSyncAtRef.current[deviceId] = syncedAt;
+    if (prev === syncedAt) return;
+
+    deviceParameterApi.invalidateParameterSchemaCache(deviceId);
+    void queryClient.invalidateQueries({ queryKey: ['devices', 'parameter-schema', deviceId] });
+  }, [device?.id, paramSyncStatus?.lastParamSyncAt, queryClient]);
 
   useEffect(() => {
     if (!device?.id || !device.macAddress) return;

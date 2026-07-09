@@ -107,6 +107,24 @@ export function resolveExistsVisibleInstances(
   return Array.from(enabled).sort((a, b) => a - b);
 }
 
+export function resolveBscBtsInstances(
+  parameters: ReadonlyArray<{ path: string }>,
+  objectCurrentInstances: ReadonlyArray<number>,
+): number[] {
+  const fromParameters = new Set<number>();
+  for (const p of parameters) {
+    const m = BSC_BTS_INSTANCE_RE.exec(p.path);
+    if (m) {
+      const n = Number(m[1]);
+      if (n > 0) fromParameters.add(n);
+    }
+  }
+  if (fromParameters.size > 0) {
+    return Array.from(fromParameters).sort((a, b) => a - b);
+  }
+  return [...objectCurrentInstances].filter((n) => n > 0).sort((a, b) => a - b);
+}
+
 export interface ResolvedCellInstancesOptions {
   /** 设备 id；空字符串/undefined 时所有派生 schema 请求均 disabled。*/
   deviceId: string;
@@ -284,24 +302,16 @@ export function useResolvedCellInstances({
     return Array.from(fallback).sort((a, b) => a - b);
   }, [isNR, nrCellSchema]);
 
-  // BSC 枚举 DeviceGSM.Bts.{i}. 实例集合。优先用 schema 指定的 currentInstances,
-  // 其次从 parameters[].path 正则 fallback;与 LTE/NR 枚举策略一致。
+  // BSC 枚举 DeviceGSM.Bts.{i}. 实例集合。优先用 parameters[].path 中已同步
+  // 的实例；仅当当前没有任何 BTS 参数时才回退 schema.currentInstances。
+  // 这能避免空参数响应时把 currentInstances 的模型兜底误当成已同步实例；若设备
+  // Path B 实际返回 1..256，仍会按已同步路径展示，真实有效 BTS 需另加业务判定。
   // 业务约定 BTS 实例号从 1 开始(与 LTE FAPService.{i} / NR Cell.{i} 一致),
   // osmo-bsc 0 号槽位是内部模板,不暴露给运维。
   const bscBtsInstances = useMemo<number[]>(() => {
     if (!isBSC || !bscBtsSchema) return [];
     const objEntry = bscBtsSchema.objects.find((o) => o.path === BSC_BTS_PREFIX);
-    const candidate = objEntry?.currentInstances ?? [];
-    if (candidate.length > 0) return [...candidate].filter((n) => n > 0).sort((a, b) => a - b);
-    const fallback = new Set<number>();
-    for (const p of bscBtsSchema.parameters) {
-      const m = BSC_BTS_INSTANCE_RE.exec(p.path);
-      if (m) {
-        const n = Number(m[1]);
-        if (n > 0) fallback.add(n);
-      }
-    }
-    return Array.from(fallback).sort((a, b) => a - b);
+    return resolveBscBtsInstances(bscBtsSchema.parameters, objEntry?.currentInstances ?? []);
   }, [isBSC, bscBtsSchema]);
 
   const bmTechOptions = useMemo<Array<'LTE' | 'GSM'>>(() => {
