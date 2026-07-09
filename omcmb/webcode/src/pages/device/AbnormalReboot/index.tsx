@@ -13,7 +13,6 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { ExportOutlined, BarChartOutlined } from '@ant-design/icons';
-import * as XLSX from 'xlsx';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
@@ -61,21 +60,25 @@ const formatRuntime = (seconds: number | null | undefined): string => {
 
 const fmtTime = (s: string | undefined): string => s?.replace('T', ' ').slice(0, 19) ?? '-';
 
-const widthOfStr = (s: string): number => {
-  let w = 0;
-  for (const ch of s) w += /[一-鿿＀-￯]/.test(ch) ? 2 : 1;
-  return w;
-};
+function escapeCsvCell(value: unknown): string {
+  const normalized = value == null ? '' : String(value);
+  return `"${normalized.replace(/"/g, '""')}"`;
+}
 
-const autoColWidth = (rows: Record<string, unknown>[]): { wch: number }[] =>
-  Object.keys(rows[0] ?? {}).map((key) => {
-    let max = widthOfStr(key);
-    for (const row of rows) {
-      const v = String(row[key] ?? '');
-      if (widthOfStr(v) > max) max = widthOfStr(v);
-    }
-    return { wch: Math.min(Math.max(max + 2, 10), 50) };
-  });
+function downloadCsv(rows: Record<string, unknown>[], filename: string): void {
+  const headers = Object.keys(rows[0] ?? {});
+  const content = [
+    headers.map(escapeCsvCell).join(','),
+    ...rows.map((row) => headers.map((header) => escapeCsvCell(row[header])).join(',')),
+  ].join('\n');
+  const blob = new Blob(['\ufeff' + content], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
 
 export default function AbnormalReboot() {
   const t = useT();
@@ -270,11 +273,7 @@ export default function AbnormalReboot() {
         [t('log.exception.column.runtime')]: formatRuntime(r.runtimeBeforeReboot),
         [t('log.exception.column.time')]: fmtTime(r.rebootTime),
       }));
-      const ws = XLSX.utils.json_to_sheet(rows);
-      ws['!cols'] = autoColWidth(rows as Record<string, unknown>[]);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, t('page.rebootRecords.title'));
-      XLSX.writeFile(wb, `${t('page.rebootRecords.title')}_${exportTimestamp()}.xlsx`);
+      downloadCsv(rows, `${t('page.rebootRecords.title')}_${exportTimestamp()}.csv`);
       void message.success(t('log.exception.exportSuccess', { count: resp.items.length }));
     } catch (e) {
       console.error('export reboot records failed', e);
@@ -342,11 +341,7 @@ export default function AbnormalReboot() {
       [t('page.rebootRecords.stat.abnormalCount')]: r.abnormalCount,
       [t('log.event.stat.latestAt')]: fmtTime(r.latestAt),
     }));
-    const ws = XLSX.utils.json_to_sheet(rows);
-    ws['!cols'] = autoColWidth(rows as Record<string, unknown>[]);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, t('log.event.statModal.title'));
-    XLSX.writeFile(wb, `${t('log.event.statModal.title')}_${exportTimestamp()}.xlsx`);
+    downloadCsv(rows, `${t('log.event.statModal.title')}_${exportTimestamp()}.csv`);
     void message.success(t('log.exception.exportSuccess', { count: statRows.length }));
   };
 
