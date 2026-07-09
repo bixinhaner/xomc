@@ -3,6 +3,7 @@ package agentruntime
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -93,6 +94,8 @@ func (e *ToolExecutor) execute(ctx context.Context, claims *admin.Claims, input 
 	switch requestPath {
 	case "/api/v1/agent/catalog":
 		return e.catalog(input.Query, policy), nil
+	case "/api/v1/agent/catalog/categories":
+		return e.catalogCategories(policy), nil
 	case "/api/v1/agent/catalog/describe":
 		return e.describe(input.Query, policy), nil
 	}
@@ -204,30 +207,42 @@ func limitString(value string, max int) string {
 }
 
 func (e *ToolExecutor) catalog(query map[string]any, policy agentconfig.RuntimePolicy) any {
-	q := strings.ToLower(queryText(query, "q"))
-	limit := queryInt(query, "limit", 50, 50)
+	q := queryText(query, "q")
+	category := strings.ToLower(queryText(query, "category"))
+	limit := queryInt(query, "limit", 20, 100)
+	offset := queryInt(query, "offset", 0, 0)
 	routes := e.filteredRoutes(policy)
-	items := make([]map[string]any, 0, len(routes))
-	totalMatched := 0
+	matched := make([]apiRouteDoc, 0, len(routes))
 	for _, route := range routes {
 		doc := apiCatalogDoc(route)
-		text := strings.ToLower(strings.Join([]string{
-			doc.OperationID,
-			doc.Method,
-			doc.Path,
-			doc.Title,
-			doc.Summary,
-			doc.Description,
-			doc.Group,
-			strings.Join(doc.Tags, " "),
-		}, " "))
-		if q != "" && !strings.Contains(text, q) {
+		if category != "" && strings.ToLower(doc.Group) != category {
 			continue
 		}
-		totalMatched++
-		if len(items) >= limit {
+		if !apiCatalogMatches(doc, q) {
 			continue
 		}
+		matched = append(matched, doc)
+	}
+	sort.SliceStable(matched, func(i, j int) bool {
+		leftScore := apiCatalogMatchScore(matched[i], q)
+		rightScore := apiCatalogMatchScore(matched[j], q)
+		if leftScore != rightScore {
+			return leftScore > rightScore
+		}
+		if matched[i].Path == matched[j].Path {
+			return matched[i].Method < matched[j].Method
+		}
+		return matched[i].Path < matched[j].Path
+	})
+	if offset > len(matched) {
+		offset = len(matched)
+	}
+	end := offset + limit
+	if end > len(matched) {
+		end = len(matched)
+	}
+	items := make([]map[string]any, 0, end-offset)
+	for _, doc := range matched[offset:end] {
 		items = append(items, map[string]any{
 			"operationId": doc.OperationID,
 			"method":      doc.Method,
@@ -240,13 +255,149 @@ func (e *ToolExecutor) catalog(query map[string]any, policy agentconfig.RuntimeP
 			"tags":        doc.Tags,
 		})
 	}
+	hasMore := end < len(matched)
+	nextOffset := end
 	return map[string]any{
-		"items":        items,
-		"total":        totalMatched,
-		"returned":     len(items),
-		"totalRoutes":  len(routes),
-		"catalogUsage": `Use describe with operationId before request. Then call rest.request with {"method","path","query","body","reason"}.`,
+		"items":          items,
+		"total":          len(matched),
+		"returned":       len(items),
+		"offset":         offset,
+		"nextOffset":     nextOffset,
+		"hasMore":        hasMore,
+		"category":       category,
+		"totalRoutes":    len(routes),
+		"catalogVersion": apiCatalogVersion(routes),
+		"catalogUsage":   `Reuse known or previously successful operations directly. For unknown APIs, search with category and concise path tokens; describe only when parameters or write semantics are unclear.`,
 	}
+}
+
+func (e *ToolExecutor) catalogCategories(policy agentconfig.RuntimePolicy) any {
+	routes := e.filteredRoutes(policy)
+	type categorySummary struct {
+		count   int
+		methods map[string]struct{}
+	}
+	summaries := make(map[string]*categorySummary)
+	for _, route := range routes {
+		doc := apiCatalogDoc(route)
+		category := doc.Group
+		if category == "" {
+			category = "other"
+		}
+		summary := summaries[category]
+		if summary == nil {
+			summary = &categorySummary{methods: make(map[string]struct{})}
+			summaries[category] = summary
+		}
+		summary.count++
+		summary.methods[doc.Method] = struct{}{}
+	}
+
+	categoryIDs := make([]string, 0, len(summaries))
+	for category := range summaries {
+		categoryIDs = append(categoryIDs, category)
+	}
+	sort.Strings(categoryIDs)
+	items := make([]map[string]any, 0, len(categoryIDs))
+	for _, category := range categoryIDs {
+		summary := summaries[category]
+		methods := make([]string, 0, len(summary.methods))
+		for method := range summary.methods {
+			methods = append(methods, method)
+		}
+		sort.Strings(methods)
+		items = append(items, map[string]any{
+			"id":      category,
+			"title":   apiCategoryTitle(category),
+			"count":   summary.count,
+			"methods": methods,
+		})
+	}
+	return map[string]any{
+		"items":           items,
+		"totalCategories": len(items),
+		"totalRoutes":     len(routes),
+		"catalogVersion":  apiCatalogVersion(routes),
+		"categoryUsage":   `Choose one category, then search /api/v1/agent/catalog with category, concise q tokens, and a small limit.`,
+	}
+}
+
+func apiCatalogMatches(doc apiRouteDoc, query string) bool {
+	tokens := apiCatalogSearchTokens(query)
+	if len(tokens) == 0 {
+		return true
+	}
+	text := apiCatalogSearchText(doc)
+	for _, token := range tokens {
+		if !strings.Contains(text, token) {
+			return false
+		}
+	}
+	return true
+}
+
+func apiCatalogMatchScore(doc apiRouteDoc, query string) int {
+	normalizedQuery := strings.Join(apiCatalogSearchTokens(query), " ")
+	if normalizedQuery == "" {
+		return 0
+	}
+	operationID := normalizeAPICatalogSearchText(doc.OperationID)
+	requestPath := normalizeAPICatalogSearchText(doc.Path)
+	title := normalizeAPICatalogSearchText(doc.Title)
+	score := 0
+	if operationID == normalizedQuery || requestPath == normalizedQuery {
+		score += 100
+	}
+	if strings.Contains(operationID, normalizedQuery) {
+		score += 30
+	}
+	if strings.Contains(requestPath, normalizedQuery) {
+		score += 20
+	}
+	if strings.Contains(title, normalizedQuery) {
+		score += 10
+	}
+	return score
+}
+
+func apiCatalogSearchText(doc apiRouteDoc) string {
+	return normalizeAPICatalogSearchText(strings.Join([]string{
+		doc.OperationID,
+		doc.Method,
+		doc.Path,
+		doc.Title,
+		doc.Summary,
+		doc.Description,
+		doc.Group,
+		strings.Join(doc.Tags, " "),
+	}, " "))
+}
+
+func apiCatalogSearchTokens(query string) []string {
+	return strings.Fields(normalizeAPICatalogSearchText(query))
+}
+
+func normalizeAPICatalogSearchText(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	replacer := strings.NewReplacer(
+		"/", " ",
+		".", " ",
+		"_", " ",
+		"-", " ",
+		":", " ",
+		"?", " ",
+		"&", " ",
+		"=", " ",
+	)
+	return strings.Join(strings.Fields(replacer.Replace(normalized)), " ")
+}
+
+func apiCatalogVersion(routes gin.RoutesInfo) string {
+	hash := sha256.New()
+	for _, route := range routes {
+		_, _ = fmt.Fprintf(hash, "%s\x00%s\n", strings.ToUpper(route.Method), route.Path)
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil))[:16]
 }
 
 func (e *ToolExecutor) describe(query map[string]any, policy agentconfig.RuntimePolicy) any {

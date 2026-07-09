@@ -152,6 +152,131 @@ func TestToolExecutorCatalogHonorsLimit(t *testing.T) {
 	require.Equal(t, 3, output["total"])
 }
 
+func TestToolExecutorCatalogUsesTokenizedSearchAndPagination(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/api/v1/devices", func(c *gin.Context) {})
+	router.GET("/api/v1/devices/stats", func(c *gin.Context) {})
+	router.GET("/api/v1/devices/:id", func(c *gin.Context) {})
+
+	executor := NewToolExecutor(router, router, nil)
+	policy := agentconfig.RuntimePolicy{
+		AllowedMethods:     []string{http.MethodGet},
+		ToolTimeoutSeconds: 30,
+		MaxResponseBytes:   262144,
+	}
+	search := executor.Execute(context.Background(), &admin.Claims{
+		UserID:   uuid.New(),
+		Username: "operator",
+	}, ToolRequest{
+		RunID:      "run-1",
+		ToolCallID: "tool-search",
+		Input: ToolRequestBody{
+			Method: http.MethodGet,
+			Path:   "/api/v1/agent/catalog",
+			Query: map[string]any{
+				"q":        "devices stats",
+				"category": "devices",
+				"limit":    1,
+			},
+		},
+	}, policy)
+
+	require.Equal(t, "ok", search.Status)
+	searchOutput, ok := search.Output.(map[string]any)
+	require.True(t, ok)
+	searchItems, ok := searchOutput["items"].([]map[string]any)
+	require.True(t, ok)
+	require.Len(t, searchItems, 1)
+	require.Equal(t, "/api/v1/devices/stats", searchItems[0]["path"])
+	require.Equal(t, "devices", searchOutput["category"])
+	require.NotEmpty(t, searchOutput["catalogVersion"])
+
+	firstPage := executor.Execute(context.Background(), &admin.Claims{
+		UserID:   uuid.New(),
+		Username: "operator",
+	}, ToolRequest{
+		RunID:      "run-1",
+		ToolCallID: "tool-page-1",
+		Input: ToolRequestBody{
+			Method: http.MethodGet,
+			Path:   "/api/v1/agent/catalog",
+			Query:  map[string]any{"category": "devices", "limit": 2},
+		},
+	}, policy)
+
+	require.Equal(t, "ok", firstPage.Status)
+	firstOutput, ok := firstPage.Output.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, 3, firstOutput["total"])
+	require.Equal(t, 2, firstOutput["returned"])
+	require.Equal(t, true, firstOutput["hasMore"])
+	require.Equal(t, 2, firstOutput["nextOffset"])
+
+	secondPage := executor.Execute(context.Background(), &admin.Claims{
+		UserID:   uuid.New(),
+		Username: "operator",
+	}, ToolRequest{
+		RunID:      "run-1",
+		ToolCallID: "tool-page-2",
+		Input: ToolRequestBody{
+			Method: http.MethodGet,
+			Path:   "/api/v1/agent/catalog",
+			Query:  map[string]any{"category": "devices", "limit": 2, "offset": 2},
+		},
+	}, policy)
+
+	require.Equal(t, "ok", secondPage.Status)
+	secondOutput, ok := secondPage.Output.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, 1, secondOutput["returned"])
+	require.Equal(t, false, secondOutput["hasMore"])
+	require.Equal(t, firstOutput["catalogVersion"], secondOutput["catalogVersion"])
+}
+
+func TestToolExecutorCatalogCategoriesCoverAllPolicyVisibleRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/api/v1/devices", func(c *gin.Context) {})
+	router.POST("/api/v1/devices", func(c *gin.Context) {})
+	router.GET("/api/v1/alarms/active", func(c *gin.Context) {})
+	router.GET("/api/v1/auth/profile", func(c *gin.Context) {})
+
+	executor := NewToolExecutor(router, router, nil)
+	result := executor.Execute(context.Background(), &admin.Claims{
+		UserID:   uuid.New(),
+		Username: "operator",
+	}, ToolRequest{
+		RunID:      "run-1",
+		ToolCallID: "tool-categories",
+		Input: ToolRequestBody{
+			Method: http.MethodGet,
+			Path:   "/api/v1/agent/catalog/categories",
+		},
+	}, agentconfig.RuntimePolicy{
+		AllowedMethods:      []string{http.MethodGet, http.MethodPost},
+		BlockedPathPrefixes: []string{"/api/v1/auth/*"},
+		ToolTimeoutSeconds:  30,
+		MaxResponseBytes:    262144,
+	})
+
+	require.Equal(t, "ok", result.Status)
+	output, ok := result.Output.(map[string]any)
+	require.True(t, ok)
+	items, ok := output["items"].([]map[string]any)
+	require.True(t, ok)
+	require.Len(t, items, 2)
+	require.Equal(t, 3, output["totalRoutes"])
+	require.Equal(t, 2, output["totalCategories"])
+	require.NotEmpty(t, output["catalogVersion"])
+
+	covered := 0
+	for _, item := range items {
+		covered += item["count"].(int)
+	}
+	require.Equal(t, output["totalRoutes"], covered)
+}
+
 func TestToolExecutorDescribeReturnsAPIHandbookEntry(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()

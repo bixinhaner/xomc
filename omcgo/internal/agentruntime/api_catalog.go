@@ -120,6 +120,16 @@ var apiActionNames = map[string]string{
 
 var camelBoundary = regexp.MustCompile(`([a-z0-9])([A-Z])`)
 
+func apiCategoryTitle(category string) string {
+	if title := apiResourceNames[category]; title != "" {
+		return title
+	}
+	if category == "other" {
+		return "其他"
+	}
+	return humanizeSegment(category)
+}
+
 func apiCatalogDoc(route gin.RouteInfo) apiRouteDoc {
 	group := apiGroup(route.Path)
 	resource := apiResourceNames[group]
