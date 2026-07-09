@@ -1604,6 +1604,7 @@ const messages: Record<string, string> = {
   'device.batch.selectGroup':           'Please select a target group',
   'device.batch.selectGroupPlaceholder': 'Select a device group',
   'device.batch.removeFromGroup':       'Remove from group (Ungrouped)',
+  'device.batch.removeFromGroupHint':   'Moving to this default group removes the devices from their current group and shows them under the default group view.',
   'device.batch.targetGroup':           'Target Group',
   'device.batch.selectedDevices':       '{count} device(s) selected',
 

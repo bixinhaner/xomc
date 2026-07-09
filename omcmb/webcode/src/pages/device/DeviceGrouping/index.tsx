@@ -18,7 +18,7 @@ import { expandSelectedGroupIds } from '@core/utils/deviceGroupFilter';
 import { withDeviceGroupDisplayName } from '@core/utils/deviceGroupDisplay';
 import { useT } from '@/hooks/useT';
 import { useI18nText } from '@/hooks/useI18nText';
-import type { Device } from '@core/types/device';
+import type { Device, DeviceGroup } from '@core/types/device';
 import GroupTreePanel from './GroupTreePanel';
 import DeviceListPanel from './DeviceListPanel';
 import GroupDialogs from './GroupDialogs';
@@ -202,21 +202,27 @@ export default function DeviceGrouping() {
   }, [groups, groupSearchText]);
 
   // ── Target group options for move-to-group modal ──
+  const getGroupName = useCallback(
+    (group: DeviceGroup): string =>
+      fromRecord(group as unknown as Record<string, unknown>, 'name') || group.name,
+    [fromRecord]
+  );
+
   const getParentName = useCallback(
     (parentId: string | null): string => {
       if (!parentId) return '';
       const parent = groups.find((g) => g.id === parentId);
-      return parent?.name ?? '';
+      return parent ? getGroupName(parent) : '';
     },
-    [groups]
+    [groups, getGroupName]
   );
 
   const targetGroupOptions = useMemo(
     () =>
-      // 一级分组(root)是容器不作目标；「未分组设备」内置节点保留为"移出分组"项
-      // （issue #478：选它走移出分组语义，删除归属记录让设备回到未分组态）。
-      buildGroupTargetOptions(groups, getParentName, t('device.batch.removeFromGroup')),
-    [groups, getParentName, t]
+      // 一级分组(root)是容器不作目标；内置默认节点的 label 与树保持一致，
+      // 但仍带 isRemove 标记，供弹窗提示其"移出分组"语义。
+      buildGroupTargetOptions(groups, getParentName, getGroupName),
+    [groups, getParentName, getGroupName]
   );
 
   // ── Group / Device action hooks ──

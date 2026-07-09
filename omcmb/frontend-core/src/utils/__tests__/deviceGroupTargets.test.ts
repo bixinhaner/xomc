@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, it, expect } from 'vitest';
 import {
   UNASSIGNED_GROUP_ID,
@@ -37,7 +39,7 @@ describe('buildGroupTargetOptions — 移动/添加到分组的目标下拉（is
       mkGroup({ id: ROOT_ID, name: '默认分组', parentId: null }),
       mkGroup({ id: 'g-real', name: '北京一区', parentId: ROOT_ID }),
     ];
-    const opts = buildGroupTargetOptions(groups, getParentName, '移出分组');
+    const opts = buildGroupTargetOptions(groups, getParentName);
     expect(opts).toEqual([
       { label: '默认分组 / 北京一区', value: 'g-real', isRemove: false },
     ]);
@@ -47,25 +49,51 @@ describe('buildGroupTargetOptions — 移动/添加到分组的目标下拉（is
     const groups: DeviceGroup[] = [
       mkGroup({ id: ROOT_ID, name: '默认分组', parentId: null }),
     ];
-    expect(buildGroupTargetOptions(groups, getParentName, '移出分组')).toEqual([]);
+    expect(buildGroupTargetOptions(groups, getParentName)).toEqual([]);
   });
 
-  it('特例路径：「未分组设备」内置节点保留为"移出分组"项（isRemove=true，用注入文案）', () => {
+  it('特例路径：内置默认节点保留分组展示名，同时标记为移出分组语义', () => {
     const groups: DeviceGroup[] = [
       mkGroup({ id: ROOT_ID, name: '默认分组', parentId: null }),
-      mkGroup({ id: UNASSIGNED_GROUP_ID, name: '未分组设备', parentId: ROOT_ID, builtIn: 1 }),
+      mkGroup({ id: UNASSIGNED_GROUP_ID, name: '默认设备组', parentId: ROOT_ID, builtIn: 1 }),
       mkGroup({ id: 'g-real', name: '北京一区', parentId: ROOT_ID }),
     ];
-    const opts = buildGroupTargetOptions(groups, getParentName, '移出分组（未分组设备）');
+    const opts = buildGroupTargetOptions(groups, getParentName);
     expect(opts).toContainEqual({
-      label: '移出分组（未分组设备）',
+      label: '默认分组 / 默认设备组',
       value: UNASSIGNED_GROUP_ID,
       isRemove: true,
     });
-    // 未分组项的 value 仍是 ...0002，交给后端按"移出分组"语义处理（删归属记录）
+    // 特殊项的 value 仍是 ...0002，交给后端按"移出分组"语义处理（删归属记录）
     const removeOpt = opts.find((o) => o.isRemove);
     expect(removeOpt?.value).toBe(UNASSIGNED_GROUP_ID);
     // 真实分组仍正常列出
     expect(opts.some((o) => o.value === 'g-real' && !o.isRemove)).toBe(true);
+  });
+
+  it('支持调用方按 locale 注入分组展示名', () => {
+    const groups: DeviceGroup[] = [
+      mkGroup({
+        id: ROOT_ID,
+        name: '默认分组',
+        parentId: null,
+        nameI18n: { 'zh-CN': '默认分组', 'en-US': 'Default Group' },
+      }),
+      mkGroup({
+        id: UNASSIGNED_GROUP_ID,
+        name: '默认设备组',
+        parentId: ROOT_ID,
+        builtIn: 1,
+        nameI18n: { 'zh-CN': '默认设备组', 'en-US': 'Default Group' },
+      }),
+    ];
+    const getParentNameEn = (parentId: string | null) =>
+      parentId === ROOT_ID ? 'Default Group' : '';
+    const getGroupNameEn = (group: DeviceGroup) =>
+      group.nameI18n?.['en-US'] ?? group.name;
+
+    expect(buildGroupTargetOptions(groups, getParentNameEn, getGroupNameEn)).toEqual([
+      { label: 'Default Group / Default Group', value: UNASSIGNED_GROUP_ID, isRemove: true },
+    ]);
   });
 });
