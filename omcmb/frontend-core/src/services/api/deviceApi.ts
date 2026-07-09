@@ -1,5 +1,5 @@
 import http from '../http';
-import type { Device, NE, DeviceFilter, DeviceGroup, DeviceListResponse, DeviceListStats, DeviceStats, DeviceParameter, CreateDeviceInput, NameFilterItem, BatchImportRequest, BatchImportResponse } from '../../types/device';
+import type { Device, NE, DeviceFilter, DeviceGroup, DeviceListResponse, DeviceListStats, DeviceStats, DeviceParameter, CreateDeviceInput, NameFilterItem, BatchImportRequest, BatchImportResponse, BatchPreRegisterRequest, BatchPreRegisterResponse } from '../../types/device';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 import { normalizeDeviceSyncStatus } from '../../utils/deviceSyncStatus';
 import { normalizeAlarmSeverity } from '../../utils/alarmSeverity';
@@ -669,6 +669,16 @@ export const deviceApi = {
   // axios 请求拦截器只转 query params，不动 body，因此这里不要再写 camelCase。
   async batchImportDevices(payload: BatchImportRequest): Promise<BatchImportResponse> {
     const { data } = await http.post<BatchImportResponse>('/devices/batch-import', payload);
+    return data;
+  },
+
+  /**
+   * 批量预登记：在设备 Bootstrap 到达前，按 SN 列表预先录入设备名称。
+   * 已存在的 SN 只更新名称/备注；不存在的 SN 新建设备（lifecycle='registered'）。
+   * 新建设备不写入任何分组，自然落在「未分组」视图，source_type 显示 Auto。
+   */
+  async batchPreRegisterDevices(payload: BatchPreRegisterRequest): Promise<BatchPreRegisterResponse> {
+    const { data } = await http.post<BatchPreRegisterResponse>('/devices/batch-preregister', payload);
     return data;
   },
 

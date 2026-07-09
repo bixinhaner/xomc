@@ -137,6 +137,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		devices.DELETE("/batch", h.BatchDeleteDevices)
 		devices.POST("/batch-reboot", h.BatchRebootDevices)
 		devices.POST("/batch-import", h.BatchImportDevices)
+		devices.POST("/batch-preregister", h.BatchPreRegisterDevices)
 		// Recycle bin routes
 		devices.GET("/recycle", h.ListRecycleBin)
 		devices.PATCH("/recycle/restore", h.RestoreDevices)

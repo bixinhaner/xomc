@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import type { App as AppNS } from 'antd';
-import type { BatchImportResponse, Device } from '@core/types/device';
+import type { BatchImportResponse, BatchPreRegisterResponse, Device } from '@core/types/device';
 import { deviceApi } from '@core/services/api/deviceApi';
 import { EXPORT_COLUMNS, IMPORT_COLUMNS } from './deviceCsvSchema';
 
@@ -127,7 +127,56 @@ export function useImportExportHandlers(deps: {
     void message.success(t('common.download'));
   }, [message, t]);
 
-  return { handleExport, handleImport, handleDownloadTemplate };
+  const handlePreRegister = useCallback(
+    async (result: BatchPreRegisterResponse) => {
+      if (result.failed > 0 && result.created + result.updated === 0) {
+        void message.error(t('device.batchPreRegister.allFailed', { failed: result.failed }));
+      } else if (result.failed > 0) {
+        void message.warning(
+          t('device.batchPreRegister.partial', {
+            created: result.created,
+            updated: result.updated,
+            failed: result.failed,
+          })
+        );
+      } else {
+        void message.success(
+          t('device.batchPreRegister.allSucceeded', { created: result.created, updated: result.updated })
+        );
+      }
+      await Promise.all([refetch(), refetchGroups()]);
+    },
+    [message, t, refetch, refetchGroups]
+  );
+
+  const handleDownloadPreRegisterTemplate = useCallback(() => {
+    const comment = t('device.csv.template.preregister.comment');
+    const header = [
+      t('device.csv.column.sn'),
+      t('device.csv.column.deviceName'),
+      t('device.csv.column.remark'),
+      t('device.csv.column.carrier'),
+      t('device.csv.column.technology'),
+    ].map(csvField).join(',');
+    const examples = [
+      ['120288069823C4B0060', '北京海淀中关村站', '一期', '', ''],
+      ['1202000690241FB0010', '北京朝阳CBD站', '二期', 'cmcc', 'lte'],
+      ['UNKNOWN-OUI-00001', '上海浦东陆家嘴站', '', 'ctcc', 'nr'],
+    ].map(row => row.map(csvField).join(',')).join('\n');
+    const content = comment + '\n' + header + '\n' + examples + '\n';
+    const blob = new Blob(['\uFEFF' + content], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'device_preregister_template.csv';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    void message.success(t('common.download'));
+  }, [message, t]);
+
+  return { handleExport, handleImport, handleDownloadTemplate, handlePreRegister, handleDownloadPreRegisterTemplate };
 }
 
 // ─── CSV 导出工具 ───────────────────────────────────────────────────────────
