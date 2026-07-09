@@ -485,7 +485,8 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- T-0098 P3-04: Alarm Definitions routes → super_admin only -----
 	if c.AlarmDefHandler != nil {
-		c.AlarmDefHandler.RegisterRoutes(superAdminGroup)
+		c.AlarmDefHandler.RegisterReadRoutes(v1)
+		c.AlarmDefHandler.RegisterWriteRoutes(superAdminGroup)
 	}
 	// 告警自定义 XML 上传/删除(严格对标 indicator FileHandler)
 	if c.AlarmDefFileHandler != nil {
@@ -494,12 +495,14 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- T-0098 P3-02: ParamModel routes → super_admin only -----
 	if c.ParamModelHandler != nil {
-		c.ParamModelHandler.RegisterRoutes(superAdminGroup)
+		c.ParamModelHandler.RegisterReadRoutes(v1)
+		c.ParamModelHandler.RegisterWriteRoutes(superAdminGroup)
 	}
 
 	// ----- T-0098 P3-01: Product routes → super_admin only -----
 	if c.ProductHandler != nil {
-		c.ProductHandler.RegisterRoutes(superAdminGroup)
+		c.ProductHandler.RegisterReadRoutes(v1)
+		c.ProductHandler.RegisterWriteRoutes(superAdminGroup)
 	}
 
 	// ----- Sprint B Q-V3-7：dictload admin reload 端点（含 mml-standard）-----
@@ -519,7 +522,8 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- T-0098 P3-03: Indicator REST routes → super_admin only -----
 	if ph.indicatorRESTHandler != nil {
-		ph.indicatorRESTHandler.RegisterRoutes(superAdminGroup)
+		ph.indicatorRESTHandler.RegisterReadRoutes(v1)
+		ph.indicatorRESTHandler.RegisterWriteRoutes(superAdminGroup)
 	}
 
 	// ----- T-0180 P1.3: Indicator XML file management (DELETE 守门) → super_admin only -----

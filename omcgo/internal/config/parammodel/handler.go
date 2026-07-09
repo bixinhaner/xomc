@@ -136,36 +136,47 @@ func (h *Handler) acquireFileLock(basename string) func() {
 
 // RegisterRoutes 挂在 /api/v1 下；内部使用 /param-models 子路径。
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
+	h.RegisterReadRoutes(rg)
+	h.RegisterWriteRoutes(rg)
+}
+
+// RegisterReadRoutes 挂载参数模型与标准参数的只读接口。
+func (h *Handler) RegisterReadRoutes(rg *gin.RouterGroup) {
 	g := rg.Group("/param-models")
 	// 集中操作（无 :name）
 	g.GET("", h.ListModels)
-	// 导入 XML:名称取自 XML paramModel 属性 + 重复二次确认覆盖(?force=true)→
-	// destructive 重载(全量+删孤儿)→ 刷新缓存,在单端点内顺序完成。
-	g.POST("/upload-xml", h.UploadXML)
 	// 下载 XML 原文件(?loaded_from= query;静态段优先于下方 /:name 参数路由)
 	g.GET("/file-content", h.DownloadFile)
 	g.POST("/translate", h.Translate)
 	// 标准参数树（位于 /param-models/standard 子路径）
 	g.GET("/standard", h.ListStandard)
 	g.GET("/standard/:path", h.GetStandard)
-	g.POST("/standard", h.UpsertStandard)
-	g.PUT("/standard/:path", h.UpdateStandard)
-	g.DELETE("/standard/:path", h.DeleteStandard)
 	// 单 paramModel
 	g.GET("/:name", h.GetModel)
-	g.PUT("/:name", h.UpdateModel)
-	g.DELETE("/:name", h.DeleteModel)
 	// mappings 子资源
 	g.GET("/:name/mappings", h.ListMappings)
-	g.POST("/:name/mappings", h.CreateMapping)
-	g.PUT("/:name/mappings/:id", h.UpdateMapping)
-	g.DELETE("/:name/mappings/:id", h.DeleteMapping)
 
 	// discovered 视图（按 product 隔离，挂在 products 命名空间下）
 	prod := rg.Group("/products")
 	prod.GET("/:id/discovered", h.ListDiscovered)
 	prod.GET("/:id/discovered/versions", h.ListDiscoveredVersions)
 	prod.DELETE("/:id/discovered/versions/:swVersion", h.DeleteDiscoveredVersion)
+}
+
+// RegisterWriteRoutes 挂载参数模型与标准参数的写接口，仅供超管管理。
+func (h *Handler) RegisterWriteRoutes(rg *gin.RouterGroup) {
+	g := rg.Group("/param-models")
+	// 导入 XML:名称取自 XML paramModel 属性 + 重复二次确认覆盖(?force=true)→
+	// destructive 重载(全量+删孤儿)→ 刷新缓存,在单端点内顺序完成。
+	g.POST("/upload-xml", h.UploadXML)
+	g.POST("/standard", h.UpsertStandard)
+	g.PUT("/standard/:path", h.UpdateStandard)
+	g.DELETE("/standard/:path", h.DeleteStandard)
+	g.PUT("/:name", h.UpdateModel)
+	g.DELETE("/:name", h.DeleteModel)
+	g.POST("/:name/mappings", h.CreateMapping)
+	g.PUT("/:name/mappings/:id", h.UpdateMapping)
+	g.DELETE("/:name/mappings/:id", h.DeleteMapping)
 }
 
 // ── ParamModel ──────────────────────────────────────────────────────

@@ -32,23 +32,21 @@ func NewIndicatorHandler(svc *IndicatorManagementService, logger *zap.Logger) *I
 //   - /gnb/pm/indicatormg   — GNB indicator CRUD
 //   - /cell/perfmgmt/kpimanage — enable/disable indicators (ENB/GSM/GNB)
 func (h *IndicatorHandler) RegisterRoutes(rg *gin.RouterGroup) {
+	h.RegisterReadRoutes(rg)
+	h.RegisterWriteRoutes(rg)
+}
+
+// RegisterReadRoutes registers indicator read endpoints for authenticated users.
+func (h *IndicatorHandler) RegisterReadRoutes(rg *gin.RouterGroup) {
 	// ENB/GSM indicator management
 	enbGsm := rg.Group("/pm/indicatormg")
 	{
 		enbGsm.POST("/getIndicatorGroupTree", h.GetIndicatorGroupTree)
-		enbGsm.POST("/addIndicatorGroup", h.CreateGroup)
 		enbGsm.POST("/getIndicatorGroupInfo", h.GetGroupInfo)
-		enbGsm.POST("/modifyIndicatorGroup", h.ModifyGroup)
-		enbGsm.POST("/delIndicatorGroup", h.DeleteGroup)
 		enbGsm.POST("/getIndicatorListByPage", h.GetIndicatorListByPage)
 		enbGsm.POST("/getEffectiveIndicators", h.GetEffectiveIndicators)
 		enbGsm.POST("/getIndicatorInfo", h.GetIndicatorInfo)
-		enbGsm.POST("/addOrModifyIndicator", h.AddOrModifyIndicator)
-		enbGsm.POST("/delIndicator", h.DeleteIndicator)
 		enbGsm.POST("/exportAllIndicator", h.ExportAllIndicator)
-		enbGsm.POST("/updateBaseKpiCustName", h.UpdateBaseKpiCustName)
-		enbGsm.POST("/updateEnbIndicatorsName", h.UpdateEnbIndicatorsName)
-		enbGsm.POST("/updateGsmIndicatorsName", h.UpdateGsmIndicatorsName)
 		enbGsm.GET("/getIndicatorUnitList", h.GetIndicatorUnitList)
 		enbGsm.POST("/getIndicatorGroupList", h.GetIndicatorGroupList)
 		enbGsm.POST("/getIndicatorTypes", h.GetIndicatorTypes)
@@ -58,15 +56,42 @@ func (h *IndicatorHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	gnb := rg.Group("/gnb/pm/indicatormg")
 	{
 		gnb.POST("/getIndicatorGroupTree", h.GetGNBIndicatorGroupTree)
-		gnb.POST("/addIndicatorGroup", h.CreateGNBGroup)
 		gnb.POST("/getIndicatorGroupInfo", h.GetGNBGroupInfo)
-		gnb.POST("/modifyIndicatorGroup", h.ModifyGNBGroup)
-		gnb.POST("/delIndicatorGroup", h.DeleteGNBGroup)
 		gnb.POST("/getIndicatorListByPage", h.GetGNBIndicatorListPageData)
 		gnb.POST("/getIndicatorInfo", h.GetGNBIndicatorInfo)
+		gnb.POST("/exportAllIndicator", h.ExportGNBAllIndicator)
+	}
+
+	// Enable/disable indicators (shared by ENB/GSM/GNB)
+	kpiManage := rg.Group("/cell/perfmgmt/kpimanage")
+	{
+		kpiManage.GET("/isIndicatorInTemplate", h.IsIndicatorInTemplate)
+	}
+}
+
+// RegisterWriteRoutes registers indicator write endpoints for super-admin users.
+func (h *IndicatorHandler) RegisterWriteRoutes(rg *gin.RouterGroup) {
+	// ENB/GSM indicator management
+	enbGsm := rg.Group("/pm/indicatormg")
+	{
+		enbGsm.POST("/addIndicatorGroup", h.CreateGroup)
+		enbGsm.POST("/modifyIndicatorGroup", h.ModifyGroup)
+		enbGsm.POST("/delIndicatorGroup", h.DeleteGroup)
+		enbGsm.POST("/addOrModifyIndicator", h.AddOrModifyIndicator)
+		enbGsm.POST("/delIndicator", h.DeleteIndicator)
+		enbGsm.POST("/updateBaseKpiCustName", h.UpdateBaseKpiCustName)
+		enbGsm.POST("/updateEnbIndicatorsName", h.UpdateEnbIndicatorsName)
+		enbGsm.POST("/updateGsmIndicatorsName", h.UpdateGsmIndicatorsName)
+	}
+
+	// GNB indicator management
+	gnb := rg.Group("/gnb/pm/indicatormg")
+	{
+		gnb.POST("/addIndicatorGroup", h.CreateGNBGroup)
+		gnb.POST("/modifyIndicatorGroup", h.ModifyGNBGroup)
+		gnb.POST("/delIndicatorGroup", h.DeleteGNBGroup)
 		gnb.POST("/addOrModifyIndicator", h.AddOrModifyGNBIndicator)
 		gnb.POST("/delIndicator", h.DeleteGNBIndicator)
-		gnb.POST("/exportAllIndicator", h.ExportGNBAllIndicator)
 		gnb.POST("/updateBaseKpiCustName", h.UpdateGNBBaseKpiCustName)
 		gnb.POST("/updateGnbIndicatorsName", h.UpdateGnbIndicatorsName)
 	}
@@ -76,7 +101,6 @@ func (h *IndicatorHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	{
 		kpiManage.POST("/enableIndicator", h.EnableIndicator)
 		kpiManage.POST("/disableIndicator", h.DisableIndicator)
-		kpiManage.GET("/isIndicatorInTemplate", h.IsIndicatorInTemplate)
 	}
 }
 

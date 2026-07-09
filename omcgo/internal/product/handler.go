@@ -132,23 +132,34 @@ func (h *Handler) invalidateDeviceCacheBySN(ctx context.Context, sn string) {
 
 // RegisterRoutes 挂载 /api/v1/products/* 到给定 RouterGroup。
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
+	h.RegisterReadRoutes(rg)
+	h.RegisterWriteRoutes(rg)
+}
+
+// RegisterReadRoutes 挂载产品中心的只读接口，供已登录用户读取基础目录数据。
+func (h *Handler) RegisterReadRoutes(rg *gin.RouterGroup) {
 	g := rg.Group("/products")
 	// 集中操作（无 :id）放最前以避免被 :id 路由吞掉
 	g.GET("", h.List)
-	g.POST("", h.Create)
 	g.GET("/match", h.Match)
 	g.GET("/match-order", h.MatchOrder)
 	g.GET("/orphan-devices", h.ListOrphan)
-	g.POST("/orphan-devices/rematch", h.RematchOrphan)
-	g.PUT("/orphan-devices/:deviceId/bind", h.BindOrphan)
-	g.POST("/cache/refresh", h.CacheRefresh)
-	g.POST("/import-directory", h.ImportDirectory)
 	// 枚举字典（产品表单下拉框用）
 	g.GET("/indicator-platforms", h.ListIndicatorPlatforms)
 	g.GET("/alarm-ne-types", h.ListAlarmNeTypes)
 
 	// 单产品
 	g.GET("/:id", h.Get)
+}
+
+// RegisterWriteRoutes 挂载产品中心的写接口，仅供超管管理。
+func (h *Handler) RegisterWriteRoutes(rg *gin.RouterGroup) {
+	g := rg.Group("/products")
+	g.POST("", h.Create)
+	g.POST("/orphan-devices/rematch", h.RematchOrphan)
+	g.PUT("/orphan-devices/:deviceId/bind", h.BindOrphan)
+	g.POST("/cache/refresh", h.CacheRefresh)
+	g.POST("/import-directory", h.ImportDirectory)
 	g.PUT("/:id", h.Update)
 	g.DELETE("/:id", h.Delete)
 	g.DELETE("/:id/discovered", h.ResetDiscovered)
