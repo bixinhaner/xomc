@@ -887,6 +887,43 @@
   padding: 0;
 }
 
+.markdown :global(.agent-render-mermaid) {
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid var(--agent-panel-border);
+  border-radius: 8px;
+  background: var(--agent-panel-surface-muted);
+  margin: 0 0 10px;
+  padding: 10px;
+}
+
+.markdown :global(.agent-render-mermaid-loading),
+.markdown :global(.agent-render-mermaid-error) {
+  color: var(--agent-panel-text-muted);
+  font-size: 12px;
+}
+
+.markdown :global(.agent-render-mermaid-error pre) {
+  overflow: auto;
+  margin: 6px 0 0;
+  color: var(--agent-panel-error-text);
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+
+.markdown :global(.agent-render-mermaid-canvas svg) {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+}
+
+.markdown :global(.katex-display) {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
 .markdown :global(.agent-render-table-scroll) {
   max-width: 100%;
   overflow: auto;
