@@ -8,7 +8,8 @@
 // 状态机：
 //
 //	pending → running → succeeded
-//	                 ↘  failed (attempt < max_attempts → 由调用方重新 Insert pending）
+//	                 ↘  pending (失败且 attempt < max_attempts，递增 attempt 后自动重试)
+//	                 ↘  failed  (失败且 attempt 达 max_attempts)
 //	                 ↘  zombie (heartbeat_at < now()-5min, by Sweeper → ResetZombie 回到 pending)
 //
 // 装配模式：
@@ -42,22 +43,24 @@ const (
 
 // Job 对应 async_jobs 表的一行。
 type Job struct {
-	ID            uuid.UUID
-	JobType       string
-	Status        Status
-	ScheduleExpr  string // cron expression（cron-triggered 任务才填）
-	ScheduledAt   time.Time
-	StartedAt     *time.Time
-	FinishedAt    *time.Time
-	HeartbeatAt   *time.Time
-	LockOwner     string
-	Attempt       int
-	MaxAttempts   int
-	Payload       json.RawMessage
-	Result        json.RawMessage
-	ErrorMessage  string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID           uuid.UUID
+	JobType      string
+	Status       Status
+	ScheduleExpr string // cron expression（cron-triggered 任务才填）
+	ScheduledAt  time.Time
+	BucketStart  *time.Time
+	BucketEnd    *time.Time
+	StartedAt    *time.Time
+	FinishedAt   *time.Time
+	HeartbeatAt  *time.Time
+	LockOwner    string
+	Attempt      int
+	MaxAttempts  int
+	Payload      json.RawMessage
+	Result       json.RawMessage
+	ErrorMessage string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // InsertRequest 创建新任务（status='pending'）。
@@ -65,6 +68,8 @@ type InsertRequest struct {
 	JobType      string
 	ScheduleExpr string
 	ScheduledAt  time.Time
+	BucketStart  *time.Time
+	BucketEnd    *time.Time
 	Payload      json.RawMessage
 	MaxAttempts  int // 0 表示用 DefaultMaxAttempts
 }

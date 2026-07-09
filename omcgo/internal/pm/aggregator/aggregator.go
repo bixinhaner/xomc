@@ -6,10 +6,10 @@
 // 流水线：pm_metrics (15min) ──hourly──▶ pm_metrics_hourly
 //
 //	──daily ──▶ pm_metrics_daily
-//	           ──weekly──▶ pm_metrics_weekly
-//	                      ──monthly──▶ pm_metrics_monthly
+//	           ├─weekly──▶ pm_metrics_weekly
+//	           └─monthly─▶ pm_metrics_monthly
 //
-// 每个 cron runner 内做两步：
+// 每个 asyncjob runner 内做两步：
 //
 //  1. AggregateCounters：把上一级粒度的 counter 行按 statis_type（sum/avg/max）GROUP BY 聚合
 //     直接落到目标表（SQL 单批，CASE WHEN 路由聚合方式）。
@@ -41,7 +41,7 @@ import (
 //   - Start, End：源数据时间区间（半开区间 [Start, End)），自然桶对齐
 //     例：hourly 桶 [10:00, 11:00)；daily 桶 [00:00, 24:00)
 //
-// cron 调度器负责按整点对齐生成 Start/End；Aggregator 不再做时间对齐。
+// 调度器或上游 chain 负责生成 Start/End；Aggregator 不再做时间对齐。
 type WindowSpec struct {
 	Granularity metrics.Granularity
 	Start, End  time.Time
@@ -62,7 +62,7 @@ type PgQuerier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-// Aggregator 是 G5 聚合主入口；线程安全，可被多 cron runner 共享。
+// Aggregator 是 G5 聚合主入口；线程安全，可被多个 asyncjob runner 共享。
 //
 // 双库说明（KPI/时序库物理分离，#532 P2）：
 //   - db：时序库（TsPool）——pm_metrics_* 聚合源表 + perf_indicators_*（两库都有副本）。
@@ -178,7 +178,7 @@ const kpiInsertBatchSize = 1000
 // KPI 公式求值仍在内存逐实体算（无法下推 SQL，保持不动）。
 //
 // 注意：本函数假设 AggregateCounters 已写入对应桶的 counter 行（否则 KPI 拿不到入参）。
-// 单 cron runner 内调用顺序：AggregateCounters → AggregateKPIs。
+// 单 asyncjob runner 内调用顺序：AggregateCounters → AggregateKPIs。
 //
 // 返回插入的 KPI 行数。
 func (a *Aggregator) AggregateKPIs(ctx context.Context, target string, w WindowSpec) (int, error) {

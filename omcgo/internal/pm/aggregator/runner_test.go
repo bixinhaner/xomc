@@ -3,6 +3,7 @@ package aggregator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -45,7 +46,7 @@ func Test_WeeklyRunner_Wiring(t *testing.T) {
 func Test_MonthlyRunner_Wiring(t *testing.T) {
 	r := NewMonthlyRunner(nil)
 	assert.Equal(t, "pm_aggregate_monthly", r.JobType())
-	assert.Equal(t, "pm_metrics_weekly", r.Source())
+	assert.Equal(t, "pm_metrics_daily", r.Source())
 	assert.Equal(t, "pm_metrics_monthly", r.Target())
 	assert.Equal(t, metrics.GranularityMonthly, r.Granularity())
 }
@@ -100,4 +101,103 @@ func Test_Runner_Run_RejectsReverseRange(t *testing.T) {
 	job := &asyncjob.Job{ID: uuid.New(), JobType: r.JobType(), Payload: payload}
 	_, err := r.Run(context.Background(), job)
 	assert.Error(t, err)
+}
+
+func shanghaiLoc(t *testing.T) *time.Location {
+	t.Helper()
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	return loc
+}
+
+func Test_Runner_Run_ChainsDailyAfterBusinessDayLastHourlyBucket(t *testing.T) {
+	loc := shanghaiLoc(t)
+	start := time.Date(2026, 7, 7, 15, 0, 0, 0, time.UTC) // 北京 2026-07-07 23:00
+	end := time.Date(2026, 7, 7, 16, 0, 0, 0, time.UTC)   // 北京 2026-07-08 00:00
+	payload, err := BuildPayload(start, end)
+	require.NoError(t, err)
+
+	db := &stubDB{execTag: pgconn.NewCommandTag("INSERT 0 1")}
+	enq := &stubEnqueuer{}
+	r := NewHourlyRunner(New(db, nil, nil))
+	r.SetRollupChain(enq, func() *time.Location { return loc })
+
+	_, err = r.Run(context.Background(), &asyncjob.Job{ID: uuid.New(), JobType: r.JobType(), Payload: payload})
+	require.NoError(t, err)
+	require.Len(t, enq.calls, 1)
+	require.Equal(t, JobTypeDaily, enq.calls[0].JobType)
+	require.NotNil(t, enq.calls[0].BucketStart)
+	require.NotNil(t, enq.calls[0].BucketEnd)
+	require.True(t, enq.calls[0].BucketStart.Equal(time.Date(2026, 7, 6, 16, 0, 0, 0, time.UTC)))
+	require.True(t, enq.calls[0].BucketEnd.Equal(time.Date(2026, 7, 7, 16, 0, 0, 0, time.UTC)))
+}
+
+func Test_Runner_Run_DoesNotChainDailyForMiddleHourlyBucket(t *testing.T) {
+	loc := shanghaiLoc(t)
+	start := time.Date(2026, 7, 7, 14, 0, 0, 0, time.UTC) // 北京 22:00
+	end := time.Date(2026, 7, 7, 15, 0, 0, 0, time.UTC)   // 北京 23:00
+	payload, err := BuildPayload(start, end)
+	require.NoError(t, err)
+
+	db := &stubDB{execTag: pgconn.NewCommandTag("INSERT 0 1")}
+	enq := &stubEnqueuer{}
+	r := NewHourlyRunner(New(db, nil, nil))
+	r.SetRollupChain(enq, func() *time.Location { return loc })
+
+	_, err = r.Run(context.Background(), &asyncjob.Job{ID: uuid.New(), JobType: r.JobType(), Payload: payload})
+	require.NoError(t, err)
+	require.Empty(t, enq.calls)
+}
+
+func Test_Runner_Run_ChainsWeeklyAndMonthlyFromDailyBoundaries(t *testing.T) {
+	loc := shanghaiLoc(t)
+	// 北京 2026-06-28(日) 00:00 到 2026-06-29(一) 00:00，是 ISO 业务周最后一天。
+	start := time.Date(2026, 6, 27, 16, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 6, 28, 16, 0, 0, 0, time.UTC)
+	payload, err := BuildPayload(start, end)
+	require.NoError(t, err)
+
+	db := &stubDB{execTag: pgconn.NewCommandTag("INSERT 0 1")}
+	enq := &stubEnqueuer{}
+	r := NewDailyRunner(New(db, nil, nil))
+	r.SetRollupChain(enq, func() *time.Location { return loc })
+
+	_, err = r.Run(context.Background(), &asyncjob.Job{ID: uuid.New(), JobType: r.JobType(), Payload: payload})
+	require.NoError(t, err)
+	require.Len(t, enq.calls, 1)
+	require.Equal(t, JobTypeWeekly, enq.calls[0].JobType)
+	require.True(t, enq.calls[0].BucketStart.Equal(time.Date(2026, 6, 21, 16, 0, 0, 0, time.UTC)))
+	require.True(t, enq.calls[0].BucketEnd.Equal(time.Date(2026, 6, 28, 16, 0, 0, 0, time.UTC)))
+
+	// 北京 2026-06-30 到 2026-07-01，是自然月最后一天。
+	enq.calls = nil
+	monthPayload, err := BuildPayload(
+		time.Date(2026, 6, 29, 16, 0, 0, 0, time.UTC),
+		time.Date(2026, 6, 30, 16, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+
+	_, err = r.Run(context.Background(), &asyncjob.Job{ID: uuid.New(), JobType: r.JobType(), Payload: monthPayload})
+	require.NoError(t, err)
+	require.Len(t, enq.calls, 1)
+	require.Equal(t, JobTypeMonthly, enq.calls[0].JobType)
+	require.True(t, enq.calls[0].BucketStart.Equal(time.Date(2026, 5, 31, 16, 0, 0, 0, time.UTC)))
+	require.True(t, enq.calls[0].BucketEnd.Equal(time.Date(2026, 6, 30, 16, 0, 0, 0, time.UTC)))
+}
+
+func Test_Runner_Run_RollupChainFailureFailsCurrentJob(t *testing.T) {
+	loc := shanghaiLoc(t)
+	payload, err := BuildPayload(
+		time.Date(2026, 7, 7, 15, 0, 0, 0, time.UTC),
+		time.Date(2026, 7, 7, 16, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+
+	db := &stubDB{execTag: pgconn.NewCommandTag("INSERT 0 1")}
+	r := NewHourlyRunner(New(db, nil, nil))
+	r.SetRollupChain(&stubEnqueuer{failErr: errors.New("queue unavailable")}, func() *time.Location { return loc })
+
+	_, err = r.Run(context.Background(), &asyncjob.Job{ID: uuid.New(), JobType: r.JobType(), Payload: payload})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "enqueue rollup chain")
 }

@@ -39,3 +39,4 @@ ADR（Architecture Decision Record）是一篇短文，记录**一个**架构决
 | [0004](0004-three-library-single-dir-sidecar.md) | 三库导入 XML 用单目录 + sidecar，不用 builtin/custom 双目录物理隔离 | Accepted（追认） | 2026-06-04 |
 | [0005](0005-acs-horizontal-scale-stateless.md) | ACS 横向扩展去进程态：4 类会话副作用状态（准入计数 / 设备孤儿会话 / CR-URL / Digest nonce）全量接共享 Redis（Option B），不靠会话亲和 | Accepted | 2026-06-11 |
 | [0006](0006-statis-duration-universal-time-base.md) | 引入通用时间基准计数器「统计时长」，所有按时间归一化指标统一用它做分母，禁止写死周期常量；小区可用率 = 在服时长 ÷ 统计时长 × 100 | Accepted | 2026-06-15 |
+| [0007](0007-pm-rollup-chain-triggering.md) | PM 跨粒度聚合由上游完成事件链式触发，只保留 hourly 独立 cron/catchup | Accepted | 2026-07-09 |
