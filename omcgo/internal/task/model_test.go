@@ -370,6 +370,28 @@ func Test_Task_ResetForRetry(t *testing.T) {
 	assert.Equal(t, 2, task.RetryCount, "retry count should increment by 1")
 }
 
+func Test_Task_ResetForRetryAfter(t *testing.T) {
+	sentAt := time.Now().Add(-5 * time.Minute)
+	task := &Task{
+		ID:         "task-1",
+		Status:     TaskStatusSent,
+		CWMPID:     "old-cwmp-id",
+		SentAt:     &sentAt,
+		RetryCount: 1,
+	}
+
+	before := time.Now().Add(2 * time.Minute)
+	task.ResetForRetryAfter(2 * time.Minute)
+
+	assert.Equal(t, TaskStatusPending, task.Status)
+	assert.Empty(t, task.CWMPID)
+	assert.Nil(t, task.SentAt)
+	assert.Equal(t, 2, task.RetryCount)
+	require.NotNil(t, task.NextAttemptAt)
+	assert.True(t, !task.IsReadyForAttempt(before))
+	assert.True(t, task.IsReadyForAttempt(before.Add(time.Second)))
+}
+
 func Test_TaskListResponse_JSON(t *testing.T) {
 	resp := &TaskListResponse{
 		Tasks: []*Task{

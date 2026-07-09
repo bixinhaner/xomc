@@ -450,6 +450,10 @@ func (s *TaskService) MarkTaskFailed(ctx context.Context, taskID string, errorCo
 	return s.MarkTaskFailedWithResult(ctx, taskID, errorCode, errorMsg, nil)
 }
 
+func shouldAutoRetryOnFailure(t *Task) bool {
+	return t != nil && t.Source == TaskSourceMML && t.CanRetry()
+}
+
 // MarkTaskFailedWithResult 标记任务失败并附带结构化 result（如 per-param SetParameterValuesFault 详情）。
 // result 为空时等价于 MarkTaskFailed —— 不会清空已有 task.Result。
 //
@@ -457,13 +461,49 @@ func (s *TaskService) MarkTaskFailed(ctx context.Context, taskID string, errorCo
 // (parameter_name / fault_code / fault_string) 序列化到 result，下游 MML
 // ResultAggregator 据此触发 is_supported=false auto-learn。
 func (s *TaskService) MarkTaskFailedWithResult(ctx context.Context, taskID string, errorCode int, errorMsg string, result json.RawMessage) error {
+	task, err := s.queue.GetByID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("get failed task: %w", err)
+	}
+	if shouldAutoRetryOnFailure(task) {
+		oldCWMPID := task.CWMPID
+		if len(result) > 0 {
+			task.Result = result
+		}
+		task.ErrorCode = errorCode
+		task.ErrorMessage = errorMsg
+		task.ResetForRetryAfter(task.RetryInterval())
+		if oldCWMPID != "" {
+			if err := s.queue.DeleteCWMPIDMapping(ctx, oldCWMPID); err != nil {
+				s.logger.Warn("delete cwmp mapping before retry",
+					zap.String("task_id", taskID),
+					zap.String("cwmp_id", oldCWMPID),
+					zap.Error(err))
+			}
+		}
+		if err := s.queue.Update(ctx, task); err != nil {
+			return fmt.Errorf("schedule task retry in queue: %w", err)
+		}
+		if err := s.repo.Update(ctx, task); err != nil {
+			s.recordDualWriteFail("sync_retry")
+			logger.L(ctx).Error("sync retry task to db", zap.Error(err), zap.String("task_id", taskID))
+		}
+		logger.L(ctx).Info("mml task scheduled for retry",
+			zap.String("task_id", taskID),
+			zap.Int("retry_count", task.RetryCount),
+			zap.Int("max_retries", task.MaxRetries),
+			zap.Int("retry_interval_seconds", task.RetryIntervalSeconds),
+			zap.Time("next_attempt_at", deref(task.NextAttemptAt)))
+		return nil
+	}
+
 	// 更新 Redis
 	if err := s.queue.MarkTaskFailedWithResult(ctx, taskID, errorCode, errorMsg, result); err != nil {
 		return fmt.Errorf("mark task failed in queue: %w", err)
 	}
 
 	// 同步更新 PostgreSQL
-	task, err := s.queue.GetByID(ctx, taskID)
+	task, err = s.queue.GetByID(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("get failed task: %w", err)
 	}
@@ -634,6 +674,16 @@ func (s *TaskService) RecoverPendingTasks(ctx context.Context, deviceSN string) 
 				logger.L(ctx).Error("mark task failed", zap.Error(err), zap.String("task_id", task.ID))
 			}
 			continue
+		}
+		if interval := task.RetryInterval(); interval > 0 && task.SentAt != nil {
+			next := task.SentAt.Add(interval)
+			if time.Now().Before(next) {
+				logger.L(ctx).Debug("stale task retry interval not reached",
+					zap.String("task_id", task.ID),
+					zap.Time("next_retry_at", next),
+					zap.Int("retry_interval_seconds", task.RetryIntervalSeconds))
+				continue
+			}
 		}
 
 		// 重置任务状态

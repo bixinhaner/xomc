@@ -149,12 +149,12 @@ func (m *mockScriptRepo) List(ctx context.Context, filter ScriptFilter) (*model.
 }
 
 type mockTaskRepo struct {
-	createFn        func(ctx context.Context, task *MMLTask) error
-	getByIDFn       func(ctx context.Context, id uuid.UUID) (*MMLTask, error)
-	updateFn        func(ctx context.Context, task *MMLTask) error
-	updateStatusFn  func(ctx context.Context, id uuid.UUID, status TaskStatus) error
-	deleteFn        func(ctx context.Context, id uuid.UUID) error
-	listFn          func(ctx context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error)
+	createFn       func(ctx context.Context, task *MMLTask) error
+	getByIDFn      func(ctx context.Context, id uuid.UUID) (*MMLTask, error)
+	updateFn       func(ctx context.Context, task *MMLTask) error
+	updateStatusFn func(ctx context.Context, id uuid.UUID, status TaskStatus) error
+	deleteFn       func(ctx context.Context, id uuid.UUID) error
+	listFn         func(ctx context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error)
 }
 
 func (m *mockTaskRepo) Create(ctx context.Context, task *MMLTask) error {
@@ -216,13 +216,13 @@ func (m *mockTaskRepo) UpdateExportDevice(ctx context.Context, id uuid.UUID, dev
 }
 
 type mockCustomCommandRepo struct {
-	createFn       func(ctx context.Context, tmpl *MMLCustomCommand) error
-	getByIDFn      func(ctx context.Context, id uuid.UUID) (*MMLCustomCommand, error)
-	updateFn       func(ctx context.Context, tmpl *MMLCustomCommand) error
-	deleteFn       func(ctx context.Context, id uuid.UUID) error
-	listFn         func(ctx context.Context, filter CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error)
-	nameExistsFn   func(ctx context.Context, ownerID uuid.UUID, name string, excludeID *uuid.UUID) (bool, error)
-	publicNameFn   func(ctx context.Context, name string, excludeID *uuid.UUID) (bool, error)
+	createFn     func(ctx context.Context, tmpl *MMLCustomCommand) error
+	getByIDFn    func(ctx context.Context, id uuid.UUID) (*MMLCustomCommand, error)
+	updateFn     func(ctx context.Context, tmpl *MMLCustomCommand) error
+	deleteFn     func(ctx context.Context, id uuid.UUID) error
+	listFn       func(ctx context.Context, filter CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error)
+	nameExistsFn func(ctx context.Context, ownerID uuid.UUID, name string, excludeID *uuid.UUID) (bool, error)
+	publicNameFn func(ctx context.Context, name string, excludeID *uuid.UUID) (bool, error)
 }
 
 func (m *mockCustomCommandRepo) Create(ctx context.Context, tmpl *MMLCustomCommand) error {
@@ -909,6 +909,111 @@ func TestService_ExecuteCommand_EmptyExecuteType_DefaultsToImmediateAndFansOut(t
 	assert.Len(t, stub.calls[0], 2, "每个设备产生一条 device_task (2 devices × 1 cmd)")
 	assert.Equal(t, TaskRunning, updatedStatus,
 		"Fanout 成功后 mml_task 状态必须迁移到 running")
+}
+
+func TestService_ExecuteCommand_ScheduledSetsNextTriggerAt(t *testing.T) {
+	scheduledAt := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+	scheduledRaw := scheduledAt.Format(time.RFC3339Nano)
+
+	var capturedTask *MMLTask
+	taskRepo := &mockTaskRepo{
+		createFn: func(_ context.Context, task *MMLTask) error {
+			capturedTask = task
+			task.ID = uuid.New()
+			return nil
+		},
+	}
+
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
+	stub := &stubDeviceTaskCreator{}
+	svc.SetFanouter(NewFanouter(stub, nil, nil, nil, zap.NewNop()))
+
+	result, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		DeviceSNs:        []string{"SN-001"},
+		TaskName:         "scheduled script",
+		Creator:          "admin",
+		ExecuteType:      ExecuteScheduled,
+		ScheduledAt:      &scheduledRaw,
+		Commands:         []map[string]interface{}{{"command_code": "REBOOT", "rpc_method": "Reboot"}},
+		FailedRetry:      true,
+		FailedRetryCount: 2,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, capturedTask)
+	require.NotNil(t, capturedTask.ScheduledAt, "scheduled_at 必须持久化到任务")
+	require.NotNil(t, capturedTask.NextTriggerAt, "scheduled 任务必须写 next_trigger_at 才能被 scheduler 认领")
+	assert.True(t, scheduledAt.Equal(*capturedTask.ScheduledAt))
+	assert.True(t, scheduledAt.Equal(*capturedTask.NextTriggerAt))
+	assert.Equal(t, TaskPending, capturedTask.Status)
+	assert.Empty(t, stub.calls, "scheduled 创建阶段不应立即 fanout")
+}
+
+func TestService_ExecuteCommand_PeriodicSetsNextTriggerAt(t *testing.T) {
+	periodStart := time.Now().UTC().Add(48 * time.Hour).Truncate(time.Second)
+	periodEnd := periodStart.Add(24 * time.Hour)
+	startRaw := periodStart.Format(time.RFC3339Nano)
+	endRaw := periodEnd.Format(time.RFC3339Nano)
+	periodTime := periodStart.Format("15:04:05")
+
+	var capturedTask *MMLTask
+	taskRepo := &mockTaskRepo{
+		createFn: func(_ context.Context, task *MMLTask) error {
+			capturedTask = task
+			task.ID = uuid.New()
+			return nil
+		},
+	}
+
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
+
+	result, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		DeviceSNs:   []string{"SN-001"},
+		TaskName:    "periodic script",
+		Creator:     "admin",
+		ExecuteType: ExecutePeriodic,
+		PeriodStart: &startRaw,
+		PeriodEnd:   &endRaw,
+		PeriodTime:  periodTime,
+		Commands:    []map[string]interface{}{{"command_code": "REBOOT", "rpc_method": "Reboot"}},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, capturedTask)
+	require.NotNil(t, capturedTask.PeriodStart, "period_start 必须持久化到任务")
+	require.NotNil(t, capturedTask.PeriodEnd, "period_end 必须持久化到任务")
+	require.NotNil(t, capturedTask.NextTriggerAt, "periodic 任务必须写 next_trigger_at 才能被 scheduler 认领")
+	assert.True(t, periodStart.Equal(*capturedTask.PeriodStart))
+	assert.True(t, periodEnd.Equal(*capturedTask.PeriodEnd))
+	assert.Equal(t, periodTime, capturedTask.PeriodTime)
+	assert.True(t, periodStart.Equal(*capturedTask.NextTriggerAt))
+	assert.Equal(t, TaskPending, capturedTask.Status)
+}
+
+func TestService_ExecuteCommand_ScheduledRejectsMissingScheduledAt(t *testing.T) {
+	var created bool
+	taskRepo := &mockTaskRepo{
+		createFn: func(_ context.Context, _ *MMLTask) error {
+			created = true
+			return nil
+		},
+	}
+
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
+
+	_, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		DeviceSNs:   []string{"SN-001"},
+		TaskName:    "bad scheduled script",
+		Creator:     "admin",
+		ExecuteType: ExecuteScheduled,
+		Commands:    []map[string]interface{}{{"command_code": "REBOOT", "rpc_method": "Reboot"}},
+	})
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrInvalidInput))
+	assert.False(t, created, "非法 scheduled 请求不应写入 mml_tasks")
 }
 
 // 回归 MML 控制台"参数路径直接执行"需求：用户没在命令树选命令，

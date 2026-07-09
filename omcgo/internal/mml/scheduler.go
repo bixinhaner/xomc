@@ -167,6 +167,21 @@ func (s *Scheduler) dispatch(ctx context.Context, task *MMLTask, now time.Time) 
 				zap.String("child_task_id", task.ID.String()),
 				zap.Error(err))
 		}
+	case ExecuteImmediate:
+		if task.PeriodicParentID == nil {
+			s.logger.Warn("scheduler got unexpected execute_type",
+				zap.String("task_id", task.ID.String()),
+				zap.String("execute_type", string(task.ExecuteType)))
+			break
+		}
+		// PgTaskRepository.cloneAsPeriodicChild 会把周期子实例降为 immediate，
+		// 表示子任务本身无需再被调度，只需立即 fanout。
+		if err := s.service.fanoutClaimed(ctx, task); err != nil {
+			s.logger.Error("fanout periodic child",
+				zap.String("child_task_id", task.ID.String()),
+				zap.String("parent_task_id", task.PeriodicParentID.String()),
+				zap.Error(err))
+		}
 	default:
 		s.logger.Warn("scheduler got unexpected execute_type",
 			zap.String("task_id", task.ID.String()),
@@ -175,7 +190,7 @@ func (s *Scheduler) dispatch(ctx context.Context, task *MMLTask, now time.Time) 
 
 	// 若 periodic 模板的 period_end 已过，收敛成 completed。
 	// 注意：此时 task 可能是 child（不是模板），所以用 PeriodicParentID 指回模板。
-	if task.ExecuteType == ExecutePeriodic && task.PeriodicParentID != nil {
+	if task.PeriodicParentID != nil {
 		s.maybeFinalizeParent(ctx, *task.PeriodicParentID, now)
 	}
 }

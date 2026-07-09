@@ -14,8 +14,10 @@ import (
 const (
 	// #168：24h→4h，与命令实际生命周期匹配，抑制 Redis 工作集增长（2.36G 撑爆事故的增长真因
 	// 之一就是 24h 任务态累积）。被淘汰/过期的任务态以 PG 双写为权威源，可重建。
-	taskDetailTTL  = 4 * time.Hour // 任务详情 TTL
-	cwmpMappingTTL = 4 * time.Hour // CWMP ID → Task ID 映射 TTL
+	taskDetailTTL    = 4 * time.Hour // 任务详情 TTL
+	cwmpMappingTTL   = 4 * time.Hour // CWMP ID → Task ID 映射 TTL
+	queuePeekLimit   = 32
+	queueScoreFactor = 1e13
 )
 
 // RedisTaskQueue 实现 TaskQueue 接口
@@ -43,16 +45,19 @@ func (q *RedisTaskQueue) cwmpKey(cwmpID string) string {
 	return redisx.Keys.ACSCWMP2Task(CWMPIDHash(cwmpID))
 }
 
+func queueScore(task *Task) float64 {
+	return float64(task.Priority)*queueScoreFactor + float64(task.QueueTime().UnixNano())
+}
+
 // Push 推送任务到队列
-// 使用 Sorted Set，score = priority * 1e13 + timestamp 纳秒
+// 使用 Sorted Set，score = priority * 1e13 + 可出队时间纳秒
 func (q *RedisTaskQueue) Push(ctx context.Context, task *Task) error {
 	if task == nil {
 		return fmt.Errorf("task is nil")
 	}
 
-	// 计算 score：优先级越小越优先，同优先级按时间先进先出
-	// score = priority * 1e13 + timestamp纳秒（保证同优先级先入先出）
-	score := float64(task.Priority)*1e13 + float64(task.CreatedAt.UnixNano())
+	// 计算 score：优先级越小越优先，同优先级按可出队时间先进先出。
+	score := queueScore(task)
 
 	// 序列化任务
 	taskData, err := json.Marshal(task)
@@ -85,8 +90,8 @@ func (q *RedisTaskQueue) Push(ctx context.Context, task *Task) error {
 func (q *RedisTaskQueue) Pop(ctx context.Context, deviceSN string) (*Task, error) {
 	queueKey := q.queueKey(deviceSN)
 
-	// 获取 score 最小的元素（最高优先级）
-	results, err := q.client.ZRangeWithScores(ctx, queueKey, 0, 0).Result()
+	// 获取 score 较小的一批元素，跳过尚未到 next_attempt_at 的延迟重试任务。
+	results, err := q.client.ZRangeWithScores(ctx, queueKey, 0, queuePeekLimit-1).Result()
 	if err != nil {
 		return nil, fmt.Errorf("zrange: %w", err)
 	}
@@ -95,34 +100,56 @@ func (q *RedisTaskQueue) Pop(ctx context.Context, deviceSN string) (*Task, error
 		return nil, nil // 队列为空
 	}
 
-	taskID := results[0].Member.(string)
+	taskIDs := make([]string, 0, len(results))
+	for _, result := range results {
+		taskID, ok := result.Member.(string)
+		if !ok {
+			continue
+		}
+		taskIDs = append(taskIDs, taskID)
+	}
+	if len(taskIDs) == 0 {
+		return nil, nil
+	}
 
-	// 原子移除并获取任务详情
+	// 批量获取任务详情，选出第一个已到可出队时间的任务。
 	pipe := q.client.Pipeline()
-
-	// 从队列移除
-	pipe.ZRem(ctx, queueKey, taskID)
-
-	// 获取任务详情
-	taskDataCmd := pipe.HGet(ctx, q.taskKey(taskID), "data")
-
-	_, err = pipe.Exec(ctx)
-	if err != nil {
+	cmds := make([]*redis.StringCmd, len(taskIDs))
+	for i, taskID := range taskIDs {
+		cmds[i] = pipe.HGet(ctx, q.taskKey(taskID), "data")
+	}
+	if _, err = pipe.Exec(ctx); err != nil && err != redis.Nil {
 		return nil, fmt.Errorf("pop task: %w", err)
 	}
 
-	taskData, err := taskDataCmd.Result()
-	if err != nil {
-		// 任务详情不存在，可能是数据不一致
-		return nil, fmt.Errorf("get task data: %w", err)
+	now := time.Now()
+	for i, cmd := range cmds {
+		taskData, err := cmd.Result()
+		if err != nil {
+			if i == 0 {
+				return nil, fmt.Errorf("get task data: %w", err)
+			}
+			continue
+		}
+
+		var task Task
+		if err := json.Unmarshal([]byte(taskData), &task); err != nil {
+			if i == 0 {
+				return nil, fmt.Errorf("unmarshal task: %w", err)
+			}
+			continue
+		}
+		if !task.IsReadyForAttempt(now) {
+			continue
+		}
+
+		if err := q.client.ZRem(ctx, queueKey, taskIDs[i]).Err(); err != nil {
+			return nil, fmt.Errorf("remove popped task: %w", err)
+		}
+		return &task, nil
 	}
 
-	var task Task
-	if err := json.Unmarshal([]byte(taskData), &task); err != nil {
-		return nil, fmt.Errorf("unmarshal task: %w", err)
-	}
-
-	return &task, nil
+	return nil, nil
 }
 
 // Peek 查看队首任务（不移除）
@@ -198,7 +225,7 @@ func (q *RedisTaskQueue) Update(ctx context.Context, task *Task) error {
 
 	// 如果任务状态变回 pending，需要重新入队
 	if task.Status == TaskStatusPending {
-		score := float64(task.Priority)*1e13 + float64(task.CreatedAt.UnixNano())
+		score := queueScore(task)
 		err = q.client.ZAdd(ctx, q.queueKey(task.DeviceSN), redis.Z{
 			Score:  score,
 			Member: task.ID,

@@ -207,6 +207,30 @@ func initMRTaskModule(c *Container) error {
 	return nil
 }
 
+func startMMLScheduler(
+	c *Container,
+	mmlService *mml.Service,
+	taskRepo mml.ScheduledTaskRepository,
+	logger *zap.Logger,
+) *mml.Scheduler {
+	scheduler := mml.NewScheduler(mmlService, taskRepo, nil, 0, logger)
+	scheduler.Start(context.Background())
+
+	if c != nil {
+		c.miscDeps.mmlScheduler = scheduler
+		if c.GS != nil {
+			c.GS.Register("mml-scheduler", 1, func(context.Context) error {
+				scheduler.Stop()
+				scheduler.Wait()
+				return nil
+			})
+		}
+	}
+
+	logger.Info("mml scheduler started")
+	return scheduler
+}
+
 // initSoftwareModule 初始化 F06 固件管理模块。
 func initSoftwareModule(c *Container) error {
 	logger := c.Logger.Named("software")
@@ -1803,6 +1827,7 @@ func initMiscModules(c *Container) error {
 		// T-0168: 复用上面已构造的 mmlFanoutMetrics 实例，避免重复注册。
 		fanouter.SetMetrics(mmlFanoutMetrics)
 		mmlService.SetFanouter(fanouter)
+		startMMLScheduler(c, mmlService, mmlTaskRepo, logger)
 
 		// Sequencer：与 ResultAggregator 并行挂到 MML completion 通路，
 		// 在 device_task 进入终态后追加入队下一行命令。
@@ -2209,6 +2234,7 @@ type miscDeps struct {
 	// MML
 	mmlHandler        *mml.Handler
 	mmlService        *mml.Service
+	mmlScheduler      *mml.Scheduler
 	mmlAdminHandler   *mml.AdminHandler   // T-0123-P0 catalog 管理 13 端点
 	mmlConsoleHandler *mml.ConsoleHandler // T-0123-P1 Console 5 端点（group-tree / sub-fields / render / parse / execute-statements）
 
