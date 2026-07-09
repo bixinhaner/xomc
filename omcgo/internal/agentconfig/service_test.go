@@ -15,7 +15,8 @@ import (
 )
 
 type fakeConfigStore struct {
-	values map[string]string
+	values      map[string]string
+	basicValues map[string]string
 }
 
 func newFakeConfigStore(values map[string]string) *fakeConfigStore {
@@ -23,18 +24,21 @@ func newFakeConfigStore(values map[string]string) *fakeConfigStore {
 	for key, value := range values {
 		copy[key] = value
 	}
-	return &fakeConfigStore{values: copy}
+	return &fakeConfigStore{values: copy, basicValues: map[string]string{}}
 }
 
 func (s *fakeConfigStore) List(_ context.Context, category string, _ bool) ([]admin.SysConfig, error) {
-	if category != Category {
+	values := s.values
+	if category == BasicCategory {
+		values = s.basicValues
+	} else if category != Category {
 		return nil, nil
 	}
-	rows := make([]admin.SysConfig, 0, len(s.values))
-	for key, value := range s.values {
+	rows := make([]admin.SysConfig, 0, len(values))
+	for key, value := range values {
 		rows = append(rows, admin.SysConfig{
 			ID:       uuid.New(),
-			Category: Category,
+			Category: category,
 			Key:      key,
 			Value:    value,
 		})
@@ -140,6 +144,44 @@ func TestRuntimeVisibilitySeparatesSwitchFromConnectedRuntime(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, runtime.Visible)
 	require.False(t, runtime.Enabled)
+}
+
+func TestRuntimeTargetIncludesInstanceDisplayMetadata(t *testing.T) {
+	store := newFakeConfigStore(map[string]string{
+		KeyEnabled:            "true",
+		KeyAgentStudioBaseURL: "https://agent.example.com",
+		KeyConnectorSlug:      "external-agent-connector",
+		KeyConnectorID:        "connector-1",
+		KeyStatus:             StatusConnected,
+	})
+	store.basicValues[OMCNameKey] = "OMC 陕西"
+	svc := NewService(store, store, nil, nil)
+
+	target, err := svc.GetRuntimeTarget(context.Background())
+
+	require.NoError(t, err)
+	require.True(t, target.Enabled)
+	require.Equal(t, "external-agent-connector", target.ConnectorSlug)
+	require.Equal(t, "connector-1", target.ConnectorID)
+	require.Equal(t, "OMC 陕西", target.InstanceName)
+	require.False(t, target.InstanceNameIsDefault)
+}
+
+func TestRuntimeTargetMarksDefaultInstanceName(t *testing.T) {
+	store := newFakeConfigStore(map[string]string{
+		KeyEnabled:            "true",
+		KeyAgentStudioBaseURL: "https://agent.example.com",
+		KeyConnectorID:        "connector-1",
+		KeyStatus:             StatusConnected,
+	})
+	store.basicValues[OMCNameKey] = DefaultOMCName
+	svc := NewService(store, store, nil, nil)
+
+	target, err := svc.GetRuntimeTarget(context.Background())
+
+	require.NoError(t, err)
+	require.Equal(t, DefaultOMCName, target.InstanceName)
+	require.True(t, target.InstanceNameIsDefault)
 }
 
 func TestSyncProvisionsConnectorAndPersistsRuntimeConfig(t *testing.T) {

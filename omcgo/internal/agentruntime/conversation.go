@@ -47,6 +47,26 @@ func (s *ConversationService) Rotate(ctx context.Context, connectorID string, cl
 	return s.ensure(ctx, connectorID, claims, true)
 }
 
+func (s *ConversationService) InstanceID(ctx context.Context) (string, error) {
+	if s == nil || s.store == nil {
+		return "", commonerrors.ErrUnavailable
+	}
+	instanceID, found, err := s.getValue(ctx, instanceConfigKey)
+	if err != nil {
+		return "", err
+	}
+	if found && isAgentInstanceID(instanceID) {
+		return instanceID, nil
+	}
+	instanceID = newAgentInstanceID()
+	if _, err := s.store.BatchUpsert(ctx, conversationCategory, []admin.BatchItem{
+		{Key: instanceConfigKey, Value: instanceID, ValueType: "string"},
+	}); err != nil {
+		return "", fmt.Errorf("save agent instance config: %w", err)
+	}
+	return instanceID, nil
+}
+
 func (s *ConversationService) ensure(ctx context.Context, connectorID string, claims *admin.Claims, rotate bool) (string, error) {
 	if s == nil || s.store == nil {
 		return "", commonerrors.ErrUnavailable

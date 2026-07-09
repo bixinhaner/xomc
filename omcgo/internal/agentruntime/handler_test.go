@@ -2,6 +2,7 @@ package agentruntime
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -25,8 +26,9 @@ func (p fakeConfigProvider) GetRuntimeTarget(context.Context) (*agentconfig.Runt
 }
 
 type fakeConversationManager struct {
-	active string
-	rotate string
+	active   string
+	rotate   string
+	instance string
 }
 
 func (m fakeConversationManager) Active(context.Context, string, *admin.Claims) (string, error) {
@@ -35,6 +37,10 @@ func (m fakeConversationManager) Active(context.Context, string, *admin.Claims) 
 
 func (m fakeConversationManager) Rotate(context.Context, string, *admin.Claims) (string, error) {
 	return m.rotate, nil
+}
+
+func (m fakeConversationManager) InstanceID(context.Context) (string, error) {
+	return m.instance, nil
 }
 
 func TestChatStreamProxiesToAgentStudioWithDelegation(t *testing.T) {
@@ -69,10 +75,15 @@ func TestChatStreamProxiesToAgentStudioWithDelegation(t *testing.T) {
 	NewHandler(fakeConfigProvider{target: &agentconfig.RuntimeTarget{
 		Enabled:            true,
 		AgentStudioBaseURL: upstream.URL,
+		ConnectorSlug:      "external-agent-connector",
 		ConnectorID:        "connector-1",
 		Status:             agentconfig.StatusConnected,
+		InstanceName:       "OMC 陕西",
 		Policy:             agentconfig.RuntimePolicy{AllowedMethods: []string{http.MethodGet}},
-	}}, jwtSvc, upstream.Client(), nil, nil, nil, fakeConversationManager{active: "server-conversation"}).RegisterRoutes(group)
+	}}, jwtSvc, upstream.Client(), nil, nil, nil, fakeConversationManager{
+		active:   "server-conversation",
+		instance: "omcinst_1234567890abcdef",
+	}).RegisterRoutes(group)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/agent/chat/stream", strings.NewReader(`{"message":"hello","conversationId":"stale-browser-value"}`))
@@ -86,6 +97,22 @@ func TestChatStreamProxiesToAgentStudioWithDelegation(t *testing.T) {
 	require.Contains(t, capturedBody, `"conversationId":"server-conversation"`)
 	require.NotContains(t, capturedBody, "stale-browser-value")
 	require.Contains(t, capturedBody, `"externalIdentity"`)
+	var capturedPayload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(capturedBody), &capturedPayload))
+	contextValue, ok := capturedPayload["context"].(map[string]any)
+	require.True(t, ok)
+	identity, ok := contextValue["externalIdentity"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "operator", identity["externalUserName"])
+	metadata, ok := identity["metadata"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "omc", metadata["sourceSystem"])
+	require.Equal(t, "OMC 陕西", metadata["instanceName"])
+	require.Equal(t, "omcinst_1234567890abcdef", metadata["instanceId"])
+	require.Equal(t, "12345678", metadata["instanceShortId"])
+	require.Equal(t, "external-agent-connector", metadata["connectorSlug"])
+	require.Equal(t, "connector-1", metadata["connectorId"])
+	require.Equal(t, "operator", metadata["userDisplayName"])
 	require.True(t, strings.HasPrefix(capturedAuth, "Bearer "))
 	token := strings.TrimPrefix(capturedAuth, "Bearer ")
 	claims, err := jwtSvc.ValidateAgentDelegationToken(token)

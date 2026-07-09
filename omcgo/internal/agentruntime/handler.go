@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -31,6 +32,7 @@ type HTTPDoer interface {
 type ConversationManager interface {
 	Active(ctx context.Context, connectorID string, claims *admin.Claims) (string, error)
 	Rotate(ctx context.Context, connectorID string, claims *admin.Claims) (string, error)
+	InstanceID(ctx context.Context) (string, error)
 }
 
 type Handler struct {
@@ -111,7 +113,7 @@ func (h *Handler) ChatStream(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	rawBody = injectExternalIdentity(rawBody, claims)
+	rawBody = h.injectExternalIdentity(c.Request.Context(), rawBody, claims, target)
 	delegationToken, _, err := h.jwt.GenerateAgentDelegationToken(claims)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
@@ -236,7 +238,7 @@ func (h *Handler) applyActiveConversation(ctx context.Context, raw []byte, conne
 	return next, nil
 }
 
-func injectExternalIdentity(raw []byte, claims *admin.Claims) []byte {
+func (h *Handler) injectExternalIdentity(ctx context.Context, raw []byte, claims *admin.Claims, target *agentconfig.RuntimeTarget) []byte {
 	var payload map[string]any
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return raw
@@ -251,6 +253,7 @@ func injectExternalIdentity(raw []byte, claims *admin.Claims) []byte {
 		"username":         claims.Username,
 		"roles":            claims.Roles,
 		"scopes":           claims.Scopes,
+		"metadata":         h.externalIdentityMetadata(ctx, claims, target),
 	}
 	payload["context"] = contextValue
 	next, err := json.Marshal(payload)
@@ -258,6 +261,86 @@ func injectExternalIdentity(raw []byte, claims *admin.Claims) []byte {
 		return raw
 	}
 	return next
+}
+
+func (h *Handler) externalIdentityMetadata(ctx context.Context, claims *admin.Claims, target *agentconfig.RuntimeTarget) map[string]any {
+	connectorID := ""
+	connectorSlug := ""
+	instanceNameIsDefault := true
+	if target != nil {
+		connectorID = target.ConnectorID
+		connectorSlug = target.ConnectorSlug
+		instanceNameIsDefault = target.InstanceNameIsDefault || strings.TrimSpace(target.InstanceName) == ""
+	}
+	metadata := map[string]any{
+		"sourceSystem":    "omc",
+		"userDisplayName": strings.TrimSpace(claims.Username),
+		"connectorId":     strings.TrimSpace(connectorID),
+		"connectorSlug":   strings.TrimSpace(connectorSlug),
+		"instanceName":    agentRuntimeInstanceName(target),
+		"localIPs":        localIPStrings(),
+	}
+	if instanceNameIsDefault {
+		metadata["instanceNameIsDefault"] = true
+	}
+	if h.conversations != nil {
+		instanceID, err := h.conversations.InstanceID(ctx)
+		if err != nil {
+			h.logger.Warn("read agent runtime instance id for external identity", zap.Error(err))
+		} else if instanceID != "" {
+			metadata["instanceId"] = instanceID
+			metadata["instanceShortId"] = shortAgentInstanceID(instanceID)
+		}
+	}
+	return metadata
+}
+
+func agentRuntimeInstanceName(target *agentconfig.RuntimeTarget) string {
+	if target == nil {
+		return agentconfig.DefaultOMCName
+	}
+	if value := strings.TrimSpace(target.InstanceName); value != "" {
+		return value
+	}
+	return agentconfig.DefaultOMCName
+}
+
+func shortAgentInstanceID(instanceID string) string {
+	value := strings.TrimPrefix(strings.TrimSpace(instanceID), instanceIDPrefix)
+	if len(value) <= 8 {
+		return value
+	}
+	return value[:8]
+}
+
+func localIPStrings() []string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, 4)
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ip, _, err := net.ParseCIDR(addr.String())
+			if err != nil || ip == nil || ip.IsLoopback() {
+				continue
+			}
+			if ip4 := ip.To4(); ip4 != nil {
+				out = append(out, ip4.String())
+			}
+			if len(out) >= 8 {
+				return out
+			}
+		}
+	}
+	return out
 }
 
 func parseSSEFrame(raw string) sseFrame {

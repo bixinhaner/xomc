@@ -111,3 +111,17 @@ func TestConversationServiceRepairsMissingInstanceIDWhenConversationExists(t *te
 	require.NoError(t, err)
 	require.True(t, isAgentInstanceID(instanceItem.Value))
 }
+
+func TestConversationServiceKeepsStableInstanceID(t *testing.T) {
+	ctx := context.Background()
+	store := newMemoryConversationStore()
+	svc := NewConversationService(store)
+
+	first, err := svc.InstanceID(ctx)
+	require.NoError(t, err)
+	second, err := svc.InstanceID(ctx)
+	require.NoError(t, err)
+
+	require.Equal(t, first, second)
+	require.True(t, isAgentInstanceID(first))
+}
