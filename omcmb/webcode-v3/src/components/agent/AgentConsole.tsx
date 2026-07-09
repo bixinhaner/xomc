@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Bot, Plus, Send, ShieldCheck, Sparkles, User, X } from 'lucide-react'
+import { Bot, GripVertical, Maximize2, Minimize2, Plus, Send, ShieldCheck, Sparkles, User, X } from 'lucide-react'
 
 import {
   AgentMarkdown,
@@ -13,6 +13,7 @@ import {
   type AgentThoughtEntry,
 } from '@core/agentkit'
 import { useAgentPanelController } from '@core/hooks/useAgentPanelController'
+import { useAgentPanelLayout } from '@core/hooks/useAgentPanelLayout'
 import { useT } from '@/hooks/useT'
 import { cn } from '@/lib/utils'
 
@@ -322,6 +323,7 @@ export function AgentConsole({ open, onClose }: AgentConsoleProps) {
     [location.pathname, location.search]
   )
   const controller = useAgentPanelController({ context, active: open })
+  const panelLayout = useAgentPanelLayout({ horizontalMargin: 32 })
 
   if (!open) return null
 
@@ -334,8 +336,28 @@ export function AgentConsole({ open, onClose }: AgentConsoleProps) {
   }
 
   return (
-    <aside className="fixed bottom-24 right-4 top-[76px] z-40 flex w-[min(400px,calc(100vw-32px))] flex-col border border-cyan-400/55 bg-[#061225] shadow-[0_0_28px_rgba(0,240,255,0.24)]">
+    <aside
+      className={cn(
+        'fixed bottom-24 right-4 top-[76px] z-40 flex w-[min(400px,calc(100vw-32px))] flex-col border border-cyan-400/55 bg-[#061225] shadow-[0_0_28px_rgba(0,240,255,0.24)] transition-[width] duration-150 ease-out',
+        panelLayout.isResizing && 'transition-none'
+      )}
+      style={panelLayout.panelStyle}
+    >
       <div className="pointer-events-none absolute inset-0 scanline" />
+      <div
+        className="absolute inset-y-0 -left-1 z-10 hidden w-2 cursor-ew-resize touch-none items-center justify-center md:flex"
+        aria-label={t('agent.resizePanel')}
+        title={t('agent.resizePanel')}
+        {...panelLayout.resizeHandleProps}
+      >
+        <div className={cn(
+          'flex h-12 w-3 items-center justify-center border border-transparent bg-black/20 text-cyan-300/60 opacity-0 transition-opacity',
+          'hover:border-cyan-300/45 hover:bg-cyan-400/10 hover:text-cyan-100 hover:opacity-100 focus-visible:border-cyan-200/70 focus-visible:bg-cyan-400/10 focus-visible:opacity-100 focus-visible:outline-none',
+          panelLayout.isResizing && 'border-cyan-200/60 bg-cyan-400/10 opacity-100'
+        )}>
+          <GripVertical className="size-3.5" />
+        </div>
+      </div>
       <header className="relative flex h-12 shrink-0 items-center gap-3 border-b border-cyan-400/30 px-3">
         <div className="flex min-w-0 flex-1 items-center gap-2 font-mono text-sm uppercase tracking-[0.2em] text-cyan-100">
           <Bot className="size-4 text-cyan-300" />
@@ -352,6 +374,15 @@ export function AgentConsole({ open, onClose }: AgentConsoleProps) {
           )}
           {controller.enabled ? t('agent.connected') : t('agent.disconnected')}
         </span>
+        <button
+          type="button"
+          className="grid size-7 place-items-center text-cyan-300/70 hover:bg-cyan-400/10 hover:text-cyan-100"
+          onClick={panelLayout.toggleExpanded}
+          aria-label={panelLayout.isExpanded ? t('agent.restorePanel') : t('agent.expandPanel')}
+          title={panelLayout.isExpanded ? t('agent.restorePanel') : t('agent.expandPanel')}
+        >
+          {panelLayout.isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+        </button>
         <button
           type="button"
           className="grid size-7 place-items-center text-cyan-300/70 hover:bg-cyan-400/10 hover:text-cyan-100 disabled:cursor-not-allowed disabled:opacity-40"

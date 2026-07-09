@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { Popconfirm } from 'antd';
 import {
   BellOutlined,
+  ArrowsAltOutlined,
   CheckOutlined,
   CloseOutlined,
   CopyOutlined,
@@ -12,6 +13,7 @@ import {
   QuestionCircleOutlined,
   RobotOutlined,
   SendOutlined,
+  ShrinkOutlined,
   ThunderboltOutlined,
   ToolOutlined,
   WifiOutlined,
@@ -29,6 +31,7 @@ import {
   type AgentThoughtEntry,
 } from '@core/agentkit';
 import { useAgentPanelController } from '@core/hooks/useAgentPanelController';
+import { useAgentPanelLayout } from '@core/hooks/useAgentPanelLayout';
 import { useT, type TranslateFn } from '@/hooks/useT';
 import styles from './AgentPanel.module.css';
 
@@ -507,6 +510,7 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
   const controller = useAgentPanelController({ context, active: open });
   const activeAssistant = latestAssistantMessage(controller.messages);
   const nowTick = useStreamingClock(controller.isStreaming);
+  const panelLayout = useAgentPanelLayout();
 
   const copyText = async (value: string) => {
     try {
@@ -534,7 +538,19 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
   };
 
   return (
-    <aside className={styles.panel} aria-label={t('agent.title')}>
+    <aside
+      className={`${styles.panel} ${panelLayout.isResizing ? styles.panelResizing : ''}`}
+      style={panelLayout.panelStyle}
+      aria-label={t('agent.title')}
+    >
+      <div
+        className={styles.resizeHandle}
+        aria-label={t('agent.resizePanel')}
+        title={t('agent.resizePanel')}
+        {...panelLayout.resizeHandleProps}
+      >
+        <span className={styles.resizeGrip} aria-hidden="true" />
+      </div>
       <header className={styles.panelHeader}>
         <div className={styles.heading}>
           <RobotOutlined />
@@ -544,6 +560,15 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
           {controller.enabled && <span className={styles.liveDot} aria-hidden="true" />}
           {controller.enabled ? t('agent.connected') : t('agent.disconnected')}
         </span>
+        <button
+          type="button"
+          className={styles.iconBtn}
+          onClick={panelLayout.toggleExpanded}
+          aria-label={panelLayout.isExpanded ? t('agent.restorePanel') : t('agent.expandPanel')}
+          title={panelLayout.isExpanded ? t('agent.restorePanel') : t('agent.expandPanel')}
+        >
+          {panelLayout.isExpanded ? <ShrinkOutlined /> : <ArrowsAltOutlined />}
+        </button>
         <Popconfirm
           title={t('agent.newConversationConfirmTitle')}
           description={t('agent.newConversationConfirmDescription')}

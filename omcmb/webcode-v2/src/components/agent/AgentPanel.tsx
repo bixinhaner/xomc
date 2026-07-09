@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Bot, CheckCircle2, Plus, Send, ShieldCheck, Sparkles, User, X } from 'lucide-react'
+import { Bot, CheckCircle2, GripVertical, Maximize2, Minimize2, Plus, Send, ShieldCheck, Sparkles, User, X } from 'lucide-react'
 
 import {
   AgentMarkdown,
@@ -13,6 +13,7 @@ import {
   type AgentThoughtEntry,
 } from '@core/agentkit'
 import { useAgentPanelController } from '@core/hooks/useAgentPanelController'
+import { useAgentPanelLayout } from '@core/hooks/useAgentPanelLayout'
 import { useT } from '@/hooks/useT'
 import { cn } from '@/lib/utils'
 
@@ -320,6 +321,7 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
     [location.pathname, location.search]
   )
   const controller = useAgentPanelController({ context, active: open })
+  const panelLayout = useAgentPanelLayout()
 
   if (!open) return null
 
@@ -332,7 +334,27 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
   }
 
   return (
-    <aside className="fixed bottom-0 right-0 top-14 z-50 flex w-[min(400px,100vw)] flex-col border-l border-border bg-background shadow-2xl">
+    <aside
+      className={cn(
+        'fixed bottom-0 right-0 top-14 z-50 flex w-[min(400px,100vw)] flex-col border-l border-border bg-background shadow-2xl transition-[width] duration-150 ease-out',
+        panelLayout.isResizing && 'transition-none'
+      )}
+      style={panelLayout.panelStyle}
+    >
+      <div
+        className="absolute inset-y-0 -left-1 z-10 hidden w-2 cursor-ew-resize touch-none items-center justify-center md:flex"
+        aria-label={t('agent.resizePanel')}
+        title={t('agent.resizePanel')}
+        {...panelLayout.resizeHandleProps}
+      >
+        <div className={cn(
+          'flex h-12 w-3 items-center justify-center rounded-full border border-transparent bg-transparent text-muted-foreground opacity-0 transition-opacity',
+          'hover:border-border hover:bg-muted hover:opacity-100 focus-visible:border-primary focus-visible:bg-muted focus-visible:opacity-100 focus-visible:outline-none',
+          panelLayout.isResizing && 'opacity-100'
+        )}>
+          <GripVertical className="size-3.5" />
+        </div>
+      </div>
       <header className="flex h-16 shrink-0 items-center gap-3 border-b border-border px-5">
         <div className="flex min-w-0 flex-1 items-center gap-2 text-base font-semibold">
           <Bot className="size-5 text-primary" />
@@ -349,6 +371,15 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
           )}
           {controller.enabled ? t('agent.connected') : t('agent.disconnected')}
         </span>
+        <button
+          type="button"
+          className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+          onClick={panelLayout.toggleExpanded}
+          aria-label={panelLayout.isExpanded ? t('agent.restorePanel') : t('agent.expandPanel')}
+          title={panelLayout.isExpanded ? t('agent.restorePanel') : t('agent.expandPanel')}
+        >
+          {panelLayout.isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+        </button>
         <button
           type="button"
           className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-45"
