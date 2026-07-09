@@ -22,6 +22,15 @@ import (
 var runTimeTokenRegex = regexp.MustCompile(`(?i)(\d+)\s*(days?|d|天|hours?|hrs?|hr|h|小时|minutes?|mins?|min|m|分钟|seconds?|secs?|sec|s|秒)`)
 var runTimeColonRegex = regexp.MustCompile(`^(\d+):(\d{1,2})(?::(\d{1,2}))?$`)
 
+var lteBandwidthEnumMHz = map[string]float64{
+	"n6":   1.4,
+	"n15":  3,
+	"n25":  5,
+	"n50":  10,
+	"n75":  15,
+	"n100": 20,
+}
+
 // parseRunTimeToSeconds parses TR069 run time format to seconds.
 // Supported formats: "40d 4h 58m", "2 days 5 hours", "58m",
 // "1天2小时3分钟4秒", "49:03:04" and plain numeric seconds.
@@ -68,6 +77,22 @@ func parseRunTimeToSeconds(val string) int64 {
 	return totalSeconds
 }
 
+func parseBandwidthMHz(val string) (float64, bool) {
+	trimmed := strings.TrimSpace(val)
+	if trimmed == "" {
+		return 0, false
+	}
+	if mhz, ok := lteBandwidthEnumMHz[strings.ToLower(trimmed)]; ok {
+		return mhz, true
+	}
+	trimmed = strings.TrimSuffix(strings.TrimSuffix(strings.ToLower(trimmed), "mhz"), "m")
+	value, err := strconv.ParseFloat(strings.TrimSpace(trimmed), 64)
+	if err != nil {
+		return 0, false
+	}
+	return value, true
+}
+
 // instanceAggregationRule 描述「同一逻辑列对应多个实例化 TR069 路径」的聚合规则。
 // 模板中以 `{x}` 形式表示通配数字索引（如 `{f}` `{c}` `{t}`），实际占位字符无关，
 // 仅用于阅读;运行期把所有 `\{[a-zA-Z]\}` 替换为 `(\d+)` 编译成正则匹配。
@@ -102,6 +127,8 @@ var universalInformInstanceMappings = []struct {
 	}},
 	// 频点 EARFCN / NRARFCNDL（小区级）
 	{column: "freq_point", templates: []string{
+		"Device.Services.GsmBTSCellDT.{g}.CurrentArfcn",
+		"DeviceGSM.Bts.{b}.Trx.{t}.Arfcn",
 		"Device.Services.FAPService.{f}.CellConfig.LTE.RAN.RF.EARFCNDL",
 		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.RAN.RF.NRARFCNDL",
 		"Device.Services.FAPService.{f}.CellConfig.LTE.RAN.Common.EARFCNDL",
@@ -113,6 +140,7 @@ var universalInformInstanceMappings = []struct {
 	}},
 	// Band（小区级）
 	{column: "band", templates: []string{
+		"Device.Services.GsmBTSCellDT.{g}.GsmBtsBand",
 		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.RAN.RF.FreqBandIndicator",
 		"Device.Services.FAPService.{f}.CellConfig.LTE.RAN.RF.FreqBandIndicator",
 	}},
@@ -121,8 +149,13 @@ var universalInformInstanceMappings = []struct {
 		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.CN.TA.{t}.TAC",
 		"Device.Services.FAPService.{f}.CellConfig.LTE.EPC.TAC",
 	}},
+	// LAC（GSM 小区级）
+	{column: "lac", templates: []string{
+		"Device.Services.GsmBTSCellDT.{g}.CurrLocAreaCode",
+	}},
 	// Cell ID / NR Cell Identity（小区级）
 	{column: "cell_id", templates: []string{
+		"Device.Services.GsmBTSCellDT.{g}.GsmCellID",
 		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.CN.TA.{t}.NrcellIdentity",
 		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.RAN.Common.CellLocalId",
 		"Device.Services.FAPService.{f}.CellConfig.LTE.RAN.Common.CellIdentity",
@@ -154,6 +187,7 @@ var deviceInfoVarcharLimits = map[string]int{
 	"cell_id":     64,
 	"freq_point":  32,
 	"ipsec_addr":  64,
+	"lac":         16,
 	"lock_status": 16,
 	"pci":         64,
 	"tac":         16,
@@ -303,6 +337,7 @@ func enforceDeviceInfoFieldSizeLimits(fields map[string]interface{}) {
 // 聚合（见 aggregateInstanceFields），单实例设备聚合后等价此处保留的单值。
 var universalInformMapping = map[string]string{
 	"Device.Services.FAPService.1.FAPControl.X_RADISYS_COM_AlarmStatus": "alarm_severity",
+	"Device.DeviceInfo.FAP_adminstate":                                  "admin_state",
 	// TR-181 Ethernet 标准 path（取代 CMCC X_CMCC_MACAddress，多数 CPE 上报此 path）
 	"Device.Ethernet.Interface.MACAddress": "mac",
 	// #362: 发射功率不再走 universal 的 Capabilities.MaxTxPower。MaxTxPower 是
@@ -316,8 +351,10 @@ var universalInformMapping = map[string]string{
 	// GSM 位置区码：补全 device_groups LAC 匹配模式所需的设备侧数据源（T-2026-05-25）。
 	// 与 TAC 平行，CPE 同时上报时 LAC 多见于双模 / GSM 设备。
 	// 兼容两种 CPE 命名：BTS.* 是 Baicells BaiBS_AGS 旧固件；GSM.* 是 sNBS1200/9200 实测路径。
-	"Device.DeviceInfo.BTS.CurrentLac": "lac",
-	"Device.DeviceInfo.GSM.CurrentLac": "lac",
+	"Device.DeviceInfo.BTS.CurrentLac":   "lac",
+	"Device.DeviceInfo.GSM.CurrentLac":   "lac",
+	"Device.DeviceInfo.BTS.CurrentArfcn": "freq_point",
+	"Device.DeviceInfo.GSM.CurrentArfcn": "freq_point",
 	// migration 000003：GSM/BTS 专属（DeviceGSM.* TR069 路径同步）
 	"DeviceGSM.BscSelect":      "bsc_select",
 	"DeviceGSM.OmlRemoteIp":    "oml_remote_ip",
@@ -496,6 +533,8 @@ func lookupWANMAC(paramValues map[string]string) (string, bool) {
 
 func lookupTransmitPower(paramValues map[string]string, mappedValue string) (string, bool) {
 	for _, suffix := range []string{
+		".BtsRfPower",
+		".GsmBtsRFPower",
 		".X_COM_MaxTxPowerExpanded",
 		".PowerModify",
 		".ReferenceSignalPower",
@@ -677,6 +716,20 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 	for paramPath, infoColumn := range universalInformMapping {
 		if val, ok := paramValues[paramPath]; ok && val != "" {
 			fields[infoColumn] = val
+		}
+	}
+	if raw, ok := fields["bandwidth"].(string); ok {
+		if mhz, parsed := parseBandwidthMHz(raw); parsed {
+			fields["bandwidth"] = mhz
+		} else {
+			delete(fields, "bandwidth")
+		}
+	}
+	if _, exists := fields["bandwidth"]; !exists {
+		if raw, ok := paramValues["Device.DeviceInfo.SAS.PreferredBandwidth"]; ok {
+			if mhz, parsed := parseBandwidthMHz(raw); parsed {
+				fields["bandwidth"] = mhz
+			}
 		}
 	}
 	if _, exists := fields["mac"]; !exists {

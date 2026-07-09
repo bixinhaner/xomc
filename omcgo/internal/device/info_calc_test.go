@@ -34,7 +34,7 @@ func TestCalcCellStatus(t *testing.T) {
 		{
 			name: "LTE strict path true is active",
 			params: map[string]string{
-				"Device.Services.FAPService.1.FAPControl.LTE.OpState":     "true",
+				"Device.Services.FAPService.1.FAPControl.LTE.OpState": "true",
 			},
 			want: "normal",
 		},
@@ -129,7 +129,7 @@ func TestCalcOpState(t *testing.T) {
 		{
 			name: "OpState=true → 1（eNB 激活回归）",
 			params: map[string]string{
-				"Device.Services.FAPService.1.FAPControl.LTE.OpState":     "true",
+				"Device.Services.FAPService.1.FAPControl.LTE.OpState": "true",
 			},
 			want: "1",
 		},
@@ -192,9 +192,9 @@ func TestCalcOpState(t *testing.T) {
 		{
 			name: "GSM cell active 与 LTE/NR cell inactive 共存 — 任一制式 active 即激活",
 			params: map[string]string{
-				"Device.Services.FAPService.1.FAPControl.LTE.OpState":     "0",
-				"Device.Services.GsmBTSCellDT.1.OpState":                  "1",
-				"Device.Services.GsmBTSCellDT.1.InUse":                    "true",
+				"Device.Services.FAPService.1.FAPControl.LTE.OpState": "0",
+				"Device.Services.GsmBTSCellDT.1.OpState":              "1",
+				"Device.Services.GsmBTSCellDT.1.InUse":                "true",
 			},
 			want: "1",
 		},
@@ -243,7 +243,7 @@ func TestCalcMMEStatus(t *testing.T) {
 		{
 			name: "lte gateway mme status has priority over legacy pool",
 			params: map[string]string{
-				"Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus":                 "disconnected",
+				"Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus":                   "disconnected",
 				"Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.1.MME1Status": "1",
 				"Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.2.MME1Status": "1",
 			},
@@ -369,8 +369,8 @@ func TestCalcSyncStatus(t *testing.T) {
 		{
 			name: "NR PLL sync state takes precedence",
 			params: map[string]string{
-				"Device.Services.FAPService.1.FAPControl.PLLSyncState":         "LOCKED",
-				"Device.FAP.Synchronization.ClockSourceSyncState":              "HOLDOVER",
+				"Device.Services.FAPService.1.FAPControl.PLLSyncState":                   "LOCKED",
+				"Device.FAP.Synchronization.ClockSourceSyncState":                        "HOLDOVER",
 				"Device.Services.FAPService.1.FAPControl.NR.Gateway.X_COM_tfcsSyncState": "1",
 			},
 			want: "LOCKED",
@@ -386,7 +386,7 @@ func TestCalcSyncStatus(t *testing.T) {
 			name: "BaiBNQ clock source sync state takes precedence over GPS status",
 			params: map[string]string{
 				"Device.FAP.Synchronization.ClockSourceSyncState": "Synchronized",
-				"Device.DeviceInfo.GPS_Status":                         "Synchronized",
+				"Device.DeviceInfo.GPS_Status":                    "Synchronized",
 			},
 			want: "Synchronized",
 		},
@@ -394,7 +394,7 @@ func TestCalcSyncStatus(t *testing.T) {
 			name: "LTE management server tfcs sync state",
 			params: map[string]string{
 				"Device.ManagementServer.tfcsSyncState": "1",
-				"Device.DeviceInfo.X_COM_GPS_Status":  "1",
+				"Device.DeviceInfo.X_COM_GPS_Status":    "1",
 			},
 			want: "gps",
 		},
@@ -402,9 +402,9 @@ func TestCalcSyncStatus(t *testing.T) {
 			name: "LTE management server raw textual sync state is preserved",
 			params: map[string]string{
 				"Device.ManagementServer.tfcsSyncState": "LOCKED",
-				"Device.DeviceInfo.X_COM_GPS_Status":  "0",
-				"Device.DeviceInfo.X_COM_BDS_Status":  "0",
-				"Device.DeviceInfo.X_COM_1588_Status": "0",
+				"Device.DeviceInfo.X_COM_GPS_Status":    "0",
+				"Device.DeviceInfo.X_COM_BDS_Status":    "0",
+				"Device.DeviceInfo.X_COM_1588_Status":   "0",
 			},
 			want: "LOCKED",
 		},
@@ -412,7 +412,7 @@ func TestCalcSyncStatus(t *testing.T) {
 			name: "GPS synced",
 			params: map[string]string{
 				"Device.Services.FAPService.1.FAPControl.LTE.Gateway.X_COM_tfcsSyncState": "1",
-				"Device.DeviceInfo.X_COM_GPS_Status": "1",
+				"Device.DeviceInfo.X_COM_GPS_Status":                                      "1",
 			},
 			want: "gps",
 		},
@@ -427,7 +427,7 @@ func TestCalcSyncStatus(t *testing.T) {
 			name: "BDS synced",
 			params: map[string]string{
 				"Device.Services.FAPService.1.FAPControl.LTE.Gateway.X_COM_tfcsSyncState": "1",
-				"Device.DeviceInfo.X_COM_BDS_Status": "1",
+				"Device.DeviceInfo.X_COM_BDS_Status":                                      "1",
 			},
 			want: "beidou",
 		},
@@ -435,7 +435,7 @@ func TestCalcSyncStatus(t *testing.T) {
 			name: "1588 synced",
 			params: map[string]string{
 				"Device.Services.FAPService.1.FAPControl.LTE.Gateway.X_COM_tfcsSyncState": "1",
-				"Device.DeviceInfo.X_COM_1588_Status": "1",
+				"Device.DeviceInfo.X_COM_1588_Status":                                     "1",
 			},
 			want: "ntp",
 		},
@@ -443,7 +443,7 @@ func TestCalcSyncStatus(t *testing.T) {
 			name: "GPS available but not locked",
 			params: map[string]string{
 				"Device.Services.FAPService.1.FAPControl.LTE.Gateway.X_COM_tfcsSyncState": "0",
-				"Device.DeviceInfo.X_COM_GPS_Status": "1",
+				"Device.DeviceInfo.X_COM_GPS_Status":                                      "1",
 			},
 			want: "gps",
 		},
@@ -496,22 +496,35 @@ func TestCalcRFStatus(t *testing.T) {
 		want   string
 	}{
 		{
-			name:   "radio disabled",
-			params: map[string]string{"Device.Services.FAPService.1.FAPControl.LTE.AdminState": "false"},
+			name:   "rf radio disabled",
+			params: map[string]string{"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable": "false"},
 			want:   "off",
 		},
 		{
-			name: "radio on, RF transmitting",
+			name: "rf radio enabled",
 			params: map[string]string{
-				"Device.Services.FAPService.1.FAPControl.LTE.AdminState":       "true",
+				"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable": "true",
+			},
+			want: "on",
+		},
+		{
+			name: "rf radio enable does not depend on admin state",
+			params: map[string]string{
+				"Device.Services.FAPService.1.FAPControl.LTE.AdminState":               "false",
+				"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable": "true",
+			},
+			want: "on",
+		},
+		{
+			name: "legacy RFTxStatus fallback transmitting",
+			params: map[string]string{
 				"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.RFTxStatus": "1",
 			},
 			want: "on",
 		},
 		{
-			name: "radio on, RF not transmitting",
+			name: "legacy RFTxStatus fallback not transmitting",
 			params: map[string]string{
-				"Device.Services.FAPService.1.FAPControl.LTE.AdminState":       "true",
 				"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.RFTxStatus": "0",
 			},
 			want: "error",

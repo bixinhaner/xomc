@@ -588,7 +588,21 @@ export const deviceApi = {
       page: 1,
       pageSize: 1,
     });
-    return result.items.length > 0 ? result.items[0] : null;
+    const listDevice = result.items.length > 0 ? result.items[0] : null;
+    if (!listDevice?.id) return listDevice;
+
+    const detailDevice = await deviceApi.getById(listDevice.id);
+    if (!detailDevice) return listDevice;
+
+    // 详情页按 SN 直达或浏览器刷新时没有列表页预热缓存。部分部署上的单设备详情
+    // 接口可能不带部分 list/device_info 字段，不能让空值覆盖列表接口已经解析出的有效值。
+    const merged: Device = { ...listDevice, ...detailDevice };
+    for (const [key, value] of Object.entries(detailDevice) as Array<[keyof Device, unknown]>) {
+      if (value === '' || value === null || value === undefined) {
+        (merged as Record<keyof Device, unknown>)[key] = listDevice[key];
+      }
+    }
+    return merged;
   },
 
   async create(input: CreateDeviceInput): Promise<Device> {

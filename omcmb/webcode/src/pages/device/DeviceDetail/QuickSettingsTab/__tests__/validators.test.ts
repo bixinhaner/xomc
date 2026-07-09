@@ -11,11 +11,12 @@ import {
 } from '../validators';
 
 describe('LTE bandwidth display formatting', () => {
-  it('uses the same LTE enum mapping helper as quick settings', () => {
-    expect(formatLteBandwidthDisplay('100')).toBe(
-      formatEnumDisplayValue('100', undefined, LTE_BANDWIDTH_PATH),
-    );
-    expect(formatLteBandwidthDisplay('100')).toBe('CELL_BW_100(20M)');
+  it('uses compact LTE bandwidth labels', () => {
+    expect(formatEnumDisplayValue('100', undefined, LTE_BANDWIDTH_PATH)).toBe('CELL_BW_100(20M)');
+    expect(formatLteBandwidthDisplay('100')).toBe('20M');
+    expect(formatLteBandwidthDisplay('20')).toBe('20M');
+    expect(formatLteBandwidthDisplay('20.00')).toBe('20M');
+    expect(formatLteBandwidthDisplay(20)).toBe('20M');
   });
 
   it('falls back to dash for empty detail values', () => {
@@ -25,7 +26,7 @@ describe('LTE bandwidth display formatting', () => {
   });
 
   it('preserves unknown values', () => {
-    expect(formatLteBandwidthDisplay('20MHz')).toBe('20MHz');
+    expect(formatLteBandwidthDisplay('unknown')).toBe('unknown');
   });
 
   it('maps BM RU RF switch values to on/off labels', () => {
