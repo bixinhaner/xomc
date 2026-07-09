@@ -49,11 +49,16 @@ function normalizeMarkdownText(content: string): string {
   next = next.replace(/([：:；;。])\s*([-*+])\s*(GET|POST|PUT|PATCH|DELETE)(\/api\/[A-Za-z0-9_./:?=&%-]+)/g, '$1\n\n$2 `$3 $4`');
   next = next.replace(/([^\n])\s*([-*+])\s*(GET|POST|PUT|PATCH|DELETE)(\/api\/[A-Za-z0-9_./:?=&%-]+)/g, '$1\n$2 `$3 $4`');
   next = next.replace(/(数量[：:][^\n]+?)(调用的\s*API[：:])/g, '$1\n$2');
+  next = next.replace(
+    /([`\u4e00-\u9fff）)\]】])\s*([-+])(?=([\u4e00-\u9fff][^。\n]{0,24}[：:]))/g,
+    '$1\n$2 '
+  );
+  next = next.replace(/([^\n])\s+(结论[：:])/g, '$1\n\n$2');
   next = next.replace(/([：:；;。])\s*(\d{1,2})\.([^\s\d])/g, '$1\n\n$2. $3');
   next = next.replace(/([\u4e00-\u9fffA-Za-z）)，,])\s+(\d{1,2})\.([\u4e00-\u9fffA-Za-z（(])/g, '$1\n$2. $3');
   next = next.replace(/([\u4e00-\u9fff）)，,])(\d{1,2})\.([\u4e00-\u9fffA-Za-z（(])/g, '$1\n$2. $3');
-  next = next.replace(/([：:。；;])\s*([-+])([^\s])/g, '$1\n$2 $3');
-  next = next.replace(/([：:。；;])\s*\*([^\s*])/g, '$1\n* $2');
+  next = next.replace(/([：:。；;])\s*([-+])([^\s])/g, '$1\n\n$2 $3');
+  next = next.replace(/([：:。；;])\s*\*([^\s*])/g, '$1\n\n* $2');
   next = next.replace(/`((?:GET|POST|PUT|PATCH|DELETE)\s*\/api\/[A-Za-z0-9_./:?=&%-]+)`/g, (_match, endpoint: string) => {
     return `\`${normalizeRestEndpoint(endpoint)}\``;
   });

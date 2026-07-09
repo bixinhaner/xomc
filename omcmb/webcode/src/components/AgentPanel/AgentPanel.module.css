@@ -822,15 +822,24 @@
 
 .markdown ul,
 .markdown ol {
-  padding-left: 18px;
+  padding-left: 20px;
 }
 
 .markdown li {
   padding-left: 1px;
+  line-height: 1.75;
+}
+
+.markdown li::marker {
+  color: var(--agent-panel-text-strong);
+}
+
+.markdown li > p {
+  margin: 0;
 }
 
 .markdown li + li {
-  margin-top: 4px;
+  margin-top: 6px;
 }
 
 .markdown blockquote {

@@ -38,4 +38,20 @@ describe('normalizeAgentMarkdown', () => {
       '数量：**0台**\n调用的API：`GET /api/v1/devices`'
     );
   });
+
+  it('splits compact Chinese bullet results after inline values', () => {
+    expect(
+      normalizeAgentMarkdown(
+        '我查询到的只读结果是：-当前活动告警：`0`-未确认告警：`0`-未读告警：`0`-活动告警列表：为空-设备统计：总设备`0`，在线`0` 结论：系统当前没有活动告警。'
+      )
+    ).toBe(
+      '我查询到的只读结果是：\n\n' +
+        '- 当前活动告警：`0`\n' +
+        '- 未确认告警：`0`\n' +
+        '- 未读告警：`0`\n' +
+        '- 活动告警列表：为空\n' +
+        '- 设备统计：总设备`0`，在线`0`\n\n' +
+        '结论：系统当前没有活动告警。'
+    );
+  });
 });
