@@ -47,6 +47,7 @@ interface BackendDevice {
   mac_address?: string;
   group_id?: string;
   group_name?: string;
+  source_type?: 'manual' | 'rule' | 'auto';
   // T-XXX (Phase 0)：字段名对齐后端 DeviceWithInfo DTO（json tag），
   // 修复"其他信息组"接入/断开/首次接入/运行时长 5 字段全空白 bug。
   // 原 mapper 用的 `online_at / offline_at / first_online_at / up_time` 在后端从不存在。
@@ -340,6 +341,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
     groupId: bd.group_id || undefined,
     // 分组未命中时前端统一按空值展示占位符；这里保留字符串兜底，避免 undefined。
     groupName: bd.group_name || '',
+    sourceType: bd.source_type,
     // T-XXX (Phase 0)：字段名对齐后端 DTO。设计文档 §13。
     onlineTime: bd.last_online_time || '',
     offlineTime: bd.last_offline_time || '',

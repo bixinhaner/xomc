@@ -38,6 +38,7 @@ function backendDevice(overrides: Record<string, unknown> = {}) {
     ip_address: '10.0.0.1',
     group_id: 'group-1',
     group_name: '默认设备组',
+    source_type: 'manual',
     connection_request_url: '',
     inform_interval: 300,
     device_name: '基站A',
@@ -117,8 +118,26 @@ describe('deviceApi.getList — filter → query 映射', () => {
     expect(d.isOnline).toBe(true);
     expect(d.groupId).toBe('group-1');
     expect(d.groupName).toBe('默认设备组');
+    expect(d.sourceType).toBe('manual');
     // 后端 stats 直读（不靠 items.filter 估算）
     expect(out.stats.online_count).toBe(1);
+  });
+
+  it('BackendDevice source_type=auto 映射为 Device.sourceType', async () => {
+    getMock.mockResolvedValue({
+      data: {
+        items: [backendDevice({ group_id: undefined, group_name: undefined, source_type: 'auto' })],
+        total: 1,
+        page: 1,
+        page_size: 20,
+        total_pages: 1,
+      },
+    });
+
+    const out = await deviceApi.getList({ page: 1, pageSize: 20 });
+    expect(out.items[0].groupId).toBeUndefined();
+    expect(out.items[0].groupName).toBe('');
+    expect(out.items[0].sourceType).toBe('auto');
   });
 
   it('列表接口返回 device_address 时也能映射成 installAddress', async () => {

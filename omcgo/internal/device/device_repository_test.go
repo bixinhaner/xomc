@@ -337,6 +337,9 @@ func TestDeviceWithInfoSelectColumns_AlarmAggregation(t *testing.T) {
 	cols := deviceWithInfoSelectColumns()
 	joined := strings.Join(cols, " || ")
 
+	assert.Contains(t, joined, "COALESCE(dgm.source_type, 'auto')", "无真实归属行的默认组视图必须派生为 auto")
+	assert.Contains(t, joined, "as source_type", "列表 DTO 必须暴露归属来源字段")
+
 	assert.Contains(t, joined, "CASE aa.top_sev", "告警级别列必须来自聚合派生 CASE")
 	assert.Contains(t, joined, "31001", "critical 需兼容 31001 编码")
 	assert.Contains(t, joined, "31002", "major 需兼容 31002 编码")

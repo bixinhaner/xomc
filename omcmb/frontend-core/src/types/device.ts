@@ -128,9 +128,9 @@ export interface Device {
   groupName: string;
   // T-0027 D9：分组归属来源（PRD §12.6 跨模块联合变更）
   // backend 通过 device_group_members.source_type 列传出（snake_case → camelCase 自动）
-  // 'manual' = 用户手工指派；'rule' = 历史 device_rules 引擎遗留（device_rules 已下线）
+  // 'manual' = 用户手工指派；'rule' = 规则匹配；'auto' = 系统默认组视图/自动归属
   // optional 因后端列表 API 尚未全部 JOIN device_group_members 暴露此字段
-  sourceType?: 'manual' | 'rule';
+  sourceType?: 'manual' | 'rule' | 'auto';
   onlineTime: string;
   offlineTime: string;
   // T-XXX (Phase 0)：后端 SQL 派生秒数（NULL 表示设备从未上线/无法计算）。

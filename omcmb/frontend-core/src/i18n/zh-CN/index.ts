@@ -1341,6 +1341,7 @@ const messages: Record<string, string> = {
   'device.sourceType':          '归属来源',
   'device.sourceType.manual':   '手工',
   'device.sourceType.rule':     '规则',
+  'device.sourceType.auto':     '自动',
   'device.moveToGroupTip':      '已选择 {count} 台设备，请选择目标设备组：',
   'device.searchGroup':         '搜索设备组',
   'device.selectedGroup':       '目标设备组',

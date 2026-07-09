@@ -1339,6 +1339,7 @@ const messages: Record<string, string> = {
   'device.sourceType':          'Group Source',
   'device.sourceType.manual':   'Manual',
   'device.sourceType.rule':     'Rule',
+  'device.sourceType.auto':     'Auto',
   'device.moveToGroupTip':      '{count} device(s) selected. Please choose a target group:',
   'device.searchGroup':         'Search groups',
   'device.selectedGroup':       'Target group',
