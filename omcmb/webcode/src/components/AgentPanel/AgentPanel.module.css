@@ -511,25 +511,26 @@
   line-height: 1.35;
 }
 
-.empty span {
+.emptyHint {
+  display: block;
   color: var(--agent-panel-text-muted);
   font-size: 13px;
   font-weight: 500;
   line-height: 1.72;
-  max-width: 300px;
+  max-width: 340px;
 }
 
 .emptyPrompts {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 158px));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px 12px;
   margin-top: 16px;
-  width: min(100%, 328px);
+  width: min(100%, 468px);
 }
 
 .emptyPrompts button {
   display: inline-flex;
-  height: 38px;
+  min-height: 38px;
   min-width: 0;
   align-items: center;
   justify-content: center;
@@ -541,9 +542,9 @@
   cursor: pointer;
   font-size: 12px;
   font-weight: 650;
-  line-height: 1;
-  padding: 0 13px;
-  white-space: nowrap;
+  line-height: 1.2;
+  padding: 8px 13px;
+  white-space: normal;
   box-shadow: 0 8px 18px rgba(15, 23, 42, 0.03);
 }
 
@@ -556,6 +557,14 @@
 .emptyPrompts button :global(.anticon) {
   flex: 0 0 auto;
   font-size: 15px;
+}
+
+.promptText {
+  min-width: 0;
+  color: inherit;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
 }
 
 .disabledEmpty {

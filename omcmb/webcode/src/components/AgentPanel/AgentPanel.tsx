@@ -481,12 +481,12 @@ function EmptyPromptState({ onPrompt }: { onPrompt: (prompt: string) => void }) 
         <span className={styles.emptyBotDotThree} />
       </div>
       <strong>{t('agent.emptyTitle')}</strong>
-      <span>{t('agent.emptyHint')}</span>
+      <span className={styles.emptyHint}>{t('agent.emptyHint')}</span>
       <div className={styles.emptyPrompts}>
         {prompts.map((prompt) => (
           <button key={prompt.text} type="button" onClick={() => onPrompt(prompt.text)}>
             {prompt.icon}
-            {prompt.text}
+            <span className={styles.promptText}>{prompt.text}</span>
           </button>
         ))}
       </div>
