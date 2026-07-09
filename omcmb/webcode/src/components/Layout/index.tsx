@@ -144,7 +144,7 @@ export default function AppShell() {
             <TaskPanel />
           </div>
         )}
-        {agentVisible && agentOpen && (
+        {agentVisible && (
           <AgentPanel open={agentOpen} onClose={() => setAgentOpen(false)} />
         )}
       </div>

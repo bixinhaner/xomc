@@ -1,15 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
+import { Popconfirm } from 'antd';
 import {
+  BellOutlined,
   CheckOutlined,
   CloseOutlined,
   CopyOutlined,
   FieldTimeOutlined,
   InfoCircleOutlined,
   PlusOutlined,
+  QuestionCircleOutlined,
   RobotOutlined,
   SendOutlined,
   ThunderboltOutlined,
+  ToolOutlined,
+  WifiOutlined,
 } from '@ant-design/icons';
 import {
   AgentMarkdown,
@@ -449,6 +454,43 @@ function shouldRenderActivity(activity: AgentPanelActivity, pendingCallId: strin
   return activity.status === 'preview' || activity.status === 'calling' || activity.status === 'running';
 }
 
+function EmptyPromptState({ onPrompt }: { onPrompt: (prompt: string) => void }) {
+  const t = useT();
+  const prompts = [
+    { text: t('agent.suggestionNetworkHealth'), icon: <QuestionCircleOutlined /> },
+    { text: t('agent.suggestionOnlineDevices'), icon: <WifiOutlined /> },
+    { text: t('agent.suggestionAlarms'), icon: <BellOutlined /> },
+    { text: t('agent.suggestionConfigChange'), icon: <ToolOutlined /> },
+  ];
+
+  return (
+    <div className={styles.empty}>
+      <div className={styles.emptyBot} aria-hidden="true">
+        <span className={styles.emptyBotOrbit} />
+        <span className={styles.emptyBotHead}>
+          <span className={styles.emptyBotFace}>
+            <span />
+            <span />
+          </span>
+        </span>
+        <span className={styles.emptyBotDotOne} />
+        <span className={styles.emptyBotDotTwo} />
+        <span className={styles.emptyBotDotThree} />
+      </div>
+      <strong>{t('agent.emptyTitle')}</strong>
+      <span>{t('agent.emptyHint')}</span>
+      <div className={styles.emptyPrompts}>
+        {prompts.map((prompt) => (
+          <button key={prompt.text} type="button" onClick={() => onPrompt(prompt.text)}>
+            {prompt.icon}
+            {prompt.text}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function AgentPanel({ open, onClose }: AgentPanelProps) {
   const t = useT();
   const location = useLocation();
@@ -478,6 +520,11 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
 
   if (!open) return null;
 
+  const handlePrompt = async (prompt: string) => {
+    if (!controller.enabled || controller.isStreaming) return;
+    await controller.sendMessage(prompt);
+  };
+
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     const text = input.trim();
@@ -497,16 +544,24 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
           {controller.enabled && <span className={styles.liveDot} aria-hidden="true" />}
           {controller.enabled ? t('agent.connected') : t('agent.disconnected')}
         </span>
-        <button
-          type="button"
-          className={styles.iconBtn}
-          onClick={controller.clear}
+        <Popconfirm
+          title={t('agent.newConversationConfirmTitle')}
+          description={t('agent.newConversationConfirmDescription')}
+          okText={t('agent.newConversation')}
+          cancelText={t('agent.cancel')}
+          onConfirm={controller.clear}
           disabled={controller.isStreaming}
-          aria-label={t('agent.newConversation')}
-          title={t('agent.newConversation')}
         >
-          <PlusOutlined />
-        </button>
+          <button
+            type="button"
+            className={styles.iconBtn}
+            disabled={controller.isStreaming}
+            aria-label={t('agent.newConversation')}
+            title={t('agent.newConversation')}
+          >
+            <PlusOutlined />
+          </button>
+        </Popconfirm>
         <button type="button" className={styles.iconBtn} onClick={onClose} aria-label={t('agent.close')}>
           <CloseOutlined />
         </button>
@@ -523,16 +578,13 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
 
       <div className={styles.body}>
         {!controller.enabled && (
-          <div className={styles.empty}>
+          <div className={styles.disabledEmpty}>
             <strong>{t('agent.disabledTitle')}</strong>
             <span>{t('agent.disabledHint')}</span>
           </div>
         )}
         {controller.enabled && controller.messages.length === 0 && controller.activities.length === 0 && (
-          <div className={styles.empty}>
-            <strong>{t('agent.emptyTitle')}</strong>
-            <span>{t('agent.emptyHint')}</span>
-          </div>
+          <EmptyPromptState onPrompt={handlePrompt} />
         )}
         {controller.messages.map((message) => (
           <div key={message.id} className={message.role === 'user' ? styles.userMessage : styles.assistantMessage}>

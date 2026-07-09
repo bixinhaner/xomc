@@ -37,6 +37,18 @@ export interface UseAgentPanelControllerResult {
 
 let nextAgentPanelId = 0;
 const AGENT_CONVERSATION_STORAGE_PREFIX = 'omc-agent-conversation';
+const AGENT_CONVERSATION_STATE_VERSION = 1;
+const MAX_PERSISTED_MESSAGES = 40;
+const MAX_PERSISTED_ACTIVITIES = 30;
+
+interface PersistedAgentPanelState {
+  version: typeof AGENT_CONVERSATION_STATE_VERSION;
+  conversationId?: string;
+  messages: AgentPanelMessage[];
+  activities: AgentPanelActivity[];
+  pendingAction: AgentPendingAction | null;
+  updatedAt: number;
+}
 
 function createId(prefix: string): string {
   nextAgentPanelId += 1;
@@ -73,20 +85,59 @@ function buildConversationStorageKey(input: {
   return `${AGENT_CONVERSATION_STORAGE_PREFIX}:${input.connectorId}:${input.userId}`;
 }
 
-function readConversationId(storageKey: string | undefined): string | undefined {
+function normalizeMessagesForStorage(messages: AgentPanelMessage[]): AgentPanelMessage[] {
+  return messages.slice(-MAX_PERSISTED_MESSAGES).map((message) => ({
+    ...message,
+    status: message.status === 'streaming' ? 'error' : message.status,
+    thoughts: completeAgentThoughts(message.thoughts),
+  }));
+}
+
+function normalizeActivitiesForStorage(activities: AgentPanelActivity[]): AgentPanelActivity[] {
+  return activities.slice(-MAX_PERSISTED_ACTIVITIES).map((activity) => ({
+    ...activity,
+    status:
+      activity.status === 'calling' || activity.status === 'running'
+        ? 'cancelled'
+        : activity.status,
+  }));
+}
+
+function readConversationState(storageKey: string | undefined): PersistedAgentPanelState | undefined {
   if (!storageKey || typeof window === 'undefined') return undefined;
   try {
-    return window.localStorage.getItem(storageKey) || undefined;
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) return undefined;
+    if (!raw.trim().startsWith('{')) {
+      return {
+        version: AGENT_CONVERSATION_STATE_VERSION,
+        conversationId: raw,
+        messages: [],
+        activities: [],
+        pendingAction: null,
+        updatedAt: 0,
+      };
+    }
+    const parsed = JSON.parse(raw) as Partial<PersistedAgentPanelState>;
+    if (parsed.version !== AGENT_CONVERSATION_STATE_VERSION) return undefined;
+    return {
+      version: AGENT_CONVERSATION_STATE_VERSION,
+      conversationId: typeof parsed.conversationId === 'string' ? parsed.conversationId : undefined,
+      messages: Array.isArray(parsed.messages) ? normalizeMessagesForStorage(parsed.messages) : [],
+      activities: Array.isArray(parsed.activities) ? normalizeActivitiesForStorage(parsed.activities) : [],
+      pendingAction: parsed.pendingAction ?? null,
+      updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : 0,
+    };
   } catch {
     return undefined;
   }
 }
 
-function writeConversationId(storageKey: string | undefined, conversationId: string | undefined) {
+function writeConversationState(storageKey: string | undefined, state: PersistedAgentPanelState | undefined) {
   if (!storageKey || typeof window === 'undefined') return;
   try {
-    if (conversationId) {
-      window.localStorage.setItem(storageKey, conversationId);
+    if (state && (state.conversationId || state.messages.length || state.activities.length || state.pendingAction)) {
+      window.localStorage.setItem(storageKey, JSON.stringify(state));
     } else {
       window.localStorage.removeItem(storageKey);
     }
@@ -125,8 +176,10 @@ export function useAgentPanelController(
   const [conversationId, setConversationId] = useState<string | undefined>();
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<AgentError | null>(null);
+  const [storageReady, setStorageReady] = useState(false);
   const actionRequestsRef = useRef(new Map<string, AgentApprovedAction>());
   const abortRef = useRef<AbortController | null>(null);
+  const skipNextPersistRef = useRef(false);
 
   const timezone = systemTimezone || 'UTC';
   const context = useMemo(() => options.context, [options.context]);
@@ -136,16 +189,41 @@ export function useAgentPanelController(
   );
 
   useEffect(() => {
-    setConversationId(readConversationId(conversationStorageKey));
+    setStorageReady(false);
+    const restored = readConversationState(conversationStorageKey);
+    skipNextPersistRef.current = true;
+    setConversationId(restored?.conversationId);
+    setMessages(restored?.messages ?? []);
+    setActivities(restored?.activities ?? []);
+    setPendingAction(restored?.pendingAction ?? null);
+    setError(null);
+    setIsStreaming(false);
+    actionRequestsRef.current.clear();
+    setStorageReady(true);
   }, [conversationStorageKey]);
 
   const updateConversationId = useCallback(
     (nextConversationId: string | undefined) => {
       setConversationId(nextConversationId);
-      writeConversationId(conversationStorageKey, nextConversationId);
     },
-    [conversationStorageKey]
+    []
   );
+
+  useEffect(() => {
+    if (!storageReady) return;
+    if (skipNextPersistRef.current) {
+      skipNextPersistRef.current = false;
+      return;
+    }
+    writeConversationState(conversationStorageKey, {
+      version: AGENT_CONVERSATION_STATE_VERSION,
+      conversationId,
+      messages: normalizeMessagesForStorage(messages),
+      activities: normalizeActivitiesForStorage(activities),
+      pendingAction,
+      updatedAt: Date.now(),
+    });
+  }, [activities, conversationId, conversationStorageKey, messages, pendingAction, storageReady]);
 
   const appendAssistantDelta = useCallback((messageId: string, text: string) => {
     setMessages((current) =>
