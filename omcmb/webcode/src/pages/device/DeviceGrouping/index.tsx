@@ -206,7 +206,7 @@ export default function DeviceGrouping() {
   });
 
   // ── Import / export handlers ──
-  const { handleExport, handleImport, handleDownloadTemplate } = useImportExportHandlers({
+  const { handleExport, handleImport, handleDownloadTemplate, handlePreRegister, handleDownloadPreRegisterTemplate } = useImportExportHandlers({
     message,
     t,
     refetch,
@@ -278,6 +278,8 @@ export default function DeviceGrouping() {
           onExport={handleExportClick}
           onImport={handleImport}
           onDownloadTemplate={handleDownloadTemplate}
+          onPreRegister={handlePreRegister}
+          onDownloadPreRegisterTemplate={handleDownloadPreRegisterTemplate}
           t={t as (id: string, values?: Record<string, unknown>) => string}
         />
       </TreeListPageLayout>

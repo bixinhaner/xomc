@@ -143,6 +143,15 @@ func (s *DeviceService) SetCarrierRegistry(r *carrier.CarrierRegistry) {
 	s.carrierRegistry = r
 }
 
+// ResolveCarrierByOUI 通过 OUI 查询运营商编码（供批量预登记路径使用）。
+// carrierRegistry 未注入时返回空串（调用方需额外处理）。
+func (s *DeviceService) ResolveCarrierByOUI(oui string) model.CarrierCode {
+	if s.carrierRegistry == nil {
+		return ""
+	}
+	return s.carrierRegistry.ResolveByOUI(oui)
+}
+
 // SetDisconnectedAlarmCleaner wires OMC disconnected-alarm cleanup for offline→online recovery.
 func (s *DeviceService) SetDisconnectedAlarmCleaner(store disconnectedAlarmStore, clearer disconnectedAlarmClearer) {
 	s.disconnectAlarms = store

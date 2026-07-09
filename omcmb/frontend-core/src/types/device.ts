@@ -80,6 +80,42 @@ export interface BatchImportResponse {
   errors: BatchImportRowError[];
 }
 
+// ─── 批量预登记 ──────────────────────────────────────────────────────────────
+
+/** 单行预登记请求（对应后端 BatchPreRegisterRow）。 */
+export interface BatchPreRegisterDevice {
+  serial_number: string;
+  device_name?: string;
+  remark?: string;
+  /** 运营商：cmcc / ctcc / cucc。为空时后端从 SN 前6位推断 OUI → CarrierRegistry。 */
+  carrier?: 'cmcc' | 'ctcc' | 'cucc';
+  /** 制式：lte / nr。为空时后端默认 lte。 */
+  technology?: 'lte' | 'nr';
+  /** OUI（可选）。为空时后端取 SN 前6位。 */
+  oui?: string;
+}
+
+export interface BatchPreRegisterRequest {
+  devices: BatchPreRegisterDevice[];
+}
+
+/** 单行预登记结果（后端 BatchPreRegisterRowResult）。 */
+export interface BatchPreRegisterRowResult {
+  row: number;
+  sn: string;
+  action?: 'created' | 'updated' | 'skipped';
+  error_code?: string;
+  reason?: string;
+}
+
+export interface BatchPreRegisterResponse {
+  total: number;
+  created: number;
+  updated: number;
+  failed: number;
+  errors: BatchPreRegisterRowResult[];
+}
+
 export interface Device {
   id: string;
   sn: string;
