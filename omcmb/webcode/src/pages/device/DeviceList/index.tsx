@@ -1042,12 +1042,33 @@ export default function DeviceList() {
   const fmtStatus = useCallback(
     (value: string | number | boolean | undefined | null, map: Record<string, { label: string; color: string }>) => {
       const v = String(value ?? '');
-      const entry = map[v];
+      const entry = map[v] ?? map[v.trim().toLowerCase()];
       if (!entry) return v || '-';
       return <Tag color={entry.color}>{entry.label}</Tag>;
     },
     []
   );
+
+  const adminStateStatusMap = useMemo<Record<string, { label: string; color: string }>>(() => ({
+    '1': { label: t('status.locked'), color: 'warning' },
+    '0': { label: t('status.unlocked'), color: 'success' },
+    '2': { label: t('status.unlocked'), color: 'success' },
+    '3': { label: t('status.shuttingDown'), color: 'error' },
+    true: { label: t('status.locked'), color: 'warning' },
+    false: { label: t('status.unlocked'), color: 'success' },
+    enabled: { label: t('status.locked'), color: 'warning' },
+    disabled: { label: t('status.unlocked'), color: 'success' },
+    locked: { label: t('status.locked'), color: 'warning' },
+    unlocked: { label: t('status.unlocked'), color: 'success' },
+    shuttingdown: { label: t('status.shuttingDown'), color: 'error' },
+    'shutting down': { label: t('status.shuttingDown'), color: 'error' },
+  }), [t]);
+
+  const adminStateLabelOf = useCallback((value: string | number | boolean | undefined | null) => {
+    const raw = String(value ?? '').trim();
+    if (!raw) return '-';
+    return adminStateStatusMap[raw]?.label ?? adminStateStatusMap[raw.toLowerCase()]?.label ?? raw;
+  }, [adminStateStatusMap]);
 
   // ── 多小区/多连接状态渲染辅助 ──
   // 原始 JSP: 逗号分隔 "on,off,on" / "1,0,1" 表示多小区状态
@@ -1625,12 +1646,7 @@ export default function DeviceList() {
         width: 120,
         hidden: true,
         group: 'common',
-        // 原始 gNB JSP: 1→Locked, 2→Unlocked, 3→ShuttingDown
-        render: (_val, record) => fmtStatus(record.adminState, {
-          '1': { label: 'Locked', color: 'warning' },
-          '2': { label: 'Unlocked', color: 'success' },
-          '3': { label: 'ShuttingDown', color: 'error' },
-        }),
+        render: (_val, record) => fmtStatus(record.adminState, adminStateStatusMap),
       },
       { key: 'ipsecAddr', title: t('device.ipsecAddr'), dataIndex: 'ipsecAddr', width: 140, hidden: true, mono: true, group: 'common' },
       {
@@ -1662,7 +1678,7 @@ export default function DeviceList() {
 
     ],
     // remarkHeaderRender 暂从 dep 列表移除：remark 列定义已注释，恢复时同步加回。
-    [navigate, openDeviceDetail, prefetchDeviceDetailEntry, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, renderActivationStatus, message, downloadStationLog, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails, editingInstallAddressId, editingInstallAddressValue, savingInstallAddressId, saveInstallAddressEdit, cancelInstallAddressEdit, startInstallAddressEdit]
+    [navigate, openDeviceDetail, prefetchDeviceDetailEntry, t, fmtTime, fmtDuration, fmtStatus, adminStateStatusMap, renderMultiCellStatus, renderActivationStatus, message, downloadStationLog, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails, editingInstallAddressId, editingInstallAddressValue, savingInstallAddressId, saveInstallAddressEdit, cancelInstallAddressEdit, startInstallAddressEdit]
   );
 
   // ─── 列表导出(用户决策 2026-06-02) ──────────────────────────────────────
@@ -1701,8 +1717,7 @@ export default function DeviceList() {
               ? t('status.enabled')
               : t('status.disabled');
         case 'adminState': {
-          const m: Record<string, string> = { '1': 'Locked', '2': 'Unlocked', '3': 'ShuttingDown' };
-          return record.adminState != null ? (m[String(record.adminState)] ?? String(record.adminState)) : '-';
+          return adminStateLabelOf(record.adminState);
         }
         case 'ueCount': {
           const v = record.ueCount;
@@ -1721,7 +1736,7 @@ export default function DeviceList() {
         }
       }
     },
-    [appLocale, mapConnStatus, getSeverityLabel, fmtTime, fmtDuration, onlineDurationOf, opStateDict?.sysDictionaryDetails, t]
+    [adminStateLabelOf, appLocale, mapConnStatus, getSeverityLabel, fmtTime, fmtDuration, onlineDurationOf, opStateDict?.sysDictionaryDetails, t]
   );
 
   // 按当前筛选条件并发分页拉取全部命中数据(不受列表当前页/页大小限制)。

@@ -223,28 +223,31 @@ func CalcGPSStatus(params map[string]string) string {
 }
 
 // CalcRFStatus computes the rf_status quick-query column from device_parameters.
-// Combines RFTxStatus and RadioEnable for a comprehensive RF status.
+// RF status is driven by RF RadioEnable; RFTxStatus is only a legacy fallback.
 func CalcRFStatus(params map[string]string) string {
 	rfTx := params["Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.RFTxStatus"]
 	if rfTx == "" {
 		rfTx = params["Device.Services.FAPService.1.CellConfig.NR.RAN.RF.RFTxStatus"]
 	}
-	radioEnable := params["Device.Services.FAPService.1.FAPControl.LTE.AdminState"]
+	radioEnable := params["Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable"]
 	if radioEnable == "" {
-		radioEnable = params["Device.Services.FAPService.1.FAPControl.NR.AdminState"]
+		radioEnable = params["Device.Services.FAPService.1.CellConfig.NR.RAN.RF.X_COM_RadioEnable"]
 	}
 
-	if !isTrueValue(radioEnable) {
+	if radioEnable != "" {
+		if isTrueValue(radioEnable) {
+			return "on"
+		}
 		return "off"
 	}
+
 	if isTrueValue(rfTx) || rfTx == "1" {
 		return "on"
 	}
 	if rfTx == "0" || strings.EqualFold(rfTx, "false") {
 		return "error"
 	}
-	// RadioEnable is on but no RFTxStatus data
-	return "on"
+	return "off"
 }
 
 // CalcNumOfCells extracts the number of cells (carriers) from device_parameters.
@@ -408,6 +411,7 @@ func firstNonEmpty(values ...string) string {
 	}
 	return ""
 }
+
 // CalcUECount 从 device_parameters 读取当前接入 UE 数。
 //
 // 读取优先级：

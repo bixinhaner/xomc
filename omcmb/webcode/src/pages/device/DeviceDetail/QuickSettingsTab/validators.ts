@@ -45,9 +45,26 @@ export function formatEnumDisplayValue(value: string, constraints?: ParameterCon
   return index >= 0 ? (meta.labels[index] || value) : value;
 }
 
-export function formatLteBandwidthDisplay(value?: string | null): string {
+const LTE_BANDWIDTH_DISPLAY: Record<string, string> = {
+  '25': '5M',
+  '50': '10M',
+  '75': '15M',
+  '100': '20M',
+};
+
+export function formatLteBandwidthDisplay(value?: string | number | null): string {
   if (!value) return '-';
-  return formatEnumDisplayValue(value, undefined, LTE_BANDWIDTH_PATH);
+  const raw = String(value).trim();
+  if (!raw) return '-';
+  if (LTE_BANDWIDTH_DISPLAY[raw]) return LTE_BANDWIDTH_DISPLAY[raw];
+
+  const normalized = raw.toLowerCase().replace(/mhz$/, '').replace(/m$/, '').trim();
+  const numericValue = Number(normalized);
+  if (Number.isFinite(numericValue)) {
+    return `${Number.isInteger(numericValue) ? numericValue : numericValue.toFixed(1)}M`;
+  }
+
+  return formatEnumDisplayValue(raw, undefined, LTE_BANDWIDTH_PATH);
 }
 
 export function validateMmeIpPlmnLimit(

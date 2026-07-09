@@ -643,6 +643,95 @@ func TestInfoSyncer_SyncFromParameters_TransmitPowerSource(t *testing.T) {
 	}
 }
 
+func TestInfoSyncer_SyncFromParameters_BLQPreferredBandwidthAndAdminState(t *testing.T) {
+	deviceID := uuid.New()
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+
+	paramRepo := stubDeviceParamRepo{params: []model.DeviceParameter{
+		{ParameterPath: "Device.DeviceInfo.SAS.PreferredBandwidth", ParameterValue: "n100"},
+		{ParameterPath: "Device.DeviceInfo.FAP_adminstate", ParameterValue: "true"},
+	}}
+	infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, gotDeviceID uuid.UUID, fields map[string]interface{}) error {
+		assert.Equal(t, deviceID, gotDeviceID)
+		assert.Equal(t, float64(20), fields["bandwidth"])
+		assert.Equal(t, "true", fields["admin_state"])
+		return nil
+	}}
+	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
+
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE)
+	assert.NoError(t, err)
+}
+
+func TestInfoSyncer_SyncFromParameters_GSMBTSRadioFields(t *testing.T) {
+	deviceID := uuid.New()
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+
+	paramRepo := stubDeviceParamRepo{params: []model.DeviceParameter{
+		{ParameterPath: "Device.Services.GsmBTSCellDT.1.InUse", ParameterValue: "true"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.1.GsmCellID", ParameterValue: "1001"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.1.CurrLocAreaCode", ParameterValue: "2001"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.1.CurrentArfcn", ParameterValue: "45"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.1.GsmBtsBand", ParameterValue: "GSM900"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.1.GsmBtsRFPower", ParameterValue: "33"},
+	}}
+	infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, _ uuid.UUID, fields map[string]interface{}) error {
+		assert.Equal(t, "45", fields["freq_point"])
+		assert.Equal(t, "33", fields["transmit_power"])
+		assert.Equal(t, "GSM900", fields["band"])
+		assert.Equal(t, "1001", fields["cell_id"])
+		assert.Equal(t, "2001", fields["lac"])
+		return nil
+	}}
+	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
+
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechGSM)
+	assert.NoError(t, err)
+}
+
+func TestInfoSyncer_SyncFromParameters_LegacyBTSRadioFields(t *testing.T) {
+	deviceID := uuid.New()
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+
+	paramRepo := stubDeviceParamRepo{params: []model.DeviceParameter{
+		{ParameterPath: "Device.DeviceInfo.BTS.CurrentArfcn", ParameterValue: "1010"},
+		{ParameterPath: "Device.DeviceInfo.BTS.CurrentLac", ParameterValue: "227"},
+		{ParameterPath: "Device.DeviceInfo.GSM.BtsRfPower", ParameterValue: "43"},
+	}}
+	infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, _ uuid.UUID, fields map[string]interface{}) error {
+		assert.Equal(t, "1010", fields["freq_point"])
+		assert.Equal(t, "43", fields["transmit_power"])
+		assert.Equal(t, "227", fields["lac"])
+		return nil
+	}}
+	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
+
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechGSM)
+	assert.NoError(t, err)
+}
+
+func TestInfoSyncer_SyncFromParameters_BSCTrxARFCNAggregatesToFreqPoint(t *testing.T) {
+	deviceID := uuid.New()
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+
+	paramRepo := stubDeviceParamRepo{params: []model.DeviceParameter{
+		{ParameterPath: "DeviceGSM.Bts.0.Trx.1.Arfcn", ParameterValue: "1010"},
+		{ParameterPath: "DeviceGSM.Bts.0.Trx.2.Arfcn", ParameterValue: "1013"},
+	}}
+	infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, _ uuid.UUID, fields map[string]interface{}) error {
+		assert.Equal(t, "1010,1013", fields["freq_point"])
+		return nil
+	}}
+	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
+
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechGSM)
+	assert.NoError(t, err)
+}
+
 // TestUniversalInformMapping_NoTransmitPowerOverride 防回归守卫：#362 删除
 // universalInformMapping 里 MaxTxPower→transmit_power 后，该表不应再含任何
 // transmit_power 映射目标（避免后人误加回 universal 覆盖）。
