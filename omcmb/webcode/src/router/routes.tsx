@@ -197,31 +197,6 @@ function withSuspense(Component: React.ComponentType) {
   );
 }
 
-// T-0098-P4-02：super_admin 治理路由组守卫包装
-function withSuperAdmin(Component: React.ComponentType) {
-  return (
-    <PrivateRoute requireSuperAdmin>
-      <ErrorBoundary>
-        <Suspense fallback={<PageLoader />}>
-          <Component />
-        </Suspense>
-      </ErrorBoundary>
-    </PrivateRoute>
-  );
-}
-
-function withAdminRole(Component: React.ComponentType) {
-  return (
-    <PrivateRoute requireAdmin>
-      <ErrorBoundary>
-        <Suspense fallback={<PageLoader />}>
-          <Component />
-        </Suspense>
-      </ErrorBoundary>
-    </PrivateRoute>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Route definitions
 // ---------------------------------------------------------------------------
@@ -313,7 +288,7 @@ export const routes: RouteObject[] = [
       { path: 'mml/task-records',    element: withSuspense(MMLTaskRecord) },
       { path: 'mml/commands',        element: withSuspense(MMLCommands) },
       { path: 'mml/private-command', element: withSuspense(MMLPrivateCommand) },
-      { path: 'mml/admin/catalog',   element: withAdminRole(MMLAdminCatalog) },
+      { path: 'mml/admin/catalog',   element: withSuspense(MMLAdminCatalog) },
 
       // Topology Management
       { path: 'topology/gis-map',  element: withSuspense(GISMapView) },
@@ -370,8 +345,8 @@ export const routes: RouteObject[] = [
       { path: 'system/api-management', element: withSuspense(ApiManagement) },
       { path: 'system/data-dictionary', element: withSuspense(DataDictionary) },
       { path: 'system/dict-loader',    element: withSuspense(DictLoaderPage) },
-      // issue #213 S3：首页 KPI 配置（管理员可见可编辑）
-      { path: 'system/kpi-config',     element: withAdminRole(KpiConfigPage) },
+      // issue #213 S3：首页 KPI 配置（菜单权限控制）
+      { path: 'system/kpi-config',     element: withSuspense(KpiConfigPage) },
 
       // Report Management
       { path: 'report/lte-standard',   element: withSuspense(LTEStandardReport) },
@@ -406,7 +381,7 @@ export const routes: RouteObject[] = [
       // Transfer Management
       { path: 'transfer/center',             element: withSuspense(FileTransferCenter) },
       { path: 'transfer/file-management',    element: withSuspense(TransferFileManagement) },
-      { path: 'transfer/template-management', element: withAdminRole(TransferTemplateManagement) },
+      { path: 'transfer/template-management', element: withSuspense(TransferTemplateManagement) },
 
       // Ops Management
       { path: 'ops/templates',         element: withSuspense(OpsTemplates) },
@@ -417,13 +392,13 @@ export const routes: RouteObject[] = [
       { path: 'ops/message-trace',     element: withSuspense(OpsMessageTrace) },
       { path: 'ops/aggregation-trigger', element: withSuspense(OpsAggregationTrigger) },
 
-      // T-0098-P4 Product Center (super_admin only)
-      { path: 'product/products',       element: withSuperAdmin(ProductsPage) },
-      { path: 'product/param-model',    element: withSuperAdmin(ParamModelPage) },
-      { path: 'product/standard-params', element: withSuperAdmin(StandardParamsPage) },
-      { path: 'product/kpi-library',    element: withSuperAdmin(KpiLibraryPage) },
-      { path: 'product/alarm-library',  element: withSuperAdmin(AlarmLibraryPage) },
-      { path: 'product/orphan-devices', element: withSuperAdmin(OrphanDevicesPage) },
+      // T-0098-P4 Product Center（菜单权限控制）
+      { path: 'product/products',       element: withSuspense(ProductsPage) },
+      { path: 'product/param-model',    element: withSuspense(ParamModelPage) },
+      { path: 'product/standard-params', element: withSuspense(StandardParamsPage) },
+      { path: 'product/kpi-library',    element: withSuspense(KpiLibraryPage) },
+      { path: 'product/alarm-library',  element: withSuspense(AlarmLibraryPage) },
+      { path: 'product/orphan-devices', element: withSuspense(OrphanDevicesPage) },
 
       // 403 / 404
       { path: '403', element: <Forbidden /> },

@@ -47,31 +47,49 @@ func NewRESTHandler(
 
 // RegisterRoutes 挂在 /api/v1 下。
 func (h *RESTHandler) RegisterRoutes(rg *gin.RouterGroup) {
+	h.RegisterReadRoutes(rg)
+	h.RegisterWriteRoutes(rg)
+}
+
+// RegisterReadRoutes 挂载指标库的只读接口，供已登录用户读取 KPI 数据。
+func (h *RESTHandler) RegisterReadRoutes(rg *gin.RouterGroup) {
 	// indicators
 	ig := rg.Group("/indicators")
 	ig.GET("", h.ListIndicators)
 	ig.GET("/platforms", h.ListPlatforms)
 	ig.GET("/:id", h.GetIndicator)
+	ig.GET("/:id/formulas", h.ListFormulas)
+	ig.GET("/:id/formulas/:platform", h.GetFormula)
+
+	// indicator-groups
+	gg := rg.Group("/indicator-groups")
+	gg.GET("", h.ListGroups)
+
+	// enabled-indicators
+	eg := rg.Group("/enabled-indicators")
+	eg.GET("", h.GetEnabled)
+
+}
+
+// RegisterWriteRoutes 挂载指标库的写接口，仅供超管管理。
+func (h *RESTHandler) RegisterWriteRoutes(rg *gin.RouterGroup) {
+	// indicators
+	ig := rg.Group("/indicators")
 	ig.POST("", h.CreateIndicator)
 	ig.PUT("/:id", h.UpdateIndicator)
 	ig.DELETE("/:id", h.DeleteIndicator)
-	ig.GET("/:id/formulas", h.ListFormulas)
-	ig.GET("/:id/formulas/:platform", h.GetFormula)
 	ig.POST("/:id/formulas", h.UpsertFormula)
 	ig.DELETE("/:id/formulas/:platform", h.DeleteFormula)
 
 	// indicator-groups
 	gg := rg.Group("/indicator-groups")
-	gg.GET("", h.ListGroups)
 	gg.POST("", h.CreateGroup)
 	gg.PUT("/:id", h.UpdateGroup)
 	gg.DELETE("/:id", h.DeleteGroup)
 
 	// enabled-indicators
 	eg := rg.Group("/enabled-indicators")
-	eg.GET("", h.GetEnabled)
 	eg.PUT("", h.SetEnabled)
-
 }
 
 // ── 公共 helper ─────────────────────────────────────────────────────

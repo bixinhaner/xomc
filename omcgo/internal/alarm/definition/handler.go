@@ -49,16 +49,27 @@ func NewHandler(service *Service, baseDir string, logger *zap.Logger) *Handler {
 // 调用方约定挂在 /api/v1 之下；本 handler 内部使用绝对子路径
 // /alarm-definitions 与 /alarm-severity-levels。
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
+	h.RegisterReadRoutes(rg)
+	h.RegisterWriteRoutes(rg)
+}
+
+// RegisterReadRoutes 挂载告警库的只读接口，供已登录用户读取基础库数据。
+func (h *Handler) RegisterReadRoutes(rg *gin.RouterGroup) {
 	g := rg.Group("/alarm-definitions")
 	g.GET("", h.List)
 	g.GET("/ne-types", h.NeTypes)
 	g.GET("/unknown-stats", h.UnknownStats)
 	g.GET("/:identifier", h.Get)
+
+	rg.GET("/alarm-severity-levels", h.SeverityLevels)
+}
+
+// RegisterWriteRoutes 挂载告警库的写接口，仅供超管管理。
+func (h *Handler) RegisterWriteRoutes(rg *gin.RouterGroup) {
+	g := rg.Group("/alarm-definitions")
 	g.POST("", h.Create)
 	g.PUT("/:identifier", h.Update)
 	g.DELETE("/:identifier", h.Delete)
-
-	rg.GET("/alarm-severity-levels", h.SeverityLevels)
 }
 
 // ── DTO ─────────────────────────────────────────────────────────────
