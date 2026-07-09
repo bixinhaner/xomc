@@ -14,11 +14,11 @@ import ListPageLayout from '@/components/Layout/ListPageLayout';
 import AutoRefreshDropdown from '@/pages/alarm/components/AutoRefreshDropdown';
 import { useT } from '@/hooks/useT';
 import { useRecycleBinList, useRestoreDevices, usePermanentDeleteDevices, useDeviceGroups } from '@core/hooks/api/useDevices';
-import { useDomainTree } from '@core/hooks/api/useTopology';
 import { useDictionaryBatch } from '@core/hooks/api/useSystem';
 import { useAppStore } from '@core/store/appStore';
 import { withDeviceGroupDisplayName } from '@core/utils/deviceGroupDisplay';
 import { resolveNetworkTypeLabel } from '@core/utils/networkType';
+import { getI18nText } from '@core/utils/i18nText';
 import type { Device } from '@core/types/device';
 import ImportModal from './ImportModal';
 
@@ -54,8 +54,6 @@ export default function RecycleBin() {
   const [refreshInterval, setRefreshInterval] = useState(30);
   const [importModalOpen, setImportModalOpen] = useState(false);
 
-  // 获取设备分组树（使用树形结构避免重复数据）
-  const { data: domains } = useDomainTree();
   const { data: groupsResp } = useDeviceGroups();
 
   // issue #223: 基站制式列与设备列表 / 筛选下拉同源——走 network_type 字典
@@ -65,57 +63,23 @@ export default function RecycleBin() {
 
   // 构建设备分组选项（只显示L2分组，带完整路径）
   const deviceGroupOptions: { id: string; name: string; fullName: string }[] = useMemo(() => {
-    // 使用 fullName 作为去重键，确保相同路径只出现一次
-    const optionsMap = new Map<string, { id: string; name: string; fullName: string }>();
-    const idSet = new Set<string>();
+    const groups = groupsResp?.groups ?? [];
+    const byId = new Map(groups.map((g) => [g.id, g]));
 
-    if (!domains || !Array.isArray(domains)) return [];
-
-    // 辅助函数：安全获取 level 值（处理字符串和数字类型）
-    const getLevel = (level: unknown): number => {
-      if (typeof level === 'number') return level;
-      if (typeof level === 'string') return parseInt(level, 10) || 0;
-      return 0;
-    };
-
-    // 遍历分组树，只添加 L2 分组（带父级路径）
-    const buildOptions = (items: unknown[], parentPath: string = '') => {
-      if (!Array.isArray(items)) return;
-
-      items.forEach((item) => {
-        if (!item || typeof item !== 'object') return;
-
-        const group = item as { id?: string; name?: string; level?: unknown; children?: unknown[] };
-        const level = getLevel(group.level);
-        const id = String(group.id || '');
-        const name = String(group.name || '');
-
-        if (level === 1) {
-          // L1 分组：不添加到选项，只遍历其子分组
-          if (group.children && Array.isArray(group.children) && group.children.length > 0) {
-            buildOptions(group.children, name);
-          }
-        } else if (level === 2) {
-          // L2 分组：添加到选项，显示完整路径（一级分组/二级分组）
-          const fullName = parentPath ? `${parentPath}/${name}` : name;
-
-          // 双重去重：先检查 id，再检查 fullName
-          if (id && !idSet.has(id) && !optionsMap.has(fullName)) {
-            idSet.add(id);
-            optionsMap.set(fullName, {
-              id: id,
-              name: name,
-              fullName: fullName,
-            });
-          }
-        }
-      });
-    };
-
-    buildOptions(domains as unknown[]);
-    // 按 fullName 排序
-    return Array.from(optionsMap.values()).sort((a, b) => a.fullName.localeCompare(b.fullName, 'zh-CN'));
-  }, [domains]);
+    return groups
+      .filter((g) => g.parentId !== null)
+      .map((group) => {
+        const parent = group.parentId ? byId.get(group.parentId) : undefined;
+        const name = getI18nText(group.nameI18n, appLocale, group.name);
+        const parentName = parent ? getI18nText(parent.nameI18n, appLocale, parent.name) : '';
+        return {
+          id: group.id,
+          name,
+          fullName: parentName ? `${parentName}/${name}` : name,
+        };
+      })
+      .sort((a, b) => a.fullName.localeCompare(b.fullName, appLocale === 'zh-CN' ? 'zh-CN' : 'en-US'));
+  }, [groupsResp?.groups, appLocale]);
 
   // 获取回收站设备列表
   const { data, isLoading, isFetching, refetch } = useRecycleBinList(
@@ -276,7 +240,7 @@ export default function RecycleBin() {
         dataIndex: 'networkType',
         width: 100,
         render: (_v, record) => {
-          const label = resolveNetworkTypeLabel(record.networkType, networkTypeDetails);
+          const label = resolveNetworkTypeLabel(record.networkType, networkTypeDetails, appLocale);
           return (
             <Tag color={NETWORK_TYPE_COLOR[record.networkType] || 'default'}>{label}</Tag>
           );
@@ -313,7 +277,7 @@ export default function RecycleBin() {
       { key: 'moveTime', title: t('recycle.moveTime'), dataIndex: 'moveTime', width: 160 },
       { key: 'move_author', title: t('recycle.account'), dataIndex: 'move_author', width: 90 },
     ],
-    [t, networkTypeDetails]
+    [t, networkTypeDetails, appLocale]
   );
 
   // 批量操作

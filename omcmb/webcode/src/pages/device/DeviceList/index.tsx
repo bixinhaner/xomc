@@ -30,6 +30,8 @@ import { activationStatusLabelOf, activationStatusOf } from '@core/utils/activat
 import { formatDeviceSyncStatus, getDeviceSyncStatusKind, normalizeDeviceSyncStatus } from '@core/utils/deviceSyncStatus';
 import { expandSelectedGroupIds } from '@core/utils/deviceGroupFilter';
 import { withDeviceGroupDisplayName } from '@core/utils/deviceGroupDisplay';
+import { getI18nText } from '@core/utils/i18nText';
+import { containsHan, localizeDeviceProductName } from '@core/utils/deviceDisplay';
 import { hasAlarmSeverity } from '@core/utils/alarmSeverity';
 import { useAlarmCountWithDeviceListInvalidation } from '@core/hooks/api/useAlarms';
 import { useTriggerAlarmSync } from '@core/hooks/api/useAlarms';
@@ -495,12 +497,16 @@ export default function DeviceList() {
       .filter((g) => g.parentId !== null) // 排除 L1 根分组
       .map((g) => {
         const parent = g.parentId ? byId.get(g.parentId) : null;
+        const name = getI18nText((g as { nameI18n?: Record<string, string> }).nameI18n, appLocale, g.name);
+        const parentName = parent
+          ? getI18nText((parent as { nameI18n?: Record<string, string> }).nameI18n, appLocale, parent.name)
+          : '';
         return {
-          label: parent ? `${parent.name} / ${g.name}` : g.name,
+          label: parentName ? `${parentName} / ${name}` : name,
           value: g.id,
         };
       });
-  }, [groupsResp]);
+  }, [appLocale, groupsResp]);
 
   // R6c: 字典驱动 — 在线状态 / 激活状态 / 网络制式 / 产品类型
   // 字典 code 与种子数据在 migrations/000136 / 000137 维护。
@@ -528,18 +534,47 @@ export default function DeviceList() {
   const deviceModelDict = batchDicts?.['device_model'];
   const softwareVersionDict = batchDicts?.['software_version'];
 
+  type DictOptionDetail = { label: string; labelI18n?: Record<string, string>; value: string };
+
   const dictToOptions = useCallback(
-    (dict: { sysDictionaryDetails?: { label: string; value: string }[] } | undefined) =>
-      (dict?.sysDictionaryDetails ?? []).map((d) => ({ label: d.label, value: d.value })),
-    [],
+    (
+      dict: { sysDictionaryDetails?: DictOptionDetail[] } | undefined,
+      formatLabel?: (detail: DictOptionDetail) => string,
+    ) =>
+      (dict?.sysDictionaryDetails ?? []).map((d) => ({
+        label: formatLabel?.(d) ?? getI18nText(d.labelI18n, appLocale, d.label),
+        value: d.value,
+      })),
+    [appLocale],
+  );
+
+  const formatOnlineOptionLabel = useCallback(
+    (detail: DictOptionDetail) => {
+      const label = getI18nText(detail.labelI18n, appLocale, detail.label);
+      if (appLocale !== 'en-US' || !containsHan(label)) return label;
+      const normalized = String(detail.value ?? '').trim().toLowerCase();
+      return ['1', 'true', 'online', 'connected', 'active'].includes(normalized)
+        ? t('status.online')
+        : t('status.offline');
+    },
+    [appLocale, t],
+  );
+
+  const formatActivationOptionLabel = useCallback(
+    (detail: DictOptionDetail) =>
+      activationStatusLabelOf(detail.value, [detail], {
+        active: t('status.active'),
+        inactive: t('status.inactive'),
+      }, appLocale) ?? getI18nText(detail.labelI18n, appLocale, detail.label),
+    [appLocale, t],
   );
 
   // 产品名称下拉：选项来自 /products（label=产品名称，value=产品 UUID → devices.product_id）。
   // 与「产品类型」(product_class 字典) 不同，此处按产品装配件主键过滤。
   const { data: productListResp } = useProductList();
   const productOptions = useMemo(
-    () => (productListResp?.items ?? []).map((p) => ({ label: p.name, value: p.id })),
-    [productListResp],
+    () => (productListResp?.items ?? []).map((p) => ({ label: localizeDeviceProductName(p.name, appLocale), value: p.id })),
+    [appLocale, productListResp],
   );
 
   // 性能优化：SEVERITY_LABEL 改为函数调用，移除 useMemo
@@ -595,14 +630,14 @@ export default function DeviceList() {
       label: t('device.connStatus'),
       type: 'select',
       width: 160,
-      options: dictToOptions(isOnlineDict),
+      options: dictToOptions(isOnlineDict, formatOnlineOptionLabel),
     },
     {
       name: 'opState',
       label: t('device.opState'),
       type: 'select',
       width: 160,
-      options: dictToOptions(opStateDict),
+      options: dictToOptions(opStateDict, formatActivationOptionLabel),
     },
     {
       name: 'networkType',
@@ -637,7 +672,7 @@ export default function DeviceList() {
       label: t('device.model'),
       type: 'multi-select',
       width: 160,
-      options: dictToOptions(deviceModelDict),
+      options: dictToOptions(deviceModelDict, (detail) => localizeDeviceProductName(getI18nText(detail.labelI18n, appLocale, detail.label), appLocale)),
     },
     {
       name: 'softwareVersion',
@@ -660,7 +695,9 @@ export default function DeviceList() {
     t,
     productOptions,
     isOnlineDict,
+    formatOnlineOptionLabel,
     opStateDict,
+    formatActivationOptionLabel,
     networkTypeDict,
     productClassDict,
     deviceModelDict,
@@ -1260,12 +1297,20 @@ export default function DeviceList() {
           const colorMap: Record<string, string> = { eNB: 'blue', gNB: 'green', GSM: 'orange' };
           // issue #223: 列文案与「基站制式」筛选下拉同源——走 network_type 字典
           // value→label 映射（与回收站统一），不再直接显示原始 eNB/gNB。
-          const label = resolveNetworkTypeLabel(record.networkType, networkTypeDict?.sysDictionaryDetails);
+          const label = resolveNetworkTypeLabel(record.networkType, networkTypeDict?.sysDictionaryDetails, appLocale);
           return <Tag color={colorMap[record.networkType] ?? 'default'}>{label}</Tag>;
         },
       },
       // 产品名称（= device.model_name，inform 命中产品后回填 product.Name）显示在产品类型前面。
-      { key: 'deviceModel', title: t('device.productName'), dataIndex: 'deviceModel', width: 120, ellipsis: true, group: 'common' },
+      {
+        key: 'deviceModel',
+        title: t('device.productName'),
+        dataIndex: 'deviceModel',
+        width: 120,
+        ellipsis: true,
+        group: 'common',
+        render: (_val, record) => localizeDeviceProductName(record.deviceModel, appLocale),
+      },
       {
         key: 'productClass',
         title: t('device.productClass'),

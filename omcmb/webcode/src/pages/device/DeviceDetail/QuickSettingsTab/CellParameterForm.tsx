@@ -21,6 +21,7 @@ import {
   applyInstanceContext,
   getEffectiveEnumMeta,
   getFeedbackScopeContext,
+  localizeEnumLabel,
   validateMmeIp,
   validateMmeIpPlmnLimit,
   validateMmeIpPlmnRows,
@@ -1521,7 +1522,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                       placeholder={item?.defaultValue || ''}
                       options={effectiveEnumValues.map((v, idx) => ({
                         value: v,
-                        label: effectiveEnumLabels[idx] || v,
+                        label: localizeEnumLabel(effectiveEnumLabels[idx] || v, v, locale),
                       }))}
                     />
                   ) : (

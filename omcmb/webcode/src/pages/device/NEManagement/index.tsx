@@ -125,7 +125,10 @@ export default function NEManagement() {
         dataIndex: 'connStatus',
         width: 100,
         render: (_val, record) => (
-          <StatusIndicator status={record.connStatus === 'online' ? 'online' : 'offline'} />
+          <StatusIndicator
+            status={record.connStatus === 'online' ? 'online' : 'offline'}
+            text={record.connStatus === 'online' ? t('status.online') : t('status.offline')}
+          />
         ),
       },
       {

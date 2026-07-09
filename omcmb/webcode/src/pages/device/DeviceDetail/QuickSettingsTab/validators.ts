@@ -5,6 +5,8 @@ interface EnumMeta {
   labels: string[];
 }
 
+type QuickSettingsLocale = 'zh-CN' | 'en-US';
+
 export const LTE_BANDWIDTH_PATH = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.DLBandwidth';
 export const BM_RU_RF_SWITCH_PATH = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable';
 
@@ -38,11 +40,24 @@ export function getEffectiveEnumMeta(constraints?: ParameterConstraints, path?: 
   return resolveEnumFallbackByPath(path);
 }
 
-export function formatEnumDisplayValue(value: string, constraints?: ParameterConstraints, path?: string): string {
+export function localizeEnumLabel(label: string, value: string, locale: QuickSettingsLocale): string {
+  if (locale === 'zh-CN') return label || value;
+  const normalized = String(label || '').trim();
+  if (normalized === '开' || normalized === '开启') return 'ON';
+  if (normalized === '关' || normalized === '关闭') return 'OFF';
+  return label || value;
+}
+
+export function formatEnumDisplayValue(
+  value: string,
+  constraints?: ParameterConstraints,
+  path?: string,
+  locale: QuickSettingsLocale = 'zh-CN',
+): string {
   const meta = getEffectiveEnumMeta(constraints, path);
   if (!meta || !value) return value;
   const index = meta.values.indexOf(value);
-  return index >= 0 ? (meta.labels[index] || value) : value;
+  return index >= 0 ? localizeEnumLabel(meta.labels[index] || value, value, locale) : value;
 }
 
 const LTE_BANDWIDTH_DISPLAY: Record<string, string> = {
