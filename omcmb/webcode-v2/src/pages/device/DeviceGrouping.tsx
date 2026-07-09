@@ -33,6 +33,7 @@ import {
   TableCard,
 } from '@/components/layout/PageShell'
 import { cn } from '@/lib/utils'
+import { useT } from '@/hooks/useT'
 
 import {
   useCreateGroup,
@@ -269,6 +270,7 @@ function GroupDialog({
 
 export default function DeviceGrouping() {
   const navigate = useNavigate()
+  const t = useT()
   const groupsQuery = useDeviceGroups()
   const createGroup = useCreateGroup()
   const updateGroup = useUpdateGroup()
@@ -369,10 +371,28 @@ export default function DeviceGrouping() {
   }
 
   function handleDelete(g: DeviceGroup) {
-    if (
-      !window.confirm(`确定删除分组「${g.name}」？该操作不会删除分组内的设备。`)
+    const isLevel1 = g.parentId === null
+    const children = isLevel1 ? (childrenOf.get(g.id) ?? []) : []
+    const childCount = children.length
+    const deviceCount = [g, ...children].reduce(
+      (sum, item) => sum + (item.deviceCount ?? 0),
+      0
     )
+    const impact = isLevel1
+      ? [
+          `${t('device.group.deleteChildGroupsLabel')}: ${t('device.group.deleteChildGroupsValue', { count: childCount })}`,
+          `${t('device.group.deleteDevicesLabel')}: ${t('device.group.deleteDevicesValue', { count: deviceCount })}`,
+        ].join('\n')
+      : `${t('device.group.deleteDevicesLabel')}: ${t('device.group.deleteDevicesValue', { count: deviceCount })}`
+
+    if (!window.confirm([
+      t('device.group.deleteConfirmMsg', { name: g.name }),
+      impact,
+      `${t('device.group.deleteResultLabel')}: ${t('device.group.deleteResultUngrouped')}`,
+      t('device.group.deleteDevicePreserveHint'),
+    ].join('\n')))
       return
+
     deleteGroup.mutate(g.id, {
       onSuccess: () => {
         if (selectedGroupId === g.id) setSelectedGroupId(null)

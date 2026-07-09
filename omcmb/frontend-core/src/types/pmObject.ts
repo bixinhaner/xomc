@@ -163,16 +163,19 @@ export function parseObjectLdn(objectLdn: string | null | undefined): ObjectLdnF
  *
  * 纯展示用，不做 i18n（小区/PLMN/gNB/Uid/切片是网管通用术语）。
  */
-export function formatObjectLdn(objectLdn: string | null | undefined): string {
+export function formatObjectLdn(objectLdn: string | null | undefined, locale: 'zh-CN' | 'en-US' = 'zh-CN'): string {
   const raw = (objectLdn ?? '').trim();
   if (!raw) return '';
 
   const f = parseObjectLdn(raw);
   const parts: string[] = [];
+  const cellLabel = locale === 'zh-CN' ? '小区' : 'Cell';
+  const sliceLabel = locale === 'zh-CN' ? '切片' : 'Slice';
+  const sliceGroupLabel = locale === 'zh-CN' ? '切片组' : 'Slice Group';
 
   switch (f.tech) {
     case 'lte': {
-      if (f.cellId) parts.push(`小区${f.cellId}`);
+      if (f.cellId) parts.push(`${cellLabel}${f.cellId}`);
       if (f.plmn) parts.push(`PLMN${f.plmn}`);
       break;
     }
@@ -181,16 +184,16 @@ export function formatObjectLdn(objectLdn: string | null | undefined): string {
       // 小区段：NrCGI 是核心；CUID/DUID 作为后缀（任一）
       if (f.nrCgi) {
         const suffix = f.cuId ?? f.duId;
-        parts.push(suffix ? `小区${f.nrCgi}/${suffix}` : `小区${f.nrCgi}`);
+        parts.push(suffix ? `${cellLabel}${f.nrCgi}/${suffix}` : `${cellLabel}${f.nrCgi}`);
       }
       if (f.plmnId) parts.push(`PLMN${f.plmnId}`);
-      if (f.nssai) parts.push(`切片${f.nssai}`);
-      if (f.sliceGroup) parts.push(`切片组${f.sliceGroup}`);
+      if (f.nssai) parts.push(`${sliceLabel}${f.nssai}`);
+      if (f.sliceGroup) parts.push(`${sliceGroupLabel}${f.sliceGroup}`);
       break;
     }
     case 'gsm': {
       // 形如 "小区 Uid4002-1"
-      if (f.uid) parts.push(`小区 Uid${f.uid}`);
+      if (f.uid) parts.push(`${cellLabel} Uid${f.uid}`);
       break;
     }
     case 'unknown':

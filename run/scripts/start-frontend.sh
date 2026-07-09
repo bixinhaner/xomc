@@ -42,7 +42,7 @@ fi
 
 # 启动
 cd "$FRONTEND_DIR"
-VITE_USE_MOCK=false npx vite > "$LOG_DIR/frontend/frontend.log" 2>&1 &
+nohup env VITE_USE_MOCK=false npx vite > "$LOG_DIR/frontend/frontend.log" 2>&1 < /dev/null &
 echo $! > "$FE_PID_FILE"
 sleep 3
 

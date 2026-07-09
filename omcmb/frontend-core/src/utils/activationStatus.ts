@@ -18,6 +18,7 @@
  *      内部字符串与列表 Tag 表现脱节)
  */
 import { getI18nText, type Locale } from './i18nText';
+import { containsHan } from './deviceDisplay';
 
 export type ActivationStatus = 'active' | 'inactive' | null;
 
@@ -53,6 +54,7 @@ export function activationStatusLabelOf(
     const detail = details?.find((item) => item?.status !== false && item?.value === value);
     if (!detail) return null;
     const label = getI18nText(detail.labelI18n, locale, detail.label).trim();
+    if (locale === 'en-US' && containsHan(label) && !detail.labelI18n?.['en-US']) return null;
     return label || null;
   };
 

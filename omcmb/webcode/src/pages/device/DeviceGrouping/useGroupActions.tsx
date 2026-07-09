@@ -3,6 +3,7 @@ import { App, Form } from 'antd';
 import type { GroupItem, NameFilterItem } from './types';
 import { parseRangeString } from './types';
 import type { UseNameFiltersReturn } from './useNameFilters';
+import styles from './DeviceGrouping.module.css';
 
 export interface AddGroupFormValues {
   /** 单值名称 — 表单只有一个 antd Input（去多语言，方案 A）。 */
@@ -54,6 +55,20 @@ interface UpdateGroupArgs {
 
 export interface MutationLike<TArgs> {
   mutateAsync: (args: TArgs) => Promise<unknown>;
+}
+
+function getDeleteImpact(groups: GroupItem[], groupId: string, isLevel1: boolean) {
+  const group = groups.find((g) => g.id === groupId);
+  const children = isLevel1 ? groups.filter((g) => g.parentId === groupId) : [];
+  const deviceCount = [group, ...children]
+    .filter((g): g is GroupItem => Boolean(g))
+    .reduce((sum, g) => sum + (g.deviceCount ?? 0), 0);
+
+  return {
+    group,
+    childCount: children.length,
+    deviceCount,
+  };
 }
 
 /**
@@ -218,14 +233,38 @@ export function useGroupActions(deps: {
 
   const confirmDelete = useCallback(
     (groupId: string, isLevel1: boolean) => {
+      const { group, childCount, deviceCount } = getDeleteImpact(groups, groupId, isLevel1);
+      if (!group) {
+        void message.error(t('common.operationFailed'));
+        return;
+      }
+
       modal.confirm({
         title: t('common.confirmDelete'),
-        width: 480,
+        width: 520,
         content: (
-          <div>
-            <div>{t('common.deleteConfirmMsg')}</div>
-            <div style={{ marginTop: 8, color: 'var(--color-text-secondary)', fontSize: 13, whiteSpace: 'nowrap' }}>
-              {isLevel1 ? t('device.deleteLevel1Desc') : t('device.deleteLevel2Desc')}
+          <div className={styles.groupDeleteConfirm}>
+            <div className={styles.groupDeleteConfirmTitle}>
+              {t('device.group.deleteConfirmMsg', { name: group.name })}
+            </div>
+            <div className={styles.groupDeleteImpactList}>
+              {isLevel1 ? (
+                <div className={styles.groupDeleteImpactItem}>
+                  <span>{t('device.group.deleteChildGroupsLabel')}</span>
+                  <strong>{t('device.group.deleteChildGroupsValue', { count: childCount })}</strong>
+                </div>
+              ) : null}
+              <div className={styles.groupDeleteImpactItem}>
+                <span>{t('device.group.deleteDevicesLabel')}</span>
+                <strong>{t('device.group.deleteDevicesValue', { count: deviceCount })}</strong>
+              </div>
+              <div className={styles.groupDeleteImpactItem}>
+                <span>{t('device.group.deleteResultLabel')}</span>
+                <strong>{t('device.group.deleteResultUngrouped')}</strong>
+              </div>
+            </div>
+            <div className={styles.groupDeleteConfirmHint}>
+              {t('device.group.deleteDevicePreserveHint')}
             </div>
           </div>
         ),
@@ -244,7 +283,7 @@ export function useGroupActions(deps: {
         },
       });
     },
-    [deleteGroupMutation, modal, message, selectedGroupId, setSelectedGroupId, t]
+    [deleteGroupMutation, groups, modal, message, selectedGroupId, setSelectedGroupId, t]
   );
 
   // ── Save handlers ──

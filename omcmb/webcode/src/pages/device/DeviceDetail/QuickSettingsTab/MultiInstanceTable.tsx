@@ -1620,7 +1620,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
           // 这两者互斥：列已经声明 formatValue 表示有自定义显示，不应再被 enum 兜底改写。
           const formattedValue = column.formatValue
             ? column.formatValue(value)
-            : (leaf ? formatEnumDisplayValue(value, item?.constraints, item?.path) : value);
+            : (leaf ? formatEnumDisplayValue(value, item?.constraints, item?.path, locale) : value);
           return <Text>{formattedValue || '-'}</Text>;
         },
       };
@@ -1762,7 +1762,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
             // 同列渲染：column.formatValue 收原始值；未提供则退到 enum 兜底。
             const displayValue = column.formatValue
               ? column.formatValue(value)
-              : (leaf ? formatEnumDisplayValue(value, item?.constraints, item?.path) : value);
+              : (leaf ? formatEnumDisplayValue(value, item?.constraints, item?.path, locale) : value);
 
             return (
               <div key={column.key} style={{ minWidth: 0 }}>
