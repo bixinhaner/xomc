@@ -15,6 +15,7 @@ import {
 } from '../agentkit';
 import { useAppStore } from '../store/appStore';
 import { useUserStore } from '../store/userStore';
+import { useAgentConversation, useStartAgentConversation } from './api/useAgentConfig';
 import { useAgentRuntimeClient } from './useAgentRuntimeClient';
 
 export interface UseAgentPanelControllerOptions {
@@ -32,7 +33,7 @@ export interface UseAgentPanelControllerResult {
   sendMessage: (message: string) => Promise<void>;
   executePendingAction: () => Promise<void>;
   cancelPendingAction: () => void;
-  clear: () => void;
+  clear: () => Promise<void>;
 }
 
 let nextAgentPanelId = 0;
@@ -80,9 +81,10 @@ function now() {
 function buildConversationStorageKey(input: {
   connectorId?: string;
   userId?: string;
+  conversationId?: string;
 }): string | undefined {
-  if (!input.connectorId || !input.userId) return undefined;
-  return `${AGENT_CONVERSATION_STORAGE_PREFIX}:${input.connectorId}:${input.userId}`;
+  if (!input.connectorId || !input.userId || !input.conversationId) return undefined;
+  return `${AGENT_CONVERSATION_STORAGE_PREFIX}:${input.connectorId}:${input.userId}:${input.conversationId}`;
 }
 
 function normalizeMessagesForStorage(messages: AgentPanelMessage[]): AgentPanelMessage[] {
@@ -136,7 +138,7 @@ function readConversationState(storageKey: string | undefined): PersistedAgentPa
 function writeConversationState(storageKey: string | undefined, state: PersistedAgentPanelState | undefined) {
   if (!storageKey || typeof window === 'undefined') return;
   try {
-    if (state && (state.conversationId || state.messages.length || state.activities.length || state.pendingAction)) {
+    if (state && (state.messages.length || state.activities.length || state.pendingAction)) {
       window.localStorage.setItem(storageKey, JSON.stringify(state));
     } else {
       window.localStorage.removeItem(storageKey);
@@ -170,6 +172,15 @@ export function useAgentPanelController(
   const { enabled, client, config } = useAgentRuntimeClient(undefined, {
     queryEnabled: options.active ?? true,
   });
+  const {
+    data: conversationData,
+    refetch: refetchConversation,
+  } = useAgentConversation(
+    config.connectorId,
+    currentUserId,
+    Boolean(options.active ?? true) && enabled
+  );
+  const startConversation = useStartAgentConversation(config.connectorId, currentUserId);
   const [messages, setMessages] = useState<AgentPanelMessage[]>([]);
   const [activities, setActivities] = useState<AgentPanelActivity[]>([]);
   const [pendingAction, setPendingAction] = useState<AgentPendingAction | null>(null);
@@ -180,19 +191,35 @@ export function useAgentPanelController(
   const actionRequestsRef = useRef(new Map<string, AgentApprovedAction>());
   const abortRef = useRef<AbortController | null>(null);
   const skipNextPersistRef = useRef(false);
+  const conversationRequestRef = useRef<Promise<string | undefined> | null>(null);
 
   const timezone = systemTimezone || 'UTC';
   const context = useMemo(() => options.context, [options.context]);
   const conversationStorageKey = useMemo(
-    () => buildConversationStorageKey({ connectorId: config.connectorId, userId: currentUserId }),
-    [config.connectorId, currentUserId]
+    () =>
+      buildConversationStorageKey({
+        connectorId: config.connectorId,
+        userId: currentUserId,
+        conversationId,
+      }),
+    [config.connectorId, conversationId, currentUserId]
   );
+
+  useEffect(() => {
+    if (!conversationData?.conversationId) return;
+    setConversationId(conversationData.conversationId);
+  }, [conversationData?.conversationId]);
+
+  useEffect(() => {
+    if (!enabled || !config.connectorId || !currentUserId) {
+      setConversationId(undefined);
+    }
+  }, [config.connectorId, currentUserId, enabled]);
 
   useEffect(() => {
     setStorageReady(false);
     const restored = readConversationState(conversationStorageKey);
     skipNextPersistRef.current = true;
-    setConversationId(restored?.conversationId);
     setMessages(restored?.messages ?? []);
     setActivities(restored?.activities ?? []);
     setPendingAction(restored?.pendingAction ?? null);
@@ -208,6 +235,32 @@ export function useAgentPanelController(
     },
     []
   );
+
+  const ensureConversationId = useCallback(async (): Promise<string | undefined> => {
+    if (conversationId) return conversationId;
+    if (!enabled || !config.connectorId || !currentUserId) return undefined;
+    if (!conversationRequestRef.current) {
+      conversationRequestRef.current = refetchConversation()
+        .then((result) => {
+          const nextConversationId = result.data?.conversationId;
+          if (nextConversationId) {
+            updateConversationId(nextConversationId);
+          }
+          return nextConversationId;
+        })
+        .finally(() => {
+          conversationRequestRef.current = null;
+        });
+    }
+    return conversationRequestRef.current;
+  }, [
+    config.connectorId,
+    conversationId,
+    currentUserId,
+    enabled,
+    refetchConversation,
+    updateConversationId,
+  ]);
 
   useEffect(() => {
     if (!storageReady) return;
@@ -488,10 +541,11 @@ export function useAgentPanelController(
       };
 
       try {
+        const activeConversationId = await ensureConversationId();
         await client.stream(
           {
             message: input.message,
-            conversationId,
+            conversationId: activeConversationId,
             mode: input.mode,
             approvedAction: input.approvedAction,
             locale,
@@ -519,7 +573,7 @@ export function useAgentPanelController(
       appendAssistantThought,
       client,
       context,
-      conversationId,
+      ensureConversationId,
       finishAssistant,
       locale,
       timezone,
@@ -565,17 +619,40 @@ export function useAgentPanelController(
     setPendingAction(null);
   }, [pendingAction]);
 
-  const clear = useCallback(() => {
+  const clear = useCallback(async () => {
     abortRef.current?.abort();
     abortRef.current = null;
     actionRequestsRef.current.clear();
-    setMessages([]);
-    setActivities([]);
-    setPendingAction(null);
-    updateConversationId(undefined);
     setIsStreaming(false);
     setError(null);
-  }, [updateConversationId]);
+    if (!enabled || !config.connectorId || !currentUserId) {
+      writeConversationState(conversationStorageKey, undefined);
+      skipNextPersistRef.current = true;
+      setMessages([]);
+      setActivities([]);
+      setPendingAction(null);
+      updateConversationId(undefined);
+      return;
+    }
+    try {
+      const next = await startConversation.mutateAsync();
+      writeConversationState(conversationStorageKey, undefined);
+      skipNextPersistRef.current = true;
+      setMessages([]);
+      setActivities([]);
+      setPendingAction(null);
+      updateConversationId(next.conversationId);
+    } catch (err) {
+      setError(runtimeError(err));
+    }
+  }, [
+    config.connectorId,
+    conversationStorageKey,
+    currentUserId,
+    enabled,
+    startConversation,
+    updateConversationId,
+  ]);
 
   return {
     enabled,

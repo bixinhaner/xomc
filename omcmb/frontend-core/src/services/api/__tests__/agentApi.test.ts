@@ -52,6 +52,24 @@ describe('agentApi', () => {
     expect(result.connectorId).toBe('c1');
   });
 
+  it('reads the active agent conversation', async () => {
+    getMock.mockResolvedValue({ data: { conversationId: 'conversation-1' } });
+
+    const result = await agentApi.getConversation();
+
+    expect(getMock).toHaveBeenCalledWith('/agent/conversation');
+    expect(result.conversationId).toBe('conversation-1');
+  });
+
+  it('starts a new agent conversation', async () => {
+    postMock.mockResolvedValue({ data: { conversationId: 'conversation-2' } });
+
+    const result = await agentApi.startConversation();
+
+    expect(postMock).toHaveBeenCalledWith('/agent/conversation');
+    expect(result.conversationId).toBe('conversation-2');
+  });
+
   it('syncs admin config through the admin API', async () => {
     const payload = {
       enabled: true,
