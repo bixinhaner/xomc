@@ -1428,6 +1428,12 @@ const messages: Record<string, string> = {
   'device.csv.column.deviceGrouping': '设备分组',
   'device.csv.column.sourceType':     '归属来源',
   'device.csv.template.comment':      '# 必填: {required} | 可选: {optional} | 说明: 按 SN 匹配已注册设备，仅更新名称/备注（不改变设备归属分组）；SN 不存在的行会失败',
+  // CSV 模板示例数据 i18n（随 locale 渲染）
+  'device.csv.example.stationA':  '北京海淀中关村站',
+  'device.csv.example.stationB':  '北京朝阳CBD站',
+  'device.csv.example.stationC':  '上海浦东陆家嘴站',
+  'device.csv.example.remarkA':   '一期',
+  'device.csv.example.remarkB':   '二期',
   // 批量导入后端错误码
   'device.batchImport.error.device_not_found':    '设备不存在（导入仅更新已注册设备的名称/备注，并归入当前分组）',
   'device.batchImport.error.update_name_failed':  '更新设备名称失败',
