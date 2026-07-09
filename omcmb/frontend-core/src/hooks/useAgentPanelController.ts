@@ -280,6 +280,17 @@ export function useAgentPanelController(
         switch (event.type) {
           case 'start':
             updateConversationId(event.conversationId);
+            setMessages((current) =>
+              current.map((message) =>
+                message.id === assistantId
+                  ? {
+                      ...message,
+                      runId: event.runId,
+                      conversationId: event.conversationId,
+                    }
+                  : message
+              )
+            );
             break;
           case 'tool_request':
             setActivities((current) =>

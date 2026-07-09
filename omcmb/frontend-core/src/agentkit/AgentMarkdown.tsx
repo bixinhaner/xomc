@@ -44,13 +44,28 @@ function normalizeMarkdownText(content: string): string {
   let next = content.replace(/\r\n?/g, '\n');
 
   next = next.replace(/^(\s{0,3})(\d{1,2})\.([^\s\d])/gm, '$1$2. $3');
-  next = next.replace(/^(\s{0,3})([-*+])([^\s])/gm, '$1$2 $3');
+  next = next.replace(/^(\s{0,3})([-+])([^\s])/gm, '$1$2 $3');
+  next = next.replace(/^(\s{0,3})\*([^\s*])/gm, '$1* $2');
+  next = next.replace(/([：:；;。])\s*([-*+])\s*(GET|POST|PUT|PATCH|DELETE)(\/api\/[A-Za-z0-9_./:?=&%-]+)/g, '$1\n\n$2 `$3 $4`');
+  next = next.replace(/([^\n])\s*([-*+])\s*(GET|POST|PUT|PATCH|DELETE)(\/api\/[A-Za-z0-9_./:?=&%-]+)/g, '$1\n$2 `$3 $4`');
+  next = next.replace(/(数量[：:][^\n]+?)(调用的\s*API[：:])/g, '$1\n$2');
   next = next.replace(/([：:；;。])\s*(\d{1,2})\.([^\s\d])/g, '$1\n\n$2. $3');
   next = next.replace(/([\u4e00-\u9fffA-Za-z）)，,])\s+(\d{1,2})\.([\u4e00-\u9fffA-Za-z（(])/g, '$1\n$2. $3');
   next = next.replace(/([\u4e00-\u9fff）)，,])(\d{1,2})\.([\u4e00-\u9fffA-Za-z（(])/g, '$1\n$2. $3');
-  next = next.replace(/([。；;])\s*([-*+])([^\s])/g, '$1\n$2 $3');
+  next = next.replace(/([：:。；;])\s*([-+])([^\s])/g, '$1\n$2 $3');
+  next = next.replace(/([：:。；;])\s*\*([^\s*])/g, '$1\n* $2');
+  next = next.replace(/`((?:GET|POST|PUT|PATCH|DELETE)\s*\/api\/[A-Za-z0-9_./:?=&%-]+)`/g, (_match, endpoint: string) => {
+    return `\`${normalizeRestEndpoint(endpoint)}\``;
+  });
+  next = next.replace(/(^|[\s:：,，;；])((?:GET|POST|PUT|PATCH|DELETE)\s*\/api\/[A-Za-z0-9_./:?=&%-]+)/gm, (_match, prefix: string, endpoint: string) => {
+    return `${prefix}\`${normalizeRestEndpoint(endpoint)}\``;
+  });
 
   return next;
+}
+
+function normalizeRestEndpoint(value: string): string {
+  return value.trim().replace(/^([A-Z]+)\s*/, '$1 ');
 }
 
 function AgentMarkdownLink(props: AnchorHTMLAttributes<HTMLAnchorElement>) {
@@ -79,16 +94,20 @@ function AgentMarkdownTable(props: TableHTMLAttributes<HTMLTableElement>) {
 
 function AgentMarkdownCode(props: HTMLAttributes<HTMLElement> & { children?: ReactNode }) {
   const { className, children, ...rest } = props;
+  const normalizedChildren =
+    typeof children === 'string' && /^(GET|POST|PUT|PATCH|DELETE)\s*\/api\//.test(children)
+      ? normalizeRestEndpoint(children)
+      : children;
   if (className) {
     return (
       <code className={className} {...rest}>
-        {children}
+        {normalizedChildren}
       </code>
     );
   }
   return (
     <code className="agent-render-inline-code" {...rest}>
-      {children}
+      {normalizedChildren}
     </code>
   );
 }

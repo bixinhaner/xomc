@@ -106,6 +106,148 @@
   opacity: 0.42;
 }
 
+.runtimeStatus {
+  position: relative;
+  display: flex;
+  min-height: 42px;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(12, 18, 28, 0.72);
+  padding: 7px 12px;
+}
+
+.runtimePulse {
+  position: relative;
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #69b1ff;
+  box-shadow: 0 0 0 4px rgba(105, 177, 255, 0.12);
+}
+
+.runtimePulse::after {
+  position: absolute;
+  inset: -5px;
+  border: 1px solid rgba(105, 177, 255, 0.46);
+  border-radius: inherit;
+  animation: agentLiveRing 1.6s ease-out infinite;
+  content: '';
+}
+
+.runtimeText {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  color: #cfe5ff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.diagnosticBtn {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  margin-left: auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(105, 177, 255, 0.2);
+  border-radius: 999px;
+  background: rgba(105, 177, 255, 0.07);
+  color: #a7cffd;
+  cursor: pointer;
+}
+
+.diagnosticBtn:hover {
+  border-color: rgba(105, 177, 255, 0.38);
+  background: rgba(105, 177, 255, 0.14);
+}
+
+.diagnosticBackdrop {
+  position: fixed;
+  z-index: 3;
+  inset: 0;
+  border: 0;
+  background: transparent;
+  cursor: default;
+}
+
+.diagnosticMenu {
+  position: absolute;
+  z-index: 4;
+  top: 36px;
+  right: 12px;
+  display: grid;
+  width: min(280px, calc(100vw - 48px));
+  gap: 8px;
+  border: 1px solid rgba(105, 177, 255, 0.26);
+  border-radius: 8px;
+  background: #181c23;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.38);
+  padding: 10px;
+}
+
+.diagnosticHeader {
+  color: #f4f6fb;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.diagnosticRow {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 8px;
+  color: #9aa3b2;
+  font-size: 11px;
+}
+
+.diagnosticRow code {
+  min-width: 0;
+  overflow: hidden;
+  color: #d8ebff;
+  font-family: SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diagnosticCopy {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #a7cffd;
+  cursor: pointer;
+}
+
+.diagnosticCopy:hover {
+  border-color: rgba(105, 177, 255, 0.32);
+  background: rgba(105, 177, 255, 0.1);
+}
+
+.diagnosticPrimary {
+  min-height: 30px;
+  border: 1px solid rgba(105, 177, 255, 0.24);
+  border-radius: 7px;
+  background: rgba(105, 177, 255, 0.1);
+  color: #cfe5ff;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.diagnosticPrimary:hover {
+  border-color: rgba(105, 177, 255, 0.42);
+  background: rgba(105, 177, 255, 0.16);
+}
+
 .body {
   min-height: 0;
   flex: 1;
@@ -435,12 +577,15 @@
 }
 
 .markdown :global(.agent-render-inline-code) {
+  display: inline;
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.08);
   color: #d6e8ff;
   font-family: SFMono-Regular, Consolas, 'Liberation Mono', monospace;
   font-size: 0.92em;
+  overflow-wrap: anywhere;
   padding: 1px 4px;
+  white-space: normal;
 }
 
 .markdown :global(.agent-render-pre) {
@@ -520,6 +665,33 @@
   padding: 8px 10px;
 }
 
+.processSummaryTitle {
+  flex: 0 0 auto;
+}
+
+.processChips {
+  display: inline-flex;
+  min-width: 0;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.processChips span {
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.055);
+  color: #aeb8c7;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+  padding: 0 6px;
+}
+
+.processChips .processErrorChip {
+  background: rgba(255, 77, 79, 0.14);
+  color: #ff9c9e;
+}
+
 .processList {
   display: grid;
   gap: 8px;
@@ -567,9 +739,55 @@
 }
 
 .processTitle {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
   color: #dce3ec;
   font-size: 12px;
   font-weight: 600;
+}
+
+.processTitleRow {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.processPath {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.processSubtle {
+  margin-top: 4px;
+  color: #7f8a99;
+  font-family: SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.inlineCopy {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #8f9bae;
+  cursor: pointer;
+}
+
+.inlineCopy:hover {
+  background: rgba(105, 177, 255, 0.12);
+  color: #d8ebff;
 }
 
 .processDetail {
