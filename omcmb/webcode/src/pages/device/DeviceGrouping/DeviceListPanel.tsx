@@ -22,7 +22,7 @@ export interface DeviceListPanelProps {
   selectedGroupId: string | null;
   selectedGroupName: string | undefined;
   batchActions: BatchAction[];
-  onSelectionChange: (keys: React.Key[]) => void;
+  onSelectionChange: (keys: React.Key[], rows: Device[]) => void;
   onPageChange: (page: number, size: number) => void;
   /** SN / 设备名称 模糊搜索（多个以逗号分隔），回车或点搜索触发。 */
   onSearch: (value: string) => void;
@@ -144,6 +144,7 @@ export default function DeviceListPanel({
             selectable
             selectedRowKeys={selectedDeviceIds}
             onSelectionChange={onSelectionChange}
+            preserveSelectedRowKeys
             batchActions={batchActions}
             extraToolbarLeft={searchBox}
             extraToolbarAfterBatch={importExportButtons}
