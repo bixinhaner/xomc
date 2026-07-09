@@ -16,32 +16,37 @@ import (
 // ---------- stub Repository（仅本测试用） ----------
 
 type stubRepo struct {
-	mu                  sync.Mutex
-	insertCount         int
-	pending             []*Job
-	heartbeatCalls      int
-	heartbeatReturnErr  error
-	markSucceededCalls  int
-	markFailedCalls     int
-	lastResult          json.RawMessage
-	lastErrMsg          string
-	zombies             []Job
-	resetCalls          int
-	resetErr            error
-	lockErr             error
+	mu                 sync.Mutex
+	insertCount        int
+	pending            []*Job
+	heartbeatCalls     int
+	heartbeatReturnErr error
+	markSucceededCalls int
+	markFailedCalls    int
+	lastResult         json.RawMessage
+	lastErrMsg         string
+	zombies            []Job
+	resetCalls         int
+	resetErr           error
+	lockErr            error
 }
 
 func (s *stubRepo) Insert(_ context.Context, req InsertRequest) (uuid.UUID, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	maxAttempts := req.MaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = DefaultMaxAttempts
+	}
 	id := uuid.New()
 	s.pending = append(s.pending, &Job{
 		ID:          id,
 		JobType:     req.JobType,
 		Status:      StatusPending,
+		Attempt:     1,
 		ScheduledAt: req.ScheduledAt,
 		Payload:     req.Payload,
-		MaxAttempts: req.MaxAttempts,
+		MaxAttempts: maxAttempts,
 	})
 	s.insertCount++
 	return id, nil
@@ -91,11 +96,26 @@ func (s *stubRepo) MarkSucceeded(_ context.Context, _ uuid.UUID, result json.Raw
 	return nil
 }
 
-func (s *stubRepo) MarkFailed(_ context.Context, _ uuid.UUID, errMsg string) error {
+func (s *stubRepo) MarkFailed(_ context.Context, id uuid.UUID, errMsg string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.markFailedCalls++
 	s.lastErrMsg = errMsg
+	for _, j := range s.pending {
+		if j.ID != id {
+			continue
+		}
+		if j.Attempt+1 > j.MaxAttempts {
+			j.Status = StatusFailed
+		} else {
+			j.Status = StatusPending
+			j.Attempt++
+			j.StartedAt = nil
+			j.HeartbeatAt = nil
+			j.LockOwner = ""
+		}
+		break
+	}
 	return nil
 }
 
@@ -189,6 +209,32 @@ func TestRegistry_RunNext_FailureMarksFailed(t *testing.T) {
 	require.Equal(t, 0, repo.markSucceededCalls)
 	require.Equal(t, 1, repo.markFailedCalls)
 	require.Contains(t, repo.lastErrMsg, "intentional failure")
+}
+
+func TestRegistry_RunNext_FailureRetriesUntilMaxAttempts(t *testing.T) {
+	repo := &stubRepo{}
+	jobID, _ := repo.Insert(context.Background(), InsertRequest{JobType: "x", ScheduledAt: time.Now(), MaxAttempts: 2})
+
+	reg := NewRegistry(repo, "test", nil)
+	reg.Register(&stubJobRunner{jobType: "x", runFn: func(_ context.Context, _ *Job) (json.RawMessage, error) {
+		return nil, errors.New("retry me")
+	}})
+
+	didRun, err := reg.RunNext(context.Background(), "x")
+	require.True(t, didRun)
+	require.NoError(t, err)
+	job, err := repo.GetByID(context.Background(), jobID)
+	require.NoError(t, err)
+	require.Equal(t, StatusPending, job.Status)
+	require.Equal(t, 2, job.Attempt)
+
+	didRun, err = reg.RunNext(context.Background(), "x")
+	require.True(t, didRun)
+	require.NoError(t, err)
+	job, err = repo.GetByID(context.Background(), jobID)
+	require.NoError(t, err)
+	require.Equal(t, StatusFailed, job.Status)
+	require.Equal(t, 2, job.Attempt)
 }
 
 func TestRegistry_RunNext_PanicRecoveredAndMarksFailed(t *testing.T) {

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
@@ -49,15 +51,38 @@ func (r *GroupRunner) SetMetrics(m *Metrics) { r.metrics = m }
 // Run 解析 payload 拿 [Start, End) → AggregateDeviceGroup 写 groupTarget。
 //
 // 不计算 KPI（设备组级 KPI 因依赖具体设备 productClass 路由，跨设备时语义复杂，留 v2）。
-func (r *GroupRunner) Run(ctx context.Context, job *asyncjob.Job) (json.RawMessage, error) {
+func (r *GroupRunner) Run(ctx context.Context, job *asyncjob.Job) (result json.RawMessage, err error) {
 	startedAt := time.Now()
 	var runStatus = "succeeded"
+	var p runPayload
+	var rows int
 	defer func() {
+		if err != nil {
+			runStatus = "failed"
+		}
 		r.metrics.ObserveDuration(r.jobType, time.Since(startedAt).Seconds())
 		r.metrics.IncRun(r.jobType, runStatus)
+		if !p.Start.IsZero() || !p.End.IsZero() {
+			fields := []zap.Field{
+				zap.String("job_type", r.jobType),
+				zap.String("job_id", job.ID.String()),
+				zap.Time("bucket_start", p.Start),
+				zap.Time("bucket_end", p.End),
+				zap.Time("scheduled_at", job.ScheduledAt),
+				zap.Int64("duration_ms", time.Since(startedAt).Milliseconds()),
+				zap.String("status", runStatus),
+				zap.Int("attempt", job.Attempt),
+				zap.Int("group_rows", rows),
+			}
+			if err != nil {
+				fields = append(fields, zap.Error(err))
+				r.aggregator.logger.Warn("pm aggregation bucket completed", fields...)
+				return
+			}
+			r.aggregator.logger.Info("pm aggregation bucket completed", fields...)
+		}
 	}()
 
-	var p runPayload
 	if len(job.Payload) > 0 {
 		if err := json.Unmarshal(job.Payload, &p); err != nil {
 			runStatus = "failed"
@@ -76,7 +101,7 @@ func (r *GroupRunner) Run(ctx context.Context, job *asyncjob.Job) (json.RawMessa
 
 	w := WindowSpec{Granularity: r.granularity, Start: p.Start, End: p.End}
 
-	rows, err := r.aggregator.AggregateDeviceGroup(ctx, r.deviceTarget, r.groupTarget, w)
+	rows, err = r.aggregator.AggregateDeviceGroup(ctx, r.deviceTarget, r.groupTarget, w)
 	if err != nil {
 		runStatus = "failed"
 		return nil, fmt.Errorf("group runner %s: aggregate device group: %w", r.jobType, err)
@@ -101,5 +126,6 @@ func (r *GroupRunner) Run(ctx context.Context, job *asyncjob.Job) (json.RawMessa
 		"group_target":  r.groupTarget,
 		"granularity":   string(r.granularity),
 	}
-	return json.Marshal(out)
+	result, err = json.Marshal(out)
+	return result, err
 }

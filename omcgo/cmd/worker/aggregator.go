@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 
@@ -67,7 +68,7 @@ func startPMAggregatorPipeline(
 	asyncMetrics := asyncjob.NewMetrics(w.MetricsReg)
 	registry.SetMetrics(asyncMetrics)
 
-	// 2) 注册 4 个 G5 设备级 cron runner
+	// 2) 注册 4 个 G5 设备级 asyncjob runner
 	runners := []*aggregator.Runner{
 		aggregator.NewHourlyRunner(aggr),
 		aggregator.NewDailyRunner(aggr),
@@ -81,6 +82,7 @@ func startPMAggregatorPipeline(
 		if gjt := aggregator.GroupJobTypeFor(r.JobType()); gjt != "" {
 			r.SetGroupChain(gjt, jobRepo)
 		}
+		r.SetRollupChain(jobRepo, tz.Current)
 		// #528 P1：设备级该桶聚合成功后推进设备级完成水位（水位表在主库，故传 PgPool）。
 		r.SetWatermarkExec(w.PgPool)
 		registry.Register(r)
@@ -92,7 +94,7 @@ func startPMAggregatorPipeline(
 			zap.String("granularity", string(r.Granularity())))
 	}
 
-	// 2b) 注册 4 个 G5 设备组级 cron runner（T-0164 收尾 G5-Gap-1）
+	// 2b) 注册 4 个 G5 设备组级 asyncjob runner（T-0164 收尾 G5-Gap-1）
 	groupRunners := []*aggregator.GroupRunner{
 		aggregator.NewHourlyGroupRunner(aggr),
 		aggregator.NewDailyGroupRunner(aggr),
@@ -222,14 +224,13 @@ type cronEntry struct {
 	advance asyncjob.BucketAdvance
 }
 
-// pmAggregatorCronEntries 4 个 G5 设备级 cron 配置（#479 改动三后只剩设备级）。
+// pmAggregatorCronEntries 返回 PM 聚合独立 cron 配置。
 //
 // 设备组级聚合不再有独立 cron——改为设备级该桶聚合成功后由 Runner 确定性 chain
 // （见 internal/pm/aggregator GroupJobTypeFor / Runner.SetGroupChain）。
 // 旧的"设备组级 cron 晚 10 分钟错峰"已废弃（脆弱、两套游标漂移、白等延迟）。
 //
-//	设备级 hourly :05 / daily 00:05 / weekly Mon 00:10 / monthly 1日 00:15
-//	→ 各自成功后立即 chain 出对应粒度的设备组聚合任务（同一 [Start,End)）。
+//	只保留设备级 hourly :05；daily/weekly/monthly 由上游 bucket 成功后 chain。
 //
 // pmAggregatorCronEntries 接受固定 loc，等价 pmAggregatorCronEntriesFn(func() loc)。
 // 保留此签名供既有单测直接断言某时区下的窗口边界。
@@ -242,53 +243,23 @@ func pmAggregatorCronEntries(loc *time.Location) []cronEntry {
 	})
 }
 
-// pmAggregatorCronEntriesFn 用「实时取业务时区」的取值器构造 cron entries（#458 动态感知）。
-//
-// window 闭包每次触发都经 locFn() 取当前时区切桶——管理员改时区后，
-// 即便 cron 还没重建完，下一次 window 计算也已用新时区（不重启即生效的核心保证）。
+// pmAggregatorCronEntriesFn 构造 cron entries（#458 保留 locFn 签名供 tzManager 重建 cron）。
+// 当前只剩 hourly 独立 cron，窗口本身与业务时区无关；daily/weekly/monthly 的业务时区边界
+// 在 Runner chain 时通过 tz.Current() 计算。
 func pmAggregatorCronEntriesFn(locFn func() *time.Location) []cronEntry {
-	loc := func() *time.Location {
-		if l := locFn(); l != nil {
-			return l
-		}
-		return time.UTC
-	}
+	_ = locFn
 	hourlyAdvance := func(prev time.Time) time.Time { return prev.Add(time.Hour) }
-	dailyAdvance := func(prev time.Time) time.Time { return prev.AddDate(0, 0, 1) }
-	weeklyAdvance := func(prev time.Time) time.Time { return prev.AddDate(0, 0, 7) }
-	monthlyAdvance := func(prev time.Time) time.Time { return prev.AddDate(0, 1, 0) }
 
 	// hourly 整点对齐与时区无关（整点 UTC = 整点北京同一瞬间），不需 loc。
 	hourlyWindow := func(now time.Time) (time.Time, time.Time) {
 		end := now.Truncate(time.Hour)
 		return end.Add(-time.Hour), end
 	}
-	// daily/weekly/monthly 把 now 归一到业务时区后再截零点，
-	// 使 truncateDay/truncateWeekISO/monthlyWindow 经 t.Location() 自然产本地零点（T-0192）。
-	dailyWindow := func(now time.Time) (time.Time, time.Time) {
-		today := truncateDay(now.In(loc()))
-		return today.AddDate(0, 0, -1), today
-	}
-	weeklyWindow := func(now time.Time) (time.Time, time.Time) {
-		thisMon := truncateWeekISO(now.In(loc()))
-		return thisMon.AddDate(0, 0, -7), thisMon
-	}
-	monthlyWindow := func(now time.Time) (time.Time, time.Time) {
-		n := now.In(loc())
-		thisMonth := time.Date(n.Year(), n.Month(), 1, 0, 0, 0, 0, n.Location())
-		return thisMonth.AddDate(0, -1, 0), thisMonth
-	}
 
-	// #479 改动三：只保留设备级 cron。设备组聚合不再有独立 cron / 固定错峰——
-	// 改为设备级该桶聚合成功后由 Runner.SetGroupChain 确定性 chain（同一 [Start,End)）。
-	// 单一触发链：设备级 cron → 设备级任务成功 → chain 组任务；无两套游标漂移、无 10 分钟空等。
-	// 启动补跑同理：设备级漏桶被 catchup 重跑时会重新 chain 出对应组任务，组级无需独立 catchup。
+	// 独立 cron 只负责 hourly。hourly catchup 补出漏桶后，Runner 成功事件继续 chain
+	// daily/weekly/monthly 和同粒度 group，避免下游早于最后源桶成功提交。
 	return []cronEntry{
-		// 设备级
 		{spec: "5 * * * *", jobType: aggregator.JobTypeHourly, window: hourlyWindow, advance: hourlyAdvance},
-		{spec: "5 0 * * *", jobType: aggregator.JobTypeDaily, window: dailyWindow, advance: dailyAdvance},
-		{spec: "10 0 * * 1", jobType: aggregator.JobTypeWeekly, window: weeklyWindow, advance: weeklyAdvance},
-		{spec: "15 0 1 * *", jobType: aggregator.JobTypeMonthly, window: monthlyWindow, advance: monthlyAdvance},
 	}
 }
 
@@ -339,9 +310,10 @@ func startCronScheduler(
 	logger.Info("pm aggregator cron scheduler started",
 		zap.String("timezone", tz.Current().String()),
 		zap.Strings("schedules_device", []string{
-			"hourly @:05", "daily 00:05", "weekly Mon 00:10", "monthly 1日 00:15",
+			"hourly @:05",
 		}),
-		zap.String("schedules_group", "chained from device-level success (#479; no separate cron)"))
+		zap.String("schedules_rollup", "daily/weekly/monthly chained from upstream bucket success"),
+		zap.String("schedules_group", "chained from same-granularity device-level success (#479; no separate cron)"))
 }
 
 // catchupCronEntry 启动时补跑单个 cron job_type 的所有漏桶。
@@ -393,7 +365,14 @@ func catchupCronEntry(
 
 	var lastEnd time.Time
 	for _, b := range missed {
-		enqueueAggregationJob(ctx, jobRepo, entry.jobType, b.Start, b.End, logger)
+		if _, err := enqueueAggregationJob(ctx, jobRepo, entry.jobType, b.Start, b.End, logger); err != nil {
+			logger.Warn("catchup enqueue failed; stop advancing cron state",
+				zap.String("job_type", entry.jobType),
+				zap.Time("bucket_start", b.Start),
+				zap.Time("bucket_end", b.End),
+				zap.Error(err))
+			break
+		}
 		asyncMetrics.IncCatchup(entry.jobType) // G8-Gap-4
 		lastEnd = b.End
 	}
@@ -431,7 +410,14 @@ func triggerCron(
 	}
 	now := time.Now().In(loc)
 	start, end := entry.window(now)
-	enqueueAggregationJob(context.Background(), jobRepo, entry.jobType, start, end, logger)
+	if _, err := enqueueAggregationJob(context.Background(), jobRepo, entry.jobType, start, end, logger); err != nil {
+		logger.Warn("skip cron state update after enqueue failure",
+			zap.String("job_type", entry.jobType),
+			zap.Time("bucket_start", start),
+			zap.Time("bucket_end", end),
+			zap.Error(err))
+		return
+	}
 
 	// 用 background ctx 防 ctx 取消时丢状态更新（与 enqueue 一致）
 	bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -447,16 +433,18 @@ func triggerCron(
 // 即使本 worker 没注册对应 runner（运维误配），Insert 仍会成功；其它 worker 实例
 // 注册了对应 runner 的话会消费它。多 worker 跨进程跑同一 jobType 时 LockNextPending
 // 的 SKIP LOCKED 保证一个 bucket 只被一个 worker 处理。
-func enqueueAggregationJob(ctx context.Context, repo asyncjob.Repository, jobType string, start, end time.Time, logger *zap.Logger) {
+func enqueueAggregationJob(ctx context.Context, repo asyncjob.Repository, jobType string, start, end time.Time, logger *zap.Logger) (uuid.UUID, error) {
 	payload, err := aggregator.BuildPayload(start, end)
 	if err != nil {
 		logger.Error("build payload failed",
 			zap.String("job_type", jobType), zap.Error(err))
-		return
+		return uuid.Nil, err
 	}
 	jobID, err := repo.Insert(ctx, asyncjob.InsertRequest{
 		JobType:     jobType,
 		ScheduledAt: time.Now(),
+		BucketStart: &start,
+		BucketEnd:   &end,
 		Payload:     payload,
 	})
 	if err != nil {
@@ -465,19 +453,45 @@ func enqueueAggregationJob(ctx context.Context, repo asyncjob.Repository, jobTyp
 			zap.Time("bucket_start", start),
 			zap.Time("bucket_end", end),
 			zap.Error(err))
-		return
+		return uuid.Nil, err
 	}
 	logger.Info("aggregation job enqueued",
 		zap.String("job_type", jobType),
 		zap.String("job_id", jobID.String()),
 		zap.Time("bucket_start", start),
 		zap.Time("bucket_end", end))
+	return jobID, nil
 }
 
 // ── time helper ───────────────────────────────────────────────────────────
 
 func truncateDay(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+}
+
+func dailyAggregationWindow(now time.Time, loc *time.Location) (time.Time, time.Time) {
+	if loc == nil {
+		loc = time.UTC
+	}
+	today := truncateDay(now.In(loc))
+	return today.AddDate(0, 0, -1), today
+}
+
+func weeklyAggregationWindow(now time.Time, loc *time.Location) (time.Time, time.Time) {
+	if loc == nil {
+		loc = time.UTC
+	}
+	thisMon := truncateWeekISO(now.In(loc))
+	return thisMon.AddDate(0, 0, -7), thisMon
+}
+
+func monthlyAggregationWindow(now time.Time, loc *time.Location) (time.Time, time.Time) {
+	if loc == nil {
+		loc = time.UTC
+	}
+	n := now.In(loc)
+	thisMonth := time.Date(n.Year(), n.Month(), 1, 0, 0, 0, 0, n.Location())
+	return thisMonth.AddDate(0, -1, 0), thisMonth
 }
 
 // truncateWeekISO 把 t 截到本周周一 00:00（ISO 周历，周一为一周开始）。
