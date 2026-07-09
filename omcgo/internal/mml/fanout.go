@@ -116,6 +116,20 @@ func failedRetryMaxRetries(mmlTask *MMLTask) *int {
 	return &retries
 }
 
+func offlineRetryExpiresIn(mmlTask *MMLTask) int {
+	if mmlTask == nil || !mmlTask.OfflineRetry || mmlTask.OfflineRetryWait <= 0 {
+		return 0
+	}
+	return mmlTask.OfflineRetryWait * 60
+}
+
+func failedRetryIntervalSeconds(mmlTask *MMLTask) int {
+	if mmlTask == nil || !mmlTask.FailedRetry || mmlTask.FailedRetryInterval <= 0 {
+		return 0
+	}
+	return mmlTask.FailedRetryInterval * 60
+}
+
 // Fanout creates device_tasks for each (command, device) pair in the MML task.
 // Only called for immediate execution; scheduled/periodic tasks are fan-outed when started.
 func (f *Fanouter) Fanout(ctx context.Context, mmlTask *MMLTask) (int, error) {
@@ -239,14 +253,16 @@ func (f *Fanouter) buildDeviceTaskRequests(ctx context.Context, mmlTask *MMLTask
 			}
 
 			reqs = append(reqs, &task.CreateTaskRequest{
-				DeviceSN:    sn,
-				Method:      rpcMethod,
-				Params:      params,
-				Priority:    10,
-				Source:      task.TaskSourceMML,
-				CreatorID:   mmlTask.Creator,
-				Description: description,
-				MaxRetries:  failedRetryMaxRetries(mmlTask),
+				DeviceSN:             sn,
+				Method:               rpcMethod,
+				Params:               params,
+				Priority:             10,
+				ExpiresIn:            offlineRetryExpiresIn(mmlTask),
+				Source:               task.TaskSourceMML,
+				CreatorID:            mmlTask.Creator,
+				Description:          description,
+				MaxRetries:           failedRetryMaxRetries(mmlTask),
+				RetryIntervalSeconds: failedRetryIntervalSeconds(mmlTask),
 
 				SourceID:     parentID,
 				CommandIndex: cmdIdx,

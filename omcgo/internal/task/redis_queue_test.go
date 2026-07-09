@@ -197,6 +197,36 @@ func TestRedisQueue_PushAndPop_PriorityOrder(t *testing.T) {
 	assert.Nil(t, empty)
 }
 
+func TestRedisQueue_PopSkipsFutureNextAttempt(t *testing.T) {
+	q, _ := newRedisQueueWithMini(t)
+	ctx := context.Background()
+
+	nextAttempt := time.Now().Add(50 * time.Millisecond)
+	delayed := newTaskForQueue("t-delayed", "SN-DELAY", "Reboot")
+	delayed.NextAttemptAt = &nextAttempt
+
+	ready := newTaskForQueue("t-ready", "SN-DELAY", "GetParameterValues")
+	ready.Priority = delayed.Priority + 1
+
+	require.NoError(t, q.Push(ctx, delayed))
+	require.NoError(t, q.Push(ctx, ready))
+
+	first, err := q.Pop(ctx, "SN-DELAY")
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	assert.Equal(t, "t-ready", first.ID)
+
+	second, err := q.Pop(ctx, "SN-DELAY")
+	require.NoError(t, err)
+	assert.Nil(t, second, "delayed task must not be popped before next_attempt_at")
+
+	time.Sleep(70 * time.Millisecond)
+	third, err := q.Pop(ctx, "SN-DELAY")
+	require.NoError(t, err)
+	require.NotNil(t, third)
+	assert.Equal(t, "t-delayed", third.ID)
+}
+
 func TestRedisQueue_Peek(t *testing.T) {
 	q, _ := newRedisQueueWithMini(t)
 	ctx := context.Background()

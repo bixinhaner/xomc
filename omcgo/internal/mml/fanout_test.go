@@ -160,6 +160,31 @@ func TestFanouter_BuildDeviceTaskRequests_MapsFailedRetryStrategy(t *testing.T) 
 		require.NotNil(t, stub.calls[0][0].MaxRetries)
 		assert.Equal(t, 5, *stub.calls[0][0].MaxRetries)
 	})
+
+	t.Run("forwards offline wait and retry interval", func(t *testing.T) {
+		stub := &stubDeviceTaskCreator{}
+		f := NewFanouter(stub, nil, nil, nil, zap.NewNop())
+
+		mmlTask := &MMLTask{
+			ID:                  uuid.New(),
+			DeviceSNs:           []string{"SN-A"},
+			OfflineRetry:        true,
+			OfflineRetryWait:    7,
+			FailedRetry:         true,
+			FailedRetryCount:    4,
+			FailedRetryInterval: 9,
+			Commands: []map[string]interface{}{
+				{"command_code": "REBOOT", "rpc_method": "Reboot"},
+			},
+		}
+
+		_, err := f.Fanout(context.Background(), mmlTask)
+		require.NoError(t, err)
+		require.Len(t, stub.calls, 1)
+		require.Len(t, stub.calls[0], 1)
+		assert.Equal(t, 7*60, stub.calls[0][0].ExpiresIn)
+		assert.Equal(t, 9*60, stub.calls[0][0].RetryIntervalSeconds)
+	})
 }
 
 func TestFanouter_BuildDeviceTaskRequests_NoParamRefs_GetSkipped(t *testing.T) {

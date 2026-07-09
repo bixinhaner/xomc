@@ -45,8 +45,8 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *Task) error {
 	query, args, err := storage.Psql.Insert("device_tasks").
 		Columns(
 			"id", "device_sn", "method", "params", "priority",
-			"command_key", "cwmp_id", "status", "retry_count", "max_retries",
-			"created_at", "sent_at", "completed_at", "expires_at",
+			"command_key", "cwmp_id", "status", "retry_count", "max_retries", "retry_interval_seconds",
+			"created_at", "sent_at", "completed_at", "expires_at", "next_attempt_at",
 			"result", "error_code", "error_message",
 			"source", "creator_id", "description",
 			"source_id", "command_index", "device_index",
@@ -55,8 +55,8 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *Task) error {
 		).
 		Values(
 			task.ID, task.DeviceSN, task.Method, task.Params, task.Priority,
-			task.CommandKey, task.CWMPID, task.Status, task.RetryCount, task.MaxRetries,
-			task.CreatedAt, task.SentAt, task.CompletedAt, task.ExpiresAt,
+			task.CommandKey, task.CWMPID, task.Status, task.RetryCount, task.MaxRetries, task.RetryIntervalSeconds,
+			task.CreatedAt, task.SentAt, task.CompletedAt, task.ExpiresAt, task.NextAttemptAt,
 			task.Result, task.ErrorCode, task.ErrorMessage,
 			task.Source, task.CreatorID, task.Description,
 			nilUUID(task.SourceID), task.CommandIndex, task.DeviceIndex,
@@ -87,9 +87,11 @@ func (r *PgTaskRepository) Update(ctx context.Context, task *Task) error {
 		Set("status", task.Status).
 		Set("retry_count", task.RetryCount).
 		Set("max_retries", task.MaxRetries).
+		Set("retry_interval_seconds", task.RetryIntervalSeconds).
 		Set("sent_at", task.SentAt).
 		Set("completed_at", task.CompletedAt).
 		Set("expires_at", task.ExpiresAt).
+		Set("next_attempt_at", task.NextAttemptAt).
 		Set("result", task.Result).
 		Set("error_code", task.ErrorCode).
 		Set("error_message", task.ErrorMessage).
@@ -563,8 +565,8 @@ func (r *PgTaskRepository) BatchCreate(ctx context.Context, tasks []*Task) error
 
 	columns := []string{
 		"id", "device_sn", "method", "params", "priority",
-		"command_key", "cwmp_id", "status", "retry_count", "max_retries",
-		"created_at", "sent_at", "completed_at", "expires_at",
+		"command_key", "cwmp_id", "status", "retry_count", "max_retries", "retry_interval_seconds",
+		"created_at", "sent_at", "completed_at", "expires_at", "next_attempt_at",
 		"result", "error_code", "error_message",
 		"source", "creator_id", "description",
 		"source_id", "command_index", "device_index",
@@ -577,8 +579,8 @@ func (r *PgTaskRepository) BatchCreate(ctx context.Context, tasks []*Task) error
 	for _, task := range tasks {
 		insertBuilder = insertBuilder.Values(
 			task.ID, task.DeviceSN, task.Method, task.Params, task.Priority,
-			task.CommandKey, task.CWMPID, task.Status, task.RetryCount, task.MaxRetries,
-			task.CreatedAt, task.SentAt, task.CompletedAt, task.ExpiresAt,
+			task.CommandKey, task.CWMPID, task.Status, task.RetryCount, task.MaxRetries, task.RetryIntervalSeconds,
+			task.CreatedAt, task.SentAt, task.CompletedAt, task.ExpiresAt, task.NextAttemptAt,
 			task.Result, task.ErrorCode, task.ErrorMessage,
 			task.Source, task.CreatorID, task.Description,
 			task.SourceID, task.CommandIndex, task.DeviceIndex,
@@ -803,8 +805,8 @@ func (r *PgTaskRepository) PurgeOldTasks(ctx context.Context, before string) (in
 func taskColumns() []string {
 	return []string{
 		"id", "device_sn", "method", "params", "priority",
-		"command_key", "cwmp_id", "status", "retry_count", "max_retries",
-		"created_at", "sent_at", "completed_at", "expires_at",
+		"command_key", "cwmp_id", "status", "retry_count", "max_retries", "retry_interval_seconds",
+		"created_at", "sent_at", "completed_at", "expires_at", "next_attempt_at",
 		"result", "error_code", "error_message",
 		"source", "creator_id", "description",
 		"source_id", "command_index", "device_index",
@@ -831,8 +833,8 @@ func (r *PgTaskRepository) scanTaskRow(row pgx.Row) (*Task, error) {
 
 	err := row.Scan(
 		&task.ID, &task.DeviceSN, &task.Method, &params, &task.Priority,
-		&task.CommandKey, &task.CWMPID, &task.Status, &task.RetryCount, &task.MaxRetries,
-		&task.CreatedAt, &task.SentAt, &task.CompletedAt, &task.ExpiresAt,
+		&task.CommandKey, &task.CWMPID, &task.Status, &task.RetryCount, &task.MaxRetries, &task.RetryIntervalSeconds,
+		&task.CreatedAt, &task.SentAt, &task.CompletedAt, &task.ExpiresAt, &task.NextAttemptAt,
 		&result, &task.ErrorCode, &task.ErrorMessage,
 		&task.Source, &task.CreatorID, &task.Description,
 		&sourceID, &task.CommandIndex, &task.DeviceIndex,

@@ -45,12 +45,15 @@ type Task struct {
 	Status     TaskStatus `json:"status"`      // 当前状态
 	RetryCount int        `json:"retry_count"` // 当前重试次数
 	MaxRetries int        `json:"max_retries"` // 最大重试次数
+	// RetryIntervalSeconds 控制自动重试间隔。0 表示立即可重试。
+	RetryIntervalSeconds int `json:"retry_interval_seconds"`
 
 	// 时间戳
-	CreatedAt   time.Time  `json:"created_at"`             // 创建时间
-	SentAt      *time.Time `json:"sent_at,omitempty"`      // 发送时间
-	CompletedAt *time.Time `json:"completed_at,omitempty"` // 完成时间
-	ExpiresAt   *time.Time `json:"expires_at,omitempty"`   // 过期时间
+	CreatedAt     time.Time  `json:"created_at"`                // 创建时间
+	SentAt        *time.Time `json:"sent_at,omitempty"`         // 发送时间
+	CompletedAt   *time.Time `json:"completed_at,omitempty"`    // 完成时间
+	ExpiresAt     *time.Time `json:"expires_at,omitempty"`      // 过期时间
+	NextAttemptAt *time.Time `json:"next_attempt_at,omitempty"` // 下一次允许出队时间
 
 	// 结果
 	Result       json.RawMessage `json:"result,omitempty"`
@@ -87,10 +90,11 @@ type CreateTaskRequest struct {
 	ExpiresIn int             `json:"expires_in"` // 过期时间（秒）
 	// MaxRetries 用指针区分"未设置"（nil → 默认 3）与"显式 0"（禁止重试）。
 	// 旧实现用 int + (>0) 判定，无法表达"调用方显式要 0 次重试"，0 被静默改回 3。
-	MaxRetries  *int       `json:"max_retries"` // 最大重试次数（nil=默认 3，0=禁止重试）
-	Source      TaskSource `json:"source"`
-	CreatorID   string     `json:"creator_id"`
-	Description string     `json:"description"`
+	MaxRetries           *int       `json:"max_retries"`            // 最大重试次数（nil=默认 3，0=禁止重试）
+	RetryIntervalSeconds int        `json:"retry_interval_seconds"` // 自动重试间隔（秒）
+	Source               TaskSource `json:"source"`
+	CreatorID            string     `json:"creator_id"`
+	Description          string     `json:"description"`
 
 	// TR069 CommandKey（预设的命令标识）
 	CommandKey string `json:"command_key,omitempty"`
@@ -144,6 +148,7 @@ func NewTask(req *CreateTaskRequest) *Task {
 		CommandKey:               req.CommandKey,
 		Status:                   TaskStatusPending,
 		MaxRetries:               3,
+		RetryIntervalSeconds:     req.RetryIntervalSeconds,
 		CreatedAt:                now,
 		Source:                   TaskSourceAPI,
 		CreatorID:                req.CreatorID,
@@ -168,6 +173,9 @@ func NewTask(req *CreateTaskRequest) *Task {
 			mr = 0
 		}
 		task.MaxRetries = mr
+	}
+	if task.RetryIntervalSeconds < 0 {
+		task.RetryIntervalSeconds = 0
 	}
 	if req.ExpiresIn > 0 {
 		expiresAt := now.Add(time.Duration(req.ExpiresIn) * time.Second)
@@ -217,6 +225,7 @@ func (t *Task) MarkSent(cwmpID string) {
 	t.Status = TaskStatusSent
 	t.CWMPID = cwmpID
 	t.SentAt = &now
+	t.NextAttemptAt = nil
 }
 
 // MarkCompleted 标记任务完成
@@ -225,6 +234,7 @@ func (t *Task) MarkCompleted(result json.RawMessage) {
 	t.Status = TaskStatusCompleted
 	t.Result = result
 	t.CompletedAt = &now
+	t.NextAttemptAt = nil
 }
 
 // MarkFailed 标记任务失败
@@ -234,6 +244,7 @@ func (t *Task) MarkFailed(errorCode int, errorMessage string) {
 	t.ErrorCode = errorCode
 	t.ErrorMessage = errorMessage
 	t.CompletedAt = &now
+	t.NextAttemptAt = nil
 }
 
 // MarkFailedWithResult 标记任务失败并附带结构化结果（如 per-param SetParameterValuesFault 详情）。
@@ -258,8 +269,41 @@ func (t *Task) MarkExpired() {
 
 // ResetForRetry 重置任务以进行重试
 func (t *Task) ResetForRetry() {
+	t.ResetForRetryAfter(0)
+}
+
+// ResetForRetryAfter 重置任务以进行重试，并可设置下一次允许出队时间。
+func (t *Task) ResetForRetryAfter(delay time.Duration) {
 	t.Status = TaskStatusPending
 	t.CWMPID = ""
 	t.SentAt = nil
 	t.RetryCount++
+	t.CompletedAt = nil
+	if delay > 0 {
+		next := time.Now().Add(delay)
+		t.NextAttemptAt = &next
+	} else {
+		t.NextAttemptAt = nil
+	}
+}
+
+// RetryInterval 返回任务配置的自动重试间隔。
+func (t *Task) RetryInterval() time.Duration {
+	if t.RetryIntervalSeconds <= 0 {
+		return 0
+	}
+	return time.Duration(t.RetryIntervalSeconds) * time.Second
+}
+
+// IsReadyForAttempt 检查任务是否已到允许出队时间。
+func (t *Task) IsReadyForAttempt(now time.Time) bool {
+	return t.NextAttemptAt == nil || !t.NextAttemptAt.After(now)
+}
+
+// QueueTime 返回用于队列排序的可出队时间。
+func (t *Task) QueueTime() time.Time {
+	if t.NextAttemptAt != nil && !t.NextAttemptAt.IsZero() {
+		return *t.NextAttemptAt
+	}
+	return t.CreatedAt
 }
