@@ -3,21 +3,17 @@ import { Button, Drawer, Form, Input, InputNumber, message, Modal, Radio, Select
 import { DownloadOutlined, InboxOutlined } from '@ant-design/icons';
 import type { FormInstance, UploadFile, UploadProps } from 'antd';
 import type { Device, EngStatus } from '@core/types/device';
+import type { GroupTargetOption } from '@core/utils/deviceGroupTargets';
 
 const { Dragger } = Upload;
 const { Text } = Typography;
-
-interface TargetGroupOption {
-  label: string;
-  value: string;
-}
 
 export interface DeviceDialogsProps {
   // Move to Group Modal
   moveToGroupModalOpen: boolean;
   selectedDeviceIds: React.Key[];
   targetGroupId: string | null;
-  targetGroupOptions: TargetGroupOption[];
+  targetGroupOptions: GroupTargetOption[];
   onTargetGroupChange: (id: string | null) => void;
   onMoveToGroupOk: () => void;
   onMoveToGroupCancel: () => void;
@@ -106,6 +102,11 @@ export default function DeviceDialogs({
     },
   }), [fileList, t]);
 
+  const selectedTargetGroup = useMemo(
+    () => targetGroupOptions.find((option) => option.value === targetGroupId),
+    [targetGroupOptions, targetGroupId]
+  );
+
   // Execute batch import
   const handleBatchImport = useCallback(async () => {
     if (fileList.length === 0) {
@@ -133,7 +134,11 @@ export default function DeviceDialogs({
           <Text type="secondary">
             {t('device.batch.selectedDevices', { count: selectedDeviceIds.length })}
           </Text>
-          <Form.Item label={t('device.batch.targetGroup')} style={{ marginTop: 16 }}>
+          <Form.Item
+            label={t('device.batch.targetGroup')}
+            style={{ marginTop: 16 }}
+            extra={selectedTargetGroup?.isRemove ? t('device.batch.removeFromGroupHint') : undefined}
+          >
             <Select
               style={{ width: '100%' }}
               placeholder={t('device.batch.selectGroupPlaceholder')}

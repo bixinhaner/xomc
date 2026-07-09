@@ -26,30 +26,28 @@ export interface GroupTargetOption {
  *
  * 规则（issue #478）：
  * - 一级分组（root, parentId == null）是容器，不作为设备归属目标 —— 过滤掉。
- * - 「未分组设备」内置节点保留为可选项，但语义是"移出分组"（isRemove=true），
- *   选它后端会删除归属记录，设备真正回到未分组态正常显示。
+ * - 「未分组设备」内置节点保留为可选项，展示名仍按分组数据渲染；
+ *   但语义是"移出分组"（isRemove=true），选它后端会删除归属记录。
  * - 其余二级/叶子真实分组作为普通写入目标。
  *
  * @param groups       全部分组（含 root 与内置节点）
  * @param getParentName 按 parentId 取父分组名（用于拼 "父 / 子" 标签）
- * @param removeLabel  「移出分组」项的展示文案（由调用方按皮肤 i18n 注入）
+ * @param getGroupName 按 group 取展示名（用于适配 nameI18n / 当前 locale）
  */
 export function buildGroupTargetOptions(
   groups: DeviceGroup[],
   getParentName: (parentId: string | null) => string,
-  removeLabel: string,
+  getGroupName: (group: DeviceGroup) => string = (group) => group.name,
 ): GroupTargetOption[] {
   return groups
     .filter((g) => g.parentId)
     .map((g) => {
-      if (isUnassignedGroup(g.id)) {
-        return { label: removeLabel, value: g.id, isRemove: true };
-      }
       const parentName = getParentName(g.parentId ?? null);
+      const groupName = getGroupName(g);
       return {
-        label: parentName ? `${parentName} / ${g.name}` : g.name,
+        label: parentName ? `${parentName} / ${groupName}` : groupName,
         value: g.id,
-        isRemove: false,
+        isRemove: isUnassignedGroup(g.id),
       };
     });
 }
