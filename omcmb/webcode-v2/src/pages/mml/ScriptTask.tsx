@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { RefreshCcw, Search, ScrollText, X } from 'lucide-react'
+import { Loader2, Play, RefreshCcw, Search, ScrollText, X } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -22,8 +22,9 @@ import {
   formatTime,
 } from '@/components/layout/PageShell'
 
-import { useMMLScriptById, useMMLScripts } from '@core/hooks/api/useMML'
+import { useCreateMMLTask, useMMLScriptById, useMMLScripts } from '@core/hooks/api/useMML'
 import type { MMLScript, MMLScriptStatus } from '@core/types/mml'
+import { parseMmlScriptPlan } from '@core/utils/mmlScriptPlanParser'
 
 // ============================================================
 // MML 脚本库 — mml_scripts 批量脚本（对齐 v1 mml/ScriptTask，参照 v3 mml/script）
@@ -55,6 +56,7 @@ export default function ScriptTask() {
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [viewing, setViewing] = useState<MMLScript | null>(null)
+  const [executing, setExecuting] = useState<MMLScript | null>(null)
 
   const params = useMemo(
     () => ({
@@ -186,14 +188,24 @@ export default function ScriptTask() {
                       {formatTime(s.updateTime)}
                     </TableCell>
                     <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 px-2 text-xs"
-                        onClick={() => setViewing(s)}
-                      >
-                        详情
-                      </Button>
+                      <div className="flex gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-xs"
+                          onClick={() => setViewing(s)}
+                        >
+                          详情
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2 text-xs"
+                          onClick={() => setExecuting(s)}
+                        >
+                          <Play className="size-3" /> 执行
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 )
@@ -213,7 +225,117 @@ export default function ScriptTask() {
       {viewing ? (
         <ScriptDetailDrawer script={viewing} onClose={() => setViewing(null)} />
       ) : null}
+      {executing ? (
+        <ScriptExecuteDialog script={executing} onClose={() => setExecuting(null)} />
+      ) : null}
     </PageShell>
+  )
+}
+
+function ScriptExecuteDialog({
+  script,
+  onClose,
+}: {
+  script: MMLScript
+  onClose: () => void
+}) {
+  const { data, isFetching } = useMMLScriptById(script.id)
+  const detailScript = data ?? script
+  const [taskName, setTaskName] = useState(`执行脚本: ${script.scriptName}`)
+  const [deviceInput, setDeviceInput] = useState('')
+  const [error, setError] = useState('')
+  const createTask = useCreateMMLTask()
+  const parsed = useMemo(
+    () => parseMmlScriptPlan(detailScript.content ?? '', { format: 'auto' }),
+    [detailScript.content]
+  )
+  const isDeviceBound = parsed.executeMode === 'device_bound'
+
+  const submit = async () => {
+    setError('')
+    const deviceSns = isDeviceBound ? parsed.deviceSns : parseDeviceInput(deviceInput)
+    if (!isDeviceBound && deviceSns.length === 0) {
+      setError('请输入设备 SN')
+      return
+    }
+    if (parsed.commands.length === 0) {
+      setError('脚本内容为空')
+      return
+    }
+    await createTask.mutateAsync({
+      taskName: taskName.trim() || `执行脚本: ${detailScript.scriptName}`,
+      scriptId: detailScript.id,
+      deviceSns,
+      commands: parsed.commands,
+      executeMode: parsed.executeMode,
+      planItems: isDeviceBound ? parsed.planItems : undefined,
+      creator: '',
+      executeType: 'immediate',
+      offlineRetry: false,
+      offlineRetryWait: 60,
+      failedRetry: false,
+      failedRetryCount: 3,
+      failedRetryInterval: 5,
+    })
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden />
+      <div className="relative flex max-h-[86vh] w-[min(720px,calc(100vw-32px))] flex-col overflow-hidden rounded border bg-background shadow-xl">
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <div className="min-w-0">
+            <div className="truncate text-base font-semibold">执行脚本</div>
+            <div className="truncate text-xs text-muted-foreground">{detailScript.scriptName}</div>
+          </div>
+          <Button variant="ghost" size="icon" onClick={onClose} aria-label="关闭">
+            <X />
+          </Button>
+        </div>
+        <div className="min-h-0 flex-1 space-y-3 overflow-auto px-4 py-3">
+          <Field label="任务名" value={<Input value={taskName} onChange={(e) => setTaskName(e.target.value)} />} />
+          <div className="grid grid-cols-2 gap-3">
+            <MiniStat label="执行模式" value={isDeviceBound ? '按设备计划行' : '普通模式'} />
+            <MiniStat label="解析结果" value={isDeviceBound ? `${parsed.planItems.length} 行 / ${parsed.deviceSns.length} 台` : `${parsed.commands.length} 条命令`} />
+          </div>
+          {!isDeviceBound ? (
+            <Field
+              label="设备 SN"
+              value={
+                <Input
+                  value={deviceInput}
+                  placeholder="逗号、空格或换行分隔"
+                  onChange={(e) => setDeviceInput(e.target.value)}
+                />
+              }
+            />
+          ) : (
+            <div className="rounded border bg-muted/30">
+              <div className="border-b px-3 py-2 text-xs font-medium text-muted-foreground">计划行预览</div>
+              <div className="max-h-56 overflow-auto">
+                {parsed.planItems.slice(0, 20).map((item) => (
+                  <div key={`${item.lineNo}-${item.deviceSn}-${item.order}`} className="grid grid-cols-[72px_150px_1fr] gap-2 border-b px-3 py-1.5 text-xs last:border-b-0">
+                    <span className="font-mono">#{item.lineNo}/{item.order}</span>
+                    <span className="truncate font-mono">{item.deviceSn}</span>
+                    <span className="truncate">{item.command.commandCode}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {error ? <div className="text-sm text-destructive">{error}</div> : null}
+          {isFetching ? <div className="text-xs text-muted-foreground">加载脚本内容中...</div> : null}
+        </div>
+        <div className="flex justify-end gap-2 border-t px-4 py-3">
+          <Button variant="outline" onClick={onClose}>取消</Button>
+          <Button onClick={() => void submit()} disabled={createTask.isPending}>
+            {createTask.isPending ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
+            执行
+          </Button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -296,6 +418,19 @@ function ScriptDetailDrawer({
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+function parseDeviceInput(value: string): string[] {
+  return Array.from(new Set(value.split(/[,\s;]+/).map((v) => v.trim()).filter(Boolean)))
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded border bg-muted/30 px-3 py-2">
+      <div className="text-xs uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="mt-0.5 truncate text-sm font-medium">{value}</div>
     </div>
   )
 }

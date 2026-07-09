@@ -31,6 +31,7 @@ import {
 import { cn } from '@/lib/utils'
 
 import { useMMLTaskResults, useMMLTasks } from '@core/hooks/api/useMML'
+import { getMmlTaskProgress } from '@core/utils/mmlTaskProgress'
 import type {
   DeviceTaskResultItem,
   MMLExecuteType,
@@ -74,12 +75,6 @@ const TASK_STATUS_ORDER: MMLTaskStatus[] = [
 
 function statusMeta(s: MMLTaskStatus) {
   return STATUS_META[s] ?? { label: s, variant: 'muted' as const }
-}
-
-function progressOf(t: MMLTask): { done: number; total: number } {
-  const done = (t.successCount ?? 0) + (t.failedCount ?? 0)
-  const total = (t.totalDevices ?? 0) * Math.max(1, t.commands?.length ?? 1)
-  return { done, total }
 }
 
 const PAGE_SIZE = 20
@@ -268,7 +263,7 @@ export default function TaskRecord() {
               <EmptyRow colSpan={cols.length}>暂无任务记录</EmptyRow>
             ) : (
               tasks.map((t) => {
-                const { done, total: tot } = progressOf(t)
+                const { done, total: tot } = getMmlTaskProgress(t)
                 const pct = tot > 0 ? Math.round((done / tot) * 100) : 0
                 const meta = statusMeta(t.status)
                 return (
@@ -442,6 +437,11 @@ function TaskDetailDrawer({ task, onClose }: { task: MMLTask; onClose: () => voi
                         {r.deviceName ? (
                           <span className="text-[11px] text-muted-foreground">
                             {r.deviceName}
+                          </span>
+                        ) : null}
+                        {r.planLineNo ? (
+                          <span className="rounded border bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                            #{r.planLineNo}/{r.planOrder ?? '-'} {r.commandCode ?? ''}
                           </span>
                         ) : null}
                       </div>

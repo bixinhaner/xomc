@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Button,
   Checkbox,
@@ -11,15 +11,19 @@ import {
   Radio,
   Select,
   Space,
+  Table,
   Upload,
 } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
 import { DownloadOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import type { UploadFile } from 'antd';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 
 import { useCreateMMLTask } from '@core/hooks/api/useMML';
-import type { MMLExecuteType, MMLTaskCommandInput } from '@core/types/mml';
+import type { MMLExecuteType, MMLTaskPlanItem } from '@core/types/mml';
+import { parseMmlScriptPlan } from '@core/utils/mmlScriptPlanParser';
+import type { MMLScriptPlanParseResult } from '@core/utils/mmlScriptPlanParser';
 import { useT } from '@/hooks/useT';
 import { toast } from '@/utils/toast';
 import DeviceSelectModal from '../Console/components/DeviceSelectModal';
@@ -90,6 +94,15 @@ const SECTION_HEADER: React.CSSProperties = {
   color: 'var(--color-neutral-700)',
 };
 
+const EMPTY_PARSE_RESULT: MMLScriptPlanParseResult = {
+  executeMode: 'common',
+  commands: [],
+  planItems: [],
+  deviceSns: [],
+  warnings: [],
+  errors: [],
+};
+
 export default function ScriptTaskDrawer({
   open,
   onClose,
@@ -105,7 +118,7 @@ export default function ScriptTaskDrawer({
 
   const [deviceSns, setDeviceSns] = useState<string[]>([]);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
-  const [parsedCommands, setParsedCommands] = useState<MMLTaskCommandInput[]>([]);
+  const [parseResult, setParseResult] = useState<MMLScriptPlanParseResult>(EMPTY_PARSE_RESULT);
   // Console 入口预填的命令文本同样允许用户手动调整（to-do-list 当轮 #6）。
   // 文件入口下，scriptContent 仅在解析完成后用于本地展示，不直接提交。
   const [scriptContent, setScriptContent] = useState('');
@@ -114,6 +127,9 @@ export default function ScriptTaskDrawer({
 
   const createTaskMutation = useCreateMMLTask();
   const submitting = createTaskMutation.isPending;
+  const parsedCommands = parseResult.commands;
+  const parsedPlanItems = parseResult.planItems;
+  const isDeviceBound = parseResult.executeMode === 'device_bound';
 
   // 打开时初始化表单；Console 入口直接把 prefillContent 拆成命令数组。
   useEffect(() => {
@@ -129,17 +145,23 @@ export default function ScriptTaskDrawer({
       failedRetryWaitTime: 5,
     });
     // 预填来自父组件的已选设备 SN；做一次排重避免重复项。
-    setDeviceSns(prefillDeviceSns ? Array.from(new Set(prefillDeviceSns.filter(Boolean))) : []);
+    const initialDeviceSns = prefillDeviceSns ? Array.from(new Set(prefillDeviceSns.filter(Boolean))) : [];
     setFileList([]);
     const initial = prefillContent ?? '';
     setScriptContent(initial);
-    setParsedCommands(initial ? parseScriptCommands(initial) : []);
+    const nextParse = initial ? parseMmlScriptPlan(initial, { format: 'text' }) : EMPTY_PARSE_RESULT;
+    setParseResult(nextParse);
+    setDeviceSns(nextParse.executeMode === 'device_bound' ? nextParse.deviceSns : initialDeviceSns);
   }, [open, prefillContent, prefillTaskName, prefillDeviceSns, form]);
 
   // 用户在 Console 入口手动改命令时，实时同步解析结果。
   const handleScriptContentChange = useCallback((value: string) => {
     setScriptContent(value);
-    setParsedCommands(parseScriptCommands(value));
+    const nextParse = parseMmlScriptPlan(value, { format: 'text' });
+    setParseResult(nextParse);
+    if (nextParse.executeMode === 'device_bound') {
+      setDeviceSns(nextParse.deviceSns);
+    }
   }, []);
 
   // BUG-19：设备选择弹框确认回调——把选中的 SN 追加进来（去重）。
@@ -152,10 +174,40 @@ export default function ScriptTaskDrawer({
     const reader = new FileReader();
     reader.onload = (event) => {
       const content = event.target?.result as string;
-      setParsedCommands(parseScriptCommands(content));
+      const format = file.name.toLowerCase().endsWith('.csv') ? 'csv' : 'text';
+      const nextParse = parseMmlScriptPlan(content, { format });
+      setScriptContent(content);
+      setParseResult(nextParse);
+      if (nextParse.executeMode === 'device_bound') {
+        setDeviceSns(nextParse.deviceSns);
+      }
     };
     reader.readAsText(file);
   }, []);
+
+  const planPreviewColumns = useMemo<ColumnsType<MMLTaskPlanItem>>(
+    () => [
+      {
+        title: t('mml.planLine'),
+        dataIndex: 'lineNo',
+        width: 82,
+        render: (value: number, item) => `${value || '-'} / ${item.order || '-'}`,
+      },
+      {
+        title: t('mml.deviceSn'),
+        dataIndex: 'deviceSn',
+        width: 150,
+        ellipsis: true,
+      },
+      {
+        title: t('mml.planCommand'),
+        key: 'command',
+        ellipsis: true,
+        render: (_, item) => item.command.commandCode,
+      },
+    ],
+    [t],
+  );
 
   // 模板内容同步自 docs/design 附带的 MMLTemplate.txt（to-do-list 本轮 #2），
   // 覆盖内建与自定义 MML 命令的书写格式，与 ACS 解析一致。
@@ -210,17 +262,25 @@ export default function ScriptTaskDrawer({
     return form
       .validateFields()
       .then(async (values) => {
-        // 设备 SN 始终必填（to-do-list 当轮 #2）：哪怕用户已经选了脚本，
-        // 没有目标设备也不能提交任务。
-        if (deviceSns.length === 0) {
+        if (isDeviceBound && parsedPlanItems.length === 0) {
+          toast.warning(t('mml.noPlanItems'));
+          throw new Error('PLAN_REQUIRED');
+        }
+        if (!isDeviceBound && deviceSns.length === 0) {
           toast.warning(t('mml.snRequired'));
           throw new Error('SN_REQUIRED');
+        }
+        if (!isDeviceBound && parsedCommands.length === 0) {
+          toast.warning(t('mml.selectFileFirst'));
+          throw new Error('COMMAND_REQUIRED');
         }
 
         const payload = {
           taskName: values.taskName.trim(),
-          deviceSns,
+          deviceSns: isDeviceBound ? parseResult.deviceSns : deviceSns,
           commands: parsedCommands,
+          executeMode: parseResult.executeMode,
+          planItems: isDeviceBound ? parsedPlanItems : undefined,
           // BUG-06 fix (#706)：脚本任务页传入 scriptId 时随 commands 一同提交，
           // 后端保存 mml_tasks.script_id 用于历史关联与 last_run_status 回写。
           scriptId: scriptId ?? undefined,
@@ -258,13 +318,16 @@ export default function ScriptTaskDrawer({
         // 表单校验失败 / guard 抛出的业务前置错误会落到这里。antd 的
         // 校验错误 err 没有 message，静默即可；其它错误统一通过 toast 暴露。
         if (err && (err as { errorFields?: unknown }).errorFields) return;
-        if (err instanceof Error && err.message === 'SN_REQUIRED') return;
+        if (err instanceof Error && ['SN_REQUIRED', 'PLAN_REQUIRED', 'COMMAND_REQUIRED'].includes(err.message)) return;
         toast.error(err, t('mml.taskCreateFailedPrefix'));
       });
   }, [
     form,
     deviceSns,
     parsedCommands,
+    parsedPlanItems,
+    parseResult,
+    isDeviceBound,
     scriptId,
     createTaskMutation,
     onSuccess,
@@ -278,7 +341,7 @@ export default function ScriptTaskDrawer({
       title={t('mml.newMmlTask')}
       open={open}
       onClose={onClose}
-      size={560}
+      size={760}
       destroyOnHidden
       footer={
         <div style={{ textAlign: 'right' }}>
@@ -317,6 +380,21 @@ export default function ScriptTaskDrawer({
 
         <div style={{ marginLeft: 12, marginBottom: 16 }}>
           <label style={{ display: 'block', marginBottom: 4, fontSize: 14 }}>
+            {t('mml.executeMode')}
+          </label>
+          <Radio.Group value={parseResult.executeMode} disabled>
+            <Radio value="common">{t('mml.executeModeCommon')}</Radio>
+            <Radio value="device_bound">{t('mml.executeModeDeviceBound')}</Radio>
+          </Radio.Group>
+          <div style={{ color: '#999', fontSize: 12, marginTop: 4 }}>
+            {isDeviceBound
+              ? `${t('mml.planItemCount', { count: parsedPlanItems.length })} / ${t('mml.planDeviceCount', { count: parseResult.deviceSns.length })}`
+              : t('mml.commandsParsed', { count: parsedCommands.length })}
+          </div>
+        </div>
+
+        <div style={{ marginLeft: 12, marginBottom: 16 }}>
+          <label style={{ display: 'block', marginBottom: 4, fontSize: 14 }}>
             {t('mml.deviceSn')}
           </label>
           <Space.Compact style={{ width: '100%' }}>
@@ -328,8 +406,9 @@ export default function ScriptTaskDrawer({
               style={{ flex: 1 }}
               tokenSeparators={[',', ';', '\n']}
               open={false}
+              disabled={isDeviceBound}
             />
-            <Button icon={<PlusOutlined />} onClick={() => setDeviceSelectOpen(true)}>
+            <Button icon={<PlusOutlined />} disabled={isDeviceBound} onClick={() => setDeviceSelectOpen(true)}>
               {t('mml.selectDevice')}
             </Button>
           </Space.Compact>
@@ -350,7 +429,9 @@ export default function ScriptTaskDrawer({
               {t('mml.scriptDescTip')}
             </div>
             <div style={{ color: '#52c41a', fontSize: 12 }}>
-              {t('mml.commandsParsed', { count: parsedCommands.length })}
+              {isDeviceBound
+                ? t('mml.planItemsParsed', { count: parsedPlanItems.length })
+                : t('mml.commandsParsed', { count: parsedCommands.length })}
             </div>
           </Form.Item>
         ) : (
@@ -364,7 +445,7 @@ export default function ScriptTaskDrawer({
             <Space orientation="vertical" style={{ width: '100%' }}>
               <Space>
                 <Upload
-                  accept=".txt"
+                  accept=".txt,.csv"
                   fileList={fileList}
                   beforeUpload={(file) => {
                     setFileList([file as unknown as UploadFile]);
@@ -375,18 +456,21 @@ export default function ScriptTaskDrawer({
                   onRemove={() => {
                     setFileList([]);
                     form.setFieldValue('fileName', '');
-                    setParsedCommands([]);
+                    setParseResult(EMPTY_PARSE_RESULT);
+                    setScriptContent('');
                   }}
                   maxCount={1}
                 >
                   <Button icon={<UploadOutlined />}>{t('mml.selectFile')}</Button>
                 </Upload>
-                <span style={{ color: '#999', fontSize: 12 }}>{t('mml.onlyTxtFormat')}</span>
+                <span style={{ color: '#999', fontSize: 12 }}>{t('mml.txtOrCsvFormat')}</span>
               </Space>
               <div style={{ color: '#999', fontSize: 12 }}>{t('mml.scriptDescTip')}</div>
               {parsedCommands.length > 0 && (
                 <div style={{ color: '#52c41a', fontSize: 12 }}>
-                  {t('mml.commandsParsed', { count: parsedCommands.length })}
+                  {isDeviceBound
+                    ? t('mml.planItemsParsed', { count: parsedPlanItems.length })
+                    : t('mml.commandsParsed', { count: parsedCommands.length })}
                 </div>
               )}
               <div>
@@ -401,6 +485,18 @@ export default function ScriptTaskDrawer({
                 </Button>
               </div>
             </Space>
+          </Form.Item>
+        )}
+
+        {isDeviceBound && (
+          <Form.Item label={t('mml.planPreview')} style={{ marginLeft: 12 }}>
+            <Table<MMLTaskPlanItem>
+              size="small"
+              rowKey={(item) => `${item.lineNo}-${item.deviceSn}-${item.order}`}
+              columns={planPreviewColumns}
+              dataSource={parsedPlanItems}
+              pagination={parsedPlanItems.length > 8 ? { pageSize: 8, size: 'small' } : false}
+            />
           </Form.Item>
         )}
 
@@ -527,93 +623,4 @@ export default function ScriptTaskDrawer({
     />
   </>
   );
-}
-
-// 把脚本文本解析为后端可执行的结构化 commands。
-// 支持：
-//   LST DEVICE_INFO;
-//   MOD DEVICE_INFO:USER_LABEL=站点A,DN_PREFIX=abc;
-//   MOD_DEVICE_INFO USER_LABEL=站点A
-function parseScriptCommands(content: string): MMLTaskCommandInput[] {
-  return content
-    .split(/\r?\n/)
-    .map(parseScriptLine)
-    .filter((cmd): cmd is MMLTaskCommandInput => Boolean(cmd));
-}
-
-function parseScriptLine(raw: string): MMLTaskCommandInput | null {
-  let line = raw.trim();
-  const commentIndex = findCommentIndex(line);
-  if (commentIndex >= 0) line = line.slice(0, commentIndex).trim();
-  line = line.replace(/;+$/, '').trim();
-  if (!line) return null;
-
-  const colonIndex = line.indexOf(':');
-  let commandCode = '';
-  let paramPart = '';
-
-  if (colonIndex >= 0) {
-    commandCode = line.slice(0, colonIndex).trim();
-    paramPart = line.slice(colonIndex + 1).trim();
-  } else {
-    const fields = line.split(/\s+/);
-    const firstParamIndex = fields.findIndex((field) => field.includes('='));
-    if (firstParamIndex >= 0) {
-      commandCode = fields.slice(0, firstParamIndex).join(' ').trim();
-      paramPart = fields.slice(firstParamIndex).join(' ');
-    } else {
-      commandCode = line;
-    }
-  }
-
-  if (!commandCode) return null;
-  const parameters = parseParameterPart(paramPart);
-  const command: MMLTaskCommandInput = { commandCode };
-  const operationType = deriveOperationType(commandCode);
-  if (operationType) command.operationType = operationType;
-  if (Object.keys(parameters).length > 0) command.parameters = parameters;
-  return command;
-}
-
-function deriveOperationType(commandCode: string): MMLTaskCommandInput['operationType'] | undefined {
-  const op = commandCode.trim().split(/\s+|_/)[0]?.toUpperCase();
-  return op || undefined;
-}
-
-function parseParameterPart(paramPart: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const token of splitParameterTokens(paramPart)) {
-    const eq = token.indexOf('=');
-    if (eq <= 0) continue;
-    const key = token.slice(0, eq).trim();
-    const value = token.slice(eq + 1).trim();
-    if (key) out[key] = value;
-  }
-  return out;
-}
-
-function splitParameterTokens(input: string): string[] {
-  const tokens: string[] = [];
-  let current = '';
-  let braceDepth = 0;
-  for (const ch of input) {
-    if (ch === '{') braceDepth += 1;
-    if (ch === '}' && braceDepth > 0) braceDepth -= 1;
-    if (braceDepth === 0 && (ch === ',' || /\s/.test(ch))) {
-      if (current.trim()) tokens.push(current.trim());
-      current = '';
-      continue;
-    }
-    current += ch;
-  }
-  if (current.trim()) tokens.push(current.trim());
-  return tokens;
-}
-
-function findCommentIndex(line: string): number {
-  const hash = line.indexOf('#');
-  const slash = line.indexOf('//');
-  if (hash < 0) return slash;
-  if (slash < 0) return hash;
-  return Math.min(hash, slash);
 }

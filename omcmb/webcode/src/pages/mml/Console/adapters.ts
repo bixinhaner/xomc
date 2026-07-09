@@ -424,6 +424,10 @@ export function mapResultItemToRow(
     }
   }
   return {
+    planLineNo: item.planLineNo,
+    planOrder: item.planOrder,
+    planRawLine: item.planRawLine,
+    commandCode: item.commandCode,
     deviceSn: item.deviceSn,
     deviceTaskId: item.deviceTaskId ?? '',
     status,
@@ -449,6 +453,12 @@ export function buildDeviceRows(
   columns: ResultColumn[],
   read: boolean,
 ): ResultRow[] {
+  if (items.some((it) => typeof it.planLineNo === 'number')) {
+    return [...items]
+      .sort((a, b) => (a.planLineNo ?? 0) - (b.planLineNo ?? 0) || (a.planOrder ?? 0) - (b.planOrder ?? 0))
+      .map((it) => mapResultItemToRow(it, columns, read));
+  }
+
   const byDevice = new Map<string, DeviceTaskResultItem[]>();
   for (const it of items) {
     const arr = byDevice.get(it.deviceSn) ?? [];

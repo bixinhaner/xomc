@@ -1,4 +1,4 @@
-import type { MMLCommand, MMLScript, MMLTask, MMLTaskCommandDetail, MMLTaskCommandInput, MMLResult, MMLCustomCommand } from '../../types/mml';
+import type { MMLCommand, MMLScript, MMLTask, MMLResult, MMLCustomCommand, MMLTaskCreateInput, DeviceTaskResultItem, MMLTaskResultsStats } from '../../types/mml';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 import { mockMMLCommands, mockMMLScripts, mockMMLTasks } from '../data/mml';
 import { delay, paginate, generateId } from '../utils';
@@ -218,22 +218,44 @@ export const mmlService = {
     return paginate(filtered, p.page, p.pageSize);
   },
 
-  async createTask(
-    data: Omit<MMLTask, 'id' | 'status' | 'results' | 'createdAt' | 'updatedAt' | 'commands'> & {
-      commands: Array<string | MMLTaskCommandInput | MMLTaskCommandDetail>;
-    }
-  ): Promise<MMLTask> {
+  async createTask(data: MMLTaskCreateInput): Promise<MMLTask> {
     await delay(200, 400);
-    const commands = data.commands.map((cmd) => (typeof cmd === 'string' ? cmd : cmd.commandCode));
+    const planItems = data.planItems ?? [];
+    const deviceSns = data.deviceSns?.length
+      ? data.deviceSns
+      : Array.from(new Set(planItems.map((p) => p.deviceSn).filter(Boolean)));
+    const commandInputs = data.commands?.length
+      ? data.commands
+      : planItems.map((p) => p.command);
+    const commands = commandInputs.map((cmd) => (typeof cmd === 'string' ? cmd : cmd.commandCode));
     const newItem: MMLTask = {
       ...data,
+      deviceSns,
       commands,
+      executeMode: data.executeMode || (planItems.length > 0 ? 'device_bound' : 'common'),
+      planItems: planItems.length > 0 ? planItems : undefined,
+      planStats:
+        planItems.length > 0
+          ? {
+              totalPlanItems: planItems.length,
+              totalDevices: deviceSns.length,
+            }
+          : undefined,
       id: generateId('mmltask'),
       status: data.executeType === 'suspended' ? 'paused' : 'pending',
       results: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      totalDevices: data.deviceSns?.length ?? 0,
+      creator: data.creator || 'admin',
+      executeType: data.executeType || 'immediate',
+      offlineRetry: data.offlineRetry ?? false,
+      offlineRetryWait: data.offlineRetryWait ?? 60,
+      failedRetry: data.failedRetry ?? false,
+      failedRetryCount: data.failedRetryCount ?? 3,
+      failedRetryInterval: data.failedRetryInterval ?? 5,
+      totalDevices: deviceSns.length,
+      successCount: data.successCount ?? 0,
+      failedCount: data.failedCount ?? 0,
     };
     tasks.push(newItem);
     return newItem;
@@ -326,7 +348,7 @@ export const mmlService = {
     id: string,
     page = 1,
     pageSize = 20
-  ): Promise<PageResponse<{ deviceSn: string; result: MMLResult }>> {
+  ): Promise<PageResponse<DeviceTaskResultItem, MMLTaskResultsStats>> {
     await delay(80, 150);
     const task = tasks.find((t) => t.id === id);
     const results = task?.results ?? [];

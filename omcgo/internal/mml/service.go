@@ -2468,7 +2468,7 @@ func (s *Service) GetTaskResults(ctx context.Context, id uuid.UUID, page, pageSi
 		}
 		items := make([]map[string]interface{}, 0, len(rows))
 		for _, row := range rows {
-			items = append(items, deviceTaskRowToResultMap(row))
+			items = append(items, deviceTaskRowToResultMap(row, taskMeta))
 		}
 		resp := model.NewListResponse(items, total, page, pageSize)
 		resp.Stats = stats
@@ -2526,7 +2526,7 @@ func buildTaskResultsStats(task *MMLTask, taskErr error) *TaskResultsStats {
 //
 // 解析 result JSONB 失败时静默跳过该字段（不影响主流程），device_sn / status 等
 // 主字段保持可用。
-func deviceTaskRowToResultMap(row DeviceTaskResultRowView) map[string]interface{} {
+func deviceTaskRowToResultMap(row DeviceTaskResultRowView, task *MMLTask) map[string]interface{} {
 	m := map[string]interface{}{
 		"device_sn":      row.DeviceSN,
 		"device_task_id": row.DeviceTaskID, // 子任务 ID（device_tasks.id），前端「PATH 列表」复制用
@@ -2536,6 +2536,22 @@ func deviceTaskRowToResultMap(row DeviceTaskResultRowView) map[string]interface{
 		"command_index":  row.CommandIndex,
 		"device_index":   row.DeviceIndex,
 		"success":        row.Status == "completed" && row.ErrorCode == 0,
+	}
+	if task != nil && task.ExecuteMode == TaskExecuteModeDeviceBound &&
+		row.CommandIndex >= 0 && row.CommandIndex < len(task.PlanItems) {
+		plan := task.PlanItems[row.CommandIndex]
+		m["plan_line_no"] = plan.LineNo
+		m["plan_device_sn"] = plan.DeviceSN
+		m["plan_order"] = plan.Order
+		if plan.RawLine != "" {
+			m["plan_raw_line"] = plan.RawLine
+		}
+		if commandCode := commandString(plan.Command, "command_code"); commandCode != "" {
+			m["command_code"] = commandCode
+		}
+		if op := commandString(plan.Command, "operation_type"); op != "" {
+			m["operation_type"] = op
+		}
 	}
 	if row.SentAt != nil {
 		m["started_at"] = row.SentAt.Format(time.RFC3339)
