@@ -3,6 +3,18 @@ import type { App as AppNS } from 'antd';
 import type { BatchImportResponse, BatchPreRegisterResponse, Device } from '@core/types/device';
 import { deviceApi } from '@core/services/api/deviceApi';
 import { EXPORT_COLUMNS, IMPORT_COLUMNS } from './deviceCsvSchema';
+import { fetchAllPaged } from '../exportPaging';
+
+type DeviceListParams = Parameters<typeof deviceApi.getList>[0];
+type ExportFilterParams = Partial<Omit<DeviceListParams, 'page' | 'pageSize'>>;
+
+export type DeviceGroupExportMode = 'selected' | 'filtered' | 'groupAll';
+
+export interface DeviceGroupExportRequest {
+  mode: DeviceGroupExportMode;
+  devices?: Device[];
+  params?: ExportFilterParams;
+}
 
 /**
  * 导出/导入/下载模板小型 handler 集合。
@@ -10,7 +22,7 @@ import { EXPORT_COLUMNS, IMPORT_COLUMNS } from './deviceCsvSchema';
  *
  * - 导入：BatchImportModal 内部完成 CSV 解析、前端校验和后端 POST，
  *         handleImport 仅负责消化 BatchImportResponse 与刷列表。
- * - 导出：拉当前分组下全部设备（分页累加），按列表展示的字段写 CSV 下载。
+ * - 导出：按显式 scope 导出已勾选 / 当前搜索结果 / 当前分组全部设备。
  */
 export function useImportExportHandlers(deps: {
   message: ReturnType<typeof AppNS.useApp>['message'];
@@ -18,66 +30,71 @@ export function useImportExportHandlers(deps: {
   refetch: () => Promise<unknown>;
   /** 刷新左侧设备分组树（导入会改变各分组的设备数，需同步刷新树上的「合计」）。 */
   refetchGroups: () => Promise<unknown>;
-  /** 当前选中的设备分组 ID；undefined 表示「全部」根节点。 */
-  selectedGroupId: string | null;
   /** 当前选中分组名（拼文件名用），undefined 时用「all」。 */
   selectedGroupName?: string;
 }) {
-  const { message, t, refetch, refetchGroups, selectedGroupId, selectedGroupName } = deps;
+  const { message, t, refetch, refetchGroups, selectedGroupName } = deps;
 
-  // opts.devices 非空 → 仅导出这些（选中）设备，直接用已加载对象，不再拉全量；
-  // 否则导出当前分组全部设备（分页拉取）。列字段与 DeviceListPanel 表格一致。
-  const handleExport = useCallback(async (opts?: { devices?: Device[] }) => {
-    console.info('[device-export] start', {
-      groupId: selectedGroupId, group: selectedGroupName, selected: opts?.devices?.length ?? 0,
-    });
-    const hide = message.loading(t('common.exportInProgress'), 0);
+  // selected 模式直接导出已勾选对象；filtered/groupAll 模式按调用方给出的 params 分页拉全量。
+  // 列字段与 DeviceListPanel 表格一致。
+  const handleExport = useCallback(async (request: DeviceGroupExportRequest) => {
+    const msgKey = 'device-grouping-export';
+    message.open({ key: msgKey, type: 'loading', content: t('common.exportInProgress'), duration: 0 });
     try {
       let all: Device[] = [];
-      if (opts?.devices && opts.devices.length > 0) {
+      let capped = false;
+      if (request.mode === 'selected') {
         // 导出选中设备：直接用传入的设备对象，无需再请求后端。
-        all = opts.devices;
-        console.info('[device-export] export selected', all.length, 'devices');
+        all = request.devices ?? [];
       } else {
-        // 导出当前分组全部：分页拉取，循环到 total。groupId 为 null 时等价「全部」。
-        const PAGE_SIZE = 500;
-        let page = 1;
-        let total = 0;
-        const params = {
-          page,
-          pageSize: PAGE_SIZE,
-          ...(selectedGroupId ? { groupId: selectedGroupId } : {}),
-        } as Parameters<typeof deviceApi.getList>[0];
-        const first = await deviceApi.getList(params);
-        total = first.total ?? first.items.length;
-        all.push(...first.items);
-        while (all.length < total) {
-          page += 1;
-          const next = await deviceApi.getList({ ...params, page });
-          if (next.items.length === 0) break; // 后端容错：意外提前没数据
-          all.push(...next.items);
-        }
-        console.info('[device-export] fetched', all.length, 'devices, total=', total);
+        // 导出筛选结果 / 当前分组全部：分页拉取，调用方负责传入是否包含 searchText。
+        let lastProgressAt = 0;
+        const result = await fetchAllPaged<Device>(
+          async (page, pageSize) => {
+            const resp = await deviceApi.getList({
+              ...(request.params ?? {}),
+              page,
+              pageSize,
+            } as DeviceListParams);
+            return { items: resp.items, total: resp.total ?? resp.items.length };
+          },
+          {
+            onProgress: (loaded, total) => {
+              const now = Date.now();
+              if (loaded < total && now - lastProgressAt < 300) return;
+              lastProgressAt = now;
+              message.open({
+                key: msgKey,
+                type: 'loading',
+                content: t('common.exportProgress', { loaded, total }),
+                duration: 0,
+              });
+            },
+          },
+        );
+        all = result.items;
+        capped = result.capped;
       }
       if (all.length === 0) {
-        hide();
-        void message.warning(t('device.export.emptyGroup'));
+        message.open({ key: msgKey, type: 'warning', content: t('device.export.emptyGroup') });
         return;
       }
 
       const csv = buildCsvForDeviceList(all, t);
       const fileName = buildExportFileName(selectedGroupName);
       triggerCsvDownload(csv, fileName);
-      hide();
-      void message.success(t('common.exportSuccess', { count: all.length }));
-      console.info('[device-export] downloaded', fileName, `(${csv.length} bytes)`);
+      message.open({
+        key: msgKey,
+        type: capped ? 'warning' : 'success',
+        content: capped
+          ? t('common.exportCapped', { count: all.length })
+          : t('common.exportSuccess', { count: all.length }),
+      });
     } catch (err) {
-      hide();
       const msg = err instanceof Error ? err.message : String(err);
-      console.error('[device-export] failed', err);
-      void message.error(t('common.exportFailed', { reason: msg }));
+      message.open({ key: msgKey, type: 'error', content: t('common.exportFailed', { reason: msg }) });
     }
-  }, [message, t, selectedGroupId, selectedGroupName]);
+  }, [message, t, selectedGroupName]);
 
   const handleImport = useCallback(
     async (result: BatchImportResponse) => {
