@@ -98,13 +98,14 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 // 否则 commands[] 形式的请求会被误拒。
 type ExecuteHTTPRequest struct {
 	CommandCode string                 `json:"command_code"`
-	DeviceSNs   []string               `json:"device_sns" binding:"required"`
+	DeviceSNs   []string               `json:"device_sns"`
 	Parameters  map[string]interface{} `json:"parameters"`
 	TaskName    string                 `json:"task_name"`
 
 	// Script execution support
-	ScriptID string                   `json:"script_id"`
-	Commands []map[string]interface{} `json:"commands"`
+	ScriptID  string                   `json:"script_id"`
+	Commands  []map[string]interface{} `json:"commands"`
+	PlanItems []MMLPlanItem            `json:"plan_items"`
 
 	// Scheduling
 	ExecuteType string `json:"execute_type"`
@@ -134,12 +135,13 @@ type ExecuteHTTPRequest struct {
 // 仅 binding 规则不同；CreateTask handler 通过显式类型转换复用 runExecute。
 type CreateTaskHTTPRequest struct {
 	CommandCode string                 `json:"command_code"`
-	DeviceSNs   []string               `json:"device_sns" binding:"required"`
+	DeviceSNs   []string               `json:"device_sns"`
 	Parameters  map[string]interface{} `json:"parameters"`
 	TaskName    string                 `json:"task_name"`
 
-	ScriptID string                   `json:"script_id"`
-	Commands []map[string]interface{} `json:"commands"`
+	ScriptID  string                   `json:"script_id"`
+	Commands  []map[string]interface{} `json:"commands"`
+	PlanItems []MMLPlanItem            `json:"plan_items"`
 
 	ExecuteType string `json:"execute_type"`
 	ScheduledAt string `json:"scheduled_at"`
@@ -256,14 +258,23 @@ func (h *Handler) Execute(c *gin.Context) {
 	// §需求 4：命令源全空，或裸路径模式下 param_paths trim 后无任何非空 PATH（无可支持 PATH），
 	// 均无可下发，直接返回执行失败，不创建空任务。
 	if req.CommandCode == "" && req.ScriptID == "" && len(req.Commands) == 0 &&
-		nonEmptyParamPathCount(req.ParamPaths) == 0 {
+		len(req.PlanItems) == 0 && nonEmptyParamPathCount(req.ParamPaths) == 0 {
 		h.logger.Warn("mml execute rejected: no supportable path / command source",
 			zap.String("client_ip", c.ClientIP()),
 			zap.String("task_name", req.TaskName),
 			zap.Strings("device_sns", req.DeviceSNs),
 		)
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			fmt.Errorf("no supportable PATH to execute: one of command_code, script_id, commands, non-empty param_paths is required"))
+			fmt.Errorf("no supportable PATH to execute: one of command_code, script_id, commands, plan_items, non-empty param_paths is required"))
+		return
+	}
+	if len(req.DeviceSNs) == 0 && len(req.PlanItems) == 0 {
+		h.logger.Warn("mml execute rejected: no device_sns or plan_items",
+			zap.String("client_ip", c.ClientIP()),
+			zap.String("task_name", req.TaskName),
+		)
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("device_sns or plan_items is required"))
 		return
 	}
 	h.runExecute(c, req)
@@ -283,13 +294,22 @@ func (h *Handler) CreateTask(c *gin.Context) {
 		return
 	}
 	if raw.CommandCode == "" && raw.ScriptID == "" && len(raw.Commands) == 0 &&
-		nonEmptyParamPathCount(raw.ParamPaths) == 0 {
+		len(raw.PlanItems) == 0 && nonEmptyParamPathCount(raw.ParamPaths) == 0 {
 		h.logger.Warn("mml task create rejected: no supportable path / command source",
 			zap.String("client_ip", c.ClientIP()),
 			zap.String("task_name", raw.TaskName),
 		)
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			fmt.Errorf("no supportable PATH to execute: one of script_id, commands, command_code, non-empty param_paths is required"))
+			fmt.Errorf("no supportable PATH to execute: one of script_id, commands, command_code, plan_items, non-empty param_paths is required"))
+		return
+	}
+	if len(raw.DeviceSNs) == 0 && len(raw.PlanItems) == 0 {
+		h.logger.Warn("mml task create rejected: no device_sns or plan_items",
+			zap.String("client_ip", c.ClientIP()),
+			zap.String("task_name", raw.TaskName),
+		)
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("device_sns or plan_items is required"))
 		return
 	}
 	// 两个结构体字段序列与类型一致（仅 binding 标签不同），
@@ -325,6 +345,7 @@ func (h *Handler) runExecute(c *gin.Context, req ExecuteHTTPRequest) {
 		Creator:             creatorStr,
 		Executor:            creatorStr,
 		Commands:            req.Commands,
+		PlanItems:           req.PlanItems,
 		ExecuteType:         ExecuteType(executeType),
 		OfflineRetry:        req.OfflineRetry,
 		OfflineRetryWait:    req.OfflineRetryWait,

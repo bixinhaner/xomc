@@ -73,7 +73,7 @@ var scriptColumns = []string{
 
 var taskColumns = []string{
 	"id", "task_name", "script_id", "device_sns",
-	"commands", "status", "results", "creator", "executor",
+	"commands", "execute_mode", "plan_items", "status", "results", "creator", "executor",
 	"created_at", "updated_at",
 	"execute_type", "scheduled_at",
 	"period_start", "period_end", "period_time",
@@ -670,6 +670,12 @@ func (r *PgTaskRepository) WithLogger(logger *zap.Logger) *PgTaskRepository {
 }
 
 func (r *PgTaskRepository) Create(ctx context.Context, task *MMLTask) error {
+	if task.ExecuteMode == "" {
+		task.ExecuteMode = TaskExecuteModeCommon
+	}
+	if task.PlanItems == nil {
+		task.PlanItems = []MMLPlanItem{}
+	}
 	deviceSNsJSON, err := json.Marshal(task.DeviceSNs)
 	if err != nil {
 		return fmt.Errorf("marshal device_sns: %w", err)
@@ -677,6 +683,10 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *MMLTask) error {
 	commandsJSON, err := json.Marshal(task.Commands)
 	if err != nil {
 		return fmt.Errorf("marshal commands: %w", err)
+	}
+	planItemsJSON, err := json.Marshal(task.PlanItems)
+	if err != nil {
+		return fmt.Errorf("marshal plan_items: %w", err)
 	}
 	resultsJSON, err := json.Marshal(task.Results)
 	if err != nil {
@@ -697,7 +707,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *MMLTask) error {
 
 	query, args, err := storage.Psql.Insert("mml_tasks").
 		Columns("task_name", "script_id", "device_sns",
-			"commands", "status", "results", "creator", "executor",
+			"commands", "execute_mode", "plan_items", "status", "results", "creator", "executor",
 			"execute_type", "scheduled_at",
 			"period_start", "period_end", "period_time",
 			"offline_retry", "offline_retry_wait",
@@ -708,7 +718,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *MMLTask) error {
 		// 2026-05-28 修复:JSONB 列用 string 传(详见 Update 函数注释)。
 		// Create 当前能工作是 pgx prepare-cache 路径行为巧合,显式 string 防退化。
 		Values(task.TaskName, task.ScriptID, string(deviceSNsJSON),
-			string(commandsJSON), task.Status, string(resultsJSON), task.Creator, task.Executor,
+			string(commandsJSON), task.ExecuteMode, string(planItemsJSON), task.Status, string(resultsJSON), task.Creator, task.Executor,
 			task.ExecuteType, task.ScheduledAt,
 			task.PeriodStart, task.PeriodEnd, task.PeriodTime,
 			task.OfflineRetry, task.OfflineRetryWait,
@@ -751,6 +761,12 @@ func (r *PgTaskRepository) GetByID(ctx context.Context, id uuid.UUID) (*MMLTask,
 }
 
 func (r *PgTaskRepository) Update(ctx context.Context, task *MMLTask) error {
+	if task.ExecuteMode == "" {
+		task.ExecuteMode = TaskExecuteModeCommon
+	}
+	if task.PlanItems == nil {
+		task.PlanItems = []MMLPlanItem{}
+	}
 	deviceSNsJSON, err := json.Marshal(task.DeviceSNs)
 	if err != nil {
 		return fmt.Errorf("marshal device_sns: %w", err)
@@ -758,6 +774,10 @@ func (r *PgTaskRepository) Update(ctx context.Context, task *MMLTask) error {
 	commandsJSON, err := json.Marshal(task.Commands)
 	if err != nil {
 		return fmt.Errorf("marshal commands: %w", err)
+	}
+	planItemsJSON, err := json.Marshal(task.PlanItems)
+	if err != nil {
+		return fmt.Errorf("marshal plan_items: %w", err)
 	}
 	resultsJSON, err := json.Marshal(task.Results)
 	if err != nil {
@@ -775,6 +795,8 @@ func (r *PgTaskRepository) Update(ctx context.Context, task *MMLTask) error {
 		Set("script_id", task.ScriptID).
 		Set("device_sns", string(deviceSNsJSON)).
 		Set("commands", string(commandsJSON)).
+		Set("execute_mode", task.ExecuteMode).
+		Set("plan_items", string(planItemsJSON)).
 		Set("status", task.Status).
 		Set("results", string(resultsJSON)).
 		Set("creator", task.Creator).
@@ -887,14 +909,14 @@ func (r *PgTaskRepository) List(ctx context.Context, filter TaskFilter) (*model.
 
 func scanTask(row pgx.Row) (*MMLTask, error) {
 	var t MMLTask
-	var deviceSNsJSON, commandsJSON, resultsJSON []byte
+	var deviceSNsJSON, commandsJSON, planItemsJSON, resultsJSON []byte
 	// T-0168: 翻译审计 4 列；matched_product_class / path_translation_source 用 *string
 	// 接 NULL（migration 000171 列允许 NULL）；product_resolved 默认 true，*bool 处理 NULL 兜底。
 	var matchedProductClass, pathTranslationSource *string
 
 	err := row.Scan(
 		&t.ID, &t.TaskName, &t.ScriptID, &deviceSNsJSON,
-		&commandsJSON, &t.Status, &resultsJSON, &t.Creator, &t.Executor,
+		&commandsJSON, &t.ExecuteMode, &planItemsJSON, &t.Status, &resultsJSON, &t.Creator, &t.Executor,
 		&t.CreatedAt, &t.UpdatedAt,
 		&t.ExecuteType, &t.ScheduledAt,
 		&t.PeriodStart, &t.PeriodEnd, &t.PeriodTime,
@@ -929,6 +951,17 @@ func scanTask(row pgx.Row) (*MMLTask, error) {
 	}
 	if t.Commands == nil {
 		t.Commands = []map[string]interface{}{}
+	}
+	if planItemsJSON != nil {
+		if err := json.Unmarshal(planItemsJSON, &t.PlanItems); err != nil {
+			return nil, fmt.Errorf("unmarshal plan_items: %w", err)
+		}
+	}
+	if t.PlanItems == nil {
+		t.PlanItems = []MMLPlanItem{}
+	}
+	if t.ExecuteMode == "" {
+		t.ExecuteMode = TaskExecuteModeCommon
 	}
 	if resultsJSON != nil {
 		if err := json.Unmarshal(resultsJSON, &t.Results); err != nil {
@@ -943,13 +976,13 @@ func scanTask(row pgx.Row) (*MMLTask, error) {
 
 func scanTaskRow(rows pgx.Rows) (*MMLTask, error) {
 	var t MMLTask
-	var deviceSNsJSON, commandsJSON, resultsJSON []byte
+	var deviceSNsJSON, commandsJSON, planItemsJSON, resultsJSON []byte
 	// T-0168: 翻译审计列 NULL 接收同 scanTask。
 	var matchedProductClass, pathTranslationSource *string
 
 	err := rows.Scan(
 		&t.ID, &t.TaskName, &t.ScriptID, &deviceSNsJSON,
-		&commandsJSON, &t.Status, &resultsJSON, &t.Creator, &t.Executor,
+		&commandsJSON, &t.ExecuteMode, &planItemsJSON, &t.Status, &resultsJSON, &t.Creator, &t.Executor,
 		&t.CreatedAt, &t.UpdatedAt,
 		&t.ExecuteType, &t.ScheduledAt,
 		&t.PeriodStart, &t.PeriodEnd, &t.PeriodTime,
@@ -984,6 +1017,17 @@ func scanTaskRow(rows pgx.Rows) (*MMLTask, error) {
 	}
 	if t.Commands == nil {
 		t.Commands = []map[string]interface{}{}
+	}
+	if planItemsJSON != nil {
+		if err := json.Unmarshal(planItemsJSON, &t.PlanItems); err != nil {
+			return nil, fmt.Errorf("unmarshal plan_items: %w", err)
+		}
+	}
+	if t.PlanItems == nil {
+		t.PlanItems = []MMLPlanItem{}
+	}
+	if t.ExecuteMode == "" {
+		t.ExecuteMode = TaskExecuteModeCommon
 	}
 	if resultsJSON != nil {
 		if err := json.Unmarshal(resultsJSON, &t.Results); err != nil {
@@ -1166,9 +1210,10 @@ var _ ScheduledTaskRepository = (*PgTaskRepository)(nil)
 // ClaimDueTasks 在事务内认领到期 (scheduled / periodic) 任务。
 //
 // P2 范围：仅处理 execute_type='scheduled' ——
-//   · SELECT FOR UPDATE SKIP LOCKED LIMIT N 挑出到期行
-//   · UPDATE mml_tasks SET status='running', started_at=now, next_trigger_at=NULL
-//   · 返回被更新的行（包括 periodic 模板行，留给 P3 阶段在 Scheduler 侧处理）
+//
+//	· SELECT FOR UPDATE SKIP LOCKED LIMIT N 挑出到期行
+//	· UPDATE mml_tasks SET status='running', started_at=now, next_trigger_at=NULL
+//	· 返回被更新的行（包括 periodic 模板行，留给 P3 阶段在 Scheduler 侧处理）
 //
 // 多副本部署下同一行不会被多 Scheduler 重复认领；事务提交后才对其它副本可见。
 func (r *PgTaskRepository) ClaimDueTasks(ctx context.Context, now time.Time, limit int) ([]*MMLTask, error) {
@@ -1265,20 +1310,21 @@ func (r *PgTaskRepository) ClaimDueTasks(ctx context.Context, now time.Time, lim
 		child := cloneAsPeriodicChild(parent, now)
 		childBytes, _ := json.Marshal(child.DeviceSNs)
 		cmdBytes, _ := json.Marshal(child.Commands)
+		planBytes, _ := json.Marshal(child.PlanItems)
 		resultBytes, _ := json.Marshal(child.Results)
 
 		insertSQL := `
 			INSERT INTO mml_tasks (
-				task_name, script_id, device_sns, commands, status, results, creator, executor,
+				task_name, script_id, device_sns, commands, execute_mode, plan_items, status, results, creator, executor,
 				execute_type, scheduled_at, period_start, period_end, period_time,
 				offline_retry, offline_retry_wait, failed_retry, failed_retry_count, failed_retry_interval,
 				total_devices, next_trigger_at, parent_task_id, started_at
 			) VALUES (
-				$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22
+				$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24
 			) RETURNING ` + joinColumns(taskColumns)
 		row := tx.QueryRow(ctx, insertSQL,
 			child.TaskName, child.ScriptID, childBytes,
-			cmdBytes, child.Status, resultBytes, child.Creator, child.Executor,
+			cmdBytes, child.ExecuteMode, planBytes, child.Status, resultBytes, child.Creator, child.Executor,
 			child.ExecuteType, child.ScheduledAt,
 			child.PeriodStart, child.PeriodEnd, child.PeriodTime,
 			child.OfflineRetry, child.OfflineRetryWait,
@@ -1376,13 +1422,13 @@ func joinColumns(cols []string) string {
 var _ CustomCommandRepository = (*PgCustomCommandRepository)(nil)
 
 var customCommandAllowedSortColumns = map[string]bool{
-	"command_name":  true,
-	"command_code":  true,
+	"command_name":   true,
+	"command_code":   true,
 	"operation_type": true,
-	"command_scope": true,
-	"creator":       true,
-	"created_at":    true,
-	"updated_at":    true,
+	"command_scope":  true,
+	"creator":        true,
+	"created_at":     true,
+	"updated_at":     true,
 }
 
 // customCommandColumns 列出 SELECT / RETURNING 时返回的列。
@@ -1754,7 +1800,6 @@ func (r *PgCustomCommandRepository) NameExistsForPublic(
 	}
 	return true, nil
 }
-
 
 // ---- Audit Repository ----
 
