@@ -95,7 +95,7 @@ start_process() {
     fi
 
     cd "$OMCGO_DIR"
-    OMCGO_ENV=dev "$bin" --config "$cfg" > "$log_file" 2>&1 &
+    nohup env OMCGO_ENV=dev "$bin" --config "$cfg" > "$log_file" 2>&1 < /dev/null &
     echo $! > "$pid_file"
     sleep 2
 
