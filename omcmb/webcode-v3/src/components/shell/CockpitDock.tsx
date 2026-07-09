@@ -1,21 +1,12 @@
 import { NavLink } from 'react-router-dom'
-import { Bot } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { MODULES } from '@/router/navConfig'
 import { useModuleVisibility } from '@core/hooks/useRouteGuard'
-import { useT } from '@/hooks/useT'
 
 // 动态菜单门禁开关（与 v1/v2 对齐）。
 const DYNAMIC_MENU = import.meta.env.VITE_DYNAMIC_MENU === 'true'
 
-interface CockpitDockProps {
-  agentVisible?: boolean
-  agentOpen?: boolean
-  onAgentToggle?: () => void
-}
-
-export function CockpitDock({ agentVisible = false, agentOpen = false, onAgentToggle }: CockpitDockProps) {
-  const t = useT()
+export function CockpitDock() {
   // 数据驱动：每个模块取首个路由作为停靠入口；按菜单可见性过滤（对齐 v1 菜单驱动侧栏）。
   const moduleVisible = useModuleVisibility(DYNAMIC_MENU)
   const items = MODULES.filter((m) => moduleVisible(m.routes[0]?.path ?? '/dashboard')).map((m) => ({
@@ -44,27 +35,6 @@ export function CockpitDock({ agentVisible = false, agentOpen = false, onAgentTo
                 )}
               </NavLink>
             ))}
-            {agentVisible && (
-              <button
-                type="button"
-                className="relative"
-                onClick={onAgentToggle}
-                aria-pressed={agentOpen}
-                aria-label={t('agent.open')}
-                title={t('agent.open')}
-              >
-                <div
-                  className={cn('dock-cell', agentOpen && 'active')}
-                  style={{ transform: `translateY(${arcOffset(items.length, items.length + 1)}px)` }}
-                >
-                  <span className="hex-bg hex" />
-                  <span className="icon-wrap">
-                    <Bot className="size-5" />
-                  </span>
-                  <span className="label">{t('agent.short')}</span>
-                </div>
-              </button>
-            )}
           </div>
         </div>
       </div>
