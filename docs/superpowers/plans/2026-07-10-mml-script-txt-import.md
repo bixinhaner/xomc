@@ -25,7 +25,7 @@
 
 ## Progress Ledger
 
-**Current checkpoint:** Task 8 complete
+**Current checkpoint:** Task 9 in progress
 **Resume from:** Task 9, Step 1 — write v1 interaction failing tests
 **Last verified commit:** `b3129773 fix(frontend-core): 规范 MML 导入错误契约`
 
