@@ -55,12 +55,22 @@ describe('v2 ScriptImportDialog', () => {
   })
 
   it('filters errors and disables save', async () => {
-    mocks.validate.mockResolvedValue(validation({ summary: { totalLines: 1, validLines: 0, effectiveLines: 0, deviceCount: 0, errorCount: 1, warningCount: 0 }, issues: [{ code: 'MML_LINE_FORMAT_INVALID', severity: 'error', lineNo: 1 }] }))
+    mocks.validate.mockResolvedValue(validation({ planItems: [{ lineNo: 1, deviceSn: 'SN1', order: 1, command: { commandCode: 'BAD' } }, { lineNo: 2, deviceSn: 'SN2', order: 1, command: { commandCode: 'WARN' } }], summary: { totalLines: 2, validLines: 1, effectiveLines: 1, deviceCount: 2, errorCount: 1, warningCount: 1 }, issues: [{ code: 'MML_LINE_FORMAT_INVALID', severity: 'error', lineNo: 1 }, { code: 'MML_DEVICE_OFFLINE', severity: 'warning', lineNo: 2 }] }))
     const user = userEvent.setup()
     render(<ScriptImportDialog open onClose={vi.fn()} />)
     await user.upload(screen.getByLabelText('选择 TXT'), new File(['BAD'], 'bad.txt', { type: 'text/plain' }))
     expect(mocks.validate).toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: '仅看错误' }))
+    expect(screen.getByText('SN1')).toBeInTheDocument()
+    expect(screen.queryByText('SN2')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '确认保存' })).toBeDisabled()
+  })
+
+  it('closes on Escape', async () => {
+    const onClose = vi.fn()
+    render(<ScriptImportDialog open onClose={onClose} />)
+    await userEvent.setup().keyboard('{Escape}')
+    expect(onClose).toHaveBeenCalled()
   })
 
   it('uses replacement validation endpoint when re-importing an existing script', async () => {

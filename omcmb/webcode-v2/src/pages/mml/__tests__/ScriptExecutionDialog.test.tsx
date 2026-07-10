@@ -60,4 +60,11 @@ describe('v2 ScriptExecutionDialog typed validation errors', () => {
     await waitFor(() => expect(mocks.execute).toHaveBeenCalled())
     expect(mocks.execute.mock.lastCall?.[0].input.scheduledAt).toBe('2026-07-10T08:30:00')
   })
+
+  it('closes on Escape', async () => {
+    const onClose = vi.fn()
+    render(<ScriptExecutionDialog open script={script} onClose={onClose} />)
+    await userEvent.setup().keyboard('{Escape}')
+    expect(onClose).toHaveBeenCalled()
+  })
 })
