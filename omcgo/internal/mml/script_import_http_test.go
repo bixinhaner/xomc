@@ -185,7 +185,7 @@ func TestHandler_CreateScriptFromImportMapsConsumedTo409(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "MML_IMPORT_TOKEN_CONSUMED")
 }
 
-func TestHandler_ValidateScriptReplacementRoute(t *testing.T) {
+func TestHandler_ScriptImportReplacementValidateRoute(t *testing.T) {
 	svc := &fakeScriptImportHTTPService{validation: &ImportValidationResponse{ValidationToken: "token", Summary: ScriptValidationSummary{ValidLines: 1}}}
 	r := gin.New()
 	h := NewHandler(NewService(&hCmdRepo{}, &hScriptRepo{}, &hTaskRepo{}, &hCustomCommandRepo{}, nil, zap.NewNop()), zap.NewNop())
@@ -201,7 +201,7 @@ func TestHandler_ValidateScriptReplacementRoute(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "validation_token")
 }
 
-func TestHandler_ReplaceScriptFromImportRoute(t *testing.T) {
+func TestHandler_ScriptImportReplacementSaveRoute(t *testing.T) {
 	id := uuid.New()
 	svc := &fakeScriptImportHTTPService{created: &MMLScript{ID: id, ScriptName: "替换后"}}
 	r := gin.New()

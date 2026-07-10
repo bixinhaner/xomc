@@ -14,4 +14,5 @@ Task 2: complete (commits 43edbfa8..82e2c21c, final spec and quality review clea
 Task 3: complete (commits d8885bbe..2b634644, final spec and quality review clean after validator-authority fixes).
 Task 4: complete (commits adc3bf6e..4ce47694, final spec and quality review clean after Redis Cluster slot fix).
 Task 5: complete (commits 6fdfd51f..f23a9f17, final spec and quality review clean after idempotency, version and authorization fixes).
-Task 6: in progress (HTTP API and dependency injection; resume at Step 1, write route and multipart failing tests).
+Task 6: complete (commit 2c8a080f, final spec and quality review clean after UpdatedAt reload and route-test fixes).
+Task 7: not started.
