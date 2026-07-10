@@ -100,6 +100,11 @@ interface BackendMenu {
   children?: BackendMenu[];
 }
 
+type MenuRowItem = Omit<MenuItem, 'children'> & {
+  level: number;
+  hasChildren: boolean;
+};
+
 // mapBackendMenu 把一颗 BackendMenu 子树转成页面本地 MenuItem 子树（递归）。
 // isExternal / routeParams / apiPermission 是页面早期 mock 字段，后端无对应列；
 // 编辑/新增表单以默认值兜底（'no' / undefined / 'none'），保证 UI 不崩。
@@ -251,14 +256,19 @@ export default function MenuManagement() {
     { name: 'status', label: t('menu.column.status'), type: 'select', placeholder: t('menu.placeholder.status'), options: buildMenuStatusOptions(t), width: 180 },
   ], [t]);
 
+  const permissionKeyRules = useMemo(() => [
+    { required: true, whitespace: true, message: t('menu.validation.permissionKey') },
+  ], [t]);
+
   // 根据展开状态扁平化菜单数据
   const flatMenus = useMemo(() => {
-    const result: (MenuItem & { level: number; hasChildren: boolean })[] = [];
+    const result: MenuRowItem[] = [];
 
     const flatten = (items: MenuItem[], level: number) => {
       items.forEach((item) => {
+        const { children, ...row } = item;
         const hasChildren = item.children && item.children.length > 0;
-        result.push({ ...item, level, hasChildren: hasChildren || false });
+        result.push({ ...row, level, hasChildren: hasChildren || false });
 
         // 只有展开时才显示子菜单
         if (hasChildren && expandedKeys.has(item.id)) {
@@ -464,7 +474,7 @@ export default function MenuManagement() {
   }, [updateMenuMut]);
 
   // 排序值 -1。
-  const handleMoveUp = useCallback((record: MenuItem & { level: number }) => {
+  const handleMoveUp = useCallback((record: MenuRowItem) => {
     updateMenuMut.mutate({
       id: record.id,
       payload: { sort_order: Math.max(1, (record.sort || 1) - 1) },
@@ -472,7 +482,7 @@ export default function MenuManagement() {
   }, [updateMenuMut]);
 
   // 表格列定义
-  const columns: DataTableColumn<MenuItem & { level: number; hasChildren: boolean }>[] = useMemo(() => [
+  const columns: DataTableColumn<MenuRowItem>[] = useMemo(() => [
     {
       key: 'actions',
       title: t('table.operation'),
@@ -696,7 +706,7 @@ export default function MenuManagement() {
           form.resetFields();
           setSelectedMenu(null);
         }}
-        size={480}
+        width={480}
         footer={
           <div style={{ textAlign: 'right' }}>
             <Button
@@ -763,6 +773,13 @@ export default function MenuManagement() {
                       label={t('menu.form.routePath')}
                     >
                       <Input placeholder={t('menu.placeholder.routePath')} maxLength={200} />
+                    </Form.Item>
+                    <Form.Item
+                      name="permissionKey"
+                      label={t('menu.form.permissionKey')}
+                      rules={permissionKeyRules}
+                    >
+                      <Input placeholder={t('menu.placeholder.permissionKey')} maxLength={100} />
                     </Form.Item>
                     <Form.Item
                       name="showStatus"
@@ -841,6 +858,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="permissionKey"
                       label={t('menu.form.permissionKey')}
+                      rules={permissionKeyRules}
                     >
                       <Input placeholder={t('menu.placeholder.permissionKey')} maxLength={100} />
                     </Form.Item>
@@ -898,6 +916,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="permissionKey"
                       label={t('menu.form.permissionKey')}
+                      rules={permissionKeyRules}
                     >
                       <Input placeholder={t('menu.placeholder.permissionKey')} maxLength={100} />
                     </Form.Item>
@@ -939,7 +958,7 @@ export default function MenuManagement() {
           setAddVisible(false);
           addForm.resetFields();
         }}
-        size={480}
+        width={480}
         footer={
           <div style={{ textAlign: 'right' }}>
             <Button
@@ -1023,6 +1042,13 @@ export default function MenuManagement() {
                       <Input placeholder={t('menu.placeholder.routePath')} maxLength={200} />
                     </Form.Item>
                     <Form.Item
+                      name="permissionKey"
+                      label={t('menu.form.permissionKey')}
+                      rules={permissionKeyRules}
+                    >
+                      <Input placeholder={t('menu.placeholder.permissionKey')} maxLength={100} />
+                    </Form.Item>
+                    <Form.Item
                       name="showStatus"
                       label={buildShowStatusLabel(t)}
                       rules={[{ required: true, message: t('menu.validation.showStatus') }]}
@@ -1104,6 +1130,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="permissionKey"
                       label={t('menu.form.permissionKey')}
+                      rules={permissionKeyRules}
                     >
                       <Input placeholder={t('menu.placeholder.permissionKey')} maxLength={100} />
                     </Form.Item>
@@ -1165,6 +1192,7 @@ export default function MenuManagement() {
                     <Form.Item
                       name="permissionKey"
                       label={t('menu.form.permissionKey')}
+                      rules={permissionKeyRules}
                     >
                       <Input placeholder={t('menu.placeholder.permissionKey')} maxLength={100} />
                     </Form.Item>

@@ -315,6 +315,9 @@ const messages: Record<string, string> = {
   'menu.placeholder.routeParams':    'Please enter route params',
   'menu.placeholder.parent':         'Please select parent menu',
 
+  // Validation
+  'menu.validation.permissionKey':  'Please enter permission key',
+
   // Radio values
   'menu.radio.yes':                'Yes',
   'menu.radio.no':                 'No',
