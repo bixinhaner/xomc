@@ -25,8 +25,8 @@
 
 ## Progress Ledger
 
-**Current checkpoint:** Task 10 complete
-**Resume from:** Task 11, Step 1 — write v3 interaction failing tests
+**Current checkpoint:** Task 11 in progress
+**Resume from:** Task 11, Step 1 — write v3 capability-alignment failing tests
 **Last verified commit:** `09cccf76 fix(frontend): hide native select bridge from a11y`
 
 - [x] Task 1 — 数据库契约与 Go 模型
