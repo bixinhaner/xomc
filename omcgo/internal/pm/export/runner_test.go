@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/minio/minio-go/v7"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -75,6 +77,56 @@ type stubTimezoneProvider struct {
 	calls int
 }
 
+type exportMetaRow struct {
+	dimension   string
+	deviceCount int
+	metricPaths []string
+}
+
+func (r *exportMetaRow) Scan(dest ...any) error {
+	if len(dest) > 0 {
+		*dest[0].(*string) = r.dimension
+	}
+	if len(dest) > 1 {
+		*dest[1].(*int) = r.deviceCount
+	}
+	if len(dest) > 2 {
+		*dest[2].(*[]string) = r.metricPaths
+	}
+	return nil
+}
+
+type recordedExportQuery struct {
+	sql  string
+	args []any
+}
+
+type recordingExportQuerier struct {
+	row         pgx.Row
+	queryRowSQL string
+	queries     []recordedExportQuery
+	results     []pgx.Rows
+}
+
+func (q *recordingExportQuerier) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	return pgconn.CommandTag{}, nil
+}
+
+func (q *recordingExportQuerier) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+	q.queries = append(q.queries, recordedExportQuery{sql: sql, args: args})
+	if len(q.results) == 0 {
+		return &adhocFakeRows{}, nil
+	}
+	rows := q.results[0]
+	q.results = q.results[1:]
+	return rows, nil
+}
+
+func (q *recordingExportQuerier) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
+	q.queryRowSQL = sql
+	return q.row
+}
+
 func (s *stubTimezoneProvider) Location(_ context.Context) *time.Location {
 	s.calls++
 	return s.loc
@@ -102,6 +154,37 @@ func (s *sliceSource) Next(_ context.Context) ([]ExportRow, bool, error) {
 
 func newTestTask(src SourceType) *Task {
 	return &Task{ID: uuid.New(), SourceType: src, Params: []byte(`{}`)}
+}
+
+// #38：adhoc 导出必须从任务元数据读取配置指标集，并传到表头发现与流式数据源。
+func TestRunner_BuildSource_AdhocUsesTaskMetricPaths(t *testing.T) {
+	taskID := uuid.New()
+	metricPaths := []string{"KGSM0101", "KGSM0102"}
+	params, err := json.Marshal(AdhocParams{TaskID: taskID.String()})
+	require.NoError(t, err)
+
+	metaDB := &recordingExportQuerier{row: &exportMetaRow{
+		dimension:   "product",
+		deviceCount: 0,
+		metricPaths: metricPaths,
+	}}
+	adhocDB := &recordingExportQuerier{results: []pgx.Rows{
+		&adhocFakeRows{rows: [][]any{{"KGSM0101", "kpi"}, {"KGSM9999", "kpi"}}},
+		&adhocFakeRows{}, // 指标名解析查询无命中，回退编号本身。
+	}}
+	runner := NewRunner(RunnerDeps{AdhocDB: adhocDB, TaskMetaDB: metaDB})
+
+	src, _, _, err := runner.buildSource(context.Background(), &Task{
+		ID:         uuid.New(),
+		SourceType: SourceAdhoc,
+		Params:     params,
+	})
+	require.NoError(t, err)
+
+	assert.Contains(t, metaDB.queryRowSQL, "metric_paths")
+	require.NotEmpty(t, adhocDB.queries)
+	assert.Contains(t, adhocDB.queries[0].sql, "metric_path IN (")
+	assert.Equal(t, metricPaths, src.(*adhocSource).metricPaths)
 }
 
 // ── 预 running 守门：payload 坏 / 缺 task_id 直接返 error，不动任务 ─────────────

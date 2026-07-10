@@ -44,13 +44,13 @@ func (f *adhocFakeRows) Scan(dest ...any) error {
 	}
 	return nil
 }
-func (f *adhocFakeRows) Err() error                        { return nil }
-func (f *adhocFakeRows) Close()                            {}
-func (f *adhocFakeRows) CommandTag() pgconn.CommandTag     { return pgconn.CommandTag{} }
+func (f *adhocFakeRows) Err() error                                   { return nil }
+func (f *adhocFakeRows) Close()                                       {}
+func (f *adhocFakeRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
 func (f *adhocFakeRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
-func (f *adhocFakeRows) Values() ([]any, error)            { return nil, nil }
-func (f *adhocFakeRows) RawValues() [][]byte               { return nil }
-func (f *adhocFakeRows) Conn() *pgx.Conn                   { return nil }
+func (f *adhocFakeRows) Values() ([]any, error)                       { return nil, nil }
+func (f *adhocFakeRows) RawValues() [][]byte                          { return nil }
+func (f *adhocFakeRows) Conn() *pgx.Conn                              { return nil }
 
 // adhocStubQuerier 把一批固定行作为 Query 结果返回（Scan 端按 adhocSelectCols 列序解析）。
 type adhocStubQuerier struct {
@@ -90,7 +90,7 @@ func TestAdhocSource_DeviceGroupLabel(t *testing.T) {
 	stub := &adhocStubQuerier{rows: [][]any{
 		adhocRow("", "", "C1", 1, strptr("DeviceGroup=abcdef1234-0000"), nil, nil, strptr("华东A组")),
 	}}
-	src := newAdhocSource(stub, uuid.New(), time.Time{}, time.Time{}, "device_group", 0)
+	src := newAdhocSource(stub, uuid.New(), nil, time.Time{}, time.Time{}, "device_group", 0)
 	rows, _, err := src.Next(context.Background())
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
@@ -103,7 +103,7 @@ func TestAdhocSource_DeviceGroupFallback(t *testing.T) {
 	stub := &adhocStubQuerier{rows: [][]any{
 		adhocRow("", "", "C1", 1, strptr("DeviceGroup=abcdef1234-0000"), nil, nil, nil),
 	}}
-	src := newAdhocSource(stub, uuid.New(), time.Time{}, time.Time{}, "device_group", 0)
+	src := newAdhocSource(stub, uuid.New(), nil, time.Time{}, time.Time{}, "device_group", 0)
 	rows, _, err := src.Next(context.Background())
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
@@ -117,7 +117,7 @@ func TestAdhocSource_DeviceGroupTechnology(t *testing.T) {
 		adhocRow("", "", "C1", 1, strptr("DeviceGroup=abcdef1234-0000,Tech=lte"), nil, nil, strptr("华东A组")),
 		adhocRow("", "", "C1", 2, strptr("DeviceGroup=abcdef1234-0000,Tech=nr"), nil, nil, strptr("华东A组")),
 	}}
-	src := newAdhocSource(stub, uuid.New(), time.Time{}, time.Time{}, "device_group", 0)
+	src := newAdhocSource(stub, uuid.New(), nil, time.Time{}, time.Time{}, "device_group", 0)
 	rows, _, err := src.Next(context.Background())
 	require.NoError(t, err)
 	require.Len(t, rows, 2)
@@ -131,7 +131,7 @@ func TestAdhocSource_NonDeviceGroupNoTechnology(t *testing.T) {
 	stub := &adhocStubQuerier{rows: [][]any{
 		adhocRow("OUI1", "SN1", "C1", 1, strptr("Cellid=111"), nil, nil, nil),
 	}}
-	src := newAdhocSource(stub, uuid.New(), time.Time{}, time.Time{}, "device", 0)
+	src := newAdhocSource(stub, uuid.New(), nil, time.Time{}, time.Time{}, "device", 0)
 	rows, _, err := src.Next(context.Background())
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
@@ -143,7 +143,7 @@ func TestAdhocSource_ProductLabel(t *testing.T) {
 	stub := &adhocStubQuerier{rows: [][]any{
 		adhocRow("", "", "C1", 1, nil, strptr("11112222-3333-4444"), strptr("BLX 产品"), nil),
 	}}
-	src := newAdhocSource(stub, uuid.New(), time.Time{}, time.Time{}, "product", 0)
+	src := newAdhocSource(stub, uuid.New(), nil, time.Time{}, time.Time{}, "product", 0)
 	rows, _, err := src.Next(context.Background())
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
@@ -156,7 +156,7 @@ func TestAdhocSource_DeviceLabelKeepsCell(t *testing.T) {
 	stub := &adhocStubQuerier{rows: [][]any{
 		adhocRow("OUI1", "SN1", "C1", 1, strptr("Cellid=111"), nil, nil, nil),
 	}}
-	src := newAdhocSource(stub, uuid.New(), time.Time{}, time.Time{}, "device", 0)
+	src := newAdhocSource(stub, uuid.New(), nil, time.Time{}, time.Time{}, "device", 0)
 	rows, _, err := src.Next(context.Background())
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
@@ -169,7 +169,7 @@ func TestAdhocSource_AggregateGroupLabel(t *testing.T) {
 	stub := &adhocStubQuerier{rows: [][]any{
 		adhocRow("", "AGGREGATED", "C1", 1, nil, nil, nil, nil),
 	}}
-	src := newAdhocSource(stub, uuid.New(), time.Time{}, time.Time{}, "aggregate_group", 2)
+	src := newAdhocSource(stub, uuid.New(), nil, time.Time{}, time.Time{}, "aggregate_group", 2)
 	rows, _, err := src.Next(context.Background())
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
