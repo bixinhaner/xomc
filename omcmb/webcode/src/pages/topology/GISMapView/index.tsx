@@ -148,8 +148,8 @@ export default function GISMapView() {
     'deviceGroup',    // 设备组（新增：默认展开）
   ]);
 
-  // 侧边栏折叠状态（默认展开）
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // 侧边栏折叠状态（默认收起）
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
 
   // ========== 显示/隐藏控制配置 ==========
   // 图例模块显示配置（默认隐藏）
