@@ -16,4 +16,4 @@ Task 4: complete (commits adc3bf6e..4ce47694, final spec and quality review clea
 Task 5: complete (commits 6fdfd51f..f23a9f17, final spec and quality review clean after idempotency, version and authorization fixes).
 Task 6: complete (commit 2c8a080f, final spec and quality review clean after UpdatedAt reload and route-test fixes).
 Task 7: complete (commits 5ef20c71..1635d5f2, final spec and quality review clean for execution snapshot, scheduler preflight and execute_type validation).
-Task 8: in progress (frontend-core contracts, API and hooks; resume at Step 1, write API mapping failing tests).
+Task 8: complete (commits a2e192fa..b3129773, final spec and quality review clean after typed errors, validation snapshot mapping and detail-cache fixes).
