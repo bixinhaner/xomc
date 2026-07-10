@@ -25,9 +25,9 @@
 
 ## Progress Ledger
 
-**Current checkpoint:** Task 12 in progress
-**Resume from:** Task 12, Step 1 — write Redis source-filter failing tests
-**Last verified commit:** `85c5106f test(frontend): 完善 v3 MML 脚本证据`
+**Current checkpoint:** Task 12 complete
+**Resume from:** Task 13, Step 1 — run latest-main/migration gates
+**Last verified commit:** `32a8184e docs(plan): 记录 MML 安全清理与旧入口收口`
 
 - [x] Task 1 — 数据库契约与 Go 模型
 - [x] Task 2 — TXT Parser
@@ -40,7 +40,7 @@
 - [x] Task 9 — v1 脚本库界面
 - [x] Task 10 — v2 脚本库界面
 - [x] Task 11 — v3 脚本库界面
-- [ ] Task 12 — 旧入口收口与安全清理工具
+- [x] Task 12 — 旧入口收口与安全清理工具
 - [ ] Task 13 — 全量验证、部署演练与文档收尾
 
 ## Resume Protocol
@@ -77,6 +77,7 @@
 | Task 9 | `50471f6c..ee8a7912` | 规格与质量复审通过；v1 ScriptTask focused tests 4 文件/13 项、typecheck 通过，覆盖 TXT 导入/重导入、只读预览、错误/警告过滤与报告、409 warning 确认、422/mixed error 保持 Drawer、定时/周期参数和无在线编辑器。ESLint 0 errors/93 warnings 记录为非阻塞清理项。 |
 | Task 10 | `510cb99b..09cccf76` | 规格与质量复审通过；v2 focused tests 2 文件/9 项、typecheck 通过，覆盖 TXT 上传/重导入、模板下载、只读预览、severity/计划行过滤、错误报告、Escape、409 warning 确认、422/mixed error、执行 issues、scheduled/periodic 时间归一化和 Table/Select primitives。 |
 | Task 11 | `85c5106f` | v3 focused tests 2 文件/10 项、typecheck 通过；skin-parity 通过（v2/v3 各 129 routes / 37 visible menus）。覆盖 TXT 上传/重导入、模板下载、只读预览、severity 过滤、错误禁用保存、warning-only 409 确认、mixed 422 逐行错误、执行方式与重试策略、scheduled/periodic 时间归一化、Escape 和真实 pending loading 文本。详见 `.superpowers/sdd/task-11-report.md`。 |
+| Task 12 | `1acf5481..32a8184e` | 规格与质量复审通过；Redis/omcctl/MML handler focused tests、三皮肤 typecheck 通过，覆盖 SCAN+pipeline 来源过滤、dry-run 无写、非 MML 保留、CWMP 映射清理、DELETE-MML-RUNTIME 双确认、旧 POST 保存和旧上传直建入口移除。 |
 
 ---
 

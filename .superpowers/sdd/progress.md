@@ -20,4 +20,5 @@ Task 8: complete (commits a2e192fa..b3129773, final spec and quality review clea
 Task 9: complete (commits 50471f6c..ee8a7912, final spec and quality review clean after warning, schedule and filtering fixes).
 Task 10: complete (commits 510cb99b..09cccf76, final spec and quality review clean after typed warning, schedule normalization, interaction coverage, UI primitive and documentation fixes).
 Task 11: complete (commits 85c5106f..8c252372, final spec and quality review clean after mixed-error, scheduled normalization, loading and evidence fixes).
-Task 12: in progress (old entry cleanup and safe Redis purge; resume at Step 1, write Redis source-filter failing tests).
+Task 12: complete (commits 1acf5481..32a8184e, final spec and quality review clean for source-scoped purge, CLI confirmation and legacy-entry removal).
+Task 13: in progress (full verification, deployment rehearsal and documentation closeout; resume at Step 1, run latest-main/migration gates).
