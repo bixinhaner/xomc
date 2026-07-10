@@ -30,6 +30,7 @@ type ValidationCommand struct {
 	TargetPaths    []string
 	RequireConfirm bool
 	Disabled       bool
+	Ambiguous      bool
 	ParamRefs      []MMLParamRef
 }
 
@@ -115,8 +116,14 @@ func validateScriptLine(line ParsedScriptLine, commands map[string]ValidationCom
 	if !commandOK {
 		return append(issues, validationIssue(line, "MML_COMMAND_NOT_FOUND", IssueError, "command_code", "command is not available to the current user")), command, nil
 	}
+	if command.Ambiguous {
+		return append(issues, validationIssue(line, "MML_COMMAND_AMBIGUOUS", IssueError, "command_code", "multiple visible custom commands use this command code")), command, nil
+	}
 	if command.Disabled {
-		issues = append(issues, validationIssue(line, "MML_COMMAND_DISABLED", IssueError, "command_code", "command is disabled"))
+		return append(issues, validationIssue(line, "MML_COMMAND_DISABLED", IssueError, "command_code", "command is disabled")), command, nil
+	}
+	if command.OperationType != line.OperationType {
+		return append(issues, validationIssue(line, "MML_COMMAND_OPERATION_MISMATCH", IssueError, "command_code", "command operation does not match the script line")), command, nil
 	}
 
 	device, deviceOK := devices[line.DeviceSN]
@@ -164,13 +171,16 @@ func validateLineParameters(line ParsedScriptLine, command ValidationCommand) []
 }
 
 func validParameterType(value, valueType string) bool {
-	switch strings.ToLower(valueType) {
+	switch canonicalValueType(valueType) {
 	case "", "string", "text":
 		return true
 	case "boolean", "bool":
 		return strings.EqualFold(value, "true") || strings.EqualFold(value, "false") || value == "0" || value == "1"
-	case "integer", "int", "int32", "int64", "uint", "uint32", "uint64":
+	case "integer", "int", "int32", "int64":
 		_, err := strconv.ParseInt(value, 10, 64)
+		return err == nil
+	case "unsignedint", "unsignedinteger", "uint", "uint32", "uint64":
+		_, err := strconv.ParseUint(value, 10, 64)
 		return err == nil
 	case "number", "float", "float32", "float64", "decimal":
 		_, err := strconv.ParseFloat(value, 64)
@@ -178,6 +188,14 @@ func validParameterType(value, valueType string) bool {
 	default:
 		return true
 	}
+}
+
+func canonicalValueType(valueType string) string {
+	canonical := strings.ToLower(strings.TrimSpace(valueType))
+	if cut := strings.IndexAny(canonical, "([{"); cut >= 0 {
+		canonical = canonical[:cut]
+	}
+	return canonical
 }
 
 func validateParameterConstraint(line ParsedScriptLine, code, value string, constraint map[string]interface{}) []ScriptIssue {

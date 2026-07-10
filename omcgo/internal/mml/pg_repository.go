@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -2105,6 +2106,7 @@ SELECT id, command_code, operation_type, rpc_method, COALESCE(target_object, '')
 	}
 	standardIDs := make([]uuid.UUID, 0, len(codes))
 	standardCodes := make(map[uuid.UUID]string, len(codes))
+	standardCodeSet := make(map[string]struct{}, len(codes))
 	for standardRows.Next() {
 		var id uuid.UUID
 		var command ValidationCommand
@@ -2120,6 +2122,7 @@ SELECT id, command_code, operation_type, rpc_method, COALESCE(target_object, '')
 		result[command.CommandCode] = command
 		standardIDs = append(standardIDs, id)
 		standardCodes[id] = command.CommandCode
+		standardCodeSet[command.CommandCode] = struct{}{}
 	}
 	if err := standardRows.Err(); err != nil {
 		standardRows.Close()
@@ -2157,7 +2160,12 @@ SELECT id, command_code, operation_type, parameters, param_paths
 			customRows.Close()
 			return nil, fmt.Errorf("scan custom validation command: %w", err)
 		}
-		if _, standard := result[code]; standard {
+		if _, standard := standardCodeSet[code]; standard {
+			continue
+		}
+		if existing, duplicate := result[code]; duplicate {
+			existing.Ambiguous = true
+			result[code] = existing
 			continue
 		}
 		command := ValidationCommand{CommandCode: code, OperationType: operation, RPCMethod: rpcMethodForOperation(operation)}
@@ -2166,7 +2174,12 @@ SELECT id, command_code, operation_type, parameters, param_paths
 			customRows.Close()
 			return nil, fmt.Errorf("decode custom validation parameters: %w", err)
 		}
+		paramCodes := make([]string, 0, len(parameters))
 		for paramCode := range parameters {
+			paramCodes = append(paramCodes, paramCode)
+		}
+		sort.Strings(paramCodes)
+		for _, paramCode := range paramCodes {
 			command.ParamRefs = append(command.ParamRefs, MMLParamRef{ParamCode: paramCode, ValueType: "string", IsWritable: true})
 		}
 		if err := json.Unmarshal(pathsJSON, &command.TargetPaths); err != nil {
@@ -2187,8 +2200,7 @@ SELECT id, command_code, operation_type, parameters, param_paths
 	paramRows, err := r.pool.Query(ctx, `
 SELECT csf.command_id, csf.mml_code, sp.standard_path,
        lower(COALESCE(sp.data_type, 'string')),
-       (sp.access = 'READ_WRITE'), csf.is_required,
-       jsonb_strip_nulls(jsonb_build_object('min', sp.min_value, 'max', sp.max_value))
+	       (sp.access = 'READ_WRITE'), csf.is_required, sp.min_value, sp.max_value
   FROM mml_command_sub_fields csf
   JOIN standard_params sp ON sp.id = csf.standard_path_id
  WHERE csf.command_id = ANY($1)
@@ -2199,17 +2211,14 @@ SELECT csf.command_id, csf.mml_code, sp.standard_path,
 	for paramRows.Next() {
 		var commandID uuid.UUID
 		var ref MMLParamRef
-		var constraints []byte
-		if err := paramRows.Scan(&commandID, &ref.ParamCode, &ref.Tr069Path, &ref.ValueType, &ref.IsWritable, &ref.IsRequired, &constraints); err != nil {
+		var minValue, maxValue *int64
+		if err := paramRows.Scan(&commandID, &ref.ParamCode, &ref.Tr069Path, &ref.ValueType, &ref.IsWritable, &ref.IsRequired, &minValue, &maxValue); err != nil {
 			paramRows.Close()
 			return nil, fmt.Errorf("scan validation command parameter: %w", err)
 		}
-		if len(constraints) > 2 {
-			if err := json.Unmarshal(constraints, &ref.ValueConstraint); err != nil {
-				paramRows.Close()
-				return nil, fmt.Errorf("decode validation parameter constraint: %w", err)
-			}
-		}
+		rules := standardValidationRules(ref.ValueType, minValue, maxValue)
+		ref.JsRegex = rules.JsRegex
+		ref.ValueConstraint = rules.ValueConstraint
 		code := standardCodes[commandID]
 		command := result[code]
 		command.ParamRefs = append(command.ParamRefs, ref)
@@ -2221,6 +2230,33 @@ SELECT csf.command_id, csf.mml_code, sp.standard_path,
 	}
 	paramRows.Close()
 	return result, nil
+}
+
+// standardValidationRules maps the constraints that the current authoritative
+// standard_params schema actually persists (data type plus numeric bounds) to
+// the generic validation contract. Boolean and unsignedInt semantics supply
+// deterministic enum/regex rules in addition to persisted bounds.
+func standardValidationRules(valueType string, minValue, maxValue *int64) MMLParamRef {
+	rules := MMLParamRef{ValueConstraint: make(map[string]interface{})}
+	if minValue != nil {
+		rules.ValueConstraint["min"] = float64(*minValue)
+	}
+	if maxValue != nil {
+		rules.ValueConstraint["max"] = float64(*maxValue)
+	}
+	switch canonicalValueType(valueType) {
+	case "boolean", "bool":
+		rules.JsRegex = "(?i)^(true|false|0|1)$"
+		rules.ValueConstraint["regex"] = rules.JsRegex
+		rules.ValueConstraint["enum"] = []interface{}{"true", "false", "0", "1"}
+	case "unsignedint", "unsignedinteger", "uint", "uint32", "uint64":
+		rules.JsRegex = "^[0-9]+$"
+		rules.ValueConstraint["regex"] = rules.JsRegex
+	}
+	if len(rules.ValueConstraint) == 0 {
+		rules.ValueConstraint = nil
+	}
+	return rules
 }
 
 func (r *PgScriptValidationRepository) LoadDevicesBySNs(ctx context.Context, sns []string) (map[string]*model.Device, error) {

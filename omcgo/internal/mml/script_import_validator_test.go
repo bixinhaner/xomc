@@ -78,6 +78,10 @@ func TestScriptImportValidator_ReportsAuthoritativeValidationIssues(t *testing.T
 		{"device missing", "LST DEVICE_INFO;MISSING", map[string]ValidationCommand{"LST DEVICE_INFO": {CommandCode: "LST DEVICE_INFO", OperationType: "LST"}}, map[string]*model.Device{}, "MML_DEVICE_NOT_FOUND", IssueError},
 		{"offline warning", "LST DEVICE_INFO;SN1", map[string]ValidationCommand{"LST DEVICE_INFO": {CommandCode: "LST DEVICE_INFO", OperationType: "LST"}}, map[string]*model.Device{"SN1": {SerialNumber: "SN1", IsOnline: false}}, "MML_DEVICE_OFFLINE", IssueWarning},
 		{"confirm warning", "RMV DEVICE_INFO;SN1", map[string]ValidationCommand{"RMV DEVICE_INFO": {CommandCode: "RMV DEVICE_INFO", OperationType: "RMV", RequireConfirm: true}}, map[string]*model.Device{"SN1": {SerialNumber: "SN1", IsOnline: true}}, "MML_COMMAND_CONFIRM_REQUIRED", IssueWarning},
+		{"unsigned int rejects non-numeric", "MOD DEVICE_INFO:REQUIRED=X,COUNT=not-a-number;SN1", map[string]ValidationCommand{"MOD DEVICE_INFO": {CommandCode: "MOD DEVICE_INFO", OperationType: "MOD", ParamRefs: []MMLParamRef{{ParamCode: "REQUIRED", IsWritable: true, IsRequired: true, ValueType: "string"}, {ParamCode: "COUNT", IsWritable: true, ValueType: "unsignedint"}}}}, map[string]*model.Device{"SN1": {SerialNumber: "SN1", IsOnline: true}}, "MML_PARAMETER_TYPE_INVALID", IssueError},
+		{"unsigned int rejects negative", "MOD DEVICE_INFO:REQUIRED=X,COUNT=-1;SN1", map[string]ValidationCommand{"MOD DEVICE_INFO": {CommandCode: "MOD DEVICE_INFO", OperationType: "MOD", ParamRefs: []MMLParamRef{{ParamCode: "REQUIRED", IsWritable: true, IsRequired: true, ValueType: "string"}, {ParamCode: "COUNT", IsWritable: true, ValueType: "unsignedint"}}}}, map[string]*model.Device{"SN1": {SerialNumber: "SN1", IsOnline: true}}, "MML_PARAMETER_TYPE_INVALID", IssueError},
+		{"ambiguous custom code", "LST CUSTOM;SN1", map[string]ValidationCommand{"LST CUSTOM": {CommandCode: "LST CUSTOM", OperationType: "LST", Ambiguous: true}}, map[string]*model.Device{"SN1": {SerialNumber: "SN1", IsOnline: true}}, "MML_COMMAND_AMBIGUOUS", IssueError},
+		{"operation mismatch", "LST CUSTOM;SN1", map[string]ValidationCommand{"LST CUSTOM": {CommandCode: "LST CUSTOM", OperationType: "MOD"}}, map[string]*model.Device{"SN1": {SerialNumber: "SN1", IsOnline: true}}, "MML_COMMAND_OPERATION_MISMATCH", IssueError},
 	}
 
 	for _, tt := range tests {
@@ -91,6 +95,18 @@ func TestScriptImportValidator_ReportsAuthoritativeValidationIssues(t *testing.T
 			require.Equal(t, tt.severity, result.Issues[0].Severity)
 		})
 	}
+}
+
+func TestStandardValidationRules_ProduceRuntimeRegexAndEnumConstraints(t *testing.T) {
+	boolean := standardValidationRules("boolean", nil, nil)
+	require.Equal(t, "(?i)^(true|false|0|1)$", boolean.JsRegex)
+	require.Equal(t, []interface{}{"true", "false", "0", "1"}, boolean.ValueConstraint["enum"])
+
+	min, max := int64(1), int64(10)
+	unsigned := standardValidationRules("unsignedint", &min, &max)
+	require.Equal(t, "^[0-9]+$", unsigned.JsRegex)
+	require.Equal(t, float64(1), unsigned.ValueConstraint["min"])
+	require.Equal(t, float64(10), unsigned.ValueConstraint["max"])
 }
 
 func TestScriptImportValidator_ProducesPlanAndUsesOneBatchPerResource(t *testing.T) {

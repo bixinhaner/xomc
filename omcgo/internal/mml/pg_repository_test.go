@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -115,4 +116,72 @@ func TestPgScriptValidationRepository_UsesBatchQueries(t *testing.T) {
 	require.Contains(t, src, "WHERE csf.command_id = ANY($1)")
 	require.Contains(t, src, "WHERE serial_number = ANY($1)")
 	require.Contains(t, src, "mml_command_sub_fields csf")
+	require.Contains(t, src, "standardValidationRules")
+}
+
+// This is deliberately PG-backed when a local test database is available: it
+// proves the import repository applies runtime rules to the actual lowercase
+// data_type values emitted by the standard catalog, rather than only to fakes.
+func TestPgScriptValidationRepository_LoadsStandardRuntimeRules(t *testing.T) {
+	pool := newMMLTestPool(t)
+	repo := NewPgScriptValidationRepository(pool)
+	ctx := context.Background()
+
+	for _, valueType := range []string{"unsignedint", "boolean"} {
+		t.Run(valueType, func(t *testing.T) {
+			var code string
+			err := pool.QueryRow(ctx, `
+SELECT c.command_code
+  FROM mml_commands c
+  JOIN mml_command_sub_fields csf ON csf.command_id = c.id
+  JOIN standard_params sp ON sp.id = csf.standard_path_id
+ WHERE c.source = 'standard'
+   AND c.deprecated_at IS NULL
+   AND lower(sp.data_type) = $1
+ ORDER BY c.command_code
+ LIMIT 1`, valueType).Scan(&code)
+			if err != nil {
+				t.Skipf("no standard %s command available: %v", valueType, err)
+			}
+
+			commands, err := repo.LoadCommandsByCodes(ctx, []string{code}, ValidationActor{})
+			require.NoError(t, err)
+			command, ok := commands[code]
+			require.True(t, ok)
+			var matched *MMLParamRef
+			for i := range command.ParamRefs {
+				if command.ParamRefs[i].ValueType == valueType {
+					matched = &command.ParamRefs[i]
+					break
+				}
+			}
+			require.NotNil(t, matched)
+			require.NotEmpty(t, matched.JsRegex)
+			if valueType == "boolean" {
+				require.Equal(t, []interface{}{"true", "false", "0", "1"}, matched.ValueConstraint["enum"])
+			}
+		})
+	}
+}
+
+func TestPgScriptValidationRepository_MarksDuplicateVisibleCustomCodesAmbiguous(t *testing.T) {
+	pool := newMMLTestPool(t)
+	ctx := context.Background()
+	code := "LST TASK3_" + strings.ToUpper(strings.ReplaceAll(uuid.NewString()[:8], "-", ""))
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), "DELETE FROM mml_custom_command WHERE command_code=$1", code)
+	})
+
+	for _, suffix := range []string{"A", "B"} {
+		_, err := pool.Exec(ctx, `
+INSERT INTO mml_custom_command
+    (command_name, command_code, operation_type, command_scope, parameters, param_paths, creator)
+VALUES ($1, $2, 'LST', 'public', '{}'::jsonb, '[]'::jsonb, 'task3-validator-test')`,
+			"task3 duplicate "+suffix+" "+uuid.NewString(), code)
+		require.NoError(t, err)
+	}
+
+	commands, err := NewPgScriptValidationRepository(pool).LoadCommandsByCodes(ctx, []string{code}, ValidationActor{})
+	require.NoError(t, err)
+	require.True(t, commands[code].Ambiguous)
 }
