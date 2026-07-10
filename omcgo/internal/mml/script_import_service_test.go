@@ -128,6 +128,7 @@ type fakeImportSessions struct {
 	claimCalls, releaseCalls, finalizeCalls int
 	claimErr                                error
 	consumed                                bool
+	finalizeErr                             error
 }
 
 func (s *fakeImportSessions) Put(_ context.Context, _ string, session *ImportSession) (string, error) {
@@ -162,12 +163,17 @@ func (s *fakeImportSessions) Release(context.Context, string, string, string) er
 }
 func (s *fakeImportSessions) Finalize(context.Context, string, string, string) error {
 	s.finalizeCalls++
+	if s.finalizeErr != nil {
+		err := s.finalizeErr
+		s.finalizeErr = nil
+		return err
+	}
 	s.consumed = true
 	return nil
 }
 
 func importedServiceSession() *ImportSession {
-	return &ImportSession{ID: uuid.New(), OriginalFilename: "巡检.txt", NormalizedContent: "LST DEVICE_INFO;SN1\n", ContentSHA256: "sha-a", ValidationVersion: ValidationVersion, Validation: ScriptValidationResult{PlanItems: []MMLPlanItem{{LineNo: 1, DeviceSN: "SN1", Order: 1, CommandCode: "LST DEVICE_INFO"}}, Summary: ScriptValidationSummary{TotalLines: 1, ValidLines: 1, DeviceCount: 1}}}
+	return &ImportSession{ID: uuid.New(), OriginalFilename: "巡检.txt", NormalizedContent: "LST DEVICE_INFO;SN1\n", ContentSHA256: "sha-a", ValidationVersion: ValidationVersion, ValidatedAt: time.Date(2026, 7, 10, 1, 2, 3, 0, time.UTC), Validation: ScriptValidationResult{PlanItems: []MMLPlanItem{{LineNo: 1, DeviceSN: "SN1", Order: 1, CommandCode: "LST DEVICE_INFO"}}, Summary: ScriptValidationSummary{TotalLines: 1, ValidLines: 1, DeviceCount: 1}}}
 }
 
 func TestScriptImportService_ValidationErrorsDoNotCreateToken(t *testing.T) {
@@ -224,10 +230,41 @@ func TestScriptImportService_PersistsOnlyAuthoritativeSessionFields(t *testing.T
 	got, err := svc.CreateScriptFromImport(context.Background(), "alice", SaveImportedScriptRequest{ValidationToken: "token", ScriptName: "巡检", Description: "desc", Tags: []string{"a"}, RequestID: "req-1"})
 	require.NoError(t, err)
 	require.Equal(t, sessions.session.NormalizedContent, got.Content)
+	require.Equal(t, sessions.session.ValidatedAt, *got.ValidatedAt)
 	require.Equal(t, sessions.session.ContentSHA256, got.ContentSHA256)
 	require.Equal(t, sessions.session.Validation.PlanItems, got.PlanItems)
 	require.Equal(t, "alice", got.Creator)
 	require.Equal(t, 1, sessions.finalizeCalls)
+}
+
+func TestScriptImportService_ReplacementRequiresExpectedVersion(t *testing.T) {
+	sessions := &fakeImportSessions{session: importedServiceSession()}
+	repo := newFakeImportedScriptRepo()
+	svc := NewScriptImportService(repo, &fakeImportValidator{}, sessions, zap.NewNop())
+	created, err := svc.CreateScriptFromImport(context.Background(), "alice", SaveImportedScriptRequest{ValidationToken: "token", ScriptName: "旧", RequestID: "create"})
+	require.NoError(t, err)
+	sessions.consumed = false
+	sessions.session.ID = uuid.New()
+	_, err = svc.ReplaceScriptFromImport(context.Background(), created.ID, "alice", ReplaceImportedScriptRequest{ValidationToken: "token", ScriptName: "新", RequestID: "replace"})
+	require.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	require.Equal(t, 1, sessions.releaseCalls)
+}
+
+func TestScriptImportService_ReplacementFinalizeFailureCanBeRetried(t *testing.T) {
+	sessions := &fakeImportSessions{session: importedServiceSession()}
+	repo := newFakeImportedScriptRepo()
+	svc := NewScriptImportService(repo, &fakeImportValidator{}, sessions, zap.NewNop())
+	created, err := svc.CreateScriptFromImport(context.Background(), "alice", SaveImportedScriptRequest{ValidationToken: "token", ScriptName: "旧", RequestID: "create"})
+	require.NoError(t, err)
+	sessions.consumed = false
+	sessions.session.ID = uuid.New()
+	sessions.finalizeErr = errors.New("redis unavailable")
+	req := ReplaceImportedScriptRequest{ValidationToken: "token", ScriptName: "新", ExpectedUpdatedAt: created.UpdatedAt, RequestID: "replace"}
+	_, err = svc.ReplaceScriptFromImport(context.Background(), created.ID, "alice", req)
+	require.ErrorContains(t, err, "redis unavailable")
+	got, err := svc.ReplaceScriptFromImport(context.Background(), created.ID, "alice", req)
+	require.NoError(t, err)
+	require.Equal(t, "新", got.ScriptName)
 }
 
 func TestScriptImportService_ReplayIsIdempotent(t *testing.T) {
@@ -264,9 +301,11 @@ func TestScriptImportService_ReplaceUsesOptimisticVersion(t *testing.T) {
 	created, err := svc.CreateScriptFromImport(context.Background(), "alice", SaveImportedScriptRequest{ValidationToken: "token", ScriptName: "旧", RequestID: "req-1"})
 	require.NoError(t, err)
 	sessions.consumed = false
+	sessions.session.ID = uuid.New()
 	_, err = svc.ReplaceScriptFromImport(context.Background(), created.ID, "alice", ReplaceImportedScriptRequest{ValidationToken: "token", ScriptName: "新", ExpectedUpdatedAt: created.UpdatedAt, RequestID: "req-2"})
 	require.NoError(t, err)
 	sessions.consumed = false
+	sessions.session.ID = uuid.New()
 	_, err = svc.ReplaceScriptFromImport(context.Background(), created.ID, "alice", ReplaceImportedScriptRequest{ValidationToken: "token", ScriptName: "再次", ExpectedUpdatedAt: created.UpdatedAt, RequestID: "req-3"})
 	require.ErrorIs(t, err, ErrScriptVersionConflict)
 }

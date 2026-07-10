@@ -9,6 +9,8 @@
 - 通过 `import_session_id` 查询和 Redis consumed tombstone 支持网络重试幂等，不重复创建脚本。
 - 新增 `ImportedScriptRepository` 及 PostgreSQL `CreateImported`、`GetByImportSessionID`、`ReplaceImported`、`UpdateMetadata`；替换使用 `id + updated_at` 乐观锁，版本冲突返回 `ErrScriptVersionConflict`。
 - consumed tombstone 保留会话快照，使数据库已提交但客户端未收到响应时可安全恢复同一脚本。
+- 替换强制携带 `expected_updated_at`；替换成功但 Finalize 暂时失败时，重复相同 request ID 会识别已提交的 session 快照并只重试 Finalize。
+- ImportSession 保存校验时刻 `ValidatedAt`，脚本落库沿用该时刻，避免重试改变审计时间。
 
 ## 测试覆盖
 
@@ -28,4 +30,3 @@ cd omcgo && /usr/local/go/bin/go build ./cmd/app
 ```
 
 结果：全部通过。未修改用户提供的未跟踪参考文档，也未修改 unrelated carrier OUI 失败。
-

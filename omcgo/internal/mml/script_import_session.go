@@ -39,6 +39,7 @@ type ImportSession struct {
 	NormalizedContent string                 `json:"normalized_content"`
 	ContentSHA256     string                 `json:"content_sha256"`
 	ValidationVersion string                 `json:"validation_version"`
+	ValidatedAt       time.Time              `json:"validated_at"`
 	Validation        ScriptValidationResult `json:"validation"`
 }
 

@@ -102,7 +102,7 @@ func (s *ScriptImportService) ValidateScriptImport(ctx context.Context, username
 	if s.sessions == nil {
 		return nil, fmt.Errorf("validate script import: session store is nil")
 	}
-	token, err := s.sessions.Put(ctx, username, &ImportSession{OriginalFilename: response.OriginalFilename, NormalizedContent: response.NormalizedContent, ContentSHA256: response.ContentSHA256, ValidationVersion: response.ValidationVersion, Validation: *result})
+	token, err := s.sessions.Put(ctx, username, &ImportSession{OriginalFilename: response.OriginalFilename, NormalizedContent: response.NormalizedContent, ContentSHA256: response.ContentSHA256, ValidationVersion: response.ValidationVersion, ValidatedAt: response.ValidatedAt, Validation: *result})
 	if err != nil {
 		return nil, fmt.Errorf("store script import validation: %w", err)
 	}
@@ -175,11 +175,33 @@ func (s *ScriptImportService) ReplaceScriptFromImport(ctx context.Context, id uu
 	}
 	session, err := s.sessions.Claim(ctx, req.ValidationToken, username, requestID)
 	if err != nil {
+		if errors.Is(err, ErrImportTokenConsumed) {
+			if reader, ok := s.sessions.(ConsumedImportSessionReader); ok {
+				if consumed, readErr := reader.GetConsumed(ctx, req.ValidationToken, username); readErr == nil {
+					if existing, lookupErr := s.repo.GetByImportSessionID(ctx, consumed.ID); lookupErr == nil && existing.ID == id {
+						return existing, nil
+					}
+				}
+			}
+		}
 		return nil, fmt.Errorf("claim script replacement: %w", err)
 	}
 	if hasScriptErrors(session.Validation.Issues) {
 		_ = s.sessions.Release(ctx, req.ValidationToken, username, requestID)
 		return nil, fmt.Errorf("replace script import: %w", commonerrors.ErrInvalidInput)
+	}
+	if existing, lookupErr := s.repo.GetByImportSessionID(ctx, session.ID); lookupErr == nil {
+		if existing.ID != id || existing.Creator != username {
+			_ = s.sessions.Release(ctx, req.ValidationToken, username, requestID)
+			return nil, commonerrors.ErrForbidden
+		}
+		if finalizeErr := s.sessions.Finalize(ctx, req.ValidationToken, username, requestID); finalizeErr != nil {
+			return nil, fmt.Errorf("finalize replayed script replacement: %w", finalizeErr)
+		}
+		return existing, nil
+	} else if !errors.Is(lookupErr, commonerrors.ErrNotFound) {
+		_ = s.sessions.Release(ctx, req.ValidationToken, username, requestID)
+		return nil, fmt.Errorf("check replacement import: %w", lookupErr)
 	}
 	current, err := s.repo.GetByID(ctx, id)
 	if err != nil {
@@ -191,7 +213,8 @@ func (s *ScriptImportService) ReplaceScriptFromImport(ctx context.Context, id uu
 		return nil, commonerrors.ErrForbidden
 	}
 	if req.ExpectedUpdatedAt.IsZero() {
-		req.ExpectedUpdatedAt = current.UpdatedAt
+		_ = s.sessions.Release(ctx, req.ValidationToken, username, requestID)
+		return nil, fmt.Errorf("replace imported script: %w", commonerrors.ErrInvalidInput)
 	}
 	replacement := scriptFromImportSession(session, username, req.ScriptName, req.Description, req.Tags)
 	replacement.ID = current.ID
@@ -207,7 +230,10 @@ func (s *ScriptImportService) ReplaceScriptFromImport(ctx context.Context, id uu
 }
 
 func scriptFromImportSession(session *ImportSession, username, name, description string, tags []string) *MMLScript {
-	now := time.Now().UTC()
+	now := session.ValidatedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
 	return &MMLScript{ImportSessionID: session.ID, ScriptName: strings.TrimSpace(name), Description: description, Content: session.NormalizedContent, OriginalFilename: session.OriginalFilename, ContentSHA256: session.ContentSHA256, ValidationVersion: session.ValidationVersion, ValidatedAt: &now, PlanItems: append([]MMLPlanItem(nil), session.Validation.PlanItems...), ValidationSummary: JSONMap{"summary": session.Validation.Summary, "issues": session.Validation.Issues}, Creator: username, Tags: append([]string(nil), tags...), Status: ScriptActive, Type: ScriptTypeBatch}
 }
 
