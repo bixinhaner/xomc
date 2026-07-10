@@ -135,13 +135,13 @@ func (m *hTaskRepo) UpdateExportDevice(ctx context.Context, id uuid.UUID, device
 }
 
 type hCustomCommandRepo struct {
-	CreateFn          func(ctx context.Context, tmpl *MMLCustomCommand) error
-	GetByIDFn         func(ctx context.Context, id uuid.UUID) (*MMLCustomCommand, error)
-	UpdateFn          func(ctx context.Context, tmpl *MMLCustomCommand) error
-	DeleteFn          func(ctx context.Context, id uuid.UUID) error
-	ListFn            func(ctx context.Context, filter CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error)
-	NameExistsFn      func(ctx context.Context, ownerID uuid.UUID, name string, excludeID *uuid.UUID) (bool, error)
-	PublicNameFn      func(ctx context.Context, name string, excludeID *uuid.UUID) (bool, error)
+	CreateFn     func(ctx context.Context, tmpl *MMLCustomCommand) error
+	GetByIDFn    func(ctx context.Context, id uuid.UUID) (*MMLCustomCommand, error)
+	UpdateFn     func(ctx context.Context, tmpl *MMLCustomCommand) error
+	DeleteFn     func(ctx context.Context, id uuid.UUID) error
+	ListFn       func(ctx context.Context, filter CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error)
+	NameExistsFn func(ctx context.Context, ownerID uuid.UUID, name string, excludeID *uuid.UUID) (bool, error)
+	PublicNameFn func(ctx context.Context, name string, excludeID *uuid.UUID) (bool, error)
 }
 
 func (m *hCustomCommandRepo) Create(ctx context.Context, tmpl *MMLCustomCommand) error {
@@ -478,13 +478,11 @@ func TestHandler_ListScripts(t *testing.T) {
 	assert.Equal(t, "Batch Query Script", resp.Items[0].ScriptName)
 }
 
-func TestHandler_CreateScript(t *testing.T) {
+func TestHandler_CreateScriptRouteRemoved(t *testing.T) {
 	cmdRepo := &hCmdRepo{}
 	scriptRepo := &hScriptRepo{
-		CreateFn: func(_ context.Context, script *MMLScript) error {
-			script.ID = uuid.New()
-			script.CreatedAt = time.Now()
-			script.UpdatedAt = time.Now()
+		CreateFn: func(_ context.Context, _ *MMLScript) error {
+			t.Fatal("legacy POST /mml/scripts route must not call CreateScript")
 			return nil
 		},
 	}
@@ -495,26 +493,12 @@ func TestHandler_CreateScript(t *testing.T) {
 	h := NewHandler(svc, logger)
 	router := setupMMLRouter(h)
 
-	body := CreateScriptRequest{
-		ScriptName:  "New Script",
-		Description: "A new MML script",
-		Content:     "LST CELL;",
-		Tags:        []string{"5g", "cell"},
-	}
-
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/mml/scripts", bytes.NewReader(mustMarshalMML(t, body)))
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/mml/scripts", bytes.NewReader([]byte(`{"script_name":"legacy"}`)))
 	r.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, r)
 
-	assert.Equal(t, http.StatusCreated, w.Code)
-
-	var resp MMLScript
-	response.DecodeData(t, w.Body, &resp)
-	assert.NotEqual(t, uuid.Nil, resp.ID)
-	assert.Equal(t, "New Script", resp.ScriptName)
-	assert.Equal(t, "LST CELL;", resp.Content)
-	assert.Equal(t, []string{"5g", "cell"}, resp.Tags)
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 func TestHandler_DeleteScript(t *testing.T) {

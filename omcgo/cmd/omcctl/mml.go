@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 	"github.com/spf13/cobra"
 
 	"github.com/omcgo/omcgo/internal/config/parammodel/mmlstandardloader"
+	"github.com/omcgo/omcgo/internal/task"
 )
 
 // contextWithTimeout 返回 (context.Context, cancel) 并设定超时。
@@ -55,7 +57,76 @@ func newMMLCmd() *cobra.Command {
 	cmd.AddCommand(newMMLMigrateDeviceParamsCmd())
 	cmd.AddCommand(newMMLImportStandardParamsCmd())
 	cmd.AddCommand(newMMLImportSpecMDCmd()) // T-0169: spec md → seed SQL + JSON catalog
+	cmd.AddCommand(newMMLResetScriptsCmd())
 	return cmd
+}
+
+// newMMLResetScriptsCmd registers the source-scoped Redis cleanup command.
+// PostgreSQL cleanup is handled by the corresponding migration; this command
+// only touches queued MML tasks in Redis.
+func newMMLResetScriptsCmd() *cobra.Command {
+	var (
+		redisAddr string
+		dryRun    bool
+		apply     bool
+		confirm   string
+	)
+	c := &cobra.Command{
+		Use:   "reset-script-data",
+		Short: "Safely purge queued MML task data from Redis",
+		Long: `扫描并清理 Redis 中 source=mml 的任务队列项。
+
+默认仅 dry-run 统计，不修改 Redis。执行删除必须同时指定
+--apply --confirm DELETE-MML-RUNTIME；命令绝不使用 KEYS/FLUSHDB。`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runMMLResetScripts(redisAddr, dryRun, apply, confirm)
+		},
+	}
+	c.Flags().StringVar(&redisAddr, "redis-addr", "localhost:6379", "Redis address")
+	c.Flags().BoolVar(&dryRun, "dry-run", true, "Only report matching tasks; default true")
+	c.Flags().BoolVar(&apply, "apply", false, "Actually delete matching tasks")
+	c.Flags().StringVar(&confirm, "confirm", "", "Required confirmation for --apply: DELETE-MML-RUNTIME")
+	return c
+}
+
+func runMMLResetScripts(redisAddr string, dryRun, apply bool, confirm string) error {
+	if apply {
+		if confirm != "DELETE-MML-RUNTIME" {
+			return fmt.Errorf("--apply requires --confirm DELETE-MML-RUNTIME")
+		}
+		dryRun = false
+	}
+	// A caller that omits --apply always stays in dry-run mode, even if it
+	// explicitly passes --dry-run=false; deletion requires the explicit guard.
+	if !apply {
+		dryRun = true
+	}
+
+	result, err := executeMMLResetScripts(redisAddr, dryRun, apply)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("matched=%d deleted=%d skipped=%d errors=%d\n", result.Matched, result.Deleted, result.Skipped, result.Errors)
+	if result.Errors > 0 {
+		return fmt.Errorf("MML Redis purge completed with %d errors", result.Errors)
+	}
+	return nil
+}
+
+func executeMMLResetScripts(redisAddr string, dryRun, apply bool) (task.PurgeBySourceResult, error) {
+	if apply {
+		dryRun = false
+	}
+	ctx, cancel := contextWithTimeout(5 * time.Minute)
+	defer cancel()
+
+	client := redis.NewClient(&redis.Options{Addr: redisAddr})
+	defer client.Close()
+	if err := client.Ping(ctx).Err(); err != nil {
+		return task.PurgeBySourceResult{}, fmt.Errorf("ping redis: %w", err)
+	}
+	queue := task.NewRedisTaskQueue(client)
+	return queue.PurgeBySource(ctx, task.TaskSourceMML, dryRun)
 }
 
 // newMMLImportStandardParamsCmd 注册 `omcctl mml import-standard-params` 子命令。

@@ -25,6 +25,17 @@ type RedisTaskQueue struct {
 	client redis.UniversalClient
 }
 
+// PurgeBySourceResult summarizes a source-scoped Redis queue purge.
+// Matched counts tasks whose source matched; Deleted is only incremented after
+// all apply operations for a task succeed. Skipped includes non-matching and
+// stale queue entries. Errors records malformed task data or failed deletes.
+type PurgeBySourceResult struct {
+	Matched int64 `json:"matched"`
+	Deleted int64 `json:"deleted"`
+	Skipped int64 `json:"skipped"`
+	Errors  int64 `json:"errors"`
+}
+
 // NewRedisTaskQueue 创建 Redis 任务队列
 func NewRedisTaskQueue(client redis.UniversalClient) *RedisTaskQueue {
 	return &RedisTaskQueue{client: client}
@@ -264,6 +275,85 @@ func (q *RedisTaskQueue) Delete(ctx context.Context, taskID string) error {
 
 	_, err = pipe.Exec(ctx)
 	return err
+}
+
+// PurgeBySource removes only queued tasks whose serialized source matches
+// source. Queue keys are traversed with SCAN; task details are read through a
+// pipeline. dryRun reports matches without mutating any Redis key. This method
+// deliberately does not use KEYS or FLUSHDB so it cannot block Redis or affect
+// unrelated namespaces.
+func (q *RedisTaskQueue) PurgeBySource(ctx context.Context, source TaskSource, dryRun bool) (PurgeBySourceResult, error) {
+	if source == "" {
+		return PurgeBySourceResult{}, fmt.Errorf("source is required")
+	}
+
+	var result PurgeBySourceResult
+	err := redisx.Scan(ctx, q.client, redisx.Keys.ACSTaskQueuePattern(), func(ctx context.Context, queueKey string) error {
+		ids, err := q.client.ZRange(ctx, queueKey, 0, -1).Result()
+		if err != nil {
+			return fmt.Errorf("scan queue %q: %w", queueKey, err)
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+
+		pipe := q.client.Pipeline()
+		cmds := make([]*redis.StringCmd, len(ids))
+		for i, id := range ids {
+			cmds[i] = pipe.HGet(ctx, q.taskKey(id), "data")
+		}
+		_, execErr := pipe.Exec(ctx)
+		if execErr != nil && execErr != redis.Nil {
+			// Individual command errors are accounted for below where possible;
+			// continue processing the other queue entries rather than broadening
+			// the purge scope.
+		}
+
+		for i, cmd := range cmds {
+			data, getErr := cmd.Result()
+			if getErr != nil {
+				if getErr == redis.Nil {
+					result.Skipped++
+				} else {
+					result.Errors++
+				}
+				continue
+			}
+
+			var task Task
+			if unmarshalErr := json.Unmarshal([]byte(data), &task); unmarshalErr != nil {
+				result.Errors++
+				continue
+			}
+			if task.Source != source {
+				result.Skipped++
+				continue
+			}
+			result.Matched++
+			if dryRun {
+				continue
+			}
+
+			deletePipe := q.client.Pipeline()
+			zrem := deletePipe.ZRem(ctx, queueKey, ids[i])
+			delDetail := deletePipe.Del(ctx, q.taskKey(ids[i]))
+			var delCWMP *redis.IntCmd
+			if task.CWMPID != "" {
+				delCWMP = deletePipe.Del(ctx, q.cwmpKey(task.CWMPID))
+			}
+			_, deleteErr := deletePipe.Exec(ctx)
+			if deleteErr != nil || zrem.Err() != nil || delDetail.Err() != nil || (delCWMP != nil && delCWMP.Err() != nil) {
+				result.Errors++
+				continue
+			}
+			result.Deleted++
+		}
+		return nil
+	})
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 // Exists 判断某任务是否已经在该设备的任务队列 Sorted Set 内。

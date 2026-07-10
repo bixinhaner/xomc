@@ -61,7 +61,6 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	scripts.PUT("/:id/import", h.ReplaceScriptFromImport)
 	scripts.POST("/:id/executions", h.CreateScriptExecution)
 	scripts.GET("", h.ListScripts)
-	scripts.POST("", h.CreateScript)
 	scripts.GET("/:id", h.GetScript)
 	scripts.PUT("/:id", h.UpdateScript)
 	scripts.DELETE("/:id", h.DeleteScript)
