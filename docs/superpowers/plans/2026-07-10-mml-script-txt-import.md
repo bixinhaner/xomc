@@ -25,8 +25,8 @@
 
 ## Progress Ledger
 
-**Current checkpoint:** Task 11 complete
-**Resume from:** Task 12, Step 1 — old entry cleanup
+**Current checkpoint:** Task 12 in progress
+**Resume from:** Task 12, Step 1 — write Redis source-filter failing tests
 **Last verified commit:** `85c5106f test(frontend): 完善 v3 MML 脚本证据`
 
 - [x] Task 1 — 数据库契约与 Go 模型
