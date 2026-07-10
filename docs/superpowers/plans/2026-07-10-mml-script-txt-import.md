@@ -25,8 +25,8 @@
 
 ## Progress Ledger
 
-**Current checkpoint:** Task 11 in progress
-**Resume from:** Task 11, Step 1 — write v3 capability-alignment failing tests
+**Current checkpoint:** Task 11 complete
+**Resume from:** Task 12, Step 1 — old entry cleanup
 **Last verified commit:** `09cccf76 fix(frontend): hide native select bridge from a11y`
 
 - [x] Task 1 — 数据库契约与 Go 模型
@@ -39,7 +39,7 @@
 - [x] Task 8 — frontend-core 契约、API 与 Hooks
 - [x] Task 9 — v1 脚本库界面
 - [x] Task 10 — v2 脚本库界面
-- [ ] Task 11 — v3 脚本库界面
+- [x] Task 11 — v3 脚本库界面
 - [ ] Task 12 — 旧入口收口与安全清理工具
 - [ ] Task 13 — 全量验证、部署演练与文档收尾
 
@@ -76,6 +76,7 @@
 | Task 8 | `a2e192fa..b3129773` | 规格与质量复审通过；API/Hook 聚焦测试 16 项和 `cd omcmb && npm run typecheck` 通过，覆盖 multipart、Blob 模板、metadata-only、execution 字段收口、422/409 类型化错误、嵌套 validation_summary/issues、详情缓存失效和中英文 i18n。 |
 | Task 9 | `50471f6c..ee8a7912` | 规格与质量复审通过；v1 ScriptTask focused tests 4 文件/13 项、typecheck 通过，覆盖 TXT 导入/重导入、只读预览、错误/警告过滤与报告、409 warning 确认、422/mixed error 保持 Drawer、定时/周期参数和无在线编辑器。ESLint 0 errors/93 warnings 记录为非阻塞清理项。 |
 | Task 10 | `510cb99b..09cccf76` | 规格与质量复审通过；v2 focused tests 2 文件/9 项、typecheck 通过，覆盖 TXT 上传/重导入、模板下载、只读预览、severity/计划行过滤、错误报告、Escape、409 warning 确认、422/mixed error、执行 issues、scheduled/periodic 时间归一化和 Table/Select primitives。 |
+| Task 11 | pending | v3 focused tests 2 文件/6 项、typecheck 通过；覆盖 TXT 上传/重导入、模板下载、只读预览、severity 过滤、错误禁用保存、409/422 typed validation、执行方式与重试策略、时间归一化、Escape 和可读 loading 文本。详见 `.superpowers/sdd/task-11-report.md`。 |
 
 ---
 
