@@ -507,6 +507,8 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- Sprint B Q-V3-7：dictload admin reload 端点（含 mml-standard）-----
 	registerDictLoadAdminRoutes(c, superAdminGroup)
+	// #41：KPI 路由人工恢复入口，与 indicator reload 复用同一失效器。
+	registerKPIRouteAdminRoutes(c.KPIRouteInvalidator, c.Logger.Named("kpi-route-admin"), superAdminGroup)
 
 	// ----- Alarm filter rule routes → resource "alarms" -----
 	alarmFilterHandler := alarm.NewFilterHandler(ah.alarmFilterRuleRepo, c.Logger)

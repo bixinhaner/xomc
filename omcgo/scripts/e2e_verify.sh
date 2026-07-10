@@ -5329,7 +5329,7 @@ for w2d_attempt in 1 2 3 4 5; do
     W2D_LOGIN_RESP=$(curl -s -X POST "$API/auth/login" \
         -H "Content-Type: application/json" \
         -d "{\"username\":\"admin\",\"encrypted_password\":\"$W2D_ENC\",\"key_id\":\"$PUBLIC_KEY_ID\"}")
-    W2D_TOKEN=$(echo "$W2D_LOGIN_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || echo "")
+    W2D_TOKEN=$(echo "$W2D_LOGIN_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print((d.get('data') or d).get('access_token',''))" 2>/dev/null || echo "")
     if [ -n "$W2D_TOKEN" ]; then
         break
     fi
@@ -6312,6 +6312,60 @@ claim "admin: dead-letters list endpoint returns 200/401/403"
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
     "$API/admin/dead-letters?page=1&page_size=10" -H "$W2D_AUTH")
 check_status_in "T-0012 dlq-1: GET /admin/dead-letters" "200 401 403" "$HTTP_CODE"
+
+# ------------------------------------------------------------
+# Issue #41 KPI 路由人工恢复：分别证明 super_admin 成功、未登录 401、普通用户 403。
+section "Issue #41 KPI route manual recovery (E/R = 3/1)"
+
+claim "kpi-route: super-admin manual refresh returns new cache version"
+RESP=$(curl -s -w "\n%{http_code}" -X POST \
+    "$API/admin/kpi-routes/refresh" -H "$W2D_AUTH")
+HTTP_CODE=$(echo "$RESP" | tail -1)
+BODY=$(echo "$RESP" | sed '$d')
+check_status "Issue #41 kpi-route-1: super-admin POST refresh" "200" "$HTTP_CODE"
+if [ "$HTTP_CODE" = "200" ]; then
+    KPI41_RESPONSE_OK=$(echo "$BODY" | python3 -c "
+import sys, json
+d = (json.load(sys.stdin).get('data') or {})
+ok = ('cache_version' in d and d.get('scope') in ('global', 'local') and
+      isinstance(d.get('multi_process_sync'), bool))
+print('yes' if ok else 'no')
+" 2>/dev/null || echo "no")
+    if [ "$KPI41_RESPONSE_OK" = "yes" ]; then
+        pass "Issue #41 kpi-route-1b: response contains cache_version/scope/multi_process_sync"
+    else
+        fail "Issue #41 kpi-route-1b: response shape" "$BODY"
+    fi
+fi
+
+claim "kpi-route: unauthenticated manual refresh is rejected"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    "$API/admin/kpi-routes/refresh")
+check_status "Issue #41 kpi-route-2: unauthenticated POST refresh" "401" "$HTTP_CODE"
+
+claim "kpi-route: authenticated non-super-admin manual refresh is rejected"
+KPI41_USERNAME="e2e-kpi41-$$"
+KPI41_PASSWORD="KpiRoute41!Pass123"
+KPI41_ENC_PASSWORD=$(encrypt_password "$KPI41_PASSWORD")
+RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/admin/users" \
+    -H "$W2D_AUTH" -H "Content-Type: application/json" \
+    -d "{\"username\":\"$KPI41_USERNAME\",\"encrypted_password\":\"$KPI41_ENC_PASSWORD\",\"key_id\":\"$PUBLIC_KEY_ID\",\"display_name\":\"KPI Route E2E User\"}")
+HTTP_CODE=$(echo "$RESP" | tail -1)
+BODY=$(echo "$RESP" | sed '$d')
+KPI41_USER_ID=$(py_get "$BODY" "data.id")
+if [ "$HTTP_CODE" = "201" ] && [ -n "$KPI41_USER_ID" ]; then
+    KPI41_LOGIN_PASSWORD=$(encrypt_password "$KPI41_PASSWORD")
+    KPI41_LOGIN_RESP=$(curl -s -X POST "$API/auth/login" \
+        -H "Content-Type: application/json" \
+        -d "{\"username\":\"$KPI41_USERNAME\",\"encrypted_password\":\"$KPI41_LOGIN_PASSWORD\",\"key_id\":\"$PUBLIC_KEY_ID\"}")
+    KPI41_USER_TOKEN=$(echo "$KPI41_LOGIN_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print((d.get('data') or {}).get('access_token',''))" 2>/dev/null || echo "")
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+        "$API/admin/kpi-routes/refresh" -H "Authorization: Bearer $KPI41_USER_TOKEN")
+    check_status "Issue #41 kpi-route-3: non-super-admin POST refresh" "403" "$HTTP_CODE"
+    curl -s -o /dev/null -X DELETE "$API/admin/users/$KPI41_USER_ID" -H "$W2D_AUTH"
+else
+    fail "Issue #41 kpi-route-3: create non-super-admin fixture" "HTTP $HTTP_CODE: $BODY"
+fi
 
 # ------------------------------------------------------------
 # T-0137 TR069 报文跟踪（M3-03，对齐 PRD AC-1..AC-6）

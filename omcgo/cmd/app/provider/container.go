@@ -24,6 +24,7 @@ import (
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
+	kpirouter "github.com/omcgo/omcgo/internal/pm/kpi/router"
 	"github.com/omcgo/omcgo/internal/pm/retention"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/provision"
@@ -105,8 +106,8 @@ type Container struct {
 	RoleRepo       *admin.PgRoleRepository
 	AuditRepo      *admin.PgAuditRepository
 	PermService    *admin.PermissionService
-	SysConfigSvc   *admin.SysConfigService // 提供 RegisterSavedHook 给其他模块挂 cache invalidate
-	SecurityPolicy *admin.SecurityPolicy   // 让其他模块可注册 InvalidateCache hook
+	SysConfigSvc   *admin.SysConfigService  // 提供 RegisterSavedHook 给其他模块挂 cache invalidate
+	SecurityPolicy *admin.SecurityPolicy    // 让其他模块可注册 InvalidateCache hook
 	DictService    *admin.DictionaryService // #241：三库导入 XML 后按 source_table 刷新绑定字典（依赖 admin 模块先初始化）
 
 	// MinIO 预签名 client 运行时订阅桥（issue #548 切片 2 D 后端）。
@@ -140,6 +141,10 @@ type Container struct {
 	// PMModule 设置
 	PMCounterRepo *counter.PgCounterRepository
 	PMKPIRepo     *kpi.PgKPIRepository
+	// KPIRouteInvalidator 由 dictload 创建、PM Router 初始化后绑定本进程 L1，
+	// 统一供指标 reload、人工恢复及后续写后热更新调用。
+	KPIRouteInvalidator *kpirouter.Invalidator
+	KPIRouteMetrics     *kpirouter.Metrics
 
 	// PM retention 策略层（T-0164-P2 / G2）
 	// sys_configs (category='pm.retention') 5 键的运行时缓存 + RegisterSavedHook 监听 reload

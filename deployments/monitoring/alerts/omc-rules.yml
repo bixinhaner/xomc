@@ -169,6 +169,47 @@ groups:
                  (backup_cleanup_cron: "0 3 * * 0" 改为每周一次)避免噪声
             Runbook: docs/operations/告警处置Runbook.md#ParamModelBackupFailedSurge
 
+  - name: omc.kpi_router
+    interval: 30s
+    rules:
+      - alert: KPIRouteInvalidationFailed
+        # result=failure 只在统一失效器完成 3 次总尝试（或有界后台上下文超时）
+        # 后累加；业务写入已经提交，不能回滚或向调用方伪装为写失败，但旧路由
+        # 可能继续过滤新 counter，因此需要立即人工恢复。
+        expr: increase(omc_kpi_router_invalidations_total{result="failure",scope="global"}[5m]) > 0
+        for: 0s
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: kpi_router
+        annotations:
+          summary: "KPI 路由全局失效最终失败（trigger={{ $labels.trigger }}）"
+          description: |
+            KPI 路由失效在有界后台上下文内完成 3 次总尝试后仍未能推进 Redis
+            cache_version。当前 app 本进程 L1 已清理，但其他 app/worker 进程可能
+            继续使用旧路由，导致新增 counter 在 PM 入库前被过滤。
+            Action:
+              1. 检查 Redis 可用性及 app 日志中的 "KPI route invalidation failed"
+              2. Redis 恢复后，以 super_admin 调用 POST /api/v1/admin/kpi-routes/refresh
+              3. 确认响应 cache_version 递增，随后观察 stale_evictions_total 增长
+
+      - alert: KPIRouteVersionReadFailuresSustained
+        # 单次读取失败按 fail-open 保留当前完整 L1 快照；持续失败则意味着 worker
+        # 无法感知远端版本推进，新指标路由可能长期不生效。
+        expr: rate(omc_kpi_router_cache_version_read_failures_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: kpi_router
+        annotations:
+          summary: "KPI 路由 cache_version 持续读取失败（{{ $labels.job }} / {{ $labels.instance }}）"
+          description: |
+            过去 5 分钟 KPI Router 持续无法读取 Redis cache_version。查询会 fail-open
+            使用当前 L1 完整快照，但该进程无法及时采用其他进程发布的新 KPI 路由。
+            Action: 检查 Redis 连通性与 kpi.router 日志；恢复后确认
+                    omc_kpi_router_stale_evictions_total 增长且本告警自动解除。
+
   - name: omc.meta
     interval: 30s
     rules:

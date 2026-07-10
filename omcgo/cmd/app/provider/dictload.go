@@ -21,14 +21,15 @@ import (
 // initDictLoadModule 初始化 T-0098 P1-06 字典加载模块。
 //
 // 启动语义（设计 §7.2）：
-//   1. 创建 4 个 Loader（paramModel / indicator / alarmDefinition / product）
-//   2. 注册到 dictloader.Registry，供未来管理 API 触发 ReloadOne（Phase 3）
-//   3. 启动期 LoadOnce 编排 — 三引用字典并行（Phase 1），products 串行后置（Phase 2）确保引用校验有数据
+//  1. 创建 4 个 Loader（paramModel / indicator / alarmDefinition / product）
+//  2. 注册到 dictloader.Registry，供未来管理 API 触发 ReloadOne（Phase 3）
+//  3. 启动期 LoadOnce 编排 — 三引用字典并行（Phase 1），products 串行后置（Phase 2）确保引用校验有数据
 //
 // 依赖关系（实施计划 §3.1）：
-//   ParamModel ┐
-//   Indicator  ├→ Product（校验三引用：paramModel.name / indicator platform / alarm ne_type）
-//   AlarmDef   ┘
+//
+//	ParamModel ┐
+//	Indicator  ├→ Product（校验三引用：paramModel.name / indicator platform / alarm ne_type）
+//	AlarmDef   ┘
 //
 // 失败语义：
 //   - DictLoaderConfig.AutoLoadOnStartup=false 时跳过 DB 字典 LoadOnce，仅创建+注册 Loader；
@@ -48,16 +49,22 @@ func initDictLoadModule(c *Container) error {
 
 	paramLoader := parammodel.NewLoader(c.PgPool, c.Cfg.DictLoader.ParamModel, baseDir, logger)
 	indicatorLoader := indicator.NewLoader(c.PgPool, c.Cfg.DictLoader.Indicator, baseDir, logger)
-	// ISSUE-389：指标库加载/重载后 bump KPI 路由 cache_version，让 Redis L2 里旧路由立即
-	// 视为 stale（否则新增的「统计时长」计数器 report_key 不在缓存白名单，落库被当孤儿丢弃）。
-	// 无 Redis 部署时跳过；KPI 路由缓存只有 Redis L2，无 Redis 即无缓存可失效。
+	// #41：统一失效器总是先清本进程 L1，再以有界后台上下文最多 3 次推进 Redis
+	// 全局版本；无 Redis 时显式降级为仅本进程清理。PM 模块稍后创建 Router 后
+	// 通过 SetLocalTarget 反向绑定同一个失效器。
+	c.KPIRouteMetrics = router.NewMetrics(c.MetricsReg)
+	var kpiRouteBumper router.VersionBumper
 	if c.Redis != nil {
-		kpiRouteCache := router.NewRedisCache(c.Redis)
-		indicatorLoader = indicatorLoader.WithCacheBumper(func(ctx context.Context) error {
-			_, err := kpiRouteCache.BumpVersion(ctx)
-			return err
-		})
+		kpiRouteBumper = router.NewRedisCache(c.Redis)
 	}
+	c.KPIRouteInvalidator = router.NewInvalidator(nil, kpiRouteBumper, router.InvalidatorOptions{
+		Metrics: c.KPIRouteMetrics,
+		Logger:  logger,
+	})
+	indicatorLoader = indicatorLoader.WithCacheBumper(func(ctx context.Context) error {
+		_, err := c.KPIRouteInvalidator.Invalidate(ctx, router.InvalidationTriggerIndicatorReload)
+		return err
+	})
 	alarmLoader := alarmdef.NewLoader(c.PgPool, c.Cfg.DictLoader.AlarmDefinition, baseDir, logger)
 	productLoader := product.NewLoader(c.PgPool, c.Cfg.DictLoader.Product, baseDir, logger)
 

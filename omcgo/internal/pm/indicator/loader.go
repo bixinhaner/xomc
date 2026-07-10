@@ -243,9 +243,9 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	return rep, nil
 }
 
-// bumpDownstreamCache 调用注入的 cacheBumper 使下游 KPI 路由缓存失效。
-// bump 失败不回滚加载（指标库本身已一致），仅告警——下游路由最坏沿用 24h TTL 兜底失效。
-// cacheBumper 为 nil（无 Redis 部署 / 测试场景）时为 no-op。
+// bumpDownstreamCache 调用注入的统一失效器使下游 KPI 路由缓存失效。
+// bump 失败不回滚已经提交的指标库加载；统一失效器负责有限重试、ERROR、指标和告警。
+// cacheBumper 为 nil 仅用于未接 provider 的独立测试；生产无 Redis 时回调仍会清本进程 L1。
 func (l *Loader) bumpDownstreamCache(ctx context.Context) {
 	if l.cacheBumper == nil {
 		return
