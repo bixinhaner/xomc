@@ -25,7 +25,7 @@
 
 ## Progress Ledger
 
-**Current checkpoint:** Task 6 complete
+**Current checkpoint:** Task 7 in progress
 **Resume from:** Task 7, Step 1 — write execution snapshot failing tests
 **Last verified commit:** `2c8a080f feat(mml): 完善 TXT 脚本导入接口复审问题`
 
