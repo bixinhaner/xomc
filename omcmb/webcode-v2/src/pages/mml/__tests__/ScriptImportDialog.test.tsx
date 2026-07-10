@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   replace: vi.fn(),
   template: vi.fn(),
+  validateReplacement: vi.fn(),
 }))
 
 vi.mock('@core/hooks/api/useMML', () => ({
@@ -16,7 +17,7 @@ vi.mock('@core/hooks/api/useMML', () => ({
 }))
 
 vi.mock('@core/services/api/mmlApi', () => ({
-  mmlApi: { downloadScriptImportTemplate: mocks.template, validateScriptReplacement: vi.fn() },
+  mmlApi: { downloadScriptImportTemplate: mocks.template, validateScriptReplacement: mocks.validateReplacement },
 }))
 
 import ScriptImportDialog from '../components/ScriptImportDialog'
@@ -35,6 +36,7 @@ describe('v2 ScriptImportDialog', () => {
     mocks.validate.mockResolvedValueOnce(validation({ summary: { totalLines: 1, validLines: 1, effectiveLines: 1, deviceCount: 1, errorCount: 0, warningCount: 1 }, issues: [{ code: 'MML_DEVICE_OFFLINE', severity: 'warning', lineNo: 1 }] }))
     mocks.create.mockResolvedValue({ id: 'script-1' })
     mocks.template.mockResolvedValue({ blob: new Blob(['template']), filename: 'MMLTemplate.txt' })
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test')
     const user = userEvent.setup()
     render(<ScriptImportDialog open onClose={vi.fn()} />)
 
@@ -42,6 +44,8 @@ describe('v2 ScriptImportDialog', () => {
     const input = screen.getByLabelText('选择 TXT')
     await user.upload(input, new File(['LST DEVICE_INFO;SN1'], 'script.txt', { type: 'text/plain' }))
     expect(mocks.validate).toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: '下载模板' }))
+    expect(mocks.template).toHaveBeenCalled()
     await user.type(screen.getByLabelText('脚本名称'), 'warning-script')
     expect(screen.queryByRole('textbox', { name: '脚本内容' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '确认保存' }))
@@ -57,5 +61,13 @@ describe('v2 ScriptImportDialog', () => {
     await user.upload(screen.getByLabelText('选择 TXT'), new File(['BAD'], 'bad.txt', { type: 'text/plain' }))
     expect(mocks.validate).toHaveBeenCalled()
     expect(screen.getByRole('button', { name: '确认保存' })).toBeDisabled()
+  })
+
+  it('uses replacement validation endpoint when re-importing an existing script', async () => {
+    mocks.validateReplacement.mockResolvedValue(validation({ originalFilename: 'replacement.txt' }))
+    const user = userEvent.setup()
+    render(<ScriptImportDialog open script={{ id: 'script-1', scriptName: 'old', description: '', updateTime: '2026-07-10T00:00:00Z' } as never} onClose={vi.fn()} />)
+    await user.upload(screen.getByLabelText('选择 TXT'), new File(['NEW'], 'replacement.txt', { type: 'text/plain' }))
+    await waitFor(() => expect(mocks.validateReplacement).toHaveBeenCalledWith('script-1', expect.any(File)))
   })
 })

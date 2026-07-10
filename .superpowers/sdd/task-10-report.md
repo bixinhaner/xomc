@@ -41,6 +41,8 @@ PASS
 
 The execution dialog now opens confirmation for warning-only rejected 409 responses, keeps mixed 422 error/warning responses in the error state, and normalizes periodic HTML date/time values to backend ISO/date-time formats.
 
+Additional focused coverage now verifies replacement endpoint selection, template download invocation, warning/error filter interactions, Escape close behavior, per-line execution issues, periodic date/time normalization, and scheduled datetime normalization. Latest focused run: 2 files / 7 tests passed; typecheck passed.
+
 ## Concerns
 
 - v2 has no shared Dialog primitive, so dialogs use the existing Tailwind modal shell.

@@ -49,4 +49,15 @@ describe('v2 ScriptExecutionDialog typed validation errors', () => {
     expect(mocks.execute.mock.lastCall?.[0].input.periodStart).toBe('2026-07-10T00:00:00')
     expect(mocks.execute.mock.lastCall?.[0].input.periodEnd).toBe('2026-07-11T23:59:59')
   })
+
+  it('normalizes scheduled datetime-local values to include seconds', async () => {
+    mocks.execute.mockResolvedValueOnce({ validation: validation([]) })
+    const user = userEvent.setup()
+    render(<ScriptExecutionDialog open script={script} onClose={vi.fn()} />)
+    await user.selectOptions(screen.getByLabelText('执行方式'), 'scheduled')
+    await user.type(screen.getByLabelText('执行时间'), '2026-07-10T08:30')
+    await user.click(screen.getByRole('button', { name: /执行/ }))
+    await waitFor(() => expect(mocks.execute).toHaveBeenCalled())
+    expect(mocks.execute.mock.lastCall?.[0].input.scheduledAt).toBe('2026-07-10T08:30:00')
+  })
 })
