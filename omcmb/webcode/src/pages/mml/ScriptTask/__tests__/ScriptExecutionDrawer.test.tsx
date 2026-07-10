@@ -94,4 +94,22 @@ describe('ScriptExecutionDrawer', () => {
     expect(await screen.findByText('请选择执行时间')).toBeInTheDocument();
     expect(mocks.execute).not.toHaveBeenCalled();
   });
+
+  it('does not confirm when typed validation contains both errors and warnings', async () => {
+    const mixedValidation = {
+      planItems: [],
+      summary: { totalLines: 2, validLines: 0, effectiveLines: 0, deviceCount: 1, errorCount: 1, warningCount: 1 },
+      issues: [
+        { code: 'MML_LINE_FORMAT_INVALID', severity: 'error' as const, lineNo: 1 },
+        { code: 'MML_DEVICE_OFFLINE', severity: 'warning' as const, lineNo: 2 },
+      ],
+    };
+    mocks.execute.mockRejectedValueOnce({ message: 'mixed validation', validation: mixedValidation });
+    render(<ScriptExecutionDrawer open script={script} onClose={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('任务名称'), 'mixed-task');
+    await user.click(screen.getByRole('button', { name: '执行' }));
+    expect((await screen.findAllByText(/MML_LINE_FORMAT_INVALID/)).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: '确认执行' })).not.toBeInTheDocument();
+  });
 });

@@ -59,7 +59,8 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
       if (errorValidation) {
         setValidation(errorValidation);
         setErrorCodes(errorValidation.issues.filter((issue) => issue.severity === 'error').map((issue) => issue.code));
-        if (errorValidation.summary.warningCount > 0 || errorValidation.issues.some((issue) => issue.severity === 'warning')) {
+        const hasValidationErrors = errorValidation.summary.errorCount > 0 || errorValidation.issues.some((issue) => issue.severity === 'error');
+        if (!hasValidationErrors && (errorValidation.summary.warningCount > 0 || errorValidation.issues.some((issue) => issue.severity === 'warning'))) {
           setWarningValues(input);
           return;
         }

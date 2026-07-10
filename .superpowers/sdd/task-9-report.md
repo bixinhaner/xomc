@@ -38,3 +38,9 @@ Follow-up verification:
 
 - `cd omcmb/webcode && npm run test -- --run src/pages/mml/ScriptTask/__tests__` — 4 files, 12 tests passed.
 - `cd omcmb/webcode && npm run typecheck` — TypeScript exited 0.
+
+Final mixed-validation guard:
+
+- Warning confirmation is now restricted to warning-only validation (`errorCount === 0` and no error-severity issue); mixed error/warning responses remain open with line issues and cannot retry.
+- Added mixed error/warning regression test.
+- Final verification: `cd omcmb/webcode && npm run test -- --run src/pages/mml/ScriptTask/__tests__` — 4 files, 13 tests passed; `cd omcmb/webcode && npm run typecheck` — TypeScript exited 0.
