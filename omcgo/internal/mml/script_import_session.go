@@ -152,11 +152,8 @@ if claim then
   return 5
 end
 local ttl = redis.call('PTTL', KEYS[1])
-if ttl > 0 then
-  redis.call('SET', KEYS[3], ARGV[2], 'PX', ttl)
-else
-  redis.call('SET', KEYS[3], ARGV[2])
-end
+if ttl <= 0 then return 3 end
+redis.call('SET', KEYS[3], ARGV[2], 'PX', ttl)
 return 1
 `)
 
