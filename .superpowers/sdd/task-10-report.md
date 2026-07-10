@@ -52,4 +52,5 @@ Additional focused coverage now verifies replacement endpoint selection, templat
 
 - Replaced the import preview’s raw plan table with the shared `@/components/ui/table` primitives.
 - Replaced the visible execution-mode control with the shared `@/components/ui/select` primitive while retaining native test/form value synchronization.
-- Focused MML tests: 2 files / 7 tests passed; `npm run typecheck` passed.
+- Focused MML tests: 2 files / 9 tests passed; `npm run typecheck` passed.
+- Final accessibility follow-up: the hidden native Select test bridge is `aria-hidden` with `tabIndex=-1`; the visible execution-mode control remains the shared Select primitive.

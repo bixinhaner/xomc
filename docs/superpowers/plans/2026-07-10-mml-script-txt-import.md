@@ -27,7 +27,7 @@
 
 **Current checkpoint:** Task 10 complete
 **Resume from:** Task 11, Step 1 — write v3 interaction failing tests
-**Last verified commit:** `ee8a7912 fix(frontend): guard mixed MML validation warnings`
+**Last verified commit:** `09cccf76 fix(frontend): hide native select bridge from a11y`
 
 - [x] Task 1 — 数据库契约与 Go 模型
 - [x] Task 2 — TXT Parser
@@ -75,7 +75,7 @@
 | Task 7 | `5ef20c71..1635d5f2` | 规格与质量复审通过；执行/调度 focused tests、MML 包与 cmd/app 测试、app build 通过，覆盖服务端 plan 快照、严格请求字段、动态 error/409 warning、device_bound、周期子任务快照复制、scheduler 预检失败落库、失败继续和 execute_type 白名单。 |
 | Task 8 | `a2e192fa..b3129773` | 规格与质量复审通过；API/Hook 聚焦测试 16 项和 `cd omcmb && npm run typecheck` 通过，覆盖 multipart、Blob 模板、metadata-only、execution 字段收口、422/409 类型化错误、嵌套 validation_summary/issues、详情缓存失效和中英文 i18n。 |
 | Task 9 | `50471f6c..ee8a7912` | 规格与质量复审通过；v1 ScriptTask focused tests 4 文件/13 项、typecheck 通过，覆盖 TXT 导入/重导入、只读预览、错误/警告过滤与报告、409 warning 确认、422/mixed error 保持 Drawer、定时/周期参数和无在线编辑器。ESLint 0 errors/93 warnings 记录为非阻塞清理项。 |
-| Task 10 | pending | v2 ScriptImportDialog/ScriptExecutionDialog 已实现；Vitest 交互测试 2 项通过，`npm run typecheck` 通过。覆盖 TXT 上传、模板下载、只读预览、错误过滤、警告确认、重新导入入口、执行方式、周期与重试字段；422/409 typed API errors 展示为通知并保留校验状态。 |
+| Task 10 | `510cb99b..09cccf76` | 规格与质量复审通过；v2 focused tests 2 文件/9 项、typecheck 通过，覆盖 TXT 上传/重导入、模板下载、只读预览、severity/计划行过滤、错误报告、Escape、409 warning 确认、422/mixed error、执行 issues、scheduled/periodic 时间归一化和 Table/Select primitives。 |
 
 ---
 
