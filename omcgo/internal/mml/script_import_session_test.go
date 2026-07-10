@@ -58,15 +58,58 @@ func TestRedisImportSessionStore_PutUsesRandomTokenHashedRedisKeyAndTTL(t *testi
 	require.Equal(t, validImportSession().Validation.PlanItems, session.Validation.PlanItems)
 }
 
+func TestRedisImportSessionStore_ClaimAndReleasePreserveEmptyJSONArrays(t *testing.T) {
+	ctx := context.Background()
+	store, mr := newRedisImportSessionStore(t, 15*time.Minute)
+	session := validImportSession()
+	session.Validation.PlanItems = make([]MMLPlanItem, 0)
+	session.Validation.Issues = make([]ScriptIssue, 0)
+
+	token, err := store.Put(ctx, "alice", session)
+	require.NoError(t, err)
+
+	digest := sha256.Sum256([]byte(token))
+	activeKey := redisx.Keys.MMLScriptImportSession(hex.EncodeToString(digest[:]))
+	rawBefore, err := mr.Get(activeKey)
+	require.NoError(t, err)
+	require.Contains(t, rawBefore, `"plan_items":[]`)
+	require.Contains(t, rawBefore, `"issues":[]`)
+
+	claimed, err := store.Claim(ctx, token, "alice", "request-1")
+	require.NoError(t, err)
+	require.NotNil(t, claimed.Validation.PlanItems)
+	require.Empty(t, claimed.Validation.PlanItems)
+	require.NotNil(t, claimed.Validation.Issues)
+	require.Empty(t, claimed.Validation.Issues)
+
+	rawAfterClaim, err := mr.Get(activeKey)
+	require.NoError(t, err)
+	require.Equal(t, rawBefore, rawAfterClaim)
+
+	require.NoError(t, store.Release(ctx, token, "alice", "request-1"))
+	released, err := store.Get(ctx, token, "alice")
+	require.NoError(t, err)
+	require.NotNil(t, released.Validation.PlanItems)
+	require.Empty(t, released.Validation.PlanItems)
+	require.NotNil(t, released.Validation.Issues)
+	require.Empty(t, released.Validation.Issues)
+	rawAfterRelease, err := mr.Get(activeKey)
+	require.NoError(t, err)
+	require.Equal(t, rawBefore, rawAfterRelease)
+}
+
 func TestRedisImportSessionStore_ActiveAndConsumedKeysShareRedisClusterHashTag(t *testing.T) {
 	digest := strings.Repeat("a", 64)
 	activeKey := redisx.Keys.MMLScriptImportSession(digest)
 	consumedKey := redisx.Keys.MMLScriptImportConsumed(digest)
+	claimKey := redisx.Keys.MMLScriptImportClaim(digest)
 
 	require.Equal(t, digest, redisClusterHashTag(activeKey))
 	require.Equal(t, redisClusterHashTag(activeKey), redisClusterHashTag(consumedKey))
+	require.Equal(t, redisClusterHashTag(activeKey), redisClusterHashTag(claimKey))
 	require.NotContains(t, activeKey, "raw-token")
 	require.NotContains(t, consumedKey, "raw-token")
+	require.NotContains(t, claimKey, "raw-token")
 }
 
 func redisClusterHashTag(key string) string {
@@ -163,7 +206,10 @@ func TestRedisImportSessionStore_ConcurrentClaimAllowsExactlyOneRequest(t *testi
 func TestRedisImportSessionStore_FinalizeCreatesConsumedTombstoneWithTTL(t *testing.T) {
 	ctx := context.Background()
 	store, mr := newRedisImportSessionStore(t, 15*time.Minute)
-	token, err := store.Put(ctx, "alice", validImportSession())
+	session := validImportSession()
+	session.Validation.PlanItems = make([]MMLPlanItem, 0)
+	session.Validation.Issues = make([]ScriptIssue, 0)
+	token, err := store.Put(ctx, "alice", session)
 	require.NoError(t, err)
 	_, err = store.Claim(ctx, token, "alice", "request-1")
 	require.NoError(t, err)
@@ -175,4 +221,10 @@ func TestRedisImportSessionStore_FinalizeCreatesConsumedTombstoneWithTTL(t *test
 	require.Equal(t, 15*time.Minute, mr.TTL(tombstoneKey))
 	_, err = store.Get(ctx, token, "alice")
 	require.ErrorIs(t, err, ErrImportTokenConsumed)
+	consumed, err := store.GetConsumed(ctx, token, "alice")
+	require.NoError(t, err)
+	require.NotNil(t, consumed.Validation.PlanItems)
+	require.Empty(t, consumed.Validation.PlanItems)
+	require.NotNil(t, consumed.Validation.Issues)
+	require.Empty(t, consumed.Validation.Issues)
 }

@@ -60,8 +60,11 @@ type ConsumedImportSessionReader interface {
 }
 
 type storedImportSession struct {
-	Username       string        `json:"username"`
-	ClaimRequestID string        `json:"claim_request_id"`
+	Username string `json:"username"`
+	// ClaimRequestID is retained for decoding records written by older builds.
+	// New claim state lives in the dedicated Redis claim key so this immutable
+	// JSON payload is never re-encoded by Lua.
+	ClaimRequestID string        `json:"claim_request_id,omitempty"`
 	Session        ImportSession `json:"session"`
 }
 
@@ -133,21 +136,27 @@ func (s *RedisImportSessionStore) Get(ctx context.Context, token, username strin
 }
 
 // claimImportSessionScript atomically binds a previously-unclaimed session to a
-// save request. Return values: 1=claimed, 2=consumed, 3=expired, 4=wrong owner,
-// 5=claimed by another request. The original TTL is preserved on mutation.
+// save request. The session JSON is immutable: only a dedicated claim key is
+// written, avoiding cjson's loss of empty-array shape during round trips.
+// Return values: 1=claimed, 2=consumed, 3=expired, 4=wrong owner,
+// 5=claimed by another request.
 var claimImportSessionScript = redis.NewScript(`
 if redis.call('EXISTS', KEYS[2]) == 1 then return 2 end
 local raw = redis.call('GET', KEYS[1])
 if not raw then return 3 end
 local record = cjson.decode(raw)
 if record.username ~= ARGV[1] then return 4 end
-if record.claim_request_id and record.claim_request_id ~= '' then
-  if record.claim_request_id == ARGV[2] then return 1 end
+local claim = redis.call('GET', KEYS[3])
+if claim then
+  if claim == ARGV[2] then return 1 end
   return 5
 end
-record.claim_request_id = ARGV[2]
 local ttl = redis.call('PTTL', KEYS[1])
-redis.call('SET', KEYS[1], cjson.encode(record), 'PX', ttl)
+if ttl > 0 then
+  redis.call('SET', KEYS[3], ARGV[2], 'PX', ttl)
+else
+  redis.call('SET', KEYS[3], ARGV[2])
+end
 return 1
 `)
 
@@ -157,7 +166,7 @@ func (s *RedisImportSessionStore) Claim(ctx context.Context, token, username, re
 	if err := s.ensureRequest("claim", username, requestID); err != nil {
 		return nil, err
 	}
-	result, err := claimImportSessionScript.Run(ctx, s.rdb, []string{s.sessionKey(token), s.consumedKey(token)}, username, requestID).Int64()
+	result, err := claimImportSessionScript.Run(ctx, s.rdb, []string{s.sessionKey(token), s.consumedKey(token), s.claimKey(token)}, username, requestID).Int64()
 	if err != nil {
 		return nil, fmt.Errorf("claim import session: %w", err)
 	}
@@ -178,10 +187,9 @@ local raw = redis.call('GET', KEYS[1])
 if not raw then return 3 end
 local record = cjson.decode(raw)
 if record.username ~= ARGV[1] then return 4 end
-if record.claim_request_id ~= ARGV[2] then return 5 end
-record.claim_request_id = ''
-local ttl = redis.call('PTTL', KEYS[1])
-redis.call('SET', KEYS[1], cjson.encode(record), 'PX', ttl)
+local claim = redis.call('GET', KEYS[3])
+if claim ~= ARGV[2] then return 5 end
+redis.call('DEL', KEYS[3])
 return 1
 `)
 
@@ -190,7 +198,7 @@ func (s *RedisImportSessionStore) Release(ctx context.Context, token, username, 
 	if err := s.ensureRequest("release", username, requestID); err != nil {
 		return err
 	}
-	result, err := releaseImportSessionScript.Run(ctx, s.rdb, []string{s.sessionKey(token), s.consumedKey(token)}, username, requestID).Int64()
+	result, err := releaseImportSessionScript.Run(ctx, s.rdb, []string{s.sessionKey(token), s.consumedKey(token), s.claimKey(token)}, username, requestID).Int64()
 	if err != nil {
 		return fmt.Errorf("release import session: %w", err)
 	}
@@ -205,8 +213,10 @@ local raw = redis.call('GET', KEYS[1])
 if not raw then return 3 end
 local record = cjson.decode(raw)
 if record.username ~= ARGV[1] then return 4 end
-if record.claim_request_id ~= ARGV[2] then return 5 end
+local claim = redis.call('GET', KEYS[3])
+if claim ~= ARGV[2] then return 5 end
 redis.call('DEL', KEYS[1])
+redis.call('DEL', KEYS[3])
 redis.call('SET', KEYS[2], raw, 'EX', ARGV[3])
 return 1
 `)
@@ -217,7 +227,7 @@ func (s *RedisImportSessionStore) Finalize(ctx context.Context, token, username,
 	if err := s.ensureRequest("finalize", username, requestID); err != nil {
 		return err
 	}
-	result, err := finalizeImportSessionScript.Run(ctx, s.rdb, []string{s.sessionKey(token), s.consumedKey(token)}, username, requestID, int64(s.ttl.Seconds())).Int64()
+	result, err := finalizeImportSessionScript.Run(ctx, s.rdb, []string{s.sessionKey(token), s.consumedKey(token), s.claimKey(token)}, username, requestID, int64(s.ttl.Seconds())).Int64()
 	if err != nil {
 		return fmt.Errorf("finalize import session: %w", err)
 	}
@@ -294,6 +304,10 @@ func (s *RedisImportSessionStore) sessionKey(token string) string {
 
 func (s *RedisImportSessionStore) consumedKey(token string) string {
 	return redisx.Keys.MMLScriptImportConsumed(importTokenSHA256(token))
+}
+
+func (s *RedisImportSessionStore) claimKey(token string) string {
+	return redisx.Keys.MMLScriptImportClaim(importTokenSHA256(token))
 }
 
 func importTokenSHA256(token string) string {

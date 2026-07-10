@@ -250,6 +250,14 @@ func (KeyBuilder) MMLScriptImportConsumed(tokenSHA256 string) string {
 	return fmt.Sprintf("%s{%s}:consumed", mmlScriptImportPrefix, tokenSHA256)
 }
 
+// MMLScriptImportClaim stores the short-lived claim owner separately from the
+// immutable validation-session JSON. It uses the same hash tag as the session
+// and consumed keys so Lua claim/release/finalize operations remain atomic in
+// Redis Cluster.
+func (KeyBuilder) MMLScriptImportClaim(tokenSHA256 string) string {
+	return fmt.Sprintf("%s{%s}:claim", mmlScriptImportPrefix, tokenSHA256)
+}
+
 // ===== Admin: 认证 / 暴力破解 / 权限 / Casbin =====
 
 // AuthCaptcha 验证码 Hash。
