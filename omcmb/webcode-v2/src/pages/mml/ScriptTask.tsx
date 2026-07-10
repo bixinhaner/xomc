@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Loader2, Play, RefreshCcw, Search, ScrollText, X } from 'lucide-react'
+import { Play, RefreshCcw, Search, ScrollText, X } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -22,16 +22,10 @@ import {
   formatTime,
 } from '@/components/layout/PageShell'
 
-import { useCreateMMLTask, useMMLScriptById, useMMLScripts } from '@core/hooks/api/useMML'
+import { useMMLScriptById, useMMLScripts } from '@core/hooks/api/useMML'
 import type { MMLScript, MMLScriptStatus } from '@core/types/mml'
-import { parseMmlScriptPlan } from '@core/utils/mmlScriptPlanParser'
-import {
-  MML_MAX_TASK_DEVICES,
-  MML_PREVIEW_PAGE_SIZE,
-  MML_PREVIEW_PAGE_SIZE_OPTIONS,
-  paginateMmlPreview,
-  validateMmlTaskScale,
-} from '@core/utils/mmlTaskScale'
+import ScriptExecutionDialog from './components/ScriptExecutionDialog'
+import ScriptImportDialog from './components/ScriptImportDialog'
 
 // ============================================================
 // MML 脚本库 — mml_scripts 批量脚本（对齐 v1 mml/ScriptTask，参照 v3 mml/script）
@@ -64,6 +58,7 @@ export default function ScriptTask() {
   const [search, setSearch] = useState('')
   const [viewing, setViewing] = useState<MMLScript | null>(null)
   const [executing, setExecuting] = useState<MMLScript | null>(null)
+  const [importing, setImporting] = useState<MMLScript | null>(null)
 
   const params = useMemo(
     () => ({
@@ -101,6 +96,7 @@ export default function ScriptTask() {
       isFetching={isFetching}
       toolbar={
         <>
+          <Button variant="default" size="sm" onClick={() => setImporting({} as MMLScript)}>导入 TXT</Button>
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -230,169 +226,11 @@ export default function ScriptTask() {
       />
 
       {viewing ? (
-        <ScriptDetailDrawer script={viewing} onClose={() => setViewing(null)} />
+        <ScriptDetailDrawer script={viewing} onClose={() => setViewing(null)} onReimport={() => setImporting(viewing)} />
       ) : null}
-      {executing ? (
-        <ScriptExecuteDialog script={executing} onClose={() => setExecuting(null)} />
-      ) : null}
+      {executing ? <ScriptExecutionDialog open script={executing} onClose={() => setExecuting(null)} /> : null}
+      <ScriptImportDialog open={Boolean(importing)} script={importing?.id ? importing : null} onClose={() => setImporting(null)} />
     </PageShell>
-  )
-}
-
-function ScriptExecuteDialog({
-  script,
-  onClose,
-}: {
-  script: MMLScript
-  onClose: () => void
-}) {
-  const { data, isFetching } = useMMLScriptById(script.id)
-  const detailScript = data ?? script
-  const [taskName, setTaskName] = useState(`执行脚本: ${script.scriptName}`)
-  const [deviceInput, setDeviceInput] = useState('')
-  const [error, setError] = useState('')
-  const [previewPage, setPreviewPage] = useState(1)
-  const [previewPageSize, setPreviewPageSize] = useState(MML_PREVIEW_PAGE_SIZE)
-  const createTask = useCreateMMLTask()
-  const parsed = useMemo(
-    () => parseMmlScriptPlan(detailScript.content ?? '', { format: 'auto' }),
-    [detailScript.content]
-  )
-  const isDeviceBound = parsed.executeMode === 'device_bound'
-  const enteredDeviceSns = useMemo(() => parseDeviceInput(deviceInput), [deviceInput])
-  const planPreview = useMemo(
-    () => paginateMmlPreview(parsed.planItems, previewPage, previewPageSize),
-    [parsed.planItems, previewPage, previewPageSize]
-  )
-  const devicePreview = useMemo(
-    () => paginateMmlPreview(enteredDeviceSns, previewPage, previewPageSize),
-    [enteredDeviceSns, previewPage, previewPageSize]
-  )
-
-  const submit = async () => {
-    setError('')
-    const deviceSns = isDeviceBound ? parsed.deviceSns : enteredDeviceSns
-    if (!isDeviceBound && deviceSns.length === 0) {
-      setError('请输入设备 SN')
-      return
-    }
-    if (parsed.commands.length === 0) {
-      setError('脚本内容为空')
-      return
-    }
-    const scaleIssue = validateMmlTaskScale(
-      deviceSns,
-      isDeviceBound ? parsed.planItems.length : parsed.commands.length
-    )
-    if (scaleIssue) {
-      setError(scaleIssue.kind === 'devices'
-        ? `设备数量 ${scaleIssue.current} 超过单任务上限 ${scaleIssue.max} 台。`
-        : `命令行数 ${scaleIssue.current} 超过单任务上限 ${scaleIssue.max} 行。`)
-      return
-    }
-    await createTask.mutateAsync({
-      taskName: taskName.trim() || `执行脚本: ${detailScript.scriptName}`,
-      scriptId: detailScript.id,
-      deviceSns,
-      commands: parsed.commands,
-      executeMode: parsed.executeMode,
-      planItems: isDeviceBound ? parsed.planItems : undefined,
-      creator: '',
-      executeType: 'immediate',
-      offlineRetry: false,
-      offlineRetryWait: 60,
-      failedRetry: false,
-      failedRetryCount: 3,
-      failedRetryInterval: 5,
-    })
-    onClose()
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden />
-      <div className="relative flex max-h-[86vh] w-[min(720px,calc(100vw-32px))] flex-col overflow-hidden rounded border bg-background shadow-xl">
-        <div className="flex items-center justify-between border-b px-4 py-3">
-          <div className="min-w-0">
-            <div className="truncate text-base font-semibold">执行脚本</div>
-            <div className="truncate text-xs text-muted-foreground">{detailScript.scriptName}</div>
-          </div>
-          <Button variant="ghost" size="icon" onClick={onClose} aria-label="关闭">
-            <X />
-          </Button>
-        </div>
-        <div className="min-h-0 flex-1 space-y-3 overflow-auto px-4 py-3">
-          <Field label="任务名" value={<Input value={taskName} onChange={(e) => setTaskName(e.target.value)} />} />
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="rounded border bg-muted/30 px-3 py-2.5">
-              <div className="text-[11px] text-muted-foreground">脚本执行方式</div>
-              <div className="mt-1 text-sm font-semibold">
-                {isDeviceBound ? '按设备编排执行' : '统一脚本批量执行'}
-              </div>
-              <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                {isDeviceBound
-                  ? '每行命令绑定设备 SN；同一设备按脚本从上到下执行。'
-                  : '选择多台设备，每台设备执行同一套脚本。'}
-              </div>
-            </div>
-            <MiniStat label="解析结果" value={isDeviceBound ? `${parsed.planItems.length} 行 / ${parsed.deviceSns.length} 台` : `${parsed.commands.length} 条命令`} />
-          </div>
-          {!isDeviceBound ? (
-            <div className="space-y-2">
-              <Field
-                label="设备 SN"
-                value={
-                <Input
-                  value={deviceInput}
-                  placeholder="逗号、空格或换行分隔"
-                  onChange={(e) => {
-                    setDeviceInput(e.target.value)
-                    setPreviewPage(1)
-                  }}
-                />
-                }
-              />
-              {enteredDeviceSns.length > 0 ? (
-                <div className="rounded border bg-muted/30">
-                  <div className="border-b px-3 py-2 text-xs font-medium text-muted-foreground">
-                    已选 {enteredDeviceSns.length}/{MML_MAX_TASK_DEVICES} 台设备
-                  </div>
-                  <div className="grid max-h-44 grid-cols-1 gap-px overflow-auto bg-border sm:grid-cols-2">
-                    {devicePreview.items.map((sn) => (
-                      <div key={sn} className="truncate bg-background px-3 py-1.5 font-mono text-xs">{sn}</div>
-                    ))}
-                  </div>
-                  <PreviewPager pageData={devicePreview} pageSize={previewPageSize} onPage={setPreviewPage} onPageSize={(size) => { setPreviewPageSize(size); setPreviewPage(1) }} unit="台" />
-                </div>
-              ) : null}
-            </div>
-          ) : (
-            <div className="rounded border bg-muted/30">
-              <div className="border-b px-3 py-2 text-xs font-medium text-muted-foreground">计划行预览</div>
-              <div className="max-h-56 overflow-auto">
-                {planPreview.items.map((item) => (
-                  <div key={`${item.lineNo}-${item.deviceSn}-${item.order}`} className="grid grid-cols-[72px_150px_1fr] gap-2 border-b px-3 py-1.5 text-xs last:border-b-0">
-                    <span className="font-mono">#{item.lineNo}/{item.order}</span>
-                    <span className="truncate font-mono">{item.deviceSn}</span>
-                    <span className="truncate">{item.command.commandCode}</span>
-                  </div>
-                ))}
-              </div>
-              <PreviewPager pageData={planPreview} pageSize={previewPageSize} onPage={setPreviewPage} onPageSize={(size) => { setPreviewPageSize(size); setPreviewPage(1) }} />
-            </div>
-          )}
-          {error ? <div className="text-sm text-destructive">{error}</div> : null}
-          {isFetching ? <div className="text-xs text-muted-foreground">加载脚本内容中...</div> : null}
-        </div>
-        <div className="flex justify-end gap-2 border-t px-4 py-3">
-          <Button variant="outline" onClick={onClose}>取消</Button>
-          <Button onClick={() => void submit()} disabled={createTask.isPending}>
-            {createTask.isPending ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
-            执行
-          </Button>
-        </div>
-      </div>
-    </div>
   )
 }
 
@@ -403,9 +241,11 @@ function ScriptExecuteDialog({
 function ScriptDetailDrawer({
   script,
   onClose,
+  onReimport,
 }: {
   script: MMLScript
   onClose: () => void
+  onReimport?: () => void
 }) {
   const { data, isFetching } = useMMLScriptById(script.id)
   const detailScript = data ?? script
@@ -474,48 +314,8 @@ function ScriptDetailDrawer({
             </div>
           )}
         </div>
+        {onReimport ? <div className="border-t px-4 py-3"><Button variant="outline" size="sm" onClick={onReimport}>重新导入 TXT</Button></div> : null}
       </div>
-    </div>
-  )
-}
-
-function parseDeviceInput(value: string): string[] {
-  return Array.from(new Set(value.split(/[,\s;]+/).map((v) => v.trim()).filter(Boolean)))
-}
-
-function PreviewPager({
-  pageData,
-  pageSize,
-  onPage,
-  onPageSize,
-  unit = '条',
-}: {
-  pageData: { page: number; pageCount: number; start: number; end: number; total: number }
-  pageSize: number
-  onPage: (page: number) => void
-  onPageSize: (pageSize: number) => void
-  unit?: string
-}) {
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2 text-xs text-muted-foreground">
-      <span>第 {pageData.start}–{pageData.end} {unit}，共 {pageData.total} {unit}</span>
-      <div className="flex items-center gap-2">
-        <select className="h-7 rounded border bg-background px-1" value={pageSize} onChange={(event) => onPageSize(Number(event.target.value))}>
-          {MML_PREVIEW_PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size} {unit}/页</option>)}
-        </select>
-        <Button variant="outline" size="sm" className="h-7 px-2" disabled={pageData.page <= 1} onClick={() => onPage(pageData.page - 1)}>上一页</Button>
-        <span>{pageData.page}/{pageData.pageCount}</span>
-        <Button variant="outline" size="sm" className="h-7 px-2" disabled={pageData.page >= pageData.pageCount} onClick={() => onPage(pageData.page + 1)}>下一页</Button>
-      </div>
-    </div>
-  )
-}
-
-function MiniStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded border bg-muted/30 px-3 py-2">
-      <div className="text-xs uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="mt-0.5 truncate text-sm font-medium">{value}</div>
     </div>
   )
 }
