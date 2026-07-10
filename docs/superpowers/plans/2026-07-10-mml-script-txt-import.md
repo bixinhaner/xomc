@@ -27,7 +27,7 @@
 
 **Current checkpoint:** Task 1 complete
 **Resume from:** Task 2, Step 1 — write parser failing tests
-**Last verified commit:** `d44bacf5 docs(mml): 设计 TXT 导入式脚本库`
+**Last verified commit:** `52909cb9 fix(mml): 保护旧脚本导入会话`
 
 - [x] Task 1 — 数据库契约与 Go 模型
 - [ ] Task 2 — TXT Parser
@@ -66,7 +66,7 @@
 | Task | Commit | Verification |
 |---|---|---|
 | Design | `d44bacf5` | 设计已确认，实施计划从 Task 1 开始 |
-| Task 1 | this commit | `bash omcgo/scripts/check-migrations.sh --strict`; `cd omcgo && go test ./internal/mml -run 'TestPgScriptRepository|TestPgTaskRepository' -count=1`; `cd omcgo && go test ./internal/mml -count=1` |
+| Task 1 | `e3f605e0..52909cb9` | 规格与质量复审通过；migration strict、PG 契约测试和 `go test ./internal/mml -count=1` 通过 |
 
 ---
 
