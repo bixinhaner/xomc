@@ -209,6 +209,18 @@ func TestScriptImportService_DoesNotConsumeTokenWhenRepositoryFails(t *testing.T
 	require.Equal(t, 0, sessions.finalizeCalls)
 }
 
+func TestScriptImportService_CreateFailureDoesNotReturnAnotherUsersScript(t *testing.T) {
+	sessions := &fakeImportSessions{session: importedServiceSession()}
+	repo := newFakeImportedScriptRepo()
+	other := scriptFromImportSession(sessions.session, "bob", "other", "", nil)
+	require.NoError(t, repo.CreateImported(context.Background(), other))
+	repo.createErr = errors.New("duplicate import session")
+	svc := NewScriptImportService(repo, &fakeImportValidator{}, sessions, zap.NewNop())
+	_, err := svc.CreateScriptFromImport(context.Background(), "alice", SaveImportedScriptRequest{ValidationToken: "token", ScriptName: "巡检"})
+	require.ErrorIs(t, err, commonerrors.ErrForbidden)
+	require.Equal(t, 0, sessions.finalizeCalls)
+}
+
 func TestScriptImportService_RejectsValidationErrorsAndMissingName(t *testing.T) {
 	session := importedServiceSession()
 	session.Validation.Issues = []ScriptIssue{{Code: "MML_COMMAND_NOT_FOUND", Severity: IssueError}}

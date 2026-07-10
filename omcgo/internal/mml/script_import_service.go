@@ -151,6 +151,10 @@ func (s *ScriptImportService) CreateScriptFromImport(ctx context.Context, userna
 	script := scriptFromImportSession(session, username, req.ScriptName, req.Description, req.Tags)
 	if err := s.repo.CreateImported(ctx, script); err != nil {
 		if existing, lookupErr := s.repo.GetByImportSessionID(ctx, session.ID); lookupErr == nil {
+			if existing.Creator != username {
+				_ = s.sessions.Release(ctx, req.ValidationToken, username, requestID)
+				return nil, commonerrors.ErrForbidden
+			}
 			if finalizeErr := s.sessions.Finalize(ctx, req.ValidationToken, username, requestID); finalizeErr != nil {
 				return nil, fmt.Errorf("finalize replayed script import: %w", finalizeErr)
 			}
