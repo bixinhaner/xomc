@@ -13,3 +13,4 @@ Task 1: complete (commits e3f605e0..52909cb9, spec and quality review clean afte
 Task 2: complete (commits 43edbfa8..82e2c21c, final spec and quality review clean after two boundary fixes).
 Task 3: complete (commits d8885bbe..2b634644, final spec and quality review clean after validator-authority fixes).
 Task 4: complete (commits adc3bf6e..4ce47694, final spec and quality review clean after Redis Cluster slot fix).
+Task 5: in progress (transactional import service; resume at Step 1, write failing tests).

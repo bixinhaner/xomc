@@ -25,7 +25,7 @@
 
 ## Progress Ledger
 
-**Current checkpoint:** Task 4 complete
+**Current checkpoint:** Task 5 in progress
 **Resume from:** Task 5, Step 1 — write transactional import-service failing tests
 **Last verified commit:** `4ce47694 fix(mml): 统一导入会话 Redis 集群槽位`
 
