@@ -295,8 +295,18 @@ function ScriptExecuteDialog({
         </div>
         <div className="min-h-0 flex-1 space-y-3 overflow-auto px-4 py-3">
           <Field label="任务名" value={<Input value={taskName} onChange={(e) => setTaskName(e.target.value)} />} />
-          <div className="grid grid-cols-2 gap-3">
-            <MiniStat label="执行模式" value={isDeviceBound ? '按设备计划行' : '普通模式'} />
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="rounded border bg-muted/30 px-3 py-2.5">
+              <div className="text-[11px] text-muted-foreground">脚本执行方式</div>
+              <div className="mt-1 text-sm font-semibold">
+                {isDeviceBound ? '按设备编排执行' : '统一脚本批量执行'}
+              </div>
+              <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                {isDeviceBound
+                  ? '每行命令绑定设备 SN；同一设备按脚本从上到下执行。'
+                  : '选择多台设备，每台设备执行同一套脚本。'}
+              </div>
+            </div>
             <MiniStat label="解析结果" value={isDeviceBound ? `${parsed.planItems.length} 行 / ${parsed.deviceSns.length} 台` : `${parsed.commands.length} 条命令`} />
           </div>
           {!isDeviceBound ? (

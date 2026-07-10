@@ -323,19 +323,25 @@ function ScriptPlanPreview({
       <div className="flex items-center justify-between border-b border-cyan-500/15 px-3 py-2">
         <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-300/55">解析预览</span>
         <span className="font-mono text-[10px] text-cyan-100/80">
-          {isDeviceBound ? '按设备编排' : '公共脚本'}
+          {isDeviceBound ? '按设备编排执行' : '统一脚本批量执行'}
         </span>
       </div>
-      <div className="grid grid-cols-2 gap-2 px-3 py-2">
-        <MiniStat label="MODE" value={isDeviceBound ? 'DEVICE-BOUND' : 'COMMON'} />
+      <div className="border-b border-cyan-500/15 px-3 py-2">
+        <div className="font-mono text-[11px] leading-5 text-cyan-100/65">
+          {isDeviceBound
+            ? '每行命令绑定设备 SN；同一设备按脚本从上到下执行。'
+            : '选择多台设备，每台设备执行同一套脚本。'}
+        </div>
+      </div>
+      <div className="px-3 py-2">
         <MiniStat
-          label="PLAN"
+          label="解析结果"
           value={isDeviceBound ? `${planItems.length} ROWS / ${deviceCount} DEVICES` : `${commandCount} COMMANDS`}
         />
       </div>
       {warnings.length > 0 ? (
         <div className="px-3 pb-2 font-mono text-[11px] text-amber-200">
-          已同时检测到带 SN 和不带 SN 的脚本行；执行时将按设备计划行处理。
+          已同时检测到带 SN 和不带 SN 的脚本行；执行时将按“按设备编排执行”处理。
         </div>
       ) : null}
       {isDeviceBound ? (
@@ -514,8 +520,18 @@ function ScriptExecuteDialog({ script, onClose }: { script: MMLScript; onClose: 
             <span className="mb-1 block font-mono text-[9px] uppercase tracking-[0.18em] text-cyan-300/55">任务名</span>
             <input className="neon-input w-full" value={taskName} onChange={(e) => setTaskName(e.target.value)} />
           </label>
-          <div className="grid grid-cols-2 gap-3">
-            <MiniStat label="MODE" value={isDeviceBound ? 'DEVICE-BOUND' : 'COMMON'} />
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="border border-cyan-500/20 bg-cyan-500/5 px-3 py-2.5">
+              <div className="font-mono text-[9px] uppercase tracking-[0.18em] text-cyan-300/55">脚本执行方式</div>
+              <div className="mt-1 font-display text-sm font-bold text-cyan-100">
+                {isDeviceBound ? '按设备编排执行' : '统一脚本批量执行'}
+              </div>
+              <div className="mt-1 font-mono text-[11px] leading-5 text-cyan-100/60">
+                {isDeviceBound
+                  ? '每行命令绑定设备 SN；同一设备按脚本从上到下执行。'
+                  : '选择多台设备，每台设备执行同一套脚本。'}
+              </div>
+            </div>
             <MiniStat
               label="PLAN"
               value={isDeviceBound ? `${parsed.planItems.length} ROWS / ${parsed.deviceSns.length} DEVICES` : `${parsed.commands.length} COMMANDS`}
