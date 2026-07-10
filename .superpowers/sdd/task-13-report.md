@@ -89,7 +89,7 @@ bash omcgo/scripts/check-migrations.sh --strict # exit 0（同上既有告警）
 
 - 三皮肤真实浏览器 `/mml/script` 验收（URL、脚本/任务 ID、网络响应和截图）：当前只重建并替换
   app，web 镜像构建在 npm ci 阶段受限，未伪造浏览器证据。
-- `omcctl mml reset-script-data --dry-run`：已执行，输出 `matched=0 deleted=0 skipped=41 errors=0`；
+- `omcctl mml reset-script-data --dry-run`：已执行，输出 `matched=0 deleted=0 skipped=8 errors=0`；
   按安全边界未执行有写操作的 `--apply --confirm DELETE-MML-RUNTIME`，非 MML 切换前后数量未做破坏性演练。
 
 ## 当前进度
