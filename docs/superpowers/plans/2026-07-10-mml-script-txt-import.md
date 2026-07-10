@@ -25,8 +25,8 @@
 
 ## Progress Ledger
 
-**Current checkpoint:** Task 1 not started
-**Resume from:** Task 1, Step 1
+**Current checkpoint:** Task 1 in progress
+**Resume from:** Task 1, Step 1 — fetch latest main and lock the migration number
 **Last verified commit:** `d44bacf5 docs(mml): 设计 TXT 导入式脚本库`
 
 - [ ] Task 1 — 数据库契约与 Go 模型
