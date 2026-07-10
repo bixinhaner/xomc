@@ -27,7 +27,7 @@
 
 **Current checkpoint:** Task 3 complete
 **Resume from:** Task 4, Step 1 — write Redis validation-session failing tests
-**Last verified commit:** `82e2c21c fix(mml): 修正 TXT 末尾换行计数`
+**Last verified commit:** `2b634644 fix(mml): 强化 TXT 脚本校验权威性`
 
 - [x] Task 1 — 数据库契约与 Go 模型
 - [x] Task 2 — TXT Parser
@@ -68,7 +68,7 @@
 | Design | `d44bacf5` | 设计已确认，实施计划从 Task 1 开始 |
 | Task 1 | `e3f605e0..52909cb9` | 规格与质量复审通过；migration strict、PG 契约测试和 `go test ./internal/mml -count=1` 通过 |
 | Task 2 | `43edbfa8..82e2c21c` | 规格与质量最终复审通过；聚焦 parser、MML 全包测试和 package build 通过，覆盖 BOM/CR/LF、终止换行 SHA、逐设备顺序、引号/大括号分隔符、200/2000 边界与有界错误累积。 |
-| Task 3 | pending commit | RED：新增 validator 测试因 `ValidationCommand`、`ValidationActor`、`NewScriptImportValidator` 未定义而编译失败；GREEN：`go test ./internal/mml -run 'TestScriptImportValidator|TestPgScriptValidationRepository' -count=1 -v`、`go test ./internal/mml -count=1` 与 `go build ./internal/mml` 通过。覆盖标准/当前用户可见自定义命令的批量加载、参数约束、设备存在/离线、危险确认、计划项编译和 2,000 行/200 SN 单次批量加载。 |
+| Task 3 | `d8885bbe..2b634644` | 规格与质量复审通过；批量 validator/PG 测试、MML package/build 和全量 Go 测试通过，覆盖 unsignedInt、boolean、可见自定义命令歧义与操作类型不匹配。 |
 
 ---
 
