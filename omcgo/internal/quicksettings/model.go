@@ -39,19 +39,20 @@ type Group struct {
 // Type/Required/Min/Max/Hint/Readonly/EnumOptions/CheckboxOptions 为可选 UI 元数据,供 form/subtable
 // 渲染器决定输入控件类型与校验规则;table 风格不使用这些字段(由 schema 推断)。
 type Param struct {
-	Name             string       `json:"name"`
-	TitleZh          string       `json:"titleZh"`
-	TitleEn          string       `json:"titleEn"`
-	StandardPath     string       `json:"standardPath,omitempty"`
-	Leaf             string       `json:"leaf,omitempty"`
-	Type             string       `json:"type,omitempty"` // string/int/enum/multiCheckbox
-	Required         bool         `json:"required,omitempty"`
-	Readonly         bool         `json:"readonly,omitempty"`
-	Hint             string       `json:"hint,omitempty"`
-	MinValue         *int64       `json:"minValue,omitempty"`
-	MaxValue         *int64       `json:"maxValue,omitempty"`
-	EnumOptions      []EnumOption `json:"enumOptions,omitempty"`
-	CheckboxOptions  []string     `json:"checkboxOptions,omitempty"`
+	Name            string       `json:"name"`
+	TitleZh         string       `json:"titleZh"`
+	TitleEn         string       `json:"titleEn"`
+	StandardPath    string       `json:"standardPath,omitempty"`
+	Leaf            string       `json:"leaf,omitempty"`
+	Type            string       `json:"type,omitempty"` // string/int/enum/multiCheckbox
+	Required        bool         `json:"required,omitempty"`
+	Readonly        bool         `json:"readonly,omitempty"`
+	Hint            string       `json:"hint,omitempty"`
+	DefaultValue    string       `json:"defaultValue,omitempty"`
+	MinValue        *int64       `json:"minValue,omitempty"`
+	MaxValue        *int64       `json:"maxValue,omitempty"`
+	EnumOptions     []EnumOption `json:"enumOptions,omitempty"`
+	CheckboxOptions []string     `json:"checkboxOptions,omitempty"`
 	// ExtraInfoPath 可选:用于在该参数下方以小字方式展示另一个只读参数的当前值
 	// (如 NR PowerModify 下方提示 Device.DeviceInfo.SupportedPowerRange = "24,30" → "[24 ~ 30]")。
 	// 前端在渲染时按该路径拉取 schema/currentValue 并按 [lo ~ hi] 格式展示。
