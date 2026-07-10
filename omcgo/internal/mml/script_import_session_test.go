@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -55,6 +56,29 @@ func TestRedisImportSessionStore_PutUsesRandomTokenHashedRedisKeyAndTTL(t *testi
 	require.NotEqual(t, uuid.Nil, session.ID)
 	require.Equal(t, validImportSession().NormalizedContent, session.NormalizedContent)
 	require.Equal(t, validImportSession().Validation.PlanItems, session.Validation.PlanItems)
+}
+
+func TestRedisImportSessionStore_ActiveAndConsumedKeysShareRedisClusterHashTag(t *testing.T) {
+	digest := strings.Repeat("a", 64)
+	activeKey := redisx.Keys.MMLScriptImportSession(digest)
+	consumedKey := redisx.Keys.MMLScriptImportConsumed(digest)
+
+	require.Equal(t, digest, redisClusterHashTag(activeKey))
+	require.Equal(t, redisClusterHashTag(activeKey), redisClusterHashTag(consumedKey))
+	require.NotContains(t, activeKey, "raw-token")
+	require.NotContains(t, consumedKey, "raw-token")
+}
+
+func redisClusterHashTag(key string) string {
+	start := strings.IndexByte(key, '{')
+	if start < 0 {
+		return ""
+	}
+	end := strings.IndexByte(key[start+1:], '}')
+	if end < 0 {
+		return ""
+	}
+	return key[start+1 : start+1+end]
 }
 
 func TestRedisImportSessionStore_ClaimOnceAndBindUser(t *testing.T) {
