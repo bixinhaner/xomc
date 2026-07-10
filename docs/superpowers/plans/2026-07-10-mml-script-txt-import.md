@@ -819,6 +819,8 @@
 
 ### Task 9: v1 脚本库界面
 
+> Implementation complete in `omcmb/webcode/src/pages/mml/ScriptTask`; see `.superpowers/sdd/task-9-report.md` for verification evidence.
+
 **Files:**
 - Create: `omcmb/webcode/src/pages/mml/ScriptTask/ScriptImportModal.tsx`
 - Create: `omcmb/webcode/src/pages/mml/ScriptTask/ScriptImportPreview.tsx`
@@ -832,7 +834,7 @@
 - Consumes: Task 8 Hooks 和类型。
 - Produces: v1 新增、只读详情、重新导入、下载 TXT 和执行配置界面。
 
-- [ ] **Step 1: 写 v1 交互失败测试**
+- [x] **Step 1: 写 v1 交互失败测试**
 
   ```tsx
   it('keeps save disabled when server validation has errors', async () => {
@@ -846,20 +848,20 @@
 
   增加警告允许保存、重新上传替换预览、只读详情、执行警告二次确认测试。
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
   Run: `cd omcmb/webcode && npm run test -- --run src/pages/mml/ScriptTask/__tests__`
   Expected: FAIL，新组件不存在。
 
-- [ ] **Step 3: 实现导入和只读预览**
+- [x] **Step 3: 实现导入和只读预览**
 
   页面字段固定为基本信息、TXT 上传、模板下载、文件摘要、统计卡、按行预览、错误/警告过滤、错误报告下载。移除 `CommandSelectModal`、内容 TextArea 和模式选择器。
 
-- [ ] **Step 4: 实现执行 Drawer**
+- [x] **Step 4: 实现执行 Drawer**
 
   Drawer 只发送任务名称、执行方式、时间和重试策略。服务端返回 warnings 时显示确认 Modal，再以 `confirmWarnings=true` 重试；errors 保持 Drawer 打开并显示逐行结果。
 
-- [ ] **Step 5: 运行 v1 测试和类型检查**
+- [x] **Step 5: 运行 v1 测试和类型检查**
 
   Run:
 
@@ -870,7 +872,7 @@
 
   Expected: PASS，页面中没有在线脚本内容编辑器。
 
-- [ ] **Step 6: 更新进度并提交**
+- [x] **Step 6: 更新进度并提交**
 
   ```bash
   git add omcmb/webcode/src/pages/mml/ScriptTask \
