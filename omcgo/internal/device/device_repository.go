@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -70,7 +69,7 @@ type DeviceFilter struct {
 
 // RecycleBinFilter specifies criteria for listing soft-deleted devices.
 type RecycleBinFilter struct {
-	Search     *string // fuzzy search across serial_number/site_name
+	Search     *string // fuzzy search across serial_number/site_name/mac
 	Carrier    *model.CarrierCode
 	Technology *model.Technology
 	GroupID    *uuid.UUID // filter by original device group
@@ -1550,10 +1549,15 @@ func recycleBinSelectColumns() []string {
 	}
 }
 
-// ListRecycleBin returns soft-deleted devices with filtering.
-func (r *PgDeviceRepository) ListRecycleBin(ctx context.Context, filter RecycleBinFilter) (*model.ListResponse[DeviceWithInfo], error) {
-	// Build base query for deleted devices with group info and device_info
-	// T-2026-07-02: 新增 device_info LEFT JOIN 以支持完整的设备信息返回（修复缺失字段）。
+func recycleBinSearchFields() []string {
+	return []string{
+		"d.serial_number",
+		"d.site_name",
+		"di.mac",
+	}
+}
+
+func buildRecycleBinListBuilders(filter RecycleBinFilter) (sq.SelectBuilder, sq.SelectBuilder) {
 	builder := storage.Psql.Select(recycleBinSelectColumns()...).
 		From("devices d").
 		LeftJoin("device_info di ON di.device_id = d.id").
@@ -1563,17 +1567,15 @@ func (r *PgDeviceRepository) ListRecycleBin(ctx context.Context, filter RecycleB
 
 	countBuilder := storage.Psql.Select("COUNT(*)").
 		From("devices d").
+		LeftJoin("device_info di ON di.device_id = d.id").
 		Where(sq.NotEq{"d.deleted_at": nil})
 
 	// Apply filters
-	if filter.Search != nil && *filter.Search != "" {
-		searchPattern := "%" + strings.ToLower(*filter.Search) + "%"
-		searchCond := sq.Or{
-			sq.Like{"LOWER(d.serial_number)": searchPattern},
-			sq.Like{"LOWER(d.site_name)": searchPattern},
+	if filter.Search != nil {
+		if cond := BuildSearchOR(*filter.Search, recycleBinSearchFields()); cond != nil {
+			builder = builder.Where(cond)
+			countBuilder = countBuilder.Where(cond)
 		}
-		builder = builder.Where(searchCond)
-		countBuilder = countBuilder.Where(searchCond)
 	}
 
 	if filter.Carrier != nil {
@@ -1598,6 +1600,15 @@ func (r *PgDeviceRepository) ListRecycleBin(ctx context.Context, filter RecycleB
 			Join("device_group_members dgm ON d.id = dgm.device_id").
 			Where(sq.Eq{"dgm.group_id": *filter.GroupID})
 	}
+
+	return builder, countBuilder
+}
+
+// ListRecycleBin returns soft-deleted devices with filtering.
+func (r *PgDeviceRepository) ListRecycleBin(ctx context.Context, filter RecycleBinFilter) (*model.ListResponse[DeviceWithInfo], error) {
+	// Build base query for deleted devices with group info and device_info
+	// T-2026-07-02: 新增 device_info LEFT JOIN 以支持完整的设备信息返回（修复缺失字段）。
+	builder, countBuilder := buildRecycleBinListBuilders(filter)
 
 	// Get total count
 	var total int64

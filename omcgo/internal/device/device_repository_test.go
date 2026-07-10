@@ -356,3 +356,24 @@ func TestDeviceWithInfoSelectColumns_AlarmAggregation(t *testing.T) {
 	assert.Contains(t, alarmsActiveAggJoin, "status <> 'cleared'")
 	assert.Contains(t, alarmsActiveAggJoin, "aa ON aa.device_id = d.id")
 }
+
+func TestBuildRecycleBinListBuilders_SearchIncludesMACInListAndCount(t *testing.T) {
+	search := "48:BF"
+	listBuilder, countBuilder := buildRecycleBinListBuilders(RecycleBinFilter{
+		Search: &search,
+	})
+
+	listSQL, listArgs, err := listBuilder.ToSql()
+	require.NoError(t, err)
+	countSQL, countArgs, err := countBuilder.ToSql()
+	require.NoError(t, err)
+
+	assert.Contains(t, listSQL, "d.serial_number ILIKE", "回收站搜索仍需支持 SN")
+	assert.Contains(t, listSQL, "d.site_name ILIKE", "回收站搜索仍需支持名称")
+	assert.Contains(t, listSQL, "di.mac ILIKE", "回收站搜索框承诺支持 MAC，应查询 device_info.mac")
+	assert.Contains(t, countSQL, "LEFT JOIN device_info di ON di.device_id = d.id",
+		"分页总数查询也必须 join device_info，否则 MAC 搜索下 count SQL 无法引用 di.mac")
+	assert.Contains(t, countSQL, "di.mac ILIKE", "分页总数口径必须与列表查询一致")
+	assert.Equal(t, []interface{}{"%48:BF%", "%48:BF%", "%48:BF%"}, listArgs)
+	assert.Equal(t, listArgs, countArgs)
+}
