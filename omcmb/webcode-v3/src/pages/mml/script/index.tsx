@@ -22,6 +22,13 @@ import { useCreateMMLScript, useCreateMMLTask, useMMLScriptById, useMMLScripts }
 import { useUserStore } from '@core/store/userStore'
 import type { MMLScript, MMLScriptStatus, MMLTaskPlanItem } from '@core/types/mml'
 import { parseMmlScriptPlan } from '@core/utils/mmlScriptPlanParser'
+import {
+  MML_MAX_TASK_DEVICES,
+  MML_PREVIEW_PAGE_SIZE,
+  MML_PREVIEW_PAGE_SIZE_OPTIONS,
+  paginateMmlPreview,
+  validateMmlTaskScale,
+} from '@core/utils/mmlTaskScale'
 
 // ─────────────────────────────────────────────────────────────
 // SCRIPT VAULT · mml_scripts 脚本库（real：useMMLScripts）
@@ -224,6 +231,16 @@ function ScriptCreateDialog({ onClose, onCreated }: { onClose: () => void; onCre
       setError('请输入脚本内容')
       return
     }
+    const scaleIssue = validateMmlTaskScale(
+      parsed.deviceSns,
+      parsed.executeMode === 'device_bound' ? parsed.planItems.length : parsed.commands.length
+    )
+    if (scaleIssue) {
+      setError(scaleIssue.kind === 'devices'
+        ? `设备数量 ${scaleIssue.current} 超过单任务上限 ${scaleIssue.max} 台。`
+        : `命令行数 ${scaleIssue.current} 超过单任务上限 ${scaleIssue.max} 行。`)
+      return
+    }
     try {
       await createScript.mutateAsync({
         scriptName: scriptName.trim(),
@@ -318,6 +335,12 @@ function ScriptPlanPreview({
   warnings: string[]
 }) {
   const isDeviceBound = parsedMode === 'device_bound'
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(MML_PREVIEW_PAGE_SIZE)
+  const preview = useMemo(
+    () => paginateMmlPreview(planItems, page, pageSize),
+    [planItems, page, pageSize]
+  )
   return (
     <div className="border border-cyan-500/15 bg-cyan-500/4">
       <div className="flex items-center justify-between border-b border-cyan-500/15 px-3 py-2">
@@ -345,17 +368,25 @@ function ScriptPlanPreview({
         </div>
       ) : null}
       {isDeviceBound ? (
-        <div className="max-h-56 overflow-auto border-t border-cyan-500/15">
-          {planItems.slice(0, 30).map((item) => (
-            <div
-              key={`${item.lineNo}-${item.deviceSn}-${item.order}`}
-              className="grid grid-cols-[76px_160px_1fr] gap-2 border-b border-cyan-500/8 px-3 py-1.5 font-mono text-[11px] text-cyan-100/85 last:border-b-0"
-            >
-              <span>#{item.lineNo}/{item.order}</span>
-              <span className="truncate text-cyan-300/75">{item.deviceSn}</span>
-              <span className="truncate">{item.command.commandCode}</span>
-            </div>
-          ))}
+        <div className="border-t border-cyan-500/15">
+          <div className="max-h-56 overflow-auto">
+            {preview.items.map((item) => (
+              <div
+                key={`${item.lineNo}-${item.deviceSn}-${item.order}`}
+                className="grid grid-cols-[76px_160px_1fr] gap-2 border-b border-cyan-500/8 px-3 py-1.5 font-mono text-[11px] text-cyan-100/85 last:border-b-0"
+              >
+                <span>#{item.lineNo}/{item.order}</span>
+                <span className="truncate text-cyan-300/75">{item.deviceSn}</span>
+                <span className="truncate">{item.command.commandCode}</span>
+              </div>
+            ))}
+          </div>
+          <PreviewPager
+            pageData={preview}
+            pageSize={pageSize}
+            onPage={setPage}
+            onPageSize={(size) => { setPageSize(size); setPage(1) }}
+          />
         </div>
       ) : null}
     </div>
@@ -459,22 +490,43 @@ function ScriptExecuteDialog({ script, onClose }: { script: MMLScript; onClose: 
   const [taskName, setTaskName] = useState(`执行脚本: ${script.scriptName}`)
   const [deviceInput, setDeviceInput] = useState('')
   const [error, setError] = useState('')
+  const [previewPage, setPreviewPage] = useState(1)
+  const [previewPageSize, setPreviewPageSize] = useState(MML_PREVIEW_PAGE_SIZE)
   const createTask = useCreateMMLTask()
   const parsed = useMemo(
     () => parseMmlScriptPlan(detailScript.content ?? '', { format: 'auto' }),
     [detailScript.content]
   )
   const isDeviceBound = parsed.executeMode === 'device_bound'
+  const enteredDeviceSns = useMemo(() => parseDeviceInput(deviceInput), [deviceInput])
+  const planPreview = useMemo(
+    () => paginateMmlPreview(parsed.planItems, previewPage, previewPageSize),
+    [parsed.planItems, previewPage, previewPageSize]
+  )
+  const devicePreview = useMemo(
+    () => paginateMmlPreview(enteredDeviceSns, previewPage, previewPageSize),
+    [enteredDeviceSns, previewPage, previewPageSize]
+  )
 
   const submit = async () => {
     setError('')
-    const deviceSns = isDeviceBound ? parsed.deviceSns : parseDeviceInput(deviceInput)
+    const deviceSns = isDeviceBound ? parsed.deviceSns : enteredDeviceSns
     if (!isDeviceBound && deviceSns.length === 0) {
       setError('请输入设备 SN')
       return
     }
     if (parsed.commands.length === 0) {
       setError('脚本内容为空')
+      return
+    }
+    const scaleIssue = validateMmlTaskScale(
+      deviceSns,
+      isDeviceBound ? parsed.planItems.length : parsed.commands.length
+    )
+    if (scaleIssue) {
+      setError(scaleIssue.kind === 'devices'
+        ? `设备数量 ${scaleIssue.current} 超过单任务上限 ${scaleIssue.max} 台。`
+        : `命令行数 ${scaleIssue.current} 超过单任务上限 ${scaleIssue.max} 行。`)
       return
     }
     await createTask.mutateAsync({
@@ -539,22 +591,37 @@ function ScriptExecuteDialog({ script, onClose }: { script: MMLScript; onClose: 
           </div>
 
           {!isDeviceBound ? (
-            <label className="block">
-              <span className="mb-1 block font-mono text-[9px] uppercase tracking-[0.18em] text-cyan-300/55">设备 SN</span>
-              <input
-                className="neon-input w-full"
-                value={deviceInput}
-                placeholder="SN1,SN2"
-                onChange={(e) => setDeviceInput(e.target.value)}
-              />
-            </label>
+            <div className="space-y-2">
+              <label className="block">
+                <span className="mb-1 block font-mono text-[9px] uppercase tracking-[0.18em] text-cyan-300/55">设备 SN</span>
+                <input
+                  className="neon-input w-full"
+                  value={deviceInput}
+                  placeholder="SN1,SN2"
+                  onChange={(e) => { setDeviceInput(e.target.value); setPreviewPage(1) }}
+                />
+              </label>
+              {enteredDeviceSns.length > 0 ? (
+                <div className="border border-cyan-500/20 bg-cyan-500/5">
+                  <div className="border-b border-cyan-500/15 px-3 py-2 font-mono text-[10px] text-cyan-300/65">
+                    已选 {enteredDeviceSns.length}/{MML_MAX_TASK_DEVICES} 台设备
+                  </div>
+                  <div className="grid max-h-44 grid-cols-1 overflow-auto sm:grid-cols-2">
+                    {devicePreview.items.map((sn) => (
+                      <div key={sn} className="truncate border-b border-cyan-500/10 px-3 py-1.5 font-mono text-[11px] text-cyan-100/80">{sn}</div>
+                    ))}
+                  </div>
+                  <PreviewPager pageData={devicePreview} pageSize={previewPageSize} onPage={setPreviewPage} onPageSize={(size) => { setPreviewPageSize(size); setPreviewPage(1) }} unit="台" />
+                </div>
+              ) : null}
+            </div>
           ) : (
             <div className="border border-cyan-500/15 bg-cyan-500/4">
               <div className="border-b border-cyan-500/15 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-300/55">
                 PLAN PREVIEW
               </div>
               <div className="max-h-56 overflow-auto">
-                {parsed.planItems.slice(0, 20).map((item) => (
+                {planPreview.items.map((item) => (
                   <div key={`${item.lineNo}-${item.deviceSn}-${item.order}`} className="grid grid-cols-[76px_160px_1fr] gap-2 border-b border-cyan-500/8 px-3 py-1.5 font-mono text-[11px] text-cyan-100/85 last:border-b-0">
                     <span>#{item.lineNo}/{item.order}</span>
                     <span className="truncate text-cyan-300/75">{item.deviceSn}</span>
@@ -562,6 +629,7 @@ function ScriptExecuteDialog({ script, onClose }: { script: MMLScript; onClose: 
                   </div>
                 ))}
               </div>
+              <PreviewPager pageData={planPreview} pageSize={previewPageSize} onPage={setPreviewPage} onPageSize={(size) => { setPreviewPageSize(size); setPreviewPage(1) }} />
             </div>
           )}
           {error ? <div className="font-mono text-[11px] text-rose-300">{error}</div> : null}
@@ -581,6 +649,34 @@ function ScriptExecuteDialog({ script, onClose }: { script: MMLScript; onClose: 
 
 function parseDeviceInput(value: string): string[] {
   return Array.from(new Set(value.split(/[,\s;]+/).map((v) => v.trim()).filter(Boolean)))
+}
+
+function PreviewPager({
+  pageData,
+  pageSize,
+  onPage,
+  onPageSize,
+  unit = '条',
+}: {
+  pageData: { page: number; pageCount: number; start: number; end: number; total: number }
+  pageSize: number
+  onPage: (page: number) => void
+  onPageSize: (pageSize: number) => void
+  unit?: string
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-cyan-500/15 px-3 py-2 font-mono text-[10px] text-cyan-300/60">
+      <span>第 {pageData.start}–{pageData.end} {unit}，共 {pageData.total} {unit}</span>
+      <div className="flex items-center gap-2">
+        <select className="neon-input h-7 w-auto py-0 text-[10px]" value={pageSize} onChange={(event) => onPageSize(Number(event.target.value))}>
+          {MML_PREVIEW_PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size}/{unit}</option>)}
+        </select>
+        <button type="button" className="border border-cyan-500/25 px-2 py-1 disabled:opacity-35" disabled={pageData.page <= 1} onClick={() => onPage(pageData.page - 1)}>PREV</button>
+        <span>{pageData.page}/{pageData.pageCount}</span>
+        <button type="button" className="border border-cyan-500/25 px-2 py-1 disabled:opacity-35" disabled={pageData.page >= pageData.pageCount} onClick={() => onPage(pageData.page + 1)}>NEXT</button>
+      </div>
+    </div>
+  )
 }
 
 function MiniStat({ label, value }: { label: string; value: string }) {

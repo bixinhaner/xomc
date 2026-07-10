@@ -7,6 +7,7 @@ import { useProductList } from '@core/hooks/api/useProducts';
 import { useDictionaryBatch } from '@core/hooks/api/useSystem';
 import type { DeviceItem, DeviceStatus } from '../types';
 import { DEVICE_MODAL_PAGE_SIZE, MAX_SELECT_ALL } from '../constants';
+import { MML_PREVIEW_PAGE_SIZE_OPTIONS } from '@core/utils/mmlTaskScale';
 import { mapDeviceToItem } from '../adapters';
 import { useT } from '@/hooks/useT';
 
@@ -289,7 +290,7 @@ export default function DeviceSelectModal({
               pageSize,
               total,
               showSizeChanger: true,
-              pageSizeOptions: ['10', '20', '50'],
+              pageSizeOptions: MML_PREVIEW_PAGE_SIZE_OPTIONS.map(String),
               // 切页或改每页条数都驱动服务端重新查询（§需求 2）。
               onChange: (p, ps) => {
                 setPage(p);

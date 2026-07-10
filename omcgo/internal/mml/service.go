@@ -584,6 +584,36 @@ type ExecuteRequest struct {
 	FailedRetryInterval int  `json:"failed_retry_interval"`
 }
 
+const (
+	maxMMLTaskDevices = 200
+	maxMMLPlanItems   = 2000
+)
+
+func validateMMLTaskScale(req ExecuteRequest, mode TaskExecuteMode) error {
+	if len(req.PlanItems) > maxMMLPlanItems {
+		return fmt.Errorf("plan item count %d exceeds limit %d: %w", len(req.PlanItems), maxMMLPlanItems, commonerrors.ErrInvalidInput)
+	}
+
+	deviceSNs := req.DeviceSNs
+	if mode == TaskExecuteModeDeviceBound {
+		deviceSNs = make([]string, 0, len(req.PlanItems))
+		for _, item := range req.PlanItems {
+			deviceSNs = append(deviceSNs, item.DeviceSN)
+		}
+	}
+	seen := make(map[string]struct{}, len(deviceSNs))
+	for _, rawSN := range deviceSNs {
+		sn := strings.TrimSpace(rawSN)
+		if sn != "" {
+			seen[sn] = struct{}{}
+		}
+	}
+	if len(seen) > maxMMLTaskDevices {
+		return fmt.Errorf("device count %d exceeds limit %d: %w", len(seen), maxMMLTaskDevices, commonerrors.ErrInvalidInput)
+	}
+	return nil
+}
+
 func taskExecuteModeFromRequest(raw string, hasPlanItems bool) (TaskExecuteMode, error) {
 	mode := strings.ToLower(strings.TrimSpace(raw))
 	switch mode {
@@ -891,6 +921,9 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 	if err != nil {
 		return nil, err
 	}
+	if err := validateMMLTaskScale(req, taskExecuteMode); err != nil {
+		return nil, err
+	}
 
 	// Build the commands list from the request
 	commands := req.Commands
@@ -931,6 +964,9 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 				})
 			}
 		}
+	}
+	if taskExecuteMode == TaskExecuteModeCommon && len(commands) > maxMMLPlanItems {
+		return nil, fmt.Errorf("command row count %d exceeds limit %d: %w", len(commands), maxMMLPlanItems, commonerrors.ErrInvalidInput)
 	}
 
 	var planItems []MMLPlanItem

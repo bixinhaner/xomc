@@ -24,9 +24,16 @@ import { useCreateMMLTask } from '@core/hooks/api/useMML';
 import type { MMLExecuteType, MMLTaskPlanItem } from '@core/types/mml';
 import { parseMmlScriptPlan } from '@core/utils/mmlScriptPlanParser';
 import type { MMLScriptPlanParseResult } from '@core/utils/mmlScriptPlanParser';
+import {
+  MML_MAX_TASK_DEVICES,
+  MML_PREVIEW_PAGE_SIZE,
+  MML_PREVIEW_PAGE_SIZE_OPTIONS,
+  validateMmlTaskScale,
+} from '@core/utils/mmlTaskScale';
 import { useT } from '@/hooks/useT';
 import { toast } from '@/utils/toast';
 import DeviceSelectModal from '../Console/components/DeviceSelectModal';
+import PaginatedDeviceSnList from './PaginatedDeviceSnList';
 
 // -----------------------------------------------------------------------------
 // "新建 MML 脚本任务" Drawer —— 由 任务记录（TaskRecord）页"新建任务"入口调用；
@@ -262,6 +269,16 @@ export default function ScriptTaskDrawer({
     return form
       .validateFields()
       .then(async (values) => {
+        const targetDeviceSns = isDeviceBound ? parseResult.deviceSns : deviceSns;
+        const rowCount = isDeviceBound ? parsedPlanItems.length : parsedCommands.length;
+        const scaleIssue = validateMmlTaskScale(targetDeviceSns, rowCount);
+        if (scaleIssue) {
+          toast.warning(t(
+            scaleIssue.kind === 'devices' ? 'mml.taskDeviceLimitExceeded' : 'mml.taskPlanLimitExceeded',
+            scaleIssue,
+          ));
+          throw new Error('SCALE_LIMIT');
+        }
         if (isDeviceBound && parsedPlanItems.length === 0) {
           toast.warning(t('mml.noPlanItems'));
           throw new Error('PLAN_REQUIRED');
@@ -283,7 +300,7 @@ export default function ScriptTaskDrawer({
 
         const payload = {
           taskName: values.taskName.trim(),
-          deviceSns: isDeviceBound ? parseResult.deviceSns : deviceSns,
+          deviceSns: targetDeviceSns,
           commands: parsedCommands,
           executeMode: parseResult.executeMode,
           planItems: isDeviceBound ? parsedPlanItems : undefined,
@@ -324,7 +341,7 @@ export default function ScriptTaskDrawer({
         // 表单校验失败 / guard 抛出的业务前置错误会落到这里。antd 的
         // 校验错误 err 没有 message，静默即可；其它错误统一通过 toast 暴露。
         if (err && (err as { errorFields?: unknown }).errorFields) return;
-        if (err instanceof Error && ['SN_REQUIRED', 'PLAN_REQUIRED', 'PLAN_MIXED', 'COMMAND_REQUIRED'].includes(err.message)) return;
+        if (err instanceof Error && ['SN_REQUIRED', 'PLAN_REQUIRED', 'PLAN_MIXED', 'COMMAND_REQUIRED', 'SCALE_LIMIT'].includes(err.message)) return;
         toast.error(err, t('mml.taskCreateFailedPrefix'));
       });
   }, [
@@ -431,12 +448,15 @@ export default function ScriptTaskDrawer({
                 style={{ flex: 1 }}
                 tokenSeparators={[',', ';', '\n']}
                 open={false}
+                maxTagCount={0}
+                maxTagPlaceholder={() => t('mml.selectedDeviceSummary', { count: deviceSns.length, max: MML_MAX_TASK_DEVICES })}
               />
               <Button icon={<PlusOutlined />} onClick={() => setDeviceSelectOpen(true)}>
                 {t('mml.selectDevice')}
               </Button>
             </Space.Compact>
             <span style={{ color: '#999', fontSize: 12 }}>{t('mml.deviceSnTip')}</span>
+            <PaginatedDeviceSnList deviceSns={deviceSns} onChange={setDeviceSns} t={t} />
           </div>
         )}
 
@@ -520,7 +540,13 @@ export default function ScriptTaskDrawer({
               rowKey={(item) => `${item.lineNo}-${item.deviceSn}-${item.order}`}
               columns={planPreviewColumns}
               dataSource={parsedPlanItems}
-              pagination={parsedPlanItems.length > 8 ? { pageSize: 8, size: 'small' } : false}
+              pagination={{
+                defaultPageSize: MML_PREVIEW_PAGE_SIZE,
+                pageSizeOptions: MML_PREVIEW_PAGE_SIZE_OPTIONS.map(String),
+                showSizeChanger: parsedPlanItems.length > MML_PREVIEW_PAGE_SIZE,
+                size: 'small',
+                showTotal: (total, [start, end]) => t('mml.planRange', { start, end, total }),
+              }}
             />
           </Form.Item>
         )}

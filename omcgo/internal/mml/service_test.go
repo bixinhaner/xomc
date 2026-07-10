@@ -881,6 +881,117 @@ func TestService_ExecuteCommand_DeviceBoundPlanItemsDeriveDevicesAndCommands(t *
 	assert.Contains(t, capturedTask.Commands[0], "param_refs")
 }
 
+func TestService_ExecuteCommand_RejectsMoreThan200Devices(t *testing.T) {
+	created := false
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, &mockTaskRepo{
+		createFn: func(context.Context, *MMLTask) error {
+			created = true
+			return nil
+		},
+	})
+	deviceSNs := make([]string, 201)
+	for i := range deviceSNs {
+		deviceSNs[i] = fmt.Sprintf("SN-%03d", i+1)
+	}
+
+	_, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		TaskName:  "too many devices",
+		DeviceSNs: deviceSNs,
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.Contains(t, err.Error(), "201")
+	assert.Contains(t, err.Error(), "200")
+	assert.False(t, created)
+}
+
+func TestService_ExecuteCommand_RejectsMoreThan2000PlanItems(t *testing.T) {
+	created := false
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, &mockTaskRepo{
+		createFn: func(context.Context, *MMLTask) error {
+			created = true
+			return nil
+		},
+	})
+	planItems := make([]MMLPlanItem, 2001)
+	for i := range planItems {
+		planItems[i] = MMLPlanItem{
+			LineNo:   i + 1,
+			DeviceSN: "SN-001",
+			Command:  map[string]interface{}{"command_code": "LST DEVICE_INFO"},
+		}
+	}
+
+	_, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		TaskName:    "too many plan rows",
+		ExecuteMode: "device_bound",
+		PlanItems:   planItems,
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.Contains(t, err.Error(), "2001")
+	assert.Contains(t, err.Error(), "2000")
+	assert.False(t, created)
+}
+
+func TestService_ExecuteCommand_RejectsMoreThan2000CommonCommands(t *testing.T) {
+	created := false
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, &mockTaskRepo{
+		createFn: func(context.Context, *MMLTask) error {
+			created = true
+			return nil
+		},
+	})
+	commands := make([]map[string]interface{}, 2001)
+	for i := range commands {
+		commands[i] = map[string]interface{}{"command_code": "LST DEVICE_INFO"}
+	}
+
+	_, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		TaskName:  "too many common commands",
+		DeviceSNs: []string{"SN-001"},
+		Commands:  commands,
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.Contains(t, err.Error(), "2001")
+	assert.Contains(t, err.Error(), "2000")
+	assert.False(t, created)
+}
+
+func TestService_ExecuteCommand_RejectsMoreThan200PlanDevices(t *testing.T) {
+	created := false
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, &mockTaskRepo{
+		createFn: func(context.Context, *MMLTask) error {
+			created = true
+			return nil
+		},
+	})
+	planItems := make([]MMLPlanItem, 201)
+	for i := range planItems {
+		planItems[i] = MMLPlanItem{
+			LineNo:   i + 1,
+			DeviceSN: fmt.Sprintf("SN-%03d", i+1),
+			Command:  map[string]interface{}{"command_code": "LST DEVICE_INFO"},
+		}
+	}
+
+	_, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		TaskName:    "too many plan devices",
+		ExecuteMode: "device_bound",
+		PlanItems:   planItems,
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.Contains(t, err.Error(), "201")
+	assert.Contains(t, err.Error(), "200")
+	assert.False(t, created)
+}
+
 func TestService_ExecuteCommand_NilCommandsDefaultsToEmpty(t *testing.T) {
 	var capturedTask *MMLTask
 	taskRepo := &mockTaskRepo{
