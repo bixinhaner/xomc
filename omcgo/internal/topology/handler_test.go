@@ -114,9 +114,9 @@ func (m *mockDeviceGroupRepo) AddDeviceWithSource(_ context.Context, groupID, de
 	return 1, nil
 }
 
-func (m *mockDeviceGroupRepo) AddDeviceAutoMatched(_ context.Context, groupID, deviceID uuid.UUID) error {
+func (m *mockDeviceGroupRepo) MoveDeviceAutoMatched(_ context.Context, _, groupID, deviceID uuid.UUID) (int64, error) {
 	m.devices[groupID] = append(m.devices[groupID], deviceID)
-	return nil
+	return 1, nil
 }
 
 func (m *mockDeviceGroupRepo) RemoveDevice(_ context.Context, groupID, deviceID uuid.UUID) error {

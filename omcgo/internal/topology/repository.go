@@ -51,10 +51,10 @@ type GroupMembership interface {
 	// sourceType 应为 "rule"；sourceRuleID 非 nil 时记录归属规则。
 	AddDeviceWithSource(ctx context.Context, groupID, deviceID uuid.UUID, sourceType string, sourceRuleID *uuid.UUID) (int64, error)
 
-	// AddDeviceAutoMatched 自动匹配命中后无条件 UPSERT 设备到指定 group，
-	// 标 source_type='rule'。与 AddDeviceWithSource 不同：**不带 A4 manual 守护**，
-	// 会覆盖手工分配 —— 符合"分组匹配规则最后编辑优先"语义（GroupMatchEngine 用）。
-	AddDeviceAutoMatched(ctx context.Context, groupID, deviceID uuid.UUID) error
+	// MoveDeviceAutoMatched 仅当设备当前仍属于 sourceGroupID 时移动到 targetGroupID。
+	// DefaultLevel2GroupID 表示未分组设备，此时仅在不存在归属记录时插入。
+	// 返回实际影响行数，0 表示设备已离开源组或发生并发竞争。
+	MoveDeviceAutoMatched(ctx context.Context, sourceGroupID, targetGroupID, deviceID uuid.UUID) (int64, error)
 }
 
 // DeviceGroupRepository defines the full persistence interface for device groups.

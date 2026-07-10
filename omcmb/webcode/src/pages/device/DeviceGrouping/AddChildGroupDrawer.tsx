@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Button, Drawer, Form, Input, Radio, Typography } from 'antd';
+import { Button, Drawer, Form, Input, Radio, Select, Typography } from 'antd';
 import type { FormInstance } from 'antd';
 import type { NameFilterItem } from './types';
 import { generateOperators } from './types';
@@ -9,11 +9,12 @@ const { Text } = Typography;
 
 export interface AddChildGroupDrawerProps {
   open: boolean;
-  form: FormInstance<{ name?: string; matchingMode: 'deviceName' | 'lac' | 'tac'; tacRag: string }>;
+  form: FormInstance<{ name?: string; matchingMode: 'deviceName' | 'lac' | 'tac' | 'serialNumber'; tacRag: string; sourceGroupId?: string; serialNumbers?: string }>;
   /** 上级（一级）分组名称，只读展示，自动填充。 */
   parentGroupName?: string;
   matchingMode: string | undefined;
   nameFilters: NameFilterItem[];
+  sourceGroupOptions: Array<{ label: string; value: string }>;
   onClose: () => void;
   onSave: () => void;
   onMatchingModeChange: () => void;
@@ -32,6 +33,7 @@ export default function AddChildGroupDrawer({
   parentGroupName,
   matchingMode,
   nameFilters,
+  sourceGroupOptions,
   onClose,
   onSave,
   onMatchingModeChange,
@@ -101,11 +103,25 @@ export default function AddChildGroupDrawer({
           <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
             {t('device.matchRuleDesc')}
           </Text>
+          <Form.Item
+            name="sourceGroupId"
+            label={t('device.rules.sourceGroup')}
+            rules={[{ required: true, message: t('device.rules.sourceGroupRequired') }]}
+            style={{ marginBottom: 12 }}
+          >
+            <Select
+              showSearch
+              optionFilterProp="label"
+              options={sourceGroupOptions}
+              placeholder={t('device.rules.sourceGroupPlaceholder')}
+            />
+          </Form.Item>
           <Form.Item name="matchingMode" label={t('device.rules.matchingMode')} style={{ marginBottom: 12 }}>
             <Radio.Group onChange={onMatchingModeChange}>
               <Radio value="deviceName">{t('device.rules.deviceName')}</Radio>
               <Radio value="lac">LAC</Radio>
               <Radio value="tac">TAC</Radio>
+              <Radio value="serialNumber">{t('device.rules.serialNumber')}</Radio>
             </Radio.Group>
           </Form.Item>
 
@@ -155,6 +171,17 @@ export default function AddChildGroupDrawer({
               }
             >
               <Input placeholder="eg: 1,2,3,1-3" maxLength={50} />
+            </Form.Item>
+          )}
+          {matchingMode === 'serialNumber' && (
+            <Form.Item
+              name="serialNumbers"
+              label={t('device.rules.serialNumber')}
+              rules={[{ required: true, message: t('device.rules.serialNumberRequired') }]}
+              style={{ marginBottom: 0 }}
+              extra={<Text type="secondary" style={{ fontSize: 12 }}>{t('device.rules.serialNumberHint')}</Text>}
+            >
+              <Input.TextArea rows={3} maxLength={2000} />
             </Form.Item>
           )}
         </div>
