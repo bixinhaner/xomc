@@ -17,4 +17,5 @@ Task 5: complete (commits 6fdfd51f..f23a9f17, final spec and quality review clea
 Task 6: complete (commit 2c8a080f, final spec and quality review clean after UpdatedAt reload and route-test fixes).
 Task 7: complete (commits 5ef20c71..1635d5f2, final spec and quality review clean for execution snapshot, scheduler preflight and execute_type validation).
 Task 8: complete (commits a2e192fa..b3129773, final spec and quality review clean after typed errors, validation snapshot mapping and detail-cache fixes).
-Task 9: in progress (v1 script library UI; resume at Step 1, write interaction failing tests).
+Task 9: complete (commits 50471f6c..ee8a7912, final spec and quality review clean after warning, schedule and filtering fixes).
+Task 10: not started.

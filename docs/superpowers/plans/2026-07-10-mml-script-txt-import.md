@@ -25,9 +25,9 @@
 
 ## Progress Ledger
 
-**Current checkpoint:** Task 9 in progress
-**Resume from:** Task 9, Step 1 — write v1 interaction failing tests
-**Last verified commit:** `b3129773 fix(frontend-core): 规范 MML 导入错误契约`
+**Current checkpoint:** Task 9 complete
+**Resume from:** Task 10, Step 1 — write v2 interaction failing tests
+**Last verified commit:** `ee8a7912 fix(frontend): guard mixed MML validation warnings`
 
 - [x] Task 1 — 数据库契约与 Go 模型
 - [x] Task 2 — TXT Parser
@@ -37,7 +37,7 @@
 - [x] Task 6 — 导入 HTTP API 与依赖注入
 - [x] Task 7 — 脚本执行预检与任务快照
 - [x] Task 8 — frontend-core 契约、API 与 Hooks
-- [ ] Task 9 — v1 脚本库界面
+- [x] Task 9 — v1 脚本库界面
 - [ ] Task 10 — v2 脚本库界面
 - [ ] Task 11 — v3 脚本库界面
 - [ ] Task 12 — 旧入口收口与安全清理工具
@@ -74,6 +74,7 @@
 | Task 6 | `2c8a080f` | 规格与质量复审通过；handler focused tests、MML 包全量测试和 app build 通过，覆盖模板下载、5 路由、multipart 2MiB+64KiB、.txt/缺文件/413、鉴权/403、422 逐行问题、409 重放、严格 JSON、metadata-only 与 updated_at reload、Redis/PG 注入。 |
 | Task 7 | `5ef20c71..1635d5f2` | 规格与质量复审通过；执行/调度 focused tests、MML 包与 cmd/app 测试、app build 通过，覆盖服务端 plan 快照、严格请求字段、动态 error/409 warning、device_bound、周期子任务快照复制、scheduler 预检失败落库、失败继续和 execute_type 白名单。 |
 | Task 8 | `a2e192fa..b3129773` | 规格与质量复审通过；API/Hook 聚焦测试 16 项和 `cd omcmb && npm run typecheck` 通过，覆盖 multipart、Blob 模板、metadata-only、execution 字段收口、422/409 类型化错误、嵌套 validation_summary/issues、详情缓存失效和中英文 i18n。 |
+| Task 9 | `50471f6c..ee8a7912` | 规格与质量复审通过；v1 ScriptTask focused tests 4 文件/13 项、typecheck 通过，覆盖 TXT 导入/重导入、只读预览、错误/警告过滤与报告、409 warning 确认、422/mixed error 保持 Drawer、定时/周期参数和无在线编辑器。ESLint 0 errors/93 warnings 记录为非阻塞清理项。 |
 
 ---
 
