@@ -69,7 +69,8 @@ export default function ScriptImportDialog({ open, onClose, script, onSaved }: S
       setValidation(next)
     } catch (error) {
       setValidation(validationFromError(error) ?? null)
-      setNotice(error instanceof Error ? error.message : 'TXT 校验失败')
+      const status = typeof error === 'object' && error && 'status' in error ? ` (${String((error as { status?: unknown }).status)})` : ''
+      setNotice(`${error instanceof Error ? error.message : 'TXT 校验失败'}${status}`)
     } finally {
       setUploading(false)
     }
