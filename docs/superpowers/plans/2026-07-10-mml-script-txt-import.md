@@ -25,7 +25,7 @@
 
 ## Progress Ledger
 
-**Current checkpoint:** Task 1 complete
+**Current checkpoint:** Task 2 in progress
 **Resume from:** Task 2, Step 1 — write parser failing tests
 **Last verified commit:** `52909cb9 fix(mml): 保护旧脚本导入会话`
 
