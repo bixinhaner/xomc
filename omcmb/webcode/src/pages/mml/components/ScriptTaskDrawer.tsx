@@ -267,7 +267,9 @@ export default function ScriptTaskDrawer({
           throw new Error('PLAN_REQUIRED');
         }
         if (isDeviceBound && parseResult.warnings.length > 0) {
-          toast.warning('按设备计划行模式下，每条有效脚本行都需要携带 SN。');
+          toast.warning(t('mml.executeModeAllRowsRequireSn', {
+            mode: t('mml.executeModeDeviceBound'),
+          }));
           throw new Error('PLAN_MIXED');
         }
         if (!isDeviceBound && deviceSns.length === 0) {
@@ -386,14 +388,20 @@ export default function ScriptTaskDrawer({
           <label style={{ display: 'block', marginBottom: 4, fontSize: 14 }}>
             {t('mml.executeMode')}
           </label>
-          <Radio.Group value={parseResult.executeMode} disabled>
-            <Radio value="common">{t('mml.executeModeCommon')}</Radio>
-            <Radio value="device_bound">{t('mml.executeModeDeviceBound')}</Radio>
-          </Radio.Group>
-          <div style={{ color: '#999', fontSize: 12, marginTop: 4 }}>
-            {isDeviceBound
-              ? `${t('mml.planItemCount', { count: parsedPlanItems.length })} / ${t('mml.planDeviceCount', { count: parseResult.deviceSns.length })}`
-              : t('mml.commandsParsed', { count: parsedCommands.length })}
+          <div style={{ border: '1px solid #d9d9d9', borderRadius: 8, padding: '12px 14px' }}>
+            <div style={{ fontSize: 14, fontWeight: 600 }}>
+              {isDeviceBound ? t('mml.executeModeDeviceBound') : t('mml.executeModeCommon')}
+            </div>
+            <div style={{ color: '#666', fontSize: 12, lineHeight: 1.6, marginTop: 4 }}>
+              {isDeviceBound
+                ? t('mml.executeModeDeviceBoundDescription')
+                : t('mml.executeModeCommonDescription')}
+            </div>
+            <div style={{ color: '#999', fontSize: 12, marginTop: 6 }}>
+              {isDeviceBound
+                ? `${t('mml.planItemCount', { count: parsedPlanItems.length })} / ${t('mml.planDeviceCount', { count: parseResult.deviceSns.length })}`
+                : t('mml.commandsParsed', { count: parsedCommands.length })}
+            </div>
           </div>
         </div>
 
@@ -403,7 +411,10 @@ export default function ScriptTaskDrawer({
               {t('mml.deviceSn')}
             </label>
             <div style={{ color: '#999', fontSize: 12 }}>
-              按设备计划行模式已从脚本解析 {parseResult.deviceSns.length} 台设备，不需要单独选择 SN。
+              {t('mml.executeModeParsedDevices', {
+                mode: t('mml.executeModeDeviceBound'),
+                count: parseResult.deviceSns.length,
+              })}
             </div>
           </div>
         ) : (

@@ -1,6 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import { Button, Descriptions, Drawer, Empty, Form, Input, Modal, Radio, Space, Spin, Table, Tag, Typography, message, theme } from 'antd';
-import type { RadioChangeEvent } from 'antd';
+import { Button, Descriptions, Drawer, Empty, Form, Input, Modal, Space, Spin, Table, Tag, Typography, message, theme } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 
@@ -10,6 +9,7 @@ import type { DataTableColumn } from '@/components/DataTable';
 import SearchInput from '@/components/SearchInput';
 import ScriptTaskDrawer from '../components/ScriptTaskDrawer';
 import CommandSelectModal from '../Console/components/CommandSelectModal';
+import ExecutionModeSelector from './ExecutionModeSelector';
 import { useT } from '@/hooks/useT';
 
 import type { MMLScript, MMLTaskExecuteMode, MMLTaskPlanItem } from '@core/types/mml';
@@ -180,8 +180,8 @@ export default function ScriptTask() {
     form.validateFields(['content']).catch(() => undefined);
   }, [selectedCommand, commandParamValues, contentValue, form]);
 
-  const handleScriptModeChange = useCallback((event: RadioChangeEvent) => {
-    setScriptMode(event.target.value as MMLTaskExecuteMode);
+  const handleScriptModeChange = useCallback((mode: MMLTaskExecuteMode) => {
+    setScriptMode(mode);
     if (!String(form.getFieldValue('content') || '').trim()) return;
     window.setTimeout(() => {
       form.validateFields(['content']).catch(() => undefined);
@@ -195,14 +195,19 @@ export default function ScriptTask() {
     const nextMode: MMLTaskExecuteMode = nextPlan.executeMode === 'device_bound' ? 'device_bound' : scriptMode;
     if (nextMode === 'device_bound') {
       if (nextPlan.planItems.length === 0) {
-        return Promise.reject(new Error('按设备计划行模式需要脚本行携带 SN；请使用“命令;SN”格式，或切换为普通模式。'));
+        return Promise.reject(new Error(t('mml.executeModeDeviceBoundRequiresSn', {
+          mode: t('mml.executeModeDeviceBound'),
+          fallback: t('mml.executeModeCommon'),
+        })));
       }
       if (nextPlan.warnings.length > 0) {
-        return Promise.reject(new Error('按设备计划行模式下，每条有效脚本行都需要携带 SN。'));
+        return Promise.reject(new Error(t('mml.executeModeAllRowsRequireSn', {
+          mode: t('mml.executeModeDeviceBound'),
+        })));
       }
     }
     return Promise.resolve();
-  }, [scriptMode]);
+  }, [scriptMode, t]);
 
   const handleSave = useCallback(() => {
     form
@@ -212,11 +217,16 @@ export default function ScriptTask() {
         const nextMode: MMLTaskExecuteMode = nextPlan.executeMode === 'device_bound' ? 'device_bound' : scriptMode;
         if (nextMode === 'device_bound') {
           if (nextPlan.planItems.length === 0) {
-            void message.error('按设备计划行模式需要脚本行携带 SN；请使用“命令;SN”格式，或切换为普通模式。');
+            void message.error(t('mml.executeModeDeviceBoundRequiresSn', {
+              mode: t('mml.executeModeDeviceBound'),
+              fallback: t('mml.executeModeCommon'),
+            }));
             return;
           }
           if (nextPlan.warnings.length > 0) {
-            void message.error('按设备计划行模式下，每条有效脚本行都需要携带 SN。');
+            void message.error(t('mml.executeModeAllRowsRequireSn', {
+              mode: t('mml.executeModeDeviceBound'),
+            }));
             return;
           }
         }
@@ -479,15 +489,12 @@ export default function ScriptTask() {
           </Form.Item>
           <Form.Item label={t('mml.executeMode')}>
             <Space direction="vertical" size={10} style={{ width: '100%' }}>
-              <Radio.Group
-                optionType="button"
-                buttonStyle="solid"
+              <ExecutionModeSelector
                 value={effectiveScriptMode}
+                deviceBoundDetected={detectedDeviceBound}
                 onChange={handleScriptModeChange}
-              >
-                <Radio.Button value="device_bound">{t('mml.executeModeDeviceBound')}</Radio.Button>
-                <Radio.Button value="common" disabled={detectedDeviceBound}>{t('mml.executeModeCommon')}</Radio.Button>
-              </Radio.Group>
+                t={t}
+              />
               {hasScriptContent ? (
                 <Space wrap>
                   {isScriptDeviceBound ? (
@@ -500,7 +507,7 @@ export default function ScriptTask() {
                   ) : null}
                   {detectedDeviceBound ? (
                     <Typography.Text type="secondary">
-                      检测到脚本中包含设备 SN，已切换为按设备计划行。
+                      {t('mml.executeModeAutoDetected', { mode: t('mml.executeModeDeviceBound') })}
                     </Typography.Text>
                   ) : null}
                 </Space>
@@ -526,7 +533,7 @@ export default function ScriptTask() {
               <Space direction="vertical" size={10} style={{ width: '100%' }}>
               {scriptPlanPreview.warnings.length > 0 ? (
                 <Typography.Text type="warning">
-                  已同时检测到带 SN 和不带 SN 的脚本行；执行时将按设备计划行处理。
+                  {t('mml.executeModeMixedRows', { mode: t('mml.executeModeDeviceBound') })}
                 </Typography.Text>
               ) : null}
               <Table<MMLTaskPlanItem>
