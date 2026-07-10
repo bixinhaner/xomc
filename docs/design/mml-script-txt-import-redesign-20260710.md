@@ -1,7 +1,7 @@
 # MML 脚本 TXT 导入重设计
 
 > 版本：2026-07-10
-> 状态：设计已确认，待实施
+> 状态：实现完成；Task 13 的本地栈/浏览器验收需在运行完整 Docker 栈后补做
 > 适用模块：MML 脚本库、脚本导入校验、MML 任务创建、任务调度与结果追溯
 > 关联文档：
 > - `docs/design/MMLScript-模板导入校验与执行逻辑总结.md`
@@ -429,3 +429,40 @@ bash omcgo/scripts/check-migrations.sh --strict
 7. 立即、挂起、定时、周期、离线等待和失败重试可用。
 8. v1、v2、v3 具备相同业务能力。
 9. 升级后旧 MML 脚本和任务数据被清除，其他任务来源不受影响。
+
+## 18. Task 13 实现与验证证据（2026-07-10）
+
+### 18.1 已落地契约
+
+- 迁移文件：`omcgo/migrations/000015_redesign_mml_script_txt_import.sql`。
+- 导入 API：`POST /api/v1/mml/scripts/import/validate`、
+  `POST /api/v1/mml/scripts/import`，重新导入对应 `/:id/import/validate` 和 `PUT /:id/import`。
+- 执行 API：`POST /api/v1/mml/scripts/:id/executions`；请求只含任务名、调度和重试策略，
+  不接受浏览器提交的 `commands`、`device_sns` 或 `plan_items`。
+- 稳定错误码：`MML_SCRIPT_VALIDATION_FAILED`（422）、`MML_IMPORT_TOKEN_CONSUMED` /
+  `MML_IMPORT_TOKEN_EXPIRED`（409）、`MML_SCRIPT_VERSION_CONFLICT`（409）、
+  `MML_FILE_TOO_LARGE`（413）、`MML_EXECUTION_VALIDATION_FAILED`（422）。
+- 结果追溯字段：任务快照及设备结果保留 `plan_line_no`、`plan_device_sn`、`plan_order`、
+  `script_content_sha256`。
+
+### 18.2 可重复 E2E 与环境限制
+
+`omcgo/scripts/e2e_mml_script_import.sh` 覆盖非法 TXT 422/无 token、合法 TXT 校验和保存、
+同 token 重放 409、服务端快照执行及结果追溯字段；样例为
+`omcgo/internal/mml/testdata/import-valid.txt` 与 `import-invalid.txt`。本轮运行命令：
+
+```text
+bash omcgo/scripts/e2e_mml_script_import.sh
+```
+
+本机 `http://localhost:8081/healthz` 返回 200，但 Docker Compose 没有运行容器，旧进程对新
+导入路径返回 404；未提供 `OMC_TOKEN`，故脚本按设计输出具体响应并以 `FAIL` 退出。没有将
+该结果伪装为 E2E PASS，也没有声称三皮肤浏览器 URL、脚本 ID、任务 ID 或截图。
+
+### 18.3 切换限制
+
+发布顺序仍为停止 MML 新建/调度、执行 `omcctl mml reset-script-data --dry-run`，复核数量后
+使用 `--apply --confirm DELETE-MML-RUNTIME`，应用 `000015` 迁移，启动服务，再运行 E2E 和
+健康检查。`--apply` 是唯一 Redis 写入口且禁止 `FLUSHDB`；迁移删除旧 MML 数据，不提供
+数据恢复 Down，回滚只能依赖发布前数据库快照。非 MML `device_tasks` 必须在切换前后单独
+统计并保持不变。
