@@ -315,6 +315,9 @@ const messages: Record<string, string> = {
   'menu.placeholder.routeParams':    '请输入路由参数',
   'menu.placeholder.parent':         '请选择上级菜单',
 
+  // Validation
+  'menu.validation.permissionKey':  '请输入权限字符',
+
   // Radio values
   'menu.radio.yes':                '是',
   'menu.radio.no':                 '否',
