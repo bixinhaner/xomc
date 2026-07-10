@@ -84,3 +84,12 @@ type CommandParamRepository interface {
 	ListByCommandID(ctx context.Context, commandID uuid.UUID) ([]MMLParamRef, error)
 	ListByCommandIDs(ctx context.Context, commandIDs []uuid.UUID) (map[uuid.UUID][]MMLParamRef, error)
 }
+
+// ScriptValidationRepository loads every external fact needed to validate a
+// parsed TXT script. Both methods deliberately accept batches: import files can
+// contain 2,000 rows and validation must not perform one database round-trip per
+// command or device.
+type ScriptValidationRepository interface {
+	LoadCommandsByCodes(ctx context.Context, codes []string, actor ValidationActor) (map[string]ValidationCommand, error)
+	LoadDevicesBySNs(ctx context.Context, sns []string) (map[string]*model.Device, error)
+}

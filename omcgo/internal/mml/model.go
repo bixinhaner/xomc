@@ -333,6 +333,7 @@ type MMLParamRef struct {
 	Tr069Path         string                 `json:"tr069_path"`
 	ValueType         string                 `json:"value_type"`
 	IsWritable        bool                   `json:"is_writable"`
+	IsRequired        bool                   `json:"is_required"`
 	DefaultValue      string                 `json:"default_value,omitempty"`
 	JsRegex           string                 `json:"js_regex,omitempty"`
 	ValueConstraint   map[string]interface{} `json:"value_constraint,omitempty"`

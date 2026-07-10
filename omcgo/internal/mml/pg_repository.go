@@ -1989,6 +1989,7 @@ func paramRefSelectExpr(lang string) string {
        sp.standard_path AS tr069_path,
        lower(COALESCE(sp.data_type, 'string'))    AS value_type,
        (sp.access = 'READ_WRITE')                  AS is_writable,
+	       csf.is_required,
        ''::text                                    AS default_value,
        ''::text                                    AS js_regex,
        '{}'::jsonb                                 AS value_constraint`
@@ -2021,7 +2022,7 @@ ORDER BY csf.sort_order ASC, csf.mml_code ASC`
 		var pr MMLParamRef
 		var constraintJSON []byte
 		if err := rows.Scan(&pr.ID, &pr.ParamCode, &pr.ParamNameZh, &pr.Tr069Path,
-			&pr.ValueType, &pr.IsWritable, &pr.DefaultValue, &pr.JsRegex, &constraintJSON); err != nil {
+			&pr.ValueType, &pr.IsWritable, &pr.IsRequired, &pr.DefaultValue, &pr.JsRegex, &constraintJSON); err != nil {
 			return nil, fmt.Errorf("scan param ref: %w", err)
 		}
 		if constraintJSON != nil && len(constraintJSON) > 2 {
@@ -2059,7 +2060,7 @@ ORDER BY csf.command_id, csf.sort_order ASC, csf.mml_code ASC`
 		var pr MMLParamRef
 		var constraintJSON []byte
 		if err := rows.Scan(&cmdID, &pr.ID, &pr.ParamCode, &pr.ParamNameZh, &pr.Tr069Path,
-			&pr.ValueType, &pr.IsWritable, &pr.DefaultValue, &pr.JsRegex, &constraintJSON); err != nil {
+			&pr.ValueType, &pr.IsWritable, &pr.IsRequired, &pr.DefaultValue, &pr.JsRegex, &constraintJSON); err != nil {
 			return nil, fmt.Errorf("scan param ref: %w", err)
 		}
 		if constraintJSON != nil && len(constraintJSON) > 2 {
@@ -2071,4 +2072,193 @@ ORDER BY csf.command_id, csf.sort_order ASC, csf.mml_code ASC`
 		return nil, fmt.Errorf("iterate param refs: %w", err)
 	}
 	return result, nil
+}
+
+// PgScriptValidationRepository is the PostgreSQL implementation used by TXT
+// import validation. It deliberately performs set-based reads only: command
+// codes, command parameters and device serial numbers are each queried as a
+// batch rather than once per parsed line.
+type PgScriptValidationRepository struct {
+	pool *pgxpool.Pool
+}
+
+func NewPgScriptValidationRepository(pool *pgxpool.Pool) *PgScriptValidationRepository {
+	return &PgScriptValidationRepository{pool: pool}
+}
+
+var _ ScriptValidationRepository = (*PgScriptValidationRepository)(nil)
+
+func (r *PgScriptValidationRepository) LoadCommandsByCodes(ctx context.Context, codes []string, actor ValidationActor) (map[string]ValidationCommand, error) {
+	result := make(map[string]ValidationCommand, len(codes))
+	if len(codes) == 0 {
+		return result, nil
+	}
+
+	standardRows, err := r.pool.Query(ctx, `
+SELECT id, command_code, operation_type, rpc_method, COALESCE(target_object, ''), target_paths, require_confirm,
+       (deprecated_at IS NOT NULL)
+  FROM mml_commands
+ WHERE command_code = ANY($1)
+   AND source = 'standard'`, codes)
+	if err != nil {
+		return nil, fmt.Errorf("load standard validation commands: %w", err)
+	}
+	standardIDs := make([]uuid.UUID, 0, len(codes))
+	standardCodes := make(map[uuid.UUID]string, len(codes))
+	for standardRows.Next() {
+		var id uuid.UUID
+		var command ValidationCommand
+		var targetPathsJSON []byte
+		if err := standardRows.Scan(&id, &command.CommandCode, &command.OperationType, &command.RPCMethod, &command.TargetObject, &targetPathsJSON, &command.RequireConfirm, &command.Disabled); err != nil {
+			standardRows.Close()
+			return nil, fmt.Errorf("scan standard validation command: %w", err)
+		}
+		if err := json.Unmarshal(targetPathsJSON, &command.TargetPaths); err != nil {
+			standardRows.Close()
+			return nil, fmt.Errorf("decode standard validation target paths: %w", err)
+		}
+		result[command.CommandCode] = command
+		standardIDs = append(standardIDs, id)
+		standardCodes[id] = command.CommandCode
+	}
+	if err := standardRows.Err(); err != nil {
+		standardRows.Close()
+		return nil, fmt.Errorf("iterate standard validation commands: %w", err)
+	}
+	standardRows.Close()
+
+	// Standard commands take precedence over a custom command with the same
+	// code. The custom predicate matches the existing public/self/group-share
+	// visibility rule, so import cannot validate an otherwise hidden command.
+	customRows, err := r.pool.Query(ctx, `
+SELECT id, command_code, operation_type, parameters, param_paths
+  FROM mml_custom_command cc
+ WHERE command_code = ANY($1)
+   AND (
+       cc.command_scope = 'public'
+       OR cc.creator = $2
+       OR EXISTS (
+           SELECT 1
+             FROM users u
+             JOIN user_roles ur ON ur.user_id = u.id
+             JOIN role_device_groups rdg ON rdg.role_id = ur.role_id
+            WHERE u.username = cc.creator
+              AND rdg.group_id = ANY($3)
+       )
+   )`, codes, actor.Username, actor.VisibleGroupIDs)
+	if err != nil {
+		return nil, fmt.Errorf("load visible custom validation commands: %w", err)
+	}
+	for customRows.Next() {
+		var id uuid.UUID
+		var code, operation string
+		var parametersJSON, pathsJSON []byte
+		if err := customRows.Scan(&id, &code, &operation, &parametersJSON, &pathsJSON); err != nil {
+			customRows.Close()
+			return nil, fmt.Errorf("scan custom validation command: %w", err)
+		}
+		if _, standard := result[code]; standard {
+			continue
+		}
+		command := ValidationCommand{CommandCode: code, OperationType: operation, RPCMethod: rpcMethodForOperation(operation)}
+		var parameters map[string]interface{}
+		if err := json.Unmarshal(parametersJSON, &parameters); err != nil {
+			customRows.Close()
+			return nil, fmt.Errorf("decode custom validation parameters: %w", err)
+		}
+		for paramCode := range parameters {
+			command.ParamRefs = append(command.ParamRefs, MMLParamRef{ParamCode: paramCode, ValueType: "string", IsWritable: true})
+		}
+		if err := json.Unmarshal(pathsJSON, &command.TargetPaths); err != nil {
+			customRows.Close()
+			return nil, fmt.Errorf("decode custom validation paths: %w", err)
+		}
+		result[code] = command
+	}
+	if err := customRows.Err(); err != nil {
+		customRows.Close()
+		return nil, fmt.Errorf("iterate custom validation commands: %w", err)
+	}
+	customRows.Close()
+
+	if len(standardIDs) == 0 {
+		return result, nil
+	}
+	paramRows, err := r.pool.Query(ctx, `
+SELECT csf.command_id, csf.mml_code, sp.standard_path,
+       lower(COALESCE(sp.data_type, 'string')),
+       (sp.access = 'READ_WRITE'), csf.is_required,
+       jsonb_strip_nulls(jsonb_build_object('min', sp.min_value, 'max', sp.max_value))
+  FROM mml_command_sub_fields csf
+  JOIN standard_params sp ON sp.id = csf.standard_path_id
+ WHERE csf.command_id = ANY($1)
+ ORDER BY csf.command_id, csf.sort_order ASC, csf.mml_code ASC`, standardIDs)
+	if err != nil {
+		return nil, fmt.Errorf("load validation command parameters: %w", err)
+	}
+	for paramRows.Next() {
+		var commandID uuid.UUID
+		var ref MMLParamRef
+		var constraints []byte
+		if err := paramRows.Scan(&commandID, &ref.ParamCode, &ref.Tr069Path, &ref.ValueType, &ref.IsWritable, &ref.IsRequired, &constraints); err != nil {
+			paramRows.Close()
+			return nil, fmt.Errorf("scan validation command parameter: %w", err)
+		}
+		if len(constraints) > 2 {
+			if err := json.Unmarshal(constraints, &ref.ValueConstraint); err != nil {
+				paramRows.Close()
+				return nil, fmt.Errorf("decode validation parameter constraint: %w", err)
+			}
+		}
+		code := standardCodes[commandID]
+		command := result[code]
+		command.ParamRefs = append(command.ParamRefs, ref)
+		result[code] = command
+	}
+	if err := paramRows.Err(); err != nil {
+		paramRows.Close()
+		return nil, fmt.Errorf("iterate validation command parameters: %w", err)
+	}
+	paramRows.Close()
+	return result, nil
+}
+
+func (r *PgScriptValidationRepository) LoadDevicesBySNs(ctx context.Context, sns []string) (map[string]*model.Device, error) {
+	result := make(map[string]*model.Device, len(sns))
+	if len(sns) == 0 {
+		return result, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+SELECT serial_number, COALESCE(product_class, ''), is_online, COALESCE(firmware_version, '')
+  FROM devices
+ WHERE serial_number = ANY($1)
+   AND deleted_at IS NULL`, sns)
+	if err != nil {
+		return nil, fmt.Errorf("load validation devices: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		device := &model.Device{}
+		if err := rows.Scan(&device.SerialNumber, &device.ProductClass, &device.IsOnline, &device.FirmwareVersion); err != nil {
+			return nil, fmt.Errorf("scan validation device: %w", err)
+		}
+		result[device.SerialNumber] = device
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate validation devices: %w", err)
+	}
+	return result, nil
+}
+
+func rpcMethodForOperation(operation string) string {
+	switch operation {
+	case "MOD":
+		return "SetParameterValues"
+	case "ADD":
+		return "AddObject"
+	case "RMV":
+		return "DeleteObject"
+	default:
+		return "GetParameterValues"
+	}
 }

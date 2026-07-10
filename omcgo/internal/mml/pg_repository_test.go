@@ -100,3 +100,19 @@ func TestPgCommandParamRepository_SQLNoDeadTableReferences(t *testing.T) {
 	assert.Contains(t, src, "standard_params",
 		"ListByCommandID/IDs 应当 JOIN standard_params 取 standardPath")
 }
+
+// TXT validation must remain set-based. This source-level contract complements
+// validator unit tests (which count repository method calls) by preventing a
+// future PG implementation from silently regressing to per-row lookups.
+func TestPgScriptValidationRepository_UsesBatchQueries(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	require.True(t, ok, "runtime.Caller failed")
+	body, err := os.ReadFile(filepath.Join(filepath.Dir(thisFile), "pg_repository.go"))
+	require.NoError(t, err)
+
+	src := string(body)
+	require.Contains(t, src, "WHERE command_code = ANY($1)")
+	require.Contains(t, src, "WHERE csf.command_id = ANY($1)")
+	require.Contains(t, src, "WHERE serial_number = ANY($1)")
+	require.Contains(t, src, "mml_command_sub_fields csf")
+}
