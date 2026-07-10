@@ -25,8 +25,8 @@
 
 ## Progress Ledger
 
-**Current checkpoint:** Task 12 complete
-**Resume from:** Task 13, Step 1 — run latest-main/migration gates
+**Current checkpoint:** Task 13 in progress
+**Resume from:** Task 13, Step 1 — write E2E failing script
 **Last verified commit:** `32a8184e docs(plan): 记录 MML 安全清理与旧入口收口`
 
 - [x] Task 1 — 数据库契约与 Go 模型
