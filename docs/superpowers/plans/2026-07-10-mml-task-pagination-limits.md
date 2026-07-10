@@ -90,4 +90,4 @@
 - [x] Run `cd omcmb && npm run skin-parity && npm run typecheck`.
 - [x] Run `git diff --check` and scoped ESLint.
 - [x] Rebuild/deploy the local web/app stack and verify v1/v2/v3 plus app health endpoints.
-- [ ] Fetch latest `origin/main`, run a non-destructive conflict check, commit, push, and create a GitLab MR.
+- [x] Fetch latest `origin/main`, run a non-destructive conflict check, commit, push, and create a GitLab MR.
