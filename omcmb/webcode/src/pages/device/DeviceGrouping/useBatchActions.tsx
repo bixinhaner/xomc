@@ -44,7 +44,7 @@ export function useBatchActions(deps: {
                   {t('device.batch.recycleMsg', { count: selectedKeys.length })}
                 </div>
                 <div className={styles.dangerConfirmHint}>
-                  {t('device.batch.deleteWarning')}
+                  {t('common.recycleConfirmDesc')}
                 </div>
               </div>
             ),

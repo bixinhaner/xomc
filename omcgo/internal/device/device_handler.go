@@ -814,7 +814,7 @@ func (h *Handler) BatchDeleteDevices(c *gin.Context) {
 	// Get username from context for recycle bin tracking
 	deletedBy := ""
 	if v, ok := c.Get(admin.CtxKeyUsername); ok {
-		deletedBy = v.(string)
+		deletedBy, _ = v.(string)
 	}
 
 	result := h.service.BatchDeleteDevices(c.Request.Context(), req.IDs, deletedBy)

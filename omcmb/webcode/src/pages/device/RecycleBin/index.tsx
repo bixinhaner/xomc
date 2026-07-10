@@ -19,6 +19,7 @@ import { useAppStore } from '@core/store/appStore';
 import { withDeviceGroupDisplayName } from '@core/utils/deviceGroupDisplay';
 import { resolveNetworkTypeLabel } from '@core/utils/networkType';
 import { getI18nText } from '@core/utils/i18nText';
+import { formatRecycleOperator } from '@core/utils/recycleBin';
 import type { Device } from '@core/types/device';
 import ImportModal from './ImportModal';
 
@@ -125,7 +126,7 @@ export default function RecycleBin() {
       ...device,
       offlineDays: calcOfflineDays(device.lastOnlineTime, device.deletedAt || ''),
       moveTime: device.deletedAt || '',
-      move_author: device.deletedBy || 'system',
+      move_author: formatRecycleOperator(device.deletedBy),
     }));
   }, [data, groupsResp?.groups, appLocale]);
 

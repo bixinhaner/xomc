@@ -18,6 +18,7 @@ import {
   usePermanentDeleteDevices,
 } from '@core/hooks/api/useDevices'
 import type { Device } from '@core/types/device'
+import { formatRecycleOperator } from '@core/utils/recycleBin'
 import { StateGate, Pager, ErrorBlock } from './_shared'
 
 const PAGE_SIZE = 20
@@ -185,7 +186,7 @@ export default function FleetRecycleBin() {
                   <div>{d.productClass || '—'}</div>
                 </div>
                 <div className="font-mono text-[10px] text-cyan-300/65">
-                  <div className="text-cyan-100/85">{d.deletedBy || '—'}</div>
+                  <div className="text-cyan-100/85">{formatRecycleOperator(d.deletedBy)}</div>
                   <div>{d.region || '—'}</div>
                 </div>
                 <div className="font-mono text-[10px] text-rose-300/70">
