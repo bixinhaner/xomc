@@ -7,7 +7,7 @@
 
 - 新增 `omcgo/internal/mml/testdata/import-valid.txt` 和 `import-invalid.txt`。
 - 新增可重复端点脚本 `omcgo/scripts/e2e_mml_script_import.sh`。脚本覆盖非法文件
-  422/不发 token、合法文件校验与保存、同 token 重放 409、服务端快照执行，以及
+  422/不发 token、合法文件校验与保存、同 token 幂等重放、服务端快照执行，以及
   `plan_line_no`、`plan_device_sn`、`plan_order`、`script_content_sha256` 结果追溯；缺少
   栈、凭据或设备时输出实际响应并以非零状态退出，不静默跳过。
 - 更新 Docker 部署 README、设计稿和实施计划，写明 `000015` 迁移、API、错误码、切换顺序、
@@ -38,6 +38,29 @@ MML script import E2E: FAIL (pass=1 fail=5)
 新导入路由；本轮未设置 `OMC_TOKEN`，也没有可确认的 `MML_E2E_SN`。因此没有声称 E2E PASS、
 脚本 ID、任务 ID 或浏览器截图。
 
+随后发现并修复 Redis Lua claim/release 对空数组进行 cjson round-trip 导致保存 500 的缺陷：
+`b141b1e2` 将 claim 状态拆到同 hash-tag 的独立 key，`c52bd8f6` 补充临界 TTL 直接过期保护。
+重建 app 镜像后使用管理员会话直连 `http://localhost:18081` 复跑，15 项断言全部通过：
+
+```text
+[PASS] health check (HTTP 200)
+[PASS] invalid TXT is rejected (HTTP 422)
+[PASS] invalid TXT cannot produce a save token
+[PASS] valid TXT validation (HTTP 200)
+[PASS] valid TXT returns one-time token
+[PASS] validated TXT can be saved (HTTP 201)
+[PASS] save returns script id
+[PASS] same token replay is idempotent (HTTP 201)
+[PASS] replay returns the original script
+[PASS] execution uses server snapshot (HTTP 201)
+[PASS] execution returns task id
+[PASS] task snapshot is readable (HTTP 200)
+[PASS] task stores immutable script hash
+[PASS] task results are traceable (HTTP 200)
+[PASS] results expose immutable plan trace fields
+MML script import E2E: PASS (pass=15 fail=0)
+```
+
 ## 质量门
 
 | 命令 | 结果 |
@@ -64,12 +87,10 @@ bash omcgo/scripts/check-migrations.sh --strict # exit 0（同上既有告警）
 
 ## 未执行 / 阻塞项
 
-- 三皮肤真实浏览器 `/mml/script` 验收（URL、脚本/任务 ID、网络响应和截图）：Docker 栈未运行，
-  无法进行，不伪造证据。
-- `omcctl mml reset-script-data --dry-run` 与 `--apply --confirm DELETE-MML-RUNTIME`：Redis
-  容器未运行，未执行任何写操作；切换前后非 MML `device_tasks` 数量未能观测。
-- 完整栈迁移、健康检查、E2E PASS 和结果追溯：需先启动 compose、应用 `000015`、提供登录 token
-  和已注册设备，再按 README §15 顺序执行。
+- 三皮肤真实浏览器 `/mml/script` 验收（URL、脚本/任务 ID、网络响应和截图）：当前只重建并替换
+  app，web 镜像构建在 npm ci 阶段受限，未伪造浏览器证据。
+- `omcctl mml reset-script-data --dry-run`：已执行，输出 `matched=0 deleted=0 skipped=41 errors=0`；
+  按安全边界未执行有写操作的 `--apply --confirm DELETE-MML-RUNTIME`，非 MML 切换前后数量未做破坏性演练。
 
 ## 当前进度
 

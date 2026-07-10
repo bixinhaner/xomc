@@ -87,9 +87,12 @@ try:
     elif expr == 'no_validation_token': ok = not bool(data.get('data', {}).get('validation_token'))
     elif expr == 'script_id': ok = bool(data.get('data', {}).get('id') or data.get('data', {}).get('script', {}).get('id'))
     elif expr == 'task_id': ok = bool(data.get('data', {}).get('task', {}).get('id') or data.get('data', {}).get('id'))
+    elif expr == 'same_script_id': ok = bool(data.get('data', {}).get('id'))
     elif expr == 'result_trace_fields':
         text = json.dumps(data)
-        ok = all(k in text for k in ('plan_line_no', 'plan_device_sn', 'plan_order', 'script_content_sha256'))
+        ok = all(k in text for k in ('plan_line_no', 'plan_device_sn', 'plan_order'))
+    elif expr == 'task_snapshot_hash':
+        ok = bool(data.get('data', {}).get('script_content_sha256'))
     else: ok = False
 except Exception:
     ok = False
@@ -133,7 +136,14 @@ if [ -n "$TOKEN_VALUE" ]; then
 
   replay="$TMP_DIR/replay.json"
   status="$(request "$replay" -X POST "$API/mml/scripts/import" "${AUTH_ARGS[@]}" -H 'Content-Type: application/json' -d "$save_body")"
-  assert_status "same token cannot be replayed" 409 "$status" "$replay"
+  assert_status "same token replay is idempotent" 201 "$status" "$replay"
+  REPLAY_SCRIPT_ID="$(json_value data.id "$replay")"
+  if [ -n "$SCRIPT_ID" ] && [ "$REPLAY_SCRIPT_ID" = "$SCRIPT_ID" ]; then
+    pass "replay returns the original script"
+  else
+    fail "replay returns the original script"
+    show_response "replay returns the original script" "$status" "$replay"
+  fi
 
   if [ -n "$SCRIPT_ID" ]; then
     execution="$TMP_DIR/execution.json"
@@ -143,6 +153,10 @@ if [ -n "$TOKEN_VALUE" ]; then
     assert_json "execution returns task id" "$execution" task_id
     TASK_ID="$(json_value data.task.id "$execution")"
     [ -n "$TASK_ID" ] && {
+      task="$TMP_DIR/task.json"
+      status="$(request "$task" -X GET "$API/mml/tasks/$TASK_ID" "${AUTH_ARGS[@]}")"
+      assert_status "task snapshot is readable" 200 "$status" "$task"
+      assert_json "task stores immutable script hash" "$task" task_snapshot_hash
       result="$TMP_DIR/result.json"
       status="$(request "$result" -X GET "$API/mml/tasks/$TASK_ID/results" "${AUTH_ARGS[@]}")"
       assert_status "task results are traceable" 200 "$status" "$result"

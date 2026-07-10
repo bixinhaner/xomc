@@ -448,16 +448,17 @@ bash omcgo/scripts/check-migrations.sh --strict
 ### 18.2 可重复 E2E 与环境限制
 
 `omcgo/scripts/e2e_mml_script_import.sh` 覆盖非法 TXT 422/无 token、合法 TXT 校验和保存、
-同 token 重放 409、服务端快照执行及结果追溯字段；样例为
+同 token 重放幂等返回原脚本、服务端快照执行及结果追溯字段；样例为
 `omcgo/internal/mml/testdata/import-valid.txt` 与 `import-invalid.txt`。本轮运行命令：
 
 ```text
 bash omcgo/scripts/e2e_mml_script_import.sh
 ```
 
-本机 `http://localhost:8081/healthz` 返回 200，但 Docker Compose 没有运行容器，旧进程对新
-导入路径返回 404；未提供 `OMC_TOKEN`，故脚本按设计输出具体响应并以 `FAIL` 退出。没有将
-该结果伪装为 E2E PASS，也没有声称三皮肤浏览器 URL、脚本 ID、任务 ID 或截图。
+本轮先在旧进程上观察到导入路径 404；重建当前分支 app 镜像并直连
+`http://localhost:18081` 后，使用管理员登录令牌复跑，15 项断言全部通过：非法/合法 TXT、
+保存、同 token 幂等重放、任务快照哈希、结果计划行追溯。三皮肤真实浏览器验收仍需带 web
+镜像和浏览器会话的环境补齐，不能用本轮 API 结果替代截图证据。
 
 ### 18.3 切换限制
 
