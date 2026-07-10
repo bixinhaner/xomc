@@ -11,9 +11,16 @@ import ScriptTaskDrawer from '../components/ScriptTaskDrawer';
 import CommandSelectModal from '../Console/components/CommandSelectModal';
 import ExecutionModeSelector from './ExecutionModeSelector';
 import { useT } from '@/hooks/useT';
+import type { TranslateFn } from '@/hooks/useT';
 
 import type { MMLScript, MMLTaskExecuteMode, MMLTaskPlanItem } from '@core/types/mml';
 import { parseMmlScriptPlan } from '@core/utils/mmlScriptPlanParser';
+import {
+  MML_PREVIEW_PAGE_SIZE,
+  MML_PREVIEW_PAGE_SIZE_OPTIONS,
+  validateMmlTaskScale,
+} from '@core/utils/mmlTaskScale';
+import type { MMLTaskScaleIssue } from '@core/utils/mmlTaskScale';
 import type { CommandItem, CommandParamPath } from '../Console/types';
 import {
   useMMLScripts,
@@ -28,6 +35,12 @@ function formatTime(iso?: string | null): string {
   if (!iso) return '-';
   const d = dayjs(iso);
   return d.isValid() ? d.format('YYYY-MM-DD HH:mm:ss') : '-';
+}
+
+function taskScaleMessage(t: TranslateFn, issue: MMLTaskScaleIssue): string {
+  return issue.kind === 'devices'
+    ? t('mml.taskDeviceLimitExceeded', issue)
+    : t('mml.taskPlanLimitExceeded', issue);
 }
 
 // 新增/编辑脚本弹窗的表单结构 —— 字段与后端 createScript/updateScript
@@ -193,6 +206,11 @@ export default function ScriptTask() {
     if (!content.trim()) return Promise.resolve();
     const nextPlan = parseMmlScriptPlan(content, { format: 'auto' });
     const nextMode: MMLTaskExecuteMode = nextPlan.executeMode === 'device_bound' ? 'device_bound' : scriptMode;
+    const rowCount = nextMode === 'device_bound' ? nextPlan.planItems.length : nextPlan.commands.length;
+    const scaleIssue = validateMmlTaskScale(nextPlan.deviceSns, rowCount);
+    if (scaleIssue) {
+      return Promise.reject(new Error(taskScaleMessage(t, scaleIssue)));
+    }
     if (nextMode === 'device_bound') {
       if (nextPlan.planItems.length === 0) {
         return Promise.reject(new Error(t('mml.executeModeDeviceBoundRequiresSn', {
@@ -542,9 +560,13 @@ export default function ScriptTask() {
                 columns={scriptPlanPreviewColumns}
                 dataSource={scriptPlanPreview.planItems}
                 pagination={
-                  scriptPlanPreview.planItems.length > 5
-                    ? { pageSize: 5, size: 'small', showSizeChanger: false }
-                    : false
+                  {
+                    defaultPageSize: MML_PREVIEW_PAGE_SIZE,
+                    pageSizeOptions: MML_PREVIEW_PAGE_SIZE_OPTIONS.map(String),
+                    showSizeChanger: scriptPlanPreview.planItems.length > MML_PREVIEW_PAGE_SIZE,
+                    size: 'small',
+                    showTotal: (total, [start, end]) => t('mml.planRange', { start, end, total }),
+                  }
                 }
               />
               </Space>

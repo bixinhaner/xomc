@@ -25,6 +25,13 @@ import {
 import { useCreateMMLTask, useMMLScriptById, useMMLScripts } from '@core/hooks/api/useMML'
 import type { MMLScript, MMLScriptStatus } from '@core/types/mml'
 import { parseMmlScriptPlan } from '@core/utils/mmlScriptPlanParser'
+import {
+  MML_MAX_TASK_DEVICES,
+  MML_PREVIEW_PAGE_SIZE,
+  MML_PREVIEW_PAGE_SIZE_OPTIONS,
+  paginateMmlPreview,
+  validateMmlTaskScale,
+} from '@core/utils/mmlTaskScale'
 
 // ============================================================
 // MML 脚本库 — mml_scripts 批量脚本（对齐 v1 mml/ScriptTask，参照 v3 mml/script）
@@ -244,22 +251,43 @@ function ScriptExecuteDialog({
   const [taskName, setTaskName] = useState(`执行脚本: ${script.scriptName}`)
   const [deviceInput, setDeviceInput] = useState('')
   const [error, setError] = useState('')
+  const [previewPage, setPreviewPage] = useState(1)
+  const [previewPageSize, setPreviewPageSize] = useState(MML_PREVIEW_PAGE_SIZE)
   const createTask = useCreateMMLTask()
   const parsed = useMemo(
     () => parseMmlScriptPlan(detailScript.content ?? '', { format: 'auto' }),
     [detailScript.content]
   )
   const isDeviceBound = parsed.executeMode === 'device_bound'
+  const enteredDeviceSns = useMemo(() => parseDeviceInput(deviceInput), [deviceInput])
+  const planPreview = useMemo(
+    () => paginateMmlPreview(parsed.planItems, previewPage, previewPageSize),
+    [parsed.planItems, previewPage, previewPageSize]
+  )
+  const devicePreview = useMemo(
+    () => paginateMmlPreview(enteredDeviceSns, previewPage, previewPageSize),
+    [enteredDeviceSns, previewPage, previewPageSize]
+  )
 
   const submit = async () => {
     setError('')
-    const deviceSns = isDeviceBound ? parsed.deviceSns : parseDeviceInput(deviceInput)
+    const deviceSns = isDeviceBound ? parsed.deviceSns : enteredDeviceSns
     if (!isDeviceBound && deviceSns.length === 0) {
       setError('请输入设备 SN')
       return
     }
     if (parsed.commands.length === 0) {
       setError('脚本内容为空')
+      return
+    }
+    const scaleIssue = validateMmlTaskScale(
+      deviceSns,
+      isDeviceBound ? parsed.planItems.length : parsed.commands.length
+    )
+    if (scaleIssue) {
+      setError(scaleIssue.kind === 'devices'
+        ? `设备数量 ${scaleIssue.current} 超过单任务上限 ${scaleIssue.max} 台。`
+        : `命令行数 ${scaleIssue.current} 超过单任务上限 ${scaleIssue.max} 行。`)
       return
     }
     await createTask.mutateAsync({
@@ -310,21 +338,39 @@ function ScriptExecuteDialog({
             <MiniStat label="解析结果" value={isDeviceBound ? `${parsed.planItems.length} 行 / ${parsed.deviceSns.length} 台` : `${parsed.commands.length} 条命令`} />
           </div>
           {!isDeviceBound ? (
-            <Field
-              label="设备 SN"
-              value={
+            <div className="space-y-2">
+              <Field
+                label="设备 SN"
+                value={
                 <Input
                   value={deviceInput}
                   placeholder="逗号、空格或换行分隔"
-                  onChange={(e) => setDeviceInput(e.target.value)}
+                  onChange={(e) => {
+                    setDeviceInput(e.target.value)
+                    setPreviewPage(1)
+                  }}
                 />
-              }
-            />
+                }
+              />
+              {enteredDeviceSns.length > 0 ? (
+                <div className="rounded border bg-muted/30">
+                  <div className="border-b px-3 py-2 text-xs font-medium text-muted-foreground">
+                    已选 {enteredDeviceSns.length}/{MML_MAX_TASK_DEVICES} 台设备
+                  </div>
+                  <div className="grid max-h-44 grid-cols-1 gap-px overflow-auto bg-border sm:grid-cols-2">
+                    {devicePreview.items.map((sn) => (
+                      <div key={sn} className="truncate bg-background px-3 py-1.5 font-mono text-xs">{sn}</div>
+                    ))}
+                  </div>
+                  <PreviewPager pageData={devicePreview} pageSize={previewPageSize} onPage={setPreviewPage} onPageSize={(size) => { setPreviewPageSize(size); setPreviewPage(1) }} unit="台" />
+                </div>
+              ) : null}
+            </div>
           ) : (
             <div className="rounded border bg-muted/30">
               <div className="border-b px-3 py-2 text-xs font-medium text-muted-foreground">计划行预览</div>
               <div className="max-h-56 overflow-auto">
-                {parsed.planItems.slice(0, 20).map((item) => (
+                {planPreview.items.map((item) => (
                   <div key={`${item.lineNo}-${item.deviceSn}-${item.order}`} className="grid grid-cols-[72px_150px_1fr] gap-2 border-b px-3 py-1.5 text-xs last:border-b-0">
                     <span className="font-mono">#{item.lineNo}/{item.order}</span>
                     <span className="truncate font-mono">{item.deviceSn}</span>
@@ -332,6 +378,7 @@ function ScriptExecuteDialog({
                   </div>
                 ))}
               </div>
+              <PreviewPager pageData={planPreview} pageSize={previewPageSize} onPage={setPreviewPage} onPageSize={(size) => { setPreviewPageSize(size); setPreviewPage(1) }} />
             </div>
           )}
           {error ? <div className="text-sm text-destructive">{error}</div> : null}
@@ -434,6 +481,34 @@ function ScriptDetailDrawer({
 
 function parseDeviceInput(value: string): string[] {
   return Array.from(new Set(value.split(/[,\s;]+/).map((v) => v.trim()).filter(Boolean)))
+}
+
+function PreviewPager({
+  pageData,
+  pageSize,
+  onPage,
+  onPageSize,
+  unit = '条',
+}: {
+  pageData: { page: number; pageCount: number; start: number; end: number; total: number }
+  pageSize: number
+  onPage: (page: number) => void
+  onPageSize: (pageSize: number) => void
+  unit?: string
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2 text-xs text-muted-foreground">
+      <span>第 {pageData.start}–{pageData.end} {unit}，共 {pageData.total} {unit}</span>
+      <div className="flex items-center gap-2">
+        <select className="h-7 rounded border bg-background px-1" value={pageSize} onChange={(event) => onPageSize(Number(event.target.value))}>
+          {MML_PREVIEW_PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size} {unit}/页</option>)}
+        </select>
+        <Button variant="outline" size="sm" className="h-7 px-2" disabled={pageData.page <= 1} onClick={() => onPage(pageData.page - 1)}>上一页</Button>
+        <span>{pageData.page}/{pageData.pageCount}</span>
+        <Button variant="outline" size="sm" className="h-7 px-2" disabled={pageData.page >= pageData.pageCount} onClick={() => onPage(pageData.page + 1)}>下一页</Button>
+      </div>
+    </div>
+  )
 }
 
 function MiniStat({ label, value }: { label: string; value: string }) {
