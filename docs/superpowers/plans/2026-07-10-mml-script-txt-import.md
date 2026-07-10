@@ -25,7 +25,7 @@
 
 ## Progress Ledger
 
-**Current checkpoint:** Task 2 complete
+**Current checkpoint:** Task 3 in progress
 **Resume from:** Task 3, Step 1 — write validator failing tests
 **Last verified commit:** `82e2c21c fix(mml): 修正 TXT 末尾换行计数`
 
