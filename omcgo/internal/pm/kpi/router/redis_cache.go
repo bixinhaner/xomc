@@ -20,7 +20,7 @@ const defaultKPIRouteTTL = 24 * time.Hour
 // RedisCache 是 KPIRoute 的 L2 缓存实现。
 //
 // cache_version 失效协议（与 ProductRegistry / ParamRegistry 一致）：
-//   - 写入时把缓存值连同 SchemaVersion 一起序列化（写入瞬间 INCR 取到的整数）。
+//   - 写入时把缓存值连同 Router 构建开始时观察到的 SchemaVersion 一起序列化。
 //   - 读取时先 GET kpi-route:cache_version；若与 entry.SchemaVersion 不一致，
 //     视为 stale → 返回 (nil, nil) 走 DB 重建。
 //   - 显式失效全集 → BumpVersion()：INCR 让所有进程下一次读全部 stale。
@@ -47,7 +47,7 @@ func NewRedisCacheWithTTL(client redis.UniversalClient, ttl time.Duration) *Redi
 	return &RedisCache{client: client, ttl: ttl}
 }
 
-// cacheEntry 是 Redis value 的 wire 结构。SchemaVersion 是写入瞬间的 cache_version 整数；
+// cacheEntry 是 Redis value 的 wire 结构。SchemaVersion 是 route 构建所依据的 cache_version；
 // Payload 是 KPIRoute 本体。
 //
 // 与 parammodel/cache.go 当前 entry 形态不同：parammodel 直接存裸 payload，
@@ -108,14 +108,11 @@ func routeHasNormalizationMetadata(route *KPIRoute) bool {
 	return true
 }
 
-// Put 写入缓存条目，SchemaVersion 取自当前 cache_version 整数（首次未 INCR → 0）。
-func (c *RedisCache) Put(ctx context.Context, route *KPIRoute) error {
+// Put 写入缓存条目。version 是 Router 开始构建本次 route 时观察到的 cache_version；
+// 显式传入可避免构建期间发生 Bump 后，把旧 DB 快照错误标成新版本。
+func (c *RedisCache) Put(ctx context.Context, route *KPIRoute, version int64) error {
 	if route == nil {
 		return errors.New("router.RedisCache.Put: nil route")
-	}
-	version, err := c.GetVersion(ctx)
-	if err != nil {
-		return fmt.Errorf("get cache_version: %w", err)
 	}
 	entry := cacheEntry{SchemaVersion: version, Payload: *route}
 	data, err := json.Marshal(entry)
