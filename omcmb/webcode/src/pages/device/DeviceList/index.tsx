@@ -361,7 +361,7 @@ export default function DeviceList() {
   const batchReboot = useBatchRebootDevices();
   const updateDevice = useUpdateDevice();
   const triggerAlarmSync = useTriggerAlarmSync();
-  useAlarmCountWithDeviceListInvalidation();
+  const alarmCountQuery = useAlarmCountWithDeviceListInvalidation();
   const createUfteTask = useCreateUnifiedFileTransferTask();
   const downloadStationLog = useDownloadStationLog();
   const taskNameUser = currentUser?.username || currentUser?.displayName || 'user';
@@ -750,12 +750,13 @@ export default function DeviceList() {
   // T-0162: 优先用 online_count / offline_count（与 backend DeviceListStats 1:1）；
   // 老 stats.online / stats.offline 字段在新前端不再使用（仅 mapListResponse 内部
   // 当 fallback 保留），新 UI 直读 stats.online_count。
+  const activeAlarmCount = alarmCountQuery.data?.total_active ?? stats.alarmed;
   const statsItems = useMemo(() => [
     { label: t('device.count.total'), value: stats.total },
     { label: t('status.online'), value: stats.online_count ?? stats.online ?? 0, color: '#52C41A' },
     { label: t('status.offline'), value: stats.offline_count ?? stats.offline ?? 0, color: '#8C8C8C' },
-    { label: t('common.hasAlarm'), value: stats.alarmed, color: '#FA8C16' },
-  ], [stats, t]);
+    { label: t('alarm.stat.activeAlarm'), value: activeAlarmCount, color: '#FA8C16' },
+  ], [activeAlarmCount, stats, t]);
 
   const handleSearch = useCallback((values: Record<string, unknown>) => {
     // 关键字上限校验：后端 BuildSearchOR 限定 ≤50 keyword × 6 fields = 300 ILIKE
