@@ -238,6 +238,18 @@ func (KeyBuilder) UploadSession(deviceSN, cwmpID string) string {
 	return fmt.Sprintf("upload:session:%s:%s", deviceSN, cwmpID)
 }
 
+// MMLScriptImportSession 返回 TXT 脚本导入校验会话键。tokenSHA256 必须是
+// 原始随机令牌的 SHA-256 十六进制摘要，禁止将原始令牌写入 Redis 键空间。
+func (KeyBuilder) MMLScriptImportSession(tokenSHA256 string) string {
+	return mmlScriptImportSessionPrefix + tokenSHA256
+}
+
+// MMLScriptImportConsumed 返回已消费导入令牌的短期 tombstone 键。它与会话键
+// 使用相同摘要，避免最终确认成功后的网络重试被错误地视为普通过期。
+func (KeyBuilder) MMLScriptImportConsumed(tokenSHA256 string) string {
+	return mmlScriptImportConsumedPrefix + tokenSHA256
+}
+
 // ===== Admin: 认证 / 暴力破解 / 权限 / Casbin =====
 
 // AuthCaptcha 验证码 Hash。
@@ -326,8 +338,10 @@ const (
 	kpiRouteCacheVersionKey = "kpi-route:cache_version"
 
 	// device / provision / upload
-	deviceSNPrefix          = "device:sn:"
-	provisionSyncPlanPrefix = "provision:sync_plan:"
+	deviceSNPrefix                = "device:sn:"
+	provisionSyncPlanPrefix       = "provision:sync_plan:"
+	mmlScriptImportSessionPrefix  = "omc:mml:script-import:"
+	mmlScriptImportConsumedPrefix = "omc:mml:script-import:consumed:"
 
 	// admin
 	authCaptchaPrefix       = "auth:captcha:"
