@@ -322,6 +322,8 @@ function mapBackendDevice(bd: BackendDevice): Device {
     activeAlarmCount: bd.active_alarm_count ?? 0,
     engStatus: 'commissioned',
     mgmtStatus: 'managed',
+    // "最后在线" 表示 OMC 最近一次收到设备 Inform 的时间。
+    // 本次连接时间使用 last_online_time，供"本次在线时长"计算。
     lastOnlineTime: bd.last_inform_at || '',
     ipAddress: bd.ip_address,
     subnet: '',
@@ -343,6 +345,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
     groupName: bd.group_name || '',
     sourceType: bd.source_type,
     // T-XXX (Phase 0)：字段名对齐后端 DTO。设计文档 §13。
+    // onlineTime = 本次连接时间；本次在线时长按它作为起点计算。
     onlineTime: bd.last_online_time || '',
     offlineTime: bd.last_offline_time || '',
     onlineDuration: bd.online_duration ?? null,

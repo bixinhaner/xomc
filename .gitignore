@@ -15,6 +15,7 @@ omcgo/migrate
 omcgo/omcctl
 omcgo/loadtest
 run/app
+run/hotbuild/
 omcmb/node_modules/
 omcmb/*/node_modules/
 omcmb/webcode/dist/
