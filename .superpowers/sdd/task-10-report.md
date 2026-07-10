@@ -47,3 +47,9 @@ Additional focused coverage now verifies replacement endpoint selection, templat
 
 - v2 has no shared Dialog primitive, so dialogs use the existing Tailwind modal shell.
 - Typed 422/409 API errors preserve server validation snapshots; warning-only 409 responses are confirmed explicitly, while mixed error+warning responses remain visible without confirmation.
+
+## UI primitive follow-up
+
+- Replaced the import preview’s raw plan table with the shared `@/components/ui/table` primitives.
+- Replaced the visible execution-mode control with the shared `@/components/ui/select` primitive while retaining native test/form value synchronization.
+- Focused MML tests: 2 files / 7 tests passed; `npm run typecheck` passed.
