@@ -30,6 +30,7 @@ export function FleetPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
+  useAlarmCountWithDeviceListInvalidation()
   const [page, setPage] = useState(1)
   const pageSize = 20
   const [keyword, setKeyword] = useState('')
@@ -40,7 +41,6 @@ export function FleetPage() {
   const [savingInstallAddressId, setSavingInstallAddressId] = useState<string | null>(null)
   const { data: groupsResp } = useDeviceGroups()
   const updateDevice = useUpdateDevice()
-  const alarmCountQuery = useAlarmCountWithDeviceListInvalidation()
 
   const params = useMemo(() => {
     const rawGroupID = searchParams.get('groupId') ?? undefined
@@ -62,7 +62,6 @@ export function FleetPage() {
     [data?.items]
   )
   const total = data?.total ?? 0
-  const activeAlarmCount = alarmCountQuery.data?.total_active ?? data?.stats?.alarmed ?? 0
 
   useEffect(() => {
     if (!autoRefresh) return
@@ -202,9 +201,9 @@ export function FleetPage() {
           </span>
         </span>
         <span className="text-rose-300/80">
-          ALARMS
+          ALARMED
           <span className="ml-1 font-display text-base text-rose-200 text-glow">
-            {activeAlarmCount}
+            {data?.stats?.alarmed ?? '—'}
           </span>
         </span>
       </div>

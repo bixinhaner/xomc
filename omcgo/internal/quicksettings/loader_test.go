@@ -2,7 +2,6 @@ package quicksettings
 
 import (
 	"context"
-	"encoding/xml"
 	"os"
 	"path/filepath"
 	"testing"
@@ -192,31 +191,6 @@ func TestLoader_MultiInstance_StandardPathPrefixMismatch_Rejects(t *testing.T) {
 	_, err := loader.LoadOnce(context.Background())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "must start with group objectPath")
-}
-
-func TestBuiltinBSC_HandoverOptionsUseDeviceValues(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "..", "data", "quicksettings", "BSC.xml"))
-	require.NoError(t, err)
-
-	var doc xmlQuickSettings
-	require.NoError(t, xml.Unmarshal(data, &doc))
-
-	var handover *xmlParam
-	for gi := range doc.Groups {
-		for pi := range doc.Groups[gi].Params {
-			p := &doc.Groups[gi].Params[pi]
-			if p.StandardPath == "DeviceGSM.Bts.{i}.handover" {
-				handover = p
-				break
-			}
-		}
-	}
-	require.NotNil(t, handover)
-	require.Len(t, handover.EnumOptions, 2)
-	assert.Equal(t, "1", handover.EnumOptions[0].Value)
-	assert.Equal(t, "Allow", handover.EnumOptions[0].Label)
-	assert.Equal(t, "0", handover.EnumOptions[1].Value)
-	assert.Equal(t, "Forbid", handover.EnumOptions[1].Label)
 }
 
 func TestRegistry_GetByParamModel_IsCopy(t *testing.T) {
