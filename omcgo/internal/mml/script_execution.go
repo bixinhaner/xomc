@@ -64,6 +64,12 @@ func (s *Service) CreateScriptExecution(ctx context.Context, scriptID uuid.UUID,
 	if actor == "" {
 		return nil, nil, commonerrors.ErrUnauthorized
 	}
+	switch req.ExecuteType {
+	case "", ExecuteImmediate, ExecuteScheduled, ExecutePeriodic, ExecuteSuspended:
+		// empty means immediate, matching ExecuteCommand's internal default.
+	default:
+		return nil, nil, fmt.Errorf("unsupported execute_type %q: %w", req.ExecuteType, commonerrors.ErrInvalidInput)
+	}
 	if scriptID == uuid.Nil {
 		return nil, nil, fmt.Errorf("script id is required: %w", commonerrors.ErrInvalidInput)
 	}
