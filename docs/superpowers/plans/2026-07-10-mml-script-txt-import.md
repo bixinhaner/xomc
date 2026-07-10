@@ -25,7 +25,7 @@
 
 ## Progress Ledger
 
-**Current checkpoint:** Task 5 complete
+**Current checkpoint:** Task 6 in progress
 **Resume from:** Task 6, Step 1 — write route and multipart failing tests
 **Last verified commit:** `053b2439 fix(mml): 校验导入幂等脚本归属`
 
