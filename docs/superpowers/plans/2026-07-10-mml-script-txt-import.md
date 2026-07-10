@@ -27,7 +27,7 @@
 
 **Current checkpoint:** Task 4 complete
 **Resume from:** Task 5, Step 1 — write transactional import-service failing tests
-**Last verified commit:** `2b634644 fix(mml): 强化 TXT 脚本校验权威性`
+**Last verified commit:** `4ce47694 fix(mml): 统一导入会话 Redis 集群槽位`
 
 - [x] Task 1 — 数据库契约与 Go 模型
 - [x] Task 2 — TXT Parser
@@ -69,7 +69,7 @@
 | Task 1 | `e3f605e0..52909cb9` | 规格与质量复审通过；migration strict、PG 契约测试和 `go test ./internal/mml -count=1` 通过 |
 | Task 2 | `43edbfa8..82e2c21c` | 规格与质量最终复审通过；聚焦 parser、MML 全包测试和 package build 通过，覆盖 BOM/CR/LF、终止换行 SHA、逐设备顺序、引号/大括号分隔符、200/2000 边界与有界错误累积。 |
 | Task 3 | `d8885bbe..2b634644` | 规格与质量复审通过；批量 validator/PG 测试、MML package/build 和全量 Go 测试通过，覆盖 unsignedInt、boolean、可见自定义命令歧义与操作类型不匹配。 |
-| Task 4 | this commit | miniredis 会话测试、MML 包全量测试及 app build 通过；覆盖随机 32-byte token、SHA-256 Redis key、15 分钟 TTL、用户绑定、过期、Claim/Release、并发双 Claim 和 consumed tombstone。 |
+| Task 4 | `adc3bf6e..4ce47694` | miniredis 会话测试、MML 包全量测试及 app build 通过；覆盖随机 32-byte token、SHA-256 Redis key、15 分钟 TTL、用户绑定、过期、Claim/Release、并发双 Claim、consumed tombstone，以及 Redis Cluster 同槽位。 |
 
 ---
 
