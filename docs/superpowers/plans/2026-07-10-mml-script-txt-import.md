@@ -27,7 +27,7 @@
 
 **Current checkpoint:** Task 7 complete
 **Resume from:** Task 8, Step 1 — write API mapping failing tests
-**Last verified commit:** `6e154e0c test(mml): 拒绝执行请求中的客户端命令字段`
+**Last verified commit:** `1635d5f2 fix(mml): 校验脚本执行类型`
 
 - [x] Task 1 — 数据库契约与 Go 模型
 - [x] Task 2 — TXT Parser
@@ -72,7 +72,7 @@
 | Task 4 | `adc3bf6e..4ce47694` | miniredis 会话测试、MML 包全量测试及 app build 通过；覆盖随机 32-byte token、SHA-256 Redis key、15 分钟 TTL、用户绑定、过期、Claim/Release、并发双 Claim、consumed tombstone，以及 Redis Cluster 同槽位。 |
 | Task 5 | `6fdfd51f..f23a9f17` | 规格与质量复审通过；服务/仓库聚焦测试、MML 包全量测试和 app build 通过，覆盖错误不发 token、warning 快照、Claim/Release/Finalize、跨 Redis/PG 幂等、替换版本冲突、Finalize 重试恢复、ValidatedAt 快照和 Creator 权限。 |
 | Task 6 | `2c8a080f` | 规格与质量复审通过；handler focused tests、MML 包全量测试和 app build 通过，覆盖模板下载、5 路由、multipart 2MiB+64KiB、.txt/缺文件/413、鉴权/403、422 逐行问题、409 重放、严格 JSON、metadata-only 与 updated_at reload、Redis/PG 注入。 |
-| Task 7 | `5ef20c71..6e154e0c` | 规格与质量复审通过；执行/调度 focused tests、MML 包与 cmd/app 测试、app build 通过，覆盖服务端 plan 快照、严格请求字段、动态 error/409 warning、device_bound、周期子任务快照复制、scheduler 预检失败落库和失败继续。 |
+| Task 7 | `5ef20c71..1635d5f2` | 规格与质量复审通过；执行/调度 focused tests、MML 包与 cmd/app 测试、app build 通过，覆盖服务端 plan 快照、严格请求字段、动态 error/409 warning、device_bound、周期子任务快照复制、scheduler 预检失败落库、失败继续和 execute_type 白名单。 |
 
 ---
 
