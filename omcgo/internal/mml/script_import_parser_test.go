@@ -1,0 +1,120 @@
+package mml
+
+import (
+	"strconv"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+func TestParseScriptTXT_DerivesPerDeviceOrder(t *testing.T) {
+	raw := []byte("\xef\xbb\xbf# note\r\nLST DEVICE_INFO;SN1\r\nMOD DEVICE_INFO:USER_LABEL=A;SN2\r\nLST DEVICE_INFO;SN2\r\n")
+
+	got, issues := ParseScriptTXT(raw)
+
+	require.Empty(t, issues)
+	require.Equal(t, "# note\nLST DEVICE_INFO;SN1\nMOD DEVICE_INFO:USER_LABEL=A;SN2\nLST DEVICE_INFO;SN2\n", got.NormalizedContent)
+	require.Len(t, got.SHA256, 64)
+	require.Equal(t, []int{1, 1, 2}, []int{got.Lines[0].Order, got.Lines[1].Order, got.Lines[2].Order})
+	require.Equal(t, []int{2, 3, 4}, []int{got.Lines[0].LineNo, got.Lines[1].LineNo, got.Lines[2].LineNo})
+	require.Equal(t, []string{"LST DEVICE_INFO", "MOD DEVICE_INFO", "LST DEVICE_INFO"}, []string{
+		got.Lines[0].CommandCode, got.Lines[1].CommandCode, got.Lines[2].CommandCode,
+	})
+}
+
+func TestParseScriptTXT_RejectsInvalidInput(t *testing.T) {
+	tests := []struct {
+		name     string
+		raw      []byte
+		wantCode string
+		lineNo   int
+		rawLine  string
+	}{
+		{
+			name:     "empty file",
+			raw:      []byte("\r\n# comment\n\n"),
+			wantCode: "MML_FILE_EMPTY",
+		},
+		{
+			name:     "non utf8",
+			raw:      []byte{0xff},
+			wantCode: "MML_FILE_ENCODING_INVALID",
+		},
+		{
+			name:     "missing serial number",
+			raw:      []byte("LST DEVICE_INFO\n"),
+			wantCode: "MML_DEVICE_SN_REQUIRED",
+			lineNo:   1,
+			rawLine:  "LST DEVICE_INFO",
+		},
+		{
+			name:     "multiple serial numbers",
+			raw:      []byte("LST DEVICE_INFO;SN1,SN2\n"),
+			wantCode: "MML_DEVICE_SN_MULTIPLE",
+			lineNo:   1,
+			rawLine:  "LST DEVICE_INFO;SN1,SN2",
+		},
+		{
+			name:     "two commands in one physical line",
+			raw:      []byte("LST DEVICE_INFO;SN1;MOD DEVICE_INFO;SN1\n"),
+			wantCode: "MML_LINE_FORMAT_INVALID",
+			lineNo:   1,
+			rawLine:  "LST DEVICE_INFO;SN1;MOD DEVICE_INFO;SN1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, issues := ParseScriptTXT(tt.raw)
+
+			require.NotEmpty(t, issues)
+			require.Equal(t, tt.wantCode, issues[0].Code)
+			require.Equal(t, tt.lineNo, issues[0].LineNo)
+			require.Equal(t, tt.rawLine, issues[0].RawLine)
+			if got != nil {
+				require.NotEmpty(t, got.NormalizedContent)
+			}
+		})
+	}
+}
+
+func TestParseScriptTXT_IgnoresQuotedAndBracedDelimiters(t *testing.T) {
+	got, issues := ParseScriptTXT([]byte(`MOD DEVICE_INFO:DESC="a;b,c",VALUES={x;y,z};SN1` + "\n"))
+
+	require.Empty(t, issues)
+	require.Len(t, got.Lines, 1)
+	require.Equal(t, "MOD", got.Lines[0].OperationType)
+	require.Equal(t, "MOD DEVICE_INFO", got.Lines[0].CommandCode)
+	require.Equal(t, "SN1", got.Lines[0].DeviceSN)
+	require.Equal(t, map[string]string{"DESC": "a;b,c", "VALUES": "{x;y,z}"}, got.Lines[0].Parameters)
+}
+
+func TestParseScriptTXT_RejectsMoreThanMaxLines(t *testing.T) {
+	raw := []byte(strings.Repeat("LST DEVICE_INFO;SN1\n", MaxScriptLines+1))
+
+	got, issues := ParseScriptTXT(raw)
+
+	require.NotNil(t, got)
+	require.Len(t, got.Lines, MaxScriptLines+1)
+	require.Len(t, issues, 1)
+	require.Equal(t, "MML_FILE_TOO_LARGE", issues[0].Code)
+	require.Equal(t, MaxScriptLines+1, issues[0].LineNo)
+	require.Equal(t, "LST DEVICE_INFO;SN1", issues[0].RawLine)
+}
+
+func TestParseScriptTXT_RejectsMoreThanMaxDevices(t *testing.T) {
+	var raw strings.Builder
+	for index := 1; index <= MaxScriptDevices+1; index++ {
+		raw.WriteString("LST DEVICE_INFO;SN" + strconv.Itoa(index) + "\n")
+	}
+
+	got, issues := ParseScriptTXT([]byte(raw.String()))
+
+	require.NotNil(t, got)
+	require.Len(t, got.Lines, MaxScriptDevices+1)
+	require.Len(t, issues, 1)
+	require.Equal(t, "MML_FILE_TOO_LARGE", issues[0].Code)
+	require.Equal(t, MaxScriptDevices+1, issues[0].LineNo)
+	require.Equal(t, "LST DEVICE_INFO;SN201", issues[0].RawLine)
+}

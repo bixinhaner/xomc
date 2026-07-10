@@ -25,12 +25,12 @@
 
 ## Progress Ledger
 
-**Current checkpoint:** Task 2 in progress
-**Resume from:** Task 2, Step 1 — write parser failing tests
+**Current checkpoint:** Task 2 complete
+**Resume from:** Task 3, Step 1 — write validator failing tests
 **Last verified commit:** `52909cb9 fix(mml): 保护旧脚本导入会话`
 
 - [x] Task 1 — 数据库契约与 Go 模型
-- [ ] Task 2 — TXT Parser
+- [x] Task 2 — TXT Parser
 - [ ] Task 3 — 批量命令/设备校验
 - [ ] Task 4 — Redis 一次性校验会话
 - [ ] Task 5 — 事务化脚本导入服务
@@ -67,6 +67,7 @@
 |---|---|---|
 | Design | `d44bacf5` | 设计已确认，实施计划从 Task 1 开始 |
 | Task 1 | `e3f605e0..52909cb9` | 规格与质量复审通过；migration strict、PG 契约测试和 `go test ./internal/mml -count=1` 通过 |
+| Task 2 | `feat(mml): 实现 TXT 脚本解析器` | `/usr/local/go/bin/go test ./internal/mml -run TestParseScriptTXT -count=1 -v` 与 `/usr/local/go/bin/go test ./internal/mml -count=1` 通过；覆盖 BOM/LF 规范化、逐设备顺序、稳定错误码、引号/大括号分隔符和 200/2000 边界。 |
 
 ---
 
