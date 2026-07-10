@@ -1,8 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { MMLScript, MMLCustomCommand, MMLImportedScriptCreateInput, MMLImportedScriptReplaceInput, MMLScriptExecutionInput } from '../../types/mml';
+import type { MMLScript, MMLCustomCommand, MMLImportedScriptCreateInput, MMLImportedScriptReplaceInput, MMLScriptExecutionInput, MMLScriptImportValidation } from '../../types/mml';
 import type { PageRequest } from '../../types/pagination';
 import { mmlService } from '../../mock/services/mmlService';
-import { mmlApi } from '../../services/api/mmlApi';
+import { MMLScriptImportApiError, mmlApi } from '../../services/api/mmlApi';
 import { createApiSwitch } from '../../services/apiSwitch';
 
 const api = createApiSwitch(mmlService, mmlApi);
@@ -96,7 +96,7 @@ export function useCreateMMLScript() {
 
 /** Validate a TXT file against the server-authoritative import parser. */
 export function useValidateMMLScriptImport() {
-  return useMutation({
+  return useMutation<MMLScriptImportValidation, MMLScriptImportApiError, File>({
     mutationFn: (file: File) => mmlApi.validateScriptImport(file),
   });
 }
@@ -118,7 +118,7 @@ export function useReplaceImportedMMLScript() {
       mmlApi.replaceImportedScript(id, input),
     onSuccess: (_, vars) => Promise.all([
       queryClient.invalidateQueries({ queryKey: ['mml', 'scripts'] }),
-      queryClient.invalidateQueries({ queryKey: ['mml', 'scripts', vars.id] }),
+      queryClient.invalidateQueries({ queryKey: ['mml', 'scripts', 'detail', vars.id] }),
     ]),
   });
 }
@@ -126,7 +126,11 @@ export function useReplaceImportedMMLScript() {
 /** Create an execution from a stored script snapshot, never from browser plan data. */
 export function useCreateMMLScriptExecution() {
   const queryClient = useQueryClient();
-  return useMutation({
+  return useMutation<
+    Awaited<ReturnType<typeof mmlApi.createScriptExecution>>,
+    MMLScriptImportApiError,
+    { id: string; input: MMLScriptExecutionInput }
+  >({
     mutationFn: ({ id, input }: { id: string; input: MMLScriptExecutionInput }) =>
       mmlApi.createScriptExecution(id, input),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['mml', 'tasks'] }),

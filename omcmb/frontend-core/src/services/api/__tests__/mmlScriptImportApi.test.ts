@@ -51,6 +51,45 @@ describe('mmlApi TXT script import', () => {
     expect(postMock.mock.calls[0][2]).toBeUndefined();
   });
 
+  it('normalizes a 422 import validation envelope into a typed error', async () => {
+    postMock.mockRejectedValue({
+      response: {
+        status: 422,
+        data: validationFailureEnvelope('MML_SCRIPT_VALIDATION_FAILED', 'script validation failed'),
+      },
+    });
+
+    await expect(mmlApi.validateScriptImport(new File(['BAD'], 'bad.txt'))).rejects.toMatchObject({
+      name: 'MMLScriptImportApiError',
+      status: 422,
+      code: 'MML_SCRIPT_VALIDATION_FAILED',
+      message: 'script validation failed',
+      validation: {
+        summary: { errorCount: 1, deviceCount: 1 },
+        planItems: [{ lineNo: 7, deviceSn: 'SN1' }],
+        issues: [{ code: 'MML_LINE_FORMAT_INVALID', lineNo: 7, rawLine: 'BAD;SN1' }],
+      },
+    });
+  });
+
+  it('normalizes a 422 replacement validation envelope into a typed error', async () => {
+    postMock.mockRejectedValue({
+      response: {
+        status: 422,
+        data: validationFailureEnvelope('MML_SCRIPT_VALIDATION_FAILED', 'replacement validation failed'),
+      },
+    });
+
+    await expect(
+      mmlApi.validateScriptReplacement('script-1', new File(['BAD'], 'replacement.txt')),
+    ).rejects.toMatchObject({
+      name: 'MMLScriptImportApiError',
+      status: 422,
+      code: 'MML_SCRIPT_VALIDATION_FAILED',
+      validation: { issues: [{ code: 'MML_LINE_FORMAT_INVALID' }] },
+    });
+  });
+
   it('saves imports with only the validation token and metadata', async () => {
     postMock.mockResolvedValue({ data: scriptResponse() });
 
@@ -127,6 +166,60 @@ describe('mmlApi TXT script import', () => {
     expect(body).not.toHaveProperty('plan_items');
   });
 
+  it('normalizes a 409 execution warning envelope into a typed error', async () => {
+    postMock.mockRejectedValue({
+      response: {
+        status: 409,
+        data: validationFailureEnvelope('MML_SCRIPT_EXECUTION_WARNINGS', 'warnings require confirmation'),
+      },
+    });
+
+    await expect(mmlApi.createScriptExecution('script-1', { taskName: '执行' })).rejects.toMatchObject({
+      name: 'MMLScriptImportApiError',
+      status: 409,
+      code: 'MML_SCRIPT_EXECUTION_WARNINGS',
+      message: 'warnings require confirmation',
+      validation: {
+        planItems: [{ lineNo: 7, deviceSn: 'SN1' }],
+        issues: [{ severity: 'error' }],
+      },
+    });
+  });
+
+  it('maps persisted nested validation_summary on listed scripts', async () => {
+    getMock.mockResolvedValue({
+      data: { items: [importedScriptResponse()], total: 1, page: 1, page_size: 20, total_pages: 1 },
+    });
+
+    const result = await mmlApi.getScripts({ page: 1, pageSize: 20 });
+
+    expect(result.items[0]).toMatchObject({
+      validationSummary: { validLines: 2, warningCount: 1 },
+      validationIssues: [{ code: 'MML_DEVICE_OFFLINE', lineNo: 2, rawLine: 'LST DEVICE_INFO;SN1' }],
+      planItems: [{ lineNo: 2, deviceSn: 'SN1' }],
+    });
+  });
+
+  it('maps persisted nested validation_summary on imported script creation', async () => {
+    postMock.mockResolvedValue({ data: importedScriptResponse() });
+
+    const result = await mmlApi.createImportedScript({ validationToken: 'token', scriptName: '巡检', description: '', tags: [] });
+
+    expect(result.validationSummary).toMatchObject({ validLines: 2, warningCount: 1 });
+    expect(result.validationIssues).toEqual([expect.objectContaining({ code: 'MML_DEVICE_OFFLINE' })]);
+  });
+
+  it('maps persisted nested validation_summary on imported script replacement', async () => {
+    putMock.mockResolvedValue({ data: importedScriptResponse() });
+
+    const result = await mmlApi.replaceImportedScript('script-1', {
+      validationToken: 'token', scriptName: '替换', description: '', tags: [], expectedUpdatedAt: '2026-07-10T00:00:00Z',
+    });
+
+    expect(result.validationSummary).toMatchObject({ validLines: 2, warningCount: 1 });
+    expect(result.validationIssues).toEqual([expect.objectContaining({ lineNo: 2 })]);
+  });
+
   it('downloads the template as a Blob and exposes the server filename', async () => {
     const blob = new Blob(['LST DEVICE_INFO;SN1\n'], { type: 'text/plain' });
     getMock.mockResolvedValue({
@@ -160,5 +253,34 @@ function taskResponse() {
     status: 'pending', results: [], creator: 'admin', created_at: '2026-07-10T00:00:00Z', updated_at: '2026-07-10T00:00:00Z',
     execute_type: 'scheduled', offline_retry: true, offline_retry_wait: 60, failed_retry: true,
     failed_retry_count: 2, failed_retry_interval: 5, total_devices: 1, success_count: 0, failed_count: 0,
+  };
+}
+
+function validationFailureEnvelope(code: string, message: string) {
+  return {
+    ret: 0,
+    msg: message,
+    code,
+    message,
+    data: {
+      summary: { total_lines: 2, valid_lines: 1, device_count: 1, error_count: 1, warning_count: 0 },
+      plan_items: [{ line_no: 7, device_sn: 'SN1', order: 1, command: { command_code: 'LST DEVICE_INFO' } }],
+      issues: [{ code: 'MML_LINE_FORMAT_INVALID', severity: 'error', line_no: 7, raw_line: 'BAD;SN1' }],
+    },
+  };
+}
+
+function importedScriptResponse() {
+  return {
+    ...scriptResponse(),
+    original_filename: '巡检.txt',
+    content_sha256: 'sha256',
+    validation_version: 'v1',
+    validated_at: '2026-07-10T00:00:00Z',
+    plan_items: [{ line_no: 2, device_sn: 'SN1', order: 1, command: { command_code: 'LST DEVICE_INFO' } }],
+    validation_summary: {
+      summary: { total_lines: 2, valid_lines: 2, device_count: 1, error_count: 0, warning_count: 1 },
+      issues: [{ code: 'MML_DEVICE_OFFLINE', severity: 'warning', line_no: 2, raw_line: 'LST DEVICE_INFO;SN1' }],
+    },
   };
 }

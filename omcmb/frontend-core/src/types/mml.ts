@@ -165,6 +165,8 @@ export interface MMLScript {
   /** 服务端权威的逐设备执行计划；浏览器只读，不可提交修改。 */
   planItems?: MMLTaskPlanItem[];
   validationSummary?: MMLScriptValidationSummary;
+  /** 持久化校验快照中的逐行问题；与 validationSummary 同时由服务端保存。 */
+  validationIssues?: MMLScriptIssue[];
 }
 
 export type MMLScriptIssueSeverity = 'error' | 'warning';

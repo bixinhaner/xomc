@@ -64,7 +64,7 @@ describe('MML TXT import hooks', () => {
 
     await waitFor(() => {
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['mml', 'scripts'] });
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['mml', 'scripts', 'script-1'] });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['mml', 'scripts', 'detail', 'script-1'] });
     });
   });
 
