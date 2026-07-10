@@ -6,7 +6,7 @@ DELETE FROM mml_tasks;
 DELETE FROM mml_scripts;
 
 ALTER TABLE mml_scripts
-    ADD COLUMN import_session_id uuid NOT NULL,
+    ADD COLUMN import_session_id uuid NOT NULL DEFAULT gen_random_uuid(),
     ADD COLUMN original_filename text NOT NULL DEFAULT '',
     ADD COLUMN content_sha256 text NOT NULL DEFAULT '',
     ADD COLUMN validation_version text NOT NULL DEFAULT '',

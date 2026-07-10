@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -27,6 +28,51 @@ func TestPgScriptRepository_TXTImportColumns(t *testing.T) {
 	}).Scan(&count)
 	require.NoError(t, err)
 	require.Equal(t, 7, count)
+
+	var importSessionDefault string
+	err = pool.QueryRow(context.Background(), `
+		SELECT COALESCE(column_default, '')
+		  FROM information_schema.columns
+		 WHERE table_schema='public' AND table_name='mml_scripts'
+		   AND column_name='import_session_id'`).Scan(&importSessionDefault)
+	require.NoError(t, err)
+	require.Contains(t, importSessionDefault, "gen_random_uuid()")
+
+	var taskCount int
+	err = pool.QueryRow(context.Background(), `
+		SELECT count(*)
+		  FROM information_schema.columns
+		 WHERE table_schema='public' AND table_name='mml_tasks'
+		   AND column_name = ANY($1)`, []string{
+		"script_content_sha256", "script_validation_version",
+	}).Scan(&taskCount)
+	require.NoError(t, err)
+	require.Equal(t, 2, taskCount)
+}
+
+// Legacy create callers have no TXT import session yet. The repository must
+// assign one so the unique database contract does not reject the second create.
+func TestPgScriptRepository_CreateAssignsImportSessionID(t *testing.T) {
+	pool := newMMLTestPool(t)
+	repo := NewPgScriptRepository(pool)
+	ctx := context.Background()
+
+	first := &MMLScript{ScriptName: "legacy import session first", Content: "LST DEVICE_INFO"}
+	second := &MMLScript{ScriptName: "legacy import session second", Content: "LST DEVICE_INFO"}
+	t.Cleanup(func() {
+		if first.ID != uuid.Nil {
+			_ = repo.Delete(ctx, first.ID)
+		}
+		if second.ID != uuid.Nil {
+			_ = repo.Delete(ctx, second.ID)
+		}
+	})
+
+	require.NoError(t, repo.Create(ctx, first))
+	require.NoError(t, repo.Create(ctx, second))
+	require.NotEqual(t, uuid.Nil, first.ImportSessionID)
+	require.NotEqual(t, uuid.Nil, second.ImportSessionID)
+	require.NotEqual(t, first.ImportSessionID, second.ImportSessionID)
 }
 
 // 回归：migration 000090 DROP `mml_command_params_rel`，migration 000095/000113

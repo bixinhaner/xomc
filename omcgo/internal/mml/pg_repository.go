@@ -365,6 +365,9 @@ func NewPgScriptRepository(pool *pgxpool.Pool) *PgScriptRepository {
 }
 
 func (r *PgScriptRepository) Create(ctx context.Context, script *MMLScript) error {
+	if script.ImportSessionID == uuid.Nil {
+		script.ImportSessionID = uuid.New()
+	}
 	if script.PlanItems == nil {
 		script.PlanItems = []MMLPlanItem{}
 	}
