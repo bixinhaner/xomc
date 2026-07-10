@@ -155,6 +155,86 @@ export interface MMLScript {
   // P1 扩展：最近一次执行态。每次执行详情查 mml_tasks。
   lastRunStatus?: string;
   lastRunAt?: string;
+  /** TXT 导入时服务端记录的原始文件名。 */
+  originalFilename?: string;
+  /** 服务端归一化 TXT 内容的 SHA-256，用于执行快照追溯。 */
+  contentSha256?: string;
+  /** 当前导入校验器版本。 */
+  validationVersion?: string;
+  validatedAt?: string;
+  /** 服务端权威的逐设备执行计划；浏览器只读，不可提交修改。 */
+  planItems?: MMLTaskPlanItem[];
+  validationSummary?: MMLScriptValidationSummary;
+}
+
+export type MMLScriptIssueSeverity = 'error' | 'warning';
+
+/** 一条由服务端 TXT parser/validator 返回的问题。 */
+export interface MMLScriptIssue {
+  code: string;
+  severity: MMLScriptIssueSeverity;
+  lineNo?: number;
+  rawLine?: string;
+  field?: string;
+  message?: string;
+}
+
+/** TXT 校验概要；effectiveLines 兼容早期接口，validLines 对应当前服务端字段。 */
+export interface MMLScriptValidationSummary {
+  totalLines: number;
+  validLines: number;
+  effectiveLines: number;
+  deviceCount: number;
+  errorCount: number;
+  warningCount: number;
+}
+
+/** 一次服务端 TXT 校验生成的、可供只读预览的权威快照。 */
+export interface MMLScriptImportValidation {
+  validationToken?: string;
+  originalFilename?: string;
+  normalizedContent?: string;
+  contentSha256?: string;
+  validationVersion?: string;
+  validatedAt?: string;
+  planItems: MMLTaskPlanItem[];
+  summary: MMLScriptValidationSummary;
+  issues: MMLScriptIssue[];
+}
+
+/** 新建导入脚本仅传递校验 token 和展示元数据。 */
+export interface MMLImportedScriptCreateInput {
+  validationToken: string;
+  scriptName: string;
+  description: string;
+  tags: string[];
+  requestId?: string;
+}
+
+/** 替换导入脚本额外携带乐观锁版本。 */
+export interface MMLImportedScriptReplaceInput extends MMLImportedScriptCreateInput {
+  expectedUpdatedAt: string;
+}
+
+/** 从导入脚本创建任务时允许的调度/重试策略。计划行始终由服务端快照提供。 */
+export interface MMLScriptExecutionInput {
+  taskName: string;
+  executeType?: MMLExecuteType;
+  scheduledAt?: string;
+  periodStart?: string;
+  periodEnd?: string;
+  periodTime?: string;
+  offlineRetry?: boolean;
+  offlineRetryWait?: number;
+  failedRetry?: boolean;
+  failedRetryCount?: number;
+  failedRetryInterval?: number;
+  confirmWarnings?: boolean;
+}
+
+export interface MMLScriptImportTemplate {
+  blob: Blob;
+  filename: string;
 }
 
 export type MMLTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'paused' | 'cancelled';

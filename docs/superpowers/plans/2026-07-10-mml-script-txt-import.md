@@ -25,8 +25,8 @@
 
 ## Progress Ledger
 
-**Current checkpoint:** Task 8 in progress
-**Resume from:** Task 8, Step 1 — write API mapping failing tests
+**Current checkpoint:** Task 8 complete
+**Resume from:** Task 9, Step 1 — write v1 interaction failing tests
 **Last verified commit:** `1635d5f2 fix(mml): 校验脚本执行类型`
 
 - [x] Task 1 — 数据库契约与 Go 模型
@@ -36,7 +36,7 @@
 - [x] Task 5 — 事务化脚本导入服务
 - [x] Task 6 — 导入 HTTP API 与依赖注入
 - [x] Task 7 — 脚本执行预检与任务快照
-- [ ] Task 8 — frontend-core 契约、API 与 Hooks
+- [x] Task 8 — frontend-core 契约、API 与 Hooks
 - [ ] Task 9 — v1 脚本库界面
 - [ ] Task 10 — v2 脚本库界面
 - [ ] Task 11 — v3 脚本库界面
@@ -73,6 +73,7 @@
 | Task 5 | `6fdfd51f..f23a9f17` | 规格与质量复审通过；服务/仓库聚焦测试、MML 包全量测试和 app build 通过，覆盖错误不发 token、warning 快照、Claim/Release/Finalize、跨 Redis/PG 幂等、替换版本冲突、Finalize 重试恢复、ValidatedAt 快照和 Creator 权限。 |
 | Task 6 | `2c8a080f` | 规格与质量复审通过；handler focused tests、MML 包全量测试和 app build 通过，覆盖模板下载、5 路由、multipart 2MiB+64KiB、.txt/缺文件/413、鉴权/403、422 逐行问题、409 重放、严格 JSON、metadata-only 与 updated_at reload、Redis/PG 注入。 |
 | Task 7 | `5ef20c71..1635d5f2` | 规格与质量复审通过；执行/调度 focused tests、MML 包与 cmd/app 测试、app build 通过，覆盖服务端 plan 快照、严格请求字段、动态 error/409 warning、device_bound、周期子任务快照复制、scheduler 预检失败落库、失败继续和 execute_type 白名单。 |
+| Task 8 | `feat(frontend-core): 接入 MML TXT 导入契约` | 先运行新增 API/Hook 红测，确认 6 个 API 方法和 4 个 hooks 均不存在；实现后 `cd omcmb/webcode && npm run test -- --run ../frontend-core/src/services/api/__tests__/mmlScriptImportApi.test.ts ../frontend-core/src/hooks/api/__tests__/useMMLScriptImport.test.tsx` 通过（10 tests），`cd omcmb && npm run typecheck` 通过（三皮肤 typecheck + skin parity）。 |
 
 ---
 
