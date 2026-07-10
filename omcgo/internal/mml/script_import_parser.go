@@ -11,10 +11,12 @@ import (
 )
 
 const (
-	MaxScriptDevices  = 200
-	MaxScriptLines    = 2000
-	MaxScriptBytes    = 2 << 20
-	ValidationVersion = "mml-txt-v1"
+	MaxScriptDevices       = 200
+	MaxScriptLines         = 2000
+	MaxScriptBytes         = 2 << 20
+	MaxScriptPhysicalLines = MaxScriptLines
+	MaxScriptIssues        = 100
+	ValidationVersion      = "mml-txt-v1"
 )
 
 // IssueSeverity is the stable severity vocabulary returned by script import.
@@ -82,15 +84,22 @@ func ParseScriptTXT(raw []byte) (*ParsedScript, []ScriptIssue) {
 	devices := make(map[string]struct{})
 	var deviceLimitIssue *ScriptIssue
 	issues := make([]ScriptIssue, 0)
-	for index, physical := range strings.Split(normalized, "\n") {
-		lineNo := index + 1
+	forEachScriptPhysicalLine(normalized, func(lineNo int, physical string) bool {
+		if lineNo > MaxScriptPhysicalLines {
+			issues = append(issues, lineIssue("MML_FILE_TOO_LARGE", lineNo, physical, "physical line limit exceeded"))
+			return false
+		}
 		parsed, issue := parseScriptPhysicalLine(lineNo, physical)
 		if issue != nil {
+			if len(issues) >= MaxScriptIssues {
+				issues = append(issues, lineIssue("MML_FILE_TOO_LARGE", lineNo, physical, "parser issue limit exceeded"))
+				return false
+			}
 			issues = append(issues, *issue)
-			continue
+			return true
 		}
 		if parsed == nil {
-			continue
+			return true
 		}
 
 		orders[parsed.DeviceSN]++
@@ -103,7 +112,8 @@ func ParseScriptTXT(raw []byte) (*ParsedScript, []ScriptIssue) {
 				deviceLimitIssue = &issue
 			}
 		}
-	}
+		return true
+	})
 
 	if len(parsedScript.Lines) == 0 && len(issues) == 0 {
 		issues = append(issues, fileIssue("MML_FILE_EMPTY"))
@@ -117,6 +127,25 @@ func ParseScriptTXT(raw []byte) (*ParsedScript, []ScriptIssue) {
 	}
 
 	return parsedScript, issues
+}
+
+// forEachScriptPhysicalLine avoids allocating a string slice proportional to
+// the number of physical rows. A file ending in LF deliberately visits its
+// final empty row, matching strings.Split(content, "\n") semantics.
+func forEachScriptPhysicalLine(content string, visit func(lineNo int, physical string) bool) {
+	start := 0
+	for lineNo := 1; ; lineNo++ {
+		next := strings.IndexByte(content[start:], '\n')
+		if next < 0 {
+			visit(lineNo, content[start:])
+			return
+		}
+		next += start
+		if !visit(lineNo, content[start:next]) {
+			return
+		}
+		start = next + 1
+	}
 }
 
 func fileIssue(code string) ScriptIssue {

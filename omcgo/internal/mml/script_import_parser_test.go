@@ -23,6 +23,26 @@ func TestParseScriptTXT_DerivesPerDeviceOrder(t *testing.T) {
 	})
 }
 
+func TestParseScriptTXT_NormalizesCROnlyLineEndings(t *testing.T) {
+	got, issues := ParseScriptTXT([]byte("# note\r\rLST DEVICE_INFO;SN1\r"))
+
+	require.Empty(t, issues)
+	require.Equal(t, "# note\n\nLST DEVICE_INFO;SN1\n", got.NormalizedContent)
+	require.Len(t, got.Lines, 1)
+	require.Equal(t, 3, got.Lines[0].LineNo)
+}
+
+func TestParseScriptTXT_CanonicalizesTerminalNewlinesForSHA256(t *testing.T) {
+	withoutTerminalNewline, withoutIssues := ParseScriptTXT([]byte("LST DEVICE_INFO;SN1"))
+	withTerminalNewlines, withIssues := ParseScriptTXT([]byte("LST DEVICE_INFO;SN1\r\n\r\n"))
+
+	require.Empty(t, withoutIssues)
+	require.Empty(t, withIssues)
+	require.Equal(t, "LST DEVICE_INFO;SN1\n", withoutTerminalNewline.NormalizedContent)
+	require.Equal(t, withoutTerminalNewline.NormalizedContent, withTerminalNewlines.NormalizedContent)
+	require.Equal(t, withoutTerminalNewline.SHA256, withTerminalNewlines.SHA256)
+}
+
 func TestParseScriptTXT_RejectsInvalidInput(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -96,7 +116,7 @@ func TestParseScriptTXT_RejectsMoreThanMaxLines(t *testing.T) {
 	got, issues := ParseScriptTXT(raw)
 
 	require.NotNil(t, got)
-	require.Len(t, got.Lines, MaxScriptLines+1)
+	require.Len(t, got.Lines, MaxScriptLines)
 	require.Len(t, issues, 1)
 	require.Equal(t, "MML_FILE_TOO_LARGE", issues[0].Code)
 	require.Equal(t, MaxScriptLines+1, issues[0].LineNo)
@@ -117,4 +137,30 @@ func TestParseScriptTXT_RejectsMoreThanMaxDevices(t *testing.T) {
 	require.Equal(t, "MML_FILE_TOO_LARGE", issues[0].Code)
 	require.Equal(t, MaxScriptDevices+1, issues[0].LineNo)
 	require.Equal(t, "LST DEVICE_INFO;SN201", issues[0].RawLine)
+}
+
+func TestParseScriptTXT_BoundsMalformedLineIssues(t *testing.T) {
+	raw := []byte(strings.Repeat("x\n", MaxScriptBytes/2))
+
+	got, issues := ParseScriptTXT(raw)
+
+	require.NotNil(t, got)
+	require.Len(t, got.Lines, 0)
+	require.Len(t, issues, MaxScriptIssues+1)
+	require.Equal(t, "MML_FILE_TOO_LARGE", issues[MaxScriptIssues].Code)
+	require.Equal(t, MaxScriptIssues+1, issues[MaxScriptIssues].LineNo)
+	require.Equal(t, "x", issues[MaxScriptIssues].RawLine)
+}
+
+func TestParseScriptTXT_BoundsPhysicalLines(t *testing.T) {
+	raw := []byte(strings.TrimSuffix(strings.Repeat("# comment\n", MaxScriptLines+1), "\n"))
+
+	got, issues := ParseScriptTXT(raw)
+
+	require.NotNil(t, got)
+	require.Len(t, got.Lines, 0)
+	require.Len(t, issues, 1)
+	require.Equal(t, "MML_FILE_TOO_LARGE", issues[0].Code)
+	require.Equal(t, MaxScriptLines+1, issues[0].LineNo)
+	require.Equal(t, "# comment", issues[0].RawLine)
 }
