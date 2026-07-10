@@ -25,9 +25,9 @@
 
 ## Progress Ledger
 
-**Current checkpoint:** Task 7 in progress
-**Resume from:** Task 7, Step 1 — write execution snapshot failing tests
-**Last verified commit:** `2c8a080f feat(mml): 完善 TXT 脚本导入接口复审问题`
+**Current checkpoint:** Task 7 complete
+**Resume from:** Task 8, Step 1 — write API mapping failing tests
+**Last verified commit:** `6e154e0c test(mml): 拒绝执行请求中的客户端命令字段`
 
 - [x] Task 1 — 数据库契约与 Go 模型
 - [x] Task 2 — TXT Parser
@@ -35,7 +35,7 @@
 - [x] Task 4 — Redis 一次性校验会话
 - [x] Task 5 — 事务化脚本导入服务
 - [x] Task 6 — 导入 HTTP API 与依赖注入
-- [ ] Task 7 — 脚本执行预检与任务快照
+- [x] Task 7 — 脚本执行预检与任务快照
 - [ ] Task 8 — frontend-core 契约、API 与 Hooks
 - [ ] Task 9 — v1 脚本库界面
 - [ ] Task 10 — v2 脚本库界面
@@ -72,6 +72,7 @@
 | Task 4 | `adc3bf6e..4ce47694` | miniredis 会话测试、MML 包全量测试及 app build 通过；覆盖随机 32-byte token、SHA-256 Redis key、15 分钟 TTL、用户绑定、过期、Claim/Release、并发双 Claim、consumed tombstone，以及 Redis Cluster 同槽位。 |
 | Task 5 | `6fdfd51f..f23a9f17` | 规格与质量复审通过；服务/仓库聚焦测试、MML 包全量测试和 app build 通过，覆盖错误不发 token、warning 快照、Claim/Release/Finalize、跨 Redis/PG 幂等、替换版本冲突、Finalize 重试恢复、ValidatedAt 快照和 Creator 权限。 |
 | Task 6 | `2c8a080f` | 规格与质量复审通过；handler focused tests、MML 包全量测试和 app build 通过，覆盖模板下载、5 路由、multipart 2MiB+64KiB、.txt/缺文件/413、鉴权/403、422 逐行问题、409 重放、严格 JSON、metadata-only 与 updated_at reload、Redis/PG 注入。 |
+| Task 7 | `5ef20c71..6e154e0c` | 规格与质量复审通过；执行/调度 focused tests、MML 包与 cmd/app 测试、app build 通过，覆盖服务端 plan 快照、严格请求字段、动态 error/409 warning、device_bound、周期子任务快照复制、scheduler 预检失败落库和失败继续。 |
 
 ---
 
