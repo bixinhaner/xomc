@@ -715,9 +715,11 @@ export const deviceApi = {
       remark_i18n?: Record<string, string>;
       // 匹配规则字段（service.go DeviceGroup 反序列化）
       matching_mode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber';
+      source_group_id?: string;
       name_rule_list?: NameFilterItem[];
       lac_list?: number[];
       tac_list?: number[];
+      serial_number_list?: string[];
       children?: BackendGroupItem[];
     }
     interface TreeResponse {
@@ -739,9 +741,11 @@ export const deviceApi = {
           description: g.remark || g.description || '',
           builtIn: g.is_default ? 1 : 0,
           matchingMode: g.matching_mode,
+          sourceGroupId: g.source_group_id,
           nameRuleList: g.name_rule_list,
           lacList: g.lac_list,
           tacList: g.tac_list,
+          serialNumberList: g.serial_number_list,
         });
         if (g.children?.length) walk(g.children);
       }
@@ -760,10 +764,12 @@ export const deviceApi = {
     remark_i18n?: Record<string, string>;
     parent_id?: string;
     remark?: string;
-    matching_mode?: 'deviceName' | 'lac' | 'tac';
+    matching_mode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber';
+    source_group_id?: string;
     name_rule_list?: NameFilterItem[];
     lac_list?: number[];
     tac_list?: number[];
+    serial_number_list?: string[];
   }): Promise<DeviceGroup> {
     const { data: created } = await http.post<DeviceGroup>('/device-groups', data);
     return created;
@@ -777,10 +783,12 @@ export const deviceApi = {
     remark_i18n?: Record<string, string>;
     parent_id?: string;
     remark?: string;
-    matching_mode?: 'deviceName' | 'lac' | 'tac';
+    matching_mode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber';
+    source_group_id?: string;
     name_rule_list?: NameFilterItem[];
     lac_list?: number[];
     tac_list?: number[];
+    serial_number_list?: string[];
   }): Promise<DeviceGroup> {
     const { data: updated } = await http.put<DeviceGroup>(`/device-groups/${id}`, data);
     return updated;

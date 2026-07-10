@@ -24,7 +24,7 @@ export interface GroupDialogsProps {
 
   // Add Child Group (Level-2) Drawer
   addChildDrawerOpen: boolean;
-  addChildForm: FormInstance<{ name_i18n?: Record<string, string>; matchingMode: 'deviceName' | 'lac' | 'tac'; tacRag: string }>;
+  addChildForm: FormInstance<{ name_i18n?: Record<string, string>; matchingMode: 'deviceName' | 'lac' | 'tac' | 'serialNumber'; tacRag: string; sourceGroupId?: string; serialNumbers?: string }>;
   addChildParentName?: string;
   matchingMode: string | undefined;
   nameFilters: NameFilterItem[];
@@ -37,7 +37,8 @@ export interface GroupDialogsProps {
 
   // Edit Level-2 Group Drawer
   editLevel2DrawerOpen: boolean;
-  editLevel2Form: FormInstance<{ name_i18n?: Record<string, string>; matchingMode: 'deviceName' | 'lac' | 'tac'; tacRag: string }>;
+  editLevel2GroupId?: string;
+  editLevel2Form: FormInstance<{ name_i18n?: Record<string, string>; matchingMode: 'deviceName' | 'lac' | 'tac' | 'serialNumber'; tacRag: string; sourceGroupId?: string; serialNumbers?: string }>;
   editLevel2ParentName?: string;
   editLevel2MatchingMode: string | undefined;
   editLevel2NameFilters: NameFilterItem[];
@@ -75,6 +76,7 @@ export default function GroupDialogs({
   onRemoveFilter,
   onUpdateFilter,
   editLevel2DrawerOpen,
+  editLevel2GroupId,
   editLevel2Form,
   editLevel2ParentName,
   editLevel2MatchingMode,
@@ -111,6 +113,12 @@ export default function GroupDialogs({
         parentGroupName={addChildParentName}
         matchingMode={matchingMode}
         nameFilters={nameFilters}
+        sourceGroupOptions={groups
+          .filter((group) => group.parentId !== null)
+          .map((group) => ({
+            label: `${groups.find((parent) => parent.id === group.parentId)?.name ?? ''} / ${group.name}`,
+            value: group.id,
+          }))}
         onClose={onAddChildDrawerClose}
         onSave={onSaveChildGroup}
         onMatchingModeChange={onMatchingModeChange}
@@ -126,6 +134,12 @@ export default function GroupDialogs({
         parentGroupName={editLevel2ParentName}
         matchingMode={editLevel2MatchingMode}
         nameFilters={editLevel2NameFilters}
+        sourceGroupOptions={groups
+          .filter((group) => group.parentId !== null && group.id !== editLevel2GroupId)
+          .map((group) => ({
+            label: `${groups.find((parent) => parent.id === group.parentId)?.name ?? ''} / ${group.name}`,
+            value: group.id,
+          }))}
         onClose={onEditLevel2DrawerClose}
         onSave={onSaveEditLevel2}
         onNameFiltersChange={onEditLevel2NameFiltersChange}

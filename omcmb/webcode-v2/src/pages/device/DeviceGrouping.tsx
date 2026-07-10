@@ -43,7 +43,7 @@ import {
   useUpdateGroup,
   type CreateGroupRequest,
 } from '@core/hooks/api/useDevices'
-import type { DeviceGroup, DeviceFilter } from '@core/types/device'
+import type { DeviceGroup, DeviceFilter, NameFilterItem } from '@core/types/device'
 import type { PageRequest } from '@core/types/pagination'
 import { buildDeviceGroupSubtreeCountMap } from '@core/utils/deviceGroupCounts'
 import { expandSelectedGroupIds } from '@core/utils/deviceGroupFilter'
@@ -60,6 +60,36 @@ type DialogMode =
   | { kind: 'create-root' }
   | { kind: 'create-child'; parentId: string; parentName: string }
   | { kind: 'rename'; group: DeviceGroup }
+
+type RuleFormValues = {
+  name: string
+  remark: string
+  sourceGroupId?: string
+  matchingMode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber'
+  nameRuleList?: NameFilterItem[]
+  lacList?: number[]
+  tacList?: number[]
+  serialNumberList?: string[]
+}
+
+function parseNumberRanges(value: string): number[] {
+  const result = new Set<number>()
+  for (const token of value.split(',')) {
+    const part = token.trim()
+    if (!part) continue
+    const match = part.match(/^(\d+)(?:-(\d+))?$/)
+    if (!match) continue
+    const start = Number(match[1])
+    const end = Number(match[2] ?? match[1])
+    if (start > end || end > 65535) continue
+    for (let current = start; current <= end; current += 1) result.add(current)
+  }
+  return [...result].sort((a, b) => a - b)
+}
+
+function parseSerialNumbers(value: string): string[] {
+  return [...new Set(value.split(/[\s,;]+/).map((item) => item.trim()).filter(Boolean))]
+}
 
 function GroupNode({
   group,
@@ -196,19 +226,36 @@ function GroupNode({
 
 function GroupDialog({
   mode,
+  groups,
   onClose,
   onSubmit,
   pending,
 }: {
   mode: DialogMode
+  groups: DeviceGroup[]
   onClose: () => void
-  onSubmit: (name: string, remark: string) => void
+  onSubmit: (values: RuleFormValues) => void
   pending: boolean
 }) {
   const [name, setName] = useState(mode.kind === 'rename' ? mode.group.name : '')
   const [remark, setRemark] = useState(
     mode.kind === 'rename' ? mode.group.description ?? '' : ''
   )
+  const editedGroup = mode.kind === 'rename' ? mode.group : undefined
+  const isLevel2 = mode.kind === 'create-child' || Boolean(editedGroup?.parentId)
+  const [sourceGroupId, setSourceGroupId] = useState(editedGroup?.sourceGroupId ?? '')
+  const [matchingMode, setMatchingMode] = useState<'deviceName' | 'lac' | 'tac' | 'serialNumber'>(
+    editedGroup?.matchingMode ?? 'deviceName'
+  )
+  const [nameRules, setNameRules] = useState<NameFilterItem[]>(
+    editedGroup?.nameRuleList?.length
+      ? editedGroup.nameRuleList
+      : [{ id: `rule-${Date.now()}`, condition: 'contain', value: '' }]
+  )
+  const [rangeValue, setRangeValue] = useState(
+    (editedGroup?.matchingMode === 'lac' ? editedGroup.lacList : editedGroup?.tacList)?.join(',') ?? ''
+  )
+  const [serialValue, setSerialValue] = useState(editedGroup?.serialNumberList?.join(',') ?? '')
 
   if (mode.kind === 'none') return null
 
@@ -242,6 +289,95 @@ function GroupDialog({
               onChange={(e) => setName(e.target.value)}
             />
           </div>
+          {isLevel2 && (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs">源设备组</Label>
+                <select
+                  className="h-9 rounded-md border bg-background px-3 text-sm"
+                  value={sourceGroupId}
+                  onChange={(event) => setSourceGroupId(event.target.value)}
+                >
+                  <option value="">请选择源设备组</option>
+                  {groups.filter((group) => group.parentId && group.id !== editedGroup?.id).map((group) => (
+                    <option key={group.id} value={group.id}>{group.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs">匹配方式</Label>
+                <select
+                  className="h-9 rounded-md border bg-background px-3 text-sm"
+                  value={matchingMode}
+                  onChange={(event) => setMatchingMode(event.target.value as typeof matchingMode)}
+                >
+                  <option value="deviceName">设备名称</option>
+                  <option value="lac">LAC</option>
+                  <option value="tac">TAC</option>
+                  <option value="serialNumber">设备序列号</option>
+                </select>
+              </div>
+              {matchingMode === 'deviceName' && (
+                <div className="flex flex-col gap-2">
+                  <Label className="text-xs">设备名称条件</Label>
+                  {nameRules.map((rule, index) => (
+                    <div key={rule.id} className="flex gap-2">
+                      {index > 0 && (
+                        <select
+                          className="h-9 w-20 rounded-md border bg-background px-2 text-xs"
+                          value={rule.andOr ?? 'and'}
+                          onChange={(event) => setNameRules((items) => items.map((item) => item.id === rule.id ? { ...item, andOr: event.target.value as 'and' | 'or' } : item))}
+                        >
+                          <option value="and">并且</option>
+                          <option value="or">或者</option>
+                        </select>
+                      )}
+                      <select
+                        className="h-9 w-24 rounded-md border bg-background px-2 text-xs"
+                        value={rule.condition}
+                        onChange={(event) => setNameRules((items) => items.map((item) => item.id === rule.id ? { ...item, condition: event.target.value as NameFilterItem['condition'] } : item))}
+                      >
+                        <option value="contain">包含</option>
+                        <option value="startWith">开头是</option>
+                        <option value="endWith">结尾是</option>
+                      </select>
+                      <Input
+                        className="flex-1"
+                        value={rule.value}
+                        onChange={(event) => setNameRules((items) => items.map((item) => item.id === rule.id ? { ...item, value: event.target.value } : item))}
+                      />
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        disabled={nameRules.length === 1}
+                        onClick={() => setNameRules((items) => items.filter((item) => item.id !== rule.id))}
+                      ><X className="size-4" /></Button>
+                    </div>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={nameRules.length >= 10}
+                    onClick={() => setNameRules((items) => [...items, { id: `rule-${Date.now()}`, condition: 'contain', value: '', andOr: 'and' }])}
+                  ><Plus className="size-4" />添加条件</Button>
+                </div>
+              )}
+              {(matchingMode === 'lac' || matchingMode === 'tac') && (
+                <div className="flex flex-col gap-1.5">
+                  <Label className="text-xs">{matchingMode.toUpperCase()}</Label>
+                  <Input value={rangeValue} onChange={(event) => setRangeValue(event.target.value)} placeholder="1,81,100-110" />
+                </div>
+              )}
+              {matchingMode === 'serialNumber' && (
+                <div className="flex flex-col gap-1.5">
+                  <Label className="text-xs">设备序列号</Label>
+                  <textarea className="min-h-20 rounded-md border bg-background p-2 text-sm" value={serialValue} onChange={(event) => setSerialValue(event.target.value)} />
+                </div>
+              )}
+            </>
+          )}
           <div className="flex flex-col gap-1.5">
             <Label className="text-xs">备注</Label>
             <Input
@@ -256,8 +392,19 @@ function GroupDialog({
             取消
           </Button>
           <Button
-            disabled={!name.trim() || pending}
-            onClick={() => onSubmit(name.trim(), remark.trim())}
+            disabled={!name.trim() || pending || (isLevel2 && !sourceGroupId)}
+            onClick={() => onSubmit({
+              name: name.trim(),
+              remark: remark.trim(),
+              ...(isLevel2 ? {
+                sourceGroupId,
+                matchingMode,
+                nameRuleList: matchingMode === 'deviceName' ? nameRules.filter((rule) => rule.value.trim()) : [],
+                lacList: matchingMode === 'lac' ? parseNumberRanges(rangeValue) : [],
+                tacList: matchingMode === 'tac' ? parseNumberRanges(rangeValue) : [],
+                serialNumberList: matchingMode === 'serialNumber' ? parseSerialNumbers(serialValue) : [],
+              } : {}),
+            })}
           >
             {pending && <Loader2 className="size-4 animate-spin" />}
             确定
@@ -350,20 +497,39 @@ export default function DeviceGrouping() {
   const total = deviceQuery.data?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
-  function handleSubmitDialog(name: string, remark: string) {
+  function handleSubmitDialog(values: RuleFormValues) {
     if (dialog.kind === 'rename') {
       updateGroup.mutate(
-        { id: dialog.group.id, data: { name, remark } },
+        { id: dialog.group.id, data: {
+          name: values.name,
+          remark: values.remark,
+          ...(dialog.group.parentId ? {
+            source_group_id: values.sourceGroupId,
+            matching_mode: values.matchingMode,
+            name_rule_list: values.nameRuleList,
+            lac_list: values.lacList,
+            tac_list: values.tacList,
+            serial_number_list: values.serialNumberList,
+          } : {}),
+        } },
         { onSuccess: () => setDialog({ kind: 'none' }) }
       )
       return
     }
     if (dialog.kind === 'create-root' || dialog.kind === 'create-child') {
       const data: CreateGroupRequest = {
-        name,
-        ...(remark ? { remark } : {}),
+        name: values.name,
+        ...(values.remark ? { remark: values.remark } : {}),
         ...(dialog.kind === 'create-child'
-          ? { parent_id: dialog.parentId }
+          ? {
+              parent_id: dialog.parentId,
+              source_group_id: values.sourceGroupId,
+              matching_mode: values.matchingMode,
+              name_rule_list: values.nameRuleList,
+              lac_list: values.lacList,
+              tac_list: values.tacList,
+              serial_number_list: values.serialNumberList,
+            }
           : {}),
       }
       createGroup.mutate(data, { onSuccess: () => setDialog({ kind: 'none' }) })
@@ -575,7 +741,9 @@ export default function DeviceGrouping() {
       </div>
 
       <GroupDialog
+        key={dialog.kind === 'rename' ? `rename-${dialog.group.id}` : dialog.kind === 'create-child' ? `child-${dialog.parentId}` : dialog.kind}
         mode={dialog}
+        groups={groups}
         onClose={() => setDialog({ kind: 'none' })}
         onSubmit={handleSubmitDialog}
         pending={dialogPending}

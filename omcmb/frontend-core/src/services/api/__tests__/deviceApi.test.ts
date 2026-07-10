@@ -368,6 +368,9 @@ describe('deviceApi.getGroups', () => {
                 is_default: true,
                 level: 2,
                 name_i18n: { 'zh-CN': '默认设备组', 'en-US': 'Default Group' },
+                source_group_id: 'source-l2',
+                matching_mode: 'serialNumber',
+                serial_number_list: ['SN-001', 'SN-002'],
               },
             ],
           },
@@ -381,6 +384,9 @@ describe('deviceApi.getGroups', () => {
 
     expect(group?.name).toBe('默认设备组');
     expect(group?.nameI18n).toEqual({ 'zh-CN': '默认设备组', 'en-US': 'Default Group' });
+    expect(group?.sourceGroupId).toBe('source-l2');
+    expect(group?.matchingMode).toBe('serialNumber');
+    expect(group?.serialNumberList).toEqual(['SN-001', 'SN-002']);
     expect(out.stats.totalDevices).toBe(6);
   });
 });

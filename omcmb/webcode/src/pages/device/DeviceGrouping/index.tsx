@@ -458,6 +458,7 @@ export default function DeviceGrouping() {
         onRemoveFilter={childNameFilters.remove}
         onUpdateFilter={childNameFilters.update}
         editLevel2DrawerOpen={groupActions.state.editLevel2DrawerOpen}
+        editLevel2GroupId={groupActions.state.editLevel2GroupId ?? undefined}
         editLevel2Form={groupActions.forms.editLevel2Form}
         editLevel2ParentName={groupActions.state.editLevel2ParentName}
         editLevel2MatchingMode={groupActions.state.editLevel2MatchingMode}

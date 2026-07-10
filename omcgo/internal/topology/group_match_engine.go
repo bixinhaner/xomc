@@ -21,9 +21,8 @@ import (
 //   - 设备心跳 inform  → HeartbeatAssigner（matcher.go，另行接线）
 //   - cron @hourly     → ReEvaluateAll（兜底全量重评估）
 //
-// 命中即无条件归组（经 AddDeviceAutoMatched，覆盖手工分配）；多个 L2 分组同时
-// 命中时，"最近新增/编辑的分组优先"（DeviceMatcher.MatchDevice 按 updated_at
-// 降序遍历）。
+// 规则只处理显式源组中的设备，写入时再次原子校验当前归属；源组中的手工归属
+// 允许移动，其他组不会被覆盖。多个目标规则同时命中时，最近编辑者优先。
 type GroupMatchEngine struct {
 	matcher   *DeviceMatcher
 	lister    DeviceLister
@@ -44,43 +43,58 @@ func NewGroupMatchEngine(matcher *DeviceMatcher, lister DeviceLister, groupRepo 
 // SetEventBus 注入 EventBus，使 Start 装配 device.registered 订阅。
 func (e *GroupMatchEngine) SetEventBus(bus event.EventBus) { e.eventBus = bus }
 
-// MatchGroup 对单个 L2 分组做全量设备匹配：遍历所有设备，命中该组匹配规则的
-// 归入此组。分组不存在 / 非 L2 / 未配匹配规则时安全 no-op。
+// MatchGroup 对单个 L2 分组做源组内匹配。未配置源组的存量规则暂停执行，
+// 避免继续跨全部设备组搬迁设备。
 // 供 DeviceGroupService 在分组新增/编辑后异步调用。
 func (e *GroupMatchEngine) MatchGroup(ctx context.Context, groupID uuid.UUID) error {
 	group, err := e.groupRepo.GetByID(ctx, groupID)
 	if err != nil {
 		return fmt.Errorf("get group for match: %w", err)
 	}
-	if group == nil || group.Level != 2 || group.MatchingMode == "" {
+	if group == nil || group.Level != 2 || group.MatchingMode == "" || group.SourceGroupID == nil {
 		return nil // 非 L2 或未配匹配规则 —— 无需匹配
 	}
+	sourceGroup, err := e.groupRepo.GetByID(ctx, *group.SourceGroupID)
+	if err != nil {
+		return fmt.Errorf("get source group for match: %w", err)
+	}
+	if sourceGroup == nil || sourceGroup.Level != 2 {
+		return nil
+	}
 
-	devices, err := e.lister.ListAllForRuleEval(ctx)
+	devices, err := e.lister.ListForRuleEval(ctx, *group.SourceGroupID)
 	if err != nil {
 		return fmt.Errorf("list devices for group match: %w", err)
 	}
 
-	matched := 0
+	matched, moved, skipped := 0, 0, 0
 	for _, d := range devices {
-		req := MatchRequest{DeviceID: d.ID, DeviceName: d.Name, SerialNumber: d.SerialNumber, LAC: d.LAC, TAC: d.TAC}
+		req := MatchRequest{DeviceID: d.ID, DeviceName: d.Name, SerialNumber: d.SerialNumber, LAC: d.LAC, TAC: d.TAC, CurrentGroupID: d.CurrentGroupID}
 		ok, mErr := e.matcher.matchGroup(ctx, *group, req)
 		if mErr != nil || !ok {
 			continue
 		}
-		if aErr := e.groupRepo.AddDeviceAutoMatched(ctx, groupID, d.ID); aErr != nil {
+		matched++
+		affected, aErr := e.groupRepo.MoveDeviceAutoMatched(ctx, *group.SourceGroupID, groupID, d.ID)
+		if aErr != nil {
 			e.logger.Warn("group match: add device failed",
 				zap.String("group_id", groupID.String()),
 				zap.String("device_id", d.ID.String()),
 				zap.Error(aErr))
 			continue
 		}
-		matched++
+		if affected == 0 {
+			skipped++
+			continue
+		}
+		moved++
 	}
 	e.logger.Info("group match done",
 		zap.String("group_id", groupID.String()),
 		zap.String("group_name", group.Name),
 		zap.Int("matched", matched),
+		zap.Int("moved", moved),
+		zap.Int("skipped", skipped),
 		zap.Int("scanned", len(devices)))
 	return nil
 }
@@ -95,7 +109,7 @@ func (e *GroupMatchEngine) ReEvaluateAll(ctx context.Context) error {
 	reqs := make([]MatchRequest, 0, len(devices))
 	for _, d := range devices {
 		reqs = append(reqs, MatchRequest{
-			DeviceID: d.ID, DeviceName: d.Name, SerialNumber: d.SerialNumber, LAC: d.LAC, TAC: d.TAC,
+			DeviceID: d.ID, DeviceName: d.Name, SerialNumber: d.SerialNumber, LAC: d.LAC, TAC: d.TAC, CurrentGroupID: d.CurrentGroupID,
 		})
 	}
 	matched, err := e.matcher.BatchMatchDevices(ctx, reqs)
@@ -123,9 +137,20 @@ func (e *GroupMatchEngine) handleDeviceRegistered(ctx context.Context, evt event
 	if payload.DeviceID == uuid.Nil {
 		return fmt.Errorf("device.registered payload missing device_id")
 	}
-	_, err := e.matcher.AssignDeviceToGroup(ctx, MatchRequest{
-		DeviceID:     payload.DeviceID,
-		SerialNumber: payload.SerialNumber,
+	d, err := e.lister.GetByID(ctx, payload.DeviceID)
+	if err != nil {
+		return fmt.Errorf("get registered device for group match: %w", err)
+	}
+	if d == nil {
+		return nil
+	}
+	_, err = e.matcher.AssignDeviceToGroup(ctx, MatchRequest{
+		DeviceID:       d.ID,
+		DeviceName:     d.Name,
+		SerialNumber:   d.SerialNumber,
+		LAC:            d.LAC,
+		TAC:            d.TAC,
+		CurrentGroupID: d.CurrentGroupID,
 	})
 	return err
 }
@@ -160,11 +185,12 @@ func (e *GroupMatchEngine) handleAttributesChanged(ctx context.Context, evt even
 		return nil
 	}
 	_, err = e.matcher.AssignDeviceToGroup(ctx, MatchRequest{
-		DeviceID:     d.ID,
-		DeviceName:   d.Name,
-		SerialNumber: d.SerialNumber,
-		LAC:          d.LAC,
-		TAC:          d.TAC,
+		DeviceID:       d.ID,
+		DeviceName:     d.Name,
+		SerialNumber:   d.SerialNumber,
+		LAC:            d.LAC,
+		TAC:            d.TAC,
+		CurrentGroupID: d.CurrentGroupID,
 	})
 	if err != nil {
 		return fmt.Errorf("assign device to group after attrs changed: %w", err)

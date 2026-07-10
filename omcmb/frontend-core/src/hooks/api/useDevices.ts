@@ -62,10 +62,12 @@ export interface CreateGroupRequest {
   name: string;
   parent_id?: string;
   remark?: string;
-  matching_mode?: 'deviceName' | 'lac' | 'tac';
+  matching_mode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber';
+  source_group_id?: string;
   name_rule_list?: NameFilterItem[];
   lac_list?: number[];
   tac_list?: number[];
+  serial_number_list?: string[];
 }
 
 // 更新分组的请求类型
@@ -73,10 +75,12 @@ export interface UpdateGroupRequest {
   name?: string;
   parent_id?: string; // 修改父级分组（L1 转 L2 或 L2 转 L1）
   remark?: string;
-  matching_mode?: 'deviceName' | 'lac' | 'tac';
+  matching_mode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber';
+  source_group_id?: string;
   name_rule_list?: NameFilterItem[];
   lac_list?: number[];
   tac_list?: number[];
+  serial_number_list?: string[];
 }
 
 export interface UseDeviceListOptions {
