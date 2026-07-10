@@ -21,12 +21,14 @@ Green:
 ```text
 cd omcmb && npm install --package-lock-only
 cd omcmb/webcode-v3 && npm run test -- --run src/pages/mml/script/__tests__/ScriptImportDialog.test.tsx src/pages/mml/script/__tests__/ScriptExecutionDialog.test.tsx
-PASS — 2 files, 6 tests
+PASS — 2 files, 10 tests
 cd omcmb/webcode-v3 && npm run typecheck
 PASS
+cd omcmb && npm run skin-parity
+PASS — v2/v3 each report 129 routes and 37 visible menus
 ```
 
-The focused tests cover TXT upload, template download, read-only content (no browser editor), warning confirmation, error filtering and disabled save, replacement validation endpoint, immediate/suspended/scheduled/periodic controls, offline/failed retry fields, 409 warning confirmation, 422 mixed error handling, date/time normalization, Escape, and readable loading/status text.
+The focused tests cover TXT upload, template download, read-only content (no browser editor), warning confirmation, error filtering and disabled save, replacement validation endpoint, immediate/suspended/scheduled/periodic controls, offline/failed retry fields, warning-only 409 confirmation, mixed 422 error+warning visibility without confirmation, scheduled and periodic date/time normalization, Escape, and real pending-state loading/status text.
 
 ## Concerns
 

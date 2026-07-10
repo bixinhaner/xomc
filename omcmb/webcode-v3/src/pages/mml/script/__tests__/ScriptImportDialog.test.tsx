@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   validate: vi.fn(),
@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   template: vi.fn(),
   validateReplacement: vi.fn(),
 }))
+
+beforeEach(() => vi.clearAllMocks())
 
 vi.mock('@core/hooks/api/useMML', () => ({
   useValidateMMLScriptImport: () => ({ mutateAsync: mocks.validate, isPending: false }),
@@ -52,7 +54,7 @@ describe('v3 ScriptImportDialog', () => {
     await waitFor(() => expect(mocks.create).toHaveBeenCalled())
   })
 
-  it('filters errors and disables save while exposing readable loading text', async () => {
+  it('filters errors and disables save', async () => {
     mocks.validate.mockResolvedValue(validation({ planItems: [{ lineNo: 1, deviceSn: 'SN1', order: 1, command: { commandCode: 'BAD' } }, { lineNo: 2, deviceSn: 'SN2', order: 1, command: { commandCode: 'WARN' } }], summary: { totalLines: 2, validLines: 1, effectiveLines: 1, deviceCount: 2, errorCount: 1, warningCount: 1 }, issues: [{ code: 'MML_LINE_FORMAT_INVALID', severity: 'error', lineNo: 1 }, { code: 'MML_DEVICE_OFFLINE', severity: 'warning', lineNo: 2 }] }))
     const user = userEvent.setup()
     render(<ScriptImportDialog open onClose={vi.fn()} />)
@@ -62,7 +64,18 @@ describe('v3 ScriptImportDialog', () => {
     expect(screen.getByText('SN1')).toBeInTheDocument()
     expect(screen.queryByText('SN2')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '确认保存' })).toBeDisabled()
-    expect(screen.queryByText('正在校验脚本…')).not.toBeInTheDocument()
+  })
+
+  it('exposes accessible validation loading text while upload is pending', async () => {
+    let release!: (value: ReturnType<typeof validation>) => void
+    mocks.validate.mockImplementationOnce(() => new Promise((resolve) => { release = resolve }))
+    const user = userEvent.setup()
+    render(<ScriptImportDialog open onClose={vi.fn()} />)
+    const uploadPromise = user.upload(screen.getByLabelText('选择 TXT'), new File(['PENDING'], 'pending.txt', { type: 'text/plain' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('正在校验脚本…')
+    release(validation())
+    await uploadPromise
+    await waitFor(() => expect(screen.queryByText('正在校验脚本…')).not.toBeInTheDocument())
   })
 
   it('closes on Escape and uses replacement endpoint for re-import', async () => {

@@ -76,7 +76,7 @@
 | Task 8 | `a2e192fa..b3129773` | 规格与质量复审通过；API/Hook 聚焦测试 16 项和 `cd omcmb && npm run typecheck` 通过，覆盖 multipart、Blob 模板、metadata-only、execution 字段收口、422/409 类型化错误、嵌套 validation_summary/issues、详情缓存失效和中英文 i18n。 |
 | Task 9 | `50471f6c..ee8a7912` | 规格与质量复审通过；v1 ScriptTask focused tests 4 文件/13 项、typecheck 通过，覆盖 TXT 导入/重导入、只读预览、错误/警告过滤与报告、409 warning 确认、422/mixed error 保持 Drawer、定时/周期参数和无在线编辑器。ESLint 0 errors/93 warnings 记录为非阻塞清理项。 |
 | Task 10 | `510cb99b..09cccf76` | 规格与质量复审通过；v2 focused tests 2 文件/9 项、typecheck 通过，覆盖 TXT 上传/重导入、模板下载、只读预览、severity/计划行过滤、错误报告、Escape、409 warning 确认、422/mixed error、执行 issues、scheduled/periodic 时间归一化和 Table/Select primitives。 |
-| Task 11 | pending | v3 focused tests 2 文件/6 项、typecheck 通过；覆盖 TXT 上传/重导入、模板下载、只读预览、severity 过滤、错误禁用保存、409/422 typed validation、执行方式与重试策略、时间归一化、Escape 和可读 loading 文本。详见 `.superpowers/sdd/task-11-report.md`。 |
+| Task 11 | pending | v3 focused tests 2 文件/10 项、typecheck 通过；skin-parity 通过（v2/v3 各 129 routes / 37 visible menus）。覆盖 TXT 上传/重导入、模板下载、只读预览、severity 过滤、错误禁用保存、warning-only 409 确认、mixed 422 逐行错误、执行方式与重试策略、scheduled/periodic 时间归一化、Escape 和真实 pending loading 文本。详见 `.superpowers/sdd/task-11-report.md`。 |
 
 ---
 
