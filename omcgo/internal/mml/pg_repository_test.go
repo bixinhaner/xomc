@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -74,6 +75,40 @@ func TestPgScriptRepository_CreateAssignsImportSessionID(t *testing.T) {
 	require.NotEqual(t, uuid.Nil, first.ImportSessionID)
 	require.NotEqual(t, uuid.Nil, second.ImportSessionID)
 	require.NotEqual(t, first.ImportSessionID, second.ImportSessionID)
+}
+
+func TestPgScriptRepository_ImportedReplaceAndMetadataAreAtomic(t *testing.T) {
+	pool := newMMLTestPool(t)
+	repo := NewPgScriptRepository(pool)
+	ctx := context.Background()
+	script := &MMLScript{
+		ScriptName: "imported repository test", Content: "LST DEVICE_INFO;SN1\n",
+		OriginalFilename: "test.txt", ContentSHA256: "sha-repo", ValidationVersion: ValidationVersion,
+		ValidatedAt:       func() *time.Time { now := time.Now(); return &now }(),
+		PlanItems:         []MMLPlanItem{{LineNo: 1, DeviceSN: "SN1", Order: 1, CommandCode: "LST DEVICE_INFO"}},
+		ValidationSummary: JSONMap{"summary": map[string]interface{}{"valid_lines": 1}}, Creator: "repo-test",
+		Status: ScriptActive, Type: ScriptTypeBatch, Tags: []string{"old"},
+	}
+	repoErr := repo.CreateImported(ctx, script)
+	require.NoError(t, repoErr)
+	t.Cleanup(func() { _ = repo.Delete(ctx, script.ID) })
+	loaded, err := repo.GetByImportSessionID(ctx, script.ImportSessionID)
+	require.NoError(t, err)
+	require.Equal(t, script.ContentSHA256, loaded.ContentSHA256)
+	require.NoError(t, repo.UpdateMetadata(ctx, script.ID, "renamed", "description", []string{"new"}))
+	loaded, err = repo.GetByID(ctx, script.ID)
+	require.NoError(t, err)
+	require.Equal(t, "renamed", loaded.ScriptName)
+	stale := *loaded
+	stale.ImportSessionID = uuid.New()
+	stale.Content = "MOD DEVICE_INFO:USER_LABEL=x;SN1\n"
+	stale.ContentSHA256 = "sha-repo-2"
+	stale.PlanItems = []MMLPlanItem{{LineNo: 1, DeviceSN: "SN1", Order: 1, CommandCode: "MOD DEVICE_INFO"}}
+	require.NoError(t, repo.ReplaceImported(ctx, &stale, loaded.UpdatedAt))
+	reloaded, err := repo.GetByID(ctx, script.ID)
+	require.NoError(t, err)
+	require.Equal(t, "sha-repo-2", reloaded.ContentSHA256)
+	require.ErrorIs(t, repo.ReplaceImported(ctx, &stale, loaded.UpdatedAt), ErrScriptVersionConflict)
 }
 
 // 回归：migration 000090 DROP `mml_command_params_rel`，migration 000095/000113

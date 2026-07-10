@@ -3,6 +3,7 @@ package mml
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -354,6 +355,7 @@ func scanCommandRow(rows pgx.Rows) (*MMLCommand, error) {
 // ======================================================================
 
 var _ ScriptRepository = (*PgScriptRepository)(nil)
+var _ ImportedScriptRepository = (*PgScriptRepository)(nil)
 
 // PgScriptRepository is a PostgreSQL implementation of ScriptRepository.
 type PgScriptRepository struct {
@@ -407,6 +409,111 @@ func (r *PgScriptRepository) Create(ctx context.Context, script *MMLScript) erro
 		return fmt.Errorf("create mml_script: %w", err)
 	}
 	*script = *created
+	return nil
+}
+
+// CreateImported persists a server-authoritative TXT import snapshot. It is
+// deliberately separate from the legacy Create entrypoint so import callers
+// can depend on the narrower ImportedScriptRepository contract.
+func (r *PgScriptRepository) CreateImported(ctx context.Context, script *MMLScript) error {
+	return r.Create(ctx, script)
+}
+
+func (r *PgScriptRepository) GetByImportSessionID(ctx context.Context, sessionID uuid.UUID) (*MMLScript, error) {
+	query, args, err := storage.Psql.Select(scriptColumns...).
+		From("mml_scripts").Where(sq.Eq{"import_session_id": sessionID}).ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build get mml_script by import session SQL: %w", err)
+	}
+	script, err := scanScript(r.pool.QueryRow(ctx, query, args...))
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, commonerrors.ErrNotFound
+		}
+		return nil, fmt.Errorf("get mml_script by import session: %w", err)
+	}
+	return script, nil
+}
+
+// ReplaceImported atomically replaces the complete TXT-backed snapshot. The
+// updated_at predicate prevents a stale editor from overwriting a newer import.
+func (r *PgScriptRepository) ReplaceImported(ctx context.Context, script *MMLScript, expectedUpdatedAt time.Time) error {
+	if script.PlanItems == nil {
+		script.PlanItems = []MMLPlanItem{}
+	}
+	if script.ValidationSummary == nil {
+		script.ValidationSummary = JSONMap{}
+	}
+	tagsJSON, err := json.Marshal(script.Tags)
+	if err != nil {
+		return fmt.Errorf("marshal tags: %w", err)
+	}
+	planItemsJSON, err := json.Marshal(script.PlanItems)
+	if err != nil {
+		return fmt.Errorf("marshal script plan_items: %w", err)
+	}
+	validationSummaryJSON, err := json.Marshal(script.ValidationSummary)
+	if err != nil {
+		return fmt.Errorf("marshal script validation_summary: %w", err)
+	}
+	query, args, err := storage.Psql.Update("mml_scripts").
+		Set("import_session_id", script.ImportSessionID).
+		Set("script_name", script.ScriptName).
+		Set("description", script.Description).
+		Set("content", script.Content).
+		Set("original_filename", script.OriginalFilename).
+		Set("content_sha256", script.ContentSHA256).
+		Set("validation_version", script.ValidationVersion).
+		Set("validated_at", script.ValidatedAt).
+		Set("plan_items", string(planItemsJSON)).
+		Set("validation_summary", string(validationSummaryJSON)).
+		Set("tags", tagsJSON).
+		Set("updated_at", sq.Expr("NOW()")).
+		Where(sq.Eq{"id": script.ID}).
+		Where(sq.Eq{"updated_at": expectedUpdatedAt}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build replace imported mml_script SQL: %w", err)
+	}
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("replace imported mml_script: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		if _, getErr := r.GetByID(ctx, script.ID); getErr != nil {
+			if getErr == commonerrors.ErrNotFound || errors.Is(getErr, commonerrors.ErrNotFound) {
+				return commonerrors.ErrNotFound
+			}
+			return fmt.Errorf("check replaced mml_script: %w", getErr)
+		}
+		return ErrScriptVersionConflict
+	}
+	updated, err := r.GetByID(ctx, script.ID)
+	if err != nil {
+		return fmt.Errorf("reload replaced mml_script: %w", err)
+	}
+	*script = *updated
+	return nil
+}
+
+func (r *PgScriptRepository) UpdateMetadata(ctx context.Context, id uuid.UUID, name, description string, tags []string) error {
+	tagsJSON, err := json.Marshal(tags)
+	if err != nil {
+		return fmt.Errorf("marshal tags: %w", err)
+	}
+	query, args, err := storage.Psql.Update("mml_scripts").
+		Set("script_name", name).Set("description", description).Set("tags", tagsJSON).
+		Set("updated_at", sq.Expr("NOW()")).Where(sq.Eq{"id": id}).ToSql()
+	if err != nil {
+		return fmt.Errorf("build update mml_script metadata SQL: %w", err)
+	}
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update mml_script metadata: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
+	}
 	return nil
 }
 

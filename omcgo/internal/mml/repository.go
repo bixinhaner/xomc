@@ -2,11 +2,16 @@ package mml
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
 )
+
+// ErrScriptVersionConflict indicates that an imported script was changed by
+// another writer after the caller read its updated_at version.
+var ErrScriptVersionConflict = errors.New("mml script version conflict")
 
 // CommandRepository provides read-only access to predefined MML commands.
 type CommandRepository interface {
@@ -30,6 +35,17 @@ type ScriptRepository interface {
 	UpdateLastRun(ctx context.Context, id uuid.UUID, status string, at time.Time) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	List(ctx context.Context, filter ScriptFilter) (*model.ListResponse[MMLScript], error)
+}
+
+// ImportedScriptRepository is the persistence boundary for TXT-imported
+// scripts. Imported writes intentionally use separate methods so callers do
+// not accidentally accept client-supplied content or plan fields.
+type ImportedScriptRepository interface {
+	ScriptRepository
+	CreateImported(ctx context.Context, script *MMLScript) error
+	GetByImportSessionID(ctx context.Context, sessionID uuid.UUID) (*MMLScript, error)
+	ReplaceImported(ctx context.Context, script *MMLScript, expectedUpdatedAt time.Time) error
+	UpdateMetadata(ctx context.Context, id uuid.UUID, name, description string, tags []string) error
 }
 
 // TaskRepository provides persistence for MML task execution records.

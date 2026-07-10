@@ -51,6 +51,13 @@ type ImportSessionStore interface {
 	Finalize(ctx context.Context, token, username, requestID string) error
 }
 
+// ConsumedImportSessionReader is optional. It lets the import service recover
+// the immutable session ID after a client retries a request whose response was
+// lost after PostgreSQL commit; ordinary callers still observe ErrConsumed.
+type ConsumedImportSessionReader interface {
+	GetConsumed(ctx context.Context, token, username string) (*ImportSession, error)
+}
+
 type storedImportSession struct {
 	Username       string        `json:"username"`
 	ClaimRequestID string        `json:"claim_request_id"`
@@ -199,7 +206,7 @@ local record = cjson.decode(raw)
 if record.username ~= ARGV[1] then return 4 end
 if record.claim_request_id ~= ARGV[2] then return 5 end
 redis.call('DEL', KEYS[1])
-redis.call('SET', KEYS[2], '1', 'EX', ARGV[3])
+redis.call('SET', KEYS[2], raw, 'EX', ARGV[3])
 return 1
 `)
 
@@ -214,6 +221,27 @@ func (s *RedisImportSessionStore) Finalize(ctx context.Context, token, username,
 		return fmt.Errorf("finalize import session: %w", err)
 	}
 	return importSessionResultError(result)
+}
+
+func (s *RedisImportSessionStore) GetConsumed(ctx context.Context, token, username string) (*ImportSession, error) {
+	if err := s.ensureRequest("get consumed", username, "read"); err != nil {
+		return nil, err
+	}
+	payload, err := s.rdb.Get(ctx, s.consumedKey(token)).Bytes()
+	if err == redis.Nil {
+		return nil, ErrImportTokenExpired
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get consumed import session: %w", err)
+	}
+	var record storedImportSession
+	if err := json.Unmarshal(payload, &record); err != nil {
+		return nil, ErrImportTokenConsumed
+	}
+	if record.Username != username {
+		return nil, ErrImportTokenOwnerMismatch
+	}
+	return &record.Session, nil
 }
 
 func (s *RedisImportSessionStore) ensureClient(operation string) error {
