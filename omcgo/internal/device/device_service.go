@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/global"
+	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/core/carrier"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
@@ -2032,7 +2033,7 @@ func (s *DeviceService) UpdateDevice(ctx context.Context, id uuid.UUID, req Upda
 func (s *DeviceService) DeleteDevice(ctx context.Context, id uuid.UUID) error {
 	// C2 修复：先查 SN 用于删除后清 cache（cache key 是 SN 不是 ID）
 	device, _ := s.deviceRepo.GetByID(ctx, id)
-	if err := s.deviceRepo.Delete(ctx, id); err != nil {
+	if _, err := s.deviceRepo.BatchDelete(ctx, []uuid.UUID{id}, deletedByFromContext(ctx, "")); err != nil {
 		return err
 	}
 	if s.cache != nil && device != nil {
@@ -2045,6 +2046,7 @@ func (s *DeviceService) DeleteDevice(ctx context.Context, id uuid.UUID) error {
 // Returns a BatchOperationResult summarising successes and failures.
 func (s *DeviceService) BatchDeleteDevices(ctx context.Context, ids []uuid.UUID, deletedBy string) BatchOperationResult {
 	result := BatchOperationResult{Total: len(ids)}
+	deletedBy = deletedByFromContext(ctx, deletedBy)
 
 	// C2 修复：先查 SN 列表用于删除后清 cache
 	idToSN, _ := s.deviceRepo.ListSerialsByIDs(ctx, ids)
@@ -2081,6 +2083,16 @@ func (s *DeviceService) BatchDeleteDevices(ctx context.Context, ids []uuid.UUID,
 		zap.Int64("deleted", deleted),
 	)
 	return result
+}
+
+func deletedByFromContext(ctx context.Context, explicit string) string {
+	if actor := strings.TrimSpace(explicit); actor != "" {
+		return actor
+	}
+	if actor, ok := ctx.Value(admin.CtxKeyUsername).(string); ok {
+		return strings.TrimSpace(actor)
+	}
+	return ""
 }
 
 // BatchRebootDevices queues a Reboot command for each device in the list.

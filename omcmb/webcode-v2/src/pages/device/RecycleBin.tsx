@@ -30,6 +30,7 @@ import {
 } from '@core/hooks/api/useDevices'
 import type { RecycleBinFilter } from '@core/hooks/api/useDevices'
 import type { Device } from '@core/types/device'
+import { formatRecycleOperator } from '@core/utils/recycleBin'
 
 // ============================================================
 // 设备回收站 — 已删除设备的恢复 / 永久删除
@@ -136,7 +137,7 @@ export default function RecycleBin() {
     })
   }
 
-  const colCount = 8
+  const colCount = 9
 
   return (
     <PageShell
@@ -253,6 +254,7 @@ export default function RecycleBin() {
               <TableHead>MAC</TableHead>
               <TableHead>离线天数</TableHead>
               <TableHead>分组</TableHead>
+              <TableHead>账户</TableHead>
               <TableHead>删除时间</TableHead>
             </TableRow>
           </TableHeader>
@@ -313,6 +315,9 @@ export default function RecycleBin() {
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {d.groupName || '—'}
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {formatRecycleOperator(d.deletedBy)}
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {formatTime(d.deletedAt)}

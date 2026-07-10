@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/core/carrier"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
@@ -22,18 +23,19 @@ import (
 // ---------------------------------------------------------------------------
 
 type mockDeviceRepo struct {
-	createFn            func(ctx context.Context, device *model.Device) error
-	getByIDFn           func(ctx context.Context, id uuid.UUID) (*model.Device, error)
-	getBySerialNumberFn func(ctx context.Context, sn string) (*model.Device, error)
+	createFn                   func(ctx context.Context, device *model.Device) error
+	getByIDFn                  func(ctx context.Context, id uuid.UUID) (*model.Device, error)
+	getBySerialNumberFn        func(ctx context.Context, sn string) (*model.Device, error)
 	getDeletedBySerialNumberFn func(ctx context.Context, sn string, carrier model.CarrierCode) (*model.Device, error)
-	updateFn            func(ctx context.Context, device *model.Device) error
-	deleteFn            func(ctx context.Context, id uuid.UUID) error
-	listFn              func(ctx context.Context, filter DeviceFilter) (*model.ListResponse[model.Device], error)
-	updateStatusFn      func(ctx context.Context, id uuid.UUID, status model.DeviceStatus) error
-	updateLastInformFn  func(ctx context.Context, sn string, at time.Time, events []string) error
-	recordBootFn        func(ctx context.Context, sn string, at time.Time) (int, error)
-	countByStatusFn     func(ctx context.Context, carrier *model.CarrierCode) (map[model.DeviceStatus]int64, error)
-	restoreDevicesFn    func(ctx context.Context, ids []uuid.UUID) (*RestoreResult, error)
+	updateFn                   func(ctx context.Context, device *model.Device) error
+	deleteFn                   func(ctx context.Context, id uuid.UUID) error
+	listFn                     func(ctx context.Context, filter DeviceFilter) (*model.ListResponse[model.Device], error)
+	updateStatusFn             func(ctx context.Context, id uuid.UUID, status model.DeviceStatus) error
+	updateLastInformFn         func(ctx context.Context, sn string, at time.Time, events []string) error
+	recordBootFn               func(ctx context.Context, sn string, at time.Time) (int, error)
+	countByStatusFn            func(ctx context.Context, carrier *model.CarrierCode) (map[model.DeviceStatus]int64, error)
+	restoreDevicesFn           func(ctx context.Context, ids []uuid.UUID) (*RestoreResult, error)
+	batchDeleteFn              func(ctx context.Context, ids []uuid.UUID, deletedBy string) (int64, error)
 }
 
 func (m *mockDeviceRepo) Create(ctx context.Context, device *model.Device) error {
@@ -78,8 +80,11 @@ func (m *mockDeviceRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (m *mockDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID, _ string) (int64, error) {
-	return 0, nil
+func (m *mockDeviceRepo) BatchDelete(ctx context.Context, ids []uuid.UUID, deletedBy string) (int64, error) {
+	if m.batchDeleteFn != nil {
+		return m.batchDeleteFn(ctx, ids, deletedBy)
+	}
+	return int64(len(ids)), nil
 }
 
 func (m *mockDeviceRepo) List(ctx context.Context, filter DeviceFilter) (*model.ListResponse[model.Device], error) {
@@ -683,7 +688,7 @@ func TestDeviceService_UpdateFromInform_ReconnectRecordsLastOnlineTimeWhenStatus
 				SerialNumber:   sn,
 				Technology:     model.TechLTE,
 				LifecycleState: model.LifecycleCommissioned,
-				IsOnline:       false,             // 关键场景：离线后恢复
+				IsOnline:       false,              // 关键场景：离线后恢复
 				Status:         model.DeviceActive, // 但状态本身已是 active
 				InformInterval: 300,
 			}, nil
@@ -698,8 +703,8 @@ func TestDeviceService_UpdateFromInform_ReconnectRecordsLastOnlineTimeWhenStatus
 	registry := carrier.NewRegistry()
 	registry.Register(testCarrier{})
 	svc.infoSyncer = &InfoSyncer{
-		logger: zap.NewNop(),
-		paramRepo: &mockParamRepo{},
+		logger:          zap.NewNop(),
+		paramRepo:       &mockParamRepo{},
 		carrierRegistry: registry,
 		infoRepo: stubDeviceInfoRepo{
 			updateSyncFields: func(_ context.Context, gotID uuid.UUID, fields map[string]interface{}) error {
@@ -847,22 +852,64 @@ func TestDeviceService_UpdateDevice_NotFound(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDeviceService_DeleteDevice(t *testing.T) {
-	deleteCalled := false
+	batchDeleteCalled := false
 	targetID := uuid.New()
 
 	deviceRepo := &mockDeviceRepo{
-		deleteFn: func(ctx context.Context, id uuid.UUID) error {
-			deleteCalled = true
-			assert.Equal(t, targetID, id)
-			return nil
+		batchDeleteFn: func(ctx context.Context, ids []uuid.UUID, deletedBy string) (int64, error) {
+			batchDeleteCalled = true
+			assert.Equal(t, []uuid.UUID{targetID}, ids)
+			assert.Equal(t, "alice", deletedBy)
+			return int64(len(ids)), nil
 		},
 	}
 
 	svc := newTestDeviceService(deviceRepo, &mockParamRepo{})
 
-	err := svc.DeleteDevice(context.Background(), targetID)
+	ctx := context.WithValue(context.Background(), admin.CtxKeyUsername, "alice")
+	err := svc.DeleteDevice(ctx, targetID)
 	require.NoError(t, err)
-	assert.True(t, deleteCalled)
+	assert.True(t, batchDeleteCalled)
+}
+
+func TestDeviceService_BatchDeleteDevices_FillsDeletedByFromContext(t *testing.T) {
+	ids := []uuid.UUID{uuid.New(), uuid.New()}
+
+	deviceRepo := &mockDeviceRepo{
+		batchDeleteFn: func(ctx context.Context, gotIDs []uuid.UUID, deletedBy string) (int64, error) {
+			assert.Equal(t, ids, gotIDs)
+			assert.Equal(t, "bob", deletedBy)
+			return int64(len(gotIDs)), nil
+		},
+	}
+
+	svc := newTestDeviceService(deviceRepo, &mockParamRepo{})
+	ctx := context.WithValue(context.Background(), admin.CtxKeyUsername, "bob")
+
+	result := svc.BatchDeleteDevices(ctx, ids, "")
+
+	assert.Equal(t, len(ids), result.Succeeded)
+	assert.Equal(t, 0, result.Failed)
+}
+
+func TestDeviceService_BatchDeleteDevices_ExplicitDeletedByWins(t *testing.T) {
+	ids := []uuid.UUID{uuid.New()}
+
+	deviceRepo := &mockDeviceRepo{
+		batchDeleteFn: func(ctx context.Context, gotIDs []uuid.UUID, deletedBy string) (int64, error) {
+			assert.Equal(t, ids, gotIDs)
+			assert.Equal(t, "system:auto_recycle", deletedBy)
+			return int64(len(gotIDs)), nil
+		},
+	}
+
+	svc := newTestDeviceService(deviceRepo, &mockParamRepo{})
+	ctx := context.WithValue(context.Background(), admin.CtxKeyUsername, "bob")
+
+	result := svc.BatchDeleteDevices(ctx, ids, "system:auto_recycle")
+
+	assert.Equal(t, 1, result.Succeeded)
+	assert.Equal(t, 0, result.Failed)
 }
 
 // ---------------------------------------------------------------------------
