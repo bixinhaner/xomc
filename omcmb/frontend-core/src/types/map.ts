@@ -85,6 +85,24 @@ export interface MapDevice {
   highestSeverityAlarmCount?: number;
 }
 
+/** 设备运行时参数解析出的天线扇区。 */
+export interface AntennaSector {
+  number: number;
+  cellId?: string;
+  antennaHeight?: number;
+  mechanicalDowntilt?: number;
+  electronicDowntilt?: string;
+  verticalBeamwidth?: number;
+  horizontalBeamwidth?: number;
+  azimuth?: number;
+  nearRadiusMeters?: number;
+  farRadiusMeters?: number;
+  fieldSources: Record<string, string>;
+  directionAvailable: boolean;
+  coverageAvailable: boolean;
+  missingFields: string[];
+}
+
 /**
  * 设备地理信息（后端返回格式）
  */
@@ -309,6 +327,18 @@ export interface GISMapProps {
   devices?: MapDevice[];
   /** 搜索结果设备（独立显示，不受主设备列表限制） */
   searchResultDevice?: MapDevice | null;
+  /** 当前选中的设备，用于展示其天线扇区。 */
+  selectedDevice?: MapDevice | null;
+  /** 当前选中设备的运行时天线扇区。 */
+  antennaSectors?: AntennaSector[];
+  /** 天线编辑值变更时更新地图中的临时覆盖预览。 */
+  onAntennaPreviewChange?: (sectorNumber: number, field: 'azimuth' | 'mechanicalDowntilt', value: number | null) => void;
+  /** 放弃编辑值并恢复地图中的原始覆盖范围。 */
+  onAntennaCancel?: () => void;
+  /** 提交设备天线参数设置任务。 */
+  onAntennaSave?: (sectorNumber: number) => Promise<unknown>;
+  /** 天线参数设置任务是否正在提交。 */
+  antennaSaving?: boolean;
   /** 地图高度 */
   height?: string | number;
   /** 默认中心点 [lng, lat] */

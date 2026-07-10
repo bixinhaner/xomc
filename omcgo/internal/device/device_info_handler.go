@@ -34,6 +34,7 @@ func (h *DeviceInfoHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		devices.GET("/enums", h.GetEnums)
 		devices.GET("/:id/info", h.GetDeviceInfo)
 		devices.GET("/:id/detail", h.GetDeviceDetail)
+		devices.GET("/:id/antenna-sectors", h.GetAntennaSectors)
 		devices.PUT("/:id/info", h.UpdateDeviceInfo)
 		devices.PUT("/:id/activate", h.ActivateDevice)
 		devices.PUT("/:id/deactivate", h.DeactivateDevice)
@@ -89,6 +90,31 @@ func (h *DeviceInfoHandler) GetDeviceDetail(c *gin.Context) {
 	}
 
 	response.OK(c, composite)
+}
+
+// GetAntennaSectors handles GET /api/v1/devices/:id/antenna-sectors.
+func (h *DeviceInfoHandler) GetAntennaSectors(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	if !authorizeDeviceAccess(c, h.service, h.permService, id) {
+		return
+	}
+
+	sectors, err := h.service.GetAntennaSectors(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if sectors == nil {
+		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
+		return
+	}
+
+	response.OK(c, sectors)
 }
 
 // UpdateDeviceInfo handles PUT /api/v1/devices/:id/info.

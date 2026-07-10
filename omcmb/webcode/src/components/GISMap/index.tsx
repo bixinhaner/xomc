@@ -87,6 +87,8 @@ interface GISMapRef {
 const GISMap = forwardRef<GISMapRef, GISMapProps>(({
   devices = [],
   searchResultDevice = null,
+  selectedDevice = null,
+  antennaSectors = [],
   height = '100%',
   defaultCenter = MAP_CONFIG.defaultCenter,
   defaultZoom = MAP_CONFIG.defaultZoom,
@@ -101,6 +103,10 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
   className,
   style,
   onAlarmClick,
+  onAntennaPreviewChange,
+  onAntennaCancel,
+  onAntennaSave,
+  antennaSaving,
 }, ref) => {
   const intl = useIntl();
   const token = useThemeToken();
@@ -142,6 +148,7 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     setTileConcurrency,
     startMeasure,
     stopMeasure,
+    updateAntennaSectors,
   } = useOLMap({
     center: defaultCenter,
     zoom: defaultZoom,
@@ -200,6 +207,12 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
       updateDevices(mergedDevices);
     }
   }, [isReady, mergedDevices, updateDevices]);
+
+  useEffect(() => {
+    if (isReady) {
+      updateAntennaSectors(selectedDevice, antennaSectors);
+    }
+  }, [antennaSectors, isReady, selectedDevice, updateAntennaSectors, viewport?.zoom]);
 
   // 当搜索结果设备变化时，自动高亮并定位
   useEffect(() => {
@@ -343,6 +356,19 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
       return null;
     }
   }, []);
+
+  useEffect(() => {
+    if (!isReady || !selectedDevice || selectedDevice.id !== searchResultDevice?.id) return;
+
+    const timer = setTimeout(() => {
+      setClickedDevice(selectedDevice);
+      const position = calculateDevicePixelPosition(mapInstanceRef, selectedDevice.lng, selectedDevice.lat);
+      if (position) {
+        setClickedPosition(position);
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [calculateDevicePixelPosition, isReady, mapInstanceRef, searchResultDevice?.id, selectedDevice]);
 
   /**
    * 高亮设备并显示卡片（用于搜索定位）
@@ -622,6 +648,11 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
           visible
           position={clickedPosition ?? popupPosition!}
           onAlarmClick={onAlarmClick}
+		  antennaSectors={clickedDevice?.id === selectedDevice?.id ? antennaSectors : []}
+          onAntennaPreviewChange={onAntennaPreviewChange}
+          onAntennaCancel={onAntennaCancel}
+          onAntennaSave={onAntennaSave}
+          antennaSaving={antennaSaving}
           onClose={() => {
             setClickedDevice(null);
             setClickedPosition(null);
