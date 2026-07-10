@@ -1,6 +1,7 @@
 import { screen, render, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { Modal } from 'antd';
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   validate: vi.fn(),
@@ -53,6 +54,7 @@ describe('ScriptImportModal', () => {
     mocks.template.mockResolvedValue({ blob: new Blob(['template']), filename: 'MMLTemplate.txt' });
     mocks.validateReplacement.mockResolvedValue(validation());
   });
+  afterEach(() => Modal.destroyAll());
 
   it('keeps save disabled when server validation has errors', async () => {
     mocks.validate.mockResolvedValue(validation({
@@ -82,6 +84,7 @@ describe('ScriptImportModal', () => {
     expect(mocks.create).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: '继续保存' }));
     await waitFor(() => expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ validationToken: 'token-1' })));
+    await waitFor(() => expect(screen.queryByRole('button', { name: '继续保存' })).not.toBeInTheDocument());
   });
 
   it('replaces the preview after a second upload', async () => {
@@ -95,4 +98,17 @@ describe('ScriptImportModal', () => {
     expect(await screen.findByText('second.txt')).toBeInTheDocument();
     expect(screen.queryByText('first.txt')).not.toBeInTheDocument();
   });
+
+  it('clears the previous token and preview when a replacement upload fails', async () => {
+    mocks.validate.mockResolvedValueOnce(validation({ originalFilename: 'first.txt' }))
+      .mockRejectedValueOnce(new Error('bad replacement'));
+    render(<ScriptImportModal open onClose={vi.fn()} />);
+    const input = screen.getByLabelText('选择 TXT');
+    await userEvent.upload(input, new File(['ONE'], 'first.txt', { type: 'text/plain' }));
+    expect(await screen.findByText('first.txt')).toBeInTheDocument();
+    await userEvent.upload(input, new File(['BAD'], 'bad.txt', { type: 'text/plain' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '确认保存' })).toBeDisabled());
+    expect(screen.queryByText('first.txt')).not.toBeInTheDocument();
+  });
+
 });

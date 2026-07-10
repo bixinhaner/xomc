@@ -19,6 +19,7 @@ export default function ScriptImportPreview({ validation, readOnly = true }: Scr
   const [filter, setFilter] = useState<IssueFilter>('all');
   const summary = validation?.summary;
   const issues = validation?.issues ?? [];
+  const visibleIssues = filter === 'all' ? issues : issues.filter((issue) => issue.severity === filter);
   const rows = useMemo<MMLTaskPlanItem[]>(() => {
     const plans = validation?.planItems ?? [];
     if (filter === 'all') return plans;
@@ -27,7 +28,7 @@ export default function ScriptImportPreview({ validation, readOnly = true }: Scr
   }, [filter, issues, validation?.planItems]);
 
   const downloadReport = () => {
-    const report = issues.map((issue) => `${issue.lineNo ?? '-'}\t${issue.severity}\t${issue.code}\t${issue.message ?? ''}`).join('\n');
+    const report = visibleIssues.map((issue) => `${issue.lineNo ?? '-'}\t${issue.severity}\t${issue.code}\t${issue.message ?? ''}`).join('\n');
     const url = URL.createObjectURL(new Blob([report], { type: 'text/plain;charset=utf-8' }));
     const anchor = document.createElement('a');
     anchor.href = url;
@@ -69,12 +70,12 @@ export default function ScriptImportPreview({ validation, readOnly = true }: Scr
         <Button type={filter === 'all' ? 'primary' : 'default'} onClick={() => setFilter('all')}>全部</Button>
         <Button type={filter === 'error' ? 'primary' : 'default'} onClick={() => setFilter('error')}>仅看错误</Button>
         <Button type={filter === 'warning' ? 'primary' : 'default'} onClick={() => setFilter('warning')}>仅看警告</Button>
-        <Button onClick={downloadReport} disabled={!issues.length}>下载错误报告</Button>
+        <Button onClick={downloadReport} disabled={!visibleIssues.length}>下载错误报告</Button>
       </Space>
-      {issues.length ? (
+      {visibleIssues.length ? (
         <Card size="small" title="逐行问题">
           <Space direction="vertical" style={{ width: '100%' }}>
-            {issues.map((issue, index) => (
+            {visibleIssues.map((issue, index) => (
               <Typography.Text key={`${issue.code}-${issue.lineNo ?? 'x'}-${index}`} type={issue.severity === 'error' ? 'danger' : 'warning'}>
                 {issue.lineNo ? `第 ${issue.lineNo} 行：` : ''}{issue.code}{issue.message ? ` — ${issue.message}` : ''}
               </Typography.Text>

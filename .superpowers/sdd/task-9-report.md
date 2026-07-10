@@ -25,3 +25,16 @@
 
 - Ant Design emits existing jsdom `getComputedStyle` and deprecation warnings during tests; no test failures or TypeScript errors remain.
 - The shared layer currently exposes only the generic validation mutation, so re-import validation calls the reviewed `mmlApi.validateScriptReplacement` directly; save/execute continue through the Task 8 mutation hooks.
+
+## Reviewer follow-up
+
+- Typed 409 execution validation warnings now remain in the drawer, open the warning confirmation, and retry with `confirmWarnings=true`.
+- Every upload clears the prior validation snapshot first; a failed replacement upload cannot reuse an older token or preview.
+- Issue cards and report downloads follow the selected all/error/warning filter.
+- Scheduled execution now requires `scheduledAt`; periodic execution renders and validates date range plus time, mapping them to `periodStart`, `periodEnd`, and `periodTime`.
+- Added regression coverage for typed warning rejection, stale upload clearing, issue-card filtering, and scheduled/periodic form boundaries.
+
+Follow-up verification:
+
+- `cd omcmb/webcode && npm run test -- --run src/pages/mml/ScriptTask/__tests__` — 4 files, 12 tests passed.
+- `cd omcmb/webcode && npm run typecheck` — TypeScript exited 0.

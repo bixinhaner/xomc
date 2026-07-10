@@ -40,6 +40,7 @@ export default function ScriptImportModal({ open, onClose, script, onSaved }: Sc
   }, [form, open, script]);
 
   const validateFile = async (file: File) => {
+    setValidation(null);
     setUploading(true);
     try {
       const next = script?.id
@@ -48,7 +49,7 @@ export default function ScriptImportModal({ open, onClose, script, onSaved }: Sc
       setValidation(next);
     } catch (error) {
       const errorValidation = validationFromError(error);
-      if (errorValidation) setValidation(errorValidation);
+      setValidation(errorValidation ?? null);
       void message.error(error instanceof Error ? error.message : 'TXT 校验失败');
     } finally {
       setUploading(false);

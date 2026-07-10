@@ -9,6 +9,7 @@ vi.mock('@core/hooks/api/useMML', () => ({
 }));
 
 import ScriptExecutionDrawer from '../ScriptExecutionDrawer';
+import { MMLScriptImportApiError } from '@core/services/api/mmlApi';
 
 const script = {
   id: 'script-1', scriptName: '巡检脚本', description: '', content: '', creator: 'admin',
@@ -54,5 +55,43 @@ describe('ScriptExecutionDrawer', () => {
     await waitFor(() => expect(mocks.execute).toHaveBeenCalled());
     expect(await screen.findByText('MML_PARAMETER_UNKNOWN')).toBeInTheDocument();
     expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('confirms a typed 409 warning rejection and retries with confirmWarnings', async () => {
+    const warningValidation = {
+      planItems: [],
+      summary: { totalLines: 1, validLines: 1, effectiveLines: 1, deviceCount: 1, errorCount: 0, warningCount: 1 },
+      issues: [{ code: 'MML_DEVICE_OFFLINE', severity: 'warning' as const, lineNo: 1 }],
+    };
+    mocks.execute
+      .mockRejectedValueOnce(new MMLScriptImportApiError({ status: 409, code: 'MML_SCRIPT_WARNINGS', message: 'warnings', validation: warningValidation }))
+      .mockResolvedValueOnce({ task: { id: 'task-2' }, validation: { ...warningValidation, summary: { ...warningValidation.summary, warningCount: 0 }, issues: [] } });
+    render(<ScriptExecutionDrawer open script={script} onClose={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('任务名称'), 'typed-warning-task');
+    await user.click(screen.getByRole('button', { name: '执行' }));
+    expect(await screen.findByRole('button', { name: '确认执行' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '确认执行' }));
+    await waitFor(() => expect(mocks.execute).toHaveBeenLastCalledWith(expect.objectContaining({ input: expect.objectContaining({ confirmWarnings: true }) })));
+  });
+
+  it('requires periodic date and time fields before submitting', async () => {
+    render(<ScriptExecutionDrawer open script={script} onClose={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('radio', { name: '周期' }));
+    expect(screen.getByLabelText('周期日期')).toBeInTheDocument();
+    expect(screen.getByLabelText('周期时间')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '执行' }));
+    expect(await screen.findByText('请选择周期日期范围')).toBeInTheDocument();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it('requires a scheduled time before submitting scheduled execution', async () => {
+    render(<ScriptExecutionDrawer open script={script} onClose={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('radio', { name: '定时' }));
+    await user.click(screen.getByRole('button', { name: '执行' }));
+    expect(await screen.findByText('请选择执行时间')).toBeInTheDocument();
+    expect(mocks.execute).not.toHaveBeenCalled();
   });
 });

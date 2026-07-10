@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Button, Checkbox, DatePicker, Drawer, Form, Input, InputNumber, Modal, Radio, Space, Typography, message } from 'antd';
+import { Button, Checkbox, DatePicker, Drawer, Form, Input, InputNumber, Modal, Radio, Space, TimePicker, Typography, message } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
 import type { MMLExecuteType, MMLScript, MMLScriptImportValidation, MMLScriptExecutionInput } from '@core/types/mml';
 import { useCreateMMLScriptExecution } from '@core/hooks/api/useMML';
@@ -16,6 +16,8 @@ interface ExecutionForm {
   taskName: string;
   executeType: MMLExecuteType;
   scheduledAt?: Dayjs;
+  periodRange?: [Dayjs, Dayjs];
+  periodTime?: Dayjs;
   offlineRetry: boolean;
   offlineRetryWait: number;
   failedRetry: boolean;
@@ -35,6 +37,7 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
   const [errorCodes, setErrorCodes] = useState<string[]>([]);
   const [warningValues, setWarningValues] = useState<MMLScriptExecutionInput | null>(null);
   const executionMutation = useCreateMMLScriptExecution();
+  const executeType = Form.useWatch('executeType', form);
 
   useEffect(() => {
     if (!open) return;
@@ -53,7 +56,14 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
       setValidation(null); onSuccess?.(); onClose();
     } catch (error) {
       const errorValidation = validationFromError(error);
-      if (errorValidation) { setValidation(errorValidation); setErrorCodes(errorValidation.issues.filter((issue) => issue.severity === 'error').map((issue) => issue.code)); }
+      if (errorValidation) {
+        setValidation(errorValidation);
+        setErrorCodes(errorValidation.issues.filter((issue) => issue.severity === 'error').map((issue) => issue.code));
+        if (errorValidation.summary.warningCount > 0 || errorValidation.issues.some((issue) => issue.severity === 'warning')) {
+          setWarningValues(input);
+          return;
+        }
+      }
       void message.error(error instanceof Error ? error.message : '执行校验失败');
     }
   };
@@ -64,8 +74,23 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
       await form.validateFields(['taskName']);
       return;
     }
+    if (values.executeType === 'scheduled') {
+      try {
+        await form.validateFields(['scheduledAt']);
+      } catch {
+        return;
+      }
+    }
+    if (values.executeType === 'periodic') {
+      try {
+        await form.validateFields(['periodRange', 'periodTime']);
+      } catch {
+        return;
+      }
+    }
     const input: MMLScriptExecutionInput = {
       taskName: values.taskName.trim(), executeType: values.executeType, scheduledAt: values.scheduledAt?.toISOString(),
+      periodStart: values.periodRange?.[0]?.toISOString(), periodEnd: values.periodRange?.[1]?.toISOString(), periodTime: values.periodTime?.format('HH:mm:ss'),
       offlineRetry: values.offlineRetry, offlineRetryWait: values.offlineRetryWait, failedRetry: values.failedRetry,
       failedRetryCount: values.failedRetryCount, failedRetryInterval: values.failedRetryInterval,
     };
@@ -83,7 +108,11 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
       <Form form={form} layout="vertical">
         <Form.Item label="任务名称" name="taskName" rules={[{ required: true, message: '请输入任务名称' }]}><Input /></Form.Item>
         <Form.Item label="执行方式" name="executeType"><Radio.Group options={[{ value: 'immediate', label: '立即' }, { value: 'suspended', label: '挂起' }, { value: 'scheduled', label: '定时' }, { value: 'periodic', label: '周期' }]} /></Form.Item>
-        <Form.Item label="执行时间" name="scheduledAt"><DatePicker showTime style={{ width: '100%' }} /></Form.Item>
+        <Form.Item label="执行时间" name="scheduledAt" rules={executeType === 'scheduled' ? [{ required: true, message: '请选择执行时间' }] : []}><DatePicker showTime style={{ width: '100%' }} /></Form.Item>
+        {executeType === 'periodic' ? <>
+          <Form.Item label="周期日期" name="periodRange" rules={[{ required: true, message: '请选择周期日期范围' }]}><DatePicker.RangePicker style={{ width: '100%' }} /></Form.Item>
+          <Form.Item label="周期时间" name="periodTime" rules={[{ required: true, message: '请选择周期执行时间' }]}><TimePicker style={{ width: '100%' }} /></Form.Item>
+        </> : null}
         <Space direction="vertical" style={{ width: '100%' }}>
           <Form.Item name="offlineRetry" valuePropName="checked" noStyle><Checkbox>离线等待重试</Checkbox></Form.Item>
           <Form.Item name="offlineRetryWait" label="离线等待（秒）"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>
