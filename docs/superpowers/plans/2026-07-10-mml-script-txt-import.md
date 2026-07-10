@@ -27,7 +27,7 @@
 
 **Current checkpoint:** All tasks complete
 **Resume from:** Final review and delivery
-**Last verified commit:** `585b1f29 test(mml): 完成 TXT 脚本导入端到端验收`
+**Last verified commit:** `3649e972 test(mml): 完成 TXT 脚本导入端到端验收`
 
 - [x] Task 1 — 数据库契约与 Go 模型
 - [x] Task 2 — TXT Parser
@@ -78,7 +78,7 @@
 | Task 10 | `510cb99b..09cccf76` | 规格与质量复审通过；v2 focused tests 2 文件/9 项、typecheck 通过，覆盖 TXT 上传/重导入、模板下载、只读预览、severity/计划行过滤、错误报告、Escape、409 warning 确认、422/mixed error、执行 issues、scheduled/periodic 时间归一化和 Table/Select primitives。 |
 | Task 11 | `85c5106f` | v3 focused tests 2 文件/10 项、typecheck 通过；skin-parity 通过（v2/v3 各 129 routes / 37 visible menus）。覆盖 TXT 上传/重导入、模板下载、只读预览、severity 过滤、错误禁用保存、warning-only 409 确认、mixed 422 逐行错误、执行方式与重试策略、scheduled/periodic 时间归一化、Escape 和真实 pending loading 文本。详见 `.superpowers/sdd/task-11-report.md`。 |
 | Task 12 | `1acf5481..32a8184e` | 规格与质量复审通过；Redis/omcctl/MML handler focused tests、三皮肤 typecheck 通过，覆盖 SCAN+pipeline 来源过滤、dry-run 无写、非 MML 保留、CWMP 映射清理、DELETE-MML-RUNTIME 双确认、旧 POST 保存和旧上传直建入口移除。 |
-| Task 13 | `585b1f29` | E2E 脚本、TXT fixtures、部署/设计文档已落地；migration strict、Go build/test、skin-parity、typecheck、v2/v3 tests 通过。Docker 栈未运行，localhost:8081 旧进程对导入路径返回 404；v1 全量测试有两个既有 frontend-core 失败，三皮肤浏览器验收、Redis 数量切换和真实 E2E PASS 待完整栈与凭据。详见 `.superpowers/sdd/task-13-report.md`。 |
+| Task 13 | `3649e972` | E2E 脚本、TXT fixtures、部署/设计文档已落地；migration strict、Go build/test、skin-parity、typecheck、v2/v3 tests 通过。Docker 栈未运行，localhost:8081 旧进程对导入路径返回 404；v1 全量测试有两个既有 frontend-core 失败，三皮肤浏览器验收、Redis 数量切换和真实 E2E PASS 待完整栈与凭据。详见 `.superpowers/sdd/task-13-report.md`。 |
 
 ---
 
