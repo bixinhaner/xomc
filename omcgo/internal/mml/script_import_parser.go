@@ -130,11 +130,10 @@ func ParseScriptTXT(raw []byte) (*ParsedScript, []ScriptIssue) {
 }
 
 // forEachScriptPhysicalLine avoids allocating a string slice proportional to
-// the number of physical rows. A file ending in LF deliberately visits its
-// final empty row, matching strings.Split(content, "\n") semantics.
+// the number of physical rows. A final LF terminates the preceding physical
+// row; unlike strings.Split, it does not create a synthetic empty row.
 func forEachScriptPhysicalLine(content string, visit func(lineNo int, physical string) bool) {
-	start := 0
-	for lineNo := 1; ; lineNo++ {
+	for start, lineNo := 0, 1; start < len(content); lineNo++ {
 		next := strings.IndexByte(content[start:], '\n')
 		if next < 0 {
 			visit(lineNo, content[start:])

@@ -164,3 +164,46 @@ func TestParseScriptTXT_BoundsPhysicalLines(t *testing.T) {
 	require.Equal(t, MaxScriptLines+1, issues[0].LineNo)
 	require.Equal(t, "# comment", issues[0].RawLine)
 }
+
+func TestParseScriptTXT_DoesNotCountTerminalLFSentinel(t *testing.T) {
+	tests := []struct {
+		name   string
+		row    string
+		assert func(t *testing.T, got *ParsedScript, issues []ScriptIssue)
+	}{
+		{
+			name: "valid rows",
+			row:  "LST DEVICE_INFO;SN1\n",
+			assert: func(t *testing.T, got *ParsedScript, issues []ScriptIssue) {
+				require.Empty(t, issues)
+				require.Len(t, got.Lines, MaxScriptLines)
+			},
+		},
+		{
+			name: "comment rows",
+			row:  "# comment\n",
+			assert: func(t *testing.T, got *ParsedScript, issues []ScriptIssue) {
+				require.Len(t, got.Lines, 0)
+				require.Len(t, issues, 1)
+				require.Equal(t, "MML_FILE_EMPTY", issues[0].Code)
+			},
+		},
+		{
+			name: "malformed rows",
+			row:  "x\n",
+			assert: func(t *testing.T, got *ParsedScript, issues []ScriptIssue) {
+				require.Len(t, got.Lines, 0)
+				require.Len(t, issues, MaxScriptIssues+1)
+				require.Equal(t, "MML_FILE_TOO_LARGE", issues[MaxScriptIssues].Code)
+				require.Equal(t, MaxScriptIssues+1, issues[MaxScriptIssues].LineNo)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, issues := ParseScriptTXT([]byte(strings.Repeat(tt.row, MaxScriptLines)))
+			tt.assert(t, got, issues)
+		})
+	}
+}
