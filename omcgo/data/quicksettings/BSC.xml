@@ -107,8 +107,8 @@
   <group id="bsc-bts-handover" titleZh="切换配置" titleEn="Handover">
     <param name="handover" titleZh="切换开关" titleEn="handover"
            standardPath="DeviceGSM.Bts.{i}.handover" type="enum">
-      <option value="Allow"/>
-      <option value="Forbid"/>
+      <option value="1" label="Allow"/>
+      <option value="0" label="Forbid"/>
     </param>
     <param name="HandoverAlgorithm" titleZh="切换算法版本" titleEn="HandoverAlgorithm"
            standardPath="DeviceGSM.Bts.{i}.HandoverAlgorithm" type="enum">
