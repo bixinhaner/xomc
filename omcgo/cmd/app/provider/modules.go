@@ -1690,8 +1690,8 @@ func initMiscModules(c *Container) error {
 	//   - 设备不存在
 	//   - product_id 与 productClass 均无法路由到 product（孤儿）
 	//   - product 装配件未挂 paramModel
-	// 上层（ConsoleService）见 nil 即降级到"全集 sub_field"行为，与原 SQL NULL
-	// 返回路径等价。
+	// 上层（ConsoleService）见 nil 即返回空的设备过滤结果，避免设备未解析时放行
+	// 未过滤的全集 sub_field。
 	mmlConsoleSvc.SetParamModelByDeviceResolver(func(ctx context.Context, deviceKey string) (*uuid.UUID, error) {
 		dev, err := resolveDeviceByKey(ctx, c, deviceKey)
 		if err != nil {
@@ -1788,8 +1788,7 @@ func initMiscModules(c *Container) error {
 				return set, nil
 			}
 			if errors.Is(err, product.ErrOrphan) {
-				// 孤儿设备：保留 productResolved=false，前端按 user Q4 决定的策略
-				// 显示全部命令但每条标 0 supported。
+				// 孤儿产品：保留 productResolved=false，由控制台返回空过滤结果。
 				return &mml.SupportedSet{
 					ProductClass:    productClass,
 					ProductResolved: false,

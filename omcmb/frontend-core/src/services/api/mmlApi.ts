@@ -1478,7 +1478,7 @@ export const mmlApi = {
   // --- T-0123-P2 Console 5 端点 ---
 
   /**
-   * GET /mml/group-tree?root=&lang=&product_class= — 命令分组树。
+   * GET /mml/group-tree?root=&lang=&product_class=&device_sn= — 命令分组树。
    *
    * productClass（T-0172）非空时后端按"该产品族 default param_mappings"过滤命令：
    *   - 命令的 target_paths 至少 1 条在 supported set → 显示
@@ -1487,16 +1487,19 @@ export const mmlApi = {
    *   - 每条返回命令带 supported_path_count / unsupported_paths / product_resolved 注解
    *   - 空 group（含 chapter）被剔除
    *
-   * productClass 缺省 / 空串 → 不做过滤（向后兼容旧调用）。
+   * deviceKey 非空时后端按设备对应 ParamModel 的支持集合过滤，和 sub-fields 使用同一口径。
+   * productClass 缺省 / 空串、deviceKey 缺省 / 空串 → 不做过滤（向后兼容旧调用）。
    */
   async buildGroupTree(
     root?: string,
     lang: string = 'zh-CN',
-    productClass?: string
+    productClass?: string,
+    deviceKey?: string,
   ): Promise<GroupTreeNode[]> {
     const params: Record<string, string> = { lang };
     if (root) params.root = root;
     if (productClass) params.product_class = productClass;
+    if (deviceKey) params.device_sn = deviceKey;
     const { data } = await http.get<{ tree: BackendGroupTreeNode[] } | BackendGroupTreeNode[]>(
       '/mml/group-tree',
       { params }
@@ -1507,7 +1510,7 @@ export const mmlApi = {
   },
 
   /**
-   * Task #9: GET /mml/group-tree?format=flat&lang= — 扁平化命令分组树。
+   * Task #9: GET /mml/group-tree?format=flat&lang=&product_class=&device_sn= — 扁平化命令分组树。
    *
    * 与 buildGroupTree 区别：
    *   - 后端预聚合为「分组 → 命令叶子」两层；不返回 ltree children/sub_fields
@@ -1520,10 +1523,15 @@ export const mmlApi = {
    * 等下划线字段被转 camel，调用方应在消费层做兼容；本层保持透传。
    */
   async buildGroupTreeFlat(
-    lang: string = 'zh-CN'
+    lang: string = 'zh-CN',
+    productClass?: string,
+    deviceKey?: string,
   ): Promise<FlatGroupTreeResponse> {
+    const params: Record<string, string> = { format: 'flat', lang };
+    if (productClass) params.product_class = productClass;
+    if (deviceKey) params.device_sn = deviceKey;
     const { data } = await http.get<FlatGroupTreeResponse>('/mml/group-tree', {
-      params: { format: 'flat', lang },
+      params,
     });
     return {
       groups: Array.isArray(data?.groups) ? data.groups : [],
@@ -1538,8 +1546,8 @@ export const mmlApi = {
    *   2. device_sn / device_id 非空 → 老 T-0170 路径(admin 工具兼容)
    *   3. 都不传 → admin 视图全集
    *
-   * console 前端始终传 productClass(从 productClassFilter dropdown 取),
-   * 让右栏 path 列表行数严格等于命令名 (N)。
+   * 控制台可传 deviceKey 或 productClass；传入后返回的 path 是
+   * 当前 ParamModel 支持集合与当前命令 MML sub-fields 的交集。
    */
   async getCommandSubFields(
     commandId: string,
