@@ -55,7 +55,16 @@ export default function ScriptExecutionDialog({ open, script, onClose, onSuccess
       onSuccess?.(); onClose()
     } catch (error) {
       const next = validationFromError(error)
-      if (next) setValidation(next)
+      if (next) {
+        setValidation(next)
+        const hasErrors = next.summary.errorCount > 0 || next.issues.some((issue) => issue.severity === 'error')
+        const hasWarnings = next.summary.warningCount > 0 || next.issues.some((issue) => issue.severity === 'warning')
+        if (hasWarnings && !hasErrors && !input.confirmWarnings) {
+          setWarningInput(input)
+          setNotice('')
+          return
+        }
+      }
       const status = typeof error === 'object' && error && 'status' in error ? ` (${String((error as { status?: unknown }).status)})` : ''
       setNotice(`${error instanceof Error ? error.message : '执行校验失败'}${status}`)
     }
@@ -65,7 +74,10 @@ export default function ScriptExecutionDialog({ open, script, onClose, onSuccess
     if (!taskName.trim()) { setNotice('请输入任务名称'); return }
     if (executeType === 'scheduled' && !scheduledAt) { setNotice('请选择执行时间'); return }
     if (executeType === 'periodic' && (!periodStart || !periodEnd || !periodTime)) { setNotice('请选择周期日期和时间'); return }
-    const input: MMLScriptExecutionInput = { taskName: taskName.trim(), executeType, scheduledAt: scheduledAt || undefined, periodStart: periodStart || undefined, periodEnd: periodEnd || undefined, periodTime: periodTime || undefined, offlineRetry, offlineRetryWait, failedRetry, failedRetryCount, failedRetryInterval }
+    const normalizedPeriodTime = periodTime ? (periodTime.length === 5 ? `${periodTime}:00` : periodTime) : undefined
+    const normalizedPeriodStart = periodStart ? (periodStart.length === 10 ? `${periodStart}T00:00:00` : periodStart) : undefined
+    const normalizedPeriodEnd = periodEnd ? (periodEnd.length === 10 ? `${periodEnd}T23:59:59` : periodEnd) : undefined
+    const input: MMLScriptExecutionInput = { taskName: taskName.trim(), executeType, scheduledAt: scheduledAt || undefined, periodStart: normalizedPeriodStart, periodEnd: normalizedPeriodEnd, periodTime: normalizedPeriodTime, offlineRetry, offlineRetryWait, failedRetry, failedRetryCount, failedRetryInterval }
     void execute(input)
   }
 
