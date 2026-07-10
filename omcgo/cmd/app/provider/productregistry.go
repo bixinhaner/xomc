@@ -11,6 +11,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/core/dictloader"
+	router "github.com/omcgo/omcgo/internal/pm/kpi/router"
 	"github.com/omcgo/omcgo/internal/product"
 )
 
@@ -72,6 +73,12 @@ func initProductRegistryModule(c *Container) error {
 		&productReloader{reg: c.DictLoaderRegistry},
 		logger,
 	)
+	if c.KPIRouteInvalidator != nil {
+		c.ProductHandler.SetRouteInvalidator(func(ctx context.Context, trigger product.RouteInvalidationTrigger) error {
+			_, err := c.KPIRouteInvalidator.Invalidate(ctx, router.InvalidationTrigger(trigger))
+			return err
+		})
+	}
 	// 2026-05-28 注入 Redis 客户端用于 per-admin rematch 锁(跨进程互斥防反复点击)。
 	// Redis 健康检查由 alarm 模块兜底,这里 c.Redis 在 modules.go init 时已 ping 过。
 	if c.Redis != nil {
