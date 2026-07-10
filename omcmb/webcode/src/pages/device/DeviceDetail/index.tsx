@@ -766,7 +766,7 @@ const getOtherFields = (t: ReturnType<typeof useT>, networkType: string, device:
     { key: 'lastOfflineReason', label: t('device.lastOfflineReason'),
       render: (d) => d.lastOfflineReason ? t(`device.lastOfflineReason.${d.lastOfflineReason}`) : '-' },
     { key: 'firstOnlineTime', label: t('device.firstOnlineTime'), render: (d) => fmtTime(d.firstOnlineTime) },
-    { key: 'lastInformTime', label: t('device.lastInformTime'), render: (d) => fmtTime(d.lastInformTime) },
+    { key: 'lastOnlineTime', label: t('device.lastOnline'), render: (d) => fmtTime(d.lastOnlineTime) },
     // 站址信息
     { key: 'siteName', label: t('device.siteName'), render: (d) => d.deviceName || '-' },
     { key: 'installAddress', label: t('device.installAddress'), render: (d) => d.installAddress || '-' },

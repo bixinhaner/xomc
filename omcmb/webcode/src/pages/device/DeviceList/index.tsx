@@ -59,7 +59,7 @@ import dayjs from 'dayjs';
 import { buildBatchTaskTypeMap, batchActionHasDetail } from './deviceBatchTask';
 import type { Device } from '@core/types/device';
 import { formatSystemTime } from '@core/utils/systemTime';
-import { computeCurrentOnlineDurationSeconds } from '@core/utils/onlineDuration';
+import { computeCumulativeOnlineDurationSeconds, computeCurrentOnlineDurationSeconds } from '@core/utils/onlineDuration';
 
 const { Link } = Typography;
 
@@ -122,6 +122,22 @@ function offlineDurationText(t: TFn, days?: number, hours?: number, minutes?: nu
   return t('device.duration.lessThanMinute');
 }
 
+function offlineDurationPartsFromSeconds(seconds: number | null | undefined): { days: number; hours: number; minutes: number } | null {
+  if (seconds === null || seconds === undefined) return null;
+  const safeSeconds = Math.max(0, Math.floor(seconds));
+  return {
+    days: Math.floor(safeSeconds / 86400),
+    hours: Math.floor((safeSeconds % 86400) / 3600),
+    minutes: Math.floor((safeSeconds % 3600) / 60),
+  };
+}
+
+function offlineDurationTextFromSeconds(t: TFn, seconds: number | null | undefined): string {
+  const parts = offlineDurationPartsFromSeconds(seconds);
+  if (!parts) return '-';
+  return offlineDurationText(t, parts.days, parts.hours, parts.minutes);
+}
+
 function formatOfflineDuration(t: TFn, days?: number, hours?: number, minutes?: number): React.ReactNode {
   if (days === undefined || days === null) return '-';
   const text = offlineDurationText(t, days, hours, minutes);
@@ -131,6 +147,12 @@ function formatOfflineDuration(t: TFn, days?: number, hours?: number, minutes?: 
   else if (days > 0) color = days >= 7 ? 'orange' : 'gold';
   else if (hours && hours > 0) color = 'gold';
   return <Tag color={color}>{text}</Tag>;
+}
+
+function formatOfflineDurationFromSeconds(t: TFn, seconds: number | null | undefined): React.ReactNode {
+  const parts = offlineDurationPartsFromSeconds(seconds);
+  if (!parts) return '-';
+  return formatOfflineDuration(t, parts.days, parts.hours, parts.minutes);
 }
 
 const URL_ARRAY_FIELDS = new Set<string>([
@@ -1076,6 +1098,26 @@ export default function DeviceList() {
     fallbackOnlineDuration: record.onlineDuration,
   }), []);
 
+  const cumulativeOnlineDurationOf = useCallback((record: Device) => computeCumulativeOnlineDurationSeconds({
+    isOnline: record.isOnline,
+    onlineTime: record.onlineTime,
+    offlineTime: record.offlineTime,
+    fallbackOnlineDuration: record.onlineDuration,
+    cumulativeOnlineDuration: record.cumulativeOnlineDuration,
+  }), []);
+
+  const offlineDurationOf = useCallback((record: Device) => {
+    if (record.connStatus !== 'offline') return null;
+    const fallbackOfflineSeconds =
+      typeof record.offlineSeconds === 'number' && !Number.isNaN(record.offlineSeconds)
+        ? Math.max(0, Math.floor(record.offlineSeconds))
+        : null;
+    if (!record.offlineTime) return fallbackOfflineSeconds;
+    const offlineAt = dayjs(record.offlineTime);
+    if (!offlineAt.isValid()) return fallbackOfflineSeconds;
+    return Math.max(0, dayjs().diff(offlineAt, 'second'));
+  }, []);
+
   // 状态值渲染辅助
   const fmtStatus = useCallback(
     (value: string | number | boolean | undefined | null, map: Record<string, { label: string; color: string }>) => {
@@ -1346,6 +1388,15 @@ export default function DeviceList() {
       { key: 'macAddress', title: t('device.macAddress'), dataIndex: 'macAddress', width: 150, mono: true, copyable: true, group: 'common' },
       { key: 'groupName', title: t('device.groupName'), dataIndex: 'groupName', width: 120, group: 'common' },
       {
+        key: 'firstOnlineTime',
+        title: t('device.firstOnlineTime'),
+        dataIndex: 'firstOnlineTime',
+        width: 165,
+        hidden: true,
+        group: 'common',
+        render: (_val, record) => fmtTime(record.firstOnlineTime),
+      },
+      {
         key: 'onlineTime',
         title: t('device.onlineTime'),
         dataIndex: 'onlineTime',
@@ -1353,6 +1404,15 @@ export default function DeviceList() {
         hidden: true,
         group: 'common',
         render: (_val, record) => fmtTime(record.onlineTime),
+      },
+      {
+        key: 'lastOnlineTime',
+        title: t('device.lastOnline'),
+        dataIndex: 'lastOnlineTime',
+        width: 165,
+        hidden: true,
+        group: 'common',
+        render: (_val, record) => fmtTime(record.lastOnlineTime),
       },
       {
         key: 'offlineTime',
@@ -1364,13 +1424,22 @@ export default function DeviceList() {
         render: (_val, record) => fmtTime(record.offlineTime),
       },
       {
-        key: 'opState',
-        title: t('device.opState'),
-        dataIndex: 'opState',
-        width: 140,
+        key: 'onlineDuration',
+        title: t('device.onlineDuration'),
+        dataIndex: 'onlineDuration',
+        width: 120,
+        hidden: true,
         group: 'common',
-        // 激活状态 = 设备是否曾首次上线（op_state），与在线/小区状态正交。
-        render: (_val, record) => renderActivationStatus(record.opState),
+        render: (_val, record) => fmtDuration(onlineDurationOf(record)),
+      },
+      {
+        key: 'cumulativeOnlineDuration',
+        title: t('device.cumulativeOnlineDuration'),
+        dataIndex: 'cumulativeOnlineDuration',
+        width: 140,
+        hidden: true,
+        group: 'common',
+        render: (_val, record) => fmtDuration(cumulativeOnlineDurationOf(record)),
       },
       {
         key: 'offlineDuration',
@@ -1380,13 +1449,18 @@ export default function DeviceList() {
         render: (_val, record) => {
           // 仅离线设备显示
           if (record.connStatus !== 'offline') return '-';
-          return formatOfflineDuration(
-            t,
-            record.offlineDays,
-            record.offlineHours,
-            record.offlineMinutes
-          );
+          return formatOfflineDurationFromSeconds(t, offlineDurationOf(record));
         },
+      },
+      { key: 'upTime', title: t('device.upTime'), dataIndex: 'upTime', width: 120, hidden: true, group: 'common', render: (_val, record) => fmtDuration(record.upTime) },
+      {
+        key: 'opState',
+        title: t('device.opState'),
+        dataIndex: 'opState',
+        width: 140,
+        group: 'common',
+        // 激活状态 = 设备是否曾首次上线（op_state），与在线/小区状态正交。
+        render: (_val, record) => renderActivationStatus(record.opState),
       },
       {
         key: 'ueCount',
@@ -1451,43 +1525,6 @@ export default function DeviceList() {
             </Tag>
           );
         },
-      },
-      {
-        key: 'onlineDuration',
-        title: t('device.onlineDuration'),
-        dataIndex: 'onlineDuration',
-        width: 120,
-        hidden: true,
-        group: 'common',
-        render: (_val, record) => fmtDuration(onlineDurationOf(record)),
-      },
-      { key: 'upTime', title: t('device.upTime'), dataIndex: 'upTime', width: 120, hidden: true, group: 'common', render: (_val, record) => fmtDuration(record.upTime) },
-      {
-        key: 'firstOnlineTime',
-        title: t('device.firstOnlineTime'),
-        dataIndex: 'firstOnlineTime',
-        width: 165,
-        hidden: true,
-        group: 'common',
-        render: (_val, record) => fmtTime(record.firstOnlineTime),
-      },
-      {
-        key: 'lastInformTime',
-        title: t('device.lastInformTime'),
-        dataIndex: 'lastInformTime',
-        width: 165,
-        hidden: true,
-        group: 'common',
-        render: (_val, record) => fmtTime(record.lastInformTime),
-      },
-      {
-        key: 'lastOnlineTime',
-        title: t('device.lastOnline'),
-        dataIndex: 'lastOnlineTime',
-        width: 165,
-        hidden: true,
-        group: 'common',
-        render: (_val, record) => fmtTime(record.lastOnlineTime),
       },
       {
         key: 'siteName',
@@ -1746,15 +1783,15 @@ export default function DeviceList() {
           return fmtTime(record.offlineTime);
         case 'firstOnlineTime':
           return fmtTime(record.firstOnlineTime);
-        case 'lastInformTime':
-          return fmtTime(record.lastInformTime);
         case 'lastOnlineTime':
           return fmtTime(record.lastOnlineTime);
         case 'onlineDuration':
           return fmtDuration(onlineDurationOf(record));
+        case 'cumulativeOnlineDuration':
+          return fmtDuration(cumulativeOnlineDurationOf(record));
         case 'offlineDuration':
           return record.connStatus === 'offline'
-            ? offlineDurationText(t, record.offlineDays, record.offlineHours, record.offlineMinutes)
+            ? offlineDurationTextFromSeconds(t, offlineDurationOf(record))
             : '-';
         case 'halobFlag':
           return record.halobFlag == null
@@ -1782,7 +1819,7 @@ export default function DeviceList() {
         }
       }
     },
-    [adminStateLabelOf, appLocale, mapConnStatus, getSeverityLabel, fmtTime, fmtDuration, onlineDurationOf, opStateDict?.sysDictionaryDetails, t]
+    [adminStateLabelOf, appLocale, mapConnStatus, getSeverityLabel, fmtTime, fmtDuration, onlineDurationOf, cumulativeOnlineDurationOf, offlineDurationOf, opStateDict?.sysDictionaryDetails, t]
   );
 
   // 按当前筛选条件并发分页拉取全部命中数据(不受列表当前页/页大小限制)。
