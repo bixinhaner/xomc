@@ -25,11 +25,11 @@
 
 ## Progress Ledger
 
-**Current checkpoint:** Task 1 in progress
-**Resume from:** Task 1, Step 1 — fetch latest main and lock the migration number
+**Current checkpoint:** Task 1 complete
+**Resume from:** Task 2, Step 1 — write parser failing tests
 **Last verified commit:** `d44bacf5 docs(mml): 设计 TXT 导入式脚本库`
 
-- [ ] Task 1 — 数据库契约与 Go 模型
+- [x] Task 1 — 数据库契约与 Go 模型
 - [ ] Task 2 — TXT Parser
 - [ ] Task 3 — 批量命令/设备校验
 - [ ] Task 4 — Redis 一次性校验会话
@@ -66,6 +66,7 @@
 | Task | Commit | Verification |
 |---|---|---|
 | Design | `d44bacf5` | 设计已确认，实施计划从 Task 1 开始 |
+| Task 1 | this commit | `bash omcgo/scripts/check-migrations.sh --strict`; `cd omcgo && go test ./internal/mml -run 'TestPgScriptRepository|TestPgTaskRepository' -count=1`; `cd omcgo && go test ./internal/mml -count=1` |
 
 ---
 

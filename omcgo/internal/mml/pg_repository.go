@@ -64,7 +64,9 @@ var commandColumns = []string{
 }
 
 var scriptColumns = []string{
-	"id", "script_name", "description", "content",
+	"id", "import_session_id", "script_name", "description", "content",
+	"original_filename", "content_sha256", "validation_version", "validated_at",
+	"plan_items", "validation_summary",
 	"creator", "tags",
 	"status", "start_time", "end_time", "type", "progress", "result",
 	"last_run_status", "last_run_at",
@@ -72,7 +74,7 @@ var scriptColumns = []string{
 }
 
 var taskColumns = []string{
-	"id", "task_name", "script_id", "device_sns",
+	"id", "task_name", "script_id", "script_content_sha256", "script_validation_version", "device_sns",
 	"commands", "execute_mode", "plan_items", "status", "results", "creator", "executor",
 	"created_at", "updated_at",
 	"execute_type", "scheduled_at",
@@ -363,16 +365,32 @@ func NewPgScriptRepository(pool *pgxpool.Pool) *PgScriptRepository {
 }
 
 func (r *PgScriptRepository) Create(ctx context.Context, script *MMLScript) error {
+	if script.PlanItems == nil {
+		script.PlanItems = []MMLPlanItem{}
+	}
+	if script.ValidationSummary == nil {
+		script.ValidationSummary = JSONMap{}
+	}
 	tagsJSON, err := json.Marshal(script.Tags)
 	if err != nil {
 		return fmt.Errorf("marshal tags: %w", err)
 	}
+	planItemsJSON, err := json.Marshal(script.PlanItems)
+	if err != nil {
+		return fmt.Errorf("marshal script plan_items: %w", err)
+	}
+	validationSummaryJSON, err := json.Marshal(script.ValidationSummary)
+	if err != nil {
+		return fmt.Errorf("marshal script validation_summary: %w", err)
+	}
 
 	query, args, err := storage.Psql.Insert("mml_scripts").
-		Columns("script_name", "description", "content",
-			"creator", "tags").
-		Values(script.ScriptName, script.Description, script.Content,
-			script.Creator, tagsJSON).
+		Columns("import_session_id", "script_name", "description", "content",
+			"original_filename", "content_sha256", "validation_version", "validated_at",
+			"plan_items", "validation_summary", "creator", "tags").
+		Values(script.ImportSessionID, script.ScriptName, script.Description, script.Content,
+			script.OriginalFilename, script.ContentSHA256, script.ValidationVersion, script.ValidatedAt,
+			string(planItemsJSON), string(validationSummaryJSON), script.Creator, tagsJSON).
 		Suffix("RETURNING " + joinColumns(scriptColumns)).
 		ToSql()
 	if err != nil {
@@ -408,15 +426,36 @@ func (r *PgScriptRepository) GetByID(ctx context.Context, id uuid.UUID) (*MMLScr
 }
 
 func (r *PgScriptRepository) Update(ctx context.Context, script *MMLScript) error {
+	if script.PlanItems == nil {
+		script.PlanItems = []MMLPlanItem{}
+	}
+	if script.ValidationSummary == nil {
+		script.ValidationSummary = JSONMap{}
+	}
 	tagsJSON, err := json.Marshal(script.Tags)
 	if err != nil {
 		return fmt.Errorf("marshal tags: %w", err)
 	}
+	planItemsJSON, err := json.Marshal(script.PlanItems)
+	if err != nil {
+		return fmt.Errorf("marshal script plan_items: %w", err)
+	}
+	validationSummaryJSON, err := json.Marshal(script.ValidationSummary)
+	if err != nil {
+		return fmt.Errorf("marshal script validation_summary: %w", err)
+	}
 
 	query, args, err := storage.Psql.Update("mml_scripts").
+		Set("import_session_id", script.ImportSessionID).
 		Set("script_name", script.ScriptName).
 		Set("description", script.Description).
 		Set("content", script.Content).
+		Set("original_filename", script.OriginalFilename).
+		Set("content_sha256", script.ContentSHA256).
+		Set("validation_version", script.ValidationVersion).
+		Set("validated_at", script.ValidatedAt).
+		Set("plan_items", string(planItemsJSON)).
+		Set("validation_summary", string(validationSummaryJSON)).
 		Set("creator", script.Creator).
 		Set("tags", tagsJSON).
 		Where(sq.Eq{"id": script.ID}).
@@ -587,10 +626,12 @@ func (r *PgScriptRepository) List(ctx context.Context, filter ScriptFilter) (*mo
 
 func scanScript(row pgx.Row) (*MMLScript, error) {
 	var s MMLScript
-	var tagsJSON, resultJSON []byte
+	var tagsJSON, planItemsJSON, validationSummaryJSON, resultJSON []byte
 
 	err := row.Scan(
-		&s.ID, &s.ScriptName, &s.Description, &s.Content,
+		&s.ID, &s.ImportSessionID, &s.ScriptName, &s.Description, &s.Content,
+		&s.OriginalFilename, &s.ContentSHA256, &s.ValidationVersion, &s.ValidatedAt,
+		&planItemsJSON, &validationSummaryJSON,
 		&s.Creator, &tagsJSON,
 		&s.Status, &s.StartTime, &s.EndTime, &s.Type, &s.Progress, &resultJSON,
 		&s.LastRunStatus, &s.LastRunAt,
@@ -606,6 +647,22 @@ func scanScript(row pgx.Row) (*MMLScript, error) {
 	}
 	if s.Tags == nil {
 		s.Tags = []string{}
+	}
+	if planItemsJSON != nil {
+		if err := json.Unmarshal(planItemsJSON, &s.PlanItems); err != nil {
+			return nil, fmt.Errorf("unmarshal script plan_items: %w", err)
+		}
+	}
+	if s.PlanItems == nil {
+		s.PlanItems = []MMLPlanItem{}
+	}
+	if validationSummaryJSON != nil && len(validationSummaryJSON) > 2 {
+		if err := json.Unmarshal(validationSummaryJSON, &s.ValidationSummary); err != nil {
+			return nil, fmt.Errorf("unmarshal script validation_summary: %w", err)
+		}
+	}
+	if s.ValidationSummary == nil {
+		s.ValidationSummary = JSONMap{}
 	}
 	if resultJSON != nil && len(resultJSON) > 2 {
 		_ = json.Unmarshal(resultJSON, &s.Result)
@@ -615,10 +672,12 @@ func scanScript(row pgx.Row) (*MMLScript, error) {
 
 func scanScriptRow(rows pgx.Rows) (*MMLScript, error) {
 	var s MMLScript
-	var tagsJSON, resultJSON []byte
+	var tagsJSON, planItemsJSON, validationSummaryJSON, resultJSON []byte
 
 	err := rows.Scan(
-		&s.ID, &s.ScriptName, &s.Description, &s.Content,
+		&s.ID, &s.ImportSessionID, &s.ScriptName, &s.Description, &s.Content,
+		&s.OriginalFilename, &s.ContentSHA256, &s.ValidationVersion, &s.ValidatedAt,
+		&planItemsJSON, &validationSummaryJSON,
 		&s.Creator, &tagsJSON,
 		&s.Status, &s.StartTime, &s.EndTime, &s.Type, &s.Progress, &resultJSON,
 		&s.LastRunStatus, &s.LastRunAt,
@@ -634,6 +693,22 @@ func scanScriptRow(rows pgx.Rows) (*MMLScript, error) {
 	}
 	if s.Tags == nil {
 		s.Tags = []string{}
+	}
+	if planItemsJSON != nil {
+		if err := json.Unmarshal(planItemsJSON, &s.PlanItems); err != nil {
+			return nil, fmt.Errorf("unmarshal script plan_items: %w", err)
+		}
+	}
+	if s.PlanItems == nil {
+		s.PlanItems = []MMLPlanItem{}
+	}
+	if validationSummaryJSON != nil && len(validationSummaryJSON) > 2 {
+		if err := json.Unmarshal(validationSummaryJSON, &s.ValidationSummary); err != nil {
+			return nil, fmt.Errorf("unmarshal script validation_summary: %w", err)
+		}
+	}
+	if s.ValidationSummary == nil {
+		s.ValidationSummary = JSONMap{}
 	}
 	if resultJSON != nil && len(resultJSON) > 2 {
 		_ = json.Unmarshal(resultJSON, &s.Result)
@@ -706,7 +781,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *MMLTask) error {
 	}
 
 	query, args, err := storage.Psql.Insert("mml_tasks").
-		Columns("task_name", "script_id", "device_sns",
+		Columns("task_name", "script_id", "script_content_sha256", "script_validation_version", "device_sns",
 			"commands", "execute_mode", "plan_items", "status", "results", "creator", "executor",
 			"execute_type", "scheduled_at",
 			"period_start", "period_end", "period_time",
@@ -717,7 +792,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *MMLTask) error {
 			"product_resolved", "matched_product_id", "matched_product_class", "path_translation_source").
 		// 2026-05-28 修复:JSONB 列用 string 传(详见 Update 函数注释)。
 		// Create 当前能工作是 pgx prepare-cache 路径行为巧合,显式 string 防退化。
-		Values(task.TaskName, task.ScriptID, string(deviceSNsJSON),
+		Values(task.TaskName, task.ScriptID, task.ScriptContentSHA256, task.ScriptValidationVersion, string(deviceSNsJSON),
 			string(commandsJSON), task.ExecuteMode, string(planItemsJSON), task.Status, string(resultsJSON), task.Creator, task.Executor,
 			task.ExecuteType, task.ScheduledAt,
 			task.PeriodStart, task.PeriodEnd, task.PeriodTime,
@@ -793,6 +868,8 @@ func (r *PgTaskRepository) Update(ctx context.Context, task *MMLTask) error {
 	query, args, err := storage.Psql.Update("mml_tasks").
 		Set("task_name", task.TaskName).
 		Set("script_id", task.ScriptID).
+		Set("script_content_sha256", task.ScriptContentSHA256).
+		Set("script_validation_version", task.ScriptValidationVersion).
 		Set("device_sns", string(deviceSNsJSON)).
 		Set("commands", string(commandsJSON)).
 		Set("execute_mode", task.ExecuteMode).
@@ -915,7 +992,7 @@ func scanTask(row pgx.Row) (*MMLTask, error) {
 	var matchedProductClass, pathTranslationSource *string
 
 	err := row.Scan(
-		&t.ID, &t.TaskName, &t.ScriptID, &deviceSNsJSON,
+		&t.ID, &t.TaskName, &t.ScriptID, &t.ScriptContentSHA256, &t.ScriptValidationVersion, &deviceSNsJSON,
 		&commandsJSON, &t.ExecuteMode, &planItemsJSON, &t.Status, &resultsJSON, &t.Creator, &t.Executor,
 		&t.CreatedAt, &t.UpdatedAt,
 		&t.ExecuteType, &t.ScheduledAt,
@@ -981,7 +1058,7 @@ func scanTaskRow(rows pgx.Rows) (*MMLTask, error) {
 	var matchedProductClass, pathTranslationSource *string
 
 	err := rows.Scan(
-		&t.ID, &t.TaskName, &t.ScriptID, &deviceSNsJSON,
+		&t.ID, &t.TaskName, &t.ScriptID, &t.ScriptContentSHA256, &t.ScriptValidationVersion, &deviceSNsJSON,
 		&commandsJSON, &t.ExecuteMode, &planItemsJSON, &t.Status, &resultsJSON, &t.Creator, &t.Executor,
 		&t.CreatedAt, &t.UpdatedAt,
 		&t.ExecuteType, &t.ScheduledAt,

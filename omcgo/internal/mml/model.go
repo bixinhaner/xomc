@@ -132,18 +132,25 @@ const (
 
 // MMLScript represents a user-defined MML command script.
 type MMLScript struct {
-	ID          uuid.UUID    `json:"id"`
-	ScriptName  string       `json:"script_name"`
-	Description string       `json:"description"`
-	Content     string       `json:"content"`
-	Creator     string       `json:"creator"`
-	Tags        []string     `json:"tags"`
-	Status      ScriptStatus `json:"status"`
-	StartTime   *time.Time   `json:"start_time,omitempty"`
-	EndTime     *time.Time   `json:"end_time,omitempty"`
-	Type        ScriptType   `json:"type"`
-	Progress    float64      `json:"progress"`
-	Result      JSONMap      `json:"result,omitempty"`
+	ID                uuid.UUID     `json:"id"`
+	ImportSessionID   uuid.UUID     `json:"-"`
+	ScriptName        string        `json:"script_name"`
+	Description       string        `json:"description"`
+	Content           string        `json:"content"`
+	OriginalFilename  string        `json:"original_filename"`
+	ContentSHA256     string        `json:"content_sha256"`
+	ValidationVersion string        `json:"validation_version"`
+	ValidatedAt       *time.Time    `json:"validated_at,omitempty"`
+	PlanItems         []MMLPlanItem `json:"plan_items"`
+	ValidationSummary JSONMap       `json:"validation_summary"`
+	Creator           string        `json:"creator"`
+	Tags              []string      `json:"tags"`
+	Status            ScriptStatus  `json:"status"`
+	StartTime         *time.Time    `json:"start_time,omitempty"`
+	EndTime           *time.Time    `json:"end_time,omitempty"`
+	Type              ScriptType    `json:"type"`
+	Progress          float64       `json:"progress"`
+	Result            JSONMap       `json:"result,omitempty"`
 	// 最近一次执行终态（由 MMLAggregator 在对应 mml_task 收敛后回写）。
 	// per-execution 详情查 mml_tasks，脚本层只持有"最近一次"指针。
 	LastRunStatus *string    `json:"last_run_status,omitempty"`
@@ -172,19 +179,21 @@ type MMLPlanItem struct {
 
 // MMLTask represents an MML command execution task.
 type MMLTask struct {
-	ID          uuid.UUID                `json:"id"`
-	TaskName    string                   `json:"task_name"`
-	ScriptID    *uuid.UUID               `json:"script_id,omitempty"`
-	DeviceSNs   []string                 `json:"device_sns"`
-	Commands    []map[string]interface{} `json:"commands"`
-	ExecuteMode TaskExecuteMode          `json:"execute_mode"`
-	PlanItems   []MMLPlanItem            `json:"plan_items"`
-	Status      TaskStatus               `json:"status"`
-	Results     []map[string]interface{} `json:"results"`
-	Creator     string                   `json:"creator"`
-	Executor    string                   `json:"executor,omitempty"`
-	CreatedAt   time.Time                `json:"created_at"`
-	UpdatedAt   time.Time                `json:"updated_at"`
+	ID                      uuid.UUID                `json:"id"`
+	TaskName                string                   `json:"task_name"`
+	ScriptID                *uuid.UUID               `json:"script_id,omitempty"`
+	ScriptContentSHA256     string                   `json:"script_content_sha256"`
+	ScriptValidationVersion string                   `json:"script_validation_version"`
+	DeviceSNs               []string                 `json:"device_sns"`
+	Commands                []map[string]interface{} `json:"commands"`
+	ExecuteMode             TaskExecuteMode          `json:"execute_mode"`
+	PlanItems               []MMLPlanItem            `json:"plan_items"`
+	Status                  TaskStatus               `json:"status"`
+	Results                 []map[string]interface{} `json:"results"`
+	Creator                 string                   `json:"creator"`
+	Executor                string                   `json:"executor,omitempty"`
+	CreatedAt               time.Time                `json:"created_at"`
+	UpdatedAt               time.Time                `json:"updated_at"`
 
 	// Scheduling
 	ExecuteType ExecuteType `json:"execute_type"`

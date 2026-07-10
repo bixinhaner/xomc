@@ -1,6 +1,7 @@
 package mml
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -9,6 +10,24 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// TestPgScriptRepository_TXTImportColumns locks the database contract for the
+// TXT import workflow. newMMLTestPool skips this integration test when no
+// PostgreSQL test database is configured.
+func TestPgScriptRepository_TXTImportColumns(t *testing.T) {
+	pool := newMMLTestPool(t)
+	var count int
+	err := pool.QueryRow(context.Background(), `
+		SELECT count(*)
+		  FROM information_schema.columns
+		 WHERE table_schema='public' AND table_name='mml_scripts'
+		   AND column_name = ANY($1)`, []string{
+		"import_session_id", "original_filename", "content_sha256", "validation_version",
+		"validated_at", "plan_items", "validation_summary",
+	}).Scan(&count)
+	require.NoError(t, err)
+	require.Equal(t, 7, count)
+}
 
 // 回归：migration 000090 DROP `mml_command_params_rel`，migration 000095/000113
 // 用 `mml_command_sub_fields` + `standard_params` 替代。`pg_repository.go` 内的
