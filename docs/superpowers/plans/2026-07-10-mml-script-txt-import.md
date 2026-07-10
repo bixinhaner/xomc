@@ -25,7 +25,7 @@
 
 ## Progress Ledger
 
-**Current checkpoint:** Task 3 complete
+**Current checkpoint:** Task 4 in progress
 **Resume from:** Task 4, Step 1 — write Redis validation-session failing tests
 **Last verified commit:** `2b634644 fix(mml): 强化 TXT 脚本校验权威性`
 
