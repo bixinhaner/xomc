@@ -194,6 +194,7 @@ func statisStr(p *metrics.StatisType) string {
 type adhocSource struct {
 	db          PgQuerier
 	taskID      uuid.UUID
+	metricPaths []string
 	startTime   time.Time
 	endTime     time.Time
 	dimension   string
@@ -205,15 +206,15 @@ type adhocSource struct {
 	done    bool
 }
 
-func newAdhocSource(db PgQuerier, taskID uuid.UUID, startTime, endTime time.Time, dimension string, deviceCount int) *adhocSource {
-	return &adhocSource{db: db, taskID: taskID, startTime: startTime, endTime: endTime, dimension: dimension, deviceCount: deviceCount}
+func newAdhocSource(db PgQuerier, taskID uuid.UUID, metricPaths []string, startTime, endTime time.Time, dimension string, deviceCount int) *adhocSource {
+	return &adhocSource{db: db, taskID: taskID, metricPaths: metricPaths, startTime: startTime, endTime: endTime, dimension: dimension, deviceCount: deviceCount}
 }
 
 func (s *adhocSource) Next(ctx context.Context) ([]ExportRow, bool, error) {
 	if s.done {
 		return nil, true, nil
 	}
-	sqlStr, args := buildAdhocKeysetSQL(s.taskID, s.startTime, s.endTime, s.started, s.curTime, s.curID, batchSize)
+	sqlStr, args := buildAdhocKeysetSQL(s.taskID, s.metricPaths, s.startTime, s.endTime, s.started, s.curTime, s.curID, batchSize)
 	rows, err := s.db.Query(ctx, sqlStr, args...)
 	if err != nil {
 		return nil, false, fmt.Errorf("export adhoc query: %w", err)
@@ -329,8 +330,8 @@ func metricColumnType(code string) string {
 }
 
 // discoverAdhocColumns 发现 adhoc 源的指标列集，按编号升序。
-func discoverAdhocColumns(ctx context.Context, db PgQuerier, taskID uuid.UUID, start, end time.Time) ([]colKey, error) {
-	sqlStr, args := buildAdhocDistinctMetricsSQL(taskID, start, end)
+func discoverAdhocColumns(ctx context.Context, db PgQuerier, taskID uuid.UUID, metricPaths []string, start, end time.Time) ([]colKey, error) {
+	sqlStr, args := buildAdhocDistinctMetricsSQL(taskID, metricPaths, start, end)
 	rows, err := db.Query(ctx, sqlStr, args...)
 	if err != nil {
 		return nil, fmt.Errorf("export discover adhoc columns: %w", err)

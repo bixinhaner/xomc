@@ -225,24 +225,25 @@ func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, []Wide
 		if err != nil {
 			return nil, nil, csvLayout{}, err
 		}
-		// 先查任务聚合维度 + 圈选设备数：决定首列表头 / 对象名解析口径 / 是否含小区列。
+		// 先查任务聚合维度、圈选设备数和配置指标集：决定首列表头 / 对象名解析口径，
+		// 并确保全量落库模式下导出仍只包含任务配置的 N 个指标。
 		// pm_tasks 在主库（PgPool），用 taskMetaDB 读；adhoc 结果表查询走 adhocDB（TsPool）。
-		dim, deviceCount, derr := loadAdhocDimension(ctx, r.taskMetaDB, taskID)
+		meta, derr := loadAdhocTaskMeta(ctx, r.taskMetaDB, taskID)
 		if derr != nil {
 			return nil, nil, csvLayout{}, derr
 		}
-		keys, kerr := discoverAdhocColumns(ctx, r.adhocDB, taskID, startTime, endTime)
+		keys, kerr := discoverAdhocColumns(ctx, r.adhocDB, taskID, meta.metricPaths, startTime, endTime)
 		if kerr != nil {
 			return nil, nil, csvLayout{}, kerr
 		}
 		cols := newNameResolver(r.adhocDB, loc).resolveColumns(ctx, keys)
 		layout := csvLayout{
-			FirstColHeader:                adhocFirstColHeader(dim),
-			IncludeTechnology:             dim == "device_group", // 设备组维度按制式分行，导出补「制式」列（与页面表格一致）
-			IncludeCell:                   adhocIncludesCell(dim),
+			FirstColHeader:                adhocFirstColHeader(meta.dimension),
+			IncludeTechnology:             meta.dimension == "device_group", // 设备组维度按制式分行，导出补「制式」列（与页面表格一致）
+			IncludeCell:                   adhocIncludesCell(meta.dimension),
 			MissingMetricValuePlaceholder: missingMetricValuePlaceholder,
 		}
-		return newAdhocSource(r.adhocDB, taskID, startTime, endTime, dim, deviceCount), cols, layout, nil
+		return newAdhocSource(r.adhocDB, taskID, meta.metricPaths, startTime, endTime, meta.dimension, meta.deviceCount), cols, layout, nil
 
 	default:
 		return nil, nil, csvLayout{}, fmt.Errorf("export runner: unsupported source_type %q", task.SourceType)
@@ -279,23 +280,28 @@ func (r *Runner) buildDashboardLikeSource(ctx context.Context, task *Task, loc a
 	return newDashboardAggregateSource(r.aggr, req, objectLDNs), cols, layout, nil
 }
 
-// loadAdhocDimension 读 adhoc 任务的聚合维度与圈选设备数（用于首列表头 / 对象名标签）。
+type adhocTaskMeta struct {
+	dimension   string
+	deviceCount int
+	metricPaths []string
+}
+
+// loadAdhocTaskMeta 读 adhoc 任务的聚合维度、圈选设备数与配置指标集。
 // pm_tasks.id 是主键，按 id 直查不依赖子类型过滤。dimension 空 → 退化 "device"；
 // 任务查不到 → 同样退化 "device"（容错，不让导出整体失败）。
-func loadAdhocDimension(ctx context.Context, db PgQuerier, taskID uuid.UUID) (string, int, error) {
-	const q = `SELECT COALESCE(dimension, ''), COALESCE(jsonb_array_length(device_sns), 0) FROM pm_tasks WHERE id = $1`
-	var dim string
-	var cnt int
-	if err := db.QueryRow(ctx, q, taskID).Scan(&dim, &cnt); err != nil {
+func loadAdhocTaskMeta(ctx context.Context, db PgQuerier, taskID uuid.UUID) (adhocTaskMeta, error) {
+	const q = `SELECT COALESCE(dimension, ''), COALESCE(jsonb_array_length(device_sns), 0), COALESCE(metric_paths, '{}'::text[]) FROM pm_tasks WHERE id = $1`
+	var meta adhocTaskMeta
+	if err := db.QueryRow(ctx, q, taskID).Scan(&meta.dimension, &meta.deviceCount, &meta.metricPaths); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return "device", 0, nil
+			return adhocTaskMeta{dimension: "device"}, nil
 		}
-		return "", 0, fmt.Errorf("export adhoc load dimension: %w", err)
+		return adhocTaskMeta{}, fmt.Errorf("export adhoc load task metadata: %w", err)
 	}
-	if dim == "" {
-		dim = "device"
+	if meta.dimension == "" {
+		meta.dimension = "device"
 	}
-	return dim, cnt, nil
+	return meta, nil
 }
 
 // objectPath 约定 object path：kpi-export/{task_id}/kpi_{source}_{timestamp}.csv（设计 §5.6）。

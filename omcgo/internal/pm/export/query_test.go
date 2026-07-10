@@ -93,7 +93,7 @@ func TestBuildDeviceKeysetSQL_NoObjectLDNFilter(t *testing.T) {
 
 func TestBuildAdhocKeysetSQL(t *testing.T) {
 	id := uuid.New()
-	q, args := buildAdhocKeysetSQL(id, time.Time{}, time.Time{}, false, time.Time{}, uuid.Nil, 5000)
+	q, args := buildAdhocKeysetSQL(id, nil, time.Time{}, time.Time{}, false, time.Time{}, uuid.Nil, 5000)
 	assert.Contains(t, q, "FROM pm_adhoc_aggregation_results r")
 	assert.Contains(t, q, "task_id")
 	assert.Contains(t, q, `ORDER BY "r"."time" ASC, r.id ASC`)
@@ -104,7 +104,7 @@ func TestBuildAdhocKeysetSQL(t *testing.T) {
 // adhoc 取数镜像网页关联：LEFT JOIN product_dim / device_group_dim（跨库分离后用本库影子表），
 // 选出产品名 / 设备组名。
 func TestBuildAdhocKeysetSQL_JoinsNames(t *testing.T) {
-	q, _ := buildAdhocKeysetSQL(uuid.New(), time.Time{}, time.Time{}, false, time.Time{}, uuid.Nil, 5000)
+	q, _ := buildAdhocKeysetSQL(uuid.New(), nil, time.Time{}, time.Time{}, false, time.Time{}, uuid.Nil, 5000)
 	assert.Contains(t, q, "LEFT JOIN product_dim")
 	assert.Contains(t, q, "device_group_dim")
 	assert.Contains(t, q, "product_name")
@@ -121,9 +121,27 @@ func TestBuildAdhocKeysetSQL_WithTimeWindow(t *testing.T) {
 	id := uuid.New()
 	st := time.Now().Add(-time.Hour)
 	et := time.Now()
-	q, _ := buildAdhocKeysetSQL(id, st, et, false, time.Time{}, uuid.Nil, 100)
+	q, _ := buildAdhocKeysetSQL(id, nil, st, et, false, time.Time{}, uuid.Nil, 100)
 	assert.Contains(t, q, "r.time >=")
 	assert.Contains(t, q, "r.time <=")
+}
+
+// #38：adhoc 底层可全存该制式全部已启用指标，但导出表头和数据都只能包含任务配置指标集。
+func TestBuildAdhocExportSQL_FiltersTaskMetricPaths(t *testing.T) {
+	id := uuid.New()
+	metricPaths := []string{"KGSM0101", "KGSM0102"}
+
+	dataSQL, dataArgs := buildAdhocKeysetSQL(
+		id, metricPaths, time.Time{}, time.Time{}, false, time.Time{}, uuid.Nil, 5000,
+	)
+	headerSQL, headerArgs := buildAdhocDistinctMetricsSQL(id, metricPaths, time.Time{}, time.Time{})
+
+	assert.Contains(t, dataSQL, "r.metric_path IN (")
+	assert.Contains(t, headerSQL, "metric_path IN (")
+	for _, metricPath := range metricPaths {
+		assert.Contains(t, dataArgs, metricPath)
+		assert.Contains(t, headerArgs, metricPath)
+	}
 }
 
 // 横表列发现：dashboard 源 DISTINCT(metric_path, metric_type)，按 metric_paths + 时窗收口。
@@ -151,7 +169,7 @@ func TestBuildDistinctMetricsSQL_NoFilters(t *testing.T) {
 // adhoc 源列发现：按 task_id（+ 可选时窗）DISTINCT。
 func TestBuildAdhocDistinctMetricsSQL(t *testing.T) {
 	id := uuid.New()
-	q, args := buildAdhocDistinctMetricsSQL(id, time.Time{}, time.Time{})
+	q, args := buildAdhocDistinctMetricsSQL(id, nil, time.Time{}, time.Time{})
 	assert.Contains(t, q, "DISTINCT metric_path, metric_type")
 	assert.Contains(t, q, "FROM pm_adhoc_aggregation_results")
 	assert.Contains(t, q, "task_id")
