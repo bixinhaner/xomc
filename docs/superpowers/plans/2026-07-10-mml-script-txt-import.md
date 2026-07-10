@@ -25,7 +25,7 @@
 
 ## Progress Ledger
 
-**Current checkpoint:** Task 9 complete
+**Current checkpoint:** Task 10 in progress
 **Resume from:** Task 10, Step 1 — write v2 interaction failing tests
 **Last verified commit:** `ee8a7912 fix(frontend): guard mixed MML validation warnings`
 
