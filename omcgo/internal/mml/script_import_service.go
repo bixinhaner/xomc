@@ -182,7 +182,10 @@ func (s *ScriptImportService) ReplaceScriptFromImport(ctx context.Context, id uu
 		if errors.Is(err, ErrImportTokenConsumed) {
 			if reader, ok := s.sessions.(ConsumedImportSessionReader); ok {
 				if consumed, readErr := reader.GetConsumed(ctx, req.ValidationToken, username); readErr == nil {
-					if existing, lookupErr := s.repo.GetByImportSessionID(ctx, consumed.ID); lookupErr == nil && existing.ID == id {
+					if existing, lookupErr := s.repo.GetByImportSessionID(ctx, consumed.ID); lookupErr == nil {
+						if existing.ID != id || existing.Creator != username {
+							return nil, commonerrors.ErrForbidden
+						}
 						return existing, nil
 					}
 				}
