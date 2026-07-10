@@ -19,13 +19,21 @@ import (
 type Handler struct {
 	service *Service
 	logger  *zap.Logger
+	// scriptImportService is set during module wiring. Keeping import endpoints
+	// optional preserves the existing handler test harnesses and startup order.
+	scriptImportService ScriptImportServiceAPI
 }
 
 // NewHandler creates a new MML Handler.
 func NewHandler(service *Service, logger *zap.Logger) *Handler {
+	var importService ScriptImportServiceAPI
+	if service != nil {
+		importService = service.ScriptImportService()
+	}
 	return &Handler{
-		service: service,
-		logger:  logger.Named("mml-handler"),
+		service:             service,
+		logger:              logger.Named("mml-handler"),
+		scriptImportService: importService,
 	}
 }
 
@@ -46,6 +54,11 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	mml.POST("/tasks", h.CreateTask)
 
 	scripts := mml.Group("/scripts")
+	scripts.GET("/import/template", h.GetScriptImportTemplate)
+	scripts.POST("/import/validate", h.ValidateScriptImport)
+	scripts.POST("/import", h.CreateScriptFromImport)
+	scripts.POST("/:id/import/validate", h.ValidateScriptReplacement)
+	scripts.PUT("/:id/import", h.ReplaceScriptFromImport)
 	scripts.GET("", h.ListScripts)
 	scripts.POST("", h.CreateScript)
 	scripts.GET("/:id", h.GetScript)
@@ -173,7 +186,6 @@ type CreateScriptRequest struct {
 type UpdateScriptRequest struct {
 	ScriptName  string   `json:"script_name" binding:"required"`
 	Description string   `json:"description"`
-	Content     string   `json:"content" binding:"required"`
 	Tags        []string `json:"tags"`
 }
 
@@ -557,14 +569,7 @@ func (h *Handler) UpdateScript(c *gin.Context) {
 		return
 	}
 
-	script := &MMLScript{
-		ScriptName:  req.ScriptName,
-		Description: req.Description,
-		Content:     req.Content,
-		Tags:        req.Tags,
-	}
-
-	updated, err := h.service.UpdateScript(c.Request.Context(), id, script)
+	updated, err := h.service.UpdateScriptMetadata(c.Request.Context(), id, req.ScriptName, req.Description, req.Tags)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return

@@ -614,6 +614,29 @@ func TestService_UpdateScript_NilTagsPreservesExisting(t *testing.T) {
 	assert.Equal(t, []string{"keep-me"}, updatedScript.Tags, "nil tags should preserve existing")
 }
 
+func TestService_UpdateScriptMetadata_ReloadsUpdatedVersion(t *testing.T) {
+	scriptID := uuid.New()
+	readCount := 0
+	latest := &MMLScript{ID: scriptID, ScriptName: "new", UpdatedAt: time.Now().UTC()}
+	scriptRepo := &mockScriptRepo{
+		getByIDFn: func(context.Context, uuid.UUID) (*MMLScript, error) {
+			readCount++
+			if readCount == 1 {
+				return &MMLScript{ID: scriptID, ScriptName: "old", UpdatedAt: latest.UpdatedAt.Add(-time.Minute)}, nil
+			}
+			return latest, nil
+		},
+		updateFn: func(context.Context, *MMLScript) error { return nil },
+	}
+
+	svc := newTestService(&mockCommandRepo{}, scriptRepo, &mockTaskRepo{})
+	got, err := svc.UpdateScriptMetadata(context.Background(), scriptID, "new", "desc", []string{"tag"})
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, latest.UpdatedAt, got.UpdatedAt)
+	assert.Equal(t, 2, readCount, "metadata update must reload updated_at for optimistic replacement")
+}
+
 // --- Tests: DeleteScript ---
 
 func TestService_DeleteScript(t *testing.T) {
