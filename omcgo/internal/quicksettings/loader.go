@@ -141,22 +141,23 @@ type xmlGroup struct {
 }
 
 type xmlParam struct {
-	Name            string         `xml:"name,attr"`
-	TitleZh         string         `xml:"titleZh,attr"`
-	TitleEn         string         `xml:"titleEn,attr"`
-	StandardPath    string         `xml:"standardPath,attr"`
-	Leaf            string         `xml:"leaf,attr"`
-	Type            string         `xml:"type,attr"`
-	Required        string         `xml:"required,attr"`
-	Readonly        string         `xml:"readonly,attr"`
-	Hint            string         `xml:"hint,attr"`
-	MinValue        string         `xml:"minValue,attr"`
-	MaxValue        string         `xml:"maxValue,attr"`
-	CheckboxOptions string         `xml:"checkboxOptions,attr"`
-	ExtraInfoPath   string         `xml:"extraInfoPath,attr"`
-	Unit            string         `xml:"unit,attr"`
-	HideRangeHint   string         `xml:"hideRangeHint,attr"`
-	EnumOptions    []xmlEnumOption `xml:"option"`
+	Name            string          `xml:"name,attr"`
+	TitleZh         string          `xml:"titleZh,attr"`
+	TitleEn         string          `xml:"titleEn,attr"`
+	StandardPath    string          `xml:"standardPath,attr"`
+	Leaf            string          `xml:"leaf,attr"`
+	Type            string          `xml:"type,attr"`
+	Required        string          `xml:"required,attr"`
+	Readonly        string          `xml:"readonly,attr"`
+	Hint            string          `xml:"hint,attr"`
+	DefaultValue    string          `xml:"defaultValue,attr"`
+	MinValue        string          `xml:"minValue,attr"`
+	MaxValue        string          `xml:"maxValue,attr"`
+	CheckboxOptions string          `xml:"checkboxOptions,attr"`
+	ExtraInfoPath   string          `xml:"extraInfoPath,attr"`
+	Unit            string          `xml:"unit,attr"`
+	HideRangeHint   string          `xml:"hideRangeHint,attr"`
+	EnumOptions     []xmlEnumOption `xml:"option"`
 }
 
 type xmlEnumOption struct {
@@ -252,6 +253,7 @@ func buildGroups(doc xmlQuickSettings, fileName string) ([]Group, error) {
 				Required:        strings.EqualFold(p.Required, "true"),
 				Readonly:        strings.EqualFold(p.Readonly, "true"),
 				Hint:            p.Hint,
+				DefaultValue:    strings.TrimSpace(p.DefaultValue),
 				MinValue:        minPtr,
 				MaxValue:        maxPtr,
 				EnumOptions:     enums,

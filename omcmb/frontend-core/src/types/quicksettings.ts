@@ -31,6 +31,7 @@ export interface QuickSettingsParam {
   required?: boolean;
   readonly?: boolean;
   hint?: string;
+  defaultValue?: string;
   minValue?: number;
   maxValue?: number;
   enumOptions?: QuickSettingsEnumOption[];

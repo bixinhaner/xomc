@@ -22,9 +22,9 @@ import {
   useQuickSettingsFeedbackStore,
   type MultiFeedback,
 } from '@core/store/quickSettingsFeedbackStore';
-import type { ParameterSchemaItem, ParameterSchemaResponse, ParameterUpdateRequest } from '@core/types/deviceParameter';
+import type { ParameterConstraints, ParameterSchemaItem, ParameterSchemaResponse, ParameterType, ParameterUpdateRequest } from '@core/types/deviceParameter';
 import { isDeviceTaskTerminal, type DeviceTaskStatus } from '@core/types/deviceTask';
-import type { QuickSettingsGroup } from '@core/types/quicksettings';
+import type { QuickSettingsGroup, QuickSettingsParam } from '@core/types/quicksettings';
 import {
   applyInstanceContext,
   formatEnumDisplayValue,
@@ -268,6 +268,41 @@ function serializeNeighborEntry(cells: string[]): string {
   return cells.map((c) => c.trim()).join('-');
 }
 
+function quickParamType(param: QuickSettingsParam | undefined): ParameterType {
+  switch (param?.type) {
+    case 'int':
+    case 'unsignedInt':
+    case 'boolean':
+    case 'dateTime':
+    case 'base64':
+    case 'hexBinary':
+    case 'object':
+      return param.type;
+    default:
+      return 'string';
+  }
+}
+
+function quickParamConstraints(param: QuickSettingsParam | undefined): ParameterConstraints | undefined {
+  if (!param) return undefined;
+  const constraints: ParameterConstraints = {};
+  if (param.minValue !== undefined) constraints.minValue = param.minValue;
+  if (param.maxValue !== undefined) constraints.maxValue = param.maxValue;
+  if (param.enumOptions && param.enumOptions.length > 0) {
+    constraints.enumValues = param.enumOptions.map((option) => option.value);
+    constraints.enumLabels = param.enumOptions.map((option) => option.label);
+  }
+  return Object.keys(constraints).length > 0 ? constraints : undefined;
+}
+
+function formatQuickParamConstraintHint(param: QuickSettingsParam | undefined, t: TFn): string {
+  if (!param || (param.enumOptions && param.enumOptions.length > 0)) return '';
+  if (param.minValue === undefined && param.maxValue === undefined) return '';
+  const lo = param.minValue ?? '-∞';
+  const hi = param.maxValue ?? '∞';
+  return quickParamType(param) === 'string' ? t('device.multi.hintLenRange', { lo, hi }) : `[${lo} ~ ${hi}]`;
+}
+
 interface PackedScalarNeighborTableProps {
   deviceId: string;
   active?: boolean;
@@ -344,6 +379,13 @@ function PackedScalarNeighborTable({
     () => group.params.map((param) => param.leaf || param.name),
     [group.params],
   );
+  const paramByLeaf = useMemo(() => {
+    const map = new Map<string, QuickSettingsParam>();
+    group.params.forEach((param) => {
+      map.set(param.leaf || param.name, param);
+    });
+    return map;
+  }, [group.params]);
 
   // 新增弹窗状态：null = 关闭；values 以 leaf 为 key。
   const [addModal, setAddModal] = useState<{
@@ -484,10 +526,15 @@ function PackedScalarNeighborTable({
   const openAddModal = useCallback(() => {
     if (!canMutate || reachedMax) return;
     setAddModal({
-      values: Object.fromEntries(fieldLeaves.map((leaf) => [leaf, ''])),
+      values: Object.fromEntries(
+        fieldLeaves.map((leaf) => {
+          const param = paramByLeaf.get(leaf);
+          return [leaf, param?.defaultValue ?? ''];
+        }),
+      ),
       errors: {},
     });
-  }, [canMutate, fieldLeaves, reachedMax]);
+  }, [canMutate, fieldLeaves, paramByLeaf, reachedMax]);
 
   const closeAddModal = useCallback(() => setAddModal(null), []);
 
@@ -505,15 +552,24 @@ function PackedScalarNeighborTable({
     const errors: Record<string, string> = {};
     const cells: string[] = [];
     for (const leaf of fieldLeaves) {
+      const param = paramByLeaf.get(leaf);
       const raw = (addModal.values[leaf] ?? '').trim();
       if (!raw) {
-        errors[leaf] = t('device.multi.packed.fieldRequired');
+        if (param?.required) {
+          errors[leaf] = t('device.multi.packed.fieldRequired');
+        }
         cells.push('');
         continue;
       }
       if (/[\s-]/.test(raw)) {
         // `-` 是字段分隔符，空白是条目分隔符，两者都不能出现在字段值里。
         errors[leaf] = t('device.multi.packed.fieldInvalidChar');
+        cells.push(raw);
+        continue;
+      }
+      const err = validateValue(raw, quickParamType(param), quickParamConstraints(param));
+      if (err) {
+        errors[leaf] = err;
         cells.push(raw);
         continue;
       }
@@ -530,7 +586,7 @@ function PackedScalarNeighborTable({
       cells,
       t('device.multi.detailAdd', { instId: String(nextEntryNumber), count: cells.length }),
     );
-  }, [addModal, cellsList.length, fieldLeaves, t, writeSingleEntry]);
+  }, [addModal, cellsList.length, fieldLeaves, paramByLeaf, t, writeSingleEntry]);
 
   const handleDeleteRow = useCallback(
     async (rowIdx: number) => {
@@ -669,19 +725,39 @@ function PackedScalarNeighborTable({
               const leaf = param.leaf || param.name;
               const label = locale === 'zh-CN' ? param.titleZh : param.titleEn;
               const err = addModal.errors[leaf];
+              const hint = formatQuickParamConstraintHint(param, t);
               return (
                 <div key={leaf}>
                   <div style={{ marginBottom: 4, fontSize: 12 }}>
+                    {param.required && <Text type="danger" style={{ marginRight: 4 }}>*</Text>}
                     <Text strong>{label}</Text>
                     <Text type="secondary" style={{ marginLeft: 8 }}>{leaf}</Text>
+                    {hint && <Text type="secondary" style={{ marginLeft: 8 }}>{hint}</Text>}
                   </div>
-                  <Input
-                    size="small"
-                    value={addModal.values[leaf] ?? ''}
-                    status={err ? 'error' : undefined}
-                    onChange={(e) => setAddModalValue(leaf, e.target.value)}
-                    placeholder={label}
-                  />
+                  {param.enumOptions && param.enumOptions.length > 0 ? (
+                    <Select
+                      size="small"
+                      value={addModal.values[leaf] || undefined}
+                      status={err ? 'error' : undefined}
+                      onChange={(value) => setAddModalValue(leaf, value ?? '')}
+                      placeholder="Select"
+                      allowClear
+                      style={{ width: '100%' }}
+                      optionFilterProp="label"
+                      options={param.enumOptions.map((option) => ({
+                        value: option.value,
+                        label: option.label || option.value,
+                      }))}
+                    />
+                  ) : (
+                    <Input
+                      size="small"
+                      value={addModal.values[leaf] ?? ''}
+                      status={err ? 'error' : undefined}
+                      onChange={(e) => setAddModalValue(leaf, e.target.value)}
+                      placeholder={label}
+                    />
+                  )}
                   {err && <Text type="danger" style={{ fontSize: 12 }}>{err}</Text>}
                 </div>
               );
