@@ -27,7 +27,7 @@
 
 **Current checkpoint:** Task 2 complete
 **Resume from:** Task 3, Step 1 — write validator failing tests
-**Last verified commit:** `52909cb9 fix(mml): 保护旧脚本导入会话`
+**Last verified commit:** `82e2c21c fix(mml): 修正 TXT 末尾换行计数`
 
 - [x] Task 1 — 数据库契约与 Go 模型
 - [x] Task 2 — TXT Parser
@@ -67,7 +67,7 @@
 |---|---|---|
 | Design | `d44bacf5` | 设计已确认，实施计划从 Task 1 开始 |
 | Task 1 | `e3f605e0..52909cb9` | 规格与质量复审通过；migration strict、PG 契约测试和 `go test ./internal/mml -count=1` 通过 |
-| Task 2 | `43edbfa8` + follow-ups | `/usr/local/go/bin/go test ./internal/mml -run TestParseScriptTXT -count=1 -v` 与 `/usr/local/go/bin/go test ./internal/mml -count=1` 通过；覆盖 BOM/CR/LF 规范化、终止换行 SHA 收敛（最终 LF 不虚增物理行）、逐设备顺序、稳定错误码、引号/大括号分隔符、200/2000 边界，以及 2,000 物理行/100 语法错误累积上限。 |
+| Task 2 | `43edbfa8..82e2c21c` | 规格与质量最终复审通过；聚焦 parser、MML 全包测试和 package build 通过，覆盖 BOM/CR/LF、终止换行 SHA、逐设备顺序、引号/大括号分隔符、200/2000 边界与有界错误累积。 |
 
 ---
 
