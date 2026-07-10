@@ -59,6 +59,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	scripts.POST("/import", h.CreateScriptFromImport)
 	scripts.POST("/:id/import/validate", h.ValidateScriptReplacement)
 	scripts.PUT("/:id/import", h.ReplaceScriptFromImport)
+	scripts.POST("/:id/executions", h.CreateScriptExecution)
 	scripts.GET("", h.ListScripts)
 	scripts.POST("", h.CreateScript)
 	scripts.GET("/:id", h.GetScript)
@@ -101,6 +102,46 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	// 一键展开为一个 mml_task，fanout + sequencer 自动串行下发。
 	groups := mml.Group("/groups")
 	groups.POST("/:id/execute", h.ExecuteGroup)
+}
+
+// CreateScriptExecution creates an execution instance from the server-side
+// imported-script snapshot. The request is intentionally strict and contains
+// no commands, device_sns or plan_items fields.
+func (h *Handler) CreateScriptExecution(c *gin.Context) {
+	username, ok := authenticatedUsername(c)
+	if !ok {
+		h.writeScriptImportError(c, http.StatusUnauthorized, "MML_UNAUTHORIZED", "authentication required", nil)
+		return
+	}
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		h.writeScriptImportError(c, http.StatusBadRequest, "MML_SCRIPT_ID_INVALID", "invalid script id", nil)
+		return
+	}
+	var req ScriptExecutionRequest
+	if err := decodeScriptImportJSON(c, &req); err != nil {
+		h.writeScriptImportError(c, http.StatusBadRequest, "MML_EXECUTION_REQUEST_INVALID", "invalid script execution request", nil)
+		return
+	}
+	task, validation, err := h.service.CreateScriptExecution(c.Request.Context(), id, username, req)
+	if err != nil {
+		var validationErr *ScriptExecutionValidationError
+		if errors.As(err, &validationErr) && validationErr.Result != nil {
+			status := http.StatusUnprocessableEntity
+			code := "MML_SCRIPT_EXECUTION_VALIDATION_FAILED"
+			message := "script execution preflight failed"
+			if validationErr.Warnings {
+				status = http.StatusConflict
+				code = "MML_SCRIPT_EXECUTION_WARNINGS"
+				message = "script execution warnings require confirmation"
+			}
+			c.AbortWithStatusJSON(status, gin.H{"ret": 0, "msg": message, "data": validationErr.Result, "code": code, "message": message, "issues": validationErr.Result.Issues})
+			return
+		}
+		h.writeScriptImportServiceError(c, err)
+		return
+	}
+	response.OKWithStatus(c, http.StatusCreated, gin.H{"task": task, "validation": validation})
 }
 
 // ---- Request types ----

@@ -1502,16 +1502,16 @@ func (r *PgTaskRepository) ClaimDueTasks(ctx context.Context, now time.Time, lim
 		resultBytes, _ := json.Marshal(child.Results)
 
 		insertSQL := `
-			INSERT INTO mml_tasks (
-				task_name, script_id, device_sns, commands, execute_mode, plan_items, status, results, creator, executor,
+		INSERT INTO mml_tasks (
+				task_name, script_id, script_content_sha256, script_validation_version, device_sns, commands, execute_mode, plan_items, status, results, creator, executor,
 				execute_type, scheduled_at, period_start, period_end, period_time,
 				offline_retry, offline_retry_wait, failed_retry, failed_retry_count, failed_retry_interval,
 				total_devices, next_trigger_at, parent_task_id, started_at
 			) VALUES (
-				$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24
+				$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26
 			) RETURNING ` + joinColumns(taskColumns)
 		row := tx.QueryRow(ctx, insertSQL,
-			child.TaskName, child.ScriptID, childBytes,
+			child.TaskName, child.ScriptID, child.ScriptContentSHA256, child.ScriptValidationVersion, childBytes,
 			cmdBytes, child.ExecuteMode, planBytes, child.Status, resultBytes, child.Creator, child.Executor,
 			child.ExecuteType, child.ScheduledAt,
 			child.PeriodStart, child.PeriodEnd, child.PeriodTime,

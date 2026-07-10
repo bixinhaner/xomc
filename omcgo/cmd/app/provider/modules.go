@@ -1505,6 +1505,7 @@ func initMiscModules(c *Container) error {
 	importSessions := mml.NewRedisImportSessionStore(c.Redis, 15*time.Minute)
 	importValidator := mml.NewScriptImportValidator(mml.NewPgScriptValidationRepository(c.PgPool))
 	mmlService.SetScriptImportService(mml.NewScriptImportService(mmlScriptRepo, importValidator, importSessions, logger))
+	mmlService.SetScriptExecutionValidator(importValidator)
 	mmlService.SetAuditRepo(mmlAuditRepo)
 	mmlService.SetCmdParamRepo(mmlCmdParamRepo)
 	// issue #115 调整3（A1）：自定义命令 PATH 关联表仓库。

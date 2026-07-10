@@ -48,7 +48,12 @@ type Service struct {
 	// 参数路径 → 友好名（standard_params.description）解析，CSV「参数名称」列用；nil 时回退 param_refs。
 	pathNameResolver    func(ctx context.Context, paths []string) (map[string]string, error)
 	scriptImportService ScriptImportServiceAPI
-	logger              *zap.Logger
+	// scriptExecutionValidator is optional because older deployments may not
+	// have the TXT validator wired yet. When present it performs the dynamic
+	// device/command checks immediately before an execution is persisted and
+	// again when a scheduled instance is dispatched.
+	scriptExecutionValidator ScriptImportValidationRunner
+	logger                   *zap.Logger
 
 	// 按 product_class 缓存 standardPath→privatePath 翻译结果（TTL 1 分钟）。混类型任务
 	// per-product 翻译一次、同 product_class 复用，避免逐设备重复翻译。
@@ -168,6 +173,14 @@ func (s *Service) SetAuditRepo(repo AuditRepository) {
 // composition boundary, while Handler receives the narrow API interface.
 func (s *Service) SetScriptImportService(importService ScriptImportServiceAPI) {
 	s.scriptImportService = importService
+}
+
+// SetScriptExecutionValidator wires the server-authoritative validator used
+// by imported-script execution preflight. Keeping this as a narrow setter
+// avoids changing the long-standing NewService constructor used by callers
+// and tests.
+func (s *Service) SetScriptExecutionValidator(validator ScriptImportValidationRunner) {
+	s.scriptExecutionValidator = validator
 }
 
 // ScriptImportService returns the configured TXT import service for handler
@@ -606,6 +619,12 @@ type ExecuteRequest struct {
 	Commands    []map[string]interface{} `json:"commands"`
 	PlanItems   []MMLPlanItem            `json:"plan_items"`
 	ScriptID    *string                  `json:"script_id,omitempty"`
+	// Immutable metadata copied from an imported script into the task snapshot.
+	// These fields are populated by CreateScriptExecution and are not accepted
+	// from the legacy HTTP command endpoints.
+	ScriptContentSHA256     string `json:"-"`
+	ScriptValidationVersion string `json:"-"`
+	PreservePlanSnapshot    bool   `json:"-"`
 
 	// Parameter path command support
 	ParamPaths    []string `json:"param_paths"`
@@ -1209,16 +1228,18 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 	}
 
 	task := &MMLTask{
-		TaskName:    req.TaskName,
-		ScriptID:    scriptID,
-		DeviceSNs:   deviceSNs,
-		Commands:    commands,
-		ExecuteMode: taskExecuteMode,
-		PlanItems:   planItems,
-		Status:      TaskPending,
-		Results:     []map[string]interface{}{},
-		Creator:     req.Creator,
-		Executor:    req.Executor,
+		TaskName:                req.TaskName,
+		ScriptID:                scriptID,
+		DeviceSNs:               deviceSNs,
+		Commands:                commands,
+		ExecuteMode:             taskExecuteMode,
+		PlanItems:               planItems,
+		ScriptContentSHA256:     req.ScriptContentSHA256,
+		ScriptValidationVersion: req.ScriptValidationVersion,
+		Status:                  TaskPending,
+		Results:                 []map[string]interface{}{},
+		Creator:                 req.Creator,
+		Executor:                req.Executor,
 
 		ExecuteType:         req.ExecuteType,
 		OfflineRetry:        req.OfflineRetry,
@@ -1227,6 +1248,9 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 		FailedRetryCount:    req.FailedRetryCount,
 		FailedRetryInterval: req.FailedRetryInterval,
 		TotalDevices:        len(deviceSNs),
+	}
+	if req.PreservePlanSnapshot {
+		task.PlanItems = cloneScriptPlanItems(req.PlanItems)
 	}
 
 	if err := applyExecuteSchedule(task, req); err != nil {

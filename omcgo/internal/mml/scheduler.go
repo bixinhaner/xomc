@@ -150,6 +150,22 @@ func (s *Scheduler) runOnce(ctx context.Context) {
 
 // dispatch 按 execute_type 分支处理已被 Claim 的任务。
 func (s *Scheduler) dispatch(ctx context.Context, task *MMLTask, now time.Time) {
+	// Imported scripts are immutable snapshots, but device availability and
+	// command visibility can change between creation and a scheduled trigger.
+	// Re-run the dynamic validator before fanout. Blocking errors transition the
+	// claimed instance to failed so it cannot silently remain pending/running.
+	if result, err := s.service.preflightTask(ctx, task); err != nil {
+		s.logger.Error("preflight scheduled mml task", zap.String("task_id", task.ID.String()), zap.Error(err))
+		_ = s.service.failPreflightTask(ctx, task, &ScriptValidationResult{Issues: []ScriptIssue{{Code: "MML_EXECUTION_PREFLIGHT_FAILED", Severity: IssueError, Message: err.Error()}}}, now)
+		return
+	} else if result != nil && (result.Summary.ErrorCount > 0 || hasScriptErrors(result.Issues)) {
+		s.logger.Warn("scheduled mml task blocked by preflight", zap.String("task_id", task.ID.String()), zap.Int("issue_count", len(result.Issues)))
+		if err := s.service.failPreflightTask(ctx, task, result, now); err != nil {
+			s.logger.Error("persist preflight failure", zap.String("task_id", task.ID.String()), zap.Error(err))
+		}
+		return
+	}
+
 	switch task.ExecuteType {
 	case ExecuteScheduled:
 		// Claim 阶段已经把 status 改为 running + 清空 next_trigger_at。
