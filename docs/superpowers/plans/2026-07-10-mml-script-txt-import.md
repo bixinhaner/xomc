@@ -25,7 +25,7 @@
 
 ## Progress Ledger
 
-**Current checkpoint:** Task 7 complete
+**Current checkpoint:** Task 8 in progress
 **Resume from:** Task 8, Step 1 — write API mapping failing tests
 **Last verified commit:** `1635d5f2 fix(mml): 校验脚本执行类型`
 
