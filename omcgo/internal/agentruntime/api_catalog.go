@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/omcgo/omcgo/internal/admin"
 )
 
 type apiParamDoc struct {
@@ -131,7 +133,11 @@ func apiCategoryTitle(category string) string {
 }
 
 func apiCatalogDoc(route gin.RouteInfo) apiRouteDoc {
-	group := apiGroup(route.Path)
+	metadata := admin.DescribeAPIRoute(route.Method, route.Path)
+	group := metadata.Group
+	if group == "" {
+		group = apiGroup(route.Path)
+	}
 	resource := apiResourceNames[group]
 	if resource == "" {
 		resource = group
@@ -142,6 +148,12 @@ func apiCatalogDoc(route gin.RouteInfo) apiRouteDoc {
 		title = strings.ToUpper(route.Method) + " " + route.Path
 	}
 	description := fmt.Sprintf("%s；通过 rest.request 调用 %s %s。", title, strings.ToUpper(route.Method), route.Path)
+	if metadata.Name != "" {
+		title = metadata.Name
+	}
+	if metadata.Description != "" {
+		description = metadata.Description
+	}
 	pathParams := apiPathParams(route.Path)
 	requestUsage := apiRequestDoc{
 		Method:      strings.ToUpper(route.Method),

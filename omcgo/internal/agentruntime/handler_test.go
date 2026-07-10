@@ -80,7 +80,7 @@ func TestChatStreamProxiesToAgentStudioWithDelegation(t *testing.T) {
 		Status:             agentconfig.StatusConnected,
 		InstanceName:       "OMC 陕西",
 		Policy:             agentconfig.RuntimePolicy{AllowedMethods: []string{http.MethodGet}},
-	}}, jwtSvc, upstream.Client(), nil, nil, nil, fakeConversationManager{
+	}}, jwtSvc, upstream.Client(), nil, r, r, fakeConversationManager{
 		active:   "server-conversation",
 		instance: "omcinst_1234567890abcdef",
 	}).RegisterRoutes(group)
@@ -113,6 +113,11 @@ func TestChatStreamProxiesToAgentStudioWithDelegation(t *testing.T) {
 	require.Equal(t, "external-agent-connector", metadata["connectorSlug"])
 	require.Equal(t, "connector-1", metadata["connectorId"])
 	require.Equal(t, "operator", metadata["userDisplayName"])
+	handbook, ok := metadata["apiHandbook"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, handbookSchemaVersion, handbook["schemaVersion"])
+	require.NotEmpty(t, handbook["catalogVersion"])
+	require.EqualValues(t, 4, handbook["totalRoutes"])
 	require.True(t, strings.HasPrefix(capturedAuth, "Bearer "))
 	token := strings.TrimPrefix(capturedAuth, "Bearer ")
 	claims, err := jwtSvc.ValidateAgentDelegationToken(token)

@@ -68,7 +68,12 @@ func NewHandler(config ConfigProvider, jwtService *admin.JWTService, httpClient 
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/agent/conversation", h.GetConversation)
 	rg.POST("/agent/conversation", h.NewConversation)
+	rg.GET("/agent/handbook/routes", h.GetHandbookRoutes)
 	rg.POST("/agent/chat/stream", h.ChatStream)
+}
+
+func (h *Handler) GetHandbookRoutes(c *gin.Context) {
+	response.OK(c, h.tools.HandbookRouteExport())
 }
 
 func (h *Handler) GetConversation(c *gin.Context) {
@@ -279,6 +284,14 @@ func (h *Handler) externalIdentityMetadata(ctx context.Context, claims *admin.Cl
 		"connectorSlug":   strings.TrimSpace(connectorSlug),
 		"instanceName":    agentRuntimeInstanceName(target),
 		"localIPs":        localIPStrings(),
+	}
+	if h.tools != nil {
+		handbook := h.tools.HandbookRouteExport()
+		metadata["apiHandbook"] = map[string]any{
+			"schemaVersion":  handbook.SchemaVersion,
+			"catalogVersion": handbook.CatalogVersion,
+			"totalRoutes":    handbook.TotalRoutes,
+		}
 	}
 	if instanceNameIsDefault {
 		metadata["instanceNameIsDefault"] = true

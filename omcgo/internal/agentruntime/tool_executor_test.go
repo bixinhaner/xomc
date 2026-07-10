@@ -317,3 +317,11 @@ func TestToolExecutorDescribeReturnsAPIHandbookEntry(t *testing.T) {
 	deleteDoc := apiCatalogDoc(gin.RouteInfo{Method: http.MethodDelete, Path: "/api/v1/devices/:id"})
 	require.Equal(t, "high", deleteDoc.Risk)
 }
+
+func TestAPICatalogDocUsesSharedBusinessRouteMetadata(t *testing.T) {
+	doc := apiCatalogDoc(gin.RouteInfo{Method: http.MethodGet, Path: "/api/v1/device-registrations"})
+
+	require.Equal(t, "设备预登记 - 列表", doc.Title)
+	require.Equal(t, "设备预登记：按筛选条件查询资源列表", doc.Description)
+	require.Equal(t, "device-registrations", doc.Group)
+}
