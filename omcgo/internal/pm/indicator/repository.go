@@ -61,6 +61,8 @@ type PlatformFormulaRepository interface {
 	BatchCreate(ctx context.Context, dt DeviceType, formulas []*PlatformFormula, tx pgx.Tx) error
 	// DeleteByIndicatorID removes all formulas for an indicator. If tx is non-nil, participates in the transaction.
 	DeleteByIndicatorID(ctx context.Context, dt DeviceType, indicatorID string, tx pgx.Tx) error
+	// DeleteByIndicatorAndPlatform removes formulas for one indicator/platform binding. If tx is non-nil, participates in the transaction.
+	DeleteByIndicatorAndPlatform(ctx context.Context, dt DeviceType, indicatorID string, platformName string, tx pgx.Tx) (int64, error)
 	// DeleteByIndicatorIDs removes formulas for multiple indicators. If tx is non-nil, participates in the transaction.
 	DeleteByIndicatorIDs(ctx context.Context, dt DeviceType, indicatorIDs []string, tx pgx.Tx) error
 	// ListPlatformNames returns distinct platform names for a device type.

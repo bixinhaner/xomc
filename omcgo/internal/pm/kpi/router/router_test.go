@@ -325,6 +325,42 @@ func Test_LookupByDevice_IndicatorReloadBumpInvalidatesWorkerL1(t *testing.T) {
 	require.Len(t, newRoute.KPIs, 2, "remote bump must expose newly registered KPIs")
 }
 
+func Test_LookupByDevice_ManagementFormulaWriteInvalidatesSameWorkerNextPMRoute(t *testing.T) {
+	productID := uuid.New()
+	ind := &fakeIndicators{rows: sampleIndicators()}
+	frm := &fakeFormulas{rows: sampleFormulas()}
+	workerCache, appCache := newRedisCachePair(t)
+	workerRouter := newRouterWithFakes(t,
+		newBaseDevice("SN-MGMT-FORMULA-WRITE", "FAPService.BLQ_LTE"),
+		newProductMatch(productID, "BLQ-LTE-V1", "ENB"),
+		ind,
+		frm,
+		workerCache,
+	)
+	managementInvalidator := NewInvalidator(nil, appCache, InvalidatorOptions{
+		Logger:     zap.NewNop(),
+		RetryDelay: time.Nanosecond,
+	})
+
+	oldRoute, err := workerRouter.LookupByDevice(context.Background(), "SN-MGMT-FORMULA-WRITE")
+	require.NoError(t, err)
+	require.Len(t, oldRoute.Counters, 2)
+	require.Len(t, oldRoute.KPIs, 1)
+
+	// 模拟管理面平台绑定/指标写入已提交：DB 真值集合扩大，然后 service 通过统一
+	// invalidator 推进 kpi-route:cache_version。下一份 PM 文件仍在同一 worker 进程
+	// 查询 route；它必须逐出旧 L1 白名单并采用新 counter/KPI 集合。
+	ind.rows = expandedIndicators()
+	frm.rows = expandedFormulas()
+	_, err = managementInvalidator.Invalidate(context.Background(), InvalidationTriggerFormulaWrite)
+	require.NoError(t, err)
+
+	nextPMRoute, err := workerRouter.LookupByDevice(context.Background(), "SN-MGMT-FORMULA-WRITE")
+	require.NoError(t, err)
+	require.Len(t, nextPMRoute.Counters, 3, "same worker next PM route must include the newly bound counter")
+	require.Len(t, nextPMRoute.KPIs, 2, "same worker next PM route must include the newly bound KPI")
+}
+
 func Test_LookupByDevice_VersionReadFailureFailsOpenAndRecovers(t *testing.T) {
 	productID := uuid.New()
 	ind := &fakeIndicators{rows: sampleIndicators()}

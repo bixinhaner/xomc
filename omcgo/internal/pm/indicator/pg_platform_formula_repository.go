@@ -100,6 +100,23 @@ func (r *PgPlatformFormulaRepository) DeleteByIndicatorID(ctx context.Context, d
 	return nil
 }
 
+func (r *PgPlatformFormulaRepository) DeleteByIndicatorAndPlatform(ctx context.Context, dt DeviceType, indicatorID string, platformName string, tx pgx.Tx) (int64, error) {
+	table := dt.FormulaTable()
+	query, args, err := storage.Psql.Delete(table).
+		Where(sq.Eq{"indicator_id": indicatorID, "platform_name": platformName}).
+		ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("build delete %s by indicator/platform SQL: %w", table, err)
+	}
+
+	q := querier(r.db, tx)
+	tag, err := q.Exec(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("delete %s by indicator/platform: %w", table, err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 func (r *PgPlatformFormulaRepository) DeleteByIndicatorIDs(ctx context.Context, dt DeviceType, indicatorIDs []string, tx pgx.Tx) error {
 	if len(indicatorIDs) == 0 {
 		return nil

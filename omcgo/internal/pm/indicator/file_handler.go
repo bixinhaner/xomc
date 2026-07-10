@@ -32,6 +32,10 @@ type CacheRefresher interface {
 	BumpCacheVersion(ctx context.Context)
 }
 
+type RouteCacheInvalidator interface {
+	InvalidateRouteCache(ctx context.Context, trigger RouteInvalidationTrigger)
+}
+
 // FileHandler 提供 XML 文件粒度的管理端点:
 //   - GET    /api/v1/indicators/summary          — 三制式聚合(平台计数 + groups + platforms)
 //   - GET    /api/v1/indicators/files?tech=      — 列出该制式所有 XML 文件 + source/deletable + 计数
@@ -310,6 +314,12 @@ func (h *FileHandler) DeleteFile(c *gin.Context) {
 			zap.String("sidecar", filepath.Base(absPath)+CustomMarkerSuffix),
 			zap.Error(rmErr))
 	}
+	if rowsAffected > 0 {
+		if h.cache != nil {
+			h.cache.BumpCacheVersion(c.Request.Context())
+		}
+		h.invalidateRouteCache(c.Request.Context(), RouteInvalidationTriggerIndicatorWrite)
+	}
 
 	// 8. 审计日志 + 响应
 	backupName := ""
@@ -530,7 +540,7 @@ func (h *FileHandler) resolveUploadTarget(tech, base string) (targetDir, targetP
 //     platform 必填 + deviceType 与 tech 一致(GSM/GNB 必填,ENB 缺省容忍)
 //  4. 名称:validateUploadFilename(<platform>+".xml") 白名单正则
 //  5. 目标路径经 pathContainedIn 二次校验不逃逸目标目录
-//  6/7. 重复 + force 判定(见上)
+//     6/7. 重复 + force 判定(见上)
 //
 // 写入流程(全程 per-filename 锁):
 //  1. MkdirAll targetDir(首次上传场景)
@@ -800,6 +810,14 @@ func (h *FileHandler) refreshBoundDict(ctx context.Context, sourceTable string) 
 		h.logger.Info("post-upload bound dictionary refreshed",
 			zap.String("source_table", sourceTable), zap.Int("dicts", n))
 	}
+}
+
+func (h *FileHandler) invalidateRouteCache(ctx context.Context, trigger RouteInvalidationTrigger) {
+	invalidator, ok := h.cache.(RouteCacheInvalidator)
+	if !ok {
+		return
+	}
+	invalidator.InvalidateRouteCache(ctx, trigger)
 }
 
 // parseUploadPlatform 从上传字节流抽 <indicatorModel platform="..."> 的 platform 属性。

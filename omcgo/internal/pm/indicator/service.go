@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/csv"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -15,17 +17,36 @@ import (
 )
 
 type IndicatorManagementService struct {
-	groupRepo     GroupRepository
-	indicatorRepo IndicatorRepository
-	platformRepo  PlatformFormulaRepository
-	enabledRepo   EnabledIndicatorRepository
-	templateRel   TemplateRelRepository
-	custNameRepo  CustNameRepository
-	thresholdRepo IndicatorThresholdRepository
-	pool          *pgxpool.Pool
-	redis         redis.UniversalClient
-	logger        *zap.Logger
+	groupRepo        GroupRepository
+	indicatorRepo    IndicatorRepository
+	platformRepo     PlatformFormulaRepository
+	enabledRepo      EnabledIndicatorRepository
+	templateRel      TemplateRelRepository
+	custNameRepo     CustNameRepository
+	thresholdRepo    IndicatorThresholdRepository
+	pool             transactionBeginner
+	redis            redis.UniversalClient
+	routeInvalidator RouteInvalidator
+	logger           *zap.Logger
 }
+
+type transactionBeginner interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+}
+
+// RouteInvalidationTrigger 是 indicator 包暴露给 provider 的低基数失效来源。
+// 这里不直接依赖 pm/kpi/router，避免 router -> indicator 的反向 import 环。
+type RouteInvalidationTrigger string
+
+const (
+	RouteInvalidationTriggerIndicatorWrite RouteInvalidationTrigger = "indicator_write"
+	RouteInvalidationTriggerFormulaWrite   RouteInvalidationTrigger = "platform_formula_write"
+	RouteInvalidationTriggerGroupDelete    RouteInvalidationTrigger = "indicator_group_delete"
+)
+
+// RouteInvalidator 在业务事务提交后失效 KPI Route。
+// 调用方必须把失败视为 best-effort：业务写入已提交，不因 route bump 失败回滚。
+type RouteInvalidator func(context.Context, RouteInvalidationTrigger) error
 
 func NewIndicatorManagementService(
 	groupRepo GroupRepository,
@@ -51,6 +72,11 @@ func NewIndicatorManagementService(
 		redis:         rdb,
 		logger:        logger,
 	}
+}
+
+func (s *IndicatorManagementService) WithRouteInvalidator(invalidator RouteInvalidator) *IndicatorManagementService {
+	s.routeInvalidator = invalidator
+	return s
 }
 
 // ── Group Operations ──────────────────────────────────────────────────────────
@@ -158,6 +184,10 @@ func (s *IndicatorManagementService) DeleteGroup(ctx context.Context, dt DeviceT
 
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit delete group: %w", err)
+	}
+	if len(indicatorIDs) > 0 {
+		s.refreshRedisCache(ctx, dt)
+		s.invalidateRouteCache(ctx, RouteInvalidationTriggerGroupDelete)
 	}
 	return nil
 }
@@ -298,6 +328,7 @@ func (s *IndicatorManagementService) CreateIndicator(ctx context.Context, req *C
 	}
 
 	s.refreshRedisCache(ctx, dt)
+	s.invalidateRouteCache(ctx, RouteInvalidationTriggerIndicatorWrite)
 	return indicator, nil
 }
 
@@ -337,6 +368,9 @@ func (s *IndicatorManagementService) UpdateIndicator(ctx context.Context, dt Dev
 	}
 
 	s.refreshRedisCache(ctx, dt)
+	if updateAffectsRoute(req) {
+		s.invalidateRouteCache(ctx, RouteInvalidationTriggerIndicatorWrite)
+	}
 	return nil
 }
 
@@ -383,6 +417,81 @@ func (s *IndicatorManagementService) DeleteIndicator(ctx context.Context, dt Dev
 	}
 
 	s.refreshRedisCache(ctx, dt)
+	s.invalidateRouteCache(ctx, RouteInvalidationTriggerIndicatorWrite)
+	return nil
+}
+
+func (s *IndicatorManagementService) UpsertPlatformFormula(ctx context.Context, dt DeviceType, indicatorID, platform, formula string) (*PlatformFormula, error) {
+	platform, formula, err := normalizePlatformFormulaInput(platform, formula)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.indicatorRepo.GetByID(ctx, dt, indicatorID); err != nil {
+		return nil, err
+	}
+	idMap, err := s.buildIDMap(ctx, dt)
+	if err != nil {
+		return nil, fmt.Errorf("build ID map for formula validation: %w", err)
+	}
+	validator := NewFormulaValidator(idMap)
+	result := validator.Validate(formula)
+	if !result.IsValid {
+		return nil, fmt.Errorf("%w: formula validation failed (platform=%s): %s", commonerrors.ErrInvalidInput, platform, result.ErrorMsg)
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := s.platformRepo.DeleteByIndicatorAndPlatform(ctx, dt, indicatorID, platform, tx); err != nil {
+		return nil, fmt.Errorf("delete existing platform formula: %w", err)
+	}
+	out := &PlatformFormula{
+		PlatformName: platform,
+		IndicatorID:  indicatorID,
+		Formula:      formula,
+	}
+	if err := s.platformRepo.BatchCreate(ctx, dt, []*PlatformFormula{out}, tx); err != nil {
+		return nil, fmt.Errorf("create platform formula: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit upsert platform formula: %w", err)
+	}
+	s.refreshRedisCache(ctx, dt)
+	s.invalidateRouteCache(ctx, RouteInvalidationTriggerFormulaWrite)
+	return out, nil
+}
+
+func (s *IndicatorManagementService) DeletePlatformFormula(ctx context.Context, dt DeviceType, indicatorID, platform string) error {
+	platform = strings.TrimSpace(platform)
+	if platform == "" {
+		return fmt.Errorf("%w: platform is required", commonerrors.ErrInvalidInput)
+	}
+	if _, err := s.indicatorRepo.GetByID(ctx, dt, indicatorID); err != nil {
+		return err
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	deleted, err := s.platformRepo.DeleteByIndicatorAndPlatform(ctx, dt, indicatorID, platform, tx)
+	if err != nil {
+		return fmt.Errorf("delete platform formula: %w", err)
+	}
+	if deleted == 0 {
+		return commonerrors.ErrNotFound
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit delete platform formula: %w", err)
+	}
+	s.refreshRedisCache(ctx, dt)
+	s.invalidateRouteCache(ctx, RouteInvalidationTriggerFormulaWrite)
 	return nil
 }
 
@@ -516,6 +625,44 @@ func (s *IndicatorManagementService) BumpCacheVersion(ctx context.Context) {
 		return
 	}
 	s.redis.Incr(ctx, "indicator:cache_version")
+}
+
+func (s *IndicatorManagementService) InvalidateRouteCache(ctx context.Context, trigger RouteInvalidationTrigger) {
+	s.invalidateRouteCache(ctx, trigger)
+}
+
+func (s *IndicatorManagementService) invalidateRouteCache(ctx context.Context, trigger RouteInvalidationTrigger) {
+	if s.routeInvalidator == nil {
+		return
+	}
+	if err := s.routeInvalidator(ctx, trigger); err != nil {
+		if s.logger == nil {
+			return
+		}
+		s.logger.Warn("business write committed but KPI route invalidation failed; manual refresh can recover",
+			zap.String("trigger", string(trigger)),
+			zap.Error(err))
+	}
+}
+
+func updateAffectsRoute(req *UpdateIndicatorRequest) bool {
+	return req.EnName != nil ||
+		req.UnitID != nil ||
+		req.Arithmetic != nil ||
+		req.StatisType != nil
+}
+
+func normalizePlatformFormulaInput(platform, formula string) (string, string, error) {
+	platform = strings.TrimSpace(platform)
+	formula = strings.TrimSpace(formula)
+	switch {
+	case platform == "":
+		return "", "", fmt.Errorf("%w: platform is required", commonerrors.ErrInvalidInput)
+	case formula == "":
+		return "", "", fmt.Errorf("%w: formula is required", commonerrors.ErrInvalidInput)
+	default:
+		return platform, formula, nil
+	}
 }
 
 // refreshRedisCache 写路径调用，等价于 BumpCacheVersion；保留旧签名（dt 参数当前不再用，
