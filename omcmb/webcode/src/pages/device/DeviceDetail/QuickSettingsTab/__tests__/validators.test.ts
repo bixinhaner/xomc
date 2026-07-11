@@ -4,6 +4,8 @@ import {
   formatEnumDisplayValue,
   formatLteBandwidthDisplay,
   LTE_BANDWIDTH_PATH,
+  resolveQuickSettingsParameterType,
+  validateValue,
   validateMmeIp,
   validateMmeIpPlmnLimit,
   validateMmeIpPlmnRows,
@@ -69,6 +71,15 @@ describe('MME list limit validation', () => {
       plmn: '46000',
     }));
     expect(validateMmeIpPlmnLimit(rows, undefined)).toBeNull();
+  });
+});
+
+describe('quick settings parameter type resolution', () => {
+  it('lets quicksettings XML override stale raw string types for numeric fields', () => {
+    const type = resolveQuickSettingsParameterType('unsignedInt', 'string', 'string');
+
+    expect(type).toBe('unsignedInt');
+    expect(validateValue('26', type, { minValue: 22, maxValue: 32 })).toBeNull();
   });
 });
 
