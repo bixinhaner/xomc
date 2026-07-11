@@ -126,6 +126,39 @@ func (f *fakeFormulas) ListByPlatform(_ context.Context, _ indicator.DeviceType,
 	return f.rows, f.err
 }
 
+type routeFieldProductRepo struct {
+	product  *product.Product
+	patterns []product.ProductClassPattern
+}
+
+func (r *routeFieldProductRepo) ListActivePatterns(context.Context) ([]product.ProductClassPattern, error) {
+	return append([]product.ProductClassPattern(nil), r.patterns...), nil
+}
+
+func (r *routeFieldProductRepo) GetProductByID(_ context.Context, id uuid.UUID) (*product.Product, error) {
+	if r.product == nil || r.product.ID != id {
+		return nil, nil
+	}
+	cp := *r.product
+	return &cp, nil
+}
+
+func (r *routeFieldProductRepo) ListProducts(context.Context) ([]*product.Product, error) {
+	if r.product == nil {
+		return nil, nil
+	}
+	cp := *r.product
+	return []*product.Product{&cp}, nil
+}
+
+func (r *routeFieldProductRepo) FetchIndicatorPlatformsByDeviceType(context.Context, string) (map[string]struct{}, error) {
+	return map[string]struct{}{}, nil
+}
+
+func (r *routeFieldProductRepo) FetchAlarmNeTypes(context.Context) (map[string]struct{}, error) {
+	return map[string]struct{}{}, nil
+}
+
 type fakeL2 struct {
 	store        map[uuid.UUID]*KPIRoute
 	storeVersion map[uuid.UUID]int64
@@ -359,6 +392,76 @@ func Test_LookupByDevice_ManagementFormulaWriteInvalidatesSameWorkerNextPMRoute(
 	require.NoError(t, err)
 	require.Len(t, nextPMRoute.Counters, 3, "same worker next PM route must include the newly bound counter")
 	require.Len(t, nextPMRoute.KPIs, 2, "same worker next PM route must include the newly bound KPI")
+}
+
+func Test_LookupByDevice_ProductRouteFieldWriteInvalidatesSameWorkerForAllDeviceTypes(t *testing.T) {
+	tests := []struct {
+		name       string
+		deviceType string
+		wantType   indicator.DeviceType
+	}{
+		{name: "ENB", deviceType: "ENB", wantType: indicator.DeviceTypeENB},
+		{name: "GSM", deviceType: "GSM", wantType: indicator.DeviceTypeGSM},
+		{name: "GNB", deviceType: "GNB", wantType: indicator.DeviceTypeGNB},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			productID := uuid.New()
+			ind := &fakeIndicators{rows: sampleIndicators()}
+			frm := &fakeFormulas{rows: sampleFormulas()}
+			workerCache, appCache := newRedisCachePair(t)
+			productRepo := &routeFieldProductRepo{
+				product: &product.Product{
+					ID:                  productID,
+					Name:                "test-product",
+					IndicatorPlatform:   "OLD-PLATFORM",
+					IndicatorDeviceType: "ENB",
+				},
+				patterns: []product.ProductClassPattern{{
+					ID:           uuid.New(),
+					ProductID:    productID,
+					ProductClass: ".*",
+					SortOrder:    1,
+					IsActive:     true,
+				}},
+			}
+			productRegistry := product.NewRegistry(productRepo, product.NopCache{}, product.NewRegistryMetrics(nil), zap.NewNop())
+			require.NoError(t, productRegistry.Refresh(context.Background()))
+			workerRouter := newRouterWithFakes(t,
+				newBaseDevice("SN-PRODUCT-ROUTE-"+tc.name, "FAPService.BLQ_LTE"),
+				productRegistry,
+				ind,
+				frm,
+				workerCache,
+			)
+			managementInvalidator := NewInvalidator(nil, appCache, InvalidatorOptions{
+				Logger:     zap.NewNop(),
+				RetryDelay: time.Nanosecond,
+			})
+
+			oldRoute, err := workerRouter.LookupByDevice(context.Background(), "SN-PRODUCT-ROUTE-"+tc.name)
+			require.NoError(t, err)
+			require.Equal(t, indicator.DeviceTypeENB, oldRoute.IndicatorDeviceType)
+			require.Equal(t, "OLD-PLATFORM", oldRoute.IndicatorPlatform)
+			require.Len(t, oldRoute.Counters, 2)
+
+			ind.rows = expandedIndicators()
+			frm.rows = expandedFormulas()
+			productRepo.product.IndicatorDeviceType = tc.deviceType
+			productRepo.product.IndicatorPlatform = "NEW-" + tc.name
+			require.NoError(t, productRegistry.Refresh(context.Background()))
+			_, err = managementInvalidator.Invalidate(context.Background(), InvalidationTriggerProductWrite)
+			require.NoError(t, err)
+
+			nextRoute, err := workerRouter.LookupByDevice(context.Background(), "SN-PRODUCT-ROUTE-"+tc.name)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantType, nextRoute.IndicatorDeviceType)
+			require.Equal(t, "NEW-"+tc.name, nextRoute.IndicatorPlatform)
+			require.Len(t, nextRoute.Counters, 3, "product field bump must evict stale same-worker route")
+			require.Len(t, nextRoute.KPIs, 2)
+		})
+	}
 }
 
 func Test_LookupByDevice_VersionReadFailureFailsOpenAndRecovers(t *testing.T) {
