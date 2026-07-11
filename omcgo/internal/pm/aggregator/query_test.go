@@ -3,6 +3,7 @@ package aggregator
 import (
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -11,6 +12,19 @@ import (
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
+
+func Test_applyScalarFilters_TimeRangeIsHalfOpen(t *testing.T) {
+	start := time.Date(2026, 7, 6, 16, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 7, 16, 0, 0, 0, time.UTC)
+	qb := storage.Psql.Select("metric_path").From("pm_metrics_daily")
+
+	sql, args, err := applyScalarFilters(qb, QueryRequest{StartTime: start, EndTime: end}).ToSql()
+	require.NoError(t, err)
+	assert.Contains(t, sql, "time >= $1")
+	assert.Contains(t, sql, "time < $2")
+	assert.NotContains(t, sql, "time <= $2")
+	assert.Equal(t, []any{start, end}, args)
+}
 
 // SelectTable 10 case：5 粒度 × 2 维度。15min × device_group 必须返 ErrUnsupportedQuery。
 
