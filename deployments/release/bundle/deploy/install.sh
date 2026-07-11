@@ -62,6 +62,12 @@ else
   die "缺 $DEPLOY_DIR/secrets-lib.sh（凭证生成库，由 build-release.sh 随包发布）" 1
 fi
 
+if [ -f "$DEPLOY_DIR/data-upgrade-lib.sh" ]; then
+  . "$DEPLOY_DIR/data-upgrade-lib.sh"
+else
+  die "缺 $DEPLOY_DIR/data-upgrade-lib.sh（data 升级保护库，由 build-release.sh 随包发布）" 1
+fi
+
 # 升级时 deploy/.env 里【运维自定义】的键 —— 跨版本继承,不被新包默认值覆盖。
 # 注：6 个密钥键虽仍在此列（升级时把上一版有效凭证带进新 .env，供 ensure_secrets 首迁导入），
 # 但密钥的【唯一权威源】是 etc/secrets.env —— ensure_secrets 在 source/起 infra 前用它覆盖 .env，
@@ -374,6 +380,18 @@ elif [ -f "$OMC_ROOT/etc/resources.env.saved" ]; then
   [ -n "$PREV_RESOURCES_SNAPSHOT" ] && { cp "$OMC_ROOT/etc/resources.env.saved" "$PREV_RESOURCES_SNAPSHOT" 2>/dev/null || PREV_RESOURCES_SNAPSHOT=""; }
 fi
 
+# 保存上一版随包 builtin 基线，用于区分“未修改的旧 builtin”与“运维在原 builtin
+# 文件上做过的扩展”。仅看 .custom 不够：指标库 force 覆盖 GSM.xml/BSC 平台时为了
+# 保持 builtin 不可删除不会写 sidecar，但这种 75→167 条的现网扩展升级时仍必须保留。
+PREV_DATA_BASELINE=""
+if [ -d "$OMC_ROOT/current/data" ]; then
+  PREV_DATA_BASELINE="$(mktemp -d)" || PREV_DATA_BASELINE=""
+  if [ -n "$PREV_DATA_BASELINE" ]; then
+    cp -a "$OMC_ROOT/current/data/." "$PREV_DATA_BASELINE/" 2>/dev/null \
+      || { warn "上一版 builtin 基线快照失败;将沿用旧版刷新判定"; rm -rf "$PREV_DATA_BASELINE"; PREV_DATA_BASELINE=""; }
+  fi
+fi
+
 RELEASE_DIR="$OMC_ROOT/releases/$VERSION"
 if [ -d "$RELEASE_DIR" ] && [ "$(readlink -f "$PKG_ROOT" 2>/dev/null)" != "$(readlink -f "$RELEASE_DIR" 2>/dev/null)" ]; then
   warn "已存在版本目录 $RELEASE_DIR，将覆盖（旧文件 → .bak.<时间戳>）"
@@ -431,7 +449,13 @@ else
     _rel="${_nf#"$NEW_DATA"/}"
     case "$_rel" in *.custom) continue ;; esac           # 新包不应含 sidecar,防御性跳过
     [ -f "$OMC_ROOT/data/$_rel.custom" ] && continue       # 运维自定义,保留不覆盖
-    if [ -f "$OMC_ROOT/data/$_rel" ] && ! cmp -s "$_nf" "$OMC_ROOT/data/$_rel"; then
+    _live="$OMC_ROOT/data/$_rel"
+    _previous="${PREV_DATA_BASELINE:+$PREV_DATA_BASELINE/$_rel}"
+    if [ -n "$_previous" ] && [ -f "$_previous" ] && ! cmp -s "$_live" "$_previous"; then
+      log "  · 保留运维修改的 builtin 字典:$_rel"
+      continue
+    fi
+    if should_refresh_builtin "$_nf" "$_live" "$_previous"; then
       if cp -a "$_nf" "$OMC_ROOT/data/$_rel"; then
         log "  · 刷新 builtin 字典:$_rel"; _refreshed=$((_refreshed + 1))
       else
@@ -441,6 +465,7 @@ else
   done < <(find "$NEW_DATA" -type f -print0)
   [ "$_refreshed" -gt 0 ] && log "升级:刷新 $_refreshed 个 builtin 字典文件(运维自定义 .custom 已保留)"
 fi
+[ -n "$PREV_DATA_BASELINE" ] && rm -rf "$PREV_DATA_BASELINE" 2>/dev/null || true
 # 容器(UID 10001 = Dockerfile 内 omcgo 非 root 用户)需可写 data:
 # 上传/删除 XML、写 .custom sidecar、worker 清理过期备份与孤儿 sidecar。
 chown -R 10001:10001 "$OMC_ROOT/data" 2>/dev/null \
