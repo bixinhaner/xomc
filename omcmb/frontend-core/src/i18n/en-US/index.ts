@@ -6040,6 +6040,8 @@ const messages: Record<string, string> = {
   'mml.detail':                              'Detail',
   'mml.resultDeviceCode':                    'Base Station Code',
   'mml.resultCommand':                       'MML Script',
+  'mml.scriptParamsTitle':                   'Command Parameters',
+  'mml.scriptParamsCount':                   '{count} params',
   'mml.scriptLineNo':                        'Script Line {line}',
   'mml.viewRawResponse':                     'View',
   'mml.resultRawResponseTitle':              'Execution Detail - {device}',

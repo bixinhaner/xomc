@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { Button, Empty, Modal, Pagination, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { Button, Empty, Modal, Pagination, Popover, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import { ProfileOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
@@ -28,6 +28,7 @@ import {
   type ParsedMmlResult,
   type ParsedParamValue,
 } from '@core/utils/mmlResultParser';
+import { parseMmlCommandDisplay } from '@core/utils/mmlCommandDisplay';
 
 // -------------------------------------------------------------------------
 // Display mappings — mml_tasks columns
@@ -78,6 +79,22 @@ function rawMessageText(row: DeviceTaskResultItem | null): string {
 
 function resultCommandText(row: DeviceTaskResultItem): string {
   return row.mmlScript || row.planRawLine || row.commandCode || '-';
+}
+
+function operationColor(operation: string): string {
+  switch (operation.toUpperCase()) {
+    case 'LST':
+      return 'blue';
+    case 'MOD':
+      return 'green';
+    case 'ADD':
+      return 'purple';
+    case 'DEL':
+    case 'RMV':
+      return 'orange';
+    default:
+      return 'default';
+  }
 }
 
 function parsedResult(row: DeviceTaskResultItem | null): ParsedMmlResult | null {
@@ -271,10 +288,47 @@ export default function TaskRecord() {
     {
       key: 'command',
       title: t('mml.resultCommand'),
-      width: 260,
-      ellipsis: true,
+      width: 360,
       render: (_: unknown, row) => {
         const command = resultCommandText(row);
+        const parsed = parseMmlCommandDisplay(command);
+        const paramsContent = parsed.parameterCount > 0 ? (
+          <div style={{ width: 520, maxWidth: '70vw' }}>
+            <Space size={6} style={{ marginBottom: 8 }}>
+              {parsed.operation ? <Tag color={operationColor(parsed.operation)}>{parsed.operation}</Tag> : null}
+              <Typography.Text strong>{parsed.target || parsed.commandHead}</Typography.Text>
+            </Space>
+            <div
+              style={{
+                maxHeight: 280,
+                overflow: 'auto',
+                border: '1px solid var(--color-border-secondary, rgba(128,128,128,0.24))',
+                borderRadius: 6,
+              }}
+            >
+              {parsed.params.map((param, index) => (
+                <div
+                  key={`${param.key}-${index}`}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '190px minmax(0, 1fr)',
+                    gap: 12,
+                    padding: '7px 10px',
+                    borderBottom: '1px solid var(--color-border-secondary, rgba(128,128,128,0.24))',
+                  }}
+                >
+                  <Typography.Text code style={{ fontSize: 12, wordBreak: 'break-all' }}>
+                    {param.key}
+                  </Typography.Text>
+                  <Typography.Text style={{ fontSize: 12, wordBreak: 'break-all' }}>
+                    {param.value || '-'}
+                  </Typography.Text>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null;
+
         return (
           <Space direction="vertical" size={2} style={{ width: '100%' }}>
             {row.planLineNo ? (
@@ -283,11 +337,30 @@ export default function TaskRecord() {
                 {row.planOrder ? ` / ${row.planOrder}` : ''}
               </Typography.Text>
             ) : null}
-            <Tooltip title={command}>
-              <Typography.Text style={{ maxWidth: 240 }} ellipsis>
-                {command}
-              </Typography.Text>
-            </Tooltip>
+            <Space size={6} wrap={false} style={{ width: '100%' }}>
+              {parsed.operation ? (
+                <Tag color={operationColor(parsed.operation)} style={{ marginInlineEnd: 0, flex: '0 0 auto' }}>
+                  {parsed.operation}
+                </Tag>
+              ) : null}
+              <Tooltip title={parsed.parameterCount > 0 ? undefined : command}>
+                <Typography.Text style={{ minWidth: 0, maxWidth: 180 }} ellipsis>
+                  {parsed.target || parsed.commandHead || command}
+                </Typography.Text>
+              </Tooltip>
+              {paramsContent ? (
+                <Popover
+                  title={t('mml.scriptParamsTitle')}
+                  content={paramsContent}
+                  trigger="click"
+                  placement="bottomLeft"
+                >
+                  <Button type="link" size="small" style={{ padding: 0, flex: '0 0 auto' }}>
+                    {t('mml.scriptParamsCount', { count: parsed.parameterCount })}
+                  </Button>
+                </Popover>
+              ) : null}
+            </Space>
           </Space>
         );
       },
@@ -377,18 +450,22 @@ export default function TaskRecord() {
 
   const columns: DataTableColumn<MMLTask>[] = useMemo(() => [
     {
-      key: 'taskId',
-      title: t('mml.taskId'),
+      key: 'operation',
+      title: t('table.operation'),
       dataIndex: 'id',
-      width: 200,
-      render: (val: unknown) => (
-        <Typography.Text
-          copyable={{ text: String(val) }}
-          style={{ fontSize: 12 }}
-          ellipsis={{ tooltip: String(val) }}
-        >
-          {String(val)}
-        </Typography.Text>
+      width: 70,
+      render: (_: unknown, record: MMLTask) => (
+        <Tooltip title={t('common.view')}>
+          <Button
+            type="text"
+            size="small"
+            icon={<ProfileOutlined />}
+            onClick={() => {
+              setResultPage(1);
+              setViewing(record);
+            }}
+          />
+        </Tooltip>
       ),
     },
     { key: 'taskName', title: t('mml.taskName'), dataIndex: 'taskName', ellipsis: true },
@@ -456,26 +533,6 @@ export default function TaskRecord() {
       width: 160,
       render: (val: unknown) => formatTime(val as string),
     },
-    {
-      key: 'operation',
-      title: t('table.operation'),
-      dataIndex: 'id',
-      width: 70,
-      fixed: 'right',
-      render: (_, record) => (
-        <Tooltip title={t('common.view')}>
-          <Button
-            type="text"
-            size="small"
-            icon={<ProfileOutlined />}
-            onClick={() => {
-              setResultPage(1);
-              setViewing(record);
-            }}
-          />
-        </Tooltip>
-      ),
-    },
   ], [t]);
 
   return (
@@ -498,7 +555,7 @@ export default function TaskRecord() {
         onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
         onRefresh={() => void refetch()}
         hideToolbar
-        scroll={{ x: 1400 }}
+        scroll={{ x: 1200 }}
       />
 
       <Modal
