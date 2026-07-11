@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
-import { Button, Empty, List, Modal, Pagination, Space, Tag, Tooltip, Typography } from 'antd';
+import { Button, Empty, Modal, Pagination, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import { ProfileOutlined } from '@ant-design/icons';
+import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 
 import ListPageLayout from '@/components/Layout/ListPageLayout';
@@ -50,15 +51,28 @@ const TASK_STATUS_TAGS: Record<MMLTaskStatus, { color: string; key: string }> = 
 
 const TASK_RESULT_PAGE_SIZE = 20;
 
+const DEVICE_RESULT_STATUS_TAGS: Record<string, { color: string; key: string }> = {
+  pending: { color: 'default', key: 'mml.pendingStatus' },
+  running: { color: 'processing', key: 'mml.runningStatus' },
+  completed: { color: 'success', key: 'mml.completedStatus' },
+  failed: { color: 'error', key: 'mml.failedStatus' },
+};
+
 function formatTime(iso?: string | null): string {
   if (!iso) return '-';
   const d = dayjs(iso);
   return d.isValid() ? d.format('YYYY-MM-DD HH:mm:ss') : '-';
 }
 
-function previewRawOutput(value?: string): string {
-  if (!value) return '';
-  return value.length > 1200 ? `${value.slice(0, 1200)}...` : value;
+function resultDetailText(row: DeviceTaskResultItem | null): string {
+  if (!row) return '';
+  if (row.result?.rawOutput) return row.result.rawOutput;
+  if (row.result?.parsedData) return JSON.stringify(row.result.parsedData, null, 2);
+  return '';
+}
+
+function resultCommandText(row: DeviceTaskResultItem): string {
+  return row.planRawLine || row.commandCode || row.mmlScript || '-';
 }
 
 export default function TaskRecord() {
@@ -165,13 +179,127 @@ export default function TaskRecord() {
   // ---- 查看 modal state ----------------------------------------------------
   // 任务记录为只读：记录由"执行 MML 命令 / 脚本任务执行"被动产生，不提供新建/编辑。
   const [viewing, setViewing] = useState<MMLTask | null>(null);
+  const [detailRow, setDetailRow] = useState<DeviceTaskResultItem | null>(null);
   const [resultPage, setResultPage] = useState(1);
-  const { data: resultsData } = useMMLTaskResults(viewing?.id ?? null, resultPage, TASK_RESULT_PAGE_SIZE);
+  const { data: resultsData, isLoading: resultsLoading } = useMMLTaskResults(viewing?.id ?? null, resultPage, TASK_RESULT_PAGE_SIZE);
 
   const resultRows = useMemo<DeviceTaskResultItem[]>(
     () => (resultsData?.items ?? []),
     [resultsData]
   );
+
+  const resultColumns: ColumnsType<DeviceTaskResultItem> = useMemo(() => [
+    {
+      key: 'deviceSn',
+      title: t('mml.resultDeviceCode'),
+      dataIndex: 'deviceSn',
+      width: 190,
+      fixed: 'left',
+      render: (value: unknown) => (
+        <Typography.Text copyable={{ text: String(value || '') }} style={{ maxWidth: 170 }} ellipsis>
+          {String(value || '-')}
+        </Typography.Text>
+      ),
+    },
+    {
+      key: 'deviceName',
+      title: t('mml.deviceName'),
+      dataIndex: 'deviceName',
+      width: 140,
+      ellipsis: true,
+      render: (value: unknown) => String(value || '-'),
+    },
+    {
+      key: 'command',
+      title: t('mml.resultCommand'),
+      width: 260,
+      ellipsis: true,
+      render: (_: unknown, row) => {
+        const command = resultCommandText(row);
+        return (
+          <Space direction="vertical" size={2} style={{ width: '100%' }}>
+            {row.planLineNo ? (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {t('mml.scriptLineNo', { line: row.planLineNo })}
+                {row.planOrder ? ` / ${row.planOrder}` : ''}
+              </Typography.Text>
+            ) : null}
+            <Tooltip title={command}>
+              <Typography.Text style={{ maxWidth: 240 }} ellipsis>
+                {command}
+              </Typography.Text>
+            </Tooltip>
+          </Space>
+        );
+      },
+    },
+    {
+      key: 'status',
+      title: t('mml.status'),
+      dataIndex: 'status',
+      width: 110,
+      render: (value: unknown) => {
+        const tag = DEVICE_RESULT_STATUS_TAGS[String(value || '')];
+        return tag ? <Tag color={tag.color}>{t(tag.key)}</Tag> : <Tag>{String(value || '-')}</Tag>;
+      },
+    },
+    {
+      key: 'result',
+      title: t('mml.result'),
+      width: 100,
+      render: (_: unknown, row) => {
+        if (row.status && row.status !== 'completed') return <Tag>{t('mml.pendingStatus')}</Tag>;
+        const ok = Boolean(row.result?.success);
+        return <Tag color={ok ? 'success' : 'error'}>{ok ? t('status.success') : t('status.failed')}</Tag>;
+      },
+    },
+    {
+      key: 'failReason',
+      title: t('mml.failReason'),
+      dataIndex: 'failReason',
+      width: 180,
+      ellipsis: true,
+      render: (value: unknown) => {
+        const text = String(value || '-');
+        return text === '-' ? text : (
+          <Tooltip title={text}>
+            <Typography.Text type="danger" style={{ maxWidth: 160 }} ellipsis>
+              {text}
+            </Typography.Text>
+          </Tooltip>
+        );
+      },
+    },
+    {
+      key: 'detail',
+      title: t('mml.detail'),
+      width: 90,
+      render: (_: unknown, row) => (
+        <Button
+          type="link"
+          size="small"
+          disabled={!resultDetailText(row)}
+          onClick={() => setDetailRow(row)}
+        >
+          {t('mml.viewRawResponse')}
+        </Button>
+      ),
+    },
+    {
+      key: 'startedAt',
+      title: t('mml.startTime'),
+      dataIndex: 'startedAt',
+      width: 160,
+      render: (value: unknown) => formatTime(value as string | undefined),
+    },
+    {
+      key: 'finishedAt',
+      title: t('mml.endTime'),
+      dataIndex: 'finishedAt',
+      width: 160,
+      render: (value: unknown) => formatTime(value as string | undefined),
+    },
+  ], [t]);
 
   const columns: DataTableColumn<MMLTask>[] = useMemo(() => [
     {
@@ -304,13 +432,15 @@ export default function TaskRecord() {
         open={Boolean(viewing)}
         onCancel={() => {
           setViewing(null);
+          setDetailRow(null);
           setResultPage(1);
         }}
         footer={<Button onClick={() => {
           setViewing(null);
+          setDetailRow(null);
           setResultPage(1);
         }}>{t('common.close')}</Button>}
-        width={960}
+        width={1180}
         destroyOnHidden
       >
         {viewing && (
@@ -323,52 +453,17 @@ export default function TaskRecord() {
               <Tag>{t('mml.failedCountLabel')}{viewing.failedCount ?? 0}</Tag>
             </Space>
 
-            {resultRows.length === 0 ? (
+            {resultRows.length === 0 && !resultsLoading ? (
               <Empty description={t('mml.noExecutionResult')} />
             ) : (
-              <List<DeviceTaskResultItem>
+              <Table<DeviceTaskResultItem>
                 size="small"
+                columns={resultColumns}
                 dataSource={resultRows}
-                renderItem={(row) => {
-                  const ok = Boolean(row.result?.success);
-                  const rawOutput = previewRawOutput(row.result?.rawOutput);
-                  return (
-                    <List.Item>
-                      <div style={{ width: '100%', minWidth: 0 }}>
-                        <Space wrap size={[8, 4]}>
-                          <Typography.Text code>{row.deviceSn || '-'}</Typography.Text>
-                          {row.deviceName ? <Typography.Text type="secondary">{row.deviceName}</Typography.Text> : null}
-                          {row.commandCode ? <Tag>{row.commandCode}</Tag> : null}
-                          {row.planLineNo ? <Tag>#{row.planLineNo}</Tag> : null}
-                          <Tag color={ok ? 'success' : 'error'}>{ok ? t('status.success') : t('status.failed')}</Tag>
-                        </Space>
-                        {row.failReason ? (
-                          <Typography.Text type="danger" style={{ display: 'block', marginTop: 6 }}>
-                            {row.failReason}
-                          </Typography.Text>
-                        ) : null}
-                        {rawOutput ? (
-                          <Typography.Paragraph
-                            style={{
-                              marginTop: 8,
-                              marginBottom: 0,
-                              maxHeight: 120,
-                              overflow: 'auto',
-                              whiteSpace: 'pre-wrap',
-                              fontFamily: 'monospace',
-                              fontSize: 12,
-                              background: 'rgba(255,255,255,0.04)',
-                              padding: 8,
-                              borderRadius: 4,
-                            }}
-                          >
-                            {rawOutput}
-                          </Typography.Paragraph>
-                        ) : null}
-                      </div>
-                    </List.Item>
-                  );
-                }}
+                loading={resultsLoading}
+                pagination={false}
+                rowKey={(row, index) => row.deviceTaskId || `${row.deviceSn}-${row.commandIndex ?? index}`}
+                scroll={{ x: 1400, y: 360 }}
               />
             )}
             {(resultsData?.total ?? 0) > TASK_RESULT_PAGE_SIZE && (
@@ -384,6 +479,43 @@ export default function TaskRecord() {
               </div>
             )}
           </div>
+        )}
+      </Modal>
+
+      <Modal
+        title={detailRow ? t('mml.resultRawResponseTitle', { device: detailRow.deviceSn || '-' }) : t('mml.rawOutput')}
+        open={Boolean(detailRow)}
+        onCancel={() => setDetailRow(null)}
+        footer={<Button onClick={() => setDetailRow(null)}>{t('common.close')}</Button>}
+        width={860}
+        destroyOnHidden
+      >
+        {detailRow && (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Space wrap size={[8, 8]}>
+              <Tag>{t('mml.resultDeviceCode')}: {detailRow.deviceSn || '-'}</Tag>
+              {detailRow.deviceName ? <Tag>{t('mml.deviceName')}: {detailRow.deviceName}</Tag> : null}
+              <Tag>{t('mml.resultCommand')}: {resultCommandText(detailRow)}</Tag>
+              <Tag color={detailRow.result?.success ? 'success' : 'error'}>
+                {detailRow.result?.success ? t('status.success') : t('status.failed')}
+              </Tag>
+            </Space>
+            <Typography.Paragraph
+              style={{
+                maxHeight: 420,
+                overflow: 'auto',
+                whiteSpace: 'pre-wrap',
+                fontFamily: 'monospace',
+                fontSize: 12,
+                background: 'rgba(0,0,0,0.04)',
+                padding: 12,
+                borderRadius: 4,
+                marginBottom: 0,
+              }}
+            >
+              {resultDetailText(detailRow) || '-'}
+            </Typography.Paragraph>
+          </Space>
         )}
       </Modal>
     </ListPageLayout>
