@@ -67,6 +67,7 @@ function statusLabel(s: MMLTaskStatus): string {
 }
 
 const PAGE_SIZE = 20
+const TASK_RESULT_PAGE_SIZE = 20
 
 export function MMLTaskRecordsPage() {
   const tr = useT()
@@ -315,17 +316,18 @@ export function MMLTaskRecordsPage() {
         <Pager page={page} totalPages={totalPages} total={total} onPage={setPage} />
       </div>
 
-      {viewing && <TaskDetailDrawer task={viewing} onClose={() => setViewing(null)} />}
+      {viewing && <TaskDetailDrawer key={viewing.id} task={viewing} onClose={() => setViewing(null)} />}
     </PageShell>
   )
 }
 
 function TaskDetailDrawer({ task, onClose }: { task: MMLTask; onClose: () => void }) {
   const tr = useT()
-  const { data, isLoading, isError } = useMMLTaskResults(task.id, 1, 200)
+  const [resultPage, setResultPage] = useState(1)
+  const { data, isLoading, isError } = useMMLTaskResults(task.id, resultPage, TASK_RESULT_PAGE_SIZE)
   const rows: DeviceTaskResultItem[] = useMemo(
-    () => data?.items ?? (task.results as unknown as DeviceTaskResultItem[]) ?? [],
-    [data, task]
+    () => data?.items ?? [],
+    [data]
   )
   // apiSwitch 把真实 API（stats: MMLTaskResultsStats）与 mock（默认 stats {}）
   // 的返回类型取交集，stats 被收窄为 {}；运行期真实 API 会填充翻译审计元数据，
@@ -456,6 +458,26 @@ function TaskDetailDrawer({ task, onClose }: { task: MMLTask; onClose: () => voi
               })}
             </div>
           )}
+          {(data?.total ?? 0) > TASK_RESULT_PAGE_SIZE ? (
+            <div className="mt-3 flex items-center justify-between">
+              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-300/55">
+                RESULT PAGE {resultPage} / {Math.max(1, Math.ceil((data?.total ?? 0) / TASK_RESULT_PAGE_SIZE))}
+              </span>
+              <div className="flex gap-2">
+                <NeonButton onClick={() => setResultPage((p) => Math.max(1, p - 1))} disabled={resultPage <= 1}>
+                  ◂ PREV
+                </NeonButton>
+                <NeonButton
+                  onClick={() =>
+                    setResultPage((p) => Math.min(Math.max(1, Math.ceil((data?.total ?? 0) / TASK_RESULT_PAGE_SIZE)), p + 1))
+                  }
+                  disabled={resultPage >= Math.max(1, Math.ceil((data?.total ?? 0) / TASK_RESULT_PAGE_SIZE))}
+                >
+                  NEXT ▸
+                </NeonButton>
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

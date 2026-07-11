@@ -1743,6 +1743,10 @@ type DeviceTaskResultLister interface {
 	) ([]DeviceTaskResultRowView, int64, error)
 }
 
+type TaskResultStatsRepository interface {
+	GetResultStatsByID(ctx context.Context, id uuid.UUID) (*MMLTask, error)
+}
+
 // DeviceTaskResultRowView 屏蔽 task 包内部 struct，让 mml 包不反向 import task 包。
 // 字段语义对齐 task.DeviceTaskResultRow；Result 是 device_tasks.result JSONB 原始字节。
 type DeviceTaskResultRowView struct {
@@ -2562,8 +2566,9 @@ func (s *Service) GetTaskResults(ctx context.Context, id uuid.UUID, page, pageSi
 		pageSize = 20
 	}
 
-	// T-0168: 先拿 task 元数据用于装配 stats（即使 deviceTaskResultLister 注入也要这步）
-	taskMeta, taskErr := s.taskRepo.GetByID(ctx, id)
+	// T-0168: 先拿 task 元数据用于装配 stats（即使 deviceTaskResultLister 注入也要这步）。
+	// PgTaskRepository 提供轻量查询，避免为结果页 stats 扫描/反序列化 mml_tasks.results。
+	taskMeta, taskErr := s.getTaskResultStats(ctx, id)
 	// taskErr 不阻塞主流程；找不到 task 让后续 device_tasks 查询自己处理
 	stats := buildTaskResultsStats(taskMeta, taskErr)
 
@@ -2608,6 +2613,13 @@ func (s *Service) GetTaskResults(ctx context.Context, id uuid.UUID, page, pageSi
 	resp := model.NewListResponse(items, total, page, pageSize)
 	resp.Stats = stats
 	return resp, nil
+}
+
+func (s *Service) getTaskResultStats(ctx context.Context, id uuid.UUID) (*MMLTask, error) {
+	if repo, ok := s.taskRepo.(TaskResultStatsRepository); ok {
+		return repo.GetResultStatsByID(ctx, id)
+	}
+	return s.taskRepo.GetByID(ctx, id)
 }
 
 // buildTaskResultsStats 装配 TaskResultsStats（T-0168）。taskErr 非 nil 时返回空 stats，

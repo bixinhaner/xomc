@@ -313,8 +313,10 @@ export interface MMLTask {
   taskOrigin: MMLTaskOrigin;
   deviceSns: string[];
   commands: string[];
+  commandCount?: number;
   executeMode?: MMLTaskExecuteMode;
   planItems?: MMLTaskPlanItem[];
+  planItemCount?: number;
   planStats?: MMLTaskPlanStats;
   /** 命令明细（含 op_type / param_paths）；老接口可能不返回，UI 需做 fallback */
   commandsDetail?: MMLTaskCommandDetail[];

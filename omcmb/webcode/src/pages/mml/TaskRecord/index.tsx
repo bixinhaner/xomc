@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { Button, Modal, Tag, Tooltip, Typography } from 'antd';
+import { Button, Modal, Pagination, Tag, Tooltip, Typography } from 'antd';
 import { ProfileOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 
@@ -20,6 +20,7 @@ import type {
   DeviceTaskResultItem,
 } from '@core/types/mml';
 import {
+  useMMLTaskById,
   useMMLTasks,
   useMMLTaskResults,
 } from '@core/hooks/api/useMML';
@@ -49,6 +50,8 @@ const TASK_STATUS_TAGS: Record<MMLTaskStatus, { color: string; key: string }> = 
   cancelled: { color: 'error',      key: 'mml.cancelledStatus' },
   failed:    { color: 'error',      key: 'mml.failedStatus' },
 };
+
+const TASK_RESULT_PAGE_SIZE = 20;
 
 function formatTime(iso?: string | null): string {
   if (!iso) return '-';
@@ -160,11 +163,14 @@ export default function TaskRecord() {
   // ---- 查看 modal state ----------------------------------------------------
   // 任务记录为只读：记录由"执行 MML 命令 / 脚本任务执行"被动产生，不提供新建/编辑。
   const [viewing, setViewing] = useState<MMLTask | null>(null);
-  const { data: resultsData } = useMMLTaskResults(viewing?.id ?? null, 1, 200);
+  const [resultPage, setResultPage] = useState(1);
+  const { data: taskDetail } = useMMLTaskById(viewing?.id ?? '');
+  const detailTask = taskDetail ?? viewing;
+  const { data: resultsData } = useMMLTaskResults(viewing?.id ?? null, resultPage, TASK_RESULT_PAGE_SIZE);
 
   const resultRows = useMemo<DeviceTaskResultItem[]>(
-    () => (resultsData?.items ?? (viewing?.results as DeviceTaskResultItem[] | undefined) ?? []),
-    [resultsData, viewing]
+    () => (resultsData?.items ?? []),
+    [resultsData]
   );
 
   const columns: DataTableColumn<MMLTask>[] = useMemo(() => [
@@ -260,7 +266,10 @@ export default function TaskRecord() {
             type="text"
             size="small"
             icon={<ProfileOutlined />}
-            onClick={() => setViewing(record)}
+            onClick={() => {
+              setResultPage(1);
+              setViewing(record);
+            }}
           />
         </Tooltip>
       ),
@@ -270,11 +279,11 @@ export default function TaskRecord() {
   // 查看明细复用 console「执行结果」组件（ResultTable），保证两页面布局一致：
   // mapTaskToRecord 取命令元信息 + columns；rows 用单独拉取的 resultRows（更可靠）重建。
   const viewRecord = useMemo(() => {
-    if (!viewing) return null;
-    const rec = mapTaskToRecord(viewing);
+    if (!detailTask) return null;
+    const rec = mapTaskToRecord(detailTask);
     const rows = buildDeviceRows(resultRows, rec.columns, rec.execMeta.read);
     return { ...rec, rows };
-  }, [viewing, resultRows]);
+  }, [detailTask, resultRows]);
 
   return (
     <ListPageLayout title={t('nav.mml.taskRecord')}>
@@ -302,8 +311,14 @@ export default function TaskRecord() {
       <Modal
         title={viewRecord ? t('mml.executionResult', { name: viewRecord.commandName }) : t('common.view')}
         open={Boolean(viewing)}
-        onCancel={() => setViewing(null)}
-        footer={<Button onClick={() => setViewing(null)}>{t('common.close')}</Button>}
+        onCancel={() => {
+          setViewing(null);
+          setResultPage(1);
+        }}
+        footer={<Button onClick={() => {
+          setViewing(null);
+          setResultPage(1);
+        }}>{t('common.close')}</Button>}
         width={960}
         destroyOnHidden
       >
@@ -318,6 +333,18 @@ export default function TaskRecord() {
               running={false}
               hasExecuted
             />
+            {(resultsData?.total ?? 0) > TASK_RESULT_PAGE_SIZE && (
+              <div style={{ marginTop: 12, textAlign: 'right' }}>
+                <Pagination
+                  size="small"
+                  current={resultPage}
+                  pageSize={TASK_RESULT_PAGE_SIZE}
+                  total={resultsData?.total ?? 0}
+                  showSizeChanger={false}
+                  onChange={setResultPage}
+                />
+              </div>
+            )}
           </div>
         )}
       </Modal>

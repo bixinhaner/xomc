@@ -85,6 +85,7 @@ function statusMeta(s: MMLTaskStatus) {
 }
 
 const PAGE_SIZE = 20
+const TASK_RESULT_PAGE_SIZE = 20
 
 export default function TaskRecord() {
   const tr = useT()
@@ -365,7 +366,7 @@ export default function TaskRecord() {
       />
 
       {viewing ? (
-        <TaskDetailDrawer task={viewing} onClose={() => setViewing(null)} />
+        <TaskDetailDrawer key={viewing.id} task={viewing} onClose={() => setViewing(null)} />
       ) : null}
     </PageShell>
   )
@@ -377,10 +378,11 @@ export default function TaskRecord() {
 
 function TaskDetailDrawer({ task, onClose }: { task: MMLTask; onClose: () => void }) {
   const t = useT()
-  const { data, isLoading, isError } = useMMLTaskResults(task.id, 1, 200)
+  const [resultPage, setResultPage] = useState(1)
+  const { data, isLoading, isError } = useMMLTaskResults(task.id, resultPage, TASK_RESULT_PAGE_SIZE)
   const rows: DeviceTaskResultItem[] = useMemo(
-    () => data?.items ?? (task.results as unknown as DeviceTaskResultItem[]) ?? [],
-    [data, task]
+    () => data?.items ?? [],
+    [data]
   )
   // apiSwitch 把真实 API（stats: MMLTaskResultsStats）与 mock（默认 stats {}）
   // 的返回类型取交集，stats 被收窄；运行期真实 API 会填充翻译审计元数据，
@@ -502,6 +504,16 @@ function TaskDetailDrawer({ task, onClose }: { task: MMLTask; onClose: () => voi
               })}
             </div>
           )}
+          {(data?.total ?? 0) > TASK_RESULT_PAGE_SIZE ? (
+            <div className="mt-3">
+              <Pagination
+                page={resultPage}
+                totalPages={Math.max(1, Math.ceil((data?.total ?? 0) / TASK_RESULT_PAGE_SIZE))}
+                pageSize={TASK_RESULT_PAGE_SIZE}
+                onChange={setResultPage}
+              />
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
