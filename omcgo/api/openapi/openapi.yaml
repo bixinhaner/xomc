@@ -2909,6 +2909,69 @@ paths:
         "403":
           description: 仅 superAdmin 可调用
 
+  /api/v1/admin/kpi-routes/refresh:
+    post:
+      tags: [Admin, KPI]
+      summary: 人工刷新 KPI 路由缓存
+      operationId: refreshKPIRoutes
+      description: |
+        仅 `super_admin` 可调用。先清理当前 app 进程的 KPI 路由 L1，再以
+        有界后台上下文最多三次推进 Redis 全局 `cache_version`。
+        无 Redis 时仅保证当前进程 L1 清理，响应 `scope=local` 且
+        `multi_process_sync=false`。
+      responses:
+        "200":
+          description: KPI 路由失效完成
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ret, msg, data]
+                properties:
+                  ret:
+                    type: integer
+                    example: 1
+                  msg:
+                    type: string
+                    example: ok
+                  data:
+                    type: object
+                    required: [cache_version, attempts, scope, multi_process_sync]
+                    properties:
+                      cache_version:
+                        type: integer
+                        format: int64
+                        example: 12
+                      attempts:
+                        type: integer
+                        minimum: 0
+                        maximum: 3
+                        example: 1
+                      scope:
+                        type: string
+                        enum: [global, local]
+                      multi_process_sync:
+                        type: boolean
+                        example: true
+        "401":
+          description: 未提供或提供了无效的认证凭据
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeErrorResponse"
+        "403":
+          description: 已认证，但不是 super_admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeErrorResponse"
+        "503":
+          description: 本进程 L1 已清理，但 Redis 全局版本推进最终失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeErrorResponse"
+
   /api/v1/mml/groups/{id}/execute:
     post:
       tags: [MML]
@@ -3084,6 +3147,31 @@ components:
         request_id:
           type: string
           description: Request tracking ID
+
+    EnvelopeErrorResponse:
+      type: object
+      description: 当前 Gin API 统一失败信封
+      required: [ret, msg, data]
+      properties:
+        ret:
+          type: integer
+          enum: [0]
+          example: 0
+        msg:
+          type: string
+          description: 已脱敏、可供调用方处理的错误说明
+          example: "super_admin role required"
+        data:
+          type: object
+          nullable: true
+          additionalProperties: true
+          example: null
+        biz_code:
+          type: integer
+          description: 可选业务错误码
+        request_id:
+          type: string
+          description: 可选请求追踪 ID
 
     PaginatedResponse:
       type: object

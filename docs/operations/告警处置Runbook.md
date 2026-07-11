@@ -60,6 +60,16 @@
 | `OMCPMProcessingSlow` | warning | PM 文件处理 p95 > 60s | 查 worker CPU、TimescaleDB 写入压力；评估 PM 文件体积与并发 |
 | `MMLPathTranslationMissSustained` | warning | 标准 path→私有 path 翻译持续 fallback —— 字典与设备不同步，下发易被 CPE 拒（Fault 9005） | `omcctl mml migrate-device-params --dry-run`；查 `parammodel_intersect_*` 指标；用 admin Tab 3 补映射 |
 | `MMLPathTranslationOrphan` | warning | productClass 未匹配任何 product —— 野设备走 orphan_passthrough 原路径下发，CPE 可能返 Fault 9005 | 见下方 §MMLPathTranslationOrphan 处置流程 |
+| `KPIRouteInvalidationFailed` | critical | 指标库写入已提交，但 KPI 路由全局版本 3 次 bump 均失败；其他进程可能继续用旧 counter 白名单 | 见下方 §KPI 路由失效处置流程 |
+| `KPIRouteVersionReadFailuresSustained` | warning | app/worker 持续读不到 KPI 路由版本，无法及时采用远端发布的新路由 | 查 Redis 与 `kpi.router` 日志；恢复后确认 stale eviction 指标增长 |
+
+### KPI 路由失效处置流程（Issue #41）
+
+1. 先恢复 Redis 连通性，定位 app 日志中的 `KPI route invalidation failed`；该错误不会回滚已经提交的指标库写入。
+2. 以 `super_admin` 调用 `POST /api/v1/admin/kpi-routes/refresh`。成功响应应包含新的 `cache_version`、`scope=global`、`multi_process_sync=true`。
+3. 观察 worker 的 `omc_kpi_router_stale_evictions_total` 增长，并确认新 PM 文件的 counter 白名单已经采用新版路由。
+
+无 Redis 部署时，人工刷新仍会清理 app 本进程 L1，并返回 `scope=local`、`multi_process_sync=false`、`cache_version=0`。这是明确的能力边界：没有全局版本协调时，无法让其他 app/worker 进程即时采用新路由；多进程部署必须恢复 Redis，或逐进程重启/受控恢复。
 
 ### MMLPathTranslationOrphan（T-0168）
 

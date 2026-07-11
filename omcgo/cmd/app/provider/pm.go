@@ -66,13 +66,17 @@ func initPMModule(c *Container) error {
 		platformFormulaRepo,
 		router.Options{
 			L2Cache: l2Cache,
-			Metrics: router.NewMetrics(c.MetricsReg),
+			Metrics: c.KPIRouteMetrics,
 			Logger:  logger,
 		},
 	)
 	if err != nil {
 		return fmt.Errorf("build kpi router: %w", err)
 	}
+	if c.KPIRouteInvalidator == nil {
+		return errors.New("KPI route invalidator not initialized")
+	}
+	c.KPIRouteInvalidator.SetLocalTarget(kpiRouter)
 
 	pmKPIEngine := kpi.NewKPIEngine(pmCounterRepo, pmKPIRepo, kpiRouter, logger)
 
