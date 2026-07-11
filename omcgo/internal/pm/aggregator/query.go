@@ -995,7 +995,9 @@ func applyScalarFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
 		qb = qb.Where(sq.GtOrEq{"time": q.StartTime})
 	}
 	if !q.EndTime.IsZero() {
-		qb = qb.Where(sq.LtOrEq{"time": q.EndTime})
+		// PM 桶和聚合窗口统一使用半开区间 [start,end)：结束时刻若恰好等于
+		// 下一桶桶头，不应把下一桶也纳入自定义时间范围（#29）。
+		qb = qb.Where(sq.Lt{"time": q.EndTime})
 	}
 	// #599：星期/小时段后端过滤（全选/空 = 不加条件，向后兼容）。
 	if len(q.Weekdays) > 0 && len(q.Weekdays) < 7 {
