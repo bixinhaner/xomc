@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	appcontext "github.com/omcgo/omcgo/internal/core/context"
 )
 
 func TestStreamCSVToObject_Success(t *testing.T) {
@@ -36,6 +38,24 @@ func TestStreamCSVToObject_Success(t *testing.T) {
 	recs, err := csv.NewReader(strings.NewReader(body)).ReadAll()
 	require.NoError(t, err)
 	assert.Len(t, recs, 4)
+}
+
+func TestStreamCSVToObject_EnglishFixedHeaders(t *testing.T) {
+	src := &sliceSource{batches: nil}
+	up := &stubUploader{}
+	layout := csvLayout{
+		FirstColHeader: "Product",
+		Locale:         appcontext.LocaleEN,
+	}
+
+	_, err := streamCSVToObject(context.Background(), up, "bkt", "obj.csv", src, nil, layout, nil)
+	require.NoError(t, err)
+
+	body := strings.TrimPrefix(string(up.gotBody), string(utf8BOM))
+	recs, err := csv.NewReader(strings.NewReader(body)).ReadAll()
+	require.NoError(t, err)
+	require.Len(t, recs, 1)
+	assert.Equal(t, []string{"Start Time", "End Time", "Product"}, recs[0])
 }
 
 func TestStreamCSVToObject_MissingMetricCellUsesPlaceholder(t *testing.T) {

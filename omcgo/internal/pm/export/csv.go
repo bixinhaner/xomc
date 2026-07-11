@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	appcontext "github.com/omcgo/omcgo/internal/core/context"
 )
 
 // utf8BOM 是 UTF-8 字节顺序标记，写在 CSV 首部让 Excel 双击直接按 UTF-8 解析、中文不乱码。
@@ -108,6 +110,10 @@ func newWideCSVWriterWithMeasurementObject(out io.Writer, firstColHeader string,
 }
 
 func newWideCSVWriterWithLayout(out io.Writer, firstColHeader string, includeTech, includeCell, includeMeasurementObject bool, cols []WideColumn, missingPlaceholder string, outputLocation *time.Location) (*WideCSVWriter, error) {
+	return newWideCSVWriterWithLocale(out, firstColHeader, includeTech, includeCell, includeMeasurementObject, cols, missingPlaceholder, outputLocation, appcontext.LocaleZH)
+}
+
+func newWideCSVWriterWithLocale(out io.Writer, firstColHeader string, includeTech, includeCell, includeMeasurementObject bool, cols []WideColumn, missingPlaceholder string, outputLocation *time.Location, loc appcontext.Locale) (*WideCSVWriter, error) {
 	if _, err := out.Write(utf8BOM); err != nil {
 		return nil, err
 	}
@@ -115,15 +121,16 @@ func newWideCSVWriterWithLayout(out io.Writer, firstColHeader string, includeTec
 		outputLocation = time.UTC
 	}
 	cw := csv.NewWriter(out)
-	fixed := []string{"开始时间", "结束时间", firstColHeader}
+	headers := localizedCSVHeaders(loc)
+	fixed := []string{headers.startTime, headers.endTime, firstColHeader}
 	if includeTech {
-		fixed = append(fixed, "制式")
+		fixed = append(fixed, headers.technology)
 	}
 	if includeCell {
 		fixed = append(fixed, "Cell ID", "PLMN")
 	}
 	if includeMeasurementObject {
-		fixed = append(fixed, "测量对象")
+		fixed = append(fixed, headers.measurementObject)
 	}
 	header := make([]string, 0, len(fixed)+len(cols))
 	header = append(header, fixed...)
@@ -142,6 +149,30 @@ func newWideCSVWriterWithLayout(out io.Writer, firstColHeader string, includeTec
 		outputLocation:                outputLocation,
 	}
 	return writer, nil
+}
+
+type csvHeaders struct {
+	startTime         string
+	endTime           string
+	technology        string
+	measurementObject string
+}
+
+func localizedCSVHeaders(loc appcontext.Locale) csvHeaders {
+	if loc == appcontext.LocaleEN {
+		return csvHeaders{
+			startTime:         "Start Time",
+			endTime:           "End Time",
+			technology:        "Technology",
+			measurementObject: "Measurement Object",
+		}
+	}
+	return csvHeaders{
+		startTime:         "开始时间",
+		endTime:           "结束时间",
+		technology:        "制式",
+		measurementObject: "测量对象",
+	}
 }
 
 // AddRow 把一个数据点喂进当前时间桶；time 变化时先 flush 上一桶。

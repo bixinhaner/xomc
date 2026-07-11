@@ -16,6 +16,7 @@ import (
 	"github.com/omcgo/omcgo/internal/authz"
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
 	"github.com/omcgo/omcgo/internal/core/compress"
+	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
@@ -774,6 +775,7 @@ func (h *Handler) ListKPIDefinitions(c *gin.Context) {
 		return
 	}
 
+	loc := appcontext.GetLocale(c.Request.Context())
 	items := make([]kpiDefinitionItem, 0)
 	for _, dt := range dts {
 		filter := indicator.IndicatorListFilter{
@@ -797,7 +799,7 @@ func (h *Handler) ListKPIDefinitions(c *gin.Context) {
 				ID:          r.ID,
 				IsCounter:   r.IsCounter,
 				Name:        r.EnName,
-				DisplayName: derefOr(r.CnName, r.EnName),
+				DisplayName: localizedIndicatorName(loc, r.EnName, r.CnName, r.ID),
 				Formula:     derefOr(r.Arithmetic, ""),
 				Unit:        derefOr(r.UnitID, ""),
 			})
@@ -828,6 +830,26 @@ func derefOr(p *string, fallback string) string {
 		return fallback
 	}
 	return *p
+}
+
+func localizedIndicatorName(loc appcontext.Locale, en string, cn *string, fallback string) string {
+	cnName := derefOr(cn, "")
+	if loc == appcontext.LocaleEN {
+		if strings.TrimSpace(en) != "" {
+			return en
+		}
+		if strings.TrimSpace(cnName) != "" {
+			return cnName
+		}
+		return fallback
+	}
+	if strings.TrimSpace(cnName) != "" {
+		return cnName
+	}
+	if strings.TrimSpace(en) != "" {
+		return en
+	}
+	return fallback
 }
 
 type calculateRequest struct {

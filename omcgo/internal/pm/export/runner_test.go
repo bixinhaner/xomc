@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"testing"
 	"time"
@@ -185,6 +186,31 @@ func TestRunner_BuildSource_AdhocUsesTaskMetricPaths(t *testing.T) {
 	require.NotEmpty(t, adhocDB.queries)
 	assert.Contains(t, adhocDB.queries[0].sql, "metric_path IN (")
 	assert.Equal(t, metricPaths, src.(*adhocSource).metricPaths)
+}
+
+func TestRunner_BuildSource_UsesStoredEnglishLocaleWithoutRequestContext(t *testing.T) {
+	taskID := uuid.New()
+	metaDB := &recordingExportQuerier{row: &exportMetaRow{
+		dimension:   "product",
+		metricPaths: []string{"KGSM0143"},
+	}}
+	adhocDB := &recordingExportQuerier{results: []pgx.Rows{
+		&adhocFakeRows{rows: [][]any{{"KGSM0143", "kpi"}}},
+		&adhocFakeRows{},
+	}}
+	runner := NewRunner(RunnerDeps{AdhocDB: adhocDB, TaskMetaDB: metaDB})
+
+	_, _, _, err := runner.buildSource(context.Background(), &Task{
+		ID:         uuid.New(),
+		SourceType: SourceAdhoc,
+		Params: []byte(fmt.Sprintf(
+			`{"task_id":%q,"locale":"en-US"}`,
+			taskID.String(),
+		)),
+	})
+	require.NoError(t, err)
+	require.Len(t, adhocDB.queries, 2)
+	assert.Contains(t, adhocDB.queries[1].sql, "COALESCE(NULLIF(en_name, ''), cn_name)")
 }
 
 // ── 预 running 守门：payload 坏 / 缺 task_id 直接返 error，不动任务 ─────────────

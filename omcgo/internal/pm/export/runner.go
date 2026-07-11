@@ -200,16 +200,22 @@ func (r *Runner) outputLocation(ctx context.Context) *time.Location {
 // 横表列集在此一次性发现（DISTINCT metric_path/metric_type）+ 解析名（三张指标表 UNION 按 locale），
 // 表头开头即知；流式阶段只摊行不再查名。
 func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, []WideColumn, csvLayout, error) {
-	loc := appcontext.GetLocale(ctx)
+	loc := exportLocale(task.Params)
+	deviceHeader := "设备 SN"
+	if loc == appcontext.LocaleEN {
+		deviceHeader = "Device SN"
+	}
 	// dashboard 路径恒为 device 维度：首列「设备 SN」+ 含 Cell ID/PLMN 列（保持仪表盘既有导出口径）。
 	// 缺值与 adhoc 导出保持一致写 "-"，避免 CSV 空单元格被误读为未导出。
 	dashboardLayout := csvLayout{
-		FirstColHeader:                "设备 SN",
+		FirstColHeader:                deviceHeader,
+		Locale:                        loc,
 		IncludeCell:                   true,
 		MissingMetricValuePlaceholder: missingMetricValuePlaceholder,
 	}
 	kpiQueryLayout := csvLayout{
-		FirstColHeader:                "设备 SN",
+		FirstColHeader:                deviceHeader,
+		Locale:                        loc,
 		IncludeMeasurementObject:      true,
 		MissingMetricValuePlaceholder: missingMetricValuePlaceholder,
 	}
@@ -238,7 +244,8 @@ func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, []Wide
 		}
 		cols := newNameResolver(r.adhocDB, loc).resolveColumns(ctx, keys)
 		layout := csvLayout{
-			FirstColHeader:                adhocFirstColHeader(meta.dimension),
+			FirstColHeader:                adhocFirstColHeader(meta.dimension, loc),
+			Locale:                        loc,
 			IncludeTechnology:             meta.dimension == "device_group", // 设备组维度按制式分行，导出补「制式」列（与页面表格一致）
 			IncludeCell:                   adhocIncludesCell(meta.dimension),
 			MissingMetricValuePlaceholder: missingMetricValuePlaceholder,

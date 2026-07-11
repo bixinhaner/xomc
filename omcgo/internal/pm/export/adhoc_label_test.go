@@ -1,6 +1,10 @@
 package export
 
-import "testing"
+import (
+	"testing"
+
+	appcontext "github.com/omcgo/omcgo/internal/core/context"
+)
 
 func TestAdhocFirstColHeader(t *testing.T) {
 	cases := map[string]string{
@@ -9,7 +13,20 @@ func TestAdhocFirstColHeader(t *testing.T) {
 		"": "设备 SN", "unknown": "设备 SN",
 	}
 	for dim, want := range cases {
-		if got := adhocFirstColHeader(dim); got != want {
+		if got := adhocFirstColHeader(dim, appcontext.LocaleZH); got != want {
+			t.Errorf("header(%q)=%q want %q", dim, got, want)
+		}
+	}
+}
+
+func TestAdhocFirstColHeader_English(t *testing.T) {
+	cases := map[string]string{
+		"device": "Device SN", "device_group": "Device Group", "product": "Product",
+		"band": "Band", "network": "Network", "aggregate_group": "Aggregate Group",
+		"": "Device SN", "unknown": "Device SN",
+	}
+	for dim, want := range cases {
+		if got := adhocFirstColHeader(dim, appcontext.LocaleEN); got != want {
 			t.Errorf("header(%q)=%q want %q", dim, got, want)
 		}
 	}
