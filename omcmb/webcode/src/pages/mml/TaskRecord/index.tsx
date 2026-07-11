@@ -16,6 +16,7 @@ import type {
   MMLTask,
   MMLTaskStatus,
   MMLExecuteType,
+  MMLTaskOrigin,
   DeviceTaskResultItem,
 } from '@core/types/mml';
 import {
@@ -33,6 +34,11 @@ const EXECUTE_TYPE_TAGS: Record<MMLExecuteType, { color: string; key: string }> 
   suspended: { color: 'orange', key: 'mml.suspended' },
   scheduled: { color: 'blue',   key: 'mml.scheduledExecute' },
   periodic:  { color: 'purple', key: 'mml.periodicTask' },
+};
+
+const TASK_ORIGIN_TAGS: Record<MMLTaskOrigin, { color: string; key: string }> = {
+  console: { color: 'cyan', key: 'mml.taskOrigin.console' },
+  script: { color: 'purple', key: 'mml.taskOrigin.script' },
 };
 
 const TASK_STATUS_TAGS: Record<MMLTaskStatus, { color: string; key: string }> = {
@@ -58,6 +64,7 @@ export default function TaskRecord() {
   const [pageSize, setPageSize] = useState(50);
   const [filters, setFilters] = useState<{
     taskName?: string;
+    taskOrigin?: string;
     status?: string;
     executeType?: string;
     result?: string;
@@ -67,6 +74,7 @@ export default function TaskRecord() {
     page,
     pageSize,
     taskName: filters.taskName,
+    taskOrigin: filters.taskOrigin && filters.taskOrigin !== 'all' ? filters.taskOrigin : undefined,
     status: filters.status && filters.status !== 'all' ? filters.status : undefined,
     executeType: filters.executeType && filters.executeType !== 'all' ? filters.executeType : undefined,
     result: filters.result && filters.result !== 'all' ? filters.result : undefined,
@@ -79,6 +87,17 @@ export default function TaskRecord() {
       label: t('mml.taskName'),
       type: 'input',
       placeholder: t('mml.inputTaskNameRequired'),
+    },
+    {
+      name: 'taskOrigin',
+      label: t('mml.taskOrigin'),
+      type: 'select',
+      placeholder: t('mml.taskOrigin'),
+      options: [
+        { label: t('common.all'), value: 'all' },
+        { label: t('mml.taskOrigin.console'), value: 'console' },
+        { label: t('mml.taskOrigin.script'), value: 'script' },
+      ],
     },
     {
       name: 'executeType',
@@ -126,6 +145,7 @@ export default function TaskRecord() {
     setPage(1);
     setFilters({
       taskName: typeof values.taskName === 'string' ? values.taskName.trim() : undefined,
+      taskOrigin: typeof values.taskOrigin === 'string' ? values.taskOrigin : undefined,
       status: typeof values.status === 'string' ? values.status : undefined,
       executeType: typeof values.executeType === 'string' ? values.executeType : undefined,
       result: typeof values.result === 'string' ? values.result : undefined,
@@ -165,6 +185,17 @@ export default function TaskRecord() {
     },
     { key: 'taskName', title: t('mml.taskName'), dataIndex: 'taskName', ellipsis: true },
     { key: 'creator',  title: t('mml.creator'),  dataIndex: 'creator', width: 100 },
+    {
+      key: 'taskOrigin',
+      title: t('mml.taskOrigin'),
+      dataIndex: 'taskOrigin',
+      width: 120,
+      render: (val: unknown) => {
+        const v = val as MMLTaskOrigin;
+        const tag = TASK_ORIGIN_TAGS[v];
+        return tag ? <Tag color={tag.color}>{t(tag.key)}</Tag> : <Tag>{v || '-'}</Tag>;
+      },
+    },
     {
       key: 'executeType',
       title: t('mml.type'),

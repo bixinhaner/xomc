@@ -246,6 +246,8 @@ export type MMLExecuteType = 'immediate' | 'scheduled' | 'periodic' | 'suspended
 
 export type MMLTaskResult = 'success' | 'partial' | 'failed';
 
+export type MMLTaskOrigin = 'console' | 'script';
+
 export type MMLTaskExecuteMode = 'common' | 'device_bound';
 
 /**
@@ -308,6 +310,7 @@ export interface MMLTask {
   id: string;
   taskName: string;
   scriptId?: string;
+  taskOrigin: MMLTaskOrigin;
   deviceSns: string[];
   commands: string[];
   executeMode?: MMLTaskExecuteMode;

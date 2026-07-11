@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Button, Card, Col, Row, Space, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { MMLScriptImportValidation, MMLScriptIssue, MMLTaskPlanItem } from '@core/types/mml';
+import { useT } from '@/hooks/useT';
 
 export interface ScriptImportPreviewProps {
   validation?: MMLScriptImportValidation | null;
@@ -16,6 +17,7 @@ function issueForLine(issues: MMLScriptIssue[], lineNo: number): MMLScriptIssue[
 
 /** Server-authoritative TXT summary and read-only plan preview. */
 export default function ScriptImportPreview({ validation, readOnly = true }: ScriptImportPreviewProps) {
+  const t = useT();
   const [filter, setFilter] = useState<IssueFilter>('all');
   const summary = validation?.summary;
   const issues = validation?.issues ?? [];
@@ -40,15 +42,15 @@ export default function ScriptImportPreview({ validation, readOnly = true }: Scr
   if (!validation) return null;
 
   const columns: ColumnsType<MMLTaskPlanItem> = [
-    { title: '行号', dataIndex: 'lineNo', width: 72 },
-    { title: '设备 SN', dataIndex: 'deviceSn', width: 150, ellipsis: true },
-    { title: '顺序', dataIndex: 'order', width: 72 },
-    { title: '命令', key: 'command', render: (_, row) => <Typography.Text code>{row.command.commandCode}</Typography.Text> },
-    { title: '参数摘要', key: 'parameters', render: (_, row) => row.command.parameters ? JSON.stringify(row.command.parameters) : '-' },
+    { title: t('mml.scriptImport.lineNo'), dataIndex: 'lineNo', width: 72 },
+    { title: t('mml.scriptImport.deviceSn'), dataIndex: 'deviceSn', width: 150, ellipsis: true },
+    { title: t('mml.scriptImport.order'), dataIndex: 'order', width: 72 },
+    { title: t('mml.scriptImport.command'), key: 'command', render: (_, row) => <Typography.Text code>{row.command.commandCode}</Typography.Text> },
+    { title: t('mml.scriptImport.parametersSummary'), key: 'parameters', render: (_, row) => row.command.parameters ? JSON.stringify(row.command.parameters) : '-' },
     {
-      title: '校验结果', key: 'issues', render: (_, row) => {
+      title: t('mml.scriptImport.validationResult'), key: 'issues', render: (_, row) => {
         const lineIssues = issueForLine(issues, row.lineNo);
-        if (!lineIssues.length) return <Tag color="success">通过</Tag>;
+        if (!lineIssues.length) return <Tag color="success">{t('mml.scriptImport.passed')}</Tag>;
         return <Space wrap>{lineIssues.map((issue, index) => <Tag key={`${issue.code}-${index}`} color={issue.severity === 'error' ? 'error' : 'warning'}>{issue.code}</Tag>)}</Space>;
       },
     },
@@ -56,28 +58,28 @@ export default function ScriptImportPreview({ validation, readOnly = true }: Scr
 
   return (
     <Space direction="vertical" size={14} style={{ width: '100%' }}>
-      <Typography.Text type="secondary">{readOnly ? 'TXT 内容由导入文件生成，只读。' : ''}</Typography.Text>
-      {validation.originalFilename ? <Typography.Text>文件：<span>{validation.originalFilename}</span></Typography.Text> : null}
-      <Card size="small" title="校验摘要">
+      <Typography.Text type="secondary">{readOnly ? t('mml.scriptImport.readOnlyContent') : ''}</Typography.Text>
+      {validation.originalFilename ? <Typography.Text>{t('mml.scriptImport.fileLabel')}：<span>{validation.originalFilename}</span></Typography.Text> : null}
+      <Card size="small" title={t('mml.scriptImport.validationSummary')}>
         <Row gutter={12}>
-          <Col span={6}><Typography.Text>有效命令行</Typography.Text><div><Typography.Title level={4}>{summary?.validLines ?? 0}</Typography.Title></div></Col>
-          <Col span={6}><Typography.Text>设备数</Typography.Text><div><Typography.Title level={4}>{summary?.deviceCount ?? 0}</Typography.Title></div></Col>
-          <Col span={6}><Typography.Text>错误数</Typography.Text><div><Typography.Title level={4} type="danger">{summary?.errorCount ?? 0}</Typography.Title></div></Col>
-          <Col span={6}><Typography.Text>警告数</Typography.Text><div><Typography.Title level={4} type="warning">{summary?.warningCount ?? 0}</Typography.Title></div></Col>
+          <Col span={6}><Typography.Text>{t('mml.scriptImport.validLines')}</Typography.Text><div><Typography.Title level={4}>{summary?.validLines ?? 0}</Typography.Title></div></Col>
+          <Col span={6}><Typography.Text>{t('mml.scriptImport.deviceCount')}</Typography.Text><div><Typography.Title level={4}>{summary?.deviceCount ?? 0}</Typography.Title></div></Col>
+          <Col span={6}><Typography.Text>{t('mml.scriptImport.errorCount')}</Typography.Text><div><Typography.Title level={4} type="danger">{summary?.errorCount ?? 0}</Typography.Title></div></Col>
+          <Col span={6}><Typography.Text>{t('mml.scriptImport.warningCount')}</Typography.Text><div><Typography.Title level={4} type="warning">{summary?.warningCount ?? 0}</Typography.Title></div></Col>
         </Row>
       </Card>
       <Space wrap>
-        <Button type={filter === 'all' ? 'primary' : 'default'} onClick={() => setFilter('all')}>全部</Button>
-        <Button type={filter === 'error' ? 'primary' : 'default'} onClick={() => setFilter('error')}>仅看错误</Button>
-        <Button type={filter === 'warning' ? 'primary' : 'default'} onClick={() => setFilter('warning')}>仅看警告</Button>
-        <Button onClick={downloadReport} disabled={!visibleIssues.length}>下载错误报告</Button>
+        <Button type={filter === 'all' ? 'primary' : 'default'} onClick={() => setFilter('all')}>{t('mml.scriptImport.all')}</Button>
+        <Button type={filter === 'error' ? 'primary' : 'default'} onClick={() => setFilter('error')}>{t('mml.scriptImport.onlyErrors')}</Button>
+        <Button type={filter === 'warning' ? 'primary' : 'default'} onClick={() => setFilter('warning')}>{t('mml.scriptImport.onlyWarnings')}</Button>
+        <Button onClick={downloadReport} disabled={!visibleIssues.length}>{t('mml.scriptImport.downloadErrorReport')}</Button>
       </Space>
       {visibleIssues.length ? (
-        <Card size="small" title="逐行问题">
+        <Card size="small" title={t('mml.scriptImport.issues')}>
           <Space direction="vertical" style={{ width: '100%' }}>
             {visibleIssues.map((issue, index) => (
               <Typography.Text key={`${issue.code}-${issue.lineNo ?? 'x'}-${index}`} type={issue.severity === 'error' ? 'danger' : 'warning'}>
-                {issue.lineNo ? `第 ${issue.lineNo} 行：` : ''}{issue.code}{issue.message ? ` — ${issue.message}` : ''}
+                {issue.lineNo ? t('mml.scriptImport.linePrefix', { line: issue.lineNo }) : ''}{issue.code}{issue.message ? ` — ${issue.message}` : ''}
               </Typography.Text>
             ))}
           </Space>

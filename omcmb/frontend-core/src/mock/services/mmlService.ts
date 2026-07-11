@@ -104,6 +104,7 @@ export const mmlService = {
       status: 'completed',
       results,
       creator: 'admin',
+      taskOrigin: 'console',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       executeType: 'immediate',
@@ -204,13 +205,14 @@ export const mmlService = {
   },
 
   async getTasks(
-    p: PageRequest & { status?: string; executeType?: string; result?: string; taskName?: string }
+    p: PageRequest & { status?: string; executeType?: string; result?: string; taskName?: string; taskOrigin?: string }
   ): Promise<PageResponse<MMLTask>> {
     await delay(80, 150);
     let filtered = tasks;
     if (p.status) filtered = filtered.filter((t) => t.status === p.status);
     if (p.executeType) filtered = filtered.filter((t) => t.executeType === p.executeType);
     if (p.result) filtered = filtered.filter((t) => t.result === p.result);
+    if (p.taskOrigin) filtered = filtered.filter((t) => (t.taskOrigin || (t.scriptId ? 'script' : 'console')) === p.taskOrigin);
     if (p.taskName) {
       const kw = p.taskName.toLowerCase();
       filtered = filtered.filter((t) => t.taskName.toLowerCase().includes(kw));
@@ -247,6 +249,7 @@ export const mmlService = {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       creator: data.creator || 'admin',
+      taskOrigin: data.scriptId ? 'script' : 'console',
       executeType: data.executeType || 'immediate',
       offlineRetry: data.offlineRetry ?? false,
       offlineRetryWait: data.offlineRetryWait ?? 60,

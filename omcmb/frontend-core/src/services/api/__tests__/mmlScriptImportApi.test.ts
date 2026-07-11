@@ -19,6 +19,26 @@ beforeEach(() => {
 });
 
 describe('mmlApi TXT script import', () => {
+  it('filters MML task records by task origin and maps the returned origin', async () => {
+    getMock.mockResolvedValue({
+      data: {
+        items: [{ ...taskResponse(), task_origin: 'script' }],
+        total: 1,
+        page: 1,
+        page_size: 20,
+        total_pages: 1,
+      },
+    });
+
+    const result = await mmlApi.getTasks({ page: 1, pageSize: 20, taskOrigin: 'script' });
+
+    expect(getMock.mock.calls[0]).toEqual([
+      '/mml/tasks',
+      { params: { page: 1, page_size: 20, task_origin: 'script' } },
+    ]);
+    expect(result.items[0].taskOrigin).toBe('script');
+  });
+
   it('sends multipart validate request and maps snake_case issues', async () => {
     postMock.mockResolvedValue({
       data: {
