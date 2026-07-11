@@ -42,6 +42,58 @@ const HNB_NAME_PATH = 'Device.Services.FAPService.1.AccessMgmt.LTE.HNBName';
 
 type TFn = (id: string, values?: Record<string, string | number>) => string;
 
+const NR_CARRIER_BANDWIDTH_OPTIONS_BY_SCS: Record<string, Array<{ value: string; label: string }>> = {
+  '0': [
+    { value: '25', label: '5MHz(25RB)' },
+    { value: '52', label: '10MHz(52RB)' },
+    { value: '79', label: '15MHz(79RB)' },
+    { value: '106', label: '20MHz(106RB)' },
+    { value: '133', label: '25MHz(133RB)' },
+    { value: '160', label: '30MHz(160RB)' },
+    { value: '216', label: '40MHz(216RB)' },
+    { value: '270', label: '50MHz(270RB)' },
+  ],
+  '1': [
+    { value: '11', label: '5MHz(11RB)' },
+    { value: '24', label: '10MHz(24RB)' },
+    { value: '38', label: '15MHz(38RB)' },
+    { value: '51', label: '20MHz(51RB)' },
+    { value: '65', label: '25MHz(65RB)' },
+    { value: '78', label: '30MHz(78RB)' },
+    { value: '106', label: '40MHz(106RB)' },
+    { value: '133', label: '50MHz(133RB)' },
+    { value: '162', label: '60MHz(162RB)' },
+    { value: '189', label: '70MHz(189RB)' },
+    { value: '217', label: '80MHz(217RB)' },
+    { value: '245', label: '90MHz(245RB)' },
+    { value: '273', label: '100MHz(273RB)' },
+  ],
+  '2': [
+    { value: '11', label: '10MHz(11RB)' },
+    { value: '18', label: '15MHz(18RB)' },
+    { value: '24', label: '20MHz(24RB)' },
+    { value: '31', label: '25MHz(31RB)' },
+    { value: '38', label: '30MHz(38RB)' },
+    { value: '51', label: '40MHz(51RB)' },
+    { value: '65', label: '50MHz(65RB)' },
+    { value: '79', label: '60MHz(79RB)' },
+    { value: '93', label: '70MHz(93RB)' },
+    { value: '107', label: '80MHz(107RB)' },
+    { value: '121', label: '90MHz(121RB)' },
+    { value: '135', label: '100MHz(135RB)' },
+  ],
+};
+
+function getNrCarrierBandwidthOptions(paramName: string, dlScs: unknown, ulScs: unknown): Array<{ value: string; label: string }> {
+  if (paramName === 'DLCarrierBandWidth') {
+    return NR_CARRIER_BANDWIDTH_OPTIONS_BY_SCS[String(dlScs ?? '')] ?? [];
+  }
+  if (paramName === 'ULCarrierBandWidth') {
+    return NR_CARRIER_BANDWIDTH_OPTIONS_BY_SCS[String(ulScs ?? '')] ?? [];
+  }
+  return [];
+}
+
 /**
  * GSM ARFCN -> 上下行频率(MHz) 派生计算。
  * 字典里没有 Frequency 叶子,这里按 3GPP TS 45.005 §2 的频段公式从 ARFCN 反推显示。
@@ -81,7 +133,7 @@ function FrequencyDisplay({ form, locale }: { form: FormInstance; locale: 'zh-CN
     ? `${ulText}: ${formatFreqMHz(freq.ul)}  ${dlText}: ${formatFreqMHz(freq.dl)}`
     : '-';
   return (
-    <Col span={12}>
+    <Col span={8}>
       <Form.Item
         label={
           <Space size={4}>
@@ -115,7 +167,7 @@ function BoundRuRouteIndexDisplay({
   const labelText = t('device.cell.routeIndexBoundRu');
   const display = ruIdx ? `RU ${ruIdx} → ${routeIndex}` : '-';
   return (
-    <Col span={12}>
+    <Col span={8}>
       <Form.Item
         label={
           <Space size={4}>
@@ -164,7 +216,7 @@ function LteFrequencyDisplay({ form, locale }: { form: FormInstance; locale: 'zh
   const labelText = t('device.cell.freqMHz');
   const display = f != null ? formatFreqMHz(f) : '-';
   return (
-    <Col span={12}>
+    <Col span={8}>
       <Form.Item
         label={
           <Space size={4}>
@@ -188,7 +240,7 @@ function CellIdDerivedDisplay({ form, locale }: { form: FormInstance; locale: 'z
   const cid = Number.isFinite(n) ? n % 256 : null;
   const labelText = 'Cell ID (ECI%256)';
   return (
-    <Col span={12}>
+    <Col span={8}>
       <Form.Item
         label={
           <Space size={4}>
@@ -212,7 +264,7 @@ function AntennaPortsAs2T4RDisplay({ form, locale }: { form: FormInstance; local
   const labelText = t('device.cell.switch2T4R');
   const v = n === 4 ? 'ON' : n === 2 ? 'OFF' : '-';
   return (
-    <Col span={12}>
+    <Col span={8}>
       <Form.Item
         label={
           <Space size={4}>
@@ -579,7 +631,7 @@ function findRawValueBySuffix(parameters: DeviceParameter[] | undefined, suffix:
  * 行为：
  *  1. 把 group.params 的 standardPath 中 {i} 替换为当前 fapInstance
  *  2. 通过 useParameterSchema 拉每条路径的 schema（类型/约束/当前值）
- *  3. 渲染为 2 列网格 Form
+   *  3. 渲染为 3 列网格 Form
  *  4. 顶部"保存"按钮收集本表单全部脏字段，一次性 SetParameterValues
  *  5. Save 部分失败时按字段标红保留输入值（继承 Antd Form 校验/状态行为）
  */
@@ -589,6 +641,8 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
   const latestLocalEditAtRef = useRef(0);
   const watchedLocalTimeZoneName = Form.useWatch('LocalTimeZoneName', form);
   const watchedIpsecEnable = Form.useWatch('IPSEC_ENABLE', form);
+  const dlSubCarrierSpacing = Form.useWatch('DLSubCarrierSpacing', form);
+  const ulSubCarrierSpacing = Form.useWatch('ULSubCarrierSpacing', form);
   const updateMutation = useUpdateParameters();
   const renameMutation = useRenameDevice(deviceId);
   const nameSyncMode = useDeviceNameSyncMode();
@@ -1262,6 +1316,20 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
               setDraftField(fbKey, name, String(value ?? ''));
             }
           }
+          const dependentBandwidthByScs: Array<[string, string]> = [
+            ['DLSubCarrierSpacing', 'DLCarrierBandWidth'],
+            ['ULSubCarrierSpacing', 'ULCarrierBandWidth'],
+          ];
+          for (const [scsName, bandwidthName] of dependentBandwidthByScs) {
+            if (!(scsName in changedValues)) continue;
+            const options = NR_CARRIER_BANDWIDTH_OPTIONS_BY_SCS[String(changedValues[scsName] ?? '')] ?? [];
+            if (options.length === 0) continue;
+            const currentBandwidth = String(form.getFieldValue(bandwidthName) ?? '');
+            if (options.some((option) => option.value === currentBandwidth)) continue;
+            const nextBandwidth = options[0].value;
+            form.setFieldValue(bandwidthName, nextBandwidth);
+            setDraftField(fbKey, bandwidthName, nextBandwidth);
+          }
           // T-0159: 交叉镜像 — 改 A 字段时把 A 的新值同步写入镜像字段 B（如 TDD 上下行带宽必须相等）。
           // antd Form.setFieldValue 不会触发 onValuesChange，故不会无限递归。
           for (const [name, value] of Object.entries(changedValues)) {
@@ -1343,7 +1411,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
           const modeOptions = deviceTimeModeOptions;
           return (
             <Row gutter={16}>
-              <Col span={12}>
+              <Col span={8}>
                 <Form.Item label="NTP" name="Enable">
                   <Select
                     disabled={!modeWritable}
@@ -1351,7 +1419,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                   />
                 </Form.Item>
               </Col>
-              <Col span={12}>
+              <Col span={8}>
                 <Form.Item
                   label="Time Zone"
                   name="LocalTimeZoneName"
@@ -1477,10 +1545,15 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
             // (如 RFEnable: 1→ON / 0→OFF)。
             const xmlEnumValues = p.enumOptions?.map((o) => o.value) ?? [];
             const xmlEnumLabels = p.enumOptions?.map((o) => o.label) ?? [];
-            const effectiveEnumValues = xmlEnumValues.length > 0
+            const nrCarrierBandwidthOptions = getNrCarrierBandwidthOptions(p.name, dlSubCarrierSpacing, ulSubCarrierSpacing);
+            const effectiveEnumValues = nrCarrierBandwidthOptions.length > 0
+              ? nrCarrierBandwidthOptions.map((o) => o.value)
+              : xmlEnumValues.length > 0
               ? xmlEnumValues
               : (enumMeta?.values ?? []);
-            const effectiveEnumLabels = xmlEnumValues.length > 0
+            const effectiveEnumLabels = nrCarrierBandwidthOptions.length > 0
+              ? nrCarrierBandwidthOptions.map((o) => o.label)
+              : xmlEnumValues.length > 0
               ? xmlEnumLabels
               : (enumMeta?.labels ?? []);
             const isEnum = !special && effectiveEnumValues.length > 0;
@@ -1495,7 +1568,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                 )
               : [];
             const input = (
-              <Col span={special?.kind === 'mme-ip-plmn-table' ? 24 : 12} key={p.name}>
+              <Col span={special?.kind === 'mme-ip-plmn-table' ? 24 : 8} key={p.name}>
                 <Form.Item
                   label={special?.kind === 'mme-ip-plmn-table' ? undefined : label}
                   name={p.name}

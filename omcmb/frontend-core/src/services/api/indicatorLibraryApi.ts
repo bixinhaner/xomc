@@ -126,7 +126,7 @@ function mapGroup(b: BackendGroup, deviceType: DeviceType): IndicatorGroup {
  * 父分组)统一用它，按树结构(缩进)展示而非扁平列表。label 以全角空格按 depth 缩进。
  * excludeId:排除该节点**及其整棵子树**(父分组下拉用，避免把自己/后代选作父，形成环)。
  *
- * 2026-06-22 起,UI 三皮肤改用真·树形选择器(可展开收起,见 groupTreeData),本函数
+ * 2026-06-22 起，UI 改用真·树形选择器（可展开收起，见 groupTreeData），本函数
  * 仅作为兼容备份保留;新代码请用 groupTreeData。
  */
 export function groupTreeOptions(
@@ -146,7 +146,7 @@ export function groupTreeOptions(
 }
 
 /**
- * 通用「分组树节点」结构 — 三皮肤的 GroupTreeSelect / TreeSelect 共用:
+ * 通用「分组树节点」结构 — GroupTreeSelect / TreeSelect 共用：
  *   · v1 (Antd) 直接喂给 `<TreeSelect treeData={...} />`(字段名天然对齐)。
  *   · v2 (shadcn) / v3 (HUD) 自制 Popover + 递归 Tree,按 children 渲展开/收起。
  *

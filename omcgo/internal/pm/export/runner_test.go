@@ -73,6 +73,16 @@ func (u *stubUploader) PutObject(_ context.Context, _, _ string, reader io.Reade
 	return minio.UploadInfo{Size: int64(len(b))}, nil
 }
 
+// earlyFailUploader 模拟对象存储在读取 pipe 前立即拒绝上传（例如桶不可用或鉴权失败）。
+// 这与会先 io.ReadAll 的 stubUploader 不同，专门覆盖 #34 的生产卡死形态。
+type earlyFailUploader struct {
+	err error
+}
+
+func (u *earlyFailUploader) PutObject(_ context.Context, _, _ string, _ io.Reader, _ int64, _ minio.PutObjectOptions) (minio.UploadInfo, error) {
+	return minio.UploadInfo{}, u.err
+}
+
 type stubTimezoneProvider struct {
 	loc   *time.Location
 	calls int
@@ -274,6 +284,37 @@ func TestRunner_Run_Success(t *testing.T) {
 	var res map[string]any
 	require.NoError(t, json.Unmarshal(out, &res))
 	assert.Equal(t, "succeeded", res["status"])
+}
+
+func TestRunner_Run_EarlyUploadFailureMarksTaskFailedWithoutHanging(t *testing.T) {
+	task := newTestTask(SourceDashboard)
+	repo := &stubTaskRepo{task: task}
+	r := NewRunner(RunnerDeps{
+		Repo:     repo,
+		Uploader: &earlyFailUploader{err: errors.New("bucket unavailable")},
+		Bucket:   "reports",
+	})
+	r.buildSourceFn = func(_ context.Context, _ *Task) (RowSource, []WideColumn, csvLayout, error) {
+		return &sliceSource{batches: [][]ExportRow{{
+			{Device: "ABCDEF/SN1", MetricCode: "K001", Value: 1.5},
+		}}}, []WideColumn{{Code: "K001", Type: "kpi", Name: "K001"}}, csvLayout{FirstColHeader: "设备"}, nil
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		payload, _ := BuildJobPayload(task.ID)
+		_, err := r.Run(context.Background(), &asyncjob.Job{Payload: payload})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+		assert.Equal(t, 1, repo.failedN)
+		assert.Contains(t, repo.failedWith, "bucket unavailable")
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("export runner hung after uploader returned before reading the pipe")
+	}
 }
 
 func TestRunner_Run_FormatsCSVTimesInTimezoneProviderLocation(t *testing.T) {

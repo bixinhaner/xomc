@@ -1907,7 +1907,7 @@ export default function DeviceDetail() {
             </div>
             {/*
               「激活状态」设备级 Tag —— 判定走 frontend-core/utils/activationStatus.ts,
-              三皮肤 + 列表/详情/KV 全调同一函数，修改口径请只改 utility。
+              列表/详情/KV 全调同一函数，修改口径请只改 utility。
 
               注: 「小区信息』表里也有列名「激活状态」但那是 cell.op_state（小区维度），
               与这里的 device.op_state（设备维度）是后端同名不同事实的两个字段——

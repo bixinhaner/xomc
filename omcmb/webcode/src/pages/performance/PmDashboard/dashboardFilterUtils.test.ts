@@ -114,6 +114,23 @@ describe('buildCompareSeries', () => {
     expect(out.series[0].values).toEqual([3, 4]);
   });
 
+  it('daily 周期比对保留上周全部 7 个点而非只显示一个（#33）', () => {
+    const currentBuckets = Array.from({ length: 7 }, (_, i) =>
+      dayjs('2026-07-06 00:00:00').add(i, 'day').toISOString(),
+    );
+    const prevBuckets = Array.from({ length: 7 }, (_, i) =>
+      dayjs('2026-06-29 00:00:00').add(i, 'day').toISOString(),
+    );
+    const prevSeries = [{ key: 'K1', name: 'RRC连接平均数', values: [1, 2, 3, 4, 5, 6, 7] }];
+    // 模拟界面时窗带 37 秒零头；修复前精确毫秒平移只有偶然重合点，甚至全不显示。
+    const offsetMs = 7 * 24 * 60 * 60 * 1000 + 37 * 1000;
+
+    const out = buildCompareSeries(currentBuckets, prevSeries, prevBuckets, offsetMs, 'daily');
+
+    expect(out.series[0].values).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(out.compareBuckets).toEqual(prevBuckets);
+  });
+
   it('month 粒度按整数日历月平移（不按固定毫秒漂移出月界）', () => {
     // 上一周期 3/31、4/30；offset≈1 个月，日历月平移后应落到当前轴 4/30、5/31。
     const offsetMs = 30 * 86_400_000 + 999; // ≈1 月 + 零头

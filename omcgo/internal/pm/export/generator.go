@@ -102,6 +102,14 @@ func streamCSVToObject(
 	}()
 
 	info, upErr := up.PutObject(ctx, bucket, object, pr, -1, minio.PutObjectOptions{ContentType: "text/csv; charset=utf-8"})
+	// PutObject 正常会持续读取到 writer 关闭；但桶不存在、鉴权失败等错误可能在读取
+	// pipe 前就直接返回。此时必须主动关闭 reader，唤醒阻塞在 pw.Write 的生成 goroutine，
+	// 否则下面等待 writeErrCh 会永久互等，导出任务一直停在 running（#34）。
+	if upErr != nil {
+		_ = pr.CloseWithError(upErr)
+	} else {
+		_ = pr.Close()
+	}
 	writeErr := <-writeErrCh
 	if writeErr != nil {
 		// 取数 / 写 CSV 失败优先：上传端的 err 多半是 pipe 被 CloseWithError 的派生错误。

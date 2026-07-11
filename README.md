@@ -17,7 +17,7 @@ OMC（Operations, Management and Control）是面向小基站 / 皮基站 / 微�
 | 目录 | 说明 | 入口文档 |
 |------|------|---------|
 | `omcgo/` | Go 1.25 后端（模块化单体）：cmd 7 个二进制（app/acs/worker/migrate/omcctl/tools/backup-reencrypt）+ internal 35 个模块 + 字典 XML(`data/`) + 迁移(`migrations/`) | [`omcgo/CLAUDE.md`](./omcgo/CLAUDE.md) |
-| `omcmb/` | 前端：业务层 `frontend-core/`（API/Hook/Store/Types/i18n/Mock，vite alias `@core`）+ 主皮肤 `webcode/`（候选皮肤 v2/v3 已于 2026-06-10 移除） | [`omcmb/webcode/README.md`](./omcmb/webcode/README.md) |
+| `omcmb/` | 前端：业务层 `frontend-core/`（API/Hook/Store/Types/i18n/Mock，vite alias `@core`）+ 唯一 V1 UI 壳 `webcode/` | [`omcmb/webcode/README.md`](./omcmb/webcode/README.md) |
 | `deployments/` | 部署清单（docker compose 容器栈 + 监控配置） | [`deployments/docker/README.md`](./deployments/docker/README.md) |
 | `run/` | 本地一键启停脚本（裸进程跑法，备用） | `run/scripts/` |
 | `docs/` | 设计 / 审查 / 流程 / PRD / Sprint / 运维手册 / 协议合规报告 | （见 §⑥） |

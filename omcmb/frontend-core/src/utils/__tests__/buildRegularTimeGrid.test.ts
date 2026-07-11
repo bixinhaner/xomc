@@ -5,7 +5,7 @@ import {
   alignPointsToGrid,
 } from '../buildRegularTimeGrid';
 
-// issue #429：v2/v3 用"查询窗口起止 + 粒度"铺规整网格，空槽 null、connectNulls=false 断开线。
+// issue #429：用“查询窗口起止 + 粒度”铺规整网格，空槽 null、connectNulls=false 断开线。
 // 必须按窗口起止铺（非数据 min/max），否则尾部连续断档铺不出占位槽。
 
 const MIN = 60 * 1000;

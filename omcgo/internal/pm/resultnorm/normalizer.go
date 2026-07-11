@@ -50,16 +50,19 @@ func Normalize(value float64, metadata *Metadata, numberProcess string) (float64
 		process = DefaultNumberProcess
 	}
 
-	if unit == "number" && process != NumberProcessNone {
-		return normalizeInteger(value, process), nil
-	}
-
 	if unit == "%" || statisType == "pct" || statisType == "avg" {
 		value = round2(value)
 		if unit == "%" && value > 100 {
 			return 100, nil
 		}
 		return value, nil
+	}
+
+	// avg/pct 是连续量统计，必须先于 unit=number 的整数化处理。尤其设备数、连接数等
+	// 原始 counter 虽以 number 为单位，跨桶平均值仍可能是小数；先整数化会让 daily avg
+	// 产生系统性偏差（#32）。只有非 avg/pct 的 number 结果才服从 intUp/intDown/intHalfUp。
+	if unit == "number" && process != NumberProcessNone {
+		return normalizeInteger(value, process), nil
 	}
 
 	if isInteger(value) {

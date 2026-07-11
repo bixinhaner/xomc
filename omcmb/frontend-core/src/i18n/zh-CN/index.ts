@@ -1246,10 +1246,14 @@ const messages: Record<string, string> = {
   'device.multi.unknownErrorHint':        '未知错误,可在通知中心查看任务详情',
   'device.multi.addInstanceFailed':       '新增实例失败({status})',
   'device.multi.addInstanceNoId':         '新增实例成功，但未能识别新实例号',
+  'device.multi.addObjectQueued':         '新增实例已入队，正在等待基站返回实例号',
   'device.multi.addFailed':               '新增失败({group})',
   'device.multi.editValidationFailed':    '编辑页校验失败,请修正后再保存',
   'device.multi.interFreqDuplicate':      '频点 {value} 已存在,不能重复添加',
   'device.multi.neighborCellDuplicate':   '相同邻区已存在,不能重复添加',
+  'device.multi.nrInterFreqLoading':       '正在加载 NR 异频邻频数据,请稍后再保存',
+  'device.multi.nrInterFreqMissing':       'SSB 频点 {value} 未配置到 NR 异频邻频,请先新增该频点',
+  'device.multi.nrInterFreqDisabled':      'SSB 频点 {value} 在 NR 异频邻频中未启用,请先启用该频点',
   'device.multi.addInstanceSuccess':      '新增实例成功',
   'device.multi.noRowChange':             '该行无变更',
   'device.multi.detailAdd':               '新增实例 {instId} {count} 项',
@@ -7841,7 +7845,7 @@ const messages: Record<string, string> = {
   'perf.kpiQuery.pivot.emptyHint':       '暂无数据，请选择查询条件后点击"查询"',
   'perf.kpiQuery.pivot.totalRows':       '共 {count} 行',
   'perf.kpiQuery.pivot.measObject':       '测量对象',
-  // qa-614 c8 (#366): v2/v3 KPI 查询/取数页 i18n 补键（v2 只读查询页 + v3 HUD 取数页）
+  // qa-614 c8 (#366): KPI 查询/取数页 i18n 补键
   'perf.kpiQuery.v2.title':              '指标查询',
   'perf.kpiQuery.v2.desc':              '基于保存的查询模板跑多设备聚合查询，结果透视为时间 × 指标表',
   'perf.kpiQuery.truncated':            '结果已截断',

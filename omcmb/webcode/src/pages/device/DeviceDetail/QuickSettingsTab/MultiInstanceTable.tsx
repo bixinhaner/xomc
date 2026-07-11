@@ -111,7 +111,6 @@ export function statusTagSpec(action: MultiFeedback, taskStatus: DeviceTaskStatu
   if (action.submitStatus === 'failed_to_queue') {
     return { color: 'error', icon: <CloseCircleOutlined />, label: t('device.multi.tagQueueFailed', { action: actionLabel }) };
   }
-  // AddObject / DeleteObject currently return no task_id; only Save goes through the full state machine
   if (!action.taskId) {
     return { color: 'processing', icon: <SyncOutlined spin />, label: t('device.multi.tagQueued', { action: actionLabel }) };
   }
@@ -201,6 +200,25 @@ const INTER_FREQ_GROUP_ID = 'enb-neighbor-freq';
 const INTER_FREQ_EARFCN_LEAF = 'EUTRACarrierARFCN';
 const NEIGHBOR_CELL_GROUP_ID = 'enb-neighbor-cell';
 const NEIGHBOR_CELL_DUPLICATE_LEAVES = ['EUTRACarrierARFCN', 'PhyCellID', 'PLMNID'] as const;
+const GNB_NR_NEIGHBOR_CELL_GROUP_ID = 'gnb-nr-neighbor-cell';
+const GNB_NR_NEIGHBOR_SSB_LEAF = 'ssbFrequency';
+const GNB_NR_INTER_FREQ_SSB_LEAF = 'SSBFrequency';
+const GNB_NR_INTER_FREQ_ENABLE_LEAF = 'Enable';
+
+function multiTableScroll(hasRows: boolean): { x?: 'max-content'; y: number } {
+  return hasRows ? { x: 'max-content', y: 240 } : { y: 240 };
+}
+
+function multiColumnWidth(hasRows: boolean, width: number | undefined): number | undefined {
+  return hasRows ? width : undefined;
+}
+
+function deriveGnbNrInterFreqObjectPath(nrNeighborObjectPath: string): string {
+  return nrNeighborObjectPath.replace(
+    '.NR.RAN.NeighborList.NRCell.',
+    '.NR.RAN.Mobility.ConnMode.NR.InterFreq.Carrier.',
+  );
+}
 
 /**
  * BSC 邻区打包标量映射：把 quicksettings XML 中的“多实例邻区表”映射到 BTS 父对象上的两个单标量字符串。
@@ -293,6 +311,40 @@ function quickParamConstraints(param: QuickSettingsParam | undefined): Parameter
     constraints.enumLabels = param.enumOptions.map((option) => option.label);
   }
   return Object.keys(constraints).length > 0 ? constraints : undefined;
+}
+
+function effectiveParamType(item: ParameterSchemaItem | undefined, param: QuickSettingsParam | undefined): ParameterType {
+  return (item?.type as ParameterType | undefined) ?? quickParamType(param);
+}
+
+function effectiveParamConstraints(
+  item: ParameterSchemaItem | undefined,
+  param: QuickSettingsParam | undefined,
+): ParameterConstraints | undefined {
+  const quick = quickParamConstraints(param);
+  const schema = item?.constraints;
+  if (!quick && !schema) return undefined;
+  return {
+    ...(quick ?? {}),
+    ...(schema ?? {}),
+  };
+}
+
+function formatEffectiveConstraintHint(
+  item: ParameterSchemaItem | undefined,
+  param: QuickSettingsParam | undefined,
+  t: TFn,
+): string {
+  const constraints = effectiveParamConstraints(item, param);
+  if (!constraints) return '';
+  if (constraints.enumValues && constraints.enumValues.length > 0) return '';
+  const isString = effectiveParamType(item, param) === 'string';
+  const min = constraints.minLength ?? constraints.minValue;
+  const max = constraints.maxLength ?? constraints.maxValue;
+  if (min === undefined && max === undefined) return '';
+  const lo = min ?? '-∞';
+  const hi = max ?? '∞';
+  return isString ? t('device.multi.hintLenRange', { lo, hi }) : `[${lo} ~ ${hi}]`;
 }
 
 function formatQuickParamConstraintHint(param: QuickSettingsParam | undefined, t: TFn): string {
@@ -415,7 +467,7 @@ function PackedScalarNeighborTable({
   });
   const setFeedback = useQuickSettingsFeedbackStore((s) => s.setFeedback);
   const patchFeedback = useQuickSettingsFeedbackStore((s) => s.patchFeedback);
-  const { data: lastTask } = useDeviceTaskStatus(active ? lastAction?.taskId : undefined);
+  const { data: lastTask } = useDeviceTaskStatus(active ? lastAction?.taskId : undefined, { intervalMs: 800 });
 
   const waitForTaskTerminal = useCallback(async (taskId: string) => {
     const timeoutAt = Date.now() + 60000;
@@ -602,28 +654,29 @@ function PackedScalarNeighborTable({
     [canMutate, cellsList, t, writeSingleEntry],
   );
 
+  const hasRows = rows.length > 0;
   const columns: ColumnType<{ key: number; id: number; cells: string[] }>[] = [
     {
       title: t('device.multi.instance'),
       dataIndex: 'id',
       key: 'id',
-      width: 80,
-      fixed: 'left',
+      width: multiColumnWidth(hasRows, 80),
+      fixed: hasRows ? 'left' : undefined,
       render: (_v: unknown, row) => <Text strong>{row.id}</Text>,
     },
     ...group.params.map<ColumnType<{ key: number; id: number; cells: string[] }>>((param, colIdx) => ({
       title: locale === 'zh-CN' ? param.titleZh : param.titleEn,
       key: param.leaf || param.name,
-      width: 140,
+      width: multiColumnWidth(hasRows, 140),
       render: (_v: unknown, row) => <Text>{row.cells[colIdx] ?? '-'}</Text>,
     })),
   ];
-  if (canMutate) {
+  if (canMutate && hasRows) {
     columns.push({
       title: t('device.multi.packed.colActions'),
       key: '__op',
-      width: 90,
-      fixed: 'right',
+      width: multiColumnWidth(hasRows, 90),
+      fixed: hasRows ? 'right' : undefined,
       render: (_v: unknown, row) => (
         <Popconfirm
           title={t('device.multi.deleteConfirm')}
@@ -700,7 +753,8 @@ function PackedScalarNeighborTable({
         loading={isLoading}
         size="small"
         pagination={false}
-        scroll={{ x: 'max-content', y: 240 }}
+        scroll={multiTableScroll(hasRows)}
+        tableLayout={hasRows ? undefined : 'fixed'}
         sticky
         locale={{ emptyText: t('device.multi.packed.emptyText') }}
       />
@@ -812,18 +866,6 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
   // BSC 邻区兼容：部分 GSM 设备不按 TR-181 子对象上报，而是把整张邻区列表打包到 BTS 父对象单标量。
   // 这种 group 不存在 currentInstances，常规多实例渲染会出现「暂无数据」。改走打包标量解析路径。
   const packedSpec = PACKED_NEIGHBOR_TABLE_BY_GROUP_ID[group.id];
-  if (packedSpec) {
-    return (
-      <PackedScalarNeighborTable
-        deviceId={deviceId}
-        active={active}
-        group={group}
-        instanceContext={instanceContext}
-        locale={locale}
-        spec={packedSpec}
-      />
-    );
-  }
   // group.objectPath 形如 "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}."
   // - 外层 FAPService.{i} → 用 fapInstance 替换
   // - 内层 Carrier.{i}. 末段是实例号占位符 — 剥离后得到父对象路径,用于查 schema.objects / AddObject / 拼接行 path 前缀
@@ -833,7 +875,16 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     });
     return resolved.replace(/\{i\}\.$/, '');
   }, [group, instanceContext]);
-  const { data: schemaResp, isLoading, refetch } = useParameterSchema(deviceId, objectPath, active);
+  const { data: schemaResp, isLoading, refetch } = useParameterSchema(deviceId, objectPath, active && !packedSpec);
+  const nrInterFreqObjectPath = useMemo(
+    () => group.id === GNB_NR_NEIGHBOR_CELL_GROUP_ID ? deriveGnbNrInterFreqObjectPath(objectPath) : '',
+    [group.id, objectPath],
+  );
+  const { data: nrInterFreqSchemaResp, isLoading: nrInterFreqLoading } = useParameterSchema(
+    deviceId,
+    nrInterFreqObjectPath,
+    active && Boolean(nrInterFreqObjectPath),
+  );
   const updateMutation = useUpdateParameters();
   const addMutation = useAddObject();
   const deleteMutation = useDeleteObject();
@@ -871,7 +922,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
   const draft = useQuickSettingsFeedbackStore((s) => s.drafts[fbKey]);
   const setDraftField = useQuickSettingsFeedbackStore((s) => s.setDraftField);
   const clearDraftPrefix = useQuickSettingsFeedbackStore((s) => s.clearDraftPrefix);
-  const { data: lastTask } = useDeviceTaskStatus(active ? lastAction?.taskId : undefined);
+  const { data: lastTask } = useDeviceTaskStatus(active ? lastAction?.taskId : undefined, { intervalMs: 800 });
 
   // schema.objects 给出 currentInstances；schema.parameters 给出值
   const objectEntry = useMemo(
@@ -888,6 +939,27 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     schemaResp?.parameters.forEach((p) => map.set(p.path, p));
     return map;
   }, [schemaResp]);
+
+  const nrInterFreqSsbState = useMemo(() => {
+    const known = new Set<string>();
+    const enabled = new Set<string>();
+    const instances = nrInterFreqSchemaResp?.objects.find((o) => o.path === nrInterFreqObjectPath)?.currentInstances ?? [];
+    const params = new Map<string, ParameterSchemaItem>();
+    nrInterFreqSchemaResp?.parameters.forEach((item) => params.set(item.path, item));
+
+    instances.forEach((instId) => {
+      const prefix = `${nrInterFreqObjectPath}${instId}.`;
+      const ssb = String(params.get(`${prefix}${GNB_NR_INTER_FREQ_SSB_LEAF}`)?.currentValue ?? '').trim();
+      if (!ssb) return;
+      known.add(ssb);
+      const enableItem = params.get(`${prefix}${GNB_NR_INTER_FREQ_ENABLE_LEAF}`);
+      if (!enableItem || isEnabledValue(enableItem.currentValue)) {
+        enabled.add(ssb);
+      }
+    });
+
+    return { known, enabled };
+  }, [nrInterFreqObjectPath, nrInterFreqSchemaResp]);
 
   const hiddenInstanceNumbers = useMemo(() => {
     const hidden = new Set(optimisticallyRemoved);
@@ -942,6 +1014,14 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     return leaves;
   }, [group.params]);
 
+  const groupParamByLeaf = useMemo(() => {
+    const map = new Map<string, QuickSettingsParam>();
+    for (const param of group.params) {
+      if (param.leaf) map.set(param.leaf, param);
+    }
+    return map;
+  }, [group.params]);
+
   const leafSchemaByLeaf = useMemo(() => {
     const map = new Map<string, ParameterSchemaItem>();
     const leaves = new Set<string>();
@@ -973,7 +1053,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     const values = Object.fromEntries(
       group.params.map((param) => {
         const leaf = param.leaf || '';
-        return [leaf, paramSchemaByLeaf.get(leaf)?.defaultValue ?? ''];
+        return [leaf, paramSchemaByLeaf.get(leaf)?.defaultValue ?? param.defaultValue ?? ''];
       }),
     );
     return values;
@@ -1012,7 +1092,8 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
         const instId = name.slice(0, splitIndex);
         const leaf = name.slice(splitIndex + 1);
         const item = schemaByPath.get(`${objectPath}${instId}.${leaf}`) ?? leafSchemaByLeaf.get(leaf);
-        const err = validateValue(String(value ?? ''), (item?.type as never) ?? 'string', item?.constraints);
+        const param = groupParamByLeaf.get(leaf);
+        const err = validateValue(String(value ?? ''), effectiveParamType(item, param), effectiveParamConstraints(item, param));
         const current = next.get(instId) ?? { edits: {}, errors: {} };
 
         current.edits[leaf] = String(value ?? '');
@@ -1023,7 +1104,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       }
       return next;
     });
-  }, [draft, objectPath, schemaByPath, leafSchemaByLeaf]);
+  }, [draft, groupParamByLeaf, objectPath, schemaByPath, leafSchemaByLeaf]);
 
   const cellValue = useCallback(
     (instId: string, leaf: string): string => {
@@ -1130,6 +1211,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
   useEffect(() => {
     if (!active) return;
     if (!lastTask || !isDeviceTaskTerminal(lastTask.status)) return;
+    if (lastAction?.action === 'add') return;
     let cancelled = false;
     void (async () => {
       const ids = lastAction?.action === 'save'
@@ -1394,17 +1476,18 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       const item = prev.instanceId
         ? (schemaByPath.get(`${objectPath}${prev.instanceId}.${leaf}`) ?? leafSchemaByLeaf.get(leaf))
         : leafSchemaByLeaf.get(leaf);
+      const param = groupParamByLeaf.get(leaf);
       const normalizedValue = isIpsecGroup && leaf === IPSEC_ENABLE_LEAF
         ? toDeviceIpsecEnableValue(value)
         : value;
-      const err = validateValue(normalizedValue, (item?.type as never) ?? 'string', item?.constraints) ?? '';
+      const err = validateValue(normalizedValue, effectiveParamType(item, param), effectiveParamConstraints(item, param)) ?? '';
       return {
         ...prev,
         values: { ...prev.values, [leaf]: value },
         errors: { ...prev.errors, [leaf]: err },
       };
     });
-  }, [isIpsecGroup, leafSchemaByLeaf, objectPath, schemaByPath]);
+  }, [groupParamByLeaf, isIpsecGroup, leafSchemaByLeaf, objectPath, schemaByPath]);
 
   const closeEditModal = useCallback(() => {
     if (updateMutation.isPending || isSubmitting) return;
@@ -1440,18 +1523,40 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       }
     }
 
+    if (group.id === GNB_NR_NEIGHBOR_CELL_GROUP_ID) {
+      const ssbFrequency = String(modal.values[GNB_NR_NEIGHBOR_SSB_LEAF] ?? '').trim();
+      if (ssbFrequency) {
+        if (nrInterFreqLoading || !nrInterFreqSchemaResp) {
+          errors[GNB_NR_NEIGHBOR_SSB_LEAF] = errors[GNB_NR_NEIGHBOR_SSB_LEAF] ?? t('device.multi.nrInterFreqLoading');
+        } else if (!nrInterFreqSsbState.known.has(ssbFrequency)) {
+          errors[GNB_NR_NEIGHBOR_SSB_LEAF] = errors[GNB_NR_NEIGHBOR_SSB_LEAF] ?? t('device.multi.nrInterFreqMissing', { value: ssbFrequency });
+        } else if (!nrInterFreqSsbState.enabled.has(ssbFrequency)) {
+          errors[GNB_NR_NEIGHBOR_SSB_LEAF] = errors[GNB_NR_NEIGHBOR_SSB_LEAF] ?? t('device.multi.nrInterFreqDisabled', { value: ssbFrequency });
+        }
+      }
+    }
+
     for (const column of displayColumns) {
       const leaf = column.leaf || '';
       if (!leaf || !groupParamLeafSet.has(leaf) || column.readOnly) continue;
 
       const rawValue = modal.values[leaf] ?? '';
+      const param = groupParamByLeaf.get(leaf);
+      if (modal.mode === 'add' && String(rawValue).trim() === '') {
+        if (param?.required) {
+          errors[leaf] = errors[leaf] ?? t('device.multi.packed.fieldRequired');
+        }
+        continue;
+      }
       const item = targetInstanceId
         ? (schemaByPath.get(`${objectPath}${targetInstanceId}.${leaf}`) ?? leafSchemaByLeaf.get(leaf))
         : leafSchemaByLeaf.get(leaf);
       const value = isIpsecGroup && leaf === IPSEC_ENABLE_LEAF
         ? toDeviceIpsecEnableValue(rawValue)
         : rawValue;
-      const err = validateValue(value, (item?.type as never) ?? 'string', item?.constraints);
+      const parameterType = effectiveParamType(item, param);
+      const constraints = effectiveParamConstraints(item, param);
+      const err = validateValue(value, parameterType, constraints);
       if (err) {
         errors[leaf] = errors[leaf] ?? err;
         continue;
@@ -1469,12 +1574,12 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       updates.push({
         parameterPath: `${objectPath}${targetInstanceId}.${leaf}`,
         parameterValue: value,
-        parameterType: (item?.type as never) ?? 'string',
+        parameterType,
       });
     }
 
     return { errors, updates, pendingEdits };
-  }, [cellValue, displayColumns, group.id, groupParamLeafSet, instanceIds, isIpsecGroup, leafSchemaByLeaf, objectPath, schemaByPath, t]);
+  }, [cellValue, displayColumns, group.id, groupParamByLeaf, groupParamLeafSet, instanceIds, isIpsecGroup, leafSchemaByLeaf, nrInterFreqLoading, nrInterFreqSchemaResp, nrInterFreqSsbState.enabled, nrInterFreqSsbState.known, objectPath, schemaByPath, t]);
 
   const rollbackAddedInstance = useCallback(async (instId: string | undefined, reason: string) => {
     if (!instId || !/^\d+$/.test(instId)) return;
@@ -1536,6 +1641,16 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     if (editModal.mode === 'add') {
       try {
         const addResult = await addMutation.mutateAsync({ deviceId, objectPath });
+        setFeedback(fbKey, {
+          kind: 'multi',
+          action: 'add',
+          submitStatus: 'queued',
+          taskId: addResult.taskId,
+          detail: t('device.multi.addObjectQueued'),
+          at: Date.now(),
+        });
+        message.success({ content: t('device.multi.addObjectQueued'), duration: 4 });
+        setEditModal(null);
         const addTask = await waitForTaskTerminal(addResult.taskId);
         if (addTask.status !== 'completed') {
           throw new Error(addTask.errorMessage || t('device.multi.addInstanceFailed', { status: addTask.status }));
@@ -1588,12 +1703,18 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     if (Object.keys(errors).length > 0) {
       setEditModal((prev) => prev ? { ...prev, errors } : prev);
       message.error({ content: t('device.multi.editValidationFailed'), duration: ERROR_FEEDBACK_DURATION_SECONDS });
+      if (editModal.mode === 'add') {
+        void rollbackAddedInstance(targetInstanceId, t('device.multi.editValidationFailed'));
+      }
       return;
     }
 
     if (updates.length === 0) {
       message.info({ content: editModal.mode === 'add' ? t('device.multi.addInstanceSuccess') : t('device.multi.noRowChange'), duration: 4 });
       setEditModal(null);
+      if (editModal.mode === 'add') {
+        void syncRelatedParameters();
+      }
       return;
     }
 
@@ -1649,15 +1770,16 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       submittingRef.current = false;
       setIsSubmitting(false);
     }
-  }, [addMutation, deviceId, editModal, fbKey, group.titleZh, objectPath, queryClient, refetch, rollbackAddedInstance, setDraftField, setFeedback, updateMutation, validateEditModalValues, waitForTaskTerminal, t]);
+  }, [addMutation, deviceId, editModal, fbKey, group.titleZh, objectPath, queryClient, refetch, rollbackAddedInstance, setDraftField, setFeedback, syncRelatedParameters, updateMutation, validateEditModalValues, waitForTaskTerminal, t]);
 
+  const hasRows = tableRows.length > 0;
   const columns: ColumnType<TableRow>[] = [
     {
       title: t('device.multi.instance'),
       dataIndex: 'instanceId',
       key: 'instanceId',
-      width: 80,
-      fixed: 'left',
+      width: multiColumnWidth(hasRows, 80),
+      fixed: hasRows ? 'left' : undefined,
       render: (_v: unknown, row: TableRow) => (
         <Text strong>{row.instanceId}</Text>
       ),
@@ -1667,12 +1789,13 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       // 列内字段约束在同一组所有实例下一致（schema 走 {i} 模板）；优先取首个有 schema 的实例作为模板。
       const titleHint = (() => {
         if (!leaf) return '';
+        const param = groupParamByLeaf.get(leaf);
         for (const inst of instanceIds) {
           const tplItem = schemaByPath.get(`${objectPath}${inst}.${leaf}`);
-          const hint = formatConstraintHint(tplItem, t);
+          const hint = formatEffectiveConstraintHint(tplItem, param, t);
           if (hint) return hint;
         }
-        return '';
+        return formatEffectiveConstraintHint(leafSchemaByLeaf.get(leaf), param, t);
       })();
       const baseTitle = column.titleKey ? t(column.titleKey) : (locale === 'zh-CN' ? (column.titleZh ?? column.titleEn) : column.titleEn);
       return {
@@ -1684,7 +1807,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
         ) : baseTitle,
         key: column.key,
         dataIndex: column.key,
-        width: column.width ?? 150,
+        width: multiColumnWidth(hasRows, column.width ?? 150),
         render: (_v: unknown, row: TableRow) => {
           const value = leaf
             ? (row.instanceId ? cellValue(row.instanceId, leaf) : '')
@@ -1692,20 +1815,24 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
           const item = leaf && row.instanceId
             ? (schemaByPath.get(`${objectPath}${row.instanceId}.${leaf}`) ?? leafSchemaByLeaf.get(leaf))
             : leafSchemaByLeaf.get(leaf);
+          const param = groupParamByLeaf.get(leaf);
+          const constraints = effectiveParamConstraints(item, param);
           // 列自定义 formatValue 接收原始值；若未定义，再退到 enum label 兜底。
           // 这两者互斥：列已经声明 formatValue 表示有自定义显示，不应再被 enum 兜底改写。
           const formattedValue = column.formatValue
             ? column.formatValue(value)
-            : (leaf ? formatEnumDisplayValue(value, item?.constraints, item?.path, locale) : value);
+            : (leaf ? formatEnumDisplayValue(value, constraints, item?.path, locale) : value);
           return <Text>{formattedValue || '-'}</Text>;
         },
       };
     }),
-    {
+  ];
+  if (hasRows) {
+    columns.push({
       title: t('table.operation'),
       key: 'actions',
-      width: 148,
-      fixed: 'right',
+      width: multiColumnWidth(hasRows, 148),
+      fixed: hasRows ? 'right' : undefined,
       render: (_v: unknown, row: TableRow) => (
         <Space size={4}>
           <Button
@@ -1724,8 +1851,8 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
           </Popconfirm>
         </Space>
       ),
-    },
-  ];
+    });
+  }
 
   const title = locale === 'zh-CN' ? group.titleZh : group.titleEn;
   const maxInstances = group.maxInstances && group.maxInstances > 0 ? group.maxInstances : undefined;
@@ -1740,6 +1867,19 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       {t('common.add')}
     </Button>
   );
+
+  if (packedSpec) {
+    return (
+      <PackedScalarNeighborTable
+        deviceId={deviceId}
+        active={active}
+        group={group}
+        instanceContext={instanceContext}
+        locale={locale}
+        spec={packedSpec}
+      />
+    );
+  }
 
   return (
     <Card
@@ -1786,7 +1926,8 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
         loading={isLoading}
         size="small"
         pagination={false}
-        scroll={{ x: 'max-content', y: 240 }}
+        scroll={multiTableScroll(hasRows)}
+        tableLayout={hasRows ? undefined : 'fixed'}
         sticky
       />
       <Modal
@@ -1819,6 +1960,8 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
               ? (editModal.values[leaf] ?? '')
               : (editModal.instanceId ? (column.getValue?.({ key: editModal.instanceId, instanceId: editModal.instanceId }, instanceContext) ?? '') : '');
             const item = leaf && editModal.instanceId ? (schemaByPath.get(`${objectPath}${editModal.instanceId}.${leaf}`) ?? leafSchemaByLeaf.get(leaf)) : leafSchemaByLeaf.get(leaf);
+            const param = groupParamByLeaf.get(leaf);
+            const constraints = effectiveParamConstraints(item, param);
             const isIpsecToggleField = isIpsecGroup && leaf === IPSEC_ENABLE_LEAF;
             const canEditByToggle = !isIpsecGroup || isIpsecToggleField || editModalIpsecEnabled;
             const isEditable = Boolean(leaf)
@@ -1826,7 +1969,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
               && !column.readOnly
               && canEditByToggle
               && (editModal.mode === 'add' ? true : ((item?.writable ?? true)));
-            const enumMeta = getEffectiveEnumMeta(item?.constraints, item?.path);
+            const enumMeta = getEffectiveEnumMeta(constraints, item?.path);
             const effectiveEnumOptions = isIpsecToggleField
               ? {
                   values: ['true', 'false'],
@@ -1835,14 +1978,20 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
               : enumMeta;
             const error = leaf ? editModal.errors[leaf] : '';
             const label = column.titleKey ? t(column.titleKey) : (locale === 'zh-CN' ? (column.titleZh ?? column.titleEn) : column.titleEn);
+            const rangeHint = leaf ? formatEffectiveConstraintHint(item, param, t) : '';
             // 同列渲染：column.formatValue 收原始值；未提供则退到 enum 兜底。
             const displayValue = column.formatValue
               ? column.formatValue(value)
-              : (leaf ? formatEnumDisplayValue(value, item?.constraints, item?.path, locale) : value);
+              : (leaf ? formatEnumDisplayValue(value, constraints, item?.path, locale) : value);
 
             return (
               <div key={column.key} style={{ minWidth: 0 }}>
-                <div style={{ marginBottom: 6, fontWeight: 500 }}>{label}</div>
+                <div style={{ marginBottom: 6, fontWeight: 500 }}>
+                  <Space size={4} wrap>
+                    <span>{label}</span>
+                    {rangeHint && <Text type="secondary" style={{ fontSize: 12 }}>{rangeHint}</Text>}
+                  </Space>
+                </div>
                 {isEditable && effectiveEnumOptions && effectiveEnumOptions.values.length > 0 ? (
                   <Select
                     value={(isIpsecToggleField ? normalizeIpsecEnableValue(value) : value) || undefined}
@@ -1928,20 +2077,4 @@ function resolveEarfcnFrequency(earfcn: number): number | null {
   if (earfcn >= 63000 && earfcn <= 63999) return 5150 + 0.1 * (earfcn - 63000);
   if (earfcn >= 64000 && earfcn <= 64999) return 5725 + 0.1 * (earfcn - 64000);
   return null;
-}
-
-// 与 CellParameterForm 同语义：枚举不输出（Select 候选项已自解释），数值/长度输出 [min ~ max]。
-function formatConstraintHint(schema: ParameterSchemaItem | undefined, t: TFn): string {
-  if (!schema?.constraints) return '';
-  const c = schema.constraints;
-  if (c.enumValues && c.enumValues.length > 0) return '';
-  const isString = schema.type === 'string';
-  const min = c.minLength ?? c.minValue;
-  const max = c.maxLength ?? c.maxValue;
-  if (min !== undefined || max !== undefined) {
-    const lo = min ?? '-∞';
-    const hi = max ?? '∞';
-    return isString ? t('device.multi.hintLenRange', { lo, hi }) : `[${lo} ~ ${hi}]`;
-  }
-  return '';
 }

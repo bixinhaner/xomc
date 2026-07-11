@@ -52,7 +52,7 @@ export function useIdleLogout(idleMinutes: number): void {
       if (now - last >= idleMs) {
         // 超时 — 登出 + 主动跳登录页（避免依赖 store 内的 navigate 副作用）
         logout();
-        // 三皮肤：跳当前皮肤的登录页（带 base 前缀），别甩到 v1 的 /login
+        // 跳当前应用 base 下的登录页，兼容自定义子路径部署。
         const target = loginUrl();
         if (window.location.pathname !== target) {
           window.location.href = target;

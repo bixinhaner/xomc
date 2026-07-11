@@ -42,11 +42,11 @@ func TestNormalize(t *testing.T) {
 			want:          13,
 		},
 		{
-			name:          "number process takes precedence over avg statis",
+			name:          "avg statis keeps decimals even when unit is number",
 			value:         12.1,
 			metadata:      &Metadata{Unit: "number", StatisType: "avg"},
 			numberProcess: NumberProcessIntUp,
-			want:          13,
+			want:          12.1,
 		},
 		{
 			name:          "number none keeps non-integer to two decimals",

@@ -68,7 +68,7 @@ const BUILTIN_CATEGORY_CODES = new Set([
 ]);
 
 // qa-614 c6 #368：4G(enb_upgrade) + 5G(gnb_upgrade) 在展示层合并为虚拟分类
-// 'device_upgrade'（『设备升级』）。聚合/展开逻辑下沉到 frontend-core（三皮肤共享，
+// 'device_upgrade'（『设备升级』）。聚合/展开逻辑下沉到 frontend-core（页面共享，
 // 见 @core/utils/ufteCategory），v1 这里只做 re-export 保持现有 import 路径不变。
 export {
   DEVICE_UPGRADE_CATEGORY,
