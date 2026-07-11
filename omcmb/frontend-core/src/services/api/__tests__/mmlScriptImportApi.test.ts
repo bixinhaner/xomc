@@ -39,6 +39,58 @@ describe('mmlApi TXT script import', () => {
     expect(result.items[0].taskOrigin).toBe('script');
   });
 
+  it('maps task result request and response messages separately', async () => {
+    getMock.mockResolvedValue({
+      data: {
+        items: [
+          {
+            device_sn: 'SN001',
+            device_task_id: 'dt-1',
+            status: 'completed',
+            success: true,
+            request_method: 'SetParameterValues',
+            request_cwmp_id: 'ID:intrnl.unset.id.SetParameterValues1780000000.123456',
+            request_command_key: 'mml-dt-1',
+            request_payload: {
+              values: [
+                { name: 'Device.ManagementServer.URL', value: 'http://localhost:8080/smallcell/AcsService', type: 'xsd:string' },
+              ],
+            },
+            raw_request: '<SOAP-ENV:Envelope><cwmp:SetParameterValues/></SOAP-ENV:Envelope>',
+            raw_output: '<SOAP-ENV:Envelope><cwmp:SetParameterValuesResponse/></SOAP-ENV:Envelope>',
+            parsed_data: { method: 'SetParameterValuesResponse' },
+          },
+        ],
+        total: 1,
+        page: 1,
+        page_size: 20,
+      },
+    });
+
+    const result = await mmlApi.getTaskResults('task-1', 1, 20);
+
+    expect(getMock.mock.calls[0]).toEqual([
+      '/mml/tasks/task-1/results',
+      { params: { page: 1, page_size: 20 } },
+    ]);
+    expect(result.items[0]).toMatchObject({
+      request: {
+        method: 'SetParameterValues',
+        cwmpId: 'ID:intrnl.unset.id.SetParameterValues1780000000.123456',
+        commandKey: 'mml-dt-1',
+        rawRequest: '<SOAP-ENV:Envelope><cwmp:SetParameterValues/></SOAP-ENV:Envelope>',
+        payload: {
+          values: [
+            { name: 'Device.ManagementServer.URL', value: 'http://localhost:8080/smallcell/AcsService', type: 'xsd:string' },
+          ],
+        },
+      },
+      result: {
+        rawOutput: '<SOAP-ENV:Envelope><cwmp:SetParameterValuesResponse/></SOAP-ENV:Envelope>',
+      },
+    });
+  });
+
   it('sends multipart validate request and maps snake_case issues', async () => {
     postMock.mockResolvedValue({
       data: {

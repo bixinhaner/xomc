@@ -70,11 +70,36 @@ function formatTime(iso?: string | null): string {
   return d.isValid() ? d.format('YYYY-MM-DD HH:mm:ss') : '-';
 }
 
-function rawMessageText(row: DeviceTaskResultItem | null): string {
+function stringifyMessagePayload(payload: unknown): string {
+  if (payload === null || payload === undefined || payload === '') return '';
+  if (typeof payload === 'string') return payload;
+  try {
+    return JSON.stringify(payload, null, 2);
+  } catch {
+    return String(payload);
+  }
+}
+
+function requestMessageText(row: DeviceTaskResultItem | null): string {
+  if (!row?.request) return '';
+  if (row.request.rawRequest) return row.request.rawRequest;
+  return stringifyMessagePayload({
+    method: row.request.method,
+    ...(row.request.cwmpId ? { cwmp_id: row.request.cwmpId } : {}),
+    ...(row.request.commandKey ? { command_key: row.request.commandKey } : {}),
+    ...(row.request.payload !== undefined ? { params: row.request.payload } : {}),
+  });
+}
+
+function responseMessageText(row: DeviceTaskResultItem | null): string {
   if (!row) return '';
   if (row.result?.rawOutput) return row.result.rawOutput;
   if (row.result?.parsedData) return JSON.stringify(row.result.parsedData, null, 2);
   return '';
+}
+
+function hasMessageText(row: DeviceTaskResultItem | null): boolean {
+  return Boolean(requestMessageText(row) || responseMessageText(row));
 }
 
 function resultCommandText(row: DeviceTaskResultItem): string {
@@ -240,6 +265,73 @@ export default function TaskRecord() {
     [resultsData]
   );
 
+  const renderCommandCompact = useCallback((command: string, maxTargetWidth = 220) => {
+    const parsed = parseMmlCommandDisplay(command);
+    const paramsContent = parsed.parameterCount > 0 ? (
+      <div style={{ width: 520, maxWidth: '70vw' }}>
+        <Space size={6} style={{ marginBottom: 8 }}>
+          {parsed.operation ? <Tag color={operationColor(parsed.operation)}>{parsed.operation}</Tag> : null}
+          <Typography.Text strong>{parsed.target || parsed.commandHead}</Typography.Text>
+        </Space>
+        <div
+          style={{
+            maxHeight: 280,
+            overflow: 'auto',
+            border: '1px solid var(--color-border-secondary, rgba(128,128,128,0.24))',
+            borderRadius: 6,
+          }}
+        >
+          {parsed.params.map((param, index) => (
+            <div
+              key={`${param.key}-${index}`}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '190px minmax(0, 1fr)',
+                gap: 12,
+                padding: '7px 10px',
+                borderBottom: '1px solid var(--color-border-secondary, rgba(128,128,128,0.24))',
+              }}
+            >
+              <Typography.Text code style={{ fontSize: 12, wordBreak: 'break-all' }}>
+                {param.key}
+              </Typography.Text>
+              <Typography.Text style={{ fontSize: 12, wordBreak: 'break-all' }}>
+                {param.value || '-'}
+              </Typography.Text>
+            </div>
+          ))}
+        </div>
+      </div>
+    ) : null;
+
+    return (
+      <Space size={6} wrap={false} style={{ maxWidth: '100%' }}>
+        {parsed.operation ? (
+          <Tag color={operationColor(parsed.operation)} style={{ marginInlineEnd: 0, flex: '0 0 auto' }}>
+            {parsed.operation}
+          </Tag>
+        ) : null}
+        <Tooltip title={parsed.parameterCount > 0 ? undefined : command}>
+          <Typography.Text style={{ minWidth: 0, maxWidth: maxTargetWidth }} ellipsis>
+            {parsed.target || parsed.commandHead || command}
+          </Typography.Text>
+        </Tooltip>
+        {paramsContent ? (
+          <Popover
+            title={t('mml.scriptParamsTitle')}
+            content={paramsContent}
+            trigger="click"
+            placement="bottomLeft"
+          >
+            <Button type="link" size="small" style={{ padding: 0, flex: '0 0 auto' }}>
+              {t('mml.scriptParamsCount', { count: parsed.parameterCount })}
+            </Button>
+          </Popover>
+        ) : null}
+      </Space>
+    );
+  }, [t]);
+
   const parsedParamColumns: ColumnsType<ParsedParamValue> = useMemo(() => [
     {
       key: 'name',
@@ -291,76 +383,15 @@ export default function TaskRecord() {
       width: 360,
       render: (_: unknown, row) => {
         const command = resultCommandText(row);
-        const parsed = parseMmlCommandDisplay(command);
-        const paramsContent = parsed.parameterCount > 0 ? (
-          <div style={{ width: 520, maxWidth: '70vw' }}>
-            <Space size={6} style={{ marginBottom: 8 }}>
-              {parsed.operation ? <Tag color={operationColor(parsed.operation)}>{parsed.operation}</Tag> : null}
-              <Typography.Text strong>{parsed.target || parsed.commandHead}</Typography.Text>
-            </Space>
-            <div
-              style={{
-                maxHeight: 280,
-                overflow: 'auto',
-                border: '1px solid var(--color-border-secondary, rgba(128,128,128,0.24))',
-                borderRadius: 6,
-              }}
-            >
-              {parsed.params.map((param, index) => (
-                <div
-                  key={`${param.key}-${index}`}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '190px minmax(0, 1fr)',
-                    gap: 12,
-                    padding: '7px 10px',
-                    borderBottom: '1px solid var(--color-border-secondary, rgba(128,128,128,0.24))',
-                  }}
-                >
-                  <Typography.Text code style={{ fontSize: 12, wordBreak: 'break-all' }}>
-                    {param.key}
-                  </Typography.Text>
-                  <Typography.Text style={{ fontSize: 12, wordBreak: 'break-all' }}>
-                    {param.value || '-'}
-                  </Typography.Text>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null;
-
         return (
-          <Space direction="vertical" size={2} style={{ width: '100%' }}>
+          <Space orientation="vertical" size={2} style={{ width: '100%' }}>
             {row.planLineNo ? (
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 {t('mml.scriptLineNo', { line: row.planLineNo })}
                 {row.planOrder ? ` / ${row.planOrder}` : ''}
               </Typography.Text>
             ) : null}
-            <Space size={6} wrap={false} style={{ width: '100%' }}>
-              {parsed.operation ? (
-                <Tag color={operationColor(parsed.operation)} style={{ marginInlineEnd: 0, flex: '0 0 auto' }}>
-                  {parsed.operation}
-                </Tag>
-              ) : null}
-              <Tooltip title={parsed.parameterCount > 0 ? undefined : command}>
-                <Typography.Text style={{ minWidth: 0, maxWidth: 180 }} ellipsis>
-                  {parsed.target || parsed.commandHead || command}
-                </Typography.Text>
-              </Tooltip>
-              {paramsContent ? (
-                <Popover
-                  title={t('mml.scriptParamsTitle')}
-                  content={paramsContent}
-                  trigger="click"
-                  placement="bottomLeft"
-                >
-                  <Button type="link" size="small" style={{ padding: 0, flex: '0 0 auto' }}>
-                    {t('mml.scriptParamsCount', { count: parsed.parameterCount })}
-                  </Button>
-                </Popover>
-              ) : null}
-            </Space>
+            {renderCommandCompact(command, 180)}
           </Space>
         );
       },
@@ -425,7 +456,7 @@ export default function TaskRecord() {
         <Button
           type="link"
           size="small"
-          disabled={!rawMessageText(row)}
+          disabled={!hasMessageText(row)}
           onClick={() => setRawRow(row)}
         >
           {t('common.view')}
@@ -446,7 +477,7 @@ export default function TaskRecord() {
       width: 160,
       render: (value: unknown) => formatTime(value as string | undefined),
     },
-  ], [t]);
+  ], [renderCommandCompact, t]);
 
   const columns: DataTableColumn<MMLTask>[] = useMemo(() => [
     {
@@ -624,7 +655,7 @@ export default function TaskRecord() {
         destroyOnHidden
       >
         {detailRow && (
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Space orientation="vertical" size={12} style={{ width: '100%' }}>
             <Space wrap size={[8, 8]}>
               <Tag>{t('mml.resultDeviceCode')}: {detailRow.deviceSn || '-'}</Tag>
               {detailRow.deviceName ? <Tag>{t('mml.deviceName')}: {detailRow.deviceName}</Tag> : null}
@@ -677,30 +708,46 @@ export default function TaskRecord() {
         destroyOnHidden
       >
         {rawRow && (
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Space orientation="vertical" size={12} style={{ width: '100%' }}>
             <Space wrap size={[8, 8]}>
               <Tag>{t('mml.resultDeviceCode')}: {rawRow.deviceSn || '-'}</Tag>
               {rawRow.deviceName ? <Tag>{t('mml.deviceName')}: {rawRow.deviceName}</Tag> : null}
-              <Tag>{t('mml.resultCommand')}: {resultCommandText(rawRow)}</Tag>
               <Tag color={rawRow.result?.success ? 'success' : 'error'}>
                 {rawRow.result?.success ? t('status.success') : t('status.failed')}
               </Tag>
             </Space>
-            <Typography.Paragraph
-              style={{
-                maxHeight: 420,
-                overflow: 'auto',
-                whiteSpace: 'pre-wrap',
-                fontFamily: 'monospace',
-                fontSize: 12,
-                background: 'rgba(0,0,0,0.04)',
-                padding: 12,
-                borderRadius: 4,
-                marginBottom: 0,
-              }}
-            >
-              {rawMessageText(rawRow) || '-'}
-            </Typography.Paragraph>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: '100%' }}>
+              <Typography.Text type="secondary">{t('mml.resultCommand')}:</Typography.Text>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                {renderCommandCompact(resultCommandText(rawRow), 360)}
+              </div>
+            </div>
+            {[
+              { key: 'request', title: t('mml.requestMessage'), text: requestMessageText(rawRow) },
+              { key: 'response', title: t('mml.responseMessage'), text: responseMessageText(rawRow) },
+            ].map((section) => (
+              <div key={section.key}>
+                <Typography.Text strong>{section.title}</Typography.Text>
+                <pre
+                  style={{
+                    maxHeight: 260,
+                    overflow: 'auto',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-all',
+                    fontFamily: 'monospace',
+                    fontSize: 12,
+                    lineHeight: 1.55,
+                    background: 'rgba(0,0,0,0.04)',
+                    padding: 12,
+                    borderRadius: 4,
+                    margin: '8px 0 0',
+                    maxWidth: '100%',
+                  }}
+                >
+                  {section.text || '-'}
+                </pre>
+              </div>
+            ))}
           </Space>
         )}
       </Modal>

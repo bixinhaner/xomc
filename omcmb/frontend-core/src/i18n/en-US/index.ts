@@ -6048,6 +6048,8 @@ const messages: Record<string, string> = {
   'mml.resultDetailTitle':                   'Execution Detail - {device}',
   'mml.messageDisplay':                      'Message',
   'mml.rawMessageTitle':                     'Message - {device}',
+  'mml.requestMessage':                      'Request Message',
+  'mml.responseMessage':                     'Response Message',
   'mml.description':                         'Description',
   'mml.searchDeviceSn':                      'Search device SN/name',
   'mml.noMatchResult':                       'No matching results',

@@ -2429,6 +2429,10 @@ func (a *mmlDeviceTaskResultAdapter) ListResultsBySourceID(
 		out = append(out, mml.DeviceTaskResultRowView{
 			DeviceTaskID: r.ID,
 			DeviceSN:     r.DeviceSN,
+			Method:       r.Method,
+			Params:       r.Params,
+			CommandKey:   r.CommandKey,
+			CWMPID:       r.CWMPID,
 			Status:       r.Status,
 			ErrorCode:    r.ErrorCode,
 			ErrorMessage: r.ErrorMessage,

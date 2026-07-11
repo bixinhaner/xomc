@@ -595,6 +595,7 @@ function mapTaskResultsStats(
 }
 
 function mapBackendResult(br: Record<string, unknown>): DeviceTaskResultItem {
+  const requestMethod = (br.request_method as string) || '';
   return {
     deviceSn: (br.device_sn as string) || '',
     deviceTaskId: (br.device_task_id as string) || undefined,
@@ -608,6 +609,15 @@ function mapBackendResult(br: Record<string, unknown>): DeviceTaskResultItem {
     deviceName: (br.device_name as string) || undefined,
     mmlScript: (br.mml_script as string) || (br.command as string) || undefined,
     status: (br.status as DeviceTaskResultItem['status']) || undefined,
+    request: requestMethod
+      ? {
+          method: requestMethod,
+          payload: br.request_payload,
+          rawRequest: (br.raw_request as string) || undefined,
+          cwmpId: (br.request_cwmp_id as string) || undefined,
+          commandKey: (br.request_command_key as string) || undefined,
+        }
+      : undefined,
     result: {
       success: Boolean(br.success),
       rawOutput: (br.raw_output as string) || '',
@@ -849,7 +859,7 @@ export const mmlApi = {
     const allCommands: MMLCommand[] = [];
     let page = 1;
     const pageSize = 100;
-    let total = 0;
+    let total: number;
     do {
       const { data } = await http.get<BackendListResponse<BackendMMLCommand>>(
         '/mml/commands',

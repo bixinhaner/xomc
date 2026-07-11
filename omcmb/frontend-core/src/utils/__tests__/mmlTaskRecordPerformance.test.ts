@@ -55,4 +55,16 @@ describe('MML task record result rendering contract', () => {
     expect(source).not.toContain('List<DeviceTaskResultItem>');
     expect(source).not.toContain('previewRawOutput');
   });
+
+  it('shows request and response messages in the task result message modal', () => {
+    const source = fs.readFileSync(
+      path.join(omcmbRoot, 'webcode/src/pages/mml/TaskRecord/index.tsx'),
+      'utf8'
+    );
+
+    expect(source).toContain('mml.requestMessage');
+    expect(source).toContain('mml.responseMessage');
+    expect(source).toContain('requestMessageText');
+    expect(source).toContain('responseMessageText');
+  });
 });
