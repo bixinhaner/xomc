@@ -108,6 +108,36 @@ func TestBaiBNQGNBNameIsWritableNRCommonPath(t *testing.T) {
 	t.Fatalf("expected BaiBNQ.xml to define writable gNBName mapping at %s", path)
 }
 
+func TestBaiBNQNguBindInterfaceAndFallbackAreWritable(t *testing.T) {
+	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BaiBNQ.xml")
+	body, err := os.ReadFile(xmlPath)
+	require.NoError(t, err)
+
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal(body, &doc))
+
+	var mappings []ParamMapping
+	for _, param := range doc.Params {
+		mappings = append(mappings, ParamMapping{
+			PrivatePath:   param.Name,
+			StandardPath:  param.StandardPath,
+			EntryType:     "parameter",
+			Access:        param.Access,
+			DataType:      param.DataType,
+			ChangeApplies: param.ChangeApplies,
+		})
+	}
+
+	validator := NewMappingValidator(&MappingSet{Mappings: mappings})
+	for path, value := range map[string]string{
+		"Device.FAP.NguIpBind1.BindInterface":                                     "Device.Ethernet.Interface.2.IPv4Address.1.IPAddress",
+		"Device.LAN_HostConfigManagement.IPInterface.NgapMgmt.NguLocalIpAddrList": "172.19.3.81",
+	} {
+		require.NotNil(t, validator.LookupParam(path), "expected BaiBNQ.xml to define %s", path)
+		assert.Nil(t, validator.ValidateValue(path, value), path)
+	}
+}
+
 func TestBaiBNQLTEIdleReselectionCarrierObjectIsWritable(t *testing.T) {
 	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BaiBNQ.xml")
 	body, err := os.ReadFile(xmlPath)
