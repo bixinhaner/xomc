@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/core/model"
 	taskpkg "github.com/omcgo/omcgo/internal/task"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -179,6 +180,76 @@ func TestPgTaskRepository_DeleteRemovesDeviceTasks(t *testing.T) {
 	err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM device_tasks WHERE source='mml' AND source_id=$1", mmlTask.ID.String()).Scan(&remaining)
 	require.NoError(t, err)
 	require.Equal(t, 0, remaining)
+}
+
+func TestPgTaskRepository_ListFiltersTaskOrigin(t *testing.T) {
+	pool := newMMLTestPool(t)
+	ctx := context.Background()
+	taskRepo := NewPgTaskRepository(pool)
+	scriptRepo := NewPgScriptRepository(pool)
+
+	script := &MMLScript{
+		ScriptName:        "origin filter script " + uuid.NewString(),
+		Content:           "LST DEVICE_INFO;SN-SCRIPT\n",
+		OriginalFilename:  "origin-filter.txt",
+		ContentSHA256:     "sha-origin-filter",
+		ValidationVersion: ValidationVersion,
+		Creator:           "repo-test",
+		Status:            ScriptActive,
+		Type:              ScriptTypeBatch,
+	}
+	require.NoError(t, scriptRepo.CreateImported(ctx, script))
+	t.Cleanup(func() { _ = scriptRepo.Delete(context.Background(), script.ID) })
+
+	consoleTask := &MMLTask{
+		TaskName:     "origin console " + uuid.NewString(),
+		DeviceSNs:    []string{"SN-CONSOLE"},
+		Commands:     []map[string]interface{}{{"command_code": "LST DEVICE_INFO"}},
+		ExecuteMode:  TaskExecuteModeCommon,
+		Status:       TaskCompleted,
+		Creator:      "repo-test",
+		ExecuteType:  ExecuteImmediate,
+		TotalDevices: 1,
+	}
+	scriptTask := &MMLTask{
+		TaskName:     "origin script " + uuid.NewString(),
+		ScriptID:     &script.ID,
+		DeviceSNs:    []string{"SN-SCRIPT"},
+		Commands:     []map[string]interface{}{{"command_code": "LST DEVICE_INFO"}},
+		ExecuteMode:  TaskExecuteModeDeviceBound,
+		Status:       TaskCompleted,
+		Creator:      "repo-test",
+		ExecuteType:  ExecuteImmediate,
+		TotalDevices: 1,
+	}
+	require.NoError(t, taskRepo.Create(ctx, consoleTask))
+	require.NoError(t, taskRepo.Create(ctx, scriptTask))
+	t.Cleanup(func() {
+		_ = taskRepo.Delete(context.Background(), consoleTask.ID)
+		_ = taskRepo.Delete(context.Background(), scriptTask.ID)
+	})
+
+	consoleOrigin := TaskOriginConsole
+	consoleList, err := taskRepo.List(ctx, TaskFilter{
+		ListRequest: model.ListRequest{Page: 1, PageSize: 20},
+		TaskName:    &consoleTask.TaskName,
+		TaskOrigin:  &consoleOrigin,
+	})
+	require.NoError(t, err)
+	require.Len(t, consoleList.Items, 1)
+	require.Equal(t, consoleTask.ID, consoleList.Items[0].ID)
+	require.Equal(t, TaskOriginConsole, consoleList.Items[0].TaskOrigin)
+
+	scriptOrigin := TaskOriginScript
+	scriptList, err := taskRepo.List(ctx, TaskFilter{
+		ListRequest: model.ListRequest{Page: 1, PageSize: 20},
+		TaskName:    &scriptTask.TaskName,
+		TaskOrigin:  &scriptOrigin,
+	})
+	require.NoError(t, err)
+	require.Len(t, scriptList.Items, 1)
+	require.Equal(t, scriptTask.ID, scriptList.Items[0].ID)
+	require.Equal(t, TaskOriginScript, scriptList.Items[0].TaskOrigin)
 }
 
 func TestPgScriptRepository_ImportedReplaceAndMetadataAreAtomic(t *testing.T) {

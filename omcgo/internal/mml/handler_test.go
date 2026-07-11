@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -578,26 +579,58 @@ func TestHandler_ListTasks(t *testing.T) {
 }
 
 func TestHandler_ListTasksBindsTaskOrigin(t *testing.T) {
-	cmdRepo := &hCmdRepo{}
-	scriptRepo := &hScriptRepo{}
+	tests := []struct {
+		name       string
+		queryValue string
+		want       TaskOrigin
+	}{
+		{name: "script", queryValue: "script", want: TaskOriginScript},
+		{name: "console", queryValue: "console", want: TaskOriginConsole},
+		{name: "localized console", queryValue: "控制台执行", want: TaskOriginConsole},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			taskRepo := &hTaskRepo{
+				ListFn: func(_ context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error) {
+					require.NotNil(t, filter.TaskOrigin)
+					assert.Equal(t, tt.want, *filter.TaskOrigin)
+					return model.NewListResponse([]MMLTask{}, 0, 1, 20), nil
+				},
+			}
+
+			logger := zap.NewNop()
+			svc := NewService(&hCmdRepo{}, &hScriptRepo{}, taskRepo, &hCustomCommandRepo{}, nil, logger)
+			h := NewHandler(svc, logger)
+			router := setupMMLRouter(h)
+
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/mml/tasks?page=1&page_size=20&task_origin="+url.QueryEscape(tt.queryValue), nil)
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+		})
+	}
+}
+
+func TestHandler_ListTasksRejectsInvalidTaskOrigin(t *testing.T) {
 	taskRepo := &hTaskRepo{
-		ListFn: func(_ context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error) {
-			require.NotNil(t, filter.TaskOrigin)
-			assert.Equal(t, TaskOriginScript, *filter.TaskOrigin)
-			return model.NewListResponse([]MMLTask{}, 0, 1, 20), nil
+		ListFn: func(_ context.Context, _ TaskFilter) (*model.ListResponse[MMLTask], error) {
+			t.Fatal("List must not be called for invalid task_origin")
+			return nil, nil
 		},
 	}
 
 	logger := zap.NewNop()
-	svc := NewService(cmdRepo, scriptRepo, taskRepo, &hCustomCommandRepo{}, nil, logger)
+	svc := NewService(&hCmdRepo{}, &hScriptRepo{}, taskRepo, &hCustomCommandRepo{}, nil, logger)
 	h := NewHandler(svc, logger)
 	router := setupMMLRouter(h)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/mml/tasks?page=1&page_size=20&task_origin=script", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/mml/tasks?page=1&page_size=20&task_origin=bad", nil)
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 // ---- Task control handler tests ----

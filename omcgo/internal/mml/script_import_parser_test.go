@@ -1,12 +1,16 @@
 package mml
 
 import (
+	_ "embed"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+//go:embed assets/MMLTemplate.txt
+var scriptImportTemplateForParserTest string
 
 func TestParseScriptTXT_DerivesPerDeviceOrder(t *testing.T) {
 	raw := []byte("\xef\xbb\xbf# note\r\nLST DEVICE_INFO;SN1\r\nMOD DEVICE_INFO:USER_LABEL=A;SN2\r\nLST DEVICE_INFO;SN2\r\n")
@@ -21,6 +25,32 @@ func TestParseScriptTXT_DerivesPerDeviceOrder(t *testing.T) {
 	require.Equal(t, []string{"LST DEVICE_INFO", "MOD DEVICE_INFO", "LST DEVICE_INFO"}, []string{
 		got.Lines[0].CommandCode, got.Lines[1].CommandCode, got.Lines[2].CommandCode,
 	})
+}
+
+func TestParseScriptTXT_TemplateDocumentsSupportedSyntaxAndExamplesParse(t *testing.T) {
+	require.Contains(t, scriptImportTemplateForParserTest, "支持操作")
+	require.Contains(t, scriptImportTemplateForParserTest, "LST 查询")
+	require.Contains(t, scriptImportTemplateForParserTest, "MOD 修改")
+	require.Contains(t, scriptImportTemplateForParserTest, "ADD 新增")
+	require.Contains(t, scriptImportTemplateForParserTest, "RMV 删除")
+	require.Contains(t, scriptImportTemplateForParserTest, "DEL 删除兼容写法")
+	require.Contains(t, scriptImportTemplateForParserTest, "操作 命令编码[:参数名=参数值")
+
+	executableTemplate := strings.ReplaceAll(scriptImportTemplateForParserTest, "DEVICE_SN", "SN-TEMPLATE-1")
+	got, issues := ParseScriptTXT([]byte(executableTemplate))
+
+	require.Empty(t, issues)
+	require.NotEmpty(t, got.Lines)
+	require.Equal(t, []string{"LST", "MOD", "ADD", "RMV", "RMV", "MOD"}, []string{
+		got.Lines[0].OperationType,
+		got.Lines[1].OperationType,
+		got.Lines[2].OperationType,
+		got.Lines[3].OperationType,
+		got.Lines[4].OperationType,
+		got.Lines[5].OperationType,
+	})
+	require.Equal(t, "DEL ETHERNET_INTERFACE;SN-TEMPLATE-1", got.Lines[4].RawLine)
+	require.Equal(t, map[string]string{"DESCRIPTION": "site,a;sector-b", "ALIAS": "{main,backup}"}, got.Lines[5].Parameters)
 }
 
 func TestParseScriptTXT_NormalizesCROnlyLineEndings(t *testing.T) {

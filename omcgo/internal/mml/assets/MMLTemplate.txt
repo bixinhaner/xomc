@@ -1,17 +1,26 @@
-# MML TXT script template
-# One executable command per line, using: COMMAND_CODE;DEVICE_SN
-# Keep one SN on each line. The order for the same SN follows file order.
-# Blank lines and lines beginning with # are ignored during validation.
-
-# Standard command examples (replace DEVICE_SN with a real device SN):
+# MML TXT脚本模板
+# 每条有效行格式：
+# 操作 命令编码[:参数名=参数值,参数名2=参数值2];设备SN
+#
+# 支持操作：
+# LST 查询。通常不填写参数。
+# MOD 修改。按命令目录需要填写一个或多个 参数名=参数值。
+# ADD 新增对象/配置。命令目录存在 ADD 命令时可用，按命令要求填写参数。
+# RMV 删除对象/配置。命令目录存在 RMV 命令时可用。
+# DEL 删除兼容写法。导入后系统会按 RMV 执行。
+#
+# 规则：
+# 1. 每行只能写一条命令和一个设备SN。
+# 2. 同一设备多行命令按文件从上到下顺序执行。
+# 3. 参数用英文逗号分隔；参数值包含逗号或分号时，可用双引号、单引号或 {} 包裹。
+# 4. 空行和 # 开头的行会被忽略。
+# 5. 单个文件最多 200 台设备、2000 条有效命令、2 MiB。
+# 6. 命令编码以 MML 命令目录实际显示的 command_code 为准。
+#
+# 示例：将 DEVICE_SN 替换为真实基站编码。
 LST DEVICE_INFO;DEVICE_SN
-MOD DEVICE_INFO:USER_LABEL=Site-A;DEVICE_SN
-ADD DEVICE_INFO:USER_LABEL=Site-B;DEVICE_SN
-RMV DEVICE_INFO;DEVICE_SN
-
-# Custom command examples use the visible command code returned by the
-# command catalog. Replace CUSTOM_COMMAND with a real custom command code.
-LST CUSTOM_COMMAND;DEVICE_SN
-MOD CUSTOM_COMMAND:PARAMETER=value;DEVICE_SN
-ADD CUSTOM_COMMAND:PARAMETER=value;DEVICE_SN
-RMV CUSTOM_COMMAND;DEVICE_SN
+MOD MANAGEMENT_SERVER:URL=http://localhost:8080/smallcell/AcsService,USERNAME=acs,PASSWORD=acs;DEVICE_SN
+ADD ETHERNET_INTERFACE;DEVICE_SN
+RMV ETHERNET_INTERFACE;DEVICE_SN
+DEL ETHERNET_INTERFACE;DEVICE_SN
+MOD DEVICE_INFO:DESCRIPTION="site,a;sector-b",ALIAS={main,backup};DEVICE_SN
