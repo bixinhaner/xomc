@@ -8003,6 +8003,7 @@ const messages: Record<string, string> = {
   'mml.scriptImport.errorsBlockSave':         '请先修复所有错误后再保存。',
   'mml.scriptImport.readOnlyContent':         'TXT 内容由导入文件生成，只读。',
   'mml.scriptImport.replace':                 '重新导入',
+  'mml.scriptExecution.defaultTaskNamePrefix': 'MML脚本任务',
   'mml.scriptExecution.confirmWarnings':      '校验发现警告，确认后继续执行。',
 };
 

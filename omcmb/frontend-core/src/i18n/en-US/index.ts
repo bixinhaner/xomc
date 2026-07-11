@@ -7966,6 +7966,7 @@ const messages: Record<string, string> = {
   'mml.scriptImport.errorsBlockSave':         'Resolve all errors before saving.',
   'mml.scriptImport.readOnlyContent':         'TXT content is generated from the imported file and is read-only.',
   'mml.scriptImport.replace':                 'Re-import',
+  'mml.scriptExecution.defaultTaskNamePrefix': 'MML Script Task',
   'mml.scriptExecution.confirmWarnings':      'Validation returned warnings. Confirm to continue execution.',
 };
 

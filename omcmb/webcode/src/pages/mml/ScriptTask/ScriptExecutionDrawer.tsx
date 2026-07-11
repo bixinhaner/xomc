@@ -3,6 +3,8 @@ import { Button, Checkbox, DatePicker, Drawer, Form, Input, InputNumber, Modal, 
 import dayjs, { type Dayjs } from 'dayjs';
 import type { MMLExecuteType, MMLScript, MMLScriptImportValidation, MMLScriptExecutionInput } from '@core/types/mml';
 import { useCreateMMLScriptExecution } from '@core/hooks/api/useMML';
+import { useUserStore } from '@core/store/userStore';
+import { useT } from '@/hooks/useT';
 import ScriptImportPreview from './ScriptImportPreview';
 
 export interface ScriptExecutionDrawerProps {
@@ -32,6 +34,8 @@ function validationFromError(error: unknown): MMLScriptImportValidation | undefi
 }
 
 export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess }: ScriptExecutionDrawerProps) {
+  const t = useT();
+  const currentUser = useUserStore((state) => state.currentUser);
   const [form] = Form.useForm<ExecutionForm>();
   const [validation, setValidation] = useState<MMLScriptImportValidation | null>(null);
   const [errorCodes, setErrorCodes] = useState<string[]>([]);
@@ -41,9 +45,11 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
 
   useEffect(() => {
     if (!open) return;
-    form.setFieldsValue({ taskName: script ? `${script.scriptName}_${dayjs().format('YYYYMMDD_HHmmss')}` : '', executeType: 'immediate', offlineRetry: false, offlineRetryWait: 60, failedRetry: false, failedRetryCount: 3, failedRetryInterval: 5 });
+    const taskOwner = currentUser?.username || currentUser?.displayName || 'user';
+    const taskName = script ? `${t('mml.scriptExecution.defaultTaskNamePrefix')}_${taskOwner}_${dayjs().format('YYYY-MM-DD HH:mm:ss')}` : '';
+    form.setFieldsValue({ taskName, executeType: 'immediate', offlineRetry: false, offlineRetryWait: 60, failedRetry: false, failedRetryCount: 3, failedRetryInterval: 5 });
     setValidation(null); setWarningValues(null); setErrorCodes([]);
-  }, [form, open, script]);
+  }, [currentUser?.displayName, currentUser?.username, form, open, script, t]);
 
   const execute = async (input: MMLScriptExecutionInput) => {
     if (!script) return;

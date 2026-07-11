@@ -1,6 +1,10 @@
 import { screen, render, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { IntlProvider } from 'react-intl';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import zhCN from '@core/i18n/zh-CN';
+import enUS from '@core/i18n/en-US';
+import { useUserStore } from '@core/store/userStore';
 
 const mocks = vi.hoisted(() => ({ execute: vi.fn() }));
 
@@ -16,8 +20,53 @@ const script = {
   createTime: '', updateTime: '2026-07-10T00:00:00Z', tags: [], status: 'active', type: 'batch', progress: 0,
 };
 
+const adminUser = {
+  id: 'user-1',
+  username: 'admin',
+  displayName: 'Admin',
+  email: 'admin@omc.example.com',
+  role: 'admin' as const,
+  status: 'active' as const,
+  createTime: '2026-07-10T00:00:00Z',
+};
+
+function renderDrawer(
+  props: Partial<React.ComponentProps<typeof ScriptExecutionDrawer>> = {},
+  locale: 'zh-CN' | 'en-US' = 'zh-CN',
+) {
+  return render(
+    <IntlProvider locale={locale} defaultLocale="zh-CN" messages={locale === 'zh-CN' ? zhCN : enUS}>
+      <ScriptExecutionDrawer open script={script} onClose={vi.fn()} {...props} />
+    </IntlProvider>,
+  );
+}
+
 describe('ScriptExecutionDrawer', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useUserStore.setState({ currentUser: adminUser, isAuthenticated: true });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    useUserStore.setState({ currentUser: null, isAuthenticated: false });
+  });
+
+  it('generates a localized default task name in Chinese', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-10T13:38:30+08:00'));
+    renderDrawer();
+
+    expect(screen.getByLabelText('任务名称')).toHaveValue('MML脚本任务_admin_2026-07-10 13:38:30');
+  });
+
+  it('generates a localized default task name in English', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-10T13:38:30+08:00'));
+    renderDrawer({}, 'en-US');
+
+    expect(screen.getByLabelText('任务名称')).toHaveValue('MML Script Task_admin_2026-07-10 13:38:30');
+  });
 
   it('confirms server warnings and retries with confirmWarnings', async () => {
     mocks.execute.mockResolvedValueOnce({
@@ -28,7 +77,7 @@ describe('ScriptExecutionDrawer', () => {
         issues: [{ code: 'MML_DEVICE_OFFLINE', severity: 'warning', lineNo: 1 }],
       },
     }).mockResolvedValueOnce({ task: { id: 'task-1' }, validation: { planItems: [], summary: { totalLines: 1, validLines: 1, effectiveLines: 1, deviceCount: 1, errorCount: 0, warningCount: 0 }, issues: [] } });
-    render(<ScriptExecutionDrawer open script={script} onClose={vi.fn()} />);
+    renderDrawer();
     const user = userEvent.setup();
     await user.type(screen.getByLabelText('任务名称'), '巡检任务');
     await user.click(screen.getByRole('button', { name: '执行' }));
@@ -48,7 +97,7 @@ describe('ScriptExecutionDrawer', () => {
         issues: [{ code: 'MML_PARAMETER_UNKNOWN', severity: 'error', lineNo: 1 }],
       },
     });
-    render(<ScriptExecutionDrawer open script={script} onClose={vi.fn()} />);
+    renderDrawer();
     const user = userEvent.setup();
     await user.type(screen.getByLabelText('任务名称'), '失败任务');
     await user.click(screen.getByRole('button', { name: '执行' }));
@@ -66,7 +115,7 @@ describe('ScriptExecutionDrawer', () => {
     mocks.execute
       .mockRejectedValueOnce(new MMLScriptImportApiError({ status: 409, code: 'MML_SCRIPT_WARNINGS', message: 'warnings', validation: warningValidation }))
       .mockResolvedValueOnce({ task: { id: 'task-2' }, validation: { ...warningValidation, summary: { ...warningValidation.summary, warningCount: 0 }, issues: [] } });
-    render(<ScriptExecutionDrawer open script={script} onClose={vi.fn()} />);
+    renderDrawer();
     const user = userEvent.setup();
     await user.type(screen.getByLabelText('任务名称'), 'typed-warning-task');
     await user.click(screen.getByRole('button', { name: '执行' }));
@@ -76,7 +125,7 @@ describe('ScriptExecutionDrawer', () => {
   });
 
   it('requires periodic date and time fields before submitting', async () => {
-    render(<ScriptExecutionDrawer open script={script} onClose={vi.fn()} />);
+    renderDrawer();
     const user = userEvent.setup();
     await user.click(screen.getByRole('radio', { name: '周期' }));
     expect(screen.getByLabelText('周期日期')).toBeInTheDocument();
@@ -87,7 +136,7 @@ describe('ScriptExecutionDrawer', () => {
   });
 
   it('requires a scheduled time before submitting scheduled execution', async () => {
-    render(<ScriptExecutionDrawer open script={script} onClose={vi.fn()} />);
+    renderDrawer();
     const user = userEvent.setup();
     await user.click(screen.getByRole('radio', { name: '定时' }));
     await user.click(screen.getByRole('button', { name: '执行' }));
@@ -105,7 +154,7 @@ describe('ScriptExecutionDrawer', () => {
       ],
     };
     mocks.execute.mockRejectedValueOnce({ message: 'mixed validation', validation: mixedValidation });
-    render(<ScriptExecutionDrawer open script={script} onClose={vi.fn()} />);
+    renderDrawer();
     const user = userEvent.setup();
     await user.type(screen.getByLabelText('任务名称'), 'mixed-task');
     await user.click(screen.getByRole('button', { name: '执行' }));
