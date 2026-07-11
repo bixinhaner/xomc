@@ -157,6 +157,124 @@
 }
 
 /* ===========================================================================
+   Operation confirmation overlays
+   =========================================================================== */
+
+.ant-popover.ant-popconfirm {
+  position: fixed !important;
+  inset: 50% auto auto 50% !important;
+  width: min(420px, calc(100vw - 48px));
+  margin: 0 !important;
+  padding: 0 !important;
+  transform: translate(-50%, -50%) !important;
+  transform-origin: center center !important;
+}
+
+.ant-popover.ant-popconfirm::before {
+  position: absolute;
+  z-index: 0;
+  top: 50%;
+  left: 50%;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.42);
+  content: "";
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.ant-popover.ant-popconfirm .ant-popover-arrow {
+  display: none;
+}
+
+.ant-popover.ant-popconfirm .ant-popover-container {
+  position: relative;
+  z-index: 1;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent;
+}
+
+.ant-popover.ant-popconfirm .ant-popover-content {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid #d9dce3;
+  border-radius: 2px;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.ant-popover.ant-popconfirm .ant-popover-content::before {
+  display: flex;
+  height: 44px;
+  align-items: center;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 0 48px 0 20px;
+  color: var(--color-neutral-900);
+  content: "操作确认";
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.ant-popover.ant-popconfirm .ant-popover-content::after {
+  position: absolute;
+  top: 8px;
+  right: 18px;
+  color: var(--color-primary-700);
+  content: "×";
+  font-size: 30px;
+  font-weight: 300;
+  line-height: 28px;
+}
+
+.ant-popover.ant-popconfirm .ant-popconfirm-inner-content {
+  min-height: 146px;
+  padding: 22px 20px 18px;
+}
+
+.ant-popover.ant-popconfirm .ant-popconfirm-message {
+  align-items: flex-start;
+  column-gap: 0;
+  min-height: 54px;
+}
+
+.ant-popover.ant-popconfirm .ant-popconfirm-message-icon {
+  display: none;
+}
+
+.ant-popover.ant-popconfirm .ant-popconfirm-title {
+  color: var(--color-neutral-900);
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 24px;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.ant-popover.ant-popconfirm .ant-popconfirm-buttons {
+  margin-top: 22px;
+  text-align: right;
+}
+
+.ant-popover.ant-popconfirm .ant-popconfirm-buttons .ant-btn {
+  min-width: 90px;
+  border-radius: 0;
+}
+
+.ant-popover.ant-popconfirm .ant-popconfirm-buttons .ant-btn-primary {
+  background: #1d0db7;
+}
+
+.ant-modal-confirm {
+  top: 50% !important;
+  max-width: calc(100vw - 48px);
+  padding-bottom: 0;
+  transform: translateY(-50%);
+}
+
+/* ===========================================================================
    TECH theme — 科技未来 (Cyberpunk / Dark)
    =========================================================================== */
 [data-theme="tech"] {
