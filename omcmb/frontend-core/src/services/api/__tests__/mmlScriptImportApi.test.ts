@@ -35,7 +35,7 @@ describe('mmlApi TXT script import', () => {
     expect(url).toBe('/mml/scripts/import/validate');
     expect(body).toBeInstanceOf(FormData);
     expect((body as FormData).get('file')).toBeInstanceOf(File);
-    expect(config).toBeUndefined();
+    expect(config).toEqual({ headers: { 'Content-Type': 'multipart/form-data' } });
     expect(result.validationToken).toBe('token');
     expect(result.planItems[0].deviceSn).toBe('SN1');
     expect(result.issues[0]).toMatchObject({ lineNo: 1, rawLine: 'LST DEVICE_INFO;SN1' });
@@ -48,7 +48,7 @@ describe('mmlApi TXT script import', () => {
 
     expect(postMock.mock.calls[0][0]).toBe('/mml/scripts/script-1/import/validate');
     expect(postMock.mock.calls[0][1]).toBeInstanceOf(FormData);
-    expect(postMock.mock.calls[0][2]).toBeUndefined();
+    expect(postMock.mock.calls[0][2]).toEqual({ headers: { 'Content-Type': 'multipart/form-data' } });
   });
 
   it('normalizes a 422 import validation envelope into a typed error', async () => {

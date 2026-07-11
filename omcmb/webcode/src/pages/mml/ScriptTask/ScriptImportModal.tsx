@@ -127,9 +127,7 @@ export default function ScriptImportModal({ open, onClose, script, onSaved }: Sc
         <Form.Item label="描述" name="description"><Input maxLength={256} /></Form.Item>
       </Form>
       <Space style={{ marginBottom: 12 }}>
-        <label htmlFor="script-txt-input">
-          <Button icon={<UploadOutlined />}>选择 TXT</Button>
-        </label>
+        <Button icon={<UploadOutlined />} onClick={() => inputRef.current?.click()} disabled={uploading}>选择 TXT</Button>
         <input id="script-txt-input" ref={inputRef} type="file" accept=".txt,text/plain" aria-label="选择 TXT" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void validateFile(file); event.currentTarget.value = ''; }} />
         <Button icon={<DownloadOutlined />} onClick={() => void downloadTemplate()}>下载模板</Button>
       </Space>
