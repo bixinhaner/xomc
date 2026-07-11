@@ -348,6 +348,7 @@
         <param name="Device.FAP.LanConfig.LanDhcpNetmask" standardPath="Device.FAP.LanConfig.LanDhcpNetmask" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.FAP.LanConfig.LanDhcpStartIp" standardPath="Device.FAP.LanConfig.LanDhcpStartIp" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.FAP.LanConfig.LanNetctlSwitch" standardPath="Device.FAP.LanConfig.LanNetctlSwitch" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.FAP.NguIpBind1.BindInterface" standardPath="Device.FAP.NguIpBind1.BindInterface" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.FAP.PTP1588.DelayInterval" standardPath="Device.FAP.PTP1588.DelayInterval" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.FAP.PTP1588.Domain" standardPath="Device.FAP.PTP1588.Domain" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.FAP.PTP1588.Interface" standardPath="Device.FAP.PTP1588.Interface" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
