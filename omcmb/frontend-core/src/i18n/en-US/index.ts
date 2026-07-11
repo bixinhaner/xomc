@@ -1244,6 +1244,7 @@ const messages: Record<string, string> = {
   'device.multi.unknownErrorHint':        'Unknown error; see task details in the notification center',
   'device.multi.addInstanceFailed':       'Failed to add instance ({status})',
   'device.multi.addInstanceNoId':         'Instance added, but the new instance id could not be identified',
+  'device.multi.addObjectQueued':         'Add instance enqueued; waiting for the base station to return the instance id',
   'device.multi.addFailed':               'Add failed ({group})',
   'device.multi.editValidationFailed':    'Validation failed; please fix before saving',
   'device.multi.interFreqDuplicate':      'EARFCN {value} already exists; duplicates are not allowed',

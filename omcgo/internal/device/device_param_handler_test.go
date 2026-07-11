@@ -253,6 +253,95 @@ func TestBuildObjectSchema_IgnoresModelOnlyPlaceholderInstances(t *testing.T) {
 	assert.Equal(t, []int{1, 6}, objects[0].CurrentInstances)
 }
 
+func TestMergeSchemaWithValues_AttachesStandardAliasValueToPrivatePath(t *testing.T) {
+	mv := parammodel.NewMappingValidator(&parammodel.MappingSet{Mappings: []parammodel.ParamMapping{
+		{
+			PrivatePath:  "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.EUTRA.Carrier.{i}.CarrierFreq",
+			StandardPath: "Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.EUTRACarrierARFCN",
+			EntryType:    "parameter",
+			Access:       "READ_WRITE",
+			DataType:     "U_INT",
+		},
+		{
+			PrivatePath:  "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.EUTRA.Carrier.{i}.Qoffset",
+			StandardPath: "Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QOffsetFreq",
+			EntryType:    "parameter",
+			Access:       "READ_WRITE",
+			DataType:     "INT",
+		},
+	}})
+	params := []model.DeviceParameter{
+		{
+			ParameterPath:  "Device.Services.FAPService.1.CellConfig.1.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.2.EUTRACarrierARFCN",
+			ParameterValue: "324232",
+			ParameterType:  model.ParamUint,
+			Writable:       true,
+			LastUpdatedAt:  time.Date(2026, 7, 11, 6, 1, 29, 0, time.UTC),
+		},
+		{
+			ParameterPath:  "Device.Services.FAPService.1.CellConfig.1.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.2.QOffsetFreq",
+			ParameterValue: "-22",
+			ParameterType:  model.ParamInt,
+			Writable:       true,
+			LastUpdatedAt:  time.Date(2026, 7, 11, 6, 1, 30, 0, time.UTC),
+		},
+	}
+
+	items := mergeSchemaWithValues(
+		mv,
+		params,
+		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.Mobility.ConnMode.EUTRA.Carrier.",
+	)
+
+	byPath := make(map[string]ParameterSchemaItem, len(items))
+	for _, item := range items {
+		byPath[item.Path] = item
+	}
+
+	carrier := byPath["Device.Services.FAPService.1.CellConfig.1.NR.RAN.Mobility.ConnMode.EUTRA.Carrier.2.CarrierFreq"]
+	require.NotNil(t, carrier.CurrentValue)
+	assert.Equal(t, "324232", *carrier.CurrentValue)
+	assert.True(t, carrier.Writable)
+
+	qoffset := byPath["Device.Services.FAPService.1.CellConfig.1.NR.RAN.Mobility.ConnMode.EUTRA.Carrier.2.Qoffset"]
+	require.NotNil(t, qoffset.CurrentValue)
+	assert.Equal(t, "-22", *qoffset.CurrentValue)
+	assert.True(t, qoffset.Writable)
+}
+
+func TestMergeSchemaWithValues_EmitsTemplateLeafForEmptyMultiInstancePrefix(t *testing.T) {
+	min := int64(0)
+	max := int64(7)
+	mv := parammodel.NewMappingValidator(&parammodel.MappingSet{Mappings: []parammodel.ParamMapping{
+		{
+			PrivatePath:  "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.EUTRA.Carrier.{i}.CellReselectionPriority",
+			StandardPath: "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.EUTRA.Carrier.{i}.CellReselectionPriority",
+			EntryType:    "parameter",
+			Access:       "READ_WRITE",
+			DataType:     "U_INT",
+			MinValue:     &min,
+			MaxValue:     &max,
+		},
+	}})
+
+	items := mergeSchemaWithValues(
+		mv,
+		nil,
+		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.Mobility.IdleMode.EUTRA.Carrier.",
+	)
+
+	require.Len(t, items, 1)
+	assert.Equal(t, "Device.Services.FAPService.1.CellConfig.1.NR.RAN.Mobility.IdleMode.EUTRA.Carrier.{i}.CellReselectionPriority", items[0].Path)
+	assert.Equal(t, "U_INT", items[0].Type)
+	assert.True(t, items[0].Writable)
+	require.NotNil(t, items[0].Constraints)
+	require.NotNil(t, items[0].Constraints.MinValue)
+	require.NotNil(t, items[0].Constraints.MaxValue)
+	assert.Equal(t, int64(0), *items[0].Constraints.MinValue)
+	assert.Equal(t, int64(7), *items[0].Constraints.MaxValue)
+	assert.Nil(t, items[0].CurrentValue)
+}
+
 func TestBuildObjectSchema_KeepsAllReadOnlyObjectInstances(t *testing.T) {
 	mv := parammodel.NewMappingValidator(&parammodel.MappingSet{Mappings: []parammodel.ParamMapping{
 		{

@@ -181,11 +181,11 @@
        </group>
        <group id="gnb-lte-reselection" titleZh="LTE异系统重选列表" titleEn="LTE Inter-System Reselection List"
                              multiInstance="true" maxInstances="8"
-                             objectPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.EUTRA.Carrier.{i}.">
-              <param name="CarrierFreq" titleZh="邻区EARFCN" titleEn="Neighbor EARFCN" leaf="CarrierFreq"/>
-              <param name="CellReselectionPriority" titleZh="小区重选优先级" titleEn="Cell Reselection Priority" leaf="CellReselectionPriority"/>
-              <param name="ThreshXHigh" titleZh="EUTRAN频点高优先级重选门限" titleEn="EUTRAN High Priority Reselection Threshold" leaf="ThreshXHigh"/>
-              <param name="ThreshXLow" titleZh="EUTRAN频点低优先级重选门限" titleEn="EUTRAN Low Priority Reselection Threshold" leaf="ThreshXLow"/>
-              <param name="QRxLevMin" titleZh="EUTRAN最低接收电平" titleEn="EUTRAN Minimum Receive Level" leaf="QRxLevMin"/>
+                             objectPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.EUTRA.Carrier.{i}.">
+              <param name="EUTRACarrierARFCN" titleZh="邻区EARFCN" titleEn="Neighbor EARFCN" leaf="EUTRACarrierARFCN" type="unsignedInt" minValue="0" maxValue="3279165"/>
+              <param name="CellReselectionPriority" titleZh="小区重选优先级" titleEn="Cell Reselection Priority" leaf="CellReselectionPriority" type="unsignedInt" minValue="0" maxValue="7"/>
+              <param name="ThreshXHigh" titleZh="EUTRAN频点高优先级重选门限" titleEn="EUTRAN High Priority Reselection Threshold" leaf="ThreshXHigh" type="unsignedInt" minValue="0" maxValue="31"/>
+              <param name="ThreshXLow" titleZh="EUTRAN频点低优先级重选门限" titleEn="EUTRAN Low Priority Reselection Threshold" leaf="ThreshXLow" type="unsignedInt" minValue="0" maxValue="31"/>
+              <param name="QRxLevMin" titleZh="EUTRAN最低接收电平" titleEn="EUTRAN Minimum Receive Level" leaf="QRxLevMin" type="int" minValue="-70" maxValue="-22"/>
        </group>
 </quickSettings>

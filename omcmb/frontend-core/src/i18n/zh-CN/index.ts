@@ -1246,6 +1246,7 @@ const messages: Record<string, string> = {
   'device.multi.unknownErrorHint':        '未知错误,可在通知中心查看任务详情',
   'device.multi.addInstanceFailed':       '新增实例失败({status})',
   'device.multi.addInstanceNoId':         '新增实例成功，但未能识别新实例号',
+  'device.multi.addObjectQueued':         '新增实例已入队，正在等待基站返回实例号',
   'device.multi.addFailed':               '新增失败({group})',
   'device.multi.editValidationFailed':    '编辑页校验失败,请修正后再保存',
   'device.multi.interFreqDuplicate':      '频点 {value} 已存在,不能重复添加',

@@ -913,17 +913,20 @@ func (h *ParameterTreeHandler) GetParameterSchema(c *gin.Context) {
 		return
 	}
 
+	schemaMV := h.resolveDisplayMappingValidator(c.Request.Context(), dev)
 	var params []model.DeviceParameter
-	if pathPrefix != "" {
+	if pathPrefix != "" && schemaMV == nil {
 		params, err = h.paramRepo.GetByPathPrefix(c.Request.Context(), id, pathPrefix)
 	} else {
+		// With a mapping validator, CPE values may be persisted under standardPath while
+		// quicksettings queries by privatePath. Keep the full device value set so schema
+		// merge can attach aliased standard values back to the requested private paths.
 		params, err = h.paramRepo.GetByDevice(c.Request.Context(), id)
 	}
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	schemaMV := h.resolveDisplayMappingValidator(c.Request.Context(), dev)
 
 	var schemaItems []ParameterSchemaItem
 	var objectItems []ObjectSchemaItem
@@ -966,6 +969,10 @@ func (h *ParameterTreeHandler) GetParameterSchema(c *gin.Context) {
 func mergeSchemaWithValues(mv *parammodel.MappingValidator, params []model.DeviceParameter, pathPrefix string) []ParameterSchemaItem {
 	items := make([]ParameterSchemaItem, 0, len(params))
 	seen := make(map[string]struct{}, len(params))
+	valuesByPath := make(map[string]model.DeviceParameter, len(params))
+	for _, p := range params {
+		valuesByPath[p.ParameterPath] = p
+	}
 
 	for _, p := range params {
 		if pathPrefix != "" && !strings.HasPrefix(p.ParameterPath, pathPrefix) {
@@ -1002,23 +1009,114 @@ func mergeSchemaWithValues(mv *parammodel.MappingValidator, params []model.Devic
 		if def.EntryType != "parameter" {
 			continue
 		}
-		privatePath, ok := instantiatePrivatePathForPrefix(def.PrivatePath, pathPrefix)
+		for _, value := range schemaValuesForPrefix(def, pathPrefix, valuesByPath) {
+			if _, exists := seen[value.privatePath]; exists {
+				continue
+			}
+			items = append(items, ParameterSchemaItem{
+				Path:          value.privatePath,
+				Type:          def.DataType,
+				Writable:      parammodel.IsAccessWritable(def.Access),
+				ChangeApplies: def.ChangeApplies,
+				Constraints:   constraintsFromMapping(&def),
+				CurrentValue:  value.currentValue,
+				LastSyncedAt:  value.lastSyncedAt,
+			})
+			seen[value.privatePath] = struct{}{}
+		}
+	}
+	return items
+}
+
+type schemaValueForPrefix struct {
+	privatePath  string
+	currentValue *string
+	lastSyncedAt *time.Time
+}
+
+func schemaValuesForPrefix(
+	def parammodel.ParamMapping,
+	pathPrefix string,
+	valuesByPath map[string]model.DeviceParameter,
+) []schemaValueForPrefix {
+	privatePath, ok := instantiatePrivatePathForPrefix(def.PrivatePath, pathPrefix)
+	if ok && strings.HasPrefix(privatePath, pathPrefix) {
+		return []schemaValueForPrefix{schemaValueFromPaths(privatePath, privatePath, def.StandardPath, pathPrefix, valuesByPath)}
+	}
+
+	prefixInstances := extractNumericSegments(pathPrefix)
+	if countPlaceholders(def.PrivatePath) != len(prefixInstances)+1 {
+		return nil
+	}
+
+	byPrivatePath := make(map[string]schemaValueForPrefix)
+	for _, p := range valuesByPath {
+		inst, matched := matchTemplateWithPrefixInstances(def.PrivatePath, p.ParameterPath, prefixInstances)
+		if !matched {
+			inst, matched = matchTemplateWithPrefixInstances(def.StandardPath, p.ParameterPath, prefixInstances)
+		}
+		if !matched {
+			continue
+		}
+		privatePath, ok := instantiatePathWithInstances(def.PrivatePath, append(prefixInstances, inst))
 		if !ok || !strings.HasPrefix(privatePath, pathPrefix) {
 			continue
 		}
-		if _, exists := seen[privatePath]; exists {
-			continue
+		val := p.ParameterValue
+		item := schemaValueForPrefix{
+			privatePath:  privatePath,
+			currentValue: &val,
 		}
-		items = append(items, ParameterSchemaItem{
-			Path:          privatePath,
-			Type:          def.DataType,
-			Writable:      parammodel.IsAccessWritable(def.Access),
-			ChangeApplies: def.ChangeApplies,
-			Constraints:   constraintsFromMapping(&def),
-		})
-		seen[privatePath] = struct{}{}
+		if !p.LastUpdatedAt.IsZero() {
+			item.lastSyncedAt = &p.LastUpdatedAt
+		}
+		byPrivatePath[privatePath] = item
 	}
-	return items
+	if len(byPrivatePath) == 0 {
+		privatePath, ok := instantiatePathWithInstances(def.PrivatePath, append(prefixInstances, "{i}"))
+		if ok && strings.HasPrefix(privatePath, pathPrefix) {
+			return []schemaValueForPrefix{{privatePath: privatePath}}
+		}
+	}
+
+	paths := make([]string, 0, len(byPrivatePath))
+	for path := range byPrivatePath {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	out := make([]schemaValueForPrefix, 0, len(paths))
+	for _, path := range paths {
+		out = append(out, byPrivatePath[path])
+	}
+	return out
+}
+
+func schemaValueFromPaths(
+	privatePath string,
+	privateValuePath string,
+	standardTemplate string,
+	pathPrefix string,
+	valuesByPath map[string]model.DeviceParameter,
+) schemaValueForPrefix {
+	item := schemaValueForPrefix{privatePath: privatePath}
+	if p, ok := valuesByPath[privateValuePath]; ok {
+		val := p.ParameterValue
+		item.currentValue = &val
+		if !p.LastUpdatedAt.IsZero() {
+			item.lastSyncedAt = &p.LastUpdatedAt
+		}
+		return item
+	}
+	if standardPath, ok := instantiatePrivatePathForPrefix(standardTemplate, pathPrefix); ok {
+		if p, exists := valuesByPath[standardPath]; exists {
+			val := p.ParameterValue
+			item.currentValue = &val
+			if !p.LastUpdatedAt.IsZero() {
+				item.lastSyncedAt = &p.LastUpdatedAt
+			}
+		}
+	}
+	return item
 }
 
 func instantiatePrivatePathForPrefix(template, pathPrefix string) (string, bool) {
@@ -1047,6 +1145,74 @@ func instantiatePrivatePathForPrefix(template, pathPrefix string) (string, bool)
 		}
 	}
 	return strings.Join(parts, "."), true
+}
+
+func instantiatePathWithInstances(template string, instances []string) (string, bool) {
+	if template == "" {
+		return "", false
+	}
+	parts := strings.Split(template, ".")
+	idx := 0
+	for i, part := range parts {
+		if part != "{i}" {
+			continue
+		}
+		if idx >= len(instances) {
+			return "", false
+		}
+		parts[i] = instances[idx]
+		idx++
+	}
+	if idx != len(instances) {
+		return "", false
+	}
+	return strings.Join(parts, "."), true
+}
+
+func matchTemplateWithPrefixInstances(template, path string, prefixInstances []string) (string, bool) {
+	if template == "" || path == "" {
+		return "", false
+	}
+	templateParts := strings.Split(strings.Trim(template, "."), ".")
+	pathParts := strings.Split(strings.Trim(path, "."), ".")
+	if len(templateParts) != len(pathParts) {
+		return "", false
+	}
+	placeholderIdx := 0
+	captured := ""
+	for i, part := range templateParts {
+		if part != "{i}" {
+			if part != pathParts[i] {
+				return "", false
+			}
+			continue
+		}
+		if placeholderIdx < len(prefixInstances) {
+			if pathParts[i] != prefixInstances[placeholderIdx] {
+				return "", false
+			}
+		} else {
+			if captured != "" || !isNumericName(pathParts[i]) {
+				return "", false
+			}
+			captured = pathParts[i]
+		}
+		placeholderIdx++
+	}
+	if placeholderIdx != len(prefixInstances)+1 || captured == "" {
+		return "", false
+	}
+	return captured, true
+}
+
+func countPlaceholders(template string) int {
+	count := 0
+	for _, part := range strings.Split(template, ".") {
+		if part == "{i}" {
+			count++
+		}
+	}
+	return count
 }
 
 func extractNumericSegments(path string) []string {
