@@ -6700,11 +6700,12 @@ const messages: Record<string, string> = {
   'commission.stationNamePlaceholder':        '请输入基站名称',
 
   // -------------------------------------------------------------------------
-  // 通知中心（模板 + 历史）
+  // 通知中心（消息 + 模板 + 历史）
   // -------------------------------------------------------------------------
   'notification.title':                        '通知中心',
+  'notification.tab.messages':                 '消息',
   'notification.tab.template':                 '通知模板',
-  'notification.tab.history':                  '发送历史',
+  'notification.tab.history':                  '模板发送历史',
 
   // 模板列表
   'notification.template.list.title':          '模板列表',
@@ -6729,8 +6730,8 @@ const messages: Record<string, string> = {
   'notification.channel.webhook':              'Webhook',
 
   // 历史
-  'notification.history.list.title':           '发送历史',
-  'notification.history.detail':               '历史详情',
+  'notification.history.list.title':           '模板发送历史',
+  'notification.history.detail':               '模板发送历史详情',
   'notification.history.recipients':           '收件人',
   'notification.history.subject':              '主题',
   'notification.history.body':                 '正文',
@@ -6759,6 +6760,28 @@ const messages: Record<string, string> = {
   'notificationCenter.clearSuccess':           '已清空 {count} 条消息',
   'notificationCenter.clearFailed':            '清空失败：{error}',
   'notificationCenter.viewAll':                '查看全部',
+  'notificationCenter.messageType':            '消息类型',
+  'notificationCenter.messageStatus':          '状态',
+  'notificationCenter.messageTitle':           '标题',
+  'notificationCenter.messageContent':         '内容',
+  'notificationCenter.sender':                 '发送方',
+  'notificationCenter.createdAt':              '创建时间',
+  'notificationCenter.readAt':                 '已读时间',
+  'notificationCenter.relatedLink':            '关联链接',
+  'notificationCenter.detailTitle':            '消息详情',
+  'notificationCenter.readState':              '阅读状态',
+  'notificationCenter.readState.read':         '已读',
+  'notificationCenter.readState.unread':       '未读',
+  'notificationCenter.type.alarm':             '告警',
+  'notificationCenter.type.taskComplete':      '任务完成',
+  'notificationCenter.type.system':            '系统',
+  'notificationCenter.type.approval':          '审批',
+  'notificationCenter.type.deviceStatus':      '设备状态',
+  'notificationCenter.status.inProgress':      '进行中',
+  'notificationCenter.status.completed':       '已完成',
+  'notificationCenter.status.failed':          '失败',
+  'notificationCenter.status.expired':         '已过期',
+  'notificationCenter.status.cancelled':       '已取消',
 
   // T-0078 备份恢复（数据恢复页面）
   'backup.restore.title':                      '数据恢复',

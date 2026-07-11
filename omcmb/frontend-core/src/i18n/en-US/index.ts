@@ -6671,9 +6671,10 @@ const messages: Record<string, string> = {
   'commission.stationNamePlaceholder':        'Enter station name',
 
   // -------------------------------------------------------------------------
-  // Notification Center (Templates + History)
+  // Notification Center (Messages + Templates + History)
   // -------------------------------------------------------------------------
   'notification.title':                        'Notification Center',
+  'notification.tab.messages':                 'Messages',
   'notification.tab.template':                 'Templates',
   'notification.tab.history':                  'History',
 
@@ -6730,6 +6731,28 @@ const messages: Record<string, string> = {
   'notificationCenter.clearSuccess':           'Cleared {count} messages',
   'notificationCenter.clearFailed':            'Failed to clear: {error}',
   'notificationCenter.viewAll':                'View All',
+  'notificationCenter.messageType':            'Type',
+  'notificationCenter.messageStatus':          'Status',
+  'notificationCenter.messageTitle':           'Title',
+  'notificationCenter.messageContent':         'Content',
+  'notificationCenter.sender':                 'Sender',
+  'notificationCenter.createdAt':              'Created At',
+  'notificationCenter.readAt':                 'Read At',
+  'notificationCenter.relatedLink':            'Related Link',
+  'notificationCenter.detailTitle':            'Message Detail',
+  'notificationCenter.readState':              'Read State',
+  'notificationCenter.readState.read':         'Read',
+  'notificationCenter.readState.unread':       'Unread',
+  'notificationCenter.type.alarm':             'Alarm',
+  'notificationCenter.type.taskComplete':      'Task Complete',
+  'notificationCenter.type.system':            'System',
+  'notificationCenter.type.approval':          'Approval',
+  'notificationCenter.type.deviceStatus':      'Device Status',
+  'notificationCenter.status.inProgress':      'In Progress',
+  'notificationCenter.status.completed':       'Completed',
+  'notificationCenter.status.failed':          'Failed',
+  'notificationCenter.status.expired':         'Expired',
+  'notificationCenter.status.cancelled':       'Cancelled',
 
   // T-0078 backup restore (RestoreData page)
   'backup.restore.title':                      'Data Restore',
