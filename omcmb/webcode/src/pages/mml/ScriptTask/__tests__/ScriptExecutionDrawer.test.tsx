@@ -52,20 +52,20 @@ describe('ScriptExecutionDrawer', () => {
     useUserStore.setState({ currentUser: null, isAuthenticated: false });
   });
 
-  it('generates a localized default task name in Chinese', () => {
+  it('generates a default task name from script name and current time in Chinese', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-10T13:38:30+08:00'));
     renderDrawer();
 
-    expect(screen.getByLabelText('任务名称')).toHaveValue('MML脚本任务_admin_2026-07-10 13:38:30');
+    expect(screen.getByLabelText('任务名称')).toHaveValue('巡检脚本_2026-07-10 13:38:30');
   });
 
-  it('generates a localized default task name in English', () => {
+  it('uses the same script-name based default task name in English', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-10T13:38:30+08:00'));
     renderDrawer({}, 'en-US');
 
-    expect(screen.getByLabelText('任务名称')).toHaveValue('MML Script Task_admin_2026-07-10 13:38:30');
+    expect(screen.getByLabelText('任务名称')).toHaveValue('巡检脚本_2026-07-10 13:38:30');
   });
 
   it('confirms server warnings and retries with confirmWarnings', async () => {

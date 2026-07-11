@@ -3,10 +3,8 @@ import { Button, Checkbox, DatePicker, Drawer, Form, Input, InputNumber, Modal, 
 import type { Dayjs } from 'dayjs';
 import type { MMLExecuteType, MMLScript, MMLScriptImportValidation, MMLScriptExecutionInput } from '@core/types/mml';
 import { useCreateMMLScriptExecution } from '@core/hooks/api/useMML';
-import { useUserStore } from '@core/store/userStore';
-import { useT } from '@/hooks/useT';
 import ScriptImportPreview from './ScriptImportPreview';
-import { buildMmlScriptDefaultTaskName } from '../utils/defaultTaskName';
+import { buildMmlScriptExecutionTaskName } from '../utils/defaultTaskName';
 
 export interface ScriptExecutionDrawerProps {
   open: boolean;
@@ -35,8 +33,6 @@ function validationFromError(error: unknown): MMLScriptImportValidation | undefi
 }
 
 export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess }: ScriptExecutionDrawerProps) {
-  const t = useT();
-  const currentUser = useUserStore((state) => state.currentUser);
   const [form] = Form.useForm<ExecutionForm>();
   const [validation, setValidation] = useState<MMLScriptImportValidation | null>(null);
   const [errorCodes, setErrorCodes] = useState<string[]>([]);
@@ -46,10 +42,10 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
 
   useEffect(() => {
     if (!open) return;
-    const taskName = script ? buildMmlScriptDefaultTaskName(t('mml.scriptExecution.defaultTaskNamePrefix'), currentUser) : '';
+    const taskName = script ? buildMmlScriptExecutionTaskName(script.scriptName) : '';
     form.setFieldsValue({ taskName, executeType: 'immediate', offlineRetry: false, offlineRetryWait: 60, failedRetry: false, failedRetryCount: 3, failedRetryInterval: 5 });
     setValidation(null); setWarningValues(null); setErrorCodes([]);
-  }, [currentUser?.displayName, currentUser?.username, form, open, script, t]);
+  }, [form, open, script]);
 
   const execute = async (input: MMLScriptExecutionInput) => {
     if (!script) return;

@@ -3,11 +3,8 @@ import { Button, Form, Input, Modal, Space, Spin, message } from 'antd';
 import { DownloadOutlined, UploadOutlined } from '@ant-design/icons';
 import type { MMLScript, MMLScriptImportValidation } from '@core/types/mml';
 import { useCreateImportedMMLScript, useReplaceImportedMMLScript, useValidateMMLScriptImport } from '@core/hooks/api/useMML';
-import { useUserStore } from '@core/store/userStore';
 import { mmlApi } from '@core/services/api/mmlApi';
-import { useT } from '@/hooks/useT';
 import ScriptImportPreview from './ScriptImportPreview';
-import { buildMmlScriptDefaultTaskName } from '../utils/defaultTaskName';
 
 export interface ScriptImportModalProps {
   open: boolean;
@@ -26,8 +23,6 @@ function validationFromError(error: unknown): MMLScriptImportValidation | undefi
 
 /** Import or re-import a TXT script. Content is never editable in the browser. */
 export default function ScriptImportModal({ open, onClose, script, onSaved }: ScriptImportModalProps) {
-  const t = useT();
-  const currentUser = useUserStore((state) => state.currentUser);
   const [form] = Form.useForm<ImportForm>();
   const [validation, setValidation] = useState<MMLScriptImportValidation | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -41,11 +36,11 @@ export default function ScriptImportModal({ open, onClose, script, onSaved }: Sc
   useEffect(() => {
     if (!open) return;
     form.setFieldsValue({
-      scriptName: script?.scriptName ?? buildMmlScriptDefaultTaskName(t('mml.scriptExecution.defaultTaskNamePrefix'), currentUser),
+      scriptName: script?.scriptName ?? '',
       description: script?.description ?? '',
     });
     setValidation(null);
-  }, [currentUser?.displayName, currentUser?.username, form, open, script, t]);
+  }, [form, open, script]);
 
   const validateFile = async (file: File) => {
     setValidation(null);

@@ -5,7 +5,6 @@ import { IntlProvider } from 'react-intl';
 import type { ComponentProps } from 'react';
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import zhCN from '@core/i18n/zh-CN';
-import { useUserStore } from '@core/store/userStore';
 
 const mocks = vi.hoisted(() => ({
   validate: vi.fn(),
@@ -50,16 +49,6 @@ const validation = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-const adminUser = {
-  id: 'user-1',
-  username: 'admin',
-  displayName: 'Admin',
-  email: 'admin@omc.example.com',
-  role: 'admin' as const,
-  status: 'active' as const,
-  createTime: '2026-07-10T00:00:00Z',
-};
-
 function renderModal(props: Partial<ComponentProps<typeof ScriptImportModal>> = {}) {
   return render(
     <IntlProvider locale="zh-CN" defaultLocale="zh-CN" messages={zhCN}>
@@ -71,7 +60,6 @@ function renderModal(props: Partial<ComponentProps<typeof ScriptImportModal>> = 
 describe('ScriptImportModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useUserStore.setState({ currentUser: adminUser, isAuthenticated: true });
     mocks.create.mockResolvedValue({ id: 'script-1' });
     mocks.replace.mockResolvedValue({ id: 'script-1' });
     mocks.template.mockResolvedValue({ blob: new Blob(['template']), filename: 'MMLTemplate.txt' });
@@ -79,20 +67,38 @@ describe('ScriptImportModal', () => {
   });
   afterEach(() => {
     vi.useRealTimers();
-    useUserStore.setState({ currentUser: null, isAuthenticated: false });
     Modal.destroyAll();
   });
 
-  it('auto-generates an editable script name for new TXT imports', () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-07-10T13:38:30+08:00'));
+  it('leaves the script name empty for new TXT imports so users name the script themselves', () => {
     renderModal();
 
     const input = screen.getByLabelText('脚本名称');
-    expect(input).toHaveValue('MML脚本任务_admin_2026-07-10 13:38:30');
+    expect(input).toHaveValue('');
 
     fireEvent.change(input, { target: { value: '人工修改后的脚本名' } });
     expect(input).toHaveValue('人工修改后的脚本名');
+  });
+
+  it('keeps the existing script name when replacing an imported script', () => {
+    renderModal({
+      script: {
+        id: 'script-1',
+        scriptName: '巡检脚本',
+        description: '已有描述',
+        content: '',
+        creator: 'admin',
+        createTime: '2026-07-10T00:00:00Z',
+        updateTime: '2026-07-10T00:00:00Z',
+        tags: [],
+        status: 'active',
+        type: 'batch',
+        progress: 0,
+      },
+    });
+
+    expect(screen.getByLabelText('脚本名称')).toHaveValue('巡检脚本');
+    expect(screen.getByLabelText('描述')).toHaveValue('已有描述');
   });
 
   it('keeps save disabled when server validation has errors', async () => {
