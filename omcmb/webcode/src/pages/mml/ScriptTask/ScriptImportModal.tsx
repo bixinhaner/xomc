@@ -4,6 +4,7 @@ import { DownloadOutlined, UploadOutlined } from '@ant-design/icons';
 import type { MMLScript, MMLScriptImportValidation } from '@core/types/mml';
 import { useCreateImportedMMLScript, useReplaceImportedMMLScript, useValidateMMLScriptImport } from '@core/hooks/api/useMML';
 import { mmlApi } from '@core/services/api/mmlApi';
+import { useT } from '@/hooks/useT';
 import ScriptImportPreview from './ScriptImportPreview';
 
 export interface ScriptImportModalProps {
@@ -27,6 +28,7 @@ function validationFromError(error: unknown): MMLScriptImportValidation | undefi
 
 /** Import or re-import a TXT script. Content is never editable in the browser. */
 export default function ScriptImportModal({ open, onClose, script, onSaved }: ScriptImportModalProps) {
+  const t = useT();
   const [form] = Form.useForm<ImportForm>();
   const [validation, setValidation] = useState<MMLScriptImportValidation | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -64,7 +66,7 @@ export default function ScriptImportModal({ open, onClose, script, onSaved }: Sc
     } catch (error) {
       const errorValidation = validationFromError(error);
       setValidation(errorValidation ?? null);
-      void message.error(error instanceof Error ? error.message : 'TXT 校验失败');
+      void message.error(error instanceof Error ? error.message : t('mml.scriptImport.validationFailed'));
     } finally {
       setUploading(false);
     }
@@ -75,10 +77,10 @@ export default function ScriptImportModal({ open, onClose, script, onSaved }: Sc
     const values = await form.validateFields();
     if (validation.summary.warningCount > 0 || validation.issues.some((issue) => issue.severity === 'warning')) {
       Modal.confirm({
-        title: '校验发现警告',
-        content: '脚本包含警告，确认后继续保存。',
-        okText: '继续保存',
-        cancelText: '取消',
+        title: t('mml.scriptImport.warningTitle'),
+        content: t('mml.scriptImport.warningSaveContent'),
+        okText: t('mml.scriptImport.continueSave'),
+        cancelText: t('common.cancel'),
         onOk: () => doSave(values),
       });
       return;
@@ -102,7 +104,7 @@ export default function ScriptImportModal({ open, onClose, script, onSaved }: Sc
     } catch (error) {
       const errorValidation = validationFromError(error);
       if (errorValidation) setValidation(errorValidation);
-      void message.error(error instanceof Error ? error.message : '保存失败');
+      void message.error(error instanceof Error ? error.message : t('common.saveFailed'));
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -114,24 +116,24 @@ export default function ScriptImportModal({ open, onClose, script, onSaved }: Sc
       const result = await mmlApi.downloadScriptImportTemplate();
       const url = URL.createObjectURL(result.blob);
       const anchor = document.createElement('a'); anchor.href = url; anchor.download = result.filename; anchor.click(); URL.revokeObjectURL(url);
-    } catch (error) { void message.error(error instanceof Error ? error.message : '模板下载失败'); }
+    } catch (error) { void message.error(error instanceof Error ? error.message : t('mml.scriptImport.downloadTemplateFailed')); }
   };
 
   return (
-    <Modal open={open} onCancel={onClose} title={script ? '重新导入 MML TXT 脚本' : '导入 MML TXT 脚本'} width={900} footer={[
-      <Button key="cancel" onClick={onClose}>取消</Button>,
-      <Button key="save" aria-label="确认保存" type="primary" loading={saving} onClick={() => void handleSave()} disabled={saving || !validation || !validation.validationToken || hasErrors}>确认保存</Button>,
+    <Modal open={open} onCancel={onClose} title={script ? t('mml.scriptImport.replaceTitle') : t('mml.scriptImport.title')} width={900} footer={[
+      <Button key="cancel" onClick={onClose}>{t('common.cancel')}</Button>,
+      <Button key="save" aria-label={t('mml.scriptImport.saveConfirm')} type="primary" loading={saving} onClick={() => void handleSave()} disabled={saving || !validation || !validation.validationToken || hasErrors}>{t('mml.scriptImport.saveConfirm')}</Button>,
     ]} destroyOnHidden>
       <Form form={form} layout="vertical">
-        <Form.Item label="脚本名称" name="scriptName" rules={[{ required: true, message: '请输入脚本名称' }]}><Input maxLength={128} /></Form.Item>
-        <Form.Item label="描述" name="description"><Input maxLength={256} /></Form.Item>
+        <Form.Item label={t('mml.scriptName')} name="scriptName" rules={[{ required: true, message: t('mml.inputScriptName') }]}><Input maxLength={128} /></Form.Item>
+        <Form.Item label={t('mml.description')} name="description"><Input maxLength={256} /></Form.Item>
       </Form>
       <Space style={{ marginBottom: 12 }}>
-        <Button icon={<UploadOutlined />} onClick={() => inputRef.current?.click()} disabled={uploading}>选择 TXT</Button>
-        <input id="script-txt-input" ref={inputRef} type="file" accept=".txt,text/plain" aria-label="选择 TXT" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void validateFile(file); event.currentTarget.value = ''; }} />
-        <Button icon={<DownloadOutlined />} onClick={() => void downloadTemplate()}>下载模板</Button>
+        <Button icon={<UploadOutlined />} onClick={() => inputRef.current?.click()} disabled={uploading}>{t('mml.scriptImport.chooseTxt')}</Button>
+        <input id="script-txt-input" ref={inputRef} type="file" accept=".txt,text/plain" aria-label={t('mml.scriptImport.chooseTxt')} hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void validateFile(file); event.currentTarget.value = ''; }} />
+        <Button icon={<DownloadOutlined />} onClick={() => void downloadTemplate()}>{t('mml.scriptImport.downloadTemplate')}</Button>
       </Space>
-      {uploading ? <Spin tip="正在校验脚本…" /> : null}
+      {uploading ? <Spin tip={t('mml.scriptImport.validating')} /> : null}
       {validation ? <ScriptImportPreview validation={validation} /> : null}
     </Modal>
   );

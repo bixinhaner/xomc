@@ -732,6 +732,10 @@ func (h *Handler) ListTasks(c *gin.Context) {
 	if taskName := c.Query("task_name"); taskName != "" {
 		filter.TaskName = &taskName
 	}
+	if taskOrigin := c.Query("task_origin"); taskOrigin != "" {
+		origin := TaskOrigin(taskOrigin)
+		filter.TaskOrigin = &origin
+	}
 
 	result, err := h.service.ListTasks(c.Request.Context(), filter)
 	if err != nil {

@@ -577,6 +577,29 @@ func TestHandler_ListTasks(t *testing.T) {
 	assert.Equal(t, TaskCompleted, resp.Items[0].Status)
 }
 
+func TestHandler_ListTasksBindsTaskOrigin(t *testing.T) {
+	cmdRepo := &hCmdRepo{}
+	scriptRepo := &hScriptRepo{}
+	taskRepo := &hTaskRepo{
+		ListFn: func(_ context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error) {
+			require.NotNil(t, filter.TaskOrigin)
+			assert.Equal(t, TaskOriginScript, *filter.TaskOrigin)
+			return model.NewListResponse([]MMLTask{}, 0, 1, 20), nil
+		},
+	}
+
+	logger := zap.NewNop()
+	svc := NewService(cmdRepo, scriptRepo, taskRepo, &hCustomCommandRepo{}, nil, logger)
+	h := NewHandler(svc, logger)
+	router := setupMMLRouter(h)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/mml/tasks?page=1&page_size=20&task_origin=script", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
 // ---- Task control handler tests ----
 
 func TestHandler_StartTask(t *testing.T) {

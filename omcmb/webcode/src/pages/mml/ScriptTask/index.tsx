@@ -49,7 +49,7 @@ export default function ScriptTask() {
   const saveBasic = async () => {
     if (!editing) return;
     const values = await basicForm.validateFields();
-    updateMutation.mutate({ id: editing.id, data: { scriptName: values.scriptName.trim(), description: values.description ?? '' } }, { onSuccess: () => { void refetch(); closeBasic(); void message.success('保存成功'); } });
+    updateMutation.mutate({ id: editing.id, data: { scriptName: values.scriptName.trim(), description: values.description ?? '' } }, { onSuccess: () => { void refetch(); closeBasic(); void message.success(t('common.saveSuccess')); } });
   };
   const columns: DataTableColumn<MMLScript>[] = [
     {
@@ -62,23 +62,25 @@ export default function ScriptTask() {
           basicForm.setFieldsValue({ scriptName: record.scriptName, description: record.description });
         };
         const confirmDelete = () => Modal.confirm({
-          title: '确认删除？',
-          okText: '删除',
+          title: t('common.confirmDelete'),
+          content: t('mml.confirmDeleteScript', { name: record.scriptName }),
+          okText: t('common.delete'),
+          cancelText: t('common.cancel'),
           okButtonProps: { danger: true },
           onOk: () => new Promise<void>((resolve, reject) => deleteMutation.mutate([record.id], { onSuccess: () => { void refetch(); resolve(); }, onError: reject })),
         });
         const items: MenuProps['items'] = [
-          { key: 'view', label: '查看详情', icon: <EyeOutlined />, onClick: () => setViewing(record) },
-          { key: 'reimport', label: '重新导入', icon: <UploadOutlined />, onClick: () => setReimporting(record) },
-          { key: 'download', label: '下载 TXT', icon: <DownloadOutlined />, onClick: () => downloadScript(record) },
-          { key: 'edit', label: '编辑', icon: <EditOutlined />, onClick: openEdit },
+          { key: 'view', label: t('mml.script.action.viewDetail'), icon: <EyeOutlined />, onClick: () => setViewing(record) },
+          { key: 'reimport', label: t('mml.script.action.reimport'), icon: <UploadOutlined />, onClick: () => setReimporting(record) },
+          { key: 'download', label: t('mml.script.action.downloadTxt'), icon: <DownloadOutlined />, onClick: () => downloadScript(record) },
+          { key: 'edit', label: t('common.edit'), icon: <EditOutlined />, onClick: openEdit },
           { type: 'divider' },
-          { key: 'delete', label: '删除', icon: <DeleteOutlined />, danger: true, onClick: confirmDelete },
+          { key: 'delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true, onClick: confirmDelete },
         ];
         return <Space size={4}>
-          <Button type="link" size="small" aria-label="执行" icon={<PlayCircleOutlined />} onClick={(event) => { event.stopPropagation(); setExecScript(record); }}>执行</Button>
+          <Button type="link" size="small" aria-label={t('mml.script.action.execute')} icon={<PlayCircleOutlined />} onClick={(event) => { event.stopPropagation(); setExecScript(record); }}>{t('mml.script.action.execute')}</Button>
           <Dropdown menu={{ items }} trigger={['click']}>
-            <Button type="text" size="small" aria-label="更多操作" icon={<MoreOutlined />} onClick={(event) => event.stopPropagation()} />
+            <Button type="text" size="small" aria-label={t('mml.script.action.more')} icon={<MoreOutlined />} onClick={(event) => event.stopPropagation()} />
           </Dropdown>
         </Space>;
       },
@@ -89,21 +91,21 @@ export default function ScriptTask() {
     { key: 'updatedAt', title: t('mml.updateTime'), dataIndex: 'updateTime', width: 170, render: (value) => formatTime(value as string) },
   ];
 
-  return <ListPageLayout title={t('nav.mml.script')} extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => setImportOpen(true)}>导入 TXT</Button>}>
+  return <ListPageLayout title={t('nav.mml.script')} extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => setImportOpen(true)}>{t('mml.script.action.importTxt')}</Button>}>
     <SearchInput placeholder={t('mml.scriptName')} allowClear style={{ width: 300, marginBottom: 16 }} onSearch={(value) => { setSearch(value); setPage(1); }} />
     <DataTable<MMLScript> tableId="mml-scripts" columns={columns} dataSource={scripts} loading={isLoading} rowKey="id" total={data?.total ?? 0} currentPage={page} pageSize={pageSize} onPageChange={(nextPage, nextSize) => { setPage(nextPage); setPageSize(nextSize); }} onRefresh={() => void refetch()} scroll={{ x: 1200 }} />
     <ScriptImportModal open={importOpen || Boolean(reimporting)} script={reimporting} onClose={() => { setImportOpen(false); setReimporting(null); }} onSaved={() => { setImportOpen(false); setReimporting(null); void refetch(); }} />
-    <Drawer title={detailScript?.scriptName || '脚本详情'} open={Boolean(viewing)} onClose={() => setViewing(null)} width={820} destroyOnHidden>
+    <Drawer title={detailScript?.scriptName || t('mml.scriptDetail')} open={Boolean(viewing)} onClose={() => setViewing(null)} width={820} destroyOnHidden>
       {detailScript ? <Spin spinning={isFetching}><Space direction="vertical" size={16} style={{ width: '100%' }}>
-        <Descriptions bordered size="small" column={2}><Descriptions.Item label="脚本名称" span={2}>{detailScript.scriptName}</Descriptions.Item><Descriptions.Item label="描述" span={2}>{detailScript.description || '-'}</Descriptions.Item><Descriptions.Item label="创建者">{detailScript.creator || '-'}</Descriptions.Item><Descriptions.Item label="更新时间">{formatTime(detailScript.updateTime)}</Descriptions.Item><Descriptions.Item label="原始文件">{detailScript.originalFilename || '-'}</Descriptions.Item><Descriptions.Item label="校验版本">{detailScript.validationVersion || '-'}</Descriptions.Item></Descriptions>
-        <Typography.Text strong>只读 TXT 内容</Typography.Text>
-        {detailScript.content ? <pre style={{ whiteSpace: 'pre-wrap', maxHeight: 280, overflow: 'auto' }}>{detailScript.content}</pre> : <Empty description="暂无脚本内容" />}
+        <Descriptions bordered size="small" column={2}><Descriptions.Item label={t('mml.scriptName')} span={2}>{detailScript.scriptName}</Descriptions.Item><Descriptions.Item label={t('mml.description')} span={2}>{detailScript.description || '-'}</Descriptions.Item><Descriptions.Item label={t('mml.creator')}>{detailScript.creator || '-'}</Descriptions.Item><Descriptions.Item label={t('mml.updateTime')}>{formatTime(detailScript.updateTime)}</Descriptions.Item><Descriptions.Item label={t('mml.script.originalFile')}>{detailScript.originalFilename || '-'}</Descriptions.Item><Descriptions.Item label={t('mml.script.validationVersion')}>{detailScript.validationVersion || '-'}</Descriptions.Item></Descriptions>
+        <Typography.Text strong>{t('mml.script.readOnlyTxtContent')}</Typography.Text>
+        {detailScript.content ? <pre style={{ whiteSpace: 'pre-wrap', maxHeight: 280, overflow: 'auto' }}>{detailScript.content}</pre> : <Empty description={t('mml.script.noContent')} />}
         {detailScript.validationSummary ? <ScriptImportPreview validation={{ planItems: detailScript.planItems ?? [], issues: detailScript.validationIssues ?? [], summary: detailScript.validationSummary, originalFilename: detailScript.originalFilename }} /> : null}
       </Space></Spin> : null}
     </Drawer>
     <ScriptExecutionDrawer open={Boolean(execScript)} script={execScript} onClose={() => setExecScript(null)} onSuccess={() => void refetch()} />
-    <Modal title="编辑脚本基本信息" open={Boolean(editing)} onCancel={closeBasic} onOk={() => void saveBasic()} confirmLoading={updateMutation.isPending}>
-      <Form form={basicForm} layout="vertical"><Form.Item label="脚本名称" name="scriptName" rules={[{ required: true, message: '请输入脚本名称' }]}><Input /></Form.Item><Form.Item label="描述" name="description"><Input /></Form.Item></Form>
+    <Modal title={t('mml.script.editBasicInfo')} open={Boolean(editing)} onCancel={closeBasic} onOk={() => void saveBasic()} confirmLoading={updateMutation.isPending} okText={t('common.save')} cancelText={t('common.cancel')}>
+      <Form form={basicForm} layout="vertical"><Form.Item label={t('mml.scriptName')} name="scriptName" rules={[{ required: true, message: t('mml.inputScriptName') }]}><Input /></Form.Item><Form.Item label={t('mml.description')} name="description"><Input /></Form.Item></Form>
     </Modal>
   </ListPageLayout>;
 }
