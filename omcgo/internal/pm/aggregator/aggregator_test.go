@@ -763,7 +763,7 @@ func Test_AggregateKPIs_NormalizesBeforeInsert(t *testing.T) {
 	_, err := a.AggregateKPIs(context.Background(), "pm_metrics_hourly", w)
 	require.NoError(t, err)
 	require.Len(t, db.execArgs, 9)
-	assert.Equal(t, float64(3), db.execArgs[3], "number KPI 应按默认 intHalfUp 规范化后写入")
+	assert.Equal(t, float64(2.5), db.execArgs[3], "avg KPI 即使 unit=number 也必须保留平均值小数")
 }
 
 // ---------------------------------------------------------------------------

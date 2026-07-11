@@ -172,3 +172,99 @@ WHERE device_oui=$1 AND device_sn=$2 AND metric_path=$3`,
 	require.NoError(t, err)
 	assert.InDelta(t, 125.0, aggValue, 0.001)
 }
+
+// #31/#32/#33：完整业务日必须包含 24 个 hourly 源桶；sum/avg 结果与上海本地
+// [00:00, 24:00) 桶边界必须同时正确。历史独立 daily cron 会抢在最后一个 hourly
+// 桶完成前执行，固定漏最后一小时；本测试锁住链式触发后的最终聚合口径。
+func Test_Integration_DailyAggregateCounters_CompleteBusinessDay(t *testing.T) {
+	dsn := os.Getenv("OMCGO_DB_DSN")
+	if dsn == "" {
+		t.Skip("OMCGO_DB_DSN not set; skipping integration test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	defer pool.Close()
+
+	const (
+		testOUI = "ISSUE31"
+		testSN  = "ISSUE31-33-DAILY-001"
+		sumPath = "C010070002"
+		avgPath = "C010070004"
+	)
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	localStart := time.Date(2026, 7, 10, 0, 0, 0, 0, loc)
+	localEnd := localStart.AddDate(0, 0, 1)
+	bucketStart := localStart.UTC()
+	bucketEnd := localEnd.UTC()
+
+	cleanup := func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM pm_metrics_hourly WHERE device_oui=$1 AND device_sn=$2`, testOUI, testSN)
+		_, _ = pool.Exec(ctx, `DELETE FROM pm_metrics_daily WHERE device_oui=$1 AND device_sn=$2`, testOUI, testSN)
+	}
+	cleanup()
+	defer cleanup()
+
+	for i := 0; i < 24; i++ {
+		start := bucketStart.Add(time.Duration(i) * time.Hour)
+		end := start.Add(time.Hour)
+		for _, metric := range []struct {
+			path   string
+			statis string
+		}{
+			{path: sumPath, statis: "sum"},
+			{path: avgPath, statis: "avg"},
+		} {
+			_, err = pool.Exec(ctx, `
+INSERT INTO pm_metrics_hourly
+    (device_oui, device_sn, metric_path, metric_type, metric_value, statis_type,
+     granularity, time, start_time, end_time, object_ldn)
+VALUES ($1, $2, $3, 'counter', $4, $5, 'hourly', $6, $6, $7, '')`,
+				testOUI, testSN, metric.path, float64(i+1), metric.statis, start, end)
+			require.NoError(t, err)
+		}
+	}
+
+	a := NewWithPool(pool, nil, nil)
+	w := WindowSpec{Granularity: metrics.GranularityDaily, Start: bucketStart, End: bucketEnd}
+	n, err := a.AggregateCounters(ctx, "pm_metrics_hourly", "pm_metrics_daily", w)
+	require.NoError(t, err)
+	require.Equal(t, 2, n)
+
+	type dailyRow struct {
+		value            float64
+		start, end, time time.Time
+	}
+	rows := make(map[string]dailyRow, 2)
+	dbRows, err := pool.Query(ctx, `
+SELECT metric_path, metric_value, start_time, end_time, time
+FROM pm_metrics_daily
+WHERE device_oui=$1 AND device_sn=$2
+ORDER BY metric_path`, testOUI, testSN)
+	require.NoError(t, err)
+	defer dbRows.Close()
+	for dbRows.Next() {
+		var path string
+		var row dailyRow
+		require.NoError(t, dbRows.Scan(&path, &row.value, &row.start, &row.end, &row.time))
+		rows[path] = row
+	}
+	require.NoError(t, dbRows.Err())
+	require.Len(t, rows, 2)
+
+	assert.InDelta(t, 300.0, rows[sumPath].value, 0.001, "sum(1..24) must include the last hourly bucket")
+	assert.InDelta(t, 12.5, rows[avgPath].value, 0.001, "avg(1..24) must include the last hourly bucket")
+	for _, path := range []string{sumPath, avgPath} {
+		row := rows[path]
+		assert.True(t, row.start.Equal(bucketStart), "%s start=%s", path, row.start)
+		assert.True(t, row.time.Equal(bucketStart), "%s time=%s", path, row.time)
+		assert.True(t, row.end.Equal(bucketEnd), "%s end=%s", path, row.end)
+		assert.Equal(t, 0, row.start.In(loc).Hour())
+		assert.Equal(t, 0, row.end.In(loc).Hour())
+		assert.Equal(t, localStart.Day(), row.start.In(loc).Day())
+		assert.Equal(t, localEnd.Day(), row.end.In(loc).Day())
+	}
+}
