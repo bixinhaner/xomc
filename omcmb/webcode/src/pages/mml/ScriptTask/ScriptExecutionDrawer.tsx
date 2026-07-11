@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Button, Checkbox, DatePicker, Drawer, Form, Input, InputNumber, Modal, Radio, Space, TimePicker, Typography, message } from 'antd';
-import dayjs, { type Dayjs } from 'dayjs';
+import type { Dayjs } from 'dayjs';
 import type { MMLExecuteType, MMLScript, MMLScriptImportValidation, MMLScriptExecutionInput } from '@core/types/mml';
 import { useCreateMMLScriptExecution } from '@core/hooks/api/useMML';
 import { useUserStore } from '@core/store/userStore';
 import { useT } from '@/hooks/useT';
 import ScriptImportPreview from './ScriptImportPreview';
+import { buildMmlScriptDefaultTaskName } from '../utils/defaultTaskName';
 
 export interface ScriptExecutionDrawerProps {
   open: boolean;
@@ -45,8 +46,7 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
 
   useEffect(() => {
     if (!open) return;
-    const taskOwner = currentUser?.username || currentUser?.displayName || 'user';
-    const taskName = script ? `${t('mml.scriptExecution.defaultTaskNamePrefix')}_${taskOwner}_${dayjs().format('YYYY-MM-DD HH:mm:ss')}` : '';
+    const taskName = script ? buildMmlScriptDefaultTaskName(t('mml.scriptExecution.defaultTaskNamePrefix'), currentUser) : '';
     form.setFieldsValue({ taskName, executeType: 'immediate', offlineRetry: false, offlineRetryWait: 60, failedRetry: false, failedRetryCount: 3, failedRetryInterval: 5 });
     setValidation(null); setWarningValues(null); setErrorCodes([]);
   }, [currentUser?.displayName, currentUser?.username, form, open, script, t]);

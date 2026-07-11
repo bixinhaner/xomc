@@ -19,6 +19,7 @@ import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 
 import { useCreateMMLTask } from '@core/hooks/api/useMML';
+import { useUserStore } from '@core/store/userStore';
 import type { MMLExecuteType, MMLTaskPlanItem } from '@core/types/mml';
 import { parseMmlScriptPlan } from '@core/utils/mmlScriptPlanParser';
 import type { MMLScriptPlanParseResult } from '@core/utils/mmlScriptPlanParser';
@@ -32,6 +33,7 @@ import { useT } from '@/hooks/useT';
 import { toast } from '@/utils/toast';
 import DeviceSelectModal from '../Console/components/DeviceSelectModal';
 import PaginatedDeviceSnList from './PaginatedDeviceSnList';
+import { buildMmlScriptDefaultTaskName } from '../utils/defaultTaskName';
 
 // -----------------------------------------------------------------------------
 // "新建 MML 脚本任务" Drawer —— 由 任务记录（TaskRecord）页"新建任务"入口调用；
@@ -117,6 +119,7 @@ export default function ScriptTaskDrawer({
   onSuccess,
 }: ScriptTaskDrawerProps) {
   const t = useT();
+  const currentUser = useUserStore((state) => state.currentUser);
   const [form] = Form.useForm<TaskForm>();
   const executeType = Form.useWatch('executeType', form);
 
@@ -139,7 +142,7 @@ export default function ScriptTaskDrawer({
     if (!open) return;
     form.resetFields();
     form.setFieldsValue({
-      taskName: prefillTaskName || `MML任务_${dayjs().format('YYYY-MM-DD HH:mm:ss')}`,
+      taskName: prefillTaskName || buildMmlScriptDefaultTaskName(t('mml.scriptExecution.defaultTaskNamePrefix'), currentUser),
       executeType: 'immediate',
       offlineRetryEnable: false,
       offlineRetryWaitTime: 60,
@@ -154,7 +157,7 @@ export default function ScriptTaskDrawer({
     const nextParse = initial ? parseMmlScriptPlan(initial, { format: 'text' }) : EMPTY_PARSE_RESULT;
     setParseResult(nextParse);
     setDeviceSns(nextParse.executeMode === 'device_bound' ? nextParse.deviceSns : initialDeviceSns);
-  }, [open, prefillContent, prefillTaskName, prefillDeviceSns, form]);
+  }, [currentUser?.displayName, currentUser?.username, form, open, prefillContent, prefillDeviceSns, prefillTaskName, t]);
 
   // 用户在 Console 入口手动改命令时，实时同步解析结果。
   const handleScriptContentChange = useCallback((value: string) => {

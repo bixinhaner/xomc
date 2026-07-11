@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Button, Descriptions, Drawer, Dropdown, Empty, Form, Input, Modal, Space, Spin, Tag, Typography, message } from 'antd';
+import { Button, Descriptions, Drawer, Dropdown, Empty, Form, Input, Modal, Space, Spin, Typography, message } from 'antd';
 import type { MenuProps } from 'antd';
 import { DeleteOutlined, DownloadOutlined, EditOutlined, EyeOutlined, MoreOutlined, PlayCircleOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -52,11 +52,14 @@ export default function ScriptTask() {
     updateMutation.mutate({ id: editing.id, data: { scriptName: values.scriptName.trim(), description: values.description ?? '' } }, { onSuccess: () => { void refetch(); closeBasic(); void message.success('保存成功'); } });
   };
   const columns: DataTableColumn<MMLScript>[] = [
+    { key: 'scriptName', title: t('mml.scriptName'), dataIndex: 'scriptName', ellipsis: true },
+    { key: 'description', title: t('mml.description'), dataIndex: 'description', ellipsis: true, render: (value) => String(value || '-') },
+    { key: 'creator', title: t('mml.creator'), dataIndex: 'creator', width: 100 },
+    { key: 'updatedAt', title: t('mml.updateTime'), dataIndex: 'updateTime', width: 170, render: (value) => formatTime(value as string) },
     {
       key: 'operation',
       title: t('table.operation'),
       width: 120,
-      fixed: 'right',
       render: (_, record) => {
         const openEdit = () => {
           setEditing(record);
@@ -84,11 +87,6 @@ export default function ScriptTask() {
         </Space>;
       },
     },
-    { key: 'scriptName', title: t('mml.scriptName'), dataIndex: 'scriptName', ellipsis: true },
-    { key: 'description', title: t('mml.description'), dataIndex: 'description', ellipsis: true, render: (value) => String(value || '-') },
-    { key: 'creator', title: t('mml.creator'), dataIndex: 'creator', width: 100 },
-    { key: 'updatedAt', title: t('mml.updateTime'), dataIndex: 'updateTime', width: 170, render: (value) => formatTime(value as string) },
-    { key: 'status', title: '状态', dataIndex: 'status', width: 100, render: (value) => <Tag>{String(value || '-')}</Tag> },
   ];
 
   return <ListPageLayout title={t('nav.mml.script')} extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => setImportOpen(true)}>导入 TXT</Button>}>
