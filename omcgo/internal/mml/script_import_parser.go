@@ -218,9 +218,10 @@ func parseScriptCommand(raw string) (operation, commandCode string, parameters m
 		return "", "", nil, fmt.Errorf("operation and command code must be separated by whitespace")
 	}
 
-	operation = strings.ToUpper(strings.TrimSpace(raw[:firstSpace]))
-	if !validScriptOperation(operation) {
-		return "", "", nil, fmt.Errorf("unsupported operation %q", operation)
+	rawOperation := strings.ToUpper(strings.TrimSpace(raw[:firstSpace]))
+	operation = normalizeScriptOperation(rawOperation)
+	if operation == "" {
+		return "", "", nil, fmt.Errorf("unsupported operation %q", rawOperation)
 	}
 	rest := strings.TrimSpace(raw[firstSpace:])
 	if rest == "" {
@@ -252,11 +253,17 @@ func parseScriptCommand(raw string) (operation, commandCode string, parameters m
 }
 
 func validScriptOperation(operation string) bool {
+	return normalizeScriptOperation(operation) != ""
+}
+
+func normalizeScriptOperation(operation string) string {
 	switch operation {
 	case "LST", "MOD", "ADD", "RMV":
-		return true
+		return operation
+	case "DEL":
+		return "RMV"
 	default:
-		return false
+		return ""
 	}
 }
 

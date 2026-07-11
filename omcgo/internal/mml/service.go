@@ -853,6 +853,7 @@ func (s *Service) normalizePlanItems(ctx context.Context, items []MMLPlanItem) (
 		if _, exists := command["parameters"]; !exists {
 			command["parameters"] = map[string]interface{}{}
 		}
+		attachObjectNameParamFromTarget(command)
 		if commandString(command, "command_code") == "" && commandString(command, "rpc_method") == "" {
 			return nil, nil, nil, fmt.Errorf("plan_items[%d].command.command_code required: %w", idx, commonerrors.ErrInvalidInput)
 		}
@@ -1589,6 +1590,34 @@ func (s *Service) attachObjectNameParam(entry map[string]interface{}, cmd *MMLCo
 	}
 
 	targetObject := strings.TrimSpace(cmd.TargetObject)
+	if !strings.HasSuffix(targetObject, ".") {
+		targetObject += "."
+	}
+	params["object_name"] = targetObject
+	entry["parameters"] = params
+}
+
+func attachObjectNameParamFromTarget(entry map[string]interface{}) {
+	if entry == nil {
+		return
+	}
+	targetObject := strings.TrimSpace(commandString(entry, "target_object"))
+	if targetObject == "" {
+		return
+	}
+	method := strings.TrimSpace(commandString(entry, "rpc_method"))
+	op := strings.ToUpper(strings.TrimSpace(commandString(entry, "operation_type")))
+	if method != "AddObject" && method != "DeleteObject" && op != "ADD" && op != "RMV" && op != "DEL" {
+		return
+	}
+
+	params := commandParameters(entry)
+	if params == nil {
+		params = map[string]interface{}{}
+	}
+	if existing, ok := params["object_name"].(string); ok && strings.TrimSpace(existing) != "" {
+		return
+	}
 	if !strings.HasSuffix(targetObject, ".") {
 		targetObject += "."
 	}
