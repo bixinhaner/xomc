@@ -11,6 +11,11 @@ export interface CellFeedback {
   notifiedFailedTaskId?: string;
 }
 
+export interface MultiPendingAddRow {
+  tempId: string;
+  values: Record<string, string>;
+}
+
 export interface MultiFeedback {
   kind: 'multi';
   /** add_rollback:add 阶段 AddObject 成功但 SPV 部分参数被拒,顶层 useEffect 触发的自动 DeleteObject。 */
@@ -29,6 +34,14 @@ export interface MultiFeedback {
   savedInstId?: string;
   /** 批量 save 动作:一次保存多个新增实例时,在任务完成后一起清掉乐观编辑态。 */
   savedInstIds?: string[];
+  /** 批量提交动作拆分:新增成功后应出现在回读列表中的实例号。 */
+  addedInstIds?: string[];
+  /** 批量提交动作拆分:删除成功后应从回读列表消失的实例号。 */
+  deletedInstIds?: string[];
+  /** 批量提交动作拆分:编辑成功后需要清掉本地编辑态的实例号。 */
+  editedInstIds?: string[];
+  /** 批量新增已提交但还未完成基站回读时,继续在表格中展示的本地行快照。 */
+  pendingAddRows?: MultiPendingAddRow[];
   /** save 动作来源:区分新增后的 SPV 与编辑已有实例的 SPV,避免把编辑失败误当新增失败回滚。 */
   saveMode?: 'add' | 'edit';
   /** BSC add 动作:AddObject 创建出来的实例号,用于 SPV 失败时自动回滚 DeleteObject。 */

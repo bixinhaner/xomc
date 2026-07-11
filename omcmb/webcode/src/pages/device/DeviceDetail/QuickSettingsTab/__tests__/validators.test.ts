@@ -5,6 +5,7 @@ import {
   formatLteBandwidthDisplay,
   LTE_BANDWIDTH_PATH,
   resolveQuickSettingsParameterType,
+  validateLteQOffsetValue,
   validateValue,
   validateMmeIp,
   validateMmeIpPlmnLimit,
@@ -34,6 +35,20 @@ describe('LTE bandwidth display formatting', () => {
   it('maps BM RU RF switch values to on/off labels', () => {
     expect(formatEnumDisplayValue('1', undefined, BM_RU_RF_SWITCH_PATH)).toBe('开');
     expect(formatEnumDisplayValue('0', undefined, BM_RU_RF_SWITCH_PATH)).toBe('关');
+  });
+});
+
+describe('LTE QOffset validation', () => {
+  it('accepts even values in the device-supported range', () => {
+    expect(validateLteQOffsetValue('-24')).toBeNull();
+    expect(validateLteQOffsetValue('0')).toBeNull();
+    expect(validateLteQOffsetValue('24')).toBeNull();
+  });
+
+  it('rejects odd and out-of-range values before SPV', () => {
+    expect(validateLteQOffsetValue('23')).toBe('QOffset 仅支持 -24 到 24 的偶数');
+    expect(validateLteQOffsetValue('26')).toBe('QOffset 仅支持 -24 到 24 的偶数');
+    expect(validateLteQOffsetValue('-25')).toBe('QOffset 仅支持 -24 到 24 的偶数');
   });
 });
 
