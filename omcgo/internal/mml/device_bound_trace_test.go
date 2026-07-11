@@ -87,6 +87,54 @@ func TestDeviceTaskRowToResultMap_CommonCommandScriptText(t *testing.T) {
 	}
 }
 
+func TestDeviceTaskRowToResultMap_IncludesRequestAndResponseMessages(t *testing.T) {
+	task := &MMLTask{
+		ExecuteMode: TaskExecuteModeCommon,
+		Commands: []map[string]interface{}{
+			{
+				"command_code":   "MOD MANAGEMENT_SERVER",
+				"operation_type": "MOD",
+			},
+		},
+	}
+	rawResult, err := json.Marshal(map[string]interface{}{
+		"method":       "SetParameterValuesResponse",
+		"raw_response": "<soap:Envelope><soap:Body><cwmp:SetParameterValuesResponse/></soap:Body></soap:Envelope>",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := DeviceTaskResultRowView{
+		DeviceTaskID: "device-task-1",
+		DeviceSN:     "SN001",
+		Method:       "SetParameterValues",
+		Params:       json.RawMessage(`{"values":[{"name":"Device.ManagementServer.URL","value":"http://localhost:8080/smallcell/AcsService","type":"xsd:string"}]}`),
+		CommandKey:   "mml-device-task-1",
+		CWMPID:       "ID:intrnl.unset.id.SetParameterValues1780000000.123456",
+		Status:       "completed",
+		CommandIndex: 0,
+		Result:       rawResult,
+	}
+
+	got := deviceTaskRowToResultMap(row, task)
+	if got["request_method"] != "SetParameterValues" {
+		t.Fatalf("request_method = %v, want SetParameterValues", got["request_method"])
+	}
+	if got["request_cwmp_id"] != "ID:intrnl.unset.id.SetParameterValues1780000000.123456" {
+		t.Fatalf("request_cwmp_id = %v", got["request_cwmp_id"])
+	}
+	rawRequest, _ := got["raw_request"].(string)
+	if !strings.Contains(rawRequest, "<cwmp:SetParameterValues>") {
+		t.Fatalf("raw_request = %q, want SetParameterValues SOAP", rawRequest)
+	}
+	if !strings.Contains(rawRequest, "Device.ManagementServer.URL") {
+		t.Fatalf("raw_request = %q, want rendered parameter", rawRequest)
+	}
+	if got["raw_output"] != "<soap:Envelope><soap:Body><cwmp:SetParameterValuesResponse/></soap:Body></soap:Envelope>" {
+		t.Fatalf("raw_output = %v, want raw response", got["raw_output"])
+	}
+}
+
 func TestBuildDeviceBoundPlanCSV(t *testing.T) {
 	taskID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	task := &MMLTask{

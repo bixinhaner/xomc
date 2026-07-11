@@ -6077,6 +6077,8 @@ const messages: Record<string, string> = {
   'mml.resultDetailTitle':                   '执行详情 - {device}',
   'mml.messageDisplay':                      '报文展示',
   'mml.rawMessageTitle':                     '报文展示 - {device}',
+  'mml.requestMessage':                      '下发报文',
+  'mml.responseMessage':                     '返回报文',
   'mml.description':                         '描述',
   'mml.searchDeviceSn':                      '搜索基站编码/名称',
   'mml.noMatchResult':                       '未找到匹配结果',

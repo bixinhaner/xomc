@@ -96,6 +96,14 @@ export interface MMLResult {
 
 export type DeviceResultStatus = 'completed' | 'running' | 'pending';
 
+export interface MMLTaskRequestMessage {
+  method: string;
+  payload?: unknown;
+  rawRequest?: string;
+  cwmpId?: string;
+  commandKey?: string;
+}
+
 export interface DeviceTaskResultItem {
   deviceSn: string;
   /** device_tasks.id —— 子任务 ID（每条 RPC 一个；详情页「PATH 列表」复制用） */
@@ -112,6 +120,7 @@ export interface DeviceTaskResultItem {
   deviceName?: string;
   mmlScript?: string;
   status?: DeviceResultStatus;
+  request?: MMLTaskRequestMessage;
   result: MMLResult;
   failReason?: string;
   startedAt?: string;

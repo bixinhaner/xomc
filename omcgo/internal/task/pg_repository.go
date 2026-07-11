@@ -653,6 +653,10 @@ WHERE source = 'mml' AND source_id = $1`
 type DeviceTaskResultRow struct {
 	ID           string // device_tasks.id（CSV 导出「子任务ID」、区分整体/逐 PATH 报文归属）
 	DeviceSN     string
+	Method       string
+	Params       json.RawMessage
+	CommandKey   string
+	CWMPID       string
 	Status       string
 	ErrorCode    int
 	ErrorMessage string
@@ -690,7 +694,7 @@ WHERE source = 'mml' AND source_id = $1`
 	}
 
 	const listQ = `
-SELECT id, device_sn, status,
+SELECT id, device_sn, method, params, COALESCE(command_key, ''), COALESCE(cwmp_id, ''), status,
        COALESCE(error_code, 0), COALESCE(error_message, ''),
        result, sent_at, completed_at, created_at,
        COALESCE(command_index, 0), COALESCE(device_index, 0)
@@ -707,14 +711,17 @@ LIMIT $2 OFFSET $3`
 	items := make([]DeviceTaskResultRow, 0, pageSize)
 	for rows.Next() {
 		var row DeviceTaskResultRow
-		var raw []byte
+		var params, raw []byte
 		if err := rows.Scan(
-			&row.ID, &row.DeviceSN, &row.Status,
+			&row.ID, &row.DeviceSN, &row.Method, &params, &row.CommandKey, &row.CWMPID, &row.Status,
 			&row.ErrorCode, &row.ErrorMessage,
 			&raw, &row.SentAt, &row.CompletedAt, &row.CreatedAt,
 			&row.CommandIndex, &row.DeviceIndex,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scan device task row: %w", err)
+		}
+		if len(params) > 0 {
+			row.Params = json.RawMessage(params)
 		}
 		if len(raw) > 0 {
 			row.Result = json.RawMessage(raw)

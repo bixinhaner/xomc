@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/global"
+	acsrpc "github.com/omcgo/omcgo/internal/acs/rpc"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 )
@@ -1848,6 +1849,10 @@ type TaskResultStatsRepository interface {
 type DeviceTaskResultRowView struct {
 	DeviceTaskID string // device_tasks.id（CSV 导出「子任务ID」）
 	DeviceSN     string
+	Method       string
+	Params       json.RawMessage
+	CommandKey   string
+	CWMPID       string
 	Status       string
 	ErrorCode    int
 	ErrorMessage string
@@ -2753,6 +2758,23 @@ func deviceTaskRowToResultMap(row DeviceTaskResultRowView, task *MMLTask) map[st
 		"device_index":   row.DeviceIndex,
 		"success":        row.Status == "completed" && row.ErrorCode == 0,
 	}
+	if row.Method != "" {
+		m["request_method"] = row.Method
+	}
+	if row.CommandKey != "" {
+		m["request_command_key"] = row.CommandKey
+	}
+	if row.CWMPID != "" {
+		m["request_cwmp_id"] = row.CWMPID
+	}
+	if len(row.Params) > 0 {
+		if requestPayload, ok := decodeJSONRaw(row.Params); ok {
+			m["request_payload"] = requestPayload
+		}
+	}
+	if rawRequest := buildDeviceTaskRawRequest(row); rawRequest != "" {
+		m["raw_request"] = rawRequest
+	}
 	var command map[string]interface{}
 	var rawLine string
 	if task != nil && task.ExecuteMode == TaskExecuteModeDeviceBound &&
@@ -2818,4 +2840,51 @@ func deviceTaskRowToResultMap(row DeviceTaskResultRowView, task *MMLTask) map[st
 		}
 	}
 	return m
+}
+
+func decodeJSONRaw(raw json.RawMessage) (interface{}, bool) {
+	if len(raw) == 0 {
+		return nil, false
+	}
+	var out interface{}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return string(raw), true
+	}
+	return out, true
+}
+
+func buildDeviceTaskRawRequest(row DeviceTaskResultRowView) string {
+	if row.Method == "" {
+		return ""
+	}
+	cwmpID := row.CWMPID
+	if cwmpID == "" {
+		cwmpID = "<pending-cwmp-id>"
+	}
+	req, err := acsrpc.NewDispatcher().BuildRequest(&acsrpc.Command{
+		ID:         row.DeviceTaskID,
+		Method:     row.Method,
+		Params:     row.Params,
+		CommandKey: row.CommandKey,
+	}, cwmpID)
+	if err == nil && len(req) > 0 {
+		return string(req)
+	}
+	fallback := map[string]interface{}{
+		"method": row.Method,
+	}
+	if row.CommandKey != "" {
+		fallback["command_key"] = row.CommandKey
+	}
+	if row.CWMPID != "" {
+		fallback["cwmp_id"] = row.CWMPID
+	}
+	if payload, ok := decodeJSONRaw(row.Params); ok {
+		fallback["params"] = payload
+	}
+	data, marshalErr := json.MarshalIndent(fallback, "", "  ")
+	if marshalErr != nil {
+		return row.Method
+	}
+	return string(data)
 }
