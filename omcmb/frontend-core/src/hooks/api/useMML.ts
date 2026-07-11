@@ -248,6 +248,16 @@ export function useDeleteMMLTask() {
   });
 }
 
+export function useDeleteMMLTasks() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => api.deleteTasks(ids),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['mml', 'tasks'] });
+    },
+  });
+}
+
 // --- Task polling hook ---
 
 const TERMINAL_STATES: string[] = ['completed', 'failed', 'cancelled'];

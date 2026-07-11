@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
+import type { Key } from 'react';
 import { Button, Descriptions, Drawer, Dropdown, Empty, Form, Input, Modal, Space, Spin, Typography, message } from 'antd';
 import type { MenuProps } from 'antd';
-import { DeleteOutlined, DownloadOutlined, EditOutlined, EyeOutlined, MoreOutlined, PlayCircleOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
+import { DeleteOutlined, DownloadOutlined, EditOutlined, EyeOutlined, MoreOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
@@ -37,6 +38,7 @@ export default function ScriptTask() {
   const [viewing, setViewing] = useState<MMLScript | null>(null);
   const [execScript, setExecScript] = useState<MMLScript | null>(null);
   const [editing, setEditing] = useState<MMLScript | null>(null);
+  const [selectedScriptIds, setSelectedScriptIds] = useState<Key[]>([]);
   const [basicForm] = Form.useForm<BasicForm>();
   const { data, isLoading, refetch } = useMMLScripts({ page, pageSize, search: search.trim() || undefined });
   const { data: detail, isFetching } = useMMLScriptById(viewing?.id ?? '');
@@ -51,6 +53,33 @@ export default function ScriptTask() {
     const values = await basicForm.validateFields();
     updateMutation.mutate({ id: editing.id, data: { scriptName: values.scriptName.trim(), description: values.description ?? '' } }, { onSuccess: () => { void refetch(); closeBasic(); void message.success(t('common.saveSuccess')); } });
   };
+
+  const confirmBatchDelete = () => {
+    const ids = selectedScriptIds.map(String);
+    if (ids.length === 0) return;
+    Modal.confirm({
+      title: t('common.confirmDelete'),
+      content: t('mml.confirmBatchDeleteScripts', { count: ids.length }),
+      okText: t('common.delete'),
+      cancelText: t('common.cancel'),
+      okButtonProps: { danger: true },
+      onOk: () => new Promise<void>((resolve, reject) => {
+        deleteMutation.mutate(ids, {
+          onSuccess: () => {
+            setSelectedScriptIds([]);
+            void refetch();
+            void message.success(t('common.deleteSuccess'));
+            resolve();
+          },
+          onError: (error) => {
+            void message.error(t('common.deleteFailed'));
+            reject(error);
+          },
+        });
+      }),
+    });
+  };
+
   const columns: DataTableColumn<MMLScript>[] = [
     {
       key: 'operation',
@@ -67,7 +96,14 @@ export default function ScriptTask() {
           okText: t('common.delete'),
           cancelText: t('common.cancel'),
           okButtonProps: { danger: true },
-          onOk: () => new Promise<void>((resolve, reject) => deleteMutation.mutate([record.id], { onSuccess: () => { void refetch(); resolve(); }, onError: reject })),
+          onOk: () => new Promise<void>((resolve, reject) => deleteMutation.mutate([record.id], {
+            onSuccess: () => {
+              setSelectedScriptIds((prev) => prev.filter((id) => id !== record.id));
+              void refetch();
+              resolve();
+            },
+            onError: reject,
+          })),
         });
         const items: MenuProps['items'] = [
           { key: 'view', label: t('mml.script.action.viewDetail'), icon: <EyeOutlined />, onClick: () => setViewing(record) },
@@ -92,8 +128,45 @@ export default function ScriptTask() {
   ];
 
   return <ListPageLayout title={t('nav.mml.script')} extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => setImportOpen(true)}>{t('mml.script.action.importTxt')}</Button>}>
-    <SearchInput placeholder={t('mml.scriptName')} allowClear style={{ width: 300, marginBottom: 16 }} onSearch={(value) => { setSearch(value); setPage(1); }} />
-    <DataTable<MMLScript> tableId="mml-scripts" columns={columns} dataSource={scripts} loading={isLoading} rowKey="id" total={data?.total ?? 0} currentPage={page} pageSize={pageSize} onPageChange={(nextPage, nextSize) => { setPage(nextPage); setPageSize(nextSize); }} onRefresh={() => void refetch()} scroll={{ x: 1200 }} />
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+      <SearchInput placeholder={t('mml.scriptName')} allowClear style={{ width: 300 }} onSearch={(value) => { setSearch(value); setPage(1); }} />
+      <Space size={8} wrap>
+        {selectedScriptIds.length > 0 ? (
+          <Typography.Text type="secondary">
+            {t('table.selected', { count: selectedScriptIds.length })}
+          </Typography.Text>
+        ) : null}
+        <Button
+          danger
+          disabled={selectedScriptIds.length === 0}
+          icon={<DeleteOutlined />}
+          loading={deleteMutation.isPending}
+          onClick={confirmBatchDelete}
+        >
+          {t('common.batchDelete')}
+        </Button>
+        <Button icon={<ReloadOutlined />} onClick={() => void refetch()}>
+          {t('common.refresh')}
+        </Button>
+      </Space>
+    </div>
+    <DataTable<MMLScript>
+      tableId="mml-scripts"
+      columns={columns}
+      dataSource={scripts}
+      loading={isLoading}
+      rowKey="id"
+      selectable
+      selectedRowKeys={selectedScriptIds}
+      onSelectionChange={(keys) => setSelectedScriptIds(keys)}
+      preserveSelectedRowKeys
+      total={data?.total ?? 0}
+      currentPage={page}
+      pageSize={pageSize}
+      onPageChange={(nextPage, nextSize) => { setPage(nextPage); setPageSize(nextSize); }}
+      hideToolbar
+      scroll={{ x: 1200 }}
+    />
     <ScriptImportModal open={importOpen || Boolean(reimporting)} script={reimporting} onClose={() => { setImportOpen(false); setReimporting(null); }} onSaved={() => { setImportOpen(false); setReimporting(null); void refetch(); }} />
     <Drawer title={detailScript?.scriptName || t('mml.scriptDetail')} open={Boolean(viewing)} onClose={() => setViewing(null)} width={820} destroyOnHidden>
       {detailScript ? <Spin spinning={isFetching}><Space direction="vertical" size={16} style={{ width: '100%' }}>

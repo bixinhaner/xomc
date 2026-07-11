@@ -6025,6 +6025,8 @@ const messages: Record<string, string> = {
   'mml.lifecycleNotWired':                   'Script-level lifecycle actions are not wired to the backend yet. Please execute from the MML Console.',
   'mml.confirmDeleteScript':                 'Delete script "{name}"? This action cannot be undone.',
   'mml.confirmDeleteTask':                   'Delete task record "{name}"? This action cannot be undone.',
+  'mml.confirmBatchDeleteScripts':           'Delete {count} selected script(s)? This action cannot be undone.',
+  'mml.confirmBatchDeleteTasks':             'Delete {count} selected task record(s)? The corresponding execution results will also be removed. This action cannot be undone.',
   'mml.confirmCancelTitle':                  'Confirm Cancellation',
   'mml.confirmCancelScript':                 'Terminate script "{name}"? The current execution will be interrupted.',
   // duplicates of mml.startFailed/pauseFailed/cancelFailed removed; canonical

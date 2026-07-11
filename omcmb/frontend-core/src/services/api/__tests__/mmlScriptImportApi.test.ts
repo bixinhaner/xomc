@@ -1,24 +1,37 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getMock, postMock, putMock } = vi.hoisted(() => ({
+const { deleteMock, getMock, postMock, putMock } = vi.hoisted(() => ({
+  deleteMock: vi.fn(),
   getMock: vi.fn(),
   postMock: vi.fn(),
   putMock: vi.fn(),
 }));
 
 vi.mock('../../http', () => ({
-  default: { get: getMock, post: postMock, put: putMock },
+  default: { delete: deleteMock, get: getMock, post: postMock, put: putMock },
 }));
 
 import { mmlApi } from '../mmlApi';
 
 beforeEach(() => {
+  deleteMock.mockReset();
   getMock.mockReset();
   postMock.mockReset();
   putMock.mockReset();
 });
 
 describe('mmlApi TXT script import', () => {
+  it('deletes selected MML task records with the existing task delete endpoint', async () => {
+    deleteMock.mockResolvedValue({});
+
+    await mmlApi.deleteTasks(['task-a', 'task-b']);
+
+    expect(deleteMock.mock.calls).toEqual([
+      ['/mml/tasks/task-a'],
+      ['/mml/tasks/task-b'],
+    ]);
+  });
+
   it('filters MML task records by task origin and maps the returned origin', async () => {
     getMock.mockResolvedValue({
       data: {
