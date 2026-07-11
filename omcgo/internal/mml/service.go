@@ -614,6 +614,7 @@ type ExecuteRequest struct {
 	DeviceSNs   []string                 `json:"device_sns"`
 	Parameters  map[string]interface{}   `json:"parameters"`
 	TaskName    string                   `json:"task_name"`
+	RequestID   string                   `json:"request_id,omitempty"`
 	Creator     string                   `json:"creator"`
 	Executor    string                   `json:"executor,omitempty"`
 	Commands    []map[string]interface{} `json:"commands"`
@@ -1229,6 +1230,7 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 
 	task := &MMLTask{
 		TaskName:                req.TaskName,
+		RequestID:               strings.TrimSpace(req.RequestID),
 		ScriptID:                scriptID,
 		DeviceSNs:               deviceSNs,
 		Commands:                commands,

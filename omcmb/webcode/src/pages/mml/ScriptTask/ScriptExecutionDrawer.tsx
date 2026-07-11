@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button, Checkbox, DatePicker, Drawer, Form, Input, InputNumber, Modal, Radio, Space, TimePicker, Typography, message } from 'antd';
 import type { Dayjs } from 'dayjs';
 import type { MMLExecuteType, MMLScript, MMLScriptImportValidation, MMLScriptExecutionInput } from '@core/types/mml';
@@ -26,6 +26,10 @@ interface ExecutionForm {
   failedRetryInterval: number;
 }
 
+function createRequestId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `mml-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 function validationFromError(error: unknown): MMLScriptImportValidation | undefined {
   if (!error || typeof error !== 'object') return undefined;
   const candidate = (error as { validation?: unknown }).validation;
@@ -37,6 +41,9 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
   const [validation, setValidation] = useState<MMLScriptImportValidation | null>(null);
   const [errorCodes, setErrorCodes] = useState<string[]>([]);
   const [warningValues, setWarningValues] = useState<MMLScriptExecutionInput | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const requestIdRef = useRef('');
   const executionMutation = useCreateMMLScriptExecution();
   const executeType = Form.useWatch('executeType', form);
 
@@ -45,15 +52,21 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
     const taskName = script ? buildMmlScriptExecutionTaskName(script.scriptName) : '';
     form.setFieldsValue({ taskName, executeType: 'immediate', offlineRetry: false, offlineRetryWait: 60, failedRetry: false, failedRetryCount: 3, failedRetryInterval: 5 });
     setValidation(null); setWarningValues(null); setErrorCodes([]);
+    setSubmitting(false); submittingRef.current = false; requestIdRef.current = '';
   }, [form, open, script]);
 
   const execute = async (input: MMLScriptExecutionInput) => {
     if (!script) return;
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
+    const requestId = input.requestId || requestIdRef.current || createRequestId();
+    requestIdRef.current = requestId;
     try {
-      const result = await executionMutation.mutateAsync({ id: script.id, input });
+      const result = await executionMutation.mutateAsync({ id: script.id, input: { ...input, requestId } });
       const resultValidation = result.validation;
       if (resultValidation.summary.warningCount > 0 || resultValidation.issues.some((issue) => issue.severity === 'warning')) {
-        setValidation(resultValidation); setWarningValues(input); return;
+        setValidation(resultValidation); setWarningValues({ ...input, requestId }); return;
       }
       setValidation(null); onSuccess?.(); onClose();
     } catch (error) {
@@ -63,11 +76,14 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
         setErrorCodes(errorValidation.issues.filter((issue) => issue.severity === 'error').map((issue) => issue.code));
         const hasValidationErrors = errorValidation.summary.errorCount > 0 || errorValidation.issues.some((issue) => issue.severity === 'error');
         if (!hasValidationErrors && (errorValidation.summary.warningCount > 0 || errorValidation.issues.some((issue) => issue.severity === 'warning'))) {
-          setWarningValues(input);
+          setWarningValues({ ...input, requestId });
           return;
         }
       }
       void message.error(error instanceof Error ? error.message : '执行校验失败');
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
     }
   };
 
@@ -123,7 +139,7 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
           <Form.Item name="failedRetryCount" label="失败重试次数"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
           <Form.Item name="failedRetryInterval" label="失败重试间隔（秒）"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>
         </Space>
-        <Button aria-label="执行" type="primary" htmlType="button" loading={executionMutation.isPending} onClick={() => void submit()}>执行</Button>
+        <Button aria-label="执行" type="primary" htmlType="button" loading={executionMutation.isPending || submitting} disabled={executionMutation.isPending || submitting} onClick={() => void submit()}>执行</Button>
       </Form>
       {errorCodes.length ? <Typography.Text type="danger">{errorCodes.join(', ')}</Typography.Text> : null}
       {validation ? <ScriptImportPreview validation={validation} /> : null}

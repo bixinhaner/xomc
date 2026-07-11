@@ -140,6 +140,9 @@ func (h *Handler) CreateScriptExecution(c *gin.Context) {
 		h.writeScriptImportServiceError(c, err)
 		return
 	}
+	if validation == nil {
+		validation = &ScriptValidationResult{PlanItems: []MMLPlanItem{}, Issues: []ScriptIssue{}}
+	}
 	response.OKWithStatus(c, http.StatusCreated, gin.H{"task": task, "validation": validation})
 }
 

@@ -28,6 +28,7 @@ type CommandRepository interface {
 type ScriptRepository interface {
 	Create(ctx context.Context, script *MMLScript) error
 	GetByID(ctx context.Context, id uuid.UUID) (*MMLScript, error)
+	NameExistsForCreator(ctx context.Context, creator, name string, excludeID *uuid.UUID) (bool, error)
 	Update(ctx context.Context, script *MMLScript) error
 	UpdateLifecycle(ctx context.Context, script *MMLScript) error
 	// UpdateLastRun 只写 last_run_status / last_run_at 两列，避免与 Update / UpdateLifecycle
@@ -52,6 +53,7 @@ type ImportedScriptRepository interface {
 type TaskRepository interface {
 	Create(ctx context.Context, task *MMLTask) error
 	GetByID(ctx context.Context, id uuid.UUID) (*MMLTask, error)
+	GetByRequestID(ctx context.Context, creator, requestID string) (*MMLTask, error)
 	Update(ctx context.Context, task *MMLTask) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status TaskStatus) error
 	IncrementStats(ctx context.Context, id uuid.UUID, successDelta, failedDelta int) error

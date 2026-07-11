@@ -221,6 +221,7 @@ export interface MMLImportedScriptReplaceInput extends MMLImportedScriptCreateIn
 /** 从导入脚本创建任务时允许的调度/重试策略。计划行始终由服务端快照提供。 */
 export interface MMLScriptExecutionInput {
   taskName: string;
+  requestId?: string;
   executeType?: MMLExecuteType;
   scheduledAt?: string;
   periodStart?: string;

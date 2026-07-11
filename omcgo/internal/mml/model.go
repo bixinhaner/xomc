@@ -181,6 +181,7 @@ type MMLPlanItem struct {
 type MMLTask struct {
 	ID                      uuid.UUID                `json:"id"`
 	TaskName                string                   `json:"task_name"`
+	RequestID               string                   `json:"request_id,omitempty"`
 	ScriptID                *uuid.UUID               `json:"script_id,omitempty"`
 	ScriptContentSHA256     string                   `json:"script_content_sha256"`
 	ScriptValidationVersion string                   `json:"script_validation_version"`

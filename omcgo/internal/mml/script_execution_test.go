@@ -46,6 +46,14 @@ func (r *scriptExecutionTaskRepo) GetByID(_ context.Context, id uuid.UUID) (*MML
 	}
 	return nil, commonerrors.ErrNotFound
 }
+func (r *scriptExecutionTaskRepo) GetByRequestID(_ context.Context, creator, requestID string) (*MMLTask, error) {
+	for _, task := range r.tasks {
+		if task.Creator == creator && task.RequestID == requestID {
+			return task, nil
+		}
+	}
+	return nil, commonerrors.ErrNotFound
+}
 func (r *scriptExecutionTaskRepo) Update(_ context.Context, task *MMLTask) error {
 	r.updateCalls++
 	return nil
@@ -109,6 +117,21 @@ func TestCreateScriptExecution_UsesStoredPlanNotClientCommands(t *testing.T) {
 	require.Equal(t, script.PlanItems, task.PlanItems)
 	require.Equal(t, "sha-a", task.ScriptContentSHA256)
 	require.Equal(t, ValidationVersion, task.ScriptValidationVersion)
+	require.Equal(t, 1, tasks.createCalls)
+}
+
+func TestCreateScriptExecution_RepeatedRequestIDReturnsExistingTask(t *testing.T) {
+	script := scriptExecutionFixture()
+	tasks := &scriptExecutionTaskRepo{}
+	svc := newScriptExecutionService(script, tasks)
+	req := ScriptExecutionRequest{TaskName: "巡检", ExecuteType: ExecuteImmediate, RequestID: "exec-1"}
+
+	first, _, err := svc.CreateScriptExecution(context.Background(), script.ID, "alice", req)
+	require.NoError(t, err)
+	second, _, err := svc.CreateScriptExecution(context.Background(), script.ID, "alice", req)
+	require.NoError(t, err)
+
+	require.Equal(t, first.ID, second.ID)
 	require.Equal(t, 1, tasks.createCalls)
 }
 

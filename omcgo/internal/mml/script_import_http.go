@@ -239,6 +239,8 @@ func scriptImportErrorStatus(err error) (int, string, string) {
 		return http.StatusUnauthorized, "MML_UNAUTHORIZED", "authentication required"
 	case errors.Is(err, commonerrors.ErrInvalidInput):
 		return http.StatusBadRequest, "MML_IMPORT_REQUEST_INVALID", "invalid script import request"
+	case errors.Is(err, commonerrors.ErrAlreadyExists):
+		return http.StatusConflict, "MML_SCRIPT_NAME_DUPLICATED", "script name already exists"
 	case errors.Is(err, ErrImportTokenExpired):
 		return http.StatusConflict, scriptImportCodeTokenExpired, "validation token expired"
 	case errors.Is(err, ErrImportTokenConsumed):

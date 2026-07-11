@@ -3,6 +3,7 @@ package mml
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -57,6 +58,19 @@ func (r *fakeImportedScriptRepo) GetByID(_ context.Context, id uuid.UUID) (*MMLS
 	}
 	cp := *s
 	return &cp, nil
+}
+func (r *fakeImportedScriptRepo) NameExistsForCreator(_ context.Context, creator, name string, excludeID *uuid.UUID) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, s := range r.scripts {
+		if excludeID != nil && id == *excludeID {
+			continue
+		}
+		if s.Creator == creator && strings.EqualFold(strings.TrimSpace(s.ScriptName), strings.TrimSpace(name)) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 func (r *fakeImportedScriptRepo) GetByImportSessionID(_ context.Context, id uuid.UUID) (*MMLScript, error) {
 	r.mu.Lock()
@@ -247,6 +261,20 @@ func TestScriptImportService_PersistsOnlyAuthoritativeSessionFields(t *testing.T
 	require.Equal(t, sessions.session.Validation.PlanItems, got.PlanItems)
 	require.Equal(t, "alice", got.Creator)
 	require.Equal(t, 1, sessions.finalizeCalls)
+}
+
+func TestScriptImportService_RejectsDuplicateScriptNameForCreator(t *testing.T) {
+	sessions := &fakeImportSessions{session: importedServiceSession()}
+	repo := newFakeImportedScriptRepo()
+	existing := scriptFromImportSession(importedServiceSession(), "alice", "巡检", "", nil)
+	require.NoError(t, repo.CreateImported(context.Background(), existing))
+	svc := NewScriptImportService(repo, &fakeImportValidator{}, sessions, zap.NewNop())
+
+	_, err := svc.CreateScriptFromImport(context.Background(), "alice", SaveImportedScriptRequest{ValidationToken: "token", ScriptName: " 巡检 "})
+
+	require.ErrorIs(t, err, commonerrors.ErrAlreadyExists)
+	require.Equal(t, 1, sessions.releaseCalls)
+	require.Equal(t, 0, sessions.finalizeCalls)
 }
 
 func TestScriptImportService_ReplacementRequiresExpectedVersion(t *testing.T) {

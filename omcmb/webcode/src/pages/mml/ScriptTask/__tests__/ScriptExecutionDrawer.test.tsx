@@ -68,6 +68,30 @@ describe('ScriptExecutionDrawer', () => {
     expect(screen.getByLabelText('任务名称')).toHaveValue('巡检脚本_2026-07-10 13:38:30');
   });
 
+  it('submits execution only once while the request is in flight', async () => {
+    let resolveExecution: (value: unknown) => void = () => {};
+    mocks.execute.mockReturnValue(new Promise((resolve) => { resolveExecution = resolve; }));
+    renderDrawer();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: '执行' }));
+    await user.click(screen.getByRole('button', { name: '执行' }));
+
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.execute).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'script-1',
+      input: expect.objectContaining({ requestId: expect.any(String) }),
+    }));
+    resolveExecution({
+      task: { id: 'task-1' },
+      validation: {
+        planItems: [],
+        summary: { totalLines: 1, validLines: 1, effectiveLines: 1, deviceCount: 1, errorCount: 0, warningCount: 0 },
+        issues: [],
+      },
+    });
+  });
+
   it('confirms server warnings and retries with confirmWarnings', async () => {
     mocks.execute.mockResolvedValueOnce({
       task: { id: 'task-1' },

@@ -76,7 +76,7 @@ var scriptColumns = []string{
 }
 
 var taskColumns = []string{
-	"id", "task_name", "script_id", "script_content_sha256", "script_validation_version", "device_sns",
+	"id", "task_name", "request_id", "script_id", "script_content_sha256", "script_validation_version", "device_sns",
 	"commands", "execute_mode", "plan_items", "status", "results", "creator", "executor",
 	"created_at", "updated_at",
 	"execute_type", "scheduled_at",
@@ -536,6 +536,29 @@ func (r *PgScriptRepository) GetByID(ctx context.Context, id uuid.UUID) (*MMLScr
 	return script, nil
 }
 
+func (r *PgScriptRepository) NameExistsForCreator(ctx context.Context, creator, name string, excludeID *uuid.UUID) (bool, error) {
+	builder := storage.Psql.Select("1").
+		From("mml_scripts").
+		Where(sq.Eq{"creator": strings.TrimSpace(creator)}).
+		Where("lower(btrim(script_name)) = lower(btrim(?))", name).
+		Limit(1)
+	if excludeID != nil && *excludeID != uuid.Nil {
+		builder = builder.Where(sq.NotEq{"id": *excludeID})
+	}
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build script name exists SQL: %w", err)
+	}
+	var one int
+	if err := r.pool.QueryRow(ctx, query, args...).Scan(&one); err != nil {
+		if err == pgx.ErrNoRows {
+			return false, nil
+		}
+		return false, fmt.Errorf("check script name exists: %w", err)
+	}
+	return true, nil
+}
+
 func (r *PgScriptRepository) Update(ctx context.Context, script *MMLScript) error {
 	if script.PlanItems == nil {
 		script.PlanItems = []MMLPlanItem{}
@@ -892,7 +915,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *MMLTask) error {
 	}
 
 	query, args, err := storage.Psql.Insert("mml_tasks").
-		Columns("task_name", "script_id", "script_content_sha256", "script_validation_version", "device_sns",
+		Columns("task_name", "request_id", "script_id", "script_content_sha256", "script_validation_version", "device_sns",
 			"commands", "execute_mode", "plan_items", "status", "results", "creator", "executor",
 			"execute_type", "scheduled_at",
 			"period_start", "period_end", "period_time",
@@ -903,7 +926,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *MMLTask) error {
 			"product_resolved", "matched_product_id", "matched_product_class", "path_translation_source").
 		// 2026-05-28 修复:JSONB 列用 string 传(详见 Update 函数注释)。
 		// Create 当前能工作是 pgx prepare-cache 路径行为巧合,显式 string 防退化。
-		Values(task.TaskName, task.ScriptID, task.ScriptContentSHA256, task.ScriptValidationVersion, string(deviceSNsJSON),
+		Values(task.TaskName, nullIfEmpty(task.RequestID), task.ScriptID, task.ScriptContentSHA256, task.ScriptValidationVersion, string(deviceSNsJSON),
 			string(commandsJSON), task.ExecuteMode, string(planItemsJSON), task.Status, string(resultsJSON), task.Creator, task.Executor,
 			task.ExecuteType, task.ScheduledAt,
 			task.PeriodStart, task.PeriodEnd, task.PeriodTime,
@@ -942,6 +965,25 @@ func (r *PgTaskRepository) GetByID(ctx context.Context, id uuid.UUID) (*MMLTask,
 			return nil, commonerrors.ErrNotFound
 		}
 		return nil, fmt.Errorf("get mml_task: %w", err)
+	}
+	return task, nil
+}
+
+func (r *PgTaskRepository) GetByRequestID(ctx context.Context, creator, requestID string) (*MMLTask, error) {
+	query, args, err := storage.Psql.Select(taskColumns...).
+		From("mml_tasks").
+		Where(sq.Eq{"creator": strings.TrimSpace(creator)}).
+		Where(sq.Eq{"request_id": strings.TrimSpace(requestID)}).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build get mml_task by request id SQL: %w", err)
+	}
+	task, err := scanTask(r.pool.QueryRow(ctx, query, args...))
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, commonerrors.ErrNotFound
+		}
+		return nil, fmt.Errorf("get mml_task by request id: %w", err)
 	}
 	return task, nil
 }
@@ -1101,9 +1143,10 @@ func scanTask(row pgx.Row) (*MMLTask, error) {
 	// T-0168: 翻译审计 4 列；matched_product_class / path_translation_source 用 *string
 	// 接 NULL（migration 000171 列允许 NULL）；product_resolved 默认 true，*bool 处理 NULL 兜底。
 	var matchedProductClass, pathTranslationSource *string
+	var requestID *string
 
 	err := row.Scan(
-		&t.ID, &t.TaskName, &t.ScriptID, &t.ScriptContentSHA256, &t.ScriptValidationVersion, &deviceSNsJSON,
+		&t.ID, &t.TaskName, &requestID, &t.ScriptID, &t.ScriptContentSHA256, &t.ScriptValidationVersion, &deviceSNsJSON,
 		&commandsJSON, &t.ExecuteMode, &planItemsJSON, &t.Status, &resultsJSON, &t.Creator, &t.Executor,
 		&t.CreatedAt, &t.UpdatedAt,
 		&t.ExecuteType, &t.ScheduledAt,
@@ -1123,6 +1166,9 @@ func scanTask(row pgx.Row) (*MMLTask, error) {
 	}
 	if pathTranslationSource != nil {
 		t.PathTranslationSource = *pathTranslationSource
+	}
+	if requestID != nil {
+		t.RequestID = *requestID
 	}
 	if deviceSNsJSON != nil {
 		if err := json.Unmarshal(deviceSNsJSON, &t.DeviceSNs); err != nil {
@@ -1167,9 +1213,10 @@ func scanTaskRow(rows pgx.Rows) (*MMLTask, error) {
 	var deviceSNsJSON, commandsJSON, planItemsJSON, resultsJSON []byte
 	// T-0168: 翻译审计列 NULL 接收同 scanTask。
 	var matchedProductClass, pathTranslationSource *string
+	var requestID *string
 
 	err := rows.Scan(
-		&t.ID, &t.TaskName, &t.ScriptID, &t.ScriptContentSHA256, &t.ScriptValidationVersion, &deviceSNsJSON,
+		&t.ID, &t.TaskName, &requestID, &t.ScriptID, &t.ScriptContentSHA256, &t.ScriptValidationVersion, &deviceSNsJSON,
 		&commandsJSON, &t.ExecuteMode, &planItemsJSON, &t.Status, &resultsJSON, &t.Creator, &t.Executor,
 		&t.CreatedAt, &t.UpdatedAt,
 		&t.ExecuteType, &t.ScheduledAt,
@@ -1189,6 +1236,9 @@ func scanTaskRow(rows pgx.Rows) (*MMLTask, error) {
 	}
 	if pathTranslationSource != nil {
 		t.PathTranslationSource = *pathTranslationSource
+	}
+	if requestID != nil {
+		t.RequestID = *requestID
 	}
 	if deviceSNsJSON != nil {
 		if err := json.Unmarshal(deviceSNsJSON, &t.DeviceSNs); err != nil {

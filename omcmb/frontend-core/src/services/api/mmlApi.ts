@@ -1002,6 +1002,7 @@ export const mmlApi = {
     if (input.periodStart) payload.period_start = input.periodStart;
     if (input.periodEnd) payload.period_end = input.periodEnd;
     if (input.periodTime) payload.period_time = input.periodTime;
+    if (input.requestId) payload.request_id = input.requestId;
     try {
       const { data } = await http.post<{
         task: BackendMMLTask;

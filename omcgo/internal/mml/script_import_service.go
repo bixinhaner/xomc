@@ -148,8 +148,16 @@ func (s *ScriptImportService) CreateScriptFromImport(ctx context.Context, userna
 		_ = s.sessions.Release(ctx, req.ValidationToken, username, requestID)
 		return nil, fmt.Errorf("check imported script: %w", lookupErr)
 	}
+	if err := s.ensureScriptNameAvailable(ctx, username, req.ScriptName, nil); err != nil {
+		_ = s.sessions.Release(ctx, req.ValidationToken, username, requestID)
+		return nil, err
+	}
 	script := scriptFromImportSession(session, username, req.ScriptName, req.Description, req.Tags)
 	if err := s.repo.CreateImported(ctx, script); err != nil {
+		if isUniqueViolation(err) {
+			_ = s.sessions.Release(ctx, req.ValidationToken, username, requestID)
+			return nil, scriptNameDuplicatedErr(req.ScriptName)
+		}
 		if existing, lookupErr := s.repo.GetByImportSessionID(ctx, session.ID); lookupErr == nil {
 			if existing.Creator != username {
 				_ = s.sessions.Release(ctx, req.ValidationToken, username, requestID)
@@ -223,11 +231,18 @@ func (s *ScriptImportService) ReplaceScriptFromImport(ctx context.Context, id uu
 		_ = s.sessions.Release(ctx, req.ValidationToken, username, requestID)
 		return nil, fmt.Errorf("replace imported script: %w", commonerrors.ErrInvalidInput)
 	}
+	if err := s.ensureScriptNameAvailable(ctx, username, req.ScriptName, &current.ID); err != nil {
+		_ = s.sessions.Release(ctx, req.ValidationToken, username, requestID)
+		return nil, err
+	}
 	replacement := scriptFromImportSession(session, username, req.ScriptName, req.Description, req.Tags)
 	replacement.ID = current.ID
 	replacement.Creator = current.Creator
 	if err := s.repo.ReplaceImported(ctx, replacement, req.ExpectedUpdatedAt); err != nil {
 		_ = s.sessions.Release(ctx, req.ValidationToken, username, requestID)
+		if isUniqueViolation(err) {
+			return nil, scriptNameDuplicatedErr(req.ScriptName)
+		}
 		return nil, fmt.Errorf("replace imported script: %w", err)
 	}
 	if err := s.sessions.Finalize(ctx, req.ValidationToken, username, requestID); err != nil {
@@ -252,6 +267,21 @@ func validateImportMetadata(username, token, name string) error {
 		return commonerrors.ErrInvalidInput
 	}
 	return nil
+}
+
+func (s *ScriptImportService) ensureScriptNameAvailable(ctx context.Context, username, name string, excludeID *uuid.UUID) error {
+	exists, err := s.repo.NameExistsForCreator(ctx, username, name, excludeID)
+	if err != nil {
+		return fmt.Errorf("check script name duplicate: %w", err)
+	}
+	if exists {
+		return scriptNameDuplicatedErr(name)
+	}
+	return nil
+}
+
+func scriptNameDuplicatedErr(name string) error {
+	return fmt.Errorf("script name %q already exists: %w", strings.TrimSpace(name), commonerrors.ErrAlreadyExists)
 }
 
 func hasScriptErrors(issues []ScriptIssue) bool { return countIssueSeverity(issues, IssueError) > 0 }

@@ -151,6 +151,7 @@ describe('mmlApi TXT script import', () => {
       failedRetryCount: 2,
       failedRetryInterval: 5,
       confirmWarnings: true,
+      requestId: 'exec-request-1',
     });
 
     const [url, body] = postMock.mock.calls[0];
@@ -160,6 +161,7 @@ describe('mmlApi TXT script import', () => {
       execute_type: 'scheduled',
       scheduled_at: '2026-07-10T10:00:00Z',
       confirm_warnings: true,
+      request_id: 'exec-request-1',
     });
     expect(body).not.toHaveProperty('commands');
     expect(body).not.toHaveProperty('device_sns');

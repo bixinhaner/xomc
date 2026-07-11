@@ -113,6 +113,10 @@ func (m *mockScriptRepo) GetByID(ctx context.Context, id uuid.UUID) (*MMLScript,
 	return nil, nil
 }
 
+func (m *mockScriptRepo) NameExistsForCreator(context.Context, string, string, *uuid.UUID) (bool, error) {
+	return false, nil
+}
+
 func (m *mockScriptRepo) Update(ctx context.Context, script *MMLScript) error {
 	if m.updateFn != nil {
 		return m.updateFn(ctx, script)
@@ -169,6 +173,10 @@ func (m *mockTaskRepo) GetByID(ctx context.Context, id uuid.UUID) (*MMLTask, err
 		return m.getByIDFn(ctx, id)
 	}
 	return nil, nil
+}
+
+func (m *mockTaskRepo) GetByRequestID(context.Context, string, string) (*MMLTask, error) {
+	return nil, commonerrors.ErrNotFound
 }
 
 func (m *mockTaskRepo) Update(ctx context.Context, task *MMLTask) error {

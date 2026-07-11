@@ -101,6 +101,27 @@ describe('ScriptImportModal', () => {
     expect(screen.getByLabelText('描述')).toHaveValue('已有描述');
   });
 
+  it('submits a valid import only once when the user clicks save repeatedly', async () => {
+    let resolveCreate: (value: unknown) => void = () => {};
+    mocks.validate.mockResolvedValue(validation());
+    mocks.create.mockReturnValue(new Promise((resolve) => { resolveCreate = resolve; }));
+    renderModal();
+    const user = userEvent.setup();
+
+    await user.upload(screen.getByLabelText('选择 TXT'), new File(['LST DEVICE_INFO;SN1'], 'script.txt', { type: 'text/plain' }));
+    await user.type(screen.getByLabelText('脚本名称'), '巡检');
+    const save = screen.getByRole('button', { name: '确认保存' });
+    await user.dblClick(save);
+
+    expect(mocks.create).toHaveBeenCalledTimes(1);
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({
+      validationToken: 'token-1',
+      requestId: expect.any(String),
+    }));
+    expect(save).toBeDisabled();
+    resolveCreate({ id: 'script-1' });
+  });
+
   it('keeps save disabled when server validation has errors', async () => {
     mocks.validate.mockResolvedValue(validation({
       summary: { totalLines: 1, validLines: 0, effectiveLines: 0, deviceCount: 0, errorCount: 1, warningCount: 0 },

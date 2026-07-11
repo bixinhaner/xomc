@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
 )
@@ -62,6 +63,9 @@ func (m *hScriptRepo) Create(ctx context.Context, script *MMLScript) error {
 func (m *hScriptRepo) GetByID(ctx context.Context, id uuid.UUID) (*MMLScript, error) {
 	return m.GetByIDFn(ctx, id)
 }
+func (m *hScriptRepo) NameExistsForCreator(context.Context, string, string, *uuid.UUID) (bool, error) {
+	return false, nil
+}
 func (m *hScriptRepo) Update(ctx context.Context, script *MMLScript) error {
 	return m.UpdateFn(ctx, script)
 }
@@ -98,6 +102,9 @@ func (m *hTaskRepo) Create(ctx context.Context, task *MMLTask) error {
 }
 func (m *hTaskRepo) GetByID(ctx context.Context, id uuid.UUID) (*MMLTask, error) {
 	return m.GetByIDFn(ctx, id)
+}
+func (m *hTaskRepo) GetByRequestID(context.Context, string, string) (*MMLTask, error) {
+	return nil, commonerrors.ErrNotFound
 }
 func (m *hTaskRepo) Update(ctx context.Context, task *MMLTask) error {
 	return m.UpdateFn(ctx, task)

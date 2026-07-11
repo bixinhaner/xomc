@@ -44,6 +44,7 @@ func (e *ScriptExecutionValidationError) Unwrap() error {
 // they are copied from the stored imported-script snapshot.
 type ScriptExecutionRequest struct {
 	TaskName            string      `json:"task_name"`
+	RequestID           string      `json:"request_id,omitempty"`
 	ExecuteType         ExecuteType `json:"execute_type"`
 	ScheduledAt         *string     `json:"scheduled_at"`
 	PeriodStart         *string     `json:"period_start"`
@@ -73,8 +74,16 @@ func (s *Service) CreateScriptExecution(ctx context.Context, scriptID uuid.UUID,
 	if scriptID == uuid.Nil {
 		return nil, nil, fmt.Errorf("script id is required: %w", commonerrors.ErrInvalidInput)
 	}
+	req.RequestID = strings.TrimSpace(req.RequestID)
 	if s == nil || s.scriptRepo == nil || s.taskRepo == nil {
 		return nil, nil, fmt.Errorf("script execution dependencies are unavailable: %w", commonerrors.ErrUnavailable)
+	}
+	if req.RequestID != "" {
+		if existing, lookupErr := s.taskRepo.GetByRequestID(ctx, actor, req.RequestID); lookupErr == nil {
+			return existing, nil, nil
+		} else if !errors.Is(lookupErr, commonerrors.ErrNotFound) {
+			return nil, nil, fmt.Errorf("check script execution request id: %w", lookupErr)
+		}
 	}
 	script, err := s.scriptRepo.GetByID(ctx, scriptID)
 	if err != nil {
@@ -145,9 +154,15 @@ func (s *Service) CreateScriptExecution(ctx context.Context, scriptID uuid.UUID,
 		ScriptContentSHA256:     script.ContentSHA256,
 		ScriptValidationVersion: script.ValidationVersion,
 		PreservePlanSnapshot:    true,
+		RequestID:               req.RequestID,
 	}
 	task, err := s.ExecuteCommand(ctx, execReq)
 	if err != nil {
+		if req.RequestID != "" && isUniqueViolation(err) {
+			if existing, lookupErr := s.taskRepo.GetByRequestID(ctx, actor, req.RequestID); lookupErr == nil {
+				return existing, validation, nil
+			}
+		}
 		return nil, validation, err
 	}
 	return task, validation, nil
