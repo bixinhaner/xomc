@@ -245,13 +245,6 @@ export default function TaskRecord() {
         </Typography.Text>
       ),
     },
-    {
-      key: 'type',
-      title: t('mml.taskResult.parsed.gpv.type'),
-      dataIndex: 'type',
-      width: 120,
-      render: (value?: string) => value || '-',
-    },
   ], [t]);
 
   const resultColumns: ColumnsType<DeviceTaskResultItem> = useMemo(() => [
