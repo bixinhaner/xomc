@@ -6069,6 +6069,8 @@ const messages: Record<string, string> = {
   'mml.detail':                              '详情',
   'mml.resultDeviceCode':                    '基站编码',
   'mml.resultCommand':                       'MML脚本',
+  'mml.scriptParamsTitle':                   '指令参数',
+  'mml.scriptParamsCount':                   '参数 {count} 项',
   'mml.scriptLineNo':                        '脚本第 {line} 行',
   'mml.viewRawResponse':                     '查看',
   'mml.resultRawResponseTitle':              '执行详情 - {device}',

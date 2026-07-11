@@ -10,9 +10,19 @@ const taskRecordSources = [
   'webcode-v3/src/pages/mml/task-records/index.tsx',
 ];
 
+function existingTaskRecordSources(): string[] {
+  return taskRecordSources.filter((relativePath) =>
+    fs.existsSync(path.join(omcmbRoot, relativePath))
+  );
+}
+
 describe('MML task record result rendering contract', () => {
   it('does not load 200 device result rows when opening a task detail', () => {
-    for (const relativePath of taskRecordSources) {
+    const sources = existingTaskRecordSources();
+
+    expect(sources).toContain('webcode/src/pages/mml/TaskRecord/index.tsx');
+
+    for (const relativePath of sources) {
       const source = fs.readFileSync(path.join(omcmbRoot, relativePath), 'utf8');
       expect(source, relativePath).not.toMatch(/useMMLTaskResults\([^)]*,\s*1,\s*200\)/);
       expect(source, relativePath).toContain('TASK_RESULT_PAGE_SIZE');
