@@ -507,7 +507,7 @@ const messages: Record<string, string> = {
   'product.kpi.indicator.typeKpiHint':        'Derived KPI computed from other indicators by formula',
   'product.kpi.indicator.arithmeticLabel':    'Formula',
   'product.kpi.indicator.arithmeticPh':       'e.g. (C000060011+C000060022)/1000',
-  'product.kpi.indicator.arithmeticHelp':     'Use indicator IDs with operators + - * / ( ); Duration represents period seconds',
+  'product.kpi.indicator.arithmeticHelp':     'Use indicator IDs with + - * / ( ). Duration means accumulated statistical duration from each report’s actual period (not a fixed 900 seconds) and is saved as the current technology’s duration Counter.',
   'product.kpi.indicator.arithmeticRequired': 'Formula is required for Formula type',
   'product.kpi.indicator.formulaBracketMismatch': 'Formula brackets are not balanced',
   'product.kpi.indicator.formulaAtLeastOne': 'Formula type requires at least 1 platform formula',

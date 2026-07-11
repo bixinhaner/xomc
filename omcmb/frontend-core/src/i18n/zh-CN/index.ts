@@ -507,7 +507,7 @@ const messages: Record<string, string> = {
   'product.kpi.indicator.typeKpiHint':        '由其他指标按公式实时算出（派生 KPI）',
   'product.kpi.indicator.arithmeticLabel':    '计算公式',
   'product.kpi.indicator.arithmeticPh':       '例：(C000060011+C000060022)/1000',
-  'product.kpi.indicator.arithmeticHelp':     '使用指标 ID 与运算符 + - * / ( )；Duration 代表统计周期秒数',
+  'product.kpi.indicator.arithmeticHelp':     '使用指标 ID 与运算符 + - * / ( )；Duration 表示统计时长（按每次上报的真实采集周期累计，不是固定 900 秒），保存时会自动转换为当前制式的统计时长 Counter',
   'product.kpi.indicator.arithmeticRequired': '公式计算类型必须填写计算公式',
   'product.kpi.indicator.formulaBracketMismatch': '公式括号不匹配',
   'product.kpi.indicator.formulaAtLeastOne': '公式计算类型必须至少配置 1 条平台公式',
