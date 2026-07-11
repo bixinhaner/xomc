@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { Button, Modal, Pagination, Tag, Tooltip, Typography } from 'antd';
+import { Button, Empty, List, Modal, Pagination, Space, Tag, Tooltip, Typography } from 'antd';
 import { ProfileOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 
@@ -9,8 +9,6 @@ import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import { useT } from '@/hooks/useT';
-import ResultTable from '../Console/components/ResultTable';
-import { mapTaskToRecord, buildDeviceRows } from '../Console/adapters';
 
 import type {
   MMLTask,
@@ -20,7 +18,6 @@ import type {
   DeviceTaskResultItem,
 } from '@core/types/mml';
 import {
-  useMMLTaskById,
   useMMLTasks,
   useMMLTaskResults,
 } from '@core/hooks/api/useMML';
@@ -57,6 +54,11 @@ function formatTime(iso?: string | null): string {
   if (!iso) return '-';
   const d = dayjs(iso);
   return d.isValid() ? d.format('YYYY-MM-DD HH:mm:ss') : '-';
+}
+
+function previewRawOutput(value?: string): string {
+  if (!value) return '';
+  return value.length > 1200 ? `${value.slice(0, 1200)}...` : value;
 }
 
 export default function TaskRecord() {
@@ -164,8 +166,6 @@ export default function TaskRecord() {
   // 任务记录为只读：记录由"执行 MML 命令 / 脚本任务执行"被动产生，不提供新建/编辑。
   const [viewing, setViewing] = useState<MMLTask | null>(null);
   const [resultPage, setResultPage] = useState(1);
-  const { data: taskDetail } = useMMLTaskById(viewing?.id ?? '');
-  const detailTask = taskDetail ?? viewing;
   const { data: resultsData } = useMMLTaskResults(viewing?.id ?? null, resultPage, TASK_RESULT_PAGE_SIZE);
 
   const resultRows = useMemo<DeviceTaskResultItem[]>(
@@ -276,15 +276,6 @@ export default function TaskRecord() {
     },
   ], [t]);
 
-  // 查看明细复用 console「执行结果」组件（ResultTable），保证两页面布局一致：
-  // mapTaskToRecord 取命令元信息 + columns；rows 用单独拉取的 resultRows（更可靠）重建。
-  const viewRecord = useMemo(() => {
-    if (!detailTask) return null;
-    const rec = mapTaskToRecord(detailTask);
-    const rows = buildDeviceRows(resultRows, rec.columns, rec.execMeta.read);
-    return { ...rec, rows };
-  }, [detailTask, resultRows]);
-
   return (
     <ListPageLayout title={t('nav.mml.taskRecord')}>
       <FilterBar
@@ -309,7 +300,7 @@ export default function TaskRecord() {
       />
 
       <Modal
-        title={viewRecord ? t('mml.executionResult', { name: viewRecord.commandName }) : t('common.view')}
+        title={viewing ? t('mml.executionResult', { name: viewing.taskName || viewing.id }) : t('common.view')}
         open={Boolean(viewing)}
         onCancel={() => {
           setViewing(null);
@@ -322,17 +313,64 @@ export default function TaskRecord() {
         width={960}
         destroyOnHidden
       >
-        {/* 查看明细复用 console「执行结果」表（含逐设备「查看」→ 执行详情），两页面布局一致 */}
-        {viewRecord && (
+        {viewing && (
           <div style={{ minHeight: 360 }}>
-            <ResultTable
-              execMeta={viewRecord.execMeta}
-              commandId={viewRecord.commandId}
-              columns={viewRecord.columns}
-              rows={viewRecord.rows}
-              running={false}
-              hasExecuted
-            />
+            <Space wrap size={[8, 8]} style={{ marginBottom: 12 }}>
+              <Tag>{t('mml.status')}: {t(TASK_STATUS_TAGS[viewing.status]?.key ?? 'mml.status')}</Tag>
+              <Tag>{t('mml.taskOrigin')}: {t(TASK_ORIGIN_TAGS[viewing.taskOrigin]?.key ?? 'mml.taskOrigin')}</Tag>
+              <Tag>{t('mml.deviceCountLabel')}{viewing.totalDevices ?? 0}</Tag>
+              <Tag>{t('mml.successCountLabel')}{viewing.successCount ?? 0}</Tag>
+              <Tag>{t('mml.failedCountLabel')}{viewing.failedCount ?? 0}</Tag>
+            </Space>
+
+            {resultRows.length === 0 ? (
+              <Empty description={t('mml.noExecutionResult')} />
+            ) : (
+              <List<DeviceTaskResultItem>
+                size="small"
+                dataSource={resultRows}
+                renderItem={(row) => {
+                  const ok = Boolean(row.result?.success);
+                  const rawOutput = previewRawOutput(row.result?.rawOutput);
+                  return (
+                    <List.Item>
+                      <div style={{ width: '100%', minWidth: 0 }}>
+                        <Space wrap size={[8, 4]}>
+                          <Typography.Text code>{row.deviceSn || '-'}</Typography.Text>
+                          {row.deviceName ? <Typography.Text type="secondary">{row.deviceName}</Typography.Text> : null}
+                          {row.commandCode ? <Tag>{row.commandCode}</Tag> : null}
+                          {row.planLineNo ? <Tag>#{row.planLineNo}</Tag> : null}
+                          <Tag color={ok ? 'success' : 'error'}>{ok ? t('status.success') : t('status.failed')}</Tag>
+                        </Space>
+                        {row.failReason ? (
+                          <Typography.Text type="danger" style={{ display: 'block', marginTop: 6 }}>
+                            {row.failReason}
+                          </Typography.Text>
+                        ) : null}
+                        {rawOutput ? (
+                          <Typography.Paragraph
+                            style={{
+                              marginTop: 8,
+                              marginBottom: 0,
+                              maxHeight: 120,
+                              overflow: 'auto',
+                              whiteSpace: 'pre-wrap',
+                              fontFamily: 'monospace',
+                              fontSize: 12,
+                              background: 'rgba(255,255,255,0.04)',
+                              padding: 8,
+                              borderRadius: 4,
+                            }}
+                          >
+                            {rawOutput}
+                          </Typography.Paragraph>
+                        ) : null}
+                      </div>
+                    </List.Item>
+                  );
+                }}
+              />
+            )}
             {(resultsData?.total ?? 0) > TASK_RESULT_PAGE_SIZE && (
               <div style={{ marginTop: 12, textAlign: 'right' }}>
                 <Pagination

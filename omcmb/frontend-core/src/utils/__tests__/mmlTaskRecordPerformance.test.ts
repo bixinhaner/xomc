@@ -18,4 +18,15 @@ describe('MML task record result rendering contract', () => {
       expect(source, relativePath).toContain('TASK_RESULT_PAGE_SIZE');
     }
   });
+
+  it('keeps the v1 task detail view off the console dynamic result table', () => {
+    const source = fs.readFileSync(
+      path.join(omcmbRoot, 'webcode/src/pages/mml/TaskRecord/index.tsx'),
+      'utf8'
+    );
+
+    expect(source).not.toContain("from '../Console/components/ResultTable'");
+    expect(source).not.toContain("from '../Console/adapters'");
+    expect(source).not.toContain('useMMLTaskById');
+  });
 });
