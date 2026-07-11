@@ -3,7 +3,9 @@ package mml
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -64,7 +66,9 @@ var commandColumns = []string{
 }
 
 var scriptColumns = []string{
-	"id", "script_name", "description", "content",
+	"id", "import_session_id", "script_name", "description", "content",
+	"original_filename", "content_sha256", "validation_version", "validated_at",
+	"plan_items", "validation_summary",
 	"creator", "tags",
 	"status", "start_time", "end_time", "type", "progress", "result",
 	"last_run_status", "last_run_at",
@@ -72,7 +76,7 @@ var scriptColumns = []string{
 }
 
 var taskColumns = []string{
-	"id", "task_name", "script_id", "device_sns",
+	"id", "task_name", "request_id", "script_id", "script_content_sha256", "script_validation_version", "device_sns",
 	"commands", "execute_mode", "plan_items", "status", "results", "creator", "executor",
 	"created_at", "updated_at",
 	"execute_type", "scheduled_at",
@@ -351,6 +355,7 @@ func scanCommandRow(rows pgx.Rows) (*MMLCommand, error) {
 // ======================================================================
 
 var _ ScriptRepository = (*PgScriptRepository)(nil)
+var _ ImportedScriptRepository = (*PgScriptRepository)(nil)
 
 // PgScriptRepository is a PostgreSQL implementation of ScriptRepository.
 type PgScriptRepository struct {
@@ -363,16 +368,35 @@ func NewPgScriptRepository(pool *pgxpool.Pool) *PgScriptRepository {
 }
 
 func (r *PgScriptRepository) Create(ctx context.Context, script *MMLScript) error {
+	if script.ImportSessionID == uuid.Nil {
+		script.ImportSessionID = uuid.New()
+	}
+	if script.PlanItems == nil {
+		script.PlanItems = []MMLPlanItem{}
+	}
+	if script.ValidationSummary == nil {
+		script.ValidationSummary = JSONMap{}
+	}
 	tagsJSON, err := json.Marshal(script.Tags)
 	if err != nil {
 		return fmt.Errorf("marshal tags: %w", err)
 	}
+	planItemsJSON, err := json.Marshal(script.PlanItems)
+	if err != nil {
+		return fmt.Errorf("marshal script plan_items: %w", err)
+	}
+	validationSummaryJSON, err := json.Marshal(script.ValidationSummary)
+	if err != nil {
+		return fmt.Errorf("marshal script validation_summary: %w", err)
+	}
 
 	query, args, err := storage.Psql.Insert("mml_scripts").
-		Columns("script_name", "description", "content",
-			"creator", "tags").
-		Values(script.ScriptName, script.Description, script.Content,
-			script.Creator, tagsJSON).
+		Columns("import_session_id", "script_name", "description", "content",
+			"original_filename", "content_sha256", "validation_version", "validated_at",
+			"plan_items", "validation_summary", "creator", "tags").
+		Values(script.ImportSessionID, script.ScriptName, script.Description, script.Content,
+			script.OriginalFilename, script.ContentSHA256, script.ValidationVersion, script.ValidatedAt,
+			string(planItemsJSON), string(validationSummaryJSON), script.Creator, tagsJSON).
 		Suffix("RETURNING " + joinColumns(scriptColumns)).
 		ToSql()
 	if err != nil {
@@ -385,6 +409,111 @@ func (r *PgScriptRepository) Create(ctx context.Context, script *MMLScript) erro
 		return fmt.Errorf("create mml_script: %w", err)
 	}
 	*script = *created
+	return nil
+}
+
+// CreateImported persists a server-authoritative TXT import snapshot. It is
+// deliberately separate from the legacy Create entrypoint so import callers
+// can depend on the narrower ImportedScriptRepository contract.
+func (r *PgScriptRepository) CreateImported(ctx context.Context, script *MMLScript) error {
+	return r.Create(ctx, script)
+}
+
+func (r *PgScriptRepository) GetByImportSessionID(ctx context.Context, sessionID uuid.UUID) (*MMLScript, error) {
+	query, args, err := storage.Psql.Select(scriptColumns...).
+		From("mml_scripts").Where(sq.Eq{"import_session_id": sessionID}).ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build get mml_script by import session SQL: %w", err)
+	}
+	script, err := scanScript(r.pool.QueryRow(ctx, query, args...))
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, commonerrors.ErrNotFound
+		}
+		return nil, fmt.Errorf("get mml_script by import session: %w", err)
+	}
+	return script, nil
+}
+
+// ReplaceImported atomically replaces the complete TXT-backed snapshot. The
+// updated_at predicate prevents a stale editor from overwriting a newer import.
+func (r *PgScriptRepository) ReplaceImported(ctx context.Context, script *MMLScript, expectedUpdatedAt time.Time) error {
+	if script.PlanItems == nil {
+		script.PlanItems = []MMLPlanItem{}
+	}
+	if script.ValidationSummary == nil {
+		script.ValidationSummary = JSONMap{}
+	}
+	tagsJSON, err := json.Marshal(script.Tags)
+	if err != nil {
+		return fmt.Errorf("marshal tags: %w", err)
+	}
+	planItemsJSON, err := json.Marshal(script.PlanItems)
+	if err != nil {
+		return fmt.Errorf("marshal script plan_items: %w", err)
+	}
+	validationSummaryJSON, err := json.Marshal(script.ValidationSummary)
+	if err != nil {
+		return fmt.Errorf("marshal script validation_summary: %w", err)
+	}
+	query, args, err := storage.Psql.Update("mml_scripts").
+		Set("import_session_id", script.ImportSessionID).
+		Set("script_name", script.ScriptName).
+		Set("description", script.Description).
+		Set("content", script.Content).
+		Set("original_filename", script.OriginalFilename).
+		Set("content_sha256", script.ContentSHA256).
+		Set("validation_version", script.ValidationVersion).
+		Set("validated_at", script.ValidatedAt).
+		Set("plan_items", string(planItemsJSON)).
+		Set("validation_summary", string(validationSummaryJSON)).
+		Set("tags", tagsJSON).
+		Set("updated_at", sq.Expr("NOW()")).
+		Where(sq.Eq{"id": script.ID}).
+		Where(sq.Eq{"updated_at": expectedUpdatedAt}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build replace imported mml_script SQL: %w", err)
+	}
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("replace imported mml_script: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		if _, getErr := r.GetByID(ctx, script.ID); getErr != nil {
+			if getErr == commonerrors.ErrNotFound || errors.Is(getErr, commonerrors.ErrNotFound) {
+				return commonerrors.ErrNotFound
+			}
+			return fmt.Errorf("check replaced mml_script: %w", getErr)
+		}
+		return ErrScriptVersionConflict
+	}
+	updated, err := r.GetByID(ctx, script.ID)
+	if err != nil {
+		return fmt.Errorf("reload replaced mml_script: %w", err)
+	}
+	*script = *updated
+	return nil
+}
+
+func (r *PgScriptRepository) UpdateMetadata(ctx context.Context, id uuid.UUID, name, description string, tags []string) error {
+	tagsJSON, err := json.Marshal(tags)
+	if err != nil {
+		return fmt.Errorf("marshal tags: %w", err)
+	}
+	query, args, err := storage.Psql.Update("mml_scripts").
+		Set("script_name", name).Set("description", description).Set("tags", tagsJSON).
+		Set("updated_at", sq.Expr("NOW()")).Where(sq.Eq{"id": id}).ToSql()
+	if err != nil {
+		return fmt.Errorf("build update mml_script metadata SQL: %w", err)
+	}
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update mml_script metadata: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
+	}
 	return nil
 }
 
@@ -407,16 +536,60 @@ func (r *PgScriptRepository) GetByID(ctx context.Context, id uuid.UUID) (*MMLScr
 	return script, nil
 }
 
+func (r *PgScriptRepository) NameExistsForCreator(ctx context.Context, creator, name string, excludeID *uuid.UUID) (bool, error) {
+	builder := storage.Psql.Select("1").
+		From("mml_scripts").
+		Where(sq.Eq{"creator": strings.TrimSpace(creator)}).
+		Where("lower(btrim(script_name)) = lower(btrim(?))", name).
+		Limit(1)
+	if excludeID != nil && *excludeID != uuid.Nil {
+		builder = builder.Where(sq.NotEq{"id": *excludeID})
+	}
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build script name exists SQL: %w", err)
+	}
+	var one int
+	if err := r.pool.QueryRow(ctx, query, args...).Scan(&one); err != nil {
+		if err == pgx.ErrNoRows {
+			return false, nil
+		}
+		return false, fmt.Errorf("check script name exists: %w", err)
+	}
+	return true, nil
+}
+
 func (r *PgScriptRepository) Update(ctx context.Context, script *MMLScript) error {
+	if script.PlanItems == nil {
+		script.PlanItems = []MMLPlanItem{}
+	}
+	if script.ValidationSummary == nil {
+		script.ValidationSummary = JSONMap{}
+	}
 	tagsJSON, err := json.Marshal(script.Tags)
 	if err != nil {
 		return fmt.Errorf("marshal tags: %w", err)
 	}
+	planItemsJSON, err := json.Marshal(script.PlanItems)
+	if err != nil {
+		return fmt.Errorf("marshal script plan_items: %w", err)
+	}
+	validationSummaryJSON, err := json.Marshal(script.ValidationSummary)
+	if err != nil {
+		return fmt.Errorf("marshal script validation_summary: %w", err)
+	}
 
 	query, args, err := storage.Psql.Update("mml_scripts").
+		Set("import_session_id", script.ImportSessionID).
 		Set("script_name", script.ScriptName).
 		Set("description", script.Description).
 		Set("content", script.Content).
+		Set("original_filename", script.OriginalFilename).
+		Set("content_sha256", script.ContentSHA256).
+		Set("validation_version", script.ValidationVersion).
+		Set("validated_at", script.ValidatedAt).
+		Set("plan_items", string(planItemsJSON)).
+		Set("validation_summary", string(validationSummaryJSON)).
 		Set("creator", script.Creator).
 		Set("tags", tagsJSON).
 		Where(sq.Eq{"id": script.ID}).
@@ -587,10 +760,12 @@ func (r *PgScriptRepository) List(ctx context.Context, filter ScriptFilter) (*mo
 
 func scanScript(row pgx.Row) (*MMLScript, error) {
 	var s MMLScript
-	var tagsJSON, resultJSON []byte
+	var tagsJSON, planItemsJSON, validationSummaryJSON, resultJSON []byte
 
 	err := row.Scan(
-		&s.ID, &s.ScriptName, &s.Description, &s.Content,
+		&s.ID, &s.ImportSessionID, &s.ScriptName, &s.Description, &s.Content,
+		&s.OriginalFilename, &s.ContentSHA256, &s.ValidationVersion, &s.ValidatedAt,
+		&planItemsJSON, &validationSummaryJSON,
 		&s.Creator, &tagsJSON,
 		&s.Status, &s.StartTime, &s.EndTime, &s.Type, &s.Progress, &resultJSON,
 		&s.LastRunStatus, &s.LastRunAt,
@@ -606,6 +781,22 @@ func scanScript(row pgx.Row) (*MMLScript, error) {
 	}
 	if s.Tags == nil {
 		s.Tags = []string{}
+	}
+	if planItemsJSON != nil {
+		if err := json.Unmarshal(planItemsJSON, &s.PlanItems); err != nil {
+			return nil, fmt.Errorf("unmarshal script plan_items: %w", err)
+		}
+	}
+	if s.PlanItems == nil {
+		s.PlanItems = []MMLPlanItem{}
+	}
+	if validationSummaryJSON != nil && len(validationSummaryJSON) > 2 {
+		if err := json.Unmarshal(validationSummaryJSON, &s.ValidationSummary); err != nil {
+			return nil, fmt.Errorf("unmarshal script validation_summary: %w", err)
+		}
+	}
+	if s.ValidationSummary == nil {
+		s.ValidationSummary = JSONMap{}
 	}
 	if resultJSON != nil && len(resultJSON) > 2 {
 		_ = json.Unmarshal(resultJSON, &s.Result)
@@ -615,10 +806,12 @@ func scanScript(row pgx.Row) (*MMLScript, error) {
 
 func scanScriptRow(rows pgx.Rows) (*MMLScript, error) {
 	var s MMLScript
-	var tagsJSON, resultJSON []byte
+	var tagsJSON, planItemsJSON, validationSummaryJSON, resultJSON []byte
 
 	err := rows.Scan(
-		&s.ID, &s.ScriptName, &s.Description, &s.Content,
+		&s.ID, &s.ImportSessionID, &s.ScriptName, &s.Description, &s.Content,
+		&s.OriginalFilename, &s.ContentSHA256, &s.ValidationVersion, &s.ValidatedAt,
+		&planItemsJSON, &validationSummaryJSON,
 		&s.Creator, &tagsJSON,
 		&s.Status, &s.StartTime, &s.EndTime, &s.Type, &s.Progress, &resultJSON,
 		&s.LastRunStatus, &s.LastRunAt,
@@ -634,6 +827,22 @@ func scanScriptRow(rows pgx.Rows) (*MMLScript, error) {
 	}
 	if s.Tags == nil {
 		s.Tags = []string{}
+	}
+	if planItemsJSON != nil {
+		if err := json.Unmarshal(planItemsJSON, &s.PlanItems); err != nil {
+			return nil, fmt.Errorf("unmarshal script plan_items: %w", err)
+		}
+	}
+	if s.PlanItems == nil {
+		s.PlanItems = []MMLPlanItem{}
+	}
+	if validationSummaryJSON != nil && len(validationSummaryJSON) > 2 {
+		if err := json.Unmarshal(validationSummaryJSON, &s.ValidationSummary); err != nil {
+			return nil, fmt.Errorf("unmarshal script validation_summary: %w", err)
+		}
+	}
+	if s.ValidationSummary == nil {
+		s.ValidationSummary = JSONMap{}
 	}
 	if resultJSON != nil && len(resultJSON) > 2 {
 		_ = json.Unmarshal(resultJSON, &s.Result)
@@ -706,7 +915,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *MMLTask) error {
 	}
 
 	query, args, err := storage.Psql.Insert("mml_tasks").
-		Columns("task_name", "script_id", "device_sns",
+		Columns("task_name", "request_id", "script_id", "script_content_sha256", "script_validation_version", "device_sns",
 			"commands", "execute_mode", "plan_items", "status", "results", "creator", "executor",
 			"execute_type", "scheduled_at",
 			"period_start", "period_end", "period_time",
@@ -717,7 +926,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *MMLTask) error {
 			"product_resolved", "matched_product_id", "matched_product_class", "path_translation_source").
 		// 2026-05-28 修复:JSONB 列用 string 传(详见 Update 函数注释)。
 		// Create 当前能工作是 pgx prepare-cache 路径行为巧合,显式 string 防退化。
-		Values(task.TaskName, task.ScriptID, string(deviceSNsJSON),
+		Values(task.TaskName, nullIfEmpty(task.RequestID), task.ScriptID, task.ScriptContentSHA256, task.ScriptValidationVersion, string(deviceSNsJSON),
 			string(commandsJSON), task.ExecuteMode, string(planItemsJSON), task.Status, string(resultsJSON), task.Creator, task.Executor,
 			task.ExecuteType, task.ScheduledAt,
 			task.PeriodStart, task.PeriodEnd, task.PeriodTime,
@@ -760,6 +969,25 @@ func (r *PgTaskRepository) GetByID(ctx context.Context, id uuid.UUID) (*MMLTask,
 	return task, nil
 }
 
+func (r *PgTaskRepository) GetByRequestID(ctx context.Context, creator, requestID string) (*MMLTask, error) {
+	query, args, err := storage.Psql.Select(taskColumns...).
+		From("mml_tasks").
+		Where(sq.Eq{"creator": strings.TrimSpace(creator)}).
+		Where(sq.Eq{"request_id": strings.TrimSpace(requestID)}).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build get mml_task by request id SQL: %w", err)
+	}
+	task, err := scanTask(r.pool.QueryRow(ctx, query, args...))
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, commonerrors.ErrNotFound
+		}
+		return nil, fmt.Errorf("get mml_task by request id: %w", err)
+	}
+	return task, nil
+}
+
 func (r *PgTaskRepository) Update(ctx context.Context, task *MMLTask) error {
 	if task.ExecuteMode == "" {
 		task.ExecuteMode = TaskExecuteModeCommon
@@ -793,6 +1021,8 @@ func (r *PgTaskRepository) Update(ctx context.Context, task *MMLTask) error {
 	query, args, err := storage.Psql.Update("mml_tasks").
 		Set("task_name", task.TaskName).
 		Set("script_id", task.ScriptID).
+		Set("script_content_sha256", task.ScriptContentSHA256).
+		Set("script_validation_version", task.ScriptValidationVersion).
 		Set("device_sns", string(deviceSNsJSON)).
 		Set("commands", string(commandsJSON)).
 		Set("execute_mode", task.ExecuteMode).
@@ -913,9 +1143,10 @@ func scanTask(row pgx.Row) (*MMLTask, error) {
 	// T-0168: 翻译审计 4 列；matched_product_class / path_translation_source 用 *string
 	// 接 NULL（migration 000171 列允许 NULL）；product_resolved 默认 true，*bool 处理 NULL 兜底。
 	var matchedProductClass, pathTranslationSource *string
+	var requestID *string
 
 	err := row.Scan(
-		&t.ID, &t.TaskName, &t.ScriptID, &deviceSNsJSON,
+		&t.ID, &t.TaskName, &requestID, &t.ScriptID, &t.ScriptContentSHA256, &t.ScriptValidationVersion, &deviceSNsJSON,
 		&commandsJSON, &t.ExecuteMode, &planItemsJSON, &t.Status, &resultsJSON, &t.Creator, &t.Executor,
 		&t.CreatedAt, &t.UpdatedAt,
 		&t.ExecuteType, &t.ScheduledAt,
@@ -935,6 +1166,9 @@ func scanTask(row pgx.Row) (*MMLTask, error) {
 	}
 	if pathTranslationSource != nil {
 		t.PathTranslationSource = *pathTranslationSource
+	}
+	if requestID != nil {
+		t.RequestID = *requestID
 	}
 	if deviceSNsJSON != nil {
 		if err := json.Unmarshal(deviceSNsJSON, &t.DeviceSNs); err != nil {
@@ -979,9 +1213,10 @@ func scanTaskRow(rows pgx.Rows) (*MMLTask, error) {
 	var deviceSNsJSON, commandsJSON, planItemsJSON, resultsJSON []byte
 	// T-0168: 翻译审计列 NULL 接收同 scanTask。
 	var matchedProductClass, pathTranslationSource *string
+	var requestID *string
 
 	err := rows.Scan(
-		&t.ID, &t.TaskName, &t.ScriptID, &deviceSNsJSON,
+		&t.ID, &t.TaskName, &requestID, &t.ScriptID, &t.ScriptContentSHA256, &t.ScriptValidationVersion, &deviceSNsJSON,
 		&commandsJSON, &t.ExecuteMode, &planItemsJSON, &t.Status, &resultsJSON, &t.Creator, &t.Executor,
 		&t.CreatedAt, &t.UpdatedAt,
 		&t.ExecuteType, &t.ScheduledAt,
@@ -1001,6 +1236,9 @@ func scanTaskRow(rows pgx.Rows) (*MMLTask, error) {
 	}
 	if pathTranslationSource != nil {
 		t.PathTranslationSource = *pathTranslationSource
+	}
+	if requestID != nil {
+		t.RequestID = *requestID
 	}
 	if deviceSNsJSON != nil {
 		if err := json.Unmarshal(deviceSNsJSON, &t.DeviceSNs); err != nil {
@@ -1314,16 +1552,16 @@ func (r *PgTaskRepository) ClaimDueTasks(ctx context.Context, now time.Time, lim
 		resultBytes, _ := json.Marshal(child.Results)
 
 		insertSQL := `
-			INSERT INTO mml_tasks (
-				task_name, script_id, device_sns, commands, execute_mode, plan_items, status, results, creator, executor,
+		INSERT INTO mml_tasks (
+				task_name, script_id, script_content_sha256, script_validation_version, device_sns, commands, execute_mode, plan_items, status, results, creator, executor,
 				execute_type, scheduled_at, period_start, period_end, period_time,
 				offline_retry, offline_retry_wait, failed_retry, failed_retry_count, failed_retry_interval,
 				total_devices, next_trigger_at, parent_task_id, started_at
 			) VALUES (
-				$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24
+				$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26
 			) RETURNING ` + joinColumns(taskColumns)
 		row := tx.QueryRow(ctx, insertSQL,
-			child.TaskName, child.ScriptID, childBytes,
+			child.TaskName, child.ScriptID, child.ScriptContentSHA256, child.ScriptValidationVersion, childBytes,
 			cmdBytes, child.ExecuteMode, planBytes, child.Status, resultBytes, child.Creator, child.Executor,
 			child.ExecuteType, child.ScheduledAt,
 			child.PeriodStart, child.PeriodEnd, child.PeriodTime,
@@ -1909,6 +2147,7 @@ func paramRefSelectExpr(lang string) string {
        sp.standard_path AS tr069_path,
        lower(COALESCE(sp.data_type, 'string'))    AS value_type,
        (sp.access = 'READ_WRITE')                  AS is_writable,
+	       csf.is_required,
        ''::text                                    AS default_value,
        ''::text                                    AS js_regex,
        '{}'::jsonb                                 AS value_constraint`
@@ -1941,7 +2180,7 @@ ORDER BY csf.sort_order ASC, csf.mml_code ASC`
 		var pr MMLParamRef
 		var constraintJSON []byte
 		if err := rows.Scan(&pr.ID, &pr.ParamCode, &pr.ParamNameZh, &pr.Tr069Path,
-			&pr.ValueType, &pr.IsWritable, &pr.DefaultValue, &pr.JsRegex, &constraintJSON); err != nil {
+			&pr.ValueType, &pr.IsWritable, &pr.IsRequired, &pr.DefaultValue, &pr.JsRegex, &constraintJSON); err != nil {
 			return nil, fmt.Errorf("scan param ref: %w", err)
 		}
 		if constraintJSON != nil && len(constraintJSON) > 2 {
@@ -1979,7 +2218,7 @@ ORDER BY csf.command_id, csf.sort_order ASC, csf.mml_code ASC`
 		var pr MMLParamRef
 		var constraintJSON []byte
 		if err := rows.Scan(&cmdID, &pr.ID, &pr.ParamCode, &pr.ParamNameZh, &pr.Tr069Path,
-			&pr.ValueType, &pr.IsWritable, &pr.DefaultValue, &pr.JsRegex, &constraintJSON); err != nil {
+			&pr.ValueType, &pr.IsWritable, &pr.IsRequired, &pr.DefaultValue, &pr.JsRegex, &constraintJSON); err != nil {
 			return nil, fmt.Errorf("scan param ref: %w", err)
 		}
 		if constraintJSON != nil && len(constraintJSON) > 2 {
@@ -1991,4 +2230,228 @@ ORDER BY csf.command_id, csf.sort_order ASC, csf.mml_code ASC`
 		return nil, fmt.Errorf("iterate param refs: %w", err)
 	}
 	return result, nil
+}
+
+// PgScriptValidationRepository is the PostgreSQL implementation used by TXT
+// import validation. It deliberately performs set-based reads only: command
+// codes, command parameters and device serial numbers are each queried as a
+// batch rather than once per parsed line.
+type PgScriptValidationRepository struct {
+	pool *pgxpool.Pool
+}
+
+func NewPgScriptValidationRepository(pool *pgxpool.Pool) *PgScriptValidationRepository {
+	return &PgScriptValidationRepository{pool: pool}
+}
+
+var _ ScriptValidationRepository = (*PgScriptValidationRepository)(nil)
+
+func (r *PgScriptValidationRepository) LoadCommandsByCodes(ctx context.Context, codes []string, actor ValidationActor) (map[string]ValidationCommand, error) {
+	result := make(map[string]ValidationCommand, len(codes))
+	if len(codes) == 0 {
+		return result, nil
+	}
+
+	standardRows, err := r.pool.Query(ctx, `
+SELECT id, command_code, operation_type, rpc_method, COALESCE(target_object, ''), target_paths, require_confirm,
+       (deprecated_at IS NOT NULL)
+  FROM mml_commands
+ WHERE command_code = ANY($1)
+   AND source = 'standard'`, codes)
+	if err != nil {
+		return nil, fmt.Errorf("load standard validation commands: %w", err)
+	}
+	standardIDs := make([]uuid.UUID, 0, len(codes))
+	standardCodes := make(map[uuid.UUID]string, len(codes))
+	standardCodeSet := make(map[string]struct{}, len(codes))
+	for standardRows.Next() {
+		var id uuid.UUID
+		var command ValidationCommand
+		var targetPathsJSON []byte
+		if err := standardRows.Scan(&id, &command.CommandCode, &command.OperationType, &command.RPCMethod, &command.TargetObject, &targetPathsJSON, &command.RequireConfirm, &command.Disabled); err != nil {
+			standardRows.Close()
+			return nil, fmt.Errorf("scan standard validation command: %w", err)
+		}
+		if err := json.Unmarshal(targetPathsJSON, &command.TargetPaths); err != nil {
+			standardRows.Close()
+			return nil, fmt.Errorf("decode standard validation target paths: %w", err)
+		}
+		result[command.CommandCode] = command
+		standardIDs = append(standardIDs, id)
+		standardCodes[id] = command.CommandCode
+		standardCodeSet[command.CommandCode] = struct{}{}
+	}
+	if err := standardRows.Err(); err != nil {
+		standardRows.Close()
+		return nil, fmt.Errorf("iterate standard validation commands: %w", err)
+	}
+	standardRows.Close()
+
+	// Standard commands take precedence over a custom command with the same
+	// code. The custom predicate matches the existing public/self/group-share
+	// visibility rule, so import cannot validate an otherwise hidden command.
+	customRows, err := r.pool.Query(ctx, `
+SELECT id, command_code, operation_type, parameters, param_paths
+  FROM mml_custom_command cc
+ WHERE command_code = ANY($1)
+   AND (
+       cc.command_scope = 'public'
+       OR cc.creator = $2
+       OR EXISTS (
+           SELECT 1
+             FROM users u
+             JOIN user_roles ur ON ur.user_id = u.id
+             JOIN role_device_groups rdg ON rdg.role_id = ur.role_id
+            WHERE u.username = cc.creator
+              AND rdg.group_id = ANY($3)
+       )
+   )`, codes, actor.Username, actor.VisibleGroupIDs)
+	if err != nil {
+		return nil, fmt.Errorf("load visible custom validation commands: %w", err)
+	}
+	for customRows.Next() {
+		var id uuid.UUID
+		var code, operation string
+		var parametersJSON, pathsJSON []byte
+		if err := customRows.Scan(&id, &code, &operation, &parametersJSON, &pathsJSON); err != nil {
+			customRows.Close()
+			return nil, fmt.Errorf("scan custom validation command: %w", err)
+		}
+		if _, standard := standardCodeSet[code]; standard {
+			continue
+		}
+		if existing, duplicate := result[code]; duplicate {
+			existing.Ambiguous = true
+			result[code] = existing
+			continue
+		}
+		command := ValidationCommand{CommandCode: code, OperationType: operation, RPCMethod: rpcMethodForOperation(operation)}
+		var parameters map[string]interface{}
+		if err := json.Unmarshal(parametersJSON, &parameters); err != nil {
+			customRows.Close()
+			return nil, fmt.Errorf("decode custom validation parameters: %w", err)
+		}
+		paramCodes := make([]string, 0, len(parameters))
+		for paramCode := range parameters {
+			paramCodes = append(paramCodes, paramCode)
+		}
+		sort.Strings(paramCodes)
+		for _, paramCode := range paramCodes {
+			command.ParamRefs = append(command.ParamRefs, MMLParamRef{ParamCode: paramCode, ValueType: "string", IsWritable: true})
+		}
+		if err := json.Unmarshal(pathsJSON, &command.TargetPaths); err != nil {
+			customRows.Close()
+			return nil, fmt.Errorf("decode custom validation paths: %w", err)
+		}
+		result[code] = command
+	}
+	if err := customRows.Err(); err != nil {
+		customRows.Close()
+		return nil, fmt.Errorf("iterate custom validation commands: %w", err)
+	}
+	customRows.Close()
+
+	if len(standardIDs) == 0 {
+		return result, nil
+	}
+	paramRows, err := r.pool.Query(ctx, `
+SELECT csf.command_id, csf.mml_code, sp.standard_path,
+       lower(COALESCE(sp.data_type, 'string')),
+	       (sp.access = 'READ_WRITE'), csf.is_required, sp.min_value, sp.max_value
+  FROM mml_command_sub_fields csf
+  JOIN standard_params sp ON sp.id = csf.standard_path_id
+ WHERE csf.command_id = ANY($1)
+ ORDER BY csf.command_id, csf.sort_order ASC, csf.mml_code ASC`, standardIDs)
+	if err != nil {
+		return nil, fmt.Errorf("load validation command parameters: %w", err)
+	}
+	for paramRows.Next() {
+		var commandID uuid.UUID
+		var ref MMLParamRef
+		var minValue, maxValue *int64
+		if err := paramRows.Scan(&commandID, &ref.ParamCode, &ref.Tr069Path, &ref.ValueType, &ref.IsWritable, &ref.IsRequired, &minValue, &maxValue); err != nil {
+			paramRows.Close()
+			return nil, fmt.Errorf("scan validation command parameter: %w", err)
+		}
+		rules := standardValidationRules(ref.ValueType, minValue, maxValue)
+		ref.JsRegex = rules.JsRegex
+		ref.ValueConstraint = rules.ValueConstraint
+		code := standardCodes[commandID]
+		command := result[code]
+		command.ParamRefs = append(command.ParamRefs, ref)
+		result[code] = command
+	}
+	if err := paramRows.Err(); err != nil {
+		paramRows.Close()
+		return nil, fmt.Errorf("iterate validation command parameters: %w", err)
+	}
+	paramRows.Close()
+	return result, nil
+}
+
+// standardValidationRules maps the constraints that the current authoritative
+// standard_params schema actually persists (data type plus numeric bounds) to
+// the generic validation contract. Boolean and unsignedInt semantics supply
+// deterministic enum/regex rules in addition to persisted bounds.
+func standardValidationRules(valueType string, minValue, maxValue *int64) MMLParamRef {
+	rules := MMLParamRef{ValueConstraint: make(map[string]interface{})}
+	if minValue != nil {
+		rules.ValueConstraint["min"] = float64(*minValue)
+	}
+	if maxValue != nil {
+		rules.ValueConstraint["max"] = float64(*maxValue)
+	}
+	switch canonicalValueType(valueType) {
+	case "boolean", "bool":
+		rules.JsRegex = "(?i)^(true|false|0|1)$"
+		rules.ValueConstraint["regex"] = rules.JsRegex
+		rules.ValueConstraint["enum"] = []interface{}{"true", "false", "0", "1"}
+	case "unsignedint", "unsignedinteger", "uint", "uint32", "uint64":
+		rules.JsRegex = "^[0-9]+$"
+		rules.ValueConstraint["regex"] = rules.JsRegex
+	}
+	if len(rules.ValueConstraint) == 0 {
+		rules.ValueConstraint = nil
+	}
+	return rules
+}
+
+func (r *PgScriptValidationRepository) LoadDevicesBySNs(ctx context.Context, sns []string) (map[string]*model.Device, error) {
+	result := make(map[string]*model.Device, len(sns))
+	if len(sns) == 0 {
+		return result, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+SELECT serial_number, COALESCE(product_class, ''), is_online, COALESCE(firmware_version, '')
+  FROM devices
+ WHERE serial_number = ANY($1)
+   AND deleted_at IS NULL`, sns)
+	if err != nil {
+		return nil, fmt.Errorf("load validation devices: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		device := &model.Device{}
+		if err := rows.Scan(&device.SerialNumber, &device.ProductClass, &device.IsOnline, &device.FirmwareVersion); err != nil {
+			return nil, fmt.Errorf("scan validation device: %w", err)
+		}
+		result[device.SerialNumber] = device
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate validation devices: %w", err)
+	}
+	return result, nil
+}
+
+func rpcMethodForOperation(operation string) string {
+	switch operation {
+	case "MOD":
+		return "SetParameterValues"
+	case "ADD":
+		return "AddObject"
+	case "RMV":
+		return "DeleteObject"
+	default:
+		return "GetParameterValues"
+	}
 }

@@ -19,13 +19,21 @@ import (
 type Handler struct {
 	service *Service
 	logger  *zap.Logger
+	// scriptImportService is set during module wiring. Keeping import endpoints
+	// optional preserves the existing handler test harnesses and startup order.
+	scriptImportService ScriptImportServiceAPI
 }
 
 // NewHandler creates a new MML Handler.
 func NewHandler(service *Service, logger *zap.Logger) *Handler {
+	var importService ScriptImportServiceAPI
+	if service != nil {
+		importService = service.ScriptImportService()
+	}
 	return &Handler{
-		service: service,
-		logger:  logger.Named("mml-handler"),
+		service:             service,
+		logger:              logger.Named("mml-handler"),
+		scriptImportService: importService,
 	}
 }
 
@@ -46,8 +54,13 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	mml.POST("/tasks", h.CreateTask)
 
 	scripts := mml.Group("/scripts")
+	scripts.GET("/import/template", h.GetScriptImportTemplate)
+	scripts.POST("/import/validate", h.ValidateScriptImport)
+	scripts.POST("/import", h.CreateScriptFromImport)
+	scripts.POST("/:id/import/validate", h.ValidateScriptReplacement)
+	scripts.PUT("/:id/import", h.ReplaceScriptFromImport)
+	scripts.POST("/:id/executions", h.CreateScriptExecution)
 	scripts.GET("", h.ListScripts)
-	scripts.POST("", h.CreateScript)
 	scripts.GET("/:id", h.GetScript)
 	scripts.PUT("/:id", h.UpdateScript)
 	scripts.DELETE("/:id", h.DeleteScript)
@@ -88,6 +101,49 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	// 一键展开为一个 mml_task，fanout + sequencer 自动串行下发。
 	groups := mml.Group("/groups")
 	groups.POST("/:id/execute", h.ExecuteGroup)
+}
+
+// CreateScriptExecution creates an execution instance from the server-side
+// imported-script snapshot. The request is intentionally strict and contains
+// no commands, device_sns or plan_items fields.
+func (h *Handler) CreateScriptExecution(c *gin.Context) {
+	username, ok := authenticatedUsername(c)
+	if !ok {
+		h.writeScriptImportError(c, http.StatusUnauthorized, "MML_UNAUTHORIZED", "authentication required", nil)
+		return
+	}
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		h.writeScriptImportError(c, http.StatusBadRequest, "MML_SCRIPT_ID_INVALID", "invalid script id", nil)
+		return
+	}
+	var req ScriptExecutionRequest
+	if err := decodeScriptImportJSON(c, &req); err != nil {
+		h.writeScriptImportError(c, http.StatusBadRequest, "MML_EXECUTION_REQUEST_INVALID", "invalid script execution request", nil)
+		return
+	}
+	task, validation, err := h.service.CreateScriptExecution(c.Request.Context(), id, username, req)
+	if err != nil {
+		var validationErr *ScriptExecutionValidationError
+		if errors.As(err, &validationErr) && validationErr.Result != nil {
+			status := http.StatusUnprocessableEntity
+			code := "MML_SCRIPT_EXECUTION_VALIDATION_FAILED"
+			message := "script execution preflight failed"
+			if validationErr.Warnings {
+				status = http.StatusConflict
+				code = "MML_SCRIPT_EXECUTION_WARNINGS"
+				message = "script execution warnings require confirmation"
+			}
+			c.AbortWithStatusJSON(status, gin.H{"ret": 0, "msg": message, "data": validationErr.Result, "code": code, "message": message, "issues": validationErr.Result.Issues})
+			return
+		}
+		h.writeScriptImportServiceError(c, err)
+		return
+	}
+	if validation == nil {
+		validation = &ScriptValidationResult{PlanItems: []MMLPlanItem{}, Issues: []ScriptIssue{}}
+	}
+	response.OKWithStatus(c, http.StatusCreated, gin.H{"task": task, "validation": validation})
 }
 
 // ---- Request types ----
@@ -173,7 +229,6 @@ type CreateScriptRequest struct {
 type UpdateScriptRequest struct {
 	ScriptName  string   `json:"script_name" binding:"required"`
 	Description string   `json:"description"`
-	Content     string   `json:"content" binding:"required"`
 	Tags        []string `json:"tags"`
 }
 
@@ -557,14 +612,7 @@ func (h *Handler) UpdateScript(c *gin.Context) {
 		return
 	}
 
-	script := &MMLScript{
-		ScriptName:  req.ScriptName,
-		Description: req.Description,
-		Content:     req.Content,
-		Tags:        req.Tags,
-	}
-
-	updated, err := h.service.UpdateScript(c.Request.Context(), id, script)
+	updated, err := h.service.UpdateScriptMetadata(c.Request.Context(), id, req.ScriptName, req.Description, req.Tags)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return

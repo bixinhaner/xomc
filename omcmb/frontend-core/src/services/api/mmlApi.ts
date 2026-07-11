@@ -1,6 +1,6 @@
 import http from '../http';
 import { generateUid } from '../../utils/uid';
-import type { MMLCommand, MMLScript, MMLTask, MMLTaskCommandDetail, MMLTaskCommandInput, MMLParam, MMLCustomCommand, ParamPath, MMLOperationType, DeviceTaskResultItem, MMLParamRef, MMLTaskResultsStats, MMLPathTranslationView, PathTranslationSource, MMLTaskPlanItem, MMLTaskCreateInput } from '../../types/mml';
+import type { MMLCommand, MMLScript, MMLTask, MMLTaskCommandDetail, MMLTaskCommandInput, MMLParam, MMLCustomCommand, ParamPath, MMLOperationType, DeviceTaskResultItem, MMLParamRef, MMLTaskResultsStats, MMLPathTranslationView, PathTranslationSource, MMLTaskPlanItem, MMLTaskCreateInput, MMLScriptImportValidation, MMLScriptValidationSummary, MMLScriptIssue, MMLImportedScriptCreateInput, MMLImportedScriptReplaceInput, MMLScriptExecutionInput, MMLScriptImportTemplate } from '../../types/mml';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 import type {
   BackendStatement,
@@ -85,6 +85,76 @@ interface BackendMMLScript {
   // P1 last_run snapshot
   last_run_status?: string | null;
   last_run_at?: string | null;
+  original_filename?: string;
+  content_sha256?: string;
+  validation_version?: string;
+  validated_at?: string | null;
+  plan_items?: BackendMMLPlanItem[] | null;
+  validation_summary?: BackendPersistedMMLScriptValidation | null;
+}
+
+interface BackendMMLScriptIssue {
+  code: string;
+  severity: string;
+  line_no?: number;
+  raw_line?: string;
+  field?: string;
+  message?: string;
+}
+
+interface BackendMMLScriptValidationSummary {
+  total_lines?: number;
+  valid_lines?: number;
+  /** Compatibility with the original frontend import proposal. */
+  effective_lines?: number;
+  device_count?: number;
+  error_count?: number;
+  warning_count?: number;
+}
+
+/**
+ * Imported scripts persist both the validator summary and line issues inside
+ * validation_summary. Older rows may contain the summary fields directly.
+ */
+interface BackendPersistedMMLScriptValidation extends BackendMMLScriptValidationSummary {
+  summary?: BackendMMLScriptValidationSummary | null;
+  issues?: BackendMMLScriptIssue[] | null;
+}
+
+interface BackendMMLScriptImportValidation {
+  validation_token?: string;
+  original_filename?: string;
+  normalized_content?: string;
+  content_sha256?: string;
+  validation_version?: string;
+  validated_at?: string | null;
+  plan_items?: BackendMMLPlanItem[] | null;
+  summary?: BackendMMLScriptValidationSummary | null;
+  issues?: BackendMMLScriptIssue[] | null;
+}
+
+export class MMLScriptImportApiError extends Error {
+  readonly status: number;
+  readonly code?: string;
+  readonly validation?: MMLScriptImportValidation;
+
+  constructor({
+    status,
+    code,
+    message,
+    validation,
+  }: {
+    status: number;
+    code?: string;
+    message: string;
+    validation?: MMLScriptImportValidation;
+  }) {
+    super(message);
+    this.name = 'MMLScriptImportApiError';
+    this.status = status;
+    this.code = code;
+    this.validation = validation;
+  }
 }
 
 interface BackendMMLTask {
@@ -344,6 +414,7 @@ function dedupeParamRefs(refs: MMLParamRef[] | undefined): MMLParamRef[] | undef
 }
 
 function mapBackendScript(bs: BackendMMLScript): MMLScript {
+  const persistedValidation = mapPersistedScriptValidation(bs.validation_summary);
   return {
     id: bs.id,
     scriptName: bs.script_name,
@@ -362,7 +433,144 @@ function mapBackendScript(bs: BackendMMLScript): MMLScript {
     result: bs.result ?? undefined,
     lastRunStatus: bs.last_run_status || undefined,
     lastRunAt: bs.last_run_at || undefined,
+    originalFilename: bs.original_filename || undefined,
+    contentSha256: bs.content_sha256 || undefined,
+    validationVersion: bs.validation_version || undefined,
+    validatedAt: bs.validated_at || undefined,
+    planItems: bs.plan_items?.map(mapBackendPlanItem),
+    validationSummary: persistedValidation.validationSummary,
+    validationIssues: persistedValidation.validationIssues,
   };
+}
+
+function mapPersistedScriptValidation(
+  validation: BackendPersistedMMLScriptValidation | null | undefined,
+): Pick<MMLScript, 'validationSummary' | 'validationIssues'> {
+  if (!validation) return {};
+  const summary = validation.summary ?? validation;
+  return {
+    validationSummary: mapBackendScriptValidationSummary(summary),
+    validationIssues: validation.issues?.map(mapBackendScriptIssue),
+  };
+}
+
+function mapBackendScriptIssue(issue: BackendMMLScriptIssue): MMLScriptIssue {
+  return {
+    code: issue.code,
+    severity: issue.severity === 'warning' ? 'warning' : 'error',
+    lineNo: issue.line_no || undefined,
+    rawLine: issue.raw_line || undefined,
+    field: issue.field || undefined,
+    message: issue.message || undefined,
+  };
+}
+
+function mapBackendScriptValidationSummary(
+  summary: BackendMMLScriptValidationSummary | null | undefined,
+): MMLScriptValidationSummary {
+  const validLines = summary?.valid_lines ?? summary?.effective_lines ?? 0;
+  return {
+    totalLines: summary?.total_lines ?? validLines,
+    validLines,
+    effectiveLines: summary?.effective_lines ?? validLines,
+    deviceCount: summary?.device_count ?? 0,
+    errorCount: summary?.error_count ?? 0,
+    warningCount: summary?.warning_count ?? 0,
+  };
+}
+
+function mapBackendScriptImportValidation(
+  validation: BackendMMLScriptImportValidation,
+): MMLScriptImportValidation {
+  return {
+    validationToken: validation.validation_token || undefined,
+    originalFilename: validation.original_filename || undefined,
+    normalizedContent: validation.normalized_content || undefined,
+    contentSha256: validation.content_sha256 || undefined,
+    validationVersion: validation.validation_version || undefined,
+    validatedAt: validation.validated_at || undefined,
+    planItems: (validation.plan_items || []).map(mapBackendPlanItem),
+    summary: mapBackendScriptValidationSummary(validation.summary),
+    issues: (validation.issues || []).map(mapBackendScriptIssue),
+  };
+}
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function validationPayloadFromError(
+  body: Record<string, unknown> | undefined,
+): BackendMMLScriptImportValidation | undefined {
+  const data = objectValue(body?.data);
+  const candidate = data ?? body;
+  if (!candidate) return undefined;
+  const issues = candidate.issues ?? body?.issues;
+  const hasValidationFields = candidate.summary !== undefined
+    || candidate.plan_items !== undefined
+    || issues !== undefined;
+  if (!hasValidationFields) return undefined;
+  return {
+    validation_token: stringValue(candidate.validation_token),
+    original_filename: stringValue(candidate.original_filename),
+    normalized_content: stringValue(candidate.normalized_content),
+    content_sha256: stringValue(candidate.content_sha256),
+    validation_version: stringValue(candidate.validation_version),
+    validated_at: stringValue(candidate.validated_at),
+    plan_items: Array.isArray(candidate.plan_items)
+      ? candidate.plan_items as BackendMMLPlanItem[]
+      : [],
+    summary: objectValue(candidate.summary) as BackendMMLScriptValidationSummary | undefined,
+    issues: Array.isArray(issues) ? issues as BackendMMLScriptIssue[] : [],
+  };
+}
+
+/**
+ * Converts Axios-shaped import/execution failures into the shared contract so
+ * skin UIs can display 422 errors and 409 warning confirmations consistently.
+ */
+export function normalizeMMLScriptImportApiError(error: unknown): MMLScriptImportApiError {
+  if (error instanceof MMLScriptImportApiError) return error;
+  const source = objectValue(error);
+  const response = objectValue(source?.response);
+  const body = objectValue(response?.data);
+  const data = objectValue(body?.data);
+  const status = typeof response?.status === 'number' ? response.status : 0;
+  const code = stringValue(body?.code) || stringValue(data?.code);
+  const message = stringValue(body?.message)
+    || stringValue(body?.msg)
+    || stringValue(data?.message)
+    || stringValue(source?.message)
+    || 'MML script import request failed';
+  const validationPayload = (status === 422 || status === 409)
+    ? validationPayloadFromError(body)
+    : undefined;
+  return new MMLScriptImportApiError({
+    status,
+    code,
+    message,
+    validation: validationPayload ? mapBackendScriptImportValidation(validationPayload) : undefined,
+  });
+}
+
+function filenameFromContentDisposition(value: unknown, fallback: string): string {
+  if (typeof value !== 'string') return fallback;
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(value)?.[1];
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded);
+    } catch {
+      return fallback;
+    }
+  }
+  const quoted = /filename="([^"]+)"/i.exec(value)?.[1];
+  return quoted || fallback;
 }
 
 function mapTaskResultsStats(
@@ -715,6 +923,112 @@ export const mmlApi = {
   },
 
   // --- Scripts ---
+
+  async validateScriptImport(file: File): Promise<MMLScriptImportValidation> {
+    const body = new FormData();
+    body.append('file', file);
+    // Do not set Content-Type here: the browser/Axios owns the multipart boundary.
+    try {
+      const { data } = await http.post<BackendMMLScriptImportValidation>(
+        '/mml/scripts/import/validate',
+        body,
+      );
+      return mapBackendScriptImportValidation(data);
+    } catch (error) {
+      throw normalizeMMLScriptImportApiError(error);
+    }
+  },
+
+  async validateScriptReplacement(
+    id: string,
+    file: File,
+  ): Promise<MMLScriptImportValidation> {
+    const body = new FormData();
+    body.append('file', file);
+    try {
+      const { data } = await http.post<BackendMMLScriptImportValidation>(
+        `/mml/scripts/${id}/import/validate`,
+        body,
+      );
+      return mapBackendScriptImportValidation(data);
+    } catch (error) {
+      throw normalizeMMLScriptImportApiError(error);
+    }
+  },
+
+  async createImportedScript(input: MMLImportedScriptCreateInput): Promise<MMLScript> {
+    const payload: Record<string, unknown> = {
+      validation_token: input.validationToken,
+      script_name: input.scriptName,
+      description: input.description,
+      tags: input.tags,
+    };
+    if (input.requestId) payload.request_id = input.requestId;
+    const { data } = await http.post<BackendMMLScript>('/mml/scripts/import', payload);
+    return mapBackendScript(data);
+  },
+
+  async replaceImportedScript(
+    id: string,
+    input: MMLImportedScriptReplaceInput,
+  ): Promise<MMLScript> {
+    const payload: Record<string, unknown> = {
+      validation_token: input.validationToken,
+      script_name: input.scriptName,
+      description: input.description,
+      tags: input.tags,
+      expected_updated_at: input.expectedUpdatedAt,
+    };
+    if (input.requestId) payload.request_id = input.requestId;
+    const { data } = await http.put<BackendMMLScript>(`/mml/scripts/${id}/import`, payload);
+    return mapBackendScript(data);
+  },
+
+  async createScriptExecution(
+    id: string,
+    input: MMLScriptExecutionInput,
+  ): Promise<{ task: MMLTask; validation: MMLScriptImportValidation }> {
+    const payload: Record<string, unknown> = {
+      task_name: input.taskName,
+      execute_type: input.executeType || 'immediate',
+      offline_retry: input.offlineRetry ?? false,
+      offline_retry_wait: input.offlineRetryWait ?? 60,
+      failed_retry: input.failedRetry ?? false,
+      failed_retry_count: input.failedRetryCount ?? 3,
+      failed_retry_interval: input.failedRetryInterval ?? 5,
+      confirm_warnings: input.confirmWarnings ?? false,
+    };
+    if (input.scheduledAt) payload.scheduled_at = input.scheduledAt;
+    if (input.periodStart) payload.period_start = input.periodStart;
+    if (input.periodEnd) payload.period_end = input.periodEnd;
+    if (input.periodTime) payload.period_time = input.periodTime;
+    if (input.requestId) payload.request_id = input.requestId;
+    try {
+      const { data } = await http.post<{
+        task: BackendMMLTask;
+        validation: BackendMMLScriptImportValidation;
+      }>(`/mml/scripts/${id}/executions`, payload);
+      return {
+        task: mapBackendTask(data.task),
+        validation: mapBackendScriptImportValidation(data.validation),
+      };
+    } catch (error) {
+      throw normalizeMMLScriptImportApiError(error);
+    }
+  },
+
+  async downloadScriptImportTemplate(): Promise<MMLScriptImportTemplate> {
+    const response = await http.get<Blob>('/mml/scripts/import/template', {
+      responseType: 'blob',
+    });
+    return {
+      blob: response.data,
+      filename: filenameFromContentDisposition(
+        response.headers?.['content-disposition'],
+        'MMLTemplate.txt',
+      ),
+    };
+  },
 
   async getScripts(
     p: PageRequest & { search?: string; creator?: string }

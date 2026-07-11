@@ -1498,6 +1498,14 @@ func initMiscModules(c *Container) error {
 	mmlAuditRepo := mml.NewPgAuditRepository(c.PgPool)
 	mmlCmdParamRepo := mml.NewPgCommandParamRepository(c.PgPool)
 	mmlService := mml.NewService(mmlCmdRepo, mmlScriptRepo, mmlTaskRepo, mmlCustomCmdRepo, messageHub, logger)
+	// MML TXT import is a two-phase flow: validation snapshots are held in
+	// Redis for 15 minutes, while command/device authority is loaded from PG.
+	// The service is injected before the handler is registered below so every
+	// route observes the same repository and session-store instances.
+	importSessions := mml.NewRedisImportSessionStore(c.Redis, 15*time.Minute)
+	importValidator := mml.NewScriptImportValidator(mml.NewPgScriptValidationRepository(c.PgPool))
+	mmlService.SetScriptImportService(mml.NewScriptImportService(mmlScriptRepo, importValidator, importSessions, logger))
+	mmlService.SetScriptExecutionValidator(importValidator)
 	mmlService.SetAuditRepo(mmlAuditRepo)
 	mmlService.SetCmdParamRepo(mmlCmdParamRepo)
 	// issue #115 调整3（A1）：自定义命令 PATH 关联表仓库。

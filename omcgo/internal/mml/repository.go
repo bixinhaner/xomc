@@ -2,11 +2,16 @@ package mml
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
 )
+
+// ErrScriptVersionConflict indicates that an imported script was changed by
+// another writer after the caller read its updated_at version.
+var ErrScriptVersionConflict = errors.New("mml script version conflict")
 
 // CommandRepository provides read-only access to predefined MML commands.
 type CommandRepository interface {
@@ -23,6 +28,7 @@ type CommandRepository interface {
 type ScriptRepository interface {
 	Create(ctx context.Context, script *MMLScript) error
 	GetByID(ctx context.Context, id uuid.UUID) (*MMLScript, error)
+	NameExistsForCreator(ctx context.Context, creator, name string, excludeID *uuid.UUID) (bool, error)
 	Update(ctx context.Context, script *MMLScript) error
 	UpdateLifecycle(ctx context.Context, script *MMLScript) error
 	// UpdateLastRun 只写 last_run_status / last_run_at 两列，避免与 Update / UpdateLifecycle
@@ -32,10 +38,22 @@ type ScriptRepository interface {
 	List(ctx context.Context, filter ScriptFilter) (*model.ListResponse[MMLScript], error)
 }
 
+// ImportedScriptRepository is the persistence boundary for TXT-imported
+// scripts. Imported writes intentionally use separate methods so callers do
+// not accidentally accept client-supplied content or plan fields.
+type ImportedScriptRepository interface {
+	ScriptRepository
+	CreateImported(ctx context.Context, script *MMLScript) error
+	GetByImportSessionID(ctx context.Context, sessionID uuid.UUID) (*MMLScript, error)
+	ReplaceImported(ctx context.Context, script *MMLScript, expectedUpdatedAt time.Time) error
+	UpdateMetadata(ctx context.Context, id uuid.UUID, name, description string, tags []string) error
+}
+
 // TaskRepository provides persistence for MML task execution records.
 type TaskRepository interface {
 	Create(ctx context.Context, task *MMLTask) error
 	GetByID(ctx context.Context, id uuid.UUID) (*MMLTask, error)
+	GetByRequestID(ctx context.Context, creator, requestID string) (*MMLTask, error)
 	Update(ctx context.Context, task *MMLTask) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status TaskStatus) error
 	IncrementStats(ctx context.Context, id uuid.UUID, successDelta, failedDelta int) error
@@ -83,4 +101,13 @@ type AuditRepository interface {
 type CommandParamRepository interface {
 	ListByCommandID(ctx context.Context, commandID uuid.UUID) ([]MMLParamRef, error)
 	ListByCommandIDs(ctx context.Context, commandIDs []uuid.UUID) (map[uuid.UUID][]MMLParamRef, error)
+}
+
+// ScriptValidationRepository loads every external fact needed to validate a
+// parsed TXT script. Both methods deliberately accept batches: import files can
+// contain 2,000 rows and validation must not perform one database round-trip per
+// command or device.
+type ScriptValidationRepository interface {
+	LoadCommandsByCodes(ctx context.Context, codes []string, actor ValidationActor) (map[string]ValidationCommand, error)
+	LoadDevicesBySNs(ctx context.Context, sns []string) (map[string]*model.Device, error)
 }

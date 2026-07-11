@@ -46,8 +46,14 @@ type Service struct {
 	pathTranslator               PathTranslator               // R-9.3 per-device standardPath → privatePath 翻译；nil 时跳过
 	exporter                     *Exporter                    // 结果 CSV 导出（MinIO）；nil 时导出端点返回 503
 	// 参数路径 → 友好名（standard_params.description）解析，CSV「参数名称」列用；nil 时回退 param_refs。
-	pathNameResolver func(ctx context.Context, paths []string) (map[string]string, error)
-	logger           *zap.Logger
+	pathNameResolver    func(ctx context.Context, paths []string) (map[string]string, error)
+	scriptImportService ScriptImportServiceAPI
+	// scriptExecutionValidator is optional because older deployments may not
+	// have the TXT validator wired yet. When present it performs the dynamic
+	// device/command checks immediately before an execution is persisted and
+	// again when a scheduled instance is dispatched.
+	scriptExecutionValidator ScriptImportValidationRunner
+	logger                   *zap.Logger
 
 	// 按 product_class 缓存 standardPath→privatePath 翻译结果（TTL 1 分钟）。混类型任务
 	// per-product 翻译一次、同 product_class 复用，避免逐设备重复翻译。
@@ -160,6 +166,27 @@ func NewService(
 // SetAuditRepo sets the audit repository for command execution logging.
 func (s *Service) SetAuditRepo(repo AuditRepository) {
 	s.auditRepo = repo
+}
+
+// SetScriptImportService injects the server-authoritative TXT import service
+// used by Handler's import routes. It is kept on Service as the module's
+// composition boundary, while Handler receives the narrow API interface.
+func (s *Service) SetScriptImportService(importService ScriptImportServiceAPI) {
+	s.scriptImportService = importService
+}
+
+// SetScriptExecutionValidator wires the server-authoritative validator used
+// by imported-script execution preflight. Keeping this as a narrow setter
+// avoids changing the long-standing NewService constructor used by callers
+// and tests.
+func (s *Service) SetScriptExecutionValidator(validator ScriptImportValidationRunner) {
+	s.scriptExecutionValidator = validator
+}
+
+// ScriptImportService returns the configured TXT import service for handler
+// wiring. A nil value means the optional import capability is unavailable.
+func (s *Service) ScriptImportService() ScriptImportServiceAPI {
+	return s.scriptImportService
 }
 
 // SetFanouter sets the fan-out engine for creating device_tasks from MML tasks.
@@ -450,6 +477,38 @@ func (s *Service) UpdateScript(ctx context.Context, id uuid.UUID, script *MMLScr
 	return existing, nil
 }
 
+// UpdateScriptMetadata changes only mutable presentation metadata. Imported
+// TXT content and its server-generated plan remain immutable here; replacing
+// content must go through ReplaceScriptFromImport.
+func (s *Service) UpdateScriptMetadata(ctx context.Context, id uuid.UUID, name, description string, tags []string) (*MMLScript, error) {
+	existing, err := s.scriptRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get mml script: %w", err)
+	}
+	if repo, ok := s.scriptRepo.(interface {
+		UpdateMetadata(context.Context, uuid.UUID, string, string, []string) error
+	}); ok {
+		if err := repo.UpdateMetadata(ctx, id, name, description, tags); err != nil {
+			return nil, fmt.Errorf("update mml script metadata: %w", err)
+		}
+	} else {
+		existing.ScriptName = name
+		existing.Description = description
+		existing.Tags = tags
+		if err := s.scriptRepo.Update(ctx, existing); err != nil {
+			return nil, fmt.Errorf("update mml script metadata: %w", err)
+		}
+	}
+	// UpdateMetadata writes updated_at in PostgreSQL. Reload the row so callers
+	// receive the new optimistic-concurrency version before a replacement
+	// import is attempted.
+	updated, err := s.scriptRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("reload mml script metadata: %w", err)
+	}
+	return updated, nil
+}
+
 // DeleteScript deletes an MML script by ID.
 func (s *Service) DeleteScript(ctx context.Context, id uuid.UUID) error {
 	return s.scriptRepo.Delete(ctx, id)
@@ -555,11 +614,18 @@ type ExecuteRequest struct {
 	DeviceSNs   []string                 `json:"device_sns"`
 	Parameters  map[string]interface{}   `json:"parameters"`
 	TaskName    string                   `json:"task_name"`
+	RequestID   string                   `json:"request_id,omitempty"`
 	Creator     string                   `json:"creator"`
 	Executor    string                   `json:"executor,omitempty"`
 	Commands    []map[string]interface{} `json:"commands"`
 	PlanItems   []MMLPlanItem            `json:"plan_items"`
 	ScriptID    *string                  `json:"script_id,omitempty"`
+	// Immutable metadata copied from an imported script into the task snapshot.
+	// These fields are populated by CreateScriptExecution and are not accepted
+	// from the legacy HTTP command endpoints.
+	ScriptContentSHA256     string `json:"-"`
+	ScriptValidationVersion string `json:"-"`
+	PreservePlanSnapshot    bool   `json:"-"`
 
 	// Parameter path command support
 	ParamPaths    []string `json:"param_paths"`
@@ -1163,16 +1229,19 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 	}
 
 	task := &MMLTask{
-		TaskName:    req.TaskName,
-		ScriptID:    scriptID,
-		DeviceSNs:   deviceSNs,
-		Commands:    commands,
-		ExecuteMode: taskExecuteMode,
-		PlanItems:   planItems,
-		Status:      TaskPending,
-		Results:     []map[string]interface{}{},
-		Creator:     req.Creator,
-		Executor:    req.Executor,
+		TaskName:                req.TaskName,
+		RequestID:               strings.TrimSpace(req.RequestID),
+		ScriptID:                scriptID,
+		DeviceSNs:               deviceSNs,
+		Commands:                commands,
+		ExecuteMode:             taskExecuteMode,
+		PlanItems:               planItems,
+		ScriptContentSHA256:     req.ScriptContentSHA256,
+		ScriptValidationVersion: req.ScriptValidationVersion,
+		Status:                  TaskPending,
+		Results:                 []map[string]interface{}{},
+		Creator:                 req.Creator,
+		Executor:                req.Executor,
 
 		ExecuteType:         req.ExecuteType,
 		OfflineRetry:        req.OfflineRetry,
@@ -1181,6 +1250,9 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 		FailedRetryCount:    req.FailedRetryCount,
 		FailedRetryInterval: req.FailedRetryInterval,
 		TotalDevices:        len(deviceSNs),
+	}
+	if req.PreservePlanSnapshot {
+		task.PlanItems = cloneScriptPlanItems(req.PlanItems)
 	}
 
 	if err := applyExecuteSchedule(task, req); err != nil {

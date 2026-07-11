@@ -113,6 +113,10 @@ func (m *mockScriptRepo) GetByID(ctx context.Context, id uuid.UUID) (*MMLScript,
 	return nil, nil
 }
 
+func (m *mockScriptRepo) NameExistsForCreator(context.Context, string, string, *uuid.UUID) (bool, error) {
+	return false, nil
+}
+
 func (m *mockScriptRepo) Update(ctx context.Context, script *MMLScript) error {
 	if m.updateFn != nil {
 		return m.updateFn(ctx, script)
@@ -169,6 +173,10 @@ func (m *mockTaskRepo) GetByID(ctx context.Context, id uuid.UUID) (*MMLTask, err
 		return m.getByIDFn(ctx, id)
 	}
 	return nil, nil
+}
+
+func (m *mockTaskRepo) GetByRequestID(context.Context, string, string) (*MMLTask, error) {
+	return nil, commonerrors.ErrNotFound
 }
 
 func (m *mockTaskRepo) Update(ctx context.Context, task *MMLTask) error {
@@ -612,6 +620,29 @@ func TestService_UpdateScript_NilTagsPreservesExisting(t *testing.T) {
 	require.NotNil(t, result)
 	assert.Equal(t, "Updated Name", updatedScript.ScriptName)
 	assert.Equal(t, []string{"keep-me"}, updatedScript.Tags, "nil tags should preserve existing")
+}
+
+func TestService_UpdateScriptMetadata_ReloadsUpdatedVersion(t *testing.T) {
+	scriptID := uuid.New()
+	readCount := 0
+	latest := &MMLScript{ID: scriptID, ScriptName: "new", UpdatedAt: time.Now().UTC()}
+	scriptRepo := &mockScriptRepo{
+		getByIDFn: func(context.Context, uuid.UUID) (*MMLScript, error) {
+			readCount++
+			if readCount == 1 {
+				return &MMLScript{ID: scriptID, ScriptName: "old", UpdatedAt: latest.UpdatedAt.Add(-time.Minute)}, nil
+			}
+			return latest, nil
+		},
+		updateFn: func(context.Context, *MMLScript) error { return nil },
+	}
+
+	svc := newTestService(&mockCommandRepo{}, scriptRepo, &mockTaskRepo{})
+	got, err := svc.UpdateScriptMetadata(context.Background(), scriptID, "new", "desc", []string{"tag"})
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, latest.UpdatedAt, got.UpdatedAt)
+	assert.Equal(t, 2, readCount, "metadata update must reload updated_at for optimistic replacement")
 }
 
 // --- Tests: DeleteScript ---

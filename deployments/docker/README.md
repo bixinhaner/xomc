@@ -726,3 +726,57 @@ sudo ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 
 > 若调整 Go 端 `shutdown_timeout`，必须同步调整 app/acs/worker 的 `stop_grace_period`，
 > 两者错配会导致优雅关闭被 docker 提前 `SIGKILL` 打断。
+
+## 15. MML TXT 脚本导入切换（Task 13）
+
+本功能使用 `omcgo/migrations/000016_redesign_mml_script_txt_import.sql`。迁移是
+不可逆数据切换：先删除 `device_tasks WHERE source = 'mml'`、`mml_tasks` 和
+`mml_scripts`，再增加 TXT 摘要、校验版本、`plan_items` 和 `validation_summary`
+字段；Down 只撤销字段和索引，不恢复旧数据。发布前必须先停止 MML 新建、调度和消费，
+并记录非 MML `device_tasks` 数量。
+
+### 15.1 导入、保存、执行接口
+
+```text
+POST /api/v1/mml/scripts/import/validate  (multipart file=.txt)
+POST /api/v1/mml/scripts/import          (JSON validation_token + metadata)
+POST /api/v1/mml/scripts/:id/executions  (JSON scheduling/retry policy only)
+GET  /api/v1/mml/tasks/:id/results
+```
+
+校验成功返回一次性 `validation_token`；保存成功返回 `201` 和 `script.id`，同一令牌
+重放返回 `409`（`MML_IMPORT_TOKEN_CONSUMED`）。非法 TXT 返回 `422`
+（`MML_SCRIPT_VALIDATION_FAILED`）且不返回保存令牌。执行任务从服务端脚本快照复制
+`plan_items`，结果应保留 `plan_line_no`、`plan_device_sn`、`plan_order` 和
+`script_content_sha256`。
+
+可重复的端到端脚本及固定样例位于：
+`omcgo/scripts/e2e_mml_script_import.sh`、
+`omcgo/internal/mml/testdata/import-valid.txt` 和 `import-invalid.txt`。
+运行时提供 `OMC_TOKEN`（或 `AUTH_TOKEN`）以及已注册设备的 `MML_E2E_SN`：
+
+```bash
+OMC_TOKEN="$TOKEN" MML_E2E_SN="<provisioned-sn>" \
+  bash omcgo/scripts/e2e_mml_script_import.sh http://localhost:8081
+```
+
+脚本不会在缺少服务、凭据或设备时静默跳过，而是输出实际 HTTP 响应并以非零状态结束。
+
+### 15.2 切换与回滚边界
+
+```bash
+# 1. 停止 MML 新建、调度和消费
+# 2. 只读统计 Redis 中 source=mml 的排队任务
+(cd omcgo && go run ./cmd/omcctl mml reset-script-data --dry-run)
+# 3. 复核数量后才允许执行（禁止 FLUSHDB）
+(cd omcgo && go run ./cmd/omcctl mml reset-script-data \
+  --apply --confirm DELETE-MML-RUNTIME
+)
+# 4. 应用迁移、启动 migrate/app/worker/web，再执行健康检查和 E2E
+bash omcgo/scripts/check-migrations.sh --strict
+curl -fsS http://localhost:8081/healthz
+```
+
+`reset-script-data` 的 `--apply` 必须同时带有精确确认串；PostgreSQL 清理由迁移负责，
+不会清理其他来源的设备任务。该迁移不提供数据恢复回滚，若发布中止只能恢复数据库快照，
+然后重新执行迁移前的验证和切换演练。

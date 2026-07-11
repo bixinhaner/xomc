@@ -1,0 +1,17 @@
+# MML TXT script template
+# One executable command per line, using: COMMAND_CODE;DEVICE_SN
+# Keep one SN on each line. The order for the same SN follows file order.
+# Blank lines and lines beginning with # are ignored during validation.
+
+# Standard command examples (replace DEVICE_SN with a real device SN):
+LST DEVICE_INFO;DEVICE_SN
+MOD DEVICE_INFO:USER_LABEL=Site-A;DEVICE_SN
+ADD DEVICE_INFO:USER_LABEL=Site-B;DEVICE_SN
+RMV DEVICE_INFO;DEVICE_SN
+
+# Custom command examples use the visible command code returned by the
+# command catalog. Replace CUSTOM_COMMAND with a real custom command code.
+LST CUSTOM_COMMAND;DEVICE_SN
+MOD CUSTOM_COMMAND:PARAMETER=value;DEVICE_SN
+ADD CUSTOM_COMMAND:PARAMETER=value;DEVICE_SN
+RMV CUSTOM_COMMAND;DEVICE_SN

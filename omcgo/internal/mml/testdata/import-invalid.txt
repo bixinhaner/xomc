@@ -1,0 +1,2 @@
+# Missing command/SN separator: the server must reject the complete file.
+THIS_IS_NOT_A_VALID_MML_LINE

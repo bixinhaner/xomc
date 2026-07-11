@@ -8004,6 +8004,24 @@ const messages: Record<string, string> = {
   'ufte.builtin.category.device_upgrade':     'Device Upgrade',
   'ufte.builtin.type.GSM_IMG_UPGRADE':        '2G Base Station Software Upgrade',
   'ufte.builtin.desc.GSM_IMG_UPGRADE':        'Reuses the live software upgrade pipeline to carry 2G (GSM) base station image upgrade tasks.',
+
+  // MML TXT script import (shared by all skins)
+  'mml.scriptImport.title':                   'Import MML TXT Script',
+  'mml.scriptImport.selectFile':              'Select TXT File',
+  'mml.scriptImport.downloadTemplate':        'Download Template',
+  'mml.scriptImport.validating':              'Validating script…',
+  'mml.scriptImport.validationSummary':       'Validation Summary',
+  'mml.scriptImport.validLines':              'Valid Command Lines',
+  'mml.scriptImport.deviceCount':             'Devices',
+  'mml.scriptImport.errorCount':              'Errors',
+  'mml.scriptImport.warningCount':            'Warnings',
+  'mml.scriptImport.issues':                  'Line Issues',
+  'mml.scriptImport.save':                    'Save',
+  'mml.scriptImport.errorsBlockSave':         'Resolve all errors before saving.',
+  'mml.scriptImport.readOnlyContent':         'TXT content is generated from the imported file and is read-only.',
+  'mml.scriptImport.replace':                 'Re-import',
+  'mml.scriptExecution.defaultTaskNamePrefix': 'MML Script Task',
+  'mml.scriptExecution.confirmWarnings':      'Validation returned warnings. Confirm to continue execution.',
 };
 
 export default messages;

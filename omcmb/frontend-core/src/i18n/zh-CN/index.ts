@@ -8041,6 +8041,24 @@ const messages: Record<string, string> = {
   'ufte.builtin.category.device_upgrade':     '设备升级',
   'ufte.builtin.type.GSM_IMG_UPGRADE':        '2G 基站软件升级',
   'ufte.builtin.desc.GSM_IMG_UPGRADE':        '复用现网软件升级链路，统一承载 2G(GSM) 基站镜像升级任务。',
+
+  // MML TXT 脚本导入（由三套皮肤共用）
+  'mml.scriptImport.title':                   '导入 MML TXT 脚本',
+  'mml.scriptImport.selectFile':              '选择 TXT 文件',
+  'mml.scriptImport.downloadTemplate':        '下载模板',
+  'mml.scriptImport.validating':              '正在校验脚本…',
+  'mml.scriptImport.validationSummary':       '校验摘要',
+  'mml.scriptImport.validLines':              '有效命令行',
+  'mml.scriptImport.deviceCount':             '设备数',
+  'mml.scriptImport.errorCount':              '错误数',
+  'mml.scriptImport.warningCount':            '警告数',
+  'mml.scriptImport.issues':                  '逐行问题',
+  'mml.scriptImport.save':                    '确认保存',
+  'mml.scriptImport.errorsBlockSave':         '请先修复所有错误后再保存。',
+  'mml.scriptImport.readOnlyContent':         'TXT 内容由导入文件生成，只读。',
+  'mml.scriptImport.replace':                 '重新导入',
+  'mml.scriptExecution.defaultTaskNamePrefix': 'MML脚本任务',
+  'mml.scriptExecution.confirmWarnings':      '校验发现警告，确认后继续执行。',
 };
 
 export default messages;

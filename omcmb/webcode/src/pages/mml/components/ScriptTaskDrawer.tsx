@@ -12,15 +12,14 @@ import {
   Select,
   Space,
   Table,
-  Upload,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { DownloadOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
-import type { UploadFile } from 'antd';
+import { PlusOutlined } from '@ant-design/icons';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 
 import { useCreateMMLTask } from '@core/hooks/api/useMML';
+import { useUserStore } from '@core/store/userStore';
 import type { MMLExecuteType, MMLTaskPlanItem } from '@core/types/mml';
 import { parseMmlScriptPlan } from '@core/utils/mmlScriptPlanParser';
 import type { MMLScriptPlanParseResult } from '@core/utils/mmlScriptPlanParser';
@@ -34,6 +33,7 @@ import { useT } from '@/hooks/useT';
 import { toast } from '@/utils/toast';
 import DeviceSelectModal from '../Console/components/DeviceSelectModal';
 import PaginatedDeviceSnList from './PaginatedDeviceSnList';
+import { buildMmlScriptDefaultTaskName } from '../utils/defaultTaskName';
 
 // -----------------------------------------------------------------------------
 // "新建 MML 脚本任务" Drawer —— 由 任务记录（TaskRecord）页"新建任务"入口调用；
@@ -73,7 +73,6 @@ export interface ScriptTaskDrawerProps {
 
 interface TaskForm {
   taskName: string;
-  fileName?: string;
   executeType: MMLExecuteType;
   scheduledAt?: Dayjs;
   periodRange?: [Dayjs, Dayjs];
@@ -120,14 +119,14 @@ export default function ScriptTaskDrawer({
   onSuccess,
 }: ScriptTaskDrawerProps) {
   const t = useT();
+  const currentUser = useUserStore((state) => state.currentUser);
   const [form] = Form.useForm<TaskForm>();
   const executeType = Form.useWatch('executeType', form);
 
   const [deviceSns, setDeviceSns] = useState<string[]>([]);
-  const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [parseResult, setParseResult] = useState<MMLScriptPlanParseResult>(EMPTY_PARSE_RESULT);
   // Console 入口预填的命令文本同样允许用户手动调整（to-do-list 当轮 #6）。
-  // 文件入口下，scriptContent 仅在解析完成后用于本地展示，不直接提交。
+  // Console 预填内容仅用于即时任务提交，不会保存为脚本。
   const [scriptContent, setScriptContent] = useState('');
   // BUG-19：设备选择弹框控制
   const [deviceSelectOpen, setDeviceSelectOpen] = useState(false);
@@ -143,7 +142,7 @@ export default function ScriptTaskDrawer({
     if (!open) return;
     form.resetFields();
     form.setFieldsValue({
-      taskName: prefillTaskName || `MML任务_${dayjs().format('YYYY-MM-DD HH:mm:ss')}`,
+      taskName: prefillTaskName || buildMmlScriptDefaultTaskName(t('mml.scriptExecution.defaultTaskNamePrefix'), currentUser),
       executeType: 'immediate',
       offlineRetryEnable: false,
       offlineRetryWaitTime: 60,
@@ -153,13 +152,12 @@ export default function ScriptTaskDrawer({
     });
     // 预填来自父组件的已选设备 SN；做一次排重避免重复项。
     const initialDeviceSns = prefillDeviceSns ? Array.from(new Set(prefillDeviceSns.filter(Boolean))) : [];
-    setFileList([]);
     const initial = prefillContent ?? '';
     setScriptContent(initial);
     const nextParse = initial ? parseMmlScriptPlan(initial, { format: 'text' }) : EMPTY_PARSE_RESULT;
     setParseResult(nextParse);
     setDeviceSns(nextParse.executeMode === 'device_bound' ? nextParse.deviceSns : initialDeviceSns);
-  }, [open, prefillContent, prefillTaskName, prefillDeviceSns, form]);
+  }, [currentUser?.displayName, currentUser?.username, form, open, prefillContent, prefillDeviceSns, prefillTaskName, t]);
 
   // 用户在 Console 入口手动改命令时，实时同步解析结果。
   const handleScriptContentChange = useCallback((value: string) => {
@@ -175,21 +173,6 @@ export default function ScriptTaskDrawer({
   const handleDeviceSelect = useCallback((sns: string[], _productId: string) => {
     setDeviceSns((prev) => Array.from(new Set([...prev, ...sns])));
     setDeviceSelectOpen(false);
-  }, []);
-
-  const parseUploadedFile = useCallback((file: File) => {
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = event.target?.result as string;
-      const format = file.name.toLowerCase().endsWith('.csv') ? 'csv' : 'text';
-      const nextParse = parseMmlScriptPlan(content, { format });
-      setScriptContent(content);
-      setParseResult(nextParse);
-      if (nextParse.executeMode === 'device_bound') {
-        setDeviceSns(nextParse.deviceSns);
-      }
-    };
-    reader.readAsText(file);
   }, []);
 
   const planPreviewColumns = useMemo<ColumnsType<MMLTaskPlanItem>>(
@@ -215,52 +198,6 @@ export default function ScriptTaskDrawer({
     ],
     [t],
   );
-
-  // 模板内容同步自 docs/design 附带的 MMLTemplate.txt（to-do-list 本轮 #2），
-  // 覆盖内建与自定义 MML 命令的书写格式，与 ACS 解析一致。
-  const handleDownloadTemplate = useCallback(() => {
-    const templateContent = `# This is a MML script example,'#' defines a comment line, if you need to excute the command please delete the character '#', and specify the parameter values.
-# You need to pay attention that one mml script must be on the same line and best not begin with blank.
-# CELL_INDEX is a cell number,can be removed,the default is 1.
-# Supports built-in commands and custom commands.
-#### The following are examples of the built-in MML command formats.
-# LST EUTRANNFREQ;{Serial Number}
-# ADD EUTRANNFREQ:LTE_INTER_FREQ_DL_EARFCN={41390};{Serial Number}
-# MOD EUTRANNFREQ:CELL_INDEX={1},i={2},LTE_INTER_FREQ_DL_EARFCN={41390};{Serial Number}
-# RMV EUTRANNFREQ:CELL_INDEX={1},i={1};{Serial Number}
-# MOD REMOTE_DEVICE:i={1},CRAN_EU_RU_RFTxStatus={true};{Serial Number}
-# REBOOT CELL;{Serial Number}
-# REBOOT_STK CELL;{Serial Number}
-# REBOOT_RU CELL:i={15};{Serial Number}
-# RESET CELL;{Serial Number}
-# COLD_REBOOT CELL;{Serial Number}
-# CLEAR IMSI;{Serial Number}
-# RADIO_OPEN CELL;{Serial Number}
-# RADIO_CLOSE CELL;{Serial Number}
-#### The following is an example of the custom MML command formats.
-## Example of a custom LST-type MML: Suppose the MML command group is named test_lst and contains three parameters named path1,path2, and path3.
-## You can execute this custom MML using either of the following methods,where v1 and v3 represent path1 and path3 respectively.
-# test_lst;{Serial Number}
-# test_lst:v1,v3;{Serial Number}
-## Example of a custom MOD type MML: Suppose the MML command group is named test_mod, containing two parameters path1 and path2, with corresponding modification values value1 and value2.
-## You can execute this command in the following three ways, where value1 and value2 can be non-custom built-in modification parameters.
-# test_mod;{Serial Numbner}
-# test_mod:v1=name,v2=3;{Serial Numbner}
-# test_mod:v1={name,name2},v2={3};{Serial Number}
-## The following are custom ADD and RMV MML commands.
-# test_add;{Serial Number}
-# test_rmv;{Serial Number}
-`;
-    const blob = new Blob([templateContent], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'mml-script-template.txt';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  }, []);
 
   // 返回 Promise 让 antd Modal/Drawer 可以 await，保证提交期间 UI 处于 loading
   // 状态、完成后再关闭；失败时保留弹窗供用户重试。toast 反馈走统一 toast util，
@@ -480,57 +417,11 @@ export default function ScriptTaskDrawer({
             </div>
           </Form.Item>
         ) : (
-          // ScriptTask 入口：文件上传（标签文案 "选择脚本"，image-10）。
-          // 不强制必填，用户可只输入 SN 提交空命令任务。
-          <Form.Item
-            label={t('mml.selectScript')}
-            name="fileName"
-            style={{ marginLeft: 12 }}
-          >
-            <Space orientation="vertical" style={{ width: '100%' }}>
-              <Space>
-                <Upload
-                  accept=".txt,.csv"
-                  fileList={fileList}
-                  beforeUpload={(file) => {
-                    setFileList([file as unknown as UploadFile]);
-                    form.setFieldValue('fileName', file.name);
-                    parseUploadedFile(file);
-                    return false;
-                  }}
-                  onRemove={() => {
-                    setFileList([]);
-                    form.setFieldValue('fileName', '');
-                    setParseResult(EMPTY_PARSE_RESULT);
-                    setScriptContent('');
-                  }}
-                  maxCount={1}
-                >
-                  <Button icon={<UploadOutlined />}>{t('mml.selectFile')}</Button>
-                </Upload>
-                <span style={{ color: '#999', fontSize: 12 }}>{t('mml.txtOrCsvFormat')}</span>
-              </Space>
-              <div style={{ color: '#999', fontSize: 12 }}>{t('mml.scriptDescTip')}</div>
-              {parsedCommands.length > 0 && (
-                <div style={{ color: '#52c41a', fontSize: 12 }}>
-                  {isDeviceBound
-                    ? t('mml.planItemsParsed', { count: parsedPlanItems.length })
-                    : t('mml.commandsParsed', { count: parsedCommands.length })}
-                </div>
-              )}
-              <div>
-                <span style={{ color: '#999', fontSize: 12 }}>{t('mml.templateImportTip')}</span>
-                <Button
-                  type="link"
-                  size="small"
-                  icon={<DownloadOutlined />}
-                  onClick={handleDownloadTemplate}
-                >
-                  {t('mml.exportTemplate')}
-                </Button>
-              </div>
-            </Space>
-          </Form.Item>
+          // 脚本库导入和执行走 ScriptImportModal/ScriptExecutionDrawer；此旧
+          // 任务抽屉仅保留 Console 预填命令，避免再次提供“上传即建任务”入口。
+          <div style={{ marginLeft: 12, color: '#999', fontSize: 12 }}>
+            {t('mml.selectFileFirst')}
+          </div>
         )}
 
         {isDeviceBound && (
