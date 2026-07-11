@@ -52,25 +52,20 @@ codex plugin marketplace add .agents/plugins
 ### 前端
 
 - 共享业务层放在 `omcmb/frontend-core/`：API、Hook、Store、Types、i18n、Mock。
-- UI 壳放在 `omcmb/webcode*`：页面、组件、路由、Provider。
+- UI 壳放在 `omcmb/webcode/`：页面、组件、路由、Provider。
 - 跨包引用走 `@core/...`，不要用相对路径越级访问 shared code。
 - 用户可见文案走国际化，不要直接散落硬编码。
 
-## 前端三皮肤铁律
+## 前端 V1 单皮肤约束
 
-前端是单底层 `frontend-core` + 三套皮肤：
-
-- `webcode`：v1 主皮肤，唯一标准。
-- `webcode-v2`：第二套皮肤。
-- `webcode-v3`：第三套皮肤。
+前端只保留单底层 `frontend-core` + V1 UI 壳 `webcode`。
 
 涉及前端 bug 或需求时：
 
-- 优先改 `frontend-core/`，让三皮肤共享受益。
-- 如果改页面、路由、菜单或交互，三套皮肤都要补齐。
-- v2/v3 的可路由 path 集合和可见菜单项集合必须严格等于 v1。
+- 共享 API、Hook、Store、Types、i18n、Mock 优先改 `frontend-core/`。
+- 页面、路由、菜单和交互只维护 `webcode/`。
 - 浏览器操作或验收时，不管源码显示什么，都必须以浏览器中的实际页面为准；先读取运行中 DOM，确认目标控件、按钮和保存行为后再操作。
-- 验收至少跑 `cd omcmb && npm run skin-parity` 和对应 typecheck。
+- 验收至少跑 `cd omcmb && npm run typecheck`。
 
 ## 运行与部署边界
 
@@ -92,7 +87,6 @@ codex plugin marketplace add .agents/plugins
 
 - 后端：`cd omcgo && go build ./... && go test ./...`
 - 前端：`cd omcmb && npm run typecheck`
-- 前端三皮肤一致性：`cd omcmb && npm run skin-parity`
 - Docker 状态：`docker compose -f deployments/docker/docker-compose.yml ps`
 
 如果验证因环境、依赖、网络或权限失败，回复中明确说明失败命令和原因。

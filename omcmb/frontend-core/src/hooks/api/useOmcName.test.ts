@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { resolveOmcName } from './useOmcName';
 
 // resolveOmcName 是品牌标题回退逻辑的核心：配置值优先、空/未配置回退默认名。
-// 三皮肤左上角 + 登录页全部依赖它做"空回退默认名而非空白"的保证。
+// 顶部与登录页依赖它保证“空值回退默认名而非空白”。
 describe('resolveOmcName', () => {
   const fallback = 'OMC 统一网管系统';
 

@@ -199,13 +199,9 @@ API / Hook / Store / Types / i18n / Mock 全在 `omcmb/frontend-core/`；页面 
 
 ### 8.3 React/TypeScript 前端规范
 
-代码归属：API/Hook/Store/Types/i18n/Mock → `frontend-core/`，页面/组件/路由 → `webcode*/` · 禁 `any`（后端响应 `BackendXxx` → `mapBackendXxx` → `Xxx`）· 跨包引用走 `@core/...`，禁相对路径越级 · 用户可见文本走 `react-intl`。
+代码归属：API/Hook/Store/Types/i18n/Mock → `frontend-core/`，页面/组件/路由 → `webcode/` · 禁 `any`（后端响应 `BackendXxx` → `mapBackendXxx` → `Xxx`）· 跨包引用走 `@core/...`，禁相对路径越级 · 用户可见文本走 `react-intl`。
 
-> 🔒 **前端三皮肤铁律（不可绕过）**：前端 = **单底层 `frontend-core` + 三套皮肤** `webcode`(v1 主皮肤 Antd5) / `webcode-v2`(shadcn/Tailwind) / `webcode-v3`(STARFORGE HUD)。**任何涉及前端的 bug 修复或需求，必须在 v1/v2/v3 三套皮肤同时解决与实现，缺一不可。**
-> - **v1 = 唯一标准**（2026-06-17 起）：**v2/v3 的「可路由 path 集合」与「可见菜单项集合」必须严格 == v1**（只允许外观不同：颜色/字体/组件库/HUD 装饰）。由 `omcmb/scripts/skin-parity.mjs` 守卫强制（从 v1 `webcode/src/router/routes.tsx` + `Sidebar/navConfig.ts` 抽 canonical，断言 v2/v3 一致），已并入 `npm run typecheck`（先跑 `skin-parity` 再三套 tsc）。新增/改路由先改 v1，再让 v2/v3 跟齐到 `node scripts/skin-parity.mjs` ✓。
-> - **优先改 `frontend-core/`**：API/Hook/Store/Types/i18n/Mock 是三皮肤共享层——业务逻辑/数据契约的改动写在这里一处生效，三皮肤同时受益（这是铁律最省力的落点）。
-> - **页面/组件层**：若需求落到页面/交互，三套 `webcode*/` 各自的页面都要补齐到同等业务深度（路由数据驱动，见 [project_frontend_three_skins_restored]）。**不允许只改 v1 不管 v2/v3**，反之亦然。
-> - **验收门**：`omcmb` `npm run skin-parity` 必须 ✓（v2/v3 路由+菜单 == v1）+ 三套各自 `npm run typecheck` 真实通过（非空跑）+ 三套路由各自浏览器冒烟无 `未找到/加载失败/Error/pageerror`，才算该前端任务完成（见 §10）。
+> 🔒 **V1 单皮肤约束**：前端 = 共享业务层 `frontend-core` + 唯一 UI 壳 `webcode`。共享逻辑优先落在 `frontend-core`，页面、路由、菜单和交互只维护 `webcode`；验收执行 `cd omcmb && npm run typecheck` 和 V1 浏览器冒烟。
 
 ---
 
@@ -231,7 +227,7 @@ API / Hook / Store / Types / i18n / Mock 全在 `omcmb/frontend-core/`；页面 
 
 **每次提交必须**：
 - [ ] 后端 `go build ./...` 编译通过、`go test ./...` 测试通过
-- [ ] 前端（如涉及）`cd omcmb && npm run typecheck` 通过 —— **先过 `skin-parity` 守卫（v2/v3 路由+菜单 == v1 标准）再三皮肤 v1/v2/v3 全部真实通过**（webcode 用 `-p tsconfig.app.json` 真校验，非 `files:[]` 空跑；前端 bug/需求三皮肤同时实现 + v1 为唯一标准，见 §8.3 铁律）
+- [ ] 前端（如涉及）`cd omcmb && npm run typecheck` 通过（webcode 用 `-p tsconfig.app.json` 真校验，非 `files:[]` 空跑）
 - [ ] 无编译器 / linter 警告
 - [ ] 新功能含成功 + 失败两条路径的测试
 - [ ] 提交消息说清"为什么"
@@ -334,7 +330,7 @@ cd omcmb/webcode && npm run {dev,dev:mock,build,typecheck,lint,test,test:e2e}
 | 任务源（活）| GitLab Issues `192.168.10.16/netmanager/xomc`（详见 `docs/agents/issue-tracker.md`）|
 | 历史任务归档 | `docs/project/backlog.md`（已冻结）· 旧流水线设计 `docs/project/dev-pipeline-design-20260420.md` |
 | 项目自有 Skill | `.claude/commands/{e2e,acs-stress-test,review,commit}.md` |
-| 前端多皮肤架构（v1=唯一标准，v2/v3 路由+菜单由 skin-parity 守卫强制对齐 v1） | `docs/project/frontend-multi-skin-plan-20260422.md` · 守卫 `omcmb/scripts/skin-parity.mjs` |
+| 前端历史多皮肤方案（已归档，当前仅 V1） | `docs/project/frontend-multi-skin-plan-20260422.md` |
 | 消息队列全流程 | `docs/消息队列全流程流转说明书.md` |
 | DoD / Release Gate / 风险登记册 | `docs/project/{dod,release-gate,risk-register}.md` |
 | 部署 / 可观测性 / Runbook | `deployments/docker/README.md` · `docs/operations/` · `docs/runbook/` |

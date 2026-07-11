@@ -1,5 +1,5 @@
 /**
- * T-0193 下钻选择器纯逻辑（与 React 解耦，三皮肤共享）。
+ * T-0193 下钻选择器纯逻辑（与 React 解耦，供页面复用）。
  */
 
 import type { MetricObject } from '../types/pmObject';

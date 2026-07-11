@@ -1,5 +1,5 @@
 /**
- * 顶部只读时钟 hook（issue #459，子单 D / 母单 #455）。三皮肤共享。
+ * 顶部只读时钟 hook（issue #459，子单 D / 母单 #455）。
  *
  * 每秒按**系统时区**刷新「当前时间」，供 v1 TimezoneSelector / v2 AppShell /
  * v3 HUDStatusBar 顶栏只读展示「系统时区 + 实时当前时间」。
