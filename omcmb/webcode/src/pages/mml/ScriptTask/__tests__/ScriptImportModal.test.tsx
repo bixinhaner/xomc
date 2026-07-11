@@ -122,6 +122,20 @@ describe('ScriptImportModal', () => {
     resolveCreate({ id: 'script-1' });
   });
 
+  it('opens the hidden TXT file input from the visible chooser button', async () => {
+    const inputClick = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(() => {});
+    renderModal();
+    const user = userEvent.setup();
+
+    try {
+      await user.click(screen.getByRole('button', { name: /选择 TXT/ }));
+
+      expect(inputClick).toHaveBeenCalledTimes(1);
+    } finally {
+      inputClick.mockRestore();
+    }
+  });
+
   it('keeps save disabled when server validation has errors', async () => {
     mocks.validate.mockResolvedValue(validation({
       summary: { totalLines: 1, validLines: 0, effectiveLines: 0, deviceCount: 0, errorCount: 1, warningCount: 0 },
