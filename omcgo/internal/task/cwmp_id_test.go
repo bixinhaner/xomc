@@ -170,6 +170,25 @@ func Test_CWMPIDHash_DifferentInputs(t *testing.T) {
 	assert.NotEqual(t, hash1, hash2, "different inputs should produce different hashes")
 }
 
+func Test_CWMPIDHash_DifferentSuffixSameMethodSecond(t *testing.T) {
+	ids := []string{
+		"ID:intrnl.unset.id.GetParameterValues1783745182.30421219",
+		"ID:intrnl.unset.id.GetParameterValues1783745182.87975882",
+		"ID:intrnl.unset.id.GetParameterValues1783745182.68459613",
+		"ID:intrnl.unset.id.GetParameterValues1783745182.77885098",
+		"ID:intrnl.unset.id.GetParameterValues1783745182.67845607",
+	}
+
+	hashes := make(map[string]string, len(ids))
+	for _, id := range ids {
+		hash := CWMPIDHash(id)
+		if previousID, exists := hashes[hash]; exists {
+			t.Fatalf("CWMPIDHash collision: %q and %q both hashed to %q", previousID, id, hash)
+		}
+		hashes[hash] = id
+	}
+}
+
 func Test_generateUUID_Format(t *testing.T) {
 	uuid := generateUUID()
 

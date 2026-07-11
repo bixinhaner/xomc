@@ -1353,18 +1353,25 @@ func (r *PgTaskRepository) UpdateExportDevice(ctx context.Context, id uuid.UUID,
 }
 
 func (r *PgTaskRepository) IncrementStats(ctx context.Context, id uuid.UUID, successDelta, failedDelta int) error {
-	builder := storage.Psql.Update("mml_tasks").
-		Set("success_count", sq.Expr("success_count + ?", successDelta)).
-		Set("failed_count", sq.Expr("failed_count + ?", failedDelta)).
-		Set("updated_at", time.Now()).
-		Where(sq.Eq{"id": id})
-
-	query, args, err := builder.ToSql()
-	if err != nil {
-		return fmt.Errorf("build increment mml_task stats SQL: %w", err)
-	}
-
-	result, err := r.pool.Exec(ctx, query, args...)
+	// Completion events may be redelivered or handled concurrently across
+	// processes. Reconcile from device_tasks instead of applying deltas so the
+	// parent counters stay idempotent.
+	query := `
+WITH stats AS (
+	SELECT
+		COUNT(*) FILTER (WHERE status = 'completed')::int AS success_count,
+		COUNT(*) FILTER (WHERE status IN ('failed', 'expired'))::int AS failed_count
+	  FROM device_tasks
+	 WHERE source = 'mml'
+	   AND source_id = $1
+)
+UPDATE mml_tasks
+   SET success_count = stats.success_count,
+       failed_count = stats.failed_count,
+       updated_at = $2
+  FROM stats
+ WHERE mml_tasks.id = $1`
+	result, err := r.pool.Exec(ctx, query, id, time.Now())
 	if err != nil {
 		return fmt.Errorf("increment mml_task stats: %w", err)
 	}

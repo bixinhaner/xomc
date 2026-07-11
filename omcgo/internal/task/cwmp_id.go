@@ -2,6 +2,7 @@ package task
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"math/big"
@@ -113,13 +114,6 @@ func CWMPIDHash(cwmpID string) string {
 	if len(cwmpID) <= 32 {
 		return cwmpID
 	}
-	// 使用前 32 个字符作为哈希
-	hash := make([]byte, 16)
-	for i, c := range cwmpID {
-		if i >= 32 {
-			break
-		}
-		hash[i%16] ^= byte(c)
-	}
-	return hex.EncodeToString(hash)
+	sum := sha256.Sum256([]byte(cwmpID))
+	return hex.EncodeToString(sum[:16])
 }
