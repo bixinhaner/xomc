@@ -17,6 +17,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 
+	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/response"
 )
@@ -149,6 +150,11 @@ func (h *Handler) Create(c *gin.Context) {
 	var params []byte
 	if len(req.Params) > 0 {
 		params = []byte(req.Params)
+	}
+	params, err := withExportLocale(params, appcontext.GetLocale(c.Request.Context()))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
 	}
 	task, err := h.svc.Create(c.Request.Context(), CreateRequest{
 		TaskName:   defaultTaskName(req.TaskName, SourceType(req.SourceType)),

@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/pm/counter"
@@ -328,6 +329,33 @@ func TestHandler_ListKPIDefinitions_DefaultKPIOnly(t *testing.T) {
 	assert.Equal(t, "RRC连接建立成功率", it.DisplayName)
 	assert.Equal(t, "a/b", it.Formula)
 	assert.Equal(t, "3", it.Unit)
+}
+
+func TestHandler_ListKPIDefinitions_EnglishLocale(t *testing.T) {
+	ir := &pmHIndicatorRepo{
+		listAllFn: func(_ context.Context, _ indicator.IndicatorListFilter) ([]indicator.IndicatorListItem, error) {
+			return []indicator.IndicatorListItem{
+				{PerfIndicator: indicator.PerfIndicator{
+					ID: "K1001", EnName: "RRC Setup Success Rate", CnName: strPtr("RRC连接建立成功率"),
+					IsCounter: "0",
+				}},
+			}, nil
+		},
+	}
+	router := pmHSetupRouterWithIndicator(ir)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/pm/kpi/definitions?device_type=ENB", nil)
+	req = req.WithContext(appcontext.WithLocale(req.Context(), appcontext.LocaleEN))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var body struct {
+		Items []kpiDefRespItem `json:"items"`
+	}
+	response.DecodeData(t, w.Body, &body)
+	require.Len(t, body.Items, 1)
+	assert.Equal(t, "RRC Setup Success Rate", body.Items[0].DisplayName)
 }
 
 // include_counters=true：不按 is_counter 过滤，KPI + 计数器都返回。

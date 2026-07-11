@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/minio/minio-go/v7"
+
+	appcontext "github.com/omcgo/omcgo/internal/core/context"
 )
 
 // Uploader 是把 CSV 流式上传到对象存储的最小契约（便于单测 stub）。
@@ -27,6 +29,7 @@ type GenerateResult struct {
 // adhoc device_group 维度含制式列（与页面表格一致），device 维度含小区列。
 type csvLayout struct {
 	FirstColHeader                string
+	Locale                        appcontext.Locale
 	IncludeTechnology             bool
 	IncludeCell                   bool
 	IncludeMeasurementObject      bool
@@ -54,7 +57,7 @@ func streamCSVToObject(
 	var rowCount int64
 	writeErrCh := make(chan error, 1)
 	go func() {
-		cw, err := newWideCSVWriterWithLayout(
+		cw, err := newWideCSVWriterWithLocale(
 			pw,
 			layout.FirstColHeader,
 			layout.IncludeTechnology,
@@ -63,6 +66,7 @@ func streamCSVToObject(
 			cols,
 			layout.MissingMetricValuePlaceholder,
 			outputLocation,
+			layout.Locale,
 		)
 		if err != nil {
 			pw.CloseWithError(err)
