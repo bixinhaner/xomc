@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
-import { Button, Empty, Modal, Pagination, Popover, Space, Table, Tag, Tooltip, Typography } from 'antd';
-import { ProfileOutlined } from '@ant-design/icons';
+import type { Key } from 'react';
+import { Button, Empty, Modal, Pagination, Popover, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { DeleteOutlined, ProfileOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 
@@ -21,6 +22,7 @@ import type {
 import {
   useMMLTasks,
   useMMLTaskResults,
+  useDeleteMMLTasks,
 } from '@core/hooks/api/useMML';
 import { getMmlTaskProgress } from '@core/utils/mmlTaskProgress';
 import {
@@ -175,6 +177,8 @@ export default function TaskRecord() {
     result: filters.result && filters.result !== 'all' ? filters.result : undefined,
   });
   const tasks = useMemo(() => data?.items ?? [], [data]);
+  const deleteMutation = useDeleteMMLTasks();
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Key[]>([]);
 
   const filterFields: FilterField[] = useMemo(() => [
     {
@@ -251,6 +255,32 @@ export default function TaskRecord() {
     setFilters({});
     setPage(1);
   }, []);
+
+  const confirmBatchDelete = () => {
+    const ids = selectedTaskIds.map(String);
+    if (ids.length === 0) return;
+    Modal.confirm({
+      title: t('common.confirmDelete'),
+      content: t('mml.confirmBatchDeleteTasks', { count: ids.length }),
+      okText: t('common.delete'),
+      cancelText: t('common.cancel'),
+      okButtonProps: { danger: true },
+      onOk: () => new Promise<void>((resolve, reject) => {
+        deleteMutation.mutate(ids, {
+          onSuccess: () => {
+            setSelectedTaskIds([]);
+            void refetch();
+            void message.success(t('common.deleteSuccess'));
+            resolve();
+          },
+          onError: (error) => {
+            void message.error(t('common.deleteFailed'));
+            reject(error);
+          },
+        });
+      }),
+    });
+  };
 
   // ---- 查看 modal state ----------------------------------------------------
   // 任务记录为只读：记录由"执行 MML 命令 / 脚本任务执行"被动产生，不提供新建/编辑。
@@ -484,19 +514,20 @@ export default function TaskRecord() {
       key: 'operation',
       title: t('table.operation'),
       dataIndex: 'id',
-      width: 70,
+      width: 90,
       render: (_: unknown, record: MMLTask) => (
-        <Tooltip title={t('common.view')}>
-          <Button
-            type="text"
-            size="small"
-            icon={<ProfileOutlined />}
-            onClick={() => {
-              setResultPage(1);
-              setViewing(record);
-            }}
-          />
-        </Tooltip>
+        <Button
+          aria-label={t('common.view')}
+          type="link"
+          size="small"
+          icon={<ProfileOutlined />}
+          onClick={() => {
+            setResultPage(1);
+            setViewing(record);
+          }}
+        >
+          {t('common.view')}
+        </Button>
       ),
     },
     { key: 'taskName', title: t('mml.taskName'), dataIndex: 'taskName', ellipsis: true },
@@ -574,12 +605,32 @@ export default function TaskRecord() {
         onSearch={handleSearch}
         onReset={handleReset}
       />
+      <Space size={8} wrap style={{ marginBottom: 12 }}>
+        <Button
+          danger
+          disabled={selectedTaskIds.length === 0}
+          icon={<DeleteOutlined />}
+          loading={deleteMutation.isPending}
+          onClick={confirmBatchDelete}
+        >
+          {t('common.batchDelete')}
+        </Button>
+        {selectedTaskIds.length > 0 ? (
+          <Typography.Text type="secondary">
+            {t('table.selected', { count: selectedTaskIds.length })}
+          </Typography.Text>
+        ) : null}
+      </Space>
       <DataTable<MMLTask>
         tableId="mml-task-record"
         columns={columns}
         dataSource={tasks}
         loading={isLoading}
         rowKey="id"
+        selectable
+        selectedRowKeys={selectedTaskIds}
+        onSelectionChange={(keys) => setSelectedTaskIds(keys)}
+        preserveSelectedRowKeys
         total={data?.total ?? 0}
         currentPage={page}
         pageSize={pageSize}

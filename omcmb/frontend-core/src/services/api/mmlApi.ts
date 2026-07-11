@@ -1264,6 +1264,12 @@ export const mmlApi = {
     await http.delete(`/mml/tasks/${id}`);
   },
 
+  async deleteTasks(ids: string[]): Promise<void> {
+    for (const id of ids) {
+      await http.delete(`/mml/tasks/${id}`);
+    }
+  },
+
   // --- Task results ---
 
   async getTaskResults(

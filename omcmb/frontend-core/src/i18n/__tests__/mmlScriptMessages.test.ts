@@ -14,6 +14,8 @@ const REQUIRED_KEYS = [
   'mml.script.validationVersion',
   'mml.script.readOnlyTxtContent',
   'mml.script.noContent',
+  'mml.confirmBatchDeleteScripts',
+  'mml.confirmBatchDeleteTasks',
   'mml.scriptImport.replaceTitle',
   'mml.scriptImport.chooseTxt',
   'mml.scriptImport.saveConfirm',

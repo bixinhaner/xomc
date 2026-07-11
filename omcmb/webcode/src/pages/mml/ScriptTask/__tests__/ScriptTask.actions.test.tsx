@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import { Modal } from 'antd';
 import { IntlProvider } from 'react-intl';
-import type { ReactNode } from 'react';
+import type { Key, ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import zhCN from '@core/i18n/zh-CN';
 
@@ -44,7 +45,21 @@ vi.mock('../ScriptExecutionDrawer', () => ({
 }));
 vi.mock('../ScriptImportPreview', () => ({ default: () => <div /> }));
 vi.mock('@/components/DataTable', () => ({
-  default: ({ columns, dataSource }: {
+  default: ({
+    batchActions = [],
+    columns,
+    dataSource,
+    hideToolbar,
+    onSelectionChange,
+    selectedRowKeys = [],
+    selectable,
+  }: {
+    batchActions?: Array<{
+      key: string;
+      label: string;
+      disabled?: boolean;
+      onClick: (keys: Key[]) => void;
+    }>;
     columns: Array<{
       key: string;
       dataIndex?: string;
@@ -52,24 +67,68 @@ vi.mock('@/components/DataTable', () => ({
       render?: (value: unknown, record: Record<string, unknown>, index: number) => ReactNode;
     }>;
     dataSource: Array<Record<string, unknown>>;
+    hideToolbar?: boolean;
+    onSelectionChange?: (keys: Key[], rows: Array<Record<string, unknown>>) => void;
+    selectedRowKeys?: Key[];
+    selectable?: boolean;
   }) => (
-    <table>
-      <tbody>
-        {dataSource.map((record, rowIndex) => (
-          <tr key={String(record.id)}>
-            {columns.map((column) => (
-              <td key={column.key} data-column-key={column.key} data-fixed={column.fixed ?? ''}>
-                {column.render
-                  ? column.render(column.dataIndex ? record[column.dataIndex] : undefined, record, rowIndex)
-                  : String(column.dataIndex ? record[column.dataIndex] ?? '' : '')}
-              </td>
-            ))}
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div>
+      {!hideToolbar ? <div data-testid="datatable-toolbar" /> : null}
+      {batchActions.map((action) => (
+        <button
+          key={action.key}
+          disabled={selectedRowKeys.length === 0 || action.disabled}
+          onClick={() => action.onClick(selectedRowKeys)}
+          type="button"
+        >
+          {action.label}
+        </button>
+      ))}
+      <table>
+        <tbody>
+          {dataSource.map((record, rowIndex) => (
+            <tr key={String(record.id)}>
+              {selectable ? (
+                <td>
+                  <input
+                    aria-label={`select-${String(record.id)}`}
+                    checked={selectedRowKeys.includes(String(record.id))}
+                    onChange={(event) => {
+                      const nextKeys = event.currentTarget.checked ? [String(record.id)] : [];
+                      onSelectionChange?.(nextKeys, dataSource.filter((item) => nextKeys.includes(String(item.id))));
+                    }}
+                    type="checkbox"
+                  />
+                </td>
+              ) : null}
+              {columns.map((column) => (
+                <td key={column.key} data-column-key={column.key} data-fixed={column.fixed ?? ''}>
+                  {column.render
+                    ? column.render(column.dataIndex ? record[column.dataIndex] : undefined, record, rowIndex)
+                    : String(column.dataIndex ? record[column.dataIndex] ?? '' : '')}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   ),
 }));
+
+const confirmSpy = vi.spyOn(Modal, 'confirm').mockImplementation((config) => {
+  void config.onOk?.(() => undefined);
+  return {
+    destroy: vi.fn(),
+    update: vi.fn(),
+  } as ReturnType<typeof Modal.confirm>;
+});
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.delete.mockImplementation((_ids: string[], options?: { onSuccess?: () => void }) => options?.onSuccess?.());
+  confirmSpy.mockClear();
+});
 
 import ScriptTask from '..';
 
@@ -82,8 +141,6 @@ function renderPage() {
 }
 
 describe('ScriptTask actions column', () => {
-  beforeEach(() => vi.clearAllMocks());
-
   it('keeps only execute visible and moves secondary script actions into the more menu', async () => {
     renderPage();
 
@@ -103,6 +160,24 @@ describe('ScriptTask actions column', () => {
     expect(screen.getByText('删除')).toBeInTheDocument();
   });
 
+  it('supports selecting scripts and deleting them in batch', () => {
+    renderPage();
+
+    expect(screen.queryByTestId('datatable-toolbar')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /批量删除/ })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'select-script-1' }));
+    fireEvent.click(screen.getByRole('button', { name: /批量删除/ }));
+
+    expect(confirmSpy).toHaveBeenCalledWith(expect.objectContaining({
+      content: '确认删除选中的 1 个脚本？此操作不可撤销。',
+    }));
+    expect(mocks.delete).toHaveBeenCalledWith(
+      ['script-1'],
+      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+    );
+  });
+
   it('omits the script library status column because it is not useful on the script task list', () => {
     renderPage();
 
@@ -120,6 +195,6 @@ describe('ScriptTask actions column', () => {
   it('keeps the operation column as the first column', () => {
     renderPage();
 
-    expect(document.querySelector('tbody tr td:first-child')).toHaveAttribute('data-column-key', 'operation');
+    expect(document.querySelector('tbody tr td:nth-child(2)')).toHaveAttribute('data-column-key', 'operation');
   });
 });

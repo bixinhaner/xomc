@@ -347,6 +347,11 @@ export const mmlService = {
     tasks = tasks.filter((t) => t.id !== id);
   },
 
+  async deleteTasks(ids: string[]): Promise<void> {
+    await delay(100, 200);
+    tasks = tasks.filter((t) => !ids.includes(t.id));
+  },
+
   async getTaskResults(
     id: string,
     page = 1,

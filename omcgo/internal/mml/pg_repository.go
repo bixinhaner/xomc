@@ -1539,6 +1539,23 @@ UPDATE mml_tasks
 }
 
 func (r *PgTaskRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin delete mml_task tx: %w", err)
+	}
+	defer reliability.RollbackTx(ctx, tx, r.logger, "PgTaskRepository.Delete")
+
+	deviceQuery, deviceArgs, err := storage.Psql.Delete("device_tasks").
+		Where(sq.Eq{"source": "mml"}).
+		Where(sq.Eq{"source_id": id}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build delete mml device_tasks SQL: %w", err)
+	}
+	if _, err := tx.Exec(ctx, deviceQuery, deviceArgs...); err != nil {
+		return fmt.Errorf("delete mml device_tasks: %w", err)
+	}
+
 	query, args, err := storage.Psql.Delete("mml_tasks").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -1546,12 +1563,15 @@ func (r *PgTaskRepository) Delete(ctx context.Context, id uuid.UUID) error {
 		return fmt.Errorf("build delete mml_task SQL: %w", err)
 	}
 
-	result, err := r.pool.Exec(ctx, query, args...)
+	result, err := tx.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("delete mml_task: %w", err)
 	}
 	if result.RowsAffected() == 0 {
 		return commonerrors.ErrNotFound
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit delete mml_task tx: %w", err)
 	}
 	return nil
 }

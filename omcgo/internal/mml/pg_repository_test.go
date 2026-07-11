@@ -131,6 +131,56 @@ func TestPgTaskRepository_IncrementStatsReconcilesFromDeviceTasks(t *testing.T) 
 	require.Equal(t, 0, got.FailedCount)
 }
 
+func TestPgTaskRepository_DeleteRemovesDeviceTasks(t *testing.T) {
+	pool := newMMLTestPool(t)
+	ctx := context.Background()
+	mmlRepo := NewPgTaskRepository(pool)
+	deviceTaskRepo := taskpkg.NewPgTaskRepository(pool)
+
+	mmlTask := &MMLTask{
+		TaskName:     "delete cascade " + uuid.NewString(),
+		DeviceSNs:    []string{"MML-DELETE-1", "MML-DELETE-2"},
+		Commands:     []map[string]interface{}{{"command_code": "LST DEVICE_INFO"}},
+		ExecuteMode:  TaskExecuteModeDeviceBound,
+		Status:       TaskCompleted,
+		Creator:      "repo-test",
+		ExecuteType:  ExecuteImmediate,
+		TotalDevices: 2,
+	}
+	require.NoError(t, mmlRepo.Create(ctx, mmlTask))
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), "DELETE FROM device_tasks WHERE source='mml' AND source_id=$1", mmlTask.ID.String())
+		_ = mmlRepo.Delete(context.Background(), mmlTask.ID)
+	})
+
+	for idx, sn := range mmlTask.DeviceSNs {
+		dt := &taskpkg.Task{
+			ID:           uuid.NewString(),
+			DeviceSN:     sn,
+			Method:       "GetParameterValues",
+			Params:       []byte("{}"),
+			Priority:     10,
+			Status:       taskpkg.TaskStatusCompleted,
+			MaxRetries:   3,
+			CreatedAt:    time.Now(),
+			Source:       taskpkg.TaskSourceMML,
+			SourceID:     mmlTask.ID.String(),
+			CommandIndex: idx,
+			DeviceIndex:  idx,
+		}
+		dt.MarkSent("cwmp-" + sn)
+		dt.MarkCompleted([]byte(`{"ok":true}`))
+		require.NoError(t, deviceTaskRepo.Create(ctx, dt))
+	}
+
+	require.NoError(t, mmlRepo.Delete(ctx, mmlTask.ID))
+
+	var remaining int
+	err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM device_tasks WHERE source='mml' AND source_id=$1", mmlTask.ID.String()).Scan(&remaining)
+	require.NoError(t, err)
+	require.Equal(t, 0, remaining)
+}
+
 func TestPgScriptRepository_ImportedReplaceAndMetadataAreAtomic(t *testing.T) {
 	pool := newMMLTestPool(t)
 	repo := NewPgScriptRepository(pool)
