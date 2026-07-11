@@ -116,4 +116,10 @@ describe('ScriptTask actions column', () => {
     expect(operationCell).toHaveAttribute('data-column-key', 'operation');
     expect(operationCell).toHaveAttribute('data-fixed', '');
   });
+
+  it('keeps the operation column as the first column', () => {
+    renderPage();
+
+    expect(document.querySelector('tbody tr td:first-child')).toHaveAttribute('data-column-key', 'operation');
+  });
 });

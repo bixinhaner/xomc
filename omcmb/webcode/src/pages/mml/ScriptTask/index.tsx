@@ -52,10 +52,6 @@ export default function ScriptTask() {
     updateMutation.mutate({ id: editing.id, data: { scriptName: values.scriptName.trim(), description: values.description ?? '' } }, { onSuccess: () => { void refetch(); closeBasic(); void message.success('保存成功'); } });
   };
   const columns: DataTableColumn<MMLScript>[] = [
-    { key: 'scriptName', title: t('mml.scriptName'), dataIndex: 'scriptName', ellipsis: true },
-    { key: 'description', title: t('mml.description'), dataIndex: 'description', ellipsis: true, render: (value) => String(value || '-') },
-    { key: 'creator', title: t('mml.creator'), dataIndex: 'creator', width: 100 },
-    { key: 'updatedAt', title: t('mml.updateTime'), dataIndex: 'updateTime', width: 170, render: (value) => formatTime(value as string) },
     {
       key: 'operation',
       title: t('table.operation'),
@@ -87,6 +83,10 @@ export default function ScriptTask() {
         </Space>;
       },
     },
+    { key: 'scriptName', title: t('mml.scriptName'), dataIndex: 'scriptName', ellipsis: true },
+    { key: 'description', title: t('mml.description'), dataIndex: 'description', ellipsis: true, render: (value) => String(value || '-') },
+    { key: 'creator', title: t('mml.creator'), dataIndex: 'creator', width: 100 },
+    { key: 'updatedAt', title: t('mml.updateTime'), dataIndex: 'updateTime', width: 170, render: (value) => formatTime(value as string) },
   ];
 
   return <ListPageLayout title={t('nav.mml.script')} extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => setImportOpen(true)}>导入 TXT</Button>}>
