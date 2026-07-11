@@ -54,6 +54,20 @@ describe('v3 ScriptImportDialog', () => {
     await waitFor(() => expect(mocks.create).toHaveBeenCalled())
   })
 
+  it('opens the hidden TXT file input from the visible chooser button', async () => {
+    const inputClick = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(() => {})
+    const user = userEvent.setup()
+    render(<ScriptImportDialog open onClose={vi.fn()} />)
+
+    try {
+      await user.click(screen.getByRole('button', { name: '选择 TXT' }))
+
+      expect(inputClick).toHaveBeenCalledTimes(1)
+    } finally {
+      inputClick.mockRestore()
+    }
+  })
+
   it('filters errors and disables save', async () => {
     mocks.validate.mockResolvedValue(validation({ planItems: [{ lineNo: 1, deviceSn: 'SN1', order: 1, command: { commandCode: 'BAD' } }, { lineNo: 2, deviceSn: 'SN2', order: 1, command: { commandCode: 'WARN' } }], summary: { totalLines: 2, validLines: 1, effectiveLines: 1, deviceCount: 2, errorCount: 1, warningCount: 1 }, issues: [{ code: 'MML_LINE_FORMAT_INVALID', severity: 'error', lineNo: 1 }, { code: 'MML_DEVICE_OFFLINE', severity: 'warning', lineNo: 2 }] }))
     const user = userEvent.setup()

@@ -927,11 +927,11 @@ export const mmlApi = {
   async validateScriptImport(file: File): Promise<MMLScriptImportValidation> {
     const body = new FormData();
     body.append('file', file);
-    // Do not set Content-Type here: the browser/Axios owns the multipart boundary.
     try {
       const { data } = await http.post<BackendMMLScriptImportValidation>(
         '/mml/scripts/import/validate',
         body,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
       );
       return mapBackendScriptImportValidation(data);
     } catch (error) {
@@ -949,6 +949,7 @@ export const mmlApi = {
       const { data } = await http.post<BackendMMLScriptImportValidation>(
         `/mml/scripts/${id}/import/validate`,
         body,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
       );
       return mapBackendScriptImportValidation(data);
     } catch (error) {
