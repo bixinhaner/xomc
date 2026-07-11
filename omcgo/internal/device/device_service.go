@@ -1751,6 +1751,22 @@ func (s *DeviceService) cacheDevice(ctx context.Context, device *model.Device) {
 
 // GetDeviceDetailComposite assembles a comprehensive device detail view by querying
 // device, device_info, and device_parameters (via prefix queries for MME/License/Antenna/Cells).
+func (s *DeviceService) GetAntennaSectors(ctx context.Context, deviceID uuid.UUID) ([]AntennaSector, error) {
+	device, err := s.deviceRepo.GetByID(ctx, deviceID)
+	if err != nil {
+		return nil, fmt.Errorf("get device: %w", err)
+	}
+	if device == nil {
+		return nil, nil
+	}
+
+	params, err := s.paramRepo.GetByGroup(ctx, deviceID, "antenna")
+	if err != nil {
+		return nil, fmt.Errorf("get antenna params: %w", err)
+	}
+	return AssembleAntennaSectors(params), nil
+}
+
 func (s *DeviceService) GetDeviceDetailComposite(ctx context.Context, deviceID uuid.UUID) (*DeviceDetailComposite, error) {
 	device, err := s.deviceRepo.GetByID(ctx, deviceID)
 	if err != nil {

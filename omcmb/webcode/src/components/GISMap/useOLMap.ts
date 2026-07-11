@@ -16,16 +16,17 @@ import Feature from 'ol/Feature';
 import Point from 'ol/geom/Point';
 import LineString from 'ol/geom/LineString';
 import MultiPoint from 'ol/geom/MultiPoint';
+import Polygon from 'ol/geom/Polygon';
 import Draw from 'ol/interaction/Draw';
 import Overlay from 'ol/Overlay';
-import { getLength } from 'ol/sphere';
+import { getLength, offset as offsetCoordinate } from 'ol/sphere';
 import { fromLonLat, toLonLat } from 'ol/proj';
 import { containsCoordinate, buffer as bufferExtent, boundingExtent } from 'ol/extent';
 import type { Extent } from 'ol/extent';
 import { defaults as defaultControls } from 'ol/control';
 import { Style, Stroke, Circle, Fill, Text } from 'ol/style';
 import type { StyleLike } from 'ol/style/Style';
-import type { MapDevice, MapViewport, MapBounds } from '@core/types/map';
+import type { AntennaSector, MapDevice, MapViewport, MapBounds } from '@core/types/map';
 import {
   MAP_CONFIG,
   ANIMATION_CONFIG,
@@ -37,6 +38,9 @@ import {
   getClusterDistanceForZoom,
   pickProgressiveSteps,
 } from './constants';
+
+// 水平方位角以正北为 0 度、顺时针增加；覆盖范围以方位角为法线向两侧各偏移 60 度。
+const COVERAGE_HALF_ANGLE_RADIANS = Math.PI / 3;
 import {
   clusterStyleFunction,
   createSpiderfyLineStyle,
@@ -170,6 +174,7 @@ interface UseOLMapReturn {
   startMeasure: () => void;
   /** 退出测距模式：清除折线和标注 */
   stopMeasure: () => void;
+  updateAntennaSectors: (device: MapDevice | null, sectors: AntennaSector[]) => void;
 }
 
 /**
@@ -263,6 +268,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
   const deviceSourceRef = useRef<VectorSource | null>(null);
   const clusterSourceRef = useRef<Cluster | null>(null);
   const deviceLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
+  const antennaSectorSourceRef = useRef<VectorSource | null>(null);
   const highlightFeatureRef = useRef<Feature | null>(null);
   // 水波纹动画定时器
   const pulseAnimationRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -297,6 +303,44 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
   const isProgrammaticFlyingRef = useRef(0);
 
   const [isReady, setIsReady] = useState(false);
+
+  const updateAntennaSectors = useCallback((device: MapDevice | null, sectors: AntennaSector[]) => {
+    const source = antennaSectorSourceRef.current;
+    const map = mapInstanceRef.current;
+    if (!source) return;
+    source.clear();
+    if (!device || !map || (map.getView().getZoom() ?? 0) < 13) return;
+
+    for (const sector of sectors) {
+      if (!sector.directionAvailable || sector.azimuth === undefined) continue;
+      const bearing = sector.azimuth * Math.PI / 180;
+      const lineEnd = offsetCoordinate([device.lng, device.lat], 100, bearing);
+      const direction = new Feature(new LineString([
+        fromLonLat([device.lng, device.lat]),
+        fromLonLat(lineEnd),
+      ]));
+      direction.setStyle(new Style({ stroke: new Stroke({ color: '#1677ff', width: 2.5 }) }));
+      source.addFeature(direction);
+
+      if (!sector.coverageAvailable || sector.nearRadiusMeters === undefined || sector.farRadiusMeters === undefined) continue;
+      const halfBeam = COVERAGE_HALF_ANGLE_RADIANS;
+      const outer: number[][] = [];
+      const inner: number[][] = [];
+      for (let step = 0; step <= 20; step++) {
+        const angle = bearing - halfBeam + (2 * halfBeam * step) / 20;
+        outer.push(fromLonLat(offsetCoordinate([device.lng, device.lat], sector.farRadiusMeters, angle)));
+        inner.push(fromLonLat(offsetCoordinate([device.lng, device.lat], sector.nearRadiusMeters, angle)));
+      }
+        const ring = [...outer, ...inner.reverse()];
+        ring.push(ring[0]);
+        const coverage = new Feature(new Polygon([ring]));
+      coverage.setStyle(new Style({
+        fill: new Fill({ color: 'rgba(22, 119, 255, 0.16)' }),
+        stroke: new Stroke({ color: '#1677ff', width: 1.5 }),
+      }));
+      source.addFeature(coverage);
+    }
+  }, []);
 
   // 收起 Spiderfy 展开（必须在 useEffect 之前定义，供 bindMapEvents 使用）
   const unspiderfy = useCallback(() => {
@@ -488,6 +532,9 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
       zIndex: 0, // 确保瓦片层在最底层
     });
     layers.push(tileLayer);
+
+    antennaSectorSourceRef.current = new VectorSource();
+    layers.push(new VectorLayer({ source: antennaSectorSourceRef.current, zIndex: 5 }));
 
     // 创建设备数据源
     deviceSourceRef.current = new VectorSource();
@@ -1614,6 +1661,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     setTileConcurrency,
     startMeasure,
     stopMeasure,
+    updateAntennaSectors,
   };
 }
 

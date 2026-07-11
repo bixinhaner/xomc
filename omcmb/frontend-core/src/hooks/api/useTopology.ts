@@ -1,8 +1,9 @@
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { topologyService } from '../../mock/services/topologyService';
 import { topologyApi } from '../../services/api/topologyApi';
+import { deviceApi } from '../../services/api/deviceApi';
 import { useMock } from '../../services/apiSwitch';
-import type { MapFilterParams, MapBounds, MapStats } from '../../types/map';
+import type { AntennaSector, MapFilterParams, MapBounds, MapStats } from '../../types/map';
 import type { SiteStatus, NodeType, NodeStatus, EdgeStatus } from '../../types/topology';
 
 export function useDomains() {
@@ -98,6 +99,15 @@ export function useGeoData() {
     queryFn: () =>
       useMock ? topologyService.getGeoData() : topologyApi.getGeoData(),
     staleTime: 60 * 1000,
+  });
+}
+
+export function useDeviceAntennaSectors(deviceID: string | undefined) {
+  return useQuery<AntennaSector[]>({
+    queryKey: ['devices', deviceID, 'antenna-sectors'],
+    queryFn: () => useMock ? Promise.resolve([]) : deviceApi.getAntennaSectors(deviceID!),
+    enabled: Boolean(deviceID),
+    staleTime: 5 * 60 * 1000,
   });
 }
 

@@ -5,10 +5,12 @@
  */
 
 import React, { useState } from 'react';
+import { Button, Form, InputNumber, message, Tabs } from 'antd';
 import { useIntl } from 'react-intl';
 import { useThemeToken } from '@/hooks/useThemeToken';
-import type { MapDevice } from '@core/types/map';
+import type { AntennaSector, MapDevice } from '@core/types/map';
 import { DEVICE_STATUS_CONFIG, ALARM_BADGE_CONFIG } from './constants';
+import styles from './styles.module.css';
 
 /** 告警级别颜色配置（label 通过 i18n key 在组件内动态获取） */
 const SEVERITY_COLOR: Record<number, { i18nKey: string; color: string }> = {
@@ -29,6 +31,15 @@ interface MapPopupProps {
   onClose?: () => void;
   /** 点击告警跳转回调（G-09） */
   onAlarmClick?: (sn: string) => void;
+  /** 当前选中设备已解析的天线扇区。 */
+  antennaSectors?: AntennaSector[];
+  /** 编辑值变更时更新地图覆盖范围预览。 */
+  onAntennaPreviewChange?: (sectorNumber: number, field: 'azimuth' | 'mechanicalDowntilt', value: number | null) => void;
+  /** 放弃编辑值并恢复地图中的原始覆盖范围。 */
+  onAntennaCancel?: () => void;
+  /** 向设备提交异步天线参数设置任务。 */
+  onAntennaSave?: (sectorNumber: number) => Promise<unknown>;
+  antennaSaving?: boolean;
 }
 
 /**
@@ -46,10 +57,17 @@ const MapPopup: React.FC<MapPopupProps> = ({
   visible = true,
   position,
   onAlarmClick,
+  antennaSectors = [],
+  onAntennaPreviewChange,
+  onAntennaCancel,
+  onAntennaSave,
+  antennaSaving = false,
 }) => {
   const token = useThemeToken();
   const intl = useIntl();
   const [alarmHovered, setAlarmHovered] = useState(false);
+  const [activeSectorNumber, setActiveSectorNumber] = useState<number | null>(null);
+  const [editingSector, setEditingSector] = useState(false);
 
   if (!visible || !device) return null;
 
@@ -96,12 +114,13 @@ const MapPopup: React.FC<MapPopupProps> = ({
 
   // 卡片样式
   const cardStyle: React.CSSProperties = {
-    width: 260,
+    width: 288,
+    maxHeight: '70vh',
     background: '#FFF',
     borderRadius: 12,
     boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
     border: '1px solid #E8E8E8',
-    overflow: 'hidden',
+    overflowY: 'auto',
     marginLeft: -1, // 与箭头重叠消除缝隙
   };
 
@@ -150,6 +169,49 @@ const MapPopup: React.FC<MapPopupProps> = ({
   const valueStyle: React.CSSProperties = {
     color: 'var(--color-neutral-800)',
     flex: 1,
+  };
+
+  const activeSector = antennaSectors.find((sector) => sector.number === activeSectorNumber) ?? antennaSectors[0];
+  const sectorLabelStyle: React.CSSProperties = {
+    ...labelStyle,
+    width: 'auto',
+    whiteSpace: 'nowrap',
+  };
+  const sectorDetailRowStyle: React.CSSProperties = {
+    ...detailRowStyle,
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 1fr) max-content',
+    columnGap: 12,
+    alignItems: 'baseline',
+    marginBottom: 7,
+    fontSize: 12,
+  };
+  const sectorValueStyle: React.CSSProperties = {
+    ...valueStyle,
+    justifySelf: 'end',
+    textAlign: 'right',
+    color: '#262626',
+    fontWeight: 500,
+  };
+  const canEdit = Boolean(activeSector && onAntennaSave && (
+    activeSector.fieldSources.azimuth
+    || activeSector.fieldSources.downtilt
+  ));
+
+  const saveAntennaSector = async () => {
+    if (!activeSector || !onAntennaSave) return;
+    try {
+      await onAntennaSave(activeSector.number);
+      setEditingSector(false);
+      message.success(intl.formatMessage({ id: 'gis.antenna.updateSubmitted' }));
+    } catch {
+      message.error(intl.formatMessage({ id: 'gis.antenna.updateFailed' }));
+    }
+  };
+
+  const cancelAntennaEditing = () => {
+    onAntennaCancel?.();
+    setEditingSector(false);
   };
 
   return (
@@ -285,6 +347,84 @@ const MapPopup: React.FC<MapPopupProps> = ({
               {device.lng.toFixed(4)}, {device.lat.toFixed(4)}
             </span>
           </div>
+
+          {antennaSectors.length > 0 && (
+            <div style={{ borderTop: '1px solid #F0F0F0', marginTop: 12, paddingTop: 10 }}>
+              <div style={{ marginBottom: 8, color: 'var(--color-neutral-800)', fontSize: 12, fontWeight: 600 }}>
+                {intl.formatMessage({ id: 'gis.antenna.popupTitle' })}
+                  {canEdit && (
+                    <Button type="link" size="small" onClick={() => editingSector ? cancelAntennaEditing() : setEditingSector(true)} style={{ float: 'right', padding: 0 }}>
+                      {editingSector ? intl.formatMessage({ id: 'common.cancel' }) : intl.formatMessage({ id: 'common.edit' })}
+                    </Button>
+                  )}
+              </div>
+              <Tabs
+                className={styles.sectorTabs}
+                activeKey={String(activeSector.number)}
+                onChange={(key) => setActiveSectorNumber(Number(key))}
+                size="small"
+                items={antennaSectors.map((sector) => ({
+                  key: String(sector.number),
+                  label: intl.formatMessage({ id: 'gis.antenna.sector' }, { number: sector.number }),
+                }))}
+              />
+              <div>
+                <div style={sectorDetailRowStyle}>
+                  <span style={sectorLabelStyle}>{intl.formatMessage({ id: 'gis.antenna.azimuth' })}:</span>
+                  <span style={sectorValueStyle}>{activeSector.azimuth === undefined ? '--' : `${activeSector.azimuth}°`}</span>
+                </div>
+                <div style={sectorDetailRowStyle}>
+                  <span style={sectorLabelStyle}>{intl.formatMessage({ id: 'gis.antenna.height' })}:</span>
+                  <span style={sectorValueStyle}>{activeSector.antennaHeight === undefined ? '--' : `${activeSector.antennaHeight} m`}</span>
+                </div>
+                <div style={sectorDetailRowStyle}>
+                  <span style={sectorLabelStyle}>{intl.formatMessage({ id: 'gis.antenna.mechanicalDowntilt' })}:</span>
+                  <span style={sectorValueStyle}>{activeSector.mechanicalDowntilt === undefined ? '--' : `${activeSector.mechanicalDowntilt}°`}</span>
+                </div>
+                <div style={sectorDetailRowStyle}>
+                  <span style={sectorLabelStyle}>{intl.formatMessage({ id: 'gis.antenna.horizontalBeamwidth' })}:</span>
+                  <span style={sectorValueStyle}>{activeSector.horizontalBeamwidth === undefined ? '--' : `${activeSector.horizontalBeamwidth}°`}</span>
+                </div>
+                <div style={sectorDetailRowStyle}>
+                  <span style={sectorLabelStyle}>{intl.formatMessage({ id: 'gis.antenna.verticalBeamwidth' })}:</span>
+                  <span style={sectorValueStyle}>{activeSector.verticalBeamwidth === undefined ? '--' : `${activeSector.verticalBeamwidth}°`}</span>
+                </div>
+                {activeSector.coverageAvailable ? (
+                  <div style={{ ...sectorDetailRowStyle, marginBottom: 0 }}>
+                    <span style={sectorLabelStyle}>{intl.formatMessage({ id: 'gis.antenna.coverageRange' })}:</span>
+                    <span style={sectorValueStyle}>{Math.round(activeSector.nearRadiusMeters ?? 0)} - {Math.round(activeSector.farRadiusMeters ?? 0)} m</span>
+                  </div>
+                ) : (
+                  <div style={{ color: '#d48806', fontSize: 11 }}>
+                    {intl.formatMessage({ id: 'gis.antenna.incompleteFields' }, { fields: activeSector.missingFields?.join(', ') || '--' })}
+                  </div>
+                )}
+                {editingSector && (
+                  <Form className={styles.sectorEditor} layout="vertical" size="small">
+                    {activeSector.fieldSources.azimuth && (
+                      <Form.Item label={intl.formatMessage({ id: 'gis.antenna.azimuth' })}>
+                        <div className={styles.sectorEditorInput}>
+                          <InputNumber controls={false} min={0} max={359} precision={0} value={activeSector.azimuth} aria-label={intl.formatMessage({ id: 'gis.antenna.azimuth' })} onChange={(value) => onAntennaPreviewChange?.(activeSector.number, 'azimuth', value)} />
+                          <span>°</span>
+                        </div>
+                      </Form.Item>
+                    )}
+                    {activeSector.fieldSources.downtilt && (
+                      <Form.Item label={intl.formatMessage({ id: 'gis.antenna.mechanicalDowntilt' })}>
+                        <div className={styles.sectorEditorInput}>
+                          <InputNumber controls={false} value={activeSector.mechanicalDowntilt} aria-label={intl.formatMessage({ id: 'gis.antenna.mechanicalDowntilt' })} onChange={(value) => onAntennaPreviewChange?.(activeSector.number, 'mechanicalDowntilt', value)} />
+                          <span>°</span>
+                        </div>
+                      </Form.Item>
+                    )}
+                    <div className={styles.sectorEditorActions}>
+                      <Button type="primary" loading={antennaSaving} onClick={() => void saveAntennaSector()}>{intl.formatMessage({ id: 'common.save' })}</Button>
+                    </div>
+                  </Form>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 底部蓝色强调线 */}

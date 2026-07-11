@@ -24,9 +24,9 @@ import (
 // ---------------------------------------------------------------------------
 
 type fakeDeviceRepo struct {
-	devices map[uuid.UUID]*model.Device
-	bySN    map[string]*model.Device
-	lastListFilter DeviceFilter
+	devices           map[uuid.UUID]*model.Device
+	bySN              map[string]*model.Device
+	lastListFilter    DeviceFilter
 	lastRecycleFilter RecycleBinFilter
 
 	// #64 GIS 数据权限测试捕获位：记录最近一次 geo 查询收到的可见分组。
@@ -230,11 +230,16 @@ func (m *fakeDeviceRepo) ListProductClasses(_ context.Context) ([]string, error)
 // ---------------------------------------------------------------------------
 
 type fakeParamRepo struct {
-	params map[uuid.UUID][]model.DeviceParameter
+	params      map[uuid.UUID][]model.DeviceParameter
+	groupParams map[uuid.UUID]map[string][]model.DeviceParameter
+	lastGroup   string
 }
 
 func newFakeParamRepo() *fakeParamRepo {
-	return &fakeParamRepo{params: make(map[uuid.UUID][]model.DeviceParameter)}
+	return &fakeParamRepo{
+		params:      make(map[uuid.UUID][]model.DeviceParameter),
+		groupParams: make(map[uuid.UUID]map[string][]model.DeviceParameter),
+	}
 }
 
 func (m *fakeParamRepo) BatchUpsert(ctx context.Context, deviceID uuid.UUID, params []model.DeviceParameter) error {
@@ -291,8 +296,9 @@ func (m *fakeParamRepo) GetDirectChildLeaves(_ context.Context, _ uuid.UUID, _ s
 	return nil, 0, nil
 }
 
-func (m *fakeParamRepo) GetByGroup(_ context.Context, _ uuid.UUID, _ string) ([]model.DeviceParameter, error) {
-	return []model.DeviceParameter{}, nil
+func (m *fakeParamRepo) GetByGroup(_ context.Context, deviceID uuid.UUID, group string) ([]model.DeviceParameter, error) {
+	m.lastGroup = group
+	return m.groupParams[deviceID][group], nil
 }
 
 func (m *fakeParamRepo) GetByFAPInstance(_ context.Context, _ uuid.UUID, _ int) ([]model.DeviceParameter, error) {

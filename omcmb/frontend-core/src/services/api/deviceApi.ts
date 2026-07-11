@@ -1,5 +1,6 @@
 import http from '../http';
 import type { Device, NE, DeviceFilter, DeviceGroup, DeviceListResponse, DeviceListStats, DeviceStats, DeviceParameter, CreateDeviceInput, NameFilterItem, BatchImportRequest, BatchImportResponse, BatchPreRegisterRequest, BatchPreRegisterResponse } from '../../types/device';
+import type { AntennaSector } from '../../types/map';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 import { normalizeDeviceSyncStatus } from '../../utils/deviceSyncStatus';
 import { normalizeAlarmSeverity } from '../../utils/alarmSeverity';
@@ -207,6 +208,42 @@ function buildUpdatedDeviceFallback(id: string, data: Partial<Device>, fallbackD
     installAddress: data.installAddress ?? fallbackDevice?.installAddress ?? '',
     remark: data.remark ?? fallbackDevice?.remark ?? '',
   } as Device;
+}
+
+interface BackendAntennaSector {
+  number: number;
+  cell_id?: string;
+  antenna_height?: number;
+  mechanical_downtilt?: number;
+  electronic_downtilt?: string;
+  vertical_beamwidth?: number;
+  horizontal_beamwidth?: number;
+  azimuth?: number;
+  near_radius_meters?: number;
+  far_radius_meters?: number;
+  field_sources?: Record<string, string>;
+  direction_available?: boolean;
+  coverage_available?: boolean;
+  missing_fields?: string[];
+}
+
+function mapBackendAntennaSector(sector: BackendAntennaSector): AntennaSector {
+  return {
+    number: sector.number,
+    cellId: sector.cell_id,
+    antennaHeight: sector.antenna_height,
+    mechanicalDowntilt: sector.mechanical_downtilt,
+    electronicDowntilt: sector.electronic_downtilt,
+    verticalBeamwidth: sector.vertical_beamwidth,
+    horizontalBeamwidth: sector.horizontal_beamwidth,
+    azimuth: sector.azimuth,
+    nearRadiusMeters: sector.near_radius_meters,
+    farRadiusMeters: sector.far_radius_meters,
+    fieldSources: sector.field_sources ?? {},
+    directionAvailable: sector.direction_available ?? false,
+    coverageAvailable: sector.coverage_available ?? false,
+    missingFields: sector.missing_fields ?? [],
+  };
 }
 
 // 后端 handler 返回的 JSON 形态（key 与 Go gin.H / 结构体 json tag 一致）。
@@ -490,6 +527,11 @@ function mapListResponse(resp: BackendListResponse<BackendDevice>): DeviceListRe
 }
 
 export const deviceApi = {
+  async getAntennaSectors(id: string): Promise<AntennaSector[]> {
+    const { data } = await http.get<BackendAntennaSector[]>(`/devices/${id}/antenna-sectors`);
+    return data.map(mapBackendAntennaSector);
+  },
+
   async getList(params: DeviceFilter & PageRequest): Promise<DeviceListResponse> {
     // Map frontend filter fields to backend query params
     const query: Record<string, unknown> = {

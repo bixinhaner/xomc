@@ -43,6 +43,118 @@
   animation: fadeIn 0.2s ease-out;
 }
 
+.sectorTabs :global(.ant-tabs-nav) {
+  margin: 0 0 12px !important;
+  padding: 3px;
+  background: #F5F7FA;
+  border: 1px solid #E6EDF7;
+  border-radius: 6px;
+}
+
+.sectorTabs :global(.ant-tabs-nav::before) {
+  border-bottom: 0;
+}
+
+.sectorTabs :global(.ant-tabs-nav-list) {
+  width: 100%;
+}
+
+.sectorTabs :global(.ant-tabs-tab) {
+  flex: 1;
+  justify-content: center;
+  margin: 0 !important;
+  padding: 5px 8px !important;
+  color: #64748B;
+  border-radius: 4px;
+}
+
+.sectorTabs :global(.ant-tabs-tab-active) {
+  background: #FFF;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+}
+
+.sectorTabs :global(.ant-tabs-tab-active .ant-tabs-tab-btn) {
+  color: #1677FF !important;
+  font-weight: 600;
+}
+
+.sectorTabs :global(.ant-tabs-ink-bar) {
+  display: none;
+}
+
+.sectorEditor {
+  margin-top: 14px;
+  padding: 12px 14px 14px;
+  background: #F6F9FD;
+  border: 1px solid #D6E2F0;
+  border-radius: 6px;
+}
+
+.sectorEditor :global(.ant-form-item) {
+  margin-bottom: 12px;
+}
+
+.sectorEditor :global(.ant-form-item-label) {
+  padding: 0 0 4px;
+}
+
+.sectorEditor :global(.ant-form-item-label > label) {
+  height: auto;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sectorEditor :global(.ant-input-number) {
+  width: 100%;
+  height: 36px;
+  background: #FFFFFF;
+  border-color: #C9D7E8;
+  border-radius: 5px;
+}
+
+.sectorEditor :global(.ant-input-number-input) {
+  height: 34px;
+  color: #1E293B;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.sectorEditor :global(.ant-input-number:hover),
+.sectorEditor :global(.ant-input-number-focused) {
+  border-color: #1677FF;
+  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.1);
+}
+
+.sectorEditorInput {
+  position: relative;
+}
+
+.sectorEditorInput :global(.ant-input-number-input) {
+  padding-right: 28px;
+}
+
+.sectorEditorInput > span {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  color: #64748B;
+  font-size: 13px;
+  font-weight: 600;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.sectorEditorActions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+
+.sectorEditorActions :global(.ant-btn) {
+  min-width: 84px;
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;
