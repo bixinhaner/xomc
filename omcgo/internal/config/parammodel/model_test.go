@@ -85,3 +85,25 @@ func TestBMUpTimeUsesStandardPath(t *testing.T) {
 
 	assert.Equal(t, 1, matches, "BM must expose uptime only via standard Device.DeviceInfo.UpTime")
 }
+
+func TestBaiBNQGNBNameIsWritableNRCommonPath(t *testing.T) {
+	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BaiBNQ.xml")
+	body, err := os.ReadFile(xmlPath)
+	require.NoError(t, err)
+
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal(body, &doc))
+
+	const path = "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBName"
+
+	for _, param := range doc.Params {
+		if param.Name == path {
+			assert.Equal(t, path, param.StandardPath)
+			assert.Equal(t, "READ_WRITE", param.Access)
+			assert.Equal(t, "STRING", param.DataType)
+			return
+		}
+	}
+
+	t.Fatalf("expected BaiBNQ.xml to define writable gNBName mapping at %s", path)
+}

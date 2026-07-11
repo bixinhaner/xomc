@@ -224,6 +224,33 @@ export function validateValue(
   return null;
 }
 
+function toParameterType(type?: string | null): ParameterType | null {
+  switch (String(type ?? '').trim()) {
+    case 'string':
+    case 'int':
+    case 'unsignedInt':
+    case 'boolean':
+    case 'dateTime':
+    case 'base64':
+    case 'hexBinary':
+    case 'object':
+      return String(type).trim() as ParameterType;
+    default:
+      return null;
+  }
+}
+
+export function resolveQuickSettingsParameterType(
+  quickSettingsType?: string,
+  schemaType?: string,
+  rawType?: string,
+): ParameterType {
+  return toParameterType(quickSettingsType)
+    ?? toParameterType(schemaType)
+    ?? toParameterType(rawType)
+    ?? 'string';
+}
+
 interface ApplyInstanceContextOptions {
   preserveTrailingInstance?: boolean;
 }

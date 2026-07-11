@@ -57,7 +57,7 @@
            standardPath="Device.FAP.NguIpBind{i}.BindInterface"/>
     <param name="gNBId" titleZh="gNB ID" titleEn="gNB ID"
            standardPath="Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBId"/>
-    <param name="gNBIdLength" titleZh="gNB Length" titleEn="gNB ID Length"
+    <param name="gNBIdLength" titleZh="gNB Length" titleEn="gNB ID Length" type="unsignedInt"
            standardPath="Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBIdLength"/>
     <param name="NrcellIdentity" titleZh="NCI" titleEn="NCI"
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.CN.TA.{i}.NrcellIdentity"/>

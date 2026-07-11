@@ -22,6 +22,7 @@ import {
   getEffectiveEnumMeta,
   getFeedbackScopeContext,
   localizeEnumLabel,
+  resolveQuickSettingsParameterType,
   validateMmeIp,
   validateMmeIpPlmnLimit,
   validateMmeIpPlmnRows,
@@ -1008,7 +1009,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
           : (rawItem?.parameterValue ?? item?.currentValue ?? ''));
       if (newVal === oldVal) continue;
 
-      const parameterType = rawItem?.parameterType ?? (item?.type as never) ?? 'string';
+      const parameterType = resolveQuickSettingsParameterType(p.type, item?.type, rawItem?.parameterType);
       const err = validateValue(newVal, parameterType, item?.constraints);
       if (err) {
         errors[p.name] = err;
