@@ -771,7 +771,8 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: MML
   // -------------------------------------------------------------------------
-  'nav.mml.script':     'Script Task',
+  'nav.mml.console':    'MML Console',
+  'nav.mml.script':     'Script Management',
   'nav.mml.taskRecord': 'Task Records',
   'nav.mml.commands':   'Command Tree',
 

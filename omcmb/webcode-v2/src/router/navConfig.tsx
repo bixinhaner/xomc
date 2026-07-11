@@ -217,12 +217,12 @@ export const MODULES: ModuleDef[] = [
     { path: '/config/auto-provision', element: s(C_pages_config_AutoProvisioning), label: '自动开站', hidden: true },
     { path: '/config/interop-test', element: s(C_pages_config_InteropTesting), label: '互操作测试', hidden: true },
   ] },
-  { key: 'mml', label: 'MML 脚本', icon: <Terminal />, section: '运维', routes: [
-    // v1 可见：script / task-records
-    { path: '/mml/script', element: s(C_pages_mml_ScriptTask), label: '脚本任务' },
+  { key: 'mml', label: 'MML 管理', icon: <Terminal />, section: '运维', routes: [
+    // v1 可见：console / script / task-records
+    { path: '/mml/console', element: s(C_pages_mml_Console), label: 'MML 控制台' },
+    { path: '/mml/script', element: s(C_pages_mml_ScriptTask), label: '脚本管理' },
     { path: '/mml/task-records', element: s(C_pages_mml_TaskRecord), label: '任务记录' },
     // routable but hidden
-    { path: '/mml/console', element: s(C_pages_mml_Console), label: 'MML 控制台', hidden: true },
     { path: '/mml/commands', element: s(C_pages_mml_CommandTree), label: '命令树', hidden: true },
     { path: '/mml/private-command', element: s(C_pages_mml_PrivateCommand), label: '私有命令', hidden: true },
     { path: '/mml/admin/catalog', element: s(C_pages_mml_admin_Catalog), label: '命令字典管理', hidden: true },
