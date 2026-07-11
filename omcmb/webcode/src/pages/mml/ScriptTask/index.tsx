@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
-import { Button, Descriptions, Drawer, Empty, Form, Input, Modal, Space, Spin, Tag, Typography, message } from 'antd';
-import { DownloadOutlined, PlusOutlined } from '@ant-design/icons';
+import { Button, Descriptions, Drawer, Dropdown, Empty, Form, Input, Modal, Space, Spin, Tag, Typography, message } from 'antd';
+import type { MenuProps } from 'antd';
+import { DeleteOutlined, DownloadOutlined, EditOutlined, EyeOutlined, MoreOutlined, PlayCircleOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
@@ -51,14 +52,38 @@ export default function ScriptTask() {
     updateMutation.mutate({ id: editing.id, data: { scriptName: values.scriptName.trim(), description: values.description ?? '' } }, { onSuccess: () => { void refetch(); closeBasic(); void message.success('保存成功'); } });
   };
   const columns: DataTableColumn<MMLScript>[] = [
-    { key: 'operation', title: t('table.operation'), width: 360, render: (_, record) => <Space size={2} wrap>
-      <Button type="link" size="small" onClick={() => setViewing(record)}>查看</Button>
-      <Button type="link" size="small" onClick={() => setExecScript(record)}>执行</Button>
-      <Button type="link" size="small" onClick={() => setReimporting(record)}>重新导入</Button>
-      <Button type="link" size="small" icon={<DownloadOutlined />} onClick={() => downloadScript(record)}>下载 TXT</Button>
-      <Button type="link" size="small" onClick={() => { setEditing(record); basicForm.setFieldsValue({ scriptName: record.scriptName, description: record.description }); }}>编辑</Button>
-      <Button type="link" size="small" danger onClick={() => Modal.confirm({ title: '确认删除？', okText: '删除', okButtonProps: { danger: true }, onOk: () => new Promise<void>((resolve, reject) => deleteMutation.mutate([record.id], { onSuccess: () => { void refetch(); resolve(); }, onError: reject })) })}>删除</Button>
-    </Space> },
+    {
+      key: 'operation',
+      title: t('table.operation'),
+      width: 120,
+      fixed: 'right',
+      render: (_, record) => {
+        const openEdit = () => {
+          setEditing(record);
+          basicForm.setFieldsValue({ scriptName: record.scriptName, description: record.description });
+        };
+        const confirmDelete = () => Modal.confirm({
+          title: '确认删除？',
+          okText: '删除',
+          okButtonProps: { danger: true },
+          onOk: () => new Promise<void>((resolve, reject) => deleteMutation.mutate([record.id], { onSuccess: () => { void refetch(); resolve(); }, onError: reject })),
+        });
+        const items: MenuProps['items'] = [
+          { key: 'view', label: '查看详情', icon: <EyeOutlined />, onClick: () => setViewing(record) },
+          { key: 'reimport', label: '重新导入', icon: <UploadOutlined />, onClick: () => setReimporting(record) },
+          { key: 'download', label: '下载 TXT', icon: <DownloadOutlined />, onClick: () => downloadScript(record) },
+          { key: 'edit', label: '编辑', icon: <EditOutlined />, onClick: openEdit },
+          { type: 'divider' },
+          { key: 'delete', label: '删除', icon: <DeleteOutlined />, danger: true, onClick: confirmDelete },
+        ];
+        return <Space size={4}>
+          <Button type="link" size="small" aria-label="执行" icon={<PlayCircleOutlined />} onClick={(event) => { event.stopPropagation(); setExecScript(record); }}>执行</Button>
+          <Dropdown menu={{ items }} trigger={['click']}>
+            <Button type="text" size="small" aria-label="更多操作" icon={<MoreOutlined />} onClick={(event) => event.stopPropagation()} />
+          </Dropdown>
+        </Space>;
+      },
+    },
     { key: 'scriptName', title: t('mml.scriptName'), dataIndex: 'scriptName', ellipsis: true },
     { key: 'description', title: t('mml.description'), dataIndex: 'description', ellipsis: true, render: (value) => String(value || '-') },
     { key: 'creator', title: t('mml.creator'), dataIndex: 'creator', width: 100 },
