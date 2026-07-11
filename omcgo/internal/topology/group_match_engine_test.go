@@ -18,11 +18,17 @@ import (
 // fakeLister 是 group_match_engine 单测专用的 DeviceLister，
 // 直接返回预设的设备切片，无需碰 PG。
 type fakeLister struct {
-	devices []DeviceForMatch
-	err     error
+	devices       []DeviceForMatch
+	err           error
+	requestedFrom *uuid.UUID
 }
 
 func (f *fakeLister) ListAllForRuleEval(_ context.Context) ([]DeviceForMatch, error) {
+	return f.devices, f.err
+}
+
+func (f *fakeLister) ListForRuleEval(_ context.Context, sourceGroupID uuid.UUID) ([]DeviceForMatch, error) {
+	f.requestedFrom = &sourceGroupID
 	return f.devices, f.err
 }
 
@@ -51,16 +57,18 @@ func newEngineWithMocks(t *testing.T) (*GroupMatchEngine, *MockDeviceGroupReposi
 
 // ── MatchGroup ──────────────────────────────────────────────────────────────
 
-// L2 + 有匹配规则 → 命中设备归入；不命中跳过；调用 AddDeviceAutoMatched（无 manual 守护）。
+// L2 + 有匹配规则 → 只读取源组，命中设备按源组条件原子移动。
 func TestGroupMatchEngine_MatchGroup_L2_AssignsMatchedDevices(t *testing.T) {
 	engine, repo, lister, ctrl := newEngineWithMocks(t)
 	defer ctrl.Finish()
 
 	groupID := uuid.New()
+	sourceGroupID := uuid.New()
 	group := &DeviceGroup{
 		ID: groupID, Level: 2, Name: "Beijing-L2",
-		MatchingMode: MatchingModeDeviceName,
-		NameRuleList: []NameRule{{Condition: "contain", Value: "BJ"}},
+		SourceGroupID: &sourceGroupID,
+		MatchingMode:  MatchingModeDeviceName,
+		NameRuleList:  []NameRule{{Condition: "contain", Value: "BJ"}},
 	}
 	matchedID := uuid.New()
 	missedID := uuid.New()
@@ -70,10 +78,42 @@ func TestGroupMatchEngine_MatchGroup_L2_AssignsMatchedDevices(t *testing.T) {
 	}
 
 	repo.EXPECT().GetByID(gomock.Any(), groupID).Return(group, nil)
-	// 关键契约：matched 设备走 AddDeviceAutoMatched（无 manual 守护），missed 不调。
-	repo.EXPECT().AddDeviceAutoMatched(gomock.Any(), groupID, matchedID).Return(nil)
+	repo.EXPECT().GetByID(gomock.Any(), sourceGroupID).Return(&DeviceGroup{ID: sourceGroupID, Level: 2}, nil)
+	// 关键契约：matched 设备走带源组条件的原子移动，missed 不调。
+	repo.EXPECT().MoveDeviceAutoMatched(gomock.Any(), sourceGroupID, groupID, matchedID).Return(int64(1), nil)
 
 	require.NoError(t, engine.MatchGroup(context.Background(), groupID))
+	require.NotNil(t, lister.requestedFrom)
+	assert.Equal(t, sourceGroupID, *lister.requestedFrom)
+}
+
+func TestGroupMatchEngine_MatchGroup_NoSource_NoOp(t *testing.T) {
+	engine, repo, _, ctrl := newEngineWithMocks(t)
+	defer ctrl.Finish()
+
+	groupID := uuid.New()
+	repo.EXPECT().GetByID(gomock.Any(), groupID).Return(&DeviceGroup{
+		ID: groupID, Level: 2, Name: "legacy-rule-without-source",
+		MatchingMode: MatchingModeTAC,
+		TACList:      []int{1},
+	}, nil)
+
+	require.NoError(t, engine.MatchGroup(context.Background(), groupID))
+}
+
+func TestGroupMatchEngine_MatchGroup_SourceIsNoLongerL2_NoOp(t *testing.T) {
+	engine, repo, _, ctrl := newEngineWithMocks(t)
+	defer ctrl.Finish()
+
+	targetID := uuid.New()
+	sourceID := uuid.New()
+	repo.EXPECT().GetByID(gomock.Any(), targetID).Return(&DeviceGroup{
+		ID: targetID, Level: 2, SourceGroupID: &sourceID,
+		MatchingMode: MatchingModeTAC, TACList: []int{1},
+	}, nil)
+	repo.EXPECT().GetByID(gomock.Any(), sourceID).Return(&DeviceGroup{ID: sourceID, Level: 1}, nil)
+
+	require.NoError(t, engine.MatchGroup(context.Background(), targetID))
 }
 
 // L1 分组 → no-op，不查 lister、不写入。
@@ -87,7 +127,7 @@ func TestGroupMatchEngine_MatchGroup_L1_NoOp(t *testing.T) {
 		MatchingMode: MatchingModeDeviceName,
 		NameRuleList: []NameRule{{Condition: "contain", Value: "X"}},
 	}, nil)
-	// 不应调 ListAllForRuleEval / AddDeviceAutoMatched —— 无 EXPECT 即不可调。
+	// 不应调 lister / MoveDeviceAutoMatched —— 无 EXPECT 即不可调。
 	lister.devices = []DeviceForMatch{{ID: uuid.New(), Name: "X-ANY"}}
 
 	require.NoError(t, engine.MatchGroup(context.Background(), groupID))
@@ -139,17 +179,40 @@ func TestGroupMatchEngine_HandleDeviceRegistered_MissingDeviceID(t *testing.T) {
 
 // 正常 payload + 无任何分组配规则 → 走完不报错（AssignDeviceToGroup 返 nil）。
 func TestGroupMatchEngine_HandleDeviceRegistered_NoConfiguredGroups_NoOp(t *testing.T) {
-	engine, repo, _, ctrl := newEngineWithMocks(t)
+	engine, repo, lister, ctrl := newEngineWithMocks(t)
 	defer ctrl.Finish()
 
+	deviceID := uuid.New()
+	lister.devices = []DeviceForMatch{{ID: deviceID, SerialNumber: "SN-001"}}
 	repo.EXPECT().GetTreeWithCounts(gomock.Any()).Return([]DeviceGroup{}, nil)
 
 	evt, err := event.NewEvent(event.SubjectDeviceRegistered, map[string]any{
-		"device_id":     uuid.New(),
+		"device_id":     deviceID,
 		"serial_number": "SN-001",
 	})
 	require.NoError(t, err)
 
+	require.NoError(t, engine.handleDeviceRegistered(context.Background(), evt))
+}
+
+func TestGroupMatchEngine_HandleDeviceRegistered_UsesPersistedCurrentGroup(t *testing.T) {
+	engine, repo, lister, ctrl := newEngineWithMocks(t)
+	defer ctrl.Finish()
+
+	deviceID := uuid.New()
+	sourceID := uuid.New()
+	targetID := uuid.New()
+	lister.devices = []DeviceForMatch{{ID: deviceID, SerialNumber: "SN-001", CurrentGroupID: &sourceID}}
+	repo.EXPECT().GetTreeWithCounts(gomock.Any()).Return([]DeviceGroup{
+		{ID: sourceID, Level: 2},
+		{ID: targetID, Level: 2, SourceGroupID: &sourceID, MatchingMode: MatchingModeSerialNumber, SerialNumberList: []string{"SN-001"}},
+	}, nil)
+	repo.EXPECT().MoveDeviceAutoMatched(gomock.Any(), sourceID, targetID, deviceID).Return(int64(1), nil)
+
+	evt, err := event.NewEvent(event.SubjectDeviceRegistered, map[string]any{
+		"device_id": deviceID, "serial_number": "SN-001",
+	})
+	require.NoError(t, err)
 	require.NoError(t, engine.handleDeviceRegistered(context.Background(), evt))
 }
 
@@ -163,34 +226,108 @@ func TestMatchDevice_PrefersMostRecentlyUpdatedL2(t *testing.T) {
 	repo := NewMockDeviceGroupRepository(ctrl)
 	matcher := NewDeviceMatcher(repo, nil, zaptest.NewLogger(t))
 
+	sourceGroupID := uuid.New()
 	older := DeviceGroup{
 		ID: uuid.New(), Level: 2, Name: "older-group",
-		MatchingMode: MatchingModeDeviceName,
-		NameRuleList: []NameRule{{Condition: "contain", Value: "BJ"}},
-		UpdatedAt:    time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
+		SourceGroupID: &sourceGroupID,
+		MatchingMode:  MatchingModeDeviceName,
+		NameRuleList:  []NameRule{{Condition: "contain", Value: "BJ"}},
+		UpdatedAt:     time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
 	}
 	newer := DeviceGroup{
 		ID: uuid.New(), Level: 2, Name: "newer-group",
-		MatchingMode: MatchingModeDeviceName,
-		NameRuleList: []NameRule{{Condition: "contain", Value: "BJ"}},
-		UpdatedAt:    time.Date(2026, 5, 19, 0, 0, 0, 0, time.UTC),
+		SourceGroupID: &sourceGroupID,
+		MatchingMode:  MatchingModeDeviceName,
+		NameRuleList:  []NameRule{{Condition: "contain", Value: "BJ"}},
+		UpdatedAt:     time.Date(2026, 5, 19, 0, 0, 0, 0, time.UTC),
 	}
 	// 故意把更早编辑的放前面，验证排序生效（不是按插入顺序）。
 	// PgDeviceGroupRepository.GetTreeWithCounts 实际返回扁平 list（Level 字段区分
 	// L1/L2），MatchDevice 按 Level==2 过滤，所以 mock 要镜像真实行为：返 flat。
 	tree := []DeviceGroup{
 		{ID: uuid.New(), Level: 1, Name: "root-L1"},
+		{ID: sourceGroupID, Level: 2, Name: "source-group"},
 		older,
 		newer,
 	}
 	repo.EXPECT().GetTreeWithCounts(gomock.Any()).Return(tree, nil)
 
 	result, err := matcher.MatchDevice(context.Background(), MatchRequest{
-		DeviceID:   uuid.New(),
-		DeviceName: "BJ-SITE-01",
+		DeviceID:       uuid.New(),
+		DeviceName:     "BJ-SITE-01",
+		CurrentGroupID: &sourceGroupID,
 	})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, newer.ID, result.GroupID, "最近编辑（updated_at 更晚）的分组应胜出")
 	assert.Equal(t, "newer-group", result.GroupName)
+	assert.Equal(t, sourceGroupID, result.SourceGroupID)
+}
+
+func TestMatchDevice_IgnoresRuleForDifferentSourceGroup(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	repo := NewMockDeviceGroupRepository(ctrl)
+	matcher := NewDeviceMatcher(repo, nil, zaptest.NewLogger(t))
+
+	ruleSourceID := uuid.New()
+	currentGroupID := uuid.New()
+	repo.EXPECT().GetTreeWithCounts(gomock.Any()).Return([]DeviceGroup{{
+		ID: uuid.New(), Level: 2, Name: "target",
+		SourceGroupID: &ruleSourceID,
+		MatchingMode:  MatchingModeTAC,
+		TACList:       []int{1},
+	}}, nil)
+
+	tac := 1
+	result, err := matcher.MatchDevice(context.Background(), MatchRequest{
+		DeviceID: uuid.New(), TAC: &tac, CurrentGroupID: &currentGroupID,
+	})
+	require.NoError(t, err)
+	assert.Nil(t, result)
+}
+
+func TestMatchDevice_IgnoresRuleWhoseSourceIsNoLongerL2(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	repo := NewMockDeviceGroupRepository(ctrl)
+	matcher := NewDeviceMatcher(repo, nil, zaptest.NewLogger(t))
+
+	sourceID := uuid.New()
+	targetID := uuid.New()
+	repo.EXPECT().GetTreeWithCounts(gomock.Any()).Return([]DeviceGroup{
+		{ID: sourceID, Level: 1},
+		{ID: targetID, Level: 2, SourceGroupID: &sourceID, MatchingMode: MatchingModeTAC, TACList: []int{1}},
+	}, nil)
+	tac := 1
+	result, err := matcher.MatchDevice(context.Background(), MatchRequest{
+		DeviceID: uuid.New(), TAC: &tac, CurrentGroupID: &sourceID,
+	})
+	require.NoError(t, err)
+	assert.Nil(t, result)
+}
+
+func TestHeartbeatAssigner_UsesCurrentGroupFromLister(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	repo := NewMockDeviceGroupRepository(ctrl)
+	matcher := NewDeviceMatcher(repo, nil, zaptest.NewLogger(t))
+
+	sourceGroupID := uuid.New()
+	targetGroupID := uuid.New()
+	deviceID := uuid.New()
+	tac := 1
+	lister := &fakeLister{devices: []DeviceForMatch{{
+		ID: deviceID, TAC: &tac, CurrentGroupID: &sourceGroupID,
+	}}}
+	repo.EXPECT().GetTreeWithCounts(gomock.Any()).Return([]DeviceGroup{{
+		ID: sourceGroupID, Level: 2, Name: "source",
+	}, {
+		ID: targetGroupID, Level: 2, Name: "target", SourceGroupID: &sourceGroupID,
+		MatchingMode: MatchingModeTAC, TACList: []int{1},
+	}}, nil)
+	repo.EXPECT().MoveDeviceAutoMatched(gomock.Any(), sourceGroupID, targetGroupID, deviceID).Return(int64(1), nil)
+
+	assigner := NewHeartbeatAssigner(matcher, lister)
+	require.NoError(t, assigner.AssignByHeartbeat(context.Background(), HeartbeatRequest{DeviceID: deviceID}))
 }

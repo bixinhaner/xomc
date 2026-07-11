@@ -1,24 +1,38 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
+import { Popconfirm } from 'antd';
 import {
+  BellOutlined,
+  ArrowsAltOutlined,
+  CheckOutlined,
   CloseOutlined,
+  CopyOutlined,
+  FieldTimeOutlined,
+  InfoCircleOutlined,
   PlusOutlined,
+  QuestionCircleOutlined,
   RobotOutlined,
   SendOutlined,
+  ShrinkOutlined,
   ThunderboltOutlined,
+  ToolOutlined,
+  WifiOutlined,
 } from '@ant-design/icons';
 import {
   AgentMarkdown,
   extractAgentRows,
+  extractAgentRestInput,
   formatAgentDetail,
   formatAgentValue,
+  summarizeAgentProcess,
   type AgentPanelActivity,
   type AgentPanelMessage,
   type AgentProcessEntry,
   type AgentThoughtEntry,
 } from '@core/agentkit';
 import { useAgentPanelController } from '@core/hooks/useAgentPanelController';
-import { useT } from '@/hooks/useT';
+import { useAgentPanelLayout } from '@core/hooks/useAgentPanelLayout';
+import { useT, type TranslateFn } from '@/hooks/useT';
 import styles from './AgentPanel.module.css';
 
 interface AgentPanelProps {
@@ -59,20 +73,193 @@ function ThoughtBlock({
   );
 }
 
-function ProcessTrace({ entries }: { entries: AgentProcessEntry[] | undefined }) {
+function shortId(value: string | undefined): string {
+  if (!value) return '';
+  return value.length > 14 ? `${value.slice(0, 8)}...${value.slice(-4)}` : value;
+}
+
+function formatElapsed(ms: number, t: TranslateFn): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  if (seconds < 60) return t('agent.elapsedSeconds', { seconds });
+  const minutes = Math.floor(seconds / 60);
+  return t('agent.elapsedMinutes', { minutes, seconds: seconds % 60 });
+}
+
+function useStreamingClock(enabled: boolean) {
+  const [tick, setTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (!enabled) return undefined;
+    const timer = window.setInterval(() => setTick(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [enabled]);
+  return tick;
+}
+
+function latestAssistantMessage(messages: AgentPanelMessage[]): AgentPanelMessage | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === 'assistant') return message;
+  }
+  return undefined;
+}
+
+function streamingStatusKey(message: AgentPanelMessage | undefined): string {
+  if (!message || message.status !== 'streaming') return '';
+  const lastProcess = message.process?.[message.process.length - 1];
+  const rest = extractAgentRestInput(lastProcess?.detail);
+  if (lastProcess?.kind === 'tool_call' && rest) {
+    if (rest.path === '/api/v1/agent/catalog' || rest.path === '/api/v1/agent/catalog/describe') {
+      return 'agent.statusSearching';
+    }
+    return 'agent.statusCalling';
+  }
+  if (lastProcess?.kind === 'process') {
+    const title = lastProcess.title.toLowerCase();
+    if (title.includes('running')) return 'agent.statusCalling';
+    if (title.includes('complete')) return 'agent.statusComposing';
+    return 'agent.statusThinking';
+  }
+  if (lastProcess?.kind === 'tool_result' || lastProcess?.kind === 'done') {
+    return 'agent.statusComposing';
+  }
+  if (message.text) return 'agent.statusComposing';
+  if (message.thoughts?.length) return 'agent.statusThinking';
+  return 'agent.statusConnecting';
+}
+
+function RuntimeStatusBar({
+  message,
+  nowTick,
+  copiedId,
+  onCopy,
+  diagnosticOpen,
+  onToggleDiagnostic,
+  onCloseDiagnostic,
+}: {
+  message: AgentPanelMessage | undefined;
+  nowTick: number;
+  copiedId: string | null;
+  onCopy: (value: string) => void;
+  diagnosticOpen: boolean;
+  onToggleDiagnostic: () => void;
+  onCloseDiagnostic: () => void;
+}) {
   const t = useT();
-  if (!entries?.length) return null;
+  if (!message || message.status !== 'streaming') return null;
+  const statusKey = streamingStatusKey(message);
+  const hasDiagnostics = Boolean(message.runId || message.conversationId);
+  const diagnostics = JSON.stringify(
+    {
+      runId: message.runId,
+      conversationId: message.conversationId,
+      status: message.status,
+      createdAt: message.createdAt,
+      processCount: message.process?.length ?? 0,
+    },
+    null,
+    2
+  );
 
   return (
-    <details className={styles.process} open={entries.some((entry) => entry.kind === 'error')}>
+    <div className={styles.runtimeStatus}>
+      <span className={styles.runtimePulse} aria-hidden="true" />
+      <span className={styles.runtimeText}>
+        <FieldTimeOutlined />
+        {t(statusKey || 'agent.statusConnecting')} · {formatElapsed(nowTick - message.createdAt, t)}
+      </span>
+      {hasDiagnostics && (
+        <>
+          <button
+            type="button"
+            className={styles.diagnosticBtn}
+            onClick={onToggleDiagnostic}
+            aria-label={t('agent.diagnostics')}
+            title={t('agent.diagnostics')}
+          >
+            <InfoCircleOutlined />
+          </button>
+          {diagnosticOpen && (
+            <>
+              <button
+                type="button"
+                className={styles.diagnosticBackdrop}
+                aria-label={t('agent.close')}
+                onClick={onCloseDiagnostic}
+              />
+              <div className={styles.diagnosticMenu}>
+                <div className={styles.diagnosticHeader}>{t('agent.diagnostics')}</div>
+                {message.runId && (
+                  <div className={styles.diagnosticRow}>
+                    <span>{t('agent.runId')}</span>
+                    <code title={message.runId}>{shortId(message.runId)}</code>
+                    <button
+                      type="button"
+                      className={styles.diagnosticCopy}
+                      onClick={() => onCopy(message.runId as string)}
+                      aria-label={t('agent.copy')}
+                    >
+                      {copiedId === message.runId ? <CheckOutlined /> : <CopyOutlined />}
+                    </button>
+                  </div>
+                )}
+                {message.conversationId && (
+                  <div className={styles.diagnosticRow}>
+                    <span>{t('agent.conversationId')}</span>
+                    <code title={message.conversationId}>{shortId(message.conversationId)}</code>
+                    <button
+                      type="button"
+                      className={styles.diagnosticCopy}
+                      onClick={() => onCopy(message.conversationId as string)}
+                      aria-label={t('agent.copy')}
+                    >
+                      {copiedId === message.conversationId ? <CheckOutlined /> : <CopyOutlined />}
+                    </button>
+                  </div>
+                )}
+                <button type="button" className={styles.diagnosticPrimary} onClick={() => onCopy(diagnostics)}>
+                  {t('agent.copyDiagnostics')}
+                </button>
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function ProcessTrace({
+  entries,
+  copiedId,
+  onCopy,
+}: {
+  entries: AgentProcessEntry[] | undefined;
+  copiedId: string | null;
+  onCopy: (value: string) => void;
+}) {
+  const t = useT();
+  if (!entries?.length) return null;
+  const summary = summarizeAgentProcess(entries);
+  const hasError = entries.some((entry) => entry.kind === 'error');
+
+  return (
+    <details className={styles.process} open={hasError}>
       <summary className={styles.processSummary}>
-        <span>{t('agent.processTrace')}</span>
+        <span className={styles.processSummaryTitle}>{t('agent.processTrace')}</span>
         <span className={styles.processCount}>{entries.length}</span>
+        <span className={styles.processChips}>
+          <span>{t('agent.processSearches')} {summary.searches}</span>
+          <span>{t('agent.processCalls')} {summary.calls}</span>
+          <span>{t('agent.processReadOnly')} {summary.readOnly}</span>
+          {summary.errors > 0 && <span className={styles.processErrorChip}>{t('agent.processErrors')} {summary.errors}</span>}
+        </span>
       </summary>
       <div className={styles.processList}>
         {entries.map((entry, index) => {
           const detail = formatAgentDetail(entry.detail);
           const isActive = index === entries.length - 1 && entry.kind !== 'error';
+          const rest = extractAgentRestInput(entry.detail);
+          const copyValue = rest ? `${rest.method} ${rest.path}` : entry.id;
           return (
             <div
               key={entry.id}
@@ -85,7 +272,30 @@ function ProcessTrace({ entries }: { entries: AgentProcessEntry[] | undefined })
                 {entry.kind}
               </span>
               <div className={styles.processBody}>
-                <div className={styles.processTitle}>{entry.title}</div>
+                <div className={styles.processTitleRow}>
+                  <div className={styles.processTitle}>
+                    {rest ? (
+                      <>
+                        <span className={`${styles.methodPill} ${rest.method === 'GET' ? styles.methodGet : styles.methodWrite}`}>
+                          {rest.method}
+                        </span>
+                        <span className={styles.processPath}>{rest.path}</span>
+                      </>
+                    ) : (
+                      entry.title
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    className={styles.inlineCopy}
+                    onClick={() => onCopy(copyValue)}
+                    title={copyValue}
+                    aria-label={t('common.copy')}
+                  >
+                    {copiedId === copyValue ? <CheckOutlined /> : <CopyOutlined />}
+                  </button>
+                </div>
+                {rest?.operationId && <div className={styles.processSubtle}>operationId: {rest.operationId}</div>}
                 {detail && <pre className={styles.processDetail}>{detail}</pre>}
               </div>
             </div>
@@ -96,7 +306,15 @@ function ProcessTrace({ entries }: { entries: AgentProcessEntry[] | undefined })
   );
 }
 
-function AssistantContent({ message }: { message: AgentPanelMessage }) {
+function AssistantContent({
+  message,
+  copiedId,
+  onCopy,
+}: {
+  message: AgentPanelMessage;
+  copiedId: string | null;
+  onCopy: (value: string) => void;
+}) {
   const t = useT();
   const running = message.status === 'streaming';
   return (
@@ -112,7 +330,7 @@ function AssistantContent({ message }: { message: AgentPanelMessage }) {
           <span className={styles.answerCaret} aria-hidden="true" />
         </span>
       ) : null}
-      <ProcessTrace entries={message.process} />
+      <ProcessTrace entries={message.process} copiedId={copiedId} onCopy={onCopy} />
     </div>
   );
 }
@@ -122,18 +340,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function restInput(input: unknown) {
-  if (!isRecord(input)) return null;
-  const method = typeof input.method === 'string' ? input.method.toUpperCase() : '';
-  const path = typeof input.path === 'string' ? input.path : '';
-  if (!method || !path) return null;
-  return {
-    method,
-    path,
-    operationId: typeof input.operationId === 'string' ? input.operationId : '',
-    query: isRecord(input.query) ? input.query : {},
-    body: input.body,
-    reason: typeof input.reason === 'string' ? input.reason : '',
-  };
+  return extractAgentRestInput(input);
 }
 
 function ActivityCard({
@@ -240,10 +447,59 @@ function ActivityCard({
   );
 }
 
+function shouldRenderActivity(activity: AgentPanelActivity, pendingCallId: string | undefined, isStreaming: boolean): boolean {
+  if (activity.callId === pendingCallId) return true;
+  if (activity.status === 'error') return true;
+  if (!isStreaming) return false;
+  if (activity.risk === 'read') return false;
+  const rest = extractAgentRestInput(activity.request?.input ?? activity.input);
+  if (rest?.method === 'GET') return false;
+  return activity.status === 'preview' || activity.status === 'calling' || activity.status === 'running';
+}
+
+function EmptyPromptState({ onPrompt }: { onPrompt: (prompt: string) => void }) {
+  const t = useT();
+  const prompts = [
+    { text: t('agent.suggestionNetworkHealth'), icon: <QuestionCircleOutlined /> },
+    { text: t('agent.suggestionOnlineDevices'), icon: <WifiOutlined /> },
+    { text: t('agent.suggestionAlarms'), icon: <BellOutlined /> },
+    { text: t('agent.suggestionConfigChange'), icon: <ToolOutlined /> },
+  ];
+
+  return (
+    <div className={styles.empty}>
+      <div className={styles.emptyBot} aria-hidden="true">
+        <span className={styles.emptyBotOrbit} />
+        <span className={styles.emptyBotHead}>
+          <span className={styles.emptyBotFace}>
+            <span />
+            <span />
+          </span>
+        </span>
+        <span className={styles.emptyBotDotOne} />
+        <span className={styles.emptyBotDotTwo} />
+        <span className={styles.emptyBotDotThree} />
+      </div>
+      <strong>{t('agent.emptyTitle')}</strong>
+      <span className={styles.emptyHint}>{t('agent.emptyHint')}</span>
+      <div className={styles.emptyPrompts}>
+        {prompts.map((prompt) => (
+          <button key={prompt.text} type="button" onClick={() => onPrompt(prompt.text)}>
+            {prompt.icon}
+            <span className={styles.promptText}>{prompt.text}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function AgentPanel({ open, onClose }: AgentPanelProps) {
   const t = useT();
   const location = useLocation();
   const [input, setInput] = useState('');
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [diagnosticOpen, setDiagnosticOpen] = useState(false);
   const context = useMemo(
     () => ({
       path: location.pathname,
@@ -252,8 +508,26 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
     [location.pathname, location.search]
   );
   const controller = useAgentPanelController({ context, active: open });
+  const activeAssistant = latestAssistantMessage(controller.messages);
+  const nowTick = useStreamingClock(controller.isStreaming);
+  const panelLayout = useAgentPanelLayout();
+
+  const copyText = async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedId(value);
+      window.setTimeout(() => setCopiedId((current) => (current === value ? null : current)), 1200);
+    } catch {
+      setCopiedId(null);
+    }
+  };
 
   if (!open) return null;
+
+  const handlePrompt = async (prompt: string) => {
+    if (!controller.enabled || controller.isStreaming) return;
+    await controller.sendMessage(prompt);
+  };
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -264,7 +538,19 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
   };
 
   return (
-    <aside className={styles.panel} aria-label={t('agent.title')}>
+    <aside
+      className={`${styles.panel} ${panelLayout.isResizing ? styles.panelResizing : ''}`}
+      style={panelLayout.panelStyle}
+      aria-label={t('agent.title')}
+    >
+      <div
+        className={styles.resizeHandle}
+        aria-label={t('agent.resizePanel')}
+        title={t('agent.resizePanel')}
+        {...panelLayout.resizeHandleProps}
+      >
+        <span className={styles.resizeGrip} aria-hidden="true" />
+      </div>
       <header className={styles.panelHeader}>
         <div className={styles.heading}>
           <RobotOutlined />
@@ -277,30 +563,53 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
         <button
           type="button"
           className={styles.iconBtn}
-          onClick={controller.clear}
-          disabled={controller.isStreaming}
-          aria-label={t('agent.newConversation')}
-          title={t('agent.newConversation')}
+          onClick={panelLayout.toggleExpanded}
+          aria-label={panelLayout.isExpanded ? t('agent.restorePanel') : t('agent.expandPanel')}
+          title={panelLayout.isExpanded ? t('agent.restorePanel') : t('agent.expandPanel')}
         >
-          <PlusOutlined />
+          {panelLayout.isExpanded ? <ShrinkOutlined /> : <ArrowsAltOutlined />}
         </button>
+        <Popconfirm
+          title={t('agent.newConversationConfirmTitle')}
+          description={t('agent.newConversationConfirmDescription')}
+          okText={t('agent.newConversation')}
+          cancelText={t('agent.cancel')}
+          onConfirm={controller.clear}
+          disabled={controller.isStreaming}
+        >
+          <button
+            type="button"
+            className={styles.iconBtn}
+            disabled={controller.isStreaming}
+            aria-label={t('agent.newConversation')}
+            title={t('agent.newConversation')}
+          >
+            <PlusOutlined />
+          </button>
+        </Popconfirm>
         <button type="button" className={styles.iconBtn} onClick={onClose} aria-label={t('agent.close')}>
           <CloseOutlined />
         </button>
       </header>
+      <RuntimeStatusBar
+        message={activeAssistant}
+        nowTick={nowTick}
+        copiedId={copiedId}
+        onCopy={copyText}
+        diagnosticOpen={diagnosticOpen}
+        onToggleDiagnostic={() => setDiagnosticOpen((current) => !current)}
+        onCloseDiagnostic={() => setDiagnosticOpen(false)}
+      />
 
       <div className={styles.body}>
         {!controller.enabled && (
-          <div className={styles.empty}>
+          <div className={styles.disabledEmpty}>
             <strong>{t('agent.disabledTitle')}</strong>
             <span>{t('agent.disabledHint')}</span>
           </div>
         )}
         {controller.enabled && controller.messages.length === 0 && controller.activities.length === 0 && (
-          <div className={styles.empty}>
-            <strong>{t('agent.emptyTitle')}</strong>
-            <span>{t('agent.emptyHint')}</span>
-          </div>
+          <EmptyPromptState onPrompt={handlePrompt} />
         )}
         {controller.messages.map((message) => (
           <div key={message.id} className={message.role === 'user' ? styles.userMessage : styles.assistantMessage}>
@@ -313,23 +622,25 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
             </div>
             <div className={styles.bubble}>
               {message.role === 'assistant' ? (
-                <AssistantContent message={message} />
+                <AssistantContent message={message} copiedId={copiedId} onCopy={copyText} />
               ) : (
                 message.text || (message.status === 'streaming' ? t('agent.streaming') : '')
               )}
             </div>
           </div>
         ))}
-        {controller.activities.map((activity) => (
-          <ActivityCard
-            key={activity.callId}
-            activity={activity}
-            isPending={controller.pendingAction?.callId === activity.callId}
-            isStreaming={controller.isStreaming}
-            onExecute={controller.executePendingAction}
-            onCancel={controller.cancelPendingAction}
-          />
-        ))}
+        {controller.activities
+          .filter((activity) => shouldRenderActivity(activity, controller.pendingAction?.callId, controller.isStreaming))
+          .map((activity) => (
+            <ActivityCard
+              key={activity.callId}
+              activity={activity}
+              isPending={controller.pendingAction?.callId === activity.callId}
+              isStreaming={controller.isStreaming}
+              onExecute={controller.executePendingAction}
+              onCancel={controller.cancelPendingAction}
+            />
+          ))}
         {controller.error && (
           <div className={styles.error}>
             {t('agent.errorPrefix')}: {controller.error.message}

@@ -9,6 +9,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
+
+	"github.com/omcgo/omcgo/global"
 )
 
 // DeviceLister 设备列举器（消费侧 narrow 接口）。
@@ -16,6 +18,7 @@ import (
 // 收到 device.attributes.changed 单设备事件时通过 GetByID 拿最新 LAC/TAC。
 type DeviceLister interface {
 	ListAllForRuleEval(ctx context.Context) ([]DeviceForMatch, error)
+	ListForRuleEval(ctx context.Context, sourceGroupID uuid.UUID) ([]DeviceForMatch, error)
 	GetByID(ctx context.Context, deviceID uuid.UUID) (*DeviceForMatch, error)
 }
 
@@ -30,11 +33,12 @@ type DeviceLister interface {
 // 值（脏数据 / 厂商扩展格式）回落为 nil；matcher.go matchByCode 对 nil 安全
 // 降级返 false（不命中也不 panic）。
 type DeviceForMatch struct {
-	ID           uuid.UUID
-	Name         string
-	SerialNumber string
-	LAC          *int
-	TAC          *int
+	ID             uuid.UUID
+	Name           string
+	SerialNumber   string
+	LAC            *int
+	TAC            *int
+	CurrentGroupID *uuid.UUID
 }
 
 // PgDeviceLister DeviceLister 的 PostgreSQL 实现。
@@ -79,9 +83,12 @@ func (l *PgDeviceLister) ListAllForRuleEval(ctx context.Context) ([]DeviceForMat
 			COALESCE(NULLIF(d.site_name, ''), d.serial_number) AS name,
 			d.serial_number,
 			CASE WHEN di.lac ~ '^-?[0-9]+$' THEN di.lac::int ELSE NULL END AS lac,
-			CASE WHEN di.tac ~ '^-?[0-9]+$' THEN di.tac::int ELSE NULL END AS tac
+			CASE WHEN di.tac ~ '^-?[0-9]+$' THEN di.tac::int ELSE NULL END AS tac,
+			dgm.group_id
 		FROM devices d
 		LEFT JOIN device_info di ON di.device_id = d.id
+		LEFT JOIN device_group_members dgm ON dgm.device_id = d.id
+		WHERE d.deleted_at IS NULL
 	`
 
 	rows, err := l.pool.Query(ctx, sqlText)
@@ -93,7 +100,7 @@ func (l *PgDeviceLister) ListAllForRuleEval(ctx context.Context) ([]DeviceForMat
 	devices := make([]DeviceForMatch, 0)
 	for rows.Next() {
 		var d DeviceForMatch
-		if err := rows.Scan(&d.ID, &d.Name, &d.SerialNumber, &d.LAC, &d.TAC); err != nil {
+		if err := rows.Scan(&d.ID, &d.Name, &d.SerialNumber, &d.LAC, &d.TAC, &d.CurrentGroupID); err != nil {
 			return nil, fmt.Errorf("scan device row: %w", err)
 		}
 		devices = append(devices, d)
@@ -106,6 +113,48 @@ func (l *PgDeviceLister) ListAllForRuleEval(ctx context.Context) ([]DeviceForMat
 	return devices, nil
 }
 
+// ListForRuleEval 只返回规则源组中的有效设备。内置“未分组设备”节点表示
+// device_group_members 中不存在记录，而不是一条真实 membership。
+func (l *PgDeviceLister) ListForRuleEval(ctx context.Context, sourceGroupID uuid.UUID) ([]DeviceForMatch, error) {
+	const baseSQL = `
+		SELECT d.id,
+		       COALESCE(NULLIF(d.site_name, ''), d.serial_number) AS name,
+		       d.serial_number,
+		       CASE WHEN di.lac ~ '^-?[0-9]+$' THEN di.lac::int ELSE NULL END AS lac,
+		       CASE WHEN di.tac ~ '^-?[0-9]+$' THEN di.tac::int ELSE NULL END AS tac,
+		       dgm.group_id
+		FROM devices d
+		LEFT JOIN device_info di ON di.device_id = d.id
+		LEFT JOIN device_group_members dgm ON dgm.device_id = d.id
+		WHERE d.deleted_at IS NULL`
+
+	query := baseSQL + ` AND dgm.group_id = $1`
+	args := []any{sourceGroupID}
+	if sourceGroupID.String() == global.DefaultLevel2GroupID {
+		query = baseSQL + ` AND dgm.device_id IS NULL`
+		args = nil
+	}
+
+	rows, err := l.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query source-group devices for rule eval: %w", err)
+	}
+	defer rows.Close()
+
+	var devices []DeviceForMatch
+	for rows.Next() {
+		var d DeviceForMatch
+		if err := rows.Scan(&d.ID, &d.Name, &d.SerialNumber, &d.LAC, &d.TAC, &d.CurrentGroupID); err != nil {
+			return nil, fmt.Errorf("scan source-group device row: %w", err)
+		}
+		devices = append(devices, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate source-group device rows: %w", err)
+	}
+	return devices, nil
+}
+
 // GetByID 返回单台设备的匹配信息集，供 device.attributes.changed 单设备路径使用。
 // 字段语义、LAC/TAC 解析行为与 ListAllForRuleEval 保持一致。设备不存在返 (nil, nil)。
 func (l *PgDeviceLister) GetByID(ctx context.Context, deviceID uuid.UUID) (*DeviceForMatch, error) {
@@ -115,13 +164,15 @@ func (l *PgDeviceLister) GetByID(ctx context.Context, deviceID uuid.UUID) (*Devi
 			COALESCE(NULLIF(d.site_name, ''), d.serial_number) AS name,
 			d.serial_number,
 			CASE WHEN di.lac ~ '^-?[0-9]+$' THEN di.lac::int ELSE NULL END AS lac,
-			CASE WHEN di.tac ~ '^-?[0-9]+$' THEN di.tac::int ELSE NULL END AS tac
+			CASE WHEN di.tac ~ '^-?[0-9]+$' THEN di.tac::int ELSE NULL END AS tac,
+			dgm.group_id
 		FROM devices d
 		LEFT JOIN device_info di ON di.device_id = d.id
-		WHERE d.id = $1
+		LEFT JOIN device_group_members dgm ON dgm.device_id = d.id
+		WHERE d.id = $1 AND d.deleted_at IS NULL
 	`
 	var d DeviceForMatch
-	if err := l.pool.QueryRow(ctx, sqlText, deviceID).Scan(&d.ID, &d.Name, &d.SerialNumber, &d.LAC, &d.TAC); err != nil {
+	if err := l.pool.QueryRow(ctx, sqlText, deviceID).Scan(&d.ID, &d.Name, &d.SerialNumber, &d.LAC, &d.TAC, &d.CurrentGroupID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}

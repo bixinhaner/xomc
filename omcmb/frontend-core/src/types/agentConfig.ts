@@ -45,6 +45,10 @@ export interface AgentVisibilityConfig {
   lastError: string;
 }
 
+export interface AgentConversation {
+  conversationId: string;
+}
+
 export interface AgentAdminConfigUpdate {
   enabled?: boolean;
   agentStudioBaseUrl?: string;

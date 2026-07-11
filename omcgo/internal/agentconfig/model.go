@@ -30,6 +30,10 @@ const (
 	DefaultBlockedPathPrefixes = "/api/v1/auth/*\n/api/v1/agent/*\n/api/v1/admin/agent-config*\n/api/v1/admin/sysConfig*"
 	DefaultToolTimeoutSeconds  = 30
 	DefaultMaxResponseBytes    = 262144
+
+	BasicCategory  = "basic"
+	OMCNameKey     = "mrOMCName"
+	DefaultOMCName = "OMC 统一网管系统"
 )
 
 type RuntimePolicy struct {
@@ -73,12 +77,15 @@ type VisibilityConfig struct {
 }
 
 type RuntimeTarget struct {
-	Enabled            bool
-	AgentStudioBaseURL string
-	ConnectorID        string
-	Status             string
-	LastError          string
-	Policy             RuntimePolicy
+	Enabled               bool
+	AgentStudioBaseURL    string
+	ConnectorSlug         string
+	ConnectorID           string
+	Status                string
+	LastError             string
+	InstanceName          string
+	InstanceNameIsDefault bool
+	Policy                RuntimePolicy
 }
 
 type UpdateRequest struct {

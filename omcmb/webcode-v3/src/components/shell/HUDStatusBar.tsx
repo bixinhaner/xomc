@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Power, Wifi, ShieldCheck } from 'lucide-react'
+import { Bot, Power, Wifi, ShieldCheck } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
 import { PulseHex } from '@/components/viz/PulseHex'
@@ -8,9 +8,18 @@ import { useAppStore } from '@core/store/appStore'
 import { usePublicOmcName, resolveOmcName } from '@core/hooks/api/useOmcName'
 import { useSystemTimezone } from '@core/hooks/api/useSystemTimezone'
 import { useSystemClock } from '@core/hooks/useSystemClock'
+import { cn } from '@/lib/utils'
+import { useT } from '@/hooks/useT'
 
-export function HUDStatusBar() {
+interface HUDStatusBarProps {
+  agentVisible?: boolean
+  agentOpen?: boolean
+  onAgentToggle?: () => void
+}
+
+export function HUDStatusBar({ agentVisible = false, agentOpen = false, onAgentToggle }: HUDStatusBarProps) {
   const navigate = useNavigate()
+  const t = useT()
   const user = useUserStore((s) => s.currentUser)
   const clearAuth = useUserStore((s) => s.clearAuth)
 
@@ -96,6 +105,31 @@ export function HUDStatusBar() {
         </div>
 
         <div className="h-7 w-px bg-cyan-500/20" />
+
+        {agentVisible && (
+          <>
+            <button
+              type="button"
+              onClick={onAgentToggle}
+              aria-pressed={agentOpen}
+              aria-label={t('agent.open')}
+              title={t('agent.open')}
+              className={cn(
+                'group relative flex size-10 items-center justify-center hex border transition-all',
+                agentOpen
+                  ? 'border-cyan-300/90 bg-cyan-400/18 shadow-[0_0_24px_rgba(0,240,255,0.6)]'
+                  : 'border-cyan-400/40 bg-cyan-500/8 shadow-[0_0_14px_rgba(0,240,255,0.22)] hover:border-cyan-300/80 hover:bg-cyan-400/14'
+              )}
+            >
+              <span className="absolute -inset-1 rounded-full border border-cyan-400/15 opacity-0 transition-opacity group-hover:opacity-100" />
+              <Bot className="size-4 text-cyan-100" />
+              <span className="absolute -bottom-2.5 font-mono text-[8px] font-bold tracking-[0.18em] text-cyan-300/80">
+                {t('agent.short')}
+              </span>
+            </button>
+            <div className="h-7 w-px bg-cyan-500/20" />
+          </>
+        )}
 
         {/* 用户 */}
         <button

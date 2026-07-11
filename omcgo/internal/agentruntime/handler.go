@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/agentconfig"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 type ConfigProvider interface {
@@ -27,32 +29,59 @@ type HTTPDoer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-type Handler struct {
-	config ConfigProvider
-	jwt    *admin.JWTService
-	http   HTTPDoer
-	logger *zap.Logger
-	tools  *ToolExecutor
+type ConversationManager interface {
+	Active(ctx context.Context, connectorID string, claims *admin.Claims) (string, error)
+	Rotate(ctx context.Context, connectorID string, claims *admin.Claims) (string, error)
+	InstanceID(ctx context.Context) (string, error)
 }
 
-func NewHandler(config ConfigProvider, jwtService *admin.JWTService, httpClient HTTPDoer, logger *zap.Logger, localHandler http.Handler, routes RouteProvider) *Handler {
+type Handler struct {
+	config        ConfigProvider
+	jwt           *admin.JWTService
+	http          HTTPDoer
+	logger        *zap.Logger
+	tools         *ToolExecutor
+	conversations ConversationManager
+}
+
+func NewHandler(config ConfigProvider, jwtService *admin.JWTService, httpClient HTTPDoer, logger *zap.Logger, localHandler http.Handler, routes RouteProvider, conversations ...ConversationManager) *Handler {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
 	if logger == nil {
 		logger = zap.NewNop()
 	}
+	var conversationManager ConversationManager
+	if len(conversations) > 0 {
+		conversationManager = conversations[0]
+	}
 	return &Handler{
-		config: config,
-		jwt:    jwtService,
-		http:   httpClient,
-		logger: logger.Named("agentruntime"),
-		tools:  NewToolExecutor(localHandler, routes, jwtService),
+		config:        config,
+		jwt:           jwtService,
+		http:          httpClient,
+		logger:        logger.Named("agentruntime"),
+		tools:         NewToolExecutor(localHandler, routes, jwtService),
+		conversations: conversationManager,
 	}
 }
 
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
+	rg.GET("/agent/conversation", h.GetConversation)
+	rg.POST("/agent/conversation", h.NewConversation)
+	rg.GET("/agent/handbook/routes", h.GetHandbookRoutes)
 	rg.POST("/agent/chat/stream", h.ChatStream)
+}
+
+func (h *Handler) GetHandbookRoutes(c *gin.Context) {
+	response.OK(c, h.tools.HandbookRouteExport())
+}
+
+func (h *Handler) GetConversation(c *gin.Context) {
+	h.handleConversation(c, false)
+}
+
+func (h *Handler) NewConversation(c *gin.Context) {
+	h.handleConversation(c, true)
 }
 
 func (h *Handler) ChatStream(c *gin.Context) {
@@ -84,7 +113,12 @@ func (h *Handler) ChatStream(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, fmt.Errorf("read agent chat body: %w", err))
 		return
 	}
-	rawBody = injectExternalIdentity(rawBody, claims)
+	rawBody, err = h.applyActiveConversation(c.Request.Context(), rawBody, target.ConnectorID, claims)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	rawBody = h.injectExternalIdentity(c.Request.Context(), rawBody, claims, target)
 	delegationToken, _, err := h.jwt.GenerateAgentDelegationToken(claims)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
@@ -129,6 +163,38 @@ func (h *Handler) ChatStream(c *gin.Context) {
 	h.streamAgentStudioResponse(c.Request.Context(), c.Writer, resp.Body, claims, delegationToken, target)
 }
 
+func (h *Handler) handleConversation(c *gin.Context, rotate bool) {
+	claims, ok := currentClaims(c)
+	if !ok {
+		commonerrors.AbortWithError(c, http.StatusUnauthorized, commonerrors.ErrUnauthorized)
+		return
+	}
+	target, err := h.config.GetRuntimeTarget(c.Request.Context())
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if target == nil || !target.Enabled || target.ConnectorID == "" {
+		commonerrors.AbortWithError(c, http.StatusServiceUnavailable, commonerrors.ErrUnavailable)
+		return
+	}
+	if h.conversations == nil {
+		commonerrors.AbortWithError(c, http.StatusServiceUnavailable, commonerrors.ErrUnavailable)
+		return
+	}
+	var conversationID string
+	if rotate {
+		conversationID, err = h.conversations.Rotate(c.Request.Context(), target.ConnectorID, claims)
+	} else {
+		conversationID, err = h.conversations.Active(c.Request.Context(), target.ConnectorID, claims)
+	}
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	response.OK(c, ConversationResponse{ConversationID: conversationID})
+}
+
 func currentClaims(c *gin.Context) (*admin.Claims, bool) {
 	value, exists := c.Get(admin.CtxKeyClaims)
 	claims, ok := value.(*admin.Claims)
@@ -157,7 +223,27 @@ type sseFrame struct {
 	data      string
 }
 
-func injectExternalIdentity(raw []byte, claims *admin.Claims) []byte {
+func (h *Handler) applyActiveConversation(ctx context.Context, raw []byte, connectorID string, claims *admin.Claims) ([]byte, error) {
+	if h.conversations == nil {
+		return raw, nil
+	}
+	conversationID, err := h.conversations.Active(ctx, connectorID, claims)
+	if err != nil {
+		return nil, err
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, fmt.Errorf("%w: decode agent chat body: %v", commonerrors.ErrInvalidInput, err)
+	}
+	payload["conversationId"] = conversationID
+	next, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("encode agent chat body: %w", err)
+	}
+	return next, nil
+}
+
+func (h *Handler) injectExternalIdentity(ctx context.Context, raw []byte, claims *admin.Claims, target *agentconfig.RuntimeTarget) []byte {
 	var payload map[string]any
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return raw
@@ -172,6 +258,7 @@ func injectExternalIdentity(raw []byte, claims *admin.Claims) []byte {
 		"username":         claims.Username,
 		"roles":            claims.Roles,
 		"scopes":           claims.Scopes,
+		"metadata":         h.externalIdentityMetadata(ctx, claims, target),
 	}
 	payload["context"] = contextValue
 	next, err := json.Marshal(payload)
@@ -179,6 +266,94 @@ func injectExternalIdentity(raw []byte, claims *admin.Claims) []byte {
 		return raw
 	}
 	return next
+}
+
+func (h *Handler) externalIdentityMetadata(ctx context.Context, claims *admin.Claims, target *agentconfig.RuntimeTarget) map[string]any {
+	connectorID := ""
+	connectorSlug := ""
+	instanceNameIsDefault := true
+	if target != nil {
+		connectorID = target.ConnectorID
+		connectorSlug = target.ConnectorSlug
+		instanceNameIsDefault = target.InstanceNameIsDefault || strings.TrimSpace(target.InstanceName) == ""
+	}
+	metadata := map[string]any{
+		"sourceSystem":    "omc",
+		"userDisplayName": strings.TrimSpace(claims.Username),
+		"connectorId":     strings.TrimSpace(connectorID),
+		"connectorSlug":   strings.TrimSpace(connectorSlug),
+		"instanceName":    agentRuntimeInstanceName(target),
+		"localIPs":        localIPStrings(),
+	}
+	if h.tools != nil {
+		handbook := h.tools.HandbookRouteExport()
+		metadata["apiHandbook"] = map[string]any{
+			"schemaVersion":  handbook.SchemaVersion,
+			"catalogVersion": handbook.CatalogVersion,
+			"totalRoutes":    handbook.TotalRoutes,
+		}
+	}
+	if instanceNameIsDefault {
+		metadata["instanceNameIsDefault"] = true
+	}
+	if h.conversations != nil {
+		instanceID, err := h.conversations.InstanceID(ctx)
+		if err != nil {
+			h.logger.Warn("read agent runtime instance id for external identity", zap.Error(err))
+		} else if instanceID != "" {
+			metadata["instanceId"] = instanceID
+			metadata["instanceShortId"] = shortAgentInstanceID(instanceID)
+		}
+	}
+	return metadata
+}
+
+func agentRuntimeInstanceName(target *agentconfig.RuntimeTarget) string {
+	if target == nil {
+		return agentconfig.DefaultOMCName
+	}
+	if value := strings.TrimSpace(target.InstanceName); value != "" {
+		return value
+	}
+	return agentconfig.DefaultOMCName
+}
+
+func shortAgentInstanceID(instanceID string) string {
+	value := strings.TrimPrefix(strings.TrimSpace(instanceID), instanceIDPrefix)
+	if len(value) <= 8 {
+		return value
+	}
+	return value[:8]
+}
+
+func localIPStrings() []string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, 4)
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ip, _, err := net.ParseCIDR(addr.String())
+			if err != nil || ip == nil || ip.IsLoopback() {
+				continue
+			}
+			if ip4 := ip.To4(); ip4 != nil {
+				out = append(out, ip4.String())
+			}
+			if len(out) >= 8 {
+				return out
+			}
+		}
+	}
+	return out
 }
 
 func parseSSEFrame(raw string) sseFrame {

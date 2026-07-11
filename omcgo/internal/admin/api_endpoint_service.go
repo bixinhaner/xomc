@@ -177,6 +177,23 @@ type routeMetadata struct {
 	Description string
 }
 
+// APIRouteMetadata exposes the same deterministic route semantics used by the
+// API permission UI to other internal consumers such as the Agent handbook.
+type APIRouteMetadata struct {
+	Name        string
+	Description string
+	Group       string
+}
+
+func DescribeAPIRoute(method, path string) APIRouteMetadata {
+	metadata := inferRouteMetadata(method, path)
+	return APIRouteMetadata{
+		Name:        metadata.Name,
+		Description: metadata.Description,
+		Group:       inferApiGroup(path),
+	}
+}
+
 type routeAction struct {
 	Verb        string
 	Description string

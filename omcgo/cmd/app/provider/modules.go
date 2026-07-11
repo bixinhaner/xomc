@@ -2078,13 +2078,14 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 	//   - 分组规则路径：GroupMatchEngine 周期/事件触发时调 matcher
 	// （历史的 device_rules 独立引擎已彻底下线，相关表/handler/seed 一并删除）
 	matcher := topology.NewDeviceMatcher(c.GroupRepo, c.PgPool, logger)
+	deviceLister := topology.NewPgDeviceLister(c.PgPool, logger)
 
 	// migration 000124 / SN 规则：把 matcher 注入到 device.InformHandler，
 	// 让心跳异步路径在更新设备信息后自动跑分组匹配。
 	// 用 closure 包装避免 device 包反向依赖 topology — closure 实现
 	// device.GroupAssigner 接口的 1 个方法。
 	if c.InformHandler != nil {
-		hbAssigner := topology.NewHeartbeatAssigner(matcher)
+		hbAssigner := topology.NewHeartbeatAssigner(matcher, deviceLister)
 		c.InformHandler.SetGroupAssigner(groupAssignerAdapter{a: hbAssigner})
 		logger.Info("device inform handler wired with topology heartbeat group assigner")
 	}
@@ -2092,7 +2093,7 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 	// 设备分组自动匹配引擎（GroupMatchEngine）：消费 L2 分组自带的匹配规则，
 	// 触发时机 = 分组新增/编辑 + 新设备注册 + 心跳 inform + cron @hourly。
 	groupMatchEngine := topology.NewGroupMatchEngine(
-		matcher, topology.NewPgDeviceLister(c.PgPool, logger), c.GroupRepo, logger)
+		matcher, deviceLister, c.GroupRepo, logger)
 	groupMatchEngine.SetEventBus(c.EventBus)
 	if err := groupMatchEngine.Start(context.Background()); err != nil {
 		logger.Error("group match engine Start failed", zap.Error(err))

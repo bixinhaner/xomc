@@ -2,6 +2,7 @@ import http from '../http';
 import type {
   AgentAdminConfig,
   AgentAdminConfigUpdate,
+  AgentConversation,
   AgentProvisionResult,
   AgentRuntimeServerConfig,
   AgentVisibilityConfig,
@@ -10,6 +11,8 @@ import type {
 export interface AgentApi {
   getVisibilityConfig(): Promise<AgentVisibilityConfig>;
   getRuntimeConfig(): Promise<AgentRuntimeServerConfig>;
+  getConversation(): Promise<AgentConversation>;
+  startConversation(): Promise<AgentConversation>;
   getAdminConfig(): Promise<AgentAdminConfig>;
   saveAdminConfig(payload: AgentAdminConfigUpdate): Promise<AgentAdminConfig>;
   testAdminConfig(payload: AgentAdminConfigUpdate): Promise<AgentProvisionResult>;
@@ -23,6 +26,14 @@ export const agentApi: AgentApi = {
   },
   async getRuntimeConfig() {
     const { data } = await http.get<AgentRuntimeServerConfig>('/agent/config');
+    return data;
+  },
+  async getConversation() {
+    const { data } = await http.get<AgentConversation>('/agent/conversation');
+    return data;
+  },
+  async startConversation() {
+    const { data } = await http.post<AgentConversation>('/agent/conversation');
     return data;
   },
   async getAdminConfig() {

@@ -22,6 +22,8 @@ export interface AgentPanelMessage {
   text: string;
   status: AgentPanelMessageStatus;
   createdAt: number;
+  runId?: string;
+  conversationId?: string;
   thoughts?: AgentThoughtEntry[];
   process?: AgentProcessEntry[];
 }
@@ -73,6 +75,24 @@ export interface AgentDisplayRow {
   value: string;
 }
 
+export interface AgentRestInput {
+  method: string;
+  path: string;
+  operationId: string;
+  query: Record<string, unknown>;
+  body?: unknown;
+  reason: string;
+}
+
+export interface AgentProcessSummary {
+  total: number;
+  searches: number;
+  calls: number;
+  readOnly: number;
+  writes: number;
+  errors: number;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -105,6 +125,53 @@ export function formatAgentDetail(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+export function extractAgentRestInput(input: unknown): AgentRestInput | null {
+  if (!isRecord(input)) return null;
+  const method = typeof input.method === 'string' ? input.method.trim().toUpperCase() : '';
+  const path = typeof input.path === 'string' ? input.path.trim() : '';
+  if (!method || !path) return null;
+  return {
+    method,
+    path,
+    operationId: typeof input.operationId === 'string' ? input.operationId.trim() : '',
+    query: isRecord(input.query) ? input.query : {},
+    body: input.body,
+    reason: typeof input.reason === 'string' ? input.reason.trim() : '',
+  };
+}
+
+export function summarizeAgentProcess(entries: AgentProcessEntry[] | undefined): AgentProcessSummary {
+  const summary: AgentProcessSummary = {
+    total: entries?.length ?? 0,
+    searches: 0,
+    calls: 0,
+    readOnly: 0,
+    writes: 0,
+    errors: 0,
+  };
+  if (!entries?.length) return summary;
+
+  for (const entry of entries) {
+    if (entry.kind === 'error') summary.errors += 1;
+    if (entry.kind !== 'tool_call') continue;
+
+    const rest = extractAgentRestInput(entry.detail);
+    if (!rest) continue;
+    if (rest.path === '/api/v1/agent/catalog' || rest.path === '/api/v1/agent/catalog/describe') {
+      summary.searches += 1;
+    } else {
+      summary.calls += 1;
+    }
+    if (rest.method === 'GET') {
+      summary.readOnly += 1;
+    } else {
+      summary.writes += 1;
+    }
+  }
+
+  return summary;
 }
 
 function thoughtLines(text: string): string[] {

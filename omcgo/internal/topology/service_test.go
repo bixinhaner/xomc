@@ -94,8 +94,8 @@ func (m *mockGroupRepo) AddDeviceWithSource(_ context.Context, _, _ uuid.UUID, _
 	return 1, nil
 }
 
-func (m *mockGroupRepo) AddDeviceAutoMatched(_ context.Context, _, _ uuid.UUID) error {
-	return nil
+func (m *mockGroupRepo) MoveDeviceAutoMatched(_ context.Context, _, _, _ uuid.UUID) (int64, error) {
+	return 1, nil
 }
 
 func (m *mockGroupRepo) RemoveDevice(ctx context.Context, groupID, deviceID uuid.UUID) error {
@@ -171,6 +171,84 @@ func (m *mockGroupRepo) UpdateBoundRule(_ context.Context, _, _ uuid.UUID) error
 
 func newTestGroupService(repo *mockGroupRepo) *DeviceGroupService {
 	return NewDeviceGroupService(repo, nil, nil, zap.NewNop())
+}
+
+func TestDeviceGroupService_CreateGroup_PersistsRuleSource(t *testing.T) {
+	parentID := uuid.New()
+	sourceID := uuid.New()
+	var created *DeviceGroup
+	repo := &mockGroupRepo{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*DeviceGroup, error) {
+			switch id {
+			case parentID:
+				return &DeviceGroup{ID: id, Level: 1}, nil
+			case sourceID:
+				return &DeviceGroup{ID: id, Level: 2}, nil
+			default:
+				return nil, commonerrors.ErrNotFound
+			}
+		},
+		createFn: func(_ context.Context, group *DeviceGroup) error {
+			created = group
+			return nil
+		},
+	}
+
+	group, err := newTestGroupService(repo).CreateGroup(context.Background(), CreateGroupRequest{
+		Name: "target", ParentID: parentID.String(), SourceGroupID: sourceID.String(),
+		MatchingMode: "serialNumber", SerialNumberList: []string{"SN-001", "SN-002"},
+	}, "tester")
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	require.NotNil(t, created.SourceGroupID)
+	assert.Equal(t, sourceID, *created.SourceGroupID)
+	assert.Equal(t, sourceID, *group.SourceGroupID)
+	assert.Equal(t, []string{"SN-001", "SN-002"}, created.SerialNumberList)
+}
+
+func TestDeviceGroupService_CreateGroup_RejectsRuleWithoutSource(t *testing.T) {
+	parentID := uuid.New()
+	repo := &mockGroupRepo{getByIDFn: func(_ context.Context, id uuid.UUID) (*DeviceGroup, error) {
+		return &DeviceGroup{ID: id, Level: 1}, nil
+	}}
+
+	_, err := newTestGroupService(repo).CreateGroup(context.Background(), CreateGroupRequest{
+		Name: "target", ParentID: parentID.String(), MatchingMode: "tac", TACList: []int{1},
+	}, "tester")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "source_group_id")
+}
+
+func TestDeviceGroupService_UpdateGroup_RejectsClearingSourceForExistingRule(t *testing.T) {
+	targetID := uuid.New()
+	sourceID := uuid.New()
+	emptySourceGroupID := ""
+	updateCalled := false
+	repo := &mockGroupRepo{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*DeviceGroup, error) {
+			if id != targetID {
+				return nil, commonerrors.ErrNotFound
+			}
+			return &DeviceGroup{
+				ID:            targetID,
+				Level:         2,
+				MatchingMode:  MatchingModeTAC,
+				SourceGroupID: &sourceID,
+				TACList:       []int{1},
+			}, nil
+		},
+		updateFn: func(_ context.Context, _ *DeviceGroup) error {
+			updateCalled = true
+			return nil
+		},
+	}
+
+	_, err := newTestGroupService(repo).UpdateGroup(context.Background(), targetID, UpdateGroupRequest{
+		SourceGroupID: &emptySourceGroupID,
+	}, "tester")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "source_group_id")
+	assert.False(t, updateCalled)
 }
 
 func ptrUUID(id uuid.UUID) *uuid.UUID {

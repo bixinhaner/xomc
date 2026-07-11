@@ -325,9 +325,11 @@ export interface DeviceGroup {
    * 把原规则回填到表单 — 缺失就是 bug 入口（用户改"匹配规则"但表单显示空）。
    */
   matchingMode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber';
+  sourceGroupId?: string;
   nameRuleList?: NameFilterItem[];
   lacList?: number[];
   tacList?: number[];
+  serialNumberList?: string[];
 }
 
 export interface DeviceFilter {

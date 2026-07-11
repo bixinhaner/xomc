@@ -100,7 +100,11 @@ export function BridgeShell() {
 
       {/* 主层 */}
       <div className="relative z-10 flex h-full w-full flex-col">
-        <HUDStatusBar />
+        <HUDStatusBar
+          agentVisible={agentVisible}
+          agentOpen={agentOpen}
+          onAgentToggle={() => setAgentOpen((open) => !open)}
+        />
 
         {/* 主体三栏：左饰条 + 内容 + 右遥测 */}
         <div className="grid flex-1 min-h-0 grid-cols-[64px_1fr_320px] gap-3 px-4 pt-3">
@@ -151,11 +155,7 @@ export function BridgeShell() {
         </div>
 
         {agentVisible && agentOpen && <AgentConsole open={agentOpen} onClose={() => setAgentOpen(false)} />}
-        <CockpitDock
-          agentVisible={agentVisible}
-          agentOpen={agentOpen}
-          onAgentToggle={() => setAgentOpen((open) => !open)}
-        />
+        <CockpitDock />
       </div>
     </div>
   )

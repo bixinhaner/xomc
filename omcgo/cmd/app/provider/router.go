@@ -361,7 +361,15 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// Authenticated user routes (any authenticated user)
 	ad.adminHandler.RegisterAuthenticatedRoutes(v1)
 
-	agentRuntimeHandler := agentruntime.NewHandler(ad.agentConfigHandler.Service(), c.JWTService, http.DefaultClient, c.Logger, r, r)
+	agentRuntimeHandler := agentruntime.NewHandler(
+		ad.agentConfigHandler.Service(),
+		c.JWTService,
+		http.DefaultClient,
+		c.Logger,
+		r,
+		r,
+		agentruntime.NewConversationService(admin.NewPgSysConfigRepository(c.PgPool)),
+	)
 	ad.agentConfigHandler.RegisterRuntimeRoutes(v1)
 	agentRuntimeHandler.RegisterRoutes(v1)
 

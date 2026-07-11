@@ -110,6 +110,33 @@ func (s *DeviceGroupService) GetTreeWithCounts(ctx context.Context) ([]DeviceGro
 	return tree, stats, nil
 }
 
+func (s *DeviceGroupService) validateRuleSource(ctx context.Context, targetID uuid.UUID, level int, mode MatchingMode, sourceRaw string) (*uuid.UUID, error) {
+	if mode == "" && sourceRaw == "" {
+		return nil, nil
+	}
+	if level != 2 {
+		return nil, commonerrors.NewBusinessError(global.ErrCodeGroupLevelInvalid, "matching rules are only supported for level-2 groups", nil)
+	}
+	if mode != "" && sourceRaw == "" {
+		return nil, commonerrors.NewBusinessError(global.ErrCodeGroupParentInvalid, "source_group_id is required for matching rules", nil)
+	}
+	sourceID, err := uuid.Parse(sourceRaw)
+	if err != nil {
+		return nil, commonerrors.NewBusinessError(global.ErrCodeGroupParentInvalid, "invalid source_group_id", err)
+	}
+	if targetID != uuid.Nil && sourceID == targetID {
+		return nil, commonerrors.NewBusinessError(global.ErrCodeGroupParentInvalid, "source group cannot equal target group", nil)
+	}
+	source, err := s.repo.GetByID(ctx, sourceID)
+	if err != nil {
+		return nil, commonerrors.NewBusinessError(global.ErrCodeGroupParentInvalid, "source group not found", err)
+	}
+	if source.Level != 2 {
+		return nil, commonerrors.NewBusinessError(global.ErrCodeGroupLevelInvalid, "source group must be a level-2 group", nil)
+	}
+	return &sourceID, nil
+}
+
 // CreateGroup creates a device group with optional sub-groups.
 func (s *DeviceGroupService) CreateGroup(ctx context.Context, req CreateGroupRequest, operator string) (*DeviceGroup, error) {
 	var parentID *uuid.UUID
@@ -136,6 +163,11 @@ func (s *DeviceGroupService) CreateGroup(ctx context.Context, req CreateGroupReq
 		level = parentLevel + 1
 	}
 
+	sourceGroupID, err := s.validateRuleSource(ctx, uuid.Nil, level, MatchingMode(req.MatchingMode), req.SourceGroupID)
+	if err != nil {
+		return nil, err
+	}
+
 	// Name uniqueness check.
 	exists, err := s.repo.ExistsByParentAndName(ctx, parentID, req.Name, nil)
 	if err != nil {
@@ -146,21 +178,23 @@ func (s *DeviceGroupService) CreateGroup(ctx context.Context, req CreateGroupReq
 	}
 
 	group := &DeviceGroup{
-		Name:            req.Name,
-		NameI18n:        req.NameI18n,
-		DescriptionI18n: req.DescriptionI18n,
-		RemarkI18n:      req.RemarkI18n,
-		ParentID:        parentID,
-		Carrier:         carrier(req.Carrier),
-		Remark:          req.Remark,
-		SortOrder:       req.SortOrder,
-		Level:           level,
-		Status:          string(global.GroupStatusActive),
-		CreatedBy:       operator,
-		MatchingMode:    MatchingMode(req.MatchingMode),
-		NameRuleList:    req.NameRuleList,
-		LACList:         req.LACList,
-		TACList:         req.TACList,
+		Name:             req.Name,
+		NameI18n:         req.NameI18n,
+		DescriptionI18n:  req.DescriptionI18n,
+		RemarkI18n:       req.RemarkI18n,
+		ParentID:         parentID,
+		Carrier:          carrier(req.Carrier),
+		Remark:           req.Remark,
+		SortOrder:        req.SortOrder,
+		Level:            level,
+		Status:           string(global.GroupStatusActive),
+		CreatedBy:        operator,
+		SourceGroupID:    sourceGroupID,
+		MatchingMode:     MatchingMode(req.MatchingMode),
+		NameRuleList:     req.NameRuleList,
+		LACList:          req.LACList,
+		TACList:          req.TACList,
+		SerialNumberList: req.SerialNumberList,
 	}
 
 	if err := s.repo.Create(ctx, group); err != nil {
@@ -291,6 +325,23 @@ func (s *DeviceGroupService) UpdateGroup(ctx context.Context, id uuid.UUID, req 
 	}
 	if req.TACList != nil {
 		group.TACList = req.TACList
+	}
+	if req.SerialNumberList != nil {
+		group.SerialNumberList = req.SerialNumberList
+	}
+	if req.SourceGroupID != nil {
+		if *req.SourceGroupID == "" {
+			group.SourceGroupID = nil
+		} else {
+			sourceID, err := s.validateRuleSource(ctx, group.ID, group.Level, group.MatchingMode, *req.SourceGroupID)
+			if err != nil {
+				return nil, err
+			}
+			group.SourceGroupID = sourceID
+		}
+	}
+	if req.SourceGroupID != nil && *req.SourceGroupID == "" && group.MatchingMode != "" {
+		return nil, commonerrors.NewBusinessError(global.ErrCodeGroupParentInvalid, "source_group_id is required for matching rules", nil)
 	}
 	group.UpdatedBy = operator
 

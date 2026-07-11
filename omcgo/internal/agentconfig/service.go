@@ -100,15 +100,41 @@ func (s *Service) GetRuntimeTarget(ctx context.Context) (*RuntimeTarget, error) 
 	if err != nil {
 		return nil, err
 	}
+	instanceName, instanceNameIsDefault := s.loadInstanceName(ctx)
 	enabled := cfg.Enabled && cfg.Status == StatusConnected && cfg.AgentStudioBaseURL != "" && cfg.ConnectorID != ""
 	return &RuntimeTarget{
-		Enabled:            enabled,
-		AgentStudioBaseURL: cfg.AgentStudioBaseURL,
-		ConnectorID:        cfg.ConnectorID,
-		Status:             cfg.Status,
-		LastError:          cfg.LastError,
-		Policy:             cfg.Policy,
+		Enabled:               enabled,
+		AgentStudioBaseURL:    cfg.AgentStudioBaseURL,
+		ConnectorSlug:         cfg.ConnectorSlug,
+		ConnectorID:           cfg.ConnectorID,
+		Status:                cfg.Status,
+		LastError:             cfg.LastError,
+		InstanceName:          instanceName,
+		InstanceNameIsDefault: instanceNameIsDefault,
+		Policy:                cfg.Policy,
 	}, nil
+}
+
+func (s *Service) loadInstanceName(ctx context.Context) (string, bool) {
+	if s == nil || s.reader == nil {
+		return DefaultOMCName, true
+	}
+	rows, err := s.reader.List(ctx, BasicCategory, false)
+	if err != nil {
+		s.logger.Warn("list basic config for agent runtime target", zap.Error(err))
+		return DefaultOMCName, true
+	}
+	for _, row := range rows {
+		if row.Key != OMCNameKey {
+			continue
+		}
+		value := strings.TrimSpace(row.Value)
+		if value == "" {
+			return DefaultOMCName, true
+		}
+		return value, isDefaultOMCName(value)
+	}
+	return DefaultOMCName, true
 }
 
 func (s *Service) Save(ctx context.Context, req UpdateRequest) (*AdminConfig, error) {
@@ -533,6 +559,10 @@ func normalizeHTTPURL(value string) (string, error) {
 
 func defaultConnectorSlug() string {
 	return "external-agent-connector"
+}
+
+func isDefaultOMCName(value string) bool {
+	return strings.TrimSpace(value) == DefaultOMCName
 }
 
 func valueTypeForKey(key string) string {

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  extractAgentRestInput,
   extractAgentRows,
   formatAgentValue,
   mergeAgentThought,
   parseApprovedAction,
+  summarizeAgentProcess,
   completeAgentThoughts,
   upsertAgentProcess,
 } from './panel';
@@ -101,5 +103,52 @@ describe('agent panel helpers', () => {
         detail: { ok: true },
       },
     ]);
+  });
+
+  it('extracts REST input and summarizes process records', () => {
+    expect(
+      extractAgentRestInput({
+        method: 'get',
+        path: '/api/v1/alarms/statistics',
+        operationId: 'get.alarms.statistics',
+        query: { page: 1 },
+      })
+    ).toEqual({
+      method: 'GET',
+      path: '/api/v1/alarms/statistics',
+      operationId: 'get.alarms.statistics',
+      query: { page: 1 },
+      body: undefined,
+      reason: '',
+    });
+
+    expect(
+      summarizeAgentProcess([
+        {
+          id: 'p1',
+          kind: 'tool_call',
+          title: 'GET /api/v1/agent/catalog',
+          detail: { method: 'GET', path: '/api/v1/agent/catalog' },
+        },
+        {
+          id: 'p2',
+          kind: 'tool_call',
+          title: 'GET /api/v1/alarms/statistics',
+          detail: { method: 'GET', path: '/api/v1/alarms/statistics' },
+        },
+        {
+          id: 'p3',
+          kind: 'error',
+          title: 'failed',
+        },
+      ])
+    ).toEqual({
+      total: 3,
+      searches: 1,
+      calls: 1,
+      readOnly: 2,
+      writes: 0,
+      errors: 1,
+    });
   });
 });

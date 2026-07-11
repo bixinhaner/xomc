@@ -24,7 +24,7 @@ var groupColumns = []string{
 	"level", "status", "is_default", "remark", "created_by", "updated_by",
 	"created_at", "updated_at",
 	"matching_mode", "name_rule_list", "lac_list", "tac_list",
-	"serial_number_list",                           // migration 000124
+	"serial_number_list", "source_group_id",
 	"name_i18n", "description_i18n", "remark_i18n", // migration 000003
 }
 
@@ -84,6 +84,7 @@ func (r *PgDeviceGroupRepository) Create(ctx context.Context, group *DeviceGroup
 			nullableIntArray(group.LACList),
 			nullableIntArray(group.TACList),
 			nullableStringArray(group.SerialNumberList),
+			nullableUUID(group.SourceGroupID),
 			nameI18nJSON, descI18nJSON, remarkI18nJSON,
 		).
 		ToSql()
@@ -142,6 +143,7 @@ func (r *PgDeviceGroupRepository) Update(ctx context.Context, group *DeviceGroup
 		Set("lac_list", nullableIntArray(group.LACList)).
 		Set("tac_list", nullableIntArray(group.TACList)).
 		Set("serial_number_list", nullableStringArray(group.SerialNumberList)).
+		Set("source_group_id", nullableUUID(group.SourceGroupID)).
 		Set("name_i18n", marshalI18n(group.NameI18n)). // migration 000003 i18n
 		Set("description_i18n", marshalI18n(group.DescriptionI18n)).
 		Set("remark_i18n", marshalI18n(group.RemarkI18n)).
@@ -248,7 +250,7 @@ func (r *PgDeviceGroupRepository) GetTreeWithCounts(ctx context.Context) ([]Devi
 		       dg.level, dg.status, dg.is_default, dg.remark, dg.created_by, dg.updated_by,
 		       dg.created_at, dg.updated_at,
 		       dg.matching_mode, dg.name_rule_list, dg.lac_list, dg.tac_list,
-		       dg.serial_number_list,
+		       dg.serial_number_list, dg.source_group_id,
 		       CASE
 		           WHEN dg.id = $1::uuid THEN (
 		               SELECT COUNT(*) FROM devices d
@@ -438,23 +440,39 @@ func (r *PgDeviceGroupRepository) AddDeviceWithSource(ctx context.Context, group
 	return tag.RowsAffected(), nil
 }
 
-// AddDeviceAutoMatched 自动匹配命中：UPSERT 设备到 group，标 source_type='rule'。
-// 2026-06-03 用户决策「手动优先」：带 manual 守护 —— WHERE source_type IS DISTINCT FROM 'manual'，
-// 冲突行为 manual 时跳过 UPDATE，永久保留运维手工分配（与 AddDeviceWithSource 同范式）。
-func (r *PgDeviceGroupRepository) AddDeviceAutoMatched(ctx context.Context, groupID, deviceID uuid.UUID) error {
-	const rawSQL = `
-		INSERT INTO device_group_members (group_id, device_id, added_at, source_type)
-		VALUES ($1, $2, $3, 'rule')
-		ON CONFLICT (device_id) DO UPDATE SET
-			group_id = EXCLUDED.group_id,
-			added_at = EXCLUDED.added_at,
-			source_type = 'rule'
-		WHERE device_group_members.source_type IS DISTINCT FROM 'manual'`
-
-	if _, err := r.pool.Exec(ctx, rawSQL, groupID, deviceID, time.Now()); err != nil {
-		return fmt.Errorf("auto-match add device to group: %w", err)
+// MoveDeviceAutoMatched 按显式源组原子移动。源组条件本身就是授权边界，
+// 因此源组中的 manual 归属也允许被该规则移动；其他组的 manual 行不会被触碰。
+func (r *PgDeviceGroupRepository) MoveDeviceAutoMatched(ctx context.Context, sourceGroupID, targetGroupID, deviceID uuid.UUID) (int64, error) {
+	var (
+		tag pgconn.CommandTag
+		err error
+	)
+	if sourceGroupID.String() == global.DefaultLevel2GroupID {
+		const insertSQL = `
+			INSERT INTO device_group_members (group_id, device_id, added_at, source_type)
+			SELECT $1, $2, $3, 'rule'
+			WHERE EXISTS (SELECT 1 FROM device_groups WHERE id = $4 AND level = 2)
+			  AND EXISTS (SELECT 1 FROM device_groups WHERE id = $1 AND level = 2)
+			  AND NOT EXISTS (
+				SELECT 1 FROM device_group_members WHERE device_id = $2
+			)
+			ON CONFLICT (device_id) DO NOTHING`
+		tag, err = r.pool.Exec(ctx, insertSQL, targetGroupID, deviceID, time.Now(), sourceGroupID)
+	} else {
+		const updateSQL = `
+			UPDATE device_group_members AS membership
+			SET group_id = $1, added_at = $2, source_type = 'rule'
+			FROM device_groups AS source_group, device_groups AS target_group
+			WHERE membership.device_id = $3
+			  AND membership.group_id = $4
+			  AND source_group.id = $4 AND source_group.level = 2
+			  AND target_group.id = $1 AND target_group.level = 2`
+		tag, err = r.pool.Exec(ctx, updateSQL, targetGroupID, time.Now(), deviceID, sourceGroupID)
 	}
-	return nil
+	if err != nil {
+		return 0, fmt.Errorf("move auto-matched device from source group: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 func (r *PgDeviceGroupRepository) RemoveDevice(ctx context.Context, groupID, deviceID uuid.UUID) error {
@@ -792,7 +810,8 @@ func scanGroup(row pgx.Row) (*DeviceGroup, error) {
 		lacList          []int
 		tacList          []int
 		serialNumberList []string // migration 000124
-		nameI18n         []byte   // migration 000003 i18n columns
+		sourceGroupID    sql.NullString
+		nameI18n         []byte // migration 000003 i18n columns
 		descI18n         []byte
 		remarkI18n       []byte
 	)
@@ -802,7 +821,7 @@ func scanGroup(row pgx.Row) (*DeviceGroup, error) {
 		&g.SortOrder, &g.Level, &g.Status, &g.IsDefault,
 		&remark, &createdBy, &updatedBy,
 		&g.CreatedAt, &g.UpdatedAt,
-		&matchingMode, &nameRuleList, &lacList, &tacList, &serialNumberList,
+		&matchingMode, &nameRuleList, &lacList, &tacList, &serialNumberList, &sourceGroupID,
 		&nameI18n, &descI18n, &remarkI18n,
 	)
 	if err != nil {
@@ -843,6 +862,10 @@ func scanGroup(row pgx.Row) (*DeviceGroup, error) {
 	if matchingMode.Valid {
 		g.MatchingMode = MatchingMode(matchingMode.String)
 	}
+	if sourceGroupID.Valid {
+		id, _ := uuid.Parse(sourceGroupID.String)
+		g.SourceGroupID = &id
+	}
 	if len(nameRuleList) > 0 {
 		if err := json.Unmarshal(nameRuleList, &g.NameRuleList); err != nil {
 			return nil, fmt.Errorf("unmarshal name_rule_list: %w", err)
@@ -871,7 +894,8 @@ func scanGroups(rows pgx.Rows) ([]DeviceGroup, error) {
 			lacList          []int
 			tacList          []int
 			serialNumberList []string // migration 000124
-			nameI18n         []byte   // migration 000003 i18n columns
+			sourceGroupID    sql.NullString
+			nameI18n         []byte // migration 000003 i18n columns
 			descI18n         []byte
 			remarkI18n       []byte
 		)
@@ -881,7 +905,7 @@ func scanGroups(rows pgx.Rows) ([]DeviceGroup, error) {
 			&g.SortOrder, &g.Level, &g.Status, &g.IsDefault,
 			&remark, &createdBy, &updatedBy,
 			&g.CreatedAt, &g.UpdatedAt,
-			&matchingMode, &nameRuleList, &lacList, &tacList, &serialNumberList,
+			&matchingMode, &nameRuleList, &lacList, &tacList, &serialNumberList, &sourceGroupID,
 			&nameI18n, &descI18n, &remarkI18n,
 		)
 		if err != nil {
@@ -919,6 +943,10 @@ func scanGroups(rows pgx.Rows) ([]DeviceGroup, error) {
 		if matchingMode.Valid {
 			g.MatchingMode = MatchingMode(matchingMode.String)
 		}
+		if sourceGroupID.Valid {
+			id, _ := uuid.Parse(sourceGroupID.String)
+			g.SourceGroupID = &id
+		}
 		if len(nameRuleList) > 0 {
 			if err := json.Unmarshal(nameRuleList, &g.NameRuleList); err != nil {
 				return nil, fmt.Errorf("unmarshal name_rule_list: %w", err)
@@ -949,7 +977,8 @@ func scanGroupsWithCount(rows pgx.Rows) ([]DeviceGroup, error) {
 			lacList          []int
 			tacList          []int
 			serialNumberList []string // migration 000124
-			nameI18n         []byte   // migration 000003 i18n columns
+			sourceGroupID    sql.NullString
+			nameI18n         []byte // migration 000003 i18n columns
 			descI18n         []byte
 			remarkI18n       []byte
 		)
@@ -959,7 +988,7 @@ func scanGroupsWithCount(rows pgx.Rows) ([]DeviceGroup, error) {
 			&g.SortOrder, &g.Level, &g.Status, &g.IsDefault,
 			&remark, &createdBy, &updatedBy,
 			&g.CreatedAt, &g.UpdatedAt,
-			&matchingMode, &nameRuleList, &lacList, &tacList, &serialNumberList,
+			&matchingMode, &nameRuleList, &lacList, &tacList, &serialNumberList, &sourceGroupID,
 			&g.DeviceCount,
 			&nameI18n, &descI18n, &remarkI18n,
 		)
@@ -997,6 +1026,10 @@ func scanGroupsWithCount(rows pgx.Rows) ([]DeviceGroup, error) {
 		}
 		if matchingMode.Valid {
 			g.MatchingMode = MatchingMode(matchingMode.String)
+		}
+		if sourceGroupID.Valid {
+			id, _ := uuid.Parse(sourceGroupID.String)
+			g.SourceGroupID = &id
 		}
 		if len(nameRuleList) > 0 {
 			if err := json.Unmarshal(nameRuleList, &g.NameRuleList); err != nil {
