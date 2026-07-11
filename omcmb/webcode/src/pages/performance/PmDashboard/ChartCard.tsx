@@ -151,6 +151,8 @@ function ChartCard({ chart }: { chart: MetricChart }) {
         trigger: 'axis',
         confine: true,
         renderMode: 'html',
+        // 允许鼠标进入 tooltip 后滚动；否则 ECharts 默认会忽略其鼠标事件，滚动条不可操作。
+        enterable: true,
         // 多设备时允许 tooltip 自身滚动，避免超出图表后底部设备被裁掉（#24）。
         extraCssText: 'max-height:220px;overflow-y:auto;overflow-x:hidden;',
         position: (
