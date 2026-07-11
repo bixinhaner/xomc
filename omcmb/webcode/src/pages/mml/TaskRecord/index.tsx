@@ -23,6 +23,11 @@ import {
   useMMLTaskResults,
 } from '@core/hooks/api/useMML';
 import { getMmlTaskProgress } from '@core/utils/mmlTaskProgress';
+import {
+  parseMmlDeviceTaskResult,
+  type ParsedMmlResult,
+  type ParsedParamValue,
+} from '@core/utils/mmlResultParser';
 
 // -------------------------------------------------------------------------
 // Display mappings — mml_tasks columns
@@ -64,7 +69,7 @@ function formatTime(iso?: string | null): string {
   return d.isValid() ? d.format('YYYY-MM-DD HH:mm:ss') : '-';
 }
 
-function resultDetailText(row: DeviceTaskResultItem | null): string {
+function rawMessageText(row: DeviceTaskResultItem | null): string {
   if (!row) return '';
   if (row.result?.rawOutput) return row.result.rawOutput;
   if (row.result?.parsedData) return JSON.stringify(row.result.parsedData, null, 2);
@@ -72,7 +77,36 @@ function resultDetailText(row: DeviceTaskResultItem | null): string {
 }
 
 function resultCommandText(row: DeviceTaskResultItem): string {
-  return row.planRawLine || row.commandCode || row.mmlScript || '-';
+  return row.mmlScript || row.planRawLine || row.commandCode || '-';
+}
+
+function parsedResult(row: DeviceTaskResultItem | null): ParsedMmlResult | null {
+  if (!row?.result?.parsedData) return null;
+  return parseMmlDeviceTaskResult(row.result.parsedData);
+}
+
+function hasParsedDetail(row: DeviceTaskResultItem): boolean {
+  const parsed = parsedResult(row);
+  if (!parsed) return false;
+  if (parsed.kind === 'gpv') return (parsed.params?.length ?? 0) > 0;
+  return parsed.kind !== 'unknown';
+}
+
+function parsedResultSummary(parsed: ParsedMmlResult, t: (key: string, values?: Record<string, string | number>) => string): string {
+  switch (parsed.kind) {
+    case 'spv':
+      return parsed.status === 1
+        ? t('mml.taskResult.parsed.spv.reboot')
+        : t('mml.taskResult.parsed.spv.immediate');
+    case 'add':
+      return t('mml.taskResult.parsed.add.success', { n: parsed.instanceNumber ?? '-' });
+    case 'delete':
+      return t('mml.taskResult.parsed.delete.success');
+    case 'reboot':
+      return t('mml.taskResult.parsed.reboot.success');
+    default:
+      return t('mml.taskResult.parsed.notParsable');
+  }
 }
 
 export default function TaskRecord() {
@@ -180,6 +214,7 @@ export default function TaskRecord() {
   // 任务记录为只读：记录由"执行 MML 命令 / 脚本任务执行"被动产生，不提供新建/编辑。
   const [viewing, setViewing] = useState<MMLTask | null>(null);
   const [detailRow, setDetailRow] = useState<DeviceTaskResultItem | null>(null);
+  const [rawRow, setRawRow] = useState<DeviceTaskResultItem | null>(null);
   const [resultPage, setResultPage] = useState(1);
   const { data: resultsData, isLoading: resultsLoading } = useMMLTaskResults(viewing?.id ?? null, resultPage, TASK_RESULT_PAGE_SIZE);
 
@@ -187,6 +222,37 @@ export default function TaskRecord() {
     () => (resultsData?.items ?? []),
     [resultsData]
   );
+
+  const parsedParamColumns: ColumnsType<ParsedParamValue> = useMemo(() => [
+    {
+      key: 'name',
+      title: t('mml.taskResult.parsed.gpv.path'),
+      dataIndex: 'name',
+      render: (value: string) => (
+        <Typography.Text code style={{ fontSize: 12, wordBreak: 'break-all' }}>
+          {value}
+        </Typography.Text>
+      ),
+    },
+    {
+      key: 'value',
+      title: t('mml.taskResult.parsed.gpv.value'),
+      dataIndex: 'value',
+      width: 220,
+      render: (value: string) => (
+        <Typography.Text style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>
+          {value || '-'}
+        </Typography.Text>
+      ),
+    },
+    {
+      key: 'type',
+      title: t('mml.taskResult.parsed.gpv.type'),
+      dataIndex: 'type',
+      width: 120,
+      render: (value?: string) => value || '-',
+    },
+  ], [t]);
 
   const resultColumns: ColumnsType<DeviceTaskResultItem> = useMemo(() => [
     {
@@ -278,10 +344,25 @@ export default function TaskRecord() {
         <Button
           type="link"
           size="small"
-          disabled={!resultDetailText(row)}
+          disabled={!hasParsedDetail(row)}
           onClick={() => setDetailRow(row)}
         >
-          {t('mml.viewRawResponse')}
+          {t('common.view')}
+        </Button>
+      ),
+    },
+    {
+      key: 'rawMessage',
+      title: t('mml.messageDisplay'),
+      width: 110,
+      render: (_: unknown, row) => (
+        <Button
+          type="link"
+          size="small"
+          disabled={!rawMessageText(row)}
+          onClick={() => setRawRow(row)}
+        >
+          {t('common.view')}
         </Button>
       ),
     },
@@ -433,11 +514,13 @@ export default function TaskRecord() {
         onCancel={() => {
           setViewing(null);
           setDetailRow(null);
+          setRawRow(null);
           setResultPage(1);
         }}
         footer={<Button onClick={() => {
           setViewing(null);
           setDetailRow(null);
+          setRawRow(null);
           setResultPage(1);
         }}>{t('common.close')}</Button>}
         width={1180}
@@ -463,7 +546,7 @@ export default function TaskRecord() {
                 loading={resultsLoading}
                 pagination={false}
                 rowKey={(row, index) => row.deviceTaskId || `${row.deviceSn}-${row.commandIndex ?? index}`}
-                scroll={{ x: 1400, y: 360 }}
+                scroll={{ x: 1520, y: 360 }}
               />
             )}
             {(resultsData?.total ?? 0) > TASK_RESULT_PAGE_SIZE && (
@@ -483,7 +566,7 @@ export default function TaskRecord() {
       </Modal>
 
       <Modal
-        title={detailRow ? t('mml.resultRawResponseTitle', { device: detailRow.deviceSn || '-' }) : t('mml.rawOutput')}
+        title={detailRow ? t('mml.resultDetailTitle', { device: detailRow.deviceSn || '-' }) : t('mml.detail')}
         open={Boolean(detailRow)}
         onCancel={() => setDetailRow(null)}
         footer={<Button onClick={() => setDetailRow(null)}>{t('common.close')}</Button>}
@@ -500,6 +583,59 @@ export default function TaskRecord() {
                 {detailRow.result?.success ? t('status.success') : t('status.failed')}
               </Tag>
             </Space>
+            {(() => {
+              const parsed = parsedResult(detailRow);
+              if (!parsed) {
+                return <Empty description={t('mml.taskResult.parsed.notParsable')} />;
+              }
+              if (parsed.kind === 'gpv') {
+                return (
+                  <Table<ParsedParamValue>
+                    size="small"
+                    rowKey={(row, index) => `${row.name}-${index}`}
+                    columns={parsedParamColumns}
+                    dataSource={parsed.params ?? []}
+                    pagination={false}
+                    scroll={{ y: 360 }}
+                    locale={{ emptyText: t('mml.taskResult.parsed.gpv.empty') }}
+                  />
+                );
+              }
+              return (
+                <Typography.Paragraph
+                  style={{
+                    background: 'rgba(0,0,0,0.04)',
+                    padding: 12,
+                    borderRadius: 4,
+                    marginBottom: 0,
+                  }}
+                >
+                  {parsedResultSummary(parsed, t)}
+                </Typography.Paragraph>
+              );
+            })()}
+          </Space>
+        )}
+      </Modal>
+
+      <Modal
+        title={rawRow ? t('mml.rawMessageTitle', { device: rawRow.deviceSn || '-' }) : t('mml.messageDisplay')}
+        open={Boolean(rawRow)}
+        onCancel={() => setRawRow(null)}
+        footer={<Button onClick={() => setRawRow(null)}>{t('common.close')}</Button>}
+        width={860}
+        destroyOnHidden
+      >
+        {rawRow && (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Space wrap size={[8, 8]}>
+              <Tag>{t('mml.resultDeviceCode')}: {rawRow.deviceSn || '-'}</Tag>
+              {rawRow.deviceName ? <Tag>{t('mml.deviceName')}: {rawRow.deviceName}</Tag> : null}
+              <Tag>{t('mml.resultCommand')}: {resultCommandText(rawRow)}</Tag>
+              <Tag color={rawRow.result?.success ? 'success' : 'error'}>
+                {rawRow.result?.success ? t('status.success') : t('status.failed')}
+              </Tag>
+            </Space>
             <Typography.Paragraph
               style={{
                 maxHeight: 420,
@@ -513,7 +649,7 @@ export default function TaskRecord() {
                 marginBottom: 0,
               }}
             >
-              {resultDetailText(detailRow) || '-'}
+              {rawMessageText(rawRow) || '-'}
             </Typography.Paragraph>
           </Space>
         )}

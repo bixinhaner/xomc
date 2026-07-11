@@ -716,6 +716,73 @@ func commandString(entry map[string]interface{}, key string) string {
 	return strings.TrimSpace(v)
 }
 
+func commandParameters(entry map[string]interface{}) map[string]interface{} {
+	raw, ok := entry["parameters"].(map[string]interface{})
+	if ok {
+		return raw
+	}
+	return nil
+}
+
+func formatMMLParameterValue(value interface{}) string {
+	s := strings.TrimSpace(fmt.Sprint(value))
+	if s == "" {
+		return "{}"
+	}
+	if strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}") {
+		return s
+	}
+	return "{" + s + "}"
+}
+
+func formatMMLParameterList(params map[string]interface{}) string {
+	if len(params) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(params))
+	for key := range params {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%s", key, formatMMLParameterValue(params[key])))
+	}
+	return strings.Join(parts, ",")
+}
+
+func stripDeviceSuffixFromMML(rawLine, deviceSN string) string {
+	line := strings.TrimSpace(rawLine)
+	if line == "" {
+		return ""
+	}
+	if deviceSN != "" {
+		suffix := ";" + strings.TrimSpace(deviceSN)
+		if strings.HasSuffix(line, suffix) {
+			line = strings.TrimSpace(strings.TrimSuffix(line, suffix))
+		}
+	}
+	line = strings.TrimSuffix(line, ";")
+	return strings.TrimSpace(line)
+}
+
+func formatMMLScriptForResult(command map[string]interface{}, rawLine, deviceSN string) string {
+	if script := stripDeviceSuffixFromMML(rawLine, deviceSN); script != "" {
+		return script
+	}
+	code := commandString(command, "command_code")
+	if code == "" {
+		return ""
+	}
+	if params := formatMMLParameterList(commandParameters(command)); params != "" {
+		return code + ":" + params
+	}
+	return code
+}
+
 func uniqueDeviceSNsFromPlanItems(items []MMLPlanItem) []string {
 	seen := make(map[string]struct{}, len(items))
 	out := make([]string, 0, len(items))
@@ -2641,7 +2708,7 @@ func buildTaskResultsStats(task *MMLTask, taskErr error) *TaskResultsStats {
 //   - device_sn / status / error_message / started_at / finished_at 直通
 //   - success = (status=completed && error_code=0)
 //   - raw_output = result->>'raw_response'
-//   - mml_script = result->>'method' （SOAP method name；便于前端展示）
+//   - mml_script = 用户下发的 MML 指令文本（来自 plan raw_line 或 commands[command_index]）
 //   - execution_time = completed_at - sent_at（毫秒）
 //
 // 解析 result JSONB 失败时静默跳过该字段（不影响主流程），device_sn / status 等
@@ -2657,9 +2724,13 @@ func deviceTaskRowToResultMap(row DeviceTaskResultRowView, task *MMLTask) map[st
 		"device_index":   row.DeviceIndex,
 		"success":        row.Status == "completed" && row.ErrorCode == 0,
 	}
+	var command map[string]interface{}
+	var rawLine string
 	if task != nil && task.ExecuteMode == TaskExecuteModeDeviceBound &&
 		row.CommandIndex >= 0 && row.CommandIndex < len(task.PlanItems) {
 		plan := task.PlanItems[row.CommandIndex]
+		command = plan.Command
+		rawLine = plan.RawLine
 		m["plan_line_no"] = plan.LineNo
 		m["plan_device_sn"] = plan.DeviceSN
 		m["plan_order"] = plan.Order
@@ -2672,6 +2743,30 @@ func deviceTaskRowToResultMap(row DeviceTaskResultRowView, task *MMLTask) map[st
 		if op := commandString(plan.Command, "operation_type"); op != "" {
 			m["operation_type"] = op
 		}
+	} else if task != nil && row.CommandIndex >= 0 && row.CommandIndex < len(task.Commands) {
+		command = task.Commands[row.CommandIndex]
+		if commandCode := commandString(command, "command_code"); commandCode != "" {
+			m["command_code"] = commandCode
+		}
+		if op := commandString(command, "operation_type"); op != "" {
+			m["operation_type"] = op
+		}
+		if planRawLine := commandString(command, "plan_raw_line"); planRawLine != "" {
+			rawLine = planRawLine
+			m["plan_raw_line"] = planRawLine
+		}
+		if lineNo, ok := command["plan_line_no"].(float64); ok && lineNo > 0 {
+			m["plan_line_no"] = int(lineNo)
+		}
+		if planDeviceSN := commandString(command, "plan_device_sn"); planDeviceSN != "" {
+			m["plan_device_sn"] = planDeviceSN
+		}
+		if order, ok := command["plan_order"].(float64); ok && order > 0 {
+			m["plan_order"] = int(order)
+		}
+	}
+	if script := formatMMLScriptForResult(command, rawLine, row.DeviceSN); script != "" {
+		m["mml_script"] = script
 	}
 	if row.SentAt != nil {
 		m["started_at"] = row.SentAt.Format(time.RFC3339)
@@ -2688,9 +2783,6 @@ func deviceTaskRowToResultMap(row DeviceTaskResultRowView, task *MMLTask) map[st
 		if err := json.Unmarshal(row.Result, &resObj); err == nil {
 			if rr, ok := resObj["raw_response"].(string); ok && rr != "" {
 				m["raw_output"] = rr
-			}
-			if method, ok := resObj["method"].(string); ok && method != "" {
-				m["mml_script"] = method
 			}
 			// parsed_data：把整个 result JSON 透传给前端做兜底渲染（不阻塞主字段）
 			m["parsed_data"] = resObj

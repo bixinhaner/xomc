@@ -45,6 +45,46 @@ func TestDeviceTaskRowToResultMap_DeviceBoundPlanTrace(t *testing.T) {
 	if got["command_code"] != "MOD CELL" {
 		t.Fatalf("command_code = %v, want MOD CELL", got["command_code"])
 	}
+	if got["mml_script"] != "MOD CELL:CELL_INDEX={1}" {
+		t.Fatalf("mml_script = %v, want MOD CELL:CELL_INDEX={1}", got["mml_script"])
+	}
+}
+
+func TestDeviceTaskRowToResultMap_CommonCommandScriptText(t *testing.T) {
+	task := &MMLTask{
+		ExecuteMode: TaskExecuteModeCommon,
+		Commands: []map[string]interface{}{
+			{
+				"command_code":   "MOD EUTRANNFREQ",
+				"operation_type": "MOD",
+				"parameters": map[string]interface{}{
+					"DL_EARFCN": 1231312,
+				},
+			},
+		},
+	}
+	rawResult, err := json.Marshal(map[string]interface{}{
+		"method":       "GetParameterValuesResponse",
+		"raw_response": "<xml/>",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := DeviceTaskResultRowView{
+		DeviceTaskID: "device-task-1",
+		DeviceSN:     "SN001",
+		Status:       "completed",
+		CommandIndex: 0,
+		Result:       rawResult,
+	}
+
+	got := deviceTaskRowToResultMap(row, task)
+	if got["mml_script"] != "MOD EUTRANNFREQ:DL_EARFCN={1231312}" {
+		t.Fatalf("mml_script = %v, want MOD EUTRANNFREQ:DL_EARFCN={1231312}", got["mml_script"])
+	}
+	if got["mml_script"] == "GetParameterValuesResponse" {
+		t.Fatalf("mml_script should not use SOAP method name")
+	}
 }
 
 func TestBuildDeviceBoundPlanCSV(t *testing.T) {

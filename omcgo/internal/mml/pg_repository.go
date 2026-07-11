@@ -1370,6 +1370,8 @@ func scanTaskSummaryRow(rows pgx.Rows) (*MMLTask, error) {
 func (r *PgTaskRepository) GetResultStatsByID(ctx context.Context, id uuid.UUID) (*MMLTask, error) {
 	query, args, err := storage.Psql.Select(
 		"commands",
+		"execute_mode",
+		"plan_items",
 		"product_resolved",
 		"matched_product_id",
 		"matched_product_class",
@@ -1381,9 +1383,12 @@ func (r *PgTaskRepository) GetResultStatsByID(ctx context.Context, id uuid.UUID)
 
 	var t MMLTask
 	var commandsJSON []byte
+	var planItemsJSON []byte
 	var matchedProductClass, pathTranslationSource *string
 	err = r.pool.QueryRow(ctx, query, args...).Scan(
 		&commandsJSON,
+		&t.ExecuteMode,
+		&planItemsJSON,
 		&t.ProductResolved,
 		&t.MatchedProductID,
 		&matchedProductClass,
@@ -1402,6 +1407,17 @@ func (r *PgTaskRepository) GetResultStatsByID(ctx context.Context, id uuid.UUID)
 	}
 	if t.Commands == nil {
 		t.Commands = []map[string]interface{}{}
+	}
+	if planItemsJSON != nil {
+		if err := json.Unmarshal(planItemsJSON, &t.PlanItems); err != nil {
+			return nil, fmt.Errorf("unmarshal plan_items: %w", err)
+		}
+	}
+	if t.PlanItems == nil {
+		t.PlanItems = []MMLPlanItem{}
+	}
+	if t.ExecuteMode == "" {
+		t.ExecuteMode = TaskExecuteModeCommon
 	}
 	if matchedProductClass != nil {
 		t.MatchedProductClass = *matchedProductClass

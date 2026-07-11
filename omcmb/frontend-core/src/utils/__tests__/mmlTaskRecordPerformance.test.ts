@@ -39,6 +39,8 @@ describe('MML task record result rendering contract', () => {
     expect(source).toContain('Table<DeviceTaskResultItem>');
     expect(source).toContain('resultColumns');
     expect(source).toContain('mml.resultCommand');
+    expect(source).toContain('parseMmlDeviceTaskResult');
+    expect(source).toContain('mml.messageDisplay');
     expect(source).not.toContain('List<DeviceTaskResultItem>');
     expect(source).not.toContain('previewRawOutput');
   });
