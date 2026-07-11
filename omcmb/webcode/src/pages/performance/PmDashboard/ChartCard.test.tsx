@@ -21,7 +21,7 @@ import type { MetricChart } from './taskDashboardUtils';
 // 捕获 ReactECharts 每次收到的 option（render 次数 + 内容），断言重绘行为。
 const echartsRenderSpy = vi.fn();
 vi.mock('echarts-for-react', () => ({
-  default: ({ option }: { option: { series: { data: number[] }[] } }) => {
+  default: ({ option }: { option: { series: { data: number[] }[]; tooltip?: { extraCssText?: string } } }) => {
     echartsRenderSpy(option);
     const first = option.series[0]?.data ?? [];
     return <div data-testid="echart" data-first-series={JSON.stringify(first)} />;
@@ -82,6 +82,19 @@ function NewRefSameContentHarness({ values }: { values: number[] }) {
 
 describe('ChartCard 渲染隔离 (#444)', () => {
   beforeEach(() => echartsRenderSpy.mockClear());
+
+  it('多设备 tooltip 设置最大高度和纵向滚动，所有设备项均可查看（#24）', () => {
+    const chart = makeChart([1, 2]);
+    chart.series = Array.from({ length: 20 }, (_, i) => ({
+      key: `dev-${i}`,
+      name: `dev-${i}`,
+      values: [i, i + 1],
+    }));
+    render(wrapIntl(<ChartCard chart={chart} />));
+    const option = echartsRenderSpy.mock.calls[0][0] as { tooltip: { extraCssText: string } };
+    expect(option.tooltip.extraCssText).toContain('max-height:220px');
+    expect(option.tooltip.extraCssText).toContain('overflow-y:auto');
+  });
 
   it('成功路径：父重渲染但 chart 引用不变时不重绘 ECharts（memo 隔离）', async () => {
     const userEventMod = await import('@testing-library/user-event');

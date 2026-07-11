@@ -64,9 +64,10 @@ export function LoadingSpinner({
 
   return (
     <div className={className} style={containerStyle}>
-      <Spin description={tip || undefined} {...spinProps}>
-        <div />
-      </Spin>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+        <Spin {...spinProps} />
+        {tip ? <span style={{ whiteSpace: 'nowrap' }}>{tip}</span> : null}
+      </div>
     </div>
   );
 }

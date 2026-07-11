@@ -150,6 +150,9 @@ function ChartCard({ chart }: { chart: MetricChart }) {
       tooltip: {
         trigger: 'axis',
         confine: true,
+        renderMode: 'html',
+        // 多设备时允许 tooltip 自身滚动，避免超出图表后底部设备被裁掉（#24）。
+        extraCssText: 'max-height:220px;overflow-y:auto;overflow-x:hidden;',
         position: (
           point: [number, number],
           _params: unknown,

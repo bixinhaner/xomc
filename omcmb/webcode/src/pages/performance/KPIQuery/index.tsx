@@ -559,8 +559,10 @@ export default function KPIQuery() {
       >
         <List.Item.Meta
           title={
-            <Space>
-              <Text>{tpl.name}</Text>
+            <Space style={{ width: '100%', minWidth: 0 }}>
+              <Text ellipsis={{ tooltip: tpl.name }} style={{ flex: 1, minWidth: 0 }}>
+                {tpl.name}
+              </Text>
               {tpl.visibility === 'public' ? (
                 <Tag color="blue">{t('perf.kpiQuery.public')}</Tag>
               ) : (
@@ -702,7 +704,7 @@ export default function KPIQuery() {
       ) : (
         <div
           style={{
-            width: 280,
+            width: 360,
             flexShrink: 0,
             display: 'flex',
             flexDirection: 'column',
