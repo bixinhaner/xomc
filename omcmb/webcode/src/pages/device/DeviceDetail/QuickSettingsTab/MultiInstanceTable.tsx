@@ -200,6 +200,10 @@ const INTER_FREQ_GROUP_ID = 'enb-neighbor-freq';
 const INTER_FREQ_EARFCN_LEAF = 'EUTRACarrierARFCN';
 const NEIGHBOR_CELL_GROUP_ID = 'enb-neighbor-cell';
 const NEIGHBOR_CELL_DUPLICATE_LEAVES = ['EUTRACarrierARFCN', 'PhyCellID', 'PLMNID'] as const;
+const GNB_NR_NEIGHBOR_CELL_GROUP_ID = 'gnb-nr-neighbor-cell';
+const GNB_NR_NEIGHBOR_SSB_LEAF = 'ssbFrequency';
+const GNB_NR_INTER_FREQ_SSB_LEAF = 'SSBFrequency';
+const GNB_NR_INTER_FREQ_ENABLE_LEAF = 'Enable';
 
 function multiTableScroll(hasRows: boolean): { x?: 'max-content'; y: number } {
   return hasRows ? { x: 'max-content', y: 240 } : { y: 240 };
@@ -207,6 +211,13 @@ function multiTableScroll(hasRows: boolean): { x?: 'max-content'; y: number } {
 
 function multiColumnWidth(hasRows: boolean, width: number | undefined): number | undefined {
   return hasRows ? width : undefined;
+}
+
+function deriveGnbNrInterFreqObjectPath(nrNeighborObjectPath: string): string {
+  return nrNeighborObjectPath.replace(
+    '.NR.RAN.NeighborList.NRCell.',
+    '.NR.RAN.Mobility.ConnMode.NR.InterFreq.Carrier.',
+  );
 }
 
 /**
@@ -855,18 +866,6 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
   // BSC 邻区兼容：部分 GSM 设备不按 TR-181 子对象上报，而是把整张邻区列表打包到 BTS 父对象单标量。
   // 这种 group 不存在 currentInstances，常规多实例渲染会出现「暂无数据」。改走打包标量解析路径。
   const packedSpec = PACKED_NEIGHBOR_TABLE_BY_GROUP_ID[group.id];
-  if (packedSpec) {
-    return (
-      <PackedScalarNeighborTable
-        deviceId={deviceId}
-        active={active}
-        group={group}
-        instanceContext={instanceContext}
-        locale={locale}
-        spec={packedSpec}
-      />
-    );
-  }
   // group.objectPath 形如 "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}."
   // - 外层 FAPService.{i} → 用 fapInstance 替换
   // - 内层 Carrier.{i}. 末段是实例号占位符 — 剥离后得到父对象路径,用于查 schema.objects / AddObject / 拼接行 path 前缀
@@ -876,7 +875,16 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     });
     return resolved.replace(/\{i\}\.$/, '');
   }, [group, instanceContext]);
-  const { data: schemaResp, isLoading, refetch } = useParameterSchema(deviceId, objectPath, active);
+  const { data: schemaResp, isLoading, refetch } = useParameterSchema(deviceId, objectPath, active && !packedSpec);
+  const nrInterFreqObjectPath = useMemo(
+    () => group.id === GNB_NR_NEIGHBOR_CELL_GROUP_ID ? deriveGnbNrInterFreqObjectPath(objectPath) : '',
+    [group.id, objectPath],
+  );
+  const { data: nrInterFreqSchemaResp, isLoading: nrInterFreqLoading } = useParameterSchema(
+    deviceId,
+    nrInterFreqObjectPath,
+    active && Boolean(nrInterFreqObjectPath),
+  );
   const updateMutation = useUpdateParameters();
   const addMutation = useAddObject();
   const deleteMutation = useDeleteObject();
@@ -931,6 +939,27 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     schemaResp?.parameters.forEach((p) => map.set(p.path, p));
     return map;
   }, [schemaResp]);
+
+  const nrInterFreqSsbState = useMemo(() => {
+    const known = new Set<string>();
+    const enabled = new Set<string>();
+    const instances = nrInterFreqSchemaResp?.objects.find((o) => o.path === nrInterFreqObjectPath)?.currentInstances ?? [];
+    const params = new Map<string, ParameterSchemaItem>();
+    nrInterFreqSchemaResp?.parameters.forEach((item) => params.set(item.path, item));
+
+    instances.forEach((instId) => {
+      const prefix = `${nrInterFreqObjectPath}${instId}.`;
+      const ssb = String(params.get(`${prefix}${GNB_NR_INTER_FREQ_SSB_LEAF}`)?.currentValue ?? '').trim();
+      if (!ssb) return;
+      known.add(ssb);
+      const enableItem = params.get(`${prefix}${GNB_NR_INTER_FREQ_ENABLE_LEAF}`);
+      if (!enableItem || isEnabledValue(enableItem.currentValue)) {
+        enabled.add(ssb);
+      }
+    });
+
+    return { known, enabled };
+  }, [nrInterFreqObjectPath, nrInterFreqSchemaResp]);
 
   const hiddenInstanceNumbers = useMemo(() => {
     const hidden = new Set(optimisticallyRemoved);
@@ -1494,6 +1523,19 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       }
     }
 
+    if (group.id === GNB_NR_NEIGHBOR_CELL_GROUP_ID) {
+      const ssbFrequency = String(modal.values[GNB_NR_NEIGHBOR_SSB_LEAF] ?? '').trim();
+      if (ssbFrequency) {
+        if (nrInterFreqLoading || !nrInterFreqSchemaResp) {
+          errors[GNB_NR_NEIGHBOR_SSB_LEAF] = errors[GNB_NR_NEIGHBOR_SSB_LEAF] ?? t('device.multi.nrInterFreqLoading');
+        } else if (!nrInterFreqSsbState.known.has(ssbFrequency)) {
+          errors[GNB_NR_NEIGHBOR_SSB_LEAF] = errors[GNB_NR_NEIGHBOR_SSB_LEAF] ?? t('device.multi.nrInterFreqMissing', { value: ssbFrequency });
+        } else if (!nrInterFreqSsbState.enabled.has(ssbFrequency)) {
+          errors[GNB_NR_NEIGHBOR_SSB_LEAF] = errors[GNB_NR_NEIGHBOR_SSB_LEAF] ?? t('device.multi.nrInterFreqDisabled', { value: ssbFrequency });
+        }
+      }
+    }
+
     for (const column of displayColumns) {
       const leaf = column.leaf || '';
       if (!leaf || !groupParamLeafSet.has(leaf) || column.readOnly) continue;
@@ -1537,7 +1579,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     }
 
     return { errors, updates, pendingEdits };
-  }, [cellValue, displayColumns, group.id, groupParamByLeaf, groupParamLeafSet, instanceIds, isIpsecGroup, leafSchemaByLeaf, objectPath, schemaByPath, t]);
+  }, [cellValue, displayColumns, group.id, groupParamByLeaf, groupParamLeafSet, instanceIds, isIpsecGroup, leafSchemaByLeaf, nrInterFreqLoading, nrInterFreqSchemaResp, nrInterFreqSsbState.enabled, nrInterFreqSsbState.known, objectPath, schemaByPath, t]);
 
   const rollbackAddedInstance = useCallback(async (instId: string | undefined, reason: string) => {
     if (!instId || !/^\d+$/.test(instId)) return;
@@ -1825,6 +1867,19 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       {t('common.add')}
     </Button>
   );
+
+  if (packedSpec) {
+    return (
+      <PackedScalarNeighborTable
+        deviceId={deviceId}
+        active={active}
+        group={group}
+        instanceContext={instanceContext}
+        locale={locale}
+        spec={packedSpec}
+      />
+    );
+  }
 
   return (
     <Card
