@@ -197,6 +197,42 @@ func TestPgRepo_Integration_Update(t *testing.T) {
 	assert.NotNil(t, got.SentAt)
 }
 
+func TestPgRepo_Integration_UpdateDoesNotDowngradeTerminalTask(t *testing.T) {
+	pool := newTestPool(t)
+	if pool == nil {
+		return
+	}
+	defer cleanupTestTasks(t, pool)
+	repo := NewPgTaskRepository(pool)
+	ctx := context.Background()
+
+	tk := freshTaskForPG("term", "term")
+	require.NoError(t, repo.Create(ctx, tk))
+
+	completedAt := time.Now()
+	completed := *tk
+	completed.Status = TaskStatusCompleted
+	completed.CompletedAt = &completedAt
+	completed.Result = json.RawMessage(`{"ok":true}`)
+	require.NoError(t, repo.Update(ctx, &completed))
+
+	sentAt := completedAt.Add(-10 * time.Millisecond)
+	staleSent := *tk
+	staleSent.Status = TaskStatusSent
+	staleSent.CWMPID = "late-cwmp"
+	staleSent.SentAt = &sentAt
+	staleSent.CompletedAt = nil
+	staleSent.Result = nil
+	require.NoError(t, repo.Update(ctx, &staleSent))
+
+	got, err := repo.GetByID(ctx, tk.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, TaskStatusCompleted, got.Status)
+	assert.NotNil(t, got.CompletedAt)
+	assert.JSONEq(t, `{"ok":true}`, string(got.Result))
+}
+
 func TestPgRepo_Integration_GetByCWMPID(t *testing.T) {
 	pool := newTestPool(t)
 	if pool == nil {
@@ -370,15 +406,17 @@ func TestPgRepo_Integration_PurgeOldTasks(t *testing.T) {
 	repo := NewPgTaskRepository(pool)
 	ctx := context.Background()
 
-	// PurgeOldTasks 仅 purge 终态任务且 created_at < before。
-	// 用未来时间作为 before（确保 purge 命中刚创建的 completed 任务）
+	// PurgeOldTasks 仅 purge 终态任务且 completed_at < before。
+	// Use an old cutoff so this integration test does not delete fresh
+	// device_tasks from local end-to-end runs that share the dev database.
 	tk := freshTaskForPG("purge", "purge")
 	tk.Status = TaskStatusCompleted
-	completedAt := time.Now()
+	tk.CreatedAt = time.Now().AddDate(-11, 0, 0)
+	completedAt := time.Now().AddDate(-11, 0, 0)
 	tk.CompletedAt = &completedAt
 	require.NoError(t, repo.Create(ctx, tk))
 
-	count, err := repo.PurgeOldTasks(ctx, time.Now().Add(time.Hour).Format(time.RFC3339))
+	count, err := repo.PurgeOldTasks(ctx, time.Now().AddDate(-10, 0, 0).Format(time.RFC3339))
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, count, int64(1))
 

@@ -363,12 +363,14 @@ func TestService_PG_PurgeOldTasks(t *testing.T) {
 
 	tk := freshTaskForPG("svcpurge", "svcpurge")
 	tk.Status = TaskStatusCompleted
-	completedAt := time.Now()
+	tk.CreatedAt = time.Now().AddDate(-11, 0, 0)
+	completedAt := time.Now().AddDate(-11, 0, 0)
 	tk.CompletedAt = &completedAt
 	require.NoError(t, repo.Create(ctx, tk))
 
-	// retentionDays=-1 → before = now+1day → 命中
-	count, err := svc.PurgeOldTasks(ctx, -1)
+	// Use an old retention boundary so this integration test does not purge
+	// fresh local E2E device_tasks from the shared dev database.
+	count, err := svc.PurgeOldTasks(ctx, 3650)
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, count, int64(1))
 }

@@ -78,7 +78,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *Task) error {
 
 // Update 更新任务记录
 func (r *PgTaskRepository) Update(ctx context.Context, task *Task) error {
-	query, args, err := storage.Psql.Update("device_tasks").
+	builder := storage.Psql.Update("device_tasks").
 		Set("method", task.Method).
 		Set("params", task.Params).
 		Set("priority", task.Priority).
@@ -95,8 +95,19 @@ func (r *PgTaskRepository) Update(ctx context.Context, task *Task) error {
 		Set("result", task.Result).
 		Set("error_code", task.ErrorCode).
 		Set("error_message", task.ErrorMessage).
-		Where(sq.Eq{"id": task.ID}).
-		ToSql()
+		Where(sq.Eq{"id": task.ID})
+	if task.Status == TaskStatusSent {
+		// A fast CPE can complete before the sent-state PG sync returns. The
+		// late sent write must not downgrade a terminal row already written by
+		// MarkTaskCompleted/Failed.
+		builder = builder.Where(sq.NotEq{"status": []TaskStatus{
+			TaskStatusCompleted,
+			TaskStatusFailed,
+			TaskStatusExpired,
+			TaskStatusCancelled,
+		}})
+	}
+	query, args, err := builder.ToSql()
 	if err != nil {
 		return fmt.Errorf("build update query: %w", err)
 	}

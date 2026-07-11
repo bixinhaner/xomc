@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	taskpkg "github.com/omcgo/omcgo/internal/task"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -75,6 +76,59 @@ func TestPgScriptRepository_CreateAssignsImportSessionID(t *testing.T) {
 	require.NotEqual(t, uuid.Nil, first.ImportSessionID)
 	require.NotEqual(t, uuid.Nil, second.ImportSessionID)
 	require.NotEqual(t, first.ImportSessionID, second.ImportSessionID)
+}
+
+func TestPgTaskRepository_IncrementStatsReconcilesFromDeviceTasks(t *testing.T) {
+	pool := newMMLTestPool(t)
+	ctx := context.Background()
+	mmlRepo := NewPgTaskRepository(pool)
+	deviceTaskRepo := taskpkg.NewPgTaskRepository(pool)
+
+	mmlTask := &MMLTask{
+		TaskName:     "stats reconcile " + uuid.NewString(),
+		DeviceSNs:    []string{"MML-STATS-1", "MML-STATS-2", "MML-STATS-3", "MML-STATS-4", "MML-STATS-5"},
+		Commands:     []map[string]interface{}{{"command_code": "LST DEVICE_INFO"}},
+		ExecuteMode:  TaskExecuteModeDeviceBound,
+		Status:       TaskRunning,
+		Creator:      "repo-test",
+		ExecuteType:  ExecuteImmediate,
+		TotalDevices: 5,
+		StartedAt:    func() *time.Time { now := time.Now(); return &now }(),
+	}
+	require.NoError(t, mmlRepo.Create(ctx, mmlTask))
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), "DELETE FROM device_tasks WHERE source='mml' AND source_id=$1", mmlTask.ID.String())
+		_ = mmlRepo.Delete(context.Background(), mmlTask.ID)
+	})
+
+	for idx, sn := range mmlTask.DeviceSNs {
+		dt := &taskpkg.Task{
+			ID:           uuid.NewString(),
+			DeviceSN:     sn,
+			Method:       "GetParameterValues",
+			Params:       []byte("{}"),
+			Priority:     10,
+			CommandKey:   "",
+			Status:       taskpkg.TaskStatusCompleted,
+			MaxRetries:   3,
+			CreatedAt:    time.Now(),
+			Source:       taskpkg.TaskSourceMML,
+			SourceID:     mmlTask.ID.String(),
+			CommandIndex: idx,
+			DeviceIndex:  idx,
+		}
+		dt.MarkSent("cwmp-" + sn)
+		dt.MarkCompleted([]byte(`{"ok":true}`))
+		require.NoError(t, deviceTaskRepo.Create(ctx, dt))
+	}
+
+	require.NoError(t, mmlRepo.IncrementStats(ctx, mmlTask.ID, 1, 0))
+	require.NoError(t, mmlRepo.IncrementStats(ctx, mmlTask.ID, 1, 0))
+
+	got, err := mmlRepo.GetByID(ctx, mmlTask.ID)
+	require.NoError(t, err)
+	require.Equal(t, 5, got.SuccessCount)
+	require.Equal(t, 0, got.FailedCount)
 }
 
 func TestPgScriptRepository_ImportedReplaceAndMetadataAreAtomic(t *testing.T) {
