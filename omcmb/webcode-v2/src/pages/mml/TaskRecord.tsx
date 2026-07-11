@@ -28,6 +28,7 @@ import {
   TableCard,
   formatTime,
 } from '@/components/layout/PageShell'
+import { useT } from '@/hooks/useT'
 import { cn } from '@/lib/utils'
 
 import { useMMLTaskResults, useMMLTasks } from '@core/hooks/api/useMML'
@@ -36,6 +37,7 @@ import type {
   DeviceTaskResultItem,
   MMLExecuteType,
   MMLTask,
+  MMLTaskOrigin,
   MMLTaskResultsStats,
   MMLTaskStatus,
 } from '@core/types/mml'
@@ -64,6 +66,11 @@ const EXEC_TYPE_LABEL: Record<MMLExecuteType, string> = {
   periodic: '周期任务',
 }
 
+const TASK_ORIGIN_LABEL: Record<MMLTaskOrigin, string> = {
+  console: 'mml.taskOrigin.console',
+  script: 'mml.taskOrigin.script',
+}
+
 const TASK_STATUS_ORDER: MMLTaskStatus[] = [
   'pending',
   'running',
@@ -80,9 +87,11 @@ function statusMeta(s: MMLTaskStatus) {
 const PAGE_SIZE = 20
 
 export default function TaskRecord() {
+  const tr = useT()
   const [page, setPage] = useState(1)
   const [taskNameInput, setTaskNameInput] = useState('')
   const [taskName, setTaskName] = useState('')
+  const [taskOrigin, setTaskOrigin] = useState<MMLTaskOrigin | ''>('')
   const [status, setStatus] = useState<MMLTaskStatus | ''>('')
   const [executeType, setExecuteType] = useState<MMLExecuteType | ''>('')
   const [result, setResult] = useState<'success' | 'partial' | 'failed' | ''>('')
@@ -93,11 +102,12 @@ export default function TaskRecord() {
       page,
       pageSize: PAGE_SIZE,
       ...(taskName.trim() ? { taskName: taskName.trim() } : {}),
+      ...(taskOrigin ? { taskOrigin } : {}),
       ...(status ? { status } : {}),
       ...(executeType ? { executeType } : {}),
       ...(result ? { result } : {}),
     }),
-    [page, taskName, status, executeType, result]
+    [page, taskName, taskOrigin, status, executeType, result]
   )
 
   const { data, isLoading, isError, error, isFetching, refetch } =
@@ -129,6 +139,7 @@ export default function TaskRecord() {
   const cols = [
     '任务名 / ID',
     '执行人',
+    tr('mml.taskOrigin'),
     '类型',
     '状态',
     '进度',
@@ -155,6 +166,23 @@ export default function TaskRecord() {
               }}
             />
           </div>
+
+          <Select
+            value={taskOrigin || 'all'}
+            onValueChange={(v) => {
+              setTaskOrigin(v === 'all' ? '' : (v as MMLTaskOrigin))
+              setPage(1)
+            }}
+          >
+            <SelectTrigger className="w-36">
+              <SelectValue placeholder={tr('mml.taskOrigin')} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{tr('mml.taskOrigin.all')}</SelectItem>
+              <SelectItem value="console">{tr('mml.taskOrigin.console')}</SelectItem>
+              <SelectItem value="script">{tr('mml.taskOrigin.script')}</SelectItem>
+            </SelectContent>
+          </Select>
 
           <Select
             value={executeType || 'all'}
@@ -282,6 +310,11 @@ export default function TaskRecord() {
                     </TableCell>
                     <TableCell className="text-xs">{t.creator || '—'}</TableCell>
                     <TableCell className="text-xs">
+                      <Badge variant="outline">
+                        {TASK_ORIGIN_LABEL[t.taskOrigin] ? tr(TASK_ORIGIN_LABEL[t.taskOrigin]) : t.taskOrigin}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-xs">
                       {EXEC_TYPE_LABEL[t.executeType] ?? t.executeType}
                     </TableCell>
                     <TableCell>
@@ -343,6 +376,7 @@ export default function TaskRecord() {
 // ---------------------------------------------------------------------------
 
 function TaskDetailDrawer({ task, onClose }: { task: MMLTask; onClose: () => void }) {
+  const t = useT()
   const { data, isLoading, isError } = useMMLTaskResults(task.id, 1, 200)
   const rows: DeviceTaskResultItem[] = useMemo(
     () => data?.items ?? (task.results as unknown as DeviceTaskResultItem[]) ?? [],
@@ -374,6 +408,10 @@ function TaskDetailDrawer({ task, onClose }: { task: MMLTask; onClose: () => voi
 
         <div className="grid grid-cols-2 gap-3 border-b px-4 py-3 sm:grid-cols-4">
           <Field label="状态" value={<Badge variant={meta.variant}>{meta.label}</Badge>} />
+          <Field
+            label={t('mml.taskOrigin')}
+            value={TASK_ORIGIN_LABEL[task.taskOrigin] ? t(TASK_ORIGIN_LABEL[task.taskOrigin]) : task.taskOrigin}
+          />
           <Field
             label="类型"
             value={EXEC_TYPE_LABEL[task.executeType] ?? task.executeType}

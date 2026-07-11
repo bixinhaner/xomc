@@ -1083,6 +1083,16 @@ func (r *PgTaskRepository) List(ctx context.Context, filter TaskFilter) (*model.
 		base = base.Where(sq.ILike{"task_name": like})
 		countBase = countBase.Where(sq.ILike{"task_name": like})
 	}
+	if filter.TaskOrigin != nil {
+		switch *filter.TaskOrigin {
+		case TaskOriginConsole:
+			base = base.Where("script_id IS NULL")
+			countBase = countBase.Where("script_id IS NULL")
+		case TaskOriginScript:
+			base = base.Where("script_id IS NOT NULL")
+			countBase = countBase.Where("script_id IS NOT NULL")
+		}
+	}
 
 	// Count total
 	countSQL, countArgs, err := countBase.ToSql()
@@ -1205,6 +1215,7 @@ func scanTask(row pgx.Row) (*MMLTask, error) {
 	if t.Results == nil {
 		t.Results = []map[string]interface{}{}
 	}
+	t.TaskOrigin = deriveTaskOrigin(t.ScriptID)
 	return &t, nil
 }
 
@@ -1275,7 +1286,15 @@ func scanTaskRow(rows pgx.Rows) (*MMLTask, error) {
 	if t.Results == nil {
 		t.Results = []map[string]interface{}{}
 	}
+	t.TaskOrigin = deriveTaskOrigin(t.ScriptID)
 	return &t, nil
+}
+
+func deriveTaskOrigin(scriptID *uuid.UUID) TaskOrigin {
+	if scriptID != nil {
+		return TaskOriginScript
+	}
+	return TaskOriginConsole
 }
 
 func (r *PgTaskRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status TaskStatus) error {

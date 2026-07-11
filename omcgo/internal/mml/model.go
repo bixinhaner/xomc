@@ -29,6 +29,14 @@ const (
 	ExecuteSuspended ExecuteType = "suspended"
 )
 
+// TaskOrigin describes where an MML task was launched from.
+type TaskOrigin string
+
+const (
+	TaskOriginConsole TaskOrigin = "console"
+	TaskOriginScript  TaskOrigin = "script"
+)
+
 // TaskExecuteMode defines whether an MML task uses common broadcast semantics
 // or the device-bound execution plan introduced by the script task redesign.
 type TaskExecuteMode string
@@ -183,6 +191,7 @@ type MMLTask struct {
 	TaskName                string                   `json:"task_name"`
 	RequestID               string                   `json:"request_id,omitempty"`
 	ScriptID                *uuid.UUID               `json:"script_id,omitempty"`
+	TaskOrigin              TaskOrigin               `json:"task_origin"`
 	ScriptContentSHA256     string                   `json:"script_content_sha256"`
 	ScriptValidationVersion string                   `json:"script_validation_version"`
 	DeviceSNs               []string                 `json:"device_sns"`
@@ -277,6 +286,7 @@ type TaskFilter struct {
 	ExecuteType *ExecuteType
 	Result      *TaskResult
 	TaskName    *string // case-insensitive substring match on task_name
+	TaskOrigin  *TaskOrigin
 	model.ListRequest
 }
 

@@ -1,6 +1,9 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { IntlProvider } from 'react-intl'
+import type { ReactElement } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import zhCN from '@core/i18n/zh-CN'
 
 const mocks = vi.hoisted(() => ({
   validate: vi.fn(),
@@ -24,6 +27,14 @@ vi.mock('@core/services/api/mmlApi', () => ({
 
 import ScriptImportDialog from '../ScriptImportDialog'
 
+function renderDialog(ui: ReactElement) {
+  return render(
+    <IntlProvider locale="zh-CN" defaultLocale="zh-CN" messages={zhCN}>
+      {ui}
+    </IntlProvider>
+  )
+}
+
 const validation = (overrides: Record<string, unknown> = {}) => ({
   validationToken: 'token-1',
   originalFilename: 'script.txt',
@@ -40,7 +51,7 @@ describe('v3 ScriptImportDialog', () => {
     mocks.template.mockResolvedValue({ blob: new Blob(['template']), filename: 'MMLTemplate.txt' })
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test')
     const user = userEvent.setup()
-    render(<ScriptImportDialog open onClose={vi.fn()} />)
+    renderDialog(<ScriptImportDialog open onClose={vi.fn()} />)
     expect(screen.getByRole('button', { name: '下载模板' })).toBeInTheDocument()
     await user.upload(screen.getByLabelText('选择 TXT'), new File(['LST DEVICE_INFO;SN1'], 'script.txt', { type: 'text/plain' }))
     expect(mocks.validate).toHaveBeenCalled()
@@ -57,7 +68,7 @@ describe('v3 ScriptImportDialog', () => {
   it('opens the hidden TXT file input from the visible chooser button', async () => {
     const inputClick = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(() => {})
     const user = userEvent.setup()
-    render(<ScriptImportDialog open onClose={vi.fn()} />)
+    renderDialog(<ScriptImportDialog open onClose={vi.fn()} />)
 
     try {
       await user.click(screen.getByRole('button', { name: '选择 TXT' }))
@@ -71,7 +82,7 @@ describe('v3 ScriptImportDialog', () => {
   it('filters errors and disables save', async () => {
     mocks.validate.mockResolvedValue(validation({ planItems: [{ lineNo: 1, deviceSn: 'SN1', order: 1, command: { commandCode: 'BAD' } }, { lineNo: 2, deviceSn: 'SN2', order: 1, command: { commandCode: 'WARN' } }], summary: { totalLines: 2, validLines: 1, effectiveLines: 1, deviceCount: 2, errorCount: 1, warningCount: 1 }, issues: [{ code: 'MML_LINE_FORMAT_INVALID', severity: 'error', lineNo: 1 }, { code: 'MML_DEVICE_OFFLINE', severity: 'warning', lineNo: 2 }] }))
     const user = userEvent.setup()
-    render(<ScriptImportDialog open onClose={vi.fn()} />)
+    renderDialog(<ScriptImportDialog open onClose={vi.fn()} />)
     await user.upload(screen.getByLabelText('选择 TXT'), new File(['BAD'], 'bad.txt', { type: 'text/plain' }))
     expect(mocks.validate).toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: '仅看错误' }))
@@ -84,7 +95,7 @@ describe('v3 ScriptImportDialog', () => {
     let release!: (value: ReturnType<typeof validation>) => void
     mocks.validate.mockImplementationOnce(() => new Promise((resolve) => { release = resolve }))
     const user = userEvent.setup()
-    render(<ScriptImportDialog open onClose={vi.fn()} />)
+    renderDialog(<ScriptImportDialog open onClose={vi.fn()} />)
     const uploadPromise = user.upload(screen.getByLabelText('选择 TXT'), new File(['PENDING'], 'pending.txt', { type: 'text/plain' }))
     expect(await screen.findByRole('status')).toHaveTextContent('正在校验脚本…')
     release(validation())
@@ -96,7 +107,7 @@ describe('v3 ScriptImportDialog', () => {
     const onClose = vi.fn()
     mocks.validateReplacement.mockResolvedValue(validation({ originalFilename: 'replacement.txt' }))
     const user = userEvent.setup()
-    render(<ScriptImportDialog open script={{ id: 'script-1', scriptName: 'old', description: '', updateTime: '2026-07-10T00:00:00Z' } as never} onClose={onClose} />)
+    renderDialog(<ScriptImportDialog open script={{ id: 'script-1', scriptName: 'old', description: '', updateTime: '2026-07-10T00:00:00Z' } as never} onClose={onClose} />)
     await user.upload(screen.getByLabelText('选择 TXT'), new File(['NEW'], 'replacement.txt', { type: 'text/plain' }))
     await waitFor(() => expect(mocks.validateReplacement).toHaveBeenCalledWith('script-1', expect.any(File)))
     await user.keyboard('{Escape}')

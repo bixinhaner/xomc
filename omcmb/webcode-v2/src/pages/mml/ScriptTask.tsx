@@ -21,6 +21,7 @@ import {
   TableCard,
   formatTime,
 } from '@/components/layout/PageShell'
+import { useT } from '@/hooks/useT'
 
 import { useMMLScriptById, useMMLScripts } from '@core/hooks/api/useMML'
 import type { MMLScript, MMLScriptStatus } from '@core/types/mml'
@@ -53,6 +54,7 @@ function statusMeta(status: MMLScriptStatus) {
 const PAGE_SIZE = 20
 
 export default function ScriptTask() {
+  const tr = useT()
   const [page, setPage] = useState(1)
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
@@ -87,7 +89,7 @@ export default function ScriptTask() {
     setPage(1)
   }
 
-  const cols = ['脚本名', '描述 / 标签', '创建人', '状态', '更新时间', '操作']
+  const cols = [tr('mml.scriptName'), '描述 / 标签', tr('mml.creator'), '状态', tr('mml.updateTime'), tr('table.operation')]
 
   return (
     <PageShell
@@ -96,12 +98,12 @@ export default function ScriptTask() {
       isFetching={isFetching}
       toolbar={
         <>
-          <Button variant="default" size="sm" onClick={() => setImporting({} as MMLScript)}>导入 TXT</Button>
+          <Button variant="default" size="sm" onClick={() => setImporting({} as MMLScript)}>{tr('mml.script.action.importTxt')}</Button>
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               className="w-64 pl-9"
-              placeholder="脚本名称"
+              placeholder={tr('mml.scriptName')}
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               onKeyDown={(e) => {
@@ -110,7 +112,7 @@ export default function ScriptTask() {
             />
           </div>
           <Button variant="outline" size="sm" onClick={applySearch}>
-            查询
+            {tr('common.search')}
           </Button>
           <Button
             variant="outline"
@@ -118,7 +120,7 @@ export default function ScriptTask() {
             className="ml-auto"
             onClick={() => refetch()}
           >
-            <RefreshCcw /> 刷新
+            <RefreshCcw /> {tr('common.refresh')}
           </Button>
         </>
       }
@@ -198,7 +200,7 @@ export default function ScriptTask() {
                           className="h-7 px-2 text-xs"
                           onClick={() => setViewing(s)}
                         >
-                          详情
+                          {tr('mml.detail')}
                         </Button>
                         <Button
                           variant="outline"
@@ -206,7 +208,7 @@ export default function ScriptTask() {
                           className="h-7 px-2 text-xs"
                           onClick={() => setExecuting(s)}
                         >
-                          <Play className="size-3" /> 执行
+                          <Play className="size-3" /> {tr('mml.script.action.execute')}
                         </Button>
                       </div>
                     </TableCell>
@@ -247,6 +249,7 @@ function ScriptDetailDrawer({
   onClose: () => void
   onReimport?: () => void
 }) {
+  const tr = useT()
   const { data, isFetching } = useMMLScriptById(script.id)
   const detailScript = data ?? script
   const meta = statusMeta(detailScript.status)
@@ -263,7 +266,7 @@ function ScriptDetailDrawer({
               {detailScript.id}
             </div>
           </div>
-          <Button variant="ghost" size="icon" onClick={onClose} aria-label="关闭">
+          <Button variant="ghost" size="icon" onClick={onClose} aria-label={tr('common.close')}>
             <X />
           </Button>
         </div>
@@ -310,11 +313,11 @@ function ScriptDetailDrawer({
             </pre>
           ) : (
             <div className="rounded border border-dashed bg-muted/20 px-3 py-8 text-center text-sm text-muted-foreground">
-              暂无脚本内容
+              {tr('mml.script.noContent')}
             </div>
           )}
         </div>
-        {onReimport ? <div className="border-t px-4 py-3"><Button variant="outline" size="sm" onClick={onReimport}>重新导入 TXT</Button></div> : null}
+        {onReimport ? <div className="border-t px-4 py-3"><Button variant="outline" size="sm" onClick={onReimport}>{tr('mml.script.action.reimport')}</Button></div> : null}
       </div>
     </div>
   )

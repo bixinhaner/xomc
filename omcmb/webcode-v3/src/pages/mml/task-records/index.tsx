@@ -14,6 +14,7 @@ import { NeonButton } from '@/components/ui/NeonButton'
 import { GlassPanel } from '@/components/ui/GlassPanel'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Sparkline } from '@/components/viz/Sparkline'
+import { useT } from '@/hooks/useT'
 import { formatTime } from '@/lib/format'
 import { useMMLTasks, useMMLTaskResults } from '@core/hooks/api/useMML'
 import { getMmlTaskProgress } from '@core/utils/mmlTaskProgress'
@@ -21,6 +22,7 @@ import type {
   MMLTask,
   MMLTaskStatus,
   MMLExecuteType,
+  MMLTaskOrigin,
   DeviceTaskResultItem,
   MMLTaskResultsStats,
 } from '@core/types/mml'
@@ -46,6 +48,11 @@ const EXEC_TYPE_LABEL: Record<MMLExecuteType, { label: string; color: string }> 
   periodic: { label: '周期任务', color: '#a855f7' },
 }
 
+const TASK_ORIGIN_LABEL: Record<MMLTaskOrigin, { key: string; color: string }> = {
+  console: { key: 'mml.taskOrigin.console', color: '#00f0ff' },
+  script: { key: 'mml.taskOrigin.script', color: '#a855f7' },
+}
+
 const TASK_STATUS_ORDER: MMLTaskStatus[] = [
   'pending',
   'running',
@@ -62,9 +69,11 @@ function statusLabel(s: MMLTaskStatus): string {
 const PAGE_SIZE = 20
 
 export function MMLTaskRecordsPage() {
+  const tr = useT()
   const [page, setPage] = useState(1)
   const [taskName, setTaskName] = useState('')
   const [status, setStatus] = useState<MMLTaskStatus | ''>('')
+  const [taskOrigin, setTaskOrigin] = useState<MMLTaskOrigin | ''>('')
   const [executeType, setExecuteType] = useState<MMLExecuteType | ''>('')
   const [result, setResult] = useState<'success' | 'partial' | 'failed' | ''>('')
   const [viewing, setViewing] = useState<MMLTask | null>(null)
@@ -74,11 +83,12 @@ export function MMLTaskRecordsPage() {
       page,
       pageSize: PAGE_SIZE,
       ...(taskName.trim() ? { taskName: taskName.trim() } : {}),
+      ...(taskOrigin ? { taskOrigin } : {}),
       ...(status ? { status } : {}),
       ...(executeType ? { executeType } : {}),
       ...(result ? { result } : {}),
     }),
-    [page, taskName, status, executeType, result]
+    [page, taskName, taskOrigin, status, executeType, result]
   )
 
   const { data, isLoading, isError, error, isFetching, refetch } = useMMLTasks(params)
@@ -163,6 +173,19 @@ export function MMLTaskRecordsPage() {
               color: EXEC_TYPE_LABEL[v].color,
             }))}
           />
+          <FilterChips<MMLTaskOrigin>
+            all="ALL ORIGIN"
+            value={taskOrigin}
+            onChange={(v) => {
+              setTaskOrigin(v)
+              setPage(1)
+            }}
+            options={(['console', 'script'] as const).map((v) => ({
+              value: v,
+              label: tr(TASK_ORIGIN_LABEL[v].key),
+              color: TASK_ORIGIN_LABEL[v].color,
+            }))}
+          />
           <FilterChips<MMLTaskStatus>
             all="ALL STATUS"
             value={status}
@@ -199,9 +222,10 @@ export function MMLTaskRecordsPage() {
           className="min-h-0 flex-1 overflow-hidden"
         >
           <div className="h-full overflow-auto">
-            <div className="sticky top-0 z-10 grid grid-cols-[2fr_1fr_1fr_1fr_1.2fr_1.4fr_70px] gap-3 border-b border-cyan-500/20 bg-[#03050d]/85 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-300/60 backdrop-blur">
+            <div className="sticky top-0 z-10 grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1.2fr_1.4fr_70px] gap-3 border-b border-cyan-500/20 bg-[#03050d]/85 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-300/60 backdrop-blur">
               <span>任务名 / ID</span>
               <span>执行人</span>
+              <span>{tr('mml.taskOrigin')}</span>
               <span>类型</span>
               <span>状态</span>
               <span>进度</span>
@@ -229,10 +253,11 @@ export function MMLTaskRecordsPage() {
                 const { done, total: tot } = getMmlTaskProgress(t)
                 const pct = tot > 0 ? Math.round((done / tot) * 100) : 0
                 const et = EXEC_TYPE_LABEL[t.executeType]
+                const origin = TASK_ORIGIN_LABEL[t.taskOrigin]
                 return (
                   <div
                     key={t.id}
-                    className="grid grid-cols-[2fr_1fr_1fr_1fr_1.2fr_1.4fr_70px] items-center gap-3 border-b border-cyan-500/8 px-3 py-2.5 hover:bg-cyan-500/5"
+                    className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1.2fr_1.4fr_70px] items-center gap-3 border-b border-cyan-500/8 px-3 py-2.5 hover:bg-cyan-500/5"
                   >
                     <div className="min-w-0">
                       <div className="truncate font-display text-sm font-bold text-cyan-100">
@@ -241,6 +266,11 @@ export function MMLTaskRecordsPage() {
                       <div className="truncate font-mono text-[10px] text-cyan-300/45">{t.id}</div>
                     </div>
                     <div className="truncate text-xs text-cyan-100/80">{t.creator || '—'}</div>
+                    <div>
+                      <span className="chip" style={{ color: origin?.color ?? '#6b86b6' }}>
+                        {origin ? tr(origin.key) : t.taskOrigin}
+                      </span>
+                    </div>
                     <div>
                       <span className="chip" style={{ color: et?.color ?? '#6b86b6' }}>
                         {et?.label ?? t.executeType}
@@ -291,6 +321,7 @@ export function MMLTaskRecordsPage() {
 }
 
 function TaskDetailDrawer({ task, onClose }: { task: MMLTask; onClose: () => void }) {
+  const tr = useT()
   const { data, isLoading, isError } = useMMLTaskResults(task.id, 1, 200)
   const rows: DeviceTaskResultItem[] = useMemo(
     () => data?.items ?? (task.results as unknown as DeviceTaskResultItem[]) ?? [],
@@ -325,6 +356,10 @@ function TaskDetailDrawer({ task, onClose }: { task: MMLTask; onClose: () => voi
 
         <div className="grid grid-cols-2 gap-3 border-b border-cyan-500/15 px-4 py-3 sm:grid-cols-4">
           <Meta label="状态" value={statusLabel(task.status)} />
+          <Meta
+            label={tr('mml.taskOrigin')}
+            value={TASK_ORIGIN_LABEL[task.taskOrigin] ? tr(TASK_ORIGIN_LABEL[task.taskOrigin].key) : task.taskOrigin}
+          />
           <Meta label="类型" value={EXEC_TYPE_LABEL[task.executeType]?.label ?? task.executeType} />
           <Meta label="设备数" value={String(task.totalDevices ?? 0)} />
           <Meta label="成功 / 失败" value={`${task.successCount ?? 0} / ${task.failedCount ?? 0}`} />
