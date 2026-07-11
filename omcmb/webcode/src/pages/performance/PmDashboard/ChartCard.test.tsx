@@ -91,7 +91,10 @@ describe('ChartCard 渲染隔离 (#444)', () => {
       values: [i, i + 1],
     }));
     render(wrapIntl(<ChartCard chart={chart} />));
-    const option = echartsRenderSpy.mock.calls[0][0] as { tooltip: { extraCssText: string } };
+    const option = echartsRenderSpy.mock.calls[0][0] as {
+      tooltip: { enterable: boolean; extraCssText: string };
+    };
+    expect(option.tooltip.enterable).toBe(true);
     expect(option.tooltip.extraCssText).toContain('max-height:220px');
     expect(option.tooltip.extraCssText).toContain('overflow-y:auto');
   });
