@@ -85,7 +85,7 @@
 ### Task 1: 数据库契约与 Go 模型
 
 **Files:**
-- Create: `omcgo/migrations/000015_redesign_mml_script_txt_import.sql`
+- Create: `omcgo/migrations/000016_redesign_mml_script_txt_import.sql`
 - Modify: `omcgo/internal/mml/model.go`
 - Modify: `omcgo/internal/mml/pg_repository.go`
 - Modify: `omcgo/internal/mml/pg_repository_test.go`
@@ -107,7 +107,7 @@
   find omcgo/migrations -maxdepth 1 -name '*.sql' -print | sort -V | tail -5
   ```
 
-  Expected: 无内容冲突；若 `000015` 已被占用，先把本计划内所有 `000015_redesign_mml_script_txt_import.sql` 替换为最新主分支之后的第一个空闲编号，再开始写迁移。
+  Expected: 无内容冲突；若计划迁移编号已被占用，先把本计划内迁移文件替换为最新主分支之后的第一个空闲编号，再开始写迁移。
 
 - [ ] **Step 2: 写迁移契约测试**
 
@@ -197,7 +197,7 @@
 - [ ] **Step 7: 更新进度并提交**
 
   ```bash
-  git add omcgo/migrations/000015_redesign_mml_script_txt_import.sql \
+  git add omcgo/migrations/000016_redesign_mml_script_txt_import.sql \
     omcgo/internal/mml/model.go omcgo/internal/mml/pg_repository.go \
     omcgo/internal/mml/pg_repository_test.go \
     docs/superpowers/plans/2026-07-10-mml-script-txt-import.md

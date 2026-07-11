@@ -729,7 +729,7 @@ sudo ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 
 ## 15. MML TXT 脚本导入切换（Task 13）
 
-本功能使用 `omcgo/migrations/000015_redesign_mml_script_txt_import.sql`。迁移是
+本功能使用 `omcgo/migrations/000016_redesign_mml_script_txt_import.sql`。迁移是
 不可逆数据切换：先删除 `device_tasks WHERE source = 'mml'`、`mml_tasks` 和
 `mml_scripts`，再增加 TXT 摘要、校验版本、`plan_items` 和 `validation_summary`
 字段；Down 只撤销字段和索引，不恢复旧数据。发布前必须先停止 MML 新建、调度和消费，

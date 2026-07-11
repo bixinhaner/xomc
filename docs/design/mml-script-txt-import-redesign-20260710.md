@@ -434,7 +434,7 @@ bash omcgo/scripts/check-migrations.sh --strict
 
 ### 18.1 已落地契约
 
-- 迁移文件：`omcgo/migrations/000015_redesign_mml_script_txt_import.sql`。
+- 迁移文件：`omcgo/migrations/000016_redesign_mml_script_txt_import.sql`。
 - 导入 API：`POST /api/v1/mml/scripts/import/validate`、
   `POST /api/v1/mml/scripts/import`，重新导入对应 `/:id/import/validate` 和 `PUT /:id/import`。
 - 执行 API：`POST /api/v1/mml/scripts/:id/executions`；请求只含任务名、调度和重试策略，
