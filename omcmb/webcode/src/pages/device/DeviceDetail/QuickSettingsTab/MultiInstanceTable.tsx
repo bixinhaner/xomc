@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Button, Card, Input, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography, message, notification } from 'antd';
 import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, DeleteOutlined, EditOutlined, PlusOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
 import type { ColumnType } from 'antd/es/table';
@@ -30,6 +30,7 @@ import {
   formatEnumDisplayValue,
   getEffectiveEnumMeta,
   getFeedbackScopeContext,
+  validateLteQOffsetValue,
   validateValue,
   type QuickSettingsInstanceContext,
 } from './validators';
@@ -150,6 +151,7 @@ interface RowEditState {
 interface TableRow {
   key: string;
   instanceId?: string;
+  pending?: 'add' | 'edit' | 'delete';
 }
 
 interface EditModalState {
@@ -157,6 +159,19 @@ interface EditModalState {
   instanceId?: string;
   values: Record<string, string>;
   errors: Record<string, string>;
+}
+
+interface PendingAddRow {
+  tempId: string;
+  values: Record<string, string>;
+}
+
+interface PackedScalarRow {
+  key: string;
+  id: number;
+  sourceIndex?: number;
+  cells: string[];
+  pending?: 'add';
 }
 
 interface SpecialColumnSpec {
@@ -330,6 +345,29 @@ function effectiveParamConstraints(
   };
 }
 
+function validateQuickSettingsCellValue(
+  leaf: string,
+  value: string,
+  parameterType: ParameterType,
+  constraints?: ParameterConstraints,
+): string | null {
+  const normalizedLeaf = leaf.trim().toLowerCase();
+  if (normalizedLeaf === 'qoffset' || normalizedLeaf === 'qoffsetfreq') {
+    return validateLteQOffsetValue(value);
+  }
+  return validateValue(value, parameterType, constraints);
+}
+
+function feedbackTagStyle(): CSSProperties {
+  return {
+    maxWidth: 560,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    verticalAlign: 'middle',
+  };
+}
+
 function formatEffectiveConstraintHint(
   item: ParameterSchemaItem | undefined,
   param: QuickSettingsParam | undefined,
@@ -421,10 +459,20 @@ function PackedScalarNeighborTable({
   }, [schemaResp, scalarPath]);
 
   const cellsList = useMemo(() => parsePackedNeighborList(packedValue), [packedValue]);
-  const rows = useMemo(
-    () => cellsList.map((cells, idx) => ({ key: idx + 1, id: idx + 1, cells })),
-    [cellsList],
-  );
+  const [pendingPackedAdds, setPendingPackedAdds] = useState<string[][]>([]);
+  const [pendingPackedDeletes, setPendingPackedDeletes] = useState<Set<number>>(() => new Set());
+  const rows = useMemo<PackedScalarRow[]>(() => {
+    const existingRows = cellsList
+      .map((cells, idx) => ({ key: `existing:${idx}`, id: idx + 1, sourceIndex: idx, cells }))
+      .filter((row) => !pendingPackedDeletes.has(row.sourceIndex));
+    const addRows = pendingPackedAdds.map((cells, idx) => ({
+      key: `new:${idx}`,
+      id: existingRows.length + idx + 1,
+      cells,
+      pending: 'add' as const,
+    }));
+    return [...existingRows, ...addRows];
+  }, [cellsList, pendingPackedAdds, pendingPackedDeletes]);
 
   // 列定义中字段顺序严格跟随 group.params（来自 quicksettings XML），对应打包条目内 `-` 分隔字段的下标。
   const fieldLeaves = useMemo(
@@ -448,6 +496,7 @@ function PackedScalarNeighborTable({
   const maxInstances = group.maxInstances && group.maxInstances > 0 ? group.maxInstances : undefined;
   const reachedMax = maxInstances !== undefined && rows.length >= maxInstances;
   const canMutate = fieldLeaves.length > 0; // 没有字段定义就退回纯只读视图（兜底）
+  const pendingPackedChangeCount = pendingPackedAdds.length + pendingPackedDeletes.size;
 
   // 与多实例表一致：ref 同步防重点，state 驱动按钮 loading。
   // 覆盖整个 writeSingleEntry 生命周期（mutation + task 轮询 + pullConfig + refetch）。
@@ -547,7 +596,6 @@ function PackedScalarNeighborTable({
             await new Promise((resolve) => setTimeout(resolve, 1500));
           } catch (pullErr) {
             // 同步失败不阻断主流程；UI 表头计数可能滞后，下次手动刷新会拼正。
-            // eslint-disable-next-line no-console
             console.warn('[PackedScalarNeighborTable] pullConfig listLeaf failed', pullErr);
           }
         }
@@ -631,40 +679,79 @@ function PackedScalarNeighborTable({
       setAddModal((prev) => (prev ? { ...prev, errors } : prev));
       return;
     }
-    const nextEntryNumber = cellsList.length + 1;
     setAddModal(null);
-    await writeSingleEntry(
-      'add',
-      cells,
-      t('device.multi.detailAdd', { instId: String(nextEntryNumber), count: cells.length }),
-    );
-  }, [addModal, cellsList.length, fieldLeaves, paramByLeaf, t, writeSingleEntry]);
+    setPendingPackedAdds((prev) => [...prev, cells]);
+    message.success({ content: t('device.multi.batchStaged'), duration: 3 });
+  }, [addModal, fieldLeaves, paramByLeaf, t]);
 
   const handleDeleteRow = useCallback(
-    async (rowIdx: number) => {
+    async (row: PackedScalarRow) => {
       if (!canMutate) return;
-      const target = cellsList[rowIdx];
-      if (!target) return;
-      await writeSingleEntry(
-        'del',
-        target,
-        t('device.multi.deleteDispatched', { instId: String(rowIdx + 1) }),
-      );
+      if (row.pending === 'add') {
+        const addIndex = pendingPackedAdds.findIndex((cells) => cells === row.cells);
+        if (addIndex >= 0) {
+          setPendingPackedAdds((prev) => prev.filter((_cells, idx) => idx !== addIndex));
+        }
+        return;
+      }
+      if (row.sourceIndex === undefined) return;
+      setPendingPackedDeletes((prev) => {
+        const next = new Set(prev);
+        next.add(row.sourceIndex!);
+        return next;
+      });
     },
-    [canMutate, cellsList, t, writeSingleEntry],
+    [canMutate, pendingPackedAdds],
   );
 
   const hasRows = rows.length > 0;
-  const columns: ColumnType<{ key: number; id: number; cells: string[] }>[] = [
+  const handleSubmitPackedBatch = useCallback(async () => {
+    if (pendingPackedChangeCount === 0 || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      for (const rowIdx of Array.from(pendingPackedDeletes).sort((a, b) => a - b)) {
+        const target = cellsList[rowIdx];
+        if (!target) continue;
+        await writeSingleEntry(
+          'del',
+          target,
+          t('device.multi.deleteDispatched', { instId: String(rowIdx + 1) }),
+        );
+      }
+      for (const cells of pendingPackedAdds) {
+        await writeSingleEntry(
+          'add',
+          cells,
+          t('device.multi.detailAdd', { instId: String(cellsList.length + 1), count: cells.length }),
+        );
+      }
+      setPendingPackedAdds([]);
+      setPendingPackedDeletes(new Set());
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [cellsList, isSubmitting, pendingPackedAdds, pendingPackedChangeCount, pendingPackedDeletes, t, writeSingleEntry]);
+
+  const clearPackedBatch = useCallback(() => {
+    setPendingPackedAdds([]);
+    setPendingPackedDeletes(new Set());
+  }, []);
+
+  const columns: ColumnType<PackedScalarRow>[] = [
     {
       title: t('device.multi.instance'),
       dataIndex: 'id',
       key: 'id',
       width: multiColumnWidth(hasRows, 80),
       fixed: hasRows ? 'left' : undefined,
-      render: (_v: unknown, row) => <Text strong>{row.id}</Text>,
+      render: (_v: unknown, row) => (
+        <Space size={4}>
+          <Text strong>{row.id}</Text>
+          {row.pending === 'add' && <Tag color="blue">{t('device.multi.pendingAdd')}</Tag>}
+        </Space>
+      ),
     },
-    ...group.params.map<ColumnType<{ key: number; id: number; cells: string[] }>>((param, colIdx) => ({
+    ...group.params.map<ColumnType<PackedScalarRow>>((param, colIdx) => ({
       title: locale === 'zh-CN' ? param.titleZh : param.titleEn,
       key: param.leaf || param.name,
       width: multiColumnWidth(hasRows, 140),
@@ -682,7 +769,7 @@ function PackedScalarNeighborTable({
           title={t('device.multi.deleteConfirm')}
           description={t('device.multi.detailInstance', { instId: String(row.id) })}
           okButtonProps={{ danger: true, loading: updateMutation.isPending || isSubmitting }}
-          onConfirm={() => void handleDeleteRow(row.id - 1)}
+          onConfirm={() => void handleDeleteRow(row)}
         >
           <Button size="small" type="link" danger icon={<DeleteOutlined />} disabled={isSubmitting}>
             {t('device.multi.actionDelete')}
@@ -708,7 +795,7 @@ function PackedScalarNeighborTable({
             const isFailed = lastTask?.status === 'failed' && Boolean(lastTask?.errorMessage);
             const briefFault = isFailed ? formatDeviceFaultBrief(lastTask?.errorMessage) : '';
             const tag = (
-              <Tag icon={tagSpec.icon} color={tagSpec.color}>
+              <Tag icon={tagSpec.icon} color={tagSpec.color} style={feedbackTagStyle()}>
                 {tagSpec.label} · {lastAction.detail}
                 {briefFault ? ` · ${briefFault}` : ''} · {formatTime(lastAction.at)}
               </Tag>
@@ -733,6 +820,22 @@ function PackedScalarNeighborTable({
             </Tooltip>
           ) : (
             <Tag color="default">{t('device.multi.packed.readonlyTag')}</Tag>
+          )}
+          {pendingPackedChangeCount > 0 && (
+            <>
+              <Button size="small" onClick={clearPackedBatch} disabled={isSubmitting}>
+                {t('device.multi.batchClear')}
+              </Button>
+              <Button
+                size="small"
+                type="primary"
+                icon={<SendOutlined />}
+                loading={isSubmitting}
+                onClick={() => void handleSubmitPackedBatch()}
+              >
+                {t('device.multi.batchSubmitWithCount', { count: pendingPackedChangeCount })}
+              </Button>
+            </>
           )}
           <Button
             size="small"
@@ -901,10 +1004,13 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
   // ref 同步起效(防同 tick 双击); state 为 Modal confirmLoading 提供视觉反馈。
   const submittingRef = useRef(false);
   const syncedSuccessNotifiedTaskIdsRef = useRef<Set<string>>(new Set());
+  const pendingAddCounterRef = useRef(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // 行编辑状态：以 instanceId 为 key，仅保留用户编辑过的字段（避免 effect 同步 schema 触发级联 render）
   const [rowEdits, setRowEdits] = useState<Map<string, RowEditState>>(new Map());
+  const [pendingAdds, setPendingAdds] = useState<PendingAddRow[]>([]);
+  const [pendingDeletes, setPendingDeletes] = useState<Set<string>>(() => new Set());
 
   // lastAction 由 zustand store 托管 —— DeviceDetail 卸载(切顶层 tab)也保留反馈。
   const fbKey = feedbackKey(
@@ -1049,6 +1155,15 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     return map;
   }, [group.params, instanceIds, objectPath, schemaByPath, schemaResp?.parameters, specialColumns]);
 
+  const submittedPendingAdds = useMemo<PendingAddRow[]>(() => {
+    if (!lastAction?.pendingAddRows || lastAction.pendingAddRows.length === 0) return [];
+    if (lastAction.submitStatus !== 'queued') return [];
+    if (lastAction.taskId && lastAction.syncedForTaskId === lastAction.taskId) return [];
+    if (lastTask && isDeviceTaskTerminal(lastTask.status) && lastTask.status !== 'completed') return [];
+    const localTempIds = new Set(pendingAdds.map((row) => row.tempId));
+    return lastAction.pendingAddRows.filter((row) => !localTempIds.has(row.tempId));
+  }, [lastAction, lastTask, pendingAdds]);
+
   const buildInitialEditValues = useCallback((): Record<string, string> => {
     const values = Object.fromEntries(
       group.params.map((param) => {
@@ -1060,8 +1175,23 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
   }, [group.params, paramSchemaByLeaf]);
 
   const tableRows = useMemo<TableRow[]>(() => {
-    return instanceIds.map((instId) => ({ key: instId, instanceId: instId }));
-  }, [instanceIds]);
+    const deleted = pendingDeletes;
+    const existingRows = instanceIds
+      .filter((instId) => !deleted.has(instId))
+      .map((instId) => ({
+        key: instId,
+        instanceId: instId,
+        pending: rowEdits.has(instId) ? 'edit' as const : undefined,
+      }));
+    const visiblePendingAdds = [...pendingAdds, ...submittedPendingAdds];
+    const addRows = visiblePendingAdds.map((row, idx) => ({
+      key: row.tempId,
+      instanceId: row.tempId,
+      pending: 'add' as const,
+      sortIndex: instanceIds.length + idx + 1,
+    }));
+    return [...existingRows, ...addRows];
+  }, [instanceIds, pendingAdds, pendingDeletes, rowEdits, submittedPendingAdds]);
 
   const scopedSyncPaths = useMemo(() => {
     const paths = new Set<string>();
@@ -1093,7 +1223,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
         const leaf = name.slice(splitIndex + 1);
         const item = schemaByPath.get(`${objectPath}${instId}.${leaf}`) ?? leafSchemaByLeaf.get(leaf);
         const param = groupParamByLeaf.get(leaf);
-        const err = validateValue(String(value ?? ''), effectiveParamType(item, param), effectiveParamConstraints(item, param));
+        const err = validateQuickSettingsCellValue(leaf, String(value ?? ''), effectiveParamType(item, param), effectiveParamConstraints(item, param));
         const current = next.get(instId) ?? { edits: {}, errors: {} };
 
         current.edits[leaf] = String(value ?? '');
@@ -1108,12 +1238,15 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
 
   const cellValue = useCallback(
     (instId: string, leaf: string): string => {
+      const pendingAdd = pendingAdds.find((row) => row.tempId === instId)
+        ?? submittedPendingAdds.find((row) => row.tempId === instId);
+      if (pendingAdd) return pendingAdd.values[leaf] ?? '';
       const edit = rowEdits.get(instId);
       if (edit && leaf in edit.edits) return edit.edits[leaf];
       const path = `${objectPath}${instId}.${leaf}`;
       return schemaByPath.get(path)?.currentValue ?? '';
     },
-    [rowEdits, objectPath, schemaByPath],
+    [pendingAdds, submittedPendingAdds, rowEdits, objectPath, schemaByPath],
   );
 
   const hideStaleInstance = useCallback((instId: string) => {
@@ -1131,6 +1264,13 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       next.delete(instId);
       return next;
     });
+  }, [clearDraftPrefix, fbKey]);
+
+  const clearLocalBatchChanges = useCallback(() => {
+    setPendingAdds([]);
+    setPendingDeletes(new Set());
+    setRowEdits(new Map());
+    clearDraftPrefix(fbKey, '');
   }, [clearDraftPrefix, fbKey]);
 
   const restoreHiddenInstance = useCallback((instId: string) => {
@@ -1187,7 +1327,6 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       }
     } catch (err) {
       // 同步失败不阻断当前操作反馈；至少再读一次本地 schema。
-      // eslint-disable-next-line no-console
       console.warn('[MultiInstanceTable] sync related parameters failed', { objectPath, err });
     }
     deviceParameterApi.invalidateParameterSchemaCache(deviceId, objectPath);
@@ -1211,12 +1350,19 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
   useEffect(() => {
     if (!active) return;
     if (!lastTask || !isDeviceTaskTerminal(lastTask.status)) return;
-    if (lastAction?.action === 'add') return;
+    // 旧的 action=add 只表示 AddObject 阶段，不需要 SPV 终态回读；
+    // 批量提交里的新增行会把最后一次 SPV taskId 也记为 add，并带 addedInstIds/savedInstIds，
+    // 必须继续走下面的 syncRelatedParameters，否则 Tag 会停在“已发送给基站”。
+    if (
+      lastAction?.action === 'add'
+      && !(lastAction.addedInstIds && lastAction.addedInstIds.length > 0)
+      && !(lastAction.savedInstIds && lastAction.savedInstIds.length > 0)
+    ) return;
     let cancelled = false;
     void (async () => {
-      const ids = lastAction?.action === 'save'
-        ? lastAction.savedInstIds ?? (lastAction.savedInstId ? [lastAction.savedInstId] : [])
-        : [];
+      const ids = lastAction?.savedInstIds ?? (
+        lastAction?.action === 'save' && lastAction.savedInstId ? [lastAction.savedInstId] : []
+      );
       if (ids.length > 0) {
         setRowEdits((prev) => {
           const next = new Map(prev);
@@ -1226,18 +1372,28 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
         for (const id of ids) clearDraftPrefix(fbKey, `${id}.`);
       }
 
-      const deleteInstId = (() => {
+      const deleteInstIds = (() => {
         if (!lastAction || lastAction.action !== 'delete') return undefined;
-        if (lastAction.savedInstId && /^\d+$/.test(lastAction.savedInstId)) return lastAction.savedInstId;
+        if (lastAction.deletedInstIds && lastAction.deletedInstIds.length > 0) return lastAction.deletedInstIds;
+        if (lastAction.savedInstIds && lastAction.savedInstIds.length > 0) return lastAction.savedInstIds;
+        if (lastAction.savedInstId && /^\d+$/.test(lastAction.savedInstId)) return [lastAction.savedInstId];
         const match = lastAction.detail.match(/\d+/);
-        return match?.[0];
+        return match?.[0] ? [match[0]] : undefined;
       })();
-      if (deleteInstId) {
+      if (deleteInstIds) {
         if (lastTask.status === 'completed') {
-          hideStaleInstance(deleteInstId);
+          deleteInstIds.forEach((instId) => hideStaleInstance(instId));
         } else {
-          restoreHiddenInstance(deleteInstId);
+          deleteInstIds.forEach((instId) => restoreHiddenInstance(instId));
         }
+      }
+      if (
+        lastAction?.pendingAddRows
+        && lastAction.pendingAddRows.length > 0
+        && lastTask.status !== 'completed'
+      ) {
+        const failedTempIds = new Set(lastAction.pendingAddRows.map((row) => row.tempId));
+        setPendingAdds((prev) => prev.filter((row) => !failedTempIds.has(row.tempId)));
       }
 
       let didRollbackAddedInstance = false;
@@ -1298,12 +1454,10 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
               await syncRelatedParameters();
             }
           } catch (waitErr) {
-            // eslint-disable-next-line no-console
             console.warn('[MultiInstanceTable] silent add-rollback wait failed', { inst, waitErr });
           }
         } catch (err) {
           // 静默策略:回滚入队失败也不打扰用户,只在 console 里留痕便于排查。
-          // eslint-disable-next-line no-console
           console.warn('[MultiInstanceTable] silent add-rollback enqueue failed', { inst, err });
         }
       }
@@ -1321,14 +1475,26 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
                 const inst = lastAction.instanceNumber;
                 return typeof inst === 'number' && refreshedInstances.includes(inst);
               }
-              if (lastAction.action === 'delete' && deleteInstId && /^\d+$/.test(deleteInstId)) {
-                return !refreshedInstances.includes(Number(deleteInstId));
+              const addedIds = lastAction.addedInstIds ?? (
+                lastAction.action === 'add' ? (lastAction.savedInstIds ?? []) : []
+              );
+              const deletedIds = lastAction.deletedInstIds ?? (
+                lastAction.action === 'delete' ? (deleteInstIds ?? []) : []
+              );
+              const editedIds = lastAction.editedInstIds ?? (
+                lastAction.action === 'save' ? (lastAction.savedInstIds ?? []) : []
+              );
+              if (addedIds.length > 0 || deletedIds.length > 0 || editedIds.length > 0) {
+                const addedOk = addedIds.every((instId) => /^\d+$/.test(instId) && refreshedInstances.includes(Number(instId)));
+                const deletedOk = deletedIds.every((instId) => /^\d+$/.test(instId) && !refreshedInstances.includes(Number(instId)));
+                return addedOk && deletedOk;
               }
               return lastAction.action === 'save';
             })();
             if (listMatchesAction) {
               syncedSuccessNotifiedTaskIdsRef.current.add(lastTask.id);
               patchFeedback(fbKey, { syncedForTaskId: lastTask.id });
+              clearLocalBatchChanges();
               message.success({
                 content: lastAction.detail,
                 duration: 6,
@@ -1371,72 +1537,48 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     }
   }, [lastTask, lastAction, group.titleZh, patchFeedback, fbKey, t]);
 
-  // 单层确认：外层 Popconfirm 已二次确认，这里直接执行删除逻辑（原 Modal.confirm 套层移除）。
+  // 单层确认：外层 Popconfirm 已二次确认，这里只标记为待删除，统一由批量提交下发。
   const handleDelete = async (instId: string) => {
     if (isIpsecGroup && !ipsecGlobalEnabled) {
       return;
     }
-    try {
-      // T-0157 C7: 后端现返回 { taskId } → 消费 taskId 让 Tag 走完整状态机
-      const result = await deleteMutation.mutateAsync({ deviceId, objectPath: `${objectPath}${instId}.` });
-      message.success({
-        content: t('device.multi.deleteDispatched', { instId }),
-        duration: 6,
-      });
-      hideStaleInstance(instId);
-      setFeedback(fbKey, {
-        kind: 'multi',
-        action: 'delete',
-        submitStatus: 'queued',
-        taskId: result.taskId,
-        detail: t('device.multi.detailInstance', { instId }),
-        savedInstId: instId,
-        at: Date.now(),
-      });
-      // 实例已删 → 清该行可能残留的 draft + rowEdits（避免下次重挂载尝试恢复已不存在的实例）
-      clearDraftPrefix(fbKey, `${instId}.`);
+    if (pendingAdds.some((row) => row.tempId === instId)) {
+      setPendingAdds((prev) => prev.filter((row) => row.tempId !== instId));
       setRowEdits((prev) => {
         const next = new Map(prev);
         next.delete(instId);
         return next;
       });
-      void refetch();
-    } catch (err) {
-      if (isObjectInstanceNotFoundError(err)) {
-        hideStaleInstance(instId);
-        message.success({
-          content: t('device.multi.deleteAlreadyGone', { instId }),
-          duration: 4,
-        });
-        setFeedback(fbKey, {
-          kind: 'multi',
-          action: 'delete',
-          submitStatus: 'queued',
-          detail: t('device.multi.detailInstance', { instId }),
-          savedInstId: instId,
-          at: Date.now(),
-        });
-        void syncRelatedParameters();
-        return;
-      }
-      const errMsg = err instanceof Error ? err.message : String(err);
-      notification.error({
-        message: t('device.multi.deleteQueueFailed', { group: group.titleZh }),
-        description: t('device.multi.deleteFailedDesc', { instId, err: errMsg }),
-        duration: ERROR_FEEDBACK_DURATION_SECONDS,
-      });
-      setFeedback(fbKey, {
-        kind: 'multi',
-        action: 'delete',
-        submitStatus: 'failed_to_queue',
-        detail: t('device.multi.detailInstanceErr', { instId, err: errMsg }),
-        at: Date.now(),
-      });
-      console.error('MultiInstanceTable: DeleteObject failed', err);
-    } finally {
-      void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
+      return;
     }
+    setPendingDeletes((prev) => {
+      const next = new Set(prev);
+      next.add(instId);
+      return next;
+    });
+    clearDraftPrefix(fbKey, `${instId}.`);
+    setRowEdits((prev) => {
+      const next = new Map(prev);
+      next.delete(instId);
+      return next;
+    });
   };
+
+  const buildUpdatesForRow = useCallback((instId: string, edits: Record<string, string>): ParameterUpdateRequest[] => {
+    const updates: ParameterUpdateRequest[] = [];
+    for (const [leaf, value] of Object.entries(edits)) {
+      const item = schemaByPath.get(`${objectPath}${instId}.${leaf}`) ?? leafSchemaByLeaf.get(leaf);
+      const param = groupParamByLeaf.get(leaf);
+      const oldVal = item?.currentValue ?? '';
+      if (value === oldVal) continue;
+      updates.push({
+        parameterPath: `${objectPath}${instId}.${leaf}`,
+        parameterValue: value,
+        parameterType: effectiveParamType(item, param),
+      });
+    }
+    return updates;
+  }, [groupParamByLeaf, leafSchemaByLeaf, objectPath, schemaByPath]);
 
   const displayColumns = useMemo<SpecialColumnSpec[]>(() => {
     if (!specialColumns) {
@@ -1460,7 +1602,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
         : cellValue(row.instanceId!, column.leaf);
     });
     setEditModal({ mode: 'edit', instanceId: row.instanceId, values, errors: {} });
-  }, [cellValue, displayColumns]);
+  }, [cellValue, displayColumns, isIpsecGroup]);
 
   const openAddModal = useCallback(() => {
     const initialValues = buildInitialEditValues();
@@ -1480,7 +1622,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       const normalizedValue = isIpsecGroup && leaf === IPSEC_ENABLE_LEAF
         ? toDeviceIpsecEnableValue(value)
         : value;
-      const err = validateValue(normalizedValue, effectiveParamType(item, param), effectiveParamConstraints(item, param)) ?? '';
+      const err = validateQuickSettingsCellValue(leaf, normalizedValue, effectiveParamType(item, param), effectiveParamConstraints(item, param)) ?? '';
       return {
         ...prev,
         values: { ...prev.values, [leaf]: value },
@@ -1501,10 +1643,13 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     const errors: Record<string, string> = {};
     const updates: ParameterUpdateRequest[] = [];
     const pendingEdits: Record<string, string> = {};
+    const comparableInstIds = tableRows
+      .map((row) => row.instanceId)
+      .filter((instId): instId is string => Boolean(instId) && instId !== modal.instanceId);
 
     if (modal.mode === 'add' && group.id === INTER_FREQ_GROUP_ID) {
       const newEarfcn = String(modal.values[INTER_FREQ_EARFCN_LEAF] ?? '').trim();
-      if (newEarfcn && instanceIds.some((instId) => cellValue(instId, INTER_FREQ_EARFCN_LEAF).trim() === newEarfcn)) {
+      if (newEarfcn && comparableInstIds.some((instId) => cellValue(instId, INTER_FREQ_EARFCN_LEAF).trim() === newEarfcn)) {
         errors[INTER_FREQ_EARFCN_LEAF] = t('device.multi.interFreqDuplicate', { value: newEarfcn });
       }
     }
@@ -1512,7 +1657,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     if (modal.mode === 'add' && group.id === NEIGHBOR_CELL_GROUP_ID) {
       const duplicateValues = NEIGHBOR_CELL_DUPLICATE_LEAVES.map((leaf) => String(modal.values[leaf] ?? '').trim());
       const hasIdentity = duplicateValues.every(Boolean);
-      const duplicated = hasIdentity && instanceIds.some((instId) =>
+      const duplicated = hasIdentity && comparableInstIds.some((instId) =>
         NEIGHBOR_CELL_DUPLICATE_LEAVES.every((leaf, idx) => cellValue(instId, leaf).trim() === duplicateValues[idx]),
       );
       if (duplicated) {
@@ -1556,7 +1701,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
         : rawValue;
       const parameterType = effectiveParamType(item, param);
       const constraints = effectiveParamConstraints(item, param);
-      const err = validateValue(value, parameterType, constraints);
+      const err = validateQuickSettingsCellValue(leaf, value, parameterType, constraints);
       if (err) {
         errors[leaf] = errors[leaf] ?? err;
         continue;
@@ -1579,7 +1724,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     }
 
     return { errors, updates, pendingEdits };
-  }, [cellValue, displayColumns, group.id, groupParamByLeaf, groupParamLeafSet, instanceIds, isIpsecGroup, leafSchemaByLeaf, nrInterFreqLoading, nrInterFreqSchemaResp, nrInterFreqSsbState.enabled, nrInterFreqSsbState.known, objectPath, schemaByPath, t]);
+  }, [cellValue, displayColumns, group.id, groupParamByLeaf, groupParamLeafSet, isIpsecGroup, leafSchemaByLeaf, nrInterFreqLoading, nrInterFreqSchemaResp, nrInterFreqSsbState.enabled, nrInterFreqSsbState.known, objectPath, schemaByPath, tableRows, t]);
 
   const rollbackAddedInstance = useCallback(async (instId: string | undefined, reason: string) => {
     if (!instId || !/^\d+$/.test(instId)) return;
@@ -1608,7 +1753,6 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
         await syncRelatedParameters();
         return;
       }
-      // eslint-disable-next-line no-console
       console.warn('[MultiInstanceTable] add rollback failed', { inst, reason, err });
       notification.warning({
         message: t('device.multi.addRollbackFailed', { instId: inst, group: group.titleZh }),
@@ -1620,157 +1764,254 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
 
   const handleSaveEditModal = useCallback(async () => {
     if (!editModal) return;
-    if (submittingRef.current) return; // 同步幂等守卫: 同 tick 双击 以及 task 轮询窗口内重点
-    submittingRef.current = true;
-    setIsSubmitting(true);
-    try {
-
-    let targetInstanceId = editModal.instanceId;
-
-    // 本地校验必须先于 AddObject。否则输入错误时虽然 SPV 不会发出,
-    // 但设备侧实例已经被 AddObject 创建,用户再次点击会不断残留空实例。
-    if (editModal.mode === 'add') {
-      const precheck = validateEditModalValues(editModal);
-      if (Object.keys(precheck.errors).length > 0) {
-        setEditModal((prev) => prev ? { ...prev, errors: precheck.errors } : prev);
-        message.error({ content: t('device.multi.editValidationFailed'), duration: ERROR_FEEDBACK_DURATION_SECONDS });
-        return;
-      }
-    }
-
-    if (editModal.mode === 'add') {
-      try {
-        const addResult = await addMutation.mutateAsync({ deviceId, objectPath });
-        setFeedback(fbKey, {
-          kind: 'multi',
-          action: 'add',
-          submitStatus: 'queued',
-          taskId: addResult.taskId,
-          detail: t('device.multi.addObjectQueued'),
-          at: Date.now(),
-        });
-        message.success({ content: t('device.multi.addObjectQueued'), duration: 4 });
-        setEditModal(null);
-        const addTask = await waitForTaskTerminal(addResult.taskId);
-        if (addTask.status !== 'completed') {
-          throw new Error(addTask.errorMessage || t('device.multi.addInstanceFailed', { status: addTask.status }));
-        }
-
-        // 优先从 AddObject task.result.instance_number 取新实例号（后端 acs/handler.go::handleAddObjectResponse
-        // 解析 SOAP AddObjectResponse 写入)。该字段最权威,不受 schema endpoint 同步延迟影响。
-        const instNumberRaw = addTask.result?.instance_number;
-        if (typeof instNumberRaw === 'number' && instNumberRaw > 0) {
-          targetInstanceId = String(instNumberRaw);
-        }
-
-        // 后备：schema diff 兜底（旧路径,与 BS 后端 GPV 写库存在 race;仅在 result 缺失时使用）。
-        if (!targetInstanceId) {
-          const refreshed = await refetch();
-          const nextObject = refreshed.data?.objects.find((o) => o.path === objectPath);
-          const knownInstances = new Set(instanceIds);
-          targetInstanceId = nextObject?.currentInstances.map((n) => String(n)).find((instId) => !knownInstances.has(instId));
-        } else {
-          // 拿到 instance_number 后仍主动 refetch 一次,让 schemaByPath 有该实例的默认值供后续 SPV 对比；
-          // 但不阻塞:即使 refetch 还没看到新实例,SPV 也能按用户填值直接发。
-          void refetch();
-        }
-
-        if (!targetInstanceId) {
-          throw new Error(t('device.multi.addInstanceNoId'));
-        }
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        notification.error({
-          message: t('device.multi.addFailed', { group: group.titleZh }),
-          description: errMsg,
-          duration: ERROR_FEEDBACK_DURATION_SECONDS,
-        });
-        setFeedback(fbKey, {
-          kind: 'multi',
-          action: 'add',
-          submitStatus: 'failed_to_queue',
-          detail: errMsg,
-          at: Date.now(),
-        });
-        return;
-      }
-    }
-
-    if (!targetInstanceId) return;
-
-    const { errors, updates, pendingEdits } = validateEditModalValues(editModal, targetInstanceId);
+    const targetInstanceId = editModal.instanceId;
+    const isPendingAdd = Boolean(targetInstanceId && pendingAdds.some((row) => row.tempId === targetInstanceId));
+    const { errors, updates, pendingEdits } = validateEditModalValues(
+      editModal,
+      editModal.mode === 'add' || isPendingAdd ? undefined : targetInstanceId,
+    );
 
     if (Object.keys(errors).length > 0) {
       setEditModal((prev) => prev ? { ...prev, errors } : prev);
       message.error({ content: t('device.multi.editValidationFailed'), duration: ERROR_FEEDBACK_DURATION_SECONDS });
-      if (editModal.mode === 'add') {
-        void rollbackAddedInstance(targetInstanceId, t('device.multi.editValidationFailed'));
-      }
+      return;
+    }
+
+    if (editModal.mode === 'add') {
+      const tempId = `new:${Date.now()}:${pendingAddCounterRef.current++}`;
+      setPendingAdds((prev) => [...prev, { tempId, values: pendingEdits }]);
+      setEditModal(null);
+      message.success({ content: t('device.multi.batchStaged'), duration: 3 });
+      return;
+    }
+
+    if (!targetInstanceId) return;
+
+    if (isPendingAdd) {
+      setPendingAdds((prev) => prev.map((row) => row.tempId === targetInstanceId ? { ...row, values: pendingEdits } : row));
+      setEditModal(null);
+      message.success({ content: t('device.multi.batchStaged'), duration: 3 });
       return;
     }
 
     if (updates.length === 0) {
-      message.info({ content: editModal.mode === 'add' ? t('device.multi.addInstanceSuccess') : t('device.multi.noRowChange'), duration: 4 });
+      setRowEdits((prev) => {
+        const next = new Map(prev);
+        next.delete(targetInstanceId);
+        return next;
+      });
+      clearDraftPrefix(fbKey, `${targetInstanceId}.`);
       setEditModal(null);
-      if (editModal.mode === 'add') {
-        void syncRelatedParameters();
-      }
+      message.info({ content: t('device.multi.noRowChange'), duration: 4 });
       return;
     }
 
-    try {
-      const result = await updateMutation.mutateAsync({ deviceId, parameters: updates });
-      setRowEdits((prev) => {
-        const next = new Map(prev);
-        next.set(targetInstanceId, { edits: pendingEdits, errors: {} });
-        return next;
-      });
-      Object.entries(pendingEdits).forEach(([leaf, value]) => {
-        setDraftField(fbKey, `${targetInstanceId}.${leaf}`, value);
-      });
-      setFeedback(fbKey, {
-        kind: 'multi',
-        action: 'save',
-        submitStatus: 'queued',
-        taskId: result.taskId,
-        savedInstId: targetInstanceId,
-        saveMode: editModal.mode,
-        // Add 流程的 SPV 入队 — 记录刚 AddObject 创建出的实例号，一旦 SPV failed,
-        // lastTask 终态 useEffect 会据此自动 DeleteObject 回滚该实例(与 BSC 须知一致)。
-        instanceNumber: editModal.mode === 'add' && /^\d+$/.test(targetInstanceId)
-          ? Number(targetInstanceId)
-          : undefined,
-        detail: editModal.mode === 'add' ? t('device.multi.detailAdd', { instId: targetInstanceId, count: updates.length }) : t('device.multi.detailRow', { instId: targetInstanceId, count: updates.length }),
-        at: Date.now(),
-      });
-      setEditModal(null);
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      if (editModal.mode === 'add') {
-        void rollbackAddedInstance(targetInstanceId, errMsg);
+    setRowEdits((prev) => {
+      const next = new Map(prev);
+      next.set(targetInstanceId, { edits: pendingEdits, errors: {} });
+      return next;
+    });
+    Object.entries(pendingEdits).forEach(([leaf, value]) => {
+      setDraftField(fbKey, `${targetInstanceId}.${leaf}`, value);
+    });
+    setEditModal(null);
+    message.success({ content: t('device.multi.batchStaged'), duration: 3 });
+  }, [clearDraftPrefix, editModal, fbKey, pendingAdds, setDraftField, t, validateEditModalValues]);
+
+  const pendingChangeCount = pendingAdds.length + pendingDeletes.size + rowEdits.size;
+  const batchAwaitingDevice = Boolean(
+    lastAction?.submitStatus === 'queued'
+    && lastAction.taskId
+    && lastAction.syncedForTaskId !== lastAction.taskId
+    && (!lastTask || !isDeviceTaskTerminal(lastTask.status) || lastTask.status === 'completed'),
+  );
+
+  const handleSubmitBatch = useCallback(async () => {
+    if (pendingChangeCount === 0 || submittingRef.current || batchAwaitingDevice) return;
+    const deletedInstIds = Array.from(pendingDeletes);
+    const editedRows = Array.from(rowEdits.entries());
+    const addRows = [...pendingAdds];
+    const validationErrors: string[] = [];
+    const validateDraftCell = (label: string, leaf: string, value: string, targetInstId?: string): string | null => {
+      const item = targetInstId
+        ? (schemaByPath.get(`${objectPath}${targetInstId}.${leaf}`) ?? leafSchemaByLeaf.get(leaf))
+        : leafSchemaByLeaf.get(leaf);
+      const param = groupParamByLeaf.get(leaf);
+      if (String(value ?? '').trim() === '') {
+        if (param?.required) return `${label}.${leaf}: ${t('device.multi.packed.fieldRequired')}`;
+        return null;
       }
+      const err = validateQuickSettingsCellValue(
+        leaf,
+        value,
+        effectiveParamType(item, param),
+        effectiveParamConstraints(item, param),
+      );
+      return err ? `${label}.${leaf}: ${err}` : null;
+    };
+
+    addRows.forEach((row, idx) => {
+      Object.entries(row.values).forEach(([leaf, value]) => {
+        const err = validateDraftCell(`+${idx + 1}`, leaf, value);
+        if (err) validationErrors.push(err);
+      });
+    });
+    editedRows.forEach(([instId, state]) => {
+      Object.entries(state.edits).forEach(([leaf, value]) => {
+        const err = validateDraftCell(instId, leaf, value, instId);
+        if (err) validationErrors.push(err);
+      });
+    });
+
+    if (validationErrors.length > 0) {
+      const detail = validationErrors.slice(0, 4).join('; ');
       notification.error({
-        message: editModal.mode === 'add'
-          ? t('device.multi.addQueueFailed', { group: group.titleZh })
-          : t('device.multi.rowQueueFailed', { instId: targetInstanceId ?? '', group: group.titleZh }),
-        description: t('device.multi.queueFailedDesc', { count: updates.length, err: errMsg }),
+        message: t('device.multi.batchSubmitFailed', { group: group.titleZh }),
+        description: validationErrors.length > 4 ? `${detail}; ...` : detail,
         duration: ERROR_FEEDBACK_DURATION_SECONDS,
       });
+      return;
+    }
+
+    submittingRef.current = true;
+    setIsSubmitting(true);
+    const savedInstIds: string[] = [];
+    const submittedAddedInstIds: string[] = [];
+    const submittedDeletedInstIds: string[] = [];
+    const submittedEditedInstIds: string[] = [];
+    let lastTaskId: string | undefined;
+    let addCreatedInst: string | undefined;
+    let currentAddTempId: string | undefined;
+
+    try {
+      for (const instId of deletedInstIds) {
+        try {
+          const result = await deleteMutation.mutateAsync({ deviceId, objectPath: `${objectPath}${instId}.` });
+          lastTaskId = result.taskId;
+          savedInstIds.push(instId);
+          submittedDeletedInstIds.push(instId);
+          hideStaleInstance(instId);
+        } catch (err) {
+          if (isObjectInstanceNotFoundError(err)) {
+            hideStaleInstance(instId);
+            savedInstIds.push(instId);
+            submittedDeletedInstIds.push(instId);
+            continue;
+          }
+          throw err;
+        }
+      }
+
+      const editUpdates = editedRows.flatMap(([instId, state]) => buildUpdatesForRow(instId, state.edits));
+      if (editUpdates.length > 0) {
+        const result = await updateMutation.mutateAsync({ deviceId, parameters: editUpdates });
+        lastTaskId = result.taskId;
+        editedRows.forEach(([instId]) => {
+          savedInstIds.push(instId);
+          submittedEditedInstIds.push(instId);
+        });
+      }
+
+      for (const row of addRows) {
+        currentAddTempId = row.tempId;
+        const addResult = await addMutation.mutateAsync({ deviceId, objectPath });
+        const addTask = await waitForTaskTerminal(addResult.taskId);
+        if (addTask.status !== 'completed') {
+          throw new Error(addTask.errorMessage || t('device.multi.addInstanceFailed', { status: addTask.status }));
+        }
+        const instNumberRaw = addTask.result?.instance_number;
+        if (typeof instNumberRaw !== 'number' || instNumberRaw <= 0) {
+          throw new Error(t('device.multi.addInstanceNoId'));
+        }
+        addCreatedInst = String(instNumberRaw);
+        const updates = Object.entries(row.values).map(([leaf, value]) => {
+          const item = leafSchemaByLeaf.get(leaf);
+          const param = groupParamByLeaf.get(leaf);
+          return {
+            parameterPath: `${objectPath}${addCreatedInst}.${leaf}`,
+            parameterValue: value,
+            parameterType: effectiveParamType(item, param),
+          };
+        });
+        if (updates.length > 0) {
+          const result = await updateMutation.mutateAsync({ deviceId, parameters: updates });
+          lastTaskId = result.taskId;
+          if (result.taskId) {
+            const spvTask = await waitForTaskTerminal(result.taskId);
+            if (spvTask.status !== 'completed') {
+              throw new Error(spvTask.errorMessage || t('device.multi.addInstanceFailed', { status: spvTask.status }));
+            }
+          }
+          savedInstIds.push(addCreatedInst);
+          submittedAddedInstIds.push(addCreatedInst);
+        }
+        addCreatedInst = undefined;
+        currentAddTempId = undefined;
+      }
+
       setFeedback(fbKey, {
         kind: 'multi',
-        action: editModal.mode === 'add' ? 'add' : 'save',
-        submitStatus: 'failed_to_queue',
-        detail: t('device.multi.detailFailed', { target: targetInstanceId ?? t('device.multi.actionAdd'), err: errMsg }),
+        action: addRows.length > 0 ? 'add' : deletedInstIds.length > 0 ? 'delete' : 'save',
+        submitStatus: 'queued',
+        taskId: lastTaskId,
+        savedInstIds,
+        addedInstIds: submittedAddedInstIds,
+        deletedInstIds: submittedDeletedInstIds,
+        editedInstIds: submittedEditedInstIds,
+        pendingAddRows: addRows,
+        detail: t('device.multi.batchSubmitted', { count: pendingChangeCount }),
         at: Date.now(),
+      });
+      message.success({ content: t('device.multi.batchSubmitted', { count: pendingChangeCount }), duration: 4 });
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (addCreatedInst) {
+        await rollbackAddedInstance(addCreatedInst, errMsg);
+      }
+      if (currentAddTempId) {
+        setPendingAdds((prev) => prev.filter((row) => row.tempId !== currentAddTempId));
+      }
+      setFeedback(fbKey, {
+        kind: 'multi',
+        action: addRows.length > 0 ? 'add' : deletedInstIds.length > 0 ? 'delete' : 'save',
+        submitStatus: 'failed_to_queue',
+        detail: t('device.multi.detailFailed', { target: t('device.multi.batchSubmit'), err: errMsg }),
+        at: Date.now(),
+      });
+      notification.error({
+        message: t('device.multi.batchSubmitFailed', { group: group.titleZh }),
+        description: errMsg,
+        duration: ERROR_FEEDBACK_DURATION_SECONDS,
       });
     } finally {
       void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
-    }
-    } finally {
       submittingRef.current = false;
       setIsSubmitting(false);
     }
-  }, [addMutation, deviceId, editModal, fbKey, group.titleZh, objectPath, queryClient, refetch, rollbackAddedInstance, setDraftField, setFeedback, syncRelatedParameters, updateMutation, validateEditModalValues, waitForTaskTerminal, t]);
+  }, [
+    addMutation,
+    batchAwaitingDevice,
+    buildUpdatesForRow,
+    deleteMutation,
+    deviceId,
+    fbKey,
+    group.titleZh,
+    groupParamByLeaf,
+    hideStaleInstance,
+    leafSchemaByLeaf,
+    objectPath,
+    pendingAdds,
+    pendingChangeCount,
+    pendingDeletes,
+    queryClient,
+    rollbackAddedInstance,
+    rowEdits,
+    schemaByPath,
+    setFeedback,
+    t,
+    updateMutation,
+    waitForTaskTerminal,
+  ]);
 
   const hasRows = tableRows.length > 0;
   const columns: ColumnType<TableRow>[] = [
@@ -1780,9 +2021,16 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       key: 'instanceId',
       width: multiColumnWidth(hasRows, 80),
       fixed: hasRows ? 'left' : undefined,
-      render: (_v: unknown, row: TableRow) => (
-        <Text strong>{row.instanceId}</Text>
-      ),
+      render: (_v: unknown, row: TableRow, idx: number) => {
+        const displayId = row.pending === 'add' ? `+${idx + 1}` : row.instanceId;
+        return (
+          <Space size={4}>
+            <Text strong>{displayId}</Text>
+            {row.pending === 'add' && <Tag color="blue">{t('device.multi.pendingAdd')}</Tag>}
+            {row.pending === 'edit' && <Tag color="gold">{t('device.multi.pendingEdit')}</Tag>}
+          </Space>
+        );
+      },
     },
     ...displayColumns.map<ColumnType<TableRow>>((column) => {
       const leaf = column.leaf || '';
@@ -1844,8 +2092,8 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
           >
             {t('common.edit')}
           </Button>
-          <Popconfirm title={t('device.multi.deleteConfirm')} onConfirm={() => row.instanceId && void handleDelete(row.instanceId)} disabled={!canDelete || (isIpsecGroup && !ipsecGlobalEnabled)}>
-            <Button type="link" size="small" danger icon={<DeleteOutlined />} disabled={!canDelete || (isIpsecGroup && !ipsecGlobalEnabled)}>
+          <Popconfirm title={t('device.multi.deleteConfirm')} onConfirm={() => row.instanceId && void handleDelete(row.instanceId)} disabled={(!canDelete && row.pending !== 'add') || (isIpsecGroup && !ipsecGlobalEnabled)}>
+            <Button type="link" size="small" danger icon={<DeleteOutlined />} disabled={(!canDelete && row.pending !== 'add') || (isIpsecGroup && !ipsecGlobalEnabled)}>
               {t('common.delete')}
             </Button>
           </Popconfirm>
@@ -1856,11 +2104,12 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
 
   const title = locale === 'zh-CN' ? group.titleZh : group.titleEn;
   const maxInstances = group.maxInstances && group.maxInstances > 0 ? group.maxInstances : undefined;
-  const reachedMax = maxInstances !== undefined && instanceIds.length >= maxInstances;
+  const effectiveInstanceCount = instanceIds.length - pendingDeletes.size + pendingAdds.length + submittedPendingAdds.length;
+  const reachedMax = maxInstances !== undefined && effectiveInstanceCount >= maxInstances;
   const cardTitle = maxInstances !== undefined
-    ? `${title}（${instanceIds.length}/${maxInstances}）`
+    ? `${title}（${effectiveInstanceCount}/${maxInstances}）`
     : title;
-  const addDisabled = !canAdd || reachedMax || updateMutation.isPending || addMutation.isPending || (isIpsecGroup && !ipsecGlobalEnabled);
+  const addDisabled = !canAdd || reachedMax || updateMutation.isPending || addMutation.isPending || isSubmitting || batchAwaitingDevice || (isIpsecGroup && !ipsecGlobalEnabled);
   const editModalIpsecEnabled = !isIpsecGroup || ipsecGlobalEnabled;
   const addBtn = (
     <Button type="default" icon={<PlusOutlined />} onClick={openAddModal} disabled={addDisabled}>
@@ -1897,7 +2146,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
             const isFailed = visibleTaskStatus === 'failed' && Boolean(lastTask?.errorMessage);
             const briefFault = isFailed ? formatDeviceFaultBrief(lastTask?.errorMessage) : '';
             const tag = (
-              <Tag icon={spec.icon} color={spec.color}>
+              <Tag icon={spec.icon} color={spec.color} style={feedbackTagStyle()}>
                 {spec.label} · {lastAction.detail}
                 {briefFault ? ` · ${briefFault}` : ''} · {formatTime(lastAction.at)}
               </Tag>
@@ -1914,6 +2163,23 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
             </Tooltip>
           ) : (
             addBtn
+          )}
+          {pendingChangeCount > 0 && (
+            <>
+              <Button size="small" onClick={clearLocalBatchChanges} disabled={isSubmitting || batchAwaitingDevice}>
+                {t('device.multi.batchClear')}
+              </Button>
+              <Button
+                size="small"
+                type="primary"
+                icon={<SendOutlined />}
+                loading={isSubmitting || batchAwaitingDevice}
+                disabled={batchAwaitingDevice}
+                onClick={() => void handleSubmitBatch()}
+              >
+                {t('device.multi.batchSubmitWithCount', { count: pendingChangeCount })}
+              </Button>
+            </>
           )}
         </Space>
       }

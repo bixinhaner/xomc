@@ -224,6 +224,17 @@ export function validateValue(
   return null;
 }
 
+export function validateLteQOffsetValue(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const num = Number(trimmed);
+  if (!Number.isInteger(num)) return '请输入整数';
+  if (num < -24 || num > 24 || num % 2 !== 0) {
+    return 'QOffset 仅支持 -24 到 24 的偶数';
+  }
+  return null;
+}
+
 function toParameterType(type?: string | null): ParameterType | null {
   switch (String(type ?? '').trim()) {
     case 'string':
