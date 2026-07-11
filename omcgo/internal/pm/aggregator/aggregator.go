@@ -566,14 +566,14 @@ func normalizeSQLValue(valueExpr, unitExpr, statisExpr, numberProcessExpr, metri
 	round2Numeric := fmt.Sprintf("round((%s)::numeric, 2)", valueExpr)
 	return fmt.Sprintf(`CASE
         WHEN btrim(COALESCE(%[2]s, '')) = '' OR btrim(COALESCE(%[3]s, '')) = '' THEN ('missing PM indicator metadata for ' || %[5]s)::double precision
+        WHEN btrim(%[2]s) = '%%' OR lower(btrim(%[3]s)) IN ('pct','avg') THEN
+            CASE WHEN btrim(%[2]s) = '%%' AND %[11]s > 100 THEN 100 ELSE %[10]s END
         WHEN btrim(%[2]s) = 'number' AND %[4]s <> '%[8]s' THEN
             CASE %[4]s
                 WHEN '%[6]s' THEN CEIL(%[1]s)
                 WHEN '%[7]s' THEN FLOOR(%[1]s)
                 ELSE %[9]s
             END
-        WHEN btrim(%[2]s) = '%%' OR lower(btrim(%[3]s)) IN ('pct','avg') THEN
-            CASE WHEN btrim(%[2]s) = '%%' AND %[11]s > 100 THEN 100 ELSE %[10]s END
         WHEN %[1]s = trunc(%[1]s) THEN %[1]s
         ELSE %[10]s
     END`,
