@@ -7,8 +7,10 @@ import (
 // Metrics 是 Router 的可选 Prometheus 指标。
 // 调用 NewMetrics(nil) 得到匿名 Registry，仍能消费但不导出到 /metrics。
 type Metrics struct {
-	hits   *prometheus.CounterVec // by tier=L1/L2/DB
-	misses *prometheus.CounterVec // by reason=orphan/invalid_metadata
+	hits                    *prometheus.CounterVec // by tier=L1/L2/DB
+	misses                  *prometheus.CounterVec // by reason=orphan/invalid_metadata
+	cacheVersionReadFailure prometheus.Counter
+	staleEvictions          prometheus.Counter
 }
 
 // NewMetrics 构造指标。reg 传 nil 会落入匿名 Registry（仅供测试）。
@@ -29,8 +31,20 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name:      "lookup_miss_total",
 			Help:      "KPI Router lookups that returned no route (orphan / invalid metadata).",
 		}, []string{"reason"}),
+		cacheVersionReadFailure: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "omc",
+			Subsystem: "kpi_router",
+			Name:      "cache_version_read_failures_total",
+			Help:      "KPI Router cache version reads that failed open.",
+		}),
+		staleEvictions: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "omc",
+			Subsystem: "kpi_router",
+			Name:      "stale_evictions_total",
+			Help:      "KPI Router L1 evictions caused by cache version changes.",
+		}),
 	}
-	reg.MustRegister(m.hits, m.misses)
+	reg.MustRegister(m.hits, m.misses, m.cacheVersionReadFailure, m.staleEvictions)
 	return m
 }
 
@@ -46,4 +60,18 @@ func (m *Metrics) miss(reason string) {
 		return
 	}
 	m.misses.WithLabelValues(reason).Inc()
+}
+
+func (m *Metrics) versionReadFailed() {
+	if m == nil {
+		return
+	}
+	m.cacheVersionReadFailure.Inc()
+}
+
+func (m *Metrics) staleEvicted() {
+	if m == nil {
+		return
+	}
+	m.staleEvictions.Inc()
 }

@@ -38,13 +38,27 @@ func newRedisHarness(t *testing.T) *RedisCache {
 	return NewRedisCache(rdb)
 }
 
+func newRedisCachePair(t *testing.T) (*RedisCache, *RedisCache) {
+	t.Helper()
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	t.Cleanup(mr.Close)
+	first := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	second := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() {
+		_ = first.Close()
+		_ = second.Close()
+	})
+	return NewRedisCache(first), NewRedisCache(second)
+}
+
 // Case 1: 默认 cache_version=0，Put → Get 应命中。
 func TestRedisCache_PutThenGet_Hit(t *testing.T) {
 	c := newRedisHarness(t)
 	productID := uuid.New()
 	want := sampleRoute(productID)
 
-	require.NoError(t, c.Put(context.Background(), want))
+	require.NoError(t, c.Put(context.Background(), want, 0))
 
 	got, err := c.Get(context.Background(), productID)
 	require.NoError(t, err)
@@ -60,7 +74,7 @@ func TestRedisCache_BumpVersion_InvalidatesAll(t *testing.T) {
 	c := newRedisHarness(t)
 	productID := uuid.New()
 
-	require.NoError(t, c.Put(context.Background(), sampleRoute(productID)))
+	require.NoError(t, c.Put(context.Background(), sampleRoute(productID), 0))
 
 	_, err := c.BumpVersion(context.Background())
 	require.NoError(t, err)
@@ -83,7 +97,7 @@ func TestRedisCache_StaleAfterRemoteIncr(t *testing.T) {
 	c2 := NewRedisCache(rdb)
 
 	productID := uuid.New()
-	require.NoError(t, c1.Put(context.Background(), sampleRoute(productID)))
+	require.NoError(t, c1.Put(context.Background(), sampleRoute(productID), 0))
 
 	got, err := c1.Get(context.Background(), productID)
 	require.NoError(t, err)
