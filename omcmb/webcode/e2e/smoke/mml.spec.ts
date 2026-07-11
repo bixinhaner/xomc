@@ -13,7 +13,7 @@ import { expectPageRenders, smokeLogin } from './helpers';
  *                       + 右侧命令表(.ant-table) + 头部 nav.mml.commands（命令树）
  *   - /mml/task-records src/pages/mml/TaskRecord   ListPageLayout 标题 nav.mml.taskRecord（任务记录）
  *                       + FilterBar(.ant-form，mml.taskName 任务名称) + DataTable(.ant-table)
- *   - /mml/script       src/pages/mml/ScriptTask   ListPageLayout 标题 nav.mml.script（脚本任务，
+ *   - /mml/script       src/pages/mml/ScriptTask   ListPageLayout 标题 nav.mml.script（脚本管理，
  *                       读 mml_scripts）+ 新增脚本按钮(mml.newScript) + DataTable(.ant-table)
  *   - /mml/admin/catalog src/pages/mml/admin/catalog 命令目录后台（withAdminRole 守卫，
  *                       admin 凭据可入，被拦则跳 /403）；Card 布局：左 LeftNavTree(.ant-tree)
@@ -66,12 +66,12 @@ test.describe('MML控制台冒烟（真实后端）', { tag: '@smoke' }, () => {
     await expect(page.locator('.ant-table').first()).toBeVisible();
   });
 
-  test('/mml/script 脚本任务（脚本库列表）渲染', async ({ page }) => {
+  test('/mml/script 脚本管理（脚本库列表）渲染', async ({ page }) => {
     await expectPageRenders(page, '/mml/script');
 
     // 页面标题 nav.mml.script（heading 角色，避开同名侧边栏菜单项）
     await expect(
-      page.getByRole('heading', { name: /脚本任务|Script Task/ }),
+      page.getByRole('heading', { name: /脚本管理|Script Management/ }),
     ).toBeVisible();
     // 头部"新增脚本"按钮（mml.newScript）+ 脚本表格骨架（空表也有表头）
     await expect(
