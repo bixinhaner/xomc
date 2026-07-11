@@ -176,6 +176,33 @@ func TestBuildIDMap_PropagatesRepoError(t *testing.T) {
 	}
 }
 
+func TestNormalizeDurationArithmetic_UsesRegisteredCounterPerDeviceType(t *testing.T) {
+	cases := []struct {
+		dt   DeviceType
+		want string
+	}{
+		{DeviceTypeENB, "OTHER_CellServiceTime/C000060273*100"},
+		{DeviceTypeGNB, "OTHER_CellServiceTime/C010120025*100"},
+		{DeviceTypeGSM, "OTHER_CellServiceTime/CGSM0080001*100"},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.dt), func(t *testing.T) {
+			got := normalizeDurationArithmetic(tc.dt, "OTHER_CellServiceTime/Duration*100")
+			if got != tc.want {
+				t.Fatalf("normalizeDurationArithmetic() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeDurationArithmetic_ReplacesCompleteTokenOnly(t *testing.T) {
+	got := normalizeDurationArithmetic(DeviceTypeENB, "DurationValue+MyDuration+Duration")
+	want := "DurationValue+MyDuration+C000060273"
+	if got != want {
+		t.Fatalf("normalizeDurationArithmetic() = %q, want %q", got, want)
+	}
+}
+
 func TestUpdateAffectsRoute_OnlyRouteFields(t *testing.T) {
 	cnName := "展示名"
 	desc := "只影响展示"
