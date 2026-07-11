@@ -133,7 +133,10 @@ func initPMModule(c *Container) error {
 		c.PgPool,
 		c.Redis,
 		logger.Named("indicator"),
-	)
+	).WithRouteInvalidator(func(ctx context.Context, trigger indicator.RouteInvalidationTrigger) error {
+		_, err := c.KPIRouteInvalidator.Invalidate(ctx, router.InvalidationTrigger(trigger))
+		return err
+	})
 
 	indicatorHandler := indicator.NewIndicatorHandler(indicatorSvc, logger.Named("indicator"))
 

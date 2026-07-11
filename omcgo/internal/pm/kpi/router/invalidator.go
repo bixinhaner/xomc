@@ -17,6 +17,9 @@ type InvalidationTrigger string
 const (
 	InvalidationTriggerManual          InvalidationTrigger = "manual"
 	InvalidationTriggerIndicatorReload InvalidationTrigger = "indicator_reload"
+	InvalidationTriggerIndicatorWrite  InvalidationTrigger = "indicator_write"
+	InvalidationTriggerFormulaWrite    InvalidationTrigger = "platform_formula_write"
+	InvalidationTriggerGroupDelete     InvalidationTrigger = "indicator_group_delete"
 )
 
 // InvalidationScope 描述一次失效能够覆盖的进程范围。
@@ -176,7 +179,11 @@ func (i *Invalidator) recordFailure(ctx context.Context, trigger InvalidationTri
 
 func safeInvalidationTrigger(trigger InvalidationTrigger) string {
 	switch trigger {
-	case InvalidationTriggerManual, InvalidationTriggerIndicatorReload:
+	case InvalidationTriggerManual,
+		InvalidationTriggerIndicatorReload,
+		InvalidationTriggerIndicatorWrite,
+		InvalidationTriggerFormulaWrite,
+		InvalidationTriggerGroupDelete:
 		return string(trigger)
 	default:
 		return "other"
