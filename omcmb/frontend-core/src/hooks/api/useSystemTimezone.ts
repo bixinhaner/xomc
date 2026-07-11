@@ -1,5 +1,5 @@
 /**
- * 系统时区读取 hook（issue #459，子单 D / 母单 #455）。三皮肤共享。
+ * 系统时区读取 hook（issue #459，子单 D / 母单 #455）。
  *
  * 系统时区唯一源 = sys_configs（category='basic', key='timezoneCode'，#456 子单 A）。
  * 该配置项**非公开**（is_public=false），故只能在**登录后**经鉴权通道

@@ -7818,7 +7818,7 @@ const messages: Record<string, string> = {
   'perf.kpiQuery.pivot.emptyHint':       '暂无数据，请选择查询条件后点击"查询"',
   'perf.kpiQuery.pivot.totalRows':       '共 {count} 行',
   'perf.kpiQuery.pivot.measObject':       '测量对象',
-  // qa-614 c8 (#366): v2/v3 KPI 查询/取数页 i18n 补键（v2 只读查询页 + v3 HUD 取数页）
+  // qa-614 c8 (#366): KPI 查询/取数页 i18n 补键
   'perf.kpiQuery.v2.title':              '指标查询',
   'perf.kpiQuery.v2.desc':              '基于保存的查询模板跑多设备聚合查询，结果透视为时间 × 指标表',
   'perf.kpiQuery.truncated':            '结果已截断',

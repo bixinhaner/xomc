@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { activationStatusLabelOf, activationStatusOf } from '../activationStatus';
 
-describe('activationStatusOf — 三皮肤共享的"激活状态"判定单一来源', () => {
+describe('activationStatusOf — 共享的“激活状态”判定单一来源', () => {
   it('"1" → active', () => {
     expect(activationStatusOf('1')).toBe('active');
   });

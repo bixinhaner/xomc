@@ -23,7 +23,7 @@
 | 完成定义 / 发布门控 | `project/dod.md` · `project/release-gate.md` | DoD 清单 / Release Gate 清单 |
 | 全流程编排 Skill | `.claude/commands/ship.md` | **活** —— `/ship` 一键贯穿全流程，只调度委派标准套件 + 项目自有 Skill |
 | 旧开发流水线设计 | `project/dev-pipeline-design-20260420.md` | ⚠️ **归档** —— 旧 `/dev-pipeline` S0–S7 设计，已被 `/ship` 取代，仅留作硬门 rationale 参考 |
-| 前端多皮肤架构 | `project/frontend-multi-skin-plan-20260422.md` | webcode / v2 / v3 三皮肤 + frontend-core 业务层方案 |
+| 前端历史多皮肤方案（已归档） | `project/frontend-multi-skin-plan-20260422.md` | V2/V3 已移除；正文仅供历史追溯 |
 | 里程碑 / 冲刺 / 发布 | `project/milestone/2026Q2-to-RC.md` · `project/sprint/sprint-{09,10,11}.md` · `project/release/RC-2026Q2-001.md` | 当前 RC 路线、活跃 Sprint、发布记录（更早 sprint 完成度快照见归档区）|
 | 决策记录 | `project/decision-records/` | Wave 级决策留档 |
 

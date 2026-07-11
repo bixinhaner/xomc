@@ -19,7 +19,7 @@
  * 后端按白名单只导命中行（空则导该设备全部小区/PLMN，向后兼容）。
  *
  * 消费方：仪表盘页（DeviceListPane/TaskDashboardPane）、adhoc 结果页（AdhocResultPanel）、
- * 指标查询页（KPIQuery，复用 kpiQueryToDashboardSelection）。放 frontend-core 供多页/多皮肤共享。
+ * 指标查询页（KPIQuery，复用 kpiQueryToDashboardSelection）。放 frontend-core 供多页面共享。
  */
 
 import type { QueryTemplatePayload } from '../types/pmQuery';

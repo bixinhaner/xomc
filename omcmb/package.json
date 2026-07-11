@@ -4,16 +4,13 @@
   "type": "module",
   "workspaces": [
     "frontend-core",
-    "webcode",
-    "webcode-v2",
-    "webcode-v3"
+    "webcode"
   ],
-  "description": "OMC 前端 workspace 根：frontend-core (共享业务层) + 三套皮肤 webcode(主/Antd5) + webcode-v2(shadcn/Tailwind) + webcode-v3(STARFORGE HUD)。多皮肤方案见 docs/project/frontend-multi-skin-plan-20260422.md",
+  "description": "OMC 前端 workspace 根：frontend-core（共享业务层）+ webcode（V1 主界面）。",
   "scripts": {
-    "lint": "eslint webcode/src webcode-v2/src webcode-v3/src frontend-core/src",
-    "lint:fix": "eslint webcode/src webcode-v2/src webcode-v3/src frontend-core/src --fix",
-    "skin-parity": "node scripts/skin-parity.mjs",
-    "typecheck": "npm run skin-parity && npm run typecheck --workspace webcode && npm run typecheck --workspace webcode-v2 && npm run typecheck --workspace webcode-v3"
+    "lint": "eslint webcode/src frontend-core/src",
+    "lint:fix": "eslint webcode/src frontend-core/src --fix",
+    "typecheck": "npm run typecheck --workspace webcode"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -22,6 +19,7 @@
     "eslint-plugin-react-refresh": "^0.4.24",
     "eslint-plugin-unused-imports": "^4.4.1",
     "globals": "^17.6.0",
+    "typescript": "~6.0.3",
     "typescript-eslint": "^8.48.0"
   },
   "comment:overrides": "#3 前端安全加固：把存在已知 CVE 的传递依赖钉到已修复版本（业务代码未直接引用这些包，均经 pro-components / ahooks / react-router-dom / openlayers 间接引入）。xlsx 的修复版仅在 SheetJS CDN 发布、npm 公共 registry 最高 0.18.5，无法经 overrides 修复，见 PR 遗留项。",

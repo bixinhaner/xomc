@@ -1,9 +1,9 @@
-// qa-614 c6 #368 / #483：UFTE 文件传输中心『设备升级』分类聚合（三皮肤共享）。
+// qa-614 c6 #368 / #483：UFTE 文件传输中心『设备升级』分类聚合（共享业务层）。
 //
 // 后端 ufte_task_types 把升级类拆成 enb_upgrade(4G) / gnb_upgrade(5G) / gsm_upgrade(2G)
 // 三条独立 category（数据契约不变）。本工具在**展示层**把这三条折叠为单个虚拟分类
 // device_upgrade（『设备升级』），制式由具体模板(typeCode)区分，并提供查询参数展开
-// ——三皮肤（v1/v2/v3）统一调用，保证分类口径一致（三皮肤铁律：业务逻辑/数据契约
+// ——页面统一调用，保证分类口径一致（业务逻辑/数据契约
 // 改在 frontend-core 一处生效）。
 //
 // 关键事实：后端任务/设备列表的 category 过滤实际是 `category → softwareTaskType 集`

@@ -2,7 +2,7 @@
 
 OMC（运营商小基站 TR-069/CWMP 无线网管）的前端主皮肤 UI 壳。技术栈：React 19 + TypeScript（严格模式）+ Vite 7 + Ant Design 5 + Pro-Components + Zustand 5 + React Query v5 + ECharts 6 + OpenLayers。
 
-> 本文件是「前端接手页」。仓库全景见根 [`README.md`](../../README.md)，AI 与人工的硬约束见根 [`CLAUDE.md`](../../CLAUDE.md) §3（仓库结构）、§7（关键路径）、§8.3（前端规范），多皮肤演进见 [`docs/project/frontend-multi-skin-plan-20260422.md`](../../docs/project/frontend-multi-skin-plan-20260422.md)。
+> 本文件是「前端接手页」。仓库全景见根 [`README.md`](../../README.md)，AI 与人工的硬约束见根 [`CLAUDE.md`](../../CLAUDE.md) §3（仓库结构）、§7（关键路径）、§8.3（前端规范）。历史架构见 [`docs/project/frontend-multi-skin-plan-20260422.md`](../../docs/project/frontend-multi-skin-plan-20260422.md)。
 
 ---
 
@@ -12,7 +12,7 @@ OMC（运营商小基站 TR-069/CWMP 无线网管）的前端主皮肤 UI 壳。
 
 ```
 omcmb/
-├── frontend-core/        # 业务层（多皮肤共享）：services/api · hooks/api · store · types · i18n · mock · utils
+├── frontend-core/        # 共享业务层：services/api · hooks/api · store · types · i18n · mock · utils
 ├── webcode/              # 主皮肤（本目录，Ant Design 5，日常开发以此为主）
 ```
 
@@ -49,7 +49,7 @@ npm run test         # Vitest 单元测试（含 frontend-core 下 __tests__；t
 npm run test:e2e     # Playwright E2E（test:e2e:ui 为交互模式）
 ```
 
-> workspace 级别命令在 `omcmb/` 根：`npm install` 一次装齐三皮肤 + core；`omcmb/ npm run lint` 同时扫 webcode 与 frontend-core。
+> workspace 级别命令在 `omcmb/` 根：`npm install` 安装 V1 + core；`omcmb/ npm run lint` 同时扫描 webcode 与 frontend-core。
 
 ---
 
@@ -59,7 +59,7 @@ npm run test:e2e     # Playwright E2E（test:e2e:ui 为交互模式）
 
 - `npm run dev:mock` / `npm run build:mock` 走 `--mode mock`，自动置 `VITE_USE_MOCK=true`，不依赖后端。
 - 默认 `npm run dev` 走真实后端（`/api` 代理到 `:8081`）。
-- Mock 数据与适配器在 `frontend-core/src/mock/`，三皮肤各自 `.env` 独立，互不干扰。
+- Mock 数据与适配器在 `frontend-core/src/mock/`，V1 的环境变量位于 `webcode/.env*`。
 
 ---
 
@@ -73,4 +73,4 @@ npm run test:e2e     # Playwright E2E（test:e2e:ui 为交互模式）
 
 - 仓库全景与上手 — 根 [`README.md`](../../README.md)
 - 前端规范（硬约束权威）— 根 [`CLAUDE.md`](../../CLAUDE.md) §3 / §7 / §8.3
-- 多皮肤架构与演进 — [`docs/project/frontend-multi-skin-plan-20260422.md`](../../docs/project/frontend-multi-skin-plan-20260422.md)
+- 已归档的历史多皮肤方案 — [`docs/project/frontend-multi-skin-plan-20260422.md`](../../docs/project/frontend-multi-skin-plan-20260422.md)

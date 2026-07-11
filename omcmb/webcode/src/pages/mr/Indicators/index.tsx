@@ -93,7 +93,7 @@ export default function Indicators() {
     },
     { key: 'description', title: t('table.description'), dataIndex: 'description', ellipsis: true },
     { key: 'category', title: t('mr.category'), dataIndex: 'category', width: 100 },
-    // 注：mr_indicators 表无 mr_type / status 字段（v2/v3 亦不展示），故移除这两列，避免渲染 "undefined"。
+    // 注：mr_indicators 表无 mr_type / status 字段，故移除这两列，避免渲染 "undefined"。
   ], [t]);
 
   return (

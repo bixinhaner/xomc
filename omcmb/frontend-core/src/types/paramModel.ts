@@ -50,7 +50,7 @@ export interface StandardParam {
   maxValue?: string;
 }
 
-// ISSUE-488: 标准参数树 dataType / changeApplies 枚举化 —— 三皮肤共享。
+// ISSUE-488: 标准参数树 dataType / changeApplies 枚举化 —— 共享业务模型。
 //
 // dataType 枚举取值（小写，对齐 TR-069 与前端默认）。后端校验大小写不敏感
 // （strings.EqualFold），且 min/max 在 dataType==='string' 时按字符串长度校验、

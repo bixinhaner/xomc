@@ -7781,7 +7781,7 @@ const messages: Record<string, string> = {
   'perf.kpiQuery.pivot.emptyHint':       'No data. Please select query conditions and click "Query".',
   'perf.kpiQuery.pivot.totalRows':       'Total {count} rows',
   'perf.kpiQuery.pivot.measObject':       'Meas Object',
-  // qa-614 c8 (#366): v2/v3 KPI 查询/取数页 i18n 补键（v2 只读查询页 + v3 HUD 取数页）
+  // qa-614 c8 (#366): KPI 查询/取数页 i18n 补键
   'perf.kpiQuery.v2.title':              'Metric Query',
   'perf.kpiQuery.v2.desc':              'Run multi-device aggregated queries from saved templates; results pivoted as time × metric table',
   'perf.kpiQuery.truncated':            'Results truncated',

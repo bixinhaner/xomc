@@ -1222,7 +1222,7 @@ export default function DeviceList() {
   // 此前误用 cell_status==='normal' 当激活，导致在线设备因小区 inactive 显示未激活。
   //
   // ™ 判定口径由 frontend-core/utils/activationStatus.ts 统一控管——
-  // 三皮肤(webcode / webcode-v2 / webcode-v3) + 列表/详情头/v2 KV/v3 KV 全调同一函数，
+  // V1 列表与详情统一调用同一函数，
   // 在上层各自渲染 Tag/文本。修改判定请只改 utility。
   const renderActivationStatus = useCallback((opState: string | undefined | null) => {
     const status = activationStatusOf(opState);
