@@ -14,6 +14,7 @@ import { createApiSwitch } from '../../services/apiSwitch';
 import type {
   ListTemplateParams,
   CreateTemplateInput,
+  QueryTemplate,
   UpdateTemplateInput,
 } from '../../types/pmQuery';
 import type { AggregatedQueryParams, AggregatedRow } from '../../types/pmDashboard';
@@ -45,7 +46,17 @@ export function useUpdateQueryTemplate() {
   return useMutation({
     mutationFn: ({ id, input }: { id: string; input: UpdateTemplateInput }) =>
       pmQueryApi.update(id, input),
-    onSuccess: (_d, vars) => {
+    onSuccess: (updated, vars) => {
+      qc.setQueriesData<{ items: QueryTemplate[]; total: number }>(
+        { queryKey: [...KEY, 'list'] },
+        (current) => current == null
+          ? current
+          : {
+              ...current,
+              items: current.items.map((item) => item.id === updated.id ? updated : item),
+            },
+      );
+      qc.setQueryData([...KEY, 'detail', vars.id], updated);
       void qc.invalidateQueries({ queryKey: [...KEY, 'list'] });
       void qc.invalidateQueries({ queryKey: [...KEY, 'detail', vars.id] });
     },
