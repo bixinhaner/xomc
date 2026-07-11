@@ -716,6 +716,73 @@ func commandString(entry map[string]interface{}, key string) string {
 	return strings.TrimSpace(v)
 }
 
+func commandParameters(entry map[string]interface{}) map[string]interface{} {
+	raw, ok := entry["parameters"].(map[string]interface{})
+	if ok {
+		return raw
+	}
+	return nil
+}
+
+func formatMMLParameterValue(value interface{}) string {
+	s := strings.TrimSpace(fmt.Sprint(value))
+	if s == "" {
+		return "{}"
+	}
+	if strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}") {
+		return s
+	}
+	return "{" + s + "}"
+}
+
+func formatMMLParameterList(params map[string]interface{}) string {
+	if len(params) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(params))
+	for key := range params {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%s", key, formatMMLParameterValue(params[key])))
+	}
+	return strings.Join(parts, ",")
+}
+
+func stripDeviceSuffixFromMML(rawLine, deviceSN string) string {
+	line := strings.TrimSpace(rawLine)
+	if line == "" {
+		return ""
+	}
+	if deviceSN != "" {
+		suffix := ";" + strings.TrimSpace(deviceSN)
+		if strings.HasSuffix(line, suffix) {
+			line = strings.TrimSpace(strings.TrimSuffix(line, suffix))
+		}
+	}
+	line = strings.TrimSuffix(line, ";")
+	return strings.TrimSpace(line)
+}
+
+func formatMMLScriptForResult(command map[string]interface{}, rawLine, deviceSN string) string {
+	if script := stripDeviceSuffixFromMML(rawLine, deviceSN); script != "" {
+		return script
+	}
+	code := commandString(command, "command_code")
+	if code == "" {
+		return ""
+	}
+	if params := formatMMLParameterList(commandParameters(command)); params != "" {
+		return code + ":" + params
+	}
+	return code
+}
+
 func uniqueDeviceSNsFromPlanItems(items []MMLPlanItem) []string {
 	seen := make(map[string]struct{}, len(items))
 	out := make([]string, 0, len(items))
@@ -786,6 +853,7 @@ func (s *Service) normalizePlanItems(ctx context.Context, items []MMLPlanItem) (
 		if _, exists := command["parameters"]; !exists {
 			command["parameters"] = map[string]interface{}{}
 		}
+		attachObjectNameParamFromTarget(command)
 		if commandString(command, "command_code") == "" && commandString(command, "rpc_method") == "" {
 			return nil, nil, nil, fmt.Errorf("plan_items[%d].command.command_code required: %w", idx, commonerrors.ErrInvalidInput)
 		}
@@ -1529,6 +1597,34 @@ func (s *Service) attachObjectNameParam(entry map[string]interface{}, cmd *MMLCo
 	entry["parameters"] = params
 }
 
+func attachObjectNameParamFromTarget(entry map[string]interface{}) {
+	if entry == nil {
+		return
+	}
+	targetObject := strings.TrimSpace(commandString(entry, "target_object"))
+	if targetObject == "" {
+		return
+	}
+	method := strings.TrimSpace(commandString(entry, "rpc_method"))
+	op := strings.ToUpper(strings.TrimSpace(commandString(entry, "operation_type")))
+	if method != "AddObject" && method != "DeleteObject" && op != "ADD" && op != "RMV" && op != "DEL" {
+		return
+	}
+
+	params := commandParameters(entry)
+	if params == nil {
+		params = map[string]interface{}{}
+	}
+	if existing, ok := params["object_name"].(string); ok && strings.TrimSpace(existing) != "" {
+		return
+	}
+	if !strings.HasSuffix(targetObject, ".") {
+		targetObject += "."
+	}
+	params["object_name"] = targetObject
+	entry["parameters"] = params
+}
+
 // attachParamRefs 把 mml_command_sub_fields JOIN standard_params 的结果挂到 entry 上。
 // Fanouter 后续会调用 BuildTR069Params(rpcMethod, paramRefs, ...) 翻译为 TR-069
 // wire 格式。失败仅记 warn，让 Fanouter 走兜底路径（透传 formValues）。
@@ -1741,6 +1837,10 @@ type DeviceTaskResultLister interface {
 	ListResultsBySourceID(
 		ctx context.Context, sourceID string, page, pageSize int,
 	) ([]DeviceTaskResultRowView, int64, error)
+}
+
+type TaskResultStatsRepository interface {
+	GetResultStatsByID(ctx context.Context, id uuid.UUID) (*MMLTask, error)
 }
 
 // DeviceTaskResultRowView 屏蔽 task 包内部 struct，让 mml 包不反向 import task 包。
@@ -2562,8 +2662,9 @@ func (s *Service) GetTaskResults(ctx context.Context, id uuid.UUID, page, pageSi
 		pageSize = 20
 	}
 
-	// T-0168: 先拿 task 元数据用于装配 stats（即使 deviceTaskResultLister 注入也要这步）
-	taskMeta, taskErr := s.taskRepo.GetByID(ctx, id)
+	// T-0168: 先拿 task 元数据用于装配 stats（即使 deviceTaskResultLister 注入也要这步）。
+	// PgTaskRepository 提供轻量查询，避免为结果页 stats 扫描/反序列化 mml_tasks.results。
+	taskMeta, taskErr := s.getTaskResultStats(ctx, id)
 	// taskErr 不阻塞主流程；找不到 task 让后续 device_tasks 查询自己处理
 	stats := buildTaskResultsStats(taskMeta, taskErr)
 
@@ -2610,6 +2711,13 @@ func (s *Service) GetTaskResults(ctx context.Context, id uuid.UUID, page, pageSi
 	return resp, nil
 }
 
+func (s *Service) getTaskResultStats(ctx context.Context, id uuid.UUID) (*MMLTask, error) {
+	if repo, ok := s.taskRepo.(TaskResultStatsRepository); ok {
+		return repo.GetResultStatsByID(ctx, id)
+	}
+	return s.taskRepo.GetByID(ctx, id)
+}
+
 // buildTaskResultsStats 装配 TaskResultsStats（T-0168）。taskErr 非 nil 时返回空 stats，
 // 避免 GetByID 失败阻断主流程（让前端拿到 200 + 空翻译详情）。
 func buildTaskResultsStats(task *MMLTask, taskErr error) *TaskResultsStats {
@@ -2629,7 +2737,7 @@ func buildTaskResultsStats(task *MMLTask, taskErr error) *TaskResultsStats {
 //   - device_sn / status / error_message / started_at / finished_at 直通
 //   - success = (status=completed && error_code=0)
 //   - raw_output = result->>'raw_response'
-//   - mml_script = result->>'method' （SOAP method name；便于前端展示）
+//   - mml_script = 用户下发的 MML 指令文本（来自 plan raw_line 或 commands[command_index]）
 //   - execution_time = completed_at - sent_at（毫秒）
 //
 // 解析 result JSONB 失败时静默跳过该字段（不影响主流程），device_sn / status 等
@@ -2645,9 +2753,13 @@ func deviceTaskRowToResultMap(row DeviceTaskResultRowView, task *MMLTask) map[st
 		"device_index":   row.DeviceIndex,
 		"success":        row.Status == "completed" && row.ErrorCode == 0,
 	}
+	var command map[string]interface{}
+	var rawLine string
 	if task != nil && task.ExecuteMode == TaskExecuteModeDeviceBound &&
 		row.CommandIndex >= 0 && row.CommandIndex < len(task.PlanItems) {
 		plan := task.PlanItems[row.CommandIndex]
+		command = plan.Command
+		rawLine = plan.RawLine
 		m["plan_line_no"] = plan.LineNo
 		m["plan_device_sn"] = plan.DeviceSN
 		m["plan_order"] = plan.Order
@@ -2660,6 +2772,30 @@ func deviceTaskRowToResultMap(row DeviceTaskResultRowView, task *MMLTask) map[st
 		if op := commandString(plan.Command, "operation_type"); op != "" {
 			m["operation_type"] = op
 		}
+	} else if task != nil && row.CommandIndex >= 0 && row.CommandIndex < len(task.Commands) {
+		command = task.Commands[row.CommandIndex]
+		if commandCode := commandString(command, "command_code"); commandCode != "" {
+			m["command_code"] = commandCode
+		}
+		if op := commandString(command, "operation_type"); op != "" {
+			m["operation_type"] = op
+		}
+		if planRawLine := commandString(command, "plan_raw_line"); planRawLine != "" {
+			rawLine = planRawLine
+			m["plan_raw_line"] = planRawLine
+		}
+		if lineNo, ok := command["plan_line_no"].(float64); ok && lineNo > 0 {
+			m["plan_line_no"] = int(lineNo)
+		}
+		if planDeviceSN := commandString(command, "plan_device_sn"); planDeviceSN != "" {
+			m["plan_device_sn"] = planDeviceSN
+		}
+		if order, ok := command["plan_order"].(float64); ok && order > 0 {
+			m["plan_order"] = int(order)
+		}
+	}
+	if script := formatMMLScriptForResult(command, rawLine, row.DeviceSN); script != "" {
+		m["mml_script"] = script
 	}
 	if row.SentAt != nil {
 		m["started_at"] = row.SentAt.Format(time.RFC3339)
@@ -2676,9 +2812,6 @@ func deviceTaskRowToResultMap(row DeviceTaskResultRowView, task *MMLTask) map[st
 		if err := json.Unmarshal(row.Result, &resObj); err == nil {
 			if rr, ok := resObj["raw_response"].(string); ok && rr != "" {
 				m["raw_output"] = rr
-			}
-			if method, ok := resObj["method"].(string); ok && method != "" {
-				m["mml_script"] = method
 			}
 			// parsed_data：把整个 result JSON 透传给前端做兜底渲染（不阻塞主字段）
 			m["parsed_data"] = resObj

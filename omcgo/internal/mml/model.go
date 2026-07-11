@@ -196,8 +196,10 @@ type MMLTask struct {
 	ScriptValidationVersion string                   `json:"script_validation_version"`
 	DeviceSNs               []string                 `json:"device_sns"`
 	Commands                []map[string]interface{} `json:"commands"`
+	CommandCount            int                      `json:"command_count,omitempty"`
 	ExecuteMode             TaskExecuteMode          `json:"execute_mode"`
 	PlanItems               []MMLPlanItem            `json:"plan_items"`
+	PlanItemCount           int                      `json:"plan_item_count,omitempty"`
 	Status                  TaskStatus               `json:"status"`
 	Results                 []map[string]interface{} `json:"results"`
 	Creator                 string                   `json:"creator"`

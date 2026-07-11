@@ -110,6 +110,16 @@ func TestParseScriptTXT_IgnoresQuotedAndBracedDelimiters(t *testing.T) {
 	require.Equal(t, map[string]string{"DESC": "a;b,c", "VALUES": "{x;y,z}"}, got.Lines[0].Parameters)
 }
 
+func TestParseScriptTXT_DELIsRMVAlias(t *testing.T) {
+	got, issues := ParseScriptTXT([]byte("DEL ETHERNET_INTERFACE;SN1\n"))
+
+	require.Empty(t, issues)
+	require.Len(t, got.Lines, 1)
+	require.Equal(t, "RMV", got.Lines[0].OperationType)
+	require.Equal(t, "RMV ETHERNET_INTERFACE", got.Lines[0].CommandCode)
+	require.Equal(t, "DEL ETHERNET_INTERFACE;SN1", got.Lines[0].RawLine)
+}
+
 func TestParseScriptTXT_RejectsMoreThanMaxLines(t *testing.T) {
 	raw := []byte(strings.Repeat("LST DEVICE_INFO;SN1\n", MaxScriptLines+1))
 

@@ -164,8 +164,10 @@ interface BackendMMLTask {
   task_origin?: string;
   device_sns: string[] | null;
   commands: Array<Record<string, unknown>> | null;
+  command_count?: number;
   execute_mode?: string | null;
   plan_items?: BackendMMLPlanItem[] | null;
+  plan_item_count?: number;
   status: string;
   results: Array<Record<string, unknown>> | null;
   creator: string;
@@ -740,8 +742,10 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
       if (typeof c.command_code === 'string') return c.command_code as string;
       return JSON.stringify(c);
     }),
+    commandCount: bt.command_count ?? (bt.commands || []).length,
     executeMode: (bt.execute_mode || 'common') as MMLTask['executeMode'],
     planItems: planItems.length > 0 ? planItems : undefined,
+    planItemCount: bt.plan_item_count ?? planItems.length,
     planStats:
       planItems.length > 0
         ? {

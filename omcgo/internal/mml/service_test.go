@@ -912,6 +912,63 @@ func TestService_ExecuteCommand_DeviceBoundPlanItemsDeriveDevicesAndCommands(t *
 	assert.Contains(t, capturedTask.Commands[0], "param_refs")
 }
 
+func TestService_ExecuteCommand_DeviceBoundPlanItemsAttachObjectName(t *testing.T) {
+	var capturedTask *MMLTask
+	taskRepo := &mockTaskRepo{
+		createFn: func(ctx context.Context, task *MMLTask) error {
+			capturedTask = task
+			task.ID = uuid.New()
+			return nil
+		},
+	}
+
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
+
+	_, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		ExecuteMode: "device_bound",
+		TaskName:    "device-bound object ops",
+		Creator:     "admin",
+		PlanItems: []MMLPlanItem{
+			{
+				LineNo:   1,
+				DeviceSN: "SN001",
+				RawLine:  "ADD ETHERNET_INTERFACE;SN001",
+				Command: map[string]interface{}{
+					"command_code":   "ADD ETHERNET_INTERFACE",
+					"operation_type": "ADD",
+					"rpc_method":     "AddObject",
+					"target_object":  "Device.Ethernet.Interface.",
+					"target_paths":   []interface{}{"Device.Ethernet.Interface."},
+					"parameters":     map[string]interface{}{},
+				},
+			},
+			{
+				LineNo:   2,
+				DeviceSN: "SN001",
+				RawLine:  "RMV ETHERNET_INTERFACE;SN001",
+				Command: map[string]interface{}{
+					"command_code":   "RMV ETHERNET_INTERFACE",
+					"operation_type": "RMV",
+					"rpc_method":     "DeleteObject",
+					"target_object":  "Device.Ethernet.Interface",
+					"parameters":     map[string]interface{}{},
+				},
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, capturedTask)
+	require.Len(t, capturedTask.Commands, 2)
+	addParams := commandParameters(capturedTask.Commands[0])
+	require.NotNil(t, addParams)
+	assert.Equal(t, "Device.Ethernet.Interface.", addParams["object_name"])
+	rmvParams := commandParameters(capturedTask.Commands[1])
+	require.NotNil(t, rmvParams)
+	assert.Equal(t, "Device.Ethernet.Interface.", rmvParams["object_name"])
+	assert.Equal(t, addParams["object_name"], capturedTask.PlanItems[0].Command["parameters"].(map[string]interface{})["object_name"])
+}
+
 func TestService_ExecuteCommand_RejectsMoreThan200Devices(t *testing.T) {
 	created := false
 	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, &mockTaskRepo{

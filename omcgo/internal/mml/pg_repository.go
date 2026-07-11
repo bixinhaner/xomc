@@ -90,6 +90,22 @@ var taskColumns = []string{
 	"product_resolved", "matched_product_id", "matched_product_class", "path_translation_source",
 }
 
+var taskListColumns = []string{
+	"id", "task_name", "request_id", "script_id", "script_content_sha256", "script_validation_version", "device_sns",
+	"COALESCE(jsonb_array_length(commands), 0) AS command_count",
+	"execute_mode", "status", "creator", "executor",
+	"COALESCE(jsonb_array_length(plan_items), 0) AS plan_item_count",
+	"created_at", "updated_at",
+	"execute_type", "scheduled_at",
+	"period_start", "period_end", "period_time",
+	"offline_retry", "offline_retry_wait",
+	"failed_retry", "failed_retry_count", "failed_retry_interval",
+	"started_at", "finished_at",
+	"total_devices", "success_count", "failed_count", "result",
+	"next_trigger_at", "parent_task_id",
+	"product_resolved", "matched_product_id", "matched_product_class", "path_translation_source",
+}
+
 // ======================================================================
 // PgCommandRepository (read-only)
 // ======================================================================
@@ -1063,7 +1079,7 @@ func (r *PgTaskRepository) Update(ctx context.Context, task *MMLTask) error {
 }
 
 func (r *PgTaskRepository) List(ctx context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error) {
-	base := storage.Psql.Select(taskColumns...).From("mml_tasks")
+	base := storage.Psql.Select(taskListColumns...).From("mml_tasks")
 	countBase := storage.Psql.Select("COUNT(*)").From("mml_tasks")
 
 	if filter.Status != nil {
@@ -1131,7 +1147,7 @@ func (r *PgTaskRepository) List(ctx context.Context, filter TaskFilter) (*model.
 
 	var items []MMLTask
 	for rows.Next() {
-		task, err := scanTaskRow(rows)
+		task, err := scanTaskSummaryRow(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan mml_task row: %w", err)
 		}
@@ -1196,6 +1212,7 @@ func scanTask(row pgx.Row) (*MMLTask, error) {
 	if t.Commands == nil {
 		t.Commands = []map[string]interface{}{}
 	}
+	t.CommandCount = len(t.Commands)
 	if planItemsJSON != nil {
 		if err := json.Unmarshal(planItemsJSON, &t.PlanItems); err != nil {
 			return nil, fmt.Errorf("unmarshal plan_items: %w", err)
@@ -1204,6 +1221,7 @@ func scanTask(row pgx.Row) (*MMLTask, error) {
 	if t.PlanItems == nil {
 		t.PlanItems = []MMLPlanItem{}
 	}
+	t.PlanItemCount = len(t.PlanItems)
 	if t.ExecuteMode == "" {
 		t.ExecuteMode = TaskExecuteModeCommon
 	}
@@ -1267,6 +1285,7 @@ func scanTaskRow(rows pgx.Rows) (*MMLTask, error) {
 	if t.Commands == nil {
 		t.Commands = []map[string]interface{}{}
 	}
+	t.CommandCount = len(t.Commands)
 	if planItemsJSON != nil {
 		if err := json.Unmarshal(planItemsJSON, &t.PlanItems); err != nil {
 			return nil, fmt.Errorf("unmarshal plan_items: %w", err)
@@ -1275,6 +1294,7 @@ func scanTaskRow(rows pgx.Rows) (*MMLTask, error) {
 	if t.PlanItems == nil {
 		t.PlanItems = []MMLPlanItem{}
 	}
+	t.PlanItemCount = len(t.PlanItems)
 	if t.ExecuteMode == "" {
 		t.ExecuteMode = TaskExecuteModeCommon
 	}
@@ -1287,6 +1307,124 @@ func scanTaskRow(rows pgx.Rows) (*MMLTask, error) {
 		t.Results = []map[string]interface{}{}
 	}
 	t.TaskOrigin = deriveTaskOrigin(t.ScriptID)
+	return &t, nil
+}
+
+func scanTaskSummaryRow(rows pgx.Rows) (*MMLTask, error) {
+	var t MMLTask
+	var deviceSNsJSON []byte
+	var matchedProductClass, pathTranslationSource *string
+	var requestID *string
+
+	err := rows.Scan(
+		&t.ID, &t.TaskName, &requestID, &t.ScriptID, &t.ScriptContentSHA256, &t.ScriptValidationVersion, &deviceSNsJSON,
+		&t.CommandCount,
+		&t.ExecuteMode, &t.Status, &t.Creator, &t.Executor,
+		&t.PlanItemCount,
+		&t.CreatedAt, &t.UpdatedAt,
+		&t.ExecuteType, &t.ScheduledAt,
+		&t.PeriodStart, &t.PeriodEnd, &t.PeriodTime,
+		&t.OfflineRetry, &t.OfflineRetryWait,
+		&t.FailedRetry, &t.FailedRetryCount, &t.FailedRetryInterval,
+		&t.StartedAt, &t.FinishedAt,
+		&t.TotalDevices, &t.SuccessCount, &t.FailedCount, &t.Result,
+		&t.NextTriggerAt, &t.PeriodicParentID,
+		&t.ProductResolved, &t.MatchedProductID, &matchedProductClass, &pathTranslationSource,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if requestID != nil {
+		t.RequestID = *requestID
+	}
+	if matchedProductClass != nil {
+		t.MatchedProductClass = *matchedProductClass
+	}
+	if pathTranslationSource != nil {
+		t.PathTranslationSource = *pathTranslationSource
+	}
+	if deviceSNsJSON != nil {
+		if err := json.Unmarshal(deviceSNsJSON, &t.DeviceSNs); err != nil {
+			return nil, fmt.Errorf("unmarshal device_sns: %w", err)
+		}
+	}
+	if t.DeviceSNs == nil {
+		t.DeviceSNs = []string{}
+	}
+	if t.Commands == nil {
+		t.Commands = []map[string]interface{}{}
+	}
+	if t.PlanItems == nil {
+		t.PlanItems = []MMLPlanItem{}
+	}
+	if t.Results == nil {
+		t.Results = []map[string]interface{}{}
+	}
+	if t.ExecuteMode == "" {
+		t.ExecuteMode = TaskExecuteModeCommon
+	}
+	t.TaskOrigin = deriveTaskOrigin(t.ScriptID)
+	return &t, nil
+}
+
+func (r *PgTaskRepository) GetResultStatsByID(ctx context.Context, id uuid.UUID) (*MMLTask, error) {
+	query, args, err := storage.Psql.Select(
+		"commands",
+		"execute_mode",
+		"plan_items",
+		"product_resolved",
+		"matched_product_id",
+		"matched_product_class",
+		"path_translation_source",
+	).From("mml_tasks").Where(sq.Eq{"id": id}).ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build get mml_task result stats SQL: %w", err)
+	}
+
+	var t MMLTask
+	var commandsJSON []byte
+	var planItemsJSON []byte
+	var matchedProductClass, pathTranslationSource *string
+	err = r.pool.QueryRow(ctx, query, args...).Scan(
+		&commandsJSON,
+		&t.ExecuteMode,
+		&planItemsJSON,
+		&t.ProductResolved,
+		&t.MatchedProductID,
+		&matchedProductClass,
+		&pathTranslationSource,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, commonerrors.ErrNotFound
+		}
+		return nil, fmt.Errorf("get mml_task result stats: %w", err)
+	}
+	if commandsJSON != nil {
+		if err := json.Unmarshal(commandsJSON, &t.Commands); err != nil {
+			return nil, fmt.Errorf("unmarshal commands: %w", err)
+		}
+	}
+	if t.Commands == nil {
+		t.Commands = []map[string]interface{}{}
+	}
+	if planItemsJSON != nil {
+		if err := json.Unmarshal(planItemsJSON, &t.PlanItems); err != nil {
+			return nil, fmt.Errorf("unmarshal plan_items: %w", err)
+		}
+	}
+	if t.PlanItems == nil {
+		t.PlanItems = []MMLPlanItem{}
+	}
+	if t.ExecuteMode == "" {
+		t.ExecuteMode = TaskExecuteModeCommon
+	}
+	if matchedProductClass != nil {
+		t.MatchedProductClass = *matchedProductClass
+	}
+	if pathTranslationSource != nil {
+		t.PathTranslationSource = *pathTranslationSource
+	}
 	return &t, nil
 }
 
@@ -1421,7 +1559,7 @@ func (r *PgTaskRepository) Delete(ctx context.Context, id uuid.UUID) error {
 // ListByScriptID 返回指定脚本关联的全部执行记录（模板 + 子实例），
 // 按 created_at 倒序分页。P4 C11：脚本详情页"历史执行"tab 用。
 func (r *PgTaskRepository) ListByScriptID(ctx context.Context, scriptID uuid.UUID, req model.ListRequest) (*model.ListResponse[MMLTask], error) {
-	base := storage.Psql.Select(taskColumns...).
+	base := storage.Psql.Select(taskListColumns...).
 		From("mml_tasks").
 		Where(sq.Eq{"script_id": scriptID})
 	countBase := storage.Psql.Select("COUNT(*)").
@@ -1454,7 +1592,7 @@ func (r *PgTaskRepository) ListByScriptID(ctx context.Context, scriptID uuid.UUI
 
 	var items []MMLTask
 	for rows.Next() {
-		t, err := scanTaskRow(rows)
+		t, err := scanTaskSummaryRow(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan run row: %w", err)
 		}

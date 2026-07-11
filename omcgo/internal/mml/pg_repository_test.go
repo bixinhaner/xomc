@@ -208,6 +208,20 @@ func TestPgScriptValidationRepository_UsesBatchQueries(t *testing.T) {
 	require.Contains(t, src, "standardValidationRules")
 }
 
+func TestPgTaskRepository_ListUsesSummaryColumns(t *testing.T) {
+	require.NotContains(t, taskListColumns, "commands")
+	require.NotContains(t, taskListColumns, "plan_items")
+	require.NotContains(t, taskListColumns, "results")
+	require.Contains(t, taskListColumns, "total_devices")
+	require.Contains(t, taskListColumns, "success_count")
+	require.Contains(t, taskListColumns, "failed_count")
+}
+
+func TestPgTaskRepository_ProvidesLightweightResultStatsLookup(t *testing.T) {
+	var repo interface{} = (*PgTaskRepository)(nil)
+	require.Implements(t, (*TaskResultStatsRepository)(nil), repo)
+}
+
 // This is deliberately PG-backed when a local test database is available: it
 // proves the import repository applies runtime rules to the actual lowercase
 // data_type values emitted by the standard catalog, rather than only to fakes.
