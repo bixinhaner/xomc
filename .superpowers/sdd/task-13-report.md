@@ -103,3 +103,33 @@ Resume from: Final review and delivery
 
 “All tasks complete”表示代码与文档收口；最终交付门仍需在具备完整 Docker 栈和凭据的环境补齐
 浏览器、Redis 切换与端点 PASS 证据。
+
+## 2026-07-11 main 同步与 MR 门补充
+
+按交付规则，功能分支不直接合入 `main`，需要通过 GitLab MR 审核。本次在
+`feat/mml-script-txt-import` worktree 内执行最新主分支门：
+
+```text
+git fetch origin --prune main                 # exit 0
+git merge-tree --write-tree --messages origin/main HEAD
+989ce7de4c1c10b72c50e6c9616adb1802bacf4f     # 无冲突消息
+bash omcgo/scripts/check-migrations.sh --strict # exit 0
+git diff --check                              # exit 0
+```
+
+同步 `origin/main` 后发现 goose 主迁移编号语义冲突：`origin/main` 已占用
+`000015_add_device_group_rule_source.sql`。已保留 main 编号，并将本分支迁移顺延：
+
+- `000015_redesign_mml_script_txt_import.sql` → `000016_redesign_mml_script_txt_import.sql`
+- `000016_add_mml_script_name_and_task_request_id_guards.sql` → `000017_add_mml_script_name_and_task_request_id_guards.sql`
+
+合入 main 后补充验证：
+
+| 命令 | 结果 |
+|---|---|
+| `/usr/local/go/bin/go test -count=1 ./internal/mml` | exit 0 |
+| `npm run test --workspace webcode -- src/pages/mml/ScriptTask/__tests__ src/pages/mml/components/__tests__/ScriptTaskDrawer.test.tsx ../frontend-core/src/services/api/__tests__/mmlScriptImportApi.test.ts` | exit 0；7 files / 37 tests |
+| `npm run typecheck` | exit 0；skin parity、v1/v2/v3 typecheck 均通过 |
+| `bash omcgo/scripts/check-migrations.sh --strict` | exit 0；000001–000017 连续，未新增主迁移冲突 |
+
+远端分支已推送到 `origin/feat/mml-script-txt-import`，下一步通过 GitLab MR 合入 `main`。
