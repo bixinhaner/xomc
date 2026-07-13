@@ -144,7 +144,9 @@ describe('ScriptTask actions column', () => {
   it('keeps only execute visible and moves secondary script actions into the more menu', async () => {
     renderPage();
 
-    expect(screen.getByRole('button', { name: '执行' })).toBeInTheDocument();
+    const executeButton = screen.getByRole('button', { name: '执行' });
+    expect(executeButton).toBeInTheDocument();
+    expect(executeButton.textContent?.trim()).toBe('');
     expect(screen.queryByRole('button', { name: '查看' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '重新导入' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /下载 TXT/ })).not.toBeInTheDocument();

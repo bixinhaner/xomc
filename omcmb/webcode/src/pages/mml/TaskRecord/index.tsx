@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import type { Key } from 'react';
 import { Button, Empty, Modal, Pagination, Popover, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
-import { DeleteOutlined, ProfileOutlined, StopOutlined } from '@ant-design/icons';
+import { DeleteOutlined, DownloadOutlined, ProfileOutlined, StopOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 
@@ -32,6 +32,10 @@ import {
   type ParsedParamValue,
 } from '@core/utils/mmlResultParser';
 import { parseMmlCommandDisplay } from '@core/utils/mmlCommandDisplay';
+import {
+  downloadMmlTaskResultsCsv,
+  fetchAllMmlTaskResults,
+} from './taskResultCsv';
 
 // -------------------------------------------------------------------------
 // Display mappings — mml_tasks columns
@@ -357,12 +361,32 @@ export default function TaskRecord() {
   const [detailRow, setDetailRow] = useState<DeviceTaskResultItem | null>(null);
   const [rawRow, setRawRow] = useState<DeviceTaskResultItem | null>(null);
   const [resultPage, setResultPage] = useState(1);
+  const [exportingResults, setExportingResults] = useState(false);
   const { data: resultsData, isLoading: resultsLoading } = useMMLTaskResults(viewing?.id ?? null, resultPage, TASK_RESULT_PAGE_SIZE);
 
   const resultRows = useMemo<DeviceTaskResultItem[]>(
     () => (resultsData?.items ?? []),
     [resultsData]
   );
+
+  const exportViewedTaskResults = useCallback(async () => {
+    if (!viewing) return;
+    setExportingResults(true);
+    try {
+      const rows = await fetchAllMmlTaskResults(viewing.id);
+      if (rows.length === 0) {
+        void message.warning(t('common.noDataToExport'));
+        return;
+      }
+      downloadMmlTaskResultsCsv(viewing, rows, t);
+      void message.success(t('mml.taskRecord.exportCsvSuccess', { count: rows.length }));
+    } catch (error) {
+      const detail = getErrorMessage(error) || t('common.unknown');
+      void message.error(t('mml.taskRecord.exportCsvFailed', { error: detail }));
+    } finally {
+      setExportingResults(false);
+    }
+  }, [t, viewing]);
 
   const renderCommandCompact = useCallback((command: string, maxTargetWidth = 220) => {
     const parsed = parseMmlCommandDisplay(command);
@@ -585,18 +609,18 @@ export default function TaskRecord() {
       dataIndex: 'id',
       width: 90,
       render: (_: unknown, record: MMLTask) => (
-        <Button
-          aria-label={t('common.view')}
-          type="link"
-          size="small"
-          icon={<ProfileOutlined />}
-          onClick={() => {
-            setResultPage(1);
-            setViewing(record);
-          }}
-        >
-          {t('common.view')}
-        </Button>
+        <Tooltip title={t('common.view')}>
+          <Button
+            aria-label={t('common.view')}
+            type="link"
+            size="small"
+            icon={<ProfileOutlined />}
+            onClick={() => {
+              setResultPage(1);
+              setViewing(record);
+            }}
+          />
+        </Tooltip>
       ),
     },
     { key: 'taskName', title: t('mml.taskName'), dataIndex: 'taskName', ellipsis: true },
@@ -760,6 +784,15 @@ export default function TaskRecord() {
               <Tag>{t('mml.deviceCountLabel')}{viewing.totalDevices ?? 0}</Tag>
               <Tag>{t('mml.successCountLabel')}{viewing.successCount ?? 0}</Tag>
               <Tag>{t('mml.failedCountLabel')}{viewing.failedCount ?? 0}</Tag>
+              <Button
+                aria-label={t('mml.taskRecord.exportCsv')}
+                size="small"
+                icon={<DownloadOutlined />}
+                loading={exportingResults}
+                onClick={() => void exportViewedTaskResults()}
+              >
+                {t('mml.taskRecord.exportCsv')}
+              </Button>
             </Space>
 
             {resultRows.length === 0 && !resultsLoading ? (

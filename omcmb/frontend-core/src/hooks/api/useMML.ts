@@ -1,6 +1,15 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { MMLScript, MMLCustomCommand, MMLImportedScriptCreateInput, MMLImportedScriptReplaceInput, MMLScriptExecutionInput, MMLScriptImportValidation } from '../../types/mml';
-import type { PageRequest } from '../../types/pagination';
+import type {
+  DeviceTaskResultItem,
+  MMLScript,
+  MMLCustomCommand,
+  MMLImportedScriptCreateInput,
+  MMLImportedScriptReplaceInput,
+  MMLScriptExecutionInput,
+  MMLScriptImportValidation,
+  MMLTaskResultsStats,
+} from '../../types/mml';
+import type { PageRequest, PageResponse } from '../../types/pagination';
 import { mmlService } from '../../mock/services/mmlService';
 import { MMLScriptImportApiError, mmlApi } from '../../services/api/mmlApi';
 import { createApiSwitch } from '../../services/apiSwitch';
@@ -291,6 +300,14 @@ export function useMMLTaskResults(taskId: string | null, page = 1, pageSize = 50
     queryFn: () => api.getTaskResults(taskId!, page, pageSize),
     enabled: Boolean(taskId),
   });
+}
+
+export function getMMLTaskResultsPage(
+  taskId: string,
+  page: number,
+  pageSize: number,
+): Promise<PageResponse<DeviceTaskResultItem, MMLTaskResultsStats>> {
+  return api.getTaskResults(taskId, page, pageSize);
 }
 
 // --- Template hooks ---

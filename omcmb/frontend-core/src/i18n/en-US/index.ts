@@ -6055,6 +6055,9 @@ const messages: Record<string, string> = {
   'mml.batchCancelSuccess':                  'Terminated {count} task record(s)',
   'mml.batchCancelFailed':                   'Batch terminate failed: {error}',
   'mml.batchDeleteRunningTasksBlocked':      '{count} selected task record(s) are still running. Batch terminate them or wait for completion before deleting.',
+  'mml.taskRecord.exportCsv':                'Export CSV',
+  'mml.taskRecord.exportCsvSuccess':         'Exported {count} execution result(s)',
+  'mml.taskRecord.exportCsvFailed':          'Export CSV failed: {error}',
   'mml.confirmCancelTitle':                  'Confirm Cancellation',
   'mml.confirmCancelScript':                 'Terminate script "{name}"? The current execution will be interrupted.',
   // duplicates of mml.startFailed/pauseFailed/cancelFailed removed; canonical
@@ -6081,6 +6084,8 @@ const messages: Record<string, string> = {
   'mml.scriptParamsTitle':                   'Command Parameters',
   'mml.scriptParamsCount':                   '{count} params',
   'mml.scriptLineNo':                        'Script Line {line}',
+  'mml.scriptLineNoColumn':                  'Script Line',
+  'mml.planOrder':                           'Plan Order',
   'mml.viewRawResponse':                     'View',
   'mml.resultRawResponseTitle':              'Execution Detail - {device}',
   'mml.resultDetailTitle':                   'Execution Detail - {device}',
