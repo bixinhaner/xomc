@@ -6,8 +6,16 @@ import type {
   KPITechDefinitions,
   KPILayout,
   KPILayoutPanel,
+  DashboardKPIGranularity,
 } from '../../types/dashboard';
 import { delay } from '../utils';
+import { useAppStore } from '../../store/appStore';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 // issue #213 S2：首页 KPI 全局布局 Mock 数据。
 // 与后端 seed（migrations/seed/000002_dashboard_kpi_layout_seed.sql）等价：
@@ -91,6 +99,32 @@ const mockKPIDefinitions: KPIDefinitionsResponse = (() => {
   const total = technologies.reduce((sum, t) => sum + t.items.length, 0);
   return { technologies, total };
 })();
+
+function buildMockKPIBucketTimes(
+  start: Date,
+  end: Date,
+  granularity: DashboardKPIGranularity,
+): string[] {
+  const systemTimezone = useAppStore.getState().systemTimezone || 'UTC';
+  const result: string[] = [];
+
+  if (granularity === 'daily') {
+    let cursor = dayjs(start).tz(systemTimezone);
+    while (cursor.isBefore(end)) {
+      result.push(cursor.format('YYYY-MM-DDTHH:mm:ssZ'));
+      const nextWallClock = cursor.add(1, 'day').format('YYYY-MM-DD HH:mm:ss');
+      cursor = dayjs.tz(nextWallClock, 'YYYY-MM-DD HH:mm:ss', systemTimezone);
+    }
+    return result;
+  }
+
+  let cursor = dayjs(start);
+  while (cursor.isBefore(end)) {
+    result.push(cursor.tz(systemTimezone).format('YYYY-MM-DDTHH:mm:ssZ'));
+    cursor = cursor.add(1, 'hour');
+  }
+  return result;
+}
 
 // KPI 配置（用于动态生成数据）
 const KPI_CONFIG: Record<string, { base: number; variance: number }> = {
@@ -209,7 +243,8 @@ export const dashboardService = {
   async getKPITimeSeries(
     kpiNames?: string[],
     startTime?: string,
-    endTime?: string
+    endTime?: string,
+    granularity: DashboardKPIGranularity = 'hourly',
   ): Promise<DashboardChartData['kpiTimeSeries']> {
     await delay(100, 200);
 
@@ -219,9 +254,7 @@ export const dashboardService = {
     const start = startTime ? new Date(startTime) : new Date(Date.now() - 24 * 60 * 60 * 1000);
     const end = endTime ? new Date(endTime) : new Date();
 
-    // 计算时间范围和间隔（每小时一个点）
-    const intervalMs = 60 * 60 * 1000; // 1小时
-    const totalPoints = Math.ceil((end.getTime() - start.getTime()) / intervalMs) + 1;
+    const bucketTimes = buildMockKPIBucketTimes(start, end, granularity);
 
     // 对每个请求的KPI动态生成数据
     if (kpiNames && kpiNames.length > 0) {
@@ -232,12 +265,9 @@ export const dashboardService = {
 
         // 生成覆盖完整时间范围的数据
         const timeSeries: KPITimeSeriesPoint[] = [];
-        for (let i = 0; i < totalPoints; i++) {
-          const pointTime = new Date(start.getTime() + i * intervalMs);
-          // 确保不超过结束时间
-          if (pointTime > end) break;
-
-          const timeStr = pointTime.toISOString();
+        for (const timeStr of bucketTimes) {
+          // 真实成功响应会返回系统时区钟面及其 RFC3339 offset；Mock 必须保持同一契约，
+          // 否则首页会把 00:00+08:00 错画到 16:00 槽。
           const value = Math.max(0, base + (Math.random() - 0.5) * 2 * variance);
           timeSeries.push([timeStr, parseFloat(value.toFixed(2))]);
         }

@@ -13,6 +13,7 @@ import (
 	"github.com/omcgo/omcgo/internal/admin"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/response"
+	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
 // Handler provides REST API endpoints for dashboard.
@@ -212,7 +213,18 @@ func (h *Handler) GetAlarmTypePie(c *gin.Context) {
 	response.OK(c, entries)
 }
 
-// GetKPITimeSeries handles GET /api/v1/dashboard/kpi-time-series?kpi_names=...&start_time=...&end_time=...
+func parseDashboardKPIGranularity(raw string) (metrics.Granularity, error) {
+	switch raw {
+	case "", string(metrics.GranularityHourly):
+		return metrics.GranularityHourly, nil
+	case string(metrics.GranularityDaily):
+		return metrics.GranularityDaily, nil
+	default:
+		return "", fmt.Errorf("invalid granularity %q (allowed: hourly, daily)", raw)
+	}
+}
+
+// GetKPITimeSeries handles GET /api/v1/dashboard/kpi-time-series?kpi_names=...&start_time=...&end_time=...&granularity=...
 func (h *Handler) GetKPITimeSeries(c *gin.Context) {
 	kpiNamesRaw := c.Query("kpi_names")
 	kpiNames := parseKPINames(kpiNamesRaw)
@@ -246,8 +258,19 @@ func (h *Handler) GetKPITimeSeries(c *gin.Context) {
 		}
 		endTime = parsed
 	}
+	if !endTime.After(startTime) {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("end_time must be after start_time"))
+		return
+	}
 
-	result, err := h.service.GetKPITimeSeries(c.Request.Context(), kpiNames, startTime, endTime)
+	granularity, err := parseDashboardKPIGranularity(c.Query("granularity"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	result, err := h.service.GetKPITimeSeries(c.Request.Context(), kpiNames, granularity, startTime, endTime)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return

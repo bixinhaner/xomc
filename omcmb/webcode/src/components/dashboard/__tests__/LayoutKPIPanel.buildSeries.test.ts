@@ -10,7 +10,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { buildSeries, KPI_METRIC_PALETTE } from '../LayoutKPIPanel.helpers';
+import {
+  buildSeries,
+  KPI_METRIC_PALETTE,
+  KPI_WEEK_LINE_COLOR,
+  shouldShowKPIChartLegend,
+} from '../LayoutKPIPanel.helpers';
 import type { MultiTrendComparisonData } from '../../../../../frontend-core/src/types/dashboard';
 import type { ResolvedMetricMeta } from '../useMetricMetadata';
 
@@ -21,7 +26,7 @@ const X_DATA = Array.from({ length: 24 }, (_, h) => `${h.toString().padStart(2, 
 // Helper：合成 24 整点的 `current` / `compare` 点列。
 function makeSeries(values: number[]) {
   return X_DATA.map((_, idx) => ({
-    time: new Date(2026, 5, 24, idx, 0, 0).toISOString(),
+    time: `2026-06-24T${String(idx).padStart(2, '0')}:00:00+08:00`,
     value: values[idx] ?? 0,
   }));
 }
@@ -114,6 +119,21 @@ describe('buildSeries', () => {
     expect(series[0].data[0]).toBe(1000);
   });
 
+  it('按后端时区钟面映射 hourly 桶，不受浏览器时区影响', () => {
+    const zoned: MultiTrendComparisonData = {
+      K900010015: {
+        current: [{ time: '2026-07-13T08:00:00+09:00', value: 8 }],
+        compare: [{ time: '2026-07-12T08:00:00+09:00', value: 7 }],
+        metadata: { kpi_name: 'K900010015', compare_type: 'yesterday' },
+      },
+    };
+    const { series } = buildSeries(
+      ['K900010015'], zoned, X_DATA, '今日', '昨日', fakeResolveMeta,
+    );
+    expect(series[0].data[8]).toBe(8);
+    expect(series[1].data[8]).toBe(7);
+  });
+
   it('trendData 为 undefined 时：返回空数据但不报错', () => {
     const { series } = buildSeries(['K900010015'], undefined, X_DATA, '今日', '昨日', fakeResolveMeta);
     expect(series).toHaveLength(2);
@@ -122,115 +142,54 @@ describe('buildSeries', () => {
   });
 });
 
-// --- last_week 模式 ---
+// --- rolling week 模式 ---
 
-/** 生成跨多天的时间点（每天 N 个小时点） */
-function makeWeekSeries(dayValues: Record<string, number[]>) {
-  const points: { time: string; value: number }[] = [];
-  Object.entries(dayValues).forEach(([date, values]) => {
-    values.forEach((v, hour) => {
-      points.push({
-        time: new Date(`${date}T${String(hour).padStart(2, '0')}:00:00`).toISOString(),
-        value: v,
-      });
-    });
-  });
-  return points;
-}
+const WEEK_DATES = [
+  '2026-07-06', '2026-07-07', '2026-07-08', '2026-07-09',
+  '2026-07-10', '2026-07-11', '2026-07-12', '2026-07-13',
+];
 
 const weekTrendData: MultiTrendComparisonData = {
   K900010015: {
-    current: makeWeekSeries({
-      '2026-06-22': [10, 20, 30],   // 3 点，日均 20
-      '2026-06-23': [40, 60],       // 2 点，日均 50
-    }),
-    compare: makeWeekSeries({
-      '2026-06-15': [5, 15],        // 2 点，日均 10
-    }),
+    current: [
+      { time: '2026-07-06T00:00:00+08:00', value: 3.23 },
+      { time: '2026-07-08T00:00:00+08:00', value: 4.56 },
+      // 与 PM 相同：后端统一出口返回系统业务时区钟面与偏移。
+      { time: '2026-07-12T00:00:00+08:00', value: 7.12 },
+    ],
+    compare: [],
     metadata: { kpi_name: 'K900010015', compare_type: 'last_week' },
   },
 };
 
-describe('buildSeries — last_week 模式', () => {
-  it('返回 weekXData / weekXDataFull，格式为 MM/DD / YYYY-MM-DD', () => {
-    const { weekXData, weekXDataFull } = buildSeries(
-      ['K900010015'], weekTrendData, X_DATA, '今日', '本周', fakeResolveMeta, undefined, 'last_week',
-    );
-    expect(weekXData).toBeDefined();
-    expect(weekXDataFull).toBeDefined();
-    // 3 个唯一日期：2026-06-15, 2026-06-22, 2026-06-23
-    expect(weekXData).toHaveLength(3);
-    expect(weekXData![0]).toBe('06/15');
-    expect(weekXData![1]).toBe('06/22');
-    expect(weekXData![2]).toBe('06/23');
-    expect(weekXDataFull![0]).toBe('2026-06-15');
-  });
-
-  it('按天聚合均值：每天多点取平均，单选时主线用 todayLabel，对比线用 compareLabel', () => {
-    const { series } = buildSeries(
-      ['K900010015'], weekTrendData, X_DATA, '今日', '本周', fakeResolveMeta, undefined, 'last_week',
-    );
-    // 单选时主线使用 todayLabel（今日）。
-    expect(series[0].name).toBe('今日');
-    // sortedDates = ['2026-06-15','2026-06-22','2026-06-23']
-    expect(series[0].data[0]).toBeNull();       // 06/15 本周无数据
-    expect(series[0].data[1]).toBeCloseTo(20);  // 06/22 avg(10,20,30)
-    expect(series[0].data[2]).toBeCloseTo(50);  // 06/23 avg(40,60)
-    // compare 线（本周）：06/15 = 10；其余 → null
-    expect(series[1].name).toBe('本周');
-    expect(series[1].data[0]).toBeCloseTo(10);  // 06/15 avg(5,15)
-    expect(series[1].data[1]).toBeNull();
-    expect(series[1].data[2]).toBeNull();
-  });
-
-  it('compare 数据为空时：compare 线全为 null 不报错', () => {
-    const noCompareTrend: MultiTrendComparisonData = {
-      K900010015: {
-        current: makeWeekSeries({ '2026-06-22': [10, 20] }),
-        compare: [],
-        metadata: { kpi_name: 'K900010015', compare_type: 'last_week' },
-      },
-    };
-    const { series, weekXData } = buildSeries(
-      ['K900010015'], noCompareTrend, X_DATA, '今日', '本周', fakeResolveMeta, undefined, 'last_week',
-    );
-    expect(weekXData).toEqual(['06/22']);
-    expect(series[0].data[0]).toBeCloseTo(15); // avg(10,20)
-    expect(series[1].data[0]).toBeNull();
-  });
-
-  it('多指标时不画 compare 线（决策 D2），图例显示为各指标名', () => {
-    const multi: MultiTrendComparisonData = {
-      K900010015: { current: makeWeekSeries({ '2026-06-22': [10] }), compare: [], metadata: { kpi_name: 'K900010015', compare_type: 'last_week' } },
-      K900010016: { current: makeWeekSeries({ '2026-06-22': [20] }), compare: [], metadata: { kpi_name: 'K900010016', compare_type: 'last_week' } },
-    };
-    const { series } = buildSeries(
-      ['K900010015', 'K900010016'], multi, X_DATA, '今日', '本周', fakeResolveMeta, undefined, 'last_week',
-    );
-    expect(series).toHaveLength(2);
-    expect(series[0].name).toBe('name:K900010015');
-    expect(series[1].name).toBe('name:K900010016');
-    expect(series.every((s) => !s.dashed)).toBe(true);
-  });
-
-  it('yesterday 模式不返回 weekXData', () => {
-    const { weekXData, weekXDataFull } = buildSeries(
-      ['K900010015'], weekTrendData, X_DATA, '今日', '昨日', fakeResolveMeta,
-    );
-    expect(weekXData).toBeUndefined();
-    expect(weekXDataFull).toBeUndefined();
-  });
-
-  it('last_week + trendData 为 undefined：空轴、两条全 null 线、不报错', () => {
+describe('buildSeries — rolling week 模式', () => {
+  it('固定七个完整日加今天日期轴，今天没有 daily 数据时保留空槽', () => {
     const { series, weekXData, weekXDataFull } = buildSeries(
-      ['K900010015'], undefined, X_DATA, '今日', '本周', fakeResolveMeta, undefined, 'last_week',
+      ['K900010015'], weekTrendData, X_DATA, '周', 'unused', fakeResolveMeta,
+      undefined, 'last_week', WEEK_DATES,
     );
-    // 无数据时并集为空，weekXData 应为空数组（不是 undefined）。
-    expect(weekXData).toEqual([]);
-    expect(weekXDataFull).toEqual([]);
-    // 仍输出两条 series（占位），数据全为 null。
-    expect(series).toHaveLength(2);
-    expect(series[0].data).toHaveLength(0);
-    expect(series[1].data).toHaveLength(0);
+    expect(weekXDataFull).toEqual(WEEK_DATES);
+    expect(weekXData).toEqual(['07/06', '07/07', '07/08', '07/09', '07/10', '07/11', '07/12', '07/13']);
+    expect(series).toHaveLength(1);
+    expect(series[0].name).toBe('name:K900010015');
+    expect(series[0].color).toBe(KPI_WEEK_LINE_COLOR);
+    expect(series[0].dashed).toBeFalsy();
+    expect(series[0].data).toEqual([3.23, null, 4.56, null, null, null, 7.12, null]);
+  });
+
+  it('无数据时仍保留七个完整日加今天的日期轴和单一周线', () => {
+    const { series, weekXDataFull } = buildSeries(
+      ['K900010015'], undefined, X_DATA, '周', 'unused', fakeResolveMeta,
+      undefined, 'last_week', WEEK_DATES,
+    );
+    expect(weekXDataFull).toEqual(WEEK_DATES);
+    expect(series).toHaveLength(1);
+    expect(series[0].data).toEqual(Array(8).fill(null));
+  });
+
+  it('单指标周模式隐藏冗余图例，多指标及天模式保留图例', () => {
+    expect(shouldShowKPIChartLegend('last_week', 1)).toBe(false);
+    expect(shouldShowKPIChartLegend('last_week', 2)).toBe(true);
+    expect(shouldShowKPIChartLegend('yesterday', 1)).toBe(true);
   });
 });

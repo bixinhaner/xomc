@@ -9,10 +9,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { TechnologyType } from './kpi-config';
 import { useKPILayout } from '@core/hooks/api/useDashboard';
-import { useMultiKPITrendComparison } from '@core/hooks/api/useDashboard';
+import { useMultiKPITrendComparison, useMultiKPIWeekSeries } from '@core/hooks/api/useDashboard';
 import { LayoutKPIPanel } from '@/components/dashboard/LayoutKPIPanel';
 import { resolveLayout, collectMetrics } from './layoutMapping';
 import type { KPILayoutPanel } from '@core/types/dashboard';
+import { useSystemClock } from '@core/hooks/useSystemClock';
 
 type CompareWindow = 'yesterday' | 'last_week';
 
@@ -35,6 +36,7 @@ export function DashboardKPIModules({
 }: DashboardKPIModulesProps) {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [compareWindows, setCompareWindows] = useState<Record<string, CompareWindow>>({});
+  const { date: systemDateKey } = useSystemClock(60_000);
 
   // 读全局布局（按制式）；读不到 / 为空 / 出错由 resolveLayout 回退内置默认。
   const { data: remoteLayout } = useKPILayout(technology);
@@ -53,11 +55,12 @@ export function DashboardKPIModules({
     metrics,
     'yesterday',
     metrics.length > 0,
+    systemDateKey,
   );
-  const { data: lastWeekTrendData, isLoading: isLastWeekLoading } = useMultiKPITrendComparison(
+  const { data: lastWeekTrendData, isLoading: isLastWeekLoading, dateKeys: weekDateKeys } = useMultiKPIWeekSeries(
     metrics,
-    'last_week',
     metrics.length > 0 && needsLastWeekData,
+    systemDateKey,
   );
 
   // 按网格坐标把图排成行（首页只读不可拖）。
@@ -107,6 +110,7 @@ export function DashboardKPIModules({
               trendData={trendData}
               isLoading={isLoading}
               compareWindow={compareWindow}
+              weekDateKeys={weekDateKeys}
               onCompareWindowChange={(nextWindow) => {
                 setCompareWindows((prev) => (
                   prev[panelKey] === nextWindow ? prev : { ...prev, [panelKey]: nextWindow }
