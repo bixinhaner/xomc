@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Modal } from 'antd';
 import { IntlProvider } from 'react-intl';
 import type { Key, ReactNode } from 'react';
@@ -8,6 +8,7 @@ import zhCN from '@core/i18n/zh-CN';
 const mocks = vi.hoisted(() => ({
   cancelTasks: vi.fn(),
   deleteTasks: vi.fn(),
+  getTaskResultsPage: vi.fn(),
   refetchTasks: vi.fn(),
   useMMLTasks: vi.fn(),
   taskItems: [] as Array<Record<string, unknown>>,
@@ -45,8 +46,13 @@ vi.mock('@core/hooks/api/useMML', () => ({
     },
     isLoading: false,
   }),
+  getMMLTaskResultsPage: mocks.getTaskResultsPage,
   useCancelMMLTasks: () => ({ mutate: mocks.cancelTasks, isPending: false }),
   useDeleteMMLTasks: () => ({ mutate: mocks.deleteTasks, isPending: false }),
+}));
+
+vi.mock('@core/utils/saveBlob', () => ({
+  saveBlob: vi.fn(),
 }));
 
 vi.mock('@/components/FilterBar', () => ({
@@ -143,6 +149,7 @@ const confirmSpy = vi.spyOn(Modal, 'confirm').mockImplementation((config) => {
 });
 
 import TaskRecord from '..';
+import { saveBlob } from '@core/utils/saveBlob';
 
 function buildTask(overrides: Record<string, unknown> = {}) {
   return {
@@ -178,6 +185,25 @@ describe('TaskRecord batch delete and console task display', () => {
     mocks.taskItems = [buildTask()];
     mocks.cancelTasks.mockImplementation((_ids: string[], options?: { onSuccess?: () => void }) => options?.onSuccess?.());
     mocks.deleteTasks.mockImplementation((_ids: string[], options?: { onSuccess?: () => void }) => options?.onSuccess?.());
+    mocks.getTaskResultsPage.mockResolvedValue({
+      total: 1,
+      page: 1,
+      pageSize: 100,
+      items: [{
+        deviceTaskId: 'device-task-1',
+        deviceSn: 'SN001',
+        deviceName: '基站 A',
+        commandCode: 'LST DEVICE_INFO',
+        status: 'completed',
+        result: {
+          success: true,
+          rawOutput: '<cwmp:GetParameterValuesResponse />',
+          parsedData: null,
+          executionTime: 30,
+          timestamp: '2026-07-11T00:00:01Z',
+        },
+      }],
+    });
     confirmSpy.mockClear();
   });
 
@@ -187,10 +213,70 @@ describe('TaskRecord batch delete and console task display', () => {
     expect(screen.getByText('控制台执行')).toBeInTheDocument();
 
     const viewButton = screen.getByRole('button', { name: '查看' });
+    expect(viewButton.textContent?.trim()).toBe('');
     fireEvent.click(viewButton);
 
     expect(screen.getByText('LST')).toBeInTheDocument();
     expect(screen.getByText('DEVICE_INFO')).toBeInTheDocument();
+  });
+
+  it('exports the full viewed task result list as CSV', async () => {
+    mocks.taskItems = [buildTask({ id: 'task-script-1', taskName: '脚本任务', taskOrigin: 'script' })];
+    mocks.getTaskResultsPage.mockResolvedValueOnce({
+      total: 2,
+      page: 1,
+      pageSize: 100,
+      items: [
+        {
+          deviceTaskId: 'device-task-1',
+          deviceSn: 'SN,001',
+          deviceName: '基站 "A"',
+          planLineNo: 21,
+          planOrder: 1,
+          mmlScript: '=HYPERLINK("http://bad")',
+          status: 'completed',
+          request: { method: 'SetParameterValues', rawRequest: '<xml attr="1">x</xml>' },
+          result: {
+            success: true,
+            rawOutput: 'line1\nline2',
+            parsedData: null,
+            executionTime: 30,
+            timestamp: '2026-07-11T00:00:01Z',
+          },
+        },
+        {
+          deviceTaskId: 'device-task-2',
+          deviceSn: 'SN002',
+          deviceName: '基站 B',
+          commandCode: 'LST Device.DeviceInfo.SoftwareVersion',
+          status: 'completed',
+          result: {
+            success: true,
+            rawOutput: 'OK',
+            parsedData: null,
+            executionTime: 20,
+            timestamp: '2026-07-11T00:00:02Z',
+          },
+        },
+      ],
+    });
+
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: '查看' }));
+    fireEvent.click(screen.getByRole('button', { name: '导出 CSV' }));
+
+    await waitFor(() => expect(saveBlob).toHaveBeenCalled());
+    expect(mocks.getTaskResultsPage).toHaveBeenCalledWith('task-script-1', 1, 100);
+
+    const [content, filename, mime] = vi.mocked(saveBlob).mock.calls[0];
+    expect(filename).toMatch(/^mml-task-results-脚本任务-\d{8}-\d{6}\.csv$/);
+    expect(mime).toBe('text/csv;charset=utf-8');
+    expect(String(content)).toContain('\ufeff');
+    expect(String(content)).toContain('"SN,001"');
+    expect(String(content)).toContain('"基站 ""A"""');
+    expect(String(content)).toContain('"\'=HYPERLINK(""http://bad"")"');
+    expect(String(content)).toContain('"line1\nline2"');
   });
 
   it('supports deleting selected task records in batch', () => {

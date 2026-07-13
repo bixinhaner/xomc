@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { Key } from 'react';
-import { Button, Descriptions, Drawer, Dropdown, Empty, Form, Input, Modal, Space, Spin, Typography, message } from 'antd';
+import { Button, Descriptions, Drawer, Dropdown, Empty, Form, Input, Modal, Space, Spin, Tooltip, Typography, message } from 'antd';
 import type { MenuProps } from 'antd';
 import { DeleteOutlined, DownloadOutlined, EditOutlined, EyeOutlined, MoreOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -114,7 +114,9 @@ export default function ScriptTask() {
           { key: 'delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true, onClick: confirmDelete },
         ];
         return <Space size={4}>
-          <Button type="link" size="small" aria-label={t('mml.script.action.execute')} icon={<PlayCircleOutlined />} onClick={(event) => { event.stopPropagation(); setExecScript(record); }}>{t('mml.script.action.execute')}</Button>
+          <Tooltip title={t('mml.script.action.execute')}>
+            <Button type="link" size="small" aria-label={t('mml.script.action.execute')} icon={<PlayCircleOutlined />} onClick={(event) => { event.stopPropagation(); setExecScript(record); }} />
+          </Tooltip>
           <Dropdown menu={{ items }} trigger={['click']}>
             <Button type="text" size="small" aria-label={t('mml.script.action.more')} icon={<MoreOutlined />} onClick={(event) => event.stopPropagation()} />
           </Dropdown>
