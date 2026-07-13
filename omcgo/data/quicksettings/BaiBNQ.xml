@@ -11,14 +11,26 @@
     <param name="Band" titleZh="频段" titleEn="Band"
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.MultiFrequencyBandListNRSIB.{i}.FreqBandIndicatorNR"
            hideRangeHint="true"/>
-    <param name="DLCarrierBandWidth" titleZh="下行载波带宽" titleEn="DL Carrier Bandwidth"
-           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.CarrierBandwidth"/>
-    <param name="DLSubCarrierSpacing" titleZh="下行子载波间隔" titleEn="DL SubCarrier Spacing"
-           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.SubcarrierSpacing"/>
-    <param name="NRARFCNDL" titleZh="NR 下行频点" titleEn="NRARFCNDL"
-           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RF.NRARFCNDL"/>
     <param name="SsbFrequency" titleZh="SSB 频点" titleEn="SSB Frequency"
            standardPath="Device.Services.FAPService.1.CellConfig.{i}.NR.RAN.RF.SsbFrequency"/>
+    <param name="DLSubCarrierSpacing" titleZh="下行子载波间隔" titleEn="DL SubCarrier Spacing" type="enum"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.SubcarrierSpacing">
+      <option value="0" label="15kHz"/>
+      <option value="1" label="30kHz"/>
+      <option value="2" label="60kHz"/>
+    </param>
+    <param name="ULSubCarrierSpacing" titleZh="上行子载波间隔" titleEn="UL SubCarrier Spacing" type="enum"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoULSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.SubcarrierSpacing">
+      <option value="0" label="15kHz"/>
+      <option value="1" label="30kHz"/>
+      <option value="2" label="60kHz"/>
+    </param>
+    <param name="DLCarrierBandWidth" titleZh="下行载波带宽" titleEn="DL Carrier Bandwidth"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.CarrierBandwidth"/>
+    <param name="ULCarrierBandWidth" titleZh="上行载波带宽" titleEn="UL Carrier Bandwidth"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoULSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.CarrierBandwidth"/>
+    <param name="NRARFCNDL" titleZh="NR 下行频点" titleEn="NRARFCNDL"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RF.NRARFCNDL"/>
     <param name="NRARFCNUL" titleZh="NR 上行频点" titleEn="NRARFCNUL"
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RF.NRARFCNUL"/>
     <param name="NumOfRxAntenna" titleZh="接收天线数" titleEn="Num Of Rx Antenna"
@@ -39,10 +51,6 @@
     </param>
     <param name="SsbSubcarrierOffset" titleZh="SSB 子载波偏移" titleEn="SSB Subcarrier Offset"
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.SSB.SsbSubcarrierOffset"/>
-    <param name="ULCarrierBandWidth" titleZh="上行载波带宽" titleEn="UL Carrier Bandwidth"
-           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoULSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.CarrierBandwidth"/>
-    <param name="ULSubCarrierSpacing" titleZh="上行子载波间隔" titleEn="UL SubCarrier Spacing"
-           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoULSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.SubcarrierSpacing"/>
   </group>
   <group id="gnb-core" titleZh="核心网参数" titleEn="Core Network Parameters">
     <param name="PLMNID" titleZh="PLMN" titleEn="PLMN"
@@ -57,7 +65,7 @@
            standardPath="Device.FAP.NguIpBind{i}.BindInterface"/>
     <param name="gNBId" titleZh="gNB ID" titleEn="gNB ID"
            standardPath="Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBId"/>
-    <param name="gNBIdLength" titleZh="gNB Length" titleEn="gNB ID Length"
+    <param name="gNBIdLength" titleZh="gNB Length" titleEn="gNB ID Length" type="unsignedInt"
            standardPath="Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBIdLength"/>
     <param name="NrcellIdentity" titleZh="NCI" titleEn="NCI"
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.CN.TA.{i}.NrcellIdentity"/>
@@ -181,11 +189,11 @@
        </group>
        <group id="gnb-lte-reselection" titleZh="LTE异系统重选列表" titleEn="LTE Inter-System Reselection List"
                              multiInstance="true" maxInstances="8"
-                             objectPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.EUTRA.Carrier.{i}.">
-              <param name="CarrierFreq" titleZh="邻区EARFCN" titleEn="Neighbor EARFCN" leaf="CarrierFreq"/>
-              <param name="CellReselectionPriority" titleZh="小区重选优先级" titleEn="Cell Reselection Priority" leaf="CellReselectionPriority"/>
-              <param name="ThreshXHigh" titleZh="EUTRAN频点高优先级重选门限" titleEn="EUTRAN High Priority Reselection Threshold" leaf="ThreshXHigh"/>
-              <param name="ThreshXLow" titleZh="EUTRAN频点低优先级重选门限" titleEn="EUTRAN Low Priority Reselection Threshold" leaf="ThreshXLow"/>
-              <param name="QRxLevMin" titleZh="EUTRAN最低接收电平" titleEn="EUTRAN Minimum Receive Level" leaf="QRxLevMin"/>
+                             objectPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.EUTRA.Carrier.{i}.">
+              <param name="EUTRACarrierARFCN" titleZh="邻区EARFCN" titleEn="Neighbor EARFCN" leaf="EUTRACarrierARFCN" type="unsignedInt" minValue="0" maxValue="3279165"/>
+              <param name="CellReselectionPriority" titleZh="小区重选优先级" titleEn="Cell Reselection Priority" leaf="CellReselectionPriority" type="unsignedInt" minValue="0" maxValue="7"/>
+              <param name="ThreshXHigh" titleZh="EUTRAN频点高优先级重选门限" titleEn="EUTRAN High Priority Reselection Threshold" leaf="ThreshXHigh" type="unsignedInt" minValue="0" maxValue="31"/>
+              <param name="ThreshXLow" titleZh="EUTRAN频点低优先级重选门限" titleEn="EUTRAN Low Priority Reselection Threshold" leaf="ThreshXLow" type="unsignedInt" minValue="0" maxValue="31"/>
+              <param name="QRxLevMin" titleZh="EUTRAN最低接收电平" titleEn="EUTRAN Minimum Receive Level" leaf="QRxLevMin" type="int" minValue="-70" maxValue="-22"/>
        </group>
 </quickSettings>

@@ -806,11 +806,12 @@ func deviceWithInfoSelectColumns() []string {
 		"d.last_inform_at", "d.last_inform_events",
 		"d.last_boot_at", "d.boot_count",
 		"d.inform_interval", "d.site_name", "d.site_id", "d.latitude", "d.longitude",
-		"d.extension_data", "d.created_at", "d.updated_at", "d.deleted_at",
+		"d.extension_data", "d.created_at", "d.updated_at", "d.deleted_at", "d.deleted_by",
 		"d.last_offline_reason", // T-0173: 离线原因诊断（migration 000184)
 		// device_groups columns
 		"dg.id as group_id",
 		"dg.name as group_name",
+		"COALESCE(dgm.source_type, 'auto') as source_type",
 		// device_info columns
 		"di.device_name", "di.address", "di.remark", "di.project_status", "di.height",
 		"di.eci", "di.pci", "di.cell_id", "di.freq_point", "di.bandwidth", "di.transmit_power", "di.plmn",
@@ -906,8 +907,8 @@ const alarmsActiveAggJoin = `(
 	GROUP BY device_id
 ) aa ON aa.device_id = d.id`
 
-	// alarmSeverityTextToCodes 把前端 AlarmSeverity 文本映成 alarms_active.severity。
-	// 兼容历史 1..4 与现行 31001..31004 两套编码。未知文本返回空切片（跳过过滤）。
+// alarmSeverityTextToCodes 把前端 AlarmSeverity 文本映成 alarms_active.severity。
+// 兼容历史 1..4 与现行 31001..31004 两套编码。未知文本返回空切片（跳过过滤）。
 func alarmSeverityTextToCodes(text string) []int {
 	switch strings.ToLower(strings.TrimSpace(text)) {
 	case "critical":
@@ -981,6 +982,7 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	// nullable string columns from devices table
 	var productClass, manufacturer, modelName *string
 	var firmwareVersion, connReqURL, siteName, siteID *string
+	var deletedBy *string
 
 	// device_info nullable fields
 	var (
@@ -1059,11 +1061,12 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		&d.LastInformAt, &eventsData,
 		&d.LastBootAt, &d.BootCount,
 		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
-		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt,
+		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
 		&d.LastOfflineReason, // T-0173: 离线原因（migration 000184)
 		// device_groups field (nullable from LEFT JOIN)
 		&d.GroupID,
 		&d.GroupName,
+		&d.SourceType,
 		// device_info fields (all nullable from LEFT JOIN)
 		&diDeviceName, &diAddress, &diRemark, &diProjectStatus, &diHeight,
 		&diECI, &diPCI, &diCellID, &diFreqPoint, &diBandwidth, &diTransmitPower, &diPLMN,
@@ -1094,6 +1097,9 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	}
 
 	// Assign nullable devices fields
+	if deletedBy != nil {
+		d.DeletedBy = *deletedBy
+	}
 	if productClass != nil {
 		d.ProductClass = *productClass
 	}

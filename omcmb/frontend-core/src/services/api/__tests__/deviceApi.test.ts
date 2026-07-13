@@ -38,6 +38,7 @@ function backendDevice(overrides: Record<string, unknown> = {}) {
     ip_address: '10.0.0.1',
     group_id: 'group-1',
     group_name: '默认设备组',
+    source_type: 'manual',
     connection_request_url: '',
     inform_interval: 300,
     device_name: '基站A',
@@ -117,8 +118,26 @@ describe('deviceApi.getList — filter → query 映射', () => {
     expect(d.isOnline).toBe(true);
     expect(d.groupId).toBe('group-1');
     expect(d.groupName).toBe('默认设备组');
+    expect(d.sourceType).toBe('manual');
     // 后端 stats 直读（不靠 items.filter 估算）
     expect(out.stats.online_count).toBe(1);
+  });
+
+  it('BackendDevice source_type=auto 映射为 Device.sourceType', async () => {
+    getMock.mockResolvedValue({
+      data: {
+        items: [backendDevice({ group_id: undefined, group_name: undefined, source_type: 'auto' })],
+        total: 1,
+        page: 1,
+        page_size: 20,
+        total_pages: 1,
+      },
+    });
+
+    const out = await deviceApi.getList({ page: 1, pageSize: 20 });
+    expect(out.items[0].groupId).toBeUndefined();
+    expect(out.items[0].groupName).toBe('');
+    expect(out.items[0].sourceType).toBe('auto');
   });
 
   it('列表接口返回 device_address 时也能映射成 installAddress', async () => {
@@ -212,6 +231,54 @@ describe('deviceApi.getById', () => {
   });
 });
 
+describe('deviceApi.getBySn', () => {
+  it('详情接口字段为空时保留列表接口解析出的设备分组和小区字段', async () => {
+    getMock
+      .mockResolvedValueOnce({
+        data: {
+          items: [backendDevice({
+            group_id: 'group-1',
+            group_name: '默认设备组',
+            pci: '425',
+            freq_point: '1498',
+            bandwidth: 20,
+            band: '3',
+            admin_state: 'true',
+          })],
+          total: 1,
+          page: 1,
+          page_size: 1,
+          total_pages: 1,
+        },
+      })
+      .mockResolvedValueOnce({
+        data: backendDevice({
+          group_id: undefined,
+          group_name: '',
+          pci: '',
+          freq_point: '',
+          bandwidth: '',
+          band: '',
+          admin_state: '',
+        }),
+      });
+
+    const d = await deviceApi.getBySn('SN001');
+
+    expect(getMock).toHaveBeenNthCalledWith(1, '/devices', {
+      params: expect.objectContaining({ sn: 'SN001', page: 1, pageSize: 1 }),
+    });
+    expect(getMock).toHaveBeenNthCalledWith(2, '/devices/d1');
+    expect(d?.groupId).toBe('group-1');
+    expect(d?.groupName).toBe('默认设备组');
+    expect(d?.pci).toBe('425');
+    expect(d?.dlEarfcn).toBe('1498');
+    expect(d?.bandwidth).toBe(20);
+    expect(d?.band).toBe('3');
+    expect(d?.adminState).toBe('true');
+  });
+});
+
 describe('deviceApi.update', () => {
   it('安装详细地址与备注走 /devices/:id/info，并在更新后回读设备', async () => {
     putMock.mockResolvedValue({ data: null });
@@ -301,6 +368,9 @@ describe('deviceApi.getGroups', () => {
                 is_default: true,
                 level: 2,
                 name_i18n: { 'zh-CN': '默认设备组', 'en-US': 'Default Group' },
+                source_group_id: 'source-l2',
+                matching_mode: 'serialNumber',
+                serial_number_list: ['SN-001', 'SN-002'],
               },
             ],
           },
@@ -314,6 +384,9 @@ describe('deviceApi.getGroups', () => {
 
     expect(group?.name).toBe('默认设备组');
     expect(group?.nameI18n).toEqual({ 'zh-CN': '默认设备组', 'en-US': 'Default Group' });
+    expect(group?.sourceGroupId).toBe('source-l2');
+    expect(group?.matchingMode).toBe('serialNumber');
+    expect(group?.serialNumberList).toEqual(['SN-001', 'SN-002']);
     expect(out.stats.totalDevices).toBe(6);
   });
 });

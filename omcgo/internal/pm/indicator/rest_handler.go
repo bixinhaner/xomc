@@ -47,31 +47,49 @@ func NewRESTHandler(
 
 // RegisterRoutes 挂在 /api/v1 下。
 func (h *RESTHandler) RegisterRoutes(rg *gin.RouterGroup) {
+	h.RegisterReadRoutes(rg)
+	h.RegisterWriteRoutes(rg)
+}
+
+// RegisterReadRoutes 挂载指标库的只读接口，供已登录用户读取 KPI 数据。
+func (h *RESTHandler) RegisterReadRoutes(rg *gin.RouterGroup) {
 	// indicators
 	ig := rg.Group("/indicators")
 	ig.GET("", h.ListIndicators)
 	ig.GET("/platforms", h.ListPlatforms)
 	ig.GET("/:id", h.GetIndicator)
+	ig.GET("/:id/formulas", h.ListFormulas)
+	ig.GET("/:id/formulas/:platform", h.GetFormula)
+
+	// indicator-groups
+	gg := rg.Group("/indicator-groups")
+	gg.GET("", h.ListGroups)
+
+	// enabled-indicators
+	eg := rg.Group("/enabled-indicators")
+	eg.GET("", h.GetEnabled)
+
+}
+
+// RegisterWriteRoutes 挂载指标库的写接口，仅供超管管理。
+func (h *RESTHandler) RegisterWriteRoutes(rg *gin.RouterGroup) {
+	// indicators
+	ig := rg.Group("/indicators")
 	ig.POST("", h.CreateIndicator)
 	ig.PUT("/:id", h.UpdateIndicator)
 	ig.DELETE("/:id", h.DeleteIndicator)
-	ig.GET("/:id/formulas", h.ListFormulas)
-	ig.GET("/:id/formulas/:platform", h.GetFormula)
 	ig.POST("/:id/formulas", h.UpsertFormula)
 	ig.DELETE("/:id/formulas/:platform", h.DeleteFormula)
 
 	// indicator-groups
 	gg := rg.Group("/indicator-groups")
-	gg.GET("", h.ListGroups)
 	gg.POST("", h.CreateGroup)
 	gg.PUT("/:id", h.UpdateGroup)
 	gg.DELETE("/:id", h.DeleteGroup)
 
 	// enabled-indicators
 	eg := rg.Group("/enabled-indicators")
-	eg.GET("", h.GetEnabled)
 	eg.PUT("", h.SetEnabled)
-
 }
 
 // ── 公共 helper ─────────────────────────────────────────────────────
@@ -378,40 +396,12 @@ func (h *RESTHandler) UpsertFormula(c *gin.Context) {
 		return
 	}
 	indicatorID := c.Param("id")
-	// 简化的 upsert：先删除该 (indicator, platform) 行，再 BatchCreate 单条。
-	// PlatformFormulaRepository 没有 Upsert/单条删除接口，借助 BatchCreate +
-	// 单 platform 维度的全删（DeleteByIndicatorID 会清掉所有 platform，副作用大）。
-	// 这里为单 platform 场景：调用方可在 service 层后续提供 UpsertOne。
-	// 折中做法：先 ListByIndicatorID → 移除冲突行后 + 新条目重写。
-	existing, err := h.formula.ListByIndicatorID(c.Request.Context(), dt, indicatorID)
+	out, err := h.svc.UpsertPlatformFormula(c.Request.Context(), dt, indicatorID, req.Platform, req.Formula)
 	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	merged := make([]*PlatformFormula, 0, len(existing)+1)
-	for _, f := range existing {
-		if f.PlatformName != req.Platform {
-			merged = append(merged, f)
-		}
-	}
-	merged = append(merged, &PlatformFormula{
-		PlatformName: req.Platform,
-		IndicatorID:  indicatorID,
-		Formula:      req.Formula,
-	})
-	if err := h.formula.DeleteByIndicatorID(c.Request.Context(), dt, indicatorID, nil); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
-		return
-	}
-	if err := h.formula.BatchCreate(c.Request.Context(), dt, merged, nil); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
-		return
-	}
-	response.OKWithStatus(c, http.StatusCreated, gin.H{
-		"indicator_id": indicatorID,
-		"platform":     req.Platform,
-		"formula":      req.Formula,
-	})
+	response.OKWithStatus(c, http.StatusCreated, out)
 }
 
 func (h *RESTHandler) DeleteFormula(c *gin.Context) {
@@ -422,33 +412,9 @@ func (h *RESTHandler) DeleteFormula(c *gin.Context) {
 	}
 	platform := c.Param("platform")
 	indicatorID := c.Param("id")
-	existing, err := h.formula.ListByIndicatorID(c.Request.Context(), dt, indicatorID)
-	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+	if err := h.svc.DeletePlatformFormula(c.Request.Context(), dt, indicatorID, platform); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
-	}
-	kept := make([]*PlatformFormula, 0, len(existing))
-	deleted := false
-	for _, f := range existing {
-		if f.PlatformName == platform {
-			deleted = true
-			continue
-		}
-		kept = append(kept, f)
-	}
-	if !deleted {
-		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
-		return
-	}
-	if err := h.formula.DeleteByIndicatorID(c.Request.Context(), dt, indicatorID, nil); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
-		return
-	}
-	if len(kept) > 0 {
-		if err := h.formula.BatchCreate(c.Request.Context(), dt, kept, nil); err != nil {
-			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
-			return
-		}
 	}
 	response.OK(c, gin.H{"deleted": true, "indicator_id": indicatorID, "platform": platform})
 }

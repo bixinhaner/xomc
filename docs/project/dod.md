@@ -1,12 +1,12 @@
 # Definition of Done（完成定义）
 
-> **性质**：硬约束。PR 合入前必须每项打勾（N/A 需注明）。  
+> **性质**：硬约束。MR 合入前必须每项打勾（N/A 需注明）。
 > **源头**：`CLAUDE.md §10 质量关卡` + `docs/project/process-design-20260420.md §5.4`  
 > **守护人**：QA/发布经理（`CLAUDE.md §16.12`）
 
 ---
 
-## 通用 DoD（所有 PR 必过）
+## 通用 DoD（所有 MR 必过）
 
 ### 编译与类型
 - [ ] 后端 `go build ./...` 通过
@@ -21,7 +21,7 @@
 - [ ] 新 REST 端点：E2E 脚本（`scripts/e2e_verify.sh`）已增补用例
 - [ ] 修复 bug：回归测试（先写失败测试 → 改代码让它过）
 - [ ] 测试覆盖率不低于合入前水平（local `make test-coverage` 对比）
-- [ ] 禁止禁用失败测试；确需删除需在 PR 说明理由
+- [ ] 禁止禁用失败测试；确需删除需在 MR 说明理由
 
 ### 迁移与数据
 - [ ] 新迁移文件编号**连续递增**（`bash scripts/check-migrations.sh` 通过）
@@ -38,9 +38,9 @@
 - [ ] 新增日志字段采用 `zap.String/Int/Error` 结构化形式
 
 ### 文档
-- [ ] PR 说明填写了 **Why**（为什么做），不只是 **What**
-- [ ] **关联 GitHub Issue**（活任务源，见 `docs/agents/issue-tracker.md`）：commit footer `Issue: Closes #NN`；纯流程/工具链提交无 Issue 时填 `N/A (<原因>)`
-- [ ] 关联 PRD（如为 feat/P0/P1）：由 `/to-prd` 发布为 GitHub Issue
+- [ ] MR 说明填写了 **Why**（为什么做），不只是 **What**
+- [ ] **关联 GitLab Issue**（活任务源，见 `docs/agents/issue-tracker.md`）：commit footer `Issue: Closes #NN`；纯流程/工具链提交无 Issue 时填 `N/A (<原因>)`
+- [ ] 关联 PRD（如为 feat/P0/P1）：由 `/to-prd` 发布为 GitLab Issue
 - [ ] 如涉及约定变更，`CLAUDE.md` 或 `omcgo/CLAUDE.md` 已同步更新
 - [ ] 如涉及对外接口变更，Swagger/API 文档已更新
 
@@ -48,7 +48,7 @@
 - [ ] commit footer **闭环字段齐全**（见 `.claude/commands/ship.md` + `.claude/commands/commit.md`）：
   - `Issue:` `Closes #NN` 或 `N/A (<原因>)`（必填一项）
   - `Review:` 审查报告路径 或 `N/A (skipped per /ship 快速通道 <type>)`（必填一项）
-- [ ] 关联 GitHub Issue 状态已回写（P9 收尾评论/关闭，引用 commit hash）
+- [ ] 关联 GitLab Issue 状态已回写（P9 收尾评论/关闭，引用 commit hash）
 - [ ] 如走快速通道（hotfix/bugfix 裁剪 P1-P3）→ postmortem 或裁剪说明已补
 
 ### 安全
@@ -111,12 +111,12 @@
 
 ## DoD 勾选规范
 
-**PR 模板** 自动展开本文件的通用 DoD 清单。作者提交 PR 时：
+**MR 模板** 自动展开本文件的通用 DoD 清单。作者提交 MR 时：
 - 每项逐项判断，打勾 `[x]` 或注明 `N/A（原因）`
-- 未完成项应在 PR 说明列出"跟进 issue"
+- 未完成项应在 MR 说明列出"跟进 issue"
 - 评审人对 N/A 理由进行交叉检查
 
-**Claude 的职责**：在 PR review（`/review` Skill）时，按本清单逐项核查，未勾选项必须被指出。
+**Claude 的职责**：在 MR review（`/review` Skill）时，按本清单逐项核查，未勾选项必须被指出。
 
 ---
 
@@ -124,6 +124,6 @@
 
 - 每 sprint 回顾时检视一次，剔除形同虚设的项、补充漏掉的坑
 - 演进记录在 `docs/project/sprint/sprint-NN.md` 的 "DoD 调整" 段
-- 重大修订推 PR 到本文件，由 QA/发布经理审批
+- 重大修订推 MR 到本文件，由 QA/发布经理审批
 
 **当前版本**：v1.0（2026-04-20）

@@ -12,4 +12,12 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 
 When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
 
-Edit the right-hand column to match whatever vocabulary you actually use.
+## Category Labels
+
+Every implementation issue should also have exactly one category label so the delivery flow can derive branch type and fast-lane behavior.
+
+| Category | Meaning |
+| -------- | ------- |
+| `docs` | Documentation, process, or local collaboration configuration |
+
+Edit these tables to match whatever vocabulary you actually use.

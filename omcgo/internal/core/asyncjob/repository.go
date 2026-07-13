@@ -59,23 +59,79 @@ func NewPgRepository(pool *pgxpool.Pool) *PgRepository {
 var _ Repository = (*PgRepository)(nil)
 
 func (r *PgRepository) Insert(ctx context.Context, req InsertRequest) (uuid.UUID, error) {
-	maxAttempts := req.MaxAttempts
-	if maxAttempts <= 0 {
-		maxAttempts = DefaultMaxAttempts
-	}
-	q, args, err := storage.Psql.Insert("async_jobs").
-		Columns("job_type", "status", "schedule_expr", "scheduled_at", "payload", "max_attempts").
-		Values(req.JobType, string(StatusPending), nullableString(req.ScheduleExpr), req.ScheduledAt, req.Payload, maxAttempts).
-		Suffix("RETURNING id").
-		ToSql()
+	q, args, err := buildInsertSQL(req)
 	if err != nil {
-		return uuid.Nil, fmt.Errorf("build insert async_jobs: %w", err)
+		return uuid.Nil, err
 	}
 	var id uuid.UUID
 	if err := r.pool.QueryRow(ctx, q, args...).Scan(&id); err != nil {
 		return uuid.Nil, fmt.Errorf("insert async_jobs: %w", err)
 	}
 	return id, nil
+}
+
+func buildInsertSQL(req InsertRequest) (string, []any, error) {
+	maxAttempts := req.MaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = DefaultMaxAttempts
+	}
+	q, args, err := storage.Psql.Insert("async_jobs").
+		Columns("job_type", "status", "schedule_expr", "scheduled_at", "bucket_start", "bucket_end", "payload", "max_attempts").
+		Values(req.JobType, string(StatusPending), nullableString(req.ScheduleExpr), req.ScheduledAt, req.BucketStart, req.BucketEnd, req.Payload, maxAttempts).
+		Suffix(`
+ON CONFLICT (job_type, bucket_start, bucket_end)
+WHERE bucket_start IS NOT NULL AND bucket_end IS NOT NULL
+DO UPDATE SET
+    status = CASE
+        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN 'pending'
+        ELSE async_jobs.status
+    END,
+    scheduled_at = CASE
+        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN EXCLUDED.scheduled_at
+        ELSE async_jobs.scheduled_at
+    END,
+    payload = CASE
+        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN EXCLUDED.payload
+        ELSE async_jobs.payload
+    END,
+    max_attempts = CASE
+        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN EXCLUDED.max_attempts
+        ELSE async_jobs.max_attempts
+    END,
+    started_at = CASE
+        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN NULL
+        ELSE async_jobs.started_at
+    END,
+    finished_at = CASE
+        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN NULL
+        ELSE async_jobs.finished_at
+    END,
+    heartbeat_at = CASE
+        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN NULL
+        ELSE async_jobs.heartbeat_at
+    END,
+    lock_owner = CASE
+        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN NULL
+        ELSE async_jobs.lock_owner
+    END,
+    attempt = CASE
+        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN 1
+        ELSE async_jobs.attempt
+    END,
+    result = CASE
+        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN NULL
+        ELSE async_jobs.result
+    END,
+    error_message = CASE
+        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN NULL
+        ELSE async_jobs.error_message
+    END`).
+		Suffix("RETURNING id").
+		ToSql()
+	if err != nil {
+		return "", nil, fmt.Errorf("build insert async_jobs: %w", err)
+	}
+	return q, args, nil
 }
 
 func (r *PgRepository) GetByID(ctx context.Context, id uuid.UUID) (*Job, error) {
@@ -110,7 +166,7 @@ SET status = 'running',
 FROM next
 WHERE aj.id = next.id
 RETURNING aj.id, aj.job_type, aj.status, aj.schedule_expr, aj.scheduled_at, aj.started_at, aj.finished_at,
-          aj.heartbeat_at, aj.lock_owner, aj.attempt, aj.max_attempts, aj.payload, aj.result, aj.error_message,
+          aj.bucket_start, aj.bucket_end, aj.heartbeat_at, aj.lock_owner, aj.attempt, aj.max_attempts, aj.payload, aj.result, aj.error_message,
           aj.created_at, aj.updated_at
 `
 	row := r.pool.QueryRow(ctx, q, jobType, lockOwner)
@@ -149,7 +205,18 @@ func (r *PgRepository) MarkSucceeded(ctx context.Context, id uuid.UUID, result j
 }
 
 func (r *PgRepository) MarkFailed(ctx context.Context, id uuid.UUID, errMsg string) error {
-	const q = `UPDATE async_jobs SET status = 'failed', finished_at = NOW(), error_message = $2 WHERE id = $1 AND status = 'running'`
+	const q = `
+UPDATE async_jobs SET
+    status = CASE WHEN attempt + 1 > max_attempts THEN 'failed' ELSE 'pending' END,
+    attempt = CASE WHEN attempt + 1 > max_attempts THEN attempt ELSE attempt + 1 END,
+    scheduled_at = CASE WHEN attempt + 1 > max_attempts THEN scheduled_at ELSE NOW() END,
+    started_at = NULL,
+    heartbeat_at = NULL,
+    lock_owner = NULL,
+    finished_at = CASE WHEN attempt + 1 > max_attempts THEN NOW() ELSE NULL END,
+    result = NULL,
+    error_message = $2
+WHERE id = $1 AND status = 'running'`
 	tag, err := r.pool.Exec(ctx, q, id, errMsg)
 	if err != nil {
 		return fmt.Errorf("mark failed: %w", err)
@@ -245,7 +312,7 @@ RETURNING status
 
 var jobCols = []string{
 	"id", "job_type", "status", "schedule_expr", "scheduled_at", "started_at", "finished_at",
-	"heartbeat_at", "lock_owner", "attempt", "max_attempts", "payload", "result", "error_message",
+	"bucket_start", "bucket_end", "heartbeat_at", "lock_owner", "attempt", "max_attempts", "payload", "result", "error_message",
 	"created_at", "updated_at",
 }
 
@@ -270,7 +337,7 @@ func scanJob(row rowScanner) (*Job, error) {
 	var payload, result []byte
 	if err := row.Scan(
 		&j.ID, &j.JobType, &j.Status, &scheduleExpr, &j.ScheduledAt, &j.StartedAt, &j.FinishedAt,
-		&j.HeartbeatAt, &lockOwner, &j.Attempt, &j.MaxAttempts, &payload, &result, &errMsg,
+		&j.BucketStart, &j.BucketEnd, &j.HeartbeatAt, &lockOwner, &j.Attempt, &j.MaxAttempts, &payload, &result, &errMsg,
 		&j.CreatedAt, &j.UpdatedAt,
 	); err != nil {
 		return nil, err

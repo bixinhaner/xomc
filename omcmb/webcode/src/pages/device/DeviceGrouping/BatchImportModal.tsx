@@ -281,7 +281,10 @@ export default function BatchImportModal({
 
     setImporting(true);
     try {
-      const group = selectedGroupId ? { group_id: selectedGroupId } : {};
+      // 批量导入只更新名称/备注，不改变设备归属分组（归组请用「Move」按钮）。
+      // 不传 group_id，后端 BatchImportDevices 的 `if req.GroupID != nil` 守卫
+      // 即不触发 BatchAssignToGroup，已有归属的设备不会被移组。
+      const group = {};
       // 后端单次 batch-import 上限 max=1000（device_handler.go binding）。导出整组
       // （如「北京移动」2000 台）后回灌会超限报「failed on the 'max' tag」。这里按
       // IMPORT_CHUNK_SIZE 分批顺序提交并聚合结果，支持任意规模、避免单请求过大。
@@ -399,7 +402,11 @@ export default function BatchImportModal({
               #{item.row}
             </Text>
             {item.sn ? <Tag style={{ marginRight: 8 }}>{item.sn}</Tag> : null}
-            <Text>{item.reason}</Text>
+            <Text>
+              {item.errorCode
+                ? t(`device.batchImport.error.${item.errorCode}`)
+                : item.reason}
+            </Text>
           </div>
         ))}
       </Flex>

@@ -44,6 +44,8 @@ var DefaultQueryGroups = []QueryGroup{
 			"Device.Services.FAPService.1.FAPControl.NR.AdminState",
 			"Device.Services.FAPService.1.FAPControl.LTE.OpState",
 			"Device.Services.FAPService.1.FAPControl.NR.OpState",
+			"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable",
+			"Device.Services.FAPService.1.CellConfig.NR.RAN.RF.X_COM_RadioEnable",
 			"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.RFTxStatus",
 			"Device.Services.FAPService.1.CellConfig.NR.RAN.RF.RFTxStatus",
 			"Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.CellOpState",

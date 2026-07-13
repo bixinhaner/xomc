@@ -1250,7 +1250,7 @@ export default function FileTransferCenter() {
       { title: t('ufte.col.progress'), dataIndex: 'progress', key: 'progress', width: 180, render: (value: number) => <Progress percent={value} size="small" status={value === 100 ? 'success' : 'active'} /> },
       failureReasonColumn,
       {
-        // issue #655：与升级类同款，「上报时间」单列改为「开始时间 / 结束时间」两列，三皮肤统一。
+        // issue #655：与升级类同款，「上报时间」单列改为「开始时间 / 结束时间」两列。
         title: t('ufte.col.startTime'),
         dataIndex: 'startedAt',
         key: 'startedAt',

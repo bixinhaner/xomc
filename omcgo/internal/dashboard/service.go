@@ -12,9 +12,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/alarm"
+	"github.com/omcgo/omcgo/internal/core/jsonx"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/device"
+	pmaggregator "github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"github.com/omcgo/omcgo/internal/topology"
@@ -122,8 +124,8 @@ type AlarmTypePieEntry struct {
 
 // KPITimeSeriesEntry represents a single data point within a named KPI series.
 type KPITimeSeriesEntry struct {
-	Time  string  `json:"time"`
-	Value float64 `json:"value"`
+	Time  string      `json:"time"`
+	Value jsonx.Float `json:"value"`
 }
 
 // KPITimeSeriesResponse maps KPI names to their time-series data.
@@ -145,6 +147,9 @@ type Service struct {
 	// 给 GetKPIDefinitions（issue #213 Phase1）按别名表的 K 编号反查中文名与单位用。
 	// 可能为 nil（测试 / 退化场景）：此时 GetKPIDefinitions 仅返回别名表静态元数据，不富化。
 	indicatorRepo indicator.IndicatorRepository
+	// pmAggregator 复用 PM 的 network 维度查询链路，为首页 KPI 折线图提供 counter-first KPI 重算口径。
+	// 可能为 nil（部分测试场景）：运行时应由 provider 注入，缺失时 KPI 时序查询返回配置错误。
+	pmAggregator *pmaggregator.Aggregator
 	// layoutRepo 是 issue #213 S1 全局 KPI 首页布局（dashboard_kpi_layouts）读写仓库。
 	// 可能为 nil（部分测试场景）：此时 GetKPILayout 回退内置默认，SaveKPILayout 报错。
 	layoutRepo KPILayoutRepository
@@ -160,6 +165,7 @@ func NewService(
 	tsPool *pgxpool.Pool,
 	groupRepo topology.DeviceGroupRepository,
 	indicatorRepo indicator.IndicatorRepository,
+	pmAggregator *pmaggregator.Aggregator,
 	logger *zap.Logger,
 ) *Service {
 	s := &Service{
@@ -170,6 +176,7 @@ func NewService(
 		tsPool:        tsPool,
 		groupRepo:     groupRepo,
 		indicatorRepo: indicatorRepo,
+		pmAggregator:  pmAggregator,
 		logger:        logger.Named("dashboard"),
 	}
 	// 全局 KPI 布局仓库走主库（dashboard_kpi_layouts 在主库）。pgPool 为 nil 时（测试）留空。
@@ -673,36 +680,37 @@ func (s *Service) GetKPITrend(ctx context.Context, kpiName string, days int) ([]
 	return entries, nil
 }
 
-// GetKPITrendComparison returns KPI trend data with comparison (today vs yesterday/last week).
-func (s *Service) GetKPITrendComparison(ctx context.Context, kpiName string, compareWith string) (*KPITrendComparison, error) {
-	now := time.Now()
-	var compareStart, compareEnd time.Time
+func dashboardStartOfDay(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+}
 
-	// Determine comparison period
+// dashboardKPITrendCompareWindow returns the comparison period boundaries used by GetKPITrendComparison.
+func dashboardKPITrendCompareWindow(now time.Time, compareWith string) (string, time.Time, time.Time) {
+	todayStart := dashboardStartOfDay(now)
+	// compareEnd 使用展示时间边界：hourly 桶 [23:00,24:00) 在首页显示为次日 00:00，
+	// 因此完整自然日的结束点必须是次日 00:00，而不是 23:59:59。
 	switch compareWith {
 	case "yesterday":
-		// Current: today 00:00 to now
-		// Compare: yesterday 00:00 to 23:59:59
-		compareStart = now.AddDate(0, 0, -1).Truncate(24 * time.Hour)
-		compareEnd = now.Truncate(24 * time.Hour).Add(-time.Second)
+		return compareWith, todayStart.AddDate(0, 0, -1), todayStart
 	case "last_week":
-		// Current: this week (Monday to now)
-		// Compare: last week (Monday to Sunday)
-		weekday := int(now.Weekday())
+		weekday := int(todayStart.Weekday())
 		if weekday == 0 {
 			weekday = 7 // Sunday = 7
 		}
-		compareStart = now.AddDate(0, 0, -weekday-6).Truncate(24 * time.Hour)      // Last Monday
-		compareEnd = compareStart.AddDate(0, 0, 6).Add(24*time.Hour - time.Second) // Last Sunday
+		start := todayStart.AddDate(0, 0, -weekday-6) // Last Monday
+		return compareWith, start, start.AddDate(0, 0, 7)
 	default:
-		// Default to yesterday
-		compareWith = "yesterday"
-		compareStart = now.AddDate(0, 0, -1).Truncate(24 * time.Hour)
-		compareEnd = now.Truncate(24 * time.Hour).Add(-time.Second)
+		return "yesterday", todayStart.AddDate(0, 0, -1), todayStart
 	}
+}
+
+// GetKPITrendComparison returns KPI trend data with comparison (today vs yesterday/last week).
+func (s *Service) GetKPITrendComparison(ctx context.Context, kpiName string, compareWith string) (*KPITrendComparison, error) {
+	now := time.Now()
+	compareWith, compareStart, compareEnd := dashboardKPITrendCompareWindow(now, compareWith)
 
 	// Query current period data (today 00:00 to now)
-	currentStart := now.Truncate(24 * time.Hour)
+	currentStart := dashboardStartOfDay(now)
 	currentEntries, err := s.queryNetworkKPISeries(ctx, kpiName, currentStart, now)
 	if err != nil {
 		return nil, fmt.Errorf("query current kpi trend: %w", err)
@@ -902,9 +910,9 @@ func (s *Service) GetAlarmTypePie(ctx context.Context) ([]AlarmTypePieEntry, err
 
 // GetKPITimeSeries returns time-series data for multiple KPI names within a time range.
 //
-// 取数源（阶段2 改造）：从「读原始每设备每小区明细（pm_metrics）」改为「读全网预聚合结果表
-// pm_adhoc_aggregation_results（network 维度）」——3 条内置全网任务每小时把全库指标
-// （counter 求和、KPI 重算）汇成全网总线，首页直接拿口径正确的全网线。详见 kpi_network_query.go。
+// 取数源：复用 PM Aggregator 的 network 维度查询链路。
+// 历史完整桶读 hourly；当前整点缺点时，补最近一小时 15min 尾部窗口。
+// KPI 派生指标先聚合 counter 依赖，再在时间桶内按公式重算；dashboard 不直接平均 KPI 行。
 //
 // 查询键：前端传指标编号（K/C 编号），直接查 metric_path。
 func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, startTime, endTime time.Time) (KPITimeSeriesResponse, error) {
@@ -929,7 +937,7 @@ func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, start
 		}
 	}
 
-	// 取全网时序：优先读每小时预聚合表，缺数据时回退 15min 直读原始明细（见 fetchNetworkKCodeSeries）。
+	// 取全网时序：走 PM Aggregator 的 network 维度，保持与 PM 查询页一致的 KPI 重算口径。
 	points, err := s.fetchNetworkKCodeSeries(ctx, kcodes, startTime, endTime)
 	if err != nil {
 		return nil, err
@@ -947,68 +955,127 @@ func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, start
 	return result, nil
 }
 
-// networkSeriesPoint 是全网时序的一行（指标编号 + 时间桶 + 值），供 GetKPITimeSeries 回填用。
+// networkSeriesPoint 是全网时序的一行（指标编号 + 图表点位时间 + 值），供 GetKPITimeSeries 回填用。
 type networkSeriesPoint struct {
 	code  string
 	time  time.Time
-	value float64
+	value jsonx.Float
 }
 
-// fetchNetworkKCodeSeries 读多个指标编号的全网时序，三段式策略（issue #359 + 尾部补点）：
-//
-//  1. 优先读每小时预聚合表 pm_adhoc_aggregation_results（口径正确的全网线，10 万级规模成本低）。
-//  2. 预聚合表对该时窗完全无任何行时（刚灌数未到整点 / continuous scheduler 未起），
-//     整体回退 15min 直读原始明细 pm_metrics 现场汇成全网线，与性能仪表板默认模板对齐容错。
-//  3. 预聚合有数据，但存在「尾部缺口」时，用 15min 原始明细补充缺失数据点
-//     （与 PM 性能仪表盘 15min 实时口径对齐）：
-//     - 当前不完整小时：17:30 时 17:00 桶未聚合，补出 17:00/17:15 打点。
-//     - 延迟的完整小时：聚合任务落后多个小时时，15min 补点同样覆盖（从缺口开始填）。
-//     - 跨制式混合指标：LTE/NR/GSM 聚合任务各自独立运行，不同制式指标可能有不同的最新桶
-//       时间；以所有 code 各自「下一桶起点」的最小值作为尾部查询起点，并在合并时按 code
-//       过滤掉与现有小时数据重叠的 15min 点，避免同一 code 同一时段双重计数。
-//
-// 两条链路都查时序库（tsPool）。策略 2 是整体缺数据时触发；策略 3 是常态下的尾部实时补充。
+// fetchNetworkKCodeSeries 读多个指标编号的首页全网时序。
+// 历史完整桶读 hourly 聚合表；若当前已过整点但该整点缺点，则补最近一小时 15min 尾部窗口。
+// 两条路径都走 PM Aggregator 的 network 查询，counter 聚合与 KPI 重算口径保持一致。
 func (s *Service) fetchNetworkKCodeSeries(ctx context.Context, kcodes []string, startTime, endTime time.Time) ([]networkSeriesPoint, error) {
-	query, args, err := buildNetworkKPISeriesQuery(kcodes, startTime, endTime)
-	if err != nil {
-		return nil, fmt.Errorf("build kpi time series query: %w", err)
+	if s.pmAggregator == nil {
+		return nil, fmt.Errorf("dashboard network KPI aggregator not configured")
 	}
-	hourlyPoints, err := s.scanNetworkSeries(ctx, query, args, "cagg_realtime")
+
+	// 对外图表时间用 EndTime。为了让 startTime 本身可作为第一个点位，需要多取前一个小时桶，
+	// 再在 networkRowsToSeriesPoints 里按展示时间裁剪回用户请求窗口。
+	hourlyStart := startTime.Add(-time.Hour)
+	rows, err := s.pmAggregator.Query(ctx, buildNetworkKPIHourlySeriesRequest(kcodes, hourlyStart, endTime))
+	if err != nil {
+		return nil, fmt.Errorf("query dashboard network kpi series: %w", err)
+	}
+
+	points := networkRowsToSeriesPoints(rows, startTime, endTime)
+	points, err = s.appendLatestHour15MinTail(ctx, points, kcodes, startTime, endTime)
 	if err != nil {
 		return nil, err
 	}
-	return hourlyPoints, nil
+	return sortAndDedupeNetworkSeriesPoints(points), nil
 }
 
-// scanNetworkSeries 跑一条「metric_path, time, metric_value」三列查询并扫成 networkSeriesPoint 列表。
-func (s *Service) scanNetworkSeries(ctx context.Context, query string, args []any, label string) ([]networkSeriesPoint, error) {
-	rows, err := s.tsPool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("query kpi time series (%s): %w", label, err)
-	}
-	defer rows.Close()
-
-	var points []networkSeriesPoint
-	for rows.Next() {
-		var p networkSeriesPoint
-		if err := rows.Scan(&p.code, &p.time, &p.value); err != nil {
-			return nil, fmt.Errorf("scan kpi time series row (%s): %w", label, err)
+// networkRowsToSeriesPoints 将 Aggregator 行转成首页图表点位。Aggregator 的 time 是桶起点；首页折线图
+// 需要在整点过后显示到该整点，所以优先使用 end_time 作为点位时间。
+func networkRowsToSeriesPoints(rows []pmaggregator.Row, startTime, endTime time.Time) []networkSeriesPoint {
+	points := make([]networkSeriesPoint, 0, len(rows))
+	for _, r := range rows {
+		displayTime := r.EndTime
+		if displayTime.IsZero() {
+			displayTime = r.Time
 		}
-		points = append(points, p)
+		if displayTime.Before(startTime) || displayTime.After(endTime) {
+			continue
+		}
+		points = append(points, networkSeriesPoint{
+			code:  r.MetricPath,
+			time:  displayTime,
+			value: r.MetricValue,
+		})
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate kpi time series rows (%s): %w", label, err)
-	}
-	return points, nil
+	return points
 }
 
-// queryNetworkKPISeries 读单个指标在某时窗内的全网预聚合时序（供 GetKPITrendComparison 用）。
+func (s *Service) appendLatestHour15MinTail(ctx context.Context, points []networkSeriesPoint, kcodes []string, startTime, endTime time.Time) ([]networkSeriesPoint, error) {
+	targetHour := endTime.Truncate(time.Hour)
+	if targetHour.Before(startTime) || targetHour.After(endTime) {
+		return points, nil
+	}
+
+	missingCodes := missingCodesAt(points, kcodes, targetHour)
+	if len(missingCodes) == 0 {
+		return points, nil
+	}
+
+	tailStart := targetHour.Add(-time.Hour)
+	if tailStart.Before(startTime) {
+		tailStart = startTime
+	}
+	// 15min 原始行的 time 是桶起点。为了能补出 targetHour 这个结束点，查询窗口需要覆盖
+	// [targetHour-15min,targetHour) 这条原始桶；取最近一小时可同时覆盖聚合任务轻微滞后的尾部。
+	tailQueryStart := tailStart.Add(-15 * time.Minute)
+	rows, err := s.pmAggregator.Query(ctx, buildNetworkKPI15MinSeriesRequest(missingCodes, tailQueryStart, targetHour))
+	if err != nil {
+		return nil, fmt.Errorf("query dashboard network kpi latest-hour tail: %w", err)
+	}
+	return append(points, networkRowsToSeriesPoints(rows, startTime, endTime)...), nil
+}
+
+func missingCodesAt(points []networkSeriesPoint, kcodes []string, t time.Time) []string {
+	has := make(map[string]struct{}, len(points))
+	for _, p := range points {
+		if p.time.Equal(t) {
+			has[p.code] = struct{}{}
+		}
+	}
+	missing := make([]string, 0, len(kcodes))
+	for _, code := range kcodes {
+		if _, ok := has[code]; !ok {
+			missing = append(missing, code)
+		}
+	}
+	return missing
+}
+
+func sortAndDedupeNetworkSeriesPoints(points []networkSeriesPoint) []networkSeriesPoint {
+	sort.SliceStable(points, func(i, j int) bool {
+		if points[i].code == points[j].code {
+			return points[i].time.Before(points[j].time)
+		}
+		return points[i].code < points[j].code
+	})
+	out := points[:0]
+	var lastCode string
+	var lastTime time.Time
+	for _, p := range points {
+		if len(out) > 0 && p.code == lastCode && p.time.Equal(lastTime) {
+			continue
+		}
+		out = append(out, p)
+		lastCode = p.code
+		lastTime = p.time
+	}
+	return out
+}
+
+// queryNetworkKPISeries 读单个指标在某时窗内的全网时序（供 GetKPITrendComparison 用）。
 //
-// kpiName 为指标编号（K/C 编号），读 pm_adhoc_aggregation_results（network 维度），与 GetKPITimeSeries 同源。
+// kpiName 为指标编号（K/C 编号），与 GetKPITimeSeries 同源走 PM Aggregator network 维度。
 func (s *Service) queryNetworkKPISeries(ctx context.Context, kpiName string, startTime, endTime time.Time) ([]KPITrendEntry, error) {
 	kcodes := []string{kpiName}
 
-	// 与 GetKPITimeSeries 同源：优先读每小时预聚合表，缺数据时回退 15min 直读原始明细（issue #359）。
+	// 与 GetKPITimeSeries 同源：通过 PM Aggregator 做 network 维度 hourly 查询与 KPI 重算。
 	points, err := s.fetchNetworkKCodeSeries(ctx, kcodes, startTime, endTime)
 	if err != nil {
 		return nil, fmt.Errorf("query network kpi series: %w", err)
@@ -1018,7 +1085,7 @@ func (s *Service) queryNetworkKPISeries(ctx context.Context, kpiName string, sta
 	for _, p := range points {
 		entries = append(entries, KPITrendEntry{
 			Time:  p.time.Format(time.RFC3339),
-			Value: p.value,
+			Value: float64(p.value),
 		})
 	}
 	return entries, nil

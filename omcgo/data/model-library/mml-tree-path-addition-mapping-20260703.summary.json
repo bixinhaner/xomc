@@ -1,0 +1,287 @@
+{
+  "generated_at": "2026-07-03T08:35:32Z",
+  "source_document": "/Users/a1/Desktop/vscode/goomc/omcgo/data/model-library/cmcc-southbound-model-library-path-rows-dedup-category-path-20260703.csv",
+  "source_rows": 2802,
+  "output_rows": 2802,
+  "current_standard_param_count_from_seed": 2101,
+  "current_mml_unique_path_count_from_seed_subfields": 554,
+  "current_mml_seed_object_count": 71,
+  "actions": {
+    "add_to_existing_command": 336,
+    "add_to_existing_command+insert_standard_param": 827,
+    "already_in_mml": 554,
+    "create_new_command_group+insert_standard_param": 1079,
+    "create_new_command_group": 6
+  },
+  "standard_param_coverage": {
+    "exists": 896,
+    "missing": 1906
+  },
+  "target_chapters": {
+    "SA": 54,
+    "SB": 6,
+    "SC": 19,
+    "SD": 60,
+    "SE": 6,
+    "SF": 985,
+    "SG": 40,
+    "SH": 159,
+    "SI": 83,
+    "SJ": 677,
+    "SK": 54,
+    "SL": 45,
+    "SM": 18,
+    "SN": 26,
+    "SO": 6,
+    "SP": 32,
+    "SQ": 22,
+    "SR": 155
+  },
+  "new_group_candidate_count": 182,
+  "existing_group_candidate_count": 71,
+  "top_new_groups": [
+    {
+      "chapter": "",
+      "group_name": "Xn口采集配置策略",
+      "target_object_path": "Device.FAP.SCMgmt.Config.{i}.",
+      "path_count": 52
+    },
+    {
+      "chapter": "",
+      "group_name": "X2口采集配置策略",
+      "target_object_path": "Device.FAP.SCMgmt.Config.{i}.",
+      "path_count": 37
+    },
+    {
+      "chapter": "",
+      "group_name": "Uu口采集配置策略",
+      "target_object_path": "Device.FAP.SCMgmt.Config.{i}.",
+      "path_count": 28
+    },
+    {
+      "chapter": "SK",
+      "group_name": "SON参数管理",
+      "target_object_path": "InternetGatewayDevice.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.",
+      "path_count": 25
+    },
+    {
+      "chapter": "",
+      "group_name": "主机单元（MU）设备信息参数管理",
+      "target_object_path": "InternetGatewayDevice.DeviceInfo.MU.{i}.",
+      "path_count": 24
+    },
+    {
+      "chapter": "SJ",
+      "group_name": "同频重选参数",
+      "target_object_path": "InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.",
+      "path_count": 20
+    },
+    {
+      "chapter": "",
+      "group_name": "网管参数管理",
+      "target_object_path": "InternetGatewayDevice.ManagementServer.",
+      "path_count": 19
+    },
+    {
+      "chapter": "",
+      "group_name": "设备信息参数管理",
+      "target_object_path": "InternetGatewayDevice.DeviceInfo.",
+      "path_count": 17
+    },
+    {
+      "chapter": "",
+      "group_name": "主机单元（MU）设备信息参数管理",
+      "target_object_path": "InternetGatewayDevice.DeviceInfo.MU.{i}.Slot.{i}.",
+      "path_count": 16
+    },
+    {
+      "chapter": "SR",
+      "group_name": "扩展型皮站-远端单元（RU）参数管理",
+      "target_object_path": "InternetGatewayDevice.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.",
+      "path_count": 16
+    },
+    {
+      "chapter": "SP",
+      "group_name": "MR参数管理",
+      "target_object_path": "InternetGatewayDevice.FAP.MRMgmt.Config.{i}.",
+      "path_count": 14
+    },
+    {
+      "chapter": "SJ",
+      "group_name": "A5事件测量控制参数",
+      "target_object_path": "InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.1.",
+      "path_count": 13
+    },
+    {
+      "chapter": "SJ",
+      "group_name": "A5事件测量控制参数",
+      "target_object_path": "InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.",
+      "path_count": 13
+    },
+    {
+      "chapter": "SJ",
+      "group_name": "B2事件测量控制参数",
+      "target_object_path": "InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.",
+      "path_count": 13
+    },
+    {
+      "chapter": "SJ",
+      "group_name": "B2事件测量控制参数",
+      "target_object_path": "InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.2.",
+      "path_count": 13
+    },
+    {
+      "chapter": "SJ",
+      "group_name": "B2事件测量控制参数",
+      "target_object_path": "InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.",
+      "path_count": 13
+    },
+    {
+      "chapter": "SJ",
+      "group_name": "异频重选参数",
+      "target_object_path": "InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.",
+      "path_count": 13
+    },
+    {
+      "chapter": "SR",
+      "group_name": "扩展型皮站-扩展单元（EU）参数管理",
+      "target_object_path": "InternetGatewayDevice.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.",
+      "path_count": 13
+    },
+    {
+      "chapter": "SI",
+      "group_name": "NR邻区参数管理",
+      "target_object_path": "InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.",
+      "path_count": 12
+    },
+    {
+      "chapter": "SH",
+      "group_name": "小区参数管理",
+      "target_object_path": "InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.",
+      "path_count": 12
+    }
+  ],
+  "top_existing_targets": [
+    {
+      "chapter": "SF",
+      "group_name": "FAP 载波基本配置",
+      "target_object_path": "Device.Services.FAPService.{i}.",
+      "path_count": 865
+    },
+    {
+      "chapter": "SJ",
+      "group_name": "连接态 EUTRA 测量",
+      "target_object_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.",
+      "path_count": 137
+    },
+    {
+      "chapter": "SJ",
+      "group_name": "连接态 IRAT 测量",
+      "target_object_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.",
+      "path_count": 52
+    },
+    {
+      "chapter": "SA",
+      "group_name": "设备基本信息",
+      "target_object_path": "Device.DeviceInfo.",
+      "path_count": 51
+    },
+    {
+      "chapter": "SH",
+      "group_name": "RAN PHY 物理层",
+      "target_object_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.",
+      "path_count": 35
+    },
+    {
+      "chapter": "SJ",
+      "group_name": "空闲态移动性",
+      "target_object_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.",
+      "path_count": 28
+    },
+    {
+      "chapter": "SK",
+      "group_name": "SON 自配置参数",
+      "target_object_path": "Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.",
+      "path_count": 25
+    },
+    {
+      "chapter": "SR",
+      "group_name": "主机单元基本信息",
+      "target_object_path": "Device.DeviceInfo.MU.{i}.",
+      "path_count": 25
+    },
+    {
+      "chapter": "SC",
+      "group_name": "基站网管连接",
+      "target_object_path": "Device.ManagementServer.",
+      "path_count": 19
+    },
+    {
+      "chapter": "SR",
+      "group_name": "射频远端单元信息",
+      "target_object_path": "Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.",
+      "path_count": 18
+    },
+    {
+      "chapter": "SP",
+      "group_name": "MR 上报配置",
+      "target_object_path": "Device.FAP.MRMgmt.Config.{i}.",
+      "path_count": 17
+    },
+    {
+      "chapter": "SR",
+      "group_name": "槽位板卡信息",
+      "target_object_path": "Device.DeviceInfo.MU.{i}.Slot.{i}.",
+      "path_count": 17
+    },
+    {
+      "chapter": "SH",
+      "group_name": "RAN MAC 协议层",
+      "target_object_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.",
+      "path_count": 16
+    },
+    {
+      "chapter": "SJ",
+      "group_name": "A5 事件测量控制",
+      "target_object_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.",
+      "path_count": 14
+    },
+    {
+      "chapter": "SJ",
+      "group_name": "B2 事件测量控制",
+      "target_object_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.",
+      "path_count": 14
+    },
+    {
+      "chapter": "SR",
+      "group_name": "扩展单元信息",
+      "target_object_path": "Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.",
+      "path_count": 14
+    },
+    {
+      "chapter": "SJ",
+      "group_name": "空闲态异频载波",
+      "target_object_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.",
+      "path_count": 14
+    },
+    {
+      "chapter": "SJ",
+      "group_name": "A1 事件测量控制",
+      "target_object_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.",
+      "path_count": 12
+    },
+    {
+      "chapter": "SJ",
+      "group_name": "A2 事件测量控制",
+      "target_object_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.",
+      "path_count": 12
+    },
+    {
+      "chapter": "SJ",
+      "group_name": "A3 事件测量控制",
+      "target_object_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.",
+      "path_count": 12
+    }
+  ],
+  "output_csv": "/Users/a1/Desktop/vscode/goomc/omcgo/data/model-library/mml-tree-path-addition-mapping-20260703.csv"
+}

@@ -3,11 +3,13 @@ package provider
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/admin/loginpwd"
+	"github.com/omcgo/omcgo/internal/agentconfig"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/core/systimezone"
@@ -168,6 +170,9 @@ func initAdminModule(c *Container) error {
 	sysConfigRepo := admin.NewPgSysConfigRepository(c.PgPool)
 	sysConfigService := admin.NewSysConfigService(sysConfigRepo)
 	sysConfigHandler := admin.NewSysConfigHandler(sysConfigService)
+	agentConfigHTTPClient := &http.Client{Timeout: 10 * time.Second}
+	agentConfigService := agentconfig.NewService(sysConfigRepo, sysConfigService, agentConfigHTTPClient, logger)
+	agentConfigHandler := agentconfig.NewHandler(agentConfigService)
 
 	// 系统时区统一入口（issue #456，子单 A）+ 响应出口时区转换接通（issue #457，子单 B）。
 	// Fetcher 从 sys_configs 读 (basic, timezoneCode)；注入 response 包后，所有走统一响应信封的
@@ -230,20 +235,21 @@ func initAdminModule(c *Container) error {
 
 	// Store handlers for route registration
 	c.adminHandlerDeps = &adminHandlerDeps{
-		adminHandler:     adminHandler,
-		apiKeyHandler:    apiKeyHandler,
-		dictHandler:      dictHandler,
-		sysConfigHandler: sysConfigHandler,
-		uiAssetHandler:   uiAssetHandler,
-		logHandler:       logHandler,
-		logRepo:          logRepo, // #122：OperLogger 中间件写 sys_oper_logs
-		pubKeyHandler:    pubKeyHandler,
-		jwtService:       jwtService,
-		tokenRevoker:     tokenRevoker,
-		apiKeySvc:        apiKeySvc,
-		userRepo:         userRepo,
-		roleRepo:         roleRepo,
-		auditRepo:        auditRepo,
+		adminHandler:       adminHandler,
+		apiKeyHandler:      apiKeyHandler,
+		dictHandler:        dictHandler,
+		sysConfigHandler:   sysConfigHandler,
+		agentConfigHandler: agentConfigHandler,
+		uiAssetHandler:     uiAssetHandler,
+		logHandler:         logHandler,
+		logRepo:            logRepo, // #122：OperLogger 中间件写 sys_oper_logs
+		pubKeyHandler:      pubKeyHandler,
+		jwtService:         jwtService,
+		tokenRevoker:       tokenRevoker,
+		apiKeySvc:          apiKeySvc,
+		userRepo:           userRepo,
+		roleRepo:           roleRepo,
+		auditRepo:          auditRepo,
 	}
 
 	logger.Info("admin/RBAC module initialized")
@@ -269,18 +275,19 @@ func (a *roleAffectedQueryAdapter) ListRolesByGroupIDs(ctx context.Context, grou
 }
 
 type adminHandlerDeps struct {
-	adminHandler     *admin.Handler
-	apiKeyHandler    *admin.APIKeyHandler
-	dictHandler      *admin.DictionaryHandler
-	sysConfigHandler *admin.SysConfigHandler
-	uiAssetHandler   *admin.UIAssetHandler
-	logHandler       *admin.LogHandler
-	logRepo          admin.LogRepository // #122：OperLogger 中间件写 sys_oper_logs
-	pubKeyHandler    *loginpwd.PublicKeyHandler
-	jwtService       *admin.JWTService
-	tokenRevoker     *admin.TokenRevoker
-	apiKeySvc        *admin.APIKeyService
-	userRepo         *admin.PgUserRepository
-	roleRepo         *admin.PgRoleRepository
-	auditRepo        *admin.PgAuditRepository
+	adminHandler       *admin.Handler
+	apiKeyHandler      *admin.APIKeyHandler
+	dictHandler        *admin.DictionaryHandler
+	sysConfigHandler   *admin.SysConfigHandler
+	agentConfigHandler *agentconfig.Handler
+	uiAssetHandler     *admin.UIAssetHandler
+	logHandler         *admin.LogHandler
+	logRepo            admin.LogRepository // #122：OperLogger 中间件写 sys_oper_logs
+	pubKeyHandler      *loginpwd.PublicKeyHandler
+	jwtService         *admin.JWTService
+	tokenRevoker       *admin.TokenRevoker
+	apiKeySvc          *admin.APIKeyService
+	userRepo           *admin.PgUserRepository
+	roleRepo           *admin.PgRoleRepository
+	auditRepo          *admin.PgAuditRepository
 }

@@ -1,5 +1,6 @@
 import http from '../http';
-import type { Device, NE, DeviceFilter, DeviceGroup, DeviceListResponse, DeviceListStats, DeviceStats, DeviceParameter, CreateDeviceInput, NameFilterItem, BatchImportRequest, BatchImportResponse } from '../../types/device';
+import type { Device, NE, DeviceFilter, DeviceGroup, DeviceListResponse, DeviceListStats, DeviceStats, DeviceParameter, CreateDeviceInput, NameFilterItem, BatchImportRequest, BatchImportResponse, BatchPreRegisterRequest, BatchPreRegisterResponse } from '../../types/device';
+import type { AntennaSector } from '../../types/map';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 import { normalizeDeviceSyncStatus } from '../../utils/deviceSyncStatus';
 import { normalizeAlarmSeverity } from '../../utils/alarmSeverity';
@@ -47,6 +48,7 @@ interface BackendDevice {
   mac_address?: string;
   group_id?: string;
   group_name?: string;
+  source_type?: 'manual' | 'rule' | 'auto';
   // T-XXX (Phase 0)：字段名对齐后端 DeviceWithInfo DTO（json tag），
   // 修复"其他信息组"接入/断开/首次接入/运行时长 5 字段全空白 bug。
   // 原 mapper 用的 `online_at / offline_at / first_online_at / up_time` 在后端从不存在。
@@ -208,6 +210,42 @@ function buildUpdatedDeviceFallback(id: string, data: Partial<Device>, fallbackD
   } as Device;
 }
 
+interface BackendAntennaSector {
+  number: number;
+  cell_id?: string;
+  antenna_height?: number;
+  mechanical_downtilt?: number;
+  electronic_downtilt?: string;
+  vertical_beamwidth?: number;
+  horizontal_beamwidth?: number;
+  azimuth?: number;
+  near_radius_meters?: number;
+  far_radius_meters?: number;
+  field_sources?: Record<string, string>;
+  direction_available?: boolean;
+  coverage_available?: boolean;
+  missing_fields?: string[];
+}
+
+function mapBackendAntennaSector(sector: BackendAntennaSector): AntennaSector {
+  return {
+    number: sector.number,
+    cellId: sector.cell_id,
+    antennaHeight: sector.antenna_height,
+    mechanicalDowntilt: sector.mechanical_downtilt,
+    electronicDowntilt: sector.electronic_downtilt,
+    verticalBeamwidth: sector.vertical_beamwidth,
+    horizontalBeamwidth: sector.horizontal_beamwidth,
+    azimuth: sector.azimuth,
+    nearRadiusMeters: sector.near_radius_meters,
+    farRadiusMeters: sector.far_radius_meters,
+    fieldSources: sector.field_sources ?? {},
+    directionAvailable: sector.direction_available ?? false,
+    coverageAvailable: sector.coverage_available ?? false,
+    missingFields: sector.missing_fields ?? [],
+  };
+}
+
 // 后端 handler 返回的 JSON 形态（key 与 Go gin.H / 结构体 json tag 一致）。
 interface BackendRestoreResult {
   restored?: number;
@@ -321,6 +359,8 @@ function mapBackendDevice(bd: BackendDevice): Device {
     activeAlarmCount: bd.active_alarm_count ?? 0,
     engStatus: 'commissioned',
     mgmtStatus: 'managed',
+    // "最后在线" 表示 OMC 最近一次收到设备 Inform 的时间。
+    // 本次连接时间使用 last_online_time，供"本次在线时长"计算。
     lastOnlineTime: bd.last_inform_at || '',
     ipAddress: bd.ip_address,
     subnet: '',
@@ -340,7 +380,9 @@ function mapBackendDevice(bd: BackendDevice): Device {
     groupId: bd.group_id || undefined,
     // 分组未命中时前端统一按空值展示占位符；这里保留字符串兜底，避免 undefined。
     groupName: bd.group_name || '',
+    sourceType: bd.source_type,
     // T-XXX (Phase 0)：字段名对齐后端 DTO。设计文档 §13。
+    // onlineTime = 本次连接时间；本次在线时长按它作为起点计算。
     onlineTime: bd.last_online_time || '',
     offlineTime: bd.last_offline_time || '',
     onlineDuration: bd.online_duration ?? null,
@@ -485,6 +527,11 @@ function mapListResponse(resp: BackendListResponse<BackendDevice>): DeviceListRe
 }
 
 export const deviceApi = {
+  async getAntennaSectors(id: string): Promise<AntennaSector[]> {
+    const { data } = await http.get<BackendAntennaSector[]>(`/devices/${id}/antenna-sectors`);
+    return data.map(mapBackendAntennaSector);
+  },
+
   async getList(params: DeviceFilter & PageRequest): Promise<DeviceListResponse> {
     // Map frontend filter fields to backend query params
     const query: Record<string, unknown> = {
@@ -588,7 +635,21 @@ export const deviceApi = {
       page: 1,
       pageSize: 1,
     });
-    return result.items.length > 0 ? result.items[0] : null;
+    const listDevice = result.items.length > 0 ? result.items[0] : null;
+    if (!listDevice?.id) return listDevice;
+
+    const detailDevice = await deviceApi.getById(listDevice.id);
+    if (!detailDevice) return listDevice;
+
+    // 详情页按 SN 直达或浏览器刷新时没有列表页预热缓存。部分部署上的单设备详情
+    // 接口可能不带部分 list/device_info 字段，不能让空值覆盖列表接口已经解析出的有效值。
+    const merged: Device = { ...listDevice, ...detailDevice };
+    for (const [key, value] of Object.entries(detailDevice) as Array<[keyof Device, unknown]>) {
+      if (value === '' || value === null || value === undefined) {
+        (merged as Record<keyof Device, unknown>)[key] = listDevice[key];
+      }
+    }
+    return merged;
   },
 
   async create(input: CreateDeviceInput): Promise<Device> {
@@ -670,6 +731,16 @@ export const deviceApi = {
     return data;
   },
 
+  /**
+   * 批量预登记：在设备 Bootstrap 到达前，按 SN 列表预先录入设备名称。
+   * 已存在的 SN 只更新名称/备注；不存在的 SN 新建设备（lifecycle='registered'）。
+   * 新建设备不写入任何分组，自然落在「未分组」视图，source_type 显示 Auto。
+   */
+  async batchPreRegisterDevices(payload: BatchPreRegisterRequest): Promise<BatchPreRegisterResponse> {
+    const { data } = await http.post<BatchPreRegisterResponse>('/devices/batch-preregister', payload);
+    return data;
+  },
+
   async getGroups(): Promise<{ groups: DeviceGroup[]; stats: { totalDevices: number } }> {
     // Backend GET /device-groups/tree returns nested tree with device counts.
     // 我们摊平为列表给前端树构造器；同时**保留 matching rule 字段**（matching_mode /
@@ -689,9 +760,11 @@ export const deviceApi = {
       remark_i18n?: Record<string, string>;
       // 匹配规则字段（service.go DeviceGroup 反序列化）
       matching_mode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber';
+      source_group_id?: string;
       name_rule_list?: NameFilterItem[];
       lac_list?: number[];
       tac_list?: number[];
+      serial_number_list?: string[];
       children?: BackendGroupItem[];
     }
     interface TreeResponse {
@@ -713,9 +786,11 @@ export const deviceApi = {
           description: g.remark || g.description || '',
           builtIn: g.is_default ? 1 : 0,
           matchingMode: g.matching_mode,
+          sourceGroupId: g.source_group_id,
           nameRuleList: g.name_rule_list,
           lacList: g.lac_list,
           tacList: g.tac_list,
+          serialNumberList: g.serial_number_list,
         });
         if (g.children?.length) walk(g.children);
       }
@@ -734,10 +809,12 @@ export const deviceApi = {
     remark_i18n?: Record<string, string>;
     parent_id?: string;
     remark?: string;
-    matching_mode?: 'deviceName' | 'lac' | 'tac';
+    matching_mode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber';
+    source_group_id?: string;
     name_rule_list?: NameFilterItem[];
     lac_list?: number[];
     tac_list?: number[];
+    serial_number_list?: string[];
   }): Promise<DeviceGroup> {
     const { data: created } = await http.post<DeviceGroup>('/device-groups', data);
     return created;
@@ -751,10 +828,12 @@ export const deviceApi = {
     remark_i18n?: Record<string, string>;
     parent_id?: string;
     remark?: string;
-    matching_mode?: 'deviceName' | 'lac' | 'tac';
+    matching_mode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber';
+    source_group_id?: string;
     name_rule_list?: NameFilterItem[];
     lac_list?: number[];
     tac_list?: number[];
+    serial_number_list?: string[];
   }): Promise<DeviceGroup> {
     const { data: updated } = await http.put<DeviceGroup>(`/device-groups/${id}`, data);
     return updated;

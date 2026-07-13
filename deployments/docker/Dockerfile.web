@@ -26,12 +26,10 @@ RUN npm config set registry https://registry.npmmirror.com \
 # Workspace 根的 package.json + 唯一权威 lock 文件
 COPY omcmb/package.json omcmb/package-lock.json ./
 
-# 全部 4 个 workspace member 的 package.json——少一个 npm ci 会报
-# "workspace not found" 拒绝安装。frontend-core(业务层) + 三套皮肤 webcode/v2/v3。
+# 两个 workspace member 的 package.json——少一个 npm ci 会报
+# "workspace not found" 拒绝安装。frontend-core（业务层）+ webcode（V1）。
 COPY omcmb/frontend-core/package.json ./frontend-core/
 COPY omcmb/webcode/package.json       ./webcode/
-COPY omcmb/webcode-v2/package.json    ./webcode-v2/
-COPY omcmb/webcode-v3/package.json    ./webcode-v3/
 
 # --include=dev：进一步兜底强制安装 devDependencies（即使 NODE_ENV 意外被改）
 # --legacy-peer-deps：跳过 peer dependency 版本冲突检查
@@ -53,15 +51,13 @@ WORKDIR /app
 # 以及各 member 目录下的占位 package.json + 可能的小 node_modules）
 COPY --from=deps /app/ ./
 
-# 覆盖源码：三套皮肤 webcode/v2/v3（构建目标）+ frontend-core（@core alias 依赖源）
+# 覆盖源码：V1 webcode（构建目标）+ frontend-core（@core alias 依赖源）
 # .dockerignore 已排除 node_modules / dist，不会污染 deps 装出来的 node_modules
 COPY omcmb/webcode/       ./webcode/
-COPY omcmb/webcode-v2/    ./webcode-v2/
-COPY omcmb/webcode-v3/    ./webcode-v3/
 COPY omcmb/frontend-core/ ./frontend-core/
 
 # 清除可能残留的旧构建产物
-RUN rm -rf webcode/dist webcode-v2/dist webcode-v3/dist
+RUN rm -rf webcode/dist
 
 # 应用版本号注入：build-release.sh 通过 --build-arg APP_VERSION=$VERSION 传入
 # （形如 1.0.0-20260522-1530），vite build 读取 VITE_APP_VERSION 内联进产物，
@@ -69,29 +65,20 @@ RUN rm -rf webcode/dist webcode-v2/dist webcode-v3/dist
 ARG APP_VERSION=""
 ENV VITE_APP_VERSION=$APP_VERSION
 
-# 通过 workspace 入口构建三套皮肤；npm 会自动把 /app/node_modules/.bin
+# 通过 workspace 入口构建 V1；npm 会自动把 /app/node_modules/.bin
 # 注入到子 workspace 的执行环境，所以不需要手动设置 PATH。
-# v2/v3 的 base(/v2/、/v3/) 在各自 vite.config.ts 内固化，无需 --base 传参。
-RUN npm run build --workspace webcode \
-    && npm run build --workspace webcode-v2 \
-    && npm run build --workspace webcode-v3
+RUN npm run build --workspace webcode
 
-# 验证三套构建产物完整性：index.html 引用的主入口文件必须存在。
-# 注意 v2/v3 的 URL 带 base 前缀(/v2//v3/)，但产物文件落在各自 dist/assets/ 下
-# （dist 根即映射到 /v2/、/v3/），校验时需把 URL 的 base 前缀剥掉再 test -f。
-RUN for d in webcode webcode-v2 webcode-v3; do \
-      grep -oE '/(v2/|v3/)?assets/[^"]+\.js' "$d/dist/index.html" | while read f; do \
-        rel=$(echo "$f" | sed -E 's#^/(v2/|v3/)#/#'); \
-        test -f "$d/dist$rel" || { echo "ERROR: build output missing: $d/dist$rel (url $f)"; exit 1; }; \
-      done; \
+# 验证 V1 构建产物完整性：index.html 引用的主入口文件必须存在。
+RUN grep -oE '/assets/[^"]+\.js' webcode/dist/index.html | while read f; do \
+      test -f "webcode/dist$f" || { echo "ERROR: build output missing: webcode/dist$f"; exit 1; }; \
     done
 
 # 阶段3: Nginx 静态服务
-# v1 在根，v2/v3 各自子目录（与 default.conf 的 /v2/ /v3/ location + 各自 base 对应）
+# V1 发布在根目录；旧 /v2、/v3 URL 由 Nginx 重定向到根路径。
 FROM nginx:alpine
 COPY --from=builder /app/webcode/dist    /usr/share/nginx/html
-COPY --from=builder /app/webcode-v2/dist /usr/share/nginx/html/v2
-COPY --from=builder /app/webcode-v3/dist /usr/share/nginx/html/v3
 COPY deployments/docker/nginx.conf /etc/nginx/nginx.conf
-COPY deployments/docker/default.conf /etc/nginx/conf.d/default.conf
+ARG NGINX_DEFAULT_CONF=deployments/docker/default.conf
+COPY ${NGINX_DEFAULT_CONF} /etc/nginx/conf.d/default.conf
 EXPOSE 8080 8081

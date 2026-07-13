@@ -23,7 +23,7 @@
 | 完成定义 / 发布门控 | `project/dod.md` · `project/release-gate.md` | DoD 清单 / Release Gate 清单 |
 | 全流程编排 Skill | `.claude/commands/ship.md` | **活** —— `/ship` 一键贯穿全流程，只调度委派标准套件 + 项目自有 Skill |
 | 旧开发流水线设计 | `project/dev-pipeline-design-20260420.md` | ⚠️ **归档** —— 旧 `/dev-pipeline` S0–S7 设计，已被 `/ship` 取代，仅留作硬门 rationale 参考 |
-| 前端多皮肤架构 | `project/frontend-multi-skin-plan-20260422.md` | webcode / v2 / v3 三皮肤 + frontend-core 业务层方案 |
+| 前端历史多皮肤方案（已归档） | `project/frontend-multi-skin-plan-20260422.md` | V2/V3 已移除；正文仅供历史追溯 |
 | 里程碑 / 冲刺 / 发布 | `project/milestone/2026Q2-to-RC.md` · `project/sprint/sprint-{09,10,11}.md` · `project/release/RC-2026Q2-001.md` | 当前 RC 路线、活跃 Sprint、发布记录（更早 sprint 完成度快照见归档区）|
 | 决策记录 | `project/decision-records/` | Wave 级决策留档 |
 
@@ -65,7 +65,8 @@
 | **参数 / KPI / 告警 三库平台化** | `参数-KPI-告警-整合设计方案.md` · `three-library-xml-import-redesign-20260604.md` | 三库统一平台化 + XML 导入重设计；演进史见 `ref/three-library-xml-import-history.md` |
 | **产品中心** | `product-center-pages-redesign-20260528.md` | 产品装配件 + ProductRegistry 页面重设计（配图 `design/assets/product-*.png`）|
 | **PM / KPI 管线** | `pm-kpi-pipeline-improvements.md` · `pm-metric-aggregation-dashboard-redesign-20260529.md` | 采集→多级聚合→仪表盘；实施计划 `project/plan-T-0164-*.md` |
-| **MML 控制台** | `mml-console-redesign-20260603.md` · `mml-console-architecture-overview-20260521.md` · `mml-empty-path-commands-spec-mapping-20260609.md` | 控制台重设计 + 架构总览 + 空 PATH 命令规范映射（MML 多代历史方案见归档区）|
+| **MML 脚本任务** | `mml-script-txt-import-redesign-20260710.md` · `mml-script-task-device-bound-redesign-20260708.md` | TXT 导入式脚本库 + 按设备编排执行（本次设计以 TXT 导入重设计为首选）|
+| **MML 控制台** | `mml-console-redesign-20260603.md` · `mml-console-architecture-overview-20260521.md` · `mml-empty-path-commands-spec-mapping-20260609.md` | 控制台重设计、架构总览与空 PATH 命令规范映射（MML 多代历史方案见归档区）|
 | **设备管理** | `device-lifecycle-online-status-decouple-20260520.md` · `device-list-and-group-improvements-20260520.md` · `device-detail-basic-fields-from-parameters-20260525.md` | 生命周期/在线状态解耦 + 列表分组 + 详情字段 |
 | **跨域基础设施** | `统一文件传输任务引擎-设计方案.md` · `notification-center-design-20260519.md` | 统一文件传输任务引擎 / 通知中心 |
 | **模块设计回填** | `参数设置页-设计.md`（↔ quicksettings）· `TR069报文跟踪-设计.md`（↔ trace）| 模块代码与设计对应 |

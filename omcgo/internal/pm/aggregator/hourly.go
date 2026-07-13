@@ -8,7 +8,7 @@ import "github.com/omcgo/omcgo/internal/pm/metrics"
 // 数据流：pm_metrics (granularity='15min') → pm_metrics_hourly。
 const JobTypeHourly = "pm_aggregate_hourly"
 
-// NewHourlyRunner 构造 hourly cron runner。
+// NewHourlyRunner 构造 hourly asyncjob runner。
 //
 // 由 worker/main.go 在初始化期调用，注册到 asyncjob.Registry。
 func NewHourlyRunner(a *Aggregator) *Runner {

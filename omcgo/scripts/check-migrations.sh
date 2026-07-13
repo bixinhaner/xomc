@@ -143,8 +143,8 @@ fi
 EMPTY_DOWN=()
 for f in "${FILES[@]}"; do
   DOWN_BODY=$(awk '/-- \+goose Down/,0' "$f" | \
-              grep -v '^\s*--' | \
-              grep -v '^\s*$' | \
+              { grep -v '^\s*--' || true; } | \
+              { grep -v '^\s*$' || true; } | \
               wc -l)
   if [[ "$DOWN_BODY" -lt 1 ]]; then
     EMPTY_DOWN+=("$f")

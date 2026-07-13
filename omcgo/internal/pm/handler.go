@@ -16,6 +16,7 @@ import (
 	"github.com/omcgo/omcgo/internal/authz"
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
 	"github.com/omcgo/omcgo/internal/core/compress"
+	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
@@ -510,6 +511,9 @@ func fillEmptyBuckets(rows []aggregator.Row, req aggregator.QueryRequest) []aggr
 		if r.Filled {
 			continue // 只看真实行（防御性：正常此时 rows 全为真实行）
 		}
+		if req.MetricType != nil && r.MetricType != *req.MetricType {
+			continue
+		}
 		if r.DisplayName != "" {
 			nameByPath[r.MetricPath] = r.DisplayName
 		}
@@ -535,6 +539,7 @@ func fillEmptyBuckets(rows []aggregator.Row, req aggregator.QueryRequest) []aggr
 				DeviceSN:    g.rep.DeviceSN,
 				MetricPath:  mp,
 				DisplayName: nameByPath[mp],
+				MetricType:  fillMetricType(g.rep.MetricType, req.MetricType),
 				Granularity: g.rep.Granularity,
 				Time:        g.rep.Time,
 				StartTime:   g.rep.StartTime,
@@ -545,6 +550,13 @@ func fillEmptyBuckets(rows []aggregator.Row, req aggregator.QueryRequest) []aggr
 		}
 	}
 	return rows
+}
+
+func fillMetricType(repType metrics.MetricType, requested *metrics.MetricType) metrics.MetricType {
+	if requested != nil {
+		return *requested
+	}
+	return repType
 }
 
 // groupKey 构造 (object_ldn, time) 分组键。object_ldn=nil（设备级）归一为固定空键，
@@ -763,6 +775,7 @@ func (h *Handler) ListKPIDefinitions(c *gin.Context) {
 		return
 	}
 
+	loc := appcontext.GetLocale(c.Request.Context())
 	items := make([]kpiDefinitionItem, 0)
 	for _, dt := range dts {
 		filter := indicator.IndicatorListFilter{
@@ -786,7 +799,7 @@ func (h *Handler) ListKPIDefinitions(c *gin.Context) {
 				ID:          r.ID,
 				IsCounter:   r.IsCounter,
 				Name:        r.EnName,
-				DisplayName: derefOr(r.CnName, r.EnName),
+				DisplayName: localizedIndicatorName(loc, r.EnName, r.CnName, r.ID),
 				Formula:     derefOr(r.Arithmetic, ""),
 				Unit:        derefOr(r.UnitID, ""),
 			})
@@ -817,6 +830,26 @@ func derefOr(p *string, fallback string) string {
 		return fallback
 	}
 	return *p
+}
+
+func localizedIndicatorName(loc appcontext.Locale, en string, cn *string, fallback string) string {
+	cnName := derefOr(cn, "")
+	if loc == appcontext.LocaleEN {
+		if strings.TrimSpace(en) != "" {
+			return en
+		}
+		if strings.TrimSpace(cnName) != "" {
+			return cnName
+		}
+		return fallback
+	}
+	if strings.TrimSpace(cnName) != "" {
+		return cnName
+	}
+	if strings.TrimSpace(en) != "" {
+		return en
+	}
+	return fallback
 }
 
 type calculateRequest struct {

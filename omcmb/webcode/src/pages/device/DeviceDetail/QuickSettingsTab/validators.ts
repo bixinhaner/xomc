@@ -5,6 +5,8 @@ interface EnumMeta {
   labels: string[];
 }
 
+type QuickSettingsLocale = 'zh-CN' | 'en-US';
+
 export const LTE_BANDWIDTH_PATH = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.DLBandwidth';
 export const BM_RU_RF_SWITCH_PATH = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable';
 
@@ -38,16 +40,95 @@ export function getEffectiveEnumMeta(constraints?: ParameterConstraints, path?: 
   return resolveEnumFallbackByPath(path);
 }
 
-export function formatEnumDisplayValue(value: string, constraints?: ParameterConstraints, path?: string): string {
+export function localizeEnumLabel(label: string, value: string, locale: QuickSettingsLocale): string {
+  if (locale === 'zh-CN') return label || value;
+  const normalized = String(label || '').trim();
+  if (normalized === '开' || normalized === '开启') return 'ON';
+  if (normalized === '关' || normalized === '关闭') return 'OFF';
+  return label || value;
+}
+
+export function formatEnumDisplayValue(
+  value: string,
+  constraints?: ParameterConstraints,
+  path?: string,
+  locale: QuickSettingsLocale = 'zh-CN',
+): string {
   const meta = getEffectiveEnumMeta(constraints, path);
   if (!meta || !value) return value;
   const index = meta.values.indexOf(value);
-  return index >= 0 ? (meta.labels[index] || value) : value;
+  return index >= 0 ? localizeEnumLabel(meta.labels[index] || value, value, locale) : value;
 }
 
-export function formatLteBandwidthDisplay(value?: string | null): string {
+const LTE_BANDWIDTH_DISPLAY: Record<string, string> = {
+  '25': '5M',
+  '50': '10M',
+  '75': '15M',
+  '100': '20M',
+};
+
+export function formatLteBandwidthDisplay(value?: string | number | null): string {
   if (!value) return '-';
-  return formatEnumDisplayValue(value, undefined, LTE_BANDWIDTH_PATH);
+  const raw = String(value).trim();
+  if (!raw) return '-';
+  if (LTE_BANDWIDTH_DISPLAY[raw]) return LTE_BANDWIDTH_DISPLAY[raw];
+
+  const normalized = raw.toLowerCase().replace(/mhz$/, '').replace(/m$/, '').trim();
+  const numericValue = Number(normalized);
+  if (Number.isFinite(numericValue)) {
+    return `${Number.isInteger(numericValue) ? numericValue : numericValue.toFixed(1)}M`;
+  }
+
+  return formatEnumDisplayValue(raw, undefined, LTE_BANDWIDTH_PATH);
+}
+
+export function validateMmeIpPlmnLimit(
+  rows: Array<{ mmeIp?: string | null; plmn?: string | null }>,
+  max?: number,
+): string | null {
+  if (max === undefined || max <= 0) return null;
+  const count = rows.filter((row) => String(row.mmeIp ?? '').trim() || String(row.plmn ?? '').trim()).length;
+  return count > max ? `最多支持 ${max} 个 MME` : null;
+}
+
+function isValidIpv4(value: string): boolean {
+  const parts = value.split('.');
+  if (parts.length !== 4) return false;
+  return parts.every((part) => {
+    if (!/^\d+$/.test(part)) return false;
+    if (part.length > 1 && part.startsWith('0')) return false;
+    const num = Number(part);
+    return Number.isInteger(num) && num >= 0 && num <= 255;
+  });
+}
+
+export function validateMmeIp(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return isValidIpv4(trimmed) ? null : 'MME IP 必须为合法 IPv4 地址';
+}
+
+export function validatePlmn(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return /^\d{5,6}$/.test(trimmed) ? null : 'PLMN 必须为 5-6 位数字';
+}
+
+export function validateMmeIpPlmnRows(
+  rows: Array<{ mmeIp?: string | null; plmn?: string | null }>,
+): string | null {
+  for (let i = 0; i < rows.length; i += 1) {
+    const mmeIp = String(rows[i]?.mmeIp ?? '').trim();
+    const plmn = String(rows[i]?.plmn ?? '').trim();
+    if (!mmeIp && !plmn) continue;
+    if (!mmeIp) return `第 ${i + 1} 行 MME IP 不能为空`;
+    if (!plmn) return `第 ${i + 1} 行 PLMN 不能为空`;
+    const ipErr = validateMmeIp(mmeIp);
+    if (ipErr) return `第 ${i + 1} 行 ${ipErr}`;
+    const plmnErr = validatePlmn(plmn);
+    if (plmnErr) return `第 ${i + 1} 行 ${plmnErr}`;
+  }
+  return null;
 }
 
 export interface QuickSettingsInstanceContext {
@@ -141,6 +222,44 @@ export function validateValue(
   }
 
   return null;
+}
+
+export function validateLteQOffsetValue(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const num = Number(trimmed);
+  if (!Number.isInteger(num)) return '请输入整数';
+  if (num < -24 || num > 24 || num % 2 !== 0) {
+    return 'QOffset 仅支持 -24 到 24 的偶数';
+  }
+  return null;
+}
+
+function toParameterType(type?: string | null): ParameterType | null {
+  switch (String(type ?? '').trim()) {
+    case 'string':
+    case 'int':
+    case 'unsignedInt':
+    case 'boolean':
+    case 'dateTime':
+    case 'base64':
+    case 'hexBinary':
+    case 'object':
+      return String(type).trim() as ParameterType;
+    default:
+      return null;
+  }
+}
+
+export function resolveQuickSettingsParameterType(
+  quickSettingsType?: string,
+  schemaType?: string,
+  rawType?: string,
+): ParameterType {
+  return toParameterType(quickSettingsType)
+    ?? toParameterType(schemaType)
+    ?? toParameterType(rawType)
+    ?? 'string';
 }
 
 interface ApplyInstanceContextOptions {

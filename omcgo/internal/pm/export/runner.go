@@ -24,6 +24,12 @@ type taskRepo interface {
 	MarkFailed(ctx context.Context, id uuid.UUID, errMsg string) error
 }
 
+// TimezoneProvider 是系统时区读取的最小契约。
+// Provider 或 Location 为 nil 时，Runner 在导出展示层回退 UTC。
+type TimezoneProvider interface {
+	Location(ctx context.Context) *time.Location
+}
+
 // Runner 是 pm_kpi_export 的 asyncjob.JobRunner 实现（T2 真生成）。
 //
 // 流程：载任务 → MarkRunning → 按 source_type 取数 → 流式写 CSV 直传对象存储 →
@@ -39,6 +45,7 @@ type Runner struct {
 	uploader   Uploader // 对象存储上传（流式）
 	bucket     string   // 导出文件落地桶
 	logger     *zap.Logger
+	timezone   TimezoneProvider
 
 	// buildSourceFn 取数源构造入口；默认 r.buildSource，单测可注入 stub 源绕过 DB。
 	// 返回取数源 + 横表指标列集（列名已解析）+ CSV 列布局（首列表头 / 是否含小区列），
@@ -53,14 +60,15 @@ type Runner struct {
 //     adhoc 查 pm_adhoc_aggregation_results（两表均在时序库）。
 //   - TaskMetaDB = 主库（PgPool）：loadAdhocDimension 读 pm_tasks（任务元数据留主库）。
 type RunnerDeps struct {
-	Repo       taskRepo
-	Aggr       *aggregator.Aggregator
-	MetricDB   PgQuerier
-	AdhocDB    PgQuerier
-	TaskMetaDB PgQuerier
-	Uploader   Uploader
-	Bucket     string
-	Logger     *zap.Logger
+	Repo             taskRepo
+	Aggr             *aggregator.Aggregator
+	MetricDB         PgQuerier
+	AdhocDB          PgQuerier
+	TaskMetaDB       PgQuerier
+	Uploader         Uploader
+	Bucket           string
+	Logger           *zap.Logger
+	TimezoneProvider TimezoneProvider
 }
 
 // NewRunner 构造 T2 Runner。
@@ -78,6 +86,7 @@ func NewRunner(d RunnerDeps) *Runner {
 		uploader:   d.Uploader,
 		bucket:     d.Bucket,
 		logger:     logger.Named("pm.export.runner"),
+		timezone:   d.TimezoneProvider,
 	}
 	r.buildSourceFn = r.buildSource
 	return r
@@ -168,11 +177,22 @@ func (r *Runner) generate(ctx context.Context, task *Task) (genResult, error) {
 	}
 
 	object := objectPath(task)
-	out, err := streamCSVToObject(ctx, r.uploader, r.bucket, object, src, cols, layout)
+	out, err := streamCSVToObject(ctx, r.uploader, r.bucket, object, src, cols, layout, r.outputLocation(ctx))
 	if err != nil {
 		return genResult{}, err
 	}
 	return genResult{filePath: object, fileSize: out.FileSize, rowCount: out.RowCount}, nil
+}
+
+func (r *Runner) outputLocation(ctx context.Context) *time.Location {
+	if r.timezone == nil {
+		return time.UTC
+	}
+	loc := r.timezone.Location(ctx)
+	if loc == nil {
+		return time.UTC
+	}
+	return loc
 }
 
 // buildSource 按 source_type 构造取数源 + 横表指标列集（含已解析列名）。
@@ -180,85 +200,115 @@ func (r *Runner) generate(ctx context.Context, task *Task) (genResult, error) {
 // 横表列集在此一次性发现（DISTINCT metric_path/metric_type）+ 解析名（三张指标表 UNION 按 locale），
 // 表头开头即知；流式阶段只摊行不再查名。
 func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, []WideColumn, csvLayout, error) {
-	loc := appcontext.GetLocale(ctx)
-	// dashboard 路径恒为 device 维度：首列「设备 SN」+ 含 Cell ID/PLMN 列（与页面表格一致）。
-	dashboardLayout := csvLayout{FirstColHeader: "设备 SN", IncludeCell: true}
+	loc := exportLocale(task.Params)
+	deviceHeader := "设备 SN"
+	if loc == appcontext.LocaleEN {
+		deviceHeader = "Device SN"
+	}
+	// dashboard 路径恒为 device 维度：首列「设备 SN」+ 含 Cell ID/PLMN 列（保持仪表盘既有导出口径）。
+	// 缺值与 adhoc 导出保持一致写 "-"，避免 CSV 空单元格被误读为未导出。
+	dashboardLayout := csvLayout{
+		FirstColHeader:                deviceHeader,
+		Locale:                        loc,
+		IncludeCell:                   true,
+		MissingMetricValuePlaceholder: missingMetricValuePlaceholder,
+	}
+	kpiQueryLayout := csvLayout{
+		FirstColHeader:                deviceHeader,
+		Locale:                        loc,
+		IncludeMeasurementObject:      true,
+		MissingMetricValuePlaceholder: missingMetricValuePlaceholder,
+	}
 	switch task.SourceType {
 	case SourceDashboard:
-		req, objectLDNs, err := parseDashboardParams(task.Params)
-		if err != nil {
-			return nil, nil, csvLayout{}, err
-		}
-		dim := req.Dimension
-		if dim == "" {
-			dim = aggregator.DimensionDevice
-		}
-		table, terr := aggregator.SelectTable(req.Granularity, dim)
-		if terr != nil {
-			return nil, nil, csvLayout{}, terr
-		}
-		// 发现列集（编号+类型，与设备/小区无关）→ 解析本地化列名。
-		keys, derr := discoverMetricColumns(ctx, r.metricDB, table, req.MetricPaths, req.StartTime, req.EndTime)
-		if derr != nil {
-			return nil, nil, csvLayout{}, derr
-		}
-		cols := newNameResolver(r.metricDB, loc).resolveColumns(ctx, keys)
+		return r.buildDashboardLikeSource(ctx, task, loc, dashboardLayout)
 
-		// device 维度且表含行级 id → (time,id) keyset 直查；否则（聚合维度 / 无 id 的 device 表）走聚合批次游标。
-		if dim == aggregator.DimensionDevice && tableHasIDColumn(table) {
-			return newDashboardDeviceSource(r.metricDB, table, req, objectLDNs), cols, dashboardLayout, nil
-		}
-		if r.aggr == nil {
-			return nil, nil, csvLayout{}, fmt.Errorf("aggregator not wired for dashboard aggregate export")
-		}
-		return newDashboardAggregateSource(r.aggr, req, objectLDNs), cols, dashboardLayout, nil
+	case SourceKpiQuery:
+		return r.buildDashboardLikeSource(ctx, task, loc, kpiQueryLayout)
 
 	case SourceAdhoc:
 		taskID, startTime, endTime, err := parseAdhocParams(task.Params)
 		if err != nil {
 			return nil, nil, csvLayout{}, err
 		}
-		// 先查任务聚合维度 + 圈选设备数：决定首列表头 / 对象名解析口径 / 是否含小区列。
+		// 先查任务聚合维度、圈选设备数和配置指标集：决定首列表头 / 对象名解析口径，
+		// 并确保全量落库模式下导出仍只包含任务配置的 N 个指标。
 		// pm_tasks 在主库（PgPool），用 taskMetaDB 读；adhoc 结果表查询走 adhocDB（TsPool）。
-		dim, deviceCount, derr := loadAdhocDimension(ctx, r.taskMetaDB, taskID)
+		meta, derr := loadAdhocTaskMeta(ctx, r.taskMetaDB, taskID)
 		if derr != nil {
 			return nil, nil, csvLayout{}, derr
 		}
-		keys, kerr := discoverAdhocColumns(ctx, r.adhocDB, taskID, startTime, endTime)
+		keys, kerr := discoverAdhocColumns(ctx, r.adhocDB, taskID, meta.metricPaths, startTime, endTime)
 		if kerr != nil {
 			return nil, nil, csvLayout{}, kerr
 		}
 		cols := newNameResolver(r.adhocDB, loc).resolveColumns(ctx, keys)
 		layout := csvLayout{
-			FirstColHeader:                adhocFirstColHeader(dim),
-			IncludeTechnology:             dim == "device_group", // 设备组维度按制式分行，导出补「制式」列（与页面表格一致）
-			IncludeCell:                   adhocIncludesCell(dim),
+			FirstColHeader:                adhocFirstColHeader(meta.dimension, loc),
+			Locale:                        loc,
+			IncludeTechnology:             meta.dimension == "device_group", // 设备组维度按制式分行，导出补「制式」列（与页面表格一致）
+			IncludeCell:                   adhocIncludesCell(meta.dimension),
 			MissingMetricValuePlaceholder: missingMetricValuePlaceholder,
 		}
-		return newAdhocSource(r.adhocDB, taskID, startTime, endTime, dim, deviceCount), cols, layout, nil
+		return newAdhocSource(r.adhocDB, taskID, meta.metricPaths, startTime, endTime, meta.dimension, meta.deviceCount), cols, layout, nil
 
 	default:
 		return nil, nil, csvLayout{}, fmt.Errorf("export runner: unsupported source_type %q", task.SourceType)
 	}
 }
 
-// loadAdhocDimension 读 adhoc 任务的聚合维度与圈选设备数（用于首列表头 / 对象名标签）。
+func (r *Runner) buildDashboardLikeSource(ctx context.Context, task *Task, loc appcontext.Locale, layout csvLayout) (RowSource, []WideColumn, csvLayout, error) {
+	req, objectLDNs, err := parseDashboardParams(task.Params)
+	if err != nil {
+		return nil, nil, csvLayout{}, err
+	}
+	dim := req.Dimension
+	if dim == "" {
+		dim = aggregator.DimensionDevice
+	}
+	table, terr := aggregator.SelectTable(req.Granularity, dim)
+	if terr != nil {
+		return nil, nil, csvLayout{}, terr
+	}
+	// 发现列集（编号+类型，与设备/小区无关）→ 解析本地化列名。
+	keys, derr := discoverMetricColumns(ctx, r.metricDB, table, req.MetricPaths, req.StartTime, req.EndTime)
+	if derr != nil {
+		return nil, nil, csvLayout{}, derr
+	}
+	cols := newNameResolver(r.metricDB, loc).resolveColumns(ctx, keys)
+
+	// device 维度且表含行级 id → (time,id) keyset 直查；否则（聚合维度 / 无 id 的 device 表）走聚合批次游标。
+	if dim == aggregator.DimensionDevice && tableHasIDColumn(table) {
+		return newDashboardDeviceSource(r.metricDB, table, req, objectLDNs), cols, layout, nil
+	}
+	if r.aggr == nil {
+		return nil, nil, csvLayout{}, fmt.Errorf("aggregator not wired for dashboard aggregate export")
+	}
+	return newDashboardAggregateSource(r.aggr, req, objectLDNs), cols, layout, nil
+}
+
+type adhocTaskMeta struct {
+	dimension   string
+	deviceCount int
+	metricPaths []string
+}
+
+// loadAdhocTaskMeta 读 adhoc 任务的聚合维度、圈选设备数与配置指标集。
 // pm_tasks.id 是主键，按 id 直查不依赖子类型过滤。dimension 空 → 退化 "device"；
 // 任务查不到 → 同样退化 "device"（容错，不让导出整体失败）。
-func loadAdhocDimension(ctx context.Context, db PgQuerier, taskID uuid.UUID) (string, int, error) {
-	const q = `SELECT COALESCE(dimension, ''), COALESCE(jsonb_array_length(device_sns), 0) FROM pm_tasks WHERE id = $1`
-	var dim string
-	var cnt int
-	if err := db.QueryRow(ctx, q, taskID).Scan(&dim, &cnt); err != nil {
+func loadAdhocTaskMeta(ctx context.Context, db PgQuerier, taskID uuid.UUID) (adhocTaskMeta, error) {
+	const q = `SELECT COALESCE(dimension, ''), COALESCE(jsonb_array_length(device_sns), 0), COALESCE(metric_paths, '{}'::text[]) FROM pm_tasks WHERE id = $1`
+	var meta adhocTaskMeta
+	if err := db.QueryRow(ctx, q, taskID).Scan(&meta.dimension, &meta.deviceCount, &meta.metricPaths); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return "device", 0, nil
+			return adhocTaskMeta{dimension: "device"}, nil
 		}
-		return "", 0, fmt.Errorf("export adhoc load dimension: %w", err)
+		return adhocTaskMeta{}, fmt.Errorf("export adhoc load task metadata: %w", err)
 	}
-	if dim == "" {
-		dim = "device"
+	if meta.dimension == "" {
+		meta.dimension = "device"
 	}
-	return dim, cnt, nil
+	return meta, nil
 }
 
 // objectPath 约定 object path：kpi-export/{task_id}/kpi_{source}_{timestamp}.csv（设计 §5.6）。

@@ -150,6 +150,11 @@ export default function ResultTable({
     });
   }, [rows, statusFilter, snKeyword]);
 
+  const hasPlanRows = useMemo(
+    () => rows.some((r) => typeof r.planLineNo === 'number' || r.commandCode),
+    [rows],
+  );
+
   const tableColumns: ColumnsType<ResultRow> = useMemo(() => {
     const base: ColumnsType<ResultRow> = [
       {
@@ -159,6 +164,36 @@ export default function ResultTable({
         fixed: 'left',
         render: (_v, _r, i) => i + 1,
       },
+      ...(hasPlanRows
+        ? [
+            {
+              title: t('mml.planLine'),
+              key: 'planLine',
+              width: 110,
+              fixed: 'left' as const,
+              render: (_v: unknown, r: ResultRow) => (
+                <Tooltip title={r.planRawLine || undefined}>
+                  <Text style={{ fontSize: 12 }}>
+                    {r.planLineNo ? `#${r.planLineNo}` : '-'}
+                    {r.planOrder ? ` / ${r.planOrder}` : ''}
+                  </Text>
+                </Tooltip>
+              ),
+            },
+            {
+              title: t('mml.planCommand'),
+              key: 'planCommand',
+              width: 150,
+              fixed: 'left' as const,
+              ellipsis: true,
+              render: (_v: unknown, r: ResultRow) => (
+                <Text style={{ fontSize: 12 }} ellipsis={{ tooltip: r.commandCode || '-' }}>
+                  {r.commandCode || '-'}
+                </Text>
+              ),
+            },
+          ]
+        : []),
       {
         title: t('mml.consoleV2.result.col.deviceSn'),
         dataIndex: 'deviceSn',
@@ -275,7 +310,7 @@ export default function ResultTable({
     return [...base, ...dynamic, ...tail];
     // commandId / 导出 mutation / 重新执行回调 / running 进依赖：切任务或对应状态变化时刷新「操作」列。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [columns, commandId, exportDeviceCsv.isPending, exportDeviceCsv.variables, onReexecute, running, t, canExportPerm, canExecutePerm]);
+  }, [columns, commandId, exportDeviceCsv.isPending, exportDeviceCsv.variables, hasPlanRows, onReexecute, running, t, canExportPerm, canExecutePerm]);
 
   return (
     <Card

@@ -1,4 +1,5 @@
 import type { MMLOperationType } from '@core/types/mml';
+import { MML_MAX_TASK_DEVICES, MML_PREVIEW_PAGE_SIZE } from '@core/utils/mmlTaskScale';
 import type { ExecStatus, UnverifiedReason } from './types';
 
 // 操作类型彩色 Tag —— 与现有 MML 控制台 CommandTree.tsx 的配色保持一致，
@@ -63,7 +64,7 @@ export const UNVERIFIED_REASON_TEXT: Record<UnverifiedReason, string> = {
 };
 
 /** 设备弹框服务端分页每页条数（mock 沿用现控制台 50 条上限）。 */
-export const DEVICE_MODAL_PAGE_SIZE = 10;
+export const DEVICE_MODAL_PAGE_SIZE = MML_PREVIEW_PAGE_SIZE;
 
 // 三步弹框（选择设备 / 选择命令 / 配置参数）统一固定高度，切换命令/标签页时不抖动，
 // 整体高度参考「选择设备」弹框（其表格 scroll.y=320 + 表头/分页 ≈ 总高基准，不改动作为参照）。
@@ -76,4 +77,4 @@ export const CONFIG_TAB_HEIGHT = 330;
 // 依据：MML 执行无显式上限,但扇出单批 BatchCreateTasks 受 PostgreSQL 65535 bind 参数
 // 约束(~5000 行硬顶),且每设备一个 Connection Request 受 ACS 准入/限流。200 远低于硬顶、
 // ACS 可从容承接,>200 台规模化下发应走脚本任务。「全选满足筛选条件全部」最多选中前 200 台。
-export const MAX_SELECT_ALL = 200;
+export const MAX_SELECT_ALL = MML_MAX_TASK_DEVICES;

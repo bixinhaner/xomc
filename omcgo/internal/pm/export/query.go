@@ -48,12 +48,15 @@ var adhocSelectCols = []string{
 // 不破坏流式（单次 SQL 无 N+1）。名缺失返 NULL，由 adhocSource 用 *string 承接（空 → 回退 ID 前 8）。
 // device_group 维度 object_ldn 形如 'DeviceGroup=<uuid>,Tech=<制式>'，故取组名 JOIN 用
 // split_part(object_ldn, ',', 1) 剥逗号前段再等值（与网页 buildResultsQuery 同口径，老行无逗号原样返回）。
-func buildAdhocKeysetSQL(taskID uuid.UUID, startTime, endTime time.Time, started bool, curTime time.Time, curID uuid.UUID, limit int) (string, []any) {
+func buildAdhocKeysetSQL(taskID uuid.UUID, metricPaths []string, startTime, endTime time.Time, started bool, curTime time.Time, curID uuid.UUID, limit int) (string, []any) {
 	b := storage.Psql.Select(adhocSelectCols...).
 		From("pm_adhoc_aggregation_results r").
 		LeftJoin("product_dim p ON p.id = r.product_id").
 		LeftJoin("device_group_dim g ON ('DeviceGroup=' || g.id::text) = split_part(r.object_ldn, ',', 1)").
 		Where(sq.Eq{"r.task_id": taskID})
+	if len(metricPaths) > 0 {
+		b = b.Where(sq.Eq{"r.metric_path": metricPaths})
+	}
 	if !startTime.IsZero() {
 		b = b.Where(sq.GtOrEq{"r.time": startTime})
 	}
@@ -86,10 +89,13 @@ func buildDistinctMetricsSQL(table string, metricPaths []string, start, end time
 }
 
 // buildAdhocDistinctMetricsSQL 发现 adhoc 源的横表指标列集：按 task_id（+ 可选时窗）DISTINCT(metric_path, metric_type)。
-func buildAdhocDistinctMetricsSQL(taskID uuid.UUID, start, end time.Time) (string, []any) {
+func buildAdhocDistinctMetricsSQL(taskID uuid.UUID, metricPaths []string, start, end time.Time) (string, []any) {
 	b := storage.Psql.Select("DISTINCT metric_path", "metric_type").
 		From("pm_adhoc_aggregation_results").
 		Where(sq.Eq{"task_id": taskID})
+	if len(metricPaths) > 0 {
+		b = b.Where(sq.Eq{"metric_path": metricPaths})
+	}
 	if !start.IsZero() {
 		b = b.Where(sq.GtOrEq{"time": start})
 	}

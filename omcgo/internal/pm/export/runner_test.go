@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/minio/minio-go/v7"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -69,6 +73,76 @@ func (u *stubUploader) PutObject(_ context.Context, _, _ string, reader io.Reade
 	return minio.UploadInfo{Size: int64(len(b))}, nil
 }
 
+// earlyFailUploader 模拟对象存储在读取 pipe 前立即拒绝上传（例如桶不可用或鉴权失败）。
+// 这与会先 io.ReadAll 的 stubUploader 不同，专门覆盖 #34 的生产卡死形态。
+type earlyFailUploader struct {
+	err error
+}
+
+func (u *earlyFailUploader) PutObject(_ context.Context, _, _ string, _ io.Reader, _ int64, _ minio.PutObjectOptions) (minio.UploadInfo, error) {
+	return minio.UploadInfo{}, u.err
+}
+
+type stubTimezoneProvider struct {
+	loc   *time.Location
+	calls int
+}
+
+type exportMetaRow struct {
+	dimension   string
+	deviceCount int
+	metricPaths []string
+}
+
+func (r *exportMetaRow) Scan(dest ...any) error {
+	if len(dest) > 0 {
+		*dest[0].(*string) = r.dimension
+	}
+	if len(dest) > 1 {
+		*dest[1].(*int) = r.deviceCount
+	}
+	if len(dest) > 2 {
+		*dest[2].(*[]string) = r.metricPaths
+	}
+	return nil
+}
+
+type recordedExportQuery struct {
+	sql  string
+	args []any
+}
+
+type recordingExportQuerier struct {
+	row         pgx.Row
+	queryRowSQL string
+	queries     []recordedExportQuery
+	results     []pgx.Rows
+}
+
+func (q *recordingExportQuerier) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	return pgconn.CommandTag{}, nil
+}
+
+func (q *recordingExportQuerier) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+	q.queries = append(q.queries, recordedExportQuery{sql: sql, args: args})
+	if len(q.results) == 0 {
+		return &adhocFakeRows{}, nil
+	}
+	rows := q.results[0]
+	q.results = q.results[1:]
+	return rows, nil
+}
+
+func (q *recordingExportQuerier) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
+	q.queryRowSQL = sql
+	return q.row
+}
+
+func (s *stubTimezoneProvider) Location(_ context.Context) *time.Location {
+	s.calls++
+	return s.loc
+}
+
 // sliceSource 把固定批次的 ExportRow 当成 RowSource（测试用）。
 type sliceSource struct {
 	batches [][]ExportRow
@@ -91,6 +165,62 @@ func (s *sliceSource) Next(_ context.Context) ([]ExportRow, bool, error) {
 
 func newTestTask(src SourceType) *Task {
 	return &Task{ID: uuid.New(), SourceType: src, Params: []byte(`{}`)}
+}
+
+// #38：adhoc 导出必须从任务元数据读取配置指标集，并传到表头发现与流式数据源。
+func TestRunner_BuildSource_AdhocUsesTaskMetricPaths(t *testing.T) {
+	taskID := uuid.New()
+	metricPaths := []string{"KGSM0101", "KGSM0102"}
+	params, err := json.Marshal(AdhocParams{TaskID: taskID.String()})
+	require.NoError(t, err)
+
+	metaDB := &recordingExportQuerier{row: &exportMetaRow{
+		dimension:   "product",
+		deviceCount: 0,
+		metricPaths: metricPaths,
+	}}
+	adhocDB := &recordingExportQuerier{results: []pgx.Rows{
+		&adhocFakeRows{rows: [][]any{{"KGSM0101", "kpi"}, {"KGSM9999", "kpi"}}},
+		&adhocFakeRows{}, // 指标名解析查询无命中，回退编号本身。
+	}}
+	runner := NewRunner(RunnerDeps{AdhocDB: adhocDB, TaskMetaDB: metaDB})
+
+	src, _, _, err := runner.buildSource(context.Background(), &Task{
+		ID:         uuid.New(),
+		SourceType: SourceAdhoc,
+		Params:     params,
+	})
+	require.NoError(t, err)
+
+	assert.Contains(t, metaDB.queryRowSQL, "metric_paths")
+	require.NotEmpty(t, adhocDB.queries)
+	assert.Contains(t, adhocDB.queries[0].sql, "metric_path IN (")
+	assert.Equal(t, metricPaths, src.(*adhocSource).metricPaths)
+}
+
+func TestRunner_BuildSource_UsesStoredEnglishLocaleWithoutRequestContext(t *testing.T) {
+	taskID := uuid.New()
+	metaDB := &recordingExportQuerier{row: &exportMetaRow{
+		dimension:   "product",
+		metricPaths: []string{"KGSM0143"},
+	}}
+	adhocDB := &recordingExportQuerier{results: []pgx.Rows{
+		&adhocFakeRows{rows: [][]any{{"KGSM0143", "kpi"}}},
+		&adhocFakeRows{},
+	}}
+	runner := NewRunner(RunnerDeps{AdhocDB: adhocDB, TaskMetaDB: metaDB})
+
+	_, _, _, err := runner.buildSource(context.Background(), &Task{
+		ID:         uuid.New(),
+		SourceType: SourceAdhoc,
+		Params: []byte(fmt.Sprintf(
+			`{"task_id":%q,"locale":"en-US"}`,
+			taskID.String(),
+		)),
+	})
+	require.NoError(t, err)
+	require.Len(t, adhocDB.queries, 2)
+	assert.Contains(t, adhocDB.queries[1].sql, "COALESCE(NULLIF(en_name, ''), cn_name)")
 }
 
 // ── 预 running 守门：payload 坏 / 缺 task_id 直接返 error，不动任务 ─────────────
@@ -154,6 +284,102 @@ func TestRunner_Run_Success(t *testing.T) {
 	var res map[string]any
 	require.NoError(t, json.Unmarshal(out, &res))
 	assert.Equal(t, "succeeded", res["status"])
+}
+
+func TestRunner_Run_EarlyUploadFailureMarksTaskFailedWithoutHanging(t *testing.T) {
+	task := newTestTask(SourceDashboard)
+	repo := &stubTaskRepo{task: task}
+	r := NewRunner(RunnerDeps{
+		Repo:     repo,
+		Uploader: &earlyFailUploader{err: errors.New("bucket unavailable")},
+		Bucket:   "reports",
+	})
+	r.buildSourceFn = func(_ context.Context, _ *Task) (RowSource, []WideColumn, csvLayout, error) {
+		return &sliceSource{batches: [][]ExportRow{{
+			{Device: "ABCDEF/SN1", MetricCode: "K001", Value: 1.5},
+		}}}, []WideColumn{{Code: "K001", Type: "kpi", Name: "K001"}}, csvLayout{FirstColHeader: "设备"}, nil
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		payload, _ := BuildJobPayload(task.ID)
+		_, err := r.Run(context.Background(), &asyncjob.Job{Payload: payload})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+		assert.Equal(t, 1, repo.failedN)
+		assert.Contains(t, repo.failedWith, "bucket unavailable")
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("export runner hung after uploader returned before reading the pipe")
+	}
+}
+
+func TestRunner_Run_FormatsCSVTimesInTimezoneProviderLocation(t *testing.T) {
+	task := newTestTask(SourceDashboard)
+	repo := &stubTaskRepo{task: task}
+	up := &stubUploader{}
+	shanghai, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	tzp := &stubTimezoneProvider{loc: shanghai}
+	r := NewRunner(RunnerDeps{Repo: repo, Uploader: up, Bucket: "reports", TimezoneProvider: tzp})
+	start := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
+	r.buildSourceFn = func(_ context.Context, _ *Task) (RowSource, []WideColumn, csvLayout, error) {
+		return &sliceSource{batches: [][]ExportRow{{
+				{Device: "SN1", MetricCode: "K001", Time: start, StartTime: start, EndTime: start.Add(time.Hour), Value: 1},
+			}}},
+			[]WideColumn{{Code: "K001", Type: "kpi", Name: "上行吞吐"}},
+			csvLayout{FirstColHeader: "设备", IncludeCell: true}, nil
+	}
+
+	payload, _ := BuildJobPayload(task.ID)
+	_, err = r.Run(context.Background(), &asyncjob.Job{Payload: payload})
+	require.NoError(t, err)
+
+	row := nthCSVRow(t, up.gotBody, 1)
+	assert.Equal(t, "2026-06-04 18:00:00", row[0])
+	assert.Equal(t, "2026-06-04 19:00:00", row[1])
+	assert.Equal(t, 1, tzp.calls)
+}
+
+func TestRunner_Run_NilTimezoneFallsBackToUTC(t *testing.T) {
+	tests := []struct {
+		name string
+		deps RunnerDeps
+	}{
+		{name: "nil provider", deps: RunnerDeps{}},
+		{name: "nil location", deps: RunnerDeps{TimezoneProvider: &stubTimezoneProvider{}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := newTestTask(SourceDashboard)
+			repo := &stubTaskRepo{task: task}
+			up := &stubUploader{}
+			tt.deps.Repo = repo
+			tt.deps.Uploader = up
+			tt.deps.Bucket = "reports"
+			r := NewRunner(tt.deps)
+			start := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
+			r.buildSourceFn = func(_ context.Context, _ *Task) (RowSource, []WideColumn, csvLayout, error) {
+				return &sliceSource{batches: [][]ExportRow{{
+						{Device: "SN1", MetricCode: "K001", Time: start, StartTime: start, EndTime: start.Add(time.Hour), Value: 1},
+					}}},
+					[]WideColumn{{Code: "K001", Type: "kpi", Name: "上行吞吐"}},
+					csvLayout{FirstColHeader: "设备", IncludeCell: true}, nil
+			}
+
+			payload, _ := BuildJobPayload(task.ID)
+			_, err := r.Run(context.Background(), &asyncjob.Job{Payload: payload})
+			require.NoError(t, err)
+
+			row := nthCSVRow(t, up.gotBody, 1)
+			assert.Equal(t, "2026-06-04 10:00:00", row[0])
+			assert.Equal(t, "2026-06-04 11:00:00", row[1])
+		})
+	}
 }
 
 // ── 失败路径：取数报错 → MarkFailed + error 落库，job 不重试（返回 nil） ───────

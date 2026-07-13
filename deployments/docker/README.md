@@ -43,7 +43,7 @@
 | `acs`       | Dockerfile.acs           | `9095:9090` (metrics), `7557:7557` | ACS 服务，处理 TR-069 CWMP 设备通信。metrics 让出宿主 9090 给 Prometheus |
 | `app`       | Dockerfile.app           | `18081:8081` (host loopback), `9091:9091` (metrics) | REST API 管理面服务，业务流量通过 Nginx 代理 |
 | `worker`    | Dockerfile.worker        | `9092:9092`                | 后台异步任务 Worker                       |
-| `web`       | Dockerfile.web           | `host network`              | Nginx 网关：宿主机 8081 前端+API，8080 ACS 代理；使用 host networking 以保留真实客户端 IP |
+| `web`       | Dockerfile.web           | `8080:8080`, `8081:8081`    | Nginx 网关：宿主机 8081 前端+API，8080 ACS 代理；默认通过 Docker bridge 访问 app/acs |
 | `prometheus` | prom/prometheus:v2.51.0 | `9090:9090`                | 指标存储与查询                            |
 | `alertmanager` | prom/alertmanager:v0.27.0 | `9093:9093`            | 告警路由                                  |
 | `grafana`   | grafana/grafana:10.4.0   | `3030:3000`                | 可视化（admin/admin，dev 默认）。宿主 3030 避让 vite dev :3000 |
@@ -122,6 +122,18 @@ docker compose -f deployments/docker/docker-compose.yml up -d --build app
 ```
 
 > **注意**：`restart` 只是停止并重启已有容器，不会重新编译代码。修改了 Go 源码或前端代码后，必须使用 `up -d --build` 才能生效。
+
+### 4.6 可选 host network 覆盖
+
+默认 `web` 服务使用 Docker bridge 网络，通过服务名访问 `app`、`acs`，并显式暴露宿主 `8081`、`8080` 端口。
+
+如果部署环境明确需要 `web` 直接绑定宿主网络，可叠加本地覆盖文件：
+
+```bash
+docker compose -f deployments/docker/docker-compose.yml -f deployments/docker/docker-compose.local.yml up -d --build web
+```
+
+该覆盖会使用 `default.local.conf`，把 Nginx 上游切到宿主映射端口 `127.0.0.1:18081` 和 `127.0.0.1:7557`，不改变默认部署拓扑。
 
 ---
 
@@ -714,3 +726,57 @@ sudo ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 
 > 若调整 Go 端 `shutdown_timeout`，必须同步调整 app/acs/worker 的 `stop_grace_period`，
 > 两者错配会导致优雅关闭被 docker 提前 `SIGKILL` 打断。
+
+## 15. MML TXT 脚本导入切换（Task 13）
+
+本功能使用 `omcgo/migrations/000016_redesign_mml_script_txt_import.sql`。迁移是
+不可逆数据切换：先删除 `device_tasks WHERE source = 'mml'`、`mml_tasks` 和
+`mml_scripts`，再增加 TXT 摘要、校验版本、`plan_items` 和 `validation_summary`
+字段；Down 只撤销字段和索引，不恢复旧数据。发布前必须先停止 MML 新建、调度和消费，
+并记录非 MML `device_tasks` 数量。
+
+### 15.1 导入、保存、执行接口
+
+```text
+POST /api/v1/mml/scripts/import/validate  (multipart file=.txt)
+POST /api/v1/mml/scripts/import          (JSON validation_token + metadata)
+POST /api/v1/mml/scripts/:id/executions  (JSON scheduling/retry policy only)
+GET  /api/v1/mml/tasks/:id/results
+```
+
+校验成功返回一次性 `validation_token`；保存成功返回 `201` 和 `script.id`，同一令牌
+重放返回 `409`（`MML_IMPORT_TOKEN_CONSUMED`）。非法 TXT 返回 `422`
+（`MML_SCRIPT_VALIDATION_FAILED`）且不返回保存令牌。执行任务从服务端脚本快照复制
+`plan_items`，结果应保留 `plan_line_no`、`plan_device_sn`、`plan_order` 和
+`script_content_sha256`。
+
+可重复的端到端脚本及固定样例位于：
+`omcgo/scripts/e2e_mml_script_import.sh`、
+`omcgo/internal/mml/testdata/import-valid.txt` 和 `import-invalid.txt`。
+运行时提供 `OMC_TOKEN`（或 `AUTH_TOKEN`）以及已注册设备的 `MML_E2E_SN`：
+
+```bash
+OMC_TOKEN="$TOKEN" MML_E2E_SN="<provisioned-sn>" \
+  bash omcgo/scripts/e2e_mml_script_import.sh http://localhost:8081
+```
+
+脚本不会在缺少服务、凭据或设备时静默跳过，而是输出实际 HTTP 响应并以非零状态结束。
+
+### 15.2 切换与回滚边界
+
+```bash
+# 1. 停止 MML 新建、调度和消费
+# 2. 只读统计 Redis 中 source=mml 的排队任务
+(cd omcgo && go run ./cmd/omcctl mml reset-script-data --dry-run)
+# 3. 复核数量后才允许执行（禁止 FLUSHDB）
+(cd omcgo && go run ./cmd/omcctl mml reset-script-data \
+  --apply --confirm DELETE-MML-RUNTIME
+)
+# 4. 应用迁移、启动 migrate/app/worker/web，再执行健康检查和 E2E
+bash omcgo/scripts/check-migrations.sh --strict
+curl -fsS http://localhost:8081/healthz
+```
+
+`reset-script-data` 的 `--apply` 必须同时带有精确确认串；PostgreSQL 清理由迁移负责，
+不会清理其他来源的设备任务。该迁移不提供数据恢复回滚，若发布中止只能恢复数据库快照，
+然后重新执行迁移前的验证和切换演练。

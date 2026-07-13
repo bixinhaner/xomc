@@ -19,7 +19,7 @@
  * 后端按白名单只导命中行（空则导该设备全部小区/PLMN，向后兼容）。
  *
  * 消费方：仪表盘页（DeviceListPane/TaskDashboardPane）、adhoc 结果页（AdhocResultPanel）、
- * 指标查询页（KPIQuery，复用 kpiQueryToDashboardSelection）。放 frontend-core 供多页/多皮肤共享。
+ * 指标查询页（KPIQuery，复用 kpiQueryToDashboardSelection）。放 frontend-core 供多页面共享。
  */
 
 import type { QueryTemplatePayload } from '../types/pmQuery';
@@ -115,20 +115,20 @@ export function validateDashboardExportSelection(
 
 /** 默认导出任务名：KPI导出_{来源}_{时间戳}。后端不传也会自动生成，这里前端给个可读名。 */
 export function defaultExportTaskName(
-  source: 'dashboard' | 'adhoc',
+  source: 'dashboard' | 'kpi_query' | 'adhoc',
   now: Date = new Date(),
 ): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   const ts = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(
     now.getHours(),
   )}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-  const label = source === 'dashboard' ? '仪表盘' : '任务结果';
+  const label = source === 'dashboard' ? '仪表盘' : source === 'kpi_query' ? '指标查询' : '任务结果';
   return `KPI导出_${label}_${ts}`;
 }
 
 /**
  * 指标查询页"最近一次查询快照"→ dashboard 导出筛选。维度固定 device（页面就是按设备查）。
- * - 不发 object_ldns（指标查询页不做小区下钻，导该设备全部小区/PLMN，与页面一致）。
+ * - 指标查询页如做小区下钻，调用方会把 object_ldns 合并进返回的 selection，保证导出与页面一致。
  * - 不发 metric_type（与出图同口径，counter/kpi 由 metric_paths 隐含）。
  *   这两点由 buildDashboardExportParams 天然处理。
  */

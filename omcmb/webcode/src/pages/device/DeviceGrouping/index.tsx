@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { App } from 'antd';
+import { App, Modal, Radio, Space, Typography } from 'antd';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import {
   useDeviceGroups,
@@ -18,7 +18,7 @@ import { expandSelectedGroupIds } from '@core/utils/deviceGroupFilter';
 import { withDeviceGroupDisplayName } from '@core/utils/deviceGroupDisplay';
 import { useT } from '@/hooks/useT';
 import { useI18nText } from '@/hooks/useI18nText';
-import type { Device } from '@core/types/device';
+import type { Device, DeviceGroup } from '@core/types/device';
 import GroupTreePanel from './GroupTreePanel';
 import DeviceListPanel from './DeviceListPanel';
 import GroupDialogs from './GroupDialogs';
@@ -27,8 +27,12 @@ import { useNameFilters } from './useNameFilters';
 import { useGroupActions } from './useGroupActions';
 import { useDeviceActions } from './useDeviceActions';
 import { useBatchActions } from './useBatchActions';
-import { useImportExportHandlers } from './useImportExportHandlers';
+import { useImportExportHandlers, type DeviceGroupExportMode } from './useImportExportHandlers';
 import { buildGroupTargetOptions } from '@core/utils/deviceGroupTargets';
+import { buildDeviceGroupSubtreeCountMap } from '@core/utils/deviceGroupCounts';
+
+type DeviceQueryParams = Parameters<typeof useDeviceList>[0];
+type DeviceExportParams = Partial<Omit<DeviceQueryParams, 'page' | 'pageSize'>>;
 
 /**
  * 设备分组主页面。
@@ -54,6 +58,9 @@ export default function DeviceGrouping() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [selectedDeviceIds, setSelectedDeviceIds] = useState<React.Key[]>([]);
+  const [selectedDeviceMap, setSelectedDeviceMap] = useState<Record<string, Device>>({});
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [exportScope, setExportScope] = useState<DeviceGroupExportMode>('groupAll');
   // SN / 设备名称 模糊搜索（多个以逗号分隔）→ 后端 ?search= → BuildSearchOR。
   const [searchText, setSearchText] = useState('');
 
@@ -76,16 +83,29 @@ export default function DeviceGrouping() {
   const editLevel2NameFilters = useNameFilters();
 
   // ── Data fetching ──
+  const expandedGroupIDs = useMemo(
+    () => expandSelectedGroupIds(selectedGroupId ?? undefined, groups),
+    [selectedGroupId, groups]
+  );
+  const groupExportParams = useMemo<DeviceExportParams>(() => {
+    return {
+      ...(expandedGroupIDs ? { groupId: expandedGroupIDs } : {}),
+    };
+  }, [expandedGroupIDs]);
+  const trimmedSearchText = searchText.trim();
+  const hasSearchFilter = trimmedSearchText.length > 0;
+  const filteredExportParams = useMemo<DeviceExportParams>(() => ({
+    ...groupExportParams,
+    // searchText → getList 映射为后端 ?search=（覆盖 SN/设备名称等，逗号分隔多关键字）
+    ...(trimmedSearchText ? { searchText: trimmedSearchText } : {}),
+  }), [groupExportParams, trimmedSearchText]);
   const queryParams = useMemo(() => {
-    const expandedGroupIDs = expandSelectedGroupIds(selectedGroupId ?? undefined, groups);
     return {
       page: currentPage,
       pageSize,
-      ...(expandedGroupIDs ? { groupId: expandedGroupIDs } : {}),
-      // searchText → getList 映射为后端 ?search=（覆盖 SN/设备名称等，逗号分隔多关键字）
-      searchText: searchText.trim() || undefined,
-    } as Parameters<typeof useDeviceList>[0];
-  }, [currentPage, pageSize, selectedGroupId, searchText, groups]);
+      ...filteredExportParams,
+    } as DeviceQueryParams;
+  }, [currentPage, pageSize, filteredExportParams]);
   const { data: deviceData, isLoading, refetch } = useDeviceList(queryParams);
   const devices: Device[] = useMemo(
     () => withDeviceGroupDisplayName(deviceData?.items ?? [], groups, locale),
@@ -96,6 +116,22 @@ export default function DeviceGrouping() {
   const selectedGroup = useMemo(
     () => groups.find((g) => g.id === selectedGroupId),
     [groups, selectedGroupId]
+  );
+  const selectedGroupNameText = useMemo(
+    () => selectedGroup ? (fromRecord(selectedGroup as unknown as Record<string, unknown>, 'name') || selectedGroup.name) : undefined,
+    [fromRecord, selectedGroup]
+  );
+  const groupCountMap = useMemo(() => buildDeviceGroupSubtreeCountMap(groups), [groups]);
+  const selectedGroupTotal = selectedGroupId
+    ? (groupCountMap.get(selectedGroupId) ?? selectedGroup?.deviceCount ?? 0)
+    : totalDevicesFromStats;
+  const exportGroupName = selectedGroupNameText ?? t('common.all');
+
+  const selectedDevices = useMemo(
+    () => selectedDeviceIds
+      .map((key) => selectedDeviceMap[String(key)])
+      .filter((device): device is Device => Boolean(device)),
+    [selectedDeviceIds, selectedDeviceMap]
   );
 
   // Default select first level-2 node under the first root group
@@ -110,6 +146,44 @@ export default function DeviceGrouping() {
       }
     }
   }, [groups, selectedGroupId]);
+
+  useEffect(() => {
+    const keySet = new Set(selectedDeviceIds.map((key) => String(key)));
+    setSelectedDeviceMap((prev) => {
+      const next: Record<string, Device> = {};
+      let changed = Object.keys(prev).length !== keySet.size;
+      for (const [key, device] of Object.entries(prev)) {
+        if (keySet.has(key)) {
+          next[key] = device;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [selectedDeviceIds]);
+
+  const clearDeviceSelection = useCallback(() => {
+    setSelectedDeviceIds([]);
+    setSelectedDeviceMap({});
+  }, []);
+
+  const handleDeviceSelectionChange = useCallback((keys: React.Key[], rows: Device[]) => {
+    const keySet = new Set(keys.map((key) => String(key)));
+    setSelectedDeviceIds(keys);
+    setSelectedDeviceMap((prev) => {
+      const next: Record<string, Device> = {};
+      for (const key of keySet) {
+        const existing = prev[key];
+        if (existing) next[key] = existing;
+      }
+      for (const row of rows) {
+        const key = String(row.id);
+        if (keySet.has(key)) next[key] = row;
+      }
+      return next;
+    });
+  }, []);
 
   // ── Filtered groups for tree search ──
   const filteredGroups = useMemo(() => {
@@ -128,21 +202,27 @@ export default function DeviceGrouping() {
   }, [groups, groupSearchText]);
 
   // ── Target group options for move-to-group modal ──
+  const getGroupName = useCallback(
+    (group: DeviceGroup): string =>
+      fromRecord(group as unknown as Record<string, unknown>, 'name') || group.name,
+    [fromRecord]
+  );
+
   const getParentName = useCallback(
     (parentId: string | null): string => {
       if (!parentId) return '';
       const parent = groups.find((g) => g.id === parentId);
-      return parent?.name ?? '';
+      return parent ? getGroupName(parent) : '';
     },
-    [groups]
+    [groups, getGroupName]
   );
 
   const targetGroupOptions = useMemo(
     () =>
-      // 一级分组(root)是容器不作目标；「未分组设备」内置节点保留为"移出分组"项
-      // （issue #478：选它走移出分组语义，删除归属记录让设备回到未分组态）。
-      buildGroupTargetOptions(groups, getParentName, t('device.batch.removeFromGroup')),
-    [groups, getParentName, t]
+      // 一级分组(root)是容器不作目标；内置默认节点的 label 与树保持一致，
+      // 但仍带 isRemove 标记，供弹窗提示其"移出分组"语义。
+      buildGroupTargetOptions(groups, getParentName, getGroupName),
+    [groups, getParentName, getGroupName]
   );
 
   // ── Group / Device action hooks ──
@@ -206,36 +286,71 @@ export default function DeviceGrouping() {
   });
 
   // ── Import / export handlers ──
-  const { handleExport, handleImport, handleDownloadTemplate } = useImportExportHandlers({
+  const { handleExport, handleImport, handleDownloadTemplate, handlePreRegister, handleDownloadPreRegisterTemplate } = useImportExportHandlers({
     message,
     t,
     refetch,
     refetchGroups,
-    selectedGroupId,
-    selectedGroupName: selectedGroup ? (fromRecord(selectedGroup as unknown as Record<string, unknown>, 'name') || selectedGroup.name) : undefined,
+    selectedGroupName: selectedGroupNameText,
+    groups,
+    locale,
   });
 
   // 搜索：回车/点搜索时应用，并回到第 1 页。
   const handleSearch = useCallback((value: string) => {
     setSearchText(value);
     setCurrentPage(1);
-  }, []);
+    clearDeviceSelection();
+  }, [clearDeviceSelection]);
 
-  // 导出按钮：有选中设备 → 仅导出选中；无选中 → 二次确认后导出当前分组全部。
   const handleExportClick = useCallback(() => {
-    const selected = devices.filter((d) => selectedDeviceIds.includes(d.id));
-    if (selected.length > 0) {
-      void handleExport({ devices: selected });
+    setExportScope(selectedDeviceIds.length > 0 ? 'selected' : (hasSearchFilter ? 'filtered' : 'groupAll'));
+    setExportModalOpen(true);
+  }, [hasSearchFilter, selectedDeviceIds.length]);
+
+  const handleExportConfirm = useCallback(async () => {
+    const normalizedScope = exportScope === 'filtered' && !hasSearchFilter ? 'groupAll' : exportScope;
+    if (normalizedScope === 'selected') {
+      if (selectedDevices.length === 0) {
+        void message.warning(t('device.export.emptySelection'));
+        return;
+      }
+      setExportModalOpen(false);
+      await handleExport({ mode: 'selected', devices: selectedDevices });
       return;
     }
-    modal.confirm({
-      title: t('device.export.confirmAllTitle'),
-      content: t('device.export.confirmAllContent'),
-      okText: t('device.export.confirmAllOk'),
-      cancelText: t('common.cancel'),
-      onOk: () => void handleExport(),
+
+    setExportModalOpen(false);
+    await handleExport({
+      mode: normalizedScope,
+      params: normalizedScope === 'filtered' ? filteredExportParams : groupExportParams,
     });
-  }, [devices, selectedDeviceIds, handleExport, modal, t]);
+  }, [
+    exportScope,
+    hasSearchFilter,
+    selectedDevices,
+    message,
+    t,
+    handleExport,
+    filteredExportParams,
+    groupExportParams,
+  ]);
+
+  const exportHint = useMemo(() => {
+    if (exportScope === 'selected') {
+      return t('device.export.hint.selected', { count: selectedDeviceIds.length });
+    }
+    if (exportScope === 'filtered' && hasSearchFilter) {
+      return t('device.export.hint.filtered', { count: total });
+    }
+    return t(
+      hasSearchFilter ? 'device.export.hint.groupAllWithFilter' : 'device.export.hint.groupAll',
+      { groupName: exportGroupName, count: selectedGroupTotal }
+    );
+  }, [exportScope, hasSearchFilter, t, selectedDeviceIds.length, total, exportGroupName, selectedGroupTotal]);
+  const exportOkDisabled =
+    (exportScope === 'selected' && selectedDeviceIds.length === 0) ||
+    (exportScope === 'filtered' && !hasSearchFilter);
 
   // ── Tree panel ──
   const treePanel = (
@@ -248,6 +363,7 @@ export default function DeviceGrouping() {
       onSelect={(key) => {
         setSelectedGroupId(key);
         setCurrentPage(1);
+        clearDeviceSelection();
       }}
       onSearchChange={setGroupSearchText}
       onContextMenu={handleContextMenu}
@@ -267,9 +383,9 @@ export default function DeviceGrouping() {
           currentPage={currentPage}
           pageSize={pageSize}
           selectedGroupId={selectedGroupId}
-          selectedGroupName={selectedGroup ? (fromRecord(selectedGroup as unknown as Record<string, unknown>, 'name') || selectedGroup.name) : undefined}
+          selectedGroupName={selectedGroupNameText}
           batchActions={batchActions}
-          onSelectionChange={setSelectedDeviceIds}
+          onSelectionChange={handleDeviceSelectionChange}
           onPageChange={(page, size) => {
             setCurrentPage(page);
             setPageSize(size);
@@ -278,9 +394,46 @@ export default function DeviceGrouping() {
           onExport={handleExportClick}
           onImport={handleImport}
           onDownloadTemplate={handleDownloadTemplate}
+          onPreRegister={handlePreRegister}
+          onDownloadPreRegisterTemplate={handleDownloadPreRegisterTemplate}
           t={t as (id: string, values?: Record<string, unknown>) => string}
         />
       </TreeListPageLayout>
+
+      <Modal
+        open={exportModalOpen}
+        title={t('device.export.confirmAllTitle')}
+        okText={t('common.export')}
+        cancelText={t('common.cancel')}
+        okButtonProps={{ disabled: exportOkDisabled }}
+        onOk={() => void handleExportConfirm()}
+        onCancel={() => setExportModalOpen(false)}
+      >
+        <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+          <Typography.Text strong>{t('device.export.scopeTitle')}</Typography.Text>
+          <Radio.Group
+            value={exportScope}
+            onChange={(event) => setExportScope(event.target.value as DeviceGroupExportMode)}
+          >
+            <Space orientation="vertical" size={8}>
+              {selectedDeviceIds.length > 0 && (
+                <Radio value="selected">
+                  {t('device.export.scope.selected', { count: selectedDeviceIds.length })}
+                </Radio>
+              )}
+              {hasSearchFilter && (
+                <Radio value="filtered">
+                  {t('device.export.scope.filtered', { count: total })}
+                </Radio>
+              )}
+              <Radio value="groupAll">
+                {t('device.export.scope.groupAll', { count: selectedGroupTotal })}
+              </Radio>
+            </Space>
+          </Radio.Group>
+          <Typography.Text type="secondary">{exportHint}</Typography.Text>
+        </Space>
+      </Modal>
 
       <GroupDialogs
         addModalOpen={groupActions.state.addModalOpen}
@@ -305,6 +458,7 @@ export default function DeviceGrouping() {
         onRemoveFilter={childNameFilters.remove}
         onUpdateFilter={childNameFilters.update}
         editLevel2DrawerOpen={groupActions.state.editLevel2DrawerOpen}
+        editLevel2GroupId={groupActions.state.editLevel2GroupId ?? undefined}
         editLevel2Form={groupActions.forms.editLevel2Form}
         editLevel2ParentName={groupActions.state.editLevel2ParentName}
         editLevel2MatchingMode={groupActions.state.editLevel2MatchingMode}

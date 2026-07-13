@@ -3,6 +3,7 @@ package export
 import (
 	"bytes"
 	"encoding/csv"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -80,6 +81,104 @@ func TestWideCSVWriter_PivotSameKey(t *testing.T) {
 	assert.Equal(t, "2.5", row[6])                 // C002 列
 }
 
+func TestWideCSVWriter_KpiQueryMeasurementObjectColumn(t *testing.T) {
+	var buf bytes.Buffer
+	cw, err := newWideCSVWriterWithMeasurementObject(&buf, "设备 SN", false, true, wideTestCols(), "-", nil)
+	require.NoError(t, err)
+
+	tm := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
+	rows := []ExportRow{
+		{
+			Device:     "LTE-SN",
+			CellPLMN:   "Cellid=111,PLMN=46068",
+			Time:       tm,
+			StartTime:  tm,
+			EndTime:    tm.Add(time.Hour),
+			MetricCode: "K001",
+			Value:      1.5,
+		},
+		{
+			Device:     "NR-SN",
+			CellPLMN:   "Type=Cell,Mode=SA,gNBID=123,NrCGI=46068123456",
+			Time:       tm,
+			StartTime:  tm,
+			EndTime:    tm.Add(time.Hour),
+			MetricCode: "K001",
+			Value:      2.5,
+		},
+		{
+			Device:     "GSM-SN",
+			CellPLMN:   "",
+			Time:       tm,
+			StartTime:  tm,
+			EndTime:    tm.Add(time.Hour),
+			MetricCode: "K001",
+			Value:      3.5,
+		},
+	}
+	for _, row := range rows {
+		require.NoError(t, cw.AddRow(row))
+	}
+	require.NoError(t, cw.Flush())
+
+	recs, err := csv.NewReader(strings.NewReader(strings.TrimPrefix(buf.String(), string(utf8BOM)))).ReadAll()
+	require.NoError(t, err)
+	require.Len(t, recs, 4)
+	assert.Equal(t, []string{"开始时间", "结束时间", "设备 SN", "测量对象", "上行吞吐", "下行包数"}, recs[0])
+	byDevice := map[string][]string{}
+	for _, row := range recs[1:] {
+		byDevice[row[2]] = row
+	}
+	assert.Equal(t, "Cellid=111,PLMN=46068", byDevice["LTE-SN"][3])
+	assert.Equal(t, "Type=Cell,Mode=SA,gNBID=123,NrCGI=46068123456", byDevice["NR-SN"][3])
+	assert.Equal(t, "-", byDevice["GSM-SN"][3])
+}
+
+func TestWideCSVWriter_FormatsTimeInOutputLocation(t *testing.T) {
+	var buf bytes.Buffer
+	shanghai, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	cw, err := newWideCSVWriterWithLocation(&buf, "设备 SN", false, true, wideTestCols(), "", shanghai)
+	require.NoError(t, err)
+
+	start := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	require.NoError(t, cw.AddRow(ExportRow{
+		Device:     "SN1",
+		MetricCode: "K001",
+		Time:       start,
+		StartTime:  start,
+		EndTime:    end,
+		Value:      1,
+	}))
+	require.NoError(t, cw.Flush())
+
+	row := nthCSVRow(t, buf.Bytes(), 1)
+	assert.Equal(t, "2026-06-04 18:00:00", row[0])
+	assert.Equal(t, "2026-06-04 19:00:00", row[1])
+}
+
+func TestWideCSVWriter_NilOutputLocationFallsBackToUTC(t *testing.T) {
+	var buf bytes.Buffer
+	cw, err := newWideCSVWriterWithLocation(&buf, "设备 SN", false, true, wideTestCols(), "", nil)
+	require.NoError(t, err)
+
+	start := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
+	require.NoError(t, cw.AddRow(ExportRow{
+		Device:     "SN1",
+		MetricCode: "K001",
+		Time:       start,
+		StartTime:  start,
+		EndTime:    start.Add(time.Hour),
+		Value:      1,
+	}))
+	require.NoError(t, cw.Flush())
+
+	row := nthCSVRow(t, buf.Bytes(), 1)
+	assert.Equal(t, "2026-06-04 10:00:00", row[0])
+	assert.Equal(t, "2026-06-04 11:00:00", row[1])
+}
+
 // 某指标在该行键缺值，默认保持 CSV 空单元格。
 func TestWideCSVWriter_MissingMetricDefaultEmptyCell(t *testing.T) {
 	var buf bytes.Buffer
@@ -116,6 +215,22 @@ func TestWideCSVWriter_MissingMetricPlaceholder(t *testing.T) {
 	// 列序：开始时间 | 结束时间 | 设备 SN | Cell ID | PLMN | K001 | C002
 	assert.Equal(t, "9", row[5]) // K001 有值
 	assert.Equal(t, "-", row[6]) // C002 缺值 → "-"
+}
+
+func TestWideCSVWriter_NullMetricValuePlaceholder(t *testing.T) {
+	var buf bytes.Buffer
+	cw, err := newWideCSVWriter(&buf, "设备 SN", false, true, wideTestCols(), "-")
+	require.NoError(t, err)
+
+	tm := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
+	require.NoError(t, cw.AddRow(ExportRow{Device: "d2", Time: tm, StartTime: tm, MetricCode: "K001", Value: math.NaN()}))
+	require.NoError(t, cw.Flush())
+
+	body := strings.TrimPrefix(buf.String(), string(utf8BOM))
+	recs, err := csv.NewReader(strings.NewReader(body)).ReadAll()
+	require.NoError(t, err)
+	row := recs[1]
+	assert.Equal(t, "-", row[5], "DB NULL 缺值应导出为 '-'")
 }
 
 // 不同时间 → 时间桶切换，各成一横行。

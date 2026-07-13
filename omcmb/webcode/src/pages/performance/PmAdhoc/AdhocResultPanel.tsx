@@ -19,9 +19,11 @@ import { usePmAdhocDetail, usePmAdhocResults } from '@core/hooks/api/usePmAdhoc'
 import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
 import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
 import type { AdhocResultRow, AdhocDimension } from '@core/types/pmAdhoc';
+import { isFinitePmMetricValue, normalizePmMetricValue } from '@core/utils/pmMetricValue';
 import { buildAdhocExportParams, defaultExportTaskName } from '@core/utils/kpiExportParams';
 import { adhocIncludesCell, adhocObjectHeaderKey, adhocObjectName, adhocTechnology, objectKeyOf } from './adhocObjectColumn';
 import { formatSystemTime, nowInSystemTimezone, toSystemTimezoneRFC3339 } from '@core/utils/systemTime';
+import { buildAdhocChartOption, type AdhocMetricSeries } from './adhocChartOption';
 
 // 按粒度算默认时窗：覆盖最近 7 天，但粒度粗于"天"时至少 7 个周期。
 // 15min / hourly / daily → 7 天；weekly → 7 周；monthly → 7 月。end 取系统时区当前时刻。
@@ -47,13 +49,7 @@ interface Props {
   embedded?: boolean;
 }
 
-interface MetricSeries {
-  name: string;
-  buckets: string[];
-  values: Array<number | '-'>;
-}
-
-function buildSeriesByMetric(rows: AdhocResultRow[], granularity: string): MetricSeries[] {
+function buildSeriesByMetric(rows: AdhocResultRow[], granularity: string): AdhocMetricSeries[] {
   const filtered = rows.filter((r) => r.granularity === granularity);
   if (filtered.length === 0) return [];
   // 取所有 bucket（按 startTime 去重升序）
@@ -68,9 +64,11 @@ function buildSeriesByMetric(rows: AdhocResultRow[], granularity: string): Metri
       m = { name: r.displayName || r.metricPath, points: new Map() };
       byMetric.set(r.metricPath, m);
     }
-    m.points.set(r.startTime, r.metricValue);
+    if (isFinitePmMetricValue(r.metricValue)) {
+      m.points.set(r.startTime, r.metricValue);
+    }
   });
-  const out: MetricSeries[] = [];
+  const out: AdhocMetricSeries[] = [];
   byMetric.forEach((m) => {
     const values: Array<number | '-'> = buckets.map((b) => {
       const v = m.points.get(b);
@@ -95,7 +93,7 @@ interface WideResultRow {
   technology: string; // device_group 维度从 objectLdn 解析出的制式（lte/nr/gsm 大写）；其它维度空
   time: string;
   endTime: string;
-  values: Record<string, number>;
+  values: Record<string, number | null>;
 }
 
 function buildWideTable(
@@ -135,7 +133,7 @@ function buildWideTable(
       };
       rowMap.set(rowKey, wr);
     }
-    wr.values[r.metricPath] = r.metricValue;
+    wr.values[r.metricPath] = normalizePmMetricValue(r.metricValue);
   });
   const data = Array.from(rowMap.values()).sort((a, b) => {
     if (a.deviceLabel !== b.deviceLabel) return a.deviceLabel.localeCompare(b.deviceLabel);
@@ -347,23 +345,7 @@ function GranularityView({
     return <Empty description={intl.formatMessage({ id: 'perf.adhoc.emptyGranNoData' }, { gran: granularity })} />;
   }
   const buckets = series[0].buckets;
-  const option = {
-    grid: { left: 50, right: 16, top: 30, bottom: 40 },
-    xAxis: { type: 'category', data: buckets, name: 'start_time', nameLocation: 'middle', nameGap: 24 },
-    yAxis: { type: 'value' },
-    series: series.map((s) => ({
-      name: s.name,
-      type: 'line',
-      smooth: true,
-      // issue #514：点标记始终可见，避免单个/极稀疏孤立点隐身被误判"暂无数据"。
-      showSymbol: true,
-      symbolSize: 4,
-      data: s.values,
-      connectNulls: false,
-    })),
-    tooltip: { trigger: 'axis' },
-    legend: { top: 0 },
-  };
+  const option = buildAdhocChartOption(series, buckets);
   return (
     <>
       <ReactECharts option={option} style={{ height: 240 }} />
@@ -430,7 +412,7 @@ function GranularityView({
             width: 200,
             render: (_: unknown, r: WideResultRow) => {
               const v = r.values[c.metricPath];
-              return v === undefined ? '-' : v;
+              return v === undefined || v === null ? '-' : v;
             },
           })),
         ]}

@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/omcgo/omcgo/internal/core/jsonx"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
@@ -67,7 +69,7 @@ func (s *dashboardDeviceSource) Next(ctx context.Context) ([]ExportRow, bool, er
 		var id uuid.UUID
 		var oui, sn, metricPath, metricType, gran string
 		var statis, ldn *string
-		var value float64
+		var value jsonx.Float
 		var tm, st, et time.Time
 		if err := rows.Scan(&id, &oui, &sn, &metricPath, &metricType, &value, &statis, &gran, &tm, &st, &et, &ldn); err != nil {
 			return nil, false, fmt.Errorf("export dashboard device scan %s: %w", s.table, err)
@@ -81,7 +83,7 @@ func (s *dashboardDeviceSource) Next(ctx context.Context) ([]ExportRow, bool, er
 			Time:        tm,
 			StartTime:   st,
 			EndTime:     et,
-			Value:       value,
+			Value:       float64(value),
 			StatisType:  derefStr(statis),
 		})
 		lastTime, lastID = tm, id
@@ -192,6 +194,7 @@ func statisStr(p *metrics.StatisType) string {
 type adhocSource struct {
 	db          PgQuerier
 	taskID      uuid.UUID
+	metricPaths []string
 	startTime   time.Time
 	endTime     time.Time
 	dimension   string
@@ -203,15 +206,15 @@ type adhocSource struct {
 	done    bool
 }
 
-func newAdhocSource(db PgQuerier, taskID uuid.UUID, startTime, endTime time.Time, dimension string, deviceCount int) *adhocSource {
-	return &adhocSource{db: db, taskID: taskID, startTime: startTime, endTime: endTime, dimension: dimension, deviceCount: deviceCount}
+func newAdhocSource(db PgQuerier, taskID uuid.UUID, metricPaths []string, startTime, endTime time.Time, dimension string, deviceCount int) *adhocSource {
+	return &adhocSource{db: db, taskID: taskID, metricPaths: metricPaths, startTime: startTime, endTime: endTime, dimension: dimension, deviceCount: deviceCount}
 }
 
 func (s *adhocSource) Next(ctx context.Context) ([]ExportRow, bool, error) {
 	if s.done {
 		return nil, true, nil
 	}
-	sqlStr, args := buildAdhocKeysetSQL(s.taskID, s.startTime, s.endTime, s.started, s.curTime, s.curID, batchSize)
+	sqlStr, args := buildAdhocKeysetSQL(s.taskID, s.metricPaths, s.startTime, s.endTime, s.started, s.curTime, s.curID, batchSize)
 	rows, err := s.db.Query(ctx, sqlStr, args...)
 	if err != nil {
 		return nil, false, fmt.Errorf("export adhoc query: %w", err)
@@ -226,7 +229,7 @@ func (s *adhocSource) Next(ctx context.Context) ([]ExportRow, bool, error) {
 		var id uuid.UUID
 		var oui, sn, metricPath, metricType, gran string
 		var statis, ldn, productID, productName, groupName *string
-		var value float64
+		var value jsonx.Float
 		var tm, st, et time.Time
 		// 列序必须与 adhocSelectCols 完全一致：
 		// id, oui, sn, metric_path, metric_type, metric_value, statis_type, granularity,
@@ -256,7 +259,7 @@ func (s *adhocSource) Next(ctx context.Context) ([]ExportRow, bool, error) {
 			Time:        tm,
 			StartTime:   st,
 			EndTime:     et,
-			Value:       value,
+			Value:       float64(value),
 			StatisType:  derefStr(statis),
 		})
 		lastTime, lastID = tm, id
@@ -286,8 +289,13 @@ type colKey struct {
 	mtype string
 }
 
-// discoverMetricColumns 发现 dashboard 源（device / aggregate 维度）的指标列集，按编号升序。
+// discoverMetricColumns 发现 dashboard 源（device / aggregate 维度）的指标列集。
+// 前端明确传 metric_paths 时，导出列必须按请求全集保留：页面 fill_empty 会让“窗口内无真实行但已选择”的指标仍显示为占位列。
+// 未传 metric_paths（全量导出）才回退到数据侧 DISTINCT 发现。
 func discoverMetricColumns(ctx context.Context, db PgQuerier, table string, metricPaths []string, start, end time.Time) ([]colKey, error) {
+	if len(metricPaths) > 0 {
+		return requestedMetricColumns(metricPaths), nil
+	}
 	sqlStr, args := buildDistinctMetricsSQL(table, metricPaths, start, end)
 	rows, err := db.Query(ctx, sqlStr, args...)
 	if err != nil {
@@ -297,9 +305,33 @@ func discoverMetricColumns(ctx context.Context, db PgQuerier, table string, metr
 	return scanColKeys(rows)
 }
 
+func requestedMetricColumns(metricPaths []string) []colKey {
+	out := make([]colKey, 0, len(metricPaths))
+	seen := make(map[string]struct{}, len(metricPaths))
+	for _, raw := range metricPaths {
+		code := strings.TrimSpace(raw)
+		if code == "" {
+			continue
+		}
+		if _, ok := seen[code]; ok {
+			continue
+		}
+		seen[code] = struct{}{}
+		out = append(out, colKey{code: code, mtype: metricColumnType(code)})
+	}
+	return out
+}
+
+func metricColumnType(code string) string {
+	if strings.HasPrefix(strings.ToUpper(code), "C") {
+		return string(metrics.MetricTypeCounter)
+	}
+	return string(metrics.MetricTypeKPI)
+}
+
 // discoverAdhocColumns 发现 adhoc 源的指标列集，按编号升序。
-func discoverAdhocColumns(ctx context.Context, db PgQuerier, taskID uuid.UUID, start, end time.Time) ([]colKey, error) {
-	sqlStr, args := buildAdhocDistinctMetricsSQL(taskID, start, end)
+func discoverAdhocColumns(ctx context.Context, db PgQuerier, taskID uuid.UUID, metricPaths []string, start, end time.Time) ([]colKey, error) {
+	sqlStr, args := buildAdhocDistinctMetricsSQL(taskID, metricPaths, start, end)
 	rows, err := db.Query(ctx, sqlStr, args...)
 	if err != nil {
 		return nil, fmt.Errorf("export discover adhoc columns: %w", err)
@@ -371,4 +403,3 @@ func ldnAllowSet(ldns []string) map[string]bool {
 	}
 	return m
 }
-

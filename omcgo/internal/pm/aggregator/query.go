@@ -684,9 +684,26 @@ func (a *Aggregator) queryNetworkTable(ctx context.Context, table string, q Quer
 		"MIN(start_time) AS start_time",
 		"MIN(end_time) AS end_time",
 		"MAX(ingest_time) AS ingest_time",
-	).From(table)
-	// 复用 device 维度公共过滤（含制式子查询收口），但不带任何设备/组实体过滤。
-	qb = applyCommonFilters(qb, q)
+	)
+	// 15min raw 表可能存在同设备同对象同窗口重复上报；network 汇总前按 device 直读口径
+	// 保留最新 ingest 行，避免首页尾部补点把重复 raw 行计入全网 counter。
+	if table == "pm_metrics" {
+		inner := storage.Psql.Select(
+			"device_oui", "device_sn", "metric_path", "metric_type", "metric_value",
+			"statis_type", "granularity", "time", "start_time", "end_time", "ingest_time", "object_ldn",
+		).
+			Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`).
+			From(table)
+		inner = applyCommonFilters(inner, q)
+		inner = inner.OrderBy(
+			"device_oui", "device_sn", "metric_path", "granularity", `"time"`, "object_ldn", "ingest_time DESC",
+		)
+		qb = qb.FromSelect(inner, "m")
+	} else {
+		qb = qb.From(table)
+		// 复用 device 维度公共过滤（含制式子查询收口），但不带任何设备/组实体过滤。
+		qb = applyCommonFilters(qb, q)
+	}
 	qb = qb.GroupBy("metric_path", "granularity", "time")
 	qb = qb.OrderBy("time DESC")
 	if q.Limit > 0 {
@@ -978,7 +995,9 @@ func applyScalarFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
 		qb = qb.Where(sq.GtOrEq{"time": q.StartTime})
 	}
 	if !q.EndTime.IsZero() {
-		qb = qb.Where(sq.LtOrEq{"time": q.EndTime})
+		// PM 桶和聚合窗口统一使用半开区间 [start,end)：结束时刻若恰好等于
+		// 下一桶桶头，不应把下一桶也纳入自定义时间范围（#29）。
+		qb = qb.Where(sq.Lt{"time": q.EndTime})
 	}
 	// #599：星期/小时段后端过滤（全选/空 = 不加条件，向后兼容）。
 	if len(q.Weekdays) > 0 && len(q.Weekdays) < 7 {

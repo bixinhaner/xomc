@@ -3,6 +3,7 @@ package collector
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/pm/resultnorm"
@@ -23,6 +24,9 @@ func (c *PMCollector) normalizeResults(ctx context.Context, counters []model.PMC
 	}
 
 	for i := range counters {
+		if math.IsNaN(counters[i].CounterValue) {
+			continue
+		}
 		normalized, err := resultnorm.Normalize(counters[i].CounterValue, &resultnorm.Metadata{
 			Unit:       counters[i].Unit,
 			StatisType: counters[i].StatisType,

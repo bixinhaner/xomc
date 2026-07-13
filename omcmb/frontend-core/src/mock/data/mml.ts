@@ -371,6 +371,7 @@ export const mockMMLTasks: MMLTask[] = [
     id: 'mmltask-001',
     taskName: '北京eNB巡检',
     scriptId: 'script-001',
+    taskOrigin: 'script',
     deviceSns: ['ENB00001', 'ENB00002', 'ENB00003'],
     commands: ['DSP VERSION', 'DSP BOARDSTATUS', 'DSP SYSRESOURCE'],
     status: 'completed',
@@ -396,7 +397,7 @@ export const mockMMLTasks: MMLTask[] = [
   {
     id: 'mmltask-002',
     taskName: '小区故障排查-上海',
-    scriptId: 'script-002',
+    taskOrigin: 'console',
     deviceSns: ['ENB00010'],
     commands: ['LST CELL', 'DSP RRUINFO', 'DSP BOARDSTATUS'],
     status: 'failed',

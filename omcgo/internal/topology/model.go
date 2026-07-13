@@ -73,20 +73,21 @@ type DeviceGroup struct {
 	DescriptionI18n map[string]string `json:"description_i18n,omitempty"`
 	RemarkI18n      map[string]string `json:"remark_i18n,omitempty"`
 	ParentID        *uuid.UUID        `json:"parent_id,omitempty"`
-	Carrier      model.CarrierCode `json:"carrier,omitempty"`
-	Description  string            `json:"description,omitempty"`
-	SortOrder    int               `json:"sort_order"`
-	Level        int               `json:"level"`
-	Status       string            `json:"status"`
-	IsDefault    bool              `json:"is_default"`
-	Remark       string            `json:"remark,omitempty"`
-	CreatedBy    string            `json:"created_by,omitempty"`
-	UpdatedBy    string            `json:"updated_by,omitempty"`
-	DeviceCount  int               `json:"device_count"`
-	Children     []DeviceGroup     `json:"children,omitempty"`
-	CreatedAt    time.Time         `json:"created_at"`
-	UpdatedAt    time.Time         `json:"updated_at"`
+	Carrier         model.CarrierCode `json:"carrier,omitempty"`
+	Description     string            `json:"description,omitempty"`
+	SortOrder       int               `json:"sort_order"`
+	Level           int               `json:"level"`
+	Status          string            `json:"status"`
+	IsDefault       bool              `json:"is_default"`
+	Remark          string            `json:"remark,omitempty"`
+	CreatedBy       string            `json:"created_by,omitempty"`
+	UpdatedBy       string            `json:"updated_by,omitempty"`
+	DeviceCount     int               `json:"device_count"`
+	Children        []DeviceGroup     `json:"children,omitempty"`
+	CreatedAt       time.Time         `json:"created_at"`
+	UpdatedAt       time.Time         `json:"updated_at"`
 	// 匹配规则（仅 L2 分组使用）
+	SourceGroupID    *uuid.UUID   `json:"source_group_id,omitempty"`
 	MatchingMode     MatchingMode `json:"matching_mode,omitempty"`
 	NameRuleList     []NameRule   `json:"name_rule_list,omitempty"`
 	LACList          []int        `json:"lac_list,omitempty"`
@@ -105,22 +106,24 @@ type DeviceGroupMember struct {
 
 // CreateGroupRequest is the payload for creating a device group.
 type CreateGroupRequest struct {
-	Name      string          `json:"name" binding:"required"`
+	Name string `json:"name" binding:"required"`
 	// i18n 三件套(可选)。后端 INSERT 时写入 {name,description,remark}_i18n JSONB 列。
 	// 形态 {"zh-CN":"...","en-US":"..."}。空 map 落 '{}' 表示无 i18n,前端 fallback 单语言列。
 	NameI18n        map[string]string `json:"name_i18n,omitempty"`
 	DescriptionI18n map[string]string `json:"description_i18n,omitempty"`
 	RemarkI18n      map[string]string `json:"remark_i18n,omitempty"`
-	ParentID  string          `json:"parent_id"`
-	Carrier   string          `json:"carrier"`
-	Remark    string          `json:"remark"`
-	SortOrder int             `json:"sort_order"`
-	SubGroups []SubGroupInput `json:"sub_groups,omitempty"`
+	ParentID        string            `json:"parent_id"`
+	Carrier         string            `json:"carrier"`
+	Remark          string            `json:"remark"`
+	SortOrder       int               `json:"sort_order"`
+	SubGroups       []SubGroupInput   `json:"sub_groups,omitempty"`
 	// 匹配规则（仅 L2 分组使用）
-	MatchingMode string     `json:"matching_mode"`           // deviceName, lac, tac
-	NameRuleList []NameRule `json:"name_rule_list"`          // 设备名称匹配规则
-	LACList      []int      `json:"lac_list"`                // LAC 列表
-	TACList      []int      `json:"tac_list"`                // TAC 列表
+	SourceGroupID    string     `json:"source_group_id"`
+	MatchingMode     string     `json:"matching_mode"`  // deviceName, lac, tac
+	NameRuleList     []NameRule `json:"name_rule_list"` // 设备名称匹配规则
+	LACList          []int      `json:"lac_list"`       // LAC 列表
+	TACList          []int      `json:"tac_list"`       // TAC 列表
+	SerialNumberList []string   `json:"serial_number_list"`
 }
 
 // SubGroupInput defines a sub-group to create in batch.
@@ -132,19 +135,21 @@ type SubGroupInput struct {
 
 // UpdateGroupRequest is the payload for updating a device group.
 type UpdateGroupRequest struct {
-	Name      *string    `json:"name"`
+	Name *string `json:"name"`
 	// i18n 三件套(可选)。nil = 不修改;非空 map = 覆盖整张 JSONB。
 	NameI18n        map[string]string `json:"name_i18n,omitempty"`
 	DescriptionI18n map[string]string `json:"description_i18n,omitempty"`
 	RemarkI18n      map[string]string `json:"remark_i18n,omitempty"`
-	ParentID  *string    `json:"parent_id"` // 修改父级分组（L1 转 L2 或 L2 转 L1）
-	Remark    *string    `json:"remark"`
-	SortOrder *int       `json:"sort_order"`
+	ParentID        *string           `json:"parent_id"` // 修改父级分组（L1 转 L2 或 L2 转 L1）
+	Remark          *string           `json:"remark"`
+	SortOrder       *int              `json:"sort_order"`
 	// 匹配规则（仅 L2 分组使用）
-	MatchingMode *string    `json:"matching_mode"`
-	NameRuleList []NameRule `json:"name_rule_list"`
-	LACList      []int      `json:"lac_list"`
-	TACList      []int      `json:"tac_list"`
+	SourceGroupID    *string    `json:"source_group_id"`
+	MatchingMode     *string    `json:"matching_mode"`
+	NameRuleList     []NameRule `json:"name_rule_list"`
+	LACList          []int      `json:"lac_list"`
+	TACList          []int      `json:"tac_list"`
+	SerialNumberList []string   `json:"serial_number_list"`
 }
 
 // CheckDeleteResponse describes the impact of deleting a group.

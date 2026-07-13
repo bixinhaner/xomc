@@ -170,6 +170,60 @@ func TestPgRepo_Integration_GetByIDNotFound(t *testing.T) {
 	assert.Nil(t, got)
 }
 
+func TestPgRepo_Integration_LatestSyncGPVSummaryIgnoresStaleUnfinishedTasks(t *testing.T) {
+	pool := newTestPool(t)
+	if pool == nil {
+		return
+	}
+	defer cleanupTestTasks(t, pool)
+	repo := NewPgTaskRepository(pool)
+	ctx := context.Background()
+
+	deviceSN := testDeviceSNPrefix + "sync-gpv-summary"
+	sourceID := generateUUID()
+	base := time.Date(2026, 7, 13, 10, 2, 2, 0, time.UTC)
+
+	makeTask := func(id, commandKey string, status TaskStatus, createdAt time.Time, completedAt *time.Time) *Task {
+		return &Task{
+			ID:                    generateUUID(),
+			DeviceSN:              deviceSN,
+			Method:                "GetParameterValues",
+			Params:                json.RawMessage(`{"paths":["Device.DeviceInfo."]}`),
+			Priority:              1,
+			CommandKey:            commandKey,
+			Status:                status,
+			MaxRetries:            3,
+			CreatedAt:             createdAt,
+			CompletedAt:           completedAt,
+			Source:                TaskSourceAPI,
+			SourceID:              sourceID,
+			CommandIndex:          0,
+			DeviceIndex:           0,
+			PathTranslationSource: id,
+		}
+	}
+
+	staleCreated := base.Add(-72 * time.Hour)
+	staleSent := makeTask("stale", "sync-gpv-"+deviceSN+"-0-r", TaskStatusSent, staleCreated, nil)
+	require.NoError(t, repo.Create(ctx, staleSent))
+
+	firstCompletedAt := base.Add(3 * time.Second)
+	lastCompletedAt := base.Add(13*time.Second + 473*time.Millisecond)
+	require.NoError(t, repo.Create(ctx, makeTask("completed-0", "sync-gpv-"+deviceSN+"-0", TaskStatusCompleted, base, &firstCompletedAt)))
+	require.NoError(t, repo.Create(ctx, makeTask("completed-1", "sync-gpv-"+deviceSN+"-1", TaskStatusCompleted, base.Add(1*time.Second), &lastCompletedAt)))
+
+	summary, err := repo.LatestSyncGPVSummaryByDevice(ctx, deviceSN)
+	require.NoError(t, err)
+	require.NotNil(t, summary)
+
+	assert.Equal(t, sourceID, summary.SourceID)
+	assert.Equal(t, 2, summary.TaskCount)
+	assert.True(t, summary.FirstCreatedAt.Equal(base))
+	require.NotNil(t, summary.LastCompletedAt)
+	assert.True(t, summary.LastCompletedAt.Equal(lastCompletedAt))
+	assert.InEpsilon(t, 13.473, summary.WallClockSeconds, 0.001)
+}
+
 func TestPgRepo_Integration_Update(t *testing.T) {
 	pool := newTestPool(t)
 	if pool == nil {
@@ -195,6 +249,42 @@ func TestPgRepo_Integration_Update(t *testing.T) {
 	assert.Equal(t, TaskStatusSent, got.Status)
 	assert.Equal(t, "cwmp-pg-1", got.CWMPID)
 	assert.NotNil(t, got.SentAt)
+}
+
+func TestPgRepo_Integration_UpdateDoesNotDowngradeTerminalTask(t *testing.T) {
+	pool := newTestPool(t)
+	if pool == nil {
+		return
+	}
+	defer cleanupTestTasks(t, pool)
+	repo := NewPgTaskRepository(pool)
+	ctx := context.Background()
+
+	tk := freshTaskForPG("term", "term")
+	require.NoError(t, repo.Create(ctx, tk))
+
+	completedAt := time.Now()
+	completed := *tk
+	completed.Status = TaskStatusCompleted
+	completed.CompletedAt = &completedAt
+	completed.Result = json.RawMessage(`{"ok":true}`)
+	require.NoError(t, repo.Update(ctx, &completed))
+
+	sentAt := completedAt.Add(-10 * time.Millisecond)
+	staleSent := *tk
+	staleSent.Status = TaskStatusSent
+	staleSent.CWMPID = "late-cwmp"
+	staleSent.SentAt = &sentAt
+	staleSent.CompletedAt = nil
+	staleSent.Result = nil
+	require.NoError(t, repo.Update(ctx, &staleSent))
+
+	got, err := repo.GetByID(ctx, tk.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, TaskStatusCompleted, got.Status)
+	assert.NotNil(t, got.CompletedAt)
+	assert.JSONEq(t, `{"ok":true}`, string(got.Result))
 }
 
 func TestPgRepo_Integration_GetByCWMPID(t *testing.T) {
@@ -370,15 +460,17 @@ func TestPgRepo_Integration_PurgeOldTasks(t *testing.T) {
 	repo := NewPgTaskRepository(pool)
 	ctx := context.Background()
 
-	// PurgeOldTasks 仅 purge 终态任务且 created_at < before。
-	// 用未来时间作为 before（确保 purge 命中刚创建的 completed 任务）
+	// PurgeOldTasks 仅 purge 终态任务且 completed_at < before。
+	// Use an old cutoff so this integration test does not delete fresh
+	// device_tasks from local end-to-end runs that share the dev database.
 	tk := freshTaskForPG("purge", "purge")
 	tk.Status = TaskStatusCompleted
-	completedAt := time.Now()
+	tk.CreatedAt = time.Now().AddDate(-11, 0, 0)
+	completedAt := time.Now().AddDate(-11, 0, 0)
 	tk.CompletedAt = &completedAt
 	require.NoError(t, repo.Create(ctx, tk))
 
-	count, err := repo.PurgeOldTasks(ctx, time.Now().Add(time.Hour).Format(time.RFC3339))
+	count, err := repo.PurgeOldTasks(ctx, time.Now().AddDate(-10, 0, 0).Format(time.RFC3339))
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, count, int64(1))
 

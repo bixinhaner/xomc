@@ -77,6 +77,9 @@ func (r *Registry) RunNext(ctx context.Context, jobType string) (didRun bool, er
 		zap.String("job_type", jobType),
 		zap.String("job_id", job.ID.String()),
 		zap.Int("attempt", job.Attempt),
+		zap.Time("scheduled_at", job.ScheduledAt),
+		zap.Timep("bucket_start", job.BucketStart),
+		zap.Timep("bucket_end", job.BucketEnd),
 	)
 
 	startedAt := time.Now()
@@ -106,9 +109,28 @@ func (r *Registry) RunNext(ctx context.Context, jobType string) (didRun bool, er
 		if mErr := r.repo.MarkFailed(finalizeCtx, job.ID, runErr.Error()); mErr != nil {
 			r.logger.Error("mark failed write error", zap.String("job_id", job.ID.String()), zap.Error(mErr))
 		}
+		finishedAt := time.Now()
+		willRetry := job.Attempt+1 <= job.MaxAttempts
+		nextStatus := StatusFailed
+		nextAttempt := job.Attempt
+		if willRetry {
+			nextStatus = StatusPending
+			nextAttempt = job.Attempt + 1
+		}
 		r.logger.Warn("async job failed",
 			zap.String("job_type", jobType),
 			zap.String("job_id", job.ID.String()),
+			zap.Timep("bucket_start", job.BucketStart),
+			zap.Timep("bucket_end", job.BucketEnd),
+			zap.Time("scheduled_at", job.ScheduledAt),
+			zap.Time("started_at", startedAt),
+			zap.Time("finished_at", finishedAt),
+			zap.Int64("queue_delay_ms", durationMillis(startedAt.Sub(job.ScheduledAt))),
+			zap.Int64("duration_ms", durationMillis(finishedAt.Sub(startedAt))),
+			zap.String("status", string(nextStatus)),
+			zap.Bool("will_retry", willRetry),
+			zap.Int("next_attempt", nextAttempt),
+			zap.Int("attempt", job.Attempt),
 			zap.Error(runErr),
 		)
 		return true, nil
@@ -118,8 +140,25 @@ func (r *Registry) RunNext(ctx context.Context, jobType string) (didRun bool, er
 		r.logger.Error("mark succeeded write error", zap.String("job_id", job.ID.String()), zap.Error(mErr))
 		return true, mErr
 	}
-	r.logger.Info("async job succeeded", zap.String("job_id", job.ID.String()))
+	finishedAt := time.Now()
+	r.logger.Info("async job succeeded",
+		zap.String("job_type", jobType),
+		zap.String("job_id", job.ID.String()),
+		zap.Timep("bucket_start", job.BucketStart),
+		zap.Timep("bucket_end", job.BucketEnd),
+		zap.Time("scheduled_at", job.ScheduledAt),
+		zap.Time("started_at", startedAt),
+		zap.Time("finished_at", finishedAt),
+		zap.Int64("queue_delay_ms", durationMillis(startedAt.Sub(job.ScheduledAt))),
+		zap.Int64("duration_ms", durationMillis(finishedAt.Sub(startedAt))),
+		zap.String("status", string(StatusSucceeded)),
+		zap.Int("attempt", job.Attempt),
+	)
 	return true, nil
+}
+
+func durationMillis(d time.Duration) int64 {
+	return d.Milliseconds()
 }
 
 // runHeartbeat 在 ctx alive 期间每 HeartbeatInterval 跳一次心跳。

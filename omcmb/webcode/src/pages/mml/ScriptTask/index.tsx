@@ -1,509 +1,184 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
-import { Button, Descriptions, Drawer, Empty, Form, Input, Modal, Select, Space, Spin, Tag, Typography, message, theme } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { useMemo, useState } from 'react';
+import type { Key } from 'react';
+import { Button, Descriptions, Drawer, Dropdown, Empty, Form, Input, Modal, Space, Spin, Typography, message } from 'antd';
+import type { MenuProps } from 'antd';
+import { DeleteOutlined, DownloadOutlined, EditOutlined, EyeOutlined, MoreOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import SearchInput from '@/components/SearchInput';
-import ScriptTaskDrawer from '../components/ScriptTaskDrawer';
-import CommandSelectModal from '../Console/components/CommandSelectModal';
 import { useT } from '@/hooks/useT';
-
 import type { MMLScript } from '@core/types/mml';
-import type { CommandItem, CommandParamPath } from '../Console/types';
-import {
-  useMMLScripts,
-  useMMLScriptById,
-  useCreateMMLScript,
-  useUpdateMMLScript,
-  useDeleteMMLScripts,
-} from '@core/hooks/api/useMML';
-import { useUserStore } from '@core/store/userStore';
+import { useMMLScripts, useMMLScriptById, useUpdateMMLScript, useDeleteMMLScripts } from '@core/hooks/api/useMML';
+import ScriptImportModal from './ScriptImportModal';
+import ScriptExecutionDrawer from './ScriptExecutionDrawer';
+import ScriptImportPreview from './ScriptImportPreview';
 
 function formatTime(iso?: string | null): string {
   if (!iso) return '-';
-  const d = dayjs(iso);
-  return d.isValid() ? d.format('YYYY-MM-DD HH:mm:ss') : '-';
+  const value = dayjs(iso);
+  return value.isValid() ? value.format('YYYY-MM-DD HH:mm:ss') : '-';
 }
 
-// 新增/编辑脚本弹窗的表单结构 —— 字段与后端 createScript/updateScript
-// 实际接收的列对齐（script_name / description / content / tags）。
-interface ScriptForm {
-  scriptName: string;
-  description?: string;
-  tags?: string[];
-  content: string;
+function downloadScript(script: MMLScript) {
+  const url = URL.createObjectURL(new Blob([script.content || ''], { type: 'text/plain;charset=utf-8' }));
+  const anchor = document.createElement('a'); anchor.href = url; anchor.download = script.originalFilename || `${script.scriptName || 'mml-script'}.txt`; anchor.click(); URL.revokeObjectURL(url);
 }
 
-// 脚本任务（mml/script）：脚本库列表，读 mml_scripts。
-// 支持新增 / 编辑 / 删除脚本（POST、PUT、DELETE /mml/scripts）。
-// 任务执行记录（mml_tasks）由独立页面 mml/task-records 承载。
+interface BasicForm { scriptName: string; description: string; }
+
 export default function ScriptTask() {
   const t = useT();
-  const { token } = theme.useToken();
-  const username = useUserStore((s) => s.currentUser?.username) ?? '';
-
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [search, setSearch] = useState('');
-
-  const { data, isLoading, refetch } = useMMLScripts({
-    page,
-    pageSize,
-    search: search.trim() || undefined,
-  });
-  const createScriptMutation = useCreateMMLScript();
-  const updateScriptMutation = useUpdateMMLScript();
-  const deleteScriptsMutation = useDeleteMMLScripts();
-
-  const scripts = useMemo(() => data?.items ?? [], [data]);
-
+  const [importOpen, setImportOpen] = useState(false);
+  const [reimporting, setReimporting] = useState<MMLScript | null>(null);
   const [viewing, setViewing] = useState<MMLScript | null>(null);
-  const { data: viewingDetail, isFetching: isViewingDetailFetching } = useMMLScriptById(viewing?.id ?? '');
-  const detailScript = viewingDetail ?? viewing;
-
-  // 执行脚本：打开 ScriptTaskDrawer 预填该脚本内容，由用户选设备 + 执行方式
-  // （立即=手动执行 / 定时 / 周期=自动执行）后提交。提交即 POST /mml/tasks，
-  // 由后端 scheduler 调度，每次执行在 mml_tasks 落一条任务记录。
   const [execScript, setExecScript] = useState<MMLScript | null>(null);
-
-  // ---- 新增/编辑脚本弹窗 ----------------------------------------------------
   const [editing, setEditing] = useState<MMLScript | null>(null);
-  const [formVisible, setFormVisible] = useState(false);
-  const [form] = Form.useForm<ScriptForm>();
-  const contentValue = Form.useWatch('content', form) ?? '';
-  const [commandSelectOpen, setCommandSelectOpen] = useState(false);
-  const [selectedCommand, setSelectedCommand] = useState<CommandItem | null>(null);
-  const [commandParamValues, setCommandParamValues] = useState<Record<string, string>>({});
+  const [selectedScriptIds, setSelectedScriptIds] = useState<Key[]>([]);
+  const [basicForm] = Form.useForm<BasicForm>();
+  const { data, isLoading, refetch } = useMMLScripts({ page, pageSize, search: search.trim() || undefined });
+  const { data: detail, isFetching } = useMMLScriptById(viewing?.id ?? '');
+  const updateMutation = useUpdateMMLScript();
+  const deleteMutation = useDeleteMMLScripts();
+  const scripts = useMemo(() => data?.items ?? [], [data]);
+  const detailScript = detail ?? viewing;
 
-  const writableParams = useMemo(
-    () => selectedCommand ? writableScriptParams(selectedCommand) : [],
-    [selectedCommand]
-  );
+  const closeBasic = () => { setEditing(null); basicForm.resetFields(); };
+  const saveBasic = async () => {
+    if (!editing) return;
+    const values = await basicForm.validateFields();
+    updateMutation.mutate({ id: editing.id, data: { scriptName: values.scriptName.trim(), description: values.description ?? '' } }, { onSuccess: () => { void refetch(); closeBasic(); void message.success(t('common.saveSuccess')); } });
+  };
 
-  // 弹窗打开后再回填表单：Modal 子节点惰性挂载，openEdit 时 Form 实例可能尚未连接，
-  // 因此把回填放进 formVisible 的副作用里，确保 Form 已挂载。
-  useEffect(() => {
-    if (!formVisible) return;
-    if (editing) {
-      form.setFieldsValue({
-        scriptName: editing.scriptName,
-        description: editing.description,
-        tags: editing.tags,
-        content: editing.content,
-      });
-    } else {
-      form.resetFields();
-    }
-  }, [formVisible, editing, form]);
-
-  const openCreate = useCallback(() => {
-    setEditing(null);
-    setSelectedCommand(null);
-    setCommandParamValues({});
-    setFormVisible(true);
-  }, []);
-
-  const openEdit = useCallback((script: MMLScript) => {
-    setEditing(script);
-    setSelectedCommand(null);
-    setCommandParamValues({});
-    setFormVisible(true);
-  }, []);
-
-  const closeForm = useCallback(() => {
-    setFormVisible(false);
-    setEditing(null);
-    setSelectedCommand(null);
-    setCommandParamValues({});
-    form.resetFields();
-  }, [form]);
-
-  const handleCommandSelected = useCallback((command: CommandItem) => {
-    const defaults: Record<string, string> = {};
-    for (const param of writableScriptParams(command)) {
-      const key = scriptParamKey(param);
-      const defaultValue = param.defaultValue ?? (param.minValue !== undefined ? String(param.minValue) : '');
-      defaults[key] = defaultValue;
-    }
-    setSelectedCommand(command);
-    setCommandParamValues(defaults);
-    setCommandSelectOpen(false);
-  }, []);
-
-  const insertSelectedCommand = useCallback(() => {
-    if (!selectedCommand) return;
-    const line = buildScriptLine(selectedCommand, commandParamValues);
-    const current = String(contentValue || '');
-    const next = current.trim()
-      ? `${current.replace(/\s*$/, '')}\n${line}`
-      : line;
-    form.setFieldValue('content', next);
-    form.validateFields(['content']).catch(() => undefined);
-  }, [selectedCommand, commandParamValues, contentValue, form]);
-
-  const handleSave = useCallback(() => {
-    form
-      .validateFields()
-      .then((vals) => {
-        // BUG-13 修复：确保 onSuccess 中刷新列表 + 关闭弹窗
-        const onDone = () => {
-          void message.success(t('mml.scriptSaved'));
-          void refetch(); // 刷新列表
-          closeForm();
-        };
-        const onFail = (err: unknown) =>
-          void message.error(
-            t('mml.scriptSaveFailed', {
-              error: err instanceof Error ? err.message : 'Unknown',
-            })
-          );
-        if (editing) {
-          updateScriptMutation.mutate(
-            {
-              id: editing.id,
-              data: {
-                scriptName: vals.scriptName.trim(),
-                description: vals.description ?? '',
-                content: vals.content,
-                tags: vals.tags ?? [],
-              },
-            },
-            { onSuccess: onDone, onError: onFail }
-          );
-        } else {
-          createScriptMutation.mutate(
-            {
-              scriptName: vals.scriptName.trim(),
-              description: vals.description ?? '',
-              content: vals.content,
-              tags: vals.tags ?? [],
-              creator: username,
-              status: 'active',
-              type: 'manual',
-              progress: 0,
-            },
-            { onSuccess: onDone, onError: onFail }
-          );
-        }
-      })
-      .catch(() => undefined);
-  }, [form, editing, username, createScriptMutation, updateScriptMutation, closeForm, refetch, t]);
-
-  // 删除脚本：敏感操作，走 Modal.confirm 二次确认。
-  const handleDelete = useCallback((script: MMLScript) => {
+  const confirmBatchDelete = () => {
+    const ids = selectedScriptIds.map(String);
+    if (ids.length === 0) return;
     Modal.confirm({
       title: t('common.confirmDelete'),
+      content: t('mml.confirmBatchDeleteScripts', { count: ids.length }),
       okText: t('common.delete'),
-      okButtonProps: { danger: true },
       cancelText: t('common.cancel'),
-      onOk: () =>
-        new Promise<void>((resolve, reject) => {
-          deleteScriptsMutation.mutate([script.id], {
-            onSuccess: () => {
-              void message.success(t('common.deleteSuccess'));
-              resolve();
-            },
-            onError: (err) => {
-              void message.error(err instanceof Error ? err.message : 'Unknown');
-              reject(err);
-            },
-          });
-        }),
+      okButtonProps: { danger: true },
+      onOk: () => new Promise<void>((resolve, reject) => {
+        deleteMutation.mutate(ids, {
+          onSuccess: () => {
+            setSelectedScriptIds([]);
+            void refetch();
+            void message.success(t('common.deleteSuccess'));
+            resolve();
+          },
+          onError: (error) => {
+            void message.error(t('common.deleteFailed'));
+            reject(error);
+          },
+        });
+      }),
     });
-  }, [deleteScriptsMutation, t]);
+  };
 
-  const columns: DataTableColumn<MMLScript>[] = useMemo(() => [
+  const columns: DataTableColumn<MMLScript>[] = [
     {
       key: 'operation',
       title: t('table.operation'),
-      dataIndex: 'id',
-      width: 220,
-      fixed: 'right',
-      render: (_, record) => (
-        <Space size={4}>
-          <Button type="link" size="small" onClick={() => setViewing(record)}>{t('mml.info')}</Button>
-          <Button type="link" size="small" onClick={() => setExecScript(record)}>{t('common.execute')}</Button>
-          <Button type="link" size="small" onClick={() => openEdit(record)}>{t('common.edit')}</Button>
-          <Button type="link" size="small" danger onClick={() => handleDelete(record)}>{t('common.delete')}</Button>
-        </Space>
-      ),
+      width: 120,
+      render: (_, record) => {
+        const openEdit = () => {
+          setEditing(record);
+          basicForm.setFieldsValue({ scriptName: record.scriptName, description: record.description });
+        };
+        const confirmDelete = () => Modal.confirm({
+          title: t('common.confirmDelete'),
+          content: t('mml.confirmDeleteScript', { name: record.scriptName }),
+          okText: t('common.delete'),
+          cancelText: t('common.cancel'),
+          okButtonProps: { danger: true },
+          onOk: () => new Promise<void>((resolve, reject) => deleteMutation.mutate([record.id], {
+            onSuccess: () => {
+              setSelectedScriptIds((prev) => prev.filter((id) => id !== record.id));
+              void refetch();
+              resolve();
+            },
+            onError: reject,
+          })),
+        });
+        const items: MenuProps['items'] = [
+          { key: 'view', label: t('mml.script.action.viewDetail'), icon: <EyeOutlined />, onClick: () => setViewing(record) },
+          { key: 'reimport', label: t('mml.script.action.reimport'), icon: <UploadOutlined />, onClick: () => setReimporting(record) },
+          { key: 'download', label: t('mml.script.action.downloadTxt'), icon: <DownloadOutlined />, onClick: () => downloadScript(record) },
+          { key: 'edit', label: t('common.edit'), icon: <EditOutlined />, onClick: openEdit },
+          { type: 'divider' },
+          { key: 'delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true, onClick: confirmDelete },
+        ];
+        return <Space size={4}>
+          <Button type="link" size="small" aria-label={t('mml.script.action.execute')} icon={<PlayCircleOutlined />} onClick={(event) => { event.stopPropagation(); setExecScript(record); }}>{t('mml.script.action.execute')}</Button>
+          <Dropdown menu={{ items }} trigger={['click']}>
+            <Button type="text" size="small" aria-label={t('mml.script.action.more')} icon={<MoreOutlined />} onClick={(event) => event.stopPropagation()} />
+          </Dropdown>
+        </Space>;
+      },
     },
     { key: 'scriptName', title: t('mml.scriptName'), dataIndex: 'scriptName', ellipsis: true },
-    { key: 'description', title: t('mml.description'), dataIndex: 'description', ellipsis: true, render: (v: unknown) => (v as string) || '-' },
+    { key: 'description', title: t('mml.description'), dataIndex: 'description', ellipsis: true, render: (value) => String(value || '-') },
     { key: 'creator', title: t('mml.creator'), dataIndex: 'creator', width: 100 },
-    { key: 'tags', title: t('mml.tags'), dataIndex: 'tags', width: 180, render: (tags: unknown) => Array.isArray(tags) && tags.length ? (tags as string[]).map((tag) => <Tag key={tag}>{tag}</Tag>) : '-' },
-    { key: 'updatedAt', title: t('mml.updateTime'), dataIndex: 'updateTime', width: 160, render: (val: unknown) => formatTime(val as string) },
-  ], [t, openEdit, handleDelete]);
+    { key: 'updatedAt', title: t('mml.updateTime'), dataIndex: 'updateTime', width: 170, render: (value) => formatTime(value as string) },
+  ];
 
-  return (
-    <ListPageLayout
-      title={t('nav.mml.script')}
-      extra={
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          {t('mml.newScript')}
+  return <ListPageLayout title={t('nav.mml.script')} extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => setImportOpen(true)}>{t('mml.script.action.importTxt')}</Button>}>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+      <SearchInput placeholder={t('mml.scriptName')} allowClear style={{ width: 300 }} onSearch={(value) => { setSearch(value); setPage(1); }} />
+      <Space size={8} wrap>
+        {selectedScriptIds.length > 0 ? (
+          <Typography.Text type="secondary">
+            {t('table.selected', { count: selectedScriptIds.length })}
+          </Typography.Text>
+        ) : null}
+        <Button
+          danger
+          disabled={selectedScriptIds.length === 0}
+          icon={<DeleteOutlined />}
+          loading={deleteMutation.isPending}
+          onClick={confirmBatchDelete}
+        >
+          {t('common.batchDelete')}
         </Button>
-      }
-    >
-      <div style={{ marginBottom: 16 }}>
-        <SearchInput
-          placeholder={t('mml.scriptName')}
-          allowClear
-          style={{ width: 300 }}
-          onSearch={(val) => { setSearch(val); setPage(1); }}
-        />
-      </div>
-      <DataTable<MMLScript>
-        tableId="mml-scripts"
-        columns={columns}
-        dataSource={scripts}
-        loading={isLoading}
-        rowKey="id"
-        total={data?.total ?? 0}
-        currentPage={page}
-        pageSize={pageSize}
-        onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-        onRefresh={() => void refetch()}
-        scroll={{ x: 900 }}
-      />
-
-      {/* 新增 / 编辑脚本弹窗 */}
-      {/* BUG-04 修复：mutation pending 时禁止 ESC/点击遮罩关闭，防止用户误以为取消但数据已提交 */}
-      <Modal
-        title={editing ? t('mml.editScript') : t('mml.newScript')}
-        open={formVisible}
-        onOk={handleSave}
-        onCancel={closeForm}
-        okText={t('common.save')}
-        cancelText={t('common.cancel')}
-        width={680}
-        confirmLoading={createScriptMutation.isPending || updateScriptMutation.isPending}
-        mask={{ closable: !createScriptMutation.isPending && !updateScriptMutation.isPending }}
-        closable={!createScriptMutation.isPending && !updateScriptMutation.isPending}
-      >
-        <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item
-            label={t('mml.scriptName')}
-            name="scriptName"
-            rules={[{ required: true, message: t('mml.inputScriptName') }]}
-          >
-            <Input maxLength={128} showCount placeholder={t('mml.inputScriptName')} />
-          </Form.Item>
-          <Form.Item label={t('mml.description')} name="description">
-            <Input maxLength={256} placeholder={t('mml.description')} />
-          </Form.Item>
-          <Form.Item label={t('mml.tags')} name="tags">
-            <Select mode="tags" tokenSeparators={[',']} placeholder={t('mml.tags')} open={false} />
-          </Form.Item>
-          <Form.Item label={t('mml.scriptCommandBuilder')}>
-            <Space direction="vertical" size={12} style={{ width: '100%' }}>
-              <Space wrap>
-                <Button icon={<PlusOutlined />} onClick={() => setCommandSelectOpen(true)}>
-                  {t('mml.selectInsertCommand')}
-                </Button>
-                <Button
-                  type="primary"
-                  ghost
-                  disabled={!selectedCommand}
-                  onClick={insertSelectedCommand}
-                >
-                  {t('mml.insertCommand')}
-                </Button>
-                {selectedCommand && (
-                  <>
-                    <Tag color="blue">{selectedCommand.operationType}</Tag>
-                    <Typography.Text code>{selectedCommand.commandCode}</Typography.Text>
-                  </>
-                )}
-              </Space>
-
-              {selectedCommand && (
-                <div
-                  style={{
-                    border: `1px solid ${token.colorBorderSecondary}`,
-                    borderRadius: 4,
-                    padding: 12,
-                    background: token.colorFillQuaternary,
-                  }}
-                >
-                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                    <div>
-                      <Typography.Text strong>{selectedCommand.commandName}</Typography.Text>
-                      <Typography.Text type="secondary" style={{ marginLeft: 8 }}>
-                        {selectedCommand.groupName}
-                      </Typography.Text>
-                    </div>
-                    <Typography.Text type="secondary">
-                      {t('mml.commandParamPathCount', { count: selectedCommand.paramPaths.length })}
-                    </Typography.Text>
-
-                    {writableParams.length > 0 ? (
-                      <div style={{ maxHeight: 220, overflow: 'auto' }}>
-                        {writableParams.map((param) => {
-                          const key = scriptParamKey(param);
-                          return (
-                            <div key={`${key}:${param.path}`} style={{ marginBottom: 8 }}>
-                              <Input
-                                addonBefore={
-                                  <span style={{ display: 'inline-block', minWidth: 110 }}>
-                                    {key}
-                                  </span>
-                                }
-                                value={commandParamValues[key] ?? ''}
-                                placeholder={param.defaultValue || param.description || param.label}
-                                onChange={(e) =>
-                                  setCommandParamValues((prev) => ({
-                                    ...prev,
-                                    [key]: e.target.value,
-                                  }))
-                                }
-                              />
-                              <Typography.Text
-                                type="secondary"
-                                style={{ display: 'block', marginTop: 2, fontSize: 12 }}
-                              >
-                                {param.label} · {param.path}
-                              </Typography.Text>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <Typography.Text type="secondary">
-                        {t('mml.noWritableCommandParams')}
-                      </Typography.Text>
-                    )}
-                  </Space>
-                </div>
-              )}
-            </Space>
-          </Form.Item>
-          <Form.Item
-            label={t('mml.scriptContent')}
-            name="content"
-            rules={[{ required: true, message: t('mml.scriptContent') }]}
-          >
-            <Input.TextArea
-              rows={10}
-              placeholder={'LST CELL;\nACT CELL:CELLID=0;'}
-              style={{ fontFamily: "'SFMono-Regular', Consolas, Menlo, monospace", fontSize: 12 }}
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      <Drawer
-        title={detailScript?.scriptName || t('mml.scriptDetail')}
-        open={Boolean(viewing)}
-        onClose={() => setViewing(null)}
-        width={720}
-        destroyOnHidden
-      >
-        {detailScript && (
-          <Spin spinning={isViewingDetailFetching}>
-            <Space direction="vertical" size={16} style={{ width: '100%' }}>
-              <Descriptions column={2} size="small" bordered>
-                <Descriptions.Item label={t('mml.scriptName')} span={2}>
-                  {detailScript.scriptName}
-                </Descriptions.Item>
-                <Descriptions.Item label={t('mml.description')} span={2}>
-                  {detailScript.description || '-'}
-                </Descriptions.Item>
-                <Descriptions.Item label={t('mml.creator')}>
-                  {detailScript.creator || '-'}
-                </Descriptions.Item>
-                <Descriptions.Item label={t('mml.updateTime')}>
-                  {formatTime(detailScript.updateTime)}
-                </Descriptions.Item>
-                <Descriptions.Item label={t('mml.createTime')}>
-                  {formatTime(detailScript.createTime)}
-                </Descriptions.Item>
-                <Descriptions.Item label={t('mml.tags')}>
-                  {detailScript.tags?.length
-                    ? detailScript.tags.map((tag) => <Tag key={tag}>{tag}</Tag>)
-                    : '-'}
-                </Descriptions.Item>
-              </Descriptions>
-
-              <div>
-                <Typography.Text strong>{t('mml.scriptContent')}</Typography.Text>
-                {detailScript.content?.trim() ? (
-                  <pre
-                    style={{
-                      marginTop: 8,
-                      background: token.colorFillQuaternary,
-                      border: `1px solid ${token.colorBorderSecondary}`,
-                      color: token.colorText,
-                      padding: 12,
-                      borderRadius: 4,
-                      maxHeight: '55vh',
-                      overflow: 'auto',
-                      fontSize: 13,
-                      lineHeight: 1.7,
-                      whiteSpace: 'pre-wrap',
-                      fontFamily: "'SFMono-Regular', Consolas, Menlo, monospace",
-                    }}
-                  >
-                    {detailScript.content}
-                  </pre>
-                ) : (
-                  <Empty
-                    image={Empty.PRESENTED_IMAGE_SIMPLE}
-                    description={t('mml.emptyScriptContent')}
-                    style={{ marginTop: 16 }}
-                  />
-                )}
-              </div>
-            </Space>
-          </Spin>
-        )}
-      </Drawer>
-
-      {/* 执行脚本：预填脚本内容，用户补设备 + 执行方式后提交生成任务记录 */}
-      <ScriptTaskDrawer
-        open={Boolean(execScript)}
-        onClose={() => setExecScript(null)}
-        prefillContent={execScript?.content ?? ''}
-        prefillTaskName={
-          execScript
-            ? `${execScript.scriptName}_${dayjs().format('YYYYMMDD_HHmmss')}`
-            : undefined
-        }
-        scriptId={execScript?.id ?? undefined}
-        onSuccess={() => void refetch()}
-      />
-      <CommandSelectModal
-        open={commandSelectOpen}
-        value={selectedCommand}
-        onCancel={() => setCommandSelectOpen(false)}
-        onConfirm={handleCommandSelected}
-        onGotoRawParams={() => {
-          setCommandSelectOpen(false);
-          void message.info(t('mml.rawParamScriptTip'));
-        }}
-      />
-    </ListPageLayout>
-  );
-}
-
-function writableScriptParams(command: CommandItem): CommandParamPath[] {
-  if (command.operationType !== 'MOD' && command.operationType !== 'ADD') return [];
-  return command.paramPaths.filter((param) => param.writable && scriptParamKey(param));
-}
-
-function scriptParamKey(param: CommandParamPath): string {
-  return (param.mmlCode || param.label || '').trim();
-}
-
-function buildScriptLine(command: CommandItem, values: Record<string, string>): string {
-  const params = writableScriptParams(command)
-    .map((param) => {
-      const key = scriptParamKey(param);
-      const value = values[key]?.trim();
-      return key && value ? `${key}=${value}` : '';
-    })
-    .filter(Boolean);
-  return `${command.commandCode}${params.length ? `:${params.join(',')}` : ''};`;
+        <Button icon={<ReloadOutlined />} onClick={() => void refetch()}>
+          {t('common.refresh')}
+        </Button>
+      </Space>
+    </div>
+    <DataTable<MMLScript>
+      tableId="mml-scripts"
+      columns={columns}
+      dataSource={scripts}
+      loading={isLoading}
+      rowKey="id"
+      selectable
+      selectedRowKeys={selectedScriptIds}
+      onSelectionChange={(keys) => setSelectedScriptIds(keys)}
+      preserveSelectedRowKeys
+      total={data?.total ?? 0}
+      currentPage={page}
+      pageSize={pageSize}
+      onPageChange={(nextPage, nextSize) => { setPage(nextPage); setPageSize(nextSize); }}
+      hideToolbar
+      scroll={{ x: 1200 }}
+    />
+    <ScriptImportModal open={importOpen || Boolean(reimporting)} script={reimporting} onClose={() => { setImportOpen(false); setReimporting(null); }} onSaved={() => { setImportOpen(false); setReimporting(null); void refetch(); }} />
+    <Drawer title={detailScript?.scriptName || t('mml.scriptDetail')} open={Boolean(viewing)} onClose={() => setViewing(null)} width={820} destroyOnHidden>
+      {detailScript ? <Spin spinning={isFetching}><Space direction="vertical" size={16} style={{ width: '100%' }}>
+        <Descriptions bordered size="small" column={2}><Descriptions.Item label={t('mml.scriptName')} span={2}>{detailScript.scriptName}</Descriptions.Item><Descriptions.Item label={t('mml.description')} span={2}>{detailScript.description || '-'}</Descriptions.Item><Descriptions.Item label={t('mml.creator')}>{detailScript.creator || '-'}</Descriptions.Item><Descriptions.Item label={t('mml.updateTime')}>{formatTime(detailScript.updateTime)}</Descriptions.Item><Descriptions.Item label={t('mml.script.originalFile')}>{detailScript.originalFilename || '-'}</Descriptions.Item><Descriptions.Item label={t('mml.script.validationVersion')}>{detailScript.validationVersion || '-'}</Descriptions.Item></Descriptions>
+        <Typography.Text strong>{t('mml.script.readOnlyTxtContent')}</Typography.Text>
+        {detailScript.content ? <pre style={{ whiteSpace: 'pre-wrap', maxHeight: 280, overflow: 'auto' }}>{detailScript.content}</pre> : <Empty description={t('mml.script.noContent')} />}
+        {detailScript.validationSummary ? <ScriptImportPreview validation={{ planItems: detailScript.planItems ?? [], issues: detailScript.validationIssues ?? [], summary: detailScript.validationSummary, originalFilename: detailScript.originalFilename }} /> : null}
+      </Space></Spin> : null}
+    </Drawer>
+    <ScriptExecutionDrawer open={Boolean(execScript)} script={execScript} onClose={() => setExecScript(null)} onSuccess={() => void refetch()} />
+    <Modal title={t('mml.script.editBasicInfo')} open={Boolean(editing)} onCancel={closeBasic} onOk={() => void saveBasic()} confirmLoading={updateMutation.isPending} okText={t('common.save')} cancelText={t('common.cancel')}>
+      <Form form={basicForm} layout="vertical"><Form.Item label={t('mml.scriptName')} name="scriptName" rules={[{ required: true, message: t('mml.inputScriptName') }]}><Input /></Form.Item><Form.Item label={t('mml.description')} name="description"><Input /></Form.Item></Form>
+    </Modal>
+  </ListPageLayout>;
 }

@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/admin"
+	"github.com/omcgo/omcgo/internal/agentruntime"
 	"github.com/omcgo/omcgo/internal/alarm"
 	"github.com/omcgo/omcgo/internal/authz"
 	"github.com/omcgo/omcgo/internal/bundle"
@@ -342,6 +343,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// 详见 docs/prd/system/ui-customization.md §6
 	ad.sysConfigHandler.RegisterPublicRoutes(publicV1)
 	ad.uiAssetHandler.RegisterPublicRoutes(publicV1)
+	ad.agentConfigHandler.RegisterPublicRoutes(publicV1)
 
 	// Protected API v1 routes (JWT or API Key authentication required)
 	v1 := r.Group("/api/v1")
@@ -358,6 +360,18 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	v1.GET("/auth/menus", ad.adminHandler.GetUserMenusByRole)
 	// Authenticated user routes (any authenticated user)
 	ad.adminHandler.RegisterAuthenticatedRoutes(v1)
+
+	agentRuntimeHandler := agentruntime.NewHandler(
+		ad.agentConfigHandler.Service(),
+		c.JWTService,
+		http.DefaultClient,
+		c.Logger,
+		r,
+		r,
+		agentruntime.NewConversationService(admin.NewPgSysConfigRepository(c.PgPool)),
+	)
+	ad.agentConfigHandler.RegisterRuntimeRoutes(v1)
+	agentRuntimeHandler.RegisterRoutes(v1)
 
 	// Helper: authenticated sub-group.
 	//
@@ -479,7 +493,8 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- T-0098 P3-04: Alarm Definitions routes → super_admin only -----
 	if c.AlarmDefHandler != nil {
-		c.AlarmDefHandler.RegisterRoutes(superAdminGroup)
+		c.AlarmDefHandler.RegisterReadRoutes(v1)
+		c.AlarmDefHandler.RegisterWriteRoutes(superAdminGroup)
 	}
 	// 告警自定义 XML 上传/删除(严格对标 indicator FileHandler)
 	if c.AlarmDefFileHandler != nil {
@@ -488,16 +503,20 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- T-0098 P3-02: ParamModel routes → super_admin only -----
 	if c.ParamModelHandler != nil {
-		c.ParamModelHandler.RegisterRoutes(superAdminGroup)
+		c.ParamModelHandler.RegisterReadRoutes(v1)
+		c.ParamModelHandler.RegisterWriteRoutes(superAdminGroup)
 	}
 
 	// ----- T-0098 P3-01: Product routes → super_admin only -----
 	if c.ProductHandler != nil {
-		c.ProductHandler.RegisterRoutes(superAdminGroup)
+		c.ProductHandler.RegisterReadRoutes(v1)
+		c.ProductHandler.RegisterWriteRoutes(superAdminGroup)
 	}
 
 	// ----- Sprint B Q-V3-7：dictload admin reload 端点（含 mml-standard）-----
 	registerDictLoadAdminRoutes(c, superAdminGroup)
+	// #41：KPI 路由人工恢复入口，与 indicator reload 复用同一失效器。
+	registerKPIRouteAdminRoutes(c.KPIRouteInvalidator, c.Logger.Named("kpi-route-admin"), superAdminGroup)
 
 	// ----- Alarm filter rule routes → resource "alarms" -----
 	alarmFilterHandler := alarm.NewFilterHandler(ah.alarmFilterRuleRepo, c.Logger)
@@ -513,7 +532,8 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- T-0098 P3-03: Indicator REST routes → super_admin only -----
 	if ph.indicatorRESTHandler != nil {
-		ph.indicatorRESTHandler.RegisterRoutes(superAdminGroup)
+		ph.indicatorRESTHandler.RegisterReadRoutes(v1)
+		ph.indicatorRESTHandler.RegisterWriteRoutes(superAdminGroup)
 	}
 
 	// ----- T-0180 P1.3: Indicator XML file management (DELETE 守门) → super_admin only -----
@@ -692,6 +712,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- System config management routes (require admin permission) -----
 	ad.sysConfigHandler.RegisterRoutes(adminGroup)
+	ad.agentConfigHandler.RegisterAdminRoutes(adminGroup)
 
 	// ----- UI 定制化：上传 Logo / 登录背景图（require admin permission）-----
 	ad.uiAssetHandler.RegisterRoutes(adminGroup)

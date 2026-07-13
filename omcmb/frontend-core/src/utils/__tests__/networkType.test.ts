@@ -27,6 +27,17 @@ describe('resolveNetworkTypeLabel', () => {
     expect(resolveNetworkTypeLabel('nr', DICT)).toBe('gNB (NR)');
   });
 
+  it('英文 locale 优先使用 labelI18n，缺失时回退 label', () => {
+    const dict: NetworkTypeDictDetail[] = [
+      { label: 'eNB (LTE)', labelI18n: { 'en-US': 'eNB (LTE)', 'zh-CN': 'eNB（LTE）' }, value: 'lte' },
+      { label: 'gNB (NR)', value: 'nr' },
+    ];
+
+    expect(resolveNetworkTypeLabel('eNB', dict, 'zh-CN')).toBe('eNB（LTE）');
+    expect(resolveNetworkTypeLabel('eNB', dict, 'en-US')).toBe('eNB (LTE)');
+    expect(resolveNetworkTypeLabel('gNB', dict, 'en-US')).toBe('gNB (NR)');
+  });
+
   it('空字段返回占位符 -', () => {
     expect(resolveNetworkTypeLabel('', DICT)).toBe('-');
     expect(resolveNetworkTypeLabel(undefined, DICT)).toBe('-');

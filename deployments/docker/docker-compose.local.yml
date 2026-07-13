@@ -1,0 +1,13 @@
+# 本地/兼容覆盖：让 web 使用 host network，并通过宿主映射端口访问 app/acs。
+#
+# 默认 docker-compose.yml 使用 Docker bridge 网络和 ports 暴露，对本机和常规
+# Compose 部署更稳。本文件只在明确需要 web 直接绑定宿主网络时叠加：
+#   docker compose -f deployments/docker/docker-compose.yml -f deployments/docker/docker-compose.local.yml up -d --build web
+
+services:
+  web:
+    network_mode: host
+    ports: !reset []
+    build:
+      args:
+        NGINX_DEFAULT_CONF: deployments/docker/default.local.conf

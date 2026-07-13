@@ -14,6 +14,7 @@
 
 export { http } from '../http';
 export { authApi } from './authApi';
+export { agentApi } from './agentApi';
 export { deviceApi } from './deviceApi';
 export { alarmApi } from './alarmApi';
 export { templateApi } from './templateApi';

@@ -2,8 +2,11 @@ package aggregator
 
 import (
 	"context"
+	dbsql "database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -215,6 +218,22 @@ func Test_buildCountersSQL_DailyFromHourly(t *testing.T) {
 	// granularity 参数
 	assert.Equal(t, "daily", args[0])
 	assert.Equal(t, "", args[5])
+}
+
+func Test_buildCountersSQL_PreservesNullAggregationSemantics(t *testing.T) {
+	w := WindowSpec{
+		Granularity: metrics.GranularityHourly,
+		Start:       time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+		End:         time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+	}
+	sql, _ := buildCountersSQL("pm_metrics", "pm_metrics_hourly", w)
+
+	assert.Contains(t, sql, "WHEN 'sum' THEN SUM(m.metric_value)")
+	assert.Contains(t, sql, "WHEN 'avg' THEN AVG(m.metric_value)")
+	assert.Contains(t, sql, "WHEN 'max' THEN MAX(m.metric_value)")
+	assert.Contains(t, sql, "WHEN 'min' THEN MIN(m.metric_value)")
+	assert.NotContains(t, sql, "COALESCE(m.metric_value", "缺值不能在聚合前被当作 0")
+	assert.NotContains(t, sql, "m.metric_value IS NOT NULL", "全 NULL 窗口仍应产出 NULL 聚合行")
 }
 
 func Test_buildCountersSQL_AcceptsNumberProcessArgument(t *testing.T) {
@@ -512,8 +531,16 @@ func scanInto(row []any, dest []any) error {
 			*dp = row[i].(string)
 		case *float64:
 			*dp = row[i].(float64)
+		case *dbsql.NullFloat64:
+			if row[i] == nil {
+				*dp = dbsql.NullFloat64{}
+			} else {
+				*dp = dbsql.NullFloat64{Float64: row[i].(float64), Valid: true}
+			}
 		case *jsonx.Float:
-			*dp = jsonx.Float(row[i].(float64))
+			if err := dp.Scan(row[i]); err != nil {
+				return err
+			}
 		case *time.Time:
 			*dp = row[i].(time.Time)
 		case **string:
@@ -547,6 +574,36 @@ func scanInto(row []any, dest []any) error {
 		}
 	}
 	return nil
+}
+
+func Test_queryDeviceTable_NullMetricValueKeepsRowAndSerializesNull(t *testing.T) {
+	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	db := &recordingDB{
+		results: []pgx.Rows{
+			&fakeRows{rows: [][]any{
+				{
+					"48BF74", "SN-899", "C000010002", "counter", nil,
+					"sum", "15min", now, now, now.Add(15 * time.Minute), now, "Cellid=1", nil,
+				},
+			}},
+		},
+	}
+	a := New(db, nil, nil)
+
+	rows, err := a.queryDeviceTable(context.Background(), "pm_metrics", QueryRequest{
+		Dimension:   DimensionDevice,
+		Granularity: metrics.Granularity15Min,
+		DeviceSNs:   []string{"SN-899"},
+		MetricPaths: []string{"C000010002"},
+		Limit:       10,
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "metric_value=NULL 的 DB 行仍应作为缺值指标返回")
+	assert.True(t, math.IsNaN(float64(rows[0].MetricValue)), "SQL NULL 应映射为 NaN 供 JSON 层输出 null")
+
+	body, err := json.Marshal(rows[0])
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `"metric_value":null`)
 }
 
 func Test_AggregateKPIs_EvaluatesFormulaAndInserts(t *testing.T) {
@@ -706,7 +763,7 @@ func Test_AggregateKPIs_NormalizesBeforeInsert(t *testing.T) {
 	_, err := a.AggregateKPIs(context.Background(), "pm_metrics_hourly", w)
 	require.NoError(t, err)
 	require.Len(t, db.execArgs, 9)
-	assert.Equal(t, float64(3), db.execArgs[3], "number KPI 应按默认 intHalfUp 规范化后写入")
+	assert.Equal(t, float64(2.5), db.execArgs[3], "avg KPI 即使 unit=number 也必须保留平均值小数")
 }
 
 // ---------------------------------------------------------------------------
@@ -1537,6 +1594,41 @@ func Test_loadCountersByObjectLdn_DoesNotLeakToAdjacentBuckets(t *testing.T) {
 	assert.NotContains(t, byLdn, "PREV_ONLY", "不应串到前一桶")
 	assert.NotContains(t, byLdn, "NEXT_ONLY", "不应串到后一桶")
 	assert.Len(t, byLdn, 2, "目标桶恰两个实体计数器，无相邻桶混入")
+}
+
+func Test_loadCountersByObjectLdn_SkipsNullMetricValues(t *testing.T) {
+	bucket := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
+	db := &recordingDB{results: []pgx.Rows{&fakeRows{rows: [][]any{
+		{"Cellid=1", "C-null", nil},
+		{"Cellid=1", "C-real", 42.0},
+	}}}}
+	a := New(db, nil, nil)
+
+	byLdn, err := a.loadCountersByObjectLdn(context.Background(), "pm_metrics_hourly", "A", "S1",
+		WindowSpec{Granularity: metrics.GranularityHourly, Start: bucket, End: bucket.Add(time.Hour)})
+
+	require.NoError(t, err)
+	require.Contains(t, byLdn, "Cellid=1")
+	assert.NotContains(t, byLdn["Cellid=1"], "C-null", "NULL counter 应按缺依赖处理，不进入 KPI 入参")
+	assert.Equal(t, 42.0, byLdn["Cellid=1"]["C-real"])
+}
+
+func Test_loadCountersForDevices_SkipsNullMetricValues(t *testing.T) {
+	bucket := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
+	db := &recordingDB{results: []pgx.Rows{&fakeRows{rows: [][]any{
+		{"A", "S1", "Cellid=1", "C-null", nil},
+		{"A", "S1", "Cellid=1", "C-real", 7.0},
+	}}}}
+	a := New(db, nil, nil)
+
+	byDevice, err := a.loadCountersForDevices(context.Background(), "pm_metrics_hourly", []deviceKey{{"A", "S1"}},
+		WindowSpec{Granularity: metrics.GranularityHourly, Start: bucket, End: bucket.Add(time.Hour)})
+
+	require.NoError(t, err)
+	byLdn := byDevice[deviceKey{"A", "S1"}]
+	require.Contains(t, byLdn, "Cellid=1")
+	assert.NotContains(t, byLdn["Cellid=1"], "C-null", "NULL counter 应按缺依赖处理，不进入 KPI 入参")
+	assert.Equal(t, 7.0, byLdn["Cellid=1"]["C-real"])
 }
 
 // ===========================================================================

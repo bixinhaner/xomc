@@ -29,8 +29,8 @@ import (
 // 缓存（L1 sync.Map + L2 Redis），翻译路径与 mml/fanout.go Stage 1 下行链路
 // 对称：
 //
-//   下行 (Stage 1) standardPath → privatePath (in mml/fanout.go)
-//   上行 (Stage 2) privatePath → standardPath (本文件)
+//	下行 (Stage 1) standardPath → privatePath (in mml/fanout.go)
+//	上行 (Stage 2) privatePath → standardPath (本文件)
 //
 // 翻译失败的 path（设备未注册 / mapping 未覆盖）退化为按原 privatePath 写入，
 // 与 Path B 同步 (provision/sync_pathb.go) 的 fallback 行为对齐；后续可通过
@@ -143,12 +143,15 @@ func (s *RPCResponseSubscriber) Start() error {
 // "sync-gpv-",对应 provision/sync.go StartSync / enqueueGPVPrefixes 入队点)。
 // 命中即回写 devices.last_param_sync_failed_at + error。
 func (s *RPCResponseSubscriber) handleSyncTaskFailed(ctx context.Context, evt event.Event) error {
-	if s.deviceWriter == nil {
-		return nil
-	}
 	var t task.Task
 	if err := evt.DecodePayload(&t); err != nil {
 		s.logger.Warn("task.failed: decode payload", zap.Error(err))
+		return nil
+	}
+	if t.Method == "DeleteObject" && isDeleteObjectAlreadyGone(t.ErrorMessage) {
+		return s.handleDeleteObjectAlreadyGone(ctx, &t)
+	}
+	if s.deviceWriter == nil {
 		return nil
 	}
 	if t.Method != "GetParameterValues" || !strings.HasPrefix(t.CommandKey, "sync-gpv-") {
@@ -177,6 +180,51 @@ func (s *RPCResponseSubscriber) handleSyncTaskFailed(ctx context.Context, evt ev
 		zap.String("task_id", t.ID),
 		zap.String("command_key", t.CommandKey),
 		zap.String("error", errMsg))
+	return nil
+}
+
+func isDeleteObjectAlreadyGone(errMsg string) bool {
+	normalized := strings.ToLower(errMsg)
+	return strings.Contains(normalized, "object instance not found") ||
+		strings.Contains(normalized, "instance not found")
+}
+
+func (s *RPCResponseSubscriber) handleDeleteObjectAlreadyGone(ctx context.Context, t *task.Task) error {
+	if t == nil || s.paramRepo == nil {
+		return nil
+	}
+	var params struct {
+		ObjectName string `json:"object_name"`
+	}
+	if err := json.Unmarshal(t.Params, &params); err != nil || params.ObjectName == "" {
+		s.logger.Warn("delete_object.failed_not_found: parse object_name failed",
+			zap.String("device_sn", t.DeviceSN),
+			zap.String("task_id", t.ID),
+			zap.Error(err))
+		return nil
+	}
+	device, err := s.deviceLookup.GetBySerialNumber(ctx, t.DeviceSN)
+	if err != nil || device == nil {
+		s.logger.Warn("delete_object.failed_not_found: device lookup failed",
+			zap.String("device_sn", t.DeviceSN),
+			zap.String("task_id", t.ID),
+			zap.Error(err))
+		return nil
+	}
+	deleted, err := s.paramRepo.DeleteByPathPrefix(ctx, device.ID, params.ObjectName)
+	if err != nil {
+		s.logger.Error("delete_object.failed_not_found: clean stale device_parameters failed",
+			zap.String("device_sn", t.DeviceSN),
+			zap.String("task_id", t.ID),
+			zap.String("object_name", params.ObjectName),
+			zap.Error(err))
+		return err
+	}
+	s.logger.Info("delete_object.failed_not_found: stale device_parameters cleaned",
+		zap.String("device_sn", t.DeviceSN),
+		zap.String("task_id", t.ID),
+		zap.String("object_name", params.ObjectName),
+		zap.Int64("deleted_rows", deleted))
 	return nil
 }
 
@@ -322,9 +370,10 @@ func (s *RPCResponseSubscriber) resolveTranslator(ctx context.Context, device *m
 	}
 	matchRes, err := s.productMatcher.MatchProductClass(ctx, device.ProductClass)
 	if err != nil || matchRes == nil || matchRes.Product == nil || matchRes.Product.ParamModelID == nil {
-		// 用户决策 2026-05-18：找不到设备对应 product/param_model 是异常态
-		// （命令树不做兼容性过滤）。上行 GPV 持久化路径同样升级到 Error 级。
-		s.logger.Error("uplink path translation fallback: product/param_model unresolved",
+		// Orphan product/model is a controlled fallback: persist the original
+		// privatePath so the RPC result is not lost, while keeping the condition
+		// visible for product-model catalog cleanup.
+		s.logger.Warn("uplink path translation fallback: product/param_model unresolved",
 			zap.String("device_sn", device.SerialNumber),
 			zap.String("product_class", device.ProductClass),
 			zap.Error(err),

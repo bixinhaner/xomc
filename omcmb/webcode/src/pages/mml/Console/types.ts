@@ -100,6 +100,10 @@ export interface PathTask {
 
 /** 结果表格的一行（= 一台设备） */
 export interface ResultRow {
+  planLineNo?: number;
+  planOrder?: number;
+  planRawLine?: string;
+  commandCode?: string;
   deviceSn: string;
   /** 设备任务 ID（= device_tasks.id；逐 PATH 时为该设备父任务 ID） */
   deviceTaskId: string;

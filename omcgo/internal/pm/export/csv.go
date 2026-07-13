@@ -3,10 +3,13 @@ package export
 import (
 	"encoding/csv"
 	"io"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	appcontext "github.com/omcgo/omcgo/internal/core/context"
 )
 
 // utf8BOM 是 UTF-8 字节顺序标记，写在 CSV 首部让 Excel 双击直接按 UTF-8 解析、中文不乱码。
@@ -23,7 +26,7 @@ const missingMetricValuePlaceholder = "-"
 type ExportRow struct {
 	Device      string // 设备：device 维度为 SN（与页面一致），聚合维度为对象标识（设备组名 / 产品名 / 全网 等）
 	Technology  string // 制式：仅 device_group 维度从 object_ldn 解析出（LTE/NR/GSM，大写），其余维度空串
-	CellPLMN    string // 小区/PLMN：object_ldn 原文（输出时拆成 Cell ID / PLMN 两列；空 → 空串）
+	CellPLMN    string // 测量对象：object_ldn 原文（dashboard/adhoc 可拆成 Cell ID / PLMN；kpi_query 原样输出）
 	MetricCode  string // 指标编号：metric_path（K/C 编号）
 	MetricName  string // 指标名：DisplayName（横表里不进单元格，列名解析另走列发现）
 	MetricType  string // 类型：counter / kpi
@@ -73,8 +76,10 @@ type WideCSVWriter struct {
 	firstHeader                   string         // 首列表头（随 adhoc 维度变：设备 / 设备组 / 产品 / 频段 / 全网 / 聚合组）
 	includeTech                   bool           // 是否含「制式」列（仅 device_group 维度为 true）
 	includeCell                   bool           // 是否含「小区/PLMN」列（仅 device 维度为 true）
+	includeMeasurementObject      bool           // 是否把 object_ldn 原样输出为「测量对象」列（指标查询页导出）
 	fixedCount                    int            // 固定行键列数（含/不含制式列与小区列各态），用于行容量预分配
 	missingMetricValuePlaceholder string         // 指标缺失时的单元格占位符；空串表示沿用 CSV 空单元格。
+	outputLocation                *time.Location // CSV 时间列输出时区；nil 入口统一回退 UTC。
 
 	// 当前时间桶状态。
 	active              bool
@@ -93,16 +98,39 @@ func NewWideCSVWriter(out io.Writer, firstColHeader string, includeTech, include
 }
 
 func newWideCSVWriter(out io.Writer, firstColHeader string, includeTech, includeCell bool, cols []WideColumn, missingPlaceholder string) (*WideCSVWriter, error) {
+	return newWideCSVWriterWithLocation(out, firstColHeader, includeTech, includeCell, cols, missingPlaceholder, nil)
+}
+
+func newWideCSVWriterWithLocation(out io.Writer, firstColHeader string, includeTech, includeCell bool, cols []WideColumn, missingPlaceholder string, outputLocation *time.Location) (*WideCSVWriter, error) {
+	return newWideCSVWriterWithLayout(out, firstColHeader, includeTech, includeCell, false, cols, missingPlaceholder, outputLocation)
+}
+
+func newWideCSVWriterWithMeasurementObject(out io.Writer, firstColHeader string, includeTech, includeMeasurementObject bool, cols []WideColumn, missingPlaceholder string, outputLocation *time.Location) (*WideCSVWriter, error) {
+	return newWideCSVWriterWithLayout(out, firstColHeader, includeTech, false, includeMeasurementObject, cols, missingPlaceholder, outputLocation)
+}
+
+func newWideCSVWriterWithLayout(out io.Writer, firstColHeader string, includeTech, includeCell, includeMeasurementObject bool, cols []WideColumn, missingPlaceholder string, outputLocation *time.Location) (*WideCSVWriter, error) {
+	return newWideCSVWriterWithLocale(out, firstColHeader, includeTech, includeCell, includeMeasurementObject, cols, missingPlaceholder, outputLocation, appcontext.LocaleZH)
+}
+
+func newWideCSVWriterWithLocale(out io.Writer, firstColHeader string, includeTech, includeCell, includeMeasurementObject bool, cols []WideColumn, missingPlaceholder string, outputLocation *time.Location, loc appcontext.Locale) (*WideCSVWriter, error) {
 	if _, err := out.Write(utf8BOM); err != nil {
 		return nil, err
 	}
+	if outputLocation == nil {
+		outputLocation = time.UTC
+	}
 	cw := csv.NewWriter(out)
-	fixed := []string{"开始时间", "结束时间", firstColHeader}
+	headers := localizedCSVHeaders(loc)
+	fixed := []string{headers.startTime, headers.endTime, firstColHeader}
 	if includeTech {
-		fixed = append(fixed, "制式")
+		fixed = append(fixed, headers.technology)
 	}
 	if includeCell {
 		fixed = append(fixed, "Cell ID", "PLMN")
+	}
+	if includeMeasurementObject {
+		fixed = append(fixed, headers.measurementObject)
 	}
 	header := make([]string, 0, len(fixed)+len(cols))
 	header = append(header, fixed...)
@@ -116,10 +144,35 @@ func newWideCSVWriter(out io.Writer, firstColHeader string, includeTech, include
 	}
 	writer := &WideCSVWriter{
 		w: cw, cols: cols, colIdx: idx,
-		firstHeader: firstColHeader, includeTech: includeTech, includeCell: includeCell, fixedCount: len(fixed),
+		firstHeader: firstColHeader, includeTech: includeTech, includeCell: includeCell, includeMeasurementObject: includeMeasurementObject, fixedCount: len(fixed),
 		missingMetricValuePlaceholder: missingPlaceholder,
+		outputLocation:                outputLocation,
 	}
 	return writer, nil
+}
+
+type csvHeaders struct {
+	startTime         string
+	endTime           string
+	technology        string
+	measurementObject string
+}
+
+func localizedCSVHeaders(loc appcontext.Locale) csvHeaders {
+	if loc == appcontext.LocaleEN {
+		return csvHeaders{
+			startTime:         "Start Time",
+			endTime:           "End Time",
+			technology:        "Technology",
+			measurementObject: "Measurement Object",
+		}
+	}
+	return csvHeaders{
+		startTime:         "开始时间",
+		endTime:           "结束时间",
+		technology:        "制式",
+		measurementObject: "测量对象",
+	}
 }
 
 // AddRow 把一个数据点喂进当前时间桶；time 变化时先 flush 上一桶。
@@ -148,7 +201,11 @@ func (c *WideCSVWriter) AddRow(r ExportRow) error {
 		c.order = append(c.order, k)
 	}
 	if idx, ok := c.colIdx[r.MetricCode]; ok {
-		cells[idx] = strconv.FormatFloat(r.Value, 'f', -1, 64)
+		if math.IsNaN(r.Value) {
+			cells[idx] = c.missingMetricValuePlaceholder
+		} else {
+			cells[idx] = strconv.FormatFloat(r.Value, 'f', -1, 64)
+		}
 	}
 	return nil
 }
@@ -166,11 +223,11 @@ func (c *WideCSVWriter) flushBucket() error {
 		return c.order[i].cellPLMN < c.order[j].cellPLMN
 	})
 	// 开始时间取时窗起（与页面"开始时间"同口径）；缺失时回退桶时间。
-	startStr := formatTime(c.bStart)
+	startStr := c.formatTime(c.bStart)
 	if c.bStart.IsZero() {
-		startStr = formatTime(c.bTime)
+		startStr = c.formatTime(c.bTime)
 	}
-	endStr := formatTime(c.bEnd)
+	endStr := c.formatTime(c.bEnd)
 	for _, k := range c.order {
 		rec := make([]string, 0, c.fixedCount+len(c.cols))
 		rec = append(rec, startStr, endStr, k.device)
@@ -180,6 +237,13 @@ func (c *WideCSVWriter) flushBucket() error {
 		if c.includeCell {
 			cellID, plmn := parseObjectLDN(k.cellPLMN)
 			rec = append(rec, cellID, plmn)
+		}
+		if c.includeMeasurementObject {
+			objectLDN := k.cellPLMN
+			if objectLDN == "" {
+				objectLDN = c.missingMetricValuePlaceholder
+			}
+			rec = append(rec, objectLDN)
 		}
 		rec = append(rec, c.cells[k]...)
 		if err := c.w.Write(rec); err != nil {
@@ -233,10 +297,14 @@ func (c *WideCSVWriter) Flush() error {
 // RowCount 返回已写出的横行数（不含表头）。
 func (c *WideCSVWriter) RowCount() int64 { return c.rowCount }
 
-// formatTime 空时间输出空串，否则本地可读格式。
-func formatTime(t time.Time) string {
+// formatTime 空时间输出空串，否则按导出时区输出本地可读格式。
+func (c *WideCSVWriter) formatTime(t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
-	return t.Format(csvTimeLayout)
+	loc := c.outputLocation
+	if loc == nil {
+		loc = time.UTC
+	}
+	return t.In(loc).Format(csvTimeLayout)
 }

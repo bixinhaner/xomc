@@ -3,11 +3,29 @@ package export
 import (
 	"fmt"
 	"strings"
+
+	appcontext "github.com/omcgo/omcgo/internal/core/context"
 )
 
 // adhocFirstColHeader 返回导出横表首列的列名（按 adhoc 任务聚合维度）。
 // 与网页结果表首列口径一致：设备组 / 产品 / 频段 / 全网 / 聚合组；其余（device/空/未知）退化"设备"。
-func adhocFirstColHeader(dim string) string {
+func adhocFirstColHeader(dim string, loc appcontext.Locale) string {
+	if loc == appcontext.LocaleEN {
+		switch dim {
+		case "device_group":
+			return "Device Group"
+		case "product":
+			return "Product"
+		case "band":
+			return "Band"
+		case "network":
+			return "Network"
+		case "aggregate_group":
+			return "Aggregate Group"
+		default:
+			return "Device SN"
+		}
+	}
 	switch dim {
 	case "device_group":
 		return "设备组"

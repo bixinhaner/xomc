@@ -34,7 +34,8 @@ import type { DataTableColumn } from '@/components/DataTable';
 import LineChart from '@/components/Charts/LineChart';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import { useSyncStatus } from '@core/hooks/api/useDeviceParameters';
-import { useDeviceBySn, useSyncDeviceParams } from '@core/hooks/api/useDevices';
+import { useDeviceBySn, useDeviceGroups, useSyncDeviceParams } from '@core/hooks/api/useDevices';
+import { deviceParameterApi } from '@core/services/api/deviceParameterApi';
 import { deviceApi } from '@core/services/api/deviceApi';
 import { useDictionary } from '@core/hooks/api/useSystem';
 import { activationStatusLabelOf, activationStatusOf } from '@core/utils/activationStatus';
@@ -58,6 +59,11 @@ import { formatSystemTime } from '@core/utils/systemTime';
 import { useAppStore } from '@core/store/appStore';
 import { formatDeviceSyncStatus, getDeviceSyncStatusKind, normalizeDeviceSyncStatus } from '@core/utils/deviceSyncStatus';
 import { computeCumulativeOnlineDurationSeconds, computeCurrentOnlineDurationSeconds } from '@core/utils/onlineDuration';
+import { rfStatusLabelOf, rfStatusOf } from '@core/utils/rfStatus';
+import { buildDeviceGroupDisplayName } from '@core/utils/deviceGroupDisplay';
+import { resolveNetworkTypeLabel } from '@core/utils/networkType';
+import { localizeDeviceProductName } from '@core/utils/deviceDisplay';
+import type { Locale } from '@core/utils/i18nText';
 
 const { Title, Text } = Typography;
 
@@ -208,6 +214,26 @@ type DetailDevice = Device & {
   ppsTimeMode?: string;
 };
 
+const resolveConnectedBscIp = (bscSelect?: string, omlRemoteIp?: string, omlRemoteIpBak?: string): string => {
+  const selected = bscSelect?.trim();
+  if (selected === '0') return omlRemoteIp?.trim() || '';
+  if (selected === '1') return omlRemoteIpBak?.trim() || '';
+  return '';
+};
+
+const isBlankDetailValue = (value: string | number | null | undefined): boolean => {
+  if (value == null) return true;
+  const text = String(value).trim();
+  return !text || text === '-' || text === '--';
+};
+
+const firstDetailValue = (...values: Array<string | number | null | undefined>): string => {
+  for (const value of values) {
+    if (!isBlankDetailValue(value)) return String(value).trim();
+  }
+  return '';
+};
+
 interface DeviceDetailCell {
   index: number;
   cellId?: string;
@@ -260,6 +286,10 @@ interface DeviceDetailInfo {
   ppsTimeMode?: string;
   rollbackVersion?: string;
   wanSpeed?: string;
+  bscSelect?: string;
+  omlRemoteIp?: string;
+  omlRemoteIpBak?: string;
+  connectedBscIp?: string;
 }
 
 interface BackendDeviceDetailCell {
@@ -314,6 +344,9 @@ interface BackendDeviceDetailInfo {
   pps_time_mode?: string;
   rollback_version?: string;
   wan_status?: string;
+  bsc_select?: string;
+  oml_remote_ip?: string;
+  oml_remote_ip_bak?: string;
 }
 
 interface BackendDeviceDetailCompositeResponse {
@@ -367,6 +400,10 @@ function mapDeviceDetailInfo(info?: BackendDeviceDetailInfo): DeviceDetailInfo |
     ppsTimeMode: info.pps_time_mode,
     rollbackVersion: info.rollback_version,
     wanSpeed: info.wan_status,
+    bscSelect: info.bsc_select,
+    omlRemoteIp: info.oml_remote_ip,
+    omlRemoteIpBak: info.oml_remote_ip_bak,
+    connectedBscIp: resolveConnectedBscIp(info.bsc_select, info.oml_remote_ip, info.oml_remote_ip_bak),
   };
 }
 
@@ -401,41 +438,45 @@ function mergeDeviceDetailInfo(device: Device, info?: DeviceDetailInfo): DetailD
 
   return {
     ...device,
-    deviceName: info.deviceName || device.deviceName,
-    remark: info.remark || device.remark,
-    macAddress: info.mac || device.macAddress,
-    gpsVersion: info.gpsVersion || device.gpsVersion,
-    eci: info.eci || device.eci,
-    pci: info.pci || device.pci,
-    cellId: info.cellId || device.cellId,
-    plmnId: info.plmn || device.plmnId,
-    tac: info.tac || device.tac,
-    subframeAssignment: info.subframeAssignment || device.subframeAssignment,
-    specialSubframe: info.specialSubframe || device.specialSubframe,
-    rootIndex: info.rootIndex || device.rootIndex,
-    bandwidth: info.bandwidth != null ? String(info.bandwidth) : device.bandwidth,
-    dlEarfcn: info.freqPoint || device.dlEarfcn,
-    ulEarfcn: info.ulEarfcn || device.ulEarfcn,
-    networkModel: info.networkModel || device.networkModel,
-    txPower: info.transmitPower != null ? String(info.transmitPower) : device.txPower,
-    band: info.band || device.band,
-    mmeStatus: info.mmeStatus || device.mmeStatus,
-    amfStatus: info.amfStatus || info.mmeStatus || device.amfStatus,
-    rfStatus: info.rfStatus || device.rfStatus,
-    syncStatus: info.syncStatus || device.syncStatus,
-    lockStatus: info.lockStatus || device.lockStatus,
-    multiPlmnEnable: info.multiPlmnEnable || device.multiPlmnEnable,
-    firstOnlineTime: info.firstOnlineTime || device.firstOnlineTime,
-    onlineTime: info.lastOnlineTime || device.onlineTime,
-    offlineTime: info.lastOfflineTime || device.offlineTime,
+    deviceName: firstDetailValue(info.deviceName, device.deviceName),
+    remark: firstDetailValue(info.remark, device.remark),
+    macAddress: firstDetailValue(info.mac, device.macAddress),
+    gpsVersion: firstDetailValue(info.gpsVersion, device.gpsVersion),
+    eci: firstDetailValue(info.eci, device.eci),
+    pci: firstDetailValue(info.pci, device.pci),
+    cellId: firstDetailValue(info.cellId, device.cellId),
+    plmnId: firstDetailValue(info.plmn, device.plmnId),
+    tac: firstDetailValue(info.tac, device.tac),
+    subframeAssignment: firstDetailValue(info.subframeAssignment, device.subframeAssignment),
+    specialSubframe: firstDetailValue(info.specialSubframe, device.specialSubframe),
+    rootIndex: firstDetailValue(info.rootIndex, device.rootIndex),
+    bandwidth: firstDetailValue(info.bandwidth, device.bandwidth),
+    dlEarfcn: firstDetailValue(info.freqPoint, device.dlEarfcn),
+    ulEarfcn: firstDetailValue(info.ulEarfcn, device.ulEarfcn),
+    networkModel: firstDetailValue(info.networkModel, device.networkModel),
+    txPower: firstDetailValue(info.transmitPower, device.txPower),
+    band: firstDetailValue(info.band, device.band),
+    mmeStatus: firstDetailValue(info.mmeStatus, device.mmeStatus),
+    amfStatus: firstDetailValue(info.amfStatus, info.mmeStatus, device.amfStatus),
+    rfStatus: firstDetailValue(info.rfStatus, device.rfStatus),
+    syncStatus: firstDetailValue(info.syncStatus, device.syncStatus),
+    lockStatus: firstDetailValue(info.lockStatus, device.lockStatus),
+    multiPlmnEnable: firstDetailValue(info.multiPlmnEnable, device.multiPlmnEnable),
+    firstOnlineTime: firstDetailValue(info.firstOnlineTime, device.firstOnlineTime),
+    onlineTime: firstDetailValue(info.lastOnlineTime, device.onlineTime),
+    offlineTime: firstDetailValue(info.lastOfflineTime, device.offlineTime),
     upTime: info.runTime ?? device.upTime,
     cumulativeOnlineDuration: info.cumulativeOnlineDuration ?? device.cumulativeOnlineDuration,
     gpsHeight: info.gpsHeight ?? device.gpsHeight,
     gpsSatelliteCount: info.gpsSatellites ?? device.gpsSatelliteCount,
-    ppsTimeMode: info.ppsTimeMode,
-    enbId: info.enbId || device.enbId,
-    rollbackVersion: info.rollbackVersion || device.rollbackVersion,
-    wanSpeed: info.wanSpeed || device.wanSpeed,
+    ppsTimeMode: firstDetailValue(info.ppsTimeMode),
+    enbId: firstDetailValue(info.enbId, device.enbId),
+    rollbackVersion: firstDetailValue(info.rollbackVersion, device.rollbackVersion),
+    wanSpeed: firstDetailValue(info.wanSpeed, device.wanSpeed),
+    bscSelect: firstDetailValue(info.bscSelect, device.bscSelect),
+    omlRemoteIp: firstDetailValue(info.omlRemoteIp, device.omlRemoteIp),
+    omlRemoteIpBak: firstDetailValue(info.omlRemoteIpBak, device.omlRemoteIpBak),
+    bscSerialNumber: firstDetailValue(info.connectedBscIp, resolveConnectedBscIp(device.bscSelect, device.omlRemoteIp, device.omlRemoteIpBak), device.bscSerialNumber),
   };
 }
 
@@ -525,6 +566,8 @@ const getStationFields = (
   t: ReturnType<typeof useT>,
   networkType: string,
   onResolveNameSync?: (action: 'use_lmt' | 'use_omc' | 'ignore') => void,
+  renderNetworkType?: FieldItem['render'],
+  locale: Locale = 'zh-CN',
 ): FieldGroup => {
   const fields: FieldItem[] = [
     // 公共字段
@@ -565,9 +608,13 @@ const getStationFields = (
         return d.name || '-';
       },
     },
-    { key: 'networkType', label: t('device.radioMode'), render: (d) => <Tag color={{ eNB: 'blue', gNB: 'green', GSM: 'orange' }[d.networkType ?? '']}>{d.networkType || '-'}</Tag> },
+    {
+      key: 'networkType',
+      label: t('device.radioMode'),
+      render: renderNetworkType ?? ((d) => <Tag color={{ eNB: 'blue', gNB: 'green', GSM: 'orange' }[d.networkType ?? '']}>{d.networkType || '-'}</Tag>),
+    },
     { key: 'productClass', label: t('device.productClass'), render: (d) => d.productClass || '-' },
-    { key: 'deviceModel', label: t('device.model'), render: (d) => d.deviceModel || '-' },
+    { key: 'deviceModel', label: t('device.model'), render: (d) => localizeDeviceProductName(d.deviceModel, locale) },
     { key: 'softwareVersion', label: t('device.softwareVersion'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.softwareVersion || '-'}</Text> },
     { key: 'macAddress', label: t('device.macAddress'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.macAddress || '-'}</Text> },
     { key: 'groupName', label: t('device.groupName'), render: (d) => d.groupName || '-' },
@@ -595,7 +642,7 @@ const getStationFields = (
 
 // ─── 小区信息组 ────────────────────────────────────────────────────────
 
-const getCellFields = (t: ReturnType<typeof useT>, networkType: string): FieldGroup => {
+const getCellFields = (t: ReturnType<typeof useT>, networkType: string, isBtsProduct = false): FieldGroup => {
   const fields: FieldItem[] = [];
 
   // eNB/gNB 共享字段
@@ -638,11 +685,15 @@ const getCellFields = (t: ReturnType<typeof useT>, networkType: string): FieldGr
   if (networkType === 'GSM') {
     fields.push(
       { key: 'lac', label: 'LAC', render: (d) => d.lac ?? '-' },
-      { key: 'arfcn', label: t('device.arfcn'), render: (d) => d.arfcn ?? '-' },
       { key: 'uplinkFrequency', label: t('device.uplinkFrequency'), render: (d) => d.uplinkFrequency ? `${d.uplinkFrequency} MHz` : '-' },
       { key: 'downlinkFrequency', label: t('device.downlinkFrequency'), render: (d) => d.downlinkFrequency ? `${d.downlinkFrequency} MHz` : '-' },
-      { key: 'btsNum', label: t('device.btsNum'), render: (d) => d.btsNum ?? '-' },
     );
+    if (isBtsProduct) {
+      fields.splice(1, 0, { key: 'arfcn', label: t('device.arfcn'), render: (d) => d.dlEarfcn || d.arfcn || '-' });
+    } else {
+      fields.splice(1, 0, { key: 'arfcn', label: t('device.arfcn'), render: (d) => d.arfcn ?? '-' });
+      fields.push({ key: 'btsNum', label: t('device.btsNum'), render: (d) => d.btsNum ?? '-' });
+    }
   }
 
   return { title: t('device.group.cell'), fields };
@@ -715,7 +766,7 @@ const getOtherFields = (t: ReturnType<typeof useT>, networkType: string, device:
     { key: 'lastOfflineReason', label: t('device.lastOfflineReason'),
       render: (d) => d.lastOfflineReason ? t(`device.lastOfflineReason.${d.lastOfflineReason}`) : '-' },
     { key: 'firstOnlineTime', label: t('device.firstOnlineTime'), render: (d) => fmtTime(d.firstOnlineTime) },
-    { key: 'lastInformTime', label: t('device.lastInformTime'), render: (d) => fmtTime(d.lastInformTime) },
+    { key: 'lastOnlineTime', label: t('device.lastOnline'), render: (d) => fmtTime(d.lastOnlineTime) },
     // 站址信息
     { key: 'siteName', label: t('device.siteName'), render: (d) => d.deviceName || '-' },
     { key: 'installAddress', label: t('device.installAddress'), render: (d) => d.installAddress || '-' },
@@ -758,25 +809,45 @@ const renderFieldGroup = (group: FieldGroup, device: DetailDevice) => (
   </Descriptions>
 );
 
+const firstText = (...values: Array<string | number | null | undefined>): string => {
+  for (const value of values) {
+    if (!isBlankDetailValue(value)) return String(value).trim();
+  }
+  return '';
+};
+
+const cellIndexedFallback = (
+  value: string | number | null | undefined,
+  index: number,
+  total: number,
+): string => {
+  if (value == null) return '';
+  const text = String(value).trim();
+  if (isBlankDetailValue(text)) return '';
+  if (!text.includes(',')) return index === 0 || total <= 1 ? text : '';
+  return text.split(',').map((item) => item.trim()).filter((item) => !isBlankDetailValue(item))[index] ?? '';
+};
+
 const buildCellRecords = (device: Device, detailCells?: DeviceDetailCell[]): CellRecord[] => {
   if (Array.isArray(detailCells) && detailCells.length > 0) {
+    const total = detailCells.length;
     return detailCells.map((cell, idx) => ({
       key: `${device.id}-cell-${cell.index || idx + 1}`,
       index: cell.index || idx + 1,
       values: {
         ...device,
-        cellId: cell.cellId ?? cell.eci ?? '',
-        nrCellId: cell.cellId ?? cell.eci ?? '',
-        eci: cell.eci ?? '',
-        pci: cell.pci ?? '',
-        freqPoint: cell.freqPoint ?? '',
-        bandwidth: cell.bandwidth ?? '',
-        band: cell.band ?? device.band ?? '',
-        opState: cell.opState ?? '',
-        rfStatus: cell.rfTxStatus ?? '',
-        adminState: cell.adminState ?? '',
-        lac: cell.lac ?? device.lac ?? '',
-        arfcn: cell.arfcn ?? device.arfcn ?? '',
+        cellId: firstText(cell.cellId, cell.eci, cellIndexedFallback(device.cellId, idx, total), cellIndexedFallback(device.eci, idx, total)),
+        nrCellId: firstText(cell.cellId, cell.eci, cellIndexedFallback(device.nrCellId, idx, total)),
+        eci: firstText(cell.eci, cellIndexedFallback(device.eci, idx, total)),
+        pci: firstText(cell.pci, cellIndexedFallback(device.pci, idx, total)),
+        freqPoint: firstText(cell.freqPoint, cellIndexedFallback(device.dlEarfcn, idx, total)),
+        bandwidth: firstText(cell.bandwidth, cellIndexedFallback(device.bandwidth, idx, total)),
+        band: firstText(cell.band, cellIndexedFallback(device.band, idx, total)),
+        opState: firstText(cell.opState, cellIndexedFallback(device.opState, idx, total)),
+        rfStatus: firstText(cell.rfTxStatus, cellIndexedFallback(device.rfStatus, idx, total)),
+        adminState: firstText(cell.adminState, cellIndexedFallback(device.adminState, idx, total)),
+        lac: firstText(cell.lac, cellIndexedFallback(device.lac, idx, total)),
+        arfcn: firstText(cell.arfcn, cellIndexedFallback(device.arfcn, idx, total)),
         btsNum: cell.btsNum ?? device.btsNum ?? 0,
       },
     }));
@@ -814,45 +885,40 @@ const renderCellOpState = (
   return <Tag color={status === 'active' ? 'success' : 'error'}>{label}</Tag>;
 };
 
-const renderCellRfStatus = (value: string | undefined, t: ReturnType<typeof useT>) =>
-  renderStatusTag(value, {
-    on: { label: t('status.rfOn'), color: 'success' },
-    off: { label: t('status.rfOff'), color: 'error' },
-    '1': { label: t('status.rfOn'), color: 'success' },
-    '0': { label: t('status.rfOff'), color: 'error' },
-    true: { label: t('status.rfOn'), color: 'success' },
-    false: { label: t('status.rfOff'), color: 'error' },
-  });
+const renderCellRfStatus = (value: string | undefined, t: ReturnType<typeof useT>) => {
+  const kind = rfStatusOf(value);
+  if (!kind) return '-';
+  const labels = {
+    on: t('status.rfOn'),
+    off: t('status.rfOff'),
+    error: t('status.failed'),
+  };
+  const color = kind === 'on' ? 'success' : 'error';
+  return <Tag color={color}>{rfStatusLabelOf(value, labels)}</Tag>;
+};
 
 const renderCellAdminState = (
   value: string | undefined,
-  networkType: string,
+  _networkType: string,
   t: ReturnType<typeof useT>,
 ) => {
-  const normalizedNetworkType = normalizeNetworkType(networkType);
-
-  if (normalizedNetworkType === 'gNB') {
-    return renderStatusTag(value, {
-      '1': { label: 'Locked', color: 'warning' },
-      '2': { label: 'Unlocked', color: 'success' },
-      '3': { label: 'ShuttingDown', color: 'error' },
-      locked: { label: 'Locked', color: 'warning' },
-      unlocked: { label: 'Unlocked', color: 'success' },
-      shuttingdown: { label: 'ShuttingDown', color: 'error' },
-    });
-  }
-
   return renderStatusTag(value, {
-    '1': { label: t('status.enabled'), color: 'success' },
-    '0': { label: t('status.disabled'), color: 'default' },
-    true: { label: t('status.enabled'), color: 'success' },
-    false: { label: t('status.disabled'), color: 'default' },
-    enabled: { label: t('status.enabled'), color: 'success' },
-    disabled: { label: t('status.disabled'), color: 'default' },
+    '1': { label: t('status.locked'), color: 'warning' },
+    '0': { label: t('status.unlocked'), color: 'success' },
+    '2': { label: t('status.unlocked'), color: 'success' },
+    '3': { label: t('status.shuttingDown'), color: 'error' },
+    true: { label: t('status.locked'), color: 'warning' },
+    false: { label: t('status.unlocked'), color: 'success' },
+    enabled: { label: t('status.locked'), color: 'warning' },
+    disabled: { label: t('status.unlocked'), color: 'success' },
+    locked: { label: t('status.locked'), color: 'warning' },
+    unlocked: { label: t('status.unlocked'), color: 'success' },
+    shuttingdown: { label: t('status.shuttingDown'), color: 'error' },
+    'shutting down': { label: t('status.shuttingDown'), color: 'error' },
   });
 };
 
-const getCellSummaryColumns = (networkType: string, t: ReturnType<typeof useT>): CellSummaryColumn[] => {
+const getCellSummaryColumns = (networkType: string, t: ReturnType<typeof useT>, isBtsProduct = false): CellSummaryColumn[] => {
   // 表里每行是一个 cell，这里的「激活状态」是 cell.op_state（小区维度），
   // 与设备列表/详情头的 device.op_state（设备维度）是底层同名但完全不同的
   // 字段。为避免同名给用户造成「列表激活/详情未激活」的误解，列标题专用
@@ -888,6 +954,15 @@ const getCellSummaryColumns = (networkType: string, t: ReturnType<typeof useT>):
         { title: t('device.bandwidth'), dataIndex: ['values', 'bandwidth'], key: 'bandwidth', width: 120 },
       ];
     case 'GSM':
+      if (isBtsProduct) {
+        return [
+          { title: 'index', dataIndex: ['index'], key: 'index', width: 80 },
+          { title: t('device.cellOpState'), key: 'opState', width: 120 },
+          { title: t('device.rfStatus'), dataIndex: ['values', 'rfStatus'], key: 'rfStatus', width: 140 },
+          { title: 'LAC', dataIndex: ['values', 'lac'], key: 'lac', width: 120 },
+          { title: t('device.arfcn'), dataIndex: ['values', 'dlEarfcn'], key: 'arfcn', width: 120 },
+        ];
+      }
       return [
         { title: 'index', dataIndex: ['index'], key: 'index', width: 80 },
         { title: t('device.cellId'), dataIndex: ['values', 'cellId'], key: 'cellId', width: 120 },
@@ -919,6 +994,7 @@ interface KPITabContentProps {
 
 function KPITabContent({ device, t }: KPITabContentProps) {
   const [timeMode, setTimeMode] = useState<'day' | 'week'>('day');
+  const appLocale = useAppStore((s) => s.locale);
   // 下钻对象集（多选，默认全选）：'' = 设备级伪项 + metricObjects 返回的实实在在 ldn。
   // 设备级行 (object_ldn='') 不在后端 metricObjects 返回集里（SQL 有 `object_ldn <> ''`），
   // 但 5G KGNB05xx 这类 KPI 原生在设备级行，不带上会全选后什么都不出，所以手动在集首加个 '' 伪项。
@@ -1022,7 +1098,7 @@ function KPITabContent({ device, t }: KPITabContentProps) {
     { label: t('device.kpi.deviceLevel'), value: '' },
     ...metricObjects.map((o) => ({
       // 下拉标签走 formatObjectLdn 友好名；legend / series.name 却按拍板决定显示原始 LDN。
-      label: formatObjectLdn(o.objectLdn),
+      label: formatObjectLdn(o.objectLdn, appLocale),
       value: o.objectLdn,
     })),
   ];
@@ -1172,7 +1248,9 @@ function KPITabContent({ device, t }: KPITabContentProps) {
                       // KPI 算不出、该设备无 KPI 行，泛化「暂无数据」无法区分「指标库未注册」
                       // 与「时段无采样」。其它制式保持通用文案。
                       description={
-                        technology === 'nr'
+                        chart.hasSamples
+                          ? t('device.detail.kpiAllMissing')
+                          : technology === 'nr'
                           ? t('device.detail.kpiNoDataNr')
                           : t('common.noData')
                       }
@@ -1214,13 +1292,16 @@ export default function DeviceDetail() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const { data: device, isLoading, refetch } = useDeviceBySn(sn);
+  const { data: deviceGroupsData } = useDeviceGroups();
   const { data: opStateDict } = useDictionary('op_state');
+  const { data: networkTypeDict } = useDictionary('network_type');
   const syncMutation = useSyncDeviceParams();
   const { data: paramSyncStatus, refetch: refetchParamSyncStatus } = useSyncStatus(device?.id ?? '');
   const [quickSettingsSyncTargetPaths, setQuickSettingsSyncTargetPaths] = useState<string[]>([]);
   const quickSettingsSync = useQuickSettingsFeedbackStore((s) => (device?.id ? s.quickSettingsSyncs[device.id] : undefined));
   const quickSettingsSyncPending = Boolean(quickSettingsSync);
   const lastQuickSettingsParamSync = useQuickSettingsFeedbackStore((s) => (device?.id ? s.lastScopedSyncs[device.id] : undefined)) ?? null;
+  const observedParamSyncAtRef = useRef<Record<string, string>>({});
   const isDeviceParamSyncBusy = paramSyncStatus?.status === 'syncing' || quickSettingsSyncPending || syncMutation.isPending;
   const isQuickSettingsRefreshSubmitting = syncMutation.isPending;
   const { data: detailComposite } = useQuery({
@@ -1234,8 +1315,27 @@ export default function DeviceDetail() {
 
   const displayDevice = useMemo(() => {
     if (!device) return null;
-    return mergeDeviceDetailInfo(device, detailComposite?.info);
-  }, [detailComposite?.info, device]);
+    const merged = mergeDeviceDetailInfo(device, detailComposite?.info);
+    const groups = deviceGroupsData?.groups ?? [];
+    if (groups.length === 0) return merged;
+    return {
+      ...merged,
+      groupName: buildDeviceGroupDisplayName(merged, groups, appLocale),
+    };
+  }, [appLocale, detailComposite?.info, device, deviceGroupsData?.groups]);
+
+  useEffect(() => {
+    const deviceId = device?.id;
+    const syncedAt = paramSyncStatus?.lastParamSyncAt;
+    if (!deviceId || !syncedAt) return;
+
+    const prev = observedParamSyncAtRef.current[deviceId];
+    observedParamSyncAtRef.current[deviceId] = syncedAt;
+    if (prev === syncedAt) return;
+
+    deviceParameterApi.invalidateParameterSchemaCache(deviceId);
+    void queryClient.invalidateQueries({ queryKey: ['devices', 'parameter-schema', deviceId] });
+  }, [device?.id, paramSyncStatus?.lastParamSyncAt, queryClient]);
 
   useEffect(() => {
     if (!device?.id || !device.macAddress) return;
@@ -1327,6 +1427,12 @@ export default function DeviceDetail() {
     .trim()
     .toUpperCase()
     .startsWith('BM'));
+  const isBtsProduct = ((quickSettingsData?.paramModel
+    ?? displayDevice?.productClass
+    ?? device?.productClass
+    ?? '')
+    .trim()
+    .toUpperCase()) === 'BTS';
 
   // 概览页小区列表的实例过滤规则与「快速设置」tab 完全一致，统一走 useResolvedCellInstances。
   const detailResolved = useResolvedCellInstances({
@@ -1670,19 +1776,27 @@ export default function DeviceDetail() {
     [displayDevice?.id, message, queryClient, t]
   );
 
+  const renderDeviceNetworkType = useCallback<FieldItem['render']>(
+    (d) => {
+      const label = resolveNetworkTypeLabel(d.networkType, networkTypeDict?.sysDictionaryDetails, appLocale);
+      return <Tag color={{ eNB: 'blue', gNB: 'green', GSM: 'orange' }[d.networkType ?? '']}>{label}</Tag>;
+    },
+    [appLocale, networkTypeDict?.sysDictionaryDetails],
+  );
+
   // 根据设备制式获取字段组
   const detailGroups = useMemo((): FieldGroup[] => {
     if (!displayDevice) return [];
     const networkType = normalizeNetworkType(displayDevice.networkType);
 
     // BSC（独立 GSM 设备，paramModel === 'BSC'）按需求隐藏「状态信息」组；BTS 保留显示。
-    const groups: FieldGroup[] = [getStationFields(t, networkType, handleResolveNameSync)];
+    const groups: FieldGroup[] = [getStationFields(t, networkType, handleResolveNameSync, renderDeviceNetworkType, appLocale)];
     if (!detailResolved.isBSC) {
       groups.push(getStatusFields(t, networkType));
     }
     groups.push(getOtherFields(t, networkType, displayDevice));
     return groups;
-  }, [detailResolved.isBSC, displayDevice, handleResolveNameSync, t]);
+  }, [appLocale, detailResolved.isBSC, displayDevice, handleResolveNameSync, renderDeviceNetworkType, t]);
 
   const cellGroup = useMemo((): FieldGroup | null => {
     if (!displayDevice) return null;
@@ -1691,8 +1805,8 @@ export default function DeviceDetail() {
       : normalizeNetworkType(displayDevice.networkType);
     // BSC（独立 GSM 设备）按需求隐藏「小区信息」表；BTS 与 BM 产品里的 GSM 小区视图均保留。
     if (detailResolved.isBSC) return null;
-    return getCellFields(t, networkType);
-  }, [activeBmTech, detailResolved.isBSC, displayDevice, isBmProduct, t]);
+    return getCellFields(t, networkType, isBtsProduct);
+  }, [activeBmTech, detailResolved.isBSC, displayDevice, isBmProduct, isBtsProduct, t]);
 
   const displayCellNetworkType = useMemo(() => {
     if (isBmProduct) {
@@ -1704,7 +1818,7 @@ export default function DeviceDetail() {
   const activeDetailCells = isBmProduct && activeBmTech === 'GSM'
     ? detailComposite?.gsmCells
     : detailComposite?.cells;
-  const useCompositeCellRecords = Array.isArray(activeDetailCells) && activeDetailCells.length > 0;
+  const useCompositeCellRecords = !isBtsProduct && Array.isArray(activeDetailCells) && activeDetailCells.length > 0;
 
   const cellRecords = useMemo(() => {
     if (!displayDevice) return [];
@@ -1720,7 +1834,7 @@ export default function DeviceDetail() {
   }, [cellRecords, detailQuickSettingsCellInstances, detailQuickSettingsRuleReady, useCompositeCellRecords]);
 
   const cellColumns = useMemo(
-    () => getCellSummaryColumns(displayCellNetworkType, t).map((column) => {
+    () => getCellSummaryColumns(displayCellNetworkType, t, isBtsProduct).map((column) => {
       // LTE 小区列表里的带宽列与详情字段、快速设置共享同一个枚举映射（仅 eNB）。
       const isLteBandwidth = column.key === 'bandwidth' && displayCellNetworkType === 'eNB';
       return {
@@ -1745,7 +1859,7 @@ export default function DeviceDetail() {
             : (value: string | number | undefined) => value ?? '-',
       };
     }),
-    [appLocale, displayCellNetworkType, opStateDict?.sysDictionaryDetails, t],
+    [appLocale, displayCellNetworkType, isBtsProduct, opStateDict?.sysDictionaryDetails, t],
   );
 
   if (isLoading) {
@@ -1793,7 +1907,7 @@ export default function DeviceDetail() {
             </div>
             {/*
               「激活状态」设备级 Tag —— 判定走 frontend-core/utils/activationStatus.ts,
-              三皮肤 + 列表/详情/KV 全调同一函数，修改口径请只改 utility。
+              列表/详情/KV 全调同一函数，修改口径请只改 utility。
 
               注: 「小区信息』表里也有列名「激活状态」但那是 cell.op_state（小区维度），
               与这里的 device.op_state（设备维度）是后端同名不同事实的两个字段——

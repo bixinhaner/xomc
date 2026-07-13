@@ -14,6 +14,7 @@
  */
 
 import type { AggregatedRow } from '../types/pmDashboard';
+import { normalizePmMetricValue } from './pmMetricValue';
 
 // ─── object_ldn 解析（对齐后端 metrics/object_ldn.go） ───
 
@@ -175,9 +176,10 @@ export function formatObjectLdn(ldn: string | null | undefined): string {
  * 指标查询页表格与仪表盘普通 Panel 导出共用，保证两处数值格式一致。
  */
 export function formatPivotNumber(v: number | null | undefined): string {
-  if (v === null || v === undefined) return '-';
-  if (Number.isInteger(v)) return String(v);
-  return v.toFixed(4).replace(/\.?0+$/, '');
+  const normalized = normalizePmMetricValue(v);
+  if (normalized === null) return '-';
+  if (Number.isInteger(normalized)) return String(normalized);
+  return normalized.toFixed(4).replace(/\.?0+$/, '');
 }
 
 /**
@@ -223,7 +225,7 @@ export function pivotLongToWide(rows: AggregatedRow[]): PivotResult {
       };
       rowMap.set(key, row);
     }
-    row.cells[r.metricPath] = r.metricValue;
+    row.cells[r.metricPath] = normalizePmMetricValue(r.metricValue);
   });
 
   // 填补缺采单元格 = null

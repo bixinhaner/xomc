@@ -29,6 +29,23 @@ const (
 	ExecuteSuspended ExecuteType = "suspended"
 )
 
+// TaskOrigin describes where an MML task was launched from.
+type TaskOrigin string
+
+const (
+	TaskOriginConsole TaskOrigin = "console"
+	TaskOriginScript  TaskOrigin = "script"
+)
+
+// TaskExecuteMode defines whether an MML task uses common broadcast semantics
+// or the device-bound execution plan introduced by the script task redesign.
+type TaskExecuteMode string
+
+const (
+	TaskExecuteModeCommon      TaskExecuteMode = "common"
+	TaskExecuteModeDeviceBound TaskExecuteMode = "device_bound"
+)
+
 // TaskResult represents the outcome of a completed task.
 type TaskResult string
 
@@ -53,20 +70,20 @@ const (
 // the "supported_operations" multi-op concept is gone because the standard model
 // already emits separate command_codes per operation.
 type MMLCommand struct {
-	ID              uuid.UUID         `json:"id"`
-	CommandName     string            `json:"command_name"`
-	CommandCode     string            `json:"command_code"`
-	Category        string            `json:"category"`
-	Description     string            `json:"description"`
-	RPCMethod       string            `json:"rpc_method"`
-	OperationType   string            `json:"operation_type" db:"operation_type"`
-	HelpDoc         string            `json:"help_doc" db:"help_doc"`
-	Notes           string            `json:"notes" db:"notes"`
+	ID            uuid.UUID `json:"id"`
+	CommandName   string    `json:"command_name"`
+	CommandCode   string    `json:"command_code"`
+	Category      string    `json:"category"`
+	Description   string    `json:"description"`
+	RPCMethod     string    `json:"rpc_method"`
+	OperationType string    `json:"operation_type" db:"operation_type"`
+	HelpDoc       string    `json:"help_doc" db:"help_doc"`
+	Notes         string    `json:"notes" db:"notes"`
 
 	// TargetPaths：自 migration 000095 起语义降级为"派生缓存"，
 	// 由 mml_command_sub_fields trigger (trg_mml_sub_fields_target_paths) 自动维护；
 	// 仍可直接 SELECT，但 admin/import 写入 sub_fields 后自动重算，避免手动同步。
-	TargetPaths     []string          `json:"target_paths"`
+	TargetPaths []string `json:"target_paths"`
 
 	TargetObject    string            `json:"target_object,omitempty"`
 	GroupID         *uuid.UUID        `json:"group_id,omitempty"`
@@ -80,7 +97,7 @@ type MMLCommand struct {
 	// 同 logical 不同 op 是命令树叶子同分支。
 	// 不再持久化为 DB 列（已 DROP）；由代码从 command_code 派生填充
 	// （见 deriveLogicalCodeFromCommandCode）。JSON 契约保持不变。
-	LogicalCode      string            `json:"logical_code"`
+	LogicalCode string `json:"logical_code"`
 	// LogicalNameI18n：逻辑命令显示名（命令树叶子 label 前缀）
 	// 例：{"en-US":"Device info","zh-CN":"设备信息"} → 叶子 "Device info(LST DEVICE_INFO)"
 	LogicalNameI18n  map[string]string `json:"logical_name_i18n" db:"logical_name_i18n"`
@@ -98,6 +115,7 @@ type MMLCommand struct {
 //   - 定义态: active / archived（脚本本身是否启用）
 //   - 执行态: pending / running / paused / completed / failed / cancelled
 //     （脚本最近一次执行的生命周期阶段，与 TaskStatus 对齐）
+//
 // mml_scripts.status 列无 CHECK 约束，允许跨族流转。
 type ScriptStatus string
 
@@ -122,18 +140,25 @@ const (
 
 // MMLScript represents a user-defined MML command script.
 type MMLScript struct {
-	ID          uuid.UUID    `json:"id"`
-	ScriptName  string       `json:"script_name"`
-	Description string       `json:"description"`
-	Content     string       `json:"content"`
-	Creator     string       `json:"creator"`
-	Tags        []string     `json:"tags"`
-	Status      ScriptStatus `json:"status"`
-	StartTime   *time.Time   `json:"start_time,omitempty"`
-	EndTime     *time.Time   `json:"end_time,omitempty"`
-	Type        ScriptType   `json:"type"`
-	Progress    float64      `json:"progress"`
-	Result      JSONMap      `json:"result,omitempty"`
+	ID                uuid.UUID     `json:"id"`
+	ImportSessionID   uuid.UUID     `json:"-"`
+	ScriptName        string        `json:"script_name"`
+	Description       string        `json:"description"`
+	Content           string        `json:"content"`
+	OriginalFilename  string        `json:"original_filename"`
+	ContentSHA256     string        `json:"content_sha256"`
+	ValidationVersion string        `json:"validation_version"`
+	ValidatedAt       *time.Time    `json:"validated_at,omitempty"`
+	PlanItems         []MMLPlanItem `json:"plan_items"`
+	ValidationSummary JSONMap       `json:"validation_summary"`
+	Creator           string        `json:"creator"`
+	Tags              []string      `json:"tags"`
+	Status            ScriptStatus  `json:"status"`
+	StartTime         *time.Time    `json:"start_time,omitempty"`
+	EndTime           *time.Time    `json:"end_time,omitempty"`
+	Type              ScriptType    `json:"type"`
+	Progress          float64       `json:"progress"`
+	Result            JSONMap       `json:"result,omitempty"`
 	// 最近一次执行终态（由 MMLAggregator 在对应 mml_task 收敛后回写）。
 	// per-execution 详情查 mml_tasks，脚本层只持有"最近一次"指针。
 	LastRunStatus *string    `json:"last_run_status,omitempty"`
@@ -145,33 +170,56 @@ type MMLScript struct {
 // JSONMap is a helper type for nullable JSONB map fields.
 type JSONMap map[string]interface{}
 
+// MMLPlanItem is one normalized row in a device-bound execution plan.
+type MMLPlanItem struct {
+	LineNo   int                    `json:"line_no"`
+	DeviceSN string                 `json:"device_sn"`
+	Order    int                    `json:"order"`
+	RawLine  string                 `json:"raw_line,omitempty"`
+	Command  map[string]interface{} `json:"command"`
+
+	// Flat fields are accepted for import/API compatibility. They are folded
+	// into Command before persistence and fanout.
+	CommandCode   string                 `json:"command_code,omitempty"`
+	OperationType string                 `json:"operation_type,omitempty"`
+	Parameters    map[string]interface{} `json:"parameters,omitempty"`
+}
+
 // MMLTask represents an MML command execution task.
 type MMLTask struct {
-	ID        uuid.UUID                `json:"id"`
-	TaskName  string                   `json:"task_name"`
-	ScriptID  *uuid.UUID               `json:"script_id,omitempty"`
-	DeviceSNs []string                 `json:"device_sns"`
-	Commands  []map[string]interface{} `json:"commands"`
-	Status    TaskStatus               `json:"status"`
-	Results   []map[string]interface{} `json:"results"`
-	Creator   string                   `json:"creator"`
-	Executor  string                   `json:"executor,omitempty"`
-	CreatedAt time.Time                `json:"created_at"`
-	UpdatedAt time.Time                `json:"updated_at"`
+	ID                      uuid.UUID                `json:"id"`
+	TaskName                string                   `json:"task_name"`
+	RequestID               string                   `json:"request_id,omitempty"`
+	ScriptID                *uuid.UUID               `json:"script_id,omitempty"`
+	TaskOrigin              TaskOrigin               `json:"task_origin"`
+	ScriptContentSHA256     string                   `json:"script_content_sha256"`
+	ScriptValidationVersion string                   `json:"script_validation_version"`
+	DeviceSNs               []string                 `json:"device_sns"`
+	Commands                []map[string]interface{} `json:"commands"`
+	CommandCount            int                      `json:"command_count,omitempty"`
+	ExecuteMode             TaskExecuteMode          `json:"execute_mode"`
+	PlanItems               []MMLPlanItem            `json:"plan_items"`
+	PlanItemCount           int                      `json:"plan_item_count,omitempty"`
+	Status                  TaskStatus               `json:"status"`
+	Results                 []map[string]interface{} `json:"results"`
+	Creator                 string                   `json:"creator"`
+	Executor                string                   `json:"executor,omitempty"`
+	CreatedAt               time.Time                `json:"created_at"`
+	UpdatedAt               time.Time                `json:"updated_at"`
 
 	// Scheduling
-	ExecuteType ExecuteType  `json:"execute_type"`
-	ScheduledAt *time.Time   `json:"scheduled_at,omitempty"`
-	PeriodStart *time.Time   `json:"period_start,omitempty"`
-	PeriodEnd   *time.Time   `json:"period_end,omitempty"`
-	PeriodTime  string       `json:"period_time,omitempty"`
+	ExecuteType ExecuteType `json:"execute_type"`
+	ScheduledAt *time.Time  `json:"scheduled_at,omitempty"`
+	PeriodStart *time.Time  `json:"period_start,omitempty"`
+	PeriodEnd   *time.Time  `json:"period_end,omitempty"`
+	PeriodTime  string      `json:"period_time,omitempty"`
 
 	// Retry strategy
-	OfflineRetry      bool `json:"offline_retry"`
-	OfflineRetryWait  int  `json:"offline_retry_wait"`
-	FailedRetry       bool `json:"failed_retry"`
-	FailedRetryCount  int  `json:"failed_retry_count"`
-	FailedRetryInterval int `json:"failed_retry_interval"`
+	OfflineRetry        bool `json:"offline_retry"`
+	OfflineRetryWait    int  `json:"offline_retry_wait"`
+	FailedRetry         bool `json:"failed_retry"`
+	FailedRetryCount    int  `json:"failed_retry_count"`
+	FailedRetryInterval int  `json:"failed_retry_interval"`
 
 	// Execution timestamps
 	StartedAt  *time.Time `json:"started_at,omitempty"`
@@ -240,6 +288,7 @@ type TaskFilter struct {
 	ExecuteType *ExecuteType
 	Result      *TaskResult
 	TaskName    *string // case-insensitive substring match on task_name
+	TaskOrigin  *TaskOrigin
 	model.ListRequest
 }
 
@@ -270,8 +319,8 @@ type MMLCustomCommand struct {
 // 私有命令可见性（T-0090-c）：
 //   - public 命令：始终可见
 //   - private 命令：仅在以下任一条件满足时可见
-//       (a) creator == Creator （self fallback，防止脱离 group 后看不见自己创建的）
-//       (b) creator's RBAC group(s) 与 VisibleGroupIDs 交集非空 （group-share）
+//     (a) creator == Creator （self fallback，防止脱离 group 后看不见自己创建的）
+//     (b) creator's RBAC group(s) 与 VisibleGroupIDs 交集非空 （group-share）
 //   - 若 Creator 与 VisibleGroupIDs 均为空 → 默认 deny private（仅 public 可见）
 //
 // UserID 由 service 层接收后调 RoleQuerier 派生 VisibleGroupIDs；repo 层仅消费派生结果。
@@ -280,9 +329,9 @@ type CustomCommandFilter struct {
 	OperationType   *string
 	CommandScope    *string
 	CategoryGroup   *string
-	Creator         *string      // 当前 admin 的 username；用于 private 命令 self-fallback 可见性
-	UserID          *uuid.UUID   // 当前 admin 的 user_id；service 层据此派生 VisibleGroupIDs
-	VisibleGroupIDs []uuid.UUID  // service 派生后填入；repo 层用作 group-share 可见性 SQL 参数
+	Creator         *string     // 当前 admin 的 username；用于 private 命令 self-fallback 可见性
+	UserID          *uuid.UUID  // 当前 admin 的 user_id；service 层据此派生 VisibleGroupIDs
+	VisibleGroupIDs []uuid.UUID // service 派生后填入；repo 层用作 group-share 可见性 SQL 参数
 	model.ListRequest
 }
 
@@ -297,6 +346,7 @@ type MMLParamRef struct {
 	Tr069Path         string                 `json:"tr069_path"`
 	ValueType         string                 `json:"value_type"`
 	IsWritable        bool                   `json:"is_writable"`
+	IsRequired        bool                   `json:"is_required"`
 	DefaultValue      string                 `json:"default_value,omitempty"`
 	JsRegex           string                 `json:"js_regex,omitempty"`
 	ValueConstraint   map[string]interface{} `json:"value_constraint,omitempty"`

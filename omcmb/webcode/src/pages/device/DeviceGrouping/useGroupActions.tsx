@@ -3,6 +3,7 @@ import { App, Form } from 'antd';
 import type { GroupItem, NameFilterItem } from './types';
 import { parseRangeString } from './types';
 import type { UseNameFiltersReturn } from './useNameFilters';
+import styles from './DeviceGrouping.module.css';
 
 export interface AddGroupFormValues {
   /** 单值名称 — 表单只有一个 antd Input（去多语言，方案 A）。 */
@@ -14,8 +15,10 @@ export interface AddGroupFormValues {
 export interface AddChildFormValues {
   /** 单值名称 — 与一级分组一致，单个 antd Input。 */
   name?: string;
-  matchingMode: 'deviceName' | 'lac' | 'tac';
+  matchingMode: 'deviceName' | 'lac' | 'tac' | 'serialNumber';
   tacRag: string;
+  sourceGroupId?: string;
+  serialNumbers?: string;
 }
 
 interface CreateGroupArgs {
@@ -26,9 +29,11 @@ interface CreateGroupArgs {
   parent_id?: string;
   remark: string;
   matching_mode?: string;
+  source_group_id?: string;
   name_rule_list?: NameFilterItem[];
   lac_list?: number[];
   tac_list?: number[];
+  serial_number_list?: string[];
 }
 
 interface UpdateGroupArgs {
@@ -45,15 +50,31 @@ interface UpdateGroupArgs {
      * 之前类型只允许 name/parent_id/remark，导致 L2 编辑改匹配规则时被 TS 静默
      * 截断 → 后端收不到 → fireGroupMatch 跑旧规则 → 设备不重新入组。
      */
-    matching_mode?: 'deviceName' | 'lac' | 'tac';
+    matching_mode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber';
+    source_group_id?: string;
     name_rule_list?: NameFilterItem[];
     lac_list?: number[];
     tac_list?: number[];
+    serial_number_list?: string[];
   };
 }
 
 export interface MutationLike<TArgs> {
   mutateAsync: (args: TArgs) => Promise<unknown>;
+}
+
+function getDeleteImpact(groups: GroupItem[], groupId: string, isLevel1: boolean) {
+  const group = groups.find((g) => g.id === groupId);
+  const children = isLevel1 ? groups.filter((g) => g.parentId === groupId) : [];
+  const deviceCount = [group, ...children]
+    .filter((g): g is GroupItem => Boolean(g))
+    .reduce((sum, g) => sum + (g.deviceCount ?? 0), 0);
+
+  return {
+    group,
+    childCount: children.length,
+    deviceCount,
+  };
 }
 
 /**
@@ -148,7 +169,7 @@ export function useGroupActions(deps: {
     (groupId: string) => {
       setParentGroupId(groupId);
       addChildForm.resetFields();
-      addChildForm.setFieldsValue({ matchingMode: 'deviceName', tacRag: '' });
+      addChildForm.setFieldsValue({ matchingMode: 'deviceName', tacRag: '', serialNumbers: '', sourceGroupId: undefined });
       childNameFilters.reset();
       setAddChildDrawerOpen(true);
     },
@@ -181,7 +202,9 @@ export function useGroupActions(deps: {
       // R1.2: 回填当前分组的匹配规则到表单。之前这里硬编码 'deviceName' + 空
       // tacRag，无视 grp 的真实规则，导致用户打开编辑抽屉看到的就是空白。
       const mode: AddChildFormValues['matchingMode'] =
-        grp.matchingMode === 'lac' || grp.matchingMode === 'tac' ? grp.matchingMode : 'deviceName';
+        grp.matchingMode === 'lac' || grp.matchingMode === 'tac' || grp.matchingMode === 'serialNumber'
+          ? grp.matchingMode
+          : 'deviceName';
 
       let tacRag = '';
       if (mode === 'lac' && grp.lacList && grp.lacList.length > 0) {
@@ -195,6 +218,8 @@ export function useGroupActions(deps: {
         name: grp.name || grp.nameI18n?.['zh-CN'] || '',
         matchingMode: mode,
         tacRag,
+        sourceGroupId: grp.sourceGroupId,
+        serialNumbers: grp.serialNumberList?.join(',') ?? '',
       });
 
       // 回填 name_rule_list 到 NameFilters hook 的内部状态
@@ -218,14 +243,38 @@ export function useGroupActions(deps: {
 
   const confirmDelete = useCallback(
     (groupId: string, isLevel1: boolean) => {
+      const { group, childCount, deviceCount } = getDeleteImpact(groups, groupId, isLevel1);
+      if (!group) {
+        void message.error(t('common.operationFailed'));
+        return;
+      }
+
       modal.confirm({
         title: t('common.confirmDelete'),
-        width: 480,
+        width: 520,
         content: (
-          <div>
-            <div>{t('common.deleteConfirmMsg')}</div>
-            <div style={{ marginTop: 8, color: 'var(--color-text-secondary)', fontSize: 13, whiteSpace: 'nowrap' }}>
-              {isLevel1 ? t('device.deleteLevel1Desc') : t('device.deleteLevel2Desc')}
+          <div className={styles.groupDeleteConfirm}>
+            <div className={styles.groupDeleteConfirmTitle}>
+              {t('device.group.deleteConfirmMsg', { name: group.name })}
+            </div>
+            <div className={styles.groupDeleteImpactList}>
+              {isLevel1 ? (
+                <div className={styles.groupDeleteImpactItem}>
+                  <span>{t('device.group.deleteChildGroupsLabel')}</span>
+                  <strong>{t('device.group.deleteChildGroupsValue', { count: childCount })}</strong>
+                </div>
+              ) : null}
+              <div className={styles.groupDeleteImpactItem}>
+                <span>{t('device.group.deleteDevicesLabel')}</span>
+                <strong>{t('device.group.deleteDevicesValue', { count: deviceCount })}</strong>
+              </div>
+              <div className={styles.groupDeleteImpactItem}>
+                <span>{t('device.group.deleteResultLabel')}</span>
+                <strong>{t('device.group.deleteResultUngrouped')}</strong>
+              </div>
+            </div>
+            <div className={styles.groupDeleteConfirmHint}>
+              {t('device.group.deleteDevicePreserveHint')}
             </div>
           </div>
         ),
@@ -244,7 +293,7 @@ export function useGroupActions(deps: {
         },
       });
     },
-    [deleteGroupMutation, modal, message, selectedGroupId, setSelectedGroupId, t]
+    [deleteGroupMutation, groups, modal, message, selectedGroupId, setSelectedGroupId, t]
   );
 
   // ── Save handlers ──
@@ -305,6 +354,7 @@ export function useGroupActions(deps: {
       let name_rule_list: NameFilterItem[] | undefined;
       let lac_list: number[] | undefined;
       let tac_list: number[] | undefined;
+      let serial_number_list: string[] | undefined;
 
       if (values.matchingMode === 'deviceName') {
         matching_mode = 'deviceName';
@@ -315,6 +365,9 @@ export function useGroupActions(deps: {
       } else if (values.matchingMode === 'tac') {
         matching_mode = 'tac';
         tac_list = parseRangeString(values.tacRag || '');
+	  } else if (values.matchingMode === 'serialNumber') {
+		matching_mode = 'serialNumber';
+		serial_number_list = parseSerialNumbers(values.serialNumbers);
       }
 
       await createGroupMutation.mutateAsync({
@@ -323,9 +376,11 @@ export function useGroupActions(deps: {
         parent_id: parentGroupId ?? undefined,
         remark: '',
         matching_mode,
+        source_group_id: values.sourceGroupId,
         name_rule_list,
         lac_list,
         tac_list,
+        serial_number_list,
       });
       void message.success(t('common.success'));
       setAddChildDrawerOpen(false);
@@ -343,10 +398,11 @@ export function useGroupActions(deps: {
 
       // R1.3: 全量替换语义 — 用户在表单上看到的就是最终落库的，避免增量合并歧义。
       // 切换 matchingMode 时显式清空非当前模式的列表字段，让后端覆盖为空数组。
-      let matching_mode: 'deviceName' | 'lac' | 'tac' | undefined;
+      let matching_mode: 'deviceName' | 'lac' | 'tac' | 'serialNumber' | undefined;
       let name_rule_list: NameFilterItem[] = [];
       let lac_list: number[] = [];
       let tac_list: number[] = [];
+      let serial_number_list: string[] = [];
 
       if (values.matchingMode === 'deviceName') {
         matching_mode = 'deviceName';
@@ -359,6 +415,9 @@ export function useGroupActions(deps: {
       } else if (values.matchingMode === 'tac') {
         matching_mode = 'tac';
         tac_list = parseRangeString(values.tacRag || '');
+	  } else if (values.matchingMode === 'serialNumber') {
+		matching_mode = 'serialNumber';
+		serial_number_list = parseSerialNumbers(values.serialNumbers);
       }
 
       await updateGroupMutation.mutateAsync({
@@ -367,9 +426,11 @@ export function useGroupActions(deps: {
           name,
           name_i18n: { 'zh-CN': name },
           matching_mode,
+          source_group_id: values.sourceGroupId,
           name_rule_list,
           lac_list,
           tac_list,
+          serial_number_list,
         },
       });
       // 改匹配方式会触发后端异步 fireGroupMatch 重新入组，设备数据非即时刷新，
@@ -393,7 +454,7 @@ export function useGroupActions(deps: {
 
   const handleMatchingModeChange = useCallback(() => {
     childNameFilters.reset();
-    addChildForm.setFieldsValue({ tacRag: '' });
+    addChildForm.setFieldsValue({ tacRag: '', serialNumbers: '' });
   }, [addChildForm, childNameFilters]);
 
   return {
@@ -435,6 +496,10 @@ export function useGroupActions(deps: {
       onMatchingModeChange: handleMatchingModeChange,
     },
   };
+}
+
+function parseSerialNumbers(value?: string): string[] {
+  return [...new Set((value ?? '').split(/[\s,;]+/).map((item) => item.trim()).filter(Boolean))];
 }
 
 // ── 错误抽取辅助（文件内私有） ──

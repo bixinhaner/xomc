@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/global"
+	acsrpc "github.com/omcgo/omcgo/internal/acs/rpc"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 )
@@ -46,8 +47,14 @@ type Service struct {
 	pathTranslator               PathTranslator               // R-9.3 per-device standardPath → privatePath 翻译；nil 时跳过
 	exporter                     *Exporter                    // 结果 CSV 导出（MinIO）；nil 时导出端点返回 503
 	// 参数路径 → 友好名（standard_params.description）解析，CSV「参数名称」列用；nil 时回退 param_refs。
-	pathNameResolver func(ctx context.Context, paths []string) (map[string]string, error)
-	logger           *zap.Logger
+	pathNameResolver    func(ctx context.Context, paths []string) (map[string]string, error)
+	scriptImportService ScriptImportServiceAPI
+	// scriptExecutionValidator is optional because older deployments may not
+	// have the TXT validator wired yet. When present it performs the dynamic
+	// device/command checks immediately before an execution is persisted and
+	// again when a scheduled instance is dispatched.
+	scriptExecutionValidator ScriptImportValidationRunner
+	logger                   *zap.Logger
 
 	// 按 product_class 缓存 standardPath→privatePath 翻译结果（TTL 1 分钟）。混类型任务
 	// per-product 翻译一次、同 product_class 复用，避免逐设备重复翻译。
@@ -160,6 +167,27 @@ func NewService(
 // SetAuditRepo sets the audit repository for command execution logging.
 func (s *Service) SetAuditRepo(repo AuditRepository) {
 	s.auditRepo = repo
+}
+
+// SetScriptImportService injects the server-authoritative TXT import service
+// used by Handler's import routes. It is kept on Service as the module's
+// composition boundary, while Handler receives the narrow API interface.
+func (s *Service) SetScriptImportService(importService ScriptImportServiceAPI) {
+	s.scriptImportService = importService
+}
+
+// SetScriptExecutionValidator wires the server-authoritative validator used
+// by imported-script execution preflight. Keeping this as a narrow setter
+// avoids changing the long-standing NewService constructor used by callers
+// and tests.
+func (s *Service) SetScriptExecutionValidator(validator ScriptImportValidationRunner) {
+	s.scriptExecutionValidator = validator
+}
+
+// ScriptImportService returns the configured TXT import service for handler
+// wiring. A nil value means the optional import capability is unavailable.
+func (s *Service) ScriptImportService() ScriptImportServiceAPI {
+	return s.scriptImportService
 }
 
 // SetFanouter sets the fan-out engine for creating device_tasks from MML tasks.
@@ -450,6 +478,38 @@ func (s *Service) UpdateScript(ctx context.Context, id uuid.UUID, script *MMLScr
 	return existing, nil
 }
 
+// UpdateScriptMetadata changes only mutable presentation metadata. Imported
+// TXT content and its server-generated plan remain immutable here; replacing
+// content must go through ReplaceScriptFromImport.
+func (s *Service) UpdateScriptMetadata(ctx context.Context, id uuid.UUID, name, description string, tags []string) (*MMLScript, error) {
+	existing, err := s.scriptRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get mml script: %w", err)
+	}
+	if repo, ok := s.scriptRepo.(interface {
+		UpdateMetadata(context.Context, uuid.UUID, string, string, []string) error
+	}); ok {
+		if err := repo.UpdateMetadata(ctx, id, name, description, tags); err != nil {
+			return nil, fmt.Errorf("update mml script metadata: %w", err)
+		}
+	} else {
+		existing.ScriptName = name
+		existing.Description = description
+		existing.Tags = tags
+		if err := s.scriptRepo.Update(ctx, existing); err != nil {
+			return nil, fmt.Errorf("update mml script metadata: %w", err)
+		}
+	}
+	// UpdateMetadata writes updated_at in PostgreSQL. Reload the row so callers
+	// receive the new optimistic-concurrency version before a replacement
+	// import is attempted.
+	updated, err := s.scriptRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("reload mml script metadata: %w", err)
+	}
+	return updated, nil
+}
+
 // DeleteScript deletes an MML script by ID.
 func (s *Service) DeleteScript(ctx context.Context, id uuid.UUID) error {
 	return s.scriptRepo.Delete(ctx, id)
@@ -555,10 +615,18 @@ type ExecuteRequest struct {
 	DeviceSNs   []string                 `json:"device_sns"`
 	Parameters  map[string]interface{}   `json:"parameters"`
 	TaskName    string                   `json:"task_name"`
+	RequestID   string                   `json:"request_id,omitempty"`
 	Creator     string                   `json:"creator"`
 	Executor    string                   `json:"executor,omitempty"`
 	Commands    []map[string]interface{} `json:"commands"`
+	PlanItems   []MMLPlanItem            `json:"plan_items"`
 	ScriptID    *string                  `json:"script_id,omitempty"`
+	// Immutable metadata copied from an imported script into the task snapshot.
+	// These fields are populated by CreateScriptExecution and are not accepted
+	// from the legacy HTTP command endpoints.
+	ScriptContentSHA256     string `json:"-"`
+	ScriptValidationVersion string `json:"-"`
+	PreservePlanSnapshot    bool   `json:"-"`
 
 	// Parameter path command support
 	ParamPaths    []string `json:"param_paths"`
@@ -581,6 +649,335 @@ type ExecuteRequest struct {
 	FailedRetry         bool `json:"failed_retry"`
 	FailedRetryCount    int  `json:"failed_retry_count"`
 	FailedRetryInterval int  `json:"failed_retry_interval"`
+}
+
+const (
+	maxMMLTaskDevices = 200
+	maxMMLPlanItems   = 2000
+)
+
+func validateMMLTaskScale(req ExecuteRequest, mode TaskExecuteMode) error {
+	if len(req.PlanItems) > maxMMLPlanItems {
+		return fmt.Errorf("plan item count %d exceeds limit %d: %w", len(req.PlanItems), maxMMLPlanItems, commonerrors.ErrInvalidInput)
+	}
+
+	deviceSNs := req.DeviceSNs
+	if mode == TaskExecuteModeDeviceBound {
+		deviceSNs = make([]string, 0, len(req.PlanItems))
+		for _, item := range req.PlanItems {
+			deviceSNs = append(deviceSNs, item.DeviceSN)
+		}
+	}
+	seen := make(map[string]struct{}, len(deviceSNs))
+	for _, rawSN := range deviceSNs {
+		sn := strings.TrimSpace(rawSN)
+		if sn != "" {
+			seen[sn] = struct{}{}
+		}
+	}
+	if len(seen) > maxMMLTaskDevices {
+		return fmt.Errorf("device count %d exceeds limit %d: %w", len(seen), maxMMLTaskDevices, commonerrors.ErrInvalidInput)
+	}
+	return nil
+}
+
+func taskExecuteModeFromRequest(raw string, hasPlanItems bool) (TaskExecuteMode, error) {
+	mode := strings.ToLower(strings.TrimSpace(raw))
+	switch mode {
+	case "", "whole", "single_path":
+		if hasPlanItems {
+			return TaskExecuteModeDeviceBound, nil
+		}
+		return TaskExecuteModeCommon, nil
+	case string(TaskExecuteModeCommon):
+		if hasPlanItems {
+			return "", fmt.Errorf("plan_items cannot be used with execute_mode=common: %w", commonerrors.ErrInvalidInput)
+		}
+		return TaskExecuteModeCommon, nil
+	case string(TaskExecuteModeDeviceBound):
+		return TaskExecuteModeDeviceBound, nil
+	default:
+		if hasPlanItems {
+			return "", fmt.Errorf("unsupported execute_mode %q for plan_items: %w", raw, commonerrors.ErrInvalidInput)
+		}
+		return TaskExecuteModeCommon, nil
+	}
+}
+
+func cloneCommandMap(in map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func commandString(entry map[string]interface{}, key string) string {
+	v, _ := entry[key].(string)
+	return strings.TrimSpace(v)
+}
+
+func commandParameters(entry map[string]interface{}) map[string]interface{} {
+	raw, ok := entry["parameters"].(map[string]interface{})
+	if ok {
+		return raw
+	}
+	return nil
+}
+
+func formatMMLParameterValue(value interface{}) string {
+	s := strings.TrimSpace(fmt.Sprint(value))
+	if s == "" {
+		return "{}"
+	}
+	if strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}") {
+		return s
+	}
+	return "{" + s + "}"
+}
+
+func formatMMLParameterList(params map[string]interface{}) string {
+	if len(params) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(params))
+	for key := range params {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%s", key, formatMMLParameterValue(params[key])))
+	}
+	return strings.Join(parts, ",")
+}
+
+func stripDeviceSuffixFromMML(rawLine, deviceSN string) string {
+	line := strings.TrimSpace(rawLine)
+	if line == "" {
+		return ""
+	}
+	if deviceSN != "" {
+		suffix := ";" + strings.TrimSpace(deviceSN)
+		if strings.HasSuffix(line, suffix) {
+			line = strings.TrimSpace(strings.TrimSuffix(line, suffix))
+		}
+	}
+	line = strings.TrimSuffix(line, ";")
+	return strings.TrimSpace(line)
+}
+
+func formatMMLScriptForResult(command map[string]interface{}, rawLine, deviceSN string) string {
+	if script := stripDeviceSuffixFromMML(rawLine, deviceSN); script != "" {
+		return script
+	}
+	code := commandString(command, "command_code")
+	if code == "" {
+		return ""
+	}
+	if params := formatMMLParameterList(commandParameters(command)); params != "" {
+		return code + ":" + params
+	}
+	return code
+}
+
+func uniqueDeviceSNsFromPlanItems(items []MMLPlanItem) []string {
+	seen := make(map[string]struct{}, len(items))
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		sn := strings.TrimSpace(item.DeviceSN)
+		if sn == "" {
+			continue
+		}
+		if _, ok := seen[sn]; ok {
+			continue
+		}
+		seen[sn] = struct{}{}
+		out = append(out, sn)
+	}
+	return out
+}
+
+func (s *Service) normalizePlanItems(ctx context.Context, items []MMLPlanItem) ([]MMLPlanItem, []map[string]interface{}, []string, error) {
+	if len(items) == 0 {
+		return nil, nil, nil, fmt.Errorf("plan_items required for device_bound task: %w", commonerrors.ErrInvalidInput)
+	}
+
+	normalized := make([]MMLPlanItem, 0, len(items))
+	commands := make([]map[string]interface{}, 0, len(items))
+	nextOrderBySN := make(map[string]int, len(items))
+	ordersBySN := make(map[string]map[int]struct{}, len(items))
+
+	for idx, item := range items {
+		sn := strings.TrimSpace(item.DeviceSN)
+		if sn == "" {
+			return nil, nil, nil, fmt.Errorf("plan_items[%d].device_sn required: %w", idx, commonerrors.ErrInvalidInput)
+		}
+
+		lineNo := item.LineNo
+		if lineNo <= 0 {
+			lineNo = idx + 1
+		}
+
+		order := item.Order
+		if order <= 0 {
+			order = nextOrderBySN[sn] + 1
+		}
+		byOrder := ordersBySN[sn]
+		if byOrder == nil {
+			byOrder = map[int]struct{}{}
+			ordersBySN[sn] = byOrder
+		}
+		if _, exists := byOrder[order]; exists {
+			return nil, nil, nil, fmt.Errorf("plan_items[%d] duplicate order %d for device %s: %w", idx, order, sn, commonerrors.ErrInvalidInput)
+		}
+		byOrder[order] = struct{}{}
+		if order > nextOrderBySN[sn] {
+			nextOrderBySN[sn] = order
+		}
+
+		baseCommand := cloneCommandMap(item.Command)
+		if item.CommandCode != "" && commandString(baseCommand, "command_code") == "" {
+			baseCommand["command_code"] = strings.TrimSpace(item.CommandCode)
+		}
+		if item.OperationType != "" && commandString(baseCommand, "operation_type") == "" {
+			baseCommand["operation_type"] = strings.TrimSpace(item.OperationType)
+		}
+		if item.Parameters != nil {
+			if _, exists := baseCommand["parameters"]; !exists {
+				baseCommand["parameters"] = item.Parameters
+			}
+		}
+		if _, exists := baseCommand["parameters"]; !exists {
+			baseCommand["parameters"] = map[string]interface{}{}
+		}
+		if commandString(baseCommand, "command_code") == "" && commandString(baseCommand, "rpc_method") == "" {
+			return nil, nil, nil, fmt.Errorf("plan_items[%d].command.command_code required: %w", idx, commonerrors.ErrInvalidInput)
+		}
+
+		planCommands := []map[string]interface{}{baseCommand}
+		if isRawPathCommandEntry(baseCommand) {
+			var err error
+			planCommands, err = normalizeRawPathCommandEntry(baseCommand)
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("plan_items[%d].command: %w", idx, err)
+			}
+		} else {
+			attachObjectNameParamFromTarget(baseCommand)
+		}
+		if len(planCommands) == 0 {
+			return nil, nil, nil, fmt.Errorf("plan_items[%d].command produced no executable commands: %w", idx, commonerrors.ErrInvalidInput)
+		}
+
+		firstCommandIndex := len(commands)
+		for subIdx, command := range planCommands {
+			command["plan_line_no"] = lineNo
+			command["plan_device_sn"] = sn
+			command["plan_order"] = order
+			command["plan_sort_order"] = order*planOrderScale + subIdx
+			if raw := strings.TrimSpace(item.RawLine); raw != "" {
+				command["plan_raw_line"] = raw
+			}
+			commands = append(commands, command)
+		}
+
+		normalized = append(normalized, MMLPlanItem{
+			LineNo:   lineNo,
+			DeviceSN: sn,
+			Order:    order,
+			RawLine:  item.RawLine,
+			Command:  commands[firstCommandIndex],
+		})
+	}
+
+	commands = s.resolveRPCMethods(ctx, commands)
+	for i := range normalized {
+		for cmdIdx, cmd := range commands {
+			if commandInt(cmd, "plan_line_no") == normalized[i].LineNo &&
+				commandString(cmd, "plan_device_sn") == normalized[i].DeviceSN &&
+				commandInt(cmd, "plan_order") == normalized[i].Order {
+				normalized[i].Command = commands[cmdIdx]
+				break
+			}
+		}
+	}
+	return normalized, commands, uniqueDeviceSNsFromPlanItems(normalized), nil
+}
+
+func applyExecuteSchedule(task *MMLTask, req ExecuteRequest) error {
+	scheduledAt, err := parseExecuteTime("scheduled_at", req.ScheduledAt)
+	if err != nil {
+		return err
+	}
+	periodStart, err := parseExecuteTime("period_start", req.PeriodStart)
+	if err != nil {
+		return err
+	}
+	periodEnd, err := parseExecuteTime("period_end", req.PeriodEnd)
+	if err != nil {
+		return err
+	}
+
+	task.ScheduledAt = scheduledAt
+	task.PeriodStart = periodStart
+	task.PeriodEnd = periodEnd
+	task.PeriodTime = strings.TrimSpace(req.PeriodTime)
+
+	switch req.ExecuteType {
+	case ExecuteScheduled:
+		if task.ScheduledAt == nil {
+			return fmt.Errorf("scheduled_at required for scheduled task: %w", commonerrors.ErrInvalidInput)
+		}
+	case ExecutePeriodic:
+		if task.PeriodStart == nil {
+			return fmt.Errorf("period_start required for periodic task: %w", commonerrors.ErrInvalidInput)
+		}
+		if task.PeriodEnd == nil {
+			return fmt.Errorf("period_end required for periodic task: %w", commonerrors.ErrInvalidInput)
+		}
+		if task.PeriodTime == "" {
+			return fmt.Errorf("period_time required for periodic task: %w", commonerrors.ErrInvalidInput)
+		}
+		if _, _, _, err := parsePeriodTime(task.PeriodTime); err != nil {
+			return fmt.Errorf("invalid period_time %q: %w", task.PeriodTime, commonerrors.ErrInvalidInput)
+		}
+		if task.PeriodEnd.Before(*task.PeriodStart) {
+			return fmt.Errorf("period_end must be after period_start: %w", commonerrors.ErrInvalidInput)
+		}
+		if computeNextPeriodicTrigger(task, time.Now()) == nil {
+			return fmt.Errorf("periodic schedule has no future trigger: %w", commonerrors.ErrInvalidInput)
+		}
+	}
+
+	return nil
+}
+
+func parseExecuteTime(field string, raw *string) (*time.Time, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	value := strings.TrimSpace(*raw)
+	if value == "" {
+		return nil, nil
+	}
+
+	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return &parsed, nil
+	}
+	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+		return &parsed, nil
+	}
+
+	for _, layout := range []string{"2006-01-02T15:04:05", "2006-01-02 15:04:05"} {
+		if parsed, err := time.ParseInLocation(layout, value, time.Local); err == nil {
+			return &parsed, nil
+		}
+	}
+
+	return nil, fmt.Errorf("invalid %s %q: %w", field, value, commonerrors.ErrInvalidInput)
 }
 
 // ExecuteGroupRequest 批量执行某 mml_param_group 下所有命令的入参
@@ -679,6 +1076,14 @@ func (s *Service) ExecuteGroup(ctx context.Context, req ExecuteGroupRequest) (*M
 // ExecuteCommand creates an MML task with pending status.
 // Real execution through cmdQueue to ACS is a future integration.
 func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLTask, error) {
+	taskExecuteMode, err := taskExecuteModeFromRequest(req.ExecuteMode, len(req.PlanItems) > 0)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateMMLTaskScale(req, taskExecuteMode); err != nil {
+		return nil, err
+	}
+
 	// Build the commands list from the request
 	commands := req.Commands
 	if commands == nil {
@@ -698,7 +1103,7 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 		}
 		scriptID = &sid
 		// 只在调用方未提供 commands 时，才从库解析脚本内容（向后兼容 /mml/execute 直传 script_id）
-		if len(commands) == 0 {
+		if taskExecuteMode == TaskExecuteModeCommon && len(commands) == 0 {
 			script, err := s.scriptRepo.GetByID(ctx, sid)
 			if err != nil {
 				return nil, fmt.Errorf("resolve script %s: %w", sid, err)
@@ -719,25 +1124,53 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 			}
 		}
 	}
+	if taskExecuteMode == TaskExecuteModeCommon && len(commands) > maxMMLPlanItems {
+		return nil, fmt.Errorf("command row count %d exceeds limit %d: %w", len(commands), maxMMLPlanItems, commonerrors.ErrInvalidInput)
+	}
 
-	// If a command_code is provided, resolve it and build the command entry
-	if req.CommandCode != "" {
-		cmd, err := s.cmdRepo.GetByCode(ctx, req.CommandCode)
+	var planItems []MMLPlanItem
+	deviceSNs := req.DeviceSNs
+	if taskExecuteMode == TaskExecuteModeDeviceBound {
+		var err error
+		planItems, commands, deviceSNs, err = s.normalizePlanItems(ctx, req.PlanItems)
 		if err != nil {
-			// Sprint B-6 fallback：standard-model 重建后部分老 command_code 已下线，
-			// FE Console 保存的 mml_custom_command 可能仍引用孤儿码。此时不阻塞任务
-			// 创建——退化为透传 entry，下游 resolveRPCMethods / fanout 会再次尝试
-			// 解析；若彻底无法识别，Fanouter 内部会跳过对应 device 任务并在审计
-			// 日志中留下痕迹，比直接 500 对用户友好得多。
-			if errors.Is(err, commonerrors.ErrNotFound) {
-				s.logger.Warn("mml execute: command_code not in mml_commands, degrading to raw passthrough",
-					zap.String("command_code", req.CommandCode),
-					zap.String("operation_type", req.OperationType),
-				)
+			return nil, err
+		}
+	} else {
+		// If a command_code is provided, resolve it and build the command entry.
+		if req.CommandCode != "" {
+			cmd, err := s.cmdRepo.GetByCode(ctx, req.CommandCode)
+			if err != nil {
+				// Sprint B-6 fallback：standard-model 重建后部分老 command_code 已下线，
+				// FE Console 保存的 mml_custom_command 可能仍引用孤儿码。此时不阻塞任务
+				// 创建——退化为透传 entry，下游 resolveRPCMethods / fanout 会再次尝试
+				// 解析；若彻底无法识别，Fanouter 内部会跳过对应 device 任务并在审计
+				// 日志中留下痕迹，比直接 500 对用户友好得多。
+				if errors.Is(err, commonerrors.ErrNotFound) {
+					s.logger.Warn("mml execute: command_code not in mml_commands, degrading to raw passthrough",
+						zap.String("command_code", req.CommandCode),
+						zap.String("operation_type", req.OperationType),
+					)
+					entry := map[string]interface{}{
+						"command_code": req.CommandCode,
+						"parameters":   req.Parameters,
+						"orphan":       true, // 标记孤儿，便于审计 / FE 提示
+					}
+					if len(req.ParamPaths) > 0 {
+						entry["param_paths"] = req.ParamPaths
+					}
+					if req.OperationType != "" {
+						entry["operation_type"] = req.OperationType
+					}
+					commands = append(commands, entry)
+				} else {
+					return nil, fmt.Errorf("resolve command code %q: %w", req.CommandCode, err)
+				}
+			} else {
 				entry := map[string]interface{}{
-					"command_code": req.CommandCode,
+					"command_code": cmd.CommandCode,
+					"rpc_method":   cmd.RPCMethod,
 					"parameters":   req.Parameters,
-					"orphan":       true, // 标记孤儿，便于审计 / FE 提示
 				}
 				if len(req.ParamPaths) > 0 {
 					entry["param_paths"] = req.ParamPaths
@@ -745,156 +1178,141 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 				if req.OperationType != "" {
 					entry["operation_type"] = req.OperationType
 				}
+				s.attachParamRefs(ctx, entry, cmd.ID)
 				commands = append(commands, entry)
-			} else {
-				return nil, fmt.Errorf("resolve command code %q: %w", req.CommandCode, err)
 			}
-		} else {
-			entry := map[string]interface{}{
-				"command_code": cmd.CommandCode,
-				"rpc_method":   cmd.RPCMethod,
-				"parameters":   req.Parameters,
+		} else if len(req.ParamPaths) > 0 {
+			// 裸路径模式：用户没在命令树选命令，直接在"参数路径指定"面板敲了 N 个 TR-069 路径。
+			// 支持 LST/DSP/MOD/ADD/RMV 五种操作类型；param_refs 在此处按 op 合成
+			// 最小集合，下游 BuildTR069Params 据此构造 wire 格式 SOAP body。
+			op := strings.ToUpper(strings.TrimSpace(req.OperationType))
+			if op == "" {
+				op = "LST"
 			}
-			if len(req.ParamPaths) > 0 {
-				entry["param_paths"] = req.ParamPaths
-			}
-			if req.OperationType != "" {
-				entry["operation_type"] = req.OperationType
-			}
-			s.attachParamRefs(ctx, entry, cmd.ID)
-			commands = append(commands, entry)
-		}
-	} else if len(req.ParamPaths) > 0 {
-		// 裸路径模式：用户没在命令树选命令，直接在"参数路径指定"面板敲了 N 个 TR-069 路径。
-		// 支持 LST/DSP/MOD/ADD/RMV 五种操作类型；param_refs 在此处按 op 合成
-		// 最小集合，下游 BuildTR069Params 据此构造 wire 格式 SOAP body。
-		op := strings.ToUpper(strings.TrimSpace(req.OperationType))
-		if op == "" {
-			op = "LST"
-		}
 
-		// 过滤空路径并对齐 param_values（按下标平行）。
-		paths := make([]string, 0, len(req.ParamPaths))
-		values := make([]string, 0, len(req.ParamPaths))
-		for i, p := range req.ParamPaths {
-			t := strings.TrimSpace(p)
-			if t == "" {
-				continue
-			}
-			paths = append(paths, t)
-			if i < len(req.ParamValues) {
-				values = append(values, req.ParamValues[i])
-			} else {
-				values = append(values, "")
-			}
-		}
-		if len(paths) == 0 {
-			return nil, fmt.Errorf("raw param_paths mode: all paths empty")
-		}
-
-		switch op {
-		case "LST", "DSP":
-			if req.ExecuteMode == "single_path" {
-				// 逐 PATH：每 path 一条 GetParameterValues command → 每 path 一个 device_task/RPC，
-				// path 级成败独立（某 path 9005 不连累其它 path）。
-				for _, p := range paths {
-					commands = append(commands, map[string]interface{}{
-						"command_code":   "RAW " + op,
-						"rpc_method":     "GetParameterValues",
-						"operation_type": op,
-						"param_paths":    []string{p},
-						"param_refs":     []MMLParamRef{{Tr069Path: p, ValueType: "string"}},
-					})
+			// 过滤空路径并对齐 param_values（按下标平行）。
+			paths := make([]string, 0, len(req.ParamPaths))
+			values := make([]string, 0, len(req.ParamPaths))
+			for i, p := range req.ParamPaths {
+				t := strings.TrimSpace(p)
+				if t == "" {
+					continue
 				}
-				break
-			}
-			synthRefs := make([]MMLParamRef, len(paths))
-			for i, p := range paths {
-				synthRefs[i] = MMLParamRef{Tr069Path: p, ValueType: "string"}
-			}
-			commands = append(commands, map[string]interface{}{
-				"command_code":   "RAW " + op,
-				"rpc_method":     "GetParameterValues",
-				"operation_type": op,
-				"param_paths":    paths,
-				"param_refs":     synthRefs,
-			})
-		case "MOD":
-			// SetParameterValues 一定要有非空值。让 ParamCode == Tr069Path，
-			// 这样 buildParameterValues 可以按 ParamCode 索引到 Tr069Path。
-			for i, v := range values {
-				if strings.TrimSpace(v) == "" {
-					return nil, fmt.Errorf("raw param_paths MOD: param_values[%d] is empty for path %q", i, paths[i])
+				paths = append(paths, t)
+				if i < len(req.ParamValues) {
+					values = append(values, req.ParamValues[i])
+				} else {
+					values = append(values, "")
 				}
 			}
-			if req.ExecuteMode == "single_path" {
-				// 逐 PATH：每 path 一条 SetParameterValues command → path 级成败独立。
+			if len(paths) == 0 {
+				return nil, fmt.Errorf("raw param_paths mode: all paths empty")
+			}
+
+			switch op {
+			case "LST", "DSP":
+				if req.ExecuteMode == "single_path" {
+					// 逐 PATH：每 path 一条 GetParameterValues command → 每 path 一个 device_task/RPC，
+					// path 级成败独立（某 path 9005 不连累其它 path）。
+					for _, p := range paths {
+						commands = append(commands, map[string]interface{}{
+							"command_code":   "RAW " + op,
+							"rpc_method":     "GetParameterValues",
+							"operation_type": op,
+							"param_paths":    []string{p},
+							"param_refs":     []MMLParamRef{{Tr069Path: p, ValueType: "string"}},
+						})
+					}
+					break
+				}
+				synthRefs := make([]MMLParamRef, len(paths))
 				for i, p := range paths {
+					synthRefs[i] = MMLParamRef{Tr069Path: p, ValueType: "string"}
+				}
+				commands = append(commands, map[string]interface{}{
+					"command_code":   "RAW " + op,
+					"rpc_method":     "GetParameterValues",
+					"operation_type": op,
+					"param_paths":    paths,
+					"param_refs":     synthRefs,
+				})
+			case "MOD":
+				// SetParameterValues 一定要有非空值。让 ParamCode == Tr069Path，
+				// 这样 buildParameterValues 可以按 ParamCode 索引到 Tr069Path。
+				for i, v := range values {
+					if strings.TrimSpace(v) == "" {
+						return nil, fmt.Errorf("raw param_paths MOD: param_values[%d] is empty for path %q", i, paths[i])
+					}
+				}
+				if req.ExecuteMode == "single_path" {
+					// 逐 PATH：每 path 一条 SetParameterValues command → path 级成败独立。
+					for i, p := range paths {
+						commands = append(commands, map[string]interface{}{
+							"command_code":   "RAW MOD",
+							"rpc_method":     "SetParameterValues",
+							"operation_type": op,
+							"param_paths":    []string{p},
+							"param_refs":     []MMLParamRef{{ParamCode: p, Tr069Path: p, ValueType: "string"}},
+							"parameters":     map[string]interface{}{p: values[i]},
+						})
+					}
+				} else {
+					synthRefs := make([]MMLParamRef, len(paths))
+					formValues := make(map[string]interface{}, len(paths))
+					for i, p := range paths {
+						synthRefs[i] = MMLParamRef{ParamCode: p, Tr069Path: p, ValueType: "string"}
+						formValues[p] = values[i]
+					}
 					commands = append(commands, map[string]interface{}{
 						"command_code":   "RAW MOD",
 						"rpc_method":     "SetParameterValues",
 						"operation_type": op,
-						"param_paths":    []string{p},
-						"param_refs":     []MMLParamRef{{ParamCode: p, Tr069Path: p, ValueType: "string"}},
-						"parameters":     map[string]interface{}{p: values[i]},
+						"param_paths":    paths,
+						"param_refs":     synthRefs,
+						"parameters":     formValues,
 					})
 				}
-			} else {
-				synthRefs := make([]MMLParamRef, len(paths))
-				formValues := make(map[string]interface{}, len(paths))
-				for i, p := range paths {
-					synthRefs[i] = MMLParamRef{ParamCode: p, Tr069Path: p, ValueType: "string"}
-					formValues[p] = values[i]
+				// #196：MOD 后自动追加一条 LST 回读，核实基站是否真的改成功（自定义 / 指定参数 PATH
+				// 通道，与结构化通道 buildStatementCommandEntries 的 MOD 回读对齐）。回读经 Sequencer
+				// 在 SPV 完成后顺序执行（下方 fanout 检测到 lst_after_mod 即启用 sequential 模式）。
+				commands = append(commands, buildRawReadbackLSTCommand(paths))
+			case "ADD":
+				// TR-069 AddObject 单次仅作用于 ONE object_name，多 path 在协议层
+				// 没有"批量"语义。前端已锁单行，这里再做一次防御以拒绝来自脚本/
+				// 直接 API 调用的异常输入。buildObjectName 会自动补尾点。
+				if len(paths) > 1 {
+					return nil, fmt.Errorf("raw param_paths ADD: TR-069 AddObject only accepts one object path per call, got %d", len(paths))
 				}
 				commands = append(commands, map[string]interface{}{
-					"command_code":   "RAW MOD",
-					"rpc_method":     "SetParameterValues",
+					"command_code":   "RAW ADD",
+					"rpc_method":     "AddObject",
 					"operation_type": op,
 					"param_paths":    paths,
-					"param_refs":     synthRefs,
-					"parameters":     formValues,
+					"parameters":     map[string]interface{}{"object_name": paths[0]},
 				})
+			case "RMV", "DEL":
+				if len(paths) > 1 {
+					return nil, fmt.Errorf("raw param_paths %s: TR-069 DeleteObject only accepts one object path per call, got %d", op, len(paths))
+				}
+				commands = append(commands, map[string]interface{}{
+					"command_code":   "RAW " + op,
+					"rpc_method":     "DeleteObject",
+					"operation_type": op,
+					"param_paths":    paths,
+					"parameters":     map[string]interface{}{"object_name": paths[0]},
+				})
+			default:
+				return nil, fmt.Errorf("raw param_paths mode: unsupported operation_type %q (allowed: LST/DSP/MOD/ADD/RMV)", req.OperationType)
 			}
-			// #196：MOD 后自动追加一条 LST 回读，核实基站是否真的改成功（自定义 / 指定参数 PATH
-			// 通道，与结构化通道 buildStatementCommandEntries 的 MOD 回读对齐）。回读经 Sequencer
-			// 在 SPV 完成后顺序执行（下方 fanout 检测到 lst_after_mod 即启用 sequential 模式）。
-			commands = append(commands, buildRawReadbackLSTCommand(paths))
-		case "ADD":
-			// TR-069 AddObject 单次仅作用于 ONE object_name，多 path 在协议层
-			// 没有"批量"语义。前端已锁单行，这里再做一次防御以拒绝来自脚本/
-			// 直接 API 调用的异常输入。buildObjectName 会自动补尾点。
-			if len(paths) > 1 {
-				return nil, fmt.Errorf("raw param_paths ADD: TR-069 AddObject only accepts one object path per call, got %d", len(paths))
-			}
-			commands = append(commands, map[string]interface{}{
-				"command_code":   "RAW ADD",
-				"rpc_method":     "AddObject",
-				"operation_type": op,
-				"param_paths":    paths,
-				"parameters":     map[string]interface{}{"object_name": paths[0]},
-			})
-		case "RMV", "DEL":
-			if len(paths) > 1 {
-				return nil, fmt.Errorf("raw param_paths %s: TR-069 DeleteObject only accepts one object path per call, got %d", op, len(paths))
-			}
-			commands = append(commands, map[string]interface{}{
-				"command_code":   "RAW " + op,
-				"rpc_method":     "DeleteObject",
-				"operation_type": op,
-				"param_paths":    paths,
-				"parameters":     map[string]interface{}{"object_name": paths[0]},
-			})
-		default:
-			return nil, fmt.Errorf("raw param_paths mode: unsupported operation_type %q (allowed: LST/DSP/MOD/ADD/RMV)", req.OperationType)
 		}
-	}
 
-	// rpc_method 补齐：前端或脚本入口的 commands 可能只带 command_code，
-	// 没有 rpc_method。Fanouter 依据 rpc_method 决定 device_task 的 Method 字段，
-	// 缺失则该条 command 在 fanout 时被跳过，整个 task 对那些设备没有实际效果。
-	// 此处按 command_code 逐条查库补齐，无法解析的（比如纯原始 MML 行）至少
-	// 保留 command_code 供后续手工诊断（to-do-list #4）。
-	commands = s.resolveRPCMethods(ctx, commands)
+		// rpc_method 补齐：前端或脚本入口的 commands 可能只带 command_code，
+		// 没有 rpc_method。Fanouter 依据 rpc_method 决定 device_task 的 Method 字段，
+		// 缺失则该条 command 在 fanout 时被跳过，整个 task 对那些设备没有实际效果。
+		// 此处按 command_code 逐条查库补齐，无法解析的（比如纯原始 MML 行）至少
+		// 保留 command_code 供后续手工诊断（to-do-list #4）。
+		commands = s.resolveRPCMethods(ctx, commands)
+	}
 
 	// Service 层兜底：ExecuteType 为空时默认立即执行（handler 已有默认值，
 	// 这里防其他内部调用方漏传）。否则下面扇出判据
@@ -904,14 +1322,19 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 	}
 
 	task := &MMLTask{
-		TaskName:  req.TaskName,
-		ScriptID:  scriptID,
-		DeviceSNs: req.DeviceSNs,
-		Commands:  commands,
-		Status:    TaskPending,
-		Results:   []map[string]interface{}{},
-		Creator:   req.Creator,
-		Executor:  req.Executor,
+		TaskName:                req.TaskName,
+		RequestID:               strings.TrimSpace(req.RequestID),
+		ScriptID:                scriptID,
+		DeviceSNs:               deviceSNs,
+		Commands:                commands,
+		ExecuteMode:             taskExecuteMode,
+		PlanItems:               planItems,
+		ScriptContentSHA256:     req.ScriptContentSHA256,
+		ScriptValidationVersion: req.ScriptValidationVersion,
+		Status:                  TaskPending,
+		Results:                 []map[string]interface{}{},
+		Creator:                 req.Creator,
+		Executor:                req.Executor,
 
 		ExecuteType:         req.ExecuteType,
 		OfflineRetry:        req.OfflineRetry,
@@ -919,7 +1342,14 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 		FailedRetry:         req.FailedRetry,
 		FailedRetryCount:    req.FailedRetryCount,
 		FailedRetryInterval: req.FailedRetryInterval,
-		TotalDevices:        len(req.DeviceSNs),
+		TotalDevices:        len(deviceSNs),
+	}
+	if req.PreservePlanSnapshot {
+		task.PlanItems = cloneScriptPlanItems(req.PlanItems)
+	}
+
+	if err := applyExecuteSchedule(task, req); err != nil {
+		return nil, err
 	}
 
 	// Map execute_type to initial status + next_trigger_at.
@@ -952,6 +1382,8 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 		zap.String("task_name", task.TaskName),
 		zap.String("execute_type", string(task.ExecuteType)),
 		zap.Int("device_count", len(task.DeviceSNs)),
+		zap.String("execute_mode", string(task.ExecuteMode)),
+		zap.Int("plan_item_count", len(task.PlanItems)),
 	)
 
 	// Write audit log entries for each command+device combination
@@ -962,7 +1394,7 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 	if task.Status == TaskPending && task.ExecuteType == ExecuteImmediate && s.fanouter != nil {
 		// #196：含 MOD 回读复合(lst_after_mod)时必须顺序执行，确保 LST 在 SPV 之后回读到新值；
 		// 否则并发扇出可能让 LST 早于 SPV 生效，读回旧值。save/set/restore 与 CreateAndFanoutTask 一致。
-		sequential := commandsNeedSequential(commands)
+		sequential := task.ExecuteMode == TaskExecuteModeDeviceBound || commandsNeedSequential(commands)
 		prev := s.fanouter.sequentialMode
 		s.fanouter.SetSequentialMode(sequential)
 		created, err := s.fanouter.Fanout(ctx, task)
@@ -1003,11 +1435,12 @@ func buildRawReadbackLSTCommand(paths []string) map[string]interface{} {
 	}
 }
 
-// commandsNeedSequential 判断 commands 是否含需顺序执行的复合（#196 MOD 回读 lst_after_mod）。
-// 命中则 fanout 启用 sequential，保证回读 LST 在 SPV 之后执行（读到生效后的新值）。
+// commandsNeedSequential 判断 commands 是否含需顺序执行的复合。
+// lst_after_mod 保证回读 LST 在 SPV 之后执行；spv_after_add 保证 AddObject 返回新实例号后再配置对象内参数。
 func commandsNeedSequential(commands []map[string]interface{}) bool {
 	for _, c := range commands {
-		if ph, _ := c["compound_phase"].(string); ph == "lst_after_mod" {
+		ph, _ := c["compound_phase"].(string)
+		if ph == "lst_after_mod" || ph == "spv_after_add" {
 			return true
 		}
 	}
@@ -1028,6 +1461,9 @@ func (s *Service) CreateAndFanoutTask(ctx context.Context, task *MMLTask, sequen
 	}
 	if task.ExecuteType == "" {
 		task.ExecuteType = ExecuteImmediate
+	}
+	if task.ExecuteMode == "" {
+		task.ExecuteMode = TaskExecuteModeCommon
 	}
 	if task.Status == "" {
 		task.Status = TaskPending
@@ -1054,6 +1490,8 @@ func (s *Service) CreateAndFanoutTask(ctx context.Context, task *MMLTask, sequen
 		zap.String("task_name", task.TaskName),
 		zap.Int("statement_count", len(task.Commands)),
 		zap.Int("device_count", len(task.DeviceSNs)),
+		zap.String("execute_mode", string(task.ExecuteMode)),
+		zap.Int("plan_item_count", len(task.PlanItems)),
 		zap.Bool("sequential", sequential),
 	)
 
@@ -1088,7 +1526,11 @@ func (s *Service) fanoutClaimed(ctx context.Context, task *MMLTask) error {
 	if s.fanouter == nil {
 		return fmt.Errorf("fanouter not wired")
 	}
+	sequential := task.ExecuteMode == TaskExecuteModeDeviceBound || commandsNeedSequential(task.Commands)
+	prev := s.fanouter.sequentialMode
+	s.fanouter.SetSequentialMode(sequential)
 	created, err := s.fanouter.Fanout(ctx, task)
+	s.fanouter.SetSequentialMode(prev)
 	if err != nil {
 		return fmt.Errorf("fanout mml task: %w", err)
 	}
@@ -1185,6 +1627,34 @@ func (s *Service) attachObjectNameParam(entry map[string]interface{}, cmd *MMLCo
 	entry["parameters"] = params
 }
 
+func attachObjectNameParamFromTarget(entry map[string]interface{}) {
+	if entry == nil {
+		return
+	}
+	targetObject := strings.TrimSpace(commandString(entry, "target_object"))
+	if targetObject == "" {
+		return
+	}
+	method := strings.TrimSpace(commandString(entry, "rpc_method"))
+	op := strings.ToUpper(strings.TrimSpace(commandString(entry, "operation_type")))
+	if method != "AddObject" && method != "DeleteObject" && op != "ADD" && op != "RMV" && op != "DEL" {
+		return
+	}
+
+	params := commandParameters(entry)
+	if params == nil {
+		params = map[string]interface{}{}
+	}
+	if existing, ok := params["object_name"].(string); ok && strings.TrimSpace(existing) != "" {
+		return
+	}
+	if !strings.HasSuffix(targetObject, ".") {
+		targetObject += "."
+	}
+	params["object_name"] = targetObject
+	entry["parameters"] = params
+}
+
 // attachParamRefs 把 mml_command_sub_fields JOIN standard_params 的结果挂到 entry 上。
 // Fanouter 后续会调用 BuildTR069Params(rpcMethod, paramRefs, ...) 翻译为 TR-069
 // wire 格式。失败仅记 warn，让 Fanouter 走兜底路径（透传 formValues）。
@@ -1222,6 +1692,56 @@ func (s *Service) writeAuditLogs(ctx context.Context, task *MMLTask) {
 	}
 
 	var entries []*MMLAuditLog
+	if task.ExecuteMode == TaskExecuteModeDeviceBound {
+		for idx, cmd := range task.Commands {
+			deviceSN := planDeviceSNForCommand(task, idx)
+			if deviceSN == "" && idx < len(task.PlanItems) {
+				deviceSN = task.PlanItems[idx].DeviceSN
+			}
+			if deviceSN == "" {
+				continue
+			}
+			commandCode, _ := cmd["command_code"].(string)
+			operationType, _ := cmd["operation_type"].(string)
+
+			var params map[string]interface{}
+			if p, ok := cmd["parameters"]; ok {
+				if pm, ok := p.(map[string]interface{}); ok {
+					params = pm
+				}
+			}
+
+			var paramPaths []string
+			if pp, ok := cmd["param_paths"]; ok {
+				if ppSlice, ok := pp.([]string); ok {
+					paramPaths = ppSlice
+				}
+			}
+
+			entries = append(entries, &MMLAuditLog{
+				TaskID:        &task.ID,
+				CommandCode:   commandCode,
+				OperationType: operationType,
+				DeviceSN:      deviceSN,
+				Parameters:    params,
+				ParamPaths:    paramPaths,
+				ResultStatus:  string(task.Status),
+				Creator:       creator,
+			})
+		}
+		if len(entries) == 0 {
+			return
+		}
+		if err := s.auditRepo.CreateBatch(ctx, entries); err != nil {
+			s.logger.Error("failed to write MML audit logs",
+				zap.String("task_id", task.ID.String()),
+				zap.Int("entry_count", len(entries)),
+				zap.Error(err),
+			)
+		}
+		return
+	}
+
 	for _, cmd := range task.Commands {
 		commandCode, _ := cmd["command_code"].(string)
 		operationType, _ := cmd["operation_type"].(string)
@@ -1352,11 +1872,19 @@ type DeviceTaskResultLister interface {
 	) ([]DeviceTaskResultRowView, int64, error)
 }
 
+type TaskResultStatsRepository interface {
+	GetResultStatsByID(ctx context.Context, id uuid.UUID) (*MMLTask, error)
+}
+
 // DeviceTaskResultRowView 屏蔽 task 包内部 struct，让 mml 包不反向 import task 包。
 // 字段语义对齐 task.DeviceTaskResultRow；Result 是 device_tasks.result JSONB 原始字节。
 type DeviceTaskResultRowView struct {
 	DeviceTaskID string // device_tasks.id（CSV 导出「子任务ID」）
 	DeviceSN     string
+	Method       string
+	Params       json.RawMessage
+	CommandKey   string
+	CWMPID       string
 	Status       string
 	ErrorCode    int
 	ErrorMessage string
@@ -1495,7 +2023,11 @@ func (s *Service) DeleteTask(ctx context.Context, id uuid.UUID) error {
 	}
 
 	if task.Status == TaskRunning {
-		return ErrCannotDeleteRunning
+		return commonerrors.NewBusinessError(
+			global.ErrCodeMMLTaskRunningCannotDelete,
+			ErrCannotDeleteRunning.Error(),
+			fmt.Errorf("%w: %w", commonerrors.ErrAlreadyExists, ErrCannotDeleteRunning),
+		)
 	}
 
 	if err := s.taskRepo.Delete(ctx, id); err != nil {
@@ -2171,8 +2703,9 @@ func (s *Service) GetTaskResults(ctx context.Context, id uuid.UUID, page, pageSi
 		pageSize = 20
 	}
 
-	// T-0168: 先拿 task 元数据用于装配 stats（即使 deviceTaskResultLister 注入也要这步）
-	taskMeta, taskErr := s.taskRepo.GetByID(ctx, id)
+	// T-0168: 先拿 task 元数据用于装配 stats（即使 deviceTaskResultLister 注入也要这步）。
+	// PgTaskRepository 提供轻量查询，避免为结果页 stats 扫描/反序列化 mml_tasks.results。
+	taskMeta, taskErr := s.getTaskResultStats(ctx, id)
 	// taskErr 不阻塞主流程；找不到 task 让后续 device_tasks 查询自己处理
 	stats := buildTaskResultsStats(taskMeta, taskErr)
 
@@ -2185,7 +2718,7 @@ func (s *Service) GetTaskResults(ctx context.Context, id uuid.UUID, page, pageSi
 		}
 		items := make([]map[string]interface{}, 0, len(rows))
 		for _, row := range rows {
-			items = append(items, deviceTaskRowToResultMap(row))
+			items = append(items, deviceTaskRowToResultMap(row, taskMeta))
 		}
 		resp := model.NewListResponse(items, total, page, pageSize)
 		resp.Stats = stats
@@ -2219,6 +2752,13 @@ func (s *Service) GetTaskResults(ctx context.Context, id uuid.UUID, page, pageSi
 	return resp, nil
 }
 
+func (s *Service) getTaskResultStats(ctx context.Context, id uuid.UUID) (*MMLTask, error) {
+	if repo, ok := s.taskRepo.(TaskResultStatsRepository); ok {
+		return repo.GetResultStatsByID(ctx, id)
+	}
+	return s.taskRepo.GetByID(ctx, id)
+}
+
 // buildTaskResultsStats 装配 TaskResultsStats（T-0168）。taskErr 非 nil 时返回空 stats，
 // 避免 GetByID 失败阻断主流程（让前端拿到 200 + 空翻译详情）。
 func buildTaskResultsStats(task *MMLTask, taskErr error) *TaskResultsStats {
@@ -2238,12 +2778,12 @@ func buildTaskResultsStats(task *MMLTask, taskErr error) *TaskResultsStats {
 //   - device_sn / status / error_message / started_at / finished_at 直通
 //   - success = (status=completed && error_code=0)
 //   - raw_output = result->>'raw_response'
-//   - mml_script = result->>'method' （SOAP method name；便于前端展示）
+//   - mml_script = 用户下发的 MML 指令文本（来自 plan raw_line 或 commands[command_index]）
 //   - execution_time = completed_at - sent_at（毫秒）
 //
 // 解析 result JSONB 失败时静默跳过该字段（不影响主流程），device_sn / status 等
 // 主字段保持可用。
-func deviceTaskRowToResultMap(row DeviceTaskResultRowView) map[string]interface{} {
+func deviceTaskRowToResultMap(row DeviceTaskResultRowView, task *MMLTask) map[string]interface{} {
 	m := map[string]interface{}{
 		"device_sn":      row.DeviceSN,
 		"device_task_id": row.DeviceTaskID, // 子任务 ID（device_tasks.id），前端「PATH 列表」复制用
@@ -2253,6 +2793,67 @@ func deviceTaskRowToResultMap(row DeviceTaskResultRowView) map[string]interface{
 		"command_index":  row.CommandIndex,
 		"device_index":   row.DeviceIndex,
 		"success":        row.Status == "completed" && row.ErrorCode == 0,
+	}
+	if row.Method != "" {
+		m["request_method"] = row.Method
+	}
+	if row.CommandKey != "" {
+		m["request_command_key"] = row.CommandKey
+	}
+	if row.CWMPID != "" {
+		m["request_cwmp_id"] = row.CWMPID
+	}
+	if len(row.Params) > 0 {
+		if requestPayload, ok := decodeJSONRaw(row.Params); ok {
+			m["request_payload"] = requestPayload
+		}
+	}
+	if rawRequest := buildDeviceTaskRawRequest(row); rawRequest != "" {
+		m["raw_request"] = rawRequest
+	}
+	var command map[string]interface{}
+	var rawLine string
+	if task != nil && task.ExecuteMode == TaskExecuteModeDeviceBound &&
+		row.CommandIndex >= 0 && row.CommandIndex < len(task.PlanItems) {
+		plan := task.PlanItems[row.CommandIndex]
+		command = plan.Command
+		rawLine = plan.RawLine
+		m["plan_line_no"] = plan.LineNo
+		m["plan_device_sn"] = plan.DeviceSN
+		m["plan_order"] = plan.Order
+		if plan.RawLine != "" {
+			m["plan_raw_line"] = plan.RawLine
+		}
+		if commandCode := commandString(plan.Command, "command_code"); commandCode != "" {
+			m["command_code"] = commandCode
+		}
+		if op := commandString(plan.Command, "operation_type"); op != "" {
+			m["operation_type"] = op
+		}
+	} else if task != nil && row.CommandIndex >= 0 && row.CommandIndex < len(task.Commands) {
+		command = task.Commands[row.CommandIndex]
+		if commandCode := commandString(command, "command_code"); commandCode != "" {
+			m["command_code"] = commandCode
+		}
+		if op := commandString(command, "operation_type"); op != "" {
+			m["operation_type"] = op
+		}
+		if planRawLine := commandString(command, "plan_raw_line"); planRawLine != "" {
+			rawLine = planRawLine
+			m["plan_raw_line"] = planRawLine
+		}
+		if lineNo, ok := command["plan_line_no"].(float64); ok && lineNo > 0 {
+			m["plan_line_no"] = int(lineNo)
+		}
+		if planDeviceSN := commandString(command, "plan_device_sn"); planDeviceSN != "" {
+			m["plan_device_sn"] = planDeviceSN
+		}
+		if order, ok := command["plan_order"].(float64); ok && order > 0 {
+			m["plan_order"] = int(order)
+		}
+	}
+	if script := formatMMLScriptForResult(command, rawLine, row.DeviceSN); script != "" {
+		m["mml_script"] = script
 	}
 	if row.SentAt != nil {
 		m["started_at"] = row.SentAt.Format(time.RFC3339)
@@ -2270,12 +2871,56 @@ func deviceTaskRowToResultMap(row DeviceTaskResultRowView) map[string]interface{
 			if rr, ok := resObj["raw_response"].(string); ok && rr != "" {
 				m["raw_output"] = rr
 			}
-			if method, ok := resObj["method"].(string); ok && method != "" {
-				m["mml_script"] = method
-			}
 			// parsed_data：把整个 result JSON 透传给前端做兜底渲染（不阻塞主字段）
 			m["parsed_data"] = resObj
 		}
 	}
 	return m
+}
+
+func decodeJSONRaw(raw json.RawMessage) (interface{}, bool) {
+	if len(raw) == 0 {
+		return nil, false
+	}
+	var out interface{}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return string(raw), true
+	}
+	return out, true
+}
+
+func buildDeviceTaskRawRequest(row DeviceTaskResultRowView) string {
+	if row.Method == "" {
+		return ""
+	}
+	cwmpID := row.CWMPID
+	if cwmpID == "" {
+		cwmpID = "<pending-cwmp-id>"
+	}
+	req, err := acsrpc.NewDispatcher().BuildRequest(&acsrpc.Command{
+		ID:         row.DeviceTaskID,
+		Method:     row.Method,
+		Params:     row.Params,
+		CommandKey: row.CommandKey,
+	}, cwmpID)
+	if err == nil && len(req) > 0 {
+		return string(req)
+	}
+	fallback := map[string]interface{}{
+		"method": row.Method,
+	}
+	if row.CommandKey != "" {
+		fallback["command_key"] = row.CommandKey
+	}
+	if row.CWMPID != "" {
+		fallback["cwmp_id"] = row.CWMPID
+	}
+	if payload, ok := decodeJSONRaw(row.Params); ok {
+		fallback["params"] = payload
+	}
+	data, marshalErr := json.MarshalIndent(fallback, "", "  ")
+	if marshalErr != nil {
+		return row.Method
+	}
+	return string(data)
 }

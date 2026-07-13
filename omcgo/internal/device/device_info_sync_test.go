@@ -218,7 +218,7 @@ func TestLookupGPSHeight(t *testing.T) {
 		{
 			name: "BaiBNQ locked altitude wins over synchronization altitude",
 			paths: map[string]string{
-				"Device.FAP.GPS.LockedAltitude":            "168",
+				"Device.FAP.GPS.LockedAltitude":       "168",
 				"Device.FAP.Synchronization.Altitude": "514.49",
 			},
 			want: "168", ok: true,
@@ -643,6 +643,95 @@ func TestInfoSyncer_SyncFromParameters_TransmitPowerSource(t *testing.T) {
 	}
 }
 
+func TestInfoSyncer_SyncFromParameters_BLQPreferredBandwidthAndAdminState(t *testing.T) {
+	deviceID := uuid.New()
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+
+	paramRepo := stubDeviceParamRepo{params: []model.DeviceParameter{
+		{ParameterPath: "Device.DeviceInfo.SAS.PreferredBandwidth", ParameterValue: "n100"},
+		{ParameterPath: "Device.DeviceInfo.FAP_adminstate", ParameterValue: "true"},
+	}}
+	infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, gotDeviceID uuid.UUID, fields map[string]interface{}) error {
+		assert.Equal(t, deviceID, gotDeviceID)
+		assert.Equal(t, float64(20), fields["bandwidth"])
+		assert.Equal(t, "true", fields["admin_state"])
+		return nil
+	}}
+	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
+
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE)
+	assert.NoError(t, err)
+}
+
+func TestInfoSyncer_SyncFromParameters_GSMBTSRadioFields(t *testing.T) {
+	deviceID := uuid.New()
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+
+	paramRepo := stubDeviceParamRepo{params: []model.DeviceParameter{
+		{ParameterPath: "Device.Services.GsmBTSCellDT.1.InUse", ParameterValue: "true"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.1.GsmCellID", ParameterValue: "1001"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.1.CurrLocAreaCode", ParameterValue: "2001"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.1.CurrentArfcn", ParameterValue: "45"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.1.GsmBtsBand", ParameterValue: "GSM900"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.1.GsmBtsRFPower", ParameterValue: "33"},
+	}}
+	infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, _ uuid.UUID, fields map[string]interface{}) error {
+		assert.Equal(t, "45", fields["freq_point"])
+		assert.Equal(t, "33", fields["transmit_power"])
+		assert.Equal(t, "GSM900", fields["band"])
+		assert.Equal(t, "1001", fields["cell_id"])
+		assert.Equal(t, "2001", fields["lac"])
+		return nil
+	}}
+	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
+
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechGSM)
+	assert.NoError(t, err)
+}
+
+func TestInfoSyncer_SyncFromParameters_LegacyBTSRadioFields(t *testing.T) {
+	deviceID := uuid.New()
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+
+	paramRepo := stubDeviceParamRepo{params: []model.DeviceParameter{
+		{ParameterPath: "Device.DeviceInfo.BTS.CurrentArfcn", ParameterValue: "1010"},
+		{ParameterPath: "Device.DeviceInfo.BTS.CurrentLac", ParameterValue: "227"},
+		{ParameterPath: "Device.DeviceInfo.GSM.BtsRfPower", ParameterValue: "43"},
+	}}
+	infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, _ uuid.UUID, fields map[string]interface{}) error {
+		assert.Equal(t, "1010", fields["freq_point"])
+		assert.Equal(t, "43", fields["transmit_power"])
+		assert.Equal(t, "227", fields["lac"])
+		return nil
+	}}
+	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
+
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechGSM)
+	assert.NoError(t, err)
+}
+
+func TestInfoSyncer_SyncFromParameters_BSCTrxARFCNAggregatesToFreqPoint(t *testing.T) {
+	deviceID := uuid.New()
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+
+	paramRepo := stubDeviceParamRepo{params: []model.DeviceParameter{
+		{ParameterPath: "DeviceGSM.Bts.0.Trx.1.Arfcn", ParameterValue: "1010"},
+		{ParameterPath: "DeviceGSM.Bts.0.Trx.2.Arfcn", ParameterValue: "1013"},
+	}}
+	infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, _ uuid.UUID, fields map[string]interface{}) error {
+		assert.Equal(t, "1010,1013", fields["freq_point"])
+		return nil
+	}}
+	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
+
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechGSM)
+	assert.NoError(t, err)
+}
+
 // TestUniversalInformMapping_NoTransmitPowerOverride 防回归守卫：#362 删除
 // universalInformMapping 里 MaxTxPower→transmit_power 后，该表不应再含任何
 // transmit_power 映射目标（避免后人误加回 universal 覆盖）。
@@ -718,11 +807,11 @@ func instanceTemplatesFor(t *testing.T, column string) []string {
 // 历史行为(BaiBNQ 等 1 个 cell 设备 sync 后 list 列仍是单值字符串)。
 func TestAggregateInstanceFields_SingleCell(t *testing.T) {
 	params := map[string]string{
-		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.PhyCellID":             "21",
-		"Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.TAC":                  "81",
-		"Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.NrcellIdentity":       "1153",
-		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.CellEnable.AdminState":    "1",
-		"Device.FAP.Ipsec.1.TUNNEL_GATEWAY":                                         "192.168.13.180",
+		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.PhyCellID":          "21",
+		"Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.TAC":               "81",
+		"Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.NrcellIdentity":    "1153",
+		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.CellEnable.AdminState": "1",
+		"Device.FAP.Ipsec.1.TUNNEL_GATEWAY":                                      "192.168.13.180",
 	}
 	fields := map[string]interface{}{}
 	aggregateInstanceFields(params, fields)
@@ -740,14 +829,14 @@ func TestAggregateInstanceFields_SingleCell(t *testing.T) {
 func TestAggregateInstanceFields_MultiCell(t *testing.T) {
 	params := map[string]string{
 		// cell 1 / cell 2：两个 PCI、两个 TAC、两个 NR Cell Identity、两个 admin_state
-		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.PhyCellID":             "21",
-		"Device.Services.FAPService.1.CellConfig.2.NR.RAN.RF.PhyCellID":             "22",
-		"Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.TAC":                  "81",
-		"Device.Services.FAPService.1.CellConfig.2.NR.CN.TA.1.TAC":                  "82",
-		"Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.NrcellIdentity":       "1153",
-		"Device.Services.FAPService.1.CellConfig.2.NR.CN.TA.1.NrcellIdentity":       "1154",
-		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.CellEnable.AdminState":    "1",
-		"Device.Services.FAPService.1.CellConfig.2.NR.RAN.CellEnable.AdminState":    "2",
+		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.PhyCellID":          "21",
+		"Device.Services.FAPService.1.CellConfig.2.NR.RAN.RF.PhyCellID":          "22",
+		"Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.TAC":               "81",
+		"Device.Services.FAPService.1.CellConfig.2.NR.CN.TA.1.TAC":               "82",
+		"Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.NrcellIdentity":    "1153",
+		"Device.Services.FAPService.1.CellConfig.2.NR.CN.TA.1.NrcellIdentity":    "1154",
+		"Device.Services.FAPService.1.CellConfig.1.NR.RAN.CellEnable.AdminState": "1",
+		"Device.Services.FAPService.1.CellConfig.2.NR.RAN.CellEnable.AdminState": "2",
 		// IPSec 多隧道
 		"Device.FAP.Ipsec.1.TUNNEL_GATEWAY": "10.0.0.1",
 		"Device.FAP.Ipsec.2.TUNNEL_GATEWAY": "10.0.0.2",
@@ -833,6 +922,26 @@ func TestInfoSyncer_SyncFromParameters_OverlongIpsecCSVDoesNotAbortOtherFields(t
 	assert.NoError(t, err)
 }
 
+func TestInfoSyncer_SyncFromParameters_VendorRunTimeFallback(t *testing.T) {
+	deviceID := uuid.New()
+	params := []model.DeviceParameter{
+		{ParameterPath: ParamStationRunTime, ParameterValue: "2 days 5 hours 4 minutes"},
+	}
+
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+
+	infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, _ uuid.UUID, fields map[string]interface{}) error {
+		assert.Equal(t, int64(2*86400+5*3600+4*60), fields["run_time"])
+		return nil
+	}}
+	paramRepo := stubDeviceParamRepo{params: params}
+	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
+
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE)
+	assert.NoError(t, err)
+}
+
 func TestParseRunTimeToSeconds(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -858,6 +967,26 @@ func TestParseRunTimeToSeconds(t *testing.T) {
 			name:  "full format with seconds",
 			input: "1d 2h 3m 4s",
 			want:  86400 + 2*3600 + 3*60 + 4, // 93784
+		},
+		{
+			name:  "english long units",
+			input: "2 days 5 hours 4 minutes",
+			want:  2*86400 + 5*3600 + 4*60,
+		},
+		{
+			name:  "chinese units",
+			input: "2天5小时4分钟3秒",
+			want:  2*86400 + 5*3600 + 4*60 + 3,
+		},
+		{
+			name:  "plain numeric seconds",
+			input: "190800",
+			want:  190800,
+		},
+		{
+			name:  "colon hours minutes seconds",
+			input: "53:04:03",
+			want:  53*3600 + 4*60 + 3,
 		},
 		{
 			name:  "days only",

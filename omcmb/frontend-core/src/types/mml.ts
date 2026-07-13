@@ -96,15 +96,31 @@ export interface MMLResult {
 
 export type DeviceResultStatus = 'completed' | 'running' | 'pending';
 
+export interface MMLTaskRequestMessage {
+  method: string;
+  payload?: unknown;
+  rawRequest?: string;
+  cwmpId?: string;
+  commandKey?: string;
+}
+
 export interface DeviceTaskResultItem {
   deviceSn: string;
   /** device_tasks.id —— 子任务 ID（每条 RPC 一个；详情页「PATH 列表」复制用） */
   deviceTaskId?: string;
   /** device_tasks.command_index —— 逐 PATH 模式下定位该条结果属于哪个 path（命令序号） */
   commandIndex?: number;
+  /** device_bound 计划行追溯字段。 */
+  planLineNo?: number;
+  planDeviceSn?: string;
+  planOrder?: number;
+  planRawLine?: string;
+  commandCode?: string;
+  operationType?: string;
   deviceName?: string;
   mmlScript?: string;
   status?: DeviceResultStatus;
+  request?: MMLTaskRequestMessage;
   result: MMLResult;
   failReason?: string;
   startedAt?: string;
@@ -148,6 +164,89 @@ export interface MMLScript {
   // P1 扩展：最近一次执行态。每次执行详情查 mml_tasks。
   lastRunStatus?: string;
   lastRunAt?: string;
+  /** TXT 导入时服务端记录的原始文件名。 */
+  originalFilename?: string;
+  /** 服务端归一化 TXT 内容的 SHA-256，用于执行快照追溯。 */
+  contentSha256?: string;
+  /** 当前导入校验器版本。 */
+  validationVersion?: string;
+  validatedAt?: string;
+  /** 服务端权威的逐设备执行计划；浏览器只读，不可提交修改。 */
+  planItems?: MMLTaskPlanItem[];
+  validationSummary?: MMLScriptValidationSummary;
+  /** 持久化校验快照中的逐行问题；与 validationSummary 同时由服务端保存。 */
+  validationIssues?: MMLScriptIssue[];
+}
+
+export type MMLScriptIssueSeverity = 'error' | 'warning';
+
+/** 一条由服务端 TXT parser/validator 返回的问题。 */
+export interface MMLScriptIssue {
+  code: string;
+  severity: MMLScriptIssueSeverity;
+  lineNo?: number;
+  rawLine?: string;
+  field?: string;
+  message?: string;
+}
+
+/** TXT 校验概要；effectiveLines 兼容早期接口，validLines 对应当前服务端字段。 */
+export interface MMLScriptValidationSummary {
+  totalLines: number;
+  validLines: number;
+  effectiveLines: number;
+  deviceCount: number;
+  errorCount: number;
+  warningCount: number;
+}
+
+/** 一次服务端 TXT 校验生成的、可供只读预览的权威快照。 */
+export interface MMLScriptImportValidation {
+  validationToken?: string;
+  originalFilename?: string;
+  normalizedContent?: string;
+  contentSha256?: string;
+  validationVersion?: string;
+  validatedAt?: string;
+  planItems: MMLTaskPlanItem[];
+  summary: MMLScriptValidationSummary;
+  issues: MMLScriptIssue[];
+}
+
+/** 新建导入脚本仅传递校验 token 和展示元数据。 */
+export interface MMLImportedScriptCreateInput {
+  validationToken: string;
+  scriptName: string;
+  description: string;
+  tags: string[];
+  requestId?: string;
+}
+
+/** 替换导入脚本额外携带乐观锁版本。 */
+export interface MMLImportedScriptReplaceInput extends MMLImportedScriptCreateInput {
+  expectedUpdatedAt: string;
+}
+
+/** 从导入脚本创建任务时允许的调度/重试策略。计划行始终由服务端快照提供。 */
+export interface MMLScriptExecutionInput {
+  taskName: string;
+  requestId?: string;
+  executeType?: MMLExecuteType;
+  scheduledAt?: string;
+  periodStart?: string;
+  periodEnd?: string;
+  periodTime?: string;
+  offlineRetry?: boolean;
+  offlineRetryWait?: number;
+  failedRetry?: boolean;
+  failedRetryCount?: number;
+  failedRetryInterval?: number;
+  confirmWarnings?: boolean;
+}
+
+export interface MMLScriptImportTemplate {
+  blob: Blob;
+  filename: string;
 }
 
 export type MMLTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'paused' | 'cancelled';
@@ -155,6 +254,10 @@ export type MMLTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'pa
 export type MMLExecuteType = 'immediate' | 'scheduled' | 'periodic' | 'suspended';
 
 export type MMLTaskResult = 'success' | 'partial' | 'failed';
+
+export type MMLTaskOrigin = 'console' | 'script';
+
+export type MMLTaskExecuteMode = 'common' | 'device_bound';
 
 /**
  * 任务 commands JSONB 数组中每条命令的"明细"形态（含 op_type 与勾选 path）。
@@ -177,6 +280,10 @@ export interface MMLTaskCommandDetail {
    * 取下发值时优先 paramValues[i]，缺则回退 parameters[path]。
    */
   parameters?: Record<string, unknown>;
+  planLineNo?: number;
+  planDeviceSn?: string;
+  planOrder?: number;
+  planRawLine?: string;
 }
 
 export interface MMLTaskCommandInput {
@@ -184,14 +291,43 @@ export interface MMLTaskCommandInput {
   operationType?: MMLOperationType | string;
   paramPaths?: string[];
   parameters?: Record<string, unknown>;
+  rawPathMode?: 'standard' | string;
 }
+
+export interface MMLTaskPlanItem {
+  lineNo: number;
+  deviceSn: string;
+  order: number;
+  rawLine?: string;
+  command: MMLTaskCommandInput;
+}
+
+export interface MMLTaskPlanStats {
+  totalPlanItems: number;
+  totalDevices: number;
+}
+
+export type MMLTaskCreateInput =
+  Partial<Omit<MMLTask, 'id' | 'status' | 'results' | 'createdAt' | 'updatedAt' | 'commands'>> &
+  Pick<MMLTask, 'taskName'> & {
+    deviceSns?: string[];
+    commands?: Array<string | MMLTaskCommandInput | MMLTaskCommandDetail>;
+    executeMode?: MMLTaskExecuteMode;
+    planItems?: MMLTaskPlanItem[];
+  };
 
 export interface MMLTask {
   id: string;
   taskName: string;
   scriptId?: string;
+  taskOrigin: MMLTaskOrigin;
   deviceSns: string[];
   commands: string[];
+  commandCount?: number;
+  executeMode?: MMLTaskExecuteMode;
+  planItems?: MMLTaskPlanItem[];
+  planItemCount?: number;
+  planStats?: MMLTaskPlanStats;
   /** 命令明细（含 op_type / param_paths）；老接口可能不返回，UI 需做 fallback */
   commandsDetail?: MMLTaskCommandDetail[];
   status: MMLTaskStatus;

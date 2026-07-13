@@ -11,7 +11,7 @@ import { useDeviceList } from '@core/hooks/api/useDevices';
 import type { Device } from '@core/types/device';
 
 // 设备记录中确实承载小区信息的字段（来自 Device 监控扩展字段组）。
-// 与 v3 webcode-v3/src/pages/config/CellManagement.tsx 的 cellIdentity 保持一致。
+// 小区标识统一使用后端 cellIdentity 字段。
 function cellIdentity(d: Device): string {
   return d.cellId || d.eci || d.nrCellId || d.enbId || d.gnbId || '';
 }

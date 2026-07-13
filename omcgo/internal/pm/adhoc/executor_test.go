@@ -3,6 +3,7 @@ package adhoc
 import (
 	"context"
 	"errors"
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -237,6 +238,72 @@ func Test_Executor_NormalizesResultsBeforeInsertAcrossDimensions(t *testing.T) {
 			assert.Equal(t, float64(13), repo.insertedRows[0].MetricValue)
 		})
 	}
+}
+
+func Test_Executor_PreservesNullMetricValueThroughNormalization(t *testing.T) {
+	stype := metrics.StatisSum
+	aggr := &stubAggr{
+		rowsByGran: map[metrics.Granularity][]aggregator.Row{
+			metrics.GranularityHourly: {{
+				DeviceOUI: "A", DeviceSN: "S1",
+				MetricPath: "C-NULL", MetricType: metrics.MetricTypeCounter,
+				MetricValue: jsonx.Float(math.NaN()), StatisType: &stype, Granularity: metrics.GranularityHourly,
+				Time: time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+			}},
+		},
+	}
+	repo := &stubRepo{}
+	e := NewExecutor(aggr, repo, nil, nil).
+		SetIndicatorMetadataLookup(stubMetadataLookup(map[string]resultnorm.Metadata{
+			"C-NULL": {Unit: "number", StatisType: "sum"},
+		}))
+	task := &Task{
+		ID:            uuid.New(),
+		Granularities: []string{"hourly"},
+		DeviceSNs:     []string{"S1"},
+		MetricPaths:   []string{"C-NULL"},
+		WindowStart:   time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+		WindowEnd:     time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+	}
+
+	n, err := e.ExecuteOneshot(context.Background(), task)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+	require.Len(t, repo.insertedRows, 1)
+	assert.True(t, math.IsNaN(repo.insertedRows[0].MetricValue), "缺值行应保留到写库层，再转 SQL NULL")
+}
+
+func Test_Executor_NullMetricStillRequiresMetadata(t *testing.T) {
+	stype := metrics.StatisSum
+	aggr := &stubAggr{
+		rowsByGran: map[metrics.Granularity][]aggregator.Row{
+			metrics.GranularityHourly: {{
+				DeviceOUI: "A", DeviceSN: "S1",
+				MetricPath: "C-UNSUPPORTED", MetricType: metrics.MetricTypeCounter,
+				MetricValue: jsonx.Float(math.NaN()), StatisType: &stype, Granularity: metrics.GranularityHourly,
+				Time: time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+			}},
+		},
+	}
+	repo := &stubRepo{}
+	e := NewExecutor(aggr, repo, nil, nil).
+		SetIndicatorMetadataLookup(stubMetadataLookup(map[string]resultnorm.Metadata{}))
+	task := &Task{
+		ID:            uuid.New(),
+		Granularities: []string{"hourly"},
+		DeviceSNs:     []string{"S1"},
+		MetricPaths:   []string{"C-UNSUPPORTED"},
+		WindowStart:   time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+		WindowEnd:     time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+	}
+
+	n, err := e.ExecuteOneshot(context.Background(), task)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), resultnorm.ErrMissingMetadata.Error())
+	assert.Equal(t, 0, n)
+	assert.Empty(t, repo.insertedRows)
 }
 
 func Test_Executor_NormalizationMissingMetadataFailsBeforeInsert(t *testing.T) {

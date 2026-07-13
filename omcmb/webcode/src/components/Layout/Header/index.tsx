@@ -7,6 +7,7 @@ import {
   MoonOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  RobotOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '@core/store/appStore';
 import { usePublicOmcName, resolveOmcName } from '@core/hooks/api/useOmcName';
@@ -21,6 +22,11 @@ import TimezoneSelector from './TimezoneSelector';
 import UserDropdown from './UserDropdown';
 import styles from './Header.module.css';
 
+interface HeaderProps {
+  agentVisible?: boolean;
+  agentOpen?: boolean;
+  onAgentToggle?: () => void;
+}
 
 const DEVICE_TYPE_KEY: Record<string, string> = {
   all: 'device.type.all',
@@ -30,7 +36,7 @@ const DEVICE_TYPE_KEY: Record<string, string> = {
   eGW: 'device.type.eGW',
 };
 
-export default function Header() {
+export default function Header({ agentVisible = false, agentOpen = false, onAgentToggle }: HeaderProps) {
   const deviceType = useAppStore((s) => s.deviceType);
   const theme = useAppStore((s) => s.theme);
   const toggleTheme = useAppStore((s) => s.toggleTheme);
@@ -145,6 +151,19 @@ export default function Header() {
         >
           {theme === 'tech' ? <SunOutlined style={{ fontSize: 16 }} /> : <MoonOutlined style={{ fontSize: 16 }} />}
         </button>
+
+        {agentVisible && (
+          <button
+            className={`${styles.headerAction} ${agentOpen ? styles.headerActionActive : ''}`}
+            onClick={onAgentToggle}
+            title={t('agent.open')}
+            type="button"
+            aria-pressed={agentOpen}
+            aria-label={t('agent.open')}
+          >
+            <RobotOutlined style={{ fontSize: 16 }} />
+          </button>
+        )}
 
         <div className={styles.divider} />
 

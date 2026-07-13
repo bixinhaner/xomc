@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/global"
+	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/core/carrier"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
@@ -141,6 +142,15 @@ func (s *DeviceService) SetTaskService(t task.Enqueuer) {
 // than queue an unkeyed SetParameterValues.
 func (s *DeviceService) SetCarrierRegistry(r *carrier.CarrierRegistry) {
 	s.carrierRegistry = r
+}
+
+// ResolveCarrierByOUI 通过 OUI 查询运营商编码（供批量预登记路径使用）。
+// carrierRegistry 未注入时返回空串（调用方需额外处理）。
+func (s *DeviceService) ResolveCarrierByOUI(oui string) model.CarrierCode {
+	if s.carrierRegistry == nil {
+		return ""
+	}
+	return s.carrierRegistry.ResolveByOUI(oui)
 }
 
 // SetDisconnectedAlarmCleaner wires OMC disconnected-alarm cleanup for offline→online recovery.
@@ -1741,6 +1751,22 @@ func (s *DeviceService) cacheDevice(ctx context.Context, device *model.Device) {
 
 // GetDeviceDetailComposite assembles a comprehensive device detail view by querying
 // device, device_info, and device_parameters (via prefix queries for MME/License/Antenna/Cells).
+func (s *DeviceService) GetAntennaSectors(ctx context.Context, deviceID uuid.UUID) ([]AntennaSector, error) {
+	device, err := s.deviceRepo.GetByID(ctx, deviceID)
+	if err != nil {
+		return nil, fmt.Errorf("get device: %w", err)
+	}
+	if device == nil {
+		return nil, nil
+	}
+
+	params, err := s.paramRepo.GetByGroup(ctx, deviceID, "antenna")
+	if err != nil {
+		return nil, fmt.Errorf("get antenna params: %w", err)
+	}
+	return AssembleAntennaSectors(params), nil
+}
+
 func (s *DeviceService) GetDeviceDetailComposite(ctx context.Context, deviceID uuid.UUID) (*DeviceDetailComposite, error) {
 	device, err := s.deviceRepo.GetByID(ctx, deviceID)
 	if err != nil {
@@ -2023,7 +2049,7 @@ func (s *DeviceService) UpdateDevice(ctx context.Context, id uuid.UUID, req Upda
 func (s *DeviceService) DeleteDevice(ctx context.Context, id uuid.UUID) error {
 	// C2 修复：先查 SN 用于删除后清 cache（cache key 是 SN 不是 ID）
 	device, _ := s.deviceRepo.GetByID(ctx, id)
-	if err := s.deviceRepo.Delete(ctx, id); err != nil {
+	if _, err := s.deviceRepo.BatchDelete(ctx, []uuid.UUID{id}, deletedByFromContext(ctx, "")); err != nil {
 		return err
 	}
 	if s.cache != nil && device != nil {
@@ -2036,6 +2062,7 @@ func (s *DeviceService) DeleteDevice(ctx context.Context, id uuid.UUID) error {
 // Returns a BatchOperationResult summarising successes and failures.
 func (s *DeviceService) BatchDeleteDevices(ctx context.Context, ids []uuid.UUID, deletedBy string) BatchOperationResult {
 	result := BatchOperationResult{Total: len(ids)}
+	deletedBy = deletedByFromContext(ctx, deletedBy)
 
 	// C2 修复：先查 SN 列表用于删除后清 cache
 	idToSN, _ := s.deviceRepo.ListSerialsByIDs(ctx, ids)
@@ -2072,6 +2099,16 @@ func (s *DeviceService) BatchDeleteDevices(ctx context.Context, ids []uuid.UUID,
 		zap.Int64("deleted", deleted),
 	)
 	return result
+}
+
+func deletedByFromContext(ctx context.Context, explicit string) string {
+	if actor := strings.TrimSpace(explicit); actor != "" {
+		return actor
+	}
+	if actor, ok := ctx.Value(admin.CtxKeyUsername).(string); ok {
+		return strings.TrimSpace(actor)
+	}
+	return ""
 }
 
 // BatchRebootDevices queues a Reboot command for each device in the list.

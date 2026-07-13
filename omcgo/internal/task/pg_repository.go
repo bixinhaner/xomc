@@ -45,8 +45,8 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *Task) error {
 	query, args, err := storage.Psql.Insert("device_tasks").
 		Columns(
 			"id", "device_sn", "method", "params", "priority",
-			"command_key", "cwmp_id", "status", "retry_count", "max_retries",
-			"created_at", "sent_at", "completed_at", "expires_at",
+			"command_key", "cwmp_id", "status", "retry_count", "max_retries", "retry_interval_seconds",
+			"created_at", "sent_at", "completed_at", "expires_at", "next_attempt_at",
 			"result", "error_code", "error_message",
 			"source", "creator_id", "description",
 			"source_id", "command_index", "device_index",
@@ -55,8 +55,8 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *Task) error {
 		).
 		Values(
 			task.ID, task.DeviceSN, task.Method, task.Params, task.Priority,
-			task.CommandKey, task.CWMPID, task.Status, task.RetryCount, task.MaxRetries,
-			task.CreatedAt, task.SentAt, task.CompletedAt, task.ExpiresAt,
+			task.CommandKey, task.CWMPID, task.Status, task.RetryCount, task.MaxRetries, task.RetryIntervalSeconds,
+			task.CreatedAt, task.SentAt, task.CompletedAt, task.ExpiresAt, task.NextAttemptAt,
 			task.Result, task.ErrorCode, task.ErrorMessage,
 			task.Source, task.CreatorID, task.Description,
 			nilUUID(task.SourceID), task.CommandIndex, task.DeviceIndex,
@@ -78,7 +78,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *Task) error {
 
 // Update 更新任务记录
 func (r *PgTaskRepository) Update(ctx context.Context, task *Task) error {
-	query, args, err := storage.Psql.Update("device_tasks").
+	builder := storage.Psql.Update("device_tasks").
 		Set("method", task.Method).
 		Set("params", task.Params).
 		Set("priority", task.Priority).
@@ -87,14 +87,27 @@ func (r *PgTaskRepository) Update(ctx context.Context, task *Task) error {
 		Set("status", task.Status).
 		Set("retry_count", task.RetryCount).
 		Set("max_retries", task.MaxRetries).
+		Set("retry_interval_seconds", task.RetryIntervalSeconds).
 		Set("sent_at", task.SentAt).
 		Set("completed_at", task.CompletedAt).
 		Set("expires_at", task.ExpiresAt).
+		Set("next_attempt_at", task.NextAttemptAt).
 		Set("result", task.Result).
 		Set("error_code", task.ErrorCode).
 		Set("error_message", task.ErrorMessage).
-		Where(sq.Eq{"id": task.ID}).
-		ToSql()
+		Where(sq.Eq{"id": task.ID})
+	if task.Status == TaskStatusSent {
+		// A fast CPE can complete before the sent-state PG sync returns. The
+		// late sent write must not downgrade a terminal row already written by
+		// MarkTaskCompleted/Failed.
+		builder = builder.Where(sq.NotEq{"status": []TaskStatus{
+			TaskStatusCompleted,
+			TaskStatusFailed,
+			TaskStatusExpired,
+			TaskStatusCancelled,
+		}})
+	}
+	query, args, err := builder.ToSql()
 	if err != nil {
 		return fmt.Errorf("build update query: %w", err)
 	}
@@ -320,6 +333,7 @@ WITH latest AS (
     AND method = 'GetParameterValues'
     AND command_key LIKE 'sync-gpv-%'
     AND source_id IS NOT NULL
+    AND completed_at IS NOT NULL
   ORDER BY created_at DESC
   LIMIT 1
 )
@@ -328,10 +342,11 @@ SELECT
   COUNT(*)::int,
   MIN(created_at),
   MAX(completed_at),
-  EXTRACT(EPOCH FROM (COALESCE(MAX(completed_at), NOW()) - MIN(created_at)))::float8
+  EXTRACT(EPOCH FROM (MAX(completed_at) - MIN(created_at)))::float8
 FROM device_tasks
 WHERE device_sn = $1
   AND method = 'GetParameterValues'
+  AND completed_at IS NOT NULL
   AND source_id = (SELECT source_id FROM latest)
 GROUP BY source_id`
 
@@ -563,8 +578,8 @@ func (r *PgTaskRepository) BatchCreate(ctx context.Context, tasks []*Task) error
 
 	columns := []string{
 		"id", "device_sn", "method", "params", "priority",
-		"command_key", "cwmp_id", "status", "retry_count", "max_retries",
-		"created_at", "sent_at", "completed_at", "expires_at",
+		"command_key", "cwmp_id", "status", "retry_count", "max_retries", "retry_interval_seconds",
+		"created_at", "sent_at", "completed_at", "expires_at", "next_attempt_at",
 		"result", "error_code", "error_message",
 		"source", "creator_id", "description",
 		"source_id", "command_index", "device_index",
@@ -577,8 +592,8 @@ func (r *PgTaskRepository) BatchCreate(ctx context.Context, tasks []*Task) error
 	for _, task := range tasks {
 		insertBuilder = insertBuilder.Values(
 			task.ID, task.DeviceSN, task.Method, task.Params, task.Priority,
-			task.CommandKey, task.CWMPID, task.Status, task.RetryCount, task.MaxRetries,
-			task.CreatedAt, task.SentAt, task.CompletedAt, task.ExpiresAt,
+			task.CommandKey, task.CWMPID, task.Status, task.RetryCount, task.MaxRetries, task.RetryIntervalSeconds,
+			task.CreatedAt, task.SentAt, task.CompletedAt, task.ExpiresAt, task.NextAttemptAt,
 			task.Result, task.ErrorCode, task.ErrorMessage,
 			task.Source, task.CreatorID, task.Description,
 			task.SourceID, task.CommandIndex, task.DeviceIndex,
@@ -640,6 +655,10 @@ WHERE source = 'mml' AND source_id = $1`
 type DeviceTaskResultRow struct {
 	ID           string // device_tasks.id（CSV 导出「子任务ID」、区分整体/逐 PATH 报文归属）
 	DeviceSN     string
+	Method       string
+	Params       json.RawMessage
+	CommandKey   string
+	CWMPID       string
 	Status       string
 	ErrorCode    int
 	ErrorMessage string
@@ -677,7 +696,7 @@ WHERE source = 'mml' AND source_id = $1`
 	}
 
 	const listQ = `
-SELECT id, device_sn, status,
+SELECT id, device_sn, method, params, COALESCE(command_key, ''), COALESCE(cwmp_id, ''), status,
        COALESCE(error_code, 0), COALESCE(error_message, ''),
        result, sent_at, completed_at, created_at,
        COALESCE(command_index, 0), COALESCE(device_index, 0)
@@ -694,14 +713,17 @@ LIMIT $2 OFFSET $3`
 	items := make([]DeviceTaskResultRow, 0, pageSize)
 	for rows.Next() {
 		var row DeviceTaskResultRow
-		var raw []byte
+		var params, raw []byte
 		if err := rows.Scan(
-			&row.ID, &row.DeviceSN, &row.Status,
+			&row.ID, &row.DeviceSN, &row.Method, &params, &row.CommandKey, &row.CWMPID, &row.Status,
 			&row.ErrorCode, &row.ErrorMessage,
 			&raw, &row.SentAt, &row.CompletedAt, &row.CreatedAt,
 			&row.CommandIndex, &row.DeviceIndex,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scan device task row: %w", err)
+		}
+		if len(params) > 0 {
+			row.Params = json.RawMessage(params)
 		}
 		if len(raw) > 0 {
 			row.Result = json.RawMessage(raw)
@@ -803,8 +825,8 @@ func (r *PgTaskRepository) PurgeOldTasks(ctx context.Context, before string) (in
 func taskColumns() []string {
 	return []string{
 		"id", "device_sn", "method", "params", "priority",
-		"command_key", "cwmp_id", "status", "retry_count", "max_retries",
-		"created_at", "sent_at", "completed_at", "expires_at",
+		"command_key", "cwmp_id", "status", "retry_count", "max_retries", "retry_interval_seconds",
+		"created_at", "sent_at", "completed_at", "expires_at", "next_attempt_at",
 		"result", "error_code", "error_message",
 		"source", "creator_id", "description",
 		"source_id", "command_index", "device_index",
@@ -831,8 +853,8 @@ func (r *PgTaskRepository) scanTaskRow(row pgx.Row) (*Task, error) {
 
 	err := row.Scan(
 		&task.ID, &task.DeviceSN, &task.Method, &params, &task.Priority,
-		&task.CommandKey, &task.CWMPID, &task.Status, &task.RetryCount, &task.MaxRetries,
-		&task.CreatedAt, &task.SentAt, &task.CompletedAt, &task.ExpiresAt,
+		&task.CommandKey, &task.CWMPID, &task.Status, &task.RetryCount, &task.MaxRetries, &task.RetryIntervalSeconds,
+		&task.CreatedAt, &task.SentAt, &task.CompletedAt, &task.ExpiresAt, &task.NextAttemptAt,
 		&result, &task.ErrorCode, &task.ErrorMessage,
 		&task.Source, &task.CreatorID, &task.Description,
 		&sourceID, &task.CommandIndex, &task.DeviceIndex,

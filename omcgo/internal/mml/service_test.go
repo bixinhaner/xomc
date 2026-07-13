@@ -113,6 +113,10 @@ func (m *mockScriptRepo) GetByID(ctx context.Context, id uuid.UUID) (*MMLScript,
 	return nil, nil
 }
 
+func (m *mockScriptRepo) NameExistsForCreator(context.Context, string, string, *uuid.UUID) (bool, error) {
+	return false, nil
+}
+
 func (m *mockScriptRepo) Update(ctx context.Context, script *MMLScript) error {
 	if m.updateFn != nil {
 		return m.updateFn(ctx, script)
@@ -149,12 +153,12 @@ func (m *mockScriptRepo) List(ctx context.Context, filter ScriptFilter) (*model.
 }
 
 type mockTaskRepo struct {
-	createFn        func(ctx context.Context, task *MMLTask) error
-	getByIDFn       func(ctx context.Context, id uuid.UUID) (*MMLTask, error)
-	updateFn        func(ctx context.Context, task *MMLTask) error
-	updateStatusFn  func(ctx context.Context, id uuid.UUID, status TaskStatus) error
-	deleteFn        func(ctx context.Context, id uuid.UUID) error
-	listFn          func(ctx context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error)
+	createFn       func(ctx context.Context, task *MMLTask) error
+	getByIDFn      func(ctx context.Context, id uuid.UUID) (*MMLTask, error)
+	updateFn       func(ctx context.Context, task *MMLTask) error
+	updateStatusFn func(ctx context.Context, id uuid.UUID, status TaskStatus) error
+	deleteFn       func(ctx context.Context, id uuid.UUID) error
+	listFn         func(ctx context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error)
 }
 
 func (m *mockTaskRepo) Create(ctx context.Context, task *MMLTask) error {
@@ -169,6 +173,10 @@ func (m *mockTaskRepo) GetByID(ctx context.Context, id uuid.UUID) (*MMLTask, err
 		return m.getByIDFn(ctx, id)
 	}
 	return nil, nil
+}
+
+func (m *mockTaskRepo) GetByRequestID(context.Context, string, string) (*MMLTask, error) {
+	return nil, commonerrors.ErrNotFound
 }
 
 func (m *mockTaskRepo) Update(ctx context.Context, task *MMLTask) error {
@@ -216,13 +224,13 @@ func (m *mockTaskRepo) UpdateExportDevice(ctx context.Context, id uuid.UUID, dev
 }
 
 type mockCustomCommandRepo struct {
-	createFn       func(ctx context.Context, tmpl *MMLCustomCommand) error
-	getByIDFn      func(ctx context.Context, id uuid.UUID) (*MMLCustomCommand, error)
-	updateFn       func(ctx context.Context, tmpl *MMLCustomCommand) error
-	deleteFn       func(ctx context.Context, id uuid.UUID) error
-	listFn         func(ctx context.Context, filter CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error)
-	nameExistsFn   func(ctx context.Context, ownerID uuid.UUID, name string, excludeID *uuid.UUID) (bool, error)
-	publicNameFn   func(ctx context.Context, name string, excludeID *uuid.UUID) (bool, error)
+	createFn     func(ctx context.Context, tmpl *MMLCustomCommand) error
+	getByIDFn    func(ctx context.Context, id uuid.UUID) (*MMLCustomCommand, error)
+	updateFn     func(ctx context.Context, tmpl *MMLCustomCommand) error
+	deleteFn     func(ctx context.Context, id uuid.UUID) error
+	listFn       func(ctx context.Context, filter CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error)
+	nameExistsFn func(ctx context.Context, ownerID uuid.UUID, name string, excludeID *uuid.UUID) (bool, error)
+	publicNameFn func(ctx context.Context, name string, excludeID *uuid.UUID) (bool, error)
 }
 
 func (m *mockCustomCommandRepo) Create(ctx context.Context, tmpl *MMLCustomCommand) error {
@@ -614,6 +622,29 @@ func TestService_UpdateScript_NilTagsPreservesExisting(t *testing.T) {
 	assert.Equal(t, []string{"keep-me"}, updatedScript.Tags, "nil tags should preserve existing")
 }
 
+func TestService_UpdateScriptMetadata_ReloadsUpdatedVersion(t *testing.T) {
+	scriptID := uuid.New()
+	readCount := 0
+	latest := &MMLScript{ID: scriptID, ScriptName: "new", UpdatedAt: time.Now().UTC()}
+	scriptRepo := &mockScriptRepo{
+		getByIDFn: func(context.Context, uuid.UUID) (*MMLScript, error) {
+			readCount++
+			if readCount == 1 {
+				return &MMLScript{ID: scriptID, ScriptName: "old", UpdatedAt: latest.UpdatedAt.Add(-time.Minute)}, nil
+			}
+			return latest, nil
+		},
+		updateFn: func(context.Context, *MMLScript) error { return nil },
+	}
+
+	svc := newTestService(&mockCommandRepo{}, scriptRepo, &mockTaskRepo{})
+	got, err := svc.UpdateScriptMetadata(context.Background(), scriptID, "new", "desc", []string{"tag"})
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, latest.UpdatedAt, got.UpdatedAt)
+	assert.Equal(t, 2, readCount, "metadata update must reload updated_at for optimistic replacement")
+}
+
 // --- Tests: DeleteScript ---
 
 func TestService_DeleteScript(t *testing.T) {
@@ -785,6 +816,325 @@ func TestService_ExecuteCommand_WithoutCode(t *testing.T) {
 	assert.Equal(t, "RAW_CMD_2", capturedTask.Commands[1]["command_code"])
 }
 
+func TestService_ExecuteCommand_DeviceBoundPlanItemsDeriveDevicesAndCommands(t *testing.T) {
+	lstID := uuid.New()
+	modID := uuid.New()
+	cmdRepo := &mockCommandRepo{
+		getByCodeFn: func(_ context.Context, code string) (*MMLCommand, error) {
+			switch code {
+			case "LST DEVICE_INFO":
+				return &MMLCommand{
+					ID:            lstID,
+					CommandCode:   "LST DEVICE_INFO",
+					RPCMethod:     "GetParameterValues",
+					OperationType: "LST",
+				}, nil
+			case "MOD DEVICE_INFO":
+				return &MMLCommand{
+					ID:            modID,
+					CommandCode:   "MOD DEVICE_INFO",
+					RPCMethod:     "SetParameterValues",
+					OperationType: "MOD",
+				}, nil
+			default:
+				return nil, commonerrors.ErrNotFound
+			}
+		},
+	}
+
+	var capturedTask *MMLTask
+	taskRepo := &mockTaskRepo{
+		createFn: func(ctx context.Context, task *MMLTask) error {
+			capturedTask = task
+			task.ID = uuid.New()
+			return nil
+		},
+	}
+
+	svc := newTestService(cmdRepo, &mockScriptRepo{}, taskRepo)
+	svc.SetCmdParamRepo(&stubCmdParamRepo{
+		refs: map[uuid.UUID][]MMLParamRef{
+			lstID: {{ParamCode: "HW", Tr069Path: "Device.DeviceInfo.HardwareVersion", ValueType: "string"}},
+			modID: {{ParamCode: "USER_LABEL", Tr069Path: "Device.X.UserLabel", ValueType: "string", IsWritable: true}},
+		},
+	})
+
+	result, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		ExecuteMode: "device_bound",
+		TaskName:    "device-bound maintenance",
+		Creator:     "admin",
+		PlanItems: []MMLPlanItem{
+			{
+				LineNo:   1,
+				DeviceSN: "SN001",
+				RawLine:  "LST DEVICE_INFO;SN001",
+				Command: map[string]interface{}{
+					"command_code":   "LST DEVICE_INFO",
+					"operation_type": "LST",
+				},
+			},
+			{
+				LineNo:   2,
+				DeviceSN: "SN002",
+				RawLine:  "MOD DEVICE_INFO:USER_LABEL=Site-A;SN002",
+				Command: map[string]interface{}{
+					"command_code":   "MOD DEVICE_INFO",
+					"operation_type": "MOD",
+					"parameters":     map[string]interface{}{"USER_LABEL": "Site-A"},
+				},
+			},
+			{
+				LineNo:   3,
+				DeviceSN: "SN002",
+				RawLine:  "LST DEVICE_INFO;SN002",
+				Command: map[string]interface{}{
+					"command_code":   "LST DEVICE_INFO",
+					"operation_type": "LST",
+				},
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, capturedTask)
+	assert.Equal(t, TaskExecuteModeDeviceBound, capturedTask.ExecuteMode)
+	assert.Equal(t, []string{"SN001", "SN002"}, capturedTask.DeviceSNs)
+	assert.Equal(t, 2, capturedTask.TotalDevices)
+	require.Len(t, capturedTask.PlanItems, 3)
+	require.Len(t, capturedTask.Commands, 3)
+	assert.Equal(t, 1, capturedTask.PlanItems[0].Order)
+	assert.Equal(t, 1, capturedTask.PlanItems[1].Order)
+	assert.Equal(t, 2, capturedTask.PlanItems[2].Order)
+	assert.Equal(t, "SN002", capturedTask.Commands[1]["plan_device_sn"])
+	assert.Equal(t, 2, capturedTask.Commands[2]["plan_order"])
+	assert.Equal(t, "SetParameterValues", capturedTask.Commands[1]["rpc_method"])
+	assert.Contains(t, capturedTask.Commands[0], "param_refs")
+}
+
+func TestService_ExecuteCommand_DeviceBoundPlanItemsAttachObjectName(t *testing.T) {
+	var capturedTask *MMLTask
+	taskRepo := &mockTaskRepo{
+		createFn: func(ctx context.Context, task *MMLTask) error {
+			capturedTask = task
+			task.ID = uuid.New()
+			return nil
+		},
+	}
+
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
+
+	_, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		ExecuteMode: "device_bound",
+		TaskName:    "device-bound object ops",
+		Creator:     "admin",
+		PlanItems: []MMLPlanItem{
+			{
+				LineNo:   1,
+				DeviceSN: "SN001",
+				RawLine:  "ADD ETHERNET_INTERFACE;SN001",
+				Command: map[string]interface{}{
+					"command_code":   "ADD ETHERNET_INTERFACE",
+					"operation_type": "ADD",
+					"rpc_method":     "AddObject",
+					"target_object":  "Device.Ethernet.Interface.",
+					"target_paths":   []interface{}{"Device.Ethernet.Interface."},
+					"parameters":     map[string]interface{}{},
+				},
+			},
+			{
+				LineNo:   2,
+				DeviceSN: "SN001",
+				RawLine:  "RMV ETHERNET_INTERFACE;SN001",
+				Command: map[string]interface{}{
+					"command_code":   "RMV ETHERNET_INTERFACE",
+					"operation_type": "RMV",
+					"rpc_method":     "DeleteObject",
+					"target_object":  "Device.Ethernet.Interface",
+					"parameters":     map[string]interface{}{},
+				},
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, capturedTask)
+	require.Len(t, capturedTask.Commands, 2)
+	addParams := commandParameters(capturedTask.Commands[0])
+	require.NotNil(t, addParams)
+	assert.Equal(t, "Device.Ethernet.Interface.", addParams["object_name"])
+	rmvParams := commandParameters(capturedTask.Commands[1])
+	require.NotNil(t, rmvParams)
+	assert.Equal(t, "Device.Ethernet.Interface.", rmvParams["object_name"])
+	assert.Equal(t, addParams["object_name"], capturedTask.PlanItems[0].Command["parameters"].(map[string]interface{})["object_name"])
+}
+
+func TestService_ExecuteCommand_DeviceBoundRawAddPathExpandsFollowUpValues(t *testing.T) {
+	var capturedTask *MMLTask
+	taskRepo := &mockTaskRepo{
+		createFn: func(ctx context.Context, task *MMLTask) error {
+			capturedTask = task
+			task.ID = uuid.New()
+			return nil
+		},
+	}
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
+
+	_, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		ExecuteMode: "device_bound",
+		TaskName:    "raw add path",
+		Creator:     "admin",
+		PlanItems: []MMLPlanItem{{
+			LineNo:   1,
+			DeviceSN: "SN001",
+			Order:    1,
+			RawLine:  "ADD PATH:Device.IP.Interface.1.IPv4Address.:IPAddress=192.168.1.10,SubnetMask=255.255.255.0;SN001",
+			Command: map[string]interface{}{
+				"command_code":   "RAW ADD",
+				"operation_type": "ADD",
+				"rpc_method":     "AddObject",
+				"param_paths":    []string{"Device.IP.Interface.1.IPv4Address."},
+				"parameters": map[string]interface{}{
+					"IPAddress":  "192.168.1.10",
+					"SubnetMask": "255.255.255.0",
+				},
+				"raw_path_mode": "standard",
+			},
+		}},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, capturedTask)
+	require.Len(t, capturedTask.PlanItems, 1)
+	require.Len(t, capturedTask.Commands, 2)
+	addParams := commandParameters(capturedTask.Commands[0])
+	require.Equal(t, "Device.IP.Interface.1.IPv4Address.", addParams["object_name"])
+	assert.Equal(t, "SN001", capturedTask.Commands[0]["plan_device_sn"])
+	assert.Equal(t, 1, capturedTask.Commands[0]["plan_order"])
+
+	spv := capturedTask.Commands[1]
+	assert.Equal(t, "RAW MOD", spv["command_code"])
+	assert.Equal(t, "SetParameterValues", spv["rpc_method"])
+	assert.Equal(t, "spv_after_add", spv["compound_phase"])
+	assert.Equal(t, "SN001", spv["plan_device_sn"])
+	assert.Equal(t, 1, spv["plan_order"])
+	refs := paramRefsFromEntry(spv)
+	require.Len(t, refs, 2)
+	assert.Equal(t, "Device.IP.Interface.1.IPv4Address.{NEW}.IPAddress", refs[0].Tr069Path)
+	assert.Equal(t, "Device.IP.Interface.1.IPv4Address.{NEW}.SubnetMask", refs[1].Tr069Path)
+}
+
+func TestService_ExecuteCommand_RejectsMoreThan200Devices(t *testing.T) {
+	created := false
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, &mockTaskRepo{
+		createFn: func(context.Context, *MMLTask) error {
+			created = true
+			return nil
+		},
+	})
+	deviceSNs := make([]string, 201)
+	for i := range deviceSNs {
+		deviceSNs[i] = fmt.Sprintf("SN-%03d", i+1)
+	}
+
+	_, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		TaskName:  "too many devices",
+		DeviceSNs: deviceSNs,
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.Contains(t, err.Error(), "201")
+	assert.Contains(t, err.Error(), "200")
+	assert.False(t, created)
+}
+
+func TestService_ExecuteCommand_RejectsMoreThan2000PlanItems(t *testing.T) {
+	created := false
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, &mockTaskRepo{
+		createFn: func(context.Context, *MMLTask) error {
+			created = true
+			return nil
+		},
+	})
+	planItems := make([]MMLPlanItem, 2001)
+	for i := range planItems {
+		planItems[i] = MMLPlanItem{
+			LineNo:   i + 1,
+			DeviceSN: "SN-001",
+			Command:  map[string]interface{}{"command_code": "LST DEVICE_INFO"},
+		}
+	}
+
+	_, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		TaskName:    "too many plan rows",
+		ExecuteMode: "device_bound",
+		PlanItems:   planItems,
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.Contains(t, err.Error(), "2001")
+	assert.Contains(t, err.Error(), "2000")
+	assert.False(t, created)
+}
+
+func TestService_ExecuteCommand_RejectsMoreThan2000CommonCommands(t *testing.T) {
+	created := false
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, &mockTaskRepo{
+		createFn: func(context.Context, *MMLTask) error {
+			created = true
+			return nil
+		},
+	})
+	commands := make([]map[string]interface{}, 2001)
+	for i := range commands {
+		commands[i] = map[string]interface{}{"command_code": "LST DEVICE_INFO"}
+	}
+
+	_, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		TaskName:  "too many common commands",
+		DeviceSNs: []string{"SN-001"},
+		Commands:  commands,
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.Contains(t, err.Error(), "2001")
+	assert.Contains(t, err.Error(), "2000")
+	assert.False(t, created)
+}
+
+func TestService_ExecuteCommand_RejectsMoreThan200PlanDevices(t *testing.T) {
+	created := false
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, &mockTaskRepo{
+		createFn: func(context.Context, *MMLTask) error {
+			created = true
+			return nil
+		},
+	})
+	planItems := make([]MMLPlanItem, 201)
+	for i := range planItems {
+		planItems[i] = MMLPlanItem{
+			LineNo:   i + 1,
+			DeviceSN: fmt.Sprintf("SN-%03d", i+1),
+			Command:  map[string]interface{}{"command_code": "LST DEVICE_INFO"},
+		}
+	}
+
+	_, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		TaskName:    "too many plan devices",
+		ExecuteMode: "device_bound",
+		PlanItems:   planItems,
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.Contains(t, err.Error(), "201")
+	assert.Contains(t, err.Error(), "200")
+	assert.False(t, created)
+}
+
 func TestService_ExecuteCommand_NilCommandsDefaultsToEmpty(t *testing.T) {
 	var capturedTask *MMLTask
 	taskRepo := &mockTaskRepo{
@@ -909,6 +1259,111 @@ func TestService_ExecuteCommand_EmptyExecuteType_DefaultsToImmediateAndFansOut(t
 	assert.Len(t, stub.calls[0], 2, "每个设备产生一条 device_task (2 devices × 1 cmd)")
 	assert.Equal(t, TaskRunning, updatedStatus,
 		"Fanout 成功后 mml_task 状态必须迁移到 running")
+}
+
+func TestService_ExecuteCommand_ScheduledSetsNextTriggerAt(t *testing.T) {
+	scheduledAt := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+	scheduledRaw := scheduledAt.Format(time.RFC3339Nano)
+
+	var capturedTask *MMLTask
+	taskRepo := &mockTaskRepo{
+		createFn: func(_ context.Context, task *MMLTask) error {
+			capturedTask = task
+			task.ID = uuid.New()
+			return nil
+		},
+	}
+
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
+	stub := &stubDeviceTaskCreator{}
+	svc.SetFanouter(NewFanouter(stub, nil, nil, nil, zap.NewNop()))
+
+	result, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		DeviceSNs:        []string{"SN-001"},
+		TaskName:         "scheduled script",
+		Creator:          "admin",
+		ExecuteType:      ExecuteScheduled,
+		ScheduledAt:      &scheduledRaw,
+		Commands:         []map[string]interface{}{{"command_code": "REBOOT", "rpc_method": "Reboot"}},
+		FailedRetry:      true,
+		FailedRetryCount: 2,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, capturedTask)
+	require.NotNil(t, capturedTask.ScheduledAt, "scheduled_at 必须持久化到任务")
+	require.NotNil(t, capturedTask.NextTriggerAt, "scheduled 任务必须写 next_trigger_at 才能被 scheduler 认领")
+	assert.True(t, scheduledAt.Equal(*capturedTask.ScheduledAt))
+	assert.True(t, scheduledAt.Equal(*capturedTask.NextTriggerAt))
+	assert.Equal(t, TaskPending, capturedTask.Status)
+	assert.Empty(t, stub.calls, "scheduled 创建阶段不应立即 fanout")
+}
+
+func TestService_ExecuteCommand_PeriodicSetsNextTriggerAt(t *testing.T) {
+	periodStart := time.Now().UTC().Add(48 * time.Hour).Truncate(time.Second)
+	periodEnd := periodStart.Add(24 * time.Hour)
+	startRaw := periodStart.Format(time.RFC3339Nano)
+	endRaw := periodEnd.Format(time.RFC3339Nano)
+	periodTime := periodStart.Format("15:04:05")
+
+	var capturedTask *MMLTask
+	taskRepo := &mockTaskRepo{
+		createFn: func(_ context.Context, task *MMLTask) error {
+			capturedTask = task
+			task.ID = uuid.New()
+			return nil
+		},
+	}
+
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
+
+	result, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		DeviceSNs:   []string{"SN-001"},
+		TaskName:    "periodic script",
+		Creator:     "admin",
+		ExecuteType: ExecutePeriodic,
+		PeriodStart: &startRaw,
+		PeriodEnd:   &endRaw,
+		PeriodTime:  periodTime,
+		Commands:    []map[string]interface{}{{"command_code": "REBOOT", "rpc_method": "Reboot"}},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, capturedTask)
+	require.NotNil(t, capturedTask.PeriodStart, "period_start 必须持久化到任务")
+	require.NotNil(t, capturedTask.PeriodEnd, "period_end 必须持久化到任务")
+	require.NotNil(t, capturedTask.NextTriggerAt, "periodic 任务必须写 next_trigger_at 才能被 scheduler 认领")
+	assert.True(t, periodStart.Equal(*capturedTask.PeriodStart))
+	assert.True(t, periodEnd.Equal(*capturedTask.PeriodEnd))
+	assert.Equal(t, periodTime, capturedTask.PeriodTime)
+	assert.True(t, periodStart.Equal(*capturedTask.NextTriggerAt))
+	assert.Equal(t, TaskPending, capturedTask.Status)
+}
+
+func TestService_ExecuteCommand_ScheduledRejectsMissingScheduledAt(t *testing.T) {
+	var created bool
+	taskRepo := &mockTaskRepo{
+		createFn: func(_ context.Context, _ *MMLTask) error {
+			created = true
+			return nil
+		},
+	}
+
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
+
+	_, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		DeviceSNs:   []string{"SN-001"},
+		TaskName:    "bad scheduled script",
+		Creator:     "admin",
+		ExecuteType: ExecuteScheduled,
+		Commands:    []map[string]interface{}{{"command_code": "REBOOT", "rpc_method": "Reboot"}},
+	})
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrInvalidInput))
+	assert.False(t, created, "非法 scheduled 请求不应写入 mml_tasks")
 }
 
 // 回归 MML 控制台"参数路径直接执行"需求：用户没在命令树选命令，

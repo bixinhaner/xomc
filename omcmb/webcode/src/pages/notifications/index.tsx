@@ -1,32 +1,28 @@
-import { useState } from 'react';
-import { Tabs } from 'antd';
+import { useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
+import { useTabStore } from '@core/store/tabStore';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
-import TemplateList from './TemplateList';
-import HistoryList from './HistoryList';
+import MessageList from './MessageList';
 
 export default function NotificationsPage() {
   const t = useT();
-  const [activeKey, setActiveKey] = useState<'templates' | 'history'>('templates');
+  const location = useLocation();
+  const openTab = useTabStore((s) => s.openTab);
+
+  useEffect(() => {
+    openTab({
+      key: 'notifications',
+      label: 'notification.title',
+      labelRaw: false,
+      path: `${location.pathname}${location.search}`,
+      closable: true,
+    });
+  }, [location.pathname, location.search, openTab]);
 
   return (
     <ListPageLayout title={t('notification.title')}>
-      <Tabs
-        activeKey={activeKey}
-        onChange={(k) => setActiveKey(k as 'templates' | 'history')}
-        items={[
-          {
-            key: 'templates',
-            label: t('notification.tab.template'),
-            children: <TemplateList />,
-          },
-          {
-            key: 'history',
-            label: t('notification.tab.history'),
-            children: <HistoryList />,
-          },
-        ]}
-      />
+      <MessageList />
     </ListPageLayout>
   );
 }

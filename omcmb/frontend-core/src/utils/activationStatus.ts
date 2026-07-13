@@ -1,5 +1,5 @@
 /**
- * 设备激活状态语义三态 —— 三皮肤(webcode / webcode-v2 / webcode-v3)的"激活状态"
+ * 设备激活状态语义三态 —— V1 webcode 的“激活状态”统一使用本工具。
  * 渲染层(列表 Tag 列、详情头部 Tag、详情 KV 文字、HUD 仪表 KV)必须复用此函数,
  * 否则不同入口("设备列表激活状态列" vs "设备详情头部状态")会出现不一致 ——
  * 历史上 PR #435 / commit c69ba889 试图收敛但口径仍有 drift,见该提交评注。
@@ -18,6 +18,7 @@
  *      内部字符串与列表 Tag 表现脱节)
  */
 import { getI18nText, type Locale } from './i18nText';
+import { containsHan } from './deviceDisplay';
 
 export type ActivationStatus = 'active' | 'inactive' | null;
 
@@ -53,6 +54,7 @@ export function activationStatusLabelOf(
     const detail = details?.find((item) => item?.status !== false && item?.value === value);
     if (!detail) return null;
     const label = getI18nText(detail.labelI18n, locale, detail.label).trim();
+    if (locale === 'en-US' && containsHan(label) && !detail.labelI18n?.['en-US']) return null;
     return label || null;
   };
 

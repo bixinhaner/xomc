@@ -46,6 +46,7 @@ import (
 	"github.com/omcgo/omcgo/internal/notification"
 	"github.com/omcgo/omcgo/internal/ops"
 	"github.com/omcgo/omcgo/internal/pm"
+	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/provision"
@@ -204,6 +205,30 @@ func initMRTaskModule(c *Container) error {
 		logger.Warn("completion router not wired; MR SPV fault → openFailure routing disabled")
 	}
 	return nil
+}
+
+func startMMLScheduler(
+	c *Container,
+	mmlService *mml.Service,
+	taskRepo mml.ScheduledTaskRepository,
+	logger *zap.Logger,
+) *mml.Scheduler {
+	scheduler := mml.NewScheduler(mmlService, taskRepo, nil, 0, logger)
+	scheduler.Start(context.Background())
+
+	if c != nil {
+		c.miscDeps.mmlScheduler = scheduler
+		if c.GS != nil {
+			c.GS.Register("mml-scheduler", 1, func(context.Context) error {
+				scheduler.Stop()
+				scheduler.Wait()
+				return nil
+			})
+		}
+	}
+
+	logger.Info("mml scheduler started")
+	return scheduler
 }
 
 // initSoftwareModule 初始化 F06 固件管理模块。
@@ -1260,15 +1285,16 @@ func initDashboardModule(c *Container) error {
 		})
 	}
 
-
 	// KPI/时序库物理分离：alarms_history / alarm_efficiency_metrics matview 在时序库（TsPool），新增 tsPool 入参。
 	// issue #213 Phase1：注入 PM 的 indicator 仓库（perf_indicators_{enb,gsm,gnb}），
 	// 供 GetKPIDefinitions 按别名表 K 编号反查 cnName / unit。dashboard 依赖 pm，pmHandlerDeps 此时已就绪。
 	var dashIndicatorRepo indicator.IndicatorRepository
+	var dashPMAggregator *aggregator.Aggregator
 	if c.pmHandlerDeps != nil {
 		dashIndicatorRepo = c.pmHandlerDeps.pmIndicatorRepo
+		dashPMAggregator = c.pmHandlerDeps.pmAggregator
 	}
-	dashboardService := dashboard.NewService(c.DeviceService, c.AlarmPgStore, c.PMKPIRepo, c.PgPool, c.TsPool, c.GroupRepo, dashIndicatorRepo, logger)
+	dashboardService := dashboard.NewService(c.DeviceService, c.AlarmPgStore, c.PMKPIRepo, c.PgPool, c.TsPool, c.GroupRepo, dashIndicatorRepo, dashPMAggregator, logger)
 	// issue #213 S1：存全局布局接口在 handler 层再校验管理员身份，注入 RoleRepo 作 Casbin 权限检查器
 	// （super_admin 旁路 + 端点级权限点）。RoleRepo 实现 admin.PermissionChecker；为 nil 时只认 super_admin。
 	var dashPermChecker admin.PermissionChecker
@@ -1472,6 +1498,14 @@ func initMiscModules(c *Container) error {
 	mmlAuditRepo := mml.NewPgAuditRepository(c.PgPool)
 	mmlCmdParamRepo := mml.NewPgCommandParamRepository(c.PgPool)
 	mmlService := mml.NewService(mmlCmdRepo, mmlScriptRepo, mmlTaskRepo, mmlCustomCmdRepo, messageHub, logger)
+	// MML TXT import is a two-phase flow: validation snapshots are held in
+	// Redis for 15 minutes, while command/device authority is loaded from PG.
+	// The service is injected before the handler is registered below so every
+	// route observes the same repository and session-store instances.
+	importSessions := mml.NewRedisImportSessionStore(c.Redis, 15*time.Minute)
+	importValidator := mml.NewScriptImportValidator(mml.NewPgScriptValidationRepository(c.PgPool))
+	mmlService.SetScriptImportService(mml.NewScriptImportService(mmlScriptRepo, importValidator, importSessions, logger))
+	mmlService.SetScriptExecutionValidator(importValidator)
 	mmlService.SetAuditRepo(mmlAuditRepo)
 	mmlService.SetCmdParamRepo(mmlCmdParamRepo)
 	// issue #115 调整3（A1）：自定义命令 PATH 关联表仓库。
@@ -1801,6 +1835,7 @@ func initMiscModules(c *Container) error {
 		// T-0168: 复用上面已构造的 mmlFanoutMetrics 实例，避免重复注册。
 		fanouter.SetMetrics(mmlFanoutMetrics)
 		mmlService.SetFanouter(fanouter)
+		startMMLScheduler(c, mmlService, mmlTaskRepo, logger)
 
 		// Sequencer：与 ResultAggregator 并行挂到 MML completion 通路，
 		// 在 device_task 进入终态后追加入队下一行命令。
@@ -2043,13 +2078,14 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 	//   - 分组规则路径：GroupMatchEngine 周期/事件触发时调 matcher
 	// （历史的 device_rules 独立引擎已彻底下线，相关表/handler/seed 一并删除）
 	matcher := topology.NewDeviceMatcher(c.GroupRepo, c.PgPool, logger)
+	deviceLister := topology.NewPgDeviceLister(c.PgPool, logger)
 
 	// migration 000124 / SN 规则：把 matcher 注入到 device.InformHandler，
 	// 让心跳异步路径在更新设备信息后自动跑分组匹配。
 	// 用 closure 包装避免 device 包反向依赖 topology — closure 实现
 	// device.GroupAssigner 接口的 1 个方法。
 	if c.InformHandler != nil {
-		hbAssigner := topology.NewHeartbeatAssigner(matcher)
+		hbAssigner := topology.NewHeartbeatAssigner(matcher, deviceLister)
 		c.InformHandler.SetGroupAssigner(groupAssignerAdapter{a: hbAssigner})
 		logger.Info("device inform handler wired with topology heartbeat group assigner")
 	}
@@ -2057,7 +2093,7 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 	// 设备分组自动匹配引擎（GroupMatchEngine）：消费 L2 分组自带的匹配规则，
 	// 触发时机 = 分组新增/编辑 + 新设备注册 + 心跳 inform + cron @hourly。
 	groupMatchEngine := topology.NewGroupMatchEngine(
-		matcher, topology.NewPgDeviceLister(c.PgPool, logger), c.GroupRepo, logger)
+		matcher, deviceLister, c.GroupRepo, logger)
 	groupMatchEngine.SetEventBus(c.EventBus)
 	if err := groupMatchEngine.Start(context.Background()); err != nil {
 		logger.Error("group match engine Start failed", zap.Error(err))
@@ -2207,6 +2243,7 @@ type miscDeps struct {
 	// MML
 	mmlHandler        *mml.Handler
 	mmlService        *mml.Service
+	mmlScheduler      *mml.Scheduler
 	mmlAdminHandler   *mml.AdminHandler   // T-0123-P0 catalog 管理 13 端点
 	mmlConsoleHandler *mml.ConsoleHandler // T-0123-P1 Console 5 端点（group-tree / sub-fields / render / parse / execute-statements）
 
@@ -2392,6 +2429,10 @@ func (a *mmlDeviceTaskResultAdapter) ListResultsBySourceID(
 		out = append(out, mml.DeviceTaskResultRowView{
 			DeviceTaskID: r.ID,
 			DeviceSN:     r.DeviceSN,
+			Method:       r.Method,
+			Params:       r.Params,
+			CommandKey:   r.CommandKey,
+			CWMPID:       r.CWMPID,
 			Status:       r.Status,
 			ErrorCode:    r.ErrorCode,
 			ErrorMessage: r.ErrorMessage,

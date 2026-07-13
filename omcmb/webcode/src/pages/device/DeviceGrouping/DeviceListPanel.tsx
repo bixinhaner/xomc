@@ -1,11 +1,13 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Button, Card, Typography } from 'antd';
-import { DownloadOutlined, UploadOutlined } from '@ant-design/icons';
+import { Button, Card, Dropdown, Typography } from 'antd';
+import type { MenuProps } from 'antd';
+import { DownloadOutlined, DownOutlined, UploadOutlined } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import SearchInput from '@/components/SearchInput';
 import type { BatchAction } from '@/components/DataTable';
-import type { Device, BatchImportResponse } from '@core/types/device';
+import type { BatchImportResponse, BatchPreRegisterResponse, Device } from '@core/types/device';
 import BatchImportModal from './BatchImportModal';
+import BatchPreRegisterModal from './BatchPreRegisterModal';
 import { useDeviceColumns } from './useDeviceColumns';
 
 const { Title, Text } = Typography;
@@ -20,17 +22,19 @@ export interface DeviceListPanelProps {
   selectedGroupId: string | null;
   selectedGroupName: string | undefined;
   batchActions: BatchAction[];
-  onSelectionChange: (keys: React.Key[]) => void;
+  onSelectionChange: (keys: React.Key[], rows: Device[]) => void;
   onPageChange: (page: number, size: number) => void;
   /** SN / 设备名称 模糊搜索（多个以逗号分隔），回车或点搜索触发。 */
   onSearch: (value: string) => void;
   onExport: () => void | Promise<void>;
   /**
-   * 批量导入完成回调（接收后端真实回执，含成功/失败统计）。
-   * T-0202 后从原 fileList 改为 BatchImportResponse —— 解析与 POST 已下沉到 Modal。
+   * 批量导入完成回调。
    */
   onImport: (result: BatchImportResponse) => void | Promise<void>;
   onDownloadTemplate: () => void;
+  /** 批量预登记完成回调。 */
+  onPreRegister: (result: BatchPreRegisterResponse) => void | Promise<void>;
+  onDownloadPreRegisterTemplate: () => void;
   t: (id: string, values?: Record<string, string | number>) => string;
 }
 
@@ -50,9 +54,12 @@ export default function DeviceListPanel({
   onExport,
   onImport,
   onDownloadTemplate,
+  onPreRegister,
+  onDownloadPreRegisterTemplate,
   t,
 }: DeviceListPanelProps) {
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [preRegModalOpen, setPreRegModalOpen] = useState(false);
 
   const handleImportClick = useCallback(() => {
     setImportModalOpen(true);
@@ -60,6 +67,14 @@ export default function DeviceListPanel({
 
   const handleImportClose = useCallback(() => {
     setImportModalOpen(false);
+  }, []);
+
+  const handlePreRegClick = useCallback(() => {
+    setPreRegModalOpen(true);
+  }, []);
+
+  const handlePreRegClose = useCallback(() => {
+    setPreRegModalOpen(false);
   }, []);
 
   const columns = useDeviceColumns({ t });
@@ -80,18 +95,26 @@ export default function DeviceListPanel({
   );
 
   // 导出 / 导入按钮放到工具栏「删除」按钮之后（DataTable.extraToolbarAfterBatch）。
+  // Import 升级为下拉：「更新名称/备注」和「批量预登记」两个选项。
+  const importMenuItems: MenuProps['items'] = useMemo(() => [
+    { key: 'import', label: t('common.import'), icon: <UploadOutlined />, onClick: handleImportClick },
+    { key: 'preregister', label: t('device.batchPreRegister'), icon: <UploadOutlined />, onClick: handlePreRegClick },
+  ], [handleImportClick, handlePreRegClick, t]);
+
   const importExportButtons = useMemo(
     () => (
       <>
         <Button size="small" type="primary" icon={<DownloadOutlined />} onClick={onExport}>
           {t('common.export')}
         </Button>
-        <Button size="small" icon={<UploadOutlined />} onClick={handleImportClick}>
-          {t('common.import')}
-        </Button>
+        <Dropdown menu={{ items: importMenuItems }} trigger={['click']}>
+          <Button size="small" icon={<UploadOutlined />}>
+            {t('common.import')} <DownOutlined />
+          </Button>
+        </Dropdown>
       </>
     ),
-    [handleImportClick, onExport, t],
+    [importMenuItems, onExport, t],
   );
 
   return (
@@ -121,6 +144,7 @@ export default function DeviceListPanel({
             selectable
             selectedRowKeys={selectedDeviceIds}
             onSelectionChange={onSelectionChange}
+            preserveSelectedRowKeys
             batchActions={batchActions}
             extraToolbarLeft={searchBox}
             extraToolbarAfterBatch={importExportButtons}
@@ -174,6 +198,13 @@ export default function DeviceListPanel({
         onDownloadTemplate={onDownloadTemplate}
         t={t}
         selectedGroupId={selectedGroupId}
+      />
+      <BatchPreRegisterModal
+        open={preRegModalOpen}
+        onClose={handlePreRegClose}
+        onPreRegister={onPreRegister}
+        onDownloadTemplate={onDownloadPreRegisterTemplate}
+        t={t}
       />
     </div>
   );

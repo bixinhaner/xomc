@@ -670,7 +670,7 @@ export default function VersionRollback() {
     },
     { key: 'deviceSn', title: t('software.stationCode'), dataIndex: 'deviceSn', width: 120, render: (val: unknown) => (val as string) || '-' },
     { key: 'deviceName', title: t('software.stationName'), dataIndex: 'deviceSn', width: 150, render: (val: unknown) => (val as string) || '-' },
-    // qa-614 #371：原标题"原始版本"却绑 destVersion，语义反向。拆成两列对齐 v2/v3：
+    // qa-614 #371：原标题“原始版本”却绑定 destVersion，语义反向，拆成两列：
     // 原始版本(oriVersion) / 目标版本(destVersion，完成后由后端回填设备上报的新版本)。
     { key: 'oriVersion', title: t('software.rollback.originalVersion'), dataIndex: 'oriVersion', width: 100, render: (val: unknown) => (val as string) || '-' },
     { key: 'destVersion', title: t('software.rollback.targetVersion'), dataIndex: 'destVersion', width: 140, render: (val: unknown) => (val as string) || t('software.rollback.destVersionPending') },

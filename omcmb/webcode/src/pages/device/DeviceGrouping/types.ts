@@ -20,9 +20,11 @@ export interface GroupItem {
    * L2 子分组编辑入口（useGroupActions.openEditLevel2）回填表单依赖这些字段。
    */
   matchingMode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber';
+  sourceGroupId?: string;
   nameRuleList?: NameFilterItem[];
   lacList?: number[];
   tacList?: number[];
+  serialNumberList?: string[];
 }
 
 // Filter condition options helper

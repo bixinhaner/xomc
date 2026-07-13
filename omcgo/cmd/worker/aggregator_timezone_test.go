@@ -32,14 +32,21 @@ func windowFor(t *testing.T, loc *time.Location, jobType string) func(now time.T
 	return nil
 }
 
+func TestPMAggregatorCronEntries_OnlyHourlyCron(t *testing.T) {
+	loc := loadShanghai(t)
+	entries := pmAggregatorCronEntries(loc)
+	require.Len(t, entries, 1)
+	require.Equal(t, aggregator.JobTypeHourly, entries[0].jobType)
+	require.Equal(t, "5 * * * *", entries[0].spec)
+}
+
 // 验收 1：daily 桶 start/end 落业务时区本地零点（北京 00:00 = UTC 前一日 16:00）。
 // 注入跨 UTC/本地零点的 now：UTC 2026-05-30 20:00 = 北京 2026-05-31 04:00。
 func TestDailyWindow_LocalMidnight(t *testing.T) {
 	loc := loadShanghai(t)
-	dailyWindow := windowFor(t, loc, aggregator.JobTypeDaily)
 
 	now := time.Date(2026, 5, 30, 20, 0, 0, 0, time.UTC) // = 北京 5-31 04:00
-	start, end := dailyWindow(now)
+	start, end := dailyAggregationWindow(now, loc)
 
 	// 桶 end = 本地今天零点（北京 5-31 00:00 = UTC 5-30 16:00）
 	wantEnd := time.Date(2026, 5, 31, 0, 0, 0, 0, loc)
@@ -58,10 +65,9 @@ func TestDailyWindow_LocalMidnight(t *testing.T) {
 // 2026-06-03 是周三，本周一为 2026-06-01。
 func TestWeeklyWindow_LocalMonday(t *testing.T) {
 	loc := loadShanghai(t)
-	weeklyWindow := windowFor(t, loc, aggregator.JobTypeWeekly)
 
 	now := time.Date(2026, 6, 2, 20, 0, 0, 0, time.UTC) // = 北京 6-03（周三）04:00
-	start, end := weeklyWindow(now)
+	start, end := weeklyAggregationWindow(now, loc)
 
 	// end = 本周一本地零点（北京 6-01 00:00 = UTC 5-31 16:00）
 	wantThisMon := time.Date(2026, 6, 1, 0, 0, 0, 0, loc)
@@ -78,10 +84,9 @@ func TestWeeklyWindow_LocalMonday(t *testing.T) {
 // 验收 2b：monthly 桶 start 落本地月初零点（带 +08 偏移即 UTC 上月某时刻）。
 func TestMonthlyWindow_LocalFirstOfMonth(t *testing.T) {
 	loc := loadShanghai(t)
-	monthlyWindow := windowFor(t, loc, aggregator.JobTypeMonthly)
 
 	now := time.Date(2026, 5, 31, 20, 0, 0, 0, time.UTC) // = 北京 6-01 04:00
-	start, end := monthlyWindow(now)
+	start, end := monthlyAggregationWindow(now, loc)
 
 	// end = 本月初本地零点（北京 6-01 00:00 = UTC 5-31 16:00）
 	wantThisMonth := time.Date(2026, 6, 1, 0, 0, 0, 0, loc)
@@ -163,6 +168,21 @@ func newTzManagerWithProvider(p *systimezone.Provider) *tzManager {
 	return m
 }
 
+func TestExportTimezoneProvider_UsesTzManagerProvider(t *testing.T) {
+	sf := &stubFetcher{}
+	sf.set("Asia/Shanghai")
+	m := newTzManagerWithProvider(systimezone.New(sf.fetch, nil))
+
+	got := exportTimezoneProvider(m)
+	require.NotNil(t, got)
+	require.Equal(t, "Asia/Shanghai", got.Location(context.Background()).String())
+}
+
+func TestExportTimezoneProvider_NilSafe(t *testing.T) {
+	require.Nil(t, exportTimezoneProvider(nil))
+	require.Nil(t, exportTimezoneProvider(&tzManager{}))
+}
+
 // 验收 5（改）：业务时区改读 sys_configs 统一源；空/非法回落 UTC 不 panic。
 func TestTzManager_ResolveFromSysConfig_FallbackUTC(t *testing.T) {
 	ctx := context.Background()
@@ -208,17 +228,10 @@ func TestTzManager_DynamicSwitch_BucketsCutByNewLoc(t *testing.T) {
 	m := newTzManagerWithProvider(systimezone.New(sf.fetch, nil, systimezone.WithTTL(0)))
 	require.Equal(t, "Asia/Tokyo", m.Current().String())
 
-	// cron entries 的 window 经 m.Current() 实时取时区（生产同路径）。
-	entries := pmAggregatorCronEntriesFn(m.Current)
-	dailyWindow := func() func(time.Time) (time.Time, time.Time) {
-		for _, e := range entries {
-			if e.jobType == aggregator.JobTypeDaily {
-				return e.window
-			}
-		}
-		t.Fatal("daily entry 未找到")
-		return nil
-	}()
+	// daily 不再独立挂 cron；链式触发时通过 tz.Current() 计算业务时区窗口。
+	dailyWindow := func(now time.Time) (time.Time, time.Time) {
+		return dailyAggregationWindow(now, m.Current())
+	}
 
 	// 注入跨本地零点的 now：UTC 2026-05-30 18:00 = 东京 5-31 03:00 = 北京 5-31 02:00。
 	now := time.Date(2026, 5, 30, 18, 0, 0, 0, time.UTC)

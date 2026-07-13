@@ -1,0 +1,28 @@
+{
+  "generated_at": "2026-07-03T08:51:44Z",
+  "standard_param_source": "/Users/a1/Desktop/vscode/goomc/omcgo/migrations/seed/000001_init_seed.sql",
+  "mml_seed_source": "/Users/a1/Desktop/vscode/goomc/omcgo/internal/config/parammodel/mmlstandardloader/seeds/cmcc_tdlte_v23.json",
+  "standard_path_count": 2101,
+  "parameter_path_count": 2088,
+  "object_path_count": 13,
+  "parameter_already_in_mml": 554,
+  "parameter_not_in_mml": 1534,
+  "parameter_add_to_existing_command": 350,
+  "parameter_create_new_command_node": 1182,
+  "parameter_root_alias_review": 2,
+  "object_can_seed_new_command_node": 13,
+  "sheets": [
+    "摘要",
+    "按动作统计",
+    "按章节动作",
+    "按根动作",
+    "按权限动作",
+    "新增参数节点候选",
+    "现有命令补充",
+    "根别名待确认",
+    "对象节点候选",
+    "标准参数明细"
+  ],
+  "output_xlsx": "/Users/a1/Desktop/vscode/goomc/omcgo/data/model-library/standard-params-to-mml-tree-analysis-20260703.xlsx",
+  "detail_csv": "/Users/a1/Desktop/vscode/goomc/omcgo/data/model-library/standard-params-to-mml-tree-analysis-20260703.detail.csv"
+}

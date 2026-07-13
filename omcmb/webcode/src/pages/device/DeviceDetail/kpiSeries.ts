@@ -16,6 +16,7 @@
  */
 
 import type { AggregatedRow } from '@core/types/pmDashboard';
+import { normalizePmMetricValue } from '@core/utils/pmMetricValue';
 
 /** 设备级筛选哨兵：objectLdn 为该值或 null/undefined 时只取设备级行。 */
 export const DEVICE_LEVEL = null;
@@ -52,6 +53,8 @@ export interface KpiChartData {
   displayName: string;
   /** 是否完全无有效数据点（所有 series 全 null / 空）—— 调用方据此显示「暂无数据」。 */
   isEmpty: boolean;
+  /** 是否存在 PM 结果行；全缺值时该字段为 true，但 isEmpty 仍为 true。 */
+  hasSamples: boolean;
 }
 
 /** 入参归一：将 objectLdn 参数归一为「对象 ldn 集合」。 null/undefined/'' 与空数组均作「设备级单对象」老语义。 */
@@ -104,7 +107,7 @@ export function buildKpiChartData(
     for (const r of objRows) byTime.set(r.time, r); // 同桶重复以最后一条为准。
     const values = xData.map((t) => {
       const v = byTime.get(t)?.metricValue;
-      return v == null ? null : v;
+      return normalizePmMetricValue(v);
     });
     // legend / series.name 拍板决定：指名重现原始完整 LDN，便于现场对照；
     // 只有设备级行（ldn=''）才回退 fallback（空串不能当 legend 名）。
@@ -115,11 +118,12 @@ export function buildKpiChartData(
 
   // 图标题友好名：仅从首个有 displayName 的行取，缺时回退 fallback。
   const displayName = matched.find((r) => r.displayName)?.displayName || fallbackLabel;
+  const hasSamples = matched.length > 0;
   const isEmpty = series.every((s) => s.values.every((v) => v == null));
   // 向后兼容首条 series 值作为 chart.values。
   const values = series[0]?.values ?? [];
 
-  return { metricPath, xData, xEnds, series, values, displayName, isEmpty };
+  return { metricPath, xData, xEnds, series, values, displayName, isEmpty, hasSamples };
 }
 
 /**

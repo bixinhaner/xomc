@@ -63,3 +63,137 @@ func TestBMNeighborListHasPrivateArfcnAlias(t *testing.T) {
 
 	t.Fatalf("expected BM.xml to define alias %s -> %s", privatePath, standardPath)
 }
+
+func TestBMUpTimeUsesStandardPath(t *testing.T) {
+	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BM.xml")
+	body, err := os.ReadFile(xmlPath)
+	require.NoError(t, err)
+
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal(body, &doc))
+
+	const path = "Device.DeviceInfo.UpTime"
+	matches := 0
+
+	for _, param := range doc.Params {
+		if param.StandardPath == path {
+			matches++
+			assert.Equal(t, path, param.Name)
+			assert.Equal(t, "U_INT", param.DataType)
+		}
+	}
+
+	assert.Equal(t, 1, matches, "BM must expose uptime only via standard Device.DeviceInfo.UpTime")
+}
+
+func TestBaiBNQGNBNameIsWritableNRCommonPath(t *testing.T) {
+	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BaiBNQ.xml")
+	body, err := os.ReadFile(xmlPath)
+	require.NoError(t, err)
+
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal(body, &doc))
+
+	const path = "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBName"
+
+	for _, param := range doc.Params {
+		if param.Name == path {
+			assert.Equal(t, path, param.StandardPath)
+			assert.Equal(t, "READ_WRITE", param.Access)
+			assert.Equal(t, "STRING", param.DataType)
+			return
+		}
+	}
+
+	t.Fatalf("expected BaiBNQ.xml to define writable gNBName mapping at %s", path)
+}
+
+func TestBaiBNQNguBindInterfaceAndFallbackAreWritable(t *testing.T) {
+	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BaiBNQ.xml")
+	body, err := os.ReadFile(xmlPath)
+	require.NoError(t, err)
+
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal(body, &doc))
+
+	var mappings []ParamMapping
+	for _, param := range doc.Params {
+		mappings = append(mappings, ParamMapping{
+			PrivatePath:   param.Name,
+			StandardPath:  param.StandardPath,
+			EntryType:     "parameter",
+			Access:        param.Access,
+			DataType:      param.DataType,
+			ChangeApplies: param.ChangeApplies,
+		})
+	}
+
+	validator := NewMappingValidator(&MappingSet{Mappings: mappings})
+	for path, value := range map[string]string{
+		"Device.FAP.NguIpBind1.BindInterface":                                     "Device.Ethernet.Interface.2.IPv4Address.1.IPAddress",
+		"Device.LAN_HostConfigManagement.IPInterface.NgapMgmt.NguLocalIpAddrList": "172.19.3.81",
+	} {
+		require.NotNil(t, validator.LookupParam(path), "expected BaiBNQ.xml to define %s", path)
+		assert.Nil(t, validator.ValidateValue(path, value), path)
+	}
+}
+
+func TestBaiBNQLTEIdleReselectionCarrierObjectIsWritable(t *testing.T) {
+	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BaiBNQ.xml")
+	body, err := os.ReadFile(xmlPath)
+	require.NoError(t, err)
+
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal(body, &doc))
+
+	const path = "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.EUTRA.Carrier."
+
+	for _, object := range doc.Objects {
+		if object.Name == path {
+			assert.Equal(t, path, object.StandardPath)
+			assert.Equal(t, "READ_WRITE", object.Access)
+			return
+		}
+	}
+
+	t.Fatalf("expected BaiBNQ.xml to define writable LTE idle reselection carrier object at %s", path)
+}
+
+func TestBaiBNQLTEIdleReselectionCarrierRanges(t *testing.T) {
+	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BaiBNQ.xml")
+	body, err := os.ReadFile(xmlPath)
+	require.NoError(t, err)
+
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal(body, &doc))
+
+	const prefix = "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.EUTRA.Carrier.{i}."
+	want := map[string]struct {
+		dataType string
+		min      string
+		max      string
+	}{
+		"CellReselectionPriority": {"U_INT", "0", "7"},
+		"EUTRACarrierARFCN":       {"U_INT", "0", "3279165"},
+		"QRxLevMin":               {"INT", "-70", "-22"},
+		"ThreshXHigh":             {"U_INT", "0", "31"},
+		"ThreshXLow":              {"U_INT", "0", "31"},
+	}
+
+	found := make(map[string]xmlParamEntry)
+	for _, param := range doc.Params {
+		for leaf := range want {
+			if param.Name == prefix+leaf {
+				found[leaf] = param
+			}
+		}
+	}
+
+	for leaf, expectation := range want {
+		param, ok := found[leaf]
+		require.True(t, ok, "expected BaiBNQ.xml to define %s%s", prefix, leaf)
+		assert.Equal(t, expectation.dataType, param.DataType, leaf)
+		assert.Equal(t, expectation.min, param.Min, leaf)
+		assert.Equal(t, expectation.max, param.Max, leaf)
+	}
+}

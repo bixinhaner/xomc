@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -40,9 +39,9 @@ type DeviceFilter struct {
 	Search *string  // fuzzy search across serial_number/site_name/manufacturer/device_name/address
 
 	// Group filters
-	GroupID             *uuid.UUID                 // filter by specific device group
-	GroupIDs            []uuid.UUID               // filter by any of these device groups (OR semantics)
-	VisibleGroups       []uuid.UUID               // legacy data permission: restrict to these groups (nil = no restriction)
+	GroupID             *uuid.UUID                    // filter by specific device group
+	GroupIDs            []uuid.UUID                   // filter by any of these device groups (OR semantics)
+	VisibleGroups       []uuid.UUID                   // legacy data permission: restrict to these groups (nil = no restriction)
 	VisibleDeviceGrants []model.DeviceVisibilityGrant // grant-based device data permission
 
 	// Extended filters (device_info / devices additional fields)
@@ -70,7 +69,7 @@ type DeviceFilter struct {
 
 // RecycleBinFilter specifies criteria for listing soft-deleted devices.
 type RecycleBinFilter struct {
-	Search     *string // fuzzy search across serial_number/site_name
+	Search     *string // fuzzy search across serial_number/site_name/mac
 	Carrier    *model.CarrierCode
 	Technology *model.Technology
 	GroupID    *uuid.UUID // filter by original device group
@@ -94,7 +93,7 @@ type GeoDeviceFilter struct {
 	// VisibleGroups 是 #64 设备组数据权限的三态可见分组（nil=超管不过滤 / []=fail-closed 空集 /
 	// [g...]=仅这些组下设备）。GIS 地图读链路按调用者可见分组 fail-closed 收口，过滤经
 	// authz.ApplyDeviceVisibilityFilter 在 d.id 上做相关子查询（避免与已有 LEFT JOIN 行翻倍）。
-	VisibleGroups      []uuid.UUID
+	VisibleGroups       []uuid.UUID
 	VisibleDeviceGrants []model.DeviceVisibilityGrant
 	// UECountMax 过滤接入 UE 数：nil=不过滤，指向0=只返回 UE=0 的基站。
 	UECountMax *int
@@ -104,10 +103,10 @@ type GeoDeviceFilter struct {
 // 与 GeoDeviceFilter 拆分是为了让 stats 也能接受 Status 过滤（handler 入参对齐 ListGeo），
 // 同时与 list 接口共用 splitGeoGroupIDs 归一化（service 层填好 GroupIDs/IncludeUngrouped）。
 type GeoStatsFilter struct {
-	GroupIDs         []string
-	IncludeUngrouped bool
-	Status           []model.DeviceStatus
-	VisibleGroups      []uuid.UUID
+	GroupIDs            []string
+	IncludeUngrouped    bool
+	Status              []model.DeviceStatus
+	VisibleGroups       []uuid.UUID
 	VisibleDeviceGrants []model.DeviceVisibilityGrant
 }
 
@@ -138,18 +137,18 @@ type GeoDevice struct {
 	PCI        *string `json:"pci,omitempty"`         // device_info.pci
 	DeviceName *string `json:"device_name,omitempty"` // device_info.device_name
 	// GIS 地图字段
-	UECount                   int  `json:"ue_count"`                        // 当前接入 UE 数
+	UECount                   int  `json:"ue_count"`                         // 当前接入 UE 数
 	HighestAlarmSeverity      *int `json:"highest_alarm_severity,omitempty"` // 最高告警级别 1=Critical..4=Warning; nil=无告警
-	HighestSeverityAlarmCount int  `json:"highest_severity_alarm_count"`    // 最高级别的告警数量
+	HighestSeverityAlarmCount int  `json:"highest_severity_alarm_count"`     // 最高级别的告警数量
 }
 
 // GeoStats represents device statistics for map display.
 type GeoStats struct {
-	Total        int64                        `json:"total"`
-	StatusCount  map[model.DeviceStatus]int64 `json:"status_count"`
-	AlarmCount   int64                        `json:"alarm_count"`
-	Center       *GeoCenter                   `json:"center,omitempty"` // 平均经纬度中心点
-	UEZeroCount  int64                        `json:"ue_zero_count"`    // UE数为0的基站数
+	Total       int64                        `json:"total"`
+	StatusCount map[model.DeviceStatus]int64 `json:"status_count"`
+	AlarmCount  int64                        `json:"alarm_count"`
+	Center      *GeoCenter                   `json:"center,omitempty"` // 平均经纬度中心点
+	UEZeroCount int64                        `json:"ue_zero_count"`    // UE数为0的基站数
 }
 
 // GeoCenter represents the geographic center point of all devices.
@@ -1484,17 +1483,18 @@ func recycleBinSelectColumns() []string {
 		"d.last_inform_at", "d.last_inform_events",
 		"d.last_boot_at", "d.boot_count",
 		"d.inform_interval", "d.site_name", "d.site_id", "d.latitude", "d.longitude",
-		"d.extension_data", "d.created_at", "d.updated_at", "d.deleted_at",
+		"d.extension_data", "d.created_at", "d.updated_at", "d.deleted_at", "d.deleted_by",
 		"d.last_offline_reason",
 		// device_groups columns
 		"dg.id as group_id",
 		"dg.name as group_name",
+		"COALESCE(dgm.source_type, 'auto') as source_type",
 		// device_info columns (no alarm_severity needed for recycle bin)
 		"di.device_name", "di.address", "di.remark", "di.project_status", "di.height",
 		"di.eci", "di.pci", "di.cell_id", "di.freq_point", "di.bandwidth", "di.transmit_power", "di.plmn",
 		"di.rf_status", "di.cell_status", "di.op_state", "di.mme_status", "di.sync_status", "di.kpi_status",
 		"di.num_of_cells", "di.gps_status",
-		"NULL::text AS alarm_severity",  // Placeholder for compatibility with DeviceWithInfo
+		"NULL::text AS alarm_severity", // Placeholder for compatibility with DeviceWithInfo
 		"di.license_status",
 		"di.mac", "di.hardware_version",
 		"di.first_online_time", "di.last_online_time", "di.last_offline_time", "di.run_time",
@@ -1545,14 +1545,19 @@ func recycleBinSelectColumns() []string {
 			THEN FLOOR((EXTRACT(EPOCH FROM (NOW() - di.last_offline_time)) % 3600) / 60)::bigint
 			ELSE NULL
 		END AS offline_minutes`,
-		"NULL::int AS active_alarm_count",  // Placeholder for compatibility
+		"NULL::int AS active_alarm_count", // Placeholder for compatibility
 	}
 }
 
-// ListRecycleBin returns soft-deleted devices with filtering.
-func (r *PgDeviceRepository) ListRecycleBin(ctx context.Context, filter RecycleBinFilter) (*model.ListResponse[DeviceWithInfo], error) {
-	// Build base query for deleted devices with group info and device_info
-	// T-2026-07-02: 新增 device_info LEFT JOIN 以支持完整的设备信息返回（修复缺失字段）。
+func recycleBinSearchFields() []string {
+	return []string{
+		"d.serial_number",
+		"d.site_name",
+		"di.mac",
+	}
+}
+
+func buildRecycleBinListBuilders(filter RecycleBinFilter) (sq.SelectBuilder, sq.SelectBuilder) {
 	builder := storage.Psql.Select(recycleBinSelectColumns()...).
 		From("devices d").
 		LeftJoin("device_info di ON di.device_id = d.id").
@@ -1562,17 +1567,15 @@ func (r *PgDeviceRepository) ListRecycleBin(ctx context.Context, filter RecycleB
 
 	countBuilder := storage.Psql.Select("COUNT(*)").
 		From("devices d").
+		LeftJoin("device_info di ON di.device_id = d.id").
 		Where(sq.NotEq{"d.deleted_at": nil})
 
 	// Apply filters
-	if filter.Search != nil && *filter.Search != "" {
-		searchPattern := "%" + strings.ToLower(*filter.Search) + "%"
-		searchCond := sq.Or{
-			sq.Like{"LOWER(d.serial_number)": searchPattern},
-			sq.Like{"LOWER(d.site_name)": searchPattern},
+	if filter.Search != nil {
+		if cond := BuildSearchOR(*filter.Search, recycleBinSearchFields()); cond != nil {
+			builder = builder.Where(cond)
+			countBuilder = countBuilder.Where(cond)
 		}
-		builder = builder.Where(searchCond)
-		countBuilder = countBuilder.Where(searchCond)
 	}
 
 	if filter.Carrier != nil {
@@ -1597,6 +1600,15 @@ func (r *PgDeviceRepository) ListRecycleBin(ctx context.Context, filter RecycleB
 			Join("device_group_members dgm ON d.id = dgm.device_id").
 			Where(sq.Eq{"dgm.group_id": *filter.GroupID})
 	}
+
+	return builder, countBuilder
+}
+
+// ListRecycleBin returns soft-deleted devices with filtering.
+func (r *PgDeviceRepository) ListRecycleBin(ctx context.Context, filter RecycleBinFilter) (*model.ListResponse[DeviceWithInfo], error) {
+	// Build base query for deleted devices with group info and device_info
+	// T-2026-07-02: 新增 device_info LEFT JOIN 以支持完整的设备信息返回（修复缺失字段）。
+	builder, countBuilder := buildRecycleBinListBuilders(filter)
 
 	// Get total count
 	var total int64

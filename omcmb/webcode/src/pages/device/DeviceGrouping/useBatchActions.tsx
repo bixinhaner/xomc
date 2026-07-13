@@ -3,6 +3,7 @@ import { DeleteOutlined, FolderOutlined as MoveToGroupIcon, RestOutlined } from 
 import type { App as AppNS } from 'antd';
 import type { BatchAction } from '@/components/DataTable';
 import type { MutationLike } from './useGroupActions';
+import styles from './DeviceGrouping.module.css';
 
 /**
  * 设备分组列表的批量操作（移动 / 回收 / 删除）。
@@ -36,12 +37,14 @@ export function useBatchActions(deps: {
         onClick: (selectedKeys: React.Key[]) => {
           modal.confirm({
             title: t('device.batch.recycleConfirm'),
-            width: 480,
+            width: 520,
             content: (
-              <div>
-                <div>{t('device.batch.recycleMsg', { count: selectedKeys.length })}</div>
-                <div style={{ marginTop: 8, color: 'var(--color-text-secondary)', fontSize: 13, whiteSpace: 'nowrap' }}>
-                  {t('device.batch.deleteWarning')}
+              <div className={styles.dangerConfirmContent}>
+                <div className={styles.dangerConfirmTitle}>
+                  {t('device.batch.recycleMsg', { count: selectedKeys.length })}
+                </div>
+                <div className={styles.dangerConfirmHint}>
+                  {t('common.recycleConfirmDesc')}
                 </div>
               </div>
             ),
@@ -68,11 +71,13 @@ export function useBatchActions(deps: {
         onClick: (selectedKeys: React.Key[]) => {
           modal.confirm({
             title: t('common.confirmDelete'),
-            width: 480,
+            width: 520,
             content: (
-              <div>
-                <div>{t('common.deleteConfirmMsg', { count: selectedKeys.length })}</div>
-                <div style={{ marginTop: 8, color: 'var(--color-text-secondary)', fontSize: 13, whiteSpace: 'nowrap' }}>
+              <div className={styles.dangerConfirmContent}>
+                <div className={styles.dangerConfirmTitle}>
+                  {t('common.deleteConfirmMsg', { count: selectedKeys.length })}
+                </div>
+                <div className={styles.dangerConfirmHint}>
                   {t('device.batch.deleteWarning')}
                 </div>
               </div>

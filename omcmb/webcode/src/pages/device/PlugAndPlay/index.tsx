@@ -35,6 +35,8 @@ import DetectDialog from './components/DetectDialog';
 import ExecuteDetailPanel from './components/ExecuteDetailPanel';
 import BatchRetryDialog from './components/BatchRetryDialog';
 import { formatSystemTime } from '@core/utils/systemTime';
+import { useAppStore } from '@core/store/appStore';
+import { getI18nText } from '@core/utils/i18nText';
 
 const { Text } = Typography;
 
@@ -44,6 +46,7 @@ type ExecuteType = '0' | '1'; // 0-auto, 1-manual
 interface Policy {
   policyId: string;
   policyName: string;
+  policyNameI18n?: Record<string, string>;
   productClass: string;
   executeType: ExecuteType;
   selfStartEnable: '0' | '1';
@@ -72,6 +75,7 @@ const MOCK_POLICIES: Policy[] = [
   {
     policyId: 'pnp-1',
     policyName: 'QAFA自动开通策略',
+    policyNameI18n: { 'zh-CN': 'QAFA自动开通策略', 'en-US': 'QAFA Auto Provisioning Policy' },
     productClass: 'QAFA',
     executeType: '0',
     selfStartEnable: '1',
@@ -85,6 +89,7 @@ const MOCK_POLICIES: Policy[] = [
   {
     policyId: 'pnp-2',
     policyName: 'QAFB手动升级策略',
+    policyNameI18n: { 'zh-CN': 'QAFB手动升级策略', 'en-US': 'QAFB Manual Upgrade Policy' },
     productClass: 'QAFB',
     executeType: '1',
     selfStartEnable: '0',
@@ -98,6 +103,7 @@ const MOCK_POLICIES: Policy[] = [
   {
     policyId: 'pnp-3',
     policyName: 'License更新策略',
+    policyNameI18n: { 'zh-CN': 'License更新策略', 'en-US': 'License Update Policy' },
     productClass: 'QAFA',
     executeType: '0',
     selfStartEnable: '1',
@@ -111,6 +117,7 @@ const MOCK_POLICIES: Policy[] = [
   {
     policyId: 'pnp-4',
     policyName: 'CPE自动开通策略',
+    policyNameI18n: { 'zh-CN': 'CPE自动开通策略', 'en-US': 'CPE Auto Provisioning Policy' },
     productClass: 'CPE-A100',
     executeType: '0',
     selfStartEnable: '1',
@@ -124,6 +131,7 @@ const MOCK_POLICIES: Policy[] = [
   {
     policyId: 'pnp-5',
     policyName: 'QAFC全量开通策略',
+    policyNameI18n: { 'zh-CN': 'QAFC全量开通策略', 'en-US': 'QAFC Full Provisioning Policy' },
     productClass: 'QAFC',
     executeType: '0',
     selfStartEnable: '1',
@@ -142,6 +150,7 @@ export default function PlugAndPlay() {
   const t = useT();
   const navigate = useNavigate();
   const { message } = App.useApp();
+  const appLocale = useAppStore((s) => s.locale);
 
   // Policy state (front-end config-only, no backend endpoint yet — see comment above)
   const [policies, setPolicies] = useState<Policy[]>(MOCK_POLICIES);
@@ -309,6 +318,7 @@ export default function PlugAndPlay() {
       title: t('provision.policyName'),
       dataIndex: 'policyName',
       ellipsis: true,
+      render: (_val, record) => getI18nText(record.policyNameI18n, appLocale, record.policyName),
     },
     {
       key: 'executeType',
@@ -372,7 +382,7 @@ export default function PlugAndPlay() {
         )
       ),
     },
-  ], [t, handlePolicyMenuClick, handlePolicySwitch]);
+  ], [appLocale, t, handlePolicyMenuClick, handlePolicySwitch]);
 
   // Task columns — driven by real ProvisioningTask shape
   const taskColumns: DataTableColumn<ProvisioningExecuteView>[] = useMemo(() => [
@@ -478,13 +488,13 @@ export default function PlugAndPlay() {
     if (policySearchText) {
       const search = policySearchText.toLowerCase();
       result = result.filter(p =>
-        p.policyName.toLowerCase().includes(search) ||
+        getI18nText(p.policyNameI18n, appLocale, p.policyName).toLowerCase().includes(search) ||
         p.productClass.toLowerCase().includes(search) ||
         p.targetVersion?.[0]?.toLowerCase().includes(search)
       );
     }
     return result;
-  }, [policies, policyProductClass, policySearchText]);
+  }, [appLocale, policies, policyProductClass, policySearchText]);
 
   // Tasks from real API → view model. Status '2'/'3'/'4' are filtered
   // client-side (the API only maps the terminal completed/failed states).

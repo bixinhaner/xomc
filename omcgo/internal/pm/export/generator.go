@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/minio/minio-go/v7"
+
+	appcontext "github.com/omcgo/omcgo/internal/core/context"
 )
 
 // Uploader 是把 CSV 流式上传到对象存储的最小契约（便于单测 stub）。
@@ -20,13 +23,16 @@ type GenerateResult struct {
 	FileSize int64
 }
 
-// csvLayout 描述横表 CSV 的列布局（按 adhoc 维度自适应）：首列表头 + 是否含「制式」列 + 是否含「小区/PLMN」列。
-// dashboard 路径恒为「设备」+ 含小区列、不含制式列（保持现状）；
+// csvLayout 描述横表 CSV 的列布局：首列表头 + 是否含「制式」列 + 测量对象列形态。
+// dashboard 路径恒为「设备」+ 含 Cell ID/PLMN 列、不含制式列（保持现状）；
+// kpi_query 路径恒为「设备 SN」+ 含「测量对象」列、不含制式列（贴近指标查询页）；
 // adhoc device_group 维度含制式列（与页面表格一致），device 维度含小区列。
 type csvLayout struct {
 	FirstColHeader                string
+	Locale                        appcontext.Locale
 	IncludeTechnology             bool
 	IncludeCell                   bool
+	IncludeMeasurementObject      bool
 	MissingMetricValuePlaceholder string
 }
 
@@ -43,6 +49,7 @@ func streamCSVToObject(
 	src RowSource,
 	cols []WideColumn,
 	layout csvLayout,
+	outputLocation *time.Location,
 ) (GenerateResult, error) {
 	pr, pw := io.Pipe()
 
@@ -50,7 +57,17 @@ func streamCSVToObject(
 	var rowCount int64
 	writeErrCh := make(chan error, 1)
 	go func() {
-		cw, err := newWideCSVWriter(pw, layout.FirstColHeader, layout.IncludeTechnology, layout.IncludeCell, cols, layout.MissingMetricValuePlaceholder)
+		cw, err := newWideCSVWriterWithLocale(
+			pw,
+			layout.FirstColHeader,
+			layout.IncludeTechnology,
+			layout.IncludeCell,
+			layout.IncludeMeasurementObject,
+			cols,
+			layout.MissingMetricValuePlaceholder,
+			outputLocation,
+			layout.Locale,
+		)
 		if err != nil {
 			pw.CloseWithError(err)
 			writeErrCh <- err
@@ -85,6 +102,14 @@ func streamCSVToObject(
 	}()
 
 	info, upErr := up.PutObject(ctx, bucket, object, pr, -1, minio.PutObjectOptions{ContentType: "text/csv; charset=utf-8"})
+	// PutObject 正常会持续读取到 writer 关闭；但桶不存在、鉴权失败等错误可能在读取
+	// pipe 前就直接返回。此时必须主动关闭 reader，唤醒阻塞在 pw.Write 的生成 goroutine，
+	// 否则下面等待 writeErrCh 会永久互等，导出任务一直停在 running（#34）。
+	if upErr != nil {
+		_ = pr.CloseWithError(upErr)
+	} else {
+		_ = pr.Close()
+	}
 	writeErr := <-writeErrCh
 	if writeErr != nil {
 		// 取数 / 写 CSV 失败优先：上传端的 err 多半是 pipe 被 CloseWithError 的派生错误。

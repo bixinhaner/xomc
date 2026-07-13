@@ -1,8 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { MMLScript, MMLCustomCommand } from '../../types/mml';
+import type { MMLScript, MMLCustomCommand, MMLImportedScriptCreateInput, MMLImportedScriptReplaceInput, MMLScriptExecutionInput, MMLScriptImportValidation } from '../../types/mml';
 import type { PageRequest } from '../../types/pagination';
 import { mmlService } from '../../mock/services/mmlService';
-import { mmlApi } from '../../services/api/mmlApi';
+import { MMLScriptImportApiError, mmlApi } from '../../services/api/mmlApi';
 import { createApiSwitch } from '../../services/apiSwitch';
 
 const api = createApiSwitch(mmlService, mmlApi);
@@ -41,7 +41,7 @@ export function useMMLScriptById(id: string) {
 }
 
 export function useMMLTasks(
-  params: PageRequest & { status?: string; executeType?: string; result?: string; taskName?: string }
+  params: PageRequest & { status?: string; executeType?: string; result?: string; taskName?: string; taskOrigin?: string }
 ) {
   return useQuery({
     queryKey: ['mml', 'tasks', params],
@@ -91,6 +91,49 @@ export function useCreateMMLScript() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['mml', 'scripts'] });
     },
+  });
+}
+
+/** Validate a TXT file against the server-authoritative import parser. */
+export function useValidateMMLScriptImport() {
+  return useMutation<MMLScriptImportValidation, MMLScriptImportApiError, File>({
+    mutationFn: (file: File) => mmlApi.validateScriptImport(file),
+  });
+}
+
+/** Save only a reviewed validation token and script metadata. */
+export function useCreateImportedMMLScript() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: MMLImportedScriptCreateInput) => mmlApi.createImportedScript(input),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['mml', 'scripts'] }),
+  });
+}
+
+/** Replace a script from a new reviewed TXT snapshot. */
+export function useReplaceImportedMMLScript() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: MMLImportedScriptReplaceInput }) =>
+      mmlApi.replaceImportedScript(id, input),
+    onSuccess: (_, vars) => Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['mml', 'scripts'] }),
+      queryClient.invalidateQueries({ queryKey: ['mml', 'scripts', 'detail', vars.id] }),
+    ]),
+  });
+}
+
+/** Create an execution from a stored script snapshot, never from browser plan data. */
+export function useCreateMMLScriptExecution() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    Awaited<ReturnType<typeof mmlApi.createScriptExecution>>,
+    MMLScriptImportApiError,
+    { id: string; input: MMLScriptExecutionInput }
+  >({
+    mutationFn: ({ id, input }: { id: string; input: MMLScriptExecutionInput }) =>
+      mmlApi.createScriptExecution(id, input),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['mml', 'tasks'] }),
   });
 }
 
@@ -195,10 +238,30 @@ export function useCancelMMLTask() {
   });
 }
 
+export function useCancelMMLTasks() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => api.cancelTasks(ids),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['mml', 'tasks'] });
+    },
+  });
+}
+
 export function useDeleteMMLTask() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.deleteTask(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['mml', 'tasks'] });
+    },
+  });
+}
+
+export function useDeleteMMLTasks() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => api.deleteTasks(ids),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['mml', 'tasks'] });
     },

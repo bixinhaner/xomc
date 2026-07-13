@@ -3,6 +3,7 @@ package metrics
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +26,23 @@ func Test_applyFilters_Empty(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "SELECT * FROM pm_metrics", sql)
 	assert.Empty(t, args)
+}
+
+func Test_metricRowValues_NaNMetricValueWritesSQLNull(t *testing.T) {
+	vals, err := metricRowValues(PMMetric{
+		DeviceOUI:   "48BF74",
+		DeviceSN:    "SN-1",
+		MetricPath:  "C000010002",
+		MetricType:  MetricTypeCounter,
+		MetricValue: math.NaN(),
+		Granularity: Granularity15Min,
+		Time:        time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC),
+		StartTime:   time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC),
+		EndTime:     time.Date(2026, 7, 7, 10, 15, 0, 0, time.UTC),
+	})
+	require.NoError(t, err)
+	require.Len(t, vals, len(pmMetricsColumns))
+	assert.Nil(t, vals[5], "metric_value 列应写 SQL NULL")
 }
 
 func Test_applyFilters_DeviceSNs_IN(t *testing.T) {

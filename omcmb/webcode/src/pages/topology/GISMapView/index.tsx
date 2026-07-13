@@ -20,16 +20,18 @@ import { MAP_CONFIG } from '@/components/GISMap/constants';
 import { useMapConfig } from '@/components/GISMap/useMapConfig';
 import { calculateCenterFromDevices, parseEnvCenter } from '@/utils/mapValidation';
 import type { GISMapRef } from '@/components/GISMap';
-import type { MapDevice, DeviceGroupNode, DeviceGeo, MapViewport } from '@core/types/map';
+import type { AntennaSector, MapDevice, DeviceGroupNode, DeviceGeo, MapViewport } from '@core/types/map';
 import type { Domain } from '@core/types/topology';
 import { useThemeToken } from '@/hooks/useThemeToken';
 // import { useMapDeviceCache } from '@/hooks/useMapDeviceCache'; // 暂未使用
 import {
   useDomainTree,
+  useDeviceAntennaSectors,
   useMapDevicesGeo,
   useMapStats,
 } from '@core/hooks/api/useTopology';
 import { useDeviceSearch } from '@core/hooks/useDeviceSearch';
+import { useAntennaSectorEditor } from '@core/hooks/useAntennaSectorEditor';
 import { topologyApi } from '@core/services/api/topologyApi';
 import { SPACING, RADIUS, SHADOWS, COLORS, transitionString, DURATION, EASING } from './styles';
 import { hasValidCoord } from './coord';
@@ -37,6 +39,7 @@ import './animations.css';
 
 // 环境变量在运行期不变，解析一次即可，避免每次 useMemo 重跑并重复打日志
 const ENV_CENTER = parseEnvCenter();
+const EMPTY_ANTENNA_SECTORS: AntennaSector[] = [];
 
 /**
  * 将 DeviceGeo 转换为 MapDevice
@@ -130,6 +133,7 @@ export default function GISMapView() {
   const [mapViewport, setMapViewport] = useState<MapViewport | null>(null);
   // 搜索结果设备（用于独立显示在地图上）
   const [searchResultDevice, setSearchResultDevice] = useState<MapDevice | null>(null);
+  const [selectedDevice, setSelectedDevice] = useState<MapDevice | null>(null);
 
   // 状态筛选：在线激活/在线未激活/离线
   const [statusFilter, setStatusFilter] = useState<{
@@ -148,8 +152,8 @@ export default function GISMapView() {
     'deviceGroup',    // 设备组（新增：默认展开）
   ]);
 
-  // 侧边栏折叠状态（默认展开）
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // 侧边栏折叠状态（默认收起）
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
 
   // ========== 显示/隐藏控制配置 ==========
   // 图例模块显示配置（默认隐藏）
@@ -291,6 +295,16 @@ export default function GISMapView() {
   }, [selectedGroupIds, statusFilter, isInitialized, allGroupIds, mapViewport, getLoadStrategy]);
 
   const { data: devicesGeoData } = useMapDevicesGeo(filterParams);
+  const {
+    data: antennaSectors = EMPTY_ANTENNA_SECTORS,
+  } = useDeviceAntennaSectors(selectedDevice?.id);
+  const {
+    previewSectors,
+    updatePreview,
+    discardPreview,
+    saveSector,
+    isSaving: antennaSaving,
+  } = useAntennaSectorEditor(selectedDevice?.id, antennaSectors);
 
   // 加载地图元数据（离线瓦片配置）
   const mapConfigData = useMapConfig();
@@ -1115,25 +1129,32 @@ export default function GISMapView() {
           ref={mapRef}
           devices={mapDevices}
           searchResultDevice={searchResultDevice}
+          selectedDevice={selectedDevice}
+          antennaSectors={previewSectors}
           height="100%"
           defaultCenter={initialCenter}
           defaultZoom={initialZoom}
           showStats={false}
           showControls={false}
           tileUrl={mapConfigData.status === 'success' && !mapConfigData.isUsingDefault ? MAP_CONFIG.tileUrl : undefined}
-          onDeviceClick={undefined}
+          onDeviceClick={setSelectedDevice}
           onAlarmClick={(sn) => {
               const path = `/alarm/current?deviceSN=${encodeURIComponent(sn)}`;
               openTab({ key: 'alarm/current', label: intl.formatMessage({ id: 'nav.alarm.current' }), path, closable: true, labelRaw: true });
               navigate(path);
             }}
           onMapClick={() => {
+			setSelectedDevice(null);
             // 点击地图时收起搜索结果面板
             setDeviceSearchExpanded(false);
             // 不清除搜索结果设备，保留高亮显示
             // 只有用户重新搜索或手动清除时才移除
             // setSearchResultDevice(null);
           }}
+          onAntennaPreviewChange={updatePreview}
+          onAntennaCancel={discardPreview}
+          onAntennaSave={saveSector}
+          antennaSaving={antennaSaving}
           onViewportChange={(viewport) => {
             // 视口变化防抖（默认 300ms，可通过 MAP_CONFIG.viewportDebounce 调整）
             // 需要这里防抖是因为 useOLMap 内部的 moveend 只做了 100ms 偏轻的合并，
@@ -1303,6 +1324,7 @@ export default function GISMapView() {
                               };
                               // 设置搜索结果设备，让地图组件独立显示
                               setSearchResultDevice(mapDevice);
+								setSelectedDevice(mapDevice);
                             }}
                           >
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

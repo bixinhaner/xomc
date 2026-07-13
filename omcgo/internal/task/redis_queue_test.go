@@ -165,6 +165,69 @@ func TestRedisQueue_PushNilTask(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestRedisTaskQueue_PurgeBySource_LeavesNonMMLTasks(t *testing.T) {
+	q, _ := newRedisQueueWithMini(t)
+	ctx := context.Background()
+
+	mmlTask := newTaskForQueue("m1", "SN1", "Reboot")
+	mmlTask.Source = TaskSourceMML
+	apiTask := newTaskForQueue("a1", "SN1", "Reboot")
+	apiTask.Source = TaskSourceAPI
+	require.NoError(t, q.Push(ctx, mmlTask))
+	require.NoError(t, q.Push(ctx, apiTask))
+
+	result, err := q.PurgeBySource(ctx, TaskSourceMML, false)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), result.Deleted)
+	remaining, err := q.GetByID(ctx, "a1")
+	require.NoError(t, err)
+	require.NotNil(t, remaining)
+}
+
+func TestRedisTaskQueue_PurgeBySource_DryRunDoesNotMutate(t *testing.T) {
+	q, _ := newRedisQueueWithMini(t)
+	ctx := context.Background()
+
+	tk := newTaskForQueue("m-dry", "SN-DRY", "Reboot")
+	tk.Source = TaskSourceMML
+	tk.CWMPID = "cwmp-dry"
+	require.NoError(t, q.Push(ctx, tk))
+	require.NoError(t, q.SetCWMPIDMapping(ctx, tk.CWMPID, tk.ID))
+
+	result, err := q.PurgeBySource(ctx, TaskSourceMML, true)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), result.Matched)
+	require.Zero(t, result.Deleted)
+	got, err := q.GetByID(ctx, tk.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	mapped, err := q.GetByCWMPID(ctx, tk.CWMPID)
+	require.NoError(t, err)
+	require.NotNil(t, mapped)
+}
+
+func TestRedisTaskQueue_PurgeBySource_DeletesCWMPMapping(t *testing.T) {
+	q, _ := newRedisQueueWithMini(t)
+	ctx := context.Background()
+
+	tk := newTaskForQueue("m-apply", "SN-APPLY", "Reboot")
+	tk.Source = TaskSourceMML
+	tk.CWMPID = "cwmp-apply"
+	require.NoError(t, q.Push(ctx, tk))
+	require.NoError(t, q.SetCWMPIDMapping(ctx, tk.CWMPID, tk.ID))
+
+	result, err := q.PurgeBySource(ctx, TaskSourceMML, false)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), result.Matched)
+	require.Equal(t, int64(1), result.Deleted)
+	got, err := q.GetByID(ctx, tk.ID)
+	require.NoError(t, err)
+	require.Nil(t, got)
+	mapped, err := q.GetByCWMPID(ctx, tk.CWMPID)
+	require.NoError(t, err)
+	require.Nil(t, mapped)
+}
+
 func TestRedisQueue_PushAndPop_PriorityOrder(t *testing.T) {
 	q, _ := newRedisQueueWithMini(t)
 	ctx := context.Background()
@@ -195,6 +258,36 @@ func TestRedisQueue_PushAndPop_PriorityOrder(t *testing.T) {
 	empty, err := q.Pop(ctx, "SN-P")
 	require.NoError(t, err)
 	assert.Nil(t, empty)
+}
+
+func TestRedisQueue_PopSkipsFutureNextAttempt(t *testing.T) {
+	q, _ := newRedisQueueWithMini(t)
+	ctx := context.Background()
+
+	nextAttempt := time.Now().Add(50 * time.Millisecond)
+	delayed := newTaskForQueue("t-delayed", "SN-DELAY", "Reboot")
+	delayed.NextAttemptAt = &nextAttempt
+
+	ready := newTaskForQueue("t-ready", "SN-DELAY", "GetParameterValues")
+	ready.Priority = delayed.Priority + 1
+
+	require.NoError(t, q.Push(ctx, delayed))
+	require.NoError(t, q.Push(ctx, ready))
+
+	first, err := q.Pop(ctx, "SN-DELAY")
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	assert.Equal(t, "t-ready", first.ID)
+
+	second, err := q.Pop(ctx, "SN-DELAY")
+	require.NoError(t, err)
+	assert.Nil(t, second, "delayed task must not be popped before next_attempt_at")
+
+	time.Sleep(70 * time.Millisecond)
+	third, err := q.Pop(ctx, "SN-DELAY")
+	require.NoError(t, err)
+	require.NotNil(t, third)
+	assert.Equal(t, "t-delayed", third.ID)
 }
 
 func TestRedisQueue_Peek(t *testing.T) {

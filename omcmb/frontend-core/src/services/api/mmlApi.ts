@@ -1,6 +1,6 @@
 import http from '../http';
 import { generateUid } from '../../utils/uid';
-import type { MMLCommand, MMLScript, MMLTask, MMLTaskCommandDetail, MMLTaskCommandInput, MMLParam, MMLCustomCommand, ParamPath, MMLOperationType, DeviceTaskResultItem, MMLParamRef, MMLTaskResultsStats, MMLPathTranslationView, PathTranslationSource } from '../../types/mml';
+import type { MMLCommand, MMLScript, MMLTask, MMLTaskCommandDetail, MMLTaskCommandInput, MMLParam, MMLCustomCommand, ParamPath, MMLOperationType, DeviceTaskResultItem, MMLParamRef, MMLTaskResultsStats, MMLPathTranslationView, PathTranslationSource, MMLTaskPlanItem, MMLTaskCreateInput, MMLScriptImportValidation, MMLScriptValidationSummary, MMLScriptIssue, MMLImportedScriptCreateInput, MMLImportedScriptReplaceInput, MMLScriptExecutionInput, MMLScriptImportTemplate } from '../../types/mml';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 import type {
   BackendStatement,
@@ -85,14 +85,89 @@ interface BackendMMLScript {
   // P1 last_run snapshot
   last_run_status?: string | null;
   last_run_at?: string | null;
+  original_filename?: string;
+  content_sha256?: string;
+  validation_version?: string;
+  validated_at?: string | null;
+  plan_items?: BackendMMLPlanItem[] | null;
+  validation_summary?: BackendPersistedMMLScriptValidation | null;
+}
+
+interface BackendMMLScriptIssue {
+  code: string;
+  severity: string;
+  line_no?: number;
+  raw_line?: string;
+  field?: string;
+  message?: string;
+}
+
+interface BackendMMLScriptValidationSummary {
+  total_lines?: number;
+  valid_lines?: number;
+  /** Compatibility with the original frontend import proposal. */
+  effective_lines?: number;
+  device_count?: number;
+  error_count?: number;
+  warning_count?: number;
+}
+
+/**
+ * Imported scripts persist both the validator summary and line issues inside
+ * validation_summary. Older rows may contain the summary fields directly.
+ */
+interface BackendPersistedMMLScriptValidation extends BackendMMLScriptValidationSummary {
+  summary?: BackendMMLScriptValidationSummary | null;
+  issues?: BackendMMLScriptIssue[] | null;
+}
+
+interface BackendMMLScriptImportValidation {
+  validation_token?: string;
+  original_filename?: string;
+  normalized_content?: string;
+  content_sha256?: string;
+  validation_version?: string;
+  validated_at?: string | null;
+  plan_items?: BackendMMLPlanItem[] | null;
+  summary?: BackendMMLScriptValidationSummary | null;
+  issues?: BackendMMLScriptIssue[] | null;
+}
+
+export class MMLScriptImportApiError extends Error {
+  readonly status: number;
+  readonly code?: string;
+  readonly validation?: MMLScriptImportValidation;
+
+  constructor({
+    status,
+    code,
+    message,
+    validation,
+  }: {
+    status: number;
+    code?: string;
+    message: string;
+    validation?: MMLScriptImportValidation;
+  }) {
+    super(message);
+    this.name = 'MMLScriptImportApiError';
+    this.status = status;
+    this.code = code;
+    this.validation = validation;
+  }
 }
 
 interface BackendMMLTask {
   id: string;
   task_name: string;
   script_id: string;
+  task_origin?: string;
   device_sns: string[] | null;
   commands: Array<Record<string, unknown>> | null;
+  command_count?: number;
+  execute_mode?: string | null;
+  plan_items?: BackendMMLPlanItem[] | null;
+  plan_item_count?: number;
   status: string;
   results: Array<Record<string, unknown>> | null;
   creator: string;
@@ -133,6 +208,17 @@ interface BackendMMLTask {
   matched_product_id?: string | null;
   matched_product_class?: string | null;
   path_translation_source?: string | null;
+}
+
+interface BackendMMLPlanItem {
+  line_no?: number;
+  device_sn?: string;
+  order?: number;
+  raw_line?: string;
+  command?: Record<string, unknown> | null;
+  command_code?: string;
+  operation_type?: string;
+  parameters?: Record<string, unknown> | null;
 }
 
 // T-0168: GET /mml/tasks/{id}/results 响应 stats 字段（后端 TaskResultsStats）
@@ -331,6 +417,7 @@ function dedupeParamRefs(refs: MMLParamRef[] | undefined): MMLParamRef[] | undef
 }
 
 function mapBackendScript(bs: BackendMMLScript): MMLScript {
+  const persistedValidation = mapPersistedScriptValidation(bs.validation_summary);
   return {
     id: bs.id,
     scriptName: bs.script_name,
@@ -349,7 +436,144 @@ function mapBackendScript(bs: BackendMMLScript): MMLScript {
     result: bs.result ?? undefined,
     lastRunStatus: bs.last_run_status || undefined,
     lastRunAt: bs.last_run_at || undefined,
+    originalFilename: bs.original_filename || undefined,
+    contentSha256: bs.content_sha256 || undefined,
+    validationVersion: bs.validation_version || undefined,
+    validatedAt: bs.validated_at || undefined,
+    planItems: bs.plan_items?.map(mapBackendPlanItem),
+    validationSummary: persistedValidation.validationSummary,
+    validationIssues: persistedValidation.validationIssues,
   };
+}
+
+function mapPersistedScriptValidation(
+  validation: BackendPersistedMMLScriptValidation | null | undefined,
+): Pick<MMLScript, 'validationSummary' | 'validationIssues'> {
+  if (!validation) return {};
+  const summary = validation.summary ?? validation;
+  return {
+    validationSummary: mapBackendScriptValidationSummary(summary),
+    validationIssues: validation.issues?.map(mapBackendScriptIssue),
+  };
+}
+
+function mapBackendScriptIssue(issue: BackendMMLScriptIssue): MMLScriptIssue {
+  return {
+    code: issue.code,
+    severity: issue.severity === 'warning' ? 'warning' : 'error',
+    lineNo: issue.line_no || undefined,
+    rawLine: issue.raw_line || undefined,
+    field: issue.field || undefined,
+    message: issue.message || undefined,
+  };
+}
+
+function mapBackendScriptValidationSummary(
+  summary: BackendMMLScriptValidationSummary | null | undefined,
+): MMLScriptValidationSummary {
+  const validLines = summary?.valid_lines ?? summary?.effective_lines ?? 0;
+  return {
+    totalLines: summary?.total_lines ?? validLines,
+    validLines,
+    effectiveLines: summary?.effective_lines ?? validLines,
+    deviceCount: summary?.device_count ?? 0,
+    errorCount: summary?.error_count ?? 0,
+    warningCount: summary?.warning_count ?? 0,
+  };
+}
+
+function mapBackendScriptImportValidation(
+  validation: BackendMMLScriptImportValidation,
+): MMLScriptImportValidation {
+  return {
+    validationToken: validation.validation_token || undefined,
+    originalFilename: validation.original_filename || undefined,
+    normalizedContent: validation.normalized_content || undefined,
+    contentSha256: validation.content_sha256 || undefined,
+    validationVersion: validation.validation_version || undefined,
+    validatedAt: validation.validated_at || undefined,
+    planItems: (validation.plan_items || []).map(mapBackendPlanItem),
+    summary: mapBackendScriptValidationSummary(validation.summary),
+    issues: (validation.issues || []).map(mapBackendScriptIssue),
+  };
+}
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function validationPayloadFromError(
+  body: Record<string, unknown> | undefined,
+): BackendMMLScriptImportValidation | undefined {
+  const data = objectValue(body?.data);
+  const candidate = data ?? body;
+  if (!candidate) return undefined;
+  const issues = candidate.issues ?? body?.issues;
+  const hasValidationFields = candidate.summary !== undefined
+    || candidate.plan_items !== undefined
+    || issues !== undefined;
+  if (!hasValidationFields) return undefined;
+  return {
+    validation_token: stringValue(candidate.validation_token),
+    original_filename: stringValue(candidate.original_filename),
+    normalized_content: stringValue(candidate.normalized_content),
+    content_sha256: stringValue(candidate.content_sha256),
+    validation_version: stringValue(candidate.validation_version),
+    validated_at: stringValue(candidate.validated_at),
+    plan_items: Array.isArray(candidate.plan_items)
+      ? candidate.plan_items as BackendMMLPlanItem[]
+      : [],
+    summary: objectValue(candidate.summary) as BackendMMLScriptValidationSummary | undefined,
+    issues: Array.isArray(issues) ? issues as BackendMMLScriptIssue[] : [],
+  };
+}
+
+/**
+ * Converts Axios-shaped import/execution failures into the shared contract so
+ * skin UIs can display 422 errors and 409 warning confirmations consistently.
+ */
+export function normalizeMMLScriptImportApiError(error: unknown): MMLScriptImportApiError {
+  if (error instanceof MMLScriptImportApiError) return error;
+  const source = objectValue(error);
+  const response = objectValue(source?.response);
+  const body = objectValue(response?.data);
+  const data = objectValue(body?.data);
+  const status = typeof response?.status === 'number' ? response.status : 0;
+  const code = stringValue(body?.code) || stringValue(data?.code);
+  const message = stringValue(body?.message)
+    || stringValue(body?.msg)
+    || stringValue(data?.message)
+    || stringValue(source?.message)
+    || 'MML script import request failed';
+  const validationPayload = (status === 422 || status === 409)
+    ? validationPayloadFromError(body)
+    : undefined;
+  return new MMLScriptImportApiError({
+    status,
+    code,
+    message,
+    validation: validationPayload ? mapBackendScriptImportValidation(validationPayload) : undefined,
+  });
+}
+
+function filenameFromContentDisposition(value: unknown, fallback: string): string {
+  if (typeof value !== 'string') return fallback;
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(value)?.[1];
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded);
+    } catch {
+      return fallback;
+    }
+  }
+  const quoted = /filename="([^"]+)"/i.exec(value)?.[1];
+  return quoted || fallback;
 }
 
 function mapTaskResultsStats(
@@ -371,13 +595,29 @@ function mapTaskResultsStats(
 }
 
 function mapBackendResult(br: Record<string, unknown>): DeviceTaskResultItem {
+  const requestMethod = (br.request_method as string) || '';
   return {
     deviceSn: (br.device_sn as string) || '',
     deviceTaskId: (br.device_task_id as string) || undefined,
     commandIndex: typeof br.command_index === 'number' ? (br.command_index as number) : undefined,
+    planLineNo: typeof br.plan_line_no === 'number' ? (br.plan_line_no as number) : undefined,
+    planDeviceSn: (br.plan_device_sn as string) || undefined,
+    planOrder: typeof br.plan_order === 'number' ? (br.plan_order as number) : undefined,
+    planRawLine: (br.plan_raw_line as string) || undefined,
+    commandCode: (br.command_code as string) || undefined,
+    operationType: (br.operation_type as string) || undefined,
     deviceName: (br.device_name as string) || undefined,
     mmlScript: (br.mml_script as string) || (br.command as string) || undefined,
     status: (br.status as DeviceTaskResultItem['status']) || undefined,
+    request: requestMethod
+      ? {
+          method: requestMethod,
+          payload: br.request_payload,
+          rawRequest: (br.raw_request as string) || undefined,
+          cwmpId: (br.request_cwmp_id as string) || undefined,
+          commandKey: (br.request_command_key as string) || undefined,
+        }
+      : undefined,
     result: {
       success: Boolean(br.success),
       rawOutput: (br.raw_output as string) || '',
@@ -391,6 +631,61 @@ function mapBackendResult(br: Record<string, unknown>): DeviceTaskResultItem {
   };
 }
 
+function mapBackendCommandInput(c: Record<string, unknown> | null | undefined): MMLTaskCommandInput {
+  const src = c ?? {};
+  return {
+    commandCode: typeof src.command_code === 'string' ? src.command_code : JSON.stringify(src),
+    operationType: typeof src.operation_type === 'string' ? src.operation_type : undefined,
+    paramPaths: Array.isArray(src.param_paths)
+      ? (src.param_paths as unknown[]).filter((p): p is string => typeof p === 'string')
+      : undefined,
+    parameters:
+      src.parameters && typeof src.parameters === 'object'
+        ? (src.parameters as Record<string, unknown>)
+        : undefined,
+    rawPathMode: typeof src.raw_path_mode === 'string' ? src.raw_path_mode : undefined,
+  };
+}
+
+function mapBackendPlanItem(item: BackendMMLPlanItem): MMLTaskPlanItem {
+  const commandSource = item.command ?? {
+    command_code: item.command_code,
+    operation_type: item.operation_type,
+    parameters: item.parameters,
+  };
+  return {
+    lineNo: item.line_no ?? 0,
+    deviceSn: item.device_sn ?? '',
+    order: item.order ?? 0,
+    rawLine: item.raw_line || undefined,
+    command: mapBackendCommandInput(commandSource),
+  };
+}
+
+function mapCommandToBackend(cmd: string | MMLTaskCommandInput | MMLTaskCommandDetail): Record<string, unknown> {
+  if (typeof cmd === 'string') return { command_code: cmd };
+  const detail = cmd as MMLTaskCommandInput & MMLTaskCommandDetail;
+  const entry: Record<string, unknown> = {
+    command_code: detail.commandCode,
+  };
+  if (detail.operationType) entry.operation_type = detail.operationType;
+  if (detail.paramPaths) entry.param_paths = detail.paramPaths;
+  if (detail.paramValues) entry.param_values = detail.paramValues;
+  if (detail.parameters) entry.parameters = detail.parameters;
+  if (detail.rawPathMode) entry.raw_path_mode = detail.rawPathMode;
+  return entry;
+}
+
+function mapPlanItemToBackend(item: MMLTaskPlanItem): Record<string, unknown> {
+  return {
+    line_no: item.lineNo,
+    device_sn: item.deviceSn,
+    order: item.order,
+    raw_line: item.rawLine,
+    command: mapCommandToBackend(item.command),
+  };
+}
+
 function mapBackendTask(bt: BackendMMLTask): MMLTask {
   // Sprint B-6：扫 commands 数组中 orphan=true 的条目，提取其 command_code
   // 让 UI 给用户清晰提示"命令已下线"，否则 0 设备派发让人疑惑。
@@ -400,6 +695,8 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
       orphanCommandCodes.push(c.command_code as string);
     }
   }
+
+  const planItems = (bt.plan_items || []).map(mapBackendPlanItem);
 
   // commandsDetail：保留 operation_type + param_paths + param_values，供"任务记录-查看"
   // 页展示用户当时勾选了哪些 path。
@@ -438,6 +735,10 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
         c.parameters && typeof c.parameters === 'object'
           ? (c.parameters as Record<string, unknown>)
           : undefined,
+      planLineNo: typeof c.plan_line_no === 'number' ? (c.plan_line_no as number) : undefined,
+      planDeviceSn: typeof c.plan_device_sn === 'string' ? c.plan_device_sn : undefined,
+      planOrder: typeof c.plan_order === 'number' ? (c.plan_order as number) : undefined,
+      planRawLine: typeof c.plan_raw_line === 'string' ? c.plan_raw_line : undefined,
     };
   });
 
@@ -445,6 +746,7 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
     id: bt.id,
     taskName: bt.task_name,
     scriptId: bt.script_id || undefined,
+    taskOrigin: (bt.task_origin || (bt.script_id ? 'script' : 'console')) as MMLTask['taskOrigin'],
     deviceSns: bt.device_sns || [],
     commands: (bt.commands || []).map((c) => {
       // Backend stores commands as {command_code: "...", ...params}
@@ -452,6 +754,17 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
       if (typeof c.command_code === 'string') return c.command_code as string;
       return JSON.stringify(c);
     }),
+    commandCount: bt.command_count ?? (bt.commands || []).length,
+    executeMode: (bt.execute_mode || 'common') as MMLTask['executeMode'],
+    planItems: planItems.length > 0 ? planItems : undefined,
+    planItemCount: bt.plan_item_count ?? planItems.length,
+    planStats:
+      planItems.length > 0
+        ? {
+            totalPlanItems: planItems.length,
+            totalDevices: new Set(planItems.map((p) => p.deviceSn).filter(Boolean)).size,
+          }
+        : undefined,
     commandsDetail: commandsDetail.length > 0 ? commandsDetail : undefined,
     orphanCommandCodes: orphanCommandCodes.length > 0 ? orphanCommandCodes : undefined,
     status: bt.status as MMLTask['status'],
@@ -548,7 +861,7 @@ export const mmlApi = {
     const allCommands: MMLCommand[] = [];
     let page = 1;
     const pageSize = 100;
-    let total = 0;
+    let total: number;
     do {
       const { data } = await http.get<BackendListResponse<BackendMMLCommand>>(
         '/mml/commands',
@@ -628,6 +941,113 @@ export const mmlApi = {
   },
 
   // --- Scripts ---
+
+  async validateScriptImport(file: File): Promise<MMLScriptImportValidation> {
+    const body = new FormData();
+    body.append('file', file);
+    try {
+      const { data } = await http.post<BackendMMLScriptImportValidation>(
+        '/mml/scripts/import/validate',
+        body,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      );
+      return mapBackendScriptImportValidation(data);
+    } catch (error) {
+      throw normalizeMMLScriptImportApiError(error);
+    }
+  },
+
+  async validateScriptReplacement(
+    id: string,
+    file: File,
+  ): Promise<MMLScriptImportValidation> {
+    const body = new FormData();
+    body.append('file', file);
+    try {
+      const { data } = await http.post<BackendMMLScriptImportValidation>(
+        `/mml/scripts/${id}/import/validate`,
+        body,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      );
+      return mapBackendScriptImportValidation(data);
+    } catch (error) {
+      throw normalizeMMLScriptImportApiError(error);
+    }
+  },
+
+  async createImportedScript(input: MMLImportedScriptCreateInput): Promise<MMLScript> {
+    const payload: Record<string, unknown> = {
+      validation_token: input.validationToken,
+      script_name: input.scriptName,
+      description: input.description,
+      tags: input.tags,
+    };
+    if (input.requestId) payload.request_id = input.requestId;
+    const { data } = await http.post<BackendMMLScript>('/mml/scripts/import', payload);
+    return mapBackendScript(data);
+  },
+
+  async replaceImportedScript(
+    id: string,
+    input: MMLImportedScriptReplaceInput,
+  ): Promise<MMLScript> {
+    const payload: Record<string, unknown> = {
+      validation_token: input.validationToken,
+      script_name: input.scriptName,
+      description: input.description,
+      tags: input.tags,
+      expected_updated_at: input.expectedUpdatedAt,
+    };
+    if (input.requestId) payload.request_id = input.requestId;
+    const { data } = await http.put<BackendMMLScript>(`/mml/scripts/${id}/import`, payload);
+    return mapBackendScript(data);
+  },
+
+  async createScriptExecution(
+    id: string,
+    input: MMLScriptExecutionInput,
+  ): Promise<{ task: MMLTask; validation: MMLScriptImportValidation }> {
+    const payload: Record<string, unknown> = {
+      task_name: input.taskName,
+      execute_type: input.executeType || 'immediate',
+      offline_retry: input.offlineRetry ?? false,
+      offline_retry_wait: input.offlineRetryWait ?? 60,
+      failed_retry: input.failedRetry ?? false,
+      failed_retry_count: input.failedRetryCount ?? 3,
+      failed_retry_interval: input.failedRetryInterval ?? 5,
+      confirm_warnings: input.confirmWarnings ?? false,
+    };
+    if (input.scheduledAt) payload.scheduled_at = input.scheduledAt;
+    if (input.periodStart) payload.period_start = input.periodStart;
+    if (input.periodEnd) payload.period_end = input.periodEnd;
+    if (input.periodTime) payload.period_time = input.periodTime;
+    if (input.requestId) payload.request_id = input.requestId;
+    try {
+      const { data } = await http.post<{
+        task: BackendMMLTask;
+        validation: BackendMMLScriptImportValidation;
+      }>(`/mml/scripts/${id}/executions`, payload);
+      return {
+        task: mapBackendTask(data.task),
+        validation: mapBackendScriptImportValidation(data.validation),
+      };
+    } catch (error) {
+      throw normalizeMMLScriptImportApiError(error);
+    }
+  },
+
+  async downloadScriptImportTemplate(): Promise<MMLScriptImportTemplate> {
+    const response = await http.get<Blob>('/mml/scripts/import/template', {
+      responseType: 'blob',
+    });
+    return {
+      blob: response.data,
+      filename: filenameFromContentDisposition(
+        response.headers?.['content-disposition'],
+        'MMLTemplate.txt',
+      ),
+    };
+  },
 
   async getScripts(
     p: PageRequest & { search?: string; creator?: string }
@@ -721,7 +1141,7 @@ export const mmlApi = {
   // --- Tasks ---
 
   async getTasks(
-    p: PageRequest & { status?: string; executeType?: string; result?: string; taskName?: string }
+    p: PageRequest & { status?: string; executeType?: string; result?: string; taskName?: string; taskOrigin?: string }
   ): Promise<PageResponse<MMLTask>> {
     const query: Record<string, unknown> = {
       page: p.page,
@@ -731,6 +1151,7 @@ export const mmlApi = {
     if (p.executeType) query.execute_type = p.executeType;
     if (p.result) query.result = p.result;
     if (p.taskName) query.task_name = p.taskName;
+    if (p.taskOrigin) query.task_origin = p.taskOrigin;
 
     const { data } = await http.get<BackendListResponse<BackendMMLTask>>(
       '/mml/tasks',
@@ -772,30 +1193,19 @@ export const mmlApi = {
     };
   },
 
-  async createTask(
-    data: Partial<Omit<MMLTask, 'id' | 'status' | 'results' | 'createdAt' | 'updatedAt' | 'commands'>> &
-    Pick<MMLTask, 'taskName' | 'deviceSns'> & {
-      commands: Array<string | MMLTaskCommandInput | MMLTaskCommandDetail>;
-    }
-  ): Promise<MMLTask> {
-    const commands = data.commands.map((cmd) => {
-      if (typeof cmd === 'string') return { command_code: cmd };
-      const commandCode = 'commandCode' in cmd ? cmd.commandCode : undefined;
-      const detail = cmd as MMLTaskCommandInput & MMLTaskCommandDetail;
-      const entry: Record<string, unknown> = {
-        command_code: commandCode ?? detail.commandCode,
-      };
-      if (detail.operationType) entry.operation_type = detail.operationType;
-      if (detail.paramPaths) entry.param_paths = detail.paramPaths;
-      if (detail.parameters) entry.parameters = detail.parameters;
-      return entry;
-    });
+  async createTask(data: MMLTaskCreateInput): Promise<MMLTask> {
+    const commands = (data.commands || []).map(mapCommandToBackend);
+    const planItems = (data.planItems || []).map(mapPlanItemToBackend);
+    const deviceSns = data.deviceSns?.length
+      ? data.deviceSns
+      : Array.from(new Set((data.planItems || []).map((p) => p.deviceSn).filter(Boolean)));
+    const executeMode = data.executeMode || (planItems.length > 0 ? 'device_bound' : 'common');
     const payload: Record<string, unknown> = {
       task_name: data.taskName,
       script_id: data.scriptId,
-      device_sns: data.deviceSns,
-      commands,
-      total_devices: data.deviceSns?.length ?? 0,
+      device_sns: deviceSns,
+      execute_mode: executeMode,
+      total_devices: deviceSns.length,
       creator: data.creator || '',
       execute_type: data.executeType || 'immediate',
       offline_retry: data.offlineRetry || false,
@@ -804,6 +1214,8 @@ export const mmlApi = {
       failed_retry_count: data.failedRetryCount || 3,
       failed_retry_interval: data.failedRetryInterval || 5,
     };
+    if (commands.length > 0) payload.commands = commands;
+    if (planItems.length > 0) payload.plan_items = planItems;
     if (data.scheduledAt) payload.scheduled_at = data.scheduledAt;
     if (data.periodStart) payload.period_start = data.periodStart;
     if (data.periodEnd) payload.period_end = data.periodEnd;
@@ -850,8 +1262,20 @@ export const mmlApi = {
     return mapBackendTask(data);
   },
 
+  async cancelTasks(ids: string[]): Promise<void> {
+    for (const id of ids) {
+      await http.post(`/mml/tasks/${id}/cancel`);
+    }
+  },
+
   async deleteTask(id: string): Promise<void> {
     await http.delete(`/mml/tasks/${id}`);
+  },
+
+  async deleteTasks(ids: string[]): Promise<void> {
+    for (const id of ids) {
+      await http.delete(`/mml/tasks/${id}`);
+    }
   },
 
   // --- Task results ---

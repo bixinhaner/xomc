@@ -4,11 +4,11 @@ package global
 
 // Device Management (1000-1999)
 const (
-	ErrCodeDeviceNotFound        = 1001
-	ErrCodeDeviceDuplicate       = 1002
-	ErrCodeDeviceInvalidInput    = 1003
-	ErrCodeDeviceOffline         = 1004
-	ErrCodeDeviceRebootFailed    = 1005
+	ErrCodeDeviceNotFound         = 1001
+	ErrCodeDeviceDuplicate        = 1002
+	ErrCodeDeviceInvalidInput     = 1003
+	ErrCodeDeviceOffline          = 1004
+	ErrCodeDeviceRebootFailed     = 1005
 	ErrCodeDeviceRenameNotAllowed = 1006 // auto_lmt_to_omc 策略下禁止从网管侧改名
 )
 
@@ -251,4 +251,8 @@ const (
 	// 关联：docs/design/mml-user-private-template-crud-20260520.md §3
 	// HTTP 映射：→ 409 Conflict（通过 commonerrors.ErrAlreadyExists 链 wrap）
 	ErrCodeTemplateNameDuplicated = 17008
+
+	// 删除任务记录时命中运行中任务。
+	// HTTP 映射：→ 409 Conflict（通过 commonerrors.ErrAlreadyExists 链 wrap）
+	ErrCodeMMLTaskRunningCannotDelete = 17009
 )

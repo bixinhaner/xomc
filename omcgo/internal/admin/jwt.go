@@ -18,16 +18,21 @@ type JWTService struct {
 // jwtClaims is the wire format. v1.0：移除 Carrier，新增 IsSuperAdmin。
 // 旧 token 反序列化时 IsSuperAdmin 缺省 false，老的 carrier 字段被 jwt 库忽略，向后兼容。
 type jwtClaims struct {
-	UserID        uuid.UUID  `json:"user_id"`
-	Username      string     `json:"username"`
-	IsSuperAdmin  bool       `json:"is_super_admin,omitempty"`
-	Roles         []string   `json:"roles"`
-	CurrentRoleID *uuid.UUID `json:"current_role_id,omitempty"`
-	IssuedAtMicros int64     `json:"iat_us,omitempty"`
+	UserID         uuid.UUID  `json:"user_id"`
+	Username       string     `json:"username"`
+	IsSuperAdmin   bool       `json:"is_super_admin,omitempty"`
+	Roles          []string   `json:"roles"`
+	CurrentRoleID  *uuid.UUID `json:"current_role_id,omitempty"`
+	IssuedAtMicros int64      `json:"iat_us,omitempty"`
+	Scopes         []string   `json:"scopes,omitempty"`
 	jwt.RegisteredClaims
 }
 
 const minJWTSecretLength = 32
+const agentDelegationSubject = "agent_delegation"
+const agentRuntimeScope = "agent-runtime"
+
+var agentDelegationTTL = 5 * time.Minute
 
 // NewJWTService creates a new JWTService with the given secret and default TTLs.
 // Returns an error if the secret is empty or shorter than 32 characters.
@@ -63,11 +68,11 @@ func (s *JWTService) GenerateTokenPair(claims *Claims) (*TokenPair, error) {
 	issuedAtMicros := now.UnixMicro()
 
 	accessClaims := &jwtClaims{
-		UserID:        claims.UserID,
-		Username:      claims.Username,
-		IsSuperAdmin:  claims.IsSuperAdmin,
-		Roles:         claims.Roles,
-		CurrentRoleID: claims.CurrentRoleID,
+		UserID:         claims.UserID,
+		Username:       claims.Username,
+		IsSuperAdmin:   claims.IsSuperAdmin,
+		Roles:          claims.Roles,
+		CurrentRoleID:  claims.CurrentRoleID,
 		IssuedAtMicros: issuedAtMicros,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   "access",
@@ -84,10 +89,10 @@ func (s *JWTService) GenerateTokenPair(claims *Claims) (*TokenPair, error) {
 	}
 
 	refreshClaims := &jwtClaims{
-		UserID:       claims.UserID,
-		Username:     claims.Username,
-		IsSuperAdmin: claims.IsSuperAdmin,
-		Roles:        claims.Roles,
+		UserID:         claims.UserID,
+		Username:       claims.Username,
+		IsSuperAdmin:   claims.IsSuperAdmin,
+		Roles:          claims.Roles,
 		IssuedAtMicros: issuedAtMicros,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   "refresh",
@@ -121,6 +126,49 @@ func (s *JWTService) ValidateRefreshToken(tokenString string) (*Claims, error) {
 	return s.validateToken(tokenString, "refresh")
 }
 
+// GenerateAgentDelegationToken creates a short-lived token for agent runtime callbacks.
+// It intentionally uses a separate subject and scope from normal web access tokens.
+func (s *JWTService) GenerateAgentDelegationToken(claims *Claims) (string, time.Time, error) {
+	now := time.Now()
+	expiresAt := now.Add(agentDelegationTTL)
+	delegationClaims := &jwtClaims{
+		UserID:         claims.UserID,
+		Username:       claims.Username,
+		IsSuperAdmin:   claims.IsSuperAdmin,
+		Roles:          claims.Roles,
+		CurrentRoleID:  claims.CurrentRoleID,
+		IssuedAtMicros: now.UnixMicro(),
+		Scopes:         []string{agentRuntimeScope},
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   agentDelegationSubject,
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
+			ID:        uuid.New().String(),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, delegationClaims)
+	tokenString, err := token.SignedString(s.secret)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("sign agent delegation token: %w", err)
+	}
+	return tokenString, expiresAt, nil
+}
+
+// ValidateAgentDelegationToken validates the short-lived agent runtime token.
+func (s *JWTService) ValidateAgentDelegationToken(tokenString string) (*Claims, error) {
+	claims, err := s.validateToken(tokenString, agentDelegationSubject)
+	if err != nil {
+		return nil, err
+	}
+	for _, scope := range claims.Scopes {
+		if scope == agentRuntimeScope {
+			return claims, nil
+		}
+	}
+	return nil, fmt.Errorf("missing %s scope", agentRuntimeScope)
+}
+
 func (s *JWTService) validateToken(tokenString, expectedSubject string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &jwtClaims{}, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -147,12 +195,13 @@ func (s *JWTService) validateToken(tokenString, expectedSubject string) (*Claims
 		issuedAt = claims.IssuedAt.Unix()
 	}
 	return &Claims{
-		UserID:        claims.UserID,
-		Username:      claims.Username,
-		IsSuperAdmin:  claims.IsSuperAdmin,
-		Roles:         claims.Roles,
-		CurrentRoleID: claims.CurrentRoleID,
-		IssuedAt:      issuedAt,
+		UserID:         claims.UserID,
+		Username:       claims.Username,
+		IsSuperAdmin:   claims.IsSuperAdmin,
+		Roles:          claims.Roles,
+		CurrentRoleID:  claims.CurrentRoleID,
+		IssuedAt:       issuedAt,
 		IssuedAtMicros: claims.IssuedAtMicros,
+		Scopes:         claims.Scopes,
 	}, nil
 }

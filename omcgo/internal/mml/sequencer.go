@@ -31,9 +31,9 @@ import (
 // 这是 "fanout 内 channel 串行" Q-V3-2 决议的轻量实现 — 不动 internal/task
 // schema（无 depends_on 列），完全靠 completion callback 驱动。
 type Sequencer struct {
-	taskRepo TaskRepository       // 查 MMLTask.commands 数组
-	enqueuer task.Enqueuer        // 入队下一行 device_task
-	fanouter *Fanouter            // 复用 buildDeviceTaskRequests 单条命令翻译逻辑
+	taskRepo TaskRepository // 查 MMLTask.commands 数组
+	enqueuer task.Enqueuer  // 入队下一行 device_task
+	fanouter *Fanouter      // 复用 buildDeviceTaskRequests 单条命令翻译逻辑
 	logger   *zap.Logger
 }
 
@@ -77,13 +77,22 @@ func (s *Sequencer) OnTaskCompleted(ctx context.Context, t *task.Task) {
 		return
 	}
 
-	nextIdx := t.CommandIndex + 1
-
 	mmlTask, err := s.taskRepo.GetByID(ctx, mmlTaskID)
 	if err != nil || mmlTask == nil {
 		s.logger.Warn("sequencer: load mml_task failed",
 			zap.String("mml_task_id", mmlTaskID.String()),
 			zap.Error(err))
+		return
+	}
+
+	nextIdx := nextCommandIndexForDevice(mmlTask, t.DeviceSN, t.CommandIndex)
+	if nextIdx < 0 {
+		s.logger.Debug("sequencer: device chain finished",
+			zap.String("mml_task_id", mmlTaskID.String()),
+			zap.String("device_sn", t.DeviceSN),
+			zap.Int("completed_cmd_idx", t.CommandIndex),
+			zap.Int("total_commands", len(mmlTask.Commands)),
+		)
 		return
 	}
 
@@ -178,11 +187,17 @@ func (s *Sequencer) buildNextRequest(ctx context.Context, mmlTask *MMLTask, devi
 	// 临时构造一个只含单 device + 单 command 的 MMLTask 视图，
 	// 复用 fanouter.buildDeviceTaskRequests 的 BuildTR069Params 链路。
 	view := &MMLTask{
-		ID:        mmlTask.ID,
-		TaskName:  mmlTask.TaskName,
-		Creator:   mmlTask.Creator,
-		DeviceSNs: []string{deviceSN},
-		Commands:  []map[string]interface{}{cmdEntry},
+		ID:                    mmlTask.ID,
+		TaskName:              mmlTask.TaskName,
+		Creator:               mmlTask.Creator,
+		DeviceSNs:             []string{deviceSN},
+		Commands:              []map[string]interface{}{cmdEntry},
+		OfflineRetry:          mmlTask.OfflineRetry,
+		OfflineRetryWait:      mmlTask.OfflineRetryWait,
+		FailedRetry:           mmlTask.FailedRetry,
+		FailedRetryCount:      mmlTask.FailedRetryCount,
+		FailedRetryInterval:   mmlTask.FailedRetryInterval,
+		PathTranslationSource: mmlTask.PathTranslationSource,
 	}
 	reqs := s.fanouter.buildDeviceTaskRequests(ctx, view)
 	if len(reqs) == 0 {
@@ -193,6 +208,52 @@ func (s *Sequencer) buildNextRequest(ctx context.Context, mmlTask *MMLTask, devi
 	reqs[0].CommandIndex = cmdIdx
 	reqs[0].DeviceIndex = deviceIdx
 	return reqs[0], nil
+}
+
+func nextCommandIndexForDevice(mmlTask *MMLTask, deviceSN string, currentIdx int) int {
+	if mmlTask == nil {
+		return -1
+	}
+	if mmlTask.ExecuteMode != TaskExecuteModeDeviceBound {
+		nextIdx := currentIdx + 1
+		if nextIdx >= len(mmlTask.Commands) {
+			return -1
+		}
+		return nextIdx
+	}
+
+	currentOrder := planOrderForCommand(mmlTask, currentIdx)
+	bestIdx := -1
+	bestOrder := 0
+	for idx := range mmlTask.Commands {
+		if idx == currentIdx {
+			continue
+		}
+		if planDeviceSNForCommand(mmlTask, idx) != deviceSN {
+			continue
+		}
+		order := planOrderForCommand(mmlTask, idx)
+		if order <= currentOrder {
+			continue
+		}
+		if bestIdx == -1 || order < bestOrder || (order == bestOrder && idx < bestIdx) {
+			bestIdx = idx
+			bestOrder = order
+		}
+	}
+	return bestIdx
+}
+
+func planDeviceSNForCommand(mmlTask *MMLTask, cmdIdx int) string {
+	if cmdIdx >= 0 && cmdIdx < len(mmlTask.Commands) {
+		if sn := commandString(mmlTask.Commands[cmdIdx], "plan_device_sn"); sn != "" {
+			return sn
+		}
+	}
+	if cmdIdx >= 0 && cmdIdx < len(mmlTask.PlanItems) {
+		return strings.TrimSpace(mmlTask.PlanItems[cmdIdx].DeviceSN)
+	}
+	return ""
 }
 
 // isAddObjectMethod 判断 task.Method 是否为 AddObject（防御性，处理 SOAP 命名差异）。

@@ -56,3 +56,54 @@ func TestResolveSources_MissingDir(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, sources)
 }
+
+func TestValidateAlarmIdentifiers(t *testing.T) {
+	tests := []struct {
+		name    string
+		alarms  []xmlAlarm
+		seen    map[string]string
+		wantErr string
+	}{
+		{
+			name:   "accepts unique identifiers",
+			alarms: []xmlAlarm{{Identifier: "1001"}, {Identifier: "1002"}},
+			seen:   map[string]string{"999": "ENB.xml"},
+		},
+		{
+			name:    "rejects empty library",
+			alarms:  []xmlAlarm{},
+			seen:    map[string]string{},
+			wantErr: "contains no alarm definitions",
+		},
+		{
+			name:    "rejects missing identifier",
+			alarms:  []xmlAlarm{{Identifier: ""}},
+			seen:    map[string]string{},
+			wantErr: "without identifier",
+		},
+		{
+			name:    "rejects duplicate identifier in XML",
+			alarms:  []xmlAlarm{{Identifier: "1001"}, {Identifier: "1001"}},
+			seen:    map[string]string{},
+			wantErr: "duplicated in NEW.xml",
+		},
+		{
+			name:    "rejects identifier owned by another library",
+			alarms:  []xmlAlarm{{Identifier: "1001"}},
+			seen:    map[string]string{"1001": "ENB.xml"},
+			wantErr: "conflicts with ENB.xml",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateAlarmIdentifiers(tt.alarms, tt.seen, "NEW.xml")
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}

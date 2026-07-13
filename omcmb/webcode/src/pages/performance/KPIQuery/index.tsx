@@ -37,6 +37,7 @@ import {
   PlusOutlined,
   DeleteOutlined,
   EditOutlined,
+  EyeOutlined,
   TeamOutlined,
   UserOutlined,
   ExportOutlined,
@@ -65,7 +66,6 @@ import {
   kpiQueryToDashboardSelection,
   buildDashboardExportParams,
 } from '@core/utils/kpiExportParams';
-import { indicatorLibraryApi } from '@core/services/api/indicatorLibraryApi';
 import type { DeviceType } from '@core/types/indicatorLibrary';
 import { deviceTypeToNetworkTech } from '@core/types/indicatorLibrary';
 import type { Granularity } from '@core/types/pmDashboard';
@@ -81,6 +81,9 @@ import MetricPickerModal from '@/components/MetricPickerModal';
 import PivotTable from './components/PivotTable';
 import CellDrilldownSelector from '../PmDashboard/CellDrilldownSelector';
 import { getEffectiveLdns, type CellSelection } from '../PmDashboard/cellDrilldownUtils';
+import { synchronizeUpdatedTemplateState } from './templateUpdateState';
+import QueryTemplateDetailModal from './QueryTemplateDetailModal';
+import { resolveTemplateMetricPaths } from './templateMetricResolver';
 
 const { Text, Title } = Typography;
 const { RangePicker } = DatePicker;
@@ -127,55 +130,6 @@ interface SaveTemplateFormState {
   visibility: TemplateVisibility;
   payload: QueryTemplatePayload;
   customRange: [dayjs.Dayjs, dayjs.Dayjs] | null;
-}
-
-// KPI 编号格式（如 K900010043）。
-// 指标编号（落库即编号化后，counter 与 KPI 的 metric_path 都是编号）：
-//   K 编号 K\d+ / C 编号 C\d+ / 5G·2G 编号 KGNB\d+·KGSM\d+。标准名一律带点（OTHER.CellServiceTime），
-//   不会被此正则误判为编号，故编号原样短路、点分名走下方解析。
-const KPI_CODE_RE = /^(C\d+|KGNB\d+|KGSM\d+|K\d+)$/;
-
-// 模板历史兼容：旧模板里 KPI 存的是显示名（落库改编号前），新链路按编号过滤会查空。
-// 载入时把非编号项尝试映射回编号——按显示名在指标库找唯一 KPI 项则换成其编号；
-// counter（点分名 = metric_path）与查不到的项原样保留；同名无法唯一映射的项记入 ambiguous 提示重选。
-async function resolveTemplateMetricPaths(
-  deviceType: DeviceType,
-  paths: string[],
-): Promise<{ paths: string[]; labels: Record<string, string>; ambiguous: string[] }> {
-  const outPaths: string[] = [];
-  const labels: Record<string, string> = {};
-  const ambiguous: string[] = [];
-  for (const p of paths) {
-    if (KPI_CODE_RE.test(p)) {
-      outPaths.push(p);
-      continue;
-    }
-    let exact: Awaited<ReturnType<typeof indicatorLibraryApi.list>>['items'] = [];
-    try {
-      const { items } = await indicatorLibraryApi.list(deviceType, { keyword: p, pageSize: 50 });
-      exact = items.filter((it) => it.enName === p || it.cnName === p);
-    } catch {
-      // 查询失败时原样保留，不阻断模板载入
-      outPaths.push(p);
-      continue;
-    }
-    const kpiMatches = exact.filter((it) => !it.isCounter);
-    if (kpiMatches.length === 1) {
-      const m = kpiMatches[0];
-      outPaths.push(m.id);
-      labels[m.id] = m.cnName || m.enName || m.id;
-    } else if (kpiMatches.length > 1) {
-      ambiguous.push(p);
-      outPaths.push(p);
-    } else {
-      // 走到这里的 p 已非编号（编号在上方短路）：旧模板里残留的点分上报名，或查不到。
-      // 原样保留——编号化后这类点分名 counter 查不到数据，仅兜底不阻断模板载入。
-      outPaths.push(p);
-      const counter = exact.find((it) => it.isCounter);
-      if (counter) labels[p] = counter.cnName || p;
-    }
-  }
-  return { paths: outPaths, labels, ambiguous };
 }
 
 function presetToRange(preset: TimeRangePreset): { start: string; end: string } | null {
@@ -228,6 +182,7 @@ export default function KPIQuery() {
   // ── 模板侧栏状态 ─────────────────────────────────────────────────
   const [templateTab, setTemplateTab] = useState<'public' | 'private'>('public');
   const [activeTemplateId, setActiveTemplateId] = useState<string | undefined>(undefined);
+  const [detailTemplateId, setDetailTemplateId] = useState<string | undefined>(undefined);
 
   const { data: templatesData, isLoading: templatesLoading, refetch: refetchTemplates } =
     useQueryTemplates({ pageSize: 200 });
@@ -243,6 +198,10 @@ export default function KPIQuery() {
   const privateTemplates = useMemo(
     () => (templatesData?.items ?? []).filter((tpl) => tpl.visibility === 'private'),
     [templatesData],
+  );
+  const detailTemplate = useMemo(
+    () => (templatesData?.items ?? []).find((tpl) => tpl.id === detailTemplateId) ?? null,
+    [detailTemplateId, templatesData],
   );
 
   const granularityOptions = useMemo(
@@ -362,14 +321,17 @@ export default function KPIQuery() {
   };
 
   // 导出取「最近一次实际查询」的快照（submittedPayload/submittedRange），而非表单实时值，
-  // 保证"导出=屏幕所见"。复用 dashboard 异步导出链路：建任务 → 文件管理下载，后端零改。
+  // 保证"导出=屏幕所见"。复用 dashboard 取数链路，但用 kpi_query 来源输出查询页表格列。
   const handleExport = () => {
     if (!submittedPayload || !submittedRange) return; // 按钮已禁用，双保险
-    const sel = kpiQueryToDashboardSelection(submittedPayload, submittedRange);
+    const sel = {
+      ...kpiQueryToDashboardSelection(submittedPayload, submittedRange),
+      objectLdns: effectiveLdns.length > 0 ? effectiveLdns : undefined,
+    };
     const ts = dayjs().format('YYYYMMDD_HHmmss');
     createExport.mutate(
       {
-        sourceType: 'dashboard',
+        sourceType: 'kpi_query',
         params: buildDashboardExportParams(sel),
         taskName: t('perf.kpiQuery.exportTaskName', { ts }), // 与仪表盘导出区分，便于任务列表辨识
       },
@@ -427,6 +389,13 @@ export default function KPIQuery() {
     });
   };
 
+  const handleOpenDetail = async (tpl: QueryTemplate) => {
+    const dt = (tpl.payload.deviceType ?? 'ENB') as DeviceType;
+    const { labels } = await resolveTemplateMetricPaths(dt, tpl.payload.metricPaths);
+    setMetricLabels((prev) => ({ ...prev, ...labels }));
+    setDetailTemplateId(tpl.id);
+  };
+
   const handleSaveTemplate = async () => {
     if (!saveForm.name.trim()) {
       message.warning(t('perf.kpiQuery.templateNameRequired'));
@@ -458,7 +427,7 @@ export default function KPIQuery() {
         });
         message.success(t('perf.kpiQuery.templateCreated'));
       } else if (saveForm.templateId) {
-        await updateMut.mutateAsync({
+        const updated = await updateMut.mutateAsync({
           id: saveForm.templateId,
           input: {
             name: saveForm.name.trim(),
@@ -467,6 +436,28 @@ export default function KPIQuery() {
             payload: payloadToSave,
           },
         });
+        if (activeTemplateId === updated.id) {
+          const dt = (updated.payload.deviceType ?? 'ENB') as DeviceType;
+          const { paths, labels } = await resolveTemplateMetricPaths(dt, updated.payload.metricPaths);
+          const next = synchronizeUpdatedTemplateState(
+            activeTemplateId,
+            { formPayload: payload, submittedPayload },
+            updated,
+            paths,
+          );
+          setMetricLabels((prev) => ({ ...prev, ...labels }));
+          setPayload(next.formPayload);
+          setTimeRangeDirty(false);
+          if (
+            updated.payload.timeRangePreset === 'custom'
+            && updated.payload.absoluteStart
+            && updated.payload.absoluteEnd
+          ) {
+            setCustomRange([dayjs(updated.payload.absoluteStart), dayjs(updated.payload.absoluteEnd)]);
+          } else {
+            setCustomRange(null);
+          }
+        }
         message.success(t('perf.kpiQuery.templateUpdated'));
       }
       setSaveForm((s) => ({ ...s, open: false }));
@@ -521,8 +512,19 @@ export default function KPIQuery() {
         }}
         onClick={() => void handleSelectTemplate(tpl)}
         actions={
-          canEdit
-            ? [
+          [
+            <Tooltip key="detail" title={t('perf.kpiQuery.detail.title')}>
+              <Button
+                type="text"
+                size="small"
+                icon={<EyeOutlined />}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void handleOpenDetail(tpl);
+                }}
+              />
+            </Tooltip>,
+            ...(canEdit ? [
                 <Tooltip key="edit" title={t('common.edit')}>
                   <Button
                     type="text"
@@ -551,14 +553,16 @@ export default function KPIQuery() {
                     onClick={(e) => e.stopPropagation()}
                   />
                 </Popconfirm>,
-              ]
-            : undefined
+              ] : []),
+          ]
         }
       >
         <List.Item.Meta
           title={
-            <Space>
-              <Text>{tpl.name}</Text>
+            <Space style={{ width: '100%', minWidth: 0 }}>
+              <Text ellipsis={{ tooltip: tpl.name }} style={{ flex: 1, minWidth: 0 }}>
+                {tpl.name}
+              </Text>
               {tpl.visibility === 'public' ? (
                 <Tag color="blue">{t('perf.kpiQuery.public')}</Tag>
               ) : (
@@ -700,7 +704,7 @@ export default function KPIQuery() {
       ) : (
         <div
           style={{
-            width: 280,
+            width: 360,
             flexShrink: 0,
             display: 'flex',
             flexDirection: 'column',
@@ -923,6 +927,13 @@ export default function KPIQuery() {
           }
           // 外层「设备类型」是唯一来源（#443）：锁定弹窗内部类型，隐藏其重复下拉，跟随外层值。
           lockDeviceType
+        />
+
+        <QueryTemplateDetailModal
+          open={detailTemplate != null}
+          template={detailTemplate}
+          metricLabels={metricLabels}
+          onClose={() => setDetailTemplateId(undefined)}
         />
 
         <Modal

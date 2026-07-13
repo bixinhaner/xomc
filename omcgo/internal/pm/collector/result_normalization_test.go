@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -39,6 +40,7 @@ func TestIngestViaCopy_NormalizesCounterValuesBeforeCopyIngest(t *testing.T) {
 				OUI:          "48BF74",
 				DeviceSN:     "SN-1",
 				CellID:       "Cellid=1",
+				CounterGroup: "C",
 				CounterName:  "C-PCT",
 				CounterValue: 19.45245145567464,
 				Granularity:  15,
@@ -51,6 +53,7 @@ func TestIngestViaCopy_NormalizesCounterValuesBeforeCopyIngest(t *testing.T) {
 				OUI:          "48BF74",
 				DeviceSN:     "SN-1",
 				CellID:       "Cellid=1",
+				CounterGroup: "C",
 				CounterName:  "C-NUM",
 				CounterValue: 3.6,
 				Granularity:  15,
@@ -68,12 +71,20 @@ func TestIngestViaCopy_NormalizesCounterValuesBeforeCopyIngest(t *testing.T) {
 		Technology: "lte",
 	}
 
-	err := c.ingestViaCopy(ctx, trace.SpanFromContext(ctx), time.Now(), time.Now(), 123, uuid.New(), payload, content)
+	allow := map[string]CounterMeta{
+		"C.PCT":     {IndicatorID: "C-PCT", ReportKey: "C.PCT", Unit: "%", StatisType: "pct"},
+		"C.NUM":     {IndicatorID: "C-NUM", ReportKey: "C.NUM", Unit: "number", StatisType: "sum"},
+		"C.MISSING": {IndicatorID: "C-MISSING", ReportKey: "C.MISSING", Unit: "number", StatisType: "sum"},
+	}
+
+	err := c.ingestViaCopy(ctx, trace.SpanFromContext(ctx), time.Now(), time.Now(), 123, uuid.New(), payload, content, allow)
 
 	require.NoError(t, err)
-	require.Len(t, copyIngestor.counters, 2)
+	require.Len(t, copyIngestor.counters, 3)
 	assert.InDelta(t, 19.45, copyIngestor.counters[0].CounterValue, 1e-9)
 	assert.Equal(t, float64(4), copyIngestor.counters[1].CounterValue)
+	assert.Equal(t, "C-MISSING", copyIngestor.counters[2].CounterName)
+	assert.True(t, math.IsNaN(copyIngestor.counters[2].CounterValue), "缺值补齐应发生在真实值规范化之后")
 }
 
 func TestNormalizeResults_NormalizesKPIValuesAndFailsMissingMetadata(t *testing.T) {

@@ -608,9 +608,9 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 		logger.Info("pm online subscriber disabled (cfg.pm.auto_setup_on_online=false)")
 	}
 
-	// T-0164-P5 / G5 + T-0164-P8 / G8：PM 自然桶聚合 cron + asyncjob 框架接入。
-	// 复用上文已构造的 pmKPIRouter（KPI 反算依赖路由）；新开 4 个 cron runner +
-	// sweeper + 触发器（hourly @:05 / daily 00:05 / weekly 周一 00:10 / monthly 1日 00:15）。
+	// T-0164-P5 / G5 + T-0164-P8 / G8：PM 自然桶聚合 + asyncjob 框架接入。
+	// 复用上文已构造的 pmKPIRouter（KPI 反算依赖路由）；注册 4 个设备级 runner +
+	// sweeper + hourly 触发器（hourly @:05）。daily/weekly/monthly 由上游 bucket 成功后 chain。
 	// T-0192：日/周/月桶按业务时区切本地零点。
 	// #458：业务时区改读 #456 统一源 sys_configs（category='basic'/key='timezoneCode'），
 	// 不再读 YAML PM.Timezone（空/非法 Provider 内回落 UTC）。tzManager 统一管理
@@ -1132,6 +1132,7 @@ func (a *routerCounterWhitelist) LookupCounters(ctx context.Context, deviceSN st
 		}
 		out[c.ReportKey] = collector.CounterMeta{
 			IndicatorID: c.IndicatorID,
+			ReportKey:   c.ReportKey,
 			StatisType:  c.StatisType,
 			Unit:        c.Unit,
 		}

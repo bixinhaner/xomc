@@ -129,7 +129,7 @@ export const useAppStore = create<AppState>()(
         const { isMobileOverlayOpen, ...rest } = state;
         return rest;
       },
-      version: 2,
+      version: 5,
       migrate: (persisted: unknown, version: number) => {
         const state = persisted as Record<string, unknown>;
         if (version === 0 || !version) {

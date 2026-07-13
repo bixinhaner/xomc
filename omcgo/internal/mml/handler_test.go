@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
 )
@@ -62,6 +64,9 @@ func (m *hScriptRepo) Create(ctx context.Context, script *MMLScript) error {
 func (m *hScriptRepo) GetByID(ctx context.Context, id uuid.UUID) (*MMLScript, error) {
 	return m.GetByIDFn(ctx, id)
 }
+func (m *hScriptRepo) NameExistsForCreator(context.Context, string, string, *uuid.UUID) (bool, error) {
+	return false, nil
+}
 func (m *hScriptRepo) Update(ctx context.Context, script *MMLScript) error {
 	return m.UpdateFn(ctx, script)
 }
@@ -99,6 +104,9 @@ func (m *hTaskRepo) Create(ctx context.Context, task *MMLTask) error {
 func (m *hTaskRepo) GetByID(ctx context.Context, id uuid.UUID) (*MMLTask, error) {
 	return m.GetByIDFn(ctx, id)
 }
+func (m *hTaskRepo) GetByRequestID(context.Context, string, string) (*MMLTask, error) {
+	return nil, commonerrors.ErrNotFound
+}
 func (m *hTaskRepo) Update(ctx context.Context, task *MMLTask) error {
 	return m.UpdateFn(ctx, task)
 }
@@ -135,13 +143,13 @@ func (m *hTaskRepo) UpdateExportDevice(ctx context.Context, id uuid.UUID, device
 }
 
 type hCustomCommandRepo struct {
-	CreateFn          func(ctx context.Context, tmpl *MMLCustomCommand) error
-	GetByIDFn         func(ctx context.Context, id uuid.UUID) (*MMLCustomCommand, error)
-	UpdateFn          func(ctx context.Context, tmpl *MMLCustomCommand) error
-	DeleteFn          func(ctx context.Context, id uuid.UUID) error
-	ListFn            func(ctx context.Context, filter CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error)
-	NameExistsFn      func(ctx context.Context, ownerID uuid.UUID, name string, excludeID *uuid.UUID) (bool, error)
-	PublicNameFn      func(ctx context.Context, name string, excludeID *uuid.UUID) (bool, error)
+	CreateFn     func(ctx context.Context, tmpl *MMLCustomCommand) error
+	GetByIDFn    func(ctx context.Context, id uuid.UUID) (*MMLCustomCommand, error)
+	UpdateFn     func(ctx context.Context, tmpl *MMLCustomCommand) error
+	DeleteFn     func(ctx context.Context, id uuid.UUID) error
+	ListFn       func(ctx context.Context, filter CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error)
+	NameExistsFn func(ctx context.Context, ownerID uuid.UUID, name string, excludeID *uuid.UUID) (bool, error)
+	PublicNameFn func(ctx context.Context, name string, excludeID *uuid.UUID) (bool, error)
 }
 
 func (m *hCustomCommandRepo) Create(ctx context.Context, tmpl *MMLCustomCommand) error {
@@ -478,13 +486,11 @@ func TestHandler_ListScripts(t *testing.T) {
 	assert.Equal(t, "Batch Query Script", resp.Items[0].ScriptName)
 }
 
-func TestHandler_CreateScript(t *testing.T) {
+func TestHandler_CreateScriptRouteRemoved(t *testing.T) {
 	cmdRepo := &hCmdRepo{}
 	scriptRepo := &hScriptRepo{
-		CreateFn: func(_ context.Context, script *MMLScript) error {
-			script.ID = uuid.New()
-			script.CreatedAt = time.Now()
-			script.UpdatedAt = time.Now()
+		CreateFn: func(_ context.Context, _ *MMLScript) error {
+			t.Fatal("legacy POST /mml/scripts route must not call CreateScript")
 			return nil
 		},
 	}
@@ -495,26 +501,12 @@ func TestHandler_CreateScript(t *testing.T) {
 	h := NewHandler(svc, logger)
 	router := setupMMLRouter(h)
 
-	body := CreateScriptRequest{
-		ScriptName:  "New Script",
-		Description: "A new MML script",
-		Content:     "LST CELL;",
-		Tags:        []string{"5g", "cell"},
-	}
-
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/mml/scripts", bytes.NewReader(mustMarshalMML(t, body)))
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/mml/scripts", bytes.NewReader([]byte(`{"script_name":"legacy"}`)))
 	r.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, r)
 
-	assert.Equal(t, http.StatusCreated, w.Code)
-
-	var resp MMLScript
-	response.DecodeData(t, w.Body, &resp)
-	assert.NotEqual(t, uuid.Nil, resp.ID)
-	assert.Equal(t, "New Script", resp.ScriptName)
-	assert.Equal(t, "LST CELL;", resp.Content)
-	assert.Equal(t, []string{"5g", "cell"}, resp.Tags)
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 func TestHandler_DeleteScript(t *testing.T) {
@@ -584,6 +576,61 @@ func TestHandler_ListTasks(t *testing.T) {
 	assert.Len(t, resp.Items, 1)
 	assert.Equal(t, "Batch Query", resp.Items[0].TaskName)
 	assert.Equal(t, TaskCompleted, resp.Items[0].Status)
+}
+
+func TestHandler_ListTasksBindsTaskOrigin(t *testing.T) {
+	tests := []struct {
+		name       string
+		queryValue string
+		want       TaskOrigin
+	}{
+		{name: "script", queryValue: "script", want: TaskOriginScript},
+		{name: "console", queryValue: "console", want: TaskOriginConsole},
+		{name: "localized console", queryValue: "控制台执行", want: TaskOriginConsole},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			taskRepo := &hTaskRepo{
+				ListFn: func(_ context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error) {
+					require.NotNil(t, filter.TaskOrigin)
+					assert.Equal(t, tt.want, *filter.TaskOrigin)
+					return model.NewListResponse([]MMLTask{}, 0, 1, 20), nil
+				},
+			}
+
+			logger := zap.NewNop()
+			svc := NewService(&hCmdRepo{}, &hScriptRepo{}, taskRepo, &hCustomCommandRepo{}, nil, logger)
+			h := NewHandler(svc, logger)
+			router := setupMMLRouter(h)
+
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/mml/tasks?page=1&page_size=20&task_origin="+url.QueryEscape(tt.queryValue), nil)
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+		})
+	}
+}
+
+func TestHandler_ListTasksRejectsInvalidTaskOrigin(t *testing.T) {
+	taskRepo := &hTaskRepo{
+		ListFn: func(_ context.Context, _ TaskFilter) (*model.ListResponse[MMLTask], error) {
+			t.Fatal("List must not be called for invalid task_origin")
+			return nil, nil
+		},
+	}
+
+	logger := zap.NewNop()
+	svc := NewService(&hCmdRepo{}, &hScriptRepo{}, taskRepo, &hCustomCommandRepo{}, nil, logger)
+	h := NewHandler(svc, logger)
+	router := setupMMLRouter(h)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/mml/tasks?page=1&page_size=20&task_origin=bad", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 // ---- Task control handler tests ----
@@ -699,4 +746,33 @@ func TestHandler_DeleteTask(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	response.DecodeData(t, w.Body, nil)
+}
+
+func TestHandler_DeleteTask_RunningReturnsConflict(t *testing.T) {
+	taskID := uuid.New()
+
+	cmdRepo := &hCmdRepo{}
+	scriptRepo := &hScriptRepo{}
+	taskRepo := &hTaskRepo{
+		GetByIDFn: func(_ context.Context, id uuid.UUID) (*MMLTask, error) {
+			assert.Equal(t, taskID, id)
+			return &MMLTask{ID: id, Status: TaskRunning}, nil
+		},
+		DeleteFn: func(_ context.Context, id uuid.UUID) error {
+			t.Fatalf("running task %s must not be deleted", id)
+			return nil
+		},
+	}
+
+	logger := zap.NewNop()
+	svc := NewService(cmdRepo, scriptRepo, taskRepo, &hCustomCommandRepo{}, nil, logger)
+	h := NewHandler(svc, logger)
+	router := setupMMLRouter(h)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/mml/tasks/"+taskID.String(), nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+	assert.Contains(t, w.Body.String(), "cannot delete a running task")
 }

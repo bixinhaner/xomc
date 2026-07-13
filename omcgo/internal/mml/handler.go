@@ -19,13 +19,21 @@ import (
 type Handler struct {
 	service *Service
 	logger  *zap.Logger
+	// scriptImportService is set during module wiring. Keeping import endpoints
+	// optional preserves the existing handler test harnesses and startup order.
+	scriptImportService ScriptImportServiceAPI
 }
 
 // NewHandler creates a new MML Handler.
 func NewHandler(service *Service, logger *zap.Logger) *Handler {
+	var importService ScriptImportServiceAPI
+	if service != nil {
+		importService = service.ScriptImportService()
+	}
 	return &Handler{
-		service: service,
-		logger:  logger.Named("mml-handler"),
+		service:             service,
+		logger:              logger.Named("mml-handler"),
+		scriptImportService: importService,
 	}
 }
 
@@ -46,8 +54,13 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	mml.POST("/tasks", h.CreateTask)
 
 	scripts := mml.Group("/scripts")
+	scripts.GET("/import/template", h.GetScriptImportTemplate)
+	scripts.POST("/import/validate", h.ValidateScriptImport)
+	scripts.POST("/import", h.CreateScriptFromImport)
+	scripts.POST("/:id/import/validate", h.ValidateScriptReplacement)
+	scripts.PUT("/:id/import", h.ReplaceScriptFromImport)
+	scripts.POST("/:id/executions", h.CreateScriptExecution)
 	scripts.GET("", h.ListScripts)
-	scripts.POST("", h.CreateScript)
 	scripts.GET("/:id", h.GetScript)
 	scripts.PUT("/:id", h.UpdateScript)
 	scripts.DELETE("/:id", h.DeleteScript)
@@ -90,6 +103,49 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	groups.POST("/:id/execute", h.ExecuteGroup)
 }
 
+// CreateScriptExecution creates an execution instance from the server-side
+// imported-script snapshot. The request is intentionally strict and contains
+// no commands, device_sns or plan_items fields.
+func (h *Handler) CreateScriptExecution(c *gin.Context) {
+	username, ok := authenticatedUsername(c)
+	if !ok {
+		h.writeScriptImportError(c, http.StatusUnauthorized, "MML_UNAUTHORIZED", "authentication required", nil)
+		return
+	}
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		h.writeScriptImportError(c, http.StatusBadRequest, "MML_SCRIPT_ID_INVALID", "invalid script id", nil)
+		return
+	}
+	var req ScriptExecutionRequest
+	if err := decodeScriptImportJSON(c, &req); err != nil {
+		h.writeScriptImportError(c, http.StatusBadRequest, "MML_EXECUTION_REQUEST_INVALID", "invalid script execution request", nil)
+		return
+	}
+	task, validation, err := h.service.CreateScriptExecution(c.Request.Context(), id, username, req)
+	if err != nil {
+		var validationErr *ScriptExecutionValidationError
+		if errors.As(err, &validationErr) && validationErr.Result != nil {
+			status := http.StatusUnprocessableEntity
+			code := "MML_SCRIPT_EXECUTION_VALIDATION_FAILED"
+			message := "script execution preflight failed"
+			if validationErr.Warnings {
+				status = http.StatusConflict
+				code = "MML_SCRIPT_EXECUTION_WARNINGS"
+				message = "script execution warnings require confirmation"
+			}
+			c.AbortWithStatusJSON(status, gin.H{"ret": 0, "msg": message, "data": validationErr.Result, "code": code, "message": message, "issues": validationErr.Result.Issues})
+			return
+		}
+		h.writeScriptImportServiceError(c, err)
+		return
+	}
+	if validation == nil {
+		validation = &ScriptValidationResult{PlanItems: []MMLPlanItem{}, Issues: []ScriptIssue{}}
+	}
+	response.OKWithStatus(c, http.StatusCreated, gin.H{"task": task, "validation": validation})
+}
+
 // ---- Request types ----
 
 // ExecuteHTTPRequest defines the request body for POST /api/v1/mml/execute
@@ -98,13 +154,14 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 // 否则 commands[] 形式的请求会被误拒。
 type ExecuteHTTPRequest struct {
 	CommandCode string                 `json:"command_code"`
-	DeviceSNs   []string               `json:"device_sns" binding:"required"`
+	DeviceSNs   []string               `json:"device_sns"`
 	Parameters  map[string]interface{} `json:"parameters"`
 	TaskName    string                 `json:"task_name"`
 
 	// Script execution support
-	ScriptID string                   `json:"script_id"`
-	Commands []map[string]interface{} `json:"commands"`
+	ScriptID  string                   `json:"script_id"`
+	Commands  []map[string]interface{} `json:"commands"`
+	PlanItems []MMLPlanItem            `json:"plan_items"`
 
 	// Scheduling
 	ExecuteType string `json:"execute_type"`
@@ -134,12 +191,13 @@ type ExecuteHTTPRequest struct {
 // 仅 binding 规则不同；CreateTask handler 通过显式类型转换复用 runExecute。
 type CreateTaskHTTPRequest struct {
 	CommandCode string                 `json:"command_code"`
-	DeviceSNs   []string               `json:"device_sns" binding:"required"`
+	DeviceSNs   []string               `json:"device_sns"`
 	Parameters  map[string]interface{} `json:"parameters"`
 	TaskName    string                 `json:"task_name"`
 
-	ScriptID string                   `json:"script_id"`
-	Commands []map[string]interface{} `json:"commands"`
+	ScriptID  string                   `json:"script_id"`
+	Commands  []map[string]interface{} `json:"commands"`
+	PlanItems []MMLPlanItem            `json:"plan_items"`
 
 	ExecuteType string `json:"execute_type"`
 	ScheduledAt string `json:"scheduled_at"`
@@ -171,7 +229,6 @@ type CreateScriptRequest struct {
 type UpdateScriptRequest struct {
 	ScriptName  string   `json:"script_name" binding:"required"`
 	Description string   `json:"description"`
-	Content     string   `json:"content" binding:"required"`
 	Tags        []string `json:"tags"`
 }
 
@@ -256,14 +313,23 @@ func (h *Handler) Execute(c *gin.Context) {
 	// §需求 4：命令源全空，或裸路径模式下 param_paths trim 后无任何非空 PATH（无可支持 PATH），
 	// 均无可下发，直接返回执行失败，不创建空任务。
 	if req.CommandCode == "" && req.ScriptID == "" && len(req.Commands) == 0 &&
-		nonEmptyParamPathCount(req.ParamPaths) == 0 {
+		len(req.PlanItems) == 0 && nonEmptyParamPathCount(req.ParamPaths) == 0 {
 		h.logger.Warn("mml execute rejected: no supportable path / command source",
 			zap.String("client_ip", c.ClientIP()),
 			zap.String("task_name", req.TaskName),
 			zap.Strings("device_sns", req.DeviceSNs),
 		)
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			fmt.Errorf("no supportable PATH to execute: one of command_code, script_id, commands, non-empty param_paths is required"))
+			fmt.Errorf("no supportable PATH to execute: one of command_code, script_id, commands, plan_items, non-empty param_paths is required"))
+		return
+	}
+	if len(req.DeviceSNs) == 0 && len(req.PlanItems) == 0 {
+		h.logger.Warn("mml execute rejected: no device_sns or plan_items",
+			zap.String("client_ip", c.ClientIP()),
+			zap.String("task_name", req.TaskName),
+		)
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("device_sns or plan_items is required"))
 		return
 	}
 	h.runExecute(c, req)
@@ -283,13 +349,22 @@ func (h *Handler) CreateTask(c *gin.Context) {
 		return
 	}
 	if raw.CommandCode == "" && raw.ScriptID == "" && len(raw.Commands) == 0 &&
-		nonEmptyParamPathCount(raw.ParamPaths) == 0 {
+		len(raw.PlanItems) == 0 && nonEmptyParamPathCount(raw.ParamPaths) == 0 {
 		h.logger.Warn("mml task create rejected: no supportable path / command source",
 			zap.String("client_ip", c.ClientIP()),
 			zap.String("task_name", raw.TaskName),
 		)
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			fmt.Errorf("no supportable PATH to execute: one of script_id, commands, command_code, non-empty param_paths is required"))
+			fmt.Errorf("no supportable PATH to execute: one of script_id, commands, command_code, plan_items, non-empty param_paths is required"))
+		return
+	}
+	if len(raw.DeviceSNs) == 0 && len(raw.PlanItems) == 0 {
+		h.logger.Warn("mml task create rejected: no device_sns or plan_items",
+			zap.String("client_ip", c.ClientIP()),
+			zap.String("task_name", raw.TaskName),
+		)
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("device_sns or plan_items is required"))
 		return
 	}
 	// 两个结构体字段序列与类型一致（仅 binding 标签不同），
@@ -325,6 +400,7 @@ func (h *Handler) runExecute(c *gin.Context, req ExecuteHTTPRequest) {
 		Creator:             creatorStr,
 		Executor:            creatorStr,
 		Commands:            req.Commands,
+		PlanItems:           req.PlanItems,
 		ExecuteType:         ExecuteType(executeType),
 		OfflineRetry:        req.OfflineRetry,
 		OfflineRetryWait:    req.OfflineRetryWait,
@@ -536,14 +612,7 @@ func (h *Handler) UpdateScript(c *gin.Context) {
 		return
 	}
 
-	script := &MMLScript{
-		ScriptName:  req.ScriptName,
-		Description: req.Description,
-		Content:     req.Content,
-		Tags:        req.Tags,
-	}
-
-	updated, err := h.service.UpdateScript(c.Request.Context(), id, script)
+	updated, err := h.service.UpdateScriptMetadata(c.Request.Context(), id, req.ScriptName, req.Description, req.Tags)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -663,6 +732,14 @@ func (h *Handler) ListTasks(c *gin.Context) {
 	if taskName := c.Query("task_name"); taskName != "" {
 		filter.TaskName = &taskName
 	}
+	if taskOrigin := c.Query("task_origin"); taskOrigin != "" {
+		origin, ok := normalizeTaskOriginQuery(taskOrigin)
+		if !ok {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+			return
+		}
+		filter.TaskOrigin = &origin
+	}
 
 	result, err := h.service.ListTasks(c.Request.Context(), filter)
 	if err != nil {
@@ -671,6 +748,21 @@ func (h *Handler) ListTasks(c *gin.Context) {
 	}
 
 	response.OK(c, result)
+}
+
+func normalizeTaskOriginQuery(raw string) (TaskOrigin, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case string(TaskOriginConsole), "mml.taskorigin.console":
+		return TaskOriginConsole, true
+	case string(TaskOriginScript), "mml.taskorigin.script":
+		return TaskOriginScript, true
+	case "控制台执行":
+		return TaskOriginConsole, true
+	case "脚本执行":
+		return TaskOriginScript, true
+	default:
+		return "", false
+	}
 }
 
 // GetTask handles GET /api/v1/mml/tasks/:id.

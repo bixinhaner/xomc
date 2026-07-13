@@ -160,6 +160,22 @@ func Test_buildDeviceGroupSQL_DailyGroupTableNoID(t *testing.T) {
 	assert.Contains(t, sql, "ON CONFLICT (device_group_id, metric_path, granularity, end_time, technology)")
 }
 
+func Test_buildDeviceGroupSQL_PreservesNullAggregationSemantics(t *testing.T) {
+	w := WindowSpec{
+		Granularity: metrics.GranularityHourly,
+		Start:       time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+		End:         time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+	}
+	sql, _ := buildDeviceGroupSQL("pm_metrics_hourly", "pm_group_metrics_hourly", w)
+
+	assert.Contains(t, sql, "WHEN 'sum' THEN SUM(m.metric_value)")
+	assert.Contains(t, sql, "WHEN 'avg' THEN AVG(m.metric_value)")
+	assert.Contains(t, sql, "WHEN 'max' THEN MAX(m.metric_value)")
+	assert.Contains(t, sql, "WHEN 'min' THEN MIN(m.metric_value)")
+	assert.NotContains(t, sql, "COALESCE(m.metric_value", "缺值不能在聚合前被当作 0")
+	assert.NotContains(t, sql, "m.metric_value IS NOT NULL", "全 NULL 窗口仍应产出 NULL 聚合行")
+}
+
 // AggregateDeviceGroup 通过 stub DB 验证 SQL + args 透传到 Exec。
 // （真实 DB 验证留 Task 5 集成测试。）
 

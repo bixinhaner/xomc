@@ -30,6 +30,8 @@ import { activationStatusLabelOf, activationStatusOf } from '@core/utils/activat
 import { formatDeviceSyncStatus, getDeviceSyncStatusKind, normalizeDeviceSyncStatus } from '@core/utils/deviceSyncStatus';
 import { expandSelectedGroupIds } from '@core/utils/deviceGroupFilter';
 import { withDeviceGroupDisplayName } from '@core/utils/deviceGroupDisplay';
+import { getI18nText } from '@core/utils/i18nText';
+import { containsHan, localizeDeviceProductName } from '@core/utils/deviceDisplay';
 import { hasAlarmSeverity } from '@core/utils/alarmSeverity';
 import { useAlarmCountWithDeviceListInvalidation } from '@core/hooks/api/useAlarms';
 import { useTriggerAlarmSync } from '@core/hooks/api/useAlarms';
@@ -57,7 +59,7 @@ import dayjs from 'dayjs';
 import { buildBatchTaskTypeMap, batchActionHasDetail } from './deviceBatchTask';
 import type { Device } from '@core/types/device';
 import { formatSystemTime } from '@core/utils/systemTime';
-import { computeCurrentOnlineDurationSeconds } from '@core/utils/onlineDuration';
+import { computeCumulativeOnlineDurationSeconds, computeCurrentOnlineDurationSeconds } from '@core/utils/onlineDuration';
 
 const { Link } = Typography;
 
@@ -120,6 +122,22 @@ function offlineDurationText(t: TFn, days?: number, hours?: number, minutes?: nu
   return t('device.duration.lessThanMinute');
 }
 
+function offlineDurationPartsFromSeconds(seconds: number | null | undefined): { days: number; hours: number; minutes: number } | null {
+  if (seconds === null || seconds === undefined) return null;
+  const safeSeconds = Math.max(0, Math.floor(seconds));
+  return {
+    days: Math.floor(safeSeconds / 86400),
+    hours: Math.floor((safeSeconds % 86400) / 3600),
+    minutes: Math.floor((safeSeconds % 3600) / 60),
+  };
+}
+
+function offlineDurationTextFromSeconds(t: TFn, seconds: number | null | undefined): string {
+  const parts = offlineDurationPartsFromSeconds(seconds);
+  if (!parts) return '-';
+  return offlineDurationText(t, parts.days, parts.hours, parts.minutes);
+}
+
 function formatOfflineDuration(t: TFn, days?: number, hours?: number, minutes?: number): React.ReactNode {
   if (days === undefined || days === null) return '-';
   const text = offlineDurationText(t, days, hours, minutes);
@@ -129,6 +147,12 @@ function formatOfflineDuration(t: TFn, days?: number, hours?: number, minutes?: 
   else if (days > 0) color = days >= 7 ? 'orange' : 'gold';
   else if (hours && hours > 0) color = 'gold';
   return <Tag color={color}>{text}</Tag>;
+}
+
+function formatOfflineDurationFromSeconds(t: TFn, seconds: number | null | undefined): React.ReactNode {
+  const parts = offlineDurationPartsFromSeconds(seconds);
+  if (!parts) return '-';
+  return formatOfflineDuration(t, parts.days, parts.hours, parts.minutes);
 }
 
 const URL_ARRAY_FIELDS = new Set<string>([
@@ -359,7 +383,7 @@ export default function DeviceList() {
   const batchReboot = useBatchRebootDevices();
   const updateDevice = useUpdateDevice();
   const triggerAlarmSync = useTriggerAlarmSync();
-  useAlarmCountWithDeviceListInvalidation();
+  const alarmCountQuery = useAlarmCountWithDeviceListInvalidation();
   const createUfteTask = useCreateUnifiedFileTransferTask();
   const downloadStationLog = useDownloadStationLog();
   const taskNameUser = currentUser?.username || currentUser?.displayName || 'user';
@@ -495,12 +519,16 @@ export default function DeviceList() {
       .filter((g) => g.parentId !== null) // 排除 L1 根分组
       .map((g) => {
         const parent = g.parentId ? byId.get(g.parentId) : null;
+        const name = getI18nText((g as { nameI18n?: Record<string, string> }).nameI18n, appLocale, g.name);
+        const parentName = parent
+          ? getI18nText((parent as { nameI18n?: Record<string, string> }).nameI18n, appLocale, parent.name)
+          : '';
         return {
-          label: parent ? `${parent.name} / ${g.name}` : g.name,
+          label: parentName ? `${parentName} / ${name}` : name,
           value: g.id,
         };
       });
-  }, [groupsResp]);
+  }, [appLocale, groupsResp]);
 
   // R6c: 字典驱动 — 在线状态 / 激活状态 / 网络制式 / 产品类型
   // 字典 code 与种子数据在 migrations/000136 / 000137 维护。
@@ -528,18 +556,47 @@ export default function DeviceList() {
   const deviceModelDict = batchDicts?.['device_model'];
   const softwareVersionDict = batchDicts?.['software_version'];
 
+  type DictOptionDetail = { label: string; labelI18n?: Record<string, string>; value: string };
+
   const dictToOptions = useCallback(
-    (dict: { sysDictionaryDetails?: { label: string; value: string }[] } | undefined) =>
-      (dict?.sysDictionaryDetails ?? []).map((d) => ({ label: d.label, value: d.value })),
-    [],
+    (
+      dict: { sysDictionaryDetails?: DictOptionDetail[] } | undefined,
+      formatLabel?: (detail: DictOptionDetail) => string,
+    ) =>
+      (dict?.sysDictionaryDetails ?? []).map((d) => ({
+        label: formatLabel?.(d) ?? getI18nText(d.labelI18n, appLocale, d.label),
+        value: d.value,
+      })),
+    [appLocale],
+  );
+
+  const formatOnlineOptionLabel = useCallback(
+    (detail: DictOptionDetail) => {
+      const label = getI18nText(detail.labelI18n, appLocale, detail.label);
+      if (appLocale !== 'en-US' || !containsHan(label)) return label;
+      const normalized = String(detail.value ?? '').trim().toLowerCase();
+      return ['1', 'true', 'online', 'connected', 'active'].includes(normalized)
+        ? t('status.online')
+        : t('status.offline');
+    },
+    [appLocale, t],
+  );
+
+  const formatActivationOptionLabel = useCallback(
+    (detail: DictOptionDetail) =>
+      activationStatusLabelOf(detail.value, [detail], {
+        active: t('status.active'),
+        inactive: t('status.inactive'),
+      }, appLocale) ?? getI18nText(detail.labelI18n, appLocale, detail.label),
+    [appLocale, t],
   );
 
   // 产品名称下拉：选项来自 /products（label=产品名称，value=产品 UUID → devices.product_id）。
   // 与「产品类型」(product_class 字典) 不同，此处按产品装配件主键过滤。
   const { data: productListResp } = useProductList();
   const productOptions = useMemo(
-    () => (productListResp?.items ?? []).map((p) => ({ label: p.name, value: p.id })),
-    [productListResp],
+    () => (productListResp?.items ?? []).map((p) => ({ label: localizeDeviceProductName(p.name, appLocale), value: p.id })),
+    [appLocale, productListResp],
   );
 
   // 性能优化：SEVERITY_LABEL 改为函数调用，移除 useMemo
@@ -595,14 +652,14 @@ export default function DeviceList() {
       label: t('device.connStatus'),
       type: 'select',
       width: 160,
-      options: dictToOptions(isOnlineDict),
+      options: dictToOptions(isOnlineDict, formatOnlineOptionLabel),
     },
     {
       name: 'opState',
       label: t('device.opState'),
       type: 'select',
       width: 160,
-      options: dictToOptions(opStateDict),
+      options: dictToOptions(opStateDict, formatActivationOptionLabel),
     },
     {
       name: 'networkType',
@@ -637,7 +694,7 @@ export default function DeviceList() {
       label: t('device.model'),
       type: 'multi-select',
       width: 160,
-      options: dictToOptions(deviceModelDict),
+      options: dictToOptions(deviceModelDict, (detail) => localizeDeviceProductName(getI18nText(detail.labelI18n, appLocale, detail.label), appLocale)),
     },
     {
       name: 'softwareVersion',
@@ -660,7 +717,9 @@ export default function DeviceList() {
     t,
     productOptions,
     isOnlineDict,
+    formatOnlineOptionLabel,
     opStateDict,
+    formatActivationOptionLabel,
     networkTypeDict,
     productClassDict,
     deviceModelDict,
@@ -713,12 +772,13 @@ export default function DeviceList() {
   // T-0162: 优先用 online_count / offline_count（与 backend DeviceListStats 1:1）；
   // 老 stats.online / stats.offline 字段在新前端不再使用（仅 mapListResponse 内部
   // 当 fallback 保留），新 UI 直读 stats.online_count。
+  const activeAlarmCount = alarmCountQuery.data?.total_active ?? stats.alarmed;
   const statsItems = useMemo(() => [
     { label: t('device.count.total'), value: stats.total },
     { label: t('status.online'), value: stats.online_count ?? stats.online ?? 0, color: '#52C41A' },
     { label: t('status.offline'), value: stats.offline_count ?? stats.offline ?? 0, color: '#8C8C8C' },
-    { label: t('common.hasAlarm'), value: stats.alarmed, color: '#FA8C16' },
-  ], [stats, t]);
+    { label: t('alarm.stat.activeAlarm'), value: activeAlarmCount, color: '#FA8C16' },
+  ], [activeAlarmCount, stats, t]);
 
   const handleSearch = useCallback((values: Record<string, unknown>) => {
     // 关键字上限校验：后端 BuildSearchOR 限定 ≤50 keyword × 6 fields = 300 ILIKE
@@ -1038,16 +1098,57 @@ export default function DeviceList() {
     fallbackOnlineDuration: record.onlineDuration,
   }), []);
 
+  const cumulativeOnlineDurationOf = useCallback((record: Device) => computeCumulativeOnlineDurationSeconds({
+    isOnline: record.isOnline,
+    onlineTime: record.onlineTime,
+    offlineTime: record.offlineTime,
+    fallbackOnlineDuration: record.onlineDuration,
+    cumulativeOnlineDuration: record.cumulativeOnlineDuration,
+  }), []);
+
+  const offlineDurationOf = useCallback((record: Device) => {
+    if (record.connStatus !== 'offline') return null;
+    const fallbackOfflineSeconds =
+      typeof record.offlineSeconds === 'number' && !Number.isNaN(record.offlineSeconds)
+        ? Math.max(0, Math.floor(record.offlineSeconds))
+        : null;
+    if (!record.offlineTime) return fallbackOfflineSeconds;
+    const offlineAt = dayjs(record.offlineTime);
+    if (!offlineAt.isValid()) return fallbackOfflineSeconds;
+    return Math.max(0, dayjs().diff(offlineAt, 'second'));
+  }, []);
+
   // 状态值渲染辅助
   const fmtStatus = useCallback(
     (value: string | number | boolean | undefined | null, map: Record<string, { label: string; color: string }>) => {
       const v = String(value ?? '');
-      const entry = map[v];
+      const entry = map[v] ?? map[v.trim().toLowerCase()];
       if (!entry) return v || '-';
       return <Tag color={entry.color}>{entry.label}</Tag>;
     },
     []
   );
+
+  const adminStateStatusMap = useMemo<Record<string, { label: string; color: string }>>(() => ({
+    '1': { label: t('status.locked'), color: 'warning' },
+    '0': { label: t('status.unlocked'), color: 'success' },
+    '2': { label: t('status.unlocked'), color: 'success' },
+    '3': { label: t('status.shuttingDown'), color: 'error' },
+    true: { label: t('status.locked'), color: 'warning' },
+    false: { label: t('status.unlocked'), color: 'success' },
+    enabled: { label: t('status.locked'), color: 'warning' },
+    disabled: { label: t('status.unlocked'), color: 'success' },
+    locked: { label: t('status.locked'), color: 'warning' },
+    unlocked: { label: t('status.unlocked'), color: 'success' },
+    shuttingdown: { label: t('status.shuttingDown'), color: 'error' },
+    'shutting down': { label: t('status.shuttingDown'), color: 'error' },
+  }), [t]);
+
+  const adminStateLabelOf = useCallback((value: string | number | boolean | undefined | null) => {
+    const raw = String(value ?? '').trim();
+    if (!raw) return '-';
+    return adminStateStatusMap[raw]?.label ?? adminStateStatusMap[raw.toLowerCase()]?.label ?? raw;
+  }, [adminStateStatusMap]);
 
   // ── 多小区/多连接状态渲染辅助 ──
   // 原始 JSP: 逗号分隔 "on,off,on" / "1,0,1" 表示多小区状态
@@ -1121,7 +1222,7 @@ export default function DeviceList() {
   // 此前误用 cell_status==='normal' 当激活，导致在线设备因小区 inactive 显示未激活。
   //
   // ™ 判定口径由 frontend-core/utils/activationStatus.ts 统一控管——
-  // 三皮肤(webcode / webcode-v2 / webcode-v3) + 列表/详情头/v2 KV/v3 KV 全调同一函数，
+  // V1 列表与详情统一调用同一函数，
   // 在上层各自渲染 Tag/文本。修改判定请只改 utility。
   const renderActivationStatus = useCallback((opState: string | undefined | null) => {
     const status = activationStatusOf(opState);
@@ -1239,12 +1340,20 @@ export default function DeviceList() {
           const colorMap: Record<string, string> = { eNB: 'blue', gNB: 'green', GSM: 'orange' };
           // issue #223: 列文案与「基站制式」筛选下拉同源——走 network_type 字典
           // value→label 映射（与回收站统一），不再直接显示原始 eNB/gNB。
-          const label = resolveNetworkTypeLabel(record.networkType, networkTypeDict?.sysDictionaryDetails);
+          const label = resolveNetworkTypeLabel(record.networkType, networkTypeDict?.sysDictionaryDetails, appLocale);
           return <Tag color={colorMap[record.networkType] ?? 'default'}>{label}</Tag>;
         },
       },
       // 产品名称（= device.model_name，inform 命中产品后回填 product.Name）显示在产品类型前面。
-      { key: 'deviceModel', title: t('device.productName'), dataIndex: 'deviceModel', width: 120, ellipsis: true, group: 'common' },
+      {
+        key: 'deviceModel',
+        title: t('device.productName'),
+        dataIndex: 'deviceModel',
+        width: 120,
+        ellipsis: true,
+        group: 'common',
+        render: (_val, record) => localizeDeviceProductName(record.deviceModel, appLocale),
+      },
       {
         key: 'productClass',
         title: t('device.productClass'),
@@ -1279,6 +1388,15 @@ export default function DeviceList() {
       { key: 'macAddress', title: t('device.macAddress'), dataIndex: 'macAddress', width: 150, mono: true, copyable: true, group: 'common' },
       { key: 'groupName', title: t('device.groupName'), dataIndex: 'groupName', width: 120, group: 'common' },
       {
+        key: 'firstOnlineTime',
+        title: t('device.firstOnlineTime'),
+        dataIndex: 'firstOnlineTime',
+        width: 165,
+        hidden: true,
+        group: 'common',
+        render: (_val, record) => fmtTime(record.firstOnlineTime),
+      },
+      {
         key: 'onlineTime',
         title: t('device.onlineTime'),
         dataIndex: 'onlineTime',
@@ -1286,6 +1404,15 @@ export default function DeviceList() {
         hidden: true,
         group: 'common',
         render: (_val, record) => fmtTime(record.onlineTime),
+      },
+      {
+        key: 'lastOnlineTime',
+        title: t('device.lastOnline'),
+        dataIndex: 'lastOnlineTime',
+        width: 165,
+        hidden: true,
+        group: 'common',
+        render: (_val, record) => fmtTime(record.lastOnlineTime),
       },
       {
         key: 'offlineTime',
@@ -1297,13 +1424,22 @@ export default function DeviceList() {
         render: (_val, record) => fmtTime(record.offlineTime),
       },
       {
-        key: 'opState',
-        title: t('device.opState'),
-        dataIndex: 'opState',
-        width: 140,
+        key: 'onlineDuration',
+        title: t('device.onlineDuration'),
+        dataIndex: 'onlineDuration',
+        width: 120,
+        hidden: true,
         group: 'common',
-        // 激活状态 = 设备是否曾首次上线（op_state），与在线/小区状态正交。
-        render: (_val, record) => renderActivationStatus(record.opState),
+        render: (_val, record) => fmtDuration(onlineDurationOf(record)),
+      },
+      {
+        key: 'cumulativeOnlineDuration',
+        title: t('device.cumulativeOnlineDuration'),
+        dataIndex: 'cumulativeOnlineDuration',
+        width: 140,
+        hidden: true,
+        group: 'common',
+        render: (_val, record) => fmtDuration(cumulativeOnlineDurationOf(record)),
       },
       {
         key: 'offlineDuration',
@@ -1313,13 +1449,18 @@ export default function DeviceList() {
         render: (_val, record) => {
           // 仅离线设备显示
           if (record.connStatus !== 'offline') return '-';
-          return formatOfflineDuration(
-            t,
-            record.offlineDays,
-            record.offlineHours,
-            record.offlineMinutes
-          );
+          return formatOfflineDurationFromSeconds(t, offlineDurationOf(record));
         },
+      },
+      { key: 'upTime', title: t('device.upTime'), dataIndex: 'upTime', width: 120, hidden: true, group: 'common', render: (_val, record) => fmtDuration(record.upTime) },
+      {
+        key: 'opState',
+        title: t('device.opState'),
+        dataIndex: 'opState',
+        width: 140,
+        group: 'common',
+        // 激活状态 = 设备是否曾首次上线（op_state），与在线/小区状态正交。
+        render: (_val, record) => renderActivationStatus(record.opState),
       },
       {
         key: 'ueCount',
@@ -1354,7 +1495,7 @@ export default function DeviceList() {
         // 原始 JSP: 支持多小区 "on,off,on"，汇总 + [N/M] Popover
         render: (_val, record) => renderMultiCellStatus(
           record.rfStatus,
-          ['on', '1'],
+          ['on', '1', '3'],
           { on: t('status.rfOn'), off: t('status.rfOff'), title: t('device.multiCellStatus') },
           { on: 'success', off: 'error', mixed: 'warning' },
         ),
@@ -1384,43 +1525,6 @@ export default function DeviceList() {
             </Tag>
           );
         },
-      },
-      {
-        key: 'onlineDuration',
-        title: t('device.onlineDuration'),
-        dataIndex: 'onlineDuration',
-        width: 120,
-        hidden: true,
-        group: 'common',
-        render: (_val, record) => fmtDuration(onlineDurationOf(record)),
-      },
-      { key: 'upTime', title: t('device.upTime'), dataIndex: 'upTime', width: 120, hidden: true, group: 'common', render: (_val, record) => fmtDuration(record.upTime) },
-      {
-        key: 'firstOnlineTime',
-        title: t('device.firstOnlineTime'),
-        dataIndex: 'firstOnlineTime',
-        width: 165,
-        hidden: true,
-        group: 'common',
-        render: (_val, record) => fmtTime(record.firstOnlineTime),
-      },
-      {
-        key: 'lastInformTime',
-        title: t('device.lastInformTime'),
-        dataIndex: 'lastInformTime',
-        width: 165,
-        hidden: true,
-        group: 'common',
-        render: (_val, record) => fmtTime(record.lastInformTime),
-      },
-      {
-        key: 'lastOnlineTime',
-        title: t('device.lastOnline'),
-        dataIndex: 'lastOnlineTime',
-        width: 165,
-        hidden: true,
-        group: 'common',
-        render: (_val, record) => fmtTime(record.lastOnlineTime),
       },
       {
         key: 'siteName',
@@ -1625,12 +1729,7 @@ export default function DeviceList() {
         width: 120,
         hidden: true,
         group: 'common',
-        // 原始 gNB JSP: 1→Locked, 2→Unlocked, 3→ShuttingDown
-        render: (_val, record) => fmtStatus(record.adminState, {
-          '1': { label: 'Locked', color: 'warning' },
-          '2': { label: 'Unlocked', color: 'success' },
-          '3': { label: 'ShuttingDown', color: 'error' },
-        }),
+        render: (_val, record) => fmtStatus(record.adminState, adminStateStatusMap),
       },
       { key: 'ipsecAddr', title: t('device.ipsecAddr'), dataIndex: 'ipsecAddr', width: 140, hidden: true, mono: true, group: 'common' },
       {
@@ -1662,7 +1761,7 @@ export default function DeviceList() {
 
     ],
     // remarkHeaderRender 暂从 dep 列表移除：remark 列定义已注释，恢复时同步加回。
-    [navigate, openDeviceDetail, prefetchDeviceDetailEntry, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, renderActivationStatus, message, downloadStationLog, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails, editingInstallAddressId, editingInstallAddressValue, savingInstallAddressId, saveInstallAddressEdit, cancelInstallAddressEdit, startInstallAddressEdit]
+    [navigate, openDeviceDetail, prefetchDeviceDetailEntry, t, fmtTime, fmtDuration, fmtStatus, adminStateStatusMap, renderMultiCellStatus, renderActivationStatus, message, downloadStationLog, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails, editingInstallAddressId, editingInstallAddressValue, savingInstallAddressId, saveInstallAddressEdit, cancelInstallAddressEdit, startInstallAddressEdit]
   );
 
   // ─── 列表导出(用户决策 2026-06-02) ──────────────────────────────────────
@@ -1684,15 +1783,15 @@ export default function DeviceList() {
           return fmtTime(record.offlineTime);
         case 'firstOnlineTime':
           return fmtTime(record.firstOnlineTime);
-        case 'lastInformTime':
-          return fmtTime(record.lastInformTime);
         case 'lastOnlineTime':
           return fmtTime(record.lastOnlineTime);
         case 'onlineDuration':
           return fmtDuration(onlineDurationOf(record));
+        case 'cumulativeOnlineDuration':
+          return fmtDuration(cumulativeOnlineDurationOf(record));
         case 'offlineDuration':
           return record.connStatus === 'offline'
-            ? offlineDurationText(t, record.offlineDays, record.offlineHours, record.offlineMinutes)
+            ? offlineDurationTextFromSeconds(t, offlineDurationOf(record))
             : '-';
         case 'halobFlag':
           return record.halobFlag == null
@@ -1701,8 +1800,7 @@ export default function DeviceList() {
               ? t('status.enabled')
               : t('status.disabled');
         case 'adminState': {
-          const m: Record<string, string> = { '1': 'Locked', '2': 'Unlocked', '3': 'ShuttingDown' };
-          return record.adminState != null ? (m[String(record.adminState)] ?? String(record.adminState)) : '-';
+          return adminStateLabelOf(record.adminState);
         }
         case 'ueCount': {
           const v = record.ueCount;
@@ -1721,7 +1819,7 @@ export default function DeviceList() {
         }
       }
     },
-    [appLocale, mapConnStatus, getSeverityLabel, fmtTime, fmtDuration, onlineDurationOf, opStateDict?.sysDictionaryDetails, t]
+    [adminStateLabelOf, appLocale, mapConnStatus, getSeverityLabel, fmtTime, fmtDuration, onlineDurationOf, cumulativeOnlineDurationOf, offlineDurationOf, opStateDict?.sysDictionaryDetails, t]
   );
 
   // 按当前筛选条件并发分页拉取全部命中数据(不受列表当前页/页大小限制)。

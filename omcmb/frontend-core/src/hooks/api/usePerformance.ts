@@ -1,13 +1,26 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { PerformanceThreshold, AggregatedCounterQuery, KPICalculationRequest } from '../../types/performance';
 import type { PageRequest } from '../../types/pagination';
+import type { Locale } from '../../types/common';
 import { performanceService } from '../../mock/services/performanceService';
 import { pmApi } from '../../services/api/pmApi';
 import { useMock } from '../../services/apiSwitch';
+import { useAppStore } from '../../store/appStore';
 
-export function useKPIList(params: { keyword?: string } & PageRequest) {
+type KPIListParams = { keyword?: string } & PageRequest;
+
+export const performanceKpiQueryKeys = {
+  list: (params: KPIListParams, locale: Locale) =>
+    ['performance', 'kpis', params, locale] as const,
+  all: (locale: Locale) => ['performance', 'kpis', 'all', locale] as const,
+  candidates: (deviceType: string | undefined, includeCounters: boolean, locale: Locale) =>
+    ['performance', 'indicator-candidates', deviceType, { includeCounters }, locale] as const,
+};
+
+export function useKPIList(params: KPIListParams) {
+  const locale = useAppStore((s) => s.locale);
   return useQuery({
-    queryKey: ['performance', 'kpis', params],
+    queryKey: performanceKpiQueryKeys.list(params, locale),
     queryFn: () =>
       useMock ? performanceService.getKPIs(params) : pmApi.getKPIs(params),
     staleTime: 5 * 60 * 1000,
@@ -15,8 +28,9 @@ export function useKPIList(params: { keyword?: string } & PageRequest) {
 }
 
 export function useAllKPIs() {
+  const locale = useAppStore((s) => s.locale);
   return useQuery({
-    queryKey: ['performance', 'kpis', 'all'],
+    queryKey: performanceKpiQueryKeys.all(locale),
     queryFn: () =>
       useMock ? performanceService.getAllKPIs() : pmApi.getAllKPIs(),
     staleTime: 10 * 60 * 1000,
@@ -30,8 +44,9 @@ export function useIndicatorCandidates(
   opts?: { includeCounters?: boolean }
 ) {
   const includeCounters = opts?.includeCounters ?? true;
+  const locale = useAppStore((s) => s.locale);
   return useQuery({
-    queryKey: ['performance', 'indicator-candidates', deviceType, { includeCounters }],
+    queryKey: performanceKpiQueryKeys.candidates(deviceType, includeCounters, locale),
     queryFn: async () => {
       if (useMock) {
         // Mock 模式退化：把 mock KPI 列表映射为候选（无 counter 区分，统一当 KPI）。

@@ -107,8 +107,8 @@
   <group id="bsc-bts-handover" titleZh="切换配置" titleEn="Handover">
     <param name="handover" titleZh="切换开关" titleEn="handover"
            standardPath="DeviceGSM.Bts.{i}.handover" type="enum">
-      <option value="Allow"/>
-      <option value="Forbid"/>
+      <option value="1" label="Allow"/>
+      <option value="0" label="Forbid"/>
     </param>
     <param name="HandoverAlgorithm" titleZh="切换算法版本" titleEn="HandoverAlgorithm"
            standardPath="DeviceGSM.Bts.{i}.HandoverAlgorithm" type="enum">
@@ -195,24 +195,101 @@
   <group id="bsc-bts-neighbor4g" titleZh="4G 邻区" titleEn="4G Neighbor"
          multiInstance="true" maxInstances="32"
          objectPath="DeviceGSM.Bts.{i}.Neighbor4G.{i}.">
-    <param name="earfcn"    titleZh="EARFCN"    titleEn="earfcn"    leaf="earfcn"/>
-    <param name="thresh-hi" titleZh="高门限"     titleEn="thresh-hi" leaf="thresh-hi"/>
-    <param name="thresh-lo" titleZh="低门限"     titleEn="thresh-lo" leaf="thresh-lo"/>
-    <param name="prio"      titleZh="优先级"     titleEn="prio"      leaf="prio"/>
-    <param name="qrxlv"     titleZh="QRxLev 门限" titleEn="qrxlv"    leaf="qrxlv"/>
-    <param name="meas"      titleZh="测量带宽"   titleEn="meas"      leaf="meas"/>
+    <param name="earfcn"    titleZh="EARFCN"    titleEn="earfcn"    leaf="earfcn"
+           type="unsignedInt" required="true" minValue="0" maxValue="65535"/>
+    <param name="thresh-hi" titleZh="高门限"     titleEn="thresh-hi" leaf="thresh-hi"
+           type="unsignedInt" required="true" minValue="0" maxValue="31" defaultValue="5"/>
+    <param name="thresh-lo" titleZh="低门限"     titleEn="thresh-lo" leaf="thresh-lo"
+           type="unsignedInt" required="true" minValue="0" maxValue="32" defaultValue="5"/>
+    <param name="prio"      titleZh="优先级"     titleEn="prio"      leaf="prio"
+           type="unsignedInt" required="true" minValue="0" maxValue="8" defaultValue="5"/>
+    <param name="qrxlv"     titleZh="QRxLev 门限" titleEn="qrxlv"    leaf="qrxlv"
+           type="unsignedInt" required="true" minValue="0" maxValue="32" defaultValue="5"/>
+    <param name="meas"      titleZh="测量带宽"   titleEn="meas"      leaf="meas"
+           type="unsignedInt" required="true" minValue="0" maxValue="8" defaultValue="5"/>
   </group>
 
   <!-- ============ 4. 2G Neighbor 多实例表（每 BTS 下 N 条 2G 邻区） ============ -->
   <group id="bsc-bts-neighbor2g" titleZh="2G 邻区" titleEn="2G Neighbor"
          multiInstance="true" maxInstances="64"
          objectPath="DeviceGSM.Bts.{i}.Neighbor2G.{i}.">
-    <param name="mcc"   titleZh="MCC"   titleEn="mcc"   leaf="mcc"/>
-    <param name="mnc"   titleZh="MNC"   titleEn="mnc"   leaf="mnc"/>
-    <param name="lac"   titleZh="LAC"   titleEn="lac"   leaf="lac"/>
-    <param name="ci"    titleZh="CI"    titleEn="ci"    leaf="ci"/>
-    <param name="arfcn" titleZh="ARFCN" titleEn="arfcn" leaf="arfcn"/>
-    <param name="bsic"  titleZh="BSIC"  titleEn="bsic"  leaf="bsic"/>
+    <param name="mcc"   titleZh="MCC"   titleEn="mcc"   leaf="mcc"
+           type="unsignedInt" required="true" minValue="0" maxValue="999"/>
+    <param name="mnc"   titleZh="MNC"   titleEn="mnc"   leaf="mnc"
+           type="unsignedInt" required="true" minValue="0" maxValue="999"/>
+    <param name="lac"   titleZh="LAC"   titleEn="lac"   leaf="lac"
+           type="unsignedInt" required="true" minValue="0" maxValue="65535"/>
+    <param name="ci"    titleZh="CI"    titleEn="ci"    leaf="ci"
+           type="unsignedInt" required="true" minValue="0" maxValue="65535"/>
+    <param name="arfcn" titleZh="ARFCN" titleEn="arfcn" leaf="arfcn"
+           type="unsignedInt" required="true" minValue="0" maxValue="1023"/>
+    <param name="bsic"  titleZh="BSIC"  titleEn="bsic"  leaf="bsic" type="enum">
+      <option value="0"/>
+      <option value="1"/>
+      <option value="2"/>
+      <option value="3"/>
+      <option value="4"/>
+      <option value="5"/>
+      <option value="6"/>
+      <option value="7"/>
+      <option value="8"/>
+      <option value="9"/>
+      <option value="10"/>
+      <option value="11"/>
+      <option value="12"/>
+      <option value="13"/>
+      <option value="14"/>
+      <option value="15"/>
+      <option value="16"/>
+      <option value="17"/>
+      <option value="18"/>
+      <option value="19"/>
+      <option value="20"/>
+      <option value="21"/>
+      <option value="22"/>
+      <option value="23"/>
+      <option value="24"/>
+      <option value="25"/>
+      <option value="26"/>
+      <option value="27"/>
+      <option value="28"/>
+      <option value="29"/>
+      <option value="30"/>
+      <option value="31"/>
+      <option value="32"/>
+      <option value="33"/>
+      <option value="34"/>
+      <option value="35"/>
+      <option value="36"/>
+      <option value="37"/>
+      <option value="38"/>
+      <option value="39"/>
+      <option value="40"/>
+      <option value="41"/>
+      <option value="42"/>
+      <option value="43"/>
+      <option value="44"/>
+      <option value="45"/>
+      <option value="46"/>
+      <option value="47"/>
+      <option value="48"/>
+      <option value="49"/>
+      <option value="50"/>
+      <option value="51"/>
+      <option value="52"/>
+      <option value="53"/>
+      <option value="54"/>
+      <option value="55"/>
+      <option value="56"/>
+      <option value="57"/>
+      <option value="58"/>
+      <option value="59"/>
+      <option value="60"/>
+      <option value="61"/>
+      <option value="62"/>
+      <option value="63"/>
+      <option value="any"/>
+    </param>
   </group>
 
   <!-- ============ 5. Trx 多实例表（每 BTS 下 N 个 TRX） ============ -->

@@ -1,0 +1,53 @@
+{
+  "generated_at": "2026-07-04T10:45:31+08:00",
+  "dsn": "postgres://omcgo:omcgo123@localhost:5432/omcgo?sslmode=disable",
+  "metrics": [
+    {
+      "name": "active_sub_field_links",
+      "value": 1619,
+      "note": "active mml_command_sub_fields rows joined to active commands"
+    },
+    {
+      "name": "active_commands_with_params",
+      "value": 116,
+      "note": "active commands that have at least one parameter binding"
+    },
+    {
+      "name": "unique_standard_paths_in_mml",
+      "value": 904,
+      "note": "unique standard_params referenced by MML config"
+    },
+    {
+      "name": "same_command_same_path_duplicate_groups",
+      "value": 0,
+      "note": "hard duplicate; should be 0 because uq_command_standard_path exists"
+    },
+    {
+      "name": "same_command_same_mml_code_duplicate_groups",
+      "value": 0,
+      "note": "hard duplicate; should be 0 because uq_command_mml_code exists"
+    },
+    {
+      "name": "standard_paths_used_by_multiple_commands",
+      "value": 715,
+      "note": "cross-command reuse; not an insertion duplicate by itself"
+    },
+    {
+      "name": "same_operation_cross_command_duplicate_groups",
+      "value": 0,
+      "note": "same path appears in multiple commands with the same operation_type; review list"
+    },
+    {
+      "name": "commands_with_duplicate_target_paths_json",
+      "value": 0,
+      "note": "duplicate path inside mml_commands.target_paths JSON array"
+    }
+  ],
+  "outputs": [
+    "data/model-library/mml-duplicate-standard-paths-cross-command-20260704.csv",
+    "data/model-library/mml-duplicate-standard-paths-same-operation-20260704.csv",
+    "data/model-library/mml-duplicate-standard-paths-same-command-20260704.csv",
+    "data/model-library/mml-duplicate-mml-code-same-command-20260704.csv",
+    "data/model-library/mml-duplicate-target-paths-json-20260704.csv"
+  ]
+}

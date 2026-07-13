@@ -175,7 +175,7 @@ let taskTypes: UnifiedFileTransferTaskType[] = [
     updatedAt: new Date(now - 4 * 60 * 60 * 1000).toISOString(),
   },
   {
-    // qa-614 c6 #365 #373：2G(GSM) 基站软件升级 mock 模板，使 mock 模式三皮肤
+    // qa-614 c6 #365 #373：2G(GSM) 基站软件升级 mock 模板，使 mock 模式
     // 分类列表也出现『2G升级』，与真实后端 builtInTaskTypes() 的 GSM_IMG_UPGRADE 对齐。
     typeCode: 'GSM_IMG_UPGRADE',
     category: 'gsm_upgrade',

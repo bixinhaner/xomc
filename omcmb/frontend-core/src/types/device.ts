@@ -68,6 +68,8 @@ export interface BatchImportRequest {
 export interface BatchImportRowError {
   row: number;
   sn?: string;
+  /** 机器可读错误码（如 "device_not_found"），前端据此查 i18n；为空时降级展示 reason。 */
+  errorCode?: string;
   reason: string;
 }
 
@@ -76,6 +78,42 @@ export interface BatchImportResponse {
   succeeded: number;
   failed: number;
   errors: BatchImportRowError[];
+}
+
+// ─── 批量预登记 ──────────────────────────────────────────────────────────────
+
+/** 单行预登记请求（对应后端 BatchPreRegisterRow）。 */
+export interface BatchPreRegisterDevice {
+  serial_number: string;
+  device_name?: string;
+  remark?: string;
+  /** 运营商：cmcc / ctcc / cucc。为空时后端从 SN 前6位推断 OUI → CarrierRegistry。 */
+  carrier?: 'cmcc' | 'ctcc' | 'cucc';
+  /** 制式：lte / nr。为空时后端默认 lte。 */
+  technology?: 'lte' | 'nr';
+  /** OUI（可选）。为空时后端取 SN 前6位。 */
+  oui?: string;
+}
+
+export interface BatchPreRegisterRequest {
+  devices: BatchPreRegisterDevice[];
+}
+
+/** 单行预登记结果（后端 BatchPreRegisterRowResult）。 */
+export interface BatchPreRegisterRowResult {
+  row: number;
+  sn: string;
+  action?: 'created' | 'updated' | 'skipped';
+  error_code?: string;
+  reason?: string;
+}
+
+export interface BatchPreRegisterResponse {
+  total: number;
+  created: number;
+  updated: number;
+  failed: number;
+  errors: BatchPreRegisterRowResult[];
 }
 
 export interface Device {
@@ -126,9 +164,9 @@ export interface Device {
   groupName: string;
   // T-0027 D9：分组归属来源（PRD §12.6 跨模块联合变更）
   // backend 通过 device_group_members.source_type 列传出（snake_case → camelCase 自动）
-  // 'manual' = 用户手工指派；'rule' = 历史 device_rules 引擎遗留（device_rules 已下线）
+  // 'manual' = 用户手工指派；'rule' = 规则匹配；'auto' = 系统默认组视图/自动归属
   // optional 因后端列表 API 尚未全部 JOIN device_group_members 暴露此字段
-  sourceType?: 'manual' | 'rule';
+  sourceType?: 'manual' | 'rule' | 'auto';
   onlineTime: string;
   offlineTime: string;
   // T-XXX (Phase 0)：后端 SQL 派生秒数（NULL 表示设备从未上线/无法计算）。
@@ -287,9 +325,11 @@ export interface DeviceGroup {
    * 把原规则回填到表单 — 缺失就是 bug 入口（用户改"匹配规则"但表单显示空）。
    */
   matchingMode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber';
+  sourceGroupId?: string;
   nameRuleList?: NameFilterItem[];
   lacList?: number[];
   tacList?: number[];
+  serialNumberList?: string[];
 }
 
 export interface DeviceFilter {

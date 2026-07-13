@@ -799,12 +799,31 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 		if err != nil {
 			log.Warn("get task by cwmp_id", zap.Error(err), zap.String("cwmp_id", cwmpID))
 		}
+		if taskItem != nil && !rpcResponseMatchesTask(method, taskItem.Method) {
+			log.Warn("RPC response cwmp_id matched task with different method; falling back to session.last_task_id",
+				zap.String("device_sn", deviceSN),
+				zap.String("response_method", string(method)),
+				zap.String("task_method", taskItem.Method),
+				zap.String("cpe_cwmp_id", cwmpID),
+				zap.String("acs_cwmp_id", session.LastTaskCWMPID),
+				zap.String("matched_task_id", taskItem.ID),
+				zap.String("last_task_id", session.LastTaskID))
+			taskItem = nil
+		}
 	}
 	if taskItem == nil && session.LastTaskID != "" {
 		t, err := h.taskService.GetTask(r.Context(), session.LastTaskID)
 		if err != nil {
 			log.Warn("get task by session.last_task_id (cwmp_id missing/mismatch)",
 				zap.Error(err),
+				zap.String("cpe_cwmp_id", cwmpID),
+				zap.String("acs_cwmp_id", session.LastTaskCWMPID),
+				zap.String("last_task_id", session.LastTaskID))
+		} else if t != nil && !rpcResponseMatchesTask(method, t.Method) {
+			log.Warn("RPC response session.last_task_id has different method; leave response unassociated",
+				zap.String("device_sn", deviceSN),
+				zap.String("response_method", string(method)),
+				zap.String("task_method", t.Method),
 				zap.String("cpe_cwmp_id", cwmpID),
 				zap.String("acs_cwmp_id", session.LastTaskCWMPID),
 				zap.String("last_task_id", session.LastTaskID))
@@ -898,7 +917,11 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	}
 
 	// 发布 RPC 响应事件到开通引擎（包含原始 body 用于 GPN/GPV 处理）。
-	h.publishRPCResponseEvent(r.Context(), deviceSN, method, body, session.LastCommandParams, taskItem, log)
+	eventParams := session.LastCommandParams
+	if taskItem != nil && len(taskItem.Params) > 0 {
+		eventParams = taskItem.Params
+	}
+	h.publishRPCResponseEvent(r.Context(), deviceSN, method, body, eventParams, taskItem, log)
 
 	// 在下发下一条命令前检查单会话 RPC 上限。
 	if h.sessionRPCLimitReached(session) {
@@ -1335,6 +1358,38 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 	h.completeSession(r.Context(), session)
 	w.Header().Set("Connection", "close")
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func rpcResponseMatchesTask(responseMethod soap.RPCMethod, taskMethod string) bool {
+	if taskMethod == "" {
+		return false
+	}
+	switch responseMethod {
+	case soap.MethodGetParameterValuesResp:
+		return taskMethod == string(soap.MethodGetParameterValues)
+	case soap.MethodSetParameterValuesResp:
+		return taskMethod == string(soap.MethodSetParameterValues)
+	case soap.MethodDownloadResp:
+		return taskMethod == string(soap.MethodDownload)
+	case soap.MethodUploadResp:
+		return taskMethod == string(soap.MethodUpload)
+	case soap.MethodGetParameterNamesResp:
+		return taskMethod == string(soap.MethodGetParameterNames)
+	case soap.MethodAddObjectResp:
+		return taskMethod == string(soap.MethodAddObject)
+	case soap.MethodDeleteObjectResp:
+		return taskMethod == string(soap.MethodDeleteObject)
+	case soap.MethodRebootResp:
+		return taskMethod == string(soap.MethodReboot)
+	case soap.MethodFactoryResetResp:
+		return taskMethod == string(soap.MethodFactoryReset)
+	case soap.MethodGetParameterAttributesResp:
+		return taskMethod == string(soap.MethodGetParameterAttributes)
+	case soap.MethodSetParameterAttributesResp:
+		return taskMethod == string(soap.MethodSetParameterAttributes)
+	default:
+		return false
+	}
 }
 
 // tryRecoverGPVFault 在参数同步 GPV 收到 SOAP Fault 时执行自愈：从原批次剔除坏 path，

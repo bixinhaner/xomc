@@ -54,6 +54,9 @@ type Handler struct {
 	reloader    Reloader
 	deviceCache DeviceCacheInvalidator // T-0176-PR-D：BindOrphan 后失效 SN cache（nil = 禁用）
 	logger      *zap.Logger
+	// routeInvalidator 在 product KPI 路由字段实际变化后推进 KPI route version。
+	// nil 仅用于未接完整 provider 的单元测试/降级场景。
+	routeInvalidator RouteInvalidator
 	// 2026-05-28 异步 rematch per-admin 锁(优先 Redis,兜底 sync.Map)。
 	//
 	// 设计:
@@ -114,6 +117,11 @@ func (h *Handler) SetDeviceCacheInvalidator(c DeviceCacheInvalidator) {
 	h.deviceCache = c
 }
 
+// SetRouteInvalidator 注入 KPI route 失效器。
+func (h *Handler) SetRouteInvalidator(invalidator RouteInvalidator) {
+	h.routeInvalidator = invalidator
+}
+
 // SetRematchRedis 注入 Redis 客户端用于 per-admin rematch 锁(跨进程互斥)。
 // nil 时退化为 sync.Map 进程内排重(开发/单测场景)。
 func (h *Handler) SetRematchRedis(rc redis.UniversalClient) {
@@ -132,23 +140,34 @@ func (h *Handler) invalidateDeviceCacheBySN(ctx context.Context, sn string) {
 
 // RegisterRoutes 挂载 /api/v1/products/* 到给定 RouterGroup。
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
+	h.RegisterReadRoutes(rg)
+	h.RegisterWriteRoutes(rg)
+}
+
+// RegisterReadRoutes 挂载产品中心的只读接口，供已登录用户读取基础目录数据。
+func (h *Handler) RegisterReadRoutes(rg *gin.RouterGroup) {
 	g := rg.Group("/products")
 	// 集中操作（无 :id）放最前以避免被 :id 路由吞掉
 	g.GET("", h.List)
-	g.POST("", h.Create)
 	g.GET("/match", h.Match)
 	g.GET("/match-order", h.MatchOrder)
 	g.GET("/orphan-devices", h.ListOrphan)
-	g.POST("/orphan-devices/rematch", h.RematchOrphan)
-	g.PUT("/orphan-devices/:deviceId/bind", h.BindOrphan)
-	g.POST("/cache/refresh", h.CacheRefresh)
-	g.POST("/import-directory", h.ImportDirectory)
 	// 枚举字典（产品表单下拉框用）
 	g.GET("/indicator-platforms", h.ListIndicatorPlatforms)
 	g.GET("/alarm-ne-types", h.ListAlarmNeTypes)
 
 	// 单产品
 	g.GET("/:id", h.Get)
+}
+
+// RegisterWriteRoutes 挂载产品中心的写接口，仅供超管管理。
+func (h *Handler) RegisterWriteRoutes(rg *gin.RouterGroup) {
+	g := rg.Group("/products")
+	g.POST("", h.Create)
+	g.POST("/orphan-devices/rematch", h.RematchOrphan)
+	g.PUT("/orphan-devices/:deviceId/bind", h.BindOrphan)
+	g.POST("/cache/refresh", h.CacheRefresh)
+	g.POST("/import-directory", h.ImportDirectory)
 	g.PUT("/:id", h.Update)
 	g.DELETE("/:id", h.Delete)
 	g.DELETE("/:id/discovered", h.ResetDiscovered)
@@ -434,12 +453,24 @@ func (h *Handler) Update(c *gin.Context) {
 		}
 		in.ParamModelID = &pmid
 	}
+	before, err := h.repo.GetProductByID(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if before == nil {
+		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
+		return
+	}
 	p, err := h.repo.UpdateProduct(c.Request.Context(), id, in)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 	h.refreshAsync(c.Request.Context(), "update-product")
+	if productRouteFieldsChanged(before, p) {
+		h.invalidateRouteCache(c.Request.Context(), RouteInvalidationTriggerProductWrite)
+	}
 	// Update 不动 patterns，回读一次以便返回值与 List 视图保持一致
 	curPatterns, _ := h.repo.ListPatternsByProduct(c.Request.Context(), id)
 	pcStrings := make([]string, 0, len(curPatterns))
@@ -1095,16 +1126,39 @@ func (h *Handler) ImportDirectory(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusServiceUnavailable, errors.New("dictloader registry not wired"))
 		return
 	}
+	before, err := h.repo.ListRouteFieldsByProductName(c.Request.Context())
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
 	if err := h.reloader.ReloadOne(c.Request.Context(), "product"); err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
+	productRegistryRefreshed := false
 	if h.registry != nil {
 		if err := h.registry.Refresh(c.Request.Context()); err != nil {
 			h.logger.Warn("post-reload product registry refresh failed", zap.Error(err))
+		} else {
+			productRegistryRefreshed = true
 		}
 	}
-	response.OK(c, gin.H{"reloaded": "product"})
+	routeFieldsChanged := false
+	after, err := h.repo.ListRouteFieldsByProductName(c.Request.Context())
+	if err != nil {
+		h.logger.Warn("list product route fields after reload failed; skip KPI route invalidation",
+			zap.Error(err))
+	} else {
+		routeFieldsChanged = RouteFieldsMapChanged(before, after)
+		if routeFieldsChanged && productRegistryRefreshed {
+			h.invalidateRouteCache(c.Request.Context(), RouteInvalidationTriggerProductReload)
+		}
+	}
+	response.OK(c, gin.H{
+		"reloaded":                   "product",
+		"product_registry_refreshed": productRegistryRefreshed,
+		"kpi_route_invalidated":      routeFieldsChanged && productRegistryRefreshed,
+	})
 }
 
 // ── Enums (form dropdowns) ──────────────────────────────────────────
@@ -1150,6 +1204,15 @@ func (h *Handler) refreshAsync(ctx context.Context, op string) {
 	if err := h.registry.Refresh(ctx); err != nil {
 		h.logger.Warn("product registry refresh after write failed",
 			zap.String("op", op), zap.Error(err))
+	}
+}
+
+func (h *Handler) invalidateRouteCache(ctx context.Context, trigger RouteInvalidationTrigger) {
+	if h.routeInvalidator == nil {
+		return
+	}
+	if err := h.routeInvalidator(ctx, trigger); err != nil {
+		logRouteInvalidationFailure(ctx, h.logger, trigger, err)
 	}
 }
 

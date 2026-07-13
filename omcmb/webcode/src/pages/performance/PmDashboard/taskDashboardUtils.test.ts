@@ -17,7 +17,7 @@ function row(p: Partial<AdhocResultRow>): AdhocResultRow {
     metricPath: p.metricPath ?? 'M1',
     displayName: p.displayName,
     metricType: 'counter',
-    metricValue: p.metricValue ?? 0,
+    metricValue: p.metricValue === undefined ? 0 : p.metricValue,
     statisType: 'sum',
     granularity: p.granularity ?? 'hourly',
     time: p.startTime ?? '2026-05-30T00:00:00Z',
@@ -149,6 +149,27 @@ describe('buildMetricCharts — 转置', () => {
     const byKey = Object.fromEntries(charts[0].series.map((s) => [s.key, s.values]));
     expect(byKey['SN-A']).toEqual([1, 2]);
     expect(byKey['SN-B']).toEqual([5, '-']);
+  });
+
+  it("NULL 缺值结果保留桶和系列，单元补 '-' 断点", () => {
+    const rows = [
+      row({ metricPath: 'M1', deviceSn: 'SN-A', startTime: 't0', metricValue: null }),
+      row({ metricPath: 'M1', deviceSn: 'SN-A', startTime: 't1', metricValue: 2 }),
+    ];
+    const charts = buildMetricCharts(rows, 'device', 'hourly');
+    expect(charts[0].buckets).toEqual(['t0', 't1']);
+    expect(charts[0].series[0].values).toEqual(['-', 2]);
+  });
+
+  it("NaN/Infinity 缺值结果保留桶和系列，单元补 '-' 断点", () => {
+    const rows = [
+      row({ metricPath: 'M1', deviceSn: 'SN-A', startTime: 't0', metricValue: Number.NaN }),
+      row({ metricPath: 'M1', deviceSn: 'SN-A', startTime: 't1', metricValue: Number.POSITIVE_INFINITY }),
+      row({ metricPath: 'M1', deviceSn: 'SN-A', startTime: 't2', metricValue: 2 }),
+    ];
+    const charts = buildMetricCharts(rows, 'device', 'hourly');
+    expect(charts[0].buckets).toEqual(['t0', 't1', 't2']);
+    expect(charts[0].series[0].values).toEqual(['-', '-', 2]);
   });
 
   it('桶按 startTime 升序去重', () => {

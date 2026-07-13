@@ -15,7 +15,8 @@
  */
 
 import type { AggregatedRow } from '@core/types/pmDashboard';
-import { deviceSnTail } from '@core/types/pmObject';
+import { buildDeviceSeriesName } from '@core/types/pmObject';
+import { isFinitePmMetricValue } from '@core/utils/pmMetricValue';
 import type { MetricChart, MetricSeries, MetricSeriesValue } from './taskDashboardUtils';
 
 export type { MetricChart, MetricSeries, MetricSeriesValue } from './taskDashboardUtils';
@@ -69,18 +70,18 @@ export function buildDeviceMetricCharts(
     const ldn = r.objectLdn ?? '';
     // 纯 fill_empty 占位行（无小区归属 + 无值）只用于对齐桶轴，不单独成线——
     // 否则按小区分线时这些无小区占位行会聚成一条空的「仅设备」兜底线（T-0193）。
-    if (!ldn && r.metricValue === null) return;
+    if (!ldn && r.metricValue === null && r.filled) return;
     const key = ldn ? `${sn}|${ldn}` : sn;
     let s = m.series.get(key);
     if (!s) {
-      // 系列名：有小区 → 「尾号 · 原始LDN」；无小区 → 仅尾号（兜底单线）。
-      const name = ldn ? `${deviceSnTail(sn) || sn} · ${ldn}` : deviceSnTail(sn) || sn;
+      // 系列名：有小区 → 「尾号 · 友好LDN」；无小区 → 仅尾号（兜底单线）。
+      const name = buildDeviceSeriesName(sn, ldn) || sn;
       s = { name, points: new Map() };
       m.series.set(key, s);
       m.seriesOrder.push(key);
     }
     // null（fill_empty / 缺采）不入点表 → 对齐时该桶补 '-' 断线；同 (系列, 桶) 多行取后到值。
-    if (r.metricValue !== null) {
+    if (isFinitePmMetricValue(r.metricValue)) {
       s.points.set(r.startTime, r.metricValue);
     }
   });

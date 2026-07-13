@@ -337,6 +337,9 @@ func TestDeviceWithInfoSelectColumns_AlarmAggregation(t *testing.T) {
 	cols := deviceWithInfoSelectColumns()
 	joined := strings.Join(cols, " || ")
 
+	assert.Contains(t, joined, "COALESCE(dgm.source_type, 'auto')", "无真实归属行的默认组视图必须派生为 auto")
+	assert.Contains(t, joined, "as source_type", "列表 DTO 必须暴露归属来源字段")
+
 	assert.Contains(t, joined, "CASE aa.top_sev", "告警级别列必须来自聚合派生 CASE")
 	assert.Contains(t, joined, "31001", "critical 需兼容 31001 编码")
 	assert.Contains(t, joined, "31002", "major 需兼容 31002 编码")
@@ -352,4 +355,25 @@ func TestDeviceWithInfoSelectColumns_AlarmAggregation(t *testing.T) {
 	assert.Contains(t, alarmsActiveAggJoin, "COUNT(*)")
 	assert.Contains(t, alarmsActiveAggJoin, "status <> 'cleared'")
 	assert.Contains(t, alarmsActiveAggJoin, "aa ON aa.device_id = d.id")
+}
+
+func TestBuildRecycleBinListBuilders_SearchIncludesMACInListAndCount(t *testing.T) {
+	search := "48:BF"
+	listBuilder, countBuilder := buildRecycleBinListBuilders(RecycleBinFilter{
+		Search: &search,
+	})
+
+	listSQL, listArgs, err := listBuilder.ToSql()
+	require.NoError(t, err)
+	countSQL, countArgs, err := countBuilder.ToSql()
+	require.NoError(t, err)
+
+	assert.Contains(t, listSQL, "d.serial_number ILIKE", "回收站搜索仍需支持 SN")
+	assert.Contains(t, listSQL, "d.site_name ILIKE", "回收站搜索仍需支持名称")
+	assert.Contains(t, listSQL, "di.mac ILIKE", "回收站搜索框承诺支持 MAC，应查询 device_info.mac")
+	assert.Contains(t, countSQL, "LEFT JOIN device_info di ON di.device_id = d.id",
+		"分页总数查询也必须 join device_info，否则 MAC 搜索下 count SQL 无法引用 di.mac")
+	assert.Contains(t, countSQL, "di.mac ILIKE", "分页总数口径必须与列表查询一致")
+	assert.Equal(t, []interface{}{"%48:BF%", "%48:BF%", "%48:BF%"}, listArgs)
+	assert.Equal(t, listArgs, countArgs)
 }

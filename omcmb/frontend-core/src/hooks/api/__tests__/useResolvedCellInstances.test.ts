@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveExistsVisibleInstances } from '../useResolvedCellInstances';
+import { resolveBscBtsInstances, resolveExistsVisibleInstances } from '../useResolvedCellInstances';
 
 // 与 hook 内一致的制式正则（LTE FAPService）。
 const LTE_FAP_INUSE_RE = /^Device\.Services\.FAPService\.(\d+)\.FAPControl\.LTE\.InUse$/i;
@@ -81,5 +81,27 @@ describe('#374 resolveExistsVisibleInstances（存在即可见、仅显式 InUse
     ];
     const got = resolveExistsVisibleInstances(params, [], LTE_FAP_INUSE_RE, FAP_INSTANCE_RE, 6);
     expect(got).toEqual([1, 2, 4]);
+  });
+});
+
+describe('resolveBscBtsInstances', () => {
+  it('BSC 快速设置优先按实际参数路径枚举 BTS，不把 currentInstances 兜底 1..256 当真实数量', () => {
+    const currentInstances = Array.from({ length: 256 }, (_, idx) => idx + 1);
+    const got = resolveBscBtsInstances(
+      [
+        { path: 'DeviceGSM.Bts.1.IpaUnitId' },
+        { path: 'DeviceGSM.Bts.1.CellId' },
+        { path: 'DeviceGSM.Bts.0.CellId' },
+      ],
+      currentInstances,
+    );
+
+    expect(got).toEqual([1]);
+  });
+
+  it('没有任何 BTS 参数时才回退 currentInstances，并过滤 0 号槽位', () => {
+    const got = resolveBscBtsInstances([], [0, 1, 2]);
+
+    expect(got).toEqual([1, 2]);
   });
 });

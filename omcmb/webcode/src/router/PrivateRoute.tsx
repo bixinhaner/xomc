@@ -16,7 +16,7 @@ interface PrivateRouteProps {
 //   - /403：未授权页本身
 //   - /login：在 routes 上层，本守卫不会经过；列出仅作文档
 //   - /notifications：通知中心（顶栏铃铛"查看全部"入口）—— 跨域功能，不挂菜单，
-//     与 v2/v3 暴露通知中心整页对齐（消息/模板/历史 tab）
+//     通知中心整页包含消息/模板/历史 tab。
 const ALWAYS_ALLOWED_PATHS = new Set<string>(['/dashboard', '/403', '/login', '/notifications']);
 
 // 错误页：未登录用户访问这些路径被弹到 /login 时，**不要**把它们当成
@@ -117,7 +117,7 @@ export default function PrivateRoute({
   //
   // 超管 / admin 整体放行（授权全量）：admin 是系统管理员，应能进所有业务路由，
   // 不受"菜单种子只覆盖部分路由"的限制。非 admin 角色仍按菜单门禁。
-  // 三皮肤一致：v2/v3 的 RouteGuard 同样对 admin bypass（见 frontend-core/utils/routeAccess）。
+  // admin bypass 口径见 frontend-core/utils/routeAccess。
   const isAdminLike =
     currentUser?.role === 'admin' || currentUser?.isSuperAdmin === true;
   if (isDynamicMenuEnabled() && menuLoaded && !isAdminLike) {

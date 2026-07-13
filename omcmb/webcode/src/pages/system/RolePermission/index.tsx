@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useMutation } from '@tanstack/react-query';
+import { useIntl } from 'react-intl';
 import {
   Alert,
   App,
@@ -45,7 +46,8 @@ import { useT } from '@/hooks/useT';
 import { adminApi } from '@core/services/api/adminApi';
 import { useMenuTree, useInvalidateUserMenus } from '@core/hooks/api/useMenus';
 import { fetchRoleMenuIds, setRoleMenus as apiSetRoleMenus } from '@core/services/api/menuApi';
-import type { Menu } from '@core/types/menu';
+import { resolveMenuLabel, type Menu } from '@core/types/menu';
+import { getI18nText, type Locale } from '@core/utils/i18nText';
 import { formatSystemTime } from '@core/utils/systemTime';
 import { UNASSIGNED_GROUP_ID } from '@core/utils/deviceGroupTargets';
 
@@ -91,6 +93,7 @@ const buildProductTypeOptions = (t: (id: string) => string) => [
 // 构建设备组树形数据（带筛选）
 const buildDeviceGroupTreeData = (
   groups: DeviceGroup[],
+  locale: Locale,
   networkTypeFilter?: string,
   productClassFilter?: string
 ): TreeDataNode[] => {
@@ -118,7 +121,7 @@ const buildDeviceGroupTreeData = (
         .filter((child) => child.parentId === root.id)
         .map((child) => ({
           key: child.id,
-          title: child.name,
+          title: getI18nText(child.nameI18n, locale, child.name),
         }));
 
         // 如果没有子节点且不是「未分组设备」虚拟节点，则不显示。
@@ -128,7 +131,7 @@ const buildDeviceGroupTreeData = (
 
       return {
         key: root.id,
-        title: root.name,
+        title: getI18nText(root.nameI18n, locale, root.name),
         children,
       };
     })
@@ -151,15 +154,15 @@ function isMenuNode(m: Menu): boolean {
 }
 
 /** 把后端菜单树转 antd TreeDataNode 树。叶子节点显式 isLeaf=true。 */
-function buildMenuPermissionTree(menus: Menu[]): TreeDataNode[] {
+function buildMenuPermissionTree(menus: Menu[], locale: string): TreeDataNode[] {
   const sortAndFilter = (list: Menu[]) =>
     [...list].filter(isMenuVisible).filter(isMenuNode).sort((a, b) => a.sortOrder - b.sortOrder);
   const walk = (list: Menu[]): TreeDataNode[] =>
     sortAndFilter(list).map((m) => {
       const childNodes = m.children?.length ? walk(m.children) : [];
       return childNodes.length > 0
-        ? { key: m.id, title: m.name, children: childNodes }
-        : { key: m.id, title: m.name, isLeaf: true };
+        ? { key: m.id, title: resolveMenuLabel(m, locale), children: childNodes }
+        : { key: m.id, title: resolveMenuLabel(m, locale), isLeaf: true };
     });
   return walk(menus);
 }
@@ -237,6 +240,8 @@ function buttonIdsUnderMenus(menus: Menu[], checkedMenuIds: Set<string>): string
 
 export default function RoleManagement() {
   const t = useT();
+  const { locale: intlLocale } = useIntl();
+  const locale: Locale = intlLocale === 'en-US' ? 'en-US' : 'zh-CN';
   const { modal, message } = App.useApp();
   const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [page, setPage] = useState(1);
@@ -286,8 +291,8 @@ export default function RoleManagement() {
 
   // 设备组树形数据（一级+二级节点，支持筛选）
   const deviceGroupTreeData = useMemo(
-    () => buildDeviceGroupTreeData(allDeviceGroups ?? [], deviceGroupNetworkType, deviceGroupProductClass),
-    [allDeviceGroups, deviceGroupNetworkType, deviceGroupProductClass]
+    () => buildDeviceGroupTreeData(allDeviceGroups ?? [], locale, deviceGroupNetworkType, deviceGroupProductClass),
+    [allDeviceGroups, locale, deviceGroupNetworkType, deviceGroupProductClass]
   );
 
   // 筛选后的二级节点ID列表
@@ -357,7 +362,7 @@ export default function RoleManagement() {
   // 全量菜单树（GET /admin/menus/tree）。useMenuTree 内部 staleTime=60s。
   const { data: menuTree = [] } = useMenuTree();
 
-  const permissionTreeData = useMemo(() => buildMenuPermissionTree(menuTree), [menuTree]);
+  const permissionTreeData = useMemo(() => buildMenuPermissionTree(menuTree, locale), [menuTree, locale]);
   const allMenuIds = useMemo(() => collectAllMenuIds(menuTree), [menuTree]);
   const expandableMenuIds = useMemo(() => collectExpandableMenuIds(menuTree), [menuTree]);
 
@@ -1057,7 +1062,7 @@ export default function RoleManagement() {
               {selectedDeviceGroupIds.length > 0 ? (
                 (allDeviceGroups ?? [])
                   .filter((g) => selectedDeviceGroupIds.includes(g.id))
-                  .map((g) => <Tag key={g.id}>{g.name}</Tag>)
+                  .map((g) => <Tag key={g.id}>{getI18nText(g.nameI18n, locale, g.name)}</Tag>)
               ) : (
                 <span style={{ color: 'var(--color-text-secondary)' }}>-</span>
               )}

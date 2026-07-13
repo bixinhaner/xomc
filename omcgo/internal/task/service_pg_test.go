@@ -205,6 +205,40 @@ func TestService_PG_MarkTaskFailed(t *testing.T) {
 	assert.Equal(t, 9001, got.ErrorCode)
 }
 
+func TestService_PG_MarkTaskFailed_AutoRetriesMML(t *testing.T) {
+	svc, _, q, repo := newServiceWithPG(t)
+	if svc == nil {
+		return
+	}
+	defer cleanupTestTasks(t, repo.pool)
+	ctx := context.Background()
+
+	mr := 2
+	req := makeReq(testDeviceSNPrefix+"svcmmlretry", "Reboot")
+	req.Source = TaskSourceMML
+	req.MaxRetries = &mr
+	req.RetryIntervalSeconds = 60
+
+	tk, err := svc.CreateTask(ctx, req)
+	require.NoError(t, err)
+	require.NoError(t, q.MarkTaskSent(ctx, tk.ID, "cwmp-mml-retry"))
+
+	require.NoError(t, svc.MarkTaskFailed(ctx, tk.ID, 9001, "boom"))
+
+	got, err := q.GetByID(ctx, tk.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, TaskStatusPending, got.Status)
+	assert.Equal(t, 1, got.RetryCount)
+	assert.Equal(t, 60, got.RetryIntervalSeconds)
+	require.NotNil(t, got.NextAttemptAt)
+	assert.True(t, got.NextAttemptAt.After(time.Now()))
+
+	popped, err := q.Pop(ctx, req.DeviceSN)
+	require.NoError(t, err)
+	assert.Nil(t, popped, "MML failed retry must wait until next_attempt_at before popping")
+}
+
 func TestService_PG_CancelTask(t *testing.T) {
 	svc, _, _, repo := newServiceWithPG(t)
 	if svc == nil {
@@ -329,12 +363,14 @@ func TestService_PG_PurgeOldTasks(t *testing.T) {
 
 	tk := freshTaskForPG("svcpurge", "svcpurge")
 	tk.Status = TaskStatusCompleted
-	completedAt := time.Now()
+	tk.CreatedAt = time.Now().AddDate(-11, 0, 0)
+	completedAt := time.Now().AddDate(-11, 0, 0)
 	tk.CompletedAt = &completedAt
 	require.NoError(t, repo.Create(ctx, tk))
 
-	// retentionDays=-1 → before = now+1day → 命中
-	count, err := svc.PurgeOldTasks(ctx, -1)
+	// Use an old retention boundary so this integration test does not purge
+	// fresh local E2E device_tasks from the shared dev database.
+	count, err := svc.PurgeOldTasks(ctx, 3650)
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, count, int64(1))
 }

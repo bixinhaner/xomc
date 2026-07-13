@@ -149,6 +149,8 @@ type Claims struct {
 	IssuedAt int64 `json:"iat,omitempty"`
 	// IssuedAtMicros 是自定义微秒级签发时间，用于消除 force-logout 的同秒边界歧义。
 	IssuedAtMicros int64 `json:"iat_us,omitempty"`
+	// Scopes 是专用短期 token 的能力边界。普通 access/refresh token 为空。
+	Scopes []string `json:"scopes,omitempty"`
 }
 
 // UserFilter provides filtering options for listing users.

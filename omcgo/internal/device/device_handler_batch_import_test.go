@@ -91,8 +91,10 @@ func TestHandler_BatchImportDevices_MissingSNFails(t *testing.T) {
 	require.Len(t, resp.Errors, 1)
 	assert.Equal(t, 2, resp.Errors[0].Row)
 	assert.Equal(t, "SN-MISSING", resp.Errors[0].SN)
-	assert.True(t, strings.Contains(resp.Errors[0].Reason, "设备不存在"),
-		"未注册 SN 应返回「设备不存在」，实际：%s", resp.Errors[0].Reason)
+	assert.Equal(t, "device_not_found", resp.Errors[0].ErrorCode,
+		"未注册 SN 应返回 error_code=device_not_found")
+	assert.True(t, strings.Contains(resp.Errors[0].Reason, "device not found"),
+		"未注册 SN reason 应为英文，实际：%s", resp.Errors[0].Reason)
 }
 
 // 全部 SN 未注册 → 全部失败。

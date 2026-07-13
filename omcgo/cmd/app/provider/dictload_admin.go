@@ -11,6 +11,8 @@ import (
 	"github.com/omcgo/omcgo/internal/config/parammodel"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/response"
+	router "github.com/omcgo/omcgo/internal/pm/kpi/router"
+	"github.com/omcgo/omcgo/internal/product"
 )
 
 // registerDictLoadAdminRoutes 在 superAdminGroup 下挂 dictloader 主动 reload 端点。
@@ -60,6 +62,16 @@ func registerDictLoadAdminRoutes(c *Container, superAdmin *gin.RouterGroup) {
 		reloadCtx, cancel := context.WithTimeout(ctx.Request.Context(), 5*time.Minute)
 		defer cancel()
 
+		var beforeProductRouteFields map[string]product.ProductRouteFields
+		if name == "product" && c.ProductRepo != nil {
+			var snapErr error
+			beforeProductRouteFields, snapErr = c.ProductRepo.ListRouteFieldsByProductName(reloadCtx)
+			if snapErr != nil {
+				commonerrors.AbortWithError(ctx, http.StatusInternalServerError, snapErr)
+				return
+			}
+		}
+
 		start := time.Now()
 		report, err := c.DictLoaderRegistry.ReloadOne(reloadCtx, name)
 		elapsed := time.Since(start)
@@ -95,16 +107,42 @@ func registerDictLoadAdminRoutes(c *Container, superAdmin *gin.RouterGroup) {
 				cacheVersion = cacheRes.CacheVersionAfter
 			}
 		}
+		productRegistryRefreshed := false
+		kpiRouteInvalidated := false
+		if name == "product" && c.ProductRegistry != nil {
+			if rErr := c.ProductRegistry.Refresh(reloadCtx); rErr != nil {
+				logger.Warn("product registry refresh after dictload reload failed",
+					zap.Error(rErr))
+			} else {
+				productRegistryRefreshed = true
+			}
+			if productRegistryRefreshed && c.ProductRepo != nil && c.KPIRouteInvalidator != nil {
+				afterProductRouteFields, snapErr := c.ProductRepo.ListRouteFieldsByProductName(reloadCtx)
+				if snapErr != nil {
+					logger.Warn("list product route fields after reload failed; skip KPI route invalidation",
+						zap.Error(snapErr))
+				} else if product.RouteFieldsMapChanged(beforeProductRouteFields, afterProductRouteFields) {
+					if _, invErr := c.KPIRouteInvalidator.Invalidate(reloadCtx, router.InvalidationTriggerProductReload); invErr != nil {
+						logger.Warn("product reload committed but KPI route invalidation failed; manual refresh can recover",
+							zap.Error(invErr))
+					} else {
+						kpiRouteInvalidated = true
+					}
+				}
+			}
+		}
 
 		response.OK(ctx, gin.H{
-			"loader":              name,
-			"elapsed_ms":          elapsed.Milliseconds(),
-			"rows_affected":       report.RowsAffected,
-			"files_loaded":        report.FilesLoaded,
-			"files_skipped":       report.FilesSkipped,
-			"errors":              report.Errors,
-			"cache_keys_cleared":  cacheKeysCleared,
-			"cache_version_after": cacheVersion,
+			"loader":                     name,
+			"elapsed_ms":                 elapsed.Milliseconds(),
+			"rows_affected":              report.RowsAffected,
+			"files_loaded":               report.FilesLoaded,
+			"files_skipped":              report.FilesSkipped,
+			"errors":                     report.Errors,
+			"cache_keys_cleared":         cacheKeysCleared,
+			"cache_version_after":        cacheVersion,
+			"product_registry_refreshed": productRegistryRefreshed,
+			"kpi_route_invalidated":      kpiRouteInvalidated,
 		})
 	})
 }

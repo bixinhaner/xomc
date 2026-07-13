@@ -2,6 +2,7 @@
 .DS_Store
 Thumbs.db
 .idea/
+.worktrees/
 
 # Editor
 .vscode/
@@ -15,6 +16,7 @@ omcgo/migrate
 omcgo/omcctl
 omcgo/loadtest
 run/app
+run/hotbuild/
 omcmb/node_modules/
 omcmb/*/node_modules/
 omcmb/webcode/dist/
@@ -36,6 +38,7 @@ run/logs
 
 # Local scratch / one-off analysis scripts
 tmp/
+/outputs/
 
 # Database backups (T-0042 W1.8) — 备份产物不入库
 backups/

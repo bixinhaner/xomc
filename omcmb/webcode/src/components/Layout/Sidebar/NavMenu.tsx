@@ -376,6 +376,7 @@ export default function NavMenu({
     <AntMenu
       mode={isHorizontal ? 'horizontal' : 'inline'}
       theme={appTheme === 'fresh' ? 'light' : 'dark'}
+      inlineIndent={24}
       inlineCollapsed={isHorizontal ? undefined : collapsed}
       items={menuItems}
       selectedKeys={selectedKeys}

@@ -17,6 +17,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 
+	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/response"
 )
@@ -96,7 +97,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 // ── 请求/响应 DTO ─────────────────────────────────────────────────────────
 
 type createRequestDTO struct {
-	SourceType string          `json:"source_type" binding:"required,oneof=dashboard adhoc"`
+	SourceType string          `json:"source_type" binding:"required,oneof=dashboard kpi_query adhoc"`
 	Params     json.RawMessage `json:"params"`
 	TaskName   string          `json:"task_name"`
 }
@@ -149,6 +150,11 @@ func (h *Handler) Create(c *gin.Context) {
 	var params []byte
 	if len(req.Params) > 0 {
 		params = []byte(req.Params)
+	}
+	params, err := withExportLocale(params, appcontext.GetLocale(c.Request.Context()))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
 	}
 	task, err := h.svc.Create(c.Request.Context(), CreateRequest{
 		TaskName:   defaultTaskName(req.TaskName, SourceType(req.SourceType)),
@@ -365,7 +371,9 @@ func defaultTaskName(name string, source SourceType) string {
 		return name
 	}
 	label := "仪表盘"
-	if source == SourceAdhoc {
+	if source == SourceKpiQuery {
+		label = "指标查询"
+	} else if source == SourceAdhoc {
 		label = "任务结果"
 	}
 	return "KPI导出_" + label + "_" + time.Now().Format("20060102_150405")

@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
+
+	"github.com/omcgo/omcgo/global"
 )
 
 // DeviceMatcher 设备匹配引擎，根据分组规则自动匹配设备
@@ -29,18 +31,20 @@ func NewDeviceMatcher(repo DeviceGroupRepository, pool *pgxpool.Pool, logger *za
 
 // MatchRequest 匹配请求参数
 type MatchRequest struct {
-	DeviceID     uuid.UUID // 设备 ID
-	DeviceName   string    // 设备名称 = devices.site_name（"名称匹配"模式的匹配字段）
-	SerialNumber string    // 设备序列号 — serialNumber 模式精确匹配（migration 000124）
-	LAC          *int      // LAC 位置区码（可选）
-	TAC          *int      // TAC 跟踪区码（可选）
+	DeviceID       uuid.UUID  // 设备 ID
+	DeviceName     string     // 设备名称 = devices.site_name（"名称匹配"模式的匹配字段）
+	SerialNumber   string     // 设备序列号 — serialNumber 模式精确匹配（migration 000124）
+	LAC            *int       // LAC 位置区码（可选）
+	TAC            *int       // TAC 跟踪区码（可选）
+	CurrentGroupID *uuid.UUID // 当前真实归属；nil 表示未分组
 }
 
 // MatchResult 匹配结果
 type MatchResult struct {
-	GroupID   uuid.UUID    // 匹配到的分组 ID
-	GroupName string       // 分组名称
-	MatchedBy MatchingMode // 匹配方式
+	SourceGroupID uuid.UUID
+	GroupID       uuid.UUID    // 匹配到的分组 ID
+	GroupName     string       // 分组名称
+	MatchedBy     MatchingMode // 匹配方式
 }
 
 // MatchDevice 为设备查找匹配的 L2 分组
@@ -59,9 +63,18 @@ func (m *DeviceMatcher) MatchDevice(ctx context.Context, req MatchRequest) (*Mat
 
 	// 收集所有配了匹配规则的 L2 分组，按 updated_at 降序排列 —— 最近新增/编辑的
 	// 分组优先匹配，首个命中即胜，实现"分组最后新增或编辑为优先"。
+	l2GroupIDs := make(map[uuid.UUID]struct{})
+	for _, g := range groups {
+		if g.Level == 2 {
+			l2GroupIDs[g.ID] = struct{}{}
+		}
+	}
 	var l2Groups []DeviceGroup
 	for _, g := range groups {
-		if g.Level == 2 && g.MatchingMode != "" {
+		if g.Level != 2 || g.MatchingMode == "" || g.SourceGroupID == nil {
+			continue
+		}
+		if _, sourceIsL2 := l2GroupIDs[*g.SourceGroupID]; sourceIsL2 && sourceGroupMatches(*g.SourceGroupID, req.CurrentGroupID) {
 			l2Groups = append(l2Groups, g)
 		}
 	}
@@ -82,14 +95,22 @@ func (m *DeviceMatcher) MatchDevice(ctx context.Context, req MatchRequest) (*Mat
 
 		if matched {
 			return &MatchResult{
-				GroupID:   l2Group.ID,
-				GroupName: l2Group.Name,
-				MatchedBy: l2Group.MatchingMode,
+				SourceGroupID: *l2Group.SourceGroupID,
+				GroupID:       l2Group.ID,
+				GroupName:     l2Group.Name,
+				MatchedBy:     l2Group.MatchingMode,
 			}, nil
 		}
 	}
 
 	return nil, nil
+}
+
+func sourceGroupMatches(sourceGroupID uuid.UUID, currentGroupID *uuid.UUID) bool {
+	if sourceGroupID.String() == global.DefaultLevel2GroupID {
+		return currentGroupID == nil
+	}
+	return currentGroupID != nil && *currentGroupID == sourceGroupID
 }
 
 // matchGroup 检查设备是否匹配指定分组
@@ -208,9 +229,13 @@ func (m *DeviceMatcher) AssignDeviceToGroup(ctx context.Context, req MatchReques
 		return nil, nil
 	}
 
-	// 将设备添加到匹配的分组（自动匹配：无条件覆盖，含手工分配）
-	if err := m.repo.AddDeviceAutoMatched(ctx, result.GroupID, req.DeviceID); err != nil {
+	// 原子校验设备仍在规则源组，避免扫描与写入之间的并发移动被覆盖。
+	moved, err := m.repo.MoveDeviceAutoMatched(ctx, result.SourceGroupID, result.GroupID, req.DeviceID)
+	if err != nil {
 		return nil, fmt.Errorf("add device to group: %w", err)
+	}
+	if moved == 0 {
+		return nil, nil
 	}
 
 	m.logger.Info("device assigned to group",
@@ -230,11 +255,12 @@ func (m *DeviceMatcher) AssignDeviceToGroup(ctx context.Context, req MatchReques
 // 字段刻意对齐 device.GroupAssignRequest，让 wiring 一行 caller 即可。
 type HeartbeatAssigner struct {
 	matcher *DeviceMatcher
+	lister  DeviceLister
 }
 
 // NewHeartbeatAssigner 构造心跳路径分组适配器。
-func NewHeartbeatAssigner(m *DeviceMatcher) *HeartbeatAssigner {
-	return &HeartbeatAssigner{matcher: m}
+func NewHeartbeatAssigner(m *DeviceMatcher, lister DeviceLister) *HeartbeatAssigner {
+	return &HeartbeatAssigner{matcher: m, lister: lister}
 }
 
 // HeartbeatRequest — 与 device.GroupAssignRequest 字段对齐的小 DTO。
@@ -254,12 +280,20 @@ func (a *HeartbeatAssigner) AssignByHeartbeat(ctx context.Context, req Heartbeat
 	if a.matcher == nil {
 		return nil
 	}
-	_, err := a.matcher.AssignDeviceToGroup(ctx, MatchRequest{
-		DeviceID:     req.DeviceID,
-		DeviceName:   req.DeviceName,
-		SerialNumber: req.SerialNumber,
-		LAC:          req.LAC,
-		TAC:          req.TAC,
+	device, err := a.lister.GetByID(ctx, req.DeviceID)
+	if err != nil {
+		return fmt.Errorf("get heartbeat device for group match: %w", err)
+	}
+	if device == nil {
+		return nil
+	}
+	_, err = a.matcher.AssignDeviceToGroup(ctx, MatchRequest{
+		DeviceID:       device.ID,
+		DeviceName:     device.Name,
+		SerialNumber:   device.SerialNumber,
+		LAC:            device.LAC,
+		TAC:            device.TAC,
+		CurrentGroupID: device.CurrentGroupID,
 	})
 	return err
 }

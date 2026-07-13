@@ -24,10 +24,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
@@ -104,12 +108,17 @@ type FormulaLister interface {
 // 命中 → 返回 (*KPIRoute, nil)；miss → 返回 (nil, nil)；错误 → (nil, err)（Router 容忍并降级到 DB）。
 type L2Cache interface {
 	Get(ctx context.Context, productID uuid.UUID) (*KPIRoute, error)
-	Put(ctx context.Context, route *KPIRoute) error
+	Put(ctx context.Context, route *KPIRoute, version int64) error
+	GetVersion(ctx context.Context) (int64, error)
 }
 
 // ── Router ──────────────────────────────────────────────────────────────
 
-const defaultL1Size = 1024
+const (
+	defaultL1Size        = 1024
+	maxRouteLoadAttempts = 3
+	maxRouteLoadDuration = 10 * time.Second
+)
 
 // Options 构造 Router 的可选参数。所有字段允许零值（采用默认）。
 type Options struct {
@@ -129,6 +138,14 @@ type Router struct {
 	l2         L2Cache
 	metrics    *Metrics
 	logger     *zap.Logger
+	versionMu  sync.Mutex
+	version    atomic.Int64
+	loads      singleflight.Group
+}
+
+type routeLookupResult struct {
+	route *KPIRoute
+	tier  string
 }
 
 // New 构造 Router。前 4 个参数必填；opts 控制 L1/L2/metrics/logger。
@@ -204,41 +221,143 @@ func (r *Router) LookupByDevice(ctx context.Context, deviceSN string) (*KPIRoute
 		return nil, ErrInvalidProductMetadata
 	}
 
-	// L1
+	// L1 保留无 singleflight 分配的热路径；miss 后按 product 合并并发重建。
+	r.ensureFresh(ctx)
 	if route, ok := r.l1.Get(prod.ID); ok {
 		r.metrics.hit("L1")
 		return route, nil
 	}
 
-	// L2
-	if r.l2 != nil {
-		route, err := r.l2.Get(ctx, prod.ID)
-		if err != nil {
-			r.logger.Warn("L2 get failed; falling back to DB",
-				zap.String("product_id", prod.ID.String()),
-				zap.Error(err))
-		} else if route != nil {
-			r.l1.Add(prod.ID, route)
-			r.metrics.hit("L2")
-			return route, nil
-		}
-	}
-
-	// DB 兜底
-	route, err := r.loadFromDB(ctx, prod)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	r.l1.Add(prod.ID, route)
-	if r.l2 != nil {
-		if err := r.l2.Put(ctx, route); err != nil {
-			r.logger.Warn("L2 put failed (non-fatal)",
-				zap.String("product_id", prod.ID.String()),
-				zap.Error(err))
+	resultCh := r.loads.DoChan(prod.ID.String(), func() (any, error) {
+		// 合并加载不从首个调用者继承取消信号，否则一个请求取消会让所有等待者失败。
+		// 保留 trace/value，并给共享 DB 工作独立的硬上限；每个等待者仍在下方响应自己的 ctx。
+		loadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), maxRouteLoadDuration)
+		defer cancel()
+		return r.lookupProductRoute(loadCtx, prod)
+	})
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case shared := <-resultCh:
+		if shared.Err != nil {
+			return nil, shared.Err
 		}
+		result := shared.Val.(routeLookupResult)
+		r.metrics.hit(result.tier)
+		return result.route, nil
 	}
-	r.metrics.hit("DB")
-	return route, nil
+}
+
+func (r *Router) lookupProductRoute(ctx context.Context, prod *product.Product) (routeLookupResult, error) {
+	for attempt := 1; attempt <= maxRouteLoadAttempts; attempt++ {
+		lookupVersion, versionKnown := r.ensureFresh(ctx)
+
+		// L1
+		if route, ok := r.l1.Get(prod.ID); ok {
+			return routeLookupResult{route: route, tier: "L1"}, nil
+		}
+
+		// L2
+		if r.l2 != nil {
+			route, err := r.l2.Get(ctx, prod.ID)
+			if err != nil {
+				r.logger.Warn("L2 get failed; falling back to DB",
+					zap.String("product_id", prod.ID.String()),
+					zap.Error(err))
+			} else if route != nil {
+				r.l1.Add(prod.ID, route)
+				return routeLookupResult{route: route, tier: "L2"}, nil
+			}
+		}
+
+		// DB 兜底。发布前复核版本，避免把旧 DB 快照缓存到新版本。
+		route, err := r.loadFromDB(ctx, prod)
+		if err != nil {
+			return routeLookupResult{}, err
+		}
+		if versionKnown && !r.versionStable(ctx, lookupVersion) {
+			continue
+		}
+
+		r.l1.Add(prod.ID, route)
+		if r.l2 != nil {
+			if err := r.l2.Put(ctx, route, lookupVersion); err != nil {
+				r.logger.Warn("L2 put failed (non-fatal)",
+					zap.String("product_id", prod.ID.String()),
+					zap.Error(err))
+			}
+		}
+		r.logger.Info("KPI route rebuilt",
+			zap.String("source_tier", "DB"),
+			zap.String("product_id", prod.ID.String()),
+			zap.String("indicator_platform", route.IndicatorPlatform),
+			zap.String("indicator_device_type", string(route.IndicatorDeviceType)),
+			zap.Int64("cache_version", lookupVersion),
+			zap.Int("counter_count", len(route.Counters)),
+			zap.Int("kpi_count", len(route.KPIs)))
+		return routeLookupResult{route: route, tier: "DB"}, nil
+	}
+
+	return routeLookupResult{}, fmt.Errorf("KPI route changed during %d consecutive load attempts", maxRouteLoadAttempts)
+}
+
+// ensureFresh 在读取 L1 前同步 KPI route cache_version。远端进程推进版本后，
+// 当前 Router 会清空进程内旧 route，确保后续查询进入 L2 / DB 重建。
+func (r *Router) ensureFresh(ctx context.Context) (int64, bool) {
+	if r.l2 == nil {
+		return 0, false
+	}
+	current, err := r.l2.GetVersion(ctx)
+	if err != nil {
+		r.metrics.versionReadFailed()
+		r.logger.Warn("get cache version failed; using current L1 route", zap.Error(err))
+		return r.version.Load(), false
+	}
+	if current == r.version.Load() {
+		return current, true
+	}
+
+	r.versionMu.Lock()
+	defer r.versionMu.Unlock()
+
+	// 版本可能在等待锁期间再次变化；锁内重读，避免较晚拿锁的 goroutine
+	// 把本进程已采纳的版本覆盖回更早的值。
+	current, err = r.l2.GetVersion(ctx)
+	if err != nil {
+		r.metrics.versionReadFailed()
+		r.logger.Warn("get cache version while invalidating L1 failed; using current L1 route", zap.Error(err))
+		return r.version.Load(), false
+	}
+	if current == r.version.Load() {
+		return current, true
+	}
+	r.l1.Purge()
+	r.version.Store(current)
+	r.metrics.staleEvicted()
+	r.logger.Info("KPI route L1 invalidated by cache version change", zap.Int64("version", current))
+	return current, true
+}
+
+// versionStable 在 DB route 发布前复核构建所依据的版本。读取失败时按 fail-open
+// 处理：允许使用刚从 DB 取得的完整快照，但 L2 仍携带旧观察版本，Redis 恢复后会自然 miss。
+func (r *Router) versionStable(ctx context.Context, expected int64) bool {
+	current, err := r.l2.GetVersion(ctx)
+	if err != nil {
+		r.metrics.versionReadFailed()
+		r.logger.Warn("get cache version before publishing route failed; using DB route",
+			zap.Int64("expected_version", expected),
+			zap.Error(err))
+		return true
+	}
+	if current == expected {
+		return true
+	}
+	// 统一走 ensureFresh 的锁内重读，防止并发 goroutine 以过时版本覆盖本进程状态。
+	r.ensureFresh(ctx)
+	return false
 }
 
 // InvalidateAll 清空 L1。L2 失效由 cache.BumpVersion 跨实例广播（见 redis_cache.go）。
