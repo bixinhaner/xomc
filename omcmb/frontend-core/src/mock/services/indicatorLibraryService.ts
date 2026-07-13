@@ -48,6 +48,18 @@ function clone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T;
 }
 
+let mockCreateSeq = 1;
+
+function nextMockIndicatorId(input: CreateIndicatorInput): string {
+  const prefix = input.isCounter === '1' ? 'D' : 'K';
+  const seq = String(mockCreateSeq++).padStart(9, '0');
+  return `${prefix}${seq}`;
+}
+
+function nextMockGroupId(): string {
+  return `mock-group-${String(mockCreateSeq++).padStart(6, '0')}`;
+}
+
 export const indicatorLibraryService = {
   async list(deviceType: DeviceType, filter?: IndicatorListFilter) {
     let items = [...indicators[deviceType]];
@@ -82,8 +94,9 @@ export const indicatorLibraryService = {
   },
 
   async create(deviceType: DeviceType, input: CreateIndicatorInput): Promise<IndicatorInfo> {
+    const id = nextMockIndicatorId(input);
     const created: IndicatorInfo = {
-      id: input.id,
+      id,
       name: input.name,
       cnName: input.cnName,
       enName: input.enName,
@@ -101,13 +114,13 @@ export const indicatorLibraryService = {
     // 详情态 platform 注入 → mock 同步写一行占位公式，保持与后端行为一致
     // （否则前端 mock 模式下也会复现“保存成功但查不到”）。
     if (input.platform) {
-      const arr = formulas[input.id] || [];
+      const arr = formulas[id] || [];
       arr.push({
         platformName: input.platform,
-        indicatorId: input.id,
+        indicatorId: id,
         formula: input.arithmetic ?? '',
       });
-      formulas[input.id] = arr;
+      formulas[id] = arr;
     }
     return clone(created);
   },
@@ -170,7 +183,7 @@ export const indicatorLibraryService = {
 
   async createGroup(deviceType: DeviceType, input: CreateGroupInput): Promise<IndicatorGroup> {
     const created: IndicatorGroup = {
-      id: input.id,
+      id: nextMockGroupId(),
       name: input.name,
       parentId: input.parentId,
       description: input.description,
