@@ -1,9 +1,6 @@
 # MML TXT脚本模板
-# 推荐写法：使用标准 PATH。每条有效行格式：
+# 使用标准 PATH。每条有效行格式：
 # 操作 PATH:标准路径[=参数值][,标准路径2=参数值2];设备SN
-#
-# 兼容写法：仍可使用命令目录中的 command_code：
-# 操作 命令编码[:参数名=参数值,参数名2=参数值2];设备SN
 #
 # 支持操作：
 # LST 查询。PATH 后填写一个或多个标准参数路径。
@@ -19,14 +16,9 @@
 # 5. 参数用英文逗号分隔；参数值包含逗号或分号时，可用双引号、单引号或 {} 包裹。
 # 6. 空行和 # 开头的行会被忽略。
 # 7. 单个文件最多 200 台设备、2000 条有效命令、2 MiB。
-# 8. 命令编码兼容写法以 MML 命令目录实际显示的 command_code 为准。
 #
 # 示例：将 DEVICE_SN 替换为真实基站编码。
 LST PATH:Device.DeviceInfo.SoftwareVersion;DEVICE_SN
 MOD PATH:Device.ManagementServer.URL=http://localhost:8080/smallcell/AcsService,Device.ManagementServer.Username=acs;DEVICE_SN
 ADD PATH:Device.IP.Interface.1.IPv4Address.:IPAddress=192.168.1.10,SubnetMask=255.255.255.0;DEVICE_SN
 RMV PATH:Device.IP.Interface.1.IPv4Address.3.;DEVICE_SN
-
-# 兼容命令编码示例：
-LST DEVICE_INFO;DEVICE_SN
-MOD DEVICE_INFO:DESCRIPTION="site,a;sector-b",ALIAS={main,backup};DEVICE_SN

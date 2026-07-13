@@ -34,26 +34,26 @@ func TestParseScriptTXT_TemplateDocumentsSupportedSyntaxAndExamplesParse(t *test
 	require.Contains(t, scriptImportTemplateForParserTest, "ADD 新增")
 	require.Contains(t, scriptImportTemplateForParserTest, "RMV 删除")
 	require.NotContains(t, scriptImportTemplateForParserTest, "DEL")
-	require.Contains(t, scriptImportTemplateForParserTest, "推荐写法：使用标准 PATH")
+	require.Contains(t, scriptImportTemplateForParserTest, "使用标准 PATH")
 	require.Contains(t, scriptImportTemplateForParserTest, "ADD 后的参数名是新对象内的相对参数名")
+	require.NotContains(t, scriptImportTemplateForParserTest, "操作 命令编码")
+	require.NotContains(t, scriptImportTemplateForParserTest, "兼容命令编码")
+	require.NotContains(t, scriptImportTemplateForParserTest, "LST DEVICE_INFO;DEVICE_SN")
 
 	executableTemplate := strings.ReplaceAll(scriptImportTemplateForParserTest, "DEVICE_SN", "SN-TEMPLATE-1")
 	got, issues := ParseScriptTXT([]byte(executableTemplate))
 
 	require.Empty(t, issues)
 	require.NotEmpty(t, got.Lines)
-	require.Equal(t, []string{"LST", "MOD", "ADD", "RMV", "LST", "MOD"}, []string{
+	require.Equal(t, []string{"LST", "MOD", "ADD", "RMV"}, []string{
 		got.Lines[0].OperationType,
 		got.Lines[1].OperationType,
 		got.Lines[2].OperationType,
 		got.Lines[3].OperationType,
-		got.Lines[4].OperationType,
-		got.Lines[5].OperationType,
 	})
 	require.Equal(t, "RMV PATH:Device.IP.Interface.1.IPv4Address.3.;SN-TEMPLATE-1", got.Lines[3].RawLine)
 	require.Equal(t, []string{"Device.IP.Interface.1.IPv4Address."}, got.Lines[2].ParamPaths)
 	require.Equal(t, map[string]string{"IPAddress": "192.168.1.10", "SubnetMask": "255.255.255.0"}, got.Lines[2].Parameters)
-	require.Equal(t, map[string]string{"DESCRIPTION": "site,a;sector-b", "ALIAS": "{main,backup}"}, got.Lines[5].Parameters)
 }
 
 func TestParseScriptTXT_EnglishTemplateDocumentsSupportedSyntaxAndExamplesParse(t *testing.T) {
@@ -66,21 +66,22 @@ func TestParseScriptTXT_EnglishTemplateDocumentsSupportedSyntaxAndExamplesParse(
 	require.Contains(t, template, "RMV remove")
 	require.NotContains(t, template, "DEL")
 	require.NotContains(t, template, "支持操作")
-	require.Contains(t, template, "Recommended syntax: use standard PATH")
+	require.Contains(t, template, "Use standard PATH")
 	require.Contains(t, template, "ADD follow-up values use relative parameter names")
+	require.NotContains(t, template, "Operation command_code")
+	require.NotContains(t, template, "Compatible command-code")
+	require.NotContains(t, template, "LST DEVICE_INFO;DEVICE_SN")
 
 	executableTemplate := strings.ReplaceAll(template, "DEVICE_SN", "SN-TEMPLATE-1")
 	got, issues := ParseScriptTXT([]byte(executableTemplate))
 
 	require.Empty(t, issues)
 	require.NotEmpty(t, got.Lines)
-	require.Equal(t, []string{"LST", "MOD", "ADD", "RMV", "LST", "MOD"}, []string{
+	require.Equal(t, []string{"LST", "MOD", "ADD", "RMV"}, []string{
 		got.Lines[0].OperationType,
 		got.Lines[1].OperationType,
 		got.Lines[2].OperationType,
 		got.Lines[3].OperationType,
-		got.Lines[4].OperationType,
-		got.Lines[5].OperationType,
 	})
 }
 

@@ -1,9 +1,6 @@
 # MML TXT Script Template
-# Recommended syntax: use standard PATH. Valid line format:
+# Use standard PATH. Valid line format:
 # Operation PATH:standard.path[=value][,standard.path2=value2];device_sn
-#
-# Compatible syntax: command_code from the command catalog is still supported:
-# Operation command_code[:param=value,param2=value2];device_sn
 #
 # Supported operations:
 # LST query. Put one or more standard parameter paths after PATH.
@@ -19,14 +16,9 @@
 # 5. Separate parameters with English commas; when a value contains a comma or semicolon, wrap it in double quotes, single quotes, or {}.
 # 6. Blank lines and lines starting with # are ignored.
 # 7. One file supports at most 200 devices, 2000 valid commands, and 2 MiB.
-# 8. Command-code syntax must match the command_code shown in the MML command catalog.
 #
 # Examples: replace DEVICE_SN with a real base station serial number.
 LST PATH:Device.DeviceInfo.SoftwareVersion;DEVICE_SN
 MOD PATH:Device.ManagementServer.URL=http://localhost:8080/smallcell/AcsService,Device.ManagementServer.Username=acs;DEVICE_SN
 ADD PATH:Device.IP.Interface.1.IPv4Address.:IPAddress=192.168.1.10,SubnetMask=255.255.255.0;DEVICE_SN
 RMV PATH:Device.IP.Interface.1.IPv4Address.3.;DEVICE_SN
-
-# Compatible command-code examples:
-LST DEVICE_INFO;DEVICE_SN
-MOD DEVICE_INFO:DESCRIPTION="site,a;sector-b",ALIAS={main,backup};DEVICE_SN
