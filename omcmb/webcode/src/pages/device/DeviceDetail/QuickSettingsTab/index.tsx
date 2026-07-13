@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Empty, Popconfirm, Select, Space, Spin, Tag, Tooltip, Typography, message } from 'antd';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Alert, Button, Card, Empty, Popconfirm, Select, Space, Spin, Tag, Tooltip, Typography, message } from 'antd';
 import { ExclamationCircleOutlined, MinusOutlined, PlusOutlined } from '@ant-design/icons';
 import { useIntl } from 'react-intl';
 import { useQueryClient } from '@tanstack/react-query';
@@ -66,6 +66,50 @@ interface QuickSettingsTabProps {
   networkType: string;
   active?: boolean;
   onSyncTargetPathsChange?: (paths: string[]) => void;
+}
+
+interface QuickSettingsGroupGateProps {
+  active: boolean;
+  eager?: boolean;
+  title: ReactNode;
+  children: (active: boolean) => ReactNode;
+}
+
+function QuickSettingsGroupGate({ active, eager = false, title, children }: QuickSettingsGroupGateProps) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [shouldRender, setShouldRender] = useState(eager);
+
+  useEffect(() => {
+    if (!active || shouldRender) return;
+    if (typeof IntersectionObserver === 'undefined') {
+      setShouldRender(true);
+      return;
+    }
+    const node = ref.current;
+    if (!node) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setShouldRender(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '600px 0px' },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [active, shouldRender]);
+
+  return (
+    <div ref={ref}>
+      {shouldRender ? children(active) : (
+        <Card title={title} size="small" style={{ marginBottom: 16, minHeight: 96 }}>
+          <div style={{ height: 32 }} />
+        </Card>
+      )}
+    </div>
+  );
 }
 
 function normalizeQuickSettingsNetworkType(networkType: string): string {
@@ -269,42 +313,54 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
     ? `${instanceContext.fapInstance}-${instanceContext.cellInstance ?? 1}`
     : String(instanceContext.fapInstance);
 
-  const renderGroup = (group: typeof visibleGroups[number], keySuffix: string) => {
+  const renderGroup = (group: typeof visibleGroups[number], keySuffix: string, eager = false) => {
     const childGroups = instanceScopedGroups.filter((g) => g.parentSelector === group.id);
-    if (group.style === 'table' && childGroups.length > 0) {
-      return (
-        <InstanceSelectorForm
-          key={`${group.id}::${refreshTick}::${keySuffix}`}
-          deviceId={deviceId}
-          active={active}
-          selectorGroup={group}
-          childGroups={childGroups}
-          instanceContext={instanceContext}
-          locale={locale}
-        />
-      );
-    }
     if (group.parentSelector) return null;
-    return group.multiInstance ? (
-      <MultiInstanceTable
-        key={`${group.id}::${refreshTick}::${keySuffix}`}
-        deviceId={deviceId}
+    const title = locale === 'en-US' ? (group.titleEn || group.titleZh) : (group.titleZh || group.titleEn);
+    return (
+      <QuickSettingsGroupGate
+        key={`${group.id}::gate::${keySuffix}`}
         active={active}
-        group={group}
-        instanceContext={instanceContext}
-        locale={locale}
-        ipsecControlValue={ipsecControlValue}
-      />
-    ) : (
-      <CellParameterForm
-        key={`${group.id}::${refreshTick}::${keySuffix}`}
-        deviceId={deviceId}
-        active={active}
-        group={group}
-        instanceContext={instanceContext}
-        locale={locale}
-        onIpsecControlChange={group.id === 'device-ipsec-control' ? setIpsecControlValue : undefined}
-      />
+        eager={eager}
+        title={title}
+      >
+        {(childActive) => {
+          if (group.style === 'table' && childGroups.length > 0) {
+            return (
+              <InstanceSelectorForm
+                key={`${group.id}::${refreshTick}::${keySuffix}`}
+                deviceId={deviceId}
+                active={childActive}
+                selectorGroup={group}
+                childGroups={childGroups}
+                instanceContext={instanceContext}
+                locale={locale}
+              />
+            );
+          }
+          return group.multiInstance ? (
+            <MultiInstanceTable
+              key={`${group.id}::${refreshTick}::${keySuffix}`}
+              deviceId={deviceId}
+              active={childActive}
+              group={group}
+              instanceContext={instanceContext}
+              locale={locale}
+              ipsecControlValue={ipsecControlValue}
+            />
+          ) : (
+            <CellParameterForm
+              key={`${group.id}::${refreshTick}::${keySuffix}`}
+              deviceId={deviceId}
+              active={childActive}
+              group={group}
+              instanceContext={instanceContext}
+              locale={locale}
+              onIpsecControlChange={group.id === 'device-ipsec-control' ? setIpsecControlValue : undefined}
+            />
+          );
+        }}
+      </QuickSettingsGroupGate>
     );
   };
 
@@ -508,7 +564,7 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
 
   return (
     <div style={{ padding: 16 }}>
-      {outerGroups.map((group) => renderGroup(group, 'outer'))}
+      {outerGroups.map((group, index) => renderGroup(group, 'outer', index < 2))}
 
       {(isENB || isNR || isBSC) && (
         <Space style={{ marginBottom: 16 }}>
@@ -624,7 +680,7 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
         </Space>
       )}
 
-      {instanceScopedGroups.map((group) => renderGroup(group, selectedKey))}
+      {instanceScopedGroups.map((group, index) => renderGroup(group, selectedKey, index === 0))}
 
       {isBSC && (
         <BscBtsAddModal
