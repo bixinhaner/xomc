@@ -77,6 +77,18 @@ describe('task result CSV export', () => {
     expect(csv).toContain('"line1\nline2"');
   });
 
+  it('preserves backend timezone wall-clock values in exported timestamps', () => {
+    const csv = buildMmlTaskResultsCsv([
+      row({
+        startedAt: '2026-07-13T10:00:00+09:00',
+        finishedAt: '2026-07-13T11:30:00+09:00',
+      }),
+    ], t);
+
+    expect(csv).toContain('2026-07-13 10:00:00');
+    expect(csv).toContain('2026-07-13 11:30:00');
+  });
+
   it('fetches every result page with the backend-safe page size', async () => {
     const fetchPage = vi.fn()
       .mockResolvedValueOnce({

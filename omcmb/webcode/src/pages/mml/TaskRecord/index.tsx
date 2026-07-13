@@ -3,7 +3,6 @@ import type { Key } from 'react';
 import { Button, Empty, Modal, Pagination, Popover, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import { DeleteOutlined, DownloadOutlined, ProfileOutlined, StopOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import dayjs from 'dayjs';
 
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
@@ -26,6 +25,7 @@ import {
   useDeleteMMLTasks,
 } from '@core/hooks/api/useMML';
 import { getMmlTaskProgress } from '@core/utils/mmlTaskProgress';
+import { formatSystemTime } from '@core/utils/systemTime';
 import {
   parseMmlDeviceTaskResult,
   type ParsedMmlResult,
@@ -73,9 +73,7 @@ const DEVICE_RESULT_STATUS_TAGS: Record<string, { color: string; key: string }> 
 };
 
 function formatTime(iso?: string | null): string {
-  if (!iso) return '-';
-  const d = dayjs(iso);
-  return d.isValid() ? d.format('YYYY-MM-DD HH:mm:ss') : '-';
+  return formatSystemTime(iso);
 }
 
 function stringifyMessagePayload(payload: unknown): string {

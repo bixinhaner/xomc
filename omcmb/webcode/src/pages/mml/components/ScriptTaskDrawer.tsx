@@ -19,9 +19,11 @@ import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 
 import { useCreateMMLTask } from '@core/hooks/api/useMML';
+import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
 import { useUserStore } from '@core/store/userStore';
 import type { MMLExecuteType, MMLTaskPlanItem } from '@core/types/mml';
 import { parseMmlScriptPlan } from '@core/utils/mmlScriptPlanParser';
+import { toSystemTimezoneRFC3339 } from '@core/utils/systemTime';
 import type { MMLScriptPlanParseResult } from '@core/utils/mmlScriptPlanParser';
 import {
   MML_MAX_TASK_DEVICES,
@@ -120,6 +122,7 @@ export default function ScriptTaskDrawer({
 }: ScriptTaskDrawerProps) {
   const t = useT();
   const currentUser = useUserStore((state) => state.currentUser);
+  const systemTimezone = useSystemTimezoneValue();
   const [form] = Form.useForm<TaskForm>();
   const executeType = Form.useWatch('executeType', form);
 
@@ -253,15 +256,15 @@ export default function ScriptTaskDrawer({
           failedRetryInterval: values.failedRetryWaitTime,
           scheduledAt:
             values.executeType === 'scheduled' && values.scheduledAt
-              ? values.scheduledAt.toISOString()
+              ? toSystemTimezoneRFC3339(values.scheduledAt, systemTimezone) ?? values.scheduledAt.toISOString()
               : undefined,
           periodStart:
             values.executeType === 'periodic' && values.periodRange?.[0]
-              ? values.periodRange[0].toISOString()
+              ? toSystemTimezoneRFC3339(values.periodRange[0], systemTimezone) ?? values.periodRange[0].toISOString()
               : undefined,
           periodEnd:
             values.executeType === 'periodic' && values.periodRange?.[1]
-              ? values.periodRange[1].toISOString()
+              ? toSystemTimezoneRFC3339(values.periodRange[1], systemTimezone) ?? values.periodRange[1].toISOString()
               : undefined,
           periodTime:
             values.executeType === 'periodic' && values.periodTime
@@ -290,6 +293,7 @@ export default function ScriptTaskDrawer({
     isDeviceBound,
     scriptId,
     createTaskMutation,
+    systemTimezone,
     onSuccess,
     onClose,
     t,
