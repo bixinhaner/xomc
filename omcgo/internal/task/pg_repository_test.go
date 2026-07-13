@@ -170,6 +170,60 @@ func TestPgRepo_Integration_GetByIDNotFound(t *testing.T) {
 	assert.Nil(t, got)
 }
 
+func TestPgRepo_Integration_LatestSyncGPVSummaryIgnoresStaleUnfinishedTasks(t *testing.T) {
+	pool := newTestPool(t)
+	if pool == nil {
+		return
+	}
+	defer cleanupTestTasks(t, pool)
+	repo := NewPgTaskRepository(pool)
+	ctx := context.Background()
+
+	deviceSN := testDeviceSNPrefix + "sync-gpv-summary"
+	sourceID := generateUUID()
+	base := time.Date(2026, 7, 13, 10, 2, 2, 0, time.UTC)
+
+	makeTask := func(id, commandKey string, status TaskStatus, createdAt time.Time, completedAt *time.Time) *Task {
+		return &Task{
+			ID:                    generateUUID(),
+			DeviceSN:              deviceSN,
+			Method:                "GetParameterValues",
+			Params:                json.RawMessage(`{"paths":["Device.DeviceInfo."]}`),
+			Priority:              1,
+			CommandKey:            commandKey,
+			Status:                status,
+			MaxRetries:            3,
+			CreatedAt:             createdAt,
+			CompletedAt:           completedAt,
+			Source:                TaskSourceAPI,
+			SourceID:              sourceID,
+			CommandIndex:          0,
+			DeviceIndex:           0,
+			PathTranslationSource: id,
+		}
+	}
+
+	staleCreated := base.Add(-72 * time.Hour)
+	staleSent := makeTask("stale", "sync-gpv-"+deviceSN+"-0-r", TaskStatusSent, staleCreated, nil)
+	require.NoError(t, repo.Create(ctx, staleSent))
+
+	firstCompletedAt := base.Add(3 * time.Second)
+	lastCompletedAt := base.Add(13*time.Second + 473*time.Millisecond)
+	require.NoError(t, repo.Create(ctx, makeTask("completed-0", "sync-gpv-"+deviceSN+"-0", TaskStatusCompleted, base, &firstCompletedAt)))
+	require.NoError(t, repo.Create(ctx, makeTask("completed-1", "sync-gpv-"+deviceSN+"-1", TaskStatusCompleted, base.Add(1*time.Second), &lastCompletedAt)))
+
+	summary, err := repo.LatestSyncGPVSummaryByDevice(ctx, deviceSN)
+	require.NoError(t, err)
+	require.NotNil(t, summary)
+
+	assert.Equal(t, sourceID, summary.SourceID)
+	assert.Equal(t, 2, summary.TaskCount)
+	assert.True(t, summary.FirstCreatedAt.Equal(base))
+	require.NotNil(t, summary.LastCompletedAt)
+	assert.True(t, summary.LastCompletedAt.Equal(lastCompletedAt))
+	assert.InEpsilon(t, 13.473, summary.WallClockSeconds, 0.001)
+}
+
 func TestPgRepo_Integration_Update(t *testing.T) {
 	pool := newTestPool(t)
 	if pool == nil {

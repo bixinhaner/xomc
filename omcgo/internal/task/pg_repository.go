@@ -333,6 +333,7 @@ WITH latest AS (
     AND method = 'GetParameterValues'
     AND command_key LIKE 'sync-gpv-%'
     AND source_id IS NOT NULL
+    AND completed_at IS NOT NULL
   ORDER BY created_at DESC
   LIMIT 1
 )
@@ -341,10 +342,11 @@ SELECT
   COUNT(*)::int,
   MIN(created_at),
   MAX(completed_at),
-  EXTRACT(EPOCH FROM (COALESCE(MAX(completed_at), NOW()) - MIN(created_at)))::float8
+  EXTRACT(EPOCH FROM (MAX(completed_at) - MIN(created_at)))::float8
 FROM device_tasks
 WHERE device_sn = $1
   AND method = 'GetParameterValues'
+  AND completed_at IS NOT NULL
   AND source_id = (SELECT source_id FROM latest)
 GROUP BY source_id`
 
