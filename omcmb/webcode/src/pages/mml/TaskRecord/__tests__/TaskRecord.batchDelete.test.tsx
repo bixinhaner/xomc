@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import zhCN from '@core/i18n/zh-CN';
 
 const mocks = vi.hoisted(() => ({
+  cancelTasks: vi.fn(),
   deleteTasks: vi.fn(),
   refetchTasks: vi.fn(),
   useMMLTasks: vi.fn(),
@@ -44,6 +45,7 @@ vi.mock('@core/hooks/api/useMML', () => ({
     },
     isLoading: false,
   }),
+  useCancelMMLTasks: () => ({ mutate: mocks.cancelTasks, isPending: false }),
   useDeleteMMLTasks: () => ({ mutate: mocks.deleteTasks, isPending: false }),
 }));
 
@@ -174,6 +176,7 @@ describe('TaskRecord batch delete and console task display', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.taskItems = [buildTask()];
+    mocks.cancelTasks.mockImplementation((_ids: string[], options?: { onSuccess?: () => void }) => options?.onSuccess?.());
     mocks.deleteTasks.mockImplementation((_ids: string[], options?: { onSuccess?: () => void }) => options?.onSuccess?.());
     confirmSpy.mockClear();
   });
@@ -205,6 +208,45 @@ describe('TaskRecord batch delete and console task display', () => {
       ['task-console-1'],
       expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
     );
+  });
+
+  it('supports cancelling selected active task records in batch', () => {
+    mocks.taskItems = [
+      buildTask({ id: 'task-running-1', taskName: '运行中任务', status: 'running' }),
+      buildTask({ id: 'task-paused-1', taskName: '暂停任务', status: 'paused' }),
+    ];
+
+    renderPage();
+
+    expect(screen.getByRole('button', { name: /批量终止/ })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'select-task-running-1' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'select-task-paused-1' }));
+    fireEvent.click(screen.getByRole('button', { name: /批量终止/ }));
+
+    expect(confirmSpy).toHaveBeenCalledWith(expect.objectContaining({
+      content: '确认终止选中的 2 条任务记录？等待中、执行中和已暂停任务会变为已终止。',
+    }));
+    expect(mocks.cancelTasks).toHaveBeenCalledWith(
+      ['task-running-1', 'task-paused-1'],
+      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+    );
+  });
+
+  it('blocks batch cancel when a selected task record is already finished', () => {
+    mocks.taskItems = [
+      buildTask({ id: 'task-running-1', taskName: '运行中任务', status: 'running' }),
+      buildTask({ id: 'task-completed-1', taskName: '完成任务', status: 'completed' }),
+    ];
+
+    renderPage();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'select-task-running-1' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'select-task-completed-1' }));
+    fireEvent.click(screen.getByRole('button', { name: /批量终止/ }));
+
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(mocks.cancelTasks).not.toHaveBeenCalled();
   });
 
   it('blocks batch delete when a selected task record is still running', () => {

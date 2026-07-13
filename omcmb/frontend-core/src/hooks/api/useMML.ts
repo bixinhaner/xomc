@@ -238,6 +238,16 @@ export function useCancelMMLTask() {
   });
 }
 
+export function useCancelMMLTasks() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => api.cancelTasks(ids),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['mml', 'tasks'] });
+    },
+  });
+}
+
 export function useDeleteMMLTask() {
   const queryClient = useQueryClient();
   return useMutation({

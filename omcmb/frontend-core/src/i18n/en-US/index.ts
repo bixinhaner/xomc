@@ -6049,7 +6049,12 @@ const messages: Record<string, string> = {
   'mml.confirmDeleteTask':                   'Delete task record "{name}"? This action cannot be undone.',
   'mml.confirmBatchDeleteScripts':           'Delete {count} selected script(s)? This action cannot be undone.',
   'mml.confirmBatchDeleteTasks':             'Delete {count} selected task record(s)? The corresponding execution results will also be removed. This action cannot be undone.',
-  'mml.batchDeleteRunningTasksBlocked':      '{count} selected task record(s) are still running. Terminate them before deleting.',
+  'mml.batchCancelTasks':                    'Batch Terminate',
+  'mml.confirmBatchCancelTasks':             'Terminate {count} selected task record(s)? Pending, running, and paused tasks will become cancelled.',
+  'mml.batchCancelInvalidTasksBlocked':      '{count} selected task record(s) have already finished and cannot be terminated. Select only pending, running, or paused tasks.',
+  'mml.batchCancelSuccess':                  'Terminated {count} task record(s)',
+  'mml.batchCancelFailed':                   'Batch terminate failed: {error}',
+  'mml.batchDeleteRunningTasksBlocked':      '{count} selected task record(s) are still running. Batch terminate them or wait for completion before deleting.',
   'mml.confirmCancelTitle':                  'Confirm Cancellation',
   'mml.confirmCancelScript':                 'Terminate script "{name}"? The current execution will be interrupted.',
   // duplicates of mml.startFailed/pauseFailed/cancelFailed removed; canonical

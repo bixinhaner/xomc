@@ -1260,6 +1260,12 @@ export const mmlApi = {
     return mapBackendTask(data);
   },
 
+  async cancelTasks(ids: string[]): Promise<void> {
+    for (const id of ids) {
+      await http.post(`/mml/tasks/${id}/cancel`);
+    }
+  },
+
   async deleteTask(id: string): Promise<void> {
     await http.delete(`/mml/tasks/${id}`);
   },
