@@ -98,9 +98,10 @@ describe('ChartCard 渲染隔离 (#444)', () => {
 
   it('多设备 tooltip 设置最大高度，并提示点击图表固定后滚动查看（#24）', () => {
     const chart = makeChart([1, 2]);
+    const rawNrObjectLdn = 'Type=Cell,Mode=SA,gNBID=25,NrCGI=401,CUID=1,PLMNID=00101';
     chart.series = Array.from({ length: 20 }, (_, i) => ({
       key: `dev-${i}`,
-      name: `dev-${i}`,
+      name: i === 0 ? rawNrObjectLdn : `dev-${i}`,
       values: [i, i + 1],
     }));
     render(wrapIntl(<ChartCard chart={chart} />));
@@ -118,7 +119,8 @@ describe('ChartCard 渲染隔离 (#444)', () => {
       chart.series.map((s, i) => ({ dataIndex: 1, seriesName: s.name, value: i + 1 })),
     );
     expect(html).toContain('对象较多，点击图表固定后可滚动查看');
-    expect(html.indexOf('对象较多，点击图表固定后可滚动查看')).toBeLessThan(html.indexOf('dev-0'));
+    expect(html).toContain(rawNrObjectLdn);
+    expect(html.indexOf('对象较多，点击图表固定后可滚动查看')).toBeLessThan(html.indexOf(rawNrObjectLdn));
   });
 
   it('点击图表数据点后固定 tooltip，用户可关闭固定浮层', async () => {
