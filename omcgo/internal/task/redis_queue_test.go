@@ -496,6 +496,29 @@ func TestRedisQueue_GetStaleSentTasks_EmptyQueue(t *testing.T) {
 	assert.Empty(t, stales)
 }
 
+func TestRedisQueue_Pop_RemovesMissingDetailAndContinues(t *testing.T) {
+	q, m := newRedisQueueWithMini(t)
+	ctx := context.Background()
+
+	ghost := newTaskForQueue("t-ghost-pop", "SN-POP-MISS", "GetParameterValues")
+	good := newTaskForQueue("t-good-pop", "SN-POP-MISS", "GetParameterValues")
+	ghost.Priority = 1
+	good.Priority = 2
+
+	require.NoError(t, q.Push(ctx, ghost))
+	require.NoError(t, q.Push(ctx, good))
+	m.Del(q.taskKey(ghost.ID))
+
+	got, err := q.Pop(ctx, "SN-POP-MISS")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, good.ID, got.ID)
+
+	exists, err := q.Exists(ctx, "SN-POP-MISS", ghost.ID)
+	require.NoError(t, err)
+	assert.False(t, exists)
+}
+
 // TestRedisQueue_GetStaleSentTasks_MissingDetail 覆盖 #16 批量 pipeline 的部分 key 缺失分支：
 // 队列里有任务 ID，但其详情 Hash 已被删（TTL 过期），pipeline 单条返回 redis.Nil，
 // 应跳过该条而非整体失败，其余陈旧任务仍正常返回。
@@ -590,8 +613,12 @@ func TestRedisQueue_PopMissingDetails(t *testing.T) {
 	m.Del("acs:task:t-corrupt")
 
 	got, err := q.Pop(ctx, "SN-COR")
-	assert.Error(t, err)
+	assert.NoError(t, err)
 	assert.Nil(t, got)
+
+	exists, err := q.Exists(ctx, "SN-COR", tk.ID)
+	require.NoError(t, err)
+	assert.False(t, exists)
 }
 
 func TestRedisQueue_GetByIDCorruptJSON(t *testing.T) {

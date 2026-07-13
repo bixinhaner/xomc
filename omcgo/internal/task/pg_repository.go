@@ -300,6 +300,33 @@ func (r *PgTaskRepository) GetPendingByDevice(ctx context.Context, deviceSN stri
 	return tasks, nil
 }
 
+// CountOpenByDevice 统计设备仍在执行窗口内的 active 任务数量。
+//
+// Redis 队列是运行时加速层，可能留下已过期或已终态任务 ID；设备同步状态这类用户可见
+// 判断应以 PG 中 pending/sent 且未过期的任务为准，避免脏队列把页面长期卡在 syncing。
+func (r *PgTaskRepository) CountOpenByDevice(ctx context.Context, deviceSN string, now time.Time) (int64, error) {
+	query, args, err := storage.Psql.Select("COUNT(*)").
+		From("device_tasks").
+		Where(sq.Eq{
+			"device_sn": deviceSN,
+			"status":    []TaskStatus{TaskStatusPending, TaskStatusSent},
+		}).
+		Where(sq.Or{
+			sq.Eq{"expires_at": nil},
+			sq.Gt{"expires_at": now},
+		}).
+		ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("build count open tasks query: %w", err)
+	}
+
+	var count int64
+	if err := r.pool.QueryRow(ctx, query, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("query open task count: %w", err)
+	}
+	return count, nil
+}
+
 func (r *PgTaskRepository) HasIncompleteSyncGPVTasksByDevice(ctx context.Context, deviceSN string) (bool, error) {
 	prefix := fmt.Sprintf("sync-gpv-%s", deviceSN)
 	query, args, err := storage.Psql.Select("COUNT(*)").
@@ -324,18 +351,103 @@ func (r *PgTaskRepository) HasIncompleteSyncGPVTasksByDevice(ctx context.Context
 	return count > 0, nil
 }
 
+// CountOpenSyncGPVByDevice 统计近 24h 内仍未完成的参数同步 GPV task。
+//
+// 设备任务队列里还会混有 PM 初始化、MML、无 command_key 的临时 GPV，以及历史遗留 sent
+// 行；参数树的 sync-status 只应被当前/近期参数同步本身影响。
+func (r *PgTaskRepository) CountOpenSyncGPVByDevice(ctx context.Context, deviceSN string) (int64, error) {
+	prefix := fmt.Sprintf("sync-gpv-%s", deviceSN)
+	query, args, err := storage.Psql.Select("COUNT(*)").
+		From("device_tasks t").
+		Where(sq.Eq{"t.device_sn": deviceSN}).
+		Where(sq.Like{"t.command_key": prefix + "%"}).
+		Where(sq.Eq{"t.status": []TaskStatus{TaskStatusPending, TaskStatusSent}}).
+		Where(sq.Expr("t.created_at > now() - interval '24 hours'")).
+		Where(sq.Or{
+			sq.Eq{"t.expires_at": nil},
+			sq.Expr("t.expires_at > now()"),
+		}).
+		ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("build open sync-gpv count query: %w", err)
+	}
+	var count int64
+	if err := r.pool.QueryRow(ctx, query, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("query open sync-gpv count: %w", err)
+	}
+	return count, nil
+}
+
 func (r *PgTaskRepository) LatestSyncGPVSummaryByDevice(ctx context.Context, deviceSN string) (*SyncGPVSummary, error) {
 	const query = `
 WITH latest AS (
-  SELECT source_id
+  SELECT
+    source_id,
+    regexp_replace(command_key, '(-r)+$', '') AS root_key,
+    created_at
   FROM device_tasks
   WHERE device_sn = $1
     AND method = 'GetParameterValues'
     AND command_key LIKE 'sync-gpv-%'
     AND source_id IS NOT NULL
     AND completed_at IS NOT NULL
-  ORDER BY created_at DESC
+  ORDER BY completed_at DESC, created_at DESC
   LIMIT 1
+),
+roots AS (
+  SELECT
+    t.source_id,
+    t.command_key AS root_key,
+    t.created_at
+  FROM device_tasks t
+  JOIN latest l ON t.source_id = l.source_id
+  WHERE t.device_sn = $1
+    AND t.method = 'GetParameterValues'
+    AND t.command_key LIKE 'sync-gpv-%'
+    AND t.command_key !~ '(-r)+$'
+),
+anchor AS (
+  SELECT
+    l.source_id,
+    COALESCE((
+      SELECT r.created_at
+      FROM roots r
+      WHERE r.root_key = l.root_key
+        AND r.created_at <= l.created_at
+      ORDER BY r.created_at DESC
+      LIMIT 1
+    ), l.created_at) AS created_at
+  FROM latest l
+),
+boundary AS (
+  SELECT COALESCE(MAX(r.created_at), '-infinity'::timestamptz) AS prev_created_at
+  FROM roots r
+  CROSS JOIN anchor a
+  WHERE r.created_at < a.created_at - interval '30 seconds'
+),
+run_roots AS (
+  SELECT r.source_id, r.root_key, r.created_at
+  FROM roots r
+  CROSS JOIN anchor a
+  CROSS JOIN boundary b
+  WHERE r.created_at > b.prev_created_at
+    AND r.created_at <= a.created_at + interval '30 seconds'
+),
+run_bounds AS (
+  SELECT MIN(created_at) AS first_root_created_at
+  FROM run_roots
+),
+run_tasks AS (
+  SELECT t.*
+  FROM device_tasks t
+  JOIN run_roots r
+    ON t.source_id = r.source_id
+   AND regexp_replace(t.command_key, '(-r)+$', '') = r.root_key
+  CROSS JOIN run_bounds rb
+  WHERE t.device_sn = $1
+    AND t.method = 'GetParameterValues'
+    AND t.completed_at IS NOT NULL
+    AND t.created_at >= rb.first_root_created_at - interval '30 seconds'
 )
 SELECT
   source_id::text,
@@ -343,11 +455,7 @@ SELECT
   MIN(created_at),
   MAX(completed_at),
   EXTRACT(EPOCH FROM (MAX(completed_at) - MIN(created_at)))::float8
-FROM device_tasks
-WHERE device_sn = $1
-  AND method = 'GetParameterValues'
-  AND completed_at IS NOT NULL
-  AND source_id = (SELECT source_id FROM latest)
+FROM run_tasks
 GROUP BY source_id`
 
 	var summary SyncGPVSummary

@@ -207,6 +207,10 @@ func TestPgRepo_Integration_LatestSyncGPVSummaryIgnoresStaleUnfinishedTasks(t *t
 	staleSent := makeTask("stale", "sync-gpv-"+deviceSN+"-0-r", TaskStatusSent, staleCreated, nil)
 	require.NoError(t, repo.Create(ctx, staleSent))
 
+	oldCompletedAt := staleCreated.Add(2 * time.Hour)
+	require.NoError(t, repo.Create(ctx, makeTask("old-completed-0", "sync-gpv-"+deviceSN+"-0", TaskStatusCompleted, staleCreated, &oldCompletedAt)))
+	require.NoError(t, repo.Create(ctx, makeTask("old-completed-1", "sync-gpv-"+deviceSN+"-1", TaskStatusCompleted, staleCreated.Add(1*time.Second), &oldCompletedAt)))
+
 	firstCompletedAt := base.Add(3 * time.Second)
 	lastCompletedAt := base.Add(13*time.Second + 473*time.Millisecond)
 	require.NoError(t, repo.Create(ctx, makeTask("completed-0", "sync-gpv-"+deviceSN+"-0", TaskStatusCompleted, base, &firstCompletedAt)))
@@ -222,6 +226,59 @@ func TestPgRepo_Integration_LatestSyncGPVSummaryIgnoresStaleUnfinishedTasks(t *t
 	require.NotNil(t, summary.LastCompletedAt)
 	assert.True(t, summary.LastCompletedAt.Equal(lastCompletedAt))
 	assert.InEpsilon(t, 13.473, summary.WallClockSeconds, 0.001)
+}
+
+func TestPgRepo_Integration_LatestSyncGPVSummaryCountsLatestRunRetries(t *testing.T) {
+	pool := newTestPool(t)
+	if pool == nil {
+		return
+	}
+	defer cleanupTestTasks(t, pool)
+	repo := NewPgTaskRepository(pool)
+	ctx := context.Background()
+
+	deviceSN := testDeviceSNPrefix + "sync-gpv-retry-run"
+	sourceID := generateUUID()
+	base := time.Date(2026, 7, 13, 14, 45, 38, 0, time.UTC)
+
+	makeTask := func(id, commandKey string, createdAt time.Time, completedAt time.Time) *Task {
+		return &Task{
+			ID:                    generateUUID(),
+			DeviceSN:              deviceSN,
+			Method:                "GetParameterValues",
+			Params:                json.RawMessage(`{"paths":["Device.DeviceInfo."]}`),
+			Priority:              1,
+			CommandKey:            commandKey,
+			Status:                TaskStatusCompleted,
+			MaxRetries:            3,
+			CreatedAt:             createdAt,
+			CompletedAt:           &completedAt,
+			Source:                TaskSourceAPI,
+			SourceID:              sourceID,
+			CommandIndex:          0,
+			DeviceIndex:           0,
+			PathTranslationSource: id,
+		}
+	}
+
+	oldBase := base.Add(-4 * time.Hour)
+	require.NoError(t, repo.Create(ctx, makeTask("old-0", "sync-gpv-"+deviceSN+"-0", oldBase, oldBase.Add(5*time.Second))))
+	require.NoError(t, repo.Create(ctx, makeTask("old-1", "sync-gpv-"+deviceSN+"-1", oldBase.Add(time.Second), oldBase.Add(4*time.Minute))))
+
+	require.NoError(t, repo.Create(ctx, makeTask("new-0", "sync-gpv-"+deviceSN+"-0", base, base.Add(3*time.Second))))
+	require.NoError(t, repo.Create(ctx, makeTask("new-0-r", "sync-gpv-"+deviceSN+"-0-r", base.Add(3*time.Second), base.Add(6*time.Second))))
+	require.NoError(t, repo.Create(ctx, makeTask("new-1", "sync-gpv-"+deviceSN+"-1", base.Add(time.Second), base.Add(139*time.Second))))
+
+	summary, err := repo.LatestSyncGPVSummaryByDevice(ctx, deviceSN)
+	require.NoError(t, err)
+	require.NotNil(t, summary)
+
+	assert.Equal(t, sourceID, summary.SourceID)
+	assert.Equal(t, 3, summary.TaskCount)
+	assert.True(t, summary.FirstCreatedAt.Equal(base))
+	require.NotNil(t, summary.LastCompletedAt)
+	assert.True(t, summary.LastCompletedAt.Equal(base.Add(139*time.Second)))
+	assert.InEpsilon(t, 139, summary.WallClockSeconds, 0.001)
 }
 
 func TestPgRepo_Integration_Update(t *testing.T) {
