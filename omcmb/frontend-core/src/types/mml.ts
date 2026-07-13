@@ -94,7 +94,7 @@ export interface MMLResult {
   timestamp: string;
 }
 
-export type DeviceResultStatus = 'completed' | 'running' | 'pending';
+export type DeviceResultStatus = 'completed' | 'running' | 'pending' | 'failed' | 'expired';
 
 export interface MMLTaskRequestMessage {
   method: string;

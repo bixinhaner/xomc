@@ -2813,24 +2813,7 @@ func deviceTaskRowToResultMap(row DeviceTaskResultRowView, task *MMLTask) map[st
 	}
 	var command map[string]interface{}
 	var rawLine string
-	if task != nil && task.ExecuteMode == TaskExecuteModeDeviceBound &&
-		row.CommandIndex >= 0 && row.CommandIndex < len(task.PlanItems) {
-		plan := task.PlanItems[row.CommandIndex]
-		command = plan.Command
-		rawLine = plan.RawLine
-		m["plan_line_no"] = plan.LineNo
-		m["plan_device_sn"] = plan.DeviceSN
-		m["plan_order"] = plan.Order
-		if plan.RawLine != "" {
-			m["plan_raw_line"] = plan.RawLine
-		}
-		if commandCode := commandString(plan.Command, "command_code"); commandCode != "" {
-			m["command_code"] = commandCode
-		}
-		if op := commandString(plan.Command, "operation_type"); op != "" {
-			m["operation_type"] = op
-		}
-	} else if task != nil && row.CommandIndex >= 0 && row.CommandIndex < len(task.Commands) {
+	if task != nil && row.CommandIndex >= 0 && row.CommandIndex < len(task.Commands) {
 		command = task.Commands[row.CommandIndex]
 		if commandCode := commandString(command, "command_code"); commandCode != "" {
 			m["command_code"] = commandCode
@@ -2850,6 +2833,23 @@ func deviceTaskRowToResultMap(row DeviceTaskResultRowView, task *MMLTask) map[st
 		}
 		if order, ok := command["plan_order"].(float64); ok && order > 0 {
 			m["plan_order"] = int(order)
+		}
+	} else if task != nil && task.ExecuteMode == TaskExecuteModeDeviceBound &&
+		row.CommandIndex >= 0 && row.CommandIndex < len(task.PlanItems) {
+		plan := task.PlanItems[row.CommandIndex]
+		command = plan.Command
+		rawLine = plan.RawLine
+		m["plan_line_no"] = plan.LineNo
+		m["plan_device_sn"] = plan.DeviceSN
+		m["plan_order"] = plan.Order
+		if plan.RawLine != "" {
+			m["plan_raw_line"] = plan.RawLine
+		}
+		if commandCode := commandString(plan.Command, "command_code"); commandCode != "" {
+			m["command_code"] = commandCode
+		}
+		if op := commandString(plan.Command, "operation_type"); op != "" {
+			m["operation_type"] = op
 		}
 	}
 	if script := formatMMLScriptForResult(command, rawLine, row.DeviceSN); script != "" {
