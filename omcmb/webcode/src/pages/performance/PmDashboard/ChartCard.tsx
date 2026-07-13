@@ -10,8 +10,9 @@
  * 仅视觉连线，缺失桶仍无数据点 / tooltip 仍按桶显示）。
  */
 
-import { memo, useMemo } from 'react';
-import { Card } from 'antd';
+import { memo, useEffect, useMemo, useState } from 'react';
+import { Button, Card, Typography } from 'antd';
+import { CloseOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { useT } from '@/hooks/useT';
 import { formatSystemTime } from '@core/utils/systemTime';
@@ -28,26 +29,35 @@ interface TooltipParam {
   value?: number | string;
 }
 
-function computeScrollableTooltipPosition(
-  point: [number, number],
-  size: { contentSize: [number, number]; viewSize: [number, number] },
-): [number, number] {
-  const [pointerX, pointerY] = point;
-  const [boxW, boxH] = size.contentSize;
-  const [viewW, viewH] = size.viewSize;
-  const margin = 12;
-  const offset = 12;
-  const x = pointerX + boxW + offset <= viewW - margin
-    ? pointerX + offset
-    : pointerX - boxW - offset;
-  const y = pointerY + boxH + offset <= viewH - margin
-    ? pointerY + offset
-    : pointerY - boxH - offset;
+interface ChartClickParam {
+  dataIndex?: number;
+}
 
-  return [
-    Math.max(margin, Math.min(x, Math.max(margin, viewW - boxW - margin))),
-    Math.max(margin, Math.min(y, Math.max(margin, viewH - boxH - margin))),
-  ];
+const MANY_OBJECT_THRESHOLD = 12;
+
+function formatTooltipHeader(
+  chart: MetricChart,
+  index: number,
+  t: ReturnType<typeof useT>,
+): string {
+  const start = chart.buckets[index] ?? '';
+  const end = chart.bucketEnds[index] ?? '';
+  let header = end
+    ? `${t('pm.chart.tooltipStart')} ${fmtTime(start)}<br/>${t('pm.chart.tooltipEnd')} ${fmtTime(end)}`
+    : fmtTime(start);
+
+  // T-0194：周期对比开启时，补一行上一周期对应桶的真实「开始~结束」时间段（非照搬当前轴标签）。
+  if (chart.compareSeries && chart.compareSeries.length > 0) {
+    const pStart = chart.compareBuckets?.[index] ?? '';
+    const pEnd = chart.compareBucketEnds?.[index] ?? '';
+    if (pStart) {
+      header += pEnd
+        ? `<br/>${t('pm.chart.tooltipPrevPeriod')} ${fmtTime(pStart)} ~ ${fmtTime(pEnd)}`
+        : `<br/>${t('pm.chart.tooltipPrevPeriod')} ${fmtTime(pStart)}`;
+    }
+  }
+
+  return header;
 }
 
 // #444 渲染隔离：包 React.memo + **内容级** areEqual 比较器（chartContentEqual）。
@@ -100,6 +110,8 @@ function chartContentEqual(prev: { chart: MetricChart }, next: { chart: MetricCh
 
 function ChartCard({ chart }: { chart: MetricChart }) {
   const t = useT();
+  const [lockedIndex, setLockedIndex] = useState<number | null>(null);
+  const effectiveLockedIndex = lockedIndex != null && lockedIndex < chart.buckets.length ? lockedIndex : null;
   const xLabels = useMemo(() => chart.buckets.map(fmtTime), [chart.buckets]);
   const currentSeries = useMemo(
     () =>
@@ -142,56 +154,149 @@ function ChartCard({ chart }: { chart: MetricChart }) {
       const arr = Array.isArray(params) ? params : [params];
       if (arr.length === 0) return '';
       const idx = arr[0].dataIndex;
-      const start = chart.buckets[idx] ?? '';
-      const end = chart.bucketEnds[idx] ?? '';
-      let header = end
-        ? `${t('pm.chart.tooltipStart')} ${fmtTime(start)}<br/>${t('pm.chart.tooltipEnd')} ${fmtTime(end)}`
-        : fmtTime(start);
-      // T-0194：周期对比开启时，补一行上一周期对应桶的真实「开始~结束」时间段（非照搬当前轴标签）。
-      if (chart.compareSeries && chart.compareSeries.length > 0) {
-        const pStart = chart.compareBuckets?.[idx] ?? '';
-        const pEnd = chart.compareBucketEnds?.[idx] ?? '';
-        if (pStart) {
-          header += pEnd
-            ? `<br/>${t('pm.chart.tooltipPrevPeriod')} ${fmtTime(pStart)} ~ ${fmtTime(pEnd)}`
-            : `<br/>${t('pm.chart.tooltipPrevPeriod')} ${fmtTime(pStart)}`;
-        }
-      }
+      const header = formatTooltipHeader(chart, idx, t);
       const lines = arr
         .map((p) => `${p.marker ?? ''}${p.seriesName ?? ''}: ${p.value ?? '-'}`)
         .join('<br/>');
-      return `${header}<hr style="margin:4px 0;border:none;border-top:1px solid #eee"/>${lines}`;
+      const pinHint = arr.length > MANY_OBJECT_THRESHOLD
+        ? `<div style="margin-top:6px;padding-top:6px;border-top:1px solid #eee;color:#667085;font-size:12px;">${t('pm.chart.tooltipPinHint')}</div>`
+        : '';
+      return `${header}<hr style="margin:4px 0;border:none;border-top:1px solid #eee"/>${lines}${pinHint}`;
     };
     return {
       grid: { left: 56, right: 16, top: 36, bottom: 40 },
       xAxis: { type: 'category', data: xLabels, boundaryGap: false },
       yAxis: { type: 'value', scale: true },
       series: [...currentSeries, ...compareSeries],
-      // 多对象 tooltip 需要可进入后滚动：贴近光标显示，边界不足时自动换侧。
-      // 若放到远端对角，用户移动鼠标去 tooltip 的途中会不断刷新 axis tooltip，实际无法滚动。
+      // hover tooltip 只承担快速预览和提示；对象很多时，用户点击数据点后打开固定浮层再滚动查看。
       tooltip: {
         trigger: 'axis',
         confine: true,
         renderMode: 'html',
-        // 允许鼠标进入 tooltip 后滚动；否则 ECharts 默认会忽略其鼠标事件，滚动条不可操作。
         enterable: true,
-        // 多设备时允许 tooltip 自身滚动，避免超出图表后底部设备被裁掉（#24）。
         extraCssText: 'max-height:220px;overflow-y:auto;overflow-x:hidden;',
-        position: (
-          point: [number, number],
-          _params: unknown,
-          _dom: unknown,
-          _rect: unknown,
-          size: { contentSize: [number, number]; viewSize: [number, number] },
-        ) => computeScrollableTooltipPosition(point, size),
         formatter: tooltipFormatter,
       },
       legend: { type: 'scroll', top: 4 },
     };
   }, [chart, xLabels, currentSeries, compareSeries, t]);
+
+  const onEvents = useMemo(
+    () => ({
+      click: (params: ChartClickParam) => {
+        if (typeof params.dataIndex === 'number') {
+          setLockedIndex(params.dataIndex);
+        }
+      },
+    }),
+    [],
+  );
+
+  useEffect(() => {
+    if (effectiveLockedIndex == null) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setLockedIndex(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [effectiveLockedIndex]);
+
+  const lockedRows = useMemo(() => {
+    if (effectiveLockedIndex == null) return [];
+    const current = chart.series.map((s) => ({
+      key: s.key,
+      name: s.name,
+      value: s.values[effectiveLockedIndex] ?? '-',
+      dashed: false,
+    }));
+    const previous = (chart.compareSeries ?? []).map((s) => ({
+      key: `compare-${s.key}`,
+      name: s.name,
+      value: s.values[effectiveLockedIndex] ?? '-',
+      dashed: true,
+    }));
+    return [...current, ...previous];
+  }, [chart.series, chart.compareSeries, effectiveLockedIndex]);
+
   return (
     <Card size="small" title={chart.displayName} style={{ marginBottom: 12 }}>
-      <ReactECharts option={option} style={{ height: 260 }} notMerge />
+      <div style={{ position: 'relative' }}>
+        <ReactECharts option={option} style={{ height: 260, cursor: 'pointer' }} notMerge onEvents={onEvents} />
+        {effectiveLockedIndex != null ? (
+          <div
+            role="dialog"
+            aria-label={t('pm.chart.tooltipPinnedAria')}
+            style={{
+              position: 'absolute',
+              top: 40,
+              right: 16,
+              zIndex: 5,
+              width: 520,
+              maxWidth: 'calc(100% - 32px)',
+              background: '#fff',
+              border: '1px solid #d9d9d9',
+              borderRadius: 6,
+              boxShadow: '0 8px 24px rgba(0,0,0,0.16)',
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+                padding: '8px 10px',
+                borderBottom: '1px solid #f0f0f0',
+              }}
+            >
+              <Typography.Text strong style={{ fontSize: 13 }}>
+                {t('pm.chart.tooltipPinnedTitle')}
+              </Typography.Text>
+              <Button
+                aria-label={t('pm.chart.tooltipPinnedClose')}
+                type="text"
+                size="small"
+                icon={<CloseOutlined />}
+                onClick={() => setLockedIndex(null)}
+              />
+            </div>
+            <div style={{ padding: '8px 10px', fontSize: 12, borderBottom: '1px solid #f0f0f0' }}>
+              <span
+                dangerouslySetInnerHTML={{
+                  __html: formatTooltipHeader(chart, effectiveLockedIndex, t),
+                }}
+              />
+            </div>
+            <div style={{ maxHeight: 260, overflowY: 'auto', overflowX: 'hidden', padding: '6px 10px' }}>
+              {lockedRows.map((row) => (
+                <div
+                  key={row.key}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr auto',
+                    gap: 8,
+                    alignItems: 'start',
+                    padding: '3px 0',
+                    borderBottom: '1px solid #fafafa',
+                  }}
+                >
+                  <Typography.Text
+                    style={{
+                      fontSize: 12,
+                      wordBreak: 'break-all',
+                      fontStyle: row.dashed ? 'italic' : undefined,
+                    }}
+                  >
+                    {row.name}
+                  </Typography.Text>
+                  <Typography.Text style={{ fontSize: 12 }}>{row.value}</Typography.Text>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
     </Card>
   );
 }

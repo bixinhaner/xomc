@@ -12,7 +12,7 @@
  *     ReactECharts 收到反映新数据的 option（series 数据随之更新）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { IntlProvider } from 'react-intl';
 import { zhCN } from '@core/i18n';
@@ -21,10 +21,23 @@ import type { MetricChart } from './taskDashboardUtils';
 // 捕获 ReactECharts 每次收到的 option（render 次数 + 内容），断言重绘行为。
 const echartsRenderSpy = vi.fn();
 vi.mock('echarts-for-react', () => ({
-  default: ({ option }: { option: { series: { data: number[] }[]; tooltip?: unknown } }) => {
+  default: ({
+    option,
+    onEvents,
+  }: {
+    option: { series: { data: number[] }[]; tooltip?: unknown };
+    onEvents?: { click?: (params: { dataIndex: number }) => void };
+  }) => {
     echartsRenderSpy(option);
     const first = option.series[0]?.data ?? [];
-    return <div data-testid="echart" data-first-series={JSON.stringify(first)} />;
+    return (
+      <div>
+        <div data-testid="echart" data-first-series={JSON.stringify(first)} />
+        <button type="button" onClick={() => onEvents?.click?.({ dataIndex: 1 })}>
+          mock-chart-click
+        </button>
+      </div>
+    );
   },
 }));
 
@@ -83,7 +96,7 @@ function NewRefSameContentHarness({ values }: { values: number[] }) {
 describe('ChartCard 渲染隔离 (#444)', () => {
   beforeEach(() => echartsRenderSpy.mockClear());
 
-  it('多设备 tooltip 设置最大高度和纵向滚动，所有设备项均可查看（#24）', () => {
+  it('多设备 tooltip 设置最大高度，并提示点击图表固定后滚动查看（#24）', () => {
     const chart = makeChart([1, 2]);
     chart.series = Array.from({ length: 20 }, (_, i) => ({
       key: `dev-${i}`,
@@ -95,22 +108,56 @@ describe('ChartCard 渲染隔离 (#444)', () => {
       tooltip: {
         enterable: boolean;
         extraCssText: string;
-        position: (
-          point: [number, number],
-          params: unknown,
-          dom: unknown,
-          rect: unknown,
-          size: { contentSize: [number, number]; viewSize: [number, number] },
-        ) => [number, number];
+        formatter: (params: Array<{ dataIndex: number; seriesName: string; value: number }>) => string;
       };
     };
     expect(option.tooltip.enterable).toBe(true);
     expect(option.tooltip.extraCssText).toContain('max-height:220px');
     expect(option.tooltip.extraCssText).toContain('overflow-y:auto');
-    expect(option.tooltip.position([120, 80], null, null, null, {
-      contentSize: [240, 180],
-      viewSize: [900, 360],
-    })).toEqual([132, 92]);
+    const html = option.tooltip.formatter(
+      chart.series.map((s, i) => ({ dataIndex: 1, seriesName: s.name, value: i + 1 })),
+    );
+    expect(html).toContain('对象较多，点击图表固定后可滚动查看');
+  });
+
+  it('点击图表数据点后固定 tooltip，用户可关闭固定浮层', async () => {
+    const userEventMod = await import('@testing-library/user-event');
+    const user = userEventMod.default.setup();
+    const chart = makeChart([1, 2]);
+    chart.series = Array.from({ length: 16 }, (_, i) => ({
+      key: `dev-${i}`,
+      name: `dev-${i}`,
+      values: [i, i + 100],
+    }));
+
+    render(wrapIntl(<ChartCard chart={chart} />));
+
+    await user.click(screen.getByText('mock-chart-click'));
+
+    expect(screen.getByRole('dialog', { name: '已固定的图表提示' })).toBeInTheDocument();
+    expect(screen.getByText('已固定 · 可滚动查看全部对象')).toBeInTheDocument();
+    expect(screen.getByText('dev-0')).toBeInTheDocument();
+    expect(screen.getByText('100')).toBeInTheDocument();
+    expect(screen.getByText('dev-15')).toBeInTheDocument();
+    expect(screen.getByText('115')).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText('关闭固定提示'));
+
+    expect(screen.queryByRole('dialog', { name: '已固定的图表提示' })).not.toBeInTheDocument();
+  });
+
+  it('固定 tooltip 后按 Escape 可关闭', async () => {
+    const userEventMod = await import('@testing-library/user-event');
+    const user = userEventMod.default.setup();
+    const chart = makeChart([1, 2]);
+    render(wrapIntl(<ChartCard chart={chart} />));
+
+    await user.click(screen.getByText('mock-chart-click'));
+    expect(screen.getByRole('dialog', { name: '已固定的图表提示' })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    expect(screen.queryByRole('dialog', { name: '已固定的图表提示' })).not.toBeInTheDocument();
   });
 
   it('成功路径：父重渲染但 chart 引用不变时不重绘 ECharts（memo 隔离）', async () => {
