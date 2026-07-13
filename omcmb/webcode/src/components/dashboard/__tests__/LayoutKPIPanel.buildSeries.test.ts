@@ -187,6 +187,40 @@ describe('buildSeries — rolling week 模式', () => {
     expect(series[0].data).toEqual(Array(8).fill(null));
   });
 
+  it('双 KPI 分别保留 daily 点，缺失日期和今天保持空槽', () => {
+    const dualTrendData: MultiTrendComparisonData = {
+      K900010014: {
+        current: [
+          { time: '2026-07-06T00:00:00+08:00', value: 61 },
+          { time: '2026-07-12T00:00:00+08:00', value: 67 },
+        ],
+        compare: [],
+        metadata: { kpi_name: 'K900010014', compare_type: 'last_week' },
+      },
+      K900010013: {
+        current: [
+          { time: '2026-07-07T00:00:00+08:00', value: 31 },
+          { time: '2026-07-11T00:00:00+08:00', value: 35 },
+        ],
+        compare: [],
+        metadata: { kpi_name: 'K900010013', compare_type: 'last_week' },
+      },
+    };
+
+    const { series } = buildSeries(
+      ['K900010014', 'K900010013'], dualTrendData, X_DATA, '周', 'unused', fakeResolveMeta,
+      undefined, 'last_week', WEEK_DATES,
+    );
+
+    expect(series).toHaveLength(2);
+    expect(series[0].name).toBe('name:K900010014');
+    expect(series[0].data).toEqual([61, null, null, null, null, null, 67, null]);
+    expect(series[1].name).toBe('name:K900010013');
+    expect(series[1].data).toEqual([null, 31, null, null, null, 35, null, null]);
+    expect(series[0].color).not.toBe(series[1].color);
+    expect(shouldShowKPIChartLegend('last_week', 2)).toBe(true);
+  });
+
   it('单指标周模式隐藏冗余图例，多指标及天模式保留图例', () => {
     expect(shouldShowKPIChartLegend('last_week', 1)).toBe(false);
     expect(shouldShowKPIChartLegend('last_week', 2)).toBe(true);
