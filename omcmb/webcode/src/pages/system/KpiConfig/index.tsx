@@ -11,7 +11,7 @@
  * 后端不动（S1 已就位）；不做实时预览、不做版本锁/冲突合并。
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   App,
   Button,
@@ -21,12 +21,14 @@ import {
   Space,
   Tabs,
   Tag,
+  theme,
   Tooltip,
   Typography,
 } from 'antd';
 import {
   DeleteOutlined,
   HolderOutlined,
+  InfoCircleOutlined,
   PlusOutlined,
   SaveOutlined,
   TableOutlined,
@@ -76,7 +78,7 @@ const TECH_TO_DEVICE_TYPE: Record<TechnologyType, DeviceType> = {
 /** 12 列网格、每行高度（px）；与首页渲染口径相近，纯编辑期视觉用。 */
 const GRID_COLS = 12;
 const ROW_HEIGHT = 30;
-const GRID_WIDTH = 1100;
+const GRID_FALLBACK_WIDTH = 1100;
 
 /**
  * 单个制式的编辑面板（拖拽画布 + 加图 + 保存）。
@@ -85,6 +87,38 @@ const GRID_WIDTH = 1100;
 function TechEditor({ tech }: { tech: TechnologyType }) {
   const t = useT();
   const { message } = App.useApp();
+  const { token } = theme.useToken();
+  const gridContainerRef = useRef<HTMLDivElement>(null);
+  const [gridWidth, setGridWidth] = useState(GRID_FALLBACK_WIDTH);
+
+  const measureGridWidth = useCallback(() => {
+    const container = gridContainerRef.current;
+    if (!container) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const cardBody = container.closest('.ant-card-body');
+    const rightEdge = cardBody instanceof HTMLElement
+      ? cardBody.getBoundingClientRect().right
+      : document.documentElement.clientWidth;
+    const nextWidth = Math.max(0, Math.floor(rightEdge - containerRect.left));
+    setGridWidth((current) => current === nextWidth ? current : nextWidth);
+  }, []);
+
+  useLayoutEffect(() => {
+    const container = gridContainerRef.current;
+    if (!container) return;
+
+    measureGridWidth();
+    const cardBody = container.closest('.ant-card-body');
+    const observer = new ResizeObserver(measureGridWidth);
+    observer.observe(container);
+    if (cardBody instanceof HTMLElement) observer.observe(cardBody);
+    window.addEventListener('resize', measureGridWidth);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', measureGridWidth);
+    };
+  }, [measureGridWidth]);
 
   const { data: remoteLayout, isLoading: layoutLoading } = useKPILayout(tech);
   const saveMutation = useSaveKPILayout();
@@ -159,7 +193,7 @@ function TechEditor({ tech }: { tech: TechnologyType }) {
 
   return (
     <div>
-      <Space style={{ marginBottom: 16 }}>
+      <Space size={12} wrap style={{ marginBottom: 16 }}>
         <Button icon={<PlusOutlined />} onClick={handleAdd}>
           {t('dashboard.kpiConfig.addPanel')}
         </Button>
@@ -171,33 +205,45 @@ function TechEditor({ tech }: { tech: TechnologyType }) {
         >
           {t('dashboard.kpiConfig.save')}
         </Button>
-        <Text type="secondary">{t('dashboard.kpiConfig.hint')}</Text>
+        <Space size={6} style={{ color: token.colorTextTertiary }}>
+          <InfoCircleOutlined />
+          <Text type="secondary">{t('dashboard.kpiConfig.hint')}</Text>
+        </Space>
       </Space>
 
       {panels.length === 0 ? (
         <Empty description={t('dashboard.kpiConfig.emptyTip')} />
       ) : (
-        <GridLayout
-          layout={gridLayout as Layout}
-          width={GRID_WIDTH}
-          gridConfig={{ cols: GRID_COLS, rowHeight: ROW_HEIGHT }}
-          dragConfig={{ handle: '.kpi-config-drag-grip' }}
-          onLayoutChange={handleLayoutChange}
-        >
-          {panels.map((panel) => (
-            <div key={panel.id}>
-              <Card
+        <div ref={gridContainerRef} style={{ width: '100%', minWidth: 0 }}>
+            <GridLayout
+              layout={gridLayout as Layout}
+              width={gridWidth}
+              gridConfig={{
+                cols: GRID_COLS,
+                rowHeight: ROW_HEIGHT,
+                margin: [24, 16],
+                containerPadding: [0, 0],
+              }}
+              dragConfig={{ handle: '.kpi-config-drag-grip' }}
+              onLayoutChange={handleLayoutChange}
+            >
+              {panels.map((panel) => (
+                <div key={panel.id}>
+                  <Card
                 size="small"
                 style={{ height: '100%', overflow: 'hidden' }}
-                styles={{ body: { padding: 12 } }}
+                styles={{
+                  header: { minHeight: 52, paddingInline: 16 },
+                  body: { padding: 16 },
+                }}
                 title={
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     {/* 专用拖拽手柄：grip 图标负责拖动整张图卡；标题输入框拦截 mousedown 只供编辑，
                         故二者分离——避免「输入框填满标题栏导致无处可抓、拖不动」。 */}
                     <Tooltip title={t('dashboard.kpiConfig.dragHint')}>
                       <HolderOutlined
                         className="kpi-config-drag-grip"
-                        style={{ cursor: 'move', color: '#999', flex: 'none' }}
+                        style={{ cursor: 'move', color: token.colorTextTertiary, flex: 'none' }}
                       />
                     </Tooltip>
                     <Input
@@ -228,10 +274,10 @@ function TechEditor({ tech }: { tech: TechnologyType }) {
                 }
               >
                 <div onMouseDown={(e) => e.stopPropagation()}>
-                  <Space orientation="vertical" style={{ width: '100%' }} size={4}>
+                  <Space orientation="vertical" style={{ width: '100%' }} size={10}>
                     <Button
                       icon={<TableOutlined />}
-                      style={{ width: '100%' }}
+                      style={{ width: '100%', height: 40 }}
                       onClick={() => setPickerPanelId(panel.id)}
                     >
                       {t('dashboard.kpiConfig.pickMetrics')}
@@ -244,7 +290,7 @@ function TechEditor({ tech }: { tech: TechnologyType }) {
                     {panel.metrics.length === 0 ? (
                       <Text type="secondary">{t('dashboard.kpiConfig.noMetrics')}</Text>
                     ) : panel.metrics.length <= 10 ? (
-                      <div style={{ lineHeight: '24px' }}>
+                      <div style={{ lineHeight: '28px' }}>
                         {panel.metrics.map((code) => {
                           const label = metricLabels[code] ?? indicatorNameMap[code] ?? code;
                           return (
@@ -261,7 +307,8 @@ function TechEditor({ tech }: { tech: TechnologyType }) {
                                   )
                                 }
                                 style={{
-                                  marginBottom: 4,
+                                  marginInlineEnd: 8,
+                                  marginBottom: 8,
                                   maxWidth: 160,
                                   overflow: 'hidden',
                                   textOverflow: 'ellipsis',
@@ -300,10 +347,11 @@ function TechEditor({ tech }: { tech: TechnologyType }) {
                     )}
                   </Space>
                 </div>
-              </Card>
-            </div>
-          ))}
-        </GridLayout>
+                  </Card>
+                </div>
+              ))}
+            </GridLayout>
+        </div>
       )}
 
       {/* 指标表格弹窗（共享件）：按当前制式锁定取数，可搜索 / 跨页多选全库（counter+KPI）。
@@ -352,10 +400,14 @@ export default function KpiConfigPage() {
   }));
 
   return (
-    <Card title={t('dashboard.kpiConfig.pageTitle')}>
+    <Card
+      title={t('dashboard.kpiConfig.pageTitle')}
+      styles={{ body: { padding: '16px 20px 20px' } }}
+    >
       <Tabs
         activeKey={activeTech}
         items={items}
+        tabBarStyle={{ marginBottom: 12 }}
         onChange={(key) => setActiveTech(key as TechnologyType)}
       />
     </Card>

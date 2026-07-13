@@ -103,41 +103,60 @@ export function toMetricOptions(items: KPIDefinitionItem[]): MetricOption[] {
 }
 
 /**
- * 新增一张空图：追加到末尾，默认半宽、标题空、无指标。
+ * 新增一张空图：插入布局最前，默认半宽、标题空、无指标。
  *
- * 落位策略：优先填满最后一行的右侧空位（与默认两列布局对齐），无空位再另起新行。
- * 具体落位由用户拖拽再调，存盘以最终坐标为准。
+ * 落位策略：新图放在左上角，旧图按当前 y/x 视觉顺序排列，再从左到右、
+ * 从上到下依次紧凑排布。旧图宽高保持不变，只调整 x/y；存盘后首页也会
+ * 按 panels 数组顺序将新图渲染在最前。
  *
  * @param panels 现有工作态 panels
  * @param title 默认标题（i18n key 或用户纯文本）
- * @returns 追加新图后的新数组（不可变）
+ * @returns 新图置首后的新数组（不可变）
  */
 export function addPanel(panels: WorkingPanel[], title = ''): WorkingPanel[] {
-  const maxBottom = panels.reduce((max, p) => Math.max(max, p.y + p.h), 0);
+  const added: WorkingPanel = {
+    id: nextPanelId(),
+    title,
+    metrics: [],
+    x: 0,
+    y: 0,
+    w: HALF_WIDTH,
+    h: DEFAULT_HEIGHT,
+    chartType: 'line',
+  };
 
-  // 检查最后一行（y 最大的行）是否只有左侧半宽图而右侧空缺。
-  // 若是，新图摆右侧，与左侧并排；否则另起新行。
-  const maxY = panels.length > 0 ? panels.reduce((max, p) => Math.max(max, p.y), 0) : -1;
-  const lastRowHasLeft =
-    maxY >= 0 && panels.some((p) => p.y === maxY && p.x === 0 && p.w === HALF_WIDTH);
-  const lastRowHasRight = maxY >= 0 && panels.some((p) => p.y === maxY && p.x >= HALF_WIDTH);
+  const ordered = panels
+    .slice()
+    .sort((a, b) => a.y - b.y || a.x - b.x);
 
-  const newX = lastRowHasLeft && !lastRowHasRight ? HALF_WIDTH : 0;
-  const newY = newX === HALF_WIDTH ? maxY : maxBottom;
+  return packPanels([added, ...ordered]);
+}
 
-  return [
-    ...panels,
-    {
-      id: nextPanelId(),
-      title,
-      metrics: [],
-      x: newX,
-      y: newY,
-      w: HALF_WIDTH,
-      h: DEFAULT_HEIGHT,
-      chartType: 'line',
-    },
-  ];
+/** 按数组顺序从左到右、从上到下紧凑排位，保留每张图的宽高。 */
+function packPanels(panels: WorkingPanel[]): WorkingPanel[] {
+  const skyline = Array<number>(FULL_WIDTH).fill(0);
+
+  const place = (panel: WorkingPanel): WorkingPanel => {
+    const width = Math.max(1, Math.min(FULL_WIDTH, panel.w));
+    let bestX = 0;
+    let bestY = Number.POSITIVE_INFINITY;
+
+    for (let x = 0; x <= FULL_WIDTH - width; x += 1) {
+      const y = Math.max(...skyline.slice(x, x + width));
+      if (y < bestY) {
+        bestX = x;
+        bestY = y;
+      }
+    }
+
+    const bottom = bestY + panel.h;
+    for (let x = bestX; x < bestX + width; x += 1) {
+      skyline[x] = bottom;
+    }
+    return { ...panel, x: bestX, y: bestY };
+  };
+
+  return panels.map(place);
 }
 
 /**
@@ -148,7 +167,8 @@ export function addPanel(panels: WorkingPanel[], title = ''): WorkingPanel[] {
  * @returns 删除后的新数组（不可变）
  */
 export function removePanel(panels: WorkingPanel[], id: string): WorkingPanel[] {
-  return panels.filter((p) => p.id !== id);
+  const remaining = panels.filter((p) => p.id !== id);
+  return remaining.length === panels.length ? panels : packPanels(remaining);
 }
 
 /**
@@ -195,7 +215,8 @@ export interface GridLayoutItem {
 /**
  * 拖拽 / 拉伸后，把 react-grid-layout 回传的坐标写回工作态 panels（按 id 对齐）。
  *
- * 只更新 x/y/w/h，标题与指标不动；layout 里没有的 id（极端竞态）保持原样。
+ * 只更新 x/y/w/h，标题与指标不动；若 layout 与当前 panels 的 id 集合不一致，
+ * 说明这是增删卡片前的过期回调，整次忽略，避免旧坐标覆盖刚完成的重新排位。
  *
  * @param panels 现有工作态 panels
  * @param layout RGL 回传的 layout items
@@ -205,12 +226,21 @@ export function applyGridLayout(
   panels: WorkingPanel[],
   layout: GridLayoutItem[],
 ): WorkingPanel[] {
+  const panelIds = new Set(panels.map((p) => p.id));
+  const layoutIds = new Set(layout.map((item) => item.i));
+  if (
+    panelIds.size !== layoutIds.size
+    || [...panelIds].some((id) => !layoutIds.has(id))
+  ) {
+    return panels;
+  }
+
   const byId = new Map(layout.map((l) => [l.i, l]));
   return panels.map((p) => {
     const g = byId.get(p.id);
     if (!g) return p;
     return { ...p, x: g.x, y: g.y, w: g.w, h: g.h };
-  });
+  }).sort((a, b) => a.y - b.y || a.x - b.x);
 }
 
 /**
