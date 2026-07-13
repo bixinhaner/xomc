@@ -34,6 +34,39 @@ interface ChartClickParam {
 }
 
 const MANY_OBJECT_THRESHOLD = 12;
+const TOOLTIP_WIDTH = 520;
+const TOOLTIP_TEXT_COLOR = '#1f2937';
+const TOOLTIP_MUTED_COLOR = '#344054';
+const TOOLTIP_STRONG_COLOR = '#111827';
+const TOOLTIP_BORDER_COLOR = '#d9d9d9';
+const TOOLTIP_DIVIDER_COLOR = '#f0f0f0';
+const TOOLTIP_ROW_DIVIDER_COLOR = '#fafafa';
+const TOOLTIP_FONT_FAMILY = '-apple-system, system-ui, Segoe UI, Roboto, Helvetica Neue, Arial, Noto Sans, sans-serif';
+const TOOLTIP_MONO_FONT_FAMILY = 'SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace';
+const TOOLTIP_SHADOW = '0 8px 24px rgba(0,0,0,0.16)';
+
+function escapeTooltipHtml(value: number | string | undefined): string {
+  return String(value ?? '-')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function formatTooltipRowHtml(param: TooltipParam): string {
+  return [
+    `<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:12px;align-items:start;padding:6px 0;border-bottom:1px solid ${TOOLTIP_ROW_DIVIDER_COLOR};">`,
+    `<span style="min-width:0;font-size:13px;line-height:18px;color:${TOOLTIP_TEXT_COLOR};font-family:${TOOLTIP_MONO_FONT_FAMILY};overflow-wrap:anywhere;word-break:break-word;">`,
+    param.marker ?? '',
+    escapeTooltipHtml(param.seriesName),
+    '</span>',
+    `<strong style="font-size:13px;line-height:18px;color:${TOOLTIP_STRONG_COLOR};font-family:${TOOLTIP_FONT_FAMILY};">`,
+    escapeTooltipHtml(param.value),
+    '</strong>',
+    '</div>',
+  ].join('');
+}
 
 function formatTooltipHeader(
   chart: MetricChart,
@@ -155,13 +188,17 @@ function ChartCard({ chart }: { chart: MetricChart }) {
       if (arr.length === 0) return '';
       const idx = arr[0].dataIndex;
       const header = formatTooltipHeader(chart, idx, t);
-      const lines = arr
-        .map((p) => `${p.marker ?? ''}${p.seriesName ?? ''}: ${p.value ?? '-'}`)
-        .join('<br/>');
+      const lines = arr.map(formatTooltipRowHtml).join('');
       const pinHint = arr.length > MANY_OBJECT_THRESHOLD
-        ? `<div style="margin-top:6px;padding-top:6px;border-top:1px solid #eee;color:#667085;font-size:12px;">${t('pm.chart.tooltipPinHint')}</div>`
+        ? `<div style="margin-top:6px;padding-top:6px;border-top:1px solid ${TOOLTIP_DIVIDER_COLOR};color:#667085;font-size:12px;line-height:18px;">${t('pm.chart.tooltipPinHint')}</div>`
         : '';
-      return `${header}<hr style="margin:4px 0;border:none;border-top:1px solid #eee"/>${lines}${pinHint}`;
+      return [
+        `<div style="font-size:13px;line-height:20px;color:${TOOLTIP_MUTED_COLOR};padding-bottom:6px;border-bottom:1px solid ${TOOLTIP_DIVIDER_COLOR};">`,
+        header,
+        '</div>',
+        `<div style="padding-top:6px;">${lines}</div>`,
+        pinHint,
+      ].join('');
     };
     return {
       grid: { left: 56, right: 16, top: 36, bottom: 40 },
@@ -174,7 +211,20 @@ function ChartCard({ chart }: { chart: MetricChart }) {
         confine: true,
         renderMode: 'html',
         enterable: true,
-        extraCssText: 'max-height:220px;overflow-y:auto;overflow-x:hidden;',
+        extraCssText: [
+          `width:${TOOLTIP_WIDTH}px`,
+          'max-width:calc(100% - 32px)',
+          'max-height:220px',
+          'overflow-y:auto',
+          'overflow-x:hidden',
+          'white-space:normal',
+          'background:#fff',
+          `color:${TOOLTIP_STRONG_COLOR}`,
+          `border:1px solid ${TOOLTIP_BORDER_COLOR}`,
+          'border-radius:6px',
+          `box-shadow:${TOOLTIP_SHADOW}`,
+          'padding:10px',
+        ].join(';'),
         formatter: tooltipFormatter,
       },
       legend: { type: 'scroll', top: 4 },
@@ -231,12 +281,13 @@ function ChartCard({ chart }: { chart: MetricChart }) {
               top: 40,
               right: 16,
               zIndex: 5,
-              width: 520,
+              width: TOOLTIP_WIDTH,
               maxWidth: 'calc(100% - 32px)',
               background: '#fff',
-              border: '1px solid #d9d9d9',
+              color: TOOLTIP_STRONG_COLOR,
+              border: `1px solid ${TOOLTIP_BORDER_COLOR}`,
               borderRadius: 6,
-              boxShadow: '0 8px 24px rgba(0,0,0,0.16)',
+              boxShadow: TOOLTIP_SHADOW,
               overflow: 'hidden',
             }}
           >
@@ -247,10 +298,10 @@ function ChartCard({ chart }: { chart: MetricChart }) {
                 justifyContent: 'space-between',
                 gap: 12,
                 padding: '8px 10px',
-                borderBottom: '1px solid #f0f0f0',
+                borderBottom: `1px solid ${TOOLTIP_DIVIDER_COLOR}`,
               }}
             >
-              <Typography.Text strong style={{ fontSize: 13 }}>
+              <Typography.Text strong style={{ fontSize: 14, color: TOOLTIP_STRONG_COLOR }}>
                 {t('pm.chart.tooltipPinnedTitle')}
               </Typography.Text>
               <Button
@@ -258,10 +309,19 @@ function ChartCard({ chart }: { chart: MetricChart }) {
                 type="text"
                 size="small"
                 icon={<CloseOutlined />}
+                style={{ color: TOOLTIP_MUTED_COLOR }}
                 onClick={() => setLockedIndex(null)}
               />
             </div>
-            <div style={{ padding: '8px 10px', fontSize: 12, borderBottom: '1px solid #f0f0f0' }}>
+            <div
+              style={{
+                padding: '8px 10px',
+                fontSize: 13,
+                lineHeight: '20px',
+                color: TOOLTIP_MUTED_COLOR,
+                borderBottom: `1px solid ${TOOLTIP_DIVIDER_COLOR}`,
+              }}
+            >
               <span
                 dangerouslySetInnerHTML={{
                   __html: formatTooltipHeader(chart, effectiveLockedIndex, t),
@@ -274,23 +334,29 @@ function ChartCard({ chart }: { chart: MetricChart }) {
                   key={row.key}
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: '1fr auto',
-                    gap: 8,
+                    gridTemplateColumns: 'minmax(0, 1fr) auto',
+                    columnGap: 12,
                     alignItems: 'start',
-                    padding: '3px 0',
-                    borderBottom: '1px solid #fafafa',
+                    padding: '6px 0',
+                    borderBottom: `1px solid ${TOOLTIP_ROW_DIVIDER_COLOR}`,
                   }}
                 >
                   <Typography.Text
                     style={{
-                      fontSize: 12,
-                      wordBreak: 'break-all',
+                      fontSize: 13,
+                      lineHeight: '18px',
+                      color: TOOLTIP_TEXT_COLOR,
+                      fontFamily: TOOLTIP_MONO_FONT_FAMILY,
+                      overflowWrap: 'anywhere',
+                      wordBreak: 'break-word',
                       fontStyle: row.dashed ? 'italic' : undefined,
                     }}
                   >
                     {row.name}
                   </Typography.Text>
-                  <Typography.Text style={{ fontSize: 12 }}>{row.value}</Typography.Text>
+                  <Typography.Text strong style={{ fontSize: 13, lineHeight: '18px', color: TOOLTIP_STRONG_COLOR }}>
+                    {row.value}
+                  </Typography.Text>
                 </div>
               ))}
             </div>

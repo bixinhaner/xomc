@@ -137,7 +137,9 @@ describe('ChartCard 渲染隔离 (#444)', () => {
     expect(screen.getByRole('dialog', { name: '已固定的图表提示' })).toBeInTheDocument();
     expect(screen.getByText('已固定 · 可滚动查看全部对象')).toBeInTheDocument();
     expect(screen.getByText('dev-0')).toBeInTheDocument();
+    expect(screen.getByText('dev-0')).toHaveStyle({ color: '#1f2937' });
     expect(screen.getByText('100')).toBeInTheDocument();
+    expect(screen.getByText('100')).toHaveStyle({ color: '#111827' });
     expect(screen.getByText('dev-15')).toBeInTheDocument();
     expect(screen.getByText('115')).toBeInTheDocument();
 
