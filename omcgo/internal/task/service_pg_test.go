@@ -198,6 +198,15 @@ func TestService_PG_CountOpenSyncGPVByDevice_ScopesToRecentSyncTasks(t *testing.
 	staleSync.SentAt = &sentAt
 	require.NoError(t, repo.Create(ctx, staleSync))
 
+	orphanSync := freshTaskForPG("orphan-sync", "sync-count")
+	orphanSync.CommandKey = "sync-gpv-" + sn + "-0-r"
+	orphanSync.Status = TaskStatusSent
+	orphanSync.ExpiresAt = nil
+	orphanSync.CreatedAt = time.Now().Add(-2 * time.Hour)
+	orphanSentAt := orphanSync.CreatedAt
+	orphanSync.SentAt = &orphanSentAt
+	require.NoError(t, repo.Create(ctx, orphanSync))
+
 	oldFailedSync := freshTaskForPG("old-failed-sync", "sync-count")
 	oldFailedSync.CommandKey = "sync-gpv-" + sn + "-1"
 	oldFailedSync.Status = TaskStatusExpired

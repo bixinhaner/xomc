@@ -1392,6 +1392,8 @@ func rpcResponseMatchesTask(responseMethod soap.RPCMethod, taskMethod string) bo
 	}
 }
 
+const syncGPVRecoveryTaskExpiresIn = 1800
+
 // tryRecoverGPVFault 在参数同步 GPV 收到 SOAP Fault 时执行自愈：从原批次剔除坏 path，
 // 用剩余 path 重新入队 GPV 续查；批次空则视为该批完成（无任何参数可查）。
 //
@@ -1465,6 +1467,7 @@ func (h *Handler) tryRecoverGPVFault(ctx context.Context, taskItem *task.Task, b
 		Method:     "GetParameterValues",
 		Params:     newParams,
 		Priority:   taskItem.Priority,
+		ExpiresIn:  syncGPVRecoveryTaskExpiresIn,
 		CommandKey: taskItem.CommandKey + "-r",
 		Source:     taskItem.Source,
 		SourceID:   taskItem.SourceID,

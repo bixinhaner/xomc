@@ -161,7 +161,30 @@
         <param name="Device.FAP.GPS.LockedLongitude" standardPath="Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude" access="READ_WRITE" type="INT" changeApplies="Immediate" min="-180000000" max="180000000"/>
         <param name="Device.FAP.GPS.LockedLongitude2" standardPath="Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude2" access="READ_WRITE" type="INT" changeApplies="Immediate" min="-180000000" max="180000000"/>
         <param name="Device.FAP.GPS.LockedLongitude3" standardPath="Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude3" access="READ_WRITE" type="INT" changeApplies="Immediate" min="-180000000" max="180000000"/>
+        <param name="Device.FAP.GNSS.SyncSource" standardPath="Device.FAP.GNSS.SyncSource" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param name="Device.FAP.PTP1588.Correction" standardPath="Device.FAP.PTP1588.Correction" access="READ_WRITE" type="INT" changeApplies="Immediate"/>
+        <param name="Device.FAP.PTP1588.DelayInterval" standardPath="Device.FAP.PTP1588.DelayInterval" access="READ_WRITE" type="INT" changeApplies="Immediate"/>
+        <param name="Device.FAP.PTP1588.Domain" standardPath="Device.FAP.PTP1588.Domain" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param name="Device.FAP.PTP1588.Integral" standardPath="Device.FAP.PTP1588.Integral" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.FAP.PTP1588.Interface" standardPath="Device.FAP.PTP1588.Interface" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.FAP.PTP1588.Profile" standardPath="Device.FAP.PTP1588.Profile" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.FAP.PTP1588.Proportional" standardPath="Device.FAP.PTP1588.Proportional" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.FAP.PTP1588.StableOffset" standardPath="Device.FAP.PTP1588.StableOffset" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param name="Device.FAP.PTP1588.StableSpike" standardPath="Device.FAP.PTP1588.StableSpike" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param name="Device.FAP.PTP1588.SyncInterval" standardPath="Device.FAP.PTP1588.SyncInterval" access="READ_WRITE" type="INT" changeApplies="Immediate"/>
+        <param name="Device.FAP.PTP1588.Transmode" standardPath="Device.FAP.PTP1588.Transmode" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.FAP.PTP1588.UnicastMode" standardPath="Device.FAP.PTP1588.UnicastMode" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param name="Device.FAP.GPS.altidute" standardPath="Device.FAP.GPS.Height" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.FAP.Synchronization.PpsTimeMode" standardPath="Device.FAP.Synchronization.PpsTimeMode" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param name="Device.Time.CurrentLocalTime" standardPath="Device.Time.CurrentLocalTime" access="READ_ONLY" type="DATE_TIME" changeApplies="Immediate"/>
+        <param name="Device.Time.Enable" standardPath="Device.Time.Enable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
+        <param name="Device.Time.LTE_X_COM_NTP_SYNC_INTERVAL" standardPath="Device.Time.LTE_X_COM_NTP_SYNC_INTERVAL" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param name="Device.Time.LocalTimeZoneName" standardPath="Device.Time.LocalTimeZoneName" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Time.NTPServer1" standardPath="Device.Time.NTPServer1" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Time.NTPServer2" standardPath="Device.Time.NTPServer2" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Time.NTPServer3" standardPath="Device.Time.NTPServer3" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Time.NTPServer4" standardPath="Device.Time.NTPServer4" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Time.NTPServer5" standardPath="Device.Time.NTPServer5" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_DPDACTION" standardPath="Device.FAP.Ipsec.{i}.DPDACTION" access="READ_WRITE" type="INT" changeApplies="Immediate"/>
         <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_DPDDELAY" standardPath="Device.FAP.Ipsec.{i}.DPDDELAY" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="256"/>
         <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_ESPAUTHENTICATION" standardPath="Device.FAP.Ipsec.{i}.ESP_AUTHENTICATION" access="READ_WRITE" type="INT" changeApplies="Immediate"/>

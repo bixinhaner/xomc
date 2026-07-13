@@ -4,6 +4,7 @@ import type { FormInstance } from 'antd';
 import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, DeleteOutlined, PlusOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { useParameterSchema, useSearchParameters, useUpdateParameters } from '@core/hooks/api/useDeviceParameters';
+import { deviceParameterApi } from '@core/services/api/deviceParameterApi';
 import { useDeviceTaskStatus } from '@core/hooks/api/useDeviceTask';
 import { notificationKeys } from '@core/hooks/api/useNotificationCenter';
 import { useRenameDevice } from '@core/hooks/api/useDevices';
@@ -39,6 +40,13 @@ const ERROR_FEEDBACK_DURATION_SECONDS = 2;
 
 // FAPService.1 HNBName 标准路径：命中此 path 的字段走 rename 接口（不走普通 SPV 下发）
 const HNB_NAME_PATH = 'Device.Services.FAPService.1.AccessMgmt.LTE.HNBName';
+const BITMASK_SELECT_PATHS = new Set([
+  'Device.FAP.Synchronization.PpsTimeMode',
+  'Device.FAP.GNSS.SyncSource',
+]);
+const BM_PPS_TIME_MODE_PATH = 'Device.FAP.Synchronization.PpsTimeMode';
+const BM_GNSS_SYNC_SOURCE_PATH = 'Device.FAP.GNSS.SyncSource';
+const BM_PTP_CONFIG_PREFIX = 'Device.FAP.PTP1588.';
 
 type TFn = (id: string, values?: Record<string, string | number>) => string;
 
@@ -289,6 +297,12 @@ function isNtpServerPath(path: string): boolean {
   return /^Device\.Time\.NTPServer\d+$/.test(path);
 }
 
+function isValidNtpServerValue(raw: unknown): boolean {
+  const value = String(raw ?? '').trim();
+  if (!value) return false;
+  return !['0.0.0.0', '::', '::0', '0:0:0:0:0:0:0:0'].includes(value);
+}
+
 /** T-0146:状态机 Tag 显示规则。 */
 interface StatusTagSpec {
   color: string;
@@ -327,6 +341,94 @@ function appendCurrentOptionWithLabel(
     return options;
   }
   return [{ value: currentValue, label: currentLabel || currentValue }, ...options];
+}
+
+function isBitmaskSelectPath(path: string): boolean {
+  return BITMASK_SELECT_PATHS.has(path);
+}
+
+function isBmPtpConfigPath(path: string): boolean {
+  return path.startsWith(BM_PTP_CONFIG_PREFIX);
+}
+
+function isBmGnssSyncSourcePath(path: string): boolean {
+  return path === BM_GNSS_SYNC_SOURCE_PATH;
+}
+
+function bitmaskHasBit(raw: unknown, bit: number): boolean {
+  const numeric = Number(String(raw ?? '').trim());
+  return Number.isInteger(numeric) && (numeric & bit) !== 0;
+}
+
+function normalizeBitmaskValue(raw: unknown): string {
+  const numeric = Number(String(raw ?? '').trim());
+  if (!Number.isFinite(numeric) || numeric < 0) return '';
+  return String(numeric);
+}
+
+function buildBitmaskCombinationOptions(
+  values: string[],
+  labels: string[],
+  locale: 'zh-CN' | 'en-US',
+): Array<{ value: string; label: string }> {
+  const baseOptions = values.map((value, idx) => ({
+    value,
+    label: localizeEnumLabel(labels[idx] || value, value, locale),
+  })).filter((option) => {
+    const bit = Number(option.value);
+    return Number.isFinite(bit) && bit > 0;
+  });
+  const options: Array<{ value: string; label: string }> = [];
+  const visit = (start: number, count: number, mask: number, parts: string[]) => {
+    if (parts.length === count) {
+      options.push({ value: String(mask), label: parts.join('+') });
+      return;
+    }
+    for (let i = start; i < baseOptions.length; i += 1) {
+      const option = baseOptions[i];
+      visit(i + 1, count, mask | Number(option.value), [...parts, option.label]);
+    }
+  };
+  for (let count = 1; count <= baseOptions.length; count += 1) {
+    visit(0, count, 0, []);
+  }
+  return options;
+}
+
+function serializeBitmaskValue(raw: unknown): string {
+  const values = Array.isArray(raw) ? raw : raw == null || raw === '' ? [] : [raw];
+  const mask = values.reduce((acc, value) => {
+    const bit = Number(String(value ?? '').trim());
+    return Number.isFinite(bit) && bit > 0 ? acc | bit : acc;
+  }, 0);
+  return String(mask);
+}
+
+function validateBitmaskValue(value: string, allowedValues: string[], minValue?: number, maxValue?: number): string | null {
+  if (!value) return '请输入值';
+  const numeric = Number(value);
+  if (!Number.isInteger(numeric) || numeric < 0) return '请输入非负整数';
+  if (minValue !== undefined && numeric < minValue) return `最小值为 ${minValue}`;
+  if (maxValue !== undefined && numeric > maxValue) return `最大值为 ${maxValue}`;
+
+  const allowedMask = allowedValues.reduce((acc, raw) => {
+    const bit = Number(String(raw ?? '').trim());
+    return Number.isInteger(bit) && bit > 0 ? acc | bit : acc;
+  }, 0);
+  if (allowedMask <= 0) return null;
+  if (numeric <= 0 || (numeric & ~allowedMask) !== 0) {
+    return `允许的组合: ${allowedValues.join(', ')}`;
+  }
+  return null;
+}
+
+function formValueEquals(left: unknown, right: unknown): boolean {
+  if (Array.isArray(left) || Array.isArray(right)) {
+    const leftValues = Array.isArray(left) ? left : left == null ? [] : [left];
+    const rightValues = Array.isArray(right) ? right : right == null ? [] : [right];
+    return leftValues.map(String).join(',') === rightValues.map(String).join(',');
+  }
+  return left === right;
 }
 
 function formatTimeZoneDisplay(value: string): string {
@@ -654,6 +756,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
   const latestLocalEditAtRef = useRef(0);
   const watchedLocalTimeZoneName = Form.useWatch('LocalTimeZoneName', form);
   const watchedIpsecEnable = Form.useWatch('IPSEC_ENABLE', form);
+  const watchedPpsTimeMode = Form.useWatch('PpsTimeMode', form);
   const dlSubCarrierSpacing = Form.useWatch('DLSubCarrierSpacing', form);
   const ulSubCarrierSpacing = Form.useWatch('ULSubCarrierSpacing', form);
   const updateMutation = useUpdateParameters();
@@ -681,6 +784,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
   const setDraftField = useQuickSettingsFeedbackStore((s) => s.setDraftField);
   const clearDraft = useQuickSettingsFeedbackStore((s) => s.clearDraft);
   const isDeviceTimeGroup = group.id === 'device-time';
+  const isBmSyncSourceGroup = group.id === 'bm-sync-source';
   const preferSchemaCurrentValue = isDeviceTimeGroup
     || group.id === 'device-ipsec-control'
     || group.id === 'enb-mme'
@@ -774,6 +878,24 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
     200,
     active && group.id === 'device-time',
   );
+  const { data: bmPpsTimeModeParams } = useSearchParameters(
+    deviceId,
+    isBmSyncSourceGroup ? BM_PPS_TIME_MODE_PATH : '',
+    20,
+    active && isBmSyncSourceGroup,
+  );
+  const { data: bmGnssSyncSourceParams } = useSearchParameters(
+    deviceId,
+    isBmSyncSourceGroup ? BM_GNSS_SYNC_SOURCE_PATH : '',
+    20,
+    active && isBmSyncSourceGroup,
+  );
+  const { data: bmPtpConfigParams } = useSearchParameters(
+    deviceId,
+    isBmSyncSourceGroup ? BM_PTP_CONFIG_PREFIX : '',
+    50,
+    active && isBmSyncSourceGroup,
+  );
   const { data: ipsecControlParams } = useSearchParameters(
     deviceId,
     group.id === 'device-ipsec-control' ? (effectiveParams[0]?.standardPath || 'IPSEC_ENABLE') : '',
@@ -781,18 +903,38 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
     active && group.id === 'device-ipsec-control',
   );
   const visibleParams = useMemo(() => {
+    if (isBmSyncSourceGroup) {
+      const ppsValue = watchedPpsTimeMode
+        ?? draft?.PpsTimeMode
+        ?? bmPpsTimeModeParams?.find((item) => item.parameterPath === BM_PPS_TIME_MODE_PATH)?.parameterValue;
+      const showGnssSyncSource = bitmaskHasBit(ppsValue, 1);
+      const showPtpConfig = bitmaskHasBit(ppsValue, 2);
+      return effectiveParams.filter((param) => {
+        const path = param.standardPath || '';
+        if (!showGnssSyncSource && isBmGnssSyncSourcePath(path)) {
+          return false;
+        }
+        if (!showPtpConfig && isBmPtpConfigPath(path)) {
+          return false;
+        }
+        return true;
+      });
+    }
     if (!isDeviceTimeGroup || deviceTimeParams === undefined) {
       return effectiveParams;
     }
-    const availableTimePaths = new Set(deviceTimeParams.map((item) => item.parameterPath));
+    if (deviceTimeParams.length === 0) {
+      return effectiveParams;
+    }
+    const availableTimeParams = new Map(deviceTimeParams.map((item) => [item.parameterPath, item.parameterValue]));
     return effectiveParams.filter((param) => {
       const path = param.standardPath || '';
       if (!isNtpServerPath(path)) {
         return true;
       }
-      return availableTimePaths.has(path);
+      return isValidNtpServerValue(availableTimeParams.get(path));
     });
-  }, [deviceTimeParams, effectiveParams, isDeviceTimeGroup]);
+  }, [bmPpsTimeModeParams, deviceTimeParams, draft, effectiveParams, isBmSyncSourceGroup, isDeviceTimeGroup, watchedPpsTimeMode]);
   // XML 驱动的 extraInfoPath:在某个字段下方以小字展示另一个只读参数当前值(范围提示)。
   // 由 quicksettings XML 在 <param> 上声明 extraInfoPath="Device.X.Y",前端按该路径拉 schema,
   // 把 currentValue 按 [lo ~ hi] 格式渲染到对应 Form.Item 的 extra 槽位。
@@ -885,11 +1027,21 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
   }, [effectiveSchemaParameters]);
   const rawParameterByPath = useMemo(() => {
     const map = new Map<string, DeviceParameter>();
-    for (const item of [...(mmeIpPlmnParams ?? []), ...(nrCommonParams ?? []), ...(nrNguParams ?? []), ...(nrNguFallbackParams ?? []), ...(deviceTimeParams ?? []), ...(ipsecControlParams ?? [])]) {
+    for (const item of [
+      ...(mmeIpPlmnParams ?? []),
+      ...(nrCommonParams ?? []),
+      ...(nrNguParams ?? []),
+      ...(nrNguFallbackParams ?? []),
+      ...(deviceTimeParams ?? []),
+      ...(bmPpsTimeModeParams ?? []),
+      ...(bmGnssSyncSourceParams ?? []),
+      ...(bmPtpConfigParams ?? []),
+      ...(ipsecControlParams ?? []),
+    ]) {
       map.set(item.parameterPath, item);
     }
     return map;
-  }, [mmeIpPlmnParams, nrCommonParams, nrNguParams, nrNguFallbackParams, deviceTimeParams, ipsecControlParams]);
+  }, [mmeIpPlmnParams, nrCommonParams, nrNguParams, nrNguFallbackParams, deviceTimeParams, bmPpsTimeModeParams, bmGnssSyncSourceParams, bmPtpConfigParams, ipsecControlParams]);
   const timeZoneParam = useMemo(
     () => visibleParams.find((param) => param.name === 'LocalTimeZoneName'),
     [visibleParams],
@@ -1010,10 +1162,13 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
     visibleParams.forEach((p) => {
       const currentValue = form.getFieldValue(p.name);
       if (draft && draft[p.name] !== undefined) {
+        const draftPath = resolveReadPath(p.standardPath || '');
         const nextValue = resolveRuntimeSpecialConfig(p.name)?.kind === 'mme-ip-plmn-table'
           ? toMmeIpPlmnRows(draft[p.name])
+          : isBitmaskSelectPath(draftPath)
+          ? normalizeBitmaskValue(draft[p.name])
           : String(draft[p.name] ?? '');
-        if (currentValue !== nextValue) {
+        if (!formValueEquals(currentValue, nextValue)) {
           form.setFieldValue(p.name, nextValue);
         }
         return;
@@ -1055,13 +1210,18 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         ) {
           raw = String(instanceContext.fapInstance);
         }
-        form.setFieldValue(
-          p.name,
-          normalizeEnumValue(
-            raw,
-            isDeviceTimeGroup && p.name === 'Enable' ? deviceTimeModeOptions : p.enumOptions,
-          ),
-        );
+        const enumOptions = isDeviceTimeGroup && p.name === 'Enable' ? deviceTimeModeOptions : p.enumOptions;
+        if (isBitmaskSelectPath(path)) {
+          form.setFieldValue(p.name, normalizeBitmaskValue(raw));
+        } else {
+          form.setFieldValue(
+            p.name,
+            normalizeEnumValue(
+              raw,
+              enumOptions,
+            ),
+          );
+        }
       }
     });
   }, [hasSchemaData, visibleParams, instanceContext, form, schemaByPath, rawParameterByPath, draft, resolveRuntimeSpecialConfig, mmeIpPlmnParams, nrNguParams, nrNguFallbackParams, preferSchemaCurrentValue, isDeviceTimeGroup, deviceTimeModeOptionsKey]);
@@ -1098,8 +1258,11 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         }
       }
 
+      const isBitmaskField = isBitmaskSelectPath(path);
       const newVal = special?.kind === 'mme-ip-plmn-table'
         ? serializeMmeIpPlmnList(toMmeIpPlmnRows(values[p.name]))
+        : isBitmaskField
+        ? serializeBitmaskValue(values[p.name])
         : String(values[p.name] ?? '');
       const oldVal = special?.kind === 'mme-ip-plmn-table'
         ? (preferSchemaCurrentValue
@@ -1111,7 +1274,14 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
       if (newVal === oldVal) continue;
 
       const parameterType = resolveQuickSettingsParameterType(p.type, item?.type, rawItem?.parameterType);
-      const err = validateValue(newVal, parameterType, item?.constraints);
+      const err = isBitmaskField
+        ? validateBitmaskValue(
+          newVal,
+          p.enumOptions?.map((option) => option.value) ?? item?.constraints?.enumValues ?? [],
+          item?.constraints?.minValue,
+          item?.constraints?.maxValue,
+        )
+        : validateValue(newVal, parameterType, item?.constraints);
       if (err) {
         errors[p.name] = err;
         continue;
@@ -1225,6 +1395,19 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
     void (async () => {
       const refreshedSchemaByPath = new Map<string, ParameterSchemaItem>();
       try {
+        // SPV 完成后后端会自动追加一次 GPV 回读并写 device_parameters。
+        // 这里稍等回读落库，并清掉 deviceParameterApi 的 5min schema 内存缓存，
+        // 否则会把 SPV 前的旧 currentValue 重新写回表单，用户必须刷新页面才看到新值。
+        if (lastTask.status === 'completed') {
+          await new Promise((resolve) => window.setTimeout(resolve, 500));
+          if (cancelled) return;
+          deviceParameterApi.invalidateParameterSchemaCache(deviceId);
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ['devices', 'parameters', 'search', deviceId] }),
+            queryClient.invalidateQueries({ queryKey: ['devices', 'parameter-schema', deviceId] }),
+          ]);
+          if (cancelled) return;
+        }
         if (isDeviceTimeGroup) {
           const [refreshedDeviceTime, refreshedManagementServer] = await Promise.all([
             refetchDeviceTimeSchema(),
@@ -1261,6 +1444,8 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         const refreshedValue = refreshedSchemaByPath.get(path)?.currentValue ?? '';
         nextValues[p.name] = special?.kind === 'mme-ip-plmn-table'
           ? toMmeIpPlmnRows(refreshedValue)
+          : isBitmaskSelectPath(path)
+            ? normalizeBitmaskValue(refreshedValue)
           : normalizeEnumValue(
             refreshedValue,
             isDeviceTimeGroup && p.name === 'Enable' ? deviceTimeModeOptions : p.enumOptions,
@@ -1406,12 +1591,21 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
               const sItem = schemaByPath.get(path);
               const normalizedValue = special?.kind === 'mme-ip-plmn-table'
                 ? serializeMmeIpPlmnList(toMmeIpPlmnRows(value))
+                : isBitmaskSelectPath(path)
+                ? serializeBitmaskValue(value)
                 : String(value ?? '');
-              const err = validateValue(
-                normalizedValue,
-                (sItem?.type as never) ?? 'string',
-                sItem?.constraints,
-              );
+              const err = isBitmaskSelectPath(path)
+                ? validateBitmaskValue(
+                  normalizedValue,
+                  p.enumOptions?.map((option) => option.value) ?? sItem?.constraints?.enumValues ?? [],
+                  sItem?.constraints?.minValue,
+                  sItem?.constraints?.maxValue,
+                )
+                : validateValue(
+                  normalizedValue,
+                  (sItem?.type as never) ?? 'string',
+                  sItem?.constraints,
+                );
               const mmeLimitErr = special?.kind === 'mme-ip-plmn-table'
                 ? validateMmeIpPlmnLimit(toMmeIpPlmnRows(value), p.maxValue)
                 : null;
@@ -1604,6 +1798,13 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
               ? xmlEnumLabels
               : (enumMeta?.labels ?? []);
             const isEnum = !special && effectiveEnumValues.length > 0;
+            const isBitmaskEnum = isEnum && isBitmaskSelectPath(path);
+            const enumOptions = isBitmaskEnum
+              ? buildBitmaskCombinationOptions(effectiveEnumValues, effectiveEnumLabels, locale)
+              : effectiveEnumValues.map((v, idx) => ({
+                value: v,
+                label: localizeEnumLabel(effectiveEnumLabels[idx] || v, v, locale),
+              }));
             const extra = special?.kind === 'mme-ip-plmn-table'
               ? t('device.cell.mmeIpPlmnExtra')
               : undefined;
@@ -1641,10 +1842,9 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                     <Select
                       disabled={!finalWritable}
                       placeholder={item?.defaultValue || ''}
-                      options={effectiveEnumValues.map((v, idx) => ({
-                        value: v,
-                        label: localizeEnumLabel(effectiveEnumLabels[idx] || v, v, locale),
-                      }))}
+                      showSearch={isBitmaskEnum}
+                      optionFilterProp="label"
+                      options={enumOptions}
                     />
                   ) : (
                     <Input disabled={!finalWritable} placeholder={special?.placeholder || item?.defaultValue || (!finalWritable ? '未上报' : '')} />
