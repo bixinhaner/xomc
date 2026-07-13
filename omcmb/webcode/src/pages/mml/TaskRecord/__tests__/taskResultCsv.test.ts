@@ -5,6 +5,7 @@ import {
   buildMmlTaskResultsCsv,
   fetchAllMmlTaskResults,
 } from '../taskResultCsv';
+import { taskResultCommandText } from '../taskResultCommand';
 
 const labels: Record<string, string> = {
   'table.index': '序号',
@@ -87,6 +88,25 @@ describe('task result CSV export', () => {
 
     expect(csv).toContain('2026-07-13 10:00:00');
     expect(csv).toContain('2026-07-13 11:30:00');
+  });
+
+  it('shows the generated SetParameterValues phase of ADD-with-params as MOD', () => {
+    const command = taskResultCommandText(row({
+      mmlScript: 'ADD Device.FAP.Ipsec.:TUNNEL_ENABLE=false,TUNNEL_GATEWAY=192.0.2.2;SN001',
+      planRawLine: 'ADD Device.FAP.Ipsec.:TUNNEL_ENABLE=false,TUNNEL_GATEWAY=192.0.2.2;SN001',
+      operationType: 'MOD',
+      request: {
+        method: 'SetParameterValues',
+        payload: {
+          values: [
+            { name: 'Device.FAP.Ipsec.2.TUNNEL_ENABLE', value: 'false', type: 'xsd:string' },
+            { name: 'Device.FAP.Ipsec.2.TUNNEL_GATEWAY', value: '192.0.2.2', type: 'xsd:string' },
+          ],
+        },
+      },
+    }));
+
+    expect(command).toBe('MOD Device.FAP.Ipsec.2.:TUNNEL_ENABLE=false,TUNNEL_GATEWAY=192.0.2.2');
   });
 
   it('fetches every result page with the backend-safe page size', async () => {

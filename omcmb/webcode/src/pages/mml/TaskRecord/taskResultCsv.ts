@@ -5,6 +5,7 @@ import { parseMmlDeviceTaskResult, type ParsedMmlResult } from '@core/utils/mmlR
 import { saveBlob } from '@core/utils/saveBlob';
 import { formatSystemTime } from '@core/utils/systemTime';
 import { getMMLTaskResultsPage } from '@core/hooks/api/useMML';
+import { taskResultCommandText } from './taskResultCommand';
 
 export const MML_TASK_RESULT_EXPORT_PAGE_SIZE = 100;
 
@@ -31,10 +32,6 @@ function stringifyMessagePayload(payload: unknown): string {
   } catch {
     return String(payload);
   }
-}
-
-export function taskResultCommandText(row: DeviceTaskResultItem): string {
-  return row.mmlScript || row.planRawLine || row.commandCode || '';
 }
 
 export function taskResultRequestText(row: DeviceTaskResultItem): string {

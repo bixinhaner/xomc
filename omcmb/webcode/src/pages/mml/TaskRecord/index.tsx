@@ -36,6 +36,7 @@ import {
   downloadMmlTaskResultsCsv,
   fetchAllMmlTaskResults,
 } from './taskResultCsv';
+import { taskResultCommandText } from './taskResultCommand';
 
 // -------------------------------------------------------------------------
 // Display mappings — mml_tasks columns
@@ -125,10 +126,6 @@ function getErrorMessage(error: unknown): string {
 
 function hasMessageText(row: DeviceTaskResultItem | null): boolean {
   return Boolean(requestMessageText(row) || responseMessageText(row));
-}
-
-function resultCommandText(row: DeviceTaskResultItem): string {
-  return row.mmlScript || row.planRawLine || row.commandCode || '-';
 }
 
 function operationColor(operation: string): string {
@@ -526,7 +523,7 @@ export default function TaskRecord() {
       title: t('mml.resultCommand'),
       width: 360,
       render: (_: unknown, row) => {
-        const command = resultCommandText(row);
+        const command = taskResultCommandText(row) || '-';
         return (
           <Space orientation="vertical" size={2} style={{ width: '100%' }}>
             {row.planLineNo ? (
@@ -861,7 +858,7 @@ export default function TaskRecord() {
             <Space wrap size={[8, 8]}>
               <Tag>{t('mml.resultDeviceCode')}: {detailRow.deviceSn || '-'}</Tag>
               {detailRow.deviceName ? <Tag>{t('mml.deviceName')}: {detailRow.deviceName}</Tag> : null}
-              <Tag>{t('mml.resultCommand')}: {resultCommandText(detailRow)}</Tag>
+              <Tag>{t('mml.resultCommand')}: {taskResultCommandText(detailRow) || '-'}</Tag>
               <Tag color={detailRow.result?.success ? 'success' : 'error'}>
                 {detailRow.result?.success ? t('status.success') : t('status.failed')}
               </Tag>
@@ -921,7 +918,7 @@ export default function TaskRecord() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: '100%' }}>
               <Typography.Text type="secondary">{t('mml.resultCommand')}:</Typography.Text>
               <div style={{ minWidth: 0, flex: 1 }}>
-                {renderCommandCompact(resultCommandText(rawRow), 360)}
+                {renderCommandCompact(taskResultCommandText(rawRow) || '-', 360)}
               </div>
             </div>
             {[
