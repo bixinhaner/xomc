@@ -47,6 +47,7 @@ import {
 import { useProductList } from '@core/hooks/api/useProducts';
 import { useBatchDownloadWithMessage } from '@/hooks/useBatchDownloadWithMessage';
 import type { SoftwareVersion } from '@core/mock/data/software';
+import { formatSystemTime } from '@core/utils/systemTime';
 
 const { Dragger } = Upload;
 const { TextArea } = Input;
@@ -392,7 +393,7 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
       title: t('table.uploadTime') ?? t('transfer.fileLib.firmware.col.uploadTime'),
       dataIndex: 'releaseDate',
       width: 180,
-      render: (val: unknown) => val ? String(val) : '-',
+      render: (val: unknown) => val ? formatSystemTime(val as string, { format: 'YYYY-MM-DD HH:mm:ss', placeholder: '-' }) : '-',
     },
   ], [t, handleOpenImportDrawer, handleToggleRecommend, productNameById]);
 
