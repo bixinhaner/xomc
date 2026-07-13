@@ -17,7 +17,7 @@
  *   · 统计类型对齐老 OMC perf_indicators.statis_type 业务：sum/avg/max/min/pct 下拉选择，
  *     驱动后端 G5 cron 聚合（见 omcgo/internal/pm/kpi/calculator.go::AggregateByStatisType）。
  *   · 归属分组 Select 选项来自 useIndicatorGroups(把分组树拍平),必填。
- *   · create 模式:id 由 crypto.randomUUID().replace(/-/g,'') 生成,默认是自定义指标,可选组。
+ *   · create 模式:ID 由后端创建接口生成,前端只提交业务字段。
  *   · edit 模式且 indicator.isBuildIn 为真 → 归属分组 Select disabled + Tooltip 提示
  *     (XML 真相源会覆盖);仅自定义指标可改组。
  *
@@ -199,7 +199,6 @@ export default function IndicatorFormModal({
         const created = await createMut.mutateAsync({
           deviceType,
           input: {
-            id: crypto.randomUUID().replace(/-/g, ''),
             // 后端 payload 映射不发 name(只认 en_name/cn_name/group_id);
             // name 仅为满足前端类型契约,取中文名占位。
             name: cnName,

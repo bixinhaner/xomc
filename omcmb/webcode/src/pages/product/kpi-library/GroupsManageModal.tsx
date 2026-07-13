@@ -2,7 +2,7 @@
  * GroupsManageModal — KPI 指标分组(功能集)维护 UI (Issue #525, v1 webcode/Antd5)。
  *
  * 一个 Modal 列出某制式下的全部指标分组,支持新建/编辑/删除:
- *   · 新建分组 → 内嵌 Form Modal,id 由前端 crypto.randomUUID() 生成,name 必填。
+ *   · 新建分组 → 内嵌 Form Modal,ID 由后端创建接口生成,name 必填。
  *   · 编辑/删除 → 内置组(isBuildIn,后端 is_build_in==='1')禁用 + Tooltip 提示。
  *   · 删除走 Popconfirm 二次确认;成功后 hook 自带 invalidate,列表自动刷新。
  */
@@ -105,7 +105,6 @@ export default function GroupsManageModal({
         await createMut.mutateAsync({
           deviceType,
           input: {
-            id: crypto.randomUUID().replace(/-/g, ''),
             name: values.name.trim(),
             // 未选父分组 → '0'(后端 buildTree 约定的顶层 root),即新建平级/顶层节点。
             parentId: values.parentId || '0',
