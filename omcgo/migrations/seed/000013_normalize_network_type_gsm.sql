@@ -1,5 +1,6 @@
 -- +goose Up
 -- #50 / #58: network_type 的机器值统一为 lte/nr/gsm；GSM 仅作为展示文本。
+-- 编号 000013：顺延既有的 000011、000012 seed 迁移。
 WITH network_type AS (
     SELECT id FROM sys_dictionaries WHERE type = 'network_type' AND deleted_at IS NULL
 )
