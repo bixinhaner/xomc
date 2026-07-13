@@ -245,11 +245,13 @@ func nextCommandIndexForDevice(mmlTask *MMLTask, deviceSN string, currentIdx int
 }
 
 func planDeviceSNForCommand(mmlTask *MMLTask, cmdIdx int) string {
+	if cmdIdx >= 0 && cmdIdx < len(mmlTask.Commands) {
+		if sn := commandString(mmlTask.Commands[cmdIdx], "plan_device_sn"); sn != "" {
+			return sn
+		}
+	}
 	if cmdIdx >= 0 && cmdIdx < len(mmlTask.PlanItems) {
 		return strings.TrimSpace(mmlTask.PlanItems[cmdIdx].DeviceSN)
-	}
-	if cmdIdx >= 0 && cmdIdx < len(mmlTask.Commands) {
-		return commandString(mmlTask.Commands[cmdIdx], "plan_device_sn")
 	}
 	return ""
 }

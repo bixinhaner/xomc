@@ -55,6 +55,8 @@ type ParsedScriptLine struct {
 	CommandCode   string            `json:"command_code"`
 	OperationType string            `json:"operation_type"`
 	Parameters    map[string]string `json:"parameters"`
+	ParamPaths    []string          `json:"param_paths,omitempty"`
+	RawPathMode   string            `json:"raw_path_mode,omitempty"`
 }
 
 // ParseScriptTXT validates TXT-level syntax without making any external calls.
@@ -191,7 +193,7 @@ func parseScriptPhysicalLine(lineNo int, rawLine string) (*ParsedScriptLine, *Sc
 		return nil, &issue
 	}
 
-	operation, commandCode, parameters, err := parseScriptCommand(commandRaw)
+	operation, commandCode, parameters, paramPaths, rawPathMode, err := parseScriptCommand(commandRaw)
 	if err != nil {
 		issue := lineIssue("MML_LINE_FORMAT_INVALID", lineNo, rawLine, err.Error())
 		return nil, &issue
@@ -203,10 +205,12 @@ func parseScriptPhysicalLine(lineNo int, rawLine string) (*ParsedScriptLine, *Sc
 		CommandCode:   commandCode,
 		OperationType: operation,
 		Parameters:    parameters,
+		ParamPaths:    paramPaths,
+		RawPathMode:   rawPathMode,
 	}, nil
 }
 
-func parseScriptCommand(raw string) (operation, commandCode string, parameters map[string]string, err error) {
+func parseScriptCommand(raw string) (operation, commandCode string, parameters map[string]string, paramPaths []string, rawPathMode string, err error) {
 	firstSpace := -1
 	for index, r := range raw {
 		if unicode.IsSpace(r) {
@@ -215,22 +219,22 @@ func parseScriptCommand(raw string) (operation, commandCode string, parameters m
 		}
 	}
 	if firstSpace < 0 {
-		return "", "", nil, fmt.Errorf("operation and command code must be separated by whitespace")
+		return "", "", nil, nil, "", fmt.Errorf("operation and command code must be separated by whitespace")
 	}
 
 	rawOperation := strings.ToUpper(strings.TrimSpace(raw[:firstSpace]))
 	operation = normalizeScriptOperation(rawOperation)
 	if operation == "" {
-		return "", "", nil, fmt.Errorf("unsupported operation %q", rawOperation)
+		return "", "", nil, nil, "", fmt.Errorf("unsupported operation %q", rawOperation)
 	}
 	rest := strings.TrimSpace(raw[firstSpace:])
 	if rest == "" {
-		return "", "", nil, fmt.Errorf("command code is required")
+		return "", "", nil, nil, "", fmt.Errorf("command code is required")
 	}
 
 	colonIndex, err := firstTopLevelIndex(rest, ':')
 	if err != nil {
-		return "", "", nil, err
+		return "", "", nil, nil, "", err
 	}
 	code := rest
 	parametersRaw := ""
@@ -238,18 +242,25 @@ func parseScriptCommand(raw string) (operation, commandCode string, parameters m
 		code = strings.TrimSpace(rest[:colonIndex])
 		parametersRaw = strings.TrimSpace(rest[colonIndex+1:])
 	}
+	if strings.EqualFold(code, "PATH") {
+		parameters, paramPaths, err = parseScriptRawPathPayload(operation, parametersRaw)
+		if err != nil {
+			return "", "", nil, nil, "", err
+		}
+		return operation, operation + " PATH", parameters, paramPaths, "standard", nil
+	}
 	if code == "" || len(strings.Fields(code)) != 1 || !isValidCommandCode(strings.ToUpper(code)) {
-		return "", "", nil, fmt.Errorf("invalid command code %q", code)
+		return "", "", nil, nil, "", fmt.Errorf("invalid command code %q", code)
 	}
 
 	parameters = make(map[string]string)
 	if parametersRaw != "" {
 		parameters, err = parseScriptParameters(parametersRaw)
 		if err != nil {
-			return "", "", nil, err
+			return "", "", nil, nil, "", err
 		}
 	}
-	return operation, operation + " " + strings.ToUpper(code), parameters, nil
+	return operation, operation + " " + strings.ToUpper(code), parameters, nil, "", nil
 }
 
 func validScriptOperation(operation string) bool {
@@ -299,6 +310,98 @@ func parseScriptParameters(raw string) (map[string]string, error) {
 		parameters[key] = value
 	}
 	return parameters, nil
+}
+
+func parseScriptRawPathPayload(operation, raw string) (map[string]string, []string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil, fmt.Errorf("PATH mode requires a path payload")
+	}
+	switch operation {
+	case "LST", "RMV":
+		paths, err := parseScriptPathList(raw)
+		if err != nil {
+			return nil, nil, err
+		}
+		return map[string]string{}, paths, nil
+	case "MOD":
+		return parseScriptPathValues(raw)
+	case "ADD":
+		pathPart := raw
+		valuePart := ""
+		if idx, err := firstTopLevelIndex(raw, ':'); err != nil {
+			return nil, nil, err
+		} else if idx >= 0 {
+			pathPart = strings.TrimSpace(raw[:idx])
+			valuePart = strings.TrimSpace(raw[idx+1:])
+		}
+		paths, err := parseScriptPathList(pathPart)
+		if err != nil {
+			return nil, nil, err
+		}
+		parameters := map[string]string{}
+		if valuePart != "" {
+			parameters, err = parseScriptParameters(valuePart)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		return parameters, paths, nil
+	default:
+		return nil, nil, fmt.Errorf("PATH mode does not support operation %q", operation)
+	}
+}
+
+func parseScriptPathList(raw string) ([]string, error) {
+	tokens, err := splitTopLevel(raw, ',')
+	if err != nil {
+		return nil, err
+	}
+	paths := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		path := strings.TrimSpace(token)
+		if path == "" {
+			return nil, fmt.Errorf("PATH token is empty")
+		}
+		paths = append(paths, path)
+	}
+	return paths, nil
+}
+
+func parseScriptPathValues(raw string) (map[string]string, []string, error) {
+	tokens, err := splitTopLevel(raw, ',')
+	if err != nil {
+		return nil, nil, err
+	}
+	parameters := make(map[string]string, len(tokens))
+	paths := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		token = strings.TrimSpace(token)
+		if token == "" {
+			return nil, nil, fmt.Errorf("parameter token is empty")
+		}
+		equalsIndex, err := firstTopLevelIndex(token, '=')
+		if err != nil {
+			return nil, nil, err
+		}
+		if equalsIndex < 0 {
+			return nil, nil, fmt.Errorf("parameter %q is missing =", token)
+		}
+		path := strings.TrimSpace(token[:equalsIndex])
+		if path == "" {
+			return nil, nil, fmt.Errorf("PATH key is empty")
+		}
+		if _, exists := parameters[path]; exists {
+			return nil, nil, fmt.Errorf("duplicate PATH key %q", path)
+		}
+		value, err := normalizeScriptParameterValue(strings.TrimSpace(token[equalsIndex+1:]))
+		if err != nil {
+			return nil, nil, err
+		}
+		parameters[path] = value
+		paths = append(paths, path)
+	}
+	return parameters, paths, nil
 }
 
 func normalizeScriptParameterValue(value string) (string, error) {

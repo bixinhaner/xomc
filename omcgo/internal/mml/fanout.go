@@ -209,7 +209,7 @@ func (f *Fanouter) buildDeviceTaskRequests(ctx context.Context, mmlTask *MMLTask
 }
 
 func (f *Fanouter) buildDeviceBoundTaskRequests(ctx context.Context, mmlTask *MMLTask) []*task.CreateTaskRequest {
-	reqs := make([]*task.CreateTaskRequest, 0, len(mmlTask.PlanItems))
+	reqs := make([]*task.CreateTaskRequest, 0, len(mmlTask.Commands))
 	deviceIndexes := make(map[string]int, len(mmlTask.DeviceSNs))
 	for idx, sn := range mmlTask.DeviceSNs {
 		if _, exists := deviceIndexes[sn]; !exists {
@@ -217,22 +217,22 @@ func (f *Fanouter) buildDeviceBoundTaskRequests(ctx context.Context, mmlTask *MM
 		}
 	}
 
-	for planIdx, item := range mmlTask.PlanItems {
-		if planIdx >= len(mmlTask.Commands) {
-			f.logger.Warn("skip plan item without matching command",
+	for cmdIdx, cmd := range mmlTask.Commands {
+		deviceSN := planDeviceSNForCommand(mmlTask, cmdIdx)
+		if deviceSN == "" {
+			f.logger.Warn("skip device-bound command without device serial number",
 				zap.String("mml_task_id", mmlTask.ID.String()),
-				zap.Int("plan_idx", planIdx),
-				zap.Int("line_no", item.LineNo),
-				zap.String("device_sn", item.DeviceSN),
+				zap.Int("cmd_idx", cmdIdx),
+				zap.Any("command_code", cmd["command_code"]),
 			)
 			continue
 		}
-		devIdx, ok := deviceIndexes[item.DeviceSN]
+		devIdx, ok := deviceIndexes[deviceSN]
 		if !ok {
 			devIdx = len(deviceIndexes)
-			deviceIndexes[item.DeviceSN] = devIdx
+			deviceIndexes[deviceSN] = devIdx
 		}
-		req := f.buildDeviceTaskRequest(ctx, mmlTask, mmlTask.Commands[planIdx], planIdx, item.DeviceSN, devIdx, true)
+		req := f.buildDeviceTaskRequest(ctx, mmlTask, cmd, cmdIdx, deviceSN, devIdx, true)
 		if req == nil {
 			continue
 		}
@@ -359,10 +359,18 @@ func firstDeviceBoundRequests(mmlTask *MMLTask, reqs []*task.CreateTaskRequest) 
 }
 
 func planOrderForCommand(mmlTask *MMLTask, cmdIdx int) int {
-	if cmdIdx >= 0 && cmdIdx < len(mmlTask.PlanItems) && mmlTask.PlanItems[cmdIdx].Order > 0 {
-		return mmlTask.PlanItems[cmdIdx].Order
+	if cmdIdx >= 0 && cmdIdx < len(mmlTask.Commands) {
+		if sortOrder := commandInt(mmlTask.Commands[cmdIdx], "plan_sort_order"); sortOrder > 0 {
+			return sortOrder
+		}
+		if order := commandInt(mmlTask.Commands[cmdIdx], "plan_order"); order > 0 {
+			return order * planOrderScale
+		}
 	}
-	return cmdIdx + 1
+	if cmdIdx >= 0 && cmdIdx < len(mmlTask.PlanItems) && mmlTask.PlanItems[cmdIdx].Order > 0 {
+		return mmlTask.PlanItems[cmdIdx].Order * planOrderScale
+	}
+	return (cmdIdx + 1) * planOrderScale
 }
 
 // translateParamRefs 已退化为 noop（T-XXX 改造）。

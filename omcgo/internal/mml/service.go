@@ -839,31 +839,49 @@ func (s *Service) normalizePlanItems(ctx context.Context, items []MMLPlanItem) (
 			nextOrderBySN[sn] = order
 		}
 
-		command := cloneCommandMap(item.Command)
-		if item.CommandCode != "" && commandString(command, "command_code") == "" {
-			command["command_code"] = strings.TrimSpace(item.CommandCode)
+		baseCommand := cloneCommandMap(item.Command)
+		if item.CommandCode != "" && commandString(baseCommand, "command_code") == "" {
+			baseCommand["command_code"] = strings.TrimSpace(item.CommandCode)
 		}
-		if item.OperationType != "" && commandString(command, "operation_type") == "" {
-			command["operation_type"] = strings.TrimSpace(item.OperationType)
+		if item.OperationType != "" && commandString(baseCommand, "operation_type") == "" {
+			baseCommand["operation_type"] = strings.TrimSpace(item.OperationType)
 		}
 		if item.Parameters != nil {
-			if _, exists := command["parameters"]; !exists {
-				command["parameters"] = item.Parameters
+			if _, exists := baseCommand["parameters"]; !exists {
+				baseCommand["parameters"] = item.Parameters
 			}
 		}
-		if _, exists := command["parameters"]; !exists {
-			command["parameters"] = map[string]interface{}{}
+		if _, exists := baseCommand["parameters"]; !exists {
+			baseCommand["parameters"] = map[string]interface{}{}
 		}
-		attachObjectNameParamFromTarget(command)
-		if commandString(command, "command_code") == "" && commandString(command, "rpc_method") == "" {
+		if commandString(baseCommand, "command_code") == "" && commandString(baseCommand, "rpc_method") == "" {
 			return nil, nil, nil, fmt.Errorf("plan_items[%d].command.command_code required: %w", idx, commonerrors.ErrInvalidInput)
 		}
 
-		command["plan_line_no"] = lineNo
-		command["plan_device_sn"] = sn
-		command["plan_order"] = order
-		if raw := strings.TrimSpace(item.RawLine); raw != "" {
-			command["plan_raw_line"] = raw
+		planCommands := []map[string]interface{}{baseCommand}
+		if isRawPathCommandEntry(baseCommand) {
+			var err error
+			planCommands, err = normalizeRawPathCommandEntry(baseCommand)
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("plan_items[%d].command: %w", idx, err)
+			}
+		} else {
+			attachObjectNameParamFromTarget(baseCommand)
+		}
+		if len(planCommands) == 0 {
+			return nil, nil, nil, fmt.Errorf("plan_items[%d].command produced no executable commands: %w", idx, commonerrors.ErrInvalidInput)
+		}
+
+		firstCommandIndex := len(commands)
+		for subIdx, command := range planCommands {
+			command["plan_line_no"] = lineNo
+			command["plan_device_sn"] = sn
+			command["plan_order"] = order
+			command["plan_sort_order"] = order*planOrderScale + subIdx
+			if raw := strings.TrimSpace(item.RawLine); raw != "" {
+				command["plan_raw_line"] = raw
+			}
+			commands = append(commands, command)
 		}
 
 		normalized = append(normalized, MMLPlanItem{
@@ -871,14 +889,20 @@ func (s *Service) normalizePlanItems(ctx context.Context, items []MMLPlanItem) (
 			DeviceSN: sn,
 			Order:    order,
 			RawLine:  item.RawLine,
-			Command:  command,
+			Command:  commands[firstCommandIndex],
 		})
-		commands = append(commands, command)
 	}
 
 	commands = s.resolveRPCMethods(ctx, commands)
 	for i := range normalized {
-		normalized[i].Command = commands[i]
+		for cmdIdx, cmd := range commands {
+			if commandInt(cmd, "plan_line_no") == normalized[i].LineNo &&
+				commandString(cmd, "plan_device_sn") == normalized[i].DeviceSN &&
+				commandInt(cmd, "plan_order") == normalized[i].Order {
+				normalized[i].Command = commands[cmdIdx]
+				break
+			}
+		}
 	}
 	return normalized, commands, uniqueDeviceSNsFromPlanItems(normalized), nil
 }
@@ -1411,11 +1435,12 @@ func buildRawReadbackLSTCommand(paths []string) map[string]interface{} {
 	}
 }
 
-// commandsNeedSequential 判断 commands 是否含需顺序执行的复合（#196 MOD 回读 lst_after_mod）。
-// 命中则 fanout 启用 sequential，保证回读 LST 在 SPV 之后执行（读到生效后的新值）。
+// commandsNeedSequential 判断 commands 是否含需顺序执行的复合。
+// lst_after_mod 保证回读 LST 在 SPV 之后执行；spv_after_add 保证 AddObject 返回新实例号后再配置对象内参数。
 func commandsNeedSequential(commands []map[string]interface{}) bool {
 	for _, c := range commands {
-		if ph, _ := c["compound_phase"].(string); ph == "lst_after_mod" {
+		ph, _ := c["compound_phase"].(string)
+		if ph == "lst_after_mod" || ph == "spv_after_add" {
 			return true
 		}
 	}
@@ -1501,7 +1526,11 @@ func (s *Service) fanoutClaimed(ctx context.Context, task *MMLTask) error {
 	if s.fanouter == nil {
 		return fmt.Errorf("fanouter not wired")
 	}
+	sequential := task.ExecuteMode == TaskExecuteModeDeviceBound || commandsNeedSequential(task.Commands)
+	prev := s.fanouter.sequentialMode
+	s.fanouter.SetSequentialMode(sequential)
 	created, err := s.fanouter.Fanout(ctx, task)
+	s.fanouter.SetSequentialMode(prev)
 	if err != nil {
 		return fmt.Errorf("fanout mml task: %w", err)
 	}
@@ -1664,10 +1693,13 @@ func (s *Service) writeAuditLogs(ctx context.Context, task *MMLTask) {
 
 	var entries []*MMLAuditLog
 	if task.ExecuteMode == TaskExecuteModeDeviceBound {
-		for idx, item := range task.PlanItems {
-			cmd := item.Command
-			if idx < len(task.Commands) {
-				cmd = task.Commands[idx]
+		for idx, cmd := range task.Commands {
+			deviceSN := planDeviceSNForCommand(task, idx)
+			if deviceSN == "" && idx < len(task.PlanItems) {
+				deviceSN = task.PlanItems[idx].DeviceSN
+			}
+			if deviceSN == "" {
+				continue
 			}
 			commandCode, _ := cmd["command_code"].(string)
 			operationType, _ := cmd["operation_type"].(string)
@@ -1690,7 +1722,7 @@ func (s *Service) writeAuditLogs(ctx context.Context, task *MMLTask) {
 				TaskID:        &task.ID,
 				CommandCode:   commandCode,
 				OperationType: operationType,
-				DeviceSN:      item.DeviceSN,
+				DeviceSN:      deviceSN,
 				Parameters:    params,
 				ParamPaths:    paramPaths,
 				ResultStatus:  string(task.Status),

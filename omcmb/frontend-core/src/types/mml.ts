@@ -291,6 +291,7 @@ export interface MMLTaskCommandInput {
   operationType?: MMLOperationType | string;
   paramPaths?: string[];
   parameters?: Record<string, unknown>;
+  rawPathMode?: 'standard' | string;
 }
 
 export interface MMLTaskPlanItem {

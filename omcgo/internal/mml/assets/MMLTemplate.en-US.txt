@@ -1,24 +1,24 @@
 # MML TXT Script Template
-# Valid line format:
-# Operation command_code[:param=value,param2=value2];device_sn
+# Use standard PATH. Valid line format:
+# Operation PATH:standard.path[=value][,standard.path2=value2];device_sn
 #
 # Supported operations:
-# LST query. Parameters are usually omitted.
-# MOD modify. Fill one or more param=value pairs as required by the command catalog.
-# ADD add an object/configuration. Use this when an ADD command exists in the command catalog, and fill required parameters.
-# RMV remove an object/configuration. Use this when an RMV command exists in the command catalog.
+# LST query. Put one or more standard parameter paths after PATH.
+# MOD modify. Put one or more standard parameter path=value pairs after PATH.
+# ADD add an object. Put the object table path after PATH; to configure the new object after ADD, append :param=value.
+# RMV remove an object. Put the concrete object instance path after PATH.
 #
 # Rules:
 # 1. Each line may contain only one command and one device SN.
 # 2. Multiple commands for the same device run in top-to-bottom file order.
-# 3. Separate parameters with English commas; when a value contains a comma or semicolon, wrap it in double quotes, single quotes, or {}.
-# 4. Blank lines and lines starting with # are ignored.
-# 5. One file supports at most 200 devices, 2000 valid commands, and 2 MiB.
-# 6. Command codes must match the command_code shown in the MML command catalog.
+# 3. PATH uses standard paths. Fill object instance indexes yourself, for example .1. for the first object and .2. for the second.
+# 4. ADD uses an object table path, for example Device.IP.Interface.1.IPv4Address.; ADD follow-up values use relative parameter names inside the new object.
+# 5. Separate parameters with English commas; when a value contains a comma or semicolon, wrap it in double quotes, single quotes, or {}.
+# 6. Blank lines and lines starting with # are ignored.
+# 7. One file supports at most 200 devices, 2000 valid commands, and 2 MiB.
 #
 # Examples: replace DEVICE_SN with a real base station serial number.
-LST DEVICE_INFO;DEVICE_SN
-MOD MANAGEMENT_SERVER:URL=http://localhost:8080/smallcell/AcsService,USERNAME=acs,PASSWORD=acs;DEVICE_SN
-ADD ETHERNET_INTERFACE;DEVICE_SN
-RMV ETHERNET_INTERFACE;DEVICE_SN
-MOD DEVICE_INFO:DESCRIPTION="site,a;sector-b",ALIAS={main,backup};DEVICE_SN
+LST PATH:Device.DeviceInfo.SoftwareVersion;DEVICE_SN
+MOD PATH:Device.ManagementServer.URL=http://localhost:8080/smallcell/AcsService,Device.ManagementServer.Username=acs;DEVICE_SN
+ADD PATH:Device.IP.Interface.1.IPv4Address.:IPAddress=192.168.1.10,SubnetMask=255.255.255.0;DEVICE_SN
+RMV PATH:Device.IP.Interface.1.IPv4Address.3.;DEVICE_SN

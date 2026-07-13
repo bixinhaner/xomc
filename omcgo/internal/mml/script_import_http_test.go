@@ -82,10 +82,10 @@ func TestHandler_ScriptImportTemplate(t *testing.T) {
 	require.Contains(t, rec.Header().Get("Content-Type"), "text/plain")
 	require.Contains(t, rec.Header().Get("Content-Disposition"), "MMLTemplate.txt")
 	require.Equal(t, "zh-CN", rec.Header().Get("Content-Language"))
-	require.Contains(t, rec.Body.String(), "操作 命令编码")
+	require.Contains(t, rec.Body.String(), "使用标准 PATH")
 	require.Contains(t, rec.Body.String(), "支持操作")
 	require.NotContains(t, rec.Body.String(), "DEL")
-	require.Contains(t, rec.Body.String(), "LST DEVICE_INFO;DEVICE_SN")
+	require.Contains(t, rec.Body.String(), "RMV PATH:Device.IP.Interface.1.IPv4Address.3.;DEVICE_SN")
 }
 
 func TestHandler_ScriptImportTemplateEnglish(t *testing.T) {
@@ -100,10 +100,10 @@ func TestHandler_ScriptImportTemplateEnglish(t *testing.T) {
 	body := rec.Body.String()
 	require.Contains(t, body, "MML TXT Script Template")
 	require.Contains(t, body, "Supported operations")
-	require.Contains(t, body, "Operation command_code[:param=value")
+	require.Contains(t, body, "Use standard PATH")
 	require.NotContains(t, body, "DEL")
 	require.NotContains(t, body, "支持操作")
-	require.Contains(t, body, "RMV ETHERNET_INTERFACE;DEVICE_SN")
+	require.Contains(t, body, "RMV PATH:Device.IP.Interface.1.IPv4Address.3.;DEVICE_SN")
 }
 
 func TestHandler_ValidateScriptImport_RejectsNonTXT(t *testing.T) {

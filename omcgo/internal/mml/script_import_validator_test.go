@@ -3,6 +3,7 @@ package mml
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -135,4 +136,31 @@ func TestScriptImportValidator_ProducesPlanAndUsesOneBatchPerResource(t *testing
 	require.Equal(t, 1, repo.deviceBatchCalls)
 	require.Equal(t, "LST DEVICE_INFO", result.PlanItems[0].Command["command_code"])
 	require.Equal(t, 10, result.PlanItems[9].Order)
+}
+
+func TestScriptImportValidator_ProducesRawPathPlanItemsWithoutCommandLookup(t *testing.T) {
+	parsed, issues := ParseScriptTXT([]byte(strings.Join([]string{
+		"LST PATH:Device.IP.Interface.1.Enable;SN1",
+		"MOD PATH:Device.IP.Interface.1.Enable=true;SN1",
+		"ADD PATH:Device.IP.Interface.1.IPv4Address.:IPAddress=192.168.1.10;SN1",
+		"RMV PATH:Device.IP.Interface.1.IPv4Address.3.;SN1",
+	}, "\n") + "\n"))
+	require.Empty(t, issues)
+	repo := &fakeScriptValidationRepo{
+		devices: map[string]*model.Device{"SN1": {SerialNumber: "SN1", IsOnline: true}},
+	}
+
+	result, err := NewScriptImportValidator(repo).Validate(context.Background(), parsed, ValidationActor{Username: "admin"})
+
+	require.NoError(t, err)
+	require.Empty(t, result.Issues)
+	require.Len(t, result.PlanItems, 4)
+	require.Equal(t, 0, repo.commandBatchCalls)
+	require.Equal(t, "RAW LST", result.PlanItems[0].Command["command_code"])
+	require.Equal(t, []string{"Device.IP.Interface.1.Enable"}, result.PlanItems[0].Command["param_paths"])
+	require.Equal(t, "RAW MOD", result.PlanItems[1].Command["command_code"])
+	require.Equal(t, map[string]interface{}{"Device.IP.Interface.1.Enable": "true"}, result.PlanItems[1].Command["parameters"])
+	require.Equal(t, "RAW ADD", result.PlanItems[2].Command["command_code"])
+	require.Equal(t, map[string]interface{}{"IPAddress": "192.168.1.10"}, result.PlanItems[2].Command["parameters"])
+	require.Equal(t, "RAW RMV", result.PlanItems[3].Command["command_code"])
 }
