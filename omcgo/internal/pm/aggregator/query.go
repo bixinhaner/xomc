@@ -573,7 +573,7 @@ func (a *Aggregator) queryProductTable(ctx context.Context, table string, q Quer
 		where = append(where, fmt.Sprintf("m.time >= %s", add(q.StartTime)))
 	}
 	if !q.EndTime.IsZero() {
-		where = append(where, fmt.Sprintf("m.time <= %s", add(q.EndTime)))
+		where = append(where, fmt.Sprintf("m.time < %s", add(q.EndTime)))
 	}
 	if len(q.ProductIDs) > 0 {
 		where = append(where, fmt.Sprintf("d.product_id = ANY(%s)", add(q.ProductIDs)))
@@ -817,7 +817,7 @@ func (a *Aggregator) queryBandTable(ctx context.Context, table string, q QueryRe
 		where = append(where, fmt.Sprintf("m.time >= %s", add(q.StartTime)))
 	}
 	if !q.EndTime.IsZero() {
-		where = append(where, fmt.Sprintf("m.time <= %s", add(q.EndTime)))
+		where = append(where, fmt.Sprintf("m.time < %s", add(q.EndTime)))
 	}
 	if len(q.Technologies) > 0 {
 		where = append(where, fmt.Sprintf("d.technology = ANY(%s)", add(q.Technologies)))

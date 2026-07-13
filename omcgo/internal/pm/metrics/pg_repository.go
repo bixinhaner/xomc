@@ -468,7 +468,7 @@ func applyFilters(qb squirrel.SelectBuilder, q QueryRequest) squirrel.SelectBuil
 		qb = qb.Where(squirrel.GtOrEq{"time": q.StartTime})
 	}
 	if !q.EndTime.IsZero() {
-		qb = qb.Where(squirrel.LtOrEq{"time": q.EndTime})
+		qb = qb.Where(squirrel.Lt{"time": q.EndTime})
 	}
 	// #64 设备组数据权限：pm_metrics 以 device_sn 为设备键，按可见分组 fail-closed 收口。
 	// nil（超管）不过滤；[] 直接 WHERE FALSE；[g...] 经 device_sn → devices → 组成员子查询限定。

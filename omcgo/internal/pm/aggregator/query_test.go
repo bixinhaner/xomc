@@ -1,11 +1,13 @@
 package aggregator
 
 import (
+	"context"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -24,6 +26,44 @@ func Test_applyScalarFilters_TimeRangeIsHalfOpen(t *testing.T) {
 	assert.Contains(t, sql, "time < $2")
 	assert.NotContains(t, sql, "time <= $2")
 	assert.Equal(t, []any{start, end}, args)
+}
+
+func Test_queryProductTable_TimeRangeIsHalfOpen(t *testing.T) {
+	start := time.Date(2026, 7, 13, 9, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)
+	db := &recordingDB{results: []pgx.Rows{&fakeRows{}}}
+	a := New(db, nil, nil)
+
+	_, err := a.queryProductTable(context.Background(), "pm_metrics_hourly", QueryRequest{
+		Granularity: metrics.GranularityHourly,
+		StartTime:   start,
+		EndTime:     end,
+	})
+	require.NoError(t, err)
+	require.Len(t, db.sqls, 1)
+	assert.Contains(t, db.sqls[0], "m.time >= $2")
+	assert.Contains(t, db.sqls[0], "m.time < $3")
+	assert.NotContains(t, db.sqls[0], "m.time <= $3")
+	assert.Equal(t, []any{"hourly", start, end}, db.argsLog[0])
+}
+
+func Test_queryBandTable_TimeRangeIsHalfOpen(t *testing.T) {
+	start := time.Date(2026, 7, 13, 9, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)
+	db := &recordingDB{results: []pgx.Rows{&fakeRows{}}}
+	a := New(db, nil, nil)
+
+	_, err := a.queryBandTable(context.Background(), "pm_metrics_hourly", QueryRequest{
+		Granularity: metrics.GranularityHourly,
+		StartTime:   start,
+		EndTime:     end,
+	})
+	require.NoError(t, err)
+	require.Len(t, db.sqls, 1)
+	assert.Contains(t, db.sqls[0], "m.time >= $2")
+	assert.Contains(t, db.sqls[0], "m.time < $3")
+	assert.NotContains(t, db.sqls[0], "m.time <= $3")
+	assert.Equal(t, []any{"hourly", start, end}, db.argsLog[0])
 }
 
 // SelectTable 10 case：5 粒度 × 2 维度。15min × device_group 必须返 ErrUnsupportedQuery。

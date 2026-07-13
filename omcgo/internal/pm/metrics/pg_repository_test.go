@@ -155,7 +155,8 @@ func Test_applyFilters_TimeRange(t *testing.T) {
 	sql, args, err := result.ToSql()
 	require.NoError(t, err)
 	assert.Contains(t, sql, "time >= $1")
-	assert.Contains(t, sql, "time <= $2")
+	assert.Contains(t, sql, "time < $2")
+	assert.NotContains(t, sql, "time <= $2")
 	assert.Len(t, args, 2)
 }
 
@@ -175,7 +176,8 @@ func Test_applyFilters_Combined(t *testing.T) {
 	assert.Contains(t, sql, "metric_type = ")
 	assert.Contains(t, sql, "granularity = ")
 	assert.Contains(t, sql, "time >= ")
-	assert.Contains(t, sql, "time <= ")
+	assert.Contains(t, sql, "time < ")
+	assert.NotContains(t, sql, "time <= ")
 }
 
 // ---------------------------------------------------------------------------
