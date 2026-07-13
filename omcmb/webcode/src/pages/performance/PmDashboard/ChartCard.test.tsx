@@ -21,7 +21,7 @@ import type { MetricChart } from './taskDashboardUtils';
 // 捕获 ReactECharts 每次收到的 option（render 次数 + 内容），断言重绘行为。
 const echartsRenderSpy = vi.fn();
 vi.mock('echarts-for-react', () => ({
-  default: ({ option }: { option: { series: { data: number[] }[]; tooltip?: { extraCssText?: string } } }) => {
+  default: ({ option }: { option: { series: { data: number[] }[]; tooltip?: unknown } }) => {
     echartsRenderSpy(option);
     const first = option.series[0]?.data ?? [];
     return <div data-testid="echart" data-first-series={JSON.stringify(first)} />;
@@ -92,11 +92,25 @@ describe('ChartCard 渲染隔离 (#444)', () => {
     }));
     render(wrapIntl(<ChartCard chart={chart} />));
     const option = echartsRenderSpy.mock.calls[0][0] as {
-      tooltip: { enterable: boolean; extraCssText: string };
+      tooltip: {
+        enterable: boolean;
+        extraCssText: string;
+        position: (
+          point: [number, number],
+          params: unknown,
+          dom: unknown,
+          rect: unknown,
+          size: { contentSize: [number, number]; viewSize: [number, number] },
+        ) => [number, number];
+      };
     };
     expect(option.tooltip.enterable).toBe(true);
     expect(option.tooltip.extraCssText).toContain('max-height:220px');
     expect(option.tooltip.extraCssText).toContain('overflow-y:auto');
+    expect(option.tooltip.position([120, 80], null, null, null, {
+      contentSize: [240, 180],
+      viewSize: [900, 360],
+    })).toEqual([132, 92]);
   });
 
   it('成功路径：父重渲染但 chart 引用不变时不重绘 ECharts（memo 隔离）', async () => {

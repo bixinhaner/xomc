@@ -16,7 +16,6 @@ import ReactECharts from 'echarts-for-react';
 import { useT } from '@/hooks/useT';
 import { formatSystemTime } from '@core/utils/systemTime';
 import type { MetricChart, MetricSeries } from './taskDashboardUtils';
-import { computeTooltipPosition } from '@/components/Charts/LineChart';
 
 // #459 子单 D：图表横轴时间标签按系统时区显示（与列表一致），不按浏览器本地转换。
 const fmtTime = (t: string) => formatSystemTime(t, { format: 'MM-DD HH:mm', placeholder: t });
@@ -27,6 +26,28 @@ interface TooltipParam {
   seriesName?: string;
   marker?: string;
   value?: number | string;
+}
+
+function computeScrollableTooltipPosition(
+  point: [number, number],
+  size: { contentSize: [number, number]; viewSize: [number, number] },
+): [number, number] {
+  const [pointerX, pointerY] = point;
+  const [boxW, boxH] = size.contentSize;
+  const [viewW, viewH] = size.viewSize;
+  const margin = 12;
+  const offset = 12;
+  const x = pointerX + boxW + offset <= viewW - margin
+    ? pointerX + offset
+    : pointerX - boxW - offset;
+  const y = pointerY + boxH + offset <= viewH - margin
+    ? pointerY + offset
+    : pointerY - boxH - offset;
+
+  return [
+    Math.max(margin, Math.min(x, Math.max(margin, viewW - boxW - margin))),
+    Math.max(margin, Math.min(y, Math.max(margin, viewH - boxH - margin))),
+  ];
 }
 
 // #444 渲染隔离：包 React.memo + **内容级** areEqual 比较器（chartContentEqual）。
@@ -95,7 +116,7 @@ function ChartCard({ chart }: { chart: MetricChart }) {
         // （断档在网管有运维含义，不再连线抹平）；#200 的"假空洞"在规整网格下已不存在。
         connectNulls: false,
       })),
-    [chart.series, chart.buckets],
+    [chart.series],
   );
   // T-0189 周期对比：上一周期系列画虚线（已在上游按 +L 对齐到当前轴）。
   const compareSeries = useMemo(
@@ -112,7 +133,7 @@ function ChartCard({ chart }: { chart: MetricChart }) {
         connectNulls: false,
         lineStyle: { type: 'dashed' as const },
       })),
-    [chart.compareSeries, chart.buckets],
+    [chart.compareSeries],
   );
   const option = useMemo(() => {
     // tooltip 表头显示该桶的「开始~结束」时间段（每个点代表一个时间桶，非单时间点）。
@@ -146,7 +167,8 @@ function ChartCard({ chart }: { chart: MetricChart }) {
       xAxis: { type: 'category', data: xLabels, boundaryGap: false },
       yAxis: { type: 'value', scale: true },
       series: [...currentSeries, ...compareSeries],
-      // 智能避让：多设备 tooltip 行多、易盖住曲线/图例，按光标位置放到对角（issue #202）。
+      // 多对象 tooltip 需要可进入后滚动：贴近光标显示，边界不足时自动换侧。
+      // 若放到远端对角，用户移动鼠标去 tooltip 的途中会不断刷新 axis tooltip，实际无法滚动。
       tooltip: {
         trigger: 'axis',
         confine: true,
@@ -161,7 +183,7 @@ function ChartCard({ chart }: { chart: MetricChart }) {
           _dom: unknown,
           _rect: unknown,
           size: { contentSize: [number, number]; viewSize: [number, number] },
-        ) => computeTooltipPosition(point, size),
+        ) => computeScrollableTooltipPosition(point, size),
         formatter: tooltipFormatter,
       },
       legend: { type: 'scroll', top: 4 },
