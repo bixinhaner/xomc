@@ -75,7 +75,7 @@ import type {
   TemplateVisibility,
   TimeRangePreset,
 } from '@core/types/pmQuery';
-import { getDefaultTimeRangeForGranularity } from '@core/utils/granularityTimeRange';
+import { buildAlignedPresetRange, getDefaultTimeRangeForGranularity } from '@core/utils/granularityTimeRange';
 import DevicePickerModal from './components/DevicePickerModal';
 import MetricPickerModal from '@/components/MetricPickerModal';
 import PivotTable from './components/PivotTable';
@@ -130,26 +130,6 @@ interface SaveTemplateFormState {
   visibility: TemplateVisibility;
   payload: QueryTemplatePayload;
   customRange: [dayjs.Dayjs, dayjs.Dayjs] | null;
-}
-
-function presetToRange(preset: TimeRangePreset): { start: string; end: string } | null {
-  const now = dayjs();
-  switch (preset) {
-    case 'last_1h':
-      return { start: now.subtract(1, 'hour').toISOString(), end: now.toISOString() };
-    case 'last_3h':
-      return { start: now.subtract(3, 'hour').toISOString(), end: now.toISOString() };
-    case 'last_24h':
-      return { start: now.subtract(24, 'hour').toISOString(), end: now.toISOString() };
-    case 'last_7d':
-      return { start: now.subtract(7, 'day').toISOString(), end: now.toISOString() };
-    case 'last_30d':
-      return { start: now.subtract(30, 'day').toISOString(), end: now.toISOString() };
-    case 'last_6m':
-      return { start: now.subtract(6, 'month').toISOString(), end: now.toISOString() };
-    case 'custom':
-      return null;
-  }
 }
 
 export default function KPIQuery() {
@@ -305,7 +285,11 @@ export default function KPIQuery() {
         end: toSystemTimezoneRFC3339(customRange[1], systemTimezone) ?? customRange[1].toISOString(),
       };
     } else {
-      range = presetToRange(payload.timeRangePreset);
+      range = buildAlignedPresetRange({
+        granularity: payload.granularity,
+        preset: payload.timeRangePreset,
+        systemTimezone,
+      });
     }
     if (!range) {
       message.warning(t('perf.kpiQuery.selectRangeRequired'));
