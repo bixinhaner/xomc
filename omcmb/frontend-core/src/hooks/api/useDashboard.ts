@@ -27,6 +27,7 @@ type KPITimeSeriesParams = {
   start_time: string;
   end_time: string;
   granularity?: DashboardKPIGranularity;
+  technology?: string;
 };
 
 const api = createApiSwitchWithMock(dashboardService, dashboardApi);
@@ -41,6 +42,7 @@ interface DashboardKPITimeSeriesClient {
     startTime?: string,
     endTime?: string,
     granularity?: DashboardKPIGranularity,
+    technology?: string,
   ): Promise<DashboardChartData['kpiTimeSeries']>;
 }
 
@@ -56,6 +58,7 @@ export function buildDashboardKPIQueryOptions(
       params?.start_time,
       params?.end_time,
       params?.granularity,
+      params?.technology,
     ),
     enabled: enabled && Boolean(params?.kpi_names?.length),
     staleTime: 30000,
@@ -234,6 +237,7 @@ export function useKPITimeSeries(
     start_time?: string;
     end_time?: string;
     granularity?: DashboardKPIGranularity;
+    technology?: string;
   },
   enabled = true
 ) {
@@ -533,6 +537,7 @@ export function useMultiKPITrendComparison(
   compareWith: 'yesterday' | 'last_week' = 'yesterday',
   enabled = true,
   windowDateKey?: string,
+  technology?: string,
 ): UseMultiKPITrendComparisonResult {
   const systemTimezone = useSystemTimezoneValue();
   // 1. 计算时间范围参数（支持多个 KPI）
@@ -540,8 +545,8 @@ export function useMultiKPITrendComparison(
     if (compareWith === 'yesterday') {
       const ranges = buildDashboardDayRanges(new Date(), systemTimezone);
       return {
-        currentParams: { kpi_names: kpiNames, ...ranges.current },
-        compareParams: { kpi_names: kpiNames, ...ranges.compare },
+        currentParams: { kpi_names: kpiNames, technology, ...ranges.current },
+        compareParams: { kpi_names: kpiNames, technology, ...ranges.compare },
       };
     }
     const now = nowInSystemTimezone(systemTimezone);
@@ -554,14 +559,16 @@ export function useMultiKPITrendComparison(
         kpi_names: kpiNames,
         start_time: currentMonday.format(),
         end_time: now.format(),
+        technology,
       },
       compareParams: {
         kpi_names: kpiNames,
         start_time: compareStart.format(),
         end_time: currentMonday.format(),
+        technology,
       },
     };
-  }, [kpiNames, compareWith, systemTimezone, windowDateKey]);
+  }, [kpiNames, compareWith, systemTimezone, windowDateKey, technology]);
 
   // 2. 两次请求获取所有 KPI 的时序数据
   const currentTimeSeries = useKPITimeSeries(currentParams, enabled);
@@ -598,6 +605,7 @@ export function useMultiKPIWeekSeries(
   kpiNames: string[],
   enabled = true,
   windowDateKey?: string,
+  technology?: string,
 ) {
   // 周窗口依赖业务自然日，必须直接订阅已鉴权的时区查询结果，不能只读可能尚未
   // 初始化的 store 缓存，否则首次请求会回落 UTC，daily 点整体左移一天。
@@ -612,6 +620,7 @@ export function useMultiKPIWeekSeries(
     start_time: window.startTime,
     end_time: window.endTime,
     granularity: 'daily',
+    technology,
   }, enabled && isDashboardBusinessTimezoneReady(systemTimezone));
 
   const data = useMemo(() => {

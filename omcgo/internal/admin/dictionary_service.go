@@ -201,7 +201,9 @@ func (s *DictionaryService) CreateDictionaryDetail(ctx context.Context, req Crea
 	if err != nil {
 		return nil, commonerrors.NewBusinessError(7003, "parent dictionary not found", err)
 	}
-	_ = parentDict // 后续可能加管理字典补录策略校验,目前方案 A 允许
+	if err := validateNetworkTypeDictionaryValue(parentDict.Type, req.Value); err != nil {
+		return nil, err
+	}
 
 	detail := &DictionaryDetail{
 		Label:           req.Label,
@@ -267,10 +269,10 @@ func (s *DictionaryService) ListDictionaryDetails(ctx context.Context, req Dicti
 //   - 不在请求里出现 parent_id 时：保持原 parent_id 不动（约定：前端始终把当前值
 //     回填到 form 一并提交，因此 nil 视为「无意改动」）。语义见 model.go 注释。
 //   - 出现 parent_id（含 null）时按以下规则：
-//     * 防环：新 parent_id 不能等于 self.id 或 self 的任一后代。
-//     * 同字典：新父明细的 sys_dictionary_id 必须与 self 一致。
-//     * 深度：max(子树 level + delta) < MaxDictionaryDetailDepth (3)。
-//     * 级联：self 自身和所有后代的 level 同步加 delta。
+//   - 防环：新 parent_id 不能等于 self.id 或 self 的任一后代。
+//   - 同字典：新父明细的 sys_dictionary_id 必须与 self 一致。
+//   - 深度：max(子树 level + delta) < MaxDictionaryDetailDepth (3)。
+//   - 级联：self 自身和所有后代的 level 同步加 delta。
 func (s *DictionaryService) UpdateDictionaryDetail(ctx context.Context, req UpdateDictionaryDetailRequest) (*DictionaryDetail, error) {
 	detail, err := s.detailRepo.GetByID(ctx, req.ID)
 	if err != nil {
@@ -302,6 +304,13 @@ func (s *DictionaryService) UpdateDictionaryDetail(ctx context.Context, req Upda
 		}
 		detail.SysDictionaryID = *req.SysDictionaryID
 	}
+	dictionary, err := s.dictRepo.GetByID(ctx, detail.SysDictionaryID)
+	if err != nil {
+		return nil, commonerrors.NewBusinessError(7003, "parent dictionary not found", err)
+	}
+	if err := validateNetworkTypeDictionaryValue(dictionary.Type, detail.Value); err != nil {
+		return nil, err
+	}
 
 	// PRD §10：换父 + 子树级联 level 调整
 	if err := s.applyParentChange(ctx, detail, req.ParentID); err != nil {
@@ -312,6 +321,19 @@ func (s *DictionaryService) UpdateDictionaryDetail(ctx context.Context, req Upda
 		return nil, fmt.Errorf("update dictionary detail: %w", err)
 	}
 	return detail, nil
+}
+
+func validateNetworkTypeDictionaryValue(dictionaryType, value string) error {
+	if dictionaryType != "network_type" {
+		return nil
+	}
+	switch value {
+	case "lte", "nr", "gsm":
+		return nil
+	default:
+		return commonerrors.NewBusinessError(7014,
+			"network_type value must be one of: lte, nr, gsm", nil)
+	}
 }
 
 // applyParentChange 处理换父：解析新 level + 校验防环/深度，然后级联调整子树 level。

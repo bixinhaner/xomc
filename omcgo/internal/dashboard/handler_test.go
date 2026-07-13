@@ -11,6 +11,7 @@ import (
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -151,6 +152,26 @@ func TestDashHandler_KPITimeSeries_InvalidGranularity(t *testing.T) {
 	w := dashHDoRequest(router, http.MethodGet,
 		"/api/v1/dashboard/kpi-time-series?kpi_names=rrc&granularity=weekly")
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestParseDashboardKPITechnology(t *testing.T) {
+	tests := []struct {
+		raw     string
+		wantErr bool
+	}{
+		{raw: ""},
+		{raw: "gsm"},
+		{raw: "GSM", wantErr: true},
+		{raw: "2g", wantErr: true},
+	}
+	for _, tt := range tests {
+		_, err := parseDashboardKPITechnology(tt.raw)
+		if tt.wantErr {
+			require.Error(t, err)
+		} else {
+			require.NoError(t, err)
+		}
+	}
 }
 
 func TestDashHandler_KPITimeSeries_RejectsNonIncreasingWindow(t *testing.T) {

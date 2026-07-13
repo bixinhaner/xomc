@@ -923,7 +923,7 @@ func (s *Service) GetAlarmTypePie(ctx context.Context) ([]AlarmTypePieEntry, err
 // KPI 派生指标先聚合 counter 依赖，再在时间桶内按公式重算；dashboard 不直接平均 KPI 行。
 //
 // 查询键：前端传指标编号（K/C 编号），直接查 metric_path。
-func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, granularity metrics.Granularity, startTime, endTime time.Time) (KPITimeSeriesResponse, error) {
+func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, technology model.Technology, granularity metrics.Granularity, startTime, endTime time.Time) (KPITimeSeriesResponse, error) {
 	result := make(KPITimeSeriesResponse, len(kpiNames))
 
 	if len(kpiNames) == 0 {
@@ -949,9 +949,9 @@ func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, granu
 	var points []networkSeriesPoint
 	var err error
 	if granularity == metrics.GranularityDaily {
-		points, err = s.fetchNetworkKCodeDailySeries(ctx, kcodes, startTime, endTime)
+		points, err = s.fetchNetworkKCodeDailySeries(ctx, kcodes, technology, startTime, endTime)
 	} else {
-		points, err = s.fetchNetworkKCodeSeries(ctx, kcodes, startTime, endTime)
+		points, err = s.fetchNetworkKCodeSeries(ctx, kcodes, technology, startTime, endTime)
 	}
 	if err != nil {
 		return nil, err
@@ -969,11 +969,11 @@ func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, granu
 	return result, nil
 }
 
-func (s *Service) fetchNetworkKCodeDailySeries(ctx context.Context, kcodes []string, startTime, endTime time.Time) ([]networkSeriesPoint, error) {
+func (s *Service) fetchNetworkKCodeDailySeries(ctx context.Context, kcodes []string, technology model.Technology, startTime, endTime time.Time) ([]networkSeriesPoint, error) {
 	if s.pmAggregator == nil {
 		return nil, fmt.Errorf("dashboard network KPI aggregator not configured")
 	}
-	rows, err := s.pmAggregator.Query(ctx, buildNetworkKPIDailySeriesRequest(kcodes, startTime, endTime))
+	rows, err := s.pmAggregator.Query(ctx, buildNetworkKPIDailySeriesRequest(kcodes, technology, startTime, endTime))
 	if err != nil {
 		return nil, fmt.Errorf("query dashboard network daily kpi series: %w", err)
 	}
@@ -1000,12 +1000,12 @@ type networkSeriesPoint struct {
 
 // fetchNetworkKCodeSeries 读多个指标编号的首页全网时序。
 // 读 hourly 聚合表，并保持与性能仪表板相同的完整桶口径。
-func (s *Service) fetchNetworkKCodeSeries(ctx context.Context, kcodes []string, startTime, endTime time.Time) ([]networkSeriesPoint, error) {
+func (s *Service) fetchNetworkKCodeSeries(ctx context.Context, kcodes []string, technology model.Technology, startTime, endTime time.Time) ([]networkSeriesPoint, error) {
 	if s.pmAggregator == nil {
 		return nil, fmt.Errorf("dashboard network KPI aggregator not configured")
 	}
 
-	rows, err := s.pmAggregator.Query(ctx, buildNetworkKPIHourlySeriesRequest(kcodes, startTime, endTime))
+	rows, err := s.pmAggregator.Query(ctx, buildNetworkKPIHourlySeriesRequest(kcodes, technology, startTime, endTime))
 	if err != nil {
 		return nil, fmt.Errorf("query dashboard network kpi series: %w", err)
 	}
@@ -1057,7 +1057,7 @@ func (s *Service) queryNetworkKPISeries(ctx context.Context, kpiName string, sta
 	kcodes := []string{kpiName}
 
 	// 与 GetKPITimeSeries 同源：通过 PM Aggregator 做 network 维度 hourly 查询与 KPI 重算。
-	points, err := s.fetchNetworkKCodeSeries(ctx, kcodes, startTime, endTime)
+	points, err := s.fetchNetworkKCodeSeries(ctx, kcodes, "", startTime, endTime)
 	if err != nil {
 		return nil, fmt.Errorf("query network kpi series: %w", err)
 	}

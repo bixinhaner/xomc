@@ -12,6 +12,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/admin"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
@@ -269,13 +270,29 @@ func (h *Handler) GetKPITimeSeries(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
+	technology, err := parseDashboardKPITechnology(c.Query("technology"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
 
-	result, err := h.service.GetKPITimeSeries(c.Request.Context(), kpiNames, granularity, startTime, endTime)
+	result, err := h.service.GetKPITimeSeries(c.Request.Context(), kpiNames, technology, granularity, startTime, endTime)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
 	response.OK(c, result)
+}
+
+func parseDashboardKPITechnology(raw string) (model.Technology, error) {
+	if raw == "" {
+		return "", nil
+	}
+	technology := model.Technology(raw)
+	if !technology.IsValid() {
+		return "", fmt.Errorf("invalid technology %q (allowed: lte, nr, gsm)", raw)
+	}
+	return technology, nil
 }
 
 // GetKPIDefinitions handles GET /api/v1/dashboard/kpi/definitions.

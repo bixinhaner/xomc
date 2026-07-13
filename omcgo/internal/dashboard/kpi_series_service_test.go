@@ -26,7 +26,7 @@ func TestFetchNetworkKCodeSeries_DoesNotQuery15MinTailWhenHourlyBucketMissing(t 
 	start := time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC)
 	end := start.Add(2*time.Hour + 30*time.Minute)
 
-	points, err := service.fetchNetworkKCodeSeries(context.Background(), []string{"K1"}, start, end)
+	points, err := service.fetchNetworkKCodeSeries(context.Background(), []string{"K1"}, "", start, end)
 
 	require.NoError(t, err)
 	require.Empty(t, points)
@@ -47,7 +47,7 @@ func TestGetKPITimeSeries_RoutesRequestedGranularity(t *testing.T) {
 			service := &Service{pmAggregator: aggregator}
 
 			_, err := service.GetKPITimeSeries(
-				context.Background(), []string{"K1"}, granularity, start, end,
+				context.Background(), []string{"K1"}, "", granularity, start, end,
 			)
 
 			require.NoError(t, err)

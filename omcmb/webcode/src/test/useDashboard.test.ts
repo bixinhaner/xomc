@@ -334,6 +334,7 @@ describe('dashboard KPI 系统时区窗口', () => {
       start_time: '2026-07-06T00:00:00+08:00',
       end_time: '2026-07-13T00:00:00+08:00',
       granularity: 'daily' as const,
+      technology: 'gsm',
     };
 
     const options = buildDashboardKPIQueryOptions(params, true, client);
@@ -344,6 +345,7 @@ describe('dashboard KPI 系统时区窗口', () => {
       params.start_time,
       params.end_time,
       'daily',
+      'gsm',
     ]]);
 
     const disabled = buildDashboardKPIQueryOptions(
