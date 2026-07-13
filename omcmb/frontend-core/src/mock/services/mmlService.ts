@@ -342,6 +342,13 @@ export const mmlService = {
     return task;
   },
 
+  async cancelTasks(ids: string[]): Promise<void> {
+    await delay(100, 200);
+    tasks = tasks.map((task) => (
+      ids.includes(task.id) ? { ...task, status: 'cancelled' } : task
+    ));
+  },
+
   async deleteTask(id: string): Promise<void> {
     await delay(100, 200);
     tasks = tasks.filter((t) => t.id !== id);

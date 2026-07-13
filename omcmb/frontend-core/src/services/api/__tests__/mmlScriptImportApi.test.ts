@@ -32,6 +32,17 @@ describe('mmlApi TXT script import', () => {
     ]);
   });
 
+  it('cancels selected MML task records with the existing task cancel endpoint', async () => {
+    postMock.mockResolvedValue({ data: taskResponse({ id: 'task-a', status: 'cancelled' }) });
+
+    await mmlApi.cancelTasks(['task-a', 'task-b']);
+
+    expect(postMock.mock.calls).toEqual([
+      ['/mml/tasks/task-a/cancel'],
+      ['/mml/tasks/task-b/cancel'],
+    ]);
+  });
+
   it.each([
     ['script'],
     ['console'],
@@ -337,12 +348,13 @@ function scriptResponse() {
   };
 }
 
-function taskResponse() {
+function taskResponse(overrides: Record<string, unknown> = {}) {
   return {
     id: 'task-1', task_name: '执行巡检', script_id: 'script-1', device_sns: ['SN1'], commands: [],
     status: 'pending', results: [], creator: 'admin', created_at: '2026-07-10T00:00:00Z', updated_at: '2026-07-10T00:00:00Z',
     execute_type: 'scheduled', offline_retry: true, offline_retry_wait: 60, failed_retry: true,
     failed_retry_count: 2, failed_retry_interval: 5, total_devices: 1, success_count: 0, failed_count: 0,
+    ...overrides,
   };
 }
 
