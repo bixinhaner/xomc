@@ -270,11 +270,9 @@ func TestExpandLargeObjectPrefixes_UsesKnownMaxInstanceBelowHintFloor(t *testing
 		"已知最大实例数为 1 时不应被 hintFloor 强制展开成 256 个任务")
 }
 
-func TestExpandLargeObjectPrefixes_FirstTimeSyncUsesHintFloor(t *testing.T) {
-	// BSC cold-start 回归: 首次同步 DB 无 BTS 历史 → maxByPrefix 返回 0 →
-	// hint=hintFloor=256。BSC `DeviceGSM.Bts.{i}.*` 实测 70 字段:
-	//   estBytes = 60 * 70 * 256 = 1,075,200 > 600KB → 展开 256 个 instance prefix
-	// 保证首次同步 即可 避免 NATS "maximum payload exceeded"。
+func TestExpandLargeObjectPrefixes_GSMBtsWithoutHistoryUsesMaxInstanceGroups(t *testing.T) {
+	// DeviceGSM.Bts.0.* 是站级参数,不是 BTS 实例。BSC cold-start 时如果 DB 尚无
+	// 历史实例号,按设备支持的最大 BTS 数展开,后续由 buildGPVBatches 分组获取。
 	mappings := make([]parammodel.ParamMapping, 0, 70)
 	for i := 0; i < 70; i++ {
 		mappings = append(mappings, parammodel.ParamMapping{
@@ -289,9 +287,17 @@ func TestExpandLargeObjectPrefixes_FirstTimeSyncUsesHintFloor(t *testing.T) {
 	}
 	got := svc.expandLargeObjectPrefixes(context.Background(), uuid.New(), mappings,
 		[]string{"DeviceGSM.Bts."})
-	require.Len(t, got, hintFloor, "BSC cold-start 展开数应等于 hintFloor")
+	require.Len(t, got, hintFloor, "未知 BTS 数量时应按最大实例数展开")
 	assert.Equal(t, "DeviceGSM.Bts.1.", got[0])
 	assert.Equal(t, "DeviceGSM.Bts."+strconv.Itoa(hintFloor)+".", got[hintFloor-1])
+	assert.NotContains(t, got, "DeviceGSM.Bts.0.")
+
+	batches := buildGPVBatches(got, 50)
+	require.NotEmpty(t, batches)
+	for _, batch := range batches {
+		assert.LessOrEqual(t, len(batch), maxExpandedObjectPrefixesPerGPV(),
+			"展开后的 BTS 实例前缀应按 payload 预算分组")
+	}
 }
 
 func TestExpandLargeObjectPrefixes_FirstTimeSyncMidSizedObjectNotExpanded(t *testing.T) {
@@ -355,8 +361,8 @@ func TestExpandLargeObjectPrefixes_NonBTSLargeObjectBypassesExpansion(t *testing
 		"非 BTS 大对象应直接整对象 GPV,不做实例展开")
 }
 
-func TestExpandLargeObjectPrefixes_DBLookupErrorFallsBackToHintFloor(t *testing.T) {
-	// DB 失败也要走 hintFloor 兜底,确保 BSC 类大对象不会因 DB 短暂故障而退化为不展开。
+func TestExpandLargeObjectPrefixes_GSMBtsDBLookupErrorFallsBackToMaxInstances(t *testing.T) {
+	// GSM BTS 的 DB 查询失败时仍按设备支持最大数分组获取,避免退回整对象大包。
 	mappings := make([]parammodel.ParamMapping, 0, 70)
 	for i := 0; i < 70; i++ {
 		mappings = append(mappings, parammodel.ParamMapping{
@@ -371,7 +377,10 @@ func TestExpandLargeObjectPrefixes_DBLookupErrorFallsBackToHintFloor(t *testing.
 	}
 	got := svc.expandLargeObjectPrefixes(context.Background(), uuid.New(), mappings,
 		[]string{"DeviceGSM.Bts."})
-	require.Len(t, got, hintFloor, "DB 错误应回退 hintFloor")
+	require.Len(t, got, hintFloor)
+	assert.Equal(t, "DeviceGSM.Bts.1.", got[0])
+	assert.Equal(t, "DeviceGSM.Bts."+strconv.Itoa(hintFloor)+".", got[hintFloor-1])
+	assert.NotContains(t, got, "DeviceGSM.Bts.0.")
 }
 
 func TestExpandLargeObjectPrefixes_NonObjectPrefixUnchanged(t *testing.T) {
@@ -385,8 +394,8 @@ func TestExpandLargeObjectPrefixes_NonObjectPrefixUnchanged(t *testing.T) {
 	assert.Equal(t, []string{"Device.System.Mode"}, got)
 }
 
-func TestExpandLargeObjectPrefixes_BtsExpansionCapsAtMaxHintCap(t *testing.T) {
-	// 仅 BTS 类对象允许实例展开；当历史实例数异常大时，仍要受 maxHintCap 截断保护。
+func TestExpandLargeObjectPrefixes_BtsExpansionCapsAtGSMMaxInstances(t *testing.T) {
+	// GSM BTS 类对象允许实例展开；当历史实例数异常大时，仍要受设备 256 实例上限保护。
 	mappings := make([]parammodel.ParamMapping, 0, 100)
 	for i := 0; i < 100; i++ {
 		mappings = append(mappings, parammodel.ParamMapping{
@@ -401,7 +410,10 @@ func TestExpandLargeObjectPrefixes_BtsExpansionCapsAtMaxHintCap(t *testing.T) {
 	}
 	got := svc.expandLargeObjectPrefixes(context.Background(), uuid.New(), mappings,
 		[]string{"DeviceGSM.Bts."})
-	require.Len(t, got, maxHintCap, "超过 maxHintCap 应截断")
+	require.Len(t, got, gsmBTSMaxInstances, "超过 GSM BTS 最大实例数应截断")
+	assert.Equal(t, "DeviceGSM.Bts.1.", got[0])
+	assert.Equal(t, "DeviceGSM.Bts.256.", got[255])
+	assert.NotContains(t, got, "DeviceGSM.Bts.0.")
 }
 
 // ── 集成:expand 决策被记录到日志 ────────────────────────────────────────

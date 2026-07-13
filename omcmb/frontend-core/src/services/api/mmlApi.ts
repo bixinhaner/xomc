@@ -100,6 +100,7 @@ interface BackendMMLScriptIssue {
   raw_line?: string;
   field?: string;
   message?: string;
+  display_message?: string;
 }
 
 interface BackendMMLScriptValidationSummary {
@@ -465,6 +466,7 @@ function mapBackendScriptIssue(issue: BackendMMLScriptIssue): MMLScriptIssue {
     rawLine: issue.raw_line || undefined,
     field: issue.field || undefined,
     message: issue.message || undefined,
+    displayMessage: issue.display_message || undefined,
   };
 }
 

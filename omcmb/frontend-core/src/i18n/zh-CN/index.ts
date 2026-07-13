@@ -8148,6 +8148,7 @@ const messages: Record<string, string> = {
   'mml.scriptImport.validationResult':        '校验结果',
   'mml.scriptImport.passed':                  '通过',
   'mml.scriptImport.linePrefix':              '第 {line} 行：',
+  'mml.scriptImport.issueFallback':           '校验未通过',
   'mml.scriptImport.validationFailed':        'TXT 校验失败',
   'mml.scriptImport.downloadTemplateFailed':  '模板下载失败',
   'mml.scriptImport.errorsBlockSave':         '请先修复所有错误后再保存。',

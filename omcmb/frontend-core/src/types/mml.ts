@@ -188,6 +188,7 @@ export interface MMLScriptIssue {
   rawLine?: string;
   field?: string;
   message?: string;
+  displayMessage?: string;
 }
 
 /** TXT 校验概要；effectiveLines 兼容早期接口，validLines 对应当前服务端字段。 */

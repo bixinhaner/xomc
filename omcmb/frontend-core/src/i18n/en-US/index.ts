@@ -8111,6 +8111,7 @@ const messages: Record<string, string> = {
   'mml.scriptImport.validationResult':        'Validation Result',
   'mml.scriptImport.passed':                  'Passed',
   'mml.scriptImport.linePrefix':              'Line {line}: ',
+  'mml.scriptImport.issueFallback':           'Validation failed',
   'mml.scriptImport.validationFailed':        'TXT validation failed',
   'mml.scriptImport.downloadTemplateFailed':  'Template download failed',
   'mml.scriptImport.errorsBlockSave':         'Resolve all errors before saving.',

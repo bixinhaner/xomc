@@ -16,16 +16,12 @@ package provision
 //
 // hint 估算策略(优先级从高到低):
 //  1. DB 已有 max instance 号(滚动学习,首次同步后越来越准)
-//  2. hintFloor=256 (首次同步无 DB 历史的兜底; 覆盖 BSC 物理上限 256 BTS)
+//  2. 无历史实例号时使用 hintFloor 兜底
 //  3. 硬上限 maxHintCap=512 (防 estimate 异常膨胀)
 //
-// hintFloor=256 的副作用过滤: expand 触发条件是 estBytes >= 600KB,即
-// fields × 256 × 60B >= 600KB → fields >= 40。小对象(<40 字段)即使 hintFloor=256
-// 也不会展开,不产生 SoapFault 9005 浪费。BSC `DeviceGSM.Bts.` (~50 字段) 自然
-// 命中展开,首次同步即可工作。
-//
-// 不存在的 instance prefix CPE 返回 SoapFault 9005,ACS handler.tryRecoverGPVFault
-// 自然容错,不阻塞同步。
+// DeviceGSM.Bts.0.* 是站级参数,不是 BTS 实例。GSM BTS 在没有历史实例号时按设备
+// 支持的最大 BTS 数展开,并由 buildGPVBatches 按 NATS 预算分组获取,
+// 避免整对象 GPV 大包超过 NATS max_payload。
 //
 // 弱化语义(Phase 1): 如果实例从 CPE 物理移除(如 BTS.5 下架),DB 残留 Bts.5 不会
 // 被自动删除(因为 instance-level reconcile 范围被限定到当前实例内部)。前端会
@@ -57,18 +53,22 @@ const (
 	// hintFloor: 首次同步无 DB 历史时,instance 展开数兜底值。
 	//
 	// 取值 256 来源:
-	//  - BSC 物理上限 256 BTS,首次同步必须能覆盖;
+	//  - BSC 设备支持的最大 BTS 实例数 256,首次同步无历史实例号时必须能覆盖;
 	//  - 历史曾用 32,导致 BSC `DeviceGSM.Bts.` cold-start estBytes ≈ 96KB << 600KB
 	//    阈值 → 不展开 → CPE 一次返回 ~1.5MB SOAP body → ACS publishRPCResponseEvent
 	//    触发 NATS `maximum payload exceeded` → 事件丢失 → device_parameters 无 BTS
 	//    实例参数 → 前端 BSC QuickSettings 临区/TRX 空白(死锁: DB 永远学不到 hint);
-	//  - 副作用受 expandThreshold 联合过滤: 小对象(<40 字段)仍不展开,不会产生
-	//    SoapFault 9005 浪费 round-trip。
+	//  - 展开后的 DeviceGSM.Bts.{1..256}. 会由 buildGPVBatches 按响应 payload 预算
+	//    分组获取,不存在的实例由 ACS 9005 恢复逻辑容错。
 	hintFloor = 256
 
 	// maxHintCap: instance 展开数硬上限,防 DB 历史异常(如残留古老脏数据)导致估算
 	// 膨胀到几千个 task。BSC 物理上限 256 BTS,留 2 倍裕量。
 	maxHintCap = 512
+
+	// gsmBTSMaxInstances: DeviceGSM.Bts.{i}. 的设备实例上限。DeviceGSM.Bts.0.*
+	// 为站级参数,不计入 BTS 实例,所以展开范围是 1..256。
+	gsmBTSMaxInstances = 256
 )
 
 // expandLargeObjectPrefixes 把响应规模可能撑爆 NATS 单事件上限的 object prefix
@@ -128,16 +128,14 @@ func (s *SyncService) maybeExpandSinglePrefix(
 		// mapping 0 字段且 DB 0 行 → 无信息,不展开,任凭 CPE 自然返回
 		return []string{p}
 	}
-
 	estBytes := avgFieldBytes * fields * hint
 	if estBytes < expandThreshold {
 		return []string{p}
 	}
-	if hint > maxHintCap {
-		hint = maxHintCap
-	}
-	expanded := make([]string, 0, hint)
-	for i := 1; i <= hint; i++ {
+	hint = min(hint, maxExpandedInstance(p))
+	first := firstExpandedInstance(p)
+	expanded := make([]string, 0, hint-first+1)
+	for i := first; i <= hint; i++ {
 		expanded = append(expanded, p+strconv.Itoa(i)+".")
 	}
 	if s.logger != nil {
@@ -152,12 +150,32 @@ func (s *SyncService) maybeExpandSinglePrefix(
 	return expanded
 }
 
+func maxExpandedInstance(prefix string) int {
+	switch prefix {
+	case "DeviceGSM.Bts.":
+		return gsmBTSMaxInstances
+	default:
+		return maxHintCap
+	}
+}
+
 func shouldExpandByInstance(prefix string) bool {
 	switch prefix {
 	case "DeviceGSM.Bts.":
 		return true
 	default:
 		return false
+	}
+}
+
+func firstExpandedInstance(prefix string) int {
+	switch prefix {
+	case "DeviceGSM.Bts.":
+		// DeviceGSM.Bts.0.* is station-level state on BSC devices, not a BTS
+		// instance. Real BTS rows start at 1.
+		return 1
+	default:
+		return 1
 	}
 }
 

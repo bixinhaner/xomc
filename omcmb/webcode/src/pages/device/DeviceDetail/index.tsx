@@ -1440,6 +1440,7 @@ export default function DeviceDetail() {
     networkType: detailQuickSettingsNetworkType,
     paramModel: quickSettingsData?.paramModel ?? '',
     bmTech: activeBmTech,
+    enabled: activeTab === 'basic',
   });
 
   const bmCellTechOptions = useMemo<BmCellTech[]>(() => {
