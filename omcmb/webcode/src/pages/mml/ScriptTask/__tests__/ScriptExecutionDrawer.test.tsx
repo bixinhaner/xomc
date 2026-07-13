@@ -92,6 +92,25 @@ describe('ScriptExecutionDrawer', () => {
     });
   });
 
+  it('passes the created task to onSuccess after execution succeeds', async () => {
+    const onSuccess = vi.fn();
+    const task = { id: 'task-created-1', taskName: '巡检任务' };
+    mocks.execute.mockResolvedValue({
+      task,
+      validation: {
+        planItems: [],
+        summary: { totalLines: 1, validLines: 1, effectiveLines: 1, deviceCount: 1, errorCount: 0, warningCount: 0 },
+        issues: [],
+      },
+    });
+    renderDrawer({ onSuccess });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: '执行' }));
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledWith(task));
+  });
+
   it('confirms server warnings and retries with confirmWarnings', async () => {
     mocks.execute.mockResolvedValueOnce({
       task: { id: 'task-1' },

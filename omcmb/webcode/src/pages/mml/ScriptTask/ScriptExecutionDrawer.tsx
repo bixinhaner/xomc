@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, Checkbox, DatePicker, Drawer, Form, Input, InputNumber, Modal, Radio, Space, TimePicker, Typography, message } from 'antd';
 import type { Dayjs } from 'dayjs';
-import type { MMLExecuteType, MMLScript, MMLScriptImportValidation, MMLScriptExecutionInput } from '@core/types/mml';
+import type { MMLExecuteType, MMLScript, MMLScriptImportValidation, MMLScriptExecutionInput, MMLTask } from '@core/types/mml';
 import { useCreateMMLScriptExecution } from '@core/hooks/api/useMML';
 import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
 import { toSystemTimezoneRFC3339 } from '@core/utils/systemTime';
@@ -12,7 +12,7 @@ export interface ScriptExecutionDrawerProps {
   open: boolean;
   script: MMLScript | null;
   onClose: () => void;
-  onSuccess?: () => void;
+  onSuccess?: (task: MMLTask) => void;
 }
 
 interface ExecutionForm {
@@ -71,7 +71,7 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
       if (resultValidation.summary.warningCount > 0 || resultValidation.issues.some((issue) => issue.severity === 'warning')) {
         setValidation(resultValidation); setWarningValues({ ...input, requestId }); return;
       }
-      setValidation(null); onSuccess?.(); onClose();
+      setValidation(null); onSuccess?.(result.task); onClose();
     } catch (error) {
       const errorValidation = validationFromError(error);
       if (errorValidation) {

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   refetch: vi.fn(),
   update: vi.fn(),
   delete: vi.fn(),
+  navigate: vi.fn(),
 }));
 
 vi.mock('@core/hooks/api/useMML', () => ({
@@ -40,10 +41,28 @@ vi.mock('@core/hooks/api/useMML', () => ({
 
 vi.mock('../ScriptImportModal', () => ({ default: () => null }));
 vi.mock('../ScriptExecutionDrawer', () => ({
-  default: ({ open, script }: { open: boolean; script?: { scriptName?: string } | null }) =>
-    open ? <div role="dialog">执行 {script?.scriptName}</div> : null,
+  default: ({
+    open,
+    script,
+    onSuccess,
+  }: {
+    open: boolean;
+    script?: { scriptName?: string } | null;
+    onSuccess?: (task: { id: string; taskName: string }) => void;
+  }) =>
+    open ? (
+      <div role="dialog">
+        执行 {script?.scriptName}
+        <button type="button" onClick={() => onSuccess?.({ id: 'task-1', taskName: '巡检任务' })}>
+          simulate-execution-success
+        </button>
+      </div>
+    ) : null,
 }));
 vi.mock('../ScriptImportPreview', () => ({ default: () => <div /> }));
+vi.mock('react-router-dom', () => ({
+  useNavigate: () => mocks.navigate,
+}));
 vi.mock('@/components/DataTable', () => ({
   default: ({
     batchActions = [],
@@ -198,5 +217,15 @@ describe('ScriptTask actions column', () => {
     renderPage();
 
     expect(document.querySelector('tbody tr td:nth-child(2)')).toHaveAttribute('data-column-key', 'operation');
+  });
+
+  it('navigates to task records after script execution succeeds', () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: '执行' }));
+    fireEvent.click(screen.getByRole('button', { name: 'simulate-execution-success' }));
+
+    expect(mocks.refetch).toHaveBeenCalled();
+    expect(mocks.navigate).toHaveBeenCalledWith('/mml/task-records');
   });
 });
