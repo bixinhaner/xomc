@@ -153,6 +153,9 @@ func (l *Loader) loadAlarmFile(ctx context.Context, path, loadedFrom string, sev
 		neType = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 		neType = strings.ToUpper(neType)
 	}
+	if err := validateAlarmIdentifiers(doc.Alarms, seen, filepath.Base(path)); err != nil {
+		return 0, err
+	}
 
 	tx, err := l.pool.Begin(ctx)
 	if err != nil {
@@ -160,13 +163,18 @@ func (l *Loader) loadAlarmFile(ctx context.Context, path, loadedFrom string, sev
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	rows, err := batchUpsertAlarms(ctx, tx, neType, loadedFrom, doc.Alarms, severityMap, seen, l.logger)
+	rows, err := batchUpsertAlarms(ctx, tx, neType, loadedFrom, doc.Alarms, severityMap)
 	if err != nil {
 		return 0, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return 0, fmt.Errorf("commit alarm tx (%s): %w", neType, err)
+	}
+	for _, a := range doc.Alarms {
+		if a.Identifier != "" {
+			seen[a.Identifier] = filepath.Base(path)
+		}
 	}
 	l.logger.Info("alarm file loaded",
 		zap.String("ne_type", neType),
@@ -175,7 +183,32 @@ func (l *Loader) loadAlarmFile(ctx context.Context, path, loadedFrom string, sev
 	return rows, nil
 }
 
-func batchUpsertAlarms(ctx context.Context, tx pgx.Tx, neType, loadedFrom string, alarms []xmlAlarm, severityMap map[string]string, seen map[string]string, logger *zap.Logger) (int, error) {
+// validateAlarmIdentifiers 在写库前检查同一 XML 和跨 XML 的 identifier 冲突。
+// identifier 是 alarm_definitions 的全局唯一键，Registry 也仅按 identifier 查询；
+// 继续跳过重复项会让新导入的库没有任何可展示行却误报导入成功。
+func validateAlarmIdentifiers(alarms []xmlAlarm, seen map[string]string, filename string) error {
+	if len(alarms) == 0 {
+		return fmt.Errorf("alarm XML %s contains no alarm definitions", filename)
+	}
+
+	local := make(map[string]struct{}, len(alarms))
+	for _, a := range alarms {
+		identifier := strings.TrimSpace(a.Identifier)
+		if identifier == "" {
+			return fmt.Errorf("alarm XML %s contains an alarm without identifier", filename)
+		}
+		if firstFile, ok := seen[identifier]; ok {
+			return fmt.Errorf("alarm identifier %q in %s conflicts with %s", identifier, filename, firstFile)
+		}
+		if _, ok := local[identifier]; ok {
+			return fmt.Errorf("alarm identifier %q is duplicated in %s", identifier, filename)
+		}
+		local[identifier] = struct{}{}
+	}
+	return nil
+}
+
+func batchUpsertAlarms(ctx context.Context, tx pgx.Tx, neType, loadedFrom string, alarms []xmlAlarm, severityMap map[string]string) (int, error) {
 	const chunkSize = 200
 	rows := 0
 	pending := make([]xmlAlarm, 0, chunkSize)
@@ -235,17 +268,6 @@ func batchUpsertAlarms(ctx context.Context, tx pgx.Tx, neType, loadedFrom string
 	}
 
 	for _, a := range alarms {
-		if a.Identifier == "" {
-			continue
-		}
-		if firstFile, ok := seen[a.Identifier]; ok {
-			logger.Error("duplicate alarm identifier across files; keep first-seen",
-				zap.String("identifier", a.Identifier),
-				zap.String("first_seen_in", firstFile),
-				zap.String("ne_type_now", neType))
-			continue
-		}
-		seen[a.Identifier] = neType + ".xml"
 		pending = append(pending, a)
 		if len(pending) >= chunkSize {
 			if err := flush(); err != nil {
