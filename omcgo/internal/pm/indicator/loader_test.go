@@ -233,6 +233,44 @@ func TestStatisDurationAndCellAvailabilityRegistered(t *testing.T) {
 	}
 }
 
+func TestGSMBuiltInDurationKPICompilesToRuntimeCounter(t *testing.T) {
+	docs := parseLibFiles(t, "GSM.xml")
+	cases := []struct {
+		id             string
+		rawArithmetic  string
+		runtimeFormula string
+		deps           []string
+	}{
+		{
+			id:             "KGSM0108",
+			rawArithmetic:  "((CGSM0040004/1000)/(CGSM0040003*Duration))*100",
+			runtimeFormula: "((CGSM0040004/1000)/(CGSM0040003*CGSM0080001))*100",
+			deps:           []string{"CGSM0040004", "CGSM0040003", "CGSM0080001"},
+		},
+		{
+			id:             "KGSM0109",
+			rawArithmetic:  "(1-(CGSM0040005)/(CGSM0040003*Duration))*100",
+			runtimeFormula: "(1-(CGSM0040005)/(CGSM0040003*CGSM0080001))*100",
+			deps:           []string{"CGSM0040005", "CGSM0040003", "CGSM0080001"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.id, func(t *testing.T) {
+			ind, ok := findIndicatorByID(docs, tc.id)
+			require.True(t, ok, "GSM 内置 KPI %s 应存在", tc.id)
+			require.Equal(t, "0", ind.IsCounter)
+			require.Equal(t, tc.rawArithmetic, ind.Arithmetic, "XML 资产保留 Duration 可读写法")
+
+			runtimeFormula := CompileRuntimeArithmetic(DeviceTypeGSM, ind.Arithmetic)
+			require.Equal(t, tc.runtimeFormula, runtimeFormula)
+			assert.NotContains(t, runtimeFormula, "Duration")
+			for _, dep := range tc.deps {
+				assert.Contains(t, runtimeFormula, dep)
+			}
+		})
+	}
+}
+
 // ISSUE-389 阶段2 修复：指标库加载成功后必须 bump 下游 KPI 路由缓存，
 // 否则新增的「统计时长」计数器 report_key 不在已缓存的旧路由白名单里，落库被丢弃。
 // 这里覆盖 bump 调用的三条语义：成功调用、bump 报错不影响加载、nil bumper 安全空跑。

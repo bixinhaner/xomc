@@ -291,6 +291,38 @@ func TestRouter_LookupByDevice_AllMissThenDBLoad(t *testing.T) {
 	require.ElementsMatch(t, []string{"C000000002", "C000000001"}, route.KPIs[0].Dependencies)
 }
 
+func TestRouter_LookupByDevice_CompilesGSMDurationRuntimeArithmetic(t *testing.T) {
+	productID := uuid.New()
+	r := newRouterWithFakes(t,
+		newBaseDevice("SN-GSM-001", "FAPService.BLQ_GSM"),
+		newProductMatch(productID, "BLQ-GSM-V1", "GSM"),
+		&fakeIndicators{rows: []*indicator.PerfIndicator{
+			{ID: "KGSM0108", EnName: "KPI.TCHUtilizationRate", IsCounter: "0", StatisType: sptr("pct"), Arithmetic: sptr("((CGSM0040004/1000)/(CGSM0040003*Duration))*100")},
+			{ID: "KGSM0109", EnName: "KPI.TCHAvaliableRate", IsCounter: "0", StatisType: sptr("pct"), Arithmetic: sptr("(1-(CGSM0040005)/(CGSM0040003*Duration))*100")},
+		}},
+		&fakeFormulas{rows: []*indicator.PlatformFormula{
+			{IndicatorID: "KGSM0108", PlatformName: "BLQ-GSM-V1"},
+			{IndicatorID: "KGSM0109", PlatformName: "BLQ-GSM-V1"},
+		}},
+		nil,
+	)
+
+	route, err := r.LookupByDevice(context.Background(), "SN-GSM-001")
+	require.NoError(t, err)
+	require.Len(t, route.KPIs, 2)
+
+	byID := map[string]KPIDef{}
+	for _, kpi := range route.KPIs {
+		byID[kpi.IndicatorID] = kpi
+	}
+	require.Equal(t, "((CGSM0040004/1000)/(CGSM0040003*CGSM0080001))*100", byID["KGSM0108"].Formula)
+	require.ElementsMatch(t, []string{"CGSM0040004", "CGSM0040003", "CGSM0080001"}, byID["KGSM0108"].Dependencies)
+	require.NotContains(t, byID["KGSM0108"].Dependencies, "Duration")
+	require.Equal(t, "(1-(CGSM0040005)/(CGSM0040003*CGSM0080001))*100", byID["KGSM0109"].Formula)
+	require.ElementsMatch(t, []string{"CGSM0040005", "CGSM0040003", "CGSM0080001"}, byID["KGSM0109"].Dependencies)
+	require.NotContains(t, byID["KGSM0109"].Dependencies, "Duration")
+}
+
 // Case 2: L1 命中 — 第二次查询不再调用 DB / L2。
 func TestRouter_LookupByDevice_L1Hit(t *testing.T) {
 	productID := uuid.New()

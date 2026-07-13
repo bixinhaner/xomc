@@ -196,10 +196,18 @@ func TestNormalizeDurationArithmetic_UsesRegisteredCounterPerDeviceType(t *testi
 }
 
 func TestNormalizeDurationArithmetic_ReplacesCompleteTokenOnly(t *testing.T) {
-	got := normalizeDurationArithmetic(DeviceTypeENB, "DurationValue+MyDuration+Duration")
-	want := "DurationValue+MyDuration+C000060273"
+	got := normalizeDurationArithmetic(DeviceTypeENB, "DurationValue+MyDuration+Duration+Duration_Seconds")
+	want := "DurationValue+MyDuration+C000060273+Duration_Seconds"
 	if got != want {
 		t.Fatalf("normalizeDurationArithmetic() = %q, want %q", got, want)
+	}
+}
+
+func TestCompileRuntimeArithmetic_UnknownDeviceTypeLeavesFormulaUnchanged(t *testing.T) {
+	formula := "C001/Duration+MyDuration"
+	got := CompileRuntimeArithmetic(DeviceType("UNKNOWN"), formula)
+	if got != formula {
+		t.Fatalf("CompileRuntimeArithmetic() = %q, want unchanged %q", got, formula)
 	}
 }
 
@@ -393,6 +401,23 @@ func TestUpsertPlatformFormula_CommitsThenInvalidatesRoute(t *testing.T) {
 	}
 	if len(triggers) != 1 || triggers[0] != RouteInvalidationTriggerFormulaWrite {
 		t.Fatalf("route invalidation triggers = %v, want [%s]", triggers, RouteInvalidationTriggerFormulaWrite)
+	}
+}
+
+func TestUpsertPlatformFormula_AcceptsDurationReservedWord(t *testing.T) {
+	platformRepo := &fakePlatformRepo{deleteRows: 1}
+	beginner := &fakeBeginner{tx: &fakeTx{}}
+	svc := newFormulaWriteTestService(platformRepo, beginner, nil)
+
+	out, err := svc.UpsertPlatformFormula(context.Background(), DeviceTypeENB, "K900000001", "BLQ", "C000200015/Duration*100")
+	if err != nil {
+		t.Fatalf("UpsertPlatformFormula returned error: %v", err)
+	}
+	if out.Formula != "C000200015/Duration*100" {
+		t.Fatalf("platform formula should keep editable Duration keyword, got %q", out.Formula)
+	}
+	if platformRepo.batchCalls != 1 {
+		t.Fatalf("batch create calls=%d, want 1", platformRepo.batchCalls)
 	}
 }
 

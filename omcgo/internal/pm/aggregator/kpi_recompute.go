@@ -27,6 +27,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/core/jsonx"
+	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/pm/kpi/expr"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
@@ -68,15 +69,15 @@ func (a *Aggregator) resolveKPIMetadata(ctx context.Context, paths []string) (kp
 		return nil, nil
 	}
 	const tmpl = `
-SELECT id, statis_type, arithmetic, is_counter
+SELECT id, statis_type, arithmetic, is_counter, 'ENB' AS device_type
 FROM perf_indicators_enb
 WHERE id = ANY($1) AND COALESCE(arithmetic, '') <> ''
 UNION ALL
-SELECT id, statis_type, arithmetic, is_counter
+SELECT id, statis_type, arithmetic, is_counter, 'GNB' AS device_type
 FROM perf_indicators_gnb
 WHERE id = ANY($1) AND COALESCE(arithmetic, '') <> ''
 UNION ALL
-SELECT id, statis_type, arithmetic, is_counter
+SELECT id, statis_type, arithmetic, is_counter, 'GSM' AS device_type
 FROM perf_indicators_gsm
 WHERE id = ANY($1) AND COALESCE(arithmetic, '') <> ''`
 
@@ -89,9 +90,9 @@ WHERE id = ANY($1) AND COALESCE(arithmetic, '') <> ''`
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var id string
+		var id, deviceType string
 		var statis, formula, isCounter *string
-		if err := rows.Scan(&id, &statis, &formula, &isCounter); err != nil {
+		if err := rows.Scan(&id, &statis, &formula, &isCounter, &deviceType); err != nil {
 			a.logger.Warn("kpi recompute metadata scan failed", zap.Error(err))
 			return nil, paths
 		}
@@ -102,6 +103,13 @@ WHERE id = ANY($1) AND COALESCE(arithmetic, '') <> ''`
 		if f == "" {
 			continue
 		}
+		dt, derr := indicator.ParseDeviceType(deviceType)
+		if derr != nil {
+			a.logger.Warn("kpi recompute metadata has invalid device type",
+				zap.String("code", id), zap.String("device_type", deviceType), zap.Error(derr))
+			continue
+		}
+		f = indicator.CompileRuntimeArithmetic(dt, f)
 		st := ""
 		if statis != nil {
 			st = *statis
@@ -217,7 +225,7 @@ func rowGroupKey(r Row) groupKey {
 //     metric_type='counter' / StatisType / Extra），不走公式合成，避免被误标成 kpi 行或丢 Extra。
 //
 // 返回：用户请求且无元数据的 counter 行 + 原始计数透传行 + 派生 KPI 重算行
-//（仅为重算引入、用户没主动请求的 deps counter 行被剔除）。
+// （仅为重算引入、用户没主动请求的 deps counter 行被剔除）。
 //
 // 可观测性（#194）：某 (组×制式×桶) 分母 counter 缺失 / 为 0 导致整条 KPI 被跳过本是设计内
 // 「不产假 0」语义，但前端 legend 按返回行 distinct object_ldn 渲染 → 该组该指标整条曲线消失，
@@ -556,11 +564,11 @@ func enabledTableSuffixes(technologies []string) []string {
 // 查法照搬 resolveKPIMetadata 的跨三表 UNION 范式（编号三表全局唯一）；查询失败降级返回空（不报错、不丢 counter）。
 func (a *Aggregator) resolveAllDerivedKPIs(ctx context.Context) []kpiMeta {
 	const tmpl = `
-SELECT id, statis_type, arithmetic FROM perf_indicators_enb WHERE COALESCE(arithmetic, '') <> '' AND COALESCE(is_counter, '0') <> '1'
+SELECT id, statis_type, arithmetic, 'ENB' AS device_type FROM perf_indicators_enb WHERE COALESCE(arithmetic, '') <> '' AND COALESCE(is_counter, '0') <> '1'
 UNION ALL
-SELECT id, statis_type, arithmetic FROM perf_indicators_gnb WHERE COALESCE(arithmetic, '') <> '' AND COALESCE(is_counter, '0') <> '1'
+SELECT id, statis_type, arithmetic, 'GNB' AS device_type FROM perf_indicators_gnb WHERE COALESCE(arithmetic, '') <> '' AND COALESCE(is_counter, '0') <> '1'
 UNION ALL
-SELECT id, statis_type, arithmetic FROM perf_indicators_gsm WHERE COALESCE(arithmetic, '') <> '' AND COALESCE(is_counter, '0') <> '1'`
+SELECT id, statis_type, arithmetic, 'GSM' AS device_type FROM perf_indicators_gsm WHERE COALESCE(arithmetic, '') <> '' AND COALESCE(is_counter, '0') <> '1'`
 	rows, err := a.db.Query(ctx, tmpl)
 	if err != nil {
 		a.logger.Warn("resolveAllDerivedKPIs query failed; skip KPI recompute for full-lib aggregation", zap.Error(err))
@@ -570,9 +578,9 @@ SELECT id, statis_type, arithmetic FROM perf_indicators_gsm WHERE COALESCE(arith
 	seen := make(map[string]struct{})
 	var out []kpiMeta
 	for rows.Next() {
-		var id string
+		var id, deviceType string
 		var statis, formula *string
-		if err := rows.Scan(&id, &statis, &formula); err != nil {
+		if err := rows.Scan(&id, &statis, &formula, &deviceType); err != nil {
 			a.logger.Warn("resolveAllDerivedKPIs scan failed", zap.Error(err))
 			return out
 		}
@@ -583,6 +591,13 @@ SELECT id, statis_type, arithmetic FROM perf_indicators_gsm WHERE COALESCE(arith
 		if f == "" {
 			continue
 		}
+		dt, derr := indicator.ParseDeviceType(deviceType)
+		if derr != nil {
+			a.logger.Warn("resolveAllDerivedKPIs has invalid device type",
+				zap.String("code", id), zap.String("device_type", deviceType), zap.Error(derr))
+			continue
+		}
+		f = indicator.CompileRuntimeArithmetic(dt, f)
 		if _, dup := seen[id]; dup {
 			continue // 编号三表全局唯一，防御性去重
 		}
