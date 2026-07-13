@@ -33,7 +33,7 @@ func TestParseScriptTXT_TemplateDocumentsSupportedSyntaxAndExamplesParse(t *test
 	require.Contains(t, scriptImportTemplateForParserTest, "MOD 修改")
 	require.Contains(t, scriptImportTemplateForParserTest, "ADD 新增")
 	require.Contains(t, scriptImportTemplateForParserTest, "RMV 删除")
-	require.Contains(t, scriptImportTemplateForParserTest, "DEL 删除兼容写法")
+	require.NotContains(t, scriptImportTemplateForParserTest, "DEL")
 	require.Contains(t, scriptImportTemplateForParserTest, "操作 命令编码[:参数名=参数值")
 
 	executableTemplate := strings.ReplaceAll(scriptImportTemplateForParserTest, "DEVICE_SN", "SN-TEMPLATE-1")
@@ -41,16 +41,40 @@ func TestParseScriptTXT_TemplateDocumentsSupportedSyntaxAndExamplesParse(t *test
 
 	require.Empty(t, issues)
 	require.NotEmpty(t, got.Lines)
-	require.Equal(t, []string{"LST", "MOD", "ADD", "RMV", "RMV", "MOD"}, []string{
+	require.Equal(t, []string{"LST", "MOD", "ADD", "RMV", "MOD"}, []string{
 		got.Lines[0].OperationType,
 		got.Lines[1].OperationType,
 		got.Lines[2].OperationType,
 		got.Lines[3].OperationType,
 		got.Lines[4].OperationType,
-		got.Lines[5].OperationType,
 	})
-	require.Equal(t, "DEL ETHERNET_INTERFACE;SN-TEMPLATE-1", got.Lines[4].RawLine)
-	require.Equal(t, map[string]string{"DESCRIPTION": "site,a;sector-b", "ALIAS": "{main,backup}"}, got.Lines[5].Parameters)
+	require.Equal(t, "RMV ETHERNET_INTERFACE;SN-TEMPLATE-1", got.Lines[3].RawLine)
+	require.Equal(t, map[string]string{"DESCRIPTION": "site,a;sector-b", "ALIAS": "{main,backup}"}, got.Lines[4].Parameters)
+}
+
+func TestParseScriptTXT_EnglishTemplateDocumentsSupportedSyntaxAndExamplesParse(t *testing.T) {
+	template := string(scriptImportTemplateForLocale("en-US"))
+	require.Contains(t, template, "MML TXT Script Template")
+	require.Contains(t, template, "Supported operations")
+	require.Contains(t, template, "LST query")
+	require.Contains(t, template, "MOD modify")
+	require.Contains(t, template, "ADD add")
+	require.Contains(t, template, "RMV remove")
+	require.NotContains(t, template, "DEL")
+	require.NotContains(t, template, "支持操作")
+
+	executableTemplate := strings.ReplaceAll(template, "DEVICE_SN", "SN-TEMPLATE-1")
+	got, issues := ParseScriptTXT([]byte(executableTemplate))
+
+	require.Empty(t, issues)
+	require.NotEmpty(t, got.Lines)
+	require.Equal(t, []string{"LST", "MOD", "ADD", "RMV", "MOD"}, []string{
+		got.Lines[0].OperationType,
+		got.Lines[1].OperationType,
+		got.Lines[2].OperationType,
+		got.Lines[3].OperationType,
+		got.Lines[4].OperationType,
+	})
 }
 
 func TestParseScriptTXT_NormalizesCROnlyLineEndings(t *testing.T) {
