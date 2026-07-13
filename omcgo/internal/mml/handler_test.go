@@ -747,3 +747,32 @@ func TestHandler_DeleteTask(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	response.DecodeData(t, w.Body, nil)
 }
+
+func TestHandler_DeleteTask_RunningReturnsConflict(t *testing.T) {
+	taskID := uuid.New()
+
+	cmdRepo := &hCmdRepo{}
+	scriptRepo := &hScriptRepo{}
+	taskRepo := &hTaskRepo{
+		GetByIDFn: func(_ context.Context, id uuid.UUID) (*MMLTask, error) {
+			assert.Equal(t, taskID, id)
+			return &MMLTask{ID: id, Status: TaskRunning}, nil
+		},
+		DeleteFn: func(_ context.Context, id uuid.UUID) error {
+			t.Fatalf("running task %s must not be deleted", id)
+			return nil
+		},
+	}
+
+	logger := zap.NewNop()
+	svc := NewService(cmdRepo, scriptRepo, taskRepo, &hCustomCommandRepo{}, nil, logger)
+	h := NewHandler(svc, logger)
+	router := setupMMLRouter(h)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/mml/tasks/"+taskID.String(), nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+	assert.Contains(t, w.Body.String(), "cannot delete a running task")
+}

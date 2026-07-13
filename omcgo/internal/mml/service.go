@@ -1991,7 +1991,11 @@ func (s *Service) DeleteTask(ctx context.Context, id uuid.UUID) error {
 	}
 
 	if task.Status == TaskRunning {
-		return ErrCannotDeleteRunning
+		return commonerrors.NewBusinessError(
+			global.ErrCodeMMLTaskRunningCannotDelete,
+			ErrCannotDeleteRunning.Error(),
+			fmt.Errorf("%w: %w", commonerrors.ErrAlreadyExists, ErrCannotDeleteRunning),
+		)
 	}
 
 	if err := s.taskRepo.Delete(ctx, id); err != nil {

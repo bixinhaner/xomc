@@ -9,33 +9,19 @@ const mocks = vi.hoisted(() => ({
   deleteTasks: vi.fn(),
   refetchTasks: vi.fn(),
   useMMLTasks: vi.fn(),
+  taskItems: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock('@core/hooks/api/useMML', () => ({
   useMMLTasks: (params: Record<string, unknown>) => {
     mocks.useMMLTasks(params);
     return {
-    data: {
-      total: 1,
-      items: [{
-        id: 'task-console-1',
-        taskName: '控制台任务',
-        creator: 'admin',
-        taskOrigin: 'console',
-        executeType: 'immediate',
-        status: 'completed',
-        result: 'success',
-        totalDevices: 1,
-        successCount: 1,
-        failedCount: 0,
-        createdAt: '2026-07-11T00:00:00Z',
-        updatedAt: '2026-07-11T00:00:00Z',
-        startedAt: '2026-07-11T00:00:00Z',
-        finishedAt: '2026-07-11T00:00:01Z',
-      }],
-    },
-    isLoading: false,
-    refetch: mocks.refetchTasks,
+      data: {
+        total: mocks.taskItems.length,
+        items: mocks.taskItems,
+      },
+      isLoading: false,
+      refetch: mocks.refetchTasks,
     };
   },
   useMMLTaskResults: () => ({
@@ -121,7 +107,10 @@ vi.mock('@/components/DataTable', () => ({
                     aria-label={`select-${String(record.id)}`}
                     checked={selectedRowKeys.includes(String(record.id))}
                     onChange={(event) => {
-                      const nextKeys = event.currentTarget.checked ? [String(record.id)] : [];
+                      const recordId = String(record.id);
+                      const nextKeys = event.currentTarget.checked
+                        ? Array.from(new Set([...selectedRowKeys.map(String), recordId]))
+                        : selectedRowKeys.filter((key) => String(key) !== recordId);
                       onSelectionChange?.(nextKeys, dataSource.filter((item) => nextKeys.includes(String(item.id))));
                     }}
                     type="checkbox"
@@ -153,6 +142,26 @@ const confirmSpy = vi.spyOn(Modal, 'confirm').mockImplementation((config) => {
 
 import TaskRecord from '..';
 
+function buildTask(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'task-console-1',
+    taskName: '控制台任务',
+    creator: 'admin',
+    taskOrigin: 'console',
+    executeType: 'immediate',
+    status: 'completed',
+    result: 'success',
+    totalDevices: 1,
+    successCount: 1,
+    failedCount: 0,
+    createdAt: '2026-07-11T00:00:00Z',
+    updatedAt: '2026-07-11T00:00:00Z',
+    startedAt: '2026-07-11T00:00:00Z',
+    finishedAt: '2026-07-11T00:00:01Z',
+    ...overrides,
+  };
+}
+
 function renderPage() {
   return render(
     <IntlProvider locale="zh-CN" defaultLocale="zh-CN" messages={zhCN}>
@@ -164,6 +173,7 @@ function renderPage() {
 describe('TaskRecord batch delete and console task display', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.taskItems = [buildTask()];
     mocks.deleteTasks.mockImplementation((_ids: string[], options?: { onSuccess?: () => void }) => options?.onSuccess?.());
     confirmSpy.mockClear();
   });
@@ -195,6 +205,26 @@ describe('TaskRecord batch delete and console task display', () => {
       ['task-console-1'],
       expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
     );
+  });
+
+  it('blocks batch delete when a selected task record is still running', () => {
+    mocks.taskItems = [
+      buildTask(),
+      buildTask({
+        id: 'task-running-1',
+        taskName: '运行中任务',
+        status: 'running',
+      }),
+    ];
+
+    renderPage();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'select-task-console-1' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'select-task-running-1' }));
+    fireEvent.click(screen.getByRole('button', { name: /批量删除/ }));
+
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(mocks.deleteTasks).not.toHaveBeenCalled();
   });
 
   it('passes console task origin through to the task list query', () => {
