@@ -1949,6 +1949,7 @@ const messages: Record<string, string> = {
   'user.passwordMinLength': 'Password must be at least 8 characters',
   'user.passwordMinLength6': 'Password must be at least 6 characters',
   'user.emailFormatError': 'Invalid email format',
+  'user.pleaseInputEmail': 'Please enter email',
   'user.pleaseInputPhone': 'Please enter phone number',
   'user.phoneFormatError': 'Invalid phone number format',
   'user.pleaseSelectGroup': 'Please select user group',

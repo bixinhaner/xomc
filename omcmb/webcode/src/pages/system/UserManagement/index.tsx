@@ -246,7 +246,7 @@ export default function UserManagement() {
       } = {
         username: vals.username as string,
         displayName: ((vals.displayName as string) || (vals.username as string)) ?? '',
-        email: (vals.email as string) || '',
+        email: (vals.email as string).trim(),
         phone: (vals.phone as string) || undefined,
         description: (vals.description as string) || undefined,
         expireTime: expire ? expire.toISOString() : undefined,
@@ -277,7 +277,7 @@ export default function UserManagement() {
       const expire = vals.expireTime as dayjs.Dayjs | undefined;
       const data: Partial<User> = {
         displayName: (vals.displayName as string) || selectedUser.displayName,
-        email: (vals.email as string) || '',
+        email: (vals.email as string).trim(),
         phone: (vals.phone as string) || undefined,
         description: (vals.description as string) ?? '',
         expireTime: expire ? expire.toISOString() : undefined,
@@ -293,6 +293,7 @@ export default function UserManagement() {
             form.resetFields();
             setSelectedUser(null);
           },
+          onError: (err) => toast.error(err, t('common.error')),
         },
       );
     });
@@ -514,10 +515,16 @@ export default function UserManagement() {
                 title: t('common.confirm'),
                 content: user.status === 'active' ? t('user.confirmDisableUser') : t('user.confirmEnableUser'),
                 onOk: () => {
+                  const email = user.email?.trim();
+                  if (!email) {
+                    message.error(t('user.pleaseInputEmail'));
+                    return;
+                  }
                   updateUser.mutate(
-                    { id: user.id, data: { status: targetStatus } },
+                    { id: user.id, data: { email, status: targetStatus } },
                     {
                       onSuccess: () => message.success(t('common.success')),
+                      onError: (err) => toast.error(err, t('common.error')),
                     },
                   );
                 },
@@ -970,7 +977,11 @@ export default function UserManagement() {
             <Form.Item
               name="email"
               label={t('user.email')}
-              rules={[{ type: 'email', message: t('user.emailFormatError') }]}
+              normalize={(value) => typeof value === 'string' ? value.trim() : value}
+              rules={[
+                { required: true, message: t('user.pleaseInputEmail') },
+                { type: 'email', message: t('user.emailFormatError') },
+              ]}
             >
               <Input placeholder={t('user.email')} maxLength={50} />
             </Form.Item>
@@ -1055,7 +1066,11 @@ export default function UserManagement() {
           <Form.Item
             name="email"
             label={t('user.email')}
-            rules={[{ type: 'email', message: t('user.emailFormatError') }]}
+            normalize={(value) => typeof value === 'string' ? value.trim() : value}
+            rules={[
+              { required: true, message: t('user.pleaseInputEmail') },
+              { type: 'email', message: t('user.emailFormatError') },
+            ]}
           >
             <Input placeholder={t('user.email')} maxLength={50} />
           </Form.Item>

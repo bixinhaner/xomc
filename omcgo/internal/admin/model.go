@@ -193,7 +193,7 @@ type CreateUserRequest struct {
 	Password           string      `json:"password" binding:"omitempty,min=6"`
 	UseDefaultPassword bool        `json:"use_default_password"`
 	DisplayName        string      `json:"display_name"`
-	Email              string      `json:"email" binding:"omitempty,email"`
+	Email              string      `json:"email" binding:"required,email"`
 	Phone              string      `json:"phone"`
 	Description        string      `json:"description"`
 	ExpireAt           *time.Time  `json:"expire_at"`
@@ -215,7 +215,7 @@ type CreateUserHTTPRequest struct {
 	Password           string      `json:"password"` // T-0120 plaintext fallback
 	UseDefaultPassword bool        `json:"use_default_password"`
 	DisplayName        string      `json:"display_name"`
-	Email              string      `json:"email" binding:"omitempty,email"`
+	Email              string      `json:"email" binding:"required,email"`
 	Phone              string      `json:"phone"`
 	Description        string      `json:"description"`
 	ExpireAt           *time.Time  `json:"expire_at"`
@@ -231,7 +231,7 @@ type CreateUserHTTPRequest struct {
 // v1.0：移除 Carrier 字段（users.carrier 已删）。
 type UpdateUserRequest struct {
 	DisplayName *string      `json:"display_name"`
-	Email       *string      `json:"email" binding:"omitempty,email"`
+	Email       *string      `json:"email" binding:"required,email"`
 	Phone       *string      `json:"phone"`
 	Description *string      `json:"description"`
 	ExpireAt    *time.Time   `json:"expire_at"`

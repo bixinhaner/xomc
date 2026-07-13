@@ -1954,6 +1954,7 @@ const messages: Record<string, string> = {
   'user.passwordMinLength': '密码长度至少8位',
   'user.passwordMinLength6': '密码长度至少6个字符',
   'user.emailFormatError': '邮箱格式不正确',
+  'user.pleaseInputEmail': '请输入邮箱',
   'user.pleaseInputPhone': '请输入手机号',
   'user.phoneFormatError': '手机号格式不正确',
   'user.pleaseSelectGroup': '请选择用户组',
