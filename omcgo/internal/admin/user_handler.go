@@ -33,6 +33,12 @@ func (h *Handler) CreateUser(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
+	phone, err := normalizeAndValidateUserPhone(httpReq.Phone)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	httpReq.Phone = phone
 
 	// issue #686：用户名格式校验（只允许字母、数字、下划线、减号）。
 	if !usernameRegex.MatchString(httpReq.Username) {
@@ -129,6 +135,14 @@ func (h *Handler) UpdateUser(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
+	phone, err := normalizeAndValidateUserPhone(dereferenceString(req.Phone))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	if req.Phone != nil {
+		req.Phone = &phone
+	}
 
 	user, err := h.service.UpdateUser(userContextWithOperator(c), id, req)
 	if err != nil {
@@ -138,6 +152,13 @@ func (h *Handler) UpdateUser(c *gin.Context) {
 	}
 
 	response.OK(c, user)
+}
+
+func dereferenceString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func (h *Handler) DeleteUser(c *gin.Context) {
