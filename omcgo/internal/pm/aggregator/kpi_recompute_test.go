@@ -16,15 +16,19 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
-// metaRow 是 resolveKPIMetadata UNION 查询的一行：id, statis_type, arithmetic, is_counter。
+// metaRow 是 resolveKPIMetadata UNION 查询的一行：id, statis_type, arithmetic, is_counter, device_type。
 // 默认 is_counter='0'（派生 KPI）。原始计数用 metaCounterRow。
 func metaRow(id, statis, formula string) []any {
-	return []any{id, statis, formula, "0"}
+	return []any{id, statis, formula, "0", "ENB"}
+}
+
+func metaRowForDeviceType(id, statis, formula, deviceType string) []any {
+	return []any{id, statis, formula, "0", deviceType}
 }
 
 // metaCounterRow 是原始计数（is_counter='1'）的元数据行：arithmetic=自身编号。
 func metaCounterRow(id, statis string) []any {
-	return []any{id, statis, id, "1"}
+	return []any{id, statis, id, "1", "ENB"}
 }
 
 // productRow 是 queryProductTable SELECT 的一行：
@@ -108,6 +112,57 @@ func Test_Recompute_MultiTermPct_Product(t *testing.T) {
 	require.Len(t, rows, 1)
 	assert.Equal(t, "K900099999", rows[0].MetricPath)
 	assert.Equal(t, pid, rows[0].ProductID, "product 维度分组键透传")
+	assert.InDelta(t, 10.0, float64(rows[0].MetricValue), 1e-9)
+}
+
+func TestResolveKPIMetadata_CompilesGSMDurationRuntimeArithmetic(t *testing.T) {
+	db := &recordingDB{
+		results: []pgx.Rows{
+			&fakeRows{rows: [][]any{
+				metaRowForDeviceType("KGSM0108", "pct", "((CGSM0040004/1000)/(CGSM0040003*Duration))*100", "GSM"),
+			}},
+		},
+	}
+	a := New(db, nil, nil)
+
+	kpis, counters := a.resolveKPIMetadata(context.Background(), []string{"KGSM0108"})
+
+	require.Empty(t, counters)
+	require.Len(t, kpis, 1)
+	assert.Equal(t, "((CGSM0040004/1000)/(CGSM0040003*CGSM0080001))*100", kpis[0].formula)
+	assert.ElementsMatch(t, []string{"CGSM0040004", "CGSM0040003", "CGSM0080001"}, kpis[0].deps)
+	assert.NotContains(t, kpis[0].deps, "Duration")
+}
+
+func Test_Recompute_GSMDurationRuntimeArithmetic_Product(t *testing.T) {
+	now := time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)
+	pid := uuid.New()
+	db := &recordingDB{
+		results: []pgx.Rows{
+			&fakeRows{rows: [][]any{
+				metaRowForDeviceType("KGSM0108", "pct", "((CGSM0040004/1000)/(CGSM0040003*Duration))*100", "GSM"),
+			}},
+			&fakeRows{rows: [][]any{
+				productRow(pid, "CGSM0040004", "counter", 900000, "sum", "hourly", now),
+				productRow(pid, "CGSM0040003", "counter", 10, "sum", "hourly", now),
+				productRow(pid, "CGSM0080001", "counter", 900, "sum", "hourly", now),
+			}},
+			&fakeRows{},
+		},
+	}
+	a := New(db, nil, nil)
+
+	rows, err := a.Query(context.Background(), QueryRequest{
+		Granularity: metrics.GranularityHourly,
+		Dimension:   DimensionProduct,
+		MetricPaths: []string{"KGSM0108"},
+	})
+
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "KGSM0108", rows[0].MetricPath)
+	assert.Equal(t, metrics.MetricTypeKPI, rows[0].MetricType)
+	assert.Equal(t, pid, rows[0].ProductID)
 	assert.InDelta(t, 10.0, float64(rows[0].MetricValue), 1e-9)
 }
 
@@ -430,7 +485,7 @@ func Test_Recompute_RawCounterPlusDerivedKPI_Mixed(t *testing.T) {
 // ── 可观测性（#194）：device_group 重算跳过某组某指标时记结构化 debug 日志 ──────────
 //
 // 一个设备组分母 counter 缺失（RRC.AttConnEstab 桶里没有）→ 该组该 KPI 整条被跳过、不产假 0
-//（既有语义不变），但应记一条聚合日志含 group_id + metric + reason=missing:<counter>，
+// （既有语义不变），但应记一条聚合日志含 group_id + metric + reason=missing:<counter>，
 // 便于现场把「该组真没数据」与「某组没上报该 counter」分离，也解释前端 legend 该组消失。
 func Test_Recompute_DeviceGroup_SkipLogged(t *testing.T) {
 	now := time.Date(2026, 6, 8, 10, 0, 0, 0, time.UTC)
