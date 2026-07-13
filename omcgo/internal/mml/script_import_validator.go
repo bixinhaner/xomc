@@ -69,9 +69,13 @@ func (v *ScriptImportValidator) Validate(ctx context.Context, parsed *ParsedScri
 	}
 
 	codes, sns := parsedScriptKeys(parsed.Lines)
-	commands, err := v.repo.LoadCommandsByCodes(ctx, codes, actor)
-	if err != nil {
-		return nil, fmt.Errorf("load validation commands: %w", err)
+	commands := map[string]ValidationCommand{}
+	if len(codes) > 0 {
+		var err error
+		commands, err = v.repo.LoadCommandsByCodes(ctx, codes, actor)
+		if err != nil {
+			return nil, fmt.Errorf("load validation commands: %w", err)
+		}
 	}
 	devices, err := v.repo.LoadDevicesBySNs(ctx, sns)
 	if err != nil {
@@ -98,9 +102,11 @@ func parsedScriptKeys(lines []ParsedScriptLine) ([]string, []string) {
 	codes := make([]string, 0, len(lines))
 	sns := make([]string, 0, len(lines))
 	for _, line := range lines {
-		if _, exists := codeSeen[line.CommandCode]; !exists {
-			codeSeen[line.CommandCode] = struct{}{}
-			codes = append(codes, line.CommandCode)
+		if line.RawPathMode == "" {
+			if _, exists := codeSeen[line.CommandCode]; !exists {
+				codeSeen[line.CommandCode] = struct{}{}
+				codes = append(codes, line.CommandCode)
+			}
 		}
 		if _, exists := snSeen[line.DeviceSN]; !exists {
 			snSeen[line.DeviceSN] = struct{}{}
@@ -112,6 +118,13 @@ func parsedScriptKeys(lines []ParsedScriptLine) ([]string, []string) {
 
 func validateScriptLine(line ParsedScriptLine, commands map[string]ValidationCommand, devices map[string]*model.Device) ([]ScriptIssue, ValidationCommand, *model.Device) {
 	issues := make([]ScriptIssue, 0, 4)
+	if line.RawPathMode == rawPathModeStandard {
+		deviceIssues, device := validateScriptLineDevice(line, devices)
+		issues = append(issues, deviceIssues...)
+		issues = append(issues, validateRawPathScriptLine(line)...)
+		return issues, ValidationCommand{}, device
+	}
+
 	command, commandOK := commands[line.CommandCode]
 	if !commandOK {
 		return append(issues, validationIssue(line, "MML_COMMAND_NOT_FOUND", IssueError, "command_code", "command is not available to the current user")), command, nil
@@ -126,18 +139,89 @@ func validateScriptLine(line ParsedScriptLine, commands map[string]ValidationCom
 		return append(issues, validationIssue(line, "MML_COMMAND_OPERATION_MISMATCH", IssueError, "command_code", "command operation does not match the script line")), command, nil
 	}
 
-	device, deviceOK := devices[line.DeviceSN]
-	if !deviceOK || device == nil {
-		issues = append(issues, validationIssue(line, "MML_DEVICE_NOT_FOUND", IssueError, "device_sn", "device does not exist"))
-	} else if !device.IsOnline {
-		issues = append(issues, validationIssue(line, "MML_DEVICE_OFFLINE", IssueWarning, "device_sn", "device is offline"))
-	}
+	deviceIssues, device := validateScriptLineDevice(line, devices)
+	issues = append(issues, deviceIssues...)
 
 	issues = append(issues, validateLineParameters(line, command)...)
 	if command.RequireConfirm {
 		issues = append(issues, validationIssue(line, "MML_COMMAND_CONFIRM_REQUIRED", IssueWarning, "command_code", "command requires execution confirmation"))
 	}
 	return issues, command, device
+}
+
+func validateScriptLineDevice(line ParsedScriptLine, devices map[string]*model.Device) ([]ScriptIssue, *model.Device) {
+	device, deviceOK := devices[line.DeviceSN]
+	if !deviceOK || device == nil {
+		return []ScriptIssue{validationIssue(line, "MML_DEVICE_NOT_FOUND", IssueError, "device_sn", "device does not exist")}, nil
+	}
+	if !device.IsOnline {
+		return []ScriptIssue{validationIssue(line, "MML_DEVICE_OFFLINE", IssueWarning, "device_sn", "device is offline")}, device
+	}
+	return nil, device
+}
+
+func validateRawPathScriptLine(line ParsedScriptLine) []ScriptIssue {
+	issues := make([]ScriptIssue, 0, 2)
+	paths := nonEmptyStringSlice(line.ParamPaths)
+	for _, path := range paths {
+		if strings.ContainsAny(path, " \t\r\n") {
+			issues = append(issues, validationIssue(line, "MML_PATH_INVALID", IssueError, "path", "PATH must not contain whitespace"))
+		}
+	}
+
+	switch line.OperationType {
+	case "LST":
+		if len(paths) == 0 {
+			issues = append(issues, validationIssue(line, "MML_PATH_REQUIRED", IssueError, "path", "LST PATH requires at least one path"))
+		}
+		if len(line.Parameters) > 0 {
+			issues = append(issues, validationIssue(line, "MML_PARAMETER_UNKNOWN", IssueError, "parameters", "LST PATH does not accept parameter values"))
+		}
+	case "MOD":
+		if len(paths) == 0 || len(line.Parameters) == 0 {
+			issues = append(issues, validationIssue(line, "MML_PARAMETER_REQUIRED", IssueError, "parameters", "MOD PATH requires path=value pairs"))
+		}
+		for _, path := range paths {
+			if _, ok := line.Parameters[path]; !ok {
+				issues = append(issues, validationIssue(line, "MML_PARAMETER_REQUIRED", IssueError, path, "MOD PATH value is missing"))
+			}
+		}
+	case "ADD":
+		if len(paths) != 1 {
+			issues = append(issues, validationIssue(line, "MML_PATH_COUNT_INVALID", IssueError, "path", "ADD PATH requires exactly one object table path"))
+			break
+		}
+		if !strings.HasSuffix(paths[0], ".") {
+			issues = append(issues, validationIssue(line, "MML_PATH_INVALID", IssueError, "path", "ADD PATH object path must end with ."))
+		}
+		if pathEndsWithInstance(paths[0]) {
+			issues = append(issues, validationIssue(line, "MML_PATH_INVALID", IssueError, "path", "ADD PATH should use the object table path, not an existing instance path"))
+		}
+	case "RMV":
+		if len(paths) != 1 {
+			issues = append(issues, validationIssue(line, "MML_PATH_COUNT_INVALID", IssueError, "path", "RMV PATH requires exactly one object instance path"))
+			break
+		}
+		if !pathEndsWithInstance(paths[0]) {
+			issues = append(issues, validationIssue(line, "MML_PATH_INVALID", IssueError, "path", "RMV PATH requires a concrete object instance path"))
+		}
+	default:
+		issues = append(issues, validationIssue(line, "MML_OPERATION_UNSUPPORTED", IssueError, "operation_type", "PATH mode supports LST/MOD/ADD/RMV"))
+	}
+	return issues
+}
+
+func pathEndsWithInstance(path string) bool {
+	path = strings.TrimSpace(path)
+	if !strings.HasSuffix(path, ".") {
+		return false
+	}
+	parts := strings.Split(strings.TrimSuffix(path, "."), ".")
+	if len(parts) == 0 {
+		return false
+	}
+	_, err := strconv.Atoi(parts[len(parts)-1])
+	return err == nil
 }
 
 func validateLineParameters(line ParsedScriptLine, command ValidationCommand) []ScriptIssue {
@@ -275,6 +359,9 @@ func constraintNumber(value interface{}) (float64, bool) {
 }
 
 func buildValidationPlanItem(line ParsedScriptLine, command ValidationCommand) MMLPlanItem {
+	if line.RawPathMode == rawPathModeStandard {
+		return buildRawPathValidationPlanItem(line)
+	}
 	return MMLPlanItem{
 		LineNo: line.LineNo, DeviceSN: line.DeviceSN, Order: line.Order, RawLine: line.RawLine,
 		Command: map[string]interface{}{
@@ -283,6 +370,20 @@ func buildValidationPlanItem(line ParsedScriptLine, command ValidationCommand) M
 			"target_paths": command.TargetPaths,
 			"parameters":   stringMapToAny(line.Parameters), "param_refs": command.ParamRefs,
 		},
+	}
+}
+
+func buildRawPathValidationPlanItem(line ParsedScriptLine) MMLPlanItem {
+	command := map[string]interface{}{
+		"command_code":   "RAW " + line.OperationType,
+		"operation_type": line.OperationType,
+		"param_paths":    append([]string(nil), line.ParamPaths...),
+		"parameters":     stringMapToAny(line.Parameters),
+		"raw_path_mode":  rawPathModeStandard,
+	}
+	return MMLPlanItem{
+		LineNo: line.LineNo, DeviceSN: line.DeviceSN, Order: line.Order, RawLine: line.RawLine,
+		Command: command,
 	}
 }
 

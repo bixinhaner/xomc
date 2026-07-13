@@ -643,6 +643,7 @@ function mapBackendCommandInput(c: Record<string, unknown> | null | undefined): 
       src.parameters && typeof src.parameters === 'object'
         ? (src.parameters as Record<string, unknown>)
         : undefined,
+    rawPathMode: typeof src.raw_path_mode === 'string' ? src.raw_path_mode : undefined,
   };
 }
 
@@ -671,6 +672,7 @@ function mapCommandToBackend(cmd: string | MMLTaskCommandInput | MMLTaskCommandD
   if (detail.paramPaths) entry.param_paths = detail.paramPaths;
   if (detail.paramValues) entry.param_values = detail.paramValues;
   if (detail.parameters) entry.parameters = detail.parameters;
+  if (detail.rawPathMode) entry.raw_path_mode = detail.rawPathMode;
   return entry;
 }
 

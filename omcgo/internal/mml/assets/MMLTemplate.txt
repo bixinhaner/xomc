@@ -1,24 +1,32 @@
 # MML TXT脚本模板
-# 每条有效行格式：
+# 推荐写法：使用标准 PATH。每条有效行格式：
+# 操作 PATH:标准路径[=参数值][,标准路径2=参数值2];设备SN
+#
+# 兼容写法：仍可使用命令目录中的 command_code：
 # 操作 命令编码[:参数名=参数值,参数名2=参数值2];设备SN
 #
 # 支持操作：
-# LST 查询。通常不填写参数。
-# MOD 修改。按命令目录需要填写一个或多个 参数名=参数值。
-# ADD 新增对象/配置。命令目录存在 ADD 命令时可用，按命令要求填写参数。
-# RMV 删除对象/配置。命令目录存在 RMV 命令时可用。
+# LST 查询。PATH 后填写一个或多个标准参数路径。
+# MOD 修改。PATH 后填写一个或多个 标准参数路径=参数值。
+# ADD 新增对象。PATH 后填写对象表路径；如需在新增对象后配置参数，可在对象路径后追加 :参数名=参数值。
+# RMV 删除对象。PATH 后填写具体对象实例路径。
 #
 # 规则：
 # 1. 每行只能写一条命令和一个设备SN。
 # 2. 同一设备多行命令按文件从上到下顺序执行。
-# 3. 参数用英文逗号分隔；参数值包含逗号或分号时，可用双引号、单引号或 {} 包裹。
-# 4. 空行和 # 开头的行会被忽略。
-# 5. 单个文件最多 200 台设备、2000 条有效命令、2 MiB。
-# 6. 命令编码以 MML 命令目录实际显示的 command_code 为准。
+# 3. PATH 使用标准路径；对象实例索引由用户填写，例如第一个对象为 .1.，第二个对象为 .2.。
+# 4. ADD 的 PATH 使用对象表路径，例如 Device.IP.Interface.1.IPv4Address.；ADD 后的参数名是新对象内的相对参数名。
+# 5. 参数用英文逗号分隔；参数值包含逗号或分号时，可用双引号、单引号或 {} 包裹。
+# 6. 空行和 # 开头的行会被忽略。
+# 7. 单个文件最多 200 台设备、2000 条有效命令、2 MiB。
+# 8. 命令编码兼容写法以 MML 命令目录实际显示的 command_code 为准。
 #
 # 示例：将 DEVICE_SN 替换为真实基站编码。
+LST PATH:Device.DeviceInfo.SoftwareVersion;DEVICE_SN
+MOD PATH:Device.ManagementServer.URL=http://localhost:8080/smallcell/AcsService,Device.ManagementServer.Username=acs;DEVICE_SN
+ADD PATH:Device.IP.Interface.1.IPv4Address.:IPAddress=192.168.1.10,SubnetMask=255.255.255.0;DEVICE_SN
+RMV PATH:Device.IP.Interface.1.IPv4Address.3.;DEVICE_SN
+
+# 兼容命令编码示例：
 LST DEVICE_INFO;DEVICE_SN
-MOD MANAGEMENT_SERVER:URL=http://localhost:8080/smallcell/AcsService,USERNAME=acs,PASSWORD=acs;DEVICE_SN
-ADD ETHERNET_INTERFACE;DEVICE_SN
-RMV ETHERNET_INTERFACE;DEVICE_SN
 MOD DEVICE_INFO:DESCRIPTION="site,a;sector-b",ALIAS={main,backup};DEVICE_SN

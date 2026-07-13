@@ -221,12 +221,84 @@ function parseCommand(raw: string): MMLTaskCommandInput | null {
   }
 
   if (!commandCode) return null;
+  const rawPathCommand = parseRawPathCommand(commandCode, paramPart);
+  if (rawPathCommand) return rawPathCommand;
+
   const parameters = parseParameterPart(paramPart);
   const command: MMLTaskCommandInput = { commandCode };
   const operationType = deriveOperationType(commandCode);
   if (operationType) command.operationType = operationType;
   if (Object.keys(parameters).length > 0) command.parameters = parameters;
   return command;
+}
+
+function parseRawPathCommand(commandCode: string, payload: string): MMLTaskCommandInput | null {
+  const parts = commandCode.trim().split(/\s+/);
+  if (parts.length !== 2 || parts[1]?.toUpperCase() !== 'PATH') return null;
+  const operationType = normalizeRawPathOperation(parts[0] ?? '');
+  if (!operationType) return null;
+
+  const parsed = parseRawPathPayload(operationType, payload);
+  if (!parsed) return null;
+  const command: MMLTaskCommandInput = {
+    commandCode: `RAW ${operationType}`,
+    operationType,
+    paramPaths: parsed.paramPaths,
+    rawPathMode: 'standard',
+  };
+  if (Object.keys(parsed.parameters).length > 0) command.parameters = parsed.parameters;
+  return command;
+}
+
+function normalizeRawPathOperation(operation: string): MMLTaskCommandInput['operationType'] | undefined {
+  const op = operation.trim().toUpperCase();
+  if (op === 'LST' || op === 'MOD' || op === 'ADD' || op === 'RMV') return op;
+  if (op === 'DEL') return 'RMV';
+  return undefined;
+}
+
+function parseRawPathPayload(
+  operationType: MMLTaskCommandInput['operationType'],
+  payload: string,
+): { paramPaths: string[]; parameters: Record<string, string> } | null {
+  const raw = payload.trim();
+  if (!raw) return null;
+  if (operationType === 'LST' || operationType === 'RMV') {
+    return { paramPaths: parsePathList(raw), parameters: {} };
+  }
+  if (operationType === 'MOD') {
+    return parsePathValues(raw);
+  }
+  if (operationType === 'ADD') {
+    const colonIndex = findTopLevelChar(raw, ':');
+    const pathPart = colonIndex >= 0 ? raw.slice(0, colonIndex).trim() : raw;
+    const valuePart = colonIndex >= 0 ? raw.slice(colonIndex + 1).trim() : '';
+    return {
+      paramPaths: parsePathList(pathPart),
+      parameters: valuePart ? parseParameterPart(valuePart) : {},
+    };
+  }
+  return null;
+}
+
+function parsePathList(raw: string): string[] {
+  return splitTopLevel(raw, ',').map((path) => path.trim()).filter(Boolean);
+}
+
+function parsePathValues(raw: string): { paramPaths: string[]; parameters: Record<string, string> } | null {
+  const parameters: Record<string, string> = {};
+  const paramPaths: string[] = [];
+  for (const token of splitTopLevel(raw, ',')) {
+    const trimmed = token.trim();
+    if (!trimmed) continue;
+    const eq = findTopLevelChar(trimmed, '=');
+    if (eq <= 0) return null;
+    const path = trimmed.slice(0, eq).trim();
+    if (!path) return null;
+    paramPaths.push(path);
+    parameters[path] = trimmed.slice(eq + 1).trim();
+  }
+  return { paramPaths, parameters };
 }
 
 function parseParameterPart(paramPart: string): Record<string, string> {

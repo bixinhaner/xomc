@@ -969,6 +969,61 @@ func TestService_ExecuteCommand_DeviceBoundPlanItemsAttachObjectName(t *testing.
 	assert.Equal(t, addParams["object_name"], capturedTask.PlanItems[0].Command["parameters"].(map[string]interface{})["object_name"])
 }
 
+func TestService_ExecuteCommand_DeviceBoundRawAddPathExpandsFollowUpValues(t *testing.T) {
+	var capturedTask *MMLTask
+	taskRepo := &mockTaskRepo{
+		createFn: func(ctx context.Context, task *MMLTask) error {
+			capturedTask = task
+			task.ID = uuid.New()
+			return nil
+		},
+	}
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
+
+	_, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		ExecuteMode: "device_bound",
+		TaskName:    "raw add path",
+		Creator:     "admin",
+		PlanItems: []MMLPlanItem{{
+			LineNo:   1,
+			DeviceSN: "SN001",
+			Order:    1,
+			RawLine:  "ADD PATH:Device.IP.Interface.1.IPv4Address.:IPAddress=192.168.1.10,SubnetMask=255.255.255.0;SN001",
+			Command: map[string]interface{}{
+				"command_code":   "RAW ADD",
+				"operation_type": "ADD",
+				"rpc_method":     "AddObject",
+				"param_paths":    []string{"Device.IP.Interface.1.IPv4Address."},
+				"parameters": map[string]interface{}{
+					"IPAddress":  "192.168.1.10",
+					"SubnetMask": "255.255.255.0",
+				},
+				"raw_path_mode": "standard",
+			},
+		}},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, capturedTask)
+	require.Len(t, capturedTask.PlanItems, 1)
+	require.Len(t, capturedTask.Commands, 2)
+	addParams := commandParameters(capturedTask.Commands[0])
+	require.Equal(t, "Device.IP.Interface.1.IPv4Address.", addParams["object_name"])
+	assert.Equal(t, "SN001", capturedTask.Commands[0]["plan_device_sn"])
+	assert.Equal(t, 1, capturedTask.Commands[0]["plan_order"])
+
+	spv := capturedTask.Commands[1]
+	assert.Equal(t, "RAW MOD", spv["command_code"])
+	assert.Equal(t, "SetParameterValues", spv["rpc_method"])
+	assert.Equal(t, "spv_after_add", spv["compound_phase"])
+	assert.Equal(t, "SN001", spv["plan_device_sn"])
+	assert.Equal(t, 1, spv["plan_order"])
+	refs := paramRefsFromEntry(spv)
+	require.Len(t, refs, 2)
+	assert.Equal(t, "Device.IP.Interface.1.IPv4Address.{NEW}.IPAddress", refs[0].Tr069Path)
+	assert.Equal(t, "Device.IP.Interface.1.IPv4Address.{NEW}.SubnetMask", refs[1].Tr069Path)
+}
+
 func TestService_ExecuteCommand_RejectsMoreThan200Devices(t *testing.T) {
 	created := false
 	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, &mockTaskRepo{

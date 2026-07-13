@@ -30,6 +30,48 @@ describe('parseMmlScriptPlan', () => {
     });
   });
 
+  it('parses standard PATH script rows into raw path command payloads', () => {
+    const result = parseMmlScriptPlan(
+      [
+        'LST PATH:Device.IP.Interface.1.Enable;SN001',
+        'MOD PATH:Device.IP.Interface.1.Enable=true,Device.IP.Interface.2.Enable=false;SN001',
+        'ADD PATH:Device.IP.Interface.1.IPv4Address.:IPAddress=192.168.1.10,SubnetMask=255.255.255.0;SN001',
+        'RMV PATH:Device.IP.Interface.1.IPv4Address.3.;SN001',
+      ].join('\n'),
+    );
+
+    expect(result.executeMode).toBe('device_bound');
+    expect(result.planItems).toHaveLength(4);
+    expect(result.planItems[0].command).toMatchObject({
+      commandCode: 'RAW LST',
+      operationType: 'LST',
+      paramPaths: ['Device.IP.Interface.1.Enable'],
+    });
+    expect(result.planItems[1].command).toMatchObject({
+      commandCode: 'RAW MOD',
+      operationType: 'MOD',
+      paramPaths: ['Device.IP.Interface.1.Enable', 'Device.IP.Interface.2.Enable'],
+      parameters: {
+        'Device.IP.Interface.1.Enable': 'true',
+        'Device.IP.Interface.2.Enable': 'false',
+      },
+    });
+    expect(result.planItems[2].command).toMatchObject({
+      commandCode: 'RAW ADD',
+      operationType: 'ADD',
+      paramPaths: ['Device.IP.Interface.1.IPv4Address.'],
+      parameters: {
+        IPAddress: '192.168.1.10',
+        SubnetMask: '255.255.255.0',
+      },
+    });
+    expect(result.planItems[3].command).toMatchObject({
+      commandCode: 'RAW RMV',
+      operationType: 'RMV',
+      paramPaths: ['Device.IP.Interface.1.IPv4Address.3.'],
+    });
+  });
+
   it('parses csv plan rows with headers', () => {
     const result = parseMmlScriptPlan(
       [
