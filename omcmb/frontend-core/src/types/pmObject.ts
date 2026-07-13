@@ -229,8 +229,9 @@ export function buildDeviceSeriesName(
   objectLdn: string | null | undefined,
 ): string {
   const tail = deviceSnTail(sn);
-  const friendly = formatObjectLdn(objectLdn);
-  if (tail && friendly) return `${tail} · ${friendly}`;
+  const raw = (objectLdn ?? '').trim();
+  const displayName = raw && parseObjectLdn(raw).tech === 'nr' ? raw : formatObjectLdn(raw);
+  if (tail && displayName) return `${tail} · ${displayName}`;
   if (tail) return tail;
-  return friendly;
+  return displayName;
 }
