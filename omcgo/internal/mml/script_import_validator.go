@@ -165,50 +165,59 @@ func validateRawPathScriptLine(line ParsedScriptLine) []ScriptIssue {
 	paths := nonEmptyStringSlice(line.ParamPaths)
 	for _, path := range paths {
 		if strings.ContainsAny(path, " \t\r\n") {
-			issues = append(issues, validationIssue(line, "MML_PATH_INVALID", IssueError, "path", "PATH must not contain whitespace"))
+			issues = append(issues, validationIssue(line, "MML_PATH_INVALID", IssueError, "path", "standard path must not contain whitespace"))
+			continue
+		}
+		if !looksLikeStandardPath(path) {
+			issues = append(issues, validationIssue(line, "MML_PATH_INVALID", IssueError, "path", "standard path must be dot-separated, for example Device.DeviceInfo.SoftwareVersion"))
 		}
 	}
 
 	switch line.OperationType {
 	case "LST":
 		if len(paths) == 0 {
-			issues = append(issues, validationIssue(line, "MML_PATH_REQUIRED", IssueError, "path", "LST PATH requires at least one path"))
+			issues = append(issues, validationIssue(line, "MML_PATH_REQUIRED", IssueError, "path", "LST requires at least one standard path"))
 		}
 		if len(line.Parameters) > 0 {
-			issues = append(issues, validationIssue(line, "MML_PARAMETER_UNKNOWN", IssueError, "parameters", "LST PATH does not accept parameter values"))
+			issues = append(issues, validationIssue(line, "MML_PARAMETER_UNKNOWN", IssueError, "parameters", "LST does not accept parameter values"))
 		}
 	case "MOD":
 		if len(paths) == 0 || len(line.Parameters) == 0 {
-			issues = append(issues, validationIssue(line, "MML_PARAMETER_REQUIRED", IssueError, "parameters", "MOD PATH requires path=value pairs"))
+			issues = append(issues, validationIssue(line, "MML_PARAMETER_REQUIRED", IssueError, "parameters", "MOD requires standard path=value pairs"))
 		}
 		for _, path := range paths {
 			if _, ok := line.Parameters[path]; !ok {
-				issues = append(issues, validationIssue(line, "MML_PARAMETER_REQUIRED", IssueError, path, "MOD PATH value is missing"))
+				issues = append(issues, validationIssue(line, "MML_PARAMETER_REQUIRED", IssueError, path, "MOD value is missing"))
 			}
 		}
 	case "ADD":
 		if len(paths) != 1 {
-			issues = append(issues, validationIssue(line, "MML_PATH_COUNT_INVALID", IssueError, "path", "ADD PATH requires exactly one object table path"))
+			issues = append(issues, validationIssue(line, "MML_PATH_COUNT_INVALID", IssueError, "path", "ADD requires exactly one object table path"))
 			break
 		}
 		if !strings.HasSuffix(paths[0], ".") {
-			issues = append(issues, validationIssue(line, "MML_PATH_INVALID", IssueError, "path", "ADD PATH object path must end with ."))
+			issues = append(issues, validationIssue(line, "MML_PATH_INVALID", IssueError, "path", "ADD object path must end with ."))
 		}
 		if pathEndsWithInstance(paths[0]) {
-			issues = append(issues, validationIssue(line, "MML_PATH_INVALID", IssueError, "path", "ADD PATH should use the object table path, not an existing instance path"))
+			issues = append(issues, validationIssue(line, "MML_PATH_INVALID", IssueError, "path", "ADD should use the object table path, not an existing instance path"))
 		}
 	case "RMV":
 		if len(paths) != 1 {
-			issues = append(issues, validationIssue(line, "MML_PATH_COUNT_INVALID", IssueError, "path", "RMV PATH requires exactly one object instance path"))
+			issues = append(issues, validationIssue(line, "MML_PATH_COUNT_INVALID", IssueError, "path", "RMV requires exactly one object instance path"))
 			break
 		}
 		if !pathEndsWithInstance(paths[0]) {
-			issues = append(issues, validationIssue(line, "MML_PATH_INVALID", IssueError, "path", "RMV PATH requires a concrete object instance path"))
+			issues = append(issues, validationIssue(line, "MML_PATH_INVALID", IssueError, "path", "RMV requires a concrete object instance path"))
 		}
 	default:
-		issues = append(issues, validationIssue(line, "MML_OPERATION_UNSUPPORTED", IssueError, "operation_type", "PATH mode supports LST/MOD/ADD/RMV"))
+		issues = append(issues, validationIssue(line, "MML_OPERATION_UNSUPPORTED", IssueError, "operation_type", "standard path mode supports LST/MOD/ADD/RMV"))
 	}
 	return issues
+}
+
+func looksLikeStandardPath(path string) bool {
+	path = strings.TrimSpace(path)
+	return path != "" && strings.Contains(path, ".")
 }
 
 func pathEndsWithInstance(path string) bool {

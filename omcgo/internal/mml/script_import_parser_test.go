@@ -13,16 +13,16 @@ import (
 var scriptImportTemplateForParserTest string
 
 func TestParseScriptTXT_DerivesPerDeviceOrder(t *testing.T) {
-	raw := []byte("\xef\xbb\xbf# note\r\nLST DEVICE_INFO;SN1\r\nMOD DEVICE_INFO:USER_LABEL=A;SN2\r\nLST DEVICE_INFO;SN2\r\n")
+	raw := []byte("\xef\xbb\xbf# note\r\nLST Device.DeviceInfo.SoftwareVersion;SN1\r\nMOD Device.DeviceInfo.X_VENDOR_Label=A;SN2\r\nLST Device.DeviceInfo.HardwareVersion;SN2\r\n")
 
 	got, issues := ParseScriptTXT(raw)
 
 	require.Empty(t, issues)
-	require.Equal(t, "# note\nLST DEVICE_INFO;SN1\nMOD DEVICE_INFO:USER_LABEL=A;SN2\nLST DEVICE_INFO;SN2\n", got.NormalizedContent)
+	require.Equal(t, "# note\nLST Device.DeviceInfo.SoftwareVersion;SN1\nMOD Device.DeviceInfo.X_VENDOR_Label=A;SN2\nLST Device.DeviceInfo.HardwareVersion;SN2\n", got.NormalizedContent)
 	require.Len(t, got.SHA256, 64)
 	require.Equal(t, []int{1, 1, 2}, []int{got.Lines[0].Order, got.Lines[1].Order, got.Lines[2].Order})
 	require.Equal(t, []int{2, 3, 4}, []int{got.Lines[0].LineNo, got.Lines[1].LineNo, got.Lines[2].LineNo})
-	require.Equal(t, []string{"LST DEVICE_INFO", "MOD DEVICE_INFO", "LST DEVICE_INFO"}, []string{
+	require.Equal(t, []string{"LST PATH", "MOD PATH", "LST PATH"}, []string{
 		got.Lines[0].CommandCode, got.Lines[1].CommandCode, got.Lines[2].CommandCode,
 	})
 }
@@ -36,6 +36,7 @@ func TestParseScriptTXT_TemplateDocumentsSupportedSyntaxAndExamplesParse(t *test
 	require.NotContains(t, scriptImportTemplateForParserTest, "DEL")
 	require.Contains(t, scriptImportTemplateForParserTest, "使用标准 PATH")
 	require.Contains(t, scriptImportTemplateForParserTest, "ADD 后的参数名是新对象内的相对参数名")
+	require.NotContains(t, scriptImportTemplateForParserTest, "PATH:")
 	require.NotContains(t, scriptImportTemplateForParserTest, "操作 命令编码")
 	require.NotContains(t, scriptImportTemplateForParserTest, "兼容命令编码")
 	require.NotContains(t, scriptImportTemplateForParserTest, "LST DEVICE_INFO;DEVICE_SN")
@@ -51,7 +52,7 @@ func TestParseScriptTXT_TemplateDocumentsSupportedSyntaxAndExamplesParse(t *test
 		got.Lines[2].OperationType,
 		got.Lines[3].OperationType,
 	})
-	require.Equal(t, "RMV PATH:Device.IP.Interface.1.IPv4Address.3.;SN-TEMPLATE-1", got.Lines[3].RawLine)
+	require.Equal(t, "RMV Device.IP.Interface.1.IPv4Address.3.;SN-TEMPLATE-1", got.Lines[3].RawLine)
 	require.Equal(t, []string{"Device.IP.Interface.1.IPv4Address."}, got.Lines[2].ParamPaths)
 	require.Equal(t, map[string]string{"IPAddress": "192.168.1.10", "SubnetMask": "255.255.255.0"}, got.Lines[2].Parameters)
 }
@@ -68,6 +69,7 @@ func TestParseScriptTXT_EnglishTemplateDocumentsSupportedSyntaxAndExamplesParse(
 	require.NotContains(t, template, "支持操作")
 	require.Contains(t, template, "Use standard PATH")
 	require.Contains(t, template, "ADD follow-up values use relative parameter names")
+	require.NotContains(t, template, "PATH:")
 	require.NotContains(t, template, "Operation command_code")
 	require.NotContains(t, template, "Compatible command-code")
 	require.NotContains(t, template, "LST DEVICE_INFO;DEVICE_SN")
@@ -162,22 +164,22 @@ func TestParseScriptTXT_RejectsInvalidInput(t *testing.T) {
 }
 
 func TestParseScriptTXT_IgnoresQuotedAndBracedDelimiters(t *testing.T) {
-	got, issues := ParseScriptTXT([]byte(`MOD DEVICE_INFO:DESC="a;b,c",VALUES={x;y,z};SN1` + "\n"))
+	got, issues := ParseScriptTXT([]byte(`MOD Device.DeviceInfo.Description="a;b,c",Device.DeviceInfo.Values={x;y,z};SN1` + "\n"))
 
 	require.Empty(t, issues)
 	require.Len(t, got.Lines, 1)
 	require.Equal(t, "MOD", got.Lines[0].OperationType)
-	require.Equal(t, "MOD DEVICE_INFO", got.Lines[0].CommandCode)
+	require.Equal(t, "MOD PATH", got.Lines[0].CommandCode)
 	require.Equal(t, "SN1", got.Lines[0].DeviceSN)
-	require.Equal(t, map[string]string{"DESC": "a;b,c", "VALUES": "{x;y,z}"}, got.Lines[0].Parameters)
+	require.Equal(t, map[string]string{"Device.DeviceInfo.Description": "a;b,c", "Device.DeviceInfo.Values": "{x;y,z}"}, got.Lines[0].Parameters)
 }
 
-func TestParseScriptTXT_ParsesStandardPathRows(t *testing.T) {
+func TestParseScriptTXT_ParsesImplicitStandardPathRows(t *testing.T) {
 	got, issues := ParseScriptTXT([]byte(strings.Join([]string{
-		"LST PATH:Device.IP.Interface.1.Enable;SN1",
-		"MOD PATH:Device.IP.Interface.1.Enable=true,Device.IP.Interface.2.Enable=false;SN1",
-		"ADD PATH:Device.IP.Interface.1.IPv4Address.:IPAddress=192.168.1.10,SubnetMask=255.255.255.0;SN1",
-		"RMV PATH:Device.IP.Interface.1.IPv4Address.3.;SN1",
+		"LST Device.IP.Interface.1.Enable;SN1",
+		"MOD Device.IP.Interface.1.Enable=true,Device.IP.Interface.2.Enable=false;SN1",
+		"ADD Device.IP.Interface.1.IPv4Address.:IPAddress=192.168.1.10,SubnetMask=255.255.255.0;SN1",
+		"RMV Device.IP.Interface.1.IPv4Address.3.;SN1",
 	}, "\n") + "\n"))
 
 	require.Empty(t, issues)
@@ -193,14 +195,14 @@ func TestParseScriptTXT_ParsesStandardPathRows(t *testing.T) {
 	require.Equal(t, "RMV PATH", got.Lines[3].CommandCode)
 }
 
-func TestParseScriptTXT_DELIsRMVAlias(t *testing.T) {
-	got, issues := ParseScriptTXT([]byte("DEL ETHERNET_INTERFACE;SN1\n"))
+func TestParseScriptTXT_ParsesExplicitPathPrefixForCompatibility(t *testing.T) {
+	got, issues := ParseScriptTXT([]byte("LST PATH:Device.IP.Interface.1.Enable;SN1\n"))
 
 	require.Empty(t, issues)
 	require.Len(t, got.Lines, 1)
-	require.Equal(t, "RMV", got.Lines[0].OperationType)
-	require.Equal(t, "RMV ETHERNET_INTERFACE", got.Lines[0].CommandCode)
-	require.Equal(t, "DEL ETHERNET_INTERFACE;SN1", got.Lines[0].RawLine)
+	require.Equal(t, "LST", got.Lines[0].OperationType)
+	require.Equal(t, "LST PATH", got.Lines[0].CommandCode)
+	require.Equal(t, []string{"Device.IP.Interface.1.Enable"}, got.Lines[0].ParamPaths)
 }
 
 func TestParseScriptTXT_RejectsMoreThanMaxLines(t *testing.T) {

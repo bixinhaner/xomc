@@ -27,6 +27,35 @@ func (f *fakeScriptValidationRepo) LoadDevicesBySNs(_ context.Context, _ []strin
 	return f.devices, nil
 }
 
+func legacyParsedScriptForTest(t *testing.T, line string) *ParsedScript {
+	t.Helper()
+	parsedLine := legacyParsedLineForTest(t, 1, line, 1)
+	return &ParsedScript{Lines: []ParsedScriptLine{parsedLine}}
+}
+
+func legacyParsedLineForTest(t *testing.T, lineNo int, line string, order int) ParsedScriptLine {
+	t.Helper()
+	parts := strings.Split(line, ";")
+	require.Len(t, parts, 2)
+	commandRaw := strings.TrimSpace(parts[0])
+	deviceSN := strings.TrimSpace(parts[1])
+	firstSpace := strings.IndexAny(commandRaw, " \t")
+	require.GreaterOrEqual(t, firstSpace, 0)
+	operation := normalizeScriptOperation(strings.ToUpper(strings.TrimSpace(commandRaw[:firstSpace])))
+	require.NotEmpty(t, operation)
+	commandCode, parameters, err := parseLegacyScriptCommand(operation, strings.TrimSpace(commandRaw[firstSpace:]))
+	require.NoError(t, err)
+	return ParsedScriptLine{
+		LineNo:        lineNo,
+		RawLine:       line,
+		DeviceSN:      deviceSN,
+		Order:         order,
+		CommandCode:   commandCode,
+		OperationType: operation,
+		Parameters:    parameters,
+	}
+}
+
 func TestScriptImportValidator_BatchesAndRejectsUnknownParameter(t *testing.T) {
 	repo := &fakeScriptValidationRepo{
 		commands: map[string]ValidationCommand{
@@ -37,8 +66,7 @@ func TestScriptImportValidator_BatchesAndRejectsUnknownParameter(t *testing.T) {
 		},
 		devices: map[string]*model.Device{"SN1": {SerialNumber: "SN1", ProductClass: "PC1", IsOnline: true}},
 	}
-	parsed, parseIssues := ParseScriptTXT([]byte("MOD DEVICE_INFO:UNKNOWN=A;SN1\n"))
-	require.Empty(t, parseIssues)
+	parsed := legacyParsedScriptForTest(t, "MOD DEVICE_INFO:UNKNOWN=A;SN1")
 
 	result, err := NewScriptImportValidator(repo).Validate(context.Background(), parsed, ValidationActor{Username: "admin"})
 	require.NoError(t, err)
@@ -87,8 +115,7 @@ func TestScriptImportValidator_ReportsAuthoritativeValidationIssues(t *testing.T
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			parsed, issues := ParseScriptTXT([]byte(tt.line + "\n"))
-			require.Empty(t, issues)
+			parsed := legacyParsedScriptForTest(t, tt.line)
 			result, err := NewScriptImportValidator(&fakeScriptValidationRepo{commands: tt.commands, devices: tt.devices}).Validate(context.Background(), parsed, ValidationActor{Username: "admin"})
 			require.NoError(t, err)
 			require.Len(t, result.Issues, 1)
@@ -115,16 +142,15 @@ func TestScriptImportValidator_ProducesPlanAndUsesOneBatchPerResource(t *testing
 		"LST DEVICE_INFO": {CommandCode: "LST DEVICE_INFO", OperationType: "LST", RPCMethod: "GetParameterValues"},
 	}
 	devices := make(map[string]*model.Device, MaxScriptDevices)
-	var script string
+	parsed := &ParsedScript{Lines: make([]ParsedScriptLine, 0, MaxScriptLines)}
 	for i := 0; i < MaxScriptDevices; i++ {
 		sn := fmt.Sprintf("SN%03d", i)
 		devices[sn] = &model.Device{SerialNumber: sn, IsOnline: true}
 		for j := 0; j < 10; j++ {
-			script += "LST DEVICE_INFO;" + sn + "\n"
+			lineNo := len(parsed.Lines) + 1
+			parsed.Lines = append(parsed.Lines, legacyParsedLineForTest(t, lineNo, "LST DEVICE_INFO;"+sn, j+1))
 		}
 	}
-	parsed, issues := ParseScriptTXT([]byte(script))
-	require.Empty(t, issues)
 	require.Len(t, parsed.Lines, MaxScriptLines)
 	repo := &fakeScriptValidationRepo{commands: commands, devices: devices}
 
@@ -140,10 +166,10 @@ func TestScriptImportValidator_ProducesPlanAndUsesOneBatchPerResource(t *testing
 
 func TestScriptImportValidator_ProducesRawPathPlanItemsWithoutCommandLookup(t *testing.T) {
 	parsed, issues := ParseScriptTXT([]byte(strings.Join([]string{
-		"LST PATH:Device.IP.Interface.1.Enable;SN1",
-		"MOD PATH:Device.IP.Interface.1.Enable=true;SN1",
-		"ADD PATH:Device.IP.Interface.1.IPv4Address.:IPAddress=192.168.1.10;SN1",
-		"RMV PATH:Device.IP.Interface.1.IPv4Address.3.;SN1",
+		"LST Device.IP.Interface.1.Enable;SN1",
+		"MOD Device.IP.Interface.1.Enable=true;SN1",
+		"ADD Device.IP.Interface.1.IPv4Address.:IPAddress=192.168.1.10;SN1",
+		"RMV Device.IP.Interface.1.IPv4Address.3.;SN1",
 	}, "\n") + "\n"))
 	require.Empty(t, issues)
 	repo := &fakeScriptValidationRepo{
@@ -163,4 +189,23 @@ func TestScriptImportValidator_ProducesRawPathPlanItemsWithoutCommandLookup(t *t
 	require.Equal(t, "RAW ADD", result.PlanItems[2].Command["command_code"])
 	require.Equal(t, map[string]interface{}{"IPAddress": "192.168.1.10"}, result.PlanItems[2].Command["parameters"])
 	require.Equal(t, "RAW RMV", result.PlanItems[3].Command["command_code"])
+}
+
+func TestScriptImportValidator_DoesNotResolveLegacyCommandCodesByDefault(t *testing.T) {
+	parsed, issues := ParseScriptTXT([]byte("LST DEVICE_INFO;SN1\n"))
+	require.Empty(t, issues)
+	repo := &fakeScriptValidationRepo{
+		devices: map[string]*model.Device{"SN1": {SerialNumber: "SN1", IsOnline: true}},
+		commands: map[string]ValidationCommand{
+			"LST DEVICE_INFO": {CommandCode: "LST DEVICE_INFO", OperationType: "LST"},
+		},
+	}
+
+	result, err := NewScriptImportValidator(repo).Validate(context.Background(), parsed, ValidationActor{Username: "admin"})
+
+	require.NoError(t, err)
+	require.Equal(t, 0, repo.commandBatchCalls)
+	require.Len(t, result.Issues, 1)
+	require.Equal(t, "MML_PATH_INVALID", result.Issues[0].Code)
+	require.Empty(t, result.PlanItems)
 }

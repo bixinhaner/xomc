@@ -202,6 +202,9 @@ function parseCommand(raw: string): MMLTaskCommandInput | null {
   const line = raw.replace(/;+$/, '').trim();
   if (!line) return null;
 
+  const standardPathCommand = parseStandardPathCommand(line);
+  if (standardPathCommand) return standardPathCommand;
+
   const colonIndex = findTopLevelChar(line, ':');
   let commandCode = '';
   let paramPart = '';
@@ -232,6 +235,19 @@ function parseCommand(raw: string): MMLTaskCommandInput | null {
   return command;
 }
 
+function parseStandardPathCommand(line: string): MMLTaskCommandInput | null {
+  const match = line.match(/^(\S+)\s+([\s\S]+)$/);
+  if (!match) return null;
+  const operationType = normalizeRawPathOperation(match[1] ?? '');
+  if (!operationType) return null;
+
+  const { payload, explicit } = stripOptionalPathPrefix(match[2] ?? '');
+  const parsed = parseRawPathPayload(operationType, payload);
+  if (!parsed) return null;
+  if (!explicit && !parsed.paramPaths.every(looksLikeStandardPath)) return null;
+  return buildRawPathCommand(operationType, parsed);
+}
+
 function parseRawPathCommand(commandCode: string, payload: string): MMLTaskCommandInput | null {
   const parts = commandCode.trim().split(/\s+/);
   if (parts.length !== 2 || parts[1]?.toUpperCase() !== 'PATH') return null;
@@ -240,6 +256,13 @@ function parseRawPathCommand(commandCode: string, payload: string): MMLTaskComma
 
   const parsed = parseRawPathPayload(operationType, payload);
   if (!parsed) return null;
+  return buildRawPathCommand(operationType, parsed);
+}
+
+function buildRawPathCommand(
+  operationType: MMLTaskCommandInput['operationType'],
+  parsed: { paramPaths: string[]; parameters: Record<string, string> },
+): MMLTaskCommandInput {
   const command: MMLTaskCommandInput = {
     commandCode: `RAW ${operationType}`,
     operationType,
@@ -248,6 +271,18 @@ function parseRawPathCommand(commandCode: string, payload: string): MMLTaskComma
   };
   if (Object.keys(parsed.parameters).length > 0) command.parameters = parsed.parameters;
   return command;
+}
+
+function stripOptionalPathPrefix(raw: string): { payload: string; explicit: boolean } {
+  const colonIndex = findTopLevelChar(raw, ':');
+  if (colonIndex >= 0 && raw.slice(0, colonIndex).trim().toUpperCase() === 'PATH') {
+    return { payload: raw.slice(colonIndex + 1).trim(), explicit: true };
+  }
+  return { payload: raw.trim(), explicit: false };
+}
+
+function looksLikeStandardPath(path: string): boolean {
+  return path.trim().includes('.');
 }
 
 function normalizeRawPathOperation(operation: string): MMLTaskCommandInput['operationType'] | undefined {

@@ -229,12 +229,23 @@ func parseScriptCommand(raw string) (operation, commandCode string, parameters m
 	}
 	rest := strings.TrimSpace(raw[firstSpace:])
 	if rest == "" {
-		return "", "", nil, nil, "", fmt.Errorf("command code is required")
+		return "", "", nil, nil, "", fmt.Errorf("standard path payload is required")
 	}
 
-	colonIndex, err := firstTopLevelIndex(rest, ':')
+	parametersRaw := stripOptionalPathPrefix(rest)
+	parameters, paramPaths, err = parseScriptRawPathPayload(operation, parametersRaw)
 	if err != nil {
 		return "", "", nil, nil, "", err
+	}
+	return operation, operation + " PATH", parameters, paramPaths, rawPathModeStandard, nil
+}
+
+// parseLegacyScriptCommand is intentionally kept for a possible future command-code
+// import mode. The current TXT import defaults to standard PATH payloads.
+func parseLegacyScriptCommand(operation, rest string) (commandCode string, parameters map[string]string, err error) {
+	colonIndex, err := firstTopLevelIndex(rest, ':')
+	if err != nil {
+		return "", nil, err
 	}
 	code := rest
 	parametersRaw := ""
@@ -242,25 +253,29 @@ func parseScriptCommand(raw string) (operation, commandCode string, parameters m
 		code = strings.TrimSpace(rest[:colonIndex])
 		parametersRaw = strings.TrimSpace(rest[colonIndex+1:])
 	}
-	if strings.EqualFold(code, "PATH") {
-		parameters, paramPaths, err = parseScriptRawPathPayload(operation, parametersRaw)
-		if err != nil {
-			return "", "", nil, nil, "", err
-		}
-		return operation, operation + " PATH", parameters, paramPaths, "standard", nil
-	}
 	if code == "" || len(strings.Fields(code)) != 1 || !isValidCommandCode(strings.ToUpper(code)) {
-		return "", "", nil, nil, "", fmt.Errorf("invalid command code %q", code)
+		return "", nil, fmt.Errorf("invalid command code %q", code)
 	}
 
 	parameters = make(map[string]string)
 	if parametersRaw != "" {
 		parameters, err = parseScriptParameters(parametersRaw)
 		if err != nil {
-			return "", "", nil, nil, "", err
+			return "", nil, err
 		}
 	}
-	return operation, operation + " " + strings.ToUpper(code), parameters, nil, "", nil
+	return operation + " " + strings.ToUpper(code), parameters, nil
+}
+
+func stripOptionalPathPrefix(rest string) string {
+	colonIndex, err := firstTopLevelIndex(rest, ':')
+	if err != nil || colonIndex < 0 {
+		return rest
+	}
+	if strings.EqualFold(strings.TrimSpace(rest[:colonIndex]), "PATH") {
+		return strings.TrimSpace(rest[colonIndex+1:])
+	}
+	return rest
 }
 
 func validScriptOperation(operation string) bool {
@@ -315,7 +330,7 @@ func parseScriptParameters(raw string) (map[string]string, error) {
 func parseScriptRawPathPayload(operation, raw string) (map[string]string, []string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return nil, nil, fmt.Errorf("PATH mode requires a path payload")
+		return nil, nil, fmt.Errorf("standard path payload is required")
 	}
 	switch operation {
 	case "LST", "RMV":
