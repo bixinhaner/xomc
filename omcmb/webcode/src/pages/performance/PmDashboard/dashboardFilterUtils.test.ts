@@ -131,6 +131,22 @@ describe('buildCompareSeries', () => {
     expect(out.compareBuckets).toEqual(prevBuckets);
   });
 
+  it('daily 周期比对保留 6/25 起的多天上一周期点，不只剩 6/30 边界点（#59）', () => {
+    const currentBuckets = Array.from({ length: 6 }, (_, i) =>
+      dayjs.utc('2026-07-02T00:00:00Z').add(i, 'day').toISOString(),
+    );
+    const prevBuckets = Array.from({ length: 6 }, (_, i) =>
+      dayjs.utc('2026-06-25T00:00:00Z').add(i, 'day').toISOString(),
+    );
+    const prevSeries: MetricSeries[] = [{ key: 'K1', name: 'RRC连接平均数', values: [11, 12, 13, 14, 15, 16] }];
+    const offsetMs = 7 * 24 * 60 * 60 * 1000 + 37 * 1000;
+
+    const out = buildCompareSeries(currentBuckets, prevSeries, prevBuckets, offsetMs, 'daily');
+
+    expect(out.series[0].values).toEqual([11, 12, 13, 14, 15, 16]);
+    expect(out.compareBuckets).toEqual(prevBuckets);
+  });
+
   it('month 粒度按整数日历月平移（不按固定毫秒漂移出月界）', () => {
     // 上一周期 3/31、4/30；offset≈1 个月，日历月平移后应落到当前轴 4/30、5/31。
     const offsetMs = 30 * 86_400_000 + 999; // ≈1 月 + 零头

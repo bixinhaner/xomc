@@ -708,7 +708,7 @@ WHERE r.task_id = $1`
 	}
 	if f.EndTime != "" {
 		if t, err := time.Parse(time.RFC3339, f.EndTime); err == nil {
-			q += fmt.Sprintf(" AND r.time <= $%d", pos)
+			q += fmt.Sprintf(" AND r.time < $%d", pos)
 			args = append(args, t)
 			pos++
 		}
@@ -787,7 +787,7 @@ func buildResultsCountQuery(taskID uuid.UUID, f resultsFilter) (string, []any) {
 	}
 	if f.EndTime != "" {
 		if t, err := time.Parse(time.RFC3339, f.EndTime); err == nil {
-			q += fmt.Sprintf(" AND r.time <= $%d", pos)
+			q += fmt.Sprintf(" AND r.time < $%d", pos)
 			args = append(args, t)
 			pos++
 		}
