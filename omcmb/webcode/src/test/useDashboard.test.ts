@@ -8,6 +8,15 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import {
+  buildDashboardDayRanges,
+  buildDashboardKPIQueryOptions,
+  buildDashboardKPIQueryKey,
+  buildDashboardWeekRange,
+  isDashboardBusinessTimezoneReady,
+} from '@core/hooks/api/useDashboard';
+import { dashboardService } from '@core/mock/services/dashboardService';
+import { useAppStore } from '@core/store/appStore';
 
 // 从 useDashboard.ts 导入实际测试的函数
 // 注意：这些函数是内部实现细节，通过测试导出或从实际模块导入
@@ -235,5 +244,113 @@ describe('useDashboard 工具函数', () => {
 
       expect(result.metadata.compare_type).toBe('last_week');
     });
+  });
+});
+
+describe('dashboard KPI 系统时区窗口', () => {
+  it('周查询必须等待系统业务时区就绪，禁止静默回落 UTC', () => {
+    expect(isDashboardBusinessTimezoneReady(undefined)).toBe(false);
+    expect(isDashboardBusinessTimezoneReady('')).toBe(false);
+    expect(isDashboardBusinessTimezoneReady('   ')).toBe(false);
+    expect(isDashboardBusinessTimezoneReady('Asia/Shanghai')).toBe(true);
+  });
+
+  it('今日/昨日使用系统时区自然日半开窗口', () => {
+    const ranges = buildDashboardDayRanges(new Date('2026-07-13T01:30:00Z'), 'Asia/Shanghai');
+    expect(ranges.current.start_time).toBe('2026-07-13T00:00:00+08:00');
+    expect(ranges.current.end_time).toBe('2026-07-13T09:30:00+08:00');
+    expect(ranges.compare.start_time).toBe('2026-07-12T00:00:00+08:00');
+    expect(ranges.compare.end_time).toBe('2026-07-13T00:00:00+08:00');
+  });
+
+  it('Mock KPI 响应保留请求窗口的系统时区钟面与偏移', async () => {
+    useAppStore.getState().setSystemTimezone('Asia/Shanghai');
+    const result = await dashboardService.getKPITimeSeries(
+      ['K900010015'],
+      '2026-07-13T00:00:00+08:00',
+      '2026-07-13T02:00:00+08:00',
+      'hourly',
+    );
+
+    expect(result.K900010015?.map((point) => point[0])).toEqual([
+      '2026-07-13T00:00:00+08:00',
+      '2026-07-13T01:00:00+08:00',
+    ]);
+  });
+
+  it('Mock daily 桶跨 DST 时保持自然日零点并逐点更新偏移', async () => {
+    useAppStore.getState().setSystemTimezone('America/New_York');
+    const result = await dashboardService.getKPITimeSeries(
+      ['K900010015'],
+      '2026-03-07T00:00:00-05:00',
+      '2026-03-10T00:00:00-04:00',
+      'daily',
+    );
+
+    expect(result.K900010015?.map((point) => point[0])).toEqual([
+      '2026-03-07T00:00:00-05:00',
+      '2026-03-08T00:00:00-05:00',
+      '2026-03-09T00:00:00-04:00',
+    ]);
+  });
+
+  it('周窗口查询最近七个完整自然日，但横轴保留今天的普通日期占位', () => {
+    const range = buildDashboardWeekRange(new Date('2026-07-13T01:30:00Z'), 'Asia/Shanghai');
+    expect(range.start_time).toBe('2026-07-06T00:00:00+08:00');
+    expect(range.end_time).toBe('2026-07-13T00:00:00+08:00');
+    expect(range.dateKeys).toEqual([
+      '2026-07-06', '2026-07-07', '2026-07-08', '2026-07-09',
+      '2026-07-10', '2026-07-11', '2026-07-12', '2026-07-13',
+    ]);
+  });
+
+  it('跨系统时区午夜后日期窗口向前滚动', () => {
+    const before = buildDashboardWeekRange(new Date('2026-07-13T15:59:59Z'), 'Asia/Shanghai');
+    const after = buildDashboardWeekRange(new Date('2026-07-13T16:00:01Z'), 'Asia/Shanghai');
+    expect(before.end_time).toBe('2026-07-13T00:00:00+08:00');
+    expect(after.end_time).toBe('2026-07-14T00:00:00+08:00');
+  });
+
+  it('KPI query key 区分 hourly 与 daily', () => {
+    const common = {
+      kpi_names: ['K1'],
+      start_time: '2026-07-13T00:00:00+08:00',
+      end_time: '2026-07-14T00:00:00+08:00',
+    };
+    expect(buildDashboardKPIQueryKey({ ...common, granularity: 'hourly' }))
+      .not.toEqual(buildDashboardKPIQueryKey({ ...common, granularity: 'daily' }));
+  });
+
+  it('周查询配置只执行一次 daily 请求，并在无指标时禁用', async () => {
+    const calls: unknown[][] = [];
+    const client = {
+      getKPITimeSeries: async (...args: unknown[]) => {
+        calls.push(args);
+        return {};
+      },
+    };
+    const params = {
+      kpi_names: ['K1'],
+      start_time: '2026-07-06T00:00:00+08:00',
+      end_time: '2026-07-13T00:00:00+08:00',
+      granularity: 'daily' as const,
+    };
+
+    const options = buildDashboardKPIQueryOptions(params, true, client);
+    expect(options.enabled).toBe(true);
+    await options.queryFn();
+    expect(calls).toEqual([[
+      ['K1'],
+      params.start_time,
+      params.end_time,
+      'daily',
+    ]]);
+
+    const disabled = buildDashboardKPIQueryOptions(
+      { ...params, kpi_names: [] },
+      true,
+      client,
+    );
+    expect(disabled.enabled).toBe(false);
   });
 });

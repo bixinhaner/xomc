@@ -9,6 +9,7 @@ import type {
   BackendKPILayout,
   KPILayout,
   KPILayoutPanel,
+  DashboardKPIGranularity,
 } from '../../types/dashboard';
 import type { DashboardChartData } from '../../mock/data/dashboard';
 
@@ -453,7 +454,8 @@ export const dashboardApi = {
   async getKPITimeSeries(
     kpiNames?: string[],
     startTime?: string,
-    endTime?: string
+    endTime?: string,
+    granularity?: DashboardKPIGranularity,
   ): Promise<DashboardChartData['kpiTimeSeries']> {
     const defaultNames = [
       'RRC_CONN_SETUP_SR',
@@ -470,6 +472,7 @@ export const dashboardApi = {
           kpi_names: names.join(','),
           ...(startTime ? { start_time: startTime } : {}),
           ...(endTime ? { end_time: endTime } : {}),
+          ...(granularity ? { granularity } : {}),
         },
       }
     );

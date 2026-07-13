@@ -451,7 +451,10 @@ export interface KPITimeSeriesParams {
   kpi_names: string[];
   start_time: string;
   end_time: string;
+  granularity?: DashboardKPIGranularity;
 }
+
+export type DashboardKPIGranularity = 'hourly' | 'daily';
 
 /**
  * 时间范围计算结果（内部使用）

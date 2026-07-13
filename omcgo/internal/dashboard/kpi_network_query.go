@@ -29,6 +29,6 @@ func buildNetworkKPIHourlySeriesRequest(codes []string, startTime, endTime time.
 	return buildNetworkKPISeriesRequest(codes, metrics.GranularityHourly, startTime, endTime)
 }
 
-func buildNetworkKPI15MinSeriesRequest(codes []string, startTime, endTime time.Time) pmaggregator.QueryRequest {
-	return buildNetworkKPISeriesRequest(codes, metrics.Granularity15Min, startTime, endTime)
+func buildNetworkKPIDailySeriesRequest(codes []string, startTime, endTime time.Time) pmaggregator.QueryRequest {
+	return buildNetworkKPISeriesRequest(codes, metrics.GranularityDaily, startTime, endTime)
 }

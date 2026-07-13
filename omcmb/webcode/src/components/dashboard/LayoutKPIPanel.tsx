@@ -33,7 +33,7 @@ import type { KPILayoutPanel } from '@core/types/dashboard';
 import type { MultiTrendComparisonData } from '@core/types/dashboard';
 import type { TechnologyType } from '@/pages/dashboard/kpi-config';
 import { useMetricMetadata, resolveMetricMeta } from './useMetricMetadata';
-import { buildSeries } from './LayoutKPIPanel.helpers';
+import { buildSeries, shouldShowKPIChartLegend } from './LayoutKPIPanel.helpers';
 
 const { Text } = Typography;
 
@@ -50,6 +50,8 @@ export interface LayoutKPIPanelProps {
   compareWindow: 'yesterday' | 'last_week';
   /** 当前卡片切换趋势对比时窗。 */
   onCompareWindowChange: (compareWindow: 'yesterday' | 'last_week') => void;
+  /** 周模式固定的七个自然日日期键。 */
+  weekDateKeys?: string[];
   /** 图表高度。 */
   height?: number;
 }
@@ -61,6 +63,7 @@ export function LayoutKPIPanel({
   isLoading,
   compareWindow,
   onCompareWindowChange,
+  weekDateKeys = [],
   height = 280,
 }: LayoutKPIPanelProps) {
   const t = useT();
@@ -117,20 +120,28 @@ export function LayoutKPIPanel({
   const titleFallbackKey = selectedMetrics[0] ?? panel.metrics[0] ?? '';
   const titleFallback = titleFallbackKey ? resolveOne(titleFallbackKey).name : '';
 
-  // 单选时图例的主线名称：结合业务习惯，无论天/周都叫"今日"代表当前周期。
-  const todayLabel = t('dashboard.timeRange.today');
+  const todayLabel = compareWindow === 'last_week'
+    ? t('dashboard.compareWindow.week')
+    : t('dashboard.timeRange.today');
 
-  // 对比线名称：结合业务习惯，天模式对比"昨日"，周模式对比线叫"本周"。
-  const compareLabel = compareWindow === 'last_week'
-    ? t('dashboard.timeRange.thisWeek')
-    : t('dashboard.timeRange.yesterday');
+  const compareLabel = t('dashboard.timeRange.yesterday');
 
   const xData = useMemo(() => generateDayAxisLabels(), []);
   const xDataFull = useMemo(() => generateDayAxisTimestamps(), []);
 
   const { series, weekXData, weekXDataFull } = useMemo(
-    () => buildSeries(selectedMetrics, trendData, xData, todayLabel, compareLabel, resolveOne, undefined, compareWindow),
-    [selectedMetrics, trendData, xData, todayLabel, compareLabel, resolveOne, compareWindow],
+    () => buildSeries(
+      selectedMetrics,
+      trendData,
+      xData,
+      todayLabel,
+      compareLabel,
+      resolveOne,
+      undefined,
+      compareWindow,
+      weekDateKeys,
+    ),
+    [selectedMetrics, trendData, xData, todayLabel, compareLabel, resolveOne, compareWindow, weekDateKeys],
   );
 
   // last_week 模式用按天聚合后的日期轴（由 buildSeries 返回），yesterday 用固定 24h 轴。
@@ -293,7 +304,7 @@ export function LayoutKPIPanel({
             series={series}
             height={height - 70}
             smooth
-            showLegend={true}
+            showLegend={shouldShowKPIChartLegend(compareWindow, selectedMetrics.length)}
             unit={sharedUnit}
           />
         )}
