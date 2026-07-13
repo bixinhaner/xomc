@@ -335,6 +335,8 @@ func (r *PgTaskRepository) HasIncompleteSyncGPVTasksByDevice(ctx context.Context
 		Where(sq.Like{"t.command_key": prefix + "%"}).
 		Where(sq.Eq{"t.status": []TaskStatus{TaskStatusPending, TaskStatusSent}}).
 		Where(sq.Expr("t.created_at > now() - interval '24 hours'")).
+		Where(sq.NotEq{"t.expires_at": nil}).
+		Where(sq.Expr("t.expires_at > now()")).
 		Where(`NOT EXISTS (
 			SELECT 1 FROM device_tasks failed
 			WHERE failed.source_id = t.source_id
@@ -363,10 +365,8 @@ func (r *PgTaskRepository) CountOpenSyncGPVByDevice(ctx context.Context, deviceS
 		Where(sq.Like{"t.command_key": prefix + "%"}).
 		Where(sq.Eq{"t.status": []TaskStatus{TaskStatusPending, TaskStatusSent}}).
 		Where(sq.Expr("t.created_at > now() - interval '24 hours'")).
-		Where(sq.Or{
-			sq.Eq{"t.expires_at": nil},
-			sq.Expr("t.expires_at > now()"),
-		}).
+		Where(sq.NotEq{"t.expires_at": nil}).
+		Where(sq.Expr("t.expires_at > now()")).
 		ToSql()
 	if err != nil {
 		return 0, fmt.Errorf("build open sync-gpv count query: %w", err)

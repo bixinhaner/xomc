@@ -46,11 +46,97 @@
               <param name="MmeIpPlmnList" titleZh="MME IP+PLMN 列表" titleEn="MME IP + PLMN List"
                                     standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmeIpPlmnList"/>
        </group>
-       <group id="device-sync" titleZh="时间与同步" titleEn="Time and Sync">
-              <param name="tfcsManagerPrimsrc" titleZh="同步源" titleEn="Sync Source"
-                                    standardPath="Device.ManagementServer.tfcsManagerPrimsrc"/>
-              <param name="tfcsSyncState" titleZh="同步状态" titleEn="Sync State"
-                                    standardPath="Device.ManagementServer.tfcsSyncState"/>
+       <group id="device-time" titleZh="NTP" titleEn="NTP">
+              <param name="Enable" titleZh="NTP" titleEn="NTP"
+                                    standardPath="Device.Time.Enable">
+                     <option value="true" label="Enable"/>
+                     <option value="false" label="Disable"/>
+              </param>
+              <param name="LocalTimeZoneName" titleZh="本地时区" titleEn="Local Time Zone"
+                                    standardPath="Device.Time.LocalTimeZoneName"/>
+              <param name="NTPSyncPeriod" titleZh="NTP 同步周期" titleEn="NTP Sync Period"
+                                    standardPath="Device.Time.LTE_X_COM_NTP_SYNC_INTERVAL"/>
+              <param name="NTPServer1" titleZh="NTP 服务器 1" titleEn="NTP Server 1"
+                                    standardPath="Device.Time.NTPServer1"/>
+              <param name="NTPServer2" titleZh="NTP 服务器 2" titleEn="NTP Server 2"
+                                    standardPath="Device.Time.NTPServer2"/>
+              <param name="NTPServer3" titleZh="NTP 服务器 3" titleEn="NTP Server 3"
+                                    standardPath="Device.Time.NTPServer3"/>
+              <param name="NTPServer4" titleZh="NTP 服务器 4" titleEn="NTP Server 4"
+                                    standardPath="Device.Time.NTPServer4"/>
+              <param name="NTPServer5" titleZh="NTP 服务器 5" titleEn="NTP Server 5"
+                                    standardPath="Device.Time.NTPServer5"/>
+       </group>
+       <group id="bm-sync-source" titleZh="同步源设置" titleEn="Sync Source Settings">
+              <param name="PpsTimeMode" titleZh="同步源类型" titleEn="Sync Source Type"
+                                    standardPath="Device.FAP.Synchronization.PpsTimeMode">
+                     <option value="1" label="GNSS"/>
+                     <option value="2" label="PTP"/>
+                     <option value="4" label="NL"/>
+                     <option value="8" label="Ext PPS"/>
+                     <option value="16" label="Free"/>
+              </param>
+              <param name="SyncSource" titleZh="GNSS 星座" titleEn="GNSS Constellation"
+                                    standardPath="Device.FAP.GNSS.SyncSource">
+                     <option value="1" label="GPS"/>
+                     <option value="2" label="GLONASS"/>
+                     <option value="4" label="Galileo"/>
+                     <option value="8" label="BeiDou"/>
+                     <option value="16" label="QZSS"/>
+              </param>
+              <param name="PTPProfile" titleZh="Profile" titleEn="Profile"
+                                    standardPath="Device.FAP.PTP1588.Profile">
+                     <option value="1588v2" label="1588v2"/>
+              </param>
+              <param name="PTPDomain" titleZh="Domain" titleEn="Domain"
+                                    standardPath="Device.FAP.PTP1588.Domain"/>
+              <param name="PTPTransmode" titleZh="Transmission Mode" titleEn="Transmission Mode"
+                                    standardPath="Device.FAP.PTP1588.Transmode">
+                     <option value="L2" label="L2"/>
+                     <option value="L3" label="L3"/>
+              </param>
+              <param name="PTPUnicastMode" titleZh="Unicast Mode" titleEn="Unicast Mode"
+                                    standardPath="Device.FAP.PTP1588.UnicastMode">
+                     <option value="0" label="Multicast"/>
+                     <option value="1" label="Unicast"/>
+              </param>
+              <param name="PTPSyncInterval" titleZh="Sync Interval" titleEn="Sync Interval"
+                                    standardPath="Device.FAP.PTP1588.SyncInterval">
+                     <option value="-7" label="-7"/>
+                     <option value="-6" label="-6"/>
+                     <option value="-5" label="-5"/>
+                     <option value="-4" label="-4"/>
+                     <option value="-3" label="-3"/>
+                     <option value="-2" label="-2"/>
+                     <option value="-1" label="-1"/>
+                     <option value="0" label="0"/>
+              </param>
+              <param name="PTPDelayInterval" titleZh="Delay Interval" titleEn="Delay Interval"
+                                    standardPath="Device.FAP.PTP1588.DelayInterval">
+                     <option value="-7" label="-7"/>
+                     <option value="-6" label="-6"/>
+                     <option value="-5" label="-5"/>
+                     <option value="-4" label="-4"/>
+                     <option value="-3" label="-3"/>
+                     <option value="-2" label="-2"/>
+                     <option value="-1" label="-1"/>
+                     <option value="0" label="0"/>
+              </param>
+              <param name="PTPCorrection" titleZh="Correction" titleEn="Correction"
+                                    standardPath="Device.FAP.PTP1588.Correction"/>
+              <param name="PTPInterface" titleZh="Interface" titleEn="Interface"
+                                    standardPath="Device.FAP.PTP1588.Interface">
+                     <option value="eth0" label="eth0"/>
+                     <option value="eth1" label="eth1"/>
+              </param>
+              <param name="PTPStableSpike" titleZh="Stable Spike (ns)" titleEn="Stable Spike (ns)"
+                                    standardPath="Device.FAP.PTP1588.StableSpike"/>
+              <param name="PTPStableOffset" titleZh="Stable Offset (ns)" titleEn="Stable Offset (ns)"
+                                    standardPath="Device.FAP.PTP1588.StableOffset"/>
+              <param name="PTPProportional" titleZh="Proportional" titleEn="Proportional"
+                                    standardPath="Device.FAP.PTP1588.Proportional"/>
+              <param name="PTPIntegral" titleZh="Integral" titleEn="Integral"
+                                    standardPath="Device.FAP.PTP1588.Integral"/>
        </group>
        <group id="device-ipsec" titleZh="IPSec 参数" titleEn="IPSec Settings"
                              multiInstance="true" maxInstances="4"

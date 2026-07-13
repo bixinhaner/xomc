@@ -651,10 +651,19 @@ func TestPgRepo_Integration_HasIncompleteSyncGPV_SkipsStaleTasks(t *testing.T) {
 	stale.CreatedAt = time.Now().Add(-48 * time.Hour)
 	require.NoError(t, repo.Create(ctx, stale))
 
-	// 只有历史卡死任务时，不应被算作未完成。
+	orphan := freshTaskForPG("orphan", "SYNCGPV")
+	orphan.DeviceSN = sn
+	orphan.Method = "GetParameterValues"
+	orphan.CommandKey = "sync-gpv-" + sn + "-0-r-r-r-r-r"
+	orphan.Status = TaskStatusSent
+	orphan.CreatedAt = time.Now().Add(-2 * time.Hour)
+	orphan.ExpiresAt = nil
+	require.NoError(t, repo.Create(ctx, orphan))
+
+	// 只有历史/孤儿卡死任务时，不应被算作未完成。
 	has, err := repo.HasIncompleteSyncGPVTasksByDevice(ctx, sn)
 	require.NoError(t, err)
-	assert.False(t, has, "超过 24h 的卡死 sync-gpv 任务不应阻断 finalize")
+	assert.False(t, has, "历史或无过期时间的卡死 sync-gpv 任务不应阻断 finalize")
 
 	// 再造一个刚创建、处 sent 的 sync-gpv 任务（正常进行中）。
 	fresh := freshTaskForPG("fresh", "SYNCGPV")
@@ -663,6 +672,8 @@ func TestPgRepo_Integration_HasIncompleteSyncGPV_SkipsStaleTasks(t *testing.T) {
 	fresh.CommandKey = "sync-gpv-" + sn + "-1-r-r-r-r"
 	fresh.Status = TaskStatusSent
 	fresh.CreatedAt = time.Now()
+	freshExpires := time.Now().Add(30 * time.Minute)
+	fresh.ExpiresAt = &freshExpires
 	require.NoError(t, repo.Create(ctx, fresh))
 
 	// 存在近 24h 内的进行中任务时，应算作未完成。
