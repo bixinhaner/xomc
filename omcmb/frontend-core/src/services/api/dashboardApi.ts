@@ -456,6 +456,7 @@ export const dashboardApi = {
     startTime?: string,
     endTime?: string,
     granularity?: DashboardKPIGranularity,
+    technology?: string,
   ): Promise<DashboardChartData['kpiTimeSeries']> {
     const defaultNames = [
       'RRC_CONN_SETUP_SR',
@@ -473,6 +474,7 @@ export const dashboardApi = {
           ...(startTime ? { start_time: startTime } : {}),
           ...(endTime ? { end_time: endTime } : {}),
           ...(granularity ? { granularity } : {}),
+          ...(technology ? { technology } : {}),
         },
       }
     );

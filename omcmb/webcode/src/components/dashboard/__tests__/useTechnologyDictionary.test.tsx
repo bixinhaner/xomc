@@ -71,6 +71,20 @@ describe('useTechnologyDictionary', () => {
     ]);
   });
 
+  it('启用的 gsm 字典项显示为 GSM 页签', () => {
+    useDictionaryMock.mockReturnValue(ok([
+      { id: 1, value: 'lte', label: 'eNB(LTE)', sort: 1, status: true },
+      { id: 2, value: 'nr', label: 'gNB(NR)', sort: 2, status: true },
+      { id: 3, value: 'gsm', label: 'GSM', sort: 3, status: true },
+    ]));
+    const { result } = renderHook(() => useTechnologyDictionary(), { wrapper: wrap() });
+    expect(result.current.options).toEqual([
+      { value: 'lte', label: 'eNB(LTE)', sort: 1 },
+      { value: 'nr', label: 'gNB(NR)', sort: 2 },
+      { value: 'gsm', label: 'GSM', sort: 3 },
+    ]);
+  });
+
   it('labelI18n[locale] 优先于 label', () => {
     useDictionaryMock.mockReturnValue(
       ok([

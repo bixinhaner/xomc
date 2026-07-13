@@ -81,7 +81,8 @@ func (r *mockDictRepository) GetByID(ctx context.Context, id int64) (*Dictionary
 }
 
 type mockDictDetailRepository struct {
-	details []DictionaryDetail
+	details    []DictionaryDetail
+	detailByID map[int64]*DictionaryDetail
 	// notFound 中的 id 让 Delete/GetByID 返回 sentinel ErrNotFound,
 	// 镜像 PgDictionaryDetailRepository 对不存在记录的行为(issue #145 D)。
 	// 默认空 → 保持「永远命中」的旧行为,不影响既有用例。
@@ -90,8 +91,9 @@ type mockDictDetailRepository struct {
 
 func newMockDictDetailRepository() *mockDictDetailRepository {
 	return &mockDictDetailRepository{
-		details:  make([]DictionaryDetail, 0),
-		notFound: make(map[int64]bool),
+		details:    make([]DictionaryDetail, 0),
+		detailByID: make(map[int64]*DictionaryDetail),
+		notFound:   make(map[int64]bool),
 	}
 }
 
@@ -118,6 +120,9 @@ func (r *mockDictDetailRepository) Delete(ctx context.Context, id int64) error {
 func (r *mockDictDetailRepository) GetByID(ctx context.Context, id int64) (*DictionaryDetail, error) {
 	if r.notFound[id] {
 		return nil, commonerrors.ErrNotFound
+	}
+	if detail, ok := r.detailByID[id]; ok {
+		return detail, nil
 	}
 	return &DictionaryDetail{ID: id}, nil
 }
@@ -250,6 +255,31 @@ func TestBatchGetDicts(t *testing.T) {
 	}
 }
 
+func TestValidateNetworkTypeDictionaryValue(t *testing.T) {
+	for _, value := range []string{"lte", "nr", "gsm"} {
+		require.NoError(t, validateNetworkTypeDictionaryValue("network_type", value))
+	}
+	assert.Error(t, validateNetworkTypeDictionaryValue("network_type", "GSM"))
+	assert.NoError(t, validateNetworkTypeDictionaryValue("other_type", "GSM"))
+}
+
+func TestDictionaryServiceEnforcesNetworkTypeValues(t *testing.T) {
+	dicts := newMockDictRepository()
+	details := newMockDictDetailRepository()
+	dicts.dicts["network_type"] = &Dictionary{ID: 3, Type: "network_type"}
+	dicts.dicts["other"] = &Dictionary{ID: 4, Type: "other"}
+	service := NewDictionaryService(dicts, details)
+
+	_, err := service.CreateDictionaryDetail(context.Background(), CreateDictionaryDetailRequest{SysDictionaryID: 3, Label: "GSM", Value: "GSM"})
+	require.Error(t, err)
+	_, err = service.CreateDictionaryDetail(context.Background(), CreateDictionaryDetailRequest{SysDictionaryID: 3, Label: "GSM", Value: "gsm"})
+	require.NoError(t, err)
+	details.detailByID[7] = &DictionaryDetail{ID: 7, SysDictionaryID: 3, Value: "gsm"}
+	label := "GSM 2G"
+	_, err = service.UpdateDictionaryDetail(context.Background(), UpdateDictionaryDetailRequest{ID: 7, Label: &label})
+	require.NoError(t, err)
+}
+
 // =============================================================
 // 错误映射回归 — issue #145 D:不存在记录的 DELETE/PUT 应返 404 而非 500
 // =============================================================
@@ -354,4 +384,3 @@ func TestDictionaryHandler_DeleteSuccess(t *testing.T) {
 func requireJSONUnmarshal(data []byte, v interface{}) error {
 	return json.Unmarshal(data, v)
 }
-

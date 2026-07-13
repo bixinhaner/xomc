@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/omcgo/omcgo/internal/core/jsonx"
+	"github.com/omcgo/omcgo/internal/core/model"
 	pmaggregator "github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 	"github.com/stretchr/testify/assert"
@@ -18,7 +19,7 @@ func TestBuildNetworkKPISeriesRequest_Basic(t *testing.T) {
 	end := time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)
 	codes := []string{"K900010015", "C000060216"}
 
-	req := buildNetworkKPIHourlySeriesRequest(codes, start, end)
+	req := buildNetworkKPIHourlySeriesRequest(codes, "", start, end)
 
 	assert.Equal(t, metrics.GranularityHourly, req.Granularity)
 	assert.Equal(t, pmaggregator.DimensionNetwork, req.Dimension)
@@ -31,9 +32,23 @@ func TestBuildNetworkKPISeriesRequest_Basic(t *testing.T) {
 	codes[0] = "mutated"
 	assert.Equal(t, []string{"K900010015", "C000060216"}, req.MetricPaths)
 
-	dailyReq := buildNetworkKPIDailySeriesRequest([]string{"K900010015"}, start, end)
+	dailyReq := buildNetworkKPIDailySeriesRequest([]string{"K900010015"}, "", start, end)
 	assert.Equal(t, metrics.GranularityDaily, dailyReq.Granularity)
 	assert.Equal(t, pmaggregator.DimensionNetwork, dailyReq.Dimension)
+}
+
+func TestBuildNetworkKPISeriesRequest_FiltersSelectedTechnology(t *testing.T) {
+	start := time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+
+	req := buildNetworkKPIDailySeriesRequest(
+		[]string{"KGSM0101"},
+		model.TechGSM,
+		start,
+		end,
+	)
+
+	assert.Equal(t, []string{string(model.TechGSM)}, req.Technologies)
 }
 
 func TestNetworkRowsToDailySeriesPoints_UsesBucketStart(t *testing.T) {

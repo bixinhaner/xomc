@@ -56,11 +56,13 @@ export function DashboardKPIModules({
     'yesterday',
     metrics.length > 0,
     systemDateKey,
+    technology,
   );
   const { data: lastWeekTrendData, isLoading: isLastWeekLoading, dateKeys: weekDateKeys } = useMultiKPIWeekSeries(
     metrics,
     metrics.length > 0 && needsLastWeekData,
     systemDateKey,
+    technology,
   );
 
   // 按网格坐标把图排成行（首页只读不可拖）。

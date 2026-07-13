@@ -245,6 +245,7 @@ export const dashboardService = {
     startTime?: string,
     endTime?: string,
     granularity: DashboardKPIGranularity = 'hourly',
+    _technology?: string,
   ): Promise<DashboardChartData['kpiTimeSeries']> {
     await delay(100, 200);
 
