@@ -32,10 +32,13 @@ describe('mmlApi TXT script import', () => {
     ]);
   });
 
-  it('filters MML task records by task origin and maps the returned origin', async () => {
+  it.each([
+    ['script'],
+    ['console'],
+  ])('filters MML task records by %s task origin and maps the returned origin', async (taskOrigin) => {
     getMock.mockResolvedValue({
       data: {
-        items: [{ ...taskResponse(), task_origin: 'script' }],
+        items: [{ ...taskResponse(), task_origin: taskOrigin }],
         total: 1,
         page: 1,
         page_size: 20,
@@ -43,13 +46,13 @@ describe('mmlApi TXT script import', () => {
       },
     });
 
-    const result = await mmlApi.getTasks({ page: 1, pageSize: 20, taskOrigin: 'script' });
+    const result = await mmlApi.getTasks({ page: 1, pageSize: 20, taskOrigin });
 
     expect(getMock.mock.calls[0]).toEqual([
       '/mml/tasks',
-      { params: { page: 1, page_size: 20, task_origin: 'script' } },
+      { params: { page: 1, page_size: 20, task_origin: taskOrigin } },
     ]);
-    expect(result.items[0].taskOrigin).toBe('script');
+    expect(result.items[0].taskOrigin).toBe(taskOrigin);
   });
 
   it('maps task result request and response messages separately', async () => {

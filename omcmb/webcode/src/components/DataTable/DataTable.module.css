@@ -172,13 +172,17 @@
 }
 
 /* 固定表头单元格同样需不透明(纵向滚动时不被表体透出) */
+:global(.omc-data-table) :global(.ant-table-thead > tr > th) {
+  --omc-table-header-bg: var(--ant-table-header-bg, var(--color-neutral-50));
+}
+
 :global(.omc-data-table) :global(.ant-table-thead > tr > th.ant-table-cell-fix-left),
 :global(.omc-data-table) :global(.ant-table-thead > tr > th.ant-table-cell-fix-right),
 :global(.omc-data-table) :global(.ant-table-thead > tr > th.ant-table-cell-fix-start),
 :global(.omc-data-table) :global(.ant-table-thead > tr > th.ant-table-cell-fix-end),
 :global(.omc-data-table) :global(.ant-table-thead > tr > th.ant-table-cell-fix-start-shadow),
 :global(.omc-data-table) :global(.ant-table-thead > tr > th.ant-table-cell-fix-end-shadow) {
-  background-color: var(--color-neutral-50) !important;
+  background-color: var(--omc-table-header-bg) !important;
 }
 
 /* Alarm row styles */

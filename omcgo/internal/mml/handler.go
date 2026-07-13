@@ -733,7 +733,11 @@ func (h *Handler) ListTasks(c *gin.Context) {
 		filter.TaskName = &taskName
 	}
 	if taskOrigin := c.Query("task_origin"); taskOrigin != "" {
-		origin := TaskOrigin(taskOrigin)
+		origin, ok := normalizeTaskOriginQuery(taskOrigin)
+		if !ok {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+			return
+		}
 		filter.TaskOrigin = &origin
 	}
 
@@ -744,6 +748,21 @@ func (h *Handler) ListTasks(c *gin.Context) {
 	}
 
 	response.OK(c, result)
+}
+
+func normalizeTaskOriginQuery(raw string) (TaskOrigin, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case string(TaskOriginConsole), "mml.taskorigin.console":
+		return TaskOriginConsole, true
+	case string(TaskOriginScript), "mml.taskorigin.script":
+		return TaskOriginScript, true
+	case "控制台执行":
+		return TaskOriginConsole, true
+	case "脚本执行":
+		return TaskOriginScript, true
+	default:
+		return "", false
+	}
 }
 
 // GetTask handles GET /api/v1/mml/tasks/:id.

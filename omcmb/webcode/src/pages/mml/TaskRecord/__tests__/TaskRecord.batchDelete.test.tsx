@@ -8,10 +8,13 @@ import zhCN from '@core/i18n/zh-CN';
 const mocks = vi.hoisted(() => ({
   deleteTasks: vi.fn(),
   refetchTasks: vi.fn(),
+  useMMLTasks: vi.fn(),
 }));
 
 vi.mock('@core/hooks/api/useMML', () => ({
-  useMMLTasks: () => ({
+  useMMLTasks: (params: Record<string, unknown>) => {
+    mocks.useMMLTasks(params);
+    return {
     data: {
       total: 1,
       items: [{
@@ -33,7 +36,8 @@ vi.mock('@core/hooks/api/useMML', () => ({
     },
     isLoading: false,
     refetch: mocks.refetchTasks,
-  }),
+    };
+  },
   useMMLTaskResults: () => ({
     data: {
       total: 1,
@@ -58,7 +62,16 @@ vi.mock('@core/hooks/api/useMML', () => ({
 }));
 
 vi.mock('@/components/FilterBar', () => ({
-  default: () => <div data-testid="filter-bar" />,
+  default: ({ onSearch, onReset }: {
+    onSearch: (values: Record<string, unknown>) => void;
+    onReset: () => void;
+  }) => (
+    <div data-testid="filter-bar">
+      <button onClick={() => onSearch({ taskOrigin: 'console' })} type="button">search-console</button>
+      <button onClick={() => onSearch({ taskOrigin: 'script' })} type="button">search-script</button>
+      <button onClick={onReset} type="button">reset</button>
+    </div>
+  ),
 }));
 
 vi.mock('@/components/DataTable', () => ({
@@ -182,5 +195,15 @@ describe('TaskRecord batch delete and console task display', () => {
       ['task-console-1'],
       expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
     );
+  });
+
+  it('passes console task origin through to the task list query', () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'search-console' }));
+
+    expect(mocks.useMMLTasks).toHaveBeenLastCalledWith(expect.objectContaining({
+      taskOrigin: 'console',
+    }));
   });
 });

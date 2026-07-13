@@ -79,7 +79,9 @@ func TestHandler_ScriptImportTemplate(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Header().Get("Content-Type"), "text/plain")
 	require.Contains(t, rec.Header().Get("Content-Disposition"), "MMLTemplate.txt")
-	require.Contains(t, rec.Body.String(), "COMMAND_CODE;DEVICE_SN")
+	require.Contains(t, rec.Body.String(), "操作 命令编码")
+	require.Contains(t, rec.Body.String(), "支持操作")
+	require.Contains(t, rec.Body.String(), "LST DEVICE_INFO;DEVICE_SN")
 }
 
 func TestHandler_ValidateScriptImport_RejectsNonTXT(t *testing.T) {
