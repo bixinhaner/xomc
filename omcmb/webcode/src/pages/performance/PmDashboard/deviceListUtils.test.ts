@@ -166,6 +166,24 @@ describe('buildDeviceMetricCharts — T-0193 按设备+小区/PLMN 分线', () =
     expect(charts[0].series[1].name).toBe('DP0015 · 小区111172246 · PLMN46068');
   });
 
+  it('5G CU/DU 同 NrCGI 同 PLMN → 系列名保留完整原始 objectLdn，避免 CUID/DUID 被压成重复名', () => {
+    const cuLdn = 'Type=Cell,Mode=SA,gNBID=25,NrCGI=401,CUID=1,PLMNID=00101';
+    const duLdn = 'Type=Cell,Mode=SA,gNBID=25,NrCGI=401,DUID=1,PLMNID=00101';
+    const rows: AggregatedRow[] = [
+      row({ deviceSn: '1202000240194DP0015', metricPath: 'M1', startTime: 'T1', metricValue: 1, objectLdn: cuLdn }),
+      row({ deviceSn: '1202000240194DP0015', metricPath: 'M1', startTime: 'T1', metricValue: 2, objectLdn: duLdn }),
+    ];
+
+    const charts = buildDeviceMetricCharts(rows, '15min');
+
+    expect(charts[0].series).toHaveLength(2);
+    expect(charts[0].series[0].name).toBe(`DP0015 · ${cuLdn}`);
+    expect(charts[0].series[1].name).toBe(`DP0015 · ${duLdn}`);
+    expect(charts[0].series[0].name).not.toBe(charts[0].series[1].name);
+    expect(charts[0].series[0].name).toContain('CUID=1');
+    expect(charts[0].series[1].name).toContain('DUID=1');
+  });
+
   it('多设备 × 多小区 → 设备×小区笛卡尔分线（4 条）', () => {
     const rows: AggregatedRow[] = [
       row({ deviceSn: 'SN-AAAAAA', metricPath: 'M1', startTime: 'T1', metricValue: 1, objectLdn: LDN1 }),
