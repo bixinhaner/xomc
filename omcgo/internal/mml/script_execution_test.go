@@ -162,6 +162,28 @@ func TestCreateScriptExecution_DynamicErrorsBlock(t *testing.T) {
 	require.Equal(t, 0, tasks.createCalls)
 }
 
+func TestParsedScriptFromPlanPreservesRawPathFields(t *testing.T) {
+	plan := []MMLPlanItem{{
+		LineNo:   2,
+		DeviceSN: "SN1",
+		Order:    1,
+		RawLine:  "LST Device.DeviceInfo.SoftwareVersion;SN1",
+		Command: map[string]interface{}{
+			"command_code":   "RAW LST",
+			"operation_type": "LST",
+			"param_paths":    []interface{}{"Device.DeviceInfo.SoftwareVersion"},
+			"parameters":     map[string]interface{}{},
+			"raw_path_mode":  rawPathModeStandard,
+		},
+	}}
+
+	parsed := parsedScriptFromPlan(nil, plan)
+
+	require.Len(t, parsed.Lines, 1)
+	require.Equal(t, "standard", parsed.Lines[0].RawPathMode)
+	require.Equal(t, []string{"Device.DeviceInfo.SoftwareVersion"}, parsed.Lines[0].ParamPaths)
+}
+
 func TestScheduler_PreflightErrorMarksTaskFailed(t *testing.T) {
 	script := scriptExecutionFixture()
 	task := &MMLTask{ID: uuid.New(), ScriptID: &script.ID, Creator: "alice", ExecuteType: ExecuteScheduled, Status: TaskRunning, PlanItems: cloneScriptPlanItems(script.PlanItems), Commands: []map[string]interface{}{{"command_code": "LST DEVICE_INFO", "rpc_method": "GetParameterValues"}}, DeviceSNs: []string{"SN1"}}

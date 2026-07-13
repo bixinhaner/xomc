@@ -260,6 +260,8 @@ func parsedScriptFromPlan(script *MMLScript, plan []MMLPlanItem) *ParsedScript {
 	for _, item := range plan {
 		code := item.CommandCode
 		op := item.OperationType
+		rawPathMode := ""
+		paramPaths := []string{}
 		params := map[string]string{}
 		if item.Command != nil {
 			if v, ok := item.Command["command_code"].(string); ok && code == "" {
@@ -268,13 +270,17 @@ func parsedScriptFromPlan(script *MMLScript, plan []MMLPlanItem) *ParsedScript {
 			if v, ok := item.Command["operation_type"].(string); ok && op == "" {
 				op = v
 			}
+			if v, ok := item.Command["raw_path_mode"].(string); ok {
+				rawPathMode = strings.TrimSpace(v)
+			}
+			paramPaths = commandStringSlice(item.Command, "param_paths")
 			if raw, ok := item.Command["parameters"].(map[string]interface{}); ok {
 				for key, value := range raw {
 					params[key] = fmt.Sprint(value)
 				}
 			}
 		}
-		parsed.Lines = append(parsed.Lines, ParsedScriptLine{LineNo: item.LineNo, RawLine: item.RawLine, DeviceSN: item.DeviceSN, Order: item.Order, CommandCode: code, OperationType: op, Parameters: params})
+		parsed.Lines = append(parsed.Lines, ParsedScriptLine{LineNo: item.LineNo, RawLine: item.RawLine, DeviceSN: item.DeviceSN, Order: item.Order, CommandCode: code, OperationType: op, Parameters: params, ParamPaths: paramPaths, RawPathMode: rawPathMode})
 	}
 	return parsed
 }
