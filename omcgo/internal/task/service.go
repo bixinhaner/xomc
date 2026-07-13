@@ -362,6 +362,15 @@ func (s *TaskService) PopTask(ctx context.Context, deviceSN string) (*Task, erro
 
 // GetQueueLength 获取队列长度
 func (s *TaskService) GetQueueLength(ctx context.Context, deviceSN string) (int64, error) {
+	if s.repo != nil {
+		count, err := s.repo.CountOpenByDevice(ctx, deviceSN, time.Now())
+		if err == nil {
+			return count, nil
+		}
+		logger.L(ctx).Warn("count open tasks from pg failed, falling back to redis queue length",
+			zap.String("device_sn", deviceSN),
+			zap.Error(err))
+	}
 	return s.queue.Len(ctx, deviceSN)
 }
 
@@ -387,6 +396,13 @@ func (s *TaskService) LatestSyncGPVSummaryByDevice(ctx context.Context, deviceSN
 		return nil, nil
 	}
 	return s.repo.LatestSyncGPVSummaryByDevice(ctx, deviceSN)
+}
+
+func (s *TaskService) CountOpenSyncGPVByDevice(ctx context.Context, deviceSN string) (int64, error) {
+	if s.repo == nil {
+		return 0, nil
+	}
+	return s.repo.CountOpenSyncGPVByDevice(ctx, deviceSN)
 }
 
 // MarkTaskSent 标记任务已发送

@@ -167,7 +167,7 @@ export default function ParameterTreeTab({ deviceId, lastScopedSync, syncBusy: e
           {/* toolbar 内联仅承载 syncing / succeeded / never 三态;失败态因错误信息
               可能很长,移到 toolbar 下方独立 Alert 渲染(下面 `{syncStatus?.lastParamSyncFailedAt && ...}`),
               避免挤压搜索框和按钮位置。 */}
-          {syncStatus && !syncStatus.lastParamSyncFailedAt && (
+          {syncStatus && (
             isSyncing ? (
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 <LoadingOutlined style={{ marginRight: 4 }} />
@@ -176,7 +176,7 @@ export default function ParameterTreeTab({ deviceId, lastScopedSync, syncBusy: e
                   ? t('device.paramTree.syncPending', { count: syncStatus.pendingCommands })
                   : ''}
               </Typography.Text>
-            ) : effectiveLastParamSyncAt ? (
+            ) : syncStatus.lastParamSyncFailedAt ? null : effectiveLastParamSyncAt ? (
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 {isLastScopedSync
                   ? t('device.paramTree.lastScopedSync', {

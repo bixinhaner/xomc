@@ -95,7 +95,7 @@ function QuickSettingsGroupGate({ active, eager = false, title, children }: Quic
           observer.disconnect();
         }
       },
-      { rootMargin: '600px 0px' },
+      { rootMargin: '160px 0px' },
     );
     observer.observe(node);
     return () => observer.disconnect();
@@ -110,6 +110,34 @@ function QuickSettingsGroupGate({ active, eager = false, title, children }: Quic
       )}
     </div>
   );
+}
+
+function useDeferredActive(active: boolean): boolean {
+  const [deferredActive, setDeferredActive] = useState(false);
+
+  useEffect(() => {
+    if (!active) {
+      setDeferredActive(false);
+      return;
+    }
+
+    let cancelled = false;
+    let raf1 = 0;
+    let raf2 = 0;
+    raf1 = window.requestAnimationFrame(() => {
+      raf2 = window.requestAnimationFrame(() => {
+        if (!cancelled) setDeferredActive(true);
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(raf1);
+      window.cancelAnimationFrame(raf2);
+    };
+  }, [active]);
+
+  return deferredActive;
 }
 
 function normalizeQuickSettingsNetworkType(networkType: string): string {
@@ -151,6 +179,7 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
   const t = useT();
   const locale: 'zh-CN' | 'en-US' = intl.locale === 'en-US' ? 'en-US' : 'zh-CN';
   const normalizedNetworkType = normalizeQuickSettingsNetworkType(networkType);
+  const queryActive = useDeferredActive(active);
   const [ipsecControlValue, setIpsecControlValue] = useState<string | undefined>(undefined);
 
   // LTE 选择 FAPService，NR 选择 CellConfig 小区实例。
@@ -193,7 +222,7 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
     bmTech,
     hasBmGsmGroups: bmHasGsmGroups,
     hasBmLteGroups: bmHasLteGroups,
-    enabled: active,
+    enabled: queryActive,
   });
 
   const {
@@ -320,7 +349,7 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
     return (
       <QuickSettingsGroupGate
         key={`${group.id}::gate::${keySuffix}`}
-        active={active}
+        active={queryActive}
         eager={eager}
         title={title}
       >
@@ -400,7 +429,7 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
   // BSC 下拉显示 "实例号 · IpaUnitId=xxx"，让运维能直接看出 BTS 与 IPA 单元映射。
   // 复用 useResolvedCellInstances 已经发过的同一份 schema 查询（react-query
   // 按 (deviceId, 'DeviceGSM.Bts.') key 去重，不会额外触发请求）。
-  const { data: bscBtsSchema } = useParameterSchema(deviceId, BSC_BTS_OBJECT_PREFIX, active && isBSC);
+  const { data: bscBtsSchema } = useParameterSchema(deviceId, BSC_BTS_OBJECT_PREFIX, queryActive && isBSC);
   const bscBtsIpaUnitIdByInstance = useMemo(() => {
     const m = new Map<number, string>();
     if (!isBSC || !bscBtsSchema) return m;

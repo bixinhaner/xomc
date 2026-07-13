@@ -141,6 +141,87 @@ func TestService_PG_GetPendingTasks(t *testing.T) {
 	assert.Len(t, tasks2, 2)
 }
 
+func TestService_PG_GetQueueLength_IgnoresStaleRedisEntries(t *testing.T) {
+	svc, _, q, repo := newServiceWithPG(t)
+	if svc == nil {
+		return
+	}
+	defer cleanupTestTasks(t, repo.pool)
+	ctx := context.Background()
+	sn := testDeviceSNPrefix + "ql-stale"
+
+	stale := freshTaskForPG("ql-stale-expired", "ql-stale")
+	stale.Status = TaskStatusExpired
+	past := time.Now().Add(-time.Hour)
+	stale.ExpiresAt = &past
+	stale.CompletedAt = &past
+	require.NoError(t, repo.Create(ctx, stale))
+	require.NoError(t, q.Push(ctx, stale))
+
+	length, err := svc.GetQueueLength(ctx, sn)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), length, "已终态/过期任务即使残留在 Redis 队列，也不应让同步状态保持 syncing")
+
+	active := freshTaskForPG("ql-active", "ql-stale")
+	future := time.Now().Add(time.Hour)
+	active.ExpiresAt = &future
+	require.NoError(t, repo.Create(ctx, active))
+	require.NoError(t, q.Push(ctx, active))
+
+	length, err = svc.GetQueueLength(ctx, sn)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), length)
+}
+
+func TestService_PG_CountOpenSyncGPVByDevice_ScopesToRecentSyncTasks(t *testing.T) {
+	svc, _, _, repo := newServiceWithPG(t)
+	if svc == nil {
+		return
+	}
+	defer cleanupTestTasks(t, repo.pool)
+	ctx := context.Background()
+	sn := testDeviceSNPrefix + "sync-count"
+	sharedSourceID := generateUUID()
+
+	pmTask := freshTaskForPG("pm", "sync-count")
+	pmTask.Method = "SetParameterValues"
+	pmTask.CommandKey = "pm_upload_setup_on_online"
+	pmExpires := time.Now().Add(time.Hour)
+	pmTask.ExpiresAt = &pmExpires
+	require.NoError(t, repo.Create(ctx, pmTask))
+
+	staleSync := freshTaskForPG("stale-sync", "sync-count")
+	staleSync.CommandKey = "sync-gpv-" + sn + "-0"
+	staleSync.Status = TaskStatusSent
+	staleSync.CreatedAt = time.Now().Add(-48 * time.Hour)
+	sentAt := staleSync.CreatedAt
+	staleSync.SentAt = &sentAt
+	require.NoError(t, repo.Create(ctx, staleSync))
+
+	oldFailedSync := freshTaskForPG("old-failed-sync", "sync-count")
+	oldFailedSync.CommandKey = "sync-gpv-" + sn + "-1"
+	oldFailedSync.Status = TaskStatusExpired
+	oldFailedSync.SourceID = sharedSourceID
+	oldFailedSync.CreatedAt = time.Now().Add(-2 * time.Hour)
+	failedAt := oldFailedSync.CreatedAt.Add(time.Minute)
+	oldFailedSync.CompletedAt = &failedAt
+	require.NoError(t, repo.Create(ctx, oldFailedSync))
+
+	count, err := svc.CountOpenSyncGPVByDevice(ctx, sn)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), count)
+
+	activeSync := freshTaskForPG("active-sync", "sync-count")
+	activeSync.CommandKey = "sync-gpv-" + sn + "-2"
+	activeSync.ExpiresAt = &pmExpires
+	activeSync.SourceID = sharedSourceID
+	require.NoError(t, repo.Create(ctx, activeSync))
+
+	count, err = svc.CountOpenSyncGPVByDevice(ctx, sn)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), count)
+}
+
 func TestService_PG_MarkTaskSent(t *testing.T) {
 	svc, _, _, repo := newServiceWithPG(t)
 	if svc == nil {
