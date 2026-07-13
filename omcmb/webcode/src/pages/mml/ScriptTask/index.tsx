@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { Key } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button, Descriptions, Drawer, Dropdown, Empty, Form, Input, Modal, Space, Spin, Tooltip, Typography, message } from 'antd';
 import type { MenuProps } from 'antd';
 import { DeleteOutlined, DownloadOutlined, EditOutlined, EyeOutlined, MoreOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons';
@@ -28,6 +29,7 @@ interface BasicForm { scriptName: string; description: string; }
 
 export default function ScriptTask() {
   const t = useT();
+  const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [search, setSearch] = useState('');
@@ -176,7 +178,15 @@ export default function ScriptTask() {
         {detailScript.validationSummary ? <ScriptImportPreview validation={{ planItems: detailScript.planItems ?? [], issues: detailScript.validationIssues ?? [], summary: detailScript.validationSummary, originalFilename: detailScript.originalFilename }} /> : null}
       </Space></Spin> : null}
     </Drawer>
-    <ScriptExecutionDrawer open={Boolean(execScript)} script={execScript} onClose={() => setExecScript(null)} onSuccess={() => void refetch()} />
+    <ScriptExecutionDrawer
+      open={Boolean(execScript)}
+      script={execScript}
+      onClose={() => setExecScript(null)}
+      onSuccess={() => {
+        void refetch();
+        void navigate('/mml/task-records');
+      }}
+    />
     <Modal title={t('mml.script.editBasicInfo')} open={Boolean(editing)} onCancel={closeBasic} onOk={() => void saveBasic()} confirmLoading={updateMutation.isPending} okText={t('common.save')} cancelText={t('common.cancel')}>
       <Form form={basicForm} layout="vertical"><Form.Item label={t('mml.scriptName')} name="scriptName" rules={[{ required: true, message: t('mml.inputScriptName') }]}><Input /></Form.Item><Form.Item label={t('mml.description')} name="description"><Input /></Form.Item></Form>
     </Modal>
