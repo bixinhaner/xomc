@@ -7,7 +7,6 @@
 # MOD 修改。按命令目录需要填写一个或多个 参数名=参数值。
 # ADD 新增对象/配置。命令目录存在 ADD 命令时可用，按命令要求填写参数。
 # RMV 删除对象/配置。命令目录存在 RMV 命令时可用。
-# DEL 删除兼容写法。导入后系统会按 RMV 执行。
 #
 # 规则：
 # 1. 每行只能写一条命令和一个设备SN。
@@ -22,5 +21,4 @@ LST DEVICE_INFO;DEVICE_SN
 MOD MANAGEMENT_SERVER:URL=http://localhost:8080/smallcell/AcsService,USERNAME=acs,PASSWORD=acs;DEVICE_SN
 ADD ETHERNET_INTERFACE;DEVICE_SN
 RMV ETHERNET_INTERFACE;DEVICE_SN
-DEL ETHERNET_INTERFACE;DEVICE_SN
 MOD DEVICE_INFO:DESCRIPTION="site,a;sector-b",ALIAS={main,backup};DEVICE_SN

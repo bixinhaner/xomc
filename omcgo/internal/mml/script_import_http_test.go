@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/middleware"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
@@ -43,6 +44,7 @@ func (f *fakeScriptImportHTTPService) ReplaceScriptFromImport(_ context.Context,
 func importHTTPRouter(svc ScriptImportServiceAPI) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
+	r.Use(middleware.Locale())
 	h := NewHandler(NewService(&hCmdRepo{}, &hScriptRepo{}, &hTaskRepo{}, &hCustomCommandRepo{}, nil, zap.NewNop()), zap.NewNop())
 	h.SetScriptImportService(svc)
 	h.RegisterRoutes(r.Group("/api/v1"))
@@ -79,9 +81,29 @@ func TestHandler_ScriptImportTemplate(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Header().Get("Content-Type"), "text/plain")
 	require.Contains(t, rec.Header().Get("Content-Disposition"), "MMLTemplate.txt")
+	require.Equal(t, "zh-CN", rec.Header().Get("Content-Language"))
 	require.Contains(t, rec.Body.String(), "操作 命令编码")
 	require.Contains(t, rec.Body.String(), "支持操作")
+	require.NotContains(t, rec.Body.String(), "DEL")
 	require.Contains(t, rec.Body.String(), "LST DEVICE_INFO;DEVICE_SN")
+}
+
+func TestHandler_ScriptImportTemplateEnglish(t *testing.T) {
+	r := importHTTPRouter(&fakeScriptImportHTTPService{})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/mml/scripts/import/template", nil)
+	req.Header.Set("Accept-Language", "en-US")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "en-US", rec.Header().Get("Content-Language"))
+	body := rec.Body.String()
+	require.Contains(t, body, "MML TXT Script Template")
+	require.Contains(t, body, "Supported operations")
+	require.Contains(t, body, "Operation command_code[:param=value")
+	require.NotContains(t, body, "DEL")
+	require.NotContains(t, body, "支持操作")
+	require.Contains(t, body, "RMV ETHERNET_INTERFACE;DEVICE_SN")
 }
 
 func TestHandler_ValidateScriptImport_RejectsNonTXT(t *testing.T) {

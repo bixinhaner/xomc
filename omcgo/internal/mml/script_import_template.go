@@ -2,9 +2,19 @@ package mml
 
 import _ "embed"
 
-// scriptImportTemplate is the single server-owned template exposed to all
-// three web skins. Keeping it embedded prevents a deployment's working
-// directory from changing the import contract.
+// Script import templates are server-owned and exposed to all three web skins.
+// Keeping them embedded prevents a deployment's working directory from changing
+// the import contract.
 //
 //go:embed assets/MMLTemplate.txt
-var scriptImportTemplate []byte
+var scriptImportTemplateZH []byte
+
+//go:embed assets/MMLTemplate.en-US.txt
+var scriptImportTemplateEN []byte
+
+func scriptImportTemplateForLocale(locale string) []byte {
+	if locale == "en-US" {
+		return scriptImportTemplateEN
+	}
+	return scriptImportTemplateZH
+}

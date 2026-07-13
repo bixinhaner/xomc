@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/response"
 	"go.uber.org/zap"
@@ -50,9 +51,12 @@ func (h *Handler) SetScriptImportService(service ScriptImportServiceAPI) {
 }
 
 func (h *Handler) GetScriptImportTemplate(c *gin.Context) {
+	locale := appcontext.GetLocale(c.Request.Context())
 	c.Header("Content-Type", "text/plain; charset=utf-8")
 	c.Header("Content-Disposition", `attachment; filename="MMLTemplate.txt"`)
-	c.Data(http.StatusOK, "text/plain; charset=utf-8", scriptImportTemplate)
+	c.Header("Content-Language", string(locale))
+	c.Header("Vary", "Accept-Language")
+	c.Data(http.StatusOK, "text/plain; charset=utf-8", scriptImportTemplateForLocale(string(locale)))
 }
 
 func (h *Handler) ValidateScriptImport(c *gin.Context) {
