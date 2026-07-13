@@ -4,38 +4,11 @@ import { useQuickSettingsFeedbackStore } from '@core/store/quickSettingsFeedback
 import { deviceParameterApi } from '@core/services/api/deviceParameterApi';
 import type { QuickSettingsSyncMonitor } from '@core/store/quickSettingsFeedbackStore';
 import type { ParameterSyncStatus } from '@core/types/deviceParameter';
+import { isCurrentSyncFailure, isCurrentSyncSuccess } from '@core/utils/quickSettingsSyncStatus';
 
-const terminalClockSkewMs = 5000;
 const staleMonitorTimeoutMs = 60 * 1000;
 const congestionHintAfterMs = 15 * 1000;
 const congestionPendingThreshold = 8;
-
-function comparableSourceId(sourceId: string | undefined) {
-  return sourceId?.startsWith('manual:') ? sourceId.slice('manual:'.length) : sourceId;
-}
-
-function isTerminalAfterSyncStart(timestamp: string | undefined, sync: QuickSettingsSyncMonitor) {
-  if (!timestamp) return false;
-  const terminalAt = Date.parse(timestamp);
-  return Number.isFinite(terminalAt) && terminalAt >= sync.startedAt - terminalClockSkewMs;
-}
-
-function isCurrentSyncSuccess(status: ParameterSyncStatus, sync: QuickSettingsSyncMonitor) {
-  if (sync.sourceId && status.lastSyncGpv?.sourceId) {
-    const sourceMatched = comparableSourceId(status.lastSyncGpv.sourceId) === comparableSourceId(sync.sourceId);
-    if (!sourceMatched) return false;
-    if (isTerminalAfterSyncStart(status.lastSyncGpv.lastCompletedAt, sync)) return true;
-  }
-  if (!status.lastParamSyncAt || status.lastParamSyncAt === sync.lastParamSyncAt) return false;
-  if (!sync.sourceId && !sync.lastParamSyncAt) return false;
-  return isTerminalAfterSyncStart(status.lastParamSyncAt, sync);
-}
-
-function isCurrentSyncFailure(status: ParameterSyncStatus, sync: QuickSettingsSyncMonitor) {
-  if (!status.lastParamSyncFailedAt || status.lastParamSyncFailedAt === sync.lastParamSyncFailedAt) return false;
-  if (!sync.sourceId && !sync.lastParamSyncFailedAt) return false;
-  return isTerminalAfterSyncStart(status.lastParamSyncFailedAt, sync);
-}
 
 function shouldHintCongestion(status: ParameterSyncStatus, sync: QuickSettingsSyncMonitor) {
   if (sync.congestionHinted) return false;
@@ -73,10 +46,9 @@ export default function QuickSettingsSyncWatcherCore() {
             useQuickSettingsFeedbackStore.getState().patchQuickSettingsSync(deviceId, { congestionHinted: true });
           }
 
-          if (status.status === 'syncing') return;
-
           const hasNewSuccess = isCurrentSyncSuccess(status, sync);
           const hasNewFailure = isCurrentSyncFailure(status, sync);
+          if (status.status === 'syncing' && !hasNewSuccess && !hasNewFailure) return;
           if (!hasNewSuccess && !hasNewFailure) return;
 
           if (hasNewFailure && !hasNewSuccess) {
@@ -99,7 +71,7 @@ export default function QuickSettingsSyncWatcherCore() {
             ? {
               targetCount: sync.targetCount,
               gpvTaskCount: sync.gpvTaskCount || status.lastSyncGpv?.taskCount || 0,
-              completedAt: status.lastParamSyncAt,
+              completedAt: status.lastParamSyncAt ?? status.lastSyncGpv?.lastCompletedAt,
               wallClockSeconds: status.lastSyncGpv?.wallClockSeconds,
             }
             : undefined);

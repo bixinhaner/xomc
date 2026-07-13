@@ -5,9 +5,9 @@ import { useQuickSettingsFeedbackStore } from '@core/store/quickSettingsFeedback
 import { deviceParameterApi } from '@core/services/api/deviceParameterApi';
 import type { QuickSettingsSyncMonitor } from '@core/store/quickSettingsFeedbackStore';
 import type { ParameterSyncStatus } from '@core/types/deviceParameter';
+import { isCurrentSyncFailure, isCurrentSyncSuccess } from '@core/utils/quickSettingsSyncStatus';
 import { useT } from '@/hooks/useT';
 
-const terminalClockSkewMs = 5000;
 const congestionHintAfterMs = 15 * 1000;
 const congestionPendingThreshold = 8;
 
@@ -15,33 +15,6 @@ const congestionPendingThreshold = 8;
 // 视为悬挂状态自动回收并提示用户。P0 止血阶段收敛到 60s，避免长期 loading。
 // 触发场景：API mutate 的 onSuccess/onError 因极端网络情况未回调，导致 monitor 长期占位。
 const staleMonitorTimeoutMs = 60 * 1000;
-
-function comparableSourceId(sourceId: string | undefined) {
-  return sourceId?.startsWith('manual:') ? sourceId.slice('manual:'.length) : sourceId;
-}
-
-function isTerminalAfterSyncStart(timestamp: string | undefined, sync: QuickSettingsSyncMonitor) {
-  if (!timestamp) return false;
-  const terminalAt = Date.parse(timestamp);
-  return Number.isFinite(terminalAt) && terminalAt >= sync.startedAt - terminalClockSkewMs;
-}
-
-function isCurrentSyncSuccess(status: ParameterSyncStatus, sync: QuickSettingsSyncMonitor) {
-  if (sync.sourceId && status.lastSyncGpv?.sourceId) {
-    const sourceMatched = comparableSourceId(status.lastSyncGpv.sourceId) === comparableSourceId(sync.sourceId);
-    if (!sourceMatched) return false;
-    if (isTerminalAfterSyncStart(status.lastSyncGpv.lastCompletedAt, sync)) return true;
-  }
-  if (!status.lastParamSyncAt || status.lastParamSyncAt === sync.lastParamSyncAt) return false;
-  if (!sync.sourceId && !sync.lastParamSyncAt) return false;
-  return isTerminalAfterSyncStart(status.lastParamSyncAt, sync);
-}
-
-function isCurrentSyncFailure(status: ParameterSyncStatus, sync: QuickSettingsSyncMonitor) {
-  if (!status.lastParamSyncFailedAt || status.lastParamSyncFailedAt === sync.lastParamSyncFailedAt) return false;
-  if (!sync.sourceId && !sync.lastParamSyncFailedAt) return false;
-  return isTerminalAfterSyncStart(status.lastParamSyncFailedAt, sync);
-}
 
 function shouldHintCongestion(status: ParameterSyncStatus, sync: QuickSettingsSyncMonitor) {
   if (sync.congestionHinted) return false;
@@ -100,10 +73,9 @@ export default function QuickSettingsSyncWatcher() {
             message.warning(t('device.detail.deviceFetchQueueBusy', { pending: status.pendingCommands }));
           }
 
-          if (status.status === 'syncing') return;
-
           const hasNewSuccess = isCurrentSyncSuccess(status, sync);
           const hasNewFailure = isCurrentSyncFailure(status, sync);
+          if (status.status === 'syncing' && !hasNewSuccess && !hasNewFailure) return;
           if (!hasNewSuccess && !hasNewFailure) return;
 
           if (hasNewFailure && !hasNewSuccess) {
@@ -127,7 +99,7 @@ export default function QuickSettingsSyncWatcher() {
             ? {
               targetCount: sync.targetCount,
               gpvTaskCount: sync.gpvTaskCount || status.lastSyncGpv?.taskCount || 0,
-              completedAt: status.lastParamSyncAt,
+              completedAt: status.lastParamSyncAt ?? status.lastSyncGpv?.lastCompletedAt,
               wallClockSeconds: status.lastSyncGpv?.wallClockSeconds,
             }
             : undefined);

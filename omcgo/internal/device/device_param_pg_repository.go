@@ -207,9 +207,10 @@ func (r *PgDeviceParameterRepository) CountByPathPrefix(ctx context.Context, dev
 // 提取 prefix 之后的第一段(如果是数字)取最大值。供 Path B instance 展开估算用。
 //
 // 例 prefix="DeviceGSM.Bts.":
-//   DB path = "DeviceGSM.Bts.254.CellId"  → 提取出 "254"
-//   DB path = "DeviceGSM.Bts.256.Trx.1.Rf" → 提取出 "256"
-//   返回 256
+//
+//	DB path = "DeviceGSM.Bts.254.CellId"  → 提取出 "254"
+//	DB path = "DeviceGSM.Bts.256.Trx.1.Rf" → 提取出 "256"
+//	返回 256
 //
 // 查询返回去重后的"第一段"集合(BSC 场景 ≤ 256 行),Go 侧扫描取 max,避免拉全部
 // 17791 行 path。无匹配返回 (0, nil)。仅 expand 路径调用,不在主接口。
@@ -252,6 +253,9 @@ func (r *PgDeviceParameterRepository) MaxInstanceNumberByPrefix(ctx context.Cont
 		if n > maxInst {
 			maxInst = n
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("iterate max instance numbers: %w", err)
 	}
 	return maxInst, nil
 }
