@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   refetchTasks: vi.fn(),
   useMMLTasks: vi.fn(),
   taskItems: [] as Array<Record<string, unknown>>,
+  taskResultItems: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock('@core/hooks/api/useMML', () => ({
@@ -28,21 +29,8 @@ vi.mock('@core/hooks/api/useMML', () => ({
   },
   useMMLTaskResults: () => ({
     data: {
-      total: 1,
-      items: [{
-        deviceTaskId: 'device-task-1',
-        deviceSn: 'SN001',
-        deviceName: '基站 A',
-        commandCode: 'LST DEVICE_INFO',
-        status: 'completed',
-        result: {
-          success: true,
-          rawOutput: '<cwmp:GetParameterValuesResponse />',
-          parsedData: null,
-          executionTime: 30,
-          timestamp: '2026-07-11T00:00:01Z',
-        },
-      }],
+      total: mocks.taskResultItems.length,
+      items: mocks.taskResultItems,
     },
     isLoading: false,
   }),
@@ -183,6 +171,20 @@ describe('TaskRecord batch delete and console task display', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.taskItems = [buildTask()];
+    mocks.taskResultItems = [{
+      deviceTaskId: 'device-task-1',
+      deviceSn: 'SN001',
+      deviceName: '基站 A',
+      commandCode: 'LST DEVICE_INFO',
+      status: 'completed',
+      result: {
+        success: true,
+        rawOutput: '<cwmp:GetParameterValuesResponse />',
+        parsedData: null,
+        executionTime: 30,
+        timestamp: '2026-07-11T00:00:01Z',
+      },
+    }];
     mocks.cancelTasks.mockImplementation((_ids: string[], options?: { onSuccess?: () => void }) => options?.onSuccess?.());
     mocks.deleteTasks.mockImplementation((_ids: string[], options?: { onSuccess?: () => void }) => options?.onSuccess?.());
     mocks.getTaskResultsPage.mockResolvedValue({
@@ -218,6 +220,52 @@ describe('TaskRecord batch delete and console task display', () => {
 
     expect(screen.getByText('LST')).toBeInTheDocument();
     expect(screen.getByText('DEVICE_INFO')).toBeInTheDocument();
+  });
+
+  it('shows aggregate result and uses executable progress count in task list', () => {
+    mocks.taskItems = [
+      buildTask({
+        id: 'task-partial-1',
+        taskName: '脚本任务',
+        taskOrigin: 'script',
+        executeMode: 'device_bound',
+        commandCount: 5,
+        planItemCount: 4,
+        successCount: 4,
+        failedCount: 1,
+        result: 'partial',
+      }),
+    ];
+
+    const { container } = renderPage();
+
+    expect(container.querySelector('td[data-column-key="result"]')?.textContent).toContain('部分成功');
+    expect(container.querySelector('td[data-column-key="progress"]')?.textContent).toBe('5/5');
+  });
+
+  it('does not render failed device task results as pending', () => {
+    mocks.taskResultItems = [{
+      deviceTaskId: 'device-task-failed',
+      deviceSn: 'SN002',
+      deviceName: '基站 B',
+      commandCode: 'RMV Device.X.9999.',
+      status: 'failed',
+      result: {
+        success: false,
+        rawOutput: '',
+        parsedData: null,
+        executionTime: 30,
+        timestamp: '2026-07-11T00:00:01Z',
+      },
+      failReason: 'instance does not exist',
+    }];
+
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: '查看' }));
+
+    expect(screen.queryByText('等待中')).not.toBeInTheDocument();
+    expect(screen.getAllByText('失败').length).toBeGreaterThanOrEqual(2);
   });
 
   it('exports the full viewed task result list as CSV', async () => {

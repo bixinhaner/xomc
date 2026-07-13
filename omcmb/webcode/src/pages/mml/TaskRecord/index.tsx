@@ -62,6 +62,12 @@ const TASK_STATUS_TAGS: Record<MMLTaskStatus, { color: string; key: string }> = 
   failed:    { color: 'error',      key: 'mml.failedStatus' },
 };
 
+const TASK_RESULT_TAGS: Record<NonNullable<MMLTask['result']>, { color: string; key: string }> = {
+  success: { color: 'success', key: 'status.success' },
+  partial: { color: 'warning', key: 'mml.partialSuccess' },
+  failed: { color: 'error', key: 'status.failed' },
+};
+
 const TASK_RESULT_PAGE_SIZE = 20;
 const CANCELLABLE_TASK_STATUSES = new Set<MMLTaskStatus>(['pending', 'running', 'paused']);
 
@@ -70,6 +76,7 @@ const DEVICE_RESULT_STATUS_TAGS: Record<string, { color: string; key: string }> 
   running: { color: 'processing', key: 'mml.runningStatus' },
   completed: { color: 'success', key: 'mml.completedStatus' },
   failed: { color: 'error', key: 'mml.failedStatus' },
+  expired: { color: 'error', key: 'mml.failedStatus' },
 };
 
 function formatTime(iso?: string | null): string {
@@ -167,6 +174,22 @@ function parsedResultSummary(parsed: ParsedMmlResult, t: (key: string, values?: 
     default:
       return t('mml.taskResult.parsed.notParsable');
   }
+}
+
+function renderDeviceResult(row: DeviceTaskResultItem, t: (key: string) => string) {
+  const status = row.status ?? '';
+  if (status && status !== 'completed') {
+    const tag = DEVICE_RESULT_STATUS_TAGS[status];
+    return tag ? <Tag color={tag.color}>{t(tag.key)}</Tag> : <Tag>{status}</Tag>;
+  }
+  const ok = Boolean(row.result?.success);
+  return <Tag color={ok ? 'success' : 'error'}>{ok ? t('status.success') : t('status.failed')}</Tag>;
+}
+
+function renderTaskResult(result: MMLTask['result'], t: (key: string) => string) {
+  if (!result) return '-';
+  const tag = TASK_RESULT_TAGS[result];
+  return tag ? <Tag color={tag.color}>{t(tag.key)}</Tag> : <Tag>{result}</Tag>;
 }
 
 export default function TaskRecord() {
@@ -531,11 +554,7 @@ export default function TaskRecord() {
       key: 'result',
       title: t('mml.result'),
       width: 100,
-      render: (_: unknown, row) => {
-        if (row.status && row.status !== 'completed') return <Tag>{t('mml.pendingStatus')}</Tag>;
-        const ok = Boolean(row.result?.success);
-        return <Tag color={ok ? 'success' : 'error'}>{ok ? t('status.success') : t('status.failed')}</Tag>;
-      },
+      render: (_: unknown, row) => renderDeviceResult(row, t),
     },
     {
       key: 'failReason',
@@ -655,6 +674,13 @@ export default function TaskRecord() {
         const tag = TASK_STATUS_TAGS[v];
         return tag ? <Tag color={tag.color}>{t(tag.key)}</Tag> : <Tag>{v || '-'}</Tag>;
       },
+    },
+    {
+      key: 'result',
+      title: t('mml.result'),
+      dataIndex: 'result',
+      width: 110,
+      render: (val: unknown) => renderTaskResult(val as MMLTask['result'], t),
     },
     {
       key: 'progress',

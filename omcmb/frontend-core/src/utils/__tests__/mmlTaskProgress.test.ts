@@ -43,4 +43,18 @@ describe('getMmlTaskProgress', () => {
       total: 9,
     });
   });
+
+  it('uses expanded executable command count for device-bound progress', () => {
+    expect(getMmlTaskProgress({
+      ...baseTask,
+      executeMode: 'device_bound',
+      commandCount: 5,
+      planItemCount: 4,
+      successCount: 4,
+      failedCount: 1,
+    })).toEqual({
+      done: 5,
+      total: 5,
+    });
+  });
 });
