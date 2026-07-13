@@ -190,14 +190,14 @@ function ChartCard({ chart }: { chart: MetricChart }) {
       const header = formatTooltipHeader(chart, idx, t);
       const lines = arr.map(formatTooltipRowHtml).join('');
       const pinHint = arr.length > MANY_OBJECT_THRESHOLD
-        ? `<div style="margin-top:6px;padding-top:6px;border-top:1px solid ${TOOLTIP_DIVIDER_COLOR};color:#667085;font-size:12px;line-height:18px;">${t('pm.chart.tooltipPinHint')}</div>`
+        ? `<div style="padding:6px 0;border-bottom:1px solid ${TOOLTIP_DIVIDER_COLOR};color:#667085;font-size:12px;line-height:18px;">${t('pm.chart.tooltipPinHint')}</div>`
         : '';
       return [
         `<div style="font-size:13px;line-height:20px;color:${TOOLTIP_MUTED_COLOR};padding-bottom:6px;border-bottom:1px solid ${TOOLTIP_DIVIDER_COLOR};">`,
         header,
         '</div>',
-        `<div style="padding-top:6px;">${lines}</div>`,
         pinHint,
+        `<div style="padding-top:6px;">${lines}</div>`,
       ].join('');
     };
     return {

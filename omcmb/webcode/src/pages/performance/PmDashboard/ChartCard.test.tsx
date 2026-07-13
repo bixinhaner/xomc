@@ -118,6 +118,7 @@ describe('ChartCard 渲染隔离 (#444)', () => {
       chart.series.map((s, i) => ({ dataIndex: 1, seriesName: s.name, value: i + 1 })),
     );
     expect(html).toContain('对象较多，点击图表固定后可滚动查看');
+    expect(html.indexOf('对象较多，点击图表固定后可滚动查看')).toBeLessThan(html.indexOf('dev-0'));
   });
 
   it('点击图表数据点后固定 tooltip，用户可关闭固定浮层', async () => {
