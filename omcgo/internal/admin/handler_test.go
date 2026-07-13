@@ -469,6 +469,7 @@ func TestHandler_CreateUser_Success(t *testing.T) {
 			EncryptedPassword: env.encryptPassword(t, "password123"),
 			KeyID:             env.KeyID,
 			DisplayName:       "New User",
+			Email:             "new@example.com",
 		}))
 	req.Header.Set("Content-Type", "application/json")
 	env.Engine.ServeHTTP(w, req)
@@ -477,6 +478,32 @@ func TestHandler_CreateUser_Success(t *testing.T) {
 	var resp User
 	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, "newuser", resp.Username)
+}
+
+func TestHandler_UserEmailRequired(t *testing.T) {
+	env := handlerNewTestEnv(t, &handlerMockUserRepo{}, &handlerMockRoleRepo{})
+
+	t.Run("create rejects missing email", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/users",
+			handlerJSON(CreateUserHTTPRequest{
+				Username:          "newuser",
+				EncryptedPassword: env.encryptPassword(t, "password123"),
+				KeyID:             env.KeyID,
+			}))
+		req.Header.Set("Content-Type", "application/json")
+		env.Engine.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("update rejects missing email", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/users/"+uuid.NewString(),
+			bytes.NewBufferString(`{"display_name":"new name"}`))
+		req.Header.Set("Content-Type", "application/json")
+		env.Engine.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
 }
 
 // TestHandler_CreateUser_InvalidUsername_Rejects 验证 issue #686 修复：
@@ -503,6 +530,7 @@ func TestHandler_CreateUser_InvalidUsername_Rejects(t *testing.T) {
 					Username:          tc.username,
 					EncryptedPassword: env.encryptPassword(t, "password123"),
 					KeyID:             env.KeyID,
+					Email:             "new@example.com",
 				}))
 			req.Header.Set("Content-Type", "application/json")
 			env.Engine.ServeHTTP(w, req)
@@ -862,6 +890,7 @@ func TestHandler_CreateUser_UseDefaultPassword_Succeeds(t *testing.T) {
 			Username:           "newuser",
 			UseDefaultPassword: true,
 			DisplayName:        "New User",
+			Email:              "new@example.com",
 		}))
 	req.Header.Set("Content-Type", "application/json")
 	env.Engine.ServeHTTP(w, req)
@@ -877,7 +906,7 @@ func TestHandler_CreateUser_MissingPassword_NoUseDefault_Rejects(t *testing.T) {
 	// 三个密码字段全空 + 未启用 use_default_password → handler 400 "missing password"
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/users",
-		handlerJSON(CreateUserHTTPRequest{Username: "newuser"}))
+		handlerJSON(CreateUserHTTPRequest{Username: "newuser", Email: "new@example.com"}))
 	req.Header.Set("Content-Type", "application/json")
 	env.Engine.ServeHTTP(w, req)
 
