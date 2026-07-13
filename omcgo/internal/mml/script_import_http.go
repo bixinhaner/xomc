@@ -84,6 +84,7 @@ func (h *Handler) ValidateScriptImport(c *gin.Context) {
 		h.writeScriptImportError(c, http.StatusInternalServerError, scriptImportCodeInternal, "script import validation returned no result", nil)
 		return
 	}
+	result = localizeImportValidationResponse(result, appcontext.GetLocale(c.Request.Context()))
 	if result.Summary.ErrorCount > 0 || hasScriptErrors(result.Issues) {
 		h.writeScriptValidationFailure(c, result)
 		return
@@ -120,10 +121,10 @@ func (h *Handler) ValidateScriptReplacement(c *gin.Context) {
 		return
 	}
 	if result.Summary.ErrorCount > 0 || hasScriptErrors(result.Issues) {
-		h.writeScriptValidationFailure(c, result)
+		h.writeScriptValidationFailure(c, localizeImportValidationResponse(result, appcontext.GetLocale(c.Request.Context())))
 		return
 	}
-	response.OK(c, result)
+	response.OK(c, localizeImportValidationResponse(result, appcontext.GetLocale(c.Request.Context())))
 }
 
 func (h *Handler) CreateScriptFromImport(c *gin.Context) {
@@ -261,6 +262,7 @@ func scriptImportErrorStatus(err error) (int, string, string) {
 }
 
 func (h *Handler) writeScriptImportError(c *gin.Context, status int, code, msg string, issues []ScriptIssue) {
+	issues = localizeScriptIssues(issues, appcontext.GetLocale(c.Request.Context()))
 	if h.logger != nil {
 		fields := []zap.Field{zap.String("code", code)}
 		if len(issues) > 0 {
@@ -289,6 +291,7 @@ func (h *Handler) writeScriptImportError(c *gin.Context, status int, code, msg s
 }
 
 func (h *Handler) writeScriptValidationFailure(c *gin.Context, result *ImportValidationResponse) {
+	result = localizeImportValidationResponse(result, appcontext.GetLocale(c.Request.Context()))
 	if h.logger != nil {
 		codes := make([]string, 0, len(result.Issues))
 		for _, issue := range result.Issues {

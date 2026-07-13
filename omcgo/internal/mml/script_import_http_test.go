@@ -3,6 +3,7 @@ package mml
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -163,6 +164,55 @@ func TestHandler_ValidateScriptImport_Returns422Issues(t *testing.T) {
 	r.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusUnprocessableEntity, rec.Code)
 	require.Contains(t, rec.Body.String(), "MML_COMMAND_NOT_FOUND")
+}
+
+func TestHandler_ValidateScriptImport_LocalizesIssueDisplayMessage(t *testing.T) {
+	tests := []struct {
+		name           string
+		acceptLanguage string
+		want           string
+	}{
+		{name: "default Chinese", want: "命令末尾必须使用 ;设备SN"},
+		{name: "English", acceptLanguage: "en-US", want: "Command must end with ;device SN"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := &fakeScriptImportHTTPService{validation: &ImportValidationResponse{
+				Summary: ScriptValidationSummary{ErrorCount: 1},
+				Issues: []ScriptIssue{{
+					Code:     "MML_DEVICE_SN_REQUIRED",
+					Severity: IssueError,
+					LineNo:   21,
+					RawLine:  "LST Device.DeviceInfo.SoftwareVersion",
+					Message:  "command must end with ;SN",
+				}},
+			}}
+			r := gin.New()
+			r.Use(middleware.Locale())
+			h := NewHandler(NewService(&hCmdRepo{}, &hScriptRepo{}, &hTaskRepo{}, &hCustomCommandRepo{}, nil, zap.NewNop()), zap.NewNop())
+			h.SetScriptImportService(svc)
+			r.Use(func(c *gin.Context) { c.Set("username", "admin"); c.Next() })
+			h.RegisterRoutes(r.Group("/api/v1"))
+			body, contentType := importMultipart(t, "script.txt", []byte("LST Device.DeviceInfo.SoftwareVersion\n"))
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/mml/scripts/import/validate", body)
+			req.Header.Set("Content-Type", contentType)
+			if tt.acceptLanguage != "" {
+				req.Header.Set("Accept-Language", tt.acceptLanguage)
+			}
+			rec := httptest.NewRecorder()
+
+			r.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+			var envelope struct {
+				Issues []ScriptIssue            `json:"issues"`
+				Data   ImportValidationResponse `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+			require.Equal(t, tt.want, envelope.Issues[0].DisplayMessage)
+			require.Equal(t, tt.want, envelope.Data.Issues[0].DisplayMessage)
+		})
+	}
 }
 
 func TestHandler_CreateScriptFromImport201(t *testing.T) {

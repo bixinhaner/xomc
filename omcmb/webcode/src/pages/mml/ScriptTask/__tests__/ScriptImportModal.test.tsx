@@ -139,13 +139,14 @@ describe('ScriptImportModal', () => {
   it('keeps save disabled when server validation has errors', async () => {
     mocks.validate.mockResolvedValue(validation({
       summary: { totalLines: 1, validLines: 0, effectiveLines: 0, deviceCount: 0, errorCount: 1, warningCount: 0 },
-      issues: [{ code: 'MML_LINE_FORMAT_INVALID', severity: 'error', lineNo: 1, rawLine: 'BAD' }],
+      issues: [{ code: 'MML_LINE_FORMAT_INVALID', severity: 'error', lineNo: 1, rawLine: 'BAD', displayMessage: '命令格式不正确' }],
     }));
     renderModal();
 
     await userEvent.upload(screen.getByLabelText('选择 TXT'), new File(['BAD'], 'bad.txt', { type: 'text/plain' }));
 
-    expect(await screen.findByText('MML_LINE_FORMAT_INVALID')).toBeInTheDocument();
+    expect(await screen.findByText('第 1 行：命令格式不正确')).toBeInTheDocument();
+    expect(screen.queryByText(/MML_LINE_FORMAT_INVALID/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '确认保存' })).toBeDisabled();
     expect(screen.queryByRole('textbox', { name: '脚本内容' })).not.toBeInTheDocument();
   });
@@ -153,7 +154,7 @@ describe('ScriptImportModal', () => {
   it('allows saving warnings only after an explicit confirmation', async () => {
     mocks.validate.mockResolvedValue(validation({
       summary: { totalLines: 1, validLines: 1, effectiveLines: 1, deviceCount: 1, errorCount: 0, warningCount: 1 },
-      issues: [{ code: 'MML_DEVICE_OFFLINE', severity: 'warning', lineNo: 1, rawLine: 'LST DEVICE_INFO;SN1' }],
+      issues: [{ code: 'MML_DEVICE_OFFLINE', severity: 'warning', lineNo: 1, rawLine: 'LST DEVICE_INFO;SN1', displayMessage: '设备当前离线' }],
     }));
     renderModal();
     const user = userEvent.setup();

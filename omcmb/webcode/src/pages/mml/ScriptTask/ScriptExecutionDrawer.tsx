@@ -39,7 +39,7 @@ function validationFromError(error: unknown): MMLScriptImportValidation | undefi
 export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess }: ScriptExecutionDrawerProps) {
   const [form] = Form.useForm<ExecutionForm>();
   const [validation, setValidation] = useState<MMLScriptImportValidation | null>(null);
-  const [errorCodes, setErrorCodes] = useState<string[]>([]);
+  const [errorMessages, setErrorMessages] = useState<string[]>([]);
   const [warningValues, setWarningValues] = useState<MMLScriptExecutionInput | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
@@ -51,7 +51,7 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
     if (!open) return;
     const taskName = script ? buildMmlScriptExecutionTaskName(script.scriptName) : '';
     form.setFieldsValue({ taskName, executeType: 'immediate', offlineRetry: false, offlineRetryWait: 60, failedRetry: false, failedRetryCount: 3, failedRetryInterval: 5 });
-    setValidation(null); setWarningValues(null); setErrorCodes([]);
+    setValidation(null); setWarningValues(null); setErrorMessages([]);
     setSubmitting(false); submittingRef.current = false; requestIdRef.current = '';
   }, [form, open, script]);
 
@@ -73,7 +73,7 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
       const errorValidation = validationFromError(error);
       if (errorValidation) {
         setValidation(errorValidation);
-        setErrorCodes(errorValidation.issues.filter((issue) => issue.severity === 'error').map((issue) => issue.code));
+        setErrorMessages(errorValidation.issues.filter((issue) => issue.severity === 'error').map((issue) => issue.displayMessage || issue.message || '校验未通过'));
         const hasValidationErrors = errorValidation.summary.errorCount > 0 || errorValidation.issues.some((issue) => issue.severity === 'error');
         if (!hasValidationErrors && (errorValidation.summary.warningCount > 0 || errorValidation.issues.some((issue) => issue.severity === 'warning'))) {
           setWarningValues({ ...input, requestId });
@@ -141,7 +141,7 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
         </Space>
         <Button aria-label="执行" type="primary" htmlType="button" loading={executionMutation.isPending || submitting} disabled={executionMutation.isPending || submitting} onClick={() => void submit()}>执行</Button>
       </Form>
-      {errorCodes.length ? <Typography.Text type="danger">{errorCodes.join(', ')}</Typography.Text> : null}
+      {errorMessages.length ? <Typography.Text type="danger">{errorMessages.join(', ')}</Typography.Text> : null}
       {validation ? <ScriptImportPreview validation={validation} /> : null}
       <Modal open={Boolean(warningValues)} title="校验发现警告" onCancel={() => setWarningValues(null)} onOk={confirmWarnings} okText="确认执行" cancelText="取消">请确认后继续执行。</Modal>
     </Drawer>

@@ -98,7 +98,7 @@ describe('ScriptExecutionDrawer', () => {
       validation: {
         planItems: [],
         summary: { totalLines: 1, validLines: 1, effectiveLines: 1, deviceCount: 1, errorCount: 0, warningCount: 1 },
-        issues: [{ code: 'MML_DEVICE_OFFLINE', severity: 'warning', lineNo: 1 }],
+        issues: [{ code: 'MML_DEVICE_OFFLINE', severity: 'warning', lineNo: 1, displayMessage: '设备当前离线' }],
       },
     }).mockResolvedValueOnce({ task: { id: 'task-1' }, validation: { planItems: [], summary: { totalLines: 1, validLines: 1, effectiveLines: 1, deviceCount: 1, errorCount: 0, warningCount: 0 }, issues: [] } });
     renderDrawer();
@@ -118,7 +118,7 @@ describe('ScriptExecutionDrawer', () => {
       validation: {
         planItems: [],
         summary: { totalLines: 1, validLines: 0, effectiveLines: 0, deviceCount: 0, errorCount: 1, warningCount: 0 },
-        issues: [{ code: 'MML_PARAMETER_UNKNOWN', severity: 'error', lineNo: 1 }],
+        issues: [{ code: 'MML_PARAMETER_UNKNOWN', severity: 'error', lineNo: 1, displayMessage: '参数不在该命令支持范围内' }],
       },
     });
     renderDrawer();
@@ -126,7 +126,8 @@ describe('ScriptExecutionDrawer', () => {
     await user.type(screen.getByLabelText('任务名称'), '失败任务');
     await user.click(screen.getByRole('button', { name: '执行' }));
     await waitFor(() => expect(mocks.execute).toHaveBeenCalled());
-    expect(await screen.findByText('MML_PARAMETER_UNKNOWN')).toBeInTheDocument();
+    expect(await screen.findByText('第 1 行：参数不在该命令支持范围内')).toBeInTheDocument();
+    expect(screen.queryByText(/MML_PARAMETER_UNKNOWN/)).not.toBeInTheDocument();
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
@@ -134,7 +135,7 @@ describe('ScriptExecutionDrawer', () => {
     const warningValidation = {
       planItems: [],
       summary: { totalLines: 1, validLines: 1, effectiveLines: 1, deviceCount: 1, errorCount: 0, warningCount: 1 },
-      issues: [{ code: 'MML_DEVICE_OFFLINE', severity: 'warning' as const, lineNo: 1 }],
+      issues: [{ code: 'MML_DEVICE_OFFLINE', severity: 'warning' as const, lineNo: 1, displayMessage: '设备当前离线' }],
     };
     mocks.execute
       .mockRejectedValueOnce(new MMLScriptImportApiError({ status: 409, code: 'MML_SCRIPT_WARNINGS', message: 'warnings', validation: warningValidation }))
@@ -173,8 +174,8 @@ describe('ScriptExecutionDrawer', () => {
       planItems: [],
       summary: { totalLines: 2, validLines: 0, effectiveLines: 0, deviceCount: 1, errorCount: 1, warningCount: 1 },
       issues: [
-        { code: 'MML_LINE_FORMAT_INVALID', severity: 'error' as const, lineNo: 1 },
-        { code: 'MML_DEVICE_OFFLINE', severity: 'warning' as const, lineNo: 2 },
+        { code: 'MML_LINE_FORMAT_INVALID', severity: 'error' as const, lineNo: 1, displayMessage: '命令格式不正确' },
+        { code: 'MML_DEVICE_OFFLINE', severity: 'warning' as const, lineNo: 2, displayMessage: '设备当前离线' },
       ],
     };
     mocks.execute.mockRejectedValueOnce({ message: 'mixed validation', validation: mixedValidation });
@@ -182,7 +183,8 @@ describe('ScriptExecutionDrawer', () => {
     const user = userEvent.setup();
     await user.type(screen.getByLabelText('任务名称'), 'mixed-task');
     await user.click(screen.getByRole('button', { name: '执行' }));
-    expect((await screen.findAllByText(/MML_LINE_FORMAT_INVALID/)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/命令格式不正确/)).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/MML_LINE_FORMAT_INVALID/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '确认执行' })).not.toBeInTheDocument();
   });
 });
