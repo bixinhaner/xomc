@@ -66,6 +66,29 @@ func currentLocation(ctx context.Context) *time.Location {
 	return p.Location(ctx)
 }
 
+// TimeInCurrentLocation returns t converted to the currently configured system
+// timezone. It is intended for streaming responses (for example CSV) that cannot
+// pass through renderJSON's recursive conversion path.
+func TimeInCurrentLocation(ctx context.Context, t time.Time) time.Time {
+	if t.IsZero() {
+		return t
+	}
+	loc := currentLocation(ctx)
+	if loc == nil {
+		return t
+	}
+	return t.In(loc)
+}
+
+// FormatTimeInCurrentLocation formats an optional time using the same system
+// timezone source as JSON success responses. Nil or zero values return "".
+func FormatTimeInCurrentLocation(ctx context.Context, t *time.Time) string {
+	if t == nil || t.IsZero() {
+		return ""
+	}
+	return TimeInCurrentLocation(ctx, *t).Format(time.RFC3339)
+}
+
 // timeType / modelTimeType 用于反射识别两类需转换的时间值。
 var (
 	timeType      = reflect.TypeOf(time.Time{})

@@ -3,7 +3,6 @@ import type { Key } from 'react';
 import { Button, Descriptions, Drawer, Dropdown, Empty, Form, Input, Modal, Space, Spin, Tooltip, Typography, message } from 'antd';
 import type { MenuProps } from 'antd';
 import { DeleteOutlined, DownloadOutlined, EditOutlined, EyeOutlined, MoreOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons';
-import dayjs from 'dayjs';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
@@ -11,14 +10,13 @@ import SearchInput from '@/components/SearchInput';
 import { useT } from '@/hooks/useT';
 import type { MMLScript } from '@core/types/mml';
 import { useMMLScripts, useMMLScriptById, useUpdateMMLScript, useDeleteMMLScripts } from '@core/hooks/api/useMML';
+import { formatSystemTime } from '@core/utils/systemTime';
 import ScriptImportModal from './ScriptImportModal';
 import ScriptExecutionDrawer from './ScriptExecutionDrawer';
 import ScriptImportPreview from './ScriptImportPreview';
 
 function formatTime(iso?: string | null): string {
-  if (!iso) return '-';
-  const value = dayjs(iso);
-  return value.isValid() ? value.format('YYYY-MM-DD HH:mm:ss') : '-';
+  return formatSystemTime(iso);
 }
 
 function downloadScript(script: MMLScript) {

@@ -309,6 +309,9 @@ func (h *Handler) ExportDevices(c *gin.Context) {
 				productName = it.ProductType
 			}
 			if upgrade {
+				startedAt := response.FormatTimeInCurrentLocation(c, it.StartedAt)
+				endedAt := response.FormatTimeInCurrentLocation(c, it.EndedAt)
+				lastReportAt := response.FormatTimeInCurrentLocation(c, it.LastReportAt)
 				// 升级类型显示规则与前端 getUpgradeTypeLabel 一致
 				upType := it.TypeDisplayName
 				switch it.Category {
@@ -322,9 +325,12 @@ func (h *Handler) ExportDevices(c *gin.Context) {
 					productName, fmt.Sprintf("%d", it.Progress),
 					translateDeviceStatus(it.Status), it.OperatorScope,
 					translateFailureReason(it.FailureReason),
-					it.StartedAt, it.EndedAt, it.LastReportAt,
+					startedAt, endedAt, lastReportAt,
 				}
 			} else {
+				startedAt := response.FormatTimeInCurrentLocation(c, it.StartedAt)
+				endedAt := response.FormatTimeInCurrentLocation(c, it.EndedAt)
+				lastReportAt := response.FormatTimeInCurrentLocation(c, it.LastReportAt)
 				// "目标版本/目标文件" 在 UI 优先显示 targetFile，回退 targetVersion
 				tgt := it.TargetFile
 				if tgt == "" {
@@ -336,7 +342,7 @@ func (h *Handler) ExportDevices(c *gin.Context) {
 					tgt, translateDeviceStatus(it.Status),
 					fmt.Sprintf("%d", it.Progress),
 					translateFailureReason(it.FailureReason),
-					it.StartedAt, it.EndedAt, it.LastReportAt,
+					startedAt, endedAt, lastReportAt,
 				}
 			}
 			if err := csvW.Write(row); err != nil {

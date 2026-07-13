@@ -3,6 +3,8 @@ import { Button, Checkbox, DatePicker, Drawer, Form, Input, InputNumber, Modal, 
 import type { Dayjs } from 'dayjs';
 import type { MMLExecuteType, MMLScript, MMLScriptImportValidation, MMLScriptExecutionInput } from '@core/types/mml';
 import { useCreateMMLScriptExecution } from '@core/hooks/api/useMML';
+import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
+import { toSystemTimezoneRFC3339 } from '@core/utils/systemTime';
 import ScriptImportPreview from './ScriptImportPreview';
 import { buildMmlScriptExecutionTaskName } from '../utils/defaultTaskName';
 
@@ -45,6 +47,7 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
   const submittingRef = useRef(false);
   const requestIdRef = useRef('');
   const executionMutation = useCreateMMLScriptExecution();
+  const systemTimezone = useSystemTimezoneValue();
   const executeType = Form.useWatch('executeType', form);
 
   useEffect(() => {
@@ -108,10 +111,17 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
       }
     }
     const input: MMLScriptExecutionInput = {
-      taskName: values.taskName.trim(), executeType: values.executeType, scheduledAt: values.scheduledAt?.toISOString(),
-      periodStart: values.periodRange?.[0]?.toISOString(), periodEnd: values.periodRange?.[1]?.toISOString(), periodTime: values.periodTime?.format('HH:mm:ss'),
-      offlineRetry: values.offlineRetry, offlineRetryWait: values.offlineRetryWait, failedRetry: values.failedRetry,
-      failedRetryCount: values.failedRetryCount, failedRetryInterval: values.failedRetryInterval,
+      taskName: values.taskName.trim(),
+      executeType: values.executeType,
+      scheduledAt: toSystemTimezoneRFC3339(values.scheduledAt, systemTimezone) ?? values.scheduledAt?.toISOString(),
+      periodStart: toSystemTimezoneRFC3339(values.periodRange?.[0], systemTimezone) ?? values.periodRange?.[0]?.toISOString(),
+      periodEnd: toSystemTimezoneRFC3339(values.periodRange?.[1], systemTimezone) ?? values.periodRange?.[1]?.toISOString(),
+      periodTime: values.periodTime?.format('HH:mm:ss'),
+      offlineRetry: values.offlineRetry,
+      offlineRetryWait: values.offlineRetryWait,
+      failedRetry: values.failedRetry,
+      failedRetryCount: values.failedRetryCount,
+      failedRetryInterval: values.failedRetryInterval,
     };
     await execute(input);
   };

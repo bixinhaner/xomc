@@ -3,6 +3,7 @@ import type { PageResponse } from '@core/types/pagination';
 import type { DeviceTaskResultItem, MMLTask, MMLTaskResultsStats } from '@core/types/mml';
 import { parseMmlDeviceTaskResult, type ParsedMmlResult } from '@core/utils/mmlResultParser';
 import { saveBlob } from '@core/utils/saveBlob';
+import { formatSystemTime } from '@core/utils/systemTime';
 import { getMMLTaskResultsPage } from '@core/hooks/api/useMML';
 
 export const MML_TASK_RESULT_EXPORT_PAGE_SIZE = 100;
@@ -54,9 +55,7 @@ export function taskResultResponseText(row: DeviceTaskResultItem): string {
 }
 
 function formatTime(iso?: string | null): string {
-  if (!iso) return '';
-  const d = dayjs(iso);
-  return d.isValid() ? d.format('YYYY-MM-DD HH:mm:ss') : '';
+  return formatSystemTime(iso, { placeholder: '' });
 }
 
 function parsedResultSummary(parsed: ParsedMmlResult, t: TFunction): string {

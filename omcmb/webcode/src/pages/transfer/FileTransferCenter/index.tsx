@@ -48,6 +48,7 @@ import {
   useUnifiedFileTransferTasks,
   useUnifiedFileTransferTaskTypes,
 } from '@core/hooks/api/useUnifiedFileTransfer';
+import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
 import { useSoftwareVersions } from '@core/hooks/api/useSoftware';
 import { useProductList } from '@core/hooks/api/useProducts';
 import { unifiedFileTransferApi } from '@core/services/api/unifiedFileTransferApi';
@@ -89,7 +90,12 @@ import {
 } from '../shared.render';
 import { resolveAutoSelectedCategory } from './categorySelection';
 import type { TransferStepId } from '@core/types/unifiedFileTransfer';
-import { formatSystemTime } from '@core/utils/systemTime';
+import { formatSystemTime, nowInSystemTimezone } from '@core/utils/systemTime';
+import {
+  isTransferSystemDateBefore,
+  isTransferSystemTimeAfter,
+  toTransferSystemTimeRFC3339,
+} from '../transferTime';
 
 const { Text, Title } = Typography;
 
@@ -183,6 +189,7 @@ type TaskFormValues = CreateUnifiedFileTransferTaskInput & {
 
 export default function FileTransferCenter() {
   const t = useT();
+  const systemTimezone = useSystemTimezoneValue();
   const queryClient = useQueryClient();
   // 任务名称自动填充用：取登录用户名拼前缀，displayName / username 哪个有用哪个。
   const currentUser = useUserStore((s) => s.currentUser);
@@ -1378,11 +1385,11 @@ export default function FileTransferCenter() {
       creatingTaskRef.current = false;
       return;
     }
-    // scheduledAt 在表单里是 dayjs 实例，发请求前转 ISO 字符串（后端 RFC3339 解析）。
+    // scheduledAt 在表单里是 dayjs 实例，发请求前按系统时区附加偏移（后端 RFC3339 解析）。
     // 非 scheduled 模式 form 不会渲染这个字段 → values.scheduledAt 为 undefined，直接传不影响。
     const rawScheduledAt = (values as { scheduledAt?: unknown }).scheduledAt;
     const scheduledAtIso = values.executionMode === 'scheduled' && rawScheduledAt
-      ? (dayjs.isDayjs(rawScheduledAt) ? rawScheduledAt : dayjs(rawScheduledAt as string)).toISOString()
+      ? toTransferSystemTimeRFC3339(rawScheduledAt, systemTimezone)
       : undefined;
     void createTaskMutation
       .mutateAsync({
@@ -2009,7 +2016,7 @@ export default function FileTransferCenter() {
           {/*
             定时执行：仅 executionMode='scheduled' 时显示日期选择器；其它模式 form value 留空。
             shouldUpdate 监听 executionMode 字段变化决定是否渲染。校验：必填 + 大于当前时间。
-            提交时 handleCreateTask 走 form.getFieldValue('scheduledAt')（dayjs 对象）→ .toISOString()。
+            提交时 handleCreateTask 走 form.getFieldValue('scheduledAt')（dayjs 对象）→ 按系统时区附加偏移。
           */}
           <Form.Item noStyle shouldUpdate={(prev, curr) => prev.executionMode !== curr.executionMode}>
             {({ getFieldValue }) =>
@@ -2022,8 +2029,7 @@ export default function FileTransferCenter() {
                     {
                       validator: (_, value) => {
                         if (!value) return Promise.resolve();
-                        const target = dayjs.isDayjs(value) ? value : dayjs(value);
-                        return target.isAfter(dayjs())
+                        return isTransferSystemTimeAfter(value, nowInSystemTimezone(systemTimezone), systemTimezone)
                           ? Promise.resolve()
                           : Promise.reject(new Error(t('ufte.form.scheduledAt.future')));
                       },
@@ -2035,7 +2041,7 @@ export default function FileTransferCenter() {
                     format="YYYY-MM-DD HH:mm:ss"
                     style={{ width: 240 }}
                     placeholder={t('ufte.form.scheduledAt.placeholder')}
-                    disabledDate={(current) => current && current.isBefore(dayjs().startOf('day'))}
+                    disabledDate={(current) => Boolean(current && isTransferSystemDateBefore(current, nowInSystemTimezone(systemTimezone), systemTimezone))}
                   />
                 </Form.Item>
               ) : null
