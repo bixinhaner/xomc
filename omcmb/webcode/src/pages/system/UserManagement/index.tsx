@@ -55,6 +55,7 @@ import { isBuiltInUser, isLdapUser } from '@core/types/system';
 import { useT } from '@/hooks/useT';
 import { toast } from '@/utils/toast';
 import { formatSystemTime } from '@core/utils/systemTime';
+import { isValidContactNumber, normalizeContactNumber } from './validation';
 
 export default function UserManagement() {
   const t = useT();
@@ -139,6 +140,17 @@ export default function UserManagement() {
     { value: 'disabled', label: t('user.form.statusDisabled') },
     { value: 'inactive', label: t('status.inactive') },
     { value: 'locked', label: t('status.locked') },
+  ], [t]);
+
+  const contactNumberRules = useMemo(() => [
+    {
+      validator(_: unknown, value: unknown) {
+        if (value === undefined || value === null || value === '') return Promise.resolve();
+        return isValidContactNumber(String(value))
+          ? Promise.resolve()
+          : Promise.reject(new Error(t('user.phoneFormatError')));
+      },
+    },
   ], [t]);
 
   const createUser = useCreateUser();
@@ -247,7 +259,7 @@ export default function UserManagement() {
         username: vals.username as string,
         displayName: ((vals.displayName as string) || (vals.username as string)) ?? '',
         email: (vals.email as string).trim(),
-        phone: (vals.phone as string) || undefined,
+        phone: vals.phone ? normalizeContactNumber(vals.phone as string) : undefined,
         description: (vals.description as string) || undefined,
         expireTime: expire ? expire.toISOString() : undefined,
         role: 'viewer' as UserRole,
@@ -278,7 +290,7 @@ export default function UserManagement() {
       const data: Partial<User> = {
         displayName: (vals.displayName as string) || selectedUser.displayName,
         email: (vals.email as string).trim(),
-        phone: (vals.phone as string) || undefined,
+        phone: vals.phone ? normalizeContactNumber(vals.phone as string) : undefined,
         description: (vals.description as string) ?? '',
         expireTime: expire ? expire.toISOString() : undefined,
         status: vals.status as UserStatus,
@@ -988,11 +1000,10 @@ export default function UserManagement() {
             <Form.Item
               name="phone"
               label={t('user.phone')}
-              rules={[
-                { pattern: /^1\d{10}$/, message: t('user.phoneFormatError') },
-              ]}
+              normalize={(value) => typeof value === 'string' ? normalizeContactNumber(value) : value}
+              rules={contactNumberRules}
             >
-              <Input placeholder={t('user.phone')} maxLength={11} />
+              <Input placeholder={t('user.phone')} maxLength={32} />
             </Form.Item>
             <Form.Item
               name="roleIds"
@@ -1077,11 +1088,10 @@ export default function UserManagement() {
           <Form.Item
             name="phone"
             label={t('user.phone')}
-            rules={[
-              { pattern: /^1\d{10}$/, message: t('user.phoneFormatError') },
-            ]}
+            normalize={(value) => typeof value === 'string' ? normalizeContactNumber(value) : value}
+            rules={contactNumberRules}
           >
-            <Input placeholder={t('user.phone')} maxLength={11} />
+            <Input placeholder={t('user.phone')} maxLength={32} />
           </Form.Item>
           <Form.Item name="roleIds" label={t('user.form.role')}>
             <Select

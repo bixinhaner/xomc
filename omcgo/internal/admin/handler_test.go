@@ -506,6 +506,19 @@ func TestHandler_UserEmailRequired(t *testing.T) {
 	})
 }
 
+func TestHandler_UserPhoneValidation(t *testing.T) {
+	env := handlerNewTestEnv(t, &handlerMockUserRepo{}, &handlerMockRoleRepo{})
+
+	t.Run("update rejects invalid phone", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/users/"+uuid.NewString(),
+			bytes.NewBufferString(`{"email":"user@example.com","phone":"123#456"}`))
+		req.Header.Set("Content-Type", "application/json")
+		env.Engine.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
 // TestHandler_CreateUser_InvalidUsername_Rejects 验证 issue #686 修复：
 // 用户名格式校验（只允许字母、数字、下划线、减号）。
 func TestHandler_CreateUser_InvalidUsername_Rejects(t *testing.T) {

@@ -346,7 +346,7 @@ const hasBuiltInSelected = selectedUsers.some(u => u.source === 'builtIn');
 | 3 | `confirmPassword` | 确认密码 | string | `<Input.Password maxLength=20>` | ✅ | — | 必须等于 `password` | `确认密码` | 仅前端校验，不提交 |
 | 4 | `displayName` | 用户昵称 | string | `<Input maxLength=64>` | — | — | — | `留空则与用户账号相同` | v1.1 标签由"用户名称"改"用户昵称"；提交时如为空，后端使用 username 兜底 |
 | 5 | `email` | 邮箱 | string | `<Input maxLength=50>` | — | — | `type: email` | `邮箱` | |
-| 6 | `phone` | 手机 | string | `<Input maxLength=11>` | — | — | `pattern: /^1\d{10}$/`（中国手机号）| `手机` | |
+| 6 | `phone` | 联系电话 | string | `<Input maxLength=32>` | — | — | 可选；填写时允许数字、空格、`+`、`-`、括号、`x/X`、`.`，长度 3–32 且至少含 3 个数字 | `联系电话` | 支持国际号码、座机及分机 |
 | 7 | `roleIds` | 角色 | UUID[] | `<Select mode="multiple">` | ✅ | — | 至少选一项 | options 来自 `useAllRoles()` → `{ label: r.roleName, value: r.id }` | 字段统一为 `roleIds`，与后端 `CreateUserRequest.RoleIDs` 对齐 |
 | 8 | `status` | 状态 | enum | `<Radio.Group>` 激活 / 禁用 | — | `active` | — | — | |
 | 9 | `expireTime` | 过期时间 | datetime | `<DatePicker showTime format="YYYY-MM-DD HH:mm:ss">`，禁用过去日期 | — | — | — | `留空表示永久有效；过期后该用户将无法登录` | |
@@ -400,7 +400,7 @@ const hasBuiltInSelected = selectedUsers.some(u => u.source === 'builtIn');
 | 1 | `username` | 用户账号 | `<Input readOnly>` | ❌ 只读 | 创建后不可改 |
 | 2 | `displayName` | 用户昵称 | `<Input maxLength=64>` | ✅ | v1.1 标签由"用户名称"改"用户昵称" |
 | 3 | `email` | 邮箱 | `<Input>` | ✅ | 同创建 |
-| 4 | `phone` | 手机 | `<Input>` | ✅ | 同创建 |
+| 4 | `phone` | 联系电话 | `<Input maxLength=32>` | ✅ | 同创建，支持国际号码、座机及分机 |
 | 5 | `roleIds` | 角色 | `<Select mode="multiple" allowClear>` | ✅ | 后端 `service.syncUserRoles` 做差量同步 |
 | 6 | `status` | 状态 | `<Radio.Group>` | ✅ | 激活/禁用 |
 | 7 | `expireTime` | 过期时间 | `<DatePicker>` | ✅ | 留空=永久 |
