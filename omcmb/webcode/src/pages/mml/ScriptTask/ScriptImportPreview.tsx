@@ -15,6 +15,15 @@ function issueForLine(issues: MMLScriptIssue[], lineNo: number): MMLScriptIssue[
   return issues.filter((issue) => issue.lineNo === lineNo);
 }
 
+function issueDescription(issue: MMLScriptIssue, t: ReturnType<typeof useT>): string {
+  return issue.displayMessage || issue.message || t('mml.scriptImport.issueFallback');
+}
+
+function issueLineText(issue: MMLScriptIssue, t: ReturnType<typeof useT>): string {
+  const prefix = issue.lineNo ? t('mml.scriptImport.linePrefix', { line: issue.lineNo }) : '';
+  return `${prefix}${issueDescription(issue, t)}`;
+}
+
 /** Server-authoritative TXT summary and read-only plan preview. */
 export default function ScriptImportPreview({ validation, readOnly = true }: ScriptImportPreviewProps) {
   const t = useT();
@@ -30,7 +39,7 @@ export default function ScriptImportPreview({ validation, readOnly = true }: Scr
   }, [filter, issues, validation?.planItems]);
 
   const downloadReport = () => {
-    const report = visibleIssues.map((issue) => `${issue.lineNo ?? '-'}\t${issue.severity}\t${issue.code}\t${issue.message ?? ''}`).join('\n');
+    const report = visibleIssues.map((issue) => issueLineText(issue, t)).join('\n');
     const url = URL.createObjectURL(new Blob([report], { type: 'text/plain;charset=utf-8' }));
     const anchor = document.createElement('a');
     anchor.href = url;
@@ -51,7 +60,7 @@ export default function ScriptImportPreview({ validation, readOnly = true }: Scr
       title: t('mml.scriptImport.validationResult'), key: 'issues', render: (_, row) => {
         const lineIssues = issueForLine(issues, row.lineNo);
         if (!lineIssues.length) return <Tag color="success">{t('mml.scriptImport.passed')}</Tag>;
-        return <Space wrap>{lineIssues.map((issue, index) => <Tag key={`${issue.code}-${index}`} color={issue.severity === 'error' ? 'error' : 'warning'}>{issue.code}</Tag>)}</Space>;
+        return <Space wrap>{lineIssues.map((issue, index) => <Tag key={`${issue.code}-${index}`} color={issue.severity === 'error' ? 'error' : 'warning'}>{issueDescription(issue, t)}</Tag>)}</Space>;
       },
     },
   ];
@@ -79,7 +88,7 @@ export default function ScriptImportPreview({ validation, readOnly = true }: Scr
           <Space direction="vertical" style={{ width: '100%' }}>
             {visibleIssues.map((issue, index) => (
               <Typography.Text key={`${issue.code}-${issue.lineNo ?? 'x'}-${index}`} type={issue.severity === 'error' ? 'danger' : 'warning'}>
-                {issue.lineNo ? t('mml.scriptImport.linePrefix', { line: issue.lineNo }) : ''}{issue.code}{issue.message ? ` — ${issue.message}` : ''}
+                {issueLineText(issue, t)}
               </Typography.Text>
             ))}
           </Space>

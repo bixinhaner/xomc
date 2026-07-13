@@ -31,12 +31,13 @@ const (
 // File-level issues have a zero LineNo and empty RawLine because no source row
 // is available to identify.
 type ScriptIssue struct {
-	Code     string        `json:"code"`
-	Severity IssueSeverity `json:"severity"`
-	LineNo   int           `json:"line_no,omitempty"`
-	RawLine  string        `json:"raw_line,omitempty"`
-	Field    string        `json:"field,omitempty"`
-	Message  string        `json:"message,omitempty"`
+	Code           string        `json:"code"`
+	Severity       IssueSeverity `json:"severity"`
+	LineNo         int           `json:"line_no,omitempty"`
+	RawLine        string        `json:"raw_line,omitempty"`
+	Field          string        `json:"field,omitempty"`
+	Message        string        `json:"message,omitempty"`
+	DisplayMessage string        `json:"display_message,omitempty"`
 }
 
 // ParsedScript is the parser's deterministic representation of one TXT file.

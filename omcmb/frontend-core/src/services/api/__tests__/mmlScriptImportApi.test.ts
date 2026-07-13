@@ -124,7 +124,7 @@ describe('mmlApi TXT script import', () => {
         validation_token: 'token',
         summary: { effective_lines: 1, device_count: 1, error_count: 0, warning_count: 0 },
         plan_items: [{ line_no: 1, device_sn: 'SN1', order: 1, command: { command_code: 'LST DEVICE_INFO' } }],
-        issues: [{ code: 'MML_DEVICE_OFFLINE', severity: 'warning', line_no: 1, raw_line: 'LST DEVICE_INFO;SN1' }],
+        issues: [{ code: 'MML_DEVICE_OFFLINE', severity: 'warning', line_no: 1, raw_line: 'LST DEVICE_INFO;SN1', display_message: '设备当前离线' }],
       },
     });
 
@@ -137,7 +137,7 @@ describe('mmlApi TXT script import', () => {
     expect(config).toEqual({ headers: { 'Content-Type': 'multipart/form-data' } });
     expect(result.validationToken).toBe('token');
     expect(result.planItems[0].deviceSn).toBe('SN1');
-    expect(result.issues[0]).toMatchObject({ lineNo: 1, rawLine: 'LST DEVICE_INFO;SN1' });
+    expect(result.issues[0]).toMatchObject({ lineNo: 1, rawLine: 'LST DEVICE_INFO;SN1', displayMessage: '设备当前离线' });
   });
 
   it('uses the replacement validation endpoint for multipart files', async () => {
