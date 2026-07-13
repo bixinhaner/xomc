@@ -33,10 +33,10 @@ describe('parseMmlScriptPlan', () => {
   it('parses standard PATH script rows into raw path command payloads', () => {
     const result = parseMmlScriptPlan(
       [
-        'LST PATH:Device.IP.Interface.1.Enable;SN001',
-        'MOD PATH:Device.IP.Interface.1.Enable=true,Device.IP.Interface.2.Enable=false;SN001',
-        'ADD PATH:Device.IP.Interface.1.IPv4Address.:IPAddress=192.168.1.10,SubnetMask=255.255.255.0;SN001',
-        'RMV PATH:Device.IP.Interface.1.IPv4Address.3.;SN001',
+        'LST Device.IP.Interface.1.Enable;SN001',
+        'MOD Device.IP.Interface.1.Enable=true,Device.IP.Interface.2.Enable=false;SN001',
+        'ADD Device.IP.Interface.1.IPv4Address.:IPAddress=192.168.1.10,SubnetMask=255.255.255.0;SN001',
+        'RMV Device.IP.Interface.1.IPv4Address.3.;SN001',
       ].join('\n'),
     );
 
@@ -69,6 +69,17 @@ describe('parseMmlScriptPlan', () => {
       commandCode: 'RAW RMV',
       operationType: 'RMV',
       paramPaths: ['Device.IP.Interface.1.IPv4Address.3.'],
+    });
+  });
+
+  it('keeps explicit PATH prefix compatible with previous templates', () => {
+    const result = parseMmlScriptPlan('LST PATH:Device.IP.Interface.1.Enable;SN001');
+
+    expect(result.planItems).toHaveLength(1);
+    expect(result.planItems[0].command).toMatchObject({
+      commandCode: 'RAW LST',
+      operationType: 'LST',
+      paramPaths: ['Device.IP.Interface.1.Enable'],
     });
   });
 
