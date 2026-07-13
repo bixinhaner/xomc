@@ -6077,6 +6077,7 @@ const messages: Record<string, string> = {
   'mml.confirmDeleteTask':                   '确定删除任务记录"{name}"？该操作不可恢复。',
   'mml.confirmBatchDeleteScripts':           '确认删除选中的 {count} 个脚本？此操作不可撤销。',
   'mml.confirmBatchDeleteTasks':             '确认删除选中的 {count} 条任务记录？该操作会删除对应执行结果，且不可撤销。',
+  'mml.batchDeleteRunningTasksBlocked':      '选中的任务记录中有 {count} 条正在执行，请先终止后再删除。',
   'mml.confirmCancelTitle':                  '确认终止任务',
   'mml.confirmCancelScript':                 '确定终止脚本"{name}"？当前执行将被中断。',
   'mml.startFailed':                         '启动失败：{error}',

@@ -100,6 +100,18 @@ function responseMessageText(row: DeviceTaskResultItem | null): string {
   return '';
 }
 
+function getErrorMessage(error: unknown): string {
+  if (!error || typeof error !== 'object') return '';
+  const candidate = error as { userMessage?: unknown; message?: unknown };
+  if (typeof candidate.userMessage === 'string' && candidate.userMessage.trim()) {
+    return candidate.userMessage;
+  }
+  if (typeof candidate.message === 'string' && candidate.message.trim()) {
+    return candidate.message;
+  }
+  return '';
+}
+
 function hasMessageText(row: DeviceTaskResultItem | null): boolean {
   return Boolean(requestMessageText(row) || responseMessageText(row));
 }
@@ -179,6 +191,7 @@ export default function TaskRecord() {
   const tasks = useMemo(() => data?.items ?? [], [data]);
   const deleteMutation = useDeleteMMLTasks();
   const [selectedTaskIds, setSelectedTaskIds] = useState<Key[]>([]);
+  const [selectedTaskStatusById, setSelectedTaskStatusById] = useState<Record<string, MMLTaskStatus>>({});
 
   const filterFields: FilterField[] = useMemo(() => [
     {
@@ -259,6 +272,14 @@ export default function TaskRecord() {
   const confirmBatchDelete = () => {
     const ids = selectedTaskIds.map(String);
     if (ids.length === 0) return;
+    const currentTaskById = new Map(tasks.map((task) => [task.id, task]));
+    const runningCount = ids.filter((id) => (
+      currentTaskById.get(id)?.status ?? selectedTaskStatusById[id]
+    ) === 'running').length;
+    if (runningCount > 0) {
+      void message.warning(t('mml.batchDeleteRunningTasksBlocked', { count: runningCount }));
+      return;
+    }
     Modal.confirm({
       title: t('common.confirmDelete'),
       content: t('mml.confirmBatchDeleteTasks', { count: ids.length }),
@@ -269,12 +290,17 @@ export default function TaskRecord() {
         deleteMutation.mutate(ids, {
           onSuccess: () => {
             setSelectedTaskIds([]);
+            setSelectedTaskStatusById({});
             void refetch();
             void message.success(t('common.deleteSuccess'));
             resolve();
           },
           onError: (error) => {
-            void message.error(t('common.deleteFailed'));
+            const detail = getErrorMessage(error);
+            setSelectedTaskIds([]);
+            setSelectedTaskStatusById({});
+            void refetch();
+            void message.error(detail ? t('mml.deleteFailed', { error: detail }) : t('common.deleteFailed'));
             reject(error);
           },
         });
@@ -629,7 +655,24 @@ export default function TaskRecord() {
         rowKey="id"
         selectable
         selectedRowKeys={selectedTaskIds}
-        onSelectionChange={(keys) => setSelectedTaskIds(keys)}
+        onSelectionChange={(keys, rows) => {
+          const nextIds = new Set(keys.map(String));
+          setSelectedTaskIds(keys);
+          setSelectedTaskStatusById((prev) => {
+            const next: Record<string, MMLTaskStatus> = {};
+            nextIds.forEach((id) => {
+              const previousStatus = prev[id];
+              if (previousStatus) next[id] = previousStatus;
+            });
+            rows.forEach((task) => {
+              if (nextIds.has(task.id)) next[task.id] = task.status;
+            });
+            tasks.forEach((task) => {
+              if (nextIds.has(task.id)) next[task.id] = task.status;
+            });
+            return next;
+          });
+        }}
         preserveSelectedRowKeys
         total={data?.total ?? 0}
         currentPage={page}
