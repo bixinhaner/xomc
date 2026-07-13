@@ -168,7 +168,7 @@ func TestMapDeviceItem_ReportTime_EmptyBeforeSuccess(t *testing.T) {
 	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
 	require.NoError(t, err)
 	assert.NotEqual(t, "ended", item.Status, "前置：该子任务尚未到成功终态")
-	assert.Empty(t, item.LastReportAt, "未到成功终态时上报时间必须为空")
+	assert.Nil(t, item.LastReportAt, "未到成功终态时上报时间必须为空")
 }
 
 // 死判 filled-on-success：上报成功终态，上报时间被填为 updated_at。
@@ -198,7 +198,7 @@ func TestMapDeviceItem_ReportTime_FilledOnSuccess(t *testing.T) {
 	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
 	require.NoError(t, err)
 	assert.Equal(t, "ended", item.Status, "前置：该子任务已到成功终态")
-	assert.Equal(t, reportedAt.Format(time.RFC3339), item.LastReportAt, "成功终态时上报时间应填为 updated_at")
+	assertTimePtrEqual(t, reportedAt, item.LastReportAt, "成功终态时上报时间应填为 updated_at")
 }
 
 // 以下两测覆盖 issue #655：三皮肤设备列表新增「开始时间 / 结束时间」两列，
@@ -233,8 +233,8 @@ func TestMapDeviceItem_StartedAndEndedAt_InProgress(t *testing.T) {
 	}
 	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
 	require.NoError(t, err)
-	assert.Equal(t, startedAt.Format(time.RFC3339), item.StartedAt, "首次进入执行态后 StartedAt 应有值")
-	assert.Empty(t, item.EndedAt, "未到终态时 EndedAt 必须为空")
+	assertTimePtrEqual(t, startedAt, item.StartedAt, "首次进入执行态后 StartedAt 应有值")
+	assert.Nil(t, item.EndedAt, "未到终态时 EndedAt 必须为空")
 }
 
 // ended：started_at + completed_at 都已写 → 两字段都有值且不相等。
@@ -268,9 +268,9 @@ func TestMapDeviceItem_StartedAndEndedAt_Ended(t *testing.T) {
 	}
 	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
 	require.NoError(t, err)
-	assert.Equal(t, startedAt.Format(time.RFC3339), item.StartedAt)
-	assert.Equal(t, completedAt.Format(time.RFC3339), item.EndedAt)
-	assert.NotEqual(t, item.StartedAt, item.EndedAt, "StartedAt 与 EndedAt 必须能区分开（避免回归到都用 updated_at）")
+	assertTimePtrEqual(t, startedAt, item.StartedAt)
+	assertTimePtrEqual(t, completedAt, item.EndedAt)
+	assert.False(t, item.StartedAt.Equal(*item.EndedAt), "StartedAt 与 EndedAt 必须能区分开（避免回归到都用 updated_at）")
 }
 
 // pending：未进入执行态 → 两字段都为空。
@@ -298,8 +298,8 @@ func TestMapDeviceItem_StartedAndEndedAt_Pending(t *testing.T) {
 	}
 	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
 	require.NoError(t, err)
-	assert.Empty(t, item.StartedAt, "pending 态 StartedAt 必须为空")
-	assert.Empty(t, item.EndedAt, "pending 态 EndedAt 必须为空")
+	assert.Nil(t, item.StartedAt, "pending 态 StartedAt 必须为空")
+	assert.Nil(t, item.EndedAt, "pending 态 EndedAt 必须为空")
 }
 
 // issue #655 追加：被操作者主动终止的子任务在执行态之前被叫停 → repo 只写了
@@ -336,8 +336,8 @@ func TestMapDeviceItem_Terminated_StartedAtFallbackAndFailureReason(t *testing.T
 	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
 	require.NoError(t, err)
 	assert.Equal(t, "terminated", item.Result, "前置：terminated 走的是 result=terminated 分支")
-	assert.Equal(t, completedAt.Format(time.RFC3339), item.EndedAt)
-	assert.Equal(t, item.EndedAt, item.StartedAt, "terminated 且 StartedAt 空时应兜底 = EndedAt")
+	assertTimePtrEqual(t, completedAt, item.EndedAt)
+	assertTimePtrEqual(t, completedAt, item.StartedAt, "terminated 且 StartedAt 空时应兜底 = EndedAt")
 	assert.Equal(t, "终止", item.FailureReason, "terminated 且 FailureReason 空时应兜底为「终止」")
 	assert.Equal(t, "task terminated by operator", item.FailureDetail, "FailureDetail 保持设备原始 ErrorMessage 不动")
 }
@@ -375,7 +375,7 @@ func TestMapDeviceItem_Terminated_PreserveExistingStartedAt(t *testing.T) {
 	}
 	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
 	require.NoError(t, err)
-	assert.Equal(t, startedAt.Format(time.RFC3339), item.StartedAt, "已有真实 started_at 时不应被 endedAt 覆盖")
-	assert.Equal(t, completedAt.Format(time.RFC3339), item.EndedAt)
-	assert.NotEqual(t, item.StartedAt, item.EndedAt)
+	assertTimePtrEqual(t, startedAt, item.StartedAt, "已有真实 started_at 时不应被 endedAt 覆盖")
+	assertTimePtrEqual(t, completedAt, item.EndedAt)
+	assert.False(t, item.StartedAt.Equal(*item.EndedAt))
 }

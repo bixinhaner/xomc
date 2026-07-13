@@ -967,7 +967,7 @@ func (s *Service) ListTasks(ctx context.Context, filter TaskListFilter, visibleG
 		items = append(items, *mapped)
 	}
 	sort.Slice(items, func(i, j int) bool {
-		return items[i].CreatedAt > items[j].CreatedAt
+		return timePtrAfter(items[i].CreatedAt, items[j].CreatedAt)
 	})
 	return paginate(items, filter.Page, filter.PageSize), nil
 }
@@ -1129,7 +1129,7 @@ func (s *Service) collectFilteredDeviceItems(ctx context.Context, filter DeviceL
 	// 新建、未上报的设备为空串，倒序会把它们挤到列表最后（本次修复的 bug）。
 	// CreatedAt（子任务 created_at）建任务即有值且 NOT NULL，倒序即"最新建的在最上"。
 	sort.Slice(items, func(i, j int) bool {
-		return items[i].CreatedAt > items[j].CreatedAt
+		return timePtrAfter(items[i].CreatedAt, items[j].CreatedAt)
 	})
 	return items, nil
 }
@@ -1210,7 +1210,7 @@ func (s *Service) ListDeviceCandidates(ctx context.Context, filter DeviceCandida
 			TargetVersion:   "",
 			Status:          "pending",
 			Progress:        0,
-			LastReportAt:    formatTime(item.UpdatedAt),
+			LastReportAt:    optionalTimePtr(item.UpdatedAt),
 			OperatorScope:   "",
 		})
 	}
@@ -1421,10 +1421,10 @@ func (s *Service) mapTask(ctx context.Context, catalog []TaskType, task *softwar
 		CurrentStep:     stepForTask(typeDef, task.Status),
 		ExecutionMode:   executionModeForTask(task.Status, task.CreateStatus),
 		CreateUser:      task.CreateUser,
-		CreatedAt:       formatTime(time.Time(task.CreatedAt)),
-		StartedAt:       modelTimePtrToString(task.StartedAt),
-		EndedAt:         modelTimePtrToString(task.EndedAt),
-		ScheduledAt:     modelTimePtrToString(task.ScheduledAt),
+		CreatedAt:       optionalTimePtr(time.Time(task.CreatedAt)),
+		StartedAt:       modelTimePtrToTimePtr(task.StartedAt),
+		EndedAt:         modelTimePtrToTimePtr(task.EndedAt),
+		ScheduledAt:     modelTimePtrToTimePtr(task.ScheduledAt),
 		OperatorScope:   task.CreateUser,
 	}, nil
 }
@@ -1472,14 +1472,44 @@ func (s *Service) resolveTaskProductName(ctx context.Context, task *software.Upg
 	return ""
 }
 
-// modelTimePtrToString 把 *model.Time 格式化成前端期望的 ISO 字符串
-// （与 CreatedAt 同款 formatTime 路径），nil 时返回空串 → JSON omitempty 不输出。
-// 用于 Task.StartedAt / EndedAt / ScheduledAt 这类可空时间字段统一序列化。
-func modelTimePtrToString(t *coremodel.Time) string {
-	if t == nil {
-		return ""
+// normalizedTime 把 DB/model 读出的时间规范为 UTC instant。
+// 后续统一响应层会按系统时区转换展示；这里不能提前按容器本地时区格式化成字符串。
+func normalizedTime(t time.Time) time.Time {
+	if t.IsZero() {
+		return time.Time{}
 	}
-	return formatTime(time.Time(*t))
+	return t.UTC()
+}
+
+// modelTimePtrToTimePtr 保留可空语义，同时把时间规范为 UTC instant。
+// 用于 Task.StartedAt / EndedAt / ScheduledAt 这类可空时间字段；nil 时 JSON omitempty 不输出。
+func modelTimePtrToTimePtr(t *coremodel.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	value := normalizedTime(time.Time(*t))
+	if value.IsZero() {
+		return nil
+	}
+	return &value
+}
+
+func optionalTimePtr(t time.Time) *time.Time {
+	value := normalizedTime(t)
+	if value.IsZero() {
+		return nil
+	}
+	return &value
+}
+
+func timePtrAfter(left, right *time.Time) bool {
+	if left == nil {
+		return false
+	}
+	if right == nil {
+		return true
+	}
+	return left.After(*right)
 }
 
 func (s *Service) mapDeviceItem(
@@ -1615,8 +1645,8 @@ func (s *Service) mapDeviceItem(
 		}
 	}
 
-	startedAt := modelTimePtrToString(subTask.StartedAt)
-	endedAt := modelTimePtrToString(subTask.CompletedAt)
+	startedAt := modelTimePtrToTimePtr(subTask.StartedAt)
+	endedAt := modelTimePtrToTimePtr(subTask.CompletedAt)
 	failureReason := subTask.FailureReason
 	// issue #655 追加：被操作者主动终止的子任务，多半在「未进入执行态」前就被叫停，
 	// 因此 sub_task.started_at 一般为空。前端列「开始时间 / 结束时间」只有结束、没开始
@@ -1625,7 +1655,7 @@ func (s *Service) mapDeviceItem(
 	// failure_reason 留空，前端「失败原因」列空着不够直观——补「终止」短标，CSV 走
 	// translateFailureReason 找不到映射会原样返回，三端口径一致。
 	if result == "terminated" {
-		if startedAt == "" && endedAt != "" {
+		if startedAt == nil && endedAt != nil {
 			startedAt = endedAt
 		}
 		if failureReason == "" {
@@ -1658,8 +1688,8 @@ func (s *Service) mapDeviceItem(
 		// terminated 特例：startedAt 兜底 = endedAt，failureReason 兜底 = "终止"。
 		StartedAt:     startedAt,
 		EndedAt:       endedAt,
-		LastReportAt:  formatTime(lastReport),
-		CreatedAt:     formatTime(time.Time(subTask.CreatedAt)),
+		LastReportAt:  optionalTimePtr(lastReport),
+		CreatedAt:     optionalTimePtr(time.Time(subTask.CreatedAt)),
 		OperatorScope: parent.CreateUser,
 		FailureReason: failureReason,
 		FailureDetail: subTask.ErrorMessage,

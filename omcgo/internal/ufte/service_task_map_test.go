@@ -2,16 +2,37 @@ package ufte
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	coremodel "github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/software"
 )
+
+type ufteTestTZProvider struct{ loc *time.Location }
+
+func (p ufteTestTZProvider) Location(context.Context) *time.Location { return p.loc }
+
+func withUFTETestTimezone(t *testing.T, loc *time.Location) {
+	t.Helper()
+	response.SetTimezoneProvider(ufteTestTZProvider{loc: loc})
+	t.Cleanup(func() { response.SetTimezoneProvider(nil) })
+}
+
+func assertTimePtrEqual(t *testing.T, want time.Time, got *time.Time, msgAndArgs ...any) {
+	t.Helper()
+	require.NotNil(t, got, msgAndArgs...)
+	assert.True(t, got.Equal(want), msgAndArgs...)
+}
 
 // TestMapTask_SerializesStartedAndEndedAt 锁定 issue #571 修复：
 // 任务管理列表的「开始时间 / 结束时间」依赖 mapTask 把 software.UpgradeTask
@@ -41,9 +62,9 @@ func TestMapTask_SerializesStartedAndEndedAt(t *testing.T) {
 
 		got, err := svc.mapTask(context.Background(), catalog, task)
 		require.NoError(t, err)
-		assert.Equal(t, "2026-06-23T08:00:00Z", got.StartedAt, "startedAt 应使用 task.StartedAt 而非 createdAt")
-		assert.Equal(t, "2026-06-23T08:15:30Z", got.EndedAt, "endedAt 应使用 task.EndedAt（已结束态才有值）")
-		assert.Equal(t, "2026-06-23T07:30:00Z", got.ScheduledAt)
+		assertTimePtrEqual(t, startedAt, got.StartedAt, "startedAt 应使用 task.StartedAt 而非 createdAt")
+		assertTimePtrEqual(t, endedAt, got.EndedAt, "endedAt 应使用 task.EndedAt（已结束态才有值）")
+		assertTimePtrEqual(t, scheduledAt, got.ScheduledAt)
 		assert.NotEqual(t, got.CreatedAt, got.EndedAt, "endedAt 不应错用 createdAt（修复前的 bug 表象）")
 	})
 
@@ -63,9 +84,9 @@ func TestMapTask_SerializesStartedAndEndedAt(t *testing.T) {
 
 		got, err := svc.mapTask(context.Background(), catalog, task)
 		require.NoError(t, err)
-		assert.Equal(t, "2026-06-23T08:00:00Z", got.StartedAt)
-		assert.Empty(t, got.EndedAt, "未结束任务 endedAt 应为空串（JSON omitempty 不输出）")
-		assert.Empty(t, got.ScheduledAt, "非预约模式 scheduledAt 应为空串")
+		assertTimePtrEqual(t, startedAt, got.StartedAt)
+		assert.Nil(t, got.EndedAt, "未结束任务 endedAt 应为空（JSON omitempty 不输出）")
+		assert.Nil(t, got.ScheduledAt, "非预约模式 scheduledAt 应为空")
 	})
 
 	t.Run("pending_task_both_times_empty", func(t *testing.T) {
@@ -79,18 +100,56 @@ func TestMapTask_SerializesStartedAndEndedAt(t *testing.T) {
 		}
 		got, err := svc.mapTask(context.Background(), catalog, task)
 		require.NoError(t, err)
-		assert.Empty(t, got.StartedAt)
-		assert.Empty(t, got.EndedAt)
+		assert.Nil(t, got.StartedAt)
+		assert.Nil(t, got.EndedAt)
 	})
 }
 
-// TestModelTimePtrToString 单独覆盖时间序列化 helper 的两条路径，便于失败时定位。
-func TestModelTimePtrToString(t *testing.T) {
+func TestMapTask_ResponseTimezoneUsesSystemTimezone(t *testing.T) {
+	utc, err := time.LoadLocation("UTC")
+	require.NoError(t, err)
+	shanghai, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	withUFTETestTimezone(t, utc)
+
+	svc := newServiceForMap(t)
+	catalog := mustCatalog(t, "RUNTIME_LOG_COLLECT")
+	task := &software.UpgradeTask{
+		ID:           uuid.New(),
+		TaskName:     "log-utc-display",
+		TaskType:     software.TaskTypeLogCollect,
+		ProductClass: "4G eNB",
+		Status:       software.TaskPending,
+		CreatedAt:    coremodel.Time(time.Date(2026, 6, 23, 15, 0, 0, 0, shanghai)),
+	}
+	mapped, err := svc.mapTask(context.Background(), catalog, task)
+	require.NoError(t, err)
+
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/ufte/tasks", nil)
+	response.OK(c, mapped)
+
+	var env struct {
+		Data struct {
+			CreatedAt string `json:"createdAt"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &env))
+	assert.Equal(t, "2026-06-23T07:00:00Z", env.Data.CreatedAt)
+}
+
+// TestModelTimePtrToTimePtr 单独覆盖时间 helper 的两条路径，便于失败时定位。
+func TestModelTimePtrToTimePtr(t *testing.T) {
 	t.Run("nil_returns_empty", func(t *testing.T) {
-		assert.Empty(t, modelTimePtrToString(nil))
+		assert.Nil(t, modelTimePtrToTimePtr(nil))
 	})
-	t.Run("valid_returns_rfc3339", func(t *testing.T) {
-		value := coremodel.Time(time.Date(2026, 6, 23, 8, 15, 30, 0, time.UTC))
-		assert.Equal(t, "2026-06-23T08:15:30Z", modelTimePtrToString(&value))
+	t.Run("valid_returns_utc_time_pointer", func(t *testing.T) {
+		shanghai := time.FixedZone("CST", 8*3600)
+		want := time.Date(2026, 6, 23, 8, 15, 30, 0, time.UTC)
+		value := coremodel.Time(time.Date(2026, 6, 23, 16, 15, 30, 0, shanghai))
+		got := modelTimePtrToTimePtr(&value)
+		assertTimePtrEqual(t, want, got)
 	})
 }
