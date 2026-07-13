@@ -7,7 +7,9 @@ import type {
   MMLImportedScriptReplaceInput,
   MMLScriptExecutionInput,
   MMLScriptImportValidation,
+  MMLTask,
   MMLTaskResultsStats,
+  MMLTaskStatus,
 } from '../../types/mml';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 import { mmlService } from '../../mock/services/mmlService';
@@ -15,6 +17,14 @@ import { MMLScriptImportApiError, mmlApi } from '../../services/api/mmlApi';
 import { createApiSwitch } from '../../services/apiSwitch';
 
 const api = createApiSwitch(mmlService, mmlApi);
+
+export const MML_TASK_LIST_ACTIVE_REFETCH_INTERVAL_MS = 3000;
+const MML_TASK_LIST_ACTIVE_STATUSES = new Set<MMLTaskStatus>(['pending', 'running', 'paused']);
+
+export function getMMLTasksRefetchInterval(data?: { items?: Array<Pick<MMLTask, 'status'>> }) {
+  const hasActiveTask = data?.items?.some((task) => MML_TASK_LIST_ACTIVE_STATUSES.has(task.status)) ?? false;
+  return hasActiveTask ? MML_TASK_LIST_ACTIVE_REFETCH_INTERVAL_MS : false;
+}
 
 export function useMMLCommands(params: { keyword?: string; category?: string } & PageRequest) {
   return useQuery({
@@ -55,6 +65,8 @@ export function useMMLTasks(
   return useQuery({
     queryKey: ['mml', 'tasks', params],
     queryFn: () => api.getTasks(params),
+    refetchInterval: (query) => getMMLTasksRefetchInterval(query.state.data),
+    refetchIntervalInBackground: false,
   });
 }
 
