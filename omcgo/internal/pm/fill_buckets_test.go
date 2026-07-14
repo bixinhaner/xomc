@@ -250,6 +250,114 @@ func Test_fillEmptyBuckets_FilledRowUsesRequestedMetricType(t *testing.T) {
 	assert.Equal(t, metrics.MetricTypeCounter, c2.MetricType)
 }
 
+func Test_fillEmptyBuckets_ExplicitObjectLDNsKeepMissingObjects(t *testing.T) {
+	bucket := time.Date(2026, 7, 14, 7, 45, 0, 0, time.UTC)
+	objectWithData := "Cellid=1,PLMN=46000"
+	objectWithoutData := "Cellid=2,PLMN=46000"
+	mt := metrics.MetricTypeKPI
+
+	rows := fillEmptyBuckets([]aggregator.Row{
+		{
+			DeviceOUI:   "48BF74",
+			DeviceSN:    "1202000240194DP0015",
+			MetricPath:  "K900010052",
+			DisplayName: "同频切换成功率-切出",
+			MetricType:  metrics.MetricTypeKPI,
+			MetricValue: 12.3,
+			Granularity: metrics.Granularity15Min,
+			Time:        bucket,
+			StartTime:   bucket,
+			EndTime:     bucket.Add(15 * time.Minute),
+			ObjectLDN:   &objectWithData,
+		},
+	}, aggregator.QueryRequest{
+		Dimension:   aggregator.DimensionDevice,
+		Granularity: metrics.Granularity15Min,
+		DeviceSNs:   []string{"1202000240194DP0015"},
+		MetricPaths: []string{"K900010052"},
+		MetricType:  &mt,
+		ObjectLDNs:  []string{objectWithData, objectWithoutData},
+		StartTime:   bucket,
+		EndTime:     bucket.Add(15 * time.Minute),
+	})
+
+	require.Len(t, rows, 2)
+	assert.False(t, rows[0].Filled)
+	assert.Equal(t, objectWithData, *rows[0].ObjectLDN)
+
+	missing := rows[1]
+	require.NotNil(t, missing.ObjectLDN)
+	assert.Equal(t, objectWithoutData, *missing.ObjectLDN)
+	assert.Equal(t, "K900010052", missing.MetricPath)
+	assert.Equal(t, "同频切换成功率-切出", missing.DisplayName)
+	assert.Equal(t, metrics.MetricTypeKPI, missing.MetricType)
+	assert.True(t, missing.Filled)
+	assert.Equal(t, bucket, missing.Time)
+}
+
+func Test_fillEmptyBuckets_ExplicitObjectLDNsFillWhenNoRealRows(t *testing.T) {
+	bucket := time.Date(2026, 7, 14, 7, 45, 0, 0, time.UTC)
+	objectLDN := "Cellid=2,PLMN=46000"
+
+	rows := fillEmptyBuckets(nil, aggregator.QueryRequest{
+		Dimension:   aggregator.DimensionDevice,
+		Granularity: metrics.Granularity15Min,
+		DeviceOUIs:  []string{"48BF74"},
+		DeviceSNs:   []string{"1202000240194DP0015"},
+		MetricPaths: []string{"K900010052"},
+		ObjectLDNs:  []string{objectLDN},
+		StartTime:   bucket,
+		EndTime:     bucket.Add(15 * time.Minute),
+	})
+
+	require.Len(t, rows, 1)
+	row := rows[0]
+	assert.True(t, row.Filled)
+	assert.Equal(t, "48BF74", row.DeviceOUI)
+	assert.Equal(t, "1202000240194DP0015", row.DeviceSN)
+	assert.Equal(t, "K900010052", row.MetricPath)
+	assert.Equal(t, metrics.MetricTypeKPI, row.MetricType)
+	require.NotNil(t, row.ObjectLDN)
+	assert.Equal(t, objectLDN, *row.ObjectLDN)
+	assert.Equal(t, bucket, row.Time)
+	assert.Equal(t, bucket, row.StartTime)
+	assert.Equal(t, bucket.Add(15*time.Minute), row.EndTime)
+}
+
+func Test_fillEmptyBuckets_ExplicitObjectSkeletonRequest(t *testing.T) {
+	start := time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)
+	req := aggregator.QueryRequest{
+		DeviceSNs:   []string{"SN1"},
+		ObjectLDNs:  []string{"Cellid=1"},
+		MetricPaths: []string{"A"},
+		Granularity: metrics.Granularity15Min,
+		StartTime:   start,
+		EndTime:     start.Add(15 * time.Minute),
+	}
+
+	assert.True(t, aggregator.IsExplicitObjectSkeletonRequest(req))
+	req.ObjectLDNs = nil
+	assert.False(t, aggregator.IsExplicitObjectSkeletonRequest(req))
+	req.ObjectLDNs = []string{"Cellid=1"}
+	req.DeviceSNs = []string{"SN1", "SN2"}
+	assert.False(t, aggregator.IsExplicitObjectSkeletonRequest(req))
+}
+
+func Test_fillEmptyBuckets_AutoDiscoverObjectSkeletonRequest(t *testing.T) {
+	start := time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)
+	req := aggregator.QueryRequest{
+		DeviceSNs:   []string{"SN1"},
+		MetricPaths: []string{"A"},
+		Granularity: metrics.Granularity15Min,
+		StartTime:   start,
+		EndTime:     start.Add(15 * time.Minute),
+	}
+
+	assert.True(t, aggregator.CanAutoDiscoverObjectSkeletonRequest(req))
+	req.ObjectLDNs = []string{"Cellid=1"}
+	assert.False(t, aggregator.CanAutoDiscoverObjectSkeletonRequest(req))
+}
+
 // Test_fillEmptyBuckets_GuardsNotDeviceDimensionOrMultiSN
 // 验收 5（守卫）：非 device 维度 / 多 SN → 原样返回不补。
 func Test_fillEmptyBuckets_GuardsNotDeviceDimensionOrMultiSN(t *testing.T) {

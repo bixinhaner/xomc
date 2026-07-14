@@ -270,6 +270,17 @@ func (r *Runner) buildDashboardLikeSource(ctx context.Context, task *Task, loc a
 	if terr != nil {
 		return nil, nil, csvLayout{}, terr
 	}
+	if shouldAutoDiscoverExportSkeleton(task.SourceType, req) {
+		if r.aggr == nil {
+			return nil, nil, csvLayout{}, fmt.Errorf("aggregator not wired for kpi query skeleton export")
+		}
+		discovered, aerr := r.aggr.DiscoverObjectLDNs(ctx, req)
+		if aerr != nil {
+			return nil, nil, csvLayout{}, aerr
+		}
+		req.ObjectLDNs = discovered
+		objectLDNs = discovered
+	}
 	// 发现列集（编号+类型，与设备/小区无关）→ 解析本地化列名。
 	keys, derr := discoverMetricColumns(ctx, r.metricDB, table, req.MetricPaths, req.StartTime, req.EndTime)
 	if derr != nil {
@@ -279,12 +290,28 @@ func (r *Runner) buildDashboardLikeSource(ctx context.Context, task *Task, loc a
 
 	// device 维度且表含行级 id → (time,id) keyset 直查；否则（聚合维度 / 无 id 的 device 表）走聚合批次游标。
 	if dim == aggregator.DimensionDevice && tableHasIDColumn(table) {
-		return newDashboardDeviceSource(r.metricDB, table, req, objectLDNs), cols, layout, nil
+		src := RowSource(newDashboardDeviceSource(r.metricDB, table, req, objectLDNs))
+		if shouldFillExportSkeleton(task.SourceType, req) {
+			src = newFillEmptySource(src, req)
+		}
+		return src, cols, layout, nil
 	}
 	if r.aggr == nil {
 		return nil, nil, csvLayout{}, fmt.Errorf("aggregator not wired for dashboard aggregate export")
 	}
-	return newDashboardAggregateSource(r.aggr, req, objectLDNs), cols, layout, nil
+	src := RowSource(newDashboardAggregateSource(r.aggr, req, objectLDNs))
+	if shouldFillExportSkeleton(task.SourceType, req) {
+		src = newFillEmptySource(src, req)
+	}
+	return src, cols, layout, nil
+}
+
+func shouldAutoDiscoverExportSkeleton(source SourceType, req aggregator.QueryRequest) bool {
+	return source == SourceKpiQuery && aggregator.CanAutoDiscoverObjectSkeletonRequest(req)
+}
+
+func shouldFillExportSkeleton(source SourceType, req aggregator.QueryRequest) bool {
+	return source == SourceKpiQuery && aggregator.IsExplicitObjectSkeletonRequest(req)
 }
 
 type adhocTaskMeta struct {

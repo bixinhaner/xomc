@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -80,4 +81,35 @@ func Test_Count_Network_SubqueryCount(t *testing.T) {
 	assert.Equal(t, 42, n)
 	assert.Contains(t, gotSQL, "SELECT COUNT(*) FROM (")
 	assert.Contains(t, gotSQL, "GROUP BY metric_path, granularity, time")
+}
+
+func Test_DiscoverObjectLDNs_IgnoresRequestedMetricPath(t *testing.T) {
+	var gotSQL string
+	db := &stubDB{}
+	db.queryFn = func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+		gotSQL = sql
+		return &fakeRows{rows: [][]any{{"Cellid=1"}, {"Cellid=2"}}}, nil
+	}
+	a := New(db, nil, nil)
+	start := time.Date(2026, 7, 14, 14, 45, 0, 0, time.UTC)
+
+	ldns, err := a.DiscoverObjectLDNs(context.Background(), QueryRequest{
+		Granularity: metrics.Granularity15Min,
+		Dimension:   DimensionDevice,
+		DeviceSNs:   []string{"SN-1"},
+		MetricPaths: []string{"K-MISSING"},
+		StartTime:   start,
+		EndTime:     start.Add(3 * time.Hour),
+		Limit:       5000,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Cellid=1", "Cellid=2"}, ldns)
+	assert.Contains(t, gotSQL, "SELECT DISTINCT object_ldn")
+	assert.Contains(t, gotSQL, "FROM pm_metrics")
+	assert.Contains(t, gotSQL, "object_ldn <> ''")
+	assert.Contains(t, gotSQL, "device_sn")
+	assert.Contains(t, gotSQL, "ORDER BY object_ldn")
+	assert.NotContains(t, gotSQL, "metric_path")
+	assert.NotContains(t, gotSQL, "LIMIT")
 }

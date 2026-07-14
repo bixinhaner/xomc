@@ -221,6 +221,56 @@ func (a *Aggregator) Count(ctx context.Context, q QueryRequest) (int, error) {
 	}
 }
 
+// DiscoverObjectLDNs 返回同设备、同时间窗下实际出现过的 object_ldn 列表。
+// 用于 "全部小区" 查询补骨架：请求未显式传 object_ldns 时，后端从同一粒度表发现展示全集。
+// 指标过滤在这里刻意清空，否则当前指标完全无数据时无法发现 object 集合。
+func (a *Aggregator) DiscoverObjectLDNs(ctx context.Context, q QueryRequest) ([]string, error) {
+	if q.Dimension == "" {
+		q.Dimension = DimensionDevice
+	}
+	if !CanAutoDiscoverObjectSkeletonRequest(q) {
+		return nil, nil
+	}
+	table, err := SelectTable(q.Granularity, q.Dimension)
+	if err != nil {
+		return nil, err
+	}
+	discoverReq := q
+	discoverReq.MetricPaths = nil
+	discoverReq.MetricType = nil
+	discoverReq.ObjectLDNs = nil
+	discoverReq.Limit = 0
+	discoverReq.Offset = 0
+
+	qb := storage.Psql.Select("DISTINCT object_ldn").
+		From(table).
+		Where("object_ldn <> ''").
+		OrderBy("object_ldn")
+	qb = applyDeviceFilters(qb, discoverReq)
+	sqlStr, args, err := qb.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("aggregator.DiscoverObjectLDNs build: %w", err)
+	}
+	rows, err := a.db.Query(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, fmt.Errorf("aggregator.DiscoverObjectLDNs exec: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]string, 0)
+	for rows.Next() {
+		var ldn string
+		if err := rows.Scan(&ldn); err != nil {
+			return nil, fmt.Errorf("aggregator.DiscoverObjectLDNs scan: %w", err)
+		}
+		out = append(out, ldn)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("aggregator.DiscoverObjectLDNs rows: %w", err)
+	}
+	return out, nil
+}
+
 func (a *Aggregator) scanCount(ctx context.Context, qb sq.SelectBuilder) (int, error) {
 	sqlStr, args, err := qb.ToSql()
 	if err != nil {

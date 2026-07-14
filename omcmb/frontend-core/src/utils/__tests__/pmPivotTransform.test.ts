@@ -146,6 +146,29 @@ describe('pivotLongToWide', () => {
     expect(formatPivotNumber(r.rows[0].cells['M1'])).toBe('-');
   });
 
+  it('后端返回已选 object 的 filled 空值骨架时保留 object 行并显示占位符', () => {
+    const r = pivotLongToWide([
+      row({
+        metricPath: 'K900010052',
+        displayName: '同频切换成功率-切出',
+        metricValue: 12.3,
+        objectLdn: 'Cellid=1,PLMN=46000',
+      }),
+      row({
+        metricPath: 'K900010052',
+        displayName: '同频切换成功率-切出',
+        metricValue: null,
+        filled: true,
+        objectLdn: 'Cellid=2,PLMN=46000',
+      }),
+    ]);
+
+    expect(r.rows).toHaveLength(2);
+    const missing = r.rows.find((x) => x.objectLdn === 'Cellid=2,PLMN=46000')!;
+    expect(missing.cells['K900010052']).toBeNull();
+    expect(formatPivotNumber(missing.cells['K900010052'])).toBe('-');
+  });
+
   it('非有限数按缺值处理，避免表格/导出出现 NaN', () => {
     const r = pivotLongToWide([
       row({ metricPath: 'M1', metricValue: Number.NaN }),
