@@ -139,6 +139,7 @@ export interface QuickSettingsInstanceContext {
 
 const DEVICE_LEVEL_QUICK_SETTINGS_GROUP_IDS = new Set([
   'device-time',
+  'gnb-sync-source',
   'device-ipsec-control',
   'device-ipsec',
   'gnb-ipsec',

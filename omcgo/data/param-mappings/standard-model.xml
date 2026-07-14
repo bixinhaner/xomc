@@ -453,7 +453,7 @@
         <param standardPath="Device.DeviceInfo.cbsdCategory" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.DeviceInfo.cellModeIdx" access="READ_ONLY" type="INT" changeApplies="Immediate" max="4"/>
         <param standardPath="Device.DeviceInfo.highFrequency" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="Device.DeviceInfo.iForcedSyncControlSwitch" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="Device.DeviceInfo.iForcedSyncControlSwitch" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="1"/>
         <param standardPath="Device.DeviceInfo.indoorDeployment" access="READ_WRITE" type="INT" changeApplies="Immediate"/>
         <param standardPath="Device.DeviceInfo.lowFrequency" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.DeviceInfo.supportedN48N78SharedRf" access="READ_ONLY" type="STRING" changeApplies="Immediate" max="5"/>
