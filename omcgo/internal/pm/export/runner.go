@@ -270,6 +270,17 @@ func (r *Runner) buildDashboardLikeSource(ctx context.Context, task *Task, loc a
 	if terr != nil {
 		return nil, nil, csvLayout{}, terr
 	}
+	if shouldAutoDiscoverExportSkeleton(task.SourceType, req) {
+		if r.aggr == nil {
+			return nil, nil, csvLayout{}, fmt.Errorf("aggregator not wired for kpi query skeleton export")
+		}
+		discovered, aerr := r.aggr.DiscoverObjectLDNs(ctx, req)
+		if aerr != nil {
+			return nil, nil, csvLayout{}, aerr
+		}
+		req.ObjectLDNs = discovered
+		objectLDNs = discovered
+	}
 	// 发现列集（编号+类型，与设备/小区无关）→ 解析本地化列名。
 	keys, derr := discoverMetricColumns(ctx, r.metricDB, table, req.MetricPaths, req.StartTime, req.EndTime)
 	if derr != nil {
@@ -295,14 +306,12 @@ func (r *Runner) buildDashboardLikeSource(ctx context.Context, task *Task, loc a
 	return src, cols, layout, nil
 }
 
+func shouldAutoDiscoverExportSkeleton(source SourceType, req aggregator.QueryRequest) bool {
+	return source == SourceKpiQuery && aggregator.CanAutoDiscoverObjectSkeletonRequest(req)
+}
+
 func shouldFillExportSkeleton(source SourceType, req aggregator.QueryRequest) bool {
-	return source == SourceKpiQuery &&
-		req.Dimension != aggregator.DimensionDeviceGroup &&
-		len(req.DeviceSNs) == 1 &&
-		len(req.ObjectLDNs) > 0 &&
-		len(req.MetricPaths) > 0 &&
-		!req.StartTime.IsZero() &&
-		req.EndTime.After(req.StartTime)
+	return source == SourceKpiQuery && aggregator.IsExplicitObjectSkeletonRequest(req)
 }
 
 type adhocTaskMeta struct {

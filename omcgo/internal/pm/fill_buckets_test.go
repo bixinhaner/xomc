@@ -343,6 +343,21 @@ func Test_fillEmptyBuckets_ExplicitObjectSkeletonRequest(t *testing.T) {
 	assert.False(t, aggregator.IsExplicitObjectSkeletonRequest(req))
 }
 
+func Test_fillEmptyBuckets_AutoDiscoverObjectSkeletonRequest(t *testing.T) {
+	start := time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)
+	req := aggregator.QueryRequest{
+		DeviceSNs:   []string{"SN1"},
+		MetricPaths: []string{"A"},
+		Granularity: metrics.Granularity15Min,
+		StartTime:   start,
+		EndTime:     start.Add(15 * time.Minute),
+	}
+
+	assert.True(t, aggregator.CanAutoDiscoverObjectSkeletonRequest(req))
+	req.ObjectLDNs = []string{"Cellid=1"}
+	assert.False(t, aggregator.CanAutoDiscoverObjectSkeletonRequest(req))
+}
+
 // Test_fillEmptyBuckets_GuardsNotDeviceDimensionOrMultiSN
 // 验收 5（守卫）：非 device 维度 / 多 SN → 原样返回不补。
 func Test_fillEmptyBuckets_GuardsNotDeviceDimensionOrMultiSN(t *testing.T) {

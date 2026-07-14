@@ -13,8 +13,9 @@ import (
 // 已返回的真实行（Filled=false），按 (object_ldn 归一, Time) 分组；对每个**已存在**的分组，
 // req.MetricPaths 里缺失的指标补一行占位。
 //
-// 当请求显式带 object_ldns + start/end + granularity 时，object_ldns 是用户本次选择的展示全集；
-// 此时按查询条件补齐 (object_ldn × 时间桶 × 指标) 骨架。缺数据 object 不应从结果消失。
+// 当请求带 object_ldns + start/end + granularity 时，object_ldns 是本次展示全集：
+// 它可以来自用户显式选择，也可以来自后端自动发现出的"全部小区"对象集。此时按查询条件补齐
+// (object_ldn × 时间桶 × 指标) 骨架，缺数据 object 不应从结果消失。
 //
 // 仅 device 维度（单 SN）+ metric_paths 非空时启用；多 SN / 组维度原样返回。
 func FillEmptyBuckets(rows []Row, req QueryRequest) []Row {
@@ -131,10 +132,19 @@ func fillMetricType(repType metrics.MetricType, requested *metrics.MetricType) m
 }
 
 func IsExplicitObjectSkeletonRequest(req QueryRequest) bool {
+	return isDeviceObjectSkeletonBaseRequest(req) &&
+		len(req.ObjectLDNs) > 0
+}
+
+func CanAutoDiscoverObjectSkeletonRequest(req QueryRequest) bool {
+	return isDeviceObjectSkeletonBaseRequest(req) &&
+		len(req.ObjectLDNs) == 0
+}
+
+func isDeviceObjectSkeletonBaseRequest(req QueryRequest) bool {
 	return req.Dimension != DimensionDeviceGroup &&
 		req.Dimension != DimensionAggregateGroup &&
 		len(req.DeviceSNs) == 1 &&
-		len(req.ObjectLDNs) > 0 &&
 		len(req.MetricPaths) > 0 &&
 		req.Granularity != "" &&
 		!req.StartTime.IsZero() &&

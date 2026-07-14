@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
+	"github.com/omcgo/omcgo/internal/pm/aggregator"
 )
 
 // ── stub repo / uploader / source ────────────────────────────────────────────
@@ -221,6 +222,47 @@ func TestRunner_BuildSource_UsesStoredEnglishLocaleWithoutRequestContext(t *test
 	require.NoError(t, err)
 	require.Len(t, adhocDB.queries, 2)
 	assert.Contains(t, adhocDB.queries[1].sql, "COALESCE(NULLIF(en_name, ''), cn_name)")
+}
+
+func TestRunner_BuildSource_KpiQueryAutoDiscoversObjectLDNsForSkeletonExport(t *testing.T) {
+	start := time.Date(2026, 7, 14, 7, 0, 0, 0, time.UTC)
+	end := start.Add(30 * time.Minute)
+	params, err := json.Marshal(DashboardParams{
+		Granularity: "15min",
+		Dimension:   "device",
+		DeviceSNs:   []string{"SN1"},
+		MetricPaths: []string{"K001"},
+		StartTime:   start.Format(time.RFC3339),
+		EndTime:     end.Format(time.RFC3339),
+	})
+	require.NoError(t, err)
+
+	metricDB := &recordingExportQuerier{results: []pgx.Rows{
+		&adhocFakeRows{rows: [][]any{{"Cellid=1"}, {"Cellid=2"}}}, // DiscoverObjectLDNs
+		&adhocFakeRows{}, // 指标名解析无命中，列名回退指标编号
+	}}
+	runner := NewRunner(RunnerDeps{
+		MetricDB: metricDB,
+		Aggr:     aggregator.New(metricDB, nil, nil),
+	})
+
+	src, _, _, err := runner.buildSource(context.Background(), &Task{
+		ID:         uuid.New(),
+		SourceType: SourceKpiQuery,
+		Params:     params,
+	})
+	require.NoError(t, err)
+
+	filled, ok := src.(*fillEmptySource)
+	require.True(t, ok)
+	assert.Equal(t, []string{"Cellid=1", "Cellid=2"}, filled.req.ObjectLDNs)
+
+	deviceSrc, ok := filled.src.(*dashboardDeviceSource)
+	require.True(t, ok)
+	assert.Equal(t, []string{"Cellid=1", "Cellid=2"}, deviceSrc.objectLDNs)
+	require.NotEmpty(t, metricDB.queries)
+	assert.Contains(t, metricDB.queries[0].sql, "SELECT DISTINCT object_ldn")
+	assert.NotContains(t, metricDB.queries[0].sql, "metric_path", "当前指标完全没数据时也要能发现对象全集")
 }
 
 // ── 预 running 守门：payload 坏 / 缺 task_id 直接返 error，不动任务 ─────────────

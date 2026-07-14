@@ -454,6 +454,14 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 	// 仅 device 维度（单 OUI+SN）+ metric_paths 非空时启用。
 	fillEmpty := c.Query("fill_empty") == "true"
 	if fillEmpty {
+		if aggregator.CanAutoDiscoverObjectSkeletonRequest(req) {
+			objectLDNs, err := h.aggr.DiscoverObjectLDNs(c.Request.Context(), req)
+			if err != nil {
+				commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+				return
+			}
+			req.ObjectLDNs = objectLDNs
+		}
 		rows = fillEmptyBuckets(rows, req)
 		// 占位行可能因「该指标本次无任何真实行」而 DisplayName 为空（fillEmptyBuckets 的 nameByPath
 		// 只从真实行收集）；整体按指标库再回填一次，使占位行与真实行同口径取名，避免透视表列头
