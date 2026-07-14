@@ -26,7 +26,7 @@ import { prefetchDeviceDetailContext, useDeviceList, useBatchRebootDevices, useD
 import { useProductList } from '@core/hooks/api/useProducts';
 import { useDictionaryBatch } from '@core/hooks/api/useSystem';
 import { resolveNetworkTypeLabel } from '@core/utils/networkType';
-import { activationStatusLabelOf, activationStatusOf } from '@core/utils/activationStatus';
+import { activationStatusLabelOf, displayActivationStatusLabelOf, displayActivationStatusOf } from '@core/utils/activationStatus';
 import { formatDeviceSyncStatus, getDeviceSyncStatusKind, normalizeDeviceSyncStatus } from '@core/utils/deviceSyncStatus';
 import { expandSelectedGroupIds } from '@core/utils/deviceGroupFilter';
 import { withDeviceGroupDisplayName } from '@core/utils/deviceGroupDisplay';
@@ -1224,11 +1224,11 @@ export default function DeviceList() {
   // ™ 判定口径由 frontend-core/utils/activationStatus.ts 统一控管——
   // V1 列表与详情统一调用同一函数，
   // 在上层各自渲染 Tag/文本。修改判定请只改 utility。
-  const renderActivationStatus = useCallback((opState: string | undefined | null) => {
-    const status = activationStatusOf(opState);
+  const renderActivationStatus = useCallback((opState: string | undefined | null, isOnline: boolean | undefined | null) => {
+    const status = displayActivationStatusOf(opState, isOnline);
     if (status == null) return '-';
     const isActive = status === 'active';
-    const label = activationStatusLabelOf(opState, opStateDict?.sysDictionaryDetails, {
+    const label = displayActivationStatusLabelOf(opState, isOnline, opStateDict?.sysDictionaryDetails, {
       active: t('status.active'),
       inactive: t('status.inactive'),
     }, appLocale);
@@ -1460,7 +1460,15 @@ export default function DeviceList() {
         width: 140,
         group: 'common',
         // 激活状态 = 设备是否曾首次上线（op_state），与在线/小区状态正交。
-        render: (_val, record) => renderActivationStatus(record.opState),
+        render: (_val, record) => renderActivationStatus(record.opState, record.isOnline),
+      },
+      {
+        key: 'mmeStatus',
+        title: t('device.mmeStatus'),
+        dataIndex: 'mmeStatus',
+        width: 130,
+        group: 'common',
+        render: (_val, record) => record.mmeStatus || '-',
       },
       {
         key: 'ueCount',
@@ -1494,7 +1502,7 @@ export default function DeviceList() {
         group: 'common',
         // 原始 JSP: 支持多小区 "on,off,on"，汇总 + [N/M] Popover
         render: (_val, record) => renderMultiCellStatus(
-          record.rfStatus,
+          record.isOnline === false ? 'off' : record.rfStatus,
           ['on', '1', '3'],
           { on: t('status.rfOn'), off: t('status.rfOff'), title: t('device.multiCellStatus') },
           { on: 'success', off: 'error', mixed: 'warning' },
@@ -1807,11 +1815,13 @@ export default function DeviceList() {
           return v === -1 || v == null ? '--' : String(v);
         }
         case 'opState': {
-          return activationStatusLabelOf(record.opState, opStateDict?.sysDictionaryDetails, {
+          return displayActivationStatusLabelOf(record.opState, record.isOnline, opStateDict?.sysDictionaryDetails, {
             active: t('status.active'),
             inactive: t('status.inactive'),
           }, appLocale) || '-';
         }
+        case 'rfStatus':
+          return record.isOnline === false ? t('status.rfOff') : (record.rfStatus || '');
         default: {
           const v = dataIndex ? (record as unknown as Record<string, unknown>)[dataIndex] : undefined;
           if (Array.isArray(v)) return v.join(', ');

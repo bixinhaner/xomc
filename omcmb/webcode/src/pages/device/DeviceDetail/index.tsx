@@ -38,7 +38,7 @@ import { useDeviceBySn, useDeviceGroups, useSyncDeviceParams } from '@core/hooks
 import { deviceParameterApi } from '@core/services/api/deviceParameterApi';
 import { deviceApi } from '@core/services/api/deviceApi';
 import { useDictionary } from '@core/hooks/api/useSystem';
-import { activationStatusLabelOf, activationStatusOf } from '@core/utils/activationStatus';
+import { displayActivationStatusLabelOf, displayActivationStatusOf } from '@core/utils/activationStatus';
 import { useQuickSettingsGroups } from '@core/hooks/api/useQuickSettings';
 import { useResolvedCellInstances } from '@core/hooks/api/useResolvedCellInstances';
 import { useAcknowledgeAlarms, useClearAlarms, useCurrentAlarms, useUnacknowledgeAlarms } from '@core/hooks/api/useAlarms';
@@ -59,7 +59,7 @@ import { formatSystemTime } from '@core/utils/systemTime';
 import { useAppStore } from '@core/store/appStore';
 import { formatDeviceSyncStatus, getDeviceSyncStatusKind, normalizeDeviceSyncStatus } from '@core/utils/deviceSyncStatus';
 import { computeCumulativeOnlineDurationSeconds, computeCurrentOnlineDurationSeconds } from '@core/utils/onlineDuration';
-import { rfStatusLabelOf, rfStatusOf } from '@core/utils/rfStatus';
+import { displayRFStatusLabelOf, displayRFStatusOf } from '@core/utils/rfStatus';
 import { buildDeviceGroupDisplayName } from '@core/utils/deviceGroupDisplay';
 import { resolveNetworkTypeLabel } from '@core/utils/networkType';
 import { localizeDeviceProductName } from '@core/utils/deviceDisplay';
@@ -872,21 +872,22 @@ const buildCellRecords = (device: Device, detailCells?: DeviceDetailCell[]): Cel
 
 const renderCellOpState = (
   value: string | undefined,
+  isOnline: boolean | undefined | null,
   t: ReturnType<typeof useT>,
   details?: { label?: string; value?: string; status?: boolean }[],
   locale: 'zh-CN' | 'en-US' = 'zh-CN',
 ) => {
-  const status = activationStatusOf(value);
+  const status = displayActivationStatusOf(value, isOnline);
   if (status == null) return '-';
-  const label = activationStatusLabelOf(value, details, {
+  const label = displayActivationStatusLabelOf(value, isOnline, details, {
     active: t('status.active'),
     inactive: t('status.inactive'),
   }, locale);
   return <Tag color={status === 'active' ? 'success' : 'error'}>{label}</Tag>;
 };
 
-const renderCellRfStatus = (value: string | undefined, t: ReturnType<typeof useT>) => {
-  const kind = rfStatusOf(value);
+const renderCellRfStatus = (value: string | undefined, isOnline: boolean | undefined | null, t: ReturnType<typeof useT>) => {
+  const kind = displayRFStatusOf(value, isOnline);
   if (!kind) return '-';
   const labels = {
     on: t('status.rfOn'),
@@ -894,7 +895,7 @@ const renderCellRfStatus = (value: string | undefined, t: ReturnType<typeof useT
     error: t('status.failed'),
   };
   const color = kind === 'on' ? 'success' : 'error';
-  return <Tag color={color}>{rfStatusLabelOf(value, labels)}</Tag>;
+  return <Tag color={color}>{displayRFStatusLabelOf(value, isOnline, labels)}</Tag>;
 };
 
 const renderCellAdminState = (
@@ -1815,6 +1816,7 @@ export default function DeviceDetail() {
     }
     return normalizeNetworkType(displayDevice?.networkType);
   }, [activeBmTech, displayDevice?.networkType, isBmProduct]);
+  const displayDeviceIsOnline = displayDevice?.isOnline;
 
   const activeDetailCells = isBmProduct && activeBmTech === 'GSM'
     ? detailComposite?.gsmCells
@@ -1843,6 +1845,7 @@ export default function DeviceDetail() {
         render: column.key === 'opState'
           ? (_: unknown, row: CellRecord) => renderCellOpState(
             row.values.opState as string | undefined,
+            displayDeviceIsOnline,
             t,
             opStateDict?.sysDictionaryDetails,
             appLocale,
@@ -1854,13 +1857,17 @@ export default function DeviceDetail() {
               t,
             )
           : column.key === 'rfStatus'
-            ? (_: unknown, row: CellRecord) => renderCellRfStatus(row.values.rfStatus as string | undefined, t)
+            ? (_: unknown, row: CellRecord) => renderCellRfStatus(
+              row.values.rfStatus as string | undefined,
+              displayDeviceIsOnline,
+              t,
+            )
           : isLteBandwidth
             ? (_: unknown, row: CellRecord) => formatLteBandwidthDisplay(row.values.bandwidth as string | undefined)
             : (value: string | number | undefined) => value ?? '-',
       };
     }),
-    [appLocale, displayCellNetworkType, isBtsProduct, opStateDict?.sysDictionaryDetails, t],
+    [appLocale, displayCellNetworkType, displayDeviceIsOnline, isBtsProduct, opStateDict?.sysDictionaryDetails, t],
   );
 
   if (isLoading) {
@@ -1915,10 +1922,10 @@ export default function DeviceDetail() {
               详情页小区表列标题已拆为 device.cellOpState「小区激活态」，避免同名误解。
             */}
             {(() => {
-              const status = activationStatusOf(displayDevice.opState);
+              const status = displayActivationStatusOf(displayDevice.opState, displayDevice.isOnline);
               if (status == null) return '-';
               const isActive = status === 'active';
-              const label = activationStatusLabelOf(displayDevice.opState, opStateDict?.sysDictionaryDetails, {
+              const label = displayActivationStatusLabelOf(displayDevice.opState, displayDevice.isOnline, opStateDict?.sysDictionaryDetails, {
                 active: t('status.active'),
                 inactive: t('status.inactive'),
               }, appLocale);

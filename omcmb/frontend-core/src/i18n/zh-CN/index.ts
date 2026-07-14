@@ -1590,7 +1590,7 @@ const messages: Record<string, string> = {
   //  定词，与设备级 device.opState 视觉区分。
   'device.cellOpState':         '小区激活态',
   'device.ueCount':             'UE数',
-  'device.mmeStatus':           'MME状态',
+  'device.mmeStatus':           'MME连接状态',
   'device.amfStatus':           'AMF状态',
   'device.rfStatus':            '射频状态',
   'device.pmReportStatus':      'KPI上报状态',

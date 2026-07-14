@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { activationStatusLabelOf, activationStatusOf } from '../activationStatus';
+import {
+  activationStatusLabelOf,
+  activationStatusOf,
+  displayActivationStatusLabelOf,
+  displayActivationStatusOf,
+} from '../activationStatus';
 
 describe('activationStatusOf — 共享的“激活状态”判定单一来源', () => {
   it('"1" → active', () => {
@@ -60,5 +65,15 @@ describe('activationStatusOf — 共享的“激活状态”判定单一来源',
 
     expect(activationStatusLabelOf('1', details, { active: 'Active', inactive: 'Inactive' }, 'en-US')).toBe('Active');
     expect(activationStatusLabelOf('0', details, { active: 'Active', inactive: 'Inactive' }, 'en-US')).toBe('Not Activated');
+  });
+
+  it('设备离线时展示口径强制为未激活，即使原始 op_state 仍是激活', () => {
+    const details = [
+      { value: '0', label: 'Deactive', status: true },
+      { value: '1', label: 'Active', status: true },
+    ];
+
+    expect(displayActivationStatusOf('1', false)).toBe('inactive');
+    expect(displayActivationStatusLabelOf('1', false, details, { active: 'Active', inactive: 'Inactive' })).toBe('Deactive');
   });
 });

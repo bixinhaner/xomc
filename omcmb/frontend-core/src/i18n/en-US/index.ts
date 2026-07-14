@@ -1586,7 +1586,7 @@ const messages: Record<string, string> = {
   //   says active / detail cell row says inactive' to be mis-reported as a bug.
   'device.cellOpState':         'Cell Op State',
   'device.ueCount':             'UE Count',
-  'device.mmeStatus':           'MME Status',
+  'device.mmeStatus':           'MME Connection Status',
   'device.amfStatus':           'AMF Status',
   'device.rfStatus':            'RF Status',
   'device.pmReportStatus':      'PM Report Status',

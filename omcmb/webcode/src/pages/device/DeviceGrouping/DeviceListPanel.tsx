@@ -156,7 +156,8 @@ export default function DeviceListPanel({
             hideColumnSettings
             hideDensity
             defaultDensity="default"
-            scroll={{ x: 'max-content', y: 100 }}
+            scroll={{ x: 'max-content' }}
+            autoFitHeight
             showRowNumber
             rowNumberTitle={t('table.rowNumber')}
           />
@@ -173,17 +174,12 @@ export default function DeviceListPanel({
         .device-list-table-wrapper .ant-spin-nested-loading,
         .device-list-table-wrapper .ant-spin-nested-loading > div,
         .device-list-table-wrapper .ant-table,
-        .device-list-table-wrapper .ant-table-container {
+        .device-list-table-wrapper .ant-table-container,
+        .device-list-table-wrapper .ant-table-body {
           display: flex !important;
           flex-direction: column !important;
           flex: 1 !important;
           min-height: 0 !important;
-        }
-        .device-list-table-wrapper .ant-table-body {
-          flex: 1 !important;
-          min-height: 0 !important;
-          overflow-y: auto !important;
-          max-height: none !important;
         }
         .device-list-table-wrapper .ant-table-thead > tr > th,
         .device-list-table-wrapper .ant-table-tbody > tr > td {
