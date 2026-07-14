@@ -145,3 +145,23 @@ func TestAdminHandler_CreateGroup_Happy_201(t *testing.T) {
 
 	require.Equal(t, http.StatusCreated, w.Code, "body=%s", w.Body.String())
 }
+
+func TestAdminHandler_ListStandardParams_BindsQueryFilters(t *testing.T) {
+	svc, _, standardParams, _ := newAdminServiceForList()
+	h := NewAdminHandler(svc, stubCommandReader{}, zap.NewNop())
+	router := setupAdminRouter(h)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/mml/admin/standard-params?q=device.test.test5&entry_type=parameter&page=2&page_size=30",
+		nil,
+	)
+	router.ServeHTTP(w, r)
+
+	require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+	assert.Equal(t, "device.test.test5", standardParams.lastFilter.Search)
+	assert.Equal(t, "parameter", standardParams.lastFilter.EntryType)
+	assert.Equal(t, 2, standardParams.lastFilter.Page)
+	assert.Equal(t, 30, standardParams.lastFilter.PageSize)
+}

@@ -38,10 +38,12 @@ func (f *fakeCommandLister) GetByID(_ context.Context, id uuid.UUID) (*MMLComman
 
 // fakeStandardParamRepo 桩 standard_params 仓储。autofill 派生测试用。
 type fakeStandardParamRepo struct {
-	byID map[uuid.UUID]*StandardParamView
+	byID       map[uuid.UUID]*StandardParamView
+	lastFilter StandardParamFilter
 }
 
-func (f *fakeStandardParamRepo) List(_ context.Context, _ StandardParamFilter) (*model.ListResponse[StandardParamView], error) {
+func (f *fakeStandardParamRepo) List(_ context.Context, filter StandardParamFilter) (*model.ListResponse[StandardParamView], error) {
+	f.lastFilter = filter
 	items := make([]StandardParamView, 0, len(f.byID))
 	for _, v := range f.byID {
 		items = append(items, *v)
