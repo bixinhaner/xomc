@@ -157,11 +157,17 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
           <Form.Item label="周期时间" name="periodTime" rules={[{ required: true, message: '请选择周期执行时间' }]}><TimePicker style={{ width: '100%' }} /></Form.Item>
         </> : null}
         <Space direction="vertical" style={{ width: '100%' }}>
-          <Form.Item name="offlineRetry" valuePropName="checked" noStyle><Checkbox>离线等待重试</Checkbox></Form.Item>
+          <div
+            aria-label="重试选项"
+            role="group"
+            style={{ display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}
+          >
+            <Form.Item name="offlineRetry" valuePropName="checked" noStyle><Checkbox>离线等待重试</Checkbox></Form.Item>
+            <Form.Item name="failedRetry" valuePropName="checked" noStyle><Checkbox>失败重试</Checkbox></Form.Item>
+          </div>
           {showOfflineRetryWait ? (
             <Form.Item name="offlineRetryWait" label="离线等待（秒）"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>
           ) : null}
-          <Form.Item name="failedRetry" valuePropName="checked" noStyle><Checkbox>失败重试</Checkbox></Form.Item>
           {showFailedRetryInputs ? <>
             <Form.Item name="failedRetryCount" label="失败重试次数"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
             <Form.Item name="failedRetryInterval" label="失败重试间隔（秒）"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>

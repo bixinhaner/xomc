@@ -199,6 +199,11 @@ describe('ScriptExecutionDrawer', () => {
     expect(screen.queryByLabelText('失败重试次数')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('失败重试间隔（秒）')).not.toBeInTheDocument();
 
+    const retryOptionRow = screen.getByRole('group', { name: '重试选项' });
+    expect(retryOptionRow).toHaveStyle({ display: 'flex' });
+    expect(retryOptionRow).toContainElement(screen.getByRole('checkbox', { name: '离线等待重试' }));
+    expect(retryOptionRow).toContainElement(screen.getByRole('checkbox', { name: '失败重试' }));
+
     await user.click(screen.getByRole('radio', { name: '定时' }));
     expect(screen.getByLabelText('执行时间')).toBeInTheDocument();
     expect(screen.queryByLabelText('周期日期')).not.toBeInTheDocument();
