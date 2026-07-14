@@ -1,0 +1,42 @@
+validate:release-tag:
+  stage: validate
+  image: alpine/git:2.49.1
+  script:
+    - git fetch origin master
+    - |
+      if ! git merge-base --is-ancestor "$CI_COMMIT_SHA" origin/master; then
+        echo "Release tags must point to commits reachable from master: $CI_COMMIT_TAG"
+        exit 1
+      fi
+    - |
+      echo "Validated release tag $CI_COMMIT_TAG for commit $CI_COMMIT_SHA"
+
+image:build:release:
+  stage: package
+  image: $DOCKER_VERSION_IMAGE
+  services:
+    - name: docker:29-dind
+      command: ["--tls=false"]
+  needs:
+    - validate:release-tag
+    - backend:quality
+    - frontend:quality
+    - backend:govulncheck
+    - frontend:audit
+  parallel:
+    matrix:
+      - SERVICE: ["app", "acs", "worker", "web"]
+  script:
+    - VERSION="${CI_COMMIT_TAG#v}"
+    - DEV_IMAGE="$OMC_DEV_REGISTRY/omc/$SERVICE:$VERSION"
+    - PRD_IMAGE="$OMC_PRD_REGISTRY/omc/$SERVICE:$VERSION"
+    - EXTRA_BUILD_ARGS=""
+    - if [ "$SERVICE" = "web" ]; then EXTRA_BUILD_ARGS="--build-arg APP_VERSION=$VERSION"; fi
+    - docker build --network host -t "$DEV_IMAGE" -f "deployments/docker/Dockerfile.$SERVICE" --build-arg APK_MIRROR=mirrors.aliyun.com $EXTRA_BUILD_ARGS .
+    - echo "$OMC_DEV_REGISTRY_PASSWORD" | docker login "$OMC_DEV_REGISTRY" -u "$OMC_DEV_REGISTRY_USER" --password-stdin
+    - docker push "$DEV_IMAGE"
+    - docker tag "$DEV_IMAGE" "$PRD_IMAGE"
+    - echo "$OMC_PRD_REGISTRY_PASSWORD" | docker login "$OMC_PRD_REGISTRY" -u "$OMC_PRD_REGISTRY_USER" --password-stdin
+    - docker push "$PRD_IMAGE"
+    - docker image inspect "$DEV_IMAGE" --format "$SERVICE image=$DEV_IMAGE id={{.Id}} created={{.Created}}"
+    - docker image inspect "$PRD_IMAGE" --format "$SERVICE image=$PRD_IMAGE id={{.Id}} created={{.Created}}"

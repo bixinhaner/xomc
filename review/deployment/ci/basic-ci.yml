@@ -1,0 +1,58 @@
+variables:
+  GIT_DEPTH: "0"
+  GO_VERSION_IMAGE: "golang:1.25-alpine"
+  NODE_VERSION_IMAGE: "node:22-alpine"
+  DOCKER_VERSION_IMAGE: "docker:29"
+  DOCKER_HOST: "tcp://docker:2375"
+  DOCKER_TLS_CERTDIR: ""
+  GOVULNCHECK_VERSION: "v1.3.0"
+  GOPROXY: "https://goproxy.cn,https://proxy.golang.org,direct"
+  NPM_CONFIG_REGISTRY: "https://registry.npmmirror.com"
+  OMC_DEV_REGISTRY: "$CI_DEV_REGISTRY"
+  OMC_DEV_REGISTRY_USER: "$CI_DEV_REGISTRY_USER"
+  OMC_DEV_REGISTRY_PASSWORD: "$CI_DEV_REGISTRY_PASSWORD"
+  OMC_PRD_REGISTRY: "$CI_PRD_REGISTRY"
+  OMC_PRD_REGISTRY_USER: "$CI_PRD_REGISTRY_USER"
+  OMC_PRD_REGISTRY_PASSWORD: "$CI_PRD_REGISTRY_PASSWORD"
+
+backend:quality:
+  stage: quality
+  image: $GO_VERSION_IMAGE
+  before_script:
+    - apk add --no-cache git
+  script:
+    - cd omcgo
+    - go vet ./...
+    - go test ./...
+    - go build ./...
+
+frontend:quality:
+  stage: quality
+  image: $NODE_VERSION_IMAGE
+  before_script:
+    - npm config set registry "$NPM_CONFIG_REGISTRY"
+  script:
+    - cd omcmb
+    - npm ci --include=dev --legacy-peer-deps
+    - npm run typecheck
+    - npm test --workspace webcode
+    - npm run build --workspace webcode
+
+backend:govulncheck:
+  stage: security
+  image: $GO_VERSION_IMAGE
+  before_script:
+    - apk add --no-cache git
+  script:
+    - go install "golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION"
+    - cd omcgo
+    - govulncheck ./...
+
+frontend:audit:
+  stage: security
+  image: $NODE_VERSION_IMAGE
+  before_script:
+    - npm config set registry "$NPM_CONFIG_REGISTRY"
+  script:
+    - cd omcmb
+    - npm audit --audit-level=high --omit=dev
