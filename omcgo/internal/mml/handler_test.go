@@ -134,6 +134,10 @@ func (m *hTaskRepo) ListByScriptID(ctx context.Context, scriptID uuid.UUID, req 
 	return model.NewListResponse([]MMLTask{}, 0, req.Page, req.PageSize), nil
 }
 
+func (m *hTaskRepo) GetActiveByScriptID(context.Context, uuid.UUID) (*MMLTask, error) {
+	return nil, commonerrors.ErrNotFound
+}
+
 func (m *hTaskRepo) UpdateExportAggregate(ctx context.Context, id uuid.UUID, objectKey string, t time.Time) error {
 	return nil
 }
