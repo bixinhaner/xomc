@@ -1059,6 +1059,63 @@ func TestHandler_ResetPassword_AuditIncludesOperatorAndRequestMetadata(t *testin
 	}
 }
 
+func TestHandler_ChangePassword_AuditIncludesCurrentUserAndRequestMetadata(t *testing.T) {
+	userID := uuid.New()
+	createdAudit := make(chan *AuditLog, 1)
+	auditRepo := &handlerMockAuditRepoWithCapture{
+		createFn: func(_ context.Context, log *AuditLog) error {
+			if log.Action == "password_change" {
+				createdAudit <- log
+			}
+			return nil
+		},
+	}
+	userRepo := &handlerMockUserRepo{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*User, error) {
+			return &User{ID: id, Username: "admin", PasswordHash: handlerHashPassword("Old@123456")}, nil
+		},
+	}
+	jwt, err := NewJWTService("test-secret-key-minimum-32-chars!!")
+	require.NoError(t, err)
+	svc := NewAdminService(userRepo, &handlerMockRoleRepo{}, &handlerMockMenuRepo{}, auditRepo, jwt, zap.NewNop())
+	h := NewHandler(svc, zap.NewNop())
+	h.SetAllowPlaintextPassword(true)
+
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		attachAuthContext(c, userID, "admin", true, []string{"admin"}, nil)
+		c.Next()
+	})
+	h.RegisterAuthenticatedRoutes(r.Group("/api/v1"))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/change-password",
+		handlerJSON(ChangePasswordHTTPRequest{
+			OldPassword: "Old@123456",
+			NewPassword: "New@123456",
+		}))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Forwarded-For", "203.0.113.72")
+	req.Header.Set("User-Agent", "password-change-audit-test/1.0")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	select {
+	case got := <-createdAudit:
+		require.NotNil(t, got.UserID)
+		assert.Equal(t, userID, *got.UserID)
+		assert.Equal(t, "admin", got.Username)
+		assert.Equal(t, "203.0.113.72", got.IPAddress)
+		assert.Equal(t, "password-change-audit-test/1.0", got.UserAgent)
+		assert.Equal(t, userID.String(), got.Details["target_user_id"])
+		serialized := fmt.Sprintf("%+v", got)
+		assert.NotContains(t, serialized, "Old@123456")
+		assert.NotContains(t, serialized, "New@123456")
+	case <-time.After(2 * time.Second):
+		t.Fatal("password_change audit log was not created")
+	}
+}
+
 func TestHandler_ResetPassword_MissingPassword_NoUseDefault_Rejects(t *testing.T) {
 	target := uuid.New()
 	userRepo := &handlerMockUserRepo{

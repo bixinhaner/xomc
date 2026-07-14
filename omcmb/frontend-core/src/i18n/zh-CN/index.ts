@@ -2791,6 +2791,7 @@ const messages: Record<string, string> = {
   // User dropdown
   // -------------------------------------------------------------------------
   'user.changePassword':  '修改密码',
+  'user.currentAccount':  '当前账号：{username}',
   'user.logout':          '退出登录',
   'user.notLoggedIn':     '未登录',
   'user.switchToEn':      'Switch to English',
