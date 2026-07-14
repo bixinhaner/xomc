@@ -250,7 +250,7 @@ type UpdateUserRequest struct {
 //
 // 两路径都不满足 → handler 返 400 missing password。
 type LoginRequest struct {
-	Username          string `json:"username" binding:"required"`
+	Username          string `json:"username"`
 	EncryptedPassword string `json:"encrypted_password"`
 	KeyID             string `json:"key_id"`
 	Password          string `json:"password"` // T-0120 plaintext fallback (config gated)

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"regexp"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -26,9 +25,6 @@ func userContextWithOperator(c *gin.Context) context.Context {
 	return ctx
 }
 
-// usernameRegex 用户名格式校验：只允许字母、数字、下划线、减号（issue #686）。
-var usernameRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
-
 func (h *Handler) CreateUser(c *gin.Context) {
 	var httpReq CreateUserHTTPRequest
 	if err := c.ShouldBindJSON(&httpReq); err != nil {
@@ -43,9 +39,9 @@ func (h *Handler) CreateUser(c *gin.Context) {
 	httpReq.Phone = phone
 
 	// issue #686：用户名格式校验（只允许字母、数字、下划线、减号）。
-	if !usernameRegex.MatchString(httpReq.Username) {
+	if err := validateUsername(httpReq.Username); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			errors.New("username can only contain letters, numbers, underscores and hyphens"))
+			err)
 		return
 	}
 
