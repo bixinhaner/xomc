@@ -164,7 +164,10 @@ func (h *Handler) Login(c *gin.Context) {
 		h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, auditIP, userAgent, reason)
 		h.recordLoginLog(req.Username, auditIP, userAgent, false, reason)
 
-		if h.loginGuard != nil {
+		// 账号级失败计数只接受真实密码错误。账号已锁定、已禁用、已过期或
+		// 用户不存在时不得继续累计，否则会反复调用 LockUserByUsername 延长锁定。
+		// IPGuard 仍在下方对所有登录失败计数，保留用户名枚举/撞库的来源级防护。
+		if h.loginGuard != nil && errors.Is(err, errLoginWrongPassword) {
 			count, _ := h.loginGuard.RecordFailure(ctx, req.Username)
 			// 阈值与锁定时长从 sys_configs (category='security') 读：
 			//   sumTimes   → ShouldLock 阈值
