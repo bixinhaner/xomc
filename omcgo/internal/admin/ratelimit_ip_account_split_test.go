@@ -17,6 +17,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
@@ -162,4 +163,82 @@ func TestLoginGuard_PerUsernameIsolation(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), bCount, "B 的失败计数独立，不被 A 污染")
 	assert.False(t, lg.ShouldLock(ctx, bCount), "B 仅 1 次不应锁")
+}
+
+func TestLockedAccount_LoginDoesNotIncrementFailureCount(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+
+	const username = "admin"
+	lockedUntil := time.Now().Add(30 * time.Minute)
+	userRepo := &handlerMockUserRepo{
+		getByUsernameFn: func(_ context.Context, gotUsername string) (*User, error) {
+			assert.Equal(t, username, gotUsername)
+			return &User{
+				ID:           uuid.New(),
+				Username:     username,
+				PasswordHash: handlerHashPassword("correct"),
+				Status:       UserStatusActive,
+				LockedUntil:  &lockedUntil,
+			}, nil
+		},
+	}
+	jwt, err := NewJWTService("test-secret-key-minimum-32-chars!!")
+	require.NoError(t, err)
+	svc := NewAdminService(userRepo, &handlerMockRoleRepo{}, &handlerMockMenuRepo{}, &handlerMockAuditRepo{}, jwt, zap.NewNop())
+	h := NewHandler(svc, zap.NewNop())
+	h.SetAllowPlaintextPassword(true)
+
+	loginGuard := NewLoginGuard(client)
+	loginGuard.SetPolicy(NewSecurityPolicy(&policyMockQuerier{entries: map[string]string{
+		"security.sumTimes":   "5",
+		"security.unlockMinu": "30",
+	}}))
+	h.SetLoginGuard(loginGuard)
+	for i := 0; i < 5; i++ {
+		_, err := loginGuard.RecordFailure(context.Background(), username)
+		require.NoError(t, err)
+	}
+
+	r := gin.New()
+	r.POST("/api/v1/auth/login", h.Login)
+	w := doLogin(t, r, username, "203.0.113.74")
+	require.Equal(t, http.StatusForbidden, w.Code)
+	_, bizCode := loginErrMsg(t, w.Body.Bytes())
+	assert.Equal(t, 7012, bizCode)
+	assert.Equal(t, int64(5), loginGuard.GetFailedCount(context.Background(), username),
+		"锁定期间再次登录不得增加失败计数，否则会再次触发 LockUserByUsername 并延长锁定")
+}
+
+func TestWrongPassword_LoginStillIncrementsFailureCount(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+
+	const username = "alice"
+	userRepo := &handlerMockUserRepo{
+		getByUsernameFn: func(_ context.Context, gotUsername string) (*User, error) {
+			return &User{
+				ID:           uuid.New(),
+				Username:     gotUsername,
+				PasswordHash: handlerHashPassword("correct"),
+				Status:       UserStatusActive,
+			}, nil
+		},
+	}
+	jwt, err := NewJWTService("test-secret-key-minimum-32-chars!!")
+	require.NoError(t, err)
+	svc := NewAdminService(userRepo, &handlerMockRoleRepo{}, &handlerMockMenuRepo{}, &handlerMockAuditRepo{}, jwt, zap.NewNop())
+	h := NewHandler(svc, zap.NewNop())
+	h.SetAllowPlaintextPassword(true)
+	loginGuard := NewLoginGuard(client)
+	h.SetLoginGuard(loginGuard)
+
+	r := gin.New()
+	r.POST("/api/v1/auth/login", h.Login)
+	w := doLogin(t, r, username, "203.0.113.75")
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Equal(t, int64(1), loginGuard.GetFailedCount(context.Background(), username),
+		"真实密码错误仍必须进入账号级暴力破解计数")
 }
