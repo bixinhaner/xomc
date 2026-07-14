@@ -292,6 +292,13 @@ interface DeviceDetailInfo {
   connectedBscIp?: string;
 }
 
+function isParameterSyncAlreadyRunningError(err: unknown) {
+  const e = err as { bizCode?: number; response?: { data?: { biz_code?: number; code?: number } }; message?: string } | null;
+  const code = e?.bizCode ?? e?.response?.data?.biz_code ?? e?.response?.data?.code;
+  const msg = e?.message ?? '';
+  return code === 1305 || code === 1205 || msg.includes('parameter sync already running');
+}
+
 interface BackendDeviceDetailCell {
   index: number;
   cell_id?: string;
@@ -1517,6 +1524,10 @@ export default function DeviceDetail() {
                     },
                     onError: (err) => {
                       useQuickSettingsFeedbackStore.getState().finishQuickSettingsSync(deviceId);
+                      if (isParameterSyncAlreadyRunningError(err)) {
+                        void refetchParamSyncStatus();
+                        return;
+                      }
                       const errMsg = err instanceof Error ? err.message : t('device.detail.deviceFetchTriggerFailed');
                       message.error(errMsg);
                     },
@@ -1551,6 +1562,10 @@ export default function DeviceDetail() {
               },
               onError: (err) => {
                 useQuickSettingsFeedbackStore.getState().finishQuickSettingsSync(deviceId);
+                if (isParameterSyncAlreadyRunningError(err)) {
+                  void refetchParamSyncStatus();
+                  return;
+                }
                 const errMsg = err instanceof Error ? err.message : t('device.detail.deviceFetchTriggerFailed');
                 message.error(errMsg);
               },

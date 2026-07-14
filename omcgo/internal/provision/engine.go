@@ -409,10 +409,10 @@ func (e *ProvisioningEngine) HandleDeviceOnline(ctx context.Context, evt device.
 	// silent skip 任何 err，不阻塞 Path B 同步主流程。
 	e.bindDeviceProductIfNeeded(ctx, dev)
 
-	// SourceID 是裸 UUID（写入 device_tasks.source_id UUID 列做溯源）；reason="device_online"
-	// 通过 WithReason 走 Redis 通道传给 HandleSyncResultPathB 打差异日志（T-0127）。
-	sourceID := evt.DeviceID.String()
-	used, _, err := e.syncService.StartPathBSync(ctx, dev, sourceID, WithReason("device_online"))
+	// Empty sourceID lets SyncService allocate a per-run UUID. Do not reuse
+	// device_id here, otherwise multiple automatic sync rounds share one
+	// source_id and their open tasks contaminate each other.
+	used, gpvTaskCount, err := e.syncService.StartPathBSync(ctx, dev, "", WithReason("device_online"))
 	if err != nil {
 		e.logger.Warn("device.online: StartPathBSync failed",
 			zap.String("device_id", evt.DeviceID.String()),
@@ -424,10 +424,17 @@ func (e *ProvisioningEngine) HandleDeviceOnline(ctx context.Context, evt device.
 			zap.String("device_id", evt.DeviceID.String()))
 		return nil
 	}
+	if gpvTaskCount == 0 {
+		e.logger.Info("device.online: Path B sync skipped (already running or no GPV task)",
+			zap.String("device_id", evt.DeviceID.String()),
+			zap.String("serial_number", evt.SerialNumber))
+		return nil
+	}
 
 	e.logger.Info("device.online: Path B sync initiated",
 		zap.String("device_id", evt.DeviceID.String()),
 		zap.String("serial_number", evt.SerialNumber),
+		zap.Int("gpv_tasks", gpvTaskCount),
 	)
 	return nil
 }
@@ -496,8 +503,9 @@ func (e *ProvisioningEngine) HandleFirmwareChanged(ctx context.Context, evt devi
 
 	// 4. 调 RequestModelUpload：log.Status=Discovering → Upload 真入队（handleDataModelFileReceived 会自动触发 Path B）；
 	//    log.Status=Completed (enable_filetype11=false) 或 err → 走 step 5 兜底
-	// SourceID 是裸 UUID 写入 device_tasks.source_id；reason="firmware_changed" 走 Redis 通道。
-	sourceID := evt.DeviceID.String()
+	// Empty sourceID lets SyncService allocate a per-run UUID for the direct
+	// Path B fallback. Model upload keeps using its discovery log source below.
+	sourceID := uuid.NewString()
 	var modelUploadEnqueued bool
 	if e.modelUploadService != nil {
 		log, uploadErr := e.modelUploadService.RequestModelUpload(ctx, dev, sourceID)
@@ -528,7 +536,7 @@ func (e *ProvisioningEngine) HandleFirmwareChanged(ctx context.Context, evt devi
 				zap.String("device_id", evt.DeviceID.String()))
 			return nil
 		}
-		used, _, syncErr := e.syncService.StartPathBSync(ctx, dev, sourceID, WithReason("firmware_changed"))
+		used, _, syncErr := e.syncService.StartPathBSync(ctx, dev, "", WithReason("firmware_changed"))
 		if syncErr != nil {
 			e.logger.Warn("firmware.changed: direct Path B fallback failed",
 				zap.String("device_id", evt.DeviceID.String()),
@@ -821,7 +829,7 @@ func (e *ProvisioningEngine) transitionTask(ctx context.Context, task *Provision
 //   - **completed**：当前不在此回调内推进 ProvisioningTask（多个子任务/响应分摊推进
 //     由 HandleRPCResult 和 handleGPVResponse 各自路径处理）；此回调只对 failed 兜底。
 func (e *ProvisioningEngine) OnTaskCompleted(ctx context.Context, t *task.Task) {
-	if t == nil || t.SourceID == "" {
+	if t == nil {
 		return
 	}
 	if t.Status == task.TaskStatusCompleted {
@@ -829,6 +837,9 @@ func (e *ProvisioningEngine) OnTaskCompleted(ctx context.Context, t *task.Task) 
 		return
 	}
 	if t.Status != task.TaskStatusFailed && t.Status != task.TaskStatusExpired {
+		return
+	}
+	if t.SourceID == "" {
 		return
 	}
 	ptID, err := uuid.Parse(t.SourceID)

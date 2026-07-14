@@ -506,10 +506,16 @@ func (h *ParameterTreeHandler) GetSyncStatus(c *gin.Context) {
 		if summaryReader, ok := taskSvc.(syncGPVSummaryReader); ok {
 			if summary, err := summaryReader.LatestSyncGPVSummaryByDevice(c.Request.Context(), dev.SerialNumber); err == nil && summary != nil {
 				lastSync := gin.H{
-					"source_id":          summary.SourceID,
-					"task_count":         summary.TaskCount,
-					"first_created_at":   summary.FirstCreatedAt,
-					"wall_clock_seconds": summary.WallClockSeconds,
+					"source_id":             summary.SourceID,
+					"task_count":            summary.TaskCount,
+					"successful_commands":   summary.SuccessfulCommands,
+					"failed_commands":       summary.FailedCommands,
+					"requested_path_count":  summary.RequestedPathCount,
+					"successful_path_count": summary.SuccessfulPathCount,
+					"failed_path_count":     summary.FailedPathCount,
+					"failed_paths":          summary.FailedPaths,
+					"first_created_at":      summary.FirstCreatedAt,
+					"wall_clock_seconds":    summary.WallClockSeconds,
 				}
 				if summary.LastCompletedAt != nil {
 					lastSync["last_completed_at"] = summary.LastCompletedAt

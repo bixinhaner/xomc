@@ -181,9 +181,9 @@ func (p *PeriodicSyncer) enqueueBatch(ctx context.Context, devices []*model.Devi
 				}
 			}
 
-			// SourceID 是裸 UUID 写入 device_tasks.source_id；reason="periodic" 走 Redis 通道。
-			sourceID := d.ID.String()
-			used, _, err := p.syncer.StartPathBSync(ctx, d, sourceID, WithReason("periodic"))
+			// Empty sourceID lets SyncService allocate a per-run UUID, avoiding
+			// cross-run contamination for recurring automatic syncs.
+			used, _, err := p.syncer.StartPathBSync(ctx, d, "", WithReason("periodic"))
 
 			countMu.Lock()
 			defer countMu.Unlock()

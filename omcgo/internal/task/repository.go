@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"time"
 )
 
 // TaskReader 提供任务的读取和查询操作
@@ -17,6 +18,9 @@ type TaskReader interface {
 
 	// GetPendingByDevice 获取设备的所有 pending 状态任务
 	GetPendingByDevice(ctx context.Context, deviceSN string) ([]*Task, error)
+
+	// ListSentByDeviceBefore 获取设备已发送且早于指定时间的任务
+	ListSentByDeviceBefore(ctx context.Context, deviceSN string, sentBefore time.Time, limit int) ([]*Task, error)
 
 	// CountByStatus 统计各状态任务数量
 	CountByStatus(ctx context.Context, deviceSN string) (map[TaskStatus]int64, error)

@@ -116,10 +116,10 @@ export default function LicenseParamsTab({ deviceId }: LicenseParamsTabProps) {
         void message.success(t('device.licenseParam.refreshHint'));
       },
       onError: (err) => {
-        // 后端 ErrCodeRuleTaskRunning 复用为"刷新进行中"标识
+        // 后端 ErrCodeRuleTaskRunning(1305) 复用为"刷新进行中"标识；1205 兼容旧设计文档/旧服务。
         const code = extractBizCode(err);
         const msg = err instanceof Error ? err.message : '';
-        if (code === 1205 || msg.includes('license refresh already running')) {
+        if (code === 1305 || code === 1205 || msg.includes('license refresh already running')) {
           void message.warning(t('device.licenseParam.refreshThrottled'));
           return;
         }

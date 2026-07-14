@@ -129,11 +129,25 @@ type TaskListResponse struct {
 
 // SyncGPVSummary summarizes the latest Path B GetParameterValues sync task group for a device.
 type SyncGPVSummary struct {
-	SourceID         string     `json:"source_id"`
-	TaskCount        int        `json:"task_count"`
-	FirstCreatedAt   time.Time  `json:"first_created_at"`
-	LastCompletedAt  *time.Time `json:"last_completed_at,omitempty"`
-	WallClockSeconds float64    `json:"wall_clock_seconds"`
+	SourceID            string           `json:"source_id"`
+	TaskCount           int              `json:"task_count"`
+	SuccessfulCommands  int              `json:"successful_commands"`
+	FailedCommands      int              `json:"failed_commands"`
+	RequestedPathCount  int              `json:"requested_path_count"`
+	SuccessfulPathCount int              `json:"successful_path_count"`
+	FailedPathCount     int              `json:"failed_path_count"`
+	FailedPaths         []SyncGPVFailure `json:"failed_paths,omitempty"`
+	FirstCreatedAt      time.Time        `json:"first_created_at"`
+	LastCompletedAt     *time.Time       `json:"last_completed_at,omitempty"`
+	WallClockSeconds    float64          `json:"wall_clock_seconds"`
+}
+
+type SyncGPVFailure struct {
+	Path       string `json:"path,omitempty"`
+	FaultCode  int    `json:"fault_code,omitempty"`
+	FaultText  string `json:"fault_text,omitempty"`
+	CommandKey string `json:"command_key,omitempty"`
+	Status     string `json:"status,omitempty"`
 }
 
 // NewTask 创建新任务

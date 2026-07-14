@@ -1223,7 +1223,7 @@ func TestOnTaskCompleted_RecoveredSyncGPVExhausted_FinalizesPathB(t *testing.T) 
 	writer := &fakeParamSyncWriter{}
 	h.engine.SetSyncService((&SyncService{logger: zap.NewNop()}).
 		SetParamSyncWriter(writer).
-		SetPathBSyncTaskReader(&fakePathBSyncTaskReader{hasOpen: false}))
+		SetPathBSyncTaskReader(&fakePathBSyncTaskReader{hasIncomplete: false}))
 
 	h.engine.OnTaskCompleted(context.Background(), &task.Task{
 		ID:         "task-recovered-final",

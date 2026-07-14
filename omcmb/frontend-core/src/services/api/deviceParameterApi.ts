@@ -68,6 +68,11 @@ interface BackendSyncStatus {
   last_sync_gpv?: {
     source_id?: string;
     task_count?: number;
+    successful_commands?: number;
+    failed_commands?: number;
+    requested_path_count?: number;
+    successful_path_count?: number;
+    failed_path_count?: number;
     first_created_at?: string;
     last_completed_at?: string;
     wall_clock_seconds?: number;
@@ -256,6 +261,11 @@ function mapBackendSyncStatus(bs: BackendSyncStatus): ParameterSyncStatus {
     lastSyncGpv: bs.last_sync_gpv ? {
       sourceId: bs.last_sync_gpv.source_id ?? '',
       taskCount: bs.last_sync_gpv.task_count ?? 0,
+      successfulCommands: bs.last_sync_gpv.successful_commands ?? 0,
+      failedCommands: bs.last_sync_gpv.failed_commands ?? 0,
+      requestedPathCount: bs.last_sync_gpv.requested_path_count ?? 0,
+      successfulPathCount: bs.last_sync_gpv.successful_path_count ?? 0,
+      failedPathCount: bs.last_sync_gpv.failed_path_count ?? 0,
       firstCreatedAt: bs.last_sync_gpv.first_created_at,
       lastCompletedAt: bs.last_sync_gpv.last_completed_at,
       wallClockSeconds: bs.last_sync_gpv.wall_clock_seconds,

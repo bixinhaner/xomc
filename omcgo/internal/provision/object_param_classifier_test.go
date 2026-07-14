@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // ── isObjectPath ───────────────────────────────────────────────────────────
@@ -139,9 +140,24 @@ func TestBuildGPVBatches_AllPlainObject_EachIsOwnBatch(t *testing.T) {
 	assert.Equal(t, want, batches)
 }
 
-func TestBuildGPVBatches_ExpandedObjects_AdaptivePayloadBudget(t *testing.T) {
-	input := make([]string, 0, 130)
-	for i := 1; i <= 130; i++ {
+func TestBuildGPVBatches_ExpandedObjects_Within5MBBudgetSingleBatch(t *testing.T) {
+	input := make([]string, 0, 256)
+	for i := 1; i <= 256; i++ {
+		input = append(input, "DeviceGSM.Bts."+strconv.Itoa(i)+".")
+	}
+	batches := buildGPVBatches(input, 50)
+
+	require.Len(t, batches, 1)
+	assert.Len(t, batches[0], 256)
+	for _, batch := range batches {
+		assert.LessOrEqual(t, estimatedGPVNATSPayloadBytes(batch), gpvNATSPayloadBudgetBytes)
+		assert.Less(t, estimatedGPVNATSPayloadBytes(batch), natsMaxPayloadBytes)
+	}
+}
+
+func TestBuildGPVBatches_ExpandedObjects_Over5MBBudgetSplits(t *testing.T) {
+	input := make([]string, 0, 400)
+	for i := 1; i <= 400; i++ {
 		input = append(input, "DeviceGSM.Bts."+strconv.Itoa(i)+".")
 	}
 	batches := buildGPVBatches(input, 50)

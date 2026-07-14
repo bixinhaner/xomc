@@ -16,12 +16,57 @@ import (
 
 // PgTaskRepository 实现 TaskRepository 接口
 type PgTaskRepository struct {
-	pool *pgxpool.Pool
+	pool          *pgxpool.Pool
+	syncLockSlots chan struct{}
 }
 
 // NewPgTaskRepository 创建 PostgreSQL 任务仓库
 func NewPgTaskRepository(pool *pgxpool.Pool) *PgTaskRepository {
-	return &PgTaskRepository{pool: pool}
+	lockSlots := 1
+	if pool != nil {
+		lockSlots = int(pool.Config().MaxConns) / 2
+		if lockSlots < 1 {
+			lockSlots = 1
+		}
+		if lockSlots > 8 {
+			lockSlots = 8
+		}
+	}
+	return &PgTaskRepository{pool: pool, syncLockSlots: make(chan struct{}, lockSlots)}
+}
+
+// AcquireSyncGPVDeviceLock serializes sync-gpv creation for one device across
+// all application instances. The returned release function ends the otherwise
+// empty transaction, which releases the transaction-scoped advisory lock.
+func (r *PgTaskRepository) AcquireSyncGPVDeviceLock(ctx context.Context, deviceSN string) (func(), error) {
+	if r == nil || r.pool == nil {
+		return func() {}, nil
+	}
+	if r.pool.Config().MaxConns < 2 {
+		return nil, fmt.Errorf("acquire sync-gpv device lock: postgres pool requires at least 2 connections")
+	}
+	select {
+	case r.syncLockSlots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, fmt.Errorf("wait for sync-gpv lock slot: %w", ctx.Err())
+	}
+	releaseSlot := func() { <-r.syncLockSlots }
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		releaseSlot()
+		return nil, fmt.Errorf("begin sync-gpv device lock transaction: %w", err)
+	}
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", deviceSN); err != nil {
+		_ = tx.Rollback(context.Background())
+		releaseSlot()
+		return nil, fmt.Errorf("acquire sync-gpv device lock: %w", err)
+	}
+	return func() {
+		defer releaseSlot()
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = tx.Rollback(releaseCtx)
+	}, nil
 }
 
 // nilUUID converts an empty string to nil for nullable UUID columns.
@@ -367,6 +412,32 @@ func (r *PgTaskRepository) HasIncompleteSyncGPVTasksByDevice(ctx context.Context
 	return count > 0, nil
 }
 
+// HasOpenSyncGPVTasksByDevice reports whether any recent sync-gpv task is still pending/sent.
+// This is stricter than HasIncompleteSyncGPVTasksByDevice: it intentionally does not ignore a
+// source_id just because another task in that source has failed, so callers can use it as a
+// backend re-entry guard before creating a new manual sync source.
+func (r *PgTaskRepository) HasOpenSyncGPVTasksByDevice(ctx context.Context, deviceSN string) (bool, error) {
+	prefix := fmt.Sprintf("sync-gpv-%s", deviceSN)
+	query, args, err := storage.Psql.Select("COUNT(*)").
+		From("device_tasks t").
+		Where(sq.Eq{"t.device_sn": deviceSN}).
+		Where(sq.Eq{"t.method": "GetParameterValues"}).
+		Where(sq.Like{"t.command_key": prefix + "%"}).
+		Where(sq.Eq{"t.status": []TaskStatus{TaskStatusPending, TaskStatusSent}}).
+		Where(sq.Expr("t.created_at > now() - interval '24 hours'")).
+		Where(sq.NotEq{"t.expires_at": nil}).
+		Where(sq.Expr("t.expires_at > now()")).
+		ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build open sync-gpv guard query: %w", err)
+	}
+	var count int64
+	if err := r.pool.QueryRow(ctx, query, args...).Scan(&count); err != nil {
+		return false, fmt.Errorf("query open sync-gpv guard: %w", err)
+	}
+	return count > 0, nil
+}
+
 // CountOpenSyncGPVByDevice 统计近 24h 内仍未完成的参数同步 GPV task。
 //
 // 设备任务队列里还会混有 PM 初始化、MML、无 command_key 的临时 GPV，以及历史遗留 sent
@@ -416,15 +487,16 @@ func (r *PgTaskRepository) LatestSyncGPVSummaryByDevice(ctx context.Context, dev
 WITH latest AS (
   SELECT
     source_id,
-    regexp_replace(command_key, '(-r)+$', '') AS root_key,
+    command_key AS root_key,
     created_at
   FROM device_tasks
   WHERE device_sn = $1
     AND method = 'GetParameterValues'
     AND command_key LIKE 'sync-gpv-%'
+    AND command_key !~ '(-r)+$'
     AND source_id IS NOT NULL
     AND completed_at IS NOT NULL
-  ORDER BY completed_at DESC, created_at DESC
+  ORDER BY created_at DESC, completed_at DESC
   LIMIT 1
 ),
 roots AS (
@@ -481,21 +553,114 @@ run_tasks AS (
     AND t.method = 'GetParameterValues'
     AND t.completed_at IS NOT NULL
     AND t.created_at >= rb.first_root_created_at - interval '30 seconds'
+),
+requested_paths AS (
+  SELECT COUNT(DISTINCT requested.path)::int AS requested_path_count
+  FROM device_tasks root
+  JOIN run_roots r
+    ON root.source_id = r.source_id
+   AND root.command_key = r.root_key
+  CROSS JOIN LATERAL jsonb_array_elements_text(
+    COALESCE(root.params::jsonb->'names', root.params::jsonb->'paths', '[]'::jsonb)
+  ) AS requested(path)
+  WHERE root.device_sn = $1
+    AND root.method = 'GetParameterValues'
+),
+failed_path_rows AS (
+  SELECT jsonb_build_object(
+    'path', t.result::jsonb->>'bad_path',
+    'fault_code', NULLIF(t.result::jsonb->>'fault_code', '')::int,
+    'fault_text', '',
+    'command_key', t.command_key,
+    'status', t.status
+  ) AS item
+  FROM run_tasks t
+  WHERE t.status = 'completed'
+    AND t.result IS NOT NULL
+    AND COALESCE((t.result::jsonb->>'recovered')::boolean, false)
+    AND COALESCE(t.result::jsonb->>'bad_path', '') <> ''
+
+  UNION ALL
+
+  SELECT jsonb_build_object(
+    'path', fault->>'parameter_name',
+    'fault_code', NULLIF(fault->>'fault_code', '')::int,
+    'fault_text', COALESCE(fault->>'fault_string', ''),
+    'command_key', t.command_key,
+    'status', t.status
+  ) AS item
+  FROM run_tasks t
+  CROSS JOIN LATERAL jsonb_array_elements(COALESCE(t.result::jsonb->'param_faults', '[]'::jsonb)) AS fault
+  WHERE t.status IN ('failed', 'expired', 'cancelled')
+    AND t.result IS NOT NULL
+
+  UNION ALL
+
+  SELECT jsonb_build_object(
+	'path', requested.path,
+	'fault_code', t.error_code,
+	'fault_text', COALESCE(t.error_message, ''),
+	'command_key', t.command_key,
+	'status', t.status
+  ) AS item
+  FROM run_tasks t
+  CROSS JOIN LATERAL jsonb_array_elements_text(
+	COALESCE(t.params::jsonb->'names', t.params::jsonb->'paths', '[]'::jsonb)
+  ) AS requested(path)
+  WHERE t.status IN ('failed', 'expired', 'cancelled')
+	AND jsonb_array_length(COALESCE(t.result::jsonb->'param_faults', '[]'::jsonb)) = 0
+
+  UNION ALL
+
+  SELECT jsonb_build_object(
+	'path', '',
+	'fault_code', t.error_code,
+	'fault_text', COALESCE(t.error_message, ''),
+	'command_key', t.command_key,
+	'status', t.status
+  ) AS item
+  FROM run_tasks t
+  WHERE t.status IN ('failed', 'expired', 'cancelled')
+	AND jsonb_array_length(COALESCE(t.result::jsonb->'param_faults', '[]'::jsonb)) = 0
+	AND jsonb_array_length(
+	  COALESCE(t.params::jsonb->'names', t.params::jsonb->'paths', '[]'::jsonb)
+	) = 0
+),
+failed_paths AS (
+  SELECT
+    COUNT(*)::int AS failed_path_count,
+    COALESCE(jsonb_agg(item ORDER BY item->>'command_key', item->>'path'), '[]'::jsonb) AS failed_paths
+  FROM failed_path_rows
 )
 SELECT
-  source_id::text,
+  rt.source_id::text,
   COUNT(*)::int,
-  MIN(created_at),
-  MAX(completed_at),
-  EXTRACT(EPOCH FROM (MAX(completed_at) - MIN(created_at)))::float8
-FROM run_tasks
-GROUP BY source_id`
+  COUNT(*) FILTER (WHERE rt.status = 'completed')::int,
+  COUNT(*) FILTER (WHERE rt.status IN ('failed', 'expired', 'cancelled'))::int,
+  COALESCE(rp.requested_path_count, 0)::int,
+  GREATEST(COALESCE(rp.requested_path_count, 0) - COALESCE(fp.failed_path_count, 0), 0)::int,
+  COALESCE(fp.failed_path_count, 0)::int,
+  COALESCE(fp.failed_paths, '[]'::jsonb)::text,
+  MIN(rt.created_at),
+  MAX(rt.completed_at),
+  EXTRACT(EPOCH FROM (MAX(rt.completed_at) - MIN(rt.created_at)))::float8
+FROM run_tasks rt
+CROSS JOIN failed_paths fp
+CROSS JOIN requested_paths rp
+GROUP BY rt.source_id, fp.failed_path_count, fp.failed_paths, rp.requested_path_count`
 
 	var summary SyncGPVSummary
 	var completed sql.NullTime
+	var failedPathsJSON string
 	if err := r.pool.QueryRow(ctx, query, deviceSN).Scan(
 		&summary.SourceID,
 		&summary.TaskCount,
+		&summary.SuccessfulCommands,
+		&summary.FailedCommands,
+		&summary.RequestedPathCount,
+		&summary.SuccessfulPathCount,
+		&summary.FailedPathCount,
+		&failedPathsJSON,
 		&summary.FirstCreatedAt,
 		&completed,
 		&summary.WallClockSeconds,
@@ -507,6 +672,11 @@ GROUP BY source_id`
 	}
 	if completed.Valid {
 		summary.LastCompletedAt = &completed.Time
+	}
+	if failedPathsJSON != "" {
+		if err := json.Unmarshal([]byte(failedPathsJSON), &summary.FailedPaths); err != nil {
+			return nil, fmt.Errorf("decode latest sync-gpv failure paths: %w", err)
+		}
 	}
 	return &summary, nil
 }
@@ -653,6 +823,45 @@ func (r *PgTaskRepository) ListExpiredCandidates(ctx context.Context, now time.T
 			return nil, err
 		}
 		tasks = append(tasks, t)
+	}
+	return tasks, nil
+}
+
+// ListSentByDeviceBefore 查找指定设备已下发但尚未结束的任务。
+//
+// PopTask 会把任务从 Redis 队列 ZSET 移除，再把状态标成 sent；如果 CWMP 会话中断，
+// 这些任务不会留在 Redis 队列里。因此 CPE 新 Inform 时的恢复必须以 PG 的 sent 记录为准。
+func (r *PgTaskRepository) ListSentByDeviceBefore(ctx context.Context, deviceSN string, sentBefore time.Time, limit int) ([]*Task, error) {
+	q := storage.Psql.Select(taskColumns()...).
+		From("device_tasks").
+		Where(sq.Eq{"device_sn": deviceSN, "status": TaskStatusSent}).
+		Where(sq.NotEq{"sent_at": nil}).
+		Where(sq.LtOrEq{"sent_at": sentBefore}).
+		OrderBy("sent_at ASC")
+	if limit > 0 {
+		q = q.Limit(uint64(limit))
+	}
+	query, args, err := q.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list sent by device query: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query sent tasks by device: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []*Task
+	for rows.Next() {
+		t, err := r.scanTaskRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate sent tasks by device: %w", err)
 	}
 	return tasks, nil
 }

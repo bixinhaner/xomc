@@ -35,6 +35,14 @@ import (
 // （provision 依赖 device，device 不能反过来依赖 provision）。
 type SysConfigLookup func(ctx context.Context, category, key string) (value string, found bool)
 
+type syncGPVOpenGuard interface {
+	HasOpenSyncGPVTasksByDevice(ctx context.Context, deviceSN string) (bool, error)
+}
+
+type syncGPVDeviceLocker interface {
+	AcquireSyncGPVDeviceLock(ctx context.Context, deviceSN string) (release func(), err error)
+}
+
 // RenameDeviceResult describes side effects produced by RenameDevice.
 type RenameDeviceResult struct {
 	TaskID string
@@ -332,6 +340,26 @@ func (s *DeviceService) SyncDeviceParamsManual(ctx context.Context, deviceID uui
 	}
 	if s.paramSyncStarter == nil {
 		return false, dev, 0, fmt.Errorf("paramSyncStarter not configured")
+	}
+	if locker, ok := s.taskSvc.(syncGPVDeviceLocker); ok {
+		release, lockErr := locker.AcquireSyncGPVDeviceLock(ctx, dev.SerialNumber)
+		if lockErr != nil {
+			return false, dev, 0, fmt.Errorf("lock manual parameter sync: %w", lockErr)
+		}
+		defer release()
+	}
+	if guard, ok := s.taskSvc.(syncGPVOpenGuard); ok {
+		hasOpen, guardErr := guard.HasOpenSyncGPVTasksByDevice(ctx, dev.SerialNumber)
+		if guardErr != nil {
+			return false, dev, 0, fmt.Errorf("check manual sync running: %w", guardErr)
+		}
+		if hasOpen {
+			return false, dev, 0, commonerrors.NewBusinessError(
+				global.ErrCodeRuleTaskRunning,
+				"parameter sync already running for this device, try again in a few seconds",
+				commonerrors.ErrAlreadyExists,
+			)
+		}
 	}
 
 	used, gpvTaskCount, err = s.paramSyncStarter.StartManualSync(ctx, dev, sourceID, parameterPaths)

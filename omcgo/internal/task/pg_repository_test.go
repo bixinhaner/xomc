@@ -138,6 +138,38 @@ func TestPgRepo_Integration_NewPgTaskRepository(t *testing.T) {
 	require.Equal(t, pool, repo.pool)
 }
 
+func TestPgRepo_Integration_AcquireSyncGPVDeviceLockSerializesByDevice(t *testing.T) {
+	pool := newTestPool(t)
+	if pool == nil {
+		return
+	}
+	repo := NewPgTaskRepository(pool)
+	ctx := context.Background()
+	deviceSN := testDeviceSNPrefix + "sync-lock"
+
+	release, err := repo.AcquireSyncGPVDeviceLock(ctx, deviceSN)
+	require.NoError(t, err)
+
+	competingTx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	var acquired bool
+	require.NoError(t, competingTx.QueryRow(ctx,
+		"SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0))", deviceSN,
+	).Scan(&acquired))
+	assert.False(t, acquired, "the same device lock must be exclusive across connections")
+	require.NoError(t, competingTx.Rollback(ctx))
+
+	release()
+
+	afterReleaseTx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	require.NoError(t, afterReleaseTx.QueryRow(ctx,
+		"SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0))", deviceSN,
+	).Scan(&acquired))
+	assert.True(t, acquired, "the device lock must be available after release")
+	require.NoError(t, afterReleaseTx.Rollback(ctx))
+}
+
 func TestPgRepo_Integration_CreateAndGet(t *testing.T) {
 	pool := newTestPool(t)
 	if pool == nil {
@@ -223,10 +255,73 @@ func TestPgRepo_Integration_LatestSyncGPVSummaryIgnoresStaleUnfinishedTasks(t *t
 
 	assert.Equal(t, sourceID, summary.SourceID)
 	assert.Equal(t, 2, summary.TaskCount)
+	assert.Equal(t, 2, summary.SuccessfulCommands)
+	assert.Equal(t, 0, summary.FailedCommands)
+	assert.Equal(t, 1, summary.RequestedPathCount)
+	assert.Equal(t, 1, summary.SuccessfulPathCount)
+	assert.Equal(t, 0, summary.FailedPathCount)
+	assert.Empty(t, summary.FailedPaths)
 	assert.True(t, summary.FirstCreatedAt.Equal(base))
 	require.NotNil(t, summary.LastCompletedAt)
 	assert.True(t, summary.LastCompletedAt.Equal(lastCompletedAt))
 	assert.InEpsilon(t, 13.473, summary.WallClockSeconds, 0.001)
+}
+
+func TestPgRepo_Integration_LatestSyncGPVSummaryPrefersNewestRunOverLateOldCompletion(t *testing.T) {
+	pool := newTestPool(t)
+	if pool == nil {
+		return
+	}
+	defer cleanupTestTasks(t, pool)
+	repo := NewPgTaskRepository(pool)
+	ctx := context.Background()
+
+	deviceSN := testDeviceSNPrefix + "sync-gpv-late-old"
+	oldSourceID := generateUUID()
+	newSourceID := generateUUID()
+	base := time.Date(2026, 7, 13, 11, 0, 0, 0, time.UTC)
+
+	makeTask := func(sourceID, commandKey string, createdAt time.Time, completedAt time.Time) *Task {
+		return &Task{
+			ID:           generateUUID(),
+			DeviceSN:     deviceSN,
+			Method:       "GetParameterValues",
+			Params:       json.RawMessage(`{"paths":["Device.DeviceInfo."]}`),
+			Priority:     1,
+			CommandKey:   commandKey,
+			Status:       TaskStatusCompleted,
+			MaxRetries:   3,
+			CreatedAt:    createdAt,
+			CompletedAt:  &completedAt,
+			Source:       TaskSourceAPI,
+			SourceID:     sourceID,
+			CommandIndex: 0,
+			DeviceIndex:  0,
+		}
+	}
+
+	require.NoError(t, repo.Create(ctx, makeTask(
+		oldSourceID,
+		"sync-gpv-"+deviceSN+"-0",
+		base,
+		base.Add(40*time.Minute),
+	)))
+	require.NoError(t, repo.Create(ctx, makeTask(
+		newSourceID,
+		"sync-gpv-"+deviceSN+"-0",
+		base.Add(10*time.Minute),
+		base.Add(10*time.Minute+3*time.Second),
+	)))
+
+	summary, err := repo.LatestSyncGPVSummaryByDevice(ctx, deviceSN)
+	require.NoError(t, err)
+	require.NotNil(t, summary)
+
+	assert.Equal(t, newSourceID, summary.SourceID)
+	assert.True(t, summary.FirstCreatedAt.Equal(base.Add(10*time.Minute)))
+	require.NotNil(t, summary.LastCompletedAt)
+	assert.True(t, summary.LastCompletedAt.Equal(base.Add(10*time.Minute+3*time.Second)))
+	assert.InEpsilon(t, 3, summary.WallClockSeconds, 0.001)
 }
 
 func TestPgRepo_Integration_LatestSyncGPVSummaryCountsLatestRunRetries(t *testing.T) {
@@ -276,10 +371,125 @@ func TestPgRepo_Integration_LatestSyncGPVSummaryCountsLatestRunRetries(t *testin
 
 	assert.Equal(t, sourceID, summary.SourceID)
 	assert.Equal(t, 3, summary.TaskCount)
+	assert.Equal(t, 3, summary.SuccessfulCommands)
+	assert.Equal(t, 0, summary.FailedCommands)
+	assert.Equal(t, 1, summary.RequestedPathCount)
+	assert.Equal(t, 1, summary.SuccessfulPathCount)
+	assert.Equal(t, 0, summary.FailedPathCount)
+	assert.Empty(t, summary.FailedPaths)
 	assert.True(t, summary.FirstCreatedAt.Equal(base))
 	require.NotNil(t, summary.LastCompletedAt)
 	assert.True(t, summary.LastCompletedAt.Equal(base.Add(139*time.Second)))
 	assert.InEpsilon(t, 139, summary.WallClockSeconds, 0.001)
+}
+
+func TestPgRepo_Integration_LatestSyncGPVSummaryReportsRecovered9005Path(t *testing.T) {
+	pool := newTestPool(t)
+	if pool == nil {
+		return
+	}
+	defer cleanupTestTasks(t, pool)
+	repo := NewPgTaskRepository(pool)
+	ctx := context.Background()
+
+	deviceSN := testDeviceSNPrefix + "sync-gpv-recovered-fault"
+	sourceID := generateUUID()
+	base := time.Date(2026, 7, 13, 16, 0, 0, 0, time.UTC)
+
+	makeTask := func(commandKey string, createdAt time.Time, completedAt time.Time, result json.RawMessage) *Task {
+		return &Task{
+			ID:           generateUUID(),
+			DeviceSN:     deviceSN,
+			Method:       "GetParameterValues",
+			Params:       json.RawMessage(`{"names":["DeviceGSM.NriNullDel"]}`),
+			Priority:     1,
+			CommandKey:   commandKey,
+			Status:       TaskStatusCompleted,
+			MaxRetries:   3,
+			CreatedAt:    createdAt,
+			CompletedAt:  &completedAt,
+			Result:       result,
+			Source:       TaskSourceSystem,
+			SourceID:     sourceID,
+			CommandIndex: 0,
+			DeviceIndex:  0,
+		}
+	}
+
+	require.NoError(t, repo.Create(ctx, makeTask(
+		"sync-gpv-"+deviceSN+"-0",
+		base,
+		base.Add(2*time.Second),
+		json.RawMessage(`{"recovered":true,"bad_path":"DeviceGSM.NriNullDel","fault_code":9005,"remaining_cnt":1}`),
+	)))
+	require.NoError(t, repo.Create(ctx, makeTask(
+		"sync-gpv-"+deviceSN+"-0-r",
+		base.Add(2*time.Second),
+		base.Add(5*time.Second),
+		nil,
+	)))
+
+	summary, err := repo.LatestSyncGPVSummaryByDevice(ctx, deviceSN)
+	require.NoError(t, err)
+	require.NotNil(t, summary)
+
+	assert.Equal(t, sourceID, summary.SourceID)
+	assert.Equal(t, 2, summary.TaskCount)
+	assert.Equal(t, 2, summary.SuccessfulCommands, "recovered GPV 仍是完成的 command，不阻断其它 path")
+	assert.Equal(t, 0, summary.FailedCommands)
+	assert.Equal(t, 1, summary.RequestedPathCount)
+	assert.Equal(t, 0, summary.SuccessfulPathCount)
+	assert.Equal(t, 1, summary.FailedPathCount)
+	require.Len(t, summary.FailedPaths, 1)
+	assert.Equal(t, "DeviceGSM.NriNullDel", summary.FailedPaths[0].Path)
+	assert.Equal(t, 9005, summary.FailedPaths[0].FaultCode)
+	assert.Equal(t, "sync-gpv-"+deviceSN+"-0", summary.FailedPaths[0].CommandKey)
+	assert.Equal(t, string(TaskStatusCompleted), summary.FailedPaths[0].Status)
+}
+
+func TestPgRepo_Integration_LatestSyncGPVSummaryCountsEveryPathInFailedBatch(t *testing.T) {
+	pool := newTestPool(t)
+	if pool == nil {
+		return
+	}
+	defer cleanupTestTasks(t, pool)
+	repo := NewPgTaskRepository(pool)
+	ctx := context.Background()
+
+	deviceSN := testDeviceSNPrefix + "sync-gpv-failed-batch"
+	sourceID := generateUUID()
+	base := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	completedAt := base.Add(4 * time.Second)
+	task := &Task{
+		ID:           generateUUID(),
+		DeviceSN:     deviceSN,
+		Method:       "GetParameterValues",
+		Params:       json.RawMessage(`{"names":["Device.A","Device.B","Device.C"]}`),
+		Priority:     1,
+		CommandKey:   "sync-gpv-" + deviceSN + "-0",
+		Status:       TaskStatusFailed,
+		MaxRetries:   3,
+		CreatedAt:    base,
+		CompletedAt:  &completedAt,
+		ErrorCode:    9002,
+		ErrorMessage: "internal error",
+		Source:       TaskSourceSystem,
+		SourceID:     sourceID,
+	}
+	require.NoError(t, repo.Create(ctx, task))
+
+	summary, err := repo.LatestSyncGPVSummaryByDevice(ctx, deviceSN)
+	require.NoError(t, err)
+	require.NotNil(t, summary)
+	assert.Equal(t, 3, summary.RequestedPathCount)
+	assert.Equal(t, 0, summary.SuccessfulPathCount)
+	assert.Equal(t, 3, summary.FailedPathCount)
+	require.Len(t, summary.FailedPaths, 3)
+	assert.ElementsMatch(t, []string{"Device.A", "Device.B", "Device.C"}, []string{
+		summary.FailedPaths[0].Path,
+		summary.FailedPaths[1].Path,
+		summary.FailedPaths[2].Path,
+	})
 }
 
 func TestPgRepo_Integration_Update(t *testing.T) {
@@ -718,4 +928,8 @@ func TestPgRepo_Integration_CountOpenSyncGPV_SkipsFailedBatchResidue(t *testing.
 	count, err := repo.CountOpenSyncGPVByDevice(ctx, sn)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), count, "同一同步批次已有失败终态时,残留 sent 不应让参数树一直同步中")
+
+	hasOpen, err := repo.HasOpenSyncGPVTasksByDevice(ctx, sn)
+	require.NoError(t, err)
+	assert.True(t, hasOpen, "防重入口径必须仍识别 sent 残留,避免重复创建新的 sync source")
 }

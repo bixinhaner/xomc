@@ -851,14 +851,14 @@ func (f *fakeDeviceInfoRefresher) SyncFromParameters(_ context.Context, _ uuid.U
 }
 
 type fakePathBSyncTaskReader struct {
-	hasOpen bool
-	err     error
-	calls   []string
+	hasIncomplete bool
+	err           error
+	calls         []string
 }
 
 func (f *fakePathBSyncTaskReader) HasIncompleteSyncGPVTasksByDevice(_ context.Context, deviceSN string) (bool, error) {
 	f.calls = append(f.calls, deviceSN)
-	return f.hasOpen, f.err
+	return f.hasIncomplete, f.err
 }
 
 func TestSetParamSyncWriter_ChainableReturnsSyncService(t *testing.T) {
@@ -917,14 +917,14 @@ func TestShouldFinalizePathBSync_NonFullSyncBypassesPendingCounter(t *testing.T)
 
 func TestShouldFinalizePathBSync_UsesTaskReaderWhenAvailable(t *testing.T) {
 	svc, _, _ := newDiffTestService(t, nil, nil)
-	reader := &fakePathBSyncTaskReader{hasOpen: true}
+	reader := &fakePathBSyncTaskReader{hasIncomplete: true}
 	svc.SetPathBSyncTaskReader(reader)
 	dev := &model.Device{ID: uuid.New(), SerialNumber: "SN-reader"}
 
 	assert.False(t, svc.shouldFinalizePathBSync(context.Background(), dev, "sync-gpv-sn-0"))
 	assert.Equal(t, []string{"SN-reader"}, reader.calls)
 
-	reader.hasOpen = false
+	reader.hasIncomplete = false
 	assert.True(t, svc.shouldFinalizePathBSync(context.Background(), dev, "sync-gpv-sn-1"))
 }
 
@@ -932,7 +932,7 @@ func TestHandleSyncResultPathB_EmptyFullSyncWaitsForRemainingTasks(t *testing.T)
 	svc, _, _ := newDiffTestService(t, nil, nil)
 	writer := &fakeParamSyncWriter{}
 	svc.SetParamSyncWriter(writer)
-	reader := &fakePathBSyncTaskReader{hasOpen: true}
+	reader := &fakePathBSyncTaskReader{hasIncomplete: true}
 	svc.SetPathBSyncTaskReader(reader)
 	dev := &model.Device{ID: uuid.New(), SerialNumber: "SN-empty", Carrier: model.CarrierCMCC, Technology: model.TechNR}
 

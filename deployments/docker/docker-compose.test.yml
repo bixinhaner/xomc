@@ -39,7 +39,18 @@ services:
 
   nats-test:
     image: nats:2.10-alpine
-    entrypoint: ["/nats-server", "--js", "--store_dir=/tmp/nats", "-m", "8222"]
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        cat >/tmp/nats-server.conf <<'EOF'
+        jetstream {
+          store_dir: "/tmp/nats"
+        }
+        http_port: 8222
+        max_payload: 5242880
+        EOF
+        exec nats-server -c /tmp/nats-server.conf
     ports:
       - "4223:4222"
     healthcheck:
