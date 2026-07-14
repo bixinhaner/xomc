@@ -3,6 +3,7 @@ package export
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -164,6 +165,10 @@ func aggregatorRowToExport(r aggregator.Row) ExportRow {
 	if device == "" && r.ProductID != uuid.Nil {
 		device = "Product=" + r.ProductID.String()
 	}
+	value := float64(r.MetricValue)
+	if r.Filled {
+		value = math.NaN()
+	}
 	return ExportRow{
 		Device:      device,
 		CellPLMN:    derefStr(r.ObjectLDN),
@@ -174,8 +179,104 @@ func aggregatorRowToExport(r aggregator.Row) ExportRow {
 		Time:        r.Time,
 		StartTime:   r.StartTime,
 		EndTime:     r.EndTime,
-		Value:       float64(r.MetricValue),
+		Value:       value,
 		StatisType:  statisStr(r.StatisType),
+	}
+}
+
+type fillEmptySource struct {
+	src    RowSource
+	req    aggregator.QueryRequest
+	rows   []ExportRow
+	i      int
+	loaded bool
+}
+
+func newFillEmptySource(src RowSource, req aggregator.QueryRequest) *fillEmptySource {
+	return &fillEmptySource{src: src, req: req}
+}
+
+func (s *fillEmptySource) Next(ctx context.Context) ([]ExportRow, bool, error) {
+	if !s.loaded {
+		if err := s.load(ctx); err != nil {
+			return nil, false, err
+		}
+	}
+	if s.i >= len(s.rows) {
+		return nil, true, nil
+	}
+	end := s.i + batchSize
+	if end > len(s.rows) {
+		end = len(s.rows)
+	}
+	out := s.rows[s.i:end]
+	s.i = end
+	return out, false, nil
+}
+
+func (s *fillEmptySource) load(ctx context.Context) error {
+	s.loaded = true
+	var rows []ExportRow
+	for {
+		batch, done, err := s.src.Next(ctx)
+		if err != nil {
+			return err
+		}
+		rows = append(rows, batch...)
+		if done {
+			break
+		}
+	}
+	aggRows := make([]aggregator.Row, 0, len(rows))
+	for _, r := range rows {
+		aggRows = append(aggRows, exportRowToAggregator(r))
+	}
+	filled := aggregator.FillEmptyBuckets(aggRows, s.req)
+	out := make([]ExportRow, 0, len(filled))
+	for _, r := range filled {
+		out = append(out, aggregatorRowToExport(r))
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if !out[i].Time.Equal(out[j].Time) {
+			return out[i].Time.Before(out[j].Time)
+		}
+		if out[i].Device != out[j].Device {
+			return out[i].Device < out[j].Device
+		}
+		if out[i].CellPLMN != out[j].CellPLMN {
+			return out[i].CellPLMN < out[j].CellPLMN
+		}
+		return out[i].MetricCode < out[j].MetricCode
+	})
+	s.rows = out
+	return nil
+}
+
+func exportRowToAggregator(r ExportRow) aggregator.Row {
+	var objectLDN *string
+	if r.CellPLMN != "" {
+		ldn := r.CellPLMN
+		objectLDN = &ldn
+	}
+	mt := metrics.MetricType(r.MetricType)
+	if mt == "" {
+		if strings.HasPrefix(r.MetricCode, "K") {
+			mt = metrics.MetricTypeKPI
+		} else {
+			mt = metrics.MetricTypeCounter
+		}
+	}
+	return aggregator.Row{
+		DeviceSN:    r.Device,
+		MetricPath:  r.MetricCode,
+		DisplayName: r.MetricName,
+		MetricType:  mt,
+		MetricValue: jsonx.Float(r.Value),
+		Granularity: metrics.Granularity(r.Granularity),
+		Time:        r.Time,
+		StartTime:   r.StartTime,
+		EndTime:     r.EndTime,
+		ObjectLDN:   objectLDN,
 	}
 }
 

@@ -237,6 +237,22 @@ describe('buildDeviceMetricCharts — T-0193 按设备+小区/PLMN 分线', () =
     expect(charts[0].buckets).toEqual(['T1', 'T2']);
     expect(charts[0].series[0].values).toEqual([1, '-']);
   });
+
+  it('带 object_ldn 的 fill_empty 骨架行 → 已选 object 保留为独立断线 series', () => {
+    const rows: AggregatedRow[] = [
+      row({ deviceSn: '1202000240194DP0015', metricPath: 'K900010052', startTime: 'T1', metricValue: 12.3, objectLdn: LDN1 }),
+      row({ deviceSn: '1202000240194DP0015', metricPath: 'K900010052', startTime: 'T1', metricValue: null, filled: true, objectLdn: LDN2 }),
+    ];
+
+    const charts = buildDeviceMetricCharts(rows, '15min');
+
+    expect(charts[0].series.map((s) => s.key)).toEqual([
+      `1202000240194DP0015|${LDN1}`,
+      `1202000240194DP0015|${LDN2}`,
+    ]);
+    expect(charts[0].series[0].values).toEqual([12.3]);
+    expect(charts[0].series[1].values).toEqual(['-']);
+  });
 });
 
 describe('filterRowsByObjectLdns — T-0193 即席小区过滤', () => {

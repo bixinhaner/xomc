@@ -452,7 +452,8 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 	// 但缺失的指标补一行占位，让透视表能区分"该时段有采样但此指标无值"与"此指标有值"。
 	// 没有任何真实行的时间桶/object 永不出现（空时段不凭空造桶）。
 	// 仅 device 维度（单 OUI+SN）+ metric_paths 非空时启用。
-	if c.Query("fill_empty") == "true" {
+	fillEmpty := c.Query("fill_empty") == "true"
+	if fillEmpty {
 		rows = fillEmptyBuckets(rows, req)
 		// 占位行可能因「该指标本次无任何真实行」而 DisplayName 为空（fillEmptyBuckets 的 nameByPath
 		// 只从真实行收集）；整体按指标库再回填一次，使占位行与真实行同口径取名，避免透视表列头
@@ -464,7 +465,7 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 	// 仅在指定了 limit 时才多跑一次（无 limit = 全量返回，total 即 len 无需 COUNT）；
 	// COUNT 失败不阻断结果返回，退回本页行数兜底。
 	total := len(rows)
-	if req.Limit > 0 {
+	if req.Limit > 0 && !(fillEmpty && aggregator.IsExplicitObjectSkeletonRequest(req)) {
 		if n, err := h.aggr.Count(c.Request.Context(), req); err == nil {
 			total = n
 		}
@@ -472,101 +473,9 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 	response.OK(c, gin.H{"items": rows, "total": total})
 }
 
-// fillEmptyBuckets 数据驱动补齐占位行（T-0192d）。
-//
-// 语义：判断单位 = 一条测量记录身份 = (object_ldn, 时间桶)。只遍历查询已返回的真实行
-// （Filled=false），按 (object_ldn 归一, Time) 分组；对每个**已存在**的分组，req.MetricPaths
-// 里缺失的指标补一行占位（身份/时段字段直接抄该组代表行、不做任何桶推算，MetricValue=0、
-// Filled=true、DisplayName 沿用同 metric_path 真实行的友好名）。没有任何真实行的时间桶/object
-// 永不出现 —— 空时段不凭空造桶。
-//
-// 分组键含 object_ldn（nil = 设备级，归一为固定空键），修旧实现去重键漏 object_ldn 的 bug：
-// 多小区/PLMN 同时段各自独立填充、互不串。
-//
-// 仅 device 维度（单 SN）+ metric_paths 非空时启用；多 SN / 组维度原样返回。
+// fillEmptyBuckets 保留 pm 包内测试入口，真实实现收敛在 aggregator 包，供页面接口和导出共用。
 func fillEmptyBuckets(rows []aggregator.Row, req aggregator.QueryRequest) []aggregator.Row {
-	if req.Dimension == aggregator.DimensionDeviceGroup || req.Dimension == aggregator.DimensionAggregateGroup {
-		return rows
-	}
-	if len(req.MetricPaths) == 0 {
-		return rows
-	}
-	// 单 SN 过滤（前端 KPIQuery 总是 1:1 拆分发请求）— 多 SN 复合查询不补。
-	if len(req.DeviceSNs) != 1 {
-		return rows
-	}
-
-	// 各 metric_path 的友好名（占位行沿用，KPI 列头不致一半友好名一半 K 编号）。
-	nameByPath := make(map[string]string, len(req.MetricPaths))
-
-	// 按 (object_ldn 归一, Time) 分组：记录每组已出现的 metric_path 集合 + 一行代表行。
-	type group struct {
-		rep  aggregator.Row      // 代表行，占位行抄它的身份/时段字段
-		have map[string]struct{} // 已出现的 metric_path 集合
-	}
-	groups := make(map[string]*group)
-	order := make([]string, 0) // 保持分组出现顺序，占位行追加稳定
-
-	for _, r := range rows {
-		if r.Filled {
-			continue // 只看真实行（防御性：正常此时 rows 全为真实行）
-		}
-		if req.MetricType != nil && r.MetricType != *req.MetricType {
-			continue
-		}
-		if r.DisplayName != "" {
-			nameByPath[r.MetricPath] = r.DisplayName
-		}
-		key := groupKey(r.ObjectLDN, r.Time)
-		g := groups[key]
-		if g == nil {
-			g = &group{rep: r, have: make(map[string]struct{})}
-			groups[key] = g
-			order = append(order, key)
-		}
-		g.have[r.MetricPath] = struct{}{}
-	}
-
-	// 对每个已存在分组，补 req.MetricPaths 里缺的指标。
-	for _, key := range order {
-		g := groups[key]
-		for _, mp := range req.MetricPaths {
-			if _, ok := g.have[mp]; ok {
-				continue
-			}
-			rows = append(rows, aggregator.Row{
-				DeviceOUI:   g.rep.DeviceOUI,
-				DeviceSN:    g.rep.DeviceSN,
-				MetricPath:  mp,
-				DisplayName: nameByPath[mp],
-				MetricType:  fillMetricType(g.rep.MetricType, req.MetricType),
-				Granularity: g.rep.Granularity,
-				Time:        g.rep.Time,
-				StartTime:   g.rep.StartTime,
-				EndTime:     g.rep.EndTime,
-				ObjectLDN:   g.rep.ObjectLDN,
-				Filled:      true,
-			})
-		}
-	}
-	return rows
-}
-
-func fillMetricType(repType metrics.MetricType, requested *metrics.MetricType) metrics.MetricType {
-	if requested != nil {
-		return *requested
-	}
-	return repType
-}
-
-// groupKey 构造 (object_ldn, time) 分组键。object_ldn=nil（设备级）归一为固定空键，
-// 与有值的 object_ldn 互不混淆；time 用 UTC RFC3339 规范化。
-func groupKey(objectLDN *string, t time.Time) string {
-	ldn := "\x00" // nil 哨兵：与任何真实 object_ldn 串值不可能相等
-	if objectLDN != nil {
-		ldn = *objectLDN
-	}
-	return ldn + "||" + t.UTC().Format(time.RFC3339Nano)
+	return aggregator.FillEmptyBuckets(rows, req)
 }
 
 // RecomputeAggregation POST /pm/aggregation/recompute（T-0164 收尾 G5-Gap-2）

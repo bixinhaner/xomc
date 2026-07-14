@@ -16,17 +16,17 @@ import (
 // 字段对齐仪表盘聚合查询入参（同 /pm/metrics/aggregated），导出时去掉 limit 全量取数。
 // 字段名沿用 REST query 的 snake_case，便于前端 T4 建任务时直接透传当前筛选。
 type DashboardParams struct {
-	Granularity  string   `json:"granularity"`
-	Dimension    string   `json:"dimension"`
-	DeviceOUIs   []string `json:"device_ouis"`
-	DeviceSNs    []string `json:"device_sns"`
+	Granularity    string   `json:"granularity"`
+	Dimension      string   `json:"dimension"`
+	DeviceOUIs     []string `json:"device_ouis"`
+	DeviceSNs      []string `json:"device_sns"`
 	DeviceGroupIDs []string `json:"device_group_ids"`
-	ProductIDs   []string `json:"product_ids"`
-	MetricPaths  []string `json:"metric_paths"`
-	MetricType   string   `json:"metric_type"`
-	Technologies []string `json:"technologies"`
-	StartTime    string   `json:"start_time"`
-	EndTime      string   `json:"end_time"`
+	ProductIDs     []string `json:"product_ids"`
+	MetricPaths    []string `json:"metric_paths"`
+	MetricType     string   `json:"metric_type"`
+	Technologies   []string `json:"technologies"`
+	StartTime      string   `json:"start_time"`
+	EndTime        string   `json:"end_time"`
 	// ObjectLDNs 是小区/PLMN 下钻白名单（A1）。空 = 不过滤，导该设备全部小区/PLMN；
 	// 非空 = 只导命中行，与仪表盘下钻定格口径一致。device 维度专属（聚合维度无意义）。
 	ObjectLDNs []string `json:"object_ldns"`
@@ -61,6 +61,7 @@ func parseDashboardParams(raw []byte) (aggregator.QueryRequest, []string, error)
 		DeviceSNs:    p.DeviceSNs,
 		MetricPaths:  p.MetricPaths,
 		Technologies: p.Technologies,
+		ObjectLDNs:   p.ObjectLDNs,
 	}
 	if p.MetricType != "" {
 		mt := metrics.MetricType(p.MetricType)

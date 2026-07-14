@@ -279,12 +279,30 @@ func (r *Runner) buildDashboardLikeSource(ctx context.Context, task *Task, loc a
 
 	// device 维度且表含行级 id → (time,id) keyset 直查；否则（聚合维度 / 无 id 的 device 表）走聚合批次游标。
 	if dim == aggregator.DimensionDevice && tableHasIDColumn(table) {
-		return newDashboardDeviceSource(r.metricDB, table, req, objectLDNs), cols, layout, nil
+		src := RowSource(newDashboardDeviceSource(r.metricDB, table, req, objectLDNs))
+		if shouldFillExportSkeleton(task.SourceType, req) {
+			src = newFillEmptySource(src, req)
+		}
+		return src, cols, layout, nil
 	}
 	if r.aggr == nil {
 		return nil, nil, csvLayout{}, fmt.Errorf("aggregator not wired for dashboard aggregate export")
 	}
-	return newDashboardAggregateSource(r.aggr, req, objectLDNs), cols, layout, nil
+	src := RowSource(newDashboardAggregateSource(r.aggr, req, objectLDNs))
+	if shouldFillExportSkeleton(task.SourceType, req) {
+		src = newFillEmptySource(src, req)
+	}
+	return src, cols, layout, nil
+}
+
+func shouldFillExportSkeleton(source SourceType, req aggregator.QueryRequest) bool {
+	return source == SourceKpiQuery &&
+		req.Dimension != aggregator.DimensionDeviceGroup &&
+		len(req.DeviceSNs) == 1 &&
+		len(req.ObjectLDNs) > 0 &&
+		len(req.MetricPaths) > 0 &&
+		!req.StartTime.IsZero() &&
+		req.EndTime.After(req.StartTime)
 }
 
 type adhocTaskMeta struct {
