@@ -188,6 +188,49 @@ describe('ScriptExecutionDrawer', () => {
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 
+  it('only shows scheduling and retry inputs when their controlling options are selected', async () => {
+    renderDrawer();
+    const user = userEvent.setup();
+
+    expect(screen.queryByLabelText('执行时间')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('周期日期')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('周期时间')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('离线等待（秒）')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('失败重试次数')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('失败重试间隔（秒）')).not.toBeInTheDocument();
+
+    const retryOptionRow = screen.getByRole('group', { name: '重试选项' });
+    expect(retryOptionRow).toHaveStyle({ display: 'flex' });
+    expect(retryOptionRow).toContainElement(screen.getByRole('checkbox', { name: '离线等待重试' }));
+    expect(retryOptionRow).toContainElement(screen.getByRole('checkbox', { name: '失败重试' }));
+    const executionActions = screen.getByRole('group', { name: '执行操作' });
+    expect(executionActions).toHaveStyle({ marginTop: '20px' });
+    expect(executionActions).toHaveStyle({ paddingTop: '16px' });
+    expect(executionActions).toContainElement(screen.getByRole('button', { name: '执行' }));
+
+    await user.click(screen.getByRole('radio', { name: '定时' }));
+    expect(screen.getByLabelText('执行时间')).toBeInTheDocument();
+    expect(screen.queryByLabelText('周期日期')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('周期时间')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('radio', { name: '周期' }));
+    expect(screen.queryByLabelText('执行时间')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('周期日期')).toBeInTheDocument();
+    expect(screen.getByLabelText('周期时间')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('checkbox', { name: '离线等待重试' }));
+    expect(screen.getByLabelText('离线等待（秒）')).toBeInTheDocument();
+    await user.click(screen.getByRole('checkbox', { name: '离线等待重试' }));
+    expect(screen.queryByLabelText('离线等待（秒）')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('checkbox', { name: '失败重试' }));
+    expect(screen.getByLabelText('失败重试次数')).toBeInTheDocument();
+    expect(screen.getByLabelText('失败重试间隔（秒）')).toBeInTheDocument();
+    await user.click(screen.getByRole('checkbox', { name: '失败重试' }));
+    expect(screen.queryByLabelText('失败重试次数')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('失败重试间隔（秒）')).not.toBeInTheDocument();
+  });
+
   it('does not confirm when typed validation contains both errors and warnings', async () => {
     const mixedValidation = {
       planItems: [],
