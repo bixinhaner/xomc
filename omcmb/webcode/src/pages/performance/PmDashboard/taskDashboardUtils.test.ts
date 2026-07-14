@@ -59,6 +59,19 @@ describe('seriesLabelOf — 系列标签', () => {
   it('network → 全网', () => {
     expect(seriesLabelOf('__network__', 'network')).toBe('全网');
   });
+  it('英文环境下使用英文系统前缀', () => {
+    expect(seriesLabelOf('__network__', 'network', undefined, 'en-US')).toBe('Network');
+    expect(seriesLabelOf('Band=42', 'band', undefined, 'en-US')).toBe('Band 42');
+    expect(seriesLabelOf('DeviceGroup=abcd1234-ef', 'device_group', '华东一区', 'en-US')).toBe(
+      'Device Group 华东一区',
+    );
+    expect(seriesLabelOf('9259a43e-301f-49b5', 'product', 'CMCC 皮基站 LTE', 'en-US')).toBe(
+      'Product CMCC 皮基站 LTE',
+    );
+    expect(seriesLabelOf('Cellid=111172245,PLMN=46068', 'aggregate_group', undefined, 'en-US')).toBe(
+      'Aggregate Group Cellid=111172245,PLMN=46068',
+    );
+  });
   it('device → SN 原样', () => {
     expect(seriesLabelOf('SN-A', 'device')).toBe('SN-A');
   });
@@ -202,6 +215,11 @@ describe('buildMetricCharts — 转置', () => {
     const charts = buildMetricCharts(rows, 'network', 'hourly');
     expect(charts[0].displayName).toBe('RRC 成功率');
     expect(charts[0].series[0].name).toBe('全网');
+  });
+  it('英文环境下图表系列名使用英文系统前缀', () => {
+    const rows = [row({ metricPath: 'M1', objectLdn: 'Band=42', startTime: 't0', metricValue: 1 })];
+    const charts = buildMetricCharts(rows, 'band', 'hourly', 'en-US');
+    expect(charts[0].series[0].name).toBe('Band 42');
   });
 
   // PM-线名解析：product 维度系列名优先用后端解析名；缺失回退 id 前 8。

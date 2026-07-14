@@ -250,7 +250,7 @@ func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, []Wide
 			IncludeCell:                   adhocIncludesCell(meta.dimension),
 			MissingMetricValuePlaceholder: missingMetricValuePlaceholder,
 		}
-		return newAdhocSource(r.adhocDB, taskID, meta.metricPaths, startTime, endTime, meta.dimension, meta.deviceCount), cols, layout, nil
+		return newAdhocSource(r.adhocDB, taskID, meta.metricPaths, startTime, endTime, meta.dimension, meta.deviceCount, loc), cols, layout, nil
 
 	default:
 		return nil, nil, csvLayout{}, fmt.Errorf("export runner: unsupported source_type %q", task.SourceType)

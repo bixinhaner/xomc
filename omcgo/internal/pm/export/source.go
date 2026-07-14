@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	"github.com/omcgo/omcgo/internal/core/jsonx"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
@@ -199,6 +200,7 @@ type adhocSource struct {
 	endTime     time.Time
 	dimension   string
 	deviceCount int
+	locale      appcontext.Locale
 
 	curTime time.Time
 	curID   uuid.UUID
@@ -206,8 +208,12 @@ type adhocSource struct {
 	done    bool
 }
 
-func newAdhocSource(db PgQuerier, taskID uuid.UUID, metricPaths []string, startTime, endTime time.Time, dimension string, deviceCount int) *adhocSource {
-	return &adhocSource{db: db, taskID: taskID, metricPaths: metricPaths, startTime: startTime, endTime: endTime, dimension: dimension, deviceCount: deviceCount}
+func newAdhocSource(db PgQuerier, taskID uuid.UUID, metricPaths []string, startTime, endTime time.Time, dimension string, deviceCount int, locs ...appcontext.Locale) *adhocSource {
+	loc := appcontext.LocaleZH
+	if len(locs) > 0 {
+		loc = locs[0]
+	}
+	return &adhocSource{db: db, taskID: taskID, metricPaths: metricPaths, startTime: startTime, endTime: endTime, dimension: dimension, deviceCount: deviceCount, locale: loc}
 }
 
 func (s *adhocSource) Next(ctx context.Context) ([]ExportRow, bool, error) {
@@ -239,7 +245,7 @@ func (s *adhocSource) Next(ctx context.Context) ([]ExportRow, bool, error) {
 			return nil, false, fmt.Errorf("export adhoc scan: %w", err)
 		}
 		device := adhocObjectLabel(s.dimension, oui, sn, derefStr(productID), derefStr(productName),
-			derefStr(ldn), derefStr(groupName), s.deviceCount)
+			derefStr(ldn), derefStr(groupName), s.deviceCount, s.locale)
 		cell := ""
 		if s.dimension == "device" {
 			cell = derefStr(ldn)
