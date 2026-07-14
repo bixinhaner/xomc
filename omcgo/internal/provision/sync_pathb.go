@@ -60,14 +60,42 @@ func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sou
 	for _, opt := range opts {
 		opt(&pbOpts)
 	}
+	fullSync := len(pbOpts.parameterPaths) == 0
+	if strings.TrimSpace(sourceID) == "" {
+		sourceID = uuid.NewString()
+	}
+	if pbOpts.reason != "manual" {
+		if locker, ok := s.taskSvc.(syncGPVDeviceLocker); ok {
+			release, lockErr := locker.AcquireSyncGPVDeviceLock(ctx, dev.SerialNumber)
+			if lockErr != nil {
+				return true, 0, fmt.Errorf("lock path-b sync start: %w", lockErr)
+			}
+			defer release()
+		}
+		if guard, ok := s.taskSvc.(syncGPVOpenGuard); ok {
+			hasOpen, guardErr := guard.HasOpenSyncGPVTasksByDevice(ctx, dev.SerialNumber)
+			if guardErr != nil {
+				return true, 0, fmt.Errorf("check path-b sync running: %w", guardErr)
+			}
+			if hasOpen {
+				if s.logger != nil {
+					s.logger.Info("path-b sync skipped: sync already running",
+						zap.String("device_sn", dev.SerialNumber),
+						zap.String("reason", pbOpts.reason),
+						zap.String("source_id", sourceID))
+				}
+				return true, 0, nil
+			}
+		}
+	}
 
 	effectiveMappings := set.Mappings
-	if len(pbOpts.parameterPaths) == 0 {
+	if fullSync {
 		effectiveMappings = s.filterReadUnsupportedMappings(ctx, matchedProduct.ID, effectiveMappings)
 	}
 
 	prefixes := extractStorablePrefixes(effectiveMappings)
-	if len(pbOpts.parameterPaths) > 0 {
+	if !fullSync {
 		prefixes = extractStorablePrefixesForStandardPaths(set.Mappings, pbOpts.parameterPaths)
 	}
 	if len(prefixes) == 0 {
@@ -84,22 +112,25 @@ func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sou
 		return true, 0, nil
 	}
 
-	// T-NATS-PAYLOAD: instance-level expansion 防大对象 GPV 响应撑爆 NATS 单事件上限。
-	// 估算 single-prefix 响应字节数 > expandThreshold (600KB) 时,把 object prefix
-	// "DeviceGSM.Bts." 展开成 ["DeviceGSM.Bts.1.", ..., "DeviceGSM.Bts.N."],
-	// 每条独立成批 GPV task (object 前缀 size=1)。详见 sync_pathb_expand.go 文件注释。
+	// T-NATS-PAYLOAD: 5MB payload 预算内保留 object-level GPV,让所有实例一次同步。
+	// 只有估算 single-prefix 响应字节数 > expandThreshold (5MB) 时,才把 object prefix
+	// 展开成 instance-level prefix 作为异常保护。详见 sync_pathb_expand.go 文件注释。
 	prefixes = s.expandLargeObjectPrefixes(ctx, dev.ID, set.Mappings, prefixes)
 
 	// T-0123: 提取 reason 写 Redis 临时映射供 HandleSyncResultPathB 完成时读取（TTL=10min 覆盖 GPV 上界）。
 	if pbOpts.reason != "" && s.redisClient != nil {
-		key := fmt.Sprintf("provision:syncreason:%s", dev.ID.String())
-		if err := s.redisClient.Set(ctx, key, pbOpts.reason, 10*time.Minute).Err(); err != nil {
+		runKey := fmt.Sprintf("provision:syncreason:%s", sourceID)
+		deviceKey := fmt.Sprintf("provision:syncreason:%s", dev.ID.String())
+		if err := s.redisClient.Set(ctx, runKey, pbOpts.reason, 10*time.Minute).Err(); err != nil {
 			// Reason 写入失败不阻断 sync，差异日志降级为 reason=unknown
 			s.logger.Warn("write path-b sync reason failed",
 				zap.String("device_sn", dev.SerialNumber),
+				zap.String("source_id", sourceID),
 				zap.String("reason", pbOpts.reason),
 				zap.Error(err))
 		}
+		// Backward-compatible device-scoped hint for older result paths and logs.
+		_ = s.redisClient.Set(ctx, deviceKey, pbOpts.reason, 10*time.Minute).Err()
 	}
 
 	gpvTaskCount := len(buildGPVBatches(prefixes, s.batchSize))
@@ -111,6 +142,7 @@ func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sou
 	s.logger.Info("path-b sync started",
 		zap.String("device_sn", dev.SerialNumber),
 		zap.String("source", string(set.Source)),
+		zap.String("source_id", sourceID),
 		zap.String("reason", pbOpts.reason),
 		zap.Int("requested_paths", len(pbOpts.parameterPaths)),
 		zap.Int("prefixes", len(prefixes)),

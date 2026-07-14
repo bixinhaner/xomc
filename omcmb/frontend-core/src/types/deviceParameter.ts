@@ -57,6 +57,11 @@ export interface ParameterSyncStatus {
   lastSyncGpv?: {
     sourceId: string;
     taskCount: number;
+    successfulCommands: number;
+    failedCommands: number;
+    requestedPathCount: number;
+    successfulPathCount: number;
+    failedPathCount: number;
     firstCreatedAt?: string;
     lastCompletedAt?: string;
     wallClockSeconds?: number;

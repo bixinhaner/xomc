@@ -20,6 +20,13 @@ function formatDuration(seconds?: number) {
   return `${Math.round(seconds)}s`;
 }
 
+function isParameterSyncAlreadyRunningError(err: unknown) {
+  const e = err as { bizCode?: number; response?: { data?: { biz_code?: number; code?: number } }; message?: string } | null;
+  const code = e?.bizCode ?? e?.response?.data?.biz_code ?? e?.response?.data?.code;
+  const msg = e?.message ?? '';
+  return code === 1305 || code === 1205 || msg.includes('parameter sync already running');
+}
+
 interface ParameterTreeTabProps {
   deviceId: string;
   lastScopedSync?: { targetCount: number; gpvTaskCount: number; completedAt?: string; wallClockSeconds?: number } | null;
@@ -97,6 +104,10 @@ export default function ParameterTreeTab({ deviceId, lastScopedSync, syncBusy: e
         },
         onError: (err) => {
           // Path B unavailable (503) / device 404 / starter nil (500) — show explicit error
+          if (isParameterSyncAlreadyRunningError(err)) {
+            void refetchSyncStatus();
+            return;
+          }
           const errorMsg = err instanceof Error ? err.message : t('device.paramTree.syncTriggerFailed');
           message.error(errorMsg);
         },
@@ -184,12 +195,16 @@ export default function ParameterTreeTab({ deviceId, lastScopedSync, syncBusy: e
                     count: lastScopedSync?.targetCount ?? 0,
                     gpvCount: lastScopedSync?.gpvTaskCount ?? 0,
                     duration: formatDuration(lastScopedSync?.wallClockSeconds) ?? '-',
+                    success: syncStatus.lastSyncGpv?.successfulPathCount ?? 0,
+                    failed: syncStatus.lastSyncGpv?.failedPathCount ?? 0,
                   })
                   : t('device.paramTree.lastSync', { time: formatSyncAge(effectiveLastParamSyncAt) })}
                 {!isLastScopedSync && syncStatus.lastSyncGpv?.taskCount
                   ? t('device.paramTree.lastSyncGpvSummary', {
                     count: syncStatus.lastSyncGpv.taskCount,
                     duration: formatDuration(syncStatus.lastSyncGpv.wallClockSeconds) ?? '-',
+                    success: syncStatus.lastSyncGpv.successfulPathCount,
+                    failed: syncStatus.lastSyncGpv.failedPathCount,
                   })
                   : ''}
               </Typography.Text>
@@ -220,7 +235,10 @@ export default function ParameterTreeTab({ deviceId, lastScopedSync, syncBusy: e
           showIcon
           style={{ marginBottom: 16 }}
           message={t('device.paramTree.lastSyncFailed', { time: formatSyncAge(syncStatus.lastParamSyncFailedAt) })}
-          description={syncStatus.lastParamSyncError || t('device.paramTree.noErrorDetail')}
+          description={`${syncStatus.lastParamSyncError || t('device.paramTree.noErrorDetail')} ${t('device.paramTree.syncResultCounts', {
+            success: syncStatus.lastSyncGpv?.successfulPathCount ?? 0,
+            failed: syncStatus.lastSyncGpv?.failedPathCount ?? 0,
+          })}`}
         />
       )}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -288,6 +289,50 @@ func TestRedisQueue_PopSkipsFutureNextAttempt(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, third)
 	assert.Equal(t, "t-delayed", third.ID)
+}
+
+func TestRedisQueue_PopConcurrentSameDeviceReturnsTaskOnce(t *testing.T) {
+	q, _ := newRedisQueueWithMini(t)
+	ctx := context.Background()
+
+	require.NoError(t, q.Push(ctx, newTaskForQueue("t-race", "SN-RACE", "GetParameterValues")))
+
+	const workers = 16
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	gotIDs := make(chan string, workers)
+	errs := make(chan error, workers)
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			got, err := q.Pop(ctx, "SN-RACE")
+			if err != nil {
+				errs <- err
+				return
+			}
+			if got != nil {
+				gotIDs <- got.ID
+			}
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+	close(gotIDs)
+	close(errs)
+
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	var ids []string
+	for id := range gotIDs {
+		ids = append(ids, id)
+	}
+	require.Len(t, ids, 1, "concurrent Pop calls must not dispatch the same task twice")
+	assert.Equal(t, "t-race", ids[0])
 }
 
 func TestRedisQueue_Peek(t *testing.T) {

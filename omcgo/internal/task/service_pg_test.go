@@ -489,7 +489,8 @@ func TestService_PG_RecoverPendingTasks(t *testing.T) {
 	ctx := context.Background()
 
 	sn := testDeviceSNPrefix + "svcrec"
-	// 创建一个 sent 状态 + sentAt 较旧的任务，直接进 queue
+	// 创建一个 sent 状态 + sentAt 较旧的任务。真实 PopTask 后任务已不在 Redis 队列 ZSET，
+	// 恢复逻辑必须能只凭 PG 记录把它放回队列。
 	tk := freshTaskForPG("rec1", "rec1")
 	tk.DeviceSN = sn
 	tk.Status = TaskStatusSent
@@ -498,7 +499,6 @@ func TestService_PG_RecoverPendingTasks(t *testing.T) {
 	tk.RetryCount = 0
 	tk.MaxRetries = 3
 	require.NoError(t, repo.Create(ctx, tk))
-	require.NoError(t, q.Push(ctx, tk))
 
 	require.NoError(t, svc.RecoverPendingTasks(ctx, sn))
 
@@ -510,8 +510,43 @@ func TestService_PG_RecoverPendingTasks(t *testing.T) {
 	assert.Equal(t, 1, got.RetryCount)
 }
 
-func TestService_PG_RecoverPendingTasks_Exhausted(t *testing.T) {
+func TestService_PG_RecoverPendingTasks_RecoversFreshSentOnNewInform(t *testing.T) {
 	svc, _, q, repo := newServiceWithPG(t)
+	if svc == nil {
+		return
+	}
+	defer cleanupTestTasks(t, repo.pool)
+	ctx := context.Background()
+
+	sn := testDeviceSNPrefix + "svcrec-fresh"
+	tk := freshTaskForPG("rec-fresh", "rec-fresh")
+	tk.DeviceSN = sn
+	tk.Status = TaskStatusSent
+	now := time.Now()
+	tk.SentAt = &now
+	tk.RetryCount = 0
+	tk.MaxRetries = 3
+	require.NoError(t, repo.Create(ctx, tk))
+
+	require.NoError(t, svc.RecoverPendingTasks(ctx, sn))
+
+	got, err := q.GetByID(ctx, tk.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, TaskStatusPending, got.Status)
+	assert.Equal(t, 1, got.RetryCount)
+	assert.Nil(t, got.SentAt)
+
+	pgGot, err := repo.GetByID(ctx, tk.ID)
+	require.NoError(t, err)
+	require.NotNil(t, pgGot)
+	assert.Equal(t, TaskStatusPending, pgGot.Status)
+	assert.Equal(t, 1, pgGot.RetryCount)
+	assert.Nil(t, pgGot.SentAt)
+}
+
+func TestService_PG_RecoverPendingTasks_Exhausted(t *testing.T) {
+	svc, _, _, repo := newServiceWithPG(t)
 	if svc == nil {
 		return
 	}
@@ -527,7 +562,6 @@ func TestService_PG_RecoverPendingTasks_Exhausted(t *testing.T) {
 	tk.RetryCount = 3
 	tk.MaxRetries = 3
 	require.NoError(t, repo.Create(ctx, tk))
-	require.NoError(t, q.Push(ctx, tk))
 
 	require.NoError(t, svc.RecoverPendingTasks(ctx, sn))
 

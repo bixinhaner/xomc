@@ -104,73 +104,77 @@ func (q *RedisTaskQueue) Pop(ctx context.Context, deviceSN string) (*Task, error
 
 	scanned := 0
 	for scanned < queuePopScanLimit {
-		// 获取 score 较小的一批元素，跳过尚未到 next_attempt_at 的延迟重试任务。
+		// 任务详情和设备队列使用不同 Redis key；在 Cluster 模式下不能放进同一个
+		// Lua 脚本访问。详情可以跨 slot 批量读取，最终通过 ZREM 的返回值原子抢占：
+		// 只有真正删除队列成员的调用者可以返回该任务。
 		results, err := q.client.ZRangeWithScores(ctx, queueKey, 0, queuePeekLimit-1).Result()
 		if err != nil {
 			return nil, fmt.Errorf("zrange: %w", err)
 		}
-
 		if len(results) == 0 {
-			return nil, nil // 队列为空
+			return nil, nil
 		}
 
 		taskIDs := make([]string, 0, len(results))
 		for _, result := range results {
 			taskID, ok := result.Member.(string)
-			if !ok {
-				continue
+			if ok {
+				taskIDs = append(taskIDs, taskID)
 			}
-			taskIDs = append(taskIDs, taskID)
 		}
 		if len(taskIDs) == 0 {
 			return nil, nil
 		}
 
-		// 批量获取任务详情，选出第一个已到可出队时间的任务。
 		pipe := q.client.Pipeline()
 		cmds := make([]*redis.StringCmd, len(taskIDs))
 		for i, taskID := range taskIDs {
 			cmds[i] = pipe.HGet(ctx, q.taskKey(taskID), "data")
 		}
 		if _, err = pipe.Exec(ctx); err != nil && err != redis.Nil {
-			return nil, fmt.Errorf("pop task: %w", err)
+			return nil, fmt.Errorf("pop task details: %w", err)
 		}
 
+		removedOrContended := false
 		now := time.Now()
-		removedStale := 0
 		for i, cmd := range cmds {
 			taskData, err := cmd.Result()
-			if err != nil {
-				if err == redis.Nil {
-					if remErr := q.client.ZRem(ctx, queueKey, taskIDs[i]).Err(); remErr != nil {
-						return nil, fmt.Errorf("remove stale queue member: %w", remErr)
-					}
-					removedStale++
-					continue
+			if err == redis.Nil {
+				if _, remErr := q.client.ZRem(ctx, queueKey, taskIDs[i]).Result(); remErr != nil {
+					return nil, fmt.Errorf("remove stale queue member: %w", remErr)
 				}
+				removedOrContended = true
+				continue
+			}
+			if err != nil {
 				return nil, fmt.Errorf("get task data: %w", err)
 			}
 
 			var task Task
 			if err := json.Unmarshal([]byte(taskData), &task); err != nil {
-				if remErr := q.client.ZRem(ctx, queueKey, taskIDs[i]).Err(); remErr != nil {
+				if _, remErr := q.client.ZRem(ctx, queueKey, taskIDs[i]).Result(); remErr != nil {
 					return nil, fmt.Errorf("remove malformed queue member: %w", remErr)
 				}
-				removedStale++
+				removedOrContended = true
 				continue
 			}
 			if !task.IsReadyForAttempt(now) {
 				continue
 			}
 
-			if err := q.client.ZRem(ctx, queueKey, taskIDs[i]).Err(); err != nil {
-				return nil, fmt.Errorf("remove popped task: %w", err)
+			removed, err := q.client.ZRem(ctx, queueKey, taskIDs[i]).Result()
+			if err != nil {
+				return nil, fmt.Errorf("claim popped task: %w", err)
 			}
-			return &task, nil
+			if removed == 1 {
+				return &task, nil
+			}
+			// 另一个实例已抢到该任务；重新读取队首，不能返回同一份详情。
+			removedOrContended = true
 		}
 
 		scanned += len(taskIDs)
-		if removedStale == 0 {
+		if !removedOrContended {
 			return nil, nil
 		}
 	}

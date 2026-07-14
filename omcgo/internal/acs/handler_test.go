@@ -3,6 +3,7 @@ package acs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -39,6 +40,40 @@ func newAcsHSessionStore() *acsHSessionStore {
 	return &acsHSessionStore{
 		sessionsByID: make(map[string]*Session),
 	}
+}
+
+type acsHDeviceSessionStore struct {
+	current map[string]string
+	swapErr error
+}
+
+func (s *acsHDeviceSessionStore) Swap(_ context.Context, deviceSN, newSessionID string) (string, error) {
+	if s.swapErr != nil {
+		return "", s.swapErr
+	}
+	if s.current == nil {
+		s.current = make(map[string]string)
+	}
+	old := s.current[deviceSN]
+	s.current[deviceSN] = newSessionID
+	if old == "" || old == newSessionID {
+		return "", nil
+	}
+	return old, nil
+}
+
+func (s *acsHDeviceSessionStore) CompareAndDelete(_ context.Context, deviceSN, sessionID string) error {
+	if s.current != nil && s.current[deviceSN] == sessionID {
+		delete(s.current, deviceSN)
+	}
+	return nil
+}
+
+func (s *acsHDeviceSessionStore) Get(_ context.Context, deviceSN string) (string, error) {
+	if s.current == nil {
+		return "", nil
+	}
+	return s.current[deviceSN], nil
 }
 
 func (m *acsHSessionStore) GetByID(ctx context.Context, sessionID string) (*Session, error) {
@@ -139,6 +174,32 @@ func newTestACSHandlerWithDeps(store SessionStore, bus event.EventBus) *Handler 
 		metrics:       metrics,
 		logger:        zap.NewNop(),
 	}
+}
+
+func TestGetSessionFromCookieRejectsSupersededDeviceSession(t *testing.T) {
+	store := newAcsHSessionStore()
+	sessionID := "session-old"
+	session := &Session{
+		ID:        sessionID,
+		DeviceSN:  "SN-STALE-SESSION",
+		State:     StateRPCPending,
+		StartedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	require.NoError(t, store.CreateWithID(context.Background(), sessionID, session))
+
+	h := newTestACSHandlerWithDeps(store, &acsHEventBus{})
+	h.deviceSessionStore = &acsHDeviceSessionStore{current: map[string]string{
+		"SN-STALE-SESSION": "session-new",
+	}}
+
+	req := httptest.NewRequest(http.MethodPost, "/acs", nil)
+	req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: sessionID})
+
+	got, gotID := h.getSessionFromCookie(req, zap.NewNop())
+
+	assert.Nil(t, got)
+	assert.Equal(t, sessionID, gotID)
 }
 
 // Minimal valid Inform SOAP body for TEST-SN-001 with bootstrap event.
@@ -416,6 +477,7 @@ func TestServeHTTP_Inform_Bootstrap_Success(t *testing.T) {
 	store := newAcsHSessionStore()
 	bus := &acsHEventBus{}
 	h := newTestACSHandlerWithDeps(store, bus)
+	taskSvc := h.taskService.(*acsHTaskService)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHInformBootstrapXML))
@@ -446,12 +508,28 @@ func TestServeHTTP_Inform_Bootstrap_Success(t *testing.T) {
 	assert.Equal(t, "100001", s.CWMPId)
 	assert.Equal(t, sessionCookie.Value, s.ID)
 	assert.Equal(t, "TEST-SN-001", s.DeviceSN)
+	assert.Equal(t, []string{"TEST-SN-001"}, taskSvc.recoveredDevices)
 
 	// Event should be published with bootstrap subject.
 	bus.mu.Lock()
 	defer bus.mu.Unlock()
 	require.Len(t, bus.published, 1)
 	assert.Equal(t, event.SubjectDeviceBootstrap, bus.published[0].Subject)
+}
+
+func TestServeHTTP_Inform_DeviceSessionSwapFailureReturns503AndReleasesAdmission(t *testing.T) {
+	h := newTestACSHandler()
+	h.deviceSessionStore = &acsHDeviceSessionStore{swapErr: errors.New("redis unavailable")}
+	taskSvc := h.taskService.(*acsHTaskService)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHInformBootstrapXML))
+	h.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.Equal(t, int64(0), h.admission.Current(context.Background()))
+	assert.Empty(t, w.Result().Cookies())
+	assert.Empty(t, taskSvc.recoveredDevices, "failed session swap must not mutate sent tasks")
 }
 
 func TestServeHTTP_Inform_Periodic_PublishesPeriodicEvent(t *testing.T) {
@@ -537,6 +615,7 @@ func TestServeHTTP_Inform_RateLimited_Returns503(t *testing.T) {
 
 func TestServeHTTP_Inform_AdmissionDenied_Returns503(t *testing.T) {
 	h := newTestACSHandler()
+	taskSvc := h.taskService.(*acsHTaskService)
 	// Set max sessions to 1 and fill it.
 	h.admission = NewAdmissionController(1)
 	h.admission.Acquire(context.Background(), "preexisting-session")
@@ -547,6 +626,7 @@ func TestServeHTTP_Inform_AdmissionDenied_Returns503(t *testing.T) {
 	h.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.Empty(t, taskSvc.recoveredDevices, "rejected Inform must not mutate sent tasks")
 }
 
 // ---------------------------------------------------------------------------
@@ -842,10 +922,11 @@ func TestFullSessionLifecycle_InformThenRPCThenEmpty(t *testing.T) {
 
 // acsHTaskService is a mock TaskService for testing
 type acsHTaskService struct {
-	mu              sync.Mutex
-	tasks           []*task.Task
-	cwmpIDToTaskMap map[string]*task.Task
-	popIndex        int
+	mu               sync.Mutex
+	tasks            []*task.Task
+	cwmpIDToTaskMap  map[string]*task.Task
+	popIndex         int
+	recoveredDevices []string
 }
 
 func newAcsHTaskService() *acsHTaskService {
@@ -956,8 +1037,10 @@ func (m *acsHTaskService) GetQueueLength(ctx context.Context, deviceSN string) (
 	return count, nil
 }
 
-// RecoverPendingTasks 在 handler 单测中无僵死任务模拟需求，no-op 满足接口即可。
 func (m *acsHTaskService) RecoverPendingTasks(ctx context.Context, deviceSN string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.recoveredDevices = append(m.recoveredDevices, deviceSN)
 	return nil
 }
 

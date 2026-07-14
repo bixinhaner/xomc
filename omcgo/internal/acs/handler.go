@@ -428,18 +428,6 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 		return
 	}
 
-	// 僵死任务恢复（docs/消息队列全流程流转说明书.md §4.3.2）。
-	// CPE 重连即视为"在线信号"——把该设备上 status=sent 且 sent_at>5min 的任务
-	// 按 CanRetry() 重置 pending 重入队 / 或标记 failed；否则这些任务会因
-	// CPE 网络波动 / RPC 丢包 / 设备重启而永久悬挂在 sent 状态（v1.1 §6 P0 短板）。
-	// 同步执行：单设备 indexed query (device_sn + status + sent_at)，亚毫秒级；
-	// 失败不阻塞 InformResponse，仅 warn 留痕。
-	if err := h.taskService.RecoverPendingTasks(r.Context(), deviceSN); err != nil {
-		log.Warn("recover pending tasks failed (non-blocking)",
-			zap.String("device_sn", deviceSN),
-			zap.Error(err))
-	}
-
 	// 预生成新会话 ID —— 准入槽位以 sessionID 为成员（issue #65 Option B），
 	// 使 Acquire/Release 跨实例严格配对。
 	sessionID := generateSessionID()
@@ -459,8 +447,11 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 	if h.deviceSessionStore != nil {
 		oldSessionID, swapErr := h.deviceSessionStore.Swap(r.Context(), deviceSN, sessionID)
 		if swapErr != nil {
-			log.Warn("device session swap failed (non-blocking)",
+			log.Error("device session swap failed; rejecting Inform",
 				zap.String("device_sn", deviceSN), zap.Error(swapErr))
+			h.admission.Release(r.Context(), sessionID)
+			http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
+			return
 		} else if oldSessionID != "" {
 			log.Info("cleaning orphaned session before new Inform",
 				zap.String("device_sn", deviceSN),
@@ -468,6 +459,16 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 				zap.String("new_session_id", sessionID))
 			h.reapOrphanedSession(deviceSN, oldSessionID, "new_inform")
 		}
+	}
+
+	// 只有新 Inform 已通过准入且设备会话指针交换成功后，才能恢复上一会话遗留的
+	// sent 任务。失败/被拒绝的 Inform 不得提前删除旧 CWMP 映射或重置任务状态。
+	// 新 Inform 表示上一 CWMP 会话已被替代，因此恢复同设备全部 sent 任务；失败
+	// 不阻塞 InformResponse，仅告警留痕。
+	if err := h.taskService.RecoverPendingTasks(r.Context(), deviceSN); err != nil {
+		log.Warn("recover pending tasks failed (non-blocking)",
+			zap.String("device_sn", deviceSN),
+			zap.Error(err))
 	}
 
 	// 跟踪活跃会话 —— 将由 completeSession() 或清理器递减。
@@ -847,7 +848,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 				combinedMsg = fmt.Sprintf("[%s] %s", soapFaultCode, faultMsg)
 			}
 			// 参数同步 GPV 自愈：剔除坏 path 后续查，命中即跳过 MarkTaskFailed
-			if !h.tryRecoverGPVFault(r.Context(), taskItem, badPath, log) {
+			if !h.tryRecoverGPVFault(r.Context(), taskItem, badPath, faultCode, log) {
 				if markErr := h.taskService.MarkTaskFailed(r.Context(), taskItem.ID, faultCode, combinedMsg); markErr != nil {
 					log.Error("mark task failed", zap.Error(markErr), zap.String("task_id", taskItem.ID))
 				}
@@ -1236,7 +1237,7 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 	}
 	if taskItem != nil {
 		// 参数同步 GPV 自愈：剔除坏 path 后续查；命中即跳过 MarkTaskFailed + Fault 事件。
-		if h.tryRecoverGPVFault(r.Context(), taskItem, badPath, log) {
+		if h.tryRecoverGPVFault(r.Context(), taskItem, badPath, faultCode, log) {
 			// 自愈分支已标 task completed 并入队 retry batch，继续走 PopTask 推进队列。
 		} else {
 			// T-0174 / T-0180 — SPV / GPV 失败时把 per-parameter 详情提取出来,
@@ -1405,10 +1406,17 @@ const syncGPVRecoveryTaskExpiresIn = 1800
 // 返回 true 表示已进入自愈分支（原 task 已标 completed，新批已入队）——调用方应跳过
 // MarkTaskFailed 与 publishRPCFaultEvent。返回 false 表示不适用，走原 fault 流程。
 //
-// 设计取舍：不设硬上限。最坏情况一批 batchSize 个 path 全坏，会触发 batchSize-1 次重查，
-// 每次至少剔除 1 个 path → 天然收敛。坏参数不持久化标记，下次同步重新探测。
-func (h *Handler) tryRecoverGPVFault(ctx context.Context, taskItem *task.Task, badPath string, log *zap.Logger) bool {
+// 仅对具体叶子参数的 9005 做 recovery。对象/实例前缀（以 "." 结尾）通常表示实例不存在
+// 或对象不可枚举，不能逐个实例滚动重试，否则会把一段连续缺失实例膨胀成很长的 -r 链。
+func (h *Handler) tryRecoverGPVFault(ctx context.Context, taskItem *task.Task, badPath string, faultCode int, log *zap.Logger) bool {
 	if taskItem == nil || badPath == "" {
+		return false
+	}
+	if !isRecoverableGPVBadPath(badPath, faultCode) {
+		log.Info("gpv fault recovery skipped: non-leaf path or non-9005 fault",
+			zap.String("task_id", taskItem.ID),
+			zap.String("bad_path", badPath),
+			zap.Int("fault_code", faultCode))
 		return false
 	}
 	if taskItem.Method != "GetParameterValues" {
@@ -1444,6 +1452,7 @@ func (h *Handler) tryRecoverGPVFault(ctx context.Context, taskItem *task.Task, b
 	resultJSON, _ := json.Marshal(map[string]interface{}{
 		"recovered":     true,
 		"bad_path":      badPath,
+		"fault_code":    faultCode,
 		"remaining_cnt": len(remaining),
 	})
 	if err := h.taskService.MarkTaskCompleted(ctx, taskItem.ID, resultJSON); err != nil {
@@ -1482,6 +1491,17 @@ func (h *Handler) tryRecoverGPVFault(ctx context.Context, taskItem *task.Task, b
 		zap.String("bad_path", badPath),
 		zap.Int("remaining", len(remaining)))
 	return true
+}
+
+func isRecoverableGPVBadPath(badPath string, faultCode int) bool {
+	if faultCode != 9005 {
+		return false
+	}
+	badPath = strings.TrimSpace(badPath)
+	if badPath == "" {
+		return false
+	}
+	return !strings.HasSuffix(badPath, ".")
 }
 
 func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request, body []byte, log *zap.Logger) {
@@ -1795,12 +1815,10 @@ func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, 
 				zap.Int("parameter_count", len(paramValues)),
 			)
 			// 体量防御:Path B 同步对大对象(如 DeviceGSM.Bts.,17791 项 ~1.5MB)
-			// 现已通过 provision/sync_pathb_expand.go 的 instance 展开机制把
-			// 单 batch 压到 1100~1500 项(~80-120KB),稳稳在 NATS 默认 max_payload=1MB
-			// 之内。这里 5000 阈值作为兜底告警:任何超过 5000 项 GPV 响应都意味着
-			// (1) 新设备/新对象未走 expand 路径 或 (2) maxInstanceHint 估算偏低,
-			// 需要排查 sync_pathb_expand 的 fieldsPerInstance 判定。
-			if len(paramValues) > 5000 {
+			// 现已允许在 NATS max_payload=5MB 内整对象返回全部实例。这里用
+			// 20000 项作为兜底告警,超过后需要排查 sync_pathb_expand 的 5MB
+			// 估算是否偏低,或设备是否返回了异常大对象。
+			if len(paramValues) > 20000 {
 				log.Warn("GPV response payload is very large; instance expand may be misconfigured",
 					zap.String("device_sn", deviceSN),
 					zap.Int("parameter_count", len(paramValues)),
@@ -2124,6 +2142,21 @@ func (h *Handler) getSessionFromCookie(r *http.Request, log *zap.Logger) (*Sessi
 	if err != nil {
 		log.Error("get session by cookie", zap.Error(err), zap.String("session_id", sessionID))
 		return nil, sessionID
+	}
+	if session != nil && h.deviceSessionStore != nil && session.DeviceSN != "" {
+		currentSessionID, err := h.deviceSessionStore.Get(r.Context(), session.DeviceSN)
+		if err != nil {
+			log.Warn("get current device session",
+				zap.Error(err),
+				zap.String("device_sn", session.DeviceSN),
+				zap.String("session_id", sessionID))
+		} else if currentSessionID != "" && currentSessionID != sessionID {
+			log.Warn("stale session cookie rejected",
+				zap.String("device_sn", session.DeviceSN),
+				zap.String("session_id", sessionID),
+				zap.String("current_session_id", currentSessionID))
+			return nil, sessionID
+		}
 	}
 
 	return session, sessionID

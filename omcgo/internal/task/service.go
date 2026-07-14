@@ -405,6 +405,20 @@ func (s *TaskService) CountOpenSyncGPVByDevice(ctx context.Context, deviceSN str
 	return s.repo.CountOpenSyncGPVByDevice(ctx, deviceSN)
 }
 
+func (s *TaskService) HasOpenSyncGPVTasksByDevice(ctx context.Context, deviceSN string) (bool, error) {
+	if s.repo == nil {
+		return false, nil
+	}
+	return s.repo.HasOpenSyncGPVTasksByDevice(ctx, deviceSN)
+}
+
+func (s *TaskService) AcquireSyncGPVDeviceLock(ctx context.Context, deviceSN string) (func(), error) {
+	if s.repo == nil {
+		return func() {}, nil
+	}
+	return s.repo.AcquireSyncGPVDeviceLock(ctx, deviceSN)
+}
+
 // MarkTaskSent 标记任务已发送
 func (s *TaskService) MarkTaskSent(ctx context.Context, taskID, cwmpID string) error {
 	// 更新 Redis
@@ -674,11 +688,16 @@ func (s *TaskService) GetTaskHistory(ctx context.Context, deviceSN string, opts 
 	}, nil
 }
 
-// RecoverPendingTasks 恢复未完成任务（CPE 重连时调用）
-// 检查 sent 状态超过指定时间的任务，重置为 pending
+const recoverSentTaskBatchSize = 500
+
+// RecoverPendingTasks 恢复未完成任务（CPE 重连/新 Inform 时调用）。
+//
+// 新 Inform 表示 CPE 已开启新的 CWMP 会话；上一会话里仍处于 sent 的 RPC
+// 不会再返回响应。如果继续等待 5 分钟 stale 阈值，参数同步页面会在“待处理 N 次 GPV”
+// 上无谓卡住。sent 任务已从 Redis 队列弹出，所以这里以 PG 为准取回同设备 sent 任务，
+// 并按重试预算恢复为 pending，让当前会话可以继续 PopTask。
 func (s *TaskService) RecoverPendingTasks(ctx context.Context, deviceSN string) error {
-	// 获取 sent 状态超过 5 分钟的任务
-	staleTasks, err := s.queue.GetStaleSentTasks(ctx, deviceSN, "5m")
+	staleTasks, err := s.repo.ListSentByDeviceBefore(ctx, deviceSN, time.Now(), recoverSentTaskBatchSize)
 	if err != nil {
 		return fmt.Errorf("get stale tasks: %w", err)
 	}
@@ -686,9 +705,23 @@ func (s *TaskService) RecoverPendingTasks(ctx context.Context, deviceSN string) 
 	for _, task := range staleTasks {
 		if !task.CanRetry() {
 			// 超过最大重试次数，标记为失败
-			if err := s.MarkTaskFailed(ctx, task.ID, 0, "exceeded max retries"); err != nil {
-				logger.L(ctx).Error("mark task failed", zap.Error(err), zap.String("task_id", task.ID))
+			oldCWMPID := task.CWMPID
+			task.MarkFailed(0, "exceeded max retries")
+			if oldCWMPID != "" {
+				if err := s.queue.DeleteCWMPIDMapping(ctx, oldCWMPID); err != nil {
+					logger.L(ctx).Warn("delete stale cwmp mapping", zap.Error(err), zap.String("task_id", task.ID), zap.String("cwmp_id", oldCWMPID))
+				}
 			}
+			if err := s.queue.Update(ctx, task); err != nil {
+				logger.L(ctx).Error("mark exhausted task failed in queue", zap.Error(err), zap.String("task_id", task.ID))
+				continue
+			}
+			if err := s.repo.Update(ctx, task); err != nil {
+				s.recordDualWriteFail("sync_terminal")
+				logger.L(ctx).Error("sync exhausted task to db", zap.Error(err), zap.String("task_id", task.ID))
+			}
+			s.recordCompletion(task, TaskStatusFailed)
+			s.notifyCompletion(ctx, task)
 			continue
 		}
 		if interval := task.RetryInterval(); interval > 0 && task.SentAt != nil {
@@ -703,22 +736,23 @@ func (s *TaskService) RecoverPendingTasks(ctx context.Context, deviceSN string) 
 		}
 
 		// 重置任务状态
+		oldCWMPID := task.CWMPID
 		task.ResetForRetry()
+		if oldCWMPID != "" {
+			if err := s.queue.DeleteCWMPIDMapping(ctx, oldCWMPID); err != nil {
+				logger.L(ctx).Warn("delete stale cwmp mapping", zap.Error(err), zap.String("task_id", task.ID), zap.String("cwmp_id", oldCWMPID))
+			}
+		}
 
-		// 更新 Redis
+		// 更新 Redis；Update 会在 pending 状态下重新加入设备队列 ZSET。
 		if err := s.queue.Update(ctx, task); err != nil {
 			logger.L(ctx).Error("reset stale task", zap.Error(err), zap.String("task_id", task.ID))
 			continue
 		}
 
-		// 重新入队
-		if err := s.queue.Push(ctx, task); err != nil {
-			logger.L(ctx).Error("requeue task", zap.Error(err), zap.String("task_id", task.ID))
-			continue
-		}
-
 		// 同步 PostgreSQL
 		if err := s.repo.Update(ctx, task); err != nil {
+			s.recordDualWriteFail("sync_retry")
 			logger.L(ctx).Error("sync task to db", zap.Error(err), zap.String("task_id", task.ID))
 		}
 

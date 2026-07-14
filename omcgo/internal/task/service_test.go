@@ -109,16 +109,17 @@ func (m *mockTaskQueue) GetStaleSentTasks(ctx context.Context, deviceSN string, 
 
 // mockTaskRepository implements the methods of PgTaskRepository used by TaskService.
 type mockTaskRepository struct {
-	createFn           func(ctx context.Context, task *Task) error
-	updateFn           func(ctx context.Context, task *Task) error
-	getByIDFn          func(ctx context.Context, id string) (*Task, error)
-	getByCWMPIDFn      func(ctx context.Context, cwmpID string) (*Task, error)
-	deleteFn           func(ctx context.Context, id string) error
-	batchCreateFn      func(ctx context.Context, tasks []*Task) error
-	getHistoryFn       func(ctx context.Context, deviceSN string, opts *TaskHistoryOptions) ([]*Task, int64, error)
-	getPendingByDevFn  func(ctx context.Context, deviceSN string) ([]*Task, error)
-	countByStatusFn    func(ctx context.Context, deviceSN string) (map[TaskStatus]int64, error)
-	purgeOldTasksFn    func(ctx context.Context, before string) (int64, error)
+	createFn          func(ctx context.Context, task *Task) error
+	updateFn          func(ctx context.Context, task *Task) error
+	getByIDFn         func(ctx context.Context, id string) (*Task, error)
+	getByCWMPIDFn     func(ctx context.Context, cwmpID string) (*Task, error)
+	deleteFn          func(ctx context.Context, id string) error
+	batchCreateFn     func(ctx context.Context, tasks []*Task) error
+	getHistoryFn      func(ctx context.Context, deviceSN string, opts *TaskHistoryOptions) ([]*Task, int64, error)
+	getPendingByDevFn func(ctx context.Context, deviceSN string) ([]*Task, error)
+	listSentByDevFn   func(ctx context.Context, deviceSN string, sentBefore time.Time, limit int) ([]*Task, error)
+	countByStatusFn   func(ctx context.Context, deviceSN string) (map[TaskStatus]int64, error)
+	purgeOldTasksFn   func(ctx context.Context, before string) (int64, error)
 }
 
 func (m *mockTaskRepository) Create(ctx context.Context, task *Task) error {
@@ -173,6 +174,13 @@ func (m *mockTaskRepository) GetHistory(ctx context.Context, deviceSN string, op
 func (m *mockTaskRepository) GetPendingByDevice(ctx context.Context, deviceSN string) ([]*Task, error) {
 	if m.getPendingByDevFn != nil {
 		return m.getPendingByDevFn(ctx, deviceSN)
+	}
+	return nil, nil
+}
+
+func (m *mockTaskRepository) ListSentByDeviceBefore(ctx context.Context, deviceSN string, sentBefore time.Time, limit int) ([]*Task, error) {
+	if m.listSentByDevFn != nil {
+		return m.listSentByDevFn(ctx, deviceSN, sentBefore, limit)
 	}
 	return nil, nil
 }
@@ -352,20 +360,19 @@ func (ts *testableTaskService) GetTaskStats(ctx context.Context, deviceSN string
 }
 
 func (ts *testableTaskService) RecoverPendingTasks(ctx context.Context, deviceSN string) error {
-	staleTasks, err := ts.queue.GetStaleSentTasks(ctx, deviceSN, "5m")
+	staleTasks, err := ts.repo.ListSentByDeviceBefore(ctx, deviceSN, time.Now(), recoverSentTaskBatchSize)
 	if err != nil {
 		return err
 	}
 	for _, task := range staleTasks {
 		if !task.CanRetry() {
-			ts.MarkTaskFailed(ctx, task.ID, 0, "exceeded max retries")
+			task.MarkFailed(0, "exceeded max retries")
+			ts.queue.Update(ctx, task)
+			ts.repo.Update(ctx, task)
 			continue
 		}
 		task.ResetForRetry()
 		if err := ts.queue.Update(ctx, task); err != nil {
-			continue
-		}
-		if err := ts.queue.Push(ctx, task); err != nil {
 			continue
 		}
 		ts.repo.Update(ctx, task)
@@ -832,7 +839,9 @@ func Test_RecoverPendingTasks_ResetsStale(t *testing.T) {
 		MaxRetries: 3,
 	}
 
-	ts.queue.getStaleSentTasksFn = func(ctx context.Context, deviceSN string, staleDuration string) ([]*Task, error) {
+	ts.repo.listSentByDevFn = func(ctx context.Context, deviceSN string, sentBefore time.Time, limit int) ([]*Task, error) {
+		assert.Equal(t, "SN001", deviceSN)
+		assert.Equal(t, recoverSentTaskBatchSize, limit)
 		return []*Task{staleTask}, nil
 	}
 
@@ -841,12 +850,6 @@ func Test_RecoverPendingTasks_ResetsStale(t *testing.T) {
 		updateCalled = true
 		assert.Equal(t, TaskStatusPending, task.Status)
 		assert.Equal(t, 1, task.RetryCount)
-		return nil
-	}
-
-	pushCalled := false
-	ts.queue.pushFn = func(ctx context.Context, task *Task) error {
-		pushCalled = true
 		return nil
 	}
 
@@ -860,7 +863,6 @@ func Test_RecoverPendingTasks_ResetsStale(t *testing.T) {
 	err := ts.RecoverPendingTasks(ctx, "SN001")
 	require.NoError(t, err)
 	assert.True(t, updateCalled, "should update task in queue")
-	assert.True(t, pushCalled, "should re-push task to queue")
 	assert.True(t, repoUpdated, "should sync to repo")
 }
 
@@ -877,22 +879,19 @@ func Test_RecoverPendingTasks_MarkExhaustedAsFailed(t *testing.T) {
 		MaxRetries: 3, // CanRetry() => false
 	}
 
-	ts.queue.getStaleSentTasksFn = func(ctx context.Context, deviceSN string, staleDuration string) ([]*Task, error) {
+	ts.repo.listSentByDevFn = func(ctx context.Context, deviceSN string, sentBefore time.Time, limit int) ([]*Task, error) {
 		return []*Task{exhaustedTask}, nil
 	}
 
-	markFailedCalled := false
-	ts.queue.markTaskFailedFn = func(ctx context.Context, taskID string, errorCode int, errorMsg string) error {
-		markFailedCalled = true
-		assert.Equal(t, "task-1", taskID)
-		assert.Equal(t, 0, errorCode)
-		assert.Contains(t, errorMsg, "exceeded max retries")
+	queueUpdated := false
+	ts.queue.updateFn = func(ctx context.Context, task *Task) error {
+		queueUpdated = true
+		assert.Equal(t, TaskStatusFailed, task.Status)
+		assert.Contains(t, task.ErrorMessage, "exceeded max retries")
 		return nil
 	}
-	ts.queue.getByIDFn = func(ctx context.Context, taskID string) (*Task, error) {
-		return exhaustedTask, nil
-	}
 	ts.repo.updateFn = func(ctx context.Context, task *Task) error {
+		assert.Equal(t, TaskStatusFailed, task.Status)
 		return nil
 	}
 
@@ -905,7 +904,7 @@ func Test_RecoverPendingTasks_MarkExhaustedAsFailed(t *testing.T) {
 	ctx := context.Background()
 	err := ts.RecoverPendingTasks(ctx, "SN001")
 	require.NoError(t, err)
-	assert.True(t, markFailedCalled, "should mark exhausted task as failed")
+	assert.True(t, queueUpdated, "should mark exhausted task as failed")
 	assert.False(t, pushCalled, "should not re-push exhausted task")
 }
 

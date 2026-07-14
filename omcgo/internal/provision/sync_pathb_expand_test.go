@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"sort"
-	"strconv"
 	"testing"
 
 	"github.com/google/uuid"
@@ -204,7 +203,7 @@ func (f *fakeRepoWithHint) GetByFAPInstanceAndGroup(_ context.Context, _ uuid.UU
 }
 
 func TestExpandLargeObjectPrefixes_SmallObjectsKeptAsIs(t *testing.T) {
-	// 小对象: fields=5, hintFloor=256 → est = 60 * 5 * 256 = 76800 << 600KB → 不展开
+	// 小对象: fields=5, hintFloor=256 → est = 60 * 5 * 256 = 76800 << 5MB → 不展开
 	// 这验证了 "hintFloor 括到 256 后小对象仍不会被误展开" 的门槛。
 	mappings := []parammodel.ParamMapping{
 		{PrivatePath: "Dev.WiFi.SSID.{i}.Enabled", IsStorable: true, IsSupported: true},
@@ -222,9 +221,8 @@ func TestExpandLargeObjectPrefixes_SmallObjectsKeptAsIs(t *testing.T) {
 	assert.Equal(t, []string{"Dev.WiFi.SSID."}, got, "小对象应原样保留")
 }
 
-func TestExpandLargeObjectPrefixes_LargeObjectExpandedToInstances(t *testing.T) {
-	// 大对象: 70 字段 × hintFloor=32 instances × 60B = 134400 < 600KB? 算不上大
-	// 试 70 × 254 (BTS 真实历史) × 60 = 1066800 > 600KB → 展开
+func TestExpandLargeObjectPrefixes_BTSObjectUnder5MBKeptWhole(t *testing.T) {
+	// 70 × 254 (BTS 真实历史) × 60 = 1066800,低于 5MB → 保持整对象一次同步。
 	mappings := make([]parammodel.ParamMapping, 0, 70)
 	for i := 0; i < 70; i++ {
 		mappings = append(mappings, parammodel.ParamMapping{
@@ -241,10 +239,7 @@ func TestExpandLargeObjectPrefixes_LargeObjectExpandedToInstances(t *testing.T) 
 	}
 	got := svc.expandLargeObjectPrefixes(context.Background(), uuid.New(), mappings,
 		[]string{"DeviceGSM.Bts."})
-	// hint = DB 已知最大实例数 254; expand 出 254 个 instance prefix
-	require.Len(t, got, 254)
-	assert.Equal(t, "DeviceGSM.Bts.1.", got[0])
-	assert.Equal(t, "DeviceGSM.Bts.254.", got[253])
+	assert.Equal(t, []string{"DeviceGSM.Bts."}, got)
 }
 
 func TestExpandLargeObjectPrefixes_UsesKnownMaxInstanceBelowHintFloor(t *testing.T) {
@@ -270,9 +265,9 @@ func TestExpandLargeObjectPrefixes_UsesKnownMaxInstanceBelowHintFloor(t *testing
 		"已知最大实例数为 1 时不应被 hintFloor 强制展开成 256 个任务")
 }
 
-func TestExpandLargeObjectPrefixes_GSMBtsWithoutHistoryUsesMaxInstanceGroups(t *testing.T) {
-	// DeviceGSM.Bts.0.* 是站级参数,不是 BTS 实例。BSC cold-start 时如果 DB 尚无
-	// 历史实例号,按设备支持的最大 BTS 数展开,后续由 buildGPVBatches 分组获取。
+func TestExpandLargeObjectPrefixes_GSMBtsWithoutHistoryKeptWholeUnder5MB(t *testing.T) {
+	// BSC cold-start 时如果 DB 尚无历史实例号,典型 256 BTS 响应仍低于 5MB,
+	// 应保持 DeviceGSM.Bts. 整对象一次同步。
 	mappings := make([]parammodel.ParamMapping, 0, 70)
 	for i := 0; i < 70; i++ {
 		mappings = append(mappings, parammodel.ParamMapping{
@@ -287,21 +282,11 @@ func TestExpandLargeObjectPrefixes_GSMBtsWithoutHistoryUsesMaxInstanceGroups(t *
 	}
 	got := svc.expandLargeObjectPrefixes(context.Background(), uuid.New(), mappings,
 		[]string{"DeviceGSM.Bts."})
-	require.Len(t, got, hintFloor, "未知 BTS 数量时应按最大实例数展开")
-	assert.Equal(t, "DeviceGSM.Bts.1.", got[0])
-	assert.Equal(t, "DeviceGSM.Bts."+strconv.Itoa(hintFloor)+".", got[hintFloor-1])
-	assert.NotContains(t, got, "DeviceGSM.Bts.0.")
-
-	batches := buildGPVBatches(got, 50)
-	require.NotEmpty(t, batches)
-	for _, batch := range batches {
-		assert.LessOrEqual(t, len(batch), maxExpandedObjectPrefixesPerGPV(),
-			"展开后的 BTS 实例前缀应按 payload 预算分组")
-	}
+	assert.Equal(t, []string{"DeviceGSM.Bts."}, got)
 }
 
 func TestExpandLargeObjectPrefixes_FirstTimeSyncMidSizedObjectNotExpanded(t *testing.T) {
-	// 首次同步 + 中等对象(fields < 40): estBytes = 60 * 30 * 256 = 460800 < 600KB
+	// 首次同步 + 中等对象(fields < 40): estBytes = 60 * 30 * 256 = 460800 < 5MB
 	// → 不展开。验证 hintFloor=256 不会误伤中小对象。
 	mappings := make([]parammodel.ParamMapping, 0, 30)
 	for i := 0; i < 30; i++ {
@@ -361,8 +346,8 @@ func TestExpandLargeObjectPrefixes_NonBTSLargeObjectBypassesExpansion(t *testing
 		"非 BTS 大对象应直接整对象 GPV,不做实例展开")
 }
 
-func TestExpandLargeObjectPrefixes_GSMBtsDBLookupErrorFallsBackToMaxInstances(t *testing.T) {
-	// GSM BTS 的 DB 查询失败时仍按设备支持最大数分组获取,避免退回整对象大包。
+func TestExpandLargeObjectPrefixes_GSMBtsDBLookupErrorKeptWholeUnder5MB(t *testing.T) {
+	// GSM BTS 的 DB 查询失败时,典型估算仍低于 5MB,保持整对象同步。
 	mappings := make([]parammodel.ParamMapping, 0, 70)
 	for i := 0; i < 70; i++ {
 		mappings = append(mappings, parammodel.ParamMapping{
@@ -377,10 +362,7 @@ func TestExpandLargeObjectPrefixes_GSMBtsDBLookupErrorFallsBackToMaxInstances(t 
 	}
 	got := svc.expandLargeObjectPrefixes(context.Background(), uuid.New(), mappings,
 		[]string{"DeviceGSM.Bts."})
-	require.Len(t, got, hintFloor)
-	assert.Equal(t, "DeviceGSM.Bts.1.", got[0])
-	assert.Equal(t, "DeviceGSM.Bts."+strconv.Itoa(hintFloor)+".", got[hintFloor-1])
-	assert.NotContains(t, got, "DeviceGSM.Bts.0.")
+	assert.Equal(t, []string{"DeviceGSM.Bts."}, got)
 }
 
 func TestExpandLargeObjectPrefixes_NonObjectPrefixUnchanged(t *testing.T) {
@@ -420,8 +402,8 @@ func TestExpandLargeObjectPrefixes_BtsExpansionCapsAtGSMMaxInstances(t *testing.
 
 func TestExpandLargeObjectPrefixes_LogsExpansion(t *testing.T) {
 	core, recorded := observer.New(zap.InfoLevel)
-	mappings := make([]parammodel.ParamMapping, 0, 70)
-	for i := 0; i < 70; i++ {
+	mappings := make([]parammodel.ParamMapping, 0, 400)
+	for i := 0; i < 400; i++ {
 		mappings = append(mappings, parammodel.ParamMapping{
 			PrivatePath: "DeviceGSM.Bts.{i}.F" + string(rune('a'+i%26)),
 			IsStorable:  true,
@@ -438,7 +420,7 @@ func TestExpandLargeObjectPrefixes_LogsExpansion(t *testing.T) {
 	require.Len(t, logs, 1)
 	fields := logs[0].ContextMap()
 	assert.Equal(t, "DeviceGSM.Bts.", fields["object_prefix"])
-	assert.EqualValues(t, 70, fields["fields_per_instance"])
+	assert.EqualValues(t, 400, fields["fields_per_instance"])
 	assert.EqualValues(t, 254, fields["max_instance_hint"])
 	assert.EqualValues(t, 254, fields["expanded_count"])
 }
