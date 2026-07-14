@@ -899,7 +899,7 @@ export default function UserManagement() {
                 { pattern: /^[a-zA-Z0-9_-]{3,32}$/, message: t('user.userNameRule') },
               ]}
             >
-              <Input placeholder={t('user.form.username')} maxLength={32} />
+              <Input autoComplete="username" placeholder={t('user.form.username')} maxLength={32} />
             </Form.Item>
             {/* Issue #649：使用系统默认密码开关。默认关；ON 时下方两个密码框 disabled
                 + 不校验 rules；defaultPasswd 为空时开关 disabled + tooltip 引导。
@@ -946,6 +946,7 @@ export default function UserManagement() {
               }
             >
               <Input.Password
+                autoComplete="new-password"
                 placeholder={
                   createUseDefault
                     ? defaultPasswd || t('user.password')
@@ -974,6 +975,7 @@ export default function UserManagement() {
               }
             >
               <Input.Password
+                autoComplete="new-password"
                 placeholder={
                   createUseDefault
                     ? defaultPasswd || t('user.confirmPassword')
@@ -1255,6 +1257,8 @@ export default function UserManagement() {
             }
           >
             <Input.Password
+              autoComplete="new-password"
+              visibilityToggle={false}
               placeholder={
                 resetUseDefault
                   ? defaultPasswd || t('user.newPassword')
@@ -1283,6 +1287,8 @@ export default function UserManagement() {
             }
           >
             <Input.Password
+              autoComplete="new-password"
+              visibilityToggle={false}
               placeholder={
                 resetUseDefault
                   ? defaultPasswd || t('user.confirmPassword')
