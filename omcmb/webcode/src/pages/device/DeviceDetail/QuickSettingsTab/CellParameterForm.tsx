@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from 'react';
-import { Alert, Button, Card, Col, Form, Input, Row, Select, Space, Spin, Table, Tag, Tooltip, Typography, message, notification } from 'antd';
+import { Alert, Button, Card, Col, Form, Input, Row, Select, Space, Spin, Switch, Table, Tag, Tooltip, Typography, message, notification } from 'antd';
 import type { FormInstance } from 'antd';
 import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, DeleteOutlined, PlusOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
@@ -47,6 +47,34 @@ const BITMASK_SELECT_PATHS = new Set([
 const BM_PPS_TIME_MODE_PATH = 'Device.FAP.Synchronization.PpsTimeMode';
 const BM_GNSS_SYNC_SOURCE_PATH = 'Device.FAP.GNSS.SyncSource';
 const BM_PTP_CONFIG_PREFIX = 'Device.FAP.PTP1588.';
+const BM_GNSS_SYNC_SOURCE_BITS = {
+  GPS: '1',
+  GLONASS: '2',
+  GALILEO: '4',
+  BEIDOU: '8',
+  QZSS: '16',
+} as const;
+const BM_GNSS_EXCLUSIVE_BITS = new Set<string>([
+  BM_GNSS_SYNC_SOURCE_BITS.GLONASS,
+  BM_GNSS_SYNC_SOURCE_BITS.BEIDOU,
+  BM_GNSS_SYNC_SOURCE_BITS.GALILEO,
+]);
+const GNB_GPS_SYNC_SOURCE_PATH = 'Device.FAP.GPS.SyncSource';
+const GNB_GNSS_SYNC_SOURCE_VALUES = {
+  GPS: 'GPS',
+  GLONASS: 'GLONASS',
+  GALILEO: 'GALILEO',
+  BEIDOU: 'BEIDOU',
+  QZSS: 'QZSS',
+} as const;
+const GNB_GNSS_EXCLUSIVE_VALUES = new Set<string>([
+  GNB_GNSS_SYNC_SOURCE_VALUES.GLONASS,
+  GNB_GNSS_SYNC_SOURCE_VALUES.BEIDOU,
+  GNB_GNSS_SYNC_SOURCE_VALUES.GALILEO,
+]);
+const GNB_FORCED_SYNC_PATH = 'Device.DeviceInfo.iForcedSyncControlSwitch';
+const GNB_SYNC_MODE_GNSS_VALUES = new Set(['GPS_PPS', 'LOCAL_CLOCK_HOLDOVER_GPS_PPS', 'GPS_AND_PTP', '1']);
+const GNB_SYNC_MODE_PTP_VALUES = new Set(['1588_PPS', 'GPS_AND_PTP', '2']);
 
 type TFn = (id: string, values?: Record<string, string | number>) => string;
 
@@ -343,6 +371,18 @@ function appendCurrentOptionWithLabel(
   return [{ value: currentValue, label: currentLabel || currentValue }, ...options];
 }
 
+function appendCurrentEnumOption(
+  options: Array<{ value: string; label: string }>,
+  rawValue: unknown,
+  xmlOptions?: Array<{ value: string; label: string }>,
+): Array<{ value: string; label: string }> {
+  const normalized = normalizeEnumValue(rawValue, xmlOptions);
+  if (!normalized || options.some((option) => option.value === normalized)) {
+    return options;
+  }
+  return [{ value: normalized, label: normalized }, ...options];
+}
+
 function isBitmaskSelectPath(path: string): boolean {
   return BITMASK_SELECT_PATHS.has(path);
 }
@@ -351,8 +391,55 @@ function isBmPtpConfigPath(path: string): boolean {
   return path.startsWith(BM_PTP_CONFIG_PREFIX);
 }
 
+function isGnbPtpConfigPath(path: string): boolean {
+  return path.startsWith(BM_PTP_CONFIG_PREFIX);
+}
+
+function isGnbCommonSyncPath(path: string): boolean {
+  return path === GNB_FORCED_SYNC_PATH;
+}
+
 function isBmGnssSyncSourcePath(path: string): boolean {
   return path === BM_GNSS_SYNC_SOURCE_PATH;
+}
+
+function isStringMultiSelectPath(path: string): boolean {
+  return path === GNB_GPS_SYNC_SOURCE_PATH;
+}
+
+function normalizeStringMultiSelectValue(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return raw.map((item) => String(item ?? '').trim()).filter(Boolean);
+  }
+  return String(raw ?? '')
+    .split('_')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function serializeStringMultiSelectValue(raw: unknown): string {
+  return normalizeStringMultiSelectValue(raw).join('_');
+}
+
+function isSwitchPath(path: string): boolean {
+  return path === GNB_FORCED_SYNC_PATH;
+}
+
+function normalizeSwitchValue(raw: unknown): boolean {
+  if (typeof raw === 'boolean') {
+    return raw;
+  }
+  const value = String(raw ?? '').trim().toLowerCase();
+  if (!value) return true;
+  return value === '1' || value === 'true' || value === 'on';
+}
+
+function serializeSwitchValue(raw: unknown): string {
+  return normalizeSwitchValue(raw) ? '1' : '0';
+}
+
+function normalizeSwitchComparableValue(raw: unknown): string {
+  return serializeSwitchValue(raw);
 }
 
 function bitmaskHasBit(raw: unknown, bit: number): boolean {
@@ -364,6 +451,75 @@ function normalizeBitmaskValue(raw: unknown): string {
   const numeric = Number(String(raw ?? '').trim());
   if (!Number.isFinite(numeric) || numeric < 0) return '';
   return String(numeric);
+}
+
+function normalizeBitmaskBits(raw: unknown, allowedValues: string[]): string[] {
+  const allowed = new Set(allowedValues);
+  if (Array.isArray(raw)) {
+    return raw
+      .map((item) => String(item ?? '').trim())
+      .filter((item, idx, arr) => item && allowed.has(item) && arr.indexOf(item) === idx);
+  }
+
+  const text = String(raw ?? '').trim();
+  if (!text) return [];
+  if (text.includes(',')) {
+    return text
+      .split(',')
+      .map((item) => item.trim())
+      .filter((item, idx, arr) => item && allowed.has(item) && arr.indexOf(item) === idx);
+  }
+
+  const numeric = Number(text);
+  if (!Number.isFinite(numeric) || numeric <= 0) return [];
+  return allowedValues.filter((value) => {
+    const bit = Number(value);
+    return Number.isFinite(bit) && bit > 0 && (numeric & bit) !== 0;
+  });
+}
+
+function isConstrainedGnssSyncSourcePath(path: string): boolean {
+  return path === BM_GNSS_SYNC_SOURCE_PATH || path === GNB_GPS_SYNC_SOURCE_PATH;
+}
+
+function getGnssExclusiveValues(path: string): Set<string> {
+  return path === BM_GNSS_SYNC_SOURCE_PATH ? BM_GNSS_EXCLUSIVE_BITS : GNB_GNSS_EXCLUSIVE_VALUES;
+}
+
+function getGnssQzssValue(path: string): string {
+  return path === BM_GNSS_SYNC_SOURCE_PATH ? BM_GNSS_SYNC_SOURCE_BITS.QZSS : GNB_GNSS_SYNC_SOURCE_VALUES.QZSS;
+}
+
+function normalizeConstrainedGnssSyncSourceValue(raw: unknown, allowedValues: string[], path: string): string[] {
+  return path === BM_GNSS_SYNC_SOURCE_PATH
+    ? normalizeBitmaskBits(raw, allowedValues)
+    : normalizeStringMultiSelectValue(raw).filter((item, idx, arr) => allowedValues.includes(item) && arr.indexOf(item) === idx);
+}
+
+function normalizeConstrainedGnssSyncSourceChange(
+  raw: unknown,
+  previous: string[],
+  allowedValues: string[],
+  path: string,
+): { value: string[]; errorKey?: string } {
+  const allowed = new Set(allowedValues);
+  let value = normalizeConstrainedGnssSyncSourceValue(raw, allowedValues, path);
+  const exclusiveValues = getGnssExclusiveValues(path);
+
+  const exclusive = value.filter((item) => exclusiveValues.has(item));
+  if (exclusive.length > 1) {
+    const addedExclusive = exclusive.filter((item) => !previous.includes(item));
+    const keep = addedExclusive.at(-1) ?? exclusive.at(-1);
+    value = value.filter((item) => !exclusiveValues.has(item) || item === keep);
+  }
+
+  if (value.includes(getGnssQzssValue(path)) && value.length === 1) {
+    return { value: [], errorKey: 'device.cell.syncSourceQzssAlone' };
+  }
+
+  return {
+    value: value.filter((item, idx, arr) => allowed.has(item) && arr.indexOf(item) === idx),
+  };
 }
 
 function buildBitmaskCombinationOptions(
@@ -404,6 +560,12 @@ function serializeBitmaskValue(raw: unknown): string {
   return String(mask);
 }
 
+function serializeConstrainedGnssSyncSourceValue(raw: unknown, path: string): string {
+  return path === BM_GNSS_SYNC_SOURCE_PATH
+    ? serializeBitmaskValue(raw)
+    : serializeStringMultiSelectValue(raw);
+}
+
 function validateBitmaskValue(value: string, allowedValues: string[], minValue?: number, maxValue?: number): string | null {
   if (!value) return '请输入值';
   const numeric = Number(value);
@@ -418,6 +580,18 @@ function validateBitmaskValue(value: string, allowedValues: string[], minValue?:
   if (allowedMask <= 0) return null;
   if (numeric <= 0 || (numeric & ~allowedMask) !== 0) {
     return `允许的组合: ${allowedValues.join(', ')}`;
+  }
+  return null;
+}
+
+function validateConstrainedGnssSyncSourceValue(value: string, allowedValues: string[], path: string, t: TFn): string | null {
+  const selected = normalizeConstrainedGnssSyncSourceValue(value, allowedValues, path);
+  if (selected.length === 0) return t('device.cell.syncSourceRequired');
+  if (selected.filter((item) => getGnssExclusiveValues(path).has(item)).length > 1) {
+    return t('device.cell.syncSourceExclusive');
+  }
+  if (selected.includes(getGnssQzssValue(path)) && selected.length === 1) {
+    return t('device.cell.syncSourceQzssAlone');
   }
   return null;
 }
@@ -754,6 +928,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
   const t = useT();
   const [form] = Form.useForm();
   const latestLocalEditAtRef = useRef(0);
+  const gnssSyncSourceRef = useRef<string[]>([]);
   const watchedLocalTimeZoneName = Form.useWatch('LocalTimeZoneName', form);
   const watchedIpsecEnable = Form.useWatch('IPSEC_ENABLE', form);
   const watchedPpsTimeMode = Form.useWatch('PpsTimeMode', form);
@@ -785,10 +960,20 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
   const clearDraft = useQuickSettingsFeedbackStore((s) => s.clearDraft);
   const isDeviceTimeGroup = group.id === 'device-time';
   const isBmSyncSourceGroup = group.id === 'bm-sync-source';
+  const isGnbSyncSourceGroup = group.id === 'gnb-sync-source';
   const preferSchemaCurrentValue = isDeviceTimeGroup
+    || isGnbSyncSourceGroup
     || group.id === 'device-ipsec-control'
     || group.id === 'enb-mme'
     || group.id === 'gnb-core';
+  const isEffectiveBitmaskPath = useCallback(
+    (path: string) => !isGnbSyncSourceGroup && isBitmaskSelectPath(path),
+    [isGnbSyncSourceGroup],
+  );
+  const isConstrainedGnssSyncSourceSelectPath = useCallback(
+    (path: string) => (isBmSyncSourceGroup || isGnbSyncSourceGroup) && isConstrainedGnssSyncSourcePath(path),
+    [isBmSyncSourceGroup, isGnbSyncSourceGroup],
+  );
   const effectiveParams = useMemo<QuickSettingsParam[]>(() => {
     if (!isDeviceTimeGroup || group.params.some((param) => param.name === 'Enable')) {
       return group.params;
@@ -821,13 +1006,13 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
   // 注：useParameterSchema 接受 pathPrefix，前缀匹配即可；这里以分组共用前缀粗查再过滤
   // 为简化，取 group 中 standardPath 的公共前缀作 pathPrefix
   const commonPrefix = useMemo(
-    () => (isDeviceTimeGroup ? '' : commonPathPrefix(effectiveParams.map((p) => resolveReadPath(p.standardPath || '')))),
-    [isDeviceTimeGroup, effectiveParams, resolveReadPath],
+    () => (isDeviceTimeGroup || isGnbSyncSourceGroup ? '' : commonPathPrefix(effectiveParams.map((p) => resolveReadPath(p.standardPath || '')))),
+    [isDeviceTimeGroup, isGnbSyncSourceGroup, effectiveParams, resolveReadPath],
   );
   const { data: schemaResp, isLoading: isCommonSchemaLoading, refetch: refetchCommonSchema } = useParameterSchema(
     deviceId,
     commonPrefix,
-    active && !isDeviceTimeGroup,
+    active && !isDeviceTimeGroup && !isGnbSyncSourceGroup,
   );
   const { data: deviceTimeSchemaResp, isLoading: isDeviceTimeSchemaLoading, refetch: refetchDeviceTimeSchema } = useParameterSchema(
     deviceId,
@@ -896,6 +1081,24 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
     50,
     active && isBmSyncSourceGroup,
   );
+  const {
+    data: gnbSyncFapSchemaResp,
+    isLoading: isGnbSyncFapSchemaLoading,
+    refetch: refetchGnbSyncFapSchema,
+  } = useParameterSchema(
+    deviceId,
+    'Device.FAP.',
+    active && isGnbSyncSourceGroup,
+  );
+  const {
+    data: gnbSyncDeviceInfoSchemaResp,
+    isLoading: isGnbSyncDeviceInfoSchemaLoading,
+    refetch: refetchGnbSyncDeviceInfoSchema,
+  } = useParameterSchema(
+    deviceId,
+    'Device.DeviceInfo.',
+    active && isGnbSyncSourceGroup,
+  );
   const { data: ipsecControlParams } = useSearchParameters(
     deviceId,
     group.id === 'device-ipsec-control' ? (effectiveParams[0]?.standardPath || 'IPSEC_ENABLE') : '',
@@ -920,6 +1123,30 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         return true;
       });
     }
+    if (isGnbSyncSourceGroup) {
+      const modeValue = watchedPpsTimeMode
+        ?? draft?.PpsTimeMode
+        ?? gnbSyncFapSchemaResp?.parameters.find((item) => item.path === BM_PPS_TIME_MODE_PATH)?.currentValue;
+      const mode = String(modeValue ?? '');
+      const showGnssFields = GNB_SYNC_MODE_GNSS_VALUES.has(mode);
+      const showPtpFields = GNB_SYNC_MODE_PTP_VALUES.has(mode);
+      return effectiveParams.filter((param) => {
+        if (param.name === 'PpsTimeMode') {
+          return true;
+        }
+        const path = resolveReadPath(param.standardPath || '');
+        if (path === GNB_GPS_SYNC_SOURCE_PATH) {
+          return showGnssFields;
+        }
+        if (isGnbPtpConfigPath(path)) {
+          return showPtpFields;
+        }
+        if (isGnbCommonSyncPath(path)) {
+          return showGnssFields || showPtpFields;
+        }
+        return false;
+      });
+    }
     if (!isDeviceTimeGroup || deviceTimeParams === undefined) {
       return effectiveParams;
     }
@@ -934,7 +1161,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
       }
       return isValidNtpServerValue(availableTimeParams.get(path));
     });
-  }, [bmPpsTimeModeParams, deviceTimeParams, draft, effectiveParams, isBmSyncSourceGroup, isDeviceTimeGroup, watchedPpsTimeMode]);
+  }, [bmPpsTimeModeParams, deviceTimeParams, draft, effectiveParams, gnbSyncFapSchemaResp, isBmSyncSourceGroup, isDeviceTimeGroup, isGnbSyncSourceGroup, watchedPpsTimeMode, resolveReadPath]);
   // XML 驱动的 extraInfoPath:在某个字段下方以小字展示另一个只读参数当前值(范围提示)。
   // 由 quicksettings XML 在 <param> 上声明 extraInfoPath="Device.X.Y",前端按该路径拉 schema,
   // 把 currentValue 按 [lo ~ hi] 格式渲染到对应 Form.Item 的 extra 槽位。
@@ -998,14 +1225,23 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         ...(deviceTimeSchemaResp?.parameters ?? []),
         ...(managementServerSchemaResp?.parameters ?? []),
       ]
+      : isGnbSyncSourceGroup
+      ? [
+        ...(gnbSyncFapSchemaResp?.parameters ?? []),
+        ...(gnbSyncDeviceInfoSchemaResp?.parameters ?? []),
+      ]
       : (schemaResp?.parameters ?? [])),
-    [isDeviceTimeGroup, deviceTimeSchemaResp, managementServerSchemaResp, schemaResp],
+    [isDeviceTimeGroup, isGnbSyncSourceGroup, deviceTimeSchemaResp, managementServerSchemaResp, gnbSyncFapSchemaResp, gnbSyncDeviceInfoSchemaResp, schemaResp],
   );
   const isSchemaLoading = isDeviceTimeGroup
     ? (isDeviceTimeSchemaLoading || isManagementServerSchemaLoading)
+    : isGnbSyncSourceGroup
+    ? (isGnbSyncFapSchemaLoading || isGnbSyncDeviceInfoSchemaLoading)
     : isCommonSchemaLoading;
   const hasSchemaData = isDeviceTimeGroup
     ? Boolean(deviceTimeSchemaResp && managementServerSchemaResp)
+    : isGnbSyncSourceGroup
+    ? Boolean(gnbSyncFapSchemaResp && gnbSyncDeviceInfoSchemaResp)
     : Boolean(schemaResp);
   const ruRouteByIdx = useMemo(() => {
     const map = new Map<string, string>();
@@ -1161,15 +1397,26 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
     if (!hasSchemaData) return;
     visibleParams.forEach((p) => {
       const currentValue = form.getFieldValue(p.name);
+      const draftPath = resolveReadPath(p.standardPath || '');
+      const draftItem = schemaByPath.get(draftPath);
+      const enumValuesForPath = p.enumOptions?.map((option) => option.value) ?? draftItem?.constraints?.enumValues ?? [];
       if (draft && draft[p.name] !== undefined) {
-        const draftPath = resolveReadPath(p.standardPath || '');
         const nextValue = resolveRuntimeSpecialConfig(p.name)?.kind === 'mme-ip-plmn-table'
           ? toMmeIpPlmnRows(draft[p.name])
-          : isBitmaskSelectPath(draftPath)
+          : isConstrainedGnssSyncSourceSelectPath(draftPath)
+          ? normalizeConstrainedGnssSyncSourceValue(draft[p.name], enumValuesForPath, draftPath)
+          : isEffectiveBitmaskPath(draftPath)
           ? normalizeBitmaskValue(draft[p.name])
+          : isStringMultiSelectPath(draftPath)
+          ? normalizeStringMultiSelectValue(draft[p.name])
+          : isSwitchPath(draftPath)
+          ? normalizeSwitchValue(draft[p.name])
           : String(draft[p.name] ?? '');
         if (!formValueEquals(currentValue, nextValue)) {
           form.setFieldValue(p.name, nextValue);
+        }
+        if (isConstrainedGnssSyncSourceSelectPath(draftPath)) {
+          gnssSyncSourceRef.current = Array.isArray(nextValue) ? nextValue.map(String) : [];
         }
         return;
       }
@@ -1211,8 +1458,17 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
           raw = String(instanceContext.fapInstance);
         }
         const enumOptions = isDeviceTimeGroup && p.name === 'Enable' ? deviceTimeModeOptions : p.enumOptions;
-        if (isBitmaskSelectPath(path)) {
+        const allowedEnumValues = enumOptions?.map((option) => option.value) ?? item?.constraints?.enumValues ?? [];
+        if (isConstrainedGnssSyncSourceSelectPath(path)) {
+          const nextValue = normalizeConstrainedGnssSyncSourceValue(raw, allowedEnumValues, path);
+          form.setFieldValue(p.name, nextValue);
+          gnssSyncSourceRef.current = nextValue;
+        } else if (isEffectiveBitmaskPath(path)) {
           form.setFieldValue(p.name, normalizeBitmaskValue(raw));
+        } else if (isStringMultiSelectPath(path)) {
+          form.setFieldValue(p.name, normalizeStringMultiSelectValue(raw));
+        } else if (isSwitchPath(path)) {
+          form.setFieldValue(p.name, normalizeSwitchValue(raw));
         } else {
           form.setFieldValue(
             p.name,
@@ -1224,7 +1480,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         }
       }
     });
-  }, [hasSchemaData, visibleParams, instanceContext, form, schemaByPath, rawParameterByPath, draft, resolveRuntimeSpecialConfig, mmeIpPlmnParams, nrNguParams, nrNguFallbackParams, preferSchemaCurrentValue, isDeviceTimeGroup, deviceTimeModeOptionsKey]);
+  }, [hasSchemaData, visibleParams, instanceContext, form, schemaByPath, rawParameterByPath, draft, resolveRuntimeSpecialConfig, mmeIpPlmnParams, nrNguParams, nrNguFallbackParams, preferSchemaCurrentValue, isDeviceTimeGroup, deviceTimeModeOptionsKey, isEffectiveBitmaskPath, isConstrainedGnssSyncSourceSelectPath]);
 
   const handleSave = async () => {
     const values = form.getFieldsValue() as Record<string, unknown>;
@@ -1258,29 +1514,45 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         }
       }
 
-      const isBitmaskField = isBitmaskSelectPath(path);
+      const isBitmaskField = isEffectiveBitmaskPath(path);
+      const isStringMultiSelectField = isStringMultiSelectPath(path);
+      const isSwitchField = isSwitchPath(path);
       const newVal = special?.kind === 'mme-ip-plmn-table'
         ? serializeMmeIpPlmnList(toMmeIpPlmnRows(values[p.name]))
         : isBitmaskField
         ? serializeBitmaskValue(values[p.name])
+        : isStringMultiSelectField
+        ? serializeStringMultiSelectValue(values[p.name])
+        : isSwitchField
+        ? serializeSwitchValue(values[p.name])
         : String(values[p.name] ?? '');
-      const oldVal = special?.kind === 'mme-ip-plmn-table'
+      const rawOldVal = special?.kind === 'mme-ip-plmn-table'
         ? (preferSchemaCurrentValue
           ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
           : (rawItem?.parameterValue ?? item?.currentValue ?? ''))
         : (preferSchemaCurrentValue
           ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
           : (rawItem?.parameterValue ?? item?.currentValue ?? ''));
+      const oldVal = isSwitchField ? normalizeSwitchComparableValue(rawOldVal) : rawOldVal;
       if (newVal === oldVal) continue;
 
       const parameterType = resolveQuickSettingsParameterType(p.type, item?.type, rawItem?.parameterType);
+      const allowedValues = p.enumOptions?.map((option) => option.value) ?? item?.constraints?.enumValues ?? [];
       const err = isBitmaskField
-        ? validateBitmaskValue(
+        ? isConstrainedGnssSyncSourceSelectPath(path)
+          ? validateConstrainedGnssSyncSourceValue(newVal, allowedValues, path, t)
+          : validateBitmaskValue(
           newVal,
-          p.enumOptions?.map((option) => option.value) ?? item?.constraints?.enumValues ?? [],
+          allowedValues,
           item?.constraints?.minValue,
           item?.constraints?.maxValue,
         )
+        : isConstrainedGnssSyncSourceSelectPath(path)
+        ? validateConstrainedGnssSyncSourceValue(newVal, allowedValues, path, t)
+        : isStringMultiSelectField
+        ? null
+        : isSwitchField
+        ? null
         : validateValue(newVal, parameterType, item?.constraints);
       if (err) {
         errors[p.name] = err;
@@ -1419,6 +1691,17 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
           for (const item of refreshedManagementServer.data?.parameters ?? []) {
             refreshedSchemaByPath.set(item.path, item);
           }
+        } else if (isGnbSyncSourceGroup) {
+          const [refreshedGnbSyncFap, refreshedGnbSyncDeviceInfo] = await Promise.all([
+            refetchGnbSyncFapSchema(),
+            refetchGnbSyncDeviceInfoSchema(),
+          ]);
+          for (const item of refreshedGnbSyncFap.data?.parameters ?? []) {
+            refreshedSchemaByPath.set(item.path, item);
+          }
+          for (const item of refreshedGnbSyncDeviceInfo.data?.parameters ?? []) {
+            refreshedSchemaByPath.set(item.path, item);
+          }
         } else {
           const refreshed = await refetchCommonSchema();
           for (const item of refreshed.data?.parameters ?? []) {
@@ -1442,10 +1725,17 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         const special = resolveRuntimeSpecialConfig(p.name);
         const path = special?.configPath ?? resolveReadPath(p.standardPath || '');
         const refreshedValue = refreshedSchemaByPath.get(path)?.currentValue ?? '';
+        const allowedEnumValues = p.enumOptions?.map((option) => option.value) ?? refreshedSchemaByPath.get(path)?.constraints?.enumValues ?? [];
         nextValues[p.name] = special?.kind === 'mme-ip-plmn-table'
           ? toMmeIpPlmnRows(refreshedValue)
-          : isBitmaskSelectPath(path)
+          : isConstrainedGnssSyncSourceSelectPath(path)
+            ? normalizeConstrainedGnssSyncSourceValue(refreshedValue, allowedEnumValues, path)
+          : isEffectiveBitmaskPath(path)
             ? normalizeBitmaskValue(refreshedValue)
+          : isStringMultiSelectPath(path)
+            ? normalizeStringMultiSelectValue(refreshedValue)
+          : isSwitchPath(path)
+            ? normalizeSwitchValue(refreshedValue)
           : normalizeEnumValue(
             refreshedValue,
             isDeviceTimeGroup && p.name === 'Enable' ? deviceTimeModeOptions : p.enumOptions,
@@ -1461,13 +1751,17 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
       if (Object.keys(changedValues).length > 0) {
         form.setFieldsValue(changedValues);
       }
+      const syncSourceValue = nextValues.SyncSource;
+      if (Array.isArray(syncSourceValue)) {
+        gnssSyncSourceRef.current = syncSourceValue.map(String);
+      }
       clearDraft(fbKey);
       setFieldErrors({});
     })();
     return () => {
       cancelled = true;
     };
-  }, [active, lastTask?.id, lastTask?.status, lastSubmit?.at, refetchCommonSchema, refetchDeviceTimeSchema, refetchManagementServerSchema, effectiveParams, instanceContext, form, clearDraft, fbKey, group.titleZh, resolveRuntimeSpecialConfig, t, isDeviceTimeGroup, deviceTimeModeOptionsKey, queryClient, deviceId]);
+  }, [active, lastTask?.id, lastTask?.status, lastSubmit?.at, refetchCommonSchema, refetchDeviceTimeSchema, refetchManagementServerSchema, refetchGnbSyncFapSchema, refetchGnbSyncDeviceInfoSchema, effectiveParams, instanceContext, form, clearDraft, fbKey, group.titleZh, resolveRuntimeSpecialConfig, t, isDeviceTimeGroup, isGnbSyncSourceGroup, deviceTimeModeOptionsKey, queryClient, deviceId, isEffectiveBitmaskPath, isConstrainedGnssSyncSourceSelectPath]);
 
   // T-0146:基站应答失败时弹一次 notification(只在 status 第一次变成 failed 时触发,避免重复弹)
   // notifiedFailedTaskId 同样存 store —— 切顶层 tab 再切回不会重复弹。
@@ -1542,6 +1836,20 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
           for (const [name, value] of Object.entries(changedValues)) {
             const p = visibleParams.find((q) => q.name === name);
             const special = p ? resolveRuntimeSpecialConfig(p.name) : undefined;
+            const path = p ? (special?.configPath ?? resolveReadPath(p.standardPath || '')) : '';
+            const item = path ? schemaByPath.get(path) : undefined;
+            const allowedEnumValues = p?.enumOptions?.map((option) => option.value) ?? item?.constraints?.enumValues ?? [];
+            if (p && isConstrainedGnssSyncSourceSelectPath(path)) {
+              const normalized = normalizeConstrainedGnssSyncSourceChange(value, gnssSyncSourceRef.current, allowedEnumValues, path);
+              changedValues[name] = normalized.value;
+              form.setFieldValue(name, normalized.value);
+              gnssSyncSourceRef.current = normalized.value;
+              setDraftField(fbKey, name, serializeConstrainedGnssSyncSourceValue(normalized.value, path));
+              if (normalized.errorKey) {
+                message.warning(t(normalized.errorKey));
+              }
+              continue;
+            }
             if (special?.kind === 'mme-ip-plmn-table') {
               setDraftField(fbKey, name, toMmeIpPlmnRows(value));
             } else {
@@ -1591,16 +1899,29 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
               const sItem = schemaByPath.get(path);
               const normalizedValue = special?.kind === 'mme-ip-plmn-table'
                 ? serializeMmeIpPlmnList(toMmeIpPlmnRows(value))
-                : isBitmaskSelectPath(path)
+                : isEffectiveBitmaskPath(path)
                 ? serializeBitmaskValue(value)
+                : isStringMultiSelectPath(path)
+                ? serializeStringMultiSelectValue(value)
+                : isSwitchPath(path)
+                ? serializeSwitchValue(value)
                 : String(value ?? '');
-              const err = isBitmaskSelectPath(path)
-                ? validateBitmaskValue(
+              const allowedValues = p.enumOptions?.map((option) => option.value) ?? sItem?.constraints?.enumValues ?? [];
+              const err = isEffectiveBitmaskPath(path)
+                ? isConstrainedGnssSyncSourceSelectPath(path)
+                  ? validateConstrainedGnssSyncSourceValue(normalizedValue, allowedValues, path, t)
+                  : validateBitmaskValue(
                   normalizedValue,
-                  p.enumOptions?.map((option) => option.value) ?? sItem?.constraints?.enumValues ?? [],
+                  allowedValues,
                   sItem?.constraints?.minValue,
                   sItem?.constraints?.maxValue,
                 )
+                : isConstrainedGnssSyncSourceSelectPath(path)
+                ? validateConstrainedGnssSyncSourceValue(normalizedValue, allowedValues, path, t)
+                : isStringMultiSelectPath(path)
+                ? null
+                : isSwitchPath(path)
+                ? null
                 : validateValue(
                   normalizedValue,
                   (sItem?.type as never) ?? 'string',
@@ -1798,13 +2119,27 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
               ? xmlEnumLabels
               : (enumMeta?.labels ?? []);
             const isEnum = !special && effectiveEnumValues.length > 0;
-            const isBitmaskEnum = isEnum && isBitmaskSelectPath(path);
-            const enumOptions = isBitmaskEnum
-              ? buildBitmaskCombinationOptions(effectiveEnumValues, effectiveEnumLabels, locale)
+            const isBitmaskEnum = isEnum && isEffectiveBitmaskPath(path);
+            const isConstrainedGnssSyncSourceEnum = isEnum && isConstrainedGnssSyncSourceSelectPath(path);
+            const isStringMultiSelectEnum = isEnum && isStringMultiSelectPath(path);
+            const isSwitchField = isSwitchPath(path);
+            const baseEnumOptions = isBitmaskEnum
+              ? isConstrainedGnssSyncSourceEnum
+                ? effectiveEnumValues.map((v, idx) => ({
+                  value: v,
+                  label: localizeEnumLabel(effectiveEnumLabels[idx] || v, v, locale),
+                }))
+                : buildBitmaskCombinationOptions(effectiveEnumValues, effectiveEnumLabels, locale)
               : effectiveEnumValues.map((v, idx) => ({
                 value: v,
                 label: localizeEnumLabel(effectiveEnumLabels[idx] || v, v, locale),
               }));
+            const currentRawValue = preferSchemaCurrentValue
+              ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
+              : (rawItem?.parameterValue ?? item?.currentValue ?? '');
+            const enumOptions = isEnum && !isBitmaskEnum && !isStringMultiSelectEnum
+              ? appendCurrentEnumOption(baseEnumOptions, currentRawValue, p.enumOptions)
+              : baseEnumOptions;
             const extra = special?.kind === 'mme-ip-plmn-table'
               ? t('device.cell.mmeIpPlmnExtra')
               : undefined;
@@ -1820,6 +2155,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                 <Form.Item
                   label={special?.kind === 'mme-ip-plmn-table' ? undefined : label}
                   name={p.name}
+                  valuePropName={isSwitchField ? 'checked' : undefined}
                   validateStatus={error ? 'error' : undefined}
                   help={error}
                   extra={extra}
@@ -1838,8 +2174,15 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                       locale={locale}
                       maxRows={p.maxValue}
                     />
+                  ) : isSwitchField ? (
+                    <Switch
+                      disabled={!finalWritable}
+                      checkedChildren={t('common.on')}
+                      unCheckedChildren={t('common.off')}
+                    />
                   ) : isEnum ? (
                     <Select
+                      mode={isStringMultiSelectEnum || isConstrainedGnssSyncSourceEnum ? 'multiple' : undefined}
                       disabled={!finalWritable}
                       placeholder={item?.defaultValue || ''}
                       showSearch={isBitmaskEnum}

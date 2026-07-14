@@ -219,6 +219,76 @@ func TestBuiltinBSC_HandoverOptionsUseDeviceValues(t *testing.T) {
 	assert.Equal(t, "Forbid", handover.EnumOptions[1].Label)
 }
 
+func TestBuiltinBaiBNQ_IncludesStringSyncSourceSettings(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "data", "quicksettings", "BaiBNQ.xml"))
+	require.NoError(t, err)
+
+	var doc xmlQuickSettings
+	require.NoError(t, xml.Unmarshal(data, &doc))
+
+	var syncGroup *xmlGroup
+	for gi := range doc.Groups {
+		if doc.Groups[gi].ID == "gnb-sync-source" {
+			syncGroup = &doc.Groups[gi]
+			break
+		}
+	}
+	require.NotNil(t, syncGroup)
+	require.Len(t, syncGroup.Params, 11)
+
+	mode := syncGroup.Params[0]
+	assert.Equal(t, "PpsTimeMode", mode.Name)
+	assert.Equal(t, "string", mode.Type)
+	assert.Equal(t, "Device.FAP.Synchronization.PpsTimeMode", mode.StandardPath)
+	assert.Equal(t, []xmlEnumOption{
+		{Value: "FREE_OSCILLATION", Label: "FREE_OSCILLATION"},
+		{Value: "GPS_PPS", Label: "GPS_PPS"},
+		{Value: "LOCAL_CLOCK_HOLDOVER_GPS_PPS", Label: "LOCAL_CLOCK_HOLDOVER_GPS_PPS"},
+		{Value: "OCXO_PPS", Label: "OCXO_PPS"},
+		{Value: "1588_PPS", Label: "1588_PPS"},
+		{Value: "GPS_AND_PTP", Label: "GPS_AND_PTP"},
+	}, mode.EnumOptions)
+
+	source := syncGroup.Params[1]
+	assert.Equal(t, "SyncSource", source.Name)
+	assert.Equal(t, "string", source.Type)
+	assert.Equal(t, "Device.FAP.GPS.SyncSource", source.StandardPath)
+	assert.Equal(t, []xmlEnumOption{
+		{Value: "GPS", Label: "GPS"},
+		{Value: "GLONASS", Label: "GLONASS"},
+		{Value: "BEIDOU", Label: "BEIDOU"},
+		{Value: "GALILEO", Label: "GALILEO"},
+		{Value: "QZSS", Label: "QZSS"},
+	}, source.EnumOptions)
+
+	forcedSync := syncGroup.Params[2]
+	assert.Equal(t, "ForcedSync", forcedSync.Name)
+	assert.Equal(t, "unsignedInt", forcedSync.Type)
+	assert.Equal(t, "Device.DeviceInfo.iForcedSyncControlSwitch", forcedSync.StandardPath)
+	assert.Equal(t, "1", forcedSync.DefaultValue)
+	assert.Equal(t, "true", forcedSync.HideRangeHint)
+	assert.Equal(t, []xmlEnumOption{
+		{Value: "1", Label: "1"},
+		{Value: "0", Label: "0"},
+	}, forcedSync.EnumOptions)
+
+	ptpStatus := syncGroup.Params[3]
+	assert.Equal(t, "PTPSyncStatus", ptpStatus.Name)
+	assert.Equal(t, "string", ptpStatus.Type)
+	assert.Equal(t, "Device.FAP.PTP1588.SyncStatus", ptpStatus.StandardPath)
+	assert.Equal(t, "true", ptpStatus.Readonly)
+
+	ptpProfile := syncGroup.Params[4]
+	assert.Equal(t, "PTPProfile", ptpProfile.Name)
+	assert.Equal(t, "Device.FAP.PTP1588.Profile", ptpProfile.StandardPath)
+	assert.Equal(t, []xmlEnumOption{{Value: "1588v2", Label: "1588v2"}}, ptpProfile.EnumOptions)
+
+	ptpDelayInterval := syncGroup.Params[10]
+	assert.Equal(t, "PTPDelayInterval", ptpDelayInterval.Name)
+	assert.Equal(t, "Device.FAP.PTP1588.DelayInterval", ptpDelayInterval.StandardPath)
+	assert.Contains(t, ptpDelayInterval.EnumOptions, xmlEnumOption{Value: "-4", Label: "-4"})
+}
+
 func TestRegistry_GetByParamModel_IsCopy(t *testing.T) {
 	reg := NewRegistry()
 	reg.Replace("BLQ", []Group{{ID: "g1"}})
