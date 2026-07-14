@@ -124,9 +124,13 @@ func (m *memRepo) Count(_ context.Context) (int64, error) {
 	defer m.mu.Unlock()
 	var n int64
 	for _, r := range m.rows {
-		if !r.IsDeleted {
-			n++
+		if r.IsDeleted {
+			continue
 		}
+		if m.isFault && r.RecordStatus != FaultRecordStatusFileReceived {
+			continue
+		}
+		n++
 	}
 	return n, nil
 }
@@ -390,6 +394,44 @@ func TestHandleLogFileReceived_InsertsWhenNoDetectedRecord(t *testing.T) {
 	row := faultRepo.rows[0]
 	assert.Equal(t, FaultRecordStatusFileReceived, row.RecordStatus)
 	assert.Equal(t, "abnormalLog_SN-ORPHAN.tar.gz", row.FileName)
+}
+
+func TestEnforceFaultLogQuota_IgnoresDetectedPlaceholdersForGlobalCount(t *testing.T) {
+	// detected 是无文件占位记录，不应把全局文件数配额顶满；
+	// 否则 ListOldest 只返回 file_received 时会误删刚到达的真实文件。
+	svc, _, faultRepo := newTestService()
+	minio := svc.minioClient.(*fakeMinioClient)
+
+	base := time.Now().Add(-time.Hour)
+	for i := 0; i < DefaultMaxFileCount+10; i++ {
+		require.NoError(t, faultRepo.Create(context.Background(), &LogFile{
+			DeviceSN:     fmt.Sprintf("SN-DETECTED-%02d", i),
+			RecordStatus: FaultRecordStatusDetected,
+			CollectedAt:  base.Add(time.Duration(i) * time.Minute),
+		}))
+	}
+
+	deviceID := uuid.New()
+	fileID := uuid.New()
+	require.NoError(t, faultRepo.Create(context.Background(), &LogFile{
+		ID:           fileID,
+		DeviceID:     &deviceID,
+		DeviceSN:     "SN-FILE-ONLY",
+		FileName:     "abnormalLog_SN-FILE-ONLY.tar.gz",
+		ObjectPath:   "fault/SN-FILE-ONLY.tar.gz",
+		Bucket:       "logs",
+		FileSize:     1024,
+		RecordStatus: FaultRecordStatusFileReceived,
+		CollectedAt:  time.Now(),
+	}))
+
+	require.NoError(t, svc.enforceFaultLogQuota(context.Background(), &deviceID))
+
+	got, err := faultRepo.GetByID(context.Background(), fileID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.False(t, got.IsDeleted, "detected 占位不应触发全局配额清理真实文件")
+	assert.Empty(t, minio.removed, "不应删除 MinIO 中刚上传的故障日志对象")
 }
 
 // TestServiceDelete_NotFoundMapsToSentinel 锁定 #125 修复：Delete 对格式合法但

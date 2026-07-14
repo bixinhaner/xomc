@@ -280,10 +280,13 @@ func (r *PgRepository) MarkDeleted(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *PgRepository) Count(ctx context.Context) (int64, error) {
-	query, args, err := storage.Psql.Select("COUNT(*)").
+	q := storage.Psql.Select("COUNT(*)").
 		From(r.tableName).
-		Where(sq.Eq{"is_deleted": false}).
-		ToSql()
+		Where(sq.Eq{"is_deleted": false})
+	if r.withFaultFields {
+		q = q.Where(sq.Eq{"record_status": FaultRecordStatusFileReceived})
+	}
+	query, args, err := q.ToSql()
 	if err != nil {
 		return 0, fmt.Errorf("build count %s: %w", r.tableName, err)
 	}
