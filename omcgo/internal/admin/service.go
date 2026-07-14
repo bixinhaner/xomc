@@ -512,33 +512,31 @@ func (s *AdminService) resolveAdminInjectedPassword(useDefault bool, plain strin
 // auditUserCreateSuccess 写一条用户创建成功的审计日志。
 // details.used_default_password 让审计端可区分两条路径，便于合规追溯。
 func (s *AdminService) auditUserCreateSuccess(ctx context.Context, req CreateUserRequest, user *User) {
-	audit.Log(ctx, audit.Entry{
-		UserID:       operatorIDFromContext(ctx),
-		Action:       audit.ActionUserCreate,
-		ResourceType: audit.ResourceUser,
-		ResourceID:   user.ID.String(),
-		Success:      true,
-		Details: map[string]interface{}{
-			"used_default_password": req.UseDefaultPassword,
-			"target_user_id":        user.ID.String(),
-			"target_username":       req.Username,
-		},
-	})
+	entry := auditEntryFromContext(ctx)
+	entry.Action = audit.ActionUserCreate
+	entry.ResourceType = audit.ResourceUser
+	entry.ResourceID = user.ID.String()
+	entry.Success = true
+	entry.Details = map[string]interface{}{
+		"used_default_password": req.UseDefaultPassword,
+		"target_user_id":        user.ID.String(),
+		"target_username":       req.Username,
+	}
+	audit.Log(ctx, entry)
 }
 
 // auditUserCreateFailure 写一条用户创建失败的审计日志（密码强度/默认密码未设置/落库失败等）。
 func (s *AdminService) auditUserCreateFailure(ctx context.Context, req CreateUserRequest, err error) {
-	audit.Log(ctx, audit.Entry{
-		UserID:       operatorIDFromContext(ctx),
-		Action:       audit.ActionUserCreate,
-		ResourceType: audit.ResourceUser,
-		Success:      false,
-		ErrorMessage: err.Error(),
-		Details: map[string]interface{}{
-			"used_default_password": req.UseDefaultPassword,
-			"target_username":       req.Username,
-		},
-	})
+	entry := auditEntryFromContext(ctx)
+	entry.Action = audit.ActionUserCreate
+	entry.ResourceType = audit.ResourceUser
+	entry.Success = false
+	entry.ErrorMessage = err.Error()
+	entry.Details = map[string]interface{}{
+		"used_default_password": req.UseDefaultPassword,
+		"target_username":       req.Username,
+	}
+	audit.Log(ctx, entry)
 }
 
 // UpdateUser updates an existing user.
@@ -999,35 +997,33 @@ func (s *AdminService) ResetPassword(ctx context.Context, id uuid.UUID, req Rese
 
 // auditPasswordResetSuccess 写一条管理员重置密码成功的审计日志。
 func (s *AdminService) auditPasswordResetSuccess(ctx context.Context, targetID uuid.UUID, username string, usedDefault bool) {
-	audit.Log(ctx, audit.Entry{
-		UserID:       operatorIDFromContext(ctx),
-		Action:       audit.ActionPasswordReset,
-		ResourceType: audit.ResourceUser,
-		ResourceID:   targetID.String(),
-		Success:      true,
-		Details: map[string]interface{}{
-			"used_default_password": usedDefault,
-			"target_user_id":        targetID.String(),
-			"target_username":       username,
-		},
-	})
+	entry := auditEntryFromContext(ctx)
+	entry.Action = audit.ActionPasswordReset
+	entry.ResourceType = audit.ResourceUser
+	entry.ResourceID = targetID.String()
+	entry.Success = true
+	entry.Details = map[string]interface{}{
+		"used_default_password": usedDefault,
+		"target_user_id":        targetID.String(),
+		"target_username":       username,
+	}
+	audit.Log(ctx, entry)
 }
 
 // auditPasswordResetFailure 写一条管理员重置密码失败的审计日志
 // （LDAP 拒绝 / 内置用户拒绝 / 默认密码未设置 / 强度不通过 / 落库失败等）。
 func (s *AdminService) auditPasswordResetFailure(ctx context.Context, targetID uuid.UUID, username string, usedDefault bool, err error) {
-	audit.Log(ctx, audit.Entry{
-		UserID:       operatorIDFromContext(ctx),
-		Action:       audit.ActionPasswordReset,
-		ResourceType: audit.ResourceUser,
-		ResourceID:   targetID.String(),
-		Success:      false,
-		ErrorMessage: err.Error(),
-		Details: map[string]interface{}{
-			"used_default_password": usedDefault,
-			"target_username":       username,
-		},
-	})
+	entry := auditEntryFromContext(ctx)
+	entry.Action = audit.ActionPasswordReset
+	entry.ResourceType = audit.ResourceUser
+	entry.ResourceID = targetID.String()
+	entry.Success = false
+	entry.ErrorMessage = err.Error()
+	entry.Details = map[string]interface{}{
+		"used_default_password": usedDefault,
+		"target_username":       username,
+	}
+	audit.Log(ctx, entry)
 }
 
 // LockUser disables a user account by setting its status to disabled.

@@ -1,11 +1,42 @@
 package admin
 
 import (
+	"context"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
 	"github.com/omcgo/omcgo/internal/admin/audit"
 )
+
+type auditRequestMetadataContextKey struct{}
+
+type auditRequestMetadata struct {
+	IPAddress string
+	UserAgent string
+}
+
+func contextWithAuditRequestMetadata(c *gin.Context) context.Context {
+	if c == nil || c.Request == nil {
+		return context.Background()
+	}
+	return context.WithValue(c.Request.Context(), auditRequestMetadataContextKey{}, auditRequestMetadata{
+		IPAddress: auditClientIP(c),
+		UserAgent: c.Request.UserAgent(),
+	})
+}
+
+func auditEntryFromContext(ctx context.Context) audit.Entry {
+	entry := audit.Entry{UserID: operatorIDFromContext(ctx)}
+	if username, ok := ctx.Value(CtxKeyUsername).(string); ok {
+		entry.Username = username
+	}
+	if metadata, ok := ctx.Value(auditRequestMetadataContextKey{}).(auditRequestMetadata); ok {
+		entry.IPAddress = metadata.IPAddress
+		entry.UserAgent = metadata.UserAgent
+	}
+	return entry
+}
 
 // UserIDFromCtx 从 gin context 提取 user_id (uuid.UUID)。
 //

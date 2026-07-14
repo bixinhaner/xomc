@@ -14,12 +14,14 @@ import (
 	"github.com/omcgo/omcgo/internal/core/response"
 )
 
-// userContextWithOperator 把 gin.Context 中的认证信息复制到 context.Context，
-// 供 service 层取 operator_id 写审计字段（created_by / updated_by）。
+// userContextWithOperator 把 gin.Context 中的认证身份和可信请求元数据复制到
+// context.Context，供 service 层写 created_by / updated_by 和业务审计字段。
 func userContextWithOperator(c *gin.Context) context.Context {
-	ctx := c.Request.Context()
-	if v, ok := c.Get(CtxKeyUserID); ok {
-		ctx = context.WithValue(ctx, CtxKeyUserID, v)
+	ctx := contextWithAuditRequestMetadata(c)
+	for _, key := range []string{CtxKeyUserID, CtxKeyUsername} {
+		if v, ok := c.Get(key); ok {
+			ctx = context.WithValue(ctx, key, v)
+		}
 	}
 	return ctx
 }
@@ -256,7 +258,7 @@ func (h *Handler) ResetPassword(c *gin.Context) {
 		return
 	}
 
-	ctx := c.Request.Context()
+	ctx := userContextWithOperator(c)
 
 	// issue #649：UseDefaultPassword=true 时跳过密码字段解析与必填校验。
 	// service 层会从 sys_configs.security.defaultPasswd 取值并跳过强度校验。

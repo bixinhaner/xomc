@@ -913,6 +913,62 @@ func TestHandler_CreateUser_UseDefaultPassword_Succeeds(t *testing.T) {
 	assert.True(t, created.MustChangePassword, "硬规则：默认密码创建即强制首次改密")
 }
 
+func TestHandler_CreateUser_AuditIncludesOperatorAndRequestMetadata(t *testing.T) {
+	operatorID := uuid.New()
+	createdAudit := make(chan *AuditLog, 1)
+	auditRepo := &handlerMockAuditRepoWithCapture{
+		createFn: func(_ context.Context, log *AuditLog) error {
+			if log.Action == "user_create" {
+				createdAudit <- log
+			}
+			return nil
+		},
+	}
+	userRepo := &handlerMockUserRepo{
+		createFn: func(_ context.Context, user *User) error {
+			user.ID = uuid.New()
+			return nil
+		},
+	}
+	jwt, err := NewJWTService("test-secret-key-minimum-32-chars!!")
+	require.NoError(t, err)
+	svc := NewAdminService(userRepo, &handlerMockRoleRepo{}, &handlerMockMenuRepo{}, auditRepo, jwt, zap.NewNop())
+	h := NewHandler(svc, zap.NewNop())
+
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		attachAuthContext(c, operatorID, "testuser2", true, []string{"admin"}, nil)
+		c.Next()
+	})
+	h.RegisterAdminRoutes(r.Group("/api/v1"))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users",
+		handlerJSON(CreateUserHTTPRequest{
+			Username:           "audituser",
+			UseDefaultPassword: true,
+			DisplayName:        "Audit User",
+			Email:              "audituser@example.com",
+		}))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Forwarded-For", "203.0.113.70")
+	req.Header.Set("User-Agent", "issue-71-test/1.0")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	select {
+	case got := <-createdAudit:
+		require.NotNil(t, got.UserID)
+		assert.Equal(t, operatorID, *got.UserID)
+		assert.Equal(t, "testuser2", got.Username)
+		assert.Equal(t, "203.0.113.70", got.IPAddress)
+		assert.Equal(t, "issue-71-test/1.0", got.UserAgent)
+		assert.NotContains(t, got.Details, "password")
+	case <-time.After(2 * time.Second):
+		t.Fatal("user_create audit log was not created")
+	}
+}
+
 func TestHandler_CreateUser_MissingPassword_NoUseDefault_Rejects(t *testing.T) {
 	env := handlerNewTestEnv(t, &handlerMockUserRepo{}, &handlerMockRoleRepo{})
 
@@ -950,6 +1006,57 @@ func TestHandler_ResetPassword_UseDefaultPassword_Succeeds(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.True(t, updateCalled, "service 应消费默认密码并调 UpdatePassword")
+}
+
+func TestHandler_ResetPassword_AuditIncludesOperatorAndRequestMetadata(t *testing.T) {
+	operatorID := uuid.New()
+	targetID := uuid.New()
+	createdAudit := make(chan *AuditLog, 1)
+	auditRepo := &handlerMockAuditRepoWithCapture{
+		createFn: func(_ context.Context, log *AuditLog) error {
+			if log.Action == "password_reset" {
+				createdAudit <- log
+			}
+			return nil
+		},
+	}
+	userRepo := &handlerMockUserRepo{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*User, error) {
+			return &User{ID: id, Username: "targetuser", Source: UserSourceAdmin}, nil
+		},
+	}
+	jwt, err := NewJWTService("test-secret-key-minimum-32-chars!!")
+	require.NoError(t, err)
+	svc := NewAdminService(userRepo, &handlerMockRoleRepo{}, &handlerMockMenuRepo{}, auditRepo, jwt, zap.NewNop())
+	h := NewHandler(svc, zap.NewNop())
+
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		attachAuthContext(c, operatorID, "testuser2", true, []string{"admin"}, nil)
+		c.Next()
+	})
+	h.RegisterAdminRoutes(r.Group("/api/v1"))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/"+targetID.String()+"/reset-password",
+		handlerJSON(ResetPasswordRequest{UseDefaultPassword: true}))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Forwarded-For", "203.0.113.71")
+	req.Header.Set("User-Agent", "issue-71-test/1.0")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	select {
+	case got := <-createdAudit:
+		require.NotNil(t, got.UserID)
+		assert.Equal(t, operatorID, *got.UserID)
+		assert.Equal(t, "testuser2", got.Username)
+		assert.Equal(t, "203.0.113.71", got.IPAddress)
+		assert.Equal(t, "issue-71-test/1.0", got.UserAgent)
+		assert.NotContains(t, got.Details, "password")
+	case <-time.After(2 * time.Second):
+		t.Fatal("password_reset audit log was not created")
+	}
 }
 
 func TestHandler_ResetPassword_MissingPassword_NoUseDefault_Rejects(t *testing.T) {
