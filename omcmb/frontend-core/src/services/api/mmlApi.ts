@@ -1254,6 +1254,12 @@ export const mmlApi = {
     return mapBackendTask(data);
   },
 
+  async startTasks(ids: string[]): Promise<void> {
+    for (const id of ids) {
+      await http.post(`/mml/tasks/${id}/start`);
+    }
+  },
+
   async pauseTask(id: string): Promise<MMLTask> {
     const { data } = await http.post<BackendMMLTask>(`/mml/tasks/${id}/pause`);
     return mapBackendTask(data);

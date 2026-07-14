@@ -323,6 +323,12 @@ export const mmlService = {
     return task;
   },
 
+  async startTasks(ids: string[]): Promise<void> {
+    for (const id of ids) {
+      await mmlService.startTask(id);
+    }
+  },
+
   async pauseTask(id: string): Promise<MMLTask> {
     await delay(100, 200);
     const task = tasks.find((t) => t.id === id);
