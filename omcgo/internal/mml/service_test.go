@@ -179,6 +179,10 @@ func (m *mockTaskRepo) GetByRequestID(context.Context, string, string) (*MMLTask
 	return nil, commonerrors.ErrNotFound
 }
 
+func (m *mockTaskRepo) GetActiveByScriptID(context.Context, uuid.UUID) (*MMLTask, error) {
+	return nil, commonerrors.ErrNotFound
+}
+
 func (m *mockTaskRepo) Update(ctx context.Context, task *MMLTask) error {
 	if m.updateFn != nil {
 		return m.updateFn(ctx, task)

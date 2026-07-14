@@ -960,6 +960,9 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *MMLTask) error {
 	row := r.pool.QueryRow(ctx, query, args...)
 	created, err := scanTask(row)
 	if err != nil {
+		if isUniqueViolation(err) {
+			return fmt.Errorf("mml task already exists: %w", commonerrors.ErrAlreadyExists)
+		}
 		return fmt.Errorf("create mml_task: %w", err)
 	}
 	*task = *created
@@ -1000,6 +1003,25 @@ func (r *PgTaskRepository) GetByRequestID(ctx context.Context, creator, requestI
 			return nil, commonerrors.ErrNotFound
 		}
 		return nil, fmt.Errorf("get mml_task by request id: %w", err)
+	}
+	return task, nil
+}
+
+func (r *PgTaskRepository) GetActiveByScriptID(ctx context.Context, scriptID uuid.UUID) (*MMLTask, error) {
+	query := `
+		SELECT ` + joinColumns(taskColumns) + `
+		  FROM mml_tasks
+		 WHERE script_id = $1
+		   AND status IN ('pending', 'running', 'paused')
+		 ORDER BY CASE WHEN parent_task_id IS NULL THEN 0 ELSE 1 END,
+		          created_at DESC
+		 LIMIT 1`
+	task, err := scanTask(r.pool.QueryRow(ctx, query, scriptID))
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, commonerrors.ErrNotFound
+		}
+		return nil, fmt.Errorf("get active mml_task by script id: %w", err)
 	}
 	return task, nil
 }

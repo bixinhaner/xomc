@@ -54,6 +54,17 @@ func (r *scriptExecutionTaskRepo) GetByRequestID(_ context.Context, creator, req
 	}
 	return nil, commonerrors.ErrNotFound
 }
+func (r *scriptExecutionTaskRepo) GetActiveByScriptID(_ context.Context, scriptID uuid.UUID) (*MMLTask, error) {
+	for _, task := range r.tasks {
+		if task.ScriptID == nil || *task.ScriptID != scriptID {
+			continue
+		}
+		if task.Status == TaskPending || task.Status == TaskRunning || task.Status == TaskPaused {
+			return task, nil
+		}
+	}
+	return nil, commonerrors.ErrNotFound
+}
 func (r *scriptExecutionTaskRepo) Update(_ context.Context, task *MMLTask) error {
 	r.updateCalls++
 	return nil
@@ -133,6 +144,24 @@ func TestCreateScriptExecution_RepeatedRequestIDReturnsExistingTask(t *testing.T
 
 	require.Equal(t, first.ID, second.ID)
 	require.Equal(t, 1, tasks.createCalls)
+}
+
+func TestCreateScriptExecution_RejectsWhenScriptHasActiveTask(t *testing.T) {
+	script := scriptExecutionFixture()
+	tasks := &scriptExecutionTaskRepo{tasks: []*MMLTask{{
+		ID:          uuid.New(),
+		ScriptID:    &script.ID,
+		TaskName:    "已有周期任务",
+		Creator:     "alice",
+		Status:      TaskPending,
+		ExecuteType: ExecutePeriodic,
+	}}}
+	svc := newScriptExecutionService(script, tasks)
+
+	_, _, err := svc.CreateScriptExecution(context.Background(), script.ID, "alice", ScriptExecutionRequest{TaskName: "巡检", ExecuteType: ExecuteImmediate})
+
+	require.ErrorIs(t, err, commonerrors.ErrAlreadyExists)
+	require.Equal(t, 0, tasks.createCalls)
 }
 
 func TestCreateScriptExecution_WarningRequiresConfirmation(t *testing.T) {
