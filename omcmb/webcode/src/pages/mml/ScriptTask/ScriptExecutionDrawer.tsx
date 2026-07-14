@@ -49,6 +49,12 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
   const executionMutation = useCreateMMLScriptExecution();
   const systemTimezone = useSystemTimezoneValue();
   const executeType = Form.useWatch('executeType', form);
+  const offlineRetry = Form.useWatch('offlineRetry', form);
+  const failedRetry = Form.useWatch('failedRetry', form);
+  const isScheduledExecution = executeType === 'scheduled';
+  const isPeriodicExecution = executeType === 'periodic';
+  const showOfflineRetryWait = Boolean(offlineRetry);
+  const showFailedRetryInputs = Boolean(failedRetry);
 
   useEffect(() => {
     if (!open) return;
@@ -113,10 +119,16 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
     const input: MMLScriptExecutionInput = {
       taskName: values.taskName.trim(),
       executeType: values.executeType,
-      scheduledAt: toSystemTimezoneRFC3339(values.scheduledAt, systemTimezone) ?? values.scheduledAt?.toISOString(),
-      periodStart: toSystemTimezoneRFC3339(values.periodRange?.[0], systemTimezone) ?? values.periodRange?.[0]?.toISOString(),
-      periodEnd: toSystemTimezoneRFC3339(values.periodRange?.[1], systemTimezone) ?? values.periodRange?.[1]?.toISOString(),
-      periodTime: values.periodTime?.format('HH:mm:ss'),
+      scheduledAt: values.executeType === 'scheduled'
+        ? toSystemTimezoneRFC3339(values.scheduledAt, systemTimezone) ?? values.scheduledAt?.toISOString()
+        : undefined,
+      periodStart: values.executeType === 'periodic'
+        ? toSystemTimezoneRFC3339(values.periodRange?.[0], systemTimezone) ?? values.periodRange?.[0]?.toISOString()
+        : undefined,
+      periodEnd: values.executeType === 'periodic'
+        ? toSystemTimezoneRFC3339(values.periodRange?.[1], systemTimezone) ?? values.periodRange?.[1]?.toISOString()
+        : undefined,
+      periodTime: values.executeType === 'periodic' ? values.periodTime?.format('HH:mm:ss') : undefined,
       offlineRetry: values.offlineRetry,
       offlineRetryWait: values.offlineRetryWait,
       failedRetry: values.failedRetry,
@@ -137,17 +149,23 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
       <Form form={form} layout="vertical">
         <Form.Item label="任务名称" name="taskName" rules={[{ required: true, message: '请输入任务名称' }]}><Input /></Form.Item>
         <Form.Item label="执行方式" name="executeType"><Radio.Group options={[{ value: 'immediate', label: '立即' }, { value: 'suspended', label: '挂起' }, { value: 'scheduled', label: '定时' }, { value: 'periodic', label: '周期' }]} /></Form.Item>
-        <Form.Item label="执行时间" name="scheduledAt" rules={executeType === 'scheduled' ? [{ required: true, message: '请选择执行时间' }] : []}><DatePicker showTime style={{ width: '100%' }} /></Form.Item>
-        {executeType === 'periodic' ? <>
+        {isScheduledExecution ? (
+          <Form.Item label="执行时间" name="scheduledAt" rules={[{ required: true, message: '请选择执行时间' }]}><DatePicker showTime style={{ width: '100%' }} /></Form.Item>
+        ) : null}
+        {isPeriodicExecution ? <>
           <Form.Item label="周期日期" name="periodRange" rules={[{ required: true, message: '请选择周期日期范围' }]}><DatePicker.RangePicker style={{ width: '100%' }} /></Form.Item>
           <Form.Item label="周期时间" name="periodTime" rules={[{ required: true, message: '请选择周期执行时间' }]}><TimePicker style={{ width: '100%' }} /></Form.Item>
         </> : null}
         <Space direction="vertical" style={{ width: '100%' }}>
           <Form.Item name="offlineRetry" valuePropName="checked" noStyle><Checkbox>离线等待重试</Checkbox></Form.Item>
-          <Form.Item name="offlineRetryWait" label="离线等待（秒）"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>
+          {showOfflineRetryWait ? (
+            <Form.Item name="offlineRetryWait" label="离线等待（秒）"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>
+          ) : null}
           <Form.Item name="failedRetry" valuePropName="checked" noStyle><Checkbox>失败重试</Checkbox></Form.Item>
-          <Form.Item name="failedRetryCount" label="失败重试次数"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
-          <Form.Item name="failedRetryInterval" label="失败重试间隔（秒）"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>
+          {showFailedRetryInputs ? <>
+            <Form.Item name="failedRetryCount" label="失败重试次数"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
+            <Form.Item name="failedRetryInterval" label="失败重试间隔（秒）"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>
+          </> : null}
         </Space>
         <Button aria-label="执行" type="primary" htmlType="button" loading={executionMutation.isPending || submitting} disabled={executionMutation.isPending || submitting} onClick={() => void submit()}>执行</Button>
       </Form>
