@@ -105,6 +105,50 @@
         "period_time": {
           "type": "string"
         },
+        "plan_items": {
+          "items": {
+            "goType": "MMLPlanItem",
+            "properties": {
+              "command": {
+                "additionalProperties": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              "command_code": {
+                "description": "Flat fields are accepted for import/API compatibility. They are folded\ninto Command before persistence and fanout.",
+                "type": "string"
+              },
+              "device_sn": {
+                "type": "string"
+              },
+              "line_no": {
+                "goType": "int",
+                "type": "integer"
+              },
+              "operation_type": {
+                "type": "string"
+              },
+              "order": {
+                "goType": "int",
+                "type": "integer"
+              },
+              "parameters": {
+                "additionalProperties": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              "raw_line": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "array"
+        },
         "scheduled_at": {
           "type": "string"
         },
@@ -115,9 +159,6 @@
           "type": "string"
         }
       },
-      "required": [
-        "device_sns"
-      ],
       "type": "object"
     }
   },

@@ -99,6 +99,11 @@
             "goType": "int",
             "type": "integer"
           },
+          "retry_interval_seconds": {
+            "description": "自动重试间隔（秒）",
+            "goType": "int",
+            "type": "integer"
+          },
           "source": {
             "goType": "TaskSource",
             "type": "string"

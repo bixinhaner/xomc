@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -69,11 +70,47 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/agent/conversation", h.GetConversation)
 	rg.POST("/agent/conversation", h.NewConversation)
 	rg.GET("/agent/handbook/routes", h.GetHandbookRoutes)
+	rg.GET("/agent/handbook/manifest", h.GetHandbookManifest)
+	rg.GET("/agent/handbook/chunks/:index", h.GetHandbookChunk)
 	rg.POST("/agent/chat/stream", h.ChatStream)
 }
 
 func (h *Handler) GetHandbookRoutes(c *gin.Context) {
 	response.OK(c, h.tools.HandbookRouteExport())
+}
+
+// GetHandbookManifest returns the immutable API handbook artifact identity and transfer layout.
+func (h *Handler) GetHandbookManifest(c *gin.Context) {
+	manifest, err := h.tools.handbookManifest()
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusServiceUnavailable, err)
+		return
+	}
+	response.OK(c, manifest)
+}
+
+// GetHandbookChunk returns one bounded base64 chunk of the immutable API handbook artifact.
+func (h *Handler) GetHandbookChunk(c *gin.Context) {
+	index, err := strconv.Atoi(strings.TrimSpace(c.Param("index")))
+	if err != nil || index < 0 {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	manifest, err := h.tools.handbookManifest()
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusServiceUnavailable, err)
+		return
+	}
+	if index >= manifest.TotalChunks {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	chunk, err := h.tools.handbookChunk(index)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusServiceUnavailable, err)
+		return
+	}
+	response.OK(c, chunk)
 }
 
 func (h *Handler) GetConversation(c *gin.Context) {
@@ -287,11 +324,31 @@ func (h *Handler) externalIdentityMetadata(ctx context.Context, claims *admin.Cl
 	}
 	if h.tools != nil {
 		handbook := h.tools.HandbookRouteExport()
-		metadata["apiHandbook"] = map[string]any{
-			"schemaVersion":  handbook.SchemaVersion,
-			"catalogVersion": handbook.CatalogVersion,
-			"totalRoutes":    handbook.TotalRoutes,
+		handbookMetadata := map[string]any{
+			"schemaVersion":    handbook.SchemaVersion,
+			"catalogVersion":   handbook.CatalogVersion,
+			"totalOperations":  handbook.TotalRoutes,
+			"packageAvailable": false,
 		}
+		if manifest, err := h.tools.handbookManifest(); err != nil {
+			h.logger.Warn("embedded agent handbook package is unavailable", zap.Error(err))
+		} else {
+			handbookMetadata = map[string]any{
+				"schemaVersion":     manifest.SchemaVersion,
+				"catalogVersion":    manifest.CatalogVersion,
+				"handbookDigest":    manifest.HandbookDigest,
+				"totalOperations":   manifest.TotalOperations,
+				"manifestPath":      manifest.ManifestPath,
+				"chunkPathTemplate": manifest.ChunkPath,
+				"archiveFormat":     manifest.ArchiveFormat,
+				"archiveBytes":      manifest.ArchiveBytes,
+				"chunkBytes":        manifest.ChunkBytes,
+				"totalChunks":       manifest.TotalChunks,
+				"contentRoot":       manifest.ContentRoot,
+				"packageAvailable":  true,
+			}
+		}
+		metadata["apiHandbook"] = handbookMetadata
 	}
 	if instanceNameIsDefault {
 		metadata["instanceNameIsDefault"] = true

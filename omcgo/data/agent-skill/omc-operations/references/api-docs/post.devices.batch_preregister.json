@@ -1,0 +1,130 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.devices.batch_preregister",
+  "method": "POST",
+  "path": "/api/v1/devices/batch-preregister",
+  "handler": "github.com/omcgo/omcgo/internal/device.(*Handler).BatchPreRegisterDevices-fm",
+  "category": "devices",
+  "title": "设备 - 批量preregister",
+  "summary": "设备 - 批量preregister",
+  "description": "设备：处理批量preregister相关数据 Handler: BatchPreRegisterDevices handles POST /api/v1/devices/batch-preregister.\n\n用于批量开站规划场景：在设备 Bootstrap 到达前，预先录入 SN 列表和设备名称。\n已存在的 SN 仅更新名称/备注；不存在的 SN 新建设备（lifecycle='registered'）。\n新建设备不写入任何分组，自然落在\"未分组\"视图，source_type 显示 Auto。",
+  "intents": [
+    "设备 - 批量preregister",
+    "设备：处理批量preregister相关数据 Handler: BatchPreRegisterDevices handles POST /api/v1/devices/batch-preregister.\n\n用于批量开站规划场景：在设备 Bootstrap 到达前，预先录入 SN 列表和设备名称。\n已存在的 SN 仅更新名称/备注；不存在的 SN 新建设备（lifecycle='registered'）。\n新建设备不写入任何分组，自然落在\"未分组\"视图，source_type 显示 Auto。",
+    "devices",
+    "设备",
+    "batch-preregister",
+    "batch preregister"
+  ],
+  "tags": [
+    "devices",
+    "设备",
+    "batch-preregister"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：设备 - 批量preregister",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "goType": "BatchPreRegisterRequest",
+      "properties": {
+        "devices": {
+          "items": {
+            "goType": "BatchPreRegisterRow",
+            "properties": {
+              "carrier": {
+                "description": "Carrier 运营商（可选）。为空时从 SN 前6位推断 OUI → CarrierRegistry。\n取值：cmcc / ctcc / cucc",
+                "goType": "model.CarrierCode",
+                "type": "object"
+              },
+              "device_name": {
+                "description": "DeviceName 设备名称（可选）。",
+                "nullable": true,
+                "type": "string"
+              },
+              "oui": {
+                "description": "OUI 设备 OUI（可选）。为空时从 SN 前6位截取。",
+                "type": "string"
+              },
+              "remark": {
+                "description": "Remark 备注（可选）。",
+                "nullable": true,
+                "type": "string"
+              },
+              "serial_number": {
+                "description": "SerialNumber 设备 SN，必填。",
+                "type": "string"
+              },
+              "technology": {
+                "description": "Technology 制式（可选）。为空时默认 lte。取值：lte / nr",
+                "goType": "model.Technology",
+                "type": "object"
+              }
+            },
+            "required": [
+              "serial_number"
+            ],
+            "type": "object"
+          },
+          "maxItems": 1000,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "devices"
+      ],
+      "type": "object"
+    }
+  },
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

@@ -57,13 +57,16 @@ type ToolError struct {
 }
 
 type ToolExecutor struct {
-	handler http.Handler
-	routes  RouteProvider
-	jwt     *admin.JWTService
+	handler     http.Handler
+	routes      RouteProvider
+	jwt         *admin.JWTService
+	handbook    *handbookPackage
+	handbookErr error
 }
 
 func NewToolExecutor(handler http.Handler, routes RouteProvider, jwt *admin.JWTService) *ToolExecutor {
-	return &ToolExecutor{handler: handler, routes: routes, jwt: jwt}
+	handbook, err := loadEmbeddedHandbookPackage()
+	return &ToolExecutor{handler: handler, routes: routes, jwt: jwt, handbook: handbook, handbookErr: err}
 }
 
 func (e *ToolExecutor) Execute(ctx context.Context, claims *admin.Claims, request ToolRequest, policy agentconfig.RuntimePolicy) ToolResult {
@@ -98,12 +101,48 @@ func (e *ToolExecutor) execute(ctx context.Context, claims *admin.Claims, input 
 		return e.catalogCategories(policy), nil
 	case "/api/v1/agent/catalog/describe":
 		return e.describe(input.Query, policy), nil
+	case "/api/v1/agent/handbook/manifest":
+		if method != http.MethodGet {
+			return nil, fmt.Errorf("handbook package manifest only supports GET")
+		}
+		return e.handbookManifest()
+	}
+	if strings.HasPrefix(requestPath, "/api/v1/agent/handbook/chunks/") {
+		if method != http.MethodGet {
+			return nil, fmt.Errorf("handbook package chunks only support GET")
+		}
+		indexText := strings.TrimPrefix(requestPath, "/api/v1/agent/handbook/chunks/")
+		index, err := strconv.Atoi(indexText)
+		if err != nil || index < 0 {
+			return nil, fmt.Errorf("invalid handbook chunk index %q", indexText)
+		}
+		return e.handbookChunk(index)
 	}
 	if pathBlocked(policy, requestPath) {
 		return nil, fmt.Errorf("path %s is blocked by agent policy", requestPath)
 	}
 
 	return e.callLocalAPI(ctx, claims, method, requestPath, input.Query, input.Body, policy)
+}
+
+func (e *ToolExecutor) handbookManifest() (HandbookPackageManifest, error) {
+	if e == nil {
+		return HandbookPackageManifest{}, fmt.Errorf("handbook package is unavailable")
+	}
+	if e.handbookErr != nil {
+		return HandbookPackageManifest{}, e.handbookErr
+	}
+	return e.handbook.validatedManifest(e.HandbookRouteExport())
+}
+
+func (e *ToolExecutor) handbookChunk(index int) (HandbookPackageChunk, error) {
+	if e == nil {
+		return HandbookPackageChunk{}, fmt.Errorf("handbook package is unavailable")
+	}
+	if e.handbookErr != nil {
+		return HandbookPackageChunk{}, e.handbookErr
+	}
+	return e.handbook.chunk(e.HandbookRouteExport(), index)
 }
 
 func (e *ToolExecutor) callLocalAPI(
