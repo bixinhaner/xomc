@@ -21,6 +21,14 @@ export function rfStatusOf(value: string | undefined | null): RFStatusKind | nul
   return null;
 }
 
+export function displayRFStatusOf(
+  value: string | undefined | null,
+  isOnline: boolean | undefined | null,
+): RFStatusKind | null {
+  if (isOnline === false) return 'off';
+  return rfStatusOf(value);
+}
+
 export function rfStatusLabelOf(
   value: string | undefined | null,
   labels: { on: string; off: string; error?: string },
@@ -32,5 +40,16 @@ export function rfStatusLabelOf(
   if (kind === 'error') {
     return labels.error ?? labels.off;
   }
+  return labels[kind];
+}
+
+export function displayRFStatusLabelOf(
+  value: string | undefined | null,
+  isOnline: boolean | undefined | null,
+  labels: { on: string; off: string; error?: string },
+): string | null {
+  const kind = displayRFStatusOf(value, isOnline);
+  if (!kind) return null;
+  if (kind === 'error') return labels.error ?? labels.off;
   return labels[kind];
 }

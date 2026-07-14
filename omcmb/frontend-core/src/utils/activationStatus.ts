@@ -29,6 +29,14 @@ export function activationStatusOf(opState: string | undefined | null): Activati
   return normalized === '1' || normalized === 'true' ? 'active' : 'inactive';
 }
 
+export function displayActivationStatusOf(
+  opState: string | undefined | null,
+  isOnline: boolean | undefined | null,
+): ActivationStatus {
+  if (isOnline === false) return 'inactive';
+  return activationStatusOf(opState);
+}
+
 interface ActivationStatusDetailLike {
   label?: string;
   labelI18n?: Record<string, string>;
@@ -68,4 +76,22 @@ export function activationStatusLabelOf(
   }
 
   return findLabel('0') || fallback.inactive;
+}
+
+export function displayActivationStatusLabelOf(
+  opState: string | undefined | null,
+  isOnline: boolean | undefined | null,
+  details: ReadonlyArray<ActivationStatusDetailLike> | null | undefined,
+  fallback: ActivationStatusFallbackLabels,
+  locale: Locale = 'zh-CN',
+): string | null {
+  if (isOnline === false) {
+    const detail = details?.find((item) => item?.status !== false && item?.value === '0');
+    const label = detail ? getI18nText(detail.labelI18n, locale, detail.label).trim() : '';
+    if (locale !== 'en-US' || !containsHan(label) || detail?.labelI18n?.['en-US']) {
+      return label || fallback.inactive;
+    }
+    return fallback.inactive;
+  }
+  return activationStatusLabelOf(opState, details, fallback, locale);
 }
