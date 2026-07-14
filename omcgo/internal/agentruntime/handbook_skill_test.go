@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/omcgo/omcgo/internal/agentruntime/handbookgen"
 )
 
 func TestOMCOperationsSkillUsesProgressiveLocalHandbook(t *testing.T) {
@@ -36,4 +38,5 @@ func TestOMCOperationsSkillUsesProgressiveLocalHandbook(t *testing.T) {
 	documents, err := os.ReadDir(filepath.Join(skillRoot, "references", "api-docs"))
 	require.NoError(t, err)
 	require.NotEmpty(t, documents)
+	require.NoError(t, handbookgen.CheckPackage(skillRoot, filepath.Join("handbookasset", "omc-api-handbook.tar.gz")))
 }

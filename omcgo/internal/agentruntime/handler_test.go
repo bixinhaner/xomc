@@ -72,7 +72,7 @@ func TestChatStreamProxiesToAgentStudioWithDelegation(t *testing.T) {
 		})
 		c.Next()
 	})
-	NewHandler(fakeConfigProvider{target: &agentconfig.RuntimeTarget{
+	handler := NewHandler(fakeConfigProvider{target: &agentconfig.RuntimeTarget{
 		Enabled:            true,
 		AgentStudioBaseURL: upstream.URL,
 		ConnectorSlug:      "external-agent-connector",
@@ -83,7 +83,10 @@ func TestChatStreamProxiesToAgentStudioWithDelegation(t *testing.T) {
 	}}, jwtSvc, upstream.Client(), nil, r, r, fakeConversationManager{
 		active:   "server-conversation",
 		instance: "omcinst_1234567890abcdef",
-	}).RegisterRoutes(group)
+	})
+	handler.RegisterRoutes(group)
+	handler.tools.handbook = testHandbookPackage(t, handler.tools.HandbookRouteExport())
+	handler.tools.handbookErr = nil
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/agent/chat/stream", strings.NewReader(`{"message":"hello","conversationId":"stale-browser-value"}`))
@@ -117,7 +120,11 @@ func TestChatStreamProxiesToAgentStudioWithDelegation(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, handbookSchemaVersion, handbook["schemaVersion"])
 	require.NotEmpty(t, handbook["catalogVersion"])
-	require.EqualValues(t, 4, handbook["totalRoutes"])
+	require.EqualValues(t, 6, handbook["totalOperations"])
+	require.Equal(t, true, handbook["packageAvailable"])
+	require.NotEmpty(t, handbook["handbookDigest"])
+	require.Equal(t, "/api/v1/agent/handbook/manifest", handbook["manifestPath"])
+	require.Equal(t, "/api/v1/agent/handbook/chunks/{index}", handbook["chunkPathTemplate"])
 	require.True(t, strings.HasPrefix(capturedAuth, "Bearer "))
 	token := strings.TrimPrefix(capturedAuth, "Bearer ")
 	claims, err := jwtSvc.ValidateAgentDelegationToken(token)

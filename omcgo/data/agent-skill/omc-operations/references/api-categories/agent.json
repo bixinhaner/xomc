@@ -36,6 +36,40 @@
       "document": "api-docs/get.agent.conversation.json"
     },
     {
+      "operationId": "get.agent.handbook.chunks.by_index",
+      "method": "GET",
+      "path": "/api/v1/agent/handbook/chunks/:index",
+      "title": "agent - 详情",
+      "summary": "agent - 详情",
+      "description": "agent：按序号读取当前 OMC 版本的完整 API 手册包分块 Handler: GetHandbookChunk returns one bounded base64 chunk of the immutable API handbook artifact.",
+      "intents": [
+        "agent - 详情",
+        "agent：按序号读取当前 OMC 版本的完整 API 手册包分块 Handler: GetHandbookChunk returns one bounded base64 chunk of the immutable API handbook artifact.",
+        "agent",
+        "handbook",
+        "chunks"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.agent.handbook.chunks.by_index.json"
+    },
+    {
+      "operationId": "get.agent.handbook.manifest",
+      "method": "GET",
+      "path": "/api/v1/agent/handbook/manifest",
+      "title": "agent - 查询",
+      "summary": "agent - 查询",
+      "description": "agent：查询当前 OMC 版本的完整 API 手册包清单 Handler: GetHandbookManifest returns the immutable API handbook artifact identity and transfer layout.",
+      "intents": [
+        "agent - 查询",
+        "agent：查询当前 OMC 版本的完整 API 手册包清单 Handler: GetHandbookManifest returns the immutable API handbook artifact identity and transfer layout.",
+        "agent",
+        "handbook",
+        "manifest"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.agent.handbook.manifest.json"
+    },
+    {
       "operationId": "get.agent.handbook.routes",
       "method": "GET",
       "path": "/api/v1/agent/handbook/routes",

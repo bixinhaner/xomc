@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Popconfirm } from 'antd';
 import {
+  ArrowDownOutlined,
   BellOutlined,
   ArrowsAltOutlined,
   CheckOutlined,
@@ -30,6 +31,7 @@ import {
   type AgentProcessEntry,
   type AgentThoughtEntry,
 } from '@core/agentkit';
+import { useAgentAutoScroll } from '@core/hooks/useAgentAutoScroll';
 import { useAgentPanelController } from '@core/hooks/useAgentPanelController';
 import { useAgentPanelLayout } from '@core/hooks/useAgentPanelLayout';
 import { useT, type TranslateFn } from '@/hooks/useT';
@@ -511,6 +513,13 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
   const activeAssistant = latestAssistantMessage(controller.messages);
   const nowTick = useStreamingClock(controller.isStreaming);
   const panelLayout = useAgentPanelLayout();
+  const {
+    scrollContainerRef,
+    scrollContentRef,
+    showJumpToLatest,
+    handleScroll,
+    scrollToLatest,
+  } = useAgentAutoScroll({ active: open });
 
   const copyText = async (value: string) => {
     try {
@@ -526,15 +535,27 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
 
   const handlePrompt = async (prompt: string) => {
     if (!controller.enabled || controller.isStreaming) return;
-    await controller.sendMessage(prompt);
+    const request = controller.sendMessage(prompt);
+    scrollToLatest('auto');
+    await request;
   };
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (!controller.enabled || controller.isStreaming) return;
     const text = input.trim();
     if (!text) return;
     setInput('');
-    await controller.sendMessage(text);
+    const request = controller.sendMessage(text);
+    scrollToLatest('auto');
+    await request;
+  };
+
+  const handleComposerKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    if (controller.isStreaming) return;
+    event.currentTarget.form?.requestSubmit();
   };
 
   return (
@@ -601,59 +622,76 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
         onCloseDiagnostic={() => setDiagnosticOpen(false)}
       />
 
-      <div className={styles.body}>
-        {!controller.enabled && (
-          <div className={styles.disabledEmpty}>
-            <strong>{t('agent.disabledTitle')}</strong>
-            <span>{t('agent.disabledHint')}</span>
+      <div className={styles.bodyShell}>
+        <div ref={scrollContainerRef} className={styles.body} onScroll={handleScroll}>
+          <div ref={scrollContentRef} className={styles.messageList}>
+            {!controller.enabled && (
+              <div className={styles.disabledEmpty}>
+                <strong>{t('agent.disabledTitle')}</strong>
+                <span>{t('agent.disabledHint')}</span>
+              </div>
+            )}
+            {controller.enabled && controller.messages.length === 0 && controller.activities.length === 0 && (
+              <EmptyPromptState onPrompt={handlePrompt} />
+            )}
+            {controller.messages.map((message) => (
+              <div key={message.id} className={message.role === 'user' ? styles.userMessage : styles.assistantMessage}>
+                <div
+                  className={`${styles.avatar} ${
+                    message.role === 'assistant' && message.status === 'streaming' ? styles.avatarActive : ''
+                  }`}
+                >
+                  {message.role === 'user' ? t('agent.userShort') : <RobotOutlined />}
+                </div>
+                <div className={styles.bubble}>
+                  {message.role === 'assistant' ? (
+                    <AssistantContent message={message} copiedId={copiedId} onCopy={copyText} />
+                  ) : (
+                    message.text || (message.status === 'streaming' ? t('agent.streaming') : '')
+                  )}
+                </div>
+              </div>
+            ))}
+            {controller.activities
+              .filter((activity) => shouldRenderActivity(activity, controller.pendingAction?.callId, controller.isStreaming))
+              .map((activity) => (
+                <ActivityCard
+                  key={activity.callId}
+                  activity={activity}
+                  isPending={controller.pendingAction?.callId === activity.callId}
+                  isStreaming={controller.isStreaming}
+                  onExecute={controller.executePendingAction}
+                  onCancel={controller.cancelPendingAction}
+                />
+              ))}
+            {controller.error && (
+              <div className={styles.error}>
+                {t('agent.errorPrefix')}: {controller.error.message}
+              </div>
+            )}
           </div>
-        )}
-        {controller.enabled && controller.messages.length === 0 && controller.activities.length === 0 && (
-          <EmptyPromptState onPrompt={handlePrompt} />
-        )}
-        {controller.messages.map((message) => (
-          <div key={message.id} className={message.role === 'user' ? styles.userMessage : styles.assistantMessage}>
-            <div
-              className={`${styles.avatar} ${
-                message.role === 'assistant' && message.status === 'streaming' ? styles.avatarActive : ''
-              }`}
-            >
-              {message.role === 'user' ? t('agent.userShort') : <RobotOutlined />}
-            </div>
-            <div className={styles.bubble}>
-              {message.role === 'assistant' ? (
-                <AssistantContent message={message} copiedId={copiedId} onCopy={copyText} />
-              ) : (
-                message.text || (message.status === 'streaming' ? t('agent.streaming') : '')
-              )}
-            </div>
-          </div>
-        ))}
-        {controller.activities
-          .filter((activity) => shouldRenderActivity(activity, controller.pendingAction?.callId, controller.isStreaming))
-          .map((activity) => (
-            <ActivityCard
-              key={activity.callId}
-              activity={activity}
-              isPending={controller.pendingAction?.callId === activity.callId}
-              isStreaming={controller.isStreaming}
-              onExecute={controller.executePendingAction}
-              onCancel={controller.cancelPendingAction}
-            />
-          ))}
-        {controller.error && (
-          <div className={styles.error}>
-            {t('agent.errorPrefix')}: {controller.error.message}
-          </div>
+        </div>
+        {showJumpToLatest && (
+          <button
+            type="button"
+            className={styles.jumpToLatest}
+            onClick={() => scrollToLatest()}
+            aria-label={t('agent.jumpToLatest')}
+            title={t('agent.jumpToLatest')}
+          >
+            <ArrowDownOutlined />
+          </button>
         )}
       </div>
 
       <form className={styles.composer} onSubmit={submit}>
-        <input
+        <textarea
+          rows={1}
           value={input}
           onChange={(event) => setInput(event.target.value)}
+          onKeyDown={handleComposerKeyDown}
           placeholder={t('agent.placeholder')}
-          disabled={!controller.enabled || controller.isStreaming}
+          disabled={!controller.enabled}
         />
         <button
           type="submit"

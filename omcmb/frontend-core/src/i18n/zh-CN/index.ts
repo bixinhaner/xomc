@@ -144,6 +144,7 @@ const messages: Record<string, string> = {
   'agent.emptyHint':       '我可以结合当前页面和系统数据，帮你查看状态、定位问题、整理结果，并在你确认后执行变更操作。',
   'agent.placeholder':     '输入你的问题，或使用 / 选择工具...',
   'agent.send':            '发送',
+  'agent.jumpToLatest':    '回到最新消息',
   'agent.newConversation': '新建对话',
   'agent.newConversationConfirmTitle':       '开始新会话？',
   'agent.newConversationConfirmDescription': '当前对话记录将从本窗口清空。',

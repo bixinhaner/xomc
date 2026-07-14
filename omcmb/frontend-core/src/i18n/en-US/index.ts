@@ -144,6 +144,7 @@ const messages: Record<string, string> = {
   'agent.emptyHint':       'I can use the current page and system data to check status, locate issues, summarize results, and perform changes after you confirm.',
   'agent.placeholder':     'Ask a question, or use / to choose a tool...',
   'agent.send':            'Send',
+  'agent.jumpToLatest':    'Jump to latest message',
   'agent.newConversation': 'New conversation',
   'agent.newConversationConfirmTitle':       'Start a new conversation?',
   'agent.newConversationConfirmDescription': 'The current conversation will be cleared from this window.',
