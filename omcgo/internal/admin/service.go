@@ -1616,11 +1616,17 @@ type ChangePasswordHTTPRequest struct {
 }
 
 // ChangePassword verifies the old password and updates to the new one.
-func (s *AdminService) ChangePassword(ctx context.Context, userID uuid.UUID, req ChangePasswordRequest) error {
+func (s *AdminService) ChangePassword(ctx context.Context, userID uuid.UUID, req ChangePasswordRequest) (retErr error) {
+	username := ""
+	defer func() {
+		s.auditPasswordChange(ctx, userID, username, retErr)
+	}()
+
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("get user: %w", err)
 	}
+	username = user.Username
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.OldPassword)); err != nil {
 		return commonerrors.NewBusinessError(7020, "old password is incorrect", commonerrors.ErrUnauthorized)
@@ -1637,10 +1643,42 @@ func (s *AdminService) ChangePassword(ctx context.Context, userID uuid.UUID, req
 		return fmt.Errorf("hash new password: %w", err)
 	}
 
+	// 先建立撤销屏障，避免密码已经更新后因 Redis 故障返回失败，导致用户继续
+	// 使用已经失效的旧密码重试。更新成功后再刷新一次时间戳，覆盖并发登录窗口。
+	if s.revoker != nil {
+		if err := s.revoker.Revoke(ctx, userID); err != nil {
+			return fmt.Errorf("revoke tokens before password change: %w", err)
+		}
+	}
 	if err := s.userRepo.UpdatePassword(ctx, userID, string(newHash)); err != nil {
 		return fmt.Errorf("update password: %w", err)
 	}
+	if s.revoker != nil {
+		if err := s.revoker.Revoke(ctx, userID); err != nil {
+			s.logger.Error("refresh token revocation after password change failed",
+				zap.String("user_id", userID.String()), zap.Error(err))
+		}
+	}
 	return nil
+}
+
+func (s *AdminService) auditPasswordChange(ctx context.Context, targetID uuid.UUID, username string, err error) {
+	entry := auditEntryFromContext(ctx)
+	entry.Action = audit.ActionPasswordChange
+	entry.ResourceType = audit.ResourceUser
+	entry.ResourceID = targetID.String()
+	entry.Success = err == nil
+	entry.Details = map[string]interface{}{
+		"success":        err == nil,
+		"target_user_id": targetID.String(),
+	}
+	if username != "" {
+		entry.Details["target_username"] = username
+	}
+	if err != nil {
+		entry.ErrorMessage = err.Error()
+	}
+	audit.Log(ctx, entry)
 }
 
 // ==================== Role User List ====================

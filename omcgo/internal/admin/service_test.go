@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -1025,6 +1026,125 @@ func TestAdminService_CreateUser_UseDefaultPassword_SkipsStrengthValidation(t *t
 	require.NoError(t, err, "消费默认密码应跳过强度校验")
 	require.NotNil(t, created)
 	assert.NoError(t, bcrypt.CompareHashAndPassword([]byte(created.PasswordHash), []byte("OMC@1")))
+}
+
+// --- ChangePassword ---
+
+func TestAdminService_ChangePassword_RevokesExistingTokens(t *testing.T) {
+	userID := uuid.New()
+	userRepo := &mockUserRepo{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*User, error) {
+			assert.Equal(t, userID, id)
+			return &User{
+				ID:           userID,
+				Username:     "admin",
+				PasswordHash: hashPassword("Old@123456"),
+			}, nil
+		},
+		updatePasswordFn: func(_ context.Context, id uuid.UUID, passwordHash string) error {
+			assert.Equal(t, userID, id)
+			assert.NoError(t, bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte("New@123456")))
+			return nil
+		},
+	}
+	svc, _, mr := newServiceWithPolicyAndRevoker(t, userRepo, &mockRoleRepo{}, map[string]string{
+		"security.passwordContent": "true",
+		"security.pwdMinLength":    "8",
+	})
+
+	err := svc.ChangePassword(context.Background(), userID, ChangePasswordRequest{
+		OldPassword: "Old@123456",
+		NewPassword: "New@123456",
+	})
+	require.NoError(t, err)
+	assert.True(t, mr.Exists("auth:revoked_at:user:"+userID.String()),
+		"自助改密成功后必须撤销该用户已有 token")
+}
+
+func TestAdminService_ChangePassword_RevokeFailureDoesNotChangePassword(t *testing.T) {
+	userID := uuid.New()
+	updateCalled := false
+	userRepo := &mockUserRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*User, error) {
+			return &User{ID: userID, Username: "admin", PasswordHash: hashPassword("Old@123456")}, nil
+		},
+		updatePasswordFn: func(_ context.Context, _ uuid.UUID, _ string) error {
+			updateCalled = true
+			return nil
+		},
+	}
+	svc, _, mr := newServiceWithPolicyAndRevoker(t, userRepo, &mockRoleRepo{}, nil)
+	mr.Close()
+
+	err := svc.ChangePassword(context.Background(), userID, ChangePasswordRequest{
+		OldPassword: "Old@123456",
+		NewPassword: "New@123456",
+	})
+	require.Error(t, err)
+	assert.False(t, updateCalled, "撤销基础设施不可用时不得先修改密码再返回失败")
+}
+
+func TestAdminService_ChangePassword_AuditsSuccessWithoutPasswords(t *testing.T) {
+	userID := uuid.New()
+	userRepo := &mockUserRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*User, error) {
+			return &User{ID: userID, Username: "admin", PasswordHash: hashPassword("Old@123456")}, nil
+		},
+	}
+	logs, fn := auditCollector()
+	svc, auditRepo, _ := newServiceWithPolicyAndRevoker(t, userRepo, &mockRoleRepo{}, nil)
+	auditRepo.createFn = fn
+	ctx := context.WithValue(context.Background(), CtxKeyUserID, userID)
+	ctx = context.WithValue(ctx, CtxKeyUsername, "admin")
+	ctx = context.WithValue(ctx, auditRequestMetadataContextKey{}, auditRequestMetadata{
+		IPAddress: "10.10.30.155",
+		UserAgent: "change-password-test",
+	})
+
+	err := svc.ChangePassword(ctx, userID, ChangePasswordRequest{
+		OldPassword: "Old@123456",
+		NewPassword: "New@123456",
+	})
+	require.NoError(t, err)
+	require.Len(t, *logs, 1)
+	log := (*logs)[0]
+	assert.Equal(t, "password_change", log.Action)
+	assert.Equal(t, "admin", log.Username)
+	assert.Equal(t, "10.10.30.155", log.IPAddress)
+	assert.Equal(t, "change-password-test", log.UserAgent)
+	assert.Equal(t, userID.String(), log.ResourceID)
+	assert.Equal(t, true, log.Details["success"])
+	assert.Equal(t, userID.String(), log.Details["target_user_id"])
+	serialized := fmt.Sprintf("%+v", log)
+	assert.NotContains(t, serialized, "Old@123456")
+	assert.NotContains(t, serialized, "New@123456")
+}
+
+func TestAdminService_ChangePassword_AuditsFailureWithoutPasswords(t *testing.T) {
+	userID := uuid.New()
+	userRepo := &mockUserRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*User, error) {
+			return &User{ID: userID, Username: "admin", PasswordHash: hashPassword("Correct@123456")}, nil
+		},
+	}
+	logs, fn := auditCollector()
+	svc, auditRepo, _ := newServiceWithPolicyAndRevoker(t, userRepo, &mockRoleRepo{}, nil)
+	auditRepo.createFn = fn
+
+	err := svc.ChangePassword(context.Background(), userID, ChangePasswordRequest{
+		OldPassword: "Wrong@123456",
+		NewPassword: "New@123456",
+	})
+	require.Error(t, err)
+	require.Len(t, *logs, 1)
+	log := (*logs)[0]
+	assert.Equal(t, "password_change_failed", log.Action)
+	assert.Equal(t, false, log.Details["success"])
+	assert.Equal(t, userID.String(), log.Details["target_user_id"])
+	serialized := fmt.Sprintf("%+v", log)
+	assert.NotContains(t, serialized, "Wrong@123456")
+	assert.NotContains(t, serialized, "New@123456")
+	assert.NotContains(t, serialized, "Correct@123456")
 }
 
 // --- ResetPassword ---

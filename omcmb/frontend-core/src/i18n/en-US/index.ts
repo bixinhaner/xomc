@@ -2784,6 +2784,7 @@ const messages: Record<string, string> = {
   // User dropdown
   // -------------------------------------------------------------------------
   'user.changePassword':  'Change Password',
+  'user.currentAccount':  'Current account: {username}',
   'user.logout':          'Logout',
   'user.notLoggedIn':     'Not Logged In',
   'user.switchToEn':      'Switch to English',

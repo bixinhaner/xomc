@@ -499,7 +499,7 @@ func (h *Handler) ChangePassword(c *gin.Context) {
 		return
 	}
 
-	ctx := c.Request.Context()
+	ctx := userContextWithOperator(c)
 
 	// Issue #695：记录请求参数便于诊断解密失败
 	h.logger.Debug("change-password: received request",
