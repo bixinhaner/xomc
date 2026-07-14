@@ -394,6 +394,32 @@ describe('TaskRecord batch delete and console task display', () => {
     );
   });
 
+  it('keeps row execute and terminate icons visible but disabled when status does not allow them', () => {
+    mocks.taskItems = [
+      buildTask({
+        id: 'task-completed-row-1',
+        taskName: '完成任务',
+        taskOrigin: 'script',
+        status: 'completed',
+      }),
+    ];
+
+    renderPage();
+
+    const executeButton = screen.getByRole('button', { name: '执行任务' });
+    const terminateButton = screen.getByRole('button', { name: '终止任务' });
+
+    expect(executeButton).toBeDisabled();
+    expect(terminateButton).toBeDisabled();
+
+    fireEvent.click(executeButton);
+    fireEvent.click(terminateButton);
+
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(mocks.startTasks).not.toHaveBeenCalled();
+    expect(mocks.cancelTasks).not.toHaveBeenCalled();
+  });
+
   it('supports starting selected pending or paused task records in batch', () => {
     mocks.taskItems = [
       buildTask({ id: 'task-pending-1', taskName: '等待任务', status: 'pending' }),

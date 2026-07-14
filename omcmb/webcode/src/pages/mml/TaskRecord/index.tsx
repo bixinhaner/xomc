@@ -694,29 +694,35 @@ export default function TaskRecord() {
                 }}
               />
             </Tooltip>
-            {startable ? (
-              <Tooltip title={t('mml.executeTask')}>
-                <Button
-                  aria-label={t('mml.executeTask')}
-                  type="link"
-                  size="small"
-                  icon={<PlayCircleOutlined />}
-                  onClick={() => confirmStartTasks([record.id])}
-                />
-              </Tooltip>
-            ) : null}
-            {cancellable ? (
-              <Tooltip title={t('mml.terminateTask')}>
-                <Button
-                  aria-label={t('mml.terminateTask')}
-                  danger
-                  type="link"
-                  size="small"
-                  icon={<StopOutlined />}
-                  onClick={() => confirmCancelTasks([record.id])}
-                />
-              </Tooltip>
-            ) : null}
+            <Tooltip title={t('mml.executeTask')}>
+              <Button
+                aria-label={t('mml.executeTask')}
+                type="link"
+                size="small"
+                disabled={!startable}
+                icon={<PlayCircleOutlined />}
+                onClick={() => {
+                  if (startable) {
+                    confirmStartTasks([record.id]);
+                  }
+                }}
+              />
+            </Tooltip>
+            <Tooltip title={t('mml.terminateTask')}>
+              <Button
+                aria-label={t('mml.terminateTask')}
+                danger
+                type="link"
+                size="small"
+                disabled={!cancellable}
+                icon={<StopOutlined />}
+                onClick={() => {
+                  if (cancellable) {
+                    confirmCancelTasks([record.id]);
+                  }
+                }}
+              />
+            </Tooltip>
           </Space>
         );
       },
