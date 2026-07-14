@@ -111,6 +111,26 @@ describe('defaultExportTaskName', () => {
     expect(defaultExportTaskName('kpi_query', d)).toBe('KPI导出_指标查询_20260604_212308');
     expect(defaultExportTaskName('adhoc', d)).toBe('KPI导出_任务结果_20260604_212308');
   });
+
+  it('英文 adhoc 导出名使用英文固定词并包含清理后的任务名', () => {
+    const d = new Date(2026, 6, 13, 14, 51, 0); // 2026-07-13 14:51:00 本地
+    expect(
+      defaultExportTaskName('adhoc', d, {
+        locale: 'en-US',
+        subjectName: 'Built-in/Product:GSM',
+      }),
+    ).toBe('KPI_Export_Built-in_Product_GSM_20260713_145100');
+  });
+
+  it('中文 adhoc 导出名保留中文体验并包含清理后的任务名', () => {
+    const d = new Date(2026, 6, 13, 14, 51, 0); // 2026-07-13 14:51:00 本地
+    expect(
+      defaultExportTaskName('adhoc', d, {
+        locale: 'zh-CN',
+        subjectName: '产品/汇总:模板',
+      }),
+    ).toBe('KPI导出_任务结果_产品_汇总_模板_20260713_145100');
+  });
 });
 
 describe('kpiQueryToDashboardSelection', () => {
