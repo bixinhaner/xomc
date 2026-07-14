@@ -58,6 +58,13 @@ func (h *Handler) Login(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
+	// 非法登录标识必须在验证码、解密、数据库、失败计数和日志链路前拒绝。
+	// 错误文案固定且不回显原始输入，避免用户名/密码组合误填后进入日志。
+	if err := validateUsername(req.Username); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			errors.New("invalid username format"))
+		return
+	}
 
 	ctx := c.Request.Context()
 	log := logger.L(ctx)
