@@ -19,7 +19,6 @@ import {
   Radio,
   Select,
   Space,
-  Tag,
   Tooltip,
   Typography,
   Empty,
@@ -547,11 +546,6 @@ export default function KPIQuery() {
               <Text ellipsis={{ tooltip: tpl.name }} style={{ flex: 1, minWidth: 0 }}>
                 {tpl.name}
               </Text>
-              {tpl.visibility === 'public' ? (
-                <Tag color="blue">{t('perf.kpiQuery.public')}</Tag>
-              ) : (
-                <Tag color="default">{t('perf.kpiQuery.private')}</Tag>
-              )}
             </Space>
           }
           description={
