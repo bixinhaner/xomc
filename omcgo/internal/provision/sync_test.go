@@ -42,3 +42,74 @@ func TestEnqueueGPVBatches_UsesSyncGPVExpiresIn(t *testing.T) {
 	}
 	assert.Equal(t, 1800, syncGPVTaskExpiresIn, "syncGPVTaskExpiresIn 常量值不应被悄悄改小")
 }
+
+func TestEnqueueGPVBatches_FillsMissingSourceIDForWholeBatch(t *testing.T) {
+	var captured []*task.CreateTaskRequest
+	mock := &mockCommandQueue{
+		CreateFn: func(_ context.Context, req *task.CreateTaskRequest) (*task.Task, error) {
+			captured = append(captured, req)
+			return task.NewTask(req), nil
+		},
+	}
+	svc := &SyncService{
+		taskSvc:   mock,
+		batchSize: 50,
+		logger:    zap.NewNop(),
+	}
+
+	paths := []string{"Dev.System.Mode", "Dev.WiFi.Radio.", "Dev.WiFi.SSID."}
+	_, err := svc.EnqueueGPVBatches(context.Background(), "SN-TEST", paths, "")
+	require.NoError(t, err)
+
+	require.Len(t, captured, 3, "应入队 3 批 task")
+	sourceID := captured[0].SourceID
+	require.NotEmpty(t, sourceID, "sourceID 为空时应由 EnqueueGPVBatches 自动补齐")
+	for i, req := range captured {
+		assert.Equalf(t, sourceID, req.SourceID, "batch %d 应共享同一轮 sync-gpv sourceID", i)
+	}
+}
+
+func TestEnqueueGPVBatches_KeepsProvidedSourceID(t *testing.T) {
+	var captured []*task.CreateTaskRequest
+	mock := &mockCommandQueue{
+		CreateFn: func(_ context.Context, req *task.CreateTaskRequest) (*task.Task, error) {
+			captured = append(captured, req)
+			return task.NewTask(req), nil
+		},
+	}
+	svc := &SyncService{
+		taskSvc:   mock,
+		batchSize: 50,
+		logger:    zap.NewNop(),
+	}
+
+	_, err := svc.EnqueueGPVBatches(context.Background(), "SN-TEST", []string{"Dev.System.Mode", "Dev.WiFi.Radio."}, "src-1")
+	require.NoError(t, err)
+
+	require.Len(t, captured, 2)
+	for _, req := range captured {
+		assert.Equal(t, "src-1", req.SourceID)
+	}
+}
+
+func TestEnqueueGPVBatches_TreatsBlankSourceIDAsMissing(t *testing.T) {
+	var captured []*task.CreateTaskRequest
+	mock := &mockCommandQueue{
+		CreateFn: func(_ context.Context, req *task.CreateTaskRequest) (*task.Task, error) {
+			captured = append(captured, req)
+			return task.NewTask(req), nil
+		},
+	}
+	svc := &SyncService{
+		taskSvc:   mock,
+		batchSize: 50,
+		logger:    zap.NewNop(),
+	}
+
+	_, err := svc.EnqueueGPVBatches(context.Background(), "SN-TEST", []string{"Dev.System.Mode"}, "   ")
+	require.NoError(t, err)
+
+	require.Len(t, captured, 1)
+	assert.NotEmpty(t, captured[0].SourceID)
+	assert.NotEqual(t, "   ", captured[0].SourceID)
+}

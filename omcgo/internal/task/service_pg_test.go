@@ -181,7 +181,7 @@ func TestService_PG_CountOpenSyncGPVByDevice_ScopesToRecentSyncTasks(t *testing.
 	defer cleanupTestTasks(t, repo.pool)
 	ctx := context.Background()
 	sn := testDeviceSNPrefix + "sync-count"
-	sharedSourceID := generateUUID()
+	failedSourceID := generateUUID()
 
 	pmTask := freshTaskForPG("pm", "sync-count")
 	pmTask.Method = "SetParameterValues"
@@ -191,6 +191,7 @@ func TestService_PG_CountOpenSyncGPVByDevice_ScopesToRecentSyncTasks(t *testing.
 	require.NoError(t, repo.Create(ctx, pmTask))
 
 	staleSync := freshTaskForPG("stale-sync", "sync-count")
+	staleSync.Method = "GetParameterValues"
 	staleSync.CommandKey = "sync-gpv-" + sn + "-0"
 	staleSync.Status = TaskStatusSent
 	staleSync.CreatedAt = time.Now().Add(-48 * time.Hour)
@@ -199,6 +200,7 @@ func TestService_PG_CountOpenSyncGPVByDevice_ScopesToRecentSyncTasks(t *testing.
 	require.NoError(t, repo.Create(ctx, staleSync))
 
 	orphanSync := freshTaskForPG("orphan-sync", "sync-count")
+	orphanSync.Method = "GetParameterValues"
 	orphanSync.CommandKey = "sync-gpv-" + sn + "-0-r"
 	orphanSync.Status = TaskStatusSent
 	orphanSync.ExpiresAt = nil
@@ -208,9 +210,10 @@ func TestService_PG_CountOpenSyncGPVByDevice_ScopesToRecentSyncTasks(t *testing.
 	require.NoError(t, repo.Create(ctx, orphanSync))
 
 	oldFailedSync := freshTaskForPG("old-failed-sync", "sync-count")
+	oldFailedSync.Method = "GetParameterValues"
 	oldFailedSync.CommandKey = "sync-gpv-" + sn + "-1"
 	oldFailedSync.Status = TaskStatusExpired
-	oldFailedSync.SourceID = sharedSourceID
+	oldFailedSync.SourceID = failedSourceID
 	oldFailedSync.CreatedAt = time.Now().Add(-2 * time.Hour)
 	failedAt := oldFailedSync.CreatedAt.Add(time.Minute)
 	oldFailedSync.CompletedAt = &failedAt
@@ -221,10 +224,22 @@ func TestService_PG_CountOpenSyncGPVByDevice_ScopesToRecentSyncTasks(t *testing.
 	assert.Equal(t, int64(0), count)
 
 	activeSync := freshTaskForPG("active-sync", "sync-count")
+	activeSync.Method = "GetParameterValues"
 	activeSync.CommandKey = "sync-gpv-" + sn + "-2"
 	activeSync.ExpiresAt = &pmExpires
-	activeSync.SourceID = sharedSourceID
+	activeSync.SourceID = failedSourceID
 	require.NoError(t, repo.Create(ctx, activeSync))
+
+	count, err = svc.CountOpenSyncGPVByDevice(ctx, sn)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), count)
+
+	activeNewBatch := freshTaskForPG("active-new-batch", "sync-count")
+	activeNewBatch.Method = "GetParameterValues"
+	activeNewBatch.CommandKey = "sync-gpv-" + sn + "-3"
+	activeNewBatch.ExpiresAt = &pmExpires
+	activeNewBatch.SourceID = generateUUID()
+	require.NoError(t, repo.Create(ctx, activeNewBatch))
 
 	count, err = svc.CountOpenSyncGPVByDevice(ctx, sn)
 	require.NoError(t, err)

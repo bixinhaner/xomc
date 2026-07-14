@@ -190,52 +190,53 @@
     前端按 group.objectPath/standardPath 是否以 Device.Services.GsmBTSCellDT. 起始
     判定 GSM 分组，进而启用"制式: LTE/GSM"切换器（见 QuickSettingsTab/index.tsx）。
     字段对照截图 GSM Cell Settings 表：
-      Cell Status   ← OpState           (READ_WRITE,   max=7)
-      RF Status     ← RfState           (READ_WRITE,   max=2)
+      Cell Status   ← OpState           (READ_WRITE,   0=OFF / 1=ON)
+      RF Power      ← GsmTxAntNum * GsmBtsRFPower (READ_WRITE,   max=43)
+      Route Index   ← GsmCellWithRuRelation (READ_WRITE, display raw value)
+      RF Status     ← RfState           (READ_ONLY,    max=2)
       UE Connections← UeCount           (READ_ONLY)
-      Band          ← GsmBtsBand        (READ_WRITE)
+      Band          ← GsmBtsBand        (READ_ONLY)
       Cell ID       ← GsmCellID         (READ_ONLY,    max=65535)
-      LAC           ← CurrLocAreaCode   (READ_WRITE,   max=65535)
-      MNC           ← MobileNetworkCode (READ_WRITE,   max=8)
-      MCC           ← NetworkCountryCode(READ_WRITE,   max=8)
+      LAC           ← CurrLocAreaCode   (READ_ONLY,    max=65535)
+      MNC           ← MobileNetworkCode (READ_ONLY,    max=8)
+      MCC           ← NetworkCountryCode(READ_ONLY,    max=8)
       BSIC          ← GsmBSIC           (READ_ONLY,    max=65535)
-      CPRI ID       ← IPAUnitID         (READ_WRITE)
       BSC Select    ← BscSelect         (READ_ONLY,    max=255)
-      ARFCN         ← CurrentArfcn      (READ_WRITE,   max=65535)
-      RF Power      ← GsmBtsRFPower     (READ_WRITE,   max=43)
-      TRX 数量      ← TrxNum            (READ_ONLY,    max=16)
+      ARFCN         ← CurrentArfcn      (READ_ONLY,    max=65535)
+      TRX 数量      ← GsmTxAntNum       (hidden, editable in RF Power prefix)
+      RU Relation   ← GsmCellWithRuRelation (shown as Route Index)
     Abis Link Status 截图字段在 BM 字典中无对应 standardPath，先不暴露，后续若设备
     侧补齐 LinkState 等节点再追加。
   -->
   <group id="gsm-cell" titleZh="GSM 空口参数" titleEn="Air Interface Settings">
     <param name="OpState" titleZh="小区状态" titleEn="Cell Status"
            standardPath="Device.Services.GsmBTSCellDT.{i}.OpState"/>
-    <param name="RfState" titleZh="RF 状态" titleEn="RF Status"
-           standardPath="Device.Services.GsmBTSCellDT.{i}.RfState"/>
-    <param name="UeCount" titleZh="UE 连接数" titleEn="UE Connections"
-           standardPath="Device.Services.GsmBTSCellDT.{i}.UeCount"/>
-    <param name="GsmBtsBand" titleZh="频段" titleEn="Band"
-           standardPath="Device.Services.GsmBTSCellDT.{i}.GsmBtsBand"/>
-    <param name="GsmCellID" titleZh="小区ID" titleEn="Cell ID"
-           standardPath="Device.Services.GsmBTSCellDT.{i}.GsmCellID"/>
-    <param name="CurrLocAreaCode" titleZh="位置区域码 LAC" titleEn="Location Area Code"
-           standardPath="Device.Services.GsmBTSCellDT.{i}.CurrLocAreaCode"/>
-    <param name="MobileNetworkCode" titleZh="MNC" titleEn="MNC"
-           standardPath="Device.Services.GsmBTSCellDT.{i}.MobileNetworkCode"/>
-    <param name="NetworkCountryCode" titleZh="MCC" titleEn="MCC"
-           standardPath="Device.Services.GsmBTSCellDT.{i}.NetworkCountryCode"/>
-    <param name="GsmBSIC" titleZh="BSIC" titleEn="BSIC"
-           standardPath="Device.Services.GsmBTSCellDT.{i}.GsmBSIC"/>
-    <param name="BscSelect" titleZh="BSC Select" titleEn="BSC Select"
-           standardPath="Device.Services.GsmBTSCellDT.{i}.BscSelect"/>
-    <param name="CurrentArfcn" titleZh="ARFCN" titleEn="ARFCN"
-           standardPath="Device.Services.GsmBTSCellDT.{i}.CurrentArfcn"/>
     <param name="GsmBtsRFPower" titleZh="发射功率(dBm)" titleEn="Transmission Power(dBm)"
            standardPath="Device.Services.GsmBTSCellDT.{i}.GsmBtsRFPower"/>
-    <!-- TRX 数量: BM 实际上报 GsmTxAntNum,字典中同样走该路径;TrxNum 未上报默认 0,已废弃。 -->
+    <param name="RfState" titleZh="RF 状态" titleEn="RF Status"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.RfState" readonly="true"/>
+    <param name="UeCount" titleZh="UE 连接数" titleEn="UE Connections"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.UeCount" readonly="true"/>
+    <param name="GsmBtsBand" titleZh="频段" titleEn="Band"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.GsmBtsBand" readonly="true"/>
+    <param name="GsmCellID" titleZh="小区ID" titleEn="Cell ID"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.GsmCellID" readonly="true"/>
+    <param name="CurrLocAreaCode" titleZh="位置区域码 LAC" titleEn="Location Area Code"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.CurrLocAreaCode" readonly="true"/>
+    <param name="MobileNetworkCode" titleZh="MNC" titleEn="MNC"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.MobileNetworkCode" readonly="true"/>
+    <param name="NetworkCountryCode" titleZh="MCC" titleEn="MCC"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.NetworkCountryCode" readonly="true"/>
+    <param name="GsmBSIC" titleZh="BSIC" titleEn="BSIC"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.GsmBSIC" readonly="true"/>
+    <param name="BscSelect" titleZh="BSC Select" titleEn="BSC Select"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.BscSelect" readonly="true"/>
+    <param name="CurrentArfcn" titleZh="ARFCN" titleEn="ARFCN"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.CurrentArfcn" readonly="true"/>
+    <!-- TRX 数量: 作为发射功率字段前缀编辑,不单独显示。TrxNum 未上报默认 0,已废弃。 -->
     <param name="GsmTxAntNum" titleZh="TRX 数量" titleEn="TRX Count"
            standardPath="Device.Services.GsmBTSCellDT.{i}.GsmTxAntNum"/>
-    <param name="GsmCellWithRuRelation" titleZh="RU 天线通道(AXC ID)" titleEn="RU Antenna Path AXC ID"
+    <param name="GsmCellWithRuRelation" titleZh="Route Index (绑定 RU)" titleEn="Route Index (Bound RU)"
            standardPath="Device.Services.GsmBTSCellDT.{i}.GsmCellWithRuRelation"/>
   </group>
   <!--

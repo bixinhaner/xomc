@@ -19,6 +19,7 @@ import { applyInstanceContext, type QuickSettingsInstanceContext } from './valid
 import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
+const BM_RU_ROUTE_INDEX_PREFIX = 'Device.DeviceInfo.RU.';
 
 const ENB_IPSEC_CONTROL_GROUP: QuickSettingsGroup = {
   id: 'device-ipsec-control',
@@ -406,6 +407,12 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
         if (param.extraInfoPath) {
           paths.add(applyInstanceContext(param.extraInfoPath, instanceContext));
         }
+      }
+      const hasBmRuRouteBinding = group.params.some((param) => (
+        param.name === 'GsmCellWithRuRelation' || param.name === 'LteCellWithRuList'
+      ));
+      if (hasBmRuRouteBinding) {
+        paths.add(BM_RU_ROUTE_INDEX_PREFIX);
       }
       // 某些 quicksettings XML 会遗漏 Device.Time.Enable 的标准路径声明，
       // 这里兜底补齐，确保头部“刷新”一定会同步 NTP 开关值。

@@ -1315,6 +1315,8 @@ const messages: Record<string, string> = {
   'device.cell.ntpServer':                'NTP Server',
   'device.cell.ntpClient':                'NTP Client',
   'device.cell.readonly':                 '(read-only)',
+  'device.cell.required':                 'Required',
+  'device.cell.notReported':              'Not reported',
   'device.cell.lmtLockedHint':            '(LMT-controlled, modify via LMT)',
   'device.cell.routeIndexBoundRu':        'Route Index (Bound RU)',
   'device.cell.switch2T4R':               '2T4R Switch',

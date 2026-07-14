@@ -57,13 +57,13 @@
         <param name="Device.DeviceInfo.EU.{i}.RU.{i}.ModelName" standardPath="Device.DeviceInfo.EU.{i}.RU.{i}.ModelName" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64"/>
         <param name="Device.DeviceInfo.EU.{i}.RU.{i}.RFTxStatus" standardPath="Device.DeviceInfo.EU.{i}.RU.{i}.RFTxStatus" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.EU.{i}.RU.{i}.Reboot" standardPath="Device.DeviceInfo.EU.{i}.RU.{i}.Reboot" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
-        <param name="Device.DeviceInfo.EU.{i}.RU.{i}.RouteIndex" standardPath="Device.DeviceInfo.EU.{i}.RU.{i}.RouteIndex" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64"/>
+        <param name="Device.DeviceInfo.EU.{i}.RU.{i}.RouteIndex" standardPath="Device.DeviceInfo.EU.{i}.RU.{i}.RouteIndex" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="1" max="64"/>
         <param name="Device.DeviceInfo.EU.{i}.RU.{i}.SerialNumber" standardPath="Device.DeviceInfo.EU.{i}.RU.{i}.SerialNumber" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64"/>
         <param name="Device.DeviceInfo.EU.{i}.RU.{i}.SoftwareVersion" standardPath="Device.DeviceInfo.EU.{i}.RU.{i}.SoftwareVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64"/>
         <param name="Device.DeviceInfo.EU.{i}.RU.{i}.Status" standardPath="Device.DeviceInfo.EU.{i}.RU.{i}.Status" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.EU.{i}.RU.{i}.Type" standardPath="Device.DeviceInfo.EU.{i}.RU.{i}.Type" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.EU.{i}.Reboot" standardPath="Device.DeviceInfo.EU.{i}.Reboot" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
-        <param name="Device.DeviceInfo.EU.{i}.RouteIndex" standardPath="Device.DeviceInfo.EU.{i}.RouteIndex" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64"/>
+        <param name="Device.DeviceInfo.EU.{i}.RouteIndex" standardPath="Device.DeviceInfo.EU.{i}.RouteIndex" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="1" max="64"/>
         <param name="Device.DeviceInfo.EU.{i}.SerialNumber" standardPath="Device.DeviceInfo.EU.{i}.SerialNumber" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64"/>
         <param name="Device.DeviceInfo.EU.{i}.SoftwareVersion" standardPath="Device.DeviceInfo.EU.{i}.SoftwareVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64"/>
         <param name="Device.DeviceInfo.EU.{i}.Status" standardPath="Device.DeviceInfo.EU.{i}.Status" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
@@ -87,7 +87,7 @@
         <param name="Device.DeviceInfo.RU.{i}.RFTxStatus" standardPath="Device.DeviceInfo.RU.{i}.RFTxStatus" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.RU.{i}.RUWithCellRelation" standardPath="Device.DeviceInfo.RU.{i}.RUWithCellRelation" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="1" max="64"/>
         <param name="Device.DeviceInfo.RU.{i}.Reboot" standardPath="Device.DeviceInfo.RU.{i}.Reboot" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
-        <param name="Device.DeviceInfo.RU.{i}.RouteIndex" standardPath="Device.DeviceInfo.RU.{i}.RouteIndex" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64"/>
+        <param name="Device.DeviceInfo.RU.{i}.RouteIndex" standardPath="Device.DeviceInfo.RU.{i}.RouteIndex" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="1" max="64"/>
         <param name="Device.DeviceInfo.RU.{i}.SerialNumber" standardPath="Device.DeviceInfo.RU.{i}.SerialNumber" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64"/>
         <param name="Device.DeviceInfo.RU.{i}.SoftwareVersion" standardPath="Device.DeviceInfo.RU.{i}.SoftwareVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64"/>
         <param name="Device.DeviceInfo.RU.{i}.SwUpgradeFailCause" standardPath="Device.DeviceInfo.RU.{i}.SwUpgradeFailCause" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64"/>
@@ -317,7 +317,7 @@
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.PhyCellID" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.PhyCellID" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.QOffset" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.QOffset" access="READ_WRITE" type="INT" changeApplies="Immediate" min="-24" max="24"/>
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.X_COM_TAC" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.TAC" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
-        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.AntennaInfo.AntennaPortsCount" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.AntennaInfo.AntennaPortsCount" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.AntennaInfo.AntennaPortsCount" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.AntennaInfo.AntennaPortsCount" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRACH.RootSequenceIndex" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRACH.RootSequenceIndex" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SpecialSubframePatterns" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SpecialSubframePatterns" access="READ_WRITE" type="INT" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SubFrameAssignment" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SubFrameAssignment" access="READ_WRITE" type="INT" changeApplies="Immediate"/>
@@ -383,10 +383,10 @@
         <param name="Device.Services.FAPService.{i}.X_COM.LTE.UE.X_BAICELLS_UE_SPEED_STATISTICS" standardPath="Device.Services.FAPService.{i}.UE_SPEED_STATISTICS" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.BscSelect" standardPath="Device.Services.GsmBTSCellDT.{i}.BscSelect" access="READ_ONLY" type="INT" changeApplies="Immediate" max="255"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.CellStateControl" standardPath="Device.Services.GsmBTSCellDT.{i}.CellStateControl" access="READ_WRITE" type="INT" changeApplies="Immediate" max="2"/>
-        <param name="Device.Services.GsmBTSCellDT.{i}.CurrLocAreaCode" standardPath="Device.Services.GsmBTSCellDT.{i}.CurrLocAreaCode" access="READ_WRITE" type="INT" changeApplies="Immediate" max="65535"/>
-        <param name="Device.Services.GsmBTSCellDT.{i}.CurrentArfcn" standardPath="Device.Services.GsmBTSCellDT.{i}.CurrentArfcn" access="READ_WRITE" type="INT" changeApplies="Immediate" max="65535"/>
+        <param name="Device.Services.GsmBTSCellDT.{i}.CurrLocAreaCode" standardPath="Device.Services.GsmBTSCellDT.{i}.CurrLocAreaCode" access="READ_ONLY" type="INT" changeApplies="Immediate" max="65535"/>
+        <param name="Device.Services.GsmBTSCellDT.{i}.CurrentArfcn" standardPath="Device.Services.GsmBTSCellDT.{i}.CurrentArfcn" access="READ_ONLY" type="INT" changeApplies="Immediate" max="65535"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.GsmBSIC" standardPath="Device.Services.GsmBTSCellDT.{i}.GsmBSIC" access="READ_ONLY" type="INT" changeApplies="Immediate" max="65535"/>
-        <param name="Device.Services.GsmBTSCellDT.{i}.GsmBtsBand" standardPath="Device.Services.GsmBTSCellDT.{i}.GsmBtsBand" access="READ_WRITE" type="INT" changeApplies="Immediate" max="65535"/>
+        <param name="Device.Services.GsmBTSCellDT.{i}.GsmBtsBand" standardPath="Device.Services.GsmBTSCellDT.{i}.GsmBtsBand" access="READ_ONLY" type="INT" changeApplies="Immediate" max="65535"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.GsmBtsBindMib" standardPath="Device.Services.GsmBTSCellDT.{i}.GsmBtsBindMib" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="1024"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.GsmBtsCellActiveBefore" standardPath="Device.Services.GsmBTSCellDT.{i}.GsmBtsCellActiveBefore" access="READ_WRITE" type="INT" changeApplies="Immediate" max="1"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.GsmBtsIfname" standardPath="Device.Services.GsmBTSCellDT.{i}.GsmBtsIfname" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="64"/>
@@ -394,24 +394,25 @@
         <param name="Device.Services.GsmBTSCellDT.{i}.GsmBtsRFPower" standardPath="Device.Services.GsmBTSCellDT.{i}.GsmBtsRFPower" access="READ_WRITE" type="INT" changeApplies="Immediate" max="43"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.GsmCellID" standardPath="Device.Services.GsmBTSCellDT.{i}.GsmCellID" access="READ_ONLY" type="INT" changeApplies="Immediate" max="65535"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.GsmCellWithRuRelation" standardPath="Device.Services.GsmBTSCellDT.{i}.GsmCellWithRuRelation" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="64"/>
+        <param name="Device.Services.GsmBTSCellDT.{i}.GsmTrxItfInfo.{i}.GsmTrxFrameID" standardPath="Device.Services.GsmBTSCellDT.{i}.GsmTrxItfInfo.{i}.GsmTrxFrameID" access="READ_ONLY" type="INT" changeApplies="Immediate" max="65535"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.GsmDlPhyDelayTime" standardPath="Device.Services.GsmBTSCellDT.{i}.GsmDlPhyDelayTime" access="READ_WRITE" type="INT" changeApplies="Immediate"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.GsmMACStubVal" standardPath="Device.Services.GsmBTSCellDT.{i}.GsmMACStubVal" access="READ_WRITE" type="INT" changeApplies="Immediate" max="65535"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.GsmMACTraceMsgType" standardPath="Device.Services.GsmBTSCellDT.{i}.GsmMACTraceMsgType" access="READ_WRITE" type="INT" changeApplies="Immediate" max="255"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.GsmMACTraceNum" standardPath="Device.Services.GsmBTSCellDT.{i}.GsmMACTraceNum" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="128"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.GsmMACTtiSwitch" standardPath="Device.Services.GsmBTSCellDT.{i}.GsmMACTtiSwitch" access="READ_WRITE" type="INT" changeApplies="Immediate" max="1"/>
-        <param name="Device.Services.GsmBTSCellDT.{i}.GsmTxAntNum" standardPath="Device.Services.GsmBTSCellDT.{i}.GsmTxAntNum" access="READ_ONLY" type="INT" changeApplies="Immediate" max="16"/>
+        <param name="Device.Services.GsmBTSCellDT.{i}.GsmTxAntNum" standardPath="Device.Services.GsmBTSCellDT.{i}.GsmTxAntNum" access="READ_WRITE" type="INT" changeApplies="Immediate" max="16"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.GsmUlPhyDelayTime" standardPath="Device.Services.GsmBTSCellDT.{i}.GsmUlPhyDelayTime" access="READ_WRITE" type="INT" changeApplies="Immediate"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.IPAUnitID" standardPath="Device.Services.GsmBTSCellDT.{i}.IPAUnitID" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="64"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.InUse" standardPath="Device.Services.GsmBTSCellDT.{i}.InUse" access="READ_WRITE" type="INT" changeApplies="Immediate" max="1"/>
-        <param name="Device.Services.GsmBTSCellDT.{i}.MobileNetworkCode" standardPath="Device.Services.GsmBTSCellDT.{i}.MobileNetworkCode" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="8"/>
-        <param name="Device.Services.GsmBTSCellDT.{i}.NetworkCountryCode" standardPath="Device.Services.GsmBTSCellDT.{i}.NetworkCountryCode" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="8"/>
+        <param name="Device.Services.GsmBTSCellDT.{i}.MobileNetworkCode" standardPath="Device.Services.GsmBTSCellDT.{i}.MobileNetworkCode" access="READ_ONLY" type="STRING" changeApplies="Immediate" max="8"/>
+        <param name="Device.Services.GsmBTSCellDT.{i}.NetworkCountryCode" standardPath="Device.Services.GsmBTSCellDT.{i}.NetworkCountryCode" access="READ_ONLY" type="STRING" changeApplies="Immediate" max="8"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.OMLRemoteIP" standardPath="Device.Services.GsmBTSCellDT.{i}.OMLRemoteIP" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="64"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.OMLRemoteIPBak" standardPath="Device.Services.GsmBTSCellDT.{i}.OMLRemoteIPBak" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="64"/>
-        <param name="Device.Services.GsmBTSCellDT.{i}.OpState" standardPath="Device.Services.GsmBTSCellDT.{i}.OpState" access="READ_ONLY" type="INT" changeApplies="Immediate" max="7"/>
+        <param name="Device.Services.GsmBTSCellDT.{i}.OpState" standardPath="Device.Services.GsmBTSCellDT.{i}.OpState" access="READ_WRITE" type="INT" changeApplies="Immediate" min="0" max="1"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.PhyCatchIq" standardPath="Device.Services.GsmBTSCellDT.{i}.PhyCatchIq" access="READ_WRITE" type="INT" changeApplies="Immediate" max="2"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.PhyStop" standardPath="Device.Services.GsmBTSCellDT.{i}.PhyStop" access="READ_WRITE" type="INT" changeApplies="Immediate" max="1"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.RTPJitterBuffer" standardPath="Device.Services.GsmBTSCellDT.{i}.RTPJitterBuffer" access="READ_WRITE" type="INT" changeApplies="Immediate" max="1000"/>
-        <param name="Device.Services.GsmBTSCellDT.{i}.RfState" standardPath="Device.Services.GsmBTSCellDT.{i}.RfState" access="READ_WRITE" type="INT" changeApplies="Immediate" max="2"/>
+        <param name="Device.Services.GsmBTSCellDT.{i}.RfState" standardPath="Device.Services.GsmBTSCellDT.{i}.RfState" access="READ_ONLY" type="INT" changeApplies="Immediate" max="2"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.TrxNum" standardPath="Device.Services.GsmBTSCellDT.{i}.TrxNum" access="READ_ONLY" type="INT" changeApplies="Immediate" max="16"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.UeCount" standardPath="Device.Services.GsmBTSCellDT.{i}.UeCount" access="READ_ONLY" type="INT" changeApplies="Immediate"/>
         <param name="Device.SoftwareCtrl.SystemBackupVersion" standardPath="Device.SoftwareCtrl.SystemBackupVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
