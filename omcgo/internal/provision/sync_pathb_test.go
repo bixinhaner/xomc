@@ -19,6 +19,8 @@ import (
 	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/mml"
+	"github.com/omcgo/omcgo/internal/product"
+	"github.com/omcgo/omcgo/pkg/tr069"
 )
 
 type fakeUnsupportedPathRepo struct {
@@ -35,6 +37,54 @@ func (f *fakeUnsupportedPathRepo) ListByProduct(_ context.Context, _ uuid.UUID) 
 		return nil, f.err
 	}
 	return append([]mml.UnsupportedPath(nil), f.items...), nil
+}
+
+type fakeProductRepoForPathB struct {
+	products map[uuid.UUID]*product.Product
+	patterns []product.ProductClassPattern
+}
+
+func (f *fakeProductRepoForPathB) ListActivePatterns(_ context.Context) ([]product.ProductClassPattern, error) {
+	return append([]product.ProductClassPattern(nil), f.patterns...), nil
+}
+
+func (f *fakeProductRepoForPathB) GetProductByID(_ context.Context, id uuid.UUID) (*product.Product, error) {
+	if f.products == nil {
+		return nil, nil
+	}
+	return f.products[id], nil
+}
+
+func (f *fakeProductRepoForPathB) ListProducts(context.Context) ([]*product.Product, error) {
+	out := make([]*product.Product, 0, len(f.products))
+	for _, p := range f.products {
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+func (f *fakeProductRepoForPathB) FetchIndicatorPlatformsByDeviceType(context.Context, string) (map[string]struct{}, error) {
+	return map[string]struct{}{}, nil
+}
+
+func (f *fakeProductRepoForPathB) FetchAlarmNeTypes(context.Context) (map[string]struct{}, error) {
+	return map[string]struct{}{}, nil
+}
+
+type fakeParamModelRepoForPathB struct {
+	defaultByModel map[uuid.UUID][]parammodel.ParamMapping
+	discovered     map[string][]parammodel.ParamMapping
+}
+
+func (f *fakeParamModelRepoForPathB) ListMappingsByParamModel(_ context.Context, paramModelID uuid.UUID) ([]parammodel.ParamMapping, error) {
+	return append([]parammodel.ParamMapping(nil), f.defaultByModel[paramModelID]...), nil
+}
+
+func (f *fakeParamModelRepoForPathB) ListDiscoveredMappings(_ context.Context, productID uuid.UUID, swVersion string) ([]parammodel.ParamMapping, error) {
+	if f.discovered == nil {
+		return nil, nil
+	}
+	return append([]parammodel.ParamMapping(nil), f.discovered[productID.String()+"|"+swVersion]...), nil
 }
 
 func TestExtractStorablePrefixes_HappyPath(t *testing.T) {
@@ -403,6 +453,31 @@ func newDiffTestService(t *testing.T, paths []string, paramErr error) (*SyncServ
 	return svc, recorded, mr
 }
 
+func enablePathBRegistryForTest(t *testing.T, svc *SyncService, productClass string, mappings []parammodel.ParamMapping) {
+	t.Helper()
+	ctx := context.Background()
+	productID := uuid.New()
+	paramModelID := uuid.New()
+	prodRepo := &fakeProductRepoForPathB{
+		products: map[uuid.UUID]*product.Product{
+			productID: {ID: productID, Name: "test product", ParamModelID: &paramModelID},
+		},
+		patterns: []product.ProductClassPattern{
+			{ID: uuid.New(), ProductID: productID, ProductClass: "^" + productClass + "$", SortOrder: 1, IsActive: true},
+		},
+	}
+	prodReg := product.NewRegistry(prodRepo, product.NopCache{}, product.NewRegistryMetrics(nil), zap.NewNop())
+	require.NoError(t, prodReg.Refresh(ctx))
+
+	paramRepo := &fakeParamModelRepoForPathB{
+		defaultByModel: map[uuid.UUID][]parammodel.ParamMapping{
+			paramModelID: mappings,
+		},
+	}
+	paramReg := parammodel.NewRegistry(paramRepo, parammodel.NopCache{}, prodReg, parammodel.NewRegistryMetrics(nil), zap.NewNop())
+	svc.WithParamRegistry(paramReg, prodReg, true)
+}
+
 // ---------------------------------------------------------------------------
 // Tests: line 52 reconcile 差集删除（全量同步语义）
 // ---------------------------------------------------------------------------
@@ -681,6 +756,40 @@ func TestLogPathBSyncDiff_ReasonUnknownWhenRedisKeyAbsent(t *testing.T) {
 	require.Len(t, entries, 1)
 	assert.Equal(t, "unknown", entries[0].ContextMap()["reason"],
 		"Redis 无 reason key 时应降级为 unknown")
+}
+
+func TestHandleSyncResultPathB_NonFullGPVSkipsMissingDiffLog(t *testing.T) {
+	svc, recorded, _ := newDiffTestService(t, []string{
+		"Device.DeviceInfo.SoftwareVersion",
+		"Device.DeviceInfo.SerialNumber",
+	}, nil)
+	enablePathBRegistryForTest(t, svc, "FAP/test", []parammodel.ParamMapping{
+		{
+			StandardPath: "Device.DeviceInfo.SoftwareVersion",
+			PrivatePath:  "Device.DeviceInfo.SoftwareVersion",
+			IsStorable:   true,
+			IsSupported:  true,
+			EntryType:    "parameter",
+			Access:       "readOnly",
+		},
+	})
+	dev := &model.Device{
+		ID:              uuid.New(),
+		SerialNumber:    "SN-MML-GPV",
+		ProductClass:    "FAP/test",
+		FirmwareVersion: "1.0",
+		Carrier:         model.CarrierCMCC,
+		Technology:      model.TechNR,
+	}
+
+	handled, err := svc.HandleSyncResultPathB(context.Background(), dev, []tr069.ParameterValueStruct{
+		{Name: "Device.DeviceInfo.SoftwareVersion", Value: "BNW_3.9.12", Type: "xsd:string"},
+	}, "")
+
+	require.NoError(t, err)
+	assert.True(t, handled)
+	assert.Empty(t, recorded.FilterMessage("param_sync_missing").All(),
+		"非 sync-gpv-* 的局部 GPV（如 MML 单路径 LST）不应触发全量缺失差异日志")
 }
 
 func TestSnapshotStandardPaths_ReturnsNilOnError(t *testing.T) {
