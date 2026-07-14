@@ -232,8 +232,9 @@ func (s *SyncService) HandleSyncResultPathB(ctx context.Context, dev *model.Devi
 	)
 
 	// T-0127: 差异日志 — 把"之前上报、本次未上报"的 standardPath 差集写应用日志。
-	// 分批 GPV 响应只覆盖局部子树；仅在整轮 sync-gpv 最后一批完成后再记录，避免中途噪声。
-	if !fullSyncTrigger || finalizeSync {
+	// 仅 full-sync 的 sync-gpv 收尾才记录。MML LST、SPV 后置 GPV、北向调试 GPV
+	// 都是局部读取，响应集合不代表设备全量参数，不能触发 param_sync_missing。
+	if fullSyncTrigger && finalizeSync {
 		s.logPathBSyncDiff(ctx, dev, prevPaths, params)
 	}
 
