@@ -182,7 +182,10 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
       {
         sourceType: 'adhoc',
         params: buildAdhocExportParams({ taskId, startTime: startISO, endTime: endISO }),
-        taskName: defaultExportTaskName('adhoc'),
+        taskName: defaultExportTaskName('adhoc', new Date(), {
+          locale: intl.locale,
+          subjectName: taskQuery.data?.name,
+        }),
       },
       {
         onSuccess: () => message.success(intl.formatMessage({ id: 'kpiExport.export.submitted' })),

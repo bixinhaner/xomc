@@ -226,7 +226,10 @@ export default function TaskDashboardPane({ taskId }: Props) {
       {
         sourceType: 'adhoc',
         params: exportParams,
-        taskName: defaultExportTaskName('adhoc'),
+        taskName: defaultExportTaskName('adhoc', new Date(), {
+          locale: intl.locale,
+          subjectName: taskQuery.data?.name,
+        }),
       },
       {
         onSuccess: () => {
