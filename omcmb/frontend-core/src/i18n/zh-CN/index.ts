@@ -7737,6 +7737,7 @@ const messages: Record<string, string> = {
   'perf.adhoc.detailTitleDefault':       '任务详情',
   'perf.adhoc.descMode':                 '模式',
   'perf.adhoc.descDimension':            '维度',
+  'perf.adhoc.descGranularity':          '粒度',
   'perf.adhoc.descTech':                 '制式',
   'perf.adhoc.descStatus':               '当前状态',
   'perf.adhoc.descSelectedMetrics':      '已选指标',
@@ -7751,6 +7752,10 @@ const messages: Record<string, string> = {
   'perf.adhoc.scopeAllBand':             '包含全部 {tech} 频段（按频段分组）',
   'perf.adhoc.scopeAllBandAny':          '包含全部频段（按频段分组）',
   'perf.adhoc.anyTech':                  '不限制式',
+  'perf.adhoc.gran.hourly':              '小时',
+  'perf.adhoc.gran.daily':               '天',
+  'perf.adhoc.gran.weekly':              '周',
+  'perf.adhoc.gran.monthly':             '月',
   // T-0194：内置任务「编辑指标」弹窗
   'perf.adhoc.editMetricTitle':          '编辑指标：{name}',
   'perf.adhoc.editMetricTitleDefault':   '编辑指标',

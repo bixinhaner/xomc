@@ -445,6 +445,8 @@ func (h *Handler) Update(c *gin.Context) {
 
 	upd := UpdateRequest{
 		IsBuiltin:   existing.IsBuiltin,
+		Mode:        existing.Mode,
+		Dimension:   existing.Dimension,
 		MetricPaths: req.MetricPaths,
 	}
 
@@ -494,6 +496,11 @@ func (h *Handler) Update(c *gin.Context) {
 		upd.Name = req.Name
 		upd.DeviceSNs = req.DeviceSNs
 		upd.Granularities = req.Granularities
+		if existing.Mode == ModeContinuous {
+			cronExpr := cronForGranularity(req.Granularities[0])
+			upd.CronExpr = &cronExpr
+			upd.ResetCursor = !sameFirstGranularity(existing.Granularities, req.Granularities)
+		}
 		upd.ObjectLDNs = objectLDNs
 		upd.WindowStart = req.WindowStart
 		upd.WindowEnd = req.WindowEnd
@@ -508,6 +515,13 @@ func (h *Handler) Update(c *gin.Context) {
 		return
 	}
 	response.OK(c, gin.H{"id": id.String()})
+}
+
+func sameFirstGranularity(a, b []string) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return len(a) == len(b)
+	}
+	return a[0] == b[0]
 }
 
 // Cancel DELETE /pm/adhoc/tasks/:id

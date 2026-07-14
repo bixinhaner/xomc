@@ -72,27 +72,27 @@ type Task struct {
 	CronExpr      *string // continuous 必填，oneshot 为 nil
 	DeviceSNs     []string
 	MetricPaths   []string
-	Granularities []string  // 多粒度多选（如 ['hourly','daily']）
+	Granularities []string // 多粒度多选（如 ['hourly','daily']）
 	// ObjectLDNs T-0193：小区/PLMN 白名单（完整 object_ldn 字符串）。空 = 不过滤 = 全小区。
 	// 纯查看级过滤，仅 device/aggregate_group 维度承载，不改聚合/落库。
-	ObjectLDNs    []string
-	WindowStart   time.Time // 单次执行的源数据时窗起
-	WindowEnd     time.Time // 源数据时窗止
-	Dimension     Dimension // 维度，默认 'device'
-	Technology    string    // T-0182：任务制式（lte/nr/gsm），空=不限制式；建后不可改
-	IsBuiltin     bool      // T-0182：内置任务标记（T-0184 预置 12 个内置任务）
-	ExpireDays    int       // T-0182：非持续型任务过期天数（默认 60，约束任务定义层）
-	Status        Status
-	Progress      int    // 0-100
-	Creator       string // user_id 字符串或用户名（与 pm_tasks 既有 creator 列对齐）
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ObjectLDNs  []string
+	WindowStart time.Time // 单次执行的源数据时窗起
+	WindowEnd   time.Time // 源数据时窗止
+	Dimension   Dimension // 维度，默认 'device'
+	Technology  string    // T-0182：任务制式（lte/nr/gsm），空=不限制式；建后不可改
+	IsBuiltin   bool      // T-0182：内置任务标记（T-0184 预置 12 个内置任务）
+	ExpireDays  int       // T-0182：非持续型任务过期天数（默认 60，约束任务定义层）
+	Status      Status
+	Progress    int    // 0-100
+	Creator     string // user_id 字符串或用户名（与 pm_tasks 既有 creator 列对齐）
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 
 	// 运行期字段（DB 中通过 pm_tasks 其它列承载）
-	StartedAt   *time.Time
-	FinishedAt  *time.Time
-	ErrorMsg    string
-	LockOwner   *string
+	StartedAt  *time.Time
+	FinishedAt *time.Time
+	ErrorMsg   string
+	LockOwner  *string
 }
 
 // CreateRequest 是 Service.Create / handler.Create 的输入（不含 ID / 时间戳 / 状态）。
@@ -104,14 +104,14 @@ type CreateRequest struct {
 	MetricPaths   []string
 	Granularities []string
 	// ObjectLDNs T-0193：小区/PLMN 白名单（完整 object_ldn 字符串）。空 = 不过滤 = 全小区。
-	ObjectLDNs    []string
-	WindowStart   time.Time
-	WindowEnd     time.Time
-	Dimension     Dimension // 默认 device
-	Technology    string    // T-0182：lte/nr/gsm，空=不限
-	IsBuiltin     bool      // T-0182：内置任务标记
-	ExpireDays    int       // T-0182：非持续型过期天数，<=0 时 repository 兜底为 60
-	Creator       string
+	ObjectLDNs  []string
+	WindowStart time.Time
+	WindowEnd   time.Time
+	Dimension   Dimension // 默认 device
+	Technology  string    // T-0182：lte/nr/gsm，空=不限
+	IsBuiltin   bool      // T-0182：内置任务标记
+	ExpireDays  int       // T-0182：非持续型过期天数，<=0 时 repository 兜底为 60
+	Creator     string
 }
 
 // UpdateRequest 是 Repository.Update / handler.Update 的输入（T-0194 编辑任务定义）。
@@ -119,16 +119,22 @@ type CreateRequest struct {
 // IsBuiltin 决定守门口径：
 //   - false（自建任务）：更新 Name/DeviceSNs/MetricPaths/Granularities/ObjectLDNs/WindowStart/WindowEnd。
 //   - true（内置任务）：只更新 MetricPaths，其余字段忽略。
+//
 // mode/technology/dimension/is_builtin/expire_days 不在本结构体内，不可改。
 type UpdateRequest struct {
 	IsBuiltin     bool // 由 service/handler 按既有任务标记填入，repository 据此决定更新字段集
 	Name          string
+	Mode          Mode
+	CronExpr      *string
+	ResetCursor   bool
+	Dimension     Dimension
 	DeviceSNs     []string
 	MetricPaths   []string
 	Granularities []string
 	ObjectLDNs    []string
 	WindowStart   time.Time
 	WindowEnd     time.Time
+	LastFireAt    time.Time
 }
 
 // ListFilter 是 Repository.List 的过滤条件。
@@ -164,9 +170,9 @@ type TaskRun struct {
 
 // ResultRow 是 pm_adhoc_aggregation_results 表的一行（写入用）。
 type ResultRow struct {
-	TaskID      uuid.UUID
-	DeviceOUI   string
-	DeviceSN    string
+	TaskID    uuid.UUID
+	DeviceOUI string
+	DeviceSN  string
 	// ProductID 是 product 维度聚合的分组键（T-0182-fix）。
 	// device / aggregate_group 维度为 uuid.Nil（落库 NULL）；product 维度填 devices.product_id。
 	ProductID   uuid.UUID

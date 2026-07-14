@@ -7700,6 +7700,7 @@ const messages: Record<string, string> = {
   'perf.adhoc.detailTitleDefault':       'Task Detail',
   'perf.adhoc.descMode':                 'Mode',
   'perf.adhoc.descDimension':            'Dimension',
+  'perf.adhoc.descGranularity':          'Granularity',
   'perf.adhoc.descTech':                 'Technology',
   'perf.adhoc.descStatus':               'Current Status',
   'perf.adhoc.descSelectedMetrics':      'Selected Metrics',
@@ -7714,6 +7715,10 @@ const messages: Record<string, string> = {
   'perf.adhoc.scopeAllBand':             'All {tech} bands (grouped by band)',
   'perf.adhoc.scopeAllBandAny':          'All bands (grouped by band)',
   'perf.adhoc.anyTech':                  'Any Technology',
+  'perf.adhoc.gran.hourly':              'Hourly',
+  'perf.adhoc.gran.daily':               'Daily',
+  'perf.adhoc.gran.weekly':              'Weekly',
+  'perf.adhoc.gran.monthly':             'Monthly',
   // T-0194: builtin task "edit metrics" modal
   'perf.adhoc.editMetricTitle':          'Edit Metrics: {name}',
   'perf.adhoc.editMetricTitleDefault':   'Edit Metrics',
