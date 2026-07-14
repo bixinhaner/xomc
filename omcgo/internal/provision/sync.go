@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/omcgo/omcgo/internal/config/parammodel"
@@ -214,6 +215,9 @@ func (s *SyncService) StartSync(ctx context.Context, dev *model.Device, paramPat
 func (s *SyncService) EnqueueGPVBatches(ctx context.Context, deviceSN string, paramPaths []string, sourceID string) ([]string, error) {
 	if deviceSN == "" {
 		return nil, fmt.Errorf("EnqueueGPVBatches: empty deviceSN")
+	}
+	if strings.TrimSpace(sourceID) == "" {
+		sourceID = uuid.NewString()
 	}
 	batches := buildGPVBatches(paramPaths, s.batchSize)
 	taskIDs := make([]string, 0, len(batches))

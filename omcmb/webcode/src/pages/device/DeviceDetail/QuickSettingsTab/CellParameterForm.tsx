@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from 'react';
-import { Alert, Button, Card, Col, Form, Input, Row, Select, Space, Spin, Switch, Table, Tag, Tooltip, Typography, message, notification } from 'antd';
+import { Alert, AutoComplete, Button, Card, Col, Form, Input, Row, Select, Space, Spin, Switch, Table, Tag, Tooltip, Typography, message, notification } from 'antd';
 import type { FormInstance } from 'antd';
 import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, DeleteOutlined, PlusOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
@@ -40,6 +40,7 @@ const ERROR_FEEDBACK_DURATION_SECONDS = 2;
 
 // FAPService.1 HNBName 标准路径：命中此 path 的字段走 rename 接口（不走普通 SPV 下发）
 const HNB_NAME_PATH = 'Device.Services.FAPService.1.AccessMgmt.LTE.HNBName';
+const BM_GSM_CELL_OP_STATE_PATTERN = /^Device\.Services\.GsmBTSCellDT\.\d+\.OpState$/;
 const BITMASK_SELECT_PATHS = new Set([
   'Device.FAP.Synchronization.PpsTimeMode',
   'Device.FAP.GNSS.SyncSource',
@@ -184,35 +185,143 @@ function FrequencyDisplay({ form, locale }: { form: FormInstance; locale: 'zh-CN
   );
 }
 
-// BoundRuRouteIndexDisplay: BM GSM 专属。监听表单 GsmCellWithRuRelation,
-// 用其值作为 RU 实例 idx,从外部传入的 ruRouteByIdx 中取出 RouteIndex 显示。
-function BoundRuRouteIndexDisplay({
+function TransmissionPowerInput({
+  countField,
+  powerField,
+  disabled,
+  placeholder,
+}: {
+  countField: string;
+  powerField: string;
+  disabled: boolean;
+  placeholder?: string;
+}) {
+  return (
+    <Space.Compact style={{ width: '100%' }}>
+      <Form.Item name={countField} noStyle>
+        <Input disabled={disabled} suffix="*" style={{ width: 72 }} />
+      </Form.Item>
+      <Form.Item name={powerField} noStyle>
+        <Input disabled={disabled} placeholder={placeholder} style={{ width: '100%' }} />
+      </Form.Item>
+    </Space.Compact>
+  );
+}
+
+function GsmRuRelationInput({
+  error,
+  ruRouteItemByIdx,
+}: {
+  error?: string;
+  ruRouteItemByIdx: Map<string, ParameterSchemaItem>;
+}) {
+  const t = useT();
+  const routeOptions = useMemo(() => (
+    Array.from(ruRouteItemByIdx.entries())
+      .sort(([a], [b]) => Number(a) - Number(b))
+      .map(([idx, item]) => {
+        const reportedValue = item.currentValue == null ? '' : String(item.currentValue).trim();
+        return {
+          label: reportedValue ? `RU ${idx} -> ${reportedValue}` : `RU ${idx} -> ${t('device.cell.notReported')}`,
+          value: reportedValue,
+        };
+      })
+      .filter((o) => o.value)
+  ), [ruRouteItemByIdx, t]);
+  return (
+    <Col span={8}>
+      <Form.Item
+        label="Route Index (绑定 RU)"
+        name="GsmCellWithRuRelation"
+        validateStatus={error ? 'error' : undefined}
+        help={error}
+      >
+        <AutoComplete
+          options={routeOptions}
+          optionFilterProp="label"
+          placeholder={t('device.cell.notReported')}
+        />
+      </Form.Item>
+    </Col>
+  );
+}
+
+// RouteIndexInput: BM LTE 小区专属。写回自身 LteCellWithRuList。
+// 输入框支持从 RU RouteIndex 候选选择,也支持用户直接手动输入。
+function RouteIndexInput({
   form,
-  ruRouteByIdx,
+  ruRouteItemByIdx,
   locale,
+  fieldName,
+  boundRuFieldName,
+  currentRuIdx,
+  disabled,
+  error,
 }: {
   form: FormInstance;
-  ruRouteByIdx: Map<string, string>;
+  ruRouteItemByIdx: Map<string, ParameterSchemaItem>;
   locale: 'zh-CN' | 'en-US';
+  fieldName: string;
+  boundRuFieldName?: string;
+  currentRuIdx?: string;
+  disabled: boolean;
+  error?: string;
 }) {
   void locale;
   const t = useT();
-  const ruRel = Form.useWatch('GsmCellWithRuRelation', form);
-  const ruIdx = ruRel == null ? '' : String(ruRel).trim();
-  const routeIndex = ruIdx && ruRouteByIdx.has(ruIdx) ? ruRouteByIdx.get(ruIdx)! : '-';
+  const lastAutoRouteValueRef = useRef('');
+  const watchedRuRel = Form.useWatch(boundRuFieldName ?? '__unusedRouteIndexBoundRu', form);
+  const ruIdx = currentRuIdx ?? (watchedRuRel == null ? '' : String(watchedRuRel).trim());
+  const routeItem = ruIdx ? ruRouteItemByIdx.get(ruIdx) : undefined;
+  const routeValue = (() => {
+    const reportedValue = routeItem?.currentValue == null ? '' : String(routeItem.currentValue).trim();
+    return reportedValue;
+  })();
+  const routeOptions = useMemo(() => (
+    Array.from(ruRouteItemByIdx.entries())
+      .sort(([a], [b]) => Number(a) - Number(b))
+      .map(([idx, item]) => {
+        const reportedValue = item.currentValue == null ? '' : String(item.currentValue).trim();
+        const value = reportedValue;
+        return {
+          label: value ? `RU ${idx} -> ${value}` : `RU ${idx} -> ${t('device.cell.notReported')}`,
+          value,
+        };
+      })
+      .filter((o) => o.value)
+  ), [boundRuFieldName, ruRouteItemByIdx, t]);
   const labelText = t('device.cell.routeIndexBoundRu');
-  const display = ruIdx ? `RU ${ruIdx} → ${routeIndex}` : '-';
+  useEffect(() => {
+    if (!boundRuFieldName) return;
+    const currentValue = form.getFieldValue(fieldName);
+    const currentText = currentValue == null ? '' : String(currentValue);
+    const lastAutoValue = lastAutoRouteValueRef.current;
+    if (currentText === '' || currentText === lastAutoValue) {
+      form.setFieldValue(fieldName, routeValue);
+      lastAutoRouteValueRef.current = routeValue;
+    }
+  }, [boundRuFieldName, fieldName, form, routeValue]);
+
+  const writable = !disabled && (boundRuFieldName ? Boolean(ruIdx) : true);
   return (
     <Col span={8}>
       <Form.Item
         label={
           <Space size={4}>
             <span>{labelText}</span>
-            <Text type="secondary" style={{ fontSize: 12 }}>{t('device.cell.readonly')}</Text>
+            {ruIdx && <Text type="secondary" style={{ fontSize: 12 }}>{`RU ${ruIdx}`}</Text>}
+            {!writable && <Text type="secondary" style={{ fontSize: 12 }}>{t('device.cell.readonly')}</Text>}
           </Space>
         }
+        name={fieldName}
+        validateStatus={error ? 'error' : undefined}
+        help={error}
       >
-        <Input value={display} disabled />
+        <AutoComplete
+          disabled={!writable}
+          options={routeOptions}
+          optionFilterProp="label"
+        />
       </Form.Item>
     </Col>
   );
@@ -286,30 +395,6 @@ function CellIdDerivedDisplay({ form, locale }: { form: FormInstance; locale: 'z
         }
       >
         <Input value={cid != null ? String(cid) : '-'} disabled />
-      </Form.Item>
-    </Col>
-  );
-}
-
-// AntennaPortsAs2T4RDisplay: 由 AntennaPortsCount 派生 2T4R 开关(2 -> OFF, 4 -> ON)。
-function AntennaPortsAs2T4RDisplay({ form, locale }: { form: FormInstance; locale: 'zh-CN' | 'en-US' }) {
-  void locale;
-  const t = useT();
-  const ports = Form.useWatch('AntennaPortsCount', form);
-  const n = Number(ports);
-  const labelText = t('device.cell.switch2T4R');
-  const v = n === 4 ? 'ON' : n === 2 ? 'OFF' : '-';
-  return (
-    <Col span={8}>
-      <Form.Item
-        label={
-          <Space size={4}>
-            <span>{labelText}</span>
-            <Text type="secondary" style={{ fontSize: 12 }}>{t('device.cell.readonly')}</Text>
-          </Space>
-        }
-      >
-        <Input value={v} disabled />
       </Form.Item>
     </Col>
   );
@@ -422,7 +507,7 @@ function serializeStringMultiSelectValue(raw: unknown): string {
 }
 
 function isSwitchPath(path: string): boolean {
-  return path === GNB_FORCED_SYNC_PATH;
+  return path === GNB_FORCED_SYNC_PATH || BM_GSM_CELL_OP_STATE_PATTERN.test(path);
 }
 
 function normalizeSwitchValue(raw: unknown): boolean {
@@ -1162,6 +1247,22 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
       return isValidNtpServerValue(availableTimeParams.get(path));
     });
   }, [bmPpsTimeModeParams, deviceTimeParams, draft, effectiveParams, gnbSyncFapSchemaResp, isBmSyncSourceGroup, isDeviceTimeGroup, isGnbSyncSourceGroup, watchedPpsTimeMode, resolveReadPath]);
+  const visibleParamNameSet = useMemo(
+    () => new Set(visibleParams.map((param) => param.name)),
+    [visibleParams],
+  );
+  const isGsmCell = group.id === 'gsm-cell';
+  const isLteCellGroup = group.id === 'enb-cell';
+  const hasGsmRuRelation = visibleParamNameSet.has('GsmCellWithRuRelation');
+  const hasGsmTxAntNum = visibleParamNameSet.has('GsmTxAntNum');
+  const hasLteRuRouteIndex = visibleParamNameSet.has('LteCellWithRuList');
+  const hasLteAntennaPortsCount = visibleParamNameSet.has('AntennaPortsCount');
+  const isBmGsmCell = isGsmCell && hasGsmRuRelation;
+  const isBmLteCell = isLteCellGroup && hasLteRuRouteIndex;
+  const isHiddenTransmissionCountParam = useCallback((name: string) => (
+    (isBmGsmCell && hasGsmTxAntNum && name === 'GsmTxAntNum') ||
+    (isBmLteCell && hasLteAntennaPortsCount && name === 'AntennaPortsCount')
+  ), [hasGsmTxAntNum, hasLteAntennaPortsCount, isBmGsmCell, isBmLteCell]);
   // XML 驱动的 extraInfoPath:在某个字段下方以小字展示另一个只读参数当前值(范围提示)。
   // 由 quicksettings XML 在 <param> 上声明 extraInfoPath="Device.X.Y",前端按该路径拉 schema,
   // 把 currentValue 按 [lo ~ hi] 格式渲染到对应 Form.Item 的 extra 槽位。
@@ -1211,13 +1312,12 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
     return m;
   }, [visibleParams, extraInfoValueByPath]);
 
-  // BM GSM 专属:并行拉 RU 节点 schema,用于在 gsm-cell 表单中展示"绑定 RU 的 Route Index"。
+  // BM 小区专属:并行拉 RU 节点 schema,用于 GSM/LTE Route Index 候选。
   // 拉取与主 schema 解耦,避免污染 commonPrefix 退化成 Device. 触发全量拉取。
-  const isGsmCell = group.id === 'gsm-cell';
   const { data: ruSchemaResp } = useParameterSchema(
     deviceId,
     'Device.DeviceInfo.RU.',
-    active && isGsmCell,
+    active && (isBmGsmCell || isBmLteCell),
   );
   const effectiveSchemaParameters = useMemo(
     () => (isDeviceTimeGroup
@@ -1243,14 +1343,13 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
     : isGnbSyncSourceGroup
     ? Boolean(gnbSyncFapSchemaResp && gnbSyncDeviceInfoSchemaResp)
     : Boolean(schemaResp);
-  const ruRouteByIdx = useMemo(() => {
-    const map = new Map<string, string>();
+  const ruRouteItemByIdx = useMemo(() => {
+    const map = new Map<string, ParameterSchemaItem>();
     ruSchemaResp?.parameters.forEach((p) => {
       // 形如 Device.DeviceInfo.RU.<n>.RouteIndex
       const m = /^Device\.DeviceInfo\.RU\.(\d+)\.RouteIndex$/.exec(p.path);
       if (m) {
-        const v = p.currentValue ?? '';
-        map.set(m[1], typeof v === 'string' ? v : String(v));
+        map.set(m[1], p);
       }
     });
     return map;
@@ -1538,7 +1637,9 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
 
       const parameterType = resolveQuickSettingsParameterType(p.type, item?.type, rawItem?.parameterType);
       const allowedValues = p.enumOptions?.map((option) => option.value) ?? item?.constraints?.enumValues ?? [];
-      const err = isBitmaskField
+      const err = isHiddenTransmissionCountParam(p.name)
+        ? null
+        : isBitmaskField
         ? isConstrainedGnssSyncSourceSelectPath(path)
           ? validateConstrainedGnssSyncSourceValue(newVal, allowedValues, path, t)
           : validateBitmaskValue(
@@ -1560,7 +1661,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
       }
       // XML 驱动的 extraInfoPath 范围校验:超出 [min, max] 阻断保存。
       const extraBounds = extraInfoBoundsByName.get(p.name);
-      if (extraBounds) {
+      if (!isHiddenTransmissionCountParam(p.name) && extraBounds) {
         const rangeErr = validateExtraInfoBounds(newVal, extraBounds);
         if (rangeErr) {
           errors[p.name] = rangeErr;
@@ -1894,6 +1995,10 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
             for (const [name, value] of Object.entries(changedValues)) {
               const p = visibleParams.find((q) => q.name === name);
               if (!p) continue;
+              if (isHiddenTransmissionCountParam(name)) {
+                delete next[name];
+                continue;
+              }
               const special = resolveRuntimeSpecialConfig(name);
               const path = special?.configPath ?? resolveReadPath(p.standardPath || '');
               const sItem = schemaByPath.get(path);
@@ -2007,6 +2112,16 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         })()}
         <Row gutter={16}>
           {visibleParams.map((p) => {
+            if (isBmGsmCell && p.name === 'GsmCellWithRuRelation') {
+              return null;
+            }
+            if (
+              (isBmGsmCell && hasGsmTxAntNum && p.name === 'GsmTxAntNum') ||
+              (isBmLteCell && hasLteAntennaPortsCount && p.name === 'AntennaPortsCount') ||
+              (isBmLteCell && p.name === 'LteCellWithRuList')
+            ) {
+              return null;
+            }
             if (isDeviceTimeGroup && (p.name === 'LocalTimeZoneName' || p.name === 'Enable')) {
               return null;
             }
@@ -2040,13 +2155,18 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
             const renderFrequencyAfter =
               (group.id === 'gsm-cell' || group.id === 'bts-cell-info') &&
               p.name === 'CurrentArfcn';
-            // BM GSM 专属:在 BscSelect 后插入"绑定 RU 的 Route Index"派生行。
-            const renderRuRouteAfter = isGsmCell && p.name === 'BscSelect';
+            // BM 小区专属:在发射功率后插入"绑定 RU 的 Route Index"。
+            // GSM 直接编辑 GsmCellWithRuRelation 原值;LTE 仍编辑 LteCellWithRuList。
+            const renderGsmRuRelationAfter = isBmGsmCell && p.name === 'GsmBtsRFPower';
+            const renderRuRouteAfter = isBmLteCell && p.name === 'PowerClass';
             // BM LTE 派生显示:Frequency / Cell ID / 2T4R 开关。
-            const isLteCell = group.id === 'enb-cell';
+            const isLteCell = isLteCellGroup;
             const renderLteFreqAfter = isLteCell && p.name === 'DLEarfcn';
             const renderCellIdAfter = isLteCell && p.name === 'ECI';
-            const render2T4RAfter = isLteCell && p.name === 'AntennaPortsCount';
+            const isTransmissionPowerField =
+              (isBmGsmCell && hasGsmTxAntNum && p.name === 'GsmBtsRFPower') ||
+              (isBmLteCell && hasLteAntennaPortsCount && p.name === 'PowerClass');
+            const transmissionCountField = isBmGsmCell ? 'GsmTxAntNum' : 'AntennaPortsCount';
             const isDeviceTimeParam = group.id === 'device-time';
             const isIpsecControlParam = group.id === 'device-ipsec-control';
             const writable = (isDeviceTimeParam || isIpsecControlParam)
@@ -2061,11 +2181,12 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
             // 策略联动：auto_lmt_to_omc 下 FAPService.1 HNBName 禁用（引导在 LMT 侧改名）
             const resolvedStdPath = special?.configPath ?? resolveReadPath(p.standardPath || '');
             const lmtLocked = resolvedStdPath === HNB_NAME_PATH && nameSyncMode === 'auto_lmt_to_omc';
-            const finalWritable = lmtLocked ? false : writable;
+            const finalWritable = lmtLocked || p.readonly ? false : writable;
             const error = fieldErrors[p.name];
-            // XML hideRangeHint="true" 时不在 label 后展示 schema 推导的 [min ~ max]
+            const isSwitchField = isSwitchPath(path);
+            // XML hideRangeHint="true" 或 Switch 字段时不在 label 后展示 schema 推导的 [min ~ max]
             // (字典范围与业务允许值不一致的字段如 Band:字典 1..maxInt,业务允许集只有少数频段)。
-            const constraintHint = p.hideRangeHint ? '' : formatConstraintHint(item, t);
+            const constraintHint = p.hideRangeHint || isSwitchField ? '' : formatConstraintHint(item, t);
             const currentBindPath = String(form.getFieldValue(p.name) ?? rawItem?.parameterValue ?? item?.currentValue ?? '');
             const resolvedDisplayValue = displayValue || (special?.bindValueMode === 'ip' ? currentBindPath : bindIpByPath.get(currentBindPath)) || '';
             // XML 驱动:若 param 在 quicksettings XML 上声明了 extraInfoPath,
@@ -2078,7 +2199,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                   {locale === 'zh-CN' ? p.titleZh : p.titleEn}
                 </span>
                 {lmtLocked && <Text type="secondary" style={{ fontSize: 12 }}>{t('device.cell.lmtLockedHint')}</Text>}
-                {!lmtLocked && !writable && <Text type="secondary" style={{ fontSize: 12 }}>{t('device.cell.readonly')}</Text>}
+                {!lmtLocked && (!writable || p.readonly) && <Text type="secondary" style={{ fontSize: 12 }}>{t('device.cell.readonly')}</Text>}
                 {constraintHint && (
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {constraintHint}
@@ -2122,7 +2243,6 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
             const isBitmaskEnum = isEnum && isEffectiveBitmaskPath(path);
             const isConstrainedGnssSyncSourceEnum = isEnum && isConstrainedGnssSyncSourceSelectPath(path);
             const isStringMultiSelectEnum = isEnum && isStringMultiSelectPath(path);
-            const isSwitchField = isSwitchPath(path);
             const baseEnumOptions = isBitmaskEnum
               ? isConstrainedGnssSyncSourceEnum
                 ? effectiveEnumValues.map((v, idx) => ({
@@ -2154,13 +2274,20 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
               <Col span={special?.kind === 'mme-ip-plmn-table' ? 24 : 8} key={p.name}>
                 <Form.Item
                   label={special?.kind === 'mme-ip-plmn-table' ? undefined : label}
-                  name={p.name}
-                  valuePropName={isSwitchField ? 'checked' : undefined}
+                  name={isTransmissionPowerField ? undefined : p.name}
+                  valuePropName={!isTransmissionPowerField && isSwitchField ? 'checked' : undefined}
                   validateStatus={error ? 'error' : undefined}
                   help={error}
                   extra={extra}
                 >
-                  {special?.kind === 'bind-select' ? (
+                  {isTransmissionPowerField ? (
+                    <TransmissionPowerInput
+                      countField={transmissionCountField}
+                      powerField={p.name}
+                      disabled={!finalWritable}
+                      placeholder={special?.placeholder || item?.defaultValue || (!finalWritable ? '未上报' : '')}
+                    />
+                  ) : special?.kind === 'bind-select' ? (
                     <Select
                       disabled={!finalWritable}
                       showSearch
@@ -2203,7 +2330,22 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
             ) : renderRuRouteAfter ? (
               <Fragment key={p.name}>
                 {input}
-                <BoundRuRouteIndexDisplay form={form} ruRouteByIdx={ruRouteByIdx} locale={locale} />
+                <RouteIndexInput
+                  form={form}
+                  ruRouteItemByIdx={ruRouteItemByIdx}
+                  locale={locale}
+                  fieldName="LteCellWithRuList"
+                  disabled={lmtLocked}
+                  error={fieldErrors.LteCellWithRuList}
+                />
+              </Fragment>
+            ) : renderGsmRuRelationAfter ? (
+              <Fragment key={p.name}>
+                {input}
+                <GsmRuRelationInput
+                  error={fieldErrors.GsmCellWithRuRelation}
+                  ruRouteItemByIdx={ruRouteItemByIdx}
+                />
               </Fragment>
             ) : renderLteFreqAfter ? (
               <Fragment key={p.name}>
@@ -2214,11 +2356,6 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
               <Fragment key={p.name}>
                 {input}
                 <CellIdDerivedDisplay form={form} locale={locale} />
-              </Fragment>
-            ) : render2T4RAfter ? (
-              <Fragment key={p.name}>
-                {input}
-                <AntennaPortsAs2T4RDisplay form={form} locale={locale} />
               </Fragment>
             ) : input;
           })}

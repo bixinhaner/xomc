@@ -1316,6 +1316,8 @@ const messages: Record<string, string> = {
   'device.cell.ntpServer':                'NTP Server',
   'device.cell.ntpClient':                'NTP Client',
   'device.cell.readonly':                 '(只读)',
+  'device.cell.required':                 '必填',
+  'device.cell.notReported':              '未上报',
   'device.cell.lmtLockedHint':            '(当前策略以基站为准，请在 LMT 侧修改)',
   'device.cell.routeIndexBoundRu':        'Route Index (绑定 RU)',
   'device.cell.switch2T4R':               '2T4R 开关',

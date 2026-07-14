@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
@@ -680,4 +681,41 @@ func TestPgRepo_Integration_HasIncompleteSyncGPV_SkipsStaleTasks(t *testing.T) {
 	has, err = repo.HasIncompleteSyncGPVTasksByDevice(ctx, sn)
 	require.NoError(t, err)
 	assert.True(t, has, "近 24h 内进行中的 sync-gpv 任务应阻断 finalize")
+}
+
+func TestPgRepo_Integration_CountOpenSyncGPV_SkipsFailedBatchResidue(t *testing.T) {
+	pool := newTestPool(t)
+	if pool == nil {
+		return
+	}
+	defer cleanupTestTasks(t, pool)
+	repo := NewPgTaskRepository(pool)
+	ctx := context.Background()
+	sn := testDeviceSNPrefix + "SYNCGPVCOUNT"
+	sourceID := uuid.New().String()
+	expiresAt := time.Now().Add(30 * time.Minute)
+
+	sentResidue := freshTaskForPG("sent-residue", "SYNCGPVCOUNT")
+	sentResidue.DeviceSN = sn
+	sentResidue.Method = "GetParameterValues"
+	sentResidue.CommandKey = "sync-gpv-" + sn + "-0-r"
+	sentResidue.SourceID = sourceID
+	sentResidue.Status = TaskStatusSent
+	sentResidue.CreatedAt = time.Now()
+	sentResidue.ExpiresAt = &expiresAt
+	require.NoError(t, repo.Create(ctx, sentResidue))
+
+	failedSameBatch := freshTaskForPG("failed-same-batch", "SYNCGPVCOUNT")
+	failedSameBatch.DeviceSN = sn
+	failedSameBatch.Method = "GetParameterValues"
+	failedSameBatch.CommandKey = "sync-gpv-" + sn + "-1"
+	failedSameBatch.SourceID = sourceID
+	failedSameBatch.Status = TaskStatusFailed
+	failedSameBatch.CreatedAt = time.Now()
+	failedSameBatch.ExpiresAt = &expiresAt
+	require.NoError(t, repo.Create(ctx, failedSameBatch))
+
+	count, err := repo.CountOpenSyncGPVByDevice(ctx, sn)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), count, "同一同步批次已有失败终态时,残留 sent 不应让参数树一直同步中")
 }

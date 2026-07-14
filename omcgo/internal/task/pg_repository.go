@@ -332,16 +332,30 @@ func (r *PgTaskRepository) HasIncompleteSyncGPVTasksByDevice(ctx context.Context
 	query, args, err := storage.Psql.Select("COUNT(*)").
 		From("device_tasks t").
 		Where(sq.Eq{"t.device_sn": deviceSN}).
+		Where(sq.Eq{"t.method": "GetParameterValues"}).
 		Where(sq.Like{"t.command_key": prefix + "%"}).
 		Where(sq.Eq{"t.status": []TaskStatus{TaskStatusPending, TaskStatusSent}}).
 		Where(sq.Expr("t.created_at > now() - interval '24 hours'")).
 		Where(sq.NotEq{"t.expires_at": nil}).
 		Where(sq.Expr("t.expires_at > now()")).
+		Where(`t.source_id = (
+			SELECT latest.source_id
+			FROM device_tasks latest
+			WHERE latest.device_sn = t.device_sn
+			  AND latest.method = 'GetParameterValues'
+			  AND latest.command_key LIKE ?
+			  AND latest.source_id IS NOT NULL
+			ORDER BY latest.created_at DESC
+			LIMIT 1
+		)`, prefix+"%").
 		Where(`NOT EXISTS (
 			SELECT 1 FROM device_tasks failed
-			WHERE failed.source_id = t.source_id
+			WHERE failed.device_sn = t.device_sn
+			  AND failed.source_id = t.source_id
+			  AND failed.method = 'GetParameterValues'
+			  AND failed.command_key LIKE ?
 			  AND failed.status IN ('failed', 'expired', 'cancelled')
-		)`).
+		)`, prefix+"%").
 		ToSql()
 	if err != nil {
 		return false, fmt.Errorf("build incomplete sync-gpv query: %w", err)
@@ -362,11 +376,30 @@ func (r *PgTaskRepository) CountOpenSyncGPVByDevice(ctx context.Context, deviceS
 	query, args, err := storage.Psql.Select("COUNT(*)").
 		From("device_tasks t").
 		Where(sq.Eq{"t.device_sn": deviceSN}).
+		Where(sq.Eq{"t.method": "GetParameterValues"}).
 		Where(sq.Like{"t.command_key": prefix + "%"}).
 		Where(sq.Eq{"t.status": []TaskStatus{TaskStatusPending, TaskStatusSent}}).
 		Where(sq.Expr("t.created_at > now() - interval '24 hours'")).
 		Where(sq.NotEq{"t.expires_at": nil}).
 		Where(sq.Expr("t.expires_at > now()")).
+		Where(`t.source_id = (
+			SELECT latest.source_id
+			FROM device_tasks latest
+			WHERE latest.device_sn = t.device_sn
+			  AND latest.method = 'GetParameterValues'
+			  AND latest.command_key LIKE ?
+			  AND latest.source_id IS NOT NULL
+			ORDER BY latest.created_at DESC
+			LIMIT 1
+		)`, prefix+"%").
+		Where(`NOT EXISTS (
+			SELECT 1 FROM device_tasks failed
+			WHERE failed.device_sn = t.device_sn
+			  AND failed.source_id = t.source_id
+			  AND failed.method = 'GetParameterValues'
+			  AND failed.command_key LIKE ?
+			  AND failed.status IN ('failed', 'expired', 'cancelled')
+		)`, prefix+"%").
 		ToSql()
 	if err != nil {
 		return 0, fmt.Errorf("build open sync-gpv count query: %w", err)
