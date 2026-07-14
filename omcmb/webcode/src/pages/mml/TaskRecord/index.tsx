@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import type { Key } from 'react';
 import { Button, Empty, Modal, Pagination, Popover, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
-import { DeleteOutlined, DownloadOutlined, ProfileOutlined, StopOutlined } from '@ant-design/icons';
+import { DeleteOutlined, DownloadOutlined, PlayCircleOutlined, ProfileOutlined, StopOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 
 import ListPageLayout from '@/components/Layout/ListPageLayout';
@@ -21,6 +21,7 @@ import type {
 import {
   useMMLTasks,
   useMMLTaskResults,
+  useStartMMLTasks,
   useCancelMMLTasks,
   useDeleteMMLTasks,
 } from '@core/hooks/api/useMML';
@@ -70,6 +71,7 @@ const TASK_RESULT_TAGS: Record<NonNullable<MMLTask['result']>, { color: string; 
 };
 
 const TASK_RESULT_PAGE_SIZE = 20;
+const STARTABLE_TASK_STATUSES = new Set<MMLTaskStatus>(['pending', 'paused']);
 const CANCELLABLE_TASK_STATUSES = new Set<MMLTaskStatus>(['pending', 'running', 'paused']);
 
 const DEVICE_RESULT_STATUS_TAGS: Record<string, { color: string; key: string }> = {
@@ -213,6 +215,7 @@ export default function TaskRecord() {
     result: filters.result && filters.result !== 'all' ? filters.result : undefined,
   });
   const tasks = useMemo(() => data?.items ?? [], [data]);
+  const startMutation = useStartMMLTasks();
   const cancelMutation = useCancelMMLTasks();
   const deleteMutation = useDeleteMMLTasks();
   const [selectedTaskIds, setSelectedTaskIds] = useState<Key[]>([]);
@@ -294,12 +297,59 @@ export default function TaskRecord() {
     setPage(1);
   }, []);
 
-  const confirmBatchCancel = () => {
-    const ids = selectedTaskIds.map(String);
+  const selectedTaskStatus = useCallback((id: string): MMLTaskStatus | undefined => {
+    return tasks.find((task) => task.id === id)?.status ?? selectedTaskStatusById[id];
+  }, [selectedTaskStatusById, tasks]);
+
+  const clearSelectedTasks = useCallback((ids: string[]) => {
+    const removed = new Set(ids);
+    setSelectedTaskIds((prev) => prev.filter((id) => !removed.has(String(id))));
+    setSelectedTaskStatusById((prev) => {
+      const next = { ...prev };
+      ids.forEach((id) => { delete next[id]; });
+      return next;
+    });
+  }, []);
+
+  const confirmStartTasks = useCallback((ids: string[]) => {
     if (ids.length === 0) return;
-    const currentTaskById = new Map(tasks.map((task) => [task.id, task]));
+    const nonStartableCount = ids.filter((id) => {
+      const status = selectedTaskStatus(id);
+      return !status || !STARTABLE_TASK_STATUSES.has(status);
+    }).length;
+    if (nonStartableCount > 0) {
+      void message.warning(t('mml.batchStartInvalidTasksBlocked', { count: nonStartableCount }));
+      return;
+    }
+    Modal.confirm({
+      title: t('mml.confirmStartTitle'),
+      content: ids.length === 1 ? t('mml.confirmStartTask') : t('mml.confirmBatchStartTasks', { count: ids.length }),
+      okText: t('mml.executeTask'),
+      cancelText: t('common.cancel'),
+      onOk: () => new Promise<void>((resolve, reject) => {
+        startMutation.mutate(ids, {
+          onSuccess: () => {
+            clearSelectedTasks(ids);
+            void refetch();
+            void message.success(t('mml.batchStartSuccess', { count: ids.length }));
+            resolve();
+          },
+          onError: (error) => {
+            const detail = getErrorMessage(error) || t('common.unknown');
+            clearSelectedTasks(ids);
+            void refetch();
+            void message.error(t('mml.batchStartFailed', { error: detail }));
+            reject(error);
+          },
+        });
+      }),
+    });
+  }, [clearSelectedTasks, refetch, selectedTaskStatus, startMutation, t]);
+
+  const confirmCancelTasks = useCallback((ids: string[]) => {
+    if (ids.length === 0) return;
     const nonCancellableCount = ids.filter((id) => {
-      const status = currentTaskById.get(id)?.status ?? selectedTaskStatusById[id];
+      const status = selectedTaskStatus(id);
       return !status || !CANCELLABLE_TASK_STATUSES.has(status);
     }).length;
     if (nonCancellableCount > 0) {
@@ -308,23 +358,21 @@ export default function TaskRecord() {
     }
     Modal.confirm({
       title: t('mml.confirmCancelTitle'),
-      content: t('mml.confirmBatchCancelTasks', { count: ids.length }),
+      content: ids.length === 1 ? t('mml.confirmCancelTask') : t('mml.confirmBatchCancelTasks', { count: ids.length }),
       okText: t('mml.terminateTask'),
       cancelText: t('common.cancel'),
       okButtonProps: { danger: true },
       onOk: () => new Promise<void>((resolve, reject) => {
         cancelMutation.mutate(ids, {
           onSuccess: () => {
-            setSelectedTaskIds([]);
-            setSelectedTaskStatusById({});
+            clearSelectedTasks(ids);
             void refetch();
             void message.success(t('mml.batchCancelSuccess', { count: ids.length }));
             resolve();
           },
           onError: (error) => {
             const detail = getErrorMessage(error) || t('common.unknown');
-            setSelectedTaskIds([]);
-            setSelectedTaskStatusById({});
+            clearSelectedTasks(ids);
             void refetch();
             void message.error(t('mml.batchCancelFailed', { error: detail }));
             reject(error);
@@ -332,6 +380,14 @@ export default function TaskRecord() {
         });
       }),
     });
+  }, [cancelMutation, clearSelectedTasks, refetch, selectedTaskStatus, t]);
+
+  const confirmBatchStart = () => {
+    confirmStartTasks(selectedTaskIds.map(String));
+  };
+
+  const confirmBatchCancel = () => {
+    confirmCancelTasks(selectedTaskIds.map(String));
   };
 
   const confirmBatchDelete = () => {
@@ -620,22 +676,56 @@ export default function TaskRecord() {
     {
       key: 'operation',
       title: t('table.operation'),
-      dataIndex: 'id',
-      width: 90,
-      render: (_: unknown, record: MMLTask) => (
-        <Tooltip title={t('common.view')}>
-          <Button
-            aria-label={t('common.view')}
-            type="link"
-            size="small"
-            icon={<ProfileOutlined />}
-            onClick={() => {
-              setResultPage(1);
-              setViewing(record);
-            }}
-          />
-        </Tooltip>
-      ),
+      width: 132,
+      render: (_: unknown, record: MMLTask) => {
+        const startable = STARTABLE_TASK_STATUSES.has(record.status);
+        const cancellable = CANCELLABLE_TASK_STATUSES.has(record.status);
+        return (
+          <Space size={4} wrap={false}>
+            <Tooltip title={t('common.view')}>
+              <Button
+                aria-label={t('common.view')}
+                type="link"
+                size="small"
+                icon={<ProfileOutlined />}
+                onClick={() => {
+                  setResultPage(1);
+                  setViewing(record);
+                }}
+              />
+            </Tooltip>
+            <Tooltip title={t('mml.executeTask')}>
+              <Button
+                aria-label={t('mml.executeTask')}
+                type="link"
+                size="small"
+                disabled={!startable}
+                icon={<PlayCircleOutlined />}
+                onClick={() => {
+                  if (startable) {
+                    confirmStartTasks([record.id]);
+                  }
+                }}
+              />
+            </Tooltip>
+            <Tooltip title={t('mml.terminateTask')}>
+              <Button
+                aria-label={t('mml.terminateTask')}
+                danger
+                type="link"
+                size="small"
+                disabled={!cancellable}
+                icon={<StopOutlined />}
+                onClick={() => {
+                  if (cancellable) {
+                    confirmCancelTasks([record.id]);
+                  }
+                }}
+              />
+            </Tooltip>
+          </Space>
+        );
+      },
     },
     { key: 'taskName', title: t('mml.taskName'), dataIndex: 'taskName', ellipsis: true },
     { key: 'creator',  title: t('mml.creator'),  dataIndex: 'creator', width: 100 },
@@ -709,7 +799,7 @@ export default function TaskRecord() {
       width: 160,
       render: (val: unknown) => formatTime(val as string),
     },
-  ], [t]);
+  ], [confirmCancelTasks, confirmStartTasks, t]);
 
   return (
     <ListPageLayout title={t('nav.mml.taskRecord')}>
@@ -720,6 +810,14 @@ export default function TaskRecord() {
         onReset={handleReset}
       />
       <Space size={8} wrap style={{ marginBottom: 12 }}>
+        <Button
+          disabled={selectedTaskIds.length === 0}
+          icon={<PlayCircleOutlined />}
+          loading={startMutation.isPending}
+          onClick={confirmBatchStart}
+        >
+          {t('mml.batchStartTasks')}
+        </Button>
         <Button
           disabled={selectedTaskIds.length === 0}
           icon={<StopOutlined />}

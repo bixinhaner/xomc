@@ -239,6 +239,16 @@ export function useStartMMLTask() {
   });
 }
 
+export function useStartMMLTasks() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => api.startTasks(ids),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['mml', 'tasks'] });
+    },
+  });
+}
+
 export function usePauseMMLTask() {
   const queryClient = useQueryClient();
   return useMutation({
