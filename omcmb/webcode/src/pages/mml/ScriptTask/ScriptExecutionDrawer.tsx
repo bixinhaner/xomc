@@ -173,7 +173,17 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
             <Form.Item name="failedRetryInterval" label="失败重试间隔（秒）"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>
           </> : null}
         </Space>
-        <Button aria-label="执行" type="primary" htmlType="button" loading={executionMutation.isPending || submitting} disabled={executionMutation.isPending || submitting} onClick={() => void submit()}>执行</Button>
+        <div
+          aria-label="执行操作"
+          role="group"
+          style={{
+            marginTop: 20,
+            paddingTop: 16,
+            borderTop: '1px solid rgba(5, 5, 5, 0.06)',
+          }}
+        >
+          <Button aria-label="执行" type="primary" htmlType="button" loading={executionMutation.isPending || submitting} disabled={executionMutation.isPending || submitting} onClick={() => void submit()}>执行</Button>
+        </div>
       </Form>
       {errorMessages.length ? <Typography.Text type="danger">{errorMessages.join(', ')}</Typography.Text> : null}
       {validation ? <ScriptImportPreview validation={validation} /> : null}

@@ -203,6 +203,10 @@ describe('ScriptExecutionDrawer', () => {
     expect(retryOptionRow).toHaveStyle({ display: 'flex' });
     expect(retryOptionRow).toContainElement(screen.getByRole('checkbox', { name: '离线等待重试' }));
     expect(retryOptionRow).toContainElement(screen.getByRole('checkbox', { name: '失败重试' }));
+    const executionActions = screen.getByRole('group', { name: '执行操作' });
+    expect(executionActions).toHaveStyle({ marginTop: '20px' });
+    expect(executionActions).toHaveStyle({ paddingTop: '16px' });
+    expect(executionActions).toContainElement(screen.getByRole('button', { name: '执行' }));
 
     await user.click(screen.getByRole('radio', { name: '定时' }));
     expect(screen.getByLabelText('执行时间')).toBeInTheDocument();
