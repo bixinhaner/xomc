@@ -258,8 +258,8 @@ func Test_Handler_Create_Continuous_NoWindow_DerivesCron_ClearsWindow(t *testing
 	}
 	b := map[string]any{
 		"name": "c", "mode": "continuous",
-		"dimension":    "network",
-		"metric_paths": []string{"M1"},
+		"dimension":     "network",
+		"metric_paths":  []string{"M1"},
 		"granularities": []string{"daily"},
 		// 不带 device_sns / window
 	}
@@ -355,6 +355,40 @@ func Test_Handler_Update_Adhoc_Success(t *testing.T) {
 	assert.Equal(t, []string{"K1001", "K1002"}, captured.MetricPaths)
 	assert.Equal(t, []string{"daily"}, captured.Granularities)
 	assert.False(t, captured.WindowStart.IsZero())
+}
+
+// 成功路径：自建 continuous 任务编辑粒度时同步派生 cron_expr。
+// 用户把 daily 改成 hourly 后，调度器必须看到小时级 cron，不能继续沿用旧 daily cron。
+func Test_Handler_Update_Adhoc_ContinuousGranularity_DerivesCron(t *testing.T) {
+	id := uuid.New()
+	dailyCron := cronForGranularity("daily")
+	var captured UpdateRequest
+	repo := &handlerStubRepo{
+		get: func(uuid.UUID) (*Task, error) {
+			return &Task{
+				ID:            id,
+				IsBuiltin:     false,
+				Mode:          ModeContinuous,
+				CronExpr:      &dailyCron,
+				Granularities: []string{"daily"},
+				Dimension:     DimensionNetwork,
+				Creator:       "anonymous",
+			}, nil
+		},
+		update: func(_ uuid.UUID, req UpdateRequest) error { captured = req; return nil },
+	}
+	b := map[string]any{
+		"name":          "edited",
+		"metric_paths":  []string{"K1001"},
+		"granularities": []string{"hourly"},
+	}
+	w := patchUpdate(t, repo, id, b)
+	require.Equal(t, http.StatusOK, w.Code)
+	require.NotNil(t, captured.CronExpr)
+	assert.Equal(t, cronForGranularity("hourly"), *captured.CronExpr)
+	assert.True(t, captured.ResetCursor, "粒度变化后应重置调度游标，避免沿用旧 daily 游标")
+	assert.Equal(t, ModeContinuous, captured.Mode)
+	assert.Equal(t, DimensionNetwork, captured.Dimension)
 }
 
 // 失败路径：自建 device 维度 + 空 device_sns → 400（必填设备）。

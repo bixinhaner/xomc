@@ -88,11 +88,20 @@ const DIMENSION_LABEL_KEY: Record<string, string> = {
   device_group: 'perf.adhoc.dimDeviceGroup',
 };
 
+const GRANULARITY_LABEL_KEY: Record<string, string> = {
+  hourly: 'perf.adhoc.gran.hourly',
+  daily: 'perf.adhoc.gran.daily',
+  weekly: 'perf.adhoc.gran.weekly',
+  monthly: 'perf.adhoc.gran.monthly',
+};
+
 const TECHNOLOGY_LABEL_KEY: Record<string, string> = {
   lte: 'perf.adhoc.techLte',
   nr: 'perf.adhoc.techNr',
   gsm: 'perf.adhoc.techGsm',
 };
+
+export const RUN_HISTORY_SCROLL_X = 1250;
 
 // 制式短标签（用于「聚合范围」说明句，比「LTE (4G)」更精炼）。
 const TECH_SHORT_LABEL: Record<string, string> = {
@@ -121,6 +130,21 @@ function statusLabel(intl: IntlShape, s?: string): string {
 function dimensionLabel(intl: IntlShape, d?: string): string {
   const id = d ? DIMENSION_LABEL_KEY[d] : undefined;
   return id ? intl.formatMessage({ id }) : (d ?? '');
+}
+
+export function granularityLabel(
+  intl: Pick<IntlShape, 'formatMessage'>,
+  granularities?: string[],
+): string {
+  if (!granularities || granularities.length === 0) {
+    return '—';
+  }
+  return granularities
+    .map((g) => {
+      const id = GRANULARITY_LABEL_KEY[g];
+      return id ? intl.formatMessage({ id }) : g;
+    })
+    .join(' / ');
 }
 
 function technologyLabel(intl: IntlShape, t?: string): string {
@@ -203,6 +227,7 @@ function RunHistoryTab({ taskId }: { taskId: string }) {
       loading={isLoading}
       dataSource={runs}
       columns={columns}
+      scroll={{ x: RUN_HISTORY_SCROLL_X }}
       pagination={{ pageSize: 10, size: 'small' }}
       expandable={{
         // failed 行 error 全文可展开
@@ -549,6 +574,9 @@ export default function PmAdhocPage() {
               </Descriptions.Item>
               <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.descDimension' })}>
                 {dimensionLabel(intl, selectedTask.dimension)}
+              </Descriptions.Item>
+              <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.descGranularity' })}>
+                {granularityLabel(intl, selectedTask.granularities)}
               </Descriptions.Item>
               <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.descTech' })}>
                 {/* T-0186：制式只读，建后不可改，无切换控件 */}

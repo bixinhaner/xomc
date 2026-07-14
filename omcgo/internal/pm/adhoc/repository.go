@@ -241,6 +241,17 @@ func (r *PgRepository) Create(ctx context.Context, req CreateRequest) (uuid.UUID
 // 自建任务（false）SET 全部可编辑字段。mode/technology/dimension/is_builtin/expire_days 永不进 SET。
 // 按 id + task_subtype='adhoc_aggregation' 限定；行不存在返 ErrNotFound。
 func (r *PgRepository) Update(ctx context.Context, id uuid.UUID, req UpdateRequest) error {
+	if !req.IsBuiltin && req.Mode == ModeContinuous && req.ResetCursor {
+		if bucket, ok := r.initialCursorForContinuous(ctx, CreateRequest{
+			Mode:          ModeContinuous,
+			Granularities: req.Granularities,
+			Dimension:     req.Dimension,
+		}); ok {
+			req.LastFireAt = bucket
+		} else {
+			req.LastFireAt = time.Now().UTC()
+		}
+	}
 	q, args, err := buildUpdateSQL(id, req)
 	if err != nil {
 		return fmt.Errorf("adhoc.Update: build SQL: %w", err)
@@ -258,7 +269,7 @@ func (r *PgRepository) Update(ctx context.Context, id uuid.UUID, req UpdateReque
 // buildUpdateSQL 构建编辑任务的 UPDATE SQL（T-0194）。抽出便于单测断言守门口径（哪些列进 SET）。
 //
 // 内置（IsBuiltin=true）：只 SET metric_paths + updated_at。
-// 自建（false）：额外 SET task_name/device_sns(JSONB)/granularities/object_ldns/window_start/window_end。
+// 自建（false）：额外 SET task_name/device_sns(JSONB)/granularities/cron_expr/object_ldns/window_start/window_end。
 // mode/technology/dimension/is_builtin/expire_days 永不进 SET。
 func buildUpdateSQL(id uuid.UUID, req UpdateRequest) (string, []any, error) {
 	qb := storage.Psql.Update("pm_tasks").
@@ -274,9 +285,13 @@ func buildUpdateSQL(id uuid.UUID, req UpdateRequest) (string, []any, error) {
 			Set("task_name", req.Name).
 			Set("device_sns", deviceSNsJSON).
 			Set("granularities", req.Granularities).
+			Set("cron_expr", nullableString(req.CronExpr)).
 			Set("object_ldns", nullableStrSlice(req.ObjectLDNs)).
 			Set("window_start", nullableTime(req.WindowStart)).
 			Set("window_end", nullableTime(req.WindowEnd))
+		if req.ResetCursor {
+			qb = qb.Set("last_fire_at", nullableTime(req.LastFireAt))
+		}
 	}
 	return qb.ToSql()
 }
