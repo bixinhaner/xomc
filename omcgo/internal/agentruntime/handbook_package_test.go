@@ -62,6 +62,24 @@ func TestHandbookPackageRejectsRuntimeVersionMismatch(t *testing.T) {
 	require.ErrorContains(t, err, "does not match running API")
 }
 
+func TestToolExecutorBuildsHandbookForRoutesMissingFromEmbeddedTemplate(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/api/v1/runtime-only/status", func(c *gin.Context) {})
+	executor := NewToolExecutor(router, router, nil)
+	routes := executor.HandbookRouteExport()
+
+	manifest, err := executor.handbookManifest()
+	require.NoError(t, err)
+	require.Equal(t, routes.CatalogVersion, manifest.CatalogVersion)
+	require.Equal(t, 1, manifest.TotalOperations)
+	require.NotEmpty(t, manifest.HandbookDigest)
+
+	chunk, err := executor.handbookChunk(0)
+	require.NoError(t, err)
+	require.Equal(t, manifest.HandbookDigest, chunk.HandbookDigest)
+}
+
 func TestToolExecutorServesHandbookPackageThroughBlockedAgentNamespace(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
