@@ -83,14 +83,15 @@ func (o *optInt64) Ptr() *int64 {
 // fileLocks 提供 per-filename 进程内互斥(Upload + Delete + ReloadOne 三方共用,
 // 避免同名文件并发写入竞态)。
 type Handler struct {
-	repo          *PgRepository
-	registry      *Registry
-	reloader      Reloader
-	dictRefresher DictSourceRefresher
-	logger        *zap.Logger
-	baseDir       string
-	builtinDir    string   // absolute path = filepath.Join(baseDir, BuiltinDirSubdir)
-	fileLocks     sync.Map // map[basename]*sync.Mutex
+	repo             *PgRepository
+	registry         *Registry
+	reloader         Reloader
+	dictRefresher    DictSourceRefresher
+	productRefresher RegistryRefresher
+	logger           *zap.Logger
+	baseDir          string
+	builtinDir       string   // absolute path = filepath.Join(baseDir, BuiltinDirSubdir)
+	fileLocks        sync.Map // map[basename]*sync.Mutex
 }
 
 // Reloader 抽象 dictloader.Registry.ReloadOne — 让 handler 不强依赖 dictloader 包。
@@ -102,6 +103,16 @@ type Reloader interface {
 // best-effort:刷新失败不阻断导入(daily cron 兜底)。可为 nil(未接入时整段跳过)。
 type DictSourceRefresher interface {
 	RefreshSourceBoundByTable(ctx context.Context, sourceTable string) (int, error)
+}
+
+// RegistryRefresher 用于在参数模型启停后刷新依赖该状态的产品路由缓存。
+type RegistryRefresher interface {
+	Refresh(ctx context.Context) error
+}
+
+// SetProductRegistryRefresher 注入 ProductRegistry，避免 parammodel 包直接依赖 product 包。
+func (h *Handler) SetProductRegistryRefresher(refresher RegistryRefresher) {
+	h.productRefresher = refresher
 }
 
 // NewHandler 构造 Handler；reloader 可为 nil（导入 XML 时 destructiveReload 跳过重载，
@@ -1209,11 +1220,15 @@ func (h *Handler) refreshBoundDict(ctx context.Context, sourceTable string) {
 // ── helpers ─────────────────────────────────────────────────────────
 
 func (h *Handler) refreshAsync(ctx context.Context, op string) {
-	if h.registry == nil {
-		return
+	if h.registry != nil {
+		if err := h.registry.Refresh(ctx); err != nil {
+			h.logger.Warn("param registry refresh after write failed", zap.String("op", op), zap.Error(err))
+		}
 	}
-	if err := h.registry.Refresh(ctx); err != nil {
-		h.logger.Warn("param registry refresh after write failed", zap.String("op", op), zap.Error(err))
+	if h.productRefresher != nil {
+		if err := h.productRefresher.Refresh(ctx); err != nil {
+			h.logger.Warn("product registry refresh after param model write failed", zap.String("op", op), zap.Error(err))
+		}
 	}
 }
 

@@ -76,6 +76,10 @@ type fakeParamModelRepoForPathB struct {
 	discovered     map[string][]parammodel.ParamMapping
 }
 
+func (f *fakeParamModelRepoForPathB) IsParamModelActive(_ context.Context, _ uuid.UUID) (bool, error) {
+	return true, nil
+}
+
 func (f *fakeParamModelRepoForPathB) ListMappingsByParamModel(_ context.Context, paramModelID uuid.UUID) ([]parammodel.ParamMapping, error) {
 	return append([]parammodel.ParamMapping(nil), f.defaultByModel[paramModelID]...), nil
 }

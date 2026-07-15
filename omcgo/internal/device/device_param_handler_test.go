@@ -22,6 +22,10 @@ type fakeParamModelRepoForDevice struct {
 	defaultByModel map[uuid.UUID][]parammodel.ParamMapping
 }
 
+func (f *fakeParamModelRepoForDevice) IsParamModelActive(_ context.Context, _ uuid.UUID) (bool, error) {
+	return true, nil
+}
+
 func (f *fakeParamModelRepoForDevice) ListMappingsByParamModel(_ context.Context, paramModelID uuid.UUID) ([]parammodel.ParamMapping, error) {
 	out := f.defaultByModel[paramModelID]
 	cp := make([]parammodel.ParamMapping, len(out))

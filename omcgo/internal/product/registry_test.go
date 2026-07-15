@@ -246,6 +246,28 @@ func TestRegistry_Match_OrphanWhenNoMatch(t *testing.T) {
 	assert.ErrorIs(t, err, ErrOrphan)
 }
 
+func TestRegistry_Match_InactiveParamModelIsNotRoutable(t *testing.T) {
+	repo := newFakeRepo()
+	pid := repo.addProduct("Inactive", "v1", "enb", "BLQ", "ENB")
+	repo.patterns = append(repo.patterns, ProductClassPattern{
+		ID:                 uuid.New(),
+		ProductID:          pid,
+		ProductClass:       "^FAP/inactive$",
+		SortOrder:          1,
+		IsActive:           true,
+		ParamModelInactive: true,
+	})
+
+	r := NewRegistry(repo, NopCache{}, NewRegistryMetrics(nil), zap.NewNop())
+	require.NoError(t, r.Refresh(context.Background()))
+
+	got, err := r.MatchProductClass(context.Background(), "FAP/inactive")
+	require.ErrorIs(t, err, ErrInactiveParamModel)
+	require.ErrorIs(t, err, ErrOrphan, "inactive model must remain compatible with device orphan handling")
+	require.NotNil(t, got, "callers that distinguish inactive models need the matched product")
+	assert.Equal(t, pid, got.Product.ID)
+}
+
 func TestRegistry_Match_DanglingPatternFallsThrough(t *testing.T) {
 	// 数据不一致：pattern 引用了不存在的 product；Match 应继续遍历后续 pattern。
 	repo := newFakeRepo()

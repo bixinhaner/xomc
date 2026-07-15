@@ -35,11 +35,12 @@ type Product struct {
 
 // ProductClassPattern 对应 product_class_patterns 表（设计 §4.2.2）。
 type ProductClassPattern struct {
-	ID           uuid.UUID
-	ProductID    uuid.UUID
-	ProductClass string
-	SortOrder    int
-	IsActive     bool
+	ID                 uuid.UUID
+	ProductID          uuid.UUID
+	ProductClass       string
+	SortOrder          int
+	IsActive           bool
+	ParamModelInactive bool // 关联产品已绑定参数模型，但模型处于停用状态
 }
 
 // MatchResult 是 ProductRegistry.MatchProductClass 的命中结果（设计 §4.3 核心类型）。
@@ -78,11 +79,12 @@ type ValidationIssue struct {
 // CacheVersion 与 Cache.GetVersion() 比对识别 stale：BumpVersion 后旧条目读出立即被
 // 视为失效，旁路到 slow path 重算，避免主动 SCAN+DEL。
 type ProductClassCacheEntry struct {
-	MatchedProductID uuid.UUID `json:"matched_product_id,omitempty"` // orphan 时 zero
-	Orphan           bool      `json:"orphan"`
-	MatchedPattern   string    `json:"matched_pattern,omitempty"`
-	GlobalSortOrder  int       `json:"sort_order,omitempty"`
-	CacheVersion     int64     `json:"cache_version"`
+	MatchedProductID   uuid.UUID `json:"matched_product_id,omitempty"` // orphan 时 zero
+	Orphan             bool      `json:"orphan"`
+	ParamModelInactive bool      `json:"param_model_inactive,omitempty"`
+	MatchedPattern     string    `json:"matched_pattern,omitempty"`
+	GlobalSortOrder    int       `json:"sort_order,omitempty"`
+	CacheVersion       int64     `json:"cache_version"`
 }
 
 // ── XML 解析结构（设计 §4.5）────────────────────────────────────────

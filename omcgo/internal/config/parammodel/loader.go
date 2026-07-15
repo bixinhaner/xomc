@@ -149,10 +149,9 @@ func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, erro
 	loadedFrom := resolveLoadedFrom(l.base, path)
 	totalObjects := len(doc.Objects)
 	totalParams := len(doc.Params)
-	totalEntries := doc.TotalEntries
-	if totalEntries == 0 {
-		totalEntries = totalObjects + totalParams
-	}
+	// XML totalEntries 可能陈旧，且去重及保留 custom 覆盖都会改变实际落库数量。
+	// 事务末尾会从 param_mappings 重算；此处只给新行一个不依赖 XML 元数据的初值。
+	totalEntries := totalObjects + totalParams
 
 	tx, err := l.pool.Begin(ctx)
 	if err != nil {
@@ -209,6 +208,25 @@ func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, erro
 		} else {
 			rows += n
 		}
+	}
+
+	// param_mappings 是统计唯一真值源。重载会保留 custom 行，且 XML 内部可能去重，
+	// 因此必须在同一事务内按最终有效行重算，不能信任 XML 的 totalEntries。
+	const recountModel = `UPDATE param_models pm
+	SET total_entries = stats.total_entries,
+	    total_objects = stats.total_objects,
+	    total_params  = stats.total_params
+	FROM (
+	    SELECT COUNT(*)::int AS total_entries,
+	           COUNT(*) FILTER (WHERE entry_type = 'object')::int AS total_objects,
+	           COUNT(*) FILTER (WHERE entry_type = 'parameter')::int AS total_params
+	      FROM param_mappings
+	     WHERE param_model_id = $1 AND is_active = TRUE
+	) stats
+	WHERE pm.id = $1
+	RETURNING pm.total_entries, pm.total_objects, pm.total_params`
+	if err := tx.QueryRow(ctx, recountModel, modelID).Scan(&totalEntries, &totalObjects, &totalParams); err != nil {
+		return 0, fmt.Errorf("recount param_model %q: %w", doc.ParamModel, err)
 	}
 
 	// §1.9 对账：param_mappings 已被本事务整体替换，需同步 discovered_param_mappings。

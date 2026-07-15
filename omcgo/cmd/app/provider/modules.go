@@ -1716,6 +1716,22 @@ func initMiscModules(c *Container) error {
 	mmlConsoleSvc.SetSupportedPathsRepository(mml.SupportedPathsResolverFunc(
 		func(ctx context.Context, productClass string) (*mml.SupportedSet, error) {
 			mr, err := c.ProductRegistry.MatchProductClass(ctx, productClass)
+			if errors.Is(err, product.ErrInactiveParamModel) {
+				set := &mml.SupportedSet{
+					ProductClass:    productClass,
+					ProductResolved: true,
+					Paths:           map[string]struct{}{},
+				}
+				if mr != nil && mr.Product != nil {
+					productID := mr.Product.ID
+					set.ProductID = &productID
+					if mr.Product.ParamModelID != nil {
+						paramModelID := *mr.Product.ParamModelID
+						set.ParamModelID = &paramModelID
+					}
+				}
+				return set, nil
+			}
 			if errors.Is(err, product.ErrOrphan) {
 				// 孤儿设备：保留 productResolved=false，前端按 user Q4 决定的策略
 				// 显示全部命令但每条标 0 supported。
@@ -1738,6 +1754,17 @@ func initMiscModules(c *Container) error {
 			}
 			set, err := c.ParamRegistry.GetByParamModel(ctx, *mr.Product.ParamModelID)
 			if err != nil {
+				if errors.Is(err, parammodel.ErrInactiveParamModel) {
+					productID := mr.Product.ID
+					paramModelID := *mr.Product.ParamModelID
+					return &mml.SupportedSet{
+						ProductClass:    productClass,
+						ProductID:       &productID,
+						ParamModelID:    &paramModelID,
+						ProductResolved: true,
+						Paths:           map[string]struct{}{},
+					}, nil
+				}
 				return nil, fmt.Errorf("get param_model %s mappings: %w", mr.Product.ParamModelID, err)
 			}
 			paths := make(map[string]struct{}, len(set.Mappings))
@@ -1760,7 +1787,7 @@ func initMiscModules(c *Container) error {
 	mmlConsoleSvc.SetParamModelPathsResolver(func(ctx context.Context, pmID uuid.UUID) (map[string]struct{}, error) {
 		set, err := c.ParamRegistry.GetByParamModel(ctx, pmID)
 		if err != nil {
-			if errors.Is(err, parammodel.ErrNoMapping) {
+			if errors.Is(err, parammodel.ErrNoMapping) || errors.Is(err, parammodel.ErrInactiveParamModel) {
 				return map[string]struct{}{}, nil
 			}
 			return nil, fmt.Errorf("get param_model %s paths: %w", pmID, err)
