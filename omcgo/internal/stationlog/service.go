@@ -158,6 +158,8 @@ func (s *Service) RecordAbnormalReboot(ctx context.Context, snap device.Abnormal
 //  2. 兼容旧链路：若找不到 detected 占位记录（例如 ACS 直传文件没经过 1 BOOT 识别），
 //     INSERT 一行新记录（记录 status 由 Create 默认推断为 file_received）。
 //
+// 当故障日志文件事件缺少 device_sn 时，优先尝试补全最近一条 detected 占位记录；
+// 若没有可补全记录则跳过，避免生成前端空设备异常重启记录。
 // 运行日志（LogTypeRunning）始终走旧 INSERT 路径。
 func (s *Service) HandleLogFileReceived(ctx context.Context, evt event.Event) error {
 	var p LogFileReceivedPayload
@@ -169,10 +171,9 @@ func (s *Service) HandleLogFileReceived(ctx context.Context, evt event.Event) er
 	logType := fileTypeToLogType(p.FileType)
 	p.DeviceSN = strings.TrimSpace(p.DeviceSN)
 	if logType == LogTypeFault && p.DeviceSN == "" {
-		s.logger.Warn("skip fault log file without device_sn",
-			zap.String("file_name", p.FileName),
-			zap.String("path", p.ObjectPath),
-		)
+		if err := s.promoteLatestDetectedFaultLog(ctx, p); err != nil {
+			return err
+		}
 		return nil
 	}
 
@@ -238,6 +239,48 @@ func (s *Service) HandleLogFileReceived(ctx context.Context, evt event.Event) er
 		}
 	}
 
+	return nil
+}
+
+func (s *Service) promoteLatestDetectedFaultLog(ctx context.Context, p LogFileReceivedPayload) error {
+	faultRepo, ok := s.faultRepo.(FaultExtraRepository)
+	if !ok {
+		s.logger.Warn("skip fault log file without device_sn: fault repository cannot promote detected record",
+			zap.String("file_name", p.FileName),
+			zap.String("path", p.ObjectPath),
+		)
+		return nil
+	}
+
+	items, _, err := s.faultRepo.List(ctx, LogFileFilter{
+		LogType:      LogTypeFault,
+		RecordStatus: FaultRecordStatusDetected,
+		Page:         1,
+		PageSize:     1,
+	})
+	if err != nil {
+		return fmt.Errorf("lookup latest detected fault log: %w", err)
+	}
+	if len(items) == 0 {
+		s.logger.Warn("skip fault log file without device_sn and detected placeholder",
+			zap.String("file_name", p.FileName),
+			zap.String("path", p.ObjectPath),
+		)
+		return nil
+	}
+
+	detected := items[0]
+	if err := faultRepo.UpdateFile(ctx, detected.ID, p.FileName, p.ObjectPath, p.Bucket, p.FileSize); err != nil {
+		return fmt.Errorf("update latest detected fault log file: %w", err)
+	}
+	s.logger.Info("station fault log promoted to file_received by latest detected fallback",
+		zap.String("id", detected.ID.String()),
+		zap.String("device_sn", detected.DeviceSN),
+		zap.String("path", p.ObjectPath),
+	)
+	if err := s.enforceFaultLogQuota(ctx, detected.DeviceID); err != nil {
+		s.logger.Warn("enforce fault log quota", zap.Error(err))
+	}
 	return nil
 }
 

@@ -65,6 +65,29 @@ func TestRetentionPolicy_MaxFileCountPerDevice_ReadsAndValidates(t *testing.T) {
 	assert.Equal(t, DefaultMaxFileCountPerDevice, bad.MaxFileCountPerDevice(context.Background()))
 }
 
+func TestRetentionPolicy_InvalidateCacheReloadsUpdatedQuota(t *testing.T) {
+	values := map[string]string{
+		KeyMaxRetentionDays:      "60",
+		KeyMaxFileCount:          "1000",
+		KeyMaxFileCountPerDevice: "5",
+	}
+	lookup := func(_ context.Context, category, key string) (string, bool) {
+		if category != RetentionCategory {
+			return "", false
+		}
+		v, ok := values[key]
+		return v, ok
+	}
+	p := NewRetentionPolicy(lookup, nil)
+
+	assert.Equal(t, 5, p.MaxFileCountPerDevice(context.Background()))
+	values[KeyMaxFileCountPerDevice] = "2"
+	assert.Equal(t, 5, p.MaxFileCountPerDevice(context.Background()), "TTL 命中时应仍读缓存")
+
+	p.InvalidateCache()
+	assert.Equal(t, 2, p.MaxFileCountPerDevice(context.Background()), "失效缓存后应立刻读到新配额")
+}
+
 // ---- CleanupRunner ----
 
 type fakeCleanupStore struct {

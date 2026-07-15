@@ -412,6 +412,34 @@ func TestHandleLogFileReceived_SkipsFaultFileWithoutDeviceSN(t *testing.T) {
 	assert.Empty(t, faultRepo.rows)
 }
 
+func TestHandleLogFileReceived_PromotesLatestDetectedWhenFaultFileHasNoDeviceSN(t *testing.T) {
+	svc, _, faultRepo := newTestService()
+	deviceID := uuid.New()
+	require.NoError(t, svc.RecordAbnormalReboot(context.Background(), device.AbnormalRebootSnapshot{
+		DeviceID:       deviceID,
+		DeviceSN:       "SN-FALLBACK",
+		HaltMainReason: "halt_reboot",
+		DetectedAt:     time.Now(),
+	}))
+
+	payloadRaw := newEventPayload(LogFileReceivedPayload{
+		FileType:   "8",
+		FileName:   "ErrorLog_20260715.1539 0800_dieLog.tar.gz",
+		ObjectPath: "fault/2026/07/15/dbc91d19/ErrorLog_20260715.1539 0800_dieLog.tar.gz",
+		Bucket:     "logs",
+		FileSize:   1317251,
+	})
+
+	require.NoError(t, svc.HandleLogFileReceived(context.Background(), payloadRaw))
+	require.Len(t, faultRepo.rows, 1)
+	row := faultRepo.rows[0]
+	assert.Equal(t, FaultRecordStatusFileReceived, row.RecordStatus)
+	assert.Equal(t, "SN-FALLBACK", row.DeviceSN)
+	require.NotNil(t, row.DeviceID)
+	assert.Equal(t, deviceID, *row.DeviceID)
+	assert.Equal(t, "ErrorLog_20260715.1539 0800_dieLog.tar.gz", row.FileName)
+}
+
 func TestEnforceFaultLogQuota_IgnoresDetectedPlaceholdersForGlobalCount(t *testing.T) {
 	// detected 是无文件占位记录，不应把全局文件数配额顶满；
 	// 否则 ListOldest 只返回 file_received 时会误删刚到达的真实文件。
@@ -631,6 +659,74 @@ func TestEnforceFaultLogQuota_PerDeviceDisabledSkipsCleanup(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 6, alive, "设备维度配额禁用后 6 条记录都不应被清理")
+}
+
+func TestEnforceFaultLogQuota_PerDeviceQuotaReloadsBeforeNextFile(t *testing.T) {
+	svc, _, faultRepo := newTestService()
+	values := map[string]string{
+		KeyMaxFileCount:          "1000",
+		KeyMaxFileCountPerDevice: "5",
+	}
+	policy := NewRetentionPolicy(func(_ context.Context, category, key string) (string, bool) {
+		if category != RetentionCategory {
+			return "", false
+		}
+		v, ok := values[key]
+		return v, ok
+	}, nil)
+	svc.SetRetentionPolicy(policy)
+
+	deviceA := uuid.New()
+	base := time.Now().Add(-time.Hour)
+	for i := 0; i < 2; i++ {
+		require.NoError(t, svc.RecordAbnormalReboot(context.Background(), device.AbnormalRebootSnapshot{
+			DeviceID:       deviceA,
+			DeviceSN:       "SN-DEVICE-RELOAD",
+			HaltMainReason: "halt_reboot",
+			DetectedAt:     base.Add(time.Duration(i) * time.Minute),
+		}))
+		require.NoError(t, svc.HandleLogFileReceived(context.Background(), newEventPayload(LogFileReceivedPayload{
+			DeviceSN:   "SN-DEVICE-RELOAD",
+			FileType:   "8",
+			FileName:   fmt.Sprintf("reload_%d.tar.gz", i),
+			ObjectPath: fmt.Sprintf("fault/reload/%d.tar.gz", i),
+			Bucket:     "logs",
+			FileSize:   1024,
+		})))
+	}
+
+	values[KeyMaxFileCountPerDevice] = "2"
+	policy.InvalidateCache()
+	require.NoError(t, svc.RecordAbnormalReboot(context.Background(), device.AbnormalRebootSnapshot{
+		DeviceID:       deviceA,
+		DeviceSN:       "SN-DEVICE-RELOAD",
+		HaltMainReason: "halt_reboot",
+		DetectedAt:     base.Add(2 * time.Minute),
+	}))
+	require.NoError(t, svc.HandleLogFileReceived(context.Background(), newEventPayload(LogFileReceivedPayload{
+		DeviceSN:   "SN-DEVICE-RELOAD",
+		FileType:   "8",
+		FileName:   "reload_2.tar.gz",
+		ObjectPath: "fault/reload/2.tar.gz",
+		Bucket:     "logs",
+		FileSize:   1024,
+	})))
+
+	var alive int
+	var oldestDeleted bool
+	for _, r := range faultRepo.rows {
+		if r.DeviceSN != "SN-DEVICE-RELOAD" {
+			continue
+		}
+		if r.FileName == "reload_0.tar.gz" && r.IsDeleted {
+			oldestDeleted = true
+		}
+		if !r.IsDeleted {
+			alive++
+		}
+	}
+	assert.Equal(t, 2, alive, "配置改成 2 并失效缓存后，同设备应只保留最新 2 个文件")
+	assert.True(t, oldestDeleted, "同设备超额时应软删最早一次文件")
 }
 
 // TestServiceDownloadURL_DeletedMapsToConflict 已软删的记录下载按冲突态返回
