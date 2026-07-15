@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -166,6 +167,14 @@ func (s *Service) HandleLogFileReceived(ctx context.Context, evt event.Event) er
 	}
 
 	logType := fileTypeToLogType(p.FileType)
+	p.DeviceSN = strings.TrimSpace(p.DeviceSN)
+	if logType == LogTypeFault && p.DeviceSN == "" {
+		s.logger.Warn("skip fault log file without device_sn",
+			zap.String("file_name", p.FileName),
+			zap.String("path", p.ObjectPath),
+		)
+		return nil
+	}
 
 	// 从文件名解析到的 device_sn 可能为空（非标准命名），此时跳过设备关联
 	var deviceID *uuid.UUID

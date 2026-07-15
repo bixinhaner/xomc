@@ -396,6 +396,22 @@ func TestHandleLogFileReceived_InsertsWhenNoDetectedRecord(t *testing.T) {
 	assert.Equal(t, "abnormalLog_SN-ORPHAN.tar.gz", row.FileName)
 }
 
+func TestHandleLogFileReceived_SkipsFaultFileWithoutDeviceSN(t *testing.T) {
+	// 故障日志会进入重启记录视图；缺少 SN 时不能落成一条空设备的“异常重启”记录。
+	svc, _, faultRepo := newTestService()
+
+	payloadRaw := newEventPayload(LogFileReceivedPayload{
+		FileType:   "8",
+		FileName:   "ErrorLog_20260715.1539 0800_dieLog.tar.gz",
+		ObjectPath: "fault/2026/07/15/dbc91d19/ErrorLog_20260715.1539 0800_dieLog.tar.gz",
+		Bucket:     "logs",
+		FileSize:   1317251,
+	})
+
+	require.NoError(t, svc.HandleLogFileReceived(context.Background(), payloadRaw))
+	assert.Empty(t, faultRepo.rows)
+}
+
 func TestEnforceFaultLogQuota_IgnoresDetectedPlaceholdersForGlobalCount(t *testing.T) {
 	// detected 是无文件占位记录，不应把全局文件数配额顶满；
 	// 否则 ListOldest 只返回 file_received 时会误删刚到达的真实文件。
