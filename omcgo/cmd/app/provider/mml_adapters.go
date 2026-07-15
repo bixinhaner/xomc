@@ -89,6 +89,9 @@ func (a *mmlPathTranslatorAdapter) TranslateForDevice(
 	}
 
 	matchRes, err := a.products.MatchProductClass(ctx, productClass)
+	if errors.Is(err, product.ErrInactiveParamModel) {
+		return nil, fmt.Errorf("mml-translator-adapter: parameter model inactive for product_class %s: %w", productClass, err)
+	}
 	orphan := errors.Is(err, product.ErrOrphan) || (err == nil && (matchRes == nil || matchRes.Product == nil))
 	if err != nil && !errors.Is(err, product.ErrOrphan) {
 		return nil, fmt.Errorf("mml-translator-adapter: match product_class %s: %w", productClass, err)

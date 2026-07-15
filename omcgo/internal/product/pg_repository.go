@@ -23,10 +23,13 @@ func NewPgRepository(pool *pgxpool.Pool) *PgRepository {
 }
 
 const listActivePatternsSQL = `
-SELECT id, product_id, product_class, sort_order, is_active
-FROM product_class_patterns
-WHERE is_active = TRUE
-ORDER BY sort_order ASC`
+SELECT pcp.id, pcp.product_id, pcp.product_class, pcp.sort_order, pcp.is_active,
+       (p.param_model_id IS NOT NULL AND COALESCE(pm.is_active, FALSE) = FALSE) AS param_model_inactive
+FROM product_class_patterns pcp
+JOIN products p ON p.id = pcp.product_id
+LEFT JOIN param_models pm ON pm.id = p.param_model_id
+WHERE pcp.is_active = TRUE
+ORDER BY pcp.sort_order ASC`
 
 // ListActivePatterns 实现 Repository。
 func (r *PgRepository) ListActivePatterns(ctx context.Context) ([]ProductClassPattern, error) {
@@ -39,7 +42,7 @@ func (r *PgRepository) ListActivePatterns(ctx context.Context) ([]ProductClassPa
 	var out []ProductClassPattern
 	for rows.Next() {
 		var p ProductClassPattern
-		if err := rows.Scan(&p.ID, &p.ProductID, &p.ProductClass, &p.SortOrder, &p.IsActive); err != nil {
+		if err := rows.Scan(&p.ID, &p.ProductID, &p.ProductClass, &p.SortOrder, &p.IsActive, &p.ParamModelInactive); err != nil {
 			return nil, fmt.Errorf("scan pattern row: %w", err)
 		}
 		out = append(out, p)

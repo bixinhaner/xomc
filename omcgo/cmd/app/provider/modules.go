@@ -1716,6 +1716,22 @@ func initMiscModules(c *Container) error {
 	mmlConsoleSvc.SetSupportedPathsRepository(mml.SupportedPathsResolverFunc(
 		func(ctx context.Context, productClass string) (*mml.SupportedSet, error) {
 			mr, err := c.ProductRegistry.MatchProductClass(ctx, productClass)
+			if errors.Is(err, product.ErrInactiveParamModel) {
+				set := &mml.SupportedSet{
+					ProductClass:    productClass,
+					ProductResolved: true,
+					Paths:           map[string]struct{}{},
+				}
+				if mr != nil && mr.Product != nil {
+					productID := mr.Product.ID
+					set.ProductID = &productID
+					if mr.Product.ParamModelID != nil {
+						paramModelID := *mr.Product.ParamModelID
+						set.ParamModelID = &paramModelID
+					}
+				}
+				return set, nil
+			}
 			if errors.Is(err, product.ErrOrphan) {
 				// 孤儿设备：保留 productResolved=false，前端按 user Q4 决定的策略
 				// 显示全部命令但每条标 0 supported。

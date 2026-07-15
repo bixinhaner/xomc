@@ -72,3 +72,27 @@ func TestMMLPathTranslator_InactiveParamModelDoesNotPassthrough(t *testing.T) {
 	require.ErrorIs(t, err, parammodel.ErrInactiveParamModel)
 	require.Nil(t, outcome, "inactive model must not silently execute MML with standard-path passthrough")
 }
+
+func TestMMLPathTranslator_InactiveProductRouteDoesNotUseOrphanPassthrough(t *testing.T) {
+	ctx := context.Background()
+	productID := uuid.New()
+	paramModelID := uuid.New()
+	products := product.NewRegistry(mmlProductRepo{
+		product: &product.Product{ID: productID, Name: "inactive-route", ParamModelID: &paramModelID},
+		pattern: product.ProductClassPattern{
+			ID:                 uuid.New(),
+			ProductID:          productID,
+			ProductClass:       "^INACTIVE-ROUTE$",
+			SortOrder:          1,
+			IsActive:           true,
+			ParamModelInactive: true,
+		},
+	}, product.NopCache{}, nil, zap.NewNop())
+	require.NoError(t, products.Refresh(ctx))
+
+	params := parammodel.NewRegistry(inactiveMMLParamRepo{}, parammodel.NopCache{}, products, nil, zap.NewNop())
+	translator := NewMMLPathTranslator(products, params, nil, zap.NewNop())
+	outcome, err := translator.TranslateForDevice(ctx, "INACTIVE-ROUTE", "1.0", []string{"Device.Test.Param"})
+	require.ErrorIs(t, err, product.ErrInactiveParamModel)
+	require.Nil(t, outcome, "inactive product route must not be downgraded to orphan_passthrough")
+}
