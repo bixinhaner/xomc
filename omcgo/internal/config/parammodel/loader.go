@@ -166,7 +166,6 @@ func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, erro
 	SET total_entries = EXCLUDED.total_entries,
 	    total_objects = EXCLUDED.total_objects,
 	    total_params  = EXCLUDED.total_params,
-	    is_active     = TRUE,
 	    loaded_from   = EXCLUDED.loaded_from
 	RETURNING id`
 	var modelID string

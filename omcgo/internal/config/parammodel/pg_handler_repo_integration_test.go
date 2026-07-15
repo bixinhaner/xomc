@@ -73,6 +73,63 @@ SELECT total_entries, total_objects, total_params
 	assert.Equal(t, 1, params)
 }
 
+func TestLoaderReloadPreservesInactiveExistingModelAndActivatesNewModel(t *testing.T) {
+	pool := paramModelIntegrationPool(t)
+	ctx := context.Background()
+	suffix := uuid.New().String()
+	existingName := "TEST-INACTIVE-" + suffix
+	newName := "TEST-NEW-" + suffix
+	standardPath := "Device.Test.LoaderReload." + suffix + "."
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM param_models WHERE name = ANY($1::text[])`, []string{existingName, newName})
+		_, _ = pool.Exec(context.Background(), `DELETE FROM standard_params WHERE standard_path = $1`, standardPath)
+	})
+
+	_, err := pool.Exec(ctx, `
+INSERT INTO param_models (id, name, total_entries, total_objects, total_params, is_active, loaded_from)
+VALUES ($1, $2, 0, 0, 0, FALSE, $3)`, uuid.New(), existingName, "param-mappings/"+existingName+".xml")
+	require.NoError(t, err)
+
+	baseDir := t.TempDir()
+	mappingDir := filepath.Join(baseDir, "param-mappings")
+	require.NoError(t, os.MkdirAll(mappingDir, 0o755))
+
+	existingXML := fmt.Sprintf(`<?xml version="1.0"?>
+<parameterModel paramModel="%s">
+  <parameters>
+    <param name="%s" standardPath="%s" access="READ_WRITE" type="STRING"/>
+  </parameters>
+</parameterModel>`, existingName, standardPath, standardPath)
+	newXML := fmt.Sprintf(`<?xml version="1.0"?>
+<parameterModel paramModel="%s">
+  <parameters>
+    <param name="%s" standardPath="%s" access="READ_WRITE" type="STRING"/>
+  </parameters>
+</parameterModel>`, newName, standardPath, standardPath+"New")
+	standardXML := fmt.Sprintf(`<?xml version="1.0"?>
+<standardModel>
+  <parameters>
+    <param standardPath="%s" access="READ_WRITE" type="STRING"/>
+  </parameters>
+</standardModel>`, standardPath)
+	require.NoError(t, os.WriteFile(filepath.Join(mappingDir, existingName+".xml"), []byte(existingXML), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(mappingDir, newName+".xml"), []byte(newXML), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(mappingDir, "standard-model.xml"), []byte(standardXML), 0o600))
+
+	loader := NewLoader(pool, appconfig.ParamModelLoaderConfig{}, baseDir, zap.NewNop())
+	_, err = loader.Reload(ctx)
+	require.NoError(t, err)
+
+	var existingActive, newActive bool
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT is_active FROM param_models WHERE name = $1`, existingName).Scan(&existingActive))
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT is_active FROM param_models WHERE name = $1`, newName).Scan(&newActive))
+	assert.False(t, existingActive, "reload must preserve an existing model's manual inactive state")
+	assert.True(t, newActive, "a newly imported model should be active by default")
+}
+
 func TestPgRepository_ModelStatsFollowActiveMappings(t *testing.T) {
 	pool := paramModelIntegrationPool(t)
 	ctx := context.Background()
