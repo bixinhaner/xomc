@@ -260,6 +260,7 @@ func (m *mockAuditRepo) List(ctx context.Context, filter AuditLogFilter) (*model
 
 type mockMenuRepo struct {
 	getAllActiveFn func(ctx context.Context) ([]Menu, error)
+	getByRoleFn    func(ctx context.Context, roleID uuid.UUID) ([]Menu, error)
 	setRoleMenusFn func(ctx context.Context, roleID uuid.UUID, menuIDs []uuid.UUID, operatorID uuid.UUID) error
 }
 
@@ -278,7 +279,10 @@ func (m *mockMenuRepo) Delete(_ context.Context, _ []uuid.UUID) error { return n
 func (m *mockMenuRepo) GetTree(_ context.Context, _ *MenuStatus) ([]Menu, error) {
 	return nil, nil
 }
-func (m *mockMenuRepo) GetByRole(_ context.Context, _ uuid.UUID) ([]Menu, error) {
+func (m *mockMenuRepo) GetByRole(ctx context.Context, roleID uuid.UUID) ([]Menu, error) {
+	if m.getByRoleFn != nil {
+		return m.getByRoleFn(ctx, roleID)
+	}
 	return nil, nil
 }
 func (m *mockMenuRepo) GetByUser(_ context.Context, _ uuid.UUID) ([]Menu, error) {
@@ -1317,6 +1321,89 @@ func TestAdminService_ResetPassword_RevokerNotInjected_StillSucceeds(t *testing.
 
 	err := svc.ResetPassword(context.Background(), target, ResetPasswordRequest{UseDefaultPassword: true})
 	require.NoError(t, err, "revoker 未注入时仍应成功（fail-safe）")
+}
+
+func TestAdminService_GetUserMenuTreeByRole_CustomRoleIncludesButtonsUnderGrantedMenu(t *testing.T) {
+	userID := uuid.New()
+	roleID := uuid.New()
+	directoryID := uuid.New()
+	menuID := uuid.New()
+	executeButtonID := uuid.New()
+
+	assignedMenus := []Menu{
+		{ID: directoryID, Type: MenuTypeDirectory, PermissionKey: "mml"},
+		{ID: menuID, Type: MenuTypeMenu, PermissionKey: "mml:console", ParentID: &directoryID},
+	}
+	allMenus := append(append([]Menu{}, assignedMenus...), Menu{
+		ID:            executeButtonID,
+		Type:          MenuTypeButton,
+		PermissionKey: "mml:console:execute",
+		ParentID:      &menuID,
+		Status:        MenuStatusNormal,
+		ShowStatus:    MenuShow,
+	})
+
+	menuRepo := &mockMenuRepo{
+		getByRoleFn: func(_ context.Context, gotRoleID uuid.UUID) ([]Menu, error) {
+			require.Equal(t, roleID, gotRoleID)
+			return assignedMenus, nil
+		},
+		getAllActiveFn: func(context.Context) ([]Menu, error) {
+			return allMenus, nil
+		},
+	}
+	userRepo := &mockUserRepo{
+		getByIDFn: func(_ context.Context, gotUserID uuid.UUID) (*User, error) {
+			require.Equal(t, userID, gotUserID)
+			return &User{ID: userID, Source: UserSourceAdmin}, nil
+		},
+	}
+	svc := newTestService(userRepo, &mockRoleRepo{}, &mockAuditRepo{})
+	svc.menuRepo = menuRepo
+
+	tree, err := svc.GetUserMenuTreeByRole(context.Background(), userID, roleID)
+	require.NoError(t, err)
+	require.Len(t, tree, 1)
+	require.Len(t, tree[0].Children, 1)
+	require.Len(t, tree[0].Children[0].Children, 1)
+	assert.Equal(t, executeButtonID, tree[0].Children[0].Children[0].ID)
+}
+
+func TestAdminService_GetUserMenuTreeByRole_BuiltInRoleKeepsExplicitButtons(t *testing.T) {
+	userID := uuid.New()
+	roleID := uuid.MustParse(builtinViewerRoleID)
+	directoryID := uuid.New()
+	menuID := uuid.New()
+	exportButtonID := uuid.New()
+
+	menuRepo := &mockMenuRepo{
+		getByRoleFn: func(_ context.Context, gotRoleID uuid.UUID) ([]Menu, error) {
+			require.Equal(t, roleID, gotRoleID)
+			return []Menu{
+				{ID: directoryID, Type: MenuTypeDirectory, PermissionKey: "mml"},
+				{ID: menuID, Type: MenuTypeMenu, PermissionKey: "mml:console", ParentID: &directoryID},
+				{ID: exportButtonID, Type: MenuTypeButton, PermissionKey: "mml:console:export", ParentID: &menuID},
+			}, nil
+		},
+		getAllActiveFn: func(context.Context) ([]Menu, error) {
+			t.Fatal("built-in roles must not derive additional button permissions")
+			return nil, nil
+		},
+	}
+	userRepo := &mockUserRepo{
+		getByIDFn: func(context.Context, uuid.UUID) (*User, error) {
+			return &User{ID: userID, Source: UserSourceAdmin}, nil
+		},
+	}
+	svc := newTestService(userRepo, &mockRoleRepo{}, &mockAuditRepo{})
+	svc.menuRepo = menuRepo
+
+	tree, err := svc.GetUserMenuTreeByRole(context.Background(), userID, roleID)
+	require.NoError(t, err)
+	require.Len(t, tree, 1)
+	require.Len(t, tree[0].Children, 1)
+	require.Len(t, tree[0].Children[0].Children, 1)
+	assert.Equal(t, exportButtonID, tree[0].Children[0].Children[0].ID)
 }
 
 // --- sys_config validator ---

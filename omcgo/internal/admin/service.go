@@ -1586,8 +1586,45 @@ func (s *AdminService) GetUserMenuTreeByRole(ctx context.Context, userID uuid.UU
 	if err != nil {
 		return nil, err
 	}
+	if !isBuiltInRole(roleID) {
+		allMenus, err := s.menuRepo.GetAllActive(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("load active menus for custom role: %w", err)
+		}
+		menus = includeButtonsUnderGrantedMenus(menus, allMenus)
+	}
 	// GetByRole 已按 parent/sort 排序但未组装成树。
 	return buildMenuTree(menus), nil
+}
+
+// includeButtonsUnderGrantedMenus derives effective operation permissions for
+// custom roles. The role editor exposes menu permissions only, so granting a
+// page menu also grants its active button children without changing role_menus.
+func includeButtonsUnderGrantedMenus(granted, all []Menu) []Menu {
+	grantedMenuIDs := make(map[uuid.UUID]struct{}, len(granted))
+	seen := make(map[uuid.UUID]struct{}, len(granted))
+	result := append([]Menu(nil), granted...)
+	for _, menu := range granted {
+		seen[menu.ID] = struct{}{}
+		if menu.Type == MenuTypeMenu {
+			grantedMenuIDs[menu.ID] = struct{}{}
+		}
+	}
+
+	for _, menu := range all {
+		if menu.Type != MenuTypeButton || menu.ParentID == nil {
+			continue
+		}
+		if _, ok := grantedMenuIDs[*menu.ParentID]; !ok {
+			continue
+		}
+		if _, ok := seen[menu.ID]; ok {
+			continue
+		}
+		result = append(result, menu)
+		seen[menu.ID] = struct{}{}
+	}
+	return result
 }
 
 // ==================== Password Change ====================
