@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -12,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/omcgo/omcgo/internal/authz"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
@@ -144,6 +146,9 @@ func (r *PgRepository) Create(ctx context.Context, f *LogFile) error {
 				recordStatus = FaultRecordStatusFileReceived
 			}
 			f.RecordStatus = recordStatus
+		}
+		if recordStatus == FaultRecordStatusFileReceived && strings.TrimSpace(f.DeviceSN) == "" {
+			return fmt.Errorf("fault log file_received requires device_sn: %w", commonerrors.ErrInvalidInput)
 		}
 		manualStatus := f.ManualCollectionStatus
 		if manualStatus == "" {
