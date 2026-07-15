@@ -5252,6 +5252,7 @@ const messages: Record<string, string> = {
   'ufte.search.tasks':                        'Search by task name or type',
   'ufte.search.devices':                      'Search by SN or task name',
   'ufte.filter.status':                       'Filter by status',
+  'ufte.filter.templateName':                 'Filter by template name',
   'ufte.filter.productType':                  'Filter by product name',
   'ufte.form.taskName':                       'Task Name',
   'ufte.form.taskName.required':              'Please enter task name',

@@ -5283,6 +5283,7 @@ const messages: Record<string, string> = {
   'ufte.search.tasks':                        '按任务名称、类型搜索',
   'ufte.search.devices':                      '按 SN、任务名称搜索',
   'ufte.filter.status':                       '按状态过滤',
+  'ufte.filter.templateName':                 '按模板名称过滤',
   'ufte.filter.productType':                  '按产品名称过滤',
   'ufte.form.taskName':                       '任务名称',
   'ufte.form.taskName.required':              '请输入任务名称',

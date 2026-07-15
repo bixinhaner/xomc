@@ -90,6 +90,10 @@ import {
 } from '../shared.render';
 import { resolveAutoSelectedCategory } from './categorySelection';
 import { resolveTargetFileDisplay } from './targetFileDisplay';
+import {
+  resolveTaskTypeFilterValue,
+  shouldShowTaskTypeFilter,
+} from './taskTypeFilterSelection';
 import type { TransferStepId } from '@core/types/unifiedFileTransfer';
 import { formatSystemTime, nowInSystemTimezone } from '@core/utils/systemTime';
 import {
@@ -264,7 +268,7 @@ export default function FileTransferCenter() {
   // 首屏 task-types 未返回时 categories 只含虚拟分类，自动选中会落在 'mr_measurement'；
   // 真实分类到达后仅当用户没主动选过时才回退，不覆盖用户选择。
   const categoryManuallyPickedRef = useRef(Boolean(urlSearchParams.get('category')));
-  const [selectedTypeCode, setSelectedTypeCode] = useState(() => urlSearchParams.get('typeCode') ?? '');
+  const [selectedTypeCode, setSelectedTypeCode] = useState<string | undefined>(() => urlSearchParams.get('typeCode') || undefined);
   const [taskPage, setTaskPage] = useState(1);
   const [taskPageSize, setTaskPageSize] = useState(10);
   const [taskKeyword, setTaskKeyword] = useState('');
@@ -375,6 +379,10 @@ export default function FileTransferCenter() {
       value: item.typeCode,
     })),
     [filteredTaskTypes, t],
+  );
+  const showTaskTypeFilter = useMemo(
+    () => shouldShowTaskTypeFilter(filteredTaskTypes),
+    [filteredTaskTypes],
   );
 
   // EXECUTION_MODE_OPTIONS 常量已下线 —— 改用 getExecutionModeOptions(t) 适配 i18n
@@ -858,13 +866,9 @@ export default function FileTransferCenter() {
   }, [categories, selectedCategory]);
 
   useEffect(() => {
-    const preferredType = filteredTaskTypes[0];
-    if (!preferredType) {
-      setSelectedTypeCode('');
-      return;
-    }
-    if (!filteredTaskTypes.some((item) => item.typeCode === selectedTypeCode)) {
-      setSelectedTypeCode(preferredType.typeCode);
+    const nextTypeCode = resolveTaskTypeFilterValue(filteredTaskTypes, selectedTypeCode);
+    if (nextTypeCode !== selectedTypeCode) {
+      setSelectedTypeCode(nextTypeCode);
     }
   }, [filteredTaskTypes, selectedTypeCode]);
 
@@ -1301,7 +1305,6 @@ export default function FileTransferCenter() {
     setDrawerDevicePage(1);
     setDrawerDeviceKeyword('');
     setDrawerDeviceKeywordInput('');
-    setSelectedTypeCode(nextTypeCode);
     setTaskDrawerOpen(true);
   };
 
@@ -1500,12 +1503,16 @@ export default function FileTransferCenter() {
                         onSearch={(value) => setTaskKeyword(value.trim())}
                         style={{ width: 280 }}
                       />
-                      <Select
-                        value={selectedTypeCode}
-                        onChange={(value) => setSelectedTypeCode(value)}
-                        options={taskTypeOptions}
-                        style={{ width: 260 }}
-                      />
+                      {showTaskTypeFilter ? (
+                        <Select
+                          allowClear
+                          placeholder={t('ufte.filter.templateName')}
+                          value={selectedTypeCode}
+                          onChange={(value) => setSelectedTypeCode(value)}
+                          options={taskTypeOptions}
+                          style={{ width: 260 }}
+                        />
+                      ) : null}
                       <Select
                         allowClear
                         placeholder={t('ufte.filter.status')}
@@ -1600,12 +1607,16 @@ export default function FileTransferCenter() {
                         onSearch={(value) => setDeviceKeyword(value.trim())}
                         style={{ width: 280 }}
                       />
-                      <Select
-                        value={selectedTypeCode}
-                        onChange={(value) => setSelectedTypeCode(value)}
-                        options={taskTypeOptions}
-                        style={{ width: 260 }}
-                      />
+                      {showTaskTypeFilter ? (
+                        <Select
+                          allowClear
+                          placeholder={t('ufte.filter.templateName')}
+                          value={selectedTypeCode}
+                          onChange={(value) => setSelectedTypeCode(value)}
+                          options={taskTypeOptions}
+                          style={{ width: 260 }}
+                        />
+                      ) : null}
                       <Select
                         allowClear
                         showSearch
