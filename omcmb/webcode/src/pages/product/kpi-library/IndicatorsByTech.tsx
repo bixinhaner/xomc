@@ -38,6 +38,7 @@ interface Props {
 
 // 启用状态走 default 行(XML 真相源)
 const OPERATOR_CODE = 'default';
+const NAME_COLUMN_WIDTH = 240;
 
 export default function IndicatorsByTech({ deviceType, filter }: Props) {
   const t = useT();
@@ -69,9 +70,8 @@ export default function IndicatorsByTech({ deviceType, filter }: Props) {
 
   const columns = [
     { title: 'ID', dataIndex: 'id', width: 150 },
-    { title: t('common.cnName'), dataIndex: 'cnName', width: 200, ellipsis: true },
-    // 英文名作为弹性列吸收剩余宽度(ellipsis 防溢出)
-    { title: t('common.enName'), dataIndex: 'enName', ellipsis: true },
+    { title: t('common.cnName'), dataIndex: 'cnName', width: NAME_COLUMN_WIDTH, ellipsis: true },
+    { title: t('common.enName'), dataIndex: 'enName', width: NAME_COLUMN_WIDTH, ellipsis: true },
     {
       title: t('common.group'),
       dataIndex: 'groupName',

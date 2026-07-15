@@ -118,7 +118,15 @@ export const paramModelService = {
   },
 
   async createStandard(input: UpsertStandardInput): Promise<StandardParam> {
-    const created: StandardParam = { ...input, changeApplies: input.changeApplies || 'reload' };
+    if (standardParams.some((item) => item.standardPath === input.standardPath)) {
+      throw new Error(`参数 path "${input.standardPath}" 已存在，只能在原有记录上修改`);
+    }
+    const created: StandardParam = {
+      ...input,
+      changeApplies: input.changeApplies || 'reload',
+      updatedAt: new Date().toISOString(),
+      updatedFields: [],
+    };
     standardParams.push(created);
     return clone(created);
   },
@@ -126,7 +134,16 @@ export const paramModelService = {
   async updateStandard(path: string, input: UpsertStandardInput): Promise<StandardParam> {
     const idx = standardParams.findIndex((s) => s.standardPath === path);
     if (idx < 0) throw new Error(`standard ${path} not found`);
-    standardParams[idx] = { ...input, changeApplies: input.changeApplies || 'reload' };
+    const previous = standardParams[idx];
+    const next = { ...input, changeApplies: input.changeApplies || 'reload' };
+    const updatedFields = (Object.keys(next) as Array<keyof typeof next>).filter(
+      (key) => previous[key] !== next[key]
+    );
+    standardParams[idx] = {
+      ...next,
+      updatedAt: new Date().toISOString(),
+      updatedFields,
+    };
     return clone(standardParams[idx]);
   },
 

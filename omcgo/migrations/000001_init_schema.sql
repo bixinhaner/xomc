@@ -5852,6 +5852,7 @@ CREATE TABLE public.standard_params (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     description text DEFAULT ''::text NOT NULL,
+    updated_fields text[] DEFAULT '{}'::text[] NOT NULL,
     CONSTRAINT standard_params_entry_type_check CHECK (((entry_type)::text = ANY (ARRAY[('object'::character varying)::text, ('parameter'::character varying)::text])))
 );
 

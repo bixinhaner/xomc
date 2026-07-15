@@ -90,6 +90,8 @@ export const mockStandardParams: StandardParam[] = [
     access: 'readWrite',
     dataType: 'string',
     changeApplies: 'reload',
+    updatedAt: '2026-07-15T00:00:00Z',
+    updatedFields: [],
   },
   {
     standardPath: 'Device.Cellular.LTE.RAN.S1.AMFAddress',
@@ -97,6 +99,8 @@ export const mockStandardParams: StandardParam[] = [
     access: 'readWrite',
     dataType: 'string',
     changeApplies: 'immediate',
+    updatedAt: '2026-07-15T00:00:00Z',
+    updatedFields: [],
   },
   {
     standardPath: 'Device.Cellular.NR.gNB.{i}.CellID',
@@ -104,5 +108,7 @@ export const mockStandardParams: StandardParam[] = [
     access: 'readWrite',
     dataType: 'unsignedInt',
     changeApplies: 'reload',
+    updatedAt: '2026-07-15T00:00:00Z',
+    updatedFields: [],
   },
 ];

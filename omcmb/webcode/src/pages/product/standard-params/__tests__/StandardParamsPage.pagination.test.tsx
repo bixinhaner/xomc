@@ -53,6 +53,8 @@ const ITEMS: StandardParam[] = Array.from({ length: 120 }, (_, i) => ({
   changeApplies: 'reload',
   minValue: '',
   maxValue: '',
+  updatedAt: '2026-07-15T00:00:00Z',
+  updatedFields: [],
 })) as StandardParam[];
 
 vi.mock('@core/hooks/api/useParamModels', () => ({

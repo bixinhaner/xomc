@@ -60,6 +60,8 @@ interface BackendStandardParam {
   change_applies: string;
   min_value?: string;
   max_value?: string;
+  updated_at: string;
+  updated_fields?: string[];
 }
 
 interface BackendDiscoveredVersion {
@@ -124,6 +126,8 @@ function mapStandard(b: BackendStandardParam): StandardParam {
     changeApplies: b.change_applies,
     minValue: b.min_value,
     maxValue: b.max_value,
+    updatedAt: b.updated_at,
+    updatedFields: b.updated_fields ?? [],
   };
 }
 

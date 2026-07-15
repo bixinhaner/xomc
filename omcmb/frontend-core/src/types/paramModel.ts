@@ -48,6 +48,8 @@ export interface StandardParam {
   changeApplies: string;
   minValue?: string;
   maxValue?: string;
+  updatedAt: string;
+  updatedFields: string[];
 }
 
 // ISSUE-488: 标准参数树 dataType / changeApplies 枚举化 —— 共享业务模型。
