@@ -730,6 +730,14 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 		md.deadLetterHandler.RegisterRoutes(dlqAdmin)
 	}
 
+	// All optional modules have registered their routes at this point. Build the
+	// immutable Agent handbook from this instance's actual route inventory.
+	if err := agentRuntimeHandler.PrepareHandbook(); err != nil {
+		c.Logger.Warn("agent handbook preparation failed",
+			zap.Error(err),
+		)
+	}
+
 	// Inject gin routes into admin handler for SyncApiEndpoints
 	ad.adminHandler.SetGinRoutes(r.Routes())
 

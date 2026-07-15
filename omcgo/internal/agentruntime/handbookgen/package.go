@@ -20,6 +20,7 @@ const handbookPackageRoot = "references"
 func BuildPackage(skillRoot string) ([]byte, error) {
 	referencesDir := filepath.Join(skillRoot, handbookPackageRoot)
 	entries := make([]string, 0, 1024)
+	files := make(map[string][]byte, 1024)
 	err := filepath.WalkDir(referencesDir, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -38,7 +39,16 @@ func BuildPackage(skillRoot string) ([]byte, error) {
 		if err != nil {
 			return err
 		}
-		entries = append(entries, relative)
+		name := filepath.ToSlash(relative)
+		if !strings.HasPrefix(name, handbookPackageRoot+"/") {
+			return fmt.Errorf("handbook file escapes references: %s", name)
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read handbook file %s: %w", relative, err)
+		}
+		entries = append(entries, name)
+		files[name] = raw
 		return nil
 	})
 	if err != nil {
@@ -48,7 +58,10 @@ func BuildPackage(skillRoot string) ([]byte, error) {
 		return nil, fmt.Errorf("handbook references are empty")
 	}
 	sort.Strings(entries)
+	return buildPackageFiles(entries, files)
+}
 
+func buildPackageFiles(entries []string, files map[string][]byte) ([]byte, error) {
 	var output bytes.Buffer
 	gzipWriter, err := gzip.NewWriterLevel(&output, gzip.BestCompression)
 	if err != nil {
@@ -57,13 +70,13 @@ func BuildPackage(skillRoot string) ([]byte, error) {
 	gzipWriter.Header.ModTime = time.Unix(0, 0).UTC()
 	tarWriter := tar.NewWriter(gzipWriter)
 	for _, relative := range entries {
-		raw, err := os.ReadFile(filepath.Join(skillRoot, relative))
-		if err != nil {
-			return nil, closePackageWriters(tarWriter, gzipWriter, fmt.Errorf("read handbook file %s: %w", relative, err))
-		}
 		name := filepath.ToSlash(relative)
 		if !strings.HasPrefix(name, handbookPackageRoot+"/") {
 			return nil, closePackageWriters(tarWriter, gzipWriter, fmt.Errorf("handbook file escapes references: %s", name))
+		}
+		raw, ok := files[name]
+		if !ok {
+			return nil, closePackageWriters(tarWriter, gzipWriter, fmt.Errorf("handbook file %s is missing", name))
 		}
 		header := &tar.Header{
 			Name:       name,

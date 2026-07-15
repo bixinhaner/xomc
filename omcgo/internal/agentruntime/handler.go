@@ -75,6 +75,29 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/agent/chat/stream", h.ChatStream)
 }
 
+// PrepareHandbook builds and caches the immutable handbook for the complete
+// route set registered by this OMC instance.
+func (h *Handler) PrepareHandbook() error {
+	if h == nil || h.tools == nil {
+		return fmt.Errorf("agent handbook is unavailable")
+	}
+	h.tools.ensureRuntimeHandbook()
+	if h.tools.handbookErr != nil {
+		return h.tools.handbookErr
+	}
+	manifest, err := h.tools.handbookManifest()
+	if err != nil {
+		return err
+	}
+	h.logger.Info("agent handbook prepared",
+		zap.String("catalog_version", manifest.CatalogVersion),
+		zap.String("handbook_digest", manifest.HandbookDigest),
+		zap.Int("total_operations", manifest.TotalOperations),
+		zap.Int("archive_bytes", manifest.ArchiveBytes),
+	)
+	return nil
+}
+
 func (h *Handler) GetHandbookRoutes(c *gin.Context) {
 	response.OK(c, h.tools.HandbookRouteExport())
 }

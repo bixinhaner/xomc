@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -57,16 +58,16 @@ type ToolError struct {
 }
 
 type ToolExecutor struct {
-	handler     http.Handler
-	routes      RouteProvider
-	jwt         *admin.JWTService
-	handbook    *handbookPackage
-	handbookErr error
+	handler      http.Handler
+	routes       RouteProvider
+	jwt          *admin.JWTService
+	handbook     *handbookPackage
+	handbookErr  error
+	handbookOnce sync.Once
 }
 
 func NewToolExecutor(handler http.Handler, routes RouteProvider, jwt *admin.JWTService) *ToolExecutor {
-	handbook, err := loadEmbeddedHandbookPackage()
-	return &ToolExecutor{handler: handler, routes: routes, jwt: jwt, handbook: handbook, handbookErr: err}
+	return &ToolExecutor{handler: handler, routes: routes, jwt: jwt}
 }
 
 func (e *ToolExecutor) Execute(ctx context.Context, claims *admin.Claims, request ToolRequest, policy agentconfig.RuntimePolicy) ToolResult {
@@ -129,6 +130,7 @@ func (e *ToolExecutor) handbookManifest() (HandbookPackageManifest, error) {
 	if e == nil {
 		return HandbookPackageManifest{}, fmt.Errorf("handbook package is unavailable")
 	}
+	e.ensureRuntimeHandbook()
 	if e.handbookErr != nil {
 		return HandbookPackageManifest{}, e.handbookErr
 	}
@@ -139,10 +141,20 @@ func (e *ToolExecutor) handbookChunk(index int) (HandbookPackageChunk, error) {
 	if e == nil {
 		return HandbookPackageChunk{}, fmt.Errorf("handbook package is unavailable")
 	}
+	e.ensureRuntimeHandbook()
 	if e.handbookErr != nil {
 		return HandbookPackageChunk{}, e.handbookErr
 	}
 	return e.handbook.chunk(e.HandbookRouteExport(), index)
+}
+
+func (e *ToolExecutor) ensureRuntimeHandbook() {
+	e.handbookOnce.Do(func() {
+		if e.handbook != nil || e.handbookErr != nil {
+			return
+		}
+		e.handbook, e.handbookErr = buildRuntimeHandbookPackage(e.HandbookRouteExport())
+	})
 }
 
 func (e *ToolExecutor) callLocalAPI(

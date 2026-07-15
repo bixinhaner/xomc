@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/omcgo/omcgo/internal/agentruntime/handbookasset"
+	"github.com/omcgo/omcgo/internal/agentruntime/handbookgen"
 )
 
 const (
@@ -64,6 +65,57 @@ func loadEmbeddedHandbookPackage() (*handbookPackage, error) {
 		embeddedHandbook, embeddedHandbookErr = newHandbookPackage(handbookasset.Archive())
 	})
 	return embeddedHandbook, embeddedHandbookErr
+}
+
+func buildRuntimeHandbookPackage(routes HandbookRouteExport) (*handbookPackage, error) {
+	template, err := loadEmbeddedHandbookPackage()
+	if err != nil {
+		return nil, err
+	}
+	runtimeArchive, err := handbookgen.BuildRuntimePackage(template.archive, toHandbookgenRouteExport(routes))
+	if err != nil {
+		return nil, fmt.Errorf("build runtime handbook package: %w", err)
+	}
+	packaged, err := newHandbookPackage(runtimeArchive)
+	if err != nil {
+		return nil, fmt.Errorf("load runtime handbook package: %w", err)
+	}
+	if _, err := packaged.validatedManifest(routes); err != nil {
+		return nil, err
+	}
+	return packaged, nil
+}
+
+func toHandbookgenRouteExport(routes HandbookRouteExport) handbookgen.RouteExport {
+	converted := handbookgen.RouteExport{
+		SchemaVersion:  routes.SchemaVersion,
+		CatalogVersion: routes.CatalogVersion,
+		TotalRoutes:    routes.TotalRoutes,
+		Routes:         make([]handbookgen.Route, 0, len(routes.Routes)),
+	}
+	for _, route := range routes.Routes {
+		pathParams := make([]handbookgen.Parameter, 0, len(route.PathParams))
+		for _, parameter := range route.PathParams {
+			pathParams = append(pathParams, handbookgen.Parameter{
+				Name: parameter.Name, In: parameter.In, Required: parameter.Required,
+				Type: parameter.Type, Description: parameter.Description,
+			})
+		}
+		converted.Routes = append(converted.Routes, handbookgen.Route{
+			OperationID: route.OperationID,
+			Method:      route.Method,
+			Path:        route.Path,
+			Handler:     route.Handler,
+			Title:       route.Title,
+			Summary:     route.Summary,
+			Description: route.Description,
+			Category:    route.Category,
+			Risk:        route.Risk,
+			Tags:        append([]string(nil), route.Tags...),
+			PathParams:  pathParams,
+		})
+	}
+	return converted
 }
 
 func newHandbookPackage(archive []byte) (*handbookPackage, error) {
