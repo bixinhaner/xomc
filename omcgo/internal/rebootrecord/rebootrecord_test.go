@@ -65,7 +65,8 @@ func TestBuildUnionBackfillsSnapshotFieldsFromDeviceTables(t *testing.T) {
 	assert.Contains(t, sql, "COALESCE(NULLIF(el.device_name, ''), NULLIF(di.device_name, ''), d.site_name, '') AS device_name")
 	assert.Contains(t, sql, "COALESCE(NULLIF(CASE d.technology WHEN 'nr' THEN 'gNB' WHEN 'lte' THEN 'eNB' WHEN 'gsm' THEN 'GSM' ELSE '' END, ''), NULLIF(el.device_type, ''), '') AS device_type")
 	assert.Contains(t, sql, "COALESCE(NULLIF(NULLIF(el.operate_ip, ''), '0.0.0.0'), NULLIF(host(d.ip_address), '0.0.0.0'), '') AS operate_ip")
-	assert.Contains(t, sql, "COALESCE(NULLIF(el.software_version, ''), d.firmware_version, '') AS software_version")
+	assert.Contains(t, sql, "COALESCE(NULLIF(el.software_version, ''), '') AS software_version")
+	assert.NotContains(t, sql, "d.firmware_version, '') AS software_version")
 
 	assert.Contains(t, sql, "FROM station_fault_logs fl")
 	assert.Contains(t, sql, "LEFT JOIN devices fd ON fd.id = fl.device_id")
@@ -75,6 +76,8 @@ func TestBuildUnionBackfillsSnapshotFieldsFromDeviceTables(t *testing.T) {
 	assert.Contains(t, sql, "COALESCE(NULLIF(fl.device_name, ''), NULLIF(fdi.device_name, ''), fd.site_name, '') AS device_name")
 	assert.Contains(t, sql, "COALESCE(NULLIF(CASE fd.technology WHEN 'nr' THEN 'gNB' WHEN 'lte' THEN 'eNB' WHEN 'gsm' THEN 'GSM' ELSE '' END, ''), NULLIF(fl.device_type, ''), '') AS device_type")
 	assert.Contains(t, sql, "COALESCE(NULLIF(NULLIF(fl.operate_ip, ''), '0.0.0.0'), NULLIF(host(fd.ip_address), '0.0.0.0'), '') AS operate_ip")
+	assert.Contains(t, sql, "COALESCE(NULLIF(fl.software_version, ''), '') AS software_version")
+	assert.NotContains(t, sql, "fd.firmware_version, '') AS software_version")
 }
 
 func TestBuildUnionFiltersUseBackfilledSnapshotFields(t *testing.T) {

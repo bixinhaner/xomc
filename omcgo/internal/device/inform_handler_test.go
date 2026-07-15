@@ -571,6 +571,113 @@ func TestHandleRebootComplete_AutoRegisterWhenMissing(t *testing.T) {
 	assert.True(t, created, "expected auto-register to call Create")
 }
 
+func TestHandleRebootComplete_NormalRecordUsesPreRebootDeviceSnapshot(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &infMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{
+				ID:              deviceID,
+				SerialNumber:    sn,
+				DeviceName:      "BSC-before-reboot",
+				OUI:             "AABBCC",
+				Carrier:         model.CarrierCMCC,
+				Technology:      model.TechGSM,
+				Status:          model.DeviceActive,
+				LifecycleState:  model.LifecycleCommissioned,
+				IsOnline:        true,
+				IPAddress:       "172.21.172.109",
+				FirmwareVersion: "BaiBS_before",
+				InformInterval:  300,
+			}, nil
+		},
+		updateFn: func(_ context.Context, device *model.Device) error {
+			assert.Equal(t, "BaiBS_after", device.FirmwareVersion)
+			return nil
+		},
+		recordBootFn: func(_ context.Context, _ string, _ time.Time) (int, error) {
+			return 4, nil
+		},
+	}
+
+	rec := &infMockBootEventRecorder{}
+	svc := NewDeviceService(deviceRepo, &infMockParamRepo{}, nil, nil, zap.NewNop())
+	svc.SetBootEventRecorder(rec)
+	h := NewInformHandler(svc, nil, model.CarrierCMCC, zap.NewNop())
+
+	payload := sampleInformPayload("SN-PRE-REBOOT-NORMAL")
+	payload.Events = []string{tr069.EventBoot}
+	payload.ParameterList = []tr069.ParameterValueStruct{
+		{Name: "Device.DeviceInfo.SoftwareVersion", Value: "BaiBS_after"},
+		{Name: "Device.ManagementServer.ConnectionRequestURL", Value: "http://10.0.0.2:7547"},
+		{Name: "Device.DeviceInfo.ModelName", Value: "PicoCell-LTE"},
+	}
+	evt, err := event.NewEvent(event.SubjectDeviceRebootComplete, payload)
+	require.NoError(t, err)
+
+	err = h.handleRebootComplete(context.Background(), evt)
+	require.NoError(t, err)
+
+	require.Len(t, rec.calls, 1)
+	assert.Equal(t, "BaiBS_before", rec.calls[0].SoftwareVersion)
+	assert.Equal(t, "172.21.172.109", rec.calls[0].OperateIP)
+	assert.Equal(t, "GSM", rec.calls[0].DeviceType)
+	assert.Equal(t, "BSC-before-reboot", rec.calls[0].DeviceName)
+}
+
+func TestHandleRebootComplete_AbnormalRecordUsesPreRebootDeviceSnapshot(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &infMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{
+				ID:              deviceID,
+				SerialNumber:    sn,
+				DeviceName:      "BSC-before-abnormal",
+				OUI:             "AABBCC",
+				Carrier:         model.CarrierCMCC,
+				Technology:      model.TechGSM,
+				Status:          model.DeviceActive,
+				LifecycleState:  model.LifecycleCommissioned,
+				IsOnline:        true,
+				IPAddress:       "172.21.172.110",
+				FirmwareVersion: "BaiBS_before_abnormal",
+				InformInterval:  300,
+			}, nil
+		},
+		updateFn: func(_ context.Context, device *model.Device) error {
+			assert.Equal(t, "BaiBS_after_abnormal", device.FirmwareVersion)
+			return nil
+		},
+		recordBootFn: func(_ context.Context, _ string, _ time.Time) (int, error) {
+			return 6, nil
+		},
+	}
+
+	rec := &infMockAbnormalRebootRecorder{}
+	svc := NewDeviceService(deviceRepo, &infMockParamRepo{}, nil, nil, zap.NewNop())
+	svc.SetAbnormalRebootRecorder(rec)
+	h := NewInformHandler(svc, nil, model.CarrierCMCC, zap.NewNop())
+
+	payload := sampleInformPayload("SN-PRE-REBOOT-ABNORMAL")
+	payload.Events = []string{tr069.EventBoot}
+	payload.ParameterList = []tr069.ParameterValueStruct{
+		{Name: "Device.DeviceInfo.SoftwareVersion", Value: "BaiBS_after_abnormal"},
+		{Name: "Device.ManagementServer.ConnectionRequestURL", Value: "http://10.0.0.3:7547"},
+		{Name: "Device.DeviceInfo.ModelName", Value: "PicoCell-LTE"},
+		{Name: HaltReasonMainPath, Value: "halt_reboot"},
+	}
+	evt, err := event.NewEvent(event.SubjectDeviceRebootComplete, payload)
+	require.NoError(t, err)
+
+	err = h.handleRebootComplete(context.Background(), evt)
+	require.NoError(t, err)
+
+	require.Len(t, rec.calls, 1)
+	assert.Equal(t, "BaiBS_before_abnormal", rec.calls[0].SoftwareVersion)
+	assert.Equal(t, "172.21.172.110", rec.calls[0].OperateIP)
+	assert.Equal(t, "GSM", rec.calls[0].DeviceType)
+	assert.Equal(t, "BSC-before-abnormal", rec.calls[0].DeviceName)
+}
+
 type infMockAbnormalRebootRecorder struct {
 	calls []AbnormalRebootSnapshot
 }
