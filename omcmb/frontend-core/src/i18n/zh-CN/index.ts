@@ -102,6 +102,7 @@ const messages: Record<string, string> = {
   'common.1minute':        '1分钟',
   'common.5minutes':       '5分钟',
   'common.updateTime':     '更新时间',
+  'product.standardParams.col.updatedFields': '修改字段',
   'common.downloadInProgress': '正在下载...',
   'common.selectAll':      '全选',
   'common.unselectAll':    '取消全选',

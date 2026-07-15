@@ -169,7 +169,7 @@ func (h *Handler) RegisterWriteRoutes(rg *gin.RouterGroup) {
 	// 导入 XML:名称取自 XML paramModel 属性 + 重复二次确认覆盖(?force=true)→
 	// destructive 重载(全量+删孤儿)→ 刷新缓存,在单端点内顺序完成。
 	g.POST("/upload-xml", h.UploadXML)
-	g.POST("/standard", h.UpsertStandard)
+	g.POST("/standard", h.CreateStandard)
 	g.PUT("/standard/:path", h.UpdateStandard)
 	g.DELETE("/standard/:path", h.DeleteStandard)
 	g.PUT("/:name", h.UpdateModel)
@@ -939,13 +939,15 @@ func (h *Handler) DeleteDiscoveredVersion(c *gin.Context) {
 // ── Standard params ─────────────────────────────────────────────────
 
 type standardView struct {
-	StandardPath  string `json:"standard_path"`
-	EntryType     string `json:"entry_type"`
-	Access        string `json:"access"`
-	DataType      string `json:"data_type"`
-	ChangeApplies string `json:"change_applies"`
-	MinValue      *int64 `json:"min_value,omitempty"`
-	MaxValue      *int64 `json:"max_value,omitempty"`
+	StandardPath  string    `json:"standard_path"`
+	EntryType     string    `json:"entry_type"`
+	Access        string    `json:"access"`
+	DataType      string    `json:"data_type"`
+	ChangeApplies string    `json:"change_applies"`
+	MinValue      *int64    `json:"min_value,omitempty"`
+	MaxValue      *int64    `json:"max_value,omitempty"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	UpdatedFields []string  `json:"updated_fields"`
 }
 
 func toStandardView(sp *StandardParam) standardView {
@@ -953,6 +955,7 @@ func toStandardView(sp *StandardParam) standardView {
 		StandardPath: sp.StandardPath, EntryType: sp.EntryType,
 		Access: sp.Access, DataType: sp.DataType, ChangeApplies: sp.ChangeApplies,
 		MinValue: sp.MinValue, MaxValue: sp.MaxValue,
+		UpdatedAt: sp.UpdatedAt, UpdatedFields: sp.UpdatedFields,
 	}
 }
 
@@ -991,13 +994,13 @@ type upsertStandardReq struct {
 	MaxValue      *optInt64 `json:"max_value"`
 }
 
-func (h *Handler) UpsertStandard(c *gin.Context) {
+func (h *Handler) CreateStandard(c *gin.Context) {
 	var req upsertStandardReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	sp, err := h.repo.UpsertStandardParam(c.Request.Context(), UpsertStandardParamInput{
+	sp, err := h.repo.CreateStandardParam(c.Request.Context(), UpsertStandardParamInput{
 		StandardPath:  req.StandardPath,
 		EntryType:     req.EntryType,
 		Access:        req.Access,
@@ -1007,6 +1010,11 @@ func (h *Handler) UpsertStandard(c *gin.Context) {
 		MaxValue:      req.MaxValue.Ptr(),
 	})
 	if err != nil {
+		if errors.Is(err, ErrStandardParamExists) {
+			commonerrors.AbortWithError(c, http.StatusConflict,
+				fmt.Errorf("参数 path %q 已存在，只能在原有记录上修改", req.StandardPath))
+			return
+		}
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
@@ -1028,7 +1036,7 @@ func (h *Handler) UpdateStandard(c *gin.Context) {
 			fmt.Errorf("standard_path in body (%q) differs from URL (%q)", req.StandardPath, standardPath))
 		return
 	}
-	sp, err := h.repo.UpsertStandardParam(c.Request.Context(), UpsertStandardParamInput{
+	sp, err := h.repo.UpdateStandardParam(c.Request.Context(), UpsertStandardParamInput{
 		StandardPath:  req.StandardPath,
 		EntryType:     req.EntryType,
 		Access:        req.Access,
@@ -1038,6 +1046,10 @@ func (h *Handler) UpdateStandard(c *gin.Context) {
 		MaxValue:      req.MaxValue.Ptr(),
 	})
 	if err != nil {
+		if errors.Is(err, ErrStandardParamNotFound) {
+			commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
+			return
+		}
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}

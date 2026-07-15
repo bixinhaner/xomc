@@ -102,6 +102,7 @@ const messages: Record<string, string> = {
   'common.1minute':        '1min',
   'common.5minutes':       '5min',
   'common.updateTime':     'Update Time',
+  'product.standardParams.col.updatedFields': 'Modified Fields',
   'common.downloadInProgress': 'Downloading...',
   'common.selectAll':      'Select All',
   'common.unselectAll':    'Unselect All',

@@ -10,6 +10,7 @@ import (
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // 本文件提供 P3-02 handler 用的 CRUD/查询方法（独立于 Registry-only Repository 接口），
@@ -352,7 +353,7 @@ func (r *PgRepository) ListStandardParams(ctx context.Context, keyword string, e
 	psql := sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 	qb := psql.Select("standard_path", "entry_type",
 		"COALESCE(access,'')", "COALESCE(data_type,'')", "COALESCE(change_applies,'')",
-		"min_value", "max_value").
+		"min_value", "max_value", "updated_at", "COALESCE(updated_fields, ARRAY[]::text[])").
 		From("standard_params").
 		OrderBy("standard_path ASC")
 	if strings.TrimSpace(keyword) != "" {
@@ -377,12 +378,12 @@ func (r *PgRepository) ListStandardParams(ctx context.Context, keyword string, e
 func (r *PgRepository) GetStandardParam(ctx context.Context, standardPath string) (*StandardParam, error) {
 	const q = `SELECT standard_path, entry_type,
 	                 COALESCE(access,''), COALESCE(data_type,''), COALESCE(change_applies,''),
-	                 min_value, max_value
+	                 min_value, max_value, updated_at, COALESCE(updated_fields, ARRAY[]::text[])
 	          FROM standard_params WHERE standard_path = $1`
 	row := r.pool.QueryRow(ctx, q, standardPath)
 	var sp StandardParam
 	if err := row.Scan(&sp.StandardPath, &sp.EntryType, &sp.Access, &sp.DataType, &sp.ChangeApplies,
-		&sp.MinValue, &sp.MaxValue); err != nil {
+		&sp.MinValue, &sp.MaxValue, &sp.UpdatedAt, &sp.UpdatedFields); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("standard_path %q not found", standardPath)
 		}
@@ -391,7 +392,7 @@ func (r *PgRepository) GetStandardParam(ctx context.Context, standardPath string
 	return &sp, nil
 }
 
-// UpsertStandardParamInput 同时承载 Create 与 Update（按 standard_path UPSERT）。
+// UpsertStandardParamInput 同时承载 Create 与 Update 的字段。
 type UpsertStandardParamInput struct {
 	StandardPath  string
 	EntryType     string
@@ -402,30 +403,82 @@ type UpsertStandardParamInput struct {
 	MaxValue      *int64
 }
 
-// UpsertStandardParam 新建或更新单条 standard_param。
-func (r *PgRepository) UpsertStandardParam(ctx context.Context, in UpsertStandardParamInput) (*StandardParam, error) {
+var (
+	ErrStandardParamExists   = errors.New("standard_param already exists")
+	ErrStandardParamNotFound = errors.New("standard_param not found")
+)
+
+func isStandardPathUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" &&
+		pgErr.ConstraintName == "standard_params_standard_path_key"
+}
+
+func validateStandardParamInput(in UpsertStandardParamInput) error {
 	if strings.TrimSpace(in.StandardPath) == "" {
-		return nil, fmt.Errorf("standard_path required")
+		return fmt.Errorf("standard_path required")
 	}
 	if in.EntryType != "object" && in.EntryType != "parameter" {
-		return nil, fmt.Errorf("entry_type must be object|parameter")
+		return fmt.Errorf("entry_type must be object|parameter")
 	}
-	const upsertSQL = `
+	return nil
+}
+
+const createStandardParamSQL = `
 INSERT INTO standard_params (
     standard_path, entry_type, access, data_type, change_applies, min_value, max_value
 ) VALUES ($1, $2, NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), $6, $7)
-ON CONFLICT (standard_path) DO UPDATE
-SET entry_type     = EXCLUDED.entry_type,
-    access         = EXCLUDED.access,
-    data_type      = EXCLUDED.data_type,
-    change_applies = EXCLUDED.change_applies,
-    min_value      = EXCLUDED.min_value,
-    max_value      = EXCLUDED.max_value`
-	if _, err := r.pool.Exec(ctx, upsertSQL,
+`
+
+// CreateStandardParam 仅创建新 path。重复 path 必须由调用方走编辑接口，禁止覆盖。
+func (r *PgRepository) CreateStandardParam(ctx context.Context, in UpsertStandardParamInput) (*StandardParam, error) {
+	if err := validateStandardParamInput(in); err != nil {
+		return nil, err
+	}
+	if _, err := r.pool.Exec(ctx, createStandardParamSQL,
 		in.StandardPath, in.EntryType, in.Access, in.DataType, in.ChangeApplies,
 		in.MinValue, in.MaxValue,
 	); err != nil {
-		return nil, fmt.Errorf("upsert standard_param: %w", err)
+		if isStandardPathUniqueViolation(err) {
+			return nil, ErrStandardParamExists
+		}
+		return nil, fmt.Errorf("create standard_param: %w", err)
+	}
+	return r.GetStandardParam(ctx, in.StandardPath)
+}
+
+const updateStandardParamSQL = `
+UPDATE standard_params
+SET updated_fields = ARRAY_REMOVE(ARRAY[
+        CASE WHEN entry_type IS DISTINCT FROM $2 THEN 'entryType' END,
+        CASE WHEN access IS DISTINCT FROM NULLIF($3,'') THEN 'access' END,
+        CASE WHEN data_type IS DISTINCT FROM NULLIF($4,'') THEN 'dataType' END,
+        CASE WHEN change_applies IS DISTINCT FROM NULLIF($5,'') THEN 'changeApplies' END,
+        CASE WHEN min_value IS DISTINCT FROM $6 THEN 'minValue' END,
+        CASE WHEN max_value IS DISTINCT FROM $7 THEN 'maxValue' END
+    ]::text[], NULL),
+    entry_type     = $2,
+    access         = NULLIF($3,''),
+    data_type      = NULLIF($4,''),
+    change_applies = NULLIF($5,''),
+    min_value      = $6,
+    max_value      = $7
+WHERE standard_path = $1`
+
+// UpdateStandardParam 只更新已存在的 path，并记录最近一次发生变化的字段。
+func (r *PgRepository) UpdateStandardParam(ctx context.Context, in UpsertStandardParamInput) (*StandardParam, error) {
+	if err := validateStandardParamInput(in); err != nil {
+		return nil, err
+	}
+	tag, err := r.pool.Exec(ctx, updateStandardParamSQL,
+		in.StandardPath, in.EntryType, in.Access, in.DataType, in.ChangeApplies,
+		in.MinValue, in.MaxValue,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("update standard_param: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, ErrStandardParamNotFound
 	}
 	return r.GetStandardParam(ctx, in.StandardPath)
 }
@@ -480,7 +533,7 @@ func scanStandardParams(rows pgx.Rows) ([]StandardParam, error) {
 	for rows.Next() {
 		var sp StandardParam
 		if err := rows.Scan(&sp.StandardPath, &sp.EntryType, &sp.Access, &sp.DataType, &sp.ChangeApplies,
-			&sp.MinValue, &sp.MaxValue); err != nil {
+			&sp.MinValue, &sp.MaxValue, &sp.UpdatedAt, &sp.UpdatedFields); err != nil {
 			return nil, fmt.Errorf("scan standard_param: %w", err)
 		}
 		out = append(out, sp)

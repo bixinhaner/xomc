@@ -9,6 +9,7 @@ package parammodel
 
 import (
 	"encoding/xml"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -102,6 +103,8 @@ type StandardParam struct {
 	ChangeApplies string
 	MinValue      *int64
 	MaxValue      *int64
+	UpdatedAt     time.Time
+	UpdatedFields []string
 }
 
 // ── XML 解析结构（设计 §1.7 格式 A 与 D）────────────────────────────────

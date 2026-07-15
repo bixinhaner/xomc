@@ -37,6 +37,7 @@ import {
 import type { StandardParam, UpsertStandardInput } from '@core/types/paramModel';
 import { makeSeqColumn } from '@/components/Table/seqColumn';
 import SearchInput from '@/components/SearchInput';
+import { formatSystemTime } from '@core/utils/systemTime';
 import { useT } from '@/hooks/useT';
 import { nextPageOnPaginationChange } from './pagination';
 
@@ -129,6 +130,20 @@ export default function StandardParamsPage() {
     { title: t('product.standardParams.col.changeApplies'), dataIndex: 'changeApplies', width: 130 },
     { title: t('product.standardParams.col.min'), dataIndex: 'minValue', width: 80 },
     { title: t('product.standardParams.col.max'), dataIndex: 'maxValue', width: 80 },
+    {
+      title: t('common.updateTime'),
+      dataIndex: 'updatedAt',
+      width: 170,
+      render: (value: string) => formatSystemTime(value),
+    },
+    {
+      title: t('product.standardParams.col.updatedFields'),
+      dataIndex: 'updatedFields',
+      width: 220,
+      ellipsis: true,
+      render: (fields?: string[]) =>
+        fields && fields.length > 0 ? fields.join(', ') : '-',
+    },
     {
       title: t('common.action'),
       width: 120,
