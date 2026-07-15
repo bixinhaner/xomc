@@ -73,6 +73,7 @@ const TASK_RESULT_TAGS: Record<NonNullable<MMLTask['result']>, { color: string; 
 const TASK_RESULT_PAGE_SIZE = 20;
 const STARTABLE_TASK_STATUSES = new Set<MMLTaskStatus>(['pending', 'paused']);
 const CANCELLABLE_TASK_STATUSES = new Set<MMLTaskStatus>(['pending', 'running', 'paused']);
+const TASK_DETAIL_ACTIVE_STATUSES = new Set<MMLTaskStatus>(['pending', 'running', 'paused']);
 
 const DEVICE_RESULT_STATUS_TAGS: Record<string, { color: string; key: string }> = {
   pending: { color: 'default', key: 'mml.pendingStatus' },
@@ -436,7 +437,22 @@ export default function TaskRecord() {
   const [rawRow, setRawRow] = useState<DeviceTaskResultItem | null>(null);
   const [resultPage, setResultPage] = useState(1);
   const [exportingResults, setExportingResults] = useState(false);
-  const { data: resultsData, isLoading: resultsLoading } = useMMLTaskResults(viewing?.id ?? null, resultPage, TASK_RESULT_PAGE_SIZE);
+  const viewingTaskId = viewing?.id ?? null;
+  const viewedTaskFromList = useMemo(() => {
+    if (!viewingTaskId) return null;
+    return tasks.find((task) => task.id === viewingTaskId) ?? null;
+  }, [tasks, viewingTaskId]);
+  const viewedTask = viewedTaskFromList ?? viewing;
+  const isViewedTaskActive = Boolean(
+    viewedTaskFromList && TASK_DETAIL_ACTIVE_STATUSES.has(viewedTaskFromList.status)
+  );
+  const {
+    data: resultsData,
+    isLoading: resultsLoading,
+    isFetching: resultsFetching,
+  } = useMMLTaskResults(viewingTaskId, resultPage, TASK_RESULT_PAGE_SIZE, {
+    pollWhileTaskActive: isViewedTaskActive,
+  });
 
   const resultRows = useMemo<DeviceTaskResultItem[]>(
     () => (resultsData?.items ?? []),
@@ -444,15 +460,15 @@ export default function TaskRecord() {
   );
 
   const exportViewedTaskResults = useCallback(async () => {
-    if (!viewing) return;
+    if (!viewedTask) return;
     setExportingResults(true);
     try {
-      const rows = await fetchAllMmlTaskResults(viewing.id);
+      const rows = await fetchAllMmlTaskResults(viewedTask.id);
       if (rows.length === 0) {
         void message.warning(t('common.noDataToExport'));
         return;
       }
-      downloadMmlTaskResultsCsv(viewing, rows, t);
+      downloadMmlTaskResultsCsv(viewedTask, rows, t);
       void message.success(t('mml.taskRecord.exportCsvSuccess', { count: rows.length }));
     } catch (error) {
       const detail = getErrorMessage(error) || t('common.unknown');
@@ -460,7 +476,7 @@ export default function TaskRecord() {
     } finally {
       setExportingResults(false);
     }
-  }, [t, viewing]);
+  }, [t, viewedTask]);
 
   const renderCommandCompact = useCallback((command: string, maxTargetWidth = 220) => {
     const parsed = parseMmlCommandDisplay(command);
@@ -878,7 +894,7 @@ export default function TaskRecord() {
       />
 
       <Modal
-        title={viewing ? t('mml.executionResult', { name: viewing.taskName || viewing.id }) : t('common.view')}
+        title={viewedTask ? t('mml.executionResult', { name: viewedTask.taskName || viewedTask.id }) : t('common.view')}
         open={Boolean(viewing)}
         onCancel={() => {
           setViewing(null);
@@ -895,14 +911,14 @@ export default function TaskRecord() {
         width={1180}
         destroyOnHidden
       >
-        {viewing && (
+        {viewedTask && (
           <div style={{ minHeight: 360 }}>
             <Space wrap size={[8, 8]} style={{ marginBottom: 12 }}>
-              <Tag>{t('mml.status')}: {t(TASK_STATUS_TAGS[viewing.status]?.key ?? 'mml.status')}</Tag>
-              <Tag>{t('mml.taskOrigin')}: {t(TASK_ORIGIN_TAGS[viewing.taskOrigin]?.key ?? 'mml.taskOrigin')}</Tag>
-              <Tag>{t('mml.deviceCountLabel')}{viewing.totalDevices ?? 0}</Tag>
-              <Tag>{t('mml.successCountLabel')}{viewing.successCount ?? 0}</Tag>
-              <Tag>{t('mml.failedCountLabel')}{viewing.failedCount ?? 0}</Tag>
+              <Tag>{t('mml.status')}: {t(TASK_STATUS_TAGS[viewedTask.status]?.key ?? 'mml.status')}</Tag>
+              <Tag>{t('mml.taskOrigin')}: {t(TASK_ORIGIN_TAGS[viewedTask.taskOrigin]?.key ?? 'mml.taskOrigin')}</Tag>
+              <Tag>{t('mml.deviceCountLabel')}{viewedTask.totalDevices ?? 0}</Tag>
+              <Tag>{t('mml.successCountLabel')}{viewedTask.successCount ?? 0}</Tag>
+              <Tag>{t('mml.failedCountLabel')}{viewedTask.failedCount ?? 0}</Tag>
               <Button
                 aria-label={t('mml.taskRecord.exportCsv')}
                 size="small"
@@ -914,14 +930,14 @@ export default function TaskRecord() {
               </Button>
             </Space>
 
-            {resultRows.length === 0 && !resultsLoading ? (
+            {resultRows.length === 0 && !resultsLoading && !resultsFetching ? (
               <Empty description={t('mml.noExecutionResult')} />
             ) : (
               <Table<DeviceTaskResultItem>
                 size="small"
                 columns={resultColumns}
                 dataSource={resultRows}
-                loading={resultsLoading}
+                loading={resultsLoading || resultsFetching}
                 pagination={false}
                 rowKey={(row, index) => row.deviceTaskId || `${row.deviceSn}-${row.commandIndex ?? index}`}
                 scroll={{ x: 1520, y: 360 }}

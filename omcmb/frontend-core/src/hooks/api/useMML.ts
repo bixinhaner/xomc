@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type {
+  DeviceResultStatus,
   DeviceTaskResultItem,
   MMLScript,
   MMLCustomCommand,
@@ -19,11 +20,23 @@ import { createApiSwitch } from '../../services/apiSwitch';
 const api = createApiSwitch(mmlService, mmlApi);
 
 export const MML_TASK_LIST_ACTIVE_REFETCH_INTERVAL_MS = 3000;
+export const MML_TASK_RESULTS_ACTIVE_REFETCH_INTERVAL_MS = 3000;
 const MML_TASK_LIST_ACTIVE_STATUSES = new Set<MMLTaskStatus>(['pending', 'running', 'paused']);
+const MML_TASK_RESULT_ACTIVE_STATUSES = new Set<DeviceResultStatus>(['pending', 'running']);
 
 export function getMMLTasksRefetchInterval(data?: { items?: Array<Pick<MMLTask, 'status'>> }) {
   const hasActiveTask = data?.items?.some((task) => MML_TASK_LIST_ACTIVE_STATUSES.has(task.status)) ?? false;
   return hasActiveTask ? MML_TASK_LIST_ACTIVE_REFETCH_INTERVAL_MS : false;
+}
+
+export function getMMLTaskResultsRefetchInterval(
+  data?: { items?: Array<Pick<DeviceTaskResultItem, 'status'>> },
+  pollWhileTaskActive = false,
+) {
+  const hasActiveResult = data?.items?.some((row) => (
+    row.status ? MML_TASK_RESULT_ACTIVE_STATUSES.has(row.status) : false
+  )) ?? false;
+  return pollWhileTaskActive || hasActiveResult ? MML_TASK_RESULTS_ACTIVE_REFETCH_INTERVAL_MS : false;
 }
 
 export function useMMLCommands(params: { keyword?: string; category?: string } & PageRequest) {
@@ -316,11 +329,21 @@ export function useMMLTaskPolling(taskId: string | null, enabled: boolean) {
   });
 }
 
-export function useMMLTaskResults(taskId: string | null, page = 1, pageSize = 50) {
+export function useMMLTaskResults(
+  taskId: string | null,
+  page = 1,
+  pageSize = 50,
+  options?: { pollWhileTaskActive?: boolean },
+) {
   return useQuery({
     queryKey: ['mml', 'tasks', taskId, 'results', page, pageSize],
     queryFn: () => api.getTaskResults(taskId!, page, pageSize),
     enabled: Boolean(taskId),
+    refetchInterval: (query) => getMMLTaskResultsRefetchInterval(
+      query.state.data,
+      options?.pollWhileTaskActive ?? false,
+    ),
+    refetchIntervalInBackground: false,
   });
 }
 
