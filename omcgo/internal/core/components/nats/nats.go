@@ -42,6 +42,9 @@ func DefaultStreams() []StreamDef {
 		{Name: "DEVICE", Subjects: []string{"device.>"}, Retention: nats.InterestPolicy},
 		{Name: "COMMAND", Subjects: []string{"command.>"}, Retention: nats.InterestPolicy},
 		{Name: "TASK", Subjects: []string{"task.>"}, Retention: nats.InterestPolicy},
+		// Parameter-sync task results and run terminal events fan out to the
+		// result processor, provisioning bindings, and operational consumers.
+		{Name: "PARAM_SYNC", Subjects: []string{"param_sync.>"}, Retention: nats.InterestPolicy},
 		{Name: "PM", Subjects: []string{"pm.>"}, Retention: nats.WorkQueuePolicy},
 		{Name: "MR", Subjects: []string{"mr.>"}, Retention: nats.WorkQueuePolicy},
 		{Name: "ALARM", Subjects: []string{"alarm.>"}, Retention: nats.WorkQueuePolicy},

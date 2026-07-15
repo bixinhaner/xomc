@@ -24,6 +24,20 @@ type GPVBatcher interface {
 	EnqueueGPVBatches(ctx context.Context, deviceSN string, paramPaths []string, sourceID string) ([]string, error)
 }
 
+type DurablePullResult struct {
+	RequestID    string
+	RunID        string
+	TaskCount    int
+	Handled      bool
+	Status       string
+	ResultCode   string
+	ErrorMessage string
+}
+
+type DurablePullSubmitter interface {
+	SubmitConfigPull(ctx context.Context, deviceSN string, paths []string, idempotencyKey string) (DurablePullResult, error)
+}
+
 // DeviceExistenceChecker 是 push/pull 入队前做设备存在性预检的窄接口
 // （避免 config → device 强耦合，DI 时按接口注入 device.DeviceRepository）。
 // ExistsBySerialNumber 返回 (true,nil) 表示设备存在；(false,nil) 表示不存在；
@@ -36,8 +50,14 @@ type DeviceExistenceChecker interface {
 type SyncHandler struct {
 	taskSvc    task.Enqueuer
 	gpvBatcher GPVBatcher
+	durable    DurablePullSubmitter
 	deviceChk  DeviceExistenceChecker
 	logger     *zap.Logger
+}
+
+func (h *SyncHandler) WithDurablePullSubmitter(submitter DurablePullSubmitter) *SyncHandler {
+	h.durable = submitter
+	return h
 }
 
 // NewSyncHandler creates a new SyncHandler.
@@ -185,6 +205,35 @@ func (h *SyncHandler) PullConfig(c *gin.Context) {
 	// 设备存在性预检：不存在则 404，避免合法 body 入队产生孤儿任务（issue #126 第3项）。
 	if !h.ensureDeviceExists(c, deviceID) {
 		return
+	}
+
+	if h.durable != nil {
+		key := c.GetHeader("Idempotency-Key")
+		result, err := h.durable.SubmitConfigPull(c.Request.Context(), deviceID, req.ParameterNames, key)
+		if err != nil {
+			logger.L(c.Request.Context()).Error("submit durable config pull", zap.String("device_id", deviceID), zap.Error(err))
+			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+			return
+		}
+		if result.Handled {
+			if result.Status == "rejected" {
+				status := http.StatusConflict
+				if result.ResultCode == "PATH_B_UNAVAILABLE" {
+					status = http.StatusServiceUnavailable
+				}
+				message := result.ErrorMessage
+				if message == "" {
+					message = "configuration pull rejected: " + result.ResultCode
+				}
+				response.Fail(c, status, message)
+				return
+			}
+			response.OKWithMsg(c, gin.H{
+				"device_id": deviceID, "command_id": result.RunID, "request_id": result.RequestID,
+				"run_id": result.RunID, "batch_count": result.TaskCount, "status": result.Status,
+			}, "configuration pull queued")
+			return
+		}
 	}
 
 	if h.gpvBatcher != nil {

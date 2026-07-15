@@ -47,6 +47,16 @@ func (s *SyncService) PathBEnabled(ctx context.Context, dev *model.Device) bool 
 // 返回 (true, nil) 表示已切到 Path B；(false, nil) 表示无法走新栈，调用方应降级旧栈；
 // (false, err) 表示新栈选中后执行出错（不再降级，由 engine 处理）。
 func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sourceID string, opts ...PathBOption) (bool, int, error) {
+	var pbOpts pathBOptions
+	for _, opt := range opts {
+		opt(&pbOpts)
+	}
+	if s.durableStarter != nil {
+		handled, taskCount, err := s.durableStarter.StartDurableSync(ctx, dev, sourceID, pbOpts.reason, pbOpts.parameterPaths)
+		if err != nil || handled {
+			return handled, taskCount, err
+		}
+	}
 	matchedProduct, ok := s.resolveMatchedProduct(ctx, dev)
 	if !ok {
 		return false, 0, nil
@@ -56,10 +66,6 @@ func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sou
 		return false, 0, nil
 	}
 
-	var pbOpts pathBOptions
-	for _, opt := range opts {
-		opt(&pbOpts)
-	}
 	fullSync := len(pbOpts.parameterPaths) == 0
 	if strings.TrimSpace(sourceID) == "" {
 		sourceID = uuid.NewString()
@@ -885,6 +891,13 @@ func extractStorablePrefixes(mappings []parammodel.ParamMapping) []string {
 	return out
 }
 
+// PathBStorablePrefixes exposes the established Path B selection algorithm to
+// the durable parameter-sync scheduler. Keeping one implementation prevents
+// the legacy and durable schedulers from drifting on template normalization.
+func PathBStorablePrefixes(mappings []parammodel.ParamMapping) []string {
+	return extractStorablePrefixes(mappings)
+}
+
 func extractStorablePrefixesForStandardPaths(mappings []parammodel.ParamMapping, standardPaths []string) []string {
 	seen := make(map[string]struct{}, len(mappings))
 	for _, m := range mappings {
@@ -912,6 +925,12 @@ func extractStorablePrefixesForStandardPaths(mappings []parammodel.ParamMapping,
 		}
 	}
 	return out
+}
+
+// PathBStorablePrefixesForStandardPaths exposes the established scoped Path B
+// selection algorithm for partial/readback durable syncs.
+func PathBStorablePrefixesForStandardPaths(mappings []parammodel.ParamMapping, standardPaths []string) []string {
+	return extractStorablePrefixesForStandardPaths(mappings, standardPaths)
 }
 
 func scopedPrefixForStandardPaths(privatePath, standardPath string, targets []string) (string, bool) {
@@ -944,17 +963,58 @@ func instantiatePrivateObjectPrefix(privatePath, standardPath, targetPrefix stri
 	privateParts := strings.Split(strings.TrimSuffix(privatePath, "."), ".")
 	standardParts := strings.Split(strings.TrimSuffix(standardPath, "."), ".")
 	targetParts := strings.Split(strings.TrimSuffix(targetPrefix, "."), ".")
-	if len(targetParts) > len(privateParts) || len(targetParts) > len(standardParts) {
+	if len(targetParts) > len(standardParts) {
 		return privatePath
 	}
-	out := make([]string, len(targetParts))
+	instances := make([]string, 0, 2)
 	for i := range targetParts {
-		out[i] = privateParts[i]
 		if standardParts[i] == "{i}" && targetParts[i] != "{i}" {
-			out[i] = targetParts[i]
+			instances = append(instances, targetParts[i])
+		}
+	}
+	end := correspondingPathTemplateEnd(standardParts, privateParts, len(targetParts)-1)
+	if end < 0 {
+		return privatePath
+	}
+	out := append([]string(nil), privateParts[:end+1]...)
+	instanceIndex := 0
+	for i := range out {
+		if out[i] == "{i}" && instanceIndex < len(instances) {
+			out[i] = instances[instanceIndex]
+			instanceIndex++
 		}
 	}
 	return strings.Join(out, ".") + "."
+}
+
+func correspondingPathTemplateEnd(from, to []string, fromEnd int) int {
+	if fromEnd < 0 || fromEnd >= len(from) {
+		return -1
+	}
+	if from[fromEnd] == "{i}" {
+		ordinal := 0
+		for i := 0; i <= fromEnd; i++ {
+			if from[i] == "{i}" {
+				ordinal++
+			}
+		}
+		seen := 0
+		for i, part := range to {
+			if part == "{i}" {
+				seen++
+				if seen == ordinal {
+					return i
+				}
+			}
+		}
+		return -1
+	}
+	for i := len(to) - 1; i >= 0; i-- {
+		if to[i] == from[fromEnd] {
+			return i
+		}
+	}
+	return -1
 }
 
 func instantiatePrivatePathFromStandardTarget(privatePath, standardPath, target string) string {

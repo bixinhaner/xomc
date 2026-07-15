@@ -120,8 +120,13 @@ func Setup(r *gin.Engine, c *Container) error {
 		Init:    func() error { return initUFTEModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{
+		Name:    "paramsync",
+		Depends: []string{"device", "task", "paramregistry", "productregistry"},
+		Init:    func() error { return initParamSyncModule(c) },
+	})
+	graph.Add(components.ModuleInitializer{
 		Name:    "provision",
-		Depends: []string{"device", "config"},
+		Depends: []string{"device", "config", "paramsync"},
 		Init:    func() error { return initProvisionModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{
@@ -390,6 +395,9 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	deviceHandler := device.NewHandler(c.DeviceService)
 	deviceHandler.SetPermissionService(c.PermService)
 	deviceHandler.RegisterRoutes(permGroup("devices"))
+	if c.miscDeps.paramSyncHandler != nil {
+		c.miscDeps.paramSyncHandler.RegisterRoutes(permGroup("devices"))
+	}
 
 	deviceInfoHandler := device.NewDeviceInfoHandler(c.DeviceService)
 	deviceInfoHandler.SetPermissionService(c.PermService)

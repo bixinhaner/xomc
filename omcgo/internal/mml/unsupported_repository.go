@@ -46,10 +46,10 @@ func (r *PgProductUnsupportedPathRepository) Record(
 		return nil
 	}
 	query, args, err := sq.Insert("product_unsupported_paths").
-		Columns("product_id", "standard_path", "read_unsupported", "write_unsupported",
+		Columns("product_id", "firmware_version", "standard_path", "read_unsupported", "write_unsupported",
 			"last_fault_code", "last_device_sn").
-		Values(productID, standardPath, readUnsupported, writeUnsupported, faultCode, deviceSN).
-		Suffix(`ON CONFLICT (product_id, standard_path) DO UPDATE SET
+		Values(productID, "", standardPath, readUnsupported, writeUnsupported, faultCode, deviceSN).
+		Suffix(`ON CONFLICT (product_id, firmware_version, standard_path) DO UPDATE SET
             read_unsupported  = product_unsupported_paths.read_unsupported  OR EXCLUDED.read_unsupported,
             write_unsupported = product_unsupported_paths.write_unsupported OR EXCLUDED.write_unsupported,
             last_fault_code   = EXCLUDED.last_fault_code,
@@ -74,10 +74,10 @@ func (r *PgProductUnsupportedPathRepository) ListByProduct(
 	if productID == uuid.Nil {
 		return nil, nil
 	}
-	query, args, err := sq.Select("standard_path", "read_unsupported", "write_unsupported").
+	query, args, err := sq.Select("standard_path", "bool_or(read_unsupported)", "bool_or(write_unsupported)").
 		From("product_unsupported_paths").
 		Where(sq.Eq{"product_id": productID}).
-		OrderBy("standard_path").
+		GroupBy("standard_path").OrderBy("standard_path").
 		PlaceholderFormat(sq.Dollar).
 		ToSql()
 	if err != nil {

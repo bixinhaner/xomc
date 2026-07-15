@@ -27,6 +27,11 @@ function isParameterSyncAlreadyRunningError(err: unknown) {
   return code === 1305 || code === 1205 || msg.includes('parameter sync already running');
 }
 
+function extractUnsupportedParameter(error?: string) {
+  if (!error || (!error.includes('ExtendedKey') && !error.includes('9005'))) return undefined;
+  return error.match(/['"]((?:Device|InternetGatewayDevice|boardconf)\.[^'"]+)['"]/)?.[1];
+}
+
 interface ParameterTreeTabProps {
   deviceId: string;
   lastScopedSync?: { targetCount: number; gpvTaskCount: number; completedAt?: string; wallClockSeconds?: number } | null;
@@ -87,6 +92,11 @@ export default function ParameterTreeTab({ deviceId, lastScopedSync, syncBusy: e
   const isLastScopedSync = Boolean(
     lastScopedSync?.targetCount && lastScopedSync.completedAt === effectiveLastParamSyncAt,
   );
+  const skippedPathCount = syncStatus?.lastSyncGpv?.failedPathCount ?? 0;
+  const skippedPaths = (syncStatus?.lastSyncGpv?.failedPaths ?? [])
+    .map((item) => item.path)
+    .filter(Boolean);
+  const unsupportedFailurePath = extractUnsupportedParameter(syncStatus?.lastParamSyncError);
   const addObjectMutation = useAddObject();
   const deleteObjectMutation = useDeleteObject();
 
@@ -235,10 +245,24 @@ export default function ParameterTreeTab({ deviceId, lastScopedSync, syncBusy: e
           showIcon
           style={{ marginBottom: 16 }}
           message={t('device.paramTree.lastSyncFailed', { time: formatSyncAge(syncStatus.lastParamSyncFailedAt) })}
-          description={`${syncStatus.lastParamSyncError || t('device.paramTree.noErrorDetail')} ${t('device.paramTree.syncResultCounts', {
+          description={`${unsupportedFailurePath
+            ? t('device.paramTree.unsupportedParameter', { path: unsupportedFailurePath })
+            : syncStatus.lastParamSyncError || t('device.paramTree.noErrorDetail')} ${t('device.paramTree.syncResultCounts', {
             success: syncStatus.lastSyncGpv?.successfulPathCount ?? 0,
             failed: syncStatus.lastSyncGpv?.failedPathCount ?? 0,
           })}`}
+        />
+      )}
+
+      {!syncStatus?.lastParamSyncFailedAt && !isSyncing && effectiveLastParamSyncAt && skippedPathCount > 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message={t('device.paramTree.syncCompletedWithSkipped', { count: skippedPathCount })}
+          description={skippedPaths.length > 0
+            ? t('device.paramTree.skippedPaths', { paths: skippedPaths.slice(0, 3).join('、') })
+            : undefined}
         />
       )}
 

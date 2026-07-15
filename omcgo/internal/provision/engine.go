@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"strings"
 	"sync"
 	"time"
 
@@ -739,7 +740,7 @@ func (e *ProvisioningEngine) handleAutoSync(ctx context.Context, task *Provision
 		return e.failTask(ctx, task, fmt.Errorf("transition to syncing: %w", err))
 	}
 
-	used, _, err := e.syncService.StartPathBSync(ctx, dev, task.ID.String())
+	used, _, err := e.syncService.StartPathBSync(ctx, dev, task.ID.String(), WithReason("bootstrap"))
 	if err != nil {
 		return e.failTask(ctx, task, fmt.Errorf("start path-b sync: %w", err))
 	}
@@ -1039,7 +1040,7 @@ func (e *ProvisioningEngine) handleDataModelFileReceived(ctx context.Context, ev
 		if pt, _ := e.taskRepo.GetByDeviceID(ctx, dev.ID); pt != nil {
 			sourceID = pt.ID.String()
 		}
-		if used, _, syncErr := e.syncService.StartPathBSync(ctx, dev, sourceID); syncErr != nil {
+		if used, _, syncErr := e.syncService.StartPathBSync(ctx, dev, sourceID, WithReason("model_upload")); syncErr != nil {
 			e.logger.Warn("path-b auto-sync after model upload failed",
 				zap.Error(syncErr),
 				zap.String("device_sn", payload.DeviceSN),
@@ -1063,6 +1064,8 @@ type gpvResponsePayload struct {
 	DeviceSN        string                       `json:"device_sn"`
 	Method          string                       `json:"method"`
 	CommandKey      string                       `json:"command_key,omitempty"`
+	TaskSource      task.TaskSource              `json:"task_source,omitempty"`
+	TaskSourceID    string                       `json:"task_source_id,omitempty"`
 	ParameterValues []tr069.ParameterValueStruct `json:"parameter_values"`
 }
 
@@ -1165,6 +1168,17 @@ func (e *ProvisioningEngine) handleGPVResponse(ctx context.Context, evt event.Ev
 }
 
 func (e *ProvisioningEngine) handleGPVPayload(ctx context.Context, payload gpvResponsePayload) error {
+	// Durable parameter-sync owns its result persistence and finalization. The
+	// legacy provisioning consumer must not write the same response directly to
+	// device_parameters or update last_param_sync_at. CommandKey is retained as
+	// a compatibility guard for fault events emitted by older ACS instances.
+	if payload.TaskSource == task.TaskSourceParamSync || strings.HasPrefix(payload.CommandKey, "param-sync-") {
+		e.logger.Debug("skip durable parameter-sync response in legacy Path B",
+			zap.String("device_sn", payload.DeviceSN),
+			zap.String("task_source_id", payload.TaskSourceID),
+		)
+		return nil
+	}
 	e.logger.Info("received GPV response",
 		zap.String("device_sn", payload.DeviceSN),
 		zap.Int("parameter_count", len(payload.ParameterValues)),

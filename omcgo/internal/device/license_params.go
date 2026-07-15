@@ -4,11 +4,11 @@
 // `Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.*`），承载该设备
 // 当前的授权 / 容量 / 过期 等参数。本文件提供 2 个能力：
 //
-//   1. ListLicenseParams — 取设备 device_parameters 表里所有 path 含 LICENSE
-//      关键字的参数行，用 ParamRegistry Translator 反向把 privatePath 翻译为
-//      OMC 标准 path，返回给前端展示
-//   2. TriggerLicenseRefresh — 收到刷新按钮点击后异步下发 GPV，让 CPE 返回最
-//      新 license 子树值；30s Redis 锁防抖
+//  1. ListLicenseParams — 取设备 device_parameters 表里所有 path 含 LICENSE
+//     关键字的参数行，用 ParamRegistry Translator 反向把 privatePath 翻译为
+//     OMC 标准 path，返回给前端展示
+//  2. TriggerLicenseRefresh — 收到刷新按钮点击后异步下发 GPV，让 CPE 返回最
+//     新 license 子树值；30s Redis 锁防抖
 //
 // 设计取舍：
 //   - GET 端点不返回 privatePath（厂商实现细节，不跨 API 边界，user 决策）
@@ -77,12 +77,11 @@ type LicenseRefreshResult struct {
 	Reason      string `json:"reason"`      // sourceID 标签，固定 "manual_license_refresh"
 }
 
-// SyncStarter — license_params service 消费侧 narrow interface。
-//
-// 由 *provision.SyncService 满足；NewLicenseParamService caller 端在 modules.go
-// wiring 时把 syncService 包成本接口注入（避免反向依赖 provision 包）。
-type SyncStarter interface {
-	StartSync(ctx context.Context, dev *model.Device, paramPaths []string, sourceID string) error
+// LicenseSyncStarter is the consumer-owned boundary to the durable parameter
+// sync data plane. License refreshes must not pass through provision.SyncService
+// or the legacy Path B scheduler.
+type LicenseSyncStarter interface {
+	StartLicenseSync(ctx context.Context, dev *model.Device, paramPaths []string, sourceID string) (int, error)
 }
 
 // LicenseParamService 设备 license 参数业务编排。
@@ -91,7 +90,7 @@ type LicenseParamService struct {
 	paramRepo       DeviceParameterRepository
 	productRegistry *product.Registry
 	paramRegistry   *parammodel.Registry
-	syncStarter     SyncStarter
+	syncStarter     LicenseSyncStarter
 	redis           redis.UniversalClient
 	logger          *zap.Logger
 }
@@ -105,7 +104,7 @@ func NewLicenseParamService(
 	paramRepo DeviceParameterRepository,
 	productRegistry *product.Registry,
 	paramRegistry *parammodel.Registry,
-	syncStarter SyncStarter,
+	syncStarter LicenseSyncStarter,
 	redisClient redis.UniversalClient,
 	logger *zap.Logger,
 ) *LicenseParamService {
@@ -191,7 +190,7 @@ func (s *LicenseParamService) ListLicenseParams(ctx context.Context, deviceID uu
 //  2. 取 device + ProductRegistry/ParamRegistry 拿映射集
 //  3. 从 mapping 集合提取 license 子树 partial prefix（截到 `LICENSE.` 父对象）
 //  4. {i} 替换为 1（FAPService 通常单实例）+ unique
-//  5. 调 syncStarter.StartSync 分批入队 GPV
+//  5. 调 durable parameter-sync data plane 分批入队 GPV
 //
 // 错误：
 //   - device 不存在 → ErrCodeDeviceNotFound (404)
@@ -252,7 +251,8 @@ func (s *LicenseParamService) TriggerLicenseRefresh(ctx context.Context, deviceI
 	}
 
 	sourceID := newManualLicenseRefreshSourceID()
-	if err := s.syncStarter.StartSync(ctx, dev, prefixes, sourceID); err != nil {
+	taskCount, err := s.syncStarter.StartLicenseSync(ctx, dev, prefixes, sourceID)
+	if err != nil {
 		return nil, fmt.Errorf("start GPV for license prefixes: %w", err)
 	}
 	keepLock = true
@@ -264,7 +264,7 @@ func (s *LicenseParamService) TriggerLicenseRefresh(ctx context.Context, deviceI
 
 	return &LicenseRefreshResult{
 		PrefixCount: len(prefixes),
-		TaskCount:   len(prefixes), // 实际批数由 syncStarter 决定；上层 UI 仅展示 prefix 数
+		TaskCount:   taskCount,
 		Reason:      "manual_license_refresh",
 	}, nil
 }

@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/acs/auth"
 	"github.com/omcgo/omcgo/internal/acs/rpc"
 	"github.com/omcgo/omcgo/internal/acs/rpclog"
@@ -48,6 +49,8 @@ type ConnectionRequester interface {
 
 // SessionCookieName TR069 会话 ID 的 Cookie 名称
 const SessionCookieName = "SESSION"
+
+const maxStaleTaskSkipsPerDispatch = 256
 
 // connSessionEntry 连接级会话绑定，记录创建时间用于 TTL 清理。
 type connSessionEntry struct {
@@ -111,7 +114,9 @@ type Handler struct {
 	deviceSessionStore DeviceSessionStore
 	// #746: 心跳周期自动调整策略。设备 BOOTSTRAP/BOOT 时入队 GPV 查询当前心跳周期，
 	// 与配置目标值比较后决定是否入队 SPV 调整。nil 时功能关闭（不影响 Inform 处理）。
-	informPeriodPolicy *InformPeriodPolicy
+	informPeriodPolicy     *InformPeriodPolicy
+	gpvFaultRecoverer      GPVFaultRecoverer
+	durableReadbackEnabled bool
 }
 
 // sessionRPCLimitReached 判断会话是否已达到单会话 RPC 上限。
@@ -573,7 +578,12 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 	// #746: 心跳周期自动调整 — BOOTSTRAP/BOOT 事件时入队 GPV 查询当前心跳周期。
 	// GPV 响应后由 handleRPCResponse 中的 processInformPeriodGPV 比较并决定是否 SPV。
 	if h.informPeriodPolicy.ShouldTrigger(eventCodes) {
-		if err := h.informPeriodPolicy.EnqueueGPVTask(r.Context(), deviceSN, inform.DeviceId.ProductClass); err != nil {
+		productClass := inform.DeviceId.ProductClass
+		if h.durableReadbackEnabled && h.informPeriodPolicy.ShouldProbe(r.Context(), productClass) &&
+			h.requestDurableReadback(r.Context(), deviceSN, "inform_period_probe",
+				[]string{"Device.ManagementServer.PeriodicInformInterval"}, "inform-period:"+deviceSN+":"+sessionID, log) {
+			// Durable request accepted by NATS; APP plans the GPV task.
+		} else if err := h.informPeriodPolicy.EnqueueGPVTask(r.Context(), deviceSN, productClass); err != nil {
 			log.Warn("enqueue inform period GPV task failed (non-blocking)",
 				zap.String("device_sn", deviceSN),
 				zap.Error(err))
@@ -658,20 +668,13 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 		return
 	}
 
-	// 尝试从统一任务队列获取下一个任务
-	taskItem, err := h.taskService.PopTask(r.Context(), deviceSN)
+	// 尝试从统一任务队列获取下一个仍满足 PG pending fence 的任务。
+	taskItem, cwmpID, err := h.popAndMarkNextTask(r.Context(), deviceSN, log)
 	if err != nil {
-		log.Error("pop task from queue", zap.Error(err))
+		log.Error("pop sendable task from queue", zap.Error(err))
 	} else if taskItem != nil {
 		// standardPath → privatePath 翻译（T-XXX：翻译职责从 App fanout 迁移到 ACS）
 		h.translateTaskParamsInPlace(r.Context(), taskItem, log)
-		// 为此任务生成 CWMP ID
-		cwmpID := task.GenerateCWMPID(taskItem.Method)
-
-		// 标记任务已发送
-		if err := h.taskService.MarkTaskSent(r.Context(), taskItem.ID, cwmpID); err != nil {
-			log.Error("mark task sent", zap.Error(err), zap.String("task_id", taskItem.ID))
-		}
 
 		// 更新会话状态
 		session.State = StateRPCPending
@@ -851,6 +854,8 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 			if !h.tryRecoverGPVFault(r.Context(), taskItem, badPath, faultCode, log) {
 				if markErr := h.taskService.MarkTaskFailed(r.Context(), taskItem.ID, faultCode, combinedMsg); markErr != nil {
 					log.Error("mark task failed", zap.Error(markErr), zap.String("task_id", taskItem.ID))
+				} else {
+					h.publishParamSyncTaskResult(r.Context(), taskItem, false, strconv.Itoa(faultCode), combinedMsg, log)
 				}
 				log.Warn("task failed with SOAP fault",
 					zap.String("task_id", taskItem.ID),
@@ -879,6 +884,10 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 						std[i] = tr069.ParameterValueStruct{Name: stdNames[i], Value: pv.Value, Type: pv.Type}
 					}
 					resultMap["standard_parameter_values"] = std
+					// Durable parameter-sync runs project against the mapping snapshot
+					// frozen at planning time. Preserve private names so a registry
+					// refresh during the run cannot change result interpretation.
+					resultMap["private_parameter_values"] = pvs
 				}
 			}
 			// AddObject 提前解析 InstanceNumber 写入 result,供 notification 渲染
@@ -891,6 +900,8 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 			resultJSON, _ := json.Marshal(resultMap)
 			if markErr := h.taskService.MarkTaskCompleted(r.Context(), taskItem.ID, resultJSON); markErr != nil {
 				log.Error("mark task completed", zap.Error(markErr), zap.String("task_id", taskItem.ID))
+			} else {
+				h.publishParamSyncTaskResult(r.Context(), taskItem, true, "", "", log)
 			}
 			log.Info("task completed", zap.String("task_id", taskItem.ID), zap.String("method", taskItem.Method))
 
@@ -938,19 +949,12 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 		return
 	}
 
-	// 尝试从统一任务队列获取下一个任务
-	nextTask, err := h.taskService.PopTask(r.Context(), deviceSN)
+	// 尝试从统一任务队列获取下一个仍满足 PG pending fence 的任务。
+	nextTask, newCWMPID, err := h.popAndMarkNextTask(r.Context(), deviceSN, log)
 	if err != nil {
-		log.Error("pop task from queue", zap.Error(err))
+		log.Error("pop sendable task from queue", zap.Error(err))
 	} else if nextTask != nil {
 		h.translateTaskParamsInPlace(r.Context(), nextTask, log)
-		// 为此任务生成 CWMP ID
-		newCWMPID := task.GenerateCWMPID(nextTask.Method)
-
-		// 标记任务已发送
-		if err := h.taskService.MarkTaskSent(r.Context(), nextTask.ID, newCWMPID); err != nil {
-			log.Error("mark task sent", zap.Error(err), zap.String("task_id", nextTask.ID))
-		}
 
 		session.State = StateRPCPending
 		session.LastRPC = nextTask.Method
@@ -1001,6 +1005,34 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	// 发送空响应表示会话结束（根据 TR069 规范无 body）。
 	w.Header().Set("Connection", "close")
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// popAndMarkNextTask returns the next task that still owns the authoritative
+// PostgreSQL pending-state fence. Redis can temporarily contain terminal task
+// copies after recovery or cancellation. MarkTaskSent removes those copies and
+// returns ErrTaskNotPending; skipping them here preserves the current CWMP
+// session so later valid tasks can be sent without waiting for another Inform.
+func (h *Handler) popAndMarkNextTask(ctx context.Context, deviceSN string, log *zap.Logger) (*task.Task, string, error) {
+	for skipped := 0; skipped < maxStaleTaskSkipsPerDispatch; skipped++ {
+		nextTask, err := h.taskService.PopTask(ctx, deviceSN)
+		if err != nil || nextTask == nil {
+			return nextTask, "", err
+		}
+
+		cwmpID := task.GenerateCWMPID(nextTask.Method)
+		if err := h.taskService.MarkTaskSent(ctx, nextTask.ID, cwmpID); err != nil {
+			if errors.Is(err, task.ErrTaskNotPending) {
+				log.Warn("skipping stale terminal task in execution queue",
+					zap.String("device_sn", deviceSN),
+					zap.String("task_id", nextTask.ID),
+					zap.Error(err))
+				continue
+			}
+			return nil, "", fmt.Errorf("mark task %s sent: %w", nextTask.ID, err)
+		}
+		return nextTask, cwmpID, nil
+	}
+	return nil, "", fmt.Errorf("skip stale tasks for device %s: limit %d reached", deviceSN, maxStaleTaskSkipsPerDispatch)
 }
 
 // completeSession 完成 TR069 会话，释放所有相关资源。
@@ -1307,22 +1339,36 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 			zap.String("device_sn", session.DeviceSN))
 	}
 
-	// 检查队列中是否有更多任务
+	// A device may expose only one invalid path per 9005 response. Recovery can
+	// therefore continue several replacements in this session; enforce the same
+	// RPC ceiling as the normal response path before dispatching another one.
+	if h.sessionRPCLimitReached(session) {
+		log.Info("ACS session RPC limit reached after fault, completing session",
+			zap.String("device_sn", session.DeviceSN),
+			zap.String("session_id", sessionID),
+			zap.Int("rpc_count", session.RPCCount),
+			zap.Int("max_rpc_per_session", h.maxRPCPerSession),
+		)
+		h.completeSession(r.Context(), session)
+		w.Header().Set("Connection", "close")
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// 检查队列中是否有更多仍满足 PG pending fence 的任务。
 	deviceSN := session.DeviceSN
-	nextTask, err := h.taskService.PopTask(r.Context(), deviceSN)
+	nextTask, newCWMPID, err := h.popAndMarkNextTask(r.Context(), deviceSN, log)
 	if err != nil {
-		log.Error("pop next task after fault", zap.Error(err))
+		log.Error("pop next sendable task after fault", zap.Error(err))
 	} else if nextTask != nil {
 		h.translateTaskParamsInPlace(r.Context(), nextTask, log)
-		newCWMPID := task.GenerateCWMPID(nextTask.Method)
-		if err := h.taskService.MarkTaskSent(r.Context(), nextTask.ID, newCWMPID); err != nil {
-			log.Error("mark next task sent", zap.Error(err), zap.String("task_id", nextTask.ID))
-		}
 
 		session.State = StateRPCPending
 		session.LastRPC = nextTask.Method
+		session.LastCommandParams = nextTask.Params
 		session.LastTaskID = nextTask.ID
 		session.LastTaskCWMPID = newCWMPID
+		session.RPCCount++
 		session.UpdatedAt = time.Now()
 		h.sessionStore.UpdateByID(r.Context(), sessionID, session)
 
@@ -1412,7 +1458,12 @@ func (h *Handler) tryRecoverGPVFault(ctx context.Context, taskItem *task.Task, b
 	if taskItem == nil || badPath == "" {
 		return false
 	}
-	if !isRecoverableGPVBadPath(badPath, faultCode) {
+	isDurable := taskItem.Source == task.TaskSourceParamSync && strings.HasPrefix(taskItem.CommandKey, "param-sync-")
+	// Durable runs tolerate an object-prefix 9005 as incomplete coverage. There
+	// is nothing to split for a one-path object request, but failing the entire
+	// run would cancel unrelated GPV batches and turn one unsupported subtree
+	// into dozens of false failures.
+	if !isRecoverableGPVBadPath(badPath, faultCode) && !isToleratedDurableGPVBadPath(taskItem, badPath, faultCode) {
 		log.Info("gpv fault recovery skipped: non-leaf path or non-9005 fault",
 			zap.String("task_id", taskItem.ID),
 			zap.String("bad_path", badPath),
@@ -1422,7 +1473,8 @@ func (h *Handler) tryRecoverGPVFault(ctx context.Context, taskItem *task.Task, b
 	if taskItem.Method != "GetParameterValues" {
 		return false
 	}
-	if !strings.HasPrefix(taskItem.CommandKey, "sync-gpv-") {
+	isLegacy := strings.HasPrefix(taskItem.CommandKey, "sync-gpv-")
+	if !isLegacy && !isDurable {
 		return false
 	}
 	var paramsObj struct {
@@ -1433,28 +1485,46 @@ func (h *Handler) tryRecoverGPVFault(ctx context.Context, taskItem *task.Task, b
 			zap.String("task_id", taskItem.ID), zap.Error(err))
 		return false
 	}
-	remaining := make([]string, 0, len(paramsObj.Names))
-	removed := false
-	for _, p := range paramsObj.Names {
-		if p == badPath {
-			removed = true
-			continue
-		}
-		remaining = append(remaining, p)
-	}
-	if !removed {
+	remaining, skippedPaths, recoverable := planGPVFaultRecovery(paramsObj.Names, badPath, isDurable)
+	if !recoverable {
 		log.Warn("gpv fault recovery: bad path not in original batch (regex extraction may be off)",
 			zap.String("task_id", taskItem.ID),
 			zap.String("bad_path", badPath),
 			zap.Strings("batch", paramsObj.Names))
 		return false
 	}
-	resultJSON, _ := json.Marshal(map[string]interface{}{
+	result := map[string]interface{}{
 		"recovered":     true,
 		"bad_path":      badPath,
 		"fault_code":    faultCode,
 		"remaining_cnt": len(remaining),
-	})
+	}
+	if len(skippedPaths) > 1 || (len(skippedPaths) == 1 && skippedPaths[0] != badPath) {
+		result["bad_paths"] = skippedPaths
+		log.Info("durable gpv fault recovery: translated fault path did not match request; skipping batch",
+			zap.String("task_id", taskItem.ID),
+			zap.String("bad_path", badPath),
+			zap.Int("skipped_path_count", len(skippedPaths)))
+	}
+	resultJSON, _ := json.Marshal(result)
+	if isDurable {
+		if h.gpvFaultRecoverer == nil {
+			log.Error("durable gpv fault recovery is not configured", zap.String("task_id", taskItem.ID))
+			return false
+		}
+		replacement, err := h.gpvFaultRecoverer.Recover(ctx, taskItem, remaining)
+		if err != nil {
+			if replacement == nil {
+				log.Error("durable gpv fault recovery: extend run failed", zap.String("task_id", taskItem.ID), zap.Error(err))
+				return false
+			}
+			// The replacement is durable and the pending outbox will retry its
+			// release. Keep the original task recovered instead of turning a
+			// transient Redis/admission error into a failed synchronization run.
+			log.Warn("durable gpv fault recovery: immediate release failed, outbox fallback retained",
+				zap.String("task_id", taskItem.ID), zap.String("replacement_task_id", replacement.ID), zap.Error(err))
+		}
+	}
 	if err := h.taskService.MarkTaskCompleted(ctx, taskItem.ID, resultJSON); err != nil {
 		log.Error("gpv fault recovery: mark original task completed failed",
 			zap.String("task_id", taskItem.ID), zap.Error(err))
@@ -1463,6 +1533,11 @@ func (h *Handler) tryRecoverGPVFault(ctx context.Context, taskItem *task.Task, b
 	if len(remaining) == 0 {
 		log.Info("gpv fault recovery: batch exhausted, no params left to query",
 			zap.String("task_id", taskItem.ID), zap.String("bad_path", badPath))
+		return true
+	}
+	if isDurable {
+		log.Info("durable gpv fault recovery: replacement batch planned",
+			zap.String("task_id", taskItem.ID), zap.String("bad_path", badPath), zap.Int("remaining", len(remaining)))
 		return true
 	}
 	newParams, err := json.Marshal(map[string]interface{}{"names": remaining})
@@ -1491,6 +1566,55 @@ func (h *Handler) tryRecoverGPVFault(ctx context.Context, taskItem *task.Task, b
 		zap.String("bad_path", badPath),
 		zap.Int("remaining", len(remaining)))
 	return true
+}
+
+// removeFaultedGPVRequest removes the request item responsible for a 9005.
+//
+// Some CPEs answer an object-prefix GPV such as Device.DeviceInfo.EU. with a
+// fault naming the concrete child they could not read, for example
+// Device.DeviceInfo.EU.0.RouteIndex. The request and fault paths are therefore
+// not textually equal even though the latter is covered by the former. Treating
+// that as an unrecoverable mismatch cancels every unrelated batch in a full
+// sync. Remove the covering object request and let the run continue with
+// incomplete coverage instead.
+func removeFaultedGPVRequest(names []string, badPath string) ([]string, bool) {
+	badPath = strings.TrimSpace(badPath)
+	remaining := make([]string, 0, len(names))
+	removed := false
+	for _, name := range names {
+		requestPath := strings.TrimSpace(name)
+		matchesFault := requestPath == badPath ||
+			(strings.HasSuffix(requestPath, ".") && strings.HasPrefix(badPath, requestPath))
+		if matchesFault {
+			removed = true
+			continue
+		}
+		remaining = append(remaining, name)
+	}
+	return remaining, removed
+}
+
+// planGPVFaultRecovery builds the continuation for a parameter-level 9005.
+// Exact/covering paths remove only the rejected request. Durable full-sync
+// tasks additionally tolerate a private-path translation mismatch by skipping
+// the current request batch. The latter is deliberately conservative: those
+// coverage paths are marked incomplete downstream, so stale values are kept
+// instead of being mistaken for authoritative absence.
+func planGPVFaultRecovery(names []string, badPath string, allowBatchSkip bool) (remaining, skipped []string, ok bool) {
+	remaining, removed := removeFaultedGPVRequest(names, badPath)
+	if removed {
+		return remaining, []string{strings.TrimSpace(badPath)}, true
+	}
+	if !allowBatchSkip || len(names) == 0 {
+		return nil, nil, false
+	}
+	skipped = append([]string(nil), names...)
+	return nil, skipped, true
+}
+
+func isToleratedDurableGPVBadPath(taskItem *task.Task, badPath string, faultCode int) bool {
+	return taskItem != nil && badPath != "" && faultCode == 9005 &&
+		taskItem.Source == task.TaskSourceParamSync && strings.HasPrefix(taskItem.CommandKey, "param-sync-")
 }
 
 func isRecoverableGPVBadPath(badPath string, faultCode int) bool {
@@ -1764,6 +1888,8 @@ func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, 
 	}
 	if taskItem != nil && taskItem.ID != "" {
 		payload["task_id"] = taskItem.ID
+		payload["task_source"] = taskItem.Source
+		payload["task_source_id"] = taskItem.SourceID
 	}
 
 	// command_key 让下游订阅者(如 Path B reconcile)按入队方约定区分触发上下文,
@@ -1837,6 +1963,37 @@ func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, 
 	}
 }
 
+func (h *Handler) publishParamSyncTaskResult(ctx context.Context, taskItem *task.Task, success bool, errorCode, errorMessage string, log *zap.Logger) {
+	if taskItem == nil || taskItem.Source != task.TaskSourceParamSync || h.eventBus == nil {
+		return
+	}
+	runID, err := uuid.Parse(taskItem.SourceID)
+	if err != nil {
+		log.Error("publish parameter sync result: invalid run id", zap.String("run_id", taskItem.SourceID), zap.Error(err))
+		return
+	}
+	requestID, err := uuid.Parse(taskItem.CreatorID)
+	if err != nil {
+		log.Error("publish parameter sync result: invalid request id", zap.String("request_id", taskItem.CreatorID), zap.Error(err))
+		return
+	}
+	payload := event.ParamSyncTaskResultPayload{
+		EventID: uuid.NewString(), RequestID: requestID, RunID: runID, TaskID: taskItem.ID,
+		DeviceSN: taskItem.DeviceSN, Success: success, ResultRef: "device_tasks:" + taskItem.ID,
+		ErrorCode: errorCode, ErrorMessage: errorMessage,
+	}
+	evt, err := event.NewEvent(event.SubjectParamSyncTaskResult, payload)
+	if err != nil {
+		log.Error("create parameter sync task result event", zap.Error(err))
+		return
+	}
+	if err := h.eventBus.Publish(ctx, event.SubjectParamSyncTaskResult, evt); err != nil {
+		// The durable device_tasks result is authoritative; ResultReconciler will
+		// republish if NATS is temporarily unavailable.
+		log.Error("publish parameter sync task result event", zap.Error(err), zap.String("task_id", taskItem.ID))
+	}
+}
+
 // publishRPCFaultEvent 在 CPE 回 SOAP Fault 时，按"原 RPC 方法"派发到对应的
 // command.*.response 事件 subject 上，payload 带 fault_code / fault_string，
 // 让业务订阅器（software.HandleUploadResponse / HandleSetParamsResponseForCollect 等）
@@ -1879,6 +2036,9 @@ func (h *Handler) publishRPCFaultEvent(ctx context.Context, deviceSN string, tas
 	payload := map[string]interface{}{
 		"device_sn":       deviceSN,
 		"method":          taskItem.Method,
+		"task_id":         taskItem.ID,
+		"task_source":     taskItem.Source,
+		"task_source_id":  taskItem.SourceID,
 		"command_key":     taskItem.CommandKey,
 		"fault_code":      faultCode,     // 数值：cwmp:FaultCode（标准 CWMP），无则 0
 		"fault_code_text": soapFaultCode, // 字符串：soap:faultcode（SOAP 1.1 outer，如 "Server.Internal"）
@@ -1938,6 +2098,9 @@ func (h *Handler) queueAutoGPVAfterSPV(ctx context.Context, spvTask *task.Task, 
 		}
 	}
 	if len(names) == 0 {
+		return
+	}
+	if h.requestDurableReadback(ctx, spvTask.DeviceSN, "spv_readback", names, "spv-readback:"+spvTask.ID, log) {
 		return
 	}
 
@@ -2010,6 +2173,9 @@ func (h *Handler) queueAutoGPVAfterAddObject(ctx context.Context, addObjTask *ta
 	}
 
 	newInstancePath := addParams.ObjectName + strconv.Itoa(instanceNumber) + "."
+	if h.requestDurableReadback(ctx, addObjTask.DeviceSN, "add_object_readback", []string{newInstancePath}, "add-object-readback:"+addObjTask.ID, log) {
+		return
+	}
 
 	gpvParams, err := json.Marshal(map[string]interface{}{"names": []string{newInstancePath}})
 	if err != nil {
@@ -2036,6 +2202,23 @@ func (h *Handler) queueAutoGPVAfterAddObject(ctx context.Context, addObjTask *ta
 		zap.String("add_obj_task_id", addObjTask.ID),
 		zap.String("gpv_task_id", gpvTask.ID),
 		zap.String("new_instance_path", newInstancePath))
+}
+
+func (h *Handler) requestDurableReadback(ctx context.Context, deviceSN, reason string, paths []string, key string, log *zap.Logger) bool {
+	if !h.durableReadbackEnabled || h.eventBus == nil || deviceSN == "" || len(paths) == 0 {
+		return false
+	}
+	evt, err := event.NewEvent(event.SubjectParamSyncRequested, event.ParamSyncRequestedPayload{
+		DeviceSN: deviceSN, TriggerReason: reason, RequestedPaths: paths, IdempotencyKey: key,
+	})
+	if err == nil {
+		err = h.eventBus.Publish(ctx, event.SubjectParamSyncRequested, evt)
+	}
+	if err != nil {
+		log.Warn("publish durable parameter readback request; falling back to legacy task", zap.String("reason", reason), zap.Error(err))
+		return false
+	}
+	return true
 }
 
 // processInformPeriodGPV 处理心跳周期 GPV 响应。
@@ -2454,8 +2637,9 @@ var (
 	//   "Parameter 'Device.X' is invalid"
 	// 抓关键字后的第一个 dot-separated 标识符（末尾可有 "."，对象前缀语义需保留）。
 	faultPathKeywordRegex = regexp.MustCompile(`(?i)(?:including|parameter|name)[\s:'"\x60]+([A-Za-z_]\w*(?:\.[A-Za-z0-9_]+)+\.?)`)
-	// faultPathGenericRegex 兜底：找任何 dot-separated 标识符（>=3 段）。最长匹配作为 path。
-	faultPathGenericRegex = regexp.MustCompile(`[A-Za-z_]\w*(?:\.[A-Za-z0-9_]+){2,}\.?`)
+	// faultPathGenericRegex 兜底：找任何 dot-separated 标识符（>=2 段）。部分
+	// GSM 顶层参数只有 DeviceGSM.NriNullDel 两段，仍是合法 CWMP path。
+	faultPathGenericRegex = regexp.MustCompile(`[A-Za-z_]\w*(?:\.[A-Za-z0-9_]+){1,}\.?`)
 
 	// T-0174 — extract per-parameter SetParameterValuesFault detail blocks.
 	// CPE returns one block per offending path; outer cwmp:FaultCode is always 9003

@@ -739,12 +739,12 @@ func (h *Handler) SyncDeviceParams(c *gin.Context) {
 	// 给前端 toast 与 API 契约。
 	sourceID := uuid.New().String()
 	displaySourceID := fmt.Sprintf("manual:%s", sourceID)
-	used, dev, gpvTaskCount, err := h.service.SyncDeviceParamsManual(c.Request.Context(), id, sourceID, req.ParameterPaths)
+	start, dev, err := h.service.SyncDeviceParamsManualDetailed(c.Request.Context(), id, sourceID, req.ParameterPaths)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	if !used {
+	if start == nil || !start.Used {
 		// Path B 不可用 — 设备 productClass 未路由到 product / MappingSet 为空
 		response.OKWithStatus(c, http.StatusServiceUnavailable, gin.H{
 			"status":    "unavailable",
@@ -758,15 +758,23 @@ func (h *Handler) SyncDeviceParams(c *gin.Context) {
 	if dev != nil {
 		deviceSN = dev.SerialNumber
 	}
-	response.OKWithStatus(c, http.StatusAccepted, gin.H{
-		"status":                "queued",
+	payload := gin.H{
+		"status":                start.Status,
 		"source_id":             displaySourceID,
+		"result_code":           start.ResultCode,
 		"device_id":             id.String(),
 		"serial_number":         deviceSN,
 		"force":                 req.Force,
 		"parameter_paths_count": len(req.ParameterPaths),
-		"gpv_task_count":        gpvTaskCount,
-	})
+		"gpv_task_count":        start.TaskCount,
+	}
+	if start.RequestID != uuid.Nil {
+		payload["request_id"] = start.RequestID
+	}
+	if start.RunID != nil && *start.RunID != uuid.Nil {
+		payload["run_id"] = start.RunID
+	}
+	response.OKWithStatus(c, http.StatusAccepted, payload)
 }
 
 // SetRFSwitch handles PUT /api/v1/devices/:id/rf-switch.

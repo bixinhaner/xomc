@@ -10,6 +10,8 @@ import type {
   ParameterConstraints,
   ChildParameter,
   DirectChildrenResponse,
+  ParameterSyncRequest,
+  ParameterSyncRun,
 } from '../../types/deviceParameter';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 
@@ -73,6 +75,13 @@ interface BackendSyncStatus {
     requested_path_count?: number;
     successful_path_count?: number;
     failed_path_count?: number;
+    failed_paths?: Array<{
+      path?: string;
+      fault_code?: number;
+      fault_text?: string;
+      command_key?: string;
+      status?: string;
+    }>;
     first_created_at?: string;
     last_completed_at?: string;
     wall_clock_seconds?: number;
@@ -80,6 +89,19 @@ interface BackendSyncStatus {
   last_param_sync_at?: string;
   last_param_sync_failed_at?: string;
   last_param_sync_error?: string;
+}
+
+interface BackendParamSyncRun {
+  id: string;
+  request_id: string;
+  status: ParameterSyncRun['status'];
+  sync_scope: ParameterSyncRun['syncScope'];
+  expected_task_count: number;
+  terminal_task_count: number;
+  processed_task_count: number;
+  failed_task_count: number;
+  started_at: string;
+  completed_at?: string;
 }
 
 interface BackendListResponse<T> {
@@ -266,6 +288,13 @@ function mapBackendSyncStatus(bs: BackendSyncStatus): ParameterSyncStatus {
       requestedPathCount: bs.last_sync_gpv.requested_path_count ?? 0,
       successfulPathCount: bs.last_sync_gpv.successful_path_count ?? 0,
       failedPathCount: bs.last_sync_gpv.failed_path_count ?? 0,
+      failedPaths: bs.last_sync_gpv.failed_paths?.map((item) => ({
+        path: item.path ?? '',
+        faultCode: item.fault_code,
+        faultText: item.fault_text,
+        commandKey: item.command_key,
+        status: item.status,
+      })),
       firstCreatedAt: bs.last_sync_gpv.first_created_at,
       lastCompletedAt: bs.last_sync_gpv.last_completed_at,
       wallClockSeconds: bs.last_sync_gpv.wall_clock_seconds,
@@ -387,7 +416,55 @@ export const deviceParameterApi = {
     const { data } = await http.get<BackendSyncStatus>(
       `/devices/${deviceId}/parameters/sync-status`
     );
-    return mapBackendSyncStatus(data);
+    const status = mapBackendSyncStatus(data);
+    try {
+      const { data: activeData } = await http.get<{ active_run?: BackendParamSyncRun }>(
+        `/devices/${deviceId}/parameter-sync/active`
+      );
+      const run = activeData.active_run;
+      if (run) {
+        status.status = 'syncing';
+        status.pendingCommands = Math.max(run.expected_task_count - run.terminal_task_count, 0);
+        status.activeRun = {
+          id: run.id,
+          requestId: run.request_id,
+          status: run.status,
+          syncScope: run.sync_scope,
+          expectedTaskCount: run.expected_task_count,
+          terminalTaskCount: run.terminal_task_count,
+          processedTaskCount: run.processed_task_count,
+          failedTaskCount: run.failed_task_count,
+          startedAt: run.started_at,
+          completedAt: run.completed_at,
+        };
+      }
+    } catch {
+      // Compatible with a backend that has not enabled the durable data plane yet.
+    }
+    return status;
+  },
+
+  async getParameterSyncRequest(requestId: string): Promise<ParameterSyncRequest> {
+    const { data } = await http.get<{
+      id: string;
+      run_id?: string;
+      active_run_id?: string;
+      status: ParameterSyncRequest['status'];
+      result_code?: string;
+      error_message?: string;
+      created_at: string;
+      completed_at?: string;
+    }>(`/parameter-sync/requests/${requestId}`);
+    return {
+      id: data.id,
+      runId: data.run_id,
+      activeRunId: data.active_run_id,
+      status: data.status,
+      resultCode: data.result_code,
+      errorMessage: data.error_message,
+      createdAt: data.created_at,
+      completedAt: data.completed_at,
+    };
   },
 
   async getParameterSchema(

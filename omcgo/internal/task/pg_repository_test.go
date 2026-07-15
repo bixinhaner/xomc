@@ -267,6 +267,39 @@ func TestPgRepo_Integration_LatestSyncGPVSummaryIgnoresStaleUnfinishedTasks(t *t
 	assert.InEpsilon(t, 13.473, summary.WallClockSeconds, 0.001)
 }
 
+func TestPgRepo_Integration_LatestSyncGPVSummaryIncludesDurableParamSync(t *testing.T) {
+	pool := newTestPool(t)
+	if pool == nil {
+		return
+	}
+	defer cleanupTestTasks(t, pool)
+	repo := NewPgTaskRepository(pool)
+	ctx := context.Background()
+
+	deviceSN := testDeviceSNPrefix + "durable-param-sync-summary"
+	runID := generateUUID()
+	completedAt := time.Date(2026, 7, 15, 10, 0, 4, 0, time.UTC)
+	tk := &Task{
+		ID: generateUUID(), DeviceSN: deviceSN, Method: "GetParameterValues",
+		Params:   json.RawMessage(`{"names":["Device.DeviceInfo.SerialNumber"]}`),
+		Priority: 10, CommandKey: "param-sync-" + runID + "-0", Status: TaskStatusFailed,
+		CreatedAt: completedAt.Add(-4 * time.Second), CompletedAt: &completedAt,
+		ErrorCode: 9005, ErrorMessage: "Invalid parameter name", Source: TaskSourceParamSync,
+		SourceID: runID, CommandIndex: 0,
+	}
+	require.NoError(t, repo.Create(ctx, tk))
+
+	summary, err := repo.LatestSyncGPVSummaryByDevice(ctx, deviceSN)
+	require.NoError(t, err)
+	require.NotNil(t, summary)
+	assert.Equal(t, runID, summary.SourceID)
+	assert.Equal(t, 1, summary.RequestedPathCount)
+	assert.Equal(t, 0, summary.SuccessfulPathCount)
+	assert.Equal(t, 1, summary.FailedPathCount)
+	require.Len(t, summary.FailedPaths, 1)
+	assert.Equal(t, 9005, summary.FailedPaths[0].FaultCode)
+}
+
 func TestPgRepo_Integration_LatestSyncGPVSummaryPrefersNewestRunOverLateOldCompletion(t *testing.T) {
 	pool := newTestPool(t)
 	if pool == nil {
@@ -396,12 +429,12 @@ func TestPgRepo_Integration_LatestSyncGPVSummaryReportsRecovered9005Path(t *test
 	sourceID := generateUUID()
 	base := time.Date(2026, 7, 13, 16, 0, 0, 0, time.UTC)
 
-	makeTask := func(commandKey string, createdAt time.Time, completedAt time.Time, result json.RawMessage) *Task {
+	makeTask := func(commandKey string, names string, createdAt time.Time, completedAt time.Time, result json.RawMessage) *Task {
 		return &Task{
 			ID:           generateUUID(),
 			DeviceSN:     deviceSN,
 			Method:       "GetParameterValues",
-			Params:       json.RawMessage(`{"names":["DeviceGSM.NriNullDel"]}`),
+			Params:       json.RawMessage(`{"names":` + names + `}`),
 			Priority:     1,
 			CommandKey:   commandKey,
 			Status:       TaskStatusCompleted,
@@ -418,12 +451,14 @@ func TestPgRepo_Integration_LatestSyncGPVSummaryReportsRecovered9005Path(t *test
 
 	require.NoError(t, repo.Create(ctx, makeTask(
 		"sync-gpv-"+deviceSN+"-0",
+		`["DeviceGSM.NriNullDel","DeviceGSM.Mcc"]`,
 		base,
 		base.Add(2*time.Second),
 		json.RawMessage(`{"recovered":true,"bad_path":"DeviceGSM.NriNullDel","fault_code":9005,"remaining_cnt":1}`),
 	)))
 	require.NoError(t, repo.Create(ctx, makeTask(
 		"sync-gpv-"+deviceSN+"-0-r",
+		`["DeviceGSM.Mcc"]`,
 		base.Add(2*time.Second),
 		base.Add(5*time.Second),
 		nil,
@@ -437,8 +472,8 @@ func TestPgRepo_Integration_LatestSyncGPVSummaryReportsRecovered9005Path(t *test
 	assert.Equal(t, 2, summary.TaskCount)
 	assert.Equal(t, 2, summary.SuccessfulCommands, "recovered GPV 仍是完成的 command，不阻断其它 path")
 	assert.Equal(t, 0, summary.FailedCommands)
-	assert.Equal(t, 1, summary.RequestedPathCount)
-	assert.Equal(t, 0, summary.SuccessfulPathCount)
+	assert.Equal(t, 2, summary.RequestedPathCount)
+	assert.Equal(t, 1, summary.SuccessfulPathCount)
 	assert.Equal(t, 1, summary.FailedPathCount)
 	require.Len(t, summary.FailedPaths, 1)
 	assert.Equal(t, "DeviceGSM.NriNullDel", summary.FailedPaths[0].Path)

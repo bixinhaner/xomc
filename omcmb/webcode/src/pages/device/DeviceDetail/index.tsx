@@ -1514,6 +1514,8 @@ export default function DeviceDetail() {
                       const gpvTaskCount = data.gpvTaskCount ?? 0;
                       useQuickSettingsFeedbackStore.getState().patchQuickSettingsSync(deviceId, {
                         sourceId: data.sourceId,
+                        requestId: data.requestId,
+                        runId: data.runId,
                         targetCount,
                         gpvTaskCount,
                       });
@@ -1552,6 +1554,8 @@ export default function DeviceDetail() {
                 const gpvTaskCount = data.gpvTaskCount ?? 0;
                 useQuickSettingsFeedbackStore.getState().patchQuickSettingsSync(deviceId, {
                   sourceId: data.sourceId,
+                  requestId: data.requestId,
+                  runId: data.runId,
                   targetCount,
                   gpvTaskCount,
                 });

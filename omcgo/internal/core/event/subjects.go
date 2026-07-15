@@ -1,5 +1,14 @@
 package event
 
+// Parameter synchronization events. Payloads contain durable identifiers and
+// result references only; raw SOAP/results remain in storage.
+const (
+	SubjectParamSyncTaskResult   = "param_sync.task.result"
+	SubjectParamSyncRequested    = "param_sync.requested"
+	SubjectParamSyncRunCompleted = "param_sync.run.completed"
+	SubjectParamSyncRunFailed    = "param_sync.run.failed"
+)
+
 // Device events
 //
 // 这类事件由 ACS Handler 在处理 CPE TR-069 Inform 报文时发布。

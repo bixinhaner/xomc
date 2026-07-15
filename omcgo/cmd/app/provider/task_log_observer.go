@@ -55,11 +55,17 @@ func (o *taskLogObserver) OnTaskCompleted(_ context.Context, t *task.Task) {
 		return
 	}
 
+	operatorID := parseOperatorID(t.CreatorID)
+	// PARAM_SYNC currently carries its request correlation UUID in CreatorID;
+	// it is not a user/operator foreign key and must never be written as one.
+	if t.Source == task.TaskSourceParamSync {
+		operatorID = nil
+	}
 	req := admin.CreateTaskLogRequest{
 		TaskType:   t.Method,
 		TaskID:     t.ID,
 		Status:     string(t.Status),
-		OperatorID: parseOperatorID(t.CreatorID),
+		OperatorID: operatorID,
 		Operator:   t.CreatorID,
 		Target:     t.DeviceSN,
 		Detail:     t.Description,

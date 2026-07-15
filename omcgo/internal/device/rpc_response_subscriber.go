@@ -306,6 +306,10 @@ func (s *RPCResponseSubscriber) handleGPVResponse(ctx context.Context, evt event
 	if deviceSN == "" {
 		return nil
 	}
+	if source, _ := payload["task_source"].(string); source == string(task.TaskSourceParamSync) {
+		// paramsync.ResultConsumer is the sole writer for durable sync runs.
+		return nil
+	}
 
 	rawParams, ok := payload["parameter_values"]
 	if !ok {

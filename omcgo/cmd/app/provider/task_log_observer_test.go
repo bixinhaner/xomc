@@ -113,6 +113,21 @@ func TestTaskLogObserver_WritesFailedTaskWithError(t *testing.T) {
 	assert.Equal(t, 0, got.CostMs, "无 sent/completed 时间戳 → cost 0")
 }
 
+func TestTaskLogObserver_DoesNotTreatParamSyncCorrelationAsOperator(t *testing.T) {
+	repo := newStubLogRepo()
+	obs := newTaskLogObserver(repo, zap.NewNop())
+	now := time.Now()
+
+	obs.OnTaskCompleted(context.Background(), &task.Task{
+		ID: uuid.NewString(), DeviceSN: "SN-1", Method: "GetParameterValues",
+		Source: task.TaskSourceParamSync, CreatorID: uuid.NewString(),
+		Status: task.TaskStatusFailed, CompletedAt: &now,
+	})
+
+	got := repo.waitOne(t)
+	assert.Nil(t, got.OperatorID)
+}
+
 func TestTaskLogObserver_SkipsNonTerminalStatus(t *testing.T) {
 	repo := newStubLogRepo()
 	obs := newTaskLogObserver(repo, zap.NewNop())
