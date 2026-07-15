@@ -77,15 +77,16 @@ type VisibilityConfig struct {
 }
 
 type RuntimeTarget struct {
-	Enabled               bool
-	AgentStudioBaseURL    string
-	ConnectorSlug         string
-	ConnectorID           string
-	Status                string
-	LastError             string
-	InstanceName          string
-	InstanceNameIsDefault bool
-	Policy                RuntimePolicy
+	Enabled                 bool
+	AgentStudioBaseURL      string
+	AgentStudioServiceToken string
+	ConnectorSlug           string
+	ConnectorID             string
+	Status                  string
+	LastError               string
+	InstanceName            string
+	InstanceNameIsDefault   bool
+	Policy                  RuntimePolicy
 }
 
 type UpdateRequest struct {

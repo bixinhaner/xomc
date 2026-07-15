@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Popconfirm } from 'antd';
 import {
@@ -9,11 +9,21 @@ import {
   CloseOutlined,
   CopyOutlined,
   FieldTimeOutlined,
+  FileExcelOutlined,
+  FileImageOutlined,
+  FileOutlined,
+  FilePdfOutlined,
+  FileTextOutlined,
+  DeleteOutlined,
+  DownloadOutlined,
+  EyeOutlined,
   InfoCircleOutlined,
   PlusOutlined,
+  PaperClipOutlined,
   QuestionCircleOutlined,
   RobotOutlined,
   SendOutlined,
+  StopOutlined,
   ShrinkOutlined,
   ThunderboltOutlined,
   ToolOutlined,
@@ -30,7 +40,10 @@ import {
   type AgentPanelMessage,
   type AgentProcessEntry,
   type AgentThoughtEntry,
+  type AgentAttachmentRef,
+  type AgentArtifactRef,
 } from '@core/agentkit';
+import { agentApi } from '@core/services/api/agentApi';
 import { useAgentAutoScroll } from '@core/hooks/useAgentAutoScroll';
 import { useAgentPanelController } from '@core/hooks/useAgentPanelController';
 import { useAgentPanelLayout } from '@core/hooks/useAgentPanelLayout';
@@ -312,10 +325,14 @@ function AssistantContent({
   message,
   copiedId,
   onCopy,
+  onPreviewArtifact,
+  onDownloadArtifact,
 }: {
   message: AgentPanelMessage;
   copiedId: string | null;
   onCopy: (value: string) => void;
+  onPreviewArtifact: (artifact: AgentArtifactRef) => void;
+  onDownloadArtifact: (artifact: AgentArtifactRef) => void;
 }) {
   const t = useT();
   const running = message.status === 'streaming';
@@ -331,8 +348,93 @@ function AssistantContent({
           {t('agent.streaming')}
           <span className={styles.answerCaret} aria-hidden="true" />
         </span>
+      ) : message.status === 'cancelled' ? (
+        <span className={styles.pendingAnswer}>{t('agent.stopped')}</span>
       ) : null}
+      <ArtifactRows
+        artifacts={message.artifacts}
+        onPreview={onPreviewArtifact}
+        onDownload={onDownloadArtifact}
+      />
       <ProcessTrace entries={message.process} copiedId={copiedId} onCopy={onCopy} />
+    </div>
+  );
+}
+
+function formatFileSize(size: number | null | undefined): string {
+  if (!size || size < 1024) return `${size ?? 0} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function FileTypeIcon({ filename, mimeType }: { filename: string; mimeType?: string | null }) {
+  const value = `${mimeType ?? ''} ${filename}`.toLowerCase();
+  if (value.includes('pdf')) return <FilePdfOutlined />;
+  if (value.includes('image')) return <FileImageOutlined />;
+  if (value.includes('spreadsheet') || /\.(xlsx?|csv)$/.test(value)) return <FileExcelOutlined />;
+  if (value.includes('text') || /\.(md|txt|json|ya?ml|log)$/.test(value)) return <FileTextOutlined />;
+  return <FileOutlined />;
+}
+
+function AttachmentRows({
+  attachments,
+  onRemove,
+}: {
+  attachments: AgentAttachmentRef[] | undefined;
+  onRemove?: (attachmentId: string) => void;
+}) {
+  if (!attachments?.length) return null;
+  return (
+    <div className={styles.fileRows}>
+      {attachments.map((file) => (
+        <div key={file.attachmentId} className={styles.fileRow}>
+          <span className={styles.fileIcon}><FileTypeIcon filename={file.filename} mimeType={file.mimeType} /></span>
+          <span className={styles.fileMeta}>
+            <strong title={file.filename}>{file.filename}</strong>
+            <small>{formatFileSize(file.sizeBytes)}</small>
+          </span>
+          {onRemove && (
+            <button type="button" className={styles.fileAction} onClick={() => onRemove(file.attachmentId)} aria-label={file.filename}>
+              <DeleteOutlined />
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ArtifactRows({
+  artifacts,
+  onPreview,
+  onDownload,
+}: {
+  artifacts: AgentArtifactRef[] | undefined;
+  onPreview: (artifact: AgentArtifactRef) => void;
+  onDownload: (artifact: AgentArtifactRef) => void;
+}) {
+  const t = useT();
+  if (!artifacts?.length) return null;
+  return (
+    <div className={styles.artifacts}>
+      <div className={styles.artifactHeading}>{t('agent.generatedFiles')}</div>
+      {artifacts.map((artifact) => (
+        <div key={artifact.artifactId} className={styles.fileRow}>
+          <span className={styles.fileIcon}><FileTypeIcon filename={artifact.filename} mimeType={artifact.mimeType} /></span>
+          <span className={styles.fileMeta}>
+            <strong title={artifact.filename}>{artifact.filename}</strong>
+            <small>{formatFileSize(artifact.sizeBytes)}</small>
+          </span>
+          <span className={styles.fileActions}>
+            <button type="button" className={styles.fileAction} onClick={() => onPreview(artifact)} title={t('agent.previewFile')}>
+              <EyeOutlined />
+            </button>
+            <button type="button" className={styles.fileAction} onClick={() => onDownload(artifact)} title={t('agent.downloadFile')}>
+              <DownloadOutlined />
+            </button>
+          </span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -502,6 +604,7 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
   const [input, setInput] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [diagnosticOpen, setDiagnosticOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const context = useMemo(
     () => ({
       path: location.pathname,
@@ -510,6 +613,13 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
     [location.pathname, location.search]
   );
   const controller = useAgentPanelController({ context, active: open });
+  const errorMessage = controller.error
+    ? ({
+        ATTACHMENT_EMPTY: t('agent.attachmentEmpty'),
+        ATTACHMENT_TOO_LARGE: t('agent.attachmentTooLarge'),
+        ATTACHMENT_LIMIT_EXCEEDED: t('agent.attachmentLimit'),
+      } as Record<string, string>)[controller.error.code] ?? controller.error.message
+    : '';
   const activeAssistant = latestAssistantMessage(controller.messages);
   const nowTick = useStreamingClock(controller.isStreaming);
   const panelLayout = useAgentPanelLayout();
@@ -529,6 +639,29 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
     } catch {
       setCopiedId(null);
     }
+  };
+
+  const previewArtifact = async (artifact: AgentArtifactRef) => {
+    const preview = window.open('', '_blank');
+    try {
+      const blob = await agentApi.getArtifactContent(artifact, 'inline');
+      const objectUrl = URL.createObjectURL(blob);
+      if (preview) preview.location.href = objectUrl;
+      else window.open(objectUrl, '_blank');
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+    } catch {
+      preview?.close();
+    }
+  };
+
+  const downloadArtifact = async (artifact: AgentArtifactRef) => {
+    const blob = await agentApi.getArtifactContent(artifact, 'attachment');
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = artifact.filename;
+    link.click();
+    URL.revokeObjectURL(objectUrl);
   };
 
   if (!open) return null;
@@ -645,9 +778,18 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
                 </div>
                 <div className={styles.bubble}>
                   {message.role === 'assistant' ? (
-                    <AssistantContent message={message} copiedId={copiedId} onCopy={copyText} />
+                    <AssistantContent
+                      message={message}
+                      copiedId={copiedId}
+                      onCopy={copyText}
+                      onPreviewArtifact={previewArtifact}
+                      onDownloadArtifact={downloadArtifact}
+                    />
                   ) : (
-                    message.text || (message.status === 'streaming' ? t('agent.streaming') : '')
+                    <div className={styles.userContent}>
+                      <span>{message.text || (message.status === 'streaming' ? t('agent.streaming') : '')}</span>
+                      <AttachmentRows attachments={message.attachments} />
+                    </div>
                   )}
                 </div>
               </div>
@@ -666,7 +808,7 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
               ))}
             {controller.error && (
               <div className={styles.error}>
-                {t('agent.errorPrefix')}: {controller.error.message}
+                {t('agent.errorPrefix')}: {errorMessage}
               </div>
             )}
           </div>
@@ -685,21 +827,45 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
       </div>
 
       <form className={styles.composer} onSubmit={submit}>
-        <textarea
-          rows={1}
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          onKeyDown={handleComposerKeyDown}
-          placeholder={t('agent.placeholder')}
-          disabled={!controller.enabled}
-        />
+        <AttachmentRows attachments={controller.attachments} onRemove={controller.removeAttachment} />
+        <div className={styles.composerRow}>
+          <input
+            ref={fileInputRef}
+            className={styles.hiddenFileInput}
+            type="file"
+            multiple
+            onChange={(event) => {
+              void controller.uploadAttachments(Array.from(event.target.files ?? []));
+              event.currentTarget.value = '';
+            }}
+          />
+          <button
+            type="button"
+            className={styles.attachBtn}
+            onClick={() => fileInputRef.current?.click()}
+            disabled={!controller.enabled || controller.isStreaming || controller.isUploading || controller.attachments.length >= 10}
+            aria-label={t('agent.attachFile')}
+            title={t('agent.attachFile')}
+          >
+            <PaperClipOutlined />
+          </button>
+          <textarea
+            rows={1}
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={handleComposerKeyDown}
+            placeholder={controller.isUploading ? t('agent.uploadingFile') : t('agent.placeholder')}
+            disabled={!controller.enabled}
+          />
+        </div>
         <button
-          type="submit"
-          className={styles.sendBtn}
-          disabled={!controller.enabled || controller.isStreaming || input.trim() === ''}
-          aria-label={t('agent.send')}
+          type={controller.isStreaming ? 'button' : 'submit'}
+          className={`${styles.sendBtn} ${controller.isStreaming ? styles.stopBtn : ''}`}
+          onClick={controller.isStreaming ? () => void controller.stop() : undefined}
+          disabled={!controller.enabled || controller.isUploading || (!controller.isStreaming && input.trim() === '')}
+          aria-label={controller.isStreaming ? t('agent.stop') : t('agent.send')}
         >
-          <SendOutlined />
+          {controller.isStreaming ? <StopOutlined /> : <SendOutlined />}
         </button>
       </form>
     </aside>
