@@ -5369,6 +5369,7 @@ const messages: Record<string, string> = {
   'ufte.col.currentVersion':                  'Current Version',
   'ufte.col.destVersion':                     'Target Version',
   'ufte.col.destVersionOrFile':               'Target Version / File',
+  'ufte.file.cleanedByQuota':                 'Cleaned by quota',
   'ufte.col.upgradeType':                     'Upgrade Type',
   'ufte.col.upgradeProgress':                 'Upgrade Progress',
   'ufte.col.progress':                        'Progress',

@@ -98,6 +98,16 @@ func (p *RetentionPolicy) MaxFileCountPerDevice(ctx context.Context) int {
 	return pc
 }
 
+// InvalidateCache 让下一次读取立即回源 sys_configs，用于配置保存后的热生效。
+func (p *RetentionPolicy) InvalidateCache() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.loadedAt = time.Time{}
+	p.mu.Unlock()
+}
+
 func (p *RetentionPolicy) get(ctx context.Context) (days, count int) {
 	days, count, _ = p.getAll(ctx)
 	return days, count

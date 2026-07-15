@@ -5400,6 +5400,7 @@ const messages: Record<string, string> = {
   'ufte.col.currentVersion':                  '当前版本',
   'ufte.col.destVersion':                     '目标版本',
   'ufte.col.destVersionOrFile':               '目标版本/目标文件',
+  'ufte.file.cleanedByQuota':                 '已被配额清理',
   'ufte.col.upgradeType':                     '升级类型',
   'ufte.col.upgradeProgress':                 '升级进度',
   'ufte.col.progress':                        '进度',

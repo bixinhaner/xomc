@@ -61,6 +61,10 @@ type Service struct {
 	// nil → DeviceItem.TargetFile / DownloadURL 永远留空。
 	fileLandedLookup func(ctx context.Context, sn, mainTaskID string) (fileName string, landed bool, err error)
 
+	// fileDeletedLookup 注入式回调：按 (sn, mainTaskID, fileName) 判断 UFTE 任务文件
+	// 是否已被站点日志配额清理。true 时前端保留文件名但禁用下载入口。
+	fileDeletedLookup func(ctx context.Context, sn, mainTaskID, fileName string) (bool, error)
+
 	// snapshotConfigRestoreDispatcher (T-0164)：CONFIG_RESTORE 任务的实际派发器。
 	// 接收设备 SN 列表，从 config_snapshots 表取每设备最新一份配置 → 缺失整批拒绝
 	// → 全部存在则创建 restore_tasks 主行 + 逐设备 Download device_tasks。
@@ -295,6 +299,12 @@ func (s *Service) SetDownloadURLLookup(fn func(ctx context.Context, sn, fileName
 // 不注入则 DeviceItem.TargetFile / DownloadURL 永远留空。
 func (s *Service) SetFileLandedLookup(fn func(ctx context.Context, sn, mainTaskID string) (fileName string, landed bool, err error)) {
 	s.fileLandedLookup = fn
+}
+
+// SetFileDeletedLookup 注入"按 (sn, mainTaskID, fileName) 判断文件是否已被配额清理"的回调。
+// 不注入则 DeviceItem.FileDeleted 始终为 false。
+func (s *Service) SetFileDeletedLookup(fn func(ctx context.Context, sn, mainTaskID, fileName string) (bool, error)) {
+	s.fileDeletedLookup = fn
 }
 
 func (s *Service) GetOverview(ctx context.Context) (*Overview, error) {
@@ -1580,9 +1590,9 @@ func (s *Service) mapDeviceItem(
 		targetFile = subTask.DestVersion
 	}
 	fileLanded := false
+	mainTaskID := subTask.TaskID.String()
 	if typeDef.softwareTaskType == software.TaskTypeLogCollect && !isDirectDispatchFile &&
 		s.fileLandedLookup != nil && subTask.DeviceSN != "" {
-		mainTaskID := subTask.TaskID.String()
 		landedFile, landed, lookupErr := s.fileLandedLookup(ctx, subTask.DeviceSN, mainTaskID)
 		if lookupErr != nil {
 			s.logger.Debug("file landed lookup failed; treating as not-landed",
@@ -1614,6 +1624,20 @@ func (s *Service) mapDeviceItem(
 	if status == "ended" {
 		lastReport = time.Time(subTask.UpdatedAt)
 	}
+	fileDeleted := false
+	if typeDef.TypeCode == "FAULT_LOG_COLLECT" && targetFile != "" && status == "ended" &&
+		s.fileDeletedLookup != nil && subTask.DeviceSN != "" {
+		deleted, lookupErr := s.fileDeletedLookup(ctx, subTask.DeviceSN, mainTaskID, targetFile)
+		if lookupErr != nil {
+			s.logger.Debug("file deleted lookup failed; treating as active",
+				zap.String("device_sn", subTask.DeviceSN),
+				zap.String("main_task_id", mainTaskID),
+				zap.String("target_file", targetFile),
+				zap.Error(lookupErr))
+		} else {
+			fileDeleted = deleted
+		}
+	}
 	// 完成态 LogCollect 类（备份等）且注入了下载回调时，拉取 1h presigned GET URL。
 	// 用 targetFile（设备实际上传文件名，从 fileLanded 反查得到）做 lookup key——
 	// 设备厂商命名不可预测，预渲染模板名匹配不上 MinIO 对象路径。
@@ -1621,7 +1645,7 @@ func (s *Service) mapDeviceItem(
 	// CONFIG_RESTORE / LICENSE_UPGRADE 是 ACS → 设备 的下行方向，downloadURLLookup
 	// 查的是设备上行的"已落地文件"，对它们语义不对——跳过，文件名以纯文本展示。
 	downloadURL := ""
-	if !isDirectDispatchFile && targetFile != "" && status == "ended" && s.downloadURLLookup != nil && subTask.DeviceSN != "" {
+	if !fileDeleted && !isDirectDispatchFile && targetFile != "" && status == "ended" && s.downloadURLLookup != nil && subTask.DeviceSN != "" {
 		url, lookupErr := s.downloadURLLookup(ctx, subTask.DeviceSN, targetFile)
 		if lookupErr != nil {
 			s.logger.Debug("download URL lookup failed; leaving blank",
@@ -1679,6 +1703,7 @@ func (s *Service) mapDeviceItem(
 		TargetVersion:   targetVersion,
 		TargetFile:      targetFile,
 		DownloadURL:     downloadURL,
+		FileDeleted:     fileDeleted,
 		Status:          status,
 		Result:          result,
 		Progress:        progressForDeviceStatus(status),

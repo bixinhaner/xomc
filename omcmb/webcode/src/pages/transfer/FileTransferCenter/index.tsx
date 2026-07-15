@@ -89,6 +89,7 @@ import {
   renderTaskStatus,
 } from '../shared.render';
 import { resolveAutoSelectedCategory } from './categorySelection';
+import { resolveTargetFileDisplay } from './targetFileDisplay';
 import type { TransferStepId } from '@core/types/unifiedFileTransfer';
 import { formatSystemTime, nowInSystemTimezone } from '@core/utils/systemTime';
 import {
@@ -1229,19 +1230,23 @@ export default function FileTransferCenter() {
         key: 'targetVersion',
         width: 240,
         render: (_, record) => {
-          const file = record.targetFile?.trim();
-          if (!file) {
+          const fileState = resolveTargetFileDisplay(record, t('ufte.file.cleanedByQuota'));
+          if (!fileState.file) {
             return '-';
           }
-          const inner = record.downloadUrl ? (
-            <a href={record.downloadUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-block', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'bottom' }}>
-              {file}
+          const inner = fileState.deleted ? (
+            <Text disabled ellipsis style={{ maxWidth: 220, cursor: 'not-allowed' }}>
+              {fileState.file}
+            </Text>
+          ) : fileState.downloadUrl ? (
+            <a href={fileState.downloadUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-block', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'bottom' }}>
+              {fileState.file}
             </a>
           ) : (
-            <Text type="secondary" ellipsis style={{ maxWidth: 220 }}>{file}</Text>
+            <Text type="secondary" ellipsis style={{ maxWidth: 220 }}>{fileState.file}</Text>
           );
           return (
-            <Tooltip title={file} placement="topLeft">
+            <Tooltip title={fileState.tooltip} placement="topLeft">
               {inner}
             </Tooltip>
           );

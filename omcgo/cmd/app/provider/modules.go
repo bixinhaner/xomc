@@ -525,6 +525,40 @@ func initUFTEModule(c *Container) error {
 		return "", false, nil
 	})
 
+	// 注入"日志文件是否已被配额清理"回调。UFTE 的文件名/下载列来自
+	// backup_restore_file；故障日志配额删除状态在 station_fault_logs.is_deleted。
+	// 这里先按 (sn, task_id, file_name) 找到当前 UFTE 任务的 MinIO 对象，再用同一个
+	// bucket/object_path 精确查询故障日志记录，避免同设备重复上传同名厂商日志时误判。
+	faultLogRepo := stationlog.NewPgFaultRepository(c.PgPool)
+	service.SetFileDeletedLookup(func(ctx context.Context, sn, mainTaskID, fileName string) (bool, error) {
+		if sn == "" || mainTaskID == "" || fileName == "" {
+			return false, nil
+		}
+		files, lookupErr := backupFileRepo.ListBySerial(ctx, sn)
+		if lookupErr != nil {
+			return false, lookupErr
+		}
+		for i := range files {
+			f := &files[i]
+			if f.FileName != fileName || f.ObjectPath == "" {
+				continue
+			}
+			if f.TaskID == nil || *f.TaskID != mainTaskID {
+				continue
+			}
+			bucket, objectPath, splitErr := backup.SplitBucketAndPath(f.ObjectPath)
+			if splitErr != nil {
+				return false, splitErr
+			}
+			logFile, fileErr := faultLogRepo.LatestByObject(ctx, bucket, objectPath)
+			if fileErr != nil || logFile == nil {
+				return false, fileErr
+			}
+			return logFile.IsDeleted, nil
+		}
+		return false, nil
+	})
+
 	// 注入"设备上线即重试"回调：让 software.HandleDeviceOnline 在 LogCollect 类
 	// 子任务被唤醒时能复用 UFTE catalog 解析 transport_path 后重启 Upload RPC。
 	// 不装配则用户挂起→开始时若设备恰好离线，子任务会永远停在 suspended。
@@ -1203,7 +1237,7 @@ func initStationLogModule(c *Container) error {
 	// #320：注入保留策略，使故障日志文件数配额可经 sys_configs 配置（stationlog.retention.
 	// max_file_count，默认 20，0=禁用）。按时间保留（60 天）由 worker cron 执行，二者并存。
 	slSysCfg := admin.NewPgSysConfigRepository(c.PgPool)
-	svc.SetRetentionPolicy(stationlog.NewRetentionPolicy(
+	retentionPolicy := stationlog.NewRetentionPolicy(
 		func(ctx context.Context, category, key string) (string, bool) {
 			row, err := slSysCfg.GetByKey(ctx, category, key)
 			if err != nil || row == nil {
@@ -1212,7 +1246,15 @@ func initStationLogModule(c *Container) error {
 			return row.Value, true
 		},
 		logger,
-	))
+	)
+	svc.SetRetentionPolicy(retentionPolicy)
+	if c.SysConfigSvc != nil {
+		c.SysConfigSvc.RegisterSavedHook(func(_ context.Context, category string) {
+			if category == stationlog.RetentionCategory {
+				retentionPolicy.InvalidateCache()
+			}
+		})
+	}
 
 	// 订阅 SubjectLogFileReceived 事件，将上传的日志文件入库
 	if c.EventBus != nil {
