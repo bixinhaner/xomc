@@ -764,6 +764,17 @@ func deriveInformIPAddress(udpAddr, connReqURL string) string {
 	return parsed.Hostname()
 }
 
+func rebootDeviceType(tech model.Technology) string {
+	switch tech {
+	case model.TechNR:
+		return "gNB"
+	case model.TechGSM:
+		return "GSM"
+	default:
+		return "eNB"
+	}
+}
+
 func deriveUDPConnectionRequestAddress(params []tr069.ParameterValueStruct) string {
 	udpAddr := strings.TrimSpace(findParamValue(params, "Device.ManagementServer.UDPConnectionRequestAddress"))
 	if udpAddr != "" && !netutil.IsUnspecifiedUDPAddress(udpAddr) {
@@ -1533,8 +1544,16 @@ func (s *DeviceService) GetDevicePreRebootRunTime(ctx context.Context, deviceID 
 // UpdateFromInform or RegisterFromInform). Returns the updated boot_count; 0
 // with no error means the device could not be found and the boot was ignored.
 func (s *DeviceService) RecordBootFromInform(ctx context.Context, device *model.Device, events []string, params []tr069.ParameterValueStruct, preRebootRunTime int64) (int, error) {
+	return s.recordBootFromInform(ctx, device, nil, events, params, preRebootRunTime)
+}
+
+func (s *DeviceService) recordBootFromInform(ctx context.Context, device *model.Device, preRebootDevice *model.Device, events []string, params []tr069.ParameterValueStruct, preRebootRunTime int64) (int, error) {
 	if device == nil {
 		return 0, nil
+	}
+	snapshotDevice := device
+	if preRebootDevice != nil {
+		snapshotDevice = preRebootDevice
 	}
 	now := time.Now()
 	bootCount, err := s.deviceRepo.RecordBoot(ctx, device.SerialNumber, now)
@@ -1589,24 +1608,20 @@ func (s *DeviceService) RecordBootFromInform(ctx context.Context, device *model.
 		// 识别即落库：在事件发布前完成 detected 占位记录写入，
 		// 让"设备一上线立即可见"，且不依赖订阅者完成时机。
 		if s.abnormalRecorder != nil {
-			// snapshot 直接 freeze devices 表当时的字段值，空就是空（人工命名 /
+			// snapshot 直接 freeze 重启前 devices 表字段值，空就是空（人工命名 /
 			// IP 长期没回填等都是上游业务流程的事，不在异常重启识别这一步做兜底）。
 			snap := AbnormalRebootSnapshot{
 				DeviceID:            device.ID,
 				DeviceSN:            device.SerialNumber,
-				DeviceName:          device.DeviceName,
-				OperateIP:           device.IPAddress,
-				SoftwareVersion:     device.FirmwareVersion,
+				DeviceName:          snapshotDevice.DeviceName,
+				DeviceType:          rebootDeviceType(snapshotDevice.Technology),
+				OperateIP:           snapshotDevice.IPAddress,
+				SoftwareVersion:     snapshotDevice.FirmwareVersion,
 				HaltMainReason:      haltMainReason,
 				HaltDetailReason:    haltDetailReason,
 				RuntimeBeforeReboot: runtimeBeforeReboot,
-				IsGNB:               device.Technology == model.TechNR,
+				IsGNB:               snapshotDevice.Technology == model.TechNR,
 				DetectedAt:          now,
-			}
-			if device.Technology == model.TechNR {
-				snap.DeviceType = "gNB"
-			} else {
-				snap.DeviceType = "eNB"
 			}
 			if recErr := s.abnormalRecorder.RecordAbnormalReboot(ctx, snap); recErr != nil {
 				// 落库失败不阻塞事件发布；告警链路依然能基于事件累计。
@@ -1640,19 +1655,15 @@ func (s *DeviceService) RecordBootFromInform(ctx context.Context, device *model.
 		bootSnap := BootEventSnapshot{
 			DeviceID:            device.ID,
 			DeviceSN:            device.SerialNumber,
-			DeviceName:          device.DeviceName,
-			OperateIP:           device.IPAddress,
-			SoftwareVersion:     device.FirmwareVersion,
+			DeviceName:          snapshotDevice.DeviceName,
+			DeviceType:          rebootDeviceType(snapshotDevice.Technology),
+			OperateIP:           snapshotDevice.IPAddress,
+			SoftwareVersion:     snapshotDevice.FirmwareVersion,
 			RuntimeBeforeReboot: runtimeBeforeReboot,
-			IsGNB:               device.Technology == model.TechNR,
+			IsGNB:               snapshotDevice.Technology == model.TechNR,
 			BootCount:           bootCount,
 			Events:              events,
 			OccurredAt:          now,
-		}
-		if device.Technology == model.TechNR {
-			bootSnap.DeviceType = "gNB"
-		} else {
-			bootSnap.DeviceType = "eNB"
 		}
 		if recErr := s.bootEventRecorder.RecordBootEvent(ctx, bootSnap); recErr != nil {
 			// 失败不阻塞主流程

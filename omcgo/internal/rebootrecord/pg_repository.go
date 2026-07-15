@@ -33,8 +33,14 @@ func buildUnion(f Filter) (string, []interface{}) {
 	var args []interface{}
 	eventDeviceSN := "COALESCE(NULLIF(el.device_sn, ''), d.serial_number, '')"
 	faultDeviceSN := "COALESCE(NULLIF(fl.device_sn, ''), fd.serial_number, '')"
-	eventDeviceType := "COALESCE(NULLIF(el.device_type, ''), CASE d.technology WHEN 'nr' THEN 'gNB' WHEN 'lte' THEN 'eNB' WHEN 'gsm' THEN 'GSM' ELSE '' END, '')"
-	faultDeviceType := "COALESCE(NULLIF(fl.device_type, ''), CASE fd.technology WHEN 'nr' THEN 'gNB' WHEN 'lte' THEN 'eNB' WHEN 'gsm' THEN 'GSM' ELSE '' END, '')"
+	eventDeviceName := "COALESCE(NULLIF(el.device_name, ''), NULLIF(di.device_name, ''), d.site_name, '')"
+	faultDeviceName := "COALESCE(NULLIF(fl.device_name, ''), NULLIF(fdi.device_name, ''), fd.site_name, '')"
+	eventDeviceType := "COALESCE(NULLIF(CASE d.technology WHEN 'nr' THEN 'gNB' WHEN 'lte' THEN 'eNB' WHEN 'gsm' THEN 'GSM' ELSE '' END, ''), NULLIF(el.device_type, ''), '')"
+	faultDeviceType := "COALESCE(NULLIF(CASE fd.technology WHEN 'nr' THEN 'gNB' WHEN 'lte' THEN 'eNB' WHEN 'gsm' THEN 'GSM' ELSE '' END, ''), NULLIF(fl.device_type, ''), '')"
+	eventOperateIP := "COALESCE(NULLIF(NULLIF(el.operate_ip, ''), '0.0.0.0'), NULLIF(host(d.ip_address), '0.0.0.0'), '')"
+	faultOperateIP := "COALESCE(NULLIF(NULLIF(fl.operate_ip, ''), '0.0.0.0'), NULLIF(host(fd.ip_address), '0.0.0.0'), '')"
+	eventSoftwareVersion := "COALESCE(NULLIF(el.software_version, ''), '')"
+	faultSoftwareVersion := "COALESCE(NULLIF(fl.software_version, ''), '')"
 
 	// 共享过滤：(event 半子句, fault 半子句) —— 仅时间列名不同
 	type cond struct{ event, fault string }
@@ -92,8 +98,8 @@ func buildUnion(f Filter) (string, []interface{}) {
 	}
 
 	eventSelect := `SELECT el.id::text AS id, 'event' AS source, false AS is_abnormal, ` + eventDeviceSN + ` AS device_sn,
-		COALESCE(NULLIF(el.device_name, ''), NULLIF(di.device_name, ''), d.site_name, '') AS device_name, ` + eventDeviceType + ` AS device_type,
-		COALESCE(NULLIF(el.operate_ip, ''), host(d.ip_address), '') AS operate_ip, COALESCE(NULLIF(el.software_version, ''), d.firmware_version, '') AS software_version,
+		` + eventDeviceName + ` AS device_name, ` + eventDeviceType + ` AS device_type,
+		` + eventOperateIP + ` AS operate_ip, ` + eventSoftwareVersion + ` AS software_version,
 		COALESCE(el.event_reason, '') AS reason, ''::text AS detail_reason,
 		COALESCE((el.event_data->>'runtime_before_reboot')::bigint, 0) AS runtime_before_reboot,
 		el.occurred_at AS reboot_time
@@ -103,8 +109,8 @@ func buildUnion(f Filter) (string, []interface{}) {
 		WHERE ` + strings.Join(eventWhere, " AND ")
 
 	faultSelect := `SELECT fl.id::text AS id, 'fault' AS source, true AS is_abnormal, ` + faultDeviceSN + ` AS device_sn,
-		COALESCE(NULLIF(fl.device_name, ''), NULLIF(fdi.device_name, ''), fd.site_name, '') AS device_name, ` + faultDeviceType + ` AS device_type,
-		COALESCE(NULLIF(fl.operate_ip, ''), host(fd.ip_address), '') AS operate_ip, COALESCE(NULLIF(fl.software_version, ''), fd.firmware_version, '') AS software_version,
+		` + faultDeviceName + ` AS device_name, ` + faultDeviceType + ` AS device_type,
+		` + faultOperateIP + ` AS operate_ip, ` + faultSoftwareVersion + ` AS software_version,
 		COALESCE(fl.fault_reason, '') AS reason, COALESCE(fl.fault_detail, '') AS detail_reason,
 		COALESCE(fl.runtime_before_reboot, 0) AS runtime_before_reboot, fl.collected_at AS reboot_time
 		FROM station_fault_logs fl
