@@ -27,12 +27,20 @@ import (
 //
 // 唯一真值源仍是 source.go::ClassifySource(loadedFrom);SQL 前缀匹配与之严格对齐。
 func (r *PgRepository) ListParamModels(ctx context.Context) ([]ParamModel, error) {
-	const q = `SELECT id, name, total_entries, total_objects, total_params,
-	                 COALESCE(description,''), is_active, COALESCE(loaded_from,'')
-	          FROM param_models
-	         WHERE loaded_from LIKE 'param-mappings/%'
-	            OR loaded_from LIKE 'param-mappings-custom/%'
-	         ORDER BY name ASC`
+	const q = `SELECT pm.id, pm.name,
+	                 stats.total_entries, stats.total_objects, stats.total_params,
+	                 COALESCE(pm.description,''), pm.is_active, COALESCE(pm.loaded_from,'')
+	          FROM param_models pm
+	          CROSS JOIN LATERAL (
+	              SELECT COUNT(*)::int AS total_entries,
+	                     COUNT(*) FILTER (WHERE m.entry_type = 'object')::int AS total_objects,
+	                     COUNT(*) FILTER (WHERE m.entry_type = 'parameter')::int AS total_params
+	                FROM param_mappings m
+	               WHERE m.param_model_id = pm.id AND m.is_active = TRUE
+	          ) stats
+	         WHERE pm.loaded_from LIKE 'param-mappings/%'
+	            OR pm.loaded_from LIKE 'param-mappings-custom/%'
+	         ORDER BY pm.name ASC`
 	rows, err := r.pool.Query(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("query param_models: %w", err)
@@ -52,9 +60,18 @@ func (r *PgRepository) ListParamModels(ctx context.Context) ([]ParamModel, error
 
 // GetParamModelByName 单条详情；不存在 → (nil, ErrNoParamModel)。
 func (r *PgRepository) GetParamModelByName(ctx context.Context, name string) (*ParamModel, error) {
-	const q = `SELECT id, name, total_entries, total_objects, total_params,
-	                 COALESCE(description,''), is_active, COALESCE(loaded_from,'')
-	          FROM param_models WHERE name = $1`
+	const q = `SELECT pm.id, pm.name,
+	                 stats.total_entries, stats.total_objects, stats.total_params,
+	                 COALESCE(pm.description,''), pm.is_active, COALESCE(pm.loaded_from,'')
+	          FROM param_models pm
+	          CROSS JOIN LATERAL (
+	              SELECT COUNT(*)::int AS total_entries,
+	                     COUNT(*) FILTER (WHERE m.entry_type = 'object')::int AS total_objects,
+	                     COUNT(*) FILTER (WHERE m.entry_type = 'parameter')::int AS total_params
+	                FROM param_mappings m
+	               WHERE m.param_model_id = pm.id AND m.is_active = TRUE
+	          ) stats
+	         WHERE pm.name = $1`
 	var m ParamModel
 	if err := r.pool.QueryRow(ctx, q, name).Scan(
 		&m.ID, &m.Name, &m.TotalEntries, &m.TotalObjects, &m.TotalParams,
@@ -71,9 +88,18 @@ func (r *PgRepository) GetParamModelByName(ctx context.Context, name string) (*P
 // GetParamModelByID 按主键查 param_model（F05 MR dispatcher 用于
 // productClass → product.ParamModelID → param_models.name 链路）。
 func (r *PgRepository) GetParamModelByID(ctx context.Context, id uuid.UUID) (*ParamModel, error) {
-	const q = `SELECT id, name, total_entries, total_objects, total_params,
-	                 COALESCE(description,''), is_active, COALESCE(loaded_from,'')
-	          FROM param_models WHERE id = $1`
+	const q = `SELECT pm.id, pm.name,
+	                 stats.total_entries, stats.total_objects, stats.total_params,
+	                 COALESCE(pm.description,''), pm.is_active, COALESCE(pm.loaded_from,'')
+	          FROM param_models pm
+	          CROSS JOIN LATERAL (
+	              SELECT COUNT(*)::int AS total_entries,
+	                     COUNT(*) FILTER (WHERE m.entry_type = 'object')::int AS total_objects,
+	                     COUNT(*) FILTER (WHERE m.entry_type = 'parameter')::int AS total_params
+	                FROM param_mappings m
+	               WHERE m.param_model_id = pm.id AND m.is_active = TRUE
+	          ) stats
+	         WHERE pm.id = $1`
 	var m ParamModel
 	if err := r.pool.QueryRow(ctx, q, id).Scan(
 		&m.ID, &m.Name, &m.TotalEntries, &m.TotalObjects, &m.TotalParams,

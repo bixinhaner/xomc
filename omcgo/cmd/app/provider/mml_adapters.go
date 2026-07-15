@@ -72,11 +72,13 @@ func NewMMLPathTranslator(products *product.Registry, params *parammodel.Registr
 // 行为：
 //   - product 命中 + 单条 path 未命中 mapping → Source="passthrough"（Private=Standard）
 //   - product 命中 + path 命中 → Source=translator.Source()（discovered / default）
-//   - **product 未命中（ErrOrphan）→ 全部 path Source="orphan_passthrough"**（激进路线）
-//     + 触发 metrics.OrphanInc(productClass) + WARN log
+//   - **product 未命中（ErrOrphan）→ 全部 path Source="orphan_passthrough"**（激进路线），
+//     同时触发 metrics.OrphanInc(productClass) + WARN log
 //   - ParamRegistry 失败（ErrNoMapping / ErrNoParamModel）→ 全 passthrough（product 已识别）
+//   - 参数模型已去激活 → 返回错误，禁止 MML 通过 passthrough 绕过模型总开关
 //
-// 仅在以下场景返 error：未注入（products/params==nil）、Registry IO 错误（非 ErrOrphan）。
+// 仅在以下场景返 error：未注入（products/params==nil）、参数模型已去激活、
+// Registry IO 错误（非 ErrOrphan）。
 func (a *mmlPathTranslatorAdapter) TranslateForDevice(
 	ctx context.Context,
 	productClass, softwareVersion string,
@@ -113,6 +115,9 @@ func (a *mmlPathTranslatorAdapter) TranslateForDevice(
 
 	translator, err := a.params.Translator(ctx, matchRes.Product.ID, softwareVersion)
 	if err != nil {
+		if errors.Is(err, parammodel.ErrInactiveParamModel) {
+			return nil, fmt.Errorf("mml-translator-adapter: parameter model inactive for product_class %s: %w", productClass, err)
+		}
 		// ParamRegistry 失败：product 已识别，但 mapping 拿不到 → 全 passthrough
 		a.logger.Warn("translator unavailable, all paths passthrough",
 			zap.String("product_class", productClass),

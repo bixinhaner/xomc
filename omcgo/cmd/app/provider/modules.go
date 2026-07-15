@@ -1738,6 +1738,17 @@ func initMiscModules(c *Container) error {
 			}
 			set, err := c.ParamRegistry.GetByParamModel(ctx, *mr.Product.ParamModelID)
 			if err != nil {
+				if errors.Is(err, parammodel.ErrInactiveParamModel) {
+					productID := mr.Product.ID
+					paramModelID := *mr.Product.ParamModelID
+					return &mml.SupportedSet{
+						ProductClass:    productClass,
+						ProductID:       &productID,
+						ParamModelID:    &paramModelID,
+						ProductResolved: true,
+						Paths:           map[string]struct{}{},
+					}, nil
+				}
 				return nil, fmt.Errorf("get param_model %s mappings: %w", mr.Product.ParamModelID, err)
 			}
 			paths := make(map[string]struct{}, len(set.Mappings))
@@ -1760,7 +1771,7 @@ func initMiscModules(c *Container) error {
 	mmlConsoleSvc.SetParamModelPathsResolver(func(ctx context.Context, pmID uuid.UUID) (map[string]struct{}, error) {
 		set, err := c.ParamRegistry.GetByParamModel(ctx, pmID)
 		if err != nil {
-			if errors.Is(err, parammodel.ErrNoMapping) {
+			if errors.Is(err, parammodel.ErrNoMapping) || errors.Is(err, parammodel.ErrInactiveParamModel) {
 				return map[string]struct{}{}, nil
 			}
 			return nil, fmt.Errorf("get param_model %s paths: %w", pmID, err)

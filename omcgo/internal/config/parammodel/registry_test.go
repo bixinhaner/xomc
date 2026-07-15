@@ -18,8 +18,10 @@ import (
 type fakeRepo struct {
 	defaultByModel      map[uuid.UUID][]ParamMapping
 	discoveredByDevice  map[discoveredKey][]ParamMapping
+	activeByModel       map[uuid.UUID]bool
 	listDefaultCalls    int
 	listDiscoveredCalls int
+	isActiveCalls       int
 	listDefaultErr      error
 	listDiscoveredErr   error
 }
@@ -28,7 +30,17 @@ func newFakeRepo() *fakeRepo {
 	return &fakeRepo{
 		defaultByModel:     map[uuid.UUID][]ParamMapping{},
 		discoveredByDevice: map[discoveredKey][]ParamMapping{},
+		activeByModel:      map[uuid.UUID]bool{},
 	}
+}
+
+func (f *fakeRepo) IsParamModelActive(_ context.Context, paramModelID uuid.UUID) (bool, error) {
+	f.isActiveCalls++
+	active, configured := f.activeByModel[paramModelID]
+	if !configured {
+		return true, nil
+	}
+	return active, nil
 }
 
 func (f *fakeRepo) ListMappingsByParamModel(_ context.Context, paramModelID uuid.UUID) ([]ParamMapping, error) {
@@ -130,6 +142,43 @@ func TestRegistry_GetByProduct_DiscoveredHit(t *testing.T) {
 	require.Len(t, set.Mappings, 1)
 	assert.Equal(t, "A", set.Mappings[0].StandardPath)
 	assert.Equal(t, pmID, set.ParamModelID, "discovered hit 也应回填 paramModelID")
+}
+
+func TestRegistry_GetByProduct_InactiveModelRejectsCachedDiscoveredMappings(t *testing.T) {
+	repo := newFakeRepo()
+	products := newFakeProductGetter()
+	productID := uuid.New()
+	pmID := uuid.New()
+	products.products[productID] = &product.Product{ID: productID, ParamModelID: &pmID}
+	repo.activeByModel[pmID] = false
+
+	client := newMiniRedis(t)
+	cache := NewRedisCache(client)
+	require.NoError(t, cache.SetDiscovered(context.Background(), productID, "1.0", []ParamMapping{
+		mkMapping("Device.Foo", "Device.PrivateFoo"),
+	}))
+
+	r := NewRegistry(repo, cache, products, NewRegistryMetrics(nil), zap.NewNop())
+	_, err := r.GetByProduct(context.Background(), productID, "1.0")
+	require.ErrorIs(t, err, ErrInactiveParamModel)
+	assert.Equal(t, 0, repo.listDiscoveredCalls, "模型状态应在读取 discovered 缓存前检查")
+}
+
+func TestRegistry_GetByParamModel_InactiveModelRejectsCachedDefaultMappings(t *testing.T) {
+	repo := newFakeRepo()
+	pmID := uuid.New()
+	repo.activeByModel[pmID] = false
+
+	client := newMiniRedis(t)
+	cache := NewRedisCache(client)
+	require.NoError(t, cache.SetDefault(context.Background(), pmID, []ParamMapping{
+		mkMapping("Device.Foo", "Device.PrivateFoo"),
+	}))
+
+	r := NewRegistry(repo, cache, nil, NewRegistryMetrics(nil), zap.NewNop())
+	_, err := r.GetByParamModel(context.Background(), pmID)
+	require.ErrorIs(t, err, ErrInactiveParamModel)
+	assert.Equal(t, 0, repo.listDefaultCalls, "模型状态应在读取 default 缓存前检查")
 }
 
 func TestRegistry_GetByProduct_FallbackToDefault(t *testing.T) {

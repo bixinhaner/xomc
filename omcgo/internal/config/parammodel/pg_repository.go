@@ -20,6 +20,18 @@ func NewPgRepository(pool *pgxpool.Pool) *PgRepository {
 	return &PgRepository{pool: pool}
 }
 
+// IsParamModelActive 实现 Repository。使用 EXISTS 将不存在的模型与 inactive 统一为 false。
+func (r *PgRepository) IsParamModelActive(ctx context.Context, paramModelID uuid.UUID) (bool, error) {
+	var active bool
+	if err := r.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM param_models WHERE id = $1 AND is_active = TRUE)`,
+		paramModelID,
+	).Scan(&active); err != nil {
+		return false, fmt.Errorf("check param model active %s: %w", paramModelID, err)
+	}
+	return active, nil
+}
+
 // ListMappingsByParamModel 实现 Repository。
 //
 // 默认映射按 standard_path 升序，确保 Translator.Mappings() 的输出在跨实例间稳定可比。
