@@ -249,6 +249,43 @@ func TestPublishPMFileReceivedEvent_publishesThinPayload(t *testing.T) {
 	assert.Empty(t, decoded.DeviceOUI, "thin payload must leave device_oui empty")
 }
 
+func TestPublishLogFileReceivedEvent_UsesQuerySNForDeviceSuppliedFaultLogName(t *testing.T) {
+	bus := &captureBus{}
+	h := &Handler{logger: zap.NewNop(), eventBus: bus}
+
+	h.publishLogFileReceivedEvent(context.Background(),
+		"logs",
+		"fault/2026/07/15/dbc91d19/ErrorLog_20260715.1539 0800_dieLog.tar.gz",
+		"ErrorLog_20260715.1539 0800_dieLog.tar.gz",
+		string(tr069.FileTypeFaultLog),
+		1317251,
+		"E8F2971A3DC921A03D3E4FD4A0C1",
+		"dbc91d19-6364-4d3f-97bc-ae5d0b6d17f3",
+	)
+
+	require.Len(t, bus.published, 1)
+	got := bus.published[0]
+	assert.Equal(t, event.SubjectLogFileReceived, got.subject)
+
+	var decoded struct {
+		Bucket     string `json:"bucket"`
+		ObjectPath string `json:"object_path"`
+		FileName   string `json:"file_name"`
+		FileType   string `json:"file_type"`
+		FileSize   int64  `json:"file_size"`
+		TaskID8    string `json:"task_id8"`
+		DeviceSN   string `json:"device_sn"`
+	}
+	require.NoError(t, got.evt.DecodePayload(&decoded))
+	assert.Equal(t, "logs", decoded.Bucket)
+	assert.Equal(t, "fault/2026/07/15/dbc91d19/ErrorLog_20260715.1539 0800_dieLog.tar.gz", decoded.ObjectPath)
+	assert.Equal(t, "ErrorLog_20260715.1539 0800_dieLog.tar.gz", decoded.FileName)
+	assert.Equal(t, string(tr069.FileTypeFaultLog), decoded.FileType)
+	assert.Equal(t, int64(1317251), decoded.FileSize)
+	assert.Equal(t, "dbc91d19", decoded.TaskID8)
+	assert.Equal(t, "E8F2971A3DC921A03D3E4FD4A0C1", decoded.DeviceSN)
+}
+
 func TestExtractDeviceSNFromPMFilename(t *testing.T) {
 	cases := []struct {
 		name     string

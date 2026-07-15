@@ -389,7 +389,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 不阻塞业务（用户能看到文件名 + 下载）。等 stationlog 模块上线后这里可以收口
 	// 到单一事件，但当前阶段同时双发更稳。
 	if (ft == tr069.FileTypeRunningLog || ft == tr069.FileTypeFaultLog) && h.eventBus != nil {
-		h.publishLogFileReceivedEvent(ctx, bucket, objectPath, filename, string(ft), info.Size)
+		h.publishLogFileReceivedEvent(ctx, bucket, objectPath, filename, string(ft), info.Size, querySN, queryTaskID)
 		h.publishBackupFileReceivedEvent(ctx, bucket, objectPath, filename, info.Size, info.ETag,
 			r.URL.Query().Get("sn"), queryTaskID)
 	}
@@ -951,10 +951,19 @@ func (h *Handler) publishMRFileUploadedEvent(
 //
 //	running log: runtime-{taskID8}-{deviceSN}.tar.gz
 //	fault log:   fault-{taskID8}-{deviceSN}.tar.gz
+//
+// Some CPEs upload vendor-generated names such as ErrorLog_...dieLog.tar.gz.
+// For those, fall back to the URL query values OMC placed in the upload URL.
 func (h *Handler) publishLogFileReceivedEvent(
-	ctx context.Context, bucket, objectPath, filename, fileType string, fileSize int64,
+	ctx context.Context, bucket, objectPath, filename, fileType string, fileSize int64, querySN, queryTaskID string,
 ) {
 	taskID8, deviceSN := parseLogFilename(filename)
+	if deviceSN == "" {
+		deviceSN = strings.TrimSpace(querySN)
+	}
+	if taskID8 == "" {
+		taskID8 = taskID8FromQuery(queryTaskID)
+	}
 
 	payload := map[string]interface{}{
 		"bucket":      bucket,
@@ -979,6 +988,14 @@ func (h *Handler) publishLogFileReceivedEvent(
 		zap.String("path", objectPath),
 		zap.String("file_type", fileType),
 		zap.String("device_sn", deviceSN))
+}
+
+func taskID8FromQuery(taskID string) string {
+	compact := strings.ReplaceAll(strings.TrimSpace(taskID), "-", "")
+	if len(compact) < 8 {
+		return ""
+	}
+	return compact[:8]
 }
 
 // logFilenameRe matches executor-generated log filenames:
