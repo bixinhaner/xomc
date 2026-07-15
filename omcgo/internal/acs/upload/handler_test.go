@@ -168,6 +168,56 @@ func TestCountingReader(t *testing.T) {
 	assert.Equal(t, int64(11), c.n.Load())
 }
 
+func TestDeriveUploadFilename_FaultLogUsesSNAndMillisecondTimestamp(t *testing.T) {
+	got := deriveUploadFilename("RL", "dbc91d19-6364-4d3f-97bc-ae5d0b6d17f3", "SN-ABC")
+
+	assert.Regexp(t, `^fault-SN-ABC-\d{17}\.tar\.gz$`, got)
+	assert.NotContains(t, got, "dbc91d19", "fault log file name should not expose task id")
+}
+
+func TestBuildUploadObjectPath_FaultLogOmitsTaskSubdir(t *testing.T) {
+	now := time.Date(2026, 7, 15, 12, 34, 56, 789*int(time.Millisecond), time.UTC)
+
+	got := buildUploadObjectPath(
+		tr069.FileTypeFaultLog,
+		"fault",
+		now,
+		"dbc91d19-6364-4d3f-97bc-ae5d0b6d17f3",
+		"fault-SN-ABC-20260715123456789.tar.gz",
+	)
+
+	assert.Equal(t, "fault/2026/07/15/fault-SN-ABC-20260715123456789.tar.gz", got)
+	assert.NotContains(t, got, "/dbc91d19/", "fault log path should be readable without task-id directory")
+}
+
+func TestBuildUploadObjectPath_RunningLogOmitsTaskSubdir(t *testing.T) {
+	now := time.Date(2026, 7, 15, 12, 34, 56, 0, time.UTC)
+
+	got := buildUploadObjectPath(
+		tr069.FileTypeRunningLog,
+		"running",
+		now,
+		"dbc91d19-6364-4d3f-97bc-ae5d0b6d17f3",
+		"runtime-dbc91d19-SN-ABC.tar.gz",
+	)
+
+	assert.Equal(t, "running/2026/07/15/runtime-dbc91d19-SN-ABC.tar.gz", got)
+}
+
+func TestBuildUploadObjectPath_ConfigBackupKeepsTaskSubdir(t *testing.T) {
+	now := time.Date(2026, 7, 15, 12, 34, 56, 0, time.UTC)
+
+	got := buildUploadObjectPath(
+		tr069.FileTypeConfig,
+		"backup",
+		now,
+		"dbc91d19-6364-4d3f-97bc-ae5d0b6d17f3",
+		"SN-ABC_CFG.xml",
+	)
+
+	assert.Equal(t, "backup/2026/07/15/dbc91d19/SN-ABC_CFG.xml", got)
+}
+
 // captureBus records every published event for assertions.
 type captureBus struct {
 	mu        sync.Mutex
@@ -255,8 +305,8 @@ func TestPublishLogFileReceivedEvent_UsesQuerySNForDeviceSuppliedFaultLogName(t 
 
 	h.publishLogFileReceivedEvent(context.Background(),
 		"logs",
-		"fault/2026/07/15/dbc91d19/ErrorLog_20260715.1539 0800_dieLog.tar.gz",
-		"ErrorLog_20260715.1539 0800_dieLog.tar.gz",
+		"fault/2026/07/15/fault-E8F2971A3DC921A03D3E4FD4A0C1-20260715153900123.tar.gz",
+		"fault-E8F2971A3DC921A03D3E4FD4A0C1-20260715153900123.tar.gz",
 		string(tr069.FileTypeFaultLog),
 		1317251,
 		"E8F2971A3DC921A03D3E4FD4A0C1",
@@ -278,12 +328,36 @@ func TestPublishLogFileReceivedEvent_UsesQuerySNForDeviceSuppliedFaultLogName(t 
 	}
 	require.NoError(t, got.evt.DecodePayload(&decoded))
 	assert.Equal(t, "logs", decoded.Bucket)
-	assert.Equal(t, "fault/2026/07/15/dbc91d19/ErrorLog_20260715.1539 0800_dieLog.tar.gz", decoded.ObjectPath)
-	assert.Equal(t, "ErrorLog_20260715.1539 0800_dieLog.tar.gz", decoded.FileName)
+	assert.Equal(t, "fault/2026/07/15/fault-E8F2971A3DC921A03D3E4FD4A0C1-20260715153900123.tar.gz", decoded.ObjectPath)
+	assert.Equal(t, "fault-E8F2971A3DC921A03D3E4FD4A0C1-20260715153900123.tar.gz", decoded.FileName)
 	assert.Equal(t, string(tr069.FileTypeFaultLog), decoded.FileType)
 	assert.Equal(t, int64(1317251), decoded.FileSize)
 	assert.Equal(t, "dbc91d19", decoded.TaskID8)
 	assert.Equal(t, "E8F2971A3DC921A03D3E4FD4A0C1", decoded.DeviceSN)
+}
+
+func TestPublishLogFileReceivedEvent_FaultLogPrefersQueryIdentityOverFilename(t *testing.T) {
+	bus := &captureBus{}
+	h := &Handler{logger: zap.NewNop(), eventBus: bus}
+
+	h.publishLogFileReceivedEvent(context.Background(),
+		"logs",
+		"fault/2026/07/15/fault-12345678-SN-FROM-NAME.tar.gz",
+		"fault-12345678-SN-FROM-NAME.tar.gz",
+		string(tr069.FileTypeFaultLog),
+		1024,
+		"SN-FROM-QUERY",
+		"abcdef01-6364-4d3f-97bc-ae5d0b6d17f3",
+	)
+
+	require.Len(t, bus.published, 1)
+	var decoded struct {
+		TaskID8  string `json:"task_id8"`
+		DeviceSN string `json:"device_sn"`
+	}
+	require.NoError(t, bus.published[0].evt.DecodePayload(&decoded))
+	assert.Equal(t, "abcdef01", decoded.TaskID8)
+	assert.Equal(t, "SN-FROM-QUERY", decoded.DeviceSN)
 }
 
 func TestExtractDeviceSNFromPMFilename(t *testing.T) {
