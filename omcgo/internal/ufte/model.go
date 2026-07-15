@@ -461,12 +461,12 @@ func builtInTaskTypes() []TaskType {
 			// "X_COM_Log.FaultLogURL"，CPE 回 "Empty parameter list" 因为该路径在 CPE 数据
 			// 模型里不存在，已对齐字典。
 			URLTemplate:            "Device.DeviceInfo.FaultLogURL",
-			TargetFileNameTemplate: "fault-{task_id8}-{sn}.tar.gz",
-			FileNameTemplate:       "fault-{task_id8}-{sn}.tar.gz",
+			TargetFileNameTemplate: "fault-{sn}-{timestamp}.tar.gz",
+			FileNameTemplate:       "fault-{sn}-{timestamp}.tar.gz",
 			// TransportPath 是 SPV 下发给 CPE 的 URL 路径模板。{id} = 主任务 UUID（与
-			// 文件名 fault-{task_id8}-{sn}.tar.gz 的 task_id8 同源；ACS upload handler
-			// 用它做 task 子目录隔离同设备多次任务）；{sn} = 设备 SN；{fileName} 留空
-			// 让 CPE 自行决定上传名。
+			// ACS upload handler 发布事件时写入的 task_id 同源）；{sn} = 设备 SN；
+			// {fileName} 留空让 CPE 自行决定上传名。ACS 落 MinIO 前会二次命名为
+			// fault-{sn}-{yyyyMMddHHmmssSSS}.tar.gz，避免额外 taskId8 目录。
 			TransportPath:    "/smallcell/FileUploadService?fileType=RL&id={id}&sn={sn}&fileName=",
 			LastEditor:       "system",
 			UpdatedAt:        now,
@@ -771,9 +771,8 @@ func progressForDeviceStatus(status string) int {
 }
 
 // renderUFTEFileNameTemplate replaces {task_id8} 与 {sn} 占位符为运行时实际值。
-// 与 software/executor.go ExecuteOneUpload 渲染逻辑保持完全一致——后者把渲染结果
-// 拼到 Upload URL filename= 参数，CPE 上传时 ACS 就用这个名字落 MinIO。
-// 因此这里的渲染产物 = backup_restore_file.file_name 自然键，可用于反查元数据。
+// 运行日志、配置备份等同步模板可用它预览文件名；FAULT_LOG_COLLECT 完成后改从
+// backup_restore_file 按 (sn, task_id) 反查 ACS 二次命名的真实落地文件名。
 func renderUFTEFileNameTemplate(tmpl string, taskID uuid.UUID, sn string) string {
 	if tmpl == "" {
 		return ""

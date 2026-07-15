@@ -703,8 +703,8 @@ func (e *UpgradeExecutor) ExecuteOneSetParamCollect(ctx context.Context, subTask
 		e.logger.Error("update set-param collect sub-task device info", zap.Error(err))
 	}
 
-	// 渲染上传 URL。{id} 用主任务 UUID（与文件名 fault-{task_id8}-{sn}.tar.gz 里的
-	// task_id 对齐，便于 ACS upload handler 据此分目录 + 按 (sn, parent_task_id) 反查），
+	// 渲染上传 URL。{id} 用主任务 UUID，ACS upload handler 后续用它发布事件并
+	// 写入 backup_restore_file.task_id，便于按 (sn, parent_task_id) 反查真实落地文件。
 	// {sn} 用设备序列号。{fileName} 留空让设备自己决定上传名（与现网 Upload 链路一致）。
 	uploadBaseURL := e.resolveUploadBaseURL(ctx)
 	resolvedPath := resolveTemplate(transportPath, map[string]string{
