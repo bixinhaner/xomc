@@ -376,7 +376,7 @@ func TestHandleLogFileReceived_PromotesDetectedRecord(t *testing.T) {
 }
 
 func TestHandleLogFileReceived_InsertsWhenNoDetectedRecord(t *testing.T) {
-	// 直接到达的文件（无前置 detected 占位）应按旧路径 INSERT 一行 file_received。
+	// 手动任务/直传文件（无前置 detected 占位）只登记故障日志文件元数据，不代表异常重启。
 	svc, _, faultRepo := newTestService()
 
 	payloadRaw := newEventPayload(LogFileReceivedPayload{
@@ -397,7 +397,7 @@ func TestHandleLogFileReceived_InsertsWhenNoDetectedRecord(t *testing.T) {
 }
 
 func TestHandleLogFileReceived_SkipsFaultFileWithoutDeviceSN(t *testing.T) {
-	// 故障日志会进入重启记录视图；缺少 SN 时不能落成一条空设备的“异常重启”记录。
+	// 缺少 SN 且没有 detected 占位可补全时，不能落成一条无设备归属的故障日志文件记录。
 	svc, _, faultRepo := newTestService()
 
 	payloadRaw := newEventPayload(LogFileReceivedPayload{
