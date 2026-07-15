@@ -247,22 +247,23 @@ func (q *RedisTaskQueue) Update(ctx context.Context, task *Task) error {
 		return fmt.Errorf("marshal task: %w", err)
 	}
 
-	// 更新任务详情
-	err = q.client.HSet(ctx, q.taskKey(task.ID), "data", taskData).Err()
-	if err != nil {
-		return fmt.Errorf("update task: %w", err)
-	}
-
-	// 如果任务状态变回 pending，需要重新入队
+	// Keep the detail hash and executable queue membership consistent. A task is
+	// executable iff it is pending; every other state must remove any stale
+	// sorted-set member left by recovery, cancellation, or a concurrent terminal
+	// transition.
+	pipe := q.client.Pipeline()
+	pipe.HSet(ctx, q.taskKey(task.ID), "data", taskData)
 	if task.Status == TaskStatusPending {
 		score := queueScore(task)
-		err = q.client.ZAdd(ctx, q.queueKey(task.DeviceSN), redis.Z{
+		pipe.ZAdd(ctx, q.queueKey(task.DeviceSN), redis.Z{
 			Score:  score,
 			Member: task.ID,
-		}).Err()
-		if err != nil {
-			return fmt.Errorf("requeue task: %w", err)
-		}
+		})
+	} else {
+		pipe.ZRem(ctx, q.queueKey(task.DeviceSN), task.ID)
+	}
+	if _, err = pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("update task: %w", err)
 	}
 
 	return nil

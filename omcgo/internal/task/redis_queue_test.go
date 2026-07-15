@@ -261,6 +261,31 @@ func TestRedisQueue_PushAndPop_PriorityOrder(t *testing.T) {
 	assert.Nil(t, empty)
 }
 
+func TestRedisQueue_UpdateTerminalTaskRemovesQueueMembership(t *testing.T) {
+	q, _ := newRedisQueueWithMini(t)
+	ctx := context.Background()
+
+	tk := newTaskForQueue("t-terminal", "SN-TERMINAL", "GetParameterValues")
+	require.NoError(t, q.Push(ctx, tk))
+	require.EqualValues(t, 1, mustQueueLen(t, q, ctx, tk.DeviceSN))
+
+	tk.MarkFailed(0, "exceeded max retries")
+	require.NoError(t, q.Update(ctx, tk))
+
+	require.Zero(t, mustQueueLen(t, q, ctx, tk.DeviceSN), "terminal task must not remain executable")
+	stored, err := q.GetByID(ctx, tk.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	require.Equal(t, TaskStatusFailed, stored.Status)
+}
+
+func mustQueueLen(t *testing.T, q *RedisTaskQueue, ctx context.Context, deviceSN string) int64 {
+	t.Helper()
+	n, err := q.Len(ctx, deviceSN)
+	require.NoError(t, err)
+	return n
+}
+
 func TestRedisQueue_PopSkipsFutureNextAttempt(t *testing.T) {
 	q, _ := newRedisQueueWithMini(t)
 	ctx := context.Background()

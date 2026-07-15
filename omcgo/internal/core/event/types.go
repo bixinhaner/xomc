@@ -35,6 +35,29 @@ type SysConfigSavedPayload struct {
 	Category string `json:"category"`
 }
 
+// ParamSyncTaskResultPayload is a lightweight canonical terminal-result event.
+// ResultRef points at durable storage; raw SOAP and large parameter lists must
+// never be embedded in this event.
+type ParamSyncTaskResultPayload struct {
+	EventID      string    `json:"event_id"`
+	RequestID    uuid.UUID `json:"request_id"`
+	RunID        uuid.UUID `json:"run_id"`
+	TaskID       string    `json:"task_id"`
+	DeviceID     uuid.UUID `json:"device_id,omitempty"`
+	DeviceSN     string    `json:"device_sn"`
+	Success      bool      `json:"success"`
+	ResultRef    string    `json:"result_ref"`
+	ErrorCode    string    `json:"error_code,omitempty"`
+	ErrorMessage string    `json:"error_message,omitempty"`
+}
+
+type ParamSyncRequestedPayload struct {
+	DeviceSN       string   `json:"device_sn"`
+	TriggerReason  string   `json:"trigger_reason"`
+	RequestedPaths []string `json:"requested_paths"`
+	IdempotencyKey string   `json:"idempotency_key"`
+}
+
 // NewEvent creates a new Event with a generated ID and current timestamp.
 func NewEvent(subject string, payload interface{}) (Event, error) {
 	data, err := json.Marshal(payload)

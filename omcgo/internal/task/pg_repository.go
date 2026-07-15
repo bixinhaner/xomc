@@ -165,6 +165,39 @@ func (r *PgTaskRepository) Update(ctx context.Context, task *Task) error {
 	return nil
 }
 
+// MarkSentIfPending is the PostgreSQL execution fence used immediately before
+// ACS sends an RPC. A cancelled/expired/terminal task can never be revived to
+// sent, even when a stale copy is still present in Redis.
+func (r *PgTaskRepository) MarkSentIfPending(ctx context.Context, taskID, cwmpID string, sentAt time.Time) (bool, error) {
+	const query = `UPDATE device_tasks SET status=$2, cwmp_id=$3, sent_at=$4
+WHERE id=$1 AND status='pending' AND (
+  COALESCE(source, '') <> 'param_sync' OR EXISTS (
+SELECT 1 FROM parameter_sync_runs r
+WHERE r.id=device_tasks.source_id
+  AND r.status IN ('planning','enqueuing','waiting_device','executing','processing')
+  )
+)`
+	tag, err := r.pool.Exec(ctx, query, taskID, TaskStatusSent, cwmpID, sentAt)
+	if err != nil {
+		return false, fmt.Errorf("execute task send fence: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// ReleaseSentClaimIfUnwritten compensates only the pre-write failure window in
+// which ACS knows the RPC was not placed on the HTTP response. Matching both
+// status and CWMP ID prevents an old failure path from reviving a terminal task
+// or releasing a newer send claim.
+func (r *PgTaskRepository) ReleaseSentClaimIfUnwritten(ctx context.Context, taskID, cwmpID string) (bool, error) {
+	const query = `UPDATE device_tasks SET status='pending', cwmp_id=NULL, sent_at=NULL
+WHERE id=$1 AND status='sent' AND cwmp_id=$2`
+	tag, err := r.pool.Exec(ctx, query, taskID, cwmpID)
+	if err != nil {
+		return false, fmt.Errorf("release unwritten task send claim: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 // GetByID 根据 ID 获取任务
 func (r *PgTaskRepository) GetByID(ctx context.Context, id string) (*Task, error) {
 	query, args, err := storage.Psql.Select(taskColumns()...).
@@ -443,40 +476,37 @@ func (r *PgTaskRepository) HasOpenSyncGPVTasksByDevice(ctx context.Context, devi
 // 设备任务队列里还会混有 PM 初始化、MML、无 command_key 的临时 GPV，以及历史遗留 sent
 // 行；参数树的 sync-status 只应被当前/近期参数同步本身影响。
 func (r *PgTaskRepository) CountOpenSyncGPVByDevice(ctx context.Context, deviceSN string) (int64, error) {
-	prefix := fmt.Sprintf("sync-gpv-%s", deviceSN)
-	query, args, err := storage.Psql.Select("COUNT(*)").
-		From("device_tasks t").
-		Where(sq.Eq{"t.device_sn": deviceSN}).
-		Where(sq.Eq{"t.method": "GetParameterValues"}).
-		Where(sq.Like{"t.command_key": prefix + "%"}).
-		Where(sq.Eq{"t.status": []TaskStatus{TaskStatusPending, TaskStatusSent}}).
-		Where(sq.Expr("t.created_at > now() - interval '24 hours'")).
-		Where(sq.NotEq{"t.expires_at": nil}).
-		Where(sq.Expr("t.expires_at > now()")).
-		Where(`t.source_id = (
-			SELECT latest.source_id
-			FROM device_tasks latest
-			WHERE latest.device_sn = t.device_sn
-			  AND latest.method = 'GetParameterValues'
-			  AND latest.command_key LIKE ?
-			  AND latest.source_id IS NOT NULL
-			ORDER BY latest.created_at DESC
-			LIMIT 1
-		)`, prefix+"%").
-		Where(`NOT EXISTS (
-			SELECT 1 FROM device_tasks failed
-			WHERE failed.device_sn = t.device_sn
-			  AND failed.source_id = t.source_id
-			  AND failed.method = 'GetParameterValues'
-			  AND failed.command_key LIKE ?
-			  AND failed.status IN ('failed', 'expired', 'cancelled')
-		)`, prefix+"%").
-		ToSql()
-	if err != nil {
-		return 0, fmt.Errorf("build open sync-gpv count query: %w", err)
-	}
+	const query = `
+WITH latest AS (
+  SELECT source_id
+  FROM device_tasks
+  WHERE device_sn=$1 AND method='GetParameterValues'
+    AND (command_key LIKE 'sync-gpv-%' OR source='param_sync')
+    AND source_id IS NOT NULL
+  ORDER BY created_at DESC
+  LIMIT 1
+)
+SELECT COUNT(*)
+FROM device_tasks t
+JOIN latest l ON l.source_id=t.source_id
+WHERE t.device_sn=$1 AND t.method='GetParameterValues'
+  AND (t.command_key LIKE 'sync-gpv-%' OR t.source='param_sync')
+  AND t.status IN ('pending','sent')
+  AND t.created_at > now() - interval '24 hours'
+  AND t.expires_at IS NOT NULL AND t.expires_at > now()
+  AND (t.source<>'param_sync' OR EXISTS (
+    SELECT 1 FROM parameter_sync_runs r
+    WHERE r.id=t.source_id
+      AND r.status IN ('planning','enqueuing','waiting_device','executing','processing')
+  ))
+  AND (t.source='param_sync' OR NOT EXISTS (
+    SELECT 1 FROM device_tasks failed
+    WHERE failed.device_sn=t.device_sn AND failed.source_id=t.source_id
+      AND failed.method='GetParameterValues' AND failed.command_key LIKE 'sync-gpv-%'
+      AND failed.status IN ('failed','expired','cancelled')
+  ))`
 	var count int64
-	if err := r.pool.QueryRow(ctx, query, args...).Scan(&count); err != nil {
+	if err := r.pool.QueryRow(ctx, query, deviceSN).Scan(&count); err != nil {
 		return 0, fmt.Errorf("query open sync-gpv count: %w", err)
 	}
 	return count, nil
@@ -492,7 +522,7 @@ WITH latest AS (
   FROM device_tasks
   WHERE device_sn = $1
     AND method = 'GetParameterValues'
-    AND command_key LIKE 'sync-gpv-%'
+    AND (command_key LIKE 'sync-gpv-%' OR source = 'param_sync')
     AND command_key !~ '(-r)+$'
     AND source_id IS NOT NULL
     AND completed_at IS NOT NULL
@@ -508,7 +538,7 @@ roots AS (
   JOIN latest l ON t.source_id = l.source_id
   WHERE t.device_sn = $1
     AND t.method = 'GetParameterValues'
-    AND t.command_key LIKE 'sync-gpv-%'
+    AND (t.command_key LIKE 'sync-gpv-%' OR t.source = 'param_sync')
     AND t.command_key !~ '(-r)+$'
 ),
 anchor AS (
@@ -568,6 +598,23 @@ requested_paths AS (
 ),
 failed_path_rows AS (
   SELECT jsonb_build_object(
+    'path', skipped.path,
+    'fault_code', NULLIF(t.result::jsonb->>'fault_code', '')::int,
+    'fault_text', '',
+    'command_key', t.command_key,
+    'status', t.status
+  ) AS item
+  FROM run_tasks t
+  CROSS JOIN LATERAL jsonb_array_elements_text(
+    COALESCE(t.result::jsonb->'bad_paths', '[]'::jsonb)
+  ) AS skipped(path)
+  WHERE t.status = 'completed'
+    AND t.result IS NOT NULL
+    AND COALESCE((t.result::jsonb->>'recovered')::boolean, false)
+
+  UNION ALL
+
+  SELECT jsonb_build_object(
     'path', t.result::jsonb->>'bad_path',
     'fault_code', NULLIF(t.result::jsonb->>'fault_code', '')::int,
     'fault_text', '',
@@ -579,6 +626,7 @@ failed_path_rows AS (
     AND t.result IS NOT NULL
     AND COALESCE((t.result::jsonb->>'recovered')::boolean, false)
     AND COALESCE(t.result::jsonb->>'bad_path', '') <> ''
+    AND jsonb_array_length(COALESCE(t.result::jsonb->'bad_paths', '[]'::jsonb)) = 0
 
   UNION ALL
 
@@ -591,7 +639,7 @@ failed_path_rows AS (
   ) AS item
   FROM run_tasks t
   CROSS JOIN LATERAL jsonb_array_elements(COALESCE(t.result::jsonb->'param_faults', '[]'::jsonb)) AS fault
-  WHERE t.status IN ('failed', 'expired', 'cancelled')
+  WHERE t.status IN ('failed', 'expired')
     AND t.result IS NOT NULL
 
   UNION ALL
@@ -607,7 +655,7 @@ failed_path_rows AS (
   CROSS JOIN LATERAL jsonb_array_elements_text(
 	COALESCE(t.params::jsonb->'names', t.params::jsonb->'paths', '[]'::jsonb)
   ) AS requested(path)
-  WHERE t.status IN ('failed', 'expired', 'cancelled')
+  WHERE t.status IN ('failed', 'expired')
 	AND jsonb_array_length(COALESCE(t.result::jsonb->'param_faults', '[]'::jsonb)) = 0
 
   UNION ALL
@@ -620,7 +668,7 @@ failed_path_rows AS (
 	'status', t.status
   ) AS item
   FROM run_tasks t
-  WHERE t.status IN ('failed', 'expired', 'cancelled')
+  WHERE t.status IN ('failed', 'expired')
 	AND jsonb_array_length(COALESCE(t.result::jsonb->'param_faults', '[]'::jsonb)) = 0
 	AND jsonb_array_length(
 	  COALESCE(t.params::jsonb->'names', t.params::jsonb->'paths', '[]'::jsonb)
@@ -631,6 +679,19 @@ failed_paths AS (
     COUNT(*)::int AS failed_path_count,
     COALESCE(jsonb_agg(item ORDER BY item->>'command_key', item->>'path'), '[]'::jsonb) AS failed_paths
   FROM failed_path_rows
+),
+successful_path_rows AS (
+  SELECT DISTINCT successful.path
+  FROM run_tasks t
+  CROSS JOIN LATERAL jsonb_array_elements_text(
+    COALESCE(t.params::jsonb->'names', t.params::jsonb->'paths', '[]'::jsonb)
+  ) AS successful(path)
+  WHERE t.status = 'completed'
+    AND NOT COALESCE((t.result::jsonb->>'recovered')::boolean, false)
+),
+successful_paths AS (
+  SELECT COUNT(*)::int AS successful_path_count
+  FROM successful_path_rows
 )
 SELECT
   rt.source_id::text,
@@ -638,7 +699,7 @@ SELECT
   COUNT(*) FILTER (WHERE rt.status = 'completed')::int,
   COUNT(*) FILTER (WHERE rt.status IN ('failed', 'expired', 'cancelled'))::int,
   COALESCE(rp.requested_path_count, 0)::int,
-  GREATEST(COALESCE(rp.requested_path_count, 0) - COALESCE(fp.failed_path_count, 0), 0)::int,
+  COALESCE(sp.successful_path_count, 0)::int,
   COALESCE(fp.failed_path_count, 0)::int,
   COALESCE(fp.failed_paths, '[]'::jsonb)::text,
   MIN(rt.created_at),
@@ -646,8 +707,9 @@ SELECT
   EXTRACT(EPOCH FROM (MAX(rt.completed_at) - MIN(rt.created_at)))::float8
 FROM run_tasks rt
 CROSS JOIN failed_paths fp
+CROSS JOIN successful_paths sp
 CROSS JOIN requested_paths rp
-GROUP BY rt.source_id, fp.failed_path_count, fp.failed_paths, rp.requested_path_count`
+GROUP BY rt.source_id, fp.failed_path_count, fp.failed_paths, sp.successful_path_count, rp.requested_path_count`
 
 	var summary SyncGPVSummary
 	var completed sql.NullTime
@@ -1175,10 +1237,10 @@ func (r *PgTaskRepository) PurgeOldTasks(ctx context.Context, before string) (in
 func taskColumns() []string {
 	return []string{
 		"id", "device_sn", "method", "params", "priority",
-		"command_key", "cwmp_id", "status", "retry_count", "max_retries", "retry_interval_seconds",
+		"COALESCE(command_key, '')", "COALESCE(cwmp_id, '')", "status", "retry_count", "max_retries", "retry_interval_seconds",
 		"created_at", "sent_at", "completed_at", "expires_at", "next_attempt_at",
-		"result", "error_code", "error_message",
-		"source", "creator_id", "description",
+		"result", "COALESCE(error_code, 0)", "COALESCE(error_message, '')",
+		"COALESCE(source, '')", "COALESCE(creator_id, '')", "COALESCE(description, '')",
 		"source_id", "command_index", "device_index",
 		"has_path_translation_miss", "path_translation_miss_count",
 		"path_translation_source", // T-0168

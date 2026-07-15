@@ -54,6 +54,8 @@ export type Feedback = CellFeedback | MultiFeedback;
 
 export interface QuickSettingsSyncMonitor {
   sourceId?: string;
+  requestId?: string;
+  runId?: string;
   lastParamSyncAt?: string;
   lastParamSyncFailedAt?: string;
   targetCount: number;

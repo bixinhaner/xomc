@@ -28,6 +28,7 @@ type ACSConfig struct {
 	PostSessionWake         PostSessionWakeConfig `mapstructure:"post_session_wake"`
 	Redis                   RedisConfig           `mapstructure:"redis"`
 	NATS                    NATSConfig            `mapstructure:"nats"`
+	ParamSync               ParamSyncConfig       `mapstructure:"param_sync"`
 	DB                      PostgresConfig        `mapstructure:"db"`
 	TSDB                    PostgresConfig        `mapstructure:"tsdb"` // KPI/时序库物理分离：ACS 写 trace_messages（已迁时序库）所需的第二个连接池
 	MinIO                   MinIOConfig           `mapstructure:"minio"`
@@ -240,6 +241,17 @@ type ParamRegistryConfig struct {
 	DiscoveredTTL time.Duration `mapstructure:"discovered_ttl"`
 }
 
+// ParamSyncConfig controls the reliable parameter-sync data plane. All switches
+// default to false so deploying the binary and migration does not change the
+// legacy path until an operator explicitly enables a deterministic canary.
+type ParamSyncConfig struct {
+	RunEnabled            bool `mapstructure:"run_enabled"`
+	ResultConsumerEnabled bool `mapstructure:"result_consumer_enabled"`
+	StagingEnabled        bool `mapstructure:"staging_enabled"`
+	CanaryPercent         int  `mapstructure:"canary_percent"`
+	LegacyFallbackEnabled bool `mapstructure:"legacy_fallback_enabled"`
+}
+
 // AppConfig 是 App 服务的完整配置。
 // 由 cmd/app/main.go 读取 config.yaml 后初始化，包含 REST API、认证、
 // 北向接口、开站引擎、数据模型过期策略和可观测性配置。
@@ -262,6 +274,7 @@ type AppConfig struct {
 	DataModelExpiry DataModelExpiryConfig `mapstructure:"datamodel_expiry"`
 	DictLoader      DictLoaderConfig      `mapstructure:"dict_loader"`
 	ParamRegistry   ParamRegistryConfig   `mapstructure:"param_registry"`
+	ParamSync       ParamSyncConfig       `mapstructure:"param_sync"`
 	BatchProcessor  BatchProcessorConfig  `mapstructure:"batch_processor"`
 	License         LicenseConfig         `mapstructure:"license"`
 	Task            TaskConfig            `mapstructure:"task"`
@@ -621,7 +634,8 @@ type WorkerConfig struct {
 	Redis               RedisConfig               `mapstructure:"redis"`
 	NATS                NATSConfig                `mapstructure:"nats"`
 	MinIO               MinIOConfig               `mapstructure:"minio"`
-	Task                TaskConfig                `mapstructure:"task"`                  // T-0157 C2: 任务过期扫描器配置
+	Task                TaskConfig                `mapstructure:"task"` // T-0157 C2: 任务过期扫描器配置
+	ParamSync           ParamSyncConfig           `mapstructure:"param_sync"`
 	OfflineAlarmCleanup OfflineAlarmCleanupConfig `mapstructure:"offline_alarm_cleanup"` // #358: 离线设备活动告警清理阈值/周期/批量可配
 	PM                  PMConfig                  `mapstructure:"pm"`                    // 设备上线时自动下发 PM 上传配置
 	// PMConsumerConcurrency 是 PM 文件入库消费者的进程内并发订阅数（pm.file.received → 解析入库）。

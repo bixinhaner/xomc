@@ -76,6 +76,8 @@ type ServerDeps struct {
 	PathTranslator *PathTranslationService
 	// #746: 心跳周期自动调整策略。nil 时功能关闭（不影响 Inform 处理）。
 	InformPeriodPolicy      *InformPeriodPolicy
+	GPVFaultRecoverer       GPVFaultRecoverer
+	DurableReadbackEnabled  bool
 	Logger                  *zap.Logger
 	RequestIDPrefix         string // prefix for request IDs, e.g., "acs"
 	EnableTestTaskInjection bool   // enable random test task injection (for testing only)
@@ -116,6 +118,8 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 		traceService:            deps.TraceService,
 		pathTranslator:          deps.PathTranslator,
 		informPeriodPolicy:      deps.InformPeriodPolicy,
+		gpvFaultRecoverer:       deps.GPVFaultRecoverer,
+		durableReadbackEnabled:  deps.DurableReadbackEnabled,
 	}
 
 	mux := http.NewServeMux()

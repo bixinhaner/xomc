@@ -46,6 +46,23 @@ func makeReq(sn, method string) *CreateTaskRequest {
 	}
 }
 
+func createParamSyncRunForTaskTest(t *testing.T, repo *PgTaskRepository, sn, status string) string {
+	t.Helper()
+	requestID, runID, deviceID := generateUUID(), generateUUID(), generateUUID()
+	_, err := repo.pool.Exec(context.Background(), `INSERT INTO parameter_sync_requests
+(id, device_id, device_sn, trigger_reason, sync_scope, status)
+VALUES ($1, $2, $3, 'manual', 'full', 'running')`, requestID, deviceID, sn)
+	require.NoError(t, err)
+	_, err = repo.pool.Exec(context.Background(), `INSERT INTO parameter_sync_runs
+(id, request_id, device_id, device_sn, trigger_reason, sync_scope, status)
+VALUES ($1, $2, $3, $4, 'manual', 'full', $5)`, runID, requestID, deviceID, sn, status)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = repo.pool.Exec(context.Background(), `DELETE FROM parameter_sync_requests WHERE id=$1`, requestID)
+	})
+	return runID
+}
+
 func TestService_PG_CreateTask(t *testing.T) {
 	svc, _, q, repo := newServiceWithPG(t)
 	if svc == nil {
@@ -246,6 +263,56 @@ func TestService_PG_CountOpenSyncGPVByDevice_ScopesToRecentSyncTasks(t *testing.
 	assert.Equal(t, int64(1), count)
 }
 
+func TestService_PG_CountOpenSyncGPVByDevice_IncludesDurableParamSync(t *testing.T) {
+	svc, _, _, repo := newServiceWithPG(t)
+	if svc == nil {
+		return
+	}
+	defer cleanupTestTasks(t, repo.pool)
+	ctx := context.Background()
+	sn := testDeviceSNPrefix + "durable-sync-count"
+
+	active := freshTaskForPG("active-param-sync", "durable-sync-count")
+	active.Method = "GetParameterValues"
+	active.CommandKey = "param-sync-" + generateUUID() + "-0"
+	active.Source = TaskSourceParamSync
+	active.SourceID = createParamSyncRunForTaskTest(t, repo, sn, "executing")
+	expires := time.Now().Add(time.Hour)
+	active.ExpiresAt = &expires
+	require.NoError(t, repo.Create(ctx, active))
+
+	count, err := svc.CountOpenSyncGPVByDevice(ctx, sn)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), count)
+}
+
+func TestService_PG_TerminalParamSyncRunCannotRemainOpenOrBeSent(t *testing.T) {
+	svc, _, _, repo := newServiceWithPG(t)
+	if svc == nil {
+		return
+	}
+	defer cleanupTestTasks(t, repo.pool)
+	ctx := context.Background()
+	sn := testDeviceSNPrefix + "terminal-param-sync"
+
+	orphan := freshTaskForPG("terminal-param-sync", "terminal-param-sync")
+	orphan.Method = "GetParameterValues"
+	orphan.CommandKey = "param-sync-" + generateUUID() + "-0-r"
+	orphan.Source = TaskSourceParamSync
+	orphan.SourceID = createParamSyncRunForTaskTest(t, repo, sn, "failed")
+	expires := time.Now().Add(30 * time.Minute)
+	orphan.ExpiresAt = &expires
+	require.NoError(t, repo.Create(ctx, orphan))
+
+	count, err := svc.CountOpenSyncGPVByDevice(ctx, sn)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), count, "终态 durable run 的竞态遗留 task 不应让参数树保持同步中")
+
+	acquired, err := repo.MarkSentIfPending(ctx, orphan.ID, "cwmp-terminal-run", time.Now())
+	require.NoError(t, err)
+	assert.False(t, acquired, "终态 durable run 的遗留 task 不得再下发设备")
+}
+
 func TestService_PG_MarkTaskSent(t *testing.T) {
 	svc, _, _, repo := newServiceWithPG(t)
 	if svc == nil {
@@ -257,6 +324,17 @@ func TestService_PG_MarkTaskSent(t *testing.T) {
 	req := makeReq(testDeviceSNPrefix+"svcmark", "Reboot")
 	tk, err := svc.CreateTask(ctx, req)
 	require.NoError(t, err)
+	before, err := repo.GetByID(ctx, tk.ID)
+	require.NoError(t, err)
+	require.NotNil(t, before)
+	require.Equal(t, TaskStatusPending, before.Status)
+	require.Equal(t, TaskSourceAPI, before.Source)
+	var fenceAllows bool
+	require.NoError(t, repo.pool.QueryRow(ctx, `SELECT COALESCE(source, '') <> 'param_sync' OR EXISTS (
+SELECT 1 FROM parameter_sync_runs r WHERE r.id=device_tasks.source_id
+  AND r.status IN ('planning','enqueuing','waiting_device','executing','processing'))
+FROM device_tasks WHERE id=$1`, tk.ID).Scan(&fenceAllows))
+	require.True(t, fenceAllows)
 
 	cwmpID := "cwmp-svc-mark-" + tk.ID[:8]
 	require.NoError(t, svc.MarkTaskSent(ctx, tk.ID, cwmpID))
@@ -267,6 +345,81 @@ func TestService_PG_MarkTaskSent(t *testing.T) {
 	require.NotNil(t, got)
 	assert.Equal(t, TaskStatusSent, got.Status)
 	assert.Equal(t, cwmpID, got.CWMPID)
+}
+
+func TestService_PG_MarkTaskSentReleasesFenceWhenRedisFailsBeforeRPCWrite(t *testing.T) {
+	svc, redisServer, _, repo := newServiceWithPG(t)
+	if svc == nil {
+		return
+	}
+	defer cleanupTestTasks(t, repo.pool)
+	ctx := context.Background()
+
+	req := makeReq(testDeviceSNPrefix+"send-fence-redis-fail", "Reboot")
+	tk, err := svc.CreateTask(ctx, req)
+	require.NoError(t, err)
+	popped, err := svc.PopTask(ctx, tk.DeviceSN)
+	require.NoError(t, err)
+	require.NotNil(t, popped)
+	redisServer.Close()
+
+	err = svc.MarkTaskSent(ctx, tk.ID, "cwmp-before-write-failure")
+	require.Error(t, err)
+
+	got, err := repo.GetByID(ctx, tk.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, TaskStatusPending, got.Status)
+	assert.Empty(t, got.CWMPID)
+	assert.Nil(t, got.SentAt)
+}
+
+func TestPGReleaseSentClaimDoesNotReviveTerminalTask(t *testing.T) {
+	_, _, _, repo := newServiceWithPG(t)
+	if repo == nil {
+		return
+	}
+	defer cleanupTestTasks(t, repo.pool)
+	ctx := context.Background()
+	tk := freshTaskForPG("release-terminal", "release-terminal")
+	require.NoError(t, repo.Create(ctx, tk))
+	cwmpID := "cwmp-release-terminal"
+	acquired, err := repo.MarkSentIfPending(ctx, tk.ID, cwmpID, time.Now())
+	require.NoError(t, err)
+	require.True(t, acquired)
+	_, err = repo.pool.Exec(ctx, `UPDATE device_tasks SET status='cancelled', completed_at=now() WHERE id=$1`, tk.ID)
+	require.NoError(t, err)
+
+	released, err := repo.ReleaseSentClaimIfUnwritten(ctx, tk.ID, cwmpID)
+
+	require.NoError(t, err)
+	assert.False(t, released)
+	got, err := repo.GetByID(ctx, tk.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, TaskStatusCancelled, got.Status)
+}
+
+func TestService_PG_MarkTaskSentDropsRedisCopyWhenFenceRejects(t *testing.T) {
+	svc, _, q, repo := newServiceWithPG(t)
+	if svc == nil {
+		return
+	}
+	defer cleanupTestTasks(t, repo.pool)
+	ctx := context.Background()
+
+	req := makeReq(testDeviceSNPrefix+"send-fence-stale", "GetParameterValues")
+	tk, err := svc.CreateTask(ctx, req)
+	require.NoError(t, err)
+	_, err = repo.pool.Exec(ctx, `UPDATE device_tasks SET status='failed', completed_at=now(), error_code=9005,
+error_message='run already failed' WHERE id=$1`, tk.ID)
+	require.NoError(t, err)
+
+	err = svc.MarkTaskSent(ctx, tk.ID, "cwmp-stale-fence")
+	require.ErrorContains(t, err, "no longer pending")
+	queued, getErr := q.GetByID(ctx, tk.ID)
+	require.NoError(t, getErr)
+	assert.Nil(t, queued, "被 PG fence 拒绝的 stale Redis task 必须移除，避免设备每次会话重复命中")
 }
 
 func TestService_PG_MarkTaskCompleted(t *testing.T) {

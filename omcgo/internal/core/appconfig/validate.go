@@ -42,6 +42,9 @@ func (c *AppConfig) Validate() error {
 	if err := c.ParamRegistry.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
+	if err := c.ParamSync.validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
 	if err := c.Notification.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
@@ -75,6 +78,9 @@ func (c *ACSConfig) Validate() error {
 	if err := c.Metrics.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
+	if err := c.ParamSync.validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
 	if c.Session.Timeout > 0 && c.Session.MaxConcurrent <= 0 {
 		errs = append(errs, "session.max_concurrent must be > 0 when session is configured")
 	}
@@ -105,6 +111,9 @@ func (c *WorkerConfig) Validate() error {
 		errs = append(errs, err.Error())
 	}
 	if err := c.Metrics.validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
+	if err := c.ParamSync.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
 
@@ -220,6 +229,28 @@ func (c ParamRegistryConfig) validate() error {
 	}
 	if c.DiscoveredTTL < 0 {
 		return fmt.Errorf("param_registry.discovered_ttl must not be negative, got %s", c.DiscoveredTTL)
+	}
+	return nil
+}
+
+func (c ParamSyncConfig) validate() error {
+	if c.CanaryPercent < 0 || c.CanaryPercent > 100 {
+		return fmt.Errorf("param_sync.canary_percent must be between 0 and 100, got %d", c.CanaryPercent)
+	}
+	if !c.RunEnabled {
+		if c.ResultConsumerEnabled || c.StagingEnabled || c.CanaryPercent != 0 {
+			return fmt.Errorf("param_sync consumer, staging, and canary settings require run_enabled=true")
+		}
+		return nil
+	}
+	if !c.ResultConsumerEnabled {
+		return fmt.Errorf("param_sync.result_consumer_enabled must be true when run_enabled=true")
+	}
+	if !c.StagingEnabled {
+		return fmt.Errorf("param_sync.staging_enabled must be true when run_enabled=true")
+	}
+	if c.CanaryPercent <= 0 {
+		return fmt.Errorf("param_sync.canary_percent must be greater than 0 when run_enabled=true")
 	}
 	return nil
 }

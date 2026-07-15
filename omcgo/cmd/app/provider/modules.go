@@ -45,6 +45,7 @@ import (
 	nbsync "github.com/omcgo/omcgo/internal/northbound/sync"
 	"github.com/omcgo/omcgo/internal/notification"
 	"github.com/omcgo/omcgo/internal/ops"
+	"github.com/omcgo/omcgo/internal/paramsync"
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
@@ -688,22 +689,31 @@ func initProvisionModule(c *Container) error {
 		logger.Info("device name sync hook enabled (Issue #758)")
 
 		c.SyncSvc = syncSvc
+		if c.miscDeps.paramSyncStarter != nil {
+			syncSvc.SetDurableStarter(c.miscDeps.paramSyncStarter)
+		}
 		provisionEngine.SetSyncService(syncSvc)
 		// T-0126: 注入 ParamSyncStarter 让 device.handler.SyncDeviceParams 调 Path B 手动同步（reason="manual"）
 		if c.DeviceService != nil {
-			c.DeviceService.SetParamSyncStarter(syncSvc)
+			if c.miscDeps.paramSyncStarter != nil {
+				c.miscDeps.paramSyncStarter.SetLegacy(syncSvc)
+				c.DeviceService.SetParamSyncStarter(c.miscDeps.paramSyncStarter)
+			} else {
+				c.DeviceService.SetParamSyncStarter(syncSvc)
+			}
 		}
 		logger.Info("auto-sync service enabled")
 
-		// License Params Tab 后端装配（DeviceDetail "License 参数" tab）—
-		// 复用 syncSvc.StartSync 做局部 GPV，需要 syncSvc 在 scope 内，所以
-		// 在此处而非 initMiscModules 装配。
+		// License Params Tab 后端装配（DeviceDetail "License 参数" tab）。
+		// 刷新直接提交到 durable paramsync 数据面，不经过 provision.SyncService
+		// 或旧 Path B 调度器。
 		if c.DeviceRepo != nil && c.ParamRepo != nil &&
-			c.ProductRegistry != nil && c.ParamRegistry != nil {
+			c.ProductRegistry != nil && c.ParamRegistry != nil &&
+			c.miscDeps.paramSyncStarter != nil {
 			licenseParamSvc := device.NewLicenseParamService(
 				c.DeviceRepo, c.ParamRepo,
 				c.ProductRegistry, c.ParamRegistry,
-				syncSvc, c.Redis, logger,
+				c.miscDeps.paramSyncStarter, c.Redis, logger,
 			)
 			c.miscDeps.licenseParamHandler = device.NewLicenseParamHandler(licenseParamSvc, logger)
 			logger.Info("device license params handler initialized")
@@ -1437,6 +1447,9 @@ func initMiscModules(c *Container) error {
 		syncDeviceChk = &syncDeviceChecker{repo: c.DeviceRepo}
 	}
 	c.miscDeps.syncHandler = config.NewSyncHandler(c.TaskSvc, gpvBatcher, syncDeviceChk, logger)
+	if c.miscDeps.paramSyncStarter != nil {
+		c.miscDeps.syncHandler.WithDurablePullSubmitter(c.miscDeps.paramSyncStarter)
+	}
 
 	// File Manager module
 	fileRepo := filemanager.NewPgFileRepository(c.PgPool)
@@ -1878,6 +1891,7 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 			// 也注册自己的 TaskSourceOps 聚合器。CompletionRouter.Register 是 mutex-safe，
 			// 允许 bridge.Subscribe 之后再追加 handler — 启动序无 race（pre-traffic 阶段）。
 			c.miscDeps.completionRouter = task.NewCompletionRouter(logger)
+			c.miscDeps.completionRouter.Register(task.TaskSourceParamSync, paramSyncCompletionHandled{})
 			// #122：source 无关的终态观察者，把每个终态任务写入 sys_task_logs。
 			// 必须在 per-source handler 之前用 RegisterObserver 注册，覆盖全部 source。
 			if c.adminHandlerDeps != nil && c.adminHandlerDeps.logRepo != nil {
@@ -2201,8 +2215,11 @@ type miscDeps struct {
 	ufteService         *ufte.Service
 
 	// Provision
-	provisionRepo   *provision.PgProvisioningTaskRepository
-	provisionEngine *provision.ProvisioningEngine
+	provisionRepo     *provision.PgProvisioningTaskRepository
+	provisionEngine   *provision.ProvisioningEngine
+	paramSyncHandler  *paramsync.Handler
+	paramSyncStarter  *paramSyncStarter
+	paramSyncConsumer *paramsync.ResultConsumer
 
 	// Task
 	taskHandler      *task.Handler

@@ -1203,6 +1203,30 @@ func TestHandleGPVResponse_EmptySyncGPVStillFinalizesPathB(t *testing.T) {
 	assert.Error(t, redisErr, "pending batch key should be cleared after final empty sync-gpv response")
 }
 
+func TestHandleGPVResponse_ParamSyncSourceSkipsLegacyPath(t *testing.T) {
+	lookupCount := 0
+	deviceRepo := &mockDeviceRepo{
+		GetBySerialNumberFn: func(_ context.Context, _ string) (*model.Device, error) {
+			lookupCount++
+			return &model.Device{ID: uuid.New(), SerialNumber: "SN-DURABLE-SYNC"}, nil
+		},
+	}
+	h := newEngineHarness(deviceRepo)
+
+	evt, err := event.NewEvent(event.SubjectCommandGetParamsResponse, map[string]interface{}{
+		"device_sn":        "SN-DURABLE-SYNC",
+		"method":           "GetParameterValuesResponse",
+		"command_key":      "param-sync-00000000-0000-0000-0000-000000000001-0",
+		"task_source":      task.TaskSourceParamSync,
+		"task_source_id":   "00000000-0000-0000-0000-000000000001",
+		"parameter_values": []map[string]any{{"name": "Device.Test.Value", "value": "1"}},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, h.engine.handleGPVResponse(context.Background(), evt))
+	assert.Zero(t, lookupCount, "durable parameter-sync responses must not enter legacy Path B")
+}
+
 func TestOnTaskCompleted_RecoveredSyncGPVExhausted_FinalizesPathB(t *testing.T) {
 	deviceID := uuid.New()
 	deviceSN := "SN-GPV-RECOVERED"

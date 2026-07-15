@@ -696,6 +696,27 @@ type syncStarterCall struct {
 	parameterPaths []string
 }
 
+type fakeDetailedParamSyncStarter struct {
+	*fakeParamSyncStarter
+	result *ManualParamSyncStart
+}
+
+type recordingConnectionRequester struct {
+	called chan struct{}
+}
+
+func (r *recordingConnectionRequester) Send(context.Context, string, string) error {
+	select {
+	case r.called <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+func (f *fakeDetailedParamSyncStarter) StartManualSyncDetailed(context.Context, *model.Device, string, []string) (*ManualParamSyncStart, error) {
+	return f.result, nil
+}
+
 func (f *fakeParamSyncStarter) StartManualSync(_ context.Context, dev *model.Device, sourceID string, parameterPaths []string) (bool, int, error) {
 	f.calls = append(f.calls, syncStarterCall{deviceID: dev.ID, sourceID: sourceID, parameterPaths: parameterPaths})
 	return f.defaultUsed, f.defaultGPVTaskCount, f.defaultErr
@@ -705,10 +726,13 @@ func TestHandler_SyncDeviceParams_Success(t *testing.T) {
 	h, deviceRepo, _ := newTestHandler()
 	starter := &fakeParamSyncStarter{defaultUsed: true, defaultGPVTaskCount: 7}
 	h.service.SetParamSyncStarter(starter)
+	connReq := &recordingConnectionRequester{called: make(chan struct{}, 1)}
+	h.service.SetConnectionRequester(connReq)
 	router := setupRouter(h)
 
 	id := uuid.New()
-	seedDevice(deviceRepo, id, "SN-SYNC-001", model.CarrierCMCC, model.TechLTE, model.DeviceActive)
+	dev := seedDevice(deviceRepo, id, "SN-SYNC-001", model.CarrierCMCC, model.TechLTE, model.DeviceActive)
+	dev.ConnectionRequestURL = "http://192.0.2.10:7547"
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices/"+id.String()+"/sync-params",
@@ -725,6 +749,10 @@ func TestHandler_SyncDeviceParams_Success(t *testing.T) {
 	assert.Equal(t, "SN-SYNC-001", resp["serial_number"])
 	assert.EqualValues(t, 7, resp["gpv_task_count"])
 	assert.Contains(t, resp["source_id"].(string), "manual:", "source_id 应以 manual: 前缀")
+	_, hasRequestID := resp["request_id"]
+	assert.False(t, hasRequestID, "legacy sync must not expose a zero durable request id")
+	_, hasRunID := resp["run_id"]
+	assert.False(t, hasRunID, "legacy sync must not expose a zero durable run id")
 
 	require.Len(t, starter.calls, 1, "应调一次 StartManualSync")
 	assert.Equal(t, id, starter.calls[0].deviceID)
@@ -733,6 +761,11 @@ func TestHandler_SyncDeviceParams_Success(t *testing.T) {
 	_, parseErr := uuid.Parse(starter.calls[0].sourceID)
 	assert.NoError(t, parseErr, "传给 service 的 sourceID 必须是合法 UUID")
 	assert.Equal(t, []string{"Device.DeviceInfo.SoftwareVersion"}, starter.calls[0].parameterPaths)
+	select {
+	case <-connReq.called:
+		t.Fatal("manual endpoint sent a duplicate device wake; durable task outbox owns the single wake")
+	case <-time.After(100 * time.Millisecond):
+	}
 }
 
 func TestHandler_SyncDeviceParams_NoBody_OK(t *testing.T) {
@@ -748,6 +781,30 @@ func TestHandler_SyncDeviceParams_NoBody_OK(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusAccepted, w.Code, "body 为空应仍返 202（force 字段容错）")
+}
+
+func TestHandler_SyncDeviceParams_DurableIDsAreReturned(t *testing.T) {
+	h, deviceRepo, _ := newTestHandler()
+	requestID, runID := uuid.New(), uuid.New()
+	h.service.SetParamSyncStarter(&fakeDetailedParamSyncStarter{
+		fakeParamSyncStarter: &fakeParamSyncStarter{},
+		result: &ManualParamSyncStart{
+			Used: true, TaskCount: 2, RequestID: requestID, RunID: &runID, Status: "running",
+		},
+	})
+	router := setupRouter(h)
+	id := uuid.New()
+	seedDevice(deviceRepo, id, "SN-DURABLE", model.CarrierCMCC, model.TechLTE, model.DeviceActive)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices/"+id.String()+"/sync-params", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusAccepted, w.Code)
+	var resp map[string]interface{}
+	response.DecodeData(t, w.Body, &resp)
+	assert.Equal(t, requestID.String(), resp["request_id"])
+	assert.Equal(t, runID.String(), resp["run_id"])
 }
 
 func TestHandler_SyncDeviceParams_NotFound(t *testing.T) {

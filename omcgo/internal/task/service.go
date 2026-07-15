@@ -36,6 +36,12 @@ const defaultWakeConcurrency = 256
 // not a 500.
 var ErrQueueFull = errors.New("device task queue at capacity")
 
+// ErrTaskNotPending means a Redis queue entry lost the PostgreSQL pending-state
+// fence before ACS could send it. Callers should discard the stale execution
+// copy and continue with the next queued task instead of aborting the CWMP
+// session.
+var ErrTaskNotPending = errors.New("task is no longer pending")
+
 // ErrTaskNotFound is returned when a task ID does not resolve to an existing
 // task (e.g. cancelling / marking a non-existent task). It wraps the core
 // errors.ErrNotFound sentinel so that handlers mapping via
@@ -374,6 +380,72 @@ func (s *TaskService) GetQueueLength(ctx context.Context, deviceSN string) (int6
 	return s.queue.Len(ctx, deviceSN)
 }
 
+// ReleasePlannedTask is the single execution-plane admission path for a task
+// whose durable row was created by an upstream transactional planner. It owns
+// queue capacity enforcement, idempotent Redis admission, metrics and wake-up,
+// while the planner remains responsible only for the business plan.
+func (s *TaskService) ReleasePlannedTask(ctx context.Context, planned *Task) (bool, error) {
+	return s.releasePlannedTask(ctx, planned, true)
+}
+
+// ReleasePlannedTaskWithoutWake admits a durable planned task without sending
+// a per-task Connection Request. Batch dispatchers use it to enqueue all work
+// for one device first and then wake that device once via WakePlannedDevice.
+func (s *TaskService) ReleasePlannedTaskWithoutWake(ctx context.Context, planned *Task) (bool, error) {
+	return s.releasePlannedTask(ctx, planned, false)
+}
+
+func (s *TaskService) releasePlannedTask(ctx context.Context, planned *Task, wake bool) (bool, error) {
+	if planned == nil || planned.Status != TaskStatusPending {
+		return false, nil
+	}
+	exists, err := s.queue.Exists(ctx, planned.DeviceSN, planned.ID)
+	if err != nil {
+		return false, fmt.Errorf("check planned task queue membership: %w", err)
+	}
+	if exists {
+		return true, nil
+	}
+	if s.maxQueueDepth > 0 {
+		depth, err := s.queue.Len(ctx, planned.DeviceSN)
+		if err != nil {
+			return false, fmt.Errorf("check planned task queue depth: %w", err)
+		}
+		if depth >= int64(s.maxQueueDepth) {
+			return false, fmt.Errorf("device %s: %w", planned.DeviceSN, ErrQueueFull)
+		}
+	}
+	if err := s.queue.Push(ctx, planned); err != nil {
+		return false, fmt.Errorf("release planned task: %w", err)
+	}
+	if s.metrics != nil {
+		s.metrics.PendingTotal.Inc()
+	}
+	if wake {
+		s.wakeDevice(planned.DeviceSN)
+	}
+	return true, nil
+}
+
+// WakePlannedDevice performs the single best-effort wake after a batch of
+// durable tasks has been admitted to the execution queue.
+func (s *TaskService) WakePlannedDevice(deviceSN string) {
+	s.wakeDevice(deviceSN)
+}
+
+// EvictPlannedTask removes an unreleased/cancelled planned task from the
+// execution plane. It is deliberately idempotent so an outbox cancellation can
+// safely race an earlier enqueue delivery or be replayed after Redis recovery.
+func (s *TaskService) EvictPlannedTask(ctx context.Context, planned *Task) error {
+	if planned == nil {
+		return nil
+	}
+	if err := s.queue.Delete(ctx, planned.ID); err != nil {
+		return fmt.Errorf("evict planned task: %w", err)
+	}
+	return nil
+}
+
 func (s *TaskService) LatestOpenTaskByDeviceAndMethod(ctx context.Context, deviceSN, method, description string) (*Task, error) {
 	if s.repo == nil {
 		return nil, nil
@@ -421,21 +493,27 @@ func (s *TaskService) AcquireSyncGPVDeviceLock(ctx context.Context, deviceSN str
 
 // MarkTaskSent 标记任务已发送
 func (s *TaskService) MarkTaskSent(ctx context.Context, taskID, cwmpID string) error {
+	if s.repo != nil {
+		acquired, err := s.repo.MarkSentIfPending(ctx, taskID, cwmpID, time.Now())
+		if err != nil {
+			return err
+		}
+		if !acquired {
+			// The queue may still contain a stale copy after the PG task or its
+			// durable run became terminal. Drop it here so every subsequent Inform
+			// does not pop and reject the same task forever.
+			if err := s.queue.Delete(ctx, taskID); err != nil {
+				return fmt.Errorf("task %s is no longer pending; remove stale queue copy: %w", taskID, err)
+			}
+			return fmt.Errorf("task %s: %w", taskID, ErrTaskNotPending)
+		}
+	}
 	// 更新 Redis
 	if err := s.queue.MarkTaskSent(ctx, taskID, cwmpID); err != nil {
-		return fmt.Errorf("mark task sent in queue: %w", err)
-	}
-
-	// 同步更新 PostgreSQL
-	task, err := s.queue.GetByID(ctx, taskID)
-	if err != nil {
-		return fmt.Errorf("get sent task: %w", err)
-	}
-	if task != nil {
-		if err := s.repo.Update(ctx, task); err != nil {
-			s.recordDualWriteFail("sync_sent")
-			logger.L(ctx).Error("sync task to db", zap.Error(err), zap.String("task_id", taskID))
+		if s.repo != nil {
+			return s.releaseUnwrittenSendClaim(ctx, taskID, cwmpID, err)
 		}
+		return fmt.Errorf("mark task sent in queue: %w", err)
 	}
 
 	logger.L(ctx).Info("task sent",
@@ -443,6 +521,37 @@ func (s *TaskService) MarkTaskSent(ctx context.Context, taskID, cwmpID string) e
 		zap.String("cwmp_id", cwmpID))
 
 	return nil
+}
+
+func (s *TaskService) releaseUnwrittenSendClaim(ctx context.Context, taskID, cwmpID string, cause error) error {
+	released, err := s.repo.ReleaseSentClaimIfUnwritten(ctx, taskID, cwmpID)
+	if err != nil {
+		s.recordDualWriteFail("release_send_claim")
+		return errors.Join(fmt.Errorf("mark task sent in queue: %w", cause), err)
+	}
+	if !released {
+		return errors.Join(
+			fmt.Errorf("mark task sent in queue: %w", cause),
+			fmt.Errorf("task %s send claim changed before compensation", taskID),
+		)
+	}
+
+	var repairErrs []error
+	if err := s.queue.DeleteCWMPIDMapping(ctx, cwmpID); err != nil {
+		repairErrs = append(repairErrs, fmt.Errorf("delete unwritten cwmp mapping: %w", err))
+	}
+	pending, err := s.repo.GetByID(ctx, taskID)
+	if err != nil {
+		repairErrs = append(repairErrs, fmt.Errorf("load released task send claim: %w", err))
+	} else if pending != nil {
+		if err := s.queue.Update(ctx, pending); err != nil {
+			repairErrs = append(repairErrs, fmt.Errorf("restore released task queue entry: %w", err))
+		}
+	}
+	if len(repairErrs) > 0 {
+		s.recordDualWriteFail("release_send_claim_queue")
+	}
+	return errors.Join(append([]error{fmt.Errorf("mark task sent in queue: %w", cause)}, repairErrs...)...)
 }
 
 // MarkTaskCompleted 标记任务完成

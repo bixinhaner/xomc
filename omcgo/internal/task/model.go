@@ -21,11 +21,12 @@ const (
 type TaskSource string
 
 const (
-	TaskSourceAPI       TaskSource = "api"       // REST API 创建
-	TaskSourceScheduler TaskSource = "scheduler" // 定时任务创建
-	TaskSourceSystem    TaskSource = "system"    // 系统内部创建
-	TaskSourceMML       TaskSource = "mml"       // MML 批量任务扇出
-	TaskSourceOps       TaskSource = "ops"       // F06 运维即时命令 (T-0102-c)
+	TaskSourceAPI       TaskSource = "api"        // REST API 创建
+	TaskSourceScheduler TaskSource = "scheduler"  // 定时任务创建
+	TaskSourceSystem    TaskSource = "system"     // 系统内部创建
+	TaskSourceMML       TaskSource = "mml"        // MML 批量任务扇出
+	TaskSourceOps       TaskSource = "ops"        // F06 运维即时命令 (T-0102-c)
+	TaskSourceParamSync TaskSource = "param_sync" // durable parameter-sync run task
 )
 
 // Task 表示一个设备任务

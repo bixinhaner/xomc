@@ -3,8 +3,24 @@ package device
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
 )
+
+type ManualParamSyncStart struct {
+	Used       bool
+	TaskCount  int
+	RequestID  uuid.UUID
+	RunID      *uuid.UUID
+	Status     string
+	ResultCode string
+}
+
+// DetailedParamSyncStarter is implemented by the durable request/run path.
+// Legacy starters continue to satisfy ParamSyncStarter unchanged.
+type DetailedParamSyncStarter interface {
+	StartManualSyncDetailed(ctx context.Context, dev *model.Device, sourceID string, parameterPaths []string) (*ManualParamSyncStart, error)
+}
 
 // ParamSyncStarter 是 device 包消费者驱动的 narrow interface（T-0126 设计 §4.1）。
 //

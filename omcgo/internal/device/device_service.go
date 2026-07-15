@@ -323,7 +323,7 @@ func (s *DeviceService) RebootDevice(ctx context.Context, id uuid.UUID) error {
 //  1. 查 device（404 if not found）
 //  2. 通过 ParamSyncStarter 调 Path B（reason="manual"）
 //  3. used=false 时返 ErrServiceUnavailable（Path B 不可用 — MappingSet 缺失）
-//  4. 后台异步唤醒设备（已有 connReq 链路）
+//  4. durable task Outbox 完成整轮入队后统一唤醒设备
 //
 // 替代旧 TriggerParamSync 方法（Path A 已下线），完整接入 T-0123/T-0124/T-0125/T-0127
 // 触发链：reason 通道 + 差异日志 + last_param_sync_at 回写 + Translator 翻译。
@@ -331,30 +331,38 @@ func (s *DeviceService) RebootDevice(ctx context.Context, id uuid.UUID) error {
 // sourceID 由 caller 构造（"manual:UUID"），供 HandleSyncResultPathB 写差异日志时
 // 通过 Redis hint 读取 reason 标签。
 func (s *DeviceService) SyncDeviceParamsManual(ctx context.Context, deviceID uuid.UUID, sourceID string, parameterPaths []string) (used bool, dev *model.Device, gpvTaskCount int, err error) {
+	result, dev, err := s.SyncDeviceParamsManualDetailed(ctx, deviceID, sourceID, parameterPaths)
+	if result == nil {
+		return false, dev, 0, err
+	}
+	return result.Used, dev, result.TaskCount, err
+}
+
+func (s *DeviceService) SyncDeviceParamsManualDetailed(ctx context.Context, deviceID uuid.UUID, sourceID string, parameterPaths []string) (result *ManualParamSyncStart, dev *model.Device, err error) {
 	dev, err = s.deviceRepo.GetByID(ctx, deviceID)
 	if err != nil {
-		return false, nil, 0, fmt.Errorf("get device for manual sync: %w", err)
+		return nil, nil, fmt.Errorf("get device for manual sync: %w", err)
 	}
 	if dev == nil {
-		return false, nil, 0, commonerrors.ErrNotFound
+		return nil, nil, commonerrors.ErrNotFound
 	}
 	if s.paramSyncStarter == nil {
-		return false, dev, 0, fmt.Errorf("paramSyncStarter not configured")
+		return nil, dev, fmt.Errorf("paramSyncStarter not configured")
 	}
 	if locker, ok := s.taskSvc.(syncGPVDeviceLocker); ok {
 		release, lockErr := locker.AcquireSyncGPVDeviceLock(ctx, dev.SerialNumber)
 		if lockErr != nil {
-			return false, dev, 0, fmt.Errorf("lock manual parameter sync: %w", lockErr)
+			return nil, dev, fmt.Errorf("lock manual parameter sync: %w", lockErr)
 		}
 		defer release()
 	}
 	if guard, ok := s.taskSvc.(syncGPVOpenGuard); ok {
 		hasOpen, guardErr := guard.HasOpenSyncGPVTasksByDevice(ctx, dev.SerialNumber)
 		if guardErr != nil {
-			return false, dev, 0, fmt.Errorf("check manual sync running: %w", guardErr)
+			return nil, dev, fmt.Errorf("check manual sync running: %w", guardErr)
 		}
 		if hasOpen {
-			return false, dev, 0, commonerrors.NewBusinessError(
+			return nil, dev, commonerrors.NewBusinessError(
 				global.ErrCodeRuleTaskRunning,
 				"parameter sync already running for this device, try again in a few seconds",
 				commonerrors.ErrAlreadyExists,
@@ -362,9 +370,14 @@ func (s *DeviceService) SyncDeviceParamsManual(ctx context.Context, deviceID uui
 		}
 	}
 
-	used, gpvTaskCount, err = s.paramSyncStarter.StartManualSync(ctx, dev, sourceID, parameterPaths)
+	if detailed, ok := s.paramSyncStarter.(DetailedParamSyncStarter); ok {
+		result, err = detailed.StartManualSyncDetailed(ctx, dev, sourceID, parameterPaths)
+	} else {
+		used, taskCount, startErr := s.paramSyncStarter.StartManualSync(ctx, dev, sourceID, parameterPaths)
+		result, err = &ManualParamSyncStart{Used: used, TaskCount: taskCount, Status: "queued"}, startErr
+	}
 	if err != nil {
-		return used, dev, gpvTaskCount, fmt.Errorf("start manual sync: %w", err)
+		return result, dev, fmt.Errorf("start manual sync: %w", err)
 	}
 
 	s.logger.Info("manual sync requested",
@@ -372,19 +385,10 @@ func (s *DeviceService) SyncDeviceParamsManual(ctx context.Context, deviceID uui
 		zap.String("serial_number", dev.SerialNumber),
 		zap.String("source_id", sourceID),
 		zap.Int("parameter_paths", len(parameterPaths)),
-		zap.Int("gpv_tasks", gpvTaskCount),
-		zap.Bool("path_b_used", used))
+		zap.Int("gpv_tasks", result.TaskCount),
+		zap.Bool("path_b_used", result.Used))
 
-	// 唤醒设备（与旧 TriggerParamSync 一致；Connection Request 仅在 Path B 入队成功后发起）
-	if used && s.connReq != nil && dev.ConnectionRequestURL != "" {
-		sn := dev.SerialNumber
-		url := dev.ConnectionRequestURL
-		go func() {
-			_ = s.connReq.Send(context.Background(), sn, url)
-		}()
-	}
-
-	return used, dev, gpvTaskCount, nil
+	return result, dev, nil
 }
 
 // SetParamSyncStarter T-0126: 注入 Path B 同步 starter（消费者驱动 narrow interface）。

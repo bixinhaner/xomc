@@ -56,6 +56,18 @@ type SyncService struct {
 	config               appconfig.AutoSyncConfig
 	batchSize            int
 	logger               *zap.Logger
+	durableStarter       DurableParamSyncStarter
+}
+
+// DurableParamSyncStarter lets the reliable request/run data plane take over a
+// deterministic canary without coupling provision to the paramsync package.
+type DurableParamSyncStarter interface {
+	StartDurableSync(ctx context.Context, dev *model.Device, sourceID, reason string, parameterPaths []string) (handled bool, taskCount int, err error)
+}
+
+func (s *SyncService) SetDurableStarter(starter DurableParamSyncStarter) *SyncService {
+	s.durableStarter = starter
+	return s
 }
 
 type syncGPVOpenGuard interface {
@@ -361,6 +373,12 @@ func buildGPVBatches(prefixes []string, batchSize int) [][]string {
 	}
 	batches = append(batches, batchPaths(instanceObjects, instanceObjectBatchSize)...)
 	return batches
+}
+
+// PathBGPVBatches exposes the established Path B GPV isolation and payload
+// budgeting rules to the durable parameter-sync scheduler.
+func PathBGPVBatches(prefixes []string, batchSize int) [][]string {
+	return buildGPVBatches(prefixes, batchSize)
 }
 
 func maxExpandedObjectPrefixesPerGPV() int {

@@ -889,12 +889,14 @@ func TestEnforceDeviceInfoFieldSizeLimits_TrimsCSVInsteadOfFailingWholeSync(t *t
 	fields := map[string]interface{}{
 		"ipsec_addr": "baicells-epc.cloudapp.net,baicells-east-epc.eastus.cloudapp.azure.com",
 		"pci":        "241,503",
+		"plmn":       "46068,46088,46066,46077,46055,46044,46011",
 	}
 
 	enforceDeviceInfoFieldSizeLimits(fields)
 
 	assert.Equal(t, "baicells-epc.cloudapp.net", fields["ipsec_addr"], "超长 CSV 应保留能装进 device_info 列宽的前缀值")
 	assert.Equal(t, "241,503", fields["pci"])
+	assert.Equal(t, "46068,46088,46066,46077,46055,46044", fields["plmn"], "PLMN CSV 应按 varchar(40) 边界保留完整条目")
 }
 
 func TestInfoSyncer_SyncFromParameters_OverlongIpsecCSVDoesNotAbortOtherFields(t *testing.T) {

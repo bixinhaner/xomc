@@ -875,6 +875,9 @@ export const deviceApi = {
   ): Promise<{
     status: string;
     sourceId: string;
+    requestId?: string;
+    runId?: string;
+    resultCode?: string;
     deviceId: string;
     serialNumber: string;
     force: boolean;
@@ -884,6 +887,9 @@ export const deviceApi = {
     const { data } = await http.post<{
       status: string;
       source_id: string;
+      request_id?: string;
+      run_id?: string;
+      result_code?: string;
       device_id: string;
       serial_number: string;
       force: boolean;
@@ -895,6 +901,9 @@ export const deviceApi = {
     return {
       status: data.status,
       sourceId: data.source_id,
+      requestId: data.request_id,
+      runId: data.run_id,
+      resultCode: data.result_code,
       deviceId: data.device_id,
       serialNumber: data.serial_number,
       force: data.force,

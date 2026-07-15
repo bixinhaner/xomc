@@ -925,6 +925,7 @@ type acsHTaskService struct {
 	mu               sync.Mutex
 	tasks            []*task.Task
 	cwmpIDToTaskMap  map[string]*task.Task
+	markSentErrors   map[string]error
 	popIndex         int
 	recoveredDevices []string
 }
@@ -933,6 +934,7 @@ func newAcsHTaskService() *acsHTaskService {
 	return &acsHTaskService{
 		tasks:           make([]*task.Task, 0),
 		cwmpIDToTaskMap: make(map[string]*task.Task),
+		markSentErrors:  make(map[string]error),
 	}
 }
 
@@ -957,6 +959,9 @@ func (m *acsHTaskService) PopTask(ctx context.Context, deviceSN string) (*task.T
 func (m *acsHTaskService) MarkTaskSent(ctx context.Context, taskID, cwmpID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if err := m.markSentErrors[taskID]; err != nil {
+		return err
+	}
 	for _, t := range m.tasks {
 		if t.ID == taskID {
 			t.Status = task.TaskStatusSent
@@ -968,6 +973,23 @@ func (m *acsHTaskService) MarkTaskSent(ctx context.Context, taskID, cwmpID strin
 		}
 	}
 	return nil
+}
+
+func TestPopAndMarkNextTaskSkipsStaleTask(t *testing.T) {
+	taskSvc := newAcsHTaskService()
+	stale := &task.Task{ID: "stale", DeviceSN: "SN-STALE", Method: "GetParameterValues", Status: task.TaskStatusPending}
+	valid := &task.Task{ID: "valid", DeviceSN: "SN-STALE", Method: "GetParameterValues", Status: task.TaskStatusPending}
+	taskSvc.addTask(stale)
+	taskSvc.addTask(valid)
+	taskSvc.markSentErrors[stale.ID] = fmt.Errorf("stale fence: %w", task.ErrTaskNotPending)
+
+	h := &Handler{taskService: taskSvc}
+	got, cwmpID, err := h.popAndMarkNextTask(context.Background(), "SN-STALE", zap.NewNop())
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, valid.ID, got.ID)
+	require.NotEmpty(t, cwmpID)
+	require.Equal(t, task.TaskStatusSent, valid.Status)
 }
 
 func (m *acsHTaskService) MarkTaskCompleted(ctx context.Context, taskID string, result json.RawMessage) error {

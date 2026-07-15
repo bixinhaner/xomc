@@ -190,6 +190,7 @@ var deviceInfoVarcharLimits = map[string]int{
 	"lac":         16,
 	"lock_status": 16,
 	"pci":         64,
+	"plmn":        40,
 	"tac":         16,
 	"ul_earfcn":   32,
 }
