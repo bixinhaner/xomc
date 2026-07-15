@@ -80,6 +80,14 @@ func TestBuildUnionBackfillsOnlyNameAndIPForRecordDisplayFields(t *testing.T) {
 	assert.NotContains(t, sql, "fd.firmware_version, '') AS software_version")
 }
 
+func TestBuildUnionFaultRowsRequireHaltReason(t *testing.T) {
+	sql, args := buildUnion(Filter{RebootType: RebootTypeAbnormal})
+
+	require.Empty(t, args)
+	assert.Contains(t, sql, "FROM station_fault_logs fl")
+	assert.Contains(t, sql, "NULLIF(fl.fault_reason, '') IS NOT NULL")
+}
+
 func TestBuildUnionFiltersUseBackfilledSnapshotFields(t *testing.T) {
 	sql, args := buildUnion(Filter{DeviceSN: "SN-1", DeviceType: "gNB"})
 

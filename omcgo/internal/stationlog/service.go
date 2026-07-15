@@ -155,11 +155,11 @@ func (s *Service) RecordAbnormalReboot(ctx context.Context, snap device.Abnormal
 // 故障日志（LogTypeFault）路径有两种补完模式：
 //  1. T-0158 识别即落库链路：device.RecordBootFromInform 已经写过一条 detected 记录，
 //     这里通过 LatestDetectedByDeviceSN 找到它并 UpdateFile 推进到 file_received；
-//  2. 兼容旧链路：若找不到 detected 占位记录（例如 ACS 直传文件没经过 1 BOOT 识别），
-//     INSERT 一行新记录（记录 status 由 Create 默认推断为 file_received）。
+//  2. 日志任务/ACS 直传文件没经过 1 BOOT 识别时，INSERT 一行文件元数据记录
+//     （record_status=file_received），供文件管理、任务列表、配额清理使用；它不是异常重启记录。
 //
 // 当故障日志文件事件缺少 device_sn 时，优先尝试补全最近一条 detected 占位记录；
-// 若没有可补全记录则跳过，避免生成前端空设备异常重启记录。
+// 若没有可补全记录则跳过，避免生成无设备归属的故障日志文件记录。
 // 运行日志（LogTypeRunning）始终走旧 INSERT 路径。
 func (s *Service) HandleLogFileReceived(ctx context.Context, evt event.Event) error {
 	var p LogFileReceivedPayload

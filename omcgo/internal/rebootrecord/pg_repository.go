@@ -74,7 +74,11 @@ func buildUnion(f Filter) (string, []interface{}) {
 	}
 
 	eventWhere := []string{"el.event_type = 'boot'"}
-	faultWhere := []string{"fl.is_deleted = false", faultDeviceSN + " <> ''"}
+	faultWhere := []string{
+		"fl.is_deleted = false",
+		faultDeviceSN + " <> ''",
+		"NULLIF(fl.fault_reason, '') IS NOT NULL",
+	}
 	for _, c := range conds {
 		eventWhere = append(eventWhere, c.event)
 		faultWhere = append(faultWhere, c.fault)
