@@ -764,6 +764,17 @@ func deriveInformIPAddress(udpAddr, connReqURL string) string {
 	return parsed.Hostname()
 }
 
+func rebootDeviceType(tech model.Technology) string {
+	switch tech {
+	case model.TechNR:
+		return "gNB"
+	case model.TechGSM:
+		return "GSM"
+	default:
+		return "eNB"
+	}
+}
+
 func deriveUDPConnectionRequestAddress(params []tr069.ParameterValueStruct) string {
 	udpAddr := strings.TrimSpace(findParamValue(params, "Device.ManagementServer.UDPConnectionRequestAddress"))
 	if udpAddr != "" && !netutil.IsUnspecifiedUDPAddress(udpAddr) {
@@ -1595,6 +1606,7 @@ func (s *DeviceService) RecordBootFromInform(ctx context.Context, device *model.
 				DeviceID:            device.ID,
 				DeviceSN:            device.SerialNumber,
 				DeviceName:          device.DeviceName,
+				DeviceType:          rebootDeviceType(device.Technology),
 				OperateIP:           device.IPAddress,
 				SoftwareVersion:     device.FirmwareVersion,
 				HaltMainReason:      haltMainReason,
@@ -1602,11 +1614,6 @@ func (s *DeviceService) RecordBootFromInform(ctx context.Context, device *model.
 				RuntimeBeforeReboot: runtimeBeforeReboot,
 				IsGNB:               device.Technology == model.TechNR,
 				DetectedAt:          now,
-			}
-			if device.Technology == model.TechNR {
-				snap.DeviceType = "gNB"
-			} else {
-				snap.DeviceType = "eNB"
 			}
 			if recErr := s.abnormalRecorder.RecordAbnormalReboot(ctx, snap); recErr != nil {
 				// 落库失败不阻塞事件发布；告警链路依然能基于事件累计。
@@ -1641,6 +1648,7 @@ func (s *DeviceService) RecordBootFromInform(ctx context.Context, device *model.
 			DeviceID:            device.ID,
 			DeviceSN:            device.SerialNumber,
 			DeviceName:          device.DeviceName,
+			DeviceType:          rebootDeviceType(device.Technology),
 			OperateIP:           device.IPAddress,
 			SoftwareVersion:     device.FirmwareVersion,
 			RuntimeBeforeReboot: runtimeBeforeReboot,
@@ -1648,11 +1656,6 @@ func (s *DeviceService) RecordBootFromInform(ctx context.Context, device *model.
 			BootCount:           bootCount,
 			Events:              events,
 			OccurredAt:          now,
-		}
-		if device.Technology == model.TechNR {
-			bootSnap.DeviceType = "gNB"
-		} else {
-			bootSnap.DeviceType = "eNB"
 		}
 		if recErr := s.bootEventRecorder.RecordBootEvent(ctx, bootSnap); recErr != nil {
 			// 失败不阻塞主流程

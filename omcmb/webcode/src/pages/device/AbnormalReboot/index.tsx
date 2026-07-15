@@ -31,6 +31,7 @@ import type {
   RebootType,
   DeviceRebootStat,
 } from '@core/services/api/rebootRecordApi';
+import { rebootRecordDeviceTypeOptions } from './filterOptions';
 
 // 「启动记录」页面（统一重启记录单列表）
 //
@@ -156,10 +157,7 @@ export default function AbnormalReboot() {
         name: 'deviceType',
         label: t('log.exception.column.deviceType'),
         type: 'select',
-        options: [
-          { label: 'eNB', value: 'eNB' },
-          { label: 'gNB', value: 'gNB' },
-        ],
+        options: [...rebootRecordDeviceTypeOptions],
       },
       { name: 'timeRange', label: t('log.timeRange'), type: 'date-range', span: 2 },
     ],
