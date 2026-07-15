@@ -137,6 +137,55 @@ func TestMapDeviceItem_ConfigRestore_EmptyDestVersionShowsEmptyTargetFile(t *tes
 	assert.Empty(t, item.TargetFile, "未写回前 TargetFile 保持空（不应回退用 parent.FileName）")
 }
 
+func TestMapDeviceItem_FaultLogQuotaDeletedFileIsShownWithoutDownloadURL(t *testing.T) {
+	svc := newServiceForMap(t)
+	catalog := mustCatalog(t, "FAULT_LOG_COLLECT")
+	parent := &software.UpgradeTask{
+		ID:       uuid.New(),
+		TaskName: "fault-log-task",
+		TaskType: software.TaskTypeLogCollect,
+	}
+	const fileName = "ErrorLog_20260715.1432 0800_dieLog(1).tar.gz"
+	sub := software.UpgradeSubTaskWithTaskName{
+		UpgradeSubTask: software.UpgradeSubTask{
+			ID:        uuid.New(),
+			TaskID:    parent.ID,
+			DeviceID:  uuid.New(),
+			DeviceSN:  "SN-QUOTA-1",
+			Status:    software.UpgradeCompleted,
+			UpdatedAt: coremodel.Time(time.Date(2026, 7, 15, 16, 8, 0, 0, time.UTC)),
+		},
+		TaskName: "fault-log-task",
+	}
+	cache := map[uuid.UUID]*coremodel.Device{
+		sub.DeviceID: {ID: sub.DeviceID, SerialNumber: "SN-QUOTA-1", ProductClass: "BSC"},
+	}
+	svc.SetFileLandedLookup(func(_ context.Context, sn, mainTaskID string) (string, bool, error) {
+		assert.Equal(t, "SN-QUOTA-1", sn)
+		assert.Equal(t, parent.ID.String(), mainTaskID)
+		return fileName, true, nil
+	})
+	svc.SetFileDeletedLookup(func(_ context.Context, sn, mainTaskID, targetFile string) (bool, error) {
+		assert.Equal(t, "SN-QUOTA-1", sn)
+		assert.Equal(t, parent.ID.String(), mainTaskID)
+		assert.Equal(t, fileName, targetFile)
+		return true, nil
+	})
+	downloadLookupCalled := false
+	svc.SetDownloadURLLookup(func(context.Context, string, string) (string, error) {
+		downloadLookupCalled = true
+		return "http://example.invalid/download", nil
+	})
+
+	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
+	require.NoError(t, err)
+	assert.Equal(t, "ended", item.Status)
+	assert.Equal(t, fileName, item.TargetFile, "配额清理后仍应展示文件名")
+	assert.True(t, item.FileDeleted, "配额清理后的文件需要显式告诉前端已删除")
+	assert.Empty(t, item.DownloadURL, "已被配额清理的文件不能再返回下载链接")
+	assert.False(t, downloadLookupCalled, "已删除文件不应再尝试生成 presigned URL")
+}
+
 // 以下两测覆盖 issue #195：上报时间只在文件真正上报成功（终态 ended）时才填。
 // sub_task.updated_at 在子任务生成 / 中间状态流转时都会刷新，但那不是
 // "文件上报成功"时刻——直接拿 updated_at 会在任务刚创建时就显示一个误导值。

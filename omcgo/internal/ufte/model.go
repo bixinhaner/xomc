@@ -118,6 +118,9 @@ type DeviceItem struct {
 	// DownloadURL 是 CPE 上传完成、ACS 落 MinIO 后的 1h presigned GET 链接；
 	// 仅当子任务已 ended 且 backup_restore_file 元数据存在时填充，否则留空。
 	DownloadURL string `json:"downloadUrl,omitempty"`
+	// FileDeleted 表示 TargetFile 对应的日志文件已被站点日志配额软删。
+	// 前端仍展示文件名，但不可点击下载，并提示清理原因。
+	FileDeleted bool   `json:"fileDeleted,omitempty"`
 	Status      string `json:"status"`
 	Result      string `json:"result,omitempty"`
 	Progress    int    `json:"progress"`

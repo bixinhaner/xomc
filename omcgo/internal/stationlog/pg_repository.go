@@ -434,6 +434,38 @@ func (r *PgRepository) LatestByDevice(ctx context.Context, deviceID uuid.UUID) (
 	return f, err
 }
 
+// LatestByObject 返回指定 MinIO 对象对应的最近一条日志记录。
+// 不过滤 is_deleted：UFTE 设备列表需要知道文件是否已被配额软删，从而保留文件名但禁用下载。
+func (r *PgRepository) LatestByObject(ctx context.Context, bucket, objectPath string) (*LogFile, error) {
+	bucket = strings.TrimSpace(bucket)
+	objectPath = strings.TrimSpace(objectPath)
+	if bucket == "" || objectPath == "" {
+		return nil, nil
+	}
+	q := storage.Psql.Select(r.cols()...).
+		From(r.tableName).
+		Where(sq.Eq{
+			"bucket":      bucket,
+			"object_path": objectPath,
+		})
+	if r.withFaultFields {
+		q = q.Where(sq.Eq{"record_status": FaultRecordStatusFileReceived})
+	}
+	query, args, err := q.
+		OrderBy("collected_at DESC").
+		Limit(1).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build latest by object %s: %w", r.tableName, err)
+	}
+	row := r.pool.QueryRow(ctx, query, args...)
+	f, err := r.scan(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return f, err
+}
+
 // UpdateFile 把 detected 状态的故障日志记录推进到 file_received。
 // 仅在 station_fault_logs 上有意义；其他表调用会返回错误。
 func (r *PgRepository) UpdateFile(ctx context.Context, id uuid.UUID, fileName, objectPath, bucket string, fileSize int64) error {
