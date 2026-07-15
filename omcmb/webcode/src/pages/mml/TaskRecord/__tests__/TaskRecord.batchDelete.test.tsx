@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   deleteTasks: vi.fn(),
   getTaskResultsPage: vi.fn(),
   refetchTasks: vi.fn(),
+  useMMLTaskResults: vi.fn(),
   useMMLTasks: vi.fn(),
   taskItems: [] as Array<Record<string, unknown>>,
   taskResultItems: [] as Array<Record<string, unknown>>,
@@ -28,13 +29,22 @@ vi.mock('@core/hooks/api/useMML', () => ({
       refetch: mocks.refetchTasks,
     };
   },
-  useMMLTaskResults: () => ({
-    data: {
-      total: mocks.taskResultItems.length,
-      items: mocks.taskResultItems,
-    },
-    isLoading: false,
-  }),
+  useMMLTaskResults: (
+    taskId: string | null,
+    page: number,
+    pageSize: number,
+    options?: { pollWhileTaskActive?: boolean },
+  ) => {
+    mocks.useMMLTaskResults({ taskId, page, pageSize, options });
+    return {
+      data: {
+        total: mocks.taskResultItems.length,
+        items: mocks.taskResultItems,
+      },
+      isLoading: false,
+      isFetching: false,
+    };
+  },
   getMMLTaskResultsPage: mocks.getTaskResultsPage,
   useStartMMLTasks: () => ({ mutate: mocks.startTasks, isPending: false }),
   useCancelMMLTasks: () => ({ mutate: mocks.cancelTasks, isPending: false }),
@@ -223,6 +233,100 @@ describe('TaskRecord batch delete and console task display', () => {
 
     expect(screen.getByText('LST')).toBeInTheDocument();
     expect(screen.getByText('DEVICE_INFO')).toBeInTheDocument();
+  });
+
+  it('updates the open task detail summary when polling refreshes the task row', () => {
+    mocks.taskItems = [
+      buildTask({
+        id: 'task-live-1',
+        taskName: '脚本任务',
+        taskOrigin: 'script',
+        status: 'running',
+        result: undefined,
+        totalDevices: 3,
+        successCount: 1,
+        failedCount: 0,
+      }),
+    ];
+
+    const { rerender } = renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: '查看' }));
+    expect(screen.getByText('状态: 执行中')).toBeInTheDocument();
+    expect(screen.getByText('成功：1')).toBeInTheDocument();
+
+    mocks.taskItems = [
+      buildTask({
+        id: 'task-live-1',
+        taskName: '脚本任务',
+        taskOrigin: 'script',
+        status: 'completed',
+        result: 'success',
+        totalDevices: 3,
+        successCount: 3,
+        failedCount: 0,
+      }),
+    ];
+
+    rerender(
+      <IntlProvider locale="zh-CN" defaultLocale="zh-CN" messages={zhCN}>
+        <TaskRecord />
+      </IntlProvider>,
+    );
+
+    expect(screen.getByText('状态: 已完成')).toBeInTheDocument();
+    expect(screen.getByText('成功：3')).toBeInTheDocument();
+    expect(screen.queryByText('状态: 执行中')).not.toBeInTheDocument();
+  });
+
+  it('does not keep task-active result polling alive from a stale detail row after the task leaves the list', () => {
+    mocks.taskItems = [
+      buildTask({
+        id: 'task-filtered-1',
+        taskName: '筛选中的任务',
+        taskOrigin: 'script',
+        status: 'running',
+        result: undefined,
+        totalDevices: 1,
+        successCount: 0,
+        failedCount: 0,
+      }),
+    ];
+    mocks.taskResultItems = [{
+      deviceTaskId: 'device-task-1',
+      deviceSn: 'SN001',
+      deviceName: '基站 A',
+      commandCode: 'LST DEVICE_INFO',
+      status: 'completed',
+      result: {
+        success: true,
+        rawOutput: '<cwmp:GetParameterValuesResponse />',
+        parsedData: null,
+        executionTime: 30,
+        timestamp: '2026-07-11T00:00:01Z',
+      },
+    }];
+
+    const { rerender } = renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: '查看' }));
+    expect(mocks.useMMLTaskResults).toHaveBeenLastCalledWith(expect.objectContaining({
+      taskId: 'task-filtered-1',
+      options: { pollWhileTaskActive: true },
+    }));
+
+    mocks.taskItems = [];
+
+    rerender(
+      <IntlProvider locale="zh-CN" defaultLocale="zh-CN" messages={zhCN}>
+        <TaskRecord />
+      </IntlProvider>,
+    );
+
+    expect(mocks.useMMLTaskResults).toHaveBeenLastCalledWith(expect.objectContaining({
+      taskId: 'task-filtered-1',
+      options: { pollWhileTaskActive: false },
+    }));
   });
 
   it('shows aggregate result and uses executable progress count in task list', () => {
