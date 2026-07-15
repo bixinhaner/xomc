@@ -33,10 +33,12 @@ func buildUnion(f Filter) (string, []interface{}) {
 	var args []interface{}
 	eventDeviceSN := "COALESCE(NULLIF(el.device_sn, ''), d.serial_number, '')"
 	faultDeviceSN := "COALESCE(NULLIF(fl.device_sn, ''), fd.serial_number, '')"
+	eventDeviceName := "COALESCE(NULLIF(el.device_name, ''), '')"
+	faultDeviceName := "COALESCE(NULLIF(fl.device_name, ''), '')"
 	eventDeviceType := "COALESCE(NULLIF(CASE d.technology WHEN 'nr' THEN 'gNB' WHEN 'lte' THEN 'eNB' WHEN 'gsm' THEN 'GSM' ELSE '' END, ''), NULLIF(el.device_type, ''), '')"
 	faultDeviceType := "COALESCE(NULLIF(CASE fd.technology WHEN 'nr' THEN 'gNB' WHEN 'lte' THEN 'eNB' WHEN 'gsm' THEN 'GSM' ELSE '' END, ''), NULLIF(fl.device_type, ''), '')"
-	eventOperateIP := "COALESCE(NULLIF(NULLIF(el.operate_ip, ''), '0.0.0.0'), NULLIF(host(d.ip_address), '0.0.0.0'), '')"
-	faultOperateIP := "COALESCE(NULLIF(NULLIF(fl.operate_ip, ''), '0.0.0.0'), NULLIF(host(fd.ip_address), '0.0.0.0'), '')"
+	eventOperateIP := "COALESCE(NULLIF(NULLIF(el.operate_ip, ''), '0.0.0.0'), '')"
+	faultOperateIP := "COALESCE(NULLIF(NULLIF(fl.operate_ip, ''), '0.0.0.0'), '')"
 	eventSoftwareVersion := "COALESCE(NULLIF(el.software_version, ''), '')"
 	faultSoftwareVersion := "COALESCE(NULLIF(fl.software_version, ''), '')"
 
@@ -96,24 +98,22 @@ func buildUnion(f Filter) (string, []interface{}) {
 	}
 
 	eventSelect := `SELECT el.id::text AS id, 'event' AS source, false AS is_abnormal, ` + eventDeviceSN + ` AS device_sn,
-		COALESCE(NULLIF(el.device_name, ''), NULLIF(di.device_name, ''), d.site_name, '') AS device_name, ` + eventDeviceType + ` AS device_type,
+		` + eventDeviceName + ` AS device_name, ` + eventDeviceType + ` AS device_type,
 		` + eventOperateIP + ` AS operate_ip, ` + eventSoftwareVersion + ` AS software_version,
 		COALESCE(el.event_reason, '') AS reason, ''::text AS detail_reason,
 		COALESCE((el.event_data->>'runtime_before_reboot')::bigint, 0) AS runtime_before_reboot,
 		el.occurred_at AS reboot_time
 		FROM event_logs el
 		LEFT JOIN devices d ON d.id = el.device_id
-		LEFT JOIN device_info di ON di.device_id = d.id
 		WHERE ` + strings.Join(eventWhere, " AND ")
 
 	faultSelect := `SELECT fl.id::text AS id, 'fault' AS source, true AS is_abnormal, ` + faultDeviceSN + ` AS device_sn,
-		COALESCE(NULLIF(fl.device_name, ''), NULLIF(fdi.device_name, ''), fd.site_name, '') AS device_name, ` + faultDeviceType + ` AS device_type,
+		` + faultDeviceName + ` AS device_name, ` + faultDeviceType + ` AS device_type,
 		` + faultOperateIP + ` AS operate_ip, ` + faultSoftwareVersion + ` AS software_version,
 		COALESCE(fl.fault_reason, '') AS reason, COALESCE(fl.fault_detail, '') AS detail_reason,
 		COALESCE(fl.runtime_before_reboot, 0) AS runtime_before_reboot, fl.collected_at AS reboot_time
 		FROM station_fault_logs fl
 		LEFT JOIN devices fd ON fd.id = fl.device_id
-		LEFT JOIN device_info fdi ON fdi.device_id = fd.id
 		WHERE ` + strings.Join(faultWhere, " AND ")
 
 	var parts []string

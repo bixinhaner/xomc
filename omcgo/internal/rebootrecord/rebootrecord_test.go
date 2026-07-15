@@ -54,29 +54,31 @@ func TestFilterOffsetLimit(t *testing.T) {
 	}
 }
 
-func TestBuildUnionBackfillsSnapshotFieldsFromDeviceTables(t *testing.T) {
+func TestBuildUnionUsesPreRebootSnapshotsForRecordDisplayFields(t *testing.T) {
 	sql, args := buildUnion(Filter{})
 
 	require.Empty(t, args)
 	assert.Contains(t, sql, "FROM event_logs el")
 	assert.Contains(t, sql, "LEFT JOIN devices d ON d.id = el.device_id")
-	assert.Contains(t, sql, "LEFT JOIN device_info di ON di.device_id = d.id")
 	assert.Contains(t, sql, "COALESCE(NULLIF(el.device_sn, ''), d.serial_number, '') AS device_sn")
-	assert.Contains(t, sql, "COALESCE(NULLIF(el.device_name, ''), NULLIF(di.device_name, ''), d.site_name, '') AS device_name")
+	assert.Contains(t, sql, "COALESCE(NULLIF(el.device_name, ''), '') AS device_name")
 	assert.Contains(t, sql, "COALESCE(NULLIF(CASE d.technology WHEN 'nr' THEN 'gNB' WHEN 'lte' THEN 'eNB' WHEN 'gsm' THEN 'GSM' ELSE '' END, ''), NULLIF(el.device_type, ''), '') AS device_type")
-	assert.Contains(t, sql, "COALESCE(NULLIF(NULLIF(el.operate_ip, ''), '0.0.0.0'), NULLIF(host(d.ip_address), '0.0.0.0'), '') AS operate_ip")
+	assert.Contains(t, sql, "COALESCE(NULLIF(NULLIF(el.operate_ip, ''), '0.0.0.0'), '') AS operate_ip")
 	assert.Contains(t, sql, "COALESCE(NULLIF(el.software_version, ''), '') AS software_version")
+	assert.NotContains(t, sql, "NULLIF(di.device_name, '')")
+	assert.NotContains(t, sql, "host(d.ip_address)")
 	assert.NotContains(t, sql, "d.firmware_version, '') AS software_version")
 
 	assert.Contains(t, sql, "FROM station_fault_logs fl")
 	assert.Contains(t, sql, "LEFT JOIN devices fd ON fd.id = fl.device_id")
-	assert.Contains(t, sql, "LEFT JOIN device_info fdi ON fdi.device_id = fd.id")
 	assert.Contains(t, sql, "COALESCE(NULLIF(fl.device_sn, ''), fd.serial_number, '') AS device_sn")
 	assert.Contains(t, sql, "COALESCE(NULLIF(fl.device_sn, ''), fd.serial_number, '') <> ''")
-	assert.Contains(t, sql, "COALESCE(NULLIF(fl.device_name, ''), NULLIF(fdi.device_name, ''), fd.site_name, '') AS device_name")
+	assert.Contains(t, sql, "COALESCE(NULLIF(fl.device_name, ''), '') AS device_name")
 	assert.Contains(t, sql, "COALESCE(NULLIF(CASE fd.technology WHEN 'nr' THEN 'gNB' WHEN 'lte' THEN 'eNB' WHEN 'gsm' THEN 'GSM' ELSE '' END, ''), NULLIF(fl.device_type, ''), '') AS device_type")
-	assert.Contains(t, sql, "COALESCE(NULLIF(NULLIF(fl.operate_ip, ''), '0.0.0.0'), NULLIF(host(fd.ip_address), '0.0.0.0'), '') AS operate_ip")
+	assert.Contains(t, sql, "COALESCE(NULLIF(NULLIF(fl.operate_ip, ''), '0.0.0.0'), '') AS operate_ip")
 	assert.Contains(t, sql, "COALESCE(NULLIF(fl.software_version, ''), '') AS software_version")
+	assert.NotContains(t, sql, "NULLIF(fdi.device_name, '')")
+	assert.NotContains(t, sql, "host(fd.ip_address)")
 	assert.NotContains(t, sql, "fd.firmware_version, '') AS software_version")
 }
 
