@@ -157,6 +157,12 @@ func (h *Handler) Create(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
+	if requiresDashboardExportLimit(SourceType(req.SourceType)) {
+		if err := validateDashboardExportLimits(params); err != nil {
+			response.Fail(c, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	task, err := h.svc.Create(c.Request.Context(), CreateRequest{
 		TaskName:   defaultTaskName(req.TaskName, SourceType(req.SourceType), locale),
 		SourceType: SourceType(req.SourceType),
@@ -176,6 +182,10 @@ func (h *Handler) Create(c *gin.Context) {
 		return
 	}
 	response.OKWithStatus(c, http.StatusCreated, taskToDTO(task))
+}
+
+func requiresDashboardExportLimit(source SourceType) bool {
+	return source == SourceDashboard || source == SourceDeviceView || source == SourceKpiQuery
 }
 
 // List GET /pm/exports — 列导出任务（任务管理 Tab）。
