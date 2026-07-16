@@ -9,6 +9,16 @@ export const MOCK_CREDENTIALS = {
   password: 'admin123',
 } as const;
 
+export async function submitLoginForm(
+  page: Page,
+  credentials: { username: string; password: string } = MOCK_CREDENTIALS,
+): Promise<void> {
+  await page.getByPlaceholder(/username|user|用户名/i).first().fill(credentials.username);
+  await page.getByPlaceholder(/password|密码/i).first().fill(credentials.password);
+  await page.locator('button[type="submit"]').click();
+  await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 15_000 });
+}
+
 /**
  * Perform a login through the UI form.
  * After this helper returns the page should be on the dashboard (or the
@@ -19,16 +29,7 @@ export async function login(
   credentials: { username: string; password: string } = MOCK_CREDENTIALS,
 ): Promise<void> {
   await page.goto('/login');
-
-  // Fill in the login form
-  await page.getByPlaceholder(/username|user|用户名/i).first().fill(credentials.username);
-  await page.getByPlaceholder(/password|密码/i).first().fill(credentials.password);
-
-  // Submit
-  await page.locator('button[type="submit"]').click();
-
-  // Wait until we are redirected away from /login
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 15_000 });
+  await submitLoginForm(page, credentials);
 }
 
 /**
@@ -36,10 +37,13 @@ export async function login(
  */
 export async function logout(page: Page): Promise<void> {
   // Open the user dropdown (click the user trigger area in the header)
-  await page.locator('.ant-dropdown-trigger').filter({ has: page.locator('.ant-avatar') }).click();
+  await page
+    .locator('button[aria-haspopup="menu"]')
+    .filter({ has: page.locator('.ant-avatar') })
+    .click();
 
   // Click the logout menu item
-  await page.getByText(/logout|log out|exit/i).click();
+  await page.getByRole('menuitem', { name: /logout|log out|exit|退出登录/i }).click();
 
   // Wait for redirect to login page
   await page.waitForURL('**/login', { timeout: 10_000 });

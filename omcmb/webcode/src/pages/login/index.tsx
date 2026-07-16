@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { App, Form, Input, Button, Checkbox, Modal, Spin } from 'antd';
 import { UserOutlined, LockOutlined, SafetyCertificateOutlined, ReloadOutlined } from '@ant-design/icons';
-import { useUserStore } from '@core/store/userStore';
+import { getLockedSession, useUserStore } from '@core/store/userStore';
 import { useT } from '@/hooks/useT';
 import { useMock } from '@core/services/apiSwitch';
 import { authApi } from '@core/services/api/authApi';
@@ -63,6 +63,8 @@ export default function LoginPage() {
   const login = useUserStore((s) => s.login);
   const setTokenPair = useUserStore((s) => s.setTokenPair);
   const setMustChangePassword = useUserStore((s) => s.setMustChangePassword);
+  const [lockedSession] = useState(getLockedSession);
+  const isUnlock = lockedSession !== null;
 
   // Issue #687: 图形验证码状态
   const [captchaRequired, setCaptchaRequired] = useState(false);
@@ -74,7 +76,10 @@ export default function LoginPage() {
   // 原 location 塞进 state.from。错误页不是合法的登录返回目的地，直接降级到
   // /dashboard，避免"admin 登录后又被踢回 /403"的体感 bug。
   const fromPath = (location.state as { from?: { pathname: string } })?.from?.pathname;
-  const from = fromPath && !FROM_PATH_BLOCKLIST.has(fromPath) ? fromPath : '/dashboard';
+  const from = lockedSession?.returnPath
+    ?? (fromPath && !FROM_PATH_BLOCKLIST.has(fromPath) ? fromPath : '/dashboard');
+  const destinationForUser = (user: User): string =>
+    lockedSession && lockedSession.userId !== user.id ? '/dashboard' : from;
 
   // P2-⑧ 浏览器记密：拉公开 security 配置，按 isBrowserAutoRecordPass=true 切
   // autocomplete 属性。注意：现代浏览器（Chrome）会忽略 autocomplete=off，
@@ -86,8 +91,15 @@ export default function LoginPage() {
   const usernameAutocomplete = publicSettings?.preventBrowserAutofill ? 'off' : 'username';
   const passwordAutocomplete = publicSettings?.preventBrowserAutofill ? 'new-password' : 'current-password';
 
-  // 页面加载时仅回填记住的用户名（密码不再持久化，需用户每次输入）。
+  // 锁屏模式固定为原用户，只允许输入密码解锁；普通登录仅回填记住的用户名。
   useEffect(() => {
+    if (lockedSession) {
+      form.setFieldsValue({
+        username: lockedSession.username,
+        remember: false,
+      });
+      return;
+    }
     const username = getRememberedUsername();
     if (username) {
       form.setFieldsValue({
@@ -95,7 +107,7 @@ export default function LoginPage() {
         remember: true,
       });
     }
-  }, [form]);
+  }, [form, lockedSession]);
 
   // Issue #687: 加载验证码图片
   const loadCaptcha = useCallback(async () => {
@@ -128,11 +140,12 @@ export default function LoginPage() {
       return;
     }
 
+    const username = lockedSession?.username ?? values.username;
     const mockUser: User = {
       id: '1',
-      username: values.username,
-      displayName: values.username === 'admin' ? 'Admin' : values.username,
-      email: `${values.username}@omc.example.com`,
+      username,
+      displayName: username === 'admin' ? 'Admin' : username,
+      email: `${username}@omc.example.com`,
       phone: '18800000000',
       role: 'admin',
       status: 'active',
@@ -141,8 +154,8 @@ export default function LoginPage() {
     };
 
     const tokenPair = {
-      access_token: `mock-access-token-${values.username}-${Date.now()}`,
-      refresh_token: `mock-refresh-token-${values.username}-${Date.now()}`,
+      access_token: `mock-access-token-${username}-${Date.now()}`,
+      refresh_token: `mock-refresh-token-${username}-${Date.now()}`,
       expires_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
       token_type: 'Bearer',
     };
@@ -150,8 +163,8 @@ export default function LoginPage() {
     setTokenPair(tokenPair);
 
     login(mockUser);
-    message.success(t('login.success'));
-    navigate(from, { replace: true });
+    message.success(t(isUnlock ? 'login.unlockSuccess' : 'login.success'));
+    navigate(destinationForUser(mockUser), { replace: true });
   };
 
   const handleRealLogin = async (values: LoginFormValues) => {
@@ -165,7 +178,8 @@ export default function LoginPage() {
     }
 
     // Step 1: Authenticate and get token pair
-    const tokenPair = await authApi.login(values.username, values.password, captchaCreds);
+    const username = lockedSession?.username ?? values.username;
+    const tokenPair = await authApi.login(username, values.password, captchaCreds);
     setTokenPair(tokenPair);
 
     // 登录成功后清除验证码状态
@@ -174,6 +188,7 @@ export default function LoginPage() {
 
     // Step 2: Fetch current user info
     const user = await authApi.getMe();
+    const destination = destinationForUser(user);
     login(user);
 
     // P2-⑪ 登录提示：后端响应附 login_notify_msg → 弹 Modal（用户确认后才进首页）
@@ -182,9 +197,9 @@ export default function LoginPage() {
         title: t('login.notifyTitle'),
         content: tokenPair.login_notify_msg,
         okText: t('common.confirm'),
-        onOk: () => navigate(from, { replace: true }),
+        onOk: () => navigate(destination, { replace: true }),
       });
-      message.success(t('login.success'));
+      message.success(t(isUnlock ? 'login.unlockSuccess' : 'login.success'));
       return;
     }
 
@@ -209,23 +224,25 @@ export default function LoginPage() {
         closable: false,
         mask: { closable: false },
         keyboard: false,
-        onOk: () => navigate(from, { replace: true }),
+        onOk: () => navigate(destination, { replace: true }),
       });
       return;
     }
 
-    message.success(t('login.success'));
-    navigate(from, { replace: true });
+    message.success(t(isUnlock ? 'login.unlockSuccess' : 'login.success'));
+    navigate(destination, { replace: true });
   };
 
   const handleSubmit = async (values: LoginFormValues) => {
     setLoading(true);
     try {
       // 记住/清除用户名（不再持久化密码）
-      if (values.remember) {
-        setRememberedUsername(values.username);
-      } else {
-        clearRemembered();
+      if (!isUnlock) {
+        if (values.remember) {
+          setRememberedUsername(values.username);
+        } else {
+          clearRemembered();
+        }
       }
 
       if (useMock) {
@@ -234,6 +251,17 @@ export default function LoginPage() {
         await handleRealLogin(values);
       }
     } catch (err) {
+      // 登录只有在 token + /auth/me 两步都成功后才算完成。若第二步失败，
+      // 立即回滚临时 token；锁屏模式保留原锁屏快照供用户重试。
+      const authState = useUserStore.getState();
+      if (!authState.currentUser && authState.accessToken) {
+        if (lockedSession) {
+          authState.lock(lockedSession.returnPath);
+        } else {
+          authState.clearAuth();
+        }
+      }
+
       // Issue #687: 检测 biz_code=7010（需要验证码）或 7011（验证码错误）
       // http 拦截器将 biz_code 暴露为 err.bizCode（而非 response.data.biz_code）
       const axiosErr = err as AxiosError<{ biz_code?: number }> & { bizCode?: number; userMessage?: string };
@@ -297,8 +325,10 @@ export default function LoginPage() {
           <div className={styles.logoIcon}>
             <span role="img" aria-label="network">🌐</span>
           </div>
-          <h1 className={styles.title}>{loginTitle}</h1>
-          <p className={styles.subtitle}>Unified Network Management System</p>
+          <h1 className={styles.title}>{isUnlock ? t('login.lockedTitle') : loginTitle}</h1>
+          <p className={styles.subtitle}>
+            {isUnlock ? lockedSession.displayName : 'Unified Network Management System'}
+          </p>
         </div>
 
         {/* Login form */}
@@ -319,6 +349,7 @@ export default function LoginPage() {
                 prefix={<UserOutlined style={{ color: 'var(--login-input-icon)' }} />}
                 placeholder={t('login.usernameTip')}
                 autoComplete={usernameAutocomplete}
+                readOnly={isUnlock}
               />
             </Form.Item>
 
@@ -380,13 +411,15 @@ export default function LoginPage() {
               </div>
             )}
 
-            <Form.Item>
-              <div className={styles.rememberRow}>
-                <Form.Item name="remember" valuePropName="checked" noStyle>
-                  <Checkbox>{t('login.rememberMe')}</Checkbox>
-                </Form.Item>
-              </div>
-            </Form.Item>
+            {!isUnlock && (
+              <Form.Item>
+                <div className={styles.rememberRow}>
+                  <Form.Item name="remember" valuePropName="checked" noStyle>
+                    <Checkbox>{t('login.rememberMe')}</Checkbox>
+                  </Form.Item>
+                </div>
+              </Form.Item>
+            )}
 
             <Form.Item>
               <Button
@@ -397,7 +430,7 @@ export default function LoginPage() {
                 size="large"
                 block
               >
-                {t('login.submit')}
+                {t(isUnlock ? 'login.unlock' : 'login.submit')}
               </Button>
             </Form.Item>
           </Form>

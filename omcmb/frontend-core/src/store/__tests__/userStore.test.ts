@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { useUserStore } from '../../store/userStore'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { getLockedSession, useUserStore } from '../../store/userStore'
+import { useTabStore } from '../../store/tabStore'
 import type { User } from '../../types/system'
 
 const mockUser: User = {
@@ -14,6 +15,12 @@ const mockUser: User = {
   createTime: '2025-01-01T00:00:00Z',
 }
 
+const otherUser: User = {
+  ...mockUser,
+  id: 'user-002',
+  username: 'otheruser',
+}
+
 describe('userStore', () => {
   beforeEach(() => {
     // Reset store to initial state before each test
@@ -26,6 +33,8 @@ describe('userStore', () => {
       permissions: [],
       loading: false,
     })
+    useTabStore.getState().closeAllTabs()
+    sessionStorage.removeItem('omc-locked-session')
   })
 
   it('has correct initial state', () => {
@@ -76,6 +85,123 @@ describe('userStore', () => {
     expect(state.refreshToken).toBeNull()
     expect(state.isAuthenticated).toBe(false)
     expect(state.permissions).toEqual([])
+  })
+
+  it('logout clears tabs for an explicit sign-out', () => {
+    useTabStore.getState().openTab({
+      key: 'device-list',
+      label: 'nav.device.list',
+      path: '/device/list',
+      closable: true,
+    })
+
+    useUserStore.getState().logout()
+
+    expect(useTabStore.getState().tabs.map((tab) => tab.key)).toEqual(['dashboard'])
+  })
+
+  it('lock clears authentication but preserves open tabs', () => {
+    useUserStore.getState().login(mockUser)
+    useUserStore.getState().setTokenPair({
+      access_token: 'token',
+      refresh_token: 'refresh',
+      expires_at: new Date().toISOString(),
+    })
+    useTabStore.getState().openTab({
+      key: 'device-list',
+      label: 'nav.device.list',
+      path: '/device/list',
+      closable: true,
+    })
+
+    useUserStore.getState().lock('/system/config?tab=security')
+
+    const state = useUserStore.getState()
+    expect(state.isAuthenticated).toBe(false)
+    expect(state.accessToken).toBeNull()
+    expect(state.refreshToken).toBeNull()
+    expect(useTabStore.getState().tabs.map((tab) => tab.key)).toEqual([
+      'dashboard',
+      'device-list',
+    ])
+    expect(getLockedSession()).toEqual({
+      userId: mockUser.id,
+      username: mockUser.username,
+      displayName: mockUser.displayName,
+      returnPath: '/system/config?tab=security',
+    })
+  })
+
+  it('preserves locked tabs when the same user logs in again', () => {
+    useUserStore.getState().login(mockUser)
+    useTabStore.getState().openTab({
+      key: 'device-list',
+      label: 'nav.device.list',
+      path: '/device/list',
+      closable: true,
+    })
+
+    useUserStore.getState().lock()
+    useUserStore.getState().login(mockUser)
+
+    expect(useTabStore.getState().tabs.map((tab) => tab.key)).toEqual([
+      'dashboard',
+      'device-list',
+    ])
+    expect(getLockedSession()).toBeNull()
+  })
+
+  it('clears locked tabs when a different user logs in', () => {
+    useUserStore.getState().login(mockUser)
+    useTabStore.getState().openTab({
+      key: 'device-list',
+      label: 'nav.device.list',
+      path: '/device/list',
+      closable: true,
+    })
+
+    useUserStore.getState().lock()
+    useUserStore.getState().login(otherUser)
+
+    expect(useTabStore.getState().tabs.map((tab) => tab.key)).toEqual(['dashboard'])
+    expect(getLockedSession()).toBeNull()
+  })
+
+  it('removes the locked user marker on an explicit sign-out', () => {
+    useUserStore.getState().login(mockUser)
+    useUserStore.getState().lock()
+
+    useUserStore.getState().login(mockUser)
+    useUserStore.getState().logout()
+
+    expect(getLockedSession()).toBeNull()
+  })
+
+  it('still clears authentication and tabs when the lock snapshot cannot be stored', () => {
+    useUserStore.getState().login(mockUser)
+    useUserStore.getState().setTokenPair({
+      access_token: 'token',
+      refresh_token: 'refresh',
+      expires_at: new Date().toISOString(),
+    })
+    useTabStore.getState().openTab({
+      key: 'device-list',
+      label: 'nav.device.list',
+      path: '/device/list',
+      closable: true,
+    })
+    const originalSetItem = sessionStorage.setItem.bind(sessionStorage)
+    const setItemSpy = vi.spyOn(sessionStorage, 'setItem').mockImplementation((key, value) => {
+      if (key === 'omc-locked-session') throw new DOMException('blocked', 'SecurityError')
+      return originalSetItem(key, value)
+    })
+
+    expect(() => useUserStore.getState().lock('/device/list')).not.toThrow()
+
+    expect(useUserStore.getState().isAuthenticated).toBe(false)
+    expect(useUserStore.getState().accessToken).toBeNull()
+    expect(useTabStore.getState().tabs.map((tab) => tab.key)).toEqual(['dashboard'])
+    setItemSpy.mockRestore()
   })
 
   it('isTokenExpired returns true when no token expiry set', () => {
