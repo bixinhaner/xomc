@@ -180,19 +180,19 @@ log "  CPU 空闲预算  : ${C_G}${C_B}${IDLE_CPU} 核${C_0}  = ${HOST_CPU} − 
 #
 #   组件          floor   ceil    surplus权重(%)   说明
 #   app            768    1536        10           非设备量驱动，最先让出预算
-#   acs           1024    2048        15           TR-069 最热堆；1M 走横向多副本
+#   acs           2048    3584        18           TR-069 最热堆；1M 走横向多副本；PM 上传 body 需缓冲进内存，余量比早期估算调大
 #   worker        1024    2048        25           PM/MR 解析最吃内存；1M 走横向
 #   postgres      7168   16384        25           业务主库；须容 max_connections=300(池+exporter+余,与 main #131 对齐)
 #   postgres-tsdb 4096   12288        22           时序库(#347)：PM COPY 入库 + KPI 聚合，写压力主要在此；独立实例，计入预算防双 PG 超分 OOM
 #   redis         3072    8192        15           appendonly，限额需≥1.5×maxmemory
 #   nats           512    2048         5
-#   minio         1024    2048         5
+#   minio         2048    3072         8           对象存储；压测发现按可见CPU配额自动估算的并发上限过于保守，floor/ceil 一并调大留余量
 #   web            512     512         0           静态+反代，固定
 # 监控栈（固定块，不纵向伸缩，但计入预算）：~4224 MiB
 COMP_NAMES=(app acs worker postgres postgres-tsdb redis nats minio web)
-COMP_FLOOR=(768 1024 1024 7168 4096 3072 512 1024 512)
-COMP_CEIL=(1536 2048 2048 16384 12288 8192 2048 2048 512)
-COMP_WEIGHT=(10 15 25 25 22 15 5 5 0)
+COMP_FLOOR=(768 2048 1024 7168 4096 3072 512 2048 512)
+COMP_CEIL=(1536 3584 2048 16384 12288 8192 2048 3072 512)
+COMP_WEIGHT=(10 18 25 25 22 15 5 8 0)
 
 MON_FIXED_MIB=4224   # prometheus1024+loki512+tempo512+otelcol512+grafana512+alertmgr512+exporters(128*3+256)
 [ "$SKIP_MONITORING" = 1 ] && MON_FIXED_MIB=0
@@ -236,8 +236,8 @@ else TIER=small; fi
 # CPU 限额（突发可超分；按档位给值）
 case "$TIER" in
   small)  CPU_app=1;   CPU_acs=2; CPU_worker=2; CPU_pg=2; CPU_tsdb=2; CPU_redis=1; CPU_nats=1; CPU_minio=1; CPU_web=1 ;;
-  medium) CPU_app="1.5"; CPU_acs=3; CPU_worker=3; CPU_pg=4; CPU_tsdb=4; CPU_redis=2; CPU_nats=1; CPU_minio=2; CPU_web=1 ;;
-  large)  CPU_app=2;   CPU_acs=4; CPU_worker=4; CPU_pg=6; CPU_tsdb=6; CPU_redis=2; CPU_nats=2; CPU_minio=4; CPU_web=1 ;;
+  medium) CPU_app="1.5"; CPU_acs=5; CPU_worker=3; CPU_pg=4; CPU_tsdb=4; CPU_redis=2; CPU_nats=1; CPU_minio=4; CPU_web=1 ;;
+  large)  CPU_app=2;   CPU_acs=8; CPU_worker=4; CPU_pg=6; CPU_tsdb=6; CPU_redis=2; CPU_nats=2; CPU_minio=6; CPU_web=1 ;;
 esac
 CPU_LIST=("$CPU_app" "$CPU_acs" "$CPU_worker" "$CPU_pg" "$CPU_tsdb" "$CPU_redis" "$CPU_nats" "$CPU_minio" "$CPU_web")
 
