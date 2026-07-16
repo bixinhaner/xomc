@@ -20,7 +20,9 @@
 
 1. **`000001_init_schema.sql`**（主库 DDL）—— 全量业务表结构（所有 public 业务表 + 分区子表 + 扩展 `ltree`/`pg_trgm`/`pgcrypto`/`uuid-ossp` + 触发器/函数）。**纯 PostgreSQL 16，无 timescaledb 扩展、无任何超表**（时序对象全在 tsdb 流）。由全量迁移后的库 `pg_dump --schema-only` 生成；PL/pgSQL 函数体已用 goose `StatementBegin/End` 包裹。
 2. **`seed/000001_init_seed.sql`**（主库 DML）—— 全量内置参考数据（RBAC/菜单/权限/系统字典/`sys_configs`/MML 命令树/`standard_params` 等）。由干净 schema+seed 库 `pg_dump --data-only --inserts --on-conflict-do-nothing` 生成；**不含运行期 dictloader 从 `data/` XML 加载的 `param_models`/`param_mappings`/`products`/`alarm_definitions`/`perf_indicators` 等**。所有 INSERT 带**无目标 `ON CONFLICT DO NOTHING`**，对全新库重复前向应用幂等。
-3. **`tsdb/000001_tsdb_schema.sql`**（时序库）—— 14 张时序表（`pm_metrics` + 4 rollup、`pm_group_metrics_*`、`pm_adhoc_aggregation_results`、`alarms_history`、`mr_records`、`trace_messages`、`pm_files`、`mr_files`）+ 显式 `create_hypertable` + 压缩/保留策略 + 7 张影子维度表（worker `tsdbsync` 从主库同步，供本库 JOIN 替代跨库 JOIN）+ `alarm_efficiency_metrics` 物化视图。显式 DDL，不依赖 pg_restore catalog 注入。
+3. **`tsdb/000001_tsdb_schema.sql`**（时序库）—— 15 张时序表（`pm_metrics` + 4 rollup、`pm_group_metrics_*`、`pm_adhoc_aggregation_results`、`alarms_history`、`mr_records`、`trace_messages`、`pm_files`、`mr_files`）+ 显式 `create_hypertable` + 压缩/保留策略 + 7 张影子维度表（worker `tsdbsync` 从主库同步，供本库 JOIN 替代跨库 JOIN）+ `alarm_efficiency_metrics` 物化视图。显式 DDL，不依赖 pg_restore catalog 注入。
+
+参数同步基线有一个有意保留的无外键设计：`parameter_sync_task_results.task_id` 和 `parameter_sync_staging_values.task_id` 都不声明到 `device_tasks` 的外键。`device_tasks` 按 `device_sn` 做 hash 分区，物理主键是 `(id, device_sn)`，PostgreSQL 不允许只引用其中的 `id`。应用处理链会校验 payload 的 `device_sn` 与同步 run 的逻辑关联，并按 `(id, device_sn)` 加载设备任务；两张表的 `run_id` 外键仍然保留。不要补回不可成立的 `REFERENCES device_tasks(id)`；如果未来在这两张表持久化 `device_sn`，再评估复合外键。
 
 ## 双库（main + tsdb）物理分离
 
@@ -73,6 +75,8 @@ docker compose -f deployments/docker/docker-compose.yml up -d --build migrate-sc
 # 本地（绕过 docker，仅主库 schema+seed）
 cd omcgo && make migrate-up   # = go run ./cmd/migrate up --paths migrations,migrations/seed
 ```
+
+> **版本表接口约束：**主库 schema 流（`migrations/`）的 Up/Down 必须使用 goose 默认版本表 `goose_db_version`，不得传自定义 `--table`；其 Down 会临时移动并恢复这个精确表名。只有 seed 和 TSDB 两条流使用已文档化的自定义接口：`--table goose_db_version_seed` 与 `--table goose_db_version_tsdb`。
 
 > ⚠️ **全新库验证 seed 必须用独立版本表**（compose 的 `migrate-seed` 已设 `GOOSE_TABLE=goose_db_version_seed`）。别用 `make migrate-up` 的 `--paths` 共享默认表跑全新库验证：schema 跑完默认版本表已占 `version_id=1`，seed 的 `000001` 会因撞号被当「已应用」跳过、不执行。
 

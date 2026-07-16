@@ -7,7 +7,7 @@
 -- 从主库同步供本库 JOIN，含 mr_customize_task_dim）+ 1 个告警效率物化视图（原在 seed，建在
 -- alarms_history 上）。注：mr_files 随「MR 也记录到时序库」由主库迁来，与 mr_records 同库。
 --
--- 14 张表的「最终形态」= 主库 000001 原始定义 叠加 这些增量的净效果：
+-- 15 张表的「最终形态」= 主库 000001 原始定义 叠加 这些增量的净效果：
 --   - pm_metrics：去掉随机 uuid 主键 pm_metrics_pkey（000044）+ 去掉自然键唯一索引
 --     uq_pm_metrics_natural（000042）+ 去掉 idx_pm_metrics_ingest_time / idx_pm_metrics_object_ldn
 --     （000043）+ 带 insert-triggered autovacuum reloptions（000044）；chunk 间隔 4 小时（000045，修 B0）。
@@ -24,7 +24,7 @@
 CREATE EXTENSION IF NOT EXISTS timescaledb;
 
 -- =====================================================================================
--- 1. 14 张时序/PM 表（最终形态）
+-- 1. 15 张时序/PM 表（最终形态）
 -- =====================================================================================
 
 -- ── alarms_history（超表：time 7d chunk，retention 365d，无压缩）─────────────────────
@@ -793,7 +793,7 @@ COMMENT ON FUNCTION public.refresh_alarm_efficiency_metrics() IS '刷新告警�
 
 
 -- +goose Down
--- DROP 全部对象（同名视图 → matview + 函数 → 镜像/归库表 → 影子表 → 14 张时序表；策略随 DROP TABLE 级联消失）。
+-- DROP 全部对象（同名视图 → matview + 函数 → 镜像/归库表 → 影子表 → 15 张时序表；策略随 DROP TABLE 级联消失）。
 DROP VIEW IF EXISTS public.alarm_definitions;
 DROP VIEW IF EXISTS public.cell_band;
 DROP VIEW IF EXISTS public.device_groups;
@@ -811,6 +811,7 @@ DROP TABLE IF EXISTS public.trace_tasks;
 DROP FUNCTION IF EXISTS public.refresh_alarm_efficiency_metrics();
 DROP MATERIALIZED VIEW IF EXISTS public.alarm_efficiency_metrics;
 
+DROP TABLE IF EXISTS public.mr_customize_task_dim;
 DROP TABLE IF EXISTS public.alarm_definition_dim;
 DROP TABLE IF EXISTS public.device_group_dim;
 DROP TABLE IF EXISTS public.product_dim;
@@ -833,6 +834,7 @@ DROP MATERIALIZED VIEW IF EXISTS public.pm_metrics_hourly_cagg;
 -- +goose StatementEnd
 DROP TABLE IF EXISTS public.pm_metrics;
 DROP TABLE IF EXISTS public.pm_files;
+DROP TABLE IF EXISTS public.mr_files;
 DROP TABLE IF EXISTS public.trace_messages;
 DROP TABLE IF EXISTS public.mr_records;
 DROP TABLE IF EXISTS public.alarms_history;
