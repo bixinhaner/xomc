@@ -213,6 +213,7 @@ func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, []Wide
 		IncludeCell:                   true,
 		MissingMetricValuePlaceholder: missingMetricValuePlaceholder,
 	}
+	deviceViewLayout := dashboardLayout
 	kpiQueryLayout := csvLayout{
 		FirstColHeader:                deviceHeader,
 		Locale:                        loc,
@@ -222,6 +223,9 @@ func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, []Wide
 	switch task.SourceType {
 	case SourceDashboard:
 		return r.buildDashboardLikeSource(ctx, task, loc, dashboardLayout)
+
+	case SourceDeviceView:
+		return r.buildDashboardLikeSource(ctx, task, loc, deviceViewLayout)
 
 	case SourceKpiQuery:
 		return r.buildDashboardLikeSource(ctx, task, loc, kpiQueryLayout)

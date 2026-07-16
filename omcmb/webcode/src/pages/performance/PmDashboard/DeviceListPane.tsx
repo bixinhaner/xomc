@@ -43,6 +43,7 @@ import {
 import { usePmAdhocList } from '@core/hooks/api/usePmAdhoc';
 import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
 import type { DeviceType } from '@core/types/indicatorLibrary';
+import type { CreateKpiExportInput } from '@core/types/kpiExport';
 import type { Granularity } from '@core/types/pmDashboard';
 import DevicePickerModal from '../KPIQuery/components/DevicePickerModal';
 import MetricPickerModal from '@/components/MetricPickerModal';
@@ -78,6 +79,18 @@ const TECH_TO_DEVICE_TYPE: Record<Tech, DeviceType> = {
   nr: 'GNB',
   gsm: 'GSM',
 };
+
+export function buildDeviceViewExportInput(
+  selection: DashboardExportSelection,
+  locale: string,
+  now: Date = new Date(),
+): CreateKpiExportInput {
+  return {
+    sourceType: 'device_view',
+    params: buildDashboardExportParams(selection),
+    taskName: defaultExportTaskName('device_view', now, { locale }),
+  };
+}
 
 // 粒度选项语料键（label 走 i18n，value 不变）。
 const GRANULARITY_MSG_IDS: { id: string; value: Granularity }[] = [
@@ -330,11 +343,7 @@ export default function DeviceListPane() {
       return;
     }
     createExport.mutate(
-      {
-        sourceType: 'dashboard',
-        params: buildDashboardExportParams(sel),
-        taskName: defaultExportTaskName('dashboard'),
-      },
+      buildDeviceViewExportInput(sel, intl.locale),
       {
         onSuccess: () => {
           message.success(intl.formatMessage({ id: 'kpiExport.export.submitted' }));

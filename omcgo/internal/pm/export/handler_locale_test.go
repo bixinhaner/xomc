@@ -41,3 +41,52 @@ func TestHandler_Create_CapturesRequestLocaleInParams(t *testing.T) {
 		string(repo.created.Params),
 	)
 }
+
+func TestHandler_Create_DeviceViewDefaultTaskName(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	taskID := uuid.New()
+	repo := &stubRepo{
+		createID: taskID,
+		getTask:  &Task{ID: taskID, SourceType: SourceDeviceView, Status: StatusPending},
+	}
+	h := NewHandler(NewService(repo, &stubEnqueuer{insertID: uuid.New()}), nil, zap.NewNop())
+	router := gin.New()
+	h.RegisterRoutes(router.Group(""))
+
+	body := []byte(`{"source_type":"device_view","params":{"granularity":"hourly"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/pm/exports", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+	require.NotNil(t, repo.created)
+	assert.Equal(t, SourceDeviceView, repo.created.SourceType)
+	assert.Contains(t, repo.created.TaskName, "KPI导出_设备性能查看_")
+	assert.NotContains(t, repo.created.TaskName, "仪表盘")
+}
+
+func TestHandler_Create_DeviceViewDefaultTaskNameUsesEnglishLocale(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	taskID := uuid.New()
+	repo := &stubRepo{
+		createID: taskID,
+		getTask:  &Task{ID: taskID, SourceType: SourceDeviceView, Status: StatusPending},
+	}
+	h := NewHandler(NewService(repo, &stubEnqueuer{insertID: uuid.New()}), nil, zap.NewNop())
+	router := gin.New()
+	h.RegisterRoutes(router.Group(""))
+
+	body := []byte(`{"source_type":"device_view","params":{"granularity":"hourly"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/pm/exports", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(appcontext.WithLocale(context.Background(), appcontext.LocaleEN))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+	require.NotNil(t, repo.created)
+	assert.Contains(t, repo.created.TaskName, "KPI_Export_Device_Performance_View_")
+	assert.NotContains(t, repo.created.TaskName, "仪表盘")
+	assert.NotContains(t, repo.created.TaskName, "设备性能查看")
+}
