@@ -135,6 +135,43 @@ describe('buildDeviceMetricCharts — 设备级转置', () => {
     expect(charts[0].series[0].values).toEqual([0, 1, 2]);
   });
 
+  it('只使用后端返回桶，不按未对齐查询开始时间自行生成时间轴', () => {
+    const rows: AggregatedRow[] = [
+      row({
+        deviceSn: 'SN-A',
+        metricPath: 'M1',
+        startTime: '2026-07-16T03:15:00Z',
+        endTime: '2026-07-16T03:30:00Z',
+        metricValue: 1,
+      }),
+      row({
+        deviceSn: 'SN-A',
+        metricPath: 'M1',
+        startTime: '2026-07-16T03:30:00Z',
+        endTime: '2026-07-16T03:45:00Z',
+        metricValue: null,
+        filled: true,
+      }),
+      row({
+        deviceSn: 'SN-A',
+        metricPath: 'M1',
+        startTime: '2026-07-16T03:45:00Z',
+        endTime: '2026-07-16T04:00:00Z',
+        metricValue: 3,
+      }),
+    ];
+
+    const charts = buildDeviceMetricCharts(rows, '15min');
+
+    expect(charts[0].buckets).toEqual([
+      '2026-07-16T03:15:00Z',
+      '2026-07-16T03:30:00Z',
+      '2026-07-16T03:45:00Z',
+    ]);
+    expect(charts[0].buckets).not.toContain('2026-07-16T03:13:17Z');
+    expect(charts[0].series[0].values).toEqual([1, '-', 3]);
+  });
+
   it('displayName 取行的 displayName，缺则回退 metricPath', () => {
     const rows: AggregatedRow[] = [
       row({ metricPath: 'K900010015', displayName: '上行流量', startTime: 'T1' }),

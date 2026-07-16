@@ -82,7 +82,7 @@ func buildDistinctMetricsSQL(table string, metricPaths []string, start, end time
 		b = b.Where(sq.GtOrEq{"time": start})
 	}
 	if !end.IsZero() {
-		b = b.Where(sq.LtOrEq{"time": end})
+		b = b.Where(sq.Lt{"time": end})
 	}
 	q, args, _ := b.ToSql()
 	return q, args
@@ -145,7 +145,7 @@ func applyDeviceExportFilters(b sq.SelectBuilder, req aggregator.QueryRequest, o
 		b = b.Where(sq.GtOrEq{"time": req.StartTime})
 	}
 	if !req.EndTime.IsZero() {
-		b = b.Where(sq.LtOrEq{"time": req.EndTime})
+		b = b.Where(sq.Lt{"time": req.EndTime})
 	}
 	if len(req.Technologies) > 0 {
 		// buildDeviceKeysetSQL 跑在 metricDB=TsPool（device 维度直查 pm_metrics/pm_metrics_hourly），

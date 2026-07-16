@@ -1,9 +1,11 @@
 package aggregator
 
 import (
+	"math"
 	"strings"
 	"time"
 
+	"github.com/omcgo/omcgo/internal/core/jsonx"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
@@ -77,6 +79,7 @@ func FillEmptyBuckets(rows []Row, req QueryRequest) []Row {
 				MetricPath:  mp,
 				DisplayName: nameByPath[mp],
 				MetricType:  fillMetricType(g.rep.MetricType, req.MetricType),
+				MetricValue: jsonNullFloat(),
 				Granularity: g.rep.Granularity,
 				Time:        g.rep.Time,
 				StartTime:   g.rep.StartTime,
@@ -110,6 +113,7 @@ func FillEmptyBuckets(rows []Row, req QueryRequest) []Row {
 					MetricPath:  mp,
 					DisplayName: nameByPath[mp],
 					MetricType:  skeletonMetricType(mp, template.MetricType, req.MetricType),
+					MetricValue: jsonNullFloat(),
 					Granularity: req.Granularity,
 					Time:        bucket,
 					StartTime:   bucket,
@@ -121,7 +125,11 @@ func FillEmptyBuckets(rows []Row, req QueryRequest) []Row {
 			}
 		}
 	}
-	return rows
+	return filterCompleteBucketRows(rows, req)
+}
+
+func jsonNullFloat() jsonx.Float {
+	return jsonx.Float(math.NaN())
 }
 
 func fillMetricType(repType metrics.MetricType, requested *metrics.MetricType) metrics.MetricType {
@@ -182,17 +190,119 @@ func skeletonMetricType(metricPath string, fallback metrics.MetricType, requeste
 }
 
 func skeletonBuckets(req QueryRequest) []time.Time {
+	return completeSkeletonBuckets(req, true)
+}
+
+func completeSkeletonBuckets(req QueryRequest, applyCalendarFilters bool) []time.Time {
 	if !knownSkeletonGranularity(req.Granularity) {
 		return nil
 	}
 	out := make([]time.Time, 0)
-	for t := req.StartTime; t.Before(req.EndTime); t = nextSkeletonBucket(t, req.Granularity) {
-		if !bucketPassesCalendarFilters(t, req) {
+	for t := firstCompleteSkeletonBucket(req.StartTime, req.Granularity); !t.IsZero() && !nextSkeletonBucket(t, req.Granularity).After(req.EndTime); t = nextSkeletonBucket(t, req.Granularity) {
+		if applyCalendarFilters && !bucketPassesCalendarFilters(t, req) {
 			continue
 		}
 		out = append(out, t)
 	}
 	return out
+}
+
+// BucketWindow describes the user requested window and the complete bucket window returned by fill_empty.
+type BucketWindow struct {
+	RequestedStartTime time.Time `json:"requested_start_time,omitempty"`
+	RequestedEndTime   time.Time `json:"requested_end_time,omitempty"`
+	ActualStartTime    time.Time `json:"actual_start_time,omitempty"`
+	ActualEndTime      time.Time `json:"actual_end_time,omitempty"`
+	Granularity        string    `json:"granularity,omitempty"`
+	Timezone           string    `json:"timezone,omitempty"`
+}
+
+// BuildBucketWindow returns the complete-bucket range for a request.
+//
+// Bucket rule: bucket_start >= query_start and bucket_start + granularity <= query_end.
+// Boundaries are calculated in the process timezone so day/week/month buckets follow the system locale.
+func BuildBucketWindow(req QueryRequest) BucketWindow {
+	win := BucketWindow{
+		RequestedStartTime: req.StartTime,
+		RequestedEndTime:   req.EndTime,
+		Granularity:        string(req.Granularity),
+		Timezone:           time.Local.String(),
+	}
+	buckets := completeSkeletonBuckets(req, false)
+	if len(buckets) == 0 {
+		return win
+	}
+	win.ActualStartTime = buckets[0]
+	win.ActualEndTime = nextSkeletonBucket(buckets[len(buckets)-1], req.Granularity)
+	return win
+}
+
+func filterCompleteBucketRows(rows []Row, req QueryRequest) []Row {
+	if !IsExplicitObjectSkeletonRequest(req) || !knownSkeletonGranularity(req.Granularity) {
+		return rows
+	}
+	buckets := skeletonBuckets(req)
+	if len(buckets) == 0 {
+		return nil
+	}
+	allowed := make(map[string]struct{}, len(buckets))
+	for _, bucket := range buckets {
+		allowed[bucketKey(bucket)] = struct{}{}
+	}
+	out := rows[:0]
+	for _, row := range rows {
+		if _, ok := allowed[bucketKey(row.Time)]; ok {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+func bucketKey(t time.Time) string {
+	return t.UTC().Format(time.RFC3339Nano)
+}
+
+func firstCompleteSkeletonBucket(start time.Time, gran metrics.Granularity) time.Time {
+	if start.IsZero() {
+		return time.Time{}
+	}
+	local := start.In(time.Local)
+	var aligned time.Time
+	switch gran {
+	case metrics.Granularity15Min:
+		minute := (local.Minute() / 15) * 15
+		aligned = time.Date(local.Year(), local.Month(), local.Day(), local.Hour(), minute, 0, 0, time.Local)
+		if aligned.Before(local) {
+			aligned = aligned.Add(15 * time.Minute)
+		}
+	case metrics.GranularityHourly:
+		aligned = time.Date(local.Year(), local.Month(), local.Day(), local.Hour(), 0, 0, 0, time.Local)
+		if aligned.Before(local) {
+			aligned = aligned.Add(time.Hour)
+		}
+	case metrics.GranularityDaily:
+		aligned = time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.Local)
+		if aligned.Before(local) {
+			aligned = aligned.AddDate(0, 0, 1)
+		}
+	case metrics.GranularityWeekly:
+		weekday := int(local.Weekday())
+		if weekday == 0 {
+			weekday = 7
+		}
+		aligned = time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.Local).AddDate(0, 0, 1-weekday)
+		if aligned.Before(local) {
+			aligned = aligned.AddDate(0, 0, 7)
+		}
+	case metrics.GranularityMonthly:
+		aligned = time.Date(local.Year(), local.Month(), 1, 0, 0, 0, 0, time.Local)
+		if aligned.Before(local) {
+			aligned = aligned.AddDate(0, 1, 0)
+		}
+	default:
+		return time.Time{}
+	}
+	return aligned.In(start.Location())
 }
 
 func knownSkeletonGranularity(gran metrics.Granularity) bool {
@@ -222,10 +332,11 @@ func nextSkeletonBucket(t time.Time, gran metrics.Granularity) time.Time {
 }
 
 func bucketPassesCalendarFilters(t time.Time, req QueryRequest) bool {
-	if len(req.Weekdays) > 0 && len(req.Weekdays) < 7 && !intInSlice(int(t.Weekday()), req.Weekdays) {
+	local := t.In(time.Local)
+	if len(req.Weekdays) > 0 && len(req.Weekdays) < 7 && !intInSlice(int(local.Weekday()), req.Weekdays) {
 		return false
 	}
-	if len(req.Hours) > 0 && len(req.Hours) < 24 && !intInSlice(t.Hour(), req.Hours) {
+	if len(req.Hours) > 0 && len(req.Hours) < 24 && !intInSlice(local.Hour(), req.Hours) {
 		return false
 	}
 	return true
