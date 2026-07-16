@@ -88,7 +88,8 @@ func TestHandler_ScriptImportTemplate(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "支持操作")
 	require.NotContains(t, rec.Body.String(), "DEL")
 	require.NotContains(t, rec.Body.String(), "PATH:")
-	require.Contains(t, rec.Body.String(), "RMV Device.IP.Interface.1.IPv4Address.3.;DEVICE_SN")
+	require.Contains(t, rec.Body.String(), "# RMV Device.IP.Interface.1.IPv4Address.3.;DEVICE_SN")
+	require.Contains(t, rec.Body.String(), "# LST Device.DeviceInfo.SoftwareVersion;DEVICE_SN,SECOND_SN")
 }
 
 func TestHandler_ScriptImportTemplateEnglish(t *testing.T) {
@@ -108,7 +109,8 @@ func TestHandler_ScriptImportTemplateEnglish(t *testing.T) {
 	require.NotContains(t, body, "DEL")
 	require.NotContains(t, body, "支持操作")
 	require.NotContains(t, body, "PATH:")
-	require.Contains(t, body, "RMV Device.IP.Interface.1.IPv4Address.3.;DEVICE_SN")
+	require.Contains(t, body, "# RMV Device.IP.Interface.1.IPv4Address.3.;DEVICE_SN")
+	require.Contains(t, body, "# LST Device.DeviceInfo.SoftwareVersion;DEVICE_SN,SECOND_SN")
 }
 
 func TestHandler_ValidateScriptImport_RejectsNonTXT(t *testing.T) {

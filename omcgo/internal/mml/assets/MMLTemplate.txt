@@ -1,4 +1,7 @@
 # MML TXT脚本模板
+# 本文档为 MML TXT 脚本说明和示例。
+# 行首 # 表示注释行，导入时会被忽略；如需执行示例命令，请删除行首 #，并填写正确的参数、值以及设备SN。
+#
 # 默认使用标准 PATH。需要直接下发设备私有 PATH 时，在路径前加 PRIVATE:。
 # 每条有效行格式：
 # 标准 PATH - 操作 路径[=参数值][,路径2=参数值2];设备SN[,设备SN2...]
@@ -21,10 +24,10 @@
 # 8. 空行和 # 开头的行会被忽略。
 # 9. 单个文件最多 200 台设备、2000 条有效命令、2 MiB。
 #
-# 示例：将 DEVICE_SN 替换为真实基站编码。
-LST Device.DeviceInfo.SoftwareVersion;DEVICE_SN
-MOD Device.ManagementServer.URL=http://localhost:8080/smallcell/AcsService,Device.ManagementServer.Username=acs;DEVICE_SN
-ADD Device.IP.Interface.1.IPv4Address.:IPAddress=192.168.1.10,SubnetMask=255.255.255.0;DEVICE_SN
-RMV Device.IP.Interface.1.IPv4Address.3.;DEVICE_SN
-LST PRIVATE:InternetGatewayDevice.DeviceInfo.SoftwareVersion;DEVICE_SN
-LST Device.DeviceInfo.SoftwareVersion;DEVICE_SN,SECOND_SN
+# 示例命令已注释，不会被导入执行。
+# LST Device.DeviceInfo.SoftwareVersion;DEVICE_SN
+# MOD Device.ManagementServer.URL=http://localhost:8080/smallcell/AcsService,Device.ManagementServer.Username=acs;DEVICE_SN
+# ADD Device.IP.Interface.1.IPv4Address.:IPAddress=192.168.1.10,SubnetMask=255.255.255.0;DEVICE_SN
+# RMV Device.IP.Interface.1.IPv4Address.3.;DEVICE_SN
+# LST PRIVATE:InternetGatewayDevice.DeviceInfo.SoftwareVersion;DEVICE_SN
+# LST Device.DeviceInfo.SoftwareVersion;DEVICE_SN,SECOND_SN

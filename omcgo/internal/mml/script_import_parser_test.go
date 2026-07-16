@@ -56,6 +56,9 @@ func TestParseScriptTXT_ExpandsCommaSeparatedDeviceSNs(t *testing.T) {
 }
 
 func TestParseScriptTXT_TemplateDocumentsSupportedSyntaxAndExamplesParse(t *testing.T) {
+	require.Contains(t, scriptImportTemplateForParserTest, "本文档为 MML TXT 脚本说明和示例")
+	require.Contains(t, scriptImportTemplateForParserTest, "行首 # 表示注释行")
+	require.Contains(t, scriptImportTemplateForParserTest, "请删除行首 #，并填写正确的参数、值以及设备SN")
 	require.Contains(t, scriptImportTemplateForParserTest, "支持操作")
 	require.Contains(t, scriptImportTemplateForParserTest, "LST 查询")
 	require.Contains(t, scriptImportTemplateForParserTest, "MOD 修改")
@@ -70,10 +73,20 @@ func TestParseScriptTXT_TemplateDocumentsSupportedSyntaxAndExamplesParse(t *test
 	require.NotContains(t, scriptImportTemplateForParserTest, "操作 命令编码")
 	require.NotContains(t, scriptImportTemplateForParserTest, "兼容命令编码")
 	require.NotContains(t, scriptImportTemplateForParserTest, "LST DEVICE_INFO;DEVICE_SN")
+	require.Contains(t, scriptImportTemplateForParserTest, "# LST Device.DeviceInfo.SoftwareVersion;DEVICE_SN")
 
-	executableTemplate := strings.ReplaceAll(scriptImportTemplateForParserTest, "DEVICE_SN", "SN-TEMPLATE-1")
+	safeTemplate := strings.ReplaceAll(scriptImportTemplateForParserTest, "DEVICE_SN", "SN-TEMPLATE-1")
+	safeTemplate = strings.ReplaceAll(safeTemplate, "SECOND_SN", "SN-TEMPLATE-2")
+	got, issues := ParseScriptTXT([]byte(safeTemplate))
+
+	require.Len(t, issues, 1)
+	require.Equal(t, "MML_FILE_EMPTY", issues[0].Code)
+	require.Empty(t, got.Lines)
+
+	executableTemplate := uncommentTemplateExamples(scriptImportTemplateForParserTest)
+	executableTemplate = strings.ReplaceAll(executableTemplate, "DEVICE_SN", "SN-TEMPLATE-1")
 	executableTemplate = strings.ReplaceAll(executableTemplate, "SECOND_SN", "SN-TEMPLATE-2")
-	got, issues := ParseScriptTXT([]byte(executableTemplate))
+	got, issues = ParseScriptTXT([]byte(executableTemplate))
 
 	require.Empty(t, issues)
 	require.NotEmpty(t, got.Lines)
@@ -93,6 +106,9 @@ func TestParseScriptTXT_TemplateDocumentsSupportedSyntaxAndExamplesParse(t *test
 func TestParseScriptTXT_EnglishTemplateDocumentsSupportedSyntaxAndExamplesParse(t *testing.T) {
 	template := string(scriptImportTemplateForLocale("en-US"))
 	require.Contains(t, template, "MML TXT Script Template")
+	require.Contains(t, template, "This document provides MML TXT script instructions and examples")
+	require.Contains(t, template, "Lines starting with # are comments")
+	require.Contains(t, template, "remove the leading # and fill in the correct parameters, values, and device SNs")
 	require.Contains(t, template, "Supported operations")
 	require.Contains(t, template, "LST query")
 	require.Contains(t, template, "MOD modify")
@@ -108,10 +124,20 @@ func TestParseScriptTXT_EnglishTemplateDocumentsSupportedSyntaxAndExamplesParse(
 	require.NotContains(t, template, "Operation command_code")
 	require.NotContains(t, template, "Compatible command-code")
 	require.NotContains(t, template, "LST DEVICE_INFO;DEVICE_SN")
+	require.Contains(t, template, "# LST Device.DeviceInfo.SoftwareVersion;DEVICE_SN")
 
-	executableTemplate := strings.ReplaceAll(template, "DEVICE_SN", "SN-TEMPLATE-1")
+	safeTemplate := strings.ReplaceAll(template, "DEVICE_SN", "SN-TEMPLATE-1")
+	safeTemplate = strings.ReplaceAll(safeTemplate, "SECOND_SN", "SN-TEMPLATE-2")
+	got, issues := ParseScriptTXT([]byte(safeTemplate))
+
+	require.Len(t, issues, 1)
+	require.Equal(t, "MML_FILE_EMPTY", issues[0].Code)
+	require.Empty(t, got.Lines)
+
+	executableTemplate := uncommentTemplateExamples(template)
+	executableTemplate = strings.ReplaceAll(executableTemplate, "DEVICE_SN", "SN-TEMPLATE-1")
 	executableTemplate = strings.ReplaceAll(executableTemplate, "SECOND_SN", "SN-TEMPLATE-2")
-	got, issues := ParseScriptTXT([]byte(executableTemplate))
+	got, issues = ParseScriptTXT([]byte(executableTemplate))
 
 	require.Empty(t, issues)
 	require.NotEmpty(t, got.Lines)
@@ -123,6 +149,23 @@ func TestParseScriptTXT_EnglishTemplateDocumentsSupportedSyntaxAndExamplesParse(
 	})
 	require.Equal(t, rawPathModePrivate, got.Lines[4].RawPathMode)
 	require.Equal(t, []string{"SN-TEMPLATE-1", "SN-TEMPLATE-2"}, []string{got.Lines[5].DeviceSN, got.Lines[6].DeviceSN})
+}
+
+func uncommentTemplateExamples(template string) string {
+	lines := strings.Split(template, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimPrefix(line, "# ")
+		if !strings.Contains(trimmed, "DEVICE_SN") && !strings.Contains(trimmed, "SECOND_SN") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "LST ") ||
+			strings.HasPrefix(trimmed, "MOD ") ||
+			strings.HasPrefix(trimmed, "ADD ") ||
+			strings.HasPrefix(trimmed, "RMV ") {
+			lines[i] = trimmed
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func TestParseScriptTXT_NormalizesCROnlyLineEndings(t *testing.T) {
