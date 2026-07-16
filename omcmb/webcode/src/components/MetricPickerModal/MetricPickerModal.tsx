@@ -21,12 +21,12 @@ import {
   Divider,
   Select,
   theme,
+  App,
 } from 'antd';
 import { SearchOutlined, ClearOutlined } from '@ant-design/icons';
 import { useIndicatorList } from '@core/hooks/api/useIndicatorsLibrary';
 import type { DeviceType, IndicatorInfo } from '@core/types/indicatorLibrary';
 import { useAppStore } from '@core/store/appStore';
-
 const { Text } = Typography;
 
 // 选中值 = 该指标在 pm_metrics 里的 metric_path：
@@ -57,6 +57,8 @@ interface MetricPickerModalProps {
   // 制式联动锁定（T-0188）：true 时隐藏内部「设备类型」下拉，deviceType 固定为
   // initialDeviceType 不可手动切换；不传/false 保持原下拉可切换行为（向后兼容 KPIQuery）。
   lockDeviceType?: boolean;
+  maxSelected?: number;
+  maxSelectedMessageId?: string;
 }
 
 const DEVICE_TYPE_OPTIONS: { label: string; value: DeviceType }[] = [
@@ -73,8 +75,11 @@ export default function MetricPickerModal({
   initialLabels,
   initialDeviceType = 'ENB',
   lockDeviceType = false,
+  maxSelected,
+  maxSelectedMessageId = 'perf.picker.metricLimitExceeded',
 }: MetricPickerModalProps) {
   const intl = useIntl();
+  const { message } = App.useApp();
   const { token } = theme.useToken();
   const isEn = useAppStore((s) => s.locale) === 'en-US';
   // 非锁定态：用户可在弹窗内自行切换设备类型（KPIQuery 用法），用内部 state。
@@ -182,7 +187,19 @@ export default function MetricPickerModal({
     setPage(1);
   };
 
+  const warnIfTooManySelected = (count: number) => {
+    if (maxSelected === undefined || count <= maxSelected) return false;
+    message.warning(
+      intl.formatMessage(
+        { id: maxSelectedMessageId },
+        { max: maxSelected, count },
+      ),
+    );
+    return true;
+  };
+
   const handleConfirm = () => {
+    if (warnIfTooManySelected(selected.length)) return;
     const labels: Record<string, string> = {};
     selected.forEach((v) => {
       labels[v] = labelMap[v] ?? v;
@@ -194,7 +211,10 @@ export default function MetricPickerModal({
   const rowSelection = {
     selectedRowKeys: selected,
     preserveSelectedRowKeys: true,
-    onChange: (keys: React.Key[]) => setSelected(keys as string[]),
+    onChange: (keys: React.Key[]) => {
+      if (warnIfTooManySelected(keys.length)) return;
+      setSelected(keys as string[]);
+    },
   };
 
   return (

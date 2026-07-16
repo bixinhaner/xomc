@@ -35,6 +35,8 @@ interface DevicePickerModalProps {
   // 制式联动锁定（T-0188）：传入时按制式过滤设备列表（透传 useDeviceList 的 networkType，
   // 直接用小写 'lte'/'nr'/'gsm'）；不传时列全部设备，保持原行为（向后兼容 KPIQuery）。
   technology?: 'lte' | 'nr' | 'gsm';
+  maxSelected?: number;
+  maxSelectedMessageId?: string;
 }
 
 export default function DevicePickerModal({
@@ -43,6 +45,8 @@ export default function DevicePickerModal({
   onConfirm,
   initialSelected = [],
   technology,
+  maxSelected,
+  maxSelectedMessageId = 'perf.picker.deviceLimitExceeded',
 }: DevicePickerModalProps) {
   const intl = useIntl();
   const { message } = App.useApp();
@@ -98,6 +102,17 @@ export default function DevicePickerModal({
     setPage(1);
   };
 
+  const warnIfTooManySelected = (count: number) => {
+    if (maxSelected === undefined || count <= maxSelected) return false;
+    message.warning(
+      intl.formatMessage(
+        { id: maxSelectedMessageId },
+        { max: maxSelected, count },
+      ),
+    );
+    return true;
+  };
+
   const handleBatchPaste = () => {
     const raw = pasteText.trim();
     if (!raw) {
@@ -113,16 +128,19 @@ export default function DevicePickerModal({
       return;
     }
     const merged = Array.from(new Set([...selected, ...sns]));
-    const added = merged.length - selected.length;
-    setSelected(merged);
+    const nextSelected = maxSelected === undefined ? merged : merged.slice(0, maxSelected);
+    warnIfTooManySelected(merged.length);
+    const added = Math.max(nextSelected.length - selected.length, 0);
+    setSelected(nextSelected);
     setPasteOpen(false);
     setPasteText('');
     message.success(
-      intl.formatMessage({ id: 'perf.picker.snAdded' }, { added, total: merged.length }),
+      intl.formatMessage({ id: 'perf.picker.snAdded' }, { added, total: nextSelected.length }),
     );
   };
 
   const handleConfirm = () => {
+    if (warnIfTooManySelected(selected.length)) return;
     onConfirm(selected);
     onClose();
   };
@@ -130,7 +148,10 @@ export default function DevicePickerModal({
   const rowSelection = {
     selectedRowKeys: selected,
     preserveSelectedRowKeys: true,
-    onChange: (keys: React.Key[]) => setSelected(keys as string[]),
+    onChange: (keys: React.Key[]) => {
+      if (warnIfTooManySelected(keys.length)) return;
+      setSelected(keys as string[]);
+    },
   };
 
   return (

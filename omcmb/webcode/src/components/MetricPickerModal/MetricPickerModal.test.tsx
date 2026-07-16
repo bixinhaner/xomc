@@ -6,7 +6,8 @@
  *   - 不传/false 时仍渲染「设备类型」下拉（向后兼容 KPIQuery 可切换行为）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { App } from 'antd';
 
 // 捕获 useIndicatorList 收到的 deviceType。
 const useIndicatorListSpy = vi.fn();
@@ -31,7 +32,7 @@ import { zhCN } from '@core/i18n';
 function wrapIntl(node: React.ReactElement) {
   return (
     <IntlProvider locale="zh-CN" defaultLocale="zh-CN" messages={zhCN}>
-      {node}
+      <App>{node}</App>
     </IntlProvider>
   );
 }
@@ -111,5 +112,42 @@ describe('MetricPickerModal 已选回显', () => {
     // 重开：必须回显模板 B 的指标，且不残留模板 A 的指标
     expect(screen.getByText('C000030170')).toBeTruthy();
     expect(screen.queryByText('C000080007')).toBeNull();
+  });
+});
+
+describe('MetricPickerModal 选择数量限制', () => {
+  beforeEach(() => {
+    useIndicatorListSpy.mockClear();
+  });
+
+  it('默认不限制选择数量，由复用页面自行决定上限', () => {
+    const onConfirm = vi.fn();
+    renderModal({ initialSelected: Array.from({ length: 51 }, (_, i) => `K-${i + 1}`), onConfirm });
+
+    fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
+
+    expect(onConfirm).toHaveBeenCalledWith(
+      Array.from({ length: 51 }, (_, i) => `K-${i + 1}`),
+      expect.any(Object),
+    );
+  });
+
+  it('已选指标正好 50 个时，点击确定可以提交', () => {
+    const onConfirm = vi.fn();
+    const selected = Array.from({ length: 50 }, (_, i) => `K-${i + 1}`);
+    renderModal({ initialSelected: selected, maxSelected: 50, onConfirm });
+
+    fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
+
+    expect(onConfirm).toHaveBeenCalledWith(selected, expect.any(Object));
+  });
+
+  it('已选指标超过 50 个时，点击确定不提交', () => {
+    const onConfirm = vi.fn();
+    renderModal({ initialSelected: Array.from({ length: 51 }, (_, i) => `K-${i + 1}`), maxSelected: 50, onConfirm });
+
+    fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
+
+    expect(onConfirm).not.toHaveBeenCalled();
   });
 });

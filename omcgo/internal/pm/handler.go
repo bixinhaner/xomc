@@ -28,6 +28,11 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	maxAggregatedMetricDeviceSNs = 50
+	maxAggregatedMetricPaths     = 50
+)
+
 // Handler provides REST API endpoints for PM data.
 type Handler struct {
 	counterRepo counter.CounterRepository
@@ -372,12 +377,10 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 		req.DeviceSNs = []string{v}
 	}
 	if v := c.Query("device_sns"); v != "" {
-		parts := strings.Split(v, ",")
-		sns := make([]string, 0, len(parts))
-		for _, p := range parts {
-			if p = strings.TrimSpace(p); p != "" {
-				sns = append(sns, p)
-			}
+		sns := splitCSVNonEmpty(v)
+		if len(sns) > maxAggregatedMetricDeviceSNs {
+			response.Fail(c, http.StatusBadRequest, fmt.Sprintf("device_sns exceeds maximum of %d", maxAggregatedMetricDeviceSNs))
+			return
 		}
 		if len(sns) > 0 {
 			req.DeviceSNs = sns
@@ -397,12 +400,10 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 		req.DeviceGroupIDs = []uuid.UUID{id}
 	}
 	if v := c.Query("metric_paths"); v != "" {
-		parts := strings.Split(v, ",")
-		paths := make([]string, 0, len(parts))
-		for _, p := range parts {
-			if p = strings.TrimSpace(p); p != "" {
-				paths = append(paths, p)
-			}
+		paths := splitCSVNonEmpty(v)
+		if len(paths) > maxAggregatedMetricPaths {
+			response.Fail(c, http.StatusBadRequest, fmt.Sprintf("metric_paths exceeds maximum of %d", maxAggregatedMetricPaths))
+			return
 		}
 		if len(paths) > 0 {
 			req.MetricPaths = paths
@@ -535,6 +536,17 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 // fillEmptyBuckets 保留 pm 包内测试入口，真实实现收敛在 aggregator 包，供页面接口和导出共用。
 func fillEmptyBuckets(rows []aggregator.Row, req aggregator.QueryRequest) []aggregator.Row {
 	return aggregator.FillEmptyBuckets(rows, req)
+}
+
+func splitCSVNonEmpty(v string) []string {
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func nilIfZeroTime(t time.Time) *time.Time {
