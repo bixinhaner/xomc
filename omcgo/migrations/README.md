@@ -130,7 +130,7 @@ docker compose exec -T postgres pg_dump -U omcgo -d omcgo \
 #    Down 用 DROP SCHEMA public CASCADE; seed 无回滚写 SELECT 1;），写入
 #    000001_init_schema.sql / seed/000001_init_seed.sql，删旧增量文件。
 
-# 6. 验证：down -v 再起，三流 goose up 全绿 + 逐表行数与 golden diff=0 + 全栈三皮肤 200。
+# 6. 验证：down -v 再起，三流 goose up 全绿 + 逐表行数与 golden diff=0 + 以浏览器实际页面验收 V1 webcode UI 壳。
 ```
 
 ## 相关位置
