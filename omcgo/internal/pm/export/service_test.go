@@ -130,6 +130,20 @@ func TestService_Create_KpiQuerySourceType(t *testing.T) {
 	require.Len(t, enq.inserted, 1)
 }
 
+func TestService_Create_DeviceViewSourceType(t *testing.T) {
+	taskID := uuid.New()
+	repo := &stubRepo{createID: taskID, getTask: &Task{ID: taskID, Status: StatusPending, SourceType: SourceDeviceView}}
+	enq := &stubEnqueuer{insertID: uuid.New()}
+	svc := NewService(repo, enq)
+
+	task, err := svc.Create(context.Background(), CreateRequest{SourceType: SourceDeviceView})
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	require.NotNil(t, repo.created)
+	assert.Equal(t, SourceDeviceView, repo.created.SourceType)
+	require.Len(t, enq.inserted, 1)
+}
+
 func TestService_Create_NilJobRepo_Rejects(t *testing.T) {
 	repo := &stubRepo{}
 	svc := NewService(repo, nil)

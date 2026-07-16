@@ -265,6 +265,38 @@ func TestRunner_BuildSource_KpiQueryAutoDiscoversObjectLDNsForSkeletonExport(t *
 	assert.NotContains(t, metricDB.queries[0].sql, "metric_path", "当前指标完全没数据时也要能发现对象全集")
 }
 
+func TestRunner_BuildSource_DeviceViewUsesDashboardLikeDeviceExport(t *testing.T) {
+	start := time.Date(2026, 7, 14, 7, 0, 0, 0, time.UTC)
+	end := start.Add(30 * time.Minute)
+	params, err := json.Marshal(DashboardParams{
+		Granularity: "15min",
+		Dimension:   "device",
+		DeviceSNs:   []string{"SN1"},
+		MetricPaths: []string{"K001"},
+		StartTime:   start.Format(time.RFC3339),
+		EndTime:     end.Format(time.RFC3339),
+	})
+	require.NoError(t, err)
+
+	metricDB := &recordingExportQuerier{results: []pgx.Rows{
+		&adhocFakeRows{}, // 指标名解析无命中，列名回退指标编号。
+	}}
+	runner := NewRunner(RunnerDeps{MetricDB: metricDB})
+
+	src, _, layout, err := runner.buildSource(context.Background(), &Task{
+		ID:         uuid.New(),
+		SourceType: SourceDeviceView,
+		Params:     params,
+	})
+	require.NoError(t, err)
+
+	_, ok := src.(*dashboardDeviceSource)
+	require.True(t, ok)
+	assert.True(t, layout.IncludeCell)
+	assert.False(t, layout.IncludeMeasurementObject)
+	assert.Equal(t, "设备 SN", layout.FirstColHeader)
+}
+
 // ── 预 running 守门：payload 坏 / 缺 task_id 直接返 error，不动任务 ─────────────
 
 func TestRunner_JobType(t *testing.T) {

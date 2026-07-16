@@ -97,7 +97,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 // ── 请求/响应 DTO ─────────────────────────────────────────────────────────
 
 type createRequestDTO struct {
-	SourceType string          `json:"source_type" binding:"required,oneof=dashboard kpi_query adhoc"`
+	SourceType string          `json:"source_type" binding:"required,oneof=dashboard device_view kpi_query adhoc"`
 	Params     json.RawMessage `json:"params"`
 	TaskName   string          `json:"task_name"`
 }
@@ -151,13 +151,14 @@ func (h *Handler) Create(c *gin.Context) {
 	if len(req.Params) > 0 {
 		params = []byte(req.Params)
 	}
-	params, err := withExportLocale(params, appcontext.GetLocale(c.Request.Context()))
+	locale := appcontext.GetLocale(c.Request.Context())
+	params, err := withExportLocale(params, locale)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 	task, err := h.svc.Create(c.Request.Context(), CreateRequest{
-		TaskName:   defaultTaskName(req.TaskName, SourceType(req.SourceType)),
+		TaskName:   defaultTaskName(req.TaskName, SourceType(req.SourceType), locale),
 		SourceType: SourceType(req.SourceType),
 		Params:     params,
 		CreateUser: extractCreateUser(c),
@@ -366,16 +367,31 @@ func tasksToDTO(tasks []Task) []taskResponseDTO {
 }
 
 // defaultTaskName 任务名缺省自动生成 KPI导出_{来源}_{时间戳}。
-func defaultTaskName(name string, source SourceType) string {
+func defaultTaskName(name string, source SourceType, locale appcontext.Locale) string {
 	if name != "" {
 		return name
 	}
+	if locale == appcontext.LocaleEN {
+		label := "Dashboard"
+		if source == SourceDeviceView {
+			label = "Device_Performance_View"
+		} else if source == SourceKpiQuery {
+			label = "KPI_Query"
+		} else if source == SourceAdhoc {
+			label = "Result"
+		}
+		return "KPI_Export_" + label + "_" + time.Now().Format("20060102_150405")
+	}
+
 	label := "仪表盘"
-	if source == SourceKpiQuery {
+	if source == SourceDeviceView {
+		label = "设备性能查看"
+	} else if source == SourceKpiQuery {
 		label = "指标查询"
 	} else if source == SourceAdhoc {
 		label = "任务结果"
 	}
+
 	return "KPI导出_" + label + "_" + time.Now().Format("20060102_150405")
 }
 
