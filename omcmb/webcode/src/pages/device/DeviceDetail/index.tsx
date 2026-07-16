@@ -12,6 +12,8 @@ import {
   Descriptions,
   Dropdown,
   Empty,
+  Input,
+  Modal,
   Radio,
   Row,
   Select,
@@ -26,6 +28,7 @@ import {
 } from 'antd';
 import {
   ArrowLeftOutlined,
+  EditOutlined,
   MoreOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
@@ -34,7 +37,7 @@ import type { DataTableColumn } from '@/components/DataTable';
 import LineChart from '@/components/Charts/LineChart';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import { useSyncStatus } from '@core/hooks/api/useDeviceParameters';
-import { useDeviceBySn, useDeviceGroups, useSyncDeviceParams } from '@core/hooks/api/useDevices';
+import { useDeviceBySn, useDeviceGroups, useRenameDevice, useSyncDeviceParams } from '@core/hooks/api/useDevices';
 import { deviceParameterApi } from '@core/services/api/deviceParameterApi';
 import { deviceApi } from '@core/services/api/deviceApi';
 import { useDictionary } from '@core/hooks/api/useSystem';
@@ -573,6 +576,7 @@ const getStationFields = (
   t: ReturnType<typeof useT>,
   networkType: string,
   onResolveNameSync?: (action: 'use_lmt' | 'use_omc' | 'ignore') => void,
+  onEditOMCName?: () => void,
   renderNetworkType?: FieldItem['render'],
   locale: Locale = 'zh-CN',
 ): FieldGroup => {
@@ -591,6 +595,18 @@ const getStationFields = (
                 <Badge status="processing" />
                 <Text strong>{d.name || '-'}</Text>
                 <Text type="secondary">({t('device.nameSyncPending.omcName')})</Text>
+                {onEditOMCName && (
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<EditOutlined />}
+                    title={t('device.nameSync.editOmcName')}
+                    aria-label={t('device.nameSync.editOmcName')}
+                    onClick={onEditOMCName}
+                  >
+                    {t('common.edit')}
+                  </Button>
+                )}
               </Space>
               <Space>
                 <Text>{d.lmtDeviceName}</Text>
@@ -612,7 +628,23 @@ const getStationFields = (
             </Space>
           );
         }
-        return d.name || '-';
+        return (
+          <Space size={4}>
+            <Text>{d.name || '-'}</Text>
+            {onEditOMCName && (
+              <Button
+                type="text"
+                size="small"
+                icon={<EditOutlined />}
+                title={t('device.nameSync.editOmcName')}
+                aria-label={t('device.nameSync.editOmcName')}
+                onClick={onEditOMCName}
+              >
+                {t('common.edit')}
+              </Button>
+            )}
+          </Space>
+        );
       },
     },
     {
@@ -1304,6 +1336,9 @@ export default function DeviceDetail() {
   const { data: opStateDict } = useDictionary('op_state');
   const { data: networkTypeDict } = useDictionary('network_type');
   const syncMutation = useSyncDeviceParams();
+  const renameMutation = useRenameDevice(device?.id ?? '');
+  const [omcNameEditorOpen, setOmcNameEditorOpen] = useState(false);
+  const [omcNameDraft, setOmcNameDraft] = useState('');
   const { data: paramSyncStatus, refetch: refetchParamSyncStatus } = useSyncStatus(device?.id ?? '');
   const [quickSettingsSyncTargetPaths, setQuickSettingsSyncTargetPaths] = useState<string[]>([]);
   const quickSettingsSync = useQuickSettingsFeedbackStore((s) => (device?.id ? s.quickSettingsSyncs[device.id] : undefined));
@@ -1797,6 +1832,27 @@ export default function DeviceDetail() {
     [displayDevice?.id, message, queryClient, t]
   );
 
+  const handleOpenOMCNameEditor = useCallback(() => {
+    if (!displayDevice) return;
+    setOmcNameDraft(displayDevice.name || '');
+    setOmcNameEditorOpen(true);
+  }, [displayDevice]);
+
+  const handleRenameOMCName = useCallback(async () => {
+    const nextName = omcNameDraft.trim();
+    if (!nextName) {
+      void message.error(t('device.nameSync.omcNameRequired'));
+      return;
+    }
+    try {
+      await renameMutation.mutateAsync(nextName);
+      setOmcNameEditorOpen(false);
+      void message.success(t('device.nameSync.editOmcNameSuccess'));
+    } catch {
+      void message.error(t('common.operationFailed'));
+    }
+  }, [message, omcNameDraft, renameMutation, t]);
+
   const renderDeviceNetworkType = useCallback<FieldItem['render']>(
     (d) => {
       const label = resolveNetworkTypeLabel(d.networkType, networkTypeDict?.sysDictionaryDetails, appLocale);
@@ -1811,13 +1867,20 @@ export default function DeviceDetail() {
     const networkType = normalizeNetworkType(displayDevice.networkType);
 
     // BSC（独立 GSM 设备，paramModel === 'BSC'）按需求隐藏「状态信息」组；BTS 保留显示。
-    const groups: FieldGroup[] = [getStationFields(t, networkType, handleResolveNameSync, renderDeviceNetworkType, appLocale)];
+    const groups: FieldGroup[] = [getStationFields(
+      t,
+      networkType,
+      handleResolveNameSync,
+      handleOpenOMCNameEditor,
+      renderDeviceNetworkType,
+      appLocale,
+    )];
     if (!detailResolved.isBSC) {
       groups.push(getStatusFields(t, networkType));
     }
     groups.push(getOtherFields(t, networkType, displayDevice));
     return groups;
-  }, [appLocale, detailResolved.isBSC, displayDevice, handleResolveNameSync, renderDeviceNetworkType, t]);
+  }, [appLocale, detailResolved.isBSC, displayDevice, handleOpenOMCNameEditor, handleResolveNameSync, renderDeviceNetworkType, t]);
 
   const cellGroup = useMemo((): FieldGroup | null => {
     if (!displayDevice) return null;
@@ -2129,6 +2192,26 @@ export default function DeviceDetail() {
           ]}
         />
       </Card>
+
+      <Modal
+        title={t('device.nameSync.editOmcName')}
+        open={omcNameEditorOpen}
+        okText={t('common.save')}
+        cancelText={t('common.cancel')}
+        confirmLoading={renameMutation.isPending}
+        onOk={() => void handleRenameOMCName()}
+        onCancel={() => setOmcNameEditorOpen(false)}
+        destroyOnHidden
+      >
+        <Input
+          value={omcNameDraft}
+          maxLength={128}
+          autoFocus
+          placeholder={t('device.nameSync.omcNamePlaceholder')}
+          onChange={(event) => setOmcNameDraft(event.target.value)}
+          onPressEnter={() => void handleRenameOMCName()}
+        />
+      </Modal>
 
       <AlarmDetail alarm={detailAlarm} open={detailOpen} onClose={handleCloseAlarmDetail} />
       <ConfirmWithNoteModal
