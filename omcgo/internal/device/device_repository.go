@@ -242,6 +242,21 @@ type DeviceWriter interface {
 	PermanentDelete(ctx context.Context, ids []uuid.UUID) (int64, error)
 }
 
+type RecycleType string
+
+const (
+	RecycleTypeManual RecycleType = "manual"
+	RecycleTypeAuto   RecycleType = "auto"
+)
+
+// RecycleMetadata separates the business account shown in the recycle bin
+// from the process that actually executed the soft delete.
+type RecycleMetadata struct {
+	DeletedBy string
+	Type      RecycleType
+	Executor  string
+}
+
 // DeviceRepository defines the full interface for device persistence.
 // It composes smaller interfaces for backward compatibility.
 //
@@ -505,6 +520,16 @@ func (r *PgDeviceRepository) Delete(ctx context.Context, id uuid.UUID) error {
 // bin can still display historical group and extended info.
 // Returns the number of devices actually soft-deleted.
 func (r *PgDeviceRepository) BatchDelete(ctx context.Context, ids []uuid.UUID, deletedBy string) (int64, error) {
+	return r.BatchDeleteWithMetadata(ctx, ids, RecycleMetadata{
+		DeletedBy: deletedBy,
+		Type:      RecycleTypeManual,
+		Executor:  deletedBy,
+	})
+}
+
+// BatchDeleteWithMetadata soft-deletes devices while preserving how the move
+// was initiated and which actor/process executed it.
+func (r *PgDeviceRepository) BatchDeleteWithMetadata(ctx context.Context, ids []uuid.UUID, metadata RecycleMetadata) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil
 	}
@@ -521,8 +546,10 @@ func (r *PgDeviceRepository) BatchDelete(ctx context.Context, ids []uuid.UUID, d
 	// Soft-delete devices with metadata
 	now := time.Now()
 	tag, err := tx.Exec(ctx,
-		`UPDATE devices SET deleted_at = $1, deleted_by = $2 WHERE id = ANY($3) AND deleted_at IS NULL`,
-		now, deletedBy, ids,
+		`UPDATE devices
+		 SET deleted_at = $1, deleted_by = $2, recycle_type = $3, recycle_executor = $4
+		 WHERE id = ANY($5) AND deleted_at IS NULL`,
+		now, metadata.DeletedBy, metadata.Type, metadata.Executor, ids,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("soft delete devices: %w", err)
@@ -867,6 +894,7 @@ func deviceColumns() []string {
 		"d.last_boot_at", "d.boot_count",
 		"d.inform_interval", "d.site_name", "d.site_id", "d.latitude", "d.longitude",
 		"d.extension_data", "d.created_at", "d.updated_at", "d.deleted_at", "d.deleted_by",
+		"d.recycle_type", "d.recycle_executor",
 		"d.last_param_sync_at",
 		"d.last_param_sync_failed_at", "d.last_param_sync_error", // migration 000142
 		"d.last_offline_reason", // T-0173: 离线原因诊断列（migration 000184）
@@ -885,7 +913,7 @@ func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 	// nullable string columns from devices table
 	var productClass, manufacturer, modelName *string
 	var firmwareVersion, connReqURL, siteName, siteID *string
-	var deletedBy *string
+	var deletedBy, recycleType, recycleExecutor *string
 
 	err := row.Scan(
 		&d.ID, &d.SerialNumber, &d.OUI, &productClass, &manufacturer, &modelName,
@@ -898,6 +926,7 @@ func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 		&d.LastBootAt, &d.BootCount,
 		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
 		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
+		&recycleType, &recycleExecutor,
 		&d.LastParamSyncAt,
 		&d.LastParamSyncFailedAt, &d.LastParamSyncError, // migration 000142
 		&d.LastOfflineReason, // T-0173: 离线原因（migration 000184)
@@ -908,6 +937,12 @@ func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 
 	if deletedBy != nil {
 		d.DeletedBy = *deletedBy
+	}
+	if recycleType != nil {
+		d.RecycleType = *recycleType
+	}
+	if recycleExecutor != nil {
+		d.RecycleExecutor = *recycleExecutor
 	}
 
 	if productClass != nil {
@@ -962,7 +997,7 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 	var ipAddr, udpAddr *string
 	// nullable string columns from devices table
 	var productClass, manufacturer, modelName *string
-	var firmwareVersion, connReqURL, siteName, siteID, deletedBy *string
+	var firmwareVersion, connReqURL, siteName, siteID, deletedBy, recycleType, recycleExecutor *string
 
 	err := rows.Scan(
 		&d.ID, &d.SerialNumber, &d.OUI, &productClass, &manufacturer, &modelName,
@@ -975,6 +1010,7 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 		&d.LastBootAt, &d.BootCount,
 		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
 		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
+		&recycleType, &recycleExecutor,
 		&d.LastParamSyncAt,
 		&d.LastParamSyncFailedAt, &d.LastParamSyncError, // migration 000142
 		&d.LastOfflineReason, // T-0173: 离线原因（migration 000184)
@@ -982,6 +1018,12 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 
 	if deletedBy != nil {
 		d.DeletedBy = *deletedBy
+	}
+	if recycleType != nil {
+		d.RecycleType = *recycleType
+	}
+	if recycleExecutor != nil {
+		d.RecycleExecutor = *recycleExecutor
 	}
 	if err != nil {
 		return nil, err
@@ -1484,6 +1526,7 @@ func recycleBinSelectColumns() []string {
 		"d.last_boot_at", "d.boot_count",
 		"d.inform_interval", "d.site_name", "d.site_id", "d.latitude", "d.longitude",
 		"d.extension_data", "d.created_at", "d.updated_at", "d.deleted_at", "d.deleted_by",
+		"d.recycle_type", "d.recycle_executor",
 		"d.last_offline_reason",
 		// device_groups columns
 		"dg.id as group_id",
@@ -1524,25 +1567,26 @@ func recycleBinSelectColumns() []string {
 				THEN EXTRACT(EPOCH FROM (di.last_offline_time - di.last_online_time))::bigint
 			ELSE NULL
 		END AS online_duration`,
-		// 离线时长计算
+		// 回收时的离线时长快照：以 deleted_at - last_inform_at 计算，
+		// 避免记录进入回收站后继续随 NOW() 增长。
 		`CASE
-			WHEN d.lifecycle_state = 'commissioned' AND d.is_online = FALSE AND di.last_offline_time IS NOT NULL
-			THEN EXTRACT(EPOCH FROM (NOW() - di.last_offline_time))::bigint
+			WHEN d.deleted_at IS NOT NULL AND d.last_inform_at IS NOT NULL
+			THEN GREATEST(EXTRACT(EPOCH FROM (d.deleted_at - d.last_inform_at)), 0)::bigint
 			ELSE NULL
 		END AS offline_seconds`,
 		`CASE
-			WHEN d.lifecycle_state = 'commissioned' AND d.is_online = FALSE AND di.last_offline_time IS NOT NULL
-			THEN FLOOR(EXTRACT(EPOCH FROM (NOW() - di.last_offline_time)) / 86400)::bigint
+			WHEN d.deleted_at IS NOT NULL AND d.last_inform_at IS NOT NULL
+			THEN FLOOR(GREATEST(EXTRACT(EPOCH FROM (d.deleted_at - d.last_inform_at)), 0) / 86400)::bigint
 			ELSE NULL
 		END AS offline_days`,
 		`CASE
-			WHEN d.lifecycle_state = 'commissioned' AND d.is_online = FALSE AND di.last_offline_time IS NOT NULL
-			THEN FLOOR((EXTRACT(EPOCH FROM (NOW() - di.last_offline_time)) % 86400) / 3600)::bigint
+			WHEN d.deleted_at IS NOT NULL AND d.last_inform_at IS NOT NULL
+			THEN FLOOR((GREATEST(EXTRACT(EPOCH FROM (d.deleted_at - d.last_inform_at)), 0) % 86400) / 3600)::bigint
 			ELSE NULL
 		END AS offline_hours`,
 		`CASE
-			WHEN d.lifecycle_state = 'commissioned' AND d.is_online = FALSE AND di.last_offline_time IS NOT NULL
-			THEN FLOOR((EXTRACT(EPOCH FROM (NOW() - di.last_offline_time)) % 3600) / 60)::bigint
+			WHEN d.deleted_at IS NOT NULL AND d.last_inform_at IS NOT NULL
+			THEN FLOOR((GREATEST(EXTRACT(EPOCH FROM (d.deleted_at - d.last_inform_at)), 0) % 3600) / 60)::bigint
 			ELSE NULL
 		END AS offline_minutes`,
 		"NULL::int AS active_alarm_count", // Placeholder for compatibility
@@ -1701,7 +1745,8 @@ func (r *PgDeviceRepository) RestoreDevices(ctx context.Context, ids []uuid.UUID
 	// 1) 恢复——NOT EXISTS 守卫排除会撞部分唯一索引的冲突行。RETURNING 拿恢复 id。
 	rows, err := r.pool.Query(ctx,
 		`UPDATE devices d
-		    SET deleted_at = NULL, deleted_by = '', updated_at = NOW()
+		    SET deleted_at = NULL, deleted_by = '', recycle_type = '',
+		        recycle_executor = '', updated_at = NOW()
 		  WHERE d.id = ANY($1)
 		    AND d.deleted_at IS NOT NULL
 		    AND NOT EXISTS (

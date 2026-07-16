@@ -807,6 +807,7 @@ func deviceWithInfoSelectColumns() []string {
 		"d.last_boot_at", "d.boot_count",
 		"d.inform_interval", "d.site_name", "d.site_id", "d.latitude", "d.longitude",
 		"d.extension_data", "d.created_at", "d.updated_at", "d.deleted_at", "d.deleted_by",
+		"d.recycle_type", "d.recycle_executor",
 		"d.last_offline_reason", // T-0173: 离线原因诊断（migration 000184)
 		// device_groups columns
 		"dg.id as group_id",
@@ -982,7 +983,7 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	// nullable string columns from devices table
 	var productClass, manufacturer, modelName *string
 	var firmwareVersion, connReqURL, siteName, siteID *string
-	var deletedBy *string
+	var deletedBy, recycleType, recycleExecutor *string
 
 	// device_info nullable fields
 	var (
@@ -1062,6 +1063,7 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		&d.LastBootAt, &d.BootCount,
 		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
 		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
+		&recycleType, &recycleExecutor,
 		&d.LastOfflineReason, // T-0173: 离线原因（migration 000184)
 		// device_groups field (nullable from LEFT JOIN)
 		&d.GroupID,
@@ -1099,6 +1101,12 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	// Assign nullable devices fields
 	if deletedBy != nil {
 		d.DeletedBy = *deletedBy
+	}
+	if recycleType != nil {
+		d.RecycleType = *recycleType
+	}
+	if recycleExecutor != nil {
+		d.RecycleExecutor = *recycleExecutor
 	}
 	if productClass != nil {
 		d.ProductClass = *productClass

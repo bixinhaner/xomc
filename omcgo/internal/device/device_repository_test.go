@@ -377,3 +377,14 @@ func TestBuildRecycleBinListBuilders_SearchIncludesMACInListAndCount(t *testing.
 	assert.Equal(t, []interface{}{"%48:BF%", "%48:BF%", "%48:BF%"}, listArgs)
 	assert.Equal(t, listArgs, countArgs)
 }
+
+func TestRecycleBinSelectColumns_ExposeStableRecycleMetadata(t *testing.T) {
+	joined := strings.Join(recycleBinSelectColumns(), "\n")
+
+	assert.Contains(t, joined, "d.recycle_type")
+	assert.Contains(t, joined, "d.recycle_executor")
+	assert.Contains(t, joined, "d.deleted_at - d.last_inform_at",
+		"离线时长必须固定在移入回收站时刻，不能随查询时间继续增长")
+	assert.NotContains(t, joined, "NOW() - di.last_offline_time",
+		"回收站离线时长不得使用当前时间动态重算")
+}
