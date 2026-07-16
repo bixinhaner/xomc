@@ -5162,7 +5162,7 @@ CREATE TABLE public.parameter_sync_outbox (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT parameter_sync_outbox_attempt_chk CHECK ((attempt_count >= 0)),
-    CONSTRAINT parameter_sync_outbox_status_chk CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'delivering'::character varying, 'delivered'::character varying, 'failed'::character varying, 'dead'::character varying])::text[])))
+    CONSTRAINT parameter_sync_outbox_status_chk CHECK (status IN ('pending', 'delivering', 'delivered', 'failed', 'dead'))
 );
 
 
@@ -5177,7 +5177,7 @@ CREATE TABLE public.parameter_sync_request_bindings (
     status character varying(24) DEFAULT 'waiting'::character varying NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     completed_at timestamp with time zone,
-    CONSTRAINT parameter_sync_bindings_status_chk CHECK (((status)::text = ANY ((ARRAY['waiting'::character varying, 'completed'::character varying, 'failed'::character varying, 'cancelled'::character varying])::text[])))
+    CONSTRAINT parameter_sync_bindings_status_chk CHECK (status IN ('waiting', 'completed', 'failed', 'cancelled'))
 );
 
 
@@ -5208,9 +5208,9 @@ CREATE TABLE public.parameter_sync_requests (
     started_at timestamp with time zone,
     completed_at timestamp with time zone,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT parameter_sync_requests_scope_chk CHECK (((sync_scope)::text = ANY ((ARRAY['full'::character varying, 'partial'::character varying, 'readback'::character varying, 'policy_probe'::character varying])::text[]))),
-    CONSTRAINT parameter_sync_requests_status_chk CHECK (((status)::text = ANY ((ARRAY['accepted'::character varying, 'queued'::character varying, 'running'::character varying, 'succeeded'::character varying, 'failed'::character varying, 'timed_out'::character varying, 'cancelled'::character varying, 'deduplicated'::character varying, 'rejected'::character varying])::text[]))),
-    CONSTRAINT parameter_sync_requests_trigger_reason_chk CHECK (((trigger_reason)::text = ANY ((ARRAY['bootstrap'::character varying, 'model_upload'::character varying, 'device_online'::character varying, 'firmware_changed'::character varying, 'periodic'::character varying, 'manual'::character varying, 'config_pull'::character varying, 'license'::character varying, 'spv_readback'::character varying, 'add_object_readback'::character varying, 'inform_period_probe'::character varying])::text[])))
+    CONSTRAINT parameter_sync_requests_scope_chk CHECK (sync_scope IN ('full', 'partial', 'readback', 'policy_probe')),
+    CONSTRAINT parameter_sync_requests_status_chk CHECK (status IN ('accepted', 'queued', 'running', 'succeeded', 'failed', 'timed_out', 'cancelled', 'deduplicated', 'rejected')),
+    CONSTRAINT parameter_sync_requests_trigger_reason_chk CHECK (trigger_reason IN ('bootstrap', 'model_upload', 'device_online', 'firmware_changed', 'periodic', 'manual', 'config_pull', 'license', 'spv_readback', 'add_object_readback', 'inform_period_probe'))
 );
 
 
@@ -5245,9 +5245,9 @@ CREATE TABLE public.parameter_sync_runs (
     projection_lease_until timestamp with time zone,
     projection_next_attempt_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT parameter_sync_runs_counts_chk CHECK (((expected_task_count >= 0) AND (terminal_task_count >= 0) AND (processed_task_count >= 0) AND (failed_task_count >= 0) AND (terminal_task_count <= expected_task_count) AND (processed_task_count <= terminal_task_count) AND (failed_task_count <= processed_task_count))),
-    CONSTRAINT parameter_sync_runs_scope_chk CHECK (((sync_scope)::text = ANY ((ARRAY['full'::character varying, 'partial'::character varying, 'readback'::character varying, 'policy_probe'::character varying])::text[]))),
-    CONSTRAINT parameter_sync_runs_status_chk CHECK (((status)::text = ANY ((ARRAY['planning'::character varying, 'enqueuing'::character varying, 'waiting_device'::character varying, 'executing'::character varying, 'processing'::character varying, 'cancelling'::character varying, 'succeeded'::character varying, 'failed'::character varying, 'cancelled'::character varying])::text[]))),
-    CONSTRAINT parameter_sync_runs_trigger_reason_chk CHECK (((trigger_reason)::text = ANY ((ARRAY['bootstrap'::character varying, 'model_upload'::character varying, 'device_online'::character varying, 'firmware_changed'::character varying, 'periodic'::character varying, 'manual'::character varying, 'config_pull'::character varying, 'license'::character varying, 'spv_readback'::character varying, 'add_object_readback'::character varying, 'inform_period_probe'::character varying])::text[])))
+    CONSTRAINT parameter_sync_runs_scope_chk CHECK (sync_scope IN ('full', 'partial', 'readback', 'policy_probe')),
+    CONSTRAINT parameter_sync_runs_status_chk CHECK (status IN ('planning', 'enqueuing', 'waiting_device', 'executing', 'processing', 'cancelling', 'succeeded', 'failed', 'cancelled')),
+    CONSTRAINT parameter_sync_runs_trigger_reason_chk CHECK (trigger_reason IN ('bootstrap', 'model_upload', 'device_online', 'firmware_changed', 'periodic', 'manual', 'config_pull', 'license', 'spv_readback', 'add_object_readback', 'inform_period_probe'))
 );
 
 
@@ -5286,7 +5286,7 @@ CREATE TABLE public.parameter_sync_task_results (
     error_message text,
     processed_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT parameter_sync_task_results_status_chk CHECK (((status)::text = ANY ((ARRAY['received'::character varying, 'processed'::character varying, 'failed'::character varying])::text[])))
+    CONSTRAINT parameter_sync_task_results_status_chk CHECK (status IN ('received', 'processed', 'failed'))
 );
 
 
@@ -13621,7 +13621,7 @@ CREATE INDEX idx_parameter_sync_device_state_due ON public.parameter_sync_device
 -- Name: idx_parameter_sync_outbox_dispatch; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_parameter_sync_outbox_dispatch ON public.parameter_sync_outbox USING btree (status, next_attempt_at, created_at) WHERE ((status)::text = ANY ((ARRAY['pending'::character varying, 'failed'::character varying])::text[]));
+CREATE INDEX idx_parameter_sync_outbox_dispatch ON public.parameter_sync_outbox USING btree (status, next_attempt_at, created_at) WHERE status IN ('pending', 'failed');
 
 
 --
@@ -14790,7 +14790,7 @@ CREATE UNIQUE INDEX uq_mml_scripts_import_session_id ON public.mml_scripts USING
 -- Name: uq_mml_tasks_active_root_script; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_mml_tasks_active_root_script ON public.mml_tasks USING btree (script_id) WHERE ((script_id IS NOT NULL) AND (parent_task_id IS NULL) AND ((status)::text = ANY ((ARRAY['pending'::character varying, 'running'::character varying, 'paused'::character varying])::text[])));
+CREATE UNIQUE INDEX uq_mml_tasks_active_root_script ON public.mml_tasks USING btree (script_id) WHERE script_id IS NOT NULL AND parent_task_id IS NULL AND status IN ('pending', 'running', 'paused');
 
 
 --
@@ -14818,7 +14818,7 @@ CREATE UNIQUE INDEX uq_parameter_sync_requests_idempotency ON public.parameter_s
 -- Name: uq_parameter_sync_runs_active_device; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_parameter_sync_runs_active_device ON public.parameter_sync_runs USING btree (device_id) WHERE ((status)::text = ANY ((ARRAY['planning'::character varying, 'enqueuing'::character varying, 'waiting_device'::character varying, 'executing'::character varying, 'processing'::character varying, 'cancelling'::character varying])::text[]));
+CREATE UNIQUE INDEX uq_parameter_sync_runs_active_device ON public.parameter_sync_runs USING btree (device_id) WHERE status IN ('planning', 'enqueuing', 'waiting_device', 'executing', 'processing', 'cancelling');
 
 
 --
@@ -18615,6 +18615,10 @@ ALTER TABLE ONLY public.users
 SELECT pg_catalog.set_config('search_path', 'public', false);
 -- +goose Down
 -- +goose StatementBegin
+CREATE SCHEMA goose_baseline_meta;
+ALTER TABLE public.goose_db_version SET SCHEMA goose_baseline_meta;
 DROP SCHEMA IF EXISTS public CASCADE;
 CREATE SCHEMA public;
+ALTER TABLE goose_baseline_meta.goose_db_version SET SCHEMA public;
+DROP SCHEMA goose_baseline_meta;
 -- +goose StatementEnd
