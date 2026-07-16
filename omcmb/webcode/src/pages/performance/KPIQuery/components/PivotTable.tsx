@@ -7,7 +7,7 @@
  * 动态右列：用户选的 N 个指标。缺采单元格显示 "-"。
  */
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Table, Empty, Typography } from 'antd';
 import type { ColumnsType, ColumnType } from 'antd/es/table';
 import { Resizable, type ResizeCallbackData } from 'react-resizable';
@@ -40,6 +40,8 @@ const FIXED_COL_WIDTHS = {
 
 // 拖拽时的最小列宽，避免拖没了
 const MIN_COL_WIDTH = 60;
+const MIN_TABLE_BODY_HEIGHT = 180;
+const TABLE_FOOTER_HEIGHT = 80;
 
 // 指标列标题宽度估算：字体 14px，英文/数字/标点 ≈ 8px，中文 ≈ 14px；左右 padding 共 32px。
 function estimateMetricColWidth(title: string): number {
@@ -108,6 +110,8 @@ function ResizableTitle({ width, onResize, ...restProps }: ResizableTitleProps) 
 export default function PivotTable({ rows, loading, emptyDescription }: PivotTableProps) {
   const t = useT();
   const pivoted = useMemo(() => pivotLongToWide(rows), [rows]);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [tableBodyHeight, setTableBodyHeight] = useState(MIN_TABLE_BODY_HEIGHT);
 
   const userId = useUserStore((s) => s.currentUser?.id);
   const storageKey = useMemo(() => storageKeyOf(userId), [userId]);
@@ -119,6 +123,21 @@ export default function PivotTable({ rows, loading, emptyDescription }: PivotTab
     setPrevStorageKey(storageKey);
     setWidths(loadWidths(storageKey));
   }
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return undefined;
+
+    const updateHeight = () => {
+      const next = Math.max(MIN_TABLE_BODY_HEIGHT, el.clientHeight - TABLE_FOOTER_HEIGHT);
+      setTableBodyHeight(next);
+    };
+    updateHeight();
+
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const handleResize = useCallback(
     (key: string) => (_e: React.SyntheticEvent, { size }: ResizeCallbackData) => {
@@ -203,21 +222,25 @@ export default function PivotTable({ rows, loading, emptyDescription }: PivotTab
 
   if (!loading && pivoted.rows.length === 0) {
     return (
-      <Empty
-        description={
-          emptyDescription ?? (
-            <Text type="secondary">{t('perf.kpiQuery.pivot.emptyHint')}</Text>
-          )
-        }
-        style={{ padding: '60px 0' }}
-      />
+      <div
+        ref={containerRef}
+        style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      >
+        <Empty
+          description={
+            emptyDescription ?? (
+              <Text type="secondary">{t('perf.kpiQuery.pivot.emptyHint')}</Text>
+            )
+          }
+        />
+      </div>
     );
   }
 
   // antd 默认 scroll.x 行为：container > totalWidth 时按列 width 比例拉伸；container < totalWidth 时严格 width + 横滚。
   // macOS 默认 overlay scrollbar 太淡用户看不见，强制 webkit scrollbar 加深可见。
   return (
-    <>
+    <div ref={containerRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
       <style>{`
         .kpi-pivot-table .ant-table-body::-webkit-scrollbar,
         .kpi-pivot-table .ant-table-content::-webkit-scrollbar {
@@ -244,6 +267,9 @@ export default function PivotTable({ rows, loading, emptyDescription }: PivotTab
           cursor: col-resize;
           touch-action: none;
         }
+        .kpi-pivot-table {
+          height: 100%;
+        }
       `}</style>
       <Table<PivotRow>
         className="kpi-pivot-table"
@@ -255,9 +281,9 @@ export default function PivotTable({ rows, loading, emptyDescription }: PivotTab
         dataSource={pivoted.rows}
         pagination={{ defaultPageSize: 50, showSizeChanger: true, showTotal: (count) => t('perf.kpiQuery.pivot.totalRows', { count }) }}
         tableLayout="fixed"
-        scroll={{ x: totalWidth }}
+        scroll={{ x: totalWidth, y: tableBodyHeight }}
         bordered
       />
-    </>
+    </div>
   );
 }

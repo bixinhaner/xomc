@@ -696,10 +696,36 @@ export default function KPIQuery() {
         </div>
       )}
       <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: 16, height: '100%', overflow: 'auto' }}>
+      <div
+        style={{
+          padding: 16,
+          height: '100%',
+          minHeight: 0,
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+        }}
+      >
         <Card
           size="small"
-          style={{ marginBottom: 12 }}
+          style={{
+            flex: '0 1 auto',
+            maxHeight: '45%',
+            minHeight: 0,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+          styles={{
+            body: {
+              flex: 1,
+              minHeight: 0,
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+            },
+          }}
           title={
             <Space>
               <TableOutlined />
@@ -707,103 +733,105 @@ export default function KPIQuery() {
             </Space>
           }
         >
-          <Form layout="vertical" size="middle">
-            <Space wrap size="middle" align="start">
-              <Form.Item label={t('perf.kpiQuery.deviceType')} style={{ marginBottom: 0 }}>
-                <Select
-                  style={{ width: 120 }}
-                  value={payload.deviceType}
-                  onChange={(v) => setPayload({ ...payload, deviceType: v })}
-                  options={DEVICE_TYPE_OPTIONS}
-                />
-              </Form.Item>
-
-              <Form.Item label={t('perf.kpiQuery.device')} style={{ marginBottom: 0 }}>
-                <Space.Compact style={{ width: 360 }}>
-                  <Input
-                    readOnly
-                    value={
-                      payload.deviceSns.length === 0
-                        ? ''
-                        : t('perf.kpiQuery.selectedSummary', {
-                            count: payload.deviceSns.length,
-                            items: payload.deviceSns.slice(0, 2).join(', ') + (payload.deviceSns.length > 2 ? ' ...' : ''),
-                          })
-                    }
-                    placeholder={t('perf.kpiQuery.selectDevicePlaceholder')}
-                  />
-                  <Button onClick={() => { setPickerTarget('main'); setDevicePickerOpen(true); }}>{t('perf.kpiQuery.pickFromList')}</Button>
-                </Space.Compact>
-              </Form.Item>
-
-              <Form.Item label={t('perf.kpiQuery.metric')} style={{ marginBottom: 0 }}>
-                <Space.Compact style={{ width: 360 }}>
-                  <Input
-                    readOnly
-                    value={metricSummary(payload.metricPaths, 2)}
-                    placeholder={t('perf.kpiQuery.selectMetricPlaceholder')}
-                  />
-                  <Button onClick={() => { setPickerTarget('main'); setMetricPickerOpen(true); }}>{t('perf.kpiQuery.pickFromList')}</Button>
-                </Space.Compact>
-              </Form.Item>
-
-              <Form.Item label={t('perf.granularity')} style={{ marginBottom: 0 }}>
-                <Radio.Group
-                  value={payload.granularity}
-                  onChange={(e) => {
-                    const g = e.target.value as Granularity;
-                    const next: QueryTemplatePayload = { ...payload, granularity: g };
-                    // #595: 粒度切换时，若用户未手动修改过时间范围，自动联动
-                    if (!timeRangeDirty) {
-                      next.timeRangePreset = getDefaultTimeRangeForGranularity(g);
-                    }
-                    setPayload(next);
-                  }}
-                  options={granularityOptions}
-                  optionType="button"
-                  buttonStyle="solid"
-                />
-              </Form.Item>
-
-              <Form.Item label={t('perf.kpiQuery.timeRange')} style={{ marginBottom: 0 }}>
-                <Space>
+          <Form layout="vertical" size="middle" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ flex: 1, minHeight: 0, overflow: 'auto', paddingRight: 4 }}>
+              <Space wrap size="middle" align="start">
+                <Form.Item label={t('perf.kpiQuery.deviceType')} style={{ marginBottom: 0 }}>
                   <Select
-                    style={{ width: 140 }}
-                    value={payload.timeRangePreset}
-                    onChange={(v) => {
-                      setPayload({ ...payload, timeRangePreset: v });
-                      setTimeRangeDirty(true);
-                    }}
-                    options={timeRangeOptions}
-                    suffixIcon={<ClockCircleOutlined />}
+                    style={{ width: 120 }}
+                    value={payload.deviceType}
+                    onChange={(v) => setPayload({ ...payload, deviceType: v })}
+                    options={DEVICE_TYPE_OPTIONS}
                   />
-                  {payload.timeRangePreset === 'custom' && (
-                    <RangePicker
-                      showTime
-                      value={customRange}
+                </Form.Item>
+
+                <Form.Item label={t('perf.kpiQuery.device')} style={{ marginBottom: 0 }}>
+                  <Space.Compact style={{ width: 360 }}>
+                    <Input
+                      readOnly
+                      value={
+                        payload.deviceSns.length === 0
+                          ? ''
+                          : t('perf.kpiQuery.selectedSummary', {
+                              count: payload.deviceSns.length,
+                              items: payload.deviceSns.slice(0, 2).join(', ') + (payload.deviceSns.length > 2 ? ' ...' : ''),
+                            })
+                      }
+                      placeholder={t('perf.kpiQuery.selectDevicePlaceholder')}
+                    />
+                    <Button onClick={() => { setPickerTarget('main'); setDevicePickerOpen(true); }}>{t('perf.kpiQuery.pickFromList')}</Button>
+                  </Space.Compact>
+                </Form.Item>
+
+                <Form.Item label={t('perf.kpiQuery.metric')} style={{ marginBottom: 0 }}>
+                  <Space.Compact style={{ width: 360 }}>
+                    <Input
+                      readOnly
+                      value={metricSummary(payload.metricPaths, 2)}
+                      placeholder={t('perf.kpiQuery.selectMetricPlaceholder')}
+                    />
+                    <Button onClick={() => { setPickerTarget('main'); setMetricPickerOpen(true); }}>{t('perf.kpiQuery.pickFromList')}</Button>
+                  </Space.Compact>
+                </Form.Item>
+
+                <Form.Item label={t('perf.granularity')} style={{ marginBottom: 0 }}>
+                  <Radio.Group
+                    value={payload.granularity}
+                    onChange={(e) => {
+                      const g = e.target.value as Granularity;
+                      const next: QueryTemplatePayload = { ...payload, granularity: g };
+                      // #595: 粒度切换时，若用户未手动修改过时间范围，自动联动
+                      if (!timeRangeDirty) {
+                        next.timeRangePreset = getDefaultTimeRangeForGranularity(g);
+                      }
+                      setPayload(next);
+                    }}
+                    options={granularityOptions}
+                    optionType="button"
+                    buttonStyle="solid"
+                  />
+                </Form.Item>
+
+                <Form.Item label={t('perf.kpiQuery.timeRange')} style={{ marginBottom: 0 }}>
+                  <Space>
+                    <Select
+                      style={{ width: 140 }}
+                      value={payload.timeRangePreset}
                       onChange={(v) => {
-                        setCustomRange(v as [dayjs.Dayjs, dayjs.Dayjs] | null);
+                        setPayload({ ...payload, timeRangePreset: v });
                         setTimeRangeDirty(true);
                       }}
+                      options={timeRangeOptions}
+                      suffixIcon={<ClockCircleOutlined />}
                     />
-                  )}
-                </Space>
-              </Form.Item>
-            </Space>
+                    {payload.timeRangePreset === 'custom' && (
+                      <RangePicker
+                        showTime
+                        value={customRange}
+                        onChange={(v) => {
+                          setCustomRange(v as [dayjs.Dayjs, dayjs.Dayjs] | null);
+                          setTimeRangeDirty(true);
+                        }}
+                      />
+                    )}
+                  </Space>
+                </Form.Item>
+              </Space>
 
-            {/* #619：测量对象下钻选择器（选完设备后可选过滤小区） */}
-            {payload.deviceSns.length > 0 && (
-              <div style={{ marginTop: 12 }}>
-                <CellDrilldownSelector
-                  deviceSns={payload.deviceSns}
-                  technology={payload.deviceType ? deviceTypeToNetworkTech(payload.deviceType) : undefined}
-                  value={cellSel}
-                  onChange={setCellSel}
-                />
-              </div>
-            )}
+              {/* #619：测量对象下钻选择器（选完设备后可选过滤小区） */}
+              {payload.deviceSns.length > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <CellDrilldownSelector
+                    deviceSns={payload.deviceSns}
+                    technology={payload.deviceType ? deviceTypeToNetworkTech(payload.deviceType) : undefined}
+                    value={cellSel}
+                    onChange={setCellSel}
+                  />
+                </div>
+              )}
+            </div>
 
-            <div style={{ marginTop: 16, borderTop: `1px dashed ${token.colorBorderSecondary}`, paddingTop: 12 }}>
+            <div style={{ flexShrink: 0, marginTop: 12, borderTop: `1px dashed ${token.colorBorderSecondary}`, paddingTop: 12 }}>
               <Space>
                 <Button type="primary" icon={<TableOutlined />} loading={aggFetching} onClick={handleQuery}>
                   {t('common.query')}
@@ -843,7 +871,7 @@ export default function KPIQuery() {
           <Alert
             type="warning"
             showIcon
-            style={{ marginBottom: 12 }}
+            style={{ flexShrink: 0 }}
             message={intl.formatMessage(
               { id: 'perf.dashboard.truncatedTip' },
               { shown: aggregatedRows.length, total: aggTotal },
@@ -851,7 +879,20 @@ export default function KPIQuery() {
           />
         ) : null}
 
-        <Card size="small" title={<span><TableOutlined /> {t('perf.kpiQuery.queryResults')}</span>}>
+        <Card
+          size="small"
+          title={<span><TableOutlined /> {t('perf.kpiQuery.queryResults')}</span>}
+          style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
+          styles={{
+            body: {
+              flex: 1,
+              minHeight: 0,
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+            },
+          }}
+        >
           <PivotTable
             rows={aggregatedRows}
             loading={aggLoading || aggFetching}
