@@ -15,18 +15,24 @@ package provision
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/task"
 	"go.uber.org/zap"
 )
 
 // HNBName 标准路径（取第一个小区 FAPService.1）。
-// 4G LTE 和 5G NR 通用：设备私有路径由 Translator 自动翻译。
+// 4G LTE 名称使用 HNBName；5G NR 名称使用 gNBName，读取时通过
+// getLMTDeviceName 的候选路径统一处理。
 const hnbNameStandardPath = "Device.Services.FAPService.1.AccessMgmt.LTE.HNBName"
+
+const gnbNameStandardPath = "Device.Services.FAPService.1.FAPControl.NR.RAN.Common.gNBName"
 
 // 配置键名（category = "device"）
 //
@@ -42,7 +48,7 @@ const (
 const (
 	NameSyncModeAutoLMTToOMC = "auto_lmt_to_omc" // 自动修改：LMT 名称覆盖网管
 	NameSyncModeAutoOMCToLMT = "auto_omc_to_lmt" // 自动修改：网管名称下发到 LMT
-	NameSyncModePrompt       = "prompt"           // 仅提示：标记待人工确认，不自动改（默认）
+	NameSyncModePrompt       = "prompt"          // 仅提示：标记待人工确认，不自动改（默认）
 )
 
 // 同步方向常量（内部使用，标准路径翻译等仍按方向区分）。
@@ -80,6 +86,47 @@ type DeviceNameSPVSender interface {
 	// SendNameToDevice 向设备下发 HNBName 参数。
 	// path 是设备私有路径（已由 Translator 翻译）。
 	SendNameToDevice(ctx context.Context, dev *model.Device, privatePath, name string) error
+}
+
+// DeviceNameTaskSender 通过 device_tasks 入队 SetParameterValues 名称下发任务。
+type DeviceNameTaskSender struct {
+	taskSvc task.Enqueuer
+}
+
+func NewDeviceNameTaskSender(taskSvc task.Enqueuer) *DeviceNameTaskSender {
+	return &DeviceNameTaskSender{taskSvc: taskSvc}
+}
+
+func (s *DeviceNameTaskSender) SendNameToDevice(ctx context.Context, dev *model.Device, path, name string) error {
+	if s == nil || s.taskSvc == nil {
+		return fmt.Errorf("task service not configured")
+	}
+	if dev == nil {
+		return nil
+	}
+	paramsJSON, err := json.Marshal(map[string]interface{}{
+		"values": []map[string]string{{
+			"name":  path,
+			"value": name,
+			"type":  "xsd:string",
+		}},
+		"parameter_key": fmt.Sprintf("name-sync-%d", time.Now().Unix()),
+	})
+	if err != nil {
+		return fmt.Errorf("marshal name sync SPV params: %w", err)
+	}
+	_, err = s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
+		DeviceSN:   dev.SerialNumber,
+		Method:     "SetParameterValues",
+		Params:     paramsJSON,
+		Priority:   5,
+		CommandKey: fmt.Sprintf("name-sync-%s", uuid.New().String()[:8]),
+		Source:     task.TaskSourceSystem,
+	})
+	if err != nil {
+		return fmt.Errorf("queue name sync SPV: %w", err)
+	}
+	return nil
 }
 
 // DeviceNameSyncHook 是 Path B 同步完成后的设备名称同步钩子。
@@ -240,39 +287,58 @@ func (h *DeviceNameSyncHook) loadConfig(ctx context.Context) DeviceNameSyncConfi
 	return cfg
 }
 
-// hnbNamePathSuffix 是 HNBName 路径的固定后缀，用于多实例扫描。
-const hnbNamePathSuffix = ".AccessMgmt.LTE.HNBName"
+func deviceNameStandardPath(dev *model.Device) string {
+	if dev != nil && dev.Technology == model.TechNR {
+		return gnbNameStandardPath
+	}
+	return hnbNameStandardPath
+}
 
-// hnbNamePathPrefix 是扫描所有 FAPService 实例时的路径前缀。
-const hnbNamePathPrefix = "Device.Services.FAPService."
+// namePathSuffixes 是设备名称路径的固定后缀，用于多实例扫描。
+var namePathSuffixes = []string{
+	".AccessMgmt.LTE.HNBName",
+	".FAPControl.NR.RAN.Common.gNBName",
+}
 
-// getLMTDeviceName 从 device_parameters 读取 HNBName。
-// 先尝试标准实例 FAPService.1；若未命中，扫描所有 FAPService.{i} 实例，
-// 取第一个包含 HNBName 的值（P1-2：多实例兼容）。
+var nameStandardPaths = []string{
+	hnbNameStandardPath,
+	gnbNameStandardPath,
+}
+
+// namePathPrefix 是扫描所有 FAPService 实例时的路径前缀。
+const namePathPrefix = "Device.Services.FAPService."
+
+// getLMTDeviceName 从 device_parameters 读取设备侧名称。
+// LTE 使用 HNBName，NR 使用 gNBName。先尝试标准实例 FAPService.1；
+// 若未命中，扫描所有 FAPService.{i} 实例，取第一个名称路径的非空值。
 func (h *DeviceNameSyncHook) getLMTDeviceName(ctx context.Context, deviceID uuid.UUID) (string, error) {
 	// 快路径：直接查 .1
-	param, err := h.paramRepo.GetByPath(ctx, deviceID, hnbNameStandardPath)
-	if err != nil {
-		return "", fmt.Errorf("query HNBName: %w", err)
-	}
-	if param != nil && param.ParameterValue != "" {
-		return param.ParameterValue, nil
+	for _, path := range nameStandardPaths {
+		param, err := h.paramRepo.GetByPath(ctx, deviceID, path)
+		if err != nil {
+			return "", fmt.Errorf("query device name parameter %s: %w", path, err)
+		}
+		if param != nil && param.ParameterValue != "" {
+			return param.ParameterValue, nil
+		}
 	}
 
-	// 回退：扫描所有 FAPService 实例，找第一个含 HNBName 的路径
-	params, err := h.paramRepo.GetByPathPrefix(ctx, deviceID, hnbNamePathPrefix)
+	// 回退：扫描所有 FAPService 实例，找第一个设备名称路径
+	params, err := h.paramRepo.GetByPathPrefix(ctx, deviceID, namePathPrefix)
 	if err != nil {
-		h.logger.Warn("fallback HNBName scan failed",
+		h.logger.Warn("fallback device name scan failed",
 			zap.String("device_id", deviceID.String()),
 			zap.Error(err))
 		return "", nil
 	}
 	for _, p := range params {
-		if strings.HasSuffix(p.ParameterPath, hnbNamePathSuffix) && p.ParameterValue != "" {
-			h.logger.Debug("HNBName found via fallback scan",
-				zap.String("device_id", deviceID.String()),
-				zap.String("path", p.ParameterPath))
-			return p.ParameterValue, nil
+		for _, suffix := range namePathSuffixes {
+			if strings.HasSuffix(p.ParameterPath, suffix) && p.ParameterValue != "" {
+				h.logger.Debug("device name found via fallback scan",
+					zap.String("device_id", deviceID.String()),
+					zap.String("path", p.ParameterPath))
+				return p.ParameterValue, nil
+			}
 		}
 	}
 	return "", nil
@@ -338,8 +404,8 @@ func (h *DeviceNameSyncHook) handleOMCToLMT(ctx context.Context, dev *model.Devi
 		return nil
 	}
 
-	if h.spvSender == nil || h.translator == nil {
-		h.logger.Warn("SPV sender or translator not configured, skip omc_to_lmt sync",
+	if h.spvSender == nil {
+		h.logger.Warn("SPV sender not configured, skip omc_to_lmt sync",
 			zap.String("device_sn", dev.SerialNumber))
 		// 降级到标记 pending
 		if err := h.infoRepo.UpdateNameSyncFields(ctx, dev.ID, true, lmtName); err != nil {
@@ -348,16 +414,22 @@ func (h *DeviceNameSyncHook) handleOMCToLMT(ctx context.Context, dev *model.Devi
 		return nil
 	}
 
-	// 翻译标准路径 → 私有路径
-	privatePath, ok := h.translator.ToPrivate(dev, hnbNameStandardPath)
-	if !ok {
-		h.logger.Warn("translate HNBName path failed, fallback to pending",
-			zap.String("device_sn", dev.SerialNumber),
-			zap.String("standard_path", hnbNameStandardPath))
-		if err := h.infoRepo.UpdateNameSyncFields(ctx, dev.ID, true, lmtName); err != nil {
-			return fmt.Errorf("set name_sync_pending (translate fail): %w", err)
+	// 优先使用注入的翻译器；未注入时沿用 RenameDevice 的语义，把标准路径入队，
+	// 由 ACS 侧统一执行 standardPath → privatePath 翻译。
+	standardPath := deviceNameStandardPath(dev)
+	privatePath := standardPath
+	if h.translator != nil {
+		if translated, ok := h.translator.ToPrivate(dev, standardPath); ok {
+			privatePath = translated
+		} else {
+			h.logger.Warn("translate device name path failed, fallback to pending",
+				zap.String("device_sn", dev.SerialNumber),
+				zap.String("standard_path", standardPath))
+			if err := h.infoRepo.UpdateNameSyncFields(ctx, dev.ID, true, lmtName); err != nil {
+				return fmt.Errorf("set name_sync_pending (translate fail): %w", err)
+			}
+			return nil
 		}
-		return nil
 	}
 
 	// 下发 SPV

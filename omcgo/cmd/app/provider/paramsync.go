@@ -346,7 +346,8 @@ func initParamSyncModule(c *Container) error {
 			return cfg.Value, true
 		},
 		c.ParamRepo, c.DeviceInfoRepo, c.DeviceInfoRepo, logger,
-	).SetSiteUpdater(device.NewPgDeviceRepository(c.PgPool))
+	).SetSiteUpdater(device.NewPgDeviceRepository(c.PgPool)).
+		SetSPVSender(provision.NewDeviceNameTaskSender(c.TaskSvc))
 	projector := paramsync.NewCompletionProjector(c.PgPool, c.EventBus, &paramSyncFullRunProjection{
 		devices: c.DeviceRepo, info: infoSyncer, nameSync: nameSyncHook,
 	})

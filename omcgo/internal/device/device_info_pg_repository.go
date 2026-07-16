@@ -941,12 +941,14 @@ func alarmSeverityFilterCond(text string) sq.Sqlizer {
 
 func scanDeviceInfoFromRow(row pgx.Row) (*DeviceInfo, error) {
 	var info DeviceInfo
-	// Issue #758: lmt_device_name 列可为 NULL（新设备从未触发过名称同步），
-	// pgx v5 不能直接将 NULL 扫描到 string，用临时 *string 接收后安全解引用。
+	// Issue #758: device_name / lmt_device_name 列可为 NULL（新设备从未人工命名、
+	// 或从未触发过名称同步），pgx v5 不能直接将 NULL 扫描到 string，用临时
+	// *string 接收后安全解引用。
+	var deviceName *string
 	var lmtDeviceName *string
 	err := row.Scan(
 		&info.DeviceID,
-		&info.DeviceName, &info.Address, &info.Remark, &info.ProjectStatus, &info.Height,
+		&deviceName, &info.Address, &info.Remark, &info.ProjectStatus, &info.Height,
 		&info.ECI, &info.PCI, &info.CellID, &info.FreqPoint, &info.Bandwidth, &info.TransmitPower, &info.PLMN,
 		&info.RFStatus, &info.CellStatus, &info.OpState, &info.MMEStatus, &info.SyncStatus, &info.KPIStatus,
 		&info.NumOfCells, &info.GPSStatus, &info.AlarmSeverity, &info.LicenseStatus,
@@ -968,6 +970,9 @@ func scanDeviceInfoFromRow(row pgx.Row) (*DeviceInfo, error) {
 	)
 	if err != nil {
 		return nil, err
+	}
+	if deviceName != nil {
+		info.DeviceName = *deviceName
 	}
 	if lmtDeviceName != nil {
 		info.LMTDeviceName = *lmtDeviceName
