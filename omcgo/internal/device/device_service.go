@@ -2364,9 +2364,18 @@ func (s *DeviceService) GetProductClasses(ctx context.Context) ([]string, error)
 
 // ===== Device Name Sync (Issue #758) =====
 
-// hnbNameStandardPath 是 HNBName（设备名称）的标准 TR-069 路径。
-// 用于 use_omc 动作下发网管名称到设备。
-const hnbNameStandardPath = "Device.Services.FAPService.1.AccessMgmt.LTE.HNBName"
+const (
+	hnbNameStandardPath = "Device.Services.FAPService.1.AccessMgmt.LTE.HNBName"
+	gnbNameStandardPath = "Device.Services.FAPService.1.FAPControl.NR.RAN.Common.gNBName"
+)
+
+// lmtDeviceNameStandardPath 返回当前制式的基站侧名称参数。
+func lmtDeviceNameStandardPath(dev *model.Device) string {
+	if dev != nil && dev.Technology == model.TechNR {
+		return gnbNameStandardPath
+	}
+	return hnbNameStandardPath
+}
 
 // ResolveNameSync 处理设备名称同步人工确认。
 //
@@ -2437,7 +2446,7 @@ func (s *DeviceService) ResolveNameSync(ctx context.Context, deviceID uuid.UUID,
 		}
 
 		spvParams := []map[string]string{{
-			"name":  hnbNameStandardPath,
+			"name":  lmtDeviceNameStandardPath(dev),
 			"value": info.DeviceName,
 			"type":  "xsd:string",
 		}}
@@ -2510,7 +2519,7 @@ func (s *DeviceService) loadNameSyncMode(ctx context.Context) string {
 // RenameDevice 从网管侧修改设备名称并按 nameSyncMode 策略决定是否下发到基站。
 //
 // 行为矩阵（见设计文档 §2.1）：
-//   - auto_lmt_to_omc → 拒绝（LMT 覆盖策略下禁止从网管改名）
+//   - auto_lmt_to_omc → 仅修改网管名称；后续设备上报时仍按策略以 LMT 名称覆盖
 //   - auto_omc_to_lmt → 双写网管库 + 建 SPV 下发任务 + 清 pending
 //   - prompt          → 双写网管库 + 置 pending=true（lmtName 取旧值原样回写）
 //
@@ -2523,16 +2532,7 @@ func (s *DeviceService) RenameDevice(ctx context.Context, id uuid.UUID, newName 
 	result := &RenameDeviceResult{}
 	mode := s.loadNameSyncMode(ctx)
 
-	// 1. auto_lmt_to_omc → 直接拒绝
-	if mode == "auto_lmt_to_omc" {
-		return nil, commonerrors.NewBusinessError(
-			global.ErrCodeDeviceRenameNotAllowed,
-			"当前命名策略以基站为准，请在 LMT 侧修改名称",
-			commonerrors.ErrForbidden,
-		)
-	}
-
-	// 2. 读设备（需要 SN 做缓存清理和 SPV 下发）
+	// 1. 读设备（需要 SN 做缓存清理和 SPV 下发）
 	dev, err := s.deviceRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("get device: %w", err)
@@ -2541,7 +2541,7 @@ func (s *DeviceService) RenameDevice(ctx context.Context, id uuid.UUID, newName 
 		return nil, commonerrors.ErrNotFound
 	}
 
-	// 3. 读 device_info（prompt 模式下需要 lmt_device_name 旧值防止污染缓存）
+	// 2. 读 device_info（prompt 模式下需要 lmt_device_name 旧值防止污染缓存）
 	info, err := s.deviceInfoRepo.GetByDeviceID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("get device info: %w", err)
@@ -2550,7 +2550,7 @@ func (s *DeviceService) RenameDevice(ctx context.Context, id uuid.UUID, newName 
 		return nil, commonerrors.ErrNotFound
 	}
 
-	// 4. 双写：device_info.device_name（详情口径）+ devices.site_name（列表口径）
+	// 3. 双写：device_info.device_name（详情口径）+ devices.site_name（列表口径）
 	if err := s.deviceInfoRepo.UpdateDeviceName(ctx, id, newName); err != nil {
 		return nil, fmt.Errorf("update device_info.device_name: %w", err)
 	}
@@ -2568,16 +2568,18 @@ func (s *DeviceService) RenameDevice(ctx context.Context, id uuid.UUID, newName 
 	dev.DeviceName = newName
 	s.PublishDeviceAttributesChangedEvent(ctx, dev, []string{"site_name"})
 
-	// 5. 按策略决定下发与 pending
-	const hnbNameStdPath = "Device.Services.FAPService.1.AccessMgmt.LTE.HNBName"
+	// 4. 按策略决定下发与 pending
 	lmtName := info.LMTDeviceName // 旧值，用于 pending 时回写和 auto 路径清 pending
 
 	switch mode {
+	case "auto_lmt_to_omc":
+		// 人工修改只作用于网管名称，不下发 LMT，也不制造人工确认 pending。
+		// 后续设备名称上报时，自动同步逻辑仍会按当前策略采用 LMT 名称。
 	case "auto_omc_to_lmt":
-		// 建 SPV 下发任务（标准路径 HNBName，ACS 侧翻私有路径）
+		// 建 SPV 下发任务（按制式选择 HNBName/gNBName，ACS 侧翻私有路径）
 		if s.taskSvc != nil {
 			spvParams := []map[string]string{{
-				"name":  hnbNameStdPath,
+				"name":  lmtDeviceNameStandardPath(dev),
 				"value": newName,
 				"type":  "xsd:string",
 			}}
