@@ -82,7 +82,8 @@ export default function CommandSelectModal({
     }
   }
 
-  const { data: treeNodes, isLoading: treeLoading } = useGroupTree(undefined, locale);
+  // 命令树和右侧 sub-fields 使用同一个设备支持集合；设备切换会重新加载两者。
+  const { data: treeNodes, isLoading: treeLoading } = useGroupTree(undefined, locale, undefined, deviceSn);
   const { commands: customCommands } = useCustomCommands();
 
   // 自定义命令分组名（随 locale 中英切换，复用命令树「自定义命令 / Customized」语料）。

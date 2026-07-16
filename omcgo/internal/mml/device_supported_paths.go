@@ -22,9 +22,9 @@ import (
 //   - 与 per-device A1 (T-0170 / Registry.GetByProduct) 区分开：那是 per-device 执行
 //     时的硬拒；本 set 是 catalog 显示时的过滤
 //
-// 孤儿处理（user Q4 决定）：productClass 未匹配任何 product → SupportedSet 仍
-// 返回（ProductResolved=false, Paths=空集），命令树渲染时仍显示全部命令但 banner
-// 标"该设备不支持任何 path"。
+// 孤儿处理：productClass 未匹配任何 product → SupportedSet 仍返回
+//（ProductResolved=false, Paths=空集），控制台调用方据此返回空树/空参数集，
+// 禁止把未过滤的完整 catalog 当成该产品支持的命令。
 // ============================================================
 
 // ErrProductClassEmpty 由 ResolveByProductClass 在传入空 productClass 时返回。
@@ -42,7 +42,7 @@ type SupportedSet struct {
 	// 孤儿或产品无 paramModel 为 nil。
 	ParamModelID *uuid.UUID
 	// ProductResolved 标记 productClass 是否成功匹配到产品。
-	// false → 孤儿；命令树仍显示全部命令，但每条标 0 supported。
+	// false → 孤儿；控制台过滤结果为空。
 	ProductResolved bool
 	// Paths 是 supported set 主体；O(1) 查询用 map[string]struct{}。
 	// 孤儿场景为空 map（非 nil，方便 Contains 直接调用）。

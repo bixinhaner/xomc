@@ -38,6 +38,15 @@ func (f *fakeGroupTreeRepo) BuildTree(_ context.Context, _, _ string) ([]GroupTr
 	return f.tree, f.err
 }
 
+type fakeFlatGroupTreeRepo struct {
+	groups []FlatGroup
+	err    error
+}
+
+func (f *fakeFlatGroupTreeRepo) BuildFlatTree(context.Context) ([]FlatGroup, error) {
+	return f.groups, f.err
+}
+
 type fakeSubFieldRepo struct {
 	byCommandList     map[uuid.UUID][]MMLCommandSubField
 	byCommandEnriched map[uuid.UUID][]MMLCommandSubFieldEnriched
@@ -51,9 +60,9 @@ func newFakeSubFieldRepo() *fakeSubFieldRepo {
 	}
 }
 
-func (f *fakeSubFieldRepo) Create(_ context.Context, _ *MMLCommandSubField) error  { return nil }
-func (f *fakeSubFieldRepo) Update(_ context.Context, _ *MMLCommandSubField) error  { return nil }
-func (f *fakeSubFieldRepo) Delete(_ context.Context, _ uuid.UUID) error            { return nil }
+func (f *fakeSubFieldRepo) Create(_ context.Context, _ *MMLCommandSubField) error { return nil }
+func (f *fakeSubFieldRepo) Update(_ context.Context, _ *MMLCommandSubField) error { return nil }
+func (f *fakeSubFieldRepo) Delete(_ context.Context, _ uuid.UUID) error           { return nil }
 func (f *fakeSubFieldRepo) GetByID(_ context.Context, _ uuid.UUID) (*MMLCommandSubField, error) {
 	return nil, nil
 }
@@ -83,9 +92,9 @@ func (f *fakeSubFieldRepo) BatchCreate(_ context.Context, _ []*MMLCommandSubFiel
 }
 
 type fakeCommandRepo struct {
-	byID    map[uuid.UUID]*MMLCommand
-	byCode  map[string]*MMLCommand
-	getErr  error
+	byID   map[uuid.UUID]*MMLCommand
+	byCode map[string]*MMLCommand
+	getErr error
 }
 
 func newFakeCommandRepo() *fakeCommandRepo {
@@ -203,6 +212,55 @@ func TestAssembleHierarchy_DisplayOrderRespected(t *testing.T) {
 	assert.Equal(t, "A", nodes[0].GroupCode)
 	assert.Equal(t, "B", nodes[1].GroupCode)
 	assert.Equal(t, "C", nodes[2].GroupCode)
+}
+
+func TestBuildGroupTreeFilteredByDeviceUsesSupportedPaths(t *testing.T) {
+	groupID := uuid.New()
+	commandA := GroupTreeCommand{ID: uuid.New(), OperationType: "LST"}
+	commandA.SetTargetPathsRaw([]byte(`["Device.A"]`))
+	commandB := GroupTreeCommand{ID: uuid.New(), OperationType: "LST"}
+	commandB.SetTargetPathsRaw([]byte(`["Device.B"]`))
+
+	pmID := uuid.New()
+	svc := NewConsoleService(&fakeGroupTreeRepo{tree: []GroupTreeNode{
+		{ID: groupID, GroupCode: "ROOT", Commands: []GroupTreeCommand{commandA, commandB}},
+	}}, newFakeSubFieldRepo(), newFakeCommandRepo(), nil)
+	svc.SetParamModelByDeviceResolver(func(context.Context, string) (*uuid.UUID, error) {
+		return &pmID, nil
+	})
+	svc.SetParamModelPathsResolver(func(context.Context, uuid.UUID) (map[string]struct{}, error) {
+		return map[string]struct{}{"Device.A": {}}, nil
+	})
+
+	got, err := svc.BuildGroupTreeFilteredByDevice(context.Background(), "", "zh-CN", "SN-1")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Len(t, got[0].Commands, 1)
+	assert.Equal(t, commandA.ID, got[0].Commands[0].ID)
+}
+
+func TestBuildFlatGroupTreeFilteredByDeviceUsesSupportedPaths(t *testing.T) {
+	commandA := FlatCommand{ID: uuid.New(), Name: "LST A", ObjectPath: []string{"Device.A"}}
+	commandB := FlatCommand{ID: uuid.New(), Name: "LST B", ObjectPath: []string{"Device.B"}}
+	pmID := uuid.New()
+	svc := NewConsoleService(&fakeGroupTreeRepo{}, newFakeSubFieldRepo(), newFakeCommandRepo(), nil)
+	svc.SetFlatTreeRepo(&fakeFlatGroupTreeRepo{groups: []FlatGroup{{
+		Code:     "SA",
+		Name:     "设备信息参数管理",
+		Commands: []FlatCommand{commandA, commandB},
+	}}})
+	svc.SetParamModelByDeviceResolver(func(context.Context, string) (*uuid.UUID, error) {
+		return &pmID, nil
+	})
+	svc.SetParamModelPathsResolver(func(context.Context, uuid.UUID) (map[string]struct{}, error) {
+		return map[string]struct{}{"Device.A": {}}, nil
+	})
+
+	got, err := svc.BuildFlatGroupTreeFiltered(context.Background(), "", "SN-1")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Len(t, got[0].Commands, 1)
+	assert.Equal(t, commandA.ID, got[0].Commands[0].ID)
 }
 
 // ============================================================
@@ -419,6 +477,55 @@ func TestGetCommandSubFields_LangFallbackToEn(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, "Only EN", got[0].Label) // fallback
+}
+
+func TestGetCommandSubFields_DeviceResolverErrorFailsClosed(t *testing.T) {
+	cmdID := uuid.New()
+	sfRepo := newFakeSubFieldRepo()
+	sfRepo.byCommandEnriched[cmdID] = []MMLCommandSubFieldEnriched{
+		{
+			MMLCommandSubField: MMLCommandSubField{ID: uuid.New(), CommandID: cmdID, MMLCode: "A"},
+			Tr069Path:          "Device.A",
+		},
+	}
+
+	svc := NewConsoleService(&fakeGroupTreeRepo{}, sfRepo, newFakeCommandRepo(), nil)
+	svc.SetParamModelByDeviceResolver(func(context.Context, string) (*uuid.UUID, error) {
+		return nil, errors.New("redis unavailable")
+	})
+
+	got, err := svc.GetCommandSubFields(context.Background(), cmdID, "SN-1", "", "zh-CN")
+	require.Error(t, err)
+	assert.Nil(t, got)
+	assert.Contains(t, err.Error(), "resolve param_model by device")
+}
+
+func TestGetCommandSubFields_DeviceReturnsSupportedMMLIntersection(t *testing.T) {
+	cmdID := uuid.New()
+	sfRepo := newFakeSubFieldRepo()
+	sfRepo.byCommandEnriched[cmdID] = []MMLCommandSubFieldEnriched{
+		{
+			MMLCommandSubField: MMLCommandSubField{ID: uuid.New(), CommandID: cmdID, MMLCode: "A"},
+			Tr069Path:          "Device.A",
+		},
+		{
+			MMLCommandSubField: MMLCommandSubField{ID: uuid.New(), CommandID: cmdID, MMLCode: "B"},
+			Tr069Path:          "Device.B",
+		},
+	}
+	pmID := uuid.New()
+	svc := NewConsoleService(&fakeGroupTreeRepo{}, sfRepo, newFakeCommandRepo(), nil)
+	svc.SetParamModelByDeviceResolver(func(context.Context, string) (*uuid.UUID, error) {
+		return &pmID, nil
+	})
+	svc.SetParamModelPathsResolver(func(context.Context, uuid.UUID) (map[string]struct{}, error) {
+		return map[string]struct{}{"Device.A": {}, "Device.C": {}}, nil
+	})
+
+	got, err := svc.GetCommandSubFields(context.Background(), cmdID, "SN-1", "", "zh-CN")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "Device.A", got[0].Tr069Path)
 }
 
 // ============================================================
