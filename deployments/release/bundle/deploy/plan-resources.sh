@@ -92,7 +92,12 @@ if [ "$OS" = "Linux" ]; then
   MEM_TOTAL_MIB="$(awk '/^MemTotal:/ {printf "%d", $2/1024}' /proc/meminfo)"
   MEM_AVAIL_MIB="$(awk '/^MemAvailable:/ {printf "%d", $2/1024}' /proc/meminfo)"
   read -r LOAD1 LOAD5 LOAD15 _ < /proc/loadavg
-  DISK_FREE_GIB="$(df -BG --output=avail /var/lib/docker 2>/dev/null | awk 'NR==2{gsub(/G/,"");print $1}')"
+  # Docker 数据根目录可能被 daemon.json 的 data-root 改到非默认路径（如 /home/docker-data），
+  # 不能硬编码 /var/lib/docker，否则测到的是错误分区的可用空间。优先问 docker info，
+  # 拿不到（docker 不可达）时才退回默认路径。
+  DOCKER_ROOT_DIR="$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || true)"
+  [ -z "$DOCKER_ROOT_DIR" ] && DOCKER_ROOT_DIR="/var/lib/docker"
+  DISK_FREE_GIB="$(df -BG --output=avail "$DOCKER_ROOT_DIR" 2>/dev/null | awk 'NR==2{gsub(/G/,"");print $1}')"
 elif [ "$OS" = "Darwin" ]; then
   # macOS：仅供本机 dry-run 预览（生产是 Linux）
   HOST_CPU="$(sysctl -n hw.ncpu)"
@@ -151,17 +156,21 @@ fi
 # 2. 计算「空闲预算」（需求 ②③，空闲优先口径）
 # ---------------------------------------------------------------------------
 sep "2/4 计算空闲资源预算"
-# OS / dockerd / 内核保留：max(2 GiB, 总量的 15%)
-OS_RESERVE_MIB="$(awk -v t="$MEM_TOTAL_MIB" 'BEGIN{r=t*0.15; if(r<2048)r=2048; printf "%d", r}')"
+# OS / dockerd / 内核保留：随主机规模缩放 = 总量 / 8，下限 4 GiB，上限 16 GiB。
+# 例：32核/32GiB → 保留4GiB（业务28GiB）；64核/64GiB → 保留8GiB；≥128GiB 封顶16GiB。
+OS_RESERVE_MIB="$(awk -v t="$MEM_TOTAL_MIB" 'BEGIN{r=t/8; if(r<4096)r=4096; if(r>16384)r=16384; printf "%d", r}')"
 IDLE_MEM_MIB=$(( MEM_AVAIL_MIB - OS_RESERVE_MIB - OTHER_RESERVE_MIB ))
 [ "$IDLE_MEM_MIB" -lt 0 ] && IDLE_MEM_MIB=0
 
-# 空闲 CPU：核数 − 主机保留(1) − max(其它容器CPU, 取整后的 load15)
+# 主机 CPU 保留：同样随规模缩放 = 核数 / 8，下限 4 核，上限 12 核。
+# 例：32核 → 保留4核（业务28核）；64核 → 保留8核；≥96核 封顶12核。
+CPU_RESERVE="$(awk -v c="$HOST_CPU" 'BEGIN{r=c/8; if(r<4)r=4; if(r>12)r=12; printf "%d", (r==int(r))?r:int(r)+1}')"
+# 空闲 CPU：核数 − 主机保留 − max(其它容器CPU, 取整后的 load15)
 LOAD15_CEIL="$(awk -v l="$LOAD15" 'BEGIN{printf "%d", (l==int(l))?l:int(l)+1}')"
-IDLE_CPU=$(( HOST_CPU - 1 - LOAD15_CEIL )); [ "$IDLE_CPU" -lt 1 ] && IDLE_CPU=1
+IDLE_CPU=$(( HOST_CPU - CPU_RESERVE - LOAD15_CEIL )); [ "$IDLE_CPU" -lt 1 ] && IDLE_CPU=1
 
 log "  内存空闲预算  : ${C_G}${C_B}$(to_gib "$IDLE_MEM_MIB") GiB${C_0}  = MemAvailable $(to_gib "$MEM_AVAIL_MIB") − OS保留 $(to_gib "$OS_RESERVE_MIB") − 其它预留 $(to_gib "$OTHER_RESERVE_MIB")"
-log "  CPU 空闲预算  : ${C_G}${C_B}${IDLE_CPU} 核${C_0}  = ${HOST_CPU} − 主机保留 1 − 负载占用 ${LOAD15_CEIL}（CPU 限额可突发超分，仅作下限参考）"
+log "  CPU 空闲预算  : ${C_G}${C_B}${IDLE_CPU} 核${C_0}  = ${HOST_CPU} − 主机保留 ${CPU_RESERVE} − 负载占用 ${LOAD15_CEIL}（CPU 限额可突发超分，仅作下限参考）"
 
 # ---------------------------------------------------------------------------
 # 3. 组件 floor/ceiling 表 + floor-first 分配（需求 ③）
@@ -227,8 +236,8 @@ else TIER=small; fi
 # CPU 限额（突发可超分；按档位给值）
 case "$TIER" in
   small)  CPU_app=1;   CPU_acs=2; CPU_worker=2; CPU_pg=2; CPU_tsdb=2; CPU_redis=1; CPU_nats=1; CPU_minio=1; CPU_web=1 ;;
-  medium) CPU_app="1.5"; CPU_acs=3; CPU_worker=3; CPU_pg=4; CPU_tsdb=4; CPU_redis=2; CPU_nats=1; CPU_minio=1; CPU_web=1 ;;
-  large)  CPU_app=2;   CPU_acs=4; CPU_worker=4; CPU_pg=6; CPU_tsdb=6; CPU_redis=2; CPU_nats=2; CPU_minio=1; CPU_web=1 ;;
+  medium) CPU_app="1.5"; CPU_acs=3; CPU_worker=3; CPU_pg=4; CPU_tsdb=4; CPU_redis=2; CPU_nats=1; CPU_minio=2; CPU_web=1 ;;
+  large)  CPU_app=2;   CPU_acs=4; CPU_worker=4; CPU_pg=6; CPU_tsdb=6; CPU_redis=2; CPU_nats=2; CPU_minio=4; CPU_web=1 ;;
 esac
 CPU_LIST=("$CPU_app" "$CPU_acs" "$CPU_worker" "$CPU_pg" "$CPU_tsdb" "$CPU_redis" "$CPU_nats" "$CPU_minio" "$CPU_web")
 
