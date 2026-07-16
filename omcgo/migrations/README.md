@@ -8,11 +8,11 @@
 
 | 流 | 合并范围 | 当前文件 | 版本表 | compose 服务 | 目标库 |
 |----|----------|----------|--------|--------------|--------|
-| 主库 schema (DDL) | `000001..000024` | `migrations/000001_init_schema.sql` | `goose_db_version` | `migrate-schema` | postgres（主库，纯 PG16）|
+| 主库 schema (DDL) | 基线 `000001` + 增量 | `migrations/000001_init_schema.sql`、`000025_add_recycle_audit_metadata.sql` | `goose_db_version` | `migrate-schema` | postgres（主库，纯 PG16）|
 | 主库 seed (DML) | `000001..000013` | `migrations/seed/000001_init_seed.sql` | `goose_db_version_seed` | `migrate-seed` | postgres |
-| 时序库 schema | `000001..000005` | `migrations/tsdb/000001_tsdb_schema.sql` | `goose_db_version_tsdb` | `migrate-tsdb-schema` | postgres-tsdb（TimescaleDB）|
+| 时序库 schema | 基线 `000001` + 增量 | `migrations/tsdb/000001_tsdb_schema.sql`、`000002_fix_alarm_history_retention_schedule.sql` | `goose_db_version_tsdb` | `migrate-tsdb-schema` | postgres-tsdb（TimescaleDB）|
 
-迁移目录中现在应当**恰好只有以上三个 SQL 文件**。schema 和 seed 基线来自完整迁移最终态，TSDB 基线包含原 `000002` 的小时连续聚合以及原 `000003..000005` 的最终列可空性。
+三个 `000001` 文件是 2026-07-16 的 consolidated baseline；此后允许按各自流继续追加增量迁移。schema 和 seed 基线来自完整迁移最终态，TSDB 基线包含原 `000002` 的小时连续聚合以及原 `000003..000005` 的最终列可空性。
 
 > ⚠️ 此基线仅兼容全新安装或允许清库重建的环境，不是既有数据库的就地升级路径。三条流在干净数据库上分别从版本 `000001` 起跑。
 
@@ -21,6 +21,8 @@
 1. **`000001_init_schema.sql`**（主库 DDL）—— 全量业务表结构（所有 public 业务表 + 分区子表 + 扩展 `ltree`/`pg_trgm`/`pgcrypto`/`uuid-ossp` + 触发器/函数）。**纯 PostgreSQL 16，无 timescaledb 扩展、无任何超表**（时序对象全在 tsdb 流）。由全量迁移后的库 `pg_dump --schema-only` 生成；PL/pgSQL 函数体已用 goose `StatementBegin/End` 包裹。
 2. **`seed/000001_init_seed.sql`**（主库 DML）—— 全量内置参考数据（RBAC/菜单/权限/系统字典/`sys_configs`/MML 命令树/`standard_params` 等）。由干净 schema+seed 库 `pg_dump --data-only --inserts --on-conflict-do-nothing` 生成；**不含运行期 dictloader 从 `data/` XML 加载的 `param_models`/`param_mappings`/`products`/`alarm_definitions`/`perf_indicators` 等**。所有 INSERT 带**无目标 `ON CONFLICT DO NOTHING`**，对全新库重复前向应用幂等。
 3. **`tsdb/000001_tsdb_schema.sql`**（时序库）—— 15 张时序表（`pm_metrics` + 4 rollup、`pm_group_metrics_*`、`pm_adhoc_aggregation_results`、`alarms_history`、`mr_records`、`trace_messages`、`pm_files`、`mr_files`）+ 显式 `create_hypertable` + 压缩/保留策略 + 7 张影子维度表（worker `tsdbsync` 从主库同步，供本库 JOIN 替代跨库 JOIN）+ `alarm_efficiency_metrics` 物化视图。显式 DDL，不依赖 pg_restore catalog 注入。
+4. **`000025_add_recycle_audit_metadata.sql`**（主库增量）—— 为设备回收审计补充元数据。
+5. **`tsdb/000002_fix_alarm_history_retention_schedule.sql`**（时序库增量）—— 只将 `alarms_history` retention policy 固定为每天 `01:08 Asia/Shanghai`；不修改 `drop_after`、job `config` 或其他后台任务。
 
 参数同步基线有一个有意保留的无外键设计：`parameter_sync_task_results.task_id` 和 `parameter_sync_staging_values.task_id` 都不声明到 `device_tasks` 的外键。`device_tasks` 按 `device_sn` 做 hash 分区，物理主键是 `(id, device_sn)`，PostgreSQL 不允许只引用其中的 `id`。应用处理链会校验 payload 的 `device_sn` 与同步 run 的逻辑关联，并按 `(id, device_sn)` 加载设备任务；两张表的 `run_id` 外键仍然保留。不要补回不可成立的 `REFERENCES device_tasks(id)`；如果未来在这两张表持久化 `device_sn`，再评估复合外键。
 
@@ -47,7 +49,7 @@ OMC 跑两个 PostgreSQL/TimescaleDB 实例，迁移分两条物理目标库的�
 
 三条流是相互独立的 goose 版本序列，记在不同版本表、**不共享号段**——所以 `000001` 在三处各出现一次是**正常的**（不是撞号）。查撞号要**分目录各查**，别把三个目录的文件名合并去重。
 
-- 新增 = 该流**现有最大号 + 1**。本次合并后三条流各自都只有 `000001`，因此 schema、seed、TSDB 的下一号分别都是 `000002`。
+- 新增 = 该流**现有最大号 + 1**。当前主库 schema 下一号是 `000026`，seed 下一号是 `000002`，TSDB 下一号是 `000003`。
 - 从本基线开始，不回填空号、不重排或复用同一发布基线内已经应用过的版本号。三条流使用独立版本表，必须分目录判断下一号。
 - DDL → `migrations/`，DML 种子 → `migrations/seed/`，时序 DDL → `migrations/tsdb/`。
 - `DO $$` / `CREATE [OR REPLACE] FUNCTION` / 循环条件 → 必须 goose `StatementBegin/End` 包裹。

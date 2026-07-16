@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 )
@@ -124,13 +125,31 @@ func (s *HistoryRetentionService) resolveDays(ctx context.Context) (int, error) 
 	return days, nil
 }
 
+type historyRetentionDB interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
 type TimescaleHistoryRetentionApplier struct {
-	pool *pgxpool.Pool
+	pool historyRetentionDB
 }
 
 func NewTimescaleHistoryRetentionApplier(pool *pgxpool.Pool) *TimescaleHistoryRetentionApplier {
+	if pool == nil {
+		return &TimescaleHistoryRetentionApplier{}
+	}
 	return &TimescaleHistoryRetentionApplier{pool: pool}
 }
+
+const addAlarmHistoryRetentionPolicySQL = `
+SELECT add_retention_policy(
+    'alarms_history',
+    drop_after => $1::interval,
+    schedule_interval => INTERVAL '1 day',
+    initial_start => TIMESTAMPTZ '2000-01-01 01:08:00+08',
+    timezone => 'Asia/Shanghai',
+    if_not_exists => TRUE
+)`
 
 func (a *TimescaleHistoryRetentionApplier) Apply(ctx context.Context, days int) error {
 	if err := validateHistoryRetentionDays(days); err != nil {
@@ -153,7 +172,7 @@ func (a *TimescaleHistoryRetentionApplier) Apply(ctx context.Context, days int) 
 		return fmt.Errorf("remove alarms_history retention policy: %w", err)
 	}
 	interval := fmt.Sprintf("%d days", days)
-	if _, err := a.pool.Exec(ctx, "SELECT add_retention_policy('alarms_history', $1::interval, if_not_exists => TRUE)", interval); err != nil {
+	if _, err := a.pool.Exec(ctx, addAlarmHistoryRetentionPolicySQL, interval); err != nil {
 		return fmt.Errorf("add alarms_history retention policy: %w", err)
 	}
 	return nil
