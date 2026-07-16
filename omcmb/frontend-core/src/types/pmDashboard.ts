@@ -65,6 +65,32 @@ export interface BackendAggregatedRow {
   filled?: boolean;
 }
 
+export interface AggregatedQueryMeta {
+  requestedStartTime?: string;
+  requestedEndTime?: string;
+  actualStartTime?: string | null;
+  actualEndTime?: string | null;
+  granularity?: Granularity | string;
+  timezone?: string;
+}
+
+export interface AggregatedQueryResult {
+  rows: AggregatedRow[];
+  total: number;
+  meta?: AggregatedQueryMeta;
+}
+
+export interface BackendAggregatedResponse {
+  items: BackendAggregatedRow[] | null;
+  total: number;
+  requested_start_time?: string;
+  requested_end_time?: string;
+  actual_start_time?: string | null;
+  actual_end_time?: string | null;
+  granularity?: string;
+  timezone?: string;
+}
+
 export interface AggregatedRow {
   deviceOui?: string;
   deviceSn?: string;
@@ -107,5 +133,16 @@ export function mapBackendAggregatedRow(b: BackendAggregatedRow): AggregatedRow 
     objectLdn: b.object_ldn ?? null,
     extra: b.extra ?? {},
     filled: b.filled,
+  };
+}
+
+export function mapBackendAggregatedMeta(b: BackendAggregatedResponse): AggregatedQueryMeta {
+  return {
+    requestedStartTime: b.requested_start_time,
+    requestedEndTime: b.requested_end_time,
+    actualStartTime: b.actual_start_time ?? null,
+    actualEndTime: b.actual_end_time ?? null,
+    granularity: b.granularity,
+    timezone: b.timezone,
   };
 }

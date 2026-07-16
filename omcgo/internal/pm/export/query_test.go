@@ -33,6 +33,20 @@ func TestBuildDeviceKeysetSQL_FirstBatch_NoCursor(t *testing.T) {
 	assert.NotEmpty(t, args)
 }
 
+func TestBuildDeviceKeysetSQL_TimeWindowUsesExclusiveEnd(t *testing.T) {
+	req := aggregator.QueryRequest{
+		Granularity: metrics.Granularity15Min,
+		StartTime:   time.Date(2026, 7, 16, 12, 15, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60)),
+		EndTime:     time.Date(2026, 7, 16, 15, 0, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60)),
+	}
+
+	q, _ := buildDeviceKeysetSQL("pm_metrics", req, nil, false, time.Time{}, uuid.Nil, 5000)
+
+	assert.Contains(t, q, "time >=")
+	assert.Contains(t, q, "time < ")
+	assert.NotContains(t, q, "time <=")
+}
+
 func TestBuildDeviceKeysetSQL_NextBatch_HasCursor(t *testing.T) {
 	req := aggregator.QueryRequest{Granularity: metrics.Granularity15Min}
 	cur := time.Now()
@@ -153,7 +167,8 @@ func TestBuildDistinctMetricsSQL(t *testing.T) {
 	assert.Contains(t, q, "FROM pm_metrics_hourly")
 	assert.Contains(t, q, "metric_path IN (")
 	assert.Contains(t, q, "time >=")
-	assert.Contains(t, q, "time <=")
+	assert.Contains(t, q, "time < ")
+	assert.NotContains(t, q, "time <=")
 	assert.NotEmpty(t, args)
 }
 

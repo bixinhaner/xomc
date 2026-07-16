@@ -478,12 +478,29 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 			total = n
 		}
 	}
-	response.OK(c, gin.H{"items": rows, "total": total})
+	result := gin.H{"items": rows, "total": total}
+	if !req.StartTime.IsZero() && !req.EndTime.IsZero() {
+		win := aggregator.BuildBucketWindow(req)
+		result["requested_start_time"] = win.RequestedStartTime
+		result["requested_end_time"] = win.RequestedEndTime
+		result["actual_start_time"] = nilIfZeroTime(win.ActualStartTime)
+		result["actual_end_time"] = nilIfZeroTime(win.ActualEndTime)
+		result["granularity"] = win.Granularity
+		result["timezone"] = win.Timezone
+	}
+	response.OK(c, result)
 }
 
 // fillEmptyBuckets 保留 pm 包内测试入口，真实实现收敛在 aggregator 包，供页面接口和导出共用。
 func fillEmptyBuckets(rows []aggregator.Row, req aggregator.QueryRequest) []aggregator.Row {
 	return aggregator.FillEmptyBuckets(rows, req)
+}
+
+func nilIfZeroTime(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
 }
 
 // RecomputeAggregation POST /pm/aggregation/recompute（T-0164 收尾 G5-Gap-2）

@@ -1,6 +1,8 @@
 package pm
 
 import (
+	"encoding/json"
+	"math"
 	"testing"
 	"time"
 
@@ -59,7 +61,10 @@ func Test_fillEmptyBuckets_FillMissingMetricInExistingBucket(t *testing.T) {
 	b, ok := findRow(out, ldn, bktTime, "B")
 	require.True(t, ok, "B 应被补出")
 	assert.True(t, b.Filled, "B 是占位行")
-	assert.Equal(t, float64(0), float64(b.MetricValue))
+	assert.True(t, math.IsNaN(float64(b.MetricValue)))
+	body, err := json.Marshal(b)
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `"metric_value":null`)
 	// 身份/时段字段抄真实行
 	require.NotNil(t, b.ObjectLDN)
 	assert.Equal(t, "Cellid=1", *b.ObjectLDN, "ObjectLDN 抄真实行")
@@ -322,6 +327,133 @@ func Test_fillEmptyBuckets_ExplicitObjectLDNsFillWhenNoRealRows(t *testing.T) {
 	assert.Equal(t, bucket, row.Time)
 	assert.Equal(t, bucket, row.StartTime)
 	assert.Equal(t, bucket.Add(15*time.Minute), row.EndTime)
+}
+
+func Test_fillEmptyBuckets_ExplicitObjectLDNsUseCompleteAlignedBuckets(t *testing.T) {
+	start := time.Date(2026, 7, 16, 11, 13, 17, 0, time.Local)
+	end := time.Date(2026, 7, 16, 12, 13, 17, 0, time.Local)
+	objectLDN := "Cellid=1,PLMN=46000"
+
+	rows := fillEmptyBuckets(nil, aggregator.QueryRequest{
+		Dimension:   aggregator.DimensionDevice,
+		Granularity: metrics.Granularity15Min,
+		DeviceOUIs:  []string{"48BF74"},
+		DeviceSNs:   []string{"1202000240194DP0015"},
+		MetricPaths: []string{"K900010052"},
+		ObjectLDNs:  []string{objectLDN},
+		StartTime:   start,
+		EndTime:     end,
+	})
+
+	require.Len(t, rows, 3)
+	got := make([]string, 0, len(rows))
+	for _, row := range rows {
+		got = append(got, row.StartTime.In(time.Local).Format("15:04"))
+		assert.True(t, row.Filled)
+		assert.Equal(t, row.StartTime, row.Time)
+		assert.Equal(t, row.StartTime.Add(15*time.Minute), row.EndTime)
+		assert.GreaterOrEqual(t, row.StartTime.UnixNano(), start.UnixNano())
+		assert.LessOrEqual(t, row.EndTime.UnixNano(), end.UnixNano())
+	}
+	assert.Equal(t, []string{"11:15", "11:30", "11:45"}, got)
+}
+
+func Test_fillEmptyBuckets_FiltersRealRowsOutsideCompleteBucketWindow(t *testing.T) {
+	start := time.Date(2026, 7, 16, 11, 13, 17, 0, time.Local)
+	end := time.Date(2026, 7, 16, 12, 13, 17, 0, time.Local)
+	objectLDN := "Cellid=1,PLMN=46000"
+	real1200 := time.Date(2026, 7, 16, 12, 0, 0, 0, time.Local)
+
+	rows := fillEmptyBuckets([]aggregator.Row{
+		{
+			DeviceSN:    "SN1",
+			MetricPath:  "K1",
+			MetricType:  metrics.MetricTypeKPI,
+			MetricValue: 1,
+			Granularity: metrics.Granularity15Min,
+			Time:        real1200,
+			StartTime:   real1200,
+			EndTime:     real1200.Add(15 * time.Minute),
+			ObjectLDN:   &objectLDN,
+		},
+	}, aggregator.QueryRequest{
+		Dimension:   aggregator.DimensionDevice,
+		Granularity: metrics.Granularity15Min,
+		DeviceSNs:   []string{"SN1"},
+		MetricPaths: []string{"K1"},
+		ObjectLDNs:  []string{objectLDN},
+		StartTime:   start,
+		EndTime:     end,
+	})
+
+	for _, row := range rows {
+		assert.NotEqual(t, "12:00", row.StartTime.In(time.Local).Format("15:04"))
+	}
+	assert.Len(t, rows, 3)
+}
+
+func Test_BuildBucketWindow_ReportsRequestedAndActualRange(t *testing.T) {
+	start := time.Date(2026, 7, 16, 11, 13, 17, 0, time.Local)
+	end := time.Date(2026, 7, 16, 12, 13, 17, 0, time.Local)
+
+	win := aggregator.BuildBucketWindow(aggregator.QueryRequest{
+		Granularity: metrics.Granularity15Min,
+		DeviceSNs:   []string{"SN1"},
+		MetricPaths: []string{"K1"},
+		ObjectLDNs:  []string{"Cellid=1"},
+		StartTime:   start,
+		EndTime:     end,
+	})
+
+	assert.Equal(t, start, win.RequestedStartTime)
+	assert.Equal(t, end, win.RequestedEndTime)
+	assert.Equal(t, "11:15", win.ActualStartTime.In(time.Local).Format("15:04"))
+	assert.Equal(t, "12:00", win.ActualEndTime.In(time.Local).Format("15:04"))
+	assert.Equal(t, "15min", win.Granularity)
+	assert.NotEmpty(t, win.Timezone)
+}
+
+func Test_BuildBucketWindow_IgnoresCalendarFiltersForActualRange(t *testing.T) {
+	start := time.Date(2026, 7, 16, 11, 13, 17, 0, time.Local)
+	end := time.Date(2026, 7, 16, 13, 13, 17, 0, time.Local)
+
+	win := aggregator.BuildBucketWindow(aggregator.QueryRequest{
+		Granularity: metrics.Granularity15Min,
+		DeviceSNs:   []string{"SN1"},
+		MetricPaths: []string{"K1"},
+		ObjectLDNs:  []string{"Cellid=1"},
+		StartTime:   start,
+		EndTime:     end,
+		Hours:       []int{12},
+	})
+
+	assert.Equal(t, "11:15", win.ActualStartTime.In(time.Local).Format("15:04"))
+	assert.Equal(t, "13:00", win.ActualEndTime.In(time.Local).Format("15:04"))
+}
+
+func Test_fillEmptyBuckets_CalendarFiltersUseLocalBucketTime(t *testing.T) {
+	start := time.Date(2026, 7, 16, 11, 13, 17, 0, time.Local)
+	end := time.Date(2026, 7, 16, 12, 13, 17, 0, time.Local)
+	objectLDN := "Cellid=1,PLMN=46000"
+
+	rows := fillEmptyBuckets(nil, aggregator.QueryRequest{
+		Dimension:   aggregator.DimensionDevice,
+		Granularity: metrics.Granularity15Min,
+		DeviceOUIs:  []string{"48BF74"},
+		DeviceSNs:   []string{"1202000240194DP0015"},
+		MetricPaths: []string{"K900010052"},
+		ObjectLDNs:  []string{objectLDN},
+		StartTime:   start.UTC(),
+		EndTime:     end.UTC(),
+		Hours:       []int{11},
+	})
+
+	require.Len(t, rows, 3)
+	got := make([]string, 0, len(rows))
+	for _, row := range rows {
+		got = append(got, row.StartTime.In(time.Local).Format("15:04"))
+	}
+	assert.Equal(t, []string{"11:15", "11:30", "11:45"}, got)
 }
 
 func Test_fillEmptyBuckets_ExplicitObjectSkeletonRequest(t *testing.T) {

@@ -35,6 +35,7 @@ import {
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { ReloadOutlined, LineChartOutlined, ExportOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import type { Dayjs } from 'dayjs';
 import {
   useAggregatedMetricsByDevices,
   useMetricObjectsByDevices,
@@ -54,7 +55,6 @@ import {
   ALL_HOURS,
   ALL_WEEKDAYS,
   attachCompareSeries,
-  extendChartsAxis,
   previousWindow,
 } from './dashboardFilterUtils';
 import {
@@ -90,6 +90,32 @@ const GRANULARITY_MSG_IDS: { id: string; value: Granularity }[] = [
 
 const MAX_DEVICES = 10;
 
+function defaultRangeForGranularity(g: Granularity): [Dayjs, Dayjs] {
+  const end = dayjs();
+  switch (g) {
+    case '15min':
+      return [end.subtract(3, 'hour'), end];
+    case 'hourly':
+      return [end.subtract(24, 'hour'), end];
+    case 'daily':
+      return [end.subtract(7, 'day'), end];
+    case 'weekly':
+      return [end.subtract(30, 'day'), end];
+    case 'monthly':
+      return [end.subtract(6, 'month'), end];
+    default:
+      return [end.subtract(24, 'hour'), end];
+  }
+}
+
+function actualRangeFromMeta(meta: { actualStartTime?: string | null; actualEndTime?: string | null } | undefined): [Dayjs, Dayjs] | null {
+  if (!meta?.actualStartTime || !meta.actualEndTime) return null;
+  const start = dayjs(meta.actualStartTime);
+  const end = dayjs(meta.actualEndTime);
+  if (!start.isValid() || !end.isValid()) return null;
+  return [start, end];
+}
+
 export default function DeviceListPane() {
   const intl = useIntl();
   const { message } = App.useApp();
@@ -112,9 +138,10 @@ export default function DeviceListPane() {
   // 用户是否手动改过指标——改过则切制式不再覆盖默认集。
   const [metricsTouched, setMetricsTouched] = useState(false);
   const [granularity, setGranularity] = useState<Granularity>('15min');
+  const [rangeTouched, setRangeTouched] = useState(false);
   // 共用三级筛选 + 周期对比开关（大时间段 + 星期 + 小时段 + 对比）。
   const [filter, setFilter] = useState<DashboardFilterValue>({
-    range: [dayjs().subtract(7, 'day'), dayjs()],
+    range: defaultRangeForGranularity('15min'),
     weekdays: [...ALL_WEEKDAYS],
     hours: [...ALL_HOURS],
     compare: false,
@@ -173,6 +200,7 @@ export default function DeviceListPane() {
 
   const {
     data: rawRows = [],
+    meta: currentMeta,
     total: rawTotal,
     truncated,
     isLoading,
@@ -186,20 +214,23 @@ export default function DeviceListPane() {
   );
 
   // 周期对比：上一周期窗口同样取数（同设备/指标/粒度，窗口换为 previousWindow）。
+  const actualRange = useMemo(() => actualRangeFromMeta(currentMeta), [currentMeta]);
   const prevParams = useMemo(() => {
     if (!submitted || !submitted.compare) return null;
+    const [prevStart, prevEnd] = actualRange ? previousWindow(actualRange) : [null, null];
+    if (!prevStart || !prevEnd) return null;
     return {
       granularity: submitted.granularity,
       metricPaths: submitted.metricPaths,
-      startTime: submitted.prevStartTime,
-      endTime: submitted.prevEndTime,
+      startTime: prevStart.toISOString(),
+      endTime: prevEnd.toISOString(),
       limit: 5000,
       fillEmpty: true,
       // #599：周期对比同口径传 weekdays/hours。
       weekdays: submitted.weekdays.length < 7 ? submitted.weekdays : undefined,
       hours: submitted.hours.length < 24 ? submitted.hours : undefined,
     };
-  }, [submitted]);
+  }, [actualRange, submitted]);
 
   const {
     data: rawPrevRows = [],
@@ -229,24 +260,19 @@ export default function DeviceListPane() {
   // 星期/小时段已由后端过滤（#599），前端只需按小区/PLMN 白名单即席过滤 + 转置分线。
   const charts = useMemo(() => {
     if (!submitted) return [];
-    const wd = new Set(submitted.weekdays);
-    const hr = new Set(submitted.hours);
     // T-0193：按小区/PLMN 白名单即席过滤，再转置分线。
     const curRows = filterRowsByObjectLdns(rawRows, submitted.allowedLdns);
-    // T-AXISFILL：转置出当前图集后立即扩轴（按 submitted 范围+粒度连续铺刻度、套星期/小时筛选、并集真实桶），
-    // 空刻度补 '-'，再挂周期对比（compare 按毫秒对齐到已扩展的 cur.buckets，prev 不单独扩轴）。
-    const cur = extendChartsAxis(buildDeviceMetricCharts(curRows, submitted.granularity), {
-      rangeStartMs: dayjs(submitted.startTime).valueOf(),
-      rangeEndMs: dayjs(submitted.endTime).valueOf(),
-      weekdays: wd,
-      hours: hr,
-      granularity: submitted.granularity,
-    });
+    // #88：设备性能查看不再由前端按请求范围生成桶轴；后端已按完整时间桶补齐，
+    // 前端只使用后端返回的 startTime 集合画图。
+    const cur = buildDeviceMetricCharts(curRows, submitted.granularity);
     if (!submitted.compare) return cur;
     const prevFilteredRows = filterRowsByObjectLdns(rawPrevRows, submitted.allowedLdns);
     const prev = buildDeviceMetricCharts(prevFilteredRows, submitted.granularity);
-    return attachCompareSeries(cur, prev, submitted.offsetMs, submitted.granularity);
-  }, [rawRows, rawPrevRows, submitted]);
+    const compareOffsetMs = actualRange
+      ? actualRange[1].valueOf() - actualRange[0].valueOf()
+      : submitted.offsetMs;
+    return attachCompareSeries(cur, prev, compareOffsetMs, submitted.granularity);
+  }, [actualRange, rawRows, rawPrevRows, submitted]);
 
   // ── 行为 ───────────────────────────────────────────────────────────
   const handleTechChange = (v: Tech) => {
@@ -256,6 +282,23 @@ export default function DeviceListPane() {
     setCellSel({}); // 设备清空 → 下钻选择重置（全选）。
   };
 
+  const handleGranularityChange = (next: Granularity) => {
+    setGranularity(next);
+    if (!rangeTouched) {
+      setFilter((cur) => ({ ...cur, range: defaultRangeForGranularity(next) }));
+    }
+  };
+
+  const handleFilterChange = (next: DashboardFilterValue) => {
+    if (
+      !next.range[0].isSame(filter.range[0]) ||
+      !next.range[1].isSame(filter.range[1])
+    ) {
+      setRangeTouched(true);
+    }
+    setFilter(next);
+  };
+
   // ── 导出（T4 dashboard 来源）：带当前筛选 POST 建任务，不卡页面 ──────────
   const createExport = useCreateKpiExport();
 
@@ -263,17 +306,19 @@ export default function DeviceListPane() {
   // A1：下钻定格的小区/PLMN 白名单一并带进导出（复用 handleQuery 的 getEffectiveLdns，空=不过滤）。
   const buildExportSelection = (): DashboardExportSelection => {
     const [start, end] = filter.range;
+    const actualStartTime = submitted ? currentMeta?.actualStartTime : undefined;
+    const actualEndTime = submitted ? currentMeta?.actualEndTime : undefined;
     return {
       technology: tech,
-      deviceSns,
-      metricPaths,
-      granularity,
-      startTime: start.toISOString(),
-      endTime: end.toISOString(),
-      objectLdns: getEffectiveLdns(cellSel, objectsByDevice),
+      deviceSns: submitted?.deviceSns ?? deviceSns,
+      metricPaths: submitted?.metricPaths ?? metricPaths,
+      granularity: submitted?.granularity ?? granularity,
+      startTime: actualStartTime ?? submitted?.startTime ?? start.toISOString(),
+      endTime: actualEndTime ?? submitted?.endTime ?? end.toISOString(),
+      objectLdns: submitted?.allowedLdns ?? getEffectiveLdns(cellSel, objectsByDevice),
       // #599：导出与出图同口径。
-      weekdays: filter.weekdays,
-      hours: filter.hours,
+      weekdays: submitted?.weekdays ?? filter.weekdays,
+      hours: submitted?.hours ?? filter.hours,
     };
   };
 
@@ -410,7 +455,7 @@ export default function DeviceListPane() {
             >
               <Radio.Group
                 value={granularity}
-                onChange={(e) => setGranularity(e.target.value)}
+                onChange={(e) => handleGranularityChange(e.target.value)}
                 options={granularityOptions}
                 optionType="button"
                 buttonStyle="solid"
@@ -436,7 +481,7 @@ export default function DeviceListPane() {
           )}
 
           <div style={{ marginTop: 16 }}>
-            <DashboardFilterBar value={filter} onChange={setFilter} />
+            <DashboardFilterBar value={filter} onChange={handleFilterChange} />
           </div>
 
           <div style={{ marginTop: 16 }}>

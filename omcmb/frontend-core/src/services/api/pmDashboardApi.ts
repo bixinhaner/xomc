@@ -12,10 +12,11 @@ import http from '../http';
 import type {
   Granularity,
   AggregatedQueryParams,
+  AggregatedQueryResult,
   AggregatedRow,
-  BackendAggregatedRow,
+  BackendAggregatedResponse,
 } from '../../types/pmDashboard';
-import { mapBackendAggregatedRow } from '../../types/pmDashboard';
+import { mapBackendAggregatedMeta, mapBackendAggregatedRow } from '../../types/pmDashboard';
 import { serializeRepeatedParams } from '../../utils/queryParams';
 
 // ── 真实 API 服务对象 ────────────────────────────────────────────────
@@ -24,7 +25,7 @@ export const pmDashboardApi = {
   // G6 Phase 4: 走 G5 aggregator → 按粒度路由聚合表（hourly+ 直查物化表，15min 退回 pm_metrics 原表）。
   async queryAggregated(
     params: AggregatedQueryParams,
-  ): Promise<{ rows: AggregatedRow[]; total: number }> {
+  ): Promise<AggregatedQueryResult> {
     // metricPaths 后端期望 comma-separated；其它 snake_case 参数手工拼，避免被 http 拦截器误转。
     const qp: Record<string, unknown> = {
       granularity: params.granularity,
@@ -53,7 +54,7 @@ export const pmDashboardApi = {
       // 走「重复键」形态 ?object_ldns=a&object_ldns=b（值整体 encode），后端 QueryArray 取回（与 #401 修复同模式）。
       object_ldns: params.objectLdns?.length ? params.objectLdns : undefined,
     };
-    const { data } = await http.get<{ items: BackendAggregatedRow[] | null; total: number }>(
+    const { data } = await http.get<BackendAggregatedResponse>(
       '/pm/metrics/aggregated',
       {
         params: qp,
@@ -63,7 +64,7 @@ export const pmDashboardApi = {
     );
     const rows = (data.items ?? []).map(mapBackendAggregatedRow);
     // T-0194：total 是后端真实 COUNT（命中 limit 时 > rows.length），前端据此提示截断。
-    return { rows, total: data.total ?? rows.length };
+    return { rows, total: data.total ?? rows.length, meta: mapBackendAggregatedMeta(data) };
   },
 };
 
@@ -71,7 +72,7 @@ export const pmDashboardApi = {
 
 export const pmDashboardMock: typeof pmDashboardApi = {
   // Mock：每个 metric 拉出 deterministic 序列。粒度按入参 8 桶。
-  async queryAggregated(params): Promise<{ rows: AggregatedRow[]; total: number }> {
+  async queryAggregated(params): Promise<AggregatedQueryResult> {
     const buckets = mockBuckets(params.granularity);
     const paths = params.metricPaths && params.metricPaths.length > 0
       ? params.metricPaths
@@ -97,7 +98,18 @@ export const pmDashboardMock: typeof pmDashboardApi = {
         });
       });
     });
-    return { rows: out, total: out.length };
+    return {
+      rows: out,
+      total: out.length,
+      meta: {
+        requestedStartTime: params.startTime,
+        requestedEndTime: params.endTime,
+        actualStartTime: out[0]?.startTime ?? null,
+        actualEndTime: out[out.length - 1]?.endTime ?? null,
+        granularity: params.granularity,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      },
+    };
   },
 };
 
