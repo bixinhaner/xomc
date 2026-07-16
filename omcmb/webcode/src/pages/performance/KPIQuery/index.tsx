@@ -310,8 +310,9 @@ export default function KPIQuery() {
     void refetchAgg();
   };
 
-  // 导出取「最近一次实际查询」的快照（submittedPayload/submittedRange），而非表单实时值，
-  // 保证"导出=屏幕所见"。复用 dashboard 取数链路，但用 kpi_query 来源输出查询页表格列。
+  // 导出取「最近一次实际查询」的筛选快照（submittedPayload/submittedRange），而非表单实时值。
+  // 表格已是后端分页，导出不带当前页 limit/offset，口径是当前筛选条件下的全量数据。
+  // 复用 dashboard 取数链路，但用 kpi_query 来源输出查询页表格列。
   const handleExport = () => {
     if (!submittedPayload || !submittedRange) return; // 按钮已禁用，双保险
     const sel = {
