@@ -415,6 +415,32 @@ SELECT create_hypertable('public.mr_records', by_range('time', INTERVAL '1 day')
 SELECT create_hypertable('public.trace_messages', by_range('captured_at', INTERVAL '1 day'), if_not_exists => TRUE, migrate_data => TRUE);
 -- pm_metrics: seed 原为 86400000000 µs = 1 day，但 000045 已改 4 hours（修 B0）→ 这里直接以 4 hours 建表。
 SELECT create_hypertable('public.pm_metrics', by_range('time', INTERVAL '4 hours'), if_not_exists => TRUE, migrate_data => TRUE);
+
+-- +goose StatementBegin
+-- 创建连续聚合视图，按小时通用聚合，替换掉以前 Go 里面复杂的 fallback 现场汇总和全网表扫描
+CREATE MATERIALIZED VIEW public.pm_metrics_hourly_cagg
+WITH (timescaledb.continuous) AS
+SELECT
+    time_bucket('1 hour', time) AS bucket_time,
+    metric_path,
+    statis_type,
+    SUM(metric_value) as sum_val,
+    AVG(metric_value) as avg_val,
+    MAX(metric_value) as max_val,
+    MIN(metric_value) as min_val
+FROM public.pm_metrics
+WHERE granularity = '15min'
+GROUP BY bucket_time, metric_path, statis_type
+WITH NO DATA;
+
+-- 设定自动刷新策略（由于实时聚合开启，15分钟刷新即可保障大部分场景的物化，
+-- 查询视图时引擎会自动拼接上过去 15 分钟尚未物化的热数据，对应用透明）
+SELECT add_continuous_aggregate_policy('public.pm_metrics_hourly_cagg',
+    start_offset => INTERVAL '24 hours',
+    end_offset => INTERVAL '15 minutes',
+    schedule_interval => INTERVAL '15 minutes');
+-- +goose StatementEnd
+
 -- pm_metrics_hourly: 604800000000 µs = 7 days; col "time"
 SELECT create_hypertable('public.pm_metrics_hourly', by_range('time', INTERVAL '7 days'), if_not_exists => TRUE, migrate_data => TRUE);
 -- pm_group_metrics_hourly: 604800000000 µs = 7 days; col "time"
@@ -801,6 +827,10 @@ DROP TABLE IF EXISTS public.pm_metrics_monthly;
 DROP TABLE IF EXISTS public.pm_metrics_weekly;
 DROP TABLE IF EXISTS public.pm_metrics_daily;
 DROP TABLE IF EXISTS public.pm_metrics_hourly;
+-- +goose StatementBegin
+SELECT remove_continuous_aggregate_policy('public.pm_metrics_hourly_cagg', if_exists => TRUE);
+DROP MATERIALIZED VIEW IF EXISTS public.pm_metrics_hourly_cagg;
+-- +goose StatementEnd
 DROP TABLE IF EXISTS public.pm_metrics;
 DROP TABLE IF EXISTS public.pm_files;
 DROP TABLE IF EXISTS public.trace_messages;
