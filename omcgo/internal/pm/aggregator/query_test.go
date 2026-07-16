@@ -146,6 +146,30 @@ func Test_buildDeviceTableSQL_PreservesWhereFilters(t *testing.T) {
 	assert.Contains(t, sql, "granularity =")
 }
 
+func Test_buildDeviceTableSQL_PageByPivotRowPagesKeysThenReturnsAllMetrics(t *testing.T) {
+	sql, args, err := buildDeviceTableSQL("pm_metrics", QueryRequest{
+		Granularity:    metrics.Granularity15Min,
+		DeviceSNs:      []string{"SN-1", "SN-2"},
+		MetricPaths:    []string{"K1", "K2"},
+		PageByPivotRow: true,
+		Limit:          50,
+		Offset:         100,
+	})
+	require.NoError(t, err)
+
+	assert.Contains(t, sql, "WITH dedup AS")
+	assert.Contains(t, sql, "page_keys AS")
+	assert.Contains(t, sql, "SELECT DISTINCT device_oui, device_sn, COALESCE(object_ldn, '') AS object_ldn, granularity, \"time\"")
+	assert.Contains(t, sql, "JOIN page_keys pk")
+	assert.Contains(t, sql, "AND pk.\"time\" = d.\"time\"")
+	assert.Contains(t, sql, "ORDER BY \"time\" DESC, device_sn ASC, object_ldn ASC")
+	assert.Contains(t, sql, "ORDER BY d.\"time\" DESC, d.device_sn ASC, COALESCE(d.object_ldn, '') ASC, d.metric_path ASC")
+	assert.Contains(t, sql, "LIMIT $")
+	assert.Contains(t, sql, "OFFSET $")
+	assert.Equal(t, 50, args[len(args)-2])
+	assert.Equal(t, 100, args[len(args)-1])
+}
+
 func Test_SelectTable_UnknownGranularity(t *testing.T) {
 	_, err := SelectTable(metrics.Granularity("xyz"), DimensionDevice)
 	assert.Error(t, err)

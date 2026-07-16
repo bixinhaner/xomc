@@ -341,6 +341,7 @@ func (h *Handler) ListAggregatedCounters(c *gin.Context) {
 //   - metric_type：counter / kpi
 //   - start_time / end_time：RFC3339
 //   - limit / offset
+//   - page_by=pivot_row：limit / offset 按透视表行 key 分页，total 返回透视表行总数
 //
 // 没注入 aggregator（兼容老部署）时返 503。
 func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
@@ -369,6 +370,18 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 	}
 	if v := c.Query("device_sn"); v != "" {
 		req.DeviceSNs = []string{v}
+	}
+	if v := c.Query("device_sns"); v != "" {
+		parts := strings.Split(v, ",")
+		sns := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if p = strings.TrimSpace(p); p != "" {
+				sns = append(sns, p)
+			}
+		}
+		if len(sns) > 0 {
+			req.DeviceSNs = sns
+		}
 	}
 	if v := c.Query("device_group_id"); v != "" {
 		id, err := uuid.Parse(v)
@@ -420,6 +433,9 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
 			req.Offset = n
 		}
+	}
+	if c.Query("page_by") == "pivot_row" {
+		req.PageByPivotRow = true
 	}
 	// #599：星期/小时段后端过滤（逗号分隔 int 列表，全选/空 = 不过滤）。
 	if v := c.Query("weekdays"); v != "" {
@@ -473,8 +489,16 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 	// 仅在指定了 limit 时才多跑一次（无 limit = 全量返回，total 即 len 无需 COUNT）；
 	// COUNT 失败不阻断结果返回，退回本页行数兜底。
 	total := len(rows)
-	if req.Limit > 0 && !(fillEmpty && aggregator.IsExplicitObjectSkeletonRequest(req)) {
-		if n, err := h.aggr.Count(c.Request.Context(), req); err == nil {
+	if req.Limit > 0 {
+		countReq := req
+		// page_by=pivot_row + fill_empty 的页面语义是「按对象骨架补齐透视行」。
+		// 当所选指标本身没有真实行时，按 metric_path count 会得到 0；此时 total 必须按
+		// 同设备/对象/时间桶的透视行骨架计数，才能和 UI 补出的行数一致。
+		if req.PageByPivotRow && fillEmpty && aggregator.IsExplicitObjectSkeletonRequest(req) {
+			countReq.MetricPaths = nil
+			countReq.MetricType = nil
+		}
+		if n, err := h.aggr.Count(c.Request.Context(), countReq); err == nil {
 			total = n
 		}
 	}

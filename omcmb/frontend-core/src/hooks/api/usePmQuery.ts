@@ -17,12 +17,19 @@ import type {
   QueryTemplate,
   UpdateTemplateInput,
 } from '../../types/pmQuery';
-import type { AggregatedQueryMeta, AggregatedQueryParams, AggregatedRow } from '../../types/pmDashboard';
+import type { AggregatedQueryMeta, AggregatedQueryParams, AggregatedQueryResult, AggregatedRow } from '../../types/pmDashboard';
 import type { MetricObject } from '../../types/pmObject';
 
 const objectsApi = createApiSwitch(pmObjectsMock, pmObjectsApi);
 
 const KEY = ['pm-query-templates'] as const;
+
+type AggregatedMetricsQueryConfig = {
+  queryKey: readonly unknown[];
+  queryFn: () => Promise<AggregatedQueryResult>;
+  enabled: boolean;
+  staleTime: number;
+};
 
 export function useQueryTemplates(params?: ListTemplateParams) {
   return useQuery({
@@ -82,13 +89,22 @@ export function useAggregatedMetricsByDevices(
 ) {
   // locale 并入查询键：切语言后图表标题指标名随后端本地化重取（pm-name-i18n）。
   const locale = useAppStore((s) => s.locale);
+  const usePivotRowPage = baseParams.pageBy === 'pivot_row';
+  const queryConfigs: AggregatedMetricsQueryConfig[] = usePivotRowPage
+    ? [{
+        queryKey: ['pm-aggregated', { ...baseParams, deviceSns, locale }],
+        queryFn: () => pmDashboardApi.queryAggregated({ ...baseParams, deviceSns }),
+        enabled: enabled && deviceSns.length > 0,
+        staleTime: 30_000,
+      }]
+    : deviceSns.map((sn) => ({
+        queryKey: ['pm-aggregated', { ...baseParams, deviceSn: sn, locale }],
+        queryFn: () => pmDashboardApi.queryAggregated({ ...baseParams, deviceSn: sn }),
+        enabled,
+        staleTime: 30_000,
+      }));
   const queries = useQueries({
-    queries: deviceSns.map((sn) => ({
-      queryKey: ['pm-aggregated', { ...baseParams, deviceSn: sn, locale }],
-      queryFn: () => pmDashboardApi.queryAggregated({ ...baseParams, deviceSn: sn }),
-      enabled,
-      staleTime: 30_000,
-    })),
+    queries: queryConfigs,
   });
   const isLoading = queries.some((q) => q.isLoading);
   const isFetching = queries.some((q) => q.isFetching);
@@ -99,7 +115,7 @@ export function useAggregatedMetricsByDevices(
   // T-0194：跨设备汇总真实总数；任一设备查询命中 limit（返回行数 < 该设备真实总数）即判截断。
   const total: number = queries.reduce((sum, q) => sum + (q.data?.total ?? 0), 0);
   const truncated = queries.some(
-    (q) => q.data != null && q.data.total > q.data.rows.length,
+    (q) => !usePivotRowPage && q.data != null && q.data.total > q.data.rows.length,
   );
   const refetch = () => queries.forEach((q) => void q.refetch());
   return { data, meta, total, truncated, isLoading, isFetching, isError, errors, refetch };

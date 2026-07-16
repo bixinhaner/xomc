@@ -120,6 +120,8 @@ const DEFAULT_PAYLOAD: QueryTemplatePayload = {
   deviceType: 'ENB',
 };
 
+const DEFAULT_PIVOT_PAGE_SIZE = 50;
+
 interface SaveTemplateFormState {
   open: boolean;
   mode: 'create' | 'update';
@@ -207,6 +209,8 @@ export default function KPIQuery() {
   // submittedPayload 是真正用于查询的快照；表单编辑时不立即查询，等用户点"查询"
   const [submittedPayload, setSubmittedPayload] = useState<QueryTemplatePayload | null>(null);
   const [submittedRange, setSubmittedRange] = useState<{ start: string; end: string } | null>(null);
+  const [pivotPage, setPivotPage] = useState(1);
+  const [pivotPageSize, setPivotPageSize] = useState(DEFAULT_PIVOT_PAGE_SIZE);
 
   // #619：加载当前选中设备的可用小区列表（供 CellDrilldownSelector 展示选项）。
   const { byDevice } = useMetricObjectsByDevices(
@@ -228,13 +232,15 @@ export default function KPIQuery() {
       metricPaths: submittedPayload.metricPaths,
       startTime: submittedRange.start,
       endTime: submittedRange.end,
-      limit: 5000,
+      limit: pivotPageSize,
+      offset: (pivotPage - 1) * pivotPageSize,
+      pageBy: 'pivot_row' as const,
       // 让后端按 (时间桶 × 指标) 补齐占位行，避免该设备此时段全空时整张表"暂无数据"
       fillEmpty: true,
       // #619：测量对象后端过滤（空 = 不过滤）。
       objectLdns: effectiveLdns.length > 0 ? effectiveLdns : undefined,
     };
-  }, [submittedPayload, submittedRange, effectiveLdns]);
+  }, [submittedPayload, submittedRange, effectiveLdns, pivotPage, pivotPageSize]);
 
   const {
     data: aggregatedRows,
@@ -296,6 +302,7 @@ export default function KPIQuery() {
     }
     setSubmittedPayload(payload);
     setSubmittedRange(range);
+    setPivotPage(1);
     // #619：点查询时才把勾选起到快照，之后过滤才生效。
     setSubmittedCellSel(cellSel);
     // 「查询」兼并旧「刷新」按钮的强刷语义：同条件再次点击也强制重拉一次最新数据
@@ -858,6 +865,8 @@ export default function KPIQuery() {
                     setActiveTemplateId(undefined);
                     setSubmittedPayload(null);
                     setSubmittedRange(null);
+                    setPivotPage(1);
+                    setPivotPageSize(DEFAULT_PIVOT_PAGE_SIZE);
                   }}
                 >
                   {t('common.reset')}
@@ -896,6 +905,17 @@ export default function KPIQuery() {
           <PivotTable
             rows={aggregatedRows}
             loading={aggLoading || aggFetching}
+            pagination={{
+              current: pivotPage,
+              pageSize: pivotPageSize,
+              total: aggTotal,
+              showSizeChanger: true,
+              showTotal: (count) => t('perf.kpiQuery.pivot.totalRows', { count }),
+              onChange: (page, pageSize) => {
+                setPivotPage(page);
+                setPivotPageSize(pageSize);
+              },
+            }}
             // gNB 查空时给更明确的引导（#201）：5G 真机样本厂商错配会让 KPI 算不出、
             // 后端返回 items=null，泛化「暂无数据」无法区分「指标库未注册」与「时段无采样」。
             // 仅在已发起查询（submittedPayload 存在）且制式=gNB 时替换文案。
