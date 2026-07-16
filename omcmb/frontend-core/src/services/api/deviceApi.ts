@@ -177,6 +177,114 @@ interface BackendDevice {
   ssl_cert_validity?: string;
 }
 
+export interface ParameterSyncRequest {
+  id: string;
+  deviceId: string;
+  deviceSn: string;
+  triggerReason: string;
+  syncScope: string;
+  requestedPaths: string[];
+  status: string;
+  runId?: string;
+  activeRunId?: string;
+  resultCode?: string;
+  errorMessage?: string;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  updatedAt: string;
+}
+
+interface BackendParameterSyncRequest {
+  id: string;
+  device_id: string;
+  device_sn: string;
+  trigger_reason: string;
+  sync_scope: string;
+  requested_paths?: string[];
+  status: string;
+  run_id?: string;
+  active_run_id?: string;
+  result_code?: string;
+  error_message?: string;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+  updated_at: string;
+}
+
+const PARAMETER_SYNC_TERMINAL_STATUSES = new Set([
+  'succeeded',
+  'failed',
+  'timed_out',
+  'cancelled',
+  'deduplicated',
+  'rejected',
+]);
+
+function mapParameterSyncRequest(req: BackendParameterSyncRequest): ParameterSyncRequest {
+  return {
+    id: req.id,
+    deviceId: req.device_id,
+    deviceSn: req.device_sn,
+    triggerReason: req.trigger_reason,
+    syncScope: req.sync_scope,
+    requestedPaths: req.requested_paths ?? [],
+    status: req.status,
+    runId: req.run_id,
+    activeRunId: req.active_run_id,
+    resultCode: req.result_code,
+    errorMessage: req.error_message,
+    createdAt: req.created_at,
+    startedAt: req.started_at,
+    completedAt: req.completed_at,
+    updatedAt: req.updated_at,
+  };
+}
+
+function isParameterSyncTerminalStatus(status: string): boolean {
+  return PARAMETER_SYNC_TERMINAL_STATUSES.has(status);
+}
+
+function createAbortError(): Error {
+  if (typeof DOMException !== 'undefined') {
+    return new DOMException('The operation was aborted.', 'AbortError');
+  }
+  const error = new Error('The operation was aborted.');
+  error.name = 'AbortError';
+  return error;
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw createAbortError();
+  }
+}
+
+async function delay(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) {
+    await new Promise<void>((resolve) => {
+      globalThis.setTimeout(resolve, delayMs);
+    });
+    return;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const timerId = globalThis.setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, delayMs);
+
+    const onAbort = () => {
+      globalThis.clearTimeout(timerId);
+      signal.removeEventListener('abort', onAbort);
+      reject(createAbortError());
+    };
+
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 export interface BatchOperationResult {
   total: number;
   succeeded: number;
@@ -869,8 +977,8 @@ export const deviceApi = {
     await http.post(`/devices/${id}/reboot`);
   },
 
-  // T-0126: 手动触发 Path B 全量参数同步（reason="manual"）。
-  // 替代旧 deviceParameterApi.syncParameters（Path A 已下线）。
+  // 手动触发 durable paramsync 参数同步（reason="manual"）。
+  // 后端当前复用 /devices/:id/sync-params 兼容端点；运行时由 paramSyncStarter 提交到 paramsync。
   // 后端 POST /api/v1/devices/:id/sync-params 响应 202 {status, source_id, device_id, serial_number, force}
   // force: 预留供未来节流绕过；当前 manual 端点天然不走节流。
   async syncDeviceParams(
@@ -886,6 +994,7 @@ export const deviceApi = {
     serialNumber: string;
     force: boolean;
     parameterPathsCount?: number;
+    taskCount?: number;
     gpvTaskCount?: number;
   }> {
     const { data } = await http.post<{
@@ -912,8 +1021,37 @@ export const deviceApi = {
       serialNumber: data.serial_number,
       force: data.force,
       parameterPathsCount: data.parameter_paths_count,
+      taskCount: data.gpv_task_count,
       gpvTaskCount: data.gpv_task_count,
     };
+  },
+
+  async getParameterSyncRequest(requestId: string): Promise<ParameterSyncRequest> {
+    const { data } = await http.get<BackendParameterSyncRequest>(`/parameter-sync/requests/${requestId}`);
+    return mapParameterSyncRequest(data);
+  },
+
+  async waitForParameterSyncRequest(
+    requestId: string,
+    options?: { timeoutMs?: number; intervalMs?: number; signal?: AbortSignal; onPoll?: (request: ParameterSyncRequest) => void },
+  ): Promise<ParameterSyncRequest> {
+    throwIfAborted(options?.signal);
+    const timeoutMs = options?.timeoutMs ?? 10 * 60 * 1000;
+    const intervalMs = options?.intervalMs ?? 2000;
+    const deadlineAt = Date.now() + timeoutMs;
+
+    while (true) {
+      throwIfAborted(options?.signal);
+      const request = await this.getParameterSyncRequest(requestId);
+      options?.onPoll?.(request);
+      if (isParameterSyncTerminalStatus(request.status)) {
+        return request;
+      }
+      if (Date.now() >= deadlineAt) {
+        throw new Error(`parameter sync request ${requestId} timed out`);
+      }
+      await delay(intervalMs, options?.signal);
+    }
   },
 
   async getNEList(params: { keyword?: string } & PageRequest): Promise<PageResponse<NE>> {

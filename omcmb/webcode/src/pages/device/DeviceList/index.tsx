@@ -12,6 +12,7 @@ import {
   EyeOutlined,
   FileTextOutlined,
   ReloadOutlined,
+  SyncOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
@@ -22,7 +23,7 @@ import StatisticsPanel from '@/components/StatisticsPanel';
 import StatusIndicator from '@/components/StatusIndicator';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import AutoRefreshDropdown from '@/pages/alarm/components/AutoRefreshDropdown';
-import { prefetchDeviceDetailContext, useDeviceList, useBatchRebootDevices, useDeviceGroups, useUpdateDevice } from '@core/hooks/api/useDevices';
+import { prefetchDeviceDetailContext, useDeviceList, useBatchRebootDevices, useDeviceGroups, useUpdateDevice, useSyncDeviceParams } from '@core/hooks/api/useDevices';
 import { useProductList } from '@core/hooks/api/useProducts';
 import { useDictionaryBatch } from '@core/hooks/api/useSystem';
 import { resolveNetworkTypeLabel } from '@core/utils/networkType';
@@ -57,6 +58,7 @@ import { useAppStore } from '@core/store/appStore';
 import { buildDefaultUfteTaskName } from '@/pages/transfer/shared';
 import dayjs from 'dayjs';
 import { buildBatchTaskTypeMap, batchActionHasDetail } from './deviceBatchTask';
+import { getDeviceListParamSyncPaths } from './deviceListParamSync';
 import type { Device } from '@core/types/device';
 import { formatSystemTime } from '@core/utils/systemTime';
 import { computeCumulativeOnlineDurationSeconds, computeCurrentOnlineDurationSeconds } from '@core/utils/onlineDuration';
@@ -76,6 +78,22 @@ const exportDeviceApi = createApiSwitch(deviceService as unknown as typeof devic
 // DataTable tableId,导出时据此读取"列设置"localStorage(须与 <DataTable tableId> 一致)。
 const DEVICE_LIST_TABLE_ID = 'device-list-table';
 const ALARM_SYNC_BATCH_CONCURRENCY = 4;
+const PARAM_SYNC_BATCH_CONCURRENCY = 4;
+
+function createBatchAbortError(): Error {
+  if (typeof DOMException !== 'undefined') {
+    return new DOMException('The operation was aborted.', 'AbortError');
+  }
+  const error = new Error('The operation was aborted.');
+  error.name = 'AbortError';
+  return error;
+}
+
+function throwIfBatchAborted(signal: AbortSignal): void {
+  if (signal.aborted) {
+    throw createBatchAbortError();
+  }
+}
 
 // 筛选下拉框 name → 表格列 key 映射:列设置隐藏该列时,对应筛选下拉一并隐藏
 // (用户决策 2026-06-09)。searchText 无对应列、不入表 → 始终显示。
@@ -278,14 +296,17 @@ export default function DeviceList() {
   const [collectTasks, setCollectTasks] = useState<LocalTask[]>([]);
   const [collectDrawerTitle, setCollectDrawerTitle] = useState('');
   const [batchAlarmSyncRunning, setBatchAlarmSyncRunning] = useState(false);
+  const [batchParamSyncRunning, setBatchParamSyncRunning] = useState(false);
 
   const [logModalOpen, setLogModalOpen] = useState(false);
   const [currentLogTask, setCurrentLogTask] = useState<LocalTask | null>(null);
   const alarmSyncBatchAbortRef = useRef<AbortController | null>(null);
+  const paramSyncBatchAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     return () => {
       alarmSyncBatchAbortRef.current?.abort();
+      paramSyncBatchAbortRef.current?.abort();
     };
   }, []);
 
@@ -412,6 +433,7 @@ export default function DeviceList() {
   const batchReboot = useBatchRebootDevices();
   const updateDevice = useUpdateDevice();
   const triggerAlarmSync = useTriggerAlarmSync();
+  const syncDeviceParams = useSyncDeviceParams();
   useAlarmCountWithDeviceListInvalidation();
   const createUfteTask = useCreateUnifiedFileTransferTask();
   const downloadStationLog = useDownloadStationLog();
@@ -857,6 +879,10 @@ export default function DeviceList() {
         void message.warning(t('task.status.running'));
         return;
       }
+      if (actionKey === 'batch-param-sync' && batchParamSyncRunning) {
+        void message.warning(t('task.status.running'));
+        return;
+      }
       modal.confirm({
         title: t('common.confirm'),
         content: t('device.batch.actionConfirm', { action: actionLabel, count: ids.length }),
@@ -881,8 +907,19 @@ export default function DeviceList() {
                 task: newTasks[index],
               }))
               : [];
+            const paramSyncEntries = actionKey === 'batch-param-sync'
+              ? selectedDevices.map((device, index) => ({
+                device,
+                task: newTasks[index],
+                parameterPaths: getDeviceListParamSyncPaths(device),
+              }))
+              : [];
             const runnableAlarmSyncEntries = alarmSyncEntries.filter(({ device, task }) => device.isOnline && Boolean(task.sn));
             const runnableAlarmSyncRowIds = new Set(runnableAlarmSyncEntries.map(({ task }) => task.id));
+            const runnableParamSyncEntries = paramSyncEntries.filter(({ device, task, parameterPaths }) =>
+              device.isOnline && Boolean(task.sn) && parameterPaths.length > 0
+            );
+            const runnableParamSyncRowIds = new Set(runnableParamSyncEntries.map(({ task }) => task.id));
 
             if (actionKey === 'batch-log-collect') {
               try {
@@ -928,12 +965,35 @@ export default function DeviceList() {
                   message: t('task.status.running'),
                 };
               }));
+            } else if (actionKey === 'batch-param-sync') {
+              const timestamp = new Date().toISOString();
+              setCollectTasks(newTasks.map((task) => {
+                if (!runnableParamSyncRowIds.has(task.id)) {
+                  const entry = paramSyncEntries.find(({ task: rowTask }) => rowTask.id === task.id);
+                  const reason = entry?.device.isOnline === false
+                    ? t('device.batch.paramSync.onlyOnline')
+                    : t('device.batch.paramSync.noSupportedParams');
+                  return {
+                    ...task,
+                    status: 'failed' as TaskStatus,
+                    progress: 100,
+                    message: reason,
+                    logContent: `[${timestamp}] ERROR: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${task.sn}\n[${timestamp}] ERROR: ${reason}`,
+                  };
+                }
+                return {
+                  ...task,
+                  status: 'running' as TaskStatus,
+                  progress: 10,
+                  message: t('task.status.running'),
+                };
+              }));
             } else {
               setCollectTasks(newTasks);
             }
             setCollectDrawerOpen(true);
 
-            if (actionKey !== 'batch-alarm-sync') {
+            if (actionKey !== 'batch-alarm-sync' && actionKey !== 'batch-param-sync') {
               newTasks.forEach((task, index) => {
                 setTimeout(() => {
                   setCollectTasks((prev) => prev.map((item) =>
@@ -1075,6 +1135,118 @@ export default function DeviceList() {
                   alarmSyncBatchAbortRef.current = null;
                 }
               }
+            } else if (actionKey === 'batch-param-sync') {
+              if (runnableParamSyncEntries.length === 0) {
+                void message.warning(t('device.batch.paramSync.noRunnableDevices'));
+                setSelectedRowKeys([]);
+                return;
+              }
+
+              setBatchParamSyncRunning(true);
+              const abortController = new AbortController();
+              paramSyncBatchAbortRef.current = abortController;
+
+              try {
+                const results = await mapWithConcurrencyLimit(
+                  runnableParamSyncEntries,
+                  PARAM_SYNC_BATCH_CONCURRENCY,
+                  async ({ device, task, parameterPaths }) => {
+                    const timestamp = new Date().toISOString();
+                    try {
+                      throwIfBatchAborted(abortController.signal);
+                      setCollectTasks((prev) => prev.map((item) =>
+                        item.id === task.id ? {
+                          ...item,
+                          status: 'running',
+                          progress: 30,
+                          message: t('task.status.running'),
+                        } : item
+                      ));
+                      const result = await syncDeviceParams.mutateAsync({ deviceId: device.id, parameterPaths });
+                      throwIfBatchAborted(abortController.signal);
+                      if (!result.requestId) {
+                        throw new Error(t('device.batch.paramSync.requestUnavailable'));
+                      }
+                      const taskCountText = result.taskCount !== undefined
+                        ? `, queued ${result.taskCount} task(s)`
+                        : '';
+                      setCollectTasks((prev) => prev.map((item) =>
+                        item.id === task.id ? {
+                          ...item,
+                          status: 'running',
+                          progress: 60,
+                          message: t('device.batch.paramSync.waitingDevice'),
+                          logContent: `[${timestamp}] INFO: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${device.sn}\n[${timestamp}] INFO: paramsync request accepted, ${parameterPaths.length} list path(s) requested${taskCountText}`,
+                        } : item
+                      ));
+                      const terminalRequest = await deviceApi.waitForParameterSyncRequest(result.requestId, {
+                        signal: abortController.signal,
+                        onPoll: (request) => {
+                          setCollectTasks((prev) => prev.map((item) => {
+                            if (item.id !== task.id) return item;
+                            if (request.status === 'running') {
+                              return { ...item, status: 'running', progress: Math.max(item.progress, 70), message: t('device.batch.paramSync.waitingDevice') };
+                            }
+                            return item;
+                          }));
+                        },
+                      });
+                      if (terminalRequest.status !== 'succeeded' || terminalRequest.resultCode === 'NO_STORABLE_PATH') {
+                        throw new Error(terminalRequest.errorMessage || terminalRequest.resultCode || terminalRequest.status);
+                      }
+                      throwIfBatchAborted(abortController.signal);
+                      await queryClient.invalidateQueries({ queryKey: ['devices'] });
+                      throwIfBatchAborted(abortController.signal);
+                      setCollectTasks((prev) => prev.map((item) =>
+                        item.id === task.id ? {
+                          ...item,
+                          status: 'success',
+                          progress: 100,
+                          message: t('task.status.completed'),
+                          logContent: `[${timestamp}] INFO: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${device.sn}\n[${timestamp}] INFO: paramsync completed, ${parameterPaths.length} list path(s) requested${taskCountText}\n[${timestamp}] INFO: ${t('task.log.success')}`,
+                        } : item
+                      ));
+                      return true;
+                    } catch (err) {
+                      if (isAbortError(err)) {
+                        throw err;
+                      }
+                      const errMsg = err instanceof Error ? err.message : t('task.log.failed');
+                      setCollectTasks((prev) => prev.map((item) =>
+                        item.id === task.id ? {
+                          ...item,
+                          status: 'failed',
+                          progress: 100,
+                          message: t('common.failed'),
+                          logContent: `[${timestamp}] ERROR: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${device.sn}\n[${timestamp}] ERROR: ${errMsg}`,
+                        } : item
+                      ));
+                      throw err;
+                    }
+                  },
+                );
+
+                const aborted = abortController.signal.aborted
+                  || results.some((result) => result.status === 'rejected' && isAbortError(result.reason));
+                if (aborted) {
+                  return;
+                }
+
+                const succeededCount = results.filter((result) => result.status === 'fulfilled').length;
+                const failedCount = newTasks.length - succeededCount;
+                if (succeededCount > 0 && failedCount === 0) {
+                  void message.success(t('device.batch.paramSync.success', { count: succeededCount }));
+                } else if (succeededCount > 0) {
+                  void message.warning(t('device.batch.paramSync.partialResult', { success: succeededCount, failed: failedCount }));
+                } else {
+                  void message.error(t('common.operationFailed'));
+                }
+              } finally {
+                setBatchParamSyncRunning(false);
+                if (paramSyncBatchAbortRef.current === abortController) {
+                  paramSyncBatchAbortRef.current = null;
+                }
+              }
             } else {
               void message.success(t('common.commandSent'));
             }
@@ -1086,6 +1258,7 @@ export default function DeviceList() {
     [
       appLocale,
       batchAlarmSyncRunning,
+      batchParamSyncRunning,
       batchReboot,
       createUfteTask,
       devices,
@@ -1096,6 +1269,7 @@ export default function DeviceList() {
       t,
       taskNameUser,
       triggerAlarmSync,
+      syncDeviceParams,
       waitForDeviceTaskTerminal,
     ]
   );
@@ -1955,6 +2129,13 @@ export default function DeviceList() {
       disabled: batchAlarmSyncRunning,
       onClick: (keys) => handleBatchAction(t('device.action.alarmSync'), keys, 'batch-alarm-sync'),
     },
+    {
+      key: 'batch-param-sync',
+      label: t('device.action.paramSync'),
+      icon: <SyncOutlined />,
+      disabled: batchParamSyncRunning,
+      onClick: (keys) => handleBatchAction(t('device.action.paramSync'), keys, 'batch-param-sync'),
+    },
     // 恢复默认配置已隐藏
     // {
     //   key: 'batch-reset-config',
@@ -1963,7 +2144,7 @@ export default function DeviceList() {
     //   danger: true,
     //   onClick: (keys) => handleBatchAction(t('device.action.resetConfig'), keys, 'batch-reset-config'),
     // },
-  ], [batchAlarmSyncRunning, handleBatchAction, t]);
+  ], [batchAlarmSyncRunning, batchParamSyncRunning, handleBatchAction, t]);
 
   // 任务面板表格列定义
   const taskColumns: ColumnsType<LocalTask> = useMemo(() => [
@@ -2122,6 +2303,9 @@ export default function DeviceList() {
               selectable
               selectedRowKeys={selectedRowKeys}
               onSelectionChange={(keys) => setSelectedRowKeys(keys)}
+              getCheckboxProps={(record) => ({
+                disabled: !record.isOnline,
+              })}
               total={total}
               pageSize={pageSize}
               currentPage={currentPage}

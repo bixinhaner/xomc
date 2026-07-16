@@ -1681,6 +1681,7 @@ const messages: Record<string, string> = {
   'device.action.logCollect':    '日志收集',
   'device.action.tr069Collect':  '收集报文',
   'device.action.alarmSync':     '告警同步',
+  'device.action.paramSync':      '参数同步',
 
   // Action confirm & feedback messages (操作确认和反馈)
   'device.action.rebootConfirm':     '确定重启设备吗？',
@@ -3234,6 +3235,14 @@ const messages: Record<string, string> = {
   'device.batch.alarmSync.onlyOnline': '告警同步仅支持在线设备，离线设备已标记为失败。',
   'device.batch.alarmSync.partialResult': '告警同步部分完成：成功 {success} 台，失败 {failed} 台。',
   'device.batch.alarmSync.taskUnavailable': '告警同步任务不可用，请稍后重试。',
+  'device.batch.paramSync.queued': '参数同步请求已提交',
+  'device.batch.paramSync.success': '参数同步完成：{count} 台设备。',
+  'device.batch.paramSync.partialResult': '参数同步部分完成：成功 {success} 台，失败 {failed} 台。',
+  'device.batch.paramSync.onlyOnline': '参数同步仅支持在线设备，离线设备已标记为失败。',
+  'device.batch.paramSync.noSupportedParams': '该设备没有可同步的设备列表参数。',
+  'device.batch.paramSync.noRunnableDevices': '没有可同步的在线设备。',
+  'device.batch.paramSync.requestUnavailable': '参数同步请求不可用，请稍后重试。',
+  'device.batch.paramSync.waitingDevice': '等待设备返回参数',
 
   // -------------------------------------------------------------------------
   // EmptyState
