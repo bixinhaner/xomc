@@ -248,7 +248,7 @@ services:
       # 超出部分返回 503 "Please reduce your request rate"（PM 文件因此丢失，
       # 上报端通常不重试）。这里显式拉高上限，不再依赖按 CPU 配额的保守自动估算。
       MINIO_API_REQUESTS_MAX: "${MINIO_API_REQUESTS_MAX:-6000}"
-      MINIO_API_REQUESTS_DEADLINE: "${MINIO_API_REQUESTS_DEADLINE:-30s}"
+      MINIO_API_REQUESTS_DEADLINE: "${MINIO_API_REQUESTS_DEADLINE:-2m}"
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       # MinIO 自带 Prometheus 指标端点 /minio/v2/metrics/*；public 模式免 token 抓取（T-0151）。
