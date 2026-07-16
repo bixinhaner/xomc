@@ -24,12 +24,24 @@ const (
 	defaultPullFetchWait     = 500 * time.Millisecond
 
 	// 以下三个常量专为 provision-gpv pull consumer 调优。
-	// 当前全代码库只有一处 PullSubscribe 调用；若未来新增 pull consumer，
-	// 需评估是否复用这些参数，或通过 PullSubscribeWithOptions 扩展接口。
-	gpvPullBatchSize     = 64   // 每次 Fetch 最多拉取 64 条
-	gpvPullMaxAckPending = 2048 // 背压上限：未 Ack 消息超过此值时 Fetch 阻塞
-	gpvPullAckWait       = 30 * time.Second // handler 处理超时，超时后 NATS 重投
+	gpvPullBatchSize = 64               // 每次 Fetch 最多拉取 64 条
+	gpvPullAckWait   = 30 * time.Second // handler 处理超时，超时后 NATS 重投
+
+	pullNoCapacityWait            = 10 * time.Millisecond
+	paramSyncResultPullBatchSize  = 64
+	paramSyncResultPullConcurrent = 64
+	paramSyncResultPullAckWait    = 2 * time.Minute
+	paramSyncResultMaxAckPending  = 512
+	defaultPullConcurrent         = 1
+	defaultPullMaxAckPending      = 2048 // 背压上限：未 Ack 消息超过此值时 Fetch 阻塞
 )
+
+type PullTuning struct {
+	BatchSize     int
+	Concurrency   int
+	AckWait       time.Duration
+	MaxAckPending int
+}
 
 // NATSEventBus 是基于 NATS JetStream 的生产级事件总线实现。
 // 每个事件通过 JetStream 持久化存储，支持 At-Least-Once 交付语义。
@@ -38,9 +50,10 @@ const (
 type NATSEventBus struct {
 	conn              *nats.Conn
 	js                nats.JetStreamContext
-	subs              []*nats.Subscription  // push / queue subscriptions
-	pullSubscriptions []*pullSubscription   // pull subscriptions；Close() 负责 drain + unsubscribe
+	subs              []*nats.Subscription // push / queue subscriptions
+	pullSubscriptions []*pullSubscription  // pull subscriptions；Close() 负责 drain + unsubscribe
 	mu                sync.Mutex
+	pullTuning        map[string]PullTuning
 	logger            *zap.Logger
 	metrics           *EventBusMetrics // issue #20：投递结果指标；nil 时（单进程/单测）静默 no-op。
 	ctx               context.Context
@@ -51,11 +64,12 @@ type NATSEventBus struct {
 func NewNATSEventBus(conn *nats.Conn, js nats.JetStreamContext, logger *zap.Logger) *NATSEventBus {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &NATSEventBus{
-		conn:   conn,
-		js:     js,
-		logger: logger,
-		ctx:    ctx,
-		cancel: cancel,
+		conn:       conn,
+		js:         js,
+		pullTuning: make(map[string]PullTuning),
+		logger:     logger,
+		ctx:        ctx,
+		cancel:     cancel,
 	}
 }
 
@@ -64,6 +78,15 @@ func NewNATSEventBus(conn *nats.Conn, js nats.JetStreamContext, logger *zap.Logg
 // the legacy log-only behaviour.
 func (b *NATSEventBus) SetMetrics(m *EventBusMetrics) {
 	b.metrics = m
+}
+
+func (b *NATSEventBus) SetPullTuning(subject string, tuning PullTuning) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.pullTuning == nil {
+		b.pullTuning = make(map[string]PullTuning)
+	}
+	b.pullTuning[subject] = tuning
 }
 
 func (b *NATSEventBus) Publish(ctx context.Context, subject string, evt Event) error {
@@ -126,11 +149,13 @@ func (b *NATSEventBus) QueueSubscribe(subject string, queue string, handler Even
 
 func (b *NATSEventBus) PullSubscribe(subject string, queue string, handler EventHandler) (Subscription, error) {
 	durable := pullDurableName(queue)
+	tuning := b.pullTuningForSubject(subject)
+	tuning = b.compatiblePullTuningForDurable(subject, durable, tuning)
 	sub, err := b.js.PullSubscribe(subject, durable,
 		nats.AckExplicit(),
 		nats.DeliverNew(), // 首次创建时从当前 stream 尾部开始，不重播历史消息（review R1）
-		nats.AckWait(gpvPullAckWait),
-		nats.MaxAckPending(gpvPullMaxAckPending),
+		nats.AckWait(tuning.AckWait),
+		nats.MaxAckPending(tuning.MaxAckPending),
 		nats.MaxDeliver(maxDeliveries),
 	)
 	if err != nil {
@@ -155,14 +180,50 @@ func (b *NATSEventBus) PullSubscribe(subject string, queue string, handler Event
 	b.logger.Info("pull subscription started",
 		zap.String("subject", subject),
 		zap.String("durable", durable),
-		zap.Int("batch_size", pullBatchSizeForSubject(subject)),
-		zap.Int("max_ack_pending", gpvPullMaxAckPending))
+		zap.Int("batch_size", tuning.BatchSize),
+		zap.Int("concurrency", tuning.Concurrency),
+		zap.Duration("ack_wait", tuning.AckWait),
+		zap.Int("max_ack_pending", tuning.MaxAckPending))
 
 	// 自动清理同 queue 名对应的旧 push consumer（迁移到 pull 后的遗留，
 	// consumer 名即 queue 本身，不含 "-pull" 后缀）。幂等：不存在时静默跳过。
 	b.cleanupLegacyPushConsumer(subject, queue)
 
 	return ps, nil
+}
+
+func (b *NATSEventBus) compatiblePullTuningForDurable(subject, durable string, desired PullTuning) PullTuning {
+	stream, err := b.js.StreamNameBySubject(subject)
+	if err != nil {
+		b.logger.Warn("resolve pull consumer stream failed",
+			zap.String("subject", subject),
+			zap.String("durable", durable),
+			zap.Error(err))
+		return desired
+	}
+	info, err := b.js.ConsumerInfo(stream, durable)
+	if err != nil {
+		if !errors.Is(err, nats.ErrConsumerNotFound) {
+			b.logger.Warn("load existing pull consumer failed",
+				zap.String("subject", subject),
+				zap.String("stream", stream),
+				zap.String("durable", durable),
+				zap.Error(err))
+		}
+		return desired
+	}
+	compatible := reconcilePullTuningWithExisting(desired, info)
+	if compatible.AckWait != desired.AckWait || compatible.MaxAckPending != desired.MaxAckPending {
+		b.logger.Warn("using existing pull consumer tuning",
+			zap.String("subject", subject),
+			zap.String("stream", stream),
+			zap.String("durable", durable),
+			zap.Duration("desired_ack_wait", desired.AckWait),
+			zap.Duration("existing_ack_wait", compatible.AckWait),
+			zap.Int("desired_max_ack_pending", desired.MaxAckPending),
+			zap.Int("existing_max_ack_pending", compatible.MaxAckPending))
+	}
+	return compatible
 }
 
 // cleanupLegacyPushConsumer 删除因迁移到 pull consumer 而遗留的同名旧 push consumer。
@@ -199,24 +260,98 @@ func pullDurableName(queue string) string {
 	return queue + "-pull"
 }
 
-func pullBatchSizeForSubject(subject string) int {
+func defaultPullTuningForSubject(subject string) PullTuning {
 	if subject == SubjectCommandGetParamsResponse {
-		return gpvPullBatchSize
+		return PullTuning{BatchSize: gpvPullBatchSize, Concurrency: defaultPullConcurrent, AckWait: gpvPullAckWait, MaxAckPending: defaultPullMaxAckPending}
 	}
-	return 32
+	if subject == SubjectParamSyncTaskResult {
+		return PullTuning{BatchSize: paramSyncResultPullBatchSize, Concurrency: paramSyncResultPullConcurrent, AckWait: paramSyncResultPullAckWait, MaxAckPending: paramSyncResultMaxAckPending}
+	}
+	return PullTuning{BatchSize: 32, Concurrency: defaultPullConcurrent, AckWait: gpvPullAckWait, MaxAckPending: defaultPullMaxAckPending}
+}
+
+func (b *NATSEventBus) pullTuningForSubject(subject string) PullTuning {
+	tuning := defaultPullTuningForSubject(subject)
+	b.mu.Lock()
+	configured, ok := b.pullTuning[subject]
+	b.mu.Unlock()
+	if !ok {
+		return tuning
+	}
+	if configured.BatchSize > 0 {
+		tuning.BatchSize = configured.BatchSize
+	}
+	if configured.Concurrency > 0 {
+		tuning.Concurrency = configured.Concurrency
+	}
+	if configured.AckWait > 0 {
+		tuning.AckWait = configured.AckWait
+	}
+	if configured.MaxAckPending > 0 {
+		tuning.MaxAckPending = configured.MaxAckPending
+	}
+	return tuning
+}
+
+func reconcilePullTuningWithExisting(desired PullTuning, info *nats.ConsumerInfo) PullTuning {
+	if info == nil {
+		return desired
+	}
+	out := desired
+	if info.Config.AckWait > 0 {
+		out.AckWait = info.Config.AckWait
+	}
+	if info.Config.MaxAckPending > 0 {
+		out.MaxAckPending = info.Config.MaxAckPending
+	}
+	return out
+}
+
+func pullFetchBatchForAvailableSlots(batchSize, concurrency, inUse int) int {
+	if batchSize <= 0 {
+		return 0
+	}
+	if concurrency <= 0 {
+		return 0
+	}
+	available := concurrency - inUse
+	if available <= 0 {
+		return 0
+	}
+	if available < batchSize {
+		return available
+	}
+	return batchSize
 }
 
 func (b *NATSEventBus) runPullSubscription(ctx context.Context, ps *pullSubscription, subject, durable string, handler EventHandler) {
-	defer close(ps.done)
+	var wg sync.WaitGroup
+	defer func() {
+		wg.Wait()
+		close(ps.done)
+	}()
 
-	batchSize := pullBatchSizeForSubject(subject)
+	tuning := b.pullTuningForSubject(subject)
+	batchSize := tuning.BatchSize
+	concurrency := tuning.Concurrency
+	sem := make(chan struct{}, concurrency)
 	for {
 		if ctx.Err() != nil {
 			return
 		}
 
+		fetchBatch := pullFetchBatchForAvailableSlots(batchSize, concurrency, len(sem))
+		if fetchBatch <= 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(pullNoCapacityWait):
+				continue
+			}
+		}
+
 		fetchCtx, fetchCancel := context.WithTimeout(ctx, defaultPullFetchWait)
-		msgs, err := ps.sub.Fetch(batchSize, nats.Context(fetchCtx))
+		msgs, err := ps.sub.Fetch(fetchBatch, nats.Context(fetchCtx))
 		fetchCancel()
 		if err != nil {
 			if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, nats.ErrBadSubscription) {
@@ -234,7 +369,17 @@ func (b *NATSEventBus) runPullSubscription(ctx context.Context, ps *pullSubscrip
 		}
 
 		for _, msg := range msgs {
-			b.processMsg(handler, msg)
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			wg.Add(1)
+			go func(msg *nats.Msg) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				b.processMsg(handler, msg)
+			}(msg)
 		}
 	}
 }

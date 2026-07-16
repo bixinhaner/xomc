@@ -15,10 +15,11 @@ import (
 )
 
 type Reconciler struct {
-	pool    *pgxpool.Pool
-	bus     event.EventBus
-	metrics *Metrics
-	now     func() time.Time
+	pool      *pgxpool.Pool
+	bus       event.EventBus
+	processor ResultProcessor
+	metrics   *Metrics
+	now       func() time.Time
 }
 
 type rowScanner interface {
@@ -60,6 +61,11 @@ func scanMissingTaskResult(row rowScanner) (missingTaskResult, error) {
 
 func NewReconciler(pool *pgxpool.Pool, bus event.EventBus, metrics *Metrics) *Reconciler {
 	return &Reconciler{pool: pool, bus: bus, metrics: metrics, now: func() time.Time { return time.Now().UTC() }}
+}
+
+func (r *Reconciler) WithResultProcessor(processor ResultProcessor) *Reconciler {
+	r.processor = processor
+	return r
 }
 
 func (r *Reconciler) SweepExpiredRequests(ctx context.Context, limit int) (int64, error) {
@@ -461,6 +467,117 @@ ORDER BY t.completed_at ASC NULLS LAST LIMIT $1`
 		r.metrics.ReconcileRepairs.WithLabelValues("missing_result").Add(float64(count))
 	}
 	return count, rows.Err()
+}
+
+func (r *Reconciler) RecoverMissingResults(ctx context.Context, runLimit, taskLimit, taskBudget int) (int, error) {
+	if r.processor == nil {
+		if r.bus == nil {
+			return 0, fmt.Errorf("recover missing parameter sync results requires result processor or event bus")
+		}
+		return r.RepublishMissingResults(ctx, taskLimit)
+	}
+	if runLimit <= 0 {
+		runLimit = 20
+	}
+	if taskLimit <= 0 {
+		taskLimit = 200
+	}
+	if taskBudget <= 0 || taskBudget > runLimit*taskLimit {
+		taskBudget = runLimit * taskLimit
+	}
+	rows, err := r.pool.Query(ctx, `
+SELECT id FROM parameter_sync_runs
+WHERE status IN ('waiting_device','executing','processing','cancelling')
+  AND expected_task_count > 0
+  AND terminal_task_count = expected_task_count
+  AND processed_task_count < expected_task_count
+ORDER BY started_at ASC
+LIMIT $1`, runLimit)
+	if err != nil {
+		return 0, fmt.Errorf("find stalled parameter sync runs with missing results: %w", err)
+	}
+	var runIDs []uuid.UUID
+	for rows.Next() {
+		var runID uuid.UUID
+		if err := rows.Scan(&runID); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("scan stalled parameter sync run: %w", err)
+		}
+		runIDs = append(runIDs, runID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, fmt.Errorf("iterate stalled parameter sync runs: %w", err)
+	}
+	rows.Close()
+
+	recovered := 0
+	for _, runID := range runIDs {
+		if recovered >= taskBudget {
+			break
+		}
+		remaining := taskBudget - recovered
+		limit := taskLimit
+		if remaining < limit {
+			limit = remaining
+		}
+		n, err := r.recoverRunMissingResults(ctx, runID, limit)
+		recovered += n
+		if err != nil {
+			return recovered, err
+		}
+	}
+	if r.metrics != nil && recovered > 0 {
+		r.metrics.ReconcileRepairs.WithLabelValues("missing_result_recovery").Add(float64(recovered))
+	}
+	return recovered, nil
+}
+
+func (r *Reconciler) recoverRunMissingResults(ctx context.Context, runID uuid.UUID, limit int) (int, error) {
+	const query = `
+SELECT t.id, t.device_sn, t.status, t.error_code, COALESCE(t.error_message,''), t.source_id, t.creator_id
+FROM device_tasks t
+LEFT JOIN parameter_sync_task_results res ON res.run_id=t.source_id AND res.task_id=t.id
+WHERE t.source='param_sync' AND t.source_id=$1
+  AND t.status IN ('completed','failed','expired','cancelled')
+  AND res.task_id IS NULL
+ORDER BY t.command_index ASC, t.created_at ASC, t.id ASC
+LIMIT $2`
+	rows, err := r.pool.Query(ctx, query, runID, limit)
+	if err != nil {
+		return 0, fmt.Errorf("find missing parameter sync results for run %s: %w", runID, err)
+	}
+	defer rows.Close()
+
+	var results []missingTaskResult
+	for rows.Next() {
+		result, err := scanMissingTaskResult(rows)
+		if err != nil {
+			return len(results), fmt.Errorf("scan missing parameter sync result for run %s: %w", runID, err)
+		}
+		results = append(results, result)
+	}
+	if err := rows.Err(); err != nil {
+		return len(results), fmt.Errorf("iterate missing parameter sync results for run %s: %w", runID, err)
+	}
+
+	processed := 0
+	for _, result := range results {
+		payload := event.ParamSyncTaskResultPayload{
+			EventID:   "reconcile:" + result.runID.String() + ":" + result.taskID + ":" + string(result.status),
+			RequestID: result.requestID, RunID: result.runID,
+			TaskID: result.taskID, DeviceSN: result.deviceSN, Success: result.status == task.TaskStatusCompleted,
+			ResultRef: "device_tasks:" + result.taskID, ErrorCode: result.errorCode, ErrorMessage: result.errorMessage,
+		}
+		outcome, err := r.processor.Process(ctx, payload)
+		if err != nil {
+			return processed, fmt.Errorf("recover missing parameter sync result %s for run %s: %w", result.taskID, result.runID, err)
+		}
+		if !outcome.Duplicate {
+			processed++
+		}
+	}
+	return processed, nil
 }
 
 func (r *Reconciler) CleanStaging(ctx context.Context, olderThan time.Time, limit int) (int64, error) {

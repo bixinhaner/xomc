@@ -158,7 +158,14 @@ func (h *Handler) GetActiveRun(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	response.OK(c, gin.H{"active_run": run})
+	body := gin.H{"active_run": run}
+	if run.ExpectedTaskCount > 0 &&
+		run.TerminalTaskCount == run.ExpectedTaskCount &&
+		run.ProcessedTaskCount < run.ExpectedTaskCount {
+		body["stalled_finalizing"] = true
+		body["reason"] = "terminal tasks completed but results are not processed"
+	}
+	response.OK(c, body)
 }
 
 func (h *Handler) ListHistory(c *gin.Context) {

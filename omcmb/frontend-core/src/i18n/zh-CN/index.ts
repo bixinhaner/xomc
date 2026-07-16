@@ -1162,6 +1162,7 @@ const messages: Record<string, string> = {
   'device.paramTree.deleteInstanceFailed':'删除实例失败',
   'device.paramTree.searchPlaceholder':   '搜索参数路径或值',
   'device.paramTree.syncing':             '同步中',
+  'device.paramTree.finalizing':           '同步结果收口中',
   'device.paramTree.syncPending':         ' · 待处理 {count} 次 GPV 请求',
   'device.paramTree.lastSync':            '上次同步完成：{time}',
   'device.paramTree.lastScopedSync':      '上次快速设置同步完成：{time} · 已同步 {success} 条 · 跳过 {failed} 条 · GPV 请求 {gpvCount} 次 · 耗时 {duration} · 目标路径 {count} 条',
