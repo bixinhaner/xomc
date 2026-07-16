@@ -3,6 +3,7 @@ package aggregator
 import (
 	"context"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -168,6 +169,29 @@ func Test_buildDeviceTableSQL_PageByPivotRowPagesKeysThenReturnsAllMetrics(t *te
 	assert.Contains(t, sql, "OFFSET $")
 	assert.Equal(t, 50, args[len(args)-2])
 	assert.Equal(t, 100, args[len(args)-1])
+}
+
+func Test_buildDeviceTableSQL_PageByPivotRowSkeletonPagesKeysWithoutMetricFilter(t *testing.T) {
+	metricType := metrics.MetricTypeKPI
+	sql, args, err := buildDeviceTableSQL("pm_metrics", QueryRequest{
+		Granularity:    metrics.Granularity15Min,
+		DeviceSNs:      []string{"SN-1"},
+		MetricPaths:    []string{"K1"},
+		MetricType:     &metricType,
+		ObjectLDNs:     []string{"Cellid=1,PLMN=46000"},
+		StartTime:      time.Date(2026, 7, 16, 11, 0, 0, 0, time.UTC),
+		EndTime:        time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC),
+		PageByPivotRow: true,
+		Limit:          1,
+	})
+	require.NoError(t, err)
+
+	pageKeysAt := strings.Index(sql, "page_keys AS")
+	require.NotEqual(t, -1, pageKeysAt)
+	pageKeySQL := sql[pageKeysAt:]
+	assert.NotContains(t, pageKeySQL, "metric_path IN")
+	assert.NotContains(t, pageKeySQL, "metric_type =")
+	assert.Equal(t, 1, args[len(args)-1])
 }
 
 func Test_SelectTable_UnknownGranularity(t *testing.T) {

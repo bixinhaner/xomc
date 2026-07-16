@@ -358,6 +358,41 @@ func Test_fillEmptyBuckets_ExplicitObjectLDNsUseCompleteAlignedBuckets(t *testin
 	assert.Equal(t, []string{"11:15", "11:30", "11:45"}, got)
 }
 
+func Test_fillEmptyBuckets_PageByPivotRowUsesOnlyCurrentPageKeys(t *testing.T) {
+	first := time.Date(2026, 7, 16, 11, 15, 0, 0, time.Local)
+	second := first.Add(15 * time.Minute)
+	object1 := "Cellid=1,PLMN=46000"
+	object2 := "Cellid=2,PLMN=46000"
+
+	rows := fillEmptyBuckets(nil, aggregator.QueryRequest{
+		Dimension:      aggregator.DimensionDevice,
+		Granularity:    metrics.Granularity15Min,
+		DeviceOUIs:     []string{"48BF74"},
+		DeviceSNs:      []string{"1202000240194DP0015"},
+		MetricPaths:    []string{"K900010052"},
+		ObjectLDNs:     []string{object1, object2},
+		StartTime:      first,
+		EndTime:        second.Add(15 * time.Minute),
+		PageByPivotRow: true,
+		PivotRowKeys: []aggregator.PivotRowKey{
+			{
+				DeviceOUI:   "48BF74",
+				DeviceSN:    "1202000240194DP0015",
+				ObjectLDN:   object2,
+				Granularity: metrics.Granularity15Min,
+				Time:        second,
+			},
+		},
+	})
+
+	require.Len(t, rows, 1)
+	row := rows[0]
+	assert.True(t, row.Filled)
+	require.NotNil(t, row.ObjectLDN)
+	assert.Equal(t, object2, *row.ObjectLDN)
+	assert.Equal(t, second, row.Time)
+}
+
 func Test_fillEmptyBuckets_FiltersRealRowsOutsideCompleteBucketWindow(t *testing.T) {
 	start := time.Date(2026, 7, 16, 11, 13, 17, 0, time.Local)
 	end := time.Date(2026, 7, 16, 12, 13, 17, 0, time.Local)

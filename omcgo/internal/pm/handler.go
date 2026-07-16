@@ -459,16 +459,33 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 		}
 	}
 
-	rows, err := h.aggr.Query(c.Request.Context(), req)
-	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
-		return
-	}
 	// fill_empty=true：数据驱动补齐占位行（T-0192d）。只对"已存在真实记录组"里所查
 	// 但缺失的指标补一行占位，让透视表能区分"该时段有采样但此指标无值"与"此指标有值"。
 	// 没有任何真实行的时间桶/object 永不出现（空时段不凭空造桶）。
 	// 仅 device 维度（单 OUI+SN）+ metric_paths 非空时启用。
 	fillEmpty := c.Query("fill_empty") == "true"
+	if fillEmpty && req.PageByPivotRow && aggregator.CanAutoDiscoverObjectSkeletonRequest(req) {
+		objectLDNs, err := h.aggr.DiscoverObjectLDNs(c.Request.Context(), req)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+			return
+		}
+		req.ObjectLDNs = objectLDNs
+	}
+	if fillEmpty && req.PageByPivotRow && aggregator.IsExplicitObjectSkeletonRequest(req) {
+		pivotKeys, err := h.aggr.DevicePivotRowKeys(c.Request.Context(), req)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+			return
+		}
+		req.PivotRowKeys = pivotKeys
+	}
+
+	rows, err := h.aggr.Query(c.Request.Context(), req)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
 	if fillEmpty {
 		if aggregator.CanAutoDiscoverObjectSkeletonRequest(req) {
 			objectLDNs, err := h.aggr.DiscoverObjectLDNs(c.Request.Context(), req)
