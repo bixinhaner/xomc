@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -86,6 +87,25 @@ func TestBuildUnionFaultRowsRequireHaltReason(t *testing.T) {
 	require.Empty(t, args)
 	assert.Contains(t, sql, "FROM station_fault_logs fl")
 	assert.Contains(t, sql, "NULLIF(fl.fault_reason, '') IS NOT NULL")
+}
+
+func TestBuildUnionFaultRowsUseDetectedTimeForRebootTime(t *testing.T) {
+	start := time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC)
+
+	sql, args := buildUnion(Filter{
+		RebootType: RebootTypeAbnormal,
+		StartTime:  &start,
+		EndTime:    &end,
+	})
+
+	require.Equal(t, []interface{}{start, end}, args)
+	assert.Contains(t, sql, "fl.created_at >= $1")
+	assert.Contains(t, sql, "fl.created_at <= $2")
+	assert.Contains(t, sql, "fl.created_at AS reboot_time")
+	assert.NotContains(t, sql, "fl.collected_at AS reboot_time")
+	assert.NotContains(t, sql, "fl.collected_at >= $1")
+	assert.NotContains(t, sql, "fl.collected_at <= $2")
 }
 
 func TestBuildUnionFiltersUseBackfilledSnapshotFields(t *testing.T) {

@@ -25,7 +25,9 @@ func NewPgRepository(pool *pgxpool.Pool) *PgRepository {
 // buildUnion 组装两表 UNION ALL 的子查询。
 //
 // 两半共用同一组过滤值（占位符复用）：device_sn / device_type / start / end 在
-// 两个 SELECT 里引用相同的 $N，只是时间列名不同（occurred_at vs collected_at）。
+// 两个 SELECT 里引用相同的 $N，只是时间列名不同。
+// 异常重启用 station_fault_logs.created_at 作为检测时间；collected_at 会在故障文件
+// 上传补全时更新，不能拿来表示 1 BOOT 发生时间。
 // 所有用户输入都走参数化占位符，无字符串拼接注入。
 //
 // 投影列在两半严格对齐（名称 + 类型），可空列一律 COALESCE 成零值，便于扫描。
@@ -64,12 +66,12 @@ func buildUnion(f Filter) (string, []interface{}) {
 	}
 	if f.StartTime != nil {
 		add(*f.StartTime, func(ph string) (string, string) {
-			return "el.occurred_at >= " + ph, "fl.collected_at >= " + ph
+			return "el.occurred_at >= " + ph, "fl.created_at >= " + ph
 		})
 	}
 	if f.EndTime != nil {
 		add(*f.EndTime, func(ph string) (string, string) {
-			return "el.occurred_at <= " + ph, "fl.collected_at <= " + ph
+			return "el.occurred_at <= " + ph, "fl.created_at <= " + ph
 		})
 	}
 
@@ -116,7 +118,7 @@ func buildUnion(f Filter) (string, []interface{}) {
 		` + faultDeviceName + ` AS device_name, ` + faultDeviceType + ` AS device_type,
 		` + faultOperateIP + ` AS operate_ip, ` + faultSoftwareVersion + ` AS software_version,
 		COALESCE(fl.fault_reason, '') AS reason, COALESCE(fl.fault_detail, '') AS detail_reason,
-		COALESCE(fl.runtime_before_reboot, 0) AS runtime_before_reboot, fl.collected_at AS reboot_time
+		COALESCE(fl.runtime_before_reboot, 0) AS runtime_before_reboot, fl.created_at AS reboot_time
 		FROM station_fault_logs fl
 		LEFT JOIN devices fd ON fd.id = fl.device_id
 		LEFT JOIN device_info fdi ON fdi.device_id = fd.id
