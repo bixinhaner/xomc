@@ -1,21 +1,24 @@
 import { describe, it, expect } from 'vitest';
+import type { Device } from '@core/types/device';
 import { buildBatchTaskTypeMap, batchActionHasDetail } from './deviceBatchTask';
+import { getDeviceListParamSyncPaths } from './deviceListParamSync';
 
 // 用恒等 t 让 map 值即 i18n key，便于断言键集与映射关系。
 const t = (k: string) => k;
 
 describe('buildBatchTaskTypeMap (#179 抓包入口移除)', () => {
-  it('保留 reboot / log-collect / alarm-sync 三个批量操作映射', () => {
+  it('保留 reboot / log-collect / alarm-sync / param-sync 四个批量操作映射', () => {
     const map = buildBatchTaskTypeMap(t);
     expect(map['batch-reboot']).toBe('common.batchReboot');
     expect(map['batch-log-collect']).toBe('device.action.logCollect');
     expect(map['batch-alarm-sync']).toBe('device.action.alarmSync');
+    expect(map['batch-param-sync']).toBe('device.action.paramSync');
   });
 
   it('不再识别 batch-tr069-collect（抓包按钮已移除）', () => {
     const map = buildBatchTaskTypeMap(t);
     expect('batch-tr069-collect' in map).toBe(false);
-    expect(Object.keys(map)).toHaveLength(3);
+    expect(Object.keys(map)).toHaveLength(4);
   });
 });
 
@@ -24,10 +27,39 @@ describe('batchActionHasDetail', () => {
     expect(batchActionHasDetail('batch-log-collect')).toBe(true);
   });
 
-  it('重启 / 告警同步 / 已移除的抓包均无详情', () => {
+  it('重启 / 告警同步 / 参数同步 / 已移除的抓包均无详情', () => {
     expect(batchActionHasDetail('batch-reboot')).toBe(false);
     expect(batchActionHasDetail('batch-alarm-sync')).toBe(false);
+    expect(batchActionHasDetail('batch-param-sync')).toBe(false);
     expect(batchActionHasDetail('batch-tr069-collect')).toBe(false);
     expect(batchActionHasDetail(undefined)).toBe(false);
+  });
+});
+
+describe('getDeviceListParamSyncPaths', () => {
+  const baseDevice = {
+    id: 'device-1',
+    sn: 'SN001',
+    networkType: 'eNB',
+    isOnline: true,
+  } as Device;
+
+  it('下发列表 rfStatus 后端派生实际读取的 RF 参数', () => {
+    const paths = getDeviceListParamSyncPaths(baseDevice);
+
+    expect(paths).toContain('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.X_COM_RadioEnable');
+    expect(paths).toContain('Device.Services.FAPService.{i}.CellConfig.NR.RAN.RF.X_COM_RadioEnable');
+    expect(paths).toContain('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.RFTxStatus');
+    expect(paths).toContain('Device.Services.FAPService.{i}.CellConfig.NR.RAN.RF.RFTxStatus');
+    expect(paths).not.toContain('Device.Services.FAPControl.LTE.RFTxStatus');
+  });
+
+  it('下发列表 opState 后端派生实际读取的 LTE/NR/GSM 参数', () => {
+    const paths = getDeviceListParamSyncPaths(baseDevice);
+
+    expect(paths).toContain('Device.Services.FAPService.{i}.FAPControl.LTE.OpState');
+    expect(paths).toContain('Device.Services.FAPService.1.CellConfig.{i}.NR.RAN.OpState');
+    expect(paths).toContain('Device.Services.GsmBTSCellDT.{i}.OpState');
+    expect(paths).not.toContain('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.OpState');
   });
 });

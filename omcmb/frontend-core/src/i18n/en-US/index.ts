@@ -1677,6 +1677,7 @@ const messages: Record<string, string> = {
   'device.action.logCollect':    'Log Collect',
   'device.action.tr069Collect':  'Collect TR069 Msg',
   'device.action.alarmSync':     'Alarm Sync',
+  'device.action.paramSync':      'Parameter Sync',
 
   // Action confirm & feedback messages
   'device.action.rebootConfirm':     'Are you sure to reboot this device?',
@@ -3218,6 +3219,14 @@ const messages: Record<string, string> = {
   'device.batch.alarmSync.onlyOnline': 'Alarm sync only supports online devices. Offline devices were marked as failed.',
   'device.batch.alarmSync.partialResult': 'Alarm sync partially completed: {success} succeeded, {failed} failed.',
   'device.batch.alarmSync.taskUnavailable': 'Alarm sync task is unavailable. Please try again later.',
+  'device.batch.paramSync.queued': 'Parameter sync request submitted',
+  'device.batch.paramSync.success': 'Parameter sync completed for {count} device(s).',
+  'device.batch.paramSync.partialResult': 'Parameter sync partially completed: {success} succeeded, {failed} failed.',
+  'device.batch.paramSync.onlyOnline': 'Parameter sync only supports online devices. Offline devices were marked as failed.',
+  'device.batch.paramSync.noSupportedParams': 'This device has no supported device-list parameters to sync.',
+  'device.batch.paramSync.noRunnableDevices': 'No online devices can be synchronized.',
+  'device.batch.paramSync.requestUnavailable': 'Parameter sync request is unavailable. Please try again later.',
+  'device.batch.paramSync.waitingDevice': 'Waiting for device parameter response',
 
   // -------------------------------------------------------------------------
   // EmptyState

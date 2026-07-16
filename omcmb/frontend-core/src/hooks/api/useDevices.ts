@@ -272,16 +272,15 @@ export function useRebootDevice() {
   });
 }
 
-// T-0126: 手动触发 Path B 全量参数同步（reason="manual"）。
-// 后端走 Path B 完整链路：reason 通道 + 差异日志 + last_param_sync_at 回写 + Translator 翻译。
-// 替代旧 useSyncParameters（Path A 已下线）。
+// 手动触发 durable paramsync 参数同步（reason="manual"）。
+// sync-params 是兼容 URL；后端运行时通过 paramSyncStarter 提交 paramsync request/run。
 export function useSyncDeviceParams() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ deviceId, force, parameterPaths }: { deviceId: string; force?: boolean; parameterPaths?: string[] }) =>
       api.syncDeviceParams(deviceId, force !== undefined || parameterPaths !== undefined ? { force, parameterPaths } : undefined),
     onSuccess: (_data, variables) => {
-      // 失效设备参数缓存让前端在 Path B 完成后展示新值
+      // 失效设备参数缓存，让 paramsync 完成后展示新值。
       void queryClient.invalidateQueries({ queryKey: ['device-parameters', variables.deviceId] });
     },
   });

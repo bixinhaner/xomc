@@ -13,6 +13,7 @@ export function buildBatchTaskTypeMap(t: BatchTaskTypeLabel): Record<string, str
     'batch-reboot': t('common.batchReboot'),
     'batch-log-collect': t('device.action.logCollect'),
     'batch-alarm-sync': t('device.action.alarmSync'),
+    'batch-param-sync': t('device.action.paramSync'),
   };
 }
 
