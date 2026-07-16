@@ -52,6 +52,10 @@ func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sou
 		opt(&pbOpts)
 	}
 	if s.durableStarter != nil {
+		// Transition rule: every trigger reaches the durable parameter_sync_*
+		// data plane first. Returning handled=false intentionally falls back to
+		// the legacy sync-gpv Path B pipeline for now; remove this fallback once
+		// param_sync_running has proven stable in production.
 		handled, taskCount, err := s.durableStarter.StartDurableSync(ctx, dev, sourceID, pbOpts.reason, pbOpts.parameterPaths)
 		if err != nil || handled {
 			return handled, taskCount, err

@@ -1682,6 +1682,7 @@ const messages: Record<string, string> = {
   'device.action.tr069Collect':  '收集报文',
   'device.action.alarmSync':     '告警同步',
   'device.action.paramSync':      '参数同步',
+  'device.action.autoParamSync':  '自动同步',
 
   // Action confirm & feedback messages (操作确认和反馈)
   'device.action.rebootConfirm':     '确定重启设备吗？',
@@ -3243,6 +3244,14 @@ const messages: Record<string, string> = {
   'device.batch.paramSync.noRunnableDevices': '没有可同步的在线设备。',
   'device.batch.paramSync.requestUnavailable': '参数同步请求不可用，请稍后重试。',
   'device.batch.paramSync.waitingDevice': '等待设备返回参数',
+  'device.periodicParamSync.title': '定时自动同步',
+  'device.periodicParamSync.desc': '启用后，系统将按周期扫描在线设备并自动发起参数同步。保存后运行时动态生效，无需重启服务。',
+  'device.periodicParamSync.hourUnit': '小时',
+  'device.periodicParamSync.minuteUnit': '分钟',
+  'device.periodicParamSync.deviceUnit': '台',
+  'device.periodicParamSync.saveSuccess': '定时自动同步设置已保存',
+  'device.periodicParamSync.running': '参数同步中',
+  'device.periodicParamSync.runningShort': '同步中',
 
   // -------------------------------------------------------------------------
   // EmptyState
@@ -4806,10 +4815,10 @@ const messages: Record<string, string> = {
   'system.device.thenEnbWillBeLocked':       '米，eNB将被锁定',
   // 设备参数同步设置（T-0124 周期性参数同步兜底）
   'system.device.periodicSync.title':                  '设备参数同步设置',
-  'system.device.periodicSync.intro':                  '定时批量扫描在线设备并发起 Path B 全量参数同步，作为配置漂移检测的兜底机制。生产建议先按 72 小时 / 50 台灰度，稳定后再调到 24 小时 / 200 台。',
+  'system.device.periodicSync.intro':                  '定时批量扫描在线设备并提交 durable 全量参数同步，作为配置漂移检测的兜底机制。生产建议先按 4320 分钟 / 50 台灰度，稳定后再调到 1440 分钟 / 200 台。',
   'system.device.periodicSync.enabledLabel':           '启用周期性参数同步（默认关闭）',
   'system.device.periodicSync.intervalPrefix':         '扫描周期',
-  'system.device.periodicSync.intervalSuffix':         '小时（建议 ≥ 1 小时，生产首次启用建议 72 小时）',
+  'system.device.periodicSync.intervalSuffix':         '分钟（建议 ≥ 5 分钟，生产首次启用建议 4320 分钟）',
   'system.device.periodicSync.batchSizePrefix':        '单轮处理',
   'system.device.periodicSync.batchSizeSuffix':        '台（建议 50 ~ 500，按最久未同步优先入队）',
   'system.device.periodicSync.maxConcurrentPrefix':    '入队并发',

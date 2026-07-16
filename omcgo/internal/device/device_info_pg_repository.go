@@ -895,6 +895,17 @@ func deviceWithInfoSelectColumns() []string {
 		END AS offline_minutes`,
 		// #361: 该设备未 cleared 活动告警数（来自 alarms_active 聚合子查询 aa）。
 		// 无活动告警时 LEFT JOIN 命中空 → NULL → 前端归 0。
+		`EXISTS (
+			SELECT 1
+			FROM parameter_sync_requests psr
+			WHERE psr.device_id = d.id
+			  AND psr.status IN ('accepted', 'queued', 'running')
+		) OR EXISTS (
+			SELECT 1
+			FROM parameter_sync_runs psrun
+			WHERE psrun.device_id = d.id
+			  AND psrun.status IN ('planning', 'enqueuing', 'waiting_device', 'executing', 'processing', 'cancelling')
+		) AS param_sync_running`,
 		"aa.active_alarm_count",
 	}
 }
@@ -1052,10 +1063,11 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		// 在线时长派生（SQL计算，设计文档 §13）
 		onlineDuration *int64
 		// 离线时长（SQL计算）
-		offlineSeconds *int64
-		offlineDays    *int64
-		offlineHours   *int64
-		offlineMinutes *int64
+		offlineSeconds   *int64
+		offlineDays      *int64
+		offlineHours     *int64
+		offlineMinutes   *int64
+		paramSyncRunning bool
 		// #361: 活动告警数（alarms_active 聚合，LEFT JOIN 未命中→NULL）
 		activeAlarmCount *int
 	)
@@ -1100,6 +1112,7 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		&onlineDuration,
 		// 离线时长（SQL计算）
 		&offlineSeconds, &offlineDays, &offlineHours, &offlineMinutes,
+		&paramSyncRunning,
 		// #361: 活动告警数（select 列末尾 aa.active_alarm_count）
 		&activeAlarmCount,
 	)
@@ -1212,6 +1225,7 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	d.OfflineDays = offlineDays
 	d.OfflineHours = offlineHours
 	d.OfflineMinutes = offlineMinutes
+	d.ParamSyncRunning = paramSyncRunning
 	// T-0162: 派生老 Status 字段给读侧兼容（DeriveStatusFromLifecycle 用
 	// commissioned+online=Active / commissioned+offline=Offline / 等映射）
 	d.Status = DeriveStatusFromLifecycle(d.LifecycleState, d.IsOnline)

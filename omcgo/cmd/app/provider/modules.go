@@ -727,7 +727,8 @@ func initProvisionModule(c *Container) error {
 			syncSvc.SetDurableStarter(c.miscDeps.paramSyncStarter)
 		}
 		provisionEngine.SetSyncService(syncSvc)
-		// T-0126: 注入 ParamSyncStarter 让 device.handler.SyncDeviceParams 调 Path B 手动同步（reason="manual"）
+		// T-0126: 注入 ParamSyncStarter 让手动同步先走 durable parameter_sync_*。
+		// 旧 sync-gpv Path B 仅作为临时兜底，待 param_sync_running 稳定后删除。
 		if c.DeviceService != nil {
 			if c.miscDeps.paramSyncStarter != nil {
 				c.miscDeps.paramSyncStarter.SetLegacy(syncSvc)
@@ -753,12 +754,14 @@ func initProvisionModule(c *Container) error {
 			logger.Info("device license params handler initialized")
 		}
 
-		// T-0124: 周期性参数同步兜底。
+		// T-0124: 周期性参数同步兜底（优先提交到 durable parameter_sync_* 数据面）。
 		// 配置从 sys_configs (category='device') 读，Enabled / Interval / BatchSize /
 		// MaxConcurrent / StaggerWindow 全部 runtime 动态生效（30s 缓存 + 1min 轮询）。
 		// 总是启动 scheduler；Enabled=false 时 scheduler 空跑等切换 — 这样用户在 FE
 		// 系统配置 → 设备设置面板里开关 enabled 不需要重启进程。
 		// PG advisory lock 协调多副本 leader，保证同一时刻只有一个 app 副本扫描入队。
+		// 所有同步（定时/手动/上线/固件变化等）统一先走 parameter_sync_*；
+		// 旧 sync-gpv Path B 只保留为临时兜底，待 param_sync_running 稳定后删除。
 		sysCfgRepo := admin.NewPgSysConfigRepository(c.PgPool)
 		periodicSyncLookup := provision.SysConfigLookup(func(ctx context.Context, cat, key string) (string, bool) {
 			cfg, err := sysCfgRepo.GetByKey(ctx, cat, key)

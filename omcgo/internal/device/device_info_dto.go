@@ -99,6 +99,10 @@ type DeviceWithInfo struct {
 	// ActiveAlarmCount 该设备未 cleared 活动告警数（#361）；无活动告警 → nil → 前端归 0。
 	ActiveAlarmCount *int `json:"active_alarm_count"`
 
+	// ParamSyncRunning 当前设备是否存在非终态的参数同步请求或运行记录。
+	// 用于设备列表显示“参数同步中”的动态状态图标。
+	ParamSyncRunning bool `json:"param_sync_running"`
+
 	// LicenseStatus 许可证状态
 	LicenseStatus *string `json:"license_status"`
 

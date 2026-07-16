@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/paramsync"
 )
 
@@ -50,4 +51,39 @@ func TestSubmitLicenseParamSync_RejectsUnavailablePlan(t *testing.T) {
 	_, err := submitLicenseParamSync(context.Background(), submitter, dev, uuid.NewString(), []string{"Device.LICENSE."})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "durable license parameter sync unavailable")
+}
+
+func TestParamSyncStarter_StartDurableSync_PeriodicUsesLegacyFallbackWhenDisabled(t *testing.T) {
+	starter := &paramSyncStarter{flags: paramsync.FeatureFlags{RunEnabled: false}}
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "periodic-device"}
+
+	handled, taskCount, err := starter.StartDurableSync(context.Background(), dev, "", string(paramsync.TriggerPeriodic), nil)
+
+	require.NoError(t, err)
+	assert.False(t, handled, "periodic sync should keep the same temporary sync-gpv fallback as other triggers")
+	assert.Equal(t, 0, taskCount)
+}
+
+type fakeLegacyManualSyncStarter struct {
+	used  bool
+	count int
+	err   error
+}
+
+func (f fakeLegacyManualSyncStarter) StartManualSync(context.Context, *model.Device, string, []string) (bool, int, error) {
+	return f.used, f.count, f.err
+}
+
+func TestParamSyncStarter_StartManualSyncDetailed_UsesLegacyFallbackWhenDisabled(t *testing.T) {
+	starter := &paramSyncStarter{
+		flags:  paramsync.FeatureFlags{RunEnabled: false},
+		legacy: fakeLegacyManualSyncStarter{used: true, count: 3},
+	}
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "manual-device"}
+
+	result, err := starter.StartManualSyncDetailed(context.Background(), dev, uuid.NewString(), nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, &device.ManualParamSyncStart{Used: true, TaskCount: 3, Status: "queued"}, result)
 }
