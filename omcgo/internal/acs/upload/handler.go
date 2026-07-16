@@ -326,6 +326,28 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 直传路径（未压缩、未加密——PM/MR 等绝大多数上传都走这条路径）此时 body 仍是
+	// r.Body 本身：一个不支持 Seek 的 io.ReadCloser。minio-go 在遇到瞬时网络错误
+	// （连接被 MinIO 端复用/重置）时会内部重试整个 PUT；重试要求 body 能从头重读，
+	// 而 r.Body 已经在第一次尝试中被读到 EOF，重试读到 0 字节，minio-go 报
+	// "http: ContentLength=N with Body length 0"（生产环境批量 PM 上传失败的根因）。
+	// 这里把 body 缓冲进内存再包成 bytes.Reader（实现 io.ReadSeeker），让重试可以
+	// Seek 回起点安全重放。体积已被上面的 MaxBytesReader 卡住上限，缓冲内存可控。
+	if !cmp.applied && !encApplied {
+		buffered, readErr := io.ReadAll(body)
+		if readErr != nil {
+			h.logger.Error("read upload body failed",
+				zap.Error(readErr),
+				zap.String("file_type", fileType),
+				zap.String("path", objectPath),
+			)
+			http.Error(w, "read upload body failed", http.StatusBadRequest)
+			return
+		}
+		body = bytes.NewReader(buffered)
+		contentLength = int64(len(buffered))
+	}
+
 	startUpload := time.Now()
 	info, err := h.minioClient.PutObject(ctx, bucket, objectPath, body, contentLength, uploadOpts)
 	if err != nil {
