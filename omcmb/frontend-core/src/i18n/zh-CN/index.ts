@@ -4763,7 +4763,7 @@ const messages: Record<string, string> = {
   'system.device.nameSync.mode.prompt':             '仅提示，人工确认',
   'system.device.nameSync.mode.prompt.hint':        '发现不一致时标记设备，由人工决定用哪个名称',
   // Issue #758: 设备名称同步
-  'device.nameSyncPending':                  '设备名称待同步',
+  'device.nameSyncPending':                  '设备名称不一致',
   'device.nameSyncPending.lmtName':          'LMT 名称',
   'device.nameSyncPending.omcName':          '网管名称',
   'device.nameSyncPending.useLmt':           '采用 LMT 名称',
