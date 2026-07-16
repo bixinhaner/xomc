@@ -1,4 +1,7 @@
 # MML TXT Script Template
+# This document provides MML TXT script instructions and examples.
+# Lines starting with # are comments and are ignored during import. To execute an example command, remove the leading # and fill in the correct parameters, values, and device SNs.
+#
 # Standard PATH is used by default. To send a device private PATH directly, prefix the path with PRIVATE:.
 # Valid line format:
 # Standard PATH - Operation path[=value][,path2=value2];device_sn[,device_sn2...]
@@ -21,10 +24,10 @@
 # 8. Blank lines and lines starting with # are ignored.
 # 9. One file supports at most 200 devices, 2000 valid commands, and 2 MiB.
 #
-# Examples: replace DEVICE_SN with a real base station serial number.
-LST Device.DeviceInfo.SoftwareVersion;DEVICE_SN
-MOD Device.ManagementServer.URL=http://localhost:8080/smallcell/AcsService,Device.ManagementServer.Username=acs;DEVICE_SN
-ADD Device.IP.Interface.1.IPv4Address.:IPAddress=192.168.1.10,SubnetMask=255.255.255.0;DEVICE_SN
-RMV Device.IP.Interface.1.IPv4Address.3.;DEVICE_SN
-LST PRIVATE:InternetGatewayDevice.DeviceInfo.SoftwareVersion;DEVICE_SN
-LST Device.DeviceInfo.SoftwareVersion;DEVICE_SN,SECOND_SN
+# Example commands are commented out and will not be imported.
+# LST Device.DeviceInfo.SoftwareVersion;DEVICE_SN
+# MOD Device.ManagementServer.URL=http://localhost:8080/smallcell/AcsService,Device.ManagementServer.Username=acs;DEVICE_SN
+# ADD Device.IP.Interface.1.IPv4Address.:IPAddress=192.168.1.10,SubnetMask=255.255.255.0;DEVICE_SN
+# RMV Device.IP.Interface.1.IPv4Address.3.;DEVICE_SN
+# LST PRIVATE:InternetGatewayDevice.DeviceInfo.SoftwareVersion;DEVICE_SN
+# LST Device.DeviceInfo.SoftwareVersion;DEVICE_SN,SECOND_SN
