@@ -207,6 +207,31 @@ func TestScriptImportValidator_ProducesRawPathPlanItemsWithoutCommandLookup(t *t
 	require.Equal(t, "RAW RMV", result.PlanItems[3].Command["command_code"])
 }
 
+func TestScriptImportValidator_ValidatesExpandedDeviceSNPlanItems(t *testing.T) {
+	parsed, issues := ParseScriptTXT([]byte("LST Device.IP.Interface.1.Enable;SN1,SN2\n"))
+	require.Empty(t, issues)
+	repo := &fakeScriptValidationRepo{
+		devices: map[string]*model.Device{
+			"SN1": {SerialNumber: "SN1", IsOnline: true},
+			"SN2": {SerialNumber: "SN2", IsOnline: true},
+		},
+		standardPaths: map[string]struct{}{"Device.IP.Interface.{i}.Enable": {}},
+	}
+
+	result, err := NewScriptImportValidator(repo).Validate(context.Background(), parsed, ValidationActor{Username: "admin"})
+
+	require.NoError(t, err)
+	require.Empty(t, result.Issues)
+	require.Len(t, result.PlanItems, 2)
+	require.Equal(t, 0, repo.commandBatchCalls)
+	require.Equal(t, 1, repo.deviceBatchCalls)
+	require.Equal(t, 1, repo.pathBatchCalls)
+	require.Equal(t, []string{"SN1", "SN2"}, []string{result.PlanItems[0].DeviceSN, result.PlanItems[1].DeviceSN})
+	require.Equal(t, []int{1, 1}, []int{result.PlanItems[0].Order, result.PlanItems[1].Order})
+	require.Equal(t, "RAW LST", result.PlanItems[0].Command["command_code"])
+	require.Equal(t, "RAW LST", result.PlanItems[1].Command["command_code"])
+}
+
 func TestScriptImportValidator_RejectsRawPathMissingFromStandardParams(t *testing.T) {
 	parsed, issues := ParseScriptTXT([]byte("LST Device.NotInStandardParams.1.Enable;SN1\n"))
 	require.Empty(t, issues)

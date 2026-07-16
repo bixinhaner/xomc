@@ -27,6 +27,34 @@ func TestParseScriptTXT_DerivesPerDeviceOrder(t *testing.T) {
 	})
 }
 
+func TestParseScriptTXT_ExpandsCommaSeparatedDeviceSNs(t *testing.T) {
+	raw := []byte(strings.Join([]string{
+		"LST Device.DeviceInfo.SoftwareVersion;SN1, SN2",
+		"MOD Device.DeviceInfo.X_VENDOR_Label=A;SN1",
+	}, "\n") + "\n")
+
+	got, issues := ParseScriptTXT(raw)
+
+	require.Empty(t, issues)
+	require.Len(t, got.Lines, 3)
+	require.Equal(t, []string{"SN1", "SN2", "SN1"}, []string{
+		got.Lines[0].DeviceSN,
+		got.Lines[1].DeviceSN,
+		got.Lines[2].DeviceSN,
+	})
+	require.Equal(t, []int{1, 1, 2}, []int{
+		got.Lines[0].Order,
+		got.Lines[1].Order,
+		got.Lines[2].Order,
+	})
+	require.Equal(t, []int{1, 1, 2}, []int{
+		got.Lines[0].LineNo,
+		got.Lines[1].LineNo,
+		got.Lines[2].LineNo,
+	})
+	require.Equal(t, "LST Device.DeviceInfo.SoftwareVersion;SN1, SN2", got.Lines[1].RawLine)
+}
+
 func TestParseScriptTXT_TemplateDocumentsSupportedSyntaxAndExamplesParse(t *testing.T) {
 	require.Contains(t, scriptImportTemplateForParserTest, "支持操作")
 	require.Contains(t, scriptImportTemplateForParserTest, "LST 查询")
@@ -36,6 +64,7 @@ func TestParseScriptTXT_TemplateDocumentsSupportedSyntaxAndExamplesParse(t *test
 	require.NotContains(t, scriptImportTemplateForParserTest, "DEL")
 	require.Contains(t, scriptImportTemplateForParserTest, "使用标准 PATH")
 	require.Contains(t, scriptImportTemplateForParserTest, "PRIVATE:")
+	require.Contains(t, scriptImportTemplateForParserTest, "多个设备SN用英文逗号分隔")
 	require.Contains(t, scriptImportTemplateForParserTest, "ADD 后的参数名是新对象内的相对参数名")
 	require.NotContains(t, scriptImportTemplateForParserTest, "PATH:")
 	require.NotContains(t, scriptImportTemplateForParserTest, "操作 命令编码")
@@ -43,6 +72,7 @@ func TestParseScriptTXT_TemplateDocumentsSupportedSyntaxAndExamplesParse(t *test
 	require.NotContains(t, scriptImportTemplateForParserTest, "LST DEVICE_INFO;DEVICE_SN")
 
 	executableTemplate := strings.ReplaceAll(scriptImportTemplateForParserTest, "DEVICE_SN", "SN-TEMPLATE-1")
+	executableTemplate = strings.ReplaceAll(executableTemplate, "SECOND_SN", "SN-TEMPLATE-2")
 	got, issues := ParseScriptTXT([]byte(executableTemplate))
 
 	require.Empty(t, issues)
@@ -57,6 +87,7 @@ func TestParseScriptTXT_TemplateDocumentsSupportedSyntaxAndExamplesParse(t *test
 	require.Equal(t, []string{"Device.IP.Interface.1.IPv4Address."}, got.Lines[2].ParamPaths)
 	require.Equal(t, map[string]string{"IPAddress": "192.168.1.10", "SubnetMask": "255.255.255.0"}, got.Lines[2].Parameters)
 	require.Equal(t, rawPathModePrivate, got.Lines[4].RawPathMode)
+	require.Equal(t, []string{"SN-TEMPLATE-1", "SN-TEMPLATE-2"}, []string{got.Lines[5].DeviceSN, got.Lines[6].DeviceSN})
 }
 
 func TestParseScriptTXT_EnglishTemplateDocumentsSupportedSyntaxAndExamplesParse(t *testing.T) {
@@ -71,6 +102,7 @@ func TestParseScriptTXT_EnglishTemplateDocumentsSupportedSyntaxAndExamplesParse(
 	require.NotContains(t, template, "支持操作")
 	require.Contains(t, template, "Standard PATH")
 	require.Contains(t, template, "PRIVATE:")
+	require.Contains(t, template, "Separate multiple device SNs with English commas")
 	require.Contains(t, template, "ADD follow-up values use relative parameter names")
 	require.NotContains(t, template, "PATH:")
 	require.NotContains(t, template, "Operation command_code")
@@ -78,6 +110,7 @@ func TestParseScriptTXT_EnglishTemplateDocumentsSupportedSyntaxAndExamplesParse(
 	require.NotContains(t, template, "LST DEVICE_INFO;DEVICE_SN")
 
 	executableTemplate := strings.ReplaceAll(template, "DEVICE_SN", "SN-TEMPLATE-1")
+	executableTemplate = strings.ReplaceAll(executableTemplate, "SECOND_SN", "SN-TEMPLATE-2")
 	got, issues := ParseScriptTXT([]byte(executableTemplate))
 
 	require.Empty(t, issues)
@@ -89,6 +122,7 @@ func TestParseScriptTXT_EnglishTemplateDocumentsSupportedSyntaxAndExamplesParse(
 		got.Lines[3].OperationType,
 	})
 	require.Equal(t, rawPathModePrivate, got.Lines[4].RawPathMode)
+	require.Equal(t, []string{"SN-TEMPLATE-1", "SN-TEMPLATE-2"}, []string{got.Lines[5].DeviceSN, got.Lines[6].DeviceSN})
 }
 
 func TestParseScriptTXT_NormalizesCROnlyLineEndings(t *testing.T) {
@@ -137,18 +171,18 @@ func TestParseScriptTXT_RejectsInvalidInput(t *testing.T) {
 			rawLine:  "LST DEVICE_INFO",
 		},
 		{
-			name:     "multiple serial numbers",
-			raw:      []byte("LST DEVICE_INFO;SN1,SN2\n"),
-			wantCode: "MML_DEVICE_SN_MULTIPLE",
-			lineNo:   1,
-			rawLine:  "LST DEVICE_INFO;SN1,SN2",
-		},
-		{
 			name:     "two commands in one physical line",
 			raw:      []byte("LST DEVICE_INFO;SN1;MOD DEVICE_INFO;SN1\n"),
 			wantCode: "MML_LINE_FORMAT_INVALID",
 			lineNo:   1,
 			rawLine:  "LST DEVICE_INFO;SN1;MOD DEVICE_INFO;SN1",
+		},
+		{
+			name:     "duplicate serial number in one physical line",
+			raw:      []byte("LST Device.DeviceInfo.SoftwareVersion;SN1,SN1\n"),
+			wantCode: "MML_DEVICE_SN_DUPLICATE",
+			lineNo:   1,
+			rawLine:  "LST Device.DeviceInfo.SoftwareVersion;SN1,SN1",
 		},
 	}
 

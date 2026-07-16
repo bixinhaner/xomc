@@ -1,8 +1,8 @@
 # MML TXT脚本模板
 # 默认使用标准 PATH。需要直接下发设备私有 PATH 时，在路径前加 PRIVATE:。
 # 每条有效行格式：
-# 标准 PATH - 操作 路径[=参数值][,路径2=参数值2];设备SN
-# 私有 PATH - 操作 PRIVATE:路径[=参数值][,路径2=参数值2];设备SN
+# 标准 PATH - 操作 路径[=参数值][,路径2=参数值2];设备SN[,设备SN2...]
+# 私有 PATH - 操作 PRIVATE:路径[=参数值][,路径2=参数值2];设备SN[,设备SN2...]
 #
 # 支持操作：
 # LST 查询。操作后填写一个或多个标准参数路径。
@@ -11,7 +11,7 @@
 # RMV 删除对象。操作后填写具体对象实例路径。
 #
 # 规则：
-# 1. 每行只能写一条命令和一个设备SN。
+# 1. 每行只能写一条命令，可以填写一个或多个设备SN；多个设备SN用英文逗号分隔。
 # 2. 同一设备多行命令按文件从上到下顺序执行。
 # 3. 标准 PATH 会校验标准库是否存在，并在下发前按设备映射转换为私有 PATH。
 # 4. PRIVATE: 表示设备私有 PATH；不会校验标准库，也不会做标准 PATH 到私有 PATH 的转换，按原 PATH 下发。
@@ -27,3 +27,4 @@ MOD Device.ManagementServer.URL=http://localhost:8080/smallcell/AcsService,Devic
 ADD Device.IP.Interface.1.IPv4Address.:IPAddress=192.168.1.10,SubnetMask=255.255.255.0;DEVICE_SN
 RMV Device.IP.Interface.1.IPv4Address.3.;DEVICE_SN
 LST PRIVATE:InternetGatewayDevice.DeviceInfo.SoftwareVersion;DEVICE_SN
+LST Device.DeviceInfo.SoftwareVersion;DEVICE_SN,SECOND_SN

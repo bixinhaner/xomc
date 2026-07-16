@@ -1,8 +1,8 @@
 # MML TXT Script Template
 # Standard PATH is used by default. To send a device private PATH directly, prefix the path with PRIVATE:.
 # Valid line format:
-# Standard PATH - Operation path[=value][,path2=value2];device_sn
-# Private PATH - Operation PRIVATE:path[=value][,path2=value2];device_sn
+# Standard PATH - Operation path[=value][,path2=value2];device_sn[,device_sn2...]
+# Private PATH - Operation PRIVATE:path[=value][,path2=value2];device_sn[,device_sn2...]
 #
 # Supported operations:
 # LST query. Put one or more standard parameter paths after the operation.
@@ -11,7 +11,7 @@
 # RMV remove an object. Put the concrete object instance path after the operation.
 #
 # Rules:
-# 1. Each line may contain only one command and one device SN.
+# 1. Each line may contain only one command and one or more device SNs. Separate multiple device SNs with English commas.
 # 2. Multiple commands for the same device run in top-to-bottom file order.
 # 3. Standard PATH lines are checked against the standard library and translated to device private PATH before dispatch.
 # 4. PRIVATE: marks a device private PATH. It is not checked against the standard library and is dispatched as written.
@@ -27,3 +27,4 @@ MOD Device.ManagementServer.URL=http://localhost:8080/smallcell/AcsService,Devic
 ADD Device.IP.Interface.1.IPv4Address.:IPAddress=192.168.1.10,SubnetMask=255.255.255.0;DEVICE_SN
 RMV Device.IP.Interface.1.IPv4Address.3.;DEVICE_SN
 LST PRIVATE:InternetGatewayDevice.DeviceInfo.SoftwareVersion;DEVICE_SN
+LST Device.DeviceInfo.SoftwareVersion;DEVICE_SN,SECOND_SN

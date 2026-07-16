@@ -92,7 +92,7 @@ func ParseScriptTXT(raw []byte) (*ParsedScript, []ScriptIssue) {
 			issues = append(issues, lineIssue("MML_FILE_TOO_LARGE", lineNo, physical, "physical line limit exceeded"))
 			return false
 		}
-		parsed, issue := parseScriptPhysicalLine(lineNo, physical)
+		parsedLines, issue := parseScriptPhysicalLine(lineNo, physical)
 		if issue != nil {
 			if len(issues) >= MaxScriptIssues {
 				issues = append(issues, lineIssue("MML_FILE_TOO_LARGE", lineNo, physical, "parser issue limit exceeded"))
@@ -101,18 +101,20 @@ func ParseScriptTXT(raw []byte) (*ParsedScript, []ScriptIssue) {
 			issues = append(issues, *issue)
 			return true
 		}
-		if parsed == nil {
+		if len(parsedLines) == 0 {
 			return true
 		}
 
-		orders[parsed.DeviceSN]++
-		parsed.Order = orders[parsed.DeviceSN]
-		parsedScript.Lines = append(parsedScript.Lines, *parsed)
-		if _, exists := devices[parsed.DeviceSN]; !exists {
-			devices[parsed.DeviceSN] = struct{}{}
-			if len(devices) > MaxScriptDevices && deviceLimitIssue == nil {
-				issue := lineIssue("MML_FILE_TOO_LARGE", parsed.LineNo, parsed.RawLine, "")
-				deviceLimitIssue = &issue
+		for _, parsed := range parsedLines {
+			orders[parsed.DeviceSN]++
+			parsed.Order = orders[parsed.DeviceSN]
+			parsedScript.Lines = append(parsedScript.Lines, parsed)
+			if _, exists := devices[parsed.DeviceSN]; !exists {
+				devices[parsed.DeviceSN] = struct{}{}
+				if len(devices) > MaxScriptDevices && deviceLimitIssue == nil {
+					issue := lineIssue("MML_FILE_TOO_LARGE", parsed.LineNo, parsed.RawLine, "")
+					deviceLimitIssue = &issue
+				}
 			}
 		}
 		return true
@@ -158,7 +160,7 @@ func lineIssue(code string, lineNo int, rawLine, message string) ScriptIssue {
 	return ScriptIssue{Code: code, Severity: IssueError, LineNo: lineNo, RawLine: rawLine, Message: message}
 }
 
-func parseScriptPhysicalLine(lineNo int, rawLine string) (*ParsedScriptLine, *ScriptIssue) {
+func parseScriptPhysicalLine(lineNo int, rawLine string) ([]ParsedScriptLine, *ScriptIssue) {
 	trimmed := strings.TrimSpace(rawLine)
 	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 		return nil, nil
@@ -180,14 +182,9 @@ func parseScriptPhysicalLine(lineNo int, rawLine string) (*ParsedScriptLine, *Sc
 
 	separator := semicolonIndexes[0]
 	commandRaw := strings.TrimSpace(trimmed[:separator])
-	deviceSN := strings.TrimSpace(trimmed[separator+1:])
-	if deviceSN == "" {
-		issue := lineIssue("MML_DEVICE_SN_REQUIRED", lineNo, rawLine, "serial number is required")
-		return nil, &issue
-	}
-	if strings.Contains(deviceSN, ",") {
-		issue := lineIssue("MML_DEVICE_SN_MULTIPLE", lineNo, rawLine, "a physical line may name only one serial number")
-		return nil, &issue
+	deviceSNs, issue := parseScriptDeviceSNs(trimmed[separator+1:], lineNo, rawLine)
+	if issue != nil {
+		return nil, issue
 	}
 	if commandRaw == "" {
 		issue := lineIssue("MML_LINE_FORMAT_INVALID", lineNo, rawLine, "command is required before ;SN")
@@ -199,16 +196,57 @@ func parseScriptPhysicalLine(lineNo int, rawLine string) (*ParsedScriptLine, *Sc
 		issue := lineIssue("MML_LINE_FORMAT_INVALID", lineNo, rawLine, err.Error())
 		return nil, &issue
 	}
-	return &ParsedScriptLine{
-		LineNo:        lineNo,
-		RawLine:       rawLine,
-		DeviceSN:      deviceSN,
-		CommandCode:   commandCode,
-		OperationType: operation,
-		Parameters:    parameters,
-		ParamPaths:    paramPaths,
-		RawPathMode:   rawPathMode,
-	}, nil
+	lines := make([]ParsedScriptLine, 0, len(deviceSNs))
+	for _, deviceSN := range deviceSNs {
+		lines = append(lines, ParsedScriptLine{
+			LineNo:        lineNo,
+			RawLine:       rawLine,
+			DeviceSN:      deviceSN,
+			CommandCode:   commandCode,
+			OperationType: operation,
+			Parameters:    cloneStringMap(parameters),
+			ParamPaths:    append([]string(nil), paramPaths...),
+			RawPathMode:   rawPathMode,
+		})
+	}
+	return lines, nil
+}
+
+func parseScriptDeviceSNs(raw string, lineNo int, rawLine string) ([]string, *ScriptIssue) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		issue := lineIssue("MML_DEVICE_SN_REQUIRED", lineNo, rawLine, "serial number is required")
+		return nil, &issue
+	}
+
+	parts := strings.Split(raw, ",")
+	deviceSNs := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		deviceSN := strings.TrimSpace(part)
+		if deviceSN == "" {
+			issue := lineIssue("MML_DEVICE_SN_REQUIRED", lineNo, rawLine, "serial number is required")
+			return nil, &issue
+		}
+		if _, exists := seen[deviceSN]; exists {
+			issue := lineIssue("MML_DEVICE_SN_DUPLICATE", lineNo, rawLine, "duplicate serial number in one line")
+			return nil, &issue
+		}
+		seen[deviceSN] = struct{}{}
+		deviceSNs = append(deviceSNs, deviceSN)
+	}
+	return deviceSNs, nil
+}
+
+func cloneStringMap(src map[string]string) map[string]string {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]string, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
 }
 
 func parseScriptCommand(raw string) (operation, commandCode string, parameters map[string]string, paramPaths []string, rawPathMode string, err error) {
