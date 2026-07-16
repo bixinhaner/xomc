@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/url"
@@ -69,10 +70,204 @@ func NewHandler(config ConfigProvider, jwtService *admin.JWTService, httpClient 
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/agent/conversation", h.GetConversation)
 	rg.POST("/agent/conversation", h.NewConversation)
+	rg.GET("/agent/conversation/messages", h.GetConversationMessages)
+	rg.POST("/agent/attachments", h.UploadAttachment)
+	rg.DELETE("/agent/attachments/:attachmentID", h.DeleteAttachment)
+	rg.POST("/agent/runs/:runID/cancel", h.CancelRun)
+	rg.GET("/agent/artifacts/:artifactID/content", h.GetArtifactContent)
 	rg.GET("/agent/handbook/routes", h.GetHandbookRoutes)
 	rg.GET("/agent/handbook/manifest", h.GetHandbookManifest)
 	rg.GET("/agent/handbook/chunks/:index", h.GetHandbookChunk)
 	rg.POST("/agent/chat/stream", h.ChatStream)
+}
+
+const maxAgentAttachmentBytes = 25 << 20
+
+type runtimeProxyContext struct {
+	target         *agentconfig.RuntimeTarget
+	claims         *admin.Claims
+	conversationID string
+}
+
+func (h *Handler) resolveRuntimeProxyContext(c *gin.Context) (*runtimeProxyContext, bool) {
+	claims, ok := currentClaims(c)
+	if !ok {
+		commonerrors.AbortWithError(c, http.StatusUnauthorized, commonerrors.ErrUnauthorized)
+		return nil, false
+	}
+	target, err := h.config.GetRuntimeTarget(c.Request.Context())
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return nil, false
+	}
+	if target == nil || !target.Enabled || target.ConnectorID == "" || strings.TrimSpace(target.AgentStudioServiceToken) == "" || h.conversations == nil {
+		commonerrors.AbortWithError(c, http.StatusServiceUnavailable, commonerrors.ErrUnavailable)
+		return nil, false
+	}
+	conversationID, err := h.conversations.Active(c.Request.Context(), target.ConnectorID, claims)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return nil, false
+	}
+	return &runtimeProxyContext{target: target, claims: claims, conversationID: conversationID}, true
+}
+
+func actionConnectorServiceURL(target *agentconfig.RuntimeTarget, suffix string) string {
+	return strings.TrimRight(target.AgentStudioBaseURL, "/") + "/api/integrations/action-connectors/" + url.PathEscape(target.ConnectorID) + suffix
+}
+
+func (h *Handler) newServiceRequest(c *gin.Context, proxy *runtimeProxyContext, method, suffix string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(c.Request.Context(), method, actionConnectorServiceURL(proxy.target, suffix), body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+proxy.target.AgentStudioServiceToken)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-External-User-ID", proxy.claims.UserID.String())
+	return req, nil
+}
+
+func (h *Handler) proxyJSON(c *gin.Context, req *http.Request) {
+	resp, err := h.http.Do(req)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadGateway, fmt.Errorf("agent runtime unreachable: %w", err))
+		return
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadGateway, fmt.Errorf("read agent runtime response: %w", err))
+		return
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		detail := strings.TrimSpace(string(body))
+		if detail == "" {
+			detail = fmt.Sprintf("agent runtime failed with HTTP %d", resp.StatusCode)
+		}
+		commonerrors.AbortWithError(c, http.StatusBadGateway, fmt.Errorf("%s", detail))
+		return
+	}
+	if len(body) == 0 {
+		response.OK(c, nil)
+		return
+	}
+	var payload any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadGateway, fmt.Errorf("decode agent runtime response: %w", err))
+		return
+	}
+	response.OK(c, payload)
+}
+
+func (h *Handler) GetConversationMessages(c *gin.Context) {
+	proxy, ok := h.resolveRuntimeProxyContext(c)
+	if !ok {
+		return
+	}
+	suffix := "/conversations/" + url.PathEscape(proxy.conversationID) + "/messages"
+	req, err := h.newServiceRequest(c, proxy, http.MethodGet, suffix, nil)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	h.proxyJSON(c, req)
+}
+
+func (h *Handler) UploadAttachment(c *gin.Context) {
+	proxy, ok := h.resolveRuntimeProxyContext(c)
+	if !ok {
+		return
+	}
+	fileHeader, err := c.FormFile("file")
+	if err != nil || fileHeader.Size <= 0 || fileHeader.Size > maxAgentAttachmentBytes {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	file, err := fileHeader.Open()
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, fmt.Errorf("open attachment: %w", err))
+		return
+	}
+	defer file.Close()
+	suffix := "/conversations/" + url.PathEscape(proxy.conversationID) + "/attachments"
+	req, err := h.newServiceRequest(c, proxy, http.MethodPost, suffix, io.LimitReader(file, maxAgentAttachmentBytes+1))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	req.ContentLength = fileHeader.Size
+	req.Header.Set("Content-Type", attachmentContentType(fileHeader))
+	req.Header.Set("X-File-Name", url.PathEscape(fileHeader.Filename))
+	h.proxyJSON(c, req)
+}
+
+func attachmentContentType(file *multipart.FileHeader) string {
+	if value := strings.TrimSpace(file.Header.Get("Content-Type")); value != "" {
+		return value
+	}
+	return "application/octet-stream"
+}
+
+func (h *Handler) DeleteAttachment(c *gin.Context) {
+	proxy, ok := h.resolveRuntimeProxyContext(c)
+	if !ok {
+		return
+	}
+	suffix := "/conversations/" + url.PathEscape(proxy.conversationID) + "/attachments/" + url.PathEscape(c.Param("attachmentID"))
+	req, err := h.newServiceRequest(c, proxy, http.MethodDelete, suffix, nil)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	h.proxyJSON(c, req)
+}
+
+func (h *Handler) CancelRun(c *gin.Context) {
+	proxy, ok := h.resolveRuntimeProxyContext(c)
+	if !ok {
+		return
+	}
+	suffix := "/runs/" + url.PathEscape(c.Param("runID")) + "/cancel"
+	req, err := h.newServiceRequest(c, proxy, http.MethodPost, suffix, nil)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	h.proxyJSON(c, req)
+}
+
+func (h *Handler) GetArtifactContent(c *gin.Context) {
+	proxy, ok := h.resolveRuntimeProxyContext(c)
+	if !ok {
+		return
+	}
+	disposition := "inline"
+	if c.Query("disposition") == "attachment" {
+		disposition = "attachment"
+	}
+	suffix := "/conversations/" + url.PathEscape(proxy.conversationID) + "/artifacts/" + url.PathEscape(c.Param("artifactID")) + "/content?disposition=" + disposition
+	req, err := h.newServiceRequest(c, proxy, http.MethodGet, suffix, nil)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	req.Header.Set("Accept", "*/*")
+	resp, err := h.http.Do(req)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadGateway, fmt.Errorf("agent runtime unreachable: %w", err))
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		commonerrors.AbortWithError(c, http.StatusBadGateway, fmt.Errorf("%s", strings.TrimSpace(string(detail))))
+		return
+	}
+	for _, key := range []string{"Content-Type", "Content-Length", "Content-Disposition", "Cache-Control", "X-Content-Type-Options"} {
+		copyHeader(c.Writer.Header(), resp.Header, key)
+	}
+	c.Status(http.StatusOK)
+	_, _ = io.Copy(c.Writer, resp.Body)
 }
 
 // PrepareHandbook builds and caches the immutable handbook for the complete

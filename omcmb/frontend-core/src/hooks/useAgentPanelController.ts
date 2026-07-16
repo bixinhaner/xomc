@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type AgentApprovedAction,
+  type AgentAttachmentRef,
   type AgentError,
   type AgentPageContext,
   type AgentRuntimeMode,
@@ -13,6 +14,7 @@ import {
   mergeAgentThought,
   upsertAgentProcess,
 } from '../agentkit';
+import { agentApi } from '../services/api/agentApi';
 import { useAppStore } from '../store/appStore';
 import { useUserStore } from '../store/userStore';
 import { useAgentConversation, useStartAgentConversation } from './api/useAgentConfig';
@@ -29,10 +31,15 @@ export interface UseAgentPanelControllerResult {
   activities: AgentPanelActivity[];
   pendingAction: AgentPendingAction | null;
   isStreaming: boolean;
+  isUploading: boolean;
+  attachments: AgentAttachmentRef[];
   error: AgentError | null;
   sendMessage: (message: string) => Promise<void>;
   executePendingAction: () => Promise<void>;
   cancelPendingAction: () => void;
+  uploadAttachments: (files: File[]) => Promise<void>;
+  removeAttachment: (attachmentId: string) => Promise<void>;
+  stop: () => Promise<void>;
   clear: () => Promise<void>;
 }
 
@@ -41,6 +48,8 @@ const AGENT_CONVERSATION_STORAGE_PREFIX = 'omc-agent-conversation';
 const AGENT_CONVERSATION_STATE_VERSION = 1;
 const MAX_PERSISTED_MESSAGES = 40;
 const MAX_PERSISTED_ACTIVITIES = 30;
+const MAX_ATTACHMENT_COUNT = 10;
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
 interface PersistedAgentPanelState {
   version: typeof AGENT_CONVERSATION_STATE_VERSION;
@@ -186,10 +195,14 @@ export function useAgentPanelController(
   const [pendingAction, setPendingAction] = useState<AgentPendingAction | null>(null);
   const [conversationId, setConversationId] = useState<string | undefined>();
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [attachments, setAttachments] = useState<AgentAttachmentRef[]>([]);
   const [error, setError] = useState<AgentError | null>(null);
   const [storageReady, setStorageReady] = useState(false);
   const actionRequestsRef = useRef(new Map<string, AgentApprovedAction>());
   const abortRef = useRef<AbortController | null>(null);
+  const activeRunIdRef = useRef<string | undefined>(undefined);
+  const historyKeyRef = useRef<string | undefined>(undefined);
   const skipNextPersistRef = useRef(false);
   const conversationRequestRef = useRef<Promise<string | undefined> | null>(null);
 
@@ -225,9 +238,33 @@ export function useAgentPanelController(
     setPendingAction(restored?.pendingAction ?? null);
     setError(null);
     setIsStreaming(false);
+    setAttachments([]);
+    activeRunIdRef.current = undefined;
     actionRequestsRef.current.clear();
     setStorageReady(true);
   }, [conversationStorageKey]);
+
+  useEffect(() => {
+    if (!options.active || !enabled || !conversationId || isStreaming) return;
+    const historyKey = `${config.connectorId}:${currentUserId}:${conversationId}`;
+    if (historyKeyRef.current === historyKey) return;
+    historyKeyRef.current = historyKey;
+    void agentApi.getConversationMessages()
+      .then((history) => {
+        if (history.conversationId !== conversationId || history.messages.length === 0) return;
+        setMessages(history.messages.map((message) => ({
+          ...message,
+          createdAt:
+            typeof message.createdAt === 'number'
+              ? message.createdAt
+              : new Date(message.createdAt).getTime(),
+          status: message.status === 'error' ? 'error' : 'done',
+        })));
+      })
+      .catch(() => {
+        historyKeyRef.current = undefined;
+      });
+  }, [config.connectorId, conversationId, currentUserId, enabled, isStreaming, options.active]);
 
   const updateConversationId = useCallback(
     (nextConversationId: string | undefined) => {
@@ -358,6 +395,7 @@ export function useAgentPanelController(
       mode: AgentRuntimeMode;
       approvedAction?: AgentApprovedAction;
       addUserMessage: boolean;
+      attachments?: AgentAttachmentRef[];
     }) => {
       if (!client) {
         setError({
@@ -385,6 +423,7 @@ export function useAgentPanelController(
             text: input.message,
             status: 'done',
             createdAt: startedAt,
+            attachments: input.attachments,
           },
           {
             id: assistantId,
@@ -410,6 +449,7 @@ export function useAgentPanelController(
       const handleEvent = (event: AgentStreamEvent) => {
         switch (event.type) {
           case 'start':
+            activeRunIdRef.current = event.runId;
             updateConversationId(event.conversationId);
             setMessages((current) =>
               current.map((message) =>
@@ -530,12 +570,36 @@ export function useAgentPanelController(
           case 'process':
             appendAssistantProcess(assistantId, event);
             break;
+          case 'artifact':
+            setMessages((current) =>
+              current.map((message) =>
+                message.id === assistantId
+                  ? { ...message, artifacts: event.files }
+                  : message
+              )
+            );
+            break;
+          case 'ui_intent':
+            setMessages((current) =>
+              current.map((message) =>
+                message.id === assistantId
+                  ? { ...message, uiIntents: [...(message.uiIntents ?? []), event.intent] }
+                  : message
+              )
+            );
+            break;
           case 'error':
             setError(event.error);
             finishAssistant(assistantId, 'error');
             break;
           case 'done':
-            finishAssistant(assistantId, 'done');
+            setMessages((current) =>
+              current.map((message) =>
+                message.id === assistantId
+                  ? { ...message, status: 'done', durationMs: event.durationMs, thoughts: completeAgentThoughts(message.thoughts) }
+                  : message
+              )
+            );
             break;
         }
       };
@@ -548,6 +612,7 @@ export function useAgentPanelController(
             conversationId: activeConversationId,
             mode: input.mode,
             approvedAction: input.approvedAction,
+            attachments: input.attachments?.map(({ attachmentId, filename }) => ({ attachmentId, filename })),
             locale,
             timezone,
             context,
@@ -564,6 +629,7 @@ export function useAgentPanelController(
         }
       } finally {
         if (abortRef.current === abortController) abortRef.current = null;
+        activeRunIdRef.current = undefined;
         setIsStreaming(false);
       }
     },
@@ -585,10 +651,68 @@ export function useAgentPanelController(
     async (message: string) => {
       const trimmed = message.trim();
       if (!trimmed || isStreaming) return;
-      await stream({ message: trimmed, mode: 'preview', addUserMessage: true });
+      const turnAttachments = attachments;
+      setAttachments([]);
+      await stream({ message: trimmed, mode: 'preview', addUserMessage: true, attachments: turnAttachments });
     },
-    [isStreaming, stream]
+    [attachments, isStreaming, stream]
   );
+
+  const uploadAttachments = useCallback(async (files: File[]) => {
+    if (!files.length || isUploading) return;
+    const available = Math.max(0, MAX_ATTACHMENT_COUNT - attachments.length);
+    if (files.length > available) {
+      setError({ code: 'ATTACHMENT_LIMIT_EXCEEDED', message: 'Attachment limit exceeded.' });
+      return;
+    }
+    if (files.some((file) => file.size === 0)) {
+      setError({ code: 'ATTACHMENT_EMPTY', message: 'Empty files cannot be uploaded.' });
+      return;
+    }
+    if (files.some((file) => file.size > MAX_ATTACHMENT_BYTES)) {
+      setError({ code: 'ATTACHMENT_TOO_LARGE', message: 'Attachment is too large.' });
+      return;
+    }
+    setIsUploading(true);
+    setError(null);
+    try {
+      await ensureConversationId();
+      const uploaded: AgentAttachmentRef[] = [];
+      for (const file of files) {
+        uploaded.push(await agentApi.uploadAttachment(file));
+      }
+      setAttachments((current) => [...current, ...uploaded].slice(0, MAX_ATTACHMENT_COUNT));
+    } catch (err) {
+      setError(runtimeError(err));
+    } finally {
+      setIsUploading(false);
+    }
+  }, [attachments.length, ensureConversationId, isUploading]);
+
+  const removeAttachment = useCallback(async (attachmentId: string) => {
+    setAttachments((current) => current.filter((item) => item.attachmentId !== attachmentId));
+    try {
+      await agentApi.removeAttachment(attachmentId);
+    } catch (err) {
+      setError(runtimeError(err));
+    }
+  }, []);
+
+  const stop = useCallback(async () => {
+    const runId = activeRunIdRef.current;
+    if (runId) {
+      await agentApi.cancelRun(runId).catch(() => false);
+    }
+    abortRef.current?.abort();
+    abortRef.current = null;
+    activeRunIdRef.current = undefined;
+    setMessages((current) => current.map((message) =>
+      message.status === 'streaming'
+        ? { ...message, status: 'cancelled', thoughts: completeAgentThoughts(message.thoughts) }
+        : message
+    ));
+    setIsStreaming(false);
+  }, []);
 
   const executePendingAction = useCallback(async () => {
     if (!pendingAction || isStreaming) return;
@@ -625,6 +749,8 @@ export function useAgentPanelController(
     actionRequestsRef.current.clear();
     setIsStreaming(false);
     setError(null);
+    await Promise.allSettled(attachments.map((item) => agentApi.removeAttachment(item.attachmentId)));
+    setAttachments([]);
     if (!enabled || !config.connectorId || !currentUserId) {
       writeConversationState(conversationStorageKey, undefined);
       skipNextPersistRef.current = true;
@@ -647,6 +773,7 @@ export function useAgentPanelController(
     }
   }, [
     config.connectorId,
+    attachments,
     conversationStorageKey,
     currentUserId,
     enabled,
@@ -660,10 +787,15 @@ export function useAgentPanelController(
     activities,
     pendingAction,
     isStreaming,
+    isUploading,
+    attachments,
     error,
     sendMessage,
     executePendingAction,
     cancelPendingAction,
+    uploadAttachments,
+    removeAttachment,
+    stop,
     clear,
   };
 }

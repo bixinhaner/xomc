@@ -1,9 +1,11 @@
 package agentruntime
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -120,7 +122,7 @@ func TestChatStreamProxiesToAgentStudioWithDelegation(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, handbookSchemaVersion, handbook["schemaVersion"])
 	require.NotEmpty(t, handbook["catalogVersion"])
-	require.EqualValues(t, 6, handbook["totalOperations"])
+	require.EqualValues(t, 11, handbook["totalOperations"])
 	require.Equal(t, true, handbook["packageAvailable"])
 	require.NotEmpty(t, handbook["handbookDigest"])
 	require.Equal(t, "/api/v1/agent/handbook/manifest", handbook["manifestPath"])
@@ -130,6 +132,53 @@ func TestChatStreamProxiesToAgentStudioWithDelegation(t *testing.T) {
 	claims, err := jwtSvc.ValidateAgentDelegationToken(token)
 	require.NoError(t, err)
 	require.Equal(t, "operator", claims.Username)
+}
+
+func TestUploadAttachmentUsesServiceTokenAndActiveConversation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	userID := uuid.New()
+	var received []byte
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/integrations/action-connectors/connector-1/conversations/conversation-1/attachments", r.URL.Path)
+		require.Equal(t, "Bearer service-secret", r.Header.Get("Authorization"))
+		require.Equal(t, userID.String(), r.Header.Get("X-External-User-ID"))
+		require.Equal(t, "report%20%E6%8A%A5%E5%91%8A.txt", r.Header.Get("X-File-Name"))
+		received, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"attachment":{"attachmentId":"a1","filename":"report 报告.txt","mimeType":"text/plain","sizeBytes":5}}`))
+	}))
+	defer upstream.Close()
+
+	r := gin.New()
+	group := r.Group("/api/v1")
+	group.Use(func(c *gin.Context) {
+		c.Set(admin.CtxKeyClaims, &admin.Claims{UserID: userID, Username: "operator"})
+		c.Next()
+	})
+	NewHandler(fakeConfigProvider{target: &agentconfig.RuntimeTarget{
+		Enabled:                 true,
+		AgentStudioBaseURL:      upstream.URL,
+		AgentStudioServiceToken: "service-secret",
+		ConnectorID:             "connector-1",
+		Status:                  agentconfig.StatusConnected,
+	}}, nil, upstream.Client(), nil, nil, nil, fakeConversationManager{active: "conversation-1"}).RegisterRoutes(group)
+
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	part, err := w.CreateFormFile("file", "report 报告.txt")
+	require.NoError(t, err)
+	_, err = part.Write([]byte("hello"))
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agent/attachments", &body)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	r.ServeHTTP(recorder, req)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, []byte("hello"), received)
+	require.Contains(t, recorder.Body.String(), `"attachmentId":"a1"`)
 }
 
 func TestChatStreamRequiresConfiguredRuntime(t *testing.T) {

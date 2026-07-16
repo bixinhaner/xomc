@@ -14,6 +14,34 @@ export interface AgentUsage {
   totalTokens?: number;
 }
 
+export interface AgentAttachmentRef {
+  attachmentId: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  sha256?: string;
+  createdAt?: string;
+}
+
+export interface AgentArtifactRef {
+  artifactId: string;
+  filename: string;
+  mimeType?: string | null;
+  sizeBytes?: number | null;
+  previewStatus?: string | null;
+  downloadStatus?: string | null;
+  blockedReason?: string | null;
+}
+
+export interface AgentUiIntent {
+  kind: 'navigate' | 'show_records' | 'refresh_record' | 'toast';
+  route?: string;
+  entity?: string;
+  ids?: string[];
+  query?: Record<string, string>;
+  message?: string;
+}
+
 export type AgentThoughtStatus = 'streaming' | 'completed';
 export type AgentProcessKind =
   | 'status'
@@ -61,6 +89,7 @@ export interface AgentRuntimeRequest {
   conversationId?: string;
   mode?: AgentRuntimeMode;
   approvedAction?: AgentApprovedAction;
+  attachments?: Array<Pick<AgentAttachmentRef, 'attachmentId' | 'filename'>>;
   locale: string;
   timezone: string;
   context: AgentPageContext;
@@ -116,7 +145,9 @@ export type AgentStreamEvent =
       detail?: unknown;
       at?: string;
     }
-  | { type: 'done'; usage?: AgentUsage }
+  | { type: 'artifact'; files: AgentArtifactRef[] }
+  | { type: 'ui_intent'; intent: AgentUiIntent }
+  | { type: 'done'; usage?: AgentUsage; durationMs?: number }
   | { type: 'error'; error: AgentError };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -238,8 +269,23 @@ export function isAgentStreamEvent(value: unknown): value is AgentStreamEvent {
         (value.id === undefined || isString(value.id)) &&
         (value.at === undefined || isString(value.at))
       );
+    case 'artifact':
+      return (
+        Array.isArray(value.files) &&
+        value.files.every(
+          (file) =>
+            isRecord(file) &&
+            isString(file.artifactId) &&
+            isString(file.filename)
+        )
+      );
+    case 'ui_intent':
+      return isRecord(value.intent) && isString(value.intent.kind);
     case 'done':
-      return value.usage === undefined || isRecord(value.usage);
+      return (
+        (value.usage === undefined || isRecord(value.usage)) &&
+        (value.durationMs === undefined || typeof value.durationMs === 'number')
+      );
     case 'error':
       return isAgentError(value.error);
     default:

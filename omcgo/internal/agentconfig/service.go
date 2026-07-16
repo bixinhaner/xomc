@@ -96,22 +96,24 @@ func (s *Service) GetVisibilityConfig(ctx context.Context) (*VisibilityConfig, e
 }
 
 func (s *Service) GetRuntimeTarget(ctx context.Context) (*RuntimeTarget, error) {
-	cfg, err := s.GetAdminConfig(ctx)
+	values, err := s.loadValues(ctx)
 	if err != nil {
 		return nil, err
 	}
+	cfg := adminConfigFromValues(values)
 	instanceName, instanceNameIsDefault := s.loadInstanceName(ctx)
 	enabled := cfg.Enabled && cfg.Status == StatusConnected && cfg.AgentStudioBaseURL != "" && cfg.ConnectorID != ""
 	return &RuntimeTarget{
-		Enabled:               enabled,
-		AgentStudioBaseURL:    cfg.AgentStudioBaseURL,
-		ConnectorSlug:         cfg.ConnectorSlug,
-		ConnectorID:           cfg.ConnectorID,
-		Status:                cfg.Status,
-		LastError:             cfg.LastError,
-		InstanceName:          instanceName,
-		InstanceNameIsDefault: instanceNameIsDefault,
-		Policy:                cfg.Policy,
+		Enabled:                 enabled,
+		AgentStudioBaseURL:      cfg.AgentStudioBaseURL,
+		AgentStudioServiceToken: strings.TrimSpace(values[KeyAgentStudioServiceToken]),
+		ConnectorSlug:           cfg.ConnectorSlug,
+		ConnectorID:             cfg.ConnectorID,
+		Status:                  cfg.Status,
+		LastError:               cfg.LastError,
+		InstanceName:            instanceName,
+		InstanceNameIsDefault:   instanceNameIsDefault,
+		Policy:                  cfg.Policy,
 	}, nil
 }
 

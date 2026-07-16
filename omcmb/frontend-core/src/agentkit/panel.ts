@@ -4,10 +4,13 @@ import type {
   AgentProcessKind,
   AgentRiskLevel,
   AgentThoughtStatus,
+  AgentAttachmentRef,
+  AgentArtifactRef,
+  AgentUiIntent,
 } from './protocol';
 
 export type AgentPanelMessageRole = 'user' | 'assistant';
-export type AgentPanelMessageStatus = 'streaming' | 'done' | 'error';
+export type AgentPanelMessageStatus = 'streaming' | 'done' | 'error' | 'cancelled';
 export type AgentPanelActivityStatus =
   | 'calling'
   | 'preview'
@@ -26,6 +29,10 @@ export interface AgentPanelMessage {
   conversationId?: string;
   thoughts?: AgentThoughtEntry[];
   process?: AgentProcessEntry[];
+  attachments?: AgentAttachmentRef[];
+  artifacts?: AgentArtifactRef[];
+  uiIntents?: AgentUiIntent[];
+  durationMs?: number;
 }
 
 export interface AgentThoughtEntry {
