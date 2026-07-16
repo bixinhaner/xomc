@@ -114,4 +114,5 @@ type CommandParamRepository interface {
 type ScriptValidationRepository interface {
 	LoadCommandsByCodes(ctx context.Context, codes []string, actor ValidationActor) (map[string]ValidationCommand, error)
 	LoadDevicesBySNs(ctx context.Context, sns []string) (map[string]*model.Device, error)
+	LoadStandardPathSupport(ctx context.Context, lookups []StandardPathLookup) (map[string]bool, error)
 }

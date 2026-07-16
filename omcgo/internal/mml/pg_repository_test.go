@@ -388,6 +388,33 @@ SELECT c.command_code
 	}
 }
 
+func TestPgScriptValidationRepository_LoadStandardPathSupportMatchesTemplates(t *testing.T) {
+	pool := newMMLTestPool(t)
+	repo := NewPgScriptValidationRepository(pool)
+	ctx := context.Background()
+
+	const knownTemplate = "Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress"
+	var exists bool
+	err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM standard_params WHERE standard_path=$1)`, knownTemplate).Scan(&exists)
+	require.NoError(t, err)
+	if !exists {
+		t.Skipf("standard path fixture %s is not available", knownTemplate)
+	}
+
+	parameter := StandardPathLookup{Kind: StandardPathLookupParameter, Path: normalizeStandardPathTemplate("Device.IP.Interface.1.IPv4Address.3.IPAddress")}
+	addObject := StandardPathLookup{Kind: StandardPathLookupObject, Path: normalizeStandardPathTemplate("Device.IP.Interface.1.IPv4Address.")}
+	removeObject := StandardPathLookup{Kind: StandardPathLookupObject, Path: normalizeStandardPathTemplate("Device.IP.Interface.1.IPv4Address.3.")}
+	missing := StandardPathLookup{Kind: StandardPathLookupParameter, Path: normalizeStandardPathTemplate("Device.NotInStandardParams.1.Enable")}
+
+	support, err := repo.LoadStandardPathSupport(ctx, []StandardPathLookup{parameter, addObject, removeObject, missing})
+
+	require.NoError(t, err)
+	require.True(t, support[parameter.key()])
+	require.True(t, support[addObject.key()])
+	require.True(t, support[removeObject.key()])
+	require.False(t, support[missing.key()])
+}
+
 func TestPgScriptValidationRepository_MarksDuplicateVisibleCustomCodesAmbiguous(t *testing.T) {
 	pool := newMMLTestPool(t)
 	ctx := context.Background()
