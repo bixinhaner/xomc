@@ -7,7 +7,7 @@
 -- 从主库同步供本库 JOIN，含 mr_customize_task_dim）+ 1 个告警效率物化视图（原在 seed，建在
 -- alarms_history 上）。注：mr_files 随「MR 也记录到时序库」由主库迁来，与 mr_records 同库。
 --
--- 14 张表的「最终形态」= 主库 000001 原始定义 叠加 这些增量的净效果：
+-- 15 张表的「最终形态」= 主库 000001 原始定义 叠加 这些增量的净效果：
 --   - pm_metrics：去掉随机 uuid 主键 pm_metrics_pkey（000044）+ 去掉自然键唯一索引
 --     uq_pm_metrics_natural（000042）+ 去掉 idx_pm_metrics_ingest_time / idx_pm_metrics_object_ldn
 --     （000043）+ 带 insert-triggered autovacuum reloptions（000044）；chunk 间隔 4 小时（000045，修 B0）。
@@ -24,7 +24,7 @@
 CREATE EXTENSION IF NOT EXISTS timescaledb;
 
 -- =====================================================================================
--- 1. 14 张时序/PM 表（最终形态）
+-- 1. 15 张时序/PM 表（最终形态）
 -- =====================================================================================
 
 -- ── alarms_history（超表：time 7d chunk，retention 365d，无压缩）─────────────────────
@@ -415,6 +415,32 @@ SELECT create_hypertable('public.mr_records', by_range('time', INTERVAL '1 day')
 SELECT create_hypertable('public.trace_messages', by_range('captured_at', INTERVAL '1 day'), if_not_exists => TRUE, migrate_data => TRUE);
 -- pm_metrics: seed 原为 86400000000 µs = 1 day，但 000045 已改 4 hours（修 B0）→ 这里直接以 4 hours 建表。
 SELECT create_hypertable('public.pm_metrics', by_range('time', INTERVAL '4 hours'), if_not_exists => TRUE, migrate_data => TRUE);
+
+-- +goose StatementBegin
+-- 创建连续聚合视图，按小时通用聚合，替换掉以前 Go 里面复杂的 fallback 现场汇总和全网表扫描
+CREATE MATERIALIZED VIEW public.pm_metrics_hourly_cagg
+WITH (timescaledb.continuous) AS
+SELECT
+    time_bucket('1 hour', time) AS bucket_time,
+    metric_path,
+    statis_type,
+    SUM(metric_value) as sum_val,
+    AVG(metric_value) as avg_val,
+    MAX(metric_value) as max_val,
+    MIN(metric_value) as min_val
+FROM public.pm_metrics
+WHERE granularity = '15min'
+GROUP BY bucket_time, metric_path, statis_type
+WITH NO DATA;
+
+-- 设定自动刷新策略（由于实时聚合开启，15分钟刷新即可保障大部分场景的物化，
+-- 查询视图时引擎会自动拼接上过去 15 分钟尚未物化的热数据，对应用透明）
+SELECT add_continuous_aggregate_policy('public.pm_metrics_hourly_cagg',
+    start_offset => INTERVAL '24 hours',
+    end_offset => INTERVAL '15 minutes',
+    schedule_interval => INTERVAL '15 minutes');
+-- +goose StatementEnd
+
 -- pm_metrics_hourly: 604800000000 µs = 7 days; col "time"
 SELECT create_hypertable('public.pm_metrics_hourly', by_range('time', INTERVAL '7 days'), if_not_exists => TRUE, migrate_data => TRUE);
 -- pm_group_metrics_hourly: 604800000000 µs = 7 days; col "time"
@@ -767,7 +793,7 @@ COMMENT ON FUNCTION public.refresh_alarm_efficiency_metrics() IS '刷新告警�
 
 
 -- +goose Down
--- DROP 全部对象（同名视图 → matview + 函数 → 镜像/归库表 → 影子表 → 14 张时序表；策略随 DROP TABLE 级联消失）。
+-- DROP 全部对象（同名视图 → matview + 函数 → 镜像/归库表 → 影子表 → 15 张时序表；策略随 DROP TABLE 级联消失）。
 DROP VIEW IF EXISTS public.alarm_definitions;
 DROP VIEW IF EXISTS public.cell_band;
 DROP VIEW IF EXISTS public.device_groups;
@@ -785,6 +811,7 @@ DROP TABLE IF EXISTS public.trace_tasks;
 DROP FUNCTION IF EXISTS public.refresh_alarm_efficiency_metrics();
 DROP MATERIALIZED VIEW IF EXISTS public.alarm_efficiency_metrics;
 
+DROP TABLE IF EXISTS public.mr_customize_task_dim;
 DROP TABLE IF EXISTS public.alarm_definition_dim;
 DROP TABLE IF EXISTS public.device_group_dim;
 DROP TABLE IF EXISTS public.product_dim;
@@ -801,8 +828,13 @@ DROP TABLE IF EXISTS public.pm_metrics_monthly;
 DROP TABLE IF EXISTS public.pm_metrics_weekly;
 DROP TABLE IF EXISTS public.pm_metrics_daily;
 DROP TABLE IF EXISTS public.pm_metrics_hourly;
+-- +goose StatementBegin
+SELECT remove_continuous_aggregate_policy('public.pm_metrics_hourly_cagg', if_exists => TRUE);
+DROP MATERIALIZED VIEW IF EXISTS public.pm_metrics_hourly_cagg;
+-- +goose StatementEnd
 DROP TABLE IF EXISTS public.pm_metrics;
 DROP TABLE IF EXISTS public.pm_files;
+DROP TABLE IF EXISTS public.mr_files;
 DROP TABLE IF EXISTS public.trace_messages;
 DROP TABLE IF EXISTS public.mr_records;
 DROP TABLE IF EXISTS public.alarms_history;
