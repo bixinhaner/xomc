@@ -59,6 +59,25 @@ beforeEach(() => {
 });
 
 describe('deviceApi.getList — filter → query 映射', () => {
+  it('分页和排序字段使用后端 snake_case 契约', async () => {
+    await deviceApi.getList({
+      page: 2,
+      pageSize: 50,
+      sortField: 'serial_number',
+      sortOrder: 'ascend',
+    });
+    const [, opts] = getMock.mock.calls[0];
+    expect(opts.params).toMatchObject({
+      page: 2,
+      page_size: 50,
+      sort_by: 'serial_number',
+      sort_dir: 'asc',
+    });
+    expect(opts.params.pageSize).toBeUndefined();
+    expect(opts.params.sortField).toBeUndefined();
+    expect(opts.params.sortOrder).toBeUndefined();
+  });
+
   it('多选字段序列化为 CSV（避免 axios key[] 形态被 gin 静默丢弃）', async () => {
     await deviceApi.getList({
       page: 1,
@@ -266,7 +285,7 @@ describe('deviceApi.getBySn', () => {
     const d = await deviceApi.getBySn('SN001');
 
     expect(getMock).toHaveBeenNthCalledWith(1, '/devices', {
-      params: expect.objectContaining({ sn: 'SN001', page: 1, pageSize: 1 }),
+      params: expect.objectContaining({ sn: 'SN001', page: 1, page_size: 1 }),
     });
     expect(getMock).toHaveBeenNthCalledWith(2, '/devices/d1');
     expect(d?.groupId).toBe('group-1');
