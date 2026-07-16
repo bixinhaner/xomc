@@ -48,7 +48,7 @@ type RebootRecord struct {
 	Reason              string    `json:"reason,omitempty"`        // 普通: event_reason；异常: fault_reason(HaltMainReason)
 	DetailReason        string    `json:"detail_reason,omitempty"` // 仅异常: fault_detail(HaltDetailReason)
 	RuntimeBeforeReboot int64     `json:"runtime_before_reboot"`   // 重启前设备运行时长（秒）；普通和异常重启均有
-	RebootTime          time.Time `json:"reboot_time"`             // 普通: occurred_at；异常: collected_at
+	RebootTime          time.Time `json:"reboot_time"`             // 普通: occurred_at；异常: detected created_at
 }
 
 // Filter 统一查询过滤条件。
