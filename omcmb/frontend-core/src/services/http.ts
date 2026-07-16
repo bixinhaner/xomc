@@ -234,7 +234,19 @@ http.interceptors.response.use(
         }
         const tokenPair = envelope.data;
 
-        const { setTokenPair } = useUserStore.getState();
+        const currentSession = useUserStore.getState();
+        // 锁屏/退出可能与 refresh 并发。只有请求使用的 refresh token 仍属于
+        // 当前已认证会话时才允许写回，避免旧响应把锁屏后的认证状态复活。
+        if (
+          !currentSession.isAuthenticated ||
+          currentSession.refreshToken !== refreshToken
+        ) {
+          const staleError = new Error('Session changed while refreshing token');
+          onTokenRefreshFailed(staleError);
+          return Promise.reject(staleError);
+        }
+
+        const { setTokenPair } = currentSession;
         setTokenPair(tokenPair);
         onTokenRefreshed(tokenPair.access_token);
 

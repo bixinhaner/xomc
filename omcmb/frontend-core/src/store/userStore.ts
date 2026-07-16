@@ -9,6 +9,59 @@ export type { User };
 export type UserInfo = User & { permissions: string[]; avatar?: string; lastLogin?: string };
 export type UserRole = 'admin' | 'operator' | 'viewer' | 'auditor';
 
+const LOCKED_SESSION_KEY = 'omc-locked-session';
+
+function safeRemoveStorage(storage: Storage, key: string): void {
+  try {
+    storage.removeItem(key);
+  } catch {
+    // Storage can be disabled by browser policy. Auth cleanup must still continue.
+  }
+}
+
+export interface LockedSession {
+  userId: string;
+  username: string;
+  displayName: string;
+  returnPath: string;
+}
+
+export function getLockedSession(): LockedSession | null {
+  try {
+    const raw = sessionStorage.getItem(LOCKED_SESSION_KEY);
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Partial<LockedSession>;
+    if (
+      typeof value.userId !== 'string' ||
+      typeof value.username !== 'string' ||
+      typeof value.displayName !== 'string' ||
+      typeof value.returnPath !== 'string' ||
+      !value.returnPath.startsWith('/') ||
+      value.returnPath.startsWith('//')
+    ) {
+      safeRemoveStorage(sessionStorage, LOCKED_SESSION_KEY);
+      return null;
+    }
+    return value as LockedSession;
+  } catch {
+    safeRemoveStorage(sessionStorage, LOCKED_SESSION_KEY);
+    return null;
+  }
+}
+
+function clearPersistedTabs(): void {
+  useTabStore.getState().closeAllTabs();
+  safeRemoveStorage(sessionStorage, 'omc-tab-store');
+}
+
+function restoreLockedSessionFor(user: User): void {
+  const lockedSession = getLockedSession();
+  if (lockedSession && lockedSession.userId !== user.id) {
+    clearPersistedTabs();
+  }
+  safeRemoveStorage(sessionStorage, LOCKED_SESSION_KEY);
+}
+
 export interface TokenPairResponse {
   access_token: string;
   refresh_token: string;
@@ -36,6 +89,7 @@ interface UserState {
   // JWT token pair methods
   setTokenPair: (pair: TokenPairResponse) => void;
   clearAuth: () => void;
+  lock: (returnPath?: string) => void;
   isTokenExpired: () => boolean;
 
   // Existing methods
@@ -63,8 +117,14 @@ export const useUserStore = create<UserState>()(
       loading: false,
       mustChangePassword: false,
 
-      login: (user) => set({ currentUser: user, isAuthenticated: true }),
-      setUser: (user) => set({ currentUser: user, isAuthenticated: true }),
+      login: (user) => {
+        restoreLockedSessionFor(user);
+        set({ currentUser: user, isAuthenticated: true });
+      },
+      setUser: (user) => {
+        restoreLockedSessionFor(user);
+        set({ currentUser: user, isAuthenticated: true });
+      },
 
       setMustChangePassword: (v: boolean) => set({ mustChangePassword: v }),
 
@@ -84,7 +144,23 @@ export const useUserStore = create<UserState>()(
         });
       },
 
-      clearAuth: () => {
+      lock: (returnPath = '/dashboard') => {
+        const lockedUser = get().currentUser;
+        let snapshotSaved = false;
+        if (lockedUser) {
+          const lockedSession: LockedSession = {
+            userId: lockedUser.id,
+            username: lockedUser.username,
+            displayName: lockedUser.displayName,
+            returnPath,
+          };
+          try {
+            sessionStorage.setItem(LOCKED_SESSION_KEY, JSON.stringify(lockedSession));
+            snapshotSaved = true;
+          } catch {
+            // 锁屏快照保存失败时降级为普通退出，但绝不能阻止 Token 清理。
+          }
+        }
         set({
           currentUser: null,
           accessToken: null,
@@ -94,15 +170,23 @@ export const useUserStore = create<UserState>()(
           permissions: [],
           mustChangePassword: false,
         });
-        localStorage.removeItem('omc-user-store');
+        safeRemoveStorage(localStorage, 'omc-user-store');
         // 退出 / Token 失效时同步清空菜单缓存，防止下一个用户登录时
         // persist 残留指向上一个用户的角色菜单（PRD §6 风险表 / §3.3 #7）。
         useMenuStore.getState().clear();
-        localStorage.removeItem('omc-menu-store');
+        safeRemoveStorage(localStorage, 'omc-menu-store');
+        if (lockedUser && !snapshotSaved) {
+          clearPersistedTabs();
+          safeRemoveStorage(sessionStorage, LOCKED_SESSION_KEY);
+        }
+      },
+
+      clearAuth: () => {
+        get().lock();
         // 同步清空标签页（sessionStorage 存），避免下一个用户进来后
         // 右侧仍残留上一个用户打开过的页面。
-        useTabStore.getState().closeAllTabs();
-        sessionStorage.removeItem('omc-tab-store');
+        clearPersistedTabs();
+        safeRemoveStorage(sessionStorage, LOCKED_SESSION_KEY);
       },
 
       isTokenExpired: () => {
