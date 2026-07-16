@@ -21,6 +21,7 @@ export interface AggregatedQueryParams {
   // 后端 v1 handler 只支持单 OUI+SN 过滤；多设备走多次查询或 group dimension。
   deviceOui?: string;
   deviceSn?: string;
+  deviceSns?: string[];
   deviceGroupId?: string;
   metricPaths?: string[];
   metricType?: 'counter' | 'kpi';
@@ -29,6 +30,7 @@ export interface AggregatedQueryParams {
   endTime?: string;
   limit?: number;
   offset?: number;
+  pageBy?: 'pivot_row';
   // 后端按 (时间桶 × 指标) 补齐占位行（filled=true，metric_value 前端 mapper 设 null）。
   // 适用 device 维度单设备查询；未启用时后端不补行。
   fillEmpty?: boolean;

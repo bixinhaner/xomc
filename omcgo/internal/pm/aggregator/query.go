@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -58,6 +59,12 @@ type QueryRequest struct {
 	VisibleGroups []uuid.UUID
 	Limit         int
 	Offset        int
+	// PageByPivotRow 让 device 维度的 Limit/Offset 作用在透视表行 key 上，而不是原始长表行上。
+	// key = device_oui + device_sn + object_ldn + granularity + time；随后再取这些 key 下的全部指标行。
+	PageByPivotRow bool
+	// PivotRowKeys 是 page_by=pivot_row + fill_empty 时当前页的透视行边界。
+	// 它只用于补骨架，避免 FillEmptyBuckets 在分页后重新扩成完整时间窗。
+	PivotRowKeys []PivotRowKey
 	// Weekdays #599：星期过滤（0=周日..6=周六，对齐 PostgreSQL EXTRACT(dow)）。
 	// 空/全选 = 不过滤。筛的是 start_time 的星期几。
 	Weekdays []int
@@ -78,6 +85,14 @@ type QueryRequest struct {
 	// 仅经 queryWithKPIRecompute 的维度（product/band/device_group/aggregate_group/network）生效；
 	// device 维度由执行器在请求侧把 MetricPaths 直接灌成已启用集（设备级 KPI 已算好，无需重算）。
 	StoreAllEnabled bool
+}
+
+type PivotRowKey struct {
+	DeviceOUI   string
+	DeviceSN    string
+	ObjectLDN   string
+	Granularity metrics.Granularity
+	Time        time.Time
 }
 
 // Row 是 Aggregator.Query 的输出行。device 维度填 DeviceOUI/DeviceSN/ObjectLDN；
@@ -189,6 +204,9 @@ func (a *Aggregator) Count(ctx context.Context, q QueryRequest) (int, error) {
 
 	switch q.Dimension {
 	case DimensionDevice:
+		if q.PageByPivotRow {
+			return a.countDevicePivotRows(ctx, table, q)
+		}
 		qb := storage.Psql.Select("COUNT(*)").From(table)
 		qb = applyDeviceFilters(qb, q)
 		return a.scanCount(ctx, qb)
@@ -462,6 +480,9 @@ var deviceTableColumns = []string{
 // 一层恢复原有「time DESC + Limit/Offset」语义。WHERE/参数绑定（applyDeviceFilters）全部留在内层、
 // 保持不变。
 func buildDeviceTableSQL(table string, q QueryRequest) (string, []any, error) {
+	if q.PageByPivotRow {
+		return buildDevicePivotRowPageSQL(table, q)
+	}
 	inner := storage.Psql.Select(deviceTableColumns...).
 		Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`).
 		From(table)
@@ -479,6 +500,168 @@ func buildDeviceTableSQL(table string, q QueryRequest) (string, []any, error) {
 		qb = qb.Offset(uint64(q.Offset))
 	}
 	return qb.ToSql()
+}
+
+func buildDevicePivotRowPageSQL(table string, q QueryRequest) (string, []any, error) {
+	builder := sq.StatementBuilder.PlaceholderFormat(sq.Question)
+	inner := builder.Select(deviceTableColumns...).
+		Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`).
+		From(table)
+	inner = applyDeviceFilters(inner, q)
+	inner = inner.OrderBy(
+		"device_oui", "device_sn", "metric_path", "granularity", `"time"`, "object_ldn", "ingest_time DESC",
+	)
+	innerSQL, args, err := inner.ToSql()
+	if err != nil {
+		return "", nil, err
+	}
+
+	pageReq := q
+	if IsExplicitObjectSkeletonRequest(q) {
+		pageReq.MetricPaths = nil
+		pageReq.MetricType = nil
+	}
+	pageInner := builder.Select(deviceTableColumns...).
+		Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`).
+		From(table)
+	pageInner = applyDeviceFilters(pageInner, pageReq)
+	pageInner = pageInner.OrderBy(
+		"device_oui", "device_sn", "metric_path", "granularity", `"time"`, "object_ldn", "ingest_time DESC",
+	)
+	pageInnerSQL, pageArgs, err := pageInner.ToSql()
+	if err != nil {
+		return "", nil, err
+	}
+	args = append(args, pageArgs...)
+
+	limitSQL := ""
+	if q.Limit > 0 {
+		args = append(args, q.Limit)
+		limitSQL = "\n  LIMIT ?"
+	}
+	offsetSQL := ""
+	if q.Offset > 0 {
+		args = append(args, q.Offset)
+		offsetSQL = "\n  OFFSET ?"
+	}
+
+	sqlStr := fmt.Sprintf(`
+WITH dedup AS (
+  %s
+),
+page_keys AS (
+  SELECT DISTINCT device_oui, device_sn, COALESCE(object_ldn, '') AS object_ldn, granularity, "time"
+  FROM (
+    %s
+  ) pk_dedup
+  ORDER BY "time" DESC, device_sn ASC, object_ldn ASC%s%s
+)
+SELECT %s
+FROM dedup d
+JOIN page_keys pk
+  ON pk.device_oui = d.device_oui
+ AND pk.device_sn = d.device_sn
+ AND pk.object_ldn = COALESCE(d.object_ldn, '')
+ AND pk.granularity = d.granularity
+ AND pk."time" = d."time"
+ORDER BY d."time" DESC, d.device_sn ASC, COALESCE(d.object_ldn, '') ASC, d.metric_path ASC`,
+		innerSQL, pageInnerSQL, limitSQL, offsetSQL, prefixedColumns("d", deviceTableColumns))
+	sqlStr, err = sq.Dollar.ReplacePlaceholders(sqlStr)
+	if err != nil {
+		return "", nil, err
+	}
+	return sqlStr, args, nil
+}
+
+func (a *Aggregator) DevicePivotRowKeys(ctx context.Context, q QueryRequest) ([]PivotRowKey, error) {
+	if q.Dimension == "" {
+		q.Dimension = DimensionDevice
+	}
+	table, err := SelectTable(q.Granularity, q.Dimension)
+	if err != nil {
+		return nil, err
+	}
+	sqlStr, args, err := buildDevicePivotRowKeysSQL(table, q)
+	if err != nil {
+		return nil, fmt.Errorf("aggregator.DevicePivotRowKeys build: %w", err)
+	}
+	rows, err := a.db.Query(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, fmt.Errorf("aggregator.DevicePivotRowKeys query %s: %w", table, err)
+	}
+	defer rows.Close()
+
+	out := make([]PivotRowKey, 0)
+	for rows.Next() {
+		var key PivotRowKey
+		var granularity string
+		if err := rows.Scan(&key.DeviceOUI, &key.DeviceSN, &key.ObjectLDN, &granularity, &key.Time); err != nil {
+			return nil, fmt.Errorf("aggregator.DevicePivotRowKeys scan %s: %w", table, err)
+		}
+		key.Granularity = metrics.Granularity(granularity)
+		out = append(out, key)
+	}
+	return out, rows.Err()
+}
+
+func buildDevicePivotRowKeysSQL(table string, q QueryRequest) (string, []any, error) {
+	builder := sq.StatementBuilder.PlaceholderFormat(sq.Question)
+	pageReq := q
+	if IsExplicitObjectSkeletonRequest(q) {
+		pageReq.MetricPaths = nil
+		pageReq.MetricType = nil
+	}
+	inner := builder.Select(deviceTableColumns...).
+		Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`).
+		From(table)
+	inner = applyDeviceFilters(inner, pageReq)
+	inner = inner.OrderBy(
+		"device_oui", "device_sn", "metric_path", "granularity", `"time"`, "object_ldn", "ingest_time DESC",
+	)
+	innerSQL, args, err := inner.ToSql()
+	if err != nil {
+		return "", nil, err
+	}
+	limitSQL := ""
+	if q.Limit > 0 {
+		args = append(args, q.Limit)
+		limitSQL = "\nLIMIT ?"
+	}
+	offsetSQL := ""
+	if q.Offset > 0 {
+		args = append(args, q.Offset)
+		offsetSQL = "\nOFFSET ?"
+	}
+	sqlStr := fmt.Sprintf(`SELECT DISTINCT device_oui, device_sn, COALESCE(object_ldn, '') AS object_ldn, granularity, "time"
+FROM (
+  %s
+) dedup
+ORDER BY "time" DESC, device_sn ASC, object_ldn ASC%s%s`, innerSQL, limitSQL, offsetSQL)
+	sqlStr, err = sq.Dollar.ReplacePlaceholders(sqlStr)
+	if err != nil {
+		return "", nil, err
+	}
+	return sqlStr, args, nil
+}
+
+func prefixedColumns(prefix string, cols []string) string {
+	out := make([]string, 0, len(cols))
+	for _, col := range cols {
+		out = append(out, prefix+"."+col)
+	}
+	return strings.Join(out, ", ")
+}
+
+func (a *Aggregator) countDevicePivotRows(ctx context.Context, table string, q QueryRequest) (int, error) {
+	keySub := storage.Psql.Select(
+		"device_oui",
+		"device_sn",
+		"COALESCE(object_ldn, '') AS object_ldn",
+		"granularity",
+		`"time"`,
+	).Distinct().From(table)
+	keySub = applyDeviceFilters(keySub, q)
+	return a.scanCountSub(ctx, keySub)
 }
 
 func (a *Aggregator) queryDeviceTable(ctx context.Context, table string, q QueryRequest) ([]Row, error) {

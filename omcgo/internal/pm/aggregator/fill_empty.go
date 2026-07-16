@@ -94,6 +94,39 @@ func FillEmptyBuckets(rows []Row, req QueryRequest) []Row {
 		return rows
 	}
 	template := skeletonTemplateRow(rows, req)
+	if req.PageByPivotRow {
+		for _, pivotKey := range req.PivotRowKeys {
+			ldn := pivotKey.ObjectLDN
+			bucket := pivotKey.Time
+			key := fillBucketKey(&ldn, bucket)
+			seen := realByKeyMetric[key]
+			if seen == nil {
+				seen = make(map[string]struct{})
+				realByKeyMetric[key] = seen
+			}
+			for _, mp := range req.MetricPaths {
+				if _, ok := seen[mp]; ok {
+					continue
+				}
+				rows = append(rows, Row{
+					DeviceOUI:   firstNonEmpty(pivotKey.DeviceOUI, template.DeviceOUI),
+					DeviceSN:    firstNonEmpty(pivotKey.DeviceSN, template.DeviceSN),
+					MetricPath:  mp,
+					DisplayName: nameByPath[mp],
+					MetricType:  skeletonMetricType(mp, template.MetricType, req.MetricType),
+					MetricValue: jsonNullFloat(),
+					Granularity: pivotKey.Granularity,
+					Time:        bucket,
+					StartTime:   bucket,
+					EndTime:     nextSkeletonBucket(bucket, req.Granularity),
+					ObjectLDN:   &ldn,
+					Filled:      true,
+				})
+				seen[mp] = struct{}{}
+			}
+		}
+		return filterCompleteBucketRows(rows, req)
+	}
 	for _, bucket := range skeletonBuckets(req) {
 		for _, objectLDN := range req.ObjectLDNs {
 			ldn := objectLDN
@@ -130,6 +163,15 @@ func FillEmptyBuckets(rows []Row, req QueryRequest) []Row {
 
 func jsonNullFloat() jsonx.Float {
 	return jsonx.Float(math.NaN())
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func fillMetricType(repType metrics.MetricType, requested *metrics.MetricType) metrics.MetricType {

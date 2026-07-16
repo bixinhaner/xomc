@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Table, Empty, Typography } from 'antd';
 import type { ColumnsType, ColumnType } from 'antd/es/table';
+import type { TablePaginationConfig } from 'antd/es/table/interface';
 import { Resizable, type ResizeCallbackData } from 'react-resizable';
 import { useT } from '@/hooks/useT';
 import type { AggregatedRow } from '@core/types/pmDashboard';
@@ -22,6 +23,7 @@ const { Text } = Typography;
 interface PivotTableProps {
   rows: AggregatedRow[];
   loading?: boolean;
+  pagination?: TablePaginationConfig;
   /**
    * 空结果时的提示文案。缺省走通用「暂无数据，请选择查询条件后点击查询」。
    * gNB 查空时调用方传更明确文案（区分「未注册厂商指标库」与「时间窗内无采样」），
@@ -107,7 +109,7 @@ function ResizableTitle({ width, onResize, ...restProps }: ResizableTitleProps) 
   );
 }
 
-export default function PivotTable({ rows, loading, emptyDescription }: PivotTableProps) {
+export default function PivotTable({ rows, loading, pagination, emptyDescription }: PivotTableProps) {
   const t = useT();
   const pivoted = useMemo(() => pivotLongToWide(rows), [rows]);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -279,7 +281,7 @@ export default function PivotTable({ rows, loading, emptyDescription }: PivotTab
         columns={columns}
         components={{ header: { cell: ResizableTitle } }}
         dataSource={pivoted.rows}
-        pagination={{ defaultPageSize: 50, showSizeChanger: true, showTotal: (count) => t('perf.kpiQuery.pivot.totalRows', { count }) }}
+        pagination={pagination ?? { defaultPageSize: 50, showSizeChanger: true, showTotal: (count) => t('perf.kpiQuery.pivot.totalRows', { count }) }}
         tableLayout="fixed"
         scroll={{ x: totalWidth, y: tableBodyHeight }}
         bordered

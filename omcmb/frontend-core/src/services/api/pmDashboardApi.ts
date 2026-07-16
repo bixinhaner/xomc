@@ -32,6 +32,9 @@ export const pmDashboardApi = {
       dimension: params.dimension,
       device_oui: params.deviceOui,
       device_sn: params.deviceSn,
+      device_sns: params.deviceSns && params.deviceSns.length > 0
+        ? params.deviceSns.join(',')
+        : undefined,
       device_group_id: params.deviceGroupId,
       metric_paths: params.metricPaths && params.metricPaths.length > 0
         ? params.metricPaths.join(',')
@@ -41,6 +44,7 @@ export const pmDashboardApi = {
       end_time: params.endTime,
       limit: params.limit,
       offset: params.offset,
+      page_by: params.pageBy,
       fill_empty: params.fillEmpty ? 'true' : undefined,
       // #599：星期/小时段后端过滤（全选/空不传 = 不过滤，向后兼容）。
       weekdays: params.weekdays?.length && params.weekdays.length < 7
