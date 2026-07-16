@@ -4734,7 +4734,7 @@ const messages: Record<string, string> = {
   'system.device.nameSync.mode.prompt':             'Prompt for manual confirmation',
   'system.device.nameSync.mode.prompt.hint':        'Flag the device on mismatch; let a human decide which name to keep',
   // Issue #758: Device Name Sync
-  'device.nameSyncPending':                  'Device name sync pending',
+  'device.nameSyncPending':                  'Device names do not match',
   'device.nameSyncPending.lmtName':          'LMT Name',
   'device.nameSyncPending.omcName':          'OMC Name',
   'device.nameSyncPending.useLmt':           'Use LMT Name',

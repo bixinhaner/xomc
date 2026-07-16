@@ -393,8 +393,7 @@ export interface DeviceParameter {
  * T-0162 解耦后字段命名：
  *   - online_count / offline_count: 实时在线/离线（is_online 双值统计）
  *   - by_lifecycle: 按业务生命周期分组的计数（commissioned/maintenance/...）
- *   - alarmed: 含 active 告警的设备数（占位字段，由后续 follow-up commit
- *     真正 JOIN alarms 表统计，当前固定 0）
+ *   - alarmed: active 告警总条数（任意级别）
  *   - online / offline: T-0162 DEPRECATED 别名，仍由后端兼容写入，新 UI 用
  *     online_count / offline_count
  */
@@ -410,7 +409,7 @@ export interface DeviceListStats {
   offline_count: number;
   /** T-0162: 按 lifecycle_state 分组计数 */
   by_lifecycle?: Partial<Record<DeviceLifecycle, number>>;
-  /** 有 active 告警的设备数（任意级别） */
+  /** active 告警总条数（任意级别） */
   alarmed: number;
 }
 

@@ -65,8 +65,8 @@ type DeviceListStats struct {
 	// 不限定 lifecycle（"在线"语义是 is_online=TRUE，与生命周期解耦）。
 	OnlineCount  int64 `json:"online_count"`
 	OfflineCount int64 `json:"offline_count"`
-	// Alarmed = 含 active 告警的设备数（任何级别）。#361 已落地：来自
-	// COUNT(DISTINCT device_id) FROM alarms_active WHERE status<>'cleared'，
-	// 受同一 applyDeviceFilters 约束，与列表『告警级别』非『无』的设备数一致。
+	// Alarmed = active 告警总条数（任何级别）。#361 已落地：来自
+	// SUM(active_alarm_count) FROM alarms_active WHERE status<>'cleared'，
+	// 受同一 applyDeviceFilters 约束，与列表行内告警数量加总一致。
 	Alarmed int64 `json:"alarmed"`
 }

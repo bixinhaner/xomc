@@ -412,7 +412,7 @@ export default function DeviceList() {
   const batchReboot = useBatchRebootDevices();
   const updateDevice = useUpdateDevice();
   const triggerAlarmSync = useTriggerAlarmSync();
-  const alarmCountQuery = useAlarmCountWithDeviceListInvalidation();
+  useAlarmCountWithDeviceListInvalidation();
   const createUfteTask = useCreateUnifiedFileTransferTask();
   const downloadStationLog = useDownloadStationLog();
   const taskNameUser = currentUser?.username || currentUser?.displayName || 'user';
@@ -801,7 +801,7 @@ export default function DeviceList() {
   // T-0162: 优先用 online_count / offline_count（与 backend DeviceListStats 1:1）；
   // 老 stats.online / stats.offline 字段在新前端不再使用（仅 mapListResponse 内部
   // 当 fallback 保留），新 UI 直读 stats.online_count。
-  const activeAlarmCount = alarmCountQuery.data?.total_active ?? stats.alarmed;
+  const activeAlarmCount = stats.alarmed;
   const statsItems = useMemo(() => [
     { label: t('device.count.total'), value: stats.total },
     { label: t('status.online'), value: stats.online_count ?? stats.online ?? 0, color: '#52C41A' },

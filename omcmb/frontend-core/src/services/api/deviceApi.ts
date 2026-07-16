@@ -540,9 +540,9 @@ export const deviceApi = {
     // Map frontend filter fields to backend query params
     const query: Record<string, unknown> = {
       page: params.page,
-      pageSize: params.pageSize,
-      sortField: params.sortField,
-      sortOrder: params.sortOrder,
+      page_size: params.pageSize,
+      sort_by: params.sortField,
+      sort_dir: params.sortOrder === 'ascend' ? 'asc' : params.sortOrder === 'descend' ? 'desc' : undefined,
     };
 
     if (params.name) query.search = params.name;

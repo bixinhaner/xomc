@@ -273,6 +273,10 @@ func deviceListSearchFields() []string {
 	}
 }
 
+func deviceListCountSelect() sq.SelectBuilder {
+	return storage.Psql.Select("COUNT(DISTINCT d.id)")
+}
+
 func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter DeviceFilter) (*model.ListResponse[DeviceWithInfo], error) {
 	selectCols := deviceWithInfoSelectColumns()
 	builder := storage.Psql.Select(selectCols...).
@@ -282,7 +286,7 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 		LeftJoin("device_groups dg ON dg.id = dgm.group_id").
 		LeftJoin(alarmsActiveAggJoin). // #361: 告警级别/告警数实时聚合
 		Where(sq.Eq{"d.deleted_at": nil})
-	countBuilder := storage.Psql.Select("COUNT(*)").
+	countBuilder := deviceListCountSelect().
 		From("devices d").
 		LeftJoin("device_info di ON di.device_id = d.id").
 		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
@@ -556,14 +560,14 @@ func (r *PgDeviceInfoRepository) GetByIDWithInfo(ctx context.Context, deviceID u
 func (r *PgDeviceInfoRepository) ComputeListStats(ctx context.Context, filter DeviceFilter) (*DeviceListStats, error) {
 	// 用子查询去重再聚合：先按筛选条件取所有命中设备的 (id, lifecycle, is_online)，
 	// 再 GROUP BY。避免 dgm/dg LEFT JOIN 引起的设备重复计数。
-	// #361: alarmed 标记——该设备是否存在未 cleared 活动告警（相关子查询 EXISTS）。
-	// 放进 DISTINCT 子查询的 SELECT 列里，外层用 COUNT FILTER 数有告警的设备，
-	// 与列表『告警级别』非『无』的口径一致（同一 alarms_active status<>'cleared' 源）。
-	const alarmedFlagExpr = `EXISTS (
-		SELECT 1 FROM alarms_active aa
+	// #361: 当前告警统计取活动告警条数，而不是"有告警的设备数"。
+	// 放进 DISTINCT 子查询的 SELECT 列里，外层 SUM 后得到与列表行内告警数量相同的口径。
+	const activeAlarmCountExpr = `(
+		SELECT COUNT(*)
+		FROM alarms_active aa
 		WHERE aa.device_id = d.id AND aa.status <> 'cleared'
-	) AS alarmed`
-	subBuilder := storage.Psql.Select("DISTINCT d.id", "d.lifecycle_state", "d.is_online", alarmedFlagExpr).
+	) AS active_alarm_count`
+	subBuilder := storage.Psql.Select("DISTINCT d.id", "d.lifecycle_state", "d.is_online", activeAlarmCountExpr).
 		From("devices d").
 		LeftJoin("device_info di ON di.device_id = d.id").
 		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
@@ -581,11 +585,11 @@ func (r *PgDeviceInfoRepository) ComputeListStats(ctx context.Context, filter De
 		return nil, fmt.Errorf("build stats subquery: %w", err)
 	}
 
-	// #361: 外层 GROUP BY 增加 alarmed 真实统计——COUNT FILTER 数有活动告警的设备。
-	// alarmed 已是子查询每设备唯一一行的布尔，外层直接 COUNT(*) FILTER 即得
-	// COUNT(DISTINCT device_id with active alarm)，与 list 列『告警级别』非『无』一致。
+	// #361: 外层 GROUP BY 增加 alarmed 真实统计——SUM 活动告警条数。
+	// active_alarm_count 已是子查询每设备唯一一行的数值，外层 SUM 后与列表行内
+	// active_alarm_count 加总一致。
 	groupQ := "SELECT lifecycle_state, is_online, COUNT(*), " +
-		"COUNT(*) FILTER (WHERE alarmed) FROM (" + subQ +
+		"COALESCE(SUM(active_alarm_count), 0) FROM (" + subQ +
 		") s GROUP BY lifecycle_state, is_online"
 
 	rows, err := r.pool.Query(ctx, groupQ, subArgs...)
