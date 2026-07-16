@@ -4,8 +4,34 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 )
+
+type stubHistoryRetentionRow struct {
+	value int
+}
+
+func (r stubHistoryRetentionRow) Scan(dest ...any) error {
+	*(dest[0].(*int)) = r.value
+	return nil
+}
+
+type stubHistoryRetentionDB struct {
+	execSQL  []string
+	execArgs [][]any
+}
+
+func (s *stubHistoryRetentionDB) QueryRow(context.Context, string, ...any) pgx.Row {
+	return stubHistoryRetentionRow{value: 1}
+}
+
+func (s *stubHistoryRetentionDB) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	s.execSQL = append(s.execSQL, sql)
+	s.execArgs = append(s.execArgs, args)
+	return pgconn.NewCommandTag("SELECT 1"), nil
+}
 
 type stubHistoryRetentionReader struct {
 	row   *HistoryRetentionConfigRow
@@ -94,4 +120,24 @@ func TestHistoryRetentionServiceOnSysConfigSavedOnlyReactsToStorageCategory(t *t
 
 	svc.OnSysConfigSaved(context.Background(), HistoryRetentionCategory)
 	require.Equal(t, []int{60}, applier.calledWith)
+}
+
+func TestTimescaleHistoryRetentionApplierApplyUsesFixedDailySchedule(t *testing.T) {
+	db := &stubHistoryRetentionDB{}
+	applier := &TimescaleHistoryRetentionApplier{pool: db}
+
+	require.NoError(t, applier.Apply(context.Background(), 20))
+	require.Len(t, db.execSQL, 2)
+	require.Contains(t, db.execSQL[1], "schedule_interval => INTERVAL '1 day'")
+	require.Contains(t, db.execSQL[1], "initial_start => TIMESTAMPTZ '2000-01-01 01:08:00+08'")
+	require.Contains(t, db.execSQL[1], "timezone => 'Asia/Shanghai'")
+	require.NotContains(t, db.execSQL[1], "run_job")
+	require.NotContains(t, db.execSQL[1], "drop_chunks")
+	require.NotContains(t, db.execSQL[1], "DELETE FROM alarms_history")
+	require.Equal(t, []any{"20 days"}, db.execArgs[1])
+}
+
+func TestTimescaleHistoryRetentionApplierConstructedWithNilPoolReturnsError(t *testing.T) {
+	applier := NewTimescaleHistoryRetentionApplier(nil)
+	require.EqualError(t, applier.Apply(context.Background(), 20), "timescale pool is nil")
 }

@@ -27,7 +27,7 @@
 - Consumes: `TimescaleHistoryRetentionApplier.Apply(ctx context.Context, days int) error`
 - Produces: 固定到 01:08 Asia/Shanghai 的 `add_retention_policy` SQL
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 新增测试，捕获 `add_retention_policy` SQL 并断言包含以下参数：
 
@@ -37,7 +37,7 @@ initial_start => TIMESTAMPTZ '2000-01-01 01:08:00+08'
 timezone => 'Asia/Shanghai'
 ```
 
-- [ ] **Step 2: 验证 RED**
+- [x] **Step 2: 验证 RED**
 
 ```bash
 cd omcgo
@@ -46,7 +46,7 @@ go test ./internal/alarm -run TestTimescaleHistoryRetentionApplierApplyUsesFixed
 
 Expected: FAIL，当前 SQL 仅传入 `drop_after`。
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 将建 policy SQL 提取为常量，并只增加三个调度参数：
 
@@ -62,7 +62,7 @@ SELECT add_retention_policy(
 )`
 ```
 
-- [ ] **Step 4: 验证 GREEN**
+- [x] **Step 4: 验证 GREEN**
 
 ```bash
 cd omcgo
@@ -81,7 +81,7 @@ Expected: PASS。
 - Consumes: `timescaledb_information.jobs` 中唯一的 `policy_retention/public/alarms_history` job
 - Produces: fixed daily schedule at 01:08 Asia/Shanghai
 
-- [ ] **Step 1: 新增 Up 迁移**
+- [x] **Step 1: 新增 Up 迁移**
 
 先校验目标 job 恰好一条，再执行：
 
@@ -99,7 +99,7 @@ WHERE proc_name = 'policy_retention'
   AND hypertable_name = 'alarms_history';
 ```
 
-- [ ] **Step 2: 新增 Down 迁移**
+- [x] **Step 2: 新增 Down 迁移**
 
 对同一唯一 job 恢复：
 
@@ -111,7 +111,7 @@ timezone => NULL
 
 不得删除或重建 policy。
 
-- [ ] **Step 3: disposable TimescaleDB 验证**
+- [x] **Step 3: disposable TimescaleDB 验证**
 
 执行 baseline → 记录 job `config` → Up → Down，验证：
 
@@ -120,7 +120,7 @@ timezone => NULL
 - Up 后 fixed schedule 对齐 01:08；
 - 查询中没有其他 hypertable job 被修改。
 
-- [ ] **Step 4: 更新迁移索引并验证**
+- [x] **Step 4: 更新迁移索引并验证**
 
 ```bash
 cd omcgo
@@ -129,4 +129,3 @@ go test ./internal/alarm -run 'Test.*HistoryRetention' -count=1
 ```
 
 Expected: PASS。
-

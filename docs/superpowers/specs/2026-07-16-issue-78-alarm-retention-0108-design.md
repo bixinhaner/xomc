@@ -32,4 +32,3 @@ Issue 78 已确认不是保留天数未保存，而是配置保存只会重建�
 - 迁移后该 job 为 fixed schedule，下一次执行对齐北京时间 01:08。
 - Up/Down 均可在 disposable TimescaleDB 上执行。
 - `go build ./...` 与历史告警 retention 相关测试通过。
-
