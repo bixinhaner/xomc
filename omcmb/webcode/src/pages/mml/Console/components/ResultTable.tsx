@@ -25,7 +25,7 @@ import type {
 } from '../types';
 import { STATUS_META, UNVERIFIED_REASON_TEXT } from '../constants';
 import { exportAll, exportOne, saveBlob } from '../download';
-import { PATH_FAILED_CELL } from '../adapters';
+import { expandObjectPathColumns, PATH_FAILED_CELL } from '../adapters';
 import ResultDetailModal from './ResultDetailModal';
 import { usePermission } from '@core/hooks/usePermission';
 
@@ -88,11 +88,15 @@ export default function ResultTable({
   // issue #409：导出 / 重新执行的按钮级权限（无权限禁用 + Tooltip，不隐藏）。
   const canExportPerm = usePermission('mml:console:export');
   const canExecutePerm = usePermission('mml:console:execute');
+  const displayColumns = useMemo(
+    () => expandObjectPathColumns(columns, rows),
+    [columns, rows],
+  );
 
   const handleExportAllCsv = (): void => {
     if (!commandId) {
       // 无真实任务 ID（理论不达），回退客户端导出。
-      exportAll('csv', columns, rows, execMeta?.label ?? 'result');
+      exportAll('csv', displayColumns, rows, execMeta?.label ?? 'result');
       return;
     }
     const name = t('mml.consoleV2.result.summaryFileName', { name: execMeta?.commandName ?? execMeta?.label ?? 'mml-result' });
@@ -107,7 +111,7 @@ export default function ResultTable({
 
   const handleExportDeviceCsv = (deviceSn: string): void => {
     if (!commandId) {
-      exportOne(columns, rows.find((r) => r.deviceSn === deviceSn)!);
+      exportOne(displayColumns, rows.find((r) => r.deviceSn === deviceSn)!);
       return;
     }
     // 文件命名：命令名称 + 设备SN（与「下载全部」的命令名前缀口径一致）。
@@ -212,7 +216,7 @@ export default function ResultTable({
       },
     ];
 
-    const dynamic: ColumnsType<ResultRow> = columns.map((c) => ({
+    const dynamic: ColumnsType<ResultRow> = displayColumns.map((c) => ({
       title: c.label,
       key: c.key,
       width: 140,
@@ -310,7 +314,7 @@ export default function ResultTable({
     return [...base, ...dynamic, ...tail];
     // commandId / 导出 mutation / 重新执行回调 / running 进依赖：切任务或对应状态变化时刷新「操作」列。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [columns, commandId, exportDeviceCsv.isPending, exportDeviceCsv.variables, hasPlanRows, onReexecute, running, t, canExportPerm, canExecutePerm]);
+  }, [displayColumns, commandId, exportDeviceCsv.isPending, exportDeviceCsv.variables, hasPlanRows, onReexecute, running, t, canExportPerm, canExecutePerm]);
 
   return (
     <Card
@@ -400,7 +404,7 @@ export default function ResultTable({
         row={viewingRow}
         execMeta={execMeta}
         commandId={commandId}
-        columns={columns}
+        columns={displayColumns}
         onClose={() => setViewingRow(null)}
       />
     </Card>

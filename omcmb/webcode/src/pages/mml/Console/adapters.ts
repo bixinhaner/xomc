@@ -329,6 +329,43 @@ function leafName(path: string): string {
 }
 
 /**
+ * GPV partial path（以 `.` 结尾）会返回该对象下的多个叶子参数。控制台初始列只有
+ * 用户输入的对象路径，因此要用设备实际返回并保存在 cells 中的叶子路径替换该占位列。
+ * 普通叶子查询保持原列不变；多设备结果按首次出现顺序去重。
+ */
+export function expandObjectPathColumns(
+  columns: ResultColumn[],
+  rows: ResultRow[],
+): ResultColumn[] {
+  const expanded: ResultColumn[] = [];
+  for (const column of columns) {
+    if (!column.path.endsWith('.')) {
+      expanded.push(column);
+      continue;
+    }
+
+    const descendantPaths: string[] = [];
+    const seen = new Set<string>();
+    for (const row of rows) {
+      for (const path of Object.keys(row.cells)) {
+        if (path === column.path || !path.startsWith(column.path) || seen.has(path)) continue;
+        seen.add(path);
+        descendantPaths.push(path);
+      }
+    }
+
+    if (descendantPaths.length === 0) {
+      expanded.push(column);
+      continue;
+    }
+    descendantPaths.forEach((path, index) => {
+      expanded.push({ key: `${column.key}:child:${index}`, label: leafName(path), path });
+    });
+  }
+  return expanded;
+}
+
+/**
  * 「指定参数」(裸路径)执行的命令记录命名：用执行的 path 命名，优先取设备模型 path 字典里的
  * 友好名（nameMap，来自 standard_params.description），缺省回退路径叶子名；前缀操作中文标签。
  * 例：LST `Device.DeviceInfo.SoftwareVersion` → 「查询 软件版本」（无字典命中时「查询 SoftwareVersion」）。
@@ -380,6 +417,8 @@ export function applyFrameToRow(
       if (parsed?.kind === 'gpv' && parsed.params) {
         const byPath = new Map(parsed.params.map((p) => [p.name, p.value]));
         const byLeaf = new Map(parsed.params.map((p) => [leafName(p.name), p.value]));
+        // partial object path 查询会返回多个后代叶子；全部保留，供结果表动态展开。
+        for (const p of parsed.params) cells[p.name] = p.value;
         for (const c of columns) {
           const v = byPath.get(c.path) ?? byLeaf.get(leafName(c.path));
           if (v != null) cells[c.path] = v;
@@ -417,6 +456,8 @@ export function mapResultItemToRow(
     if (parsed?.kind === 'gpv' && parsed.params) {
       const byPath = new Map(parsed.params.map((p) => [p.name, p.value]));
       const byLeaf = new Map(parsed.params.map((p) => [leafName(p.name), p.value]));
+      // 与 SSE 路径一致：保留 partial object path 返回的全部后代叶子。
+      for (const p of parsed.params) cells[p.name] = p.value;
       for (const c of columns) {
         const v = byPath.get(c.path) ?? byLeaf.get(leafName(c.path));
         if (v != null) cells[c.path] = v;
