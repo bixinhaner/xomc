@@ -337,6 +337,9 @@ export default function KPIQuery() {
   // 复用 dashboard 取数链路，但用 kpi_query 来源输出查询页表格列。
   const handleExport = () => {
     if (!submittedPayload || !submittedRange) return; // 按钮已禁用，双保险
+    if (warnIfSelectionExceedsLimit(payload) || warnIfSelectionExceedsLimit(submittedPayload)) {
+      return;
+    }
     const sel = {
       ...kpiQueryToDashboardSelection(submittedPayload, submittedRange),
       objectLdns: effectiveLdns.length > 0 ? effectiveLdns : undefined,

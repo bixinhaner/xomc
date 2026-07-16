@@ -8,6 +8,24 @@ import KPIQuery from './index';
 
 const refetchAggSpy = vi.fn();
 const createTemplateSpy = vi.fn();
+const createExportSpy = vi.fn();
+
+const validTemplate: QueryTemplate = {
+  id: 'tpl-valid',
+  name: '正常模板',
+  visibility: 'public',
+  creatorId: 'user-1',
+  description: '',
+  payload: {
+    deviceSns: ['SN-OK'],
+    metricPaths: ['K-1'],
+    granularity: '15min',
+    timeRangePreset: 'last_1h',
+    deviceType: 'ENB',
+  },
+  createdAt: '2026-01-01T00:00:00Z',
+  updatedAt: '2026-01-01T00:00:00Z',
+};
 
 const overLimitTemplate: QueryTemplate = {
   id: 'tpl-over-limit',
@@ -28,7 +46,7 @@ const overLimitTemplate: QueryTemplate = {
 
 vi.mock('@core/hooks/api/usePmQuery', () => ({
   useQueryTemplates: () => ({
-    data: { items: [overLimitTemplate], total: 1 },
+    data: { items: [validTemplate, overLimitTemplate], total: 2 },
     isLoading: false,
     refetch: vi.fn(),
   }),
@@ -57,7 +75,7 @@ vi.mock('@core/hooks/api/useSystemTimezone', () => ({
 }));
 
 vi.mock('@core/hooks/api/useKpiExport', () => ({
-  useCreateKpiExport: () => ({ mutate: vi.fn(), isPending: false }),
+  useCreateKpiExport: () => ({ mutate: createExportSpy, isPending: false }),
 }));
 
 vi.mock('@/hooks/useThemeToken', () => ({
@@ -116,6 +134,7 @@ describe('KPIQuery 模板数量限制', () => {
   beforeEach(() => {
     refetchAggSpy.mockClear();
     createTemplateSpy.mockReset();
+    createExportSpy.mockReset();
   });
 
   it('老模板仍可展示，但超 50 个设备时点击查询不会执行聚合查询', async () => {
@@ -140,5 +159,23 @@ describe('KPIQuery 模板数量限制', () => {
     await waitFor(() => {
       expect(createTemplateSpy).not.toHaveBeenCalled();
     });
+  });
+
+  it('已有查询快照时，当前老模板超 50 个设备也不能发起导出', async () => {
+    renderPage();
+
+    fireEvent.click(screen.getByText('正常模板'));
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('已选 1 个：SN-OK')).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /查询$/ }));
+
+    fireEvent.click(screen.getByText('老模板-超限设备'));
+    await waitFor(() => {
+      expect(screen.getByDisplayValue(/已选 51 个/)).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /导出 CSV/ }));
+
+    expect(createExportSpy).not.toHaveBeenCalled();
   });
 });
