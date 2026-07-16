@@ -1,6 +1,8 @@
 # MML TXT Script Template
-# Use standard PATH. Valid line format:
-# Operation standard.path[=value][,standard.path2=value2];device_sn
+# Standard PATH is used by default. To send a device private PATH directly, prefix the path with PRIVATE:.
+# Valid line format:
+# Standard PATH - Operation path[=value][,path2=value2];device_sn
+# Private PATH - Operation PRIVATE:path[=value][,path2=value2];device_sn
 #
 # Supported operations:
 # LST query. Put one or more standard parameter paths after the operation.
@@ -11,14 +13,17 @@
 # Rules:
 # 1. Each line may contain only one command and one device SN.
 # 2. Multiple commands for the same device run in top-to-bottom file order.
-# 3. Use standard paths. Fill object instance indexes yourself, for example .1. for the first object and .2. for the second.
-# 4. ADD uses an object table path, for example Device.IP.Interface.1.IPv4Address.; ADD follow-up values use relative parameter names inside the new object.
-# 5. Separate parameters with English commas; when a value contains a comma or semicolon, wrap it in double quotes, single quotes, or {}.
-# 6. Blank lines and lines starting with # are ignored.
-# 7. One file supports at most 200 devices, 2000 valid commands, and 2 MiB.
+# 3. Standard PATH lines are checked against the standard library and translated to device private PATH before dispatch.
+# 4. PRIVATE: marks a device private PATH. It is not checked against the standard library and is dispatched as written.
+# 5. Fill object instance indexes yourself, for example .1. for the first object and .2. for the second.
+# 6. ADD uses an object table path, for example Device.IP.Interface.1.IPv4Address.; ADD follow-up values use relative parameter names inside the new object.
+# 7. Separate parameters with English commas; when a value contains a comma or semicolon, wrap it in double quotes, single quotes, or {}.
+# 8. Blank lines and lines starting with # are ignored.
+# 9. One file supports at most 200 devices, 2000 valid commands, and 2 MiB.
 #
 # Examples: replace DEVICE_SN with a real base station serial number.
 LST Device.DeviceInfo.SoftwareVersion;DEVICE_SN
 MOD Device.ManagementServer.URL=http://localhost:8080/smallcell/AcsService,Device.ManagementServer.Username=acs;DEVICE_SN
 ADD Device.IP.Interface.1.IPv4Address.:IPAddress=192.168.1.10,SubnetMask=255.255.255.0;DEVICE_SN
 RMV Device.IP.Interface.1.IPv4Address.3.;DEVICE_SN
+LST PRIVATE:InternetGatewayDevice.DeviceInfo.SoftwareVersion;DEVICE_SN

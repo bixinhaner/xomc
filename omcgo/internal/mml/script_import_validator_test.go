@@ -222,6 +222,25 @@ func TestScriptImportValidator_RejectsRawPathMissingFromStandardParams(t *testin
 	require.Equal(t, "MML_PATH_NOT_FOUND", result.Issues[0].Code)
 }
 
+func TestScriptImportValidator_PrivateRawPathSkipsStandardParamsLookup(t *testing.T) {
+	parsed, issues := ParseScriptTXT([]byte("LST PRIVATE:InternetGatewayDevice.DeviceInfo.X_VENDOR_NotRegistered;SN1\n"))
+	require.Empty(t, issues)
+	repo := &fakeScriptValidationRepo{
+		devices: map[string]*model.Device{"SN1": {SerialNumber: "SN1", IsOnline: true}},
+	}
+
+	result, err := NewScriptImportValidator(repo).Validate(context.Background(), parsed, ValidationActor{Username: "admin"})
+
+	require.NoError(t, err)
+	require.Empty(t, result.Issues)
+	require.Len(t, result.PlanItems, 1)
+	require.Equal(t, 0, repo.commandBatchCalls)
+	require.Equal(t, 1, repo.deviceBatchCalls)
+	require.Equal(t, 0, repo.pathBatchCalls)
+	require.Equal(t, rawPathModePrivate, result.PlanItems[0].Command["raw_path_mode"])
+	require.Equal(t, []string{"InternetGatewayDevice.DeviceInfo.X_VENDOR_NotRegistered"}, result.PlanItems[0].Command["param_paths"])
+}
+
 func TestScriptImportValidator_DoesNotResolveLegacyCommandCodesByDefault(t *testing.T) {
 	parsed, issues := ParseScriptTXT([]byte("LST DEVICE_INFO;SN1\n"))
 	require.Empty(t, issues)

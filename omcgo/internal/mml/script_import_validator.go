@@ -100,9 +100,12 @@ func (v *ScriptImportValidator) Validate(ctx context.Context, parsed *ParsedScri
 	if err != nil {
 		return nil, fmt.Errorf("load validation devices: %w", err)
 	}
-	standardPathSupport, err := v.repo.LoadStandardPathSupport(ctx, parsedStandardPathLookups(parsed.Lines))
-	if err != nil {
-		return nil, fmt.Errorf("load standard path support: %w", err)
+	standardPathSupport := map[string]bool{}
+	if lookups := parsedStandardPathLookups(parsed.Lines); len(lookups) > 0 {
+		standardPathSupport, err = v.repo.LoadStandardPathSupport(ctx, lookups)
+		if err != nil {
+			return nil, fmt.Errorf("load standard path support: %w", err)
+		}
 	}
 
 	result := &ScriptValidationResult{PlanItems: make([]MMLPlanItem, 0, len(parsed.Lines)), Issues: make([]ScriptIssue, 0)}
@@ -178,7 +181,7 @@ func standardPathLookupKindForOperation(operation string) StandardPathLookupKind
 
 func validateScriptLine(line ParsedScriptLine, commands map[string]ValidationCommand, devices map[string]*model.Device, standardPathSupport map[string]bool) ([]ScriptIssue, ValidationCommand, *model.Device) {
 	issues := make([]ScriptIssue, 0, 4)
-	if line.RawPathMode == rawPathModeStandard {
+	if isRawPathMode(line.RawPathMode) {
 		deviceIssues, device := validateScriptLineDevice(line, devices)
 		issues = append(issues, deviceIssues...)
 		issues = append(issues, validateRawPathScriptLine(line, standardPathSupport)...)
@@ -223,13 +226,17 @@ func validateScriptLineDevice(line ParsedScriptLine, devices map[string]*model.D
 func validateRawPathScriptLine(line ParsedScriptLine, standardPathSupport map[string]bool) []ScriptIssue {
 	issues := make([]ScriptIssue, 0, 2)
 	paths := nonEmptyStringSlice(line.ParamPaths)
+	pathMode := normalizeRawPathMode(line.RawPathMode)
 	for _, path := range paths {
 		if strings.ContainsAny(path, " \t\r\n") {
-			issues = append(issues, validationIssue(line, "MML_PATH_INVALID", IssueError, "path", "standard path must not contain whitespace"))
+			issues = append(issues, validationIssue(line, "MML_PATH_INVALID", IssueError, "path", "path must not contain whitespace"))
 			continue
 		}
 		if !looksLikeStandardPath(path) {
-			issues = append(issues, validationIssue(line, "MML_PATH_INVALID", IssueError, "path", "standard path must be dot-separated, for example Device.DeviceInfo.SoftwareVersion"))
+			issues = append(issues, validationIssue(line, "MML_PATH_INVALID", IssueError, "path", "path must be dot-separated, for example Device.DeviceInfo.SoftwareVersion"))
+			continue
+		}
+		if pathMode == rawPathModePrivate {
 			continue
 		}
 		lookup := StandardPathLookup{Path: normalizeStandardPathTemplate(path), Kind: standardPathLookupKindForOperation(line.OperationType)}
@@ -278,6 +285,10 @@ func validateRawPathScriptLine(line ParsedScriptLine, standardPathSupport map[st
 		issues = append(issues, validationIssue(line, "MML_OPERATION_UNSUPPORTED", IssueError, "operation_type", "standard path mode supports LST/MOD/ADD/RMV"))
 	}
 	return issues
+}
+
+func isRawPathMode(mode string) bool {
+	return strings.TrimSpace(mode) != ""
 }
 
 func looksLikeStandardPath(path string) bool {
@@ -526,7 +537,7 @@ func constraintNumber(value interface{}) (float64, bool) {
 }
 
 func buildValidationPlanItem(line ParsedScriptLine, command ValidationCommand) MMLPlanItem {
-	if line.RawPathMode == rawPathModeStandard {
+	if isRawPathMode(line.RawPathMode) {
 		return buildRawPathValidationPlanItem(line)
 	}
 	return MMLPlanItem{
@@ -546,7 +557,7 @@ func buildRawPathValidationPlanItem(line ParsedScriptLine) MMLPlanItem {
 		"operation_type": line.OperationType,
 		"param_paths":    append([]string(nil), line.ParamPaths...),
 		"parameters":     stringMapToAny(line.Parameters),
-		"raw_path_mode":  rawPathModeStandard,
+		"raw_path_mode":  normalizeRawPathMode(line.RawPathMode),
 	}
 	return MMLPlanItem{
 		LineNo: line.LineNo, DeviceSN: line.DeviceSN, Order: line.Order, RawLine: line.RawLine,

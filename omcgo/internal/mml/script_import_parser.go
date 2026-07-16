@@ -230,15 +230,15 @@ func parseScriptCommand(raw string) (operation, commandCode string, parameters m
 	}
 	rest := strings.TrimSpace(raw[firstSpace:])
 	if rest == "" {
-		return "", "", nil, nil, "", fmt.Errorf("standard path payload is required")
+		return "", "", nil, nil, "", fmt.Errorf("path payload is required")
 	}
 
-	parametersRaw := stripOptionalPathPrefix(rest)
+	rawPathMode, parametersRaw := parseRawPathModePayload(rest)
 	parameters, paramPaths, err = parseScriptRawPathPayload(operation, parametersRaw)
 	if err != nil {
 		return "", "", nil, nil, "", err
 	}
-	return operation, operation + " PATH", parameters, paramPaths, rawPathModeStandard, nil
+	return operation, operation + " PATH", parameters, paramPaths, rawPathMode, nil
 }
 
 // parseLegacyScriptCommand is intentionally kept for a possible future command-code
@@ -269,14 +269,29 @@ func parseLegacyScriptCommand(operation, rest string) (commandCode string, param
 }
 
 func stripOptionalPathPrefix(rest string) string {
+	_, payload := parseRawPathModePayload(rest)
+	return payload
+}
+
+func parseRawPathModePayload(rest string) (string, string) {
+	rest = strings.TrimSpace(rest)
 	colonIndex, err := firstTopLevelIndex(rest, ':')
 	if err != nil || colonIndex < 0 {
-		return rest
+		return rawPathModeStandard, rest
 	}
-	if strings.EqualFold(strings.TrimSpace(rest[:colonIndex]), "PATH") {
-		return strings.TrimSpace(rest[colonIndex+1:])
+	prefix := normalizeRawPathModePrefix(rest[:colonIndex])
+	payload := strings.TrimSpace(rest[colonIndex+1:])
+	switch prefix {
+	case "PATH":
+		return rawPathModeStandard, payload
+	case "PRIVATE":
+		return rawPathModePrivate, payload
 	}
-	return rest
+	return rawPathModeStandard, rest
+}
+
+func normalizeRawPathModePrefix(prefix string) string {
+	return strings.ToUpper(strings.Join(strings.Fields(strings.TrimSpace(prefix)), " "))
 }
 
 func validScriptOperation(operation string) bool {

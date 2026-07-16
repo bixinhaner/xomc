@@ -35,6 +35,7 @@ func TestParseScriptTXT_TemplateDocumentsSupportedSyntaxAndExamplesParse(t *test
 	require.Contains(t, scriptImportTemplateForParserTest, "RMV 删除")
 	require.NotContains(t, scriptImportTemplateForParserTest, "DEL")
 	require.Contains(t, scriptImportTemplateForParserTest, "使用标准 PATH")
+	require.Contains(t, scriptImportTemplateForParserTest, "PRIVATE:")
 	require.Contains(t, scriptImportTemplateForParserTest, "ADD 后的参数名是新对象内的相对参数名")
 	require.NotContains(t, scriptImportTemplateForParserTest, "PATH:")
 	require.NotContains(t, scriptImportTemplateForParserTest, "操作 命令编码")
@@ -55,6 +56,7 @@ func TestParseScriptTXT_TemplateDocumentsSupportedSyntaxAndExamplesParse(t *test
 	require.Equal(t, "RMV Device.IP.Interface.1.IPv4Address.3.;SN-TEMPLATE-1", got.Lines[3].RawLine)
 	require.Equal(t, []string{"Device.IP.Interface.1.IPv4Address."}, got.Lines[2].ParamPaths)
 	require.Equal(t, map[string]string{"IPAddress": "192.168.1.10", "SubnetMask": "255.255.255.0"}, got.Lines[2].Parameters)
+	require.Equal(t, rawPathModePrivate, got.Lines[4].RawPathMode)
 }
 
 func TestParseScriptTXT_EnglishTemplateDocumentsSupportedSyntaxAndExamplesParse(t *testing.T) {
@@ -67,7 +69,8 @@ func TestParseScriptTXT_EnglishTemplateDocumentsSupportedSyntaxAndExamplesParse(
 	require.Contains(t, template, "RMV remove")
 	require.NotContains(t, template, "DEL")
 	require.NotContains(t, template, "支持操作")
-	require.Contains(t, template, "Use standard PATH")
+	require.Contains(t, template, "Standard PATH")
+	require.Contains(t, template, "PRIVATE:")
 	require.Contains(t, template, "ADD follow-up values use relative parameter names")
 	require.NotContains(t, template, "PATH:")
 	require.NotContains(t, template, "Operation command_code")
@@ -85,6 +88,7 @@ func TestParseScriptTXT_EnglishTemplateDocumentsSupportedSyntaxAndExamplesParse(
 		got.Lines[2].OperationType,
 		got.Lines[3].OperationType,
 	})
+	require.Equal(t, rawPathModePrivate, got.Lines[4].RawPathMode)
 }
 
 func TestParseScriptTXT_NormalizesCROnlyLineEndings(t *testing.T) {
@@ -203,6 +207,21 @@ func TestParseScriptTXT_ParsesExplicitPathPrefixForCompatibility(t *testing.T) {
 	require.Equal(t, "LST", got.Lines[0].OperationType)
 	require.Equal(t, "LST PATH", got.Lines[0].CommandCode)
 	require.Equal(t, []string{"Device.IP.Interface.1.Enable"}, got.Lines[0].ParamPaths)
+}
+
+func TestParseScriptTXT_ParsesPrivatePathPrefix(t *testing.T) {
+	got, issues := ParseScriptTXT([]byte(strings.Join([]string{
+		"LST PRIVATE:InternetGatewayDevice.DeviceInfo.SoftwareVersion;SN1",
+		"MOD PRIVATE:InternetGatewayDevice.DeviceInfo.X_VENDOR_Label=alpha;SN1",
+	}, "\n") + "\n"))
+
+	require.Empty(t, issues)
+	require.Len(t, got.Lines, 2)
+	require.Equal(t, rawPathModePrivate, got.Lines[0].RawPathMode)
+	require.Equal(t, "LST PATH", got.Lines[0].CommandCode)
+	require.Equal(t, []string{"InternetGatewayDevice.DeviceInfo.SoftwareVersion"}, got.Lines[0].ParamPaths)
+	require.Equal(t, rawPathModePrivate, got.Lines[1].RawPathMode)
+	require.Equal(t, map[string]string{"InternetGatewayDevice.DeviceInfo.X_VENDOR_Label": "alpha"}, got.Lines[1].Parameters)
 }
 
 func TestParseScriptTXT_RejectsMoreThanMaxLines(t *testing.T) {
