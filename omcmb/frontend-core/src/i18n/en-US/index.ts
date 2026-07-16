@@ -1160,6 +1160,7 @@ const messages: Record<string, string> = {
   'device.paramTree.deleteInstanceFailed':'Failed to delete instance',
   'device.paramTree.searchPlaceholder':   'Search parameter path or value',
   'device.paramTree.syncing':             'Syncing',
+  'device.paramTree.finalizing':           'Finalizing sync results',
   'device.paramTree.syncPending':         ' · {count} GPV request(s) pending',
   'device.paramTree.lastSync':            'Last sync completed: {time}',
   'device.paramTree.lastScopedSync':      'Last quick-settings sync completed: {time} · {success} synced · {failed} skipped · {gpvCount} GPV request(s) · {duration} · {count} target paths',

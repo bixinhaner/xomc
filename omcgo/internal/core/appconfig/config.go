@@ -245,11 +245,20 @@ type ParamRegistryConfig struct {
 // default to false so deploying the binary and migration does not change the
 // legacy path until an operator explicitly enables a deterministic canary.
 type ParamSyncConfig struct {
-	RunEnabled            bool `mapstructure:"run_enabled"`
-	ResultConsumerEnabled bool `mapstructure:"result_consumer_enabled"`
-	StagingEnabled        bool `mapstructure:"staging_enabled"`
-	CanaryPercent         int  `mapstructure:"canary_percent"`
-	LegacyFallbackEnabled bool `mapstructure:"legacy_fallback_enabled"`
+	RunEnabled                    bool          `mapstructure:"run_enabled"`
+	ResultConsumerEnabled         bool          `mapstructure:"result_consumer_enabled"`
+	StagingEnabled                bool          `mapstructure:"staging_enabled"`
+	CanaryPercent                 int           `mapstructure:"canary_percent"`
+	LegacyFallbackEnabled         bool          `mapstructure:"legacy_fallback_enabled"`
+	ResultConsumerShardCount      int           `mapstructure:"result_consumer_shard_count"`
+	ResultConsumerQueueDepth      int           `mapstructure:"result_consumer_queue_depth"`
+	ResultConsumerPullBatchSize   int           `mapstructure:"result_consumer_pull_batch_size"`
+	ResultConsumerPullConcurrency int           `mapstructure:"result_consumer_pull_concurrency"`
+	ResultConsumerAckWait         time.Duration `mapstructure:"result_consumer_ack_wait"`
+	ResultConsumerMaxAckPending   int           `mapstructure:"result_consumer_max_ack_pending"`
+	RecoveryRunLimit              int           `mapstructure:"recovery_run_limit"`
+	RecoveryTaskLimitPerRun       int           `mapstructure:"recovery_task_limit_per_run"`
+	RecoveryTaskBudget            int           `mapstructure:"recovery_task_budget"`
 }
 
 // AppConfig 是 App 服务的完整配置。

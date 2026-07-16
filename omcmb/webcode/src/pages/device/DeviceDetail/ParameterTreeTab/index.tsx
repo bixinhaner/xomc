@@ -192,7 +192,9 @@ export default function ParameterTreeTab({ deviceId, lastScopedSync, syncBusy: e
             isSyncing ? (
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 <LoadingOutlined style={{ marginRight: 4 }} />
-                {t('device.paramTree.syncing')}
+                {syncStatus.stalledFinalizing
+                  ? t('device.paramTree.finalizing')
+                  : t('device.paramTree.syncing')}
                 {syncStatus.pendingCommands > 0
                   ? t('device.paramTree.syncPending', { count: syncStatus.pendingCommands })
                   : ''}

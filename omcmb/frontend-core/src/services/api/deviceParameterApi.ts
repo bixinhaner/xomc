@@ -418,13 +418,19 @@ export const deviceParameterApi = {
     );
     const status = mapBackendSyncStatus(data);
     try {
-      const { data: activeData } = await http.get<{ active_run?: BackendParamSyncRun }>(
+      const { data: activeData } = await http.get<{
+        active_run?: BackendParamSyncRun;
+        stalled_finalizing?: boolean;
+        reason?: string;
+      }>(
         `/devices/${deviceId}/parameter-sync/active`
       );
       const run = activeData.active_run;
       if (run) {
         status.status = 'syncing';
         status.pendingCommands = Math.max(run.expected_task_count - run.terminal_task_count, 0);
+        status.stalledFinalizing = !!activeData.stalled_finalizing;
+        status.stalledReason = activeData.reason;
         status.activeRun = {
           id: run.id,
           requestId: run.request_id,

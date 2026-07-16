@@ -48,6 +48,15 @@ param_sync:
   staging_enabled: false
   canary_percent: 0
   legacy_fallback_enabled: true
+  result_consumer_shard_count: 8
+  result_consumer_queue_depth: 64
+  result_consumer_pull_batch_size: 64
+  result_consumer_pull_concurrency: 64
+  result_consumer_ack_wait: 2m
+  result_consumer_max_ack_pending: 512
+  recovery_run_limit: 20
+  recovery_task_limit_per_run: 200
+  recovery_task_budget: 200
 
 nats:
   url: "nats://localhost:4222"
