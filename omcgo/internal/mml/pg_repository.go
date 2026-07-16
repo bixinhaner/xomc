@@ -2649,6 +2649,93 @@ SELECT serial_number, COALESCE(product_class, ''), is_online, COALESCE(firmware_
 	return result, nil
 }
 
+func (r *PgScriptValidationRepository) LoadStandardPathSupport(ctx context.Context, lookups []StandardPathLookup) (map[string]bool, error) {
+	result := make(map[string]bool, len(lookups))
+	if len(lookups) == 0 {
+		return result, nil
+	}
+	exactCandidates := make([]string, 0, len(lookups))
+	prefixCandidates := make([]string, 0, len(lookups))
+	for _, lookup := range lookups {
+		result[lookup.key()] = false
+		exactCandidates = append(exactCandidates, standardPathExactCandidates(lookup)...)
+		prefixCandidates = append(prefixCandidates, standardPathPrefixCandidates(lookup)...)
+	}
+	exactCandidates = uniqueStrings(exactCandidates)
+	prefixCandidates = uniqueStrings(prefixCandidates)
+
+	exactMatches := make(map[string]struct{}, len(exactCandidates))
+	if len(exactCandidates) > 0 {
+		rows, err := r.pool.Query(ctx, `
+SELECT standard_path
+  FROM standard_params
+ WHERE standard_path = ANY($1)`, exactCandidates)
+		if err != nil {
+			return nil, fmt.Errorf("load standard path exact matches: %w", err)
+		}
+		for rows.Next() {
+			var path string
+			if err := rows.Scan(&path); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan standard path exact match: %w", err)
+			}
+			exactMatches[path] = struct{}{}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("iterate standard path exact matches: %w", err)
+		}
+		rows.Close()
+	}
+
+	prefixMatches := make(map[string]struct{}, len(prefixCandidates))
+	if len(prefixCandidates) > 0 {
+		rows, err := r.pool.Query(ctx, `
+SELECT p.prefix
+  FROM unnest($1::text[]) AS p(prefix)
+ WHERE EXISTS (
+       SELECT 1
+         FROM standard_params sp
+        WHERE left(sp.standard_path, length(p.prefix)) = p.prefix
+ )`, prefixCandidates)
+		if err != nil {
+			return nil, fmt.Errorf("load standard path prefix matches: %w", err)
+		}
+		for rows.Next() {
+			var prefix string
+			if err := rows.Scan(&prefix); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan standard path prefix match: %w", err)
+			}
+			prefixMatches[prefix] = struct{}{}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("iterate standard path prefix matches: %w", err)
+		}
+		rows.Close()
+	}
+
+	for _, lookup := range lookups {
+		for _, candidate := range standardPathExactCandidates(lookup) {
+			if _, ok := exactMatches[candidate]; ok {
+				result[lookup.key()] = true
+				break
+			}
+		}
+		if result[lookup.key()] {
+			continue
+		}
+		for _, prefix := range standardPathPrefixCandidates(lookup) {
+			if _, ok := prefixMatches[prefix]; ok {
+				result[lookup.key()] = true
+				break
+			}
+		}
+	}
+	return result, nil
+}
+
 func rpcMethodForOperation(operation string) string {
 	switch operation {
 	case "MOD":

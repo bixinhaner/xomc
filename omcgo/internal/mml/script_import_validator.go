@@ -34,6 +34,25 @@ type ValidationCommand struct {
 	ParamRefs      []MMLParamRef
 }
 
+type StandardPathLookupKind string
+
+const (
+	StandardPathLookupParameter StandardPathLookupKind = "parameter"
+	StandardPathLookupObject    StandardPathLookupKind = "object"
+)
+
+// StandardPathLookup is the normalized validation key used by TXT raw PATH
+// import. Parameter paths must resolve exactly; object paths may resolve either
+// to an object row or to known child parameters under the object template.
+type StandardPathLookup struct {
+	Path string
+	Kind StandardPathLookupKind
+}
+
+func (l StandardPathLookup) key() string {
+	return string(l.Kind) + "\x00" + strings.TrimSpace(l.Path)
+}
+
 // ScriptValidationSummary is persisted with a successful import and lets the
 // caller show a concise result without re-walking all plan rows.
 type ScriptValidationSummary struct {
@@ -81,10 +100,14 @@ func (v *ScriptImportValidator) Validate(ctx context.Context, parsed *ParsedScri
 	if err != nil {
 		return nil, fmt.Errorf("load validation devices: %w", err)
 	}
+	standardPathSupport, err := v.repo.LoadStandardPathSupport(ctx, parsedStandardPathLookups(parsed.Lines))
+	if err != nil {
+		return nil, fmt.Errorf("load standard path support: %w", err)
+	}
 
 	result := &ScriptValidationResult{PlanItems: make([]MMLPlanItem, 0, len(parsed.Lines)), Issues: make([]ScriptIssue, 0)}
 	for _, line := range parsed.Lines {
-		lineIssues, command, device := validateScriptLine(line, commands, devices)
+		lineIssues, command, device := validateScriptLine(line, commands, devices, standardPathSupport)
 		result.Issues = append(result.Issues, lineIssues...)
 		if !lineHasError(lineIssues) {
 			result.PlanItems = append(result.PlanItems, buildValidationPlanItem(line, command))
@@ -116,12 +139,49 @@ func parsedScriptKeys(lines []ParsedScriptLine) ([]string, []string) {
 	return codes, sns
 }
 
-func validateScriptLine(line ParsedScriptLine, commands map[string]ValidationCommand, devices map[string]*model.Device) ([]ScriptIssue, ValidationCommand, *model.Device) {
+func parsedStandardPathLookups(lines []ParsedScriptLine) []StandardPathLookup {
+	seen := make(map[string]struct{})
+	lookups := make([]StandardPathLookup, 0)
+	for _, line := range lines {
+		if line.RawPathMode != rawPathModeStandard {
+			continue
+		}
+		kind := standardPathLookupKindForOperation(line.OperationType)
+		if kind == "" {
+			continue
+		}
+		for _, path := range nonEmptyStringSlice(line.ParamPaths) {
+			if !rawPathShapeValid(path) {
+				continue
+			}
+			lookup := StandardPathLookup{Path: normalizeStandardPathTemplate(path), Kind: kind}
+			if _, ok := seen[lookup.key()]; ok {
+				continue
+			}
+			seen[lookup.key()] = struct{}{}
+			lookups = append(lookups, lookup)
+		}
+	}
+	return lookups
+}
+
+func standardPathLookupKindForOperation(operation string) StandardPathLookupKind {
+	switch operation {
+	case "LST", "MOD":
+		return StandardPathLookupParameter
+	case "ADD", "RMV":
+		return StandardPathLookupObject
+	default:
+		return ""
+	}
+}
+
+func validateScriptLine(line ParsedScriptLine, commands map[string]ValidationCommand, devices map[string]*model.Device, standardPathSupport map[string]bool) ([]ScriptIssue, ValidationCommand, *model.Device) {
 	issues := make([]ScriptIssue, 0, 4)
 	if line.RawPathMode == rawPathModeStandard {
 		deviceIssues, device := validateScriptLineDevice(line, devices)
 		issues = append(issues, deviceIssues...)
-		issues = append(issues, validateRawPathScriptLine(line)...)
+		issues = append(issues, validateRawPathScriptLine(line, standardPathSupport)...)
 		return issues, ValidationCommand{}, device
 	}
 
@@ -160,7 +220,7 @@ func validateScriptLineDevice(line ParsedScriptLine, devices map[string]*model.D
 	return nil, device
 }
 
-func validateRawPathScriptLine(line ParsedScriptLine) []ScriptIssue {
+func validateRawPathScriptLine(line ParsedScriptLine, standardPathSupport map[string]bool) []ScriptIssue {
 	issues := make([]ScriptIssue, 0, 2)
 	paths := nonEmptyStringSlice(line.ParamPaths)
 	for _, path := range paths {
@@ -170,6 +230,11 @@ func validateRawPathScriptLine(line ParsedScriptLine) []ScriptIssue {
 		}
 		if !looksLikeStandardPath(path) {
 			issues = append(issues, validationIssue(line, "MML_PATH_INVALID", IssueError, "path", "standard path must be dot-separated, for example Device.DeviceInfo.SoftwareVersion"))
+			continue
+		}
+		lookup := StandardPathLookup{Path: normalizeStandardPathTemplate(path), Kind: standardPathLookupKindForOperation(line.OperationType)}
+		if lookup.Kind != "" && !standardPathSupport[lookup.key()] {
+			issues = append(issues, validationIssue(line, "MML_PATH_NOT_FOUND", IssueError, "path", "standard path is not registered in standard_params"))
 		}
 	}
 
@@ -218,6 +283,99 @@ func validateRawPathScriptLine(line ParsedScriptLine) []ScriptIssue {
 func looksLikeStandardPath(path string) bool {
 	path = strings.TrimSpace(path)
 	return path != "" && strings.Contains(path, ".")
+}
+
+func rawPathShapeValid(path string) bool {
+	return !strings.ContainsAny(path, " \t\r\n") && looksLikeStandardPath(path)
+}
+
+func normalizeStandardPathTemplate(path string) string {
+	parts := strings.Split(strings.TrimSpace(path), ".")
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		if _, err := strconv.Atoi(part); err == nil {
+			parts[i] = "{i}"
+		}
+	}
+	return strings.Join(parts, ".")
+}
+
+func standardPathExactCandidates(lookup StandardPathLookup) []string {
+	path := strings.TrimSpace(lookup.Path)
+	if path == "" {
+		return nil
+	}
+	if lookup.Kind == StandardPathLookupParameter {
+		return []string{path}
+	}
+	candidates := []string{path}
+	if stripped, ok := stripTrailingInstanceTemplate(path); ok {
+		candidates = append(candidates, stripped)
+	}
+	if strings.HasSuffix(path, ".") && !strings.HasSuffix(path, "{i}.") {
+		candidates = append(candidates, path+"{i}.")
+	}
+	return uniqueStrings(candidates)
+}
+
+func standardPathPrefixCandidates(lookup StandardPathLookup) []string {
+	if lookup.Kind != StandardPathLookupObject {
+		return nil
+	}
+	path := strings.TrimSpace(lookup.Path)
+	if path == "" {
+		return nil
+	}
+	candidates := []string{path}
+	if stripped, ok := stripTrailingInstanceTemplate(path); ok {
+		candidates = append(candidates, stripped+"{i}.")
+	}
+	if strings.HasSuffix(path, ".") && !strings.HasSuffix(path, "{i}.") {
+		candidates = append(candidates, path+"{i}.")
+	}
+	return uniqueStrings(candidates)
+}
+
+func stripTrailingInstanceTemplate(path string) (string, bool) {
+	if !strings.HasSuffix(path, "{i}.") {
+		return path, false
+	}
+	return strings.TrimSuffix(path, "{i}."), true
+}
+
+func standardPathLookupSupportedBySet(lookup StandardPathLookup, standardPaths map[string]struct{}) bool {
+	for _, candidate := range standardPathExactCandidates(lookup) {
+		if _, ok := standardPaths[candidate]; ok {
+			return true
+		}
+	}
+	for _, prefix := range standardPathPrefixCandidates(lookup) {
+		for standardPath := range standardPaths {
+			if strings.HasPrefix(standardPath, prefix) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func pathEndsWithInstance(path string) bool {
