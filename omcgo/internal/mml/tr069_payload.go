@@ -63,9 +63,9 @@ var paramPathLegalChars = regexp.MustCompile(`^[A-Za-z0-9_.\[\]\-]+$`)
 type PathSkipReason string
 
 const (
-	PathSkipBadPrefix      PathSkipReason = "bad_prefix"      // 不是 Device. / InternetGatewayDevice.
-	PathSkipPlaceholder    PathSkipReason = "has_placeholder" // 含 {i}/{n}/{idx}
-	PathSkipBadChars       PathSkipReason = "bad_chars"       // 含非法字符
+	PathSkipBadPrefix   PathSkipReason = "bad_prefix"      // 不是 Device. / InternetGatewayDevice.
+	PathSkipPlaceholder PathSkipReason = "has_placeholder" // 含 {i}/{n}/{idx}
+	PathSkipBadChars    PathSkipReason = "bad_chars"       // 含非法字符
 )
 
 // SkippedPath 是 ValidatePath 返回的不合规条目。
@@ -219,6 +219,7 @@ func xsdType(valueType string) string {
 // 不合规的路径（前缀错 / 非法字符 / 仍含 {i}）被跳过。
 // 全部不合规时返回 ErrNoUsableParams 让上层跳过整条 command。
 func buildParameterNames(paramRefs []MMLParamRef) (json.RawMessage, error) {
+	pathMode := pathModeFromRefs(paramRefs, nil)
 	raw := make([]string, 0, len(paramRefs))
 	for _, ref := range paramRefs {
 		if ref.Tr069Path != "" {
@@ -226,8 +227,10 @@ func buildParameterNames(paramRefs []MMLParamRef) (json.RawMessage, error) {
 		}
 	}
 	// Sprint B Q-V3-2: 展开 {i} 路径为 partial path（在合规校验之前）。
-	raw = expandInstancePaths(raw)
-	legal, skipped := filterLegalPaths(raw)
+	if pathMode != rawPathModePrivate {
+		raw = expandInstancePaths(raw)
+	}
+	legal, skipped := filterPathsForMode(raw, pathMode)
 
 	// 去重（保序）
 	names := make([]string, 0, len(legal))
@@ -247,7 +250,7 @@ func buildParameterNames(paramRefs []MMLParamRef) (json.RawMessage, error) {
 		}
 		return nil, fmt.Errorf("%w: GetParameterValues found 0 tr069_path in command param_refs", ErrNoUsableParams)
 	}
-	return json.Marshal(map[string]interface{}{"names": names})
+	return marshalPathPayload(map[string]interface{}{"names": names}, pathMode)
 }
 
 // buildParameterValues 把 formValues（map[param_code]value）翻译为
@@ -259,6 +262,7 @@ func buildParameterValues(paramRefs []MMLParamRef, formValues map[string]interfa
 	if len(formValues) == 0 {
 		return nil, fmt.Errorf("%w: SetParameterValues requires form values, got empty map", ErrNoUsableParams)
 	}
+	pathMode := pathModeFromRefs(paramRefs, formValues)
 
 	refsByCode := make(map[string]MMLParamRef, len(paramRefs))
 	for _, ref := range paramRefs {
@@ -285,7 +289,7 @@ func buildParameterValues(paramRefs []MMLParamRef, formValues map[string]interfa
 			continue
 		}
 		// 写类参数路径同样必须合规（占位符未替换的 path 写下去 CPE 也会拒）
-		if reason := validatePath(ref.Tr069Path); reason != "" {
+		if reason := validatePathForMode(ref.Tr069Path, pathMode); reason != "" {
 			skipped = append(skipped, SkippedPath{Path: ref.Tr069Path, Reason: reason})
 			continue
 		}
@@ -303,7 +307,7 @@ func buildParameterValues(paramRefs []MMLParamRef, formValues map[string]interfa
 		}
 		return nil, fmt.Errorf("%w: SetParameterValues mapped 0 values; unknown_codes=%v", ErrNoUsableParams, unknown)
 	}
-	return json.Marshal(map[string]interface{}{"values": values})
+	return marshalPathPayload(map[string]interface{}{"values": values}, pathMode)
 }
 
 // buildSetAttributes 翻译 SetParameterAttributes：通常携带 notification 设置。
@@ -311,8 +315,9 @@ func buildParameterValues(paramRefs []MMLParamRef, formValues map[string]interfa
 // 否则按 paramRefs 兜底构造（每个 ref 一条，notification_change=false）。
 func buildSetAttributes(paramRefs []MMLParamRef, formValues map[string]interface{}) (json.RawMessage, error) {
 	if attrs, ok := formValues["attributes"]; ok {
-		return json.Marshal(map[string]interface{}{"attributes": attrs})
+		return marshalPathPayload(map[string]interface{}{"attributes": attrs}, pathModeFromRefs(paramRefs, formValues))
 	}
+	pathMode := pathModeFromRefs(paramRefs, formValues)
 	type attrEntry struct {
 		Name               string `json:"name"`
 		NotificationChange bool   `json:"notification_change"`
@@ -323,7 +328,7 @@ func buildSetAttributes(paramRefs []MMLParamRef, formValues map[string]interface
 		if ref.Tr069Path == "" {
 			continue
 		}
-		if reason := validatePath(ref.Tr069Path); reason != "" {
+		if reason := validatePathForMode(ref.Tr069Path, pathMode); reason != "" {
 			continue // 不合规路径直接跳过
 		}
 		entries = append(entries, attrEntry{Name: ref.Tr069Path})
@@ -331,12 +336,13 @@ func buildSetAttributes(paramRefs []MMLParamRef, formValues map[string]interface
 	if len(entries) == 0 {
 		return nil, fmt.Errorf("%w: SetParameterAttributes resolved 0 legal paths", ErrNoUsableParams)
 	}
-	return json.Marshal(map[string]interface{}{"attributes": entries})
+	return marshalPathPayload(map[string]interface{}{"attributes": entries}, pathMode)
 }
 
 // buildGetParameterNames 处理 GetParameterNames(path, next_level)。
 // 优先 formValues["path"]；否则取 paramRefs 第一条作为兜底。
 func buildGetParameterNames(paramRefs []MMLParamRef, formValues map[string]interface{}) (json.RawMessage, error) {
+	pathMode := pathModeFromRefs(paramRefs, formValues)
 	var path string
 	if p, ok := formValues["path"].(string); ok && p != "" {
 		path = p
@@ -348,10 +354,13 @@ func buildGetParameterNames(paramRefs []MMLParamRef, formValues map[string]inter
 	}
 	// GetParameterNames 的 path 允许 partial（以 "." 结尾），所以校验只查前缀和字符集，
 	// 占位符 {i} 同样不允许（CPE 解析失败）。
-	if !paramPathLegalRoot.MatchString(path) {
+	if pathMode == rawPathModePrivate {
+		if reason := validateDirectPath(path); reason != "" {
+			return nil, fmt.Errorf("%w: GetParameterNames private path %q failed validation (%s)", ErrNoUsableParams, path, reason)
+		}
+	} else if !paramPathLegalRoot.MatchString(path) {
 		return nil, fmt.Errorf("%w: GetParameterNames path %q does not start with an accepted root (Device./InternetGatewayDevice./boardconf./DeviceGSM./aldconfig./FAPService.)", ErrNoUsableParams, path)
-	}
-	if paramPathPlaceholder.MatchString(path) {
+	} else if paramPathPlaceholder.MatchString(path) {
 		return nil, fmt.Errorf("%w: GetParameterNames path %q contains unresolved placeholder {i}/{n}", ErrNoUsableParams, path)
 	}
 	var nextLevel bool
@@ -361,15 +370,16 @@ func buildGetParameterNames(paramRefs []MMLParamRef, formValues map[string]inter
 	case string:
 		nextLevel = v == "true" || v == "1"
 	}
-	return json.Marshal(map[string]interface{}{
+	return marshalPathPayload(map[string]interface{}{
 		"path":       path,
 		"next_level": nextLevel,
-	})
+	}, pathMode)
 }
 
 // buildObjectName 翻译 AddObject / DeleteObject：取 formValues["object_name"]
 // 或 paramRefs[0].Tr069Path。TR-069 协议规定 object_name 必须以 "." 结尾。
 func buildObjectName(paramRefs []MMLParamRef, formValues map[string]interface{}) (json.RawMessage, error) {
+	pathMode := pathModeFromRefs(paramRefs, formValues)
 	var name string
 	if v, ok := formValues["object_name"].(string); ok && v != "" {
 		name = v
@@ -379,17 +389,72 @@ func buildObjectName(paramRefs []MMLParamRef, formValues map[string]interface{})
 	if name == "" {
 		return nil, fmt.Errorf("%w: AddObject/DeleteObject requires object_name", ErrNoUsableParams)
 	}
-	// 对象名同样必须合规。AddObject 的 object_name 是 partial path（以 . 结尾），
-	// 所以前缀校验和占位符校验都查；字符集校验跳过末尾的 "."。
-	checkName := strings.TrimSuffix(name, ".")
-	if reason := validatePath(checkName); reason != "" {
-		return nil, fmt.Errorf("%w: AddObject/DeleteObject object_name %q failed validation (%s)",
-			ErrNoUsableParams, name, reason)
-	}
 	if !strings.HasSuffix(name, ".") {
 		name += "."
 	}
-	return json.Marshal(map[string]interface{}{"object_name": name})
+	// 对象名同样必须合规。AddObject 的 object_name 是 partial path（以 . 结尾）。
+	if reason := validatePathForMode(strings.TrimSuffix(name, "."), pathMode); reason != "" {
+		return nil, fmt.Errorf("%w: AddObject/DeleteObject object_name %q failed validation (%s)",
+			ErrNoUsableParams, name, reason)
+	}
+	return marshalPathPayload(map[string]interface{}{"object_name": name}, pathMode)
+}
+
+func pathModeFromRefs(paramRefs []MMLParamRef, formValues map[string]interface{}) string {
+	if formValues != nil {
+		if mode, ok := formValues["path_mode"].(string); ok && normalizeRawPathMode(mode) == rawPathModePrivate {
+			return rawPathModePrivate
+		}
+	}
+	for _, ref := range paramRefs {
+		if normalizeRawPathMode(ref.PathMode) == rawPathModePrivate {
+			return rawPathModePrivate
+		}
+	}
+	return rawPathModeStandard
+}
+
+func marshalPathPayload(payload map[string]interface{}, pathMode string) (json.RawMessage, error) {
+	if normalizeRawPathMode(pathMode) == rawPathModePrivate {
+		payload["path_mode"] = rawPathModePrivate
+	}
+	return json.Marshal(payload)
+}
+
+func filterPathsForMode(paths []string, pathMode string) (legal []string, skipped []SkippedPath) {
+	if normalizeRawPathMode(pathMode) != rawPathModePrivate {
+		return filterLegalPaths(paths)
+	}
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if reason := validateDirectPath(p); reason != "" {
+			skipped = append(skipped, SkippedPath{Path: p, Reason: reason})
+			continue
+		}
+		legal = append(legal, p)
+	}
+	return legal, skipped
+}
+
+func validatePathForMode(path, pathMode string) PathSkipReason {
+	if normalizeRawPathMode(pathMode) == rawPathModePrivate {
+		return validateDirectPath(path)
+	}
+	return validatePath(path)
+}
+
+func validateDirectPath(path string) PathSkipReason {
+	path = strings.TrimSpace(path)
+	if path == "" || !strings.Contains(path, ".") {
+		return PathSkipBadPrefix
+	}
+	if paramPathPlaceholder.MatchString(path) {
+		return PathSkipPlaceholder
+	}
+	if !paramPathLegalChars.MatchString(path) {
+		return PathSkipBadChars
+	}
+	return ""
 }
 
 func marshalRaw(formValues map[string]interface{}) (json.RawMessage, error) {

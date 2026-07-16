@@ -350,6 +350,7 @@ type MMLParamRef struct {
 	DefaultValue      string                 `json:"default_value,omitempty"`
 	JsRegex           string                 `json:"js_regex,omitempty"`
 	ValueConstraint   map[string]interface{} `json:"value_constraint,omitempty"`
+	PathMode          string                 `json:"path_mode,omitempty"`
 	PrivatePath       string                 `json:"private_path,omitempty"`
 	TranslationSource string                 `json:"translation_source,omitempty"`
 }

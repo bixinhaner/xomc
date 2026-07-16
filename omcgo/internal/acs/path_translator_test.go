@@ -133,6 +133,21 @@ func TestTranslateTaskParams_TranslatesGPVNames(t *testing.T) {
 	}, got.Names)
 }
 
+func TestTranslateTaskParams_SkipsPrivatePathMode(t *testing.T) {
+	called := false
+	dev := &stubDeviceLookup{dev: &coremodel.Device{ProductClass: "X-BLQ", FirmwareVersion: "1.0.0"}}
+	wrapped := devLookupCounter{inner: dev, called: &called}
+	s := NewPathTranslationService(wrapped, &stubProductMatcher{}, &stubTranslatorFactory{}, zap.NewNop())
+	in := json.RawMessage(`{"path_mode":"private","names":["InternetGatewayDevice.DeviceInfo.X_VENDOR_NotRegistered"]}`)
+	tk := &task.Task{ID: "t1", DeviceSN: "SN1", Method: "GetParameterValues", Params: in}
+
+	out, changed := s.TranslateTaskParams(context.Background(), tk)
+
+	require.False(t, changed)
+	assert.JSONEq(t, string(in), string(out))
+	assert.False(t, called, "private path mode should bypass translator lookup")
+}
+
 // issue #424：响应方向（私有→标准）回译，与出站 TranslateTaskParams 对称。
 func TestTranslateResponseNames_PrivateToStandard(t *testing.T) {
 	dev := &coremodel.Device{ProductClass: "X-BLQ", FirmwareVersion: "1.0.0"}

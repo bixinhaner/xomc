@@ -1028,6 +1028,52 @@ func TestService_ExecuteCommand_DeviceBoundRawAddPathExpandsFollowUpValues(t *te
 	assert.Equal(t, "Device.IP.Interface.1.IPv4Address.{NEW}.SubnetMask", refs[1].Tr069Path)
 }
 
+func TestService_ExecuteCommand_PrivateRawPathCarriesPathModeToPayload(t *testing.T) {
+	var capturedTask *MMLTask
+	taskRepo := &mockTaskRepo{
+		createFn: func(ctx context.Context, task *MMLTask) error {
+			capturedTask = task
+			task.ID = uuid.New()
+			return nil
+		},
+	}
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
+
+	_, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		ExecuteMode: "device_bound",
+		TaskName:    "private raw path",
+		Creator:     "admin",
+		PlanItems: []MMLPlanItem{{
+			LineNo:   1,
+			DeviceSN: "SN001",
+			Order:    1,
+			RawLine:  "LST PRIVATE:VendorRoot.DeviceInfo.X_PRIVATE_NotRegistered;SN001",
+			Command: map[string]interface{}{
+				"command_code":   "RAW LST",
+				"operation_type": "LST",
+				"param_paths":    []string{"VendorRoot.DeviceInfo.X_PRIVATE_NotRegistered"},
+				"parameters":     map[string]interface{}{},
+				"raw_path_mode":  rawPathModePrivate,
+			},
+		}},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, capturedTask)
+	require.Len(t, capturedTask.Commands, 1)
+	refs := paramRefsFromEntry(capturedTask.Commands[0])
+	require.Len(t, refs, 1)
+	require.Equal(t, rawPathModePrivate, refs[0].PathMode)
+	payload, err := BuildTR069Params(
+		capturedTask.Commands[0]["rpc_method"].(string),
+		refs,
+		commandAnyMap(capturedTask.Commands[0], "parameters"),
+		capturedTask.Commands[0]["operation_type"].(string),
+	)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"path_mode":"private","names":["VendorRoot.DeviceInfo.X_PRIVATE_NotRegistered"]}`, string(payload))
+}
+
 func TestService_ExecuteCommand_RejectsMoreThan200Devices(t *testing.T) {
 	created := false
 	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, &mockTaskRepo{

@@ -8,6 +8,7 @@ import (
 
 const (
 	rawPathModeStandard = "standard"
+	rawPathModePrivate  = "private"
 	planOrderScale      = 1000
 )
 
@@ -51,6 +52,7 @@ func normalizeRawPathCommandEntry(entry map[string]interface{}) ([]map[string]in
 	if params == nil {
 		params = map[string]interface{}{}
 	}
+	pathMode := normalizeRawPathMode(commandString(entry, "raw_path_mode"))
 
 	switch op {
 	case "LST", "DSP":
@@ -59,7 +61,7 @@ func normalizeRawPathCommandEntry(entry map[string]interface{}) ([]map[string]in
 		}
 		refs := make([]MMLParamRef, len(paths))
 		for i, path := range paths {
-			refs[i] = MMLParamRef{Tr069Path: path, ValueType: "string"}
+			refs[i] = MMLParamRef{Tr069Path: path, ValueType: "string", PathMode: pathMode}
 		}
 		return []map[string]interface{}{{
 			"command_code":   "RAW " + op,
@@ -68,7 +70,7 @@ func normalizeRawPathCommandEntry(entry map[string]interface{}) ([]map[string]in
 			"param_paths":    paths,
 			"param_refs":     refs,
 			"parameters":     params,
-			"raw_path_mode":  rawPathModeStandard,
+			"raw_path_mode":  pathMode,
 		}}, nil
 	case "MOD":
 		if len(paths) == 0 {
@@ -76,7 +78,7 @@ func normalizeRawPathCommandEntry(entry map[string]interface{}) ([]map[string]in
 		}
 		refs := make([]MMLParamRef, len(paths))
 		for i, path := range paths {
-			refs[i] = MMLParamRef{ParamCode: path, Tr069Path: path, ValueType: "string", IsWritable: true}
+			refs[i] = MMLParamRef{ParamCode: path, Tr069Path: path, ValueType: "string", IsWritable: true, PathMode: pathMode}
 			if _, ok := params[path]; !ok {
 				return nil, fmt.Errorf("raw PATH MOD requires value for path %q", path)
 			}
@@ -88,7 +90,7 @@ func normalizeRawPathCommandEntry(entry map[string]interface{}) ([]map[string]in
 			"param_paths":    paths,
 			"param_refs":     refs,
 			"parameters":     params,
-			"raw_path_mode":  rawPathModeStandard,
+			"raw_path_mode":  pathMode,
 		}}, nil
 	case "ADD":
 		if len(paths) != 1 {
@@ -100,8 +102,8 @@ func normalizeRawPathCommandEntry(entry map[string]interface{}) ([]map[string]in
 			"rpc_method":     "AddObject",
 			"operation_type": "ADD",
 			"param_paths":    []string{objectPath},
-			"parameters":     map[string]interface{}{"object_name": objectPath},
-			"raw_path_mode":  rawPathModeStandard,
+			"parameters":     rawObjectParameters(objectPath, pathMode),
+			"raw_path_mode":  pathMode,
 		}
 		valueKeys := sortedRawAddValueKeys(params)
 		if len(valueKeys) == 0 {
@@ -122,6 +124,7 @@ func normalizeRawPathCommandEntry(entry map[string]interface{}) ([]map[string]in
 				IsWritable:  true,
 				IsRequired:  false,
 				PrivatePath: "",
+				PathMode:    pathMode,
 			})
 		}
 		return []map[string]interface{}{
@@ -133,7 +136,7 @@ func normalizeRawPathCommandEntry(entry map[string]interface{}) ([]map[string]in
 				"param_paths":     spvPaths,
 				"param_refs":      spvRefs,
 				"parameters":      spvParams,
-				"raw_path_mode":   rawPathModeStandard,
+				"raw_path_mode":   pathMode,
 				"compound_phase":  "spv_after_add",
 				"compound_parent": "RAW ADD",
 			},
@@ -148,12 +151,29 @@ func normalizeRawPathCommandEntry(entry map[string]interface{}) ([]map[string]in
 			"rpc_method":     "DeleteObject",
 			"operation_type": "RMV",
 			"param_paths":    []string{objectPath},
-			"parameters":     map[string]interface{}{"object_name": objectPath},
-			"raw_path_mode":  rawPathModeStandard,
+			"parameters":     rawObjectParameters(objectPath, pathMode),
+			"raw_path_mode":  pathMode,
 		}}, nil
 	default:
 		return nil, fmt.Errorf("raw PATH mode: unsupported operation_type %q", op)
 	}
+}
+
+func normalizeRawPathMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case rawPathModePrivate:
+		return rawPathModePrivate
+	default:
+		return rawPathModeStandard
+	}
+}
+
+func rawObjectParameters(objectPath, pathMode string) map[string]interface{} {
+	params := map[string]interface{}{"object_name": objectPath}
+	if normalizeRawPathMode(pathMode) == rawPathModePrivate {
+		params["path_mode"] = rawPathModePrivate
+	}
+	return params
 }
 
 func commandStringSlice(entry map[string]interface{}, key string) []string {
