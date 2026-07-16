@@ -276,6 +276,8 @@ export interface Device {
   // 回收站扩展字段
   deletedAt?: string;
   deletedBy?: string;
+  recycleType?: 'manual' | 'auto';
+  recycleExecutor?: string;
 
   // ===== 离线时长（仅离线设备有值）=====
 

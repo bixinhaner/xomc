@@ -19,7 +19,13 @@ import { useAppStore } from '@core/store/appStore';
 import { withDeviceGroupDisplayName } from '@core/utils/deviceGroupDisplay';
 import { resolveNetworkTypeLabel } from '@core/utils/networkType';
 import { getI18nText } from '@core/utils/i18nText';
-import { formatRecycleOperator } from '@core/utils/recycleBin';
+import {
+  formatRecycleOperator,
+  normalizeRecycleOfflineDays,
+  resolveRecycleType,
+  type RecycleType,
+} from '@core/utils/recycleBin';
+import { formatSystemTime } from '@core/utils/systemTime';
 import type { Device } from '@core/types/device';
 import ImportModal from './ImportModal';
 
@@ -30,17 +36,8 @@ const NETWORK_TYPE_COLOR: Record<string, string> = {
   GSM: 'orange',
 };
 
-// 计算离线天数
-function calcOfflineDays(lastInformTime: string, deletedAt: string): number {
-  const refTime = deletedAt || lastInformTime;
-  if (!refTime) return 0;
-  const diff = Date.now() - new Date(refTime).getTime();
-  return Math.floor(diff / (1000 * 60 * 60 * 24));
-}
-
-// 回收方式映射（暂时全部为手动）
-const getMoveTypeLabel = (t: (key: string) => string) => {
-  return t('recycle.manual');
+const getMoveTypeLabel = (type: RecycleType, t: (key: string) => string) => {
+  return t(type === 'auto' ? 'recycle.auto' : 'recycle.manual');
 };
 
 export default function RecycleBin() {
@@ -124,7 +121,8 @@ export default function RecycleBin() {
     );
     return devices.map((device: Device) => ({
       ...device,
-      offlineDays: calcOfflineDays(device.lastOnlineTime, device.deletedAt || ''),
+      offlineDays: normalizeRecycleOfflineDays(device.offlineDays),
+      moveType: resolveRecycleType(device.recycleType, device.deletedBy),
       moveTime: device.deletedAt || '',
       move_author: formatRecycleOperator(device.deletedBy),
     }));
@@ -273,9 +271,18 @@ export default function RecycleBin() {
         title: t('recycle.moveType'),
         dataIndex: 'moveType',
         width: 90,
-        render: () => <Tag color="blue">{getMoveTypeLabel(t)}</Tag>,
+        render: (value: unknown) => {
+          const type: RecycleType = value === 'auto' ? 'auto' : 'manual';
+          return <Tag color={type === 'auto' ? 'green' : 'blue'}>{getMoveTypeLabel(type, t)}</Tag>;
+        },
       },
-      { key: 'moveTime', title: t('recycle.moveTime'), dataIndex: 'moveTime', width: 160 },
+      {
+        key: 'moveTime',
+        title: t('recycle.moveTime'),
+        dataIndex: 'moveTime',
+        width: 160,
+        render: (value: unknown) => (typeof value === 'string' && value ? formatSystemTime(value) : '-'),
+      },
       { key: 'move_author', title: t('recycle.account'), dataIndex: 'move_author', width: 90 },
     ],
     [t, networkTypeDetails, appLocale]

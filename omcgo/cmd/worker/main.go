@@ -686,7 +686,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 
 	// #779: 回收站自动移入 cron（每天 00:10，与 UI 配置说明对齐）。
 	// 读取 sys_configs device:deviceOfflineEnable / deviceOfflineSaveDay，
-	// 满足离线天数阈值的设备批量软删除（deleted_by='system:auto_recycle'）。
+	// 满足离线天数阈值的设备批量软删除（deleted_by='system'，executor='system:auto_recycle'）。
 	startAutoRecycleCron(w, logger)
 
 	// KPI/时序库物理分离：worker 把主库维度表周期刷入时序库影子维度表，

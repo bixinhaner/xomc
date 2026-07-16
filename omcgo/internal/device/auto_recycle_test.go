@@ -16,8 +16,8 @@ import (
 type stubAutoRecycleDeleter struct {
 	findIDs     [][]uuid.UUID // 每次 FindOfflineForRecycle 返回的批次（按调用顺序）
 	findCallIdx int
-	deleted     []uuid.UUID   // 记录 BatchDelete 收到的 ids
-	deletedBy   string
+	deleted     []uuid.UUID // 记录 BatchDelete 收到的 ids
+	metadata    RecycleMetadata
 	batchErr    error
 	findErr     error
 }
@@ -34,12 +34,12 @@ func (s *stubAutoRecycleDeleter) FindOfflineForRecycle(_ context.Context, _ time
 	return ids, nil
 }
 
-func (s *stubAutoRecycleDeleter) BatchDelete(_ context.Context, ids []uuid.UUID, deletedBy string) (int64, error) {
+func (s *stubAutoRecycleDeleter) BatchDeleteWithMetadata(_ context.Context, ids []uuid.UUID, metadata RecycleMetadata) (int64, error) {
 	if s.batchErr != nil {
 		return 0, s.batchErr
 	}
 	s.deleted = append(s.deleted, ids...)
-	s.deletedBy = deletedBy
+	s.metadata = metadata
 	return int64(len(ids)), nil
 }
 
@@ -107,7 +107,7 @@ func TestAutoRecycleJob_NoDevicesToRecycle(t *testing.T) {
 	assert.Empty(t, ops.deleted)
 }
 
-func TestAutoRecycleJob_DeletesDevices(t *testing.T) {
+func TestAutoRecycleJob_DeletesDevicesAsSystem(t *testing.T) {
 	// 正常路径：有 3 个符合条件的设备，全部软删除
 	id1, id2, id3 := uuid.New(), uuid.New(), uuid.New()
 	ops := &stubAutoRecycleDeleter{
@@ -124,7 +124,11 @@ func TestAutoRecycleJob_DeletesDevices(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), n)
 	assert.ElementsMatch(t, []uuid.UUID{id1, id2, id3}, ops.deleted)
-	assert.Equal(t, "system:auto_recycle", ops.deletedBy)
+	assert.Equal(t, RecycleMetadata{
+		DeletedBy: "system",
+		Type:      RecycleTypeAuto,
+		Executor:  "system:auto_recycle",
+	}, ops.metadata)
 }
 
 func TestAutoRecycleJob_DeletesAcrossMultipleBatches(t *testing.T) {

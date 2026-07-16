@@ -37,6 +37,8 @@ interface BackendDevice {
   updated_at: string;
   deleted_at?: string;
   deleted_by?: string;
+  recycle_type?: 'manual' | 'auto';
+  recycle_executor?: string;
 
   // --- 监控扩展字段 ---
   host_name?: string;
@@ -491,6 +493,8 @@ function mapBackendDevice(bd: BackendDevice): Device {
     // 回收站扩展字段
     deletedAt: bd.deleted_at,
     deletedBy: bd.deleted_by,
+    recycleType: bd.recycle_type,
+    recycleExecutor: bd.recycle_executor,
   };
 }
 
