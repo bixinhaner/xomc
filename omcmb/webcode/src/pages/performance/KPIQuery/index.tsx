@@ -270,6 +270,9 @@ export default function KPIQuery() {
   }, [aggErrors, message, t]);
 
   // ── 行为 ─────────────────────────────────────────────────────────
+  const isSelectionExceedsLimit = (target: QueryTemplatePayload): boolean =>
+    target.deviceSns.length > PM_QUERY_SELECTION_LIMIT || target.metricPaths.length > PM_QUERY_SELECTION_LIMIT;
+
   const warnIfSelectionExceedsLimit = (target: QueryTemplatePayload): boolean => {
     if (target.deviceSns.length > PM_QUERY_SELECTION_LIMIT) {
       message.warning(t('perf.kpiQuery.deviceLimitExceeded', {
@@ -336,8 +339,11 @@ export default function KPIQuery() {
   // 表格已是后端分页，导出不带当前页 limit/offset，口径是当前筛选条件下的全量数据。
   // 复用 dashboard 取数链路，但用 kpi_query 来源输出查询页表格列。
   const handleExport = () => {
+    if (warnIfSelectionExceedsLimit(payload)) {
+      return;
+    }
     if (!submittedPayload || !submittedRange) return; // 按钮已禁用，双保险
-    if (warnIfSelectionExceedsLimit(payload) || warnIfSelectionExceedsLimit(submittedPayload)) {
+    if (warnIfSelectionExceedsLimit(submittedPayload)) {
       return;
     }
     const sel = {
@@ -879,7 +885,7 @@ export default function KPIQuery() {
                   icon={<ExportOutlined />}
                   onClick={handleExport}
                   loading={createExport.isPending}
-                  disabled={!submittedPayload || aggFetching}
+                  disabled={aggFetching || (!submittedPayload && !isSelectionExceedsLimit(payload))}
                 >
                   {t('perf.kpiQuery.exportCsv')}
                 </Button>

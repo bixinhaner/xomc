@@ -161,6 +161,18 @@ describe('KPIQuery 模板数量限制', () => {
     });
   });
 
+  it('未形成查询快照时，当前老模板超 50 个设备仍可点击导出并被提示拦截', async () => {
+    renderPage();
+    await selectOverLimitTemplate();
+
+    const exportButton = screen.getByRole('button', { name: /导出 CSV/ });
+    expect(exportButton).not.toBeDisabled();
+
+    fireEvent.click(exportButton);
+
+    expect(createExportSpy).not.toHaveBeenCalled();
+  });
+
   it('已有查询快照时，当前老模板超 50 个设备也不能发起导出', async () => {
     renderPage();
 
