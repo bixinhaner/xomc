@@ -50,6 +50,35 @@ func TestDeviceTaskRowToResultMap_DeviceBoundPlanTrace(t *testing.T) {
 	}
 }
 
+func TestDeviceTaskRowToResultMap_MultiSNRawLineOmitsDeviceList(t *testing.T) {
+	task := &MMLTask{
+		ExecuteMode: TaskExecuteModeDeviceBound,
+		PlanItems: []MMLPlanItem{
+			{
+				LineNo:   1,
+				DeviceSN: "SN001",
+				Order:    1,
+				RawLine:  "LST Device.DeviceInfo.SoftwareVersion;SN001,SN002",
+				Command: map[string]interface{}{
+					"command_code":   "RAW LST",
+					"operation_type": "LST",
+				},
+			},
+		},
+	}
+	row := DeviceTaskResultRowView{
+		DeviceTaskID: "device-task-1",
+		DeviceSN:     "SN001",
+		Status:       "completed",
+		CommandIndex: 0,
+	}
+
+	got := deviceTaskRowToResultMap(row, task)
+	if got["mml_script"] != "LST Device.DeviceInfo.SoftwareVersion" {
+		t.Fatalf("mml_script = %v, want LST Device.DeviceInfo.SoftwareVersion", got["mml_script"])
+	}
+}
+
 func TestDeviceTaskRowToResultMap_DeviceBoundExpandedCommandTrace(t *testing.T) {
 	task := &MMLTask{
 		ExecuteMode: TaskExecuteModeDeviceBound,

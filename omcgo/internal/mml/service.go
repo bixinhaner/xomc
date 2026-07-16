@@ -760,10 +760,14 @@ func stripDeviceSuffixFromMML(rawLine, deviceSN string) string {
 	if line == "" {
 		return ""
 	}
-	if deviceSN != "" {
-		suffix := ";" + strings.TrimSpace(deviceSN)
-		if strings.HasSuffix(line, suffix) {
-			line = strings.TrimSpace(strings.TrimSuffix(line, suffix))
+	if indexes, err := topLevelIndexes(line, ';'); err == nil && len(indexes) > 0 {
+		last := indexes[len(indexes)-1]
+		commandPart := strings.TrimSpace(line[:last])
+		devicePart := strings.TrimSpace(line[last+1:])
+		for _, sn := range strings.Split(devicePart, ",") {
+			if strings.TrimSpace(sn) == strings.TrimSpace(deviceSN) {
+				return commandPart
+			}
 		}
 	}
 	line = strings.TrimSuffix(line, ";")
