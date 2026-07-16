@@ -28,7 +28,7 @@
 
 - `runPullSubscription()` 已按可用并发槽限制每轮 `Fetch()` 数量，避免已拉取但未进入 handler 的消息在本地隐形排队消耗 AckWait。
 - `PullTuning` 已纳入 `MaxAckPending`，`param_sync.task.result` 默认使用独立值 `512`，app 配置新增 `param_sync.result_consumer_max_ack_pending`。
-- `PullSubscribe()` 已在订阅既有 durable consumer 时沿用服务端 AckWait/MaxAckPending，避免升级后因本地配置变更导致 app 启动失败，同时不删除已有 consumer，保留 pending 消息。
+- `PullSubscribe()` 已在订阅既有 durable consumer 时优先通过 `UpdateConsumer()` 覆盖 AckWait/MaxAckPending，避免升级后因本地配置变更导致 app 启动失败；若更新失败才沿用服务端配置继续启动，同时不删除已有 consumer，保留 pending 消息。
 - 已补充低 concurrency/high batch 的纯函数回归测试，覆盖 Fetch 数量不会超过可用并发槽。
 
 ## 当前可接受点

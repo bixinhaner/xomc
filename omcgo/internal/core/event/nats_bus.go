@@ -150,7 +150,7 @@ func (b *NATSEventBus) QueueSubscribe(subject string, queue string, handler Even
 func (b *NATSEventBus) PullSubscribe(subject string, queue string, handler EventHandler) (Subscription, error) {
 	durable := pullDurableName(queue)
 	tuning := b.pullTuningForSubject(subject)
-	tuning = b.compatiblePullTuningForDurable(subject, durable, tuning)
+	tuning = b.ensurePullTuningForDurable(subject, durable, tuning)
 	sub, err := b.js.PullSubscribe(subject, durable,
 		nats.AckExplicit(),
 		nats.DeliverNew(), // 首次创建时从当前 stream 尾部开始，不重播历史消息（review R1）
@@ -192,7 +192,7 @@ func (b *NATSEventBus) PullSubscribe(subject string, queue string, handler Event
 	return ps, nil
 }
 
-func (b *NATSEventBus) compatiblePullTuningForDurable(subject, durable string, desired PullTuning) PullTuning {
+func (b *NATSEventBus) ensurePullTuningForDurable(subject, durable string, desired PullTuning) PullTuning {
 	stream, err := b.js.StreamNameBySubject(subject)
 	if err != nil {
 		b.logger.Warn("resolve pull consumer stream failed",
@@ -212,18 +212,30 @@ func (b *NATSEventBus) compatiblePullTuningForDurable(subject, durable string, d
 		}
 		return desired
 	}
-	compatible := reconcilePullTuningWithExisting(desired, info)
-	if compatible.AckWait != desired.AckWait || compatible.MaxAckPending != desired.MaxAckPending {
-		b.logger.Warn("using existing pull consumer tuning",
+	updatedConfig, needsUpdate := updatedPullConsumerConfig(info, desired)
+	if !needsUpdate {
+		return desired
+	}
+	if _, err := b.js.UpdateConsumer(stream, &updatedConfig); err != nil {
+		compatible := reconcilePullTuningWithExisting(desired, info)
+		b.logger.Warn("update existing pull consumer tuning failed; using existing values",
 			zap.String("subject", subject),
 			zap.String("stream", stream),
 			zap.String("durable", durable),
 			zap.Duration("desired_ack_wait", desired.AckWait),
 			zap.Duration("existing_ack_wait", compatible.AckWait),
 			zap.Int("desired_max_ack_pending", desired.MaxAckPending),
-			zap.Int("existing_max_ack_pending", compatible.MaxAckPending))
+			zap.Int("existing_max_ack_pending", compatible.MaxAckPending),
+			zap.Error(err))
+		return compatible
 	}
-	return compatible
+	b.logger.Info("updated existing pull consumer tuning",
+		zap.String("subject", subject),
+		zap.String("stream", stream),
+		zap.String("durable", durable),
+		zap.Duration("ack_wait", desired.AckWait),
+		zap.Int("max_ack_pending", desired.MaxAckPending))
+	return desired
 }
 
 // cleanupLegacyPushConsumer 删除因迁移到 pull consumer 而遗留的同名旧 push consumer。
@@ -305,6 +317,26 @@ func reconcilePullTuningWithExisting(desired PullTuning, info *nats.ConsumerInfo
 		out.MaxAckPending = info.Config.MaxAckPending
 	}
 	return out
+}
+
+func updatedPullConsumerConfig(info *nats.ConsumerInfo, desired PullTuning) (nats.ConsumerConfig, bool) {
+	if info == nil {
+		return nats.ConsumerConfig{}, false
+	}
+	cfg := info.Config
+	if cfg.Name == "" && cfg.Durable == "" {
+		cfg.Durable = info.Name
+	}
+	changed := false
+	if desired.AckWait > 0 && cfg.AckWait != desired.AckWait {
+		cfg.AckWait = desired.AckWait
+		changed = true
+	}
+	if desired.MaxAckPending > 0 && cfg.MaxAckPending != desired.MaxAckPending {
+		cfg.MaxAckPending = desired.MaxAckPending
+		changed = true
+	}
+	return cfg, changed
 }
 
 func pullFetchBatchForAvailableSlots(batchSize, concurrency, inUse int) int {
