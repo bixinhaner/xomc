@@ -83,6 +83,7 @@ import { getEffectiveLdns, type CellSelection } from '../PmDashboard/cellDrilldo
 import { synchronizeUpdatedTemplateState } from './templateUpdateState';
 import QueryTemplateDetailModal from './QueryTemplateDetailModal';
 import { resolveTemplateMetricPaths } from './templateMetricResolver';
+import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
 
 const { Text, Title } = Typography;
 const { RangePicker } = DatePicker;
@@ -269,6 +270,27 @@ export default function KPIQuery() {
   }, [aggErrors, message, t]);
 
   // ── 行为 ─────────────────────────────────────────────────────────
+  const isSelectionExceedsLimit = (target: QueryTemplatePayload): boolean =>
+    target.deviceSns.length > PM_QUERY_SELECTION_LIMIT || target.metricPaths.length > PM_QUERY_SELECTION_LIMIT;
+
+  const warnIfSelectionExceedsLimit = (target: QueryTemplatePayload): boolean => {
+    if (target.deviceSns.length > PM_QUERY_SELECTION_LIMIT) {
+      message.warning(t('perf.kpiQuery.deviceLimitExceeded', {
+        max: PM_QUERY_SELECTION_LIMIT,
+        count: target.deviceSns.length,
+      }));
+      return true;
+    }
+    if (target.metricPaths.length > PM_QUERY_SELECTION_LIMIT) {
+      message.warning(t('perf.kpiQuery.metricLimitExceeded', {
+        max: PM_QUERY_SELECTION_LIMIT,
+        count: target.metricPaths.length,
+      }));
+      return true;
+    }
+    return false;
+  };
+
   const handleQuery = () => {
     if (payload.deviceSns.length === 0) {
       message.warning(t('perf.kpiQuery.selectDeviceRequired'));
@@ -276,6 +298,9 @@ export default function KPIQuery() {
     }
     if (payload.metricPaths.length === 0) {
       message.warning(t('perf.kpiQuery.selectMetricRequired'));
+      return;
+    }
+    if (warnIfSelectionExceedsLimit(payload)) {
       return;
     }
     let range: { start: string; end: string } | null;
@@ -314,7 +339,13 @@ export default function KPIQuery() {
   // 表格已是后端分页，导出不带当前页 limit/offset，口径是当前筛选条件下的全量数据。
   // 复用 dashboard 取数链路，但用 kpi_query 来源输出查询页表格列。
   const handleExport = () => {
+    if (warnIfSelectionExceedsLimit(payload)) {
+      return;
+    }
     if (!submittedPayload || !submittedRange) return; // 按钮已禁用，双保险
+    if (warnIfSelectionExceedsLimit(submittedPayload)) {
+      return;
+    }
     const sel = {
       ...kpiQueryToDashboardSelection(submittedPayload, submittedRange),
       objectLdns: effectiveLdns.length > 0 ? effectiveLdns : undefined,
@@ -394,6 +425,9 @@ export default function KPIQuery() {
     }
     if (saveForm.payload.timeRangePreset === 'custom' && !saveForm.customRange) {
       message.warning(t('perf.kpiQuery.selectCustomRangeRequired'));
+      return;
+    }
+    if (warnIfSelectionExceedsLimit(saveForm.payload)) {
       return;
     }
     // 保存时回填 custom 模式的绝对时间（使用 Modal 内部的 payload + customRange，不是主表单）
@@ -851,7 +885,7 @@ export default function KPIQuery() {
                   icon={<ExportOutlined />}
                   onClick={handleExport}
                   loading={createExport.isPending}
-                  disabled={!submittedPayload || aggFetching}
+                  disabled={aggFetching || (!submittedPayload && !isSelectionExceedsLimit(payload))}
                 >
                   {t('perf.kpiQuery.exportCsv')}
                 </Button>
@@ -948,6 +982,7 @@ export default function KPIQuery() {
           technology={deviceTypeToNetworkTech(
             (pickerTarget === 'modal' ? saveForm.payload.deviceType : payload.deviceType) ?? 'ENB',
           )}
+          maxSelected={PM_QUERY_SELECTION_LIMIT}
         />
 
         <MetricPickerModal
@@ -967,6 +1002,7 @@ export default function KPIQuery() {
           }
           // 外层「设备类型」是唯一来源（#443）：锁定弹窗内部类型，隐藏其重复下拉，跟随外层值。
           lockDeviceType
+          maxSelected={PM_QUERY_SELECTION_LIMIT}
         />
 
         <QueryTemplateDetailModal

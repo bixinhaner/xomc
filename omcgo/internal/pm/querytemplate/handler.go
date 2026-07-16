@@ -3,6 +3,7 @@ package querytemplate
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -13,6 +14,11 @@ import (
 	"github.com/omcgo/omcgo/internal/admin"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/response"
+)
+
+const (
+	maxTemplateDeviceSNs   = 50
+	maxTemplateMetricPaths = 50
 )
 
 // Handler 是 T-0174 指标查询模板的 REST 入口。
@@ -181,6 +187,10 @@ func (h *Handler) Create(c *gin.Context) {
 	if len(payload) == 0 {
 		payload = []byte("{}")
 	}
+	if err := validatePayloadLimits(payload); err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
 	req := CreateRequest{
 		Name:        dto.Name,
 		Visibility:  visibility,
@@ -233,6 +243,10 @@ func (h *Handler) Update(c *gin.Context) {
 	}
 	req := UpdateRequest{Name: dto.Name, Description: dto.Description}
 	if len(dto.Payload) > 0 {
+		if err := validatePayloadLimits(dto.Payload); err != nil {
+			response.Fail(c, http.StatusBadRequest, err.Error())
+			return
+		}
 		req.Payload = []byte(dto.Payload)
 	}
 	if dto.Visibility != nil {
@@ -332,4 +346,38 @@ func canWrite(t *Template, caller uuid.UUID, isSuperAdmin bool) bool {
 		return true
 	}
 	return t.CreatorID == caller
+}
+
+func validatePayloadLimits(payload []byte) error {
+	count, err := countPayloadStringArray(payload, "device_sns")
+	if err != nil {
+		return err
+	}
+	if count > maxTemplateDeviceSNs {
+		return fmt.Errorf("device_sns exceeds maximum of %d", maxTemplateDeviceSNs)
+	}
+	count, err = countPayloadStringArray(payload, "metric_paths")
+	if err != nil {
+		return err
+	}
+	if count > maxTemplateMetricPaths {
+		return fmt.Errorf("metric_paths exceeds maximum of %d", maxTemplateMetricPaths)
+	}
+	return nil
+}
+
+func countPayloadStringArray(payload []byte, key string) (int, error) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		return 0, fmt.Errorf("invalid payload")
+	}
+	field, ok := raw[key]
+	if !ok || len(field) == 0 || string(field) == "null" {
+		return 0, nil
+	}
+	var values []string
+	if err := json.Unmarshal(field, &values); err != nil {
+		return 0, fmt.Errorf("%s must be an array of strings", key)
+	}
+	return len(values), nil
 }

@@ -6,7 +6,7 @@
  *   - 不传 technology 时，networkType 为 undefined（列全部设备，向后兼容 KPIQuery）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { App } from 'antd';
 import { IntlProvider } from 'react-intl';
 import { zhCN } from '@core/i18n';
@@ -82,5 +82,39 @@ describe('DevicePickerModal 已选回显', () => {
     // 重开：必须回显模板 B 的设备，且不残留模板 A 的设备
     expect(screen.getByText('SN-BBB')).toBeTruthy();
     expect(screen.queryByText('SN-AAA')).toBeNull();
+  });
+});
+
+describe('DevicePickerModal 选择数量限制', () => {
+  beforeEach(() => {
+    useDeviceListSpy.mockClear();
+  });
+
+  it('默认不限制选择数量，由复用页面自行决定上限', () => {
+    const onConfirm = vi.fn();
+    renderModal({ initialSelected: Array.from({ length: 51 }, (_, i) => `SN-${i + 1}`), onConfirm });
+
+    fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
+
+    expect(onConfirm).toHaveBeenCalledWith(Array.from({ length: 51 }, (_, i) => `SN-${i + 1}`));
+  });
+
+  it('已选设备正好 50 个时，点击确定可以提交', () => {
+    const onConfirm = vi.fn();
+    const selected = Array.from({ length: 50 }, (_, i) => `SN-${i + 1}`);
+    renderModal({ initialSelected: selected, maxSelected: 50, onConfirm });
+
+    fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
+
+    expect(onConfirm).toHaveBeenCalledWith(selected);
+  });
+
+  it('已选设备超过 50 个时，点击确定不提交', () => {
+    const onConfirm = vi.fn();
+    renderModal({ initialSelected: Array.from({ length: 51 }, (_, i) => `SN-${i + 1}`), maxSelected: 50, onConfirm });
+
+    fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
+
+    expect(onConfirm).not.toHaveBeenCalled();
   });
 });

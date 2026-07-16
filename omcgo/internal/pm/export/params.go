@@ -11,6 +11,11 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
+const (
+	maxExportDeviceSNs   = 50
+	maxExportMetricPaths = 50
+)
+
 // DashboardParams 是 source_type=dashboard 时 pm_kpi_export_tasks.params(jsonb) 的字段集。
 //
 // 字段对齐仪表盘聚合查询入参（同 /pm/metrics/aggregated），导出时去掉 limit 全量取数。
@@ -37,6 +42,22 @@ type AdhocParams struct {
 	TaskID    string `json:"task_id"`
 	StartTime string `json:"start_time"` // 可选二次时窗筛选
 	EndTime   string `json:"end_time"`
+}
+
+func validateDashboardExportLimits(raw []byte) error {
+	var p DashboardParams
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return fmt.Errorf("parse dashboard export params: %w", err)
+		}
+	}
+	if len(p.DeviceSNs) > maxExportDeviceSNs {
+		return fmt.Errorf("device_sns exceeds maximum of %d", maxExportDeviceSNs)
+	}
+	if len(p.MetricPaths) > maxExportMetricPaths {
+		return fmt.Errorf("metric_paths exceeds maximum of %d", maxExportMetricPaths)
+	}
+	return nil
 }
 
 // parseDashboardParams 把 params(jsonb) 解析成 aggregator.QueryRequest（去 limit/offset）

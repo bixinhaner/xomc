@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
+	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
@@ -138,6 +141,15 @@ func pmHSetupRouterWithIndicator(ir indicator.IndicatorRepository) *gin.Engine {
 	return r
 }
 
+func pmHSetupRouterWithAggregator(aggr *aggregator.Aggregator) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	h := NewHandler(&pmHCounterRepo{}, &pmHKPIRepo{}, pmHNewEngine(), &pmHTaskRepo{}, nil, nil, "pm-files", nil, nil, zap.NewNop())
+	h.WithAggregator(aggr)
+	h.RegisterRoutes(r.Group(""))
+	return r
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -240,6 +252,34 @@ func TestHandler_ListAggregatedCounters_NoPagination(t *testing.T) {
 	response.DecodeData(t, w.Body, &body)
 	require.Len(t, body.Items, 1)
 	assert.Equal(t, float64(5000), body.Items[0].SumValue)
+}
+
+func TestHandler_ListAggregatedMetrics_RejectsTooManyDeviceSNs(t *testing.T) {
+	router := pmHSetupRouterWithAggregator(&aggregator.Aggregator{})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(
+		http.MethodGet,
+		"/pm/metrics/aggregated?granularity=15min&device_sns="+pmHJoinStrings("SN", 51)+"&metric_paths=K1",
+		nil,
+	)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestHandler_ListAggregatedMetrics_RejectsTooManyMetricPaths(t *testing.T) {
+	router := pmHSetupRouterWithAggregator(&aggregator.Aggregator{})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(
+		http.MethodGet,
+		"/pm/metrics/aggregated?granularity=15min&device_sns=SN-1&metric_paths="+pmHJoinStrings("K", 51),
+		nil,
+	)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestHandler_ListKPIValues(t *testing.T) {
@@ -514,4 +554,12 @@ func TestHandler_CreateTask_MissingName(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func pmHJoinStrings(prefix string, n int) string {
+	parts := make([]string, n)
+	for i := range parts {
+		parts[i] = prefix + "-" + strconv.Itoa(i+1)
+	}
+	return strings.Join(parts, ",")
 }
