@@ -717,8 +717,8 @@ func initProvisionModule(c *Container) error {
 		})
 		deviceNameSyncHook := provision.NewDeviceNameSyncHook(
 			nameSyncConfigLookup, c.ParamRepo, c.DeviceInfoRepo, c.DeviceInfoRepo, logger,
-		).SetSiteUpdater(device.NewPgDeviceRepository(c.PgPool)) // P1-1: 自动路径同步 devices.site_name
-		// TODO: 当配置方向为 omc_to_lmt 时，需注入 SPVSender 和 Translator 以支持下发
+		).SetSiteUpdater(device.NewPgDeviceRepository(c.PgPool)).
+			SetSPVSender(provision.NewDeviceNameTaskSender(c.TaskSvc))
 		syncSvc.SetDeviceNameSyncHook(deviceNameSyncHook)
 		logger.Info("device name sync hook enabled (Issue #758)")
 

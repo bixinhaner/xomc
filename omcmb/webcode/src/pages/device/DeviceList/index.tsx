@@ -184,6 +184,35 @@ export default function DeviceList() {
     void navigate(`/device/detail/${device.sn}${suffix}`);
   }, [navigate, prefetchDeviceDetailEntry]);
 
+  const resolveNameSyncFromList = useCallback(async (device: Device, action: 'use_lmt' | 'use_omc' | 'ignore') => {
+    try {
+      await deviceApi.resolveNameSync(device.id, action);
+      void message.success(t('common.operationSuccess'));
+      void queryClient.invalidateQueries({ queryKey: ['devices'] });
+    } catch {
+      void message.error(t('common.operationFailed'));
+    }
+  }, [message, queryClient, t]);
+
+  const renderNameSyncActions = useCallback((device: Device) => (
+    <Space direction="vertical" size={8}>
+      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+        {t('device.nameSyncPending')}
+      </Typography.Text>
+      <Space size={4}>
+        <Button size="small" type="primary" onClick={() => void resolveNameSyncFromList(device, 'use_lmt')}>
+          {t('device.nameSyncPending.useLmt')}
+        </Button>
+        <Button size="small" onClick={() => void resolveNameSyncFromList(device, 'use_omc')}>
+          {t('device.nameSyncPending.useOmc')}
+        </Button>
+        <Button size="small" onClick={() => void resolveNameSyncFromList(device, 'ignore')}>
+          {t('device.nameSyncPending.ignore')}
+        </Button>
+      </Space>
+    </Space>
+  ), [resolveNameSyncFromList, t]);
+
   const [currentPage, setCurrentPage] = useState(() => {
     const page = searchParams.get('page');
     return page ? parseInt(page, 10) : 1;
@@ -1323,9 +1352,9 @@ export default function DeviceList() {
               {record.deviceName || '-'}
             </span>
             {record.nameSyncPending && (
-              <Tooltip title={t('device.nameSyncPending')}>
-                <Badge status="error" />
-              </Tooltip>
+              <Popover content={renderNameSyncActions(record)} trigger="click" placement="bottomLeft">
+                <Badge status="error" style={{ cursor: 'pointer' }} onClick={(event) => event.stopPropagation()} />
+              </Popover>
             )}
           </Space>
         ),

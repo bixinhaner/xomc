@@ -1788,8 +1788,8 @@ export default function DeviceDetail() {
       try {
         await deviceApi.resolveNameSync(displayDevice.id, action);
         void message.success(t('common.operationSuccess'));
-        // 刷新设备详情
-        void queryClient.invalidateQueries({ queryKey: ['device'] });
+        // 刷新设备列表、SN 详情和 composite 详情缓存。
+        void queryClient.invalidateQueries({ queryKey: ['devices'] });
       } catch (err) {
         void message.error(t('common.operationFailed'));
       }
