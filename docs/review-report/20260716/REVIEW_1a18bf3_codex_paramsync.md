@@ -37,7 +37,7 @@
 
 ### INFO
 
-- 既有 `param-sync-results-pull` durable consumer 如果已在 NATS 中创建，服务端 AckWait/MaxAckPending 会优先于新配置生效；这是为了避免升级时删除 durable consumer 造成 pending result 跳过。新建 consumer 仍使用配置文件中的新默认值。
+- 既有 `param-sync-results-pull` durable consumer 如果已在 NATS 中创建，会优先通过 `UpdateConsumer()` 覆盖 AckWait/MaxAckPending；这是为了让新配置生效，同时避免删除 durable consumer 造成 pending result 跳过。仅当更新失败时才沿用服务端旧值并打 warning。
 - ACS 直接发布 result 与 `TaskTerminalBridge` 终态转换仍可能产生同 task 重复事件；当前由 `(run_id, task_id)` 幂等写入吸收，属于可接受的 at-least-once 行为。
 
 ## 验证
@@ -50,7 +50,8 @@
 - `npm run build` (`omcmb/webcode`)：通过
 - `OMC_PROJECT=goomc-local bash deployments/docker/dc.sh up -d --build web`：通过
 - `curl -I --max-time 10 http://localhost:8081/`：`HTTP/1.1 200 OK`
+- 手动创建旧版 NATS durable consumer `PARAM_SYNC / param-sync-results-pull`（AckWait `30s`、MaxAckPending `2048`）后启动新 app：app 日志出现 `updated existing pull consumer tuning`，consumer 原地更新为 AckWait `2m0s`、MaxAckPending `512`，启动成功
 
 ## 结论
 
-当前 staged diff 未发现阻断合入问题。升级兼容风险已通过既有 durable consumer 配置沿用逻辑补齐，并有纯函数测试覆盖。
+当前 staged diff 未发现阻断合入问题。升级兼容风险已通过既有 durable consumer 原地更新逻辑补齐，并有纯函数测试覆盖。

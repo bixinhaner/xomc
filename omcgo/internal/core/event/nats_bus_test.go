@@ -335,7 +335,41 @@ func TestPullTuningForSubject_DefaultsAndOverride(t *testing.T) {
 	assert.Equal(t, 99, overridden.MaxAckPending)
 }
 
-func TestReconcilePullTuningWithExisting_PreservesServerConsumerConfig(t *testing.T) {
+func TestUpdatedPullConsumerConfig_OverwritesMutableTuning(t *testing.T) {
+	desired := PullTuning{BatchSize: 64, Concurrency: 64, AckWait: 2 * time.Minute, MaxAckPending: 512}
+	existing := &nats.ConsumerInfo{
+		Name:   "param-sync-results-pull",
+		Config: nats.ConsumerConfig{AckWait: 30 * time.Second, MaxAckPending: 2048},
+	}
+
+	got, changed := updatedPullConsumerConfig(existing, desired)
+
+	require.True(t, changed)
+	assert.Equal(t, "param-sync-results-pull", got.Durable)
+	assert.Equal(t, 2*time.Minute, got.AckWait)
+	assert.Equal(t, 512, got.MaxAckPending)
+}
+
+func TestUpdatedPullConsumerConfig_NoChangeWhenAlreadyAligned(t *testing.T) {
+	desired := PullTuning{BatchSize: 64, Concurrency: 64, AckWait: 2 * time.Minute, MaxAckPending: 512}
+	existing := &nats.ConsumerInfo{
+		Name:   "param-sync-results-pull",
+		Config: nats.ConsumerConfig{Durable: "param-sync-results-pull", AckWait: 2 * time.Minute, MaxAckPending: 512},
+	}
+
+	got, changed := updatedPullConsumerConfig(existing, desired)
+
+	require.False(t, changed)
+	assert.Equal(t, existing.Config, got)
+}
+
+func TestReconcilePullTuningWithExisting_NilKeepsDesired(t *testing.T) {
+	desired := PullTuning{BatchSize: 64, Concurrency: 64, AckWait: 2 * time.Minute, MaxAckPending: 512}
+
+	assert.Equal(t, desired, reconcilePullTuningWithExisting(desired, nil))
+}
+
+func TestReconcilePullTuningWithExisting_FallbackPreservesServerConsumerConfig(t *testing.T) {
 	desired := PullTuning{BatchSize: 64, Concurrency: 64, AckWait: 2 * time.Minute, MaxAckPending: 512}
 	existing := &nats.ConsumerInfo{Config: nats.ConsumerConfig{AckWait: 30 * time.Second, MaxAckPending: 2048}}
 
@@ -345,12 +379,6 @@ func TestReconcilePullTuningWithExisting_PreservesServerConsumerConfig(t *testin
 	assert.Equal(t, desired.Concurrency, got.Concurrency)
 	assert.Equal(t, 30*time.Second, got.AckWait)
 	assert.Equal(t, 2048, got.MaxAckPending)
-}
-
-func TestReconcilePullTuningWithExisting_NilKeepsDesired(t *testing.T) {
-	desired := PullTuning{BatchSize: 64, Concurrency: 64, AckWait: 2 * time.Minute, MaxAckPending: 512}
-
-	assert.Equal(t, desired, reconcilePullTuningWithExisting(desired, nil))
 }
 
 // --- decodeEventBytes pure-function tests ---
