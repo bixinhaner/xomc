@@ -80,6 +80,7 @@ interface BackendDevice {
   // Issue #758：设备名称同步
   name_sync_pending?: boolean;
   lmt_device_name?: string;
+  param_sync_running?: boolean;
 
   // Cell
   enb_id?: string;
@@ -516,6 +517,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
     // Issue #758：设备名称同步
     nameSyncPending: bd.name_sync_pending ?? false,
     lmtDeviceName: bd.lmt_device_name || '',
+    paramSyncRunning: bd.param_sync_running ?? false,
 
     enbId: bd.enb_id || '',
     cellId: bd.cell_id || '',

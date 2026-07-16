@@ -142,6 +142,7 @@ function generateDevice(index: number): Device {
     // Issue #758: 设备名称同步
     nameSyncPending: index % 10 === 0, // 每 10 个设备模拟一个待同步
     lmtDeviceName: index % 10 === 0 ? `LMT-${city.name}-${index}` : '',
+    paramSyncRunning: index % 17 === 0,
 
     enbId: enbIdVal,
     cellId: String(Math.floor(Math.random() * 256)),
@@ -339,6 +340,7 @@ const beijingDevices: Device[] = Array.from({ length: 50 }, (_, i) => {
     // Issue #758: 设备名称同步
     nameSyncPending: i % 10 === 0,
     lmtDeviceName: i % 10 === 0 ? `LMT-北京-${i}` : '',
+    paramSyncRunning: i % 17 === 0,
 
     enbId: enbIdVal,
     cellId: String(Math.floor(Math.random() * 256)),

@@ -105,7 +105,7 @@ func stubLookup(kv map[string]string) SysConfigLookup {
 func makePolicySnap(snap PeriodicSyncSnapshot) *PeriodicSyncPolicy {
 	kv := map[string]string{
 		"device.periodicSyncEnabled":              strconv.FormatBool(snap.Enabled),
-		"device.periodicSyncIntervalHours":        strconv.Itoa(int(snap.Interval / time.Hour)),
+		"device.periodicSyncIntervalMinutes":      strconv.Itoa(int(snap.Interval / time.Minute)),
 		"device.periodicSyncBatchSize":            strconv.Itoa(snap.BatchSize),
 		"device.periodicSyncMaxConcurrent":        strconv.Itoa(snap.MaxConcurrent),
 		"device.periodicSyncStaggerWindowMinutes": strconv.Itoa(int(snap.StaggerWindow / time.Minute)),
@@ -130,7 +130,7 @@ func TestPeriodicSyncer_Snapshot_DefaultsWhenLookupNil(t *testing.T) {
 func TestPeriodicSyncer_Snapshot_OverridesFromSysConfig(t *testing.T) {
 	kv := map[string]string{
 		"device.periodicSyncEnabled":              "true",
-		"device.periodicSyncIntervalHours":        "72",
+		"device.periodicSyncIntervalMinutes":      "45",
 		"device.periodicSyncBatchSize":            "50",
 		"device.periodicSyncMaxConcurrent":        "5",
 		"device.periodicSyncStaggerWindowMinutes": "5",
@@ -138,17 +138,28 @@ func TestPeriodicSyncer_Snapshot_OverridesFromSysConfig(t *testing.T) {
 	p := NewPeriodicSyncPolicy(stubLookup(kv), zap.NewNop())
 	snap := p.Snapshot(context.Background())
 	assert.True(t, snap.Enabled)
-	assert.Equal(t, 72*time.Hour, snap.Interval)
+	assert.Equal(t, 45*time.Minute, snap.Interval)
 	assert.Equal(t, 50, snap.BatchSize)
 	assert.Equal(t, 5, snap.MaxConcurrent)
 	assert.Equal(t, 5*time.Minute, snap.StaggerWindow)
+}
+
+func TestPeriodicSyncer_Snapshot_LegacyIntervalHoursFallback(t *testing.T) {
+	kv := map[string]string{
+		"device.periodicSyncEnabled":       "true",
+		"device.periodicSyncIntervalHours": "72",
+	}
+	p := NewPeriodicSyncPolicy(stubLookup(kv), zap.NewNop())
+	snap := p.Snapshot(context.Background())
+	assert.True(t, snap.Enabled)
+	assert.Equal(t, 72*time.Hour, snap.Interval)
 }
 
 func TestPeriodicSyncer_Snapshot_InvalidValuesFallBackToDefault(t *testing.T) {
 	// 非数值 / 负值 / 解析失败 → 退化到 default
 	kv := map[string]string{
 		"device.periodicSyncEnabled":              "yes",  // ParseBool 不接受
-		"device.periodicSyncIntervalHours":        "-3",   // 拒绝负值
+		"device.periodicSyncIntervalMinutes":      "-3",   // 拒绝负值
 		"device.periodicSyncBatchSize":            "abc",  // 解析失败
 		"device.periodicSyncMaxConcurrent":        "0",    // 拒绝 0
 		"device.periodicSyncStaggerWindowMinutes": "-100", // 拒绝负值
@@ -252,7 +263,59 @@ func TestPeriodicSyncer_StartPathBSyncFailureIsolated(t *testing.T) {
 	assert.Equal(t, 3, syncer.callCount(), "单设备失败不应中断 batch，其他设备仍调")
 }
 
-func TestPeriodicSyncer_PathBUnavailable_CountsAsSkipped(t *testing.T) {
+func TestPeriodicSyncer_RunOnce_ReturnsFalseWhenLeaderUnavailable(t *testing.T) {
+	lister := &fakeStaleLister{devices: mkDevices(1)}
+	syncer := newFakeSyncStarter(true)
+	leader := &fakeLeader{acquired: false}
+	p := NewPeriodicSyncer(lister, syncer, leader, nil, zap.NewNop())
+
+	ok := p.runOnce(context.Background(), PeriodicSyncSnapshot{
+		Enabled:       true,
+		Interval:      time.Hour,
+		BatchSize:     200,
+		MaxConcurrent: 10,
+	})
+
+	assert.False(t, ok, "未获得 leader 时不应推进 lastRunAt")
+	assert.Equal(t, int32(0), lister.calls.Load())
+	assert.Equal(t, 0, syncer.callCount())
+}
+
+func TestPeriodicSyncer_RunOnce_ReturnsFalseOnListError(t *testing.T) {
+	lister := &fakeStaleLister{err: errors.New("db connection lost")}
+	syncer := newFakeSyncStarter(true)
+	p := NewPeriodicSyncer(lister, syncer, nil, nil, zap.NewNop())
+
+	ok := p.runOnce(context.Background(), PeriodicSyncSnapshot{
+		Enabled:       true,
+		Interval:      time.Hour,
+		BatchSize:     200,
+		MaxConcurrent: 10,
+	})
+
+	assert.False(t, ok, "列表查询失败时应尽快重试")
+	assert.Equal(t, int32(1), lister.calls.Load())
+	assert.Equal(t, 0, syncer.callCount())
+}
+
+func TestPeriodicSyncer_RunOnce_ReturnsTrueWhenScanCompletesWithNoDevices(t *testing.T) {
+	lister := &fakeStaleLister{}
+	syncer := newFakeSyncStarter(true)
+	p := NewPeriodicSyncer(lister, syncer, nil, nil, zap.NewNop())
+
+	ok := p.runOnce(context.Background(), PeriodicSyncSnapshot{
+		Enabled:       true,
+		Interval:      time.Hour,
+		BatchSize:     200,
+		MaxConcurrent: 10,
+	})
+
+	assert.True(t, ok, "完成有效扫描后可推进 lastRunAt，避免空列表时每分钟重复查库")
+	assert.Equal(t, int32(1), lister.calls.Load())
+	assert.Equal(t, 0, syncer.callCount())
+}
+
+func TestPeriodicSyncer_DurableUnavailable_CountsAsSkipped(t *testing.T) {
 	devices := mkDevices(3)
 	lister := &fakeStaleLister{devices: devices}
 	syncer := newFakeSyncStarter(false) // used=false 全部跳过
@@ -261,7 +324,49 @@ func TestPeriodicSyncer_PathBUnavailable_CountsAsSkipped(t *testing.T) {
 	p := NewPeriodicSyncer(lister, syncer, leader, nil, zap.NewNop())
 	p.runOnce(context.Background(), PeriodicSyncSnapshot{Interval: time.Hour, BatchSize: 200, MaxConcurrent: 10})
 
-	assert.Equal(t, 3, syncer.callCount(), "仍调 StartPathBSync 但内部 used=false → 跳过不算失败")
+	assert.Equal(t, 3, syncer.callCount(), "仍调同步入口但内部 used=false → 跳过不算失败")
+}
+
+func TestPeriodicSyncer_StopsEnqueueWhenPolicyDisabled(t *testing.T) {
+	devices := mkDevices(3)
+	lister := &fakeStaleLister{devices: devices}
+
+	var kvMu sync.Mutex
+	kv := map[string]string{
+		"device.periodicSyncEnabled":              "true",
+		"device.periodicSyncIntervalMinutes":      "60",
+		"device.periodicSyncBatchSize":            "200",
+		"device.periodicSyncMaxConcurrent":        "1",
+		"device.periodicSyncStaggerWindowMinutes": "0",
+	}
+	policy := NewPeriodicSyncPolicy(func(_ context.Context, cat, key string) (string, bool) {
+		kvMu.Lock()
+		defer kvMu.Unlock()
+		v, ok := kv[cat+"."+key]
+		return v, ok
+	}, zap.NewNop())
+
+	var calls atomic.Int32
+	syncer := &trackingSyncStarter{
+		onCall: func() {
+			if calls.Add(1) == 1 {
+				kvMu.Lock()
+				kv["device.periodicSyncEnabled"] = "false"
+				kvMu.Unlock()
+				policy.InvalidateCache()
+			}
+		},
+	}
+
+	p := NewPeriodicSyncer(lister, syncer, nil, policy, zap.NewNop())
+	p.runOnce(context.Background(), PeriodicSyncSnapshot{
+		Enabled:       true,
+		Interval:      time.Hour,
+		BatchSize:     200,
+		MaxConcurrent: 1,
+	})
+
+	assert.Equal(t, int32(1), calls.Load(), "关闭开关后不应继续为后续设备入队")
 }
 
 func TestPeriodicSyncer_ListError_NoCrash(t *testing.T) {
@@ -301,6 +406,36 @@ func TestPeriodicSyncer_Start_StopsOnCtxCancel(t *testing.T) {
 		t.Fatal("Start should exit within 2s of ctx cancel")
 	}
 	assert.True(t, leader.released.Load(), "Start 退出时应调 leader.Release")
+}
+
+func TestPeriodicSyncer_Start_RunsEnabledPolicyImmediately(t *testing.T) {
+	lister := &fakeStaleLister{devices: mkDevices(1)}
+	syncer := newFakeSyncStarter(true)
+	leader := &fakeLeader{acquired: true}
+	policy := makePolicySnap(PeriodicSyncSnapshot{
+		Enabled:       true,
+		Interval:      time.Hour,
+		BatchSize:     200,
+		MaxConcurrent: 10,
+	})
+	p := NewPeriodicSyncer(lister, syncer, leader, policy, zap.NewNop())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- p.Start(ctx) }()
+
+	require.Eventually(t, func() bool {
+		return lister.calls.Load() > 0 && syncer.callCount() > 0
+	}, 500*time.Millisecond, 10*time.Millisecond, "enabled scheduler should run once without waiting for the 1m poll tick")
+
+	cancel()
+	select {
+	case err := <-done:
+		assert.ErrorIs(t, err, context.Canceled)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Start should exit within 2s of ctx cancel")
+	}
 }
 
 func TestPeriodicSyncer_ConcurrentRequest_RespectsMaxConcurrent(t *testing.T) {

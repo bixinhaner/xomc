@@ -194,6 +194,7 @@ export interface Device {
   // Issue #758：设备名称同步
   nameSyncPending: boolean;
   lmtDeviceName: string;
+  paramSyncRunning: boolean;
 
   // 小区信息组 (Cell)
   enbId: string;

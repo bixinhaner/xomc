@@ -1,16 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { App, Badge, Button, Card, Drawer, Input, Modal, Popconfirm, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { App, Badge, Button, Card, Checkbox, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   AlertOutlined,
+  ClockCircleOutlined,
   CheckOutlined,
   CloseOutlined,
   EditOutlined,
   ExportOutlined,
   EyeOutlined,
   FileTextOutlined,
+  LinkOutlined,
   ReloadOutlined,
   SyncOutlined,
   WarningOutlined,
@@ -25,7 +27,7 @@ import ListPageLayout from '@/components/Layout/ListPageLayout';
 import AutoRefreshDropdown from '@/pages/alarm/components/AutoRefreshDropdown';
 import { prefetchDeviceDetailContext, useDeviceList, useBatchRebootDevices, useDeviceGroups, useUpdateDevice, useSyncDeviceParams } from '@core/hooks/api/useDevices';
 import { useProductList } from '@core/hooks/api/useProducts';
-import { useDictionaryBatch } from '@core/hooks/api/useSystem';
+import { useBatchUpdateSysConfigs, useDictionaryBatch, useSysConfigsByCategory } from '@core/hooks/api/useSystem';
 import { resolveNetworkTypeLabel } from '@core/utils/networkType';
 import { activationStatusLabelOf, displayActivationStatusLabelOf, displayActivationStatusOf } from '@core/utils/activationStatus';
 import { formatDeviceSyncStatus, getDeviceSyncStatusKind, normalizeDeviceSyncStatus } from '@core/utils/deviceSyncStatus';
@@ -62,6 +64,8 @@ import { getDeviceListParamSyncPaths } from './deviceListParamSync';
 import type { Device } from '@core/types/device';
 import { formatSystemTime } from '@core/utils/systemTime';
 import { computeCumulativeOnlineDurationSeconds, computeCurrentOnlineDurationSeconds } from '@core/utils/onlineDuration';
+import type { SysConfigItem } from '@core/types/system';
+import { buildBatchItems } from '@/pages/system/SystemConfig/sysConfigSerialize';
 
 const { Link } = Typography;
 
@@ -79,6 +83,38 @@ const exportDeviceApi = createApiSwitch(deviceService as unknown as typeof devic
 const DEVICE_LIST_TABLE_ID = 'device-list-table';
 const ALARM_SYNC_BATCH_CONCURRENCY = 4;
 const PARAM_SYNC_BATCH_CONCURRENCY = 4;
+const PARAM_SYNC_ACTIVE_REFETCH_MS = 3000;
+const PERIODIC_SYNC_WATCH_MS = 2 * 60 * 1000;
+const PERIODIC_PARAM_SYNC_DEFAULTS = {
+  periodicSyncEnabled: false,
+  periodicSyncIntervalMinutes: 1440,
+  periodicSyncBatchSize: 200,
+  periodicSyncMaxConcurrent: 10,
+  periodicSyncStaggerWindowMinutes: 0,
+};
+
+function decodeSysConfigValue(item: SysConfigItem): unknown {
+  switch (item.valueType) {
+    case 'bool':
+      return item.value === 'true' || item.value === '1';
+    case 'int': {
+      const n = parseInt(item.value, 10);
+      return Number.isFinite(n) ? n : 0;
+    }
+    case 'float': {
+      const n = parseFloat(item.value);
+      return Number.isFinite(n) ? n : 0;
+    }
+    case 'json':
+      try {
+        return JSON.parse(item.value) as unknown;
+      } catch {
+        return item.value;
+      }
+    default:
+      return item.value;
+  }
+}
 
 function createBatchAbortError(): Error {
   if (typeof DOMException !== 'undefined') {
@@ -250,6 +286,12 @@ export default function DeviceList() {
   });
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [periodicSyncModalOpen, setPeriodicSyncModalOpen] = useState(false);
+  const [periodicSyncForm] = Form.useForm();
+  const { data: periodicSyncConfigs, isFetching: periodicSyncLoading } = useSysConfigsByCategory('device', periodicSyncModalOpen);
+  const batchUpdateSysConfigs = useBatchUpdateSysConfigs();
+  const [optimisticParamSyncDeviceIds, setOptimisticParamSyncDeviceIds] = useState<Set<string>>(() => new Set());
+  const [periodicSyncWatchUntil, setPeriodicSyncWatchUntil] = useState(0);
 
   useEffect(() => {
     const params: Record<string, unknown> = {};
@@ -275,6 +317,23 @@ export default function DeviceList() {
       setFilterParams(params);
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!periodicSyncModalOpen) return;
+    const values: Record<string, unknown> = { ...PERIODIC_PARAM_SYNC_DEFAULTS };
+    const hasMinuteInterval = (periodicSyncConfigs || []).some((cfg) => cfg.key === 'periodicSyncIntervalMinutes');
+    for (const item of periodicSyncConfigs || []) {
+      if (item.key in PERIODIC_PARAM_SYNC_DEFAULTS) {
+        values[item.key] = decodeSysConfigValue(item);
+      } else if (item.key === 'periodicSyncIntervalHours' && !hasMinuteInterval) {
+        const hours = decodeSysConfigValue(item);
+        if (typeof hours === 'number' && hours > 0) {
+          values.periodicSyncIntervalMinutes = hours * 60;
+        }
+      }
+    }
+    periodicSyncForm.setFieldsValue(values);
+  }, [periodicSyncModalOpen, periodicSyncConfigs, periodicSyncForm]);
 
   type TaskStatus = 'pending' | 'running' | 'success' | 'failed';
   interface LocalTask {
@@ -424,8 +483,9 @@ export default function DeviceList() {
     } as Parameters<typeof useDeviceList>[0];
   }, [filterParams, groupsResp?.groups, currentPage, pageSize]);
 
+  const paramSyncPolling = periodicSyncWatchUntil > 0 || optimisticParamSyncDeviceIds.size > 0;
   const { data, isLoading, isFetching, refetch } = useDeviceList(queryParams, {
-    refetchInterval: autoRefresh ? refreshInterval * 1000 : undefined,
+    refetchInterval: autoRefresh ? refreshInterval * 1000 : (paramSyncPolling ? PARAM_SYNC_ACTIVE_REFETCH_MS : undefined),
   });
   const [refreshSpinnerActive, setRefreshSpinnerActive] = useState(false);
   const refreshSpinStartedAtRef = useRef<number | null>(null);
@@ -449,6 +509,12 @@ export default function DeviceList() {
   );
   const total = data?.total ?? 0;
   const stats = useMemo(() => data?.stats ?? { total: 0, online: 0, offline: 0, alarmed: 0, online_count: 0, offline_count: 0 }, [data?.stats]);
+
+  useEffect(() => {
+    if (periodicSyncWatchUntil <= Date.now()) return;
+    const timeout = window.setTimeout(() => setPeriodicSyncWatchUntil(0), periodicSyncWatchUntil - Date.now());
+    return () => window.clearTimeout(timeout);
+  }, [periodicSyncWatchUntil]);
 
   useEffect(() => {
     if (!autoRefresh) return;
@@ -1143,6 +1209,13 @@ export default function DeviceList() {
               }
 
               setBatchParamSyncRunning(true);
+              setOptimisticParamSyncDeviceIds((prev) => {
+                const next = new Set(prev);
+                for (const { device } of runnableParamSyncEntries) {
+                  next.add(device.id);
+                }
+                return next;
+              });
               const abortController = new AbortController();
               paramSyncBatchAbortRef.current = abortController;
 
@@ -1212,6 +1285,12 @@ export default function DeviceList() {
                         throw err;
                       }
                       const errMsg = err instanceof Error ? err.message : t('task.log.failed');
+                      setOptimisticParamSyncDeviceIds((prev) => {
+                        if (!prev.has(device.id)) return prev;
+                        const next = new Set(prev);
+                        next.delete(device.id);
+                        return next;
+                      });
                       setCollectTasks((prev) => prev.map((item) =>
                         item.id === task.id ? {
                           ...item,
@@ -1243,6 +1322,7 @@ export default function DeviceList() {
                 }
               } finally {
                 setBatchParamSyncRunning(false);
+                setOptimisticParamSyncDeviceIds(new Set());
                 if (paramSyncBatchAbortRef.current === abortController) {
                   paramSyncBatchAbortRef.current = null;
                 }
@@ -1467,16 +1547,58 @@ export default function DeviceList() {
         key: 'connStatus',
         title: t('device.connStatus'),
         dataIndex: 'connStatus',
-        width: 100,
+        width: 170,
         fixed: 'left',
         group: 'common',
         render: (_val, record) => {
           const mappedStatus = mapConnStatus(record.connStatus);
           return (
-            <StatusIndicator
-              status={mappedStatus}
-              text={mappedStatus === 'online' ? t('status.online') : t('status.offline')}
-            />
+            <Space size={6} wrap={false}>
+              <StatusIndicator
+                status={mappedStatus}
+                text={mappedStatus === 'online' ? t('status.online') : t('status.offline')}
+              />
+              {(record.paramSyncRunning || optimisticParamSyncDeviceIds.has(record.id)) && (
+                <Tooltip title={t('device.periodicParamSync.running')}>
+                  <Tag
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 28,
+                      height: 28,
+                      padding: 0,
+                      marginInlineEnd: 0,
+                      color: '#1677ff',
+                      background: '#e6f4ff',
+                      borderColor: '#91caff',
+                    }}
+                  >
+                    <span
+                      style={{
+                        position: 'relative',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 20,
+                        height: 20,
+                      }}
+                    >
+                      <LinkOutlined style={{ fontSize: 14, color: '#0958d9' }} />
+                      <SyncOutlined
+                        spin
+                        style={{
+                          position: 'absolute',
+                          inset: 0,
+                          fontSize: 20,
+                          color: '#1677ff',
+                        }}
+                      />
+                    </span>
+                  </Tag>
+                </Tooltip>
+              )}
+            </Space>
           );
         },
       },
@@ -1972,7 +2094,7 @@ export default function DeviceList() {
 
     ],
     // remarkHeaderRender 暂从 dep 列表移除：remark 列定义已注释，恢复时同步加回。
-    [navigate, openDeviceDetail, prefetchDeviceDetailEntry, t, fmtTime, fmtDuration, fmtStatus, adminStateStatusMap, renderMultiCellStatus, renderActivationStatus, message, downloadStationLog, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails, editingInstallAddressId, editingInstallAddressValue, savingInstallAddressId, saveInstallAddressEdit, cancelInstallAddressEdit, startInstallAddressEdit]
+    [navigate, openDeviceDetail, prefetchDeviceDetailEntry, t, fmtTime, fmtDuration, fmtStatus, adminStateStatusMap, renderMultiCellStatus, renderActivationStatus, message, downloadStationLog, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails, editingInstallAddressId, editingInstallAddressValue, savingInstallAddressId, saveInstallAddressEdit, cancelInstallAddressEdit, startInstallAddressEdit, optimisticParamSyncDeviceIds]
   );
 
   // ─── 列表导出(用户决策 2026-06-02) ──────────────────────────────────────
@@ -2106,6 +2228,34 @@ export default function DeviceList() {
     },
     [columns, message, t, fetchAllFilteredDevices, formatExportCell]
   );
+
+  const handleSavePeriodicSync = useCallback(async () => {
+    if (periodicSyncLoading) {
+      void message.warning(t('common.loading'));
+      return;
+    }
+    let values: Record<string, unknown>;
+    try {
+      values = (await periodicSyncForm.validateFields()) as Record<string, unknown>;
+    } catch {
+      void message.error(t('common.formValidationFailed'));
+      return;
+    }
+    try {
+      await batchUpdateSysConfigs.mutateAsync({
+        category: 'device',
+        items: buildBatchItems(values, periodicSyncConfigs),
+      });
+      if (values.periodicSyncEnabled === true) {
+        setPeriodicSyncWatchUntil(Date.now() + PERIODIC_SYNC_WATCH_MS);
+        void refetch();
+      }
+      void message.success(t('device.periodicParamSync.saveSuccess'));
+      setPeriodicSyncModalOpen(false);
+    } catch (err) {
+      void message.error(err instanceof Error ? err.message : t('sysconfig.error.saveFailed'));
+    }
+  }, [batchUpdateSysConfigs, message, periodicSyncConfigs, periodicSyncForm, periodicSyncLoading, refetch, t]);
 
   const batchActions = useMemo((): BatchAction[] => [
     {
@@ -2263,6 +2413,47 @@ export default function DeviceList() {
     </Modal>
   );
 
+  const periodicSyncModal = (
+    <Modal
+      open={periodicSyncModalOpen}
+      title={t('device.periodicParamSync.title')}
+      onCancel={() => setPeriodicSyncModalOpen(false)}
+      onOk={() => void handleSavePeriodicSync()}
+      okText={t('common.save')}
+      cancelText={t('common.cancel')}
+      confirmLoading={batchUpdateSysConfigs.isPending}
+      okButtonProps={{ disabled: periodicSyncLoading }}
+      destroyOnHidden
+    >
+      <Typography.Paragraph type="secondary" style={{ marginBottom: 16, fontSize: 12 }}>
+        {t('device.periodicParamSync.desc')}
+      </Typography.Paragraph>
+      <Form
+        form={periodicSyncForm}
+        layout="vertical"
+        size="small"
+        disabled={periodicSyncLoading || batchUpdateSysConfigs.isPending}
+        initialValues={PERIODIC_PARAM_SYNC_DEFAULTS}
+      >
+        <Form.Item name="periodicSyncEnabled" valuePropName="checked">
+          <Checkbox>{t('system.device.periodicSync.enabledLabel')}</Checkbox>
+        </Form.Item>
+        <Form.Item label={t('system.device.periodicSync.intervalPrefix')} name="periodicSyncIntervalMinutes" rules={[{ required: true, type: 'number', min: 1, max: 10080 }]}>
+          <InputNumber min={1} max={10080} addonAfter={t('device.periodicParamSync.minuteUnit')} style={{ width: '100%' }} />
+        </Form.Item>
+        <Form.Item label={t('system.device.periodicSync.batchSizePrefix')} name="periodicSyncBatchSize" rules={[{ required: true, type: 'number', min: 1, max: 1000 }]}>
+          <InputNumber min={1} max={1000} addonAfter={t('device.periodicParamSync.deviceUnit')} style={{ width: '100%' }} />
+        </Form.Item>
+        <Form.Item label={t('system.device.periodicSync.maxConcurrentPrefix')} name="periodicSyncMaxConcurrent" rules={[{ required: true, type: 'number', min: 1, max: 50 }]}>
+          <InputNumber min={1} max={50} style={{ width: '100%' }} />
+        </Form.Item>
+        <Form.Item label={t('system.device.periodicSync.staggerPrefix')} name="periodicSyncStaggerWindowMinutes" rules={[{ required: true, type: 'number', min: 0, max: 120 }]} style={{ marginBottom: 0 }}>
+          <InputNumber min={0} max={120} addonAfter={t('device.periodicParamSync.minuteUnit')} style={{ width: '100%' }} />
+        </Form.Item>
+      </Form>
+    </Modal>
+  );
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <div style={{ flex: '1 1 100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
@@ -2315,6 +2506,15 @@ export default function DeviceList() {
               }}
               batchActions={batchActions}
               onRefresh={handleManualRefresh}
+              extraToolbarAfterBatch={(
+                <Button
+                  size="small"
+                  icon={<ClockCircleOutlined />}
+                  onClick={() => setPeriodicSyncModalOpen(true)}
+                >
+                  {t('device.action.autoParamSync')}
+                </Button>
+              )}
               extraToolbarRight={(
                 <Space size={8}>
                   <Button
@@ -2436,6 +2636,7 @@ export default function DeviceList() {
       </Modal>
 
       {exportConfirmModal}
+      {periodicSyncModal}
     </div>
   );
 }

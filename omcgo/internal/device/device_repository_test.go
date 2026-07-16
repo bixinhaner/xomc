@@ -347,6 +347,11 @@ func TestDeviceWithInfoSelectColumns_AlarmAggregation(t *testing.T) {
 	assert.Contains(t, joined, "31004", "warning 需兼容 31004 编码")
 	assert.Contains(t, joined, "AS alarm_severity", "派生列别名仍为 alarm_severity（前端契约不变）")
 	assert.Contains(t, joined, "aa.active_alarm_count", "必须暴露活动告警数列")
+	assert.Contains(t, joined, "AS param_sync_running", "列表 DTO 必须暴露参数同步动态状态列")
+	assert.Contains(t, joined, "parameter_sync_requests", "durable paramsync 请求未终态时应显示同步中")
+	assert.Contains(t, joined, "parameter_sync_runs", "durable paramsync 运行未终态时应显示同步中")
+	assert.NotContains(t, joined, "device_tasks dt", "旧 Path B sync-gpv 任务已废弃，动态状态不得依赖 device_tasks")
+	assert.NotContains(t, joined, "sync-gpv-", "动态状态只认 durable parameter_sync_* 数据面")
 	assert.NotContains(t, joined, "di.alarm_severity",
 		"#361：列表 select 不再读无人维护的 di.alarm_severity 冗余列")
 

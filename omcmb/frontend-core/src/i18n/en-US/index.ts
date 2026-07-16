@@ -1678,6 +1678,7 @@ const messages: Record<string, string> = {
   'device.action.tr069Collect':  'Collect TR069 Msg',
   'device.action.alarmSync':     'Alarm Sync',
   'device.action.paramSync':      'Parameter Sync',
+  'device.action.autoParamSync':  'Auto Sync',
 
   // Action confirm & feedback messages
   'device.action.rebootConfirm':     'Are you sure to reboot this device?',
@@ -3227,6 +3228,14 @@ const messages: Record<string, string> = {
   'device.batch.paramSync.noRunnableDevices': 'No online devices can be synchronized.',
   'device.batch.paramSync.requestUnavailable': 'Parameter sync request is unavailable. Please try again later.',
   'device.batch.paramSync.waitingDevice': 'Waiting for device parameter response',
+  'device.periodicParamSync.title': 'Scheduled Auto Sync',
+  'device.periodicParamSync.desc': 'When enabled, the system periodically scans online devices and automatically starts parameter sync. Changes take effect at runtime without restarting services.',
+  'device.periodicParamSync.hourUnit': 'hour(s)',
+  'device.periodicParamSync.minuteUnit': 'minute(s)',
+  'device.periodicParamSync.deviceUnit': 'device(s)',
+  'device.periodicParamSync.saveSuccess': 'Scheduled auto sync settings saved',
+  'device.periodicParamSync.running': 'Parameter sync in progress',
+  'device.periodicParamSync.runningShort': 'Syncing',
 
   // -------------------------------------------------------------------------
   // EmptyState
@@ -4777,10 +4786,10 @@ const messages: Record<string, string> = {
   'system.device.thenEnbWillBeLocked':       'meters, eNB will be locked',
   // Periodic Param Sync (T-0124 fallback for config drift detection)
   'system.device.periodicSync.title':                  'Device Parameter Sync',
-  'system.device.periodicSync.intro':                  'Periodically scan online devices and trigger Path B full param sync as a fallback against config drift. For production, start with 72h / 50 devices, then ramp to 24h / 200 once stable.',
+  'system.device.periodicSync.intro':                  'Periodically scan online devices and submit durable full parameter sync as a fallback against config drift. For production, start with 4320 min / 50 devices, then ramp to 1440 min / 200 once stable.',
   'system.device.periodicSync.enabledLabel':           'Enable periodic parameter sync (default off)',
   'system.device.periodicSync.intervalPrefix':         'Scan every',
-  'system.device.periodicSync.intervalSuffix':         'hour(s) (recommended ≥ 1h; start with 72h in production)',
+  'system.device.periodicSync.intervalSuffix':         'minute(s) (recommended ≥ 5 min; start with 4320 min in production)',
   'system.device.periodicSync.batchSizePrefix':        'Process up to',
   'system.device.periodicSync.batchSizeSuffix':        'devices per round (50–500 recommended; oldest-synced first)',
   'system.device.periodicSync.maxConcurrentPrefix':    'Enqueue concurrency',

@@ -120,8 +120,16 @@ export default function SystemConfig() {
     for (const item of configList) {
       fields[item.key] = decodeValue(item.value, item.valueType);
     }
+    if (
+      activeTab === 'device' &&
+      fields.periodicSyncIntervalMinutes === undefined &&
+      typeof fields.periodicSyncIntervalHours === 'number' &&
+      fields.periodicSyncIntervalHours > 0
+    ) {
+      fields.periodicSyncIntervalMinutes = fields.periodicSyncIntervalHours * 60;
+    }
     form.setFieldsValue(fields);
-  }, [activeForm, configList]);
+  }, [activeForm, activeTab, configList]);
 
   const batchUpdate = useBatchUpdateSysConfigs();
 

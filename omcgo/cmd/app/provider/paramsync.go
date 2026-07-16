@@ -262,12 +262,16 @@ func (s *paramSyncStarter) SubmitConfigPull(ctx context.Context, deviceSN string
 }
 
 func (s *paramSyncStarter) StartDurableSync(ctx context.Context, dev *model.Device, sourceID, reason string, paths []string) (bool, int, error) {
-	if !s.flags.EnabledForDevice(dev.ID.String()) {
-		return false, 0, nil
-	}
 	trigger := paramsync.TriggerReason(reason)
 	if trigger == "" {
 		return true, 0, fmt.Errorf("durable parameter sync trigger reason is required")
+	}
+	if !s.flags.EnabledForDevice(dev.ID.String()) {
+		// All parameter sync triggers enter the durable parameter_sync_* path
+		// first. The legacy sync-gpv Path B path is retained only as a
+		// temporary fallback until param_sync_running is stable enough to remove
+		// the old pipeline.
+		return false, 0, nil
 	}
 	scope := paramsync.SyncScopeFull
 	if len(paths) > 0 {
@@ -282,6 +286,9 @@ func (s *paramSyncStarter) StartDurableSync(ctx context.Context, dev *model.Devi
 	}
 	if result.ResultCode == paramsync.ResultCodePathBUnavailable {
 		if s.flags.LegacyFallbackEnabled {
+			// Temporary fallback: all triggers prefer parameter_sync_*; legacy
+			// sync-gpv Path B remains only while param_sync_running rollout is
+			// being stabilized.
 			return false, 0, nil
 		}
 		return true, 0, fmt.Errorf("durable parameter sync unavailable: %s", result.ResultCode)
@@ -319,6 +326,11 @@ func (s *paramSyncStarter) StartManualSync(ctx context.Context, dev *model.Devic
 
 func (s *paramSyncStarter) StartManualSyncDetailed(ctx context.Context, dev *model.Device, sourceID string, paths []string) (*device.ManualParamSyncStart, error) {
 	if !s.flags.EnabledForDevice(dev.ID.String()) {
+		// Manual sync follows the same transition rule as periodic,
+		// device_online, firmware_changed, bootstrap, and model_upload:
+		// parameter_sync_* first; legacy sync-gpv Path B only as a temporary
+		// fallback until param_sync_running is stable and the old path can be
+		// deleted.
 		if s.legacy == nil {
 			return &device.ManualParamSyncStart{}, nil
 		}
@@ -337,6 +349,10 @@ func (s *paramSyncStarter) StartManualSyncDetailed(ctx context.Context, dev *mod
 		return &device.ManualParamSyncStart{Used: true}, err
 	}
 	if result.ResultCode == paramsync.ResultCodePathBUnavailable {
+		if s.flags.LegacyFallbackEnabled && s.legacy != nil {
+			used, count, err := s.legacy.StartManualSync(ctx, dev, sourceID, paths)
+			return &device.ManualParamSyncStart{Used: used, TaskCount: count, Status: "queued"}, err
+		}
 		return &device.ManualParamSyncStart{RequestID: result.RequestID, Status: string(result.Status), ResultCode: string(result.ResultCode)}, nil
 	}
 	if result.Status == paramsync.RequestStatusRejected && result.ResultCode == paramsync.ResultCodeActiveSyncExists {
