@@ -19,6 +19,7 @@ type stubSysConfigRepo struct {
 	mu sync.Mutex
 
 	batchUpsertFn func(ctx context.Context, category string, items []BatchItem) (int, error)
+	listFn        func(ctx context.Context, category string, publicOnly bool) ([]SysConfig, error)
 }
 
 func (s *stubSysConfigRepo) Create(_ context.Context, _ *SysConfig) error { return nil }
@@ -28,7 +29,11 @@ func (s *stubSysConfigRepo) GetByID(_ context.Context, _ uuid.UUID) (*SysConfig,
 func (s *stubSysConfigRepo) GetByKey(_ context.Context, _, _ string) (*SysConfig, error) {
 	return nil, nil
 }
-func (s *stubSysConfigRepo) List(_ context.Context, _ string, _ bool) ([]SysConfig, error) {
+
+func (s *stubSysConfigRepo) List(ctx context.Context, category string, publicOnly bool) ([]SysConfig, error) {
+	if s.listFn != nil {
+		return s.listFn(ctx, category, publicOnly)
+	}
 	return nil, nil
 }
 func (s *stubSysConfigRepo) Update(_ context.Context, _ *SysConfig) error { return nil }
@@ -133,6 +138,48 @@ func TestSysConfigService_RegisterSavedHook_NilSafe(t *testing.T) {
 		Items:    []BatchItem{{Key: "k", Value: "v"}},
 	})
 	require.NoError(t, err)
+}
+
+func TestIsLoginPagePublicSecurityConfig(t *testing.T) {
+	tests := []struct {
+		name     string
+		category string
+		key      string
+		want     bool
+	}{
+		{name: "screen lock timeout is not runtime-whitelisted", category: "security", key: "userSessionExpirationMin", want: false},
+		{name: "browser password policy", category: "security", key: "isBrowserAutoRecordPass", want: true},
+		{name: "login notice switch is not runtime-whitelisted", category: "security", key: "enabledFlag", want: false},
+		{name: "login notice message is not runtime-whitelisted", category: "security", key: "msg", want: false},
+		{name: "password must stay private", category: "security", key: "defaultPasswd", want: false},
+		{name: "same key in another category", category: "basic", key: "msg", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isLoginPagePublicSecurityConfig(tt.category, tt.key))
+		})
+	}
+}
+
+func TestSysConfigService_ListPublic_SecurityUsesStrictAllowlist(t *testing.T) {
+	repo := &stubSysConfigRepo{
+		listFn: func(_ context.Context, category string, publicOnly bool) ([]SysConfig, error) {
+			assert.Equal(t, "security", category)
+			assert.False(t, publicOnly, "security 分类需先读取后按安全白名单过滤")
+			return []SysConfig{
+				{Category: "security", Key: "isBrowserAutoRecordPass", Value: "true", IsPublic: false},
+				{Category: "security", Key: "defaultPasswd", Value: "secret", IsPublic: false},
+				{Category: "security", Key: "legacyPublicKey", Value: "legacy", IsPublic: true},
+			}, nil
+		},
+	}
+
+	items, err := NewSysConfigService(repo).ListPublic(context.Background(), "security")
+	require.NoError(t, err)
+	require.Len(t, items, 2)
+	assert.Equal(t, "isBrowserAutoRecordPass", items[0].Key)
+	assert.Equal(t, "legacyPublicKey", items[1].Key)
 }
 
 // ── Validator hook（issue #548 切片 2 D 后端 sys_configs validator）─────────────────

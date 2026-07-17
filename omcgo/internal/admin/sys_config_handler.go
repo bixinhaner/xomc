@@ -34,17 +34,17 @@ func (h *SysConfigHandler) RegisterRoutes(rg *gin.RouterGroup) {
 }
 
 // RegisterPublicRoutes 注册无需鉴权即可访问的子集端点。
-// 仅返回 is_public=true 的配置项，供登录页消费品牌化资产
-// （产品名、Logo、登录背景图等）。参 docs/prd/system/ui-customization.md §6。
+// 仅返回 is_public=true 的配置项及登录页严格白名单项，供认证前页面消费。
+// 参 docs/prd/system/ui-customization.md §6。
 func (h *SysConfigHandler) RegisterPublicRoutes(rg *gin.RouterGroup) {
 	rg.GET("/admin/public/configs", h.ListPublic)
 }
 
-// ListPublic 返回 (可选 category 过滤后) is_public=true 的全部配置。
+// ListPublic 返回 (可选 category 过滤后) 可公开读取的配置。
 // 不携带敏感字段，无需登录态。
 func (h *SysConfigHandler) ListPublic(c *gin.Context) {
 	category := c.Query("category")
-	result, err := h.service.List(c.Request.Context(), category, true)
+	result, err := h.service.ListPublic(c.Request.Context(), category)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
