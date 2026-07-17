@@ -358,7 +358,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		soap.MethodDownloadResp,
 		soap.MethodUploadResp,
 		soap.MethodRebootResp,
-		soap.MethodFactoryResetResp:
+		soap.MethodFactoryResetResp,
+		soap.MethodBaicellsPasswordResetResp:
 		h.handleRPCResponse(w, r, body, method, log)
 	default:
 		log.Warn("unknown SOAP method", zap.String("method", string(method)))
@@ -1430,6 +1431,8 @@ func rpcResponseMatchesTask(responseMethod soap.RPCMethod, taskMethod string) bo
 		return taskMethod == string(soap.MethodReboot)
 	case soap.MethodFactoryResetResp:
 		return taskMethod == string(soap.MethodFactoryReset)
+	case soap.MethodBaicellsPasswordResetResp:
+		return taskMethod == string(soap.MethodBaicellsPasswordReset)
 	case soap.MethodGetParameterAttributesResp:
 		return taskMethod == string(soap.MethodGetParameterAttributes)
 	case soap.MethodSetParameterAttributesResp:

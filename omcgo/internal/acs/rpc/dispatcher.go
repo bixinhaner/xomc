@@ -55,6 +55,7 @@ func NewDispatcher(cfgs ...DispatcherConfig) *Dispatcher {
 	d.Register("Upload", &UploadHandler{})
 	d.Register("Reboot", &RebootHandler{})
 	d.Register("FactoryReset", &FactoryResetHandler{})
+	d.Register("X_BAICELLS_COM_PasswordReset", &BaicellsPasswordResetHandler{})
 	d.Register("GetParameterAttributes", &GetParameterAttributesHandler{})
 	d.Register("SetParameterAttributes", &SetParameterAttributesHandler{})
 	d.Register("GetRPCMethods", &GetRPCMethodsHandler{})
@@ -244,6 +245,13 @@ type FactoryResetHandler struct{}
 func (h *FactoryResetHandler) BuildRequest(cmd *Command) ([]byte, error) {
 	data := soap.FactoryResetData{ID: cmd.CWMPID}
 	return soap.RenderResponse(soap.FactoryResetTmpl, data)
+}
+
+type BaicellsPasswordResetHandler struct{}
+
+func (h *BaicellsPasswordResetHandler) BuildRequest(cmd *Command) ([]byte, error) {
+	data := soap.RebootData{ID: cmd.CWMPID, CommandKey: cmd.CommandKey}
+	return soap.RenderResponse(soap.BaicellsPasswordResetTmpl, data)
 }
 
 // GetRPCMethodsHandler 处理 GetRPCMethods RPC（TR-069 §A.3.1.2）。
