@@ -232,6 +232,7 @@ export default function DeviceGrouping() {
     modal,
     message,
     t,
+    locale,
     selectedGroupId,
     setSelectedGroupId,
     createGroupMutation: createGroupMutation as unknown as Parameters<typeof useGroupActions>[0]['createGroupMutation'],

@@ -54,6 +54,7 @@ import { buildKpiCharts, buildKpiCompareData } from './kpiSeries';
 import ParameterTreeTab from './ParameterTreeTab';
 import QuickSettingsTab from './QuickSettingsTab';
 import LicenseParamsTab from './LicenseParamsTab';
+import PasswordManagementTab from './PasswordManagementTab';
 import { formatLteBandwidthDisplay } from './QuickSettingsTab/validators';
 import AlarmDetail from '@/pages/alarm/AlarmDetail';
 import AutoRefreshDropdown from '@/pages/alarm/components/AutoRefreshDropdown';
@@ -2025,7 +2026,7 @@ export default function DeviceDetail() {
           </div>
           <Space>
             {/* license/parameters tab 自带明确操作入口，此处头部刷新隐藏，避免语义重复或误导 */}
-            {activeTab !== 'license' && activeTab !== 'parameters' && (
+            {activeTab !== 'license' && activeTab !== 'parameters' && activeTab !== 'password' && (
               <Button
                 icon={<ReloadOutlined />}
                 onClick={handleHeaderRefresh}
@@ -2187,6 +2188,16 @@ export default function DeviceDetail() {
                     <LicenseParamsTab deviceId={device.id} />
                   </ErrorBoundary>
                 </div>
+              ),
+            },
+            {
+              key: 'password',
+              label: t('device.password.title'),
+              forceRender: true,
+              children: (
+                <ErrorBoundary>
+                  <PasswordManagementTab deviceId={device.id} />
+                </ErrorBoundary>
               ),
             },
           ]}
