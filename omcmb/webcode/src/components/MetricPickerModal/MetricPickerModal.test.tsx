@@ -115,6 +115,41 @@ describe('MetricPickerModal 已选回显', () => {
   });
 });
 
+describe('MetricPickerModal 搜索状态', () => {
+  beforeEach(() => {
+    useIndicatorListSpy.mockClear();
+  });
+
+  it('关闭后重开会清空上次搜索词并回到第一页', () => {
+    const { rerender } = render(
+      wrapIntl(<MetricPickerModal open onClose={() => {}} onConfirm={() => {}} />),
+    );
+    const input = screen.getByPlaceholderText('按指标路径 / 中文名 搜索') as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: 'availability' } });
+    fireEvent.click(screen.getByRole('button', { name: /搜\s*索/ }));
+
+    expect(useIndicatorListSpy.mock.calls.at(-1)?.[1]).toMatchObject({
+      keyword: 'availability',
+      page: 1,
+    });
+
+    rerender(
+      wrapIntl(<MetricPickerModal open={false} onClose={() => {}} onConfirm={() => {}} />),
+    );
+    rerender(
+      wrapIntl(<MetricPickerModal open onClose={() => {}} onConfirm={() => {}} />),
+    );
+
+    const reopenedInput = screen.getByPlaceholderText('按指标路径 / 中文名 搜索') as HTMLInputElement;
+    expect(reopenedInput.value).toBe('');
+    expect(useIndicatorListSpy.mock.calls.at(-1)?.[1]).toMatchObject({
+      keyword: undefined,
+      page: 1,
+    });
+  });
+});
+
 describe('MetricPickerModal 选择数量限制', () => {
   beforeEach(() => {
     useIndicatorListSpy.mockClear();

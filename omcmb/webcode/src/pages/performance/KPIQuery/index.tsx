@@ -395,7 +395,10 @@ export default function KPIQuery() {
     });
   };
 
-  const handleOpenUpdateModal = (tpl: QueryTemplate) => {
+  const handleOpenUpdateModal = async (tpl: QueryTemplate) => {
+    const dt = (tpl.payload.deviceType ?? 'ENB') as DeviceType;
+    const { paths, labels } = await resolveTemplateMetricPaths(dt, tpl.payload.metricPaths);
+    setMetricLabels((prev) => ({ ...prev, ...labels }));
     setSaveForm({
       open: true,
       mode: 'update',
@@ -403,7 +406,7 @@ export default function KPIQuery() {
       name: tpl.name,
       description: tpl.description ?? '',
       visibility: tpl.visibility,
-      payload: tpl.payload,
+      payload: { ...tpl.payload, metricPaths: paths },
       customRange:
         tpl.payload.timeRangePreset === 'custom' && tpl.payload.absoluteStart && tpl.payload.absoluteEnd
           ? [dayjs(tpl.payload.absoluteStart), dayjs(tpl.payload.absoluteEnd)]
@@ -557,7 +560,7 @@ export default function KPIQuery() {
                     icon={<EditOutlined />}
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleOpenUpdateModal(tpl);
+                      void handleOpenUpdateModal(tpl);
                     }}
                   />
                 </Tooltip>,
