@@ -363,6 +363,41 @@ func TestUpdatedPullConsumerConfig_NoChangeWhenAlreadyAligned(t *testing.T) {
 	assert.Equal(t, existing.Config, got)
 }
 
+func TestQueueTuningForSubjectDefaultsAndOverride(t *testing.T) {
+	bus := NewNATSEventBus(nil, nil, zap.NewNop())
+
+	got := bus.queueTuningForSubject(SubjectPMFileReceived)
+	assert.Equal(t, queueSubscribeAckWait, got.AckWait)
+	assert.Equal(t, maxDeliveries, got.MaxDeliver)
+	assert.Equal(t, defaultQueueMaxAckPending, got.MaxAckPending)
+
+	bus.SetQueueTuning(SubjectPMFileReceived, QueueTuning{
+		AckWait: 3 * time.Minute, MaxDeliver: 7, MaxAckPending: 16,
+	})
+	got = bus.queueTuningForSubject(SubjectPMFileReceived)
+	assert.Equal(t, 3*time.Minute, got.AckWait)
+	assert.Equal(t, 7, got.MaxDeliver)
+	assert.Equal(t, 16, got.MaxAckPending)
+}
+
+func TestUpdatedQueueConsumerConfigOverwritesMutableTuning(t *testing.T) {
+	desired := QueueTuning{AckWait: 2 * time.Minute, MaxDeliver: 5, MaxAckPending: 16}
+	existing := &nats.ConsumerInfo{
+		Name: "pm-workers",
+		Config: nats.ConsumerConfig{
+			AckWait: 30 * time.Second, MaxDeliver: -1, MaxAckPending: 1000,
+		},
+	}
+
+	got, changed := updatedQueueConsumerConfig(existing, desired)
+
+	require.True(t, changed)
+	assert.Equal(t, "pm-workers", got.Durable)
+	assert.Equal(t, desired.AckWait, got.AckWait)
+	assert.Equal(t, desired.MaxDeliver, got.MaxDeliver)
+	assert.Equal(t, desired.MaxAckPending, got.MaxAckPending)
+}
+
 func TestReconcilePullTuningWithExisting_NilKeepsDesired(t *testing.T) {
 	desired := PullTuning{BatchSize: 64, Concurrency: 64, AckWait: 2 * time.Minute, MaxAckPending: 512}
 

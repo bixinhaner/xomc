@@ -228,13 +228,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// #318：PM 上传背压门闸。磁盘/CPU 超高水位时（watchdog 后台维护态，热路径仅读原子标志）
 	// 对 PM 文件早返回 503——在落 MinIO 前拒收，TR-069 设备会重传，不丢数据；回落自动恢复。
-	if ft == tr069.FileTypePM && h.backpressure != nil && !h.backpressure.Allowed() {
-		h.backpressure.RecordRejected()
-		h.logger.Warn("PM upload rejected: resource backpressure (disk/cpu high)",
-			zap.String("filename", filename), zap.String("remote_addr", r.RemoteAddr))
-		w.Header().Set("Retry-After", "60")
-		http.Error(w, "PM upload temporarily paused due to resource backpressure", http.StatusServiceUnavailable)
-		return
+	if ft == tr069.FileTypePM && h.backpressure != nil {
+		if allowed, reason := h.backpressure.Acquire(); !allowed {
+			h.backpressure.RecordRejected(reason)
+			h.logger.Warn("PM upload rejected: resource backpressure or inflight limit",
+				zap.String("filename", filename), zap.String("remote_addr", r.RemoteAddr),
+				zap.String("reason", reason))
+			w.Header().Set("Retry-After", "60")
+			http.Error(w, "PM upload temporarily paused due to resource backpressure", http.StatusServiceUnavailable)
+			return
+		}
+		defer h.backpressure.Release()
 	}
 
 	bucket, category := storage.BucketAndCategory(ft, h.buckets)

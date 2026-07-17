@@ -163,6 +163,7 @@ services:
         cat >/tmp/nats-server.conf <<'EOF'
         jetstream {
           store_dir: "/data"
+          max_memory_store: ${NATS_MAX_MEMORY_STORE:-134217728}
         }
         http_port: 8222
         max_payload: 5242880

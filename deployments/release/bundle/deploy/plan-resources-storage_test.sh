@@ -41,6 +41,11 @@ if run_planner "$ENV_FILE" "$TMP/resources.env" > "$TMP/output" 2>&1; then
   check_eq "Redis 默认路径" "$(storage_env_get "$ENV_FILE" REDIS_DATA_PATH)" "/data-large/omc-data/redis"
   check_eq "NATS 默认路径" "$(storage_env_get "$ENV_FILE" NATS_DATA_PATH)" "/data-large/omc-data/nats"
   check_eq "MinIO 默认路径" "$(storage_env_get "$ENV_FILE" MINIO_DATA_PATH)" "/data-large/omc-data/minio"
+  if grep -q '^NATS_MAX_MEMORY_STORE=[0-9][0-9]*$' "$TMP/resources.env"; then
+    ok
+  else
+    bad "resources.env 应输出 NATS_MAX_MEMORY_STORE"
+  fi
 else
   bad "planner 应成功运行"
 fi

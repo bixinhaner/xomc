@@ -35,29 +35,43 @@ const (
 	bpKeyEnabled     = "enabled"
 	bpKeyDiskHighPct = "disk_high_pct"
 	bpKeyDiskLowPct  = "disk_low_pct"
+	bpKeyIOSomeHigh  = "io_some_high_pct"
+	bpKeyIOSomeLow   = "io_some_low_pct"
+	bpKeyMaxInflight = "max_inflight"
 	bpKeyInterval    = "check_interval_sec"
 
 	bpDefaultEnabled     = true
 	bpDefaultDiskHighPct = 85.0
 	bpDefaultDiskLowPct  = 75.0
+	bpDefaultIOSomeHigh  = 40.0
+	bpDefaultIOSomeLow   = 20.0
+	bpDefaultMaxInflight = 64
 	bpDefaultIntervalSec = 30
 	bpMinInterval        = 5 * time.Second
+
+	rejectReasonResourcePressure = "resource_pressure"
+	rejectReasonInflightLimit    = "inflight_limit"
 )
 
 // BackpressureGate 是 PM 上传背压门闸的最小读取接口（便于 handler 测试）。
 type BackpressureGate interface {
-	// Allowed 返回是否允许接收 PM 上传（false = 当前处于背压）。
-	Allowed() bool
+	// Acquire 尝试获取一个 PM 上传在途槽位。watchdog 背压生效或达到并发上限时返回 false。
+	Acquire() (allowed bool, rejectReason string)
+	// Release 释放 Acquire 成功取得的槽位。
+	Release()
 	// RecordRejected 记录一次因背压拒收（metric）。
-	RecordRejected()
+	RecordRejected(reason string)
 }
 
 // BackpressureConfig 是背压判定阈值，来自 sys_configs，可热刷新。
 type BackpressureConfig struct {
-	Enabled     bool
-	DiskHighPct float64 // 磁盘高水位%：≥ 则进入背压
-	DiskLowPct  float64 // 磁盘低水位%：≤ 才解除（迟滞）
-	Interval    time.Duration
+	Enabled       bool
+	DiskHighPct   float64 // 磁盘高水位%：≥ 则进入背压
+	DiskLowPct    float64 // 磁盘低水位%：≤ 才解除（迟滞）
+	IOSomeHighPct float64 // /proc/pressure/io some avg10 高水位
+	IOSomeLowPct  float64 // /proc/pressure/io some avg10 低水位
+	MaxInflight   int64   // PM 上传最大在途数
+	Interval      time.Duration
 }
 
 // ConfigLookup 读 sys_configs 单值（value, found）。
@@ -69,15 +83,21 @@ type DiskUsageFunc func(ctx context.Context) (pct float64, err error)
 // loadBackpressureConfig 从 sys_configs 读全部背压阈值，缺失/非法回落默认值并做迟滞防呆。
 func loadBackpressureConfig(ctx context.Context, lookup ConfigLookup) BackpressureConfig {
 	cfg := BackpressureConfig{
-		Enabled:     bpDefaultEnabled,
-		DiskHighPct: bpDefaultDiskHighPct,
-		DiskLowPct:  bpDefaultDiskLowPct,
-		Interval:    time.Duration(bpDefaultIntervalSec) * time.Second,
+		Enabled:       bpDefaultEnabled,
+		DiskHighPct:   bpDefaultDiskHighPct,
+		DiskLowPct:    bpDefaultDiskLowPct,
+		IOSomeHighPct: bpDefaultIOSomeHigh,
+		IOSomeLowPct:  bpDefaultIOSomeLow,
+		MaxInflight:   bpDefaultMaxInflight,
+		Interval:      time.Duration(bpDefaultIntervalSec) * time.Second,
 	}
 	if lookup != nil {
 		cfg.Enabled = bpReadBool(ctx, lookup, bpKeyEnabled, bpDefaultEnabled)
 		cfg.DiskHighPct = float64(bpReadInt(ctx, lookup, bpKeyDiskHighPct, int(bpDefaultDiskHighPct), 1, 100))
 		cfg.DiskLowPct = float64(bpReadInt(ctx, lookup, bpKeyDiskLowPct, int(bpDefaultDiskLowPct), 0, 100))
+		cfg.IOSomeHighPct = float64(bpReadInt(ctx, lookup, bpKeyIOSomeHigh, int(bpDefaultIOSomeHigh), 1, 100))
+		cfg.IOSomeLowPct = float64(bpReadInt(ctx, lookup, bpKeyIOSomeLow, int(bpDefaultIOSomeLow), 0, 100))
+		cfg.MaxInflight = int64(bpReadInt(ctx, lookup, bpKeyMaxInflight, bpDefaultMaxInflight, 1, 10000))
 		sec := bpReadInt(ctx, lookup, bpKeyInterval, bpDefaultIntervalSec, 1, 3600)
 		cfg.Interval = time.Duration(sec) * time.Second
 	}
@@ -87,6 +107,9 @@ func loadBackpressureConfig(ctx context.Context, lookup ConfigLookup) Backpressu
 	// 迟滞防呆：low 必须 ≤ high，否则回落条件与进入条件交叠会抖动。
 	if cfg.DiskLowPct > cfg.DiskHighPct {
 		cfg.DiskLowPct = cfg.DiskHighPct
+	}
+	if cfg.IOSomeLowPct > cfg.IOSomeHighPct {
+		cfg.IOSomeLowPct = cfg.IOSomeHighPct
 	}
 	return cfg
 }
@@ -120,7 +143,7 @@ func bpReadInt(ctx context.Context, lookup ConfigLookup, key string, def, lo, hi
 
 // decideBackpressure 是纯函数迟滞决策（便于单测）。diskPct 为负表示该信号不可用
 // （探测失败），不可用时进入判定忽略、解除判定视作已达标（fail-open，不长期误堵）。
-func decideBackpressure(current bool, diskPct float64, cfg BackpressureConfig) bool {
+func decideBackpressure(current bool, diskPct, ioSomePct float64, cfg BackpressureConfig) bool {
 	if !cfg.Enabled {
 		return false
 	}
@@ -129,19 +152,26 @@ func decideBackpressure(current bool, diskPct float64, cfg BackpressureConfig) b
 		if diskPct >= 0 && diskPct >= cfg.DiskHighPct {
 			return true
 		}
+		if ioSomePct >= 0 && ioSomePct >= cfg.IOSomeHighPct {
+			return true
+		}
 		return false
 	}
 	// 已背压：磁盘回落到低水位以下才解除（迟滞）。
 	diskOK := diskPct < 0 || diskPct <= cfg.DiskLowPct
-	return !diskOK
+	ioOK := ioSomePct < 0 || ioSomePct <= cfg.IOSomeLowPct
+	return !(diskOK && ioOK)
 }
 
 // BackpressureMetrics 暴露背压可观测指标。
 type BackpressureMetrics struct {
-	active      prometheus.Gauge
-	rejected    prometheus.Counter
-	diskPct     prometheus.Gauge
-	loadPerCore prometheus.Gauge
+	active           prometheus.Gauge
+	rejected         prometheus.Counter
+	rejectedByReason *prometheus.CounterVec
+	diskPct          prometheus.Gauge
+	ioSomePct        prometheus.Gauge
+	inflight         prometheus.Gauge
+	loadPerCore      prometheus.Gauge
 }
 
 // NewBackpressureMetrics 注册并返回背压指标。reg 为 nil 时不注册（测试用）。
@@ -155,9 +185,21 @@ func NewBackpressureMetrics(reg prometheus.Registerer) *BackpressureMetrics {
 			Name: "acs_pm_upload_backpressure_rejected_total",
 			Help: "因背压被拒收的 PM 上传总数（设备会重传，不丢数据）",
 		}),
+		rejectedByReason: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "acs_pm_upload_backpressure_rejected_by_reason_total",
+			Help: "因背压被拒收的 PM 上传总数，按 resource_pressure/inflight_limit 分类",
+		}, []string{"reason"}),
 		diskPct: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "acs_data_disk_usage_percent",
 			Help: "watchdog 观测到的数据盘（MinIO）使用率百分比",
+		}),
+		ioSomePct: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "acs_host_io_pressure_some_avg10_percent",
+			Help: "watchdog 观测到的 /proc/pressure/io some avg10 百分比",
+		}),
+		inflight: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "acs_pm_upload_inflight",
+			Help: "当前已准入且尚未完成的 PM 上传数",
 		}),
 		loadPerCore: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "acs_host_load_per_core",
@@ -165,7 +207,7 @@ func NewBackpressureMetrics(reg prometheus.Registerer) *BackpressureMetrics {
 		}),
 	}
 	if reg != nil {
-		reg.MustRegister(m.active, m.rejected, m.diskPct, m.loadPerCore)
+		reg.MustRegister(m.active, m.rejected, m.rejectedByReason, m.diskPct, m.ioSomePct, m.inflight, m.loadPerCore)
 	}
 	return m
 }
@@ -173,40 +215,89 @@ func NewBackpressureMetrics(reg prometheus.Registerer) *BackpressureMetrics {
 // Watchdog 周期采样磁盘使用率，带迟滞维护背压态，并对 handler 暴露 Allowed()。
 // CPU 负载另行探测并上报 acs_host_load_per_core 指标，但不参与背压决策（#827）。
 type Watchdog struct {
-	lookup    ConfigLookup
-	diskUsage DiskUsageFunc
-	loadFn    func() (float64, error)
-	metrics   *BackpressureMetrics
-	logger    *zap.Logger
+	lookup     ConfigLookup
+	diskUsage  DiskUsageFunc
+	ioPressure func() (float64, error)
+	loadFn     func() (float64, error)
+	metrics    *BackpressureMetrics
+	logger     *zap.Logger
 
-	cfg    atomic.Pointer[BackpressureConfig]
-	active atomic.Bool // true = 背压中（拒收 PM）
+	cfg      atomic.Pointer[BackpressureConfig]
+	active   atomic.Bool // true = 背压中（拒收 PM）
+	inflight atomic.Int64
 }
 
-// NewWatchdog 构造 watchdog。diskUsage 为 nil 时跳过磁盘信号（背压始终不触发）。
+// NewWatchdog 构造 watchdog。diskUsage 为 nil 时跳过磁盘空间信号，Linux IO PSI 和
+// 最大在途数仍继续提供保护。
 func NewWatchdog(lookup ConfigLookup, diskUsage DiskUsageFunc, metrics *BackpressureMetrics, logger *zap.Logger) *Watchdog {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	w := &Watchdog{
-		lookup:    lookup,
-		diskUsage: diskUsage,
-		loadFn:    loadPerCore,
-		metrics:   metrics,
-		logger:    logger,
+		lookup:     lookup,
+		diskUsage:  diskUsage,
+		ioPressure: ioSomeAvg10,
+		loadFn:     loadPerCore,
+		metrics:    metrics,
+		logger:     logger,
 	}
 	cfg := loadBackpressureConfig(context.Background(), lookup)
 	w.cfg.Store(&cfg)
 	return w
 }
 
-// Allowed 实现 BackpressureGate：非背压态才允许接收 PM 上传。
-func (w *Watchdog) Allowed() bool { return !w.active.Load() }
+// Acquire 实现 BackpressureGate：在 watchdog 未背压时用 CAS 获取一个有界在途槽位。
+func (w *Watchdog) Acquire() (bool, string) {
+	if w == nil || w.active.Load() {
+		return false, rejectReasonResourcePressure
+	}
+	limit := w.cfg.Load().MaxInflight
+	for {
+		cur := w.inflight.Load()
+		if cur >= limit {
+			return false, rejectReasonInflightLimit
+		}
+		if w.inflight.CompareAndSwap(cur, cur+1) {
+			if w.metrics != nil {
+				w.metrics.inflight.Set(float64(cur + 1))
+			}
+			// 采样态可能在 CAS 期间切换；撤销该槽位，避免新流量穿透已生效的背压。
+			if w.active.Load() {
+				w.Release()
+				return false, rejectReasonResourcePressure
+			}
+			return true, ""
+		}
+	}
+}
+
+// Release 释放一个成功取得的槽位；重复释放被钳制在 0，避免监控出现负数。
+func (w *Watchdog) Release() {
+	if w == nil {
+		return
+	}
+	for {
+		cur := w.inflight.Load()
+		if cur <= 0 {
+			return
+		}
+		if w.inflight.CompareAndSwap(cur, cur-1) {
+			if w.metrics != nil {
+				w.metrics.inflight.Set(float64(cur - 1))
+			}
+			return
+		}
+	}
+}
 
 // RecordRejected 记录一次背压拒收。
-func (w *Watchdog) RecordRejected() {
+func (w *Watchdog) RecordRejected(reason string) {
 	if w.metrics != nil {
 		w.metrics.rejected.Inc()
+		if reason == "" {
+			reason = rejectReasonResourcePressure
+		}
+		w.metrics.rejectedByReason.WithLabelValues(reason).Inc()
 	}
 }
 
@@ -261,6 +352,17 @@ func (w *Watchdog) sample(ctx context.Context) {
 			}
 		}
 	}
+	ioSomePct := -1.0
+	if w.ioPressure != nil {
+		if p, err := w.ioPressure(); err != nil {
+			w.logger.Warn("io pressure probe failed; skip PSI signal", zap.Error(err))
+		} else {
+			ioSomePct = p
+			if w.metrics != nil {
+				w.metrics.ioSomePct.Set(p)
+			}
+		}
+	}
 
 	// CPU 负载只更新监控指标，不参与背压决策（#827）。
 	if w.loadFn != nil {
@@ -272,18 +374,49 @@ func (w *Watchdog) sample(ctx context.Context) {
 	}
 
 	prev := w.active.Load()
-	next := decideBackpressure(prev, diskPct, cfg)
+	next := decideBackpressure(prev, diskPct, ioSomePct, cfg)
 	if next != prev {
 		w.active.Store(next)
 		if next {
 			w.logger.Warn("PM upload backpressure ENGAGED — rejecting PM uploads (devices will retry)",
-				zap.Float64("disk_pct", diskPct), zap.Float64("disk_high_pct", cfg.DiskHighPct))
+				zap.Float64("disk_pct", diskPct), zap.Float64("io_some_avg10_pct", ioSomePct),
+				zap.Float64("disk_high_pct", cfg.DiskHighPct), zap.Float64("io_some_high_pct", cfg.IOSomeHighPct))
 		} else {
 			w.logger.Info("PM upload backpressure RELEASED — resuming PM uploads",
 				zap.Float64("disk_pct", diskPct))
 		}
 	}
 	w.setActiveGauge(next)
+}
+
+// ioSomeAvg10 读取 Linux PSI 的 IO some avg10。非 Linux 或未启用 PSI 时返回错误，
+// watchdog 对该信号 fail-open，仍保留磁盘空间和在途并发保护。
+func ioSomeAvg10() (float64, error) {
+	data, err := os.ReadFile("/proc/pressure/io")
+	if err != nil {
+		return 0, err
+	}
+	return parseIOSomeAvg10(string(data))
+}
+
+func parseIOSomeAvg10(text string) (float64, error) {
+	for _, line := range strings.Split(text, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || fields[0] != "some" {
+			continue
+		}
+		for _, field := range fields[1:] {
+			if !strings.HasPrefix(field, "avg10=") {
+				continue
+			}
+			value, err := strconv.ParseFloat(strings.TrimPrefix(field, "avg10="), 64)
+			if err != nil {
+				return 0, fmt.Errorf("parse io pressure avg10: %w", err)
+			}
+			return value, nil
+		}
+	}
+	return 0, fmt.Errorf("io pressure some avg10 not found")
 }
 
 func (w *Watchdog) setActiveGauge(active bool) {

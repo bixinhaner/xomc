@@ -263,6 +263,9 @@ CPU_redis=$(cpu_share 0.15 1); CPU_nats=$(cpu_share 0.15 1)
 CPU_minio=$(cpu_share 0.15 1); CPU_web=$(cpu_share 0.1 1)
 fi
 
+# 两种规划模式都在最终 NATS_MEM 确定后统一派生，避免 maximize 分支漏定义。
+NATS_MAX_MEMORY_STORE=$(( NATS_MEM * 1024 * 1024 / 4 ))
+
 # ---- 联动派生 ----
 gomemlimit() { pct "$1" 90; }                          # GOMEMLIMIT = 0.90 × 内存限额（软限）
 APP_GOMEM=$(gomemlimit "$APP_MEM"); ACS_GOMEM=$(gomemlimit "$ACS_MEM"); WORKER_GOMEM=$(gomemlimit "$WORKER_MEM")
@@ -447,7 +450,7 @@ fi
   echo "REDIS_MAXMEMORY=${REDIS_MAXMEM}mb"; echo "REDIS_MAXMEMORY_POLICY=allkeys-lru"
   echo ""
   echo "# ── NATS / MinIO / Web ──"
-  echo "NATS_CPUS=$CPU_nats";     echo "NATS_MEM=${NATS_MEM}m"
+  echo "NATS_CPUS=$CPU_nats";     echo "NATS_MEM=${NATS_MEM}m"; echo "NATS_MAX_MEMORY_STORE=$NATS_MAX_MEMORY_STORE"
   echo "MINIO_CPUS=$CPU_minio";   echo "MINIO_MEM=${MINIO_MEM}m"
   echo "WEB_CPUS=$CPU_web";       echo "WEB_MEM=${WEB_MEM}m"
   echo ""

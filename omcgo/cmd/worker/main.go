@@ -240,6 +240,21 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 		pmConcurrency = 16
 	}
 	pmCollector.SetConcurrency(pmConcurrency)
+	// 服务端 durable consumer 的 MaxAckPending 必须与实际处理能力绑定。默认 1000 会在
+	// 机械盘过载时把大量消息同时推到 worker，形成重投和内存/IO 放大。
+	if setter, ok := w.EventBus.(interface {
+		SetQueueTuning(string, event.QueueTuning)
+	}); ok {
+		maxAckPending := pmConcurrency * 4
+		if maxAckPending < 16 {
+			maxAckPending = 16
+		}
+		setter.SetQueueTuning(event.SubjectPMFileReceived, event.QueueTuning{
+			AckWait:       2 * time.Minute,
+			MaxDeliver:    5,
+			MaxAckPending: maxAckPending,
+		})
+	}
 
 	// PM 指标大批量写异步提交（synchronous_commit=off）：PM 数据可从 MinIO 重建，换写吞吐。
 	// 注意：仅作用于 metrics.batchInsertCopy 等旁路；copy-direct 主路径 CopyIngest 刻意忽略它以保证

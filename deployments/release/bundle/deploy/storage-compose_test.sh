@@ -8,6 +8,9 @@ DEV_COMPOSE="$REPO_ROOT/deployments/docker/docker-compose.yml"
 INSTALL="$RELEASE_DEPLOY/install.sh"
 SVC="$RELEASE_DEPLOY/svc.sh"
 BUILD="$REPO_ROOT/deployments/release/build-release.sh"
+DEV_PLANNER="$REPO_ROOT/deployments/docker/plan-resources.sh"
+NGINX_DEFAULT="$REPO_ROOT/deployments/docker/default.conf"
+NGINX_LOCAL="$REPO_ROOT/deployments/docker/default.local.conf"
 
 PASS=0
 FAIL=0
@@ -43,6 +46,25 @@ contains "开发 TimescaleDB 默认命名卷" '${TSDB_DATA_PATH:-tsdbdata}:/var/
 contains "开发 Redis 默认命名卷" '${REDIS_DATA_PATH:-redisdata}:/data' "$DEV_COMPOSE"
 contains "开发 NATS 默认命名卷" '${NATS_DATA_PATH:-natsdata}:/data' "$DEV_COMPOSE"
 contains "开发 MinIO 默认命名卷" '${MINIO_DATA_PATH:-miniodata}:/data' "$DEV_COMPOSE"
+
+echo "── 过载保护配置 ──"
+contains "release NATS 内存存储上限" 'max_memory_store: ${NATS_MAX_MEMORY_STORE:-134217728}' "$RELEASE_COMPOSE"
+contains "开发 NATS 内存存储上限" 'max_memory_store: ${NATS_MAX_MEMORY_STORE:-134217728}' "$DEV_COMPOSE"
+contains "ACS access log 默认关闭" 'access_log off; # ACS 高频请求由应用指标观测，避免与数据盘竞争 IO' "$NGINX_DEFAULT"
+contains "本地 ACS access log 默认关闭" 'access_log off; # ACS 高频请求由应用指标观测，避免与数据盘竞争 IO' "$NGINX_LOCAL"
+contains "ACS 请求体不落临时文件" 'proxy_request_buffering off;' "$NGINX_DEFAULT"
+contains "本地 ACS 请求体不落临时文件" 'proxy_request_buffering off;' "$NGINX_LOCAL"
+
+echo "── 开发 planner maximize 分支 ──"
+TMP_MAX="$(mktemp)"
+trap 'rm -f "$TMP_MAX"' EXIT
+if OMC_PROBE_CPU=32 OMC_PROBE_MEM_TOTAL_MIB=32768 \
+   bash "$DEV_PLANNER" --maximize --assume-dedicated --disk-gib 900 -o "$TMP_MAX" >/dev/null 2>&1 &&
+   grep -q '^NATS_MAX_MEMORY_STORE=[0-9][0-9]*$' "$TMP_MAX"; then
+  ok
+else
+  bad "开发 planner maximize 模式应输出 NATS_MAX_MEMORY_STORE"
+fi
 
 echo "════ Results: PASS=$PASS FAIL=$FAIL ════"
 [ "$FAIL" -eq 0 ]

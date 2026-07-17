@@ -18,6 +18,7 @@ import (
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -391,7 +392,7 @@ func TestServeHTTP_EmptyBody_WithSession_NoCommands_CompletesSession(t *testing.
 	}
 	store.CreateWithID(context.Background(), sessionID, session)
 	h.admission.Acquire(context.Background(), sessionID)
-	h.metrics.ActiveSessions.Inc()
+	h.trackActiveSession(sessionID)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(""))
@@ -423,7 +424,7 @@ func TestServeHTTP_EmptyBody_WithSession_HasCommand_SendsRPC(t *testing.T) {
 	}
 	store.CreateWithID(context.Background(), sessionID, session)
 	h.admission.Acquire(context.Background(), sessionID)
-	h.metrics.ActiveSessions.Inc()
+	h.trackActiveSession(sessionID)
 
 	// Queue a GetParameterValues command.
 	params, _ := json.Marshal(map[string]interface{}{
@@ -651,7 +652,7 @@ func TestServeHTTP_RPCResponse_CompletesSessionWhenNoMoreCommands(t *testing.T) 
 	}
 	store.CreateWithID(context.Background(), sessionID, session)
 	h.admission.Acquire(context.Background(), sessionID)
-	h.metrics.ActiveSessions.Inc()
+	h.trackActiveSession(sessionID)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHGetParamRespXML))
@@ -689,7 +690,7 @@ func TestServeHTTP_RPCResponse_ChainsNextCommand(t *testing.T) {
 	}
 	store.CreateWithID(context.Background(), sessionID, session)
 	h.admission.Acquire(context.Background(), sessionID)
-	h.metrics.ActiveSessions.Inc()
+	h.trackActiveSession(sessionID)
 	// Queue another task to be dispatched after the RPC response.
 	taskSvc.addTask(&task.Task{
 		ID:         "cmd-reboot",
@@ -775,7 +776,7 @@ func TestCompleteSession_ReleasesResources(t *testing.T) {
 		logger:       zap.NewNop(),
 	}
 
-	h.metrics.ActiveSessions.Inc()
+	h.trackActiveSession("session-complete")
 	h.admission.Acquire(context.Background(), "session-complete")
 
 	session := &Session{
@@ -799,7 +800,7 @@ func TestCompleteSession_ReleasesResources(t *testing.T) {
 
 // issue #65（Option B）契约变更：completeSession(nil) 不再释放准入槽位 —— 没有
 // sessionID 无法配对释放，残留槽位由准入 sorted set 的 TTL 过期分自愈回收。这里验证
-// nil session 仍递减 ActiveSessions 指标，但 admission 槽位保持不变（等 TTL 回收）。
+// nil session 既不能释放 admission，也不能递减无法配对的 ActiveSessions。
 func TestCompleteSession_NilSession_DoesNotReleaseAdmissionSlot(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	metrics := NewACSMetrics(reg)
@@ -817,6 +818,31 @@ func TestCompleteSession_NilSession_DoesNotReleaseAdmissionSlot(t *testing.T) {
 
 	// 槽位不被 nil-session 释放（由 TTL 回收）。
 	assert.Equal(t, int64(1), h.admission.Current(context.Background()))
+	assert.Equal(t, float64(0), testutil.ToFloat64(metrics.ActiveSessions))
+}
+
+func TestCompleteSessionOnlyDecrementsSessionsTrackedByThisProcess(t *testing.T) {
+	metrics := NewACSMetrics(prometheus.NewRegistry())
+	h := &Handler{
+		sessionStore: newAcsHSessionStore(),
+		admission:    NewAdmissionController(100),
+		metrics:      metrics,
+		logger:       zap.NewNop(),
+	}
+
+	h.trackActiveSession("local-session")
+	assert.Equal(t, float64(1), testutil.ToFloat64(metrics.ActiveSessions))
+
+	// 进程重启前遗留的共享会话不在本地集合中，不得把新进程 gauge 减成负数。
+	h.completeSession(context.Background(), &Session{ID: "old-process-session", StartedAt: time.Now()})
+	assert.Equal(t, float64(1), testutil.ToFloat64(metrics.ActiveSessions))
+
+	h.completeSession(context.Background(), &Session{ID: "local-session", StartedAt: time.Now()})
+	assert.Equal(t, float64(0), testutil.ToFloat64(metrics.ActiveSessions))
+
+	// 重复完成也只能递减一次。
+	h.completeSession(context.Background(), &Session{ID: "local-session", StartedAt: time.Now()})
+	assert.Equal(t, float64(0), testutil.ToFloat64(metrics.ActiveSessions))
 }
 
 // ---------------------------------------------------------------------------
