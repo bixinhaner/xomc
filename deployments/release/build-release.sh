@@ -85,6 +85,10 @@ fi
 # 经典 builder 不识别该语法会报 "the --mount option requires BuildKit"。
 # 这里强制开 BuildKit，老 docker (>=18.09) 都支持。
 export DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}"
+# macOS bsdtar/copyfile may otherwise materialize extended attributes as
+# AppleDouble files (._name). The runtime XML loader treats those as real
+# configuration files and fails on their binary header.
+export COPYFILE_DISABLE=1
 [ -n "${PROJECT_IMAGE_PREFIX:-}" ] || die "release.conf 未配置 PROJECT_IMAGE_PREFIX"
 if [ -z "${BUSINESS_IMAGES+x}" ] || [ "${#BUSINESS_IMAGES[@]}" -eq 0 ]; then
   die "release.conf 未配置 BUSINESS_IMAGES"
@@ -287,6 +291,8 @@ sha256sum -c checksums.sha256
 PostgreSQL / MinIO / JWT / Grafana 默认口令必须在部署时修改（deploy/.env）。
 \`OMC_PUBLIC_HOST\` 必须在部署时填本机对外 IP（基站可达），否则基站无法回传 PM 文件（deploy/.env）。
 EOF
+  # 防止上游复制阶段已经带入 AppleDouble 文件；只清理本次临时 staging。
+  find "$STAGE" -type f -name '._*' -delete
   ( cd "$STAGE" && find . -type f ! -name checksums.sha256 -print0 \
       | sort -z | xargs -0 sha256sum > checksums.sha256 )
 

@@ -31,3 +31,11 @@ else
   echo "FAIL: docker build does not pass the requested --platform" >&2
   exit 1
 fi
+
+if grep -Fq 'export COPYFILE_DISABLE=1' "$BUILD_SCRIPT" &&
+   grep -Fq "find \"\$STAGE\" -type f -name '._*' -delete" "$BUILD_SCRIPT"; then
+  echo "PASS: release package excludes macOS AppleDouble metadata"
+else
+  echo "FAIL: release package may contain macOS AppleDouble metadata" >&2
+  exit 1
+fi
