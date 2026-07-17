@@ -83,7 +83,7 @@ services:
           cpus: "0.5"
           memory: 512m
     volumes:
-      - pgdata:/var/lib/postgresql/data    # 生产建议改为数据盘 bind mount，如 /data/omc/pg
+      - ${POSTGRES_DATA_PATH:-pgdata}:/var/lib/postgresql/data
       - /etc/localtime:/etc/localtime:ro
     networks:
       - omcgo-net
@@ -142,7 +142,7 @@ services:
           cpus: "0.5"
           memory: 512m
     volumes:
-      - tsdbdata:/var/lib/postgresql/data   # 生产建议改为数据盘 bind mount，如 /data/omc/tsdb
+      - ${TSDB_DATA_PATH:-tsdbdata}:/var/lib/postgresql/data
       - /etc/localtime:/etc/localtime:ro
     networks:
       - omcgo-net
@@ -180,7 +180,7 @@ services:
           cpus: "0.25"
           memory: 256m
     volumes:
-      - redisdata:/data
+      - ${REDIS_DATA_PATH:-redisdata}:/data
       - /etc/localtime:/etc/localtime:ro
     networks:
       - omcgo-net
@@ -223,7 +223,7 @@ services:
           cpus: "0.25"
           memory: 256m
     volumes:
-      - natsdata:/data
+      - ${NATS_DATA_PATH:-natsdata}:/data
       - /etc/localtime:/etc/localtime:ro
     networks:
       - omcgo-net
@@ -268,7 +268,7 @@ services:
           cpus: "0.25"
           memory: 512m
     volumes:
-      - miniodata:/data
+      - ${MINIO_DATA_PATH:-miniodata}:/data
       - /etc/localtime:/etc/localtime:ro
     networks:
       - omcgo-net

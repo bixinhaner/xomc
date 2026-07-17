@@ -379,11 +379,17 @@ SERVICE = ${OMCGO_SERVICE:-app}    # 由 Dockerfile ENV 预设
 
 ## 9. 数据持久化
 
+五个有状态服务均支持通过环境变量切换宿主机 bind mount：
+`POSTGRES_DATA_PATH`、`TSDB_DATA_PATH`、`REDIS_DATA_PATH`、`NATS_DATA_PATH`、
+`MINIO_DATA_PATH`。变量留空时仍使用下表命名卷，已有开发数据不会因升级被旁路；填写时
+必须使用绝对路径。切换已有数据前先停栈并完整复制，不能只修改变量后直接启动。
+
 ### 9.1 Docker 命名卷（自动管理）
 
 | 卷名         | 挂载路径                         | 存储内容              |
 |-------------|----------------------------------|----------------------|
 | `pgdata`    | postgres:/var/lib/postgresql/data | PostgreSQL 数据文件   |
+| `tsdbdata`  | postgres-tsdb:/var/lib/postgresql/data | TimescaleDB 时序数据 |
 | `redisdata` | redis:/data                      | Redis AOF 持久化文件  |
 | `natsdata`  | nats:/data                       | NATS JetStream 消息  |
 | `miniodata` | minio:/data                      | MinIO 对象文件        |
