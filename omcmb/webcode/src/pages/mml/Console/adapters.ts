@@ -266,6 +266,7 @@ export function buildRawExecutePayload(
   deviceSns: string[],
   taskName?: string,
   execMode: ExecMode = 'whole',
+  commandName?: string,
 ): Record<string, unknown> {
   const valid = rows.filter((r) => r.path.trim() !== '');
   const paths = valid.map((r) => r.path.trim());
@@ -285,6 +286,7 @@ export function buildRawExecutePayload(
     // 逐 PATH：后端把每 path 拆成一条 command（每 path 一个 RPC），path 级成败独立。
     execute_mode: execMode === 'single-path' ? 'single_path' : 'whole',
     task_name: name,
+    ...(commandName?.trim() ? { command_name: commandName.trim() } : {}),
   };
 }
 
@@ -469,6 +471,7 @@ export function mapResultItemToRow(
     planOrder: item.planOrder,
     planRawLine: item.planRawLine,
     commandCode: item.commandCode,
+    commandName: item.commandName,
     deviceSn: item.deviceSn,
     deviceTaskId: item.deviceTaskId ?? '',
     status,
@@ -479,6 +482,11 @@ export function mapResultItemToRow(
     raw: item.result.rawOutput ?? '',
     elapsedMs: item.result.executionTime ?? 0,
   };
+}
+
+/** 普通 MML 子任务没有脚本计划行，不应显示永远为空的 Plan Row 列。 */
+export function hasPlanRows(rows: Pick<ResultRow, 'planLineNo'>[]): boolean {
+  return rows.some((row) => typeof row.planLineNo === 'number');
 }
 
 /**

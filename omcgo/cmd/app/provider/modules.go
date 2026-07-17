@@ -22,6 +22,7 @@ import (
 	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/core/components"
 	minioinfra "github.com/omcgo/omcgo/internal/core/components/minio"
+	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/ratelimit"
@@ -1565,13 +1566,30 @@ func initMiscModules(c *Container) error {
 	mmlService.SetCmdParamRepo(mmlCmdParamRepo)
 	// issue #115 调整3（A1）：自定义命令 PATH 关联表仓库。
 	mmlService.SetCustomCommandPathRepo(mml.NewPgCustomCommandPathRepository(c.PgPool))
-	// CSV 导出「参数名称」列：standardPath → standard_params.description（友好名）。
+	// CSV 导出「参数名称」列：优先使用命令 sub-field 的请求语言标签；
+	// 中文缺失时回退 standard_params.description，英文缺失时回退 standardPath，避免中文泄漏到英文导出。
 	mmlService.SetPathNameResolver(func(ctx context.Context, paths []string) (map[string]string, error) {
 		if len(paths) == 0 {
 			return nil, nil
 		}
+		locale := string(appcontext.GetLocale(ctx))
 		rows, err := c.PgPool.Query(ctx,
-			`SELECT standard_path, COALESCE(description, '') FROM standard_params WHERE standard_path = ANY($1)`, paths)
+			`SELECT sp.standard_path,
+				COALESCE(
+					NULLIF((SELECT csf.label_i18n->>$1
+						FROM mml_command_sub_fields csf
+						WHERE csf.standard_path_id = sp.id
+						ORDER BY csf.sort_order, csf.id
+						LIMIT 1), ''),
+					NULLIF((SELECT csf.label_i18n->>'en-US'
+						FROM mml_command_sub_fields csf
+						WHERE csf.standard_path_id = sp.id
+						ORDER BY csf.sort_order, csf.id
+						LIMIT 1), ''),
+					CASE WHEN $1 = 'zh-CN' THEN COALESCE(sp.description, '') ELSE '' END
+				) AS display_name
+			 FROM standard_params sp
+			 WHERE sp.standard_path = ANY($2)`, locale, paths)
 		if err != nil {
 			return nil, fmt.Errorf("query standard_params descriptions: %w", err)
 		}
@@ -1580,7 +1598,7 @@ func initMiscModules(c *Container) error {
 		for rows.Next() {
 			var p, d string
 			if err := rows.Scan(&p, &d); err != nil {
-				return nil, fmt.Errorf("scan standard_params description: %w", err)
+				return nil, fmt.Errorf("scan standard parameter display name: %w", err)
 			}
 			if d != "" {
 				m[p] = d

@@ -607,6 +607,7 @@ function mapBackendResult(br: Record<string, unknown>): DeviceTaskResultItem {
     planOrder: typeof br.plan_order === 'number' ? (br.plan_order as number) : undefined,
     planRawLine: (br.plan_raw_line as string) || undefined,
     commandCode: (br.command_code as string) || undefined,
+    commandName: (br.command_name as string) || undefined,
     operationType: (br.operation_type as string) || undefined,
     deviceName: (br.device_name as string) || undefined,
     mmlScript: (br.mml_script as string) || (br.command as string) || undefined,

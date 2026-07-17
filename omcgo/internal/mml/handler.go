@@ -154,6 +154,7 @@ func (h *Handler) CreateScriptExecution(c *gin.Context) {
 // 否则 commands[] 形式的请求会被误拒。
 type ExecuteHTTPRequest struct {
 	CommandCode string                 `json:"command_code"`
+	CommandName string                 `json:"command_name"`
 	DeviceSNs   []string               `json:"device_sns"`
 	Parameters  map[string]interface{} `json:"parameters"`
 	TaskName    string                 `json:"task_name"`
@@ -191,6 +192,7 @@ type ExecuteHTTPRequest struct {
 // 仅 binding 规则不同；CreateTask handler 通过显式类型转换复用 runExecute。
 type CreateTaskHTTPRequest struct {
 	CommandCode string                 `json:"command_code"`
+	CommandName string                 `json:"command_name"`
 	DeviceSNs   []string               `json:"device_sns"`
 	Parameters  map[string]interface{} `json:"parameters"`
 	TaskName    string                 `json:"task_name"`
@@ -394,6 +396,7 @@ func (h *Handler) runExecute(c *gin.Context, req ExecuteHTTPRequest) {
 
 	execReq := ExecuteRequest{
 		CommandCode:         req.CommandCode,
+		CommandName:         req.CommandName,
 		DeviceSNs:           req.DeviceSNs,
 		Parameters:          req.Parameters,
 		TaskName:            req.TaskName,
