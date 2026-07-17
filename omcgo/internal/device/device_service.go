@@ -988,11 +988,16 @@ func (s *DeviceService) clearDisconnectedAlarmOnOnline(ctx context.Context, devi
 	}
 	alarm, err := s.disconnectAlarms.GetActiveByDeviceAndIdentifier(ctx, device.SerialNumber, identifier)
 	if err != nil {
-		s.logger.Warn("lookup disconnected alarm on device online failed",
-			zap.Error(err),
-			zap.String("device_id", device.ID.String()),
-			zap.String("serial_number", device.SerialNumber),
-			zap.String("alarm_identifier", identifier))
+		// 设备上线时没有活跃断连告警是最常见的正常情况（没触发过断连/已清除），
+		// 不是错误——只对真正的查询失败（DB错误等）打WARN，避免每次设备上线都
+		// 产生一条噪音日志（压测/大规模上线场景下会淹没真正的告警日志）。
+		if !errors.Is(err, commonerrors.ErrNotFound) {
+			s.logger.Warn("lookup disconnected alarm on device online failed",
+				zap.Error(err),
+				zap.String("device_id", device.ID.String()),
+				zap.String("serial_number", device.SerialNumber),
+				zap.String("alarm_identifier", identifier))
+		}
 		return
 	}
 	if alarm == nil {
