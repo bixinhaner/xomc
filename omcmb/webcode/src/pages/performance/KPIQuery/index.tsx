@@ -123,6 +123,12 @@ const DEFAULT_PAYLOAD: QueryTemplatePayload = {
 
 const DEFAULT_PIVOT_PAGE_SIZE = 50;
 
+const createDefaultTemplatePayload = (): QueryTemplatePayload => ({
+  ...DEFAULT_PAYLOAD,
+  deviceSns: [...DEFAULT_PAYLOAD.deviceSns],
+  metricPaths: [...DEFAULT_PAYLOAD.metricPaths],
+});
+
 interface SaveTemplateFormState {
   open: boolean;
   mode: 'create' | 'update';
@@ -133,6 +139,16 @@ interface SaveTemplateFormState {
   payload: QueryTemplatePayload;
   customRange: [dayjs.Dayjs, dayjs.Dayjs] | null;
 }
+
+const createBlankSaveTemplateForm = (open: boolean): SaveTemplateFormState => ({
+  open,
+  mode: 'create',
+  name: '',
+  description: '',
+  visibility: 'private',
+  payload: createDefaultTemplatePayload(),
+  customRange: null,
+});
 
 export default function KPIQuery() {
   const token = useThemeToken();
@@ -196,15 +212,7 @@ export default function KPIQuery() {
   );
 
   // ── 存为模板 Modal ───────────────────────────────────────────────
-  const [saveForm, setSaveForm] = useState<SaveTemplateFormState>({
-    open: false,
-    mode: 'create',
-    name: '',
-    description: '',
-    visibility: 'private',
-    payload: DEFAULT_PAYLOAD,
-    customRange: null,
-  });
+  const [saveForm, setSaveForm] = useState<SaveTemplateFormState>(() => createBlankSaveTemplateForm(false));
 
   // ── 查询执行状态 ─────────────────────────────────────────────────
   // submittedPayload 是真正用于查询的快照；表单编辑时不立即查询，等用户点"查询"
@@ -382,8 +390,12 @@ export default function KPIQuery() {
     }
   };
 
-  const handleOpenSaveModal = () => {
-    // 从主表单复制当前条件作为初值（即"存为模板"工作流）；从侧栏 + 新建也走这里，复用主表单 default
+  const handleOpenCreateModal = () => {
+    setSaveForm(createBlankSaveTemplateForm(true));
+  };
+
+  const handleOpenSaveAsModal = () => {
+    // 从主表单复制当前条件作为初值（即"存为模板"工作流）。
     setSaveForm({
       open: true,
       mode: 'create',
@@ -558,6 +570,7 @@ export default function KPIQuery() {
                     type="text"
                     size="small"
                     icon={<EditOutlined />}
+                    aria-label={t('common.edit')}
                     onClick={(e) => {
                       e.stopPropagation();
                       void handleOpenUpdateModal(tpl);
@@ -621,7 +634,8 @@ export default function KPIQuery() {
                 type="text"
                 size="small"
                 icon={<PlusOutlined />}
-                onClick={handleOpenSaveModal}
+                aria-label={t('perf.kpiQuery.newTemplate')}
+                onClick={handleOpenCreateModal}
               />
             </Tooltip>
             <Tooltip title={t('perf.kpiQuery.refreshList')}>
@@ -881,7 +895,7 @@ export default function KPIQuery() {
                 <Button type="primary" icon={<TableOutlined />} loading={aggFetching} onClick={handleQuery}>
                   {t('common.query')}
                 </Button>
-                <Button icon={<SaveOutlined />} onClick={handleOpenSaveModal}>
+                <Button icon={<SaveOutlined />} onClick={handleOpenSaveAsModal}>
                   {t('perf.kpiQuery.saveAsTemplate')}
                 </Button>
                 <Button
