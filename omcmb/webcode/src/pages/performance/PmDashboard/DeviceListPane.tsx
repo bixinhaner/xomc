@@ -596,6 +596,7 @@ export default function DeviceListPane() {
         }}
         initialSelected={deviceSns}
         technology={tech}
+        maxSelected={MAX_DEVICES}
       />
 
       <MetricPickerModal
