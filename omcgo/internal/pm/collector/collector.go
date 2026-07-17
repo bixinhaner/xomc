@@ -61,6 +61,13 @@ type DeviceLookup interface {
 	GetBySerialNumber(ctx context.Context, sn string) (*model.Device, error)
 }
 
+// FileMarkerLookup checks whether a PM file already completed ingestion.
+// It deliberately exposes only the indexed file-level idempotency query needed
+// by the collector, rather than coupling the hot path to the full PMFileStore.
+type FileMarkerLookup interface {
+	IsFileParsed(ctx context.Context, deviceSN, fileName string) (bool, error)
+}
+
 // CounterMeta 是 CounterWhitelist 命中后回填给 PMCounter 的元数据（PM-P2）。
 //   - IndicatorID：指标编号（perf_indicators_*.id，如 C000060216），落库即编号化的目标。
 //   - StatisType：'sum' / 'avg' / 'max' / 'pct'，或空串（indicator 元数据未填），驱动 G5 自然桶聚合。
@@ -122,6 +129,7 @@ type PMCollector struct {
 	metrics             *pm.PMMetrics
 	runner              runner.Wrapper
 	deviceLookup        DeviceLookup
+	fileMarkerLookup    FileMarkerLookup
 	counterWhitelist    CounterWhitelist
 	numberProcessLookup NumberProcessLookup
 	copyIngestor        CopyIngestor
@@ -165,6 +173,13 @@ func (c *PMCollector) SetRunner(w runner.Wrapper) {
 // thin-payload events fail the existing uuid.Parse(DeviceID) check.
 func (c *PMCollector) SetDeviceLookup(lookup DeviceLookup) {
 	c.deviceLookup = lookup
+}
+
+// SetFileMarkerLookup wires the file-level idempotency lookup. When a completed
+// marker already exists, the collector ACKs a redelivered event before touching
+// the original MinIO path, which may have been renamed by the raw archiver.
+func (c *PMCollector) SetFileMarkerLookup(lookup FileMarkerLookup) {
+	c.fileMarkerLookup = lookup
 }
 
 // SetCounterWhitelist wires the indicator-library-driven counter whitelist
@@ -272,6 +287,26 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 
 	if err := c.resolveDevice(ctx, &payload); err != nil {
 		return err
+	}
+
+	if c.fileMarkerLookup != nil {
+		fileName := path.Base(payload.MinIOPath)
+		parsed, err := c.fileMarkerLookup.IsFileParsed(ctx, payload.DeviceSN, fileName)
+		if err != nil {
+			return fmt.Errorf("lookup parsed pm file marker: %w", err)
+		}
+		if parsed {
+			span.SetAttributes(attribute.Bool("pm.duplicate", true))
+			if c.metrics != nil {
+				c.metrics.FilesProcessedTotal.WithLabelValues("duplicate").Inc()
+				c.metrics.ProcessingDurationSecs.Observe(time.Since(startTime).Seconds())
+			}
+			c.logger.Info("skipping already ingested PM file",
+				zap.String("device_sn", payload.DeviceSN),
+				zap.String("file_name", fileName),
+			)
+			return nil
+		}
 	}
 
 	deviceID, err := uuid.Parse(payload.DeviceID)

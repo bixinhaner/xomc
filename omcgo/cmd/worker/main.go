@@ -199,6 +199,9 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// T-0164 G1 真机闭环：acs.upload.Handler 发的瘦 payload 只带 device_sn，
 	// 由 collector 用同一个 deviceRepo 反查补齐 UUID / OUI / carrier / technology。
 	pmCollector.SetDeviceLookup(pmDeviceRepo)
+	// 已完成入库的同名文件重投时，在读取 MinIO 前按文件 marker 幂等短路。
+	// 原始 .xml 可能已被归档器改名为 .xml.gz，不能依赖旧对象仍然存在。
+	pmCollector.SetFileMarkerLookup(pmFileStore)
 
 	// T-0164 G1 BUG-6 真根因复盘 / 方案 D：collector 用指标库白名单过滤孤儿 counter。
 	// 复用 pmKPIRouter 的 LookupByDevice：route.Counters[].ReportKey 即设备所属产品在
