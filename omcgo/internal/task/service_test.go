@@ -237,6 +237,10 @@ func (ts *testableTaskService) CreateTask(ctx context.Context, req *CreateTaskRe
 	if err := ts.repo.Create(ctx, task); err != nil {
 		return nil, fmt.Errorf("persist task: %w", err)
 	}
+	if req.FailImmediately {
+		ts.svc.notifyCompletion(ctx, task)
+		return task, nil
+	}
 	if err := ts.queue.Push(ctx, task); err != nil {
 		ts.repo.Delete(ctx, task.ID)
 		return nil, fmt.Errorf("enqueue task: %w", err)
@@ -390,6 +394,10 @@ func (ts *testableTaskService) BatchCreateTasks(ctx context.Context, reqs []*Cre
 	}
 	var pushed []*Task
 	for _, task := range tasks {
+		if task.Status == TaskStatusFailed {
+			ts.svc.notifyCompletion(ctx, task)
+			continue
+		}
 		if err := ts.queue.Push(ctx, task); err != nil {
 			continue
 		}
@@ -401,6 +409,14 @@ func (ts *testableTaskService) BatchCreateTasks(ctx context.Context, reqs []*Cre
 func (ts *testableTaskService) PurgeOldTasks(ctx context.Context, retentionDays int) (int64, error) {
 	before := time.Now().AddDate(0, 0, -retentionDays).Format(time.RFC3339)
 	return ts.repo.PurgeOldTasks(ctx, before)
+}
+
+type captureCompletionCallback struct {
+	tasks []*Task
+}
+
+func (c *captureCompletionCallback) OnTaskCompleted(_ context.Context, task *Task) {
+	c.tasks = append(c.tasks, task)
 }
 
 // --- Tests ---
@@ -936,6 +952,105 @@ func Test_BatchCreateTasks_Success(t *testing.T) {
 	assert.True(t, batchCreated)
 	assert.Len(t, tasks, 3)
 	assert.Equal(t, 3, pushCount)
+}
+
+func Test_BatchCreateTasks_FailImmediatelyPersistsTerminalTaskWithoutQueuePush(t *testing.T) {
+	ts := newTestableService()
+	var persisted []*Task
+	ts.repo.batchCreateFn = func(ctx context.Context, tasks []*Task) error {
+		persisted = append(persisted, tasks...)
+		return nil
+	}
+
+	pushCount := 0
+	ts.queue.pushFn = func(ctx context.Context, task *Task) error {
+		pushCount++
+		return nil
+	}
+
+	callback := &captureCompletionCallback{}
+	ts.svc.AddCompletionCallback(callback)
+
+	ctx := context.Background()
+	reqs := []*CreateTaskRequest{
+		{
+			DeviceSN:        "SN-OFF",
+			Method:          "Reboot",
+			FailImmediately: true,
+			FailReason:      "device offline",
+			SourceID:        "mml-task-1",
+			Source:          TaskSourceMML,
+		},
+	}
+
+	tasks, err := ts.BatchCreateTasks(ctx, reqs)
+	require.NoError(t, err)
+	require.Len(t, persisted, 1)
+	require.Len(t, tasks, 0, "immediate failures are persisted and completed, but not pushed to Redis")
+	assert.Equal(t, TaskStatusFailed, persisted[0].Status)
+	assert.Equal(t, "device offline", persisted[0].ErrorMessage)
+	assert.NotNil(t, persisted[0].CompletedAt)
+	assert.Equal(t, 0, pushCount)
+	require.Len(t, callback.tasks, 1)
+	assert.Equal(t, TaskStatusFailed, callback.tasks[0].Status)
+}
+
+func Test_BatchCreateTasks_MixedImmediateFailurePushesOnlyRunnableTasks(t *testing.T) {
+	ts := newTestableService()
+	var persisted []*Task
+	ts.repo.batchCreateFn = func(ctx context.Context, tasks []*Task) error {
+		persisted = append(persisted, tasks...)
+		return nil
+	}
+
+	var pushed []*Task
+	ts.queue.pushFn = func(ctx context.Context, task *Task) error {
+		pushed = append(pushed, task)
+		return nil
+	}
+
+	callback := &captureCompletionCallback{}
+	ts.svc.AddCompletionCallback(callback)
+
+	ctx := context.Background()
+	reqs := []*CreateTaskRequest{
+		{
+			DeviceSN: "SN-ON",
+			Method:   "Reboot",
+			SourceID: "mml-task-1",
+			Source:   TaskSourceMML,
+		},
+		{
+			DeviceSN:        "SN-OFF",
+			Method:          "Reboot",
+			FailImmediately: true,
+			FailReason:      "device offline",
+			SourceID:        "mml-task-1",
+			Source:          TaskSourceMML,
+		},
+	}
+
+	tasks, err := ts.BatchCreateTasks(ctx, reqs)
+	require.NoError(t, err)
+	require.Len(t, persisted, 2)
+	require.Len(t, tasks, 1, "only runnable tasks should be returned to fanout as queued work")
+	require.Len(t, pushed, 1, "online task should still be queued")
+	assert.Equal(t, "SN-ON", pushed[0].DeviceSN)
+	assert.Equal(t, TaskStatusPending, pushed[0].Status)
+
+	var offline *Task
+	for _, persistedTask := range persisted {
+		if persistedTask.DeviceSN == "SN-OFF" {
+			offline = persistedTask
+			break
+		}
+	}
+	require.NotNil(t, offline)
+	assert.Equal(t, TaskStatusFailed, offline.Status)
+	assert.Equal(t, "device offline", offline.ErrorMessage)
+	require.Len(t, callback.tasks, 1)
+	assert.Equal(t, "SN-OFF", callback.tasks[0].DeviceSN)
+	assert.Equal(t, TaskStatusFailed, callback.tasks[0].Status)
 }
 
 func Test_BatchCreateTasks_RepoFailure(t *testing.T) {

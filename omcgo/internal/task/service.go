@@ -230,7 +230,7 @@ func (s *TaskService) CreateTask(ctx context.Context, req *CreateTaskRequest) (*
 
 	// issue #7: 每设备 pending 队列深度背压 —— 防止面向不可达 / 不可信设备的任务
 	// 无界堆积耗尽 Redis/PG。命中上限直接拒绝（不落库、不入队），调用方按 429 处理。
-	if s.maxQueueDepth > 0 {
+	if !req.FailImmediately && s.maxQueueDepth > 0 {
 		depth, err := s.queue.Len(ctx, req.DeviceSN)
 		if err != nil {
 			return nil, fmt.Errorf("check queue depth: %w", err)
@@ -256,6 +256,11 @@ func (s *TaskService) CreateTask(ctx context.Context, req *CreateTaskRequest) (*
 		// T-0157 C6: 入队失败兜底 → 写一条 status=failed 的消息（避免用户感知"点了没反应"）
 		s.notifyCreateFailure(ctx, task, err)
 		return nil, fmt.Errorf("persist task: %w", err)
+	}
+	if req.FailImmediately {
+		s.recordCompletion(task, TaskStatusFailed)
+		s.notifyCompletion(ctx, task)
+		return task, nil
 	}
 
 	// 2. 推送到 Redis 队列
@@ -1054,6 +1059,11 @@ func (s *TaskService) BatchCreateTasks(ctx context.Context, reqs []*CreateTaskRe
 	wakeDevices := make(map[string]struct{})
 	var pushed []*Task
 	for _, task := range tasks {
+		if task.Status == TaskStatusFailed {
+			s.recordCompletion(task, TaskStatusFailed)
+			s.notifyCompletion(ctx, task)
+			continue
+		}
 		if err := s.queue.Push(ctx, task); err != nil {
 			logger.L(ctx).Error("enqueue task", zap.Error(err), zap.String("task_id", task.ID))
 			continue

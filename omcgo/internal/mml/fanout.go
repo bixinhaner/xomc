@@ -325,6 +325,8 @@ func (f *Fanouter) buildDeviceTaskRequest(
 		Description:          description,
 		MaxRetries:           failedRetryMaxRetries(mmlTask),
 		RetryIntervalSeconds: failedRetryIntervalSeconds(mmlTask),
+		FailImmediately:      f.shouldFailOfflineImmediately(ctx, mmlTask, sn),
+		FailReason:           "device offline",
 
 		SourceID:     parentID,
 		CommandIndex: cmdIdx,
@@ -335,6 +337,23 @@ func (f *Fanouter) buildDeviceTaskRequest(
 		// T-0168: per-device 翻译来源继承 task 维度（D2 决策：R-8.4 保证一致）。
 		PathTranslationSource: mmlTask.PathTranslationSource,
 	}
+}
+
+func (f *Fanouter) shouldFailOfflineImmediately(ctx context.Context, mmlTask *MMLTask, sn string) bool {
+	if f == nil || f.deviceLookup == nil || mmlTask == nil || mmlTask.OfflineRetry {
+		return false
+	}
+	dev, err := f.deviceLookup.GetBySerialNumber(ctx, sn)
+	if err != nil || dev == nil {
+		if err != nil {
+			f.logger.Debug("skip immediate offline fail: device lookup failed",
+				zap.String("device_sn", sn),
+				zap.Error(err),
+			)
+		}
+		return false
+	}
+	return !dev.IsOnline
 }
 
 func firstDeviceBoundRequests(mmlTask *MMLTask, reqs []*task.CreateTaskRequest) []*task.CreateTaskRequest {
