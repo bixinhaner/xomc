@@ -1,13 +1,13 @@
 ---
 name: ship
-description: OMC 一键交付流程，从想法或 GitLab Issue 推进到 feature 分支 MR。用户显式调用 $ship、要求交付 OMC Issue、执行 issue-to-MR 流水线、查看 status/audit、处理 ready-for-agent Issue，或要求从实现推进到构建、验证、审查、提交、推送、开 MR 时使用；默认不合并 MR，不直接推送 main；仅当用户在当前回合明确指定合并某个 MR 时允许合并。
+description: OMC 一键交付流程，从想法或 GitLab Issue 推进到 feature 分支 MR。用户显式调用 $ship、要求交付 OMC Issue、执行 issue-to-MR 流水线、查看 status/audit、处理 ready-for-agent Issue，或要求从实现推进到构建、验证、审查、提交、推送、开 MR 时使用；默认不合并 MR，不直接推送 main；仅当用户在当前回合明确指定合并某个 MR 时调用 $merge-mr 合并并删除源分支。
 ---
 
 # Ship
 
 驱动 OMC 从需求或 GitLab Issue 到可审查 MR 的开发流程。本 skill 只做编排：把设计、实现、审查、交接委派给对应 skill 或工具，并在阶段之间执行硬门检查。
 
-永远不要直接在 `main` 或 `master` 上提交或推送。进入实现阶段后，必须在 feature 分支工作，并默认以 GitLab MR 作为交付终点。不要 force-push 共享分支。仅当用户在当前回合明确指定合并某个 MR 时，允许通过 `glab mr merge` 合并该指定 MR；合并前必须确认 MR 仍 open、目标分支正确、工作区状态已知，并向用户报告检查结果。
+永远不要直接在 `main` 或 `master` 上提交或推送。进入实现阶段后，必须在 feature 分支工作，并默认以 GitLab MR 作为交付终点。不要 force-push 共享分支。仅当用户在当前回合明确指定合并某个 MR 时，调用 `$merge-mr` 合并该指定 MR；合并时必须删除源分支，合并前必须确认 MR 仍 open、目标分支正确、工作区状态已知，并向用户报告检查结果。
 
 ## 调用参数
 
@@ -110,7 +110,7 @@ CRITICAL 示例：运营商硬编码如 `if carrier == "cmcc"`、字符串拼接
 - 当前分支不是 `main` 或 `master`。
 - `git push -u origin <feature-branch>` 成功。
 - `glab mr create` 返回 MR URL。
-- 默认不合并 MR；review 和 merge 不属于常规交付硬门。仅当用户在当前回合明确指定合并某个 MR 时，允许执行 `glab mr merge <MR>`；不得直接推送 `main`/`master`。
+- 默认不合并 MR；review 和 merge 不属于常规交付硬门。仅当用户在当前回合明确指定合并某个 MR 时，调用 `$merge-mr` 并启用删除源分支；不得直接推送 `main`/`master`。
 
 如果工作无法完成，使用 `$handoff` 保存现场和下一步。
 

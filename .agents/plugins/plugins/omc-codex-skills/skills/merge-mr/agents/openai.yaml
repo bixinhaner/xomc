@@ -1,0 +1,4 @@
+interface:
+  display_name: "合并并清理 MR 源分支"
+  short_description: "安全合并指定 MR 并删除其源分支"
+  default_prompt: "使用 $merge-mr 合并指定 MR，并删除源分支。"
