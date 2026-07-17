@@ -85,7 +85,7 @@ type TaskService struct {
 	eventBus     event.EventBus
 	logger       *zap.Logger
 
-	// defaultExpiresIn: T-0157 C1 — CreateTask 兜底默认超时秒数。
+	// defaultExpiresIn: T-0157 C1 — device task 创建兜底默认超时秒数。
 	// 调用方语义见 appconfig.TaskConfig.DefaultExpiresInSeconds。0 表示未配置（不兜底）。
 	defaultExpiresIn int
 
@@ -209,7 +209,7 @@ func (s *TaskService) SetMaxQueueDepth(n int) {
 	s.maxQueueDepth = n
 }
 
-// SetDefaultExpiresIn 配置 CreateTask 的默认超时兜底秒数（T-0157 C1）。
+// SetDefaultExpiresIn 配置 device task 创建的默认超时兜底秒数（T-0157 C1）。
 // 仅当 CreateTaskRequest.ExpiresIn == 0 时生效；调用方显式传 0 等价于声明"永不超时"
 // 但本兜底仍会覆盖（如需真正永不超时，调用方需显式传一个极大值如 86400）。
 // 负值或 0 表示不启用兜底，等价于历史行为。
@@ -218,6 +218,12 @@ func (s *TaskService) SetDefaultExpiresIn(seconds int) {
 		seconds = 0
 	}
 	s.defaultExpiresIn = seconds
+}
+
+func (s *TaskService) applyDefaultExpiresIn(req *CreateTaskRequest) {
+	if req != nil && req.ExpiresIn == 0 && s.defaultExpiresIn > 0 {
+		req.ExpiresIn = s.defaultExpiresIn
+	}
 }
 
 // CreateTask 创建新任务
@@ -245,9 +251,7 @@ func (s *TaskService) CreateTask(ctx context.Context, req *CreateTaskRequest) (*
 	}
 
 	// T-0157 C1: 兜底默认超时（调用方未传 → 用配置默认；保留显式覆盖能力）
-	if req.ExpiresIn == 0 && s.defaultExpiresIn > 0 {
-		req.ExpiresIn = s.defaultExpiresIn
-	}
+	s.applyDefaultExpiresIn(req)
 
 	task := NewTask(req)
 
@@ -1046,6 +1050,7 @@ func (s *TaskService) RetryTask(ctx context.Context, task *Task) error {
 func (s *TaskService) BatchCreateTasks(ctx context.Context, reqs []*CreateTaskRequest) ([]*Task, error) {
 	var tasks []*Task
 	for _, req := range reqs {
+		s.applyDefaultExpiresIn(req)
 		task := NewTask(req)
 		tasks = append(tasks, task)
 	}

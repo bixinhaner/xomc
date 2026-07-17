@@ -154,7 +154,7 @@ upgrade:
   require_firmware_signature: false
 
 # Task 默认行为（T-0157 C1 引入）。
-# default_expires_in_seconds：CreateTask 调用方未显式传 ExpiresIn 时使用的默认超时秒数。
+# default_expires_in_seconds：device task 创建调用方未显式传 ExpiresIn 时使用的默认超时秒数。
 #   显式传 0 表示"永不超时"（仅限运维场景）；显式传 >0 覆盖默认。
 #   实际 CPE 应答落在 5-60 秒区间，120s 给慢响应留两倍缓冲又不让用户傻等。
 # sweep_interval_seconds：worker 进程内 task_sweeper 周期扫描间隔（C2 引入），
