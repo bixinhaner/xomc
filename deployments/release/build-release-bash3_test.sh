@@ -12,3 +12,15 @@ else
   echo "FAIL: build-release expands empty EXTRA_ARGS unsafely under Bash 3.2" >&2
   exit 1
 fi
+
+if grep -q 'date -Is' "$BUILD_SCRIPT"; then
+  echo "FAIL: build-release uses GNU-only date -Is" >&2
+  exit 1
+fi
+echo "PASS: build-release timestamp is BSD/GNU date compatible"
+
+if LC_ALL=C grep -Eq '\$[A-Za-z_][A-Za-z0-9_]*[^ -~]' "$BUILD_SCRIPT"; then
+  echo "FAIL: unbraced variable directly precedes non-ASCII punctuation" >&2
+  exit 1
+fi
+echo "PASS: build-release variables before Chinese punctuation are braced"

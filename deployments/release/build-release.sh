@@ -37,6 +37,7 @@ source "$SCRIPT_DIR/release.conf"
 log()  { echo -e "\033[1;32m[release]\033[0m $*"; }
 warn() { echo -e "\033[1;33m[release][警告]\033[0m $*" >&2; }
 die()  { echo -e "\033[1;31m[release][错误]\033[0m $*" >&2; exit 1; }
+iso_time() { date -u '+%Y-%m-%dT%H:%M:%SZ'; }
 
 # ── 参数解析 ────────────────────────────────────────────────────────────
 VERSION=""
@@ -53,7 +54,7 @@ done
 
 case "$CHANNEL" in
   test|release) ;;
-  *) die "--channel 取值非法：$CHANNEL（应为 test 或 release）" ;;
+  *) die "--channel 取值非法：${CHANNEL}（应为 test 或 release）" ;;
 esac
 
 # 仅支持 amd64（见 release.conf 注释 "架构支持"）
@@ -97,7 +98,7 @@ case "$PKG_COMPRESS" in
   gzip) TAR_OPT="-czf"; EXT="tar.gz" ;;
   zstd) TAR_OPT="--zstd -cf"; EXT="tar.zst"
         command -v zstd >/dev/null 2>&1 || die "PKG_COMPRESS=zstd 但未安装 zstd" ;;
-  *)    die "release.conf 的 PKG_COMPRESS 取值非法：$PKG_COMPRESS（应为 xz/gzip/zstd）" ;;
+  *)    die "release.conf 的 PKG_COMPRESS 取值非法：${PKG_COMPRESS}（应为 xz/gzip/zstd）" ;;
 esac
 
 # ── 项目版本号解析 ──────────────────────────────────────────────────────
@@ -261,17 +262,17 @@ channel=$CHANNEL
 arch=$ARCH
 image_prefix=$PROJECT_IMAGE_PREFIX
 business_images=${BUSINESS_IMAGES[*]}
-build_time=$(date -Is)
+build_time=$(iso_time)
 git_commit=$GIT_COMMIT
 EOF
   cat > "$STAGE/README.md" <<EOF
 # OMC 项目交付包 — $VERSION ($ARCH)
 
 - 项目版本：$VERSION
-- 发布渠道：$CHANNEL（test=测试阶段 / release=正式发布）
-- 架构：$ARCH（目标机 \`uname -m\`：x86_64→amd64，aarch64→arm64）
-- 业务镜像：${BUSINESS_IMAGES[*]/#/$PROJECT_IMAGE_PREFIX/}（tag = $VERSION）
-- 构建时间：$(date -Is)　git commit：$GIT_COMMIT
+- 发布渠道：${CHANNEL}（test=测试阶段 / release=正式发布）
+- 架构：${ARCH}（目标机 \`uname -m\`：x86_64→amd64，aarch64→arm64）
+- 业务镜像：${BUSINESS_IMAGES[*]/#/$PROJECT_IMAGE_PREFIX/}（tag = ${VERSION}）
+- 构建时间：$(iso_time)　git commit：$GIT_COMMIT
 
 本包【全 docker compose 部署】，含业务镜像 tar（docker save）+ compose
 文件 + 配置模板 + 迁移 / 字典 / Casbin（可挂载覆盖）+ 监控栈配置 + 运维脚本。
@@ -289,7 +290,7 @@ EOF
       | sort -z | xargs -0 sha256sum > checksums.sha256 )
 
   # 1.7 压缩打包 → archive/project/<版本>/
-  log "[$ARCH] 压缩打包（$PKG_COMPRESS）..."
+  log "[$ARCH] 压缩打包（${PKG_COMPRESS}）..."
   # shellcheck disable=SC2086
   ( cd "$WORK" && tar $TAR_OPT "$OUT/$PKG_NAME.$EXT" "$PKG_NAME" )
   ( cd "$OUT" && sha256sum "$PKG_NAME.$EXT" > "$PKG_NAME.$EXT.sha256" )
@@ -302,7 +303,7 @@ rm -rf "$WORK"
 {
   echo "project_version=$VERSION"
   echo "channel=$CHANNEL"
-  echo "build_time=$(date -Is)"
+  echo "build_time=$(iso_time)"
   echo "git_commit=$GIT_COMMIT"
   echo "arches=$ARCHES"
   echo "compress=$PKG_COMPRESS"
@@ -313,7 +314,7 @@ rm -rf "$WORK"
   echo "项目版本：$VERSION"
   echo "发布渠道：$CHANNEL"
   echo "git commit：$GIT_COMMIT"
-  echo "业务镜像前缀：$PROJECT_IMAGE_PREFIX  （tag = $VERSION）"
+  echo "业务镜像前缀：$PROJECT_IMAGE_PREFIX  （tag = ${VERSION}）"
   echo "业务服务：${BUSINESS_IMAGES[*]}"
   echo ""
   echo "说明：本包【全 docker compose 部署】，含业务镜像 tar + compose 文件 + 配置。"
