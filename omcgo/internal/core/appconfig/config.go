@@ -302,7 +302,7 @@ type AppConfig struct {
 
 // TaskConfig 配置 task 子系统的全局默认行为（T-0157 C1 引入）。
 //
-// DefaultExpiresInSeconds: CreateTask 调用方未显式传 ExpiresIn 时使用的默认超时秒数。
+// DefaultExpiresInSeconds: device task 创建调用方未显式传 ExpiresIn 时使用的默认超时秒数。
 //
 //	调用方语义:
 //	  - req.ExpiresIn > 0  → 直接采用该值

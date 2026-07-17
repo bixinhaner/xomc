@@ -2,6 +2,7 @@ package task
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -292,7 +293,22 @@ func (t *Task) MarkFailedWithResult(errorCode int, errorMessage string, result j
 func (t *Task) MarkExpired() {
 	now := time.Now()
 	t.Status = TaskStatusExpired
+	if t.Source == TaskSourceMML && t.ErrorMessage == "" {
+		t.ErrorMessage = t.commandTimeoutMessage()
+	}
 	t.CompletedAt = &now
+}
+
+func (t *Task) commandTimeoutMessage() string {
+	if t == nil || t.ExpiresAt == nil || t.CreatedAt.IsZero() {
+		return "执行命令超时"
+	}
+	timeout := t.ExpiresAt.Sub(t.CreatedAt)
+	seconds := int(timeout.Round(time.Second) / time.Second)
+	if seconds <= 0 {
+		return "执行命令超时"
+	}
+	return fmt.Sprintf("执行命令超时，超时时间 %d 秒", seconds)
 }
 
 // ResetForRetry 重置任务以进行重试

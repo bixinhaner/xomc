@@ -229,7 +229,7 @@ func newTestableService() *testableTaskService {
 // This is necessary because TaskService uses concrete types.
 
 func (ts *testableTaskService) CreateTask(ctx context.Context, req *CreateTaskRequest) (*Task, error) {
-	// T-0157 C1: 同步真实 TaskService.CreateTask 的默认超时兜底行为
+	// T-0157 C1: 同步真实 TaskService.CreateTask 的默认超时兜底行为。
 	if req.ExpiresIn == 0 && ts.svc.defaultExpiresIn > 0 {
 		req.ExpiresIn = ts.svc.defaultExpiresIn
 	}
@@ -387,6 +387,7 @@ func (ts *testableTaskService) RecoverPendingTasks(ctx context.Context, deviceSN
 func (ts *testableTaskService) BatchCreateTasks(ctx context.Context, reqs []*CreateTaskRequest) ([]*Task, error) {
 	var tasks []*Task
 	for _, req := range reqs {
+		ts.svc.applyDefaultExpiresIn(req)
 		tasks = append(tasks, NewTask(req))
 	}
 	if err := ts.repo.BatchCreate(ctx, tasks); err != nil {
