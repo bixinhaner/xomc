@@ -60,9 +60,16 @@ type FileRepository interface {
 type LogFileQuotaRepository interface {
 	CountActiveLogFiles(ctx context.Context) (int64, error)
 	CountActiveLogFilesBySerial(ctx context.Context, sn string) (int64, error)
+	ListActiveLogFileSerialCounts(ctx context.Context) ([]LogFileSerialCount, error)
 	ListOldestActiveLogFiles(ctx context.Context, limit int) ([]BackupRestoreFile, error)
 	ListOldestActiveLogFilesBySerial(ctx context.Context, sn string, limit int) ([]BackupRestoreFile, error)
 	MarkFileDeleted(ctx context.Context, id int64) error
+}
+
+// LogFileSerialCount 是按设备 SN 聚合的活跃故障日志文件数量。
+type LogFileSerialCount struct {
+	SerialNumber string
+	Count        int64
 }
 
 // LogFileRetentionRepository 是 backup_restore_file 上基站日志时间保留需要的最小契约。
@@ -231,6 +238,39 @@ func (r *PgFileRepository) CountActiveLogFilesBySerial(ctx context.Context, sn s
 		return 0, nil
 	}
 	return r.countActiveLogFiles(ctx, sq.Eq{"serial_number": sn})
+}
+
+func (r *PgFileRepository) ListActiveLogFileSerialCounts(ctx context.Context) ([]LogFileSerialCount, error) {
+	query, args, err := storage.Psql.
+		Select("serial_number", "COUNT(*)").
+		From("backup_restore_file").
+		Where("is_deleted = false").
+		Where(logFileQuotaWhere).
+		Where(sq.NotEq{"serial_number": ""}).
+		GroupBy("serial_number").
+		OrderBy("serial_number ASC").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build backup_restore_file log serial counts SQL: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query backup_restore_file log serial counts: %w", err)
+	}
+	defer rows.Close()
+
+	var out []LogFileSerialCount
+	for rows.Next() {
+		var item LogFileSerialCount
+		if scanErr := rows.Scan(&item.SerialNumber, &item.Count); scanErr != nil {
+			return nil, fmt.Errorf("scan backup_restore_file log serial count: %w", scanErr)
+		}
+		out = append(out, item)
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		return nil, fmt.Errorf("iterate backup_restore_file log serial counts: %w", rowsErr)
+	}
+	return out, nil
 }
 
 func (r *PgFileRepository) countActiveLogFiles(ctx context.Context, extra sq.Sqlizer) (int64, error) {

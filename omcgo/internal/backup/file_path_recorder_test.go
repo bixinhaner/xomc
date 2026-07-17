@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -163,6 +164,25 @@ func (m *fakeMetadataRepo) CountActiveLogFilesBySerial(_ context.Context, sn str
 	return n, nil
 }
 
+func (m *fakeMetadataRepo) ListActiveLogFileSerialCounts(context.Context) ([]LogFileSerialCount, error) {
+	counts := make(map[string]int64)
+	order := make([]string, 0)
+	for _, row := range m.rows {
+		if row.IsDeleted || row.SerialNumber == "" || !isQuotaManagedLogObjectPath(row.ObjectPath) {
+			continue
+		}
+		if _, ok := counts[row.SerialNumber]; !ok {
+			order = append(order, row.SerialNumber)
+		}
+		counts[row.SerialNumber]++
+	}
+	out := make([]LogFileSerialCount, 0, len(order))
+	for _, sn := range order {
+		out = append(out, LogFileSerialCount{SerialNumber: sn, Count: counts[sn]})
+	}
+	return out, nil
+}
+
 func (m *fakeMetadataRepo) ListOldestActiveLogFiles(_ context.Context, limit int) ([]BackupRestoreFile, error) {
 	return m.oldest(func(row BackupRestoreFile) bool {
 		return !row.IsDeleted && isQuotaManagedLogObjectPath(row.ObjectPath)
@@ -219,11 +239,12 @@ func (p fakeLogQuotaPolicy) MaxFileCountPerDevice(context.Context) int {
 
 type fakeObjectRemover struct {
 	removed []string
+	err     error
 }
 
 func (r *fakeObjectRemover) RemoveObject(_ context.Context, bucketName, objectName string, _ minio.RemoveObjectOptions) error {
 	r.removed = append(r.removed, bucketName+"/"+objectName)
-	return nil
+	return r.err
 }
 
 // makeEvent constructs an Event with a BackupFileReceivedPayload-shaped map.
@@ -353,6 +374,77 @@ func TestHandleFileReceived_EnforcesLogFileQuotaOnBackupRestoreMetadata(t *testi
 	assert.NotNil(t, meta.rows[0].DeletedAt)
 	assert.False(t, meta.rows[1].IsDeleted)
 	assert.Equal(t, []string{"logs/fault/2026/07/17/fault-SN-QUOTA-old.tar.gz"}, remover.removed)
+}
+
+func TestEnforceAllLogFileQuotas_ConvergesExistingFilesAfterConfigChange(t *testing.T) {
+	repo := &fakePrefixRepo{byPrefix: map[string][]*BackupTask{}}
+	meta := &fakeMetadataRepo{}
+	remover := &fakeObjectRemover{}
+	rec := newRecorder(t, repo)
+	rec.SetFileRepository(meta)
+	rec.SetLogFileQuota(meta, fakeLogQuotaPolicy{max: 100, maxPerDevice: 2}, remover)
+
+	for i := 1; i <= 5; i++ {
+		taskID := uuid.New().String()
+		require.NoError(t, rec.handleFileReceived(context.Background(), makeEvent(t, map[string]interface{}{
+			"bucket":                "logs",
+			"object_path":           "fault/2026/07/17/fault-SN-CONVERGE-" + strconv.Itoa(i) + ".tar.gz",
+			"filename":              "fault-SN-CONVERGE-" + strconv.Itoa(i) + ".tar.gz",
+			"backup_task_id_prefix": taskID[:8],
+			"task_id":               taskID,
+			"device_sn":             "SN-CONVERGE",
+			"file_size":             int64(i),
+		})))
+	}
+	// Simulate the historical state before the quota was lowered: all five
+	// files are still active when the saved config hook runs.
+	for i := range meta.rows {
+		meta.rows[i].IsDeleted = false
+		meta.rows[i].DeletedAt = nil
+	}
+	remover.removed = nil
+
+	rec.EnforceAllLogFileQuotas(context.Background())
+
+	require.Len(t, meta.rows, 5)
+	for i := 0; i < 3; i++ {
+		assert.True(t, meta.rows[i].IsDeleted, "old file %d should be greyed after quota convergence", i+1)
+	}
+	for i := 3; i < 5; i++ {
+		assert.False(t, meta.rows[i].IsDeleted, "new file %d should remain downloadable", i+1)
+	}
+	assert.Equal(t, []string{
+		"logs/fault/2026/07/17/fault-SN-CONVERGE-1.tar.gz",
+		"logs/fault/2026/07/17/fault-SN-CONVERGE-2.tar.gz",
+		"logs/fault/2026/07/17/fault-SN-CONVERGE-3.tar.gz",
+	}, remover.removed)
+}
+
+func TestEnforceAllLogFileQuotas_DoesNotGreyFileWhenMinioDeleteFails(t *testing.T) {
+	repo := &fakePrefixRepo{byPrefix: map[string][]*BackupTask{}}
+	meta := &fakeMetadataRepo{}
+	remover := &fakeObjectRemover{err: errors.New("minio unavailable")}
+	rec := newRecorder(t, repo)
+	rec.SetFileRepository(meta)
+	rec.SetLogFileQuota(meta, fakeLogQuotaPolicy{max: 100, maxPerDevice: 1}, remover)
+
+	for i := 1; i <= 2; i++ {
+		taskID := uuid.New().String()
+		require.NoError(t, rec.handleFileReceived(context.Background(), makeEvent(t, map[string]interface{}{
+			"bucket":                "logs",
+			"object_path":           "fault/2026/07/17/fault-SN-STRICT-" + strconv.Itoa(i) + ".tar.gz",
+			"filename":              "fault-SN-STRICT-" + strconv.Itoa(i) + ".tar.gz",
+			"backup_task_id_prefix": taskID[:8],
+			"task_id":               taskID,
+			"device_sn":             "SN-STRICT",
+			"file_size":             int64(i),
+		})))
+	}
+
+	require.Len(t, meta.rows, 2)
+	assert.False(t, meta.rows[0].IsDeleted, "MinIO 删除失败时不能只把页面置灰")
+	assert.False(t, meta.rows[1].IsDeleted)
+	assert.Equal(t, []string{"logs/fault/2026/07/17/fault-SN-STRICT-1.tar.gz"}, remover.removed)
 }
 
 func TestHandleFileReceived_FaultLogQuotaIgnoresConfigBackupMetadata(t *testing.T) {

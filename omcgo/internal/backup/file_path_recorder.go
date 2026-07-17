@@ -371,6 +371,46 @@ func (r *FilePathRecorder) enforceLogFileQuota(ctx context.Context, f *BackupRes
 		return
 	}
 
+	r.enforceGlobalLogFileQuota(ctx)
+
+	if f.SerialNumber == "" {
+		return
+	}
+	r.enforceSerialLogFileQuota(ctx, f.SerialNumber)
+}
+
+// EnforceAllLogFileQuotas 收敛现存故障日志文件数配额。它用于 sys_configs 保存后：
+// 当每设备/全局配额被调小，旧的活跃文件也应尽快置灰，而不等下一次设备上传。
+func (r *FilePathRecorder) EnforceAllLogFileQuotas(ctx context.Context) {
+	if r.logQuotaRepo == nil || r.logQuotaPolicy == nil {
+		return
+	}
+	r.enforceGlobalLogFileQuota(ctx)
+
+	if maxPerDevice := r.logQuotaPolicy.MaxFileCountPerDevice(ctx); maxPerDevice > 0 {
+		counts, err := r.logQuotaRepo.ListActiveLogFileSerialCounts(ctx)
+		if err != nil {
+			r.logger.Warn("list active log file serial counts for quota convergence", zap.Error(err))
+			return
+		}
+		for _, item := range counts {
+			if item.Count <= int64(maxPerDevice) || item.SerialNumber == "" {
+				continue
+			}
+			oldest, listErr := r.logQuotaRepo.ListOldestActiveLogFilesBySerial(
+				ctx, item.SerialNumber, int(item.Count-int64(maxPerDevice)),
+			)
+			if listErr != nil {
+				r.logger.Warn("list oldest log files by serial for quota convergence",
+					zap.String("device_sn", item.SerialNumber), zap.Error(listErr))
+				continue
+			}
+			r.removeQuotaLogFiles(ctx, oldest)
+		}
+	}
+}
+
+func (r *FilePathRecorder) enforceGlobalLogFileQuota(ctx context.Context) {
 	if maxCount := r.logQuotaPolicy.MaxFileCount(ctx); maxCount > 0 {
 		count, err := r.logQuotaRepo.CountActiveLogFiles(ctx)
 		if err != nil {
@@ -384,20 +424,22 @@ func (r *FilePathRecorder) enforceLogFileQuota(ctx context.Context, f *BackupRes
 			}
 		}
 	}
+}
 
-	if f.SerialNumber == "" {
+func (r *FilePathRecorder) enforceSerialLogFileQuota(ctx context.Context, serialNumber string) {
+	if serialNumber == "" {
 		return
 	}
 	if maxPerDevice := r.logQuotaPolicy.MaxFileCountPerDevice(ctx); maxPerDevice > 0 {
-		count, err := r.logQuotaRepo.CountActiveLogFilesBySerial(ctx, f.SerialNumber)
+		count, err := r.logQuotaRepo.CountActiveLogFilesBySerial(ctx, serialNumber)
 		if err != nil {
 			r.logger.Warn("count active log files by serial for quota",
-				zap.String("device_sn", f.SerialNumber), zap.Error(err))
+				zap.String("device_sn", serialNumber), zap.Error(err))
 		} else if count > int64(maxPerDevice) {
-			oldest, listErr := r.logQuotaRepo.ListOldestActiveLogFilesBySerial(ctx, f.SerialNumber, int(count-int64(maxPerDevice)))
+			oldest, listErr := r.logQuotaRepo.ListOldestActiveLogFilesBySerial(ctx, serialNumber, int(count-int64(maxPerDevice)))
 			if listErr != nil {
 				r.logger.Warn("list oldest log files by serial for quota",
-					zap.String("device_sn", f.SerialNumber), zap.Error(listErr))
+					zap.String("device_sn", serialNumber), zap.Error(listErr))
 			} else {
 				r.removeQuotaLogFiles(ctx, oldest)
 			}
@@ -414,12 +456,19 @@ func (r *FilePathRecorder) removeQuotaLogFiles(ctx context.Context, files []Back
 					zap.Int64("id", old.ID),
 					zap.String("path", old.ObjectPath),
 					zap.Error(splitErr))
+				continue
 			} else if removeErr := r.logQuotaRemover.RemoveObject(ctx, bucket, objectPath, minio.RemoveObjectOptions{}); removeErr != nil {
 				r.logger.Warn("remove log file object for quota",
 					zap.Int64("id", old.ID),
 					zap.String("path", old.ObjectPath),
 					zap.Error(removeErr))
+				continue
 			}
+		} else {
+			r.logger.Warn("skip quota metadata deletion because minio remover or object path is missing",
+				zap.Int64("id", old.ID),
+				zap.String("path", old.ObjectPath))
+			continue
 		}
 		if markErr := r.logQuotaRepo.MarkFileDeleted(ctx, old.ID); markErr != nil {
 			r.logger.Warn("mark log file metadata deleted for quota",

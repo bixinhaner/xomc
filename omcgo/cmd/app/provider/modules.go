@@ -925,6 +925,11 @@ func initBackupModule(c *Container) error {
 		c.SysConfigSvc.RegisterSavedHook(func(_ context.Context, category string) {
 			if category == stationlog.RetentionCategory {
 				logFileRetentionPolicy.InvalidateCache()
+				go func() {
+					cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+					defer cancel()
+					filePathRecorder.EnforceAllLogFileQuotas(cleanupCtx)
+				}()
 			}
 		})
 	}
