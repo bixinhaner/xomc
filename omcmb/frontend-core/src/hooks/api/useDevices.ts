@@ -22,6 +22,16 @@ type QueryClientLike = {
 const api = createApiSwitchWithMock(deviceService, deviceApi);
 const DEVICE_DETAIL_STALE_TIME_MS = 10 * 60 * 1000;
 
+/**
+ * 按当前前端 API 环境查询设备列表。
+ *
+ * 供需要在用户操作中即时校验设备的 UI 复用，保证真实 API 与 mock API
+ * 使用同一套筛选语义。
+ */
+export function fetchDeviceList(params: DeviceFilter & PageRequest) {
+  return api.getList(params);
+}
+
 function findDeviceInListCaches(queryClient: QueryClientLike, sn: string): Device | undefined {
   const cachedLists = queryClient.getQueriesData<DeviceListResponse>({
     queryKey: ['devices', 'list'],
@@ -96,7 +106,7 @@ export function useDeviceList(
 ) {
   return useQuery({
     queryKey: ['devices', 'list', params],
-    queryFn: () => api.getList(params),
+    queryFn: () => fetchDeviceList(params),
     refetchInterval: options?.refetchInterval || false,
     enabled: options?.enabled ?? true,
   });
