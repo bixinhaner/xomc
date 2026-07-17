@@ -1760,6 +1760,33 @@ func initMiscModules(c *Container) error {
 		pid := mr.Product.ID
 		return &pid, nil
 	}
+	// 控制台公有/私有自定义命令也必须使用当前产品参数模型的支持集合；否则
+	// 模板中的跨产品 path 会在树中显示，直到选中后才被过滤。
+	if c.ProductRegistry != nil && c.ParamRegistry != nil {
+		mmlService.SetCustomCommandSupportedPathsResolver(func(ctx context.Context, productID uuid.UUID) (map[string]struct{}, error) {
+			p, err := c.ProductRegistry.GetProductByID(ctx, productID)
+			if err != nil {
+				return nil, fmt.Errorf("get product %s: %w", productID, err)
+			}
+			if p == nil || p.ParamModelID == nil {
+				return map[string]struct{}{}, nil
+			}
+			set, err := c.ParamRegistry.GetByParamModel(ctx, *p.ParamModelID)
+			if err != nil {
+				if errors.Is(err, parammodel.ErrNoMapping) || errors.Is(err, parammodel.ErrInactiveParamModel) {
+					return map[string]struct{}{}, nil
+				}
+				return nil, fmt.Errorf("get param_model %s: %w", p.ParamModelID, err)
+			}
+			paths := make(map[string]struct{}, len(set.Mappings))
+			for _, mapping := range set.Mappings {
+				if mapping.StandardPath != "" && mapping.IsActive && mapping.IsSupported {
+					paths[mapping.StandardPath] = struct{}{}
+				}
+			}
+			return paths, nil
+		})
+	}
 	mmlConsoleSvc.SetUnsupportedPathsProvider(unsupportedPathRepo, productIDByDevice)
 	if c.SyncSvc != nil {
 		c.SyncSvc.SetUnsupportedPathRepo(unsupportedPathRepo)

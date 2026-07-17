@@ -1974,6 +1974,41 @@ func TestService_ListCustomCommands_RBAC_NoQuerierInjected_FallbackToCreatorOnly
 		"无 RoleQuerier 场景下纯 creator-self 过滤（向后兼容）")
 }
 
+func TestService_ListCustomCommands_FiltersPathsByProductModel(t *testing.T) {
+	productID := uuid.New()
+	unsupportedOnly := MMLCustomCommand{
+		ID:         uuid.New(),
+		ParamPaths: []string{"Device.DeviceInfo.dxp.omc"},
+	}
+	mixed := MMLCustomCommand{
+		ID:         uuid.New(),
+		ParamPaths: []string{"Device.DeviceInfo.dxp.omc", "Device.DeviceInfo.ModelName"},
+	}
+	repo := &mockCustomCommandRepo{
+		listFn: func(_ context.Context, filter CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error) {
+			require.Equal(t, productID, *filter.ProductID)
+			return model.NewListResponse([]MMLCustomCommand{
+				unsupportedOnly,
+				mixed,
+			}, 2, 1, 100), nil
+		},
+	}
+	svc := newCustomCmdServiceForRBAC(repo, nil)
+	svc.SetCustomCommandSupportedPathsResolver(func(context.Context, uuid.UUID) (map[string]struct{}, error) {
+		return map[string]struct{}{"Device.DeviceInfo.ModelName": {}}, nil
+	})
+
+	got, err := svc.ListCustomCommands(context.Background(), CustomCommandFilter{
+		ProductID:   &productID,
+		ListRequest: model.ListRequest{Page: 1, PageSize: 100},
+	})
+	require.NoError(t, err)
+	require.Len(t, got.Items, 1)
+	assert.Equal(t, mixed.ID, got.Items[0].ID)
+	assert.Equal(t, []string{"Device.DeviceInfo.ModelName"}, got.Items[0].ParamPaths)
+	assert.Equal(t, int64(1), got.Total)
+}
+
 // assertError 是测试用 sentinel error，避免引入 errors 包仅为构造常量错误。
 type assertError string
 

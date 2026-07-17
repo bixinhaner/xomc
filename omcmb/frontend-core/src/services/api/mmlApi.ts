@@ -1400,6 +1400,7 @@ export const mmlApi = {
       commandCode?: string;
       operationType?: string;
       templateScope?: string;
+      productId?: string;
     } & PageRequest
   ): Promise<PageResponse<MMLCustomCommand>> {
     const query: Record<string, unknown> = {
@@ -1411,6 +1412,7 @@ export const mmlApi = {
     // T-0090-d：后端 handler.go L722 实际读 `command_scope`，本端旧 `template_scope`
     // 与之不一致导致 scope 过滤被静默忽略；按后端契约对齐。
     if (params?.templateScope) query.command_scope = params.templateScope;
+    if (params?.productId) query.product_id = params.productId;
 
     const { data } = await http.get<BackendListResponse<BackendMMLCustomCommand>>(
       '/mml/templates',

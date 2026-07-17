@@ -84,7 +84,24 @@ export default function CommandSelectModal({
 
   // 命令树和右侧 sub-fields 使用同一个设备支持集合；设备切换会重新加载两者。
   const { data: treeNodes, isLoading: treeLoading } = useGroupTree(undefined, locale, undefined, deviceSn);
-  const { commands: customCommands } = useCustomCommands();
+  const { commands: customCommands } = useCustomCommands(productId);
+
+  // 产品参数模型过滤由 /mml/templates?product_id= 完成；这里继续叠加运行时
+  // 不支持 path 过滤，确保模板在树上没有任何可执行 path 时直接消失。
+  const { data: unsupportedPaths } = useUnsupportedPaths(productId);
+
+  const customCommandsWithAvailablePaths = useMemo(() => {
+    if (!unsupportedPaths) return customCommands;
+    return customCommands.filter((cc) => {
+      const isWrite = cc.operationType === 'MOD' || cc.operationType === 'ADD' || cc.operationType === 'RMV';
+      const blocked = new Set(
+        unsupportedPaths
+          .filter((u) => (isWrite ? u.writeUnsupported : u.readUnsupported))
+          .map((u) => u.path),
+      );
+      return customCommandParamPaths(cc).some((p) => !blocked.has(p.path));
+    });
+  }, [customCommands, unsupportedPaths]);
 
   // 自定义命令分组名（随 locale 中英切换，复用命令树「自定义命令 / Customized」语料）。
   const customGroupLabel = t('mml.console.commandTree.customized');
@@ -98,9 +115,9 @@ export default function CommandSelectModal({
   }, [entries]);
   const customById = useMemo(() => {
     const m = new Map<string, MMLCustomCommand>();
-    customCommands.forEach((cc) => m.set(cc.id, cc));
+    customCommandsWithAvailablePaths.forEach((cc) => m.set(cc.id, cc));
     return m;
-  }, [customCommands]);
+  }, [customCommandsWithAvailablePaths]);
 
   const filtered = useMemo(() => {
     const kw = keyword.trim().toLowerCase();
@@ -115,14 +132,14 @@ export default function CommandSelectModal({
 
   const filteredCustoms = useMemo(() => {
     const kw = keyword.trim().toLowerCase();
-    if (!kw) return customCommands;
-    return customCommands.filter(
+    if (!kw) return customCommandsWithAvailablePaths;
+    return customCommandsWithAvailablePaths.filter(
       (cc) =>
         cc.commandCode.toLowerCase().includes(kw) ||
         cc.commandName.toLowerCase().includes(kw) ||
         customGroupLabel.toLowerCase().includes(kw),
     );
-  }, [customCommands, keyword, customGroupLabel]);
+  }, [customCommandsWithAvailablePaths, keyword, customGroupLabel]);
 
   const treeData: TreeDataNode[] = useMemo(() => {
     const byGroup = new Map<string, typeof entries>();
@@ -212,7 +229,6 @@ export default function CommandSelectModal({
   );
 
   // 该产品执行 path 不支持类故障记录的自学习表——按命令读/写类型过滤（标准 + 自定义共用）。
-  const { data: unsupportedPaths } = useUnsupportedPaths(productId);
   const hiddenPaths = useMemo(() => {
     if (!unsupportedPaths || unsupportedPaths.length === 0) return new Set<string>();
     const op = selectedCustom?.operationType ?? selectedEntry?.command.operationType;

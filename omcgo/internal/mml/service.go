@@ -47,8 +47,11 @@ type Service struct {
 	pathTranslator               PathTranslator               // R-9.3 per-device standardPath → privatePath 翻译；nil 时跳过
 	exporter                     *Exporter                    // 结果 CSV 导出（MinIO）；nil 时导出端点返回 503
 	// 参数路径 → 友好名（standard_params.description）解析，CSV「参数名称」列用；nil 时回退 param_refs。
-	pathNameResolver    func(ctx context.Context, paths []string) (map[string]string, error)
-	scriptImportService ScriptImportServiceAPI
+	pathNameResolver func(ctx context.Context, paths []string) (map[string]string, error)
+	// customCommandSupportedPaths 按产品参数模型解析自定义命令可用 path。
+	// 仅控制台携带 ProductID 时使用；管理端不传产品上下文，不裁剪模板。
+	customCommandSupportedPaths func(ctx context.Context, productID uuid.UUID) (map[string]struct{}, error)
+	scriptImportService         ScriptImportServiceAPI
 	// scriptExecutionValidator is optional because older deployments may not
 	// have the TXT validator wired yet. When present it performs the dynamic
 	// device/command checks immediately before an execution is persisted and
@@ -204,6 +207,14 @@ func (s *Service) SetCmdParamRepo(repo CommandParamRepository) {
 // 不注入时 ListCustomCommands fallback 仅 creator-self 可见（即 T-0090-c 之前的行为）。
 func (s *Service) SetRoleQuerier(rq RoleQuerier) {
 	s.roleQuerier = rq
+}
+
+// SetCustomCommandSupportedPathsResolver 注入产品参数模型支持 path 解析器。
+// 解析失败时控制台列表直接报错，避免回退展示跨产品模板。
+func (s *Service) SetCustomCommandSupportedPathsResolver(
+	resolver func(ctx context.Context, productID uuid.UUID) (map[string]struct{}, error),
+) {
+	s.customCommandSupportedPaths = resolver
 }
 
 // SetDeviceLookup 注入设备查询适配器，启用 R-8.4 product_class 一致性校验。
@@ -2300,7 +2311,46 @@ func (s *Service) ListCustomCommands(ctx context.Context, filter CustomCommandFi
 			filter.VisibleGroupIDs = groupIDs
 		}
 	}
-	return s.customCommandRepo.List(ctx, filter)
+	result, err := s.customCommandRepo.List(ctx, filter)
+	if err != nil || filter.ProductID == nil {
+		return result, err
+	}
+	if s.customCommandSupportedPaths == nil {
+		return nil, fmt.Errorf("filter custom commands for product %s: supported paths resolver not configured", filter.ProductID)
+	}
+	supported, err := s.customCommandSupportedPaths(ctx, *filter.ProductID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve supported paths for product %s: %w", filter.ProductID, err)
+	}
+
+	// 当前控制台一次拉取最多 1000 条模板；先按产品支持集合裁 path，再删除无可用
+	// path 的模板，避免公有模板树残留“空节点”。
+	filtered := make([]MMLCustomCommand, 0, len(result.Items))
+	for _, command := range result.Items {
+		paths := make([]string, 0, len(command.ParamPaths))
+		for _, path := range command.ParamPaths {
+			path = strings.TrimSpace(path)
+			if path == "" {
+				continue
+			}
+			if _, ok := supported[path]; ok {
+				paths = append(paths, path)
+			}
+		}
+		if len(paths) == 0 {
+			continue
+		}
+		command.ParamPaths = paths
+		filtered = append(filtered, command)
+	}
+	result.Items = filtered
+	result.Total = int64(len(filtered))
+	if result.PageSize > 0 {
+		result.TotalPages = (len(filtered) + result.PageSize - 1) / result.PageSize
+	} else {
+		result.TotalPages = 0
+	}
+	return result, nil
 }
 
 // GetCustomCommand retrieves an MML custom command by ID.

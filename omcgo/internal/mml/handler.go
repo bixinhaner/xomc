@@ -1017,6 +1017,14 @@ func (h *Handler) ListTemplates(c *gin.Context) {
 	if categoryGroup := c.Query("category_group"); categoryGroup != "" {
 		filter.CategoryGroup = &categoryGroup
 	}
+	if productID := strings.TrimSpace(c.Query("product_id")); productID != "" {
+		parsed, err := uuid.Parse(productID)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, fmt.Errorf("invalid product_id: %w", err))
+			return
+		}
+		filter.ProductID = &parsed
+	}
 
 	// T-0090-c：传入当前用户 username + user_id 双凭据让 service 层做 RBAC 可见性派生。
 	//   - Creator (username) 用于私有命令 self-fallback（永远能看到自己创建的）
