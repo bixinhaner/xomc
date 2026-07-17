@@ -645,12 +645,17 @@ type DeviceCoordinateWriter interface {
 	UpdateCoordinates(ctx context.Context, id uuid.UUID, latitude, longitude float64) error
 }
 
+type DeviceCoordinateReader interface {
+	GetCoordinates(ctx context.Context, id uuid.UUID) (*Location, error)
+}
+
 type InfoSyncer struct {
-	infoRepo         DeviceInfoRepository
-	paramRepo        DeviceParameterRepository
-	coordinateWriter DeviceCoordinateWriter
-	carrierRegistry  *carrier.CarrierRegistry
-	logger           *zap.Logger
+	infoRepo                DeviceInfoRepository
+	paramRepo               DeviceParameterRepository
+	coordinateWriter        DeviceCoordinateWriter
+	locationObservationRepo LocationObservationRepository
+	carrierRegistry         *carrier.CarrierRegistry
+	logger                  *zap.Logger
 }
 
 // NewInfoSyncer creates a new InfoSyncer.
@@ -660,13 +665,19 @@ func NewInfoSyncer(
 	coordinateWriter DeviceCoordinateWriter,
 	carrierRegistry *carrier.CarrierRegistry,
 	logger *zap.Logger,
+	locationObservationRepos ...LocationObservationRepository,
 ) *InfoSyncer {
+	var locationObservationRepo LocationObservationRepository
+	if len(locationObservationRepos) > 0 {
+		locationObservationRepo = locationObservationRepos[0]
+	}
 	return &InfoSyncer{
-		infoRepo:         infoRepo,
-		paramRepo:        paramRepo,
-		coordinateWriter: coordinateWriter,
-		carrierRegistry:  carrierRegistry,
-		logger:           logger,
+		infoRepo:                infoRepo,
+		paramRepo:               paramRepo,
+		coordinateWriter:        coordinateWriter,
+		locationObservationRepo: locationObservationRepo,
+		carrierRegistry:         carrierRegistry,
+		logger:                  logger,
 	}
 }
 
@@ -805,7 +816,7 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 	aggregateInstanceFields(paramValues, fields)
 	enforceDeviceInfoFieldSizeLimits(fields)
 
-	latitude, longitude, hasCoordinates := lookupGPSCoordinates(paramValues)
+	latitude, longitude, sourcePath, hasCoordinates := LookupGPSCoordinates(paramValues)
 
 	if len(fields) == 0 && !hasCoordinates {
 		return nil, nil
@@ -841,9 +852,33 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 		}
 	}
 
-	if hasCoordinates && s.coordinateWriter != nil {
-		if err := s.coordinateWriter.UpdateCoordinates(ctx, deviceID, latitude, longitude); err != nil {
-			return nil, fmt.Errorf("update device coordinates: %w", err)
+	if hasCoordinates {
+		observation := ReportedLocation{
+			Latitude:   latitude,
+			Longitude:  longitude,
+			ObservedAt: time.Now(),
+			SourcePath: sourcePath,
+		}
+		if s.locationObservationRepo != nil {
+			if err := s.locationObservationRepo.UpsertLatest(ctx, deviceID, observation); err != nil {
+				return nil, fmt.Errorf("update reported GPS coordinates: %w", err)
+			}
+		}
+
+		if s.coordinateWriter != nil {
+			var accepted *Location
+			if reader, ok := s.coordinateWriter.(DeviceCoordinateReader); ok {
+				var err error
+				accepted, err = reader.GetCoordinates(ctx, deviceID)
+				if err != nil {
+					return nil, fmt.Errorf("read accepted device coordinates: %w", err)
+				}
+			}
+			if accepted == nil {
+				if err := s.coordinateWriter.UpdateCoordinates(ctx, deviceID, latitude, longitude); err != nil {
+					return nil, fmt.Errorf("initialize device coordinates: %w", err)
+				}
+			}
 		}
 	}
 

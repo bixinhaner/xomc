@@ -8,7 +8,7 @@
 
 | 流 | 合并范围 | 当前文件 | 版本表 | compose 服务 | 目标库 |
 |----|----------|----------|--------|--------------|--------|
-| 主库 schema (DDL) | 基线 `000001` + 增量 | `migrations/000001_init_schema.sql`、`000025_add_recycle_audit_metadata.sql` | `goose_db_version` | `migrate-schema` | postgres（主库，纯 PG16）|
+| 主库 schema (DDL) | 基线 `000001` + 增量 | `migrations/000001_init_schema.sql`、`000025_add_recycle_audit_metadata.sql`、`000026_add_parameter_sync_runs_device_status_index.sql`、`000027_add_backup_restore_file_deleted_flag.sql`、`000028_add_device_location_observations.sql` | `goose_db_version` | `migrate-schema` | postgres（主库，纯 PG16）|
 | 主库 seed (DML) | `000001..000013` | `migrations/seed/000001_init_seed.sql` | `goose_db_version_seed` | `migrate-seed` | postgres |
 | 时序库 schema | 基线 `000001` + 增量 | `migrations/tsdb/000001_tsdb_schema.sql`、`000002_fix_alarm_history_retention_schedule.sql` | `goose_db_version_tsdb` | `migrate-tsdb-schema` | postgres-tsdb（TimescaleDB）|
 
@@ -23,6 +23,7 @@
 3. **`tsdb/000001_tsdb_schema.sql`**（时序库）—— 15 张时序表（`pm_metrics` + 4 rollup、`pm_group_metrics_*`、`pm_adhoc_aggregation_results`、`alarms_history`、`mr_records`、`trace_messages`、`pm_files`、`mr_files`）+ 显式 `create_hypertable` + 压缩/保留策略 + 7 张影子维度表（worker `tsdbsync` 从主库同步，供本库 JOIN 替代跨库 JOIN）+ `alarm_efficiency_metrics` 物化视图。显式 DDL，不依赖 pg_restore catalog 注入。
 4. **`000025_add_recycle_audit_metadata.sql`**（主库增量）—— 为设备回收审计补充元数据。
 5. **`tsdb/000002_fix_alarm_history_retention_schedule.sql`**（时序库增量）—— 只将 `alarms_history` retention policy 固定为每天 `01:08 Asia/Shanghai`；不修改 `drop_after`、job `config` 或其他后台任务。
+6. **`000028_add_device_location_observations.sql`**（主库增量）—— 保存设备最新有效 GPS 观测值，与网管已接受坐标分离。
 
 参数同步基线有一个有意保留的无外键设计：`parameter_sync_task_results.task_id` 和 `parameter_sync_staging_values.task_id` 都不声明到 `device_tasks` 的外键。`device_tasks` 按 `device_sn` 做 hash 分区，物理主键是 `(id, device_sn)`，PostgreSQL 不允许只引用其中的 `id`。应用处理链会校验 payload 的 `device_sn` 与同步 run 的逻辑关联，并按 `(id, device_sn)` 加载设备任务；两张表的 `run_id` 外键仍然保留。不要补回不可成立的 `REFERENCES device_tasks(id)`；如果未来在这两张表持久化 `device_sn`，再评估复合外键。
 

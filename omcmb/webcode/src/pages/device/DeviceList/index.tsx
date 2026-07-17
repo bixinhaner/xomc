@@ -487,6 +487,67 @@ export default function DeviceList() {
   const { data, isLoading, isFetching, refetch } = useDeviceList(queryParams, {
     refetchInterval: autoRefresh ? refreshInterval * 1000 : (paramSyncPolling ? PARAM_SYNC_ACTIVE_REFETCH_MS : undefined),
   });
+  const acceptLocationSync = useCallback(async (record: Device) => {
+    const reportedVersion = record.locationSync.reported?.version;
+    if (reportedVersion == null) {
+      void message.error(t('device.gpsSyncNoReport'));
+      return;
+    }
+    try {
+      await deviceApi.acceptLocationSync(record.id, reportedVersion);
+      void message.success(t('device.gpsSyncSuccess'));
+    } catch (error: unknown) {
+      const status = (error as { response?: { status?: number } })?.response?.status;
+      void message.error(
+        status === 409
+          ? t('device.gpsSyncConflict')
+          : status === 403
+            ? t('device.gpsSyncForbidden')
+            : t('device.gpsSyncFailed'),
+      );
+      return;
+    }
+
+    // The promotion has already succeeded at this point. A list refresh is
+    // best-effort so a transient query failure cannot be reported as a failed
+    // GPS synchronization or leave the user unsure whether the action applied.
+    try {
+      const refreshResult = await refetch();
+      if (refreshResult.isError) {
+        void message.warning(t('device.gpsSyncRefreshFailed'));
+      }
+    } catch {
+      void message.warning(t('device.gpsSyncRefreshFailed'));
+    }
+  }, [message, refetch, t]);
+
+  const renderLocationCell = useCallback((value: number | null | undefined, record: Device) => {
+    if (value == null) return '--';
+    const sync = record.locationSync;
+    const reported = sync.status === 'pending' ? sync.reported : undefined;
+    if (!reported) return value;
+    return (
+      <Space size={4}>
+        <Popconfirm
+          title={t('device.gpsSyncConfirmTitle')}
+          description={t('device.gpsSyncDetails', {
+            acceptedLongitude: record.longitude ?? '--',
+            acceptedLatitude: record.latitude ?? '--',
+            reportedLongitude: reported.longitude,
+            reportedLatitude: reported.latitude,
+            distance: Math.round(sync.distanceMeters ?? 0),
+            observedAt: reported.observedAt,
+          })}
+          onConfirm={() => void acceptLocationSync(record)}
+          okText={t('common.confirm')}
+          cancelText={t('common.cancel')}
+        >
+          <WarningOutlined style={{ color: '#faad14', cursor: 'pointer' }} />
+        </Popconfirm>
+        {value}
+      </Space>
+    );
+  }, [acceptLocationSync, t]);
   const [refreshSpinnerActive, setRefreshSpinnerActive] = useState(false);
   const refreshSpinStartedAtRef = useRef<number | null>(null);
   const refreshSpinTimeoutRef = useRef<number | null>(null);
@@ -1883,25 +1944,7 @@ export default function DeviceList() {
         width: 130,
         hidden: true,
         group: 'common',
-        render: (_val, record) => {
-          const v = record.longitude;
-          if (v === null || v === undefined) return '--';
-          if (record.networkType !== 'eNB') return v;
-          return (
-            <Space size={4}>
-              <Popconfirm
-                title={`${t('device.longitude')}: ${record.longitude ?? '--'}   ${t('device.latitude')}: ${record.latitude ?? '--'}   ${t('device.gpsHeight')}(m): ${record.gpsHeight ?? '--'}`}
-                description={t('device.gpsInconsistent')}
-                onConfirm={() => void message.success(t('device.gpsSyncSuccess'))}
-                okText={t('common.confirm')}
-                cancelText={t('common.cancel')}
-              >
-                <WarningOutlined style={{ color: '#faad14', cursor: 'pointer' }} />
-              </Popconfirm>
-              {v}
-            </Space>
-          );
-        },
+        render: (_val, record) => renderLocationCell(record.longitude, record),
       },
       {
         key: 'latitude',
@@ -1910,25 +1953,7 @@ export default function DeviceList() {
         width: 130,
         hidden: true,
         group: 'common',
-        render: (_val, record) => {
-          const v = record.latitude;
-          if (v === null || v === undefined) return '--';
-          if (record.networkType !== 'eNB') return v;
-          return (
-            <Space size={4}>
-              <Popconfirm
-                title={`${t('device.longitude')}: ${record.longitude ?? '--'}   ${t('device.latitude')}: ${record.latitude ?? '--'}   ${t('device.gpsHeight')}(m): ${record.gpsHeight ?? '--'}`}
-                description={t('device.gpsInconsistent')}
-                onConfirm={() => void message.success(t('device.gpsSyncSuccess'))}
-                okText={t('common.confirm')}
-                cancelText={t('common.cancel')}
-              >
-                <WarningOutlined style={{ color: '#faad14', cursor: 'pointer' }} />
-              </Popconfirm>
-              {v}
-            </Space>
-          );
-        },
+        render: (_val, record) => renderLocationCell(record.latitude, record),
       },
       {
         key: 'gpsHeight',
@@ -1937,25 +1962,7 @@ export default function DeviceList() {
         width: 120,
         hidden: true,
         group: 'common',
-        render: (_val, record) => {
-          const v = record.gpsHeight;
-          if (v === null || v === undefined) return '--';
-          if (record.networkType !== 'eNB') return v;
-          return (
-            <Space size={4}>
-              <Popconfirm
-                title={`${t('device.longitude')}: ${record.longitude ?? '--'}   ${t('device.latitude')}: ${record.latitude ?? '--'}   ${t('device.gpsHeight')}(m): ${record.gpsHeight ?? '--'}`}
-                description={t('device.gpsInconsistent')}
-                onConfirm={() => void message.success(t('device.gpsSyncSuccess'))}
-                okText={t('common.confirm')}
-                cancelText={t('common.cancel')}
-              >
-                <WarningOutlined style={{ color: '#faad14', cursor: 'pointer' }} />
-              </Popconfirm>
-              {v}
-            </Space>
-          );
-        },
+        render: (_val, record) => renderLocationCell(record.gpsHeight, record),
       },
       {
         key: 'gpsSatelliteCount',
@@ -2094,7 +2101,7 @@ export default function DeviceList() {
 
     ],
     // remarkHeaderRender 暂从 dep 列表移除：remark 列定义已注释，恢复时同步加回。
-    [navigate, openDeviceDetail, prefetchDeviceDetailEntry, t, fmtTime, fmtDuration, fmtStatus, adminStateStatusMap, renderMultiCellStatus, renderActivationStatus, message, downloadStationLog, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails, editingInstallAddressId, editingInstallAddressValue, savingInstallAddressId, saveInstallAddressEdit, cancelInstallAddressEdit, startInstallAddressEdit, optimisticParamSyncDeviceIds]
+    [navigate, openDeviceDetail, prefetchDeviceDetailEntry, t, fmtTime, fmtDuration, fmtStatus, adminStateStatusMap, renderMultiCellStatus, renderActivationStatus, message, downloadStationLog, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails, editingInstallAddressId, editingInstallAddressValue, savingInstallAddressId, saveInstallAddressEdit, cancelInstallAddressEdit, startInstallAddressEdit, optimisticParamSyncDeviceIds, renderLocationCell]
   );
 
   // ─── 列表导出(用户决策 2026-06-02) ──────────────────────────────────────

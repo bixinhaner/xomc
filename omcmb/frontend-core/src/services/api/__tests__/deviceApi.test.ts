@@ -59,6 +59,43 @@ beforeEach(() => {
 });
 
 describe('deviceApi.getList — filter → query 映射', () => {
+	it('映射 location_sync 对账状态及设备上报坐标', async () => {
+		getMock.mockResolvedValue({
+			data: {
+				items: [backendDevice({
+					location_sync: {
+						status: 'pending',
+						accepted: { latitude: 30, longitude: 120 },
+						reported: {
+							latitude: 30.001,
+							longitude: 120.001,
+							observed_at: '2026-07-17T02:00:00Z',
+							version: 8,
+							source_path: 'Device.DeviceInfo.SAS.FAP.GPS',
+						},
+						distance_meters: 146,
+					},
+				})],
+				total: 1,
+				page: 1,
+				page_size: 20,
+				total_pages: 1,
+			},
+		});
+
+		const out = await deviceApi.getList({ page: 1, pageSize: 20 });
+		expect(out.items[0].locationSync.status).toBe('pending');
+		expect(out.items[0].locationSync.reported?.version).toBe(8);
+		expect(out.items[0].locationSync.distanceMeters).toBe(146);
+	});
+
+	it('确认 GPS 同步提交 reported_version', async () => {
+		postMock.mockResolvedValue({ data: { status: 'in_sync' } });
+		const result = await deviceApi.acceptLocationSync('d1', 8);
+		expect(result.status).toBe('in_sync');
+		expect(postMock).toHaveBeenCalledWith('/devices/d1/location-sync/accept', { reported_version: 8 });
+	});
+
   it('分页和排序字段使用后端 snake_case 契约', async () => {
     await deviceApi.getList({
       page: 2,
