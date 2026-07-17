@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from 'antd';
 import { IntlProvider } from 'react-intl';
 import { zhCN } from '@core/i18n';
@@ -15,7 +15,7 @@ const validTemplate: QueryTemplate = {
   name: '正常模板',
   visibility: 'public',
   creatorId: 'user-1',
-  description: '',
+  description: '正常模板描述',
   payload: {
     deviceSns: ['SN-OK'],
     metricPaths: ['K-1'],
@@ -130,6 +130,13 @@ async function selectOverLimitTemplate() {
   });
 }
 
+async function findModalByTitle(title: string) {
+  const titleNode = await screen.findByText(title);
+  const modal = titleNode.closest('.ant-modal');
+  expect(modal).toBeTruthy();
+  return modal as HTMLElement;
+}
+
 describe('KPIQuery 模板数量限制', () => {
   beforeEach(() => {
     refetchAggSpy.mockClear();
@@ -189,5 +196,92 @@ describe('KPIQuery 模板数量限制', () => {
     fireEvent.click(screen.getByRole('button', { name: /导出 CSV/ }));
 
     expect(createExportSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('KPIQuery 模板弹窗初始值', () => {
+  beforeEach(() => {
+    refetchAggSpy.mockClear();
+    createTemplateSpy.mockReset();
+    createExportSpy.mockReset();
+  });
+
+  it('侧栏新建模板每次打开都使用干净初始值', async () => {
+    renderPage();
+
+    fireEvent.click(screen.getByText('正常模板'));
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('已选 1 个：SN-OK')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '新建查询模板' }));
+
+    const dialog = await findModalByTitle('新建查询模板');
+    expect(within(dialog).getByPlaceholderText('例如：eNB 基础 KPI')).toHaveValue('');
+    expect(within(dialog).getByPlaceholderText('点击右侧按钮选择设备')).toHaveValue('');
+    expect(within(dialog).getByPlaceholderText('点击右侧按钮选择指标')).toHaveValue('');
+    expect(within(dialog).getByText('近 3 小时')).toBeTruthy();
+    expect(within(dialog).queryByDisplayValue('已选 1 个：SN-OK')).toBeNull();
+    expect(within(dialog).queryByDisplayValue('已选 1 个：K-1')).toBeNull();
+  });
+
+  it('侧栏新建模板再次打开不会残留上一次输入', async () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: '新建查询模板' }));
+
+    const firstDialog = await findModalByTitle('新建查询模板');
+    fireEvent.change(within(firstDialog).getByPlaceholderText('例如：eNB 基础 KPI'), {
+      target: { value: '上一次创建的模板' },
+    });
+    const firstDescription = firstDialog.querySelector('textarea');
+    expect(firstDescription).toBeTruthy();
+    fireEvent.change(firstDescription as HTMLTextAreaElement, {
+      target: { value: '上一次创建的描述' },
+    });
+    fireEvent.mouseDown(within(firstDialog).getByText('近 3 小时'));
+    fireEvent.click(await screen.findByText('近 1 小时'));
+    fireEvent.click(within(firstDialog).getByRole('button', { name: /取\s*消/ }));
+
+    fireEvent.click(screen.getByRole('button', { name: '新建查询模板' }));
+
+    const secondDialog = await findModalByTitle('新建查询模板');
+    const secondDescription = secondDialog.querySelector('textarea');
+    expect(secondDescription).toBeTruthy();
+    expect(within(secondDialog).getByPlaceholderText('例如：eNB 基础 KPI')).toHaveValue('');
+    expect(secondDescription).toHaveValue('');
+    expect(within(secondDialog).getAllByText('近 3 小时').length).toBeGreaterThan(0);
+    expect(within(secondDialog).queryByDisplayValue('上一次创建的模板')).toBeNull();
+    expect(within(secondDialog).queryByDisplayValue('上一次创建的描述')).toBeNull();
+  });
+
+  it('查询区存为模板仍使用当前查询条件作为初始值', async () => {
+    renderPage();
+
+    fireEvent.click(screen.getByText('正常模板'));
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('已选 1 个：SN-OK')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /存为模板/ }));
+
+    const dialog = await findModalByTitle('新建查询模板');
+    expect(within(dialog).getByPlaceholderText('点击右侧按钮选择设备')).toHaveValue('已选 1 个：SN-OK');
+    expect(within(dialog).getByPlaceholderText('点击右侧按钮选择指标')).toHaveValue('已选 1 个：K-1');
+    expect(within(dialog).getByText('近 1 小时')).toBeTruthy();
+  });
+
+  it('编辑模板弹窗仍回填待编辑模板数据', async () => {
+    renderPage();
+
+    fireEvent.click(screen.getAllByRole('button', { name: '编辑' })[0]);
+
+    const dialog = await findModalByTitle('编辑查询模板');
+    expect(within(dialog).getByDisplayValue('正常模板')).toBeTruthy();
+    expect(within(dialog).getByDisplayValue('正常模板描述')).toBeTruthy();
+    expect(within(dialog).getByLabelText('公共（所有人可见）')).toBeChecked();
+    expect(within(dialog).getByPlaceholderText('点击右侧按钮选择设备')).toHaveValue('已选 1 个：SN-OK');
+    expect(within(dialog).getByPlaceholderText('点击右侧按钮选择指标')).toHaveValue('已选 1 个：K-1');
+    expect(within(dialog).getByText('近 1 小时')).toBeTruthy();
   });
 });

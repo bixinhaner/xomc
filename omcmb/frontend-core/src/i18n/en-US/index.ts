@@ -7908,7 +7908,7 @@ const messages: Record<string, string> = {
   'perf.adhoc.granularMonthly':          'Monthly',
   // ── KPI Query (KPIQuery) page ──
   'perf.kpiQuery.queryTemplates':        'Query Templates',
-  'perf.kpiQuery.newTemplateTip':        'New template (uses current query conditions; unfilled fields can be added later)',
+  'perf.kpiQuery.newTemplateTip':        'New blank template',
   'perf.kpiQuery.refreshList':           'Refresh List',
   'perf.kpiQuery.collapseSidebar':       'Collapse template panel',
   'perf.kpiQuery.expandSidebar':         'Expand template panel',
