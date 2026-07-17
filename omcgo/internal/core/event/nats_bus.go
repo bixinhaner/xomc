@@ -27,6 +27,14 @@ const (
 	gpvPullBatchSize = 64               // 每次 Fetch 最多拉取 64 条
 	gpvPullAckWait   = 30 * time.Second // handler 处理超时，超时后 NATS 重投
 
+	// queueSubscribeAckWait 是 QueueSubscribe（push consumer，pm-workers 等）的
+	// 显式 ack_wait。此前不设置，NATS 用服务端默认 30s + 无限 MaxDeliver，高并发下
+	// DB 慢查询导致 handler 处理耗时超过 30s 时，NATS 会在 Go 侧 decideAck 还没来得及
+	// Ack/Term 之前就重投同一条消息，造成并发重复处理（现象：worker 日志里 Term 时的
+	// delivery 计数远超 maxDeliveries=5 常量，说明重投已经先发生了很多次）。2 分钟对齐
+	// paramSyncResultPullAckWait，给 DB 争用场景留够处理时间。
+	queueSubscribeAckWait = 2 * time.Minute
+
 	pullNoCapacityWait            = 10 * time.Millisecond
 	paramSyncResultPullBatchSize  = 64
 	paramSyncResultPullConcurrent = 64
@@ -120,9 +128,13 @@ func (b *NATSEventBus) Subscribe(subject string, handler EventHandler) (Subscrip
 }
 
 func (b *NATSEventBus) QueueSubscribe(subject string, queue string, handler EventHandler) (Subscription, error) {
+	ackWait, maxDeliver := b.ensureQueueConsumerTuning(subject, queue)
+
 	sub, err := b.js.QueueSubscribe(subject, queue, b.wrapHandler(handler),
 		nats.Durable(queue),
 		nats.AckExplicit(),
+		nats.AckWait(ackWait),
+		nats.MaxDeliver(maxDeliver),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("queue subscribe to %s (queue=%s): %w", subject, queue, err)
@@ -236,6 +248,75 @@ func (b *NATSEventBus) ensurePullTuningForDurable(subject, durable string, desir
 		zap.Duration("ack_wait", desired.AckWait),
 		zap.Int("max_ack_pending", desired.MaxAckPending))
 	return desired
+}
+
+// ensureQueueConsumerTuning 保证 QueueSubscribe（push consumer）显式使用
+// queueSubscribeAckWait + maxDeliveries，不再依赖 NATS 服务端默认值。若同名 durable
+// consumer 已存在且配置不同，尝试 UpdateConsumer 就地更新；更新失败（如 NATS 版本
+// 不支持修改某字段）则退回沿用已有配置，避免后续 QueueSubscribe 因期望值与已存在
+// consumer 不一致而报错——与 ensurePullTuningForDurable 的处理方式保持一致。
+func (b *NATSEventBus) ensureQueueConsumerTuning(subject, durable string) (ackWait time.Duration, maxDeliver int) {
+	ackWait, maxDeliver = queueSubscribeAckWait, maxDeliveries
+
+	stream, err := b.js.StreamNameBySubject(subject)
+	if err != nil {
+		b.logger.Warn("resolve queue consumer stream failed",
+			zap.String("subject", subject),
+			zap.String("durable", durable),
+			zap.Error(err))
+		return
+	}
+	info, err := b.js.ConsumerInfo(stream, durable)
+	if err != nil {
+		if !errors.Is(err, nats.ErrConsumerNotFound) {
+			b.logger.Warn("load existing queue consumer failed",
+				zap.String("subject", subject),
+				zap.String("stream", stream),
+				zap.String("durable", durable),
+				zap.Error(err))
+		}
+		return
+	}
+
+	cfg := info.Config
+	changed := false
+	if cfg.AckWait != ackWait {
+		cfg.AckWait = ackWait
+		changed = true
+	}
+	if cfg.MaxDeliver != maxDeliver {
+		cfg.MaxDeliver = maxDeliver
+		changed = true
+	}
+	if !changed {
+		return
+	}
+
+	if _, err := b.js.UpdateConsumer(stream, &cfg); err != nil {
+		b.logger.Warn("update existing queue consumer tuning failed; using existing values",
+			zap.String("subject", subject),
+			zap.String("stream", stream),
+			zap.String("durable", durable),
+			zap.Duration("desired_ack_wait", ackWait),
+			zap.Duration("existing_ack_wait", info.Config.AckWait),
+			zap.Int("desired_max_deliver", maxDeliver),
+			zap.Int("existing_max_deliver", info.Config.MaxDeliver),
+			zap.Error(err))
+		if info.Config.AckWait > 0 {
+			ackWait = info.Config.AckWait
+		}
+		if info.Config.MaxDeliver != 0 {
+			maxDeliver = info.Config.MaxDeliver
+		}
+		return
+	}
+	b.logger.Info("updated existing queue consumer tuning",
+		zap.String("subject", subject),
+		zap.String("stream", stream),
+		zap.String("durable", durable),
+		zap.Duration("ack_wait", ackWait),
+		zap.Int("max_deliver", maxDeliver))
+	return
 }
 
 // cleanupLegacyPushConsumer 删除因迁移到 pull consumer 而遗留的同名旧 push consumer。

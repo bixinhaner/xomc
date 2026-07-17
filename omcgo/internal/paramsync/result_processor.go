@@ -615,39 +615,83 @@ func inferProjectedParameterType(soapType string) string {
 	}
 }
 
-func writeStagingValues(ctx context.Context, tx pgx.Tx, run *SyncRun, taskID string, values []projectedValue, now time.Time) error {
+// paramSyncUpsertBatchSize 是 writeStagingValues/upsertOfficialValues 单条多行 INSERT 携带的最大
+// 参数值行数。此前逐值单条 tx.Exec，一次任务结果几十~上百个参数值就是几十~上百次网络往返 +
+// 语句 parse/plan，是压测（万级设备并发同步）下 postgres CPU 被打满的主因之一——已有整改方案
+// 明确要求（docs/review-report/20260714/PARAM_SYNC_REMEDIATION_PLAN.md §16.10）"正式参数写入
+// 使用 pgx.CopyFrom、unnest 或等价批量方式，禁止逐参数单条 upsert"。这里选多行 VALUES 而非
+// CopyFrom：批量通常几十到几百行（单task的GetParameterValues响应），COPY 需要额外落临时表才能
+// 支持 ON CONFLICT 语义，收益不及实现复杂度；多行 INSERT 已经把 N 次往返收敛成 1 次。500 行 ×
+// 8/11 列远低于 PG 65535 参数上限，留足安全边际。
+const paramSyncUpsertBatchSize = 500
+
+// dedupeProjectedValuesByPath 按 ParameterPath 去重，同路径保留最后一个值——和原来逐条
+// tx.Exec 顺序执行、后写覆盖前写的语义一致。同一批多行 INSERT ... ON CONFLICT DO UPDATE
+// 不允许在同一条语句里两次命中同一冲突目标（PG 报 "ON CONFLICT DO UPDATE command cannot
+// affect row a second time"），而 translator 把不同 private path 映射到同一 StandardPath
+// 是已知可能场景（多实例映射未命中时的兜底），必须先去重才能安全批量。
+func dedupeProjectedValuesByPath(values []projectedValue) []projectedValue {
+	if len(values) < 2 {
+		return values
+	}
+	order := make([]string, 0, len(values))
+	byPath := make(map[string]projectedValue, len(values))
 	for _, value := range values {
-		encoded, err := json.Marshal(value.Value)
-		if err != nil {
-			return fmt.Errorf("encode staging parameter value: %w", err)
+		if _, exists := byPath[value.ParameterPath]; !exists {
+			order = append(order, value.ParameterPath)
 		}
-		query, args, err := storage.Psql.Insert("parameter_sync_staging_values").
-			Columns("run_id", "parameter_path", "private_path", "value", "value_type", "writable", "fap_instance", "param_group", "task_id", "created_at", "updated_at").
-			Values(run.ID, value.ParameterPath, value.PrivatePath, encoded, value.ParameterType, value.Writable, value.FAPInstance, value.ParamGroup, taskID, now, now).
+		byPath[value.ParameterPath] = value
+	}
+	deduped := make([]projectedValue, 0, len(order))
+	for _, path := range order {
+		deduped = append(deduped, byPath[path])
+	}
+	return deduped
+}
+
+func writeStagingValues(ctx context.Context, tx pgx.Tx, run *SyncRun, taskID string, values []projectedValue, now time.Time) error {
+	values = dedupeProjectedValuesByPath(values)
+	for start := 0; start < len(values); start += paramSyncUpsertBatchSize {
+		end := min(start+paramSyncUpsertBatchSize, len(values))
+		builder := storage.Psql.Insert("parameter_sync_staging_values").
+			Columns("run_id", "parameter_path", "private_path", "value", "value_type", "writable", "fap_instance", "param_group", "task_id", "created_at", "updated_at")
+		for _, value := range values[start:end] {
+			encoded, err := json.Marshal(value.Value)
+			if err != nil {
+				return fmt.Errorf("encode staging parameter value: %w", err)
+			}
+			builder = builder.Values(run.ID, value.ParameterPath, value.PrivatePath, encoded, value.ParameterType, value.Writable, value.FAPInstance, value.ParamGroup, taskID, now, now)
+		}
+		query, args, err := builder.
 			Suffix("ON CONFLICT (run_id, parameter_path) DO UPDATE SET private_path = EXCLUDED.private_path, value = EXCLUDED.value, value_type = EXCLUDED.value_type, writable = EXCLUDED.writable, fap_instance = EXCLUDED.fap_instance, param_group = EXCLUDED.param_group, task_id = EXCLUDED.task_id, updated_at = EXCLUDED.updated_at").
 			ToSql()
 		if err != nil {
-			return fmt.Errorf("build stage parameter sync value: %w", err)
+			return fmt.Errorf("build stage parameter sync value batch: %w", err)
 		}
 		if _, err := tx.Exec(ctx, query, args...); err != nil {
-			return fmt.Errorf("stage parameter sync value: %w", err)
+			return fmt.Errorf("stage parameter sync value batch: %w", err)
 		}
 	}
 	return nil
 }
 
 func upsertOfficialValues(ctx context.Context, tx pgx.Tx, deviceID uuid.UUID, values []projectedValue, now time.Time) error {
-	for _, value := range values {
-		query, args, err := storage.Psql.Insert("device_parameters").
-			Columns("device_id", "parameter_path", "parameter_value", "parameter_type", "writable", "last_updated_at", "fap_instance", "param_group").
-			Values(deviceID, value.ParameterPath, value.Value, value.ParameterType, value.Writable, now, value.FAPInstance, value.ParamGroup).
+	values = dedupeProjectedValuesByPath(values)
+	for start := 0; start < len(values); start += paramSyncUpsertBatchSize {
+		end := min(start+paramSyncUpsertBatchSize, len(values))
+		builder := storage.Psql.Insert("device_parameters").
+			Columns("device_id", "parameter_path", "parameter_value", "parameter_type", "writable", "last_updated_at", "fap_instance", "param_group")
+		for _, value := range values[start:end] {
+			builder = builder.Values(deviceID, value.ParameterPath, value.Value, value.ParameterType, value.Writable, now, value.FAPInstance, value.ParamGroup)
+		}
+		query, args, err := builder.
 			Suffix("ON CONFLICT (device_id, parameter_path) DO UPDATE SET parameter_value = EXCLUDED.parameter_value, parameter_type = EXCLUDED.parameter_type, writable = EXCLUDED.writable, last_updated_at = EXCLUDED.last_updated_at, fap_instance = EXCLUDED.fap_instance, param_group = EXCLUDED.param_group").
 			ToSql()
 		if err != nil {
-			return fmt.Errorf("build upsert parameter sync value: %w", err)
+			return fmt.Errorf("build upsert parameter sync value batch: %w", err)
 		}
 		if _, err := tx.Exec(ctx, query, args...); err != nil {
-			return fmt.Errorf("upsert parameter sync value: %w", err)
+			return fmt.Errorf("upsert parameter sync value batch: %w", err)
 		}
 	}
 	return nil

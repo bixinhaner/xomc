@@ -175,6 +175,36 @@ func TestProjectTaskValuesUsesFrozenMappingSemantics(t *testing.T) {
 	assert.Equal(t, projectedValue{ParameterPath: "Device.X.Vendor.Extension", PrivatePath: "Device.X.Vendor.Extension", Value: "kept", ParameterType: "unsignedInt", Writable: false, FAPInstance: 0, ParamGroup: "other"}, got[1])
 }
 
+// TestDedupeProjectedValuesByPath_KeepsLastAndOriginalOrder 覆盖批量 INSERT ... ON CONFLICT
+// 上批前必须去重的场景：不同 private path（如不同实例）被 translator 映射到同一个
+// StandardPath 时（多实例映射未命中兜底等已知场景），同一条多行 INSERT 语句里对同一冲突
+// 目标 DO UPDATE 两次会被 PG 拒绝（"ON CONFLICT DO UPDATE command cannot affect row a
+// second time"），所以必须先去重、且要保留"后写覆盖前写"的原逐条执行语义。
+func TestDedupeProjectedValuesByPath_KeepsLastAndOriginalOrder(t *testing.T) {
+	values := []projectedValue{
+		{ParameterPath: "Device.Radio.1.Enable", Value: "first"},
+		{ParameterPath: "Device.Radio.2.Enable", Value: "only"},
+		{ParameterPath: "Device.Radio.1.Enable", Value: "last-wins"},
+	}
+
+	got := dedupeProjectedValuesByPath(values)
+
+	require.Len(t, got, 2)
+	assert.Equal(t, projectedValue{ParameterPath: "Device.Radio.1.Enable", Value: "last-wins"}, got[0])
+	assert.Equal(t, projectedValue{ParameterPath: "Device.Radio.2.Enable", Value: "only"}, got[1])
+}
+
+func TestDedupeProjectedValuesByPath_NoDuplicatesReturnsSameValues(t *testing.T) {
+	values := []projectedValue{
+		{ParameterPath: "Device.Radio.1.Enable", Value: "a"},
+		{ParameterPath: "Device.Radio.2.Enable", Value: "b"},
+	}
+
+	got := dedupeProjectedValuesByPath(values)
+
+	assert.Equal(t, values, got)
+}
+
 func TestPlanner_BatchesStayBelowNATSBudget(t *testing.T) {
 	mappings := make([]parammodel.ParamMapping, 0, 1000)
 	for i := range 1000 {

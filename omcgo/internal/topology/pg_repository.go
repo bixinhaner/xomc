@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -19,6 +20,13 @@ import (
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
+// groupTreeCountsCacheTTL 是 GetTreeWithCounts 的短TTL读缓存有效期。
+// 该查询虽然执行本身很快（<1ms），但 devices 是按运营商分区的表，LATERAL 子查询
+// 触发的分区裁剪规划开销很高（实测 Planning Time ~62ms，是 Execution Time 的百倍），
+// 高并发轮询（如分组树前端页面）下会成为 postgres CPU 的主要来源之一。分组结构和
+// 设备计数没有强一致要求，短TTL缓存可以把同一窗口内的并发重复调用收敛成一次真实查询。
+const groupTreeCountsCacheTTL = 3 * time.Second
+
 var groupColumns = []string{
 	"id", "name", "parent_id", "carrier", "description", "sort_order",
 	"level", "status", "is_default", "remark", "created_by", "updated_by",
@@ -31,6 +39,10 @@ var groupColumns = []string{
 // PgDeviceGroupRepository implements DeviceGroupRepository using PostgreSQL.
 type PgDeviceGroupRepository struct {
 	pool *pgxpool.Pool
+
+	treeCountsMu   sync.Mutex
+	treeCountsAt   time.Time
+	treeCountsData []DeviceGroup
 }
 
 // NewPgDeviceGroupRepository creates a new PgDeviceGroupRepository.
@@ -240,7 +252,17 @@ func (r *PgDeviceGroupRepository) GetTree(ctx context.Context) ([]DeviceGroup, e
 
 // GetTreeWithCounts returns all groups with device_count populated.
 // Optimized: Uses LATERAL join for efficient counting instead of GROUP BY on entire table.
+//
+// 短TTL读缓存（groupTreeCountsCacheTTL）：devices 是按运营商分区的表，LATERAL 子查询
+// 每次调用都要重新做分区裁剪规划，实测 Planning Time（~62ms）远高于 Execution Time
+// （<1ms）。分组树接口在高并发轮询/多用户打开分组页时会被大量并发重复调用，缓存把
+// TTL 窗口内的重复调用收敛成一次真实查询，避免规划开销被并发放大成 CPU 热点。分组
+// 结构和设备计数没有强一致性要求，短暂（几秒）过期可接受。
 func (r *PgDeviceGroupRepository) GetTreeWithCounts(ctx context.Context) ([]DeviceGroup, error) {
+	if cached, ok := r.cachedTreeWithCounts(); ok {
+		return cached, nil
+	}
+
 	// 「未分组设备」($1 = DefaultLevel2GroupID）是系统内置组，语义是「整个系统中未绑定任何
 	// 分组的设备」(NOT EXISTS device_group_members)，而非「该组的成员」——和设备列表点进去的
 	// 口径(device_info_pg_repository.ungroupedDevicesWhere)保持一致；其余组仍按成员计数。
@@ -275,7 +297,39 @@ func (r *PgDeviceGroupRepository) GetTreeWithCounts(ctx context.Context) ([]Devi
 	}
 	defer rows.Close()
 
-	return scanGroupsWithCount(rows)
+	groups, err := scanGroupsWithCount(rows)
+	if err != nil {
+		return nil, err
+	}
+	r.storeTreeWithCountsCache(groups)
+	return cloneDeviceGroups(groups), nil
+}
+
+// cachedTreeWithCounts 返回缓存副本（未过期时）。返回副本而非共享切片，是因为
+// service.buildTree 会就地改写传入切片元素（flat[i].Children = nil 等），共享同一
+// 底层数组会在并发调用间互相污染。
+func (r *PgDeviceGroupRepository) cachedTreeWithCounts() ([]DeviceGroup, bool) {
+	r.treeCountsMu.Lock()
+	defer r.treeCountsMu.Unlock()
+	if r.treeCountsData == nil || time.Since(r.treeCountsAt) > groupTreeCountsCacheTTL {
+		return nil, false
+	}
+	return cloneDeviceGroups(r.treeCountsData), true
+}
+
+func (r *PgDeviceGroupRepository) storeTreeWithCountsCache(groups []DeviceGroup) {
+	r.treeCountsMu.Lock()
+	defer r.treeCountsMu.Unlock()
+	r.treeCountsData = groups
+	r.treeCountsAt = time.Now()
+}
+
+// cloneDeviceGroups 返回顶层切片的独立拷贝。DeviceGroup 在这个扁平列表阶段还没有
+// 填充 Children（由 service.buildTree 之后才构建），值拷贝足够安全。
+func cloneDeviceGroups(src []DeviceGroup) []DeviceGroup {
+	out := make([]DeviceGroup, len(src))
+	copy(out, src)
+	return out
 }
 
 // ExistsByParentAndName checks if a group with the given name exists under the parent.
