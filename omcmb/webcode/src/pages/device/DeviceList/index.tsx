@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { App, Badge, Button, Card, Checkbox, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { App, Badge, Button, Card, Checkbox, Drawer, Form, Input, InputNumber, Modal, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   AlertOutlined,
@@ -15,7 +15,6 @@ import {
   LinkOutlined,
   ReloadOutlined,
   SyncOutlined,
-  WarningOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn, BatchAction } from '@/components/DataTable';
@@ -61,6 +60,9 @@ import { buildDefaultUfteTaskName } from '@/pages/transfer/shared';
 import dayjs from 'dayjs';
 import { buildBatchTaskTypeMap, batchActionHasDetail, removeParamSyncOptimisticDeviceId } from './deviceBatchTask';
 import { getDeviceListParamSyncPaths } from './deviceListParamSync';
+import { shouldShowLocationSyncIndicator } from './deviceGpsSyncIndicator';
+import GpsSyncConfirmModal from './GpsSyncConfirmModal';
+import GpsSyncTrigger from './GpsSyncTrigger';
 import type { Device } from '@core/types/device';
 import { formatSystemTime } from '@core/utils/systemTime';
 import { computeCumulativeOnlineDurationSeconds, computeCurrentOnlineDurationSeconds } from '@core/utils/onlineDuration';
@@ -366,6 +368,7 @@ export default function DeviceList() {
   const [collectDrawerTitle, setCollectDrawerTitle] = useState('');
   const [batchAlarmSyncRunning, setBatchAlarmSyncRunning] = useState(false);
   const [batchParamSyncRunning, setBatchParamSyncRunning] = useState(false);
+  const [gpsSyncConfirmDevice, setGpsSyncConfirmDevice] = useState<Device | null>(null);
 
   const clearOptimisticParamSyncDevice = useCallback((deviceId: string) => {
     setOptimisticParamSyncDeviceIds((prev) => removeParamSyncOptimisticDeviceId(prev, deviceId));
@@ -536,32 +539,19 @@ export default function DeviceList() {
   }, [message, refetch, t]);
 
   const renderLocationCell = useCallback((value: number | null | undefined, record: Device) => {
-    if (value == null) return '--';
-    const sync = record.locationSync;
-    const reported = sync.status === 'pending' ? sync.reported : undefined;
-    if (!reported) return value;
+    const showSyncIndicator = shouldShowLocationSyncIndicator(value);
+    const displayValue = value == null ? '--' : value;
+    if (!showSyncIndicator) return displayValue;
     return (
       <Space size={4}>
-        <Popconfirm
-          title={t('device.gpsSyncConfirmTitle')}
-          description={t('device.gpsSyncDetails', {
-            acceptedLongitude: record.longitude ?? '--',
-            acceptedLatitude: record.latitude ?? '--',
-            reportedLongitude: reported.longitude,
-            reportedLatitude: reported.latitude,
-            distance: Math.round(sync.distanceMeters ?? 0),
-            observedAt: reported.observedAt,
-          })}
-          onConfirm={() => void acceptLocationSync(record)}
-          okText={t('common.confirm')}
-          cancelText={t('common.cancel')}
-        >
-          <WarningOutlined style={{ color: '#faad14', cursor: 'pointer' }} />
-        </Popconfirm>
-        {value}
+        <GpsSyncTrigger
+          label={t('device.gpsSyncAction')}
+          onClick={() => setGpsSyncConfirmDevice(record)}
+        />
+        {displayValue}
       </Space>
     );
-  }, [acceptLocationSync, t]);
+  }, [t]);
   const [refreshSpinnerActive, setRefreshSpinnerActive] = useState(false);
   const refreshSpinStartedAtRef = useRef<number | null>(null);
   const refreshSpinTimeoutRef = useRef<number | null>(null);
@@ -2670,6 +2660,16 @@ export default function DeviceList() {
 
       {exportConfirmModal}
       {periodicSyncModal}
+      <GpsSyncConfirmModal
+        open={gpsSyncConfirmDevice != null}
+        device={gpsSyncConfirmDevice}
+        onCancel={() => setGpsSyncConfirmDevice(null)}
+        onConfirm={() => {
+          const device = gpsSyncConfirmDevice;
+          setGpsSyncConfirmDevice(null);
+          if (device) void acceptLocationSync(device);
+        }}
+      />
     </div>
   );
 }
