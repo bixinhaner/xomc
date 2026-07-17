@@ -107,3 +107,26 @@ storage_prepare_env_paths() {
     fi
   done
 }
+
+storage_prepare_configured_env_paths() {
+  local env_file="$1" key value
+  for key in $STORAGE_PATH_KEYS; do
+    value="$(storage_env_get "$env_file" "$key")"
+    [ -z "$value" ] && continue
+    case "$value" in
+      /*) ;;
+      *)
+        printf '[storage][错误] %s 必须是绝对路径，当前值：%s\n' "$key" "$value" >&2
+        return 1
+        ;;
+    esac
+    mkdir -p "$value" || {
+      printf '[storage][错误] 无法创建 %s=%s\n' "$key" "$value" >&2
+      return 1
+    }
+    if [ ! -d "$value" ] || [ ! -w "$value" ]; then
+      printf '[storage][错误] 数据目录不可写：%s=%s\n' "$key" "$value" >&2
+      return 1
+    fi
+  done
+}

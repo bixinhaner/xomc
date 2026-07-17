@@ -72,5 +72,20 @@ else
   bad "合法绝对路径应能准备目录"
 fi
 
+echo "── 生命周期入口只准备已配置路径 ──"
+PARTIAL_ENV="$TMP/partial.env"
+printf 'POSTGRES_DATA_PATH=%s\nTSDB_DATA_PATH=\n' "$TMP/partial/postgres" > "$PARTIAL_ENV"
+if storage_prepare_configured_env_paths "$PARTIAL_ENV"; then
+  [ -d "$TMP/partial/postgres" ] && ok || bad "已配置路径应创建"
+else
+  bad "部分组件配置路径应被允许"
+fi
+printf 'POSTGRES_DATA_PATH=relative/postgres\n' > "$PARTIAL_ENV"
+if storage_prepare_configured_env_paths "$PARTIAL_ENV" >/dev/null 2>&1; then
+  bad "已配置的相对路径应失败"
+else
+  ok
+fi
+
 echo "════ Results: PASS=$PASS FAIL=$FAIL ════"
 [ "$FAIL" -eq 0 ]

@@ -231,6 +231,14 @@ MINIO_ROOT_USER=REPLACE_ME
 MINIO_ROOT_PASSWORD=REPLACE_ME
 GRAFANA_ADMIN_USER=admin
 GRAFANA_ADMIN_PASSWORD=REPLACE_ME
+# 有状态服务数据目录（非密钥）。留空继续使用原 Docker 命名卷，升级不会隐式切换数据。
+# 新部署建议先运行 deploy/plan-resources.sh 自动填入最大可用盘，再按物理 SSD/NVMe 人工拆分。
+# 已有数据修改这些值前必须停服并完成数据复制；脚本不会自动迁移。
+POSTGRES_DATA_PATH=
+TSDB_DATA_PATH=
+REDIS_DATA_PATH=
+NATS_DATA_PATH=
+MINIO_DATA_PATH=
 # OMC 运行环境（容器内 entrypoint.sh 读）
 OMCGO_ENV=prod
 # JWT 密钥（app 容器读）—— 由 install.sh ensure_secrets 自动生成（#175）
