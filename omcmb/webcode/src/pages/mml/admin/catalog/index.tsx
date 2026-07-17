@@ -379,7 +379,10 @@ export default function MMLAdminCatalog() {
         style={{
           display: 'flex',
           gap: 16,
-          minHeight: 'calc(100vh - 280px)',
+          // 与「选择命令」弹框一样固定主体高度，让左右栏各自承载滚动。
+          // 仅设置 minHeight 会让内容把父容器继续撑高，滚动实际落到页面主容器。
+          height: 'calc(100vh - 280px)',
+          minHeight: 0,
           alignItems: 'stretch',
         }}
       >
@@ -389,7 +392,8 @@ export default function MMLAdminCatalog() {
             flexShrink: 0,
             borderRight: '1px solid #f0f0f0',
             paddingRight: 12,
-            overflowY: 'auto',
+            minHeight: 0,
+            overflow: 'auto',
           }}
         >
           <LeftNavTree
@@ -404,7 +408,7 @@ export default function MMLAdminCatalog() {
             extraNodes={[customizedNode]}
           />
         </div>
-        <div style={{ flex: 1, overflowY: 'auto' }}>
+        <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto' }}>
           {selectedCustom ? (
             <CustomCommandDetailPanel
               command={selectedCustom}
