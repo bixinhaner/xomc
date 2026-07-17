@@ -116,6 +116,8 @@ export interface DeviceTaskResultItem {
   planOrder?: number;
   planRawLine?: string;
   commandCode?: string;
+  /** 后端任务快照中的用户可见命令名（自定义命令也必须保留）。 */
+  commandName?: string;
   operationType?: string;
   deviceName?: string;
   mmlScript?: string;

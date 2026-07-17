@@ -607,6 +607,7 @@ function mapBackendResult(br: Record<string, unknown>): DeviceTaskResultItem {
     planOrder: typeof br.plan_order === 'number' ? (br.plan_order as number) : undefined,
     planRawLine: (br.plan_raw_line as string) || undefined,
     commandCode: (br.command_code as string) || undefined,
+    commandName: (br.command_name as string) || undefined,
     operationType: (br.operation_type as string) || undefined,
     deviceName: (br.device_name as string) || undefined,
     mmlScript: (br.mml_script as string) || (br.command as string) || undefined,
@@ -1400,6 +1401,7 @@ export const mmlApi = {
       commandCode?: string;
       operationType?: string;
       templateScope?: string;
+      productId?: string;
     } & PageRequest
   ): Promise<PageResponse<MMLCustomCommand>> {
     const query: Record<string, unknown> = {
@@ -1411,6 +1413,7 @@ export const mmlApi = {
     // T-0090-d：后端 handler.go L722 实际读 `command_scope`，本端旧 `template_scope`
     // 与之不一致导致 scope 过滤被静默忽略；按后端契约对齐。
     if (params?.templateScope) query.command_scope = params.templateScope;
+    if (params?.productId) query.product_id = params.productId;
 
     const { data } = await http.get<BackendListResponse<BackendMMLCustomCommand>>(
       '/mml/templates',

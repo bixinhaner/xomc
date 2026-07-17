@@ -15,6 +15,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 
+	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	"github.com/omcgo/omcgo/pkg/soap"
 )
 
@@ -160,7 +161,6 @@ func taskIsRead(commands []map[string]interface{}) bool {
 // exportRow 一台设备一行的导出数据。
 type exportRow struct {
 	sn          string
-	statusText  string
 	values      map[string]string // standardPath -> 读回值（读类）
 	faultCode   string
 	faultMsg    string
@@ -168,7 +168,27 @@ type exportRow struct {
 	completedAt string
 }
 
-func deviceStatusText(status string, errorCode int) string {
+func localizedDeviceStatusText(status string, errorCode int, locale appcontext.Locale) string {
+	if locale == appcontext.LocaleEN {
+		if status == "completed" && errorCode == 0 {
+			return "Success"
+		}
+		switch status {
+		case "completed":
+			return "Success"
+		case "failed":
+			return "Failed"
+		case "expired":
+			return "Timeout"
+		case "pending", "running":
+			return "Running"
+		default:
+			if status == "" {
+				return "Unknown"
+			}
+			return status
+		}
+	}
 	if status == "completed" && errorCode == 0 {
 		return "成功"
 	}
@@ -189,6 +209,82 @@ func deviceStatusText(status string, errorCode int) string {
 	}
 }
 
+type exportLabels struct {
+	header        []string
+	deviceSN      string
+	command       string
+	operation     string
+	executionMode string
+	deviceStatus  string
+	parameterPath string
+	parameterName string
+	status        string
+	readbackValue string
+	faultCode     string
+	faultMessage  string
+	subtaskID     string
+	sentAt        string
+	responseAt    string
+	resultXML     string
+	pending       string
+}
+
+func labelsForLocale(locale appcontext.Locale) exportLabels {
+	if locale == appcontext.LocaleEN {
+		return exportLabels{
+			header:        []string{"Index", "Device SN", "Command", "Operation", "Parameter Path", "Parameter Name", "Status", "Readback Value", "Fault Code", "Fault Message", "Sent Time", "Response Time", "Result XML"},
+			deviceSN:      "Device SN",
+			command:       "Command",
+			operation:     "Operation",
+			executionMode: "Execution Mode",
+			deviceStatus:  "Device Status",
+			parameterPath: "Parameter Path",
+			parameterName: "Parameter Name",
+			status:        "Status",
+			readbackValue: "Readback Value",
+			faultCode:     "Fault Code",
+			faultMessage:  "Fault Message",
+			subtaskID:     "Subtask ID",
+			sentAt:        "Sent Time",
+			responseAt:    "Response Time",
+			resultXML:     "Result XML",
+			pending:       "Pending",
+		}
+	}
+	return exportLabels{
+		header:        []string{"序号", "设备SN", "命令", "操作类型", "参数路径", "参数名称", "状态", "读回值", "故障码", "故障信息", "下发时间", "响应时间", "结果报文(XML)"},
+		deviceSN:      "设备SN",
+		command:       "命令",
+		operation:     "操作类型",
+		executionMode: "执行模式",
+		deviceStatus:  "设备状态",
+		parameterPath: "参数路径",
+		parameterName: "参数名称",
+		status:        "状态",
+		readbackValue: "读回值",
+		faultCode:     "故障码",
+		faultMessage:  "故障信息",
+		subtaskID:     "子任务ID",
+		sentAt:        "下发时间",
+		responseAt:    "响应时间",
+		resultXML:     "结果报文(XML)",
+		pending:       "待执行",
+	}
+}
+
+func execModeLabelForLocale(commands []map[string]interface{}, locale appcontext.Locale) string {
+	if len(commands) > 1 {
+		if locale == appcontext.LocaleEN {
+			return "Per PATH"
+		}
+		return "逐 PATH"
+	}
+	if locale == appcontext.LocaleEN {
+		return "Whole"
+	}
+	return "整体执行"
+}
+
 func leafOf(path string) string {
 	parts := strings.Split(path, ".")
 	for i := len(parts) - 1; i >= 0; i-- {
@@ -202,10 +298,9 @@ func leafOf(path string) string {
 // rowToExport 把 device_tasks 结果行转为导出行；读类解析 GPV 原始报文回填列值。
 func rowToExport(row DeviceTaskResultRowView, cols []exportColumn, read bool) exportRow {
 	er := exportRow{
-		sn:         row.DeviceSN,
-		statusText: deviceStatusText(row.Status, row.ErrorCode),
-		values:     map[string]string{},
-		faultMsg:   row.ErrorMessage,
+		sn:       row.DeviceSN,
+		values:   map[string]string{},
+		faultMsg: row.ErrorMessage,
 	}
 	if row.ErrorCode != 0 {
 		er.faultCode = strconv.Itoa(row.ErrorCode)
@@ -289,7 +384,7 @@ func commandStandardPaths(commands []map[string]interface{}, ci int) []string {
 	return out
 }
 
-// commandPathNames 从 commands 的 param_refs 抽 standardPath → 参数名称（param_name_zh）映射。
+// commandPathNames 从 commands 的 param_refs 抽 standardPath → 参数名称（旧字段名 param_name_zh）映射。
 func commandPathNames(commands []map[string]interface{}) map[string]string {
 	names := make(map[string]string)
 	for _, entry := range commands {
@@ -321,12 +416,11 @@ func commandStringField(commands []map[string]interface{}, ci int, key string) s
 	return v
 }
 
-// execModeLabel 推导执行模式：逐 PATH 拆成 N 条 command（每条 1 path）；整体执行为单条 command。
-func execModeLabel(commands []map[string]interface{}) string {
-	if len(commands) > 1 {
-		return "逐 PATH"
+func commandDisplayField(commands []map[string]interface{}, ci int) string {
+	if name := commandStringField(commands, ci, "command_name"); name != "" {
+		return name
 	}
-	return "整体执行"
+	return commandStringField(commands, ci, "command_code")
 }
 
 // flattenXML 把多行 XML 报文压成一行（空白折叠为单空格），便于放进 CSV 单元格（方式 B）。
@@ -337,24 +431,22 @@ func flattenXML(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-// longFormatHeader 是多设备汇总长表表头。
-var longFormatHeader = []string{
-	"序号", "设备SN", "命令", "操作类型", "执行模式", "子任务ID",
-	"参数路径", "参数名称", "状态", "读回值", "故障码", "故障信息",
-	"下发时间", "响应时间", "结果报文(XML)",
-}
-
 // buildLongFormatCSV 多设备汇总（长表，一行 = 设备 × PATH）：
-//   - 设备级公共字段（序号/设备SN/命令/操作类型/执行模式）只在该设备首行填；
-//   - 子任务级字段（子任务ID/下发/响应/结果报文）只在该 device_task 首行填（整体执行=1 个 RPC→只首行；
-//     逐 PATH=N 个 RPC→各自首行），报文压一行不重复；
-//   - PATH 级字段（参数路径/参数名称/状态/读回值/故障码/故障信息）每行都填；
-//   - 设备之间空一行。
+// 保留该函数供旧的包内调用使用；HTTP 导出入口使用带 locale 的实现。
 func buildLongFormatCSV(
 	cols []exportColumn, rows []DeviceTaskResultRowView, commands []map[string]interface{},
 	nameMap map[string]string, read bool,
 ) ([]byte, error) {
-	execMode := execModeLabel(commands)
+	return buildLongFormatCSVForLocale(cols, rows, commands, nameMap, read, appcontext.LocaleZH)
+}
+
+// buildLongFormatCSVForLocale 多设备汇总（长表，一行 = 设备 × PATH）。
+// 汇总表不再输出执行模式和子任务 ID 两列，也不插入设备间空行，保证 CSV 可以按 PATH
+// 连续筛选和处理；设备/任务信息仍由任务详情接口提供。
+func buildLongFormatCSVForLocale(
+	cols []exportColumn, rows []DeviceTaskResultRowView, commands []map[string]interface{},
+	nameMap map[string]string, read bool, locale appcontext.Locale,
+) ([]byte, error) {
 
 	order := make([]string, 0)
 	groups := make(map[string][]DeviceTaskResultRowView)
@@ -369,22 +461,18 @@ func buildLongFormatCSV(
 	var buf bytes.Buffer
 	buf.WriteString(utf8BOM)
 	w := csv.NewWriter(&buf)
-	if err := w.Write(longFormatHeader); err != nil {
+	labels := labelsForLocale(locale)
+	if err := w.Write(labels.header); err != nil {
 		return nil, err
 	}
 
 	deviceSeq := 0
-	for di, sn := range order {
-		if di > 0 {
-			if err := w.Write(make([]string, len(longFormatHeader))); err != nil { // 设备间空行
-				return nil, err
-			}
-		}
+	for _, sn := range order {
 		deviceSeq++
 		firstRowOfDevice := true
 		for _, row := range groups[sn] {
 			er := rowToExport(row, cols, read)
-			status := deviceStatusText(row.Status, row.ErrorCode)
+			status := localizedDeviceStatusText(row.Status, row.ErrorCode, locale)
 			faultCode, faultMsg := "", ""
 			if row.ErrorCode != 0 {
 				faultCode = strconv.Itoa(row.ErrorCode)
@@ -394,28 +482,29 @@ func buildLongFormatCSV(
 			paths := commandStandardPaths(commands, row.CommandIndex)
 			firstRowOfTask := true
 			for _, p := range paths {
-				rec := make([]string, len(longFormatHeader))
+				rec := make([]string, len(labels.header))
 				if firstRowOfDevice { // 设备级公共字段：仅设备首行
 					rec[0] = strconv.Itoa(deviceSeq)
 					rec[1] = sn
-					rec[2] = commandStringField(commands, row.CommandIndex, "command_code")
+					rec[2] = commandDisplayField(commands, row.CommandIndex)
 					rec[3] = commandStringField(commands, row.CommandIndex, "operation_type")
-					rec[4] = execMode
 					firstRowOfDevice = false
 				}
-				if firstRowOfTask { // 子任务级字段：仅该 device_task 首行（整体执行不重复报文）
-					rec[5] = row.DeviceTaskID
-					rec[12] = er.sentAt
-					rec[13] = er.completedAt
-					rec[14] = raw
+				if firstRowOfTask { // 下发/响应/报文仅在该 device_task 首行填，避免重复
+					rec[10] = er.sentAt
+					rec[11] = er.completedAt
+					rec[12] = raw
 					firstRowOfTask = false
 				}
-				rec[6] = p // PATH 级：每行
-				rec[7] = nameMap[p]
-				rec[8] = status
-				rec[9] = er.values[p]
-				rec[10] = faultCode
-				rec[11] = faultMsg
+				rec[4] = p // PATH 级：每行
+				rec[5] = nameMap[p]
+				if rec[5] == "" {
+					rec[5] = p
+				}
+				rec[6] = status
+				rec[7] = er.values[p]
+				rec[8] = faultCode
+				rec[9] = faultMsg
 				if err := w.Write(rec); err != nil {
 					return nil, err
 				}
@@ -436,6 +525,14 @@ func buildDeviceCSVMulti(
 	cols []exportColumn, devRows []DeviceTaskResultRowView, commands []map[string]interface{},
 	nameMap map[string]string, read bool,
 ) ([]byte, error) {
+	return buildDeviceCSVMultiForLocale(cols, devRows, commands, nameMap, read, appcontext.LocaleZH)
+}
+
+func buildDeviceCSVMultiForLocale(
+	cols []exportColumn, devRows []DeviceTaskResultRowView, commands []map[string]interface{},
+	nameMap map[string]string, read bool, locale appcontext.Locale,
+) ([]byte, error) {
+	labels := labelsForLocale(locale)
 	// 设备级状态：全成功=成功 / 全失败=失败 / 混合=部分失败。
 	anySucc, anyFail := false, false
 	for _, row := range devRows {
@@ -445,18 +542,22 @@ func buildDeviceCSVMulti(
 			anyFail = true
 		}
 	}
-	devStatus := "成功"
+	devStatus := localizedDeviceStatusText("completed", 0, locale)
 	switch {
 	case anyFail && anySucc:
-		devStatus = "部分失败"
+		if locale == appcontext.LocaleEN {
+			devStatus = "Partially Failed"
+		} else {
+			devStatus = "部分失败"
+		}
 	case anyFail:
-		devStatus = "失败"
+		devStatus = localizedDeviceStatusText("failed", 1, locale)
 	}
 
 	cmdCode := ""
 	opType := ""
 	if len(devRows) > 0 {
-		cmdCode = commandStringField(commands, devRows[0].CommandIndex, "command_code")
+		cmdCode = commandDisplayField(commands, devRows[0].CommandIndex)
 		opType = commandStringField(commands, devRows[0].CommandIndex, "operation_type")
 	}
 
@@ -465,13 +566,13 @@ func buildDeviceCSVMulti(
 	w := csv.NewWriter(&buf)
 	// 顶部设备摘要（公共字段一次）。
 	for _, line := range [][]string{
-		{"设备SN", devRows[0].DeviceSN},
-		{"命令", cmdCode},
-		{"操作类型", opType},
-		{"执行模式", execModeLabel(commands)},
-		{"设备状态", devStatus},
+		{labels.deviceSN, devRows[0].DeviceSN},
+		{labels.command, cmdCode},
+		{labels.operation, opType},
+		{labels.executionMode, execModeLabelForLocale(commands, locale)},
+		{labels.deviceStatus, devStatus},
 		{},
-		{"参数路径", "参数名称", "状态", "读回值", "故障码", "故障信息", "子任务ID", "下发时间", "响应时间", "结果报文(XML)"},
+		{labels.parameterPath, labels.parameterName, labels.status, labels.readbackValue, labels.faultCode, labels.faultMessage, labels.subtaskID, labels.sentAt, labels.responseAt, labels.resultXML},
 	} {
 		if err := w.Write(line); err != nil {
 			return nil, err
@@ -481,7 +582,7 @@ func buildDeviceCSVMulti(
 	// 逐 PATH 明细：子任务级字段（子任务ID/下发/响应/报文）只在该 device_task 首行填。
 	for _, row := range devRows {
 		er := rowToExport(row, cols, read)
-		status := deviceStatusText(row.Status, row.ErrorCode)
+		status := localizedDeviceStatusText(row.Status, row.ErrorCode, locale)
 		faultCode, faultMsg := "", ""
 		if row.ErrorCode != 0 {
 			faultCode = strconv.Itoa(row.ErrorCode)
@@ -490,7 +591,11 @@ func buildDeviceCSVMulti(
 		raw := flattenXML(rawResponseOf(row.Result))
 		firstRowOfTask := true
 		for _, p := range commandStandardPaths(commands, row.CommandIndex) {
-			rec := []string{p, nameMap[p], status, er.values[p], faultCode, faultMsg, "", "", "", ""}
+			name := nameMap[p]
+			if name == "" {
+				name = p
+			}
+			rec := []string{p, name, status, er.values[p], faultCode, faultMsg, "", "", "", ""}
 			if firstRowOfTask {
 				rec[6] = row.DeviceTaskID
 				rec[7] = er.sentAt
@@ -517,6 +622,11 @@ var deviceBoundPlanHeader = []string{
 }
 
 func buildDeviceBoundPlanCSV(task *MMLTask, rows []DeviceTaskResultRowView, deviceSN string) ([]byte, error) {
+	return buildDeviceBoundPlanCSVForLocale(task, rows, deviceSN, appcontext.LocaleZH)
+}
+
+func buildDeviceBoundPlanCSVForLocale(task *MMLTask, rows []DeviceTaskResultRowView, deviceSN string, locale appcontext.Locale) ([]byte, error) {
+	labels := labelsForLocale(locale)
 	rowByPlanIndex := make(map[int]DeviceTaskResultRowView, len(rows))
 	for _, row := range rows {
 		if row.CommandIndex < 0 {
@@ -533,7 +643,11 @@ func buildDeviceBoundPlanCSV(task *MMLTask, rows []DeviceTaskResultRowView, devi
 	var buf bytes.Buffer
 	buf.WriteString(utf8BOM)
 	w := csv.NewWriter(&buf)
-	if err := w.Write(deviceBoundPlanHeader); err != nil {
+	header := deviceBoundPlanHeader
+	if locale == appcontext.LocaleEN {
+		header = []string{"Task ID", "Task Name", "Line No.", "Device SN", "Order", "Raw Script Line", "Command Code", "RPC Method", "Operation", "Parameters", "Subtask ID", "Status", "Fault Code", "Failure Reason", "Sent Time", "Response Time", "Result XML"}
+	}
+	if err := w.Write(header); err != nil {
 		return nil, err
 	}
 
@@ -543,10 +657,10 @@ func buildDeviceBoundPlanCSV(task *MMLTask, rows []DeviceTaskResultRowView, devi
 			continue
 		}
 		row, hasRow := rowByPlanIndex[idx]
-		status := "待执行"
+		status := labels.pending
 		faultCode, faultMsg, sentAt, completedAt, raw, deviceTaskID := "", "", "", "", "", ""
 		if hasRow {
-			status = deviceStatusText(row.Status, row.ErrorCode)
+			status = localizedDeviceStatusText(row.Status, row.ErrorCode, locale)
 			if row.ErrorCode != 0 {
 				faultCode = strconv.Itoa(row.ErrorCode)
 				faultMsg = row.ErrorMessage
@@ -614,9 +728,8 @@ func commandParametersSummary(command map[string]interface{}) string {
 
 // ── Service 导出方法 ──────────────────────────────────────────────────────────
 
-// resolvePathNames 解析 standardPath → 友好名（CSV「参数名称」列）。优先 pathNameResolver
-// （standard_params.description）；缺失的 path 回退 commandPathNames（param_refs.param_name_zh，
-// 排除名==path 的冗余值）。
+// resolvePathNames 解析 standardPath → 友好名（CSV「参数名称」列）。优先使用带 locale 的
+// pathNameResolver；中文缺失时回退任务快照中的旧 param_name_zh，英文缺失时由调用方回退 PATH。
 func (s *Service) resolvePathNames(ctx context.Context, cols []exportColumn, commands []map[string]interface{}) map[string]string {
 	names := make(map[string]string)
 	if s.pathNameResolver != nil && len(cols) > 0 {
@@ -634,9 +747,11 @@ func (s *Service) resolvePathNames(ctx context.Context, cols []exportColumn, com
 			s.logger.Warn("resolve path names for csv export", zap.Error(err))
 		}
 	}
-	for path, name := range commandPathNames(commands) {
-		if _, ok := names[path]; !ok && name != "" && name != path {
-			names[path] = name
+	if appcontext.GetLocale(ctx) != appcontext.LocaleEN {
+		for path, name := range commandPathNames(commands) {
+			if _, ok := names[path]; !ok && name != "" && name != path {
+				names[path] = name
+			}
 		}
 	}
 	return names
@@ -673,10 +788,11 @@ func (s *Service) AggregateCSVBytes(ctx context.Context, taskID uuid.UUID) ([]by
 		return nil, err
 	}
 	if task.ExecuteMode == TaskExecuteModeDeviceBound {
-		return buildDeviceBoundPlanCSV(task, rows, "")
+		return buildDeviceBoundPlanCSVForLocale(task, rows, "", appcontext.GetLocale(ctx))
 	}
+	s.enrichCommandNames(ctx, task.Commands)
 	nameMap := s.resolvePathNames(ctx, cols, task.Commands)
-	return buildLongFormatCSV(cols, rows, task.Commands, nameMap, read)
+	return buildLongFormatCSVForLocale(cols, rows, task.Commands, nameMap, read, appcontext.GetLocale(ctx))
 }
 
 // DeviceCSVBytes 直接生成「单设备」CSV 字节（不落 MinIO），供同源流式下载。
@@ -695,8 +811,9 @@ func (s *Service) DeviceCSVBytes(ctx context.Context, taskID uuid.UUID, deviceSN
 		return nil, err
 	}
 	if task.ExecuteMode == TaskExecuteModeDeviceBound {
-		return buildDeviceBoundPlanCSV(task, rows, deviceSN)
+		return buildDeviceBoundPlanCSVForLocale(task, rows, deviceSN, appcontext.GetLocale(ctx))
 	}
+	s.enrichCommandNames(ctx, task.Commands)
 	var devRows []DeviceTaskResultRowView
 	for i := range rows {
 		if rows[i].DeviceSN == deviceSN {
@@ -707,7 +824,7 @@ func (s *Service) DeviceCSVBytes(ctx context.Context, taskID uuid.UUID, deviceSN
 		return nil, commonDeviceResultNotFound
 	}
 	nameMap := s.resolvePathNames(ctx, cols, task.Commands)
-	return buildDeviceCSVMulti(cols, devRows, task.Commands, nameMap, read)
+	return buildDeviceCSVMultiForLocale(cols, devRows, task.Commands, nameMap, read, appcontext.GetLocale(ctx))
 }
 
 func (s *Service) ExportTaskResultsCSV(ctx context.Context, taskID uuid.UUID) (objectKey, downloadURL string, err error) {

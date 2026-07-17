@@ -111,7 +111,11 @@ func (s *ConsoleService) BuildGroupTreeFiltered(ctx context.Context, rootCode, l
 	if supported.Paths == nil {
 		supported.Paths = map[string]struct{}{}
 	}
-	filterTreeInPlace(tree, supported)
+	blocked, err := s.unsupportedPathsForProduct(ctx, supported.ProductID)
+	if err != nil {
+		return nil, err
+	}
+	filterTreeInPlace(tree, supported, blocked)
 	tree = pruneEmptyGroups(tree)
 	return tree, nil
 }
@@ -140,7 +144,11 @@ func (s *ConsoleService) BuildGroupTreeFilteredByDevice(
 	if err != nil {
 		return nil, err
 	}
-	filterTreeInPlace(tree, supported)
+	blocked, err := s.unsupportedPathsForDevice(ctx, deviceKey)
+	if err != nil {
+		return nil, err
+	}
+	filterTreeInPlace(tree, supported, blocked)
 	return pruneEmptyGroups(tree), nil
 }
 
@@ -177,15 +185,24 @@ func (s *ConsoleService) resolveSupportedSetByDevice(
 	}, nil
 }
 
-// filterTreeInPlace 递归遍历 tree，按 supported 给每个 command 加标注，
-// 隐藏 visible=false 的命令。原 slice 被改动（in-place）。
-func filterTreeInPlace(nodes []GroupTreeNode, supported *SupportedSet) {
+// filterTreeInPlace 递归遍历 tree，按静态 ParamModel 支持集合和运行时不支持 path
+// 集合给每个 command 加标注，隐藏最终无可用 path 的命令。原 slice 被改动（in-place）。
+func filterTreeInPlace(nodes []GroupTreeNode, supported *SupportedSet, blocked *unsupportedPathFilter) {
 	for i := range nodes {
 		kept := nodes[i].Commands[:0]
 		for _, cmd := range nodes[i].Commands {
 			ann := AnnotateCommand(cmd.OperationType, cmd.TargetPathsRaw(), cmd.TargetObject, supported)
 			if !ann.Visible {
 				continue
+			}
+			if blocked != nil {
+				available := countAvailableCommandPaths(cmd, supported, blocked)
+				if cmd.OperationType == "LST" || cmd.OperationType == "MOD" {
+					ann.SupportedPathCount = available
+				}
+				if available == 0 {
+					continue
+				}
 			}
 			// 复制标注到响应字段（指针字段允许 omitempty 不出现在未过滤路径上）
 			supported := ann.SupportedPathCount
@@ -196,8 +213,30 @@ func filterTreeInPlace(nodes []GroupTreeNode, supported *SupportedSet) {
 			kept = append(kept, cmd)
 		}
 		nodes[i].Commands = kept
-		filterTreeInPlace(nodes[i].Children, supported)
+		filterTreeInPlace(nodes[i].Children, supported, blocked)
 	}
+}
+
+func (s *ConsoleService) unsupportedPathsForProduct(ctx context.Context, productID *uuid.UUID) (*unsupportedPathFilter, error) {
+	if s.unsupportedRepo == nil || productID == nil {
+		return nil, nil
+	}
+	paths, err := s.unsupportedRepo.ListByProduct(ctx, *productID)
+	if err != nil {
+		return nil, fmt.Errorf("list unsupported paths for product %s: %w", productID, err)
+	}
+	return newUnsupportedPathFilter(paths), nil
+}
+
+func (s *ConsoleService) unsupportedPathsForDevice(ctx context.Context, deviceKey string) (*unsupportedPathFilter, error) {
+	if s.unsupportedRepo == nil || s.productIDByDev == nil {
+		return nil, nil
+	}
+	productID, err := s.productIDByDev(ctx, deviceKey)
+	if err != nil {
+		return nil, fmt.Errorf("resolve product_id for unsupported paths on device %q: %w", deviceKey, err)
+	}
+	return s.unsupportedPathsForProduct(ctx, productID)
 }
 
 // pruneEmptyGroups 递归剔除"自身无命令且子树也全空"的 group（含 chapter 顶层）。
