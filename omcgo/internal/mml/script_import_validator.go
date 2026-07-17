@@ -149,12 +149,12 @@ func parsedStandardPathLookups(lines []ParsedScriptLine) []StandardPathLookup {
 		if line.RawPathMode != rawPathModeStandard {
 			continue
 		}
-		kind := standardPathLookupKindForOperation(line.OperationType)
-		if kind == "" {
-			continue
-		}
 		for _, path := range nonEmptyStringSlice(line.ParamPaths) {
 			if !rawPathShapeValid(path) {
+				continue
+			}
+			kind := standardPathLookupKindForLinePath(line.OperationType, path)
+			if kind == "" {
 				continue
 			}
 			lookup := StandardPathLookup{Path: normalizeStandardPathTemplate(path), Kind: kind}
@@ -177,6 +177,13 @@ func standardPathLookupKindForOperation(operation string) StandardPathLookupKind
 	default:
 		return ""
 	}
+}
+
+func standardPathLookupKindForLinePath(operation, path string) StandardPathLookupKind {
+	if operation == "LST" && strings.HasSuffix(strings.TrimSpace(path), ".") {
+		return StandardPathLookupObject
+	}
+	return standardPathLookupKindForOperation(operation)
 }
 
 func validateScriptLine(line ParsedScriptLine, commands map[string]ValidationCommand, devices map[string]*model.Device, standardPathSupport map[string]bool) ([]ScriptIssue, ValidationCommand, *model.Device) {
@@ -239,7 +246,7 @@ func validateRawPathScriptLine(line ParsedScriptLine, standardPathSupport map[st
 		if pathMode == rawPathModePrivate {
 			continue
 		}
-		lookup := StandardPathLookup{Path: normalizeStandardPathTemplate(path), Kind: standardPathLookupKindForOperation(line.OperationType)}
+		lookup := StandardPathLookup{Path: normalizeStandardPathTemplate(path), Kind: standardPathLookupKindForLinePath(line.OperationType, path)}
 		if lookup.Kind != "" && !standardPathSupport[lookup.key()] {
 			issues = append(issues, validationIssue(line, "MML_PATH_NOT_FOUND", IssueError, "path", "standard path is not registered in standard_params"))
 		}
