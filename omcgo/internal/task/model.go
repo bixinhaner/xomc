@@ -85,7 +85,7 @@ type Task struct {
 
 // CreateTaskRequest 创建任务请求
 type CreateTaskRequest struct {
-	DeviceSN  string          `json:"device_sn" binding:"required"`
+	DeviceSN  string          `json:"device_sn"`
 	Method    string          `json:"method" binding:"required"`
 	Params    json.RawMessage `json:"params"`
 	Priority  int             `json:"priority"`
