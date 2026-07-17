@@ -133,8 +133,8 @@ for ARCH in $ARCHES; do
   STAGE="$WORK/$PKG_NAME"
   mkdir -p "$STAGE"/{etc,docs,images}
 
-  # 1.1 构建业务镜像（amd64-only：host 已在入口断言为 amd64，docker build 默认
-  # 按 host 架构产出，无需 --platform；arm64 host 上自行恢复 buildx 跨架构逻辑）
+  # 1.1 构建业务镜像。目标架构必须显式传给 Docker；否则 Apple Silicon 构建机会
+  # 产出 arm64 镜像，即使包名和 release.conf 标记为 amd64，目标机将 exec format error。
   #
   # --network host：build container 共用宿主网络栈，绕开默认 bridge 网络
   # （172.17.0.0/16）。某些服务器的 FORWARD/DOCKER-FORWARD 链被 ufw / fail2ban
@@ -154,6 +154,7 @@ for ARCH in $ARCHES; do
     [ "$SVC" = "web" ] && EXTRA_ARGS+=( --build-arg "APP_VERSION=$VERSION" )
     ( cd "$REPO_ROOT" && docker build \
         --network host \
+        --platform "linux/$ARCH" \
         -t "$TAG" \
         -f "$DOCKERFILE" \
         --build-arg APK_MIRROR=mirrors.aliyun.com \

@@ -24,3 +24,10 @@ if LC_ALL=C grep -Eq '\$[A-Za-z_][A-Za-z0-9_]*[^ -~]' "$BUILD_SCRIPT"; then
   exit 1
 fi
 echo "PASS: build-release variables before Chinese punctuation are braced"
+
+if grep -Fq -- '--platform "linux/$ARCH"' "$BUILD_SCRIPT"; then
+  echo "PASS: docker build pins the requested target architecture"
+else
+  echo "FAIL: docker build does not pass the requested --platform" >&2
+  exit 1
+fi
