@@ -727,10 +727,19 @@ func frozenCoveragePathPredicate(coverage CoverageScope) sq.Sqlizer {
 		if !mapping.IsStorable || mapping.StandardPath == "" {
 			continue
 		}
-		if strings.Contains(mapping.StandardPath, "{i}") {
+		if idx := strings.Index(mapping.StandardPath, "{i}"); idx >= 0 {
 			pattern := "^" + regexp.QuoteMeta(mapping.StandardPath) + "$"
 			pattern = strings.ReplaceAll(pattern, regexp.QuoteMeta("{i}"), `[0-9]+`)
-			predicates = append(predicates, sq.Expr("parameter_path ~ ?", pattern))
+			// device_parameters 只有 (device_id, parameter_path varchar_pattern_ops)
+			// 这一个前缀索引，加速 LIKE，不加速下面的 POSIX 正则 `~`。任何满足正则的
+			// 值必然以 {i} 之前的字面前缀开头，所以先加一个等价的 LIKE 前缀条件让
+			// planner 走索引缩小候选行，再用正则精确核对——不改变匹配结果，只是让
+			// 这条本该走索引的收尾清理不再退化成整表逐行扫描（线上巡检实测单次
+			// DELETE 20~32 秒，根因就是这里全靠内存正则过滤）。
+			predicates = append(predicates, sq.And{
+				sq.Expr("parameter_path LIKE ?", mapping.StandardPath[:idx]+"%"),
+				sq.Expr("parameter_path ~ ?", pattern),
+			})
 		} else {
 			predicates = append(predicates, sq.Eq{"parameter_path": mapping.StandardPath})
 		}
