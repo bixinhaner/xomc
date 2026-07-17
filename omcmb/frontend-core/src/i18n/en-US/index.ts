@@ -15,6 +15,7 @@ const messages: Record<string, string> = {
   'common.import':         'Import',
   'common.batchImport':    'Batch Import',
   'common.confirm':        'Confirm',
+  'common.operationConfirm': 'Operation Confirmation',
   'common.gotIt':          'Got it',
   'common.cancel':         'Cancel',
   'common.save':           'Save',
@@ -1649,6 +1650,10 @@ const messages: Record<string, string> = {
   // Monitor page extended fields (Location)
   'device.gpsHeight':           'GPS Height',
   'device.gpsInconsistent':     'Data inconsistent, Sure to synchronize?',
+  'device.gpsSyncCoordinates':  'Longitude: {longitude} Latitude: {latitude} GPS Height(m): {gpsHeight}',
+  'device.gpsSyncAction':       'Review and synchronize GPS coordinates',
+  'device.gpsCoordinateDetailsTitle': 'GPS Coordinate Details',
+  'device.gpsInSync':           'GPS coordinates are synchronized',
   'device.gpsSyncSuccess':      'GPS coordinates synchronized',
   'device.gpsSyncConfirmTitle': 'Use device-reported coordinates to overwrite OMC coordinates?',
   'device.gpsSyncDetails':      'OMC: ({acceptedLongitude}, {acceptedLatitude}); Device: ({reportedLongitude}, {reportedLatitude}); Difference: {distance} m; Observed: {observedAt}',

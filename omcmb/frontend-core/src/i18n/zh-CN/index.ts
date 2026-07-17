@@ -15,6 +15,7 @@ const messages: Record<string, string> = {
   'common.import':         '导入',
   'common.batchImport':    '批量导入',
   'common.confirm':        '确认',
+  'common.operationConfirm': '操作确认',
   'common.gotIt':          '知道了',
   'common.cancel':         '取消',
   'common.save':           '保存',
@@ -1653,6 +1654,10 @@ const messages: Record<string, string> = {
   // 监控页面扩展字段 (Location)
   'device.gpsHeight':           'GPS高度',
   'device.gpsInconsistent':     '数据不一致，确认同步？',
+  'device.gpsSyncCoordinates':  '经度：{longitude} 纬度：{latitude} GPS高度(m)：{gpsHeight}',
+  'device.gpsSyncAction':       '查看并同步 GPS 坐标',
+  'device.gpsCoordinateDetailsTitle': 'GPS 坐标详情',
+  'device.gpsInSync':           'GPS 坐标已同步',
   'device.gpsSyncSuccess':      'GPS坐标已同步',
   'device.gpsSyncConfirmTitle': '使用设备上报坐标覆盖网管坐标？',
   'device.gpsSyncDetails':      '网管坐标：({acceptedLongitude}, {acceptedLatitude})；设备上报：({reportedLongitude}, {reportedLatitude})；差异：{distance} 米；上报时间：{observedAt}',
