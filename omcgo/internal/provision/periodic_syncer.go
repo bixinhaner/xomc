@@ -47,6 +47,12 @@ type PeriodicSyncer struct {
 	logger *zap.Logger
 }
 
+// SetParamSyncRoutingMode is kept for provider compatibility. Periodic sync is
+// an allowed automatic entry and must still call StartPathBSync so the durable
+// parameter_sync path can accept it before any legacy fallback decision.
+func (p *PeriodicSyncer) SetParamSyncRoutingMode(mode string) {
+}
+
 // NewPeriodicSyncer 创建周期同步器。leader / policy 可为 nil：
 //   - leader=nil：单副本部署不需要协调
 //   - policy=nil：全部走 default（Enabled=false → Start 立即退出）

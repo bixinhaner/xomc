@@ -21,3 +21,10 @@ export function buildBatchTaskTypeMap(t: BatchTaskTypeLabel): Record<string, str
 export function batchActionHasDetail(actionKey?: string): boolean {
   return actionKey === 'batch-log-collect';
 }
+
+export function removeParamSyncOptimisticDeviceId(prev: Set<string>, deviceId: string): Set<string> {
+  if (!prev.has(deviceId)) return prev;
+  const next = new Set(prev);
+  next.delete(deviceId);
+  return next;
+}

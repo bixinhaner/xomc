@@ -55,32 +55,34 @@ type GroupAssigner interface {
 
 // DeviceService provides business logic for device management.
 type DeviceService struct {
-	redisClient       redis.UniversalClient
-	deviceRepo        DeviceRepository
-	paramRepo         DeviceParameterRepository
-	deviceInfoRepo    DeviceInfoRepository
-	disconnectAlarms  disconnectedAlarmStore
-	disconnectClearer disconnectedAlarmClearer
-	regRepo           RegistrationRepository
-	groupAssigner     GroupAssigner
-	infoSyncer        *InfoSyncer
-	reconciler        *DeviceStatusReconciler
-	eventBus          event.EventBus
-	taskSvc           task.Enqueuer
-	connReq           ConnectionRequester
-	stunUpdater       StunAddressUpdater
-	cache             *DeviceCache
-	metrics           *DeviceMetrics
-	licenseEnforcer   LicenseEnforcer
-	carrierRegistry   *carrier.CarrierRegistry // T-0029: RF control path lookup by carrier+tech
-	paramSyncStarter  ParamSyncStarter         // T-0126: 注入 *provision.SyncService 触发 Path B 手动同步
-	abnormalRecorder  AbnormalRebootRecorder   // T-0158: 异常重启识别即落库（nil = 禁用）
-	bootEventRecorder BootEventRecorder        // 普通 1 BOOT 事件日志写入（nil = 禁用）
-	productMatcher    ProductClassMatcher      // Phase 6 ModelName 回填（nil = 禁用）
-	productBinder     ProductBinder            // T-0176-PR-D：CreateDevice inline match 后写回 product_id（nil = 禁用）
-	groupReader       DeviceGroupReader        // 越权校验：读设备组归属（nil = 退化为不校验，见 AuthorizeDeviceGroupAccess）
-	sysConfigLookup   SysConfigLookup          // 读系统配置（nameSyncMode 等）
-	logger            *zap.Logger
+	redisClient          redis.UniversalClient
+	deviceRepo           DeviceRepository
+	paramRepo            DeviceParameterRepository
+	deviceInfoRepo       DeviceInfoRepository
+	disconnectAlarms     disconnectedAlarmStore
+	disconnectClearer    disconnectedAlarmClearer
+	regRepo              RegistrationRepository
+	groupAssigner        GroupAssigner
+	infoSyncer           *InfoSyncer
+	reconciler           *DeviceStatusReconciler
+	eventBus             event.EventBus
+	taskSvc              task.Enqueuer
+	connReq              ConnectionRequester
+	stunUpdater          StunAddressUpdater
+	cache                *DeviceCache
+	metrics              *DeviceMetrics
+	licenseEnforcer      LicenseEnforcer
+	carrierRegistry      *carrier.CarrierRegistry // T-0029: RF control path lookup by carrier+tech
+	paramSyncStarter     ParamSyncStarter         // T-0126: 注入 *provision.SyncService 触发 Path B 手动同步
+	paramSyncRoutingMode string
+	manualOfflineMode    string
+	abnormalRecorder     AbnormalRebootRecorder // T-0158: 异常重启识别即落库（nil = 禁用）
+	bootEventRecorder    BootEventRecorder      // 普通 1 BOOT 事件日志写入（nil = 禁用）
+	productMatcher       ProductClassMatcher    // Phase 6 ModelName 回填（nil = 禁用）
+	productBinder        ProductBinder          // T-0176-PR-D：CreateDevice inline match 后写回 product_id（nil = 禁用）
+	groupReader          DeviceGroupReader      // 越权校验：读设备组归属（nil = 退化为不校验，见 AuthorizeDeviceGroupAccess）
+	sysConfigLookup      SysConfigLookup        // 读系统配置（nameSyncMode 等）
+	logger               *zap.Logger
 }
 
 type disconnectedAlarmStore interface {
@@ -349,28 +351,41 @@ func (s *DeviceService) SyncDeviceParamsManualDetailed(ctx context.Context, devi
 	if s.paramSyncStarter == nil {
 		return nil, dev, fmt.Errorf("paramSyncStarter not configured")
 	}
-	if locker, ok := s.taskSvc.(syncGPVDeviceLocker); ok {
-		release, lockErr := locker.AcquireSyncGPVDeviceLock(ctx, dev.SerialNumber)
-		if lockErr != nil {
-			return nil, dev, fmt.Errorf("lock manual parameter sync: %w", lockErr)
-		}
-		defer release()
+	detailed, hasDurableStarter := s.paramSyncStarter.(DetailedParamSyncStarter)
+	if s.blocksLegacyParamSync() && !hasDurableStarter {
+		return nil, dev, fmt.Errorf("parameter sync routing mode %q does not expose the manual legacy path: %w", s.paramSyncRoutingMode, commonerrors.ErrUnavailable)
 	}
-	if guard, ok := s.taskSvc.(syncGPVOpenGuard); ok {
-		hasOpen, guardErr := guard.HasOpenSyncGPVTasksByDevice(ctx, dev.SerialNumber)
-		if guardErr != nil {
-			return nil, dev, fmt.Errorf("check manual sync running: %w", guardErr)
+	if !dev.IsOnline && s.manualOfflineModeRejects(hasDurableStarter) {
+		return nil, dev, commonerrors.NewBusinessError(
+			global.ErrCodeDeviceOffline,
+			"device is offline; parameter sync can only be started for online devices",
+			commonerrors.ErrUnavailable,
+		)
+	}
+	if !hasDurableStarter {
+		if locker, ok := s.taskSvc.(syncGPVDeviceLocker); ok {
+			release, lockErr := locker.AcquireSyncGPVDeviceLock(ctx, dev.SerialNumber)
+			if lockErr != nil {
+				return nil, dev, fmt.Errorf("lock manual parameter sync: %w", lockErr)
+			}
+			defer release()
 		}
-		if hasOpen {
-			return nil, dev, commonerrors.NewBusinessError(
-				global.ErrCodeRuleTaskRunning,
-				"parameter sync already running for this device, try again in a few seconds",
-				commonerrors.ErrAlreadyExists,
-			)
+		if guard, ok := s.taskSvc.(syncGPVOpenGuard); ok {
+			hasOpen, guardErr := guard.HasOpenSyncGPVTasksByDevice(ctx, dev.SerialNumber)
+			if guardErr != nil {
+				return nil, dev, fmt.Errorf("check manual sync running: %w", guardErr)
+			}
+			if hasOpen {
+				return nil, dev, commonerrors.NewBusinessError(
+					global.ErrCodeRuleTaskRunning,
+					"parameter sync already running for this device, try again in a few seconds",
+					commonerrors.ErrAlreadyExists,
+				)
+			}
 		}
 	}
 
-	if detailed, ok := s.paramSyncStarter.(DetailedParamSyncStarter); ok {
+	if hasDurableStarter {
 		result, err = detailed.StartManualSyncDetailed(ctx, dev, sourceID, parameterPaths)
 	} else {
 		used, taskCount, startErr := s.paramSyncStarter.StartManualSync(ctx, dev, sourceID, parameterPaths)
@@ -395,6 +410,35 @@ func (s *DeviceService) SyncDeviceParamsManualDetailed(ctx context.Context, devi
 // 唯一实现者 *provision.SyncService。nil 时 SyncDeviceParamsManual 会返错。
 func (s *DeviceService) SetParamSyncStarter(starter ParamSyncStarter) {
 	s.paramSyncStarter = starter
+}
+
+// SetParamSyncRoutingMode applies the P0 fail-closed gate to the manual
+// legacy starter. The durable manual submitter will replace this path before
+// routing_mode=durable is enabled.
+func (s *DeviceService) SetParamSyncRoutingMode(mode string) {
+	s.paramSyncRoutingMode = strings.TrimSpace(mode)
+}
+
+// SetParamSyncManualOfflineMode controls whether manual durable requests for
+// offline devices are queued or rejected before reaching the durable submitter.
+func (s *DeviceService) SetParamSyncManualOfflineMode(mode string) {
+	s.manualOfflineMode = strings.TrimSpace(mode)
+}
+
+func (s *DeviceService) blocksLegacyParamSync() bool {
+	switch s.paramSyncRoutingMode {
+	case "durable_shadow", "durable", "closed":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *DeviceService) manualOfflineModeRejects(hasDurableStarter bool) bool {
+	if !hasDurableStarter {
+		return true
+	}
+	return s.manualOfflineMode != "queue"
 }
 
 // SetRFSwitch queues a SetParameterValues command to enable/disable the

@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/global"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/stretchr/testify/assert"
@@ -331,21 +332,24 @@ func newTestHandler() (*Handler, *fakeDeviceRepo, *fakeParamRepo) {
 
 func seedDevice(repo *fakeDeviceRepo, id uuid.UUID, sn string, carrier model.CarrierCode, tech model.Technology, status model.DeviceStatus) *model.Device {
 	now := time.Now()
+	isOnline := status == model.DeviceActive
 	d := &model.Device{
-		ID:           id,
-		SerialNumber: sn,
-		OUI:          "AABBCC",
-		Manufacturer: "TestVendor",
-		ModelName:    "PicoCell-100",
-		Carrier:      carrier,
-		Technology:   tech,
-		Status:       status,
-		DeviceName:   "Site-A",
-		SiteID:       "SITE-001",
-		Latitude:     f64p(39.9042),
-		Longitude:    f64p(116.4074),
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:             id,
+		SerialNumber:   sn,
+		OUI:            "AABBCC",
+		Manufacturer:   "TestVendor",
+		ModelName:      "PicoCell-100",
+		Carrier:        carrier,
+		Technology:     tech,
+		LifecycleState: model.LifecycleCommissioned,
+		IsOnline:       isOnline,
+		Status:         status,
+		DeviceName:     "Site-A",
+		SiteID:         "SITE-001",
+		Latitude:       f64p(39.9042),
+		Longitude:      f64p(116.4074),
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}
 	repo.devices[id] = d
 	repo.bySN[sn] = d
@@ -805,6 +809,72 @@ func TestHandler_SyncDeviceParams_DurableIDsAreReturned(t *testing.T) {
 	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, requestID.String(), resp["request_id"])
 	assert.Equal(t, runID.String(), resp["run_id"])
+}
+
+func TestHandler_SyncDeviceParams_OfflineLegacyRejectedBeforeStart(t *testing.T) {
+	h, deviceRepo, _ := newTestHandler()
+	starter := &fakeParamSyncStarter{defaultUsed: true, defaultGPVTaskCount: 5}
+	h.service.SetParamSyncStarter(starter)
+	router := setupRouter(h)
+	id := uuid.New()
+	seedDevice(deviceRepo, id, "SN-OFFLINE-SYNC", model.CarrierCMCC, model.TechLTE, model.DeviceOffline)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices/"+id.String()+"/sync-params", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.EqualValues(t, global.ErrCodeDeviceOffline, resp["biz_code"])
+	assert.Contains(t, resp["msg"].(string), "offline")
+	assert.Empty(t, starter.calls, "offline device must not create a parameter sync request/run")
+}
+
+func TestHandler_SyncDeviceParams_OfflineDurableQueuedWhenConfigured(t *testing.T) {
+	h, deviceRepo, _ := newTestHandler()
+	requestID := uuid.New()
+	h.service.SetParamSyncManualOfflineMode("queue")
+	h.service.SetParamSyncStarter(&fakeDetailedParamSyncStarter{
+		fakeParamSyncStarter: &fakeParamSyncStarter{},
+		result: &ManualParamSyncStart{
+			Used: true, RequestID: requestID, Status: "queued", ResultCode: "DEVICE_OFFLINE",
+		},
+	})
+	router := setupRouter(h)
+	id := uuid.New()
+	seedDevice(deviceRepo, id, "SN-OFFLINE-DURABLE", model.CarrierCMCC, model.TechLTE, model.DeviceOffline)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices/"+id.String()+"/sync-params", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusAccepted, w.Code)
+	var resp map[string]interface{}
+	response.DecodeData(t, w.Body, &resp)
+	assert.Equal(t, "queued", resp["status"])
+	assert.Equal(t, requestID.String(), resp["request_id"])
+}
+
+func TestHandler_SyncDeviceParams_OfflineDurableRejectedByDefault(t *testing.T) {
+	h, deviceRepo, _ := newTestHandler()
+	requestID := uuid.New()
+	h.service.SetParamSyncStarter(&fakeDetailedParamSyncStarter{
+		fakeParamSyncStarter: &fakeParamSyncStarter{},
+		result:               &ManualParamSyncStart{Used: true, RequestID: requestID, Status: "queued"},
+	})
+	router := setupRouter(h)
+	id := uuid.New()
+	seedDevice(deviceRepo, id, "SN-OFFLINE-REJECT", model.CarrierCMCC, model.TechLTE, model.DeviceOffline)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices/"+id.String()+"/sync-params", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.EqualValues(t, global.ErrCodeDeviceOffline, resp["biz_code"])
 }
 
 func TestHandler_SyncDeviceParams_NotFound(t *testing.T) {

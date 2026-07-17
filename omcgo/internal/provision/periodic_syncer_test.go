@@ -327,6 +327,18 @@ func TestPeriodicSyncer_DurableUnavailable_CountsAsSkipped(t *testing.T) {
 	assert.Equal(t, 3, syncer.callCount(), "仍调同步入口但内部 used=false → 跳过不算失败")
 }
 
+func TestPeriodicSyncer_ClosedRoutingModeStillCallsDurableFirstEntry(t *testing.T) {
+	devices := mkDevices(2)
+	lister := &fakeStaleLister{devices: devices}
+	syncer := newFakeSyncStarter(true)
+	p := NewPeriodicSyncer(lister, syncer, nil, nil, zap.NewNop())
+	p.SetParamSyncRoutingMode("closed")
+
+	p.runOnce(context.Background(), PeriodicSyncSnapshot{Interval: time.Hour, BatchSize: 200, MaxConcurrent: 10})
+
+	assert.Equal(t, 2, syncer.callCount(), "closed mode must not suppress periodic durable parameter-sync")
+}
+
 func TestPeriodicSyncer_StopsEnqueueWhenPolicyDisabled(t *testing.T) {
 	devices := mkDevices(3)
 	lister := &fakeStaleLister{devices: devices}

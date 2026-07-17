@@ -238,26 +238,30 @@ func TestService_SubmitAutomaticGateFailureDoesNotLeakAcceptedRequest(t *testing
 	repo.gateErr = errors.New("gate unavailable")
 	service := NewService(repo, stubPlanner{plan: &Plan{Batches: []TaskBatch{{Paths: []string{"Device."}}}}})
 
-	_, err := service.Submit(context.Background(), submitCommand(TriggerDeviceOnline))
+	_, err := service.Submit(context.Background(), submitCommand(TriggerModelUpload))
 
 	require.ErrorContains(t, err, "gate unavailable")
 	assert.Empty(t, repo.requests)
 }
 
 func TestService_SubmitAutomaticBackoffIsPersistedAsRejected(t *testing.T) {
-	repo := newMemoryRequestRepo()
-	repo.backoff = time.Now().Add(time.Hour)
-	service := NewService(repo, stubPlanner{plan: &Plan{Batches: []TaskBatch{{Paths: []string{"Device."}}}}})
+	for _, reason := range []TriggerReason{TriggerModelUpload, TriggerDeviceOnline} {
+		t.Run(string(reason), func(t *testing.T) {
+			repo := newMemoryRequestRepo()
+			repo.backoff = time.Now().Add(time.Hour)
+			service := NewService(repo, stubPlanner{plan: &Plan{Batches: []TaskBatch{{Paths: []string{"Device."}}}}})
 
-	got, err := service.Submit(context.Background(), submitCommand(TriggerDeviceOnline))
+			got, err := service.Submit(context.Background(), submitCommand(reason))
 
-	require.NoError(t, err)
-	assert.Equal(t, RequestStatusRejected, got.Status)
-	assert.Equal(t, ResultCodeAutomaticBackoff, got.ResultCode)
-	require.Len(t, repo.requests, 1)
-	for _, req := range repo.requests {
-		assert.Equal(t, RequestStatusRejected, req.Status)
-		assert.NotNil(t, req.CompletedAt)
+			require.NoError(t, err)
+			assert.Equal(t, RequestStatusRejected, got.Status)
+			assert.Equal(t, ResultCodeAutomaticBackoff, got.ResultCode)
+			require.Len(t, repo.requests, 1)
+			for _, req := range repo.requests {
+				assert.Equal(t, RequestStatusRejected, req.Status)
+				assert.NotNil(t, req.CompletedAt)
+			}
+		})
 	}
 }
 

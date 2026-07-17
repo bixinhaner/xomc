@@ -3250,6 +3250,7 @@ const messages: Record<string, string> = {
   'device.batch.paramSync.noRunnableDevices': '没有可同步的在线设备。',
   'device.batch.paramSync.requestUnavailable': '参数同步请求不可用，请稍后重试。',
   'device.batch.paramSync.waitingDevice': '等待设备返回参数',
+  'device.batch.paramSync.alreadyRunning': '该设备已有参数同步在进行，本次已跳过。',
   'device.periodicParamSync.title': '定时自动同步',
   'device.periodicParamSync.desc': '启用后，系统将按周期扫描在线设备并自动发起参数同步。保存后运行时动态生效，无需重启服务。',
   'device.periodicParamSync.hourUnit': '小时',

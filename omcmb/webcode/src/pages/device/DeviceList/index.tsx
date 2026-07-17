@@ -59,7 +59,7 @@ import { useUserStore } from '@core/store/userStore';
 import { useAppStore } from '@core/store/appStore';
 import { buildDefaultUfteTaskName } from '@/pages/transfer/shared';
 import dayjs from 'dayjs';
-import { buildBatchTaskTypeMap, batchActionHasDetail } from './deviceBatchTask';
+import { buildBatchTaskTypeMap, batchActionHasDetail, removeParamSyncOptimisticDeviceId } from './deviceBatchTask';
 import { getDeviceListParamSyncPaths } from './deviceListParamSync';
 import type { Device } from '@core/types/device';
 import { formatSystemTime } from '@core/utils/systemTime';
@@ -129,6 +129,16 @@ function throwIfBatchAborted(signal: AbortSignal): void {
   if (signal.aborted) {
     throw createBatchAbortError();
   }
+}
+
+function isParamSyncAlreadyRunningError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const message = err.message.toLowerCase();
+  return message.includes('active_sync_exists')
+    || message.includes('already running')
+    || message.includes('already exists')
+    || message.includes('已有')
+    || message.includes('正在同步');
 }
 
 // 筛选下拉框 name → 表格列 key 映射:列设置隐藏该列时,对应筛选下拉一并隐藏
@@ -356,6 +366,10 @@ export default function DeviceList() {
   const [collectDrawerTitle, setCollectDrawerTitle] = useState('');
   const [batchAlarmSyncRunning, setBatchAlarmSyncRunning] = useState(false);
   const [batchParamSyncRunning, setBatchParamSyncRunning] = useState(false);
+
+  const clearOptimisticParamSyncDevice = useCallback((deviceId: string) => {
+    setOptimisticParamSyncDeviceIds((prev) => removeParamSyncOptimisticDeviceId(prev, deviceId));
+  }, []);
 
   const [logModalOpen, setLogModalOpen] = useState(false);
   const [currentLogTask, setCurrentLogTask] = useState<LocalTask | null>(null);
@@ -1270,6 +1284,7 @@ export default function DeviceList() {
                       throwIfBatchAborted(abortController.signal);
                       await queryClient.invalidateQueries({ queryKey: ['devices'] });
                       throwIfBatchAborted(abortController.signal);
+                      clearOptimisticParamSyncDevice(device.id);
                       setCollectTasks((prev) => prev.map((item) =>
                         item.id === task.id ? {
                           ...item,
@@ -1284,13 +1299,23 @@ export default function DeviceList() {
                       if (isAbortError(err)) {
                         throw err;
                       }
+                      const alreadyRunning = isParamSyncAlreadyRunningError(err);
+                      if (alreadyRunning) {
+                        const skippedMessage = t('device.batch.paramSync.alreadyRunning');
+                        clearOptimisticParamSyncDevice(device.id);
+                        setCollectTasks((prev) => prev.map((item) =>
+                          item.id === task.id ? {
+                            ...item,
+                            status: 'success',
+                            progress: 100,
+                            message: skippedMessage,
+                            logContent: `[${timestamp}] INFO: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${device.sn}\n[${timestamp}] INFO: ${skippedMessage}`,
+                          } : item
+                        ));
+                        return true;
+                      }
                       const errMsg = err instanceof Error ? err.message : t('task.log.failed');
-                      setOptimisticParamSyncDeviceIds((prev) => {
-                        if (!prev.has(device.id)) return prev;
-                        const next = new Set(prev);
-                        next.delete(device.id);
-                        return next;
-                      });
+                      clearOptimisticParamSyncDevice(device.id);
                       setCollectTasks((prev) => prev.map((item) =>
                         item.id === task.id ? {
                           ...item,
@@ -1340,6 +1365,7 @@ export default function DeviceList() {
       batchAlarmSyncRunning,
       batchParamSyncRunning,
       batchReboot,
+      clearOptimisticParamSyncDevice,
       createUfteTask,
       devices,
       message,

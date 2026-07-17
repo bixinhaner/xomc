@@ -45,6 +45,8 @@ redis:
 
 # Reliable parameter-sync data plane. Keep disabled until migration 000021 is applied.
 param_sync:
+  routing_mode: legacy
+  manual_offline_mode: reject
   run_enabled: false
   result_consumer_enabled: false
   staging_enabled: false

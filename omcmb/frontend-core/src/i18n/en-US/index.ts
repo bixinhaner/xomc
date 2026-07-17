@@ -3234,6 +3234,7 @@ const messages: Record<string, string> = {
   'device.batch.paramSync.noRunnableDevices': 'No online devices can be synchronized.',
   'device.batch.paramSync.requestUnavailable': 'Parameter sync request is unavailable. Please try again later.',
   'device.batch.paramSync.waitingDevice': 'Waiting for device parameter response',
+  'device.batch.paramSync.alreadyRunning': 'A parameter sync is already running for this device; this request was skipped.',
   'device.periodicParamSync.title': 'Scheduled Auto Sync',
   'device.periodicParamSync.desc': 'When enabled, the system periodically scans online devices and automatically starts parameter sync. Changes take effect at runtime without restarting services.',
   'device.periodicParamSync.hourUnit': 'hour(s)',
