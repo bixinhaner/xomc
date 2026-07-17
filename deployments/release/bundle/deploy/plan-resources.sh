@@ -236,8 +236,8 @@ else TIER=small; fi
 # CPU 限额（突发可超分；按档位给值）
 case "$TIER" in
   small)  CPU_app=1;   CPU_acs=2; CPU_worker=2; CPU_pg=2; CPU_tsdb=2; CPU_redis=1; CPU_nats=1; CPU_minio=1; CPU_web=1 ;;
-  medium) CPU_app="1.5"; CPU_acs=5; CPU_worker=3; CPU_pg=4; CPU_tsdb=4; CPU_redis=2; CPU_nats=1; CPU_minio=4; CPU_web=1 ;;
-  large)  CPU_app=2;   CPU_acs=8; CPU_worker=4; CPU_pg=6; CPU_tsdb=6; CPU_redis=2; CPU_nats=2; CPU_minio=6; CPU_web=1 ;;
+  medium) CPU_app="1.5"; CPU_acs=5; CPU_worker=3; CPU_pg=6; CPU_tsdb=4; CPU_redis=2; CPU_nats=1; CPU_minio=4; CPU_web=1 ;;
+  large)  CPU_app=2;   CPU_acs=8; CPU_worker=4; CPU_pg=8; CPU_tsdb=6; CPU_redis=2; CPU_nats=2; CPU_minio=6; CPU_web=1 ;;
 esac
 CPU_LIST=("$CPU_app" "$CPU_acs" "$CPU_worker" "$CPU_pg" "$CPU_tsdb" "$CPU_redis" "$CPU_nats" "$CPU_minio" "$CPU_web")
 

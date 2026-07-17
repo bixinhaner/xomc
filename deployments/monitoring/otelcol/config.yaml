@@ -34,7 +34,7 @@ receivers:
     endpoint: postgres:5432
     transport: tcp
     username: omcgo
-    password: omcgo123
+    password: ${env:POSTGRES_PASSWORD}
     databases: [omcgo]
     collection_interval: 30s
     tls:
@@ -72,7 +72,7 @@ receivers:
     endpoint: postgres-tsdb:5432
     transport: tcp
     username: omcgo
-    password: omcgo123
+    password: ${env:POSTGRES_TSDB_PASSWORD}
     databases: [omcgo]
     collection_interval: 30s
     tls:

@@ -692,6 +692,9 @@ services:
     user: "0:0"
     environment:
       TZ: "Asia/Shanghai"
+      # postgresqlreceiver 连主库/tsdb 库用的凭据（config.yaml 里用 ${env:VAR} 引用）。
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_TSDB_PASSWORD: ${POSTGRES_TSDB_PASSWORD}
     # 仅容器内对接 SDK 与 Tempo，不对外暴露端口（trace 不上公网）。
     # ports 故意不开：宿主侧的 trace 查询走 Grafana，不直连 otelcol。
     volumes:
