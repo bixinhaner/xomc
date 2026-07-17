@@ -124,10 +124,10 @@ Expected: FAIL，release compose 仍引用命名卷。
 
 - [ ] **Step 3: 实现 bind mount、默认键和生命周期校验**
 
-release compose 分别使用 `${KEY:-/opt/omc/storage/<component>}:/container/path`；
+release compose 分别使用 `${KEY:-<legacy-volume>}:/container/path`，空值继续使用旧命名卷；
 `build-release.sh` 生成五个空键并附人工修改说明；`install.sh` 白名单加入五键，在 compose
-启动前准备目录；`svc.sh` 的 start/up/restart 前同样准备目录。开发 compose 使用
-`${KEY:-volume-name}` 保持向后兼容。
+启动前准备已配置的绝对路径；`svc.sh` 的 start/up/restart 前同样准备。开发 compose
+同样使用 `${KEY:-volume-name}` 保持向后兼容。
 
 - [ ] **Step 4: 运行测试确认通过**
 

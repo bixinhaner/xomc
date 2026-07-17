@@ -713,7 +713,53 @@ sudo bash /opt/omc/current/deploy/deploy.sh --skip-infra --skip-migrate
 
 > 升级前务必完成 `pg_dump` + MinIO 备份，并已在测试环境演练过回滚流程。
 
-### 8.4 卸载
+### 8.4 SSD/NVMe 数据路径与存量迁移
+
+`deploy/.env` 支持五个独立路径：
+
+```dotenv
+POSTGRES_DATA_PATH=/mnt/nvme-b/omc-data/postgres
+TSDB_DATA_PATH=/mnt/nvme-a/omc-data/timescaledb
+REDIS_DATA_PATH=/mnt/ssd/omc-data/redis
+NATS_DATA_PATH=/mnt/ssd/omc-data/nats
+MINIO_DATA_PATH=/mnt/nvme-c/omc-data/minio
+```
+
+留空时继续使用 Docker 命名卷；运行 `bash deploy/plan-resources.sh` 会以可用空间最大的本地
+文件系统生成默认值，但不会覆盖已有人工值，也不会搬迁数据。安装前必须人工检查 `.env`，
+确认目录确实位于目标 SSD/NVMe，而不是同一旋转盘的另一个目录。
+
+推荐优先级：TimescaleDB 独占写入能力最强的 NVMe，PostgreSQL 主库使用另一块 NVMe，
+MinIO 使用第三块 SSD/NVMe；Redis 与 NATS 放在剩余低延迟盘。只有一块 SSD/NVMe 时可先把
+五项都指向该盘，仍能降低机械寻道等待，但不能隔离组件之间的 I/O 竞争。
+
+已有环境以主库为例按以下步骤迁移，其他组件分别替换为
+`omcgo_tsdbdata/omcgo_redisdata/omcgo_natsdata/omcgo_miniodata` 和对应环境变量：
+
+```bash
+cd /opt/omc/current/deploy
+bash svc.sh stop
+SRC="$(docker volume inspect -f '{{.Mountpoint}}' omcgo_pgdata)"
+DEST=/mnt/nvme-b/omc-data/postgres
+install -d "$DEST"
+rsync -aHAX --numeric-ids "$SRC"/ "$DEST"/
+du -sb "$SRC" "$DEST"                 # 容量应一致；重要库再核对文件数/备份
+vi .env                               # 填 POSTGRES_DATA_PATH=$DEST
+docker compose -p omcgo --env-file .env --env-file resources.env \
+  -f docker-compose.infra.yml -f docker-compose.app.yml config >/dev/null
+bash svc.sh up
+docker inspect omcgo-postgres-1 --format '{{range .Mounts}}{{println .Source "->" .Destination}}{{end}}'
+```
+
+随后检查两个数据库 `pg_isready`、Redis `PING`、NATS `http://127.0.0.1:8222/healthz`、
+MinIO `http://127.0.0.1:9000/minio/health/live`、app/ACS/worker 健康接口。旧卷或旧目录至少
+保留一个观察周期；回滚时停服，把对应路径改回旧位置（命名卷则清空变量）再启动。
+
+当前单旋转盘压测观察到读取等待约 154 ms、末段 iowait 约 61%。迁移到真实 SSD/NVMe 后
+预期存储等待和队列深度显著下降，PM 消费速率更接近输入速率；具体收益受介质、RAID 和
+拆盘方式影响，必须按相同 KPI 口径复测，不能用脚本配置生效代替硬件收益验证。
+
+### 8.5 卸载
 
 ```bash
 sudo bash /opt/omc/current/deploy/deploy.sh --uninstall                 # dry-run，只列将做的动作

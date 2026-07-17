@@ -208,8 +208,53 @@ OMC_PROBE_CPU=32 OMC_PROBE_MEM_TOTAL_MIB=65536 OMC_PROBE_MEM_AVAIL_MIB=61440 \
   并约束单文件解析体积上限。
 - task：`taskDetailTTL`/`cwmpMappingTTL` 24h→2-4h（治 Redis 数据集增长的真因）。
 - 监控告警：`redis used_memory>70%`、`pg numbackends>0.8×max_connections`、容器 `OOMKilled` 计数。
-- 数据盘：`pgdata`/`miniodata` 改 bind-mount 到独立数据盘；MinIO 桶生命周期过期。
+- 数据盘：已支持通过 `.env` 的五个 `*_DATA_PATH` 把有状态服务 bind-mount 到独立数据盘；
+  迁移步骤见下节。MinIO 桶生命周期过期仍需另行配置。
 - 300k+ 规模：引入 pgbouncer（transaction pooling）作为 acs/worker 加副本的前置条件。
+
+### 有状态服务拆盘与迁移
+
+可独立配置：
+
+| 服务 | `.env` 键 | 容器目录 |
+|---|---|---|
+| PostgreSQL | `POSTGRES_DATA_PATH` | `/var/lib/postgresql/data` |
+| TimescaleDB | `TSDB_DATA_PATH` | `/var/lib/postgresql/data` |
+| Redis | `REDIS_DATA_PATH` | `/data` |
+| NATS JetStream | `NATS_DATA_PATH` | `/data` |
+| MinIO | `MINIO_DATA_PATH` | `/data` |
+
+键留空时继续使用 `pgdata/tsdbdata/redisdata/natsdata/miniodata` 命名卷，保证升级不隐式
+切换数据。`plan-resources.sh` 按可用空间选择最大的本地持久文件系统，只补空值并提示人工
+拆盘；它不复制数据。建议 NVMe A 放 TimescaleDB、NVMe B 放主库、SSD/NVMe C 放 MinIO，
+Redis/NATS 放剩余低延迟设备。只有一块 SSD/NVMe 时可先全部迁入，寻道等待会下降，但五个
+服务仍会争用同一设备。
+
+存量迁移必须停服逐项执行，以下以主库为例，其他组件只替换卷名和目标目录：
+
+```bash
+cd /opt/omc/current/deploy
+bash svc.sh stop
+SRC="$(docker volume inspect -f '{{.Mountpoint}}' omcgo_pgdata)"
+DEST=/mnt/nvme-b/omc-data/postgres
+install -d "$DEST"
+rsync -aHAX --numeric-ids "$SRC"/ "$DEST"/
+du -sb "$SRC" "$DEST"
+# 编辑 .env：POSTGRES_DATA_PATH=/mnt/nvme-b/omc-data/postgres
+docker compose -p omcgo --env-file .env --env-file resources.env \
+  -f docker-compose.infra.yml -f docker-compose.app.yml config >/dev/null
+bash svc.sh up
+docker compose -p omcgo --env-file .env --env-file resources.env \
+  -f docker-compose.infra.yml -f docker-compose.app.yml ps
+```
+
+验收数据库 `pg_isready`、Redis `PING`、NATS `/healthz`、MinIO `/minio/health/live` 和业务
+健康接口后，旧卷/旧目录至少保留一个观察周期。回滚时停服、清空对应 `*_DATA_PATH` 或改回
+旧路径，再启动。禁止在容器写入期间直接复制 PostgreSQL/WAL、Redis AOF 或 JetStream。
+
+当前压测旋转盘读取等待约 154 ms、末段 iowait 约 61%。SSD/NVMe 一般可把介质等待降到低
+毫秒级，独立设备还能降低队列深度和 checkpoint、PM COPY、MinIO 上传、AOF、JetStream
+之间的相互阻塞；实际收益必须在真实硬件迁移后复测，不承诺固定倍数。
 
 ---
 
