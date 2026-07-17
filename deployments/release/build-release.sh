@@ -156,7 +156,7 @@ for ARCH in $ARCHES; do
         -t "$TAG" \
         -f "$DOCKERFILE" \
         --build-arg APK_MIRROR=mirrors.aliyun.com \
-        "${EXTRA_ARGS[@]}" \
+        ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} \
         . )
     IMG_REFS+=( "$TAG" )
   done
