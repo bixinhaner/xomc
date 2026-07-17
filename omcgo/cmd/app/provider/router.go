@@ -394,6 +394,8 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	dh := c.deviceHandlerDeps
 	deviceHandler := device.NewHandler(c.DeviceService)
 	deviceHandler.SetPermissionService(c.PermService)
+	locationSyncRepo := device.NewPgLocationObservationRepository(c.PgPool)
+	deviceHandler.SetLocationSyncService(device.NewLocationSyncService(locationSyncRepo))
 	deviceHandler.RegisterRoutes(permGroup("devices"))
 	if c.miscDeps.paramSyncHandler != nil {
 		c.miscDeps.paramSyncHandler.RegisterRoutes(permGroup("devices"))

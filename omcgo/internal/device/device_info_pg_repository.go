@@ -282,6 +282,7 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 	builder := storage.Psql.Select(selectCols...).
 		From("devices d").
 		LeftJoin("device_info di ON di.device_id = d.id").
+		LeftJoin("device_location_observations dlo ON dlo.device_id = d.id").
 		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
 		LeftJoin("device_groups dg ON dg.id = dgm.group_id").
 		LeftJoin(alarmsActiveAggJoin). // #361: 告警级别/告警数实时聚合
@@ -289,6 +290,7 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 	countBuilder := deviceListCountSelect().
 		From("devices d").
 		LeftJoin("device_info di ON di.device_id = d.id").
+		LeftJoin("device_location_observations dlo ON dlo.device_id = d.id").
 		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
 		Where(sq.Eq{"d.deleted_at": nil})
 
@@ -524,6 +526,7 @@ func (r *PgDeviceInfoRepository) GetByIDWithInfo(ctx context.Context, deviceID u
 		Select(deviceWithInfoSelectColumns()...).
 		From("devices d").
 		LeftJoin("device_info di ON di.device_id = d.id").
+		LeftJoin("device_location_observations dlo ON dlo.device_id = d.id").
 		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
 		LeftJoin("device_groups dg ON dg.id = dgm.group_id").
 		LeftJoin(alarmsActiveAggJoin). // #361: 告警级别/告警数实时聚合
@@ -810,6 +813,9 @@ func deviceWithInfoSelectColumns() []string {
 		"d.last_inform_at", "d.last_inform_events",
 		"d.last_boot_at", "d.boot_count",
 		"d.inform_interval", "d.site_name", "d.site_id", "d.latitude", "d.longitude",
+		"dlo.latitude AS reported_latitude", "dlo.longitude AS reported_longitude",
+		"dlo.gps_height AS reported_gps_height", "dlo.observed_at AS reported_observed_at",
+		"dlo.version AS reported_version", "dlo.source_path AS reported_source_path",
 		"d.extension_data", "d.created_at", "d.updated_at", "d.deleted_at", "d.deleted_by",
 		"d.recycle_type", "d.recycle_executor",
 		"d.last_offline_reason", // T-0173: 离线原因诊断（migration 000184)
@@ -1004,6 +1010,10 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	var productClass, manufacturer, modelName *string
 	var firmwareVersion, connReqURL, siteName, siteID *string
 	var deletedBy, recycleType, recycleExecutor *string
+	var reportedLatitude, reportedLongitude, reportedGPSHeight *float64
+	var reportedObservedAt *time.Time
+	var reportedVersion *int64
+	var reportedSourcePath *string
 
 	// device_info nullable fields
 	var (
@@ -1083,6 +1093,8 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		&d.LastInformAt, &eventsData,
 		&d.LastBootAt, &d.BootCount,
 		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
+		&reportedLatitude, &reportedLongitude, &reportedGPSHeight, &reportedObservedAt,
+		&reportedVersion, &reportedSourcePath,
 		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
 		&recycleType, &recycleExecutor,
 		&d.LastOfflineReason, // T-0173: 离线原因（migration 000184)
@@ -1226,6 +1238,22 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	d.OfflineHours = offlineHours
 	d.OfflineMinutes = offlineMinutes
 	d.ParamSyncRunning = paramSyncRunning
+	acceptedLocation := locationFromDeviceCoordinates(d.Latitude, d.Longitude, nil)
+	var reportedLocation *ReportedLocation
+	if reportedLatitude != nil && reportedLongitude != nil && reportedObservedAt != nil && reportedVersion != nil && reportedSourcePath != nil {
+		reportedLocation = &ReportedLocation{
+			Latitude:   *reportedLatitude,
+			Longitude:  *reportedLongitude,
+			GPSHeight:  reportedGPSHeight,
+			ObservedAt: *reportedObservedAt,
+			Version:    *reportedVersion,
+			SourcePath: *reportedSourcePath,
+		}
+	}
+	d.LocationSync = func() *LocationSync {
+		result := CompareLocations(acceptedLocation, reportedLocation)
+		return &result
+	}()
 	// T-0162: 派生老 Status 字段给读侧兼容（DeriveStatusFromLifecycle 用
 	// commissioned+online=Active / commissioned+offline=Offline / 等映射）
 	d.Status = DeriveStatusFromLifecycle(d.LifecycleState, d.IsOnline)

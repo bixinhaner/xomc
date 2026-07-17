@@ -701,7 +701,7 @@ func initProvisionModule(c *Container) error {
 			SetRedisClient(c.Redis).
 			SetParamSyncWriter(c.DeviceRepo).
 			SetPathBSyncTaskReader(task.NewPgTaskRepository(c.PgPool)).
-			SetDeviceInfoRefresher(device.NewInfoSyncer(c.DeviceInfoRepo, c.ParamRepo, device.NewPgDeviceRepository(c.PgPool), c.Carriers, logger)) // Path B 参数落库后立即刷新 device_info 快照
+			SetDeviceInfoRefresher(device.NewInfoSyncer(c.DeviceInfoRepo, c.ParamRepo, device.NewPgDeviceRepository(c.PgPool), c.Carriers, logger, device.NewPgLocationObservationRepository(c.PgPool))) // Path B 参数落库后立即刷新 device_info 快照
 
 		// Issue #758: 设备名称同步钩子装配
 		// Path B 同步完成后比对 LMT 设备名与网管名，按配置方向自动同步或标记待确认。
@@ -1961,7 +1961,7 @@ func initMiscModules(c *Container) error {
 			c.ParamRegistry,
 			c.DeviceService,
 			c.ParamRepo,
-			device.NewInfoSyncer(c.DeviceInfoRepo, c.ParamRepo, device.NewPgDeviceRepository(c.PgPool), c.Carriers, logger),
+			device.NewInfoSyncer(c.DeviceInfoRepo, c.ParamRepo, device.NewPgDeviceRepository(c.PgPool), c.Carriers, logger, device.NewPgLocationObservationRepository(c.PgPool)),
 			c.DeviceRepo, // migration 000146: 写 last_param_sync_failed_at + error
 			logger,
 		)

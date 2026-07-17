@@ -15,6 +15,10 @@ type DeviceWithInfo struct {
 	// 嵌入 devices 表核心字段
 	model.Device
 
+	// LocationSync combines the accepted device coordinates with the latest
+	// valid device-reported observation for list/detail reconciliation.
+	LocationSync *LocationSync `json:"location_sync,omitempty"`
+
 	// ===== 设备分组信息（可能为空）=====
 
 	// GroupID 设备分组 ID

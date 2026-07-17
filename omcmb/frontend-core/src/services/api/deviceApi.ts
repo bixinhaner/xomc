@@ -1,5 +1,5 @@
 import http from '../http';
-import type { Device, NE, DeviceFilter, DeviceGroup, DeviceListResponse, DeviceListStats, DeviceStats, DeviceParameter, CreateDeviceInput, NameFilterItem, BatchImportRequest, BatchImportResponse, BatchPreRegisterRequest, BatchPreRegisterResponse } from '../../types/device';
+import type { Device, NE, DeviceFilter, DeviceGroup, DeviceListResponse, DeviceListStats, DeviceStats, DeviceParameter, CreateDeviceInput, NameFilterItem, BatchImportRequest, BatchImportResponse, BatchPreRegisterRequest, BatchPreRegisterResponse, LocationSync, ReportedLocation } from '../../types/device';
 import type { AntennaSector } from '../../types/map';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 import { normalizeDeviceSyncStatus } from '../../utils/deviceSyncStatus';
@@ -33,6 +33,7 @@ interface BackendDevice {
   site_id: string;
   latitude: number;
   longitude: number;
+  location_sync?: BackendLocationSync;
   created_at: string;
   updated_at: string;
   deleted_at?: string;
@@ -176,6 +177,44 @@ interface BackendDevice {
   energy_saving?: string;
   gnb_topo_cellmgr?: string;
   ssl_cert_validity?: string;
+}
+
+interface BackendLocationSync {
+  status: LocationSync['status'];
+  accepted?: { latitude: number; longitude: number } | null;
+  reported?: {
+    latitude: number;
+    longitude: number;
+    gps_height?: number | null;
+    observed_at: string;
+    version: number;
+    source_path: string;
+  } | null;
+  distance_meters?: number | null;
+  height_diff_meters?: number | null;
+}
+
+function mapBackendLocationSync(value?: BackendLocationSync): LocationSync {
+  if (!value) {
+    return { status: 'no_report', accepted: null, reported: null, distanceMeters: null, heightDiffMeters: null };
+  }
+  const reported: ReportedLocation | null = value.reported
+    ? {
+        latitude: value.reported.latitude,
+        longitude: value.reported.longitude,
+        gpsHeight: value.reported.gps_height ?? null,
+        observedAt: value.reported.observed_at,
+        version: value.reported.version,
+        sourcePath: value.reported.source_path,
+      }
+    : null;
+  return {
+    status: value.status,
+    accepted: value.accepted ? { latitude: value.accepted.latitude, longitude: value.accepted.longitude } : null,
+    reported,
+    distanceMeters: value.distance_meters ?? null,
+    heightDiffMeters: value.height_diff_meters ?? null,
+  };
 }
 
 export interface ParameterSyncRequest {
@@ -478,6 +517,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
     site: bd.device_name,
     longitude: bd.longitude,
     latitude: bd.latitude,
+    locationSync: mapBackendLocationSync(bd.location_sync),
     softwareVersion: bd.firmware_version,
     createTime: bd.created_at,
 
@@ -741,6 +781,13 @@ export const deviceApi = {
     } catch {
       return null;
     }
+  },
+
+  async acceptLocationSync(id: string, reportedVersion: number): Promise<LocationSync> {
+    const { data } = await http.post<BackendLocationSync>(`/devices/${id}/location-sync/accept`, {
+      reported_version: reportedVersion,
+    });
+    return mapBackendLocationSync(data);
   },
 
   async getBySn(sn: string): Promise<Device | null> {

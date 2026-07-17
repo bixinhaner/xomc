@@ -417,7 +417,7 @@ func initParamSyncModule(c *Container) error {
 	reconciler := paramsync.NewReconciler(c.PgPool, c.EventBus, metrics).WithResultProcessor(resultProcessor)
 	bridge := paramsync.NewTaskTerminalBridge(c.EventBus)
 	binding := paramsync.NewBindingCoordinator(c.PgPool, c.EventBus)
-	infoSyncer := device.NewInfoSyncer(c.DeviceInfoRepo, c.ParamRepo, device.NewPgDeviceRepository(c.PgPool), c.Carriers, logger)
+	infoSyncer := device.NewInfoSyncer(c.DeviceInfoRepo, c.ParamRepo, device.NewPgDeviceRepository(c.PgPool), c.Carriers, logger, device.NewPgLocationObservationRepository(c.PgPool))
 	nameSyncCfgRepo := admin.NewPgSysConfigRepository(c.PgPool)
 	nameSyncHook := provision.NewDeviceNameSyncHook(
 		func(ctx context.Context, category, key string) (string, bool) {
