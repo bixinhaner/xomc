@@ -25,7 +25,7 @@ import type {
 } from '../types';
 import { STATUS_META, UNVERIFIED_REASON_TEXT } from '../constants';
 import { exportAll, exportOne, saveBlob } from '../download';
-import { expandObjectPathColumns, hasPlanRows, PATH_FAILED_CELL } from '../adapters';
+import { expandObjectPathColumns, PATH_FAILED_CELL } from '../adapters';
 import ResultDetailModal from './ResultDetailModal';
 import { usePermission } from '@core/hooks/usePermission';
 
@@ -154,47 +154,8 @@ export default function ResultTable({
     });
   }, [rows, statusFilter, snKeyword]);
 
-  const showPlanRows = useMemo(() => hasPlanRows(rows), [rows]);
-
   const tableColumns: ColumnsType<ResultRow> = useMemo(() => {
     const base: ColumnsType<ResultRow> = [
-      {
-        title: t('mml.consoleV2.result.col.idx'),
-        key: 'idx',
-        width: 60,
-        fixed: 'left',
-        render: (_v, _r, i) => i + 1,
-      },
-      ...(showPlanRows
-        ? [
-            {
-              title: t('mml.planLine'),
-              key: 'planLine',
-              width: 110,
-              fixed: 'left' as const,
-              render: (_v: unknown, r: ResultRow) => (
-                <Tooltip title={r.planRawLine || undefined}>
-                  <Text style={{ fontSize: 12 }}>
-                    {r.planLineNo ? `#${r.planLineNo}` : '-'}
-                    {r.planOrder ? ` / ${r.planOrder}` : ''}
-                  </Text>
-                </Tooltip>
-              ),
-            },
-            {
-              title: t('mml.planCommand'),
-              key: 'planCommand',
-              width: 150,
-              fixed: 'left' as const,
-              ellipsis: true,
-              render: (_v: unknown, r: ResultRow) => (
-                <Text style={{ fontSize: 12 }} ellipsis={{ tooltip: r.commandName || r.commandCode || '-' }}>
-                  {r.commandName || r.commandCode || '-'}
-                </Text>
-              ),
-            },
-          ]
-        : []),
       {
         title: t('mml.consoleV2.result.col.deviceSn'),
         dataIndex: 'deviceSn',
@@ -204,12 +165,62 @@ export default function ResultTable({
         ellipsis: true,
       },
       {
+        title: t('mml.consoleV2.result.col.action'),
+        key: 'action',
+        width: 110,
+        fixed: 'left',
+        align: 'center',
+        render: (_v, r) => (
+          <Space size={0}>
+            <Tooltip title={t('mml.consoleV2.result.view')}>
+              <Button
+                type="text"
+                size="small"
+                icon={<ProfileOutlined />}
+                onClick={() => setViewingRow(r)}
+              />
+            </Tooltip>
+            <Tooltip title={canExportPerm ? t('mml.consoleV2.result.downloadDevice') : t('common.noPermission')}>
+              <Button
+                type="text"
+                size="small"
+                icon={<DownloadOutlined />}
+                disabled={!canExportPerm}
+                loading={exportDeviceCsv.isPending && exportDeviceCsv.variables?.deviceSn === r.deviceSn}
+                onClick={() => handleExportDeviceCsv(r.deviceSn)}
+              />
+            </Tooltip>
+            {onReexecute && (
+              <Tooltip title={canExecutePerm ? t('mml.consoleV2.result.reexecute') : t('common.noPermission')}>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<RedoOutlined />}
+                  disabled={running || !canExecutePerm}
+                  onClick={() => onReexecute(r.deviceSn)}
+                />
+              </Tooltip>
+            )}
+          </Space>
+        ),
+      },
+      {
         title: t('mml.consoleV2.result.col.status'),
         dataIndex: 'status',
         key: 'status',
         width: 120,
-        fixed: 'left',
         render: (s: ExecStatus, r) => <StatusTag status={s} reason={r.unverifiedReason} t={t} />,
+      },
+      {
+        title: t('mml.planCommand'),
+        key: 'planCommand',
+        width: 150,
+        ellipsis: true,
+        render: (_v: unknown, r: ResultRow) => (
+          <Text style={{ fontSize: 12 }} ellipsis={{ tooltip: r.commandName || r.commandCode || '-' }}>
+            {r.commandName || r.commandCode || '-'}
+          </Text>
+        ),
       },
     ];
 
@@ -253,7 +264,6 @@ export default function ResultTable({
         dataIndex: 'dispatchedAt',
         key: 'dispatchedAt',
         width: 104,
-        fixed: 'right',
         render: (v?: string) =>
           v ? <Text style={{ fontSize: 12 }}>{v}</Text> : <Text type="secondary">-</Text>,
       },
@@ -262,56 +272,15 @@ export default function ResultTable({
         dataIndex: 'respondedAt',
         key: 'respondedAt',
         width: 104,
-        fixed: 'right',
         render: (v?: string) =>
           v ? <Text style={{ fontSize: 12 }}>{v}</Text> : <Text type="secondary">-</Text>,
-      },
-      {
-        title: t('mml.consoleV2.result.col.action'),
-        key: 'action',
-        width: 110,
-        fixed: 'right',
-        align: 'center',
-        render: (_v, r) => (
-          <Space size={0}>
-            <Tooltip title={t('mml.consoleV2.result.view')}>
-              <Button
-                type="text"
-                size="small"
-                icon={<ProfileOutlined />}
-                onClick={() => setViewingRow(r)}
-              />
-            </Tooltip>
-            <Tooltip title={canExportPerm ? t('mml.consoleV2.result.downloadDevice') : '无导出权限'}>
-              <Button
-                type="text"
-                size="small"
-                icon={<DownloadOutlined />}
-                disabled={!canExportPerm}
-                loading={exportDeviceCsv.isPending && exportDeviceCsv.variables?.deviceSn === r.deviceSn}
-                onClick={() => handleExportDeviceCsv(r.deviceSn)}
-              />
-            </Tooltip>
-            {onReexecute && (
-              <Tooltip title={canExecutePerm ? t('mml.consoleV2.result.reexecute') : '无执行权限'}>
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<RedoOutlined />}
-                  disabled={running || !canExecutePerm}
-                  onClick={() => onReexecute(r.deviceSn)}
-                />
-              </Tooltip>
-            )}
-          </Space>
-        ),
       },
     ];
 
     return [...base, ...dynamic, ...tail];
     // commandId / 导出 mutation / 重新执行回调 / running 进依赖：切任务或对应状态变化时刷新「操作」列。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [displayColumns, commandId, exportDeviceCsv.isPending, exportDeviceCsv.variables, showPlanRows, onReexecute, running, t, canExportPerm, canExecutePerm]);
+  }, [displayColumns, commandId, exportDeviceCsv.isPending, exportDeviceCsv.variables, onReexecute, running, t, canExportPerm, canExecutePerm]);
 
   return (
     <Card
@@ -344,7 +313,7 @@ export default function ResultTable({
       style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
       styles={{ body: { padding: 16, flex: 1, minHeight: 0, overflow: 'auto' } }}
       extra={
-        <Tooltip title={canExportPerm ? undefined : '无导出权限'}>
+        <Tooltip title={canExportPerm ? undefined : t('common.noPermission')}>
           <Button
             icon={<DownloadOutlined />}
             disabled={rows.length === 0 || !canExportPerm}
