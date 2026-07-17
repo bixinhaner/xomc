@@ -217,8 +217,8 @@ export default function ResultTable({
         width: 150,
         ellipsis: true,
         render: (_v: unknown, r: ResultRow) => (
-          <Text style={{ fontSize: 12 }} ellipsis={{ tooltip: r.commandCode || '-' }}>
-            {r.commandCode || '-'}
+          <Text style={{ fontSize: 12 }} ellipsis={{ tooltip: r.commandName || r.commandCode || '-' }}>
+            {r.commandName || r.commandCode || '-'}
           </Text>
         ),
       },

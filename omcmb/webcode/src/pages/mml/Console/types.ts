@@ -104,6 +104,7 @@ export interface ResultRow {
   planOrder?: number;
   planRawLine?: string;
   commandCode?: string;
+  commandName?: string;
   deviceSn: string;
   /** 设备任务 ID（= device_tasks.id；逐 PATH 时为该设备父任务 ID） */
   deviceTaskId: string;

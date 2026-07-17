@@ -325,10 +325,13 @@ type MMLCustomCommand struct {
 //
 // UserID 由 service 层接收后调 RoleQuerier 派生 VisibleGroupIDs；repo 层仅消费派生结果。
 type CustomCommandFilter struct {
-	CommandCode     *string
-	OperationType   *string
-	CommandScope    *string
-	CategoryGroup   *string
+	CommandCode   *string
+	OperationType *string
+	CommandScope  *string
+	CategoryGroup *string
+	// ProductID 非空时，列表只返回当前产品参数模型仍支持至少一个 path 的模板，
+	// 并把模板中的不支持 path 一并裁掉。管理端不传此字段，仍返回完整模板。
+	ProductID       *uuid.UUID
 	Creator         *string     // 当前 admin 的 username；用于 private 命令 self-fallback 可见性
 	UserID          *uuid.UUID  // 当前 admin 的 user_id；service 层据此派生 VisibleGroupIDs
 	VisibleGroupIDs []uuid.UUID // service 派生后填入；repo 层用作 group-share 可见性 SQL 参数

@@ -47,6 +47,19 @@ func (f *fakeFlatGroupTreeRepo) BuildFlatTree(context.Context) ([]FlatGroup, err
 	return f.groups, f.err
 }
 
+type fakeUnsupportedPathRepo struct {
+	paths []UnsupportedPath
+	err   error
+}
+
+func (f *fakeUnsupportedPathRepo) Record(context.Context, uuid.UUID, string, bool, bool, int, string) error {
+	return nil
+}
+
+func (f *fakeUnsupportedPathRepo) ListByProduct(context.Context, uuid.UUID) ([]UnsupportedPath, error) {
+	return f.paths, f.err
+}
+
 type fakeSubFieldRepo struct {
 	byCommandList     map[uuid.UUID][]MMLCommandSubField
 	byCommandEnriched map[uuid.UUID][]MMLCommandSubFieldEnriched
@@ -237,6 +250,32 @@ func TestBuildGroupTreeFilteredByDeviceUsesSupportedPaths(t *testing.T) {
 	require.Len(t, got, 1)
 	require.Len(t, got[0].Commands, 1)
 	assert.Equal(t, commandA.ID, got[0].Commands[0].ID)
+}
+
+func TestBuildGroupTreeFilteredByDevicePrunesCommandWithOnlyRuntimeUnsupportedPaths(t *testing.T) {
+	groupID := uuid.New()
+	command := GroupTreeCommand{ID: uuid.New(), OperationType: "LST"}
+	command.SetTargetPathsRaw([]byte(`["Device.A"]`))
+	productID := uuid.New()
+	paramModelID := uuid.New()
+	svc := NewConsoleService(&fakeGroupTreeRepo{tree: []GroupTreeNode{
+		{ID: groupID, GroupCode: "ROOT", Commands: []GroupTreeCommand{command}},
+	}}, newFakeSubFieldRepo(), newFakeCommandRepo(), nil)
+	svc.SetParamModelByDeviceResolver(func(context.Context, string) (*uuid.UUID, error) {
+		return &paramModelID, nil
+	})
+	svc.SetParamModelPathsResolver(func(context.Context, uuid.UUID) (map[string]struct{}, error) {
+		return map[string]struct{}{"Device.A": {}}, nil
+	})
+	svc.SetUnsupportedPathsProvider(&fakeUnsupportedPathRepo{paths: []UnsupportedPath{
+		{Path: "Device.A", ReadUnsupported: true},
+	}}, func(context.Context, string) (*uuid.UUID, error) {
+		return &productID, nil
+	})
+
+	got, err := svc.BuildGroupTreeFilteredByDevice(context.Background(), "", "zh-CN", "SN-1")
+	require.NoError(t, err)
+	assert.Empty(t, got, "group with no remaining readable path must not be returned")
 }
 
 func TestBuildFlatGroupTreeFilteredByDeviceUsesSupportedPaths(t *testing.T) {

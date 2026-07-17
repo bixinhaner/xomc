@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDeviceRows } from '../adapters';
+import { buildDeviceRows, buildRawExecutePayload, hasPlanRows, mapResultItemToRow } from '../adapters';
 import type { ResultColumn } from '../types';
 import type { DeviceTaskResultItem } from '@core/types/mml';
 
@@ -30,6 +30,26 @@ const item = (over: Partial<DeviceTaskResultItem> & { success: boolean }): Devic
 });
 
 describe('buildDeviceRows (逐 PATH 合并)', () => {
+  it('保留后端返回的自定义命令名，详情不回退到内部命令码', () => {
+    const result = mapResultItemToRow(
+      item({ success: true, commandCode: 'RAW LST', commandName: 'dxpTest' }),
+      columns,
+      true,
+    );
+
+    expect(result.commandName).toBe('dxpTest');
+  });
+
+  it('只有实际存在计划行时才显示 Plan Row 列', () => {
+    expect(hasPlanRows([{ planLineNo: undefined }])).toBe(false);
+    expect(hasPlanRows([{ planLineNo: 7 }])).toBe(true);
+  });
+
+  it('裸路径执行请求携带用户选择的命令名', () => {
+    const payload = buildRawExecutePayload('LST', [{ path: SW, value: '' }], [SN], 'dxpTest', 'whole', 'dxpTest');
+    expect(payload.command_name).toBe('dxpTest');
+  });
+
   // 注：成功 path 的读回值由 parseMmlDeviceTaskResult(GPV) 解析（需 DOM，已在 BUG-3 真机验证）；
   // 本单测聚焦 buildDeviceRows 的「合并」新逻辑：分组 / 失败标记 / 行状态 / pathTasks。
   it('单设备多 path → 合并为一行，失败 path 标「✗ 失败」、行状态 failed、pathTasks 逐 path', () => {

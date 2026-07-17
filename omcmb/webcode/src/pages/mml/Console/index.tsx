@@ -316,6 +316,8 @@ export default function MMLConsole() {
             req.checkedPaths.map((p) => ({ path: p, value: req.values?.[p] ?? '' })),
             targetSns,
             taskNameWithSn(command.commandName),
+            'whole',
+            command.commandName,
           );
           const task = await rawMutation.mutateAsync({ payload });
           taskId = task.id;
@@ -351,6 +353,7 @@ export default function MMLConsole() {
           targetSns,
           taskNameWithSn(cmdName),
           req.execMode,
+          cmdName,
         );
         const task = await rawMutation.mutateAsync({ payload });
         taskId = task.id;

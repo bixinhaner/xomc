@@ -77,8 +77,8 @@ function parseBoolSafe(raw: string | undefined, fallback: boolean): boolean {
 
 /**
  * usePublicSecuritySettings 走 `/admin/public/configs?category=security` 无需鉴权，
- * 仅能拉 is_public=true 的 4 个字段：
- *   userSessionExpirationMin / isBrowserAutoRecordPass / enabledFlag / msg
+ * 仅消费公开的登录前安全配置；issue #100 的运行时白名单只兜底
+ * isBrowserAutoRecordPass，其余字段仍必须显式标记 is_public=true 才会返回。
  *
  * 主要消费方：登录页（未登录态拉不到 useSysConfigsByCategory）。
  *

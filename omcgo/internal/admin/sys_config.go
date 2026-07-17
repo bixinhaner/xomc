@@ -77,6 +77,14 @@ type PgSysConfigRepository struct {
 
 var _ SysConfigRepository = (*PgSysConfigRepository)(nil)
 
+// isLoginPagePublicSecurityConfig 维护登录页安全配置的公开白名单。
+// 登录页必须在认证前读取禁止浏览器记密开关；其余 security 配置（尤其密码策略和默认密码）
+// 仍保持非公开。配置页走 BatchUpsert 首次创建键时也必须复用这份分类，避免新库
+// 把登录页依赖的配置误写成 is_public=false。
+func isLoginPagePublicSecurityConfig(category, key string) bool {
+	return category == "security" && key == "isBrowserAutoRecordPass"
+}
+
 // NewPgSysConfigRepository creates a new PgSysConfigRepository.
 func NewPgSysConfigRepository(pool *pgxpool.Pool) *PgSysConfigRepository {
 	return &PgSysConfigRepository{pool: pool}
@@ -221,14 +229,18 @@ func (r *PgSysConfigRepository) BatchUpsert(ctx context.Context, category string
 		if valueType == "" {
 			valueType = "string"
 		}
-		// 仅 update value + updated_at；value_type / desc / is_public 仅在新增时落库，
-		// 已存在的行不会被覆盖到这些维度（防止业务侧误传 value_type 把字段语义破坏）。
+		isPublic := isLoginPagePublicSecurityConfig(category, item.Key)
+		// 仅 update value + updated_at；value_type / desc 不随通用批量保存改写。
+		// 登录页公开白名单是例外：首次创建时写入 is_public=true；若历史数据因旧版
+		// 基线缺失而是 false，再次保存也会自动修复。非白名单永不在这里降级已有标记。
 		_, err := tx.Exec(ctx, `
-INSERT INTO sys_configs (category, key, value, value_type)
-VALUES ($1, $2, $3, $4)
+INSERT INTO sys_configs (category, key, value, value_type, is_public)
+VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (category, key) DO UPDATE
-SET value = EXCLUDED.value, updated_at = NOW()
-`, category, item.Key, item.Value, valueType)
+SET value = EXCLUDED.value,
+    is_public = CASE WHEN EXCLUDED.is_public THEN TRUE ELSE sys_configs.is_public END,
+    updated_at = NOW()
+`, category, item.Key, item.Value, valueType, isPublic)
 		if err != nil {
 			return count, fmt.Errorf("upsert %s.%s: %w", category, item.Key, err)
 		}
@@ -332,6 +344,24 @@ func (s *SysConfigService) Get(ctx context.Context, id uuid.UUID) (*SysConfig, e
 // List returns configs, optionally filtered by category.
 func (s *SysConfigService) List(ctx context.Context, category string, publicOnly bool) ([]SysConfig, error) {
 	return s.repo.List(ctx, category, publicOnly)
+}
+
+// ListPublic 返回无需认证即可读取的配置项。
+// 除数据库 is_public 标记外，登录页依赖的 isBrowserAutoRecordPass 使用代码白名单兜底，
+// 兼容 consolidated baseline 前已存在但公开标记丢失的数据库。过滤始终在 service
+// 内完成，defaultPasswd 等未列入白名单的安全项不会进入 handler 响应。
+func (s *SysConfigService) ListPublic(ctx context.Context, category string) ([]SysConfig, error) {
+	items, err := s.repo.List(ctx, category, false)
+	if err != nil {
+		return nil, err
+	}
+	publicItems := make([]SysConfig, 0, len(items))
+	for _, item := range items {
+		if item.IsPublic || isLoginPagePublicSecurityConfig(item.Category, item.Key) {
+			publicItems = append(publicItems, item)
+		}
+	}
+	return publicItems, nil
 }
 
 // Update updates a config.

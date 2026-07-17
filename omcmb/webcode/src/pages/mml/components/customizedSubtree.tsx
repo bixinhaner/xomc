@@ -53,10 +53,10 @@ export function parseCustomLeafId(key: string): string | null {
  * 复用与 Console 原实现一致的 getTemplates 查询，但统一到共享 query key
  * CUSTOM_COMMANDS_QUERY_KEY，使 Console / catalog 两页的失效互相联动。
  */
-export function useCustomCommands() {
+export function useCustomCommands(productId?: string) {
   const query = useQuery({
-    queryKey: CUSTOM_COMMANDS_QUERY_KEY,
-    queryFn: () => mmlApi.getTemplates({ page: 1, pageSize: 100 }),
+    queryKey: [...CUSTOM_COMMANDS_QUERY_KEY, productId ?? ''],
+    queryFn: () => mmlApi.getTemplates({ page: 1, pageSize: 1000, productId }),
     staleTime: 5 * 60 * 1000,
   });
   return {

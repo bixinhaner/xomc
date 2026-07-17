@@ -162,3 +162,21 @@
   justify-content: space-between;
   margin-bottom: 0;
 }
+
+/* Chromium 专用：视觉掩码落在实际 input，而不是 Ant Design 外层容器。 */
+.maskedPasswordInput {
+  -webkit-text-security: disc;
+}
+
+.revealedPasswordInput {
+  -webkit-text-security: none;
+}
+
+.passwordVisibilityToggle {
+  display: inline-flex;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+}
