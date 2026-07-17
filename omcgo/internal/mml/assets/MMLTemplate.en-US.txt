@@ -8,7 +8,7 @@
 # Private PATH - Operation PRIVATE:path[=value][,path2=value2];device_sn[,device_sn2...]
 #
 # Supported operations:
-# LST query. Put one or more standard parameter paths after the operation.
+# LST query. Put one or more standard parameter paths after the operation; an object or prefix path ending with . is also supported, and the device returns all parameters under that object.
 # MOD modify. Put one or more standard parameter path=value pairs after the operation.
 # ADD add an object. Put the object table path after the operation; to configure the new object after ADD, append :param=value.
 # RMV remove an object. Put the concrete object instance path after the operation.

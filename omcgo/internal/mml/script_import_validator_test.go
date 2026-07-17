@@ -178,6 +178,7 @@ func TestScriptImportValidator_ProducesPlanAndUsesOneBatchPerResource(t *testing
 func TestScriptImportValidator_ProducesRawPathPlanItemsWithoutCommandLookup(t *testing.T) {
 	parsed, issues := ParseScriptTXT([]byte(strings.Join([]string{
 		"LST Device.IP.Interface.1.Enable;SN1",
+		"LST Device.FAP.Ipsec.;SN1",
 		"MOD Device.IP.Interface.1.Enable=true;SN1",
 		"ADD Device.IP.Interface.1.IPv4Address.:IPAddress=192.168.1.10;SN1",
 		"RMV Device.IP.Interface.1.IPv4Address.3.;SN1",
@@ -188,6 +189,7 @@ func TestScriptImportValidator_ProducesRawPathPlanItemsWithoutCommandLookup(t *t
 		standardPaths: map[string]struct{}{
 			"Device.IP.Interface.{i}.Enable":                    {},
 			"Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress": {},
+			"Device.FAP.Ipsec.{i}.TUNNEL_ENABLE":                {},
 		},
 	}
 
@@ -195,16 +197,18 @@ func TestScriptImportValidator_ProducesRawPathPlanItemsWithoutCommandLookup(t *t
 
 	require.NoError(t, err)
 	require.Empty(t, result.Issues)
-	require.Len(t, result.PlanItems, 4)
+	require.Len(t, result.PlanItems, 5)
 	require.Equal(t, 0, repo.commandBatchCalls)
 	require.Equal(t, 1, repo.pathBatchCalls)
 	require.Equal(t, "RAW LST", result.PlanItems[0].Command["command_code"])
 	require.Equal(t, []string{"Device.IP.Interface.1.Enable"}, result.PlanItems[0].Command["param_paths"])
-	require.Equal(t, "RAW MOD", result.PlanItems[1].Command["command_code"])
-	require.Equal(t, map[string]interface{}{"Device.IP.Interface.1.Enable": "true"}, result.PlanItems[1].Command["parameters"])
-	require.Equal(t, "RAW ADD", result.PlanItems[2].Command["command_code"])
-	require.Equal(t, map[string]interface{}{"IPAddress": "192.168.1.10"}, result.PlanItems[2].Command["parameters"])
-	require.Equal(t, "RAW RMV", result.PlanItems[3].Command["command_code"])
+	require.Equal(t, "RAW LST", result.PlanItems[1].Command["command_code"])
+	require.Equal(t, []string{"Device.FAP.Ipsec."}, result.PlanItems[1].Command["param_paths"])
+	require.Equal(t, "RAW MOD", result.PlanItems[2].Command["command_code"])
+	require.Equal(t, map[string]interface{}{"Device.IP.Interface.1.Enable": "true"}, result.PlanItems[2].Command["parameters"])
+	require.Equal(t, "RAW ADD", result.PlanItems[3].Command["command_code"])
+	require.Equal(t, map[string]interface{}{"IPAddress": "192.168.1.10"}, result.PlanItems[3].Command["parameters"])
+	require.Equal(t, "RAW RMV", result.PlanItems[4].Command["command_code"])
 }
 
 func TestScriptImportValidator_ValidatesExpandedDeviceSNPlanItems(t *testing.T) {
