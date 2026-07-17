@@ -124,6 +124,29 @@ func logFile(bucket, path string) *LogFile {
 	return &LogFile{ID: uuid.New(), Bucket: bucket, ObjectPath: path}
 }
 
+type fakeTaskLogStore struct {
+	remaining []TaskLogFile
+	deleted   []int64
+}
+
+func (f *fakeTaskLogStore) ListExpiredTaskLogs(_ context.Context, _ time.Time, limit int) ([]TaskLogFile, error) {
+	if len(f.remaining) == 0 {
+		return nil, nil
+	}
+	n := limit
+	if n > len(f.remaining) {
+		n = len(f.remaining)
+	}
+	out := f.remaining[:n]
+	f.remaining = f.remaining[n:]
+	return out, nil
+}
+
+func (f *fakeTaskLogStore) MarkTaskLogDeleted(_ context.Context, id int64) error {
+	f.deleted = append(f.deleted, id)
+	return nil
+}
+
 func TestCleanupRunner_DeletesExpiredObjectsAndRows(t *testing.T) {
 	fault := &fakeCleanupStore{remaining: []*LogFile{
 		logFile("logs", "fault/a"),
@@ -145,6 +168,28 @@ func TestCleanupRunner_DeletesExpiredObjectsAndRows(t *testing.T) {
 	assert.Len(t, running.deleted, 1)
 	// 只对有 object_path 的记录删 MinIO（fault 2 条 + running 1 条 = 3），跳过空占位。
 	assert.ElementsMatch(t, []string{"logs/fault/a", "logs/fault/b", "logs/run/x"}, remover.removed)
+}
+
+func TestCleanupRunner_DeletesExpiredTaskLogMetadata(t *testing.T) {
+	taskLogs := &fakeTaskLogStore{remaining: []TaskLogFile{
+		{ID: 101, Bucket: "backup", ObjectPath: "logs/running/task-a.log"},
+		{ID: 102, Bucket: "backup", ObjectPath: "logs/fault/task-b.log"},
+		{ID: 103}, // bad legacy metadata: no object, still soft-delete metadata
+	}}
+	remover := &fakeRemover{}
+	runner := NewCleanupRunner(nil, nil, remover, NewRetentionPolicy(nil, nil), nil)
+	runner.SetTaskLogStore(taskLogs)
+
+	out, err := runner.Run(context.Background(), nil)
+	require.NoError(t, err)
+	require.NotNil(t, out)
+
+	assert.Equal(t, []int64{101, 102, 103}, taskLogs.deleted)
+	assert.ElementsMatch(t, []string{
+		"backup/logs/running/task-a.log",
+		"backup/logs/fault/task-b.log",
+	}, remover.removed)
+	assert.JSONEq(t, `{"days":60,"fault_deleted":0,"running_deleted":0,"task_log_deleted":3}`, string(out))
 }
 
 func TestCleanupRunner_NilStoresSafe(t *testing.T) {

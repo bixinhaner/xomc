@@ -186,6 +186,55 @@ func TestMapDeviceItem_FaultLogQuotaDeletedFileIsShownWithoutDownloadURL(t *test
 	assert.False(t, downloadLookupCalled, "已删除文件不应再尝试生成 presigned URL")
 }
 
+func TestMapDeviceItem_RuntimeLogDeletedFileIsShownWithoutDownloadURL(t *testing.T) {
+	svc := newServiceForMap(t)
+	catalog := mustCatalog(t, "RUNTIME_LOG_COLLECT")
+	parent := &software.UpgradeTask{
+		ID:       uuid.New(),
+		TaskName: "runtime-log-task",
+		TaskType: software.TaskTypeLogCollect,
+	}
+	const fileName = "runtime-SN-QUOTA-2.tar.gz"
+	sub := software.UpgradeSubTaskWithTaskName{
+		UpgradeSubTask: software.UpgradeSubTask{
+			ID:        uuid.New(),
+			TaskID:    parent.ID,
+			DeviceID:  uuid.New(),
+			DeviceSN:  "SN-QUOTA-2",
+			Status:    software.UpgradeCompleted,
+			UpdatedAt: coremodel.Time(time.Date(2026, 7, 17, 11, 0, 0, 0, time.UTC)),
+		},
+		TaskName: "runtime-log-task",
+	}
+	cache := map[uuid.UUID]*coremodel.Device{
+		sub.DeviceID: {ID: sub.DeviceID, SerialNumber: "SN-QUOTA-2", ProductClass: "BSC"},
+	}
+	svc.SetFileLandedLookup(func(_ context.Context, sn, mainTaskID string) (string, bool, error) {
+		assert.Equal(t, "SN-QUOTA-2", sn)
+		assert.Equal(t, parent.ID.String(), mainTaskID)
+		return fileName, true, nil
+	})
+	svc.SetFileDeletedLookup(func(_ context.Context, sn, mainTaskID, targetFile string) (bool, error) {
+		assert.Equal(t, "SN-QUOTA-2", sn)
+		assert.Equal(t, parent.ID.String(), mainTaskID)
+		assert.Equal(t, fileName, targetFile)
+		return true, nil
+	})
+	downloadLookupCalled := false
+	svc.SetDownloadURLLookup(func(context.Context, string, string) (string, error) {
+		downloadLookupCalled = true
+		return "http://example.invalid/download", nil
+	})
+
+	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
+	require.NoError(t, err)
+	assert.Equal(t, "ended", item.Status)
+	assert.Equal(t, fileName, item.TargetFile)
+	assert.True(t, item.FileDeleted, "运行日志元数据标记删除后也需要告诉前端")
+	assert.Empty(t, item.DownloadURL)
+	assert.False(t, downloadLookupCalled, "已删除运行日志不应再尝试生成 presigned URL")
+}
+
 // 以下两测覆盖 issue #195：上报时间只在文件真正上报成功（终态 ended）时才填。
 // sub_task.updated_at 在子任务生成 / 中间状态流转时都会刷新，但那不是
 // "文件上报成功"时刻——直接拿 updated_at 会在任务刚创建时就显示一个误导值。
