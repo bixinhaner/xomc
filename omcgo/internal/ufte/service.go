@@ -62,7 +62,7 @@ type Service struct {
 	fileLandedLookup func(ctx context.Context, sn, mainTaskID string) (fileName string, landed bool, err error)
 
 	// fileDeletedLookup 注入式回调：按 (sn, mainTaskID, fileName) 判断 UFTE 任务文件
-	// 是否已被站点日志配额清理。true 时前端保留文件名但禁用下载入口。
+	// 元数据是否已标记删除。true 时前端保留文件名但禁用下载入口。
 	fileDeletedLookup func(ctx context.Context, sn, mainTaskID, fileName string) (bool, error)
 
 	// snapshotConfigRestoreDispatcher (T-0164)：CONFIG_RESTORE 任务的实际派发器。
@@ -301,7 +301,7 @@ func (s *Service) SetFileLandedLookup(fn func(ctx context.Context, sn, mainTaskI
 	s.fileLandedLookup = fn
 }
 
-// SetFileDeletedLookup 注入"按 (sn, mainTaskID, fileName) 判断文件是否已被配额清理"的回调。
+// SetFileDeletedLookup 注入"按 (sn, mainTaskID, fileName) 判断文件元数据是否已标记删除"的回调。
 // 不注入则 DeviceItem.FileDeleted 始终为 false。
 func (s *Service) SetFileDeletedLookup(fn func(ctx context.Context, sn, mainTaskID, fileName string) (bool, error)) {
 	s.fileDeletedLookup = fn
@@ -1512,6 +1512,10 @@ func optionalTimePtr(t time.Time) *time.Time {
 	return &value
 }
 
+func isTaskLogCollectType(typeCode string) bool {
+	return typeCode == "RUNTIME_LOG_COLLECT" || typeCode == "FAULT_LOG_COLLECT"
+}
+
 func timePtrAfter(left, right *time.Time) bool {
 	if left == nil {
 		return false
@@ -1625,7 +1629,7 @@ func (s *Service) mapDeviceItem(
 		lastReport = time.Time(subTask.UpdatedAt)
 	}
 	fileDeleted := false
-	if typeDef.TypeCode == "FAULT_LOG_COLLECT" && targetFile != "" && status == "ended" &&
+	if isTaskLogCollectType(typeDef.TypeCode) && targetFile != "" && status == "ended" &&
 		s.fileDeletedLookup != nil && subTask.DeviceSN != "" {
 		deleted, lookupErr := s.fileDeletedLookup(ctx, subTask.DeviceSN, mainTaskID, targetFile)
 		if lookupErr != nil {

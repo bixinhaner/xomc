@@ -400,7 +400,7 @@ const (
 const (
 	// SubjectLogFileReceived 是 CPE 上传运行日志（FileType "6"）或故障日志（FileType "8"/"RL"）
 	// 成功落 MinIO 后，由 acs/upload/handler.go 发布。
-	// 订阅者：stationlog.Service（创建 station_log_files 记录 + 故障日志配额清理）。
+	// 订阅者：stationlog.Service（运行日志入库；故障日志不写入重启记录）。
 	// Payload：LogFileReceivedPayload
 	SubjectLogFileReceived = "log.file.received"
 )

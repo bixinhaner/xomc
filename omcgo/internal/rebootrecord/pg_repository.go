@@ -26,8 +26,8 @@ func NewPgRepository(pool *pgxpool.Pool) *PgRepository {
 //
 // 两半共用同一组过滤值（占位符复用）：device_sn / device_type / start / end 在
 // 两个 SELECT 里引用相同的 $N，只是时间列名不同。
-// 异常重启用 station_fault_logs.created_at 作为检测时间；collected_at 会在故障文件
-// 上传补全时更新，不能拿来表示 1 BOOT 发生时间。
+// 异常重启用 station_fault_logs.created_at 作为检测时间；collected_at 是日志采集
+// 领域的历史字段，不能拿来表示 1 BOOT 发生时间。
 // 所有用户输入都走参数化占位符，无字符串拼接注入。
 //
 // 投影列在两半严格对齐（名称 + 类型），可空列一律 COALESCE 成零值，便于扫描。

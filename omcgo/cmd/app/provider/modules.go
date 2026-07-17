@@ -472,6 +472,9 @@ func initUFTEModule(c *Container) error {
 			if files[i].FileName != fileName || files[i].ObjectPath == "" {
 				continue
 			}
+			if files[i].IsDeleted {
+				continue
+			}
 			bucket, objectPath, splitErr := backup.SplitBucketAndPath(files[i].ObjectPath)
 			if splitErr != nil {
 				return "", splitErr
@@ -527,11 +530,9 @@ func initUFTEModule(c *Container) error {
 		return "", false, nil
 	})
 
-	// 注入"日志文件是否已被配额清理"回调。UFTE 的文件名/下载列来自
-	// backup_restore_file；故障日志配额删除状态在 station_fault_logs.is_deleted。
-	// 这里先按 (sn, task_id, file_name) 找到当前 UFTE 任务的 MinIO 对象，再用同一个
-	// bucket/object_path 精确查询故障日志记录，避免同设备重复上传同名厂商日志时误判。
-	faultLogRepo := stationlog.NewPgFaultRepository(c.PgPool)
+	// 注入"日志文件元数据是否已标记删除"回调。UFTE 的文件名/下载列来自
+	// backup_restore_file；故障日志文件数配额清理也记录在 backup_restore_file.is_deleted。
+	// 按 (sn, task_id, file_name) 精确命中当前 UFTE 任务，避免同设备重复上传同名厂商日志时误判。
 	service.SetFileDeletedLookup(func(ctx context.Context, sn, mainTaskID, fileName string) (bool, error) {
 		if sn == "" || mainTaskID == "" || fileName == "" {
 			return false, nil
@@ -548,15 +549,7 @@ func initUFTEModule(c *Container) error {
 			if f.TaskID == nil || *f.TaskID != mainTaskID {
 				continue
 			}
-			bucket, objectPath, splitErr := backup.SplitBucketAndPath(f.ObjectPath)
-			if splitErr != nil {
-				return false, splitErr
-			}
-			logFile, fileErr := faultLogRepo.LatestByObject(ctx, bucket, objectPath)
-			if fileErr != nil || logFile == nil {
-				return false, fileErr
-			}
-			return logFile.IsDeleted, nil
+			return f.IsDeleted, nil
 		}
 		return false, nil
 	})
@@ -908,9 +901,33 @@ func initBackupModule(c *Container) error {
 	// after CPE finishes uploading. Both wire onto the same RestoreMetrics.
 	restoreService.SetBackupTaskFinder(backupTaskRepo)
 	filePathRecorder := backup.NewFilePathRecorder(backupTaskRepo, restoreMetrics, logger)
+	backupRestoreFileRepo := backup.NewPgFileRepository(c.PgPool)
 	// M1 of backup-restore-alignment-plan: 同步落库 backup_restore_file 元数据
 	// （SN/file_name/md5/size/operator_code/update_time），支撑后续查询与导出。
-	filePathRecorder.SetFileRepository(backup.NewPgFileRepository(c.PgPool))
+	filePathRecorder.SetFileRepository(backupRestoreFileRepo)
+	logFileRetentionSysCfg := admin.NewPgSysConfigRepository(c.PgPool)
+	logFileRetentionPolicy := stationlog.NewRetentionPolicy(
+		func(ctx context.Context, category, key string) (string, bool) {
+			row, err := logFileRetentionSysCfg.GetByKey(ctx, category, key)
+			if err != nil || row == nil {
+				return "", false
+			}
+			return row.Value, true
+		},
+		logger,
+	)
+	if c.MinIO != nil {
+		filePathRecorder.SetLogFileQuota(backupRestoreFileRepo, logFileRetentionPolicy, c.MinIO)
+	} else {
+		filePathRecorder.SetLogFileQuota(backupRestoreFileRepo, logFileRetentionPolicy, nil)
+	}
+	if c.SysConfigSvc != nil {
+		c.SysConfigSvc.RegisterSavedHook(func(_ context.Context, category string) {
+			if category == stationlog.RetentionCategory {
+				logFileRetentionPolicy.InvalidateCache()
+			}
+		})
+	}
 	// FAULT_LOG_COLLECT / RUNTIME_LOG_COLLECT 的"文件落地即任务成功"hook：
 	// BACKUP stream 是 WorkQueuePolicy，软件包不能再订一份 backup.file.received，
 	// 走同进程 hook 让 FilePathRecorder 处理完元数据后回调 software 推进 sub_task。
@@ -1238,7 +1255,7 @@ func ensureSnapshotBucket(ctx context.Context, client *minio.Client, bucket stri
 	return nil
 }
 
-// initStationLogModule 初始化基站日志采集模块（运行日志 + 故障日志下载 / 配额管理）。
+// initStationLogModule 初始化基站日志采集模块（运行日志 + 异常重启记录）。
 func initStationLogModule(c *Container) error {
 	logger := c.Logger.Named("stationlog")
 
@@ -1270,7 +1287,7 @@ func initStationLogModule(c *Container) error {
 		})
 	}
 
-	// 订阅 SubjectLogFileReceived 事件，将上传的日志文件入库
+	// 订阅 SubjectLogFileReceived 事件；运行日志入库，故障日志上传由文件传输任务链路维护。
 	if c.EventBus != nil {
 		if _, err := c.EventBus.Subscribe(event.SubjectLogFileReceived, func(ctx context.Context, evt event.Event) error {
 			return svc.HandleLogFileReceived(ctx, evt)

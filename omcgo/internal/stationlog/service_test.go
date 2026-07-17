@@ -32,8 +32,7 @@ func newEventPayload(p LogFileReceivedPayload) event.Event {
 }
 
 // memRepo 是内存版 Repository，单测专用。
-// 通过实现 Repository + FaultExtraRepository 两个接口，能完整覆盖
-// stationlog.Service 在故障日志路径上的两种 detected/file_received 状态切换。
+// 通过实现 Repository 接口覆盖 stationlog.Service 对运行日志与异常重启记录的读写。
 type memRepo struct {
 	mu      sync.Mutex
 	rows    []*LogFile
@@ -226,38 +225,6 @@ func (m *memRepo) ListOldestByDevice(_ context.Context, deviceID uuid.UUID, limi
 	return candidates, nil
 }
 
-func (m *memRepo) UpdateFile(_ context.Context, id uuid.UUID, fileName, objectPath, bucket string, size int64) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for _, r := range m.rows {
-		if r.ID == id {
-			r.FileName = fileName
-			r.ObjectPath = objectPath
-			r.Bucket = bucket
-			r.FileSize = size
-			r.RecordStatus = FaultRecordStatusFileReceived
-			r.UpdatedAt = time.Now()
-			r.CollectedAt = time.Now()
-			return nil
-		}
-	}
-	return nil
-}
-
-func (m *memRepo) LatestDetectedByDeviceSN(_ context.Context, sn string) (*LogFile, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for i := len(m.rows) - 1; i >= 0; i-- {
-		r := m.rows[i]
-		if r.IsDeleted || r.DeviceSN != sn || r.RecordStatus != FaultRecordStatusDetected {
-			continue
-		}
-		clone := *r
-		return &clone, nil
-	}
-	return nil, nil
-}
-
 type stubDeviceLookup struct{}
 
 func (stubDeviceLookup) GetBySerialNumber(_ context.Context, _ string) (*model.Device, error) {
@@ -282,9 +249,8 @@ func (f *fakeMinioClient) PresignedGetObject(_ context.Context, bucket, object s
 	return url.Parse("https://minio.local/" + bucket + "/" + object)
 }
 
-// newTestService 用 fakeMinioClient 替身接住 MinIO 调用；HandleLogFileReceived 的 fault
-// 路径会走 detected 补全分支，运行日志路径写 repository 即可，两者都可能触发配额清理
-// 从而调用到 minioClient，用真实 nil 会 panic，故用 fake 替身。
+// newTestService 用 fakeMinioClient 替身接住 MinIO 调用；运行日志路径写 repository，
+// 配额清理测试会直接调用 enforceFaultLogQuota，用真实 nil 会 panic，故用 fake 替身。
 func newTestService() (*Service, *memRepo, *memRepo) {
 	runRepo := newMemRunRepo()
 	faultRepo := newMemFaultRepo()
@@ -341,42 +307,42 @@ func TestRecordAbnormalReboot_AllowsRepeatRecords(t *testing.T) {
 	assert.Len(t, faultRepo.rows, 2)
 }
 
-func TestHandleLogFileReceived_PromotesDetectedRecord(t *testing.T) {
-	// 文件到达时优先把已有 detected 占位记录推进到 file_received，避免 UI 重复条目。
+func TestHandleLogFileReceived_FaultUploadDoesNotMutateRebootRecord(t *testing.T) {
+	// 重启记录只记录 1 BOOT 事实，不承载故障日志文件附件；文件上传不应补全重启记录。
 	svc, _, faultRepo := newTestService()
 
-	// 先写一条 detected 占位
 	snap := device.AbnormalRebootSnapshot{
 		DeviceID:       uuid.New(),
-		DeviceSN:       "SN-PROMOTE",
+		DeviceSN:       "SN-NO-FILE-MUTATION",
 		HaltMainReason: "halt_reboot",
 		DetectedAt:     time.Now(),
 	}
 	require.NoError(t, svc.RecordAbnormalReboot(context.Background(), snap))
 	require.Len(t, faultRepo.rows, 1)
 
-	// 文件到达事件
 	payloadRaw := newEventPayload(LogFileReceivedPayload{
-		DeviceSN:   "SN-PROMOTE",
+		DeviceSN:   "SN-NO-FILE-MUTATION",
 		FileType:   "8",
-		FileName:   "abnormalLog_SN-PROMOTE.tar.gz",
-		ObjectPath: "fault/2026/05/21/abnormalLog_SN-PROMOTE.tar.gz",
+		FileName:   "fault-SN-NO-FILE-MUTATION-20260717140000000.tar.gz",
+		ObjectPath: "fault/2026/07/17/fault-SN-NO-FILE-MUTATION-20260717140000000.tar.gz",
 		Bucket:     "logs",
 		FileSize:   1024,
 	})
 
 	require.NoError(t, svc.HandleLogFileReceived(context.Background(), payloadRaw))
 
-	// 仍然只有一行，但已经升级到 file_received
 	require.Len(t, faultRepo.rows, 1)
 	row := faultRepo.rows[0]
-	assert.Equal(t, FaultRecordStatusFileReceived, row.RecordStatus)
-	assert.Equal(t, "abnormalLog_SN-PROMOTE.tar.gz", row.FileName)
-	assert.Equal(t, int64(1024), row.FileSize)
+	assert.Equal(t, FaultRecordStatusDetected, row.RecordStatus)
+	assert.Equal(t, "halt_reboot", row.FaultReason)
+	assert.Empty(t, row.FileName)
+	assert.Empty(t, row.ObjectPath)
+	assert.Empty(t, row.Bucket)
+	assert.Zero(t, row.FileSize)
 }
 
-func TestHandleLogFileReceived_InsertsWhenNoDetectedRecord(t *testing.T) {
-	// 手动任务/直传文件（无前置 detected 占位）只登记故障日志文件元数据，不代表异常重启。
+func TestHandleLogFileReceived_FaultUploadWithoutRebootRecordDoesNotInsert(t *testing.T) {
+	// 手动任务/直传故障日志由文件传输任务链路更新，不应在重启记录表插入文件元数据。
 	svc, _, faultRepo := newTestService()
 
 	payloadRaw := newEventPayload(LogFileReceivedPayload{
@@ -389,15 +355,11 @@ func TestHandleLogFileReceived_InsertsWhenNoDetectedRecord(t *testing.T) {
 	})
 
 	require.NoError(t, svc.HandleLogFileReceived(context.Background(), payloadRaw))
-
-	require.Len(t, faultRepo.rows, 1)
-	row := faultRepo.rows[0]
-	assert.Equal(t, FaultRecordStatusFileReceived, row.RecordStatus)
-	assert.Equal(t, "abnormalLog_SN-ORPHAN.tar.gz", row.FileName)
+	assert.Empty(t, faultRepo.rows)
 }
 
 func TestHandleLogFileReceived_SkipsFaultFileWithoutDeviceSN(t *testing.T) {
-	// 缺少 SN 且没有 detected 占位可补全时，不能落成一条无设备归属的故障日志文件记录。
+	// 缺少 SN 的故障日志上传同样不能落成重启记录侧数据。
 	svc, _, faultRepo := newTestService()
 
 	payloadRaw := newEventPayload(LogFileReceivedPayload{
@@ -412,7 +374,7 @@ func TestHandleLogFileReceived_SkipsFaultFileWithoutDeviceSN(t *testing.T) {
 	assert.Empty(t, faultRepo.rows)
 }
 
-func TestHandleLogFileReceived_PromotesLatestDetectedWhenFaultFileHasNoDeviceSN(t *testing.T) {
+func TestHandleLogFileReceived_FaultUploadWithoutDeviceSNDoesNotMutateLatestRebootRecord(t *testing.T) {
 	svc, _, faultRepo := newTestService()
 	deviceID := uuid.New()
 	require.NoError(t, svc.RecordAbnormalReboot(context.Background(), device.AbnormalRebootSnapshot{
@@ -433,11 +395,12 @@ func TestHandleLogFileReceived_PromotesLatestDetectedWhenFaultFileHasNoDeviceSN(
 	require.NoError(t, svc.HandleLogFileReceived(context.Background(), payloadRaw))
 	require.Len(t, faultRepo.rows, 1)
 	row := faultRepo.rows[0]
-	assert.Equal(t, FaultRecordStatusFileReceived, row.RecordStatus)
+	assert.Equal(t, FaultRecordStatusDetected, row.RecordStatus)
 	assert.Equal(t, "SN-FALLBACK", row.DeviceSN)
 	require.NotNil(t, row.DeviceID)
 	assert.Equal(t, deviceID, *row.DeviceID)
-	assert.Equal(t, "ErrorLog_20260715.1539 0800_dieLog.tar.gz", row.FileName)
+	assert.Empty(t, row.FileName)
+	assert.Empty(t, row.ObjectPath)
 }
 
 func TestEnforceFaultLogQuota_IgnoresDetectedPlaceholdersForGlobalCount(t *testing.T) {
@@ -556,7 +519,7 @@ func TestServiceDownloadURL_NotFoundMapsToSentinel(t *testing.T) {
 }
 
 // TestEnforceFaultLogQuota_PerDeviceLimitIndependentOfOtherDevices 锁定 #798：每设备故障日志
-// 配额（默认 5）与全局配额并存、互不替代。设备 A 连续 6 次异常重启+文件到达，超出后应只清理
+// 配额（默认 5）与全局配额并存、互不替代。设备 A 连续 6 条历史文件记录，超出后应只清理
 // 设备 A 自己最旧的一条，设备 B 的记录不受影响。
 func TestEnforceFaultLogQuota_PerDeviceLimitIndependentOfOtherDevices(t *testing.T) {
 	svc, _, faultRepo := newTestService()
@@ -564,37 +527,30 @@ func TestEnforceFaultLogQuota_PerDeviceLimitIndependentOfOtherDevices(t *testing
 	deviceA := uuid.New()
 	base := time.Now().Add(-time.Hour)
 	for i := 0; i < 6; i++ {
-		require.NoError(t, svc.RecordAbnormalReboot(context.Background(), device.AbnormalRebootSnapshot{
-			DeviceID:       deviceA,
-			DeviceSN:       "SN-DEVICE-A",
-			HaltMainReason: "halt_reboot",
-			DetectedAt:     base.Add(time.Duration(i) * time.Minute),
+		require.NoError(t, faultRepo.Create(context.Background(), &LogFile{
+			DeviceID:     &deviceA,
+			DeviceSN:     "SN-DEVICE-A",
+			FileName:     fmt.Sprintf("abnormalLog_A_%d.tar.gz", i),
+			ObjectPath:   fmt.Sprintf("fault/A/%d.tar.gz", i),
+			Bucket:       "logs",
+			FileSize:     1024,
+			RecordStatus: FaultRecordStatusFileReceived,
+			CollectedAt:  base.Add(time.Duration(i) * time.Minute),
 		}))
-		require.NoError(t, svc.HandleLogFileReceived(context.Background(), newEventPayload(LogFileReceivedPayload{
-			DeviceSN:   "SN-DEVICE-A",
-			FileType:   "8",
-			FileName:   fmt.Sprintf("abnormalLog_A_%d.tar.gz", i),
-			ObjectPath: fmt.Sprintf("fault/A/%d.tar.gz", i),
-			Bucket:     "logs",
-			FileSize:   1024,
-		})))
 	}
 
 	deviceB := uuid.New()
-	require.NoError(t, svc.RecordAbnormalReboot(context.Background(), device.AbnormalRebootSnapshot{
-		DeviceID:       deviceB,
-		DeviceSN:       "SN-DEVICE-B",
-		HaltMainReason: "halt_reboot",
-		DetectedAt:     time.Now(),
+	require.NoError(t, faultRepo.Create(context.Background(), &LogFile{
+		DeviceID:     &deviceB,
+		DeviceSN:     "SN-DEVICE-B",
+		FileName:     "abnormalLog_B_0.tar.gz",
+		ObjectPath:   "fault/B/0.tar.gz",
+		Bucket:       "logs",
+		FileSize:     1024,
+		RecordStatus: FaultRecordStatusFileReceived,
+		CollectedAt:  time.Now(),
 	}))
-	require.NoError(t, svc.HandleLogFileReceived(context.Background(), newEventPayload(LogFileReceivedPayload{
-		DeviceSN:   "SN-DEVICE-B",
-		FileType:   "8",
-		FileName:   "abnormalLog_B_0.tar.gz",
-		ObjectPath: "fault/B/0.tar.gz",
-		Bucket:     "logs",
-		FileSize:   1024,
-	})))
+	require.NoError(t, svc.enforceFaultLogQuota(context.Background(), &deviceA))
 
 	var aliveA, aliveB int
 	var oldestAStillAlive bool
@@ -636,21 +592,18 @@ func TestEnforceFaultLogQuota_PerDeviceDisabledSkipsCleanup(t *testing.T) {
 	deviceA := uuid.New()
 	base := time.Now().Add(-time.Hour)
 	for i := 0; i < 6; i++ {
-		require.NoError(t, svc.RecordAbnormalReboot(context.Background(), device.AbnormalRebootSnapshot{
-			DeviceID:       deviceA,
-			DeviceSN:       "SN-DEVICE-DISABLED",
-			HaltMainReason: "halt_reboot",
-			DetectedAt:     base.Add(time.Duration(i) * time.Minute),
+		require.NoError(t, faultRepo.Create(context.Background(), &LogFile{
+			DeviceID:     &deviceA,
+			DeviceSN:     "SN-DEVICE-DISABLED",
+			FileName:     fmt.Sprintf("abnormalLog_D_%d.tar.gz", i),
+			ObjectPath:   fmt.Sprintf("fault/D/%d.tar.gz", i),
+			Bucket:       "logs",
+			FileSize:     1024,
+			RecordStatus: FaultRecordStatusFileReceived,
+			CollectedAt:  base.Add(time.Duration(i) * time.Minute),
 		}))
-		require.NoError(t, svc.HandleLogFileReceived(context.Background(), newEventPayload(LogFileReceivedPayload{
-			DeviceSN:   "SN-DEVICE-DISABLED",
-			FileType:   "8",
-			FileName:   fmt.Sprintf("abnormalLog_D_%d.tar.gz", i),
-			ObjectPath: fmt.Sprintf("fault/D/%d.tar.gz", i),
-			Bucket:     "logs",
-			FileSize:   1024,
-		})))
 	}
+	require.NoError(t, svc.enforceFaultLogQuota(context.Background(), &deviceA))
 
 	var alive int
 	for _, r := range faultRepo.rows {
@@ -679,38 +632,31 @@ func TestEnforceFaultLogQuota_PerDeviceQuotaReloadsBeforeNextFile(t *testing.T) 
 	deviceA := uuid.New()
 	base := time.Now().Add(-time.Hour)
 	for i := 0; i < 2; i++ {
-		require.NoError(t, svc.RecordAbnormalReboot(context.Background(), device.AbnormalRebootSnapshot{
-			DeviceID:       deviceA,
-			DeviceSN:       "SN-DEVICE-RELOAD",
-			HaltMainReason: "halt_reboot",
-			DetectedAt:     base.Add(time.Duration(i) * time.Minute),
+		require.NoError(t, faultRepo.Create(context.Background(), &LogFile{
+			DeviceID:     &deviceA,
+			DeviceSN:     "SN-DEVICE-RELOAD",
+			FileName:     fmt.Sprintf("reload_%d.tar.gz", i),
+			ObjectPath:   fmt.Sprintf("fault/reload/%d.tar.gz", i),
+			Bucket:       "logs",
+			FileSize:     1024,
+			RecordStatus: FaultRecordStatusFileReceived,
+			CollectedAt:  base.Add(time.Duration(i) * time.Minute),
 		}))
-		require.NoError(t, svc.HandleLogFileReceived(context.Background(), newEventPayload(LogFileReceivedPayload{
-			DeviceSN:   "SN-DEVICE-RELOAD",
-			FileType:   "8",
-			FileName:   fmt.Sprintf("reload_%d.tar.gz", i),
-			ObjectPath: fmt.Sprintf("fault/reload/%d.tar.gz", i),
-			Bucket:     "logs",
-			FileSize:   1024,
-		})))
 	}
 
 	values[KeyMaxFileCountPerDevice] = "2"
 	policy.InvalidateCache()
-	require.NoError(t, svc.RecordAbnormalReboot(context.Background(), device.AbnormalRebootSnapshot{
-		DeviceID:       deviceA,
-		DeviceSN:       "SN-DEVICE-RELOAD",
-		HaltMainReason: "halt_reboot",
-		DetectedAt:     base.Add(2 * time.Minute),
+	require.NoError(t, faultRepo.Create(context.Background(), &LogFile{
+		DeviceID:     &deviceA,
+		DeviceSN:     "SN-DEVICE-RELOAD",
+		FileName:     "reload_2.tar.gz",
+		ObjectPath:   "fault/reload/2.tar.gz",
+		Bucket:       "logs",
+		FileSize:     1024,
+		RecordStatus: FaultRecordStatusFileReceived,
+		CollectedAt:  base.Add(2 * time.Minute),
 	}))
-	require.NoError(t, svc.HandleLogFileReceived(context.Background(), newEventPayload(LogFileReceivedPayload{
-		DeviceSN:   "SN-DEVICE-RELOAD",
-		FileType:   "8",
-		FileName:   "reload_2.tar.gz",
-		ObjectPath: "fault/reload/2.tar.gz",
-		Bucket:     "logs",
-		FileSize:   1024,
-	})))
+	require.NoError(t, svc.enforceFaultLogQuota(context.Background(), &deviceA))
 
 	var alive int
 	var oldestDeleted bool

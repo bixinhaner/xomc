@@ -18,8 +18,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
+	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
@@ -78,6 +80,20 @@ type FilePathRecorder struct {
 	// 失败仅 warn + metric，不影响主链路成功 —— 配置快照表是辅助索引，
 	// 任何故障都不应让备份任务被标记为失败。
 	snapshotPromoter SnapshotPromoter
+
+	logQuotaRepo    LogFileQuotaRepository
+	logQuotaPolicy  LogFileQuotaPolicy
+	logQuotaRemover logQuotaObjectRemover
+}
+
+// LogFileQuotaPolicy 提供故障日志文件数限额，生产上由 stationlog.RetentionPolicy 实现。
+type LogFileQuotaPolicy interface {
+	MaxFileCount(ctx context.Context) int
+	MaxFileCountPerDevice(ctx context.Context) int
+}
+
+type logQuotaObjectRemover interface {
+	RemoveObject(ctx context.Context, bucket, object string, opts minio.RemoveObjectOptions) error
 }
 
 // SnapshotPromoter 是 FilePathRecorder 对 SnapshotService 的最小依赖。
@@ -128,6 +144,14 @@ func (r *FilePathRecorder) SetFileRepository(fr FileRepository) {
 	r.fileRepo = fr
 }
 
+// SetLogFileQuota 注入故障日志文件配额清理依赖。它只作用于 backup_restore_file 中
+// logs/fault 的元数据，不影响运行日志、配置备份，也不写 station_fault_logs。
+func (r *FilePathRecorder) SetLogFileQuota(repo LogFileQuotaRepository, policy LogFileQuotaPolicy, remover logQuotaObjectRemover) {
+	r.logQuotaRepo = repo
+	r.logQuotaPolicy = policy
+	r.logQuotaRemover = remover
+}
+
 // Subscribe wires the recorder into the EventBus. Uses QueueSubscribe so
 // only one App instance processes each event in a multi-replica deployment.
 func (r *FilePathRecorder) Subscribe(bus event.EventBus) error {
@@ -149,13 +173,13 @@ func (r *FilePathRecorder) Subscribe(bus event.EventBus) error {
 // nil so NATS doesn't redeliver. Real DB errors return the wrapped error.
 //
 // 双分支语义（2026-05-20 修复，backup-display-fix-20260520.md B4）：
-//   1. 旧 backup_tasks 链路（T-0079 first-write-wins）—— 仅当 prefix 命中
-//      backup_tasks 行才写 file_path，未命中跳过。
-//   2. backup_restore_file 元数据 —— 自然键 (serial_number, file_name)，
-//      *与 backup_tasks 是否命中无关*。UFTE / 自动开站等链路也会上报
-//      backup.file.received，它们的"任务"实体不在 backup_tasks 而在
-//      software.upgrade_tasks，但前端展示与下载链路需要这份元数据来定位
-//      object_path 与 MD5。因此该 upsert 提到任何 backup_tasks 判定之前。
+//  1. 旧 backup_tasks 链路（T-0079 first-write-wins）—— 仅当 prefix 命中
+//     backup_tasks 行才写 file_path，未命中跳过。
+//  2. backup_restore_file 元数据 —— 自然键 (serial_number, file_name)，
+//     *与 backup_tasks 是否命中无关*。UFTE / 自动开站等链路也会上报
+//     backup.file.received，它们的"任务"实体不在 backup_tasks 而在
+//     software.upgrade_tasks，但前端展示与下载链路需要这份元数据来定位
+//     object_path 与 MD5。因此该 upsert 提到任何 backup_tasks 判定之前。
 func (r *FilePathRecorder) handleFileReceived(ctx context.Context, evt event.Event) error {
 	var p BackupFileReceivedPayload
 	if err := evt.DecodePayload(&p); err != nil {
@@ -168,7 +192,8 @@ func (r *FilePathRecorder) handleFileReceived(ctx context.Context, evt event.Eve
 	// 分支 2：先 upsert metadata —— 与下面的 backup_tasks 匹配无关，
 	// nil target 表示找不到原 backup_task 行（UFTE 链路 / 旧任务被清理），
 	// 此时 OperatorCode 留空。
-	r.upsertFileMetadata(ctx, nil, p, fullPath)
+	metadata := r.upsertFileMetadata(ctx, nil, p, fullPath)
+	r.enforceLogFileQuota(ctx, metadata)
 
 	// T-0164 关键：promote 必须在 backup_tasks 匹配**之前**触发，因为现网真实链路
 	// 大多走 UFTE 的 CONFIG_BACKUP_XML / CONFIG_BACKUP_NV —— 主任务在
@@ -294,12 +319,12 @@ func (r *FilePathRecorder) upsertFileMetadata(
 	target *BackupTask,
 	p BackupFileReceivedPayload,
 	fullPath string,
-) {
+) *BackupRestoreFile {
 	if r.fileRepo == nil {
-		return
+		return nil
 	}
 	if p.DeviceSN == "" || p.Filename == "" {
-		return
+		return nil
 	}
 	var md5 *string
 	if p.MD5 != "" {
@@ -329,12 +354,89 @@ func (r *FilePathRecorder) upsertFileMetadata(
 			zap.String("device_sn", p.DeviceSN),
 			zap.String("filename", p.Filename),
 			zap.Error(err))
-		return
+		return nil
 	}
 	r.logger.Debug("backup_restore_file upserted",
 		zap.String("device_sn", p.DeviceSN),
 		zap.String("filename", p.Filename),
 		zap.Int64("file_size", p.FileSize))
+	return f
+}
+
+func (r *FilePathRecorder) enforceLogFileQuota(ctx context.Context, f *BackupRestoreFile) {
+	if f == nil || !isQuotaManagedLogObjectPath(f.ObjectPath) {
+		return
+	}
+	if r.logQuotaRepo == nil || r.logQuotaPolicy == nil {
+		return
+	}
+
+	if maxCount := r.logQuotaPolicy.MaxFileCount(ctx); maxCount > 0 {
+		count, err := r.logQuotaRepo.CountActiveLogFiles(ctx)
+		if err != nil {
+			r.logger.Warn("count active log files for quota", zap.Error(err))
+		} else if count > int64(maxCount) {
+			oldest, listErr := r.logQuotaRepo.ListOldestActiveLogFiles(ctx, int(count-int64(maxCount)))
+			if listErr != nil {
+				r.logger.Warn("list oldest log files for quota", zap.Error(listErr))
+			} else {
+				r.removeQuotaLogFiles(ctx, oldest)
+			}
+		}
+	}
+
+	if f.SerialNumber == "" {
+		return
+	}
+	if maxPerDevice := r.logQuotaPolicy.MaxFileCountPerDevice(ctx); maxPerDevice > 0 {
+		count, err := r.logQuotaRepo.CountActiveLogFilesBySerial(ctx, f.SerialNumber)
+		if err != nil {
+			r.logger.Warn("count active log files by serial for quota",
+				zap.String("device_sn", f.SerialNumber), zap.Error(err))
+		} else if count > int64(maxPerDevice) {
+			oldest, listErr := r.logQuotaRepo.ListOldestActiveLogFilesBySerial(ctx, f.SerialNumber, int(count-int64(maxPerDevice)))
+			if listErr != nil {
+				r.logger.Warn("list oldest log files by serial for quota",
+					zap.String("device_sn", f.SerialNumber), zap.Error(listErr))
+			} else {
+				r.removeQuotaLogFiles(ctx, oldest)
+			}
+		}
+	}
+}
+
+func (r *FilePathRecorder) removeQuotaLogFiles(ctx context.Context, files []BackupRestoreFile) {
+	for _, old := range files {
+		if r.logQuotaRemover != nil && old.ObjectPath != "" {
+			bucket, objectPath, splitErr := SplitBucketAndPath(old.ObjectPath)
+			if splitErr != nil {
+				r.logger.Warn("split log file object path for quota",
+					zap.Int64("id", old.ID),
+					zap.String("path", old.ObjectPath),
+					zap.Error(splitErr))
+			} else if removeErr := r.logQuotaRemover.RemoveObject(ctx, bucket, objectPath, minio.RemoveObjectOptions{}); removeErr != nil {
+				r.logger.Warn("remove log file object for quota",
+					zap.Int64("id", old.ID),
+					zap.String("path", old.ObjectPath),
+					zap.Error(removeErr))
+			}
+		}
+		if markErr := r.logQuotaRepo.MarkFileDeleted(ctx, old.ID); markErr != nil {
+			r.logger.Warn("mark log file metadata deleted for quota",
+				zap.Int64("id", old.ID),
+				zap.String("path", old.ObjectPath),
+				zap.Error(markErr))
+		} else {
+			r.logger.Info("log file quota: removed old file",
+				zap.Int64("id", old.ID),
+				zap.String("device_sn", old.SerialNumber),
+				zap.String("path", old.ObjectPath))
+		}
+	}
+}
+
+func isQuotaManagedLogObjectPath(path string) bool {
+	return strings.Contains(path, "/fault/") || strings.HasPrefix(path, "fault/")
 }
 
 // promoteSnapshot 把刚落地的备份文件 promote 到 config_snapshots（B3）。
