@@ -245,6 +245,11 @@ type ParamRegistryConfig struct {
 // default to false so deploying the binary and migration does not change the
 // legacy path until an operator explicitly enables a deterministic canary.
 type ParamSyncConfig struct {
+	// RoutingMode controls which parameter-sync entry path is allowed. Empty
+	// keeps the pre-routing-mode legacy behavior for backward-compatible local
+	// configurations; production should explicitly use closed/durable.
+	RoutingMode                   string        `mapstructure:"routing_mode"`
+	ManualOfflineMode             string        `mapstructure:"manual_offline_mode"`
 	RunEnabled                    bool          `mapstructure:"run_enabled"`
 	ResultConsumerEnabled         bool          `mapstructure:"result_consumer_enabled"`
 	StagingEnabled                bool          `mapstructure:"staging_enabled"`

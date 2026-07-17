@@ -219,6 +219,28 @@ func (s *paramSyncStarter) StartLicenseSync(ctx context.Context, dev *model.Devi
 	return submitLicenseParamSync(ctx, s.service, dev, sourceID, paths)
 }
 
+func (s *paramSyncStarter) SubmitModelUploadParamSync(ctx context.Context, dev *model.Device, sourceID string, modelUploadID uuid.UUID, status string) (bool, int, error) {
+	if !s.flags.EnabledForDevice(dev.ID.String()) {
+		return false, 0, fmt.Errorf("durable model-upload parameter sync is disabled for this device")
+	}
+	result, err := s.service.Submit(ctx, paramsync.SubmitCommand{
+		DeviceID: dev.ID, DeviceSN: dev.SerialNumber, CallerType: "provision",
+		TriggerReason: paramsync.TriggerModelUpload, Scope: paramsync.SyncScopeFull,
+		IdempotencyKey: sourceID, SourceEventID: sourceID, OriginEventType: "model_upload",
+		ModelUploadIntentID: &modelUploadID, ModelUploadStatus: status,
+	})
+	if err != nil {
+		return true, 0, err
+	}
+	if result.ResultCode == paramsync.ResultCodePathBUnavailable {
+		return true, 0, fmt.Errorf("durable model-upload parameter sync unavailable: %s", result.ResultCode)
+	}
+	if result.Status == paramsync.RequestStatusRejected && result.ResultCode == paramsync.ResultCodeActiveSyncExists {
+		return true, 0, fmt.Errorf("durable model-upload parameter sync is busy for this device")
+	}
+	return true, result.TaskCount, nil
+}
+
 func (s *paramSyncStarter) SubmitConfigPull(ctx context.Context, deviceSN string, paths []string, key string) (config.DurablePullResult, error) {
 	dev, err := s.devices.GetBySerialNumber(ctx, deviceSN)
 	if err != nil {

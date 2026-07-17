@@ -1290,7 +1290,7 @@ func TestOnTaskCompleted_RecoveredSyncGPVWithRemaining_DoesNotFinalize(t *testin
 }
 
 // ---------------------------------------------------------------------------
-// Tests: T-0125 HandleFirmwareChanged — Redis 串行锁 + reason hint + fallback Path B
+// Tests: T-0125 HandleFirmwareChanged — Redis 串行锁 + model refresh without parameter sync
 // ---------------------------------------------------------------------------
 
 func TestHandleFirmwareChanged_RedisSerialLockSkipsConcurrent(t *testing.T) {
@@ -1328,7 +1328,7 @@ func TestHandleFirmwareChanged_RedisSerialLockSkipsConcurrent(t *testing.T) {
 	assert.Equal(t, firstLookup, lookupCount, "second call within 10min should be skipped by serial lock")
 }
 
-func TestHandleFirmwareChanged_WritesReasonHintToRedis(t *testing.T) {
+func TestHandleFirmwareChanged_DoesNotWriteParamSyncReasonHint(t *testing.T) {
 	deviceID := uuid.New()
 	deviceRepo := &mockDeviceRepo{
 		GetByIDFn: func(_ context.Context, _ uuid.UUID) (*model.Device, error) {
@@ -1346,10 +1346,8 @@ func TestHandleFirmwareChanged_WritesReasonHintToRedis(t *testing.T) {
 	err := engine.HandleFirmwareChanged(context.Background(), evt)
 	require.NoError(t, err)
 
-	// 验证 reason hint 写入 Redis
-	val, getErr := mr.Get("provision:syncreason:" + deviceID.String())
-	require.NoError(t, getErr)
-	assert.Equal(t, "firmware_changed", val, "reason hint 应写入 Redis 供 handleDataModelFileReceived auto-sync 读取")
+	_, getErr := mr.Get("provision:syncreason:" + deviceID.String())
+	assert.Error(t, getErr, "firmware changed must not arm a parameter-sync reason hint")
 }
 
 func TestHandleFirmwareChanged_DeviceNotFound_NoOp(t *testing.T) {

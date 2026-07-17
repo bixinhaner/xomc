@@ -57,10 +57,14 @@ func buildCreateRequest(req *SyncRequest) (string, []any, error) {
 	query, args, err := storage.Psql.Insert("parameter_sync_requests").
 		Columns("id", "device_id", "device_sn", "caller_type", "trigger_reason", "sync_scope",
 			"requested_paths", "status", "priority", "next_attempt_at", "deadline_at", "idempotency_key",
-			"result_code", "error_message", "campaign_id", "created_at", "completed_at", "updated_at").
+			"result_code", "error_message", "campaign_id", "source_event_id", "origin_event_type",
+			"model_upload_intent_id", "model_upload_status", "admission_class", "admission_reason",
+			"admission_snapshot", "deduplicated_to_request_id", "created_at", "completed_at", "updated_at").
 		Values(req.ID, req.DeviceID, req.DeviceSN, req.CallerType, req.TriggerReason, req.SyncScope,
 			paths, req.Status, req.Priority, req.NextAttemptAt, req.DeadlineAt, req.IdempotencyKey,
-			req.ResultCode, req.ErrorMessage, req.CampaignID, req.CreatedAt, req.CompletedAt, req.UpdatedAt).
+			req.ResultCode, req.ErrorMessage, req.CampaignID, req.SourceEventID, req.OriginEventType,
+			req.ModelUploadIntentID, req.ModelUploadStatus, req.AdmissionClass, req.AdmissionReason,
+			req.AdmissionSnapshot, req.DeduplicatedToRequestID, req.CreatedAt, req.CompletedAt, req.UpdatedAt).
 		ToSql()
 	if err != nil {
 		return "", nil, fmt.Errorf("build create parameter sync request: %w", err)
@@ -73,7 +77,9 @@ func (r *PGRepository) GetRequest(ctx context.Context, id uuid.UUID) (*SyncReque
 		"id", "device_id", "device_sn", "caller_type", "trigger_reason", "sync_scope",
 		"requested_paths", "status", "run_id", "active_run_id", "priority", "next_attempt_at",
 		"deadline_at", "idempotency_key", "COALESCE(result_code, '')", "COALESCE(result_summary, 'null'::jsonb)", "COALESCE(error_message, '')",
-		"campaign_id", "created_at", "started_at", "completed_at", "updated_at",
+		"campaign_id", "source_event_id", "origin_event_type", "model_upload_intent_id", "model_upload_status",
+		"admission_class", "COALESCE(admission_reason, '')", "COALESCE(admission_snapshot, 'null'::jsonb)",
+		"deduplicated_to_request_id", "created_at", "started_at", "completed_at", "updated_at",
 	).From("parameter_sync_requests").Where(sq.Eq{"id": id}).ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build get parameter sync request: %w", err)
@@ -84,7 +90,9 @@ func (r *PGRepository) GetRequest(ctx context.Context, id uuid.UUID) (*SyncReque
 		&req.ID, &req.DeviceID, &req.DeviceSN, &req.CallerType, &req.TriggerReason, &req.SyncScope,
 		&paths, &req.Status, &req.RunID, &req.ActiveRunID, &req.Priority, &req.NextAttemptAt,
 		&req.DeadlineAt, &req.IdempotencyKey, &req.ResultCode, &req.ResultSummary, &req.ErrorMessage,
-		&req.CampaignID, &req.CreatedAt, &req.StartedAt, &req.CompletedAt, &req.UpdatedAt,
+		&req.CampaignID, &req.SourceEventID, &req.OriginEventType, &req.ModelUploadIntentID, &req.ModelUploadStatus,
+		&req.AdmissionClass, &req.AdmissionReason, &req.AdmissionSnapshot, &req.DeduplicatedToRequestID,
+		&req.CreatedAt, &req.StartedAt, &req.CompletedAt, &req.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get parameter sync request: %w", err)

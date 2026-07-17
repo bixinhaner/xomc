@@ -5127,6 +5127,30 @@ COMMENT ON COLUMN public.parameter_discovery_log.param_model_id IS 'T-0098 å‚æ•
 
 
 --
+-- Name: model_upload_intents; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.model_upload_intents (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    device_id uuid NOT NULL,
+    upload_task_id uuid NOT NULL,
+    discovery_log_id uuid,
+    source_event_id character varying(128) NOT NULL,
+    model_version character varying(128),
+    model_hash character varying(128),
+    status character varying(24) DEFAULT 'requested'::character varying NOT NULL,
+    failure_code character varying(64),
+    failure_message text,
+    attempts integer DEFAULT 0 NOT NULL,
+    next_attempt_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_error text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT model_upload_intents_status_chk CHECK (status IN ('requested', 'uploaded', 'not_supported', 'failed', 'sync_queued', 'sync_submitted', 'manual_review'))
+);
+
+
+--
 -- Name: parameter_sync_device_state; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -5204,6 +5228,14 @@ CREATE TABLE public.parameter_sync_requests (
     result_summary jsonb,
     error_message text,
     campaign_id uuid,
+    source_event_id character varying(128),
+    origin_event_type character varying(64),
+    model_upload_intent_id uuid,
+    model_upload_status character varying(24),
+    admission_class character varying(32),
+    admission_reason text,
+    admission_snapshot jsonb,
+    deduplicated_to_request_id uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     started_at timestamp with time zone,
     completed_at timestamp with time zone,
@@ -5248,6 +5280,95 @@ CREATE TABLE public.parameter_sync_runs (
     CONSTRAINT parameter_sync_runs_scope_chk CHECK (sync_scope IN ('full', 'partial', 'readback', 'policy_probe')),
     CONSTRAINT parameter_sync_runs_status_chk CHECK (status IN ('planning', 'enqueuing', 'waiting_device', 'executing', 'processing', 'cancelling', 'succeeded', 'failed', 'cancelled')),
     CONSTRAINT parameter_sync_runs_trigger_reason_chk CHECK (trigger_reason IN ('bootstrap', 'model_upload', 'device_online', 'firmware_changed', 'periodic', 'manual', 'config_pull', 'license', 'spv_readback', 'add_object_readback', 'inform_period_probe'))
+);
+
+
+--
+-- Name: parameter_sync_admission_state; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.parameter_sync_admission_state (
+    admission_class character varying(32) NOT NULL,
+    bucket_id smallint NOT NULL,
+    active_run_limit integer DEFAULT 0 NOT NULL,
+    active_task_limit integer DEFAULT 0 NOT NULL,
+    missing_result_limit integer DEFAULT 0 NOT NULL,
+    create_rate_per_minute integer DEFAULT 0 NOT NULL,
+    reserved_runs integer DEFAULT 0 NOT NULL,
+    reserved_tasks integer DEFAULT 0 NOT NULL,
+    version bigint DEFAULT 0 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT parameter_sync_admission_bucket_chk CHECK (bucket_id >= 0),
+    CONSTRAINT parameter_sync_admission_class_chk CHECK (admission_class IN ('global', 'model_upload', 'periodic', 'manual')),
+    CONSTRAINT parameter_sync_admission_counts_chk CHECK ((active_run_limit >= 0) AND (active_task_limit >= 0) AND (missing_result_limit >= 0) AND (create_rate_per_minute >= 0) AND (reserved_runs >= 0) AND (reserved_tasks >= 0))
+);
+
+
+--
+-- Name: parameter_sync_admission_reservations; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.parameter_sync_admission_reservations (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    request_id uuid NOT NULL,
+    admission_class character varying(32) NOT NULL,
+    bucket_id smallint NOT NULL,
+    reserved_runs integer DEFAULT 0 NOT NULL,
+    reserved_tasks integer DEFAULT 0 NOT NULL,
+    status character varying(16) DEFAULT 'reserved'::character varying NOT NULL,
+    lease_until timestamp with time zone DEFAULT now() NOT NULL,
+    released_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT parameter_sync_admission_reservation_counts_chk CHECK ((reserved_runs >= 0) AND (reserved_tasks >= 0)),
+    CONSTRAINT parameter_sync_admission_reservation_status_chk CHECK (status IN ('reserved', 'released', 'expired'))
+);
+
+
+--
+-- Name: parameter_sync_event_failures; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.parameter_sync_event_failures (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    subject character varying(255) NOT NULL,
+    event_id character varying(128) NOT NULL,
+    device_id uuid,
+    device_sn character varying(64),
+    request_id uuid,
+    run_id uuid,
+    task_id uuid,
+    raw_payload jsonb DEFAULT '{}'::jsonb NOT NULL,
+    delivery_count integer DEFAULT 0 NOT NULL,
+    status character varying(24) DEFAULT 'pending'::character varying NOT NULL,
+    last_error text,
+    next_retry_at timestamp with time zone,
+    replayed_at timestamp with time zone,
+    recovered_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT parameter_sync_event_failure_status_chk CHECK (status IN ('pending', 'replayed', 'recovered', 'manual_review'))
+);
+
+
+--
+-- Name: parameter_sync_recovery_state; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.parameter_sync_recovery_state (
+    run_id uuid NOT NULL,
+    task_id uuid NOT NULL,
+    status character varying(24) DEFAULT 'pending'::character varying NOT NULL,
+    attempts integer DEFAULT 0 NOT NULL,
+    next_retry_at timestamp with time zone DEFAULT now() NOT NULL,
+    lease_token uuid,
+    lease_until timestamp with time zone,
+    last_error text,
+    claimed_at timestamp with time zone,
+    processed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT parameter_sync_recovery_status_chk CHECK (status IN ('pending', 'processing', 'processed', 'failed', 'manual_review'))
 );
 
 
@@ -8711,6 +8832,30 @@ ALTER TABLE ONLY public.param_models
 
 
 --
+-- Name: model_upload_intents model_upload_intents_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.model_upload_intents
+    ADD CONSTRAINT model_upload_intents_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: model_upload_intents uq_model_upload_intents_device_task; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.model_upload_intents
+    ADD CONSTRAINT uq_model_upload_intents_device_task UNIQUE (device_id, upload_task_id);
+
+
+--
+-- Name: model_upload_intents uq_model_upload_intents_source_event; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.model_upload_intents
+    ADD CONSTRAINT uq_model_upload_intents_source_event UNIQUE (source_event_id);
+
+
+--
 -- Name: parameter_discovery_log parameter_discovery_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -8724,6 +8869,46 @@ ALTER TABLE ONLY public.parameter_discovery_log
 
 ALTER TABLE ONLY public.parameter_sync_device_state
     ADD CONSTRAINT parameter_sync_device_state_pkey PRIMARY KEY (device_id);
+
+
+--
+-- Name: parameter_sync_admission_reservations parameter_sync_admission_reservations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_admission_reservations
+    ADD CONSTRAINT parameter_sync_admission_reservations_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: parameter_sync_admission_reservations uq_parameter_sync_admission_reservation_request; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_admission_reservations
+    ADD CONSTRAINT uq_parameter_sync_admission_reservation_request UNIQUE (request_id, admission_class);
+
+
+--
+-- Name: parameter_sync_admission_state parameter_sync_admission_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_admission_state
+    ADD CONSTRAINT parameter_sync_admission_state_pkey PRIMARY KEY (admission_class, bucket_id);
+
+
+--
+-- Name: parameter_sync_event_failures parameter_sync_event_failures_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_event_failures
+    ADD CONSTRAINT parameter_sync_event_failures_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: parameter_sync_event_failures uq_parameter_sync_event_failure_event; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_event_failures
+    ADD CONSTRAINT uq_parameter_sync_event_failure_event UNIQUE (subject, event_id);
 
 
 --
@@ -8748,6 +8933,14 @@ ALTER TABLE ONLY public.parameter_sync_request_bindings
 
 ALTER TABLE ONLY public.parameter_sync_requests
     ADD CONSTRAINT parameter_sync_requests_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: parameter_sync_recovery_state parameter_sync_recovery_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_recovery_state
+    ADD CONSTRAINT parameter_sync_recovery_state_pkey PRIMARY KEY (run_id, task_id);
 
 
 --
@@ -13604,6 +13797,27 @@ CREATE INDEX idx_param_models_active ON public.param_models USING btree (is_acti
 
 
 --
+-- Name: idx_model_upload_intents_dispatch; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_model_upload_intents_dispatch ON public.model_upload_intents USING btree (status, next_attempt_at, created_at);
+
+
+--
+-- Name: idx_parameter_sync_admission_reservations_bucket; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_admission_reservations_bucket ON public.parameter_sync_admission_reservations USING btree (admission_class, bucket_id, status);
+
+
+--
+-- Name: idx_parameter_sync_admission_reservations_due; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_admission_reservations_due ON public.parameter_sync_admission_reservations USING btree (status, lease_until, updated_at);
+
+
+--
 -- Name: idx_parameter_sync_bindings_run; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -13615,6 +13829,20 @@ CREATE INDEX idx_parameter_sync_bindings_run ON public.parameter_sync_request_bi
 --
 
 CREATE INDEX idx_parameter_sync_device_state_due ON public.parameter_sync_device_state USING btree (next_auto_sync_at) WHERE (next_auto_sync_at IS NOT NULL);
+
+
+--
+-- Name: idx_parameter_sync_event_failures_replay; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_event_failures_replay ON public.parameter_sync_event_failures USING btree (status, next_retry_at, created_at);
+
+
+--
+-- Name: idx_parameter_sync_event_failures_run_task; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_event_failures_run_task ON public.parameter_sync_event_failures USING btree (run_id, task_id) WHERE ((run_id IS NOT NULL) OR (task_id IS NOT NULL));
 
 
 --
@@ -13636,6 +13864,20 @@ CREATE INDEX idx_parameter_sync_requests_device_history ON public.parameter_sync
 --
 
 CREATE INDEX idx_parameter_sync_requests_schedule ON public.parameter_sync_requests USING btree (status, priority, next_attempt_at, created_at);
+
+
+--
+-- Name: idx_parameter_sync_requests_source_event; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_requests_source_event ON public.parameter_sync_requests USING btree (source_event_id) WHERE (source_event_id IS NOT NULL);
+
+
+--
+-- Name: idx_parameter_sync_recovery_claim; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_recovery_claim ON public.parameter_sync_recovery_state USING btree (status, next_retry_at, lease_until, updated_at);
 
 
 --
@@ -14815,6 +15057,13 @@ CREATE UNIQUE INDEX uq_parameter_sync_requests_idempotency ON public.parameter_s
 
 
 --
+-- Name: uq_parameter_sync_requests_model_upload_intent; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_parameter_sync_requests_model_upload_intent ON public.parameter_sync_requests USING btree (model_upload_intent_id) WHERE (model_upload_intent_id IS NOT NULL);
+
+
+--
 -- Name: uq_parameter_sync_runs_active_device; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -14822,10 +15071,17 @@ CREATE UNIQUE INDEX uq_parameter_sync_runs_active_device ON public.parameter_syn
 
 
 --
--- Name: uq_parameter_sync_task_results_event; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_parameter_sync_task_results_event; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_parameter_sync_task_results_event ON public.parameter_sync_task_results USING btree (event_id);
+CREATE INDEX idx_parameter_sync_task_results_event ON public.parameter_sync_task_results USING btree (event_id);
+
+
+--
+-- Name: idx_parameter_sync_task_results_status_time; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_task_results_status_time ON public.parameter_sync_task_results USING btree (status, created_at, processed_at);
 
 
 --
@@ -18228,6 +18484,14 @@ ALTER TABLE ONLY public.parameter_sync_request_bindings
 
 ALTER TABLE ONLY public.parameter_sync_request_bindings
     ADD CONSTRAINT parameter_sync_request_bindings_run_id_fkey FOREIGN KEY (run_id) REFERENCES public.parameter_sync_runs(id) ON DELETE CASCADE;
+
+
+--
+-- Name: parameter_sync_admission_reservations parameter_sync_admission_reservations_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_admission_reservations
+    ADD CONSTRAINT parameter_sync_admission_reservations_request_id_fkey FOREIGN KEY (request_id) REFERENCES public.parameter_sync_requests(id) ON DELETE CASCADE;
 
 
 --

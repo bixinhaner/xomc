@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -36,6 +37,13 @@ type ModelUploadService struct {
 	config           appconfig.ModelUploadConfig
 	logger           *zap.Logger
 	metrics          *Metrics
+	paramSync        ModelUploadParamSyncSubmitter
+	syncMu           sync.Mutex
+	syncOnTerminal   map[uuid.UUID]bool
+}
+
+type ModelUploadParamSyncSubmitter interface {
+	SubmitModelUploadParamSync(ctx context.Context, dev *model.Device, sourceID string, modelUploadID uuid.UUID, status string) (handled bool, taskCount int, err error)
 }
 
 // NewModelUploadService creates a new ModelUploadService.
@@ -56,6 +64,7 @@ func NewModelUploadService(
 		intersectService: intersect,
 		config:           config,
 		logger:           logger.Named("model-upload"),
+		syncOnTerminal:   map[uuid.UUID]bool{},
 	}
 }
 
@@ -63,6 +72,57 @@ func NewModelUploadService(
 // （HIGH-27）。nil 表示禁用（updateDiscoveryStatus 仍记 warn，仅不打点）。
 func (s *ModelUploadService) SetMetrics(m *Metrics) {
 	s.metrics = m
+}
+
+func (s *ModelUploadService) SetParamSyncSubmitter(submitter ModelUploadParamSyncSubmitter) {
+	s.paramSync = submitter
+}
+
+func (s *ModelUploadService) rememberTerminalSync(logID uuid.UUID, enabled bool) {
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+	if s.syncOnTerminal == nil {
+		s.syncOnTerminal = map[uuid.UUID]bool{}
+	}
+	s.syncOnTerminal[logID] = enabled
+}
+
+func (s *ModelUploadService) shouldSubmitTerminalSync(logID uuid.UUID) bool {
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+	enabled, ok := s.syncOnTerminal[logID]
+	if ok {
+		delete(s.syncOnTerminal, logID)
+		return enabled
+	}
+	return true
+}
+
+func (s *ModelUploadService) submitTerminalSync(ctx context.Context, dev *model.Device, logID uuid.UUID, status string) {
+	if s.paramSync == nil || dev == nil || !s.shouldSubmitTerminalSync(logID) {
+		return
+	}
+	handled, taskCount, err := s.paramSync.SubmitModelUploadParamSync(ctx, dev, logID.String(), logID, status)
+	if err != nil {
+		s.logger.Warn("model upload terminal parameter sync failed",
+			zap.String("device_sn", dev.SerialNumber),
+			zap.String("model_upload_id", logID.String()),
+			zap.String("model_upload_status", status),
+			zap.Error(err))
+		return
+	}
+	if !handled {
+		s.logger.Warn("model upload terminal parameter sync not handled",
+			zap.String("device_sn", dev.SerialNumber),
+			zap.String("model_upload_id", logID.String()),
+			zap.String("model_upload_status", status))
+		return
+	}
+	s.logger.Info("model upload terminal parameter sync submitted",
+		zap.String("device_sn", dev.SerialNumber),
+		zap.String("model_upload_id", logID.String()),
+		zap.String("model_upload_status", status),
+		zap.Int("task_count", taskCount))
 }
 
 // updateDiscoveryStatus 统一封装 housekeeping 类 discovery_log 状态写库：
@@ -100,12 +160,17 @@ func (s *ModelUploadService) resolveProduct(ctx context.Context, dev *model.Devi
 // 设备 product.EnableFileType11=false → 直接跳过 Upload，标 discovery_log 为
 // completed (reason=disabled_by_product_config)，让 Translator 自动降级到默认映射。
 func (s *ModelUploadService) RequestModelUpload(ctx context.Context, dev *model.Device, sourceID string) (*ParameterDiscoveryLog, error) {
+	return s.RequestModelUploadWithParamSync(ctx, dev, sourceID, true)
+}
+
+func (s *ModelUploadService) RequestModelUploadWithParamSync(ctx context.Context, dev *model.Device, sourceID string, syncOnTerminal bool) (*ParameterDiscoveryLog, error) {
 	log := NewParameterDiscoveryLog(dev.ID, dev.SerialNumber, dev.OUI, dev.ProductClass, dev.FirmwareVersion)
 	log.Status = DiscoveryDiscovering
 
 	if err := s.discoveryRepo.Create(ctx, log); err != nil {
 		return nil, fmt.Errorf("create discovery log: %w", err)
 	}
+	s.rememberTerminalSync(log.ID, syncOnTerminal)
 
 	if prod, ok := s.resolveProduct(ctx, dev); ok && !prod.EnableFileType11 {
 		s.updateDiscoveryStatus(ctx, log.ID, DiscoveryCompleted,
@@ -115,6 +180,7 @@ func (s *ModelUploadService) RequestModelUpload(ctx context.Context, dev *model.
 			zap.String("product_id", prod.ID.String()),
 			zap.String("product_name", prod.Name),
 		)
+		s.submitTerminalSync(ctx, dev, log.ID, "not_supported")
 		return log, nil
 	}
 
@@ -276,6 +342,9 @@ func (s *ModelUploadService) HandleModelFileReceived(ctx context.Context, dev *m
 		zap.Int("uploaded_count", res.UploadedCount),
 		zap.Int("matched", res.Matched),
 	)
+	if log != nil {
+		s.submitTerminalSync(ctx, dev, log.ID, "uploaded")
+	}
 	return nil
 }
 
@@ -297,6 +366,7 @@ func (s *ModelUploadService) HandleUploadFailed(ctx context.Context, dev *model.
 		zap.String("device_sn", dev.SerialNumber),
 		zap.String("reason", reason),
 	)
+	s.submitTerminalSync(ctx, dev, log.ID, "not_supported")
 	return nil
 }
 
