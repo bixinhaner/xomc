@@ -625,6 +625,21 @@ func inferProjectedParameterType(soapType string) string {
 // 8/11 列远低于 PG 65535 参数上限，留足安全边际。
 const paramSyncUpsertBatchSize = 500
 
+// deviceParameterUnchangedGuard 是 device_parameters 的 ON CONFLICT DO UPDATE 附加 WHERE
+// 条件：只有 value/type/writable/fap_instance/param_group 任一实际变化才真正重写这一行
+// （从而才推进 last_updated_at）。压测实测 device_parameters 单表在 postgres 上有 ~13000
+// 行更新/秒的持续写入量，绝大多数是设备重复上报同样的值——不加这层判断，即使已经把多个
+// 参数值合并成一条多行 INSERT（见 paramSyncUpsertBatchSize），每次同步仍会对每一行做一次
+// 实际的 UPDATE（新版本、索引维护、WAL），是批量合并解决不了的成本，只能从"要不要写"这层
+// 拦住。代价：`last_updated_at`（前端展示为"最后更新"）语义从"最近一次确认同步"变成
+// "最近一次值实际变化"——已确认前端标签本就是"最后更新/Last Updated"，与新语义一致，
+// 唯一另一处 lastSynced 展示（QuickSettingsTab）用的是独立本地状态，不读这个字段，不受影响。
+const deviceParameterUnchangedGuard = `(device_parameters.parameter_value IS DISTINCT FROM EXCLUDED.parameter_value
+    OR device_parameters.parameter_type IS DISTINCT FROM EXCLUDED.parameter_type
+    OR device_parameters.writable IS DISTINCT FROM EXCLUDED.writable
+    OR device_parameters.fap_instance IS DISTINCT FROM EXCLUDED.fap_instance
+    OR device_parameters.param_group IS DISTINCT FROM EXCLUDED.param_group)`
+
 // dedupeProjectedValuesByPath 按 ParameterPath 去重，同路径保留最后一个值——和原来逐条
 // tx.Exec 顺序执行、后写覆盖前写的语义一致。同一批多行 INSERT ... ON CONFLICT DO UPDATE
 // 不允许在同一条语句里两次命中同一冲突目标（PG 报 "ON CONFLICT DO UPDATE command cannot
@@ -685,7 +700,7 @@ func upsertOfficialValues(ctx context.Context, tx pgx.Tx, deviceID uuid.UUID, va
 			builder = builder.Values(deviceID, value.ParameterPath, value.Value, value.ParameterType, value.Writable, now, value.FAPInstance, value.ParamGroup)
 		}
 		query, args, err := builder.
-			Suffix("ON CONFLICT (device_id, parameter_path) DO UPDATE SET parameter_value = EXCLUDED.parameter_value, parameter_type = EXCLUDED.parameter_type, writable = EXCLUDED.writable, last_updated_at = EXCLUDED.last_updated_at, fap_instance = EXCLUDED.fap_instance, param_group = EXCLUDED.param_group").
+			Suffix("ON CONFLICT (device_id, parameter_path) DO UPDATE SET parameter_value = EXCLUDED.parameter_value, parameter_type = EXCLUDED.parameter_type, writable = EXCLUDED.writable, last_updated_at = EXCLUDED.last_updated_at, fap_instance = EXCLUDED.fap_instance, param_group = EXCLUDED.param_group WHERE " + deviceParameterUnchangedGuard).
 			ToSql()
 		if err != nil {
 			return fmt.Errorf("build upsert parameter sync value batch: %w", err)
@@ -709,7 +724,8 @@ ON CONFLICT (device_id, parameter_path) DO UPDATE SET
   writable = EXCLUDED.writable,
   last_updated_at = EXCLUDED.last_updated_at,
   fap_instance = EXCLUDED.fap_instance,
-  param_group = EXCLUDED.param_group`
+  param_group = EXCLUDED.param_group
+WHERE ` + deviceParameterUnchangedGuard
 		if _, err := tx.Exec(ctx, mergeSQL, run.DeviceID, now, run.ID); err != nil {
 			return fmt.Errorf("merge full parameter sync staging: %w", err)
 		}
