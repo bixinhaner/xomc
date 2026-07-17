@@ -580,7 +580,8 @@ interface DeviceSnSelectProps {
   value?: string;
   onChange?: (sn: string) => void;
 }
-function DeviceSnSelect({ value, onChange }: DeviceSnSelectProps) {
+export function DeviceSnSelect({ value, onChange }: DeviceSnSelectProps) {
+  const t = useT();
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebounce(search, { wait: 300 });
   const enabled = debouncedSearch.trim().length >= 1;
@@ -602,15 +603,17 @@ function DeviceSnSelect({ value, onChange }: DeviceSnSelectProps) {
         : [],
     [data, enabled]
   );
-  let notFoundContent = '输入 SN / 站点名搜索设备';
+  let notFoundContent = t('trace.field.deviceSn.noInput');
   if (enabled) {
-    notFoundContent = isFetching ? '搜索中...' : '无匹配设备';
+    notFoundContent = isFetching
+      ? t('trace.field.deviceSn.searching')
+      : t('trace.field.deviceSn.notFound');
   }
   return (
     <Select
       showSearch
       allowClear
-      placeholder="输入 SN / 站点名搜索设备（支持粘贴完整 SN）"
+      placeholder={t('trace.field.deviceSn.placeholder')}
       value={value}
       onChange={onChange}
       onSearch={setSearch}
