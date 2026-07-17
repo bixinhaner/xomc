@@ -2202,6 +2202,8 @@ const messages: Record<string, string> = {
   'login.forgotPwd':     '忘记密码',
   'login.usernameTip':   '请输入用户名',
   'login.passwordTip':   '请输入密码',
+  'login.showPassword':  '显示密码',
+  'login.hidePassword':  '隐藏密码',
   'login.success':       '登录成功',
   'login.failed':        '用户名或密码错误',
   // P1+P2 安全策略相关

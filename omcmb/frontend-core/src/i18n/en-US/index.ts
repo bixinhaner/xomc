@@ -2196,6 +2196,8 @@ const messages: Record<string, string> = {
   'login.forgotPwd':     'Forgot Password',
   'login.usernameTip':   'Please enter username',
   'login.passwordTip':   'Please enter password',
+  'login.showPassword':  'Show password',
+  'login.hidePassword':  'Hide password',
   'login.success':       'Login successful',
   'login.failed':        'Invalid username or password',
   // P1+P2 security policy

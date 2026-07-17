@@ -12,6 +12,7 @@ import { usePublicOmcName, resolveOmcName } from '@core/hooks/api/useOmcName';
 import { getI18nKeyByBizCode } from '@core/i18n/bizCodeMessages';
 import type { User } from '@core/types/system';
 import type { AxiosError } from 'axios';
+import { BrowserPasswordInput } from './BrowserPasswordInput';
 import styles from './Login.module.css';
 
 interface LoginFormValues {
@@ -81,15 +82,13 @@ export default function LoginPage() {
   const destinationForUser = (user: User): string =>
     lockedSession && lockedSession.userId !== user.id ? '/dashboard' : from;
 
-  // P2-⑧ 浏览器记密：拉公开 security 配置，按 isBrowserAutoRecordPass=true 切
-  // autocomplete 属性。注意：现代浏览器（Chrome）会忽略 autocomplete=off，
-  // 此为 best-effort —— 严格合规仍需依赖客户端策略。
+  // P2-⑧ 浏览器记密：拉公开 security 配置。开启时不渲染原生 password 字段，
+  // 避免 Chromium 忽略 autocomplete 后继续弹出保存密码提示。
   const { settings: publicSettings } = usePublicSecuritySettings();
   // 登录页大标题跟随「OMC 名称」配置（走免登录公开通道，登录前可读）；空回退 login.title。
   const { omcName } = usePublicOmcName();
   const loginTitle = resolveOmcName(omcName, t('login.title'));
   const usernameAutocomplete = publicSettings?.preventBrowserAutofill ? 'off' : 'username';
-  const passwordAutocomplete = publicSettings?.preventBrowserAutofill ? 'new-password' : 'current-password';
 
   // 锁屏模式固定为原用户，只允许输入密码解锁；普通登录仅回填记住的用户名。
   useEffect(() => {
@@ -357,11 +356,20 @@ export default function LoginPage() {
               name="password"
               rules={[{ required: true, message: t('login.passwordTip') }]}
             >
-              <Input.Password
-                prefix={<LockOutlined style={{ color: 'var(--login-input-icon)' }} />}
-                placeholder={t('login.passwordTip')}
-                autoComplete={passwordAutocomplete}
-              />
+              {publicSettings?.preventBrowserAutofill ? (
+                <BrowserPasswordInput
+                  prefix={<LockOutlined style={{ color: 'var(--login-input-icon)' }} />}
+                  placeholder={t('login.passwordTip')}
+                  showPasswordLabel={t('login.showPassword')}
+                  hidePasswordLabel={t('login.hidePassword')}
+                />
+              ) : (
+                <Input.Password
+                  prefix={<LockOutlined style={{ color: 'var(--login-input-icon)' }} />}
+                  placeholder={t('login.passwordTip')}
+                  autoComplete="current-password"
+                />
+              )}
             </Form.Item>
 
             {/* Issue #687: 验证码（仅当后端要求时显示） */}

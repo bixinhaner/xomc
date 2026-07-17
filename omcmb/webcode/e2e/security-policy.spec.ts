@@ -114,8 +114,8 @@ async function mockSysConfigsByCategory(
 // P2-⑧ Autocomplete switching
 // ============================================================================
 
-test.describe('P2-⑧ Autocomplete behavior on login page', () => {
-  test('isBrowserAutoRecordPass=true → input autocomplete=off / password=new-password', async ({
+test.describe('P2-⑧ Browser password-save behavior on login page', () => {
+  test('isBrowserAutoRecordPass=true → text input + CSS mask + autocomplete=off', async ({
     page,
   }) => {
     await mockPublicSecurityConfigs(page, { isBrowserAutoRecordPass: true });
@@ -128,7 +128,9 @@ test.describe('P2-⑧ Autocomplete behavior on login page', () => {
     const passwordInput = page.getByPlaceholder(PASSWORD_PLACEHOLDER).first();
 
     await expect(usernameInput).toHaveAttribute('autocomplete', 'off');
-    await expect(passwordInput).toHaveAttribute('autocomplete', 'new-password');
+    await expect(passwordInput).toHaveAttribute('type', 'text');
+    await expect(passwordInput).toHaveAttribute('autocomplete', 'off');
+    await expect(passwordInput).toHaveCSS('-webkit-text-security', 'disc');
   });
 
   test('isBrowserAutoRecordPass=false → default autocomplete (username / current-password)', async ({
@@ -142,6 +144,7 @@ test.describe('P2-⑧ Autocomplete behavior on login page', () => {
     const passwordInput = page.getByPlaceholder(PASSWORD_PLACEHOLDER).first();
 
     await expect(usernameInput).toHaveAttribute('autocomplete', 'username');
+    await expect(passwordInput).toHaveAttribute('type', 'password');
     await expect(passwordInput).toHaveAttribute('autocomplete', 'current-password');
   });
 });

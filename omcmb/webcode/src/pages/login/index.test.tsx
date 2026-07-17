@@ -7,8 +7,10 @@ import LoginPage from './index';
 
 vi.mock('@core/services/apiSwitch', () => ({ useMock: true }));
 
+const publicSecuritySettings = vi.hoisted(() => ({ preventBrowserAutofill: false }));
+
 vi.mock('@core/hooks/api/useSecuritySettings', () => ({
-  usePublicSecuritySettings: () => ({ settings: {} }),
+  usePublicSecuritySettings: () => ({ settings: publicSecuritySettings }),
 }));
 
 vi.mock('@core/hooks/api/useOmcName', () => ({
@@ -24,10 +26,98 @@ vi.mock('@/hooks/useT', () => ({
     'login.unlockSuccess': '解锁成功',
     'login.usernameTip': '请输入用户名',
     'login.passwordTip': '请输入密码',
+    'login.showPassword': '显示密码',
+    'login.hidePassword': '隐藏密码',
     'login.rememberMe': '记住我',
     'login.submit': '登录',
   }[key] ?? key),
 }));
+
+beforeEach(() => {
+  publicSecuritySettings.preventBrowserAutofill = false;
+});
+
+describe('LoginPage 浏览器记密策略', () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    localStorage.clear();
+    useUserStore.setState({
+      currentUser: null,
+      accessToken: null,
+      refreshToken: null,
+      tokenExpiresAt: null,
+      isAuthenticated: false,
+      permissions: [],
+      loading: false,
+      mustChangePassword: false,
+    });
+  });
+
+  function renderLogin() {
+    return render(
+      <AntdApp>
+        <MemoryRouter initialEntries={['/login']}>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/dashboard" element={<div>dashboard page</div>} />
+          </Routes>
+        </MemoryRouter>
+      </AntdApp>,
+    );
+  }
+
+  it('策略关闭时保留标准密码输入框', () => {
+    renderLogin();
+
+    expect(screen.getByPlaceholderText('请输入密码')).toHaveAttribute('type', 'password');
+    expect(screen.getByPlaceholderText('请输入密码')).toHaveAttribute(
+      'autocomplete',
+      'current-password',
+    );
+  });
+
+  it('策略开启时不向浏览器暴露 password 输入框', () => {
+    publicSecuritySettings.preventBrowserAutofill = true;
+    vi.stubGlobal('CSS', { supports: () => true });
+    renderLogin();
+
+    const passwordInput = screen.getByPlaceholderText('请输入密码');
+    expect(passwordInput).toHaveAttribute('type', 'text');
+    expect(passwordInput).toHaveAttribute('autocomplete', 'off');
+    expect(passwordInput.className).toContain('maskedPasswordInput');
+
+    fireEvent.click(screen.getByRole('button', { name: '显示密码' }));
+    expect(passwordInput.className).toContain('revealedPasswordInput');
+    expect(screen.getByRole('button', { name: '隐藏密码' })).toBeVisible();
+  });
+
+  it('策略开启时仍提交真实密码并正常登录', async () => {
+    publicSecuritySettings.preventBrowserAutofill = true;
+    vi.stubGlobal('CSS', { supports: () => true });
+    renderLogin();
+
+    fireEvent.change(screen.getByPlaceholderText('请输入用户名'), {
+      target: { value: 'admin' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('请输入密码'), {
+      target: { value: 'admin123' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /登\s*录/ }));
+
+    await waitFor(() => {
+      expect(screen.getByText('dashboard page')).toBeVisible();
+    });
+  });
+
+  it('浏览器不支持文本掩码时安全回退为 password 输入框', () => {
+    publicSecuritySettings.preventBrowserAutofill = true;
+    vi.stubGlobal('CSS', { supports: () => false });
+    renderLogin();
+
+    expect(screen.getByPlaceholderText('请输入密码')).toHaveAttribute('type', 'password');
+    expect(screen.getByPlaceholderText('请输入密码')).toHaveAttribute('autocomplete', 'off');
+  });
+});
 
 describe('LoginPage 锁屏模式', () => {
   beforeEach(() => {
