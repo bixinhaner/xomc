@@ -42,7 +42,9 @@ set -euo pipefail
 # 0. 参数解析
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/storage-paths-lib.sh"
 OUT_FILE="$SCRIPT_DIR/resources.env"
+STORAGE_ENV_FILE="${OMC_STORAGE_ENV_FILE:-$SCRIPT_DIR/.env}"
 DRY_RUN=0
 SKIP_MONITORING=0
 ASSUME_DEDICATED=0
@@ -84,10 +86,19 @@ to_gib()  { awk -v m="$1" 'BEGIN{printf "%.1f", m/1024}'; }            # MiB→G
 # 1. 探测主机硬件 + 当前负荷（需求 ①②）
 # ---------------------------------------------------------------------------
 sep "1/4 探测主机配置与当前负荷"
-OS="$(uname -s)"
+OS="${OMC_PROBE_OS:-$(uname -s)}"
 HOST_CPU=0; MEM_TOTAL_MIB=0; MEM_AVAIL_MIB=0; LOAD1=0; LOAD5=0; LOAD15=0; DISK_FREE_GIB=0
 
-if [ "$OS" = "Linux" ]; then
+if [ -n "${OMC_PROBE_CPU:-}" ] &&
+   [ -n "${OMC_PROBE_MEM_TOTAL_MIB:-}" ] &&
+   [ -n "${OMC_PROBE_MEM_AVAIL_MIB:-}" ] &&
+   [ -n "${OMC_PROBE_LOAD15:-}" ]; then
+  HOST_CPU="$OMC_PROBE_CPU"
+  MEM_TOTAL_MIB="$OMC_PROBE_MEM_TOTAL_MIB"
+  MEM_AVAIL_MIB="$OMC_PROBE_MEM_AVAIL_MIB"
+  LOAD15="$OMC_PROBE_LOAD15"
+  DISK_FREE_GIB="${OMC_PROBE_DISK_FREE_GIB:-0}"
+elif [ "$OS" = "Linux" ]; then
   HOST_CPU="$(nproc)"
   MEM_TOTAL_MIB="$(awk '/^MemTotal:/ {printf "%d", $2/1024}' /proc/meminfo)"
   MEM_AVAIL_MIB="$(awk '/^MemAvailable:/ {printf "%d", $2/1024}' /proc/meminfo)"
@@ -114,7 +125,7 @@ fi
 [ "${DISK_FREE_GIB:-0}" -gt 0 ] 2>/dev/null || DISK_FREE_GIB=0
 
 # what-if 覆盖：在构建机为「目标主机」预规划，或测试用。设了就覆盖探测值。
-[ -n "${OMC_PROBE_CPU:-}" ]            && HOST_CPU="$OMC_PROBE_CPU"
+[ -n "${OMC_PROBE_CPU:-}" ]           && HOST_CPU="$OMC_PROBE_CPU"
 [ -n "${OMC_PROBE_MEM_TOTAL_MIB:-}" ] && MEM_TOTAL_MIB="$OMC_PROBE_MEM_TOTAL_MIB"
 [ -n "${OMC_PROBE_MEM_AVAIL_MIB:-}" ] && MEM_AVAIL_MIB="$OMC_PROBE_MEM_AVAIL_MIB"
 [ -n "${OMC_PROBE_LOAD15:-}" ]        && LOAD15="$OMC_PROBE_LOAD15"
@@ -125,6 +136,30 @@ log "  内存总量      : ${C_B}$(to_gib "$MEM_TOTAL_MIB") GiB${C_0} (${MEM_TOT
 log "  当前可用内存  : ${C_B}$(to_gib "$MEM_AVAIL_MIB") GiB${C_0} (MemAvailable，已反映其它进程当前占用)"
 log "  负载(1/5/15)  : ${LOAD1} / ${LOAD5} / ${LOAD15}"
 log "  Docker 盘可用 : ${DISK_FREE_GIB} GiB"
+
+if [ -n "${OMC_PROBE_STORAGE_MOUNTS:-}" ]; then
+  STORAGE_MOUNTS="$OMC_PROBE_STORAGE_MOUNTS"
+elif [ "$OS" = "Linux" ]; then
+  STORAGE_MOUNTS="$(
+    df -l -B1 --output=avail,target \
+      -x tmpfs -x devtmpfs -x overlay -x squashfs -x proc -x sysfs -x cgroup -x cgroup2 \
+      2>/dev/null |
+      awk 'NR > 1 && $1 ~ /^[0-9]+$/ {
+        avail=$1
+        $1=""
+        sub(/^[[:space:]]+/, "")
+        if ($0 ~ /^\//) print avail "|" $0
+      }'
+  )"
+else
+  STORAGE_MOUNTS="$(
+    df -k / 2>/dev/null |
+      awk 'NR == 2 { print ($4 * 1024) "|" $NF }'
+  )"
+fi
+RECOMMENDED_STORAGE_MOUNT="$(printf '%s\n' "$STORAGE_MOUNTS" | storage_select_largest_mount)" ||
+  die "未找到可用的本地持久文件系统；请检查磁盘挂载后重试。" 1
+log "  推荐数据盘    : ${C_B}${RECOMMENDED_STORAGE_MOUNT}${C_0}（按可用空间最大选择）"
 
 # 其它项目（非 omcgo）容器的「已声明但未用」预留 —— 共享主机要替它们留出余量
 OTHER_RESERVE_MIB=0; OTHER_CPU=0
@@ -313,10 +348,22 @@ log "  ────────────────────────�
 log "  Σ内存限额    : ${C_B}$(to_gib "$ALLOC_SUM") GiB${C_0} / 空闲预算 $(to_gib "$IDLE_MEM_MIB") GiB（余 $(to_gib $(( IDLE_MEM_MIB - ALLOC_SUM ))) GiB）"
 [ "$TIER" = large ] && warn "large 档：1M 规模须多机拓扑（acs/worker ×6-8 + pgbouncer + Redis 拆分），本脚本仅规划单机切片。"
 
+sep "数据路径建议"
+log "  默认根目录    : ${RECOMMENDED_STORAGE_MOUNT%/}/omc-data"
+log "  ${C_Y}请人工检查并按物理 SSD/NVMe 修改 ${STORAGE_ENV_FILE} 中五个 *_DATA_PATH。${C_0}"
+log "  ${C_Y}本脚本只生成启动路径，不会迁移已有 Docker volume 或目录中的数据。${C_0}"
+
 if [ "$DRY_RUN" = 1 ]; then
   log "\n${C_Y}--dry-run：未写入文件。${C_0}去掉 --dry-run 即生成 $OUT_FILE"
   exit 0
 fi
+
+storage_apply_recommended_paths "$STORAGE_ENV_FILE" "$RECOMMENDED_STORAGE_MOUNT" ||
+  die "写入数据路径失败：$STORAGE_ENV_FILE" 1
+log "  已补齐空值    : ${STORAGE_ENV_FILE}（已有人工配置保持不变）"
+for storage_key in $STORAGE_PATH_KEYS; do
+  log "    $storage_key=$(storage_env_get "$STORAGE_ENV_FILE" "$storage_key")"
+done
 
 # 写 resources.env（带注释，可手改）
 {
