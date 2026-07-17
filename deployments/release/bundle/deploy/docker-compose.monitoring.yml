@@ -179,6 +179,11 @@ services:
     restart: unless-stopped
     environment:
       TZ: "Asia/Shanghai"
+      # postgresqlreceiver 连主库/tsdb 库用的凭据（config.yaml 里用 ${env:VAR} 引用）；
+      # 之前 config.yaml 硬编码了 dev 默认密码 omcgo123，生产环境走随机强密码时
+      # 每 30s scrape 一次全部认证失败（线上巡检发现），必须从 .env 同源注入。
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_TSDB_PASSWORD: ${POSTGRES_TSDB_PASSWORD}
     volumes:
       - ./monitoring/otelcol/config.yaml:/etc/otelcol-contrib/config.yaml:ro
       # 采集业务容器的日志：与 app/acs/worker 容器 /run/logs 挂载源同路径

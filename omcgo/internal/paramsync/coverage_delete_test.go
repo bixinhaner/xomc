@@ -20,8 +20,11 @@ func TestFrozenCoveragePathPredicateOnlyMatchesMappedRuntimeInstances(t *testing
 		{StandardPath: "Device.Radio.{i}.Secret", IsStorable: false},
 	}}).ToSql()
 	require.NoError(t, err)
+	// {i} 分支要同时带一个可走 (device_id, parameter_path varchar_pattern_ops)
+	// 索引的 LIKE 前缀条件，避免整表逐行做正则匹配（线上巡检发现的性能问题）。
+	assert.Contains(t, sql, "parameter_path LIKE ?")
 	assert.Contains(t, sql, "parameter_path ~ ?")
-	assert.Equal(t, []any{`^Device\.Radio\.[0-9]+\.Enable$`}, args)
+	assert.Equal(t, []any{"Device.Radio.%", `^Device\.Radio\.[0-9]+\.Enable$`}, args)
 }
 
 func TestRecoveredPrivateLeafMarksOnlyItsFrozenStandardCoverageIncomplete(t *testing.T) {
