@@ -109,6 +109,12 @@ type CreateTaskRequest struct {
 	HasPathTranslationMiss   bool   `json:"has_path_translation_miss"`
 	PathTranslationMissCount int    `json:"path_translation_miss_count"`
 	PathTranslationSource    string `json:"path_translation_source,omitempty"` // T-0168
+
+	// FailImmediately creates a terminal failed task row without enqueueing it.
+	// It is used by callers that already know an RPC cannot be delivered, such
+	// as an MML task targeting an offline device without offline-wait enabled.
+	FailImmediately bool   `json:"fail_immediately,omitempty"`
+	FailReason      string `json:"fail_reason,omitempty"`
 }
 
 // TaskHistoryOptions 任务历史查询选项
@@ -198,6 +204,13 @@ func NewTask(req *CreateTaskRequest) *Task {
 	}
 	if req.Source != "" {
 		task.Source = req.Source
+	}
+	if req.FailImmediately {
+		reason := req.FailReason
+		if reason == "" {
+			reason = "task failed before enqueue"
+		}
+		task.MarkFailed(0, reason)
 	}
 
 	return task

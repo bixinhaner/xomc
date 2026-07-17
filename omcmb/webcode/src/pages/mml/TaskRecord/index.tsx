@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
 import type { Key } from 'react';
-import { Button, Empty, Modal, Pagination, Popover, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { Button, Descriptions, Empty, Modal, Pagination, Popover, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import { DeleteOutlined, DownloadOutlined, PlayCircleOutlined, ProfileOutlined, StopOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 
@@ -190,6 +190,69 @@ function renderTaskResult(result: MMLTask['result'], t: (key: string) => string)
   if (!result) return '-';
   const tag = TASK_RESULT_TAGS[result];
   return tag ? <Tag color={tag.color}>{t(tag.key)}</Tag> : <Tag>{result}</Tag>;
+}
+
+function secondsText(seconds: number | undefined, t: (key: string, values?: Record<string, string | number>) => string) {
+  return t('mml.secondsValue', { seconds: seconds ?? 0 });
+}
+
+function buildScriptExecutionPolicyItems(
+  task: MMLTask,
+  t: (key: string, values?: Record<string, string | number>) => string,
+) {
+  const executeTypeTag = EXECUTE_TYPE_TAGS[task.executeType];
+  const items = [
+    {
+      key: 'executeType',
+      label: t('mml.executeMethod'),
+      children: executeTypeTag ? t(executeTypeTag.key) : task.executeType || '-',
+    },
+  ];
+
+  if (task.executeType === 'scheduled') {
+    items.push({
+      key: 'scheduledAt',
+      label: t('mml.scheduledAt'),
+      children: formatTime(task.scheduledAt),
+    });
+  }
+
+  if (task.executeType === 'periodic') {
+    items.push(
+      {
+        key: 'periodStart',
+        label: t('mml.periodStart'),
+        children: formatTime(task.periodStart),
+      },
+      {
+        key: 'periodEnd',
+        label: t('mml.periodEnd'),
+        children: formatTime(task.periodEnd),
+      },
+      {
+        key: 'periodTime',
+        label: t('mml.periodTime'),
+        children: task.periodTime || '-',
+      },
+    );
+  }
+
+  items.push(
+    {
+      key: 'offlineRetry',
+      label: t('mml.offlineRetryPolicy'),
+      children: task.offlineRetry ? secondsText(task.offlineRetryWait, t) : t('common.disabled'),
+    },
+    {
+      key: 'failedRetry',
+      label: t('mml.failedRetryPolicy'),
+      children: task.failedRetry
+        ? t('mml.retryCountAndInterval', { count: task.failedRetryCount ?? 0, seconds: task.failedRetryInterval ?? 0 })
+        : t('common.disabled'),
+    },
+  );
+
+  return items;
 }
 
 export default function TaskRecord() {
@@ -929,6 +992,18 @@ export default function TaskRecord() {
                 {t('mml.taskRecord.exportCsv')}
               </Button>
             </Space>
+
+            {viewedTask.taskOrigin === 'script' ? (
+              <div style={{ marginBottom: 12 }}>
+                <Typography.Text strong>{t('mml.executionPolicy')}</Typography.Text>
+                <Descriptions
+                  size="small"
+                  column={2}
+                  items={buildScriptExecutionPolicyItems(viewedTask, t)}
+                  style={{ marginTop: 8 }}
+                />
+              </div>
+            ) : null}
 
             {resultRows.length === 0 && !resultsLoading && !resultsFetching ? (
               <Empty description={t('mml.noExecutionResult')} />
