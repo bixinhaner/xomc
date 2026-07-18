@@ -460,6 +460,30 @@ func Test_Executor_EmptyTechnology_NoTechnologiesPassed(t *testing.T) {
 	assert.Nil(t, aggr.lastReq.Technologies)
 }
 
+func Test_Executor_ContinuousHourlyQueryUsesHalfOpenWatermarkWindow(t *testing.T) {
+	loc := time.UTC
+	bucket := time.Date(2026, 7, 18, 9, 0, 0, 0, loc)
+	aggr := &stubAggr{}
+	wm := &stubWatermark{byKey: map[wmKey]time.Time{
+		{metrics.GranularityHourly, aggregator.WatermarkLevelDevice}: bucket,
+	}}
+	e := NewExecutor(aggr, &stubRepo{}, nil, nil).SetLocation(loc).SetWatermarkReader(wm)
+
+	task := &Task{
+		ID:            uuid.New(),
+		Mode:          ModeContinuous,
+		Granularities: []string{string(metrics.GranularityHourly)},
+		Dimension:     DimensionNetwork,
+		Technology:    "lte",
+	}
+	_, err := e.ExecuteOneshot(context.Background(), task)
+	require.NoError(t, err)
+
+	assert.True(t, aggr.lastReq.StartTime.Equal(bucket), "continuous hourly start 应为水位桶")
+	assert.True(t, aggr.lastReq.EndTime.Equal(bucket.Add(time.Hour)), "continuous hourly end 应为下一小时桶")
+	assert.NotEqual(t, aggr.lastReq.StartTime, aggr.lastReq.EndTime, "continuous 查询窗口不能是 [bucket,bucket) 空区间")
+}
+
 // ---------------------------------------------------------------------------
 // T-0184：network 维度路由 + device_group 维度路由（复用 G5 预聚合）
 // ---------------------------------------------------------------------------
