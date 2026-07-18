@@ -232,17 +232,16 @@ describe('ConfigParamsModal', () => {
     expect(screen.getByText('Enable')).toBeInTheDocument();
     fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '3' } });
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'enabled' } });
+    expect(screen.getByText('Device.Services.FAPService.3.')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /mml.consoleV2.config.confirmAndExecute/ }));
 
-    expect(onConfirmAndExecute).toHaveBeenCalledWith(expect.objectContaining({
+    expect(onConfirmAndExecute).toHaveBeenCalledWith({
       mode: 'standard',
-      operationType: 'ADD',
-      targetObject: 'Device.Services.FAPService.{i}.',
       checkedPaths: [addPath],
       values: { [addPath]: 'enabled' },
       instanceSelectors: { i01: '3' },
       execMode: 'whole',
-    }));
+    });
   });
 
   it('emits the complete RMV target-object and forced whole-request payload', () => {
@@ -265,18 +264,17 @@ describe('ConfigParamsModal', () => {
     expect(instanceInputs).toHaveLength(2);
     fireEvent.change(instanceInputs[0], { target: { value: '4' } });
     fireEvent.change(instanceInputs[1], { target: { value: '9' } });
+    expect(screen.getByText('Device.Services.FAPService.4.')).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'mml.consoleV2.config.execPerPath' })).toBeDisabled();
     expect(screen.getByRole('radio', { name: 'mml.consoleV2.config.execWhole' })).toBeChecked();
     fireEvent.click(screen.getByRole('button', { name: /mml.consoleV2.config.confirmAndExecute/ }));
 
-    expect(onConfirmAndExecute).toHaveBeenCalledWith(expect.objectContaining({
+    expect(onConfirmAndExecute).toHaveBeenCalledWith({
       mode: 'standard',
-      operationType: 'RMV',
-      targetObject: 'Device.Services.FAPService.{i}.',
       checkedPaths: [],
       instanceSelectors: { i01: '4' },
       instance: 9,
       execMode: 'whole',
-    }));
+    });
   });
 });

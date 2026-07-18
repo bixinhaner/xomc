@@ -32,11 +32,6 @@ import { usePermission } from '@core/hooks/usePermission';
 
 const { Text } = Typography;
 
-type ConfigExecRequest = ExecRequest & {
-  operationType?: CommandItem['operationType'];
-  targetObject?: string;
-};
-
 /** 写类操作各自的提醒文案（§需求 3）。读类 LST/DSP 无提醒。 */
 const WRITE_REMINDER_KEYS: Record<string, string> = {
   ADD: 'mml.consoleV2.config.writeReminder.addRmv',
@@ -58,7 +53,7 @@ interface ConfigParamsModalProps {
   onGotoCommand?: () => void;
   onCancel: () => void;
   /** 执行:保存配置 + 直接下发（原「确定并执行」，#470 后唯一执行入口） */
-  onConfirmAndExecute: (req: ConfigExecRequest) => void;
+  onConfirmAndExecute: (req: ExecRequest) => void;
 }
 
 /**
@@ -197,15 +192,12 @@ export default function ConfigParamsModal({
     Object.entries(values).filter(([path]) => checkedPathSet.has(path)),
   );
 
-  const buildRequest = (): ConfigExecRequest =>
+  const buildRequest = (): ExecRequest =>
     mode === 'standard'
       ? {
           mode: 'standard',
           checkedPaths,
           execMode: effectiveExecMode,
-          ...(isAddRmvCmd
-            ? { operationType: command?.operationType, targetObject: command?.targetObject }
-            : {}),
           // 父级 `.{i}.` 实例选择器（默认 1）。
           ...(instanceSlots.length > 0 ? { instanceSelectors } : {}),
           // MOD/ADD 携带写入值；RMV 携带实例号。LST 两者均不消费。
