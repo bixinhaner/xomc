@@ -307,11 +307,14 @@ type MMLCustomCommand struct {
 	CategoryGroup string                 `json:"category_group,omitempty"`
 	Parameters    map[string]interface{} `json:"parameters"`
 	ParamPaths    []string               `json:"param_paths"`
-	Description   string                 `json:"description"`
-	Creator       string                 `json:"creator"`
-	OwnerUserID   *uuid.UUID             `json:"owner_user_id,omitempty"`
-	CreatedAt     time.Time              `json:"created_at"`
-	UpdatedAt     time.Time              `json:"updated_at"`
+	// ParamPathsProvided 仅用于 Update 的字段掩码；防止省略 param_paths 的 PUT
+	// 用 service 层旧快照覆盖并发 Path 关联写入。
+	ParamPathsProvided bool       `json:"-"`
+	Description        string     `json:"description"`
+	Creator            string     `json:"creator"`
+	OwnerUserID        *uuid.UUID `json:"owner_user_id,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
 // CustomCommandFilter specifies criteria for listing MML custom commands.

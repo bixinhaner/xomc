@@ -2502,6 +2502,7 @@ func (s *Service) UpdateCustomCommand(
 	if !isOwnerOrSuper(existing, currentUserID, currentUsername, isSuperAdmin) {
 		return nil, fmt.Errorf("only creator or super_admin can update template: %w", commonerrors.ErrForbidden)
 	}
+	paramPathsProvided := cmd.ParamPaths != nil
 
 	// scope 在编辑模式下不允许变更（§2 D6）— 强制保留原值，防 UI 误传
 	cmd.CommandScope = existing.CommandScope
@@ -2542,6 +2543,7 @@ func (s *Service) UpdateCustomCommand(
 	if cmd.ParamPaths != nil {
 		existing.ParamPaths = cmd.ParamPaths
 	}
+	existing.ParamPathsProvided = paramPathsProvided
 
 	if err := s.customCommandRepo.Update(ctx, existing); err != nil {
 		// 并发 race 穿过查询预检后，私有 DB 兜底索引可能抛 23505 → 翻 409。

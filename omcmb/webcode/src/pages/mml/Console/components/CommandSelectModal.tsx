@@ -264,10 +264,18 @@ export default function CommandSelectModal({
     [subFields, hiddenPaths],
   );
   const customParamPaths = useMemo(
-    () =>
-      selectedCustom
-        ? customCommandPathDefsToParamPaths(customPathDefs ?? []).filter((p) => !hiddenPaths.has(p.path))
-        : [],
+    () => {
+      if (!selectedCustom) return [];
+      // /mml/templates?product_id= 已把 selectedCustom.paramPaths 裁成当前产品支持集合；
+      // 富化端点按命令返回标准元数据，必须与该集合取交集，不能让产品不支持的关联
+      // Path 重新进入选择器和执行请求。
+      const productSupportedPaths = new Set(
+        selectedCustom.paramPaths.map((path) => path.trim()).filter(Boolean),
+      );
+      return customCommandPathDefsToParamPaths(customPathDefs ?? []).filter(
+        (p) => productSupportedPaths.has(p.path) && !hiddenPaths.has(p.path),
+      );
+    },
     [selectedCustom, customPathDefs, hiddenPaths],
   );
 

@@ -31,6 +31,7 @@ import type {
   SearchCommand,
 } from '../../types/mmlConsole';
 import type { MMLCustomCommandPathDef, MMLTask } from '../../types/mml';
+import { MML_CUSTOM_COMMAND_PATHS_QUERY_KEY } from './mmlQueryKeys';
 
 /**
  * 命令分组树。
@@ -99,7 +100,7 @@ export function useCustomCommandPaths(
   commandId?: string,
 ): ReturnType<typeof useQuery<MMLCustomCommandPathDef[]>> {
   return useQuery({
-    queryKey: ['mml', 'console', 'custom-command-paths', commandId ?? ''],
+    queryKey: [...MML_CUSTOM_COMMAND_PATHS_QUERY_KEY, commandId ?? ''],
     queryFn: () => mmlApi.getTemplatePaths(commandId!),
     staleTime: 30 * 60 * 1000,
     enabled: Boolean(commandId),

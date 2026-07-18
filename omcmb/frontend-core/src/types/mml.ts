@@ -475,4 +475,6 @@ export interface MMLCustomCommandPathDef {
   maxValue?: number;
   defaultSelected: boolean;
   sortOrder: number;
+  /** false 表示仅由历史 param_paths JSON 补出的只读兼容行。 */
+  mutable: boolean;
 }

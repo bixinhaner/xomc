@@ -39,4 +39,6 @@ type MMLCustomCommandPathView struct {
 	MaxValue        *int64    `json:"max_value,omitempty"`
 	DefaultSelected bool      `json:"default_selected"`
 	SortOrder       int       `json:"sort_order"`
+	// Mutable=false 表示仅从历史 param_paths JSON 补出的兼容行，没有真实关联 ID。
+	Mutable bool `json:"mutable"`
 }

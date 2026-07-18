@@ -259,6 +259,70 @@ describe('CommandSelectModal', () => {
     );
   });
 
+  it('keeps enriched custom paths inside the product-filtered command paths', async () => {
+    fixtures.customCommands = [{
+      id: 'custom-filtered',
+      commandName: '修改产品支持参数',
+      commandCode: 'MOD FILTERED',
+      operationType: 'MOD',
+      commandScope: 'public',
+      categoryGroup: '',
+      parameters: {},
+      paramPaths: ['Device.Info.Name'],
+      description: '',
+      creator: 'admin',
+      createdAt: '',
+      updatedAt: '',
+    }];
+    fixtures.customPaths = [
+      {
+        id: 'path-supported',
+        commandId: 'custom-filtered',
+        standardPathId: 'standard-supported',
+        standardPath: 'Device.Info.Name',
+        entryType: 'parameter',
+        access: 'READ_WRITE',
+        dataType: 'STRING',
+        description: 'Name',
+        minValue: 2,
+        maxValue: 32,
+        defaultSelected: false,
+        sortOrder: 1,
+      },
+      {
+        id: 'path-filtered',
+        commandId: 'custom-filtered',
+        standardPathId: 'standard-filtered',
+        standardPath: 'Device.Info.Model',
+        entryType: 'parameter',
+        access: 'READ_WRITE',
+        dataType: 'STRING',
+        description: 'Model',
+        minValue: 2,
+        maxValue: 32,
+        defaultSelected: false,
+        sortOrder: 2,
+      },
+    ];
+    renderModal();
+
+    for (let depth = 0; depth < 4 && !screen.queryByText('修改产品支持参数'); depth += 1) {
+      const switcher = Array.from(document.querySelectorAll('.ant-tree-switcher')).find((node) =>
+        node.classList.contains('ant-tree-switcher_close'),
+      );
+      if (!switcher) break;
+      fireEvent.click(switcher);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    fireEvent.click(await screen.findByText('修改产品支持参数'));
+
+    expect(await screen.findByRole('checkbox', { name: /Name/ })).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: /Model/ })).not.toBeInTheDocument();
+    expect(
+      screen.getByText('mml.consoleV2.cmdSelect.paramPathCount:{"count":1}'),
+    ).toBeInTheDocument();
+  });
+
   it.each([
     ['ADD', '新增用户', 'add-1', 'AddObject'],
     ['RMV', '删除用户', 'rmv-1', 'DeleteObject'],

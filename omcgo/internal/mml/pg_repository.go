@@ -1894,7 +1894,118 @@ func NewPgCustomCommandRepository(pool *pgxpool.Pool) *PgCustomCommandRepository
 	return &PgCustomCommandRepository{pool: pool}
 }
 
+func normalizeCustomCommandParamPaths(paramPaths []string) []string {
+	normalized := make([]string, 0, len(paramPaths))
+	seen := make(map[string]struct{}, len(paramPaths))
+	for _, path := range paramPaths {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		if _, exists := seen[path]; exists {
+			continue
+		}
+		seen[path] = struct{}{}
+		normalized = append(normalized, path)
+	}
+	return normalized
+}
+
+// syncCustomCommandPaths 让历史 JSON param_paths 与标准 Path 关联表保持一致。
+//
+// AddTemplateModal 及兼容 API 仍按字符串 Path 提交 param_paths；关联表只存
+// standard_path_id。这里在创建/更新自定义命令的同一事务中解析 standard_params，
+// 保留仍存在关联的 default_selected，仅删除已移除 Path 并按 JSON 顺序更新 sort_order。
+func syncCustomCommandPaths(
+	ctx context.Context,
+	tx pgx.Tx,
+	commandID uuid.UUID,
+	paramPaths []string,
+) error {
+	normalized := normalizeCustomCommandParamPaths(paramPaths)
+
+	if len(normalized) == 0 {
+		if _, err := tx.Exec(ctx,
+			`DELETE FROM mml_custom_command_paths WHERE command_id = $1`,
+			commandID,
+		); err != nil {
+			return fmt.Errorf("clear custom command paths: %w", err)
+		}
+		return nil
+	}
+
+	rows, err := tx.Query(ctx, `
+		SELECT requested.standard_path, sp.id
+		FROM unnest($1::text[]) WITH ORDINALITY AS requested(standard_path, sort_order)
+		JOIN standard_params sp ON sp.standard_path = requested.standard_path
+		ORDER BY requested.sort_order`,
+		normalized,
+	)
+	if err != nil {
+		return fmt.Errorf("resolve custom command standard paths: %w", err)
+	}
+	defer rows.Close()
+
+	standardPathIDs := make(map[string]uuid.UUID, len(normalized))
+	for rows.Next() {
+		var path string
+		var id uuid.UUID
+		if err := rows.Scan(&path, &id); err != nil {
+			return fmt.Errorf("scan custom command standard path: %w", err)
+		}
+		standardPathIDs[path] = id
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate custom command standard paths: %w", err)
+	}
+
+	missing := make([]string, 0)
+	orderedIDs := make([]uuid.UUID, 0, len(normalized))
+	for _, path := range normalized {
+		id, exists := standardPathIDs[path]
+		if !exists {
+			missing = append(missing, path)
+			continue
+		}
+		orderedIDs = append(orderedIDs, id)
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf(
+			"custom command paths missing from standard_params: %s: %w",
+			strings.Join(missing, ", "),
+			commonerrors.ErrInvalidInput,
+		)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM mml_custom_command_paths
+		WHERE command_id = $1
+		  AND NOT (standard_path_id = ANY($2::uuid[]))`,
+		commandID,
+		orderedIDs,
+	); err != nil {
+		return fmt.Errorf("delete removed custom command paths: %w", err)
+	}
+
+	for sortOrder, standardPathID := range orderedIDs {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO mml_custom_command_paths (command_id, standard_path_id, sort_order)
+			VALUES ($1, $2, $3)
+			ON CONFLICT (command_id, standard_path_id) DO UPDATE
+			SET sort_order = EXCLUDED.sort_order,
+			    updated_at = now()`,
+			commandID,
+			standardPathID,
+			sortOrder,
+		); err != nil {
+			return fmt.Errorf("upsert custom command path: %w", err)
+		}
+	}
+	return nil
+}
+
 func (r *PgCustomCommandRepository) Create(ctx context.Context, cmd *MMLCustomCommand) error {
+	cmd.ParamPaths = normalizeCustomCommandParamPaths(cmd.ParamPaths)
 	parametersJSON, err := json.Marshal(cmd.Parameters)
 	if err != nil {
 		return fmt.Errorf("marshal parameters: %w", err)
@@ -1919,10 +2030,22 @@ func (r *PgCustomCommandRepository) Create(ctx context.Context, cmd *MMLCustomCo
 		return fmt.Errorf("build insert mml_custom_command SQL: %w", err)
 	}
 
-	row := r.pool.QueryRow(ctx, query, args...)
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin create mml_custom_command: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	row := tx.QueryRow(ctx, query, args...)
 	created, err := scanCustomCommand(row)
 	if err != nil {
 		return fmt.Errorf("create mml_custom_command: %w", err)
+	}
+	if err := syncCustomCommandPaths(ctx, tx, created.ID, created.ParamPaths); err != nil {
+		return fmt.Errorf("sync mml custom command paths: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit create mml_custom_command: %w", err)
 	}
 	*cmd = *created
 	return nil
@@ -1952,6 +2075,22 @@ func (r *PgCustomCommandRepository) Update(ctx context.Context, cmd *MMLCustomCo
 	if err != nil {
 		return fmt.Errorf("marshal parameters: %w", err)
 	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin update mml_custom_command: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	latestParamPaths, err := lockCustomCommandParamPaths(ctx, tx, cmd.ID)
+	if err != nil {
+		return err
+	}
+	if cmd.ParamPathsProvided {
+		cmd.ParamPaths = normalizeCustomCommandParamPaths(cmd.ParamPaths)
+	} else {
+		cmd.ParamPaths = latestParamPaths
+	}
 	paramPathsJSON, err := json.Marshal(cmd.ParamPaths)
 	if err != nil {
 		return fmt.Errorf("marshal param_paths: %w", err)
@@ -1972,12 +2111,18 @@ func (r *PgCustomCommandRepository) Update(ctx context.Context, cmd *MMLCustomCo
 		return fmt.Errorf("build update mml_custom_command SQL: %w", err)
 	}
 
-	result, err := r.pool.Exec(ctx, query, args...)
+	result, err := tx.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("update mml_custom_command: %w", err)
 	}
 	if result.RowsAffected() == 0 {
 		return commonerrors.ErrNotFound
+	}
+	if err := syncCustomCommandPaths(ctx, tx, cmd.ID, cmd.ParamPaths); err != nil {
+		return fmt.Errorf("sync mml custom command paths: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit update mml_custom_command: %w", err)
 	}
 	return nil
 }

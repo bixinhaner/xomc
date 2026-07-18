@@ -948,10 +948,15 @@ tar -cf - \
   omcgo/internal/mml/console_service.go \
   omcgo/internal/mml/custom_command_path_model.go \
   omcgo/internal/mml/custom_command_path_repository.go \
+  omcgo/internal/mml/pg_repository.go \
   omcmb/frontend-core/src/types/mmlConsole.ts \
   omcmb/frontend-core/src/types/mml.ts \
+  omcmb/frontend-core/src/types/paramModel.ts \
   omcmb/frontend-core/src/services/api/mmlApi.ts \
+  omcmb/frontend-core/src/hooks/api/mmlQueryKeys.ts \
+  omcmb/frontend-core/src/hooks/api/useMML.ts \
   omcmb/frontend-core/src/hooks/api/useMmlConsole.ts \
+  omcmb/frontend-core/src/hooks/api/useParamModels.ts \
   omcmb/frontend-core/src/i18n/zh-CN/index.ts \
   omcmb/frontend-core/src/i18n/en-US/index.ts \
   omcmb/webcode/src/pages/mml/Console/types.ts \
@@ -991,3 +996,85 @@ git diff --stat origin/main...HEAD
 ```
 
 Expected: 分支包含设计文档及 4 个小步实现提交；无未提交文件、无无关改动、未推送。
+
+---
+
+### Task 6: 修复最终审查发现的真实数据兼容问题
+
+**Files:**
+
+- Modify: `omcmb/frontend-core/src/types/paramModel.ts`
+- Modify: `omcmb/webcode/src/pages/mml/Console/modParamValidation.test.ts`
+- Modify: `omcmb/webcode/src/pages/mml/Console/components/CommandSelectModal.tsx`
+- Modify: `omcmb/webcode/src/pages/mml/Console/components/CommandSelectModal.test.tsx`
+- Modify: `omcmb/webcode/src/pages/mml/components/customizedSubtree.tsx`
+- Modify: `omcgo/internal/mml/pg_repository.go`
+- Modify: `omcgo/internal/mml/model.go`
+- Modify: `omcgo/internal/mml/service.go`
+- Modify: `omcgo/internal/mml/custom_command_path_model.go`
+- Modify: `omcgo/internal/mml/custom_command_path_repository.go`
+- Create: `omcgo/internal/mml/custom_command_path_integration_test.go`
+- Modify: `omcmb/frontend-core/src/types/mml.ts`
+- Modify: `omcmb/frontend-core/src/services/api/mmlApi.ts`
+- Modify: `omcmb/frontend-core/src/services/api/__tests__/mmlConsoleApi.test.ts`
+- Create: `omcmb/frontend-core/src/hooks/api/mmlQueryKeys.ts`
+- Modify: `omcmb/frontend-core/src/hooks/api/useMML.ts`
+- Modify: `omcmb/frontend-core/src/hooks/api/useMmlConsole.ts`
+- Modify: `omcmb/frontend-core/src/hooks/api/useParamModels.ts`
+- Create: `omcmb/frontend-core/src/hooks/api/__tests__/useMMLCustomPathInvalidation.test.tsx`
+
+- [x] **Step 1: 以真实标准树类型写失败测试**
+
+使用 113 只读查询确认存量包含 `STRING`、`BOOLEAN`、`DATE_TIME`、`INT`、
+`U_INT` 等类型。为大写字符串长度、布尔/日期无范围语义写测试并确认原实现误判。
+
+- [x] **Step 2: 规范化类型语义**
+
+`dataTypeRangeKind`、`isStringDataType`、`isUnsignedDataType` 按大小写不敏感、
+忽略下划线/空白/连字符的 key 判断；保留原始值用于类型标签。
+
+- [x] **Step 3: 以正常自定义命令创建/更新链路写集成失败测试**
+
+通过现有 service 创建带 JSON `param_paths` 的命令，再调用富化 Path 读取；验证修复前
+返回空。测试还覆盖更新后替换关联、关联接口增删改双写、非法 Path 事务回滚、
+`default_selected` 保留，以及历史 JSON-only 命令的 trim/空值过滤/去重回退。
+
+- [x] **Step 4: 同事务同步关联并兼容历史数据**
+
+`PgCustomCommandRepository.Create/Update` 在同一事务中解析 `standard_params` 并同步
+`mml_custom_command_paths`；关联增删改接口同步更新 JSON；富化查询补入没有关联行的
+历史 JSON Path，并以 `mutable=false` 标记为只读。缺失标准 Path 整体回滚并返回输入错误。
+父命令 PUT 省略 `param_paths` 时通过字段掩码在父行锁内读取最新 JSON，不能用
+service 层旧快照覆盖并发的 Path 关联修改。
+
+- [x] **Step 5: 保留产品过滤并失效缓存**
+
+富化 Path 与产品过滤后的 `selectedCustom.paramPaths` 取交集。模板、产品参数映射或
+标准参数元数据变更后，同时失效 `['mml','custom-commands']` 和
+`['mml','console','custom-command-paths']` 前缀。
+
+- [x] **Step 6: 运行定向回归**
+
+```bash
+cd omcgo
+go build ./...
+go test ./internal/mml/... -count=1
+
+cd ../omcmb
+npm test --workspace webcode -- --run \
+  ../frontend-core/src/services/api/__tests__/mmlConsoleApi.test.ts \
+  ../frontend-core/src/hooks/api/__tests__/useMMLCustomPathInvalidation.test.tsx \
+  src/pages/mml/Console/modParamValidation.test.ts \
+  src/pages/mml/Console/components/CommandSelectModal.test.tsx \
+  src/pages/mml/Console/components/ConfigParamsModal.test.tsx
+npm run typecheck
+```
+
+Expected: Go 构建/MML 测试通过；前端 5 个文件 53 个测试和 typecheck 通过。
+
+- [ ] **Step 7: 重新部署并走正常创建链路验收**
+
+部署 Task 5 更新后的运行时文件。在 113 通过现有
+`POST /api/v1/mml/templates` 创建临时自定义 MOD，不直接插入关联表；确认后端自动生成
+关联、Console 可见富化类型/范围，并覆盖大写 `STRING` 长度校验。验收后通过现有
+`DELETE /api/v1/mml/templates/:id` 删除命令，复核命令和关联均为 0。

@@ -82,6 +82,7 @@ describe('mmlApi console product filtering', () => {
       max_value: 32,
       default_selected: false,
       sort_order: 1,
+      mutable: false,
     }] } });
 
     const result = await mmlApi.getTemplatePaths('custom-1');
@@ -92,6 +93,7 @@ describe('mmlApi console product filtering', () => {
       dataType: 'string',
       minValue: 2,
       maxValue: 32,
+      mutable: false,
     });
   });
 });

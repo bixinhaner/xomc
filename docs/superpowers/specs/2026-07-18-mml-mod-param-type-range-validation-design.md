@@ -87,13 +87,26 @@ standard_params
 
 ### 4.2 自定义命令
 
-自定义命令 Path 已通过 `mml_custom_command_paths.standard_path_id` 关联
-`standard_params`。现有自定义命令 Path 富化视图已经返回 `data_type`，本次补充
-`min_value` 和 `max_value`，选择自定义 MOD 命令时把富化后的 Path 转换为同一个
-`CommandParamPath`。
+自定义命令兼容 API 以 `mml_custom_command.param_paths` JSON 保存字符串 Path，
+富化视图则通过 `mml_custom_command_paths.standard_path_id` 关联
+`standard_params`。创建或更新命令时，后端必须在同一事务中把 JSON Path 解析为
+关联行；读取同步逻辑上线前的历史命令时，富化查询还需按 JSON Path 回退 JOIN
+`standard_params`，不能因缺少关联行返回空列表。关联增删改接口也必须在同一事务中
+同步 JSON：新增追加 Path，排序更新 JSON 顺序，删除同时移除 JSON Path，避免接口成功
+但控制台有效 Path 不变。
 
-自定义命令不再仅依赖字符串 Path 构造 MOD 配置项；类型和范围必须来自关联的
-`standard_params` 行。
+历史 JSON-only 回退行没有真实关联 ID，接口以 `mutable=false` 明确标记为只读；其
+字符串 Path 按正常写入规则去首尾空白（含 Tab/CR/LF）、丢弃空值、按首次出现位置
+去重并稳定排序。
+
+父命令 PUT 允许省略 `param_paths`。后端必须保留“字段是否提供”的更新掩码，并在
+repository 事务锁定父命令后读取最新 JSON；省略时使用锁内最新值，防止 service 层
+旧快照覆盖并发的 Path 关联增删改。
+
+自定义命令不再仅依赖字符串 Path 构造 MOD 配置项；JSON 只确定命令声明和产品过滤后的
+Path 集合，类型、访问权限和范围必须来自 `standard_params`。富化结果必须与
+`GET /mml/templates?product_id=...` 已裁剪的 `paramPaths` 取交集，防止产品不支持的
+关联 Path 回流到选择器和执行请求。
 
 ### 4.3 数据库与执行协议
 
@@ -173,6 +186,9 @@ MOD 配置页每行保持“参数标签 + Path + 输入框”的布局，在 Pa
 2. `minValue` 和 `maxValue` 都为空时，范围校验直接通过，不额外校验数据类型。
 3. 只有一个边界时，只检查该边界。
 4. 边界值本身合法，范围为闭区间。
+5. 标准树存量类型同时存在规范小驼峰与历史大写/下划线形式，例如
+   `string/STRING`、`boolean/BOOLEAN`、`dateTime/DATE_TIME`、
+   `unsignedInt/U_INT`；范围语义判断大小写不敏感并忽略分隔符，类型标签仍展示原值。
 
 ### 7.2 字符串
 
@@ -205,14 +221,20 @@ MOD 配置页每行保持“参数标签 + Path + 输入框”的布局，在 Pa
 
 - `PgSubFieldRepository`：查询并扫描 `sp.max_value`。
 - `MMLCommandSubFieldEnriched`、`SubFieldDTO`：增加 `MaxValue`。
-- 自定义命令 Path repository/view：查询并返回 `min_value`、`max_value`。
+- 自定义命令创建/更新 repository：同事务同步 JSON `param_paths` 与关联表。
+- 自定义命令 Path repository/view：关联增删改同时同步 JSON，查询返回
+  `min_value`、`max_value` 和 `mutable`，并兼容历史 JSON-only 命令。
+- 父命令更新：以字段掩码区分“省略 Path”和“明确清空 Path”，在父行锁内合并最新
+  JSON，避免与 Path 写接口并发时丢更新。
 - 对应 service/handler 保持透传，不引入新的业务推断。
 
 ### `frontend-core`
 
 - `BackendSubField`、`SubFieldDef`：增加 `maxValue` 映射。
-- 自定义命令 Path 类型/API：增加 `minValue`、`maxValue` 映射。
-- 复用 `dataTypeRangeKind` 判断长度、数值和无范围类型。
+- 自定义命令 Path 类型/API：增加 `minValue`、`maxValue`、`mutable` 映射。
+- 复用大小写不敏感的 `dataTypeRangeKind` 判断长度、数值和无范围类型。
+- 模板、产品参数映射或标准参数元数据变化后，同时失效产品化自定义命令列表与富化
+  Path 查询缓存。
 
 ### MML Console adapter
 

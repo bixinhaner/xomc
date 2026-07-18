@@ -289,6 +289,7 @@ interface BackendMMLCustomCommandPath {
   max_value?: number | null;
   default_selected: boolean;
   sort_order: number;
+  mutable: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -861,6 +862,7 @@ function mapBackendCustomCommandPath(
     maxValue: path.max_value ?? undefined,
     defaultSelected: path.default_selected,
     sortOrder: path.sort_order,
+    mutable: path.mutable,
   };
 }
 

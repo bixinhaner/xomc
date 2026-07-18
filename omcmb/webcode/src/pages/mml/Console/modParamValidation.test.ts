@@ -60,6 +60,33 @@ describe('validateModParamValue', () => {
     ).toBeNull();
   });
 
+  it('uses actual uppercase standard-tree type aliases for range semantics', () => {
+    expect(
+      validateModParamValue(
+        param({ valueType: 'STRING', minValue: 2, maxValue: 4 }),
+        'abc',
+      ),
+    ).toBeNull();
+    expect(
+      validateModParamValue(
+        param({ valueType: 'STRING', minValue: 2, maxValue: 4 }),
+        'abcde',
+      ),
+    ).toEqual({ code: 'maxLength', bound: 4 });
+    expect(
+      validateModParamValue(
+        param({ valueType: 'BOOLEAN', minValue: 1, maxValue: 1 }),
+        'anything',
+      ),
+    ).toBeNull();
+    expect(
+      validateModParamValue(
+        param({ valueType: 'DATE_TIME', minValue: 1, maxValue: 1 }),
+        'anything',
+      ),
+    ).toBeNull();
+  });
+
   it('accepts inclusive integer boundaries', () => {
     const path = param({ valueType: 'unsignedInt', minValue: 1, maxValue: 13 });
     expect(validateModParamValue(path, '1')).toBeNull();
