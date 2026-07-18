@@ -6356,6 +6356,8 @@ const messages: Record<string, string> = {
   'mml.consoleV2.rawPath.valuePlaceholder':  'Enter parameter value',
   'mml.consoleV2.rawPath.singleRowLocked':   'ADD / RMV acts on only one object per execution; locked to a single row',
   // ConfigParamsModal
+  'mml.consoleV2.config.confirmSelectedPaths': 'Confirm PATHs for this execution',
+  'mml.consoleV2.config.modValueRequired':      'Enter a value for every selected PATH',
   'mml.consoleV2.config.writeReminder.addRmv': 'ADD / RMV protocol acts on only one object path per execution; locked to a single row.',
   'mml.consoleV2.config.writeReminder.mod':  'MOD will modify the parameter values of all selected devices; please confirm the values are correct.',
   'mml.consoleV2.config.pickDeviceFirst':    'Please select target devices first',

@@ -6385,6 +6385,8 @@ const messages: Record<string, string> = {
   'mml.consoleV2.rawPath.valuePlaceholder':  '请输入参数值',
   'mml.consoleV2.rawPath.singleRowLocked':   'ADD / RMV 单次仅作用一个对象，已锁定单行',
   // ConfigParamsModal
+  'mml.consoleV2.config.confirmSelectedPaths': '确认本次执行的 PATH',
+  'mml.consoleV2.config.modValueRequired':      '请填写所有已选 PATH 的修改值',
   'mml.consoleV2.config.writeReminder.addRmv': 'ADD / RMV 协议规定单次仅作用于一个对象路径，已锁定为单行。',
   'mml.consoleV2.config.writeReminder.mod':  'MOD 将修改所有已选设备的参数值，请确认参数值无误。',
   'mml.consoleV2.config.pickDeviceFirst':    '请先选择目标设备',
