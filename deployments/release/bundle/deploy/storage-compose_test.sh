@@ -50,6 +50,8 @@ contains "开发 MinIO 默认命名卷" '${MINIO_DATA_PATH:-miniodata}:/data' "$
 echo "── 过载保护配置 ──"
 contains "release NATS 内存存储上限" 'max_memory_store: ${NATS_MAX_MEMORY_STORE:-134217728}' "$RELEASE_COMPOSE"
 contains "开发 NATS 内存存储上限" 'max_memory_store: ${NATS_MAX_MEMORY_STORE:-134217728}' "$DEV_COMPOSE"
+contains "release NATS 大积压恢复宽限" 'start_period: 5m' "$RELEASE_COMPOSE"
+contains "开发 NATS 大积压恢复宽限" 'start_period: 5m' "$DEV_COMPOSE"
 contains "ACS access log 默认关闭" 'access_log off; # ACS 高频请求由应用指标观测，避免与数据盘竞争 IO' "$NGINX_DEFAULT"
 contains "本地 ACS access log 默认关闭" 'access_log off; # ACS 高频请求由应用指标观测，避免与数据盘竞争 IO' "$NGINX_LOCAL"
 contains "ACS 请求体不落临时文件" 'proxy_request_buffering off;' "$NGINX_DEFAULT"
