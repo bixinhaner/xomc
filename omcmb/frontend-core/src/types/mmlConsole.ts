@@ -107,6 +107,7 @@ export interface BackendSubField {
   js_regex?: string;
   /** standard_params.min_value：MOD/ADD 填值时标量参数默认值（值默认取 min_value）。 */
   min_value?: number | null;
+  max_value?: number | null;
   default_selected: boolean;
   is_required: boolean;
   sort_order: number;
@@ -250,6 +251,7 @@ export interface SubFieldDef {
   jsRegex?: string;
   /** standard_params.min_value：MOD/ADD 填值时标量参数默认值（值默认取 min_value）。 */
   minValue?: number;
+  maxValue?: number;
   defaultSelected: boolean;
   isRequired: boolean;
   sortOrder: number;

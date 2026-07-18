@@ -461,3 +461,18 @@ export interface MMLCustomCommand {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface MMLCustomCommandPathDef {
+  id: string;
+  commandId: string;
+  standardPathId: string;
+  standardPath: string;
+  entryType: string;
+  access: string;
+  dataType: string;
+  description: string;
+  minValue?: number;
+  maxValue?: number;
+  defaultSelected: boolean;
+  sortOrder: number;
+}

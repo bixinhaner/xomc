@@ -1,6 +1,6 @@
 import http from '../http';
 import { generateUid } from '../../utils/uid';
-import type { MMLCommand, MMLScript, MMLTask, MMLTaskCommandDetail, MMLTaskCommandInput, MMLParam, MMLCustomCommand, ParamPath, MMLOperationType, DeviceTaskResultItem, MMLParamRef, MMLTaskResultsStats, MMLPathTranslationView, PathTranslationSource, MMLTaskPlanItem, MMLTaskCreateInput, MMLScriptImportValidation, MMLScriptValidationSummary, MMLScriptIssue, MMLImportedScriptCreateInput, MMLImportedScriptReplaceInput, MMLScriptExecutionInput, MMLScriptImportTemplate } from '../../types/mml';
+import type { MMLCommand, MMLScript, MMLTask, MMLTaskCommandDetail, MMLTaskCommandInput, MMLParam, MMLCustomCommand, MMLCustomCommandPathDef, ParamPath, MMLOperationType, DeviceTaskResultItem, MMLParamRef, MMLTaskResultsStats, MMLPathTranslationView, PathTranslationSource, MMLTaskPlanItem, MMLTaskCreateInput, MMLScriptImportValidation, MMLScriptValidationSummary, MMLScriptIssue, MMLImportedScriptCreateInput, MMLImportedScriptReplaceInput, MMLScriptExecutionInput, MMLScriptImportTemplate } from '../../types/mml';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 import type {
   BackendStatement,
@@ -274,6 +274,21 @@ interface BackendMMLCustomCommand {
   creator: string;
   created_at: string;
   updated_at: string;
+}
+
+interface BackendMMLCustomCommandPath {
+  id: string;
+  command_id: string;
+  standard_path_id: string;
+  standard_path: string;
+  entry_type: string;
+  access: string;
+  data_type: string;
+  description: string;
+  min_value?: number | null;
+  max_value?: number | null;
+  default_selected: boolean;
+  sort_order: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -827,6 +842,25 @@ function mapBackendCustomCommand(bc: BackendMMLCustomCommand): MMLCustomCommand 
     creator: bc.creator,
     createdAt: bc.created_at,
     updatedAt: bc.updated_at,
+  };
+}
+
+function mapBackendCustomCommandPath(
+  path: BackendMMLCustomCommandPath,
+): MMLCustomCommandPathDef {
+  return {
+    id: path.id,
+    commandId: path.command_id,
+    standardPathId: path.standard_path_id,
+    standardPath: path.standard_path,
+    entryType: path.entry_type,
+    access: path.access,
+    dataType: path.data_type,
+    description: path.description,
+    minValue: path.min_value ?? undefined,
+    maxValue: path.max_value ?? undefined,
+    defaultSelected: path.default_selected,
+    sortOrder: path.sort_order,
   };
 }
 
@@ -1427,6 +1461,13 @@ export const mmlApi = {
     };
   },
 
+  async getTemplatePaths(commandId: string): Promise<MMLCustomCommandPathDef[]> {
+    const { data } = await http.get<{ items: BackendMMLCustomCommandPath[] }>(
+      `/mml/templates/${commandId}/paths`,
+    );
+    return (data.items ?? []).map(mapBackendCustomCommandPath);
+  },
+
   async createTemplate(
     tmpl: Omit<MMLCustomCommand, 'id' | 'creator' | 'createdAt' | 'updatedAt'>
   ): Promise<MMLCustomCommand> {
@@ -1773,6 +1814,7 @@ function mapSubField(s: BackendSubField): SubFieldDef {
     accessType: s.access_type,
     isObject: s.is_object,
     minValue: s.min_value ?? undefined,
+    maxValue: s.max_value ?? undefined,
     supportsAdd: s.supports_add,
     supportsDelete: s.supports_delete,
     changeApplies: s.change_applies,

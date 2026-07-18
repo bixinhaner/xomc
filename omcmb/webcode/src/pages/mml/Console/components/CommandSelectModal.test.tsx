@@ -2,7 +2,13 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { App } from 'antd';
 import type { ComponentProps } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { useCommandSubFields, useGroupTree, useUnsupportedPaths } from '@core/hooks/api/useMmlConsole';
+import type {
+  useCommandSubFields,
+  useCustomCommandPaths,
+  useGroupTree,
+  useUnsupportedPaths,
+} from '@core/hooks/api/useMmlConsole';
+import type { MMLCustomCommand, MMLCustomCommandPathDef } from '@core/types/mml';
 import type { CommandItem } from '../types';
 import CommandSelectModal from './CommandSelectModal';
 
@@ -57,6 +63,8 @@ const fixtures = vi.hoisted(() => {
   return {
     defaultSubFields,
     subFields: defaultSubFields,
+    customCommands: [] as MMLCustomCommand[],
+    customPaths: [] as MMLCustomCommandPathDef[],
     groupTree: [
       {
         id: 'group-1',
@@ -74,6 +82,10 @@ vi.mock('@core/hooks/api/useMmlConsole', () => ({
   useCommandSubFields: (id?: string) =>
     ({ data: id ? fixtures.subFields : undefined, isFetching: false }) as unknown as ReturnType<
       typeof useCommandSubFields
+    >,
+  useCustomCommandPaths: (id?: string) =>
+    ({ data: id ? fixtures.customPaths : undefined, isFetching: false }) as unknown as ReturnType<
+      typeof useCustomCommandPaths
     >,
   useUnsupportedPaths: () => ({ data: [] }) as unknown as ReturnType<typeof useUnsupportedPaths>,
 }));
@@ -93,12 +105,14 @@ vi.mock('../../components/customizedSubtree', async () => {
   );
   return {
     ...actual,
-    useCustomCommands: () => ({ commands: [] }),
+    useCustomCommands: () => ({ commands: fixtures.customCommands }),
   };
 });
 
 afterEach(() => {
   fixtures.subFields = fixtures.defaultSubFields;
+  fixtures.customCommands = [];
+  fixtures.customPaths = [];
 });
 
 function makeCommandItem(id: string, operationType: 'LST' | 'MOD'): CommandItem {
@@ -185,6 +199,64 @@ describe('CommandSelectModal', () => {
     expect(
       screen.getByText('mml.consoleV2.cmdSelect.paramPathCount:{"count":3}'),
     ).toBeInTheDocument();
+  });
+
+  it('confirms enriched type and range metadata for a custom MOD command', async () => {
+    fixtures.customCommands = [{
+      id: 'custom-1',
+      commandName: '修改名称',
+      commandCode: 'MOD CUSTOM',
+      operationType: 'MOD',
+      commandScope: 'public',
+      categoryGroup: '',
+      parameters: {},
+      paramPaths: ['Device.Info.Name'],
+      description: '',
+      creator: 'admin',
+      createdAt: '',
+      updatedAt: '',
+    }];
+    fixtures.customPaths = [{
+      id: 'path-1',
+      commandId: 'custom-1',
+      standardPathId: 'standard-1',
+      standardPath: 'Device.Info.Name',
+      entryType: 'parameter',
+      access: 'readWrite',
+      dataType: 'string',
+      description: 'Name',
+      minValue: 2,
+      maxValue: 32,
+      defaultSelected: false,
+      sortOrder: 1,
+    }];
+    const onConfirm = vi.fn();
+    renderModal({ onConfirm });
+
+    for (let depth = 0; depth < 4 && !screen.queryByText('修改名称'); depth += 1) {
+      const switcher = Array.from(document.querySelectorAll('.ant-tree-switcher')).find((node) =>
+        node.classList.contains('ant-tree-switcher_close'),
+      );
+      if (!switcher) break;
+      fireEvent.click(switcher);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    fireEvent.click(await screen.findByText('修改名称'));
+    fireEvent.click(await screen.findByRole('checkbox', { name: /Name/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'mml.consoleV2.cmdSelect.okText' }));
+
+    expect(onConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        isCustom: true,
+        paramPaths: [expect.objectContaining({
+          path: 'Device.Info.Name',
+          valueType: 'string',
+          minValue: 2,
+          maxValue: 32,
+        })],
+      }),
+      ['Device.Info.Name'],
+    );
   });
 
   it.each([

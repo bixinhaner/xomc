@@ -15,6 +15,7 @@ import type {
 import type {
   DeviceTaskResultItem,
   MMLCustomCommand,
+  MMLCustomCommandPathDef,
   MMLOperationType,
   MMLTask,
   MMLTaskCommandDetail,
@@ -67,6 +68,7 @@ export function subFieldsToParamPaths(subFields: SubFieldDef[]): CommandParamPat
       writable: sf.accessType === 'READ_WRITE',
       isObject: sf.isObject,
       minValue: sf.minValue,
+      maxValue: sf.maxValue,
       valueType: sf.valueType,
       defaultValue: sf.defaultValue,
       description: sf.description,
@@ -106,6 +108,21 @@ export function customCommandParamPaths(cc: MMLCustomCommand): CommandParamPath[
       writable,
       isObject: false,
     }));
+}
+
+export function customCommandPathDefsToParamPaths(
+  paths: MMLCustomCommandPathDef[],
+): CommandParamPath[] {
+  return paths.map((p) => ({
+    path: p.standardPath,
+    label: p.description || p.standardPath.split('.').filter(Boolean).pop() || p.standardPath,
+    writable: p.access.replace(/[_-]/g, '').toLowerCase() === 'readwrite',
+    isObject: p.entryType === 'object',
+    valueType: p.dataType,
+    minValue: p.minValue,
+    maxValue: p.maxValue,
+    description: p.description,
+  }));
 }
 
 /**
