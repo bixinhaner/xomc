@@ -21,11 +21,12 @@ import {
   Divider,
 } from 'antd';
 import { SearchOutlined, CopyOutlined, ClearOutlined } from '@ant-design/icons';
-import { useDeviceList } from '@core/hooks/api/useDevices';
+import { fetchDeviceList, useDeviceList } from '@core/hooks/api/useDevices';
 import type { Device } from '@core/types/device';
 
 const { Text } = Typography;
 const { TextArea } = Input;
+const BATCH_SN_LOOKUP_SIZE = 100;
 
 interface DevicePickerModalProps {
   open: boolean;
@@ -57,6 +58,7 @@ export default function DevicePickerModal({
   const [selected, setSelected] = useState<string[]>(initialSelected);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
+  const [isBatchPasting, setIsBatchPasting] = useState(false);
 
   // 已选回显同步：本组件在调用页常驻不卸载（Modal 的 destroyOnHidden 只销毁弹窗 DOM、不重挂载本组件），
   // 内部 selected 仅首挂载赋值一次，关闭后用新 initialSelected 重开（如切换编辑不同模板）时不会自动刷新、
@@ -113,7 +115,7 @@ export default function DevicePickerModal({
     return true;
   };
 
-  const handleBatchPaste = () => {
+  const handleBatchPaste = async () => {
     const raw = pasteText.trim();
     if (!raw) {
       message.warning(intl.formatMessage({ id: 'perf.picker.pasteSnList' }));
@@ -127,16 +129,38 @@ export default function DevicePickerModal({
       message.warning(intl.formatMessage({ id: 'perf.picker.noSnParsed' }));
       return;
     }
-    const merged = Array.from(new Set([...selected, ...sns]));
-    const nextSelected = maxSelected === undefined ? merged : merged.slice(0, maxSelected);
-    warnIfTooManySelected(merged.length);
-    const added = Math.max(nextSelected.length - selected.length, 0);
-    setSelected(nextSelected);
-    setPasteOpen(false);
-    setPasteText('');
-    message.success(
-      intl.formatMessage({ id: 'perf.picker.snAdded' }, { added, total: nextSelected.length }),
-    );
+    const requestedSns = Array.from(new Set(sns));
+    setIsBatchPasting(true);
+    try {
+      // 批量粘贴不能把用户输入直接当作已选设备：先通过 sn_list 精确查询，
+      // 并沿用当前制式过滤。按输入顺序重组结果，保持既有回显顺序。
+      // 前端每批最多查询 100 个 SN，避免单次请求过大；大批量输入会完整拆分查询，
+      // 不会因分页或单批大小遗漏有效设备。
+      const lookupRequests = [];
+      for (let offset = 0; offset < requestedSns.length; offset += BATCH_SN_LOOKUP_SIZE) {
+        const snList = requestedSns.slice(offset, offset + BATCH_SN_LOOKUP_SIZE);
+        lookupRequests.push(
+          fetchDeviceList({ page: 1, pageSize: snList.length, snList, networkType: technology }),
+        );
+      }
+      const responses = await Promise.all(lookupRequests);
+      const availableSns = new Set(responses.flatMap((response) => response.items.map((device) => device.sn)));
+      const validSns = requestedSns.filter((sn) => availableSns.has(sn));
+      const merged = Array.from(new Set([...selected, ...validSns]));
+      const nextSelected = maxSelected === undefined ? merged : merged.slice(0, maxSelected);
+      warnIfTooManySelected(merged.length);
+      const added = Math.max(nextSelected.length - selected.length, 0);
+      setSelected(nextSelected);
+      setPasteOpen(false);
+      setPasteText('');
+      message.success(
+        intl.formatMessage({ id: 'perf.picker.snAdded' }, { added, total: nextSelected.length }),
+      );
+    } catch {
+      message.error(intl.formatMessage({ id: 'common.operationFailed' }));
+    } finally {
+      setIsBatchPasting(false);
+    }
   };
 
   const handleConfirm = () => {
@@ -260,6 +284,7 @@ export default function DevicePickerModal({
         open={pasteOpen}
         onCancel={() => setPasteOpen(false)}
         onOk={handleBatchPaste}
+        confirmLoading={isBatchPasting}
         okText={intl.formatMessage({ id: 'perf.picker.addToSelected' })}
         cancelText={intl.formatMessage({ id: 'common.cancel' })}
         width={520}

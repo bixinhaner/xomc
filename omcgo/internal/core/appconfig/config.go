@@ -245,6 +245,11 @@ type ParamRegistryConfig struct {
 // default to false so deploying the binary and migration does not change the
 // legacy path until an operator explicitly enables a deterministic canary.
 type ParamSyncConfig struct {
+	// RoutingMode controls which parameter-sync entry path is allowed. Empty
+	// keeps the pre-routing-mode legacy behavior for backward-compatible local
+	// configurations; production should explicitly use closed/durable.
+	RoutingMode                   string        `mapstructure:"routing_mode"`
+	ManualOfflineMode             string        `mapstructure:"manual_offline_mode"`
 	RunEnabled                    bool          `mapstructure:"run_enabled"`
 	ResultConsumerEnabled         bool          `mapstructure:"result_consumer_enabled"`
 	StagingEnabled                bool          `mapstructure:"staging_enabled"`
@@ -297,7 +302,7 @@ type AppConfig struct {
 
 // TaskConfig 配置 task 子系统的全局默认行为（T-0157 C1 引入）。
 //
-// DefaultExpiresInSeconds: CreateTask 调用方未显式传 ExpiresIn 时使用的默认超时秒数。
+// DefaultExpiresInSeconds: device task 创建调用方未显式传 ExpiresIn 时使用的默认超时秒数。
 //
 //	调用方语义:
 //	  - req.ExpiresIn > 0  → 直接采用该值

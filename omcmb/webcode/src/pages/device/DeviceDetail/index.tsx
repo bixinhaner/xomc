@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTabStore } from '@core/store/tabStore';
@@ -28,18 +29,24 @@ import {
 } from 'antd';
 import {
   ArrowLeftOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  ClockCircleOutlined,
   EditOutlined,
   MoreOutlined,
   ReloadOutlined,
+  SyncOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import LineChart from '@/components/Charts/LineChart';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import { useSyncStatus } from '@core/hooks/api/useDeviceParameters';
+import { useDeviceTaskStatus } from '@core/hooks/api/useDeviceTask';
 import { useDeviceBySn, useDeviceGroups, useRenameDevice, useSyncDeviceParams } from '@core/hooks/api/useDevices';
 import { deviceParameterApi } from '@core/services/api/deviceParameterApi';
 import { deviceApi } from '@core/services/api/deviceApi';
+import { isDeviceTaskTerminal, type DeviceTaskStatus } from '@core/types/deviceTask';
 import { useDictionary } from '@core/hooks/api/useSystem';
 import { displayActivationStatusLabelOf, displayActivationStatusOf } from '@core/utils/activationStatus';
 import { useQuickSettingsGroups } from '@core/hooks/api/useQuickSettings';
@@ -54,6 +61,7 @@ import { buildKpiCharts, buildKpiCompareData } from './kpiSeries';
 import ParameterTreeTab from './ParameterTreeTab';
 import QuickSettingsTab from './QuickSettingsTab';
 import LicenseParamsTab from './LicenseParamsTab';
+import PasswordManagementTab from './PasswordManagementTab';
 import { formatLteBandwidthDisplay } from './QuickSettingsTab/validators';
 import AlarmDetail from '@/pages/alarm/AlarmDetail';
 import AutoRefreshDropdown from '@/pages/alarm/components/AutoRefreshDropdown';
@@ -77,6 +85,28 @@ const SEVERITY_COLOR: Record<string, string> = {
   warning: 'blue',
   none: 'default',
 };
+
+const passwordTaskStorageKey = (deviceSn: string) => `xomc:device-password-task:${deviceSn}`;
+
+function passwordTaskStatusTagSpec(status: DeviceTaskStatus | undefined): {
+  color: string;
+  icon: ReactNode;
+} {
+  switch (status) {
+    case 'completed':
+      return { color: 'success', icon: <CheckCircleOutlined /> };
+    case 'failed':
+      return { color: 'error', icon: <CloseCircleOutlined /> };
+    case 'expired':
+      return { color: 'warning', icon: <ClockCircleOutlined /> };
+    case 'cancelled':
+      return { color: 'default', icon: <CloseCircleOutlined /> };
+    case 'sent':
+    case 'pending':
+    default:
+      return { color: 'processing', icon: <SyncOutlined spin /> };
+  }
+}
 
 // ─── KPI 指标配置 ────────────────────────────────────────────────────────
 
@@ -1320,7 +1350,7 @@ function KPITabContent({ device, t }: KPITabContentProps) {
 
 export default function DeviceDetail() {
   const t = useT();
-  const { modal, message } = App.useApp();
+  const { modal, message, notification } = App.useApp();
   const { sn = '' } = useParams<{ sn: string }>();
   const detailTabKey = sn ? `device-detail:${sn}` : 'device-detail';
   const location = useLocation();
@@ -1345,6 +1375,9 @@ export default function DeviceDetail() {
   const quickSettingsSyncPending = Boolean(quickSettingsSync);
   const lastQuickSettingsParamSync = useQuickSettingsFeedbackStore((s) => (device?.id ? s.lastScopedSyncs[device.id] : undefined)) ?? null;
   const observedParamSyncAtRef = useRef<Record<string, string>>({});
+  const notifiedPasswordTaskRef = useRef<Record<string, true>>({});
+  const [passwordTaskId, setPasswordTaskId] = useState<string | undefined>();
+  const { data: passwordTask } = useDeviceTaskStatus(passwordTaskId);
   const isDeviceParamSyncBusy = paramSyncStatus?.status === 'syncing' || quickSettingsSyncPending || syncMutation.isPending;
   const isQuickSettingsRefreshSubmitting = syncMutation.isPending;
   const { data: detailComposite } = useQuery({
@@ -1366,6 +1399,67 @@ export default function DeviceDetail() {
       groupName: buildDeviceGroupDisplayName(merged, groups, appLocale),
     };
   }, [appLocale, detailComposite?.info, device, deviceGroupsData?.groups]);
+
+  useEffect(() => {
+    const deviceSn = displayDevice?.sn;
+    if (!deviceSn || typeof window === 'undefined') {
+      setPasswordTaskId(undefined);
+      return;
+    }
+    setPasswordTaskId(window.localStorage.getItem(passwordTaskStorageKey(deviceSn)) || undefined);
+  }, [displayDevice?.sn]);
+
+  const handlePasswordTaskSubmitted = useCallback((taskId: string) => {
+    setPasswordTaskId(taskId);
+    const deviceSn = displayDevice?.sn;
+    if (deviceSn && typeof window !== 'undefined') {
+      window.localStorage.setItem(passwordTaskStorageKey(deviceSn), taskId);
+    }
+  }, [displayDevice?.sn]);
+
+  const handlePasswordTaskCleared = useCallback(() => {
+    setPasswordTaskId(undefined);
+    const deviceSn = displayDevice?.sn;
+    if (deviceSn && typeof window !== 'undefined') {
+      window.localStorage.removeItem(passwordTaskStorageKey(deviceSn));
+    }
+  }, [displayDevice?.sn]);
+
+  useEffect(() => {
+    if (!device?.id || !passwordTask || !isDeviceTaskTerminal(passwordTask.status)) return;
+
+    const deviceSn = displayDevice?.sn;
+    if (deviceSn && typeof window !== 'undefined') {
+      window.localStorage.removeItem(passwordTaskStorageKey(deviceSn));
+    }
+
+    deviceParameterApi.invalidateParameterSchemaCache(device.id);
+    void queryClient.invalidateQueries({ queryKey: ['devices', 'parameters', device.id] });
+    void queryClient.invalidateQueries({ queryKey: ['devices', 'parameters', 'search', device.id] });
+    void queryClient.invalidateQueries({ queryKey: ['devices', 'parameter-schema', device.id] });
+
+    if (notifiedPasswordTaskRef.current[passwordTask.id]) return;
+    notifiedPasswordTaskRef.current[passwordTask.id] = true;
+
+    if (passwordTask.status === 'completed') return;
+
+    notification.error({
+      message: t('device.password.taskFailed'),
+      description: passwordTask.errorMessage || t('device.multi.unknownErrorHint'),
+      duration: 8,
+    });
+  }, [device?.id, displayDevice?.sn, message, notification, passwordTask, queryClient, t]);
+
+  const passwordTaskTag = useMemo(() => {
+    if (!passwordTaskId) return null;
+    const status = passwordTask?.status ?? 'pending';
+    const spec = passwordTaskStatusTagSpec(status);
+    return (
+      <Tag icon={spec.icon} color={spec.color} style={{ marginInlineEnd: 0 }}>
+        {t('device.password.statusPrefix')}: {t(`device.taskStatus.${status}`)}
+      </Tag>
+    );
+  }, [passwordTask?.status, passwordTaskId, t]);
 
   useEffect(() => {
     const deviceId = device?.id;
@@ -2024,8 +2118,9 @@ export default function DeviceDetail() {
             )}
           </div>
           <Space>
+            {passwordTaskTag}
             {/* license/parameters tab 自带明确操作入口，此处头部刷新隐藏，避免语义重复或误导 */}
-            {activeTab !== 'license' && activeTab !== 'parameters' && (
+            {activeTab !== 'license' && activeTab !== 'parameters' && activeTab !== 'password' && (
               <Button
                 icon={<ReloadOutlined />}
                 onClick={handleHeaderRefresh}
@@ -2187,6 +2282,24 @@ export default function DeviceDetail() {
                     <LicenseParamsTab deviceId={device.id} />
                   </ErrorBoundary>
                 </div>
+              ),
+            },
+            {
+              key: 'password',
+              label: t('device.password.title'),
+              forceRender: true,
+              children: (
+                <ErrorBoundary>
+                  <PasswordManagementTab
+                    deviceId={device.id}
+                    deviceSn={displayDevice.sn}
+                    productClass={displayDevice.productClass}
+                    deviceModel={displayDevice.deviceModel}
+                    networkType={displayDevice.networkType}
+                    onTaskSubmitted={handlePasswordTaskSubmitted}
+                    onTaskCleared={handlePasswordTaskCleared}
+                  />
+                </ErrorBoundary>
               ),
             },
           ]}

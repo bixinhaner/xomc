@@ -393,3 +393,18 @@ func TestRecycleBinSelectColumns_ExposeStableRecycleMetadata(t *testing.T) {
 	assert.NotContains(t, joined, "NOW() - di.last_offline_time",
 		"回收站离线时长不得使用当前时间动态重算")
 }
+
+func TestRecycleBinListIncludesLocationObservationColumnsForSharedScanner(t *testing.T) {
+	joined := strings.Join(recycleBinSelectColumns(), "\n")
+	assert.Contains(t, joined, "dlo.latitude AS reported_latitude")
+	assert.Contains(t, joined, "dlo.longitude AS reported_longitude")
+	assert.Contains(t, joined, "dlo.gps_height AS reported_gps_height")
+	assert.Contains(t, joined, "dlo.observed_at AS reported_observed_at")
+	assert.Contains(t, joined, "dlo.version AS reported_version")
+	assert.Contains(t, joined, "dlo.source_path AS reported_source_path")
+
+	listBuilder, _ := buildRecycleBinListBuilders(RecycleBinFilter{})
+	listSQL, _, err := listBuilder.ToSql()
+	require.NoError(t, err)
+	assert.Contains(t, listSQL, "LEFT JOIN device_location_observations dlo ON d.id = dlo.device_id")
+}

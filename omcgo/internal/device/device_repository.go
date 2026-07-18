@@ -368,6 +368,30 @@ func (r *PgDeviceRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.
 	return r.scanDevice(ctx, query, args...)
 }
 
+func (r *PgDeviceRepository) GetCoordinates(ctx context.Context, id uuid.UUID) (*Location, error) {
+	query, args, err := storage.Psql.Select("latitude", "longitude").
+		From("devices").
+		Where(sq.Eq{"id": id}).
+		Where(notDeleted).
+		Limit(1).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build get device coordinates query: %w", err)
+	}
+
+	var latitude, longitude *float64
+	if err := r.pool.QueryRow(ctx, query, args...).Scan(&latitude, &longitude); err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, commonerrors.ErrNotFound
+		}
+		return nil, fmt.Errorf("get device coordinates: %w", err)
+	}
+	if latitude == nil || longitude == nil {
+		return nil, nil
+	}
+	return &Location{Latitude: *latitude, Longitude: *longitude}, nil
+}
+
 func (r *PgDeviceRepository) GetBySerialNumber(ctx context.Context, sn string) (*model.Device, error) {
 	query, args, err := storage.Psql.Select(deviceColumns()...).
 		From("devices d").
@@ -1525,6 +1549,9 @@ func recycleBinSelectColumns() []string {
 		"d.last_inform_at", "d.last_inform_events",
 		"d.last_boot_at", "d.boot_count",
 		"d.inform_interval", "d.site_name", "d.site_id", "d.latitude", "d.longitude",
+		"dlo.latitude AS reported_latitude", "dlo.longitude AS reported_longitude",
+		"dlo.gps_height AS reported_gps_height", "dlo.observed_at AS reported_observed_at",
+		"dlo.version AS reported_version", "dlo.source_path AS reported_source_path",
 		"d.extension_data", "d.created_at", "d.updated_at", "d.deleted_at", "d.deleted_by",
 		"d.recycle_type", "d.recycle_executor",
 		"d.last_offline_reason",
@@ -1605,6 +1632,7 @@ func buildRecycleBinListBuilders(filter RecycleBinFilter) (sq.SelectBuilder, sq.
 	builder := storage.Psql.Select(recycleBinSelectColumns()...).
 		From("devices d").
 		LeftJoin("device_info di ON di.device_id = d.id").
+		LeftJoin("device_location_observations dlo ON d.id = dlo.device_id").
 		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
 		LeftJoin("device_groups dg ON dg.id = dgm.group_id").
 		Where(sq.NotEq{"d.deleted_at": nil})

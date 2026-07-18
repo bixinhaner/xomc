@@ -234,6 +234,16 @@ func (c ParamRegistryConfig) validate() error {
 }
 
 func (c ParamSyncConfig) validate() error {
+	if c.RoutingMode != "" {
+		switch c.RoutingMode {
+		case "legacy", "durable_shadow", "durable", "closed":
+		default:
+			return fmt.Errorf("param_sync.routing_mode must be one of legacy, durable_shadow, durable, closed, got %q", c.RoutingMode)
+		}
+	}
+	if c.ManualOfflineMode != "" && c.ManualOfflineMode != "queue" && c.ManualOfflineMode != "reject" {
+		return fmt.Errorf("param_sync.manual_offline_mode must be queue or reject, got %q", c.ManualOfflineMode)
+	}
 	if c.CanaryPercent < 0 || c.CanaryPercent > 100 {
 		return fmt.Errorf("param_sync.canary_percent must be between 0 and 100, got %d", c.CanaryPercent)
 	}

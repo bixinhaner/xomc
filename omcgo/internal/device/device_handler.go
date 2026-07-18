@@ -26,8 +26,9 @@ type VisibleGroupsResolver interface {
 
 // Handler provides HTTP handlers for device management REST API.
 type Handler struct {
-	service     *DeviceService
-	permService VisibleGroupsResolver
+	service         *DeviceService
+	permService     VisibleGroupsResolver
+	locationSyncSvc *LocationSyncService
 }
 
 // authorizeDeviceAccess 是所有"按 ID 直读"设备端点共享的越权（IDOR）守卫。
@@ -72,6 +73,10 @@ func NewHandler(service *DeviceService) *Handler {
 // SetPermissionService sets the data permission service for group-based filtering.
 func (h *Handler) SetPermissionService(ps VisibleGroupsResolver) {
 	h.permService = ps
+}
+
+func (h *Handler) SetLocationSyncService(service *LocationSyncService) {
+	h.locationSyncSvc = service
 }
 
 // resolveVisibleDeviceGrants 解析调用者可见设备数据权限（三态：nil 超管 / [] 无权限 / [grant...] 限定）。
@@ -150,12 +155,78 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		devices.POST("/:id/reboot", h.RebootDevice)
 		// T-0126: 旧 /param-sync (Path A) 已下线，替换为 /sync-params (Path B + reason="manual")
 		devices.POST("/:id/sync-params", h.SyncDeviceParams)
+		devices.POST("/:id/location-sync/accept", h.AcceptLocationSync)
 		devices.PUT("/:id/rf-switch", h.SetRFSwitch)
 		// Issue #758: 设备名称同步人工处理端点
 		devices.POST("/:id/resolve-name-sync", h.ResolveNameSync)
 		// 网管侧手动改基站名（即时下发）
 		devices.POST("/:id/rename", h.RenameDevice)
 	}
+}
+
+type AcceptLocationRequest struct {
+	ReportedVersion int64 `json:"reported_version" binding:"required"`
+}
+
+func locationSyncAuditDetails(result *LocationSync, reportedVersion int64) map[string]interface{} {
+	details := map[string]interface{}{"operation": "location_sync_accept", "reported_version": reportedVersion}
+	if result == nil {
+		return details
+	}
+	if result.AcceptedBefore != nil {
+		details["accepted_before"] = map[string]float64{
+			"latitude":  result.AcceptedBefore.Latitude,
+			"longitude": result.AcceptedBefore.Longitude,
+		}
+	}
+	if result.Accepted != nil {
+		details["accepted_after"] = map[string]float64{
+			"latitude":  result.Accepted.Latitude,
+			"longitude": result.Accepted.Longitude,
+		}
+	}
+	return details
+}
+
+// AcceptLocationSync promotes the latest device-reported GPS coordinates to
+// the OMC accepted coordinates after an optimistic version check.
+func (h *Handler) AcceptLocationSync(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	if !authorizeDeviceAccess(c, h.service, h.permService, id) {
+		return
+	}
+	if h.locationSyncSvc == nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, commonerrors.ErrInternal)
+		return
+	}
+
+	var req AcceptLocationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	result, err := h.locationSyncSvc.Accept(c.Request.Context(), id, req.ReportedVersion)
+
+	entry := admin.AuditContextFromGin(c)
+	entry.Action = audit.ActionConfig
+	entry.ResourceType = audit.ResourceDevice
+	entry.ResourceID = id.String()
+	entry.Details = locationSyncAuditDetails(result, req.ReportedVersion)
+	entry.Success = err == nil
+	if err != nil {
+		entry.ErrorMessage = err.Error()
+	}
+	audit.LogAsync(entry)
+
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	response.OK(c, result)
 }
 
 // CreateDeviceRequest defines the request body for creating a device.

@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/task"
 )
 
@@ -187,6 +188,94 @@ func TestFanouter_BuildDeviceTaskRequests_MapsFailedRetryStrategy(t *testing.T) 
 	})
 }
 
+func TestFanouter_OfflineDeviceWithoutOfflineRetryFailsImmediately(t *testing.T) {
+	stub := &stubDeviceTaskCreator{}
+	lookup := &stubFanoutDeviceLookup{
+		devices: map[string]*model.Device{
+			"SN-OFF": {SerialNumber: "SN-OFF", IsOnline: false},
+		},
+	}
+	f := NewFanouter(stub, nil, nil, lookup, zap.NewNop())
+
+	mmlTask := &MMLTask{
+		ID:           uuid.New(),
+		DeviceSNs:    []string{"SN-OFF"},
+		OfflineRetry: false,
+		Commands: []map[string]interface{}{
+			{"command_code": "REBOOT", "rpc_method": "Reboot"},
+		},
+	}
+
+	_, err := f.Fanout(context.Background(), mmlTask)
+	require.NoError(t, err)
+	require.Len(t, stub.calls, 1)
+	require.Len(t, stub.calls[0], 1)
+	assert.True(t, stub.calls[0][0].FailImmediately)
+	assert.Equal(t, "device offline", stub.calls[0][0].FailReason)
+}
+
+func TestFanouter_MixedOnlineOfflineMarksOnlyOfflineDeviceImmediateFailed(t *testing.T) {
+	stub := &stubDeviceTaskCreator{}
+	lookup := &stubFanoutDeviceLookup{
+		devices: map[string]*model.Device{
+			"SN-ON":  {SerialNumber: "SN-ON", IsOnline: true},
+			"SN-OFF": {SerialNumber: "SN-OFF", IsOnline: false},
+		},
+	}
+	f := NewFanouter(stub, nil, nil, lookup, zap.NewNop())
+
+	mmlTask := &MMLTask{
+		ID:           uuid.New(),
+		DeviceSNs:    []string{"SN-ON", "SN-OFF"},
+		OfflineRetry: false,
+		Commands: []map[string]interface{}{
+			{"command_code": "REBOOT", "rpc_method": "Reboot"},
+		},
+	}
+
+	_, err := f.Fanout(context.Background(), mmlTask)
+	require.NoError(t, err)
+	require.Len(t, stub.calls, 1)
+	require.Len(t, stub.calls[0], 2)
+
+	bySN := map[string]*task.CreateTaskRequest{}
+	for _, req := range stub.calls[0] {
+		bySN[req.DeviceSN] = req
+	}
+	require.Contains(t, bySN, "SN-ON")
+	require.Contains(t, bySN, "SN-OFF")
+	assert.False(t, bySN["SN-ON"].FailImmediately, "online device must keep normal execution")
+	assert.True(t, bySN["SN-OFF"].FailImmediately, "offline device should fail immediately")
+	assert.Equal(t, "device offline", bySN["SN-OFF"].FailReason)
+}
+
+func TestFanouter_OfflineDeviceWithOfflineRetryKeepsWaiting(t *testing.T) {
+	stub := &stubDeviceTaskCreator{}
+	lookup := &stubFanoutDeviceLookup{
+		devices: map[string]*model.Device{
+			"SN-OFF": {SerialNumber: "SN-OFF", IsOnline: false},
+		},
+	}
+	f := NewFanouter(stub, nil, nil, lookup, zap.NewNop())
+
+	mmlTask := &MMLTask{
+		ID:               uuid.New(),
+		DeviceSNs:        []string{"SN-OFF"},
+		OfflineRetry:     true,
+		OfflineRetryWait: 7,
+		Commands: []map[string]interface{}{
+			{"command_code": "REBOOT", "rpc_method": "Reboot"},
+		},
+	}
+
+	_, err := f.Fanout(context.Background(), mmlTask)
+	require.NoError(t, err)
+	require.Len(t, stub.calls, 1)
+	require.Len(t, stub.calls[0], 1)
+	assert.False(t, stub.calls[0][0].FailImmediately)
+	assert.Equal(t, 7*60, stub.calls[0][0].ExpiresIn)
+}
+
 func TestFanouter_DeviceBoundPlanItemsDoNotBroadcastCommands(t *testing.T) {
 	stub := &stubDeviceTaskCreator{}
 	f := NewFanouter(stub, nil, nil, nil, zap.NewNop())
@@ -341,4 +430,15 @@ func deviceBoundFanoutFixture() *MMLTask {
 		},
 		Creator: "admin",
 	}
+}
+
+type stubFanoutDeviceLookup struct {
+	devices map[string]*model.Device
+}
+
+func (s *stubFanoutDeviceLookup) GetBySerialNumber(_ context.Context, sn string) (*model.Device, error) {
+	if s == nil {
+		return nil, nil
+	}
+	return s.devices[sn], nil
 }

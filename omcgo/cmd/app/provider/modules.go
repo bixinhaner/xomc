@@ -661,6 +661,7 @@ func initProvisionModule(c *Container) error {
 		c.Carriers, c.TaskSvc, c.EventBus, c.Cfg.Provision, logger,
 	)
 	provisionEngine.SetDeduper(c.Deduper)
+	provisionEngine.SetParamSyncRoutingMode(c.Cfg.ParamSync.RoutingMode)
 	// HIGH-27 / MEDIUM-19：provisioning 指标（discovery_log 状态写库失败、Redis 节流失败）。
 	provisionMetrics := provision.NewMetrics(c.MetricsReg)
 	provisionEngine.SetMetrics(provisionMetrics)
@@ -684,6 +685,9 @@ func initProvisionModule(c *Container) error {
 			c.Cfg.Provision.ModelUpload, logger,
 		)
 		modelUploadSvc.SetMetrics(provisionMetrics)
+		if c.miscDeps.paramSyncStarter != nil {
+			modelUploadSvc.SetParamSyncSubmitter(c.miscDeps.paramSyncStarter)
+		}
 		provisionEngine.SetModelUploadService(modelUploadSvc)
 		logger.Info("model upload service enabled",
 			zap.String("upload_url", c.Cfg.Provision.ModelUpload.UploadURL))
@@ -697,7 +701,7 @@ func initProvisionModule(c *Container) error {
 			SetRedisClient(c.Redis).
 			SetParamSyncWriter(c.DeviceRepo).
 			SetPathBSyncTaskReader(task.NewPgTaskRepository(c.PgPool)).
-			SetDeviceInfoRefresher(device.NewInfoSyncer(c.DeviceInfoRepo, c.ParamRepo, device.NewPgDeviceRepository(c.PgPool), c.Carriers, logger)) // Path B 参数落库后立即刷新 device_info 快照
+			SetDeviceInfoRefresher(device.NewInfoSyncer(c.DeviceInfoRepo, c.ParamRepo, device.NewPgDeviceRepository(c.PgPool), c.Carriers, logger, device.NewPgLocationObservationRepository(c.PgPool))) // Path B 参数落库后立即刷新 device_info 快照
 
 		// Issue #758: 设备名称同步钩子装配
 		// Path B 同步完成后比对 LMT 设备名与网管名，按配置方向自动同步或标记待确认。
@@ -724,6 +728,8 @@ func initProvisionModule(c *Container) error {
 		// T-0126: 注入 ParamSyncStarter 让手动同步先走 durable parameter_sync_*。
 		// 旧 sync-gpv Path B 仅作为临时兜底，待 param_sync_running 稳定后删除。
 		if c.DeviceService != nil {
+			c.DeviceService.SetParamSyncRoutingMode(c.Cfg.ParamSync.RoutingMode)
+			c.DeviceService.SetParamSyncManualOfflineMode(c.Cfg.ParamSync.ManualOfflineMode)
 			if c.miscDeps.paramSyncStarter != nil {
 				c.miscDeps.paramSyncStarter.SetLegacy(syncSvc)
 				c.DeviceService.SetParamSyncStarter(c.miscDeps.paramSyncStarter)
@@ -779,6 +785,7 @@ func initProvisionModule(c *Container) error {
 			c.DeviceRepo, syncSvc, leader,
 			periodicSyncPolicy, logger,
 		)
+		periodicSyncer.SetParamSyncRoutingMode(c.Cfg.ParamSync.RoutingMode)
 		go func() {
 			if err := periodicSyncer.Start(context.Background()); err != nil && err != context.Canceled {
 				logger.Warn("periodic syncer exited with error", zap.Error(err))
@@ -925,6 +932,11 @@ func initBackupModule(c *Container) error {
 		c.SysConfigSvc.RegisterSavedHook(func(_ context.Context, category string) {
 			if category == stationlog.RetentionCategory {
 				logFileRetentionPolicy.InvalidateCache()
+				go func() {
+					cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+					defer cancel()
+					filePathRecorder.EnforceAllLogFileQuotas(cleanupCtx)
+				}()
 			}
 		})
 	}
@@ -1949,7 +1961,7 @@ func initMiscModules(c *Container) error {
 			c.ParamRegistry,
 			c.DeviceService,
 			c.ParamRepo,
-			device.NewInfoSyncer(c.DeviceInfoRepo, c.ParamRepo, device.NewPgDeviceRepository(c.PgPool), c.Carriers, logger),
+			device.NewInfoSyncer(c.DeviceInfoRepo, c.ParamRepo, device.NewPgDeviceRepository(c.PgPool), c.Carriers, logger, device.NewPgLocationObservationRepository(c.PgPool)),
 			c.DeviceRepo, // migration 000146: 写 last_param_sync_failed_at + error
 			logger,
 		)

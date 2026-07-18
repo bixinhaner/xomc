@@ -38,10 +38,10 @@ function metricValueOf(r: IndicatorInfo): string {
   return r.id;
 }
 
-// 选中标签的友好显示名：按当前界面语言优先取对应名，空则回退另一种 / 编号
-// （pm-name-i18n：英文态选 enName 优先，中文态选 cnName 优先）。
+// 选中标签的友好显示名：英文态缺英文名时显示编号，避免英文界面混入中文名；
+// 中文态仍可回退英文名。
 function metricLabelOf(r: IndicatorInfo, en: boolean): string {
-  return en ? r.enName || r.cnName || r.id : r.cnName || r.enName || r.id;
+  return en ? r.enName || r.id : r.cnName || r.enName || r.id;
 }
 
 interface MetricPickerModalProps {
@@ -101,10 +101,10 @@ export default function MetricPickerModal({
     setPrevOpen(open);
     if (open) {
       setSelected(initialSelected);
-      // 弹窗重新打开时，把调用方预加载的指标名并入 labelMap（低优先级，不覆盖已有条目）。
-      if (initialLabels) {
-        setLabelMap((prev) => ({ ...initialLabels, ...prev }));
-      }
+      setKeyword('');
+      setKeywordDraft('');
+      setPage(1);
+      setLabelMap(initialLabels ?? {});
     }
   }
 

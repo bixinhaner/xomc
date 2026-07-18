@@ -85,7 +85,7 @@ type TaskService struct {
 	eventBus     event.EventBus
 	logger       *zap.Logger
 
-	// defaultExpiresIn: T-0157 C1 — CreateTask 兜底默认超时秒数。
+	// defaultExpiresIn: T-0157 C1 — device task 创建兜底默认超时秒数。
 	// 调用方语义见 appconfig.TaskConfig.DefaultExpiresInSeconds。0 表示未配置（不兜底）。
 	defaultExpiresIn int
 
@@ -209,7 +209,7 @@ func (s *TaskService) SetMaxQueueDepth(n int) {
 	s.maxQueueDepth = n
 }
 
-// SetDefaultExpiresIn 配置 CreateTask 的默认超时兜底秒数（T-0157 C1）。
+// SetDefaultExpiresIn 配置 device task 创建的默认超时兜底秒数（T-0157 C1）。
 // 仅当 CreateTaskRequest.ExpiresIn == 0 时生效；调用方显式传 0 等价于声明"永不超时"
 // 但本兜底仍会覆盖（如需真正永不超时，调用方需显式传一个极大值如 86400）。
 // 负值或 0 表示不启用兜底，等价于历史行为。
@@ -218,6 +218,12 @@ func (s *TaskService) SetDefaultExpiresIn(seconds int) {
 		seconds = 0
 	}
 	s.defaultExpiresIn = seconds
+}
+
+func (s *TaskService) applyDefaultExpiresIn(req *CreateTaskRequest) {
+	if req != nil && req.ExpiresIn == 0 && s.defaultExpiresIn > 0 {
+		req.ExpiresIn = s.defaultExpiresIn
+	}
 }
 
 // CreateTask 创建新任务
@@ -230,7 +236,7 @@ func (s *TaskService) CreateTask(ctx context.Context, req *CreateTaskRequest) (*
 
 	// issue #7: 每设备 pending 队列深度背压 —— 防止面向不可达 / 不可信设备的任务
 	// 无界堆积耗尽 Redis/PG。命中上限直接拒绝（不落库、不入队），调用方按 429 处理。
-	if s.maxQueueDepth > 0 {
+	if !req.FailImmediately && s.maxQueueDepth > 0 {
 		depth, err := s.queue.Len(ctx, req.DeviceSN)
 		if err != nil {
 			return nil, fmt.Errorf("check queue depth: %w", err)
@@ -245,9 +251,7 @@ func (s *TaskService) CreateTask(ctx context.Context, req *CreateTaskRequest) (*
 	}
 
 	// T-0157 C1: 兜底默认超时（调用方未传 → 用配置默认；保留显式覆盖能力）
-	if req.ExpiresIn == 0 && s.defaultExpiresIn > 0 {
-		req.ExpiresIn = s.defaultExpiresIn
-	}
+	s.applyDefaultExpiresIn(req)
 
 	task := NewTask(req)
 
@@ -256,6 +260,11 @@ func (s *TaskService) CreateTask(ctx context.Context, req *CreateTaskRequest) (*
 		// T-0157 C6: 入队失败兜底 → 写一条 status=failed 的消息（避免用户感知"点了没反应"）
 		s.notifyCreateFailure(ctx, task, err)
 		return nil, fmt.Errorf("persist task: %w", err)
+	}
+	if req.FailImmediately {
+		s.recordCompletion(task, TaskStatusFailed)
+		s.notifyCompletion(ctx, task)
+		return task, nil
 	}
 
 	// 2. 推送到 Redis 队列
@@ -1041,6 +1050,7 @@ func (s *TaskService) RetryTask(ctx context.Context, task *Task) error {
 func (s *TaskService) BatchCreateTasks(ctx context.Context, reqs []*CreateTaskRequest) ([]*Task, error) {
 	var tasks []*Task
 	for _, req := range reqs {
+		s.applyDefaultExpiresIn(req)
 		task := NewTask(req)
 		tasks = append(tasks, task)
 	}
@@ -1054,6 +1064,11 @@ func (s *TaskService) BatchCreateTasks(ctx context.Context, reqs []*CreateTaskRe
 	wakeDevices := make(map[string]struct{})
 	var pushed []*Task
 	for _, task := range tasks {
+		if task.Status == TaskStatusFailed {
+			s.recordCompletion(task, TaskStatusFailed)
+			s.notifyCompletion(ctx, task)
+			continue
+		}
 		if err := s.queue.Push(ctx, task); err != nil {
 			logger.L(ctx).Error("enqueue task", zap.Error(err), zap.String("task_id", task.ID))
 			continue

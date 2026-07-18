@@ -2,6 +2,7 @@ package task
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -84,7 +85,7 @@ type Task struct {
 
 // CreateTaskRequest 创建任务请求
 type CreateTaskRequest struct {
-	DeviceSN  string          `json:"device_sn" binding:"required"`
+	DeviceSN  string          `json:"device_sn"`
 	Method    string          `json:"method" binding:"required"`
 	Params    json.RawMessage `json:"params"`
 	Priority  int             `json:"priority"`
@@ -109,6 +110,12 @@ type CreateTaskRequest struct {
 	HasPathTranslationMiss   bool   `json:"has_path_translation_miss"`
 	PathTranslationMissCount int    `json:"path_translation_miss_count"`
 	PathTranslationSource    string `json:"path_translation_source,omitempty"` // T-0168
+
+	// FailImmediately creates a terminal failed task row without enqueueing it.
+	// It is used by callers that already know an RPC cannot be delivered, such
+	// as an MML task targeting an offline device without offline-wait enabled.
+	FailImmediately bool   `json:"fail_immediately,omitempty"`
+	FailReason      string `json:"fail_reason,omitempty"`
 }
 
 // TaskHistoryOptions 任务历史查询选项
@@ -199,6 +206,13 @@ func NewTask(req *CreateTaskRequest) *Task {
 	if req.Source != "" {
 		task.Source = req.Source
 	}
+	if req.FailImmediately {
+		reason := req.FailReason
+		if reason == "" {
+			reason = "task failed before enqueue"
+		}
+		task.MarkFailed(0, reason)
+	}
 
 	return task
 }
@@ -279,7 +293,22 @@ func (t *Task) MarkFailedWithResult(errorCode int, errorMessage string, result j
 func (t *Task) MarkExpired() {
 	now := time.Now()
 	t.Status = TaskStatusExpired
+	if t.Source == TaskSourceMML && t.ErrorMessage == "" {
+		t.ErrorMessage = t.commandTimeoutMessage()
+	}
 	t.CompletedAt = &now
+}
+
+func (t *Task) commandTimeoutMessage() string {
+	if t == nil || t.ExpiresAt == nil || t.CreatedAt.IsZero() {
+		return "执行命令超时"
+	}
+	timeout := t.ExpiresAt.Sub(t.CreatedAt)
+	seconds := int(timeout.Round(time.Second) / time.Second)
+	if seconds <= 0 {
+		return "执行命令超时"
+	}
+	return fmt.Sprintf("执行命令超时，超时时间 %d 秒", seconds)
 }
 
 // ResetForRetry 重置任务以进行重试

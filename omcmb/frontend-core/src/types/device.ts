@@ -150,6 +150,7 @@ export interface Device {
   site: string;
   longitude: number | null;
   latitude: number | null;
+  locationSync: LocationSync;
   softwareVersion: string;
   createTime: string;
 
@@ -290,6 +291,28 @@ export interface Device {
   offlineHours?: number;
   /** 剩余分钟数（0-59）*/
   offlineMinutes?: number;
+}
+
+export type LocationSyncStatus = 'no_report' | 'initialized' | 'in_sync' | 'pending';
+
+export interface LocationCoordinate {
+  latitude: number;
+  longitude: number;
+}
+
+export interface ReportedLocation extends LocationCoordinate {
+  gpsHeight?: number | null;
+  observedAt: string;
+  version: number;
+  sourcePath: string;
+}
+
+export interface LocationSync {
+  status: LocationSyncStatus;
+  accepted: LocationCoordinate | null;
+  reported: ReportedLocation | null;
+  distanceMeters: number | null;
+  heightDiffMeters: number | null;
 }
 
 export interface NE {

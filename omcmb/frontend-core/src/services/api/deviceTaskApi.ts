@@ -69,6 +69,16 @@ interface BackendDeviceTask {
   result?: Record<string, unknown>;
 }
 
+export interface CreateDeviceTaskInput {
+  method: string;
+  params?: Record<string, unknown>;
+  commandKey?: string;
+  priority?: number;
+  expiresIn?: number;
+  maxRetries?: number;
+  description?: string;
+}
+
 function mapBackendDeviceTask(bt: BackendDeviceTask): DeviceTask {
   return {
     id: bt.id,
@@ -113,6 +123,26 @@ function isMockAlarmSyncTaskId(taskId: string): boolean {
  * 前端 useDeviceTaskStatus Hook 用它轮询任务状态,直到终态后停止。
  */
 export const deviceTaskApi = {
+  async createTask(deviceSn: string, input: CreateDeviceTaskInput): Promise<DeviceTask> {
+    const body: Record<string, unknown> = {
+      device_sn: deviceSn,
+      method: input.method,
+      params: input.params ?? {},
+    };
+    if (input.commandKey) body.command_key = input.commandKey;
+    if (input.priority !== undefined) body.priority = input.priority;
+    if (input.expiresIn !== undefined) body.expires_in = input.expiresIn;
+    if (input.maxRetries !== undefined) body.max_retries = input.maxRetries;
+    if (input.description) body.description = input.description;
+
+    const { data } = await http.post<BackendDeviceTask>(
+      '/devices/tasks',
+      body,
+      { params: { device_sn: deviceSn } }
+    );
+    return mapBackendDeviceTask(data);
+  },
+
   async getTask(taskId: string): Promise<DeviceTask> {
     const { data } = await http.get<BackendDeviceTask>(`/devices/tasks/${taskId}`);
     return mapBackendDeviceTask(data);

@@ -352,6 +352,24 @@ func Test_Task_MarkExpired(t *testing.T) {
 	assert.NotNil(t, task.CompletedAt)
 }
 
+func Test_Task_MarkExpired_MMLCommandTimeoutMessage(t *testing.T) {
+	createdAt := time.Date(2026, 7, 17, 17, 10, 0, 0, time.UTC)
+	expiresAt := createdAt.Add(120 * time.Second)
+	task := &Task{
+		ID:        "task-1",
+		Status:    TaskStatusSent,
+		Source:    TaskSourceMML,
+		CreatedAt: createdAt,
+		ExpiresAt: &expiresAt,
+	}
+
+	task.MarkExpired()
+
+	assert.Equal(t, TaskStatusExpired, task.Status)
+	assert.Equal(t, "执行命令超时，超时时间 120 秒", task.ErrorMessage)
+	assert.NotNil(t, task.CompletedAt)
+}
+
 func Test_Task_ResetForRetry(t *testing.T) {
 	sentAt := time.Now().Add(-5 * time.Minute)
 	task := &Task{

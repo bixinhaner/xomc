@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { Device } from '@core/types/device';
-import { buildBatchTaskTypeMap, batchActionHasDetail } from './deviceBatchTask';
+import { buildBatchTaskTypeMap, batchActionHasDetail, removeParamSyncOptimisticDeviceId } from './deviceBatchTask';
 import { getDeviceListParamSyncPaths } from './deviceListParamSync';
 
 // 用恒等 t 让 map 值即 i18n key，便于断言键集与映射关系。
@@ -33,6 +33,23 @@ describe('batchActionHasDetail', () => {
     expect(batchActionHasDetail('batch-param-sync')).toBe(false);
     expect(batchActionHasDetail('batch-tr069-collect')).toBe(false);
     expect(batchActionHasDetail(undefined)).toBe(false);
+  });
+});
+
+describe('removeParamSyncOptimisticDeviceId', () => {
+  it('参数同步任务进入终态后移除对应设备的转圈状态', () => {
+    const prev = new Set(['device-1', 'device-2']);
+    const next = removeParamSyncOptimisticDeviceId(prev, 'device-1');
+
+    expect([...next]).toEqual(['device-2']);
+    expect([...prev]).toEqual(['device-1', 'device-2']);
+  });
+
+  it('设备不在转圈集合里时复用原集合，避免无意义刷新', () => {
+    const prev = new Set(['device-2']);
+    const next = removeParamSyncOptimisticDeviceId(prev, 'device-1');
+
+    expect(next).toBe(prev);
   });
 });
 

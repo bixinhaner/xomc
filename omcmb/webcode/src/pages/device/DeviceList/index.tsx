@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { App, Badge, Button, Card, Checkbox, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { App, Badge, Button, Card, Checkbox, Drawer, Form, Input, InputNumber, Modal, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   AlertOutlined,
@@ -15,7 +15,6 @@ import {
   LinkOutlined,
   ReloadOutlined,
   SyncOutlined,
-  WarningOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn, BatchAction } from '@/components/DataTable';
@@ -59,8 +58,11 @@ import { useUserStore } from '@core/store/userStore';
 import { useAppStore } from '@core/store/appStore';
 import { buildDefaultUfteTaskName } from '@/pages/transfer/shared';
 import dayjs from 'dayjs';
-import { buildBatchTaskTypeMap, batchActionHasDetail } from './deviceBatchTask';
+import { buildBatchTaskTypeMap, batchActionHasDetail, removeParamSyncOptimisticDeviceId } from './deviceBatchTask';
 import { getDeviceListParamSyncPaths } from './deviceListParamSync';
+import { shouldShowLocationSyncIndicator } from './deviceGpsSyncIndicator';
+import GpsSyncConfirmModal from './GpsSyncConfirmModal';
+import GpsSyncTrigger from './GpsSyncTrigger';
 import type { Device } from '@core/types/device';
 import { formatSystemTime } from '@core/utils/systemTime';
 import { computeCumulativeOnlineDurationSeconds, computeCurrentOnlineDurationSeconds } from '@core/utils/onlineDuration';
@@ -129,6 +131,16 @@ function throwIfBatchAborted(signal: AbortSignal): void {
   if (signal.aborted) {
     throw createBatchAbortError();
   }
+}
+
+function isParamSyncAlreadyRunningError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const message = err.message.toLowerCase();
+  return message.includes('active_sync_exists')
+    || message.includes('already running')
+    || message.includes('already exists')
+    || message.includes('已有')
+    || message.includes('正在同步');
 }
 
 // 筛选下拉框 name → 表格列 key 映射:列设置隐藏该列时,对应筛选下拉一并隐藏
@@ -356,6 +368,11 @@ export default function DeviceList() {
   const [collectDrawerTitle, setCollectDrawerTitle] = useState('');
   const [batchAlarmSyncRunning, setBatchAlarmSyncRunning] = useState(false);
   const [batchParamSyncRunning, setBatchParamSyncRunning] = useState(false);
+  const [gpsSyncConfirmDevice, setGpsSyncConfirmDevice] = useState<Device | null>(null);
+
+  const clearOptimisticParamSyncDevice = useCallback((deviceId: string) => {
+    setOptimisticParamSyncDeviceIds((prev) => removeParamSyncOptimisticDeviceId(prev, deviceId));
+  }, []);
 
   const [logModalOpen, setLogModalOpen] = useState(false);
   const [currentLogTask, setCurrentLogTask] = useState<LocalTask | null>(null);
@@ -487,6 +504,54 @@ export default function DeviceList() {
   const { data, isLoading, isFetching, refetch } = useDeviceList(queryParams, {
     refetchInterval: autoRefresh ? refreshInterval * 1000 : (paramSyncPolling ? PARAM_SYNC_ACTIVE_REFETCH_MS : undefined),
   });
+  const acceptLocationSync = useCallback(async (record: Device) => {
+    const reportedVersion = record.locationSync.reported?.version;
+    if (reportedVersion == null) {
+      void message.error(t('device.gpsSyncNoReport'));
+      return;
+    }
+    try {
+      await deviceApi.acceptLocationSync(record.id, reportedVersion);
+      void message.success(t('device.gpsSyncSuccess'));
+    } catch (error: unknown) {
+      const status = (error as { response?: { status?: number } })?.response?.status;
+      void message.error(
+        status === 409
+          ? t('device.gpsSyncConflict')
+          : status === 403
+            ? t('device.gpsSyncForbidden')
+            : t('device.gpsSyncFailed'),
+      );
+      return;
+    }
+
+    // The promotion has already succeeded at this point. A list refresh is
+    // best-effort so a transient query failure cannot be reported as a failed
+    // GPS synchronization or leave the user unsure whether the action applied.
+    try {
+      const refreshResult = await refetch();
+      if (refreshResult.isError) {
+        void message.warning(t('device.gpsSyncRefreshFailed'));
+      }
+    } catch {
+      void message.warning(t('device.gpsSyncRefreshFailed'));
+    }
+  }, [message, refetch, t]);
+
+  const renderLocationCell = useCallback((value: number | null | undefined, record: Device) => {
+    const showSyncIndicator = shouldShowLocationSyncIndicator(value);
+    const displayValue = value == null ? '--' : value;
+    if (!showSyncIndicator) return displayValue;
+    return (
+      <Space size={4}>
+        <GpsSyncTrigger
+          label={t('device.gpsSyncAction')}
+          onClick={() => setGpsSyncConfirmDevice(record)}
+        />
+        {displayValue}
+      </Space>
+    );
+  }, [t]);
   const [refreshSpinnerActive, setRefreshSpinnerActive] = useState(false);
   const refreshSpinStartedAtRef = useRef<number | null>(null);
   const refreshSpinTimeoutRef = useRef<number | null>(null);
@@ -1270,6 +1335,7 @@ export default function DeviceList() {
                       throwIfBatchAborted(abortController.signal);
                       await queryClient.invalidateQueries({ queryKey: ['devices'] });
                       throwIfBatchAborted(abortController.signal);
+                      clearOptimisticParamSyncDevice(device.id);
                       setCollectTasks((prev) => prev.map((item) =>
                         item.id === task.id ? {
                           ...item,
@@ -1284,13 +1350,23 @@ export default function DeviceList() {
                       if (isAbortError(err)) {
                         throw err;
                       }
+                      const alreadyRunning = isParamSyncAlreadyRunningError(err);
+                      if (alreadyRunning) {
+                        const skippedMessage = t('device.batch.paramSync.alreadyRunning');
+                        clearOptimisticParamSyncDevice(device.id);
+                        setCollectTasks((prev) => prev.map((item) =>
+                          item.id === task.id ? {
+                            ...item,
+                            status: 'success',
+                            progress: 100,
+                            message: skippedMessage,
+                            logContent: `[${timestamp}] INFO: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${device.sn}\n[${timestamp}] INFO: ${skippedMessage}`,
+                          } : item
+                        ));
+                        return true;
+                      }
                       const errMsg = err instanceof Error ? err.message : t('task.log.failed');
-                      setOptimisticParamSyncDeviceIds((prev) => {
-                        if (!prev.has(device.id)) return prev;
-                        const next = new Set(prev);
-                        next.delete(device.id);
-                        return next;
-                      });
+                      clearOptimisticParamSyncDevice(device.id);
                       setCollectTasks((prev) => prev.map((item) =>
                         item.id === task.id ? {
                           ...item,
@@ -1340,6 +1416,7 @@ export default function DeviceList() {
       batchAlarmSyncRunning,
       batchParamSyncRunning,
       batchReboot,
+      clearOptimisticParamSyncDevice,
       createUfteTask,
       devices,
       message,
@@ -1883,25 +1960,7 @@ export default function DeviceList() {
         width: 130,
         hidden: true,
         group: 'common',
-        render: (_val, record) => {
-          const v = record.longitude;
-          if (v === null || v === undefined) return '--';
-          if (record.networkType !== 'eNB') return v;
-          return (
-            <Space size={4}>
-              <Popconfirm
-                title={`${t('device.longitude')}: ${record.longitude ?? '--'}   ${t('device.latitude')}: ${record.latitude ?? '--'}   ${t('device.gpsHeight')}(m): ${record.gpsHeight ?? '--'}`}
-                description={t('device.gpsInconsistent')}
-                onConfirm={() => void message.success(t('device.gpsSyncSuccess'))}
-                okText={t('common.confirm')}
-                cancelText={t('common.cancel')}
-              >
-                <WarningOutlined style={{ color: '#faad14', cursor: 'pointer' }} />
-              </Popconfirm>
-              {v}
-            </Space>
-          );
-        },
+        render: (_val, record) => renderLocationCell(record.longitude, record),
       },
       {
         key: 'latitude',
@@ -1910,25 +1969,7 @@ export default function DeviceList() {
         width: 130,
         hidden: true,
         group: 'common',
-        render: (_val, record) => {
-          const v = record.latitude;
-          if (v === null || v === undefined) return '--';
-          if (record.networkType !== 'eNB') return v;
-          return (
-            <Space size={4}>
-              <Popconfirm
-                title={`${t('device.longitude')}: ${record.longitude ?? '--'}   ${t('device.latitude')}: ${record.latitude ?? '--'}   ${t('device.gpsHeight')}(m): ${record.gpsHeight ?? '--'}`}
-                description={t('device.gpsInconsistent')}
-                onConfirm={() => void message.success(t('device.gpsSyncSuccess'))}
-                okText={t('common.confirm')}
-                cancelText={t('common.cancel')}
-              >
-                <WarningOutlined style={{ color: '#faad14', cursor: 'pointer' }} />
-              </Popconfirm>
-              {v}
-            </Space>
-          );
-        },
+        render: (_val, record) => renderLocationCell(record.latitude, record),
       },
       {
         key: 'gpsHeight',
@@ -1937,25 +1978,7 @@ export default function DeviceList() {
         width: 120,
         hidden: true,
         group: 'common',
-        render: (_val, record) => {
-          const v = record.gpsHeight;
-          if (v === null || v === undefined) return '--';
-          if (record.networkType !== 'eNB') return v;
-          return (
-            <Space size={4}>
-              <Popconfirm
-                title={`${t('device.longitude')}: ${record.longitude ?? '--'}   ${t('device.latitude')}: ${record.latitude ?? '--'}   ${t('device.gpsHeight')}(m): ${record.gpsHeight ?? '--'}`}
-                description={t('device.gpsInconsistent')}
-                onConfirm={() => void message.success(t('device.gpsSyncSuccess'))}
-                okText={t('common.confirm')}
-                cancelText={t('common.cancel')}
-              >
-                <WarningOutlined style={{ color: '#faad14', cursor: 'pointer' }} />
-              </Popconfirm>
-              {v}
-            </Space>
-          );
-        },
+        render: (_val, record) => renderLocationCell(record.gpsHeight, record),
       },
       {
         key: 'gpsSatelliteCount',
@@ -2094,7 +2117,7 @@ export default function DeviceList() {
 
     ],
     // remarkHeaderRender 暂从 dep 列表移除：remark 列定义已注释，恢复时同步加回。
-    [navigate, openDeviceDetail, prefetchDeviceDetailEntry, t, fmtTime, fmtDuration, fmtStatus, adminStateStatusMap, renderMultiCellStatus, renderActivationStatus, message, downloadStationLog, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails, editingInstallAddressId, editingInstallAddressValue, savingInstallAddressId, saveInstallAddressEdit, cancelInstallAddressEdit, startInstallAddressEdit, optimisticParamSyncDeviceIds]
+    [navigate, openDeviceDetail, prefetchDeviceDetailEntry, t, fmtTime, fmtDuration, fmtStatus, adminStateStatusMap, renderMultiCellStatus, renderActivationStatus, message, downloadStationLog, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails, editingInstallAddressId, editingInstallAddressValue, savingInstallAddressId, saveInstallAddressEdit, cancelInstallAddressEdit, startInstallAddressEdit, optimisticParamSyncDeviceIds, renderLocationCell]
   );
 
   // ─── 列表导出(用户决策 2026-06-02) ──────────────────────────────────────
@@ -2637,6 +2660,16 @@ export default function DeviceList() {
 
       {exportConfirmModal}
       {periodicSyncModal}
+      <GpsSyncConfirmModal
+        open={gpsSyncConfirmDevice != null}
+        device={gpsSyncConfirmDevice}
+        onCancel={() => setGpsSyncConfirmDevice(null)}
+        onConfirm={() => {
+          const device = gpsSyncConfirmDevice;
+          setGpsSyncConfirmDevice(null);
+          if (device) void acceptLocationSync(device);
+        }}
+      />
     </div>
   );
 }

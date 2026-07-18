@@ -31,16 +31,34 @@ func TestNewDispatcher_AllHandlersRegistered(t *testing.T) {
 		"Upload",
 		"Reboot",
 		"FactoryReset",
+		"X_BAICELLS_COM_PasswordReset",
 		"GetParameterAttributes",
 		"SetParameterAttributes",
 		"GetRPCMethods",
 	}
 
-	assert.Len(t, d.handlers, 12)
+	assert.Len(t, d.handlers, len(expectedMethods))
 	for _, method := range expectedMethods {
 		_, ok := d.handlers[method]
 		assert.True(t, ok, "handler missing for %s", method)
 	}
+}
+
+func TestBaicellsPasswordResetHandler(t *testing.T) {
+	d := NewDispatcher()
+	cmd := &Command{
+		Method:     "X_BAICELLS_COM_PasswordReset",
+		CommandKey: "password-reset-key",
+		Params:     json.RawMessage(`{}`),
+	}
+
+	result, err := d.BuildRequest(cmd, "cwmp-id-reset")
+
+	require.NoError(t, err)
+	body := string(result)
+	assert.Contains(t, body, "cwmp:X_BAICELLS_COM_PasswordReset")
+	assert.Contains(t, body, "<CommandKey>password-reset-key</CommandKey>")
+	assert.Contains(t, body, "cwmp-id-reset")
 }
 
 func TestDispatcher_BuildRequest_UnknownMethod(t *testing.T) {

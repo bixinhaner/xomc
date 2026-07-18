@@ -6,19 +6,21 @@
  *   - 不传 technology 时，networkType 为 undefined（列全部设备，向后兼容 KPIQuery）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App } from 'antd';
 import { IntlProvider } from 'react-intl';
 import { zhCN } from '@core/i18n';
 
 // 捕获 useDeviceList 收到的 params。
 const useDeviceListSpy = vi.fn();
+const fetchDeviceListSpy = vi.fn();
 
 vi.mock('@core/hooks/api/useDevices', () => ({
   useDeviceList: (params: unknown, options: unknown) => {
     useDeviceListSpy(params, options);
     return { data: { items: [], total: 0 }, isLoading: false };
   },
+  fetchDeviceList: (params: unknown) => fetchDeviceListSpy(params),
 }));
 
 import DevicePickerModal from './DevicePickerModal';
@@ -37,6 +39,7 @@ function renderModal(props: Partial<React.ComponentProps<typeof DevicePickerModa
 describe('DevicePickerModal 制式联动', () => {
   beforeEach(() => {
     useDeviceListSpy.mockClear();
+    fetchDeviceListSpy.mockReset();
   });
 
   it('传 technology 时按制式过滤（networkType 透传 useDeviceList）', () => {
@@ -55,6 +58,7 @@ describe('DevicePickerModal 制式联动', () => {
 describe('DevicePickerModal 已选回显', () => {
   beforeEach(() => {
     useDeviceListSpy.mockClear();
+    fetchDeviceListSpy.mockReset();
   });
 
   // 回归：与制式同款「组件常驻不卸载」问题——内部 selected 仅首挂载赋值一次。
@@ -88,6 +92,7 @@ describe('DevicePickerModal 已选回显', () => {
 describe('DevicePickerModal 选择数量限制', () => {
   beforeEach(() => {
     useDeviceListSpy.mockClear();
+    fetchDeviceListSpy.mockReset();
   });
 
   it('默认不限制选择数量，由复用页面自行决定上限', () => {
@@ -116,5 +121,83 @@ describe('DevicePickerModal 选择数量限制', () => {
     fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
 
     expect(onConfirm).not.toHaveBeenCalled();
+  });
+});
+
+describe('DevicePickerModal 批量粘贴', () => {
+  beforeEach(() => {
+    useDeviceListSpy.mockClear();
+    fetchDeviceListSpy.mockReset();
+  });
+
+  async function pasteSns(value: string) {
+    fireEvent.click(screen.getByRole('button', { name: /批量粘贴/ }));
+    const textArea = await screen.findByPlaceholderText(/SN-001/);
+    fireEvent.change(textArea, { target: { value } });
+    const addButton = await screen.findByRole('button', { name: /加入已选/ });
+    await act(async () => {
+      fireEvent.click(addButton);
+      await Promise.resolve();
+    });
+  }
+
+  it('只加入实际存在的 SN，忽略无效和重复输入', async () => {
+    fetchDeviceListSpy.mockResolvedValue({
+      items: [{ sn: 'SN-VALID' }, { sn: 'SN-OTHER' }],
+      total: 2,
+    });
+    renderModal();
+
+    await pasteSns('SN-INVALID, SN-VALID\nSN-VALID, SN-OTHER');
+
+    await waitFor(() => expect(screen.getByText('SN-VALID')).toBeTruthy());
+    expect(screen.getByText('SN-OTHER')).toBeTruthy();
+    expect(screen.queryByText('SN-INVALID')).toBeNull();
+    expect(fetchDeviceListSpy).toHaveBeenCalledWith({
+      page: 1,
+      pageSize: 3,
+      snList: ['SN-INVALID', 'SN-VALID', 'SN-OTHER'],
+      networkType: undefined,
+    });
+  });
+
+  it('批量查询会带上当前 technology，且全无效时不加入设备', async () => {
+    fetchDeviceListSpy.mockResolvedValue({ items: [], total: 0 });
+    renderModal({ technology: 'nr' });
+
+    await pasteSns('SN-LTE, SN-NOT-FOUND');
+
+    await waitFor(() => expect(fetchDeviceListSpy).toHaveBeenCalled());
+    expect(fetchDeviceListSpy).toHaveBeenCalledWith({
+      page: 1,
+      pageSize: 2,
+      snList: ['SN-LTE', 'SN-NOT-FOUND'],
+      networkType: 'nr',
+    });
+    expect(screen.getByText('未选择任何设备')).toBeTruthy();
+  });
+
+  it('只按最大数量加入已验证存在的设备', async () => {
+    fetchDeviceListSpy.mockResolvedValue({
+      items: [{ sn: 'SN-1' }, { sn: 'SN-2' }, { sn: 'SN-3' }],
+      total: 3,
+    });
+    renderModal({ maxSelected: 2 });
+
+    await pasteSns('SN-1, SN-2, SN-3');
+
+    expect(screen.getByText('SN-1')).toBeTruthy();
+    expect(screen.getByText('SN-2')).toBeTruthy();
+    expect(screen.queryByText('SN-3')).toBeNull();
+  });
+
+  it('批量查询失败时不改变已有选择', async () => {
+    fetchDeviceListSpy.mockRejectedValue(new Error('network error'));
+    renderModal({ initialSelected: ['SN-EXISTING'] });
+
+    await pasteSns('SN-NEW');
+
+    expect(screen.getByText('SN-EXISTING')).toBeTruthy();
+    expect(screen.getByText('选择设备（已选 1 个）')).toBeTruthy();
   });
 });

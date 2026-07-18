@@ -80,6 +80,7 @@ type stubDeviceParamRepo struct {
 
 type stubDeviceCoordinateWriter struct {
 	updateCoordinates func(ctx context.Context, deviceID uuid.UUID, latitude, longitude float64) error
+	coordinates       *Location
 }
 
 func (s stubDeviceCoordinateWriter) UpdateCoordinates(ctx context.Context, deviceID uuid.UUID, latitude, longitude float64) error {
@@ -87,6 +88,25 @@ func (s stubDeviceCoordinateWriter) UpdateCoordinates(ctx context.Context, devic
 		return s.updateCoordinates(ctx, deviceID, latitude, longitude)
 	}
 	return nil
+}
+
+func (s stubDeviceCoordinateWriter) GetCoordinates(context.Context, uuid.UUID) (*Location, error) {
+	return s.coordinates, nil
+}
+
+type stubLocationObservationRepo struct {
+	upsert func(deviceID uuid.UUID, observation ReportedLocation) error
+}
+
+func (s stubLocationObservationRepo) UpsertLatest(_ context.Context, deviceID uuid.UUID, observation ReportedLocation) error {
+	if s.upsert != nil {
+		return s.upsert(deviceID, observation)
+	}
+	return nil
+}
+
+func (s stubLocationObservationRepo) GetLatest(context.Context, uuid.UUID) (*ReportedLocation, error) {
+	return nil, nil
 }
 
 func (s stubDeviceParamRepo) BatchUpsert(context.Context, uuid.UUID, []model.DeviceParameter) error {
@@ -530,6 +550,59 @@ func TestInfoSyncer_SyncFromParameters_BackfillsCoordinates(t *testing.T) {
 
 	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechNR)
 	assert.NoError(t, err)
+}
+
+func TestInfoSyncer_SyncFromParameters_StoresStandardGPSObservationWithoutOverwritingAccepted(t *testing.T) {
+	deviceID := uuid.New()
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+
+	paramRepo := stubDeviceParamRepo{params: []model.DeviceParameter{
+		{ParameterPath: "Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude", ParameterValue: "39904200"},
+		{ParameterPath: "Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude", ParameterValue: "116407400"},
+	}}
+
+	accepted := &Location{Latitude: 31.2, Longitude: 121.5}
+	coordinateWriter := stubDeviceCoordinateWriter{coordinates: accepted, updateCoordinates: func(context.Context, uuid.UUID, float64, float64) error {
+		t.Fatal("existing accepted coordinates must not be overwritten during parameter sync")
+		return nil
+	}}
+	observationRepo := stubLocationObservationRepo{upsert: func(gotDeviceID uuid.UUID, observation ReportedLocation) error {
+		assert.Equal(t, deviceID, gotDeviceID)
+		assert.Equal(t, 39.9042, observation.Latitude)
+		assert.Equal(t, 116.4074, observation.Longitude)
+		assert.Equal(t, "Device.DeviceInfo.SAS.FAP.GPS", observation.SourcePath)
+		return nil
+	}}
+
+	syncer := NewInfoSyncer(infoRepoNoop{}, paramRepo, coordinateWriter, registry, zap.NewNop(), observationRepo)
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE)
+	assert.NoError(t, err)
+}
+
+type infoRepoNoop struct{}
+
+func (infoRepoNoop) GetByDeviceID(context.Context, uuid.UUID) (*DeviceInfo, error) { return nil, nil }
+func (infoRepoNoop) Create(context.Context, *DeviceInfo) error                     { return nil }
+func (infoRepoNoop) UpdateManualFields(context.Context, uuid.UUID, UpdateDeviceInfoRequest, string) error {
+	return nil
+}
+func (infoRepoNoop) UpdateSyncFields(context.Context, uuid.UUID, map[string]interface{}) error {
+	return nil
+}
+func (infoRepoNoop) UpdateNameSyncFields(context.Context, uuid.UUID, bool, string) error { return nil }
+func (infoRepoNoop) UpdateDeviceName(context.Context, uuid.UUID, string) error           { return nil }
+func (infoRepoNoop) GetTopologyAttributes(context.Context, uuid.UUID) (map[string]string, error) {
+	return nil, nil
+}
+func (infoRepoNoop) ListDevicesWithInfo(context.Context, DeviceFilter) (*model.ListResponse[DeviceWithInfo], error) {
+	return nil, nil
+}
+func (infoRepoNoop) GetByIDWithInfo(context.Context, uuid.UUID) (*DeviceWithInfo, error) {
+	return nil, nil
+}
+func (infoRepoNoop) ComputeListStats(context.Context, DeviceFilter) (*DeviceListStats, error) {
+	return nil, nil
 }
 
 func TestInfoSyncer_SyncFromParameters_ComputesQuickFieldsWithoutCarrierMapping(t *testing.T) {

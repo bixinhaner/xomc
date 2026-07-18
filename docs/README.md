@@ -43,7 +43,7 @@
 | Agent 约定（matt-pocock 套件）| `agents/issue-tracker.md` · `triage-labels.md` · `domain.md` · `git-boundaries.md` | 任务源（GitHub Issues）/ triage 标签 / 单上下文域文档 / git 软硬约束矩阵 |
 | 审查专家视角 | `expert-personas.md` | 文件路径→专家激活映射 + 各专家审查清单（CLAUDE.md §16 的展开篇）|
 | 工程方法论（3 篇）| `methodology/从0到生产可发布完整方法论.md` · `AI承诺对峙清单.md` · `整改运行手册-2026Q2.md` | 方法论与整改运行手册 |
-| 历史经验参考 | `ref/migration-pitfalls.md` · `ref/three-library-xml-import-history.md` | 迁移踩坑库 / 三库 XML 导入演进史 |
+| 历史经验参考 | `ref/migration-pitfalls.md` · `ref/three-library-xml-import-history.md` · `ref/mml-validation-rules/` | 迁移踩坑库 / 三库 XML 导入演进史 / MML 参数校验规则快照 |
 
 ### 跨域 SOP / 接口契约
 
