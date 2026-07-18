@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { App } from 'antd';
 import type { ComponentProps } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { useCommandSubFields, useGroupTree, useUnsupportedPaths } from '@core/hooks/api/useMmlConsole';
 import type { CommandItem } from '../types';
 import CommandSelectModal from './CommandSelectModal';
@@ -10,6 +10,12 @@ const nativeGetComputedStyle = window.getComputedStyle.bind(window);
 vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => nativeGetComputedStyle(element));
 
 const fixtures = vi.hoisted(() => {
+  const defaultSubFields = [
+    { tr069Path: 'Device.Info.Serial', label: 'Serial', accessType: 'READ_ONLY', isObject: false },
+    { tr069Path: 'Device.Info.Name', label: 'Name', accessType: 'READ_WRITE', isObject: false },
+    { tr069Path: 'Device.Info.Model', label: 'Model', accessType: 'READ_WRITE', isObject: false },
+    { tr069Path: 'Device.Info.Alias', label: 'Alias', accessType: 'READ_WRITE', isObject: false },
+  ];
   const commands = [
     {
       id: 'lst-1',
@@ -19,19 +25,38 @@ const fixtures = vi.hoisted(() => {
       targetObject: '',
     },
     {
+      id: 'dsp-1',
+      commandCode: 'DSP INFO',
+      displayName: '展示设备信息',
+      operationType: 'DSP',
+      targetObject: '',
+    },
+    {
       id: 'mod-1',
       commandCode: 'MOD INFO',
       displayName: '修改设备信息',
       operationType: 'MOD',
       targetObject: '',
     },
+    {
+      id: 'add-1',
+      commandCode: 'ADD USER',
+      displayName: '新增用户',
+      operationType: 'ADD',
+      targetObject: 'Device.Users.User.',
+    },
+    {
+      id: 'rmv-1',
+      commandCode: 'RMV USER',
+      displayName: '删除用户',
+      operationType: 'RMV',
+      targetObject: 'Device.Users.User.',
+    },
   ];
 
   return {
-    subFields: [
-      { tr069Path: 'Device.Info.Serial', label: 'Serial', accessType: 'READ_ONLY', isObject: false },
-      { tr069Path: 'Device.Info.Name', label: 'Name', accessType: 'READ_WRITE', isObject: false },
-    ],
+    defaultSubFields,
+    subFields: defaultSubFields,
     groupTree: [
       {
         id: 'group-1',
@@ -58,7 +83,8 @@ vi.mock('@/hooks/useI18nText', () => ({
 }));
 
 vi.mock('@/hooks/useT', () => ({
-  useT: () => (id: string) => id,
+  useT: () => (id: string, values?: Record<string, unknown>) =>
+    values ? `${id}:${JSON.stringify(values)}` : id,
 }));
 
 vi.mock('../../components/customizedSubtree', async () => {
@@ -69,6 +95,10 @@ vi.mock('../../components/customizedSubtree', async () => {
     ...actual,
     useCustomCommands: () => ({ commands: [] }),
   };
+});
+
+afterEach(() => {
+  fixtures.subFields = fixtures.defaultSubFields;
 });
 
 function makeCommandItem(id: string, operationType: 'LST' | 'MOD'): CommandItem {
@@ -130,6 +160,21 @@ describe('CommandSelectModal', () => {
     );
   });
 
+  it('starts DSP with no Paths selected, requires one, and returns its key separately', async () => {
+    const onConfirm = vi.fn();
+    renderModal({ onConfirm, value: null, selectedPathKeys: [] });
+    fireEvent.click(document.querySelector('.ant-tree-switcher')!);
+    fireEvent.click(await screen.findByText('展示设备信息'));
+
+    expect(await screen.findByRole('checkbox', { name: /Serial/ })).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'mml.consoleV2.cmdSelect.okText' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Serial/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'mml.consoleV2.cmdSelect.okText' }));
+
+    expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({ id: 'dsp-1' }), ['Device.Info.Serial']);
+  });
+
   it('shows only writable Path candidates for MOD', async () => {
     renderModal({ value: null, selectedPathKeys: [] });
     fireEvent.click(document.querySelector('.ant-tree-switcher')!);
@@ -137,6 +182,65 @@ describe('CommandSelectModal', () => {
 
     expect(await screen.findByRole('checkbox', { name: /Name/ })).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: /Serial/ })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['ADD', '新增用户', 'add-1', 'AddObject'],
+    ['RMV', '删除用户', 'rmv-1', 'DeleteObject'],
+  ])('keeps target-object behavior for %s commands', async (_operation, displayName, id, rpc) => {
+    const onConfirm = vi.fn();
+    renderModal({ onConfirm, value: null, selectedPathKeys: [] });
+    fireEvent.click(document.querySelector('.ant-tree-switcher')!);
+    fireEvent.click(await screen.findByText(displayName));
+
+    expect(await screen.findByText('mml.consoleV2.cmdSelect.targetObjectPath')).toBeInTheDocument();
+    expect(screen.getByText('Device.Users.User.')).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(rpc))).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: /Name/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'mml.consoleV2.cmdSelect.okText' })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'mml.consoleV2.cmdSelect.okText' }));
+    expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({ id, targetObject: 'Device.Users.User.' }), []);
+  });
+
+  it('prunes keys that become non-writable and preserves current command-definition order on confirm', async () => {
+    const onConfirm = vi.fn();
+    const selectedPathKeys = ['Device.Info.Alias', 'Device.Info.Name', 'Device.Info.Model'];
+    const { rerender } = renderModal({
+      onConfirm,
+      value: makeCommandItem('mod-1', 'MOD'),
+      selectedPathKeys,
+    });
+    expect(await screen.findByRole('checkbox', { name: /Name/ })).toBeChecked();
+
+    fixtures.subFields = [
+      { tr069Path: 'Device.Info.Serial', label: 'Serial', accessType: 'READ_ONLY', isObject: false },
+      { tr069Path: 'Device.Info.Name', label: 'Name', accessType: 'READ_ONLY', isObject: false },
+      { tr069Path: 'Device.Info.Model', label: 'Model', accessType: 'READ_WRITE', isObject: false },
+      { tr069Path: 'Device.Info.Alias', label: 'Alias', accessType: 'READ_WRITE', isObject: false },
+    ];
+    rerender(renderCommandModal({ onConfirm, value: makeCommandItem('mod-1', 'MOD'), selectedPathKeys }));
+
+    expect(await screen.findByRole('checkbox', { name: /Model/ })).toBeChecked();
+    expect(screen.queryByRole('checkbox', { name: /Name/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'mml.consoleV2.cmdSelect.okText' }));
+
+    expect(onConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'mod-1' }),
+      ['Device.Info.Model', 'Device.Info.Alias'],
+    );
+  });
+
+  it.each([
+    ['LST', '查询设备信息'],
+    ['DSP', '展示设备信息'],
+    ['MOD', '修改设备信息'],
+  ])('shows the zero-selection prompt for %s', async (_operation, displayName) => {
+    renderModal({ value: null, selectedPathKeys: [] });
+    fireEvent.click(document.querySelector('.ant-tree-switcher')!);
+    fireEvent.click(await screen.findByText(displayName));
+
+    expect(await screen.findByText('mml.consoleV2.cmdSelect.pickPathFirst')).toBeInTheDocument();
   });
 
   it('restores confirmed keys on reopen and clears the draft when switching commands', async () => {

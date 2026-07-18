@@ -35,6 +35,8 @@ export default function CommandPathSelector({ paths, value, onChange }: CommandP
         </Text>
       </Space>
 
+      {selected.length === 0 && <Text type="secondary">{t('mml.consoleV2.cmdSelect.pickPathFirst')}</Text>}
+
       <Checkbox.Group
         style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}
         value={selected}
