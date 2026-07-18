@@ -98,18 +98,50 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	defer w.Logger.Sync()
 	w.Logger.Info("omcgo-worker starting", zap.String("config", cfgPath))
 
-	// 启动时把 device_tasks 里仍为 pending 的任务重灌进 Redis 设备队列。
-	// ZScore 去重保证多 Worker/多次重启都不会重复入队；sent 任务不在此路径，
-	// 由 CPE 重连时的 RecoverPendingTasks 走陈旧阈值恢复。
-	if _, err := w.TaskService.RestorePendingQueues(ctx, 0); err != nil {
-		w.Logger.Warn("restore pending task queues failed", zap.Error(err))
-	}
-
 	// Register all event subscribers
 	registerSubscribers(w, &cfg)
 
+	// 启动时把 device_tasks 里仍为 pending 的任务重灌进 Redis 设备队列。
+	// 大库冷启动时即使有专用索引，恢复也可能受机械盘或 autovacuum 影响；放到后台
+	// 执行，避免历史任务积压阻塞 metrics/healthz 和 PM 消费者启动。ZScore 去重保证
+	// 多 Worker/多次重启都不会重复入队；sent 任务仍由 CPE 重连恢复路径处理。
+	restoreCtx, cancelRestore := context.WithCancel(ctx)
+	w.GS.Register("pending-queue-restore", 1, func(context.Context) error {
+		cancelRestore()
+		return nil
+	})
+	startPendingQueueRestore(restoreCtx, func(ctx context.Context) (task.RestoreStats, error) {
+		return w.TaskService.RestorePendingQueues(ctx, 0)
+	}, w.Logger)
+
 	w.Logger.Info("omcgo-worker ready, waiting for events...")
 	return w.WaitAndShutdown(nil)
+}
+
+// startPendingQueueRestore 异步执行启动期 pending 队列恢复，返回只读完成信号供测试
+// 和未来编排使用。恢复失败只降级告警，不影响 worker 健康端点和其它消费者。
+func startPendingQueueRestore(
+	ctx context.Context,
+	restore func(context.Context) (task.RestoreStats, error),
+	logger *zap.Logger,
+) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		stats, err := restore(ctx)
+		if err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Warn("restore pending task queues failed", zap.Error(err))
+			}
+			return
+		}
+		logger.Info("restore pending task queues completed",
+			zap.Int("scanned", stats.Scanned),
+			zap.Int("pushed", stats.Pushed),
+			zap.Int("skipped", stats.Skipped),
+			zap.Int("failed", stats.Failed))
+	}()
+	return done
 }
 
 func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
