@@ -16,6 +16,7 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/rpc"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/task"
+	"github.com/omcgo/omcgo/pkg/soap"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -725,6 +726,41 @@ func TestServeHTTP_RPCResponse_NoCookie_Returns204(t *testing.T) {
 	h.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNoContent, w.Code)
+}
+
+func TestServeHTTP_PasswordResetResponse_NoCookie_Returns204(t *testing.T) {
+	h := newTestACSHandler()
+
+	body := `<?xml version="1.0" encoding="UTF-8"?>
+<soap-env:Envelope xmlns:soap-env="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soap-env:Header><cwmp:ID soap-env:mustUnderstand="1">reset-id</cwmp:ID></soap-env:Header>
+  <soap-env:Body>
+    <cwmp:X_BAICELLS_COM_PasswordResetResponse>
+      <Status>1</Status>
+    </cwmp:X_BAICELLS_COM_PasswordResetResponse>
+  </soap-env:Body>
+</soap-env:Envelope>`
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNoContent, w.Code)
+}
+
+func TestRPCResponseMatchesPasswordResetTask(t *testing.T) {
+	assert.True(t, rpcResponseMatchesTask(
+		soap.MethodBaicellsPasswordResetResp,
+		"X_BAICELLS_COM_PasswordReset",
+	))
+	assert.True(t, rpcResponseMatchesTask(
+		soap.MethodCommonPasswordResetResp,
+		"X_COMMON_COM_PasswordReset",
+	))
+	assert.False(t, rpcResponseMatchesTask(
+		soap.MethodCommonPasswordResetResp,
+		"X_BAICELLS_COM_PasswordReset",
+	))
 }
 
 // ---------------------------------------------------------------------------

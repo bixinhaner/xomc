@@ -3201,7 +3201,6 @@ const messages: Record<string, string> = {
   'device.licenseParam.empty':          'No License parameters reported yet. Click Refresh to fetch from the device.',
   'device.licenseParam.notConfigured':  'No License param model configured for this product',
   'device.licenseParam.valueNotFetched': 'N/A',
-
   // DeviceDetail "Password Management" tab
   'device.password.title':              'Password Management',
   'device.password.noticeTitle':        'Manage the LMT login password through parameter delivery',

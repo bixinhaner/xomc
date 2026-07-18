@@ -153,6 +153,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		devices.PUT("/:id", h.UpdateDevice)
 		devices.DELETE("/:id", h.DeleteDevice)
 		devices.POST("/:id/reboot", h.RebootDevice)
+		devices.POST("/:id/password/reset", h.ResetLMTPassword)
 		// T-0126: 旧 /param-sync (Path A) 已下线，替换为 /sync-params (Path B + reason="manual")
 		devices.POST("/:id/sync-params", h.SyncDeviceParams)
 		devices.POST("/:id/location-sync/accept", h.AcceptLocationSync)
@@ -591,6 +592,35 @@ func (h *Handler) RebootDevice(c *gin.Context) {
 	}
 
 	response.OKWithStatus(c, http.StatusAccepted, gin.H{"message": "reboot command queued"})
+}
+
+// ResetLMTPassword handles POST /api/v1/devices/:id/password/reset.
+func (h *Handler) ResetLMTPassword(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	if !authorizeDeviceAccess(c, h.service, h.permService, id) {
+		return
+	}
+
+	result, err := h.service.ResetLMTPassword(c.Request.Context(), id, admin.UserIDStringFromCtx(c))
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	body := gin.H{
+		"message":         "password reset command queued",
+		"parameters":      0,
+		"reboot_required": false,
+	}
+	if result != nil && result.TaskID != "" {
+		body["task_id"] = result.TaskID
+	}
+	response.OKWithStatus(c, http.StatusAccepted, body)
 }
 
 // parseGeoStatusFilter 把前端 GIS 的三档 status（onlineActive/onlineInactive/offline）翻译为

@@ -64,6 +64,8 @@
         <param name="Device.DeviceInfo.SupportedPowerLevel" standardPath="Device.DeviceInfo.SupportedPowerRange" access="READ_ONLY" type="STRING" changeApplies="Immediate" max="50"/>
         <param name="Device.DeviceInfo.UpTime" standardPath="Device.DeviceInfo.UpTime_OLD" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.X_COM_IpAddr" standardPath="Device.DeviceInfo.IpAddr" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="1" max="15"/>
+        <param name="Device.DeviceInfo.X_COM_Localweb_password" standardPath="Device.DeviceInfo.X_COM_Localweb_password" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="5" max="64"/>
+        <param name="Device.DeviceInfo.X_COM_Localweb_username" standardPath="Device.DeviceInfo.X_COM_Localweb_username" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="1" max="64"/>
         <param name="Device.DeviceInfo.cbsdCategory" standardPath="Device.DeviceInfo.cbsdCategory" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="1"/>
         <param name="Device.DeviceInfo.cpiLatitude" standardPath="Device.DeviceInfo.SAS.CPI.cpiLatitude" access="READ_WRITE" type="INT" changeApplies="Immediate" min="-90000000" max="90000000"/>
         <param name="Device.DeviceInfo.cpiLongitude" standardPath="Device.DeviceInfo.SAS.CPI.cpiLongitude" access="READ_WRITE" type="INT" changeApplies="Immediate" min="-180000000" max="180000000"/>

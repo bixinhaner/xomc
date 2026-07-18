@@ -64,6 +64,7 @@ const (
 	MethodGetParameterAttributesResp     RPCMethod = "GetParameterAttributesResponse"
 	MethodSetParameterAttributes         RPCMethod = "SetParameterAttributes"
 	MethodSetParameterAttributesResp     RPCMethod = "SetParameterAttributesResponse"
+	MethodCommonPasswordResetResp        RPCMethod = "X_COMMON_COM_PasswordResetResponse"
 	MethodAutonomousTransferComplete     RPCMethod = "AutonomousTransferComplete"
 	MethodAutonomousTransferCompleteResp RPCMethod = "AutonomousTransferCompleteResponse"
 	MethodTransferComplete               RPCMethod = "TransferComplete"
