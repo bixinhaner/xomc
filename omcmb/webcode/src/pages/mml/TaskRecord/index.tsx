@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
 import type { Key } from 'react';
-import { Button, Descriptions, Empty, Modal, Pagination, Popover, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { Button, Descriptions, Empty, Modal, Pagination, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import { DeleteOutlined, DownloadOutlined, PlayCircleOutlined, ProfileOutlined, StopOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 
@@ -32,12 +32,12 @@ import {
   type ParsedMmlResult,
   type ParsedParamValue,
 } from '@core/utils/mmlResultParser';
-import { parseMmlCommandDisplay } from '@core/utils/mmlCommandDisplay';
 import {
   downloadMmlTaskResultsCsv,
   fetchAllMmlTaskResults,
 } from './taskResultCsv';
 import { taskResultCommandText } from './taskResultCommand';
+import MmlCommandDisplay from '../components/MmlCommandDisplay';
 
 // -------------------------------------------------------------------------
 // Display mappings — mml_tasks columns
@@ -129,22 +129,6 @@ function getErrorMessage(error: unknown): string {
 
 function hasMessageText(row: DeviceTaskResultItem | null): boolean {
   return Boolean(requestMessageText(row) || responseMessageText(row));
-}
-
-function operationColor(operation: string): string {
-  switch (operation.toUpperCase()) {
-    case 'LST':
-      return 'blue';
-    case 'MOD':
-      return 'green';
-    case 'ADD':
-      return 'purple';
-    case 'DEL':
-    case 'RMV':
-      return 'orange';
-    default:
-      return 'default';
-  }
 }
 
 function parsedResult(row: DeviceTaskResultItem | null): ParsedMmlResult | null {
@@ -541,73 +525,6 @@ export default function TaskRecord() {
     }
   }, [t, viewedTask]);
 
-  const renderCommandCompact = useCallback((command: string, maxTargetWidth = 220) => {
-    const parsed = parseMmlCommandDisplay(command);
-    const paramsContent = parsed.parameterCount > 0 ? (
-      <div style={{ width: 520, maxWidth: '70vw' }}>
-        <Space size={6} style={{ marginBottom: 8 }}>
-          {parsed.operation ? <Tag color={operationColor(parsed.operation)}>{parsed.operation}</Tag> : null}
-          <Typography.Text strong>{parsed.target || parsed.commandHead}</Typography.Text>
-        </Space>
-        <div
-          style={{
-            maxHeight: 280,
-            overflow: 'auto',
-            border: '1px solid var(--color-border-secondary, rgba(128,128,128,0.24))',
-            borderRadius: 6,
-          }}
-        >
-          {parsed.params.map((param, index) => (
-            <div
-              key={`${param.key}-${index}`}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '190px minmax(0, 1fr)',
-                gap: 12,
-                padding: '7px 10px',
-                borderBottom: '1px solid var(--color-border-secondary, rgba(128,128,128,0.24))',
-              }}
-            >
-              <Typography.Text code style={{ fontSize: 12, wordBreak: 'break-all' }}>
-                {param.key}
-              </Typography.Text>
-              <Typography.Text style={{ fontSize: 12, wordBreak: 'break-all' }}>
-                {param.value || '-'}
-              </Typography.Text>
-            </div>
-          ))}
-        </div>
-      </div>
-    ) : null;
-
-    return (
-      <Space size={6} wrap={false} style={{ maxWidth: '100%' }}>
-        {parsed.operation ? (
-          <Tag color={operationColor(parsed.operation)} style={{ marginInlineEnd: 0, flex: '0 0 auto' }}>
-            {parsed.operation}
-          </Tag>
-        ) : null}
-        <Tooltip title={parsed.parameterCount > 0 ? undefined : command}>
-          <Typography.Text style={{ minWidth: 0, maxWidth: maxTargetWidth }} ellipsis>
-            {parsed.target || parsed.commandHead || command}
-          </Typography.Text>
-        </Tooltip>
-        {paramsContent ? (
-          <Popover
-            title={t('mml.scriptParamsTitle')}
-            content={paramsContent}
-            trigger="click"
-            placement="bottomLeft"
-          >
-            <Button type="link" size="small" style={{ padding: 0, flex: '0 0 auto' }}>
-              {t('mml.scriptParamsCount', { count: parsed.parameterCount })}
-            </Button>
-          </Popover>
-        ) : null}
-      </Space>
-    );
-  }, [t]);
-
   const parsedParamColumns: ColumnsType<ParsedParamValue> = useMemo(() => [
     {
       key: 'name',
@@ -667,7 +584,7 @@ export default function TaskRecord() {
                 {row.planOrder ? ` / ${row.planOrder}` : ''}
               </Typography.Text>
             ) : null}
-            {renderCommandCompact(command, 180)}
+            <MmlCommandDisplay command={command} maxTargetWidth={180} />
           </Space>
         );
       },
@@ -749,7 +666,7 @@ export default function TaskRecord() {
       width: 160,
       render: (value: unknown) => formatTime(value as string | undefined),
     },
-  ], [renderCommandCompact, t]);
+  ], [t]);
 
   const columns: DataTableColumn<MMLTask>[] = useMemo(() => [
     {
@@ -1107,7 +1024,7 @@ export default function TaskRecord() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: '100%' }}>
               <Typography.Text type="secondary">{t('mml.resultCommand')}:</Typography.Text>
               <div style={{ minWidth: 0, flex: 1 }}>
-                {renderCommandCompact(taskResultCommandText(rawRow) || '-', 360)}
+                <MmlCommandDisplay command={taskResultCommandText(rawRow) || '-'} maxTargetWidth={360} />
               </div>
             </div>
             {[
