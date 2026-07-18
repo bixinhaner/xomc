@@ -6371,6 +6371,9 @@ const messages: Record<string, string> = {
   'mml.consoleV2.cmdSelect.paramPathCount':  '参数 PATH（{count} 项）：',
   'mml.consoleV2.cmdSelect.noParamPath':     '该命令无可展示的参数路径',
   'mml.consoleV2.cmdSelect.selectToView':    '请选择左侧命令查看详情',
+  'mml.consoleV2.cmdSelect.selectAll':       '全选',
+  'mml.consoleV2.cmdSelect.selectedCount':   '已选 {selected} 项 / 共 {total} 项',
+  'mml.consoleV2.cmdSelect.pickPathFirst':   '请至少选择一个 PATH',
   // RawPathPanel
   'mml.consoleV2.rawPath.operationType':     '操作类型',
   'mml.consoleV2.rawPath.paramPath':         '参数路径',

@@ -6342,6 +6342,9 @@ const messages: Record<string, string> = {
   'mml.consoleV2.cmdSelect.paramPathCount':  'Parameter PATH ({count}):',
   'mml.consoleV2.cmdSelect.noParamPath':     'This command has no parameter paths to show',
   'mml.consoleV2.cmdSelect.selectToView':    'Select a command on the left to view details',
+  'mml.consoleV2.cmdSelect.selectAll':       'Select All',
+  'mml.consoleV2.cmdSelect.selectedCount':   '{selected} selected / {total} total',
+  'mml.consoleV2.cmdSelect.pickPathFirst':   'Select at least one PATH',
   // RawPathPanel
   'mml.consoleV2.rawPath.operationType':     'Operation Type',
   'mml.consoleV2.rawPath.paramPath':         'Parameter Path',
