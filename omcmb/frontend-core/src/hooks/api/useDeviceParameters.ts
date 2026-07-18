@@ -69,6 +69,18 @@ export function useUpdateParameters() {
   });
 }
 
+export function useResetLMTPassword() {
+  return useMutation({
+    mutationFn: ({
+      deviceId,
+      password,
+    }: {
+      deviceId: string;
+      password?: string;
+    }) => api.resetLMTPassword(deviceId, password),
+  });
+}
+
 // T-0126: useSyncParameters 已下线（Path A）。
 // 切换到 useDevices.useSyncDeviceParams（Path B + reason="manual" 完整接入 F09 触发链）。
 

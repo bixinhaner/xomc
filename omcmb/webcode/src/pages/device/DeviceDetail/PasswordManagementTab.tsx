@@ -1,17 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { App, Alert, Button, Form, Input, Radio, Space } from 'antd';
-import { ReloadOutlined, SendOutlined } from '@ant-design/icons';
+import { SendOutlined } from '@ant-design/icons';
 import { useT } from '@/hooks/useT';
-import { useParameterSchema, useSearchParameters } from '@core/hooks/api/useDeviceParameters';
-import { useSecuritySettings } from '@core/hooks/api/useSecuritySettings';
+import { useParameterSchema, useResetLMTPassword, useSearchParameters } from '@core/hooks/api/useDeviceParameters';
 import { deviceTaskApi } from '@core/services/api/deviceTaskApi';
 
 const LMT_PASSWORD_STANDARD_PATH = 'Device.Services.lmt.userConfig.1.pass';
 const LEGACY_LMT_USERNAME_PATH = 'Device.DeviceInfo.X_COM_Localweb_username';
 const LEGACY_LMT_PASSWORD_PATH = 'Device.DeviceInfo.X_COM_Localweb_password';
 const SET_PARAMETER_VALUES_METHOD = 'SetParameterValues';
-const BAICELLS_PASSWORD_RESET_METHOD = 'X_BAICELLS_COM_PasswordReset';
-const DEFAULT_RESET_PASSWORD_VALUE = 'OMC@123456';
 
 type OperationType = 'update' | 'reset';
 
@@ -57,6 +54,8 @@ function resolvePasswordFlow(productClass?: string, deviceModel?: string, networ
     return family.length >= 3 && value.startsWith(family);
   }));
 
+  const isBNQ = hasFamily(['BNQ', 'BAIBNQ']);
+
   if (isNrStation) {
     return {
       operations: ['update'],
@@ -65,6 +64,17 @@ function resolvePasswordFlow(productClass?: string, deviceModel?: string, networ
       passwordPaths: [LEGACY_LMT_PASSWORD_PATH],
       noticeTitle: 'device.password.nrNoticeTitle',
       noticeDesc: 'device.password.nrNoticeDesc',
+    };
+  }
+
+  if (isBNQ) {
+    return {
+      operations: ['update', 'reset'],
+      requiresUsername: true,
+      usernamePaths: [LEGACY_LMT_USERNAME_PATH],
+      passwordPaths: [LEGACY_LMT_PASSWORD_PATH],
+      noticeTitle: 'device.password.noticeTitle',
+      noticeDesc: 'device.password.noticeDesc',
     };
   }
 
@@ -95,8 +105,8 @@ export default function PasswordManagementTab({ deviceId, deviceSn, productClass
   const t = useT();
   const [form] = Form.useForm<PasswordFormValues>();
   const { message, modal, notification } = App.useApp();
-  const { settings: securitySettings } = useSecuritySettings();
   const [taskSubmitting, setTaskSubmitting] = useState(false);
+  const resetMutation = useResetLMTPassword();
   const passwordFlow = useMemo(
     () => resolvePasswordFlow(productClass, deviceModel, networkType),
     [deviceModel, networkType, productClass]
@@ -131,24 +141,11 @@ export default function PasswordManagementTab({ deviceId, deviceSn, productClass
     [availablePathSet, passwordFlow.usernamePaths]
   );
 
-  const schemaLoading = searchQuery.isLoading
-    || lmtSchemaQuery.isLoading
-    || deviceInfoSchemaQuery.isLoading
-    || managementServerSchemaQuery.isLoading;
-
-  const refreshSchema = () => {
-    void searchQuery.refetch();
-    void lmtSchemaQuery.refetch();
-    void deviceInfoSchemaQuery.refetch();
-    void managementServerSchemaQuery.refetch();
-  };
-
   const watchedOperation = Form.useWatch('operation', form);
   const selectedOperation = watchedOperation && supportedOperations.includes(watchedOperation)
     ? watchedOperation
     : supportedOperations[0] ?? 'update';
   const isResetOperation = selectedOperation === 'reset';
-  const resetPasswordValue = securitySettings?.raw.get('defaultPasswd')?.trim() || DEFAULT_RESET_PASSWORD_VALUE;
 
   useEffect(() => {
     form.setFieldsValue({ operation: selectedOperation });
@@ -164,35 +161,30 @@ export default function PasswordManagementTab({ deviceId, deviceSn, productClass
     } catch {
       return;
     }
-    const password = isResetOperation ? resetPasswordValue : values.newPassword ?? '';
-    const parameters = [{
-      name: effectivePasswordPath,
-      value: password,
-      type: 'xsd:string',
-    }];
-
-    if (!isResetOperation && passwordFlow.requiresUsername && effectiveUsernamePath) {
-      parameters.unshift({
-        name: effectiveUsernamePath,
-        value: values.username ?? '',
-        type: 'xsd:string',
-      });
-    }
-
     const submit = async () => {
       try {
         onTaskCleared?.();
         setTaskSubmitting(true);
         if (isResetOperation) {
-          const resetTask = await deviceTaskApi.createTask(deviceSn, {
-            method: BAICELLS_PASSWORD_RESET_METHOD,
-            params: {},
-            commandKey: `password-reset-${Date.now()}`,
-            maxRetries: 0,
-            description: 'Reset LMT login password',
-          });
-          onTaskSubmitted?.(resetTask.id);
+          const result = await resetMutation.mutateAsync({ deviceId });
+          if (result.taskId) {
+            onTaskSubmitted?.(result.taskId);
+          }
         } else {
+          const parameters = [{
+            name: effectivePasswordPath,
+            value: values.newPassword ?? '',
+            type: 'xsd:string',
+          }];
+
+          if (passwordFlow.requiresUsername && effectiveUsernamePath) {
+            parameters.unshift({
+              name: effectiveUsernamePath,
+              value: values.username ?? '',
+              type: 'xsd:string',
+            });
+          }
+
           const commandKey = `password-update-${Date.now()}`;
           const updateTask = await deviceTaskApi.createTask(deviceSn, {
             method: SET_PARAMETER_VALUES_METHOD,
@@ -307,23 +299,14 @@ export default function PasswordManagementTab({ deviceId, deviceSn, productClass
             </>
           )}
 
-          <Space>
-            <Button
-              type="primary"
-              icon={<SendOutlined />}
-              loading={taskSubmitting}
-              onClick={() => void handleSubmit()}
-            >
-              {currentAction}
-            </Button>
-            <Button
-              icon={<ReloadOutlined />}
-              loading={schemaLoading}
-              onClick={refreshSchema}
-            >
-              {t('common.refresh')}
-            </Button>
-          </Space>
+          <Button
+            type="primary"
+            icon={<SendOutlined />}
+            loading={taskSubmitting}
+            onClick={() => void handleSubmit()}
+          >
+            {currentAction}
+          </Button>
         </Form>
       </Space>
     </div>

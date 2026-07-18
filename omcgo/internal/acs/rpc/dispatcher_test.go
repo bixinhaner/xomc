@@ -32,6 +32,7 @@ func TestNewDispatcher_AllHandlersRegistered(t *testing.T) {
 		"Reboot",
 		"FactoryReset",
 		"X_BAICELLS_COM_PasswordReset",
+		"X_COMMON_COM_PasswordReset",
 		"GetParameterAttributes",
 		"SetParameterAttributes",
 		"GetRPCMethods",
@@ -44,7 +45,7 @@ func TestNewDispatcher_AllHandlersRegistered(t *testing.T) {
 	}
 }
 
-func TestBaicellsPasswordResetHandler(t *testing.T) {
+func TestResetLMTPasswordHandler_BaicellsMethod(t *testing.T) {
 	d := NewDispatcher()
 	cmd := &Command{
 		Method:     "X_BAICELLS_COM_PasswordReset",
@@ -182,6 +183,42 @@ func TestFactoryResetHandler(t *testing.T) {
 	require.NoError(t, err)
 	body := string(result)
 	assert.Contains(t, body, "cwmp:FactoryReset")
+}
+
+func TestResetLMTPasswordHandler(t *testing.T) {
+	d := NewDispatcher()
+	cmd := &Command{
+		Method:     "X_BAICELLS_COM_PasswordReset",
+		CommandKey: "reset-lmt-password-key-1",
+		Params:     json.RawMessage(`{}`),
+	}
+
+	result, err := d.BuildRequest(cmd, "cwmp-id-reset-lmt-password")
+
+	require.NoError(t, err)
+	body := string(result)
+	assert.Contains(t, body, "<cwmp:X_BAICELLS_COM_PasswordReset>")
+	assert.Contains(t, body, "<CommandKey>reset-lmt-password-key-1</CommandKey>")
+	assert.Contains(t, body, "</cwmp:X_BAICELLS_COM_PasswordReset>")
+	assert.NotContains(t, body, "cwmp:SetParameterValues")
+	assert.NotContains(t, body, "X_COM_Localweb_password")
+}
+
+func TestResetLMTPasswordHandler_LegacyCommonMethodStillBuildsBaicellsPayload(t *testing.T) {
+	d := NewDispatcher()
+	cmd := &Command{
+		Method:     "X_COMMON_COM_PasswordReset",
+		CommandKey: "legacy-reset-key-1",
+		Params:     json.RawMessage(`{}`),
+	}
+
+	result, err := d.BuildRequest(cmd, "cwmp-id-reset-lmt-password-legacy")
+
+	require.NoError(t, err)
+	body := string(result)
+	assert.Contains(t, body, "<cwmp:X_COMMON_COM_PasswordReset>")
+	assert.Contains(t, body, "<CommandKey>legacy-reset-key-1</CommandKey>")
+	assert.Contains(t, body, "</cwmp:X_COMMON_COM_PasswordReset>")
 }
 
 // TestGetRPCMethodsHandler verifies the TR-069 §A.3.1.2 GetRPCMethods RPC

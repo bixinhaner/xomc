@@ -55,7 +55,8 @@ func NewDispatcher(cfgs ...DispatcherConfig) *Dispatcher {
 	d.Register("Upload", &UploadHandler{})
 	d.Register("Reboot", &RebootHandler{})
 	d.Register("FactoryReset", &FactoryResetHandler{})
-	d.Register("X_BAICELLS_COM_PasswordReset", &BaicellsPasswordResetHandler{})
+	d.Register("X_BAICELLS_COM_PasswordReset", &ResetLMTPasswordHandler{})
+	d.Register("X_COMMON_COM_PasswordReset", &ResetLMTPasswordHandler{})
 	d.Register("GetParameterAttributes", &GetParameterAttributesHandler{})
 	d.Register("SetParameterAttributes", &SetParameterAttributesHandler{})
 	d.Register("GetRPCMethods", &GetRPCMethodsHandler{})
@@ -247,11 +248,11 @@ func (h *FactoryResetHandler) BuildRequest(cmd *Command) ([]byte, error) {
 	return soap.RenderResponse(soap.FactoryResetTmpl, data)
 }
 
-type BaicellsPasswordResetHandler struct{}
+type ResetLMTPasswordHandler struct{}
 
-func (h *BaicellsPasswordResetHandler) BuildRequest(cmd *Command) ([]byte, error) {
-	data := soap.RebootData{ID: cmd.CWMPID, CommandKey: cmd.CommandKey}
-	return soap.RenderResponse(soap.BaicellsPasswordResetTmpl, data)
+func (h *ResetLMTPasswordHandler) BuildRequest(cmd *Command) ([]byte, error) {
+	data := soap.ResetLMTPasswordData{ID: cmd.CWMPID, Method: cmd.Method, CommandKey: cmd.CommandKey}
+	return soap.RenderResponse(soap.ResetLMTPasswordTmpl, data)
 }
 
 // GetRPCMethodsHandler 处理 GetRPCMethods RPC（TR-069 §A.3.1.2）。

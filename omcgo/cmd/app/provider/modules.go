@@ -1963,6 +1963,7 @@ func initMiscModules(c *Container) error {
 			c.ParamRepo,
 			device.NewInfoSyncer(c.DeviceInfoRepo, c.ParamRepo, device.NewPgDeviceRepository(c.PgPool), c.Carriers, logger, device.NewPgLocationObservationRepository(c.PgPool)),
 			c.DeviceRepo, // migration 000146: 写 last_param_sync_failed_at + error
+			c.miscDeps.taskSvc,
 			logger,
 		)
 		if err := rpcRespSub.Start(); err != nil {

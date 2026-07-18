@@ -1642,8 +1642,8 @@ export default function DeviceList() {
                       display: 'inline-flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      width: 28,
-                      height: 28,
+                      width: 22,
+                      height: 22,
                       padding: 0,
                       marginInlineEnd: 0,
                       color: '#1677ff',
@@ -1657,17 +1657,17 @@ export default function DeviceList() {
                         display: 'inline-flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        width: 20,
-                        height: 20,
+                        width: 16,
+                        height: 16,
                       }}
                     >
-                      <LinkOutlined style={{ fontSize: 14, color: '#0958d9' }} />
+                      <LinkOutlined style={{ fontSize: 11, color: '#0958d9' }} />
                       <SyncOutlined
                         spin
                         style={{
                           position: 'absolute',
                           inset: 0,
-                          fontSize: 20,
+                          fontSize: 16,
                           color: '#1677ff',
                         }}
                       />

@@ -3217,7 +3217,6 @@ const messages: Record<string, string> = {
   'device.licenseParam.empty':          '设备暂未上报 License 参数，请点击"刷新"触发拉取',
   'device.licenseParam.notConfigured':  '当前产品未配置 License 参数模型',
   'device.licenseParam.valueNotFetched': '未获取',
-
   // DeviceDetail "密码管理" tab
   'device.password.title':              '密码管理',
   'device.password.noticeTitle':        '通过参数下发管理 LMT 登录密码',
