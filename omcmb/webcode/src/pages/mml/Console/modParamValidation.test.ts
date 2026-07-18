@@ -51,6 +51,15 @@ describe('validateModParamValue', () => {
     ).toBeNull();
   });
 
+  it('counts original string whitespace toward length', () => {
+    expect(
+      validateModParamValue(
+        param({ valueType: 'string', minValue: 3, maxValue: 3 }),
+        ' a ',
+      ),
+    ).toBeNull();
+  });
+
   it('accepts inclusive integer boundaries', () => {
     const path = param({ valueType: 'unsignedInt', minValue: 1, maxValue: 13 });
     expect(validateModParamValue(path, '1')).toBeNull();
@@ -59,6 +68,8 @@ describe('validateModParamValue', () => {
 
   it.each([
     ['x', 'integer'],
+    ['1.2', 'integer'],
+    ['1e3', 'integer'],
     ['0', 'minValue'],
     ['14', 'maxValue'],
     ['9007199254740992', 'integer'],
@@ -110,6 +121,7 @@ describe('getModParamValidationErrors', () => {
       getModParamValidationErrors([invalidPath, validPath], {
         'Device.Cell.Invalid': '0',
         'Device.Cell.Valid': 'ok',
+        'Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.Unselected': 'not-a-number',
       }),
     ).toEqual({
       'Device.Cell.Invalid': { code: 'minValue', bound: 1 },
