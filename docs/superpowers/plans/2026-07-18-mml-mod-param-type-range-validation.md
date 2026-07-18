@@ -927,17 +927,19 @@ Expected: 本需求涉及的 `internal/mml` 通过。若仍只有已记录的
 `internal/core/dictloader.TestCacheVersion_SelfIncrement_DoesNotFireOwnBump` 失败，
 按既有基线报告；出现新的失败则停止交付并修复。
 
-- [ ] **Step 4: 部署 113 自测环境**
+- [ ] **Step 4: 部署 113 自测环境（172.21.158.113）**
 
-先只读解析正在运行的 compose 项目和工作目录：
+先只读解析正在运行的 compose 项目和工作目录。团队既有 113 部署镜像位于
+`/opt/omcgo-src`；Compose label 的 working directory 是其
+`deployments/docker` 子目录：
 
 ```bash
-ssh root@172.17.9.113 'docker ps --format "{{.Names}}\t{{.Image}}\t{{.Ports}}"'
-ssh root@172.17.9.113 'docker inspect $(docker ps --filter name=web --format "{{.ID}}" | head -n 1) --format "{{index .Config.Labels \"com.docker.compose.project\"}} {{index .Config.Labels \"com.docker.compose.project.working_dir\"}}"'
+ssh root@172.21.158.113 'docker ps --format "{{.Names}}\t{{.Image}}\t{{.Ports}}"'
+ssh root@172.21.158.113 'docker inspect omcgo-web-1 --format "{{index .Config.Labels \"com.docker.compose.project\"}} {{index .Config.Labels \"com.docker.compose.project.working_dir\"}} {{index .Config.Labels \"com.docker.compose.project.config_files\"}}"'
 ```
 
-确认返回了非空 project 和存在的 working directory 后，仅同步本需求运行时文件并重建
-同一 compose 项目的 `app`、`web`：
+确认 project 为 `omcgo`、config 指向 `/opt/omcgo-src/deployments/docker/docker-compose.yml`
+且 `/opt/omcgo-src` 存在后，仅同步本需求运行时文件并重建 `app`、`web`：
 
 ```bash
 tar -cf - \
@@ -957,8 +959,8 @@ tar -cf - \
   omcmb/webcode/src/pages/mml/Console/modParamValidation.ts \
   omcmb/webcode/src/pages/mml/Console/components/CommandSelectModal.tsx \
   omcmb/webcode/src/pages/mml/Console/components/ConfigParamsModal.tsx \
-| ssh root@172.17.9.113 'web_id=$(docker ps --filter name=web --format "{{.ID}}" | head -n 1); project=$(docker inspect "$web_id" --format "{{index .Config.Labels \"com.docker.compose.project\"}}"); workdir=$(docker inspect "$web_id" --format "{{index .Config.Labels \"com.docker.compose.project.working_dir\"}}"); test -n "$project" && test -d "$workdir"; tar -xf - -C "$workdir"; cd "$workdir"; docker compose -p "$project" -f deployments/docker/docker-compose.yml up -d --no-deps --build --force-recreate app web; docker compose -p "$project" -f deployments/docker/docker-compose.yml ps app web'
-curl -I http://172.17.9.113:8081/mml/console
+| ssh root@172.21.158.113 'test -d /opt/omcgo-src; tar -xf - -C /opt/omcgo-src; cd /opt/omcgo-src; docker compose -p omcgo -f deployments/docker/docker-compose.yml up -d --no-deps --build --force-recreate app web; docker compose -p omcgo -f deployments/docker/docker-compose.yml ps app web'
+curl -I http://172.21.158.113:8081/mml/console
 ```
 
 若 SSH、compose labels 或远端 working directory 任一不可用，停止部署并报告实际门禁，
@@ -966,7 +968,7 @@ curl -I http://172.17.9.113:8081/mml/console
 
 - [ ] **Step 5: 在 113 环境进行只读浏览器验收**
 
-使用真实浏览器打开 `http://172.17.9.113:8081/mml/console`：
+使用真实浏览器打开 `http://172.21.158.113:8081/mml/console`：
 
 1. 登录后选择一台测试设备。
 2. 选择内置 MOD 命令和两个可写 Path。
