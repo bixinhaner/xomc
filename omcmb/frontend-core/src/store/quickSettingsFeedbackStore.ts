@@ -53,6 +53,7 @@ export interface MultiFeedback {
 export type Feedback = CellFeedback | MultiFeedback;
 
 export interface QuickSettingsSyncMonitor {
+  scope?: 'quickSettings' | 'license';
   sourceId?: string;
   requestId?: string;
   runId?: string;

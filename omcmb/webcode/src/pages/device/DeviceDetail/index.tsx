@@ -1371,6 +1371,7 @@ export default function DeviceDetail() {
   const [omcNameDraft, setOmcNameDraft] = useState('');
   const { data: paramSyncStatus, refetch: refetchParamSyncStatus } = useSyncStatus(device?.id ?? '');
   const [quickSettingsSyncTargetPaths, setQuickSettingsSyncTargetPaths] = useState<string[]>([]);
+  const [licenseSyncTargetPaths, setLicenseSyncTargetPaths] = useState<string[]>([]);
   const quickSettingsSync = useQuickSettingsFeedbackStore((s) => (device?.id ? s.quickSettingsSyncs[device.id] : undefined));
   const quickSettingsSyncPending = Boolean(quickSettingsSync);
   const lastQuickSettingsParamSync = useQuickSettingsFeedbackStore((s) => (device?.id ? s.lastScopedSyncs[device.id] : undefined)) ?? null;
@@ -1600,6 +1601,53 @@ export default function DeviceDetail() {
   const detailQuickSettingsCellInstances = detailResolved.instances;
   const detailQuickSettingsRuleReady = showQuickSettingsTab && detailResolved.ready;
 
+  const submitScopedParamRefresh = useCallback((
+    deviceId: string,
+    targetPaths: string[],
+    scope: 'quickSettings' | 'license' = 'quickSettings',
+  ) => {
+    const parameterPaths = targetPaths.length > 0 ? targetPaths : undefined;
+    const targetCountHint = targetPaths.length;
+
+    useQuickSettingsFeedbackStore.getState().startQuickSettingsSync(deviceId, {
+      scope,
+      lastParamSyncAt: paramSyncStatus?.lastParamSyncAt,
+      lastParamSyncFailedAt: paramSyncStatus?.lastParamSyncFailedAt,
+      targetCount: targetCountHint,
+      gpvTaskCount: 0,
+      startedAt: Date.now(),
+    });
+    syncMutation.mutate(
+      { deviceId, parameterPaths },
+      {
+        onSuccess: (data) => {
+          const targetCount = data.parameterPathsCount ?? targetCountHint;
+          const gpvTaskCount = data.gpvTaskCount ?? 0;
+          useQuickSettingsFeedbackStore.getState().patchQuickSettingsSync(deviceId, {
+            sourceId: data.sourceId,
+            requestId: data.requestId,
+            runId: data.runId,
+            targetCount,
+            gpvTaskCount,
+          });
+          message.success(targetCount > 0
+            ? t('device.detail.deviceFetchQueuedScoped', { id: data.sourceId, count: targetCount, gpvCount: gpvTaskCount })
+            : t('device.detail.deviceFetchQueued', { id: data.sourceId }));
+          void refetchParamSyncStatus();
+        },
+        onError: (err) => {
+          useQuickSettingsFeedbackStore.getState().finishQuickSettingsSync(deviceId);
+          if (isParameterSyncAlreadyRunningError(err)) {
+            void refetchParamSyncStatus();
+            return;
+          }
+          const errMsg = err instanceof Error ? err.message : t('device.detail.deviceFetchTriggerFailed');
+          message.error(errMsg);
+        },
+      },
+    );
+  }, [message, paramSyncStatus?.lastParamSyncAt, paramSyncStatus?.lastParamSyncFailedAt, refetchParamSyncStatus, syncMutation, t]);
+
   const handleHeaderRefresh = useCallback(() => {
     void refetch();
     const deviceId = device?.id;
@@ -1628,88 +1676,23 @@ export default function DeviceDetail() {
               okText: t('common.confirm'),
               cancelText: t('common.cancel'),
               onOk: () => {
-                useQuickSettingsFeedbackStore.getState().startQuickSettingsSync(deviceId, {
-                  lastParamSyncAt: paramSyncStatus?.lastParamSyncAt,
-                  lastParamSyncFailedAt: paramSyncStatus?.lastParamSyncFailedAt,
-                  targetCount: quickSettingsSyncTargetPaths.length,
-                  gpvTaskCount: 0,
-                  startedAt: Date.now(),
-                });
-                syncMutation.mutate(
-                  { deviceId, parameterPaths: quickSettingsSyncTargetPaths },
-                  {
-                    onSuccess: (data) => {
-                      const targetCount = data.parameterPathsCount ?? quickSettingsSyncTargetPaths.length;
-                      const gpvTaskCount = data.gpvTaskCount ?? 0;
-                      useQuickSettingsFeedbackStore.getState().patchQuickSettingsSync(deviceId, {
-                        sourceId: data.sourceId,
-                        requestId: data.requestId,
-                        runId: data.runId,
-                        targetCount,
-                        gpvTaskCount,
-                      });
-                      message.success(targetCount > 0
-                        ? t('device.detail.deviceFetchQueuedScoped', { id: data.sourceId, count: targetCount, gpvCount: gpvTaskCount })
-                        : t('device.detail.deviceFetchQueued', { id: data.sourceId }));
-                      void refetchParamSyncStatus();
-                    },
-                    onError: (err) => {
-                      useQuickSettingsFeedbackStore.getState().finishQuickSettingsSync(deviceId);
-                      if (isParameterSyncAlreadyRunningError(err)) {
-                        void refetchParamSyncStatus();
-                        return;
-                      }
-                      const errMsg = err instanceof Error ? err.message : t('device.detail.deviceFetchTriggerFailed');
-                      message.error(errMsg);
-                    },
-                  },
-                );
+                submitScopedParamRefresh(deviceId, quickSettingsSyncTargetPaths);
               },
             });
             break;
           }
-          useQuickSettingsFeedbackStore.getState().startQuickSettingsSync(deviceId, {
-            lastParamSyncAt: paramSyncStatus?.lastParamSyncAt,
-            lastParamSyncFailedAt: paramSyncStatus?.lastParamSyncFailedAt,
-            targetCount: quickSettingsSyncTargetPaths.length,
-            gpvTaskCount: 0,
-            startedAt: Date.now(),
-          });
-          syncMutation.mutate(
-            { deviceId, parameterPaths: quickSettingsSyncTargetPaths },
-            {
-              onSuccess: (data) => {
-                const targetCount = data.parameterPathsCount ?? quickSettingsSyncTargetPaths.length;
-                const gpvTaskCount = data.gpvTaskCount ?? 0;
-                useQuickSettingsFeedbackStore.getState().patchQuickSettingsSync(deviceId, {
-                  sourceId: data.sourceId,
-                  requestId: data.requestId,
-                  runId: data.runId,
-                  targetCount,
-                  gpvTaskCount,
-                });
-                message.success(targetCount > 0
-                  ? t('device.detail.deviceFetchQueuedScoped', { id: data.sourceId, count: targetCount, gpvCount: gpvTaskCount })
-                  : t('device.detail.deviceFetchQueued', { id: data.sourceId }));
-                void refetchParamSyncStatus();
-              },
-              onError: (err) => {
-                useQuickSettingsFeedbackStore.getState().finishQuickSettingsSync(deviceId);
-                if (isParameterSyncAlreadyRunningError(err)) {
-                  void refetchParamSyncStatus();
-                  return;
-                }
-                const errMsg = err instanceof Error ? err.message : t('device.detail.deviceFetchTriggerFailed');
-                message.error(errMsg);
-              },
-            },
-          );
+          submitScopedParamRefresh(deviceId, quickSettingsSyncTargetPaths);
+        }
+        break;
+      case 'license':
+        if (deviceId) {
+          submitScopedParamRefresh(deviceId, licenseSyncTargetPaths, 'license');
         }
         break;
       default:
         break;
     }
-  }, [activeTab, device?.id, message, modal, paramSyncStatus?.lastParamSyncAt, paramSyncStatus?.lastParamSyncFailedAt, queryClient, quickSettingsSyncTargetPaths, refetch, refetchParamSyncStatus, syncMutation, t]);
+  }, [activeTab, device?.id, licenseSyncTargetPaths, modal, queryClient, quickSettingsSyncTargetPaths, refetch, submitScopedParamRefresh, t]);
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     critical: t('alarm.severity.critical'),
@@ -1919,7 +1902,7 @@ export default function DeviceDetail() {
         void message.success(t('common.operationSuccess'));
         // 刷新设备列表、SN 详情和 composite 详情缓存。
         void queryClient.invalidateQueries({ queryKey: ['devices'] });
-      } catch (err) {
+      } catch (_err) {
         void message.error(t('common.operationFailed'));
       }
     },
@@ -2119,12 +2102,12 @@ export default function DeviceDetail() {
           </div>
           <Space>
             {passwordTaskTag}
-            {/* license/parameters tab 自带明确操作入口，此处头部刷新隐藏，避免语义重复或误导 */}
-            {activeTab !== 'license' && activeTab !== 'parameters' && activeTab !== 'password' && (
+            {/* parameters tab 自带全量同步入口；quickSettings/license 使用页头刷新触发同一套参数同步。 */}
+            {activeTab !== 'parameters' && activeTab !== 'password' && (
               <Button
                 icon={<ReloadOutlined />}
                 onClick={handleHeaderRefresh}
-                loading={activeTab === 'quickSettings' && isQuickSettingsRefreshSubmitting}
+                loading={(activeTab === 'quickSettings' || activeTab === 'license') && isQuickSettingsRefreshSubmitting}
                 disabled={isDeviceParamSyncBusy}
               >
                 {t('common.refresh')}
@@ -2279,7 +2262,10 @@ export default function DeviceDetail() {
               children: (
                 <div style={{ padding: '0 0 16px' }}>
                   <ErrorBoundary>
-                    <LicenseParamsTab deviceId={device.id} />
+                    <LicenseParamsTab
+                      deviceId={device.id}
+                      onSyncTargetPathsChange={setLicenseSyncTargetPaths}
+                    />
                   </ErrorBoundary>
                 </div>
               ),
