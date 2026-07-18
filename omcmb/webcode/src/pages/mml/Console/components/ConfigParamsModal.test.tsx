@@ -45,7 +45,7 @@ function modal(props: Partial<ModalProps> = {}) {
         onConfirmAndExecute={() => undefined}
         {...props}
       />
-    </App>,
+    </App>
   );
 }
 

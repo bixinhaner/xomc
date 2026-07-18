@@ -83,7 +83,10 @@ export default function ConfigParamsModal({
     () => getOrderedSelectedCommandPaths(command?.paramPaths ?? [], selectedPathKeys),
     [command, selectedPathKeys],
   );
-  const standardParamPaths = usesPathSelection ? selectedParamPaths : (command?.paramPaths ?? []);
+  const standardParamPaths = useMemo(
+    () => (usesPathSelection ? selectedParamPaths : (command?.paramPaths ?? [])),
+    [command, selectedParamPaths, usesPathSelection],
+  );
   const scopedCommand = useMemo(
     () => (command && usesPathSelection ? { ...command, paramPaths: standardParamPaths } : command),
     [command, standardParamPaths, usesPathSelection],
@@ -377,7 +380,7 @@ export default function ConfigParamsModal({
         <Button key="cancel" onClick={onCancel}>
           {t('common.cancel')}
         </Button>,
-        <Tooltip key="exec" title={canExecutePerm ? undefined : '无执行权限'}>
+        <Tooltip key="exec" title={canExecutePerm ? undefined : t('common.noPermission')}>
           <Button
             type="primary"
             icon={<PlayCircleOutlined />}
