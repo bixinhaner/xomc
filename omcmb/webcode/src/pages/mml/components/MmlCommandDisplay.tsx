@@ -1,10 +1,8 @@
 import { useMemo, useState } from 'react';
-import { Button, Empty, Input, Modal, Popover, Space, Tag, Tooltip, Typography } from 'antd';
+import { Button, Empty, Input, Modal, Space, Tag, Tooltip, Typography } from 'antd';
 import { parseMmlCommandDisplay } from '@core/utils/mmlCommandDisplay';
 import type { MmlCommandDisplayParam } from '@core/utils/mmlCommandDisplay';
 import { useT } from '@/hooks/useT';
-
-const COMPACT_PARAM_LIMIT = 12;
 
 function operationColor(operation: string): string {
   switch (operation.toUpperCase()) {
@@ -72,7 +70,6 @@ export default function MmlCommandDisplay({ command, maxTargetWidth = 220 }: Mml
   const [paramsModalOpen, setParamsModalOpen] = useState(false);
   const [paramsSearch, setParamsSearch] = useState('');
   const parsed = useMemo(() => parseMmlCommandDisplay(command), [command]);
-  const isLargeParams = parsed.parameterCount > COMPACT_PARAM_LIMIT;
   const filteredParams = useMemo(() => {
     const keyword = paramsSearch.trim().toLowerCase();
     if (!keyword) return parsed.params;
@@ -81,16 +78,6 @@ export default function MmlCommandDisplay({ command, maxTargetWidth = 220 }: Mml
       || param.value.toLowerCase().includes(keyword)
     ));
   }, [paramsSearch, parsed.params]);
-  const paramsContent = parsed.parameterCount > 0 ? (
-    <div style={{ width: 520, maxWidth: '70vw' }}>
-      <Space size={6} style={{ marginBottom: 8 }}>
-        {parsed.operation ? <Tag color={operationColor(parsed.operation)}>{parsed.operation}</Tag> : null}
-        <Typography.Text strong>{parsed.target || parsed.commandHead}</Typography.Text>
-      </Space>
-      <ParamsList params={parsed.params} maxHeight={280} keyColumnWidth={190} />
-    </div>
-  ) : null;
-
   return (
     <Space size={6} wrap={false} style={{ maxWidth: '100%' }}>
       {parsed.operation ? (
@@ -103,19 +90,7 @@ export default function MmlCommandDisplay({ command, maxTargetWidth = 220 }: Mml
           {parsed.target || parsed.commandHead || command}
         </Typography.Text>
       </Tooltip>
-      {paramsContent && !isLargeParams ? (
-        <Popover
-          title={t('mml.scriptParamsTitle')}
-          content={paramsContent}
-          trigger="click"
-          placement="bottomLeft"
-        >
-          <Button type="link" size="small" style={{ padding: 0, flex: '0 0 auto' }}>
-            {t('mml.scriptParamsCount', { count: parsed.parameterCount })}
-          </Button>
-        </Popover>
-      ) : null}
-      {isLargeParams ? (
+      {parsed.parameterCount > 0 ? (
         <>
           <Button
             type="link"
@@ -135,6 +110,8 @@ export default function MmlCommandDisplay({ command, maxTargetWidth = 220 }: Mml
               onCancel={() => setParamsModalOpen(false)}
               footer={null}
               width={760}
+              zIndex={1600}
+              getContainer={() => document.body}
             >
               <Space direction="vertical" size={12} style={{ width: '100%' }}>
                 <Space size={6} wrap>

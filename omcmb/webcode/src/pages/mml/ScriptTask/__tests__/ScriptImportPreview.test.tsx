@@ -19,7 +19,7 @@ describe('ScriptImportPreview', () => {
     vi.restoreAllMocks();
   });
 
-  it('shows executable MML text for raw-path plan commands', () => {
+  it('shows executable MML text for raw-path plan commands', async () => {
     renderPreview(<ScriptImportPreview validation={{
       originalFilename: 'raw-path.txt',
       planItems: [
@@ -57,6 +57,12 @@ describe('ScriptImportPreview', () => {
     expect(screen.getAllByText('LST')[0]).toBeInTheDocument();
     expect(screen.getAllByText('Device.FAP.Ipsec.')).toHaveLength(2);
     expect(screen.getByText('参数 2 项')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: '参数 2 项' }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByText('匹配 2 / 2 项')).toBeInTheDocument();
+    expect(screen.getByText('TUNNEL_ENABLE')).toBeInTheDocument();
+    expect(screen.getByText('TUNNEL_GATEWAY')).toBeInTheDocument();
   });
 
   it('opens a searchable parameter dialog for large command parameter sets', async () => {
