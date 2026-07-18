@@ -85,6 +85,80 @@ describe('ConfigParamsModal', () => {
     expect(screen.getByRole('textbox')).toBeInTheDocument();
   });
 
+  it('shows the standard data type and keeps minValue as the MOD default', () => {
+    renderModal({
+      command: {
+        ...command,
+        operationType: 'MOD',
+        paramPaths: [{
+          path: 'Device.Info.Name',
+          label: 'Name',
+          writable: true,
+          isObject: false,
+          valueType: 'string',
+          minValue: 2,
+          maxValue: 8,
+        }],
+      },
+      selectedPathKeys: ['Device.Info.Name'],
+    });
+
+    expect(screen.getByText('string')).toBeInTheDocument();
+    expect(screen.getByRole('textbox')).toHaveValue('2');
+  });
+
+  it('blocks execution and shows a per-field error outside the configured range', () => {
+    renderModal({
+      command: {
+        ...command,
+        operationType: 'MOD',
+        paramPaths: [{
+          path: 'Device.Radio.Channel',
+          label: 'Channel',
+          writable: true,
+          isObject: false,
+          valueType: 'unsignedInt',
+          minValue: 1,
+          maxValue: 13,
+        }],
+      },
+      selectedPathKeys: ['Device.Radio.Channel'],
+    });
+
+    const input = screen.getByRole('textbox');
+    const execute = screen.getByRole('button', { name: /mml.consoleV2.config.confirmAndExecute/ });
+    fireEvent.change(input, { target: { value: '14' } });
+
+    expect(screen.getByText('mml.consoleV2.config.validation.maxValue')).toBeInTheDocument();
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(execute).toBeDisabled();
+
+    fireEvent.change(input, { target: { value: '13' } });
+    expect(screen.queryByText('mml.consoleV2.config.validation.maxValue')).not.toBeInTheDocument();
+    expect(execute).toBeEnabled();
+  });
+
+  it('does not type-check a nonblank MOD value when its range is not configured', () => {
+    renderModal({
+      command: {
+        ...command,
+        operationType: 'MOD',
+        paramPaths: [{
+          path: 'Device.Radio.Channel',
+          label: 'Channel',
+          writable: true,
+          isObject: false,
+          valueType: 'unsignedInt',
+        }],
+      },
+      selectedPathKeys: ['Device.Radio.Channel'],
+    });
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'not-a-number' } });
+
+    expect(screen.getByRole('button', { name: /mml.consoleV2.config.confirmAndExecute/ })).toBeEnabled();
+  });
+
   it('requires a nonblank value for every selected MOD Path before execution', () => {
     const onConfirmAndExecute = vi.fn();
     renderModal({

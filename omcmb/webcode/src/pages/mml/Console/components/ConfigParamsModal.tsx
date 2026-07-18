@@ -23,10 +23,10 @@ import { newRawPathRow } from '../rawPathRow';
 import { validateRawPath } from '../rawPathValidate';
 import { computeInstanceSlots, resolveObjectPath } from '../adapters';
 import {
-  areSelectedPathValuesComplete,
   commandUsesPathSelection,
   getOrderedSelectedCommandPaths,
 } from '../pathSelection';
+import { getModParamValidationErrors } from '../modParamValidation';
 import { useT } from '@/hooks/useT';
 import { usePermission } from '@core/hooks/usePermission';
 
@@ -172,6 +172,12 @@ export default function ConfigParamsModal({
   const rawAllValid = rawPayload.rows.every(
     (r) => validateRawPath(rawPayload.operationType, r.path) === null,
   );
+  const modValidationErrors = useMemo(
+    () => command?.operationType === 'MOD'
+      ? getModParamValidationErrors(selectedParamPaths, values)
+      : {},
+    [command?.operationType, selectedParamPaths, values],
+  );
 
   // 写类操作各自的提醒文案（取代原「写操作将对所有已选设备生效」通用提示，§需求 3）。
   const writeReminderKey = currentOp ? WRITE_REMINDER_KEYS[currentOp] : undefined;
@@ -182,7 +188,7 @@ export default function ConfigParamsModal({
   //   - LST/MOD 依赖勾选/可写参数 PATH → checkedPaths 为空时置灰不可执行（保持原行为）。
   const isAddRmvCmd = command?.operationType === 'ADD' || command?.operationType === 'RMV';
   const modValuesValid =
-    command?.operationType !== 'MOD' || areSelectedPathValuesComplete(selectedParamPaths, values);
+    command?.operationType !== 'MOD' || Object.keys(modValidationErrors).length === 0;
   const standardValid =
     !!command &&
     (isAddRmvCmd
@@ -335,24 +341,33 @@ export default function ConfigParamsModal({
           </div>
         ) : (
           <Space orientation="vertical" size={10} style={{ width: '100%', marginTop: 8 }}>
-            {writablePaths.map((p) => (
-              <div key={p.path} style={{ whiteSpace: 'nowrap' }}>
-                <Text>{p.label}</Text>{' '}
-                <Text type="secondary" code style={{ fontSize: 11 }}>
-                  {p.path}
-                </Text>
-                <Input
-                  placeholder={t('mml.consoleV2.config.inputFieldPlaceholder', { label: p.label })}
-                  value={values[p.path] ?? ''}
-                  onChange={(e) => setValues((prev) => ({ ...prev, [p.path]: e.target.value }))}
-                />
-              </div>
-            ))}
-            {command.operationType === 'MOD' && !modValuesValid && (
-              <Text type="danger" style={{ fontSize: 12 }}>
-                {t('mml.consoleV2.config.modValueRequired')}
-              </Text>
-            )}
+            {writablePaths.map((p) => {
+              const error = command.operationType === 'MOD' ? modValidationErrors[p.path] : undefined;
+
+              return (
+                <div key={p.path} style={{ whiteSpace: 'nowrap' }}>
+                  <Text>{p.label}</Text>{' '}
+                  <Text type="secondary" code style={{ fontSize: 11 }}>
+                    {p.path}
+                  </Text>
+                  {command.operationType === 'MOD' && p.valueType && (
+                    <Tag style={{ marginInlineStart: 6 }}>{p.valueType}</Tag>
+                  )}
+                  <Input
+                    status={error ? 'error' : undefined}
+                    aria-invalid={Boolean(error)}
+                    placeholder={t('mml.consoleV2.config.inputFieldPlaceholder', { label: p.label })}
+                    value={values[p.path] ?? ''}
+                    onChange={(e) => setValues((prev) => ({ ...prev, [p.path]: e.target.value }))}
+                  />
+                  {error && (
+                    <Text type="danger" style={{ fontSize: 12 }}>
+                      {t(`mml.consoleV2.config.validation.${error.code}`, { bound: error.bound ?? '' })}
+                    </Text>
+                  )}
+                </div>
+              );
+            })}
           </Space>
         )}
       </div>
