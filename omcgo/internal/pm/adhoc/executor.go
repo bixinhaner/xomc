@@ -274,9 +274,10 @@ func (e *Executor) queryAndConvert(ctx context.Context, task *Task, g metrics.Gr
 			// 不扑空也不越过水位。游标由调度器按 last_fire_at 推进，下次 tick 水位到了再取。
 			return nil, nil
 		}
-		// 结果聚合表里桶行的 `time` 列即桶起点；StartTime==EndTime==桶起点 → 只命中这一格。
+		// aggregator.Query 对 `time` 列使用半开区间 [start, end)；end 必须推进到下一桶，
+		// 否则 [bucket, bucket) 会查不到任何水位桶行。
 		startTime = bucket
-		endTime = bucket
+		endTime = nextBucketStart(g, bucket)
 	}
 	req := aggregator.QueryRequest{
 		Granularity:  g,
