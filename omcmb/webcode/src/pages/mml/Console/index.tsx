@@ -19,6 +19,7 @@ import type {
   ResultRow,
 } from './types';
 import { isReadOp, opLabel } from './constants';
+import { commandUsesPathSelection } from './pathSelection';
 import { useConsoleHistory } from './useConsoleHistory';
 import { useExecStream } from './useExecStream';
 import {
@@ -76,6 +77,7 @@ export default function MMLConsole() {
   // 所选产品 ID（设备弹框强制同一产品）：用于「选择命令 / 配置参数」按产品拉不支持 path 过滤。
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [command, setCommand] = useState<CommandItem | null>(null);
+  const [selectedPathKeys, setSelectedPathKeys] = useState<string[]>([]);
   const [config, setConfig] = useState<ExecRequest | null>(null);
   const [configTouched, setConfigTouched] = useState(false);
   // 配置参数弹框打开时激活的标签：命令参数(standard) / 指定参数(raw)。
@@ -508,13 +510,20 @@ export default function MMLConsole() {
       <CommandSelectModal
         open={commandModalOpen}
         value={command}
+        selectedPathKeys={selectedPathKeys}
         deviceSn={selectedSns[0]}
         productId={selectedProductId}
         onCancel={() => setCommandModalOpen(false)}
-        onConfirm={(cmd) => {
+        onConfirm={(cmd, pathKeys) => {
           setCommand(cmd);
-          // 选命令后置默认配置(标准模式全部路径),让「执行」无需先开③
-          setConfig({ mode: 'standard', checkedPaths: cmd.paramPaths.map((p) => p.path) });
+          setSelectedPathKeys(pathKeys);
+          // 选命令后置默认配置，让「执行」无需先开③。
+          setConfig({
+            mode: 'standard',
+            checkedPaths: commandUsesPathSelection(cmd.operationType)
+              ? pathKeys
+              : cmd.paramPaths.map((p) => p.path),
+          });
           setConfigTouched(false);
           setConfigMode('standard');
           setCommandModalOpen(false);
@@ -532,6 +541,7 @@ export default function MMLConsole() {
       <ConfigParamsModal
         open={configModalOpen}
         command={command}
+        selectedPathKeys={selectedPathKeys}
         deviceCount={selectedSns.length}
         initialMode={configMode}
         onGotoCommand={() => {

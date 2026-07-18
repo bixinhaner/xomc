@@ -6371,6 +6371,9 @@ const messages: Record<string, string> = {
   'mml.consoleV2.cmdSelect.paramPathCount':  '参数 PATH（{count} 项）：',
   'mml.consoleV2.cmdSelect.noParamPath':     '该命令无可展示的参数路径',
   'mml.consoleV2.cmdSelect.selectToView':    '请选择左侧命令查看详情',
+  'mml.consoleV2.cmdSelect.selectAll':       '全选',
+  'mml.consoleV2.cmdSelect.selectedCount':   '已选 {selected} 项 / 共 {total} 项',
+  'mml.consoleV2.cmdSelect.pickPathFirst':   '请至少选择一个 PATH',
   // RawPathPanel
   'mml.consoleV2.rawPath.operationType':     '操作类型',
   'mml.consoleV2.rawPath.paramPath':         '参数路径',
@@ -6382,6 +6385,8 @@ const messages: Record<string, string> = {
   'mml.consoleV2.rawPath.valuePlaceholder':  '请输入参数值',
   'mml.consoleV2.rawPath.singleRowLocked':   'ADD / RMV 单次仅作用一个对象，已锁定单行',
   // ConfigParamsModal
+  'mml.consoleV2.config.confirmSelectedPaths': '确认本次执行的 PATH',
+  'mml.consoleV2.config.modValueRequired':      '请填写所有已选 PATH 的修改值',
   'mml.consoleV2.config.writeReminder.addRmv': 'ADD / RMV 协议规定单次仅作用于一个对象路径，已锁定为单行。',
   'mml.consoleV2.config.writeReminder.mod':  'MOD 将修改所有已选设备的参数值，请确认参数值无误。',
   'mml.consoleV2.config.pickDeviceFirst':    '请先选择目标设备',

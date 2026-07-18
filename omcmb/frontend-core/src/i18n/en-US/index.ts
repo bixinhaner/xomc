@@ -6342,6 +6342,9 @@ const messages: Record<string, string> = {
   'mml.consoleV2.cmdSelect.paramPathCount':  'Parameter PATH ({count}):',
   'mml.consoleV2.cmdSelect.noParamPath':     'This command has no parameter paths to show',
   'mml.consoleV2.cmdSelect.selectToView':    'Select a command on the left to view details',
+  'mml.consoleV2.cmdSelect.selectAll':       'Select All',
+  'mml.consoleV2.cmdSelect.selectedCount':   '{selected} selected / {total} total',
+  'mml.consoleV2.cmdSelect.pickPathFirst':   'Select at least one PATH',
   // RawPathPanel
   'mml.consoleV2.rawPath.operationType':     'Operation Type',
   'mml.consoleV2.rawPath.paramPath':         'Parameter Path',
@@ -6353,6 +6356,8 @@ const messages: Record<string, string> = {
   'mml.consoleV2.rawPath.valuePlaceholder':  'Enter parameter value',
   'mml.consoleV2.rawPath.singleRowLocked':   'ADD / RMV acts on only one object per execution; locked to a single row',
   // ConfigParamsModal
+  'mml.consoleV2.config.confirmSelectedPaths': 'Confirm PATHs for this execution',
+  'mml.consoleV2.config.modValueRequired':      'Enter a value for every selected PATH',
   'mml.consoleV2.config.writeReminder.addRmv': 'ADD / RMV protocol acts on only one object path per execution; locked to a single row.',
   'mml.consoleV2.config.writeReminder.mod':  'MOD will modify the parameter values of all selected devices; please confirm the values are correct.',
   'mml.consoleV2.config.pickDeviceFirst':    'Please select target devices first',
