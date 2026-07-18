@@ -85,6 +85,41 @@ describe('ConfigParamsModal', () => {
     expect(screen.getByRole('textbox')).toBeInTheDocument();
   });
 
+  it('does not block MOD execution for a selected non-writable Path hidden from the config page', () => {
+    renderModal({
+      command: {
+        ...command,
+        operationType: 'MOD',
+        paramPaths: [
+          {
+            path: 'Device.Radio.Channel',
+            label: 'Channel',
+            writable: true,
+            isObject: false,
+            valueType: 'unsignedInt',
+            minValue: 1,
+            maxValue: 13,
+          },
+          {
+            path: 'Device.Radio.Serial',
+            label: 'Serial',
+            writable: false,
+            isObject: false,
+          },
+        ],
+      },
+      selectedPathKeys: ['Device.Radio.Channel', 'Device.Radio.Serial'],
+    });
+
+    expect(screen.getByText('Channel')).toBeInTheDocument();
+    expect(screen.queryByText('Serial')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('textbox')).toHaveLength(1);
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '13' } });
+
+    expect(screen.getByRole('button', { name: /mml.consoleV2.config.confirmAndExecute/ })).toBeEnabled();
+  });
+
   it('shows the standard data type and keeps minValue as the MOD default', () => {
     renderModal({
       command: {

@@ -174,9 +174,9 @@ export default function ConfigParamsModal({
   );
   const modValidationErrors = useMemo(
     () => command?.operationType === 'MOD'
-      ? getModParamValidationErrors(selectedParamPaths, values)
+      ? getModParamValidationErrors(writablePaths, values)
       : {},
-    [command?.operationType, selectedParamPaths, values],
+    [command?.operationType, values, writablePaths],
   );
 
   // 写类操作各自的提醒文案（取代原「写操作将对所有已选设备生效」通用提示，§需求 3）。
