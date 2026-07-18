@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import { Button, Descriptions, Drawer, Space, Tag, Typography, message } from 'antd';
 import { CheckCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
@@ -33,12 +34,19 @@ const uiStateColorMap: Record<NotificationCenterUiState, string> = {
 
 export default function MessageList() {
   const t = useT();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const targetMessageId = searchParams.get('messageId');
   const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(20);
   const [detail, setDetail] = useState<NotificationCenterItem | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [refreshInterval, setRefreshInterval] = useState(30);
+  const dismissedMessageIdRef = useRef<string | null>(null);
+  const [refreshSpinnerActive, setRefreshSpinnerActive] = useState(false);
+  const refreshSpinStartedAtRef = useRef<number | null>(null);
+  const refreshSpinTimeoutRef = useRef<number | null>(null);
 
   const isReadFilter =
     filters.isRead === 'true' ? true : filters.isRead === 'false' ? false : undefined;
@@ -52,8 +60,92 @@ export default function MessageList() {
     },
     refetchIntervalMs: autoRefresh ? refreshInterval * 1000 : undefined,
   });
+  const { refetch, isFetching } = listQuery;
   const markRead = useMarkNotificationRead();
   const markAllRead = useMarkAllNotificationsRead();
+
+  const handleManualRefresh = useCallback(() => {
+    if (refreshSpinTimeoutRef.current !== null) {
+      window.clearTimeout(refreshSpinTimeoutRef.current);
+      refreshSpinTimeoutRef.current = null;
+    }
+    if (refreshSpinStartedAtRef.current === null) {
+      refreshSpinStartedAtRef.current = Date.now();
+    }
+    setRefreshSpinnerActive(true);
+    void refetch();
+  }, [refetch]);
+
+  useEffect(() => {
+    if (isFetching) {
+      if (refreshSpinTimeoutRef.current !== null) {
+        window.clearTimeout(refreshSpinTimeoutRef.current);
+        refreshSpinTimeoutRef.current = null;
+      }
+      if (refreshSpinStartedAtRef.current === null) {
+        refreshSpinStartedAtRef.current = Date.now();
+      }
+      setRefreshSpinnerActive(true);
+      return;
+    }
+
+    if (refreshSpinStartedAtRef.current === null) {
+      setRefreshSpinnerActive(false);
+      return;
+    }
+
+    const elapsedMs = Date.now() - refreshSpinStartedAtRef.current;
+    const remainingMs = Math.max(0, 1000 - elapsedMs);
+
+    refreshSpinTimeoutRef.current = window.setTimeout(() => {
+      refreshSpinStartedAtRef.current = null;
+      refreshSpinTimeoutRef.current = null;
+      setRefreshSpinnerActive(false);
+    }, remainingMs);
+
+    return () => {
+      if (refreshSpinTimeoutRef.current !== null) {
+        window.clearTimeout(refreshSpinTimeoutRef.current);
+        refreshSpinTimeoutRef.current = null;
+      }
+    };
+  }, [isFetching]);
+
+  useEffect(() => () => {
+    if (refreshSpinTimeoutRef.current !== null) {
+      window.clearTimeout(refreshSpinTimeoutRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!autoRefresh) return;
+    void refetch();
+  }, [autoRefresh, refreshInterval, refetch]);
+
+  useEffect(() => {
+    if (!targetMessageId) {
+      dismissedMessageIdRef.current = null;
+      return;
+    }
+    if (dismissedMessageIdRef.current === targetMessageId) return;
+
+    const stateItem = (location.state as { notificationItem?: NotificationCenterItem } | null)
+      ?.notificationItem;
+    if (stateItem?.id === targetMessageId) {
+      setDetail({ ...stateItem, isRead: true });
+      return;
+    }
+
+    const item = listQuery.data?.items.find((n) => n.id === targetMessageId);
+    if (!item) return;
+
+    setDetail({ ...item, isRead: true });
+    if (!item.isRead) {
+      void markRead.mutateAsync(item.id).catch(() => {
+        // Mark-read failure should not block opening the message detail.
+      });
+    }
+  }, [listQuery.data?.items, location.state, markRead, targetMessageId]);
 
   const typeLabelMap: Record<NotificationCenterType, string> = useMemo(
     () => ({
@@ -105,6 +197,7 @@ export default function MessageList() {
   );
 
   const handleOpenMessage = async (item: NotificationCenterItem) => {
+    dismissedMessageIdRef.current = null;
     if (!item.isRead) {
       try {
         await markRead.mutateAsync(item.id);
@@ -112,7 +205,23 @@ export default function MessageList() {
         // Mark-read failure should not block viewing the message detail.
       }
     }
+    const next = new URLSearchParams(searchParams);
+    next.set('messageId', item.id);
+    setSearchParams(next, { replace: true });
     setDetail({ ...item, isRead: true });
+  };
+
+  const handleCloseDetail = () => {
+    if (!targetMessageId) {
+      setDetail(null);
+      return;
+    }
+
+    dismissedMessageIdRef.current = targetMessageId;
+    const next = new URLSearchParams(searchParams);
+    next.delete('messageId');
+    setSearchParams(next, { replace: true });
+    setDetail(null);
   };
 
   const handleMarkAllRead = async () => {
@@ -246,7 +355,7 @@ export default function MessageList() {
           setPage(p);
           setPageSize(s);
         }}
-        onRefresh={() => void listQuery.refetch()}
+        onRefresh={handleManualRefresh}
         hideRealtime
         hideRefresh
         scroll={{ x: 1450 }}
@@ -266,8 +375,8 @@ export default function MessageList() {
             <Button
               size="small"
               icon={<ReloadOutlined />}
-              loading={listQuery.isFetching}
-              onClick={() => void listQuery.refetch()}
+              loading={refreshSpinnerActive}
+              onClick={handleManualRefresh}
             >
               {t('common.refresh')}
             </Button>
@@ -276,7 +385,7 @@ export default function MessageList() {
               intervalSeconds={refreshInterval}
               onEnabledChange={setAutoRefresh}
               onIntervalChange={setRefreshInterval}
-              spinning={autoRefresh && listQuery.isFetching}
+              spinning={autoRefresh && refreshSpinnerActive}
               size="small"
             />
           </Space>
@@ -286,7 +395,7 @@ export default function MessageList() {
         item={detail}
         typeLabelMap={typeLabelMap}
         statusLabelMap={statusLabelMap}
-        onClose={() => setDetail(null)}
+        onClose={handleCloseDetail}
       />
     </div>
   );
