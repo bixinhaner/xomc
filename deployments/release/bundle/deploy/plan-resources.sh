@@ -220,12 +220,12 @@ log "  CPU 空闲预算  : ${C_G}${C_B}${IDLE_CPU} 核${C_0}  = ${HOST_CPU} − 
 #   postgres      7168   16384        25           业务主库；须容 max_connections=300(池+exporter+余,与 main #131 对齐)
 #   postgres-tsdb 4096   12288        22           时序库(#347)：PM COPY 入库 + KPI 聚合，写压力主要在此；独立实例，计入预算防双 PG 超分 OOM
 #   redis         3072    8192        15           appendonly，限额需≥1.5×maxmemory
-#   nats           512    2048         5
+#   nats          1024    2048         5           JetStream backlog + client buffers，避免 512MiB cgroup 临界
 #   minio         3072    4096         8           对象存储；压测发现按可见CPU配额自动估算的并发上限过于保守，且线上巡检 2.5GiB 配额下已到 88%，floor/ceil 一并调大留余量
 #   web            512     512         0           静态+反代，固定
 # 监控栈（固定块，不纵向伸缩，但计入预算）：~4224 MiB
 COMP_NAMES=(app acs worker postgres postgres-tsdb redis nats minio web)
-COMP_FLOOR=(1536 2048 1024 7168 4096 3072 512 3072 512)
+COMP_FLOOR=(1536 2048 1024 7168 4096 3072 1024 3072 512)
 COMP_CEIL=(3072 3584 2048 16384 12288 8192 2048 4096 512)
 COMP_WEIGHT=(10 18 25 25 22 15 5 8 0)
 
@@ -291,6 +291,7 @@ APP_MEM=${COMP_MEM[$(idx app)]};     ACS_MEM=${COMP_MEM[$(idx acs)]}
 WORKER_MEM=${COMP_MEM[$(idx worker)]}; PG_MEM=${COMP_MEM[$(idx postgres)]}
 TSDB_MEM=${COMP_MEM[$(idx postgres-tsdb)]}
 REDIS_MEM=${COMP_MEM[$(idx redis)]};   NATS_MEM=${COMP_MEM[$(idx nats)]}
+NATS_MAX_MEMORY_STORE=$(( NATS_MEM * 1024 * 1024 / 4 ))
 MINIO_MEM=${COMP_MEM[$(idx minio)]};   WEB_MEM=${COMP_MEM[$(idx web)]}
 
 APP_GOMEM=$(gomemlimit "$APP_MEM"); ACS_GOMEM=$(gomemlimit "$ACS_MEM"); WORKER_GOMEM=$(gomemlimit "$WORKER_MEM")
@@ -402,7 +403,7 @@ done
   echo "REDIS_MAXMEMORY=${REDIS_MAXMEM}mb"; echo "REDIS_MAXMEMORY_POLICY=$REDIS_POLICY"
   echo ""
   echo "# ── NATS / MinIO / Web ──"
-  echo "NATS_CPUS=$CPU_nats";     echo "NATS_MEM=${NATS_MEM}m"
+  echo "NATS_CPUS=$CPU_nats";     echo "NATS_MEM=${NATS_MEM}m"; echo "NATS_MAX_MEMORY_STORE=$NATS_MAX_MEMORY_STORE"
   echo "MINIO_CPUS=$CPU_minio";   echo "MINIO_MEM=${MINIO_MEM}m"
   echo "WEB_CPUS=$CPU_web";       echo "WEB_MEM=${WEB_MEM}m"
   echo ""

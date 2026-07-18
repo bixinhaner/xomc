@@ -60,14 +60,17 @@ type connSessionEntry struct {
 
 // Handler 处理 TR069/CWMP HTTP 请求。
 type Handler struct {
-	sessionStore            SessionStore
-	taskService             TaskService // 统一任务管理服务
-	eventBus                event.EventBus
-	authenticator           auth.DeviceAuthenticator
-	rpcDispatcher           *rpc.Dispatcher
-	rateLimiter             *DeviceRateLimiter
-	admission               AdmissionController
-	metrics                 *ACSMetrics
+	sessionStore  SessionStore
+	taskService   TaskService // 统一任务管理服务
+	eventBus      event.EventBus
+	authenticator auth.DeviceAuthenticator
+	rpcDispatcher *rpc.Dispatcher
+	rateLimiter   *DeviceRateLimiter
+	admission     AdmissionController
+	metrics       *ACSMetrics
+	// localActiveSessions 只记录本进程曾对 ActiveSessions 递增的 session ID。
+	// 共享 SessionStore 可能包含重启前或其它实例的会话，清理它们时不能递减本进程 gauge。
+	localActiveSessions     sync.Map
 	logger                  *zap.Logger
 	requestIDPrefix         string                    // 请求 ID 前缀，如 "acs"
 	enableTestTaskInjection bool                      // 启用随机测试任务注入（仅测试用）
@@ -191,7 +194,7 @@ func (h *Handler) reapOrphanedSession(deviceSN, sessionID, reason string) {
 			zap.String("session_id", sessionID),
 			zap.String("reason", reason))
 		h.admission.Release(ctx, sessionID)
-		h.metrics.ActiveSessions.Dec()
+		h.untrackActiveSession(sessionID)
 		// 仍触发 postSessionWake —— 即使会话已消失，设备队列中可能仍有待执行命令。
 		if h.connReqSender != nil && h.postSessionWakeCfg.Enabled && deviceSN != "" {
 			go h.postSessionWake(deviceSN)
@@ -477,8 +480,8 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 			zap.Error(err))
 	}
 
-	// 跟踪活跃会话 —— 将由 completeSession() 或清理器递减。
-	h.metrics.ActiveSessions.Inc()
+	// 跟踪本进程活跃会话 —— 将由 completeSession() 或清理器配对递减。
+	h.trackActiveSession(sessionID)
 
 	// 记录指标
 	eventCodes := tr069.EventCodes(inform.Event)
@@ -1039,13 +1042,11 @@ func (h *Handler) popAndMarkNextTask(ctx context.Context, deviceSN string, log *
 // completeSession 完成 TR069 会话，释放所有相关资源。
 // 根据 Session.ID 删除 Redis 中的会话数据。
 func (h *Handler) completeSession(ctx context.Context, session *Session) {
-	// 递减活跃会话计数
-	h.metrics.ActiveSessions.Dec()
-
 	if session == nil {
 		// 无会话上下文 → 无 sessionID，准入槽位无法配对释放（由 TTL 自愈回收）。
 		return
 	}
+	h.untrackActiveSession(session.ID)
 
 	// 释放该 sessionID 的准入槽位（issue #65 Option B：槽位以 sessionID 为成员，配对释放）。
 	h.admission.Release(ctx, session.ID)
@@ -1077,6 +1078,24 @@ func (h *Handler) completeSession(ctx context.Context, session *Session) {
 	// 异步检查队列并续唤设备
 	if h.connReqSender != nil && h.postSessionWakeCfg.Enabled && session.DeviceSN != "" {
 		go h.postSessionWake(session.DeviceSN)
+	}
+}
+
+func (h *Handler) trackActiveSession(sessionID string) {
+	if h == nil || h.metrics == nil || sessionID == "" {
+		return
+	}
+	if _, loaded := h.localActiveSessions.LoadOrStore(sessionID, struct{}{}); !loaded {
+		h.metrics.ActiveSessions.Inc()
+	}
+}
+
+func (h *Handler) untrackActiveSession(sessionID string) {
+	if h == nil || h.metrics == nil || sessionID == "" {
+		return
+	}
+	if _, loaded := h.localActiveSessions.LoadAndDelete(sessionID); loaded {
+		h.metrics.ActiveSessions.Dec()
 	}
 }
 

@@ -42,12 +42,21 @@ const (
 	paramSyncResultMaxAckPending  = 512
 	defaultPullConcurrent         = 1
 	defaultPullMaxAckPending      = 2048 // 背压上限：未 Ack 消息超过此值时 Fetch 阻塞
+	// 非 PM push consumer 保持 NATS 既有默认容量；PM subject 由 worker 按实际并发单独收紧。
+	defaultQueueMaxAckPending = 1000
 )
 
 type PullTuning struct {
 	BatchSize     int
 	Concurrency   int
 	AckWait       time.Duration
+	MaxAckPending int
+}
+
+// QueueTuning 控制 push durable consumer 的服务端在途上限。
+type QueueTuning struct {
+	AckWait       time.Duration
+	MaxDeliver    int
 	MaxAckPending int
 }
 
@@ -62,6 +71,7 @@ type NATSEventBus struct {
 	pullSubscriptions []*pullSubscription  // pull subscriptions；Close() 负责 drain + unsubscribe
 	mu                sync.Mutex
 	pullTuning        map[string]PullTuning
+	queueTuning       map[string]QueueTuning
 	logger            *zap.Logger
 	metrics           *EventBusMetrics // issue #20：投递结果指标；nil 时（单进程/单测）静默 no-op。
 	ctx               context.Context
@@ -72,13 +82,23 @@ type NATSEventBus struct {
 func NewNATSEventBus(conn *nats.Conn, js nats.JetStreamContext, logger *zap.Logger) *NATSEventBus {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &NATSEventBus{
-		conn:       conn,
-		js:         js,
-		pullTuning: make(map[string]PullTuning),
-		logger:     logger,
-		ctx:        ctx,
-		cancel:     cancel,
+		conn:        conn,
+		js:          js,
+		pullTuning:  make(map[string]PullTuning),
+		queueTuning: make(map[string]QueueTuning),
+		logger:      logger,
+		ctx:         ctx,
+		cancel:      cancel,
 	}
+}
+
+func (b *NATSEventBus) SetQueueTuning(subject string, tuning QueueTuning) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.queueTuning == nil {
+		b.queueTuning = make(map[string]QueueTuning)
+	}
+	b.queueTuning[subject] = tuning
 }
 
 // SetMetrics attaches delivery-outcome metrics (issue #20). Call before any
@@ -128,13 +148,14 @@ func (b *NATSEventBus) Subscribe(subject string, handler EventHandler) (Subscrip
 }
 
 func (b *NATSEventBus) QueueSubscribe(subject string, queue string, handler EventHandler) (Subscription, error) {
-	ackWait, maxDeliver := b.ensureQueueConsumerTuning(subject, queue)
+	tuning := b.ensureQueueConsumerTuning(subject, queue)
 
 	sub, err := b.js.QueueSubscribe(subject, queue, b.wrapHandler(handler),
 		nats.Durable(queue),
 		nats.AckExplicit(),
-		nats.AckWait(ackWait),
-		nats.MaxDeliver(maxDeliver),
+		nats.AckWait(tuning.AckWait),
+		nats.MaxDeliver(tuning.MaxDeliver),
+		nats.MaxAckPending(tuning.MaxAckPending),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("queue subscribe to %s (queue=%s): %w", subject, queue, err)
@@ -255,8 +276,8 @@ func (b *NATSEventBus) ensurePullTuningForDurable(subject, durable string, desir
 // consumer 已存在且配置不同，尝试 UpdateConsumer 就地更新；更新失败（如 NATS 版本
 // 不支持修改某字段）则退回沿用已有配置，避免后续 QueueSubscribe 因期望值与已存在
 // consumer 不一致而报错——与 ensurePullTuningForDurable 的处理方式保持一致。
-func (b *NATSEventBus) ensureQueueConsumerTuning(subject, durable string) (ackWait time.Duration, maxDeliver int) {
-	ackWait, maxDeliver = queueSubscribeAckWait, maxDeliveries
+func (b *NATSEventBus) ensureQueueConsumerTuning(subject, durable string) QueueTuning {
+	desired := b.queueTuningForSubject(subject)
 
 	stream, err := b.js.StreamNameBySubject(subject)
 	if err != nil {
@@ -264,7 +285,7 @@ func (b *NATSEventBus) ensureQueueConsumerTuning(subject, durable string) (ackWa
 			zap.String("subject", subject),
 			zap.String("durable", durable),
 			zap.Error(err))
-		return
+		return desired
 	}
 	info, err := b.js.ConsumerInfo(stream, durable)
 	if err != nil {
@@ -275,21 +296,12 @@ func (b *NATSEventBus) ensureQueueConsumerTuning(subject, durable string) (ackWa
 				zap.String("durable", durable),
 				zap.Error(err))
 		}
-		return
+		return desired
 	}
 
-	cfg := info.Config
-	changed := false
-	if cfg.AckWait != ackWait {
-		cfg.AckWait = ackWait
-		changed = true
-	}
-	if cfg.MaxDeliver != maxDeliver {
-		cfg.MaxDeliver = maxDeliver
-		changed = true
-	}
+	cfg, changed := updatedQueueConsumerConfig(info, desired)
 	if !changed {
-		return
+		return desired
 	}
 
 	if _, err := b.js.UpdateConsumer(stream, &cfg); err != nil {
@@ -297,26 +309,80 @@ func (b *NATSEventBus) ensureQueueConsumerTuning(subject, durable string) (ackWa
 			zap.String("subject", subject),
 			zap.String("stream", stream),
 			zap.String("durable", durable),
-			zap.Duration("desired_ack_wait", ackWait),
+			zap.Duration("desired_ack_wait", desired.AckWait),
 			zap.Duration("existing_ack_wait", info.Config.AckWait),
-			zap.Int("desired_max_deliver", maxDeliver),
+			zap.Int("desired_max_deliver", desired.MaxDeliver),
 			zap.Int("existing_max_deliver", info.Config.MaxDeliver),
+			zap.Int("desired_max_ack_pending", desired.MaxAckPending),
+			zap.Int("existing_max_ack_pending", info.Config.MaxAckPending),
 			zap.Error(err))
 		if info.Config.AckWait > 0 {
-			ackWait = info.Config.AckWait
+			desired.AckWait = info.Config.AckWait
 		}
 		if info.Config.MaxDeliver != 0 {
-			maxDeliver = info.Config.MaxDeliver
+			desired.MaxDeliver = info.Config.MaxDeliver
 		}
-		return
+		if info.Config.MaxAckPending > 0 {
+			desired.MaxAckPending = info.Config.MaxAckPending
+		}
+		return desired
 	}
 	b.logger.Info("updated existing queue consumer tuning",
 		zap.String("subject", subject),
 		zap.String("stream", stream),
 		zap.String("durable", durable),
-		zap.Duration("ack_wait", ackWait),
-		zap.Int("max_deliver", maxDeliver))
-	return
+		zap.Duration("ack_wait", desired.AckWait),
+		zap.Int("max_deliver", desired.MaxDeliver),
+		zap.Int("max_ack_pending", desired.MaxAckPending))
+	return desired
+}
+
+func (b *NATSEventBus) queueTuningForSubject(subject string) QueueTuning {
+	tuning := QueueTuning{
+		AckWait:       queueSubscribeAckWait,
+		MaxDeliver:    maxDeliveries,
+		MaxAckPending: defaultQueueMaxAckPending,
+	}
+	b.mu.Lock()
+	configured, ok := b.queueTuning[subject]
+	b.mu.Unlock()
+	if !ok {
+		return tuning
+	}
+	if configured.AckWait > 0 {
+		tuning.AckWait = configured.AckWait
+	}
+	if configured.MaxDeliver > 0 {
+		tuning.MaxDeliver = configured.MaxDeliver
+	}
+	if configured.MaxAckPending > 0 {
+		tuning.MaxAckPending = configured.MaxAckPending
+	}
+	return tuning
+}
+
+func updatedQueueConsumerConfig(info *nats.ConsumerInfo, desired QueueTuning) (nats.ConsumerConfig, bool) {
+	if info == nil {
+		return nats.ConsumerConfig{}, false
+	}
+	cfg := info.Config
+	if cfg.Name == "" && cfg.Durable == "" {
+		cfg.Durable = info.Name
+	}
+	changed := false
+	if desired.AckWait > 0 && cfg.AckWait != desired.AckWait {
+		cfg.AckWait = desired.AckWait
+		changed = true
+	}
+	if desired.MaxDeliver > 0 && cfg.MaxDeliver != desired.MaxDeliver {
+		cfg.MaxDeliver = desired.MaxDeliver
+		changed = true
+	}
+	if desired.MaxAckPending > 0 && cfg.MaxAckPending != desired.MaxAckPending {
+		cfg.MaxAckPending = desired.MaxAckPending
+		changed = true
+	}
+	return cfg, changed
 }
 
 // cleanupLegacyPushConsumer 删除因迁移到 pull consumer 而遗留的同名旧 push consumer。

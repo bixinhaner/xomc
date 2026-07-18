@@ -207,6 +207,7 @@ services:
         cat >/tmp/nats-server.conf <<'EOF'
         jetstream {
           store_dir: "/data"
+          max_memory_store: ${NATS_MAX_MEMORY_STORE:-134217728}
         }
         http_port: 8222
         max_payload: 5242880
@@ -229,6 +230,9 @@ services:
       - omcgo-net
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      # 百万级 JetStream backlog 恢复实测可接近 3 分钟；宽限期内保持 starting，
+      # 避免安装器把正常恢复误判为 unhealthy。
+      start_period: 5m
       interval: 5s
       timeout: 5s
       retries: 10
