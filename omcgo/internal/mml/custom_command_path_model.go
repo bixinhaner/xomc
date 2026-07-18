@@ -35,6 +35,8 @@ type MMLCustomCommandPathView struct {
 	Access          string    `json:"access"`
 	DataType        string    `json:"data_type"`
 	Description     string    `json:"description"`
+	MinValue        *int64    `json:"min_value,omitempty"`
+	MaxValue        *int64    `json:"max_value,omitempty"`
 	DefaultSelected bool      `json:"default_selected"`
 	SortOrder       int       `json:"sort_order"`
 }

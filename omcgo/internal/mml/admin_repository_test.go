@@ -161,6 +161,34 @@ func Test_ListEnrichedByCommand_NilParamModelReturnsAllSubFields(t *testing.T) {
 		"paramModelID=nil should return all sub_fields regardless of csf.is_supported (PR-C)")
 }
 
+func Test_ListEnrichedByCommand_ReturnsStandardRange(t *testing.T) {
+	pool := newMMLTestPool(t)
+	if pool == nil {
+		return
+	}
+	ctx := context.Background()
+	fx := newMMLFixture(t, pool)
+	defer fx.cleanup()
+
+	commandID := fx.insertCommand("LST_STANDARD_RANGE", "chapter:RNG")
+	fx.insertSubField(commandID, "Device.Range.Value", true, 1)
+	_, err := pool.Exec(ctx, `
+UPDATE standard_params
+   SET data_type = 'unsignedInt', min_value = 2, max_value = 32
+ WHERE standard_path = $1`, "Device.Range.Value")
+	require.NoError(t, err)
+
+	repo := NewPgSubFieldRepository(pool)
+	rows, err := repo.ListEnrichedByCommand(ctx, commandID, nil)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "unsignedInt", rows[0].ValueType)
+	require.NotNil(t, rows[0].MinValue)
+	require.NotNil(t, rows[0].MaxValue)
+	assert.EqualValues(t, 2, *rows[0].MinValue)
+	assert.EqualValues(t, 32, *rows[0].MaxValue)
+}
+
 // T-0176-PR-E：MarkUnsupportedByStandardPath 写入真值源迁到 param_mappings；
 // 本文件用 PG 集成测试守门：
 //   - 入参 paramModelID 必须生效（不跨 paramModel 污染）

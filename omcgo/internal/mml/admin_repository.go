@@ -338,6 +338,7 @@ SELECT
     NULL::text                            AS default_value,
     NULL::text                            AS js_regex,
     sp.min_value                          AS min_value,
+    sp.max_value                          AS max_value,
     jsonb_build_object(
         'zh-CN', sp.standard_path,
         'en-US', sp.standard_path
@@ -365,7 +366,7 @@ ORDER BY csf.sort_order ASC, csf.mml_code ASC`
 			&e.Tr069Path, &e.ValueType,
 			&e.AccessType, &e.IsObject, &e.SupportsAdd, &e.SupportsDelete,
 			&e.ChangeApplies, &constraintI18n,
-			&e.DefaultValue, &e.JsRegex, &e.MinValue, &paramNameI18n,
+			&e.DefaultValue, &e.JsRegex, &e.MinValue, &e.MaxValue, &paramNameI18n,
 			&e.Description,
 			&e.IsSupported,
 		); err != nil {

@@ -44,6 +44,7 @@ func (r *PgCustomCommandPathRepository) ListByCommand(ctx context.Context, comma
 		SELECT ccp.id, ccp.command_id, ccp.standard_path_id,
 		       sp.standard_path, sp.entry_type,
 		       COALESCE(sp.access, ''), COALESCE(sp.data_type, ''), COALESCE(sp.description, ''),
+		       sp.min_value, sp.max_value,
 		       ccp.default_selected, ccp.sort_order
 		FROM mml_custom_command_paths ccp
 		JOIN standard_params sp ON sp.id = ccp.standard_path_id
@@ -60,6 +61,7 @@ func (r *PgCustomCommandPathRepository) ListByCommand(ctx context.Context, comma
 		var v MMLCustomCommandPathView
 		if err := rows.Scan(&v.ID, &v.CommandID, &v.StandardPathID,
 			&v.StandardPath, &v.EntryType, &v.Access, &v.DataType, &v.Description,
+			&v.MinValue, &v.MaxValue,
 			&v.DefaultSelected, &v.SortOrder); err != nil {
 			return nil, fmt.Errorf("scan custom command path: %w", err)
 		}
