@@ -1,12 +1,15 @@
 package mml
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/task"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 // ============================================================
@@ -21,8 +24,8 @@ import (
 
 func TestIsAddObjectMethod(t *testing.T) {
 	assert.True(t, isAddObjectMethod("AddObject"))
-	assert.True(t, isAddObjectMethod("addobject"))       // case-insensitive
-	assert.True(t, isAddObjectMethod("  AddObject  "))   // trim space
+	assert.True(t, isAddObjectMethod("addobject"))     // case-insensitive
+	assert.True(t, isAddObjectMethod("  AddObject  ")) // trim space
 	assert.False(t, isAddObjectMethod(""))
 	assert.False(t, isAddObjectMethod("SetParameterValues"))
 	assert.False(t, isAddObjectMethod("GetParameterValues"))
@@ -32,17 +35,17 @@ func TestIsSpvCmdEntry(t *testing.T) {
 	assert.True(t, isSpvCmdEntry(map[string]interface{}{"rpc_method": "SetParameterValues"}))
 	assert.True(t, isSpvCmdEntry(map[string]interface{}{"rpc_method": "setparametervalues"}))
 	assert.False(t, isSpvCmdEntry(map[string]interface{}{"rpc_method": "AddObject"}))
-	assert.False(t, isSpvCmdEntry(map[string]interface{}{}))                          // 缺字段
-	assert.False(t, isSpvCmdEntry(map[string]interface{}{"rpc_method": 42}))          // 非 string
-	assert.False(t, isSpvCmdEntry(map[string]interface{}{"rpc_method": nil}))         // nil
+	assert.False(t, isSpvCmdEntry(map[string]interface{}{}))                  // 缺字段
+	assert.False(t, isSpvCmdEntry(map[string]interface{}{"rpc_method": 42}))  // 非 string
+	assert.False(t, isSpvCmdEntry(map[string]interface{}{"rpc_method": nil})) // nil
 }
 
 func TestExtractInstanceNumber(t *testing.T) {
 	cases := []struct {
-		name    string
-		input   string
-		wantN   int
-		wantOK  bool
+		name   string
+		input  string
+		wantN  int
+		wantOK bool
 	}{
 		{
 			name:   "标准 ACS handler 写入形态",
@@ -192,4 +195,101 @@ func TestSubstituteNewInstance_InstanceNumberZero(t *testing.T) {
 	out := substituteNewInstance(cmd, 0)
 	outRefs := out["param_refs"].([]MMLParamRef)
 	assert.Equal(t, "Device.X.0.Foo", outRefs[0].Tr069Path)
+}
+
+type sequencerTestEnqueuer struct {
+	reqs     []*task.CreateTaskRequest
+	onCreate func(req *task.CreateTaskRequest, created *task.Task)
+}
+
+func (e *sequencerTestEnqueuer) CreateTask(_ context.Context, req *task.CreateTaskRequest) (*task.Task, error) {
+	e.reqs = append(e.reqs, req)
+	created := &task.Task{
+		ID:           uuid.New().String(),
+		Source:       req.Source,
+		SourceID:     req.SourceID,
+		DeviceSN:     req.DeviceSN,
+		Method:       req.Method,
+		CommandIndex: req.CommandIndex,
+		DeviceIndex:  req.DeviceIndex,
+		Status:       task.TaskStatusPending,
+	}
+	if req.FailImmediately {
+		created.MarkFailed(0, req.FailReason)
+	}
+	if e.onCreate != nil {
+		e.onCreate(req, created)
+	}
+	return created, nil
+}
+
+func (e *sequencerTestEnqueuer) GetQueueLength(context.Context, string) (int64, error) {
+	return 0, nil
+}
+
+func TestSequencer_ChainBreakRecordsDependentFailureAndContinues(t *testing.T) {
+	mmlID := uuid.New()
+	mmlTask := &MMLTask{
+		ID:        mmlID,
+		Status:    TaskRunning,
+		DeviceSNs: []string{"SN001"},
+		Commands: []map[string]interface{}{
+			{
+				"command_code": "ADD CELL",
+				"rpc_method":   "AddObject",
+			},
+			{
+				"command_code":   "MOD NEW CELL",
+				"rpc_method":     "SetParameterValues",
+				"compound_phase": "spv_after_add",
+				"param_refs": []MMLParamRef{
+					{ParamCode: "Enable", Tr069Path: "Device.Services.FAPService.1.CellConfig.{NEW}.Enable"},
+				},
+				"parameters": map[string]interface{}{"Enable": true},
+			},
+			{
+				"command_code":   "LST DEVICE_INFO",
+				"rpc_method":     "GetParameterValues",
+				"operation_type": "LST",
+				"param_refs": []MMLParamRef{
+					{ParamCode: "SerialNumber", Tr069Path: "Device.DeviceInfo.SerialNumber"},
+				},
+			},
+		},
+	}
+	repo := &mockTaskRepo{
+		getByIDFn: func(context.Context, uuid.UUID) (*MMLTask, error) {
+			return mmlTask, nil
+		},
+	}
+	enqueuer := &sequencerTestEnqueuer{}
+	fanouter := NewFanouter(nil, nil, nil, nil, zap.NewNop())
+	seq := NewSequencer(repo, enqueuer, fanouter, zap.NewNop())
+	enqueuer.onCreate = func(req *task.CreateTaskRequest, created *task.Task) {
+		if req.FailImmediately {
+			seq.OnTaskCompleted(context.Background(), created)
+		}
+	}
+
+	seq.OnTaskCompleted(context.Background(), &task.Task{
+		ID:           uuid.New().String(),
+		Source:       task.TaskSourceMML,
+		SourceID:     mmlID.String(),
+		DeviceSN:     "SN001",
+		Method:       "AddObject",
+		CommandIndex: 0,
+		DeviceIndex:  0,
+		Status:       task.TaskStatusFailed,
+		Result:       json.RawMessage(`{"fault_code":9005}`),
+	})
+
+	require.Len(t, enqueuer.reqs, 2)
+	assert.Equal(t, 1, enqueuer.reqs[0].CommandIndex)
+	assert.Equal(t, "SetParameterValues", enqueuer.reqs[0].Method)
+	assert.True(t, enqueuer.reqs[0].FailImmediately)
+	assert.Contains(t, enqueuer.reqs[0].FailReason, "missing instance_number")
+
+	assert.Equal(t, 2, enqueuer.reqs[1].CommandIndex)
+	assert.Equal(t, "GetParameterValues", enqueuer.reqs[1].Method)
+	assert.False(t, enqueuer.reqs[1].FailImmediately)
 }
