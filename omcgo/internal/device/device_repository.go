@@ -369,14 +369,9 @@ func (r *PgDeviceRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.
 }
 
 func (r *PgDeviceRepository) GetCoordinates(ctx context.Context, id uuid.UUID) (*Location, error) {
-	query, args, err := storage.Psql.Select("latitude", "longitude").
-		From("devices").
-		Where(sq.Eq{"id": id}).
-		Where(notDeleted).
-		Limit(1).
-		ToSql()
+	query, args, err := buildGetCoordinatesQuery(id)
 	if err != nil {
-		return nil, fmt.Errorf("build get device coordinates query: %w", err)
+		return nil, err
 	}
 
 	var latitude, longitude *float64
@@ -390,6 +385,19 @@ func (r *PgDeviceRepository) GetCoordinates(ctx context.Context, id uuid.UUID) (
 		return nil, nil
 	}
 	return &Location{Latitude: *latitude, Longitude: *longitude}, nil
+}
+
+func buildGetCoordinatesQuery(id uuid.UUID) (string, []interface{}, error) {
+	query, args, err := storage.Psql.Select("latitude", "longitude").
+		From("devices d").
+		Where(sq.Eq{"id": id}).
+		Where(notDeleted).
+		Limit(1).
+		ToSql()
+	if err != nil {
+		return "", nil, fmt.Errorf("build get device coordinates query: %w", err)
+	}
+	return query, args, nil
 }
 
 func (r *PgDeviceRepository) GetBySerialNumber(ctx context.Context, sn string) (*model.Device, error) {

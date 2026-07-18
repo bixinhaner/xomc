@@ -172,6 +172,15 @@ func TestScanGeoDeviceRow_NullableJoinColumns(t *testing.T) {
 	assert.Nil(t, d.DeviceName)
 }
 
+// TestGetCoordinatesQueryUsesDeviceAlias guards the shared notDeleted predicate,
+// which references d.deleted_at. The FROM clause must therefore declare alias d.
+func TestGetCoordinatesQueryUsesDeviceAlias(t *testing.T) {
+	query, _, err := buildGetCoordinatesQuery(uuid.New())
+	require.NoError(t, err)
+	assert.Contains(t, query, "FROM devices d")
+	assert.Contains(t, query, "d.deleted_at")
+}
+
 // ---------------------------------------------------------------------------
 // issue #203：FindStaleDevicesByClass 的 SQL 构建断言（DB-free）
 //
