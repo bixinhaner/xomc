@@ -171,11 +171,12 @@ func Test_ListEnrichedByCommand_ReturnsStandardRange(t *testing.T) {
 	defer fx.cleanup()
 
 	commandID := fx.insertCommand("LST_STANDARD_RANGE", "chapter:RNG")
-	fx.insertSubField(commandID, "Device.Range.Value", true, 1)
+	standardPath := "Device.Range." + uuid.NewString()
+	fx.insertSubField(commandID, standardPath, true, 1)
 	_, err := pool.Exec(ctx, `
 UPDATE standard_params
    SET data_type = 'unsignedInt', min_value = 2, max_value = 32
- WHERE standard_path = $1`, "Device.Range.Value")
+ WHERE standard_path = $1`, standardPath)
 	require.NoError(t, err)
 
 	repo := NewPgSubFieldRepository(pool)
