@@ -182,6 +182,9 @@ describe('CommandSelectModal', () => {
 
     expect(await screen.findByRole('checkbox', { name: /Name/ })).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: /Serial/ })).not.toBeInTheDocument();
+    expect(
+      screen.getByText('mml.consoleV2.cmdSelect.paramPathCount:{"count":3}'),
+    ).toBeInTheDocument();
   });
 
   it.each([

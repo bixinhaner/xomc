@@ -266,6 +266,7 @@ export default function CommandSelectModal({
   const selectedOperation = selectedCustom?.operationType ?? selectedEntry?.command.operationType;
   const usesPathSelection = commandUsesPathSelection(selectedOperation);
   const selectablePaths = getSelectableCommandPaths(selectedOperation, paramPaths);
+  const visiblePathCount = usesPathSelection ? selectablePaths.length : paramPaths.length;
   const effectiveDraftPathKeys = getOrderedSelectedPathKeys(selectablePaths, draftPathKeys);
 
   // ADD/RMV 以「目标对象路径」(target_object)下发 RPC(AddObject/DeleteObject)，无参数 PATH；
@@ -380,8 +381,8 @@ export default function CommandSelectModal({
                 </>
               ) : (
                 <>
-                  <Text strong>{t('mml.consoleV2.cmdSelect.paramPathCount', { count: paramPaths.length })}</Text>
-                  {paramPaths.length === 0 ? (
+                  <Text strong>{t('mml.consoleV2.cmdSelect.paramPathCount', { count: visiblePathCount })}</Text>
+                  {visiblePathCount === 0 ? (
                     <Text type="secondary">{t('mml.consoleV2.cmdSelect.noParamPath')}</Text>
                   ) : usesPathSelection ? (
                     <CommandPathSelector
