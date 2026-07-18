@@ -51,6 +51,8 @@ import {
   applyInstanceContext,
   getEffectiveEnumMeta,
   localizeEnumLabel,
+  parseQuickSettingsMultiCheckboxValue,
+  serializeQuickSettingsMultiCheckboxValue,
   validateValue,
   type QuickSettingsInstanceContext,
 } from './validators';
@@ -76,6 +78,13 @@ interface BscSubTableDef {
   subObject: string;
   /** 列定义 */
   columns: { key: string; title: string }[];
+}
+
+function normalizeComparableFieldValue(value: unknown, param?: QuickSettingsParam): string {
+  if (param?.type === 'multiCheckbox') {
+    return serializeQuickSettingsMultiCheckboxValue(value);
+  }
+  return String(value ?? '');
 }
 
 /** 把 XML 来的 QuickSettingsParam 转成本地 BscFieldDef。 */
@@ -270,14 +279,14 @@ function renderFieldGrid(
         }
 
         if (def.type === 'multiCheckbox') {
-          const selected = rawValue ? rawValue.split(',').map((s) => s.trim()).filter(Boolean) : [];
+          const selected = parseQuickSettingsMultiCheckboxValue(rawValue);
           return (
             <div key={def.leaf} style={{ minWidth: 0, gridColumn: '1 / -1' }}>
               {labelNode}
               <Checkbox.Group
                 value={selected}
                 options={(def.checkboxOptions ?? []).map((v) => ({ value: v, label: v }))}
-                onChange={(vals) => setValue(path, (vals as string[]).join(','), validator)}
+                onChange={(vals) => setValue(path, serializeQuickSettingsMultiCheckboxValue(vals), validator)}
               />
               {hintNode}
               {errNode}
@@ -456,6 +465,21 @@ export default function InstanceSelectorForm({
     () => new Set(selectorGroup.params.map((param) => param.leaf).filter(Boolean)),
     [selectorGroup.params],
   );
+
+  const paramByLeaf = useMemo(() => {
+    const map = new Map<string, QuickSettingsParam>();
+    for (const group of [selectorGroup, ...childGroups]) {
+      for (const param of group.params) {
+        const keys = [param.leaf, param.name].filter(Boolean) as string[];
+        for (const key of keys) {
+          if (!map.has(key)) {
+            map.set(key, param);
+          }
+        }
+      }
+    }
+    return map;
+  }, [childGroups, selectorGroup]);
 
   const [selectedInstId, setSelectedInstId] = useState<string | null>(null);
 
@@ -831,11 +855,14 @@ export default function InstanceSelectorForm({
       }
       const item = schemaByPath.get(path);
       if (item && item.writable === false) continue;
-      const oldVal = item?.currentValue ?? '';
-      if (value === oldVal) continue;
+      const leaf = path.split('.').pop() ?? '';
+      const param = paramByLeaf.get(leaf);
+      const normalizedValue = normalizeComparableFieldValue(value, param);
+      const oldVal = normalizeComparableFieldValue(item?.currentValue ?? '', param);
+      if (normalizedValue === oldVal) continue;
       updates.push({
         parameterPath: path,
-        parameterValue: value,
+        parameterValue: normalizedValue,
         parameterType: (item?.type as never) ?? 'string',
       });
     }
@@ -890,6 +917,7 @@ export default function InstanceSelectorForm({
     selectorGroup.titleZh,
     queryClient,
     schemaByPath,
+    paramByLeaf,
     selectedInstId,
     setFeedback,
     updateMutation,
