@@ -66,6 +66,13 @@ describe('ConfigParamsModal', () => {
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
   });
 
+  it('shows confirmation-only query copy without the stale parameter-check instruction', () => {
+    renderModal({ selectedPathKeys: ['Device.Info.Name'] });
+
+    expect(screen.getByText('mml.consoleV2.config.confirmSelectedPaths')).toBeInTheDocument();
+    expect(screen.queryByText('mml.consoleV2.config.hintRead')).not.toBeInTheDocument();
+  });
+
   it('shows inputs only for selected writable MOD Paths', () => {
     renderModal({
       command: { ...command, operationType: 'MOD', commandCode: 'MOD INFO', commandName: '修改设备信息' },
@@ -115,25 +122,96 @@ describe('ConfigParamsModal', () => {
     }));
   });
 
-  it('resets hidden MOD values when the parent confirms a different Path selection', () => {
+  it('resets MOD values and instance selectors when the parent confirms different Paths', () => {
+    const onConfirmAndExecute = vi.fn();
     const modCommand = {
       ...command,
       operationType: 'MOD' as const,
-      commandCode: 'MOD INFO',
-      commandName: '修改设备信息',
+      commandCode: 'MOD SERVICE',
+      commandName: '修改服务信息',
+      paramPaths: [
+        { path: 'Device.Services.{i}.Name', label: 'Name', writable: true, isObject: false },
+        {
+          path: 'Device.Services.{i}.Cells.{i}.Mode',
+          label: 'Mode',
+          writable: true,
+          isObject: false,
+        },
+      ],
     };
-    const { rerender } = renderModal({ command: modCommand, selectedPathKeys: ['Device.Info.Name'] });
+    const { rerender } = renderModal({
+      command: modCommand,
+      selectedPathKeys: ['Device.Services.{i}.Name'],
+      onConfirmAndExecute,
+    });
+    fireEvent.change(screen.getAllByRole('spinbutton')[0], { target: { value: '7' } });
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'cell-a' } });
-    expect(screen.getByRole('button', { name: /mml.consoleV2.config.confirmAndExecute/ })).toBeEnabled();
 
-    rerender(modal({ command: modCommand, selectedPathKeys: ['Device.Info.Mode'] }));
+    rerender(
+      modal({
+        command: modCommand,
+        selectedPathKeys: ['Device.Services.{i}.Cells.{i}.Mode'],
+        onConfirmAndExecute,
+      }),
+    );
 
     expect(screen.queryByText('Name')).not.toBeInTheDocument();
     expect(screen.getByText('Mode')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /mml.consoleV2.config.confirmAndExecute/ })).toBeDisabled();
+    expect(screen.getAllByRole('spinbutton')).toHaveLength(2);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'mode-b' } });
+    fireEvent.click(screen.getByRole('button', { name: /mml.consoleV2.config.confirmAndExecute/ }));
+
+    expect(onConfirmAndExecute).toHaveBeenLastCalledWith(expect.objectContaining({
+      checkedPaths: ['Device.Services.{i}.Cells.{i}.Mode'],
+      values: { 'Device.Services.{i}.Cells.{i}.Mode': 'mode-b' },
+      instanceSelectors: { i01: '1', i02: '1' },
+    }));
   });
 
-  it('preserves ADD target-object and value behavior without Path selection', () => {
+  it.each(['LST', 'DSP', 'MOD'] as const)(
+    'derives %s instance inputs and request selectors from confirmed Paths only',
+    (operationType) => {
+      const onConfirmAndExecute = vi.fn();
+      const selectedPath = 'Device.Selected.{i}.Name';
+      renderModal({
+        command: {
+          ...command,
+          id: `instance-${operationType}`,
+          operationType,
+          commandCode: `${operationType} INSTANCE`,
+          commandName: `${operationType} 实例范围`,
+          paramPaths: [
+            {
+              path: 'Device.Hidden.{i}.Cells.{i}.Serial',
+              label: 'Hidden',
+              writable: operationType === 'MOD',
+              isObject: false,
+            },
+            { path: selectedPath, label: 'Name', writable: operationType === 'MOD', isObject: false },
+          ],
+        },
+        selectedPathKeys: [selectedPath],
+        onConfirmAndExecute,
+      });
+
+      const instanceInputs = screen.getAllByRole('spinbutton');
+      expect(instanceInputs).toHaveLength(1);
+      fireEvent.change(instanceInputs[0], { target: { value: '8' } });
+      if (operationType === 'MOD') {
+        fireEvent.change(screen.getByRole('textbox'), { target: { value: 'selected-value' } });
+      }
+      fireEvent.click(screen.getByRole('button', { name: /mml.consoleV2.config.confirmAndExecute/ }));
+
+      expect(onConfirmAndExecute).toHaveBeenCalledWith(expect.objectContaining({
+        checkedPaths: [selectedPath],
+        instanceSelectors: { i01: '8' },
+      }));
+    },
+  );
+
+  it('emits the complete ADD target-object, value, and instance request without Path selection', () => {
+    const onConfirmAndExecute = vi.fn();
+    const addPath = 'Device.Services.FAPService.{i}.Enable';
     renderModal({
       command: {
         ...command,
@@ -143,18 +221,32 @@ describe('ConfigParamsModal', () => {
         commandName: '新增服务对象',
         targetObject: 'Device.Services.FAPService.{i}.',
         paramPaths: [
-          { path: 'Device.Services.FAPService.{i}.Enable', label: 'Enable', writable: true, isObject: false },
+          { path: addPath, label: 'Enable', writable: true, isObject: false },
         ],
       },
       selectedPathKeys: [],
+      onConfirmAndExecute,
     });
 
     expect(screen.getAllByText(/Device\.Services\.FAPService/).length).toBeGreaterThan(0);
     expect(screen.getByText('Enable')).toBeInTheDocument();
-    expect(screen.getByRole('textbox')).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '3' } });
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'enabled' } });
+    fireEvent.click(screen.getByRole('button', { name: /mml.consoleV2.config.confirmAndExecute/ }));
+
+    expect(onConfirmAndExecute).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'standard',
+      operationType: 'ADD',
+      targetObject: 'Device.Services.FAPService.{i}.',
+      checkedPaths: [addPath],
+      values: { [addPath]: 'enabled' },
+      instanceSelectors: { i01: '3' },
+      execMode: 'whole',
+    }));
   });
 
-  it('preserves RMV instance input and whole-request execution mode', () => {
+  it('emits the complete RMV target-object and forced whole-request payload', () => {
+    const onConfirmAndExecute = vi.fn();
     renderModal({
       command: {
         ...command,
@@ -166,10 +258,25 @@ describe('ConfigParamsModal', () => {
         paramPaths: [],
       },
       selectedPathKeys: [],
+      onConfirmAndExecute,
     });
 
-    expect(screen.getAllByRole('spinbutton').length).toBeGreaterThan(0);
+    const instanceInputs = screen.getAllByRole('spinbutton');
+    expect(instanceInputs).toHaveLength(2);
+    fireEvent.change(instanceInputs[0], { target: { value: '4' } });
+    fireEvent.change(instanceInputs[1], { target: { value: '9' } });
     expect(screen.getByRole('radio', { name: 'mml.consoleV2.config.execPerPath' })).toBeDisabled();
     expect(screen.getByRole('radio', { name: 'mml.consoleV2.config.execWhole' })).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: /mml.consoleV2.config.confirmAndExecute/ }));
+
+    expect(onConfirmAndExecute).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'standard',
+      operationType: 'RMV',
+      targetObject: 'Device.Services.FAPService.{i}.',
+      checkedPaths: [],
+      instanceSelectors: { i01: '4' },
+      instance: 9,
+      execMode: 'whole',
+    }));
   });
 });
