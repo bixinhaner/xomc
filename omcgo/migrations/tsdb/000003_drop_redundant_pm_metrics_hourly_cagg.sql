@@ -11,8 +11,18 @@
 --   2. 连 `select count(*) from pm_metrics` 这种简单查询都要等5分钟以上
 -- 是当前KPI处理链路"数据进得来、算不出来"的根因，不是并发度或索引问题。
 --
+-- remove_continuous_aggregate_policy(if_exists=>TRUE) 只防"策略不存在"，如果
+-- 视图本身已经不存在（例如线上已经手工 DROP 过一次）它仍然会报
+-- "relation does not exist"——用 to_regclass 先判视图是否存在，存在才去删策略，
+-- 保证这条迁移在"从没建过 cagg"和"已经手工删过 cagg"两种库状态下都是幂等的。
 -- +goose StatementBegin
-SELECT remove_continuous_aggregate_policy('public.pm_metrics_hourly_cagg', if_exists => TRUE);
+DO $$
+BEGIN
+    IF to_regclass('public.pm_metrics_hourly_cagg') IS NOT NULL THEN
+        PERFORM remove_continuous_aggregate_policy('public.pm_metrics_hourly_cagg', if_exists => TRUE);
+    END IF;
+END
+$$;
 -- +goose StatementEnd
 DROP MATERIALIZED VIEW IF EXISTS public.pm_metrics_hourly_cagg;
 
