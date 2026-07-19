@@ -35,7 +35,7 @@ import (
 //
 // 翻译链路：product_class → ProductRegistry.MatchProductClass → product.id
 //
-//	→ ParamRegistry.Translator(productID, swVersion) → Translator.ToPrivate(path)
+//	→ ParamRegistry.Translator(productID, swVersion) → Translator.ToPrivateCandidates(path)
 //
 // T-0168 激进路线：MatchProductClass 返 ErrOrphan 时**不**返 error，构造
 // TranslationOutcome{ProductResolved=false, AggregateSource="orphan_passthrough"}
@@ -67,7 +67,7 @@ func NewMMLPathTranslator(products *product.Registry, params *parammodel.Registr
 // TranslateForDevice 实现 mml.PathTranslator 接口（T-0168 升级版）。
 //
 //	productClass → ProductRegistry.MatchProductClass → product.id
-//	→ ParamRegistry.Translator(productID, swVersion) → ToPrivate
+//	→ ParamRegistry.Translator(productID, swVersion) → ToPrivateCandidates
 //
 // 行为：
 //   - product 命中 + 单条 path 未命中 mapping → Source="passthrough"（Private=Standard）
@@ -146,8 +146,9 @@ func (a *mmlPathTranslatorAdapter) TranslateForDevice(
 	paths := make([]mml.TranslatedPath, 0, len(standardPaths))
 	missPaths := make([]string, 0)
 	for _, p := range standardPaths {
-		r := translator.ToPrivate(p)
-		if r.Found {
+		candidates := translator.ToPrivateCandidates(p)
+		if len(candidates) > 0 {
+			r := candidates[0]
 			paths = append(paths, mml.TranslatedPath{Standard: p, Private: r.Translated, Source: src})
 		} else {
 			missPaths = append(missPaths, p)
