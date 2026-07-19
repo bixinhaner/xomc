@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { computeInstanceSlots, resolveObjectPath } from '../adapters';
+import {
+  buildDefaultInstanceSelectors,
+  computeInstanceSlots,
+  resolveObjectPath,
+  resolveQueryPath,
+} from '../adapters';
 import { validateRawPath } from '../rawPathValidate';
 import type { CommandItem, CommandParamPath } from '../types';
 import type { MMLOperationType } from '@core/types/mml';
@@ -89,5 +94,71 @@ describe('resolveObjectPath (ADD/RMV 目标对象路径展示)', () => {
     expect(resolveObjectPath(noPlaceholder, { i01: '2' })).toBe(noPlaceholder);
     expect(resolveObjectPath(undefined)).toBe('');
     expect(resolveObjectPath('')).toBe('');
+  });
+});
+
+describe('buildDefaultInstanceSelectors', () => {
+  const slots = [
+    { key: 'i01', label: 'A' },
+    { key: 'i02', label: 'B' },
+    { key: 'i03', label: 'C' },
+  ];
+
+  it('查询命令仅将最后一层默认留空', () => {
+    expect(buildDefaultInstanceSelectors(slots.slice(0, 1), 'LST')).toEqual({ i01: '' });
+    expect(buildDefaultInstanceSelectors(slots.slice(0, 2), 'DSP')).toEqual({
+      i01: '1',
+      i02: '',
+    });
+    expect(buildDefaultInstanceSelectors(slots, 'LST')).toEqual({
+      i01: '1',
+      i02: '1',
+      i03: '',
+    });
+  });
+
+  it('写命令继续默认全部实例为 1', () => {
+    for (const op of ['MOD', 'ADD', 'RMV'] as const) {
+      expect(buildDefaultInstanceSelectors(slots.slice(0, 2), op)).toEqual({
+        i01: '1',
+        i02: '1',
+      });
+    }
+  });
+});
+
+describe('resolveQueryPath', () => {
+  const twoLayer = 'Device.A.{i}.B.{i}.Value';
+
+  it('在单层或最后一层空实例处截断并保留对象尾点', () => {
+    expect(resolveQueryPath('Device.A.{i}.Value', { i01: '' })).toBe('Device.A.');
+    expect(resolveQueryPath(twoLayer, { i01: '1', i02: '' })).toBe('Device.A.1.B.');
+  });
+
+  it('第一层或中间层为空时忽略后续实例与 Path', () => {
+    expect(resolveQueryPath(twoLayer, { i01: '', i02: '2' })).toBe('Device.A.');
+    expect(
+      resolveQueryPath('Device.A.{i}.B.{i}.C.{i}.Value', {
+        i01: '1',
+        i02: '',
+        i03: '3',
+      }),
+    ).toBe('Device.A.1.B.');
+  });
+
+  it('完整实例生成叶子 Path，缺少后层 selector 视为空，多余 selector 被忽略', () => {
+    expect(resolveQueryPath(twoLayer, { i01: '3', i02: '2' })).toBe(
+      'Device.A.3.B.2.Value',
+    );
+    expect(resolveQueryPath(twoLayer, { i01: '3' })).toBe('Device.A.3.B.');
+    expect(resolveQueryPath('Device.A.{i}.Value', { i01: '4', i02: '9' })).toBe(
+      'Device.A.4.Value',
+    );
+  });
+
+  it('无占位符 Path 原样返回', () => {
+    expect(resolveQueryPath('Device.Info.SerialNumber', { i01: '' })).toBe(
+      'Device.Info.SerialNumber',
+    );
   });
 });

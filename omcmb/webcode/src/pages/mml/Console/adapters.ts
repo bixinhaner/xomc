@@ -221,6 +221,38 @@ export function computeInstanceSlots(command: CommandItem): { key: string; label
   return slots;
 }
 
+export function buildDefaultInstanceSelectors(
+  slots: { key: string; label: string }[],
+  operationType: MMLOperationType,
+): Record<string, string> {
+  const finalIndex = slots.length - 1;
+  return Object.fromEntries(
+    slots.map((slot, index) => [
+      slot.key,
+      isReadOp(operationType) && index === finalIndex ? '' : '1',
+    ]),
+  );
+}
+
+export function resolveQueryPath(
+  path: string,
+  instanceSelectors?: Record<string, string>,
+): string {
+  let result = path;
+  let layer = 1;
+  while (true) {
+    const marker = result.indexOf('.{i}.');
+    if (marker < 0) return result;
+
+    const key = `i${String(layer).padStart(2, '0')}`;
+    const value = instanceSelectors?.[key]?.trim() ?? '';
+    if (value === '') return result.slice(0, marker + 1);
+
+    result = `${result.slice(0, marker)}.${value}.${result.slice(marker + 5)}`;
+    layer += 1;
+  }
+}
+
 /**
  * 把 targetObject 里的 `.{i}.` 占位按 instanceSelectors 替换为具体实例号，用于
  * ADD/RMV 命令「目标对象路径」展示（与 computeInstanceSlots 同序：左→右 i01/i02…，缺省 1）。
