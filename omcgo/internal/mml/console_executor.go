@@ -38,7 +38,8 @@ var ErrInvalidRequest = errors.New("mml: invalid request")
 //          SelectedSubFieldIDs → 选中的 sub_field.tr069_path 合成 param_refs
 //          SelectedSubFieldIDs 为空 → 默认全选（与老 OMC 默认勾选状态一致）
 //   - MOD: rpc_method=SetParameterValues
-//          param_refs = 所有 sub_fields（ParamCode=MMLCode 便于 SPV builder 查表）
+//          param_refs = Values 命中的 sub_fields（ParamCode=MMLCode 便于 SPV builder 查表）
+//          Values 全无命中时保留所有 sub_fields，兼容旧版手工 MML 文本
 //          parameters = Values（map[string]string → map[string]interface{}）
 //   - ADD: rpc_method=AddObject
 //          parameters["object_name"] = command.TargetObject（必含尾点）
@@ -409,7 +410,19 @@ func buildStatementCommandEntry(stmt Statement, cmd *MMLCommand, subFields []MML
 			// 'READ_WRITE'）。Hint 提示常见排查点。
 			return nil, fmt.Errorf("MOD: empty values — 请确认至少勾选一个 READ_WRITE 字段并填入值；若调用 API 时按 access_type 过滤可写字段，注意使用完整字面值 'READ_WRITE'/'READ_ONLY'，而非缩写 'RW'/'RO'")
 		}
-		refs := buildMODParamRefs(subFields, cmd.Params)
+		selectedSubFields := make([]MMLCommandSubField, 0, len(stmt.Values))
+		for _, sf := range subFields {
+			if _, selected := stmt.Values[sf.MMLCode]; selected {
+				selectedSubFields = append(selectedSubFields, sf)
+			}
+		}
+		// 旧版手工 MML 文本允许解析未知 mml_code，并通过 UnknownCodes 提示调用方。
+		// 当全部 Values 均未知时，保持改动前的 refs 形状；结构化页面请求会更早在
+		// StructuredToStatement 以 ErrUnknownPaths 拒绝未知 Path，不会进入此回退。
+		if len(selectedSubFields) == 0 {
+			selectedSubFields = subFields
+		}
+		refs := buildMODParamRefs(selectedSubFields, cmd.Params)
 		if err := applyInstanceSelectorsToRefs(refs, stmt.InstanceSelectors); err != nil {
 			return nil, err
 		}
@@ -558,7 +571,7 @@ func buildLSTParamRefs(selected []uuid.UUID, subFields []MMLCommandSubField, cmd
 	return refs
 }
 
-// buildMODParamRefs 为 MOD 命令合成 param_refs：所有 sub_fields 都纳入，
+// buildMODParamRefs 为 MOD 命令合成 param_refs：纳入调用方选定的 sub_fields，
 // 让 BuildTR069Params.buildParameterValues 能按 ParamCode（=MMLCode）索引 Tr069Path。
 //
 // ParamCode 改写为 sub_field.MMLCode（命令上下文的 code），与 parser 解出的 Values key 对齐。

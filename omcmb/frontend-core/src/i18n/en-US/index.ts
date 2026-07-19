@@ -6360,6 +6360,12 @@ const messages: Record<string, string> = {
   // ConfigParamsModal
   'mml.consoleV2.config.confirmSelectedPaths': 'Confirm PATHs for this execution',
   'mml.consoleV2.config.modValueRequired':      'Enter a value for every selected PATH',
+  'mml.consoleV2.config.validation.required':   'A parameter value is required',
+  'mml.consoleV2.config.validation.integer':    'Must be an integer',
+  'mml.consoleV2.config.validation.minValue':   'Must not be less than {bound}',
+  'mml.consoleV2.config.validation.maxValue':   'Must not be greater than {bound}',
+  'mml.consoleV2.config.validation.minLength':  'Must be at least {bound} characters',
+  'mml.consoleV2.config.validation.maxLength':  'Must not exceed {bound} characters',
   'mml.consoleV2.config.writeReminder.addRmv': 'ADD / RMV protocol acts on only one object path per execution; locked to a single row.',
   'mml.consoleV2.config.writeReminder.mod':  'MOD will modify the parameter values of all selected devices; please confirm the values are correct.',
   'mml.consoleV2.config.pickDeviceFirst':    'Please select target devices first',

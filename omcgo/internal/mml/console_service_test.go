@@ -496,6 +496,32 @@ func TestGetCommandSubFields_LangPicksZhCN(t *testing.T) {
 	assert.Equal(t, "只读字符串", got[0].ConstraintText)
 }
 
+func TestGetCommandSubFields_PropagatesStandardRange(t *testing.T) {
+	cmdID := uuid.New()
+	minValue, maxValue := int64(2), int64(32)
+	sfRepo := newFakeSubFieldRepo()
+	sfRepo.byCommandEnriched[cmdID] = []MMLCommandSubFieldEnriched{{
+		MMLCommandSubField: MMLCommandSubField{
+			ID: uuid.New(), CommandID: cmdID, MMLCode: "NAME",
+			LabelI18n: map[string]string{"zh-CN": "名称"},
+		},
+		Tr069Path:  "Device.Info.Name",
+		ValueType:  "string",
+		AccessType: "READ_WRITE",
+		MinValue:   &minValue,
+		MaxValue:   &maxValue,
+	}}
+
+	svc := NewConsoleService(&fakeGroupTreeRepo{}, sfRepo, newFakeCommandRepo(), nil)
+	got, err := svc.GetCommandSubFields(context.Background(), cmdID, "", "", "zh-CN")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.NotNil(t, got[0].MinValue)
+	require.NotNil(t, got[0].MaxValue)
+	assert.EqualValues(t, 2, *got[0].MinValue)
+	assert.EqualValues(t, 32, *got[0].MaxValue)
+}
+
 func TestGetCommandSubFields_LangFallbackToEn(t *testing.T) {
 	cmdID := uuid.New()
 	sfRepo := newFakeSubFieldRepo()

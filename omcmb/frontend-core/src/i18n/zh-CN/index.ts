@@ -6389,6 +6389,12 @@ const messages: Record<string, string> = {
   // ConfigParamsModal
   'mml.consoleV2.config.confirmSelectedPaths': '确认本次执行的 PATH',
   'mml.consoleV2.config.modValueRequired':      '请填写所有已选 PATH 的修改值',
+  'mml.consoleV2.config.validation.required':   '请填写参数值',
+  'mml.consoleV2.config.validation.integer':    '请输入整数',
+  'mml.consoleV2.config.validation.minValue':   '不能小于 {bound}',
+  'mml.consoleV2.config.validation.maxValue':   '不能大于 {bound}',
+  'mml.consoleV2.config.validation.minLength':  '长度不能少于 {bound} 个字符',
+  'mml.consoleV2.config.validation.maxLength':  '长度不能超过 {bound} 个字符',
   'mml.consoleV2.config.writeReminder.addRmv': 'ADD / RMV 协议规定单次仅作用于一个对象路径，已锁定为单行。',
   'mml.consoleV2.config.writeReminder.mod':  'MOD 将修改所有已选设备的参数值，请确认参数值无误。',
   'mml.consoleV2.config.pickDeviceFirst':    '请先选择目标设备',

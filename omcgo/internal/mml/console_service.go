@@ -513,6 +513,7 @@ type SubFieldDTO struct {
 	JsRegex            *string           `json:"js_regex,omitempty"`
 	// MinValue 是 standard_params.min_value：MML 控制台 MOD/ADD 填值时标量参数默认值。
 	MinValue        *int64 `json:"min_value,omitempty"`
+	MaxValue        *int64 `json:"max_value,omitempty"`
 	DefaultSelected bool   `json:"default_selected"`
 	IsRequired      bool   `json:"is_required"`
 	SortOrder       int    `json:"sort_order"`
@@ -604,6 +605,7 @@ func (s *ConsoleService) GetCommandSubFields(ctx context.Context, commandID uuid
 			DefaultValue:       e.DefaultValue,
 			JsRegex:            e.JsRegex,
 			MinValue:           e.MinValue,
+			MaxValue:           e.MaxValue,
 			DefaultSelected:    e.DefaultSelected,
 			IsRequired:         e.IsRequired,
 			SortOrder:          e.SortOrder,

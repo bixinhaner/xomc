@@ -10,6 +10,10 @@ import type {
   StandardParamFilter,
   TranslateRequest,
 } from '../../types/paramModel';
+import {
+  MML_CUSTOM_COMMAND_PATHS_QUERY_KEY,
+  MML_CUSTOM_COMMANDS_QUERY_KEY,
+} from './mmlQueryKeys';
 
 const api = createApiSwitch(paramModelService, paramModelApi);
 
@@ -37,6 +41,7 @@ export function useUpdateParamModel() {
       api.update(name, input),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: PM_KEY });
+      void qc.invalidateQueries({ queryKey: MML_CUSTOM_COMMANDS_QUERY_KEY });
     },
   });
 }
@@ -47,6 +52,7 @@ export function useDeleteParamModel() {
     mutationFn: (name: string) => api.delete(name),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: PM_KEY });
+      void qc.invalidateQueries({ queryKey: MML_CUSTOM_COMMANDS_QUERY_KEY });
     },
   });
 }
@@ -66,6 +72,7 @@ export function useCreateMapping() {
       api.createMapping(name, input),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({ queryKey: [...PM_KEY, 'mappings', vars.name] });
+      void qc.invalidateQueries({ queryKey: MML_CUSTOM_COMMANDS_QUERY_KEY });
     },
   });
 }
@@ -77,6 +84,7 @@ export function useUpdateMapping() {
       api.updateMapping(name, id, input),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({ queryKey: [...PM_KEY, 'mappings', vars.name] });
+      void qc.invalidateQueries({ queryKey: MML_CUSTOM_COMMANDS_QUERY_KEY });
     },
   });
 }
@@ -87,6 +95,7 @@ export function useDeleteMapping() {
     mutationFn: ({ name, id }: { name: string; id: string }) => api.deleteMapping(name, id),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({ queryKey: [...PM_KEY, 'mappings', vars.name] });
+      void qc.invalidateQueries({ queryKey: MML_CUSTOM_COMMANDS_QUERY_KEY });
     },
   });
 }
@@ -113,6 +122,8 @@ export function useUpsertStandard() {
       path ? api.updateStandard(path, input) : api.createStandard(input),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: [...PM_KEY, 'standard'] });
+      void qc.invalidateQueries({ queryKey: MML_CUSTOM_COMMANDS_QUERY_KEY });
+      void qc.invalidateQueries({ queryKey: MML_CUSTOM_COMMAND_PATHS_QUERY_KEY });
     },
   });
 }
@@ -123,6 +134,8 @@ export function useDeleteStandard() {
     mutationFn: (path: string) => api.deleteStandard(path),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: [...PM_KEY, 'standard'] });
+      void qc.invalidateQueries({ queryKey: MML_CUSTOM_COMMANDS_QUERY_KEY });
+      void qc.invalidateQueries({ queryKey: MML_CUSTOM_COMMAND_PATHS_QUERY_KEY });
     },
   });
 }
@@ -177,6 +190,7 @@ export function useUploadParamModelXML() {
     mutationFn: ({ file, force }: { file: File; force?: boolean }) => api.uploadXML(file, force),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: PM_KEY });
+      void qc.invalidateQueries({ queryKey: MML_CUSTOM_COMMANDS_QUERY_KEY });
       // #241：后端导入成功后已按 source_table 刷新 param_model_name 绑定字典;
       // 这里失效字典查询,让「新增产品 → 参数模型名称」下拉立即重取到新模型。
       void qc.invalidateQueries({ queryKey: ['dictionary', 'param_model_name'] });

@@ -30,7 +30,8 @@ import type {
   FlatGroupTreeResponse,
   SearchCommand,
 } from '../../types/mmlConsole';
-import type { MMLTask } from '../../types/mml';
+import type { MMLCustomCommandPathDef, MMLTask } from '../../types/mml';
+import { MML_CUSTOM_COMMAND_PATHS_QUERY_KEY } from './mmlQueryKeys';
 
 /**
  * 命令分组树。
@@ -90,6 +91,17 @@ export function useCommandSubFields(
     // T-0170: queryKey 含设备/产品上下文，让切换目标后重新拉对应支持集合的 sub_field。
     queryKey: ['mml', 'console', 'sub-fields', commandId ?? '', lang, deviceKey ?? '', productClass ?? ''],
     queryFn: () => mmlApi.getCommandSubFields(commandId!, lang, deviceKey, productClass),
+    staleTime: 30 * 60 * 1000,
+    enabled: Boolean(commandId),
+  });
+}
+
+export function useCustomCommandPaths(
+  commandId?: string,
+): ReturnType<typeof useQuery<MMLCustomCommandPathDef[]>> {
+  return useQuery({
+    queryKey: [...MML_CUSTOM_COMMAND_PATHS_QUERY_KEY, commandId ?? ''],
+    queryFn: () => mmlApi.getTemplatePaths(commandId!),
     staleTime: 30 * 60 * 1000,
     enabled: Boolean(commandId),
   });

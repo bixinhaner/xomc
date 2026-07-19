@@ -461,3 +461,20 @@ export interface MMLCustomCommand {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface MMLCustomCommandPathDef {
+  id: string;
+  commandId: string;
+  standardPathId: string;
+  standardPath: string;
+  entryType: string;
+  access: string;
+  dataType: string;
+  description: string;
+  minValue?: number;
+  maxValue?: number;
+  defaultSelected: boolean;
+  sortOrder: number;
+  /** false 表示仅由历史 param_paths JSON 补出的只读兼容行。 */
+  mutable: boolean;
+}

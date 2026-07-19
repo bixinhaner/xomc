@@ -55,6 +55,7 @@ export interface CommandParamPath {
   isObject: boolean;
   /** standard_params.min_value：MOD/ADD 填值时该标量参数的默认值 */
   minValue?: number;
+  maxValue?: number;
   valueType?: string;
   defaultValue?: string;
   description?: string;

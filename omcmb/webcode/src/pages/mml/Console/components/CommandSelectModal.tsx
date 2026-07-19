@@ -2,7 +2,12 @@ import { useMemo, useState } from 'react';
 import { Button, Empty, Input, Modal, Space, Spin, Tag, Tooltip, Tree, Typography } from 'antd';
 import type { TreeDataNode } from 'antd';
 import { RightOutlined } from '@ant-design/icons';
-import { useGroupTree, useCommandSubFields, useUnsupportedPaths } from '@core/hooks/api/useMmlConsole';
+import {
+  useCommandSubFields,
+  useCustomCommandPaths,
+  useGroupTree,
+  useUnsupportedPaths,
+} from '@core/hooks/api/useMmlConsole';
 import type { MMLCustomCommand } from '@core/types/mml';
 import { useI18nText } from '@/hooks/useI18nText';
 import { useT } from '@/hooks/useT';
@@ -21,6 +26,7 @@ import {
   getSelectableCommandPaths,
 } from '../pathSelection';
 import {
+  customCommandPathDefsToParamPaths,
   customCommandParamPaths,
   flattenGroupTree,
   mapCommandItem,
@@ -237,6 +243,9 @@ export default function CommandSelectModal({
     locale,
     deviceSn,
   );
+  const { data: customPathDefs, isFetching: customPathsLoading } = useCustomCommandPaths(
+    selectedCustomId ?? undefined,
+  );
 
   // 该产品执行 path 不支持类故障记录的自学习表——按命令读/写类型过滤（标准 + 自定义共用）。
   const hiddenPaths = useMemo(() => {
@@ -255,13 +264,24 @@ export default function CommandSelectModal({
     [subFields, hiddenPaths],
   );
   const customParamPaths = useMemo(
-    () => (selectedCustom ? customCommandParamPaths(selectedCustom).filter((p) => !hiddenPaths.has(p.path)) : []),
-    [selectedCustom, hiddenPaths],
+    () => {
+      if (!selectedCustom) return [];
+      // /mml/templates?product_id= 已把 selectedCustom.paramPaths 裁成当前产品支持集合；
+      // 富化端点按命令返回标准元数据，必须与该集合取交集，不能让产品不支持的关联
+      // Path 重新进入选择器和执行请求。
+      const productSupportedPaths = new Set(
+        selectedCustom.paramPaths.map((path) => path.trim()).filter(Boolean),
+      );
+      return customCommandPathDefsToParamPaths(customPathDefs ?? []).filter(
+        (p) => productSupportedPaths.has(p.path) && !hiddenPaths.has(p.path),
+      );
+    },
+    [selectedCustom, customPathDefs, hiddenPaths],
   );
 
   // 统一的「当前选中命令的可执行参数路径」+ 加载态（右侧预览与确定按钮共用）。
   const paramPaths = isCustomSelected ? customParamPaths : subFieldsToParamPaths(visibleSubFields);
-  const pathsLoading = isCustomSelected ? false : subFieldsLoading;
+  const pathsLoading = isCustomSelected ? customPathsLoading : subFieldsLoading;
   const hasSelection = !!selectedEntry || !!selectedCustom;
   const selectedOperation = selectedCustom?.operationType ?? selectedEntry?.command.operationType;
   const usesPathSelection = commandUsesPathSelection(selectedOperation);
