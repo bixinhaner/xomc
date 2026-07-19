@@ -21,7 +21,11 @@ import { CONFIG_TAB_HEIGHT, isReadOp, opColor, opLabel } from '../constants';
 import RawPathPanel from './RawPathPanel';
 import { newRawPathRow } from '../rawPathRow';
 import { validateRawPath } from '../rawPathValidate';
-import { computeInstanceSlots, resolveObjectPath } from '../adapters';
+import {
+  buildDefaultInstanceSelectors,
+  computeInstanceSlots,
+  resolveObjectPath,
+} from '../adapters';
 import {
   commandUsesPathSelection,
   getOrderedSelectedCommandPaths,
@@ -142,12 +146,8 @@ export default function ConfigParamsModal({
         });
       }
       setValues(initVals);
-      // 父级 `.{i}.` 实例选择器默认每个 1（实例默认 1）。
-      const initSel: Record<string, string> = {};
-      computeInstanceSlots(scopedCommand ?? command).forEach((s) => {
-        initSel[s.key] = '1';
-      });
-      setInstanceSelectors(initSel);
+      const slots = computeInstanceSlots(scopedCommand ?? command);
+      setInstanceSelectors(buildDefaultInstanceSelectors(slots, command.operationType));
     }
     setInstance(1);
   }
@@ -291,22 +291,29 @@ export default function ConfigParamsModal({
               {t('mml.consoleV2.config.objectInstance')}
             </Text>
             <Space wrap style={{ marginTop: 6 }}>
-              {instanceSlots.map((s) => (
-                <span key={s.key}>
-                  <Text type="secondary" style={{ fontSize: 12, marginRight: 4 }}>
-                    {s.label}
-                  </Text>
-                  <InputNumber
-                    min={1}
-                    size="small"
-                    style={{ width: 96 }}
-                    value={Number(instanceSelectors[s.key] ?? '1')}
-                    onChange={(v) =>
-                      setInstanceSelectors((prev) => ({ ...prev, [s.key]: String(v ?? 1) }))
-                    }
-                  />
-                </span>
-              ))}
+              {instanceSlots.map((s) => {
+                const rawValue = instanceSelectors[s.key] ?? (read ? '' : '1');
+                return (
+                  <span key={s.key}>
+                    <Text type="secondary" style={{ fontSize: 12, marginRight: 4 }}>
+                      {s.label}
+                    </Text>
+                    <InputNumber
+                      min={1}
+                      precision={0}
+                      size="small"
+                      style={{ width: 96 }}
+                      value={rawValue === '' ? null : Number(rawValue)}
+                      onChange={(v) =>
+                        setInstanceSelectors((prev) => ({
+                          ...prev,
+                          [s.key]: String(v ?? (read ? '' : 1)),
+                        }))
+                      }
+                    />
+                  </span>
+                );
+              })}
             </Space>
           </div>
         )}

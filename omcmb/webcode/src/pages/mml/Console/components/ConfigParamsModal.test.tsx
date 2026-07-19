@@ -231,6 +231,58 @@ describe('ConfigParamsModal', () => {
     }));
   });
 
+  it.each([
+    ['Device.A.{i}.Value', [null]],
+    ['Device.A.{i}.B.{i}.Value', [1, null]],
+    ['Device.A.{i}.B.{i}.C.{i}.Value', [1, 1, null]],
+  ] as const)('initializes query instance inputs for %s', (queryPath, expected) => {
+    renderModal({
+      command: {
+        ...command,
+        id: queryPath,
+        operationType: 'LST',
+        paramPaths: [
+          { path: queryPath, label: 'Value', writable: false, isObject: false },
+        ],
+      },
+      selectedPathKeys: [queryPath],
+    });
+
+    expect(screen.getAllByRole('spinbutton').map((input) => (
+      (input as HTMLInputElement).value === '' ? null : Number((input as HTMLInputElement).value)
+    ))).toEqual(expected);
+  });
+
+  it('allows clearing a query instance and emits blank selectors', () => {
+    const onConfirmAndExecute = vi.fn();
+    const queryPath = 'Device.A.{i}.B.{i}.Value';
+    renderModal({
+      command: {
+        ...command,
+        id: 'query-optional-instance',
+        operationType: 'LST',
+        paramPaths: [
+          { path: queryPath, label: 'Value', writable: false, isObject: false },
+        ],
+      },
+      selectedPathKeys: [queryPath],
+      onConfirmAndExecute,
+    });
+
+    const inputs = screen.getAllByRole('spinbutton');
+    expect(inputs[0]).toHaveValue('1');
+    expect(inputs[1]).toHaveValue('');
+    fireEvent.change(inputs[0], { target: { value: '' } });
+    fireEvent.click(
+      screen.getByRole('button', { name: /mml.consoleV2.config.confirmAndExecute/ }),
+    );
+
+    expect(onConfirmAndExecute).toHaveBeenCalledWith(expect.objectContaining({
+      checkedPaths: [queryPath],
+      instanceSelectors: { i01: '', i02: '' },
+    }));
+  });
+
   it('resets MOD values and instance selectors when the parent confirms different Paths', () => {
     const onConfirmAndExecute = vi.fn();
     const modCommand = {
