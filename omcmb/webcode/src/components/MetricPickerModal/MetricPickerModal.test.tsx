@@ -10,12 +10,15 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { App } from 'antd';
 
 // 捕获 useIndicatorList 收到的 deviceType。
-const useIndicatorListSpy = vi.fn();
+const { useIndicatorListSpy, indicatorListData } = vi.hoisted(() => ({
+  useIndicatorListSpy: vi.fn(),
+  indicatorListData: { items: [] as unknown[], total: 0 },
+}));
 
 vi.mock('@core/hooks/api/useIndicatorsLibrary', () => {
   // 稳定引用：组件内有按 data 身份做的 render-phase 同步，mock 每次返回新对象会在多次
   // rerender 时把它放大成无限渲染（生产用真 React Query 数据稳定，不触发）。
-  const STABLE = { data: { items: [], total: 0 }, isLoading: false };
+  const STABLE = { data: indicatorListData, isLoading: false };
   return {
     useIndicatorList: (deviceType: unknown, params: unknown) => {
       useIndicatorListSpy(deviceType, params);
@@ -46,6 +49,8 @@ function renderModal(props: Partial<React.ComponentProps<typeof MetricPickerModa
 describe('MetricPickerModal 制式锁定', () => {
   beforeEach(() => {
     useIndicatorListSpy.mockClear();
+    indicatorListData.items = [];
+    indicatorListData.total = 0;
   });
 
   it('lockDeviceType=true 时隐藏「设备类型」下拉，按 initialDeviceType 锁死取数', () => {
@@ -84,6 +89,8 @@ describe('MetricPickerModal 制式锁定', () => {
 describe('MetricPickerModal 已选回显', () => {
   beforeEach(() => {
     useIndicatorListSpy.mockClear();
+    indicatorListData.items = [];
+    indicatorListData.total = 0;
   });
 
   // 回归：与制式同款「组件常驻不卸载」问题——内部 selected 仅首挂载赋值一次。
@@ -118,6 +125,8 @@ describe('MetricPickerModal 已选回显', () => {
 describe('MetricPickerModal 搜索状态', () => {
   beforeEach(() => {
     useIndicatorListSpy.mockClear();
+    indicatorListData.items = [];
+    indicatorListData.total = 0;
   });
 
   it('关闭后重开会清空上次搜索词并回到第一页', () => {
@@ -153,6 +162,8 @@ describe('MetricPickerModal 搜索状态', () => {
 describe('MetricPickerModal 选择数量限制', () => {
   beforeEach(() => {
     useIndicatorListSpy.mockClear();
+    indicatorListData.items = [];
+    indicatorListData.total = 0;
   });
 
   it('默认不限制选择数量，由复用页面自行决定上限', () => {
@@ -184,5 +195,36 @@ describe('MetricPickerModal 选择数量限制', () => {
     fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
 
     expect(onConfirm).not.toHaveBeenCalled();
+  });
+});
+
+describe('MetricPickerModal 指标级别列', () => {
+  beforeEach(() => {
+    useIndicatorListSpy.mockClear();
+    indicatorListData.items = [
+      {
+        id: 'K-BOTH',
+        name: 'rrc_sr',
+        cnName: 'RRC连接成功率',
+        enName: 'RRC Success Rate',
+        indicatorLevel: 'both',
+        isCounter: false,
+        deviceType: 'ENB',
+      },
+    ];
+    indicatorListData.total = 1;
+  });
+
+  it('ENB/GSM 指标选择列表显示“指标级别”列并把 both 显示为“设备级 / PLMN级”', () => {
+    renderModal({ initialDeviceType: 'ENB' });
+
+    expect(screen.getAllByText('指标级别').length).toBeGreaterThan(0);
+    expect(screen.getByText('设备级 / PLMN级')).toBeTruthy();
+  });
+
+  it('GNB 指标选择列表暂不显示“指标级别”列', () => {
+    renderModal({ initialDeviceType: 'GNB' });
+
+    expect(screen.queryByText('指标级别')).toBeNull();
   });
 });

@@ -7,6 +7,19 @@ import type { QueryTemplate } from '@core/types/pmQuery';
 
 import QueryTemplateDetailModal from './QueryTemplateDetailModal';
 
+vi.mock('@core/hooks/api/useIndicatorsLibrary', () => ({
+  useAllIndicators: () => ({
+    data: {
+      items: [
+        {
+          id: 'KPI-36',
+          indicatorLevel: 'device',
+        },
+      ],
+    },
+  }),
+}));
+
 const template: QueryTemplate = {
   id: 'template-36',
   name: '小时模板',
@@ -41,7 +54,7 @@ describe('QueryTemplateDetailModal', () => {
     expect(screen.getByText(/私有/)).toBeInTheDocument();
     expect(screen.getByText('小时')).toBeInTheDocument();
     expect(screen.getByText('SN-36')).toBeInTheDocument();
-    expect(screen.getByText('小区可用率')).toBeInTheDocument();
+    expect(screen.getByText('小区可用率（设备级）')).toBeInTheDocument();
     expect(screen.getByText('近 7 天')).toBeInTheDocument();
   });
 });

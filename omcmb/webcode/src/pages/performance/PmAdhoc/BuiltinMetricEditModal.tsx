@@ -14,6 +14,7 @@ import { useIndicatorCandidates } from '@core/hooks/api/usePerformance';
 import type { IndicatorCandidate } from '@core/services/api/pmApi';
 import type { AdhocTask } from '@core/types/pmAdhoc';
 import type { DeviceType } from '@core/types/indicatorLibrary';
+import { formatIndicatorLevel, shouldShowIndicatorLevel } from '@core/utils/indicatorLevelDisplay';
 
 // 制式 → 指标库 deviceType（与向导一致）。
 const TECH_TO_DEVICE_TYPE: Record<string, DeviceType> = {
@@ -27,6 +28,7 @@ interface MetricTransferItem {
   id: string;
   name: string;
   isCounter: boolean;
+  indicatorLevel?: string;
   searchText: string;
 }
 
@@ -74,6 +76,7 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
           id: ind.id,
           name: ind.cnName || ind.name,
           isCounter: ind.isCounter,
+          indicatorLevel: ind.indicatorLevel,
           searchText: `${ind.id} ${ind.name} ${ind.cnName}`.toLowerCase(),
         })),
     [indicatorItems, metricTypeFilter, selectedKeySet],
@@ -86,6 +89,11 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
           ? intl.formatMessage({ id: 'perf.adhoc.metricTagCounter' })
           : intl.formatMessage({ id: 'perf.adhoc.metricTagKpi' })}
       </Tag>
+      {shouldShowIndicatorLevel(deviceType) && (
+        <Tag color="default" style={{ marginInlineEnd: 0 }}>
+          {formatIndicatorLevel(item.indicatorLevel, (id) => intl.formatMessage({ id }))}
+        </Tag>
+      )}
       <span style={{ color: '#999' }}>{item.id}</span>
       <span>{item.name}</span>
     </Space>

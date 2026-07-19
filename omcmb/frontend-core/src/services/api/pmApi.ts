@@ -17,6 +17,7 @@ interface BackendKPIDefinition {
   // 旧调用（getKPIs/getAllKPIs）不依赖这两个字段，故为可选，保持零回归。
   id?: string;
   is_counter?: string;
+  indicator_level?: string;
 }
 
 // IndicatorCandidate 是向导第③步穿梭框消费的指标候选项（按制式、含计数器、带编号/类型）。
@@ -26,6 +27,7 @@ export interface IndicatorCandidate {
   cnName: string;    // 中文名（缺省回退 en_name）
   enName: string;    // 英文名
   isCounter: boolean; // true=计数器(C)，false=KPI(K)
+  indicatorLevel?: string;
 }
 
 interface BackendKPIValue {
@@ -87,6 +89,7 @@ function mapBackendIndicatorCandidate(d: BackendKPIDefinition): IndicatorCandida
     cnName,
     enName,
     isCounter: d.is_counter === '1',
+    indicatorLevel: d.indicator_level,
   };
 }
 
