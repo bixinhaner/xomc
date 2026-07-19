@@ -42,6 +42,7 @@ import type { IndicatorCandidate } from '@core/services/api/pmApi';
 import type { AdhocDimension, AdhocMode } from '@core/types/pmAdhoc';
 import type { DeviceType } from '@core/types/indicatorLibrary';
 import { isGranularityDimensionSupported } from '@core/utils/pmAdhocConstraints';
+import { formatIndicatorLevel, shouldShowIndicatorLevel } from '@core/utils/indicatorLevelDisplay';
 import CellDrilldownSelector from '../PmDashboard/CellDrilldownSelector';
 import { getEffectiveLdns, type CellSelection } from '../PmDashboard/cellDrilldownUtils';
 
@@ -68,6 +69,7 @@ interface MetricTransferItem {
   name: string;
   cnName: string;
   isCounter: boolean;
+  indicatorLevel?: string;
   // 搜索用拼接串（编号 + 中英文名），小写。
   searchText: string;
 }
@@ -247,6 +249,7 @@ export default function PmAdhocWizard() {
           name: ind.cnName || ind.name,
           cnName: ind.cnName,
           isCounter: ind.isCounter,
+          indicatorLevel: ind.indicatorLevel,
           searchText: `${ind.id} ${ind.name} ${ind.cnName}`.toLowerCase(),
         })),
     [indicatorItems, metricTypeFilter, selectedKeySet],
@@ -493,6 +496,11 @@ export default function PmAdhocWizard() {
           ? intl.formatMessage({ id: 'perf.adhoc.metricTagCounter' })
           : intl.formatMessage({ id: 'perf.adhoc.metricTagKpi' })}
       </Tag>
+      {shouldShowIndicatorLevel(deviceType) && (
+        <Tag color="default" style={{ marginInlineEnd: 0 }}>
+          {formatIndicatorLevel(item.indicatorLevel, (id) => intl.formatMessage({ id }))}
+        </Tag>
+      )}
       <span style={{ color: '#999' }}>{item.id}</span>
       <span>{item.name}</span>
     </Space>
@@ -596,9 +604,13 @@ export default function PmAdhocWizard() {
 
   const renderStep5 = () => {
     const effectiveLdns = needsDevicePick ? getEffectiveLdns(cellSel, objectsByDevice) : [];
-    const metricNames = metricPaths.map((id) => {
+    const metricSummaries = metricPaths.map((id) => {
       const ind = indicatorById.get(id);
-      return ind ? `${ind.id} ${ind.cnName || ind.name}`.trim() : id;
+      return {
+        id,
+        label: ind ? `${ind.id} ${ind.cnName || ind.name}`.trim() : id,
+        level: ind?.indicatorLevel,
+      };
     });
     return (
       <Descriptions bordered column={1} size="middle">
@@ -646,10 +658,16 @@ export default function PmAdhocWizard() {
           </Descriptions.Item>
         )}
         <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmMetric' })}>
-          {metricNames.length > 0 ? (
+          {metricSummaries.length > 0 ? (
             <Space size={[4, 4]} wrap>
-              {metricNames.map((m) => (
-                <Tag key={m}>{m}</Tag>
+              {metricSummaries.map((m) => (
+                <Tag key={m.id}>
+                  {m.label}
+                  {shouldShowIndicatorLevel(deviceType) && intl.formatMessage(
+                    { id: 'perf.query.indicatorLevelInline' },
+                    { level: formatIndicatorLevel(m.level, (id) => intl.formatMessage({ id })) },
+                  )}
+                </Tag>
               ))}
             </Space>
           ) : (

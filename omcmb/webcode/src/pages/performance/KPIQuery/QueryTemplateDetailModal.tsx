@@ -1,6 +1,8 @@
 import { Descriptions, Modal, Space, Tag, Typography } from 'antd';
 
 import type { QueryTemplate } from '@core/types/pmQuery';
+import { useAllIndicators } from '@core/hooks/api/useIndicatorsLibrary';
+import { formatIndicatorLevel, shouldShowIndicatorLevel } from '@core/utils/indicatorLevelDisplay';
 import { useT } from '@/hooks/useT';
 import dayjs from 'dayjs';
 
@@ -13,9 +15,17 @@ interface QueryTemplateDetailModalProps {
   onClose: () => void;
 }
 
-export default function QueryTemplateDetailModal({ open, template, metricLabels, onClose }: QueryTemplateDetailModalProps) {
+export default function QueryTemplateDetailModal(props: QueryTemplateDetailModalProps) {
+  if (!props.template) return null;
+
+  return <QueryTemplateDetailModalContent {...props} template={props.template} />;
+}
+
+function QueryTemplateDetailModalContent({ open, template, metricLabels, onClose }: QueryTemplateDetailModalProps & { template: QueryTemplate }) {
   const t = useT();
-  if (!template) return null;
+  const deviceType = template.payload.deviceType ?? 'ENB';
+  const { data: indicatorsData } = useAllIndicators(deviceType);
+  const indicatorById = new Map((indicatorsData?.items ?? []).map((ind) => [ind.id, ind]));
 
   const range = template.payload.timeRangePreset === 'custom'
     ? [template.payload.absoluteStart, template.payload.absoluteEnd].filter(Boolean).join(' — ') || '-'
@@ -48,7 +58,21 @@ export default function QueryTemplateDetailModal({ open, template, metricLabels,
         <Descriptions.Item label={t('perf.kpiQuery.metric')}>
           {template.payload.metricPaths.length === 0
             ? '-'
-            : <Space wrap>{template.payload.metricPaths.map((path) => <Tag key={path}>{metricLabels[path] ?? path}</Tag>)}</Space>}
+            : (
+                <Space wrap>
+                  {template.payload.metricPaths.map((path) => {
+                    const indicator = indicatorById.get(path);
+                    return (
+                      <Tag key={path}>
+                        {metricLabels[path] ?? path}
+                        {shouldShowIndicatorLevel(deviceType) && t('perf.query.indicatorLevelInline', {
+                          level: formatIndicatorLevel(indicator?.indicatorLevel, t),
+                        })}
+                      </Tag>
+                    );
+                  })}
+                </Space>
+              )}
         </Descriptions.Item>
         <Descriptions.Item label={t('perf.granularity')}>
           {t(granularityLabels[template.payload.granularity] ?? template.payload.granularity)}

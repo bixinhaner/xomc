@@ -783,12 +783,13 @@ func (h *Handler) ListKPIDefinitions(c *gin.Context) {
 		}
 		for _, r := range rows {
 			items = append(items, kpiDefinitionItem{
-				ID:          r.ID,
-				IsCounter:   r.IsCounter,
-				Name:        r.EnName,
-				DisplayName: localizedIndicatorName(loc, r.EnName, r.CnName, r.ID),
-				Formula:     derefOr(r.Arithmetic, ""),
-				Unit:        derefOr(r.UnitID, ""),
+				ID:             r.ID,
+				IsCounter:      r.IsCounter,
+				IndicatorLevel: derefOr(r.IndicatorLevel, ""),
+				Name:           r.EnName,
+				DisplayName:    localizedIndicatorName(loc, r.EnName, r.CnName, r.ID),
+				Formula:        derefOr(r.Arithmetic, ""),
+				Unit:           derefOr(r.UnitID, ""),
 			})
 		}
 	}
@@ -799,12 +800,13 @@ func (h *Handler) ListKPIDefinitions(c *gin.Context) {
 // 历史字段（name/display_name/formula/unit）与旧 model.KPIDefinition 的 JSON 形态一致，
 // 额外补 id / is_counter。不污染共享的 model.KPIDefinition（KPI 计算引擎在用）。
 type kpiDefinitionItem struct {
-	ID          string `json:"id"`
-	IsCounter   string `json:"is_counter"`
-	Name        string `json:"name"`
-	DisplayName string `json:"display_name"`
-	Formula     string `json:"formula"`
-	Unit        string `json:"unit"`
+	ID             string `json:"id"`
+	IsCounter      string `json:"is_counter"`
+	IndicatorLevel string `json:"indicator_level"`
+	Name           string `json:"name"`
+	DisplayName    string `json:"display_name"`
+	Formula        string `json:"formula"`
+	Unit           string `json:"unit"`
 }
 
 // parseBoolQuery 把 query 字符串解析为 bool，仅 "true"/"1" 视为 true，其余（含空）为 false。

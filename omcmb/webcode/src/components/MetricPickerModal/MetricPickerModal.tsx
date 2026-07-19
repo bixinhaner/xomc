@@ -27,6 +27,7 @@ import { SearchOutlined, ClearOutlined } from '@ant-design/icons';
 import { useIndicatorList } from '@core/hooks/api/useIndicatorsLibrary';
 import type { DeviceType, IndicatorInfo } from '@core/types/indicatorLibrary';
 import { useAppStore } from '@core/store/appStore';
+import { formatIndicatorLevel, shouldShowIndicatorLevel } from '@core/utils/indicatorLevelDisplay';
 const { Text } = Typography;
 
 // 选中值 = 该指标在 pm_metrics 里的 metric_path：
@@ -178,8 +179,19 @@ export default function MetricPickerModal({
         render: (_: unknown, r: IndicatorInfo) =>
           r.isCounter ? <Tag color="blue">Counter</Tag> : <Tag color="orange">KPI</Tag>,
       },
+      ...(shouldShowIndicatorLevel(deviceType)
+        ? [
+            {
+              title: intl.formatMessage({ id: 'perf.picker.colIndicatorLevel' }),
+              key: 'indicatorLevel',
+              dataIndex: 'indicatorLevel',
+              width: 130,
+              render: (v: string | undefined) => formatIndicatorLevel(v, (id) => intl.formatMessage({ id })),
+            },
+          ]
+        : []),
     ],
-    [intl, isEn],
+    [intl, isEn, deviceType],
   );
 
   const handleSearch = () => {
@@ -225,7 +237,7 @@ export default function MetricPickerModal({
       onOk={handleConfirm}
       okText={intl.formatMessage({ id: 'common.confirm' })}
       cancelText={intl.formatMessage({ id: 'common.cancel' })}
-      width={820}
+      width={920}
       destroyOnHidden
     >
       <Space orientation="vertical" style={{ width: '100%' }} size="middle">
@@ -271,7 +283,7 @@ export default function MetricPickerModal({
           dataSource={items}
           rowSelection={rowSelection}
           pagination={false}
-          scroll={{ y: 320 }}
+          scroll={{ x: shouldShowIndicatorLevel(deviceType) ? 760 : undefined, y: 320 }}
         />
 
         <Pagination

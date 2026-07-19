@@ -320,12 +320,13 @@ func TestHandler_ListKPIDefinitions(t *testing.T) {
 
 // kpiDefRespItem 镜像 handler 的响应 wire 形态（含 id / is_counter + 历史字段）。
 type kpiDefRespItem struct {
-	ID          string `json:"id"`
-	IsCounter   string `json:"is_counter"`
-	Name        string `json:"name"`
-	DisplayName string `json:"display_name"`
-	Formula     string `json:"formula"`
-	Unit        string `json:"unit"`
+	ID             string `json:"id"`
+	IsCounter      string `json:"is_counter"`
+	IndicatorLevel string `json:"indicator_level"`
+	Name           string `json:"name"`
+	DisplayName    string `json:"display_name"`
+	Formula        string `json:"formula"`
+	Unit           string `json:"unit"`
 }
 
 // 默认（不带 include_counters）：仅请求 is_counter='0' 的 KPI，响应含 id/is_counter，
@@ -430,6 +431,36 @@ func TestHandler_ListKPIDefinitions_IncludeCounters(t *testing.T) {
 	assert.Equal(t, "0", body.Items[0].IsCounter)
 	assert.Equal(t, "1", body.Items[1].IsCounter)
 	assert.Equal(t, "C2001", body.Items[1].ID)
+}
+
+func TestHandler_ListKPIDefinitions_IndicatorLevel(t *testing.T) {
+	level := "both"
+	ir := &pmHIndicatorRepo{
+		listAllFn: func(_ context.Context, f indicator.IndicatorListFilter) ([]indicator.IndicatorListItem, error) {
+			require.Equal(t, "GSM", f.DeviceType)
+			return []indicator.IndicatorListItem{
+				{PerfIndicator: indicator.PerfIndicator{
+					ID: "K3001", EnName: "gsm_call_sr", CnName: strPtr("GSM呼叫成功率"),
+					IsCounter: "0", IndicatorLevel: &level,
+				}},
+			}, nil
+		},
+	}
+	router := pmHSetupRouterWithIndicator(ir)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/pm/kpi/definitions?device_type=GSM", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var body struct {
+		Items []kpiDefRespItem `json:"items"`
+		Total int              `json:"total"`
+	}
+	response.DecodeData(t, w.Body, &body)
+	assert.Equal(t, 1, body.Total)
+	require.Len(t, body.Items, 1)
+	assert.Equal(t, "both", body.Items[0].IndicatorLevel)
 }
 
 // device_type 指定时只查该制式表（不传则三表合并）。
