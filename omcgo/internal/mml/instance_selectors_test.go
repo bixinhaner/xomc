@@ -122,6 +122,30 @@ func TestSubstituteQueryInstanceSelectors(t *testing.T) {
 			selectors: map[string]string{"i01": "4", "i02": "9"},
 			want:      "Device.A.4.Value",
 		},
+		{
+			name:      "numbered sparse map truncates at missing middle layer",
+			path:      "Device.A.{i}.B.{i}.Value",
+			selectors: map[string]string{"i01": "1", "i03": "3"},
+			want:      "Device.A.1.B.",
+		},
+		{
+			name:      "numbered first layer blank truncates before later value",
+			path:      "Device.A.{i}.B.{i}.Value",
+			selectors: map[string]string{"i01": "", "i02": "2"},
+			want:      "Device.A.",
+		},
+		{
+			name:      "numbered three layers use their fixed layer keys",
+			path:      "Device.A.{i}.B.{i}.C.{i}.Value",
+			selectors: map[string]string{"i01": "1", "i02": "2", "i03": "3"},
+			want:      "Device.A.1.B.2.C.3.Value",
+		},
+		{
+			name:      "legacy Greek keys retain sorted positional mapping",
+			path:      "Device.A.{i}.B.{i}.Value",
+			selectors: map[string]string{"iβ": "2", "iα": "1"},
+			want:      "Device.A.1.B.2.Value",
+		},
 	}
 
 	for _, tc := range cases {

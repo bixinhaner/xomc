@@ -530,6 +530,22 @@ func substituteQueryInstanceSelectors(path string, selectors map[string]string) 
 		return path
 	}
 
+	if hasNumberedQueryInstanceSelectors(selectors) {
+		result := path
+		for layer := 1; ; layer++ {
+			idx := strings.Index(result, ".{i}.")
+			if idx < 0 {
+				return result
+			}
+
+			value, ok := selectors[fmt.Sprintf("i%02d", layer)]
+			if !ok || strings.TrimSpace(value) == "" {
+				return result[:idx+1]
+			}
+			result = result[:idx] + "." + value + "." + result[idx+5:]
+		}
+	}
+
 	keys := make([]string, 0, len(selectors))
 	for key := range selectors {
 		keys = append(keys, key)
@@ -552,6 +568,15 @@ func substituteQueryInstanceSelectors(path string, selectors map[string]string) 
 		}
 		result = result[:idx] + "." + value + "." + result[idx+5:]
 	}
+}
+
+func hasNumberedQueryInstanceSelectors(selectors map[string]string) bool {
+	for key := range selectors {
+		if len(key) != 3 || key[0] != 'i' || key[1] < '0' || key[1] > '9' || key[2] < '0' || key[2] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // buildLSTParamRefs 把 LST 选中的 sub_field 合成为 BuildTR069Params 可消费的 param_refs。
