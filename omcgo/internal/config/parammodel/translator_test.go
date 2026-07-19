@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -307,6 +308,41 @@ func TestTranslator_PartialPrefixDerivation(t *testing.T) {
 		assert.Nil(t, got.Mapping)
 	})
 
+	reverseMultiCandidateTranslator := func() *Translator {
+		return newTranslator(
+			mkMapping(
+				"Device.Z.{i}.Pool.{i}.Value",
+				"InternetGatewayDevice.Shared.{i}.B.{i}.Val",
+			),
+			mkMapping(
+				"Device.X.{i}.Group.{i}.Value",
+				"InternetGatewayDevice.Shared.{i}.C.{i}.Val",
+			),
+			mkMapping(
+				"Device.X.{i}.Other.{i}.Value",
+				"InternetGatewayDevice.Shared.{i}.D.{i}.Val",
+			),
+		)
+	}
+
+	t.Run("reverse multiple candidates are deduplicated and deterministic", func(t *testing.T) {
+		got := reverseMultiCandidateTranslator().ToStandardCandidates("InternetGatewayDevice.Shared.")
+
+		require.Len(t, got, 2)
+		assert.Equal(t, "Device.X.", got[0].Translated)
+		assert.Equal(t, "Device.Z.", got[1].Translated)
+		assert.True(t, got[0].Found)
+		assert.True(t, got[1].Found)
+	})
+
+	t.Run("reverse legacy method misses for multiple candidates", func(t *testing.T) {
+		got := reverseMultiCandidateTranslator().ToStandard("InternetGatewayDevice.Shared.")
+
+		assert.False(t, got.Found)
+		assert.Equal(t, "InternetGatewayDevice.Shared.", got.Translated)
+		assert.Nil(t, got.Mapping)
+	})
+
 	t.Run("exact direct mapping takes precedence", func(t *testing.T) {
 		tr := newTranslator(
 			baseMapping,
@@ -322,6 +358,24 @@ func TestTranslator_PartialPrefixDerivation(t *testing.T) {
 		assert.Equal(t, "InternetGatewayDevice.Direct.", legacy.Translated)
 	})
 
+	t.Run("reverse exact direct mapping takes precedence", func(t *testing.T) {
+		tr := newTranslator(
+			mkMapping(
+				"Device.Derived.{i}.Value",
+				"InternetGatewayDevice.Shared.{i}.Val",
+			),
+			mkMapping("Device.Direct.", "InternetGatewayDevice.Shared."),
+		)
+
+		candidates := tr.ToStandardCandidates("InternetGatewayDevice.Shared.")
+		require.Len(t, candidates, 1)
+		assert.Equal(t, "Device.Direct.", candidates[0].Translated)
+
+		legacy := tr.ToStandard("InternetGatewayDevice.Shared.")
+		require.True(t, legacy.Found)
+		assert.Equal(t, "Device.Direct.", legacy.Translated)
+	})
+
 	t.Run("existing full concrete leaf translation remains unchanged", func(t *testing.T) {
 		tr := newTranslator(baseMapping)
 
@@ -335,31 +389,114 @@ func TestTranslator_PartialPrefixDerivation(t *testing.T) {
 	})
 }
 
+func TestTranslator_PartialPrefixPreservesFixedNumericSegments(t *testing.T) {
+	tr := NewTranslator(
+		&MappingSet{
+			Source: MappingSourceDefault,
+			Mappings: []ParamMapping{mkMapping(
+				"Device.A.{i}.Profile.1.B.{i}.Value",
+				"InternetGatewayDevice.X.{i}.Profile.1.Pool.{i}.Val",
+			)},
+		},
+		NewRegistryMetrics(nil),
+		nil,
+	)
+
+	toPrivate := tr.ToPrivate("Device.A.7.Profile.1.B.")
+	require.True(t, toPrivate.Found)
+	assert.Equal(t, "InternetGatewayDevice.X.7.Profile.1.Pool.", toPrivate.Translated)
+
+	privateCandidates := tr.ToPrivateCandidates("Device.A.7.Profile.1.B.")
+	require.Len(t, privateCandidates, 1)
+	assert.Equal(t, "InternetGatewayDevice.X.7.Profile.1.Pool.", privateCandidates[0].Translated)
+
+	toStandard := tr.ToStandard("InternetGatewayDevice.X.7.Profile.1.Pool.")
+	require.True(t, toStandard.Found)
+	assert.Equal(t, "Device.A.7.Profile.1.B.", toStandard.Translated)
+
+	standardCandidates := tr.ToStandardCandidates("InternetGatewayDevice.X.7.Profile.1.Pool.")
+	require.Len(t, standardCandidates, 1)
+	assert.Equal(t, "Device.A.7.Profile.1.B.", standardCandidates[0].Translated)
+}
+
+func TestTranslator_LegacyExactFastPathDoesNotAllocateCandidateSlice(t *testing.T) {
+	tr := NewTranslator(
+		&MappingSet{
+			Source: MappingSourceDefault,
+			Mappings: []ParamMapping{
+				mkMapping("Device.Exact", "InternetGatewayDevice.Exact"),
+			},
+		},
+		nil,
+		nil,
+	)
+
+	var privateResult TranslationResult
+	var standardResult TranslationResult
+	allocs := testing.AllocsPerRun(1000, func() {
+		privateResult = tr.ToPrivate("Device.Exact")
+		standardResult = tr.ToStandard("InternetGatewayDevice.Exact")
+	})
+
+	assert.Zero(t, allocs)
+	assert.True(t, privateResult.Found)
+	assert.True(t, standardResult.Found)
+}
+
+func TestTranslator_CandidateAndLegacyMetrics(t *testing.T) {
+	metrics := NewRegistryMetrics(nil)
+	tr := NewTranslator(
+		&MappingSet{
+			Source: MappingSourceDefault,
+			Mappings: []ParamMapping{
+				mkMapping("Device.A.{i}.B", "InternetGatewayDevice.X.{i}.B"),
+				mkMapping("Device.A.{i}.C", "InternetGatewayDevice.Y.{i}.C"),
+			},
+		},
+		metrics,
+		nil,
+	)
+
+	require.Len(t, tr.ToPrivateCandidates("Device.A."), 2)
+	assert.False(t, tr.ToPrivate("Device.A.").Found)
+
+	assert.Equal(t, float64(1), testutil.ToFloat64(
+		metrics.translateTotal.WithLabelValues("to_private", "hit"),
+	))
+	assert.Equal(t, float64(1), testutil.ToFloat64(
+		metrics.translateTotal.WithLabelValues("to_private", "miss"),
+	))
+}
+
 func TestSubstituteInstanceNumbers(t *testing.T) {
 	cases := []struct {
-		name     string
-		src, dst string
-		want     string
-		ok       bool
+		name            string
+		instanceNumbers []string
+		dst             string
+		want            string
+		ok              bool
 	}{
 		{"single_i",
-			"Device.Foo.0.Bar", "Device.Other.{i}.Baz",
+			[]string{"0"}, "Device.Other.{i}.Baz",
 			"Device.Other.0.Baz", true},
 		{"multi_i_in_order",
-			"A.7.B.3.C", "X.{i}.Y.{i}.Z",
+			[]string{"7", "3"}, "X.{i}.Y.{i}.Z",
 			"X.7.Y.3.Z", true},
-		{"src_no_digits_dst_has_i",
-			"A.B", "X.{i}.Y",
+		{"fixed_numeric_segment_preserved",
+			[]string{"7", "3"}, "X.{i}.Profile.1.Y.{i}.Z",
+			"X.7.Profile.1.Y.3.Z", true},
+		{"no_instance_number_for_placeholder",
+			nil, "X.{i}.Y",
 			"", false},
-		{"dst_no_i_src_has_digits",
-			"A.5.B", "X.Y",
+		{"extra_instance_number",
+			[]string{"5"}, "X.Y",
 			"", false},
-		{"empty_inputs",
-			"", "X.{i}", "", false},
+		{"empty_destination",
+			[]string{"5"}, "", "", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, ok := substituteInstanceNumbers(c.src, c.dst)
+			got, ok := substituteInstanceNumbers(c.instanceNumbers, c.dst)
 			assert.Equal(t, c.ok, ok)
 			assert.Equal(t, c.want, got)
 		})
