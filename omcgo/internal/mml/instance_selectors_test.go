@@ -86,6 +86,51 @@ func TestSubstituteInstanceSelectors(t *testing.T) {
 	}
 }
 
+func TestSubstituteQueryInstanceSelectors(t *testing.T) {
+	cases := []struct {
+		name      string
+		path      string
+		selectors map[string]string
+		want      string
+	}{
+		{
+			name: "legacy empty selector map keeps template for payload fallback",
+			path: "Device.A.{i}.Value",
+			want: "Device.A.{i}.Value",
+		},
+		{
+			name:      "single blank selector truncates to parent object",
+			path:      "Device.A.{i}.Value",
+			selectors: map[string]string{"i01": ""},
+			want:      "Device.A.",
+		},
+		{
+			name:      "last blank selector truncates after resolved outer instance",
+			path:      "Device.A.{i}.B.{i}.Value",
+			selectors: map[string]string{"i01": "1", "i02": ""},
+			want:      "Device.A.1.B.",
+		},
+		{
+			name:      "missing trailing selector truncates at that layer",
+			path:      "Device.A.{i}.B.{i}.Value",
+			selectors: map[string]string{"i01": "3"},
+			want:      "Device.A.3.B.",
+		},
+		{
+			name:      "extra selector is ignored by shallow path",
+			path:      "Device.A.{i}.Value",
+			selectors: map[string]string{"i01": "4", "i02": "9"},
+			want:      "Device.A.4.Value",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, substituteQueryInstanceSelectors(tc.path, tc.selectors))
+		})
+	}
+}
+
 func TestApplyInstanceSelectorsToRefs(t *testing.T) {
 	refs := []MMLParamRef{
 		{ParamCode: "P1", Tr069Path: "Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress"},
@@ -95,6 +140,16 @@ func TestApplyInstanceSelectorsToRefs(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Device.IP.Interface.1.IPv4Address.2.IPAddress", refs[0].Tr069Path)
 	assert.Equal(t, "Device.IP.Interface.1.IPv4Address.2.Enable", refs[1].Tr069Path)
+}
+
+func TestApplyQueryInstanceSelectorsToRefs_MixedDepth(t *testing.T) {
+	refs := []MMLParamRef{
+		{ParamCode: "P1", Tr069Path: "Device.A.{i}.Value"},
+		{ParamCode: "P2", Tr069Path: "Device.A.{i}.B.{i}.Value"},
+	}
+	applyQueryInstanceSelectorsToRefs(refs, map[string]string{"i01": "1", "i02": ""})
+	assert.Equal(t, "Device.A.1.Value", refs[0].Tr069Path)
+	assert.Equal(t, "Device.A.1.B.", refs[1].Tr069Path)
 }
 
 func TestApplyInstanceSelectorsToRefs_EmptySelectors_NoOp(t *testing.T) {
@@ -143,6 +198,44 @@ func TestBuildEntry_LST_InstanceSelectors(t *testing.T) {
 	refs := entry["param_refs"].([]MMLParamRef)
 	require.Len(t, refs, 1)
 	assert.Equal(t, "Device.IP.Interface.1.IPv4Address.2.IPAddress", refs[0].Tr069Path)
+}
+
+func TestBuildEntry_LST_BlankFinalInstanceUsesPartialPath(t *testing.T) {
+	cmdID := uuid.New()
+	sfID := uuid.New()
+	cmd := &MMLCommand{
+		ID:            cmdID,
+		CommandCode:   "LST_VALUE",
+		OperationType: "LST",
+		Params: []MMLParamRef{{
+			ID: sfID, ParamCode: "VALUE",
+			Tr069Path: "Device.A.{i}.B.{i}.Value",
+		}},
+	}
+	subFields := []MMLCommandSubField{{
+		ID: sfID, CommandID: cmdID, MMLCode: "VALUE",
+	}}
+	stmt := Statement{
+		CommandID:           &cmdID,
+		OperationType:       "LST",
+		SelectedSubFieldIDs: []uuid.UUID{sfID},
+		InstanceSelectors:   map[string]string{"i01": "1", "i02": ""},
+	}
+
+	entry, err := buildStatementCommandEntry(stmt, cmd, subFields)
+	require.NoError(t, err)
+	refs := entry["param_refs"].([]MMLParamRef)
+	require.Len(t, refs, 1)
+	assert.Equal(t, "Device.A.1.B.", refs[0].Tr069Path)
+
+	payload, err := BuildTR069Params(
+		entry["rpc_method"].(string),
+		refs,
+		nil,
+		entry["operation_type"].(string),
+	)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"names":["Device.A.1.B."]}`, string(payload))
 }
 
 // buildEntry_MOD_WithSelectors 验证 MOD 分支 param_refs 路径被替换。
@@ -206,7 +299,7 @@ func TestBuildEntry_RMV_InstanceSelectors(t *testing.T) {
 	stmt := Statement{
 		OperationType:     "RMV",
 		InstanceSelectors: map[string]string{"iα": "2"}, // 上层 IP.Interface.2
-		RmvInstanceIndex:  &idx,                          // 删除 IPv4Address.5
+		RmvInstanceIndex:  &idx,                         // 删除 IPv4Address.5
 	}
 	entry, err := buildStatementCommandEntry(stmt, cmd, nil)
 	require.NoError(t, err)
