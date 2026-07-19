@@ -308,6 +308,31 @@ export function buildStructuredStatement(
   return stmt;
 }
 
+export function buildStandardQueryColumns(
+  command: CommandItem,
+  checkedPaths: string[],
+  instanceSelectors?: Record<string, string>,
+): ResultColumn[] {
+  return buildColumns(command, checkedPaths).map((column) => ({
+    ...column,
+    path: resolveQueryPath(column.path, instanceSelectors),
+  }));
+}
+
+export function buildStandardRawRows(
+  operationType: MMLOperationType,
+  checkedPaths: string[],
+  values?: Record<string, string>,
+  instanceSelectors?: Record<string, string>,
+): { path: string; value: string }[] {
+  return checkedPaths.map((path) => ({
+    path: isReadOp(operationType)
+      ? resolveQueryPath(path, instanceSelectors)
+      : path,
+    value: values?.[path] ?? '',
+  }));
+}
+
 /** 裸路径模式 ExecRequest → legacy POST /mml/execute 请求体（param_paths/param_values 下标对齐）。 */
 export function buildRawExecutePayload(
   operationType: MMLOperationType,

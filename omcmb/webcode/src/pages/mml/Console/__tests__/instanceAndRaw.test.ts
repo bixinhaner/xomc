@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildDefaultInstanceSelectors,
+  buildStandardQueryColumns,
+  buildStandardRawRows,
   computeInstanceSlots,
   resolveObjectPath,
   resolveQueryPath,
@@ -160,5 +162,57 @@ describe('resolveQueryPath', () => {
     expect(resolveQueryPath('Device.Info.SerialNumber', { i01: '' })).toBe(
       'Device.Info.SerialNumber',
     );
+  });
+});
+
+describe('buildStandardRawRows', () => {
+  const paths = [
+    'Device.A.{i}.Value',
+    'Device.A.{i}.B.{i}.Value',
+  ];
+
+  it.each(['LST', 'DSP'] as const)(
+    '%s 查询在进入裸路径通道前生成截断 Path',
+    (operationType) => {
+      expect(
+        buildStandardRawRows(operationType, paths, undefined, {
+          i01: '1',
+          i02: '',
+        }),
+      ).toEqual([
+        { path: 'Device.A.1.Value', value: '' },
+        { path: 'Device.A.1.B.', value: '' },
+      ]);
+    },
+  );
+
+  it('写命令保留原 Path 和原 value', () => {
+    expect(
+      buildStandardRawRows(
+        'MOD',
+        [paths[0]],
+        { [paths[0]]: 'new-value' },
+        { i01: '' },
+      ),
+    ).toEqual([{ path: paths[0], value: 'new-value' }]);
+  });
+});
+
+describe('buildStandardQueryColumns', () => {
+  it('uses resolved Paths without mutating standard command Paths', () => {
+    const paths = [
+      'Device.A.{i}.Value',
+      'Device.A.{i}.B.{i}.Value',
+    ];
+    const command = cmd('LST', paths.map((value) => path(value)));
+
+    expect(
+      buildStandardQueryColumns(command, paths, { i01: '1', i02: '' })
+        .map((column) => column.path),
+    ).toEqual([
+      'Device.A.1.Value',
+      'Device.A.1.B.',
+    ]);
+    expect(command.paramPaths.map((item) => item.path)).toEqual(paths);
   });
 });

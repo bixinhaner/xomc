@@ -29,6 +29,8 @@ import {
   buildDeviceRows,
   buildMODReadbackRows,
   buildRawExecutePayload,
+  buildStandardQueryColumns,
+  buildStandardRawRows,
   buildStructuredStatement,
   initialPendingRows,
   isStructuredOp,
@@ -258,7 +260,9 @@ export default function MMLConsole() {
           setDispatching(false);
           return;
         }
-        columns = buildColumns(command, req.checkedPaths);
+        columns = isReadOp(command.operationType)
+          ? buildStandardQueryColumns(command, req.checkedPaths, req.instanceSelectors)
+          : buildColumns(command, req.checkedPaths);
         meta = {
           operationType: command.operationType,
           read: isReadOp(command.operationType),
@@ -315,7 +319,12 @@ export default function MMLConsole() {
           // 按勾选 path + 用户填值下发；task_name 用命令名（req4）。
           const payload = buildRawExecutePayload(
             command.operationType,
-            req.checkedPaths.map((p) => ({ path: p, value: req.values?.[p] ?? '' })),
+            buildStandardRawRows(
+              command.operationType,
+              req.checkedPaths,
+              req.values,
+              req.instanceSelectors,
+            ),
             targetSns,
             taskNameWithSn(command.commandName),
             'whole',
