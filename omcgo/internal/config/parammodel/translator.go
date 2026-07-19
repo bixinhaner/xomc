@@ -1,6 +1,7 @@
 package parammodel
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -17,11 +18,18 @@ const placeholderToken = "{i}"
 // 避免错过 Registry 的更新。Registry.Translator(ctx, productID, swVersion)
 // 会自动从最新快照构造。
 type Translator struct {
-	set               *MappingSet
-	standardToPrivate map[string]*ParamMapping
-	privateToStandard map[string]*ParamMapping
-	skippedCount      int
-	metrics           *registryMetrics
+	set                      *MappingSet
+	standardToPrivate        map[string]*ParamMapping
+	privateToStandard        map[string]*ParamMapping
+	standardPartialToPrivate map[string][]partialPrefixTranslation
+	privatePartialToStandard map[string][]partialPrefixTranslation
+	skippedCount             int
+	metrics                  *registryMetrics
+}
+
+type partialPrefixTranslation struct {
+	translated string
+	mapping    *ParamMapping
 }
 
 // NewTranslator 从 MappingSet 构造 Translator。
@@ -37,15 +45,19 @@ func NewTranslator(set *MappingSet, metrics *registryMetrics, logger *zap.Logger
 	}
 	if set == nil {
 		return &Translator{
-			set:               &MappingSet{},
-			standardToPrivate: map[string]*ParamMapping{},
-			privateToStandard: map[string]*ParamMapping{},
-			metrics:           metrics,
+			set:                      &MappingSet{},
+			standardToPrivate:        map[string]*ParamMapping{},
+			privateToStandard:        map[string]*ParamMapping{},
+			standardPartialToPrivate: map[string][]partialPrefixTranslation{},
+			privatePartialToStandard: map[string][]partialPrefixTranslation{},
+			metrics:                  metrics,
 		}
 	}
 
 	stp := make(map[string]*ParamMapping, len(set.Mappings))
 	pts := make(map[string]*ParamMapping, len(set.Mappings))
+	stpPartialCandidates := make(map[string]map[string]*ParamMapping)
+	ptsPartialCandidates := make(map[string]map[string]*ParamMapping)
 	skipped := 0
 	paramModelLabel := paramModelLabel(set)
 
@@ -77,93 +89,227 @@ func NewTranslator(set *MappingSet, metrics *registryMetrics, logger *zap.Logger
 			)
 		}
 		pts[m.PrivatePath] = m
+
+		addPartialPrefixCandidates(stpPartialCandidates, m.StandardPath, m.PrivatePath, m)
+		addPartialPrefixCandidates(ptsPartialCandidates, m.PrivatePath, m.StandardPath, m)
 	}
 
 	return &Translator{
-		set:               set,
-		standardToPrivate: stp,
-		privateToStandard: pts,
-		skippedCount:      skipped,
-		metrics:           metrics,
+		set:                      set,
+		standardToPrivate:        stp,
+		privateToStandard:        pts,
+		standardPartialToPrivate: buildPartialPrefixIndex(stpPartialCandidates),
+		privatePartialToStandard: buildPartialPrefixIndex(ptsPartialCandidates),
+		skippedCount:             skipped,
+		metrics:                  metrics,
 	}
 }
 
 // ToPrivate 把 standardPath 翻译为 privatePath。Found=false → Translated=Original。
 //
-// 查找流程：
-//  1. 模板形态直接命中（map key 就是 standard.{i}.path 形态）→ 返 PrivatePath 原值
-//  2. 运行时实例号规范化（".0." → ".{i}."）后重试 —— 参 CLAUDE.md §5.3
-//     "{i} 占位符规范化：运行时实例号 .N. 与模板 .{i}. 折叠为同一索引键"。
-//     命中后按位置把数字回填到 private 模板的 {i} 槽。
-//  3. 都不中 → Found=false，Translated=Original 兜底（调用方据此决定 passthrough 或拒）。
+// ToPrivateCandidates 恰好返回一个结果时命中；多候选 partial prefix 保守返回 miss。
 func (t *Translator) ToPrivate(standard string) TranslationResult {
-	if m, ok := t.standardToPrivate[standard]; ok {
-		if t.metrics != nil {
-			t.metrics.translateHit("to_private")
-		}
-		return TranslationResult{
-			Original:   standard,
-			Translated: m.PrivatePath,
-			Found:      true,
-			Mapping:    m,
-		}
+	candidates := t.toPrivateCandidates(standard)
+	if len(candidates) == 1 {
+		t.observeTranslation("to_private", true)
+		return candidates[0]
 	}
-	if norm := normalizeInstancePath(standard); norm != standard {
-		if m, ok := t.standardToPrivate[norm]; ok {
-			if translated, ok2 := substituteInstanceNumbers(standard, m.PrivatePath); ok2 {
-				if t.metrics != nil {
-					t.metrics.translateHit("to_private")
-				}
-				return TranslationResult{
-					Original:   standard,
-					Translated: translated,
-					Found:      true,
-					Mapping:    m,
-				}
-			}
-		}
-	}
-	if t.metrics != nil {
-		t.metrics.translateMiss("to_private")
-	}
+	t.observeTranslation("to_private", false)
 	return TranslationResult{Original: standard, Translated: standard, Found: false}
+}
+
+// ToPrivateCandidates 把 standardPath 翻译为所有合法 privatePath 候选。
+//
+// 精确映射和完整运行时叶子优先且只返回一个结果；partial object prefix 返回构造期
+// 预计算、按目标路径排序并去重的全部候选。
+func (t *Translator) ToPrivateCandidates(standard string) []TranslationResult {
+	candidates := t.toPrivateCandidates(standard)
+	t.observeTranslation("to_private", len(candidates) > 0)
+	return candidates
 }
 
 // ToStandard 把 privatePath 翻译为 standardPath。Found=false → Translated=Original。
 //
-// 同 ToPrivate：先直接命中模板形态，否则把运行时实例号规范化为 .{i}. 后重试，
-// 命中再把数字回填到 standard 模板的 {i} 槽。
+// ToStandardCandidates 恰好返回一个结果时命中；多候选 partial prefix 保守返回 miss。
 func (t *Translator) ToStandard(private string) TranslationResult {
-	if m, ok := t.privateToStandard[private]; ok {
-		if t.metrics != nil {
-			t.metrics.translateHit("to_standard")
-		}
-		return TranslationResult{
-			Original:   private,
-			Translated: m.StandardPath,
-			Found:      true,
-			Mapping:    m,
-		}
+	candidates := t.toStandardCandidates(private)
+	if len(candidates) == 1 {
+		t.observeTranslation("to_standard", true)
+		return candidates[0]
 	}
-	if norm := normalizeInstancePath(private); norm != private {
-		if m, ok := t.privateToStandard[norm]; ok {
-			if translated, ok2 := substituteInstanceNumbers(private, m.StandardPath); ok2 {
-				if t.metrics != nil {
-					t.metrics.translateHit("to_standard")
-				}
-				return TranslationResult{
-					Original:   private,
-					Translated: translated,
-					Found:      true,
-					Mapping:    m,
-				}
+	t.observeTranslation("to_standard", false)
+	return TranslationResult{Original: private, Translated: private, Found: false}
+}
+
+// ToStandardCandidates 把 privatePath 翻译为所有合法 standardPath 候选。
+//
+// 规则与 ToPrivateCandidates 对称。
+func (t *Translator) ToStandardCandidates(private string) []TranslationResult {
+	candidates := t.toStandardCandidates(private)
+	t.observeTranslation("to_standard", len(candidates) > 0)
+	return candidates
+}
+
+func (t *Translator) toPrivateCandidates(standard string) []TranslationResult {
+	if m, ok := t.standardToPrivate[standard]; ok {
+		return singleTranslationResult(standard, m.PrivatePath, m)
+	}
+	norm := normalizeInstancePath(standard)
+	if norm != standard {
+		if m, ok := t.standardToPrivate[norm]; ok {
+			if translated, ok := substituteInstanceNumbers(standard, m.PrivatePath); ok {
+				return singleTranslationResult(standard, translated, m)
 			}
 		}
 	}
-	if t.metrics != nil {
-		t.metrics.translateMiss("to_standard")
+	if candidates, ok := t.standardPartialToPrivate[standard]; ok {
+		return partialTranslationResults(standard, candidates, false)
 	}
-	return TranslationResult{Original: private, Translated: private, Found: false}
+	if norm != standard {
+		if candidates, ok := t.standardPartialToPrivate[norm]; ok {
+			return partialTranslationResults(standard, candidates, true)
+		}
+	}
+	return nil
+}
+
+func (t *Translator) toStandardCandidates(private string) []TranslationResult {
+	if m, ok := t.privateToStandard[private]; ok {
+		return singleTranslationResult(private, m.StandardPath, m)
+	}
+	norm := normalizeInstancePath(private)
+	if norm != private {
+		if m, ok := t.privateToStandard[norm]; ok {
+			if translated, ok := substituteInstanceNumbers(private, m.StandardPath); ok {
+				return singleTranslationResult(private, translated, m)
+			}
+		}
+	}
+	if candidates, ok := t.privatePartialToStandard[private]; ok {
+		return partialTranslationResults(private, candidates, false)
+	}
+	if norm != private {
+		if candidates, ok := t.privatePartialToStandard[norm]; ok {
+			return partialTranslationResults(private, candidates, true)
+		}
+	}
+	return nil
+}
+
+func singleTranslationResult(original, translated string, mapping *ParamMapping) []TranslationResult {
+	return []TranslationResult{{
+		Original:   original,
+		Translated: translated,
+		Found:      true,
+		Mapping:    mapping,
+	}}
+}
+
+func partialTranslationResults(
+	original string,
+	candidates []partialPrefixTranslation,
+	substitute bool,
+) []TranslationResult {
+	results := make([]TranslationResult, 0, len(candidates))
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		translated := candidate.translated
+		if substitute {
+			var ok bool
+			translated, ok = substituteInstanceNumbers(original, translated)
+			if !ok {
+				continue
+			}
+		}
+		if _, ok := seen[translated]; ok {
+			continue
+		}
+		seen[translated] = struct{}{}
+		results = append(results, TranslationResult{
+			Original:   original,
+			Translated: translated,
+			Found:      true,
+			Mapping:    candidate.mapping,
+		})
+	}
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Translated < results[j].Translated
+	})
+	return results
+}
+
+func (t *Translator) observeTranslation(direction string, hit bool) {
+	if t.metrics == nil {
+		return
+	}
+	if hit {
+		t.metrics.translateHit(direction)
+		return
+	}
+	t.metrics.translateMiss(direction)
+}
+
+func addPartialPrefixCandidates(
+	candidates map[string]map[string]*ParamMapping,
+	sourceTemplate string,
+	destinationTemplate string,
+	mapping *ParamMapping,
+) {
+	sourcePrefixes := prefixesBeforePlaceholders(sourceTemplate)
+	destinationPrefixes := prefixesBeforePlaceholders(destinationTemplate)
+	if len(sourcePrefixes) != len(destinationPrefixes) {
+		return
+	}
+	for i, source := range sourcePrefixes {
+		destination := destinationPrefixes[i]
+		if source == "" || destination == "" {
+			continue
+		}
+		destinations := candidates[source]
+		if destinations == nil {
+			destinations = make(map[string]*ParamMapping)
+			candidates[source] = destinations
+		}
+		if _, exists := destinations[destination]; !exists {
+			destinations[destination] = mapping
+		}
+	}
+}
+
+func prefixesBeforePlaceholders(path string) []string {
+	parts := strings.Split(path, ".")
+	prefixes := make([]string, 0, strings.Count(path, placeholderToken))
+	for i, part := range parts {
+		if part != placeholderToken {
+			continue
+		}
+		prefix := strings.Join(parts[:i], ".")
+		if prefix != "" {
+			prefix += "."
+		}
+		prefixes = append(prefixes, prefix)
+	}
+	return prefixes
+}
+
+func buildPartialPrefixIndex(
+	candidates map[string]map[string]*ParamMapping,
+) map[string][]partialPrefixTranslation {
+	index := make(map[string][]partialPrefixTranslation, len(candidates))
+	for source, destinations := range candidates {
+		translations := make([]partialPrefixTranslation, 0, len(destinations))
+		for destination, mapping := range destinations {
+			translations = append(translations, partialPrefixTranslation{
+				translated: destination,
+				mapping:    mapping,
+			})
+		}
+		sort.Slice(translations, func(i, j int) bool {
+			return translations[i].translated < translations[j].translated
+		})
+		index[source] = translations
+	}
+	return index
 }
 
 // substituteInstanceNumbers 把 srcWithNums 里各全数字段（运行时实例号）按顺序回填到

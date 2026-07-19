@@ -62,7 +62,7 @@ func TestTranslator_PlaceholderMismatchSkipped(t *testing.T) {
 		Source:       MappingSourceDefault,
 		Mappings: []ParamMapping{
 			mkMapping("Device.OK.{i}.X", "Device.Priv.{i}.X"), // ok
-			mkMapping("Device.Bad.{i}.X", "Device.Priv.X"),     // 跳过
+			mkMapping("Device.Bad.{i}.X", "Device.Priv.X"),    // 跳过
 		},
 	}
 	tr := NewTranslator(set, NewRegistryMetrics(nil), nil)
@@ -75,6 +75,11 @@ func TestTranslator_PlaceholderMismatchSkipped(t *testing.T) {
 	// 跳过的不可翻译
 	r2 := tr.ToPrivate("Device.Bad.{i}.X")
 	assert.False(t, r2.Found)
+
+	// 跳过的条目也不能参与 partial object prefix 派生。
+	r3 := tr.ToPrivate("Device.Bad.")
+	assert.False(t, r3.Found)
+	assert.Empty(t, tr.ToPrivateCandidates("Device.Bad."))
 }
 
 func TestTranslator_Source(t *testing.T) {
@@ -217,6 +222,117 @@ func TestTranslator_ToStandard_RuntimeInstanceFoldsToTemplate(t *testing.T) {
 	got = tr.ToStandard("Unknown.0.Path")
 	assert.False(t, got.Found)
 	assert.Equal(t, "Unknown.0.Path", got.Translated)
+}
+
+func TestTranslator_PartialPrefixDerivation(t *testing.T) {
+	newTranslator := func(mappings ...ParamMapping) *Translator {
+		return NewTranslator(
+			&MappingSet{Source: MappingSourceDefault, Mappings: mappings},
+			NewRegistryMetrics(nil),
+			nil,
+		)
+	}
+
+	baseMapping := mkMapping(
+		"Device.A.{i}.B.{i}.Value",
+		"InternetGatewayDevice.X.{i}.Pool.{i}.Val",
+	)
+
+	t.Run("one-level blank prefix", func(t *testing.T) {
+		got := newTranslator(baseMapping).ToPrivate("Device.A.")
+
+		require.True(t, got.Found)
+		assert.Equal(t, "InternetGatewayDevice.X.", got.Translated)
+		require.NotNil(t, got.Mapping)
+	})
+
+	t.Run("two-level prefix preserves outer runtime instance", func(t *testing.T) {
+		got := newTranslator(baseMapping).ToPrivate("Device.A.1.B.")
+
+		require.True(t, got.Found)
+		assert.Equal(t, "InternetGatewayDevice.X.1.Pool.", got.Translated)
+	})
+
+	t.Run("template-form prior placeholder", func(t *testing.T) {
+		got := newTranslator(baseMapping).ToPrivate("Device.A.{i}.B.")
+
+		require.True(t, got.Found)
+		assert.Equal(t, "InternetGatewayDevice.X.{i}.Pool.", got.Translated)
+	})
+
+	t.Run("symmetric to-standard derivation", func(t *testing.T) {
+		tr := newTranslator(baseMapping)
+
+		blank := tr.ToStandardCandidates("InternetGatewayDevice.X.")
+		require.Len(t, blank, 1)
+		assert.Equal(t, "Device.A.", blank[0].Translated)
+
+		resolved := tr.ToStandardCandidates("InternetGatewayDevice.X.7.Pool.")
+		require.Len(t, resolved, 1)
+		assert.Equal(t, "Device.A.7.B.", resolved[0].Translated)
+	})
+
+	multiCandidateTranslator := func() *Translator {
+		return newTranslator(
+			mkMapping(
+				"Device.A.{i}.B.{i}.Value",
+				"InternetGatewayDevice.Z.{i}.Pool.{i}.Val",
+			),
+			mkMapping(
+				"Device.A.{i}.C.{i}.Value",
+				"InternetGatewayDevice.X.{i}.Group.{i}.Val",
+			),
+			mkMapping(
+				"Device.A.{i}.D.{i}.Value",
+				"InternetGatewayDevice.Z.{i}.Other.{i}.Val",
+			),
+		)
+	}
+
+	t.Run("multiple candidates are deduplicated and deterministic", func(t *testing.T) {
+		got := multiCandidateTranslator().ToPrivateCandidates("Device.A.")
+
+		require.Len(t, got, 2)
+		assert.Equal(t, "InternetGatewayDevice.X.", got[0].Translated)
+		assert.Equal(t, "InternetGatewayDevice.Z.", got[1].Translated)
+		assert.True(t, got[0].Found)
+		assert.True(t, got[1].Found)
+	})
+
+	t.Run("legacy method misses for multiple candidates", func(t *testing.T) {
+		got := multiCandidateTranslator().ToPrivate("Device.A.")
+
+		assert.False(t, got.Found)
+		assert.Equal(t, "Device.A.", got.Translated)
+		assert.Nil(t, got.Mapping)
+	})
+
+	t.Run("exact direct mapping takes precedence", func(t *testing.T) {
+		tr := newTranslator(
+			baseMapping,
+			mkMapping("Device.A.", "InternetGatewayDevice.Direct."),
+		)
+
+		candidates := tr.ToPrivateCandidates("Device.A.")
+		require.Len(t, candidates, 1)
+		assert.Equal(t, "InternetGatewayDevice.Direct.", candidates[0].Translated)
+
+		legacy := tr.ToPrivate("Device.A.")
+		require.True(t, legacy.Found)
+		assert.Equal(t, "InternetGatewayDevice.Direct.", legacy.Translated)
+	})
+
+	t.Run("existing full concrete leaf translation remains unchanged", func(t *testing.T) {
+		tr := newTranslator(baseMapping)
+
+		candidates := tr.ToPrivateCandidates("Device.A.7.B.3.Value")
+		require.Len(t, candidates, 1)
+		assert.Equal(t, "InternetGatewayDevice.X.7.Pool.3.Val", candidates[0].Translated)
+
+		legacy := tr.ToPrivate("Device.A.7.B.3.Value")
+		require.True(t, legacy.Found)
+		assert.Equal(t, "InternetGatewayDevice.X.7.Pool.3.Val", legacy.Translated)
+	})
 }
 
 func TestSubstituteInstanceNumbers(t *testing.T) {
