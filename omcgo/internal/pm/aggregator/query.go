@@ -162,16 +162,19 @@ func (a *Aggregator) Query(ctx context.Context, q QueryRequest) ([]Row, error) {
 	case DimensionNetwork:
 		rows, err = a.queryWithKPIRecompute(ctx, table, q, a.queryNetworkTable)
 	default:
-		// device 维度直接读设备级聚合表（counter / KPI 行都是设备自己算好的，无需跨维重算）。
-		// #532 P2 store-all-by-enabled：device 维度不走重算 wrapper，故在入口把已启用集直接
-		// 灌成 MetricPaths（既存 counter 行 + 设备级已算好的 KPI 行都按已启用集筛取落库）；
-		// 已启用集为空时降级为不下推过滤（取设备表全部，不丢行）。
+		// device 维度也要按 KPI statis_type 分流：pct 等公式类用 counter 聚合后重算，
+		// avg/sum/max/min 从 15min KPI 点直接聚合。否则旧 daily/hourly 表缺历史 KPI 行时，
+		// API 会返回空，且 avg 也无法表达"只平均已有 15 分钟点"。
 		if q.StoreAllEnabled && len(q.MetricPaths) == 0 {
 			if enabled := a.resolveEnabledIndicators(ctx, q.Technologies); len(enabled) > 0 {
 				q.MetricPaths = enabled
 			}
 		}
-		rows, err = a.queryDeviceTable(ctx, table, q)
+		if usesKPIQueryPath(q) {
+			rows, err = a.queryWithKPIRecompute(ctx, table, q, a.queryDeviceTable)
+		} else {
+			rows, err = a.queryDeviceTable(ctx, table, q)
+		}
 	}
 	if err != nil {
 		return nil, err
@@ -201,6 +204,9 @@ func (a *Aggregator) Count(ctx context.Context, q QueryRequest) (int, error) {
 	// Count 不分页：清掉 Limit/Offset，避免被带进子查询。
 	q.Limit = 0
 	q.Offset = 0
+	if usesKPIQueryPath(q) {
+		return a.countByQueryResult(ctx, q)
+	}
 
 	switch q.Dimension {
 	case DimensionDevice:
@@ -237,6 +243,53 @@ func (a *Aggregator) Count(ctx context.Context, q QueryRequest) (int, error) {
 		}
 		return len(rows), nil
 	}
+}
+
+func usesKPIQueryPath(q QueryRequest) bool {
+	if q.RecomputeAllKPIs || q.StoreAllEnabled {
+		return true
+	}
+	if q.MetricType != nil && *q.MetricType == metrics.MetricTypeKPI && len(q.MetricPaths) > 0 {
+		return true
+	}
+	return hasKPIIndicatorPath(q.MetricPaths)
+}
+
+func hasKPIIndicatorPath(paths []string) bool {
+	for _, path := range paths {
+		if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(path)), "K") {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *Aggregator) countByQueryResult(ctx context.Context, q QueryRequest) (int, error) {
+	countReq := q
+	countReq.Limit = 0
+	countReq.Offset = 0
+	rows, err := a.Query(ctx, countReq)
+	if err != nil {
+		return 0, fmt.Errorf("aggregator.Count query KPI rollup rows: %w", err)
+	}
+	if !q.PageByPivotRow {
+		return len(rows), nil
+	}
+	seen := make(map[PivotRowKey]struct{}, len(rows))
+	for _, row := range rows {
+		objectLDN := ""
+		if row.ObjectLDN != nil {
+			objectLDN = *row.ObjectLDN
+		}
+		seen[PivotRowKey{
+			DeviceOUI:   row.DeviceOUI,
+			DeviceSN:    row.DeviceSN,
+			ObjectLDN:   objectLDN,
+			Granularity: row.Granularity,
+			Time:        row.Time,
+		}] = struct{}{}
+	}
+	return len(seen), nil
 }
 
 // DiscoverObjectLDNs 返回同设备、同时间窗下实际出现过的 object_ldn 列表。

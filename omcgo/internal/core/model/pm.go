@@ -55,7 +55,7 @@ type KPIValue struct {
 	Carrier     CarrierCode `json:"carrier" db:"carrier"`
 	Technology  Technology  `json:"technology" db:"technology"`
 	// StatisType/Unit 来自指标库 KPI 元数据，供 15min 入库前结果值规范化使用；
-	// pm_metrics KPI 行仍不写 statis_type 列。
+	// StatisType 同时写入 pm_metrics，驱动 avg/sum/max/min KPI 后续直接聚合。
 	StatisType string `json:"statis_type,omitempty" db:"-"`
 	Unit       string `json:"unit,omitempty" db:"-"`
 }
