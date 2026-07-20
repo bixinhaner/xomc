@@ -233,6 +233,16 @@ func runACS(cmd *cobra.Command, args []string) error {
 		)
 		uploadHandler.SetRuntimeProvider(transferPolicy)
 
+		// PM 上传去重：压测观测到 omc_pm_files_processed_total{status=duplicate}
+		// 占比约78%，CPE 网络抖动短时间内重复 PUT 同一份文件是主因。复用
+		// internal/core/event.Deduper（与 app/worker 里 transfer/事件去重同款
+		// Redis SETNX + TTL、fail-open），namespace 用 "acs-pm-upload" 与其他
+		// 用途区隔，避免 key 冲突。inf.Redis 为 nil（未配置 Redis）时 Deduper 本身
+		// 会在 SetNX 出错时 fail-open，不影响上传主流程。
+		if inf.Redis != nil {
+			uploadHandler.SetPMUploadDedup(event.NewDeduper(inf.Redis, 24*time.Hour, inf.Logger.Named("pm-upload-dedup")))
+		}
+
 		// issue #318：PM 上传背压 watchdog。磁盘（查 MinIO 集群指标端点，同栈内网免鉴权）+ CPU
 		// （host loadavg ÷ 核数）超高水位时拒收 PM 上传（设备重传不丢数据），回落自动恢复。配置
 		// 走 sys_configs(acs.backpressure)，经 SubjectSysConfigSaved 热刷新；GS 注册优雅关停。
