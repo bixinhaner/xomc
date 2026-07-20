@@ -24,6 +24,21 @@ export interface PathListSectionProps {
   command: GroupTreeCommand;
 }
 
+type ObjectPathRow = {
+  id: string;
+  rowKind: 'object';
+  mmlCode: string;
+  label: string;
+  tr069Path: string;
+  defaultSelected: boolean;
+};
+
+type PathRow = AdminSubFieldEnriched | ObjectPathRow;
+
+function isObjectPathRow(row: PathRow): row is ObjectPathRow {
+  return 'rowKind' in row && row.rowKind === 'object';
+}
+
 export default function PathListSection({
   command,
 }: PathListSectionProps): React.ReactElement {
@@ -55,7 +70,23 @@ export default function PathListSection({
     });
   };
 
-  const columns: ColumnsType<AdminSubFieldEnriched> = [
+  const isObjectOperation = command.operationType === 'ADD' || command.operationType === 'RMV';
+  const objectPath = command.targetObject?.trim();
+  const rows: PathRow[] =
+    subFields.length === 0 && isObjectOperation && objectPath
+      ? [
+          {
+            id: `${command.id}:target-object`,
+            rowKind: 'object',
+            mmlCode: command.operationType,
+            label: t('mml.admin.catalog.commands.targetObject'),
+            tr069Path: objectPath,
+            defaultSelected: true,
+          },
+        ]
+      : subFields;
+
+  const columns: ColumnsType<PathRow> = [
     {
       title: t('mml.admin.catalog.subField.mmlCode'),
       dataIndex: 'mmlCode',
@@ -68,13 +99,17 @@ export default function PathListSection({
       key: 'label',
       width: 160,
       ellipsis: true,
-      render: (_, sf) =>
-        sf.labelI18n?.['zh-CN'] ||
-        sf.labelI18n?.['en-US'] ||
-        sf.labelI18n?.zh ||
-        sf.labelI18n?.en ||
-        sf.label ||
-        '-',
+      render: (_, sf) => {
+        if (isObjectPathRow(sf)) return sf.label;
+        return (
+          sf.labelI18n?.['zh-CN'] ||
+          sf.labelI18n?.['en-US'] ||
+          sf.labelI18n?.zh ||
+          sf.labelI18n?.en ||
+          sf.label ||
+          '-'
+        );
+      },
     },
     {
       title: t('mml.admin.catalog.subField.standardPath'),
@@ -113,27 +148,28 @@ export default function PathListSection({
       key: 'op',
       width: 120,
       align: 'center',
-      render: (_, sf) => (
-        <Space size={4}>
-          <Tooltip title={t('mml.admin.catalog.common.edit')}>
-            <Button
-              type="text"
-              size="small"
-              icon={<EditOutlined />}
-              onClick={() => setEditTarget(sf)}
-            />
-          </Tooltip>
-          <Tooltip title={t('mml.admin.catalog.common.delete')}>
-            <Button
-              type="text"
-              size="small"
-              danger
-              icon={<DeleteOutlined />}
-              onClick={() => handleDelete(sf)}
-            />
-          </Tooltip>
-        </Space>
-      ),
+      render: (_, sf) =>
+        isObjectPathRow(sf) ? null : (
+          <Space size={4}>
+            <Tooltip title={t('mml.admin.catalog.common.edit')}>
+              <Button
+                type="text"
+                size="small"
+                icon={<EditOutlined />}
+                onClick={() => setEditTarget(sf)}
+              />
+            </Tooltip>
+            <Tooltip title={t('mml.admin.catalog.common.delete')}>
+              <Button
+                type="text"
+                size="small"
+                danger
+                icon={<DeleteOutlined />}
+                onClick={() => handleDelete(sf)}
+              />
+            </Tooltip>
+          </Space>
+        ),
     },
   ];
 
@@ -150,6 +186,7 @@ export default function PathListSection({
           size="small"
           icon={<PlusOutlined />}
           onClick={() => setAddOpen(true)}
+          disabled={isObjectOperation}
         >
           {t('mml.admin.catalog.subField.batchAddBtn')}
         </Button>
@@ -157,10 +194,10 @@ export default function PathListSection({
       {isLoading ? (
         <Spin />
       ) : (
-        <Table<AdminSubFieldEnriched>
+        <Table<PathRow>
           rowKey="id"
           columns={columns}
-          dataSource={subFields}
+          dataSource={rows}
           pagination={false}
           size="small"
         />
