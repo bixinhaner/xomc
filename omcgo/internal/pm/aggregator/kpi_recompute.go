@@ -14,16 +14,18 @@ package aggregator
 //  4. 产出前剔除「仅为重算引入、用户没主动请求」的 deps counter 行；
 //  5. DisplayName 由 Query 末尾的 backfillDisplayNames 统一回填。
 //
-// 落点：Query 入口在路由到分维度函数前后包一层（recompute*）。device 维度不做重算
-// （单设备行就是设备自己算好的 KPI，无需跨设备汇总）。
+// 落点：Query 入口在路由到分维度函数前后包一层（recompute*）。device 维度同样经该入口分流：
+// pct/公式类仍按 counter 重算，avg/sum/max/min 从 15min KPI 点直接 rollup。
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/core/jsonx"
@@ -382,7 +384,26 @@ func (a *Aggregator) queryWithKPIRecompute(
 		return dimFn(ctx, table, q)
 	}
 
-	eff := effectiveCounterPaths(userCounters, kpis)
+	formulaKPIs, directKPIs := splitKPIMetaByRollupMode(kpis)
+	directRows, err := a.queryDirectRollupKPIs(ctx, q, directKPIs)
+	if err != nil {
+		return nil, err
+	}
+	if len(formulaKPIs) == 0 {
+		if len(userCounters) == 0 {
+			return directRows, nil
+		}
+		cq := q
+		cq.MetricPaths = userCounters
+		cq.MetricType = counterMetricType()
+		counterRows, err := dimFn(ctx, table, cq)
+		if err != nil {
+			return nil, err
+		}
+		return append(counterRows, directRows...), nil
+	}
+
+	eff := effectiveCounterPaths(userCounters, formulaKPIs)
 	cq := q
 	cq.MetricPaths = eff
 	cq.MetricType = counterMetricType() // 只聚 counter 行
@@ -395,13 +416,299 @@ func (a *Aggregator) queryWithKPIRecompute(
 	if err != nil {
 		return nil, err
 	}
-	return a.recomputeKPIs(counterRows, kpis, userCounters), nil
+	recomputed := a.recomputeKPIs(counterRows, formulaKPIs, userCounters)
+	return append(recomputed, directRows...), nil
 }
 
 // counterMetricType 返回 metric_type='counter' 过滤值的指针（重算只聚 counter 行）。
 func counterMetricType() *metrics.MetricType {
 	ct := metrics.MetricTypeCounter
 	return &ct
+}
+
+func splitKPIMetaByRollupMode(kpis []kpiMeta) (formula, direct []kpiMeta) {
+	for _, km := range kpis {
+		if !km.isCounter && isDirectRollupStatisType(km.statisType) {
+			direct = append(direct, km)
+		} else {
+			formula = append(formula, km)
+		}
+	}
+	return formula, direct
+}
+
+func (a *Aggregator) queryDirectRollupKPIs(
+	ctx context.Context,
+	q QueryRequest,
+	kpis []kpiMeta,
+) ([]Row, error) {
+	if len(kpis) == 0 {
+		return nil, nil
+	}
+	sqlStr, args, err := buildDirectRollupKPI15MinSQL(q, kpis)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := a.db.Query(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, fmt.Errorf("aggregator.Query direct KPI rollup from 15min: %w", err)
+	}
+	defer rows.Close()
+	out := make([]Row, 0)
+	for rows.Next() {
+		var r Row
+		var groupID, productID *uuid.UUID
+		var objectLDN, statis *string
+		var metricType, granularity string
+		if err := rows.Scan(
+			&r.DeviceOUI, &r.DeviceSN, &groupID, &r.Technology, &productID, &objectLDN,
+			&r.MetricPath, &metricType, &r.MetricValue, &statis, &granularity,
+			&r.Time, &r.StartTime, &r.EndTime, &r.IngestTime,
+		); err != nil {
+			return nil, fmt.Errorf("aggregator.Query scan direct KPI rollup from 15min: %w", err)
+		}
+		if groupID != nil {
+			r.DeviceGroupID = *groupID
+		}
+		if productID != nil {
+			r.ProductID = *productID
+		}
+		r.ObjectLDN = objectLDN
+		r.MetricType = metrics.MetricType(metricType)
+		r.Granularity = metrics.Granularity(granularity)
+		if statis != nil {
+			st := metrics.StatisType(*statis)
+			r.StatisType = &st
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("aggregator.Query iterate direct KPI rollup from 15min: %w", err)
+	}
+	return out, nil
+}
+
+func buildDirectRollupKPI15MinSQL(q QueryRequest, kpis []kpiMeta) (string, []any, error) {
+	bucketExpr, endExpr, err := directRollupBucketExpr(q.Granularity)
+	if err != nil {
+		return "", nil, err
+	}
+	args := []any{}
+	pos := 1
+	add := func(v any) string {
+		args = append(args, v)
+		p := fmt.Sprintf("$%d", pos)
+		pos++
+		return p
+	}
+
+	defRows := make([]string, 0, len(kpis))
+	for _, km := range kpis {
+		defRows = append(defRows, fmt.Sprintf("(%s, %s)", add(km.code), add(km.statisType)))
+	}
+
+	where := []string{"m.metric_type = 'kpi'", "m.granularity = '15min'"}
+	if !q.StartTime.IsZero() {
+		where = append(where, fmt.Sprintf("m.time >= %s", add(q.StartTime)))
+	}
+	if !q.EndTime.IsZero() {
+		where = append(where, fmt.Sprintf("m.time < %s", add(q.EndTime)))
+	}
+	if len(q.DeviceOUIs) > 0 && len(q.DeviceSNs) > 0 {
+		n := len(q.DeviceOUIs)
+		if len(q.DeviceSNs) < n {
+			n = len(q.DeviceSNs)
+		}
+		pairs := make([]string, 0, n)
+		for i := 0; i < n; i++ {
+			pairs = append(pairs, fmt.Sprintf("(%s, %s)", add(q.DeviceOUIs[i]), add(q.DeviceSNs[i])))
+		}
+		where = append(where, "(m.device_oui, m.device_sn) IN ("+joinComma(pairs)+")")
+	} else if len(q.DeviceOUIs) > 0 {
+		where = append(where, fmt.Sprintf("m.device_oui = ANY(%s)", add(q.DeviceOUIs)))
+	} else if len(q.DeviceSNs) > 0 {
+		where = append(where, fmt.Sprintf("m.device_sn = ANY(%s)", add(q.DeviceSNs)))
+	}
+	if len(q.ObjectLDNs) > 0 {
+		where = append(where, fmt.Sprintf("m.object_ldn = ANY(%s)", add(q.ObjectLDNs)))
+	}
+	if len(q.Weekdays) > 0 && len(q.Weekdays) < 7 {
+		where = append(where, fmt.Sprintf("EXTRACT(dow FROM m.start_time)::int = ANY(%s)", add(q.Weekdays)))
+	}
+	if len(q.Hours) > 0 && len(q.Hours) < 24 {
+		where = append(where, fmt.Sprintf("EXTRACT(hour FROM m.start_time)::int = ANY(%s)", add(q.Hours)))
+	}
+
+	joins := []string{"JOIN kpi_defs kd ON kd.metric_path = m.metric_path"}
+	selectDeviceOUI := "''::text"
+	selectDeviceSN := "'AGGREGATED'::text"
+	selectGroupID := "NULL::uuid"
+	selectTechnology := "''::text"
+	selectProductID := "NULL::uuid"
+	selectObjectLDN := "NULL::text"
+	groupBy := []string{"bucket", "m.metric_path", "kd.statis_type"}
+	distinctOn := []string{"m.device_oui", "m.device_sn", "m.metric_path", "m.granularity", "m.time", "m.object_ldn"}
+
+	switch q.Dimension {
+	case DimensionDevice:
+		selectDeviceOUI = "m.device_oui"
+		selectDeviceSN = "m.device_sn"
+		selectObjectLDN = "COALESCE(m.object_ldn, '')"
+		if len(q.Technologies) > 0 {
+			where = append(where,
+				fmt.Sprintf("(m.device_oui, m.device_sn) IN (SELECT oui, serial_number FROM device_dim WHERE technology = ANY(%s))", add(q.Technologies)),
+			)
+		}
+		where = appendVisibleSNWhere(where, "m.device_sn", q.VisibleGroups, add)
+	case DimensionDeviceGroup:
+		joins = append(joins,
+			"JOIN device_dim d ON d.oui = m.device_oui AND d.serial_number = m.device_sn",
+			"JOIN device_group_member_dim dgm ON dgm.device_id = d.id",
+		)
+		selectGroupID = "dgm.group_id"
+		selectTechnology = "d.technology"
+		distinctOn = append(distinctOn, "dgm.group_id", "d.technology")
+		if len(q.DeviceGroupIDs) > 0 {
+			where = append(where, fmt.Sprintf("dgm.group_id = ANY(%s)", add(q.DeviceGroupIDs)))
+		}
+		if len(q.Technologies) > 0 {
+			where = append(where, fmt.Sprintf("d.technology = ANY(%s)", add(q.Technologies)))
+		}
+	case DimensionProduct:
+		joins = append(joins, "JOIN device_dim d ON d.oui = m.device_oui AND d.serial_number = m.device_sn")
+		selectProductID = "d.product_id"
+		distinctOn = append(distinctOn, "d.product_id")
+		where = append(where, "d.product_id IS NOT NULL")
+		if len(q.ProductIDs) > 0 {
+			where = append(where, fmt.Sprintf("d.product_id = ANY(%s)", add(q.ProductIDs)))
+		}
+		if len(q.Technologies) > 0 {
+			where = append(where, fmt.Sprintf("d.technology = ANY(%s)", add(q.Technologies)))
+		}
+		where = appendVisibleSNWhere(where, "m.device_sn", q.VisibleGroups, add)
+	case DimensionBand:
+		joins = append(joins,
+			"JOIN device_dim d ON d.oui = m.device_oui AND d.serial_number = m.device_sn",
+			`JOIN cell_band_dim cb
+  ON cb.device_id = d.id
+ AND cb.cell_id = COALESCE(
+     substring(m.object_ldn FROM 'Cellid=([0-9]+)'),
+     substring(m.object_ldn FROM 'NrCGI=([0-9]+)'),
+     substring(m.object_ldn FROM 'Uid=([^,]+)')
+ )`,
+		)
+		selectObjectLDN = "'Band=' || cb.band"
+		distinctOn = append(distinctOn, "cb.band")
+		where = append(where, "m.object_ldn IS NOT NULL")
+		if len(q.Technologies) > 0 {
+			where = append(where, fmt.Sprintf("d.technology = ANY(%s)", add(q.Technologies)))
+		}
+		where = appendVisibleSNWhere(where, "m.device_sn", q.VisibleGroups, add)
+	case DimensionAggregateGroup, DimensionNetwork:
+		if len(q.Technologies) > 0 {
+			where = append(where,
+				fmt.Sprintf("(m.device_oui, m.device_sn) IN (SELECT oui, serial_number FROM device_dim WHERE technology = ANY(%s))", add(q.Technologies)),
+			)
+		}
+		where = appendVisibleSNWhere(where, "m.device_sn", q.VisibleGroups, add)
+	default:
+		return "", nil, fmt.Errorf("aggregator: unsupported direct KPI rollup dimension %s", q.Dimension)
+	}
+	groupBy = []string{
+		"bucket", "m.metric_path", "kd.statis_type",
+		"m.out_device_oui", "m.out_device_sn", "m.out_device_group_id",
+		"m.out_technology", "m.out_product_id", "m.out_object_ldn",
+	}
+
+	aggValue := `CASE kd.statis_type
+        WHEN 'sum' THEN SUM(m.metric_value)
+        WHEN 'avg' THEN AVG(m.metric_value)
+        WHEN 'max' THEN MAX(m.metric_value)
+        WHEN 'min' THEN MIN(m.metric_value)
+    END`
+	sqlStr := fmt.Sprintf(`
+WITH kpi_defs(metric_path, statis_type) AS (
+    VALUES %s
+),
+dedup AS (
+    SELECT DISTINCT ON (%s)
+        m.device_oui, m.device_sn, m.metric_path, m.metric_value, m.object_ldn, m.start_time, m.time, m.ingest_time,
+        kd.statis_type,
+        %s AS bucket,
+        %s AS out_device_oui,
+        %s AS out_device_sn,
+        %s AS out_device_group_id,
+        %s AS out_technology,
+        %s AS out_product_id,
+        %s AS out_object_ldn
+    FROM pm_metrics m
+    %s
+    WHERE %s
+    ORDER BY %s, m.ingest_time DESC
+)
+SELECT
+    m.out_device_oui,
+    m.out_device_sn,
+    m.out_device_group_id,
+    m.out_technology,
+    m.out_product_id,
+    m.out_object_ldn,
+    m.metric_path,
+    'kpi' AS metric_type,
+    %s AS metric_value,
+    kd.statis_type,
+    %s AS granularity,
+    bucket AS time,
+    bucket AS start_time,
+    %s AS end_time,
+    NOW() AS ingest_time
+FROM dedup m
+JOIN kpi_defs kd ON kd.metric_path = m.metric_path
+%s
+GROUP BY %s
+ORDER BY bucket DESC`,
+		joinComma(defRows),
+		strings.Join(distinctOn, ", "),
+		bucketExpr,
+		selectDeviceOUI,
+		selectDeviceSN,
+		selectGroupID,
+		selectTechnology,
+		selectProductID,
+		selectObjectLDN,
+		strings.Join(joins, "\n    "),
+		strings.Join(where, "\n      AND "),
+		strings.Join(distinctOn, ", "),
+		aggValue,
+		add(string(q.Granularity)),
+		endExpr,
+		"",
+		strings.Join(groupBy, ", "),
+	)
+	if q.Limit > 0 {
+		sqlStr += fmt.Sprintf("\nLIMIT %s", add(q.Limit))
+	}
+	if q.Offset > 0 {
+		sqlStr += fmt.Sprintf("\nOFFSET %s", add(q.Offset))
+	}
+	return sqlStr, args, nil
+}
+
+func directRollupBucketExpr(g metrics.Granularity) (bucket string, end string, err error) {
+	switch g {
+	case metrics.Granularity15Min:
+		return "m.time", "bucket + interval '15 minutes'", nil
+	case metrics.GranularityHourly:
+		return "date_trunc('hour', m.time)", "bucket + interval '1 hour'", nil
+	case metrics.GranularityDaily:
+		return "date_trunc('day', m.time)", "bucket + interval '1 day'", nil
+	case metrics.GranularityWeekly:
+		return "date_trunc('week', m.time)", "bucket + interval '1 week'", nil
+	case metrics.GranularityMonthly:
+		return "date_trunc('month', m.time)", "bucket + interval '1 month'", nil
+	default:
+		return "", "", fmt.Errorf("aggregator: unsupported direct KPI rollup granularity %s", g)
+	}
 }
 
 // queryFullLibraryWithKPIs 是「全网/全聚放开到全库」的取数路径（RecomputeAllKPIs=true）：
@@ -432,10 +739,18 @@ func (a *Aggregator) queryFullLibraryWithKPIs(
 		// 指标库无可重算 KPI（或查询失败已降级）：退回「全部 counter」，不丢 counter 行。
 		return counterRows, nil
 	}
-	// recomputeKPIs(userCounters=nil, 全派生 KPI)：passthrough 为空 → 仅产出 KPI 行；
-	// 与全部 counter 行合并 = 全部 counter + 全部 KPI。
-	kpiRows := a.recomputeKPIs(counterRows, kpis, nil)
-	return append(counterRows, kpiRows...), nil
+	formulaKPIs, directKPIs := splitKPIMetaByRollupMode(kpis)
+	out := counterRows
+	if len(formulaKPIs) > 0 {
+		// recomputeKPIs(userCounters=nil, pct 派生 KPI)：passthrough 为空 → 仅产出 KPI 行。
+		out = append(out, a.recomputeKPIs(counterRows, formulaKPIs, nil)...)
+	}
+	directRows, err := a.queryDirectRollupKPIs(ctx, q, directKPIs)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, directRows...)
+	return out, nil
 }
 
 // queryEnabledWithKPIs 是「落库侧全存已启用指标集」的取数路径（#532 P2，StoreAllEnabled=true）：
@@ -465,22 +780,35 @@ func (a *Aggregator) queryEnabledWithKPIs(
 	// 用已启用集合走与默认重算同一套元数据解析：命中 arithmetic 的进 kpis（含派生 + 原始计数），
 	// 其余无元数据的进 userCounters（纯 counter 编号）。
 	kpis, userCounters := a.resolveKPIMetadata(ctx, enabled)
-	eff := effectiveCounterPaths(userCounters, kpis)
-	cq := q
-	cq.MetricPaths = eff
-	cq.MetricType = counterMetricType() // 只聚 counter 行
-	cq.Limit = 0                        // 重算需每桶全部 deps counter，不截行
-	cq.Offset = 0
-	counterRows, err := dimFn(ctx, table, cq)
-	if err != nil {
-		return nil, err
+	formulaKPIs, directKPIs := splitKPIMetaByRollupMode(kpis)
+	eff := effectiveCounterPaths(userCounters, formulaKPIs)
+	var counterRows []Row
+	if len(eff) > 0 {
+		cq := q
+		cq.MetricPaths = eff
+		cq.MetricType = counterMetricType() // 只聚 counter 行
+		cq.Limit = 0                        // 重算需每桶全部 deps counter，不截行
+		cq.Offset = 0
+		var err error
+		counterRows, err = dimFn(ctx, table, cq)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if len(kpis) == 0 {
 		// 已启用集里没有任何 arithmetic 指标：所有已启用项都是裸 counter，直接返回（已被 eff 收口）。
 		return counterRows, nil
 	}
-	// passthrough = 已启用 counter（userCounters）+ 已启用原始计数；dep-only 非启用 counter 被剔除。
-	return a.recomputeKPIs(counterRows, kpis, userCounters), nil
+	out := counterRows
+	if len(formulaKPIs) > 0 {
+		// passthrough = 已启用 counter（userCounters）+ 已启用原始计数；dep-only 非启用 counter 被剔除。
+		out = a.recomputeKPIs(counterRows, formulaKPIs, userCounters)
+	}
+	directRows, err := a.queryDirectRollupKPIs(ctx, q, directKPIs)
+	if err != nil {
+		return nil, err
+	}
+	return append(out, directRows...), nil
 }
 
 // resolveEnabledIndicators 按请求制式枚举「已启用指标编号集」（#532 P2）。

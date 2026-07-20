@@ -53,7 +53,7 @@ func Test_Count_Device_PageByPivotRowCountsDistinctPivotKeys(t *testing.T) {
 		Granularity:    metrics.Granularity15Min,
 		Dimension:      DimensionDevice,
 		DeviceSNs:      []string{"SN-1"},
-		MetricPaths:    []string{"K1", "K2"},
+		MetricPaths:    []string{"C1", "C2"},
 		PageByPivotRow: true,
 		Limit:          50,
 		Offset:         100,

@@ -257,12 +257,39 @@ func TestRunner_BuildSource_KpiQueryAutoDiscoversObjectLDNsForSkeletonExport(t *
 	require.True(t, ok)
 	assert.Equal(t, []string{"Cellid=1", "Cellid=2"}, filled.req.ObjectLDNs)
 
-	deviceSrc, ok := filled.src.(*dashboardDeviceSource)
+	aggregateSrc, ok := filled.src.(*dashboardAggregateSource)
 	require.True(t, ok)
-	assert.Equal(t, []string{"Cellid=1", "Cellid=2"}, deviceSrc.objectLDNs)
+	assert.Equal(t, []string{"Cellid=1", "Cellid=2"}, aggregateSrc.objectLDNs)
 	require.NotEmpty(t, metricDB.queries)
 	assert.Contains(t, metricDB.queries[0].sql, "SELECT DISTINCT object_ldn")
 	assert.NotContains(t, metricDB.queries[0].sql, "metric_path", "当前指标完全没数据时也要能发现对象全集")
+}
+
+func TestRunner_BuildSource_KpiQueryDeviceExportRequiresAggregator(t *testing.T) {
+	start := time.Date(2026, 7, 14, 7, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	params, err := json.Marshal(DashboardParams{
+		Granularity: "hourly",
+		Dimension:   "device",
+		DeviceSNs:   []string{"SN1"},
+		MetricPaths: []string{"K001"},
+		StartTime:   start.Format(time.RFC3339),
+		EndTime:     end.Format(time.RFC3339),
+	})
+	require.NoError(t, err)
+
+	metricDB := &recordingExportQuerier{results: []pgx.Rows{
+		&adhocFakeRows{}, // 指标名解析无命中，列名回退指标编号。
+	}}
+	runner := NewRunner(RunnerDeps{MetricDB: metricDB})
+
+	_, _, _, err = runner.buildSource(context.Background(), &Task{
+		ID:         uuid.New(),
+		SourceType: SourceDashboard,
+		Params:     params,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "aggregator not wired")
 }
 
 func TestRunner_BuildSource_DeviceViewUsesDashboardLikeDeviceExport(t *testing.T) {
@@ -272,7 +299,7 @@ func TestRunner_BuildSource_DeviceViewUsesDashboardLikeDeviceExport(t *testing.T
 		Granularity: "15min",
 		Dimension:   "device",
 		DeviceSNs:   []string{"SN1"},
-		MetricPaths: []string{"K001"},
+		MetricPaths: []string{"C001"},
 		StartTime:   start.Format(time.RFC3339),
 		EndTime:     end.Format(time.RFC3339),
 	})

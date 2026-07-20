@@ -43,6 +43,12 @@ func groupTableRow(gid uuid.UUID, tech, path, mtype string, val float64, statis,
 	return []any{gid, tech, path, mtype, val, statis, gran, t, t, t, t, []byte(nil)}
 }
 
+// directRollupRow 是 queryDirectRollupKPIs SELECT 的统一行：
+// device_oui, device_sn, group_id, technology, product_id, object_ldn, path, type, value, statis, gran, time×4。
+func directRollupRow(deviceOUI, deviceSN string, groupID any, tech string, productID any, objectLDN any, path, mtype string, val float64, statis, gran string, t time.Time) []any {
+	return []any{deviceOUI, deviceSN, groupID, tech, productID, objectLDN, path, mtype, val, statis, gran, t, t, t, t}
+}
+
 // ── 1. 简单 pct 重算正确，且 ≠ 各设备百分比平均 ───────────────────────────────
 //
 // succ=[90,10] att=[100,300]：跨设备各自 SUM → succ=100, att=400 → 100/400*100=25%。
@@ -113,6 +119,220 @@ func Test_Recompute_MultiTermPct_Product(t *testing.T) {
 	assert.Equal(t, "K900099999", rows[0].MetricPath)
 	assert.Equal(t, pid, rows[0].ProductID, "product 维度分组键透传")
 	assert.InDelta(t, 10.0, float64(rows[0].MetricValue), 1e-9)
+}
+
+func Test_Query_DerivedAvgKPI_ProductAggregatesExistingKPIValues(t *testing.T) {
+	now := time.Date(2026, 5, 30, 10, 0, 0, 0, time.UTC)
+	pid := uuid.New()
+	db := &recordingDB{
+		results: []pgx.Rows{
+			&fakeRows{rows: [][]any{
+				metaRow("KAVG001", "avg", "numerator/denominator"),
+			}},
+			&fakeRows{rows: [][]any{
+				directRollupRow("", "AGGREGATED", nil, "", pid, nil, "KAVG001", "kpi", 40, "avg", "daily", now),
+			}},
+			&fakeRows{},
+		},
+	}
+	a := New(db, nil, nil)
+	rows, err := a.Query(context.Background(), QueryRequest{
+		Granularity: metrics.GranularityDaily,
+		Dimension:   DimensionProduct,
+		MetricPaths: []string{"KAVG001"},
+		StartTime:   now,
+		EndTime:     now.Add(24 * time.Hour),
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "KAVG001", rows[0].MetricPath)
+	assert.Equal(t, metrics.MetricTypeKPI, rows[0].MetricType)
+	assert.InDelta(t, 40.0, float64(rows[0].MetricValue), 1e-9)
+	require.NotNil(t, rows[0].StatisType)
+	assert.Equal(t, metrics.StatisAvg, *rows[0].StatisType)
+	assert.Contains(t, db.sqls[1], "FROM pm_metrics m", "avg 派生 KPI 应回到 15 分钟源表聚合")
+	assert.Contains(t, db.sqls[1], "m.granularity = '15min'", "daily avg 不应从 daily 表二次平均")
+	assert.NotContains(t, db.sqls[1], "numerator", "avg 派生 KPI 不应下推公式依赖 counter")
+}
+
+func Test_Query_DerivedAvgKPI_DeviceAggregatesExisting15MinKPIValues(t *testing.T) {
+	now := time.Date(2026, 5, 30, 0, 0, 0, 0, time.UTC)
+	visibleGroup := uuid.New()
+	db := &recordingDB{
+		results: []pgx.Rows{
+			&fakeRows{rows: [][]any{
+				metaRow("KAVG001", "avg", "numerator/denominator"),
+			}},
+			&fakeRows{rows: [][]any{
+				directRollupRow("48BF74", "SN-1", nil, "", nil, "Cellid=1", "KAVG001", "kpi", 16.688172, "avg", "daily", now),
+			}},
+			&fakeRows{},
+		},
+	}
+	a := New(db, nil, nil)
+	mt := metrics.MetricTypeKPI
+	rows, err := a.Query(context.Background(), QueryRequest{
+		Granularity:   metrics.GranularityDaily,
+		Dimension:     DimensionDevice,
+		DeviceOUIs:    []string{"48BF74"},
+		DeviceSNs:     []string{"SN-1"},
+		MetricPaths:   []string{"KAVG001"},
+		MetricType:    &mt,
+		Technologies:  []string{"nr"},
+		VisibleGroups: []uuid.UUID{visibleGroup},
+		StartTime:     now,
+		EndTime:       now.Add(24 * time.Hour),
+		ObjectLDNs:    []string{"Cellid=1"},
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "48BF74", rows[0].DeviceOUI)
+	assert.Equal(t, "SN-1", rows[0].DeviceSN)
+	require.NotNil(t, rows[0].ObjectLDN)
+	assert.Equal(t, "Cellid=1", *rows[0].ObjectLDN)
+	assert.Equal(t, metrics.MetricTypeKPI, rows[0].MetricType)
+	assert.InDelta(t, 16.688172, float64(rows[0].MetricValue), 1e-9)
+	require.NotNil(t, rows[0].StatisType)
+	assert.Equal(t, metrics.StatisAvg, *rows[0].StatisType)
+	assert.Contains(t, db.sqls[1], "FROM pm_metrics m", "device daily avg 应从 15 分钟 KPI 源表聚合")
+	assert.Contains(t, db.sqls[1], "m.granularity = '15min'", "device daily avg 不应依赖旧 daily KPI 行")
+	assert.Contains(t, db.sqls[1], "SELECT oui, serial_number FROM device_dim WHERE technology = ANY(", "device direct KPI 应保留制式过滤")
+	assert.Contains(t, db.sqls[1], "m.device_sn IN (SELECT serial_number FROM devices WHERE id IN (SELECT device_id FROM device_group_members WHERE group_id = ANY(", "device direct KPI 应保留可见分组过滤")
+	assert.Contains(t, db.argsLog[1], []string{"nr"})
+	assert.Contains(t, db.argsLog[1], []uuid.UUID{visibleGroup})
+	assert.NotContains(t, db.sqls[1], "pm_metrics_daily", "device direct KPI 不应读旧 daily 表")
+	assert.NotContains(t, db.sqls[1], "numerator", "avg 派生 KPI 不应下推公式依赖 counter")
+}
+
+func Test_Query_DerivedAvgKPI_DeviceInfersKPIPathWithoutMetricType(t *testing.T) {
+	now := time.Date(2026, 5, 30, 0, 0, 0, 0, time.UTC)
+	db := &recordingDB{
+		results: []pgx.Rows{
+			&fakeRows{rows: [][]any{
+				metaRow("KAVG001", "avg", "numerator/denominator"),
+			}},
+			&fakeRows{rows: [][]any{
+				directRollupRow("48BF74", "SN-1", nil, "", nil, "Cellid=1", "KAVG001", "kpi", 16.688172, "avg", "daily", now),
+			}},
+			&fakeRows{},
+		},
+	}
+	a := New(db, nil, nil)
+	rows, err := a.Query(context.Background(), QueryRequest{
+		Granularity: metrics.GranularityDaily,
+		Dimension:   DimensionDevice,
+		DeviceOUIs:  []string{"48BF74"},
+		DeviceSNs:   []string{"SN-1"},
+		MetricPaths: []string{"KAVG001"},
+		StartTime:   now,
+		EndTime:     now.Add(24 * time.Hour),
+		ObjectLDNs:  []string{"Cellid=1"},
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Contains(t, db.sqls[1], "FROM pm_metrics m")
+	assert.Contains(t, db.sqls[1], "m.granularity = '15min'")
+	assert.NotContains(t, db.sqls[1], "pm_metrics_daily")
+}
+
+func Test_Count_DerivedAvgKPI_DeviceCountsDirectRollupRows(t *testing.T) {
+	now := time.Date(2026, 5, 30, 0, 0, 0, 0, time.UTC)
+	db := &recordingDB{
+		results: []pgx.Rows{
+			&fakeRows{rows: [][]any{
+				metaRow("KAVG001", "avg", "numerator/denominator"),
+			}},
+			&fakeRows{rows: [][]any{
+				directRollupRow("48BF74", "SN-1", nil, "", nil, "Cellid=1", "KAVG001", "kpi", 16.688172, "avg", "daily", now),
+			}},
+			&fakeRows{},
+		},
+	}
+	a := New(db, nil, nil)
+	mt := metrics.MetricTypeKPI
+	n, err := a.Count(context.Background(), QueryRequest{
+		Granularity: metrics.GranularityDaily,
+		Dimension:   DimensionDevice,
+		DeviceOUIs:  []string{"48BF74"},
+		DeviceSNs:   []string{"SN-1"},
+		MetricPaths: []string{"KAVG001"},
+		MetricType:  &mt,
+		StartTime:   now,
+		EndTime:     now.Add(24 * time.Hour),
+		ObjectLDNs:  []string{"Cellid=1"},
+		Limit:       10,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+	assert.Contains(t, db.sqls[1], "FROM pm_metrics m")
+	assert.NotContains(t, db.sqls[1], "pm_metrics_daily")
+}
+
+func Test_Query_DerivedAvgKPI_DeviceGroupAggregates15MinKPIValues(t *testing.T) {
+	now := time.Date(2026, 5, 30, 10, 0, 0, 0, time.UTC)
+	gid := uuid.New()
+	db := &recordingDB{
+		results: []pgx.Rows{
+			&fakeRows{rows: [][]any{
+				metaRow("KAVG001", "avg", "numerator/denominator"),
+			}},
+			&fakeRows{rows: [][]any{
+				directRollupRow("", "AGGREGATED", gid, "nr", nil, nil, "KAVG001", "kpi", 40, "avg", "daily", now),
+			}},
+			&fakeRows{},
+		},
+	}
+	a := New(db, nil, nil)
+	rows, err := a.Query(context.Background(), QueryRequest{
+		Granularity:    metrics.GranularityDaily,
+		Dimension:      DimensionDeviceGroup,
+		DeviceGroupIDs: []uuid.UUID{gid},
+		MetricPaths:    []string{"KAVG001"},
+		StartTime:      now,
+		EndTime:        now.Add(24 * time.Hour),
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, gid, rows[0].DeviceGroupID)
+	assert.Equal(t, "nr", rows[0].Technology)
+	assert.Equal(t, metrics.MetricTypeKPI, rows[0].MetricType)
+	assert.InDelta(t, 40.0, float64(rows[0].MetricValue), 1e-9)
+	assert.Contains(t, db.sqls[1], "JOIN device_group_member_dim dgm", "设备组 direct KPI 应从 raw KPI 行按设备组现场聚合")
+	assert.Contains(t, db.sqls[1], "DISTINCT ON (m.device_oui, m.device_sn, m.metric_path, m.granularity, m.time, m.object_ldn, dgm.group_id, d.technology)", "同一设备属于多个组时不能被去重误删")
+	assert.Contains(t, db.sqls[1], "m.granularity = '15min'")
+	assert.NotContains(t, db.sqls[1], "pm_group_metrics_daily", "设备组 direct KPI 不应依赖只存 counter 的 group 快表")
+}
+
+func Test_Count_DerivedAvgKPI_DeviceGroupCountsDirectRollupRows(t *testing.T) {
+	now := time.Date(2026, 5, 30, 0, 0, 0, 0, time.UTC)
+	gid := uuid.New()
+	db := &recordingDB{
+		results: []pgx.Rows{
+			&fakeRows{rows: [][]any{
+				metaRow("KAVG001", "avg", "numerator/denominator"),
+			}},
+			&fakeRows{rows: [][]any{
+				directRollupRow("", "AGGREGATED", gid, "nr", nil, nil, "KAVG001", "kpi", 40, "avg", "daily", now),
+			}},
+			&fakeRows{},
+		},
+	}
+	a := New(db, nil, nil)
+	mt := metrics.MetricTypeKPI
+	n, err := a.Count(context.Background(), QueryRequest{
+		Granularity:    metrics.GranularityDaily,
+		Dimension:      DimensionDeviceGroup,
+		DeviceGroupIDs: []uuid.UUID{gid},
+		MetricPaths:    []string{"KAVG001"},
+		MetricType:     &mt,
+		StartTime:      now,
+		EndTime:        now.Add(24 * time.Hour),
+		Limit:          10,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+	assert.Contains(t, db.sqls[1], "FROM pm_metrics m")
+	assert.NotContains(t, db.sqls[1], "pm_group_metrics_daily")
 }
 
 func TestResolveKPIMetadata_CompilesGSMDurationRuntimeArithmetic(t *testing.T) {
