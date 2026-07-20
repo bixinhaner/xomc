@@ -35,6 +35,7 @@ import {
 } from 'antd';
 import dayjs from 'dayjs';
 import { InputAddon } from '@/components/common/InputAddon';
+import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
 import { useCreatePmAdhoc, useUpdatePmAdhoc, usePmAdhocDetail } from '@core/hooks/api/usePmAdhoc';
 import { useDeviceList } from '@core/hooks/api/useDevices';
 import { useMetricObjectsByDevices } from '@core/hooks/api/usePmQuery';
@@ -51,6 +52,7 @@ import {
   formatMetricIdSamples,
   type MetricBatchSelectionResult,
 } from '@/components/MetricPickerModal';
+import { resolveLimitedTransferSelection } from './selectionLimit';
 
 // 制式（含 GSM，networkType 过滤直接用小写值）
 type WizardTech = 'lte' | 'nr' | 'gsm';
@@ -78,6 +80,10 @@ interface MetricTransferItem {
   indicatorLevel?: string;
   // 搜索用拼接串（编号 + 中英文名），小写。
   searchText: string;
+}
+
+function isSameStringArray(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
 export default function PmAdhocWizard() {
@@ -264,8 +270,10 @@ export default function PmAdhocWizard() {
 
   // ── 步骤校验（决定"下一步"是否可点 / 提交是否可点）──────────────────────
   const step1Valid = name.trim().length > 0;
-  const step2Valid = needsDevicePick ? selectedSns.length > 0 : true;
-  const step3Valid = metricPaths.length >= 1;
+  const step2Valid = needsDevicePick
+    ? selectedSns.length > 0 && selectedSns.length <= PM_QUERY_SELECTION_LIMIT
+    : true;
+  const step3Valid = metricPaths.length >= 1 && metricPaths.length <= PM_QUERY_SELECTION_LIMIT;
   const step4Valid =
     granularity.length > 0 &&
     // #669：兜底——15min 已从粒度选项删除，但编辑模式遇旧任务仍可能传入 15min，由此拦截。
@@ -274,7 +282,39 @@ export default function PmAdhocWizard() {
 
   const canNext = [step1Valid, step2Valid, step3Valid, step4Valid][current];
 
+  const warnDeviceLimitExceeded = (count: number) => {
+    if (count <= PM_QUERY_SELECTION_LIMIT) return false;
+    message.warning(intl.formatMessage(
+      { id: 'perf.picker.deviceLimitExceeded' },
+      { max: PM_QUERY_SELECTION_LIMIT, count },
+    ));
+    return true;
+  };
+
+  const warnMetricLimitExceeded = (count: number) => {
+    if (count <= PM_QUERY_SELECTION_LIMIT) return false;
+    message.warning(intl.formatMessage(
+      { id: 'perf.picker.metricLimitExceeded' },
+      { max: PM_QUERY_SELECTION_LIMIT, count },
+    ));
+    return true;
+  };
+
+  const resolveDeviceKeys = (keys: React.Key[]) => {
+    const result = resolveLimitedTransferSelection(selectedSns, keys, PM_QUERY_SELECTION_LIMIT);
+    if (result.exceeded) warnDeviceLimitExceeded(result.count);
+    return result.next;
+  };
+
+  const resolveMetricKeys = (keys: React.Key[]) => {
+    const result = resolveLimitedTransferSelection(metricPaths, keys, PM_QUERY_SELECTION_LIMIT);
+    if (result.exceeded) warnMetricLimitExceeded(result.count);
+    return result.next;
+  };
+
   const handleSubmit = async () => {
+    if (needsDevicePick && warnDeviceLimitExceeded(selectedSns.length)) return;
+    if (warnMetricLimitExceeded(metricPaths.length)) return;
     if (!step1Valid || !step2Valid || !step3Valid || !step4Valid) {
       message.error(intl.formatMessage({ id: 'perf.adhoc.checkStepsIncomplete' }));
       return;
@@ -451,8 +491,11 @@ export default function PmAdhocWizard() {
                 dataSource={deviceItems}
                 targetKeys={selectedSns}
                 onChange={(keys: React.Key[]) => {
-                  setSelectedSns(keys.map(String));
-                  setCellSel({}); // 设备集变更 → 下钻选择重置（全选）。
+                  const nextSelectedSns = resolveDeviceKeys(keys);
+                  if (!isSameStringArray(selectedSns, nextSelectedSns)) {
+                    setSelectedSns(nextSelectedSns);
+                    setCellSel({}); // 设备集变更 → 下钻选择重置（全选）。
+                  }
                 }}
                 render={(item) => item.title}
                 showSearch
@@ -549,7 +592,12 @@ export default function PmAdhocWizard() {
         <Transfer<MetricTransferItem>
           dataSource={metricTransferItems}
           targetKeys={metricPaths}
-          onChange={(keys: React.Key[]) => setMetricPaths(keys.map(String))}
+          onChange={(keys: React.Key[]) => {
+            const nextMetricPaths = resolveMetricKeys(keys);
+            if (!isSameStringArray(metricPaths, nextMetricPaths)) {
+              setMetricPaths(nextMetricPaths);
+            }
+          }}
           render={renderMetricItem}
           showSearch
           // 类型筛选已下移到 dataSource 层预过滤（见 metricTransferItems）；此处 filterOption
@@ -576,6 +624,7 @@ export default function PmAdhocWizard() {
         open={metricBatchOpen}
         candidates={indicatorItems}
         currentSelected={metricPaths}
+        maxSelected={PM_QUERY_SELECTION_LIMIT}
         loading={indicatorsLoading}
         onCancel={() => setMetricBatchOpen(false)}
         onApply={(result: MetricBatchSelectionResult) => {
@@ -589,6 +638,15 @@ export default function PmAdhocWizard() {
             message.warning(intl.formatMessage(
               { id: 'perf.metricBatchInput.notFound' },
               { count: result.invalidIds.length, ids: formatMetricIdSamples(result.invalidIds) },
+            ));
+          }
+          if (result.limitExceeded) {
+            message.warning(intl.formatMessage(
+              { id: 'perf.metricBatchInput.truncated' },
+              {
+                max: PM_QUERY_SELECTION_LIMIT,
+                count: result.omittedValidIds.length,
+              },
             ));
           }
         }}

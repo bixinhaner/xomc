@@ -7774,7 +7774,7 @@ const messages: Record<string, string> = {
   'perf.dashboard.granularWeekly':       '周',
   'perf.dashboard.granularMonthly':      '月',
   'perf.dashboard.fieldTech':            '制式',
-  'perf.dashboard.fieldDevice':          '设备（≤10）',
+  'perf.dashboard.fieldDevice':          '设备（≤50）',
   'perf.dashboard.fieldMetric':          '指标',
   'perf.dashboard.fieldGranularity':     '粒度',
   'perf.dashboard.devicePlaceholder':    '点击右侧按钮选择设备',

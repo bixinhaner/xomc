@@ -10,6 +10,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { useIntl } from 'react-intl';
 import { ImportOutlined } from '@ant-design/icons';
 import { Alert, Button, Modal, Select, Space, Spin, Tag, Transfer, message } from 'antd';
+import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
 import { useUpdatePmAdhoc } from '@core/hooks/api/usePmAdhoc';
 import { useIndicatorCandidates } from '@core/hooks/api/usePerformance';
 import type { IndicatorCandidate } from '@core/services/api/pmApi';
@@ -21,6 +22,7 @@ import {
   formatMetricIdSamples,
   type MetricBatchSelectionResult,
 } from '@/components/MetricPickerModal';
+import { resolveLimitedTransferSelection } from './selectionLimit';
 
 // 制式 → 指标库 deviceType（与向导一致）。
 const TECH_TO_DEVICE_TYPE: Record<string, DeviceType> = {
@@ -107,12 +109,28 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
     </Space>
   );
 
+  const warnMetricLimitExceeded = (count: number) => {
+    if (count <= PM_QUERY_SELECTION_LIMIT) return false;
+    message.warning(intl.formatMessage(
+      { id: 'perf.picker.metricLimitExceeded' },
+      { max: PM_QUERY_SELECTION_LIMIT, count },
+    ));
+    return true;
+  };
+
+  const limitMetricKeys = (keys: React.Key[]) => {
+    const result = resolveLimitedTransferSelection(metricPaths, keys, PM_QUERY_SELECTION_LIMIT);
+    if (result.exceeded) warnMetricLimitExceeded(result.count);
+    return result.next;
+  };
+
   const handleOk = async () => {
     if (!task) return;
     if (metricPaths.length < 1) {
       message.error(intl.formatMessage({ id: 'perf.adhoc.editMetricEmpty' }));
       return;
     }
+    if (warnMetricLimitExceeded(metricPaths.length)) return;
     try {
       await updateMut.mutateAsync({ id: task.id, input: { metricPaths } });
       message.success(intl.formatMessage({ id: 'perf.adhoc.editMetricSaved' }));
@@ -173,7 +191,7 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
           <Transfer<MetricTransferItem>
             dataSource={transferItems}
             targetKeys={metricPaths}
-            onChange={(keys: React.Key[]) => setMetricPaths(keys.map(String))}
+            onChange={(keys: React.Key[]) => setMetricPaths(limitMetricKeys(keys))}
             render={renderItem}
             showSearch
             filterOption={(inputValue, item) => {
@@ -194,6 +212,7 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
           open={metricBatchOpen}
           candidates={indicatorItems}
           currentSelected={metricPaths}
+          maxSelected={PM_QUERY_SELECTION_LIMIT}
           loading={isLoading}
           onCancel={() => setMetricBatchOpen(false)}
           onApply={(result: MetricBatchSelectionResult) => {
@@ -207,6 +226,15 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
               message.warning(intl.formatMessage(
                 { id: 'perf.metricBatchInput.notFound' },
                 { count: result.invalidIds.length, ids: formatMetricIdSamples(result.invalidIds) },
+              ));
+            }
+            if (result.limitExceeded) {
+              message.warning(intl.formatMessage(
+                { id: 'perf.metricBatchInput.truncated' },
+                {
+                  max: PM_QUERY_SELECTION_LIMIT,
+                  count: result.omittedValidIds.length,
+                },
               ));
             }
           }}

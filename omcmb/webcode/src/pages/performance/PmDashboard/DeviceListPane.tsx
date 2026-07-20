@@ -3,8 +3,8 @@
  *
  * 交互：
  *   - 制式 Segmented（默认 LTE；ENB/GNB/GSM）。
- *   - 设备多选（≤10，复用 KPIQuery/components/DevicePickerModal；超 10 拦截提示并截断）。
- *   - 指标可换（复用共享件 components/MetricPickerModal，initialDeviceType 随制式）；
+ *   - 设备多选（最多 50，复用 KPIQuery/components/DevicePickerModal；超限拦截提示并截断）。
+ *   - 指标可换（最多 50，复用共享件 components/MetricPickerModal，initialDeviceType 随制式）；
  *     默认集 = 选中制式的内置任务指标集（usePmAdhocList isBuiltin，按 technology 找一个取 metricPaths）。
  *     用户未手动改过指标时，切制式默认集随之切换；手动改过则保留用户选择。
  *   - 粒度选择（默认 15min）。
@@ -45,6 +45,7 @@ import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
 import type { DeviceType } from '@core/types/indicatorLibrary';
 import type { CreateKpiExportInput } from '@core/types/kpiExport';
 import type { Granularity } from '@core/types/pmDashboard';
+import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
 import DevicePickerModal from '../KPIQuery/components/DevicePickerModal';
 import MetricPickerModal from '@/components/MetricPickerModal';
 import ChartCard from './ChartCard';
@@ -101,7 +102,13 @@ const GRANULARITY_MSG_IDS: { id: string; value: Granularity }[] = [
   { id: 'perf.dashboard.granularMonthly', value: 'monthly' },
 ];
 
-const MAX_DEVICES = 10;
+export function isDeviceViewDeviceSelectionOverLimit(deviceSns: string[]): boolean {
+  return deviceSns.length > PM_QUERY_SELECTION_LIMIT;
+}
+
+export function isDeviceViewMetricSelectionOverLimit(metricPaths: string[]): boolean {
+  return metricPaths.length > PM_QUERY_SELECTION_LIMIT;
+}
 
 function defaultRangeForGranularity(g: Granularity): [Dayjs, Dayjs] {
   const end = dayjs();
@@ -365,8 +372,22 @@ export default function DeviceListPane() {
       message.warning(intl.formatMessage({ id: 'perf.dashboard.selectAtLeastOneDevice' }));
       return;
     }
+    if (isDeviceViewDeviceSelectionOverLimit(deviceSns)) {
+      message.warning(intl.formatMessage(
+        { id: 'perf.picker.deviceLimitExceeded' },
+        { max: PM_QUERY_SELECTION_LIMIT, count: deviceSns.length },
+      ));
+      return;
+    }
     if (metricPaths.length === 0) {
       message.warning(intl.formatMessage({ id: 'perf.dashboard.selectAtLeastOneMetric' }));
+      return;
+    }
+    if (isDeviceViewMetricSelectionOverLimit(metricPaths)) {
+      message.warning(intl.formatMessage(
+        { id: 'perf.picker.metricLimitExceeded' },
+        { max: PM_QUERY_SELECTION_LIMIT, count: metricPaths.length },
+      ));
       return;
     }
     const [start, end] = filter.range;
@@ -582,21 +603,21 @@ export default function DeviceListPane() {
         onClose={() => setDevicePickerOpen(false)}
         onConfirm={(sns) => {
           setCellSel({}); // 设备变更 → 重置下钻选择为全选。
-          if (sns.length > MAX_DEVICES) {
+          if (isDeviceViewDeviceSelectionOverLimit(sns)) {
             message.warning(
               intl.formatMessage(
-                { id: 'perf.dashboard.maxDevicesTruncated' },
-                { max: MAX_DEVICES },
+                { id: 'perf.picker.deviceLimitExceeded' },
+                { max: PM_QUERY_SELECTION_LIMIT, count: sns.length },
               ),
             );
-            setDeviceSns(sns.slice(0, MAX_DEVICES));
+            setDeviceSns(sns.slice(0, PM_QUERY_SELECTION_LIMIT));
           } else {
             setDeviceSns(sns);
           }
         }}
         initialSelected={deviceSns}
         technology={tech}
-        maxSelected={MAX_DEVICES}
+        maxSelected={PM_QUERY_SELECTION_LIMIT}
       />
 
       <MetricPickerModal
@@ -609,6 +630,7 @@ export default function DeviceListPane() {
         initialSelected={metricPaths}
         initialDeviceType={TECH_TO_DEVICE_TYPE[tech]}
         lockDeviceType
+        maxSelected={PM_QUERY_SELECTION_LIMIT}
         enableBatchInput
       />
     </div>
