@@ -33,7 +33,7 @@ export function useIndicatorList(deviceType: DeviceType, filter?: IndicatorListF
  * 供首页面板「编号 → 中文名/单位」元数据反查。复用 api.list，不动后端分页上限。
  */
 const ALL_INDICATORS_PAGE_SIZE = 1000; // 后端分页契约上限（model/pagination.go），按此循环翻页取全
-export function useAllIndicators(deviceType: DeviceType) {
+export function useAllIndicators(deviceType: DeviceType, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: [...IL_KEY, 'all', deviceType],
     queryFn: async () => {
@@ -50,6 +50,7 @@ export function useAllIndicators(deviceType: DeviceType) {
       }
       return { items, total };
     },
+    enabled: options?.enabled ?? true,
     staleTime: 5 * 60 * 1000,
   });
 }

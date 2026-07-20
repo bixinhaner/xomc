@@ -10,20 +10,23 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { App } from 'antd';
 
 // 捕获 useIndicatorList 收到的 deviceType。
-const { useIndicatorListSpy, indicatorListData } = vi.hoisted(() => ({
+const { useIndicatorListSpy, indicatorListData, allIndicatorsData } = vi.hoisted(() => ({
   useIndicatorListSpy: vi.fn(),
   indicatorListData: { items: [] as unknown[], total: 0 },
+  allIndicatorsData: { items: [] as unknown[], total: 0 },
 }));
 
 vi.mock('@core/hooks/api/useIndicatorsLibrary', () => {
   // 稳定引用：组件内有按 data 身份做的 render-phase 同步，mock 每次返回新对象会在多次
   // rerender 时把它放大成无限渲染（生产用真 React Query 数据稳定，不触发）。
   const STABLE = { data: indicatorListData, isLoading: false };
+  const ALL_STABLE = { data: allIndicatorsData, isLoading: false };
   return {
     useIndicatorList: (deviceType: unknown, params: unknown) => {
       useIndicatorListSpy(deviceType, params);
       return STABLE;
     },
+    useAllIndicators: () => ALL_STABLE,
   };
 });
 
@@ -51,6 +54,8 @@ describe('MetricPickerModal 制式锁定', () => {
     useIndicatorListSpy.mockClear();
     indicatorListData.items = [];
     indicatorListData.total = 0;
+    allIndicatorsData.items = [];
+    allIndicatorsData.total = 0;
   });
 
   it('lockDeviceType=true 时隐藏「设备类型」下拉，按 initialDeviceType 锁死取数', () => {
@@ -91,6 +96,8 @@ describe('MetricPickerModal 已选回显', () => {
     useIndicatorListSpy.mockClear();
     indicatorListData.items = [];
     indicatorListData.total = 0;
+    allIndicatorsData.items = [];
+    allIndicatorsData.total = 0;
   });
 
   // 回归：与制式同款「组件常驻不卸载」问题——内部 selected 仅首挂载赋值一次。
@@ -127,6 +134,8 @@ describe('MetricPickerModal 搜索状态', () => {
     useIndicatorListSpy.mockClear();
     indicatorListData.items = [];
     indicatorListData.total = 0;
+    allIndicatorsData.items = [];
+    allIndicatorsData.total = 0;
   });
 
   it('关闭后重开会清空上次搜索词并回到第一页', () => {
@@ -164,6 +173,8 @@ describe('MetricPickerModal 选择数量限制', () => {
     useIndicatorListSpy.mockClear();
     indicatorListData.items = [];
     indicatorListData.total = 0;
+    allIndicatorsData.items = [];
+    allIndicatorsData.total = 0;
   });
 
   it('默认不限制选择数量，由复用页面自行决定上限', () => {
@@ -198,6 +209,90 @@ describe('MetricPickerModal 选择数量限制', () => {
   });
 });
 
+describe('MetricPickerModal 批量输入指标 ID', () => {
+  beforeEach(() => {
+    useIndicatorListSpy.mockClear();
+    indicatorListData.items = [];
+    indicatorListData.total = 0;
+    allIndicatorsData.items = [
+      {
+        id: 'C000060011',
+        name: 'rrc_att',
+        cnName: 'RRC请求次数',
+        enName: 'RRC Attempts',
+        isCounter: true,
+        deviceType: 'ENB',
+      },
+      {
+        id: 'K900010002',
+        name: 'availability',
+        cnName: '可用率',
+        enName: 'Availability',
+        isCounter: false,
+        deviceType: 'ENB',
+      },
+    ];
+    allIndicatorsData.total = 2;
+  });
+
+  it('默认不显示批量输入入口，由调用页显式开启', () => {
+    renderModal();
+
+    expect(screen.queryByRole('button', { name: /批量输入/ })).toBeNull();
+  });
+
+  it('只把全量真实指标库里存在的 ID 加入已选，并忽略不存在 ID', async () => {
+    const onConfirm = vi.fn();
+    renderModal({ initialSelected: ['EXISTING'], onConfirm, enableBatchInput: true });
+
+    fireEvent.click(screen.getByRole('button', { name: /批量输入/ }));
+    const input = await screen.findByPlaceholderText(/K000000001/);
+    fireEvent.change(input, {
+      target: { value: 'K900010002，UNKNOWN\nC000060011 K900010002' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /加入已选/ }));
+    fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
+
+    expect(onConfirm).toHaveBeenCalledWith(
+      ['EXISTING', 'K900010002', 'C000060011'],
+      expect.objectContaining({
+        K900010002: '可用率',
+        C000060011: 'RRC请求次数',
+      }),
+    );
+  });
+
+  it('全部 ID 不存在时不改变原已选', async () => {
+    const onConfirm = vi.fn();
+    renderModal({ initialSelected: ['EXISTING'], onConfirm, enableBatchInput: true });
+
+    fireEvent.click(screen.getByRole('button', { name: /批量输入/ }));
+    const input = await screen.findByPlaceholderText(/K000000001/);
+    fireEvent.change(input, {
+      target: { value: 'UNKNOWN-1 UNKNOWN-2' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /加入已选/ }));
+    fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
+
+    expect(onConfirm).toHaveBeenCalledWith(['EXISTING'], expect.any(Object));
+  });
+
+  it('批量输入同样受 maxSelected 上限限制', async () => {
+    const onConfirm = vi.fn();
+    renderModal({ initialSelected: ['EXISTING'], maxSelected: 2, onConfirm, enableBatchInput: true });
+
+    fireEvent.click(screen.getByRole('button', { name: /批量输入/ }));
+    const input = await screen.findByPlaceholderText(/K000000001/);
+    fireEvent.change(input, {
+      target: { value: 'K900010002 C000060011' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /加入已选/ }));
+    fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
+
+    expect(onConfirm).toHaveBeenCalledWith(['EXISTING', 'K900010002'], expect.any(Object));
+  });
+});
+
 describe('MetricPickerModal 指标级别列', () => {
   beforeEach(() => {
     useIndicatorListSpy.mockClear();
@@ -213,6 +308,8 @@ describe('MetricPickerModal 指标级别列', () => {
       },
     ];
     indicatorListData.total = 1;
+    allIndicatorsData.items = [];
+    allIndicatorsData.total = 0;
   });
 
   it('ENB/GSM 指标选择列表显示“指标级别”列并把 both 显示为“设备级 / PLMN级”', () => {

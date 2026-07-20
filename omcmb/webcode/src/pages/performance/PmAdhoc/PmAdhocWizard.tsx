@@ -16,6 +16,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { useNavigate, useParams } from 'react-router-dom';
+import { ImportOutlined } from '@ant-design/icons';
 import {
   Alert,
   Button,
@@ -45,6 +46,11 @@ import { isGranularityDimensionSupported } from '@core/utils/pmAdhocConstraints'
 import { formatIndicatorLevel, shouldShowIndicatorLevel } from '@core/utils/indicatorLevelDisplay';
 import CellDrilldownSelector from '../PmDashboard/CellDrilldownSelector';
 import { getEffectiveLdns, type CellSelection } from '../PmDashboard/cellDrilldownUtils';
+import {
+  MetricBatchInputModal,
+  formatMetricIdSamples,
+  type MetricBatchSelectionResult,
+} from '@/components/MetricPickerModal';
 
 // 制式（含 GSM，networkType 过滤直接用小写值）
 type WizardTech = 'lte' | 'nr' | 'gsm';
@@ -154,6 +160,7 @@ export default function PmAdhocWizard() {
   const [metricPaths, setMetricPaths] = useState<string[]>([]);
   // 穿梭框候选侧类型筛选：all=全部 / kpi=只看 KPI(K) / counter=只看计数(C)。
   const [metricTypeFilter, setMetricTypeFilter] = useState<'all' | 'kpi' | 'counter'>('all');
+  const [metricBatchOpen, setMetricBatchOpen] = useState(false);
 
   // ④ 聚合设置
   const [granularity, setGranularity] = useState<string>('hourly');
@@ -530,6 +537,13 @@ export default function PmAdhocWizard() {
             { label: intl.formatMessage({ id: 'perf.adhoc.metricTypeCounter' }), value: 'counter' },
           ]}
         />
+        <Button
+          icon={<ImportOutlined />}
+          onClick={() => setMetricBatchOpen(true)}
+          disabled={indicatorsLoading}
+        >
+          {intl.formatMessage({ id: 'perf.metricBatchInput.title' })}
+        </Button>
       </Space>
       <Spin spinning={indicatorsLoading}>
         <Transfer<MetricTransferItem>
@@ -558,6 +572,27 @@ export default function PmAdhocWizard() {
       <div style={{ color: '#888' }}>
         {intl.formatMessage({ id: 'perf.adhoc.metricSelectedCount' }, { count: metricPaths.length })}
       </div>
+      <MetricBatchInputModal
+        open={metricBatchOpen}
+        candidates={indicatorItems}
+        currentSelected={metricPaths}
+        loading={indicatorsLoading}
+        onCancel={() => setMetricBatchOpen(false)}
+        onApply={(result: MetricBatchSelectionResult) => {
+          setMetricPaths(result.nextSelected);
+          setMetricBatchOpen(false);
+          message.success(intl.formatMessage(
+            { id: 'perf.metricBatchInput.importSuccess' },
+            { added: result.addedIds.length, total: result.nextSelected.length },
+          ));
+          if (result.invalidIds.length > 0) {
+            message.warning(intl.formatMessage(
+              { id: 'perf.metricBatchInput.notFound' },
+              { count: result.invalidIds.length, ids: formatMetricIdSamples(result.invalidIds) },
+            ));
+          }
+        }}
+      />
     </Space>
   );
 
