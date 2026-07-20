@@ -362,6 +362,7 @@ export interface MMLTask {
   successCount: number;
   failedCount: number;
   result?: MMLTaskResult;
+  latestRun?: MMLTaskLatestRun;
 
   // Scheduler fields (P2/P3, docs/design/mml-task-flow-design-20260424.md)
   // nextTriggerAt: 下次触发时刻（scheduled 一次性；periodic 滚动更新）
@@ -404,6 +405,23 @@ export interface MMLTask {
   matchedProductClass?: string;
   /** 任务级翻译来源汇总：discovered/default/passthrough/orphan_passthrough/mixed */
   pathTranslationSource?: PathTranslationSource;
+}
+
+export interface MMLTaskLatestRun {
+  id: string;
+  executeType: MMLExecuteType;
+  executeMode?: MMLTaskExecuteMode;
+  status: MMLTaskStatus;
+  result?: MMLTaskResult;
+  totalDevices: number;
+  successCount: number;
+  failedCount: number;
+  commandCount?: number;
+  planItemCount?: number;
+  startedAt?: string;
+  finishedAt?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 /** T-0168: 路径翻译来源枚举（per-path 与 task 级共用）。 */

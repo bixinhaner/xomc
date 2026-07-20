@@ -61,7 +61,36 @@ describe('getMmlTaskProgress', () => {
     });
   });
 
-  it('marks periodic parent rows as schedule templates instead of executable progress', () => {
+  it('uses latest periodic run progress for periodic parent rows', () => {
+    expect(getMmlTaskProgress({
+      ...baseTask,
+      taskOrigin: 'script',
+      executeType: 'periodic',
+      commandCount: 6,
+      successCount: 0,
+      failedCount: 0,
+      latestRun: {
+        id: 'run-1',
+        executeType: 'immediate',
+        status: 'completed',
+        result: 'partial',
+        executeMode: 'device_bound',
+        commandCount: 6,
+        planItemCount: 6,
+        totalDevices: 2,
+        successCount: 5,
+        failedCount: 1,
+        createdAt: '2026-07-20T00:00:00Z',
+        updatedAt: '2026-07-20T00:00:00Z',
+      },
+    })).toEqual({
+      kind: 'execution',
+      done: 6,
+      total: 6,
+    });
+  });
+
+  it('marks periodic parent rows without runs as awaiting first execution', () => {
     expect(getMmlTaskProgress({
       ...baseTask,
       taskOrigin: 'script',
@@ -72,7 +101,7 @@ describe('getMmlTaskProgress', () => {
     })).toEqual({
       done: 0,
       total: 0,
-      kind: 'schedule_template',
+      kind: 'awaiting_first_run',
     });
   });
 });

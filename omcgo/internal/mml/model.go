@@ -230,6 +230,7 @@ type MMLTask struct {
 	SuccessCount int         `json:"success_count"`
 	FailedCount  int         `json:"failed_count"`
 	Result       *TaskResult `json:"result,omitempty"`
+	LatestRun    *MMLTaskRun `json:"latest_run,omitempty"`
 
 	// Scheduler 调度字段（P2/P3，docs/design/mml-task-flow-design-20260424.md）
 	// NextTriggerAt: 下次触发时刻；PeriodicParentID: periodic 子实例指向模板。
@@ -252,6 +253,25 @@ type MMLTask struct {
 	MatchedProductID      *uuid.UUID `json:"matched_product_id,omitempty"`
 	MatchedProductClass   string     `json:"matched_product_class,omitempty"`
 	PathTranslationSource string     `json:"path_translation_source,omitempty"` // discovered/default/passthrough/orphan_passthrough/mixed
+}
+
+// MMLTaskRun is a lightweight child-execution summary embedded in periodic
+// parent list rows so the UI can show the latest run progress without N+1 calls.
+type MMLTaskRun struct {
+	ID            uuid.UUID       `json:"id"`
+	ExecuteType   ExecuteType     `json:"execute_type"`
+	ExecuteMode   TaskExecuteMode `json:"execute_mode"`
+	Status        TaskStatus      `json:"status"`
+	Result        *TaskResult     `json:"result,omitempty"`
+	TotalDevices  int             `json:"total_devices"`
+	SuccessCount  int             `json:"success_count"`
+	FailedCount   int             `json:"failed_count"`
+	CommandCount  int             `json:"command_count"`
+	PlanItemCount int             `json:"plan_item_count"`
+	StartedAt     *time.Time      `json:"started_at,omitempty"`
+	FinishedAt    *time.Time      `json:"finished_at,omitempty"`
+	CreatedAt     time.Time       `json:"created_at"`
+	UpdatedAt     time.Time       `json:"updated_at"`
 }
 
 // PathTranslationWarning 是 MML 任务详情中关于 standardPath ↔ privatePath 翻译

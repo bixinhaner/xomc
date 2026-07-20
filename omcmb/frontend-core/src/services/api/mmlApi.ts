@@ -194,6 +194,7 @@ interface BackendMMLTask {
   success_count: number;
   failed_count: number;
   result: string | null;
+  latest_run?: BackendMMLTaskRun | null;
   // P2/P3 Scheduler fields
   next_trigger_at?: string | null;
   parent_task_id?: string | null;
@@ -209,6 +210,23 @@ interface BackendMMLTask {
   matched_product_id?: string | null;
   matched_product_class?: string | null;
   path_translation_source?: string | null;
+}
+
+interface BackendMMLTaskRun {
+  id: string;
+  execute_type: string;
+  execute_mode?: string | null;
+  status: string;
+  result?: string | null;
+  total_devices?: number;
+  success_count?: number;
+  failed_count?: number;
+  command_count?: number;
+  plan_item_count?: number;
+  started_at?: string | null;
+  finished_at?: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 interface BackendMMLPlanItem {
@@ -811,6 +829,7 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
     successCount: bt.success_count ?? 0,
     failedCount: bt.failed_count ?? 0,
     result: (bt.result || undefined) as MMLTask['result'],
+    latestRun: mapBackendTaskRun(bt.latest_run),
     // Scheduler fields (P2/P3)
     nextTriggerAt: bt.next_trigger_at || undefined,
     parentTaskId: bt.parent_task_id || undefined,
@@ -826,6 +845,26 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
           pathCount: bt.path_translation_warning.path_count,
         }
       : undefined,
+  };
+}
+
+function mapBackendTaskRun(run?: BackendMMLTaskRun | null): MMLTask['latestRun'] {
+  if (!run) return undefined;
+  return {
+    id: run.id,
+    executeType: (run.execute_type ?? 'immediate') as MMLTask['executeType'],
+    executeMode: (run.execute_mode || 'common') as MMLTask['executeMode'],
+    status: run.status as MMLTask['status'],
+    result: (run.result || undefined) as MMLTask['result'],
+    totalDevices: run.total_devices ?? 0,
+    successCount: run.success_count ?? 0,
+    failedCount: run.failed_count ?? 0,
+    commandCount: run.command_count ?? 0,
+    planItemCount: run.plan_item_count ?? 0,
+    startedAt: run.started_at || undefined,
+    finishedAt: run.finished_at || undefined,
+    createdAt: run.created_at,
+    updatedAt: run.updated_at,
   };
 }
 

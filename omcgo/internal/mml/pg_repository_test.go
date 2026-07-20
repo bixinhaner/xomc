@@ -252,6 +252,84 @@ func TestPgTaskRepository_ListFiltersTaskOrigin(t *testing.T) {
 	require.Equal(t, TaskOriginScript, scriptList.Items[0].TaskOrigin)
 }
 
+func TestPgTaskRepository_ListIncludesLatestPeriodicRun(t *testing.T) {
+	pool := newMMLTestPool(t)
+	ctx := context.Background()
+	taskRepo := NewPgTaskRepository(pool)
+
+	taskName := "periodic latest run " + uuid.NewString()
+	parent := &MMLTask{
+		TaskName:     taskName,
+		DeviceSNs:    []string{"SN-PERIODIC-1", "SN-PERIODIC-2"},
+		Commands:     []map[string]interface{}{{"command_code": "LST DEVICE_INFO"}},
+		ExecuteMode:  TaskExecuteModeDeviceBound,
+		Status:       TaskCompleted,
+		Creator:      "repo-test",
+		ExecuteType:  ExecutePeriodic,
+		TotalDevices: 2,
+	}
+	require.NoError(t, taskRepo.Create(ctx, parent))
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), "DELETE FROM mml_tasks WHERE parent_task_id=$1", parent.ID)
+		_ = taskRepo.Delete(context.Background(), parent.ID)
+	})
+
+	firstResult := ResultSuccess
+	first := &MMLTask{
+		TaskName:         taskName,
+		DeviceSNs:        parent.DeviceSNs,
+		Commands:         parent.Commands,
+		ExecuteMode:      TaskExecuteModeDeviceBound,
+		Status:           TaskCompleted,
+		Creator:          "repo-test",
+		ExecuteType:      ExecuteImmediate,
+		PeriodicParentID: &parent.ID,
+		TotalDevices:     2,
+		SuccessCount:     2,
+		FailedCount:      0,
+		Result:           &firstResult,
+		StartedAt:        func() *time.Time { ts := time.Now().Add(-10 * time.Minute); return &ts }(),
+		FinishedAt:       func() *time.Time { ts := time.Now().Add(-9 * time.Minute); return &ts }(),
+	}
+	require.NoError(t, taskRepo.Create(ctx, first))
+
+	latestResult := ResultPartial
+	latest := &MMLTask{
+		TaskName:         taskName,
+		DeviceSNs:        parent.DeviceSNs,
+		Commands:         parent.Commands,
+		ExecuteMode:      TaskExecuteModeDeviceBound,
+		Status:           TaskCompleted,
+		Creator:          "repo-test",
+		ExecuteType:      ExecuteImmediate,
+		PeriodicParentID: &parent.ID,
+		TotalDevices:     2,
+		SuccessCount:     5,
+		FailedCount:      1,
+		Result:           &latestResult,
+		StartedAt:        func() *time.Time { ts := time.Now().Add(-2 * time.Minute); return &ts }(),
+		FinishedAt:       func() *time.Time { ts := time.Now().Add(-1 * time.Minute); return &ts }(),
+	}
+	require.NoError(t, taskRepo.Create(ctx, latest))
+
+	executeType := ExecutePeriodic
+	list, err := taskRepo.List(ctx, TaskFilter{
+		ListRequest: model.ListRequest{Page: 1, PageSize: 20},
+		TaskName:    &taskName,
+		ExecuteType: &executeType,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, list.Items, 1)
+	require.NotNil(t, list.Items[0].LatestRun)
+	require.Equal(t, latest.ID, list.Items[0].LatestRun.ID)
+	require.Equal(t, latest.SuccessCount, list.Items[0].LatestRun.SuccessCount)
+	require.Equal(t, latest.FailedCount, list.Items[0].LatestRun.FailedCount)
+	require.Equal(t, latest.Result, list.Items[0].LatestRun.Result)
+	require.Equal(t, 1, list.Items[0].LatestRun.CommandCount)
+	require.Equal(t, 0, list.Items[0].LatestRun.PlanItemCount)
+}
+
 func TestPgScriptRepository_ImportedReplaceAndMetadataAreAtomic(t *testing.T) {
 	pool := newMMLTestPool(t)
 	repo := NewPgScriptRepository(pool)

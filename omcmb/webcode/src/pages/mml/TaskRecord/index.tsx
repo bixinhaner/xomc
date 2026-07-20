@@ -183,15 +183,25 @@ function isPeriodicParentTask(task: MMLTask | null | undefined) {
 
 function renderTaskProgress(task: MMLTask, t: (key: string) => string) {
   const progress = getMmlTaskProgress(task);
-  if (progress.kind === 'schedule_template') {
+  if (progress.kind === 'awaiting_first_run') {
     return (
       <Space orientation="vertical" size={2}>
-        <Tag color="purple">{t('mml.periodicTemplate')}</Tag>
+        <Tag color="default">{t('mml.awaitingFirstRun')}</Tag>
         {task.nextTriggerAt ? (
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             {t('mml.nextTriggerAt')}: {formatTime(task.nextTriggerAt)}
           </Typography.Text>
         ) : null}
+      </Space>
+    );
+  }
+  if (isPeriodicParentTask(task) && task.latestRun) {
+    return (
+      <Space orientation="vertical" size={2}>
+        <span>{progress.done}/{progress.total}</span>
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          {t('mml.latestRun')}
+        </Typography.Text>
       </Space>
     );
   }
