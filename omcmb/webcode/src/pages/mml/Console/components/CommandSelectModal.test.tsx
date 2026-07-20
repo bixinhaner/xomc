@@ -65,11 +65,15 @@ const fixtures = vi.hoisted(() => {
     subFields: defaultSubFields,
     customCommands: [] as MMLCustomCommand[],
     customPaths: [] as MMLCustomCommandPathDef[],
-    unsupportedPaths: [] as Array<{
-      path: string;
-      readUnsupported: boolean;
-      writeUnsupported: boolean;
-    }>,
+    unsupportedPaths: [] as
+      | Array<{
+          path: string;
+          readUnsupported: boolean;
+          writeUnsupported: boolean;
+        }>
+      | undefined,
+    unsupportedPathsFetching: false,
+    unsupportedPathsError: false,
     groupTree: [
       {
         id: 'group-1',
@@ -93,7 +97,11 @@ vi.mock('@core/hooks/api/useMmlConsole', () => ({
       typeof useCustomCommandPaths
     >,
   useUnsupportedPaths: () =>
-    ({ data: fixtures.unsupportedPaths }) as unknown as ReturnType<typeof useUnsupportedPaths>,
+    ({
+      data: fixtures.unsupportedPaths,
+      isFetching: fixtures.unsupportedPathsFetching,
+      isError: fixtures.unsupportedPathsError,
+    }) as unknown as ReturnType<typeof useUnsupportedPaths>,
 }));
 
 vi.mock('@/hooks/useI18nText', () => ({
@@ -120,6 +128,8 @@ afterEach(() => {
   fixtures.customCommands = [];
   fixtures.customPaths = [];
   fixtures.unsupportedPaths = [];
+  fixtures.unsupportedPathsFetching = false;
+  fixtures.unsupportedPathsError = false;
 });
 
 function makeCommandItem(id: string, operationType: 'LST' | 'MOD'): CommandItem {
@@ -467,5 +477,55 @@ describe('CommandSelectModal', () => {
 
     expect(screen.queryByRole('checkbox', { name: /Serial/ })).not.toBeInTheDocument();
     expect(await screen.findByRole('checkbox', { name: /Name/ })).toBeChecked();
+  });
+
+  it('keeps Path confirmation closed until runtime support filtering succeeds', async () => {
+    fixtures.subFields = fixtures.defaultSubFields.map((subField) => ({
+      ...subField,
+      defaultSelected:
+        subField.tr069Path === 'Device.Info.Serial' ||
+        subField.tr069Path === 'Device.Info.Name',
+    }));
+    fixtures.unsupportedPaths = undefined;
+    fixtures.unsupportedPathsFetching = true;
+    const onConfirm = vi.fn();
+    const props = {
+      onConfirm,
+      value: makeCommandItem('lst-1', 'LST'),
+      selectedPathKeys: [],
+    };
+    const { rerender } = renderModal(props);
+
+    const okButton = screen.getByRole('button', { name: 'mml.consoleV2.cmdSelect.okText' });
+    expect(okButton).toBeDisabled();
+    expect(screen.queryByRole('checkbox', { name: /Serial/ })).not.toBeInTheDocument();
+    fireEvent.click(okButton);
+    expect(onConfirm).not.toHaveBeenCalled();
+
+    fixtures.unsupportedPathsFetching = false;
+    fixtures.unsupportedPathsError = true;
+    rerender(renderCommandModal(props));
+
+    expect(okButton).toBeDisabled();
+    expect(screen.queryByRole('checkbox', { name: /Serial/ })).not.toBeInTheDocument();
+    fireEvent.click(okButton);
+    expect(onConfirm).not.toHaveBeenCalled();
+
+    fixtures.unsupportedPaths = [{
+      path: 'Device.Info.Serial',
+      readUnsupported: true,
+      writeUnsupported: false,
+    }];
+    fixtures.unsupportedPathsError = false;
+    rerender(renderCommandModal(props));
+
+    expect(screen.queryByRole('checkbox', { name: /Serial/ })).not.toBeInTheDocument();
+    expect(await screen.findByRole('checkbox', { name: /Name/ })).toBeChecked();
+    expect(okButton).toBeEnabled();
+    fireEvent.click(okButton);
+    expect(onConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'lst-1' }),
+      ['Device.Info.Name'],
+    );
   });
 });

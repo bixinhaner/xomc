@@ -109,6 +109,7 @@ export default function CommandSelectModal({
   // 产品参数模型过滤由 /mml/templates?product_id= 完成；这里继续叠加运行时
   // 不支持 path 过滤，确保模板在树上没有任何可执行 path 时直接消失。
   const { data: unsupportedPaths } = useUnsupportedPaths(productId);
+  const unsupportedPathsPending = Boolean(productId) && unsupportedPaths === undefined;
 
   const customCommandsWithAvailablePaths = useMemo(() => {
     if (!unsupportedPaths) return customCommands;
@@ -285,7 +286,8 @@ export default function CommandSelectModal({
 
   // 统一的「当前选中命令的可执行参数路径」+ 加载态（右侧预览与确定按钮共用）。
   const paramPaths = isCustomSelected ? customParamPaths : subFieldsToParamPaths(visibleSubFields);
-  const pathsLoading = isCustomSelected ? customPathsLoading : subFieldsLoading;
+  const pathsLoading =
+    unsupportedPathsPending || (isCustomSelected ? customPathsLoading : subFieldsLoading);
   const hasSelection = !!selectedEntry || !!selectedCustom;
   const selectedOperation = selectedCustom?.operationType ?? selectedEntry?.command.operationType;
   const usesPathSelection = commandUsesPathSelection(selectedOperation);
@@ -316,6 +318,7 @@ export default function CommandSelectModal({
     (usesPathSelection && effectiveDraftPathKeys.length === 0);
 
   const handleOk = (): void => {
+    if (pathsLoading) return;
     if (selectedCustom) {
       // 无可执行 path 不允许确认（§需求 3）；按钮已禁用，这里再兜底。
       if (customParamPaths.length === 0) return;
