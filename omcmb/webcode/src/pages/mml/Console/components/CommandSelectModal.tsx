@@ -22,6 +22,7 @@ import type { CommandItem } from '../types';
 import { COMMAND_MODAL_BODY_HEIGHT, opColor } from '../constants';
 import {
   commandUsesPathSelection,
+  getDefaultSelectedPathKeys,
   getOrderedSelectedPathKeys,
   getSelectableCommandPaths,
 } from '../pathSelection';
@@ -70,7 +71,6 @@ interface CommandSelectModalProps {
 export default function CommandSelectModal({
   open,
   value,
-  selectedPathKeys,
   onCancel,
   onConfirm,
   onGotoRawParams,
@@ -83,6 +83,8 @@ export default function CommandSelectModal({
   const [selectedId, setSelectedId] = useState<string | undefined>();
   const [wasOpen, setWasOpen] = useState(false);
   const [draftPathKeys, setDraftPathKeys] = useState<string[]>([]);
+  const [selectionEpoch, setSelectionEpoch] = useState(0);
+  const [draftSelectionEpoch, setDraftSelectionEpoch] = useState<number | undefined>();
   // §需求 B1：默认所有命令分组折叠。expandedKeys 由用户手动展开累积；搜索时另行整树展开。
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
 
@@ -94,7 +96,9 @@ export default function CommandSelectModal({
       setExpandedKeys([]); // 每次打开都重置为全部折叠
       // 自定义命令叶子 key 带 custom: 前缀，回填选中态时需还原前缀，否则匹配不到树节点。
       setSelectedId(value ? (value.isCustom ? `${CUSTOM_KEY_PREFIX}${value.id}` : value.id) : undefined);
-      setDraftPathKeys(value ? selectedPathKeys : []);
+      setSelectionEpoch((epoch) => epoch + 1);
+      setDraftSelectionEpoch(undefined);
+      setDraftPathKeys([]);
     }
   }
 
@@ -105,6 +109,7 @@ export default function CommandSelectModal({
   // 产品参数模型过滤由 /mml/templates?product_id= 完成；这里继续叠加运行时
   // 不支持 path 过滤，确保模板在树上没有任何可执行 path 时直接消失。
   const { data: unsupportedPaths } = useUnsupportedPaths(productId);
+  const unsupportedPathsPending = Boolean(productId) && unsupportedPaths === undefined;
 
   const customCommandsWithAvailablePaths = useMemo(() => {
     if (!unsupportedPaths) return customCommands;
@@ -279,22 +284,34 @@ export default function CommandSelectModal({
     [selectedCustom, customPathDefs, hiddenPaths],
   );
 
-  // 统一的「当前选中命令的可执行参数路径」+ 加载态（右侧预览与确定按钮共用）。
-  const paramPaths = isCustomSelected ? customParamPaths : subFieldsToParamPaths(visibleSubFields);
-  const pathsLoading = isCustomSelected ? customPathsLoading : subFieldsLoading;
-  const hasSelection = !!selectedEntry || !!selectedCustom;
-  const selectedOperation = selectedCustom?.operationType ?? selectedEntry?.command.operationType;
-  const usesPathSelection = commandUsesPathSelection(selectedOperation);
-  const selectablePaths = getSelectableCommandPaths(selectedOperation, paramPaths);
-  const visiblePathCount = usesPathSelection ? selectablePaths.length : paramPaths.length;
-  const effectiveDraftPathKeys = getOrderedSelectedPathKeys(selectablePaths, draftPathKeys);
-
   // ADD/RMV 以「目标对象路径」(target_object)下发 RPC(AddObject/DeleteObject)，无参数 PATH；
   // 仅标准命令带 target_object。有 target_object 即可「确定选择」，不受 paramPaths 为空限制。
   const selOp = selectedEntry?.command.operationType;
   const selTargetObject = selectedEntry?.command.targetObject?.trim() ?? '';
   const isAddRmvWithObject =
     !isCustomSelected && (selOp === 'ADD' || selOp === 'RMV') && selTargetObject !== '';
+
+  // 统一的「当前选中命令的可执行参数路径」+ 加载态（右侧预览与确定按钮共用）。
+  const paramPaths = isCustomSelected ? customParamPaths : subFieldsToParamPaths(visibleSubFields);
+  const pathsLoading =
+    (!isAddRmvWithObject && unsupportedPathsPending) ||
+    (isCustomSelected ? customPathsLoading : subFieldsLoading);
+  const hasSelection = !!selectedEntry || !!selectedCustom;
+  const selectedOperation = selectedCustom?.operationType ?? selectedEntry?.command.operationType;
+  const usesPathSelection = commandUsesPathSelection(selectedOperation);
+  const selectablePaths = getSelectableCommandPaths(selectedOperation, paramPaths);
+  const visiblePathCount = usesPathSelection ? selectablePaths.length : paramPaths.length;
+  const defaultPathKeys = getDefaultSelectedPathKeys(selectablePaths);
+  const effectiveDraftPathKeys =
+    draftSelectionEpoch === selectionEpoch
+      ? getOrderedSelectedPathKeys(selectablePaths, draftPathKeys)
+      : defaultPathKeys;
+
+  const handleDraftPathKeysChange = (pathKeys: string[]): void => {
+    setDraftSelectionEpoch(selectionEpoch);
+    setDraftPathKeys(pathKeys);
+  };
+
   // §需求 3：LST/MOD 无可执行 PATH → 禁用；ADD/RMV 看 target_object。
   const okDisabled =
     !hasSelection ||
@@ -303,6 +320,7 @@ export default function CommandSelectModal({
     (usesPathSelection && effectiveDraftPathKeys.length === 0);
 
   const handleOk = (): void => {
+    if (pathsLoading) return;
     if (selectedCustom) {
       // 无可执行 path 不允许确认（§需求 3）；按钮已禁用，这里再兜底。
       if (customParamPaths.length === 0) return;
@@ -373,8 +391,12 @@ export default function CommandSelectModal({
                 const k = keys[0] as string | undefined;
                 // 仅命令叶子可选（分组 / 私有公有骨架节点 selectable=false 不会触发，这里再排除前缀兜底）。
                 if (k && !k.startsWith('group:') && k !== CUSTOM_ROOT_KEY) {
-                  if (k !== selectedId) setDraftPathKeys([]);
-                  setSelectedId(k);
+                  if (k !== selectedId) {
+                    setSelectedId(k);
+                    setSelectionEpoch((epoch) => epoch + 1);
+                    setDraftSelectionEpoch(undefined);
+                    setDraftPathKeys([]);
+                  }
                 }
               }}
             />
@@ -408,7 +430,7 @@ export default function CommandSelectModal({
                     <CommandPathSelector
                       paths={selectablePaths}
                       value={effectiveDraftPathKeys}
-                      onChange={setDraftPathKeys}
+                      onChange={handleDraftPathKeysChange}
                     />
                   ) : (
                     <Space orientation="vertical" size={4} style={{ width: '100%' }}>

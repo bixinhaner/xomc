@@ -5,6 +5,7 @@ import {
   areSelectedPathValuesComplete,
   getOrderedSelectedCommandPaths,
   getOrderedSelectedPathKeys,
+  getDefaultSelectedPathKeys,
   getSelectableCommandPaths,
 } from './pathSelection';
 
@@ -77,5 +78,44 @@ describe('selected Path projection', () => {
         'Device.Info.Name': 'cell-a',
       }),
     ).toBe(false);
+  });
+});
+
+describe('configured default Path projection', () => {
+  it('keeps candidate order and ignores false or missing defaults', () => {
+    const candidates: CommandParamPath[] = [
+      {
+        path: 'Device.Info.Serial',
+        label: 'Serial',
+        writable: false,
+        isObject: false,
+        defaultSelected: true,
+      },
+      {
+        path: 'Device.Info.Name',
+        label: 'Name',
+        writable: true,
+        isObject: false,
+        defaultSelected: false,
+      },
+      {
+        path: 'Device.Info.Model',
+        label: 'Model',
+        writable: true,
+        isObject: false,
+      },
+      {
+        path: 'Device.Info.Alias',
+        label: 'Alias',
+        writable: true,
+        isObject: false,
+        defaultSelected: true,
+      },
+    ];
+
+    expect(getDefaultSelectedPathKeys(candidates)).toEqual([
+      'Device.Info.Serial',
+      'Device.Info.Alias',
+    ]);
   });
 });

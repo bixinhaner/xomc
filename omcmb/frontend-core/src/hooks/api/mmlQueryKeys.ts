@@ -1,3 +1,9 @@
+export const MML_CONSOLE_SUB_FIELDS_QUERY_KEY = [
+  'mml',
+  'console',
+  'sub-fields',
+] as const;
+
 export const MML_CUSTOM_COMMAND_PATHS_QUERY_KEY = [
   'mml',
   'console',

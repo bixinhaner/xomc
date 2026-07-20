@@ -72,6 +72,7 @@ export function subFieldsToParamPaths(subFields: SubFieldDef[]): CommandParamPat
       valueType: sf.valueType,
       defaultValue: sf.defaultValue,
       description: sf.description,
+      defaultSelected: sf.defaultSelected,
     }));
 }
 
@@ -122,6 +123,7 @@ export function customCommandPathDefsToParamPaths(
     minValue: p.minValue,
     maxValue: p.maxValue,
     description: p.description,
+    defaultSelected: p.defaultSelected,
   }));
 }
 
