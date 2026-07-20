@@ -10,6 +10,7 @@ import {
   useMoveDevices,
   useAddDevicesToGroup,
   useDeleteDevices,
+  usePermanentDeleteDevices,
   useBatchRebootDevices,
   useUpdateDevice,
 } from '@core/hooks/api/useDevices';
@@ -71,6 +72,7 @@ export default function DeviceGrouping() {
   const moveDevicesMutation = useMoveDevices();
   const addDevicesToGroupMutation = useAddDevicesToGroup();
   const deleteDevicesMutation = useDeleteDevices();
+  const permanentDeleteDevicesMutation = usePermanentDeleteDevices();
   // batchRebootMutation 暂未使用，保留 hook 触发以便后续启用而不破坏依赖图
   const _batchRebootMutation = useBatchRebootDevices();
   const updateDeviceMutation = useUpdateDevice();
@@ -218,11 +220,26 @@ export default function DeviceGrouping() {
   );
 
   const targetGroupOptions = useMemo(
-    () =>
-      // 一级分组(root)是容器不作目标；内置默认节点的 label 与树保持一致，
-      // 但仍带 isRemove 标记，供弹窗提示其"移出分组"语义。
-      buildGroupTargetOptions(groups, getParentName, getGroupName),
-    [groups, getParentName, getGroupName]
+    () => {
+      const selectedGroupIds = selectedDevices
+        .map((device) => device.groupId)
+        .filter((groupId): groupId is string => Boolean(groupId));
+      const firstSelectedGroupId = selectedGroupIds[0];
+      const commonSelectedGroupId =
+        selectedGroupIds.length === selectedDevices.length &&
+        firstSelectedGroupId &&
+        selectedGroupIds.every((groupId) => groupId === firstSelectedGroupId)
+          ? firstSelectedGroupId
+          : undefined;
+      const currentLevel2GroupId = selectedGroup?.parentId ? selectedGroup.id : undefined;
+      const excludedCurrentGroupId = commonSelectedGroupId ?? currentLevel2GroupId;
+
+      // 一级分组(root)是容器不作目标；设备已在的同一分组也不再作为移动目标。
+      return buildGroupTargetOptions(groups, getParentName, getGroupName, {
+        excludeGroupIds: [excludedCurrentGroupId],
+      });
+    },
+    [groups, getParentName, getGroupName, selectedDevices, selectedGroup]
   );
 
   // ── Group / Device action hooks ──
@@ -282,6 +299,7 @@ export default function DeviceGrouping() {
     refetch,
     refetchGroups,
     deleteDevicesMutation,
+    permanentDeleteDevicesMutation,
     setSelectedDeviceIds,
     onMoveToGroup: deviceActions.open.move,
   });

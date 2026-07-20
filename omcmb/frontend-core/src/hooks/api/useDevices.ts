@@ -351,6 +351,8 @@ export function usePermanentDeleteDevices() {
     mutationFn: (ids: string[]) => deviceApi.permanentDeleteDevices(ids),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['devices', 'recycle-bin'] });
+      void queryClient.invalidateQueries({ queryKey: ['devices', 'list'] });
+      void queryClient.invalidateQueries({ queryKey: ['devices', 'groups'] });
     },
   });
 }

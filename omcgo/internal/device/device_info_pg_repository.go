@@ -19,9 +19,8 @@ import (
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
-// ungroupedDevicesWhere 是"未分组设备"节点的过滤:设备未绑定任何分组(无成员关系行)。
-// 2026-06-03 用户决策「未分组 = 未绑定任何分组」——选中默认 L2 组(DefaultLevel2GroupID)时,
-// 不再按该组成员过滤,而是取 NOT EXISTS device_group_members 的设备。
+// ungroupedDevicesWhere 保留给历史无归属数据兜底；默认组本身按真实
+// device_group_members 归属查询。
 const ungroupedDevicesWhere = "NOT EXISTS (SELECT 1 FROM device_group_members m WHERE m.device_id = d.id)"
 
 // allowedSortColumnsWithInfo maps user-facing sort keys to qualified column names
@@ -726,27 +725,22 @@ func applyDeviceGroupFilter(b sq.SelectBuilder, filter DeviceFilter) sq.SelectBu
 	}
 	selectedGroupIDs = append(selectedGroupIDs, filter.GroupIDs...)
 
-	realGroupIDs := make([]uuid.UUID, 0, len(selectedGroupIDs))
-	includeUngrouped := false
-	for _, groupID := range selectedGroupIDs {
-		if groupID.String() == global.DefaultLevel2GroupID {
-			includeUngrouped = true
-			continue
+	if len(selectedGroupIDs) > 0 {
+		hasDefaultGroup := false
+		realGroupIDs := make([]uuid.UUID, 0, len(selectedGroupIDs))
+		for _, groupID := range selectedGroupIDs {
+			if groupID.String() == global.DefaultLevel2GroupID {
+				hasDefaultGroup = true
+			}
+			realGroupIDs = append(realGroupIDs, groupID)
 		}
-		realGroupIDs = append(realGroupIDs, groupID)
-	}
-
-	if includeUngrouped && len(realGroupIDs) > 0 {
-		return b.Where(sq.Or{
-			sq.Eq{"dgm.group_id": realGroupIDs},
-			sq.Expr(ungroupedDevicesWhere),
-		})
-	}
-	if includeUngrouped {
-		return b.Where(ungroupedDevicesWhere)
-	}
-	if len(realGroupIDs) > 0 {
-		return b.Where(sq.Eq{"dgm.group_id": realGroupIDs})
+		if hasDefaultGroup {
+			return b.Where(sq.Or{
+				sq.Eq{"dgm.group_id": realGroupIDs},
+				sq.Expr(ungroupedDevicesWhere),
+			})
+		}
+		return b.Where(sq.Eq{"dgm.group_id": selectedGroupIDs})
 	}
 	return b
 }

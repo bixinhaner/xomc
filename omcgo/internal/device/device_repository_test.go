@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/omcgo/omcgo/global"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
@@ -392,11 +393,83 @@ func TestBuildRecycleBinListBuilders_SearchIncludesMACInListAndCount(t *testing.
 	assert.Equal(t, listArgs, countArgs)
 }
 
+func TestBuildRecycleBinListBuilders_GroupFilterUsesPreservedMemberships(t *testing.T) {
+	groupID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	listBuilder, countBuilder := buildRecycleBinListBuilders(RecycleBinFilter{
+		GroupID: &groupID,
+	})
+
+	listSQL, listArgs, err := listBuilder.ToSql()
+	require.NoError(t, err)
+	countSQL, countArgs, err := countBuilder.ToSql()
+	require.NoError(t, err)
+
+	assert.Contains(t, listSQL, "LEFT JOIN device_group_members dgm ON d.id = dgm.device_id")
+	assert.Contains(t, listSQL, "dgm.group_id = $1")
+	assert.Contains(t, countSQL, "JOIN device_group_members dgm ON d.id = dgm.device_id")
+	assert.Contains(t, countSQL, "dgm.group_id = $1")
+	assert.Equal(t, []interface{}{groupID.String()}, listArgs)
+	assert.Equal(t, listArgs, countArgs)
+}
+
+func TestBuildRecycleBinListBuilders_DefaultGroupIncludesLegacyUngroupedDevices(t *testing.T) {
+	groupID := uuid.MustParse(global.DefaultLevel2GroupID)
+	listBuilder, countBuilder := buildRecycleBinListBuilders(RecycleBinFilter{
+		GroupID: &groupID,
+	})
+
+	listSQL, _, err := listBuilder.ToSql()
+	require.NoError(t, err)
+	countSQL, _, err := countBuilder.ToSql()
+	require.NoError(t, err)
+
+	assert.Contains(t, listSQL, "dgm.group_id = $1")
+	assert.Contains(t, listSQL, ungroupedDevicesWhere)
+	assert.Contains(t, countSQL, "LEFT JOIN device_group_members dgm ON d.id = dgm.device_id")
+	assert.Contains(t, countSQL, "dgm.group_id = $1")
+	assert.Contains(t, countSQL, ungroupedDevicesWhere)
+}
+
+func TestApplyDeviceGroupFilter_DefaultGroupIncludesLegacyUngroupedDevices(t *testing.T) {
+	defaultGroup := uuid.MustParse(global.DefaultLevel2GroupID)
+	builder := sq.Select("d.id").
+		From("devices d").
+		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
+		PlaceholderFormat(sq.Dollar)
+
+	got := applyDeviceGroupFilter(builder, DeviceFilter{GroupID: &defaultGroup})
+	sql, args, err := got.ToSql()
+	require.NoError(t, err)
+
+	assert.Contains(t, sql, "dgm.group_id IN ($1)")
+	assert.Contains(t, sql, ungroupedDevicesWhere)
+	assert.Equal(t, []interface{}{defaultGroup}, args)
+}
+
+func TestApplyDeviceGroupFilter_RealGroupDoesNotIncludeLegacyUngroupedDevices(t *testing.T) {
+	groupID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	builder := sq.Select("d.id").
+		From("devices d").
+		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
+		PlaceholderFormat(sq.Dollar)
+
+	got := applyDeviceGroupFilter(builder, DeviceFilter{GroupID: &groupID})
+	sql, args, err := got.ToSql()
+	require.NoError(t, err)
+
+	assert.Contains(t, sql, "dgm.group_id IN ($1)")
+	assert.NotContains(t, sql, ungroupedDevicesWhere)
+	assert.Equal(t, []interface{}{groupID}, args)
+}
+
 func TestRecycleBinSelectColumns_ExposeStableRecycleMetadata(t *testing.T) {
 	joined := strings.Join(recycleBinSelectColumns(), "\n")
 
+	assert.Equal(t, len(deviceWithInfoSelectColumns()), len(recycleBinSelectColumns()),
+		"回收站复用 scanDeviceWithInfoRow，SELECT 列数必须与共享 scanner 对齐")
 	assert.Contains(t, joined, "d.recycle_type")
 	assert.Contains(t, joined, "d.recycle_executor")
+	assert.Contains(t, joined, "FALSE AS param_sync_running")
 	assert.Contains(t, joined, "d.deleted_at - d.last_inform_at",
 		"离线时长必须固定在移入回收站时刻，不能随查询时间继续增长")
 	assert.NotContains(t, joined, "NOW() - di.last_offline_time",

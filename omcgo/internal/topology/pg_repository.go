@@ -250,31 +250,14 @@ func (r *PgDeviceGroupRepository) GetTree(ctx context.Context) ([]DeviceGroup, e
 	return scanGroups(rows)
 }
 
-// GetTreeWithCounts returns all groups with device_count populated.
-// Optimized: Uses LATERAL join for efficient counting instead of GROUP BY on entire table.
-//
-// 短TTL读缓存（groupTreeCountsCacheTTL）：devices 是按运营商分区的表，LATERAL 子查询
-// 每次调用都要重新做分区裁剪规划，实测 Planning Time（~62ms）远高于 Execution Time
-// （<1ms）。分组树接口在高并发轮询/多用户打开分组页时会被大量并发重复调用，缓存把
-// TTL 窗口内的重复调用收敛成一次真实查询，避免规划开销被并发放大成 CPU 热点。分组
-// 结构和设备计数没有强一致性要求，短暂（几秒）过期可接受。
-func (r *PgDeviceGroupRepository) GetTreeWithCounts(ctx context.Context) ([]DeviceGroup, error) {
-	if cached, ok := r.cachedTreeWithCounts(); ok {
-		return cached, nil
-	}
-
-	// 「未分组设备」($1 = DefaultLevel2GroupID）是系统内置组，语义是「整个系统中未绑定任何
-	// 分组的设备」(NOT EXISTS device_group_members)，而非「该组的成员」——和设备列表点进去的
-	// 口径(device_info_pg_repository.ungroupedDevicesWhere)保持一致；其余组仍按成员计数。
-	// 否则徽标按成员数算(未分组设备恒为 0)，与列表数据(23k+)对不上。
-	const rawSQL = `
+const getTreeWithCountsRawSQL = `
 		SELECT dg.id, dg.name, dg.parent_id, dg.carrier, dg.description, dg.sort_order,
 		       dg.level, dg.status, dg.is_default, dg.remark, dg.created_by, dg.updated_by,
 		       dg.created_at, dg.updated_at,
 		       dg.matching_mode, dg.name_rule_list, dg.lac_list, dg.tac_list,
 		       dg.serial_number_list, dg.source_group_id,
 		       CASE
-		           WHEN dg.id = $1::uuid THEN (
+		           WHEN dg.id = $1::uuid THEN COALESCE(device_counts.count, 0) + (
 		               SELECT COUNT(*) FROM devices d
 		               WHERE d.deleted_at IS NULL
 		                 AND NOT EXISTS (SELECT 1 FROM device_group_members m WHERE m.device_id = d.id)
@@ -291,7 +274,20 @@ func (r *PgDeviceGroupRepository) GetTreeWithCounts(ctx context.Context) ([]Devi
 		) device_counts ON true
 		ORDER BY dg.sort_order ASC, dg.name ASC`
 
-	rows, err := r.pool.Query(ctx, rawSQL, global.DefaultLevel2GroupID)
+// GetTreeWithCounts returns all groups with device_count populated.
+// Optimized: Uses LATERAL join for efficient counting instead of GROUP BY on entire table.
+//
+// 短TTL读缓存（groupTreeCountsCacheTTL）：devices 是按运营商分区的表，LATERAL 子查询
+// 每次调用都要重新做分区裁剪规划，实测 Planning Time（~62ms）远高于 Execution Time
+// （<1ms）。分组树接口在高并发轮询/多用户打开分组页时会被大量并发重复调用，缓存把
+// TTL 窗口内的重复调用收敛成一次真实查询，避免规划开销被并发放大成 CPU 热点。分组
+// 结构和设备计数没有强一致性要求，短暂（几秒）过期可接受。
+func (r *PgDeviceGroupRepository) GetTreeWithCounts(ctx context.Context) ([]DeviceGroup, error) {
+	if cached, ok := r.cachedTreeWithCounts(); ok {
+		return cached, nil
+	}
+
+	rows, err := r.pool.Query(ctx, getTreeWithCountsRawSQL, global.DefaultLevel2GroupID)
 	if err != nil {
 		return nil, fmt.Errorf("get tree with counts: %w", err)
 	}
@@ -636,8 +632,8 @@ func (r *PgDeviceGroupRepository) MoveDevices(ctx context.Context, deviceIDs []u
 	return r.BatchAddDevices(ctx, targetGroupID, deviceIDs)
 }
 
-// RemoveDevicesFromAllGroups 按 device_id 删除给定设备的全部归属记录（不限分组），
-// 等价"移出分组"。issue #478：用于「移动/添加到『未分组设备』内置节点」的服务层兜底。
+// RemoveDevicesFromAllGroups 按 device_id 删除给定设备的全部归属记录（不限分组）。
+// 默认组是普通真实分组；该方法仅保留给历史无归属数据修复/管理类任务。
 func (r *PgDeviceGroupRepository) RemoveDevicesFromAllGroups(ctx context.Context, deviceIDs []uuid.UUID) (int64, error) {
 	if len(deviceIDs) == 0 {
 		return 0, nil
@@ -658,9 +654,8 @@ func (r *PgDeviceGroupRepository) RemoveDevicesFromAllGroups(ctx context.Context
 }
 
 // MoveGroupDevicesToDefault 删除分组时处理其成员设备。
-// 2026-06-03 用户决策「未分组 = 未绑定任何分组」：不再把成员回退到默认 L2 组,
-// 而是直接移除成员关系 —— 设备变为真正"未分组"(NOT EXISTS device_group_members),
-// 自然出现在"未分组设备"节点下。方法名保留以免动接口/调用点。
+// 默认组是一个真实 L2 组：删除其他组时把成员归属更新到默认组，回收站也能继续
+// 通过 device_group_members 显示设备的最终归属。
 func (r *PgDeviceGroupRepository) MoveGroupDevicesToDefault(ctx context.Context, groupIDs []uuid.UUID) (int64, error) {
 	return moveGroupDevicesToDefaultTx(ctx, r.pool, groupIDs)
 }
@@ -671,11 +666,16 @@ func moveGroupDevicesToDefaultTx(ctx context.Context, ex pgxExecutor, groupIDs [
 		return 0, nil
 	}
 
-	const rawSQL = `DELETE FROM device_group_members WHERE group_id = ANY($1)`
+	defaultGroupID := uuid.MustParse(global.DefaultLevel2GroupID)
+	const rawSQL = `
+		UPDATE device_group_members
+		   SET group_id = $1, added_at = NOW()
+		 WHERE group_id = ANY($2)
+		   AND group_id <> $1`
 
-	tag, err := ex.Exec(ctx, rawSQL, groupIDs)
+	tag, err := ex.Exec(ctx, rawSQL, defaultGroupID, groupIDs)
 	if err != nil {
-		return 0, fmt.Errorf("remove device memberships on group delete: %w", err)
+		return 0, fmt.Errorf("move device memberships to default on group delete: %w", err)
 	}
 	return tag.RowsAffected(), nil
 }

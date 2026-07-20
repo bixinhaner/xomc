@@ -1723,8 +1723,8 @@ const messages: Record<string, string> = {
   'device.batch.deleteWarning':        'All device data will be deleted (monitoring data, configuration, alarms, KPI, etc.)',
   'device.batch.selectGroup':           'Please select a target group',
   'device.batch.selectGroupPlaceholder': 'Select a device group',
-  'device.batch.removeFromGroup':       'Remove from group (Ungrouped)',
-  'device.batch.removeFromGroupHint':   'Moving to this default group removes the devices from their current group and shows them under the default group view.',
+  'device.batch.removeFromGroup':       'Default Group',
+  'device.batch.removeFromGroupHint':   'Moving to the default group transfers the devices from their current group to the default group.',
   'device.batch.targetGroup':           'Target Group',
   'device.batch.selectedDevices':       '{count} device(s) selected',
 
