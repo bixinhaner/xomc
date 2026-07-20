@@ -2,17 +2,17 @@
 
 迁移工具：[`pressly/goose/v3`](https://github.com/pressly/goose)。由 `cmd/migrate` 包装执行，docker compose 的 `migrate-*` 服务在容器栈启动期跑。版本号记录在数据库的 goose 版本表里。
 
-## 当前状态：consolidated baseline（2026-07-20）
+## 当前状态：consolidated baseline（2026-07-20，seed 流当天二次合并）
 
-2026-07-16 首次将三条**相互独立**的 goose 流分别合并为一个直接表达最终状态的 `000001` 基线。此后各流又累积了若干增量（2026-07-20 合并前：主库 schema 累积到 `000032`、seed 累积到 `000002`、TSDB 累积到 `000003`），2026-07-20 按同一套「重生 baseline」标准流程再次合并回各自的单 `000001`。当前文件如下：
+2026-07-16 首次将三条**相互独立**的 goose 流分别合并为一个直接表达最终状态的 `000001` 基线。此后各流又累积了若干增量（2026-07-20 首次合并前：主库 schema 累积到 `000032`、seed 累积到 `000002`、TSDB 累积到 `000003`），2026-07-20 按同一套「重生 baseline」标准流程再次合并回各自的单 `000001`。首次合并当天 seed 流又新增了 `000002`/`000003` 两个增量（内置角色 API 权限修复 + DEVICE_INFO MML 子字段清理），故 seed 流当天又做了第二次合并，其余两条流未变。当前文件如下：
 
 | 流 | 合并范围 | 当前文件 | 版本表 | compose 服务 | 目标库 |
 |----|----------|----------|--------|--------------|--------|
 | 主库 schema (DDL) | 基线 `000001`（含原 `000001..000032` 全部增量） | `migrations/000001_init_schema.sql` | `goose_db_version` | `migrate-schema` | postgres（主库，纯 PG16）|
-| 主库 seed (DML) | 基线 `000001`（含原 `000001..000002` 全部增量） | `migrations/seed/000001_init_seed.sql` | `goose_db_version_seed` | `migrate-seed` | postgres |
+| 主库 seed (DML) | 基线 `000001`（含第一次合并的 `000001..000002`，及第二次合并新增的 `000002_repair_builtin_role_api_permissions`/`000003_prune_device_info_mml_sub_fields` 全部增量） | `migrations/seed/000001_init_seed.sql` | `goose_db_version_seed` | `migrate-seed` | postgres |
 | 时序库 schema | 基线 `000001`（含原 `000001..000003` 全部增量） | `migrations/tsdb/000001_tsdb_schema.sql` | `goose_db_version_tsdb` | `migrate-tsdb-schema` | postgres-tsdb（TimescaleDB）|
 
-三个 `000001` 文件是 2026-07-20 的 consolidated baseline；此后允许按各自流继续追加增量迁移。schema 和 seed 基线来自完整迁移最终状态的 `pg_dump`；tsdb 基线仍是手写显式 DDL，本次手动合入了原 `000002`（alarms_history retention 固定每天 01:08 Asia/Shanghai）和 `000003`（删除与 Go 侧聚合管线重复的废弃 `pm_metrics_hourly_cagg`）的净效果。
+三个 `000001` 文件是 2026-07-20 的 consolidated baseline（seed 当天二次合并）；此后允许按各自流继续追加增量迁移。schema 和 seed 基线来自完整迁移最终状态的 `pg_dump`；tsdb 基线仍是手写显式 DDL，本次手动合入了原 `000002`（alarms_history retention 固定每天 01:08 Asia/Shanghai）和 `000003`（删除与 Go 侧聚合管线重复的废弃 `pm_metrics_hourly_cagg`）的净效果。
 
 > ⚠️ 此基线仅兼容全新安装或允许清库重建的环境，不是既有数据库的就地升级路径。三条流在干净数据库上分别从版本 `000001` 起跑。
 
