@@ -8152,6 +8152,7 @@ const messages: Record<string, string> = {
   'perf.adhoc.colStartTime':             '开始时间',
   'perf.adhoc.colEndTime':               '结束时间',
   'perf.adhoc.resultSummary':            '{deviceCount} 设备 × {metricCount} 指标 × {granCount} 粒度',
+  'perf.adhoc.resultSummaryWithoutDeviceCount': '{metricCount} 指标 × {granCount} 粒度',
   'perf.adhoc.truncatedTip':             '结果已截断：仅显示最新 {shown} / 共 {total} 行，请缩小时间范围或减少指标数',
   'perf.adhoc.exportExcel':              '导出 Excel',
   'perf.adhoc.noGranInfo':               '任务无粒度信息',

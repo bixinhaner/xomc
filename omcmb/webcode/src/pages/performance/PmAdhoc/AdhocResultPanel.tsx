@@ -79,6 +79,33 @@ function buildSeriesByMetric(rows: AdhocResultRow[], granularity: string): Adhoc
   return out;
 }
 
+function formatResultSummary(
+  intl: IntlShape,
+  task: { dimension: AdhocDimension; deviceSns: string[]; metricPaths: string[] },
+  granularities: string[],
+): string {
+  const showsSelectedDeviceCount = task.dimension === 'device' || task.dimension === 'aggregate_group';
+
+  if (!showsSelectedDeviceCount) {
+    return intl.formatMessage(
+      { id: 'perf.adhoc.resultSummaryWithoutDeviceCount' },
+      {
+        metricCount: task.metricPaths.length,
+        granCount: granularities.length,
+      },
+    );
+  }
+
+  return intl.formatMessage(
+    { id: 'perf.adhoc.resultSummary' },
+    {
+      deviceCount: task.deviceSns.length,
+      metricCount: task.metricPaths.length,
+      granCount: granularities.length,
+    },
+  );
+}
+
 // 结果表横表透视：把长表（每行一个数据点）摊成横表——同一 (设备 × 小区/PLMN × 时间) 行键凑一行，
 // 每个指标占一列，列名「编号(名·类型)」（与导出 CSV 横表同口径，列名自带中文，顺带解决"指标列显编号"）。
 interface WideMetricCol {
@@ -217,14 +244,7 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
   const summary = (
     <Space size={6} wrap>
       <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-        {intl.formatMessage(
-          { id: 'perf.adhoc.resultSummary' },
-          {
-            deviceCount: task.deviceSns.length,
-            metricCount: task.metricPaths.length,
-            granCount: granularities.length,
-          },
-        )}
+        {formatResultSummary(intl, task, granularities)}
       </Typography.Text>
       <DatePicker.RangePicker
         size="small"
