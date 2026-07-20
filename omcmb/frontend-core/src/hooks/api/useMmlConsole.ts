@@ -31,7 +31,10 @@ import type {
   SearchCommand,
 } from '../../types/mmlConsole';
 import type { MMLCustomCommandPathDef, MMLTask } from '../../types/mml';
-import { MML_CUSTOM_COMMAND_PATHS_QUERY_KEY } from './mmlQueryKeys';
+import {
+  MML_CONSOLE_SUB_FIELDS_QUERY_KEY,
+  MML_CUSTOM_COMMAND_PATHS_QUERY_KEY,
+} from './mmlQueryKeys';
 
 /**
  * 命令分组树。
@@ -89,7 +92,13 @@ export function useCommandSubFields(
 ): ReturnType<typeof useQuery<SubFieldDef[]>> {
   return useQuery({
     // T-0170: queryKey 含设备/产品上下文，让切换目标后重新拉对应支持集合的 sub_field。
-    queryKey: ['mml', 'console', 'sub-fields', commandId ?? '', lang, deviceKey ?? '', productClass ?? ''],
+    queryKey: [
+      ...MML_CONSOLE_SUB_FIELDS_QUERY_KEY,
+      commandId ?? '',
+      lang,
+      deviceKey ?? '',
+      productClass ?? '',
+    ],
     queryFn: () => mmlApi.getCommandSubFields(commandId!, lang, deviceKey, productClass),
     staleTime: 30 * 60 * 1000,
     enabled: Boolean(commandId),
