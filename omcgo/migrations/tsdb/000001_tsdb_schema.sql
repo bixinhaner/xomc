@@ -19,6 +19,11 @@
 --
 -- 超表 chunk 间隔 / 压缩 / 保留参数还原自 seed 的 _timescaledb_catalog（dimension.interval_length /
 -- bgw_job policy_compression/policy_retention / compression_settings），µs→人类可读换算见各处注释。
+--
+-- 2026-07-20 consolidated baseline：合并原 000002（alarms_history retention 固定为每天
+-- 01:08 Asia/Shanghai）+ 000003（删除与 Go 侧 internal/pm/aggregator 功能重复、全代码库无
+-- 查询引用的废弃 pm_metrics_hourly_cagg 连续聚合视图，压测实测其刷新与 autovacuum 抢 IO/Buffer
+-- 是「数据进得来、算不出来」的根因）。此后本 baseline 不再建 pm_metrics_hourly_cagg。
 -- =====================================================================================
 
 CREATE EXTENSION IF NOT EXISTS timescaledb;
@@ -416,31 +421,6 @@ SELECT create_hypertable('public.trace_messages', by_range('captured_at', INTERV
 -- pm_metrics: seed 原为 86400000000 µs = 1 day，但 000045 已改 4 hours（修 B0）→ 这里直接以 4 hours 建表。
 SELECT create_hypertable('public.pm_metrics', by_range('time', INTERVAL '4 hours'), if_not_exists => TRUE, migrate_data => TRUE);
 
--- +goose StatementBegin
--- 创建连续聚合视图，按小时通用聚合，替换掉以前 Go 里面复杂的 fallback 现场汇总和全网表扫描
-CREATE MATERIALIZED VIEW public.pm_metrics_hourly_cagg
-WITH (timescaledb.continuous) AS
-SELECT
-    time_bucket('1 hour', time) AS bucket_time,
-    metric_path,
-    statis_type,
-    SUM(metric_value) as sum_val,
-    AVG(metric_value) as avg_val,
-    MAX(metric_value) as max_val,
-    MIN(metric_value) as min_val
-FROM public.pm_metrics
-WHERE granularity = '15min'
-GROUP BY bucket_time, metric_path, statis_type
-WITH NO DATA;
-
--- 设定自动刷新策略（由于实时聚合开启，15分钟刷新即可保障大部分场景的物化，
--- 查询视图时引擎会自动拼接上过去 15 分钟尚未物化的热数据，对应用透明）
-SELECT add_continuous_aggregate_policy('public.pm_metrics_hourly_cagg',
-    start_offset => INTERVAL '24 hours',
-    end_offset => INTERVAL '15 minutes',
-    schedule_interval => INTERVAL '15 minutes');
--- +goose StatementEnd
-
 -- pm_metrics_hourly: 604800000000 µs = 7 days; col "time"
 SELECT create_hypertable('public.pm_metrics_hourly', by_range('time', INTERVAL '7 days'), if_not_exists => TRUE, migrate_data => TRUE);
 -- pm_group_metrics_hourly: 604800000000 µs = 7 days; col "time"
@@ -470,6 +450,20 @@ SELECT add_compression_policy('public.pm_adhoc_aggregation_results', INTERVAL '9
 --   alarms_history 365d / mr_records 90d / trace_messages 3d / pm_metrics 30d /
 --   pm_metrics_hourly 180d / pm_group_metrics_hourly 180d / pm_adhoc 365d
 SELECT add_retention_policy('public.alarms_history', INTERVAL '365 days');
+
+-- alarms_history retention 固定为每天 01:08 Asia/Shanghai 执行（原 000002 增量）。
+SELECT alter_job(
+    j.job_id,
+    schedule_interval => INTERVAL '1 day',
+    fixed_schedule => TRUE,
+    initial_start => TIMESTAMPTZ '2000-01-01 01:08:00+08',
+    timezone => 'Asia/Shanghai'
+)
+  FROM timescaledb_information.jobs j
+ WHERE j.proc_name = 'policy_retention'
+   AND j.hypertable_schema = 'public'
+   AND j.hypertable_name = 'alarms_history';
+
 SELECT add_retention_policy('public.mr_records', INTERVAL '90 days');
 SELECT add_retention_policy('public.trace_messages', INTERVAL '3 days');
 SELECT add_retention_policy('public.pm_metrics', INTERVAL '30 days');
@@ -828,10 +822,6 @@ DROP TABLE IF EXISTS public.pm_metrics_monthly;
 DROP TABLE IF EXISTS public.pm_metrics_weekly;
 DROP TABLE IF EXISTS public.pm_metrics_daily;
 DROP TABLE IF EXISTS public.pm_metrics_hourly;
--- +goose StatementBegin
-SELECT remove_continuous_aggregate_policy('public.pm_metrics_hourly_cagg', if_exists => TRUE);
-DROP MATERIALIZED VIEW IF EXISTS public.pm_metrics_hourly_cagg;
--- +goose StatementEnd
 DROP TABLE IF EXISTS public.pm_metrics;
 DROP TABLE IF EXISTS public.pm_files;
 DROP TABLE IF EXISTS public.mr_files;
