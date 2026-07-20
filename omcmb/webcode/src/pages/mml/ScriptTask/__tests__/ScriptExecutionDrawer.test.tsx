@@ -65,7 +65,24 @@ describe('ScriptExecutionDrawer', () => {
     vi.setSystemTime(new Date('2026-07-10T13:38:30+08:00'));
     renderDrawer({}, 'en-US');
 
-    expect(screen.getByLabelText('任务名称')).toHaveValue('巡检脚本_2026-07-10 13:38:30');
+    expect(screen.getByLabelText('Task Name')).toHaveValue('巡检脚本_2026-07-10 13:38:30');
+  });
+
+  it('localizes execution configuration controls in English', () => {
+    renderDrawer({}, 'en-US');
+
+    expect(screen.getByRole('dialog')).toHaveTextContent('Execute: 巡检脚本');
+    expect(screen.getByLabelText('Task Name')).toBeInTheDocument();
+    expect(screen.getByText('Execution Method')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Immediate' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Suspended' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Scheduled' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Periodic' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Offline Wait Retry' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Failure Retry' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Execute' })).toBeInTheDocument();
+    expect(screen.queryByText('执行方式')).not.toBeInTheDocument();
+    expect(screen.queryByText('立即')).not.toBeInTheDocument();
   });
 
   it('submits execution only once while the request is in flight', async () => {

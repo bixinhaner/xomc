@@ -65,6 +65,32 @@ describe('ScriptImportPreview', () => {
     expect(screen.getByText('TUNNEL_GATEWAY')).toBeInTheDocument();
   });
 
+  it('keeps long device SN values readable in the import plan table', () => {
+    const longSn = '1202000860256LB0002';
+
+    renderPreview(<ScriptImportPreview validation={{
+      originalFilename: 'long-sn.txt',
+      planItems: [{
+        lineNo: 2,
+        deviceSn: longSn,
+        order: 1,
+        rawLine: `LST Device.DeviceInfo.;${longSn}`,
+        command: {
+          commandCode: 'RAW LST',
+          operationType: 'LST',
+          paramPaths: ['Device.DeviceInfo.'],
+          parameters: {},
+        },
+      }],
+      summary: { totalLines: 1, validLines: 1, effectiveLines: 1, deviceCount: 1, errorCount: 0, warningCount: 0 },
+      issues: [],
+    }} />);
+
+    const snCell = screen.getByText(longSn).closest('td');
+    expect(snCell).not.toHaveClass('ant-table-cell-ellipsis');
+    expect(snCell).toHaveStyle({ minWidth: '240px', whiteSpace: 'nowrap' });
+  });
+
   it('opens a searchable parameter dialog for large command parameter sets', async () => {
     const params = Object.fromEntries(
       Array.from({ length: 16 }, (_, index) => [`PARAM_${String(index + 1).padStart(2, '0')}`, `value-${index + 1}`]),

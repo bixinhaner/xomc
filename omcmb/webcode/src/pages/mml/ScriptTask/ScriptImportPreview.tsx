@@ -100,7 +100,12 @@ export default function ScriptImportPreview({ validation, readOnly = true }: Scr
 
   const columns: ColumnsType<MMLTaskPlanItem> = [
     { title: t('mml.scriptImport.lineNo'), dataIndex: 'lineNo', width: 72 },
-    { title: t('mml.scriptImport.deviceSn'), dataIndex: 'deviceSn', width: 150, ellipsis: true },
+    {
+      title: t('mml.scriptImport.deviceSn'),
+      dataIndex: 'deviceSn',
+      width: 240,
+      onCell: () => ({ style: { minWidth: 240, whiteSpace: 'nowrap' } }),
+    },
     { title: t('mml.scriptImport.order'), dataIndex: 'order', width: 72 },
     {
       title: t('mml.scriptImport.command'),
@@ -149,7 +154,7 @@ export default function ScriptImportPreview({ validation, readOnly = true }: Scr
           </Space>
         </Card>
       ) : null}
-      <Table<MMLTaskPlanItem> rowKey={(row) => `${row.lineNo}-${row.deviceSn}-${row.order}`} columns={columns} dataSource={rows} size="small" pagination={{ pageSize: 20 }} scroll={{ x: 680 }} />
+      <Table<MMLTaskPlanItem> rowKey={(row) => `${row.lineNo}-${row.deviceSn}-${row.order}`} columns={columns} dataSource={rows} size="small" pagination={{ pageSize: 20 }} scroll={{ x: 840 }} />
     </Space>
   );
 }
