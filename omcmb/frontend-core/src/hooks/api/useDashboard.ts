@@ -114,10 +114,11 @@ export function useDashboardData() {
   });
 }
 
-export function useDashboardSummary() {
+export function useDashboardSummary(apiScope: string, userScope: string | undefined) {
   return useQuery({
-    queryKey: ['dashboard', 'summary'],
+    queryKey: ['dashboard', 'summary', apiScope, userScope],
     queryFn: () => api.getSummary(),
+    enabled: Boolean(userScope),
   });
 }
 
