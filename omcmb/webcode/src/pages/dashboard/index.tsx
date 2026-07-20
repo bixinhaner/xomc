@@ -206,7 +206,9 @@ export default function DashboardPage() {
       message.success(t('dashboard.refreshSuccess'));
     } catch (error) {
       message.error(t('dashboard.refreshFailed'));
-      console.error('Dashboard refresh failed:', error);
+      if (import.meta.env.DEV) {
+        console.error('Dashboard refresh failed:', error);
+      }
     } finally {
       setTimeout(() => setIsRefreshing(false), 500);
     }
