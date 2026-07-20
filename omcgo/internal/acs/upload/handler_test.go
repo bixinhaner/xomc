@@ -16,6 +16,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
+
 	"github.com/omcgo/omcgo/internal/backup"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/pkg/tr069"
@@ -41,21 +44,23 @@ func newTestHandler(t *testing.T, getter backup.PolicyGetter) *Handler {
 	return h
 }
 
-func TestMaybeWrapForCompression_nonConfigFileType(t *testing.T) {
+func TestMaybeWrapForCompression_unrelatedFileType(t *testing.T) {
+	// MR is neither FileTypeConfig (policy-gated backup compression) nor
+	// FileTypePM (unconditional PM compression) — must stay plaintext.
 	h := newTestHandler(t, &fakePolicyGetter{policy: enabledGzipPolicy()})
-	w := h.maybeWrapForCompression(context.Background(), tr069.FileTypePM, strings.NewReader("payload"))
-	assert.False(t, w.applied, "PM file type must not trigger compression")
+	w := h.maybeWrapForCompression(context.Background(), tr069.FileTypeMR, "report.xml", strings.NewReader("payload"))
+	assert.False(t, w.applied, "MR file type must not trigger compression")
 }
 
 func TestMaybeWrapForCompression_noPolicyGetter(t *testing.T) {
 	h := &Handler{logger: zap.NewNop()}
-	w := h.maybeWrapForCompression(context.Background(), tr069.FileTypeConfig, strings.NewReader("payload"))
+	w := h.maybeWrapForCompression(context.Background(), tr069.FileTypeConfig, "backup.xml", strings.NewReader("payload"))
 	assert.False(t, w.applied, "nil policy getter must keep compression off")
 }
 
 func TestMaybeWrapForCompression_policyError(t *testing.T) {
 	h := newTestHandler(t, &fakePolicyGetter{err: errors.New("DB outage")})
-	w := h.maybeWrapForCompression(context.Background(), tr069.FileTypeConfig, strings.NewReader("payload"))
+	w := h.maybeWrapForCompression(context.Background(), tr069.FileTypeConfig, "backup.xml", strings.NewReader("payload"))
 	assert.False(t, w.applied, "policy lookup error must fall back to plaintext")
 }
 
@@ -63,7 +68,7 @@ func TestMaybeWrapForCompression_disabled(t *testing.T) {
 	pol := backup.DefaultPolicy()
 	pol.EnableCompression = false
 	h := newTestHandler(t, &fakePolicyGetter{policy: pol})
-	w := h.maybeWrapForCompression(context.Background(), tr069.FileTypeConfig, strings.NewReader("payload"))
+	w := h.maybeWrapForCompression(context.Background(), tr069.FileTypeConfig, "backup.xml", strings.NewReader("payload"))
 	assert.False(t, w.applied, "EnableCompression=false must keep plaintext")
 }
 
@@ -77,7 +82,7 @@ func TestMaybeWrapForCompression_lz4Applied(t *testing.T) {
 	pol.EnableCompression = true
 	pol.CompressionFormat = "lz4"
 	h := newTestHandler(t, &fakePolicyGetter{policy: pol})
-	w := h.maybeWrapForCompression(context.Background(), tr069.FileTypeConfig, strings.NewReader("payload"))
+	w := h.maybeWrapForCompression(context.Background(), tr069.FileTypeConfig, "backup.xml", strings.NewReader("payload"))
 	require.True(t, w.applied, "lz4 must apply now that T-0077 ships the real impl")
 	defer w.body.Close()
 	assert.Equal(t, "lz4", w.format)
@@ -89,7 +94,7 @@ func TestMaybeWrapForCompression_bzip2Applied(t *testing.T) {
 	pol.EnableCompression = true
 	pol.CompressionFormat = "bzip2"
 	h := newTestHandler(t, &fakePolicyGetter{policy: pol})
-	w := h.maybeWrapForCompression(context.Background(), tr069.FileTypeConfig, strings.NewReader("payload"))
+	w := h.maybeWrapForCompression(context.Background(), tr069.FileTypeConfig, "backup.xml", strings.NewReader("payload"))
 	require.True(t, w.applied, "bzip2 must apply now that T-0077 ships the real impl")
 	defer w.body.Close()
 	assert.Equal(t, "bzip2", w.format)
@@ -99,7 +104,7 @@ func TestMaybeWrapForCompression_bzip2Applied(t *testing.T) {
 func TestMaybeWrapForCompression_gzipApplied(t *testing.T) {
 	plaintext := []byte(strings.Repeat("backup config payload ", 256))
 	h := newTestHandler(t, &fakePolicyGetter{policy: enabledGzipPolicy()})
-	w := h.maybeWrapForCompression(context.Background(), tr069.FileTypeConfig, bytes.NewReader(plaintext))
+	w := h.maybeWrapForCompression(context.Background(), tr069.FileTypeConfig, "backup.xml", bytes.NewReader(plaintext))
 	require.True(t, w.applied, "gzip compression must apply for FileTypeConfig + EnableCompression=true")
 	defer w.body.Close()
 
@@ -134,7 +139,7 @@ func TestMaybeWrapForCompression_zstdApplied(t *testing.T) {
 	pol.CompressionLevel = 9
 
 	h := newTestHandler(t, &fakePolicyGetter{policy: pol})
-	w := h.maybeWrapForCompression(context.Background(), tr069.FileTypeConfig, bytes.NewReader(plaintext))
+	w := h.maybeWrapForCompression(context.Background(), tr069.FileTypeConfig, "backup.xml", bytes.NewReader(plaintext))
 	require.True(t, w.applied)
 	defer w.body.Close()
 
@@ -150,6 +155,43 @@ func TestMaybeWrapForCompression_zstdApplied(t *testing.T) {
 	recovered, err := io.ReadAll(dec)
 	require.NoError(t, err)
 	assert.Equal(t, plaintext, recovered)
+}
+
+func TestMaybeWrapForCompression_pmUploadCompressesUnconditionally(t *testing.T) {
+	plaintext := []byte(strings.Repeat("<counter name=\"x\">1</counter>", 256))
+	// No policyGetter wired at all — PM compression must not depend on the
+	// backup sys_configs policy machinery.
+	h := &Handler{logger: zap.NewNop()}
+
+	w := h.maybeWrapForCompression(context.Background(), tr069.FileTypePM, "A20260718.0010-0800-0015-0800_48BF74.SN1.xml", bytes.NewReader(plaintext))
+	require.True(t, w.applied, "PM upload must be gzip-compressed unconditionally")
+	defer w.body.Close()
+
+	assert.Equal(t, "gzip", w.format)
+	assert.Equal(t, ".gz", w.ext)
+
+	compressed, err := io.ReadAll(w.body)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(compressed), 2)
+	assert.Equal(t, byte(0x1f), compressed[0], "must be valid gzip magic byte 1")
+	assert.Equal(t, byte(0x8b), compressed[1], "must be valid gzip magic byte 2")
+	assert.Less(t, len(compressed), len(plaintext), "repetitive PM XML must actually shrink")
+
+	gzr, err := gzip.NewReader(bytes.NewReader(compressed))
+	require.NoError(t, err)
+	defer gzr.Close()
+	recovered, err := io.ReadAll(gzr)
+	require.NoError(t, err)
+	assert.Equal(t, plaintext, recovered, "must round-trip back to the exact original bytes")
+}
+
+func TestMaybeWrapForCompression_pmUploadAlreadyGzipSkipsDoubleCompression(t *testing.T) {
+	h := &Handler{logger: zap.NewNop()}
+
+	// issue #321: real CPEs / the simulator sometimes upload already-gzipped
+	// PM files (filename ends in .gz). Must not wrap gzip-in-gzip.
+	w := h.maybeWrapForCompression(context.Background(), tr069.FileTypePM, "A20260718.0010-0800-0015-0800_48BF74.SN1.xml.gz", strings.NewReader("already gzip bytes"))
+	assert.False(t, w.applied, "PM filename already ending in .gz must not be re-compressed")
 }
 
 func TestCountingReader(t *testing.T) {
@@ -489,4 +531,57 @@ func TestPMUploadEventKeepsPlainXMLPath(t *testing.T) {
 	assert.Equal(t, "pm/2026/07/03/A_48BF74.1202000240194DP0015.xml", decoded.MinIOPath)
 	assert.Equal(t, "A_48BF74.1202000240194DP0015.xml", decoded.FileName)
 	assert.NotContains(t, decoded.MinIOPath, ".xml.gz", "ACS must not publish a pre-ingest gzip path for plaintext PM XML")
+}
+
+// newTestDeduper 起一个 miniredis 支撑的真实 event.Deduper，用于校验去重的
+// SETNX+TTL 行为（而不是 mock 掉 Redis 交互）。
+func newTestDeduper(t *testing.T) *event.Deduper {
+	t.Helper()
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	t.Cleanup(mr.Close)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	return event.NewDeduper(rdb, time.Hour, nil)
+}
+
+func TestCheckPMUploadDuplicate_FirstSeenNotDuplicate(t *testing.T) {
+	h := &Handler{logger: zap.NewNop(), pmDedup: newTestDeduper(t)}
+
+	skip := h.checkPMUploadDuplicate(context.Background(), "SN1", "A20260718.0010-0800-0015-0800_48BF74.SN1.xml")
+
+	assert.False(t, skip, "first time seeing this (device_sn, filename) must not be treated as duplicate")
+}
+
+func TestCheckPMUploadDuplicate_RepeatIsDuplicate(t *testing.T) {
+	h := &Handler{logger: zap.NewNop(), pmDedup: newTestDeduper(t)}
+	ctx := context.Background()
+	sn, filename := "SN1", "A20260718.0010-0800-0015-0800_48BF74.SN1.xml"
+
+	require.False(t, h.checkPMUploadDuplicate(ctx, sn, filename), "first call must pass through")
+	assert.True(t, h.checkPMUploadDuplicate(ctx, sn, filename), "second call for the same device_sn+filename must be flagged as duplicate")
+}
+
+func TestCheckPMUploadDuplicate_DifferentFilenameNotDuplicate(t *testing.T) {
+	h := &Handler{logger: zap.NewNop(), pmDedup: newTestDeduper(t)}
+	ctx := context.Background()
+
+	require.False(t, h.checkPMUploadDuplicate(ctx, "SN1", "A20260718.0010-0800-0015-0800_48BF74.SN1.xml"))
+	// Next reporting period is a different filename — must not be suppressed
+	// by the previous period's dedup key.
+	assert.False(t, h.checkPMUploadDuplicate(ctx, "SN1", "A20260718.0015-0800-0020-0800_48BF74.SN1.xml"))
+}
+
+func TestCheckPMUploadDuplicate_NilDeduperNeverSkips(t *testing.T) {
+	h := &Handler{logger: zap.NewNop()} // pmDedup not wired (nil-safe default)
+
+	assert.False(t, h.checkPMUploadDuplicate(context.Background(), "SN1", "f.xml"),
+		"without a wired deduper, PM uploads must never be treated as duplicate")
+}
+
+func TestCheckPMUploadDuplicate_EmptySNNeverSkips(t *testing.T) {
+	h := &Handler{logger: zap.NewNop(), pmDedup: newTestDeduper(t)}
+
+	assert.False(t, h.checkPMUploadDuplicate(context.Background(), "", "f.xml"),
+		"empty device_sn can't form a reliable dedup key, must fail open")
 }

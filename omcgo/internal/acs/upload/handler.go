@@ -56,6 +56,14 @@ type Handler struct {
 	// reports backpressure (disk/CPU over high watermark). Devices retry per
 	// TR-069 so no data is lost.
 	backpressure BackpressureGate
+	// PM 上传去重（压测观测到 omc_pm_files_processed_total{status=duplicate} 占比
+	// 高达约78%）：CPE 网络抖动会在短时间内对同一份文件重复发起 HTTP 上传，worker
+	// 侧 IsFileParsed 短路虽然接近零成本，但重复的 MinIO 落盘 + NATS 事件发布仍然
+	// 浪费 IO、占用 pm-workers 并发槽位、放大队列积压观测值。nil-safe：未注入时
+	// 不做去重（等价于原有行为）。复用 internal/core/event.Deduper（Redis SETNX +
+	// TTL，fail-open），key 用 (device_sn, filename) 而不是 event ID——要拦的是
+	// "同一份文件被多次上传"，此时还没有 event，天然不能用 event ID 去重。
+	pmDedup *event.Deduper
 }
 
 // NewHandler creates a new upload Handler.
@@ -89,6 +97,35 @@ func (h *Handler) SetRuntimeProvider(provider transfercfg.Provider) {
 // SetBackpressureGate 注入 PM 上传背压门闸（#318）。nil-safe：未注入时不做背压。
 func (h *Handler) SetBackpressureGate(gate BackpressureGate) {
 	h.backpressure = gate
+}
+
+// SetPMUploadDedup 注入 PM 上传去重器。nil-safe：未注入时不做去重（原有行为）。
+func (h *Handler) SetPMUploadDedup(d *event.Deduper) {
+	h.pmDedup = d
+}
+
+// checkPMUploadDuplicate 判断 (deviceSN, filename) 这个 PM 上传在去重 TTL 窗口内
+// 是否已经见过。返回 true 表示应该跳过本次上传（重复），调用方应直接答复设备成功，
+// 不再落 MinIO、不再发布事件。
+//
+// nil-safe / fail-open：h.pmDedup 未注入、deviceSN 为空、或 Redis 出错时都返回
+// false（不跳过，走原有正常上传流程），避免因为去重能力缺失或故障影响主链路。
+func (h *Handler) checkPMUploadDuplicate(ctx context.Context, deviceSN, filename string) bool {
+	if h.pmDedup == nil || deviceSN == "" {
+		return false
+	}
+	first, err := h.pmDedup.FirstTime(ctx, "acs-pm-upload", deviceSN+":"+filename)
+	if err != nil {
+		h.logger.Warn("PM upload dedup check failed, failing open",
+			zap.Error(err), zap.String("device_sn", deviceSN), zap.String("filename", filename))
+		return false
+	}
+	if !first {
+		h.logger.Info("PM upload deduplicated: same device_sn+filename seen recently, skipping store+publish",
+			zap.String("device_sn", deviceSN), zap.String("filename", filename))
+		return true
+	}
+	return false
 }
 
 // ServeHTTP handles upload requests.
@@ -226,6 +263,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 5. Determine bucket and object path
 
+	// PM 上传去重短路：在背压检查之前做，命中时连背压 inflight 名额都不占。
+	// SN 提取优先级与 6.4 节发布事件时一致（URL query `sn=` 优先，回退文件名解析），
+	// 保证同一次真实上传（含 CPE 重传）在这里算出的 key 稳定一致。
+	if ft == tr069.FileTypePM && h.pmDedup != nil {
+		pmSN := r.URL.Query().Get("sn")
+		if pmSN == "" {
+			pmSN = extractDeviceSNFromPMFilename(filename)
+		}
+		if h.checkPMUploadDuplicate(r.Context(), pmSN, filename) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"status":"ok","dedup":true,"filename":"%s"}`, filename)
+			return
+		}
+	}
+
 	// #318：PM 上传背压门闸。磁盘/CPU 超高水位时（watchdog 后台维护态，热路径仅读原子标志）
 	// 对 PM 文件早返回 503——在落 MinIO 前拒收，TR-069 设备会重传，不丢数据；回落自动恢复。
 	if ft == tr069.FileTypePM && h.backpressure != nil {
@@ -274,7 +327,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	contentLength := r.ContentLength
 	uploadOpts := minio.PutObjectOptions{ContentType: "application/octet-stream"}
 
-	cmp := h.maybeWrapForCompression(ctx, ft, r.Body)
+	cmp := h.maybeWrapForCompression(ctx, ft, filename, r.Body)
 	if cmp.applied {
 		defer cmp.body.Close()
 		body = cmp.body
@@ -636,6 +689,8 @@ func (c compressionWrap) bytesIn() int64 {
 
 // maybeWrapForCompression decides whether the inbound upload body should be
 // streaming-compressed. Returns applied=false (and no error) when:
+//   - file type is PM: delegates to compressPMUpload (unconditional gzip,
+//     no policy gate — see compressPMUpload doc), OR
 //   - file type is not FileTypeConfig (only backup files compress today), OR
 //   - no policyGetter wired, OR
 //   - policy lookup failed, OR
@@ -644,7 +699,10 @@ func (c compressionWrap) bytesIn() int64 {
 //
 // The fall-back-on-failure choice is deliberate: backup is a high-availability
 // feature; we prefer storing larger uncompressed bytes over failing the upload.
-func (h *Handler) maybeWrapForCompression(ctx context.Context, ft tr069.FileType, src io.Reader) compressionWrap {
+func (h *Handler) maybeWrapForCompression(ctx context.Context, ft tr069.FileType, filename string, src io.Reader) compressionWrap {
+	if ft == tr069.FileTypePM {
+		return h.compressPMUpload(ctx, filename, src)
+	}
 	if ft != tr069.FileTypeConfig || h.policyGetter == nil {
 		return compressionWrap{}
 	}
@@ -674,6 +732,62 @@ func (h *Handler) maybeWrapForCompression(ctx context.Context, ft tr069.FileType
 		h.logger.Warn("compressor wrap failed; passing through",
 			zap.String("format", c.Format()),
 			zap.Error(err))
+		return compressionWrap{}
+	}
+	return compressionWrap{
+		applied: true,
+		body:    wrapped,
+		ext:     c.Extension(),
+		format:  c.Format(),
+		counter: counter,
+	}
+}
+
+// pmUploadGzipLevel is the fixed gzip level used for compressPMUpload —
+// matches the level-6 default used elsewhere in this codebase (backup.
+// DefaultPolicy), a balanced choice given ACS handles many concurrent PM
+// uploads and shouldn't burn excessive CPU per file on max compression.
+const pmUploadGzipLevel = 6
+
+// compressPMUpload gzip-wraps a PM (FileType=4) upload body before it lands
+// in MinIO.
+//
+// Unlike maybeWrapForCompression's backup-config branch (policy-gated per
+// sys_configs, currently dormant per issue #585), PM compression here is
+// unconditional: PM/KPI XML is highly repetitive (many similar counter/tag
+// names) and gzips well, directly cutting MinIO write IO on the ACS hot path
+// and MinIO read IO when the worker downloads it to parse — a stress-test
+// diagnosis found tsdb/host IO pressure (PSI) as the dominant bottleneck
+// behind PM ingestion lag, not worker CPU/concurrency.
+//
+// No changes are required downstream:
+//   - internal/pm/collector.go already transparently gunzips on download via
+//     core/compress.MaybeGunzip (issue #321 — real CPEs already upload
+//     .xml.gz in the wild, so this path was already exercised).
+//   - internal/core/rawarchive.Archiver's async re-compression pass already
+//     probes the gzip magic number and short-circuits to outcomeSkippedGz
+//     (a single 2-byte ReadHead, no re-read/re-write) for objects that are
+//     already gzip, so it won't double-compress.
+//   - internal/pm/handler.go's DownloadPMFile already sniffs the gzip magic
+//     number at download time and adjusts the served filename/Content-Type
+//     accordingly, so the existing download UI keeps working unchanged.
+//
+// Guards against double-compression: if filename already ends in ".gz" the
+// CPE (or simulator) is already sending gzip bytes (issue #321) — this
+// returns compressionWrap{} (not applied) so we never wrap gzip in gzip.
+func (h *Handler) compressPMUpload(ctx context.Context, filename string, src io.Reader) compressionWrap {
+	if strings.HasSuffix(strings.ToLower(filename), ".gz") {
+		return compressionWrap{}
+	}
+	c, err := backup.NewCompressor("gzip", pmUploadGzipLevel)
+	if err != nil {
+		h.logger.Warn("PM upload gzip compressor construction failed; uploading plaintext", zap.Error(err))
+		return compressionWrap{}
+	}
+	counter := &countingReader{r: src}
+	wrapped, err := c.Wrap(ctx, counter)
+	if err != nil {
+		h.logger.Warn("PM upload gzip wrap failed; uploading plaintext", zap.Error(err))
 		return compressionWrap{}
 	}
 	return compressionWrap{
