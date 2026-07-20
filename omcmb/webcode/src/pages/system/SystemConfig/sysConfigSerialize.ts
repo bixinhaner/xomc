@@ -40,8 +40,11 @@ export function buildBatchItems(
 
   const items: BatchUpdateSysConfigItem[] = [];
   for (const [key, raw] of Object.entries(formValues)) {
+    const existingItem = existingMap.get(key);
+    const isWriteOnlySecret = existingItem?.isSecret || key === 'defaultPasswd';
+    if (isWriteOnlySecret && String(raw ?? '').trim() === '') continue;
     const enc = encodeValue(raw);
-    const dbType = existingMap.get(key)?.valueType;
+    const dbType = existingItem?.valueType;
     items.push({
       key,
       value: enc.value,

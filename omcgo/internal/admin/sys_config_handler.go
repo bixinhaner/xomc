@@ -34,7 +34,7 @@ func (h *SysConfigHandler) RegisterRoutes(rg *gin.RouterGroup) {
 }
 
 // RegisterPublicRoutes 注册无需鉴权即可访问的子集端点。
-// 仅返回 is_public=true 的配置项及登录页严格白名单项，供认证前页面消费。
+// 仅返回代码白名单允许的配置项，供认证前页面消费。
 // 参 docs/prd/system/ui-customization.md §6。
 func (h *SysConfigHandler) RegisterPublicRoutes(rg *gin.RouterGroup) {
 	rg.GET("/admin/public/configs", h.ListPublic)
@@ -49,10 +49,7 @@ func (h *SysConfigHandler) ListPublic(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	if result == nil {
-		result = []SysConfig{}
-	}
-	response.OKWithMsg(c, result, "查询成功")
+	response.OKWithMsg(c, toSysConfigResponses(result), "查询成功")
 }
 
 func (h *SysConfigHandler) Create(c *gin.Context) {
@@ -63,10 +60,10 @@ func (h *SysConfigHandler) Create(c *gin.Context) {
 	}
 	result, err := h.service.Create(c.Request.Context(), req)
 	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	response.OKWithMsg(c, result, "创建成功")
+	response.OKWithMsg(c, toSysConfigResponse(*result), "创建成功")
 }
 
 func (h *SysConfigHandler) Get(c *gin.Context) {
@@ -80,7 +77,7 @@ func (h *SysConfigHandler) Get(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	response.OKWithMsg(c, result, "查询成功")
+	response.OKWithMsg(c, toSysConfigResponse(*result), "查询成功")
 }
 
 func (h *SysConfigHandler) List(c *gin.Context) {
@@ -92,10 +89,7 @@ func (h *SysConfigHandler) List(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	if result == nil {
-		result = []SysConfig{}
-	}
-	response.OKWithMsg(c, result, "查询成功")
+	response.OKWithMsg(c, toSysConfigResponses(result), "查询成功")
 }
 
 func (h *SysConfigHandler) Update(c *gin.Context) {
@@ -111,10 +105,10 @@ func (h *SysConfigHandler) Update(c *gin.Context) {
 	}
 	result, err := h.service.Update(c.Request.Context(), id, req)
 	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	response.OKWithMsg(c, result, "更新成功")
+	response.OKWithMsg(c, toSysConfigResponse(*result), "更新成功")
 }
 
 func (h *SysConfigHandler) Delete(c *gin.Context) {
@@ -124,7 +118,7 @@ func (h *SysConfigHandler) Delete(c *gin.Context) {
 		return
 	}
 	if err := h.service.Delete(c.Request.Context(), id); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 	response.OKWithMsg(c, nil, "删除成功")
@@ -139,6 +133,10 @@ func (h *SysConfigHandler) BatchUpdate(c *gin.Context) {
 	var req BatchUpdateSysConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	if err := validateGenericBatchWrite(req); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 	count, err := h.service.BatchUpsert(c.Request.Context(), req)

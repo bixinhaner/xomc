@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -263,6 +264,181 @@ func TestRequirePermission_NoAuth(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func TestRequireAPIPermission_UsesFullPathAndMethod(t *testing.T) {
+	userID := uuid.New()
+	var capturedUserID uuid.UUID
+	var capturedPath, capturedMethod string
+	roleRepo := &mockRoleRepo{
+		checkPermissionFn: func(_ context.Context, uid uuid.UUID, resource, action string) (bool, error) {
+			capturedUserID = uid
+			capturedPath = resource
+			capturedMethod = action
+			return true, nil
+		},
+	}
+
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set(CtxKeyUserID, userID)
+		c.Set(CtxKeyIsSuperAdmin, false)
+		c.Next()
+	})
+	r.Use(RequireAPIPermission(roleRepo))
+	r.PUT("/api/v1/admin/sysConfig/:id", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/sysConfig/123", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, userID, capturedUserID)
+	assert.Equal(t, "/api/v1/admin/sysConfig/:id", capturedPath)
+	assert.Equal(t, http.MethodPut, capturedMethod)
+}
+
+func TestRequireAPIPermission_Denied(t *testing.T) {
+	roleRepo := &mockRoleRepo{
+		checkPermissionFn: func(_ context.Context, _ uuid.UUID, _, _ string) (bool, error) {
+			return false, nil
+		},
+	}
+
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set(CtxKeyUserID, uuid.New())
+		c.Next()
+	})
+	r.Use(RequireAPIPermission(roleRepo))
+	r.GET("/api/v1/admin/sysConfig", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/sysConfig", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+func TestRequireAPIPermission_CheckerErrorFailsClosed(t *testing.T) {
+	roleRepo := &mockRoleRepo{
+		checkPermissionFn: func(_ context.Context, _ uuid.UUID, _, _ string) (bool, error) {
+			return false, errors.New("casbin unavailable")
+		},
+	}
+
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set(CtxKeyUserID, uuid.New())
+		c.Next()
+	})
+	r.Use(RequireAPIPermission(roleRepo))
+	r.GET("/api/v1/admin/sysConfig", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/sysConfig", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestRequireAPIPermission_NilCheckerFailsClosed(t *testing.T) {
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set(CtxKeyUserID, uuid.New())
+		c.Next()
+	})
+	r.Use(RequireAPIPermission(nil))
+	r.GET("/api/v1/admin/sysConfig", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/sysConfig", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestRequireAPIPermission_MissingAuthContext(t *testing.T) {
+	r := gin.New()
+	r.Use(RequireAPIPermission(&mockRoleRepo{}))
+	r.GET("/api/v1/admin/sysConfig", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/sysConfig", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func TestRequireAPIPermission_InvalidUserContextFailsClosed(t *testing.T) {
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set(CtxKeyUserID, "not-a-uuid")
+		c.Next()
+	})
+	r.Use(RequireAPIPermission(&mockRoleRepo{}))
+	r.GET("/api/v1/admin/sysConfig", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/sysConfig", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestRequireAPIPermission_MissingRouteTemplateFailsClosed(t *testing.T) {
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set(CtxKeyUserID, uuid.New())
+		c.Next()
+	})
+	r.Use(RequireAPIPermission(&mockRoleRepo{}))
+
+	req := httptest.NewRequest(http.MethodGet, "/unregistered", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestRequireAPIPermission_SuperAdminBypassesChecker(t *testing.T) {
+	checkerCalled := false
+	roleRepo := &mockRoleRepo{
+		checkPermissionFn: func(_ context.Context, _ uuid.UUID, _, _ string) (bool, error) {
+			checkerCalled = true
+			return false, nil
+		},
+	}
+
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set(CtxKeyUserID, uuid.New())
+		c.Set(CtxKeyIsSuperAdmin, true)
+		c.Next()
+	})
+	r.Use(RequireAPIPermission(roleRepo))
+	r.DELETE("/api/v1/admin/sysConfig/:id", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/sysConfig/123", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.False(t, checkerCalled)
 }
 
 // TestRequireCarrier_* removed in v1.0: RequireCarrier middleware deleted

@@ -2,12 +2,14 @@ package admin
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/casbin/casbin/v2"
 	casbinModel "github.com/casbin/casbin/v2/model"
+	"github.com/casbin/casbin/v2/persist"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
@@ -19,13 +21,46 @@ import (
 
 const testModelPath = "../../configs/casbin_model.conf"
 
-func newTestEnforcer(t *testing.T) *casbin.Enforcer {
+func newTestEnforcer(t *testing.T) *casbin.SyncedEnforcer {
 	t.Helper()
 	m, err := casbinModel.NewModelFromFile(testModelPath)
 	require.NoError(t, err, "failed to load casbin model")
-	e, err := casbin.NewEnforcer(m)
+	e, err := casbin.NewSyncedEnforcer(m)
 	require.NoError(t, err, "failed to create enforcer")
 	return e
+}
+
+type concurrentPolicyAdapter struct {
+	mu    sync.RWMutex
+	allow bool
+}
+
+func (a *concurrentPolicyAdapter) LoadPolicy(m casbinModel.Model) error {
+	a.mu.RLock()
+	allow := a.allow
+	a.mu.RUnlock()
+
+	if allow {
+		persist.LoadPolicyLine("p, role:viewer, system, /api/v1/admin/sysConfig, GET", m)
+	}
+	persist.LoadPolicyLine("g, 20000000-0000-0000-0000-000000000001, role:viewer, system", m)
+	return nil
+}
+
+func (a *concurrentPolicyAdapter) SavePolicy(casbinModel.Model) error { return nil }
+
+func (a *concurrentPolicyAdapter) AddPolicy(string, string, []string) error { return nil }
+
+func (a *concurrentPolicyAdapter) RemovePolicy(string, string, []string) error { return nil }
+
+func (a *concurrentPolicyAdapter) RemoveFilteredPolicy(string, string, int, ...string) error {
+	return nil
+}
+
+func (a *concurrentPolicyAdapter) toggle() {
+	a.mu.Lock()
+	a.allow = !a.allow
+	a.mu.Unlock()
 }
 
 // newTestAuthorizer creates a CasbinAuthorizer with pre-loaded policies for testing.
@@ -203,6 +238,43 @@ func TestCheckPermission_SystemUserAllDomains(t *testing.T) {
 	assert.True(t, ok)
 }
 
+func TestCasbinAuthorizerConcurrentEnforceAndReload(t *testing.T) {
+	adapter := &concurrentPolicyAdapter{allow: true}
+	m, err := casbinModel.NewModelFromFile(testModelPath)
+	require.NoError(t, err)
+	enforcer, err := casbin.NewSyncedEnforcer(m, adapter)
+	require.NoError(t, err)
+
+	auth := &CasbinAuthorizer{enforcer: enforcer, logger: zap.NewNop()}
+	userID := uuid.MustParse("20000000-0000-0000-0000-000000000001")
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 500 {
+				_, enforceErr := auth.CheckPermission(
+					context.Background(),
+					userID,
+					"/api/v1/admin/sysConfig",
+					"GET",
+				)
+				assert.NoError(t, enforceErr)
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for range 200 {
+			adapter.toggle()
+			assert.NoError(t, auth.ReloadPolicy())
+		}
+	}()
+	wg.Wait()
+}
+
 // --- pgAdapter no-op methods ---
 
 func TestPgAdapter_SavePolicy_NoOp(t *testing.T) {
@@ -334,7 +406,7 @@ func BenchmarkCheckPermission_Allow(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	e, err := casbin.NewEnforcer(m)
+	e, err := casbin.NewSyncedEnforcer(m)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -361,7 +433,7 @@ func BenchmarkCheckPermission_Deny(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	e, err := casbin.NewEnforcer(m)
+	e, err := casbin.NewSyncedEnforcer(m)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -386,7 +458,7 @@ func BenchmarkCheckPermission_WithRoleInheritance(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	e, err := casbin.NewEnforcer(m)
+	e, err := casbin.NewSyncedEnforcer(m)
 	if err != nil {
 		b.Fatal(err)
 	}

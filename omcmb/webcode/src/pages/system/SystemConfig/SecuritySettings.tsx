@@ -3,6 +3,7 @@ import { useT } from '@/hooks/useT';
 
 interface SecuritySettingsProps {
   form: ReturnType<typeof Form.useForm>[0];
+  defaultPasswordConfigured: boolean;
 }
 
 // 设置行样式
@@ -18,7 +19,7 @@ const subSettingBaseStyle: React.CSSProperties = {
   borderRadius: 4,
 };
 
-export default function SecuritySettings({ form }: SecuritySettingsProps) {
+export default function SecuritySettings({ form, defaultPasswordConfigured }: SecuritySettingsProps) {
   const t = useT();
   const { token } = theme.useToken();
   // 子设置区域背景跟随明/暗主题，不再写死 #fafafa
@@ -26,7 +27,6 @@ export default function SecuritySettings({ form }: SecuritySettingsProps) {
 
   return (
     <Form form={form} layout="vertical" size="small" initialValues={{
-      defaultPasswd: 'OMC@123456',
       passwordContent: false,
       pwdMinLength: 10,
       pwdMaxLength: 23,
@@ -64,7 +64,17 @@ export default function SecuritySettings({ form }: SecuritySettingsProps) {
             <Space>
               {t('system.security.useAsDefaultPassword')}
               <Form.Item name="defaultPasswd" noStyle>
-                <Input style={{ width: 160 }} maxLength={50} />
+                <Input.Password
+                  style={{ width: 240 }}
+                  maxLength={50}
+                  autoComplete="new-password"
+                  visibilityToggle={false}
+                  placeholder={t(
+                    defaultPasswordConfigured
+                      ? 'system.security.defaultPasswordConfiguredPlaceholder'
+                      : 'system.security.defaultPasswordUnsetPlaceholder',
+                  )}
+                />
               </Form.Item>
             </Space>
           </div>

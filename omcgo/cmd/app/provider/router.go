@@ -380,10 +380,8 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// Helper: authenticated sub-group.
 	//
-	// 这里保留 helper 只是为了延续原来的路由组织方式；当前 API 不再做端点级
-	// 权限判断，路由组只要求完成认证。
-	// resource 参数保留供 30+ 调用点签名兼容，新版被忽略；helper 名留作"受保护
-	// 路由组"语义提示。
+	// RequireAPIPermission 按标准路由模板 + HTTP 方法执行端点级 Casbin 鉴权。
+	// resource 参数保留供现有调用点表达业务归属；实际权限键由路由模板和方法决定。
 	permGroup := func(_ string) *gin.RouterGroup {
 		g := v1.Group("")
 		g.Use(admin.RequireAPIPermission(ad.roleRepo))
@@ -712,7 +710,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	ad.apiKeyHandler.RegisterRoutes(v1)
 
 	// ----- Admin management routes -----
-	// 仍保留独立路由组，便于后续再收紧权限；当前只要求认证。
+	// 独立路由组统一执行端点级 API 权限校验。
 	adminGroup := v1.Group("/admin")
 	adminGroup.Use(admin.RequireAPIPermission(ad.roleRepo))
 	ad.adminHandler.RegisterAdminRoutes(adminGroup)

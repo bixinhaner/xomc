@@ -118,6 +118,8 @@ export default function SystemConfig() {
     if (!configList || configList.length === 0) return;
     const fields: Record<string, unknown> = {};
     for (const item of configList) {
+      // write-only secret 的 value 固定为空，不能灌回表单形成“空值覆盖”。
+      if (item.isSecret) continue;
       fields[item.key] = decodeValue(item.value, item.valueType);
     }
     if (
@@ -132,6 +134,11 @@ export default function SystemConfig() {
   }, [activeForm, activeTab, configList]);
 
   const batchUpdate = useBatchUpdateSysConfigs();
+
+  const defaultPasswordConfigured = useMemo(
+    () => configList?.some((item) => item.key === 'defaultPasswd' && item.isSecret && item.isConfigured) ?? false,
+    [configList],
+  );
 
   // 保存当前设置
   const handleSave = useCallback(async () => {
@@ -165,7 +172,12 @@ export default function SystemConfig() {
       case 'basic':
         return <BasicSettings form={basicForm} />;
       case 'security':
-        return <SecuritySettings form={securityForm} />;
+        return (
+          <SecuritySettings
+            form={securityForm}
+            defaultPasswordConfigured={defaultPasswordConfigured}
+          />
+        );
       case 'device':
         return <DeviceSettings form={deviceForm} />;
       case 'storage':

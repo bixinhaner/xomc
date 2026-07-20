@@ -181,7 +181,7 @@ func (w *redisWatcher) Notify() error {
 // CasbinAuthorizer provides Casbin-based permission checking.
 // Watcher 接口化允许在 NATS（生产）和 Redis（历史兼容 / 测试）之间切换。
 type CasbinAuthorizer struct {
-	enforcer *casbin.Enforcer
+	enforcer *casbin.SyncedEnforcer
 	adapter  *pgAdapter
 	watcher  persist.Watcher
 	logger   *zap.Logger
@@ -198,9 +198,9 @@ func NewCasbinAuthorizer(pool *pgxpool.Pool, bus event.EventBus, modelPath strin
 
 	adapter := newPgAdapter(pool)
 
-	enforcer, err := casbin.NewEnforcer(m, adapter)
+	enforcer, err := casbin.NewSyncedEnforcer(m, adapter)
 	if err != nil {
-		return nil, fmt.Errorf("create casbin enforcer: %w", err)
+		return nil, fmt.Errorf("create casbin synced enforcer: %w", err)
 	}
 
 	watcher := newNATSCasbinWatcher(bus, logger)

@@ -4748,6 +4748,8 @@ const messages: Record<string, string> = {
 
   // System - Security Settings
   'system.security.defaultPassword':         'Default Password',
+  'system.security.defaultPasswordConfiguredPlaceholder': 'Configured; leave blank to keep unchanged',
+  'system.security.defaultPasswordUnsetPlaceholder': 'Not configured; enter a new password',
   // Issue #649: hardened to mandatory rule (admin-injected = always force change),
   // i18n key 'system.security.forcePasswordChangeOnFirstLogin' removed
   // Issue #649: copy aligned with backend hard rule — admin-injected users are forced to change on first login
@@ -4758,6 +4760,7 @@ const messages: Record<string, string> = {
   'system.user.resetToDefault':              'Reset to system default password',
   'system.user.resetToDefaultConfirm':       'Reset this user\'s password to the system default? The user must change it at next login, and existing sessions will be invalidated immediately.',
   'system.user.defaultPasswordNotSet':       'System default password is not set. Please configure it in System Config → Security Settings first.',
+  'system.user.defaultPasswordWillBeUsed':   'The system default password will be used',
   'system.user.ldapResetDisabledTip':        'LDAP users\' passwords are managed by the LDAP system and cannot be reset here.',
   'system.user.builtInResetDisabledTip':     'Built-in users must be reset via the omcctl CLI.',
   'system.security.passwordStrength':        'Password Strength',
