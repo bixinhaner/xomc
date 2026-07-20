@@ -263,24 +263,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 5. Determine bucket and object path
 
-	// PM 上传去重短路：在背压检查之前做，命中时连背压 inflight 名额都不占。
-	// SN 提取优先级与 6.4 节发布事件时一致（URL query `sn=` 优先，回退文件名解析），
-	// 保证同一次真实上传（含 CPE 重传）在这里算出的 key 稳定一致。
-	if ft == tr069.FileTypePM && h.pmDedup != nil {
-		pmSN := r.URL.Query().Get("sn")
-		if pmSN == "" {
-			pmSN = extractDeviceSNFromPMFilename(filename)
-		}
-		if h.checkPMUploadDuplicate(r.Context(), pmSN, filename) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, `{"status":"ok","dedup":true,"filename":"%s"}`, filename)
-			return
-		}
-	}
-
 	// #318：PM 上传背压门闸。磁盘/CPU 超高水位时（watchdog 后台维护态，热路径仅读原子标志）
 	// 对 PM 文件早返回 503——在落 MinIO 前拒收，TR-069 设备会重传，不丢数据；回落自动恢复。
+	//
+	// 必须在去重检查之前做（2026-07-20 修复 #833 复测暴露的严重 bug）：去重用的是
+	// Redis SETNX + 24h TTL，一旦某次请求先被去重标记为"已见过"，之后 24 小时内同一
+	// (device_sn, filename) 的所有请求都会被去重短路直接回 200 OK，不再真正落
+	// MinIO/发事件。如果去重检查在背压之前，背压生效期间收到的第一次请求会：先被
+	// 去重标记为"已见过" → 再被背压拒收（503）。设备按 TR-069 语义重传时，重传请求
+	// 却会被去重当成"已处理过的重复"直接吃掉、回 200 OK——设备以为上传成功，但这份
+	// PM 文件从未真正落盘/入库，且 24h 内都无法再重传成功，等价于背压窗口内的 PM
+	// 文件被静默永久丢弃，与背压设计初衷"设备重传、不丢数据"直接矛盾（omc78 压测环境
+	// 实测复现：背压持续 2.5 小时期间该设备的 PM 文件在 pm_files 表里一条都没有，
+	// 背压解除后也没有补上）。把背压检查挪到去重之前即可修复：背压拒收的请求根本
+	// 不会走到去重这一步，去重标记只会在请求真正被接纳、准备落盘时才打上。
 	if ft == tr069.FileTypePM && h.backpressure != nil {
 		if allowed, reason := h.backpressure.Acquire(); !allowed {
 			h.backpressure.RecordRejected(reason)
@@ -292,6 +288,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer h.backpressure.Release()
+	}
+
+	// PM 上传去重短路：SN 提取优先级与 6.4 节发布事件时一致（URL query `sn=` 优先，
+	// 回退文件名解析），保证同一次真实上传（含 CPE 重传）在这里算出的 key 稳定一致。
+	if ft == tr069.FileTypePM && h.pmDedup != nil {
+		pmSN := r.URL.Query().Get("sn")
+		if pmSN == "" {
+			pmSN = extractDeviceSNFromPMFilename(filename)
+		}
+		if h.checkPMUploadDuplicate(r.Context(), pmSN, filename) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"status":"ok","dedup":true,"filename":"%s"}`, filename)
+			return
+		}
 	}
 
 	bucket, category := storage.BucketAndCategory(ft, h.buckets)
