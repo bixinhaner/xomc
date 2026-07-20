@@ -22,6 +22,7 @@ import type { CommandItem } from '../types';
 import { COMMAND_MODAL_BODY_HEIGHT, opColor } from '../constants';
 import {
   commandUsesPathSelection,
+  getDefaultSelectedPathKeys,
   getOrderedSelectedPathKeys,
   getSelectableCommandPaths,
 } from '../pathSelection';
@@ -70,7 +71,6 @@ interface CommandSelectModalProps {
 export default function CommandSelectModal({
   open,
   value,
-  selectedPathKeys,
   onCancel,
   onConfirm,
   onGotoRawParams,
@@ -83,6 +83,8 @@ export default function CommandSelectModal({
   const [selectedId, setSelectedId] = useState<string | undefined>();
   const [wasOpen, setWasOpen] = useState(false);
   const [draftPathKeys, setDraftPathKeys] = useState<string[]>([]);
+  const [selectionEpoch, setSelectionEpoch] = useState(0);
+  const [draftSelectionEpoch, setDraftSelectionEpoch] = useState<number | undefined>();
   // §需求 B1：默认所有命令分组折叠。expandedKeys 由用户手动展开累积；搜索时另行整树展开。
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
 
@@ -94,7 +96,9 @@ export default function CommandSelectModal({
       setExpandedKeys([]); // 每次打开都重置为全部折叠
       // 自定义命令叶子 key 带 custom: 前缀，回填选中态时需还原前缀，否则匹配不到树节点。
       setSelectedId(value ? (value.isCustom ? `${CUSTOM_KEY_PREFIX}${value.id}` : value.id) : undefined);
-      setDraftPathKeys(value ? selectedPathKeys : []);
+      setSelectionEpoch((epoch) => epoch + 1);
+      setDraftSelectionEpoch(undefined);
+      setDraftPathKeys([]);
     }
   }
 
@@ -287,7 +291,16 @@ export default function CommandSelectModal({
   const usesPathSelection = commandUsesPathSelection(selectedOperation);
   const selectablePaths = getSelectableCommandPaths(selectedOperation, paramPaths);
   const visiblePathCount = usesPathSelection ? selectablePaths.length : paramPaths.length;
-  const effectiveDraftPathKeys = getOrderedSelectedPathKeys(selectablePaths, draftPathKeys);
+  const defaultPathKeys = getDefaultSelectedPathKeys(selectablePaths);
+  const effectiveDraftPathKeys =
+    draftSelectionEpoch === selectionEpoch
+      ? getOrderedSelectedPathKeys(selectablePaths, draftPathKeys)
+      : defaultPathKeys;
+
+  const handleDraftPathKeysChange = (pathKeys: string[]): void => {
+    setDraftSelectionEpoch(selectionEpoch);
+    setDraftPathKeys(pathKeys);
+  };
 
   // ADD/RMV 以「目标对象路径」(target_object)下发 RPC(AddObject/DeleteObject)，无参数 PATH；
   // 仅标准命令带 target_object。有 target_object 即可「确定选择」，不受 paramPaths 为空限制。
@@ -373,8 +386,12 @@ export default function CommandSelectModal({
                 const k = keys[0] as string | undefined;
                 // 仅命令叶子可选（分组 / 私有公有骨架节点 selectable=false 不会触发，这里再排除前缀兜底）。
                 if (k && !k.startsWith('group:') && k !== CUSTOM_ROOT_KEY) {
-                  if (k !== selectedId) setDraftPathKeys([]);
-                  setSelectedId(k);
+                  if (k !== selectedId) {
+                    setSelectedId(k);
+                    setSelectionEpoch((epoch) => epoch + 1);
+                    setDraftSelectionEpoch(undefined);
+                    setDraftPathKeys([]);
+                  }
                 }
               }}
             />
@@ -408,7 +425,7 @@ export default function CommandSelectModal({
                     <CommandPathSelector
                       paths={selectablePaths}
                       value={effectiveDraftPathKeys}
-                      onChange={setDraftPathKeys}
+                      onChange={handleDraftPathKeysChange}
                     />
                   ) : (
                     <Space orientation="vertical" size={4} style={{ width: '100%' }}>

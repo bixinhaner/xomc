@@ -65,6 +65,11 @@ const fixtures = vi.hoisted(() => {
     subFields: defaultSubFields,
     customCommands: [] as MMLCustomCommand[],
     customPaths: [] as MMLCustomCommandPathDef[],
+    unsupportedPaths: [] as Array<{
+      path: string;
+      readUnsupported: boolean;
+      writeUnsupported: boolean;
+    }>,
     groupTree: [
       {
         id: 'group-1',
@@ -87,7 +92,8 @@ vi.mock('@core/hooks/api/useMmlConsole', () => ({
     ({ data: id ? fixtures.customPaths : undefined, isFetching: false }) as unknown as ReturnType<
       typeof useCustomCommandPaths
     >,
-  useUnsupportedPaths: () => ({ data: [] }) as unknown as ReturnType<typeof useUnsupportedPaths>,
+  useUnsupportedPaths: () =>
+    ({ data: fixtures.unsupportedPaths }) as unknown as ReturnType<typeof useUnsupportedPaths>,
 }));
 
 vi.mock('@/hooks/useI18nText', () => ({
@@ -113,6 +119,7 @@ afterEach(() => {
   fixtures.subFields = fixtures.defaultSubFields;
   fixtures.customCommands = [];
   fixtures.customPaths = [];
+  fixtures.unsupportedPaths = [];
 });
 
 function makeCommandItem(id: string, operationType: 'LST' | 'MOD'): CommandItem {
@@ -190,11 +197,17 @@ describe('CommandSelectModal', () => {
   });
 
   it('shows only writable Path candidates for MOD', async () => {
+    fixtures.subFields = fixtures.defaultSubFields.map((subField) => ({
+      ...subField,
+      defaultSelected:
+        subField.tr069Path === 'Device.Info.Serial' ||
+        subField.tr069Path === 'Device.Info.Name',
+    }));
     renderModal({ value: null, selectedPathKeys: [] });
     fireEvent.click(document.querySelector('.ant-tree-switcher')!);
     fireEvent.click(await screen.findByText('修改设备信息'));
 
-    expect(await screen.findByRole('checkbox', { name: /Name/ })).toBeInTheDocument();
+    expect(await screen.findByRole('checkbox', { name: /Name/ })).toBeChecked();
     expect(screen.queryByRole('checkbox', { name: /Serial/ })).not.toBeInTheDocument();
     expect(
       screen.getByText('mml.consoleV2.cmdSelect.paramPathCount:{"count":3}'),
@@ -227,7 +240,7 @@ describe('CommandSelectModal', () => {
       description: 'Name',
       minValue: 2,
       maxValue: 32,
-      defaultSelected: false,
+      defaultSelected: true,
       sortOrder: 1,
     }];
     const onConfirm = vi.fn();
@@ -242,7 +255,7 @@ describe('CommandSelectModal', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
     fireEvent.click(await screen.findByText('修改名称'));
-    fireEvent.click(await screen.findByRole('checkbox', { name: /Name/ }));
+    expect(await screen.findByRole('checkbox', { name: /Name/ })).toBeChecked();
     fireEvent.click(screen.getByRole('button', { name: 'mml.consoleV2.cmdSelect.okText' }));
 
     expect(onConfirm).toHaveBeenCalledWith(
@@ -344,13 +357,14 @@ describe('CommandSelectModal', () => {
 
   it('prunes keys that become non-writable and preserves current command-definition order on confirm', async () => {
     const onConfirm = vi.fn();
-    const selectedPathKeys = ['Device.Info.Alias', 'Device.Info.Name', 'Device.Info.Model'];
     const { rerender } = renderModal({
       onConfirm,
       value: makeCommandItem('mod-1', 'MOD'),
-      selectedPathKeys,
+      selectedPathKeys: [],
     });
-    expect(await screen.findByRole('checkbox', { name: /Name/ })).toBeChecked();
+    fireEvent.click(await screen.findByRole('checkbox', { name: /Name/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Model/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Alias/ }));
 
     fixtures.subFields = [
       { tr069Path: 'Device.Info.Serial', label: 'Serial', accessType: 'READ_ONLY', isObject: false },
@@ -358,7 +372,7 @@ describe('CommandSelectModal', () => {
       { tr069Path: 'Device.Info.Model', label: 'Model', accessType: 'READ_WRITE', isObject: false },
       { tr069Path: 'Device.Info.Alias', label: 'Alias', accessType: 'READ_WRITE', isObject: false },
     ];
-    rerender(renderCommandModal({ onConfirm, value: makeCommandItem('mod-1', 'MOD'), selectedPathKeys }));
+    rerender(renderCommandModal({ onConfirm, value: makeCommandItem('mod-1', 'MOD'), selectedPathKeys: [] }));
 
     expect(await screen.findByRole('checkbox', { name: /Model/ })).toBeChecked();
     expect(screen.queryByRole('checkbox', { name: /Name/ })).not.toBeInTheDocument();
@@ -382,31 +396,76 @@ describe('CommandSelectModal', () => {
     expect(await screen.findByText('mml.consoleV2.cmdSelect.pickPathFirst')).toBeInTheDocument();
   });
 
-  it('restores confirmed keys on reopen and clears the draft when switching commands', async () => {
-    const { rerender } = renderModal({
+  it('reapplies configured defaults on reopen and ignores confirmed keys', async () => {
+    fixtures.subFields = fixtures.defaultSubFields.map((subField) => ({
+      ...subField,
+      defaultSelected: subField.tr069Path === 'Device.Info.Serial',
+    }));
+    const props = {
       value: makeCommandItem('lst-1', 'LST'),
       selectedPathKeys: ['Device.Info.Name'],
-    });
-    expect(await screen.findByRole('checkbox', { name: /Name/ })).toBeChecked();
+    };
+    const { rerender } = renderModal(props);
 
-    rerender(
-      renderCommandModal({
-        open: false,
-        value: makeCommandItem('lst-1', 'LST'),
-        selectedPathKeys: ['Device.Info.Name'],
-      }),
-    );
-    rerender(
-      renderCommandModal({
-        open: true,
-        value: makeCommandItem('lst-1', 'LST'),
-        selectedPathKeys: ['Device.Info.Name'],
-      }),
-    );
-    expect(await screen.findByRole('checkbox', { name: /Name/ })).toBeChecked();
+    const serial = await screen.findByRole('checkbox', { name: /Serial/ });
+    const name = screen.getByRole('checkbox', { name: /Name/ });
+    expect(serial).toBeChecked();
+    expect(name).not.toBeChecked();
+
+    fireEvent.click(serial);
+    expect(serial).not.toBeChecked();
+
+    rerender(renderCommandModal(props));
+    expect(screen.getByRole('checkbox', { name: /Serial/ })).not.toBeChecked();
+
+    rerender(renderCommandModal({ ...props, open: false }));
+    rerender(renderCommandModal({ ...props, open: true }));
+    expect(await screen.findByRole('checkbox', { name: /Serial/ })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /Name/ })).not.toBeChecked();
+  });
+
+  it('reapplies defaults after switching away from and back to a command', async () => {
+    fixtures.subFields = fixtures.defaultSubFields.map((subField) => ({
+      ...subField,
+      defaultSelected: subField.tr069Path === 'Device.Info.Name',
+    }));
+    renderModal({
+      value: makeCommandItem('lst-1', 'LST'),
+      selectedPathKeys: [],
+    });
+
+    const name = await screen.findByRole('checkbox', { name: /Name/ });
+    expect(name).toBeChecked();
+    fireEvent.click(name);
+    expect(name).not.toBeChecked();
 
     fireEvent.click(document.querySelector('.ant-tree-switcher')!);
     fireEvent.click(await screen.findByText('修改设备信息'));
-    expect(await screen.findByRole('checkbox', { name: /Name/ })).not.toBeChecked();
+    expect(await screen.findByRole('checkbox', { name: /Name/ })).toBeChecked();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Name/ }));
+    fireEvent.click(await screen.findByText('查询设备信息'));
+    expect(await screen.findByRole('checkbox', { name: /Name/ })).toBeChecked();
+  });
+
+  it('does not default-select a query Path hidden by runtime support filtering', async () => {
+    fixtures.subFields = fixtures.defaultSubFields.map((subField) => ({
+      ...subField,
+      defaultSelected:
+        subField.tr069Path === 'Device.Info.Serial' ||
+        subField.tr069Path === 'Device.Info.Name',
+    }));
+    fixtures.unsupportedPaths = [{
+      path: 'Device.Info.Serial',
+      readUnsupported: true,
+      writeUnsupported: false,
+    }];
+
+    renderModal({ value: null, selectedPathKeys: [] });
+    fireEvent.click(document.querySelector('.ant-tree-switcher')!);
+    fireEvent.click(await screen.findByText('查询设备信息'));
+
+    expect(screen.queryByRole('checkbox', { name: /Serial/ })).not.toBeInTheDocument();
+    expect(await screen.findByRole('checkbox', { name: /Name/ })).toBeChecked();
   });
 });
