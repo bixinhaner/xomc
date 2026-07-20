@@ -161,6 +161,7 @@ func TestParseOperatorID(t *testing.T) {
 	id := uuid.New()
 	assert.Nil(t, parseOperatorID(""))
 	assert.Nil(t, parseOperatorID("not-a-uuid"))
+	assert.Nil(t, parseOperatorID(uuid.Nil.String()), "全零 UUID 应视为无操作人，避免写 sys_task_logs 时触发 operator_id 外键违反")
 	got := parseOperatorID(id.String())
 	require.NotNil(t, got)
 	assert.Equal(t, id, *got)
