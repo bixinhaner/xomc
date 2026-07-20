@@ -84,6 +84,8 @@ type createRequestDTO struct {
 	IsBuiltin bool `json:"is_builtin"`
 	// 非持续型过期天数（T-0182，默认 60）
 	ExpireDays int `json:"expire_days" binding:"omitempty,min=1"`
+	// visibility：private（默认，仅创建者/超管可见可操作）/ public（登录用户可见可操作）
+	Visibility string `json:"visibility" binding:"omitempty,oneof=private public"`
 }
 
 type taskResponseDTO struct {
@@ -101,6 +103,7 @@ type taskResponseDTO struct {
 	Technology    string    `json:"technology,omitempty"`
 	IsBuiltin     bool      `json:"is_builtin"`
 	ExpireDays    int       `json:"expire_days"`
+	Visibility    string    `json:"visibility"`
 	Status        string    `json:"status"`
 	Progress      int       `json:"progress"`
 	Creator       string    `json:"creator"`
@@ -131,6 +134,7 @@ func taskToDTO(ctx context.Context, t *Task) taskResponseDTO {
 		Technology:    t.Technology,
 		IsBuiltin:     t.IsBuiltin,
 		ExpireDays:    t.ExpireDays,
+		Visibility:    string(normalizeVisibility(t.Visibility)),
 		Status:        string(t.Status),
 		Progress:      t.Progress,
 		Creator:       t.Creator,
@@ -216,6 +220,7 @@ func (h *Handler) Create(c *gin.Context) {
 		Technology:    req.Technology,
 		IsBuiltin:     req.IsBuiltin,
 		ExpireDays:    req.ExpireDays,
+		Visibility:    Visibility(req.Visibility),
 		Creator:       creator,
 	})
 	if err != nil {
@@ -308,12 +313,13 @@ WHERE serial_number = ANY($1)`
 	return nil
 }
 
-// List GET /pm/adhoc/tasks?mode=&status=&limit=&offset=&all=true
+// List GET /pm/adhoc/tasks?mode=&status=&limit=&offset=
 //
-// T-0164 收尾 G7-Gap-7：默认按 creator=current_user 过滤（"我的任务"），
-// admin 角色传 ?all=true 可看全部任务（运维 / 审计场景）。
+// 默认返回：内置任务 + 当前用户 private 自定义任务 + 所有 public 自定义任务。
+// 超管（source='builtIn'）由后端登录态自动识别，可看全部任务（运维 / 审计场景）。
 func (h *Handler) List(c *gin.Context) {
-	filter := ListFilter{Limit: 50}
+	currentUser := extractCreator(c)
+	filter := ListFilter{Limit: 50, CurrentUser: currentUser}
 	if v := c.Query("mode"); v != "" {
 		m := Mode(v)
 		filter.Mode = &m
@@ -323,13 +329,7 @@ func (h *Handler) List(c *gin.Context) {
 		filter.Status = &s
 	}
 
-	// T-0164 收尾 G7-Gap-7：creator 过滤
-	// - 默认按当前用户过滤（"我的任务"）
-	// - admin 角色传 ?all=true 可看全部
-	// - 显式传 ?creator=xxx 时尊重（向后兼容老 client + 运维筛查特定用户场景）
 	// T-0184：内置任务过滤（前端分"内置区"/"自建区"）。
-	//   ?is_builtin=true  → 只看内置 12 个预置任务（全用户可见，不按 creator 过滤）
-	//   ?is_builtin=false → 只看自建任务（仍按 creator 默认过滤）
 	var builtinOnly bool
 	if v := c.Query("is_builtin"); v != "" {
 		b := v == "true"
@@ -337,20 +337,9 @@ func (h *Handler) List(c *gin.Context) {
 		builtinOnly = b
 	}
 
-	currentUser := extractCreator(c)
-	all := c.Query("all") == "true"
-	switch {
-	case builtinOnly:
-		// 内置任务无 per-user 归属，全用户共享可见 → 不按 creator 过滤
-		filter.Creator = ""
-	case c.Query("creator") != "":
+	filter.IncludeAll = isAdmin(c)
+	if !builtinOnly && c.Query("creator") != "" {
 		filter.Creator = c.Query("creator")
-	case all && isAdmin(c):
-		// admin + 显式 ?all=true → 不过滤
-		filter.Creator = ""
-	default:
-		// 默认按当前用户过滤
-		filter.Creator = currentUser
 	}
 	if v := c.Query("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
@@ -390,6 +379,10 @@ func (h *Handler) Get(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
+	if !canViewTask(t, extractCreator(c), isAdmin(c)) {
+		response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
+		return
+	}
 	response.OK(c, taskToDTO(c.Request.Context(), t))
 }
 
@@ -405,6 +398,7 @@ type updateRequestDTO struct {
 	ObjectLDNs    []string  `json:"object_ldns"`
 	WindowStart   time.Time `json:"window_start"`
 	WindowEnd     time.Time `json:"window_end"`
+	Visibility    string    `json:"visibility" binding:"omitempty,oneof=private public"`
 }
 
 // Update PATCH /pm/adhoc/tasks/:id
@@ -435,7 +429,7 @@ func (h *Handler) Update(c *gin.Context) {
 		return
 	}
 
-	// #652：自建任务归属权校验（编辑）—— 仅创建者或超管可编辑。
+	// 自建任务权限：private 仅创建者或超管；public 允许其他登录用户编辑。
 	if !existing.IsBuiltin {
 		if !canOperate(existing, extractCreator(c), isAdmin(c)) {
 			response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
@@ -496,6 +490,10 @@ func (h *Handler) Update(c *gin.Context) {
 		upd.Name = req.Name
 		upd.DeviceSNs = req.DeviceSNs
 		upd.Granularities = req.Granularities
+		upd.Visibility = existing.Visibility
+		if req.Visibility != "" {
+			upd.Visibility = Visibility(req.Visibility)
+		}
 		if existing.Mode == ModeContinuous {
 			cronExpr := cronForGranularity(req.Granularities[0])
 			upd.CronExpr = &cronExpr
@@ -531,7 +529,7 @@ func (h *Handler) Cancel(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "invalid id")
 		return
 	}
-	// #652：先取任务做归属权校验（取消）—— 自建任务仅创建者或超管可取消。
+	// 取消会中断正在执行/排期的任务，仍限定创建者或超管。
 	existing, err := h.repo.Get(c.Request.Context(), id)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -542,7 +540,7 @@ func (h *Handler) Cancel(c *gin.Context) {
 		return
 	}
 	if !existing.IsBuiltin {
-		if !canOperate(existing, extractCreator(c), isAdmin(c)) {
+		if !canCancelTask(existing, extractCreator(c), isAdmin(c)) {
 			response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
 			return
 		}
@@ -573,7 +571,7 @@ func (h *Handler) Resume(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "invalid id")
 		return
 	}
-	// #652：先取任务做归属权校验（恢复）—— 自建任务仅创建者或超管可恢复。
+	// 自建任务权限：private 仅创建者或超管；public 允许其他登录用户恢复。
 	existing, err := h.repo.Get(c.Request.Context(), id)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -617,7 +615,7 @@ func (h *Handler) Delete(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "invalid id")
 		return
 	}
-	// #652：先取任务做归属权校验（删除）—— 自建任务仅创建者或超管可删除。
+	// 自建任务权限：private 仅创建者或超管；public 允许其他登录用户删除。
 	existing, err := h.repo.Get(c.Request.Context(), id)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -627,7 +625,6 @@ func (h *Handler) Delete(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	// #652：自建任务归属权校验（删除）—— 仅创建者或超管可删除。
 	// 内置任务不做归属权校验（由 repo.Delete 的 is_builtin 守门拦截）。
 	if !existing.IsBuiltin {
 		if !canOperate(existing, extractCreator(c), isAdmin(c)) {
@@ -860,8 +857,8 @@ func (h *Handler) Results(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	// #652：自建任务结果读权限校验 —— 内置任务全员可读，自建任务仅创建者或超管可读。
-	if !canViewResults(task, extractCreator(c), isAdmin(c)) {
+	// 结果读权限与任务查看权限一致。
+	if !canViewTask(task, extractCreator(c), isAdmin(c)) {
 		response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
 		return
 	}
@@ -1132,8 +1129,8 @@ func (h *Handler) FilterOptions(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	// #652：筛选选项属于结果数据的衍生视图，与 Results 同口径做读权限校验。
-	if !canViewResults(task, extractCreator(c), isAdmin(c)) {
+	// 筛选选项属于结果数据的衍生视图，与 Results 同口径做读权限校验。
+	if !canViewTask(task, extractCreator(c), isAdmin(c)) {
 		response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
 		return
 	}
@@ -1286,7 +1283,7 @@ func (h *Handler) Runs(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	if !canViewResults(task, extractCreator(c), isAdmin(c)) {
+	if !canViewTask(task, extractCreator(c), isAdmin(c)) {
 		response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
 		return
 	}
@@ -1322,6 +1319,19 @@ func (h *Handler) Progress(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid id")
+		return
+	}
+	task, err := h.repo.Get(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			response.Fail(c, http.StatusNotFound, "task not found")
+			return
+		}
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if !canViewTask(task, extractCreator(c), isAdmin(c)) {
+		response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
 		return
 	}
 	if h.bus == nil {
@@ -1395,22 +1405,37 @@ func (h *Handler) writeSSE(w io.Writer, eventName string, data []byte) {
 	_, _ = w.Write([]byte("\n\n"))
 }
 
-// canOperate 判断当前用户对自建任务有无操作权限（编辑/取消/删除）。
-// 超管可操作任意自建任务；普通用户只能操作自己创建的任务。
+// canOperate 判断当前用户对自建任务有无管理权限（编辑/恢复/删除）。
+// 超管可操作任意自建任务；public 自建任务允许登录用户操作；private 仅创建者可操作。
 func canOperate(task *Task, currentUser string, admin bool) bool {
+	if admin {
+		return true
+	}
+	if normalizeVisibility(task.Visibility) == VisibilityPublic {
+		return true
+	}
+	return task.Creator == currentUser
+}
+
+// canCancelTask 判断当前用户能否取消任务。
+// 取消会影响正在执行/排期中的任务，只允许创建者或超管执行。
+func canCancelTask(task *Task, currentUser string, admin bool) bool {
 	if admin {
 		return true
 	}
 	return task.Creator == currentUser
 }
 
-// canViewResults 判断当前用户对任务结果有无读权限。
-// 内置任务全员可读；自建任务仅创建者或超管可读。
-func canViewResults(task *Task, currentUser string, admin bool) bool {
+// canViewTask 判断当前用户对任务定义、结果和运行信息有无读权限。
+// 内置任务全员可读；public 自建任务全员可读；private 自建任务仅创建者或超管可读。
+func canViewTask(task *Task, currentUser string, admin bool) bool {
 	if task.IsBuiltin {
 		return true
 	}
 	if admin {
+		return true
+	}
+	if normalizeVisibility(task.Visibility) == VisibilityPublic {
 		return true
 	}
 	return task.Creator == currentUser
@@ -1427,10 +1452,8 @@ func extractCreator(c *gin.Context) string {
 	return "anonymous"
 }
 
-// isAdmin 判断当前用户是否 admin / super_admin（T-0164 收尾 G7-Gap-7 用，决定 ?all=true 是否生效）。
-//
-// admin.AuthMiddleware 注入的 context key（roles / is_super_admin / user role）；
-// 任一为真即视为有权限看全部任务。
+// isAdmin 判断当前用户是否具备全局管理员视角。
+// 内置超管（source='builtIn' 派生 is_super_admin）和 admin / super_admin 角色都可查看全部任务。
 func isAdmin(c *gin.Context) bool {
 	if v, ok := c.Get("is_super_admin"); ok {
 		if b, ok := v.(bool); ok && b {

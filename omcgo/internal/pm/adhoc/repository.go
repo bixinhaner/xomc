@@ -179,7 +179,7 @@ var taskCols = []string{
 	"id", "task_name", "task_subtype", "mode", "cron_expr",
 	"device_sns", "metric_paths", "granularities",
 	"window_start", "window_end", "dimension", "technology", "is_builtin", "expire_days",
-	"status", "progress",
+	"visibility", "status", "progress",
 	"creator", "created_at", "updated_at",
 	"object_ldns", // T-0193：小区/PLMN 白名单（TEXT[]，NULL=不过滤）
 }
@@ -201,6 +201,7 @@ func (r *PgRepository) Create(ctx context.Context, req CreateRequest) (uuid.UUID
 	if expireDays <= 0 {
 		expireDays = 60 // 默认 60 天（约束任务定义层，与结果数据 PM 保留期分离）
 	}
+	visibility := normalizeVisibility(req.Visibility)
 	// #528 P3：持续任务初始游标 = 建任务时刻当前对应水位桶起点（从「现在」起算，不回扫历史）。
 	// 取不到水位（上游尚未卷完 / 未注入读取器）→ last_fire_at 留 NULL，退化到 created_at，
 	// 水位 gate 仍兜底挡史前格，安全。oneshot 任务无 cron 调度，初始游标无意义。
@@ -215,13 +216,13 @@ func (r *PgRepository) Create(ctx context.Context, req CreateRequest) (uuid.UUID
 			"task_name", "task_type", "task_subtype", "mode", "cron_expr",
 			"device_sns", "metric_paths", "granularities",
 			"window_start", "window_end", "dimension", "technology", "is_builtin", "expire_days",
-			"status", "progress", "creator", "object_ldns", "last_fire_at",
+			"visibility", "status", "progress", "creator", "object_ldns", "last_fire_at",
 		).
 		Values(
 			req.Name, "extraction", TaskSubtype, string(req.Mode), nullableString(req.CronExpr),
 			deviceSNsJSON, req.MetricPaths, req.Granularities,
 			nullableTime(req.WindowStart), nullableTime(req.WindowEnd), string(dim), nullableTech(req.Technology), req.IsBuiltin, expireDays,
-			string(StatusPending), 0, req.Creator, nullableStrSlice(req.ObjectLDNs), initialFire,
+			string(visibility), string(StatusPending), 0, req.Creator, nullableStrSlice(req.ObjectLDNs), initialFire,
 		).
 		Suffix("RETURNING id").
 		ToSql()
@@ -286,6 +287,7 @@ func buildUpdateSQL(id uuid.UUID, req UpdateRequest) (string, []any, error) {
 			Set("device_sns", deviceSNsJSON).
 			Set("granularities", req.Granularities).
 			Set("cron_expr", nullableString(req.CronExpr)).
+			Set("visibility", string(normalizeVisibility(req.Visibility))).
 			Set("object_ldns", nullableStrSlice(req.ObjectLDNs)).
 			Set("window_start", nullableTime(req.WindowStart)).
 			Set("window_end", nullableTime(req.WindowEnd))
@@ -316,29 +318,7 @@ func (r *PgRepository) Get(ctx context.Context, id uuid.UUID) (*Task, error) {
 }
 
 func (r *PgRepository) List(ctx context.Context, filter ListFilter) ([]Task, error) {
-	qb := storage.Psql.Select(taskCols...).
-		From("pm_tasks").
-		Where(sq.Eq{"task_subtype": TaskSubtype}).
-		OrderBy("task_name ASC")
-	if filter.Mode != nil {
-		qb = qb.Where(sq.Eq{"mode": string(*filter.Mode)})
-	}
-	if filter.Status != nil {
-		qb = qb.Where(sq.Eq{"status": string(*filter.Status)})
-	}
-	if filter.Creator != "" {
-		qb = qb.Where(sq.Eq{"creator": filter.Creator})
-	}
-	if filter.IsBuiltin != nil {
-		qb = qb.Where(sq.Eq{"is_builtin": *filter.IsBuiltin})
-	}
-	if filter.Limit > 0 {
-		qb = qb.Limit(uint64(filter.Limit))
-	}
-	if filter.Offset > 0 {
-		qb = qb.Offset(uint64(filter.Offset))
-	}
-	q, args, err := qb.ToSql()
+	q, args, err := buildListSQL(filter)
 	if err != nil {
 		return nil, fmt.Errorf("adhoc.List: build SQL: %w", err)
 	}
@@ -356,6 +336,43 @@ func (r *PgRepository) List(ctx context.Context, filter ListFilter) ([]Task, err
 		out = append(out, *t)
 	}
 	return out, rows.Err()
+}
+
+func buildListSQL(filter ListFilter) (string, []any, error) {
+	qb := storage.Psql.Select(taskCols...).
+		From("pm_tasks").
+		Where(sq.Eq{"task_subtype": TaskSubtype}).
+		OrderBy("task_name ASC")
+	if filter.Mode != nil {
+		qb = qb.Where(sq.Eq{"mode": string(*filter.Mode)})
+	}
+	if filter.Status != nil {
+		qb = qb.Where(sq.Eq{"status": string(*filter.Status)})
+	}
+	if filter.Creator != "" {
+		qb = qb.Where(sq.Eq{"creator": filter.Creator})
+	}
+	if filter.IsBuiltin != nil {
+		qb = qb.Where(sq.Eq{"is_builtin": *filter.IsBuiltin})
+	}
+	if !filter.IncludeAll {
+		qb = qb.Where(visibleTaskExpr(filter.CurrentUser))
+	}
+	if filter.Limit > 0 {
+		qb = qb.Limit(uint64(filter.Limit))
+	}
+	if filter.Offset > 0 {
+		qb = qb.Offset(uint64(filter.Offset))
+	}
+	return qb.ToSql()
+}
+
+func visibleTaskExpr(currentUser string) sq.Sqlizer {
+	return sq.Or{
+		sq.Eq{"is_builtin": true},
+		sq.Eq{"visibility": string(VisibilityPublic)},
+		sq.Eq{"creator": currentUser},
+	}
 }
 
 func (r *PgRepository) Cancel(ctx context.Context, id uuid.UUID) error {
@@ -805,6 +822,7 @@ func scanTask(row rowScanner) (*Task, error) {
 	var technology *string
 	var isBuiltin bool
 	var expireDays int
+	var visibility string
 	var status string
 	var creator *string
 	var objectLDNs []string // T-0193：白名单列，NULL → nil（不过滤）
@@ -812,7 +830,7 @@ func scanTask(row rowScanner) (*Task, error) {
 	err := row.Scan(
 		&t.ID, &t.Name, &subtype, &mode, &cronExpr,
 		&deviceSNsJSON, &metricPaths, &granularities,
-		&windowStart, &windowEnd, &dimension, &technology, &isBuiltin, &expireDays, &status, &t.Progress,
+		&windowStart, &windowEnd, &dimension, &technology, &isBuiltin, &expireDays, &visibility, &status, &t.Progress,
 		&creator, &t.CreatedAt, &t.UpdatedAt, &objectLDNs,
 	)
 	if err != nil {
@@ -824,6 +842,7 @@ func scanTask(row rowScanner) (*Task, error) {
 	}
 	t.IsBuiltin = isBuiltin
 	t.ExpireDays = expireDays
+	t.Visibility = normalizeVisibility(Visibility(visibility))
 	if mode != nil {
 		t.Mode = Mode(*mode)
 	}
@@ -869,6 +888,13 @@ func nullableString(s *string) any {
 		return nil
 	}
 	return *s
+}
+
+func normalizeVisibility(v Visibility) Visibility {
+	if v == VisibilityPublic {
+		return VisibilityPublic
+	}
+	return VisibilityPrivate
 }
 
 // nullableStrSlice 把 nil / 空切片映射为 SQL NULL（T-0193 object_ldns 列）。

@@ -41,7 +41,7 @@ import { useDeviceList } from '@core/hooks/api/useDevices';
 import { useMetricObjectsByDevices } from '@core/hooks/api/usePmQuery';
 import { useIndicatorCandidates } from '@core/hooks/api/usePerformance';
 import type { IndicatorCandidate } from '@core/services/api/pmApi';
-import type { AdhocDimension, AdhocMode } from '@core/types/pmAdhoc';
+import type { AdhocDimension, AdhocMode, AdhocVisibility } from '@core/types/pmAdhoc';
 import type { DeviceType } from '@core/types/indicatorLibrary';
 import { isGranularityDimensionSupported } from '@core/utils/pmAdhocConstraints';
 import { formatIndicatorLevel, shouldShowIndicatorLevel } from '@core/utils/indicatorLevelDisplay';
@@ -155,6 +155,7 @@ export default function PmAdhocWizard() {
   const [technology, setTechnology] = useState<WizardTech>('lte');
   const [mode, setMode] = useState<AdhocMode>('oneshot');
   const [expireDays, setExpireDays] = useState<number>(60);
+  const [visibility, setVisibility] = useState<AdhocVisibility>('private');
 
   // ② 聚合范围
   const [dimension, setDimension] = useState<AdhocDimension>('network');
@@ -190,6 +191,7 @@ export default function PmAdhocWizard() {
     }
     setMode(editTask.mode);
     setExpireDays(editTask.expireDays || 60);
+    setVisibility(editTask.visibility ?? 'private');
     setDimension(editTask.dimension);
     setSelectedSns(editTask.deviceSns ?? []);
     setMetricPaths(editTask.metricPaths ?? []);
@@ -335,6 +337,7 @@ export default function PmAdhocWizard() {
             deviceSns: needsDevicePick ? selectedSns : [],
             metricPaths,
             granularities: [granularity],
+            visibility,
             windowStart: mode === 'oneshot' ? window[0].toISOString() : undefined,
             windowEnd: mode === 'oneshot' ? window[1].toISOString() : undefined,
             objectLdns: objectLdns.length > 0 ? objectLdns : undefined,
@@ -352,6 +355,7 @@ export default function PmAdhocWizard() {
         deviceSns: needsDevicePick ? selectedSns : [],
         metricPaths,
         granularities: [granularity],
+        visibility,
         // oneshot 带 window；continuous 不带（后端开窗滚动）
         windowStart: mode === 'oneshot' ? window[0].toISOString() : undefined,
         windowEnd: mode === 'oneshot' ? window[1].toISOString() : undefined,
@@ -381,6 +385,19 @@ export default function PmAdhocWizard() {
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder={intl.formatMessage({ id: 'perf.adhoc.taskNamePlaceholder' })}
+        />
+      </div>
+      <div>
+        <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldVisibility' })}</div>
+        <Radio.Group
+          optionType="button"
+          buttonStyle="solid"
+          value={visibility}
+          onChange={(e) => setVisibility(e.target.value as AdhocVisibility)}
+          options={[
+            { label: intl.formatMessage({ id: 'perf.adhoc.visibilityPrivate' }), value: 'private' },
+            { label: intl.formatMessage({ id: 'perf.adhoc.visibilityPublic' }), value: 'public' },
+          ]}
         />
       </div>
       <div>
@@ -717,6 +734,15 @@ export default function PmAdhocWizard() {
           ) : (
             <Tag>{intl.formatMessage({ id: 'perf.adhoc.modeOneshotFull' })}</Tag>
           )}
+        </Descriptions.Item>
+        <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmVisibility' })}>
+          <Tag color={visibility === 'public' ? 'green' : undefined}>
+            {intl.formatMessage({
+              id: visibility === 'public'
+                ? 'perf.adhoc.visibilityPublic'
+                : 'perf.adhoc.visibilityPrivate',
+            })}
+          </Tag>
         </Descriptions.Item>
         {mode === 'oneshot' && (
           <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmExpireDays' })}>

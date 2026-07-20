@@ -113,6 +113,7 @@ func initPMModule(c *Container) error {
 	}
 	pmExportHandler := pmexport.NewHandler(pmExportSvc, exportPresigner, logger.Named("export"))
 	pmExportHandler.SetObjectClient(c.MinIO)
+	pmExportHandler.SetAdhocTaskReader(pmAdhocRepo)
 	if c.PresignBridge != nil {
 		pmExportHandler.SetPresignProvider(c.PresignBridge)
 	}

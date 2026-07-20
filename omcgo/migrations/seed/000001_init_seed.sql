@@ -7927,7 +7927,11 @@ ALTER TABLE public.pm_query_templates ENABLE TRIGGER ALL;
 
 ALTER TABLE public.pm_tasks DISABLE TRIGGER ALL;
 
-INSERT INTO public.pm_tasks VALUES
+INSERT INTO public.pm_tasks (
+	id, task_name, task_type, device_sns, kpi_codes, granularity, time_range, status, progress,
+	creator, created_at, updated_at, task_subtype, mode, cron_expr, metric_paths, granularities,
+	window_start, window_end, last_fire_at, dimension, technology, is_builtin, expire_days, object_ldns
+) VALUES
 	('0184dddd-0001-4000-8000-000000000001', '内置-全网-LTE', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 18:16:52.409282+08', '2026-06-12 18:16:52.409282+08', 'adhoc_aggregation', 'continuous', '5 * * * *', '{K900010015,K900010016,C000060216,K900010014,K900010013,K900010006,K900010002,K900010005,K900010029,K900010027,K900010017,K900010022,K900010021,K900010026}', '{hourly}', NULL, NULL, NULL, 'network', 'lte', true, 60, NULL),
 	('0184dddd-0001-4000-8000-000000000002', '内置-全网-NR', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 18:16:52.409282+08', '2026-06-12 18:16:52.409282+08', 'adhoc_aggregation', 'continuous', '5 * * * *', '{KGNB0511,KGNB0510,KGNB0506,KGNB0505}', '{hourly}', NULL, NULL, NULL, 'network', 'nr', true, 60, NULL),
 	('0184dddd-0001-4000-8000-000000000003', '内置-全网-GSM', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 18:16:52.409282+08', '2026-06-12 18:16:52.409282+08', 'adhoc_aggregation', 'continuous', '5 * * * *', '{KGSM0102,KGSM0103,KGSM0101}', '{hourly}', NULL, NULL, NULL, 'network', 'gsm', true, 60, NULL),

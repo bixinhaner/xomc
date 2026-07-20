@@ -42,6 +42,7 @@ func Test_buildUpdateSQL_Adhoc_AllFields(t *testing.T) {
 	for _, col := range []string{"metric_paths", "task_name", "device_sns", "granularities", "cron_expr", "object_ldns", "window_start", "window_end", "updated_at"} {
 		assert.Contains(t, setClause, col, "自建任务应更新 %s", col)
 	}
+	assert.Contains(t, setClause, "visibility", "自建任务应允许更新 visibility")
 	// 结构性不可改字段绝不出现在 SET
 	for _, col := range []string{"mode =", "technology =", "dimension =", "is_builtin =", "expire_days ="} {
 		assert.NotContains(t, setClause, col, "不可改字段 %s 不应进 SET", col)
@@ -96,4 +97,5 @@ func Test_buildUpdateSQL_Builtin_OnlyMetricPaths(t *testing.T) {
 	for _, col := range []string{"task_name", "device_sns", "granularities", "cron_expr", "object_ldns", "window_start", "window_end"} {
 		assert.NotContains(t, setClause, col, "内置任务不应更新 %s", col)
 	}
+	assert.NotContains(t, setClause, "visibility", "内置任务不应更新 visibility")
 }

@@ -5832,10 +5832,12 @@ CREATE TABLE public.pm_tasks (
     is_builtin boolean DEFAULT false NOT NULL,
     expire_days integer DEFAULT 60 NOT NULL,
     object_ldns text[],
+    visibility character varying(16) DEFAULT 'private'::character varying NOT NULL,
     CONSTRAINT chk_pm_tasks_continuous_cron CHECK (((mode IS DISTINCT FROM 'continuous'::text) OR (cron_expr IS NOT NULL))),
     CONSTRAINT chk_pm_tasks_dimension CHECK ((dimension = ANY (ARRAY['device'::text, 'aggregate_group'::text, 'device_group'::text, 'product'::text, 'band'::text, 'network'::text]))),
     CONSTRAINT chk_pm_tasks_mode CHECK (((mode IS NULL) OR (mode = ANY (ARRAY['oneshot'::text, 'continuous'::text])))),
-    CONSTRAINT chk_pm_tasks_technology CHECK (((technology IS NULL) OR (technology = ANY (ARRAY['lte'::text, 'nr'::text, 'gsm'::text]))))
+    CONSTRAINT chk_pm_tasks_technology CHECK (((technology IS NULL) OR (technology = ANY (ARRAY['lte'::text, 'nr'::text, 'gsm'::text])))),
+    CONSTRAINT chk_pm_tasks_visibility CHECK (((visibility)::text = ANY (ARRAY[('private'::character varying)::text, ('public'::character varying)::text])))
 );
 
 
@@ -5844,6 +5846,13 @@ CREATE TABLE public.pm_tasks (
 --
 
 COMMENT ON COLUMN public.pm_tasks.last_fire_at IS 'G7 continuous 任务上次 cron 触发时刻；ContinuousScheduler 写入，worker 不动。';
+
+
+--
+-- Name: COLUMN pm_tasks.visibility; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.pm_tasks.visibility IS 'PM adhoc 自定义聚合任务可见性：private=仅创建者/超管可见可操作；public=登录用户可见可操作。旧任务默认 private。';
 
 
 --
@@ -14350,6 +14359,13 @@ CREATE INDEX idx_pm_tasks_status ON public.pm_tasks USING btree (status);
 --
 
 CREATE INDEX idx_pm_tasks_subtype_status ON public.pm_tasks USING btree (task_subtype, status) WHERE (task_subtype IS NOT NULL);
+
+
+--
+-- Name: idx_pm_tasks_adhoc_visibility_creator; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pm_tasks_adhoc_visibility_creator ON public.pm_tasks USING btree (is_builtin, visibility, creator, task_name) WHERE (task_subtype = 'adhoc_aggregation'::text);
 
 
 --
