@@ -895,7 +895,7 @@ export const deviceApi = {
   /**
    * 批量预登记：在设备 Bootstrap 到达前，按 SN 列表预先录入设备名称。
    * 已存在的 SN 只更新名称/备注；不存在的 SN 新建设备（lifecycle='registered'）。
-   * 新建设备不写入任何分组，自然落在「未分组」视图，source_type 显示 Auto。
+   * 新建设备由后端归入默认设备组或按规则归组，source_type 显示 Auto。
    */
   async batchPreRegisterDevices(payload: BatchPreRegisterRequest): Promise<BatchPreRegisterResponse> {
     const { data } = await http.post<BatchPreRegisterResponse>('/devices/batch-preregister', payload);
@@ -957,7 +957,7 @@ export const deviceApi = {
       }
     }
     walk(data.items || []);
-    // 计算总设备数 = 已分组设备 + 未分组设备
+    // 计算总设备数 = 已分组设备 + 历史无归属设备
     const totalDevices = (data.stats?.grouped_devices ?? 0) + (data.stats?.ungrouped_devices ?? 0);
     return { groups: flat, stats: { totalDevices } };
   },

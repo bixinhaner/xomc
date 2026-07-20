@@ -17,10 +17,21 @@ export function useBatchActions(deps: {
   /** 刷新分组树查询（device-groups）—— 回收/删除设备后需同步更新各分组徽标 + 「全部」总数。 */
   refetchGroups: () => Promise<unknown>;
   deleteDevicesMutation: MutationLike<string[]>;
+  permanentDeleteDevicesMutation: MutationLike<string[]>;
   setSelectedDeviceIds: React.Dispatch<React.SetStateAction<React.Key[]>>;
   onMoveToGroup: (selectedKeys: React.Key[]) => void;
 }): BatchAction[] {
-  const { modal, message, t, refetch, refetchGroups, deleteDevicesMutation, setSelectedDeviceIds, onMoveToGroup } = deps;
+  const {
+    modal,
+    message,
+    t,
+    refetch,
+    refetchGroups,
+    deleteDevicesMutation,
+    permanentDeleteDevicesMutation,
+    setSelectedDeviceIds,
+    onMoveToGroup,
+  } = deps;
 
   return useMemo<BatchAction[]>(
     () => [
@@ -86,7 +97,7 @@ export function useBatchActions(deps: {
             okType: 'danger',
             onOk: async () => {
               try {
-                await deleteDevicesMutation.mutateAsync(selectedKeys as string[]);
+                await permanentDeleteDevicesMutation.mutateAsync(selectedKeys as string[]);
                 void message.success(t('common.deleteSuccess'));
               } catch {
                 void message.error(t('common.operationFailed'));
@@ -98,6 +109,16 @@ export function useBatchActions(deps: {
         },
       },
     ],
-    [t, modal, message, refetch, refetchGroups, deleteDevicesMutation, setSelectedDeviceIds, onMoveToGroup]
+    [
+      t,
+      modal,
+      message,
+      refetch,
+      refetchGroups,
+      deleteDevicesMutation,
+      permanentDeleteDevicesMutation,
+      setSelectedDeviceIds,
+      onMoveToGroup,
+    ]
   );
 }

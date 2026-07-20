@@ -723,27 +723,34 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 		}
 	}
 
-	// Check pre-registration: assign to specified group if found.
-	if s.regRepo != nil && s.groupAssigner != nil {
-		preReg, _ := s.regRepo.GetBySerialNumber(ctx, device.SerialNumber)
+	// Assign new devices to the pre-registered group when present; otherwise to
+	// the default L2 group. Matching rules may move the device later.
+	if s.groupAssigner != nil {
+		var preReg *DeviceRegistration
+		if s.regRepo != nil {
+			preReg, _ = s.regRepo.GetBySerialNumber(ctx, device.SerialNumber)
+		}
+
+		targetGroupID := uuid.MustParse(global.DefaultLevel2GroupID)
 		if preReg != nil && preReg.GroupID != nil {
-			if _, err := s.groupAssigner.BatchAddDevices(ctx, *preReg.GroupID, []uuid.UUID{device.ID}); err != nil {
-				s.logger.Warn("assign device to pre-registered group",
-					zap.String("device_id", device.ID.String()),
-					zap.String("group_id", preReg.GroupID.String()),
-					zap.Error(err))
-			} else {
-				s.logger.Info("device assigned to pre-registered group",
-					zap.String("device_id", device.ID.String()),
-					zap.String("group_id", preReg.GroupID.String()))
-			}
+			targetGroupID = *preReg.GroupID
+		}
+
+		if _, err := s.groupAssigner.BatchAddDevices(ctx, targetGroupID, []uuid.UUID{device.ID}); err != nil {
+			s.logger.Warn("assign new device to group",
+				zap.String("device_id", device.ID.String()),
+				zap.String("group_id", targetGroupID.String()),
+				zap.Error(err))
+		} else {
+			s.logger.Info("new device assigned to group",
+				zap.String("device_id", device.ID.String()),
+				zap.String("group_id", targetGroupID.String()))
+		}
+
+		if preReg != nil {
 			// Mark registration as online.
 			s.regRepo.UpdateStatus(ctx, preReg.ID, string(global.RegistrationOnline))
 		}
-		// 2026-06-03 用户决策「未分组 = 未绑定任何分组」：取消"无预登记则自动归默认 L2 组"。
-		// 无预登记的新设备保持未分组(无 device_group_members 行),由 GroupMatchEngine
-		// (device.registered / device.attributes.changed / cron)按规则命中才归组;不命中即留在
-		// "未分组设备"。这样"未分组"是真正的无成员关系,而非默认组成员。
 	}
 
 	// Sync UDP address to STUN cache
@@ -2232,10 +2239,8 @@ func (s *DeviceService) BatchRebootDevices(ctx context.Context, ids []uuid.UUID)
 	return result
 }
 
-// splitGeoGroupIDs 把前端传来的 group_ids（可能混入 DefaultLevel2GroupID 这个「未分组设备」伪节点）
-// 拆分为「真实分组 ID」+「是否包含未分组」两路。Geo 三接口（list/stats/center）都先经过此归一，
-// 再由 repository 的 applyGeoGroupFilter 拼装为 (dg.id IN realIDs ∨ NOT EXISTS device_group_members)，
-// 与设备列表 / 拓扑徽标对未分组节点的口径保持一致。
+// splitGeoGroupIDs 归一化前端传来的 group_ids。默认组现在是真实设备组，
+// 保留 includeUngrouped 仅兼容历史无归属数据的显式空值分支。
 func splitGeoGroupIDs(ids []string) (realIDs []string, includeUngrouped bool) {
 	if len(ids) == 0 {
 		return nil, false
@@ -2243,9 +2248,6 @@ func splitGeoGroupIDs(ids []string) (realIDs []string, includeUngrouped bool) {
 	realIDs = make([]string, 0, len(ids))
 	for _, id := range ids {
 		if id == "" {
-			continue
-		}
-		if id == global.DefaultLevel2GroupID {
 			includeUngrouped = true
 			continue
 		}
@@ -2259,7 +2261,7 @@ func splitGeoGroupIDs(ids []string) (realIDs []string, includeUngrouped bool) {
 
 // ListGeo returns devices with geographic coordinates for map display.
 // filter.VisibleGroups 携带 #64 设备组数据权限，由 handler 解析调用者身份后注入。
-// filter.GroupIDs 经 splitGeoGroupIDs 归一后传给 repository，确保「未分组设备」节点选中场景能命中。
+// filter.GroupIDs 经 splitGeoGroupIDs 归一后传给 repository。
 func (s *DeviceService) ListGeo(ctx context.Context, filter GeoDeviceFilter) ([]GeoDevice, int64, error) {
 	filter.GroupIDs, filter.IncludeUngrouped = splitGeoGroupIDs(filter.GroupIDs)
 	devices, total, err := s.deviceRepo.ListGeo(ctx, filter)

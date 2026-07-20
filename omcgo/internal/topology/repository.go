@@ -39,10 +39,8 @@ type GroupMembership interface {
 	MoveDevices(ctx context.Context, deviceIDs []uuid.UUID, targetGroupID uuid.UUID) (int64, error)
 	MoveGroupDevicesToDefault(ctx context.Context, groupIDs []uuid.UUID) (int64, error)
 
-	// RemoveDevicesFromAllGroups 删除给定设备的**全部**归属记录（不限分组），
-	// 等价"移出分组" —— 设备回到 NOT EXISTS device_group_members 的未分组态。
-	// 用于「移动/添加到『未分组设备』内置节点(DefaultLevel2GroupID)」的服务层兜底，
-	// 避免再产生指向内置节点的归属行（issue #478）。
+	// RemoveDevicesFromAllGroups 删除给定设备的**全部**归属记录（不限分组）。
+	// 仅保留给历史无归属数据修复/管理类任务；默认组是普通真实分组。
 	RemoveDevicesFromAllGroups(ctx context.Context, deviceIDs []uuid.UUID) (int64, error)
 
 	// AddDeviceWithSource UPSERT 设备到指定 group 并标注来源（T-0027 D5.B）。

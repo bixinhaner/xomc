@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/omcgo/omcgo/global"
 	"github.com/omcgo/omcgo/internal/authz"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -79,9 +80,7 @@ type RecycleBinFilter struct {
 }
 
 // GeoDeviceFilter specifies criteria for listing devices with geo data.
-// GroupIDs 仅包含「真实」分组（service 层在调用 repository 前已剥离 DefaultLevel2GroupID）。
-// IncludeUngrouped=true 表示调用方选中了「未分组设备」伪节点，repository 用
-// ungroupedDevicesWhere 子查询独立合并到 group 过滤里，口径与设备列表/拓扑徽标一致。
+// GroupIDs 是真实分组 ID；IncludeUngrouped 仅兼容历史无归属设备兜底。
 type GeoDeviceFilter struct {
 	GroupIDs         []string
 	IncludeUngrouped bool
@@ -1176,10 +1175,8 @@ func scanGeoDeviceRow(row scannable) (GeoDevice, error) {
 	return d, nil
 }
 
-// applyGeoGroupFilter 给 GIS Geo 查询（list/stats/center）拼上「真实分组 IN ∨ 未分组 NOT EXISTS」语义。
-// realIDs 与 includeUngrouped 由 service.splitGeoGroupIDs 归一化后传入，体口与设备列表一致
-// （参见 device_info_pg_repository.go ungroupedDevicesWhere），避免 Geo 链路对 DefaultLevel2GroupID
-// 简单 IN 导致「未分组」节点计数归 0 的口径分叉。
+// applyGeoGroupFilter 给 GIS Geo 查询（list/stats/center）拼上设备组过滤。
+// includeUngrouped 仅用于兼容历史无归属设备；默认组本身作为真实分组传入 realIDs。
 func applyGeoGroupFilter(builder sq.SelectBuilder, realIDs []string, includeUngrouped bool) sq.SelectBuilder {
 	switch {
 	case len(realIDs) > 0 && includeUngrouped:
@@ -1624,6 +1621,7 @@ func recycleBinSelectColumns() []string {
 			THEN FLOOR((GREATEST(EXTRACT(EPOCH FROM (d.deleted_at - d.last_inform_at)), 0) % 3600) / 60)::bigint
 			ELSE NULL
 		END AS offline_minutes`,
+		"FALSE AS param_sync_running", // Placeholder for shared DeviceWithInfo scanner
 		"NULL::int AS active_alarm_count", // Placeholder for compatibility
 	}
 }
@@ -1673,12 +1671,23 @@ func buildRecycleBinListBuilders(filter RecycleBinFilter) (sq.SelectBuilder, sq.
 		countBuilder = countBuilder.Where(sq.Like{"d.deleted_by": "%" + *filter.DeletedBy + "%"})
 	}
 
-	// GroupID filter (LEFT JOIN already in main query, just add WHERE)
+	// GroupID filter. 默认组额外兜底历史无归属设备；新数据仍写真实默认组 membership。
 	if filter.GroupID != nil {
-		builder = builder.Where(sq.Eq{"dgm.group_id": *filter.GroupID})
-		countBuilder = countBuilder.
-			Join("device_group_members dgm ON d.id = dgm.device_id").
-			Where(sq.Eq{"dgm.group_id": *filter.GroupID})
+		if filter.GroupID.String() == global.DefaultLevel2GroupID {
+			cond := sq.Or{
+				sq.Eq{"dgm.group_id": *filter.GroupID},
+				sq.Expr(ungroupedDevicesWhere),
+			}
+			builder = builder.Where(cond)
+			countBuilder = countBuilder.
+				LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
+				Where(cond)
+		} else {
+			builder = builder.Where(sq.Eq{"dgm.group_id": *filter.GroupID})
+			countBuilder = countBuilder.
+				Join("device_group_members dgm ON d.id = dgm.device_id").
+				Where(sq.Eq{"dgm.group_id": *filter.GroupID})
+		}
 	}
 
 	return builder, countBuilder

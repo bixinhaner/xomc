@@ -52,7 +52,7 @@ describe('buildGroupTargetOptions — 移动/添加到分组的目标下拉（is
     expect(buildGroupTargetOptions(groups, getParentName)).toEqual([]);
   });
 
-  it('特例路径：内置默认节点保留分组展示名，同时标记为移出分组语义', () => {
+  it('默认二级组作为普通写入目标', () => {
     const groups: DeviceGroup[] = [
       mkGroup({ id: ROOT_ID, name: '默认分组', parentId: null }),
       mkGroup({ id: UNASSIGNED_GROUP_ID, name: '默认设备组', parentId: ROOT_ID, builtIn: 1 }),
@@ -62,13 +62,25 @@ describe('buildGroupTargetOptions — 移动/添加到分组的目标下拉（is
     expect(opts).toContainEqual({
       label: '默认分组 / 默认设备组',
       value: UNASSIGNED_GROUP_ID,
-      isRemove: true,
+      isRemove: false,
     });
-    // 特殊项的 value 仍是 ...0002，交给后端按"移出分组"语义处理（删归属记录）
-    const removeOpt = opts.find((o) => o.isRemove);
-    expect(removeOpt?.value).toBe(UNASSIGNED_GROUP_ID);
-    // 真实分组仍正常列出
+    expect(opts.some((o) => o.isRemove)).toBe(false);
     expect(opts.some((o) => o.value === 'g-real' && !o.isRemove)).toBe(true);
+  });
+
+  it('移动目标可排除设备已在的当前分组', () => {
+    const groups: DeviceGroup[] = [
+      mkGroup({ id: ROOT_ID, name: '默认分组', parentId: null }),
+      mkGroup({ id: UNASSIGNED_GROUP_ID, name: '默认设备组', parentId: ROOT_ID, builtIn: 1 }),
+      mkGroup({ id: 'g-real', name: '北京一区', parentId: ROOT_ID }),
+    ];
+    const opts = buildGroupTargetOptions(groups, getParentName, undefined, {
+      excludeGroupIds: [UNASSIGNED_GROUP_ID],
+    });
+
+    expect(opts).toEqual([
+      { label: '默认分组 / 北京一区', value: 'g-real', isRemove: false },
+    ]);
   });
 
   it('支持调用方按 locale 注入分组展示名', () => {
@@ -93,7 +105,7 @@ describe('buildGroupTargetOptions — 移动/添加到分组的目标下拉（is
       group.nameI18n?.['en-US'] ?? group.name;
 
     expect(buildGroupTargetOptions(groups, getParentNameEn, getGroupNameEn)).toEqual([
-      { label: 'Default Group / Default Group', value: UNASSIGNED_GROUP_ID, isRemove: true },
+      { label: 'Default Group / Default Group', value: UNASSIGNED_GROUP_ID, isRemove: false },
     ]);
   });
 });
