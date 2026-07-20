@@ -1,6 +1,5 @@
 -- +goose Up
--- 主库 consolidated baseline（2026-07-16；纯 PostgreSQL 16；时序对象位于 migrations/tsdb）。
-
+-- 主库 consolidated baseline（2026-07-20；纯 PostgreSQL 16；时序对象位于 migrations/tsdb）。
 --
 -- PostgreSQL database dump
 --
@@ -761,7 +760,9 @@ CREATE TABLE public.backup_restore_file (
     operator_code character varying(8),
     update_time timestamp with time zone DEFAULT now() NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    task_id uuid
+    task_id uuid,
+    is_deleted boolean DEFAULT false NOT NULL,
+    deleted_at timestamp with time zone
 );
 
 
@@ -1331,7 +1332,8 @@ CREATE TABLE public.device_info (
     lmt_device_name character varying(255),
     highest_alarm_severity smallint,
     highest_severity_alarm_count smallint DEFAULT 0
-);
+)
+WITH (autovacuum_vacuum_scale_factor='0.02', autovacuum_vacuum_threshold='200', autovacuum_analyze_scale_factor='0.02', autovacuum_analyze_threshold='200');
 
 
 --
@@ -1742,6 +1744,32 @@ CREATE TABLE public.device_licenses (
     CONSTRAINT device_licenses_file_ext_check CHECK (((file_ext)::text = 'lic'::text)),
     CONSTRAINT device_licenses_source_check CHECK (((source)::text = 'manual_upload'::text))
 );
+
+
+--
+-- Name: device_location_observations; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.device_location_observations (
+    device_id uuid NOT NULL,
+    latitude double precision NOT NULL,
+    longitude double precision NOT NULL,
+    gps_height double precision,
+    observed_at timestamp with time zone NOT NULL,
+    version bigint DEFAULT 1 NOT NULL,
+    source_path text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT device_location_observations_latitude_check CHECK (((latitude >= ('-90'::integer)::double precision) AND (latitude <= (90)::double precision))),
+    CONSTRAINT device_location_observations_longitude_check CHECK (((longitude >= ('-180'::integer)::double precision) AND (longitude <= (180)::double precision))),
+    CONSTRAINT device_location_observations_version_check CHECK ((version > 0))
+);
+
+
+--
+-- Name: TABLE device_location_observations; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.device_location_observations IS '设备最新有效 GPS 观测值；不等同于网管已接受坐标';
 
 
 --
@@ -2988,7 +3016,10 @@ CREATE TABLE public.devices (
     last_param_sync_failed_at timestamp with time zone,
     last_param_sync_error text,
     last_offline_reason character varying(32),
-    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text])))
+    recycle_type character varying(16) DEFAULT ''::character varying NOT NULL,
+    recycle_executor character varying(128) DEFAULT ''::character varying NOT NULL,
+    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text]))),
+    CONSTRAINT devices_recycle_type_check CHECK (((recycle_type)::text = ANY ((ARRAY[''::character varying, 'manual'::character varying, 'auto'::character varying])::text[])))
 )
 PARTITION BY LIST (carrier);
 
@@ -3225,6 +3256,20 @@ COMMENT ON COLUMN public.devices.last_offline_reason IS '最近一次被标记�
 
 
 --
+-- Name: COLUMN devices.recycle_type; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.devices.recycle_type IS '移入回收站方式：manual 或 auto';
+
+
+--
+-- Name: COLUMN devices.recycle_executor; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.devices.recycle_executor IS '实际执行软删除的用户或系统任务标识';
+
+
+--
 -- Name: devices_cmcc; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -3264,8 +3309,12 @@ CREATE TABLE public.devices_cmcc (
     last_param_sync_failed_at timestamp with time zone,
     last_param_sync_error text,
     last_offline_reason character varying(32),
-    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text])))
-);
+    recycle_type character varying(16) DEFAULT ''::character varying NOT NULL,
+    recycle_executor character varying(128) DEFAULT ''::character varying NOT NULL,
+    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text]))),
+    CONSTRAINT devices_recycle_type_check CHECK (((recycle_type)::text = ANY ((ARRAY[''::character varying, 'manual'::character varying, 'auto'::character varying])::text[])))
+)
+WITH (autovacuum_vacuum_scale_factor='0.02', autovacuum_vacuum_threshold='200', autovacuum_analyze_scale_factor='0.02', autovacuum_analyze_threshold='200');
 
 
 --
@@ -3308,7 +3357,10 @@ CREATE TABLE public.devices_ctcc (
     last_param_sync_failed_at timestamp with time zone,
     last_param_sync_error text,
     last_offline_reason character varying(32),
-    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text])))
+    recycle_type character varying(16) DEFAULT ''::character varying NOT NULL,
+    recycle_executor character varying(128) DEFAULT ''::character varying NOT NULL,
+    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text]))),
+    CONSTRAINT devices_recycle_type_check CHECK (((recycle_type)::text = ANY ((ARRAY[''::character varying, 'manual'::character varying, 'auto'::character varying])::text[])))
 );
 
 
@@ -3352,7 +3404,10 @@ CREATE TABLE public.devices_cucc (
     last_param_sync_failed_at timestamp with time zone,
     last_param_sync_error text,
     last_offline_reason character varying(32),
-    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text])))
+    recycle_type character varying(16) DEFAULT ''::character varying NOT NULL,
+    recycle_executor character varying(128) DEFAULT ''::character varying NOT NULL,
+    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text]))),
+    CONSTRAINT devices_recycle_type_check CHECK (((recycle_type)::text = ANY ((ARRAY[''::character varying, 'manual'::character varying, 'auto'::character varying])::text[])))
 );
 
 
@@ -3396,7 +3451,10 @@ CREATE TABLE public.devices_other (
     last_param_sync_failed_at timestamp with time zone,
     last_param_sync_error text,
     last_offline_reason character varying(32),
-    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text])))
+    recycle_type character varying(16) DEFAULT ''::character varying NOT NULL,
+    recycle_executor character varying(128) DEFAULT ''::character varying NOT NULL,
+    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text]))),
+    CONSTRAINT devices_recycle_type_check CHECK (((recycle_type)::text = ANY ((ARRAY[''::character varying, 'manual'::character varying, 'auto'::character varying])::text[])))
 );
 
 
@@ -4482,6 +4540,30 @@ COMMENT ON COLUMN public.mml_tasks.request_id IS 'Client-generated idempotency k
 
 
 --
+-- Name: model_upload_intents; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.model_upload_intents (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    device_id uuid NOT NULL,
+    upload_task_id uuid NOT NULL,
+    discovery_log_id uuid,
+    source_event_id character varying(128) NOT NULL,
+    model_version character varying(128),
+    model_hash character varying(128),
+    status character varying(24) DEFAULT 'requested'::character varying NOT NULL,
+    failure_code character varying(64),
+    failure_message text,
+    attempts integer DEFAULT 0 NOT NULL,
+    next_attempt_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_error text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT model_upload_intents_status_chk CHECK (((status)::text = ANY ((ARRAY['requested'::character varying, 'uploaded'::character varying, 'not_supported'::character varying, 'failed'::character varying, 'sync_queued'::character varying, 'sync_submitted'::character varying, 'manual_review'::character varying])::text[])))
+);
+
+
+--
 -- Name: mr_customize_task; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -5127,26 +5209,44 @@ COMMENT ON COLUMN public.parameter_discovery_log.param_model_id IS 'T-0098 参�
 
 
 --
--- Name: model_upload_intents; Type: TABLE; Schema: public; Owner: -
+-- Name: parameter_sync_admission_reservations; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.model_upload_intents (
+CREATE TABLE public.parameter_sync_admission_reservations (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    device_id uuid NOT NULL,
-    upload_task_id uuid NOT NULL,
-    discovery_log_id uuid,
-    source_event_id character varying(128) NOT NULL,
-    model_version character varying(128),
-    model_hash character varying(128),
-    status character varying(24) DEFAULT 'requested'::character varying NOT NULL,
-    failure_code character varying(64),
-    failure_message text,
-    attempts integer DEFAULT 0 NOT NULL,
-    next_attempt_at timestamp with time zone DEFAULT now() NOT NULL,
-    last_error text,
+    request_id uuid NOT NULL,
+    admission_class character varying(32) NOT NULL,
+    bucket_id smallint NOT NULL,
+    reserved_runs integer DEFAULT 0 NOT NULL,
+    reserved_tasks integer DEFAULT 0 NOT NULL,
+    status character varying(16) DEFAULT 'reserved'::character varying NOT NULL,
+    lease_until timestamp with time zone DEFAULT now() NOT NULL,
+    released_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT model_upload_intents_status_chk CHECK (status IN ('requested', 'uploaded', 'not_supported', 'failed', 'sync_queued', 'sync_submitted', 'manual_review'))
+    CONSTRAINT parameter_sync_admission_reservation_counts_chk CHECK (((reserved_runs >= 0) AND (reserved_tasks >= 0))),
+    CONSTRAINT parameter_sync_admission_reservation_status_chk CHECK (((status)::text = ANY ((ARRAY['reserved'::character varying, 'released'::character varying, 'expired'::character varying])::text[])))
+);
+
+
+--
+-- Name: parameter_sync_admission_state; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.parameter_sync_admission_state (
+    admission_class character varying(32) NOT NULL,
+    bucket_id smallint NOT NULL,
+    active_run_limit integer DEFAULT 0 NOT NULL,
+    active_task_limit integer DEFAULT 0 NOT NULL,
+    missing_result_limit integer DEFAULT 0 NOT NULL,
+    create_rate_per_minute integer DEFAULT 0 NOT NULL,
+    reserved_runs integer DEFAULT 0 NOT NULL,
+    reserved_tasks integer DEFAULT 0 NOT NULL,
+    version bigint DEFAULT 0 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT parameter_sync_admission_bucket_chk CHECK ((bucket_id >= 0)),
+    CONSTRAINT parameter_sync_admission_class_chk CHECK (((admission_class)::text = ANY ((ARRAY['global'::character varying, 'model_upload'::character varying, 'periodic'::character varying, 'manual'::character varying])::text[]))),
+    CONSTRAINT parameter_sync_admission_counts_chk CHECK (((active_run_limit >= 0) AND (active_task_limit >= 0) AND (missing_result_limit >= 0) AND (create_rate_per_minute >= 0) AND (reserved_runs >= 0) AND (reserved_tasks >= 0)))
 );
 
 
@@ -5164,6 +5264,32 @@ CREATE TABLE public.parameter_sync_device_state (
     last_error text,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT parameter_sync_device_state_consecutive_failures_check CHECK ((consecutive_failures >= 0))
+);
+
+
+--
+-- Name: parameter_sync_event_failures; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.parameter_sync_event_failures (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    subject character varying(255) NOT NULL,
+    event_id character varying(128) NOT NULL,
+    device_id uuid,
+    device_sn character varying(64),
+    request_id uuid,
+    run_id uuid,
+    task_id uuid,
+    raw_payload jsonb DEFAULT '{}'::jsonb NOT NULL,
+    delivery_count integer DEFAULT 0 NOT NULL,
+    status character varying(24) DEFAULT 'pending'::character varying NOT NULL,
+    last_error text,
+    next_retry_at timestamp with time zone,
+    replayed_at timestamp with time zone,
+    recovered_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT parameter_sync_event_failure_status_chk CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'replayed'::character varying, 'recovered'::character varying, 'manual_review'::character varying])::text[])))
 );
 
 
@@ -5186,7 +5312,28 @@ CREATE TABLE public.parameter_sync_outbox (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT parameter_sync_outbox_attempt_chk CHECK ((attempt_count >= 0)),
-    CONSTRAINT parameter_sync_outbox_status_chk CHECK (status IN ('pending', 'delivering', 'delivered', 'failed', 'dead'))
+    CONSTRAINT parameter_sync_outbox_status_chk CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'delivering'::character varying, 'delivered'::character varying, 'failed'::character varying, 'dead'::character varying])::text[])))
+);
+
+
+--
+-- Name: parameter_sync_recovery_state; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.parameter_sync_recovery_state (
+    run_id uuid NOT NULL,
+    task_id uuid NOT NULL,
+    status character varying(24) DEFAULT 'pending'::character varying NOT NULL,
+    attempts integer DEFAULT 0 NOT NULL,
+    next_retry_at timestamp with time zone DEFAULT now() NOT NULL,
+    lease_token uuid,
+    lease_until timestamp with time zone,
+    last_error text,
+    claimed_at timestamp with time zone,
+    processed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT parameter_sync_recovery_status_chk CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'processing'::character varying, 'processed'::character varying, 'failed'::character varying, 'manual_review'::character varying])::text[])))
 );
 
 
@@ -5201,7 +5348,7 @@ CREATE TABLE public.parameter_sync_request_bindings (
     status character varying(24) DEFAULT 'waiting'::character varying NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     completed_at timestamp with time zone,
-    CONSTRAINT parameter_sync_bindings_status_chk CHECK (status IN ('waiting', 'completed', 'failed', 'cancelled'))
+    CONSTRAINT parameter_sync_bindings_status_chk CHECK (((status)::text = ANY ((ARRAY['waiting'::character varying, 'completed'::character varying, 'failed'::character varying, 'cancelled'::character varying])::text[])))
 );
 
 
@@ -5240,9 +5387,9 @@ CREATE TABLE public.parameter_sync_requests (
     started_at timestamp with time zone,
     completed_at timestamp with time zone,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT parameter_sync_requests_scope_chk CHECK (sync_scope IN ('full', 'partial', 'readback', 'policy_probe')),
-    CONSTRAINT parameter_sync_requests_status_chk CHECK (status IN ('accepted', 'queued', 'running', 'succeeded', 'failed', 'timed_out', 'cancelled', 'deduplicated', 'rejected')),
-    CONSTRAINT parameter_sync_requests_trigger_reason_chk CHECK (trigger_reason IN ('bootstrap', 'model_upload', 'device_online', 'firmware_changed', 'periodic', 'manual', 'config_pull', 'license', 'spv_readback', 'add_object_readback', 'inform_period_probe'))
+    CONSTRAINT parameter_sync_requests_scope_chk CHECK (((sync_scope)::text = ANY ((ARRAY['full'::character varying, 'partial'::character varying, 'readback'::character varying, 'policy_probe'::character varying])::text[]))),
+    CONSTRAINT parameter_sync_requests_status_chk CHECK (((status)::text = ANY ((ARRAY['accepted'::character varying, 'queued'::character varying, 'running'::character varying, 'succeeded'::character varying, 'failed'::character varying, 'timed_out'::character varying, 'cancelled'::character varying, 'deduplicated'::character varying, 'rejected'::character varying])::text[]))),
+    CONSTRAINT parameter_sync_requests_trigger_reason_chk CHECK (((trigger_reason)::text = ANY ((ARRAY['bootstrap'::character varying, 'model_upload'::character varying, 'device_online'::character varying, 'firmware_changed'::character varying, 'periodic'::character varying, 'manual'::character varying, 'config_pull'::character varying, 'license'::character varying, 'spv_readback'::character varying, 'add_object_readback'::character varying, 'inform_period_probe'::character varying])::text[])))
 );
 
 
@@ -5277,98 +5424,9 @@ CREATE TABLE public.parameter_sync_runs (
     projection_lease_until timestamp with time zone,
     projection_next_attempt_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT parameter_sync_runs_counts_chk CHECK (((expected_task_count >= 0) AND (terminal_task_count >= 0) AND (processed_task_count >= 0) AND (failed_task_count >= 0) AND (terminal_task_count <= expected_task_count) AND (processed_task_count <= terminal_task_count) AND (failed_task_count <= processed_task_count))),
-    CONSTRAINT parameter_sync_runs_scope_chk CHECK (sync_scope IN ('full', 'partial', 'readback', 'policy_probe')),
-    CONSTRAINT parameter_sync_runs_status_chk CHECK (status IN ('planning', 'enqueuing', 'waiting_device', 'executing', 'processing', 'cancelling', 'succeeded', 'failed', 'cancelled')),
-    CONSTRAINT parameter_sync_runs_trigger_reason_chk CHECK (trigger_reason IN ('bootstrap', 'model_upload', 'device_online', 'firmware_changed', 'periodic', 'manual', 'config_pull', 'license', 'spv_readback', 'add_object_readback', 'inform_period_probe'))
-);
-
-
---
--- Name: parameter_sync_admission_state; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.parameter_sync_admission_state (
-    admission_class character varying(32) NOT NULL,
-    bucket_id smallint NOT NULL,
-    active_run_limit integer DEFAULT 0 NOT NULL,
-    active_task_limit integer DEFAULT 0 NOT NULL,
-    missing_result_limit integer DEFAULT 0 NOT NULL,
-    create_rate_per_minute integer DEFAULT 0 NOT NULL,
-    reserved_runs integer DEFAULT 0 NOT NULL,
-    reserved_tasks integer DEFAULT 0 NOT NULL,
-    version bigint DEFAULT 0 NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT parameter_sync_admission_bucket_chk CHECK (bucket_id >= 0),
-    CONSTRAINT parameter_sync_admission_class_chk CHECK (admission_class IN ('global', 'model_upload', 'periodic', 'manual')),
-    CONSTRAINT parameter_sync_admission_counts_chk CHECK ((active_run_limit >= 0) AND (active_task_limit >= 0) AND (missing_result_limit >= 0) AND (create_rate_per_minute >= 0) AND (reserved_runs >= 0) AND (reserved_tasks >= 0))
-);
-
-
---
--- Name: parameter_sync_admission_reservations; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.parameter_sync_admission_reservations (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    request_id uuid NOT NULL,
-    admission_class character varying(32) NOT NULL,
-    bucket_id smallint NOT NULL,
-    reserved_runs integer DEFAULT 0 NOT NULL,
-    reserved_tasks integer DEFAULT 0 NOT NULL,
-    status character varying(16) DEFAULT 'reserved'::character varying NOT NULL,
-    lease_until timestamp with time zone DEFAULT now() NOT NULL,
-    released_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT parameter_sync_admission_reservation_counts_chk CHECK ((reserved_runs >= 0) AND (reserved_tasks >= 0)),
-    CONSTRAINT parameter_sync_admission_reservation_status_chk CHECK (status IN ('reserved', 'released', 'expired'))
-);
-
-
---
--- Name: parameter_sync_event_failures; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.parameter_sync_event_failures (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    subject character varying(255) NOT NULL,
-    event_id character varying(128) NOT NULL,
-    device_id uuid,
-    device_sn character varying(64),
-    request_id uuid,
-    run_id uuid,
-    task_id uuid,
-    raw_payload jsonb DEFAULT '{}'::jsonb NOT NULL,
-    delivery_count integer DEFAULT 0 NOT NULL,
-    status character varying(24) DEFAULT 'pending'::character varying NOT NULL,
-    last_error text,
-    next_retry_at timestamp with time zone,
-    replayed_at timestamp with time zone,
-    recovered_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT parameter_sync_event_failure_status_chk CHECK (status IN ('pending', 'replayed', 'recovered', 'manual_review'))
-);
-
-
---
--- Name: parameter_sync_recovery_state; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.parameter_sync_recovery_state (
-    run_id uuid NOT NULL,
-    task_id uuid NOT NULL,
-    status character varying(24) DEFAULT 'pending'::character varying NOT NULL,
-    attempts integer DEFAULT 0 NOT NULL,
-    next_retry_at timestamp with time zone DEFAULT now() NOT NULL,
-    lease_token uuid,
-    lease_until timestamp with time zone,
-    last_error text,
-    claimed_at timestamp with time zone,
-    processed_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT parameter_sync_recovery_status_chk CHECK (status IN ('pending', 'processing', 'processed', 'failed', 'manual_review'))
+    CONSTRAINT parameter_sync_runs_scope_chk CHECK (((sync_scope)::text = ANY ((ARRAY['full'::character varying, 'partial'::character varying, 'readback'::character varying, 'policy_probe'::character varying])::text[]))),
+    CONSTRAINT parameter_sync_runs_status_chk CHECK (((status)::text = ANY ((ARRAY['planning'::character varying, 'enqueuing'::character varying, 'waiting_device'::character varying, 'executing'::character varying, 'processing'::character varying, 'cancelling'::character varying, 'succeeded'::character varying, 'failed'::character varying, 'cancelled'::character varying])::text[]))),
+    CONSTRAINT parameter_sync_runs_trigger_reason_chk CHECK (((trigger_reason)::text = ANY ((ARRAY['bootstrap'::character varying, 'model_upload'::character varying, 'device_online'::character varying, 'firmware_changed'::character varying, 'periodic'::character varying, 'manual'::character varying, 'config_pull'::character varying, 'license'::character varying, 'spv_readback'::character varying, 'add_object_readback'::character varying, 'inform_period_probe'::character varying])::text[])))
 );
 
 
@@ -5407,7 +5465,7 @@ CREATE TABLE public.parameter_sync_task_results (
     error_message text,
     processed_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT parameter_sync_task_results_status_chk CHECK (status IN ('received', 'processed', 'failed'))
+    CONSTRAINT parameter_sync_task_results_status_chk CHECK (((status)::text = ANY ((ARRAY['received'::character varying, 'processed'::character varying, 'failed'::character varying])::text[])))
 );
 
 
@@ -7960,6 +8018,14 @@ ALTER TABLE ONLY public.device_licenses
 
 
 --
+-- Name: device_location_observations device_location_observations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.device_location_observations
+    ADD CONSTRAINT device_location_observations_pkey PRIMARY KEY (device_id);
+
+
+--
 -- Name: device_parameters device_parameters_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -8616,6 +8682,14 @@ ALTER TABLE ONLY public.mml_custom_command
 
 
 --
+-- Name: model_upload_intents model_upload_intents_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.model_upload_intents
+    ADD CONSTRAINT model_upload_intents_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: mr_customize_task mr_customize_task_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -8832,43 +8906,11 @@ ALTER TABLE ONLY public.param_models
 
 
 --
--- Name: model_upload_intents model_upload_intents_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.model_upload_intents
-    ADD CONSTRAINT model_upload_intents_pkey PRIMARY KEY (id);
-
-
---
--- Name: model_upload_intents uq_model_upload_intents_device_task; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.model_upload_intents
-    ADD CONSTRAINT uq_model_upload_intents_device_task UNIQUE (device_id, upload_task_id);
-
-
---
--- Name: model_upload_intents uq_model_upload_intents_source_event; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.model_upload_intents
-    ADD CONSTRAINT uq_model_upload_intents_source_event UNIQUE (source_event_id);
-
-
---
 -- Name: parameter_discovery_log parameter_discovery_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.parameter_discovery_log
     ADD CONSTRAINT parameter_discovery_log_pkey PRIMARY KEY (id);
-
-
---
--- Name: parameter_sync_device_state parameter_sync_device_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.parameter_sync_device_state
-    ADD CONSTRAINT parameter_sync_device_state_pkey PRIMARY KEY (device_id);
 
 
 --
@@ -8880,19 +8922,19 @@ ALTER TABLE ONLY public.parameter_sync_admission_reservations
 
 
 --
--- Name: parameter_sync_admission_reservations uq_parameter_sync_admission_reservation_request; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.parameter_sync_admission_reservations
-    ADD CONSTRAINT uq_parameter_sync_admission_reservation_request UNIQUE (request_id, admission_class);
-
-
---
 -- Name: parameter_sync_admission_state parameter_sync_admission_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.parameter_sync_admission_state
     ADD CONSTRAINT parameter_sync_admission_state_pkey PRIMARY KEY (admission_class, bucket_id);
+
+
+--
+-- Name: parameter_sync_device_state parameter_sync_device_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_device_state
+    ADD CONSTRAINT parameter_sync_device_state_pkey PRIMARY KEY (device_id);
 
 
 --
@@ -8904,19 +8946,19 @@ ALTER TABLE ONLY public.parameter_sync_event_failures
 
 
 --
--- Name: parameter_sync_event_failures uq_parameter_sync_event_failure_event; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.parameter_sync_event_failures
-    ADD CONSTRAINT uq_parameter_sync_event_failure_event UNIQUE (subject, event_id);
-
-
---
 -- Name: parameter_sync_outbox parameter_sync_outbox_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.parameter_sync_outbox
     ADD CONSTRAINT parameter_sync_outbox_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: parameter_sync_recovery_state parameter_sync_recovery_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_recovery_state
+    ADD CONSTRAINT parameter_sync_recovery_state_pkey PRIMARY KEY (run_id, task_id);
 
 
 --
@@ -8933,14 +8975,6 @@ ALTER TABLE ONLY public.parameter_sync_request_bindings
 
 ALTER TABLE ONLY public.parameter_sync_requests
     ADD CONSTRAINT parameter_sync_requests_pkey PRIMARY KEY (id);
-
-
---
--- Name: parameter_sync_recovery_state parameter_sync_recovery_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.parameter_sync_recovery_state
-    ADD CONSTRAINT parameter_sync_recovery_state_pkey PRIMARY KEY (run_id, task_id);
 
 
 --
@@ -9568,11 +9602,43 @@ ALTER TABLE ONLY public.mml_param_versions
 
 
 --
+-- Name: model_upload_intents uq_model_upload_intents_device_task; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.model_upload_intents
+    ADD CONSTRAINT uq_model_upload_intents_device_task UNIQUE (device_id, upload_task_id);
+
+
+--
+-- Name: model_upload_intents uq_model_upload_intents_source_event; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.model_upload_intents
+    ADD CONSTRAINT uq_model_upload_intents_source_event UNIQUE (source_event_id);
+
+
+--
 -- Name: mr_customize_task_progress uq_mr_progress_task_cell; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.mr_customize_task_progress
     ADD CONSTRAINT uq_mr_progress_task_cell UNIQUE (task_id, small_cell_code);
+
+
+--
+-- Name: parameter_sync_admission_reservations uq_parameter_sync_admission_reservation_request; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_admission_reservations
+    ADD CONSTRAINT uq_parameter_sync_admission_reservation_request UNIQUE (request_id, admission_class);
+
+
+--
+-- Name: parameter_sync_event_failures uq_parameter_sync_event_failure_event; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_event_failures
+    ADD CONSTRAINT uq_parameter_sync_event_failure_event UNIQUE (subject, event_id);
 
 
 --
@@ -10325,6 +10391,20 @@ CREATE INDEX device_parameters_p31_parameter_value_device_id_idx ON public.devic
 
 
 --
+-- Name: idx_device_tasks_pending_created_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_device_tasks_pending_created_id ON ONLY public.device_tasks USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
+
+
+--
+-- Name: device_tasks_p00_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p00_created_at_id_idx ON public.device_tasks_p00 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
+
+
+--
 -- Name: idx_device_tasks_created_at; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -10451,6 +10531,13 @@ CREATE INDEX device_tasks_p00_status_idx ON public.device_tasks_p00 USING btree 
 
 
 --
+-- Name: device_tasks_p01_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p01_created_at_id_idx ON public.device_tasks_p01 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
+
+
+--
 -- Name: device_tasks_p01_created_at_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -10511,6 +10598,13 @@ CREATE INDEX device_tasks_p01_status_expires_at_idx ON public.device_tasks_p01 U
 --
 
 CREATE INDEX device_tasks_p01_status_idx ON public.device_tasks_p01 USING btree (status);
+
+
+--
+-- Name: device_tasks_p02_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p02_created_at_id_idx ON public.device_tasks_p02 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
 
 
 --
@@ -10577,6 +10671,13 @@ CREATE INDEX device_tasks_p02_status_idx ON public.device_tasks_p02 USING btree 
 
 
 --
+-- Name: device_tasks_p03_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p03_created_at_id_idx ON public.device_tasks_p03 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
+
+
+--
 -- Name: device_tasks_p03_created_at_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -10637,6 +10738,13 @@ CREATE INDEX device_tasks_p03_status_expires_at_idx ON public.device_tasks_p03 U
 --
 
 CREATE INDEX device_tasks_p03_status_idx ON public.device_tasks_p03 USING btree (status);
+
+
+--
+-- Name: device_tasks_p04_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p04_created_at_id_idx ON public.device_tasks_p04 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
 
 
 --
@@ -10703,6 +10811,13 @@ CREATE INDEX device_tasks_p04_status_idx ON public.device_tasks_p04 USING btree 
 
 
 --
+-- Name: device_tasks_p05_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p05_created_at_id_idx ON public.device_tasks_p05 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
+
+
+--
 -- Name: device_tasks_p05_created_at_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -10763,6 +10878,13 @@ CREATE INDEX device_tasks_p05_status_expires_at_idx ON public.device_tasks_p05 U
 --
 
 CREATE INDEX device_tasks_p05_status_idx ON public.device_tasks_p05 USING btree (status);
+
+
+--
+-- Name: device_tasks_p06_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p06_created_at_id_idx ON public.device_tasks_p06 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
 
 
 --
@@ -10829,6 +10951,13 @@ CREATE INDEX device_tasks_p06_status_idx ON public.device_tasks_p06 USING btree 
 
 
 --
+-- Name: device_tasks_p07_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p07_created_at_id_idx ON public.device_tasks_p07 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
+
+
+--
 -- Name: device_tasks_p07_created_at_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -10889,6 +11018,13 @@ CREATE INDEX device_tasks_p07_status_expires_at_idx ON public.device_tasks_p07 U
 --
 
 CREATE INDEX device_tasks_p07_status_idx ON public.device_tasks_p07 USING btree (status);
+
+
+--
+-- Name: device_tasks_p08_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p08_created_at_id_idx ON public.device_tasks_p08 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
 
 
 --
@@ -10955,6 +11091,13 @@ CREATE INDEX device_tasks_p08_status_idx ON public.device_tasks_p08 USING btree 
 
 
 --
+-- Name: device_tasks_p09_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p09_created_at_id_idx ON public.device_tasks_p09 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
+
+
+--
 -- Name: device_tasks_p09_created_at_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -11015,6 +11158,13 @@ CREATE INDEX device_tasks_p09_status_expires_at_idx ON public.device_tasks_p09 U
 --
 
 CREATE INDEX device_tasks_p09_status_idx ON public.device_tasks_p09 USING btree (status);
+
+
+--
+-- Name: device_tasks_p10_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p10_created_at_id_idx ON public.device_tasks_p10 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
 
 
 --
@@ -11081,6 +11231,13 @@ CREATE INDEX device_tasks_p10_status_idx ON public.device_tasks_p10 USING btree 
 
 
 --
+-- Name: device_tasks_p11_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p11_created_at_id_idx ON public.device_tasks_p11 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
+
+
+--
 -- Name: device_tasks_p11_created_at_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -11141,6 +11298,13 @@ CREATE INDEX device_tasks_p11_status_expires_at_idx ON public.device_tasks_p11 U
 --
 
 CREATE INDEX device_tasks_p11_status_idx ON public.device_tasks_p11 USING btree (status);
+
+
+--
+-- Name: device_tasks_p12_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p12_created_at_id_idx ON public.device_tasks_p12 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
 
 
 --
@@ -11207,6 +11371,13 @@ CREATE INDEX device_tasks_p12_status_idx ON public.device_tasks_p12 USING btree 
 
 
 --
+-- Name: device_tasks_p13_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p13_created_at_id_idx ON public.device_tasks_p13 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
+
+
+--
 -- Name: device_tasks_p13_created_at_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -11270,6 +11441,13 @@ CREATE INDEX device_tasks_p13_status_idx ON public.device_tasks_p13 USING btree 
 
 
 --
+-- Name: device_tasks_p14_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p14_created_at_id_idx ON public.device_tasks_p14 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
+
+
+--
 -- Name: device_tasks_p14_created_at_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -11330,6 +11508,13 @@ CREATE INDEX device_tasks_p14_status_expires_at_idx ON public.device_tasks_p14 U
 --
 
 CREATE INDEX device_tasks_p14_status_idx ON public.device_tasks_p14 USING btree (status);
+
+
+--
+-- Name: device_tasks_p15_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p15_created_at_id_idx ON public.device_tasks_p15 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
 
 
 --
@@ -12131,6 +12316,20 @@ CREATE INDEX idx_audit_logs_user_time ON public.audit_logs USING btree (user_id,
 
 
 --
+-- Name: idx_backup_restore_file_active_fault_logs; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_backup_restore_file_active_fault_logs ON public.backup_restore_file USING btree (serial_number, update_time, id) WHERE ((is_deleted = false) AND ((object_path ~~ '%/fault/%'::text) OR (object_path ~~ 'fault/%'::text)));
+
+
+--
+-- Name: idx_backup_restore_file_active_station_logs_retention; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_backup_restore_file_active_station_logs_retention ON public.backup_restore_file USING btree (update_time, id) WHERE ((is_deleted = false) AND ((object_path ~~ '%/running/%'::text) OR (object_path ~~ 'running/%'::text) OR (object_path ~~ '%/fault/%'::text) OR (object_path ~~ 'fault/%'::text)));
+
+
+--
 -- Name: idx_backup_restore_file_operator; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -12597,6 +12796,13 @@ CREATE INDEX idx_device_licenses_product_type ON public.device_licenses USING bt
 --
 
 CREATE INDEX idx_device_licenses_update_time ON public.device_licenses USING btree (update_time DESC);
+
+
+--
+-- Name: idx_device_location_observations_observed_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_device_location_observations_observed_at ON public.device_location_observations USING btree (device_id, observed_at DESC);
 
 
 --
@@ -13279,6 +13485,13 @@ CREATE INDEX idx_mml_templates_scope_group ON public.mml_custom_command USING bt
 
 
 --
+-- Name: idx_model_upload_intents_dispatch; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_model_upload_intents_dispatch ON public.model_upload_intents USING btree (status, next_attempt_at, created_at);
+
+
+--
 -- Name: idx_mr_indicators_category; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -13797,13 +14010,6 @@ CREATE INDEX idx_param_models_active ON public.param_models USING btree (is_acti
 
 
 --
--- Name: idx_model_upload_intents_dispatch; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_model_upload_intents_dispatch ON public.model_upload_intents USING btree (status, next_attempt_at, created_at);
-
-
---
 -- Name: idx_parameter_sync_admission_reservations_bucket; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -13849,7 +14055,21 @@ CREATE INDEX idx_parameter_sync_event_failures_run_task ON public.parameter_sync
 -- Name: idx_parameter_sync_outbox_dispatch; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_parameter_sync_outbox_dispatch ON public.parameter_sync_outbox USING btree (status, next_attempt_at, created_at) WHERE status IN ('pending', 'failed');
+CREATE INDEX idx_parameter_sync_outbox_dispatch ON public.parameter_sync_outbox USING btree (status, next_attempt_at, created_at) WHERE ((status)::text = ANY ((ARRAY['pending'::character varying, 'failed'::character varying])::text[]));
+
+
+--
+-- Name: idx_parameter_sync_outbox_ready_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_outbox_ready_created ON public.parameter_sync_outbox USING btree (created_at, id) WHERE ((status)::text = ANY ((ARRAY['pending'::character varying, 'failed'::character varying])::text[]));
+
+
+--
+-- Name: idx_parameter_sync_recovery_claim; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_recovery_claim ON public.parameter_sync_recovery_state USING btree (status, next_retry_at, lease_until, updated_at);
 
 
 --
@@ -13874,17 +14094,17 @@ CREATE INDEX idx_parameter_sync_requests_source_event ON public.parameter_sync_r
 
 
 --
--- Name: idx_parameter_sync_recovery_claim; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_parameter_sync_recovery_claim ON public.parameter_sync_recovery_state USING btree (status, next_retry_at, lease_until, updated_at);
-
-
---
 -- Name: idx_parameter_sync_runs_device_history; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_parameter_sync_runs_device_history ON public.parameter_sync_runs USING btree (device_id, started_at DESC);
+
+
+--
+-- Name: idx_parameter_sync_runs_device_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_runs_device_status ON public.parameter_sync_runs USING btree (device_id, status, started_at DESC);
 
 
 --
@@ -13906,6 +14126,20 @@ CREATE INDEX idx_parameter_sync_runs_projection_pending ON public.parameter_sync
 --
 
 CREATE INDEX idx_parameter_sync_runs_request ON public.parameter_sync_runs USING btree (request_id);
+
+
+--
+-- Name: idx_parameter_sync_task_results_event; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_task_results_event ON public.parameter_sync_task_results USING btree (event_id);
+
+
+--
+-- Name: idx_parameter_sync_task_results_status_time; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_task_results_status_time ON public.parameter_sync_task_results USING btree (status, created_at, processed_at);
 
 
 --
@@ -15032,7 +15266,7 @@ CREATE UNIQUE INDEX uq_mml_scripts_import_session_id ON public.mml_scripts USING
 -- Name: uq_mml_tasks_active_root_script; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_mml_tasks_active_root_script ON public.mml_tasks USING btree (script_id) WHERE script_id IS NOT NULL AND parent_task_id IS NULL AND status IN ('pending', 'running', 'paused');
+CREATE UNIQUE INDEX uq_mml_tasks_active_root_script ON public.mml_tasks USING btree (script_id) WHERE ((script_id IS NOT NULL) AND (parent_task_id IS NULL) AND ((status)::text = ANY ((ARRAY['pending'::character varying, 'running'::character varying, 'paused'::character varying])::text[])));
 
 
 --
@@ -15067,21 +15301,7 @@ CREATE UNIQUE INDEX uq_parameter_sync_requests_model_upload_intent ON public.par
 -- Name: uq_parameter_sync_runs_active_device; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_parameter_sync_runs_active_device ON public.parameter_sync_runs USING btree (device_id) WHERE status IN ('planning', 'enqueuing', 'waiting_device', 'executing', 'processing', 'cancelling');
-
-
---
--- Name: idx_parameter_sync_task_results_event; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_parameter_sync_task_results_event ON public.parameter_sync_task_results USING btree (event_id);
-
-
---
--- Name: idx_parameter_sync_task_results_status_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_parameter_sync_task_results_status_time ON public.parameter_sync_task_results USING btree (status, created_at, processed_at);
+CREATE UNIQUE INDEX uq_parameter_sync_runs_active_device ON public.parameter_sync_runs USING btree (device_id) WHERE ((status)::text = ANY ((ARRAY['planning'::character varying, 'enqueuing'::character varying, 'waiting_device'::character varying, 'executing'::character varying, 'processing'::character varying, 'cancelling'::character varying])::text[]));
 
 
 --
@@ -15988,6 +16208,13 @@ ALTER INDEX public.device_parameters_pkey ATTACH PARTITION public.device_paramet
 
 
 --
+-- Name: device_tasks_p00_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p00_created_at_id_idx;
+
+
+--
 -- Name: device_tasks_p00_created_at_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -16055,6 +16282,13 @@ ALTER INDEX public.idx_device_tasks_status_expires ATTACH PARTITION public.devic
 --
 
 ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_p00_status_idx;
+
+
+--
+-- Name: device_tasks_p01_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p01_created_at_id_idx;
 
 
 --
@@ -16128,6 +16362,13 @@ ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_
 
 
 --
+-- Name: device_tasks_p02_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p02_created_at_id_idx;
+
+
+--
 -- Name: device_tasks_p02_created_at_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -16195,6 +16436,13 @@ ALTER INDEX public.idx_device_tasks_status_expires ATTACH PARTITION public.devic
 --
 
 ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_p02_status_idx;
+
+
+--
+-- Name: device_tasks_p03_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p03_created_at_id_idx;
 
 
 --
@@ -16268,6 +16516,13 @@ ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_
 
 
 --
+-- Name: device_tasks_p04_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p04_created_at_id_idx;
+
+
+--
 -- Name: device_tasks_p04_created_at_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -16335,6 +16590,13 @@ ALTER INDEX public.idx_device_tasks_status_expires ATTACH PARTITION public.devic
 --
 
 ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_p04_status_idx;
+
+
+--
+-- Name: device_tasks_p05_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p05_created_at_id_idx;
 
 
 --
@@ -16408,6 +16670,13 @@ ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_
 
 
 --
+-- Name: device_tasks_p06_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p06_created_at_id_idx;
+
+
+--
 -- Name: device_tasks_p06_created_at_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -16475,6 +16744,13 @@ ALTER INDEX public.idx_device_tasks_status_expires ATTACH PARTITION public.devic
 --
 
 ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_p06_status_idx;
+
+
+--
+-- Name: device_tasks_p07_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p07_created_at_id_idx;
 
 
 --
@@ -16548,6 +16824,13 @@ ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_
 
 
 --
+-- Name: device_tasks_p08_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p08_created_at_id_idx;
+
+
+--
 -- Name: device_tasks_p08_created_at_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -16615,6 +16898,13 @@ ALTER INDEX public.idx_device_tasks_status_expires ATTACH PARTITION public.devic
 --
 
 ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_p08_status_idx;
+
+
+--
+-- Name: device_tasks_p09_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p09_created_at_id_idx;
 
 
 --
@@ -16688,6 +16978,13 @@ ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_
 
 
 --
+-- Name: device_tasks_p10_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p10_created_at_id_idx;
+
+
+--
 -- Name: device_tasks_p10_created_at_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -16755,6 +17052,13 @@ ALTER INDEX public.idx_device_tasks_status_expires ATTACH PARTITION public.devic
 --
 
 ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_p10_status_idx;
+
+
+--
+-- Name: device_tasks_p11_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p11_created_at_id_idx;
 
 
 --
@@ -16828,6 +17132,13 @@ ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_
 
 
 --
+-- Name: device_tasks_p12_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p12_created_at_id_idx;
+
+
+--
 -- Name: device_tasks_p12_created_at_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -16895,6 +17206,13 @@ ALTER INDEX public.idx_device_tasks_status_expires ATTACH PARTITION public.devic
 --
 
 ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_p12_status_idx;
+
+
+--
+-- Name: device_tasks_p13_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p13_created_at_id_idx;
 
 
 --
@@ -16968,6 +17286,13 @@ ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_
 
 
 --
+-- Name: device_tasks_p14_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p14_created_at_id_idx;
+
+
+--
 -- Name: device_tasks_p14_created_at_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -17035,6 +17360,13 @@ ALTER INDEX public.idx_device_tasks_status_expires ATTACH PARTITION public.devic
 --
 
 ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_p14_status_idx;
+
+
+--
+-- Name: device_tasks_p15_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p15_created_at_id_idx;
 
 
 --
@@ -18463,6 +18795,14 @@ ALTER TABLE ONLY public.param_mappings
 
 
 --
+-- Name: parameter_sync_admission_reservations parameter_sync_admission_reservations_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_admission_reservations
+    ADD CONSTRAINT parameter_sync_admission_reservations_request_id_fkey FOREIGN KEY (request_id) REFERENCES public.parameter_sync_requests(id) ON DELETE CASCADE;
+
+
+--
 -- Name: parameter_sync_request_bindings parameter_sync_request_bindings_provisioning_task_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -18484,14 +18824,6 @@ ALTER TABLE ONLY public.parameter_sync_request_bindings
 
 ALTER TABLE ONLY public.parameter_sync_request_bindings
     ADD CONSTRAINT parameter_sync_request_bindings_run_id_fkey FOREIGN KEY (run_id) REFERENCES public.parameter_sync_runs(id) ON DELETE CASCADE;
-
-
---
--- Name: parameter_sync_admission_reservations parameter_sync_admission_reservations_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.parameter_sync_admission_reservations
-    ADD CONSTRAINT parameter_sync_admission_reservations_request_id_fkey FOREIGN KEY (request_id) REFERENCES public.parameter_sync_requests(id) ON DELETE CASCADE;
 
 
 --
@@ -18873,8 +19205,6 @@ ALTER TABLE ONLY public.users
 --
 -- PostgreSQL database dump complete
 --
-
-
 
 SELECT pg_catalog.set_config('search_path', 'public', false);
 -- +goose Down
