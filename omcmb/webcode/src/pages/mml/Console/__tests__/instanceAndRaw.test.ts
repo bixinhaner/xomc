@@ -215,4 +215,19 @@ describe('buildStandardQueryColumns', () => {
     ]);
     expect(command.paramPaths.map((item) => item.path)).toEqual(paths);
   });
+
+  it('多个叶子解析为同一对象前缀时按首次出现稳定去重', () => {
+    const paths = [
+      'Device.A.{i}.B.{i}.Value',
+      'Device.A.{i}.B.{i}.Name',
+    ];
+    const command = cmd('LST', paths.map((value) => path(value)));
+
+    expect(
+      buildStandardQueryColumns(command, paths, { i01: '1', i02: '' })
+        .map(({ key, path: resolvedPath }) => ({ key, path: resolvedPath })),
+    ).toEqual([
+      { key: 'c0', path: 'Device.A.1.B.' },
+    ]);
+  });
 });

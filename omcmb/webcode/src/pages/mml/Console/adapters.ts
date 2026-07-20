@@ -313,10 +313,17 @@ export function buildStandardQueryColumns(
   checkedPaths: string[],
   instanceSelectors?: Record<string, string>,
 ): ResultColumn[] {
-  return buildColumns(command, checkedPaths).map((column) => ({
-    ...column,
-    path: resolveQueryPath(column.path, instanceSelectors),
-  }));
+  const seen = new Set<string>();
+  return buildColumns(command, checkedPaths)
+    .map((column) => ({
+      ...column,
+      path: resolveQueryPath(column.path, instanceSelectors),
+    }))
+    .filter((column) => {
+      if (seen.has(column.path)) return false;
+      seen.add(column.path);
+      return true;
+    });
 }
 
 export function buildStandardRawRows(
@@ -414,23 +421,30 @@ export function expandObjectPathColumns(
   rows: ResultRow[],
 ): ResultColumn[] {
   const expanded: ResultColumn[] = [];
+  const emittedPaths = new Set<string>();
   for (const column of columns) {
     if (!column.path.endsWith('.')) {
+      if (emittedPaths.has(column.path)) continue;
+      emittedPaths.add(column.path);
       expanded.push(column);
       continue;
     }
 
     const descendantPaths: string[] = [];
-    const seen = new Set<string>();
+    let hasDescendant = false;
     for (const row of rows) {
       for (const path of Object.keys(row.cells)) {
-        if (path === column.path || !path.startsWith(column.path) || seen.has(path)) continue;
-        seen.add(path);
+        if (path === column.path || !path.startsWith(column.path)) continue;
+        hasDescendant = true;
+        if (emittedPaths.has(path)) continue;
+        emittedPaths.add(path);
         descendantPaths.push(path);
       }
     }
 
-    if (descendantPaths.length === 0) {
+    if (!hasDescendant) {
+      if (emittedPaths.has(column.path)) continue;
+      emittedPaths.add(column.path);
       expanded.push(column);
       continue;
     }

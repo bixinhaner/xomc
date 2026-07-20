@@ -146,6 +146,36 @@ func TestSubstituteQueryInstanceSelectors(t *testing.T) {
 			selectors: map[string]string{"iβ": "2", "iα": "1"},
 			want:      "Device.A.1.B.2.Value",
 		},
+		{
+			name:      "mixed selectors keep numbered key bound to its exact layer",
+			path:      "Device.A.{i}.B.{i}.C.{i}.Value",
+			selectors: map[string]string{"i03": "3", "iα": "1", "iβ": "2"},
+			want:      "Device.A.1.B.2.C.3.Value",
+		},
+		{
+			name:      "mixed i02 leaves layer one for legacy selector",
+			path:      "Device.A.{i}.B.{i}.Value",
+			selectors: map[string]string{"i02": "2", "iα": "1"},
+			want:      "Device.A.1.B.2.Value",
+		},
+		{
+			name:      "out of range numbered key is ignored before legacy fill",
+			path:      "Device.A.{i}.B.{i}.Value",
+			selectors: map[string]string{"i03": "9", "iα": "1", "iβ": "2"},
+			want:      "Device.A.1.B.2.Value",
+		},
+		{
+			name:      "mixed blank numbered selector truncates its layer and ignores later values",
+			path:      "Device.A.{i}.B.{i}.C.{i}.Value",
+			selectors: map[string]string{"i02": "", "iα": "1", "iβ": "3"},
+			want:      "Device.A.1.B.",
+		},
+		{
+			name:      "mixed sparse selectors truncate at first unbound layer",
+			path:      "Device.A.{i}.B.{i}.C.{i}.D.{i}.Value",
+			selectors: map[string]string{"i02": "2", "i04": "4", "iα": "1"},
+			want:      "Device.A.1.B.2.C.",
+		},
 	}
 
 	for _, tc := range cases {

@@ -70,4 +70,45 @@ describe('GPV 对象路径结果展示', () => {
   it('设备未返回对象后代时保留原对象列作为空结果占位', () => {
     expect(expandObjectPathColumns(columns, [pendingRow])).toEqual(columns);
   });
+
+  it('对象前缀重叠时同一返回后代 Path 只展开一次', () => {
+    const overlappingColumns: ResultColumn[] = [
+      { key: 'c0', label: 'A', path: 'Device.A.' },
+      { key: 'c1', label: '1', path: 'Device.A.1.' },
+    ];
+    const descendantPath = 'Device.A.1.Name';
+    const row = {
+      ...pendingRow,
+      cells: { [descendantPath]: 'first' },
+    };
+
+    expect(
+      expandObjectPathColumns(overlappingColumns, [row])
+        .map(({ key, path }) => ({ key, path })),
+    ).toEqual([
+      { key: 'c0:child:0', path: descendantPath },
+    ]);
+  });
+
+  it('显式叶子与对象动态后代命中同一 Path 时保留首次出现列', () => {
+    const objectColumn: ResultColumn = { key: 'object', label: 'A', path: 'Device.A.' };
+    const leafColumn: ResultColumn = {
+      key: 'leaf',
+      label: 'Name',
+      path: 'Device.A.1.Name',
+    };
+    const row = {
+      ...pendingRow,
+      cells: { [leafColumn.path]: 'first' },
+    };
+    const keyAndPath = (resultColumns: ResultColumn[]) =>
+      resultColumns.map(({ key, path }) => ({ key, path }));
+
+    expect(keyAndPath(expandObjectPathColumns([leafColumn, objectColumn], [row]))).toEqual([
+      { key: 'leaf', path: leafColumn.path },
+    ]);
+    expect(keyAndPath(expandObjectPathColumns([objectColumn, leafColumn], [row]))).toEqual([
+      { key: 'object:child:0', path: leafColumn.path },
+    ]);
+  });
 });

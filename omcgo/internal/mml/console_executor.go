@@ -530,53 +530,52 @@ func substituteQueryInstanceSelectors(path string, selectors map[string]string) 
 		return path
 	}
 
-	if hasNumberedQueryInstanceSelectors(selectors) {
-		result := path
-		for layer := 1; ; layer++ {
-			idx := strings.Index(result, ".{i}.")
-			if idx < 0 {
-				return result
-			}
-
-			value, ok := selectors[fmt.Sprintf("i%02d", layer)]
-			if !ok || strings.TrimSpace(value) == "" {
-				return result[:idx+1]
-			}
-			result = result[:idx] + "." + value + "." + result[idx+5:]
+	placeholderCount := strings.Count(path, ".{i}.")
+	layerValues := make([]string, placeholderCount)
+	layerBound := make([]bool, placeholderCount)
+	legacyKeys := make([]string, 0, len(selectors))
+	for key, value := range selectors {
+		layer, numbered := queryInstanceSelectorLayer(key)
+		if !numbered {
+			legacyKeys = append(legacyKeys, key)
+			continue
+		}
+		if layer >= 1 && layer <= placeholderCount {
+			layerValues[layer-1] = value
+			layerBound[layer-1] = true
 		}
 	}
 
-	keys := make([]string, 0, len(selectors))
-	for key := range selectors {
-		keys = append(keys, key)
+	sort.Strings(legacyKeys)
+	nextLayer := 0
+	for _, key := range legacyKeys {
+		for nextLayer < placeholderCount && layerBound[nextLayer] {
+			nextLayer++
+		}
+		if nextLayer >= placeholderCount {
+			break
+		}
+		layerValues[nextLayer] = strings.TrimSpace(selectors[key])
+		layerBound[nextLayer] = true
+		nextLayer++
 	}
-	sort.Strings(keys)
 
 	result := path
-	for layer := 0; ; layer++ {
+	for layer := 0; layer < placeholderCount; layer++ {
 		idx := strings.Index(result, ".{i}.")
-		if idx < 0 {
-			return result
-		}
-		if layer >= len(keys) {
+		if !layerBound[layer] || strings.TrimSpace(layerValues[layer]) == "" {
 			return result[:idx+1]
 		}
-
-		value := strings.TrimSpace(selectors[keys[layer]])
-		if value == "" {
-			return result[:idx+1]
-		}
-		result = result[:idx] + "." + value + "." + result[idx+5:]
+		result = result[:idx] + "." + layerValues[layer] + "." + result[idx+5:]
 	}
+	return result
 }
 
-func hasNumberedQueryInstanceSelectors(selectors map[string]string) bool {
-	for key := range selectors {
-		if len(key) != 3 || key[0] != 'i' || key[1] < '0' || key[1] > '9' || key[2] < '0' || key[2] > '9' {
-			return false
-		}
+func queryInstanceSelectorLayer(key string) (int, bool) {
+	if len(key) != 3 || key[0] != 'i' || key[1] < '0' || key[1] > '9' || key[2] < '0' || key[2] > '9' {
+		return 0, false
 	}
-	return true
+	return int(key[1]-'0')*10 + int(key[2]-'0'), true
 }
 
 // buildLSTParamRefs 把 LST 选中的 sub_field 合成为 BuildTR069Params 可消费的 param_refs。
