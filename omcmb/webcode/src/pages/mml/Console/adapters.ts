@@ -326,6 +326,31 @@ export function buildStandardQueryColumns(
     });
 }
 
+/**
+ * 逐 PATH 下发顺序与结果列保持一致。
+ * 查询 path 若因空实例截断为同一对象前缀，只保留首次出现的一条 statement；
+ * 写命令不做截断去重，继续严格按用户选择逐条下发。
+ */
+export function buildPerPathStatementPaths(
+  command: CommandItem,
+  checkedPaths: string[],
+  instanceSelectors?: Record<string, string>,
+): string[] {
+  const checked = new Set(checkedPaths);
+  const orderedPaths = command.paramPaths
+    .filter((item) => checked.has(item.path))
+    .map((item) => item.path);
+  if (!isReadOp(command.operationType)) return orderedPaths;
+
+  const seen = new Set<string>();
+  return orderedPaths.filter((path) => {
+    const resolved = resolveQueryPath(path, instanceSelectors);
+    if (seen.has(resolved)) return false;
+    seen.add(resolved);
+    return true;
+  });
+}
+
 export function buildStandardRawRows(
   operationType: MMLOperationType,
   checkedPaths: string[],

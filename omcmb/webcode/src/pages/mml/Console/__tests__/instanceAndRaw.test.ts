@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildDefaultInstanceSelectors,
+  buildPerPathStatementPaths,
   buildStandardQueryColumns,
   buildStandardRawRows,
   computeInstanceSlots,
@@ -229,5 +230,35 @@ describe('buildStandardQueryColumns', () => {
     ).toEqual([
       { key: 'c0', path: 'Device.A.1.B.' },
     ]);
+  });
+});
+
+describe('buildPerPathStatementPaths', () => {
+  it('LST 多个叶子截断为同一对象前缀时只创建一条逐 PATH statement', () => {
+    const paths = [
+      'Device.A.{i}.B.{i}.Value',
+      'Device.A.{i}.B.{i}.Name',
+      'Device.C.{i}.Value',
+    ];
+    const command = cmd('LST', paths.map((value) => path(value)));
+
+    expect(
+      buildPerPathStatementPaths(command, paths, { i01: '1', i02: '' }),
+    ).toEqual([
+      'Device.A.{i}.B.{i}.Value',
+      'Device.C.{i}.Value',
+    ]);
+  });
+
+  it('MOD 逐 PATH 保留全部原始 path，不应用查询截断去重', () => {
+    const paths = [
+      'Device.A.{i}.B.{i}.Value',
+      'Device.A.{i}.B.{i}.Name',
+    ];
+    const command = cmd('MOD', paths.map((value) => path(value, { writable: true })));
+
+    expect(
+      buildPerPathStatementPaths(command, paths, { i01: '1', i02: '' }),
+    ).toEqual(paths);
   });
 });

@@ -516,7 +516,7 @@ func exportPathsByCommand(
 	commands []map[string]interface{},
 	read bool,
 ) map[int][]string {
-	pathsByCommand := make(map[int][]string, len(commands))
+	matchedPathsByCommand := make(map[int][]string, len(commands))
 	seenByCommand := make(map[int]map[string]struct{}, len(commands))
 	if read {
 		for _, row := range rows {
@@ -532,13 +532,41 @@ func exportPathsByCommand(
 					continue
 				}
 				seenByCommand[row.CommandIndex][value.Name] = struct{}{}
-				pathsByCommand[row.CommandIndex] = append(pathsByCommand[row.CommandIndex], value.Name)
+				matchedPathsByCommand[row.CommandIndex] = append(
+					matchedPathsByCommand[row.CommandIndex],
+					value.Name,
+				)
 			}
 		}
 	}
+
+	pathsByCommand := make(map[int][]string, len(commands))
 	for ci := range commands {
-		if len(pathsByCommand[ci]) == 0 {
-			pathsByCommand[ci] = commandStandardPaths(commands, ci)
+		seen := make(map[string]struct{})
+		appendPath := func(path string) {
+			if path == "" {
+				return
+			}
+			if _, ok := seen[path]; ok {
+				return
+			}
+			seen[path] = struct{}{}
+			pathsByCommand[ci] = append(pathsByCommand[ci], path)
+		}
+
+		for _, originalPath := range commandStandardPaths(commands, ci) {
+			matched := false
+			originalColumn := exportColumn{standard: originalPath}
+			for _, resultPath := range matchedPathsByCommand[ci] {
+				if !pathMatchesExportColumn(resultPath, originalColumn) {
+					continue
+				}
+				matched = true
+				appendPath(resultPath)
+			}
+			if !matched {
+				appendPath(originalPath)
+			}
 		}
 	}
 	return pathsByCommand

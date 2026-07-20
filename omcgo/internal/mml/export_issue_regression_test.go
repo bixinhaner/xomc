@@ -115,6 +115,52 @@ func TestBuildLongFormatCSV_ExpandsStandardDescendantsByCommandInFirstSeenOrder(
 	}
 }
 
+func TestBuildLongFormatCSV_PreservesUnreturnedOriginalPathWhenAnotherPathExpands(t *testing.T) {
+	commands := []map[string]interface{}{
+		{
+			"command_code":   "LST A",
+			"operation_type": "LST",
+			"param_paths":    []interface{}{"Device.A.", "Device.C.Leaf"},
+		},
+	}
+	rows := []DeviceTaskResultRowView{
+		{
+			DeviceSN: "SN001", Status: "completed", CommandIndex: 0,
+			Result: mustResultJSON(t, []map[string]string{
+				{"name": "Device.A.1.Foo", "value": "foo-1"},
+			}, ""),
+		},
+	}
+
+	data, err := buildLongFormatCSVForLocale(
+		[]exportColumn{
+			{standard: "Device.A.", private: "Device.A."},
+			{standard: "Device.C.Leaf", private: "Device.C.Leaf"},
+		},
+		rows,
+		commands,
+		nil,
+		true,
+		appcontext.LocaleEN,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	records := mustCSVRecords(t, data)
+	got := make([]string, 0, len(records)-1)
+	for _, record := range records[1:] {
+		got = append(got, record[4]+"="+record[7])
+	}
+	want := []string{
+		"Device.A.1.Foo=foo-1",
+		"Device.C.Leaf=",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("PATH/value rows =\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
 func TestBuildDeviceCSVMulti_FallsBackToRawDescendantsAndPreservesExactLeaf(t *testing.T) {
 	commands := []map[string]interface{}{
 		{

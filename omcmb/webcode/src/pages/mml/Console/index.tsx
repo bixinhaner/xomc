@@ -28,6 +28,7 @@ import {
   buildColumnsFromRawPaths,
   buildDeviceRows,
   buildMODReadbackRows,
+  buildPerPathStatementPaths,
   buildRawExecutePayload,
   buildStandardQueryColumns,
   buildStandardRawRows,
@@ -288,10 +289,11 @@ export default function MMLConsole() {
             req.execMode === 'single-path' && splittable && req.checkedPaths.length > 1;
           let statements;
           if (perPath) {
-            const checkedSet = new Set(req.checkedPaths);
-            const orderedPaths = command.paramPaths
-              .filter((p) => checkedSet.has(p.path))
-              .map((p) => p.path);
+            const orderedPaths = buildPerPathStatementPaths(
+              command,
+              req.checkedPaths,
+              req.instanceSelectors,
+            );
             statements = orderedPaths.map((p) =>
               buildStructuredStatement(command, [p], req.values, req.instance, req.instanceSelectors),
             );
