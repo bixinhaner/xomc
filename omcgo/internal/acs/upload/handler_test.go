@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -584,4 +586,55 @@ func TestCheckPMUploadDuplicate_EmptySNNeverSkips(t *testing.T) {
 
 	assert.False(t, h.checkPMUploadDuplicate(context.Background(), "", "f.xml"),
 		"empty device_sn can't form a reliable dedup key, must fail open")
+}
+// fakeBackpressureGate 让测试可以精确控制 Acquire() 是否放行，不依赖真实
+// /proc/pressure/io 或磁盘水位。
+type fakeBackpressureGate struct {
+	allow  bool
+	reason string
+}
+
+func (f *fakeBackpressureGate) Acquire() (bool, string) {
+	if f.allow {
+		return true, ""
+	}
+	return false, f.reason
+}
+func (f *fakeBackpressureGate) Release()               {}
+func (f *fakeBackpressureGate) RecordRejected(string) {}
+
+// TestServeHTTP_PMUpload_BackpressureRejectionDoesNotPoisonDedup 是 2026-07-20
+// omc78 压测环境实测复现的严重 bug 的回归测试：修复前 ServeHTTP 先做 PM 去重检查
+// （FirstTime 用 SETNX 把 (device_sn, filename) 标记为"已见过"，24h TTL），再做
+// 背压检查；背压生效期间收到的第一次上传会被去重标记为已见过之后才被背压拒收
+// （503），导致设备按 TR-069 语义重传时，重传请求被去重短路直接回 200 OK——
+// 设备以为上传成功，但这份 PM 文件从未真正落盘/入库，且 24h 内该 (device_sn,
+// filename) 都无法再重传成功，等价于背压窗口内的 PM 文件被静默永久丢弃。
+//
+// 正确顺序应该是：背压检查在前，去重检查在后——背压拒收的请求必须完全不触碰
+// 去重层，去重标记只应该在请求真正被接纳、准备落盘时才打上。
+func TestServeHTTP_PMUpload_BackpressureRejectionDoesNotPoisonDedup(t *testing.T) {
+	gate := &fakeBackpressureGate{allow: false, reason: "resource_pressure"}
+	h := &Handler{
+		logger:       zap.NewNop(),
+		pmDedup:      newTestDeduper(t),
+		backpressure: gate,
+	}
+	const sn = "SN1"
+	const filename = "A20260718.0010-0800-0015-0800_48BF74.SN1.xml"
+
+	// 第一次上传：背压生效中，必须被拒收 503。
+	req := httptest.NewRequest(http.MethodPost,
+		"/smallcell/FileUploadService?fileType=PM&filename="+filename+"&sn="+sn, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code,
+		"backpressure must reject the PM upload with 503")
+
+	// 关键断言：被背压拒收的这次请求，绝不能把去重键标记为"已见过"——
+	// 否则设备按 TR-069 语义重传时会被去重层错误地当成"已处理过的重复"直接吃掉。
+	skip := h.checkPMUploadDuplicate(context.Background(), sn, filename)
+	assert.False(t, skip,
+		"a request rejected by backpressure must never mark the dedup key; "+
+			"otherwise the device's retry gets silently swallowed and the PM file is lost for the 24h TTL")
 }
