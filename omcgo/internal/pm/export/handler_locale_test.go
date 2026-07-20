@@ -16,16 +16,23 @@ import (
 	"go.uber.org/zap"
 
 	appcontext "github.com/omcgo/omcgo/internal/core/context"
+	"github.com/omcgo/omcgo/internal/pm/adhoc"
 )
 
 func TestHandler_Create_CapturesRequestLocaleInParams(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	taskID := uuid.New()
+	adhocTaskID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	repo := &stubRepo{
 		createID: taskID,
 		getTask:  &Task{ID: taskID, SourceType: SourceAdhoc, Status: StatusPending},
 	}
 	h := NewHandler(NewService(repo, &stubEnqueuer{insertID: uuid.New()}), nil, zap.NewNop())
+	h.SetAdhocTaskReader(&stubAdhocTaskReader{task: &adhoc.Task{
+		ID:         adhocTaskID,
+		Creator:    "anonymous",
+		Visibility: adhoc.VisibilityPrivate,
+	}})
 	router := gin.New()
 	h.RegisterRoutes(router.Group(""))
 

@@ -5,6 +5,7 @@ import { normalizePmMetricValue } from '../utils/pmMetricValue';
  */
 
 export type AdhocMode = 'oneshot' | 'continuous';
+export type AdhocVisibility = 'private' | 'public';
 
 /**
  * 聚合维度（T-0185 扩展至 6 维，对齐后端 binding oneof）：
@@ -47,6 +48,7 @@ export interface AdhocTask {
   isBuiltin: boolean;
   // 非持续型过期天数（T-0182，默认 60）
   expireDays: number;
+  visibility: AdhocVisibility;
   status: AdhocStatus;
   progress: number;
   creator: string;
@@ -71,6 +73,7 @@ export interface CreateAdhocTaskInput {
   technology?: string;
   isBuiltin?: boolean;
   expireDays?: number;
+  visibility?: AdhocVisibility;
   // T-0193 小区/PLMN 白名单（完整 object_ldn 字符串数组）。空/缺 = 不传 → 全小区（现状语义）。
   objectLdns?: string[];
 }
@@ -86,6 +89,7 @@ export interface UpdateAdhocTaskInput {
   deviceSns?: string[];
   metricPaths: string[];
   granularities?: string[];
+  visibility?: AdhocVisibility;
   objectLdns?: string[];
   windowStart?: string;
   windowEnd?: string;
@@ -179,6 +183,7 @@ export interface BackendAdhocTask {
   technology?: string;
   is_builtin?: boolean;
   expire_days?: number;
+  visibility?: string;
   status: string;
   progress: number;
   creator: string;
@@ -261,6 +266,7 @@ export function mapBackendAdhocTask(b: BackendAdhocTask): AdhocTask {
     technology: b.technology,
     isBuiltin: b.is_builtin ?? false,
     expireDays: b.expire_days ?? 60,
+    visibility: b.visibility === 'public' ? 'public' : 'private',
     status: b.status as AdhocStatus,
     progress: b.progress,
     creator: b.creator,

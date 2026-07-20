@@ -38,6 +38,7 @@ import {
   useDeletePmAdhoc,
   useResumePmAdhoc,
 } from '@core/hooks/api/usePmAdhoc';
+import { useUserStore } from '@core/store/userStore';
 import {
   useAdhocProgressStream,
   type AdhocLiveProgress,
@@ -99,6 +100,11 @@ const TECHNOLOGY_LABEL_KEY: Record<string, string> = {
   lte: 'perf.adhoc.techLte',
   nr: 'perf.adhoc.techNr',
   gsm: 'perf.adhoc.techGsm',
+};
+
+const VISIBILITY_LABEL_KEY: Record<string, string> = {
+  private: 'perf.adhoc.visibilityPrivate',
+  public: 'perf.adhoc.visibilityPublic',
 };
 
 export const RUN_HISTORY_SCROLL_X = 1250;
@@ -256,6 +262,8 @@ function TaskTable({
   onEdit,
   onDelete,
   onResume,
+  currentUsername,
+  isSuperAdmin,
 }: {
   tasks: AdhocTask[];
   loading: boolean;
@@ -270,6 +278,8 @@ function TaskTable({
   onDelete?: (t: AdhocTask) => void;
   // #674：恢复已取消任务。
   onResume?: (id: string) => void;
+  currentUsername: string;
+  isSuperAdmin: boolean;
 }) {
   const intl = useIntl();
   const columns: ColumnsType<AdhocTask> = useMemo(
@@ -309,6 +319,22 @@ function TaskTable({
         ? []
         : [
             {
+              title: intl.formatMessage({ id: 'perf.adhoc.colVisibility' }),
+              dataIndex: 'visibility',
+              width: 90,
+              render: (v: string) => (
+                <Tag color={v === 'public' ? 'green' : undefined}>
+                  {intl.formatMessage({ id: VISIBILITY_LABEL_KEY[v] ?? 'perf.adhoc.visibilityPrivate' })}
+                </Tag>
+              ),
+            } as ColumnsType<AdhocTask>[number],
+            {
+              title: intl.formatMessage({ id: 'perf.adhoc.colCreator' }),
+              dataIndex: 'creator',
+              width: 120,
+              render: (v: string) => v || '—',
+            } as ColumnsType<AdhocTask>[number],
+            {
               title: intl.formatMessage({ id: 'perf.adhoc.colCreatedAt' }),
               dataIndex: 'createdAt',
               width: 180,
@@ -318,45 +344,53 @@ function TaskTable({
       {
         title: intl.formatMessage({ id: 'perf.adhoc.colOperation' }),
         width: 230,
-        render: (_, r) => (
-          <Space>
-            <Button size="small" onClick={() => onView(r)}>
-              {intl.formatMessage({ id: 'perf.adhoc.btnViewDetail' })}
-            </Button>
-            {/* T-0194：内置区给「编辑指标」（只改指标集），自建区给「编辑」（进向导编辑页） */}
-            <Button size="small" icon={<EditOutlined />} onClick={() => onEdit(r)}>
-              {isBuiltinArea
-                ? intl.formatMessage({ id: 'perf.adhoc.btnEditMetrics' })
-                : intl.formatMessage({ id: 'perf.adhoc.btnEdit' })}
-            </Button>
-            {(r.status === 'pending' || r.status === 'running' || r.status === 'scheduled') && (
-              <Button size="small" danger icon={<StopOutlined />} onClick={() => onCancel(r.id)}>
-                {intl.formatMessage({ id: 'perf.adhoc.btnCancel' })}
+        render: (_, r) => {
+          const isOwner = r.creator === currentUsername;
+          const publicTask = r.visibility === 'public';
+          const canManage = isBuiltinArea || isSuperAdmin || isOwner || publicTask;
+          const canCancel = isBuiltinArea || isSuperAdmin || isOwner;
+          return (
+            <Space>
+              <Button size="small" onClick={() => onView(r)}>
+                {intl.formatMessage({ id: 'perf.adhoc.btnViewDetail' })}
               </Button>
-            )}
-            {/* #674：已取消任务给「启用」恢复执行。 */}
-            {onResume && r.status === 'canceled' && (
-              <Button size="small" type="primary" ghost icon={<PlayCircleOutlined />} onClick={() => onResume(r.id)}>
-                {intl.formatMessage({ id: 'perf.adhoc.btnResume' })}
-              </Button>
-            )}
-            {/* issue #392：终态(成功/失败/已取消)自建任务给「删除」（onDelete 仅自建区传入）。 */}
-            {onDelete &&
-              (r.status === 'succeeded' || r.status === 'failed' || r.status === 'canceled') && (
-                <Button
-                  size="small"
-                  danger
-                  icon={<DeleteOutlined />}
-                  onClick={() => onDelete(r)}
-                >
-                  {intl.formatMessage({ id: 'perf.adhoc.btnDelete' })}
+              {/* T-0194：内置区给「编辑指标」（只改指标集），自建区给「编辑」（进向导编辑页） */}
+              {canManage && (
+                <Button size="small" icon={<EditOutlined />} onClick={() => onEdit(r)}>
+                  {isBuiltinArea
+                    ? intl.formatMessage({ id: 'perf.adhoc.btnEditMetrics' })
+                    : intl.formatMessage({ id: 'perf.adhoc.btnEdit' })}
                 </Button>
               )}
-          </Space>
-        ),
+              {canCancel && (r.status === 'pending' || r.status === 'running' || r.status === 'scheduled') && (
+                <Button size="small" danger icon={<StopOutlined />} onClick={() => onCancel(r.id)}>
+                  {intl.formatMessage({ id: 'perf.adhoc.btnCancel' })}
+                </Button>
+              )}
+              {/* #674：已取消任务给「启用」恢复执行。 */}
+              {canManage && onResume && r.status === 'canceled' && (
+                <Button size="small" type="primary" ghost icon={<PlayCircleOutlined />} onClick={() => onResume(r.id)}>
+                  {intl.formatMessage({ id: 'perf.adhoc.btnResume' })}
+                </Button>
+              )}
+              {/* issue #392：终态(成功/失败/已取消)自建任务给「删除」（onDelete 仅自建区传入）。 */}
+              {canManage && onDelete &&
+                (r.status === 'succeeded' || r.status === 'failed' || r.status === 'canceled') && (
+                  <Button
+                    size="small"
+                    danger
+                    icon={<DeleteOutlined />}
+                    onClick={() => onDelete(r)}
+                  >
+                    {intl.formatMessage({ id: 'perf.adhoc.btnDelete' })}
+                  </Button>
+                )}
+            </Space>
+          );
+        },
       },
     ],
-    [intl, isBuiltinArea, liveProgress, onView, onCancel, onEdit, onDelete, onResume],
+    [intl, isBuiltinArea, liveProgress, onView, onCancel, onEdit, onDelete, onResume, currentUsername, isSuperAdmin],
   );
 
   return (
@@ -373,6 +407,8 @@ function TaskTable({
 
 export default function PmAdhocPage() {
   const intl = useIntl();
+  const currentUsername = useUserStore((s) => s.currentUser?.username ?? '');
+  const isSuperAdmin = useUserStore((s) => Boolean(s.currentUser?.isSuperAdmin));
   // T-0186：分两区，各发一次 list（内置 / 自建）。
   const { data: builtinTasks = [], isLoading: builtinLoading } = usePmAdhocList({
     refetchInterval: ADHOC_POLL_FALLBACK_MS,
@@ -515,6 +551,8 @@ export default function PmAdhocPage() {
           onCancel={handleCancel}
           onEdit={handleEditBuiltin}
           onResume={handleResume}
+          currentUsername={currentUsername}
+          isSuperAdmin={isSuperAdmin}
         />
       </Card>
 
@@ -541,6 +579,8 @@ export default function PmAdhocPage() {
           onEdit={handleEditCustom}
           onDelete={handleDelete}
           onResume={handleResume}
+          currentUsername={currentUsername}
+          isSuperAdmin={isSuperAdmin}
         />
       </Card>
 
@@ -591,6 +631,17 @@ export default function PmAdhocPage() {
                   {statusLabel(intl, selectedTask.status)}
                 </Tag>
               </Descriptions.Item>
+              {!selectedTask.isBuiltin && (
+                <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.descVisibility' })}>
+                  <Tag color={selectedTask.visibility === 'public' ? 'green' : undefined}>
+                    {intl.formatMessage({
+                      id: selectedTask.visibility === 'public'
+                        ? 'perf.adhoc.visibilityPublic'
+                        : 'perf.adhoc.visibilityPrivate',
+                    })}
+                  </Tag>
+                </Descriptions.Item>
+              )}
               {/* T-0194：已选指标 — 按制式解析为可读指标名（编号+名），查不到回退显编号 */}
               <Descriptions.Item
                 label={intl.formatMessage({ id: 'perf.adhoc.descSelectedMetrics' })}

@@ -125,6 +125,7 @@ describe('PmAdhocWizard batch metric input', () => {
       technology: 'lte',
       isBuiltin: false,
       expireDays: 60,
+      visibility: 'private',
       status: 'scheduled',
       progress: 0,
       creator: 'tester',
