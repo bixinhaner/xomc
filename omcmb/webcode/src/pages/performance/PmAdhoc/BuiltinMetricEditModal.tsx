@@ -22,6 +22,7 @@ import {
   formatMetricIdSamples,
   type MetricBatchSelectionResult,
 } from '@/components/MetricPickerModal';
+import { resolveLimitedTransferSelection } from './selectionLimit';
 
 // 制式 → 指标库 deviceType（与向导一致）。
 const TECH_TO_DEVICE_TYPE: Record<string, DeviceType> = {
@@ -118,9 +119,9 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
   };
 
   const limitMetricKeys = (keys: React.Key[]) => {
-    const next = keys.map(String);
-    if (!warnMetricLimitExceeded(next.length)) return next;
-    return next.slice(0, PM_QUERY_SELECTION_LIMIT);
+    const result = resolveLimitedTransferSelection(metricPaths, keys, PM_QUERY_SELECTION_LIMIT);
+    if (result.exceeded) warnMetricLimitExceeded(result.count);
+    return result.next;
   };
 
   const handleOk = async () => {

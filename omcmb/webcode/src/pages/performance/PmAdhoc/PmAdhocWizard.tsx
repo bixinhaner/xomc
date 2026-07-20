@@ -52,6 +52,7 @@ import {
   formatMetricIdSamples,
   type MetricBatchSelectionResult,
 } from '@/components/MetricPickerModal';
+import { resolveLimitedTransferSelection } from './selectionLimit';
 
 // 制式（含 GSM，networkType 过滤直接用小写值）
 type WizardTech = 'lte' | 'nr' | 'gsm';
@@ -299,16 +300,16 @@ export default function PmAdhocWizard() {
     return true;
   };
 
-  const limitDeviceKeys = (keys: React.Key[]) => {
-    const next = keys.map(String);
-    if (!warnDeviceLimitExceeded(next.length)) return next;
-    return next.slice(0, PM_QUERY_SELECTION_LIMIT);
+  const resolveDeviceKeys = (keys: React.Key[]) => {
+    const result = resolveLimitedTransferSelection(selectedSns, keys, PM_QUERY_SELECTION_LIMIT);
+    if (result.exceeded) warnDeviceLimitExceeded(result.count);
+    return result.next;
   };
 
-  const limitMetricKeys = (keys: React.Key[]) => {
-    const next = keys.map(String);
-    if (!warnMetricLimitExceeded(next.length)) return next;
-    return next.slice(0, PM_QUERY_SELECTION_LIMIT);
+  const resolveMetricKeys = (keys: React.Key[]) => {
+    const result = resolveLimitedTransferSelection(metricPaths, keys, PM_QUERY_SELECTION_LIMIT);
+    if (result.exceeded) warnMetricLimitExceeded(result.count);
+    return result.next;
   };
 
   const handleSubmit = async () => {
@@ -490,7 +491,7 @@ export default function PmAdhocWizard() {
                 dataSource={deviceItems}
                 targetKeys={selectedSns}
                 onChange={(keys: React.Key[]) => {
-                  const nextSelectedSns = limitDeviceKeys(keys);
+                  const nextSelectedSns = resolveDeviceKeys(keys);
                   if (!isSameStringArray(selectedSns, nextSelectedSns)) {
                     setSelectedSns(nextSelectedSns);
                     setCellSel({}); // 设备集变更 → 下钻选择重置（全选）。
@@ -591,7 +592,12 @@ export default function PmAdhocWizard() {
         <Transfer<MetricTransferItem>
           dataSource={metricTransferItems}
           targetKeys={metricPaths}
-          onChange={(keys: React.Key[]) => setMetricPaths(limitMetricKeys(keys))}
+          onChange={(keys: React.Key[]) => {
+            const nextMetricPaths = resolveMetricKeys(keys);
+            if (!isSameStringArray(metricPaths, nextMetricPaths)) {
+              setMetricPaths(nextMetricPaths);
+            }
+          }}
           render={renderMetricItem}
           showSearch
           // 类型筛选已下移到 dataSource 层预过滤（见 metricTransferItems）；此处 filterOption
