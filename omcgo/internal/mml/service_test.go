@@ -153,12 +153,13 @@ func (m *mockScriptRepo) List(ctx context.Context, filter ScriptFilter) (*model.
 }
 
 type mockTaskRepo struct {
-	createFn       func(ctx context.Context, task *MMLTask) error
-	getByIDFn      func(ctx context.Context, id uuid.UUID) (*MMLTask, error)
-	updateFn       func(ctx context.Context, task *MMLTask) error
-	updateStatusFn func(ctx context.Context, id uuid.UUID, status TaskStatus) error
-	deleteFn       func(ctx context.Context, id uuid.UUID) error
-	listFn         func(ctx context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error)
+	createFn                 func(ctx context.Context, task *MMLTask) error
+	getByIDFn                func(ctx context.Context, id uuid.UUID) (*MMLTask, error)
+	getLatestPeriodicChildFn func(ctx context.Context, parentID uuid.UUID) (*MMLTask, error)
+	updateFn                 func(ctx context.Context, task *MMLTask) error
+	updateStatusFn           func(ctx context.Context, id uuid.UUID, status TaskStatus) error
+	deleteFn                 func(ctx context.Context, id uuid.UUID) error
+	listFn                   func(ctx context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error)
 }
 
 func (m *mockTaskRepo) Create(ctx context.Context, task *MMLTask) error {
@@ -176,6 +177,13 @@ func (m *mockTaskRepo) GetByID(ctx context.Context, id uuid.UUID) (*MMLTask, err
 }
 
 func (m *mockTaskRepo) GetByRequestID(context.Context, string, string) (*MMLTask, error) {
+	return nil, commonerrors.ErrNotFound
+}
+
+func (m *mockTaskRepo) GetLatestPeriodicChild(ctx context.Context, parentID uuid.UUID) (*MMLTask, error) {
+	if m.getLatestPeriodicChildFn != nil {
+		return m.getLatestPeriodicChildFn(ctx, parentID)
+	}
 	return nil, commonerrors.ErrNotFound
 }
 

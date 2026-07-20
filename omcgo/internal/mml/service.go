@@ -1920,6 +1920,10 @@ type TaskResultStatsRepository interface {
 	GetResultStatsByID(ctx context.Context, id uuid.UUID) (*MMLTask, error)
 }
 
+type PeriodicChildTaskRepository interface {
+	GetLatestPeriodicChild(ctx context.Context, parentID uuid.UUID) (*MMLTask, error)
+}
+
 // DeviceTaskResultRowView 屏蔽 task 包内部 struct，让 mml 包不反向 import task 包。
 // 字段语义对齐 task.DeviceTaskResultRow；Result 是 device_tasks.result JSONB 原始字节。
 type DeviceTaskResultRowView struct {
@@ -2788,9 +2792,7 @@ func (s *Service) GetTaskResults(ctx context.Context, id uuid.UUID, page, pageSi
 		pageSize = 20
 	}
 
-	// T-0168: 先拿 task 元数据用于装配 stats（即使 deviceTaskResultLister 注入也要这步）。
-	// PgTaskRepository 提供轻量查询，避免为结果页 stats 扫描/反序列化 mml_tasks.results。
-	taskMeta, taskErr := s.getTaskResultStats(ctx, id)
+	taskMeta, resultSourceID, taskErr := s.resolveTaskResultSource(ctx, id)
 	// taskErr 不阻塞主流程；找不到 task 让后续 device_tasks 查询自己处理
 	stats := buildTaskResultsStats(taskMeta, taskErr)
 	if taskErr == nil && taskMeta != nil {
@@ -2802,7 +2804,7 @@ func (s *Service) GetTaskResults(ctx context.Context, id uuid.UUID, page, pageSi
 	// 优先路径：从 device_tasks 拉真实执行结果（2026-05-23 修；执行结果实际写在
 	// device_tasks 表，mml_tasks.results 从未由 ACS 回写，老路径永远空）。
 	if s.deviceTaskResultLister != nil {
-		rows, total, err := s.deviceTaskResultLister.ListResultsBySourceID(ctx, id.String(), page, pageSize)
+		rows, total, err := s.deviceTaskResultLister.ListResultsBySourceID(ctx, resultSourceID.String(), page, pageSize)
 		if err != nil {
 			return nil, fmt.Errorf("list device task results: %w", err)
 		}
@@ -2816,7 +2818,7 @@ func (s *Service) GetTaskResults(ctx context.Context, id uuid.UUID, page, pageSi
 	}
 
 	// 兼容回退：装配器未注入时读老 JSONB（dev / 单测）。
-	t, err := s.taskRepo.GetByID(ctx, id)
+	t, err := s.taskRepo.GetByID(ctx, resultSourceID)
 	if err != nil {
 		return nil, fmt.Errorf("get mml task: %w", err)
 	}
@@ -2840,6 +2842,31 @@ func (s *Service) GetTaskResults(ctx context.Context, id uuid.UUID, page, pageSi
 	resp := model.NewListResponse(items, total, page, pageSize)
 	resp.Stats = stats
 	return resp, nil
+}
+
+func (s *Service) resolveTaskResultSource(ctx context.Context, id uuid.UUID) (*MMLTask, uuid.UUID, error) {
+	task, err := s.getTaskResultStats(ctx, id)
+	if err != nil {
+		return nil, id, err
+	}
+	if task == nil || task.ExecuteType != ExecutePeriodic || task.PeriodicParentID != nil {
+		return task, id, nil
+	}
+	childRepo, ok := s.taskRepo.(PeriodicChildTaskRepository)
+	if !ok {
+		return task, id, nil
+	}
+	child, err := childRepo.GetLatestPeriodicChild(ctx, id)
+	if err != nil {
+		if errors.Is(err, commonerrors.ErrNotFound) {
+			return task, id, nil
+		}
+		return nil, id, fmt.Errorf("get latest periodic child: %w", err)
+	}
+	if child == nil {
+		return task, id, nil
+	}
+	return child, child.ID, nil
 }
 
 func (s *Service) getTaskResultStats(ctx context.Context, id uuid.UUID) (*MMLTask, error) {

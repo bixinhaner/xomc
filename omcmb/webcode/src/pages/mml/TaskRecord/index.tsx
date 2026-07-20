@@ -21,6 +21,7 @@ import type {
 import {
   useMMLTasks,
   useMMLTaskResults,
+  useMMLScriptRuns,
   useStartMMLTasks,
   useCancelMMLTasks,
   useDeleteMMLTasks,
@@ -174,6 +175,27 @@ function renderTaskResult(result: MMLTask['result'], t: (key: string) => string)
   if (!result) return '-';
   const tag = TASK_RESULT_TAGS[result];
   return tag ? <Tag color={tag.color}>{t(tag.key)}</Tag> : <Tag>{result}</Tag>;
+}
+
+function isPeriodicParentTask(task: MMLTask | null | undefined) {
+  return task?.executeType === 'periodic' && !task.parentTaskId;
+}
+
+function renderTaskProgress(task: MMLTask, t: (key: string) => string) {
+  const progress = getMmlTaskProgress(task);
+  if (progress.kind === 'schedule_template') {
+    return (
+      <Space orientation="vertical" size={2}>
+        <Tag color="purple">{t('mml.periodicTemplate')}</Tag>
+        {task.nextTriggerAt ? (
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {t('mml.nextTriggerAt')}: {formatTime(task.nextTriggerAt)}
+          </Typography.Text>
+        ) : null}
+      </Space>
+    );
+  }
+  return `${progress.done}/${progress.total}`;
 }
 
 function secondsText(seconds: number | undefined, t: (key: string, values?: Record<string, string | number>) => string) {
@@ -490,6 +512,20 @@ export default function TaskRecord() {
     return tasks.find((task) => task.id === viewingTaskId) ?? null;
   }, [tasks, viewingTaskId]);
   const viewedTask = viewedTaskFromList ?? viewing;
+  const isViewingPeriodicParent = isPeriodicParentTask(viewedTask);
+  const scriptRunsParams = useMemo(() => ({ page: 1, pageSize: 100 }), []);
+  const {
+    data: scriptRunsData,
+    isLoading: scriptRunsLoading,
+  } = useMMLScriptRuns(
+    isViewingPeriodicParent && viewedTask?.scriptId ? viewedTask.scriptId : '',
+    scriptRunsParams,
+  );
+  const periodicRuns = useMemo(
+    () => (scriptRunsData?.items ?? []).filter((task) => task.parentTaskId === viewedTask?.id),
+    [scriptRunsData, viewedTask?.id],
+  );
+  const latestPeriodicRun = periodicRuns[0] ?? null;
   const isViewedTaskActive = Boolean(
     viewedTaskFromList && TASK_DETAIL_ACTIVE_STATUSES.has(viewedTaskFromList.status)
   );
@@ -545,6 +581,63 @@ export default function TaskRecord() {
         <Typography.Text style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>
           {value || '-'}
         </Typography.Text>
+      ),
+    },
+  ], [t]);
+
+  const periodicRunColumns: ColumnsType<MMLTask> = useMemo(() => [
+    {
+      key: 'createdAt',
+      title: t('mml.createTime'),
+      dataIndex: 'createdAt',
+      width: 160,
+      render: (value: unknown) => formatTime(value as string | undefined),
+    },
+    {
+      key: 'status',
+      title: t('mml.status'),
+      dataIndex: 'status',
+      width: 110,
+      render: (value: unknown) => {
+        const tag = TASK_STATUS_TAGS[value as MMLTaskStatus];
+        return tag ? <Tag color={tag.color}>{t(tag.key)}</Tag> : <Tag>{String(value || '-')}</Tag>;
+      },
+    },
+    {
+      key: 'result',
+      title: t('mml.result'),
+      dataIndex: 'result',
+      width: 120,
+      render: (value: unknown) => renderTaskResult(value as MMLTask['result'], t),
+    },
+    {
+      key: 'progress',
+      title: t('mml.progress'),
+      width: 100,
+      render: (_: unknown, task) => renderTaskProgress(task, t),
+    },
+    {
+      key: 'startedAt',
+      title: t('mml.startTime'),
+      dataIndex: 'startedAt',
+      width: 160,
+      render: (value: unknown) => formatTime(value as string | undefined),
+    },
+    {
+      key: 'operation',
+      title: t('table.operation'),
+      width: 90,
+      render: (_: unknown, task) => (
+        <Button
+          type="link"
+          size="small"
+          onClick={() => {
+            setResultPage(1);
+            setViewing(task);
+          }}
+        >
+          {t('mml.viewThisRun')}
+        </Button>
       ),
     },
   ], [t]);
@@ -768,11 +861,8 @@ export default function TaskRecord() {
     {
       key: 'progress',
       title: t('mml.progress'),
-      width: 100,
-      render: (_: unknown, record: MMLTask) => {
-        const { done, total } = getMmlTaskProgress(record);
-        return `${done}/${total}`;
-      },
+      width: 130,
+      render: (_: unknown, record: MMLTask) => renderTaskProgress(record, t),
     },
     {
       key: 'startedAt',
@@ -897,8 +987,21 @@ export default function TaskRecord() {
               <Tag>{t('mml.status')}: {t(TASK_STATUS_TAGS[viewedTask.status]?.key ?? 'mml.status')}</Tag>
               <Tag>{t('mml.taskOrigin')}: {t(TASK_ORIGIN_TAGS[viewedTask.taskOrigin]?.key ?? 'mml.taskOrigin')}</Tag>
               <Tag>{t('mml.deviceCountLabel')}{viewedTask.totalDevices ?? 0}</Tag>
-              <Tag>{t('mml.successCountLabel')}{viewedTask.successCount ?? 0}</Tag>
-              <Tag>{t('mml.failedCountLabel')}{viewedTask.failedCount ?? 0}</Tag>
+              {isViewingPeriodicParent ? (
+                <>
+                  <Tag>{t('mml.periodicRunCount', { count: periodicRuns.length })}</Tag>
+                  <Tag>
+                    {t('mml.latestRun')}: {latestPeriodicRun?.result
+                      ? t(TASK_RESULT_TAGS[latestPeriodicRun.result]?.key ?? 'mml.result')
+                      : '-'}
+                  </Tag>
+                </>
+              ) : (
+                <>
+                  <Tag>{t('mml.successCountLabel')}{viewedTask.successCount ?? 0}</Tag>
+                  <Tag>{t('mml.failedCountLabel')}{viewedTask.failedCount ?? 0}</Tag>
+                </>
+              )}
               <Button
                 aria-label={t('mml.taskRecord.exportCsv')}
                 size="small"
@@ -918,6 +1021,32 @@ export default function TaskRecord() {
                   column={2}
                   items={buildScriptExecutionPolicyItems(viewedTask, t)}
                   style={{ marginTop: 8 }}
+                />
+              </div>
+            ) : null}
+
+            {isViewingPeriodicParent ? (
+              <div style={{ marginBottom: 12 }}>
+                <Space wrap size={[8, 8]} style={{ marginBottom: 8 }}>
+                  <Typography.Text strong>{t('mml.periodicRuns')}</Typography.Text>
+                  <Tag color="purple">{t('mml.periodicRunCount', { count: periodicRuns.length })}</Tag>
+                  {latestPeriodicRun ? (
+                    <Typography.Text type="secondary">
+                      {t('mml.showingLatestRunResults', {
+                        time: formatTime(latestPeriodicRun.startedAt || latestPeriodicRun.createdAt),
+                      })}
+                    </Typography.Text>
+                  ) : null}
+                </Space>
+                <Table<MMLTask>
+                  size="small"
+                  columns={periodicRunColumns}
+                  dataSource={periodicRuns}
+                  loading={scriptRunsLoading}
+                  pagination={false}
+                  rowKey="id"
+                  scroll={{ x: 880, y: 180 }}
+                  locale={{ emptyText: t('mml.noExecutionResult') }}
                 />
               </div>
             ) : null}

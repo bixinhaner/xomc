@@ -27,6 +27,7 @@ const baseTask: MMLTask = {
 describe('getMmlTaskProgress', () => {
   it('uses lightweight command counts when list rows omit command arrays', () => {
     expect(getMmlTaskProgress({ ...baseTask, commandCount: 4 })).toEqual({
+      kind: 'execution',
       done: 3,
       total: 12,
     });
@@ -39,6 +40,7 @@ describe('getMmlTaskProgress', () => {
       commandCount: 0,
       planItemCount: 9,
     })).toEqual({
+      kind: 'execution',
       done: 3,
       total: 9,
     });
@@ -53,8 +55,24 @@ describe('getMmlTaskProgress', () => {
       successCount: 4,
       failedCount: 1,
     })).toEqual({
+      kind: 'execution',
       done: 5,
       total: 5,
+    });
+  });
+
+  it('marks periodic parent rows as schedule templates instead of executable progress', () => {
+    expect(getMmlTaskProgress({
+      ...baseTask,
+      taskOrigin: 'script',
+      executeType: 'periodic',
+      commandCount: 6,
+      successCount: 0,
+      failedCount: 0,
+    })).toEqual({
+      done: 0,
+      total: 0,
+      kind: 'schedule_template',
     });
   });
 });
