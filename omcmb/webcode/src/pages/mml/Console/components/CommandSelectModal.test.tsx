@@ -365,6 +365,27 @@ describe('CommandSelectModal', () => {
     expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({ id, targetObject: 'Device.Users.User.' }), []);
   });
 
+  it('keeps standard ADD target-object confirmation available when unsupported Paths fail without data', async () => {
+    fixtures.unsupportedPaths = undefined;
+    fixtures.unsupportedPathsFetching = false;
+    fixtures.unsupportedPathsError = true;
+    const onConfirm = vi.fn();
+    renderModal({ onConfirm, productId: 'product-1' });
+    fireEvent.click(document.querySelector('.ant-tree-switcher')!);
+    fireEvent.click(await screen.findByText('新增用户'));
+
+    const okButton = screen.getByRole('button', { name: 'mml.consoleV2.cmdSelect.okText' });
+    expect(okButton).toBeEnabled();
+    expect(screen.getByText('mml.consoleV2.cmdSelect.targetObjectPath')).toBeInTheDocument();
+    expect(screen.getByText('Device.Users.User.')).toBeInTheDocument();
+
+    fireEvent.click(okButton);
+    expect(onConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'add-1', targetObject: 'Device.Users.User.' }),
+      [],
+    );
+  });
+
   it('prunes keys that become non-writable and preserves current command-definition order on confirm', async () => {
     const onConfirm = vi.fn();
     const { rerender } = renderModal({

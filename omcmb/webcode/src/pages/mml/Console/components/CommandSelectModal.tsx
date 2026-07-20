@@ -284,10 +284,18 @@ export default function CommandSelectModal({
     [selectedCustom, customPathDefs, hiddenPaths],
   );
 
+  // ADD/RMV 以「目标对象路径」(target_object)下发 RPC(AddObject/DeleteObject)，无参数 PATH；
+  // 仅标准命令带 target_object。有 target_object 即可「确定选择」，不受 paramPaths 为空限制。
+  const selOp = selectedEntry?.command.operationType;
+  const selTargetObject = selectedEntry?.command.targetObject?.trim() ?? '';
+  const isAddRmvWithObject =
+    !isCustomSelected && (selOp === 'ADD' || selOp === 'RMV') && selTargetObject !== '';
+
   // 统一的「当前选中命令的可执行参数路径」+ 加载态（右侧预览与确定按钮共用）。
   const paramPaths = isCustomSelected ? customParamPaths : subFieldsToParamPaths(visibleSubFields);
   const pathsLoading =
-    unsupportedPathsPending || (isCustomSelected ? customPathsLoading : subFieldsLoading);
+    (!isAddRmvWithObject && unsupportedPathsPending) ||
+    (isCustomSelected ? customPathsLoading : subFieldsLoading);
   const hasSelection = !!selectedEntry || !!selectedCustom;
   const selectedOperation = selectedCustom?.operationType ?? selectedEntry?.command.operationType;
   const usesPathSelection = commandUsesPathSelection(selectedOperation);
@@ -304,12 +312,6 @@ export default function CommandSelectModal({
     setDraftPathKeys(pathKeys);
   };
 
-  // ADD/RMV 以「目标对象路径」(target_object)下发 RPC(AddObject/DeleteObject)，无参数 PATH；
-  // 仅标准命令带 target_object。有 target_object 即可「确定选择」，不受 paramPaths 为空限制。
-  const selOp = selectedEntry?.command.operationType;
-  const selTargetObject = selectedEntry?.command.targetObject?.trim() ?? '';
-  const isAddRmvWithObject =
-    !isCustomSelected && (selOp === 'ADD' || selOp === 'RMV') && selTargetObject !== '';
   // §需求 3：LST/MOD 无可执行 PATH → 禁用；ADD/RMV 看 target_object。
   const okDisabled =
     !hasSelection ||
