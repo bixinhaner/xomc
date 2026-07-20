@@ -229,7 +229,7 @@
         <param name="DeviceGSM.Msc.{i}.Amr7_95" standardPath="DeviceGSM.Msc.{i}.Amr7_95" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="allowed,forbidden" enumLabels="allowed,forbidden"/>
         <param name="DeviceGSM.Msc.{i}.AmrPayload" standardPath="DeviceGSM.Msc.{i}.AmrPayload" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="octet-aligned,bandwidth-efficient" enumLabels="octet-aligned,bandwidth-efficient"/>
         <param name="DeviceGSM.Msc.{i}.AspProtocol" standardPath="DeviceGSM.Msc.{i}.AspProtocol" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="m3ua" enumLabels="m3ua"/>
-        <param name="DeviceGSM.Msc.{i}.AttachProportion" standardPath="DeviceGSM.Msc.{i}.AttachProportion" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Msc.{i}.AttachProportion" standardPath="DeviceGSM.Msc.{i}.AttachProportion" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="100"/>
         <param name="DeviceGSM.Msc.{i}.LclsMismatch" standardPath="DeviceGSM.Msc.{i}.LclsMismatch" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="allowed,forbidden" enumLabels="allowed,forbidden"/>
         <param name="DeviceGSM.Msc.{i}.LclsMode" standardPath="DeviceGSM.Msc.{i}.LclsMode" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="disabled,mgw-loop,bts-loop" enumLabels="disabled,mgw-loop,bts-loop"/>
         <param name="DeviceGSM.Msc.{i}.MscAddr" standardPath="DeviceGSM.Msc.{i}.MscAddr" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="10"/>

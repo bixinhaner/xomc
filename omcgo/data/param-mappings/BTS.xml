@@ -23,8 +23,8 @@
         <param name="Device.DeviceInfo.X_COM_ROLLBACK_ENABLE" standardPath="Device.DeviceInfo.ROLLBACK_ENABLE" access="READ_ONLY" type="BOOLEAN" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.X_COM_STATION_RUN_Time" standardPath="Device.DeviceInfo.UpTime" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.X_COM_UE_Count" standardPath="Device.DeviceInfo.UE_Count" access="READ_ONLY" type="INT" changeApplies="Immediate"/>
-        <param name="Device.FAP.GPS.LockedLatitude" standardPath="Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude" access="READ_WRITE" type="INT" changeApplies="Immediate" min="-90000000" max="90000000"/>
-        <param name="Device.FAP.GPS.LockedLongitude" standardPath="Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude" access="READ_WRITE" type="INT" changeApplies="Immediate" min="-180000000" max="180000000"/>
+        <param name="Device.FAP.GPS.LockedLatitude" standardPath="Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude" access="READ_WRITE" type="INT" changeApplies="Immediate" min="0" max="10"/>
+        <param name="Device.FAP.GPS.LockedLongitude" standardPath="Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude" access="READ_WRITE" type="INT" changeApplies="Immediate" min="0" max="10"/>
         <param name="Device.FAP.GPS.altidute" standardPath="Device.DeviceInfo.AntennaInfo.Height" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="10"/>
         <param name="Device.FaultMgmt.CurrentAlarm.{i}.AdditionalInformation" standardPath="Device.FaultMgmt.CurrentAlarm.{i}.AdditionalInformation" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="256"/>
         <param name="Device.FaultMgmt.CurrentAlarm.{i}.AdditionalText" standardPath="Device.FaultMgmt.CurrentAlarm.{i}.AdditionalText" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="256"/>

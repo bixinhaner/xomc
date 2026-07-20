@@ -515,7 +515,7 @@
         <!-- 以下参数来源：MySQL param_info，MongoDB 中无对应映射 -->
         <param name="Device.Services.FAPService.Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth" standardPath="Device.Services.FAPService.Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.{i}.AccessMgmt.LTE.HNBName" standardPath="Device.Services.FAPService.{i}.AccessMgmt.LTE.HNBName" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="InternetGatewayDevice.Time.NTPServer3" standardPath="InternetGatewayDevice.Time.NTPServer3" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="InternetGatewayDevice.Time.NTPServer5" standardPath="InternetGatewayDevice.Time.NTPServer5" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="InternetGatewayDevice.Time.NTPServer3" standardPath="InternetGatewayDevice.Time.NTPServer3" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="64"/>
+        <param name="InternetGatewayDevice.Time.NTPServer5" standardPath="InternetGatewayDevice.Time.NTPServer5" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="64"/>
     </parameters>
 </parameterModel>
