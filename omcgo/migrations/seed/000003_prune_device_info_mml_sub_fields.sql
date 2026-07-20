@@ -4,6 +4,7 @@
 -- Also normalize SB/software-version bindings against the CMCC 5G v1.9.4 and
 -- TD-LTE V2.3 southbound model specs.
 -- Also normalize SC/management-server bindings against the same specs.
+-- Also normalize SE/log-management bindings against the same specs.
 -- Also normalize SD/alarm-parameter command bindings to read-only query pages:
 -- keep only current-alarm and history-alarm LST commands; remove write actions
 -- and unsupported auxiliary alarm views from the MML page.
@@ -344,6 +345,223 @@ SET target_paths = COALESCE(paths.paths, '[]'::jsonb),
     tree_node_refs = COALESCE(paths.paths, '[]'::jsonb),
     updated_at = now()
 FROM affected_management_commands a
+LEFT JOIN LATERAL (
+    SELECT jsonb_agg(sp.standard_path ORDER BY csf.sort_order, sp.standard_path) AS paths
+    FROM public.mml_command_sub_fields csf
+    JOIN public.standard_params sp ON sp.id = csf.standard_path_id
+    WHERE csf.command_id = a.id
+      AND csf.deprecated_at IS NULL
+) paths ON true
+WHERE c.id = a.id;
+
+-- Normalize SE/log-management command bindings:
+-- - add the 5G v1.9.4-only LogLevel RW field to LST/MOD LOG_MGMT
+-- - add the same path as a custom product-param-model mapping for every product
+--   model that already has the 5 common LogMgmt paths; source=custom keeps the
+--   supplement from being removed by XML param-model reloads
+-- - refresh tree_node_refs, which was empty while target_paths had 5 entries
+WITH upsert_log_level AS (
+    INSERT INTO public.standard_params (
+        standard_path,
+        entry_type,
+        access,
+        data_type,
+        change_applies,
+        description
+    )
+    VALUES (
+        'Device.LogMgmt.LogLevel',
+        'parameter',
+        'READ_WRITE',
+        'STRING',
+        'Immediate',
+        '日志重要等级。Enumerate{ASSERT_LOG;ERROR;WARN;INFO;DEBUG;VERBOSE}'
+    )
+    ON CONFLICT (standard_path) DO UPDATE
+    SET entry_type = EXCLUDED.entry_type,
+        access = EXCLUDED.access,
+        data_type = EXCLUDED.data_type,
+        change_applies = EXCLUDED.change_applies,
+        description = EXCLUDED.description,
+        updated_at = now()
+    RETURNING id
+), log_mgmt_param_models AS (
+    SELECT pm.param_model_id
+    FROM public.param_mappings pm
+    WHERE pm.is_active = true
+      AND pm.is_supported = true
+      AND pm.standard_path IN (
+          'Device.LogMgmt.PeriodicUploadEnable',
+          'Device.LogMgmt.URL',
+          'Device.LogMgmt.Username',
+          'Device.LogMgmt.Password',
+          'Device.LogMgmt.PeriodicUploadInterval'
+      )
+    GROUP BY pm.param_model_id
+    HAVING COUNT(DISTINCT pm.standard_path) = 5
+), inserted_log_level_mappings AS (
+    INSERT INTO public.param_mappings (
+        param_model_id,
+        standard_path,
+        private_path,
+        entry_type,
+        access,
+        data_type,
+        change_applies,
+        is_storable,
+        is_active,
+        is_supported,
+        enum_values,
+        source
+    )
+    SELECT
+        pm.param_model_id,
+        'Device.LogMgmt.LogLevel',
+        'Device.LogMgmt.LogLevel',
+        'parameter',
+        'READ_WRITE',
+        'STRING',
+        'Immediate',
+        true,
+        true,
+        true,
+        'ASSERT_LOG,ERROR,WARN,INFO,DEBUG,VERBOSE',
+        'custom'
+    FROM log_mgmt_param_models pm
+    ON CONFLICT (param_model_id, private_path) DO UPDATE
+    SET standard_path = EXCLUDED.standard_path,
+        entry_type = EXCLUDED.entry_type,
+        access = EXCLUDED.access,
+        data_type = EXCLUDED.data_type,
+        change_applies = EXCLUDED.change_applies,
+        is_storable = EXCLUDED.is_storable,
+        is_active = EXCLUDED.is_active,
+        is_supported = EXCLUDED.is_supported,
+        enum_values = EXCLUDED.enum_values,
+        source = EXCLUDED.source,
+        updated_at = now()
+    RETURNING param_model_id
+), inserted_discovered_log_level_mappings AS (
+    INSERT INTO public.discovered_param_mappings (
+        product_id,
+        software_version,
+        standard_path,
+        private_path,
+        entry_type,
+        access,
+        data_type,
+        change_applies,
+        is_storable,
+        is_active,
+        is_supported,
+        enum_values
+    )
+    SELECT
+        d.product_id,
+        d.software_version,
+        'Device.LogMgmt.LogLevel',
+        'Device.LogMgmt.LogLevel',
+        'parameter',
+        'READ_WRITE',
+        'STRING',
+        'Immediate',
+        true,
+        true,
+        true,
+        'ASSERT_LOG,ERROR,WARN,INFO,DEBUG,VERBOSE'
+    FROM public.discovered_param_mappings d
+    WHERE d.is_active = true
+      AND d.is_supported = true
+      AND d.standard_path IN (
+          'Device.LogMgmt.PeriodicUploadEnable',
+          'Device.LogMgmt.URL',
+          'Device.LogMgmt.Username',
+          'Device.LogMgmt.Password',
+          'Device.LogMgmt.PeriodicUploadInterval'
+      )
+    GROUP BY d.product_id, d.software_version
+    HAVING COUNT(DISTINCT d.standard_path) = 5
+    ON CONFLICT (product_id, software_version, standard_path) DO UPDATE
+    SET private_path = EXCLUDED.private_path,
+        entry_type = EXCLUDED.entry_type,
+        access = EXCLUDED.access,
+        data_type = EXCLUDED.data_type,
+        change_applies = EXCLUDED.change_applies,
+        is_storable = EXCLUDED.is_storable,
+        is_active = EXCLUDED.is_active,
+        is_supported = EXCLUDED.is_supported,
+        enum_values = EXCLUDED.enum_values,
+        updated_at = now()
+    RETURNING product_id
+), log_mgmt_commands AS (
+    SELECT id
+    FROM public.mml_commands
+    WHERE command_code IN ('LST LOG_MGMT', 'MOD LOG_MGMT')
+), inserted_log_level AS (
+    INSERT INTO public.mml_command_sub_fields (
+        command_id,
+        mml_code,
+        label_i18n,
+        default_selected,
+        is_required,
+        sort_order,
+        standard_path_id,
+        access_type,
+        is_supported
+    )
+    SELECT
+        c.id,
+        'LOG_LEVEL',
+        '{"zh-CN": "日志重要等级", "en-US": "LogLevel"}'::jsonb,
+        true,
+        false,
+        6,
+        p.id,
+        'RW',
+        true
+    FROM log_mgmt_commands c
+    CROSS JOIN upsert_log_level p
+    ON CONFLICT (command_id, standard_path_id) DO UPDATE
+    SET mml_code = EXCLUDED.mml_code,
+        label_i18n = EXCLUDED.label_i18n,
+        sort_order = EXCLUDED.sort_order,
+        access_type = EXCLUDED.access_type,
+        is_supported = EXCLUDED.is_supported,
+        deprecated_at = NULL,
+        updated_at = now()
+    RETURNING command_id
+), touched_log_mgmt_commands AS (
+    SELECT id AS command_id FROM log_mgmt_commands
+    UNION
+    SELECT command_id FROM inserted_log_level
+)
+UPDATE public.mml_commands c
+SET target_paths = COALESCE(paths.paths, '[]'::jsonb),
+    tree_node_refs = COALESCE(paths.paths, '[]'::jsonb),
+    updated_at = now()
+FROM touched_log_mgmt_commands t
+LEFT JOIN LATERAL (
+    SELECT jsonb_agg(sp.standard_path ORDER BY csf.sort_order, sp.standard_path) AS paths
+    FROM public.mml_command_sub_fields csf
+    JOIN public.standard_params sp ON sp.id = csf.standard_path_id
+    WHERE csf.command_id = t.command_id
+      AND csf.deprecated_at IS NULL
+) paths ON true
+WHERE c.id = t.command_id;
+
+-- mml_command_sub_fields triggers may refresh target_paths during the statement
+-- above. Run an independent final sync so tree_node_refs cannot retain stale or
+-- empty log-management paths.
+WITH affected_log_mgmt_commands AS (
+    SELECT id
+    FROM public.mml_commands
+    WHERE command_code IN ('LST LOG_MGMT', 'MOD LOG_MGMT')
+)
+UPDATE public.mml_commands c
+SET target_paths = COALESCE(paths.paths, '[]'::jsonb),
+    tree_node_refs = COALESCE(paths.paths, '[]'::jsonb),
+    updated_at = now()
+FROM affected_log_mgmt_commands a
 LEFT JOIN LATERAL (
     SELECT jsonb_agg(sp.standard_path ORDER BY csf.sort_order, sp.standard_path) AS paths
     FROM public.mml_command_sub_fields csf

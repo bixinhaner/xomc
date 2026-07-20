@@ -54,6 +54,7 @@
 - [keep-detail.csv](keep-detail.csv)：最终保留绑定明细。
 - [software-version-patch-info.md](software-version-patch-info.md)：软件版本参数分组缺失项补充记录。
 - [management-server-normalize.md](management-server-normalize.md)：基站网管参数分组规范化记录。
+- [log-management.md](log-management.md)：日志参数分组缺失项补充记录。
 
 ## 关键注意
 
@@ -90,3 +91,14 @@
 - `LST MANAGEMENT_SERVER` 当前 22 条绑定。
 - `MOD MANAGEMENT_SERVER` 当前 18 条绑定。
 - `LST/MOD MANAGEMENT_SERVER` 的 `target_paths` 与 `tree_node_refs` 已同步一致。
+
+## 后续补充：日志参数分组
+
+按两份南向规范复核 `SE / 日志参数管理` 后，确认 TD-LTE V2.3 包含 5 个 `Device.LogMgmt.*` 字段，5G v1.9.4 额外包含 `Device.LogMgmt.LogLevel`。
+
+本地数据库已执行 `omcgo/migrations/seed/000003_prune_device_info_mml_sub_fields.sql`：
+
+- `LST LOG_MGMT`、`MOD LOG_MGMT` 新增 `LOG_LEVEL -> Device.LogMgmt.LogLevel`，排序为 6。
+- `LST LOG_MGMT` 当前 6 条绑定。
+- `MOD LOG_MGMT` 当前 6 条绑定。
+- `LST/MOD LOG_MGMT` 的 `target_paths` 与 `tree_node_refs` 已同步一致。
