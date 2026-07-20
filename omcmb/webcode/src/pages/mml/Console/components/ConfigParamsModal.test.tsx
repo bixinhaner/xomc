@@ -251,6 +251,7 @@ describe('ConfigParamsModal', () => {
     expect(screen.getAllByRole('spinbutton').map((input) => (
       (input as HTMLInputElement).value === '' ? null : Number((input as HTMLInputElement).value)
     ))).toEqual(expected);
+    expect(screen.getByText('mml.consoleV2.config.objectInstanceRead')).toBeInTheDocument();
   });
 
   it('allows clearing a query instance and emits blank selectors', () => {

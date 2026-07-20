@@ -6378,6 +6378,7 @@ const messages: Record<string, string> = {
   'mml.consoleV2.config.slotReplaced':       '\'{\'i\'}\' replaced by the instance index below',
   'mml.consoleV2.config.noSlot':             'no instance placeholder',
   'mml.consoleV2.config.objectInstance':     'Object instance (\'{\'i\'}\', default 1):',
+  'mml.consoleV2.config.objectInstanceRead': 'Object instance (earlier levels default to 1; the last defaults blank):',
   'mml.consoleV2.config.instanceNo':         'Instance',
   'mml.consoleV2.config.inputFieldPlaceholder': 'Enter {label}',
   'mml.consoleV2.config.title':              'Configure Params',

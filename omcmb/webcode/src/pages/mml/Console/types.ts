@@ -168,7 +168,7 @@ export type ExecRequest =
       values?: Record<string, string>;
       /** RMV 删除的实例号 */
       instance?: number;
-      /** 父级 `.{i}.` 实例选择器（key=i01/i02…，value=具体实例号，默认 1） */
+      /** 父级 `.{i}.` 实例选择器（key=i01/i02…；查询可空，写类默认 1） */
       instanceSelectors?: Record<string, string>;
       /** 下发方式：whole=整体一条 RPC；single-path=逐 PATH 每 path 一条 RPC（成败独立） */
       execMode?: ExecMode;

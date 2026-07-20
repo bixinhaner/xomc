@@ -207,7 +207,7 @@ export default function ConfigParamsModal({
           mode: 'standard',
           checkedPaths,
           execMode: effectiveExecMode,
-          // 父级 `.{i}.` 实例选择器（默认 1）。
+          // 父级 `.{i}.` 实例选择器：查询类允许留空，写类默认 1。
           ...(instanceSlots.length > 0 ? { instanceSelectors } : {}),
           // MOD/ADD 携带写入值；RMV 携带实例号。LST 两者均不消费。
           ...(command && !isReadOp(command.operationType) && command.operationType !== 'RMV'
@@ -284,11 +284,15 @@ export default function ConfigParamsModal({
           </div>
         )}
 
-        {/* 父级 `.{i}.` 实例选择器：对象实例默认 1，按路径中占位符个数渲染。 */}
+        {/* 父级 `.{i}.` 实例选择器：查询前层默认 1、最后一层留空；写类默认 1。 */}
         {instanceSlots.length > 0 && (
           <div style={{ marginTop: 10 }}>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              {t('mml.consoleV2.config.objectInstance')}
+              {t(
+                read
+                  ? 'mml.consoleV2.config.objectInstanceRead'
+                  : 'mml.consoleV2.config.objectInstance',
+              )}
             </Text>
             <Space wrap style={{ marginTop: 6 }}>
               {instanceSlots.map((s) => {
