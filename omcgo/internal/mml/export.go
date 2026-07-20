@@ -969,13 +969,13 @@ func (s *Service) allDeviceResults(ctx context.Context, taskID uuid.UUID) ([]Dev
 // AggregateCSVBytes 直接生成「全设备汇总」CSV 字节（不落 MinIO），供同源流式下载——
 // 避免 MinIO 预签名 URL（public_endpoint）在跨主机/反代访问时浏览器不可达的问题。
 func (s *Service) AggregateCSVBytes(ctx context.Context, taskID uuid.UUID) ([]byte, error) {
-	task, err := s.taskRepo.GetByID(ctx, taskID)
+	task, resultSourceID, err := s.resolveTaskResultSource(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("get mml task: %w", err)
 	}
 	cols := exportColumnsFromTask(task.Commands)
 	read := taskIsRead(task.Commands)
-	rows, err := s.allDeviceResults(ctx, taskID)
+	rows, err := s.allDeviceResults(ctx, resultSourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -992,13 +992,13 @@ func (s *Service) DeviceCSVBytes(ctx context.Context, taskID uuid.UUID, deviceSN
 	if deviceSN == "" {
 		return nil, commonInvalidDeviceSN
 	}
-	task, err := s.taskRepo.GetByID(ctx, taskID)
+	task, resultSourceID, err := s.resolveTaskResultSource(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("get mml task: %w", err)
 	}
 	cols := exportColumnsFromTask(task.Commands)
 	read := taskIsRead(task.Commands)
-	rows, err := s.allDeviceResults(ctx, taskID)
+	rows, err := s.allDeviceResults(ctx, resultSourceID)
 	if err != nil {
 		return nil, err
 	}
