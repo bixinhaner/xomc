@@ -609,6 +609,7 @@ export default function DeviceListPane() {
         initialSelected={metricPaths}
         initialDeviceType={TECH_TO_DEVICE_TYPE[tech]}
         lockDeviceType
+        enableBatchInput
       />
     </div>
   );

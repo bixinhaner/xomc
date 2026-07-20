@@ -1020,6 +1020,7 @@ export default function KPIQuery() {
           // 外层「设备类型」是唯一来源（#443）：锁定弹窗内部类型，隐藏其重复下拉，跟随外层值。
           lockDeviceType
           maxSelected={PM_QUERY_SELECTION_LIMIT}
+          enableBatchInput
         />
 
         <QueryTemplateDetailModal

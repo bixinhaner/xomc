@@ -8,13 +8,19 @@
 
 import { useMemo, useState, useEffect } from 'react';
 import { useIntl } from 'react-intl';
-import { Alert, Modal, Select, Space, Spin, Tag, Transfer, message } from 'antd';
+import { ImportOutlined } from '@ant-design/icons';
+import { Alert, Button, Modal, Select, Space, Spin, Tag, Transfer, message } from 'antd';
 import { useUpdatePmAdhoc } from '@core/hooks/api/usePmAdhoc';
 import { useIndicatorCandidates } from '@core/hooks/api/usePerformance';
 import type { IndicatorCandidate } from '@core/services/api/pmApi';
 import type { AdhocTask } from '@core/types/pmAdhoc';
 import type { DeviceType } from '@core/types/indicatorLibrary';
 import { formatIndicatorLevel, shouldShowIndicatorLevel } from '@core/utils/indicatorLevelDisplay';
+import {
+  MetricBatchInputModal,
+  formatMetricIdSamples,
+  type MetricBatchSelectionResult,
+} from '@/components/MetricPickerModal';
 
 // 制式 → 指标库 deviceType（与向导一致）。
 const TECH_TO_DEVICE_TYPE: Record<string, DeviceType> = {
@@ -44,12 +50,14 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
 
   const [metricPaths, setMetricPaths] = useState<string[]>([]);
   const [metricTypeFilter, setMetricTypeFilter] = useState<'all' | 'kpi' | 'counter'>('all');
+  const [metricBatchOpen, setMetricBatchOpen] = useState(false);
 
   // 打开/切换任务时预填当前指标集。
   useEffect(() => {
     if (open && task) {
       setMetricPaths([...task.metricPaths]);
       setMetricTypeFilter('all');
+      setMetricBatchOpen(false);
     }
   }, [open, task]);
 
@@ -153,6 +161,13 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
               { label: intl.formatMessage({ id: 'perf.adhoc.metricTypeCounter' }), value: 'counter' },
             ]}
           />
+          <Button
+            icon={<ImportOutlined />}
+            onClick={() => setMetricBatchOpen(true)}
+            disabled={isLoading}
+          >
+            {intl.formatMessage({ id: 'perf.metricBatchInput.title' })}
+          </Button>
         </Space>
         <Spin spinning={isLoading}>
           <Transfer<MetricTransferItem>
@@ -175,6 +190,27 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
         <div style={{ color: '#888' }}>
           {intl.formatMessage({ id: 'perf.adhoc.metricSelectedCount' }, { count: metricPaths.length })}
         </div>
+        <MetricBatchInputModal
+          open={metricBatchOpen}
+          candidates={indicatorItems}
+          currentSelected={metricPaths}
+          loading={isLoading}
+          onCancel={() => setMetricBatchOpen(false)}
+          onApply={(result: MetricBatchSelectionResult) => {
+            setMetricPaths(result.nextSelected);
+            setMetricBatchOpen(false);
+            message.success(intl.formatMessage(
+              { id: 'perf.metricBatchInput.importSuccess' },
+              { added: result.addedIds.length, total: result.nextSelected.length },
+            ));
+            if (result.invalidIds.length > 0) {
+              message.warning(intl.formatMessage(
+                { id: 'perf.metricBatchInput.notFound' },
+                { count: result.invalidIds.length, ids: formatMetricIdSamples(result.invalidIds) },
+              ));
+            }
+          }}
+        />
       </Space>
     </Modal>
   );
