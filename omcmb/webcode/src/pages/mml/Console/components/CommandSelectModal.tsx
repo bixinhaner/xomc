@@ -386,8 +386,8 @@ export default function CommandSelectModal({
               {pathsLoading ? (
                 <Spin size="small" />
               ) : isAddRmvWithObject ? (
-                // §需求 1：ADD/RMV 无参数 PATH，展示执行 RPC 的「目标对象路径」提醒用户。
                 <>
+                  {/* §需求 1：ADD/RMV 无参数 PATH，展示执行 RPC 的「目标对象路径」提醒用户。 */}
                   <Text strong>{t('mml.consoleV2.cmdSelect.targetObjectPath')}</Text>
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {t('mml.consoleV2.cmdSelect.addRmvHint', {

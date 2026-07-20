@@ -1,0 +1,33 @@
+﻿命令代码,命令名称,MML Codex,中文显示名称,英文显示名称,标准路径,参数类型,访问权限,调整说明
+LST DEVICE_INFO,列出 设备基本信息,3GPP_SPEC_VERSION,3GPP协议版本,3GPPSpecVersion,Device.DeviceInfo.3GPPSpecVersion,STRING,READ_ONLY,标准匹配：Device.DeviceInfo.3GPPSpecVersion -> Device.DeviceInfo.3GPPSpecVersion
+LST DEVICE_INFO,列出 设备基本信息,ADDITIONAL_HARDWARE_VERSION,附加硬件版本,AdditionalHardwareVersion,Device.DeviceInfo.AdditionalHardwareVersion,STRING,READ_ONLY,标准匹配：Device.DeviceInfo.AdditionalHardwareVersion -> Device.DeviceInfo.AdditionalHardwareVersion
+LST DEVICE_INFO,列出 设备基本信息,ADDITIONAL_SOFTWARE_VERSION,附加软件版本,AdditionalSoftwareVersion,Device.DeviceInfo.AdditionalSoftwareVersion,STRING,READ_ONLY,标准匹配：Device.DeviceInfo.AdditionalSoftwareVersion -> Device.DeviceInfo.AdditionalSoftwareVersion
+LST DEVICE_INFO,列出 设备基本信息,DATA_MODEL_SPEC_VERSION,数据模型版本,DataModelSpecVersion,Device.DeviceInfo.DataModelSpecVersion,string,READ_ONLY,标准匹配：Device.DeviceInfo.DataModelSpecVersion -> Device.DeviceInfo.DataModelSpecVersion
+LST DEVICE_INFO,列出 设备基本信息,DN_PREFIX,DN前缀,DnPrefix,Device.DeviceInfo.DnPrefix,string,READ_WRITE,标准匹配：Device.DeviceInfo.DnPrefix -> Device.DeviceInfo.DnPrefix
+LST DEVICE_INFO,列出 设备基本信息,FAULT_LOG_URL,FAULT_LOG_URL,Fault Log URL,Device.DeviceInfo.FaultLogURL,STRING,READ_WRITE,保留为设备基础标识/版本/状态信息
+LST DEVICE_INFO,列出 设备基本信息,FIRST_USE_DATE,首次使用日期,FirstUseDate,Device.DeviceInfo.FirstUseDate,DATE_TIME,READ_ONLY,标准匹配：Device.DeviceInfo.FirstUseDate -> Device.DeviceInfo.FirstUseDate
+LST DEVICE_INFO,列出 设备基本信息,HARDWARE_PLATFORM,硬件平台,HardwarePlatform,Device.DeviceInfo.HardwarePlatform,STRING,READ_ONLY,标准匹配：Device.DeviceInfo.HardwarePlatform -> Device.DeviceInfo.HardwarePlatform
+LST DEVICE_INFO,列出 设备基本信息,HARDWARE_VERSION,硬件版本,HardwareVersion,Device.DeviceInfo.HardwareVersion,STRING,READ_ONLY,标准匹配：Device.DeviceInfo.HardwareVersion -> Device.DeviceInfo.HardwareVersion
+LST DEVICE_INFO,列出 设备基本信息,HARDWARE_VERSION_OLD,HARDWARE_VERSION_OLD,Hardware Version OLD,Device.DeviceInfo.HardwareVersion_OLD,STRING,READ_ONLY,保留为设备基础标识/版本/状态信息
+LST DEVICE_INFO,列出 设备基本信息,MODULE_TYPE,MODULE_TYPE,MODULE TYPE,Device.DeviceInfo.MODULE_TYPE,STRING,READ_ONLY,保留为设备基础标识/版本/状态信息
+LST DEVICE_INFO,列出 设备基本信息,MODULE_TYPE_OLD,MODULE_TYPE_OLD,MODULE TYPE OLD,Device.DeviceInfo.MODULE_TYPE_OLD,STRING,READ_ONLY,保留为设备基础标识/版本/状态信息
+LST DEVICE_INFO,列出 设备基本信息,MANUFACTURER,制造商,Manufacturer,Device.DeviceInfo.Manufacturer,STRING,READ_ONLY,标准匹配：Device.DeviceInfo.Manufacturer -> Device.DeviceInfo.Manufacturer
+LST DEVICE_INFO,列出 设备基本信息,MANUFACTURER_OUI,制造商OUI,ManufacturerOUI,Device.DeviceInfo.ManufacturerOUI,STRING,READ_WRITE,标准匹配：Device.DeviceInfo.ManufacturerOUI -> Device.DeviceInfo.ManufacturerOUI
+LST DEVICE_INFO,列出 设备基本信息,MODEL_NAME,设备型号,ModelName,Device.DeviceInfo.ModelName,STRING,READ_ONLY,标准匹配：Device.DeviceInfo.ModelName -> Device.DeviceInfo.ModelName
+LST DEVICE_INFO,列出 设备基本信息,PRODUCT_CLASS,产品分类,ProductClass,Device.DeviceInfo.ProductClass,STRING,READ_WRITE,标准匹配：Device.DeviceInfo.ProductClass -> Device.DeviceInfo.ProductClass
+LST DEVICE_INFO,列出 设备基本信息,PROVISIONING_CODE,供应商代号,ProvisioningCode,Device.DeviceInfo.ProvisioningCode,STRING,READ_ONLY,标准匹配：Device.DeviceInfo.ProvisioningCode -> Device.DeviceInfo.ProvisioningCode
+LST DEVICE_INFO,列出 设备基本信息,RUNNING_STATUS,RUNNING_STATUS,Running Status,Device.DeviceInfo.RunningStatus,STRING,READ_WRITE,保留为设备基础标识/版本/状态信息
+LST DEVICE_INFO,列出 设备基本信息,SERIAL_NUMBER,序列号,SerialNumber,Device.DeviceInfo.SerialNumber,STRING,READ_ONLY,标准匹配：Device.DeviceInfo.SerialNumber -> Device.DeviceInfo.SerialNumber
+LST DEVICE_INFO,列出 设备基本信息,SITE_ID,SITE_ID,Site Id,Device.DeviceInfo.SiteId,STRING,READ_WRITE,保留为设备基础标识/版本/状态信息
+LST DEVICE_INFO,列出 设备基本信息,SOFTWARE_VERSION,软件版本,SoftwareVersion,Device.DeviceInfo.SoftwareVersion,STRING,READ_ONLY,标准匹配：Device.DeviceInfo.SoftwareVersion -> Device.DeviceInfo.SoftwareVersion
+LST DEVICE_INFO,列出 设备基本信息,UP_TIME,运行时间,UpTime,Device.DeviceInfo.UpTime,STRING,READ_ONLY,标准匹配：Device.DeviceInfo.UpTime -> Device.DeviceInfo.UpTime
+LST DEVICE_INFO,列出 设备基本信息,UP_TIME_OLD,UP_TIME_OLD,Up Time OLD,Device.DeviceInfo.UpTime_OLD,STRING,READ_ONLY,保留为设备基础标识/版本/状态信息
+LST DEVICE_INFO,列出 设备基本信息,USER_LABEL,用户友好名,UserLabel,Device.DeviceInfo.UserLabel,string,READ_WRITE,标准匹配：Device.DeviceInfo.UserLabel -> Device.DeviceInfo.UserLabel
+LST DEVICE_INFO_SW_UPGRADE,列出 设备软件升级状态,FAILURE_CAUSE,升级失败原因,FailureCause,Device.DeviceInfo.SwUpgrade.FailureCause,string,READ_ONLY,标准匹配：Device.DeviceInfo.SwUpgrade.FailureCause -> Device.DeviceInfo.SwUpgrade.FailureCause
+LST DEVICE_INFO_SW_UPGRADE,列出 设备软件升级状态,STAGE,升级阶段,Stage,Device.DeviceInfo.SwUpgrade.Stage,unsignedInt,READ_ONLY,标准匹配：Device.DeviceInfo.SwUpgrade.Stage -> Device.DeviceInfo.SwUpgrade.Stage
+LST DEVICE_INFO_SW_UPGRADE,列出 设备软件升级状态,STATUS,状态,Status,Device.DeviceInfo.SwUpgrade.Status,unsignedInt,READ_ONLY,标准匹配：Device.DeviceInfo.SwUpgrade.Status -> Device.DeviceInfo.SwUpgrade.Status
+MOD DEVICE_INFO,修改 设备基本信息,DN_PREFIX,DN前缀,DnPrefix,Device.DeviceInfo.DnPrefix,string,READ_WRITE,标准匹配：Device.DeviceInfo.DnPrefix -> Device.DeviceInfo.DnPrefix
+MOD DEVICE_INFO,修改 设备基本信息,FAULT_LOG_URL,FAULT_LOG_URL,Fault Log URL,Device.DeviceInfo.FaultLogURL,STRING,READ_WRITE,保留为设备基础标识/版本/状态信息
+MOD DEVICE_INFO,修改 设备基本信息,RUNNING_STATUS,RUNNING_STATUS,Running Status,Device.DeviceInfo.RunningStatus,STRING,READ_WRITE,保留为设备基础标识/版本/状态信息
+MOD DEVICE_INFO,修改 设备基本信息,SITE_ID,SITE_ID,Site Id,Device.DeviceInfo.SiteId,STRING,READ_WRITE,保留为设备基础标识/版本/状态信息
+MOD DEVICE_INFO,修改 设备基本信息,USER_LABEL,用户友好名,UserLabel,Device.DeviceInfo.UserLabel,string,READ_WRITE,标准匹配：Device.DeviceInfo.UserLabel -> Device.DeviceInfo.UserLabel

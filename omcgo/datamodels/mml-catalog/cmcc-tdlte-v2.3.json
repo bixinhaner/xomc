@@ -8,8 +8,8 @@
   "stats": {
     "chapters": 18,
     "objectsTotal": 71,
-    "commandLeavesTotal": 190,
-    "uniqueParams": 624,
+    "commandLeavesTotal": 183,
+    "uniqueParams": 621,
     "mergeEvents": 1,
     "nonCreatableFiltered": 17
   },
@@ -215,26 +215,6 @@
       "displayOrder": 4,
       "commands": [
         {
-          "commandCode": "LST:Device.FaultMgmt.*",
-          "operationType": "LST",
-          "rpcMethod": "GetParameterValues",
-          "logicalNameI18n": {
-            "zh-CN": "故障管理总览"
-          },
-          "groupCodeObject": "Device.FaultMgmt.*",
-          "instanceArity": 0,
-          "instanceLevels": [],
-          "instanceRangeMeta": [],
-          "treeNodeRefs": [
-            "Device.FaultMgmt.SupportedAlarmNumberOfEntries",
-            "Device.FaultMgmt.MaxCurrentAlarmEntries",
-            "Device.FaultMgmt.CurrentAlarmNumberOfEntries",
-            "Device.FaultMgmt.HistoryEventNumberOfEntries",
-            "Device.FaultMgmt.ExpeditedEventNumberOfEntries",
-            "Device.FaultMgmt.QueuedEventNumberOfEntries"
-          ]
-        },
-        {
           "commandCode": "LST:Device.FaultMgmt.CurrentAlarm.{i}.*",
           "operationType": "LST",
           "rpcMethod": "GetParameterValues",
@@ -272,43 +252,6 @@
           ]
         },
         {
-          "commandCode": "LST:Device.FaultMgmt.ExpeditedEvent.{i}.*",
-          "operationType": "LST",
-          "rpcMethod": "GetParameterValues",
-          "logicalNameI18n": {
-            "zh-CN": "实时告警实例"
-          },
-          "groupCodeObject": "Device.FaultMgmt.ExpeditedEvent.{i}.*",
-          "instanceArity": 1,
-          "instanceLevels": [
-            "ExpeditedEvent"
-          ],
-          "instanceRangeMeta": [
-            {
-              "layer": 1,
-              "rangeExpr": "0~N",
-              "rangeMin": 0,
-              "rangeMax": null,
-              "dynamic": true,
-              "nSource": null,
-              "description": "实时告警实例编号"
-            }
-          ],
-          "treeNodeRefs": [
-            "Device.FaultMgmt.ExpeditedEvent.{i}.EventTime",
-            "Device.FaultMgmt.ExpeditedEvent.{i}.AlarmIdentifier",
-            "Device.FaultMgmt.ExpeditedEvent.{i}.NotificationType",
-            "Device.FaultMgmt.ExpeditedEvent.{i}.FaultLocation",
-            "Device.FaultMgmt.ExpeditedEvent.{i}.ManagedObjectInstance",
-            "Device.FaultMgmt.ExpeditedEvent.{i}.EventType",
-            "Device.FaultMgmt.ExpeditedEvent.{i}.ProbableCause",
-            "Device.FaultMgmt.ExpeditedEvent.{i}.SpecificProblem",
-            "Device.FaultMgmt.ExpeditedEvent.{i}.PerceivedSeverity",
-            "Device.FaultMgmt.ExpeditedEvent.{i}.AdditionalText",
-            "Device.FaultMgmt.ExpeditedEvent.{i}.AdditionalInformation"
-          ]
-        },
-        {
           "commandCode": "LST:Device.FaultMgmt.HistoryEvent.{i}.*",
           "operationType": "LST",
           "rpcMethod": "GetParameterValues",
@@ -343,155 +286,6 @@
             "Device.FaultMgmt.HistoryEvent.{i}.PerceivedSeverity",
             "Device.FaultMgmt.HistoryEvent.{i}.AdditionalText",
             "Device.FaultMgmt.HistoryEvent.{i}.AdditionalInformation"
-          ]
-        },
-        {
-          "commandCode": "LST:Device.FaultMgmt.QueuedEvent.{i}.*",
-          "operationType": "LST",
-          "rpcMethod": "GetParameterValues",
-          "logicalNameI18n": {
-            "zh-CN": "队列告警实例"
-          },
-          "groupCodeObject": "Device.FaultMgmt.QueuedEvent.{i}.*",
-          "instanceArity": 1,
-          "instanceLevels": [
-            "QueuedEvent"
-          ],
-          "instanceRangeMeta": [
-            {
-              "layer": 1,
-              "rangeExpr": "0~N",
-              "rangeMin": 0,
-              "rangeMax": null,
-              "dynamic": true,
-              "nSource": null,
-              "description": "队列告警实例编号"
-            }
-          ],
-          "treeNodeRefs": [
-            "Device.FaultMgmt.QueuedEvent.{i}.EventTime",
-            "Device.FaultMgmt.QueuedEvent.{i}.AlarmIdentifier",
-            "Device.FaultMgmt.QueuedEvent.{i}.NotificationType",
-            "Device.FaultMgmt.QueuedEvent.{i}.FaultLocation",
-            "Device.FaultMgmt.QueuedEvent.{i}.ManagedObjectInstance",
-            "Device.FaultMgmt.QueuedEvent.{i}.EventType",
-            "Device.FaultMgmt.QueuedEvent.{i}.ProbableCause",
-            "Device.FaultMgmt.QueuedEvent.{i}.SpecificProblem",
-            "Device.FaultMgmt.QueuedEvent.{i}.PerceivedSeverity",
-            "Device.FaultMgmt.QueuedEvent.{i}.AdditionalText",
-            "Device.FaultMgmt.QueuedEvent.{i}.AdditionalInformation"
-          ]
-        },
-        {
-          "commandCode": "LST:Device.FaultMgmt.SupportedAlarm.{i}.*",
-          "operationType": "LST",
-          "rpcMethod": "GetParameterValues",
-          "logicalNameI18n": {
-            "zh-CN": "支持告警类型"
-          },
-          "groupCodeObject": "Device.FaultMgmt.SupportedAlarm.{i}.*",
-          "instanceArity": 1,
-          "instanceLevels": [
-            "SupportedAlarm"
-          ],
-          "instanceRangeMeta": [
-            {
-              "layer": 1,
-              "rangeExpr": "0~N",
-              "rangeMin": 0,
-              "rangeMax": null,
-              "dynamic": true,
-              "nSource": "SupportedAlarmNumberOfEntries",
-              "description": "告警实例编号，N由SupportedAlarmNumberOfEntries决定"
-            }
-          ],
-          "treeNodeRefs": [
-            "Device.FaultMgmt.SupportedAlarm.{i}.EventType",
-            "Device.FaultMgmt.SupportedAlarm.{i}.ProbableCause",
-            "Device.FaultMgmt.SupportedAlarm.{i}.SpecificProblem",
-            "Device.FaultMgmt.SupportedAlarm.{i}.PerceivedSeverity",
-            "Device.FaultMgmt.SupportedAlarm.{i}.ReportingMechanism"
-          ]
-        },
-        {
-          "commandCode": "MOD:Device.FaultMgmt.SupportedAlarm.{i}.*",
-          "operationType": "MOD",
-          "rpcMethod": "SetParameterValues",
-          "logicalNameI18n": {
-            "zh-CN": "支持告警类型"
-          },
-          "groupCodeObject": "Device.FaultMgmt.SupportedAlarm.{i}.*",
-          "instanceArity": 1,
-          "instanceLevels": [
-            "SupportedAlarm"
-          ],
-          "instanceRangeMeta": [
-            {
-              "layer": 1,
-              "rangeExpr": "0~N",
-              "rangeMin": 0,
-              "rangeMax": null,
-              "dynamic": true,
-              "nSource": "SupportedAlarmNumberOfEntries",
-              "description": "告警实例编号，N由SupportedAlarmNumberOfEntries决定"
-            }
-          ],
-          "treeNodeRefs": [
-            "Device.FaultMgmt.SupportedAlarm.{i}.ReportingMechanism"
-          ]
-        },
-        {
-          "commandCode": "ADD:Device.FaultMgmt.SupportedAlarm.{i}.*",
-          "operationType": "ADD",
-          "rpcMethod": "AddObject",
-          "logicalNameI18n": {
-            "zh-CN": "支持告警类型"
-          },
-          "groupCodeObject": "Device.FaultMgmt.SupportedAlarm.{i}.*",
-          "instanceArity": 1,
-          "instanceLevels": [
-            "SupportedAlarm"
-          ],
-          "instanceRangeMeta": [
-            {
-              "layer": 1,
-              "rangeExpr": "0~N",
-              "rangeMin": 0,
-              "rangeMax": null,
-              "dynamic": true,
-              "nSource": "SupportedAlarmNumberOfEntries",
-              "description": "告警实例编号，N由SupportedAlarmNumberOfEntries决定"
-            }
-          ],
-          "treeNodeRefs": [
-            "Device.FaultMgmt.SupportedAlarm.{i}."
-          ]
-        },
-        {
-          "commandCode": "RMV:Device.FaultMgmt.SupportedAlarm.{i}.*",
-          "operationType": "RMV",
-          "rpcMethod": "DeleteObject",
-          "logicalNameI18n": {
-            "zh-CN": "支持告警类型"
-          },
-          "groupCodeObject": "Device.FaultMgmt.SupportedAlarm.{i}.*",
-          "instanceArity": 1,
-          "instanceLevels": [
-            "SupportedAlarm"
-          ],
-          "instanceRangeMeta": [
-            {
-              "layer": 1,
-              "rangeExpr": "0~N",
-              "rangeMin": 0,
-              "rangeMax": null,
-              "dynamic": true,
-              "nSource": "SupportedAlarmNumberOfEntries",
-              "description": "告警实例编号，N由SupportedAlarmNumberOfEntries决定"
-            }
-          ],
-          "treeNodeRefs": [
-            "Device.FaultMgmt.SupportedAlarm.{i}."
           ]
         }
       ]
