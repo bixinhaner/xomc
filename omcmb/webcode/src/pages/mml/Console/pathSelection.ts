@@ -30,6 +30,12 @@ export function getOrderedSelectedPathKeys(
   return getOrderedSelectedCommandPaths(paths, selectedPathKeys).map((path) => path.path);
 }
 
+export function getDefaultSelectedPathKeys(paths: CommandParamPath[]): string[] {
+  return paths
+    .filter((path) => path.defaultSelected === true)
+    .map((path) => path.path);
+}
+
 export function areSelectedPathValuesComplete(
   paths: CommandParamPath[],
   values: Record<string, string>,

@@ -59,6 +59,8 @@ export interface CommandParamPath {
   valueType?: string;
   defaultValue?: string;
   description?: string;
+  /** MML 配置中的默认勾选标记；兼容数据缺失时按 false 处理。 */
+  defaultSelected?: boolean;
 }
 
 /**
