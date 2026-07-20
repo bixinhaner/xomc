@@ -280,3 +280,69 @@ awk '/^-- \+goose Down/{exit} {print}' migrations/seed/000003_prune_device_info_
 2 个 tfcs* ManagementServer 扩展字段 sub_fields stale_refs = 0
 2 个 tfcs* ManagementServer 扩展字段 tree_node_refs stale_refs = 0
 ```
+
+## 2026-07-20 日志参数分组补充
+
+按以下规范复核 `SE / 日志参数管理`：
+
+- `中国移动5G扩展型皮基站网管南向接口数据模型规范v1.9.4.xlsx`
+- `中国移动TD-LTE皮站_飞站基站设备网络管理南向接口数据配置模型规范V2.3.xlsx`
+
+两份规范共同包含 5 个 `Device.LogMgmt.*` 字段：
+
+- `Device.LogMgmt.PeriodicUploadEnable`
+- `Device.LogMgmt.URL`
+- `Device.LogMgmt.Username`
+- `Device.LogMgmt.Password`
+- `Device.LogMgmt.PeriodicUploadInterval`
+
+5G v1.9.4 额外包含 `Device.LogMgmt.LogLevel`，权限为 RW；TD-LTE V2.3 不包含该项。
+
+处理前当前库状态：
+
+- `LST LOG_MGMT`、`MOD LOG_MGMT` 均已有 5 个共同字段。
+- `standard_params` 缺失 `Device.LogMgmt.LogLevel`。
+- 两个命令的 `target_paths` 均为 5 条，但 `tree_node_refs` 均为空数组。
+
+合并到既有脚本：
+
+```text
+omcgo/migrations/seed/000003_prune_device_info_mml_sub_fields.sql
+```
+
+执行：
+
+```bash
+awk '/^-- \+goose Down/{exit} {print}' migrations/seed/000003_prune_device_info_mml_sub_fields.sql \
+  | docker exec -i goomc-local-postgres-1 psql -U omcgo -d omcgo -v ON_ERROR_STOP=1
+```
+
+处理结果：
+
+- `standard_params` 新增/更新 `Device.LogMgmt.LogLevel`。
+- `LST LOG_MGMT`、`MOD LOG_MGMT` 新增 `LOG_LEVEL` 绑定，`sort_order = 6`。
+- `param_mappings` 为所有已具备 5 个基础日志参数的产品模型新增 `Device.LogMgmt.LogLevel` active/supported 映射，`source = custom`，避免被 XML 参数模型重载删除。
+- 刷新 `LST LOG_MGMT`、`MOD LOG_MGMT` 的 `target_paths` 与 `tree_node_refs`。
+
+验证结果：
+
+| command_code | target_count | tree_count | refs_match |
+|---|---:|---:|---|
+| `LST LOG_MGMT` | 6 | 6 | true |
+| `MOD LOG_MGMT` | 6 | 6 | true |
+
+控制台产品模型过滤复核：
+
+| 范围 | 可见字段数 | 说明 |
+|---|---:|---|
+| 当前截图设备 `E8F2971A3DC921A03D3E4FD4A0C1` / `FAP/PGSM` / `BSC` | 6 | 已通过 `source = custom` 补充 `Device.LogMgmt.LogLevel` |
+| 5G `BaiBNQ` 产品模型 | 6 | 包含 5G v1.9.4 额外字段 `Device.LogMgmt.LogLevel` |
+
+为避免旧参数模型缓存影响控制台展示，已删除 Redis 缓存：
+
+```bash
+docker exec -i goomc-local-redis-1 sh -lc \
+  'redis-cli --scan --pattern "parammodel:*" | xargs -r redis-cli DEL'
+```
+
+随后重启 `goomc-local-app-1`。
