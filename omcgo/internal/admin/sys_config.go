@@ -77,14 +77,6 @@ type PgSysConfigRepository struct {
 
 var _ SysConfigRepository = (*PgSysConfigRepository)(nil)
 
-// isLoginPagePublicSecurityConfig 维护登录页安全配置的公开白名单。
-// 登录页必须在认证前读取禁止浏览器记密开关；其余 security 配置（尤其密码策略和默认密码）
-// 仍保持非公开。配置页走 BatchUpsert 首次创建键时也必须复用这份分类，避免新库
-// 把登录页依赖的配置误写成 is_public=false。
-func isLoginPagePublicSecurityConfig(category, key string) bool {
-	return category == "security" && key == "isBrowserAutoRecordPass"
-}
-
 // NewPgSysConfigRepository creates a new PgSysConfigRepository.
 func NewPgSysConfigRepository(pool *pgxpool.Pool) *PgSysConfigRepository {
 	return &PgSysConfigRepository{pool: pool}
@@ -229,16 +221,15 @@ func (r *PgSysConfigRepository) BatchUpsert(ctx context.Context, category string
 		if valueType == "" {
 			valueType = "string"
 		}
-		isPublic := isLoginPagePublicSecurityConfig(category, item.Key)
-		// 仅 update value + updated_at；value_type / desc 不随通用批量保存改写。
-		// 登录页公开白名单是例外：首次创建时写入 is_public=true；若历史数据因旧版
-		// 基线缺失而是 false，再次保存也会自动修复。非白名单永不在这里降级已有标记。
+		isPublic := isPublicSysConfig(category, item.Key)
+		// 仅 update value、派生后的 public 分类和 updated_at；value_type / desc
+		// 不随通用批量保存改写。public 分类由代码白名单全量纠正历史脏标记。
 		_, err := tx.Exec(ctx, `
 INSERT INTO sys_configs (category, key, value, value_type, is_public)
 VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (category, key) DO UPDATE
 SET value = EXCLUDED.value,
-    is_public = CASE WHEN EXCLUDED.is_public THEN TRUE ELSE sys_configs.is_public END,
+    is_public = EXCLUDED.is_public,
     updated_at = NOW()
 `, category, item.Key, item.Value, valueType, isPublic)
 		if err != nil {
@@ -315,21 +306,25 @@ func (s *SysConfigService) RegisterValidator(category, key string, fn SysConfigV
 
 // Create creates a new config entry.
 func (s *SysConfigService) Create(ctx context.Context, req CreateSysConfigRequest) (*SysConfig, error) {
+	if req.IsPublic != nil {
+		return nil, fmt.Errorf("%w: is_public is server-managed", commonerrors.ErrInvalidInput)
+	}
+	if isSecretSysConfig(req.Category, req.Key) {
+		return nil, fmt.Errorf("%w: direct CRUD is not allowed for secret sys_config %s.%s",
+			commonerrors.ErrInvalidInput, req.Category, req.Key)
+	}
+
 	cfg := &SysConfig{
 		Category:    req.Category,
 		Key:         req.Key,
 		Value:       req.Value,
 		ValueType:   req.ValueType,
 		Description: req.Description,
-		IsPublic:    false,
+		IsPublic:    isPublicSysConfig(req.Category, req.Key),
 	}
 	if cfg.ValueType == "" {
 		cfg.ValueType = "string"
 	}
-	if req.IsPublic != nil {
-		cfg.IsPublic = *req.IsPublic
-	}
-
 	if err := s.repo.Create(ctx, cfg); err != nil {
 		return nil, fmt.Errorf("create config: %w", err)
 	}
@@ -347,9 +342,7 @@ func (s *SysConfigService) List(ctx context.Context, category string, publicOnly
 }
 
 // ListPublic 返回无需认证即可读取的配置项。
-// 除数据库 is_public 标记外，登录页依赖的 isBrowserAutoRecordPass 使用代码白名单兜底，
-// 兼容 consolidated baseline 前已存在但公开标记丢失的数据库。过滤始终在 service
-// 内完成，defaultPasswd 等未列入白名单的安全项不会进入 handler 响应。
+// 公开范围只由代码白名单决定，不信任数据库中的历史 is_public 标记。
 func (s *SysConfigService) ListPublic(ctx context.Context, category string) ([]SysConfig, error) {
 	items, err := s.repo.List(ctx, category, false)
 	if err != nil {
@@ -357,7 +350,7 @@ func (s *SysConfigService) ListPublic(ctx context.Context, category string) ([]S
 	}
 	publicItems := make([]SysConfig, 0, len(items))
 	for _, item := range items {
-		if item.IsPublic || isLoginPagePublicSecurityConfig(item.Category, item.Key) {
+		if isPublicSysConfig(item.Category, item.Key) {
 			publicItems = append(publicItems, item)
 		}
 	}
@@ -366,9 +359,17 @@ func (s *SysConfigService) ListPublic(ctx context.Context, category string) ([]S
 
 // Update updates a config.
 func (s *SysConfigService) Update(ctx context.Context, id uuid.UUID, req UpdateSysConfigRequest) (*SysConfig, error) {
+	if req.IsPublic != nil {
+		return nil, fmt.Errorf("%w: is_public is server-managed", commonerrors.ErrInvalidInput)
+	}
+
 	cfg, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("get config for update: %w", err)
+	}
+	if isSecretSysConfig(cfg.Category, cfg.Key) {
+		return nil, fmt.Errorf("%w: direct CRUD is not allowed for secret sys_config %s.%s",
+			commonerrors.ErrInvalidInput, cfg.Category, cfg.Key)
 	}
 	if req.Value != nil {
 		cfg.Value = *req.Value
@@ -376,9 +377,7 @@ func (s *SysConfigService) Update(ctx context.Context, id uuid.UUID, req UpdateS
 	if req.Description != nil {
 		cfg.Description = *req.Description
 	}
-	if req.IsPublic != nil {
-		cfg.IsPublic = *req.IsPublic
-	}
+	cfg.IsPublic = isPublicSysConfig(cfg.Category, cfg.Key)
 	if err := s.repo.Update(ctx, cfg); err != nil {
 		return nil, fmt.Errorf("update config: %w", err)
 	}
@@ -387,6 +386,14 @@ func (s *SysConfigService) Update(ctx context.Context, id uuid.UUID, req UpdateS
 
 // Delete deletes a config.
 func (s *SysConfigService) Delete(ctx context.Context, id uuid.UUID) error {
+	cfg, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("get config for delete: %w", err)
+	}
+	if isSecretSysConfig(cfg.Category, cfg.Key) {
+		return fmt.Errorf("%w: direct CRUD is not allowed for secret sys_config %s.%s",
+			commonerrors.ErrInvalidInput, cfg.Category, cfg.Key)
+	}
 	return s.repo.Delete(ctx, id)
 }
 

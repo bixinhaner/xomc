@@ -83,3 +83,32 @@ describe('adminApi dictionary i18n mapping', () => {
     expect(out?.sysDictionaryDetails?.[0].labelI18n).toEqual({ 'zh-CN': '激活', 'en-US': 'Active' });
   });
 });
+
+describe('adminApi system config secret mapping', () => {
+  it('maps backend secret metadata to camelCase fields', async () => {
+    getMock.mockResolvedValue({
+      data: [
+        {
+          id: 'config-1',
+          category: 'security',
+          key: 'defaultPasswd',
+          value: '',
+          value_type: 'string',
+          is_public: false,
+          is_secret: true,
+          is_configured: true,
+        },
+      ],
+    });
+
+    const [item] = await adminApi.getSysConfigsByCategory('security');
+
+    expect(item).toMatchObject({
+      key: 'defaultPasswd',
+      value: '',
+      isPublic: false,
+      isSecret: true,
+      isConfigured: true,
+    });
+  });
+});

@@ -140,6 +140,10 @@ export interface SysConfigItem {
   valueType?: SysConfigValueType;
   description?: string;
   isPublic?: boolean;
+  /** 后端标记该配置为 write-only 敏感值；value 始终为空。 */
+  isSecret?: boolean;
+  /** 仅对敏感值有意义：服务端是否已保存非空值。 */
+  isConfigured?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }

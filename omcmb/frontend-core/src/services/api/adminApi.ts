@@ -412,6 +412,8 @@ interface BackendSysConfig {
   value_type: string;
   desc?: string;
   is_public?: boolean;
+  is_secret?: boolean;
+  is_configured?: boolean;
   created_at?: string;
   updated_at?: string;
 }
@@ -677,6 +679,8 @@ function mapBackendSysConfig(b: BackendSysConfig): SysConfigItem {
     valueType: vt,
     description: b.desc,
     isPublic: b.is_public,
+    isSecret: b.is_secret,
+    isConfigured: b.is_configured,
     createdAt: b.created_at,
     updatedAt: b.updated_at,
   };

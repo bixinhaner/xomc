@@ -18,12 +18,24 @@ import (
 type stubSysConfigRepo struct {
 	mu sync.Mutex
 
+	createFn      func(ctx context.Context, cfg *SysConfig) error
+	getByIDFn     func(ctx context.Context, id uuid.UUID) (*SysConfig, error)
+	updateFn      func(ctx context.Context, cfg *SysConfig) error
+	deleteFn      func(ctx context.Context, id uuid.UUID) error
 	batchUpsertFn func(ctx context.Context, category string, items []BatchItem) (int, error)
 	listFn        func(ctx context.Context, category string, publicOnly bool) ([]SysConfig, error)
 }
 
-func (s *stubSysConfigRepo) Create(_ context.Context, _ *SysConfig) error { return nil }
-func (s *stubSysConfigRepo) GetByID(_ context.Context, _ uuid.UUID) (*SysConfig, error) {
+func (s *stubSysConfigRepo) Create(ctx context.Context, cfg *SysConfig) error {
+	if s.createFn != nil {
+		return s.createFn(ctx, cfg)
+	}
+	return nil
+}
+func (s *stubSysConfigRepo) GetByID(ctx context.Context, id uuid.UUID) (*SysConfig, error) {
+	if s.getByIDFn != nil {
+		return s.getByIDFn(ctx, id)
+	}
 	return nil, nil
 }
 func (s *stubSysConfigRepo) GetByKey(_ context.Context, _, _ string) (*SysConfig, error) {
@@ -36,8 +48,18 @@ func (s *stubSysConfigRepo) List(ctx context.Context, category string, publicOnl
 	}
 	return nil, nil
 }
-func (s *stubSysConfigRepo) Update(_ context.Context, _ *SysConfig) error { return nil }
-func (s *stubSysConfigRepo) Delete(_ context.Context, _ uuid.UUID) error  { return nil }
+func (s *stubSysConfigRepo) Update(ctx context.Context, cfg *SysConfig) error {
+	if s.updateFn != nil {
+		return s.updateFn(ctx, cfg)
+	}
+	return nil
+}
+func (s *stubSysConfigRepo) Delete(ctx context.Context, id uuid.UUID) error {
+	if s.deleteFn != nil {
+		return s.deleteFn(ctx, id)
+	}
+	return nil
+}
 
 func (s *stubSysConfigRepo) BatchUpsert(ctx context.Context, category string, items []BatchItem) (int, error) {
 	s.mu.Lock()
@@ -140,28 +162,6 @@ func TestSysConfigService_RegisterSavedHook_NilSafe(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestIsLoginPagePublicSecurityConfig(t *testing.T) {
-	tests := []struct {
-		name     string
-		category string
-		key      string
-		want     bool
-	}{
-		{name: "screen lock timeout is not runtime-whitelisted", category: "security", key: "userSessionExpirationMin", want: false},
-		{name: "browser password policy", category: "security", key: "isBrowserAutoRecordPass", want: true},
-		{name: "login notice switch is not runtime-whitelisted", category: "security", key: "enabledFlag", want: false},
-		{name: "login notice message is not runtime-whitelisted", category: "security", key: "msg", want: false},
-		{name: "password must stay private", category: "security", key: "defaultPasswd", want: false},
-		{name: "same key in another category", category: "basic", key: "msg", want: false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, isLoginPagePublicSecurityConfig(tt.category, tt.key))
-		})
-	}
-}
-
 func TestSysConfigService_ListPublic_SecurityUsesStrictAllowlist(t *testing.T) {
 	repo := &stubSysConfigRepo{
 		listFn: func(_ context.Context, category string, publicOnly bool) ([]SysConfig, error) {
@@ -177,9 +177,141 @@ func TestSysConfigService_ListPublic_SecurityUsesStrictAllowlist(t *testing.T) {
 
 	items, err := NewSysConfigService(repo).ListPublic(context.Background(), "security")
 	require.NoError(t, err)
-	require.Len(t, items, 2)
+	require.Len(t, items, 1)
 	assert.Equal(t, "isBrowserAutoRecordPass", items[0].Key)
-	assert.Equal(t, "legacyPublicKey", items[1].Key)
+}
+
+func TestSysConfigService_Create_RejectsClientControlledPublicFlag(t *testing.T) {
+	called := false
+	requestedPublic := true
+	svc := NewSysConfigService(&stubSysConfigRepo{
+		createFn: func(_ context.Context, _ *SysConfig) error {
+			called = true
+			return nil
+		},
+	})
+
+	_, err := svc.Create(context.Background(), CreateSysConfigRequest{
+		Category: "system",
+		Key:      "system_name",
+		Value:    "OMC",
+		IsPublic: &requestedPublic,
+	})
+
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.False(t, called)
+}
+
+func TestSysConfigService_Create_RejectsSecretThroughDirectCRUD(t *testing.T) {
+	called := false
+	svc := NewSysConfigService(&stubSysConfigRepo{
+		createFn: func(_ context.Context, _ *SysConfig) error {
+			called = true
+			return nil
+		},
+	})
+
+	_, err := svc.Create(context.Background(), CreateSysConfigRequest{
+		Category: "security",
+		Key:      "defaultPasswd",
+		Value:    "secret",
+	})
+
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.False(t, called)
+}
+
+func TestSysConfigService_Create_DerivesPublicFlagFromAllowlist(t *testing.T) {
+	var stored SysConfig
+	svc := NewSysConfigService(&stubSysConfigRepo{
+		createFn: func(_ context.Context, cfg *SysConfig) error {
+			stored = *cfg
+			return nil
+		},
+	})
+
+	_, err := svc.Create(context.Background(), CreateSysConfigRequest{
+		Category: "system",
+		Key:      "system_name",
+		Value:    "OMC",
+	})
+
+	require.NoError(t, err)
+	assert.True(t, stored.IsPublic)
+}
+
+func TestSysConfigService_Update_RejectsClientControlledPublicFlag(t *testing.T) {
+	requestedPublic := true
+	getCalled := false
+	svc := NewSysConfigService(&stubSysConfigRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*SysConfig, error) {
+			getCalled = true
+			return &SysConfig{}, nil
+		},
+	})
+
+	_, err := svc.Update(context.Background(), uuid.New(), UpdateSysConfigRequest{IsPublic: &requestedPublic})
+
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.False(t, getCalled)
+}
+
+func TestSysConfigService_Update_RejectsSecretThroughDirectCRUD(t *testing.T) {
+	updated := false
+	value := "new secret"
+	svc := NewSysConfigService(&stubSysConfigRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*SysConfig, error) {
+			return &SysConfig{Category: "agent", Key: "agent_studio_service_token", Value: "old"}, nil
+		},
+		updateFn: func(_ context.Context, _ *SysConfig) error {
+			updated = true
+			return nil
+		},
+	})
+
+	_, err := svc.Update(context.Background(), uuid.New(), UpdateSysConfigRequest{Value: &value})
+
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.False(t, updated)
+}
+
+func TestSysConfigService_Update_DerivesPublicFlagFromStoredIdentity(t *testing.T) {
+	var stored SysConfig
+	value := "new value"
+	svc := NewSysConfigService(&stubSysConfigRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*SysConfig, error) {
+			return &SysConfig{Category: "system", Key: "rogue_public", IsPublic: true}, nil
+		},
+		updateFn: func(_ context.Context, cfg *SysConfig) error {
+			stored = *cfg
+			return nil
+		},
+	})
+
+	_, err := svc.Update(context.Background(), uuid.New(), UpdateSysConfigRequest{Value: &value})
+
+	require.NoError(t, err)
+	assert.False(t, stored.IsPublic)
+}
+
+func TestSysConfigService_Delete_RejectsSecretThroughDirectCRUD(t *testing.T) {
+	id := uuid.New()
+	deleted := false
+	svc := NewSysConfigService(&stubSysConfigRepo{
+		getByIDFn: func(_ context.Context, gotID uuid.UUID) (*SysConfig, error) {
+			assert.Equal(t, id, gotID)
+			return &SysConfig{ID: id, Category: "agent", Key: "agent_studio_service_token"}, nil
+		},
+		deleteFn: func(_ context.Context, _ uuid.UUID) error {
+			deleted = true
+			return nil
+		},
+	})
+
+	err := svc.Delete(context.Background(), id)
+
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.False(t, deleted)
 }
 
 // ── Validator hook（issue #548 切片 2 D 后端 sys_configs validator）─────────────────

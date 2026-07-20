@@ -4777,6 +4777,8 @@ const messages: Record<string, string> = {
 
   // System - Security Settings
   'system.security.defaultPassword':         '默认密码',
+  'system.security.defaultPasswordConfiguredPlaceholder': '已配置，留空不修改',
+  'system.security.defaultPasswordUnsetPlaceholder': '未配置，请输入新密码',
   // Issue #649：废弃硬规则化（管理员注入即强制改密），i18n 同步删除该文案
   // 'system.security.forcePasswordChangeOnFirstLogin' 已下线
   // Issue #649：文案对齐后端硬规则 — 管理员注入此密码的用户首次登录强制改密
@@ -4787,6 +4789,7 @@ const messages: Record<string, string> = {
   'system.user.resetToDefault':              '重置为系统默认密码',
   'system.user.resetToDefaultConfirm':       '确定将该用户密码重置为系统默认密码？用户下次登录需立即修改密码，旧登录态将立即失效。',
   'system.user.defaultPasswordNotSet':       '系统默认密码未设置，请先到系统配置 → 安全设置中设置',
+  'system.user.defaultPasswordWillBeUsed':   '将使用系统默认密码',
   'system.user.ldapResetDisabledTip':        'LDAP 用户密码由 LDAP 系统管理，无法在此重置',
   'system.user.builtInResetDisabledTip':     '内置用户请通过 omcctl CLI 重置密码',
   'system.security.passwordStrength':        '密码强度',
