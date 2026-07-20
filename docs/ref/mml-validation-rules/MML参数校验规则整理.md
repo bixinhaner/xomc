@@ -239,6 +239,26 @@ no_zh
 
 表示不允许输入中文。前端会将它转换成禁止中文字符的正则。
 
+## 八、第二轮前端具体参数规则
+
+第二轮扫描重点检查配置类 JSP 中直接绑定到具体参数的范围、正则、条件关系和参数联动。页面级命令名、NamePath、通用控件处理和通用 `no_zh` 转换不作为具体参数规则统计。
+
+| 参数或参数组 | 前端规则 | 来源 |
+|---|---|---|
+| `LTE_HOME_NODEB_NAME` | 非空时匹配 `^[A-Za-z]{1}[A-Za-z0-9_\-]{0,47}$`，首字符必须为英文字母，长度不超过 48 | `modCell.jsp` |
+| `TUNNEL_NAME` | 必填，长度 1..14，匹配 `^\w+$` | `addIpsecSetting.jsp` |
+| `LEFTSOURCEIP` | 允许合法 IPv4 地址或特殊值 `%config`，长度不超过 256 | `addIpsecSetting.jsp` |
+| `KEYLIFE`、`IKELIFETIME`、`REKEYMARGIN`、`DPDDELAY` | 时间值为数字加单位；新增 IPsec 页面使用 `^\d+[s|m|d]{1}$`，编辑页面校验允许 `s/m/h/d` | `addIpsecSetting.jsp`、`ipsec.jsp` |
+| `KEYINGTRIES` | 只允许十进制数字或 `%forever` | `addIpsecSetting.jsp` |
+| `KEYLIFE`、`REKEYMARGIN` | 换算为秒后满足 `KEYLIFE >= 3 * REKEYMARGIN` | `ipsec.jsp`、`ipsec3.jsp` |
+| `IKELIFETIME`、`KEYLIFE` | 换算为秒后满足 `IKELIFETIME >= KEYLIFE` | `ipsec.jsp`、`ipsec3.jsp` |
+| `REKEYMARGIN` | 产品类型为 RTS&QRTB 时至少为 `5m`，V3 时至少为 `3m` | `ipsec.jsp`、`addIpsecSetting.jsp` |
+| `USIM_ENABLE` 与 `IMSI`、`KEY`、`OPc`、`R_value` | `USIM_ENABLE=1` 时显示字段，否则隐藏；长度上限分别为 21、32、32、32 | `modUSIM.jsp` |
+| SAS 相关 LTE 参数 | `SASEnble=1` 时禁用 `LTE_DL_EARFCN`、`LTE_UL_EARFCN`、`LTE_FREQ_BAND_INDICATOR`、`LTE_BANDS_SUPPORTED`、`LTE_DL_BANDWIDTH`、`LTE_UL_BANDWIDTH` | `modCell.jsp` |
+| `LTE_BANDS_SUPPORTED` | `hardwareVersion=BAIBLX1.0` 时不显示控件 | `modCell.jsp` |
+
+以上规则已写入 22 个版本 XML 的 `<frontendRules>`。数据库中已经明确保存的普通 `V_TYPE` 范围和枚举不重复作为前端遗漏规则；第二轮新增统计按参数名计为 19 个参数，参数组联动规则另行记录。
+
 注意：
 
 - `js_regex` 主要是前端校验规则；
@@ -298,6 +318,51 @@ max_value = 65535
 ```text
 OMCWebServer/src/main/webapp/WEB-INF/content/gnodeb/maintenance/mml.jsp
 ```
+
+### 4. XML 中补充的前端硬编码规则
+
+由于部分规则直接写在 MML JSP/JavaScript 中，不能由单个参数的 `v_type`、`js_regex` 或 `v_*` 字段表达，所有版本 XML 在 `relations` 后增加了：
+
+```xml
+<frontendRules>
+    <row rule_id="FR-001">
+        <field name="RULE_TYPE">...</field>
+        <field name="SCOPE">...</field>
+        <field name="PARAMETERS">...</field>
+        <field name="RULE">...</field>
+        <field name="SOURCE_FILE">...</field>
+        <field name="SOURCE_LINE">...</field>
+    </row>
+</frontendRules>
+```
+
+字段含义：
+
+| 字段 | 含义 |
+|---|---|
+| `rule_id` | 前端规则编号，`FR-001` 等编号只在当前规则集合内使用 |
+| `RULE_TYPE` | 规则类型，例如输入校验、条件校验、条件必填、版本页面约束 |
+| `SCOPE` | 规则作用范围，例如参数值、命令、自定义参数路径、加载的专用页面 |
+| `CONDITION` | 触发条件，例如特定硬件版本或特定命令 |
+| `PARAMETERS` | 涉及的 `mib_dn`，多个参数使用英文逗号分隔 |
+| `RULE` | 前端实际执行的规则说明 |
+| `SOURCE_FILE` | 规则实现文件，相对于 OMC 工程根目录 |
+| `SOURCE_LINE` | 取证时的代码行范围 |
+| `PRIORITY` | 规则优先级；PCI 联合校验标记为 `low`，表示该规则不是本次参数规则交付重点 |
+
+当前 `frontendRules` 已记录：
+
+1. 自定义命令名的长度和字符集限制；
+2. 俄罗斯高通参数路径的非空、`.`、`{i}` 和结尾规则；
+3. 特定版本及特定参数的 `a..b` 范围格式校验；
+4. `Ipv4AddrArr` 的逗号分隔和逐项 IPv4 校验；
+5. `JS_REGEX=no_zh` 在前端转换为禁止中文正则的实现；
+6. `LTE_HALOB_ENABLE_STATE={1}` 时 `LTE_HALOB_MODE` 的条件必填；
+7. `ADD EUTRANNCELL` 页面中 CID、EARFCN 和 PHY Cell ID 的固定范围；
+8. 硬件版本和命令名导致控件显示、禁用或选项变化的页面约束；
+9. PCI 联合校验（已标记为低优先级）。
+
+这些规则是页面实现规则，不应与参数 XML 中的单参数数据库规则混淆。若数据库中的 `V_TYPE`/`JS_REGEX` 与 `frontendRules` 同时存在，应同时执行两类规则。
 
 ## 十、后台校验逻辑
 
@@ -677,7 +742,7 @@ param_version + path
 已根据本机 `small_cell` 数据生成 XML 文件，输出目录为：
 
 ```text
-OMC/plan/MML参数校验规则XML/
+OMC/plan/MML-validation-rules/
 ```
 
 共生成 22 个文件，每个参数版本一个独立文件：
@@ -720,7 +785,8 @@ QC4.2T.xml
 3. 参数原始字段：名称、`MIB_DN`、`V_TYPE`、`JS_REGEX`、默认值、操作标识等；
 4. `validation`：按 `add`、`mod`、`rmv`、`lst` 拆分支持状态和必填状态；
 5. `parameterGroups`：参数组原始信息；
-6. `relations`：参数组和参数之间的关联关系及显示顺序。
+6. `relations`：参数组和参数之间的关联关系及显示顺序；
+7. `frontendRules`：从 JSP/JavaScript 中整理出的、无法由参数表字段完整表达的前端硬编码规则。该节点位于 `relations` 之后，不属于单个参数的 `validation`，需要与数据库规则同时读取。
 
 参数节点示意：
 
@@ -739,6 +805,8 @@ QC4.2T.xml
 ```
 
 注意：XML 中的 `path` 来自 `small_cell_param.NAME_PATH`，这是最终代表一个参数的核心字段；`MIB_DN`、`PARAM_ID` 和参数名称均作为辅助信息保留。
+
+当前 XML 已在 22 个版本文件中补充 `frontendRules`。不同版本的规则行数量和字段并不完全相同，读取时应以 XML 中实际存在的 `row` 和 `field` 为准，不能假设每条规则都包含 `SCOPE`、`CONDITION` 或 `PARAMETERS`。规则编号（如 `FR-001`、`FR-SECOND-ROUND`）只在对应 XML 文件内使用，不应跨版本作为全局唯一 ID。
 
 ## 十七、参数版本与 CellPlatformType 映射关系
 
