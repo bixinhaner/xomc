@@ -106,6 +106,35 @@ var taskListColumns = []string{
 	"product_resolved", "matched_product_id", "matched_product_class", "path_translation_source",
 }
 
+func taskListColumnsWithLatestRun() []string {
+	cols := make([]string, 0, len(taskListColumns)+1)
+	cols = append(cols, taskListColumns...)
+	return append(cols, "latest_periodic_run.latest_run AS latest_run")
+}
+
+const latestPeriodicRunJoin = `LATERAL (
+	SELECT jsonb_build_object(
+		'id', child.id,
+		'execute_type', child.execute_type,
+		'execute_mode', child.execute_mode,
+		'status', child.status,
+		'result', child.result,
+		'total_devices', child.total_devices,
+		'success_count', child.success_count,
+		'failed_count', child.failed_count,
+		'command_count', COALESCE(jsonb_array_length(child.commands), 0),
+		'plan_item_count', COALESCE(jsonb_array_length(child.plan_items), 0),
+		'started_at', child.started_at,
+		'finished_at', child.finished_at,
+		'created_at', child.created_at,
+		'updated_at', child.updated_at
+	) AS latest_run
+	  FROM mml_tasks child
+	 WHERE child.parent_task_id = mml_tasks.id
+	 ORDER BY child.created_at DESC
+	 LIMIT 1
+) latest_periodic_run ON mml_tasks.execute_type = 'periodic' AND mml_tasks.parent_task_id IS NULL`
+
 // ======================================================================
 // PgCommandRepository (read-only)
 // ======================================================================
@@ -1122,7 +1151,9 @@ func (r *PgTaskRepository) Update(ctx context.Context, task *MMLTask) error {
 }
 
 func (r *PgTaskRepository) List(ctx context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error) {
-	base := storage.Psql.Select(taskListColumns...).From("mml_tasks")
+	base := storage.Psql.Select(taskListColumnsWithLatestRun()...).
+		From("mml_tasks").
+		LeftJoin(latestPeriodicRunJoin)
 	countBase := storage.Psql.Select("COUNT(*)").From("mml_tasks")
 
 	if filter.Status != nil {
@@ -1356,6 +1387,7 @@ func scanTaskRow(rows pgx.Rows) (*MMLTask, error) {
 func scanTaskSummaryRow(rows pgx.Rows) (*MMLTask, error) {
 	var t MMLTask
 	var deviceSNsJSON []byte
+	var latestRunJSON []byte
 	var matchedProductClass, pathTranslationSource *string
 	var requestID *string
 
@@ -1373,6 +1405,7 @@ func scanTaskSummaryRow(rows pgx.Rows) (*MMLTask, error) {
 		&t.TotalDevices, &t.SuccessCount, &t.FailedCount, &t.Result,
 		&t.NextTriggerAt, &t.PeriodicParentID,
 		&t.ProductResolved, &t.MatchedProductID, &matchedProductClass, &pathTranslationSource,
+		&latestRunJSON,
 	)
 	if err != nil {
 		return nil, err
@@ -1385,6 +1418,13 @@ func scanTaskSummaryRow(rows pgx.Rows) (*MMLTask, error) {
 	}
 	if pathTranslationSource != nil {
 		t.PathTranslationSource = *pathTranslationSource
+	}
+	if len(latestRunJSON) > 0 {
+		var latestRun MMLTaskRun
+		if err := json.Unmarshal(latestRunJSON, &latestRun); err != nil {
+			return nil, fmt.Errorf("unmarshal latest_run: %w", err)
+		}
+		t.LatestRun = &latestRun
 	}
 	if deviceSNsJSON != nil {
 		if err := json.Unmarshal(deviceSNsJSON, &t.DeviceSNs); err != nil {
@@ -1628,8 +1668,9 @@ func (r *PgTaskRepository) Delete(ctx context.Context, id uuid.UUID) error {
 // ListByScriptID 返回指定脚本关联的全部执行记录（模板 + 子实例），
 // 按 created_at 倒序分页。P4 C11：脚本详情页"历史执行"tab 用。
 func (r *PgTaskRepository) ListByScriptID(ctx context.Context, scriptID uuid.UUID, req model.ListRequest) (*model.ListResponse[MMLTask], error) {
-	base := storage.Psql.Select(taskListColumns...).
+	base := storage.Psql.Select(taskListColumnsWithLatestRun()...).
 		From("mml_tasks").
+		LeftJoin(latestPeriodicRunJoin).
 		Where(sq.Eq{"script_id": scriptID})
 	countBase := storage.Psql.Select("COUNT(*)").
 		From("mml_tasks").

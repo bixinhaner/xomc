@@ -6166,6 +6166,7 @@ const messages: Record<string, string> = {
   'mml.nextTriggerAt':                       '下次触发时间',
   'mml.periodicChild':                       '周期子实例',
   'mml.periodicTemplate':                    '周期模板',
+  'mml.awaitingFirstRun':                    '待首次执行',
   'mml.periodicRuns':                        '周期执行实例',
   'mml.periodicRunCount':                    '已触发 {count} 次',
   'mml.latestRun':                           '最近一次',

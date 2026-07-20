@@ -6138,6 +6138,7 @@ const messages: Record<string, string> = {
   'mml.nextTriggerAt':                       'Next Trigger',
   'mml.periodicChild':                       'Periodic Run',
   'mml.periodicTemplate':                    'Periodic Template',
+  'mml.awaitingFirstRun':                    'Awaiting First Run',
   'mml.periodicRuns':                        'Periodic Runs',
   'mml.periodicRunCount':                    'Triggered {count} time(s)',
   'mml.latestRun':                           'Latest Run',
