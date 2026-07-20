@@ -7737,7 +7737,7 @@ const messages: Record<string, string> = {
   'perf.dashboard.granularWeekly':       'Weekly',
   'perf.dashboard.granularMonthly':      'Monthly',
   'perf.dashboard.fieldTech':            'Technology',
-  'perf.dashboard.fieldDevice':          'Device (≤10)',
+  'perf.dashboard.fieldDevice':          'Device (≤50)',
   'perf.dashboard.fieldMetric':          'Metric',
   'perf.dashboard.fieldGranularity':     'Granularity',
   'perf.dashboard.devicePlaceholder':    'Click the button on the right to select devices',

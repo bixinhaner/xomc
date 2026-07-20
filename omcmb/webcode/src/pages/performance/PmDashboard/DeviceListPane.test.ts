@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
 import type { DashboardExportSelection } from '@core/utils/kpiExportParams';
-import { buildDeviceViewExportInput } from './DeviceListPane';
+import {
+  buildDeviceViewExportInput,
+  isDeviceViewDeviceSelectionOverLimit,
+  isDeviceViewMetricSelectionOverLimit,
+} from './DeviceListPane';
 
 const selection: DashboardExportSelection = {
   technology: 'lte',
@@ -33,5 +38,25 @@ describe('buildDeviceViewExportInput', () => {
 
     expect(input.sourceType).toBe('device_view');
     expect(input.taskName).toBe('KPI_Export_Device_Performance_View_20260716_184005');
+  });
+});
+
+describe('isDeviceViewMetricSelectionOverLimit', () => {
+  it('设备性能查看沿用 PM 查询设备数量上限', () => {
+    expect(isDeviceViewDeviceSelectionOverLimit(
+      Array.from({ length: PM_QUERY_SELECTION_LIMIT }, (_, index) => `SN-${index + 1}`),
+    )).toBe(false);
+    expect(isDeviceViewDeviceSelectionOverLimit(
+      Array.from({ length: PM_QUERY_SELECTION_LIMIT + 1 }, (_, index) => `SN-${index + 1}`),
+    )).toBe(true);
+  });
+
+  it('设备性能查看沿用 PM 查询指标数量上限', () => {
+    expect(isDeviceViewMetricSelectionOverLimit(
+      Array.from({ length: PM_QUERY_SELECTION_LIMIT }, (_, index) => `K${index + 1}`),
+    )).toBe(false);
+    expect(isDeviceViewMetricSelectionOverLimit(
+      Array.from({ length: PM_QUERY_SELECTION_LIMIT + 1 }, (_, index) => `K${index + 1}`),
+    )).toBe(true);
   });
 });

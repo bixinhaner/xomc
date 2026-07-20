@@ -13,6 +13,7 @@ import { Alert, Button, DatePicker, Drawer, Form, Input, Select, Switch, message
 import dayjs from 'dayjs';
 import { useCreatePmAdhoc } from '@core/hooks/api/usePmAdhoc';
 import type { AdhocMode } from '@core/types/pmAdhoc';
+import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
 
 // 纯枚举（label = value），不译，保持原样。
 const GRANULARITY_OPTIONS = ['hourly', 'daily', 'weekly', 'monthly'].map((g) => ({
@@ -45,6 +46,15 @@ interface Props {
   onCreated?: (taskId: string) => void;
 }
 
+function parseCsvList(value: string): string[] {
+  return Array.from(new Set(
+    value
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  ));
+}
+
 export function CreateAdhocTaskDrawer({ open, preset, onClose, onCreated }: Props) {
   const intl = useIntl();
   const [form] = Form.useForm<CreateForm>();
@@ -73,18 +83,30 @@ export function CreateAdhocTaskDrawer({ open, preset, onClose, onCreated }: Prop
 
   const handleCreate = async () => {
     const v = await form.validateFields();
+    const deviceSns = parseCsvList(v.deviceSns);
+    const metricPaths = parseCsvList(v.metricPaths);
+
+    if (deviceSns.length > PM_QUERY_SELECTION_LIMIT) {
+      message.warning(intl.formatMessage(
+        { id: 'perf.picker.deviceLimitExceeded' },
+        { max: PM_QUERY_SELECTION_LIMIT, count: deviceSns.length },
+      ));
+      return;
+    }
+    if (metricPaths.length > PM_QUERY_SELECTION_LIMIT) {
+      message.warning(intl.formatMessage(
+        { id: 'perf.picker.metricLimitExceeded' },
+        { max: PM_QUERY_SELECTION_LIMIT, count: metricPaths.length },
+      ));
+      return;
+    }
+
     const task = await createMut.mutateAsync({
       name: v.name,
       mode: v.mode,
       cronExpr: v.cronExpr,
-      deviceSns: v.deviceSns
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean),
-      metricPaths: v.metricPaths
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean),
+      deviceSns,
+      metricPaths,
       granularities: v.granularities,
       windowStart: v.window[0].toISOString(),
       windowEnd: v.window[1].toISOString(),
