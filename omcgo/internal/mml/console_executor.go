@@ -397,9 +397,7 @@ func buildStatementCommandEntry(stmt Statement, cmd *MMLCommand, subFields []MML
 			return nil, fmt.Errorf("LST: no usable sub_fields (selected=%d, total=%d)",
 				len(stmt.SelectedSubFieldIDs), len(subFields))
 		}
-		if err := applyInstanceSelectorsToRefs(refs, stmt.InstanceSelectors); err != nil {
-			return nil, err
-		}
+		applyQueryInstanceSelectorsToRefs(refs, stmt.InstanceSelectors)
 		entry["rpc_method"] = "GetParameterValues"
 		entry["param_refs"] = refs
 
@@ -494,9 +492,10 @@ func buildStatementCommandEntry(stmt Statement, cmd *MMLCommand, subFields []MML
 //   - 空 selectors + 路径无 `.{i}.` → 原样返回（兼容老路径无 instance 的场景）
 //
 // 示例：
-//   path = "Device.DeviceInfo.MU.{i}.Slot.{i}.3GPPSpecVersion"
-//   selectors = {iα: "1", iβ: "2"}  → 排序后 keys=[iα, iβ]
-//   result = "Device.DeviceInfo.MU.1.Slot.2.3GPPSpecVersion"
+//
+//	path = "Device.DeviceInfo.MU.{i}.Slot.{i}.3GPPSpecVersion"
+//	selectors = {iα: "1", iβ: "2"}  → 排序后 keys=[iα, iβ]
+//	result = "Device.DeviceInfo.MU.1.Slot.2.3GPPSpecVersion"
 func substituteInstanceSelectors(path string, selectors map[string]string) (string, error) {
 	placeholderCount := strings.Count(path, ".{i}.")
 	if placeholderCount == 0 && len(selectors) == 0 {
@@ -524,6 +523,59 @@ func substituteInstanceSelectors(path string, selectors map[string]string) (stri
 		result = result[:idx] + "." + val + "." + result[idx+5:]
 	}
 	return result, nil
+}
+
+func substituteQueryInstanceSelectors(path string, selectors map[string]string) string {
+	if len(selectors) == 0 {
+		return path
+	}
+
+	placeholderCount := strings.Count(path, ".{i}.")
+	layerValues := make([]string, placeholderCount)
+	layerBound := make([]bool, placeholderCount)
+	legacyKeys := make([]string, 0, len(selectors))
+	for key, value := range selectors {
+		layer, numbered := queryInstanceSelectorLayer(key)
+		if !numbered {
+			legacyKeys = append(legacyKeys, key)
+			continue
+		}
+		if layer >= 1 && layer <= placeholderCount {
+			layerValues[layer-1] = value
+			layerBound[layer-1] = true
+		}
+	}
+
+	sort.Strings(legacyKeys)
+	nextLayer := 0
+	for _, key := range legacyKeys {
+		for nextLayer < placeholderCount && layerBound[nextLayer] {
+			nextLayer++
+		}
+		if nextLayer >= placeholderCount {
+			break
+		}
+		layerValues[nextLayer] = strings.TrimSpace(selectors[key])
+		layerBound[nextLayer] = true
+		nextLayer++
+	}
+
+	result := path
+	for layer := 0; layer < placeholderCount; layer++ {
+		idx := strings.Index(result, ".{i}.")
+		if !layerBound[layer] || strings.TrimSpace(layerValues[layer]) == "" {
+			return result[:idx+1]
+		}
+		result = result[:idx] + "." + layerValues[layer] + "." + result[idx+5:]
+	}
+	return result
+}
+
+func queryInstanceSelectorLayer(key string) (int, bool) {
+	if len(key) != 3 || key[0] != 'i' || key[1] < '0' || key[1] > '9' || key[2] < '0' || key[2] > '9' {
+		return 0, false
+	}
+	return int(key[1]-'0')*10 + int(key[2]-'0'), true
 }
 
 // buildLSTParamRefs 把 LST 选中的 sub_field 合成为 BuildTR069Params 可消费的 param_refs。
@@ -626,6 +678,21 @@ func applyInstanceSelectorsToRefs(refs []MMLParamRef, selectors map[string]strin
 		refs[i].Tr069Path = newPath
 	}
 	return nil
+}
+
+func applyQueryInstanceSelectorsToRefs(
+	refs []MMLParamRef,
+	selectors map[string]string,
+) {
+	if len(selectors) == 0 {
+		return
+	}
+	for i := range refs {
+		refs[i].Tr069Path = substituteQueryInstanceSelectors(
+			refs[i].Tr069Path,
+			selectors,
+		)
+	}
 }
 
 // 用户决策 2026-05-20 二次澄清（仍生效，核心约束）：

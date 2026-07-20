@@ -6407,6 +6407,7 @@ const messages: Record<string, string> = {
   'mml.consoleV2.config.slotReplaced':       '\'{\'i\'}\' 由下方实例号替换',
   'mml.consoleV2.config.noSlot':             '无实例占位',
   'mml.consoleV2.config.objectInstance':     '对象实例（\'{\'i\'}\'，默认 1）：',
+  'mml.consoleV2.config.objectInstanceRead': '对象实例（前层默认 1，最后一层默认留空）：',
   'mml.consoleV2.config.instanceNo':         '实例号',
   'mml.consoleV2.config.inputFieldPlaceholder': '输入 {label}',
   'mml.consoleV2.config.title':              '配置参数',

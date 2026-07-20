@@ -221,6 +221,38 @@ export function computeInstanceSlots(command: CommandItem): { key: string; label
   return slots;
 }
 
+export function buildDefaultInstanceSelectors(
+  slots: { key: string; label: string }[],
+  operationType: MMLOperationType,
+): Record<string, string> {
+  const finalIndex = slots.length - 1;
+  return Object.fromEntries(
+    slots.map((slot, index) => [
+      slot.key,
+      isReadOp(operationType) && index === finalIndex ? '' : '1',
+    ]),
+  );
+}
+
+export function resolveQueryPath(
+  path: string,
+  instanceSelectors?: Record<string, string>,
+): string {
+  let result = path;
+  let layer = 1;
+  while (true) {
+    const marker = result.indexOf('.{i}.');
+    if (marker < 0) return result;
+
+    const key = `i${String(layer).padStart(2, '0')}`;
+    const value = instanceSelectors?.[key]?.trim() ?? '';
+    if (value === '') return result.slice(0, marker + 1);
+
+    result = `${result.slice(0, marker)}.${value}.${result.slice(marker + 5)}`;
+    layer += 1;
+  }
+}
+
 /**
  * 把 targetObject 里的 `.{i}.` 占位按 instanceSelectors 替换为具体实例号，用于
  * ADD/RMV 命令「目标对象路径」展示（与 computeInstanceSlots 同序：左→右 i01/i02…，缺省 1）。
@@ -274,6 +306,63 @@ export function buildStructuredStatement(
     stmt.instanceIndices = [instance];
   }
   return stmt;
+}
+
+export function buildStandardQueryColumns(
+  command: CommandItem,
+  checkedPaths: string[],
+  instanceSelectors?: Record<string, string>,
+): ResultColumn[] {
+  const seen = new Set<string>();
+  return buildColumns(command, checkedPaths)
+    .map((column) => ({
+      ...column,
+      path: resolveQueryPath(column.path, instanceSelectors),
+    }))
+    .filter((column) => {
+      if (seen.has(column.path)) return false;
+      seen.add(column.path);
+      return true;
+    });
+}
+
+/**
+ * 逐 PATH 下发顺序与结果列保持一致。
+ * 查询 path 若因空实例截断为同一对象前缀，只保留首次出现的一条 statement；
+ * 写命令不做截断去重，继续严格按用户选择逐条下发。
+ */
+export function buildPerPathStatementPaths(
+  command: CommandItem,
+  checkedPaths: string[],
+  instanceSelectors?: Record<string, string>,
+): string[] {
+  const checked = new Set(checkedPaths);
+  const orderedPaths = command.paramPaths
+    .filter((item) => checked.has(item.path))
+    .map((item) => item.path);
+  if (!isReadOp(command.operationType)) return orderedPaths;
+
+  const seen = new Set<string>();
+  return orderedPaths.filter((path) => {
+    const resolved = resolveQueryPath(path, instanceSelectors);
+    if (seen.has(resolved)) return false;
+    seen.add(resolved);
+    return true;
+  });
+}
+
+export function buildStandardRawRows(
+  operationType: MMLOperationType,
+  checkedPaths: string[],
+  values?: Record<string, string>,
+  instanceSelectors?: Record<string, string>,
+): { path: string; value: string }[] {
+  return checkedPaths.map((path) => ({
+    path: isReadOp(operationType)
+      ? resolveQueryPath(path, instanceSelectors)
+      : path,
+    value: values?.[path] ?? '',
+  }));
 }
 
 /** 裸路径模式 ExecRequest → legacy POST /mml/execute 请求体（param_paths/param_values 下标对齐）。 */
@@ -357,23 +446,30 @@ export function expandObjectPathColumns(
   rows: ResultRow[],
 ): ResultColumn[] {
   const expanded: ResultColumn[] = [];
+  const emittedPaths = new Set<string>();
   for (const column of columns) {
     if (!column.path.endsWith('.')) {
+      if (emittedPaths.has(column.path)) continue;
+      emittedPaths.add(column.path);
       expanded.push(column);
       continue;
     }
 
     const descendantPaths: string[] = [];
-    const seen = new Set<string>();
+    let hasDescendant = false;
     for (const row of rows) {
       for (const path of Object.keys(row.cells)) {
-        if (path === column.path || !path.startsWith(column.path) || seen.has(path)) continue;
-        seen.add(path);
+        if (path === column.path || !path.startsWith(column.path)) continue;
+        hasDescendant = true;
+        if (emittedPaths.has(path)) continue;
+        emittedPaths.add(path);
         descendantPaths.push(path);
       }
     }
 
-    if (descendantPaths.length === 0) {
+    if (!hasDescendant) {
+      if (emittedPaths.has(column.path)) continue;
+      emittedPaths.add(column.path);
       expanded.push(column);
       continue;
     }

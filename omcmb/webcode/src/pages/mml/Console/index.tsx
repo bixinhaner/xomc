@@ -28,7 +28,10 @@ import {
   buildColumnsFromRawPaths,
   buildDeviceRows,
   buildMODReadbackRows,
+  buildPerPathStatementPaths,
   buildRawExecutePayload,
+  buildStandardQueryColumns,
+  buildStandardRawRows,
   buildStructuredStatement,
   initialPendingRows,
   isStructuredOp,
@@ -258,7 +261,9 @@ export default function MMLConsole() {
           setDispatching(false);
           return;
         }
-        columns = buildColumns(command, req.checkedPaths);
+        columns = isReadOp(command.operationType)
+          ? buildStandardQueryColumns(command, req.checkedPaths, req.instanceSelectors)
+          : buildColumns(command, req.checkedPaths);
         meta = {
           operationType: command.operationType,
           read: isReadOp(command.operationType),
@@ -284,10 +289,11 @@ export default function MMLConsole() {
             req.execMode === 'single-path' && splittable && req.checkedPaths.length > 1;
           let statements;
           if (perPath) {
-            const checkedSet = new Set(req.checkedPaths);
-            const orderedPaths = command.paramPaths
-              .filter((p) => checkedSet.has(p.path))
-              .map((p) => p.path);
+            const orderedPaths = buildPerPathStatementPaths(
+              command,
+              req.checkedPaths,
+              req.instanceSelectors,
+            );
             statements = orderedPaths.map((p) =>
               buildStructuredStatement(command, [p], req.values, req.instance, req.instanceSelectors),
             );
@@ -315,7 +321,12 @@ export default function MMLConsole() {
           // 按勾选 path + 用户填值下发；task_name 用命令名（req4）。
           const payload = buildRawExecutePayload(
             command.operationType,
-            req.checkedPaths.map((p) => ({ path: p, value: req.values?.[p] ?? '' })),
+            buildStandardRawRows(
+              command.operationType,
+              req.checkedPaths,
+              req.values,
+              req.instanceSelectors,
+            ),
             targetSns,
             taskNameWithSn(command.commandName),
             'whole',

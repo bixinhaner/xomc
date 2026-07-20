@@ -168,6 +168,24 @@ type exportRow struct {
 	completedAt string
 }
 
+type exportParameterValue struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+func standardParameterValuesOf(result json.RawMessage) []exportParameterValue {
+	if len(result) == 0 {
+		return nil
+	}
+	var payload struct {
+		Values []exportParameterValue `json:"standard_parameter_values"`
+	}
+	if err := json.Unmarshal(result, &payload); err != nil {
+		return nil
+	}
+	return payload.Values
+}
+
 func localizedDeviceStatusText(status string, errorCode int, locale appcontext.Locale) string {
 	if locale == appcontext.LocaleEN {
 		if status == "completed" && errorCode == 0 {
@@ -295,6 +313,111 @@ func leafOf(path string) string {
 	return path
 }
 
+func pathMatchesExportColumn(path string, col exportColumn) bool {
+	if path == col.standard {
+		return true
+	}
+	return strings.HasSuffix(col.standard, ".") && strings.HasPrefix(path, col.standard)
+}
+
+func matchingStandardParameterValues(result json.RawMessage, cols []exportColumn) []exportParameterValue {
+	values := standardParameterValuesOf(result)
+	matched := make([]exportParameterValue, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if value.Name == "" {
+			continue
+		}
+		for _, col := range cols {
+			if !pathMatchesExportColumn(value.Name, col) {
+				continue
+			}
+			if _, ok := seen[value.Name]; !ok {
+				seen[value.Name] = struct{}{}
+				matched = append(matched, value)
+			}
+			break
+		}
+	}
+	return matched
+}
+
+func longestPrefixColumn(path string, cols []exportColumn, private bool) (exportColumn, bool) {
+	var matched exportColumn
+	matchedLength := -1
+	for _, col := range cols {
+		prefix := col.standard
+		if private {
+			prefix = col.private
+		}
+		if !strings.HasSuffix(prefix, ".") || !strings.HasPrefix(path, prefix) {
+			continue
+		}
+		if len(prefix) > matchedLength {
+			matched = col
+			matchedLength = len(prefix)
+		}
+	}
+	return matched, matchedLength >= 0
+}
+
+func standardPathForRawName(path string, cols []exportColumn) (string, bool) {
+	for _, col := range cols {
+		if path == col.private {
+			return col.standard, true
+		}
+	}
+	for _, col := range cols {
+		if path == col.standard {
+			return col.standard, true
+		}
+	}
+	if col, ok := longestPrefixColumn(path, cols, true); ok {
+		return col.standard + strings.TrimPrefix(path, col.private), true
+	}
+	if _, ok := longestPrefixColumn(path, cols, false); ok {
+		return path, true
+	}
+	for _, col := range cols {
+		if !strings.HasSuffix(col.standard, ".") && leafOf(path) == leafOf(col.private) {
+			return col.standard, true
+		}
+	}
+	return "", false
+}
+
+func matchingRawParameterValues(result json.RawMessage, cols []exportColumn) []exportParameterValue {
+	raw := rawResponseOf(result)
+	if raw == "" {
+		return nil
+	}
+	values, _, err := soap.DecodeGetParameterValuesResponse(strings.NewReader(raw))
+	if err != nil {
+		return nil
+	}
+	matched := make([]exportParameterValue, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		standardPath, ok := standardPathForRawName(value.Name, cols)
+		if !ok {
+			continue
+		}
+		if _, ok := seen[standardPath]; ok {
+			continue
+		}
+		seen[standardPath] = struct{}{}
+		matched = append(matched, exportParameterValue{Name: standardPath, Value: value.Value})
+	}
+	return matched
+}
+
+func matchingResultParameterValues(result json.RawMessage, cols []exportColumn) []exportParameterValue {
+	if values := matchingStandardParameterValues(result, cols); len(values) > 0 {
+		return values
+	}
+	return matchingRawParameterValues(result, cols)
+}
+
 // rowToExport 把 device_tasks 结果行转为导出行；读类解析 GPV 原始报文回填列值。
 func rowToExport(row DeviceTaskResultRowView, cols []exportColumn, read bool) exportRow {
 	er := exportRow{
@@ -313,26 +436,8 @@ func rowToExport(row DeviceTaskResultRowView, cols []exportColumn, read bool) ex
 	}
 
 	if read && row.Status == "completed" {
-		raw := rawResponseOf(row.Result)
-		if raw != "" {
-			if pvs, _, err := soap.DecodeGetParameterValuesResponse(strings.NewReader(raw)); err == nil {
-				byPath := make(map[string]string, len(pvs))
-				byLeaf := make(map[string]string, len(pvs))
-				for _, pv := range pvs {
-					byPath[pv.Name] = pv.Value
-					byLeaf[leafOf(pv.Name)] = pv.Value
-				}
-				// 列对齐：优先 privatePath（GPV 实际 key）→ standardPath → 叶子名兜底。
-				for _, c := range cols {
-					if v, ok := byPath[c.private]; ok {
-						er.values[c.standard] = v
-					} else if v, ok := byPath[c.standard]; ok {
-						er.values[c.standard] = v
-					} else if v, ok := byLeaf[leafOf(c.private)]; ok {
-						er.values[c.standard] = v
-					}
-				}
-			}
+		for _, value := range matchingResultParameterValues(row.Result, cols) {
+			er.values[value.Name] = value.Value
 		}
 	}
 	return er
@@ -382,6 +487,89 @@ func commandStandardPaths(commands []map[string]interface{}, ci int) []string {
 		}
 	}
 	return out
+}
+
+func commandExportColumns(commands []map[string]interface{}, cols []exportColumn, ci int) []exportColumn {
+	paths := commandStandardPaths(commands, ci)
+	out := make([]exportColumn, 0, len(paths))
+	seen := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		col := exportColumn{standard: path, private: path}
+		for _, candidate := range cols {
+			if candidate.standard == path {
+				col = candidate
+				break
+			}
+		}
+		out = append(out, col)
+	}
+	return out
+}
+
+func exportPathsByCommand(
+	cols []exportColumn,
+	rows []DeviceTaskResultRowView,
+	commands []map[string]interface{},
+	read bool,
+) map[int][]string {
+	matchedPathsByCommand := make(map[int][]string, len(commands))
+	seenByCommand := make(map[int]map[string]struct{}, len(commands))
+	if read {
+		for _, row := range rows {
+			if row.Status != "completed" {
+				continue
+			}
+			commandCols := commandExportColumns(commands, cols, row.CommandIndex)
+			for _, value := range matchingResultParameterValues(row.Result, commandCols) {
+				if seenByCommand[row.CommandIndex] == nil {
+					seenByCommand[row.CommandIndex] = make(map[string]struct{})
+				}
+				if _, ok := seenByCommand[row.CommandIndex][value.Name]; ok {
+					continue
+				}
+				seenByCommand[row.CommandIndex][value.Name] = struct{}{}
+				matchedPathsByCommand[row.CommandIndex] = append(
+					matchedPathsByCommand[row.CommandIndex],
+					value.Name,
+				)
+			}
+		}
+	}
+
+	pathsByCommand := make(map[int][]string, len(commands))
+	for ci := range commands {
+		seen := make(map[string]struct{})
+		appendPath := func(path string) {
+			if path == "" {
+				return
+			}
+			if _, ok := seen[path]; ok {
+				return
+			}
+			seen[path] = struct{}{}
+			pathsByCommand[ci] = append(pathsByCommand[ci], path)
+		}
+
+		for _, originalPath := range commandStandardPaths(commands, ci) {
+			matched := false
+			originalColumn := exportColumn{standard: originalPath}
+			for _, resultPath := range matchedPathsByCommand[ci] {
+				if !pathMatchesExportColumn(resultPath, originalColumn) {
+					continue
+				}
+				matched = true
+				appendPath(resultPath)
+			}
+			if !matched {
+				appendPath(originalPath)
+			}
+		}
+	}
+	return pathsByCommand
 }
 
 // commandPathNames 从 commands 的 param_refs 抽 standardPath → 参数名称（旧字段名 param_name_zh）映射。
@@ -448,6 +636,7 @@ func buildLongFormatCSVForLocale(
 	nameMap map[string]string, read bool, locale appcontext.Locale,
 ) ([]byte, error) {
 
+	pathsByCommand := exportPathsByCommand(cols, rows, commands, read)
 	order := make([]string, 0)
 	groups := make(map[string][]DeviceTaskResultRowView)
 	for i := range rows {
@@ -471,7 +660,8 @@ func buildLongFormatCSVForLocale(
 		deviceSeq++
 		firstRowOfDevice := true
 		for _, row := range groups[sn] {
-			er := rowToExport(row, cols, read)
+			commandCols := commandExportColumns(commands, cols, row.CommandIndex)
+			er := rowToExport(row, commandCols, read)
 			status := localizedDeviceStatusText(row.Status, row.ErrorCode, locale)
 			faultCode, faultMsg := "", ""
 			if row.ErrorCode != 0 {
@@ -479,7 +669,7 @@ func buildLongFormatCSVForLocale(
 				faultMsg = row.ErrorMessage
 			}
 			raw := flattenXML(rawResponseOf(row.Result))
-			paths := commandStandardPaths(commands, row.CommandIndex)
+			paths := pathsByCommand[row.CommandIndex]
 			firstRowOfTask := true
 			for _, p := range paths {
 				rec := make([]string, len(labels.header))
@@ -533,6 +723,7 @@ func buildDeviceCSVMultiForLocale(
 	nameMap map[string]string, read bool, locale appcontext.Locale,
 ) ([]byte, error) {
 	labels := labelsForLocale(locale)
+	pathsByCommand := exportPathsByCommand(cols, devRows, commands, read)
 	// 设备级状态：全成功=成功 / 全失败=失败 / 混合=部分失败。
 	anySucc, anyFail := false, false
 	for _, row := range devRows {
@@ -581,7 +772,8 @@ func buildDeviceCSVMultiForLocale(
 
 	// 逐 PATH 明细：子任务级字段（子任务ID/下发/响应/报文）只在该 device_task 首行填。
 	for _, row := range devRows {
-		er := rowToExport(row, cols, read)
+		commandCols := commandExportColumns(commands, cols, row.CommandIndex)
+		er := rowToExport(row, commandCols, read)
 		status := localizedDeviceStatusText(row.Status, row.ErrorCode, locale)
 		faultCode, faultMsg := "", ""
 		if row.ErrorCode != 0 {
@@ -590,7 +782,7 @@ func buildDeviceCSVMultiForLocale(
 		}
 		raw := flattenXML(rawResponseOf(row.Result))
 		firstRowOfTask := true
-		for _, p := range commandStandardPaths(commands, row.CommandIndex) {
+		for _, p := range pathsByCommand[row.CommandIndex] {
 			name := nameMap[p]
 			if name == "" {
 				name = p

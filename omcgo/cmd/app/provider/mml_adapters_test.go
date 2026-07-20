@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/config/parammodel"
+	"github.com/omcgo/omcgo/internal/mml"
 	"github.com/omcgo/omcgo/internal/product"
 )
 
@@ -22,6 +23,20 @@ func (inactiveMMLParamRepo) ListMappingsByParamModel(context.Context, uuid.UUID)
 }
 func (inactiveMMLParamRepo) ListDiscoveredMappings(context.Context, uuid.UUID, string) ([]parammodel.ParamMapping, error) {
 	return []parammodel.ParamMapping{{StandardPath: "Device.Test.Param", PrivatePath: "Device.Private.Param"}}, nil
+}
+
+type activeMMLParamRepo struct {
+	mappings []parammodel.ParamMapping
+}
+
+func (activeMMLParamRepo) IsParamModelActive(context.Context, uuid.UUID) (bool, error) {
+	return true, nil
+}
+func (r activeMMLParamRepo) ListMappingsByParamModel(context.Context, uuid.UUID) ([]parammodel.ParamMapping, error) {
+	return r.mappings, nil
+}
+func (activeMMLParamRepo) ListDiscoveredMappings(context.Context, uuid.UUID, string) ([]parammodel.ParamMapping, error) {
+	return nil, nil
 }
 
 type mmlProductRepo struct {
@@ -47,6 +62,82 @@ func (mmlProductRepo) FetchIndicatorPlatformsByDeviceType(context.Context, strin
 }
 func (mmlProductRepo) FetchAlarmNeTypes(context.Context) (map[string]struct{}, error) {
 	return map[string]struct{}{}, nil
+}
+
+func newActiveMMLPathTranslator(t *testing.T, mappings []parammodel.ParamMapping) mml.PathTranslator {
+	t.Helper()
+	ctx := context.Background()
+	productID := uuid.New()
+	paramModelID := uuid.New()
+	productRow := &product.Product{ID: productID, Name: "active-product", ParamModelID: &paramModelID}
+	products := product.NewRegistry(mmlProductRepo{
+		product: productRow,
+		pattern: product.ProductClassPattern{
+			ID:           uuid.New(),
+			ProductID:    productID,
+			ProductClass: "^ACTIVE-MODEL$",
+			SortOrder:    1,
+			IsActive:     true,
+		},
+	}, product.NopCache{}, nil, zap.NewNop())
+	require.NoError(t, products.Refresh(ctx))
+
+	params := parammodel.NewRegistry(
+		activeMMLParamRepo{mappings: mappings},
+		parammodel.NopCache{},
+		products,
+		nil,
+		zap.NewNop(),
+	)
+	return NewMMLPathTranslator(products, params, nil, zap.NewNop())
+}
+
+func multiPrefixMappings() []parammodel.ParamMapping {
+	return []parammodel.ParamMapping{
+		{
+			StandardPath: "Device.Services.FAPService.{i}.CellConfig.LTE.ParamA",
+			PrivatePath:  "Device.VendorA.FAPService.{i}.CellConfig.LTE.ParamA",
+		},
+		{
+			StandardPath: "Device.Services.FAPService.{i}.CellConfig.NR.ParamB",
+			PrivatePath:  "InternetGatewayDevice.Services.FAPService.{i}.CellConfig.NR.ParamB",
+		},
+	}
+}
+
+func TestMMLPathTranslator_AcceptsPartialPrefixWithMultiplePrivateCandidates(t *testing.T) {
+	translator := newActiveMMLPathTranslator(t, multiPrefixMappings())
+
+	outcome, err := translator.TranslateForDevice(
+		context.Background(),
+		"ACTIVE-MODEL",
+		"1.0",
+		[]string{
+			"Device.Services.FAPService.",
+			"Device.Services.FAPService.1.CellConfig.LTE.ParamA",
+		},
+	)
+
+	require.NoError(t, err)
+	require.Len(t, outcome.Paths, 2, "TranslationOutcome keeps one record per standard input")
+	require.Equal(t, "Device.VendorA.FAPService.", outcome.Paths[0].Private)
+	require.Equal(t, "Device.VendorA.FAPService.1.CellConfig.LTE.ParamA", outcome.Paths[1].Private)
+}
+
+func TestMMLPathTranslator_RejectsUnknownPartialPrefix(t *testing.T) {
+	translator := newActiveMMLPathTranslator(t, multiPrefixMappings())
+
+	outcome, err := translator.TranslateForDevice(
+		context.Background(),
+		"ACTIVE-MODEL",
+		"1.0",
+		[]string{"Device.Services.Unknown."},
+	)
+
+	require.Nil(t, outcome)
+	var unsupported *mml.ErrPathUnsupported
+	require.ErrorAs(t, err, &unsupported)
+	require.Equal(t, []string{"Device.Services.Unknown."}, unsupported.Paths)
 }
 
 func TestMMLPathTranslator_InactiveParamModelDoesNotPassthrough(t *testing.T) {
