@@ -29,6 +29,7 @@
 #   ./plan-resources.sh --skip-monitoring   # 不部署监控栈，降低门槛
 #   ./plan-resources.sh --tier small|medium|large   # 手动指定档位（默认自动判定）
 #   ./plan-resources.sh --assume-dedicated  # 视整机为 OMC 独占，不扣其它容器预留
+#   ./plan-resources.sh --floor-tolerance-pct N  # 门禁容忍度（默认30，见下方说明）
 #   ./plan-resources.sh -o /path/resources.env   # 指定输出路径
 #
 # 退出码：0 成功；1 主机低于最低配置（含建议最低配）；2 参数错误。
@@ -49,6 +50,10 @@ DRY_RUN=0
 SKIP_MONITORING=0
 ASSUME_DEDICATED=0
 TIER_OVERRIDE=""
+# 门禁容忍度：空闲预算低于「下限之和」时，只要缺口不超过这个百分比就降级为 WARN
+# 按下限分配（不再向上伸缩），而不是直接 FATAL 拒绝部署。压测/生产实测组件很少
+# 同时打满 floor，留一点容忍度换可用性；超过该百分比说明缺口太大，仍然 die。
+FLOOR_TOLERANCE_PCT=30
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -57,6 +62,8 @@ while [ $# -gt 0 ]; do
     --assume-dedicated) ASSUME_DEDICATED=1 ;;
     --tier)             TIER_OVERRIDE="${2:-}"; shift ;;
     --tier=*)           TIER_OVERRIDE="${1#*=}" ;;
+    --floor-tolerance-pct) FLOOR_TOLERANCE_PCT="${2:?--floor-tolerance-pct 需要 0-99 的百分比}"; shift ;;
+    --floor-tolerance-pct=*) FLOOR_TOLERANCE_PCT="${1#*=}" ;;
     -o|--output)        OUT_FILE="${2:?-o 需要路径}"; shift ;;
     -o=*|--output=*)    OUT_FILE="${1#*=}" ;;
     -h|--help)
@@ -69,6 +76,11 @@ done
 case "$TIER_OVERRIDE" in ""|small|medium|large) ;; *)
   echo "--tier 仅支持 small|medium|large，收到：$TIER_OVERRIDE" >&2; exit 2 ;;
 esac
+
+case "$FLOOR_TOLERANCE_PCT" in
+  ''|*[!0-9]*) echo "--floor-tolerance-pct 仅支持 0-99 的整数，收到：$FLOOR_TOLERANCE_PCT" >&2; exit 2 ;;
+esac
+[ "$FLOOR_TOLERANCE_PCT" -ge 100 ] && { echo "--floor-tolerance-pct 必须 < 100，收到：$FLOOR_TOLERANCE_PCT" >&2; exit 2; }
 
 # 颜色与日志
 if [ -t 1 ]; then C_B='\033[1m'; C_G='\033[32m'; C_Y='\033[33m'; C_R='\033[31m'; C_0='\033[0m'
@@ -239,12 +251,17 @@ FLOOR_SUM=$(( FLOOR_SUM + MON_FIXED_MIB ))
 sep "3/4 floor-first 资源分配"
 log "  组件下限之和  : $(to_gib "$FLOOR_SUM") GiB$([ "$SKIP_MONITORING" = 1 ] && echo '（不含监控）' || echo '（含监控 '"$(to_gib "$MON_FIXED_MIB")"' GiB）')"
 
-# 最低配置门禁（需求 ②：不够就 fail + 给建议）
-if [ "$IDLE_MEM_MIB" -lt "$FLOOR_SUM" ]; then
+# 最低配置门禁（需求 ②：缺口超过容忍度才 fail + 给建议；容忍度内降级为 WARN 按下限分配）
+FLOOR_MIN_REQUIRED=$(mul_pct "$FLOOR_SUM" $((100 - FLOOR_TOLERANCE_PCT)))
+if [ "$IDLE_MEM_MIB" -lt "$FLOOR_MIN_REQUIRED" ]; then
   REC_FULL=$(( (FLOOR_SUM + OS_RESERVE_MIB) / 1024 + 2 ))
-  die "空闲内存 $(to_gib "$IDLE_MEM_MIB") GiB < 组件下限之和 $(to_gib "$FLOOR_SUM") GiB —— 无法安全部署。
+  die "空闲内存 $(to_gib "$IDLE_MEM_MIB") GiB < 组件下限之和 $(to_gib "$FLOOR_SUM") GiB 的 $((100 - FLOOR_TOLERANCE_PCT))%（容忍度 ${FLOOR_TOLERANCE_PCT}% 后仍不够）—— 无法安全部署。
        建议最低配置：整机 ≥ ${REC_FULL} GiB 内存$([ "$SKIP_MONITORING" = 0 ] && echo '（或加 --skip-monitoring 降到约 20 GiB）')；
-       或释放本机其它项目占用后重试，或用 --assume-dedicated（确认本机 OMC 独占时）。" 1
+       或释放本机其它项目占用后重试，或用 --assume-dedicated（确认本机 OMC 独占时），或调大 --floor-tolerance-pct（当前 ${FLOOR_TOLERANCE_PCT}%）。" 1
+elif [ "$IDLE_MEM_MIB" -lt "$FLOOR_SUM" ]; then
+  SHORT_MIB=$(( FLOOR_SUM - IDLE_MEM_MIB ))
+  SHORT_PCT=$(( SHORT_MIB * 100 / FLOOR_SUM ))
+  warn "空闲内存 $(to_gib "$IDLE_MEM_MIB") GiB < 组件下限之和 $(to_gib "$FLOOR_SUM") GiB，缺口 ${SHORT_PCT}%（≤ 容忍度 ${FLOOR_TOLERANCE_PCT}%）：按下限分配，不再向上伸缩。各组件同时打满 limit 时仍有 OOM 风险，请尽快释放内存或调低 --floor-tolerance-pct 复核。"
 fi
 
 # 剩余空闲按权重分配（floor..ceil 之间向上伸缩）
@@ -276,10 +293,12 @@ case "$TIER" in
 esac
 CPU_LIST=("$CPU_app" "$CPU_acs" "$CPU_worker" "$CPU_pg" "$CPU_tsdb" "$CPU_redis" "$CPU_nats" "$CPU_minio" "$CPU_web")
 
-# 校验：Σ内存限额 ≤ 空闲预算（全量记账，含监控）
+# 校验：Σ内存限额 ≤ 空闲预算（全量记账，含监控）。SURPLUS=0 时 ALLOC_SUM==FLOOR_SUM，
+# 若此时仍 > IDLE_MEM_MIB 属于上面已经 warn 过的「容忍度内下限缺口」，是预期行为，不重复 die；
+# 只有「明明分了 SURPLUS>0 却还超预算」才是真正的分配逻辑 bug。
 ALLOC_SUM=0; for m in "${COMP_MEM[@]}"; do ALLOC_SUM=$(( ALLOC_SUM + m )); done
 ALLOC_SUM=$(( ALLOC_SUM + MON_FIXED_MIB ))
-if [ "$ALLOC_SUM" -gt "$IDLE_MEM_MIB" ]; then
+if [ "$ALLOC_SUM" -gt "$IDLE_MEM_MIB" ] && [ "$SURPLUS" -gt 0 ]; then
   die "内部错误：分配后 Σ限额 $(to_gib "$ALLOC_SUM") GiB > 空闲预算 $(to_gib "$IDLE_MEM_MIB") GiB。请反馈此 bug。" 1
 fi
 
