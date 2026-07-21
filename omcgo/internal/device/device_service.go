@@ -53,36 +53,43 @@ type GroupAssigner interface {
 	BatchAddDevices(ctx context.Context, groupID uuid.UUID, deviceIDs []uuid.UUID) (int64, error)
 }
 
+// DeviceGroupCountsInvalidator clears cached device-group counts after a
+// device lifecycle write changes which active devices must be counted.
+type DeviceGroupCountsInvalidator interface {
+	InvalidateDeviceGroupCounts()
+}
+
 // DeviceService provides business logic for device management.
 type DeviceService struct {
-	redisClient          redis.UniversalClient
-	deviceRepo           DeviceRepository
-	paramRepo            DeviceParameterRepository
-	deviceInfoRepo       DeviceInfoRepository
-	disconnectAlarms     disconnectedAlarmStore
-	disconnectClearer    disconnectedAlarmClearer
-	regRepo              RegistrationRepository
-	groupAssigner        GroupAssigner
-	infoSyncer           *InfoSyncer
-	reconciler           *DeviceStatusReconciler
-	eventBus             event.EventBus
-	taskSvc              task.Enqueuer
-	connReq              ConnectionRequester
-	stunUpdater          StunAddressUpdater
-	cache                *DeviceCache
-	metrics              *DeviceMetrics
-	licenseEnforcer      LicenseEnforcer
-	carrierRegistry      *carrier.CarrierRegistry // T-0029: RF control path lookup by carrier+tech
-	paramSyncStarter     ParamSyncStarter         // T-0126: 注入 *provision.SyncService 触发 Path B 手动同步
-	paramSyncRoutingMode string
-	manualOfflineMode    string
-	abnormalRecorder     AbnormalRebootRecorder // T-0158: 异常重启识别即落库（nil = 禁用）
-	bootEventRecorder    BootEventRecorder      // 普通 1 BOOT 事件日志写入（nil = 禁用）
-	productMatcher       ProductClassMatcher    // Phase 6 ModelName 回填（nil = 禁用）
-	productBinder        ProductBinder          // T-0176-PR-D：CreateDevice inline match 后写回 product_id（nil = 禁用）
-	groupReader          DeviceGroupReader      // 越权校验：读设备组归属（nil = 退化为不校验，见 AuthorizeDeviceGroupAccess）
-	sysConfigLookup      SysConfigLookup        // 读系统配置（nameSyncMode 等）
-	logger               *zap.Logger
+	redisClient            redis.UniversalClient
+	deviceRepo             DeviceRepository
+	paramRepo              DeviceParameterRepository
+	deviceInfoRepo         DeviceInfoRepository
+	disconnectAlarms       disconnectedAlarmStore
+	disconnectClearer      disconnectedAlarmClearer
+	regRepo                RegistrationRepository
+	groupAssigner          GroupAssigner
+	groupCountsInvalidator DeviceGroupCountsInvalidator
+	infoSyncer             *InfoSyncer
+	reconciler             *DeviceStatusReconciler
+	eventBus               event.EventBus
+	taskSvc                task.Enqueuer
+	connReq                ConnectionRequester
+	stunUpdater            StunAddressUpdater
+	cache                  *DeviceCache
+	metrics                *DeviceMetrics
+	licenseEnforcer        LicenseEnforcer
+	carrierRegistry        *carrier.CarrierRegistry // T-0029: RF control path lookup by carrier+tech
+	paramSyncStarter       ParamSyncStarter         // T-0126: 注入 *provision.SyncService 触发 Path B 手动同步
+	paramSyncRoutingMode   string
+	manualOfflineMode      string
+	abnormalRecorder       AbnormalRebootRecorder // T-0158: 异常重启识别即落库（nil = 禁用）
+	bootEventRecorder      BootEventRecorder      // 普通 1 BOOT 事件日志写入（nil = 禁用）
+	productMatcher         ProductClassMatcher    // Phase 6 ModelName 回填（nil = 禁用）
+	productBinder          ProductBinder          // T-0176-PR-D：CreateDevice inline match 后写回 product_id（nil = 禁用）
+	groupReader            DeviceGroupReader      // 越权校验：读设备组归属（nil = 退化为不校验，见 AuthorizeDeviceGroupAccess）
+	sysConfigLookup        SysConfigLookup        // 读系统配置（nameSyncMode 等）
+	logger                 *zap.Logger
 }
 
 type disconnectedAlarmStore interface {
@@ -122,6 +129,11 @@ type StunAddressUpdater interface {
 // SetRedis assigns the redis client to DeviceService for caching lookups.
 func (s *DeviceService) SetRedis(r redis.UniversalClient) {
 	s.redisClient = r
+}
+
+// SetDeviceGroupCountsInvalidator wires the topology count-cache invalidator.
+func (s *DeviceService) SetDeviceGroupCountsInvalidator(invalidator DeviceGroupCountsInvalidator) {
+	s.groupCountsInvalidator = invalidator
 }
 
 func NewDeviceService(
@@ -2185,6 +2197,9 @@ func (s *DeviceService) BatchDeleteDevices(ctx context.Context, ids []uuid.UUID,
 
 	result.Succeeded = int(deleted)
 	result.Failed = len(ids) - int(deleted)
+	if deleted > 0 && s.groupCountsInvalidator != nil {
+		s.groupCountsInvalidator.InvalidateDeviceGroupCounts()
+	}
 
 	// C2 修复：删除成功后清 cache（cache key 用 SN，cache 不感知 ID）
 	if s.cache != nil {

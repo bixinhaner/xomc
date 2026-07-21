@@ -103,3 +103,18 @@ func TestGetTreeWithCounts_DefaultGroupCountsLegacyUngroupedDevices(t *testing.T
 	assert.Contains(t, getTreeWithCountsRawSQL, "WHEN dg.id = $1::uuid")
 	assert.Contains(t, getTreeWithCountsRawSQL, "NOT EXISTS (SELECT 1 FROM device_group_members m WHERE m.device_id = d.id)")
 }
+
+func TestDeviceGroupCountsCache_InvalidationRejectsInFlightStaleResult(t *testing.T) {
+	t.Parallel()
+
+	repo := &PgDeviceGroupRepository{}
+	_, hit, generation := repo.cachedTreeWithCounts()
+	require.False(t, hit)
+
+	// 模拟查询已经在缓存失效前启动，但在失效后才尝试回填旧结果。
+	repo.InvalidateDeviceGroupCounts()
+	repo.storeTreeWithCountsCache([]DeviceGroup{{Name: "stale"}}, generation)
+
+	_, hit, _ = repo.cachedTreeWithCounts()
+	assert.False(t, hit, "失效前启动的查询结果不能在失效后重新写回缓存")
+}
