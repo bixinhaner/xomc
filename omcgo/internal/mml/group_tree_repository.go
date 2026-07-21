@@ -212,7 +212,7 @@ SELECT
     --   冻结待 PR-F DROP，读路径不再依赖。
     COALESCE(c.target_paths, '[]'::jsonb) AS target_paths
 FROM mml_command_groups g
-LEFT JOIN mml_commands c ON c.group_id = g.id
+LEFT JOIN mml_commands c ON c.group_id = g.id AND c.deprecated_at IS NULL
 WHERE g.path IS NOT NULL
   AND (
     (g.source = 'standard' AND COALESCE(g.chapter_code, '') <> '')

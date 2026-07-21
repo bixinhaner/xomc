@@ -57,6 +57,12 @@
 - [log-management.md](log-management.md)：日志参数分组缺失项补充记录。
 - [cell-service-normalize-summary.md](cell-service-normalize-summary.md)：小区服务参数管理规范化汇总，包含原始数量、新增字段、删除字段与最终状态。
 - [cell-service-deleted-trpaths.csv](cell-service-deleted-trpaths.csv)：小区服务参数管理删除 TR path 明细。
+- [lte-nr-group-name-normalize.md](lte-nr-group-name-normalize.md)：按 LTE/NR 南向目录统一 MML 分组命名口径。
+- [remaining-groups-param-diff.md](remaining-groups-param-diff.md)：红框下方剩余 MML 分组参数新增/删除/保留明细。
+- [remaining-groups-subgroup-rebuild.md](remaining-groups-subgroup-rebuild.md)：按南向小分组重建红框下方剩余 MML 分组命令与参数绑定。
+- [remaining-groups-neighbor-object-commands.csv](remaining-groups-neighbor-object-commands.csv)：邻区参数小分组新增的 ADD/RMV 对象命令与对象路径。
+- [remaining-groups-wan-object-commands.csv](remaining-groups-wan-object-commands.csv)：WAN 口配置小分组补充的 ADD/RMV 对象命令。
+- [nr-cell-service-subgroup-rebuild.md](nr-cell-service-subgroup-rebuild.md)：按 5G 南向 `SJ / CellConfig.NR` 补齐 `小区服务参数管理（总体）` 的 NR 二级分组。
 
 ## 关键注意
 
