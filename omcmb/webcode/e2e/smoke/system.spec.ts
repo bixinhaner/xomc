@@ -120,6 +120,59 @@ test.describe('系统管理冒烟（真实后端）', { tag: '@smoke' }, () => {
     ).toBeVisible();
   });
 
+  test('/system/config 长列表滚动时设置 Tabs 吸顶', async ({ page }) => {
+    await expectPageRenders(page, '/system/config');
+
+    const main = page.locator('main');
+    const configTabs = main.locator('.ant-tabs').first();
+    const retentionTab = configTabs
+      .locator('.ant-tabs-tab')
+      .filter({ hasText: /资源保留与背压|Resource Retention/ })
+      .first();
+
+    await retentionTab.click();
+    await expect(retentionTab).toHaveClass(/ant-tabs-tab-active/);
+    await expect.poll(() => main.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+
+    await main.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+
+    await expect.poll(async () => {
+      const mainBox = await main.boundingBox();
+      const tabsBox = await configTabs.boundingBox();
+      if (!mainBox || !tabsBox) return Number.POSITIVE_INFINITY;
+      return Math.abs(tabsBox.y - mainBox.y);
+    }).toBeLessThanOrEqual(1);
+  });
+
+  test('/system/config 切换设置页签时主内容回到顶部', async ({ page }) => {
+    await expectPageRenders(page, '/system/config');
+
+    const main = page.locator('main');
+    const configTabs = main.locator('.ant-tabs').first();
+    const retentionTab = configTabs
+      .locator('.ant-tabs-tab')
+      .filter({ hasText: /资源保留与背压|Resource Retention/ })
+      .first();
+    const securityTab = configTabs
+      .locator('.ant-tabs-tab')
+      .filter({ hasText: /安全设置|Security Settings/ })
+      .first();
+
+    await retentionTab.click();
+    await expect(retentionTab).toHaveClass(/ant-tabs-tab-active/);
+    await expect.poll(() => main.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+    await main.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await expect.poll(() => main.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+
+    await securityTab.click();
+    await expect(securityTab).toHaveClass(/ant-tabs-tab-active/);
+    await expect.poll(() => main.evaluate((element) => element.scrollTop)).toBe(0);
+  });
+
   test('/system/menus 菜单管理渲染，菜单表格骨架可见', async ({ page }) => {
     await expectPageRenders(page, '/system/menus');
 
