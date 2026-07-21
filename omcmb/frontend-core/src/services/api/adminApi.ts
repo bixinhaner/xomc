@@ -26,6 +26,9 @@ import type {
   SysConfigItem,
   SysConfigValueType,
   BatchUpdateSysConfigPayload,
+  BatchUpdateSysConfigResult,
+  ConfigApplyBatch,
+  ConfigApplyStatus,
 } from '../../types/system';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 
@@ -1322,9 +1325,80 @@ export const adminApi = {
     return (Array.isArray(data) ? data : []).map(mapBackendSysConfig);
   },
 
-  async batchUpdateSysConfigs(payload: BatchUpdateSysConfigPayload): Promise<number> {
-    const { data } = await http.post<{ updated?: number }>('/admin/sysConfig/batch', payload);
-    return data?.updated ?? 0;
+  async batchUpdateSysConfigs(payload: BatchUpdateSysConfigPayload): Promise<BatchUpdateSysConfigResult> {
+    const { data } = await http.post<{
+      updated?: number;
+      batch?: {
+        id?: string;
+        category?: string;
+        config_version?: number;
+        status?: ConfigApplyStatus;
+        created_at?: string;
+        updated_at?: string;
+        targets?: Array<{
+          target?: string;
+          status?: ConfigApplyStatus;
+          attempts?: number;
+          applied_at?: string;
+          last_error?: string;
+        }>;
+      };
+    }>('/admin/sysConfig/batch', payload);
+    const batch = data?.batch;
+    if (!batch?.id || !batch.category || !batch.status) {
+      throw new Error('配置保存响应缺少应用批次状态');
+    }
+    return {
+      updated: data?.updated ?? 0,
+      batch: {
+        id: batch.id,
+        category: batch.category,
+        configVersion: batch.config_version ?? 0,
+        status: batch.status,
+        createdAt: batch.created_at ?? '',
+        updatedAt: batch.updated_at ?? '',
+        targets: (batch.targets ?? []).map((target) => ({
+          target: target.target ?? '',
+          status: target.status ?? 'pending',
+          attempts: target.attempts ?? 0,
+          appliedAt: target.applied_at,
+          lastError: target.last_error,
+        })),
+      },
+    };
+  },
+
+  async getSysConfigApplyBatch(id: string): Promise<ConfigApplyBatch> {
+    const { data } = await http.get<{
+      id: string;
+      category: string;
+      config_version: number;
+      status: ConfigApplyStatus;
+      created_at: string;
+      updated_at: string;
+      targets: Array<{
+        target: string;
+        status: ConfigApplyStatus;
+        attempts: number;
+        applied_at?: string;
+        last_error?: string;
+      }>;
+    }>(`/admin/sysConfig/apply-batches/${id}`);
+    return {
+      id: data.id,
+      category: data.category,
+      configVersion: data.config_version,
+      status: data.status,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at,
+      targets: data.targets.map((target) => ({
+        target: target.target,
+        status: target.status,
+        attempts: target.attempts,
+        appliedAt: target.applied_at,
+        lastError: target.last_error,
+      })),
+    };
   },
 
   // ---- Public configs (no auth) ----

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/admin/loginpwd"
 	"github.com/omcgo/omcgo/internal/agentconfig"
@@ -203,18 +204,16 @@ func initAdminModule(c *Container) error {
 	})
 	// issue #649：注册安全设置类 BatchUpsert 前置校验器（含 defaultPasswd 强度校验）。
 	admin.RegisterSecurityValidators(sysConfigService, securityPolicy)
-	if c.EventBus != nil {
-		sysConfigService.RegisterSavedHook(func(ctx context.Context, category string) {
-			evt, err := event.NewEvent(event.SubjectSysConfigSaved, event.SysConfigSavedPayload{Category: category})
-			if err != nil {
-				logger.Warn("build sys config saved event", zap.String("category", category), zap.Error(err))
-				return
-			}
-			if err := c.EventBus.Publish(ctx, event.SubjectSysConfigSaved, evt); err != nil {
-				logger.Warn("publish sys config saved event", zap.String("category", category), zap.Error(err))
-			}
-		})
-	}
+	// ACS 上传/下发地址会直接下发到设备；保存前拒绝非 HTTP(S) 及生产环境的本机私网地址。
+	sysConfigService.RegisterValidator(transfercfg.Category, transfercfg.KeyUploadBaseURL, transfercfg.ValidateBaseURL)
+	sysConfigService.RegisterValidator(transfercfg.Category, transfercfg.KeyDownloadBaseURL, transfercfg.ValidateBaseURL)
+	sysConfigService.RegisterValidator(transfercfg.Category, transfercfg.KeyUploadPath, transfercfg.ValidateServicePath)
+	sysConfigService.RegisterValidator(transfercfg.Category, transfercfg.KeyDownloadPath, transfercfg.ValidateServicePath)
+	sysConfigService.RegisterApplyHandler(
+		transfercfg.Category,
+		"acs_transfer_event_delivery",
+		newACSConfigDeliveryHandler(c.EventBus),
+	)
 
 	// 暴露到 Container 让其他模块（如 provision.PeriodicSyncPolicy）也能挂 hook。
 	c.SysConfigSvc = sysConfigService
@@ -254,6 +253,27 @@ func initAdminModule(c *Container) error {
 
 	logger.Info("admin/RBAC module initialized")
 	return nil
+}
+
+func newACSConfigDeliveryHandler(bus event.EventBus) admin.ConfigApplyHandler {
+	return func(ctx context.Context, work admin.ConfigApplyWork) (map[string]any, error) {
+		if bus == nil {
+			return nil, fmt.Errorf("publish ACS transfer config event: event bus is unavailable")
+		}
+		payload := event.SysConfigSavedPayload{
+			Category:      transfercfg.Category,
+			BatchID:       work.Batch.ID,
+			ConfigVersion: work.Batch.ConfigVersion,
+		}
+		evt, err := event.NewEvent(event.SubjectSysConfigSaved, payload)
+		if err != nil {
+			return nil, fmt.Errorf("build ACS transfer config event: %w", err)
+		}
+		if err := bus.Publish(ctx, event.SubjectSysConfigSaved, evt); err != nil {
+			return nil, fmt.Errorf("publish ACS transfer config event: %w", err)
+		}
+		return map[string]any{"delivery": "published", "event_id": evt.ID}, nil
+	}
 }
 
 // roleAffectedQueryAdapter 把 *admin.PgRoleRepository.ListRolesByGroupIDs 的

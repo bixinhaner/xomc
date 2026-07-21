@@ -32,7 +32,9 @@ type EventHandler func(ctx context.Context, event Event) error
 // Category matches sys_configs.category and lets subscribers invalidate only the
 // runtime policy slice they care about.
 type SysConfigSavedPayload struct {
-	Category string `json:"category"`
+	Category      string    `json:"category"`
+	BatchID       uuid.UUID `json:"batch_id,omitempty"`
+	ConfigVersion int64     `json:"config_version,omitempty"`
 }
 
 // ParamSyncTaskResultPayload is a lightweight canonical terminal-result event.

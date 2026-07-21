@@ -161,6 +161,31 @@ export interface BatchUpdateSysConfigPayload {
   items: BatchUpdateSysConfigItem[];
 }
 
+export type ConfigApplyStatus = 'pending' | 'applying' | 'applied' | 'failed';
+
+export interface ConfigApplyTarget {
+  target: string;
+  status: ConfigApplyStatus;
+  attempts: number;
+  appliedAt?: string;
+  lastError?: string;
+}
+
+export interface ConfigApplyBatch {
+  id: string;
+  category: string;
+  configVersion: number;
+  status: ConfigApplyStatus;
+  createdAt: string;
+  updatedAt: string;
+  targets: ConfigApplyTarget[];
+}
+
+export interface BatchUpdateSysConfigResult {
+  updated: number;
+  batch: ConfigApplyBatch;
+}
+
 export type OperationResult = 'success' | 'failure' | 'partial';
 export type OperationType =
   | 'create'

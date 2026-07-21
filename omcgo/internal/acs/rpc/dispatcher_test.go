@@ -287,7 +287,7 @@ func TestDownloadHandler_RuntimeTransferConfigOverride(t *testing.T) {
 	d := NewDispatcher(DispatcherConfig{
 		TransferConfigProvider: staticTransferProvider{snapshot: transfercfg.Snapshot{
 			Download: transfercfg.DownloadSettings{
-				BaseURL:  "http://gateway.example.com",
+				BaseURL:  "https://gateway.example.com:9443/omc/",
 				Path:     "/smallcell/FileDownloadService",
 				Username: "runtime-user",
 				Password: "runtime-pass",
@@ -299,7 +299,7 @@ func TestDownloadHandler_RuntimeTransferConfigOverride(t *testing.T) {
 		CommandKey: "dl-key-2",
 		Params: json.RawMessage(`{
 			"file_type": "1 Firmware Upgrade Image",
-			"url": "firmware/QAFA/V1/pkg.bin",
+			"url": "firmware/QAFA/V1/正式 pkg.bin",
 			"file_size": 2048,
 			"target_file_name": "pkg.bin",
 			"delay_seconds": 0
@@ -310,7 +310,7 @@ func TestDownloadHandler_RuntimeTransferConfigOverride(t *testing.T) {
 	require.NoError(t, err)
 	body := string(result)
 	// BaseURL/Path 拼接生效
-	assert.Contains(t, body, "http://gateway.example.com/smallcell/FileDownloadService/firmware/QAFA/V1/pkg.bin")
+	assert.Contains(t, body, "https://gateway.example.com:9443/omc/smallcell/FileDownloadService/firmware/QAFA/V1/%E6%AD%A3%E5%BC%8F%20pkg.bin")
 	// 凭据**不**应被注入（runtime config 里的 Username/Password 不进 SOAP）
 	assert.NotContains(t, body, "runtime-user",
 		"runtime transfer config 的 Username 不应注入 SOAP（产品决策）")

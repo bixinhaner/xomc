@@ -25,12 +25,28 @@ func (h *SysConfigHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	configs := rg.Group("/sysConfig")
 	{
 		configs.GET("", h.List)
+		configs.GET("/apply-batches/:id", h.GetApplyBatch)
 		configs.GET("/:id", h.Get)
 		configs.POST("", h.Create)
 		configs.POST("/batch", h.BatchUpdate)
 		configs.PUT("/:id", h.Update)
 		configs.DELETE("/:id", h.Delete)
 	}
+}
+
+// GetApplyBatch 返回一次配置保存对应的运行态应用状态；目标的期望/实际值不会出现在响应中。
+func (h *SysConfigHandler) GetApplyBatch(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.NewBusinessError(7, "invalid id", err))
+		return
+	}
+	batch, err := h.service.GetApplyBatch(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	response.OKWithMsg(c, batch, "查询成功")
 }
 
 // RegisterPublicRoutes 注册无需鉴权即可访问的子集端点。
@@ -139,10 +155,10 @@ func (h *SysConfigHandler) BatchUpdate(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	count, err := h.service.BatchUpsert(c.Request.Context(), req)
+	result, err := h.service.BatchUpsertWithResult(c.Request.Context(), req)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	response.OKWithMsg(c, gin.H{"updated": count}, "保存成功")
+	response.OKWithMsg(c, gin.H{"updated": result.Updated, "batch": result.Batch}, "保存成功")
 }

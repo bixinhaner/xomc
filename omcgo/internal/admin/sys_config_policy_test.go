@@ -44,6 +44,8 @@ func TestIsSecretSysConfig_UsesExactRegistry(t *testing.T) {
 	}{
 		{name: "default password", category: "security", key: "defaultPasswd", want: true},
 		{name: "Agent Studio token", category: "agent", key: "agent_studio_service_token", want: true},
+		{name: "ACS upload password", category: "acs_transfer", key: "uploadPassword", want: true},
+		{name: "ACS download password", category: "acs_transfer", key: "downloadPassword", want: true},
 		{name: "same password key wrong category", category: "basic", key: "defaultPasswd", want: false},
 		{name: "ordinary security setting", category: "security", key: "passwordMinLength", want: false},
 	}
@@ -108,6 +110,32 @@ func TestValidateGenericBatchWrite_RejectsAgentToken(t *testing.T) {
 	})
 
 	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+}
+
+func TestValidateGenericBatchWrite_AllowsWriteOnlyACSPasswordRotation(t *testing.T) {
+	for _, value := range []string{"new-secret", ""} {
+		err := validateGenericBatchWrite(BatchUpdateSysConfigRequest{
+			Category: "acs_transfer",
+			Items: []BatchItem{
+				{Key: "uploadPassword", Value: value},
+				{Key: "downloadPassword", Value: value},
+			},
+		})
+		assert.NoError(t, err)
+	}
+}
+
+func TestPreserveBlankSecretsKeepsNonEmptyRotationAndDropsBlankPlaceholder(t *testing.T) {
+	items := preserveBlankSecrets("acs_transfer", []BatchItem{
+		{Key: "uploadPassword", Value: ""},
+		{Key: "downloadPassword", Value: "rotated"},
+		{Key: "uploadBaseURL", Value: "https://acs.example.com"},
+	})
+
+	assert.Equal(t, []BatchItem{
+		{Key: "downloadPassword", Value: "rotated"},
+		{Key: "uploadBaseURL", Value: "https://acs.example.com"},
+	}, items)
 }
 
 func TestValidateGenericBatchWrite_RejectsEmptyDefaultPassword(t *testing.T) {

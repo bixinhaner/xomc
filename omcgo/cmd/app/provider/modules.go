@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"strconv"
 	"time"
 
@@ -181,7 +182,7 @@ func initMRTaskModule(c *Container) error {
 	cleaner := mrtask.NewCleaner(c.miscDeps.mrStore, mrtask.CleanerConfig{
 		Bucket: c.Cfg.MinIO.Buckets.MRFiles,
 	}, func(ctx context.Context) int {
-		return readMinIORetentionDays(ctx, mrSysCfg, logger)
+		return readMinIORetentionDaysOrDefault(ctx, mrSysCfg, logger)
 	}, logger)
 	cleaner.SetMetrics(metrics)
 	if err := cleaner.Start(context.Background()); err != nil {
@@ -2268,6 +2269,13 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 
 	// System Info endpoint
 	c.miscDeps.sysInfoHandler = components.NewSystemInfoHandler(c.PgPool, c.Redis, logger)
+	prometheusURL := os.Getenv("OMCGO_SYSTEM_INFO_PROMETHEUS_URL")
+	if prometheusURL == "" {
+		prometheusURL = "http://prometheus:9090"
+	}
+	c.miscDeps.sysInfoHandler.SetStorageCollector(
+		components.NewPrometheusStorageCollector(prometheusURL, 2*time.Second, time.Minute, nil),
+	)
 
 	// PM threshold
 	c.miscDeps.thresholdRepo = pm.NewPgThresholdRepository(c.PgPool)

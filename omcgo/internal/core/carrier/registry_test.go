@@ -132,6 +132,27 @@ func TestResolveByOUI_NoMatch(t *testing.T) {
 	assert.Equal(t, model.CarrierCode(""), got)
 }
 
+func TestResolveByOUI_PrefersFirstRegisteredCarrierForSharedOUI(t *testing.T) {
+	r := NewRegistry()
+	sharedOUI := "AABBCC"
+	newCarrier := func(code model.CarrierCode) *registryMockCarrier {
+		return &registryMockCarrier{
+			code:         code,
+			technologies: []model.Technology{model.TechLTE},
+			ouiProductMap: map[model.Technology][]OUIProductClassInfo{
+				model.TechLTE: {{OUI: sharedOUI, ProductClass: "SmallCell"}},
+			},
+		}
+	}
+
+	r.Register(newCarrier(model.CarrierCMCC))
+	r.Register(newCarrier(model.CarrierCTCC))
+
+	for i := 0; i < 20; i++ {
+		assert.Equal(t, model.CarrierCMCC, r.ResolveByOUI(sharedOUI))
+	}
+}
+
 // #17: DefaultCarrier 取代 InformHandler 处硬编码的 CarrierCMCC 默认值。
 
 func TestDefaultCarrier_Empty(t *testing.T) {

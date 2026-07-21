@@ -9,6 +9,7 @@ import type {
   ApiEndpointPayload,
   SysConfigItem,
   BatchUpdateSysConfigPayload,
+  BatchUpdateSysConfigResult,
 } from '../../types/system';
 import type { Dictionary } from '../../services/api/adminApi';
 import type { PageRequest } from '../../types/pagination';
@@ -454,8 +455,20 @@ export function useBatchUpdateSysConfigs() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (payload: BatchUpdateSysConfigPayload) => adminApi.batchUpdateSysConfigs(payload),
-    onSuccess: (_count, variables) => {
+    onSuccess: (_result: BatchUpdateSysConfigResult, variables) => {
       void queryClient.invalidateQueries({ queryKey: ['system', 'sysConfig', variables.category] });
+    },
+  });
+}
+
+export function useSysConfigApplyBatch(id: string | undefined) {
+  return useQuery({
+    queryKey: ['system', 'sysConfig', 'applyBatch', id],
+    queryFn: () => adminApi.getSysConfigApplyBatch(id as string),
+    enabled: Boolean(id),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === 'applied' || status === 'failed' ? false : 2000;
     },
   });
 }

@@ -204,7 +204,19 @@ func (h *DownloadHandler) BuildRequest(cmd *Command) ([]byte, error) {
 	// 应该是空标签。Params.URL 上层若已显式塞凭据走透传；空字符串则渲染成空标签。
 	current := h.currentSettings()
 	if current.BaseURL != "" && params.URL != "" && !strings.Contains(params.URL, "://") {
-		params.URL = strings.TrimRight(current.BaseURL, "/") + current.Path + "/" + params.URL
+		servicePath := current.Path
+		if servicePath == "" {
+			servicePath = "/smallcell/FileDownloadService"
+		}
+		objectPath := strings.Trim(params.URL, "/")
+		if objectPath == "" {
+			return nil, fmt.Errorf("build Download URL: object path is required")
+		}
+		builtURL, err := transfercfg.BuildURL(current.BaseURL, servicePath, strings.Split(objectPath, "/"), nil)
+		if err != nil {
+			return nil, fmt.Errorf("build Download URL: %w", err)
+		}
+		params.URL = builtURL
 	}
 
 	return soap.RenderResponse(soap.DownloadTmpl, params)

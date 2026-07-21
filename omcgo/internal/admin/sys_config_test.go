@@ -221,14 +221,8 @@ func TestSysConfigService_Create_RejectsSecretThroughDirectCRUD(t *testing.T) {
 	assert.False(t, called)
 }
 
-func TestSysConfigService_Create_DerivesPublicFlagFromAllowlist(t *testing.T) {
-	var stored SysConfig
-	svc := NewSysConfigService(&stubSysConfigRepo{
-		createFn: func(_ context.Context, cfg *SysConfig) error {
-			stored = *cfg
-			return nil
-		},
-	})
+func TestSysConfigService_Create_RejectsDirectMutation(t *testing.T) {
+	svc := NewSysConfigService(&stubSysConfigRepo{})
 
 	_, err := svc.Create(context.Background(), CreateSysConfigRequest{
 		Category: "system",
@@ -236,8 +230,7 @@ func TestSysConfigService_Create_DerivesPublicFlagFromAllowlist(t *testing.T) {
 		Value:    "OMC",
 	})
 
-	require.NoError(t, err)
-	assert.True(t, stored.IsPublic)
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
 }
 
 func TestSysConfigService_Update_RejectsClientControlledPublicFlag(t *testing.T) {
@@ -275,23 +268,13 @@ func TestSysConfigService_Update_RejectsSecretThroughDirectCRUD(t *testing.T) {
 	assert.False(t, updated)
 }
 
-func TestSysConfigService_Update_DerivesPublicFlagFromStoredIdentity(t *testing.T) {
-	var stored SysConfig
+func TestSysConfigService_Update_RejectsDirectMutation(t *testing.T) {
 	value := "new value"
-	svc := NewSysConfigService(&stubSysConfigRepo{
-		getByIDFn: func(_ context.Context, _ uuid.UUID) (*SysConfig, error) {
-			return &SysConfig{Category: "system", Key: "rogue_public", IsPublic: true}, nil
-		},
-		updateFn: func(_ context.Context, cfg *SysConfig) error {
-			stored = *cfg
-			return nil
-		},
-	})
+	svc := NewSysConfigService(&stubSysConfigRepo{})
 
 	_, err := svc.Update(context.Background(), uuid.New(), UpdateSysConfigRequest{Value: &value})
 
-	require.NoError(t, err)
-	assert.False(t, stored.IsPublic)
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
 }
 
 func TestSysConfigService_Delete_RejectsSecretThroughDirectCRUD(t *testing.T) {
@@ -426,4 +409,80 @@ func TestSysConfigService_RegisterValidator_NilFnDeletes(t *testing.T) {
 		Items:    []BatchItem{{Key: "k", Value: "v"}},
 	})
 	require.NoError(t, err)
+}
+
+func TestBatchItemsToApplyState_RedactsSecrets(t *testing.T) {
+	state := batchItemsToApplyState("security", []BatchItem{
+		{Key: "defaultPasswd", Value: "plaintext-password"},
+		{Key: "isBrowserAutoRecordPass", Value: "true"},
+	})
+
+	assert.Equal(t, "[REDACTED]", state["defaultPasswd"])
+	assert.Equal(t, "true", state["isBrowserAutoRecordPass"])
+	assert.NotContains(t, state, "plaintext-password")
+
+	acsState := batchItemsToApplyState("acs_transfer", []BatchItem{
+		{Key: "uploadPassword", Value: "upload-secret"},
+		{Key: "downloadPassword", Value: "download-secret"},
+	})
+	assert.Equal(t, "[REDACTED]", acsState["uploadPassword"])
+	assert.Equal(t, "[REDACTED]", acsState["downloadPassword"])
+}
+
+func TestBatchUpsertPreservesBlankACSCredentials(t *testing.T) {
+	var persisted []BatchItem
+	svc := NewSysConfigService(&stubSysConfigRepo{batchUpsertFn: func(_ context.Context, _ string, items []BatchItem) (int, error) {
+		persisted = append([]BatchItem(nil), items...)
+		return len(items), nil
+	}})
+
+	updated, err := svc.BatchUpsert(context.Background(), BatchUpdateSysConfigRequest{
+		Category: "acs_transfer",
+		Items: []BatchItem{
+			{Key: "uploadPassword", Value: ""},
+			{Key: "downloadPassword", Value: "rotated"},
+			{Key: "uploadBaseURL", Value: "https://acs.example.com"},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 2, updated)
+	require.Equal(t, []BatchItem{
+		{Key: "downloadPassword", Value: "rotated"},
+		{Key: "uploadBaseURL", Value: "https://acs.example.com"},
+	}, persisted)
+}
+
+func TestBatchUpsertRejectsAllBlankACSCredentialPlaceholders(t *testing.T) {
+	repoCalled := false
+	svc := NewSysConfigService(&stubSysConfigRepo{batchUpsertFn: func(_ context.Context, _ string, _ []BatchItem) (int, error) {
+		repoCalled = true
+		return 0, nil
+	}})
+
+	_, err := svc.BatchUpsert(context.Background(), BatchUpdateSysConfigRequest{
+		Category: "acs_transfer",
+		Items: []BatchItem{
+			{Key: "uploadPassword", Value: ""},
+			{Key: "downloadPassword", Value: ""},
+		},
+	})
+
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.False(t, repoCalled)
+}
+
+func TestConfigApplyTargetsIncludeRequiredTargetsEvenWhenModuleDependencyIsMissing(t *testing.T) {
+	svc := NewSysConfigService(&stubSysConfigRepo{})
+	svc.RegisterApplyHandler("storage", "alarm_history_retention", func(context.Context, ConfigApplyWork) (map[string]any, error) {
+		return nil, nil
+	})
+
+	storageTargets := svc.configApplyTargetsForCategory("storage")
+	require.Equal(t, []string{"alarm_history_retention", "minio_presign_endpoint"}, []string{
+		storageTargets[0].Target, storageTargets[1].Target,
+	})
+	minioTargets := svc.configApplyTargetsForCategory("minio.retention")
+	require.Len(t, minioTargets, 1)
+	require.Equal(t, "minio_raw_file_lifecycle", minioTargets[0].Target)
 }
