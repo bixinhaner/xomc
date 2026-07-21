@@ -67,6 +67,8 @@ function findCommand(
     for (const c of g.commands ?? []) {
       if (c.id === commandId) return { command: c, groupId: g.id };
     }
+    const found = findCommand(g.children ?? [], commandId);
+    if (found) return found;
   }
   return null;
 }
@@ -75,7 +77,16 @@ function findGroup(
   groups: GroupTreeNode[],
   groupId: string,
 ): GroupTreeNode | null {
-  return groups.find((g) => g.id === groupId) ?? null;
+  for (const g of groups) {
+    if (g.id === groupId) return g;
+    const found = findGroup(g.children ?? [], groupId);
+    if (found) return found;
+  }
+  return null;
+}
+
+function flattenGroups(groups: GroupTreeNode[]): GroupTreeNode[] {
+  return groups.flatMap((g) => [g, ...flattenGroups(g.children ?? [])]);
 }
 
 export default function MMLAdminCatalog() {
@@ -134,6 +145,7 @@ export default function MMLAdminCatalog() {
     () => tree.filter((g) => !g.path.includes('.')),
     [tree],
   );
+  const allGroups = useMemo<GroupTreeNode[]>(() => flattenGroups(topGroups), [topGroups]);
 
   const selection = useMemo(() => parseSelection(selectedKey), [selectedKey]);
 
@@ -144,8 +156,8 @@ export default function MMLAdminCatalog() {
 
   const selectedGroup = useMemo(() => {
     if (selection?.kind !== 'group') return null;
-    return findGroup(topGroups, selection.id);
-  }, [topGroups, selection]);
+    return findGroup(tree, selection.id);
+  }, [tree, selection]);
 
   const selectedCustom = useMemo(() => {
     if (selection?.kind !== 'custom') return null;
@@ -420,7 +432,7 @@ export default function MMLAdminCatalog() {
             <RightDetailPanel
               command={selectedCommandCtx?.command}
               parentGroupId={selectedCommandCtx?.groupId}
-              groupOptions={topGroups}
+              groupOptions={allGroups}
               selectedGroup={selectedGroup ?? undefined}
               editing={editing}
               onEditingChange={setEditing}
@@ -440,7 +452,7 @@ export default function MMLAdminCatalog() {
       <CommandEditorModal
         open={commandEditor.open}
         parentGroup={commandEditor.parent}
-        groupOptions={topGroups}
+        groupOptions={allGroups}
         onClose={() => setCommandEditor({ open: false, parent: undefined })}
         onSuccess={(newCommandId) => {
           void refetch();

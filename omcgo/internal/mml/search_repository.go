@@ -30,21 +30,21 @@ import (
 
 // SearchCommandRow 是单条命令的搜索结果行。
 type SearchCommandRow struct {
-	CommandID      uuid.UUID         `json:"command_id"`
-	CommandCode    string            `json:"command_code"`
-	LogicalCode    string            `json:"logical_code"`
-	OperationType  string            `json:"operation_type"`
-	DisplayName    string            `json:"display_name"`   // lang 派生 "<OP> <command_zh_name>"
-	LogicalName    string            `json:"logical_name"`   // lang 派生
-	GroupID        uuid.UUID         `json:"group_id"`
-	GroupCode      string            `json:"group_code"`     // "chapter:SA" 等
-	GroupName      string            `json:"group_name"`     // lang 派生
-	ChapterCode    string            `json:"chapter_code"`   // "SA" / "SB" / ... 用于排序
-	MatchedPaths   []string          `json:"matched_paths"`  // ILIKE 命中的 path 列表（去重）
-	MatchReasons   []string          `json:"match_reasons"`  // command_name / command_code / path / description
-	LabelI18n      map[string]string `json:"-"`
-	LogicalI18n    map[string]string `json:"-"`
-	GroupNameI18n  map[string]string `json:"-"`
+	CommandID     uuid.UUID         `json:"command_id"`
+	CommandCode   string            `json:"command_code"`
+	LogicalCode   string            `json:"logical_code"`
+	OperationType string            `json:"operation_type"`
+	DisplayName   string            `json:"display_name"` // lang 派生 "<OP> <command_zh_name>"
+	LogicalName   string            `json:"logical_name"` // lang 派生
+	GroupID       uuid.UUID         `json:"group_id"`
+	GroupCode     string            `json:"group_code"`    // "chapter:SA" 等
+	GroupName     string            `json:"group_name"`    // lang 派生
+	ChapterCode   string            `json:"chapter_code"`  // "SA" / "SB" / ... 用于排序
+	MatchedPaths  []string          `json:"matched_paths"` // ILIKE 命中的 path 列表（去重）
+	MatchReasons  []string          `json:"match_reasons"` // command_name / command_code / path / description
+	LabelI18n     map[string]string `json:"-"`
+	LogicalI18n   map[string]string `json:"-"`
+	GroupNameI18n map[string]string `json:"-"`
 }
 
 // SearchRepository 提供命令搜索能力。
@@ -137,7 +137,17 @@ SELECT
 FROM mml_commands c
 JOIN mml_command_groups g ON g.id = c.group_id
 WHERE c.id IN (SELECT id FROM matched_ids)
-ORDER BY g.chapter_code NULLS LAST, g.display_order, c.operation_type, c.command_code
+ORDER BY g.chapter_code NULLS LAST,
+         g.display_order,
+         regexp_replace(COALESCE(c.command_code, ''), '^(LST|MOD|ADD|RMV)[[:space:]]+', ''),
+         CASE c.operation_type
+             WHEN 'LST' THEN 1
+             WHEN 'MOD' THEN 2
+             WHEN 'ADD' THEN 3
+             WHEN 'RMV' THEN 4
+             ELSE 99
+         END,
+         c.command_code
 LIMIT $2`
 
 	rows, err := r.pool.Query(ctx, sqlText, pattern, limit)
