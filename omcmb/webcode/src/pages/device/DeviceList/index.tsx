@@ -60,6 +60,7 @@ import { buildDefaultUfteTaskName } from '@/pages/transfer/shared';
 import dayjs from 'dayjs';
 import { buildBatchTaskTypeMap, batchActionHasDetail, removeParamSyncOptimisticDeviceId } from './deviceBatchTask';
 import { getDeviceListParamSyncPaths } from './deviceListParamSync';
+import { formatDeviceRadioField } from './deviceRadioFieldSupport';
 import { amfStatusForDevice, bscLinkStatusForDevice, mmeStatusForDevice } from './deviceCoreNetworkStatus';
 import { shouldShowLocationSyncIndicator } from './deviceGpsSyncIndicator';
 import GpsSyncConfirmModal from './GpsSyncConfirmModal';
@@ -2086,14 +2087,14 @@ export default function DeviceList() {
           );
         },
       },
-      { key: 'pci', title: 'PCI', dataIndex: 'pci', width: 80, hidden: true, group: 'common' },
-      { key: 'tac', title: 'TAC', dataIndex: 'tac', width: 80, hidden: true, group: 'common' },
-      { key: 'band', title: 'Band', dataIndex: 'band', width: 100, hidden: true, group: 'common' },
-      { key: 'dlEarfcn', title: t('device.dlEarfcn'), dataIndex: 'dlEarfcn', width: 110, hidden: true, group: 'common' },
-      { key: 'ulEarfcn', title: t('device.ulEarfcn'), dataIndex: 'ulEarfcn', width: 110, hidden: true, group: 'common' },
+      { key: 'pci', title: 'PCI', dataIndex: 'pci', width: 80, hidden: true, group: 'common', render: (value, record) => formatDeviceRadioField(record, 'pci', value) },
+      { key: 'tac', title: 'TAC', dataIndex: 'tac', width: 80, hidden: true, group: 'common', render: (value, record) => formatDeviceRadioField(record, 'tac', value) },
+      { key: 'band', title: 'Band', dataIndex: 'band', width: 100, hidden: true, group: 'common', render: (value, record) => formatDeviceRadioField(record, 'band', value) },
+      { key: 'dlEarfcn', title: t('device.dlEarfcn'), dataIndex: 'dlEarfcn', width: 110, hidden: true, group: 'common', render: (value, record) => formatDeviceRadioField(record, 'dlEarfcn', value) },
+      { key: 'ulEarfcn', title: t('device.ulEarfcn'), dataIndex: 'ulEarfcn', width: 110, hidden: true, group: 'common', render: (value, record) => formatDeviceRadioField(record, 'ulEarfcn', value) },
       // 基站类型(networkModel)暂时隐藏：当前 LTE/NR/双模 推导口径未与产品对齐;恢复时取消下行注释。
       // { key: 'networkModel', title: t('device.networkModel'), dataIndex: 'networkModel', width: 110, hidden: true, group: 'common' },
-      { key: 'txPower', title: 'Tx Power', dataIndex: 'txPower', width: 100, hidden: true, group: 'common' },
+      { key: 'txPower', title: 'Tx Power', dataIndex: 'txPower', width: 100, hidden: true, group: 'common', render: (value, record) => formatDeviceRadioField(record, 'txPower', value) },
       {
         key: 'halobFlag',
         title: 'HaloB',
@@ -2198,6 +2199,13 @@ export default function DeviceList() {
         }
         case 'rfStatus':
           return record.isOnline === false ? t('status.rfOff') : (record.rfStatus || '');
+        case 'pci':
+        case 'tac':
+        case 'band':
+        case 'dlEarfcn':
+        case 'ulEarfcn':
+        case 'txPower':
+          return formatDeviceRadioField(record, key, record[key]);
         default: {
           const v = dataIndex ? (record as unknown as Record<string, unknown>)[dataIndex] : undefined;
           if (Array.isArray(v)) return v.join(', ');
