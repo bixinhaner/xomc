@@ -1,0 +1,19 @@
+.stickyTabs {
+  position: sticky;
+  top: -16px;
+  z-index: 10;
+  background: var(--color-neutral-100);
+  box-shadow: 0 1px 0 var(--color-border);
+}
+
+@media (min-width: 768px) and (max-width: 991px) {
+  .stickyTabs {
+    top: -12px;
+  }
+}
+
+@media (max-width: 767px) {
+  .stickyTabs {
+    top: -8px;
+  }
+}

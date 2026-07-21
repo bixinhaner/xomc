@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
   Alert,
@@ -29,6 +29,7 @@ import {
 import type { SysConfigValueType } from '@core/types/system';
 import { buildBatchItems } from './sysConfigSerialize';
 import type { ConfigApplyBatch } from '@core/types/system';
+import styles from './SystemConfig.module.css';
 
 // 设置子页签类型（v1.0：移除 sas / ldap，参 omgo/docs/prd/system/config.md）
 // notify tab 已隐藏（#781）：邮件/短信后端未真实打通前不展示，避免误导用户
@@ -84,6 +85,7 @@ function decodeValue(raw: string, type: SysConfigValueType | undefined): unknown
 
 export default function SystemConfig() {
   const t = useT();
+  const tabsContainerRef = useRef<HTMLDivElement>(null);
   const [activeTab, setActiveTab] = useState<SettingsTab>('basic');
   const [submittedBatch, setSubmittedBatch] = useState<ConfigApplyBatch | null>(null);
   const { data: refreshedBatch } = useSysConfigApplyBatch(submittedBatch?.id);
@@ -214,14 +216,22 @@ export default function SystemConfig() {
     label: t(tab.labelKey),
   }));
 
+  const handleTabChange = useCallback((key: string) => {
+    const scrollContainer = tabsContainerRef.current?.closest('main');
+    if (scrollContainer) scrollContainer.scrollTop = 0;
+    setActiveTab(key as SettingsTab);
+  }, []);
+
   return (
     <ListPageLayout>
       {/* 页签切换 - 放在 Card 外部 */}
-      <Tabs
-        activeKey={activeTab}
-        onChange={(key) => setActiveTab(key as SettingsTab)}
-        items={tabItems}
-      />
+      <div ref={tabsContainerRef} className={styles.stickyTabs}>
+        <Tabs
+          activeKey={activeTab}
+          onChange={handleTabChange}
+          items={tabItems}
+        />
+      </div>
       {/* 设置内容（含 loading 遮罩） */}
       <Spin spinning={isFetching}>
         {renderSettingsContent()}
