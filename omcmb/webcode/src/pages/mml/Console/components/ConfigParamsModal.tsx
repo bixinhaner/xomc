@@ -97,6 +97,7 @@ export default function ConfigParamsModal({
   );
   const [checkedPaths, setCheckedPaths] = useState<string[]>([]);
   const [values, setValues] = useState<Record<string, string>>({});
+  const [showModValidationErrors, setShowModValidationErrors] = useState(false);
   const [instance, setInstance] = useState<number>(1);
   // 父级 `.{i}.` 实例选择器（key=i01/i02…），默认每个 1。
   const [instanceSelectors, setInstanceSelectors] = useState<Record<string, string>>({});
@@ -128,6 +129,7 @@ export default function ConfigParamsModal({
     : '';
   if (configKey !== lastConfigKey) {
     setLastConfigKey(configKey);
+    setShowModValidationErrors(false);
     if (!command) {
       setCheckedPaths([]);
       setValues({});
@@ -187,13 +189,11 @@ export default function ConfigParamsModal({
   //   - ADD/RMV 以「目标对象路径」(target_object)下发 RPC，不依赖参数 PATH → 有 target_object 即可执行；
   //   - LST/MOD 依赖勾选/可写参数 PATH → checkedPaths 为空时置灰不可执行（保持原行为）。
   const isAddRmvCmd = command?.operationType === 'ADD' || command?.operationType === 'RMV';
-  const modValuesValid =
-    command?.operationType !== 'MOD' || Object.keys(modValidationErrors).length === 0;
   const standardValid =
     !!command &&
     (isAddRmvCmd
       ? !!(command.targetObject && command.targetObject.trim())
-      : checkedPaths.length > 0 && modValuesValid);
+      : checkedPaths.length > 0);
   const valid = mode === 'standard' ? standardValid : rawHasPath && rawAllValid;
 
   const checkedPathSet = new Set(checkedPaths);
@@ -221,6 +221,14 @@ export default function ConfigParamsModal({
           rows: rawPayload.rows,
           execMode: effectiveExecMode,
         };
+
+  const handleConfirmAndExecute = () => {
+    if (command?.operationType === 'MOD' && Object.keys(modValidationErrors).length > 0) {
+      setShowModValidationErrors(true);
+      return;
+    }
+    onConfirmAndExecute(buildRequest());
+  };
 
   const standardBody = !command ? (
     <Empty
@@ -329,9 +337,18 @@ export default function ConfigParamsModal({
               {t('mml.consoleV2.config.confirmSelectedPaths')}
             </Text>
             {selectedParamPaths.map((p) => (
-              <div key={p.path} style={{ whiteSpace: 'nowrap' }}>
+              <div key={p.path} style={{ minWidth: 0 }}>
                 <Text>{p.label}</Text>{' '}
-                <Text type="secondary" code style={{ fontSize: 11 }}>
+                <Text
+                  type="secondary"
+                  code
+                  style={{
+                    fontSize: 11,
+                    whiteSpace: 'normal',
+                    overflowWrap: 'anywhere',
+                    wordBreak: 'break-word',
+                  }}
+                >
                   {p.path}
                 </Text>
               </div>
@@ -353,26 +370,50 @@ export default function ConfigParamsModal({
         ) : (
           <Space orientation="vertical" size={10} style={{ width: '100%', marginTop: 8 }}>
             {writablePaths.map((p) => {
-              const error = command.operationType === 'MOD' ? modValidationErrors[p.path] : undefined;
+              const error = command.operationType === 'MOD' && showModValidationErrors
+                ? modValidationErrors[p.path]
+                : undefined;
 
               return (
-                <div key={p.path} style={{ whiteSpace: 'nowrap' }}>
-                  <Text>{p.label}</Text>{' '}
-                  <Text type="secondary" code style={{ fontSize: 11 }}>
-                    {p.path}
-                  </Text>
-                  {command.operationType === 'MOD' && p.valueType && (
-                    <Tag style={{ marginInlineStart: 6 }}>{p.valueType}</Tag>
-                  )}
+                <div key={p.path} style={{ minWidth: 0 }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      flexWrap: 'wrap',
+                      gap: 6,
+                      minWidth: 0,
+                    }}
+                  >
+                    <Text style={{ flexShrink: 0 }}>{p.label}</Text>
+                    <Text
+                      type="secondary"
+                      code
+                      style={{
+                        flex: '1 1 320px',
+                        minWidth: 0,
+                        fontSize: 11,
+                        whiteSpace: 'normal',
+                        overflowWrap: 'anywhere',
+                        wordBreak: 'break-word',
+                      }}
+                    >
+                      {p.path}
+                    </Text>
+                    {command.operationType === 'MOD' && p.valueType && (
+                      <Tag style={{ marginInlineStart: 0, flexShrink: 0 }}>{p.valueType}</Tag>
+                    )}
+                  </div>
                   <Input
                     status={error ? 'error' : undefined}
                     aria-invalid={Boolean(error)}
                     placeholder={t('mml.consoleV2.config.inputFieldPlaceholder', { label: p.label })}
                     value={values[p.path] ?? ''}
                     onChange={(e) => setValues((prev) => ({ ...prev, [p.path]: e.target.value }))}
+                    style={{ display: 'block', width: '100%', marginTop: 6 }}
                   />
                   {error && (
-                    <Text type="danger" style={{ fontSize: 12 }}>
+                    <Text type="danger" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>
                       {t(`mml.consoleV2.config.validation.${error.code}`, { bound: error.bound ?? '' })}
                     </Text>
                   )}
@@ -411,7 +452,7 @@ export default function ConfigParamsModal({
             type="primary"
             icon={<PlayCircleOutlined />}
             disabled={!valid || deviceCount === 0 || !canExecutePerm}
-            onClick={() => onConfirmAndExecute(buildRequest())}
+            onClick={handleConfirmAndExecute}
           >
             {t('mml.consoleV2.config.confirmAndExecute', { count: deviceCount })}
           </Button>
@@ -427,7 +468,10 @@ export default function ConfigParamsModal({
             key: 'standard',
             label: t('mml.consoleV2.config.tabStandard'),
             children: (
-              <div style={{ height: CONFIG_TAB_HEIGHT, overflowY: 'auto', overflowX: 'auto', paddingRight: 4 }}>
+              <div
+                className="mml-config-tab-scroll"
+                style={{ height: CONFIG_TAB_HEIGHT, overflowY: 'auto', overflowX: 'hidden', paddingRight: 4 }}
+              >
                 {standardBody}
               </div>
             ),
@@ -436,7 +480,10 @@ export default function ConfigParamsModal({
             key: 'raw',
             label: t('mml.consoleV2.config.tabRaw'),
             children: (
-              <div style={{ height: CONFIG_TAB_HEIGHT, overflowY: 'auto', overflowX: 'auto', paddingRight: 4 }}>
+              <div
+                className="mml-config-tab-scroll"
+                style={{ height: CONFIG_TAB_HEIGHT, overflowY: 'auto', overflowX: 'hidden', paddingRight: 4 }}
+              >
                 <RawPathPanel value={rawPayload} onChange={setRawPayload} suggestions={suggestions} />
               </div>
             ),

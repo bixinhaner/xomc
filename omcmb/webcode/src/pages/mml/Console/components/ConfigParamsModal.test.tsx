@@ -85,6 +85,45 @@ describe('ConfigParamsModal', () => {
     expect(screen.getByRole('textbox')).toBeInTheDocument();
   });
 
+  it('wraps long MOD paths and keeps each value input inside its own block', () => {
+    const longPath = 'Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmePool.MmePoolListMapIpsecTunnel';
+    renderModal({
+      command: {
+        ...command,
+        operationType: 'MOD',
+        commandCode: 'MOD LONG PATH',
+        commandName: '修改长路径参数',
+        paramPaths: [{
+          path: longPath,
+          label: 'MME_POOL_LIST_MAP_IPSEC_TUNNEL',
+          writable: true,
+          isObject: false,
+        }],
+      },
+      selectedPathKeys: [longPath],
+    });
+
+    const path = screen.getByText(longPath, { exact: true });
+    const pathContainer = path.parentElement ?? path;
+    const input = screen.getByRole('textbox');
+
+    expect(pathContainer).toHaveStyle({
+      whiteSpace: 'normal',
+      overflowWrap: 'anywhere',
+      wordBreak: 'break-word',
+    });
+    expect(input).toHaveStyle({
+      display: 'block',
+      width: '100%',
+    });
+    expect(path.closest('div')).not.toBe(input.parentElement);
+    expect(document.querySelectorAll('.mml-config-tab-scroll')).toHaveLength(1);
+    expect(document.querySelector('.mml-config-tab-scroll')).toHaveStyle({
+      overflowX: 'hidden',
+      overflowY: 'auto',
+    });
+  });
+
   it('does not block MOD execution for a selected non-writable Path hidden from the config page', () => {
     renderModal({
       command: {
@@ -164,9 +203,11 @@ describe('ConfigParamsModal', () => {
     const execute = screen.getByRole('button', { name: /mml.consoleV2.config.confirmAndExecute/ });
     fireEvent.change(input, { target: { value: '14' } });
 
+    expect(screen.queryByText('mml.consoleV2.config.validation.maxValue')).not.toBeInTheDocument();
+    expect(execute).toBeEnabled();
+    fireEvent.click(execute);
     expect(screen.getByText('mml.consoleV2.config.validation.maxValue')).toBeInTheDocument();
     expect(input).toHaveAttribute('aria-invalid', 'true');
-    expect(execute).toBeDisabled();
 
     fireEvent.change(input, { target: { value: '13' } });
     expect(screen.queryByText('mml.consoleV2.config.validation.maxValue')).not.toBeInTheDocument();
@@ -194,6 +235,24 @@ describe('ConfigParamsModal', () => {
     expect(screen.getByRole('button', { name: /mml.consoleV2.config.confirmAndExecute/ })).toBeEnabled();
   });
 
+  it('defers the required MOD error until execution is submitted', () => {
+    const onConfirmAndExecute = vi.fn();
+    renderModal({
+      command: { ...command, operationType: 'MOD', commandCode: 'MOD INFO', commandName: '修改设备信息' },
+      selectedPathKeys: ['Device.Info.Name'],
+      onConfirmAndExecute,
+    });
+
+    const execute = screen.getByRole('button', { name: /mml.consoleV2.config.confirmAndExecute/ });
+    expect(screen.queryByText('mml.consoleV2.config.validation.required')).not.toBeInTheDocument();
+    expect(execute).toBeEnabled();
+
+    fireEvent.click(execute);
+
+    expect(screen.getByText('mml.consoleV2.config.validation.required')).toBeInTheDocument();
+    expect(onConfirmAndExecute).not.toHaveBeenCalled();
+  });
+
   it('requires a nonblank value for every selected MOD Path before execution', () => {
     const onConfirmAndExecute = vi.fn();
     renderModal({
@@ -203,11 +262,16 @@ describe('ConfigParamsModal', () => {
     });
 
     const execute = screen.getByRole('button', { name: /mml.consoleV2.config.confirmAndExecute/ });
-    expect(execute).toBeDisabled();
+    expect(execute).toBeEnabled();
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '   ' } });
-    expect(execute).toBeDisabled();
+    expect(execute).toBeEnabled();
+    fireEvent.click(execute);
+    expect(screen.getByText('mml.consoleV2.config.validation.required')).toBeInTheDocument();
+    expect(onConfirmAndExecute).not.toHaveBeenCalled();
+
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'cell-a' } });
     expect(execute).toBeEnabled();
+    expect(screen.queryByText('mml.consoleV2.config.validation.required')).not.toBeInTheDocument();
     fireEvent.click(execute);
 
     expect(onConfirmAndExecute).toHaveBeenCalledWith(expect.objectContaining({
