@@ -1,6 +1,7 @@
 package alarm
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -13,6 +14,11 @@ import (
 	"github.com/omcgo/omcgo/internal/core/response"
 	"go.uber.org/zap"
 )
+
+type localizedAlarmReader interface {
+	GetActiveByIDLocalized(ctx context.Context, id uuid.UUID) (*model.Alarm, error)
+	GetHistoryByIDLocalized(ctx context.Context, id uuid.UUID) (*model.Alarm, error)
+}
 
 // Handler provides REST API endpoints for alarm management.
 type Handler struct {
@@ -244,9 +250,15 @@ func (h *Handler) GetByID(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
 		return
 	}
-	alarm, err := h.store.GetActiveByID(c.Request.Context(), id)
+	getActive := h.store.GetActiveByID
+	getHistory := h.store.GetHistoryByID
+	if reader, ok := h.store.(localizedAlarmReader); ok {
+		getActive = reader.GetActiveByIDLocalized
+		getHistory = reader.GetHistoryByIDLocalized
+	}
+	alarm, err := getActive(c.Request.Context(), id)
 	if err != nil {
-		alarm, err = h.store.GetHistoryByID(c.Request.Context(), id)
+		alarm, err = getHistory(c.Request.Context(), id)
 		if err != nil {
 			commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
 			return
