@@ -97,7 +97,7 @@ func TestLoadBackpressureConfig_DefaultsAndClamp(t *testing.T) {
 	assert.True(t, def.Enabled)
 	assert.Equal(t, 85.0, def.DiskHighPct)
 	assert.Equal(t, 75.0, def.DiskLowPct)
-	assert.Equal(t, 40.0, def.IOSomeHighPct)
+	assert.Equal(t, 70.0, def.IOSomeHighPct)
 	assert.Equal(t, 20.0, def.IOSomeLowPct)
 	assert.Equal(t, int64(64), def.MaxInflight)
 	assert.Equal(t, 30*time.Second, def.Interval)
