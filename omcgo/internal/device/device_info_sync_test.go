@@ -560,6 +560,7 @@ func TestInfoSyncer_SyncFromParameters_StoresStandardGPSObservationWithoutOverwr
 	paramRepo := stubDeviceParamRepo{params: []model.DeviceParameter{
 		{ParameterPath: "Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude", ParameterValue: "39904200"},
 		{ParameterPath: "Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude", ParameterValue: "116407400"},
+		{ParameterPath: "Device.FAP.GPS.Height", ParameterValue: "174"},
 	}}
 
 	accepted := &Location{Latitude: 31.2, Longitude: 121.5}
@@ -571,6 +572,9 @@ func TestInfoSyncer_SyncFromParameters_StoresStandardGPSObservationWithoutOverwr
 		assert.Equal(t, deviceID, gotDeviceID)
 		assert.Equal(t, 39.9042, observation.Latitude)
 		assert.Equal(t, 116.4074, observation.Longitude)
+		if assert.NotNil(t, observation.GPSHeight) {
+			assert.Equal(t, 174.0, *observation.GPSHeight)
+		}
 		assert.Equal(t, "Device.DeviceInfo.SAS.FAP.GPS", observation.SourcePath)
 		return nil
 	}}

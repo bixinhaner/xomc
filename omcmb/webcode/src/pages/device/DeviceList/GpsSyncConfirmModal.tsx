@@ -20,6 +20,15 @@ export default function GpsSyncConfirmModal({
   const canSynchronize = device?.locationSync.status === 'pending'
     && device.locationSync.reported != null;
   const isSynchronized = device?.locationSync.status === 'in_sync';
+  const accepted = device?.locationSync.accepted;
+  const reported = device?.locationSync.reported;
+  const acceptedLongitude = accepted?.longitude ?? device?.longitude ?? '--';
+  const acceptedLatitude = accepted?.latitude ?? device?.latitude ?? '--';
+  const reportedLongitude = reported?.longitude ?? '--';
+  const reportedLatitude = reported?.latitude ?? '--';
+  // Older observations may not carry height; the list's latest synchronized
+  // GPS height is the compatible fallback until the next parameter sync.
+  const reportedGPSHeight = reported?.gpsHeight ?? device?.gpsHeight ?? '--';
 
   return (
     <Modal
@@ -49,13 +58,28 @@ export default function GpsSyncConfirmModal({
             background: token.colorFillAlter,
           }}
         >
-          <Typography.Text>
-            {t('device.gpsSyncCoordinates', {
-              longitude: device?.longitude ?? '--',
-              latitude: device?.latitude ?? '--',
-              gpsHeight: device?.gpsHeight ?? '--',
-            })}
-          </Typography.Text>
+          <Space orientation="vertical" size={4}>
+            <Typography.Text>
+              {t('device.gpsAcceptedCoordinates', {
+                longitude: acceptedLongitude,
+                latitude: acceptedLatitude,
+              })}
+            </Typography.Text>
+            <Typography.Text>
+              {t('device.gpsReportedCoordinates', {
+                longitude: reportedLongitude,
+                latitude: reportedLatitude,
+                gpsHeight: reportedGPSHeight,
+              })}
+            </Typography.Text>
+            {device?.locationSync.distanceMeters != null && (
+              <Typography.Text>
+                {t('device.gpsHorizontalDifference', {
+                  distance: Math.round(device.locationSync.distanceMeters),
+                })}
+              </Typography.Text>
+            )}
+          </Space>
         </div>
         <Alert
           type={canSynchronize ? 'warning' : isSynchronized ? 'success' : 'info'}

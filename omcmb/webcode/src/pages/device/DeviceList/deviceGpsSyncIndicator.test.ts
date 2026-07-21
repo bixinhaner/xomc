@@ -2,19 +2,22 @@ import { describe, expect, it } from 'vitest';
 import { shouldShowLocationSyncIndicator } from './deviceGpsSyncIndicator';
 
 describe('shouldShowLocationSyncIndicator', () => {
-  it('shows an indicator for every concrete coordinate cell', () => {
-    expect(shouldShowLocationSyncIndicator(115)).toBe(true);
-    expect(shouldShowLocationSyncIndicator(25)).toBe(true);
-    expect(shouldShowLocationSyncIndicator(0)).toBe(true);
+  const reported = {
+    longitude: 115.366198,
+    latitude: 25.92416,
+    observedAt: '2026-07-17T10:00:00Z',
+    version: 3,
+    sourcePath: 'Device.DeviceInfo.SAS.FAP.GPS',
+  };
+
+  it('仅待确认差异显示提示', () => {
+    expect(shouldShowLocationSyncIndicator({ status: 'pending', reported })).toBe(true);
   });
 
-  it('does not show an indicator for an empty coordinate cell', () => {
-    expect(shouldShowLocationSyncIndicator(null)).toBe(false);
-    expect(shouldShowLocationSyncIndicator(undefined)).toBe(false);
-  });
-
-  it('shows an indicator even when there is no pending report', () => {
-    expect(shouldShowLocationSyncIndicator(115)).toBe(true);
-    expect(shouldShowLocationSyncIndicator(25)).toBe(true);
+  it('确认后、无上报和初始化状态均不显示提示', () => {
+    expect(shouldShowLocationSyncIndicator({ status: 'in_sync', reported })).toBe(false);
+    expect(shouldShowLocationSyncIndicator({ status: 'no_report', reported: null })).toBe(false);
+    expect(shouldShowLocationSyncIndicator({ status: 'initialized', reported })).toBe(false);
+    expect(shouldShowLocationSyncIndicator({ status: 'pending', reported: null })).toBe(false);
   });
 });

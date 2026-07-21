@@ -69,6 +69,17 @@ describe('getDeviceListParamSyncPaths', () => {
     expect(paths).toContain('Device.DeviceInfo.X_COM_MACAddress');
   });
 
+  it('经纬度局部同步使用 SAS 标准路径并覆盖三个槽位', () => {
+    const paths = getDeviceListParamSyncPaths(baseDevice);
+
+    for (const suffix of ['', '2', '3']) {
+      expect(paths).toContain(`Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude${suffix}`);
+      expect(paths).toContain(`Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude${suffix}`);
+    }
+    expect(paths).not.toContain('Device.FAP.GPS.LockedLongitude');
+    expect(paths).not.toContain('Device.FAP.GPS.LockedLatitude');
+  });
+
   it('下发列表 rfStatus 后端派生实际读取的 RF 参数', () => {
     const paths = getDeviceListParamSyncPaths(baseDevice);
 

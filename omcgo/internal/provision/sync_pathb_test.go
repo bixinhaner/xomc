@@ -221,6 +221,40 @@ func TestExtractStorablePrefixesForStandardPaths_KeepsConcreteBSCInstance(t *tes
 	assert.NotContains(t, got, "DeviceGSM.Bts.")
 }
 
+func TestExtractStorablePrefixesForStandardPaths_GPSTranslatesStandardTargets(t *testing.T) {
+	mappings := []parammodel.ParamMapping{
+		{
+			PrivatePath:  "Device.FAP.GPS.LockedLongitude",
+			StandardPath: "Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude",
+			IsStorable:   true,
+			IsSupported:  true,
+			EntryType:    "parameter",
+		},
+		{
+			PrivatePath:  "Device.FAP.GPS.LockedLatitude2",
+			StandardPath: "Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude2",
+			IsStorable:   true,
+			IsSupported:  true,
+			EntryType:    "parameter",
+		},
+	}
+
+	got := extractStorablePrefixesForStandardPaths(mappings, []string{
+		"Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude",
+		"Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude2",
+	})
+	sort.Strings(got)
+	assert.Equal(t, []string{
+		"Device.FAP.GPS.LockedLatitude2",
+		"Device.FAP.GPS.LockedLongitude",
+	}, got)
+
+	// 局部同步接口按 standardPath 过滤；把 privatePath 当请求目标会筛不到映射。
+	assert.Empty(t, extractStorablePrefixesForStandardPaths(mappings, []string{
+		"Device.FAP.GPS.LockedLongitude",
+	}))
+}
+
 func TestExtractStorablePrefixes_AllUnsupported_Empty(t *testing.T) {
 	mappings := []parammodel.ParamMapping{
 		{PrivatePath: "Dev.X", IsStorable: true, IsSupported: false},
