@@ -62,14 +62,34 @@ type gpsCoordinatePathPair struct {
 
 var gpsCoordinatePathPairs = []gpsCoordinatePathPair{
 	{
+		latitude:  "Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude",
+		longitude: "Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude",
+		source:    "Device.DeviceInfo.SAS.FAP.GPS",
+	},
+	{
+		latitude:  "Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude2",
+		longitude: "Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude2",
+		source:    "Device.DeviceInfo.SAS.FAP.GPS.2",
+	},
+	{
+		latitude:  "Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude3",
+		longitude: "Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude3",
+		source:    "Device.DeviceInfo.SAS.FAP.GPS.3",
+	},
+	{
 		latitude:  "Device.FAP.GPS.LockedLatitude",
 		longitude: "Device.FAP.GPS.LockedLongitude",
 		source:    "Device.FAP.GPS",
 	},
 	{
-		latitude:  "Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude",
-		longitude: "Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude",
-		source:    "Device.DeviceInfo.SAS.FAP.GPS",
+		latitude:  "Device.FAP.GPS.LockedLatitude2",
+		longitude: "Device.FAP.GPS.LockedLongitude2",
+		source:    "Device.FAP.GPS.2",
+	},
+	{
+		latitude:  "Device.FAP.GPS.LockedLatitude3",
+		longitude: "Device.FAP.GPS.LockedLongitude3",
+		source:    "Device.FAP.GPS.3",
 	},
 }
 

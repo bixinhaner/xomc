@@ -1,21 +1,25 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import { ConfigProvider } from 'antd';
 import GpsSyncTrigger from './GpsSyncTrigger';
 
 describe('GpsSyncTrigger', () => {
-  it('renders a discoverable GPS location action and handles clicks', () => {
+  it('renders the yellow inconsistency warning and handles clicks', () => {
     const onClick = vi.fn();
 
     const { container } = render(
-      <GpsSyncTrigger
-        label="Review and synchronize GPS coordinates"
-        onClick={onClick}
-      />,
+      <ConfigProvider theme={{ token: { colorWarning: '#f0a500' } }}>
+        <GpsSyncTrigger
+          label="Review and synchronize GPS coordinates"
+          onClick={onClick}
+        />
+      </ConfigProvider>,
     );
 
     const button = screen.getByRole('button', {
       name: 'Review and synchronize GPS coordinates',
     });
-    expect(container.querySelector('.anticon-aim')).toBeInTheDocument();
+    expect(container.querySelector('.anticon-warning')).toBeInTheDocument();
+    expect(button).toHaveStyle({ color: '#f0a500' });
 
     fireEvent.click(button);
     expect(onClick).toHaveBeenCalledOnce();

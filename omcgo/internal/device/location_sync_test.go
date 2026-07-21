@@ -21,6 +21,67 @@ func TestLookupGPSCoordinatesAcceptsStandardAlias(t *testing.T) {
 	}
 }
 
+func TestLookupGPSCoordinatesPrefersCanonicalSASPath(t *testing.T) {
+	lat, lng, sourcePath, ok := LookupGPSCoordinates(map[string]string{
+		"Device.FAP.GPS.LockedLatitude":                 "25000000",
+		"Device.FAP.GPS.LockedLongitude":                "115000000",
+		"Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude":  "25924160",
+		"Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude": "115366462",
+	})
+	if !ok {
+		t.Fatal("expected canonical GPS pair to be accepted")
+	}
+	if lat != 25.92416 || lng != 115.366462 {
+		t.Fatalf("expected canonical coordinates, got (%v, %v)", lat, lng)
+	}
+	if sourcePath != "Device.DeviceInfo.SAS.FAP.GPS" {
+		t.Fatalf("unexpected source path: %q", sourcePath)
+	}
+}
+
+func TestLookupGPSCoordinatesFallsBackToSuffixedPair(t *testing.T) {
+	lat, lng, sourcePath, ok := LookupGPSCoordinates(map[string]string{
+		"Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude":   "",
+		"Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude":  "115366198",
+		"Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude2":  "25924160",
+		"Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude2": "115366462",
+	})
+	if !ok {
+		t.Fatal("expected second GPS pair to be accepted")
+	}
+	if lat != 25.92416 || lng != 115.366462 {
+		t.Fatalf("unexpected suffixed coordinates: got (%v, %v)", lat, lng)
+	}
+	if sourcePath != "Device.DeviceInfo.SAS.FAP.GPS.2" {
+		t.Fatalf("unexpected source path: %q", sourcePath)
+	}
+}
+
+func TestLookupGPSCoordinatesFallsBackToLegacyThirdSlot(t *testing.T) {
+	lat, lng, sourcePath, ok := LookupGPSCoordinates(map[string]string{
+		"Device.FAP.GPS.LockedLatitude3":  "25924160",
+		"Device.FAP.GPS.LockedLongitude3": "115366462",
+	})
+	if !ok {
+		t.Fatal("expected legacy third GPS pair to be accepted")
+	}
+	if lat != 25.92416 || lng != 115.366462 {
+		t.Fatalf("unexpected legacy third-slot coordinates: got (%v, %v)", lat, lng)
+	}
+	if sourcePath != "Device.FAP.GPS.3" {
+		t.Fatalf("unexpected source path: %q", sourcePath)
+	}
+}
+
+func TestLookupGPSCoordinatesDoesNotMixSlots(t *testing.T) {
+	if _, _, _, ok := LookupGPSCoordinates(map[string]string{
+		"Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude":   "25924160",
+		"Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude2": "115366462",
+	}); ok {
+		t.Fatal("expected coordinates from different slots to be rejected")
+	}
+}
+
 func TestCompareLocationsReturnsPendingOnlyForRealDifference(t *testing.T) {
 	observedAt := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)
 	reported := &ReportedLocation{

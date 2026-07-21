@@ -797,8 +797,12 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 	fields["ue_count"] = CalcUECount(paramValues)
 
 	// Phase 3 派生字段（设计文档 §4.2 Layer C）：
+	var reportedGPSHeight *float64
 	if v, ok := lookupGPSHeight(paramValues); ok {
 		fields["gps_height"] = v
+		if height, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil && !math.IsNaN(height) && !math.IsInf(height, 0) {
+			reportedGPSHeight = &height
+		}
 	}
 	if eci, ok := fields["eci"].(string); ok {
 		if enb, ok := deriveEnbID(eci); ok {
@@ -856,6 +860,7 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 		observation := ReportedLocation{
 			Latitude:   latitude,
 			Longitude:  longitude,
+			GPSHeight:  reportedGPSHeight,
 			ObservedAt: time.Now(),
 			SourcePath: sourcePath,
 		}

@@ -64,7 +64,8 @@ import { amfStatusForDevice, bscLinkStatusForDevice, mmeStatusForDevice } from '
 import { shouldShowLocationSyncIndicator } from './deviceGpsSyncIndicator';
 import GpsSyncConfirmModal from './GpsSyncConfirmModal';
 import GpsSyncTrigger from './GpsSyncTrigger';
-import type { Device } from '@core/types/device';
+import { applyLocationSyncResult, applyLocationSyncResultToList } from './deviceLocationSync';
+import type { Device, DeviceListResponse } from '@core/types/device';
 import { formatSystemTime } from '@core/utils/systemTime';
 import { computeCumulativeOnlineDurationSeconds, computeCurrentOnlineDurationSeconds } from '@core/utils/onlineDuration';
 import type { SysConfigItem } from '@core/types/system';
@@ -512,7 +513,17 @@ export default function DeviceList() {
       return;
     }
     try {
-      await deviceApi.acceptLocationSync(record.id, reportedVersion);
+      const result = await deviceApi.acceptLocationSync(record.id, reportedVersion);
+      queryClient.setQueriesData<DeviceListResponse>(
+        { queryKey: ['devices', 'list'] },
+        (previous) => applyLocationSyncResultToList(previous, record.id, result),
+      );
+      queryClient.setQueryData<Device | null>(['devices', 'detail', record.id], (previous) => (
+        previous ? applyLocationSyncResult(previous, result) : previous
+      ));
+      queryClient.setQueryData<Device | null>(['devices', 'sn', record.sn], (previous) => (
+        previous ? applyLocationSyncResult(previous, result) : previous
+      ));
       void message.success(t('device.gpsSyncSuccess'));
     } catch (error: unknown) {
       const status = (error as { response?: { status?: number } })?.response?.status;
@@ -537,10 +548,10 @@ export default function DeviceList() {
     } catch {
       void message.warning(t('device.gpsSyncRefreshFailed'));
     }
-  }, [message, refetch, t]);
+  }, [message, queryClient, refetch, t]);
 
   const renderLocationCell = useCallback((value: number | null | undefined, record: Device) => {
-    const showSyncIndicator = shouldShowLocationSyncIndicator(value);
+    const showSyncIndicator = shouldShowLocationSyncIndicator(record.locationSync);
     const displayValue = value == null ? '--' : value;
     if (!showSyncIndicator) return displayValue;
     return (

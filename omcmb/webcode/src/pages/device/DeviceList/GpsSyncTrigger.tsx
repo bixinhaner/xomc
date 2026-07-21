@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AimOutlined } from '@ant-design/icons';
+import { WarningOutlined } from '@ant-design/icons';
 import { Button, Tooltip, theme } from 'antd';
 
 interface GpsSyncTriggerProps {
@@ -17,7 +17,7 @@ export default function GpsSyncTrigger({ label, onClick }: GpsSyncTriggerProps) 
         type="text"
         size="small"
         shape="circle"
-        icon={<AimOutlined />}
+        icon={<WarningOutlined />}
         aria-label={label}
         onClick={(event) => {
           event.stopPropagation();
@@ -29,7 +29,7 @@ export default function GpsSyncTrigger({ label, onClick }: GpsSyncTriggerProps) 
           minWidth: 24,
           height: 24,
           padding: 0,
-          color: token.colorPrimary,
+          color: token.colorWarning,
         }}
       />
     </Tooltip>

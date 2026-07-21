@@ -51,8 +51,11 @@ describe('GpsSyncConfirmModal', () => {
     expect(screen.getByText('Operation Confirmation')).toBeInTheDocument();
     expect(screen.queryByText('操作确认')).not.toBeInTheDocument();
     expect(screen.getByText('Use device-reported coordinates to overwrite OMC coordinates?')).toBeInTheDocument();
-    expect(screen.getByText('Longitude: 115.366462 Latitude: 25.92416 GPS Height(m): 174')).toBeInTheDocument();
+    expect(screen.getByText('OMC coordinates: Longitude 115.366462, Latitude 25.92416')).toBeInTheDocument();
+    expect(screen.getByText('Device-reported coordinates: Longitude 115.376, Latitude 25.9341, GPS Height(m) 174')).toBeInTheDocument();
+    expect(screen.getByText('Horizontal difference: 1500 m')).toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent('Data inconsistent, Sure to synchronize?');
+    expect(screen.getByRole('dialog').textContent).not.toMatch(/[\u3400-\u9fff]/u);
   });
 
   it('renders the Chinese title and preserves confirm behavior', () => {

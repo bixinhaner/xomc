@@ -61,8 +61,24 @@ const DEVICE_LIST_SYNC_PARAMS: DeviceListSyncParam[] = [
       'Device.FAP.PTP1588.SyncStatus',
     ],
   },
-  { key: 'longitude', scope: 'common', paths: ['Device.FAP.GPS.LockedLongitude'] },
-  { key: 'latitude', scope: 'common', paths: ['Device.FAP.GPS.LockedLatitude'] },
+  {
+    key: 'longitude',
+    scope: 'common',
+    paths: [
+      'Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude',
+      'Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude2',
+      'Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude3',
+    ],
+  },
+  {
+    key: 'latitude',
+    scope: 'common',
+    paths: [
+      'Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude',
+      'Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude2',
+      'Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude3',
+    ],
+  },
   { key: 'gpsHeight', scope: 'common', paths: ['Device.FAP.GPS.altidute', 'Device.FAP.GPS.Altitude', 'Device.FAP.GPS.LockedAltitude', 'Device.FAP.Synchronization.Altitude', 'Device.FAP.GPS.Height'] },
   { key: 'gpsSatelliteCount', scope: 'common', paths: ['Device.FAP.GPS.NumberOfSatellites'] },
   { key: 'pci', scope: 'common', paths: ['Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PhyCellID', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RF.PhyCellID'] },
