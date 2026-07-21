@@ -70,7 +70,10 @@ CPU 空闲预算 = nproc − 主机CPU保留 − max(其它容器CPU, ⌈load15�
 **正好重演它要修的那个 OOM**。所以改为：
 
 1. **先发下限**：每个组件先拿到 100k 基线 `floor`（绝不低于）。
-2. **门禁**：`Σfloor`（含监控）就是最低门槛；`空闲预算 < Σfloor` → **die + 给建议最低配**，不硬塞。
+2. **门禁（带容忍度）**：`Σfloor`（含监控）是最低门槛；`--floor-tolerance-pct`（默认 30）
+   划出一个缓冲带——缺口在容忍度内（即 `空闲预算 ≥ Σfloor × (1 − 容忍度%)`）只降级为
+   **WARN + 按下限分配**（不再向上伸缩），不阻断部署；缺口超过容忍度才 **die + 给建议最低配**。
+   压测/生产实测组件很少同时打满 floor，留一点容忍度换可用性，比直接拒绝部署更实用。
 3. **再分余量**：`剩余 = 空闲预算 − Σfloor`，按权重分给可伸缩组件，每个**封顶到 `ceiling`**。
 4. **全量记账**：nats/minio/web/monitoring 也计入预算；最后校验 `Σ限额 ≤ 空闲预算`。
 
@@ -118,9 +121,12 @@ CPU 空闲预算 = nproc − 主机CPU保留 − max(其它容器CPU, ⌈load15�
 | medium | ≥ 24 GiB | 100k 满突发 / 300-500k | 单机 + pgbouncer + acs/worker ×2-3（Phase 2/手动） |
 | large | ≥ 48 GiB | 1M | **多机**：acs/worker ×6-8 + pgbouncer + Redis 拆分；脚本仅规划单机切片并告警 |
 
-**最低配置门禁**：`空闲预算 < Σfloor` 直接 `die`，给出检测值 vs 需求值 + 建议最低配 +
-逃生口（`--skip-monitoring` 约降到 20 GiB / `--assume-dedicated` / 释放其它项目）。
-全栈推荐底线 **≥ 28 GiB**，`--skip-monitoring` 约 **20 GiB**（#347 起含独立时序库 postgres-tsdb，较单 PG 时上调约 4 GiB）。
+**最低配置门禁（带 30% 容忍度）**：`空闲预算 < Σfloor` 时，缺口 ≤ `--floor-tolerance-pct`
+（默认 30%）先降级为 WARN 按下限分配放行；缺口超过容忍度才 `die`，给出检测值 vs 需求值 +
+建议最低配 + 逃生口（`--skip-monitoring` 约降到 20 GiB / `--assume-dedicated` / 释放其它
+项目 / 调大 `--floor-tolerance-pct`）。全栈推荐底线 **≥ 28 GiB**，`--skip-monitoring` 约
+**20 GiB**（#347 起含独立时序库 postgres-tsdb，较单 PG 时上调约 4 GiB）；容忍度带内
+（如 32 核/31 GiB 机器）仍可放行，但各组件同时打满 limit 时有 OOM 风险，建议尽快扩容内存。
 
 > **1M 明确超出单机范围**（~3333 会话/s + ~1111 PM 文件/s），脚本检出 large 档时
 > 给多机拓扑建议而非假装单机能扛。

@@ -245,6 +245,7 @@ bash deploy/plan-resources.sh                     # 探测主机 + 计算 + 写 
 bash deploy/plan-resources.sh --skip-monitoring   # 不部署监控栈时，降低最低配门槛
 bash deploy/plan-resources.sh --tier medium       # 手动指定档位（默认按空闲内存自动判定 small/medium/large）
 bash deploy/plan-resources.sh --assume-dedicated  # 本机 OMC 独占时，不扣其它容器预留
+bash deploy/plan-resources.sh --floor-tolerance-pct 30  # 门禁容忍度（默认30，缺口在此百分比内降级WARN按下限分配）
 bash deploy/plan-resources.sh -h                  # 全部参数</pre>
 <p class="tip">随后 <code>sudo bash deploy/install.sh</code> 会把包内 <code>deploy/resources.env</code> 一并带入部署（拷进 <code>current/deploy/</code>）。不跑 plan-resources.sh 则用 compose 内置默认限额。</p>
 <p><b>⬆️ 升级部署</b>：<code>resources.env</code> 由 install.sh <b>自动从上一版继承</b>（<code>current/deploy/resources.env</code> 或 <code>etc/resources.env.saved</code>），<b>通常无需重跑</b>。仅当目标主机资源变化需<b>重新规划</b>时，在<b>新版本包目录</b>跑 <code>bash deploy/plan-resources.sh</code>（会覆盖继承值）。</p>
