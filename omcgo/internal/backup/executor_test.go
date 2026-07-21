@@ -3,6 +3,7 @@ package backup
 import (
 	"context"
 	"encoding/json"
+	"net/url"
 	"testing"
 	"time"
 
@@ -16,6 +17,30 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
+
+func TestBuildBackupUploadURL_PreservesPrefixAndEncodesBusinessQuery(t *testing.T) {
+	got, err := buildBackupUploadURL(
+		transfercfg.UploadSettings{
+			BaseURL: "https://edge.example.com:9443/omc/",
+			Path:    "/smallcell/FileUploadService",
+		},
+		&BackupTypeSpec{URLFileTypeParam: "CONFIGBACKUP_XML"},
+		"SN 100&1",
+		"task/100",
+		"配置 a&b.xml",
+	)
+	require.NoError(t, err)
+
+	parsed, err := url.Parse(got)
+	require.NoError(t, err)
+	require.Equal(t, "https", parsed.Scheme)
+	require.Equal(t, "edge.example.com:9443", parsed.Host)
+	require.Equal(t, "/omc/smallcell/FileUploadService", parsed.Path)
+	require.Equal(t, "CONFIGBACKUP_XML", parsed.Query().Get("fileType"))
+	require.Equal(t, "SN 100&1", parsed.Query().Get("sn"))
+	require.Equal(t, "task/100", parsed.Query().Get("taskId"))
+	require.Equal(t, "配置 a&b.xml", parsed.Query().Get("filename"))
+}
 
 // ---------------------------------------------------------------------------
 // Mocks (prefixed with exec to avoid collision with service_test.go)
