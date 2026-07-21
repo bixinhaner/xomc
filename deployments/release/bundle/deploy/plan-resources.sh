@@ -215,7 +215,7 @@ log "  CPU 空闲预算  : ${C_G}${C_B}${IDLE_CPU} 核${C_0}  = ${HOST_CPU} − 
 #
 #   组件          floor   ceil    surplus权重(%)   说明
 #   app           1536    3072        10           非设备量驱动，最先让出预算；线上巡检发现 995MiB 配额下常驻内存已到 88%，floor/ceil 一并调大留余量
-#   acs           2048    3584        18           TR-069 最热堆；1M 走横向多副本；PM 上传 body 需缓冲进内存，余量比早期估算调大
+#   acs           4096    6144        18           TR-069 最热堆；1M 走横向多副本；PM 上传 body 需缓冲进内存，omc78 压测实测 1-2GiB 在高并发（max_inflight 调大后）下触发 cgroup OOMKilled 循环重启，floor 提到 4GiB（2026-07-21）
 #   worker        1024    2048        25           PM/MR 解析最吃内存；1M 走横向
 #   postgres      7168   16384        25           业务主库；须容 max_connections=300(池+exporter+余,与 main #131 对齐)
 #   postgres-tsdb 4096   12288        22           时序库(#347)：PM COPY 入库 + KPI 聚合，写压力主要在此；独立实例，计入预算防双 PG 超分 OOM
@@ -225,8 +225,8 @@ log "  CPU 空闲预算  : ${C_G}${C_B}${IDLE_CPU} 核${C_0}  = ${HOST_CPU} − 
 #   web            512     512         0           静态+反代，固定
 # 监控栈（固定块，不纵向伸缩，但计入预算）：~4224 MiB
 COMP_NAMES=(app acs worker postgres postgres-tsdb redis nats minio web)
-COMP_FLOOR=(1536 2048 1024 7168 4096 3072 1024 3072 512)
-COMP_CEIL=(3072 3584 2048 16384 12288 8192 2048 4096 512)
+COMP_FLOOR=(1536 4096 1024 7168 4096 3072 1024 3072 512)
+COMP_CEIL=(3072 6144 2048 16384 12288 8192 2048 4096 512)
 COMP_WEIGHT=(10 18 25 25 22 15 5 8 0)
 
 MON_FIXED_MIB=4224   # prometheus1024+loki512+tempo512+otelcol512+grafana512+alertmgr512+exporters(128*3+256)

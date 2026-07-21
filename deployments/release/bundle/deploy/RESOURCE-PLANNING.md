@@ -81,7 +81,7 @@ CPU 空闲预算 = nproc − 主机CPU保留 − max(其它容器CPU, ⌈load15�
 | 组件 | floor | ceiling | 余量权重 | 依据 |
 |------|------:|--------:|:-------:|------|
 | app | 1536 | 3072 | 10% | 非设备量驱动（运维UI+OSS轮询），最先让出预算；线上巡检发现 995MiB 配额下常驻内存已到 88%，floor/ceil 上调留余量 |
-| acs | 1024 | 2048 | 15% | TR-069 最热堆（1万并发会话+20万限流器映射+50MB SOAP体）；1M 走横向多副本 |
+| acs | 4096 | 6144 | 18% | TR-069 最热堆（1万并发会话+20万限流器映射+50MB SOAP体）；1M 走横向多副本；omc78 压测实测 max_inflight 调大后并发 PM 上传缓冲内存需求上升，1-2GiB 下触发 cgroup OOMKilled 循环重启，floor 提到 4GiB（2026-07-21）|
 | worker | 1024 | 2048 | 25% | PM/MR XML 解析最吃内存（111→1111 文件/s）；1M 走横向 |
 | **postgres** | **5120** | 16384 | 25% | **须容 `max_connections=200`**（180池+余量）：shared_buffers+maint+200×(10+work_mem) 须舒适放进限额 |
 | **postgres-tsdb** | **4096** | 12288 | 22% | **时序库（#347）独立 TimescaleDB 实例**：PM COPY 入库 + KPI 聚合写主要在此；与主库分别计入预算，防双 PG 同机超分 OOM。同源派生 `TSDB_*`（shared_buffers 25% 等），`max_connections=300` 与主库对齐（实际池仅 ~65，余量充足） |
