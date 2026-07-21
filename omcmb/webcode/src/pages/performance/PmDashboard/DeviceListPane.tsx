@@ -111,7 +111,7 @@ export function isDeviceViewMetricSelectionOverLimit(metricPaths: string[]): boo
 }
 
 function defaultRangeForGranularity(g: Granularity): [Dayjs, Dayjs] {
-  const end = dayjs();
+  const end = dayjs().millisecond(0);
   switch (g) {
     case '15min':
       return [end.subtract(3, 'hour'), end];
@@ -126,6 +126,10 @@ function defaultRangeForGranularity(g: Granularity): [Dayjs, Dayjs] {
     default:
       return [end.subtract(24, 'hour'), end];
   }
+}
+
+export function toDeviceViewRequestISOString(value: Dayjs): string {
+  return value.millisecond(0).toISOString();
 }
 
 function actualRangeFromMeta(meta: { actualStartTime?: string | null; actualEndTime?: string | null } | undefined): [Dayjs, Dayjs] | null {
@@ -242,8 +246,8 @@ export default function DeviceListPane() {
     return {
       granularity: submitted.granularity,
       metricPaths: submitted.metricPaths,
-      startTime: prevStart.toISOString(),
-      endTime: prevEnd.toISOString(),
+      startTime: toDeviceViewRequestISOString(prevStart),
+      endTime: toDeviceViewRequestISOString(prevEnd),
       limit: 5000,
       fillEmpty: true,
       // #599：周期对比同口径传 weekdays/hours。
@@ -333,8 +337,8 @@ export default function DeviceListPane() {
       deviceSns: submitted?.deviceSns ?? deviceSns,
       metricPaths: submitted?.metricPaths ?? metricPaths,
       granularity: submitted?.granularity ?? granularity,
-      startTime: actualStartTime ?? submitted?.startTime ?? start.toISOString(),
-      endTime: actualEndTime ?? submitted?.endTime ?? end.toISOString(),
+      startTime: actualStartTime ?? submitted?.startTime ?? toDeviceViewRequestISOString(start),
+      endTime: actualEndTime ?? submitted?.endTime ?? toDeviceViewRequestISOString(end),
       objectLdns: submitted?.allowedLdns ?? getEffectiveLdns(cellSel, objectsByDevice),
       // #599：导出与出图同口径。
       weekdays: submitted?.weekdays ?? filter.weekdays,
@@ -396,14 +400,14 @@ export default function DeviceListPane() {
       deviceSns,
       metricPaths,
       granularity,
-      startTime: start.toISOString(),
-      endTime: end.toISOString(),
+      startTime: toDeviceViewRequestISOString(start),
+      endTime: toDeviceViewRequestISOString(end),
       weekdays: filter.weekdays,
       hours: filter.hours,
       compare: filter.compare,
       offsetMs: end.valueOf() - start.valueOf(),
-      prevStartTime: prevStart.toISOString(),
-      prevEndTime: prevEnd.toISOString(),
+      prevStartTime: toDeviceViewRequestISOString(prevStart),
+      prevEndTime: toDeviceViewRequestISOString(prevEnd),
       // 定格当前下钻白名单（空=全选不过滤）。
       allowedLdns: getEffectiveLdns(cellSel, objectsByDevice),
     });
