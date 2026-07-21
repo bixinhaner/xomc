@@ -99,7 +99,7 @@ func TestLoadBackpressureConfig_DefaultsAndClamp(t *testing.T) {
 	assert.Equal(t, 75.0, def.DiskLowPct)
 	assert.Equal(t, 40.0, def.IOSomeHighPct)
 	assert.Equal(t, 20.0, def.IOSomeLowPct)
-	assert.Equal(t, int64(64), def.MaxInflight)
+	assert.Equal(t, int64(2000), def.MaxInflight)
 	assert.Equal(t, 30*time.Second, def.Interval)
 
 	// low > high → 夹到 high（防迟滞失效）；interval 过小 → 夹到下限。

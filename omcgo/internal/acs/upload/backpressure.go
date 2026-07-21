@@ -45,7 +45,7 @@ const (
 	bpDefaultDiskLowPct  = 75.0
 	bpDefaultIOSomeHigh  = 40.0
 	bpDefaultIOSomeLow   = 20.0
-	bpDefaultMaxInflight = 64
+	bpDefaultMaxInflight = 2000
 	bpDefaultIntervalSec = 30
 	bpMinInterval        = 5 * time.Second
 
