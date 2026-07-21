@@ -197,3 +197,29 @@ func TestBaiBNQLTEIdleReselectionCarrierRanges(t *testing.T) {
 		assert.Equal(t, expectation.max, param.Max, leaf)
 	}
 }
+
+func TestNormalizeEnumCSV_ReplacesFullWidthComma(t *testing.T) {
+	assert.Equal(t, "PSK,SIM,CERT,OTHER", normalizeEnumCSV(" PSK，SIM, ，CERT，OTHER "))
+}
+
+func TestXMLParamEntryCarriesValueRules(t *testing.T) {
+	const snippet = `<?xml version="1.0"?>
+<parameterModel paramModel="TestModel">
+  <parameters>
+    <param name="Device.Test.Value" standardPath="Device.Test.Value"
+      type="STRING" min="1" max="8" defaultValue="abc"
+      validationPattern="/^abc/" enumValues="a,b" enumLabels="A,B"/>
+  </parameters>
+</parameterModel>`
+
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal([]byte(snippet), &doc))
+	require.Len(t, doc.Params, 1)
+	entry := doc.Params[0]
+	assert.Equal(t, "1", entry.Min)
+	assert.Equal(t, "8", entry.Max)
+	assert.Equal(t, "abc", entry.DefaultValue)
+	assert.Equal(t, "/^abc/", entry.ValidationPattern)
+	assert.Equal(t, "a,b", entry.EnumValues)
+	assert.Equal(t, "A,B", entry.EnumLabels)
+}

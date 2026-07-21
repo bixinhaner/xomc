@@ -1863,6 +1863,8 @@ function mapSubField(s: BackendSubField): SubFieldDef {
     constraintTextI18n: s.constraint_text_i18n ?? {},
     defaultValue: s.default_value || undefined,
     jsRegex: s.js_regex || undefined,
+    validationPattern: s.validation_pattern || undefined,
+    enumOptions: s.enum_options?.length ? s.enum_options : undefined,
     defaultSelected: s.default_selected,
     isRequired: s.is_required,
     sortOrder: s.sort_order,

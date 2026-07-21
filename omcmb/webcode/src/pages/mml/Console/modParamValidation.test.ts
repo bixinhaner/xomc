@@ -129,6 +129,31 @@ describe('validateModParamValue', () => {
       ),
     ).toBeNull();
   });
+
+  it('rejects values outside model enum options', () => {
+    expect(
+      validateModParamValue(
+        param({ enumOptions: [{ value: '0', label: 'Disabled' }, { value: '1', label: 'Enabled' }] }),
+        '2',
+      ),
+    ).toEqual({ code: 'enumValue' });
+  });
+
+  it('validates the model validation pattern after range checks', () => {
+    expect(
+      validateModParamValue(
+        param({ validationPattern: '/^\\d{5,6}$/' }),
+        'abc',
+      ),
+    ).toEqual({ code: 'pattern' });
+  });
+
+  it('maps the named no_zh rule to the canonical no-Chinese validation', () => {
+    expect(validateModParamValue(param({ validationPattern: 'no_zh' }), 'abc-123')).toBeNull();
+    expect(validateModParamValue(param({ validationPattern: 'no_zh' }), 'abc中文')).toEqual({
+      code: 'pattern',
+    });
+  });
 });
 
 describe('getModParamValidationErrors', () => {

@@ -71,6 +71,8 @@ export function subFieldsToParamPaths(subFields: SubFieldDef[]): CommandParamPat
       maxValue: sf.maxValue,
       valueType: sf.valueType,
       defaultValue: sf.defaultValue,
+      validationPattern: sf.validationPattern,
+      enumOptions: sf.enumOptions,
       description: sf.description,
       defaultSelected: sf.defaultSelected,
     }));

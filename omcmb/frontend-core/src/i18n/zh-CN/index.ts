@@ -6410,6 +6410,8 @@ const messages: Record<string, string> = {
   'mml.consoleV2.config.validation.maxValue':   '不能大于 {bound}',
   'mml.consoleV2.config.validation.minLength':  '长度不能少于 {bound} 个字符',
   'mml.consoleV2.config.validation.maxLength':  '长度不能超过 {bound} 个字符',
+  'mml.consoleV2.config.validation.enumValue':  '请选择有效的参数值',
+  'mml.consoleV2.config.validation.pattern':    '参数值格式不正确',
   'mml.consoleV2.config.writeReminder.addRmv': 'ADD / RMV 协议规定单次仅作用于一个对象路径，已锁定为单行。',
   'mml.consoleV2.config.writeReminder.mod':  'MOD 将修改所有已选设备的参数值，请确认参数值无误。',
   'mml.consoleV2.config.pickDeviceFirst':    '请先选择目标设备',

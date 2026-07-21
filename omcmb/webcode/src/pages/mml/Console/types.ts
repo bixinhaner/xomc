@@ -53,11 +53,13 @@ export interface CommandParamPath {
   writable: boolean;
   /** 该 path 末级是否为多实例对象（standard_params.entry_type='object'） */
   isObject: boolean;
-  /** standard_params.min_value：MOD/ADD 填值时该标量参数的默认值 */
+	/** 当前参数模型 min/max；缺失时由后端回退 standard_params。 */
   minValue?: number;
   maxValue?: number;
   valueType?: string;
   defaultValue?: string;
+  validationPattern?: string;
+  enumOptions?: Array<{ value: string; label: string }>;
   description?: string;
   /** MML 配置中的默认勾选标记；兼容数据缺失时按 false 处理。 */
   defaultSelected?: boolean;
