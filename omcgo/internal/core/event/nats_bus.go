@@ -12,6 +12,8 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
+
+	"github.com/omcgo/omcgo/internal/core/reliability"
 )
 
 const maxDeliveries = 5
@@ -664,6 +666,8 @@ type ackDecision struct {
 
 // decideAck 决定对已投递 deliveries 次的消息采取何种动作：
 //   - handler 无错 → Ack
+//   - handler 错误包装了 reliability.ErrPermanent（业务确定性失败，如设备未注册，
+//     重试无法改变结果）→ 无视 deliveries，立即 Term，避免无意义的多次重投
 //   - handler 出错且未达 maxDelivery → Nak with exponential backoff
 //   - handler 出错且达到 maxDelivery → Term（避免无限重试）
 //
@@ -672,6 +676,9 @@ type ackDecision struct {
 func decideAck(handlerErr error, deliveries, maxDelivery uint64) ackDecision {
 	if handlerErr == nil {
 		return ackDecision{action: ackActionAck}
+	}
+	if errors.Is(handlerErr, reliability.ErrPermanent) {
+		return ackDecision{action: ackActionTerm}
 	}
 	if deliveries >= maxDelivery {
 		return ackDecision{action: ackActionTerm}

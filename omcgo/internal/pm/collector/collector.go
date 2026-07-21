@@ -17,6 +17,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/rawarchive"
+	"github.com/omcgo/omcgo/internal/core/reliability"
 	"github.com/omcgo/omcgo/internal/core/reliability/runner"
 	"github.com/omcgo/omcgo/internal/core/tracing"
 	"github.com/omcgo/omcgo/internal/pm"
@@ -486,9 +487,19 @@ func (c *PMCollector) ingestViaCopy(
 // resolveDevice fills in DeviceID / DeviceOUI / Carrier / Technology on the
 // payload when the publisher only provided device_sn (T-0164 G1 真机闭环 —
 // acs.upload.Handler 发的瘦 payload）。transfer.Bridge 发的胖 payload device_id
-// 已填，函数直接 no-op 返回。Returning an error here triggers retry+DLQ in
-// the wrapping runner — transient cases (device row not yet inserted because
-// the inform/registration race) get retried and usually succeed.
+// 已填，函数直接 no-op 返回。
+//
+// 错误分类（2026-07-21 修订，产品决策：设备不在注册表就拒绝入库，不重试）：
+//   - lookup 本身出错（DB 连接等基础设施问题）→ 普通错误，触发 retry+DLQ，通常瞬时问题。
+//   - lookup 成功但 dev==nil（设备不在 device_info 注册表）→ 包装
+//     reliability.ErrPermanent，Runner/EventBus 会立即短路终止，不再重试、不落库。
+//     此前的设计（重试 5 次 + 指数退避 ~15s）是为了兜住"设备刚 Inform、注册尚未
+//     落库"的竞态窗口；实测 omc78 压测环境里触发该错误的绝大多数是从未注册/早已
+//     从回收站清理、但固件仍在自主上传 PM 文件的设备——重试 5 次全部落空，只是
+//     徒增 5 条 Error 日志和 5 条 DLQ 记录，最终结果依然是丢弃、不会真正入库。
+//     现改为首次即终止：代价是如果真的撞上"刚注册、尚未提交"的极短竞态，这台
+//     设备当次的 PM 文件会被直接丢弃而不是重试后捞回来；下一个上报周期（通常
+//     15 分钟）注册必然已完成，届时会正常入库，不会影响该设备后续所有数据。
 func (c *PMCollector) resolveDevice(ctx context.Context, payload *FileReceivedPayload) error {
 	if payload.DeviceID != "" {
 		return nil
@@ -504,7 +515,7 @@ func (c *PMCollector) resolveDevice(ctx context.Context, payload *FileReceivedPa
 		return fmt.Errorf("lookup device by sn %s: %w", payload.DeviceSN, err)
 	}
 	if dev == nil {
-		return fmt.Errorf("pm.file.received: device not found for sn=%s", payload.DeviceSN)
+		return fmt.Errorf("pm.file.received: device not found for sn=%s: %w", payload.DeviceSN, reliability.ErrPermanent)
 	}
 	payload.DeviceID = dev.ID.String()
 	payload.DeviceOUI = dev.OUI
