@@ -130,7 +130,7 @@ export default function GroupDialogs({
         matchingMode={matchingMode}
         nameFilters={nameFilters}
         sourceGroupOptions={groups
-          .filter((group) => group.parentId !== null)
+          .filter((group) => group.parentId != null)
           .map((group) => ({
             label: getSourceGroupOptionLabel(group),
             value: group.id,
@@ -151,7 +151,7 @@ export default function GroupDialogs({
         matchingMode={editLevel2MatchingMode}
         nameFilters={editLevel2NameFilters}
         sourceGroupOptions={groups
-          .filter((group) => group.parentId !== null && group.id !== editLevel2GroupId)
+          .filter((group) => group.parentId != null && group.id !== editLevel2GroupId)
           .map((group) => ({
             label: getSourceGroupOptionLabel(group),
             value: group.id,

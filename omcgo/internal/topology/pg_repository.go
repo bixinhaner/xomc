@@ -503,10 +503,11 @@ func (r *PgDeviceGroupRepository) MoveDeviceAutoMatched(ctx context.Context, sou
 			SELECT $1, $2, $3, 'rule'
 			WHERE EXISTS (SELECT 1 FROM device_groups WHERE id = $4 AND level = 2)
 			  AND EXISTS (SELECT 1 FROM device_groups WHERE id = $1 AND level = 2)
-			  AND NOT EXISTS (
-				SELECT 1 FROM device_group_members WHERE device_id = $2
-			)
-			ON CONFLICT (device_id) DO NOTHING`
+			ON CONFLICT (device_id) DO UPDATE
+			SET group_id = EXCLUDED.group_id,
+			    added_at = EXCLUDED.added_at,
+			    source_type = 'rule'
+			WHERE device_group_members.group_id = $4`
 		tag, err = r.pool.Exec(ctx, insertSQL, targetGroupID, deviceID, time.Now(), sourceGroupID)
 	} else {
 		const updateSQL = `

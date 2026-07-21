@@ -1442,7 +1442,7 @@ const messages: Record<string, string> = {
   // device 分组保存错误提示（biz_code 1107 = ErrCodeGroupNameDuplicate）
   'device.group.saveFailed':       '保存分组失败',
   'device.group.nameDuplicate':    '同一父级下已存在同名分组，请换一个名称重试',
-  'device.group.editMatchingSuccess': '成功，设备数据异步更新中，请稍后再次刷新页面',
+  'device.group.editMatchingSuccess': '规则已保存，后台匹配已触发；命中设备会自动归入，请稍后刷新查看',
   'device.childGroupName':      '子分组名称',
   'device.groupNameLabel':      '分组名称',
   'device.superiorGroup':       '上级分组',
