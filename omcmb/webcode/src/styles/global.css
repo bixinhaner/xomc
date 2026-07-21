@@ -200,33 +200,22 @@
   z-index: 1;
   width: 100%;
   overflow: hidden;
-  border: 1px solid #d9dce3;
+  border: 1px solid var(--color-border-secondary);
   border-radius: 2px;
-  background: #ffffff;
-  box-shadow: none;
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-md);
 }
 
 .ant-popover.ant-popconfirm .ant-popover-content::before {
   display: flex;
   height: 44px;
   align-items: center;
-  border-bottom: 1px solid #e5e7eb;
-  padding: 0 48px 0 20px;
+  border-bottom: 1px solid var(--color-border);
+  padding: 0 20px;
   color: var(--color-neutral-900);
   content: "操作确认";
   font-size: 15px;
   font-weight: 600;
-}
-
-.ant-popover.ant-popconfirm .ant-popover-content::after {
-  position: absolute;
-  top: 8px;
-  right: 18px;
-  color: var(--color-primary-700);
-  content: "×";
-  font-size: 30px;
-  font-weight: 300;
-  line-height: 28px;
 }
 
 .ant-popover.ant-popconfirm .ant-popconfirm-inner-content {
@@ -253,6 +242,10 @@
   word-break: break-word;
 }
 
+.ant-popover.ant-popconfirm .ant-popconfirm-description {
+  color: var(--color-neutral-800);
+}
+
 .ant-popover.ant-popconfirm .ant-popconfirm-buttons {
   margin-top: 22px;
   text-align: right;
@@ -263,8 +256,15 @@
   border-radius: 0;
 }
 
+.ant-popover.ant-popconfirm .ant-popconfirm-buttons .ant-btn-default {
+  border-color: var(--color-border-secondary);
+  background: var(--color-bg-container);
+  color: var(--color-neutral-900);
+}
+
 .ant-popover.ant-popconfirm .ant-popconfirm-buttons .ant-btn-primary {
-  background: #1d0db7;
+  border-color: var(--color-primary-600);
+  background: var(--color-primary-600);
 }
 
 .ant-modal-confirm {

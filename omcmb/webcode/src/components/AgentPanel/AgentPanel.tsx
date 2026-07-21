@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Popconfirm } from 'antd';
+import { Modal } from 'antd';
 import {
   ArrowDownOutlined,
   BellOutlined,
@@ -604,6 +604,8 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
   const [input, setInput] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [diagnosticOpen, setDiagnosticOpen] = useState(false);
+  const [newConversationOpen, setNewConversationOpen] = useState(false);
+  const [newConversationLoading, setNewConversationLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const context = useMemo(
     () => ({
@@ -691,6 +693,16 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
     event.currentTarget.form?.requestSubmit();
   };
 
+  const startNewConversation = async () => {
+    setNewConversationLoading(true);
+    try {
+      await controller.clear();
+      setNewConversationOpen(false);
+    } finally {
+      setNewConversationLoading(false);
+    }
+  };
+
   return (
     <aside
       className={`${styles.panel} ${panelLayout.isResizing ? styles.panelResizing : ''}`}
@@ -723,24 +735,16 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
         >
           {panelLayout.isExpanded ? <ShrinkOutlined /> : <ArrowsAltOutlined />}
         </button>
-        <Popconfirm
-          title={t('agent.newConversationConfirmTitle')}
-          description={t('agent.newConversationConfirmDescription')}
-          okText={t('agent.newConversation')}
-          cancelText={t('agent.cancel')}
-          onConfirm={controller.clear}
+        <button
+          type="button"
+          className={styles.iconBtn}
+          onClick={() => setNewConversationOpen(true)}
           disabled={controller.isStreaming}
+          aria-label={t('agent.newConversation')}
+          title={t('agent.newConversation')}
         >
-          <button
-            type="button"
-            className={styles.iconBtn}
-            disabled={controller.isStreaming}
-            aria-label={t('agent.newConversation')}
-            title={t('agent.newConversation')}
-          >
-            <PlusOutlined />
-          </button>
-        </Popconfirm>
+          <PlusOutlined />
+        </button>
         <button type="button" className={styles.iconBtn} onClick={onClose} aria-label={t('agent.close')}>
           <CloseOutlined />
         </button>
@@ -868,6 +872,19 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
           {controller.isStreaming ? <StopOutlined /> : <SendOutlined />}
         </button>
       </form>
+      <Modal
+        open={newConversationOpen}
+        title={t('agent.newConversationConfirmTitle')}
+        okText={t('agent.newConversation')}
+        cancelText={t('agent.cancel')}
+        confirmLoading={newConversationLoading}
+        centered
+        width={420}
+        onOk={() => void startNewConversation()}
+        onCancel={() => setNewConversationOpen(false)}
+      >
+        <p>{t('agent.newConversationConfirmDescription')}</p>
+      </Modal>
     </aside>
   );
 }
