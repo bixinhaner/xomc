@@ -130,22 +130,24 @@ type CreateRequest struct {
 //   - false（自建任务）：更新 Name/DeviceSNs/MetricPaths/Granularities/ObjectLDNs/WindowStart/WindowEnd。
 //   - true（内置任务）：只更新 MetricPaths，其余字段忽略。
 //
-// mode/technology/dimension/is_builtin/expire_days 不在本结构体内，不可改。
+// mode/technology/dimension/is_builtin/expire_days 不可改；其中 mode/dimension/is_builtin
+// 由 handler 按既有任务传入，只用于决定编辑守门和状态流转口径。
 type UpdateRequest struct {
-	IsBuiltin     bool // 由 service/handler 按既有任务标记填入，repository 据此决定更新字段集
-	Name          string
-	Mode          Mode
-	CronExpr      *string
-	ResetCursor   bool
-	Dimension     Dimension
-	DeviceSNs     []string
-	MetricPaths   []string
-	Granularities []string
-	ObjectLDNs    []string
-	WindowStart   time.Time
-	WindowEnd     time.Time
-	LastFireAt    time.Time
-	Visibility    Visibility
+	IsBuiltin       bool // 由 service/handler 按既有任务标记填入，repository 据此决定更新字段集
+	Name            string
+	Mode            Mode
+	RequeueTerminal bool // 自建 oneshot 的执行输入变化时，允许 repository 将终态任务重新排队
+	CronExpr        *string
+	ResetCursor     bool
+	Dimension       Dimension
+	DeviceSNs       []string
+	MetricPaths     []string
+	Granularities   []string
+	ObjectLDNs      []string
+	WindowStart     time.Time
+	WindowEnd       time.Time
+	LastFireAt      time.Time
+	Visibility      Visibility
 }
 
 // ListFilter 是 Repository.List 的过滤条件。

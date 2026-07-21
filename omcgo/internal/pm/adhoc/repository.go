@@ -271,6 +271,7 @@ func (r *PgRepository) Update(ctx context.Context, id uuid.UUID, req UpdateReque
 //
 // 内置（IsBuiltin=true）：只 SET metric_paths + updated_at。
 // 自建（false）：额外 SET task_name/device_sns(JSONB)/granularities/cron_expr/object_ldns/window_start/window_end。
+// 自建 oneshot 的执行输入变化时，已执行完成的 succeeded/failed 任务重新排队为 pending；pending/running 保持原状态。
 // mode/technology/dimension/is_builtin/expire_days 永不进 SET。
 func buildUpdateSQL(id uuid.UUID, req UpdateRequest) (string, []any, error) {
 	qb := storage.Psql.Update("pm_tasks").
@@ -291,6 +292,11 @@ func buildUpdateSQL(id uuid.UUID, req UpdateRequest) (string, []any, error) {
 			Set("object_ldns", nullableStrSlice(req.ObjectLDNs)).
 			Set("window_start", nullableTime(req.WindowStart)).
 			Set("window_end", nullableTime(req.WindowEnd))
+		if req.Mode == ModeOneshot && req.RequeueTerminal {
+			qb = qb.
+				Set("status", sq.Expr("CASE WHEN status IN ('succeeded','failed') THEN 'pending' ELSE status END")).
+				Set("progress", sq.Expr("CASE WHEN status IN ('succeeded','failed') THEN 0 ELSE progress END"))
+		}
 		if req.ResetCursor {
 			qb = qb.Set("last_fire_at", nullableTime(req.LastFireAt))
 		}
