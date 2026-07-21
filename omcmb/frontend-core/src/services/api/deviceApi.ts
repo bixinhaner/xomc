@@ -481,6 +481,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
   // 在 site_name 未填的设备上显示空白（用户看到"未命名设备"会失去识别能力）。
   // 历史 mapper 中 name 字段已是这个回退，deviceName 字段当时填的空串 —— 现统一。
   const friendlyName = bd.device_name || bd.serial_number;
+  const networkType = toRadioMode(bd.technology);
 
   return {
     id: bd.id,
@@ -488,7 +489,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
     name: friendlyName,
     vendor: bd.manufacturer,
     productClass: bd.product_class,
-    networkType: toRadioMode(bd.technology),
+    networkType,
     deviceModel: bd.model_name,
     region: bd.device_name,
     stationId: bd.site_id,
@@ -590,8 +591,10 @@ function mapBackendDevice(bd: BackendDevice): Device {
     // 全部 inactive / 无 cell 数据 → "inactive"）。之前 T-0162 误以为后端不再透出此列写死 ''，导致 BTS 详情页「小区状态」恒为 '-'。
     cellStatus: bd.cell_status || '',
     opState: bd.op_state || 'unknown',
-    mmeStatus: bd.mme_status || '',
-    amfStatus: bd.amf_status || '',
+    // device_info.mme_status 是后端按制式归一的核心网状态：LTE=MME，NR=AMF。
+    // 这里按制式分流，避免 5G/2G 设备误显示 MME。
+    mmeStatus: networkType === 'eNB' ? bd.mme_status || '' : '',
+    amfStatus: networkType === 'gNB' ? bd.amf_status || bd.mme_status || '' : '',
     rfStatus: bd.rf_status || '',
     pmReportStatus: bd.pm_report_status || '',
     halobFlag: bd.halob_enabled ?? false,

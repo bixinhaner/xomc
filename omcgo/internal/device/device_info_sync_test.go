@@ -627,6 +627,24 @@ func TestInfoSyncer_SyncFromParameters_ComputesQuickFieldsWithoutCarrierMapping(
 	assert.NoError(t, err)
 }
 
+func TestInfoSyncer_SyncFromParameters_ClearsStaleCoreNetworkStatus(t *testing.T) {
+	deviceID := uuid.New()
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+
+	infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, gotDeviceID uuid.UUID, fields map[string]interface{}) error {
+		assert.Equal(t, deviceID, gotDeviceID)
+		mmeStatus, exists := fields["mme_status"]
+		assert.True(t, exists, "mme_status must be explicitly cleared when NR AMF status is absent")
+		assert.Equal(t, "", mmeStatus)
+		return nil
+	}}
+	syncer := NewInfoSyncer(infoRepo, stubDeviceParamRepo{}, nil, registry, zap.NewNop())
+
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechNR)
+	assert.NoError(t, err)
+}
+
 // txPowerCarrier 是带 LTE ReferenceSignalPower→transmit_power 映射的运营商桩，
 // 模拟 cmcc/ctcc adapter 的 GetInfoParamMapping 行为，用于 #362 取值校验。
 type txPowerCarrier struct{ testCarrier }

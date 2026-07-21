@@ -179,6 +179,32 @@ describe('deviceApi.getList — filter → query 映射', () => {
     expect(out.stats.online_count).toBe(1);
   });
 
+  it('按制式映射核心网状态，非本制式字段保持为空', async () => {
+    getMock.mockResolvedValue({
+      data: {
+        items: [
+          backendDevice({ id: 'lte', technology: 'lte', mme_status: 'connected', amf_status: 'wrong', bsc_link_status: 'wrong' }),
+          backendDevice({ id: 'nr', technology: 'nr', mme_status: 'connected' }),
+          backendDevice({ id: 'gsm', technology: 'gsm', mme_status: 'disconnected', bsc_link_status: 'connected' }),
+        ],
+        total: 3,
+        page: 1,
+        page_size: 20,
+        total_pages: 1,
+      },
+    });
+
+    const out = await deviceApi.getList({ page: 1, pageSize: 20 });
+    const [lte, nr, gsm] = out.items;
+    expect(lte.mmeStatus).toBe('connected');
+    expect(lte.amfStatus).toBe('');
+    expect(nr.mmeStatus).toBe('');
+    expect(nr.amfStatus).toBe('connected');
+    expect(gsm.mmeStatus).toBe('');
+    expect(gsm.amfStatus).toBe('');
+    expect(gsm.bscLinkStatus).toBe('connected');
+  });
+
   it('BackendDevice source_type=auto 映射为 Device.sourceType', async () => {
     getMock.mockResolvedValue({
       data: {

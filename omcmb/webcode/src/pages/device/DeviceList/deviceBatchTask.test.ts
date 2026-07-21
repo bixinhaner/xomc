@@ -87,4 +87,16 @@ describe('getDeviceListParamSyncPaths', () => {
     expect(paths).toContain('Device.Services.GsmBTSCellDT.{i}.OpState');
     expect(paths).not.toContain('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.OpState');
   });
+
+  it('按制式下发 MME/AMF 状态参数', () => {
+    const ltePaths = getDeviceListParamSyncPaths(baseDevice);
+    const nrPaths = getDeviceListParamSyncPaths({ ...baseDevice, networkType: 'gNB' });
+
+    expect(ltePaths).toContain('Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmeStatus');
+    expect(ltePaths).toContain('Device.Services.FAPService.{i}.CellConfig.LTE.EPC.MmePoolConfigParam.{i}.MME1Status');
+    expect(ltePaths).toContain('Device.Services.FAPService.{i}.CellConfig.LTE.MmePoolConfigParam.{i}.MME1Status');
+    expect(ltePaths).not.toContain('Device.Services.FAPService.1.AmfsStatus');
+    expect(nrPaths).toContain('Device.Services.FAPService.1.AmfsStatus');
+    expect(nrPaths).not.toContain('Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmeStatus');
+  });
 });

@@ -60,6 +60,7 @@ import { buildDefaultUfteTaskName } from '@/pages/transfer/shared';
 import dayjs from 'dayjs';
 import { buildBatchTaskTypeMap, batchActionHasDetail, removeParamSyncOptimisticDeviceId } from './deviceBatchTask';
 import { getDeviceListParamSyncPaths } from './deviceListParamSync';
+import { amfStatusForDevice, bscLinkStatusForDevice, mmeStatusForDevice } from './deviceCoreNetworkStatus';
 import { shouldShowLocationSyncIndicator } from './deviceGpsSyncIndicator';
 import GpsSyncConfirmModal from './GpsSyncConfirmModal';
 import GpsSyncTrigger from './GpsSyncTrigger';
@@ -1870,7 +1871,23 @@ export default function DeviceList() {
         dataIndex: 'mmeStatus',
         width: 130,
         group: 'common',
-        render: (_val, record) => record.mmeStatus || '-',
+        render: (_val, record) => mmeStatusForDevice(record) || '-',
+      },
+      {
+        key: 'amfStatus',
+        title: t('device.amfStatus'),
+        dataIndex: 'amfStatus',
+        width: 130,
+        group: 'common',
+        render: (_val, record) => amfStatusForDevice(record) || '-',
+      },
+      {
+        key: 'bscLinkStatus',
+        title: t('device.bscLinkStatus'),
+        dataIndex: 'bscLinkStatus',
+        width: 140,
+        group: 'common',
+        render: (_val, record) => bscLinkStatusForDevice(record) || '-',
       },
       {
         key: 'ueCount',
