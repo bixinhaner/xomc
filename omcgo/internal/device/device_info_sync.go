@@ -141,7 +141,7 @@ var universalInformInstanceMappings = []struct {
 	// Band（小区级）
 	{column: "band", templates: []string{
 		"Device.Services.GsmBTSCellDT.{g}.GsmBtsBand",
-		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.RAN.RF.FreqBandIndicator",
+		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.RAN.PHY.FrequencyInfoDLSIB.MultiFrequencyBandListNRSIB.{b}.FreqBandIndicatorNR",
 		"Device.Services.FAPService.{f}.CellConfig.LTE.RAN.RF.FreqBandIndicator",
 	}},
 	// TAC（小区级，NR 走 CN.TA 子树，LTE 走 EPC.TAC）

@@ -580,7 +580,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
     // T-XXX (Phase 5)：transmit_power 是后端实际字段 (NUMERIC 转 number)
     // 部分设备用 -1 表示未知/未上报，列表不应把占位值展示成真实 Tx Power。
     // tx_power 兼容旧字段名；fmtDuration 等渲染器接受 string，转字符串展示。
-    txPower: bd.transmit_power != null && bd.transmit_power >= 0 ? String(bd.transmit_power) : (bd.tx_power || ''),
+    txPower: bd.transmit_power != null && bd.transmit_power !== -1 ? String(bd.transmit_power) : (bd.tx_power || ''),
     band: bd.band || '',
     lac: bd.lac || '',
     arfcn: bd.arfcn || '',

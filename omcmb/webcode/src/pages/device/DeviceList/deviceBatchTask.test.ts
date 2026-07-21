@@ -99,6 +99,32 @@ describe('getDeviceListParamSyncPaths', () => {
     expect(paths).not.toContain('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.OpState');
   });
 
+  it('按制式下发实际发射功率参数且不把能力上限当成当前功率', () => {
+    const ltePaths = getDeviceListParamSyncPaths(baseDevice);
+    const nrPaths = getDeviceListParamSyncPaths({ ...baseDevice, networkType: 'gNB' });
+    const gsmPaths = getDeviceListParamSyncPaths({ ...baseDevice, networkType: 'GSM' });
+
+    expect(ltePaths).toContain('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ReferenceSignalPower');
+    expect(ltePaths).toContain('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.X_COM_MaxTxPowerExpanded');
+    expect(nrPaths).toContain('Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PowerModify');
+    expect(gsmPaths).toContain('Device.DeviceInfo.GSM.BtsRfPower');
+    expect(gsmPaths).toContain('Device.Services.GsmBTSCellDT.{i}.GsmBtsRFPower');
+
+    for (const paths of [ltePaths, nrPaths, gsmPaths]) {
+      expect(paths).not.toContain('Device.Services.FAPService.{i}.CellConfig.Capabilities.MaxTxPower');
+      expect(paths).not.toContain('Device.Services.FAPService.{i}.Capabilities.MaxTxPower');
+    }
+  });
+
+  it('BaiBNQ Band 使用产品模型中的 FreqBandIndicatorNR 路径', () => {
+    const paths = getDeviceListParamSyncPaths({ ...baseDevice, networkType: 'gNB' });
+
+    expect(paths).toContain(
+      'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.MultiFrequencyBandListNRSIB.{i}.FreqBandIndicatorNR',
+    );
+    expect(paths).not.toContain('Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RF.FreqBandIndicator');
+  });
+
   it('按制式下发 MME/AMF 状态参数', () => {
     const ltePaths = getDeviceListParamSyncPaths(baseDevice);
     const nrPaths = getDeviceListParamSyncPaths({ ...baseDevice, networkType: 'gNB' });

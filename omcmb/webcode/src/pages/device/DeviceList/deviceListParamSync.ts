@@ -83,10 +83,30 @@ const DEVICE_LIST_SYNC_PARAMS: DeviceListSyncParam[] = [
   { key: 'gpsSatelliteCount', scope: 'common', paths: ['Device.FAP.GPS.NumberOfSatellites'] },
   { key: 'pci', scope: 'common', paths: ['Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PhyCellID', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RF.PhyCellID'] },
   { key: 'tac', scope: 'common', paths: ['Device.Services.FAPService.{i}.CellConfig.LTE.EPC.TAC', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.CN.TA.{i}.TAC'] },
-  { key: 'band', scope: 'common', paths: ['Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.FreqBandIndicator', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RF.FreqBandIndicator', 'Device.Services.GsmBTSCellDT.{i}.GsmBtsBand'] },
+  { key: 'band', scope: 'common', paths: ['Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.FreqBandIndicator', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.MultiFrequencyBandListNRSIB.{i}.FreqBandIndicatorNR', 'Device.Services.GsmBTSCellDT.{i}.GsmBtsBand'] },
   { key: 'dlEarfcn', scope: 'common', paths: ['Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNDL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.EARFCNDL', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RF.NRARFCNDL'] },
   { key: 'ulEarfcn', scope: 'common', paths: ['Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNUL', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RF.NRARFCNUL'] },
-  { key: 'txPower', scope: 'common', paths: ['Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ReferenceSignalPower', 'Device.Services.FAPService.{i}.CellConfig.Capabilities.MaxTxPower'] },
+  {
+    key: 'txPower',
+    scope: 'eNB',
+    paths: [
+      'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.X_COM_MaxTxPowerExpanded',
+      'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ReferenceSignalPower',
+    ],
+  },
+  {
+    key: 'txPower',
+    scope: 'gNB',
+    paths: ['Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PowerModify'],
+  },
+  {
+    key: 'txPower',
+    scope: 'GSM',
+    paths: [
+      'Device.DeviceInfo.GSM.BtsRfPower',
+      'Device.Services.GsmBTSCellDT.{i}.GsmBtsRFPower',
+    ],
+  },
   { key: 'adminState', scope: 'common', paths: ['Device.DeviceInfo.FAP_adminstate', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.CellEnable.AdminState', 'Device.Services.FAPService.{i}.FAPControl.LTE.AdminState'] },
   { key: 'ipsecAddr', scope: 'common', paths: ['Device.FAP.Ipsec.{i}.TUNNEL_GATEWAY'] },
   { key: 'siteName', scope: 'eNB', paths: ['Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.UserLabel'] },

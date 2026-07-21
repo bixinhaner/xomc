@@ -842,8 +842,8 @@ func TestUniversalInformMapping_NoTransmitPowerOverride(t *testing.T) {
 // 覆盖；删除任一条会令 BaiBNQ 等 NR 设备列表对应列长期空白。
 func TestUniversalInformMapping_NRBandAndULEARFCN(t *testing.T) {
 	assert.Contains(t, instanceTemplatesFor(t, "band"),
-		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.RAN.RF.FreqBandIndicator",
-		"NR FreqBandIndicator 必须在 band 列的实例聚合模板中")
+		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.RAN.PHY.FrequencyInfoDLSIB.MultiFrequencyBandListNRSIB.{b}.FreqBandIndicatorNR",
+		"BaiBNQ FreqBandIndicatorNR 必须在 band 列的实例聚合模板中")
 	assert.Contains(t, instanceTemplatesFor(t, "freq_point"),
 		"Device.Services.FAPService.{f}.CellConfig.LTE.RAN.RF.EARFCNDL",
 		"LTE RAN.RF.EARFCNDL 必须在 freq_point 列的实例聚合模板中，避免列表与详情页频点路径分叉")

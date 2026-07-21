@@ -271,6 +271,21 @@ describe('deviceApi.getList — filter → query 映射', () => {
     expect(out.items[0].txPower).toBe('');
   });
 
+  it('保留 LTE ReferenceSignalPower 的负 dBm 实际值', async () => {
+    getMock.mockResolvedValue({
+      data: {
+        items: [backendDevice({ transmit_power: -21, tx_power: '' })],
+        total: 1,
+        page: 1,
+        page_size: 20,
+        total_pages: 1,
+      },
+    });
+
+    const out = await deviceApi.getList({ page: 1, pageSize: 20 });
+    expect(out.items[0].txPower).toBe('-21');
+  });
+
   it('stats 缺省时用当前页 items 估算（向下兼容兜底）', async () => {
     getMock.mockResolvedValue({
       data: {
