@@ -80,14 +80,18 @@ describe('getDeviceListParamSyncPaths', () => {
     expect(paths).not.toContain('Device.FAP.GPS.LockedLatitude');
   });
 
-  it('下发列表 rfStatus 后端派生实际读取的 RF 参数', () => {
-    const paths = getDeviceListParamSyncPaths(baseDevice);
+  it('RF 状态同步使用产品模型可翻译的标准路径', () => {
+    const ltePaths = getDeviceListParamSyncPaths(baseDevice);
+    const nrPaths = getDeviceListParamSyncPaths({ ...baseDevice, networkType: 'gNB' });
+    const gsmPaths = getDeviceListParamSyncPaths({ ...baseDevice, networkType: 'GSM' });
 
-    expect(paths).toContain('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.X_COM_RadioEnable');
-    expect(paths).toContain('Device.Services.FAPService.{i}.CellConfig.NR.RAN.RF.X_COM_RadioEnable');
-    expect(paths).toContain('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.RFTxStatus');
-    expect(paths).toContain('Device.Services.FAPService.{i}.CellConfig.NR.RAN.RF.RFTxStatus');
-    expect(paths).not.toContain('Device.Services.FAPControl.LTE.RFTxStatus');
+    expect(ltePaths).toContain('Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus');
+    expect(ltePaths).toContain('Device.DeviceInfo.SAS.RadioEnable');
+    expect(nrPaths).toContain('Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.rftxEnable');
+    expect(nrPaths).toContain('Device.DeviceInfo.SAS.RadioEnable');
+    expect(nrPaths).toContain('Device.DeviceInfo.CellConfig.{i}.SAS.RadioEnable');
+    expect(gsmPaths).toContain('Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus');
+    expect(gsmPaths).toContain('Device.Services.GsmBTSCellDT.{i}.RfState');
   });
 
   it('下发列表 opState 后端派生实际读取的 LTE/NR/GSM 参数', () => {

@@ -562,12 +562,70 @@ func TestCalcRFStatus(t *testing.T) {
 			params: map[string]string{
 				"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.RFTxStatus": "0",
 			},
-			want: "error",
+			want: "off",
+		},
+		{
+			name: "standard LTE FAPControl status",
+			params: map[string]string{
+				"Device.Services.FAPService.2.FAPControl.LTE.RFTxStatus": "true",
+			},
+			want: "on",
+		},
+		{
+			name: "standard NR cell status",
+			params: map[string]string{
+				"Device.Services.FAPService.1.CellConfig.2.NR.RAN.rftxEnable": "1",
+			},
+			want: "on",
+		},
+		{
+			name: "BaiBNQ SAS radio enable",
+			params: map[string]string{
+				"Device.DeviceInfo.SAS.RadioEnable": "true",
+			},
+			want: "on",
+		},
+		{
+			name: "BaiBNQ cell SAS radio enable",
+			params: map[string]string{
+				"Device.DeviceInfo.CellConfig.2.SAS.RadioEnable": "true",
+			},
+			want: "on",
+		},
+		{
+			name: "unknown direct status falls back to valid SAS status",
+			params: map[string]string{
+				"Device.Services.FAPService.1.CellConfig.1.NR.RAN.rftxEnable": "not-reported",
+				"Device.DeviceInfo.SAS.RadioEnable":                           "true",
+			},
+			want: "on",
+		},
+		{
+			name: "GSM BTS RF state",
+			params: map[string]string{
+				"Device.Services.GsmBTSCellDT.1.RfState": "1",
+			},
+			want: "on",
+		},
+		{
+			name: "multi cell NR status",
+			params: map[string]string{
+				"Device.Services.FAPService.1.CellConfig.2.NR.RAN.rftxEnable": "0",
+				"Device.Services.FAPService.1.CellConfig.1.NR.RAN.rftxEnable": "1",
+			},
+			want: "on,off",
+		},
+		{
+			name: "unknown RF value",
+			params: map[string]string{
+				"Device.DeviceInfo.SAS.RadioEnable": "not-reported",
+			},
+			want: "",
 		},
 		{
 			name:   "empty params",
 			params: map[string]string{},
-			want:   "off",
+			want:   "",
 		},
 	}
 	for _, tt := range tests {

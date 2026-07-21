@@ -2,6 +2,8 @@ package device
 
 import (
 	"fmt"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -248,32 +250,84 @@ func CalcGPSStatus(params map[string]string) string {
 	}
 }
 
+var rfStatusPathFamilies = []*regexp.Regexp{
+	// 产品模型会把 BaiBNQ 私有 rftxEnable 和 LTE 私有 RadioEnable
+	// 归一为以下标准路径，优先读取小区级直接状态。
+	regexp.MustCompile(`^Device\.Services\.FAPService\.\d+\.CellConfig\.\d+\.NR\.RAN\.rftxEnable$`),
+	regexp.MustCompile(`^Device\.DeviceInfo\.CellConfig\.\d+\.SAS\.RadioEnable$`),
+	regexp.MustCompile(`^Device\.Services\.FAPService\.\d+\.FAPControl\.LTE\.RFTxStatus$`),
+	regexp.MustCompile(`^Device\.Services\.FAPService\.\d+\.CellConfig\.(?:LTE|NR)\.RAN\.RF\.X_COM_RadioEnable$`),
+	regexp.MustCompile(`^Device\.Services\.GsmBTSCellDT\.\d+\.RfState$`),
+	regexp.MustCompile(`^Device\.DeviceInfo\.SAS\.RadioEnable\d*$`),
+	regexp.MustCompile(`^Device\.DeviceInfo\.(?:EU\.\d+\.)?RU\.\d+\.RFTxStatus$`),
+	// 兼容历史已落库的非标准 RAN.RF 路径。
+	regexp.MustCompile(`^Device\.Services\.FAPService\.\d+\.CellConfig\.(?:LTE|NR)\.RAN\.RF\.RFTxStatus$`),
+}
+
+var rfStatusPathIndex = regexp.MustCompile(`\.(\d+)(?:\.|$)`)
+
 // CalcRFStatus computes the rf_status quick-query column from device_parameters.
-// RF status is driven by RF RadioEnable; RFTxStatus is only a legacy fallback.
+// It preserves three distinct states: explicit on, explicit off/error, and unknown.
+// Missing or unrecognized parameters must stay empty instead of being fabricated as off.
 func CalcRFStatus(params map[string]string) string {
-	rfTx := params["Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.RFTxStatus"]
-	if rfTx == "" {
-		rfTx = params["Device.Services.FAPService.1.CellConfig.NR.RAN.RF.RFTxStatus"]
-	}
-	radioEnable := params["Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable"]
-	if radioEnable == "" {
-		radioEnable = params["Device.Services.FAPService.1.CellConfig.NR.RAN.RF.X_COM_RadioEnable"]
-	}
-
-	if radioEnable != "" {
-		if isTrueValue(radioEnable) {
-			return "on"
+	for _, family := range rfStatusPathFamilies {
+		paths := make([]string, 0)
+		for path := range params {
+			if family.MatchString(path) {
+				paths = append(paths, path)
+			}
 		}
-		return "off"
-	}
+		if len(paths) == 0 {
+			continue
+		}
 
-	if isTrueValue(rfTx) || rfTx == "1" {
-		return "on"
+		sort.SliceStable(paths, func(i, j int) bool {
+			return lessRFStatusPath(paths[i], paths[j])
+		})
+		statuses := make([]string, 0, len(paths))
+		for _, path := range paths {
+			if status, ok := normalizeRFStatusValue(params[path]); ok {
+				statuses = append(statuses, status)
+			}
+		}
+		if len(statuses) > 0 {
+			return strings.Join(statuses, ",")
+		}
 	}
-	if rfTx == "0" || strings.EqualFold(rfTx, "false") {
-		return "error"
+	return ""
+}
+
+func normalizeRFStatusValue(value string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "3", "true", "on", "enabled":
+		return "on", true
+	case "0", "2", "false", "off", "disabled":
+		return "off", true
+	case "error", "abnormal", "failed", "fault":
+		return "error", true
+	default:
+		return "", false
 	}
-	return "off"
+}
+
+func lessRFStatusPath(left, right string) bool {
+	leftMatches := rfStatusPathIndex.FindAllStringSubmatch(left, -1)
+	rightMatches := rfStatusPathIndex.FindAllStringSubmatch(right, -1)
+	limit := len(leftMatches)
+	if len(rightMatches) < limit {
+		limit = len(rightMatches)
+	}
+	for i := 0; i < limit; i++ {
+		leftIndex, _ := strconv.Atoi(leftMatches[i][1])
+		rightIndex, _ := strconv.Atoi(rightMatches[i][1])
+		if leftIndex != rightIndex {
+			return leftIndex < rightIndex
+		}
+	}
+	if len(leftMatches) != len(rightMatches) {
+		return len(leftMatches) < len(rightMatches)
+	}
+	return left < right
 }
 
 // CalcNumOfCells extracts the number of cells (carriers) from device_parameters.
