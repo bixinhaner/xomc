@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 // CalcCellStatus computes the list-page activation summary from device_parameters.
@@ -67,12 +69,14 @@ func CalcOpState(params map[string]string) string {
 //
 // Priority:
 //  1. LTE strict path `Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus`
-//  2. Legacy fallback: count `...MmePoolConfigParam.{1-16}.MME1Status`
+//  2. For each pool instance, prefer the EPC path and fall back to the legacy
+//     LTE path `...MmePoolConfigParam.{1-16}.MME1Status` when EPC is empty.
 //
 // Returns:
 //
-//	"disconnected" — no active MME
-//	"partial"      — 1 active MME (legacy pool fallback only)
+//	""             — no MME status observed
+//	"disconnected" — observed MME statuses are all inactive
+//	"partial"      — 1 active MME
 //	"connected"    — 2+ active MMEs / gateway indicates connected
 func CalcMMEStatus(params map[string]string) string {
 	if gatewayStatus := strings.TrimSpace(params["Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus"]); gatewayStatus != "" {
@@ -90,16 +94,25 @@ func CalcMMEStatus(params map[string]string) string {
 	}
 
 	activeCount := 0
+	hasStatus := false
 	for i := 1; i <= 16; i++ {
-		prefix := fmt.Sprintf("Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.%d.", i)
-		if params[prefix+"MME1Status"] == "1" {
+		epCPrefix := fmt.Sprintf("Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.%d.", i)
+		status := strings.TrimSpace(params[epCPrefix+"MME1Status"])
+		if status == "" {
+			legacyPrefix := fmt.Sprintf("Device.Services.FAPService.1.CellConfig.LTE.MmePoolConfigParam.%d.", i)
+			status = strings.TrimSpace(params[legacyPrefix+"MME1Status"])
+		}
+		if status == "" {
+			continue
+		}
+
+		hasStatus = true
+		if status == "1" {
 			activeCount++
 		}
-		// Also check NR path
-		nrPrefix := fmt.Sprintf("Device.Services.FAPService.1.CellConfig.NR.Core.MmePoolConfigParam.%d.", i)
-		if params[nrPrefix+"MME1Status"] == "1" {
-			activeCount++
-		}
+	}
+	if !hasStatus {
+		return ""
 	}
 	switch {
 	case activeCount == 0:
@@ -108,6 +121,19 @@ func CalcMMEStatus(params map[string]string) string {
 		return "partial"
 	default:
 		return "connected"
+	}
+}
+
+// CalcCoreNetworkStatus computes the technology-appropriate core-network
+// quick-query status. LTE uses MME paths; NR uses the AMF status report.
+func CalcCoreNetworkStatus(params map[string]string, tech model.Technology) string {
+	switch tech {
+	case model.TechLTE:
+		return CalcMMEStatus(params)
+	case model.TechNR:
+		return normalizeAMFStatus(params[amfsStatusPath])
+	default:
+		return ""
 	}
 }
 
