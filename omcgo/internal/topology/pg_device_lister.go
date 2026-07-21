@@ -63,7 +63,7 @@ func NewPgDeviceLister(pool *pgxpool.Pool, logger *zap.Logger) *PgDeviceLister {
 // ListAllForRuleEval 返回所有可被规则匹配的设备的最小信息集。
 //
 // SQL 字段来源：
-//   - Name = COALESCE(NULLIF(site_name,''), serial_number)：
+//   - Name = COALESCE(NULLIF(site_name,”), serial_number)：
 //     site_name 非空 → 用 site_name；site_name 空/NULL → 回落 SN。与前端 mapper
 //     friendlyName=device_name||serial_number 完全对齐，保证"UI 上看到什么、
 //     '设备名称' 匹配模式就拿什么比对"——避免 site_name 空的设备被悄悄排除。
@@ -113,8 +113,8 @@ func (l *PgDeviceLister) ListAllForRuleEval(ctx context.Context) ([]DeviceForMat
 	return devices, nil
 }
 
-// ListForRuleEval 只返回规则源组中的有效设备。内置“未分组设备”节点表示
-// device_group_members 中不存在记录，而不是一条真实 membership。
+// ListForRuleEval 只返回规则源组中的有效设备。内置默认 L2 源组同时覆盖两类
+// 存量形态：没有 membership 的旧未分组设备，以及已显式归属默认组的新设备。
 func (l *PgDeviceLister) ListForRuleEval(ctx context.Context, sourceGroupID uuid.UUID) ([]DeviceForMatch, error) {
 	const baseSQL = `
 		SELECT d.id,
@@ -131,8 +131,7 @@ func (l *PgDeviceLister) ListForRuleEval(ctx context.Context, sourceGroupID uuid
 	query := baseSQL + ` AND dgm.group_id = $1`
 	args := []any{sourceGroupID}
 	if sourceGroupID.String() == global.DefaultLevel2GroupID {
-		query = baseSQL + ` AND dgm.device_id IS NULL`
-		args = nil
+		query = baseSQL + ` AND (dgm.device_id IS NULL OR dgm.group_id = $1)`
 	}
 
 	rows, err := l.pool.Query(ctx, query, args...)

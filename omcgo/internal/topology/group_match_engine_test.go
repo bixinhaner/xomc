@@ -12,6 +12,7 @@ import (
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap/zaptest"
 
+	"github.com/omcgo/omcgo/global"
 	"github.com/omcgo/omcgo/internal/core/event"
 )
 
@@ -305,6 +306,34 @@ func TestMatchDevice_IgnoresRuleWhoseSourceIsNoLongerL2(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Nil(t, result)
+}
+
+func TestMatchDevice_DefaultSourceMatchesExplicitDefaultMembership(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	repo := NewMockDeviceGroupRepository(ctrl)
+	matcher := NewDeviceMatcher(repo, nil, zaptest.NewLogger(t))
+
+	defaultGroupID := uuid.MustParse(global.DefaultLevel2GroupID)
+	targetID := uuid.New()
+	repo.EXPECT().GetTreeWithCounts(gomock.Any()).Return([]DeviceGroup{
+		{ID: defaultGroupID, Level: 2, Name: "default"},
+		{ID: targetID, Level: 2, Name: "target",
+			SourceGroupID: &defaultGroupID,
+			MatchingMode:  MatchingModeSerialNumber,
+			SerialNumberList: []string{
+				"SN-001",
+			},
+		},
+	}, nil)
+
+	result, err := matcher.MatchDevice(context.Background(), MatchRequest{
+		DeviceID: uuid.New(), SerialNumber: "SN-001", CurrentGroupID: &defaultGroupID,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, targetID, result.GroupID)
+	assert.Equal(t, defaultGroupID, result.SourceGroupID)
 }
 
 func TestHeartbeatAssigner_UsesCurrentGroupFromLister(t *testing.T) {

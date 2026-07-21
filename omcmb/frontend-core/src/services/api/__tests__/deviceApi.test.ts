@@ -445,6 +445,41 @@ describe('deviceApi.getGroups', () => {
     expect(group?.serialNumberList).toEqual(['SN-001', 'SN-002']);
     expect(out.stats.totalDevices).toBe(6);
   });
+
+  it('将省略 parent_id 的根分组归一为 null，避免被当成二级源分组', async () => {
+    getMock.mockResolvedValue({
+      data: {
+        items: [
+          {
+            id: 'root-group',
+            name: '默认设备组',
+            device_count: 0,
+            description: '',
+            remark: '',
+            is_default: true,
+            level: 1,
+            children: [
+              {
+                id: UNASSIGNED_GROUP_ID,
+                name: '默认设备组',
+                parent_id: 'root-group',
+                device_count: 6,
+                description: '',
+                remark: '',
+                is_default: true,
+                level: 2,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const out = await deviceApi.getGroups();
+
+    expect(out.groups.find((item) => item.id === 'root-group')?.parentId).toBeNull();
+    expect(out.groups.find((item) => item.id === UNASSIGNED_GROUP_ID)?.parentId).toBe('root-group');
+  });
 });
 
 describe('deviceApi.getStats / getProductClasses — 端点透传', () => {

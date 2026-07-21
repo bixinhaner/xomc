@@ -446,8 +446,7 @@ export function useGroupActions(deps: {
           serial_number_list,
         },
       });
-      // 改匹配方式会触发后端异步 fireGroupMatch 重新入组，设备数据非即时刷新，
-      // 提示用户稍后再刷新页面（区别于一级编辑的通用「成功」）。
+      // 后端异步 fireGroupMatch 可能命中 0 台，提示只确认规则保存和匹配触发。
       void message.success(t('device.group.editMatchingSuccess'));
       setEditLevel2DrawerOpen(false);
       void refetchGroups();

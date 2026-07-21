@@ -1440,7 +1440,7 @@ const messages: Record<string, string> = {
   // device group save error prompts (biz_code 1107 = ErrCodeGroupNameDuplicate)
   'device.group.saveFailed':       'Failed to save group',
   'device.group.nameDuplicate':    'A group with the same name already exists under this parent. Please use a different name.',
-  'device.group.editMatchingSuccess': 'Success. Device data is updating asynchronously, please refresh the page again later.',
+  'device.group.editMatchingSuccess': 'Rule saved. Background matching has started; matched devices will be assigned automatically. Refresh later to view results.',
   'device.childGroupName':      'Child Group Name',
   'device.groupNameLabel':      'Group Name',
   'device.superiorGroup':       'Parent Group',

@@ -942,7 +942,7 @@ export const deviceApi = {
           nameI18n: g.name_i18n,
           descriptionI18n: g.description_i18n,
           remarkI18n: g.remark_i18n,
-          parentId: g.parent_id,
+          parentId: g.parent_id ?? null,
           deviceCount: g.device_count ?? 0,
           description: g.remark || g.description || '',
           builtIn: g.is_default ? 1 : 0,
