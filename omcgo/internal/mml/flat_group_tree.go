@@ -282,9 +282,11 @@ ORDER BY g.chapter_code,
 	return out, nil
 }
 
-// chapterMetadata: 18 个 SA-SR 章节的中文展示名，与 spec doc 主表对齐。
-// 来源：omcgo/规范/移动/南向数据模型/cmcc-tdlte-southbound-data-model-v2.3.md
-// "参数管理类别分组清单（派生）" 章节主表。
+// chapterMetadata: MML 扁平树章节中文展示名。
+//
+// 命名口径按 CMCC TD-LTE V2.3 与 5G NR v1.9.4 南向数据模型目录对齐：
+// LTE/NR 共有的业务域使用统一分组名称；单制式独占的业务域使用对应南向
+// 规范目录名称。
 var chapterMetadata = map[string]struct {
 	ObjRoot string
 	NameZH  string
@@ -296,6 +298,9 @@ var chapterMetadata = map[string]struct {
 	"SE":    {"DeviceLogMgmt", "日志参数管理"},
 	"SF":    {"Services.FAPService", "小区服务参数管理"},
 	"SF_NR": {"Services.FAPService.{i}.FAPControl.NR", "基站配置参数管理"},
+	"SH_NR": {"Services.FAPService.{i}.FAPControl.LocalBreakout", "本地分流规则"},
+	"SI_NR": {"Services.FAPService.{i}.Capabilities.NR", "基站能力参数管理"},
+	"ST_NR": {"FAP.SCMgmt", "软采规则"},
 	"SG":    {"Services.FAPService.{i}.SCTP.Transport", "SCTP参数管理"},
 	"SH":    {"Services.FAPService.{i}.CellConfig.LTE.RAN", "RAN协议栈参数"},
 	"SI":    {"Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList", "邻区参数管理"},

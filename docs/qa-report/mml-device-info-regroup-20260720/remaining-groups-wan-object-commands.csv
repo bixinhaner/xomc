@@ -1,0 +1,4 @@
+chapter_code,group_name,subgroup,add_command,rmv_command,target_object
+SL,WAN口配置参数管理,WAN口配置参数管理,ADD SL_SUB_01,RMV SL_SUB_01,Device.Ethernet.Interface.
+SL,WAN口配置参数管理,vlan子接口配置参数管理,ADD SL_SUB_02,RMV SL_SUB_02,Device.Ethernet.Interface.{i}.VlanInterface.
+SL,WAN口配置参数管理,本地路由配置参数管理,ADD SL_SUB_03,RMV SL_SUB_03,Device.Ethernet.IpRoute.
