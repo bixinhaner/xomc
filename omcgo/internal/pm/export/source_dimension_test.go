@@ -10,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/omcgo/omcgo/internal/core/jsonx"
 )
 
 // ── 轻量 pgx.Rows / PgQuerier stub（adhocSource 按维度映射行的取证用）──────────
@@ -38,6 +40,8 @@ func (f *adhocFakeRows) Scan(dest ...any) error {
 			}
 		case *float64:
 			*p = row[j].(float64)
+		case *jsonx.Float:
+			*p = jsonx.Float(row[j].(float64))
 		case *time.Time:
 			*p = row[j].(time.Time)
 		}

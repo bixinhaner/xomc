@@ -257,15 +257,15 @@ func TestRunner_BuildSource_KpiQueryAutoDiscoversObjectLDNsForSkeletonExport(t *
 	require.True(t, ok)
 	assert.Equal(t, []string{"Cellid=1", "Cellid=2"}, filled.req.ObjectLDNs)
 
-	aggregateSrc, ok := filled.src.(*dashboardAggregateSource)
+	deviceSrc, ok := filled.src.(*dashboardDeviceSource)
 	require.True(t, ok)
-	assert.Equal(t, []string{"Cellid=1", "Cellid=2"}, aggregateSrc.objectLDNs)
+	assert.Equal(t, []string{"Cellid=1", "Cellid=2"}, deviceSrc.objectLDNs)
 	require.NotEmpty(t, metricDB.queries)
 	assert.Contains(t, metricDB.queries[0].sql, "SELECT DISTINCT object_ldn")
 	assert.NotContains(t, metricDB.queries[0].sql, "metric_path", "当前指标完全没数据时也要能发现对象全集")
 }
 
-func TestRunner_BuildSource_KpiQueryDeviceExportRequiresAggregator(t *testing.T) {
+func TestRunner_BuildSource_DeviceKPIExportUsesStoredResultSource(t *testing.T) {
 	start := time.Date(2026, 7, 14, 7, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
 	params, err := json.Marshal(DashboardParams{
@@ -283,13 +283,72 @@ func TestRunner_BuildSource_KpiQueryDeviceExportRequiresAggregator(t *testing.T)
 	}}
 	runner := NewRunner(RunnerDeps{MetricDB: metricDB})
 
-	_, _, _, err = runner.buildSource(context.Background(), &Task{
+	src, _, _, err := runner.buildSource(context.Background(), &Task{
 		ID:         uuid.New(),
 		SourceType: SourceDashboard,
 		Params:     params,
 	})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "aggregator not wired")
+	require.NoError(t, err)
+	_, ok := src.(*dashboardDeviceSource)
+	require.True(t, ok)
+}
+
+func TestRunner_BuildSource_MixedKpiCounterClearsSingleMetricTypeFilter(t *testing.T) {
+	start := time.Date(2026, 7, 14, 7, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	params, err := json.Marshal(DashboardParams{
+		Granularity: "hourly",
+		Dimension:   "device",
+		DeviceSNs:   []string{"SN1"},
+		MetricPaths: []string{"KGSM0101", "CGSM0010001"},
+		MetricType:  "kpi",
+		StartTime:   start.Format(time.RFC3339),
+		EndTime:     end.Format(time.RFC3339),
+	})
+	require.NoError(t, err)
+
+	metricDB := &recordingExportQuerier{results: []pgx.Rows{
+		&adhocFakeRows{},
+	}}
+	runner := NewRunner(RunnerDeps{MetricDB: metricDB})
+
+	src, _, _, err := runner.buildSource(context.Background(), &Task{
+		ID:         uuid.New(),
+		SourceType: SourceDeviceView,
+		Params:     params,
+	})
+	require.NoError(t, err)
+	deviceSrc, ok := src.(*dashboardDeviceSource)
+	require.True(t, ok)
+	assert.Nil(t, deviceSrc.req.MetricType)
+}
+
+func TestRunner_BuildSource_DeviceDailyKPIExportUsesStoredOffsetSource(t *testing.T) {
+	start := time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+	params, err := json.Marshal(DashboardParams{
+		Granularity: "daily",
+		Dimension:   "device",
+		DeviceSNs:   []string{"SN1"},
+		MetricPaths: []string{"KGSM0101"},
+		StartTime:   start.Format(time.RFC3339),
+		EndTime:     end.Format(time.RFC3339),
+	})
+	require.NoError(t, err)
+
+	metricDB := &recordingExportQuerier{results: []pgx.Rows{
+		&adhocFakeRows{},
+	}}
+	runner := NewRunner(RunnerDeps{MetricDB: metricDB})
+
+	src, _, _, err := runner.buildSource(context.Background(), &Task{
+		ID:         uuid.New(),
+		SourceType: SourceDashboard,
+		Params:     params,
+	})
+	require.NoError(t, err)
+	_, ok := src.(*dashboardDeviceOffsetSource)
+	require.True(t, ok)
 }
 
 func TestRunner_BuildSource_DeviceViewUsesDashboardLikeDeviceExport(t *testing.T) {

@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import dayjs from 'dayjs';
 import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
 import type { DashboardExportSelection } from '@core/utils/kpiExportParams';
 import {
   buildDeviceViewExportInput,
   isDeviceViewDeviceSelectionOverLimit,
   isDeviceViewMetricSelectionOverLimit,
+  toDeviceViewRequestISOString,
 } from './DeviceListPane';
 
 const selection: DashboardExportSelection = {
@@ -58,5 +60,14 @@ describe('isDeviceViewMetricSelectionOverLimit', () => {
     expect(isDeviceViewMetricSelectionOverLimit(
       Array.from({ length: PM_QUERY_SELECTION_LIMIT + 1 }, (_, index) => `K${index + 1}`),
     )).toBe(true);
+  });
+});
+
+describe('toDeviceViewRequestISOString', () => {
+  it('设备性能查看提交给后端的时间不携带 DatePicker 隐藏毫秒', () => {
+    expect(toDeviceViewRequestISOString(dayjs('2026-07-21T00:00:00.300+08:00')))
+      .toBe('2026-07-20T16:00:00.000Z');
+    expect(toDeviceViewRequestISOString(dayjs('2026-07-21T01:00:00.300+08:00')))
+      .toBe('2026-07-20T17:00:00.000Z');
   });
 });

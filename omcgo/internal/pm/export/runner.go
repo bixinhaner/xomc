@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,7 +14,6 @@ import (
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
 	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
-	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
 // taskRepo 是 Runner 操作导出任务表的契约（载任务 + 三态切换），便于单测 stub。
@@ -268,6 +266,7 @@ func (r *Runner) buildDashboardLikeSource(ctx context.Context, task *Task, loc a
 	if err != nil {
 		return nil, nil, csvLayout{}, err
 	}
+	req = normalizeStoredResultExportRequest(req)
 	dim := req.Dimension
 	if dim == "" {
 		dim = aggregator.DimensionDevice
@@ -294,10 +293,15 @@ func (r *Runner) buildDashboardLikeSource(ctx context.Context, task *Task, loc a
 	}
 	cols := newNameResolver(r.metricDB, loc).resolveColumns(ctx, keys)
 
-	// device 维度且表含行级 id → (time,id) keyset 直查；KPI 查询必须走 aggregator，
-	// 以复用 avg/sum/max/min 从 15min KPI 点直接聚合、pct 走公式的同一套口径。
-	if dim == aggregator.DimensionDevice && tableHasIDColumn(table) && !usesKPIExportQueryPath(task.SourceType, req) {
-		src := RowSource(newDashboardDeviceSource(r.metricDB, table, req, objectLDNs))
+	// 普通 device 导出只读取已经落库的 KPI/counter 结果，不进入 aggregator.Query 的
+	// KPI 现场重算路径。含行级 id 的表用 (time,id) keyset；无 id 的日/周/月表用稳定排序 offset。
+	if dim == aggregator.DimensionDevice {
+		var src RowSource
+		if tableHasIDColumn(table) {
+			src = newDashboardDeviceSource(r.metricDB, table, req, objectLDNs)
+		} else {
+			src = newDashboardDeviceOffsetSource(r.metricDB, table, req, objectLDNs)
+		}
 		if shouldFillExportSkeleton(task.SourceType, req) {
 			src = newFillEmptySource(src, req)
 		}
@@ -319,21 +323,6 @@ func shouldAutoDiscoverExportSkeleton(source SourceType, req aggregator.QueryReq
 
 func shouldFillExportSkeleton(source SourceType, req aggregator.QueryRequest) bool {
 	return source == SourceKpiQuery && aggregator.IsExplicitObjectSkeletonRequest(req)
-}
-
-func usesKPIExportQueryPath(source SourceType, req aggregator.QueryRequest) bool {
-	if source == SourceKpiQuery || req.RecomputeAllKPIs || req.StoreAllEnabled {
-		return true
-	}
-	if req.MetricType != nil && *req.MetricType == metrics.MetricTypeKPI && len(req.MetricPaths) > 0 {
-		return true
-	}
-	for _, path := range req.MetricPaths {
-		if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(path)), "K") {
-			return true
-		}
-	}
-	return false
 }
 
 type adhocTaskMeta struct {

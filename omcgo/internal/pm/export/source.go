@@ -104,6 +104,66 @@ func (s *dashboardDeviceSource) Next(ctx context.Context) ([]ExportRow, bool, er
 	return out, false, nil
 }
 
+type dashboardDeviceOffsetSource struct {
+	db         PgQuerier
+	table      string
+	req        aggregator.QueryRequest
+	objectLDNs []string
+	offset     int
+	done       bool
+}
+
+func newDashboardDeviceOffsetSource(db PgQuerier, table string, req aggregator.QueryRequest, objectLDNs []string) *dashboardDeviceOffsetSource {
+	return &dashboardDeviceOffsetSource{db: db, table: table, req: req, objectLDNs: objectLDNs}
+}
+
+func (s *dashboardDeviceOffsetSource) Next(ctx context.Context) ([]ExportRow, bool, error) {
+	if s.done {
+		return nil, true, nil
+	}
+	sqlStr, args := buildDeviceOffsetSQL(s.table, s.req, s.objectLDNs, s.offset, batchSize)
+	rows, err := s.db.Query(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, false, fmt.Errorf("export dashboard device query %s: %w", s.table, err)
+	}
+	defer rows.Close()
+
+	out := make([]ExportRow, 0, batchSize)
+	n := 0
+	for rows.Next() {
+		var oui, sn, metricPath, metricType, gran string
+		var statis, ldn *string
+		var value jsonx.Float
+		var tm, st, et time.Time
+		if err := rows.Scan(&oui, &sn, &metricPath, &metricType, &value, &statis, &gran, &tm, &st, &et, &ldn); err != nil {
+			return nil, false, fmt.Errorf("export dashboard device scan %s: %w", s.table, err)
+		}
+		out = append(out, ExportRow{
+			Device:      deviceSNLabel(oui, sn),
+			CellPLMN:    derefStr(ldn),
+			MetricCode:  metricPath,
+			MetricType:  metricType,
+			Granularity: gran,
+			Time:        tm,
+			StartTime:   st,
+			EndTime:     et,
+			Value:       float64(value),
+			StatisType:  derefStr(statis),
+		})
+		n++
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, fmt.Errorf("export dashboard device rows %s: %w", s.table, err)
+	}
+
+	if n < batchSize {
+		s.done = true
+	} else {
+		s.offset += batchSize
+	}
+	return out, false, nil
+}
+
 // ── dashboard 聚合维度：批次游标兜底（含 KPI 反算） ─────────────────────────
 //
 // group/product/band/network 维度在 aggregator.Query 内现场 GROUP BY + KPI 反算，无行级 id，
@@ -280,6 +340,33 @@ func exportRowToAggregator(r ExportRow) aggregator.Row {
 	}
 }
 
+func normalizeStoredResultExportRequest(req aggregator.QueryRequest) aggregator.QueryRequest {
+	if len(req.MetricPaths) == 0 || req.MetricType == nil {
+		return req
+	}
+	var inferred *metrics.MetricType
+	for _, raw := range req.MetricPaths {
+		path := strings.TrimSpace(raw)
+		if path == "" {
+			continue
+		}
+		mt := metricTypeFromPath(path)
+		if inferred == nil {
+			v := mt
+			inferred = &v
+			continue
+		}
+		if *inferred != mt {
+			req.MetricType = nil
+			return req
+		}
+	}
+	if inferred != nil && *inferred != *req.MetricType {
+		req.MetricType = nil
+	}
+	return req
+}
+
 // statisStr 把 *metrics.StatisType 解引用成字符串（nil → 空串）。
 func statisStr(p *metrics.StatisType) string {
 	if p == nil {
@@ -430,10 +517,14 @@ func requestedMetricColumns(metricPaths []string) []colKey {
 }
 
 func metricColumnType(code string) string {
-	if strings.HasPrefix(strings.ToUpper(code), "C") {
-		return string(metrics.MetricTypeCounter)
+	return string(metricTypeFromPath(code))
+}
+
+func metricTypeFromPath(code string) metrics.MetricType {
+	if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(code)), "C") {
+		return metrics.MetricTypeCounter
 	}
-	return string(metrics.MetricTypeKPI)
+	return metrics.MetricTypeKPI
 }
 
 // discoverAdhocColumns 发现 adhoc 源的指标列集，按编号升序。

@@ -105,6 +105,45 @@ func TestBuildDeviceKeysetSQL_NoObjectLDNFilter(t *testing.T) {
 	assert.NotContains(t, q, "object_ldn IN")
 }
 
+func TestBuildDeviceOffsetSQL_UsesStoredResultTableWithoutID(t *testing.T) {
+	req := aggregator.QueryRequest{
+		Granularity: metrics.GranularityDaily,
+		DeviceSNs:   []string{"SN1"},
+		MetricPaths: []string{"KGSM0101", "CGSM0010001"},
+	}
+	q, args := buildDeviceOffsetSQL("pm_metrics_daily", req, nil, 5000, 5000)
+
+	assert.Contains(t, q, "FROM pm_metrics_daily")
+	assert.NotContains(t, q, " id,")
+	assert.Contains(t, q, "metric_path = ")
+	assert.Contains(t, q, "metric_type = ")
+	assert.Contains(t, q, `ORDER BY "time" ASC, device_oui ASC, device_sn ASC, object_ldn ASC, metric_path ASC, metric_type ASC`)
+	assert.Contains(t, q, "LIMIT 5000")
+	assert.Contains(t, q, "OFFSET 5000")
+	assert.Contains(t, args, "SN1")
+	assert.Contains(t, args, "KGSM0101")
+	assert.Contains(t, args, "CGSM0010001")
+	assert.Contains(t, args, "kpi")
+	assert.Contains(t, args, "counter")
+}
+
+func TestBuildDeviceKeysetSQL_BindsMetricPathToInferredMetricTypeWhenTypeAbsent(t *testing.T) {
+	req := aggregator.QueryRequest{
+		Granularity: metrics.GranularityHourly,
+		DeviceSNs:   []string{"SN1"},
+		MetricPaths: []string{" KGSM0101 ", "CGSM0010001"},
+	}
+	q, args := buildDeviceKeysetSQL("pm_metrics_hourly", req, nil, false, time.Time{}, uuid.Nil, 5000)
+
+	assert.Contains(t, q, "((metric_path = ")
+	assert.Contains(t, q, "AND metric_type = ")
+	assert.Contains(t, q, ") OR (metric_path = ")
+	assert.Contains(t, args, "KGSM0101")
+	assert.Contains(t, args, "kpi")
+	assert.Contains(t, args, "CGSM0010001")
+	assert.Contains(t, args, "counter")
+}
+
 func TestBuildAdhocKeysetSQL(t *testing.T) {
 	id := uuid.New()
 	q, args := buildAdhocKeysetSQL(id, nil, time.Time{}, time.Time{}, false, time.Time{}, uuid.Nil, 5000)
