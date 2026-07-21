@@ -267,10 +267,10 @@ services:
       resources:
         limits:
           cpus: "${MINIO_CPUS:-1}"
-          memory: "${MINIO_MEM:-1g}"
+          memory: "${MINIO_MEM:-4g}"
         reservations:
           cpus: "0.25"
-          memory: 512m
+          memory: 1g
     volumes:
       - ${MINIO_DATA_PATH:-miniodata}:/data
       - /etc/localtime:/etc/localtime:ro
