@@ -503,4 +503,74 @@ describe('ConfigParamsModal', () => {
       execMode: 'whole',
     });
   });
+
+  it('renders boolean MOD values as a true/false select', () => {
+    renderModal({
+      command: {
+        ...command,
+        operationType: 'MOD',
+        paramPaths: [{
+          path: 'Device.Radio.Enable',
+          label: 'Enable',
+          writable: true,
+          isObject: false,
+          valueType: 'BOOLEAN',
+          defaultValue: 'true',
+        }],
+      },
+      selectedPathKeys: ['Device.Radio.Enable'],
+    });
+
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.getByText('true', { exact: true })).toBeInTheDocument();
+
+    fireEvent.mouseDown(screen.getByRole('combobox'));
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(['true', 'false']);
+  });
+
+  it('submits the selected boolean value as a string', () => {
+    const onConfirmAndExecute = vi.fn();
+    renderModal({
+      command: {
+        ...command,
+        operationType: 'MOD',
+        paramPaths: [{
+          path: 'Device.Radio.Enable',
+          label: 'Enable',
+          writable: true,
+          isObject: false,
+          valueType: 'boolean',
+          defaultValue: 'true',
+        }],
+      },
+      selectedPathKeys: ['Device.Radio.Enable'],
+      onConfirmAndExecute,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /mml.consoleV2.config.confirmAndExecute/ }));
+
+    expect(onConfirmAndExecute).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'standard',
+      values: { 'Device.Radio.Enable': 'true' },
+    }));
+  });
+
+  it('defaults a boolean value to false when no default is provided', () => {
+    renderModal({
+      command: {
+        ...command,
+        operationType: 'MOD',
+        paramPaths: [{
+          path: 'Device.Radio.Enable',
+          label: 'Enable',
+          writable: true,
+          isObject: false,
+          valueType: 'boolean',
+        }],
+      },
+      selectedPathKeys: ['Device.Radio.Enable'],
+    });
+
+    expect(screen.getByText('false', { exact: true })).toBeInTheDocument();
+  });
 });

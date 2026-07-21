@@ -8,6 +8,7 @@ import {
   InputNumber,
   Modal,
   Radio,
+  Select,
   Space,
   Tabs,
   Tag,
@@ -42,6 +43,23 @@ const WRITE_REMINDER_KEYS: Record<string, string> = {
   RMV: 'mml.consoleV2.config.writeReminder.addRmv',
   MOD: 'mml.consoleV2.config.writeReminder.mod',
 };
+
+const BOOLEAN_OPTIONS = [
+  { label: 'true', value: 'true' },
+  { label: 'false', value: 'false' },
+];
+
+function isBooleanValueType(valueType?: string): boolean {
+  const normalized = valueType?.trim().toLowerCase();
+  return normalized === 'boolean' || normalized === 'bool';
+}
+
+function normalizeBooleanValue(value: unknown): 'true' | 'false' | undefined {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1') return 'true';
+  if (normalized === 'false' || normalized === '0') return 'false';
+  return undefined;
+}
 
 interface ConfigParamsModalProps {
   open: boolean;
@@ -144,7 +162,14 @@ export default function ConfigParamsModal({
       const initVals: Record<string, string> = {};
       if (!isReadOp(command.operationType)) {
         standardParamPaths.forEach((p) => {
-          if (p.writable && p.minValue != null) initVals[p.path] = String(p.minValue);
+          if (!p.writable) return;
+          if (isBooleanValueType(p.valueType)) {
+            initVals[p.path] = normalizeBooleanValue(p.defaultValue)
+              ?? normalizeBooleanValue(p.minValue)
+              ?? 'false';
+          } else if (p.minValue != null) {
+            initVals[p.path] = String(p.minValue);
+          }
         });
       }
       setValues(initVals);
@@ -373,6 +398,7 @@ export default function ConfigParamsModal({
               const error = command.operationType === 'MOD' && showModValidationErrors
                 ? modValidationErrors[p.path]
                 : undefined;
+              const isBoolean = isBooleanValueType(p.valueType);
 
               return (
                 <div key={p.path} style={{ minWidth: 0 }}>
@@ -404,14 +430,24 @@ export default function ConfigParamsModal({
                       <Tag style={{ marginInlineStart: 0, flexShrink: 0 }}>{p.valueType}</Tag>
                     )}
                   </div>
-                  <Input
-                    status={error ? 'error' : undefined}
-                    aria-invalid={Boolean(error)}
-                    placeholder={t('mml.consoleV2.config.inputFieldPlaceholder', { label: p.label })}
-                    value={values[p.path] ?? ''}
-                    onChange={(e) => setValues((prev) => ({ ...prev, [p.path]: e.target.value }))}
-                    style={{ display: 'block', width: '100%', marginTop: 6 }}
-                  />
+                  {isBoolean ? (
+                    <Select
+                      aria-label={p.label}
+                      value={values[p.path] ?? 'false'}
+                      options={BOOLEAN_OPTIONS}
+                      onChange={(value) => setValues((prev) => ({ ...prev, [p.path]: value }))}
+                      style={{ display: 'block', width: '100%', marginTop: 6 }}
+                    />
+                  ) : (
+                    <Input
+                      status={error ? 'error' : undefined}
+                      aria-invalid={Boolean(error)}
+                      placeholder={t('mml.consoleV2.config.inputFieldPlaceholder', { label: p.label })}
+                      value={values[p.path] ?? ''}
+                      onChange={(e) => setValues((prev) => ({ ...prev, [p.path]: e.target.value }))}
+                      style={{ display: 'block', width: '100%', marginTop: 6 }}
+                    />
+                  )}
                   {error && (
                     <Text type="danger" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>
                       {t(`mml.consoleV2.config.validation.${error.code}`, { bound: error.bound ?? '' })}
