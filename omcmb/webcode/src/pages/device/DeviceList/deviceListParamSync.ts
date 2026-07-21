@@ -23,6 +23,16 @@ const DEVICE_LIST_SYNC_PARAMS: DeviceListSyncParam[] = [
   { key: 'upTime', scope: 'common', paths: ['Device.DeviceInfo.UpTime', 'Device.DeviceInfo.X_COM_STATION_RUN_Time'] },
   { key: 'ueCount', scope: 'common', paths: ['Device.Services.FAPService.{i}.CellConfig.AccessMgmt.LTE.MaxUEsServed'] },
   {
+    key: 'mmeStatus',
+    scope: 'eNB',
+    paths: [
+      'Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmeStatus',
+      'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.MmePoolConfigParam.{i}.MME1Status',
+      'Device.Services.FAPService.{i}.CellConfig.LTE.MmePoolConfigParam.{i}.MME1Status',
+    ],
+  },
+  { key: 'amfStatus', scope: 'gNB', paths: ['Device.Services.FAPService.1.AmfsStatus'] },
+  {
     key: 'rfStatus',
     scope: 'common',
     paths: [
