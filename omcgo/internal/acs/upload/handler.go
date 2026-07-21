@@ -340,14 +340,36 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	cmp := h.maybeWrapForCompression(ctx, ft, filename, r.Body)
 	if cmp.applied {
-		defer cmp.body.Close()
-		body = cmp.body
-		contentLength = -1 // streaming, compressed size unknown
 		objectPath += cmp.ext
 		// ContentEncoding documents the on-disk compression so the restore
 		// side (T-0072) can read it from object metadata as a backup signal
 		// to the .gz/.zst filename suffix.
 		uploadOpts.ContentEncoding = cmp.format
+		if ft == tr069.FileTypePM {
+			// PM 压缩体积通常不大（几十KB~几MB），提前读完拿到确切压缩后
+			// 大小，走已知 size 的单次 PutObject。若像下面 else 分支那样
+			// 传 contentLength=-1（未知大小），minio-go 对未知大小走
+			// putObjectMultipartStreamParallel，会为每次调用分配
+			// opts.NumThreads*PartSize（可达数百 MB）的内存缓冲区——高
+			// 并发下（PM 上传背压 max_inflight 调大后）迅速把内存打爆，
+			// 触发 cgroup OOM killer 循环杀死 ACS 进程（2026-07-21 omc78
+			// 压测实测：4G 内存限额下仍持续 OOMKilled，根因在此，不是文件
+			// 本身大，是 SDK 对"未知大小"的缓冲策略）。
+			compressed, readErr := io.ReadAll(cmp.body)
+			cmp.body.Close()
+			if readErr != nil {
+				h.logger.Error("read compressed PM upload body failed",
+					zap.Error(readErr), zap.String("path", objectPath))
+				http.Error(w, "read upload body failed", http.StatusBadRequest)
+				return
+			}
+			body = bytes.NewReader(compressed)
+			contentLength = int64(len(compressed))
+		} else {
+			defer cmp.body.Close()
+			body = cmp.body
+			contentLength = -1 // streaming, compressed size unknown（备份大文件场景仍走流式，保留原行为）
+		}
 	}
 
 	// T-0075: encryption layer (after compression). Buffers fully into memory
