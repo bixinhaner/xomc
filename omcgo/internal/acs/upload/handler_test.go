@@ -47,11 +47,21 @@ func newTestHandler(t *testing.T, getter backup.PolicyGetter) *Handler {
 }
 
 func TestMaybeWrapForCompression_unrelatedFileType(t *testing.T) {
-	// MR is neither FileTypeConfig (policy-gated backup compression) nor
-	// FileTypePM (unconditional PM compression) — must stay plaintext.
+	// RunningLog is neither FileTypeConfig (policy-gated backup compression)
+	// nor FileTypePM/FileTypeMR (unconditional PM/MR compression) — must stay
+	// plaintext.
 	h := newTestHandler(t, &fakePolicyGetter{policy: enabledGzipPolicy()})
+	w := h.maybeWrapForCompression(context.Background(), tr069.FileTypeRunningLog, "report.xml", strings.NewReader("payload"))
+	assert.False(t, w.applied, "unrelated file type must not trigger compression")
+}
+
+func TestMaybeWrapForCompression_mrUnconditionalGzip(t *testing.T) {
+	// MR shares PM's unconditional gzip treatment (2026-07-21): same
+	// high-frequency, structured, repetitive shape, same compressPMUpload path.
+	h := newTestHandler(t, nil)
 	w := h.maybeWrapForCompression(context.Background(), tr069.FileTypeMR, "report.xml", strings.NewReader("payload"))
-	assert.False(t, w.applied, "MR file type must not trigger compression")
+	assert.True(t, w.applied, "MR file type must trigger unconditional gzip like PM")
+	assert.Equal(t, "gzip", w.format)
 }
 
 func TestMaybeWrapForCompression_noPolicyGetter(t *testing.T) {

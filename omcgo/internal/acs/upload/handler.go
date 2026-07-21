@@ -340,14 +340,39 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	cmp := h.maybeWrapForCompression(ctx, ft, filename, r.Body)
 	if cmp.applied {
-		defer cmp.body.Close()
-		body = cmp.body
-		contentLength = -1 // streaming, compressed size unknown
 		objectPath += cmp.ext
 		// ContentEncoding documents the on-disk compression so the restore
 		// side (T-0072) can read it from object metadata as a backup signal
 		// to the .gz/.zst filename suffix.
 		uploadOpts.ContentEncoding = cmp.format
+		if ft == tr069.FileTypePM || ft == tr069.FileTypeMR {
+			// PM/MR 压缩体积通常不大（几十KB~几MB），提前读完拿到确切压缩后
+			// 大小，走已知 size 的单次 PutObject。若像下面 else 分支那样
+			// 传 contentLength=-1（未知大小），minio-go 对未知大小走
+			// putObjectMultipartStreamParallel，会为每次调用分配
+			// opts.NumThreads*PartSize（可达数百 MB）的内存缓冲区——高
+			// 并发下（PM 上传背压 max_inflight 调大后）迅速把内存打爆，
+			// 触发 cgroup OOM killer 循环杀死 ACS 进程（2026-07-21 omc78
+			// 压测实测：4G 内存限额下仍持续 OOMKilled，根因在此，不是文件
+			// 本身大，是 SDK 对"未知大小"的缓冲策略）。MR 与 PM 同
+			// 构（高频、结构化、重复性强的性能/测量数据），同样会在
+			// max_inflight 调大后遇到同样的高并发惊群，因此与 PM 统一
+			// 处理。
+			compressed, readErr := io.ReadAll(cmp.body)
+			cmp.body.Close()
+			if readErr != nil {
+				h.logger.Error("read compressed PM/MR upload body failed",
+					zap.Error(readErr), zap.String("path", objectPath))
+				http.Error(w, "read upload body failed", http.StatusBadRequest)
+				return
+			}
+			body = bytes.NewReader(compressed)
+			contentLength = int64(len(compressed))
+		} else {
+			defer cmp.body.Close()
+			body = cmp.body
+			contentLength = -1 // streaming, compressed size unknown（备份大文件场景仍走流式，保留原行为）
+		}
 	}
 
 	// T-0075: encryption layer (after compression). Buffers fully into memory
@@ -700,8 +725,8 @@ func (c compressionWrap) bytesIn() int64 {
 
 // maybeWrapForCompression decides whether the inbound upload body should be
 // streaming-compressed. Returns applied=false (and no error) when:
-//   - file type is PM: delegates to compressPMUpload (unconditional gzip,
-//     no policy gate — see compressPMUpload doc), OR
+//   - file type is PM or MR: delegates to compressPMUpload (unconditional
+//     gzip, no policy gate — see compressPMUpload doc), OR
 //   - file type is not FileTypeConfig (only backup files compress today), OR
 //   - no policyGetter wired, OR
 //   - policy lookup failed, OR
@@ -711,7 +736,7 @@ func (c compressionWrap) bytesIn() int64 {
 // The fall-back-on-failure choice is deliberate: backup is a high-availability
 // feature; we prefer storing larger uncompressed bytes over failing the upload.
 func (h *Handler) maybeWrapForCompression(ctx context.Context, ft tr069.FileType, filename string, src io.Reader) compressionWrap {
-	if ft == tr069.FileTypePM {
+	if ft == tr069.FileTypePM || ft == tr069.FileTypeMR {
 		return h.compressPMUpload(ctx, filename, src)
 	}
 	if ft != tr069.FileTypeConfig || h.policyGetter == nil {
@@ -760,28 +785,33 @@ func (h *Handler) maybeWrapForCompression(ctx context.Context, ft tr069.FileType
 // uploads and shouldn't burn excessive CPU per file on max compression.
 const pmUploadGzipLevel = 6
 
-// compressPMUpload gzip-wraps a PM (FileType=4) upload body before it lands
-// in MinIO.
+// compressPMUpload gzip-wraps a PM (FileType=4) or MR (FileType=5) upload
+// body before it lands in MinIO.
 //
 // Unlike maybeWrapForCompression's backup-config branch (policy-gated per
-// sys_configs, currently dormant per issue #585), PM compression here is
-// unconditional: PM/KPI XML is highly repetitive (many similar counter/tag
-// names) and gzips well, directly cutting MinIO write IO on the ACS hot path
-// and MinIO read IO when the worker downloads it to parse — a stress-test
-// diagnosis found tsdb/host IO pressure (PSI) as the dominant bottleneck
-// behind PM ingestion lag, not worker CPU/concurrency.
+// sys_configs, currently dormant per issue #585), PM/MR compression here is
+// unconditional: PM/KPI and MR XML are highly repetitive (many similar
+// counter/tag names) and gzip well, directly cutting MinIO write IO on the
+// ACS hot path and MinIO read IO when the worker downloads it to parse — a
+// stress-test diagnosis found tsdb/host IO pressure (PSI) as the dominant
+// bottleneck behind PM ingestion lag, not worker CPU/concurrency. MR shares
+// the same shape (high-frequency, structured, repetitive measurement data),
+// so it gets the same treatment (docs/project/pm-mr-gzip-rekey-plan-20260616.md
+// §2 已锁定「范围：PM + MR 一起改（同构链路）」).
 //
 // No changes are required downstream:
-//   - internal/pm/collector.go already transparently gunzips on download via
-//     core/compress.MaybeGunzip (issue #321 — real CPEs already upload
-//     .xml.gz in the wild, so this path was already exercised).
+//   - internal/pm/collector.go and internal/mr/collector/collector.go already
+//     transparently gunzip on download via core/compress.MaybeGunzip (issue
+//     #321 — real CPEs already upload .xml.gz in the wild, so this path was
+//     already exercised for PM; MR collector shares the same helper).
 //   - internal/core/rawarchive.Archiver's async re-compression pass already
 //     probes the gzip magic number and short-circuits to outcomeSkippedGz
 //     (a single 2-byte ReadHead, no re-read/re-write) for objects that are
 //     already gzip, so it won't double-compress.
-//   - internal/pm/handler.go's DownloadPMFile already sniffs the gzip magic
-//     number at download time and adjusts the served filename/Content-Type
-//     accordingly, so the existing download UI keeps working unchanged.
+//   - internal/pm/handler.go's DownloadPMFile and internal/mr/handler.go's
+//     DownloadFile already sniff the gzip magic number at download time and
+//     adjust the served filename/Content-Type accordingly, so the existing
+//     download UI keeps working unchanged for both PM and MR.
 //
 // Guards against double-compression: if filename already ends in ".gz" the
 // CPE (or simulator) is already sending gzip bytes (issue #321) — this
