@@ -376,6 +376,8 @@ export default function DashboardPage() {
             iconBgColor="#e6f4ff"
             iconColor={token.colorPrimary}
             loading={cardsLoading}
+            hasComparison={totalDevicesDelta?.hasComparison === true}
+            unavailableText={t('dashboard.notComparable')}
             trend={totalDevicesDelta?.trend ?? 'stable'}
             delta={totalDevicesDelta?.changePercent !== undefined ? `${totalDevicesDelta.changePercent.toFixed(1)}%` : undefined}
             deltaLabel={totalDevicesDelta?.compareType === 'last_week' ? t('dashboard.vsLastWeek') : t('dashboard.vsYesterday')}
@@ -412,6 +414,8 @@ export default function DashboardPage() {
             iconBgColor="#fff2f0"
             iconColor="#F5222D"
             loading={cardsLoading}
+            hasComparison={activeAlarmsDelta?.hasComparison === true}
+            unavailableText={t('dashboard.notComparable')}
             trend={activeAlarmsDelta?.trend ?? 'stable'}
             delta={activeAlarmsDelta?.changePercent !== undefined ? `${activeAlarmsDelta.changePercent.toFixed(1)}%` : undefined}
             deltaLabel={activeAlarmsDelta?.compareType === 'yesterday' ? t('dashboard.vsYesterday') : t('dashboard.vsLastWeek')}
@@ -429,6 +433,8 @@ export default function DashboardPage() {
             iconBgColor="#f6ffed"
             iconColor="#10B981"
             loading={cardsLoading}
+            hasComparison={ueTrendDelta?.hasComparison === true}
+            unavailableText={t('dashboard.notComparable')}
             trend={ueTrendDelta?.trend ?? 'stable'}
             delta={ueTrendDelta?.changePercent !== undefined ? `${ueTrendDelta.changePercent.toFixed(1)}%` : undefined}
             deltaLabel={ueTrendDelta?.changePercent !== undefined ? t('dashboard.vsLastWeek') : undefined}

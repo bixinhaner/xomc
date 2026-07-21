@@ -2864,6 +2864,7 @@ const messages: Record<string, string> = {
   'dashboard.vsLastWeek':        '较上周',
   'dashboard.onlineRate':        '在线率',
   'dashboard.vsYesterday':       '较昨日',
+  'dashboard.notComparable':     'N/A',
   'dashboard.compareWindow.label':     '对比时窗',
   'dashboard.compareWindow.yesterday': '昨日',
   'dashboard.compareWindow.lastWeek':  '上周',

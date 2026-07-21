@@ -56,12 +56,18 @@ vi.mock('@/components/KPICard', () => ({
     title,
     value,
     loading,
+    hasComparison,
   }: {
     title: string;
     value: number | string;
     loading?: boolean;
+    hasComparison?: boolean;
   }) => (
-    <div data-testid={`kpi-${title}`} data-loading={String(Boolean(loading))}>
+    <div
+      data-testid={`kpi-${title}`}
+      data-loading={String(Boolean(loading))}
+      data-has-comparison={String(hasComparison)}
+    >
       {String(value)}
     </div>
   ),
@@ -309,6 +315,39 @@ describe('DashboardPage card snapshot integration', () => {
       'true',
     );
     expect(screen.getByText(/dashboard\.lastUpdate/)).toHaveTextContent('--');
+  });
+
+  it('marks period-comparison cards unavailable when Summary has no valid baselines', () => {
+    dashboardMocks.summaryResult = {
+      data: successfulSummary,
+      dataUpdatedAt: 200,
+      isLoading: false,
+      isPending: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    };
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <DashboardPage />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByTestId('kpi-dashboard.totalDevices')).toHaveAttribute(
+      'data-has-comparison',
+      'false',
+    );
+    expect(screen.getByTestId('kpi-dashboard.activeAlarmsEvents')).toHaveAttribute(
+      'data-has-comparison',
+      'false',
+    );
+    expect(screen.getByTestId('kpi-dashboard.activeUE')).toHaveAttribute(
+      'data-has-comparison',
+      'false',
+    );
   });
 
   it('does not display another user snapshot on the same API', () => {
