@@ -3,6 +3,7 @@ package reliability
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -48,6 +49,21 @@ func TestRetry_ExhaustedAttempts(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "exhausted 2 retry attempts")
 	assert.Contains(t, err.Error(), "permanent error")
+}
+
+func TestRetry_PermanentErrorShortCircuits(t *testing.T) {
+	var calls int32
+	cfg := RetryConfig{MaxAttempts: 5, BaseDelay: 10 * time.Millisecond, MaxDelay: 100 * time.Millisecond}
+
+	err := Retry(context.Background(), cfg, func(_ context.Context) error {
+		atomic.AddInt32(&calls, 1)
+		return fmt.Errorf("device not found: %w", ErrPermanent)
+	})
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrPermanent), "returned error should still unwrap to ErrPermanent")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&calls), "fn must be called exactly once, no retry")
+	assert.NotContains(t, err.Error(), "exhausted", "short-circuit path must not use the exhausted-attempts wrapping")
 }
 
 func TestRetry_ContextCancelled(t *testing.T) {

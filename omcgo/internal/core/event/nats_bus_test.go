@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -11,6 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+
+	"github.com/omcgo/omcgo/internal/core/reliability"
 )
 
 // --- Constructor tests ---
@@ -311,6 +314,15 @@ func TestDecideAck_ExtremeDeliveries_BackoffCapped(t *testing.T) {
 	assert.Equal(t, ackActionNak, d.action)
 	// 1<<30 seconds 是个大但有限的值，不应是负数或 0
 	assert.Greater(t, d.backoff, time.Duration(0))
+}
+
+func TestDecideAck_PermanentError_ReturnsTermRegardlessOfDeliveries(t *testing.T) {
+	// 包装了 reliability.ErrPermanent 的错误（如设备未注册）无论 deliveries 多少，
+	// 都应立即 Term，不走正常的指数退避 Nak 重投。
+	err := fmt.Errorf("device not found: %w", reliability.ErrPermanent)
+	d := decideAck(err, 1, 5)
+	assert.Equal(t, ackActionTerm, d.action)
+	assert.Zero(t, d.backoff)
 }
 
 func TestPullTuningForSubject_DefaultsAndOverride(t *testing.T) {
