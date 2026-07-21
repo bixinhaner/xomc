@@ -43,6 +43,7 @@ type PgDeviceGroupRepository struct {
 	treeCountsMu   sync.Mutex
 	treeCountsAt   time.Time
 	treeCountsData []DeviceGroup
+	treeCountsGen  uint64
 }
 
 // NewPgDeviceGroupRepository creates a new PgDeviceGroupRepository.
@@ -283,7 +284,8 @@ const getTreeWithCountsRawSQL = `
 // TTL 窗口内的重复调用收敛成一次真实查询，避免规划开销被并发放大成 CPU 热点。分组
 // 结构和设备计数没有强一致性要求，短暂（几秒）过期可接受。
 func (r *PgDeviceGroupRepository) GetTreeWithCounts(ctx context.Context) ([]DeviceGroup, error) {
-	if cached, ok := r.cachedTreeWithCounts(); ok {
+	cached, ok, generation := r.cachedTreeWithCounts()
+	if ok {
 		return cached, nil
 	}
 
@@ -297,27 +299,41 @@ func (r *PgDeviceGroupRepository) GetTreeWithCounts(ctx context.Context) ([]Devi
 	if err != nil {
 		return nil, err
 	}
-	r.storeTreeWithCountsCache(groups)
+	r.storeTreeWithCountsCache(groups, generation)
 	return cloneDeviceGroups(groups), nil
 }
 
 // cachedTreeWithCounts 返回缓存副本（未过期时）。返回副本而非共享切片，是因为
 // service.buildTree 会就地改写传入切片元素（flat[i].Children = nil 等），共享同一
 // 底层数组会在并发调用间互相污染。
-func (r *PgDeviceGroupRepository) cachedTreeWithCounts() ([]DeviceGroup, bool) {
+func (r *PgDeviceGroupRepository) cachedTreeWithCounts() ([]DeviceGroup, bool, uint64) {
 	r.treeCountsMu.Lock()
 	defer r.treeCountsMu.Unlock()
 	if r.treeCountsData == nil || time.Since(r.treeCountsAt) > groupTreeCountsCacheTTL {
-		return nil, false
+		return nil, false, r.treeCountsGen
 	}
-	return cloneDeviceGroups(r.treeCountsData), true
+	return cloneDeviceGroups(r.treeCountsData), true, r.treeCountsGen
 }
 
-func (r *PgDeviceGroupRepository) storeTreeWithCountsCache(groups []DeviceGroup) {
+func (r *PgDeviceGroupRepository) storeTreeWithCountsCache(groups []DeviceGroup, generation uint64) {
 	r.treeCountsMu.Lock()
 	defer r.treeCountsMu.Unlock()
+	if generation != r.treeCountsGen {
+		return
+	}
 	r.treeCountsData = groups
 	r.treeCountsAt = time.Now()
+}
+
+// InvalidateDeviceGroupCounts clears the short-lived group tree count cache.
+// Device lifecycle writes live in another module, so they call this narrow
+// invalidation seam after a successful write instead of waiting for the TTL.
+func (r *PgDeviceGroupRepository) InvalidateDeviceGroupCounts() {
+	r.treeCountsMu.Lock()
+	defer r.treeCountsMu.Unlock()
+	r.treeCountsGen++
+	r.treeCountsData = nil
+	r.treeCountsAt = time.Time{}
 }
 
 // cloneDeviceGroups 返回顶层切片的独立拷贝。DeviceGroup 在这个扁平列表阶段还没有

@@ -958,6 +958,31 @@ func TestDeviceService_BatchDeleteDevices_ExplicitDeletedByWins(t *testing.T) {
 	assert.Equal(t, 0, result.Failed)
 }
 
+type recordingDeviceGroupCountsInvalidator struct {
+	calls int
+}
+
+func (r *recordingDeviceGroupCountsInvalidator) InvalidateDeviceGroupCounts() {
+	r.calls++
+}
+
+func TestDeviceService_BatchDeleteDevices_InvalidatesDeviceGroupCounts(t *testing.T) {
+	ids := []uuid.UUID{uuid.New()}
+	deviceRepo := &mockDeviceRepo{
+		batchDeleteFn: func(context.Context, []uuid.UUID, string) (int64, error) {
+			return 1, nil
+		},
+	}
+	invalidator := &recordingDeviceGroupCountsInvalidator{}
+	svc := newTestDeviceService(deviceRepo, &mockParamRepo{})
+	svc.SetDeviceGroupCountsInvalidator(invalidator)
+
+	result := svc.BatchDeleteDevices(context.Background(), ids, "alice")
+
+	assert.Equal(t, 1, result.Succeeded)
+	assert.Equal(t, 1, invalidator.calls)
+}
+
 // ---------------------------------------------------------------------------
 // Tests: TransitionStatus
 // ---------------------------------------------------------------------------
