@@ -171,19 +171,24 @@ func (r *PgCommandRepository) GetByID(ctx context.Context, id uuid.UUID) (*MMLCo
 }
 
 // ListByGroupID 按 group_id 查询命令（Sprint B Q-V3-1 group 批量执行 API 基础）。
-// 排序：先按 operation_type 顺序（LST/MOD/ADD/RMV 习惯），再按 command_code 字典序。
+// 排序：同一小节（去掉 LST/MOD/ADD/RMV 前缀后的 command_code）聚在一起，
+// 小节内按 LST/MOD/ADD/RMV 习惯顺序。
 func (r *PgCommandRepository) ListByGroupID(ctx context.Context, groupID uuid.UUID) ([]MMLCommand, error) {
 	query, args, err := storage.Psql.Select(commandColumns...).
 		From("mml_commands").
 		Where(sq.Eq{"group_id": groupID}).
-		OrderBy(`
+		OrderBy(
+			"regexp_replace(COALESCE(command_code, ''), '^(LST|MOD|ADD|RMV)[[:space:]]+', '') ASC",
+			`
 			CASE operation_type
 				WHEN 'LST' THEN 1
 				WHEN 'MOD' THEN 2
 				WHEN 'ADD' THEN 3
 				WHEN 'RMV' THEN 4
 				ELSE 99
-			END`, "command_code ASC").
+			END`,
+			"command_code ASC",
+		).
 		ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build list mml_commands by group SQL: %w", err)

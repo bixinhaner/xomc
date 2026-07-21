@@ -104,7 +104,7 @@ var _ GroupTreeRepository = (*PgGroupTreeRepository)(nil)
 
 // BuildTree 单 SQL JOIN 抓 groups + commands，Go 侧按 path 分层组装。
 //
-// SQL 侧 WHERE 已过滤为 "chapter:" 前缀的章节行 + 子树命令；Go 侧仅做层级组装
+// SQL 侧 WHERE 已过滤为 standard chapter 树 + admin 分组；Go 侧仅做层级组装
 // 与排序，不再做章节合成或 family 推断。
 func (r *PgGroupTreeRepository) BuildTree(ctx context.Context, rootCode, lang string) ([]GroupTreeNode, error) {
 	if lang == "" {
@@ -181,7 +181,7 @@ func (r *PgGroupTreeRepository) BuildTree(ctx context.Context, rootCode, lang st
 // rootCode 为空时拉所有 chapter 子树；非空时按 LTREE @> 拉指定子树。
 //
 // 过滤规则:
-//   - standard 来源:LIKE 'chapter:%'(spec v2.3 §R-1)
+//   - standard 来源:chapter_code 非空的标准章节树（含 chapter 顶层和标准二级分组）
 //   - admin 来源:全部纳入(2026-05-27 修复;此前 admin 在 mml/admin/catalog 页面
 //     新建的分组因不带 chapter: 前缀被排除,创建后看不见)
 func (r *PgGroupTreeRepository) queryGroupsAndCommands(ctx context.Context, rootCode string) ([]groupTreeRow, error) {
@@ -214,9 +214,22 @@ SELECT
 FROM mml_command_groups g
 LEFT JOIN mml_commands c ON c.group_id = g.id
 WHERE g.path IS NOT NULL
-  AND (g.group_code LIKE 'chapter:%%' OR g.source = 'admin')
+  AND (
+    (g.source = 'standard' AND COALESCE(g.chapter_code, '') <> '')
+    OR g.source = 'admin'
+  )
 %s
-ORDER BY g.path, g.display_order, c.operation_type, c.command_code`
+ORDER BY g.path,
+         g.display_order,
+         regexp_replace(COALESCE(c.command_code, ''), '^(LST|MOD|ADD|RMV)[[:space:]]+', ''),
+         CASE c.operation_type
+             WHEN 'LST' THEN 1
+             WHEN 'MOD' THEN 2
+             WHEN 'ADD' THEN 3
+             WHEN 'RMV' THEN 4
+             ELSE 99
+         END,
+         c.command_code`
 
 	var whereParts []string
 	var args []any
@@ -425,8 +438,27 @@ func sortCommandsByLogicalCode(cmds []GroupTreeCommand) {
 		if a.LogicalCode != b.LogicalCode {
 			return a.LogicalCode < b.LogicalCode
 		}
-		return a.OperationType < b.OperationType
+		ao, bo := operationSortRank(a.OperationType), operationSortRank(b.OperationType)
+		if ao != bo {
+			return ao < bo
+		}
+		return a.CommandCode < b.CommandCode
 	})
+}
+
+func operationSortRank(op string) int {
+	switch op {
+	case "LST":
+		return 1
+	case "MOD":
+		return 2
+	case "ADD":
+		return 3
+	case "RMV":
+		return 4
+	default:
+		return 99
+	}
 }
 
 // sortSlice generic helper using sort.SliceStable（避免 generics import 复杂度）。

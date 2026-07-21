@@ -55,6 +55,8 @@
 - [software-version-patch-info.md](software-version-patch-info.md)：软件版本参数分组缺失项补充记录。
 - [management-server-normalize.md](management-server-normalize.md)：基站网管参数分组规范化记录。
 - [log-management.md](log-management.md)：日志参数分组缺失项补充记录。
+- [cell-service-normalize-summary.md](cell-service-normalize-summary.md)：小区服务参数管理规范化汇总，包含原始数量、新增字段、删除字段与最终状态。
+- [cell-service-deleted-trpaths.csv](cell-service-deleted-trpaths.csv)：小区服务参数管理删除 TR path 明细。
 
 ## 关键注意
 
@@ -102,3 +104,33 @@
 - `LST LOG_MGMT` 当前 6 条绑定。
 - `MOD LOG_MGMT` 当前 6 条绑定。
 - `LST/MOD LOG_MGMT` 的 `target_paths` 与 `tree_node_refs` 已同步一致。
+
+## 后续补充：小区服务参数分组
+
+按 TD-LTE V2.3 规范复核 `SF / 小区服务参数管理（总体）` 后，确认 `SF` 页包含 58 个 TR-181 标准字段。
+
+本次处理落地到：
+
+- `omcgo/data/mml-catalog/cmcc-tdlte-v2.3.json`
+- `omcgo/migrations/seed/000002_normalize_sf_cell_service_catalog.sql`
+- `omcgo/migrations/seed/000003_add_nr_sf_base_station_config_catalog.sql`
+- `docs/qa-report/mml-device-info-regroup-20260720/cell-service-normalize-summary.md`
+
+处理摘要：
+
+- 补齐 `EPC PLMN 列表` 4 个字段：`PLMNID`、`CellReservedForOperatorUse`、`Enable`、`IsPrimary`。
+- 补齐 `VoLTE PDCP 初始参数` 1 个字段：`RohcEn`。
+- 补齐 `PLMN_LIST`、`PDCP_INIT_PARAM` 的 `LST/MOD/ADD/RMV` catalog 配置。
+- 补齐 NR `SF` 页 `基站配置参数管理`，采用与小区服务参数一致的单层命令结构，新增 AMF 地址、Xn 链接信息、gNB 参数相关命令。
+- 修正 `FAP 载波基本配置` 空命令码：`LST ` / `MOD ` 改为 `LST FAP_SERVICE` / `MOD FAP_SERVICE`。
+- 本地库 `LST FAP_SERVICE` 从 701 条绑定收敛到 34 条，删除 667 条。
+- 本地库 `MOD FAP_SERVICE` 从 698 条绑定收敛到 32 条，删除 666 条。
+- 本地库 `LST/MOD PLMN_LIST` 保留 4 条绑定，其中 `Enable`、`IsPrimary` 按产品口径保留。
+- 本地库 `基站配置参数管理` 直接挂 10 条命令：AMF 地址、Xn 链接信息各含查询/修改/添加/删除，gNB 参数含查询/修改。
+- 本地库小区服务主命令合计删除 1333 条白名单外 TR path 绑定，明细见 `cell-service-deleted-trpaths.csv`。
+- 小区服务相关 `LST/MOD/ADD/RMV` 命令的 `target_paths` 与 `tree_node_refs` 已同步一致。
+
+备注：
+
+- `FAP_SERVICE` 当前保留 10 个 `RRCTimers` 字段；这些字段来源于既有 `SH/RRCTimers` 合并记录，本次未删除。
+- `PLMN_LIST` 当前保留 `Enable`、`IsPrimary`；这两个字段按产品口径保留。

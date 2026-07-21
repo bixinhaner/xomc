@@ -863,6 +863,280 @@
       ]
     },
     {
+      "chapter": "SF_NR",
+      "group_code": "Device.Services.FAPService.{i}.FAPControl.NR.*",
+      "command_zh_name": "基站配置参数管理",
+      "has_instance": true,
+      "paths": [
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.AmfName",
+          "param_name": "AmfName",
+          "chinese_name": "AMFName",
+          "access": "READ_ONLY",
+          "data_type": "string",
+          "max_length": 150
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.PLMNID",
+          "param_name": "PLMNID",
+          "chinese_name": "AMFPLMN标识",
+          "access": "READ_WRITE",
+          "data_type": "string",
+          "max_length": 6
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.GUAMI.{i}.AmfRegionID",
+          "param_name": "AmfRegionID",
+          "chinese_name": "AMFRegionID",
+          "access": "READ_ONLY",
+          "data_type": "string",
+          "max_length": 8
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.GUAMI.{i}.AmfSetID",
+          "param_name": "AmfSetID",
+          "chinese_name": "AMFSetID",
+          "access": "READ_ONLY",
+          "data_type": "string",
+          "max_length": 10
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.GUAMI.{i}.AmfPointer",
+          "param_name": "AmfPointer",
+          "chinese_name": "AMFPointer",
+          "access": "READ_ONLY",
+          "data_type": "string",
+          "max_length": 6
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.RelativeAmfCapacity",
+          "param_name": "RelativeAmfCapacity",
+          "chinese_name": "RelativeAMFCapacity",
+          "access": "READ_ONLY",
+          "data_type": "unsignedInt",
+          "min_value": 0,
+          "max_value": 255
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.AmfIP1",
+          "param_name": "AmfIP1",
+          "chinese_name": "AmfIP1",
+          "access": "READ_WRITE",
+          "data_type": "string",
+          "max_length": 64
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.AmfIP2",
+          "param_name": "AmfIP2",
+          "chinese_name": "AmfIP2",
+          "access": "READ_WRITE",
+          "data_type": "string",
+          "max_length": 64
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.TAISupportList.{i}.TAC",
+          "param_name": "TAC",
+          "chinese_name": "跟踪区编码",
+          "access": "READ_ONLY",
+          "data_type": "string",
+          "max_length": 24
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.TAISupportList.{i}.BroadcastPLMNs.{i}.PLMNID",
+          "param_name": "PLMNID",
+          "chinese_name": "PLMNID",
+          "access": "READ_ONLY",
+          "data_type": "string",
+          "max_length": 6
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.gNBID",
+          "param_name": "gNBID",
+          "chinese_name": "gNBID",
+          "access": "READ_WRITE",
+          "data_type": "unsignedInt"
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.RemoteAddress",
+          "param_name": "RemoteAddress",
+          "chinese_name": "对端IP",
+          "access": "READ_WRITE",
+          "data_type": "string",
+          "max_length": 64
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.SubnetMask",
+          "param_name": "SubnetMask",
+          "chinese_name": "子网掩码",
+          "access": "READ_ONLY",
+          "data_type": "string",
+          "max_length": 64
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.LocalAddress",
+          "param_name": "LocalAddress",
+          "chinese_name": "本端地址",
+          "access": "READ_ONLY",
+          "data_type": "string",
+          "max_length": 64
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBIdLength",
+          "param_name": "gNBIdLength",
+          "chinese_name": "gNB标识长度",
+          "access": "READ_WRITE",
+          "data_type": "unsignedInt",
+          "min_value": 22,
+          "max_value": 32
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBId",
+          "param_name": "gNBId",
+          "chinese_name": "gNB标识",
+          "access": "READ_WRITE",
+          "data_type": "unsignedInt",
+          "min_value": 0,
+          "max_value": 4294967295
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBName",
+          "param_name": "gNBName",
+          "chinese_name": "gNB名称",
+          "access": "READ_WRITE",
+          "data_type": "string",
+          "max_length": 150
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.AdminState",
+          "param_name": "AdminState",
+          "chinese_name": "基站的管理状态",
+          "access": "READ_WRITE",
+          "data_type": "unsignedInt",
+          "min_value": 1,
+          "max_value": 3
+        }
+      ],
+      "commands": [
+        {
+          "command_code": "LST NR_AMF_POOL_CONFIG_PARAM",
+          "logical_code": "NR_AMF_POOL_CONFIG_PARAM",
+          "operation_type": "LST",
+          "rpc_method": "GetParameterValues",
+          "target_paths": [
+            "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.AmfName",
+            "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.PLMNID",
+            "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.GUAMI.{i}.AmfRegionID",
+            "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.GUAMI.{i}.AmfSetID",
+            "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.GUAMI.{i}.AmfPointer",
+            "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.RelativeAmfCapacity",
+            "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.AmfIP1",
+            "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.AmfIP2"
+          ]
+        },
+        {
+          "command_code": "MOD NR_AMF_POOL_CONFIG_PARAM",
+          "logical_code": "NR_AMF_POOL_CONFIG_PARAM",
+          "operation_type": "MOD",
+          "rpc_method": "SetParameterValues",
+          "target_paths": [
+            "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.PLMNID",
+            "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.AmfIP1",
+            "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.AmfIP2"
+          ]
+        },
+        {
+          "command_code": "ADD NR_AMF_POOL_CONFIG_PARAM",
+          "logical_code": "NR_AMF_POOL_CONFIG_PARAM",
+          "operation_type": "ADD",
+          "rpc_method": "AddObject",
+          "target_paths": [
+            "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam."
+          ],
+          "target_object": "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.",
+          "command_name": "添加 AMF地址"
+        },
+        {
+          "command_code": "RMV NR_AMF_POOL_CONFIG_PARAM",
+          "logical_code": "NR_AMF_POOL_CONFIG_PARAM",
+          "operation_type": "RMV",
+          "rpc_method": "DeleteObject",
+          "target_paths": [
+            "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam."
+          ],
+          "target_object": "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam."
+        },
+        {
+          "command_code": "LST NR_XN_IP_ADDR_MAP_INFO",
+          "logical_code": "NR_XN_IP_ADDR_MAP_INFO",
+          "operation_type": "LST",
+          "rpc_method": "GetParameterValues",
+          "target_paths": [
+            "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.TAISupportList.{i}.TAC",
+            "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.TAISupportList.{i}.BroadcastPLMNs.{i}.PLMNID",
+            "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.gNBID",
+            "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.RemoteAddress",
+            "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.SubnetMask",
+            "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.LocalAddress"
+          ]
+        },
+        {
+          "command_code": "MOD NR_XN_IP_ADDR_MAP_INFO",
+          "logical_code": "NR_XN_IP_ADDR_MAP_INFO",
+          "operation_type": "MOD",
+          "rpc_method": "SetParameterValues",
+          "target_paths": [
+            "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.gNBID",
+            "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.RemoteAddress"
+          ]
+        },
+        {
+          "command_code": "ADD NR_XN_IP_ADDR_MAP_INFO",
+          "logical_code": "NR_XN_IP_ADDR_MAP_INFO",
+          "operation_type": "ADD",
+          "rpc_method": "AddObject",
+          "target_paths": [
+            "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo."
+          ],
+          "target_object": "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.",
+          "command_name": "添加 Xn链接信息"
+        },
+        {
+          "command_code": "RMV NR_XN_IP_ADDR_MAP_INFO",
+          "logical_code": "NR_XN_IP_ADDR_MAP_INFO",
+          "operation_type": "RMV",
+          "rpc_method": "DeleteObject",
+          "target_paths": [
+            "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo."
+          ],
+          "target_object": "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo."
+        },
+        {
+          "command_code": "LST NR_RAN_COMMON",
+          "logical_code": "NR_RAN_COMMON",
+          "operation_type": "LST",
+          "rpc_method": "GetParameterValues",
+          "target_paths": [
+            "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBIdLength",
+            "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBId",
+            "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBName",
+            "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.AdminState"
+          ]
+        },
+        {
+          "command_code": "MOD NR_RAN_COMMON",
+          "logical_code": "NR_RAN_COMMON",
+          "operation_type": "MOD",
+          "rpc_method": "SetParameterValues",
+          "target_paths": [
+            "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBIdLength",
+            "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBId",
+            "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBName",
+            "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.AdminState"
+          ]
+        }
+      ]
+    },
+    {
       "chapter": "SF",
       "group_code": "Device.Services.FAPControl.LTE.Gateway.*",
       "command_zh_name": "安全接入网关",
@@ -1511,8 +1785,8 @@
       ],
       "commands": [
         {
-          "command_code": "LST ",
-          "logical_code": "",
+          "command_code": "LST FAP_SERVICE",
+          "logical_code": "FAP_SERVICE",
           "operation_type": "LST",
           "rpc_method": "GetParameterValues",
           "target_paths": [
@@ -1553,8 +1827,8 @@
           ]
         },
         {
-          "command_code": "MOD ",
-          "logical_code": "",
+          "command_code": "MOD FAP_SERVICE",
+          "logical_code": "FAP_SERVICE",
           "operation_type": "MOD",
           "rpc_method": "SetParameterValues",
           "target_paths": [
@@ -1737,16 +2011,139 @@
       "group_code": "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.*",
       "command_zh_name": "EPC PLMN 列表",
       "has_instance": true,
-      "paths": null,
-      "commands": null
+      "paths": [
+        {
+          "standard_path": "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.PLMNID",
+          "param_name": "PLMNID",
+          "chinese_name": "小区PLMNID",
+          "access": "READ_WRITE",
+          "data_type": "string",
+          "max_length": 6
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.CellReservedForOperatorUse",
+          "param_name": "CellReservedForOperatorUse",
+          "chinese_name": "小区预留标识",
+          "access": "READ_WRITE",
+          "data_type": "boolean"
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.Enable",
+          "param_name": "Enable",
+          "chinese_name": "PLMN列表使能",
+          "access": "READ_WRITE",
+          "data_type": "boolean"
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.IsPrimary",
+          "param_name": "IsPrimary",
+          "chinese_name": "主PLMN标识",
+          "access": "READ_WRITE",
+          "data_type": "boolean"
+        }
+      ],
+      "commands": [
+        {
+          "command_code": "LST PLMN_LIST",
+          "logical_code": "PLMN_LIST",
+          "operation_type": "LST",
+          "rpc_method": "GetParameterValues",
+          "target_paths": [
+            "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.PLMNID",
+            "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.CellReservedForOperatorUse",
+            "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.Enable",
+            "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.IsPrimary"
+          ]
+        },
+        {
+          "command_code": "MOD PLMN_LIST",
+          "logical_code": "PLMN_LIST",
+          "operation_type": "MOD",
+          "rpc_method": "SetParameterValues",
+          "target_paths": [
+            "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.PLMNID",
+            "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.CellReservedForOperatorUse",
+            "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.Enable",
+            "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.IsPrimary"
+          ]
+        },
+        {
+          "command_code": "ADD PLMN_LIST",
+          "logical_code": "PLMN_LIST",
+          "operation_type": "ADD",
+          "rpc_method": "AddObject",
+          "target_paths": [
+            "Device.Services.FAPService.CellConfig.LTE.EPC.PLMNList."
+          ],
+          "target_object": "Device.Services.FAPService.CellConfig.LTE.EPC.PLMNList."
+        },
+        {
+          "command_code": "RMV PLMN_LIST",
+          "logical_code": "PLMN_LIST",
+          "operation_type": "RMV",
+          "rpc_method": "DeleteObject",
+          "target_paths": [
+            "Device.Services.FAPService.CellConfig.LTE.EPC.PLMNList."
+          ],
+          "target_object": "Device.Services.FAPService.CellConfig.LTE.EPC.PLMNList."
+        }
+      ]
     },
     {
       "chapter": "SF",
       "group_code": "Device.Services.FAPService.{i}.CellConfig.LTE.VoLTE.PdcpInitParam.{i}.*",
       "command_zh_name": "VoLTE PDCP 初始参数",
       "has_instance": true,
-      "paths": null,
-      "commands": null
+      "paths": [
+        {
+          "standard_path": "Device.Services.FAPService.{i}.CellConfig.LTE.VoLTE.PdcpInitParam.{i}.RohcEn",
+          "param_name": "RohcEn",
+          "chinese_name": "分QCI头压缩功能开关",
+          "access": "READ_WRITE",
+          "data_type": "string",
+          "max_length": 64
+        }
+      ],
+      "commands": [
+        {
+          "command_code": "LST PDCP_INIT_PARAM",
+          "logical_code": "PDCP_INIT_PARAM",
+          "operation_type": "LST",
+          "rpc_method": "GetParameterValues",
+          "target_paths": [
+            "Device.Services.FAPService.{i}.CellConfig.LTE.VoLTE.PdcpInitParam.{i}.RohcEn"
+          ]
+        },
+        {
+          "command_code": "MOD PDCP_INIT_PARAM",
+          "logical_code": "PDCP_INIT_PARAM",
+          "operation_type": "MOD",
+          "rpc_method": "SetParameterValues",
+          "target_paths": [
+            "Device.Services.FAPService.{i}.CellConfig.LTE.VoLTE.PdcpInitParam.{i}.RohcEn"
+          ]
+        },
+        {
+          "command_code": "ADD PDCP_INIT_PARAM",
+          "logical_code": "PDCP_INIT_PARAM",
+          "operation_type": "ADD",
+          "rpc_method": "AddObject",
+          "target_paths": [
+            "Device.Services.FAPService.CellConfig.LTE.VoLTE.PdcpInitParam."
+          ],
+          "target_object": "Device.Services.FAPService.CellConfig.LTE.VoLTE.PdcpInitParam."
+        },
+        {
+          "command_code": "RMV PDCP_INIT_PARAM",
+          "logical_code": "PDCP_INIT_PARAM",
+          "operation_type": "RMV",
+          "rpc_method": "DeleteObject",
+          "target_paths": [
+            "Device.Services.FAPService.CellConfig.LTE.VoLTE.PdcpInitParam."
+          ],
+          "target_object": "Device.Services.FAPService.CellConfig.LTE.VoLTE.PdcpInitParam."
+        }
+      ]
     },
     {
       "chapter": "SG",
