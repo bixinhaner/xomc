@@ -36,11 +36,34 @@ const DEVICE_LIST_SYNC_PARAMS: DeviceListSyncParam[] = [
     key: 'rfStatus',
     scope: 'common',
     paths: [
-      'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.X_COM_RadioEnable',
-      'Device.Services.FAPService.{i}.CellConfig.NR.RAN.RF.X_COM_RadioEnable',
-      'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.RFTxStatus',
-      'Device.Services.FAPService.{i}.CellConfig.NR.RAN.RF.RFTxStatus',
+      'Device.DeviceInfo.SAS.RadioEnable',
+      'Device.DeviceInfo.SAS.RadioEnable1',
+      'Device.DeviceInfo.SAS.RadioEnable2',
+      'Device.DeviceInfo.SAS.RadioEnable3',
+      'Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus',
     ],
+  },
+  {
+    key: 'rfStatus',
+    scope: 'eNB',
+    paths: [
+      'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.X_COM_RadioEnable',
+      'Device.DeviceInfo.RU.{i}.RFTxStatus',
+      'Device.DeviceInfo.EU.{i}.RU.{i}.RFTxStatus',
+    ],
+  },
+  {
+    key: 'rfStatus',
+    scope: 'gNB',
+    paths: [
+      'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.rftxEnable',
+      'Device.DeviceInfo.CellConfig.{i}.SAS.RadioEnable',
+    ],
+  },
+  {
+    key: 'rfStatus',
+    scope: 'GSM',
+    paths: ['Device.Services.GsmBTSCellDT.{i}.RfState'],
   },
   {
     key: 'syncStatus',

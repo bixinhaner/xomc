@@ -42,8 +42,13 @@ describe('rfStatusLabelOf', () => {
     expect(rfStatusLabelOf('error', labels)).toBe('异常');
   });
 
-  it('forces RF OFF for offline devices even when the raw value is ON', () => {
-    expect(displayRFStatusOf('1', false)).toBe('off');
-    expect(displayRFStatusLabelOf('1', false, labels)).toBe('射频关');
+  it('keeps the last reported RF state independent of management connectivity', () => {
+    expect(displayRFStatusOf('1', false)).toBe('on');
+    expect(displayRFStatusLabelOf('1', false, labels)).toBe('射频开');
+  });
+
+  it('keeps missing RF state unknown for both online and offline devices', () => {
+    expect(displayRFStatusOf('', true)).toBeNull();
+    expect(displayRFStatusOf('', false)).toBeNull();
   });
 });
