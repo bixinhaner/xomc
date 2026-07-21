@@ -235,7 +235,7 @@ func (m *execFTPConfigRepo) List(_ context.Context, _ FTPConfigFilter) (*model.L
 // ---------------------------------------------------------------------------
 
 func newTestExecutor(taskRepo *execTaskRepo, deviceRepo *execDeviceRepo, cmdQ *execCmdQueue) *BackupExecutor {
-	return &BackupExecutor{
+	executor := &BackupExecutor{
 		taskRepo:   taskRepo,
 		deviceRepo: deviceRepo,
 		taskSvc:    cmdQ,
@@ -243,6 +243,13 @@ func newTestExecutor(taskRepo *execTaskRepo, deviceRepo *execDeviceRepo, cmdQ *e
 		eventBus:   event.NewChannelEventBus(16, zap.NewNop()),
 		logger:     zap.NewNop(),
 	}
+	executor.SetTransferProvider(&execTransferProvider{
+		upload: transfercfg.UploadSettings{
+			BaseURL: "http://acs.test:7557",
+			Path:    "/smallcell/FileUploadService",
+		},
+	})
+	return executor
 }
 
 func TestHandleTask_PendingToRunning(t *testing.T) {
