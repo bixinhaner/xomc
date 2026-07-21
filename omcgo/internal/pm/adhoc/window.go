@@ -56,6 +56,24 @@ func nextBucketStart(g metrics.Granularity, bucket time.Time) time.Time {
 	}
 }
 
+// previousBucketStart 返回给定桶起点之前的上一桶起点。
+func previousBucketStart(g metrics.Granularity, bucket time.Time) time.Time {
+	switch g {
+	case metrics.Granularity15Min:
+		return bucket.Add(-15 * time.Minute)
+	case metrics.GranularityHourly:
+		return bucket.Add(-time.Hour)
+	case metrics.GranularityDaily:
+		return bucket.AddDate(0, 0, -1)
+	case metrics.GranularityWeekly:
+		return bucket.AddDate(0, 0, -7)
+	case metrics.GranularityMonthly:
+		return bucket.AddDate(0, -1, 0)
+	default:
+		return bucket.Add(-time.Hour)
+	}
+}
+
 // truncateAdhocDay 把 t 截到当天 00:00（保留 t 的时区）。
 func truncateAdhocDay(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
