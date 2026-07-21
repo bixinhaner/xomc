@@ -6587,6 +6587,55 @@ COMMENT ON TABLE public.sys_configs IS '系统配置参数表';
 
 
 --
+-- Name: config_apply_versions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.config_apply_versions (
+    category character varying(64) NOT NULL,
+    config_version bigint DEFAULT 0 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: config_apply_batches; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.config_apply_batches (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    category character varying(64) NOT NULL,
+    config_version bigint NOT NULL,
+    status character varying(16) NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT chk_config_apply_batch_status CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('applying'::character varying)::text, ('applied'::character varying)::text, ('failed'::character varying)::text])))
+);
+
+
+--
+-- Name: config_apply_targets; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.config_apply_targets (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    batch_id uuid NOT NULL,
+    category character varying(64) NOT NULL,
+    target character varying(128) NOT NULL,
+    status character varying(16) NOT NULL,
+    attempts integer DEFAULT 0 NOT NULL,
+    applied_at timestamp with time zone,
+    last_error text DEFAULT ''::text NOT NULL,
+    expected_value jsonb DEFAULT '{}'::jsonb NOT NULL,
+    actual_value jsonb DEFAULT '{}'::jsonb NOT NULL,
+    lease_token uuid,
+    lease_expires_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT chk_config_apply_target_status CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('applying'::character varying)::text, ('applied'::character varying)::text, ('failed'::character varying)::text])))
+);
+
+
+--
 -- Name: sys_dictionaries; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -9320,6 +9369,46 @@ ALTER TABLE ONLY public.roles
 
 ALTER TABLE ONLY public.roles
     ADD CONSTRAINT roles_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: config_apply_batches config_apply_batches_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.config_apply_batches
+    ADD CONSTRAINT config_apply_batches_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: config_apply_batches uq_config_apply_batch_version; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.config_apply_batches
+    ADD CONSTRAINT uq_config_apply_batch_version UNIQUE (category, config_version);
+
+
+--
+-- Name: config_apply_targets config_apply_targets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.config_apply_targets
+    ADD CONSTRAINT config_apply_targets_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: config_apply_targets uq_config_apply_target; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.config_apply_targets
+    ADD CONSTRAINT uq_config_apply_target UNIQUE (batch_id, target);
+
+
+--
+-- Name: config_apply_versions config_apply_versions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.config_apply_versions
+    ADD CONSTRAINT config_apply_versions_pkey PRIMARY KEY (category);
 
 
 --
@@ -14684,6 +14773,27 @@ CREATE INDEX idx_station_fault_logs_status ON public.station_fault_logs USING bt
 
 
 --
+-- Name: idx_config_apply_targets_pending; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_config_apply_targets_pending ON public.config_apply_targets USING btree (status, updated_at) WHERE ((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('failed'::character varying)::text]));
+
+
+--
+-- Name: idx_config_apply_targets_recovering; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_config_apply_targets_recovering ON public.config_apply_targets USING btree (lease_expires_at) WHERE ((status)::text = 'applying'::text);
+
+
+--
+-- Name: uq_config_apply_target_running; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_config_apply_target_running ON public.config_apply_targets USING btree (category, target) WHERE ((status)::text = 'applying'::text);
+
+
+--
 -- Name: idx_station_running_logs_active; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -18600,6 +18710,14 @@ ALTER TABLE ONLY public.pm_user_dashboard_preferences
 
 ALTER TABLE ONLY public.products
     ADD CONSTRAINT fk_products_param_model FOREIGN KEY (param_model_id) REFERENCES public.param_models(id) ON DELETE SET NULL;
+
+
+--
+-- Name: config_apply_targets config_apply_targets_batch_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.config_apply_targets
+    ADD CONSTRAINT config_apply_targets_batch_id_fkey FOREIGN KEY (batch_id) REFERENCES public.config_apply_batches(id) ON DELETE CASCADE;
 
 
 --

@@ -214,6 +214,8 @@ SELECT
 FROM mml_command_groups g
 LEFT JOIN mml_commands c ON c.group_id = g.id AND c.deprecated_at IS NULL
 WHERE g.path IS NOT NULL
+  AND g.deleted_at IS NULL
+  AND g.deprecated_at IS NULL
   AND (
     (g.source = 'standard' AND COALESCE(g.chapter_code, '') <> '')
     OR g.source = 'admin'
@@ -221,6 +223,17 @@ WHERE g.path IS NOT NULL
 %s
 ORDER BY g.path,
          g.display_order,
+         CASE
+             WHEN g.group_code = 'MML350_G_INTERFACE_BINDING'
+              AND c.command_code = 'LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NRCU' THEN 1
+             WHEN g.group_code = 'MML350_G_INTERFACE_BINDING'
+              AND c.command_code = 'MOD MML350_INTERFACE_BINDING_F' THEN 2
+             WHEN g.group_code = 'MML350_G_INTERFACE_BINDING'
+              AND c.command_code = 'LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NGAPMGMT' THEN 3
+             WHEN g.group_code = 'MML350_G_INTERFACE_BINDING'
+              AND c.command_code = 'MOD MML350_INTERFACE_BINDING_NG' THEN 4
+             ELSE 99
+         END,
          regexp_replace(COALESCE(c.command_code, ''), '^(LST|MOD|ADD|RMV)[[:space:]]+', ''),
          CASE c.operation_type
              WHEN 'LST' THEN 1
