@@ -6384,6 +6384,8 @@ const messages: Record<string, string> = {
   'mml.consoleV2.config.validation.maxValue':   'Must not be greater than {bound}',
   'mml.consoleV2.config.validation.minLength':  'Must be at least {bound} characters',
   'mml.consoleV2.config.validation.maxLength':  'Must not exceed {bound} characters',
+  'mml.consoleV2.config.validation.enumValue':  'Please select a valid value',
+  'mml.consoleV2.config.validation.pattern':    'Value format is invalid',
   'mml.consoleV2.config.writeReminder.addRmv': 'ADD / RMV protocol acts on only one object path per execution; locked to a single row.',
   'mml.consoleV2.config.writeReminder.mod':  'MOD will modify the parameter values of all selected devices; please confirm the values are correct.',
   'mml.consoleV2.config.pickDeviceFirst':    'Please select target devices first',

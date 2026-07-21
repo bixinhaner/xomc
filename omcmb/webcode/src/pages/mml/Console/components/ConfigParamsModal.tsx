@@ -17,7 +17,14 @@ import {
 } from 'antd';
 import { PlayCircleOutlined, RightOutlined } from '@ant-design/icons';
 import { InputAddon } from '@/components/common/InputAddon';
-import type { CommandItem, ExecMode, ExecRequest, OperationMode, RawPathPayload } from '../types';
+import type {
+  CommandItem,
+  CommandParamPath,
+  ExecMode,
+  ExecRequest,
+  OperationMode,
+  RawPathPayload,
+} from '../types';
 import { CONFIG_TAB_HEIGHT, isReadOp, opColor, opLabel } from '../constants';
 import RawPathPanel from './RawPathPanel';
 import { newRawPathRow } from '../rawPathRow';
@@ -49,6 +56,16 @@ const BOOLEAN_OPTIONS = [
   { label: 'false', value: 'false' },
 ];
 
+const PARAM_CONTROL_STYLE = {
+  width: '100%',
+  marginTop: 6,
+};
+
+const INPUT_CONTROL_STYLE = {
+  ...PARAM_CONTROL_STYLE,
+  display: 'block',
+};
+
 function isBooleanValueType(valueType?: string): boolean {
   const normalized = valueType?.trim().toLowerCase();
   return normalized === 'boolean' || normalized === 'bool';
@@ -59,6 +76,20 @@ function normalizeBooleanValue(value: unknown): 'true' | 'false' | undefined {
   if (normalized === 'true' || normalized === '1') return 'true';
   if (normalized === 'false' || normalized === '0') return 'false';
   return undefined;
+}
+
+function paramModelKey(path: CommandParamPath): string {
+  return [
+    path.path,
+    path.writable,
+    path.isObject,
+    path.minValue ?? '',
+    path.maxValue ?? '',
+    path.valueType ?? '',
+    path.defaultValue ?? '',
+    path.validationPattern ?? '',
+    JSON.stringify(path.enumOptions ?? []),
+  ].join('\u001f');
 }
 
 interface ConfigParamsModalProps {
@@ -143,7 +174,7 @@ export default function ConfigParamsModal({
 
   // 命令或其确认的 PATH 变更时重置标准模式参数（渲染阶段调整，避开 set-state-in-effect）。
   const configKey = command
-    ? `${command.id}:${standardParamPaths.map((path) => path.path).join('\u0000')}`
+    ? `${command.id}:${command.operationType}:${standardParamPaths.map(paramModelKey).join('\u0000')}`
     : '';
   if (configKey !== lastConfigKey) {
     setLastConfigKey(configKey);
@@ -167,6 +198,8 @@ export default function ConfigParamsModal({
             initVals[p.path] = normalizeBooleanValue(p.defaultValue)
               ?? normalizeBooleanValue(p.minValue)
               ?? 'false';
+          } else if (p.defaultValue != null && p.defaultValue !== '') {
+            initVals[p.path] = p.defaultValue;
           } else if (p.minValue != null) {
             initVals[p.path] = String(p.minValue);
           }
@@ -399,6 +432,7 @@ export default function ConfigParamsModal({
                 ? modValidationErrors[p.path]
                 : undefined;
               const isBoolean = isBooleanValueType(p.valueType);
+              const enumOptions = isBoolean ? BOOLEAN_OPTIONS : (p.enumOptions ?? []);
 
               return (
                 <div key={p.path} style={{ minWidth: 0 }}>
@@ -430,22 +464,37 @@ export default function ConfigParamsModal({
                       <Tag style={{ marginInlineStart: 0, flexShrink: 0 }}>{p.valueType}</Tag>
                     )}
                   </div>
-                  {isBoolean ? (
+                  {enumOptions.length > 0 ? (
                     <Select
+                      className="mml-config-param-select mml-config-param-control"
                       aria-label={p.label}
-                      value={values[p.path] ?? 'false'}
-                      options={BOOLEAN_OPTIONS}
+                      status={error ? 'error' : undefined}
+                      value={values[p.path] ?? (isBoolean ? 'false' : undefined)}
+                      options={enumOptions}
                       onChange={(value) => setValues((prev) => ({ ...prev, [p.path]: value }))}
-                      style={{ display: 'block', width: '100%', marginTop: 6 }}
+                      style={PARAM_CONTROL_STYLE}
+                      styles={{
+                        root: { display: 'inline-flex', width: '100%' },
+                        content: {
+                          flex: '1 1 auto',
+                          minWidth: 0,
+                          paddingInlineEnd: 32,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        },
+                        suffix: { marginInlineStart: 'auto' },
+                      }}
                     />
                   ) : (
                     <Input
+                      className="mml-config-param-control"
                       status={error ? 'error' : undefined}
                       aria-invalid={Boolean(error)}
                       placeholder={t('mml.consoleV2.config.inputFieldPlaceholder', { label: p.label })}
                       value={values[p.path] ?? ''}
                       onChange={(e) => setValues((prev) => ({ ...prev, [p.path]: e.target.value }))}
-                      style={{ display: 'block', width: '100%', marginTop: 6 }}
+                      style={INPUT_CONTROL_STYLE}
                     />
                   )}
                   {error && (

@@ -247,6 +247,41 @@ func (r *PgSubFieldRepository) ListByCommand(ctx context.Context, commandID uuid
 	return out, nil
 }
 
+func buildEnumOptions(enumValues, enumLabels *string) []MMLParamEnumOption {
+	if enumValues == nil {
+		return nil
+	}
+	values := splitEnumCSV(*enumValues)
+	if len(values) == 0 {
+		return nil
+	}
+	var labels []string
+	if enumLabels != nil {
+		labels = splitEnumCSV(*enumLabels)
+	}
+	options := make([]MMLParamEnumOption, 0, len(values))
+	for i, value := range values {
+		label := value
+		if i < len(labels) && labels[i] != "" {
+			label = labels[i]
+		}
+		options = append(options, MMLParamEnumOption{Value: value, Label: label})
+	}
+	return options
+}
+
+func splitEnumCSV(value string) []string {
+	parts := strings.Split(strings.ReplaceAll(value, "，", ","), ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
 // ListEnrichedByCommand 返回 sub_fields JOIN standard_params 富集后的视图，
 // 供 GET /mml/commands/:id/sub-fields API 直接 marshal 给前端 SubFieldChecklist /
 // SubFieldInputList 渲染使用，无需前端再发查 param 元数据。
@@ -275,8 +310,16 @@ func (r *PgSubFieldRepository) ListEnrichedByCommand(ctx context.Context, comman
 	//   - 本改: 回到 T-0170 行为,前端不再处理 unsupported 行
 	//
 	// paramModelID 为 nil (admin 视角)时:不叠加 param_mappings 过滤,is_supported
-	// 列走 BOOL_OR 聚合,与原行为一致(admin 看的是字典全貌)。
+	// 列走 BOOL_OR 聚合,与原行为一致(admin 看的是字典全貌)。带 paramModelID 时，
+	// 同一查询按模型读取 default/pattern/enum，并让模型 min/max 覆盖标准树范围。
 	paramModelFilter := ""
+	modelMappingJoin := ""
+	defaultValueExpr := "NULL::text"
+	validationPatternExpr := "NULL::text"
+	minValueExpr := "sp.min_value"
+	maxValueExpr := "sp.max_value"
+	enumValuesExpr := "NULL::text"
+	enumLabelsExpr := "NULL::text"
 	isSupportedExpr := `(
         SELECT BOOL_OR(pm.is_supported)
           FROM param_mappings pm
@@ -285,6 +328,24 @@ func (r *PgSubFieldRepository) ListEnrichedByCommand(ctx context.Context, comman
     )`
 	args := []any{commandID}
 	if paramModelID != nil {
+		modelMappingJoin = `
+LEFT JOIN LATERAL (
+    SELECT pm.default_value, pm.validation_pattern,
+           pm.min_value, pm.max_value, pm.enum_values, pm.enum_labels
+      FROM param_mappings pm
+     WHERE pm.standard_path = sp.standard_path
+       AND pm.param_model_id = $2
+       AND pm.is_active = true
+       AND pm.is_supported = true
+     ORDER BY (pm.source = 'custom') DESC, pm.private_path ASC
+     LIMIT 1
+) model_pm ON true`
+		defaultValueExpr = "model_pm.default_value"
+		validationPatternExpr = "model_pm.validation_pattern"
+		minValueExpr = "COALESCE(model_pm.min_value, sp.min_value)"
+		maxValueExpr = "COALESCE(model_pm.max_value, sp.max_value)"
+		enumValuesExpr = "model_pm.enum_values"
+		enumLabelsExpr = "model_pm.enum_labels"
 		paramModelFilter = `
   AND EXISTS (
       SELECT 1 FROM param_mappings pm
@@ -318,27 +379,30 @@ SELECT
     false                                 AS supports_delete,
     COALESCE(sp.change_applies, 'Immediate') AS change_applies,
     CASE
-        WHEN sp.min_value IS NOT NULL AND sp.max_value IS NOT NULL THEN
+        WHEN ` + minValueExpr + ` IS NOT NULL AND ` + maxValueExpr + ` IS NOT NULL THEN
             jsonb_build_object(
-                'zh-CN', '[' || sp.min_value::text || ', ' || sp.max_value::text || ']',
-                'en-US', '[' || sp.min_value::text || ', ' || sp.max_value::text || ']'
+                'zh-CN', '[' || ` + minValueExpr + `::text || ', ' || ` + maxValueExpr + `::text || ']',
+                'en-US', '[' || ` + minValueExpr + `::text || ', ' || ` + maxValueExpr + `::text || ']'
             )
-        WHEN sp.min_value IS NOT NULL THEN
+        WHEN ` + minValueExpr + ` IS NOT NULL THEN
             jsonb_build_object(
-                'zh-CN', '≥ ' || sp.min_value::text,
-                'en-US', '≥ ' || sp.min_value::text
+                'zh-CN', '≥ ' || ` + minValueExpr + `::text,
+                'en-US', '≥ ' || ` + minValueExpr + `::text
             )
-        WHEN sp.max_value IS NOT NULL THEN
+        WHEN ` + maxValueExpr + ` IS NOT NULL THEN
             jsonb_build_object(
-                'zh-CN', '≤ ' || sp.max_value::text,
-                'en-US', '≤ ' || sp.max_value::text
+                'zh-CN', '≤ ' || ` + maxValueExpr + `::text,
+                'en-US', '≤ ' || ` + maxValueExpr + `::text
             )
         ELSE '{}'::jsonb
     END                                   AS constraint_text_i18n,
-    NULL::text                            AS default_value,
-    NULL::text                            AS js_regex,
-    sp.min_value                          AS min_value,
-    sp.max_value                          AS max_value,
+    ` + defaultValueExpr + `                  AS default_value,
+    ` + validationPatternExpr + `             AS js_regex,
+    ` + validationPatternExpr + `             AS validation_pattern,
+    ` + minValueExpr + `                      AS min_value,
+    ` + maxValueExpr + `                      AS max_value,
+    ` + enumValuesExpr + `                    AS enum_values,
+    ` + enumLabelsExpr + `                    AS enum_labels,
     jsonb_build_object(
         'zh-CN', sp.standard_path,
         'en-US', sp.standard_path
@@ -347,6 +411,7 @@ SELECT
     COALESCE(` + isSupportedExpr + `, true)             AS is_supported
 FROM mml_command_sub_fields csf
 JOIN standard_params sp ON sp.id = csf.standard_path_id
+` + modelMappingJoin + `
 WHERE csf.command_id = $1` + paramModelFilter + `
 ORDER BY csf.sort_order ASC, csf.mml_code ASC`
 
@@ -360,13 +425,15 @@ ORDER BY csf.sort_order ASC, csf.mml_code ASC`
 	for rows.Next() {
 		e := MMLCommandSubFieldEnriched{}
 		var labelI18n, constraintI18n, paramNameI18n []byte
+		var enumValues, enumLabels *string
 		if err := rows.Scan(
 			&e.ID, &e.CommandID, &e.ParamID, &e.MMLCode, &labelI18n,
 			&e.DefaultSelected, &e.IsRequired, &e.SortOrder, &e.CreatedAt, &e.UpdatedAt,
 			&e.Tr069Path, &e.ValueType,
 			&e.AccessType, &e.IsObject, &e.SupportsAdd, &e.SupportsDelete,
 			&e.ChangeApplies, &constraintI18n,
-			&e.DefaultValue, &e.JsRegex, &e.MinValue, &e.MaxValue, &paramNameI18n,
+			&e.DefaultValue, &e.JsRegex, &e.ValidationPattern,
+			&e.MinValue, &e.MaxValue, &enumValues, &enumLabels, &paramNameI18n,
 			&e.Description,
 			&e.IsSupported,
 		); err != nil {
@@ -381,6 +448,7 @@ ORDER BY csf.sort_order ASC, csf.mml_code ASC`
 		if err := unmarshalI18n(paramNameI18n, &e.ParamNameI18n); err != nil {
 			return nil, fmt.Errorf("unmarshal param name_i18n: %w", err)
 		}
+		e.EnumOptions = buildEnumOptions(enumValues, enumLabels)
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {

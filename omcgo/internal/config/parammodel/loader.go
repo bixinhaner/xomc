@@ -296,6 +296,11 @@ SET standard_path = pm.standard_path,
                      THEN d.min_value ELSE pm.min_value END,
     max_value = CASE WHEN COALESCE((pr.device_attrs_override->>'max_value')::boolean, false)
                      THEN d.max_value ELSE pm.max_value END,
+    default_value = pm.default_value,
+    validation_pattern = pm.validation_pattern,
+    enum_values = pm.enum_values,
+    enum_labels = pm.enum_labels,
+    mirror_with = pm.mirror_with,
     is_storable = pm.is_storable,
     is_supported = pm.is_supported,
     updated_at = now()
@@ -318,6 +323,11 @@ WHERE d.product_id = pr.id
         AND d.min_value IS DISTINCT FROM pm.min_value)
     OR (NOT COALESCE((pr.device_attrs_override->>'max_value')::boolean, false)
         AND d.max_value IS DISTINCT FROM pm.max_value)
+    OR d.default_value IS DISTINCT FROM pm.default_value
+    OR d.validation_pattern IS DISTINCT FROM pm.validation_pattern
+    OR d.enum_values IS DISTINCT FROM pm.enum_values
+    OR d.enum_labels IS DISTINCT FROM pm.enum_labels
+    OR d.mirror_with IS DISTINCT FROM pm.mirror_with
   )`
 	updTag, err := tx.Exec(ctx, updSQL, modelID)
 	if err != nil {
@@ -352,7 +362,8 @@ type discoveredObjectInsert struct {
 func loadDiscoveredObjectReconcileRows(ctx context.Context, tx pgx.Tx, modelID string) ([]ParamMapping, []discoveredMappingRef, error) {
 	objectRows, err := tx.Query(ctx, `
 SELECT standard_path, private_path, entry_type, access, data_type, change_applies,
-       min_value, max_value, enum_values, enum_labels, mirror_with,
+       min_value, max_value, default_value, validation_pattern,
+       enum_values, enum_labels, mirror_with,
        is_storable, is_active, is_supported
 FROM param_mappings
 WHERE param_model_id = $1
@@ -380,6 +391,8 @@ WHERE param_model_id = $1
 			&changeApplies,
 			&mapping.MinValue,
 			&mapping.MaxValue,
+			&mapping.DefaultValue,
+			&mapping.ValidationPattern,
 			&mapping.EnumValues,
 			&mapping.EnumLabels,
 			&mapping.MirrorWith,
@@ -493,7 +506,8 @@ func batchInsertDiscoveredObjects(ctx context.Context, tx pgx.Tx, pending []disc
 		ib := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).Insert("discovered_param_mappings").Columns(
 			"product_id", "software_version", "standard_path", "private_path",
 			"entry_type", "access", "data_type", "change_applies",
-			"min_value", "max_value", "enum_values", "enum_labels", "mirror_with",
+			"min_value", "max_value", "default_value", "validation_pattern",
+			"enum_values", "enum_labels", "mirror_with",
 			"is_storable", "is_active", "is_supported",
 		)
 		for _, ins := range pending[i:end] {
@@ -509,6 +523,8 @@ func batchInsertDiscoveredObjects(ctx context.Context, tx pgx.Tx, pending []disc
 				mapping.ChangeApplies,
 				mapping.MinValue,
 				mapping.MaxValue,
+				mapping.DefaultValue,
+				mapping.ValidationPattern,
 				mapping.EnumValues,
 				mapping.EnumLabels,
 				mapping.MirrorWith,
@@ -574,6 +590,7 @@ func batchInsertMappings(ctx context.Context, tx pgx.Tx, modelID string, entries
 			"param_model_id", "standard_path", "private_path", "entry_type",
 			"access", "data_type", "change_applies",
 			"min_value", "max_value",
+			"default_value", "validation_pattern",
 			"enum_values", "enum_labels", // T-0158
 			"mirror_with", // T-0159
 			"is_storable", "is_active", "is_supported",
@@ -594,9 +611,11 @@ func batchInsertMappings(ctx context.Context, tx pgx.Tx, modelID string, entries
 				nullIfEmpty(e.ChangeApplies),
 				parseNullableInt(e.Min),
 				parseNullableInt(e.Max),
-				nullIfEmpty(e.EnumValues), // T-0158: 枚举值 CSV
-				nullIfEmpty(e.EnumLabels), // T-0158: 枚举标签 CSV
-				nullIfEmpty(e.MirrorWith), // T-0159: 交叉镜像目标 standardPath
+				nullIfEmpty(e.DefaultValue),
+				nullIfEmpty(e.ValidationPattern),
+				nullIfEmpty(normalizeEnumCSV(e.EnumValues)),             // T-0158: 枚举值 CSV
+				nullIfEmpty(normalizeEnumCSV(e.EnumLabels)),             // T-0158: 枚举标签 CSV
+				nullIfEmpty(e.MirrorWith),                               // T-0159: 交叉镜像目标 standardPath
 				!strings.EqualFold(strings.TrimSpace(e.Store), "false"), // 缺省 / 任意非 "false" → true
 				true, // is_active
 				!strings.EqualFold(strings.TrimSpace(e.Supported), "false"), // T-0103: 缺省 / 任意非 "false" → true
@@ -616,6 +635,18 @@ func batchInsertMappings(ctx context.Context, tx pgx.Tx, modelID string, entries
 		total += end - i
 	}
 	return total, nil
+}
+
+func normalizeEnumCSV(value string) string {
+	parts := strings.Split(strings.ReplaceAll(value, "，", ","), ",")
+	normalized := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			normalized = append(normalized, part)
+		}
+	}
+	return strings.Join(normalized, ",")
 }
 
 // loadStandardModelFile 全量重写 standard_params 表。

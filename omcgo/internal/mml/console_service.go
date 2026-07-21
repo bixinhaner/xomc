@@ -494,24 +494,27 @@ func filterFlatCommand(command FlatCommand, supported *SupportedSet) (FlatComman
 // SubFieldDTO 是 GET /mml/commands/:id/sub-fields 端点的响应单元。
 // 包装 MMLCommandSubFieldEnriched 加 lang 派生顶级 label / constraint_text。
 type SubFieldDTO struct {
-	ID                 uuid.UUID         `json:"id"`
-	CommandID          uuid.UUID         `json:"command_id"`
-	ParamID            uuid.UUID         `json:"param_id"`
-	MMLCode            string            `json:"mml_code"`
-	Label              string            `json:"label"` // lang 派生
-	LabelI18n          map[string]string `json:"label_i18n"`
-	Tr069Path          string            `json:"tr069_path"`
-	ValueType          string            `json:"value_type"`
-	AccessType         string            `json:"access_type"`
-	IsObject           bool              `json:"is_object"`
-	SupportsAdd        bool              `json:"supports_add"`
-	SupportsDelete     bool              `json:"supports_delete"`
-	ChangeApplies      string            `json:"change_applies"`
-	ConstraintText     string            `json:"constraint_text"`
-	ConstraintTextI18n map[string]string `json:"constraint_text_i18n"`
-	DefaultValue       *string           `json:"default_value,omitempty"`
-	JsRegex            *string           `json:"js_regex,omitempty"`
-	// MinValue 是 standard_params.min_value：MML 控制台 MOD/ADD 填值时标量参数默认值。
+	ID                 uuid.UUID            `json:"id"`
+	CommandID          uuid.UUID            `json:"command_id"`
+	ParamID            uuid.UUID            `json:"param_id"`
+	MMLCode            string               `json:"mml_code"`
+	Label              string               `json:"label"` // lang 派生
+	LabelI18n          map[string]string    `json:"label_i18n"`
+	Tr069Path          string               `json:"tr069_path"`
+	ValueType          string               `json:"value_type"`
+	AccessType         string               `json:"access_type"`
+	IsObject           bool                 `json:"is_object"`
+	SupportsAdd        bool                 `json:"supports_add"`
+	SupportsDelete     bool                 `json:"supports_delete"`
+	ChangeApplies      string               `json:"change_applies"`
+	ConstraintText     string               `json:"constraint_text"`
+	ConstraintTextI18n map[string]string    `json:"constraint_text_i18n"`
+	DefaultValue       *string              `json:"default_value,omitempty"`
+	JsRegex            *string              `json:"js_regex,omitempty"`
+	ValidationPattern  *string              `json:"validation_pattern,omitempty"`
+	EnumOptions        []MMLParamEnumOption `json:"enum_options,omitempty"`
+	// MinValue/MaxValue 优先来自当前 paramModel 的 param_mappings，缺失时回退
+	// standard_params；MML 控制台 MOD/ADD 用它们做范围校验和兼容默认值。
 	MinValue        *int64 `json:"min_value,omitempty"`
 	MaxValue        *int64 `json:"max_value,omitempty"`
 	DefaultSelected bool   `json:"default_selected"`
@@ -543,6 +546,7 @@ func (s *ConsoleService) GetCommandSubFields(ctx context.Context, commandID uuid
 	// supportedPaths 是 Redis（ParamRegistry L1→L2→DB）取出的该产品支持路径集。
 	// nil 表示 admin 全集（不过滤）；非 nil 时 Go 层做交集，不再走 SQL EXISTS 过滤。
 	var supportedPaths map[string]struct{}
+	var paramModelID *uuid.UUID
 	if productClass != "" {
 		if s.supportedPathsRepo == nil {
 			return nil, fmt.Errorf("resolve supported paths for product_class %q: repository not configured", productClass)
@@ -558,6 +562,7 @@ func (s *ConsoleService) GetCommandSubFields(ctx context.Context, commandID uuid
 		}
 		// SupportedSet.Paths 已由 ParamRegistry 经 Redis L1→L2→DB 取得，直接复用。
 		supportedPaths = set.Paths
+		paramModelID = set.ParamModelID
 		if supportedPaths == nil {
 			supportedPaths = map[string]struct{}{}
 		}
@@ -572,9 +577,11 @@ func (s *ConsoleService) GetCommandSubFields(ctx context.Context, commandID uuid
 			return []SubFieldDTO{}, nil
 		}
 		supportedPaths = set.Paths
+		paramModelID = set.ParamModelID
 	}
-	// 取命令 sub_fields 全集（不带 SQL param_mappings 过滤），在 Go 层按 Redis 路径集过滤。
-	enriched, err := s.subFieldRepo.ListEnrichedByCommand(ctx, commandID, nil)
+	// 取命令 sub_fields 全集；产品上下文下 SQL 先按模型支持状态过滤，随后在 Go 层
+	// 按 Redis 路径集做交集，保证命令树与参数模型缓存口径一致。
+	enriched, err := s.subFieldRepo.ListEnrichedByCommand(ctx, commandID, paramModelID)
 	if err != nil {
 		return nil, fmt.Errorf("list enriched sub_fields: %w", err)
 	}
@@ -604,6 +611,8 @@ func (s *ConsoleService) GetCommandSubFields(ctx context.Context, commandID uuid
 			ConstraintText:     pickI18n(e.ConstraintTextI18n, lang, "", "", ""),
 			DefaultValue:       e.DefaultValue,
 			JsRegex:            e.JsRegex,
+			ValidationPattern:  e.ValidationPattern,
+			EnumOptions:        e.EnumOptions,
 			MinValue:           e.MinValue,
 			MaxValue:           e.MaxValue,
 			DefaultSelected:    e.DefaultSelected,

@@ -7,22 +7,31 @@ export type ModParamValidationCode =
   | 'minValue'
   | 'maxValue'
   | 'minLength'
-  | 'maxLength';
+  | 'maxLength'
+  | 'enumValue'
+  | 'pattern';
 
 export interface ModParamValidationError {
   code: ModParamValidationCode;
   bound?: number;
 }
 
+const NAMED_VALIDATION_PATTERNS: Record<string, string> = {
+  // omc ship's legacy front-end rule name: reject CJK characters.
+  no_zh: '^(?:(?![\\u4E00-\\u9FA5]|[\\uFE30-\\uFFA0]).)+$',
+};
+
 export function validateModParamValue(
   path: CommandParamPath,
   value: string,
 ): ModParamValidationError | null {
   if (value.trim() === '') return { code: 'required' };
-  if (path.minValue == null && path.maxValue == null) return null;
+
+  if (path.enumOptions?.length && !path.enumOptions.some((option) => option.value === value)) {
+    return { code: 'enumValue' };
+  }
 
   const rangeKind = dataTypeRangeKind(path.valueType);
-  if (rangeKind === 'none') return null;
   if (rangeKind === 'length') {
     const length = Array.from(value).length;
     if (path.minValue != null && length < path.minValue) {
@@ -31,20 +40,38 @@ export function validateModParamValue(
     if (path.maxValue != null && length > path.maxValue) {
       return { code: 'maxLength', bound: path.maxValue };
     }
-    return null;
+  } else if (rangeKind !== 'none' && (path.minValue != null || path.maxValue != null)) {
+    const trimmed = value.trim();
+    if (!/^[+-]?\d+$/.test(trimmed)) return { code: 'integer' };
+    const numericValue = Number(trimmed);
+    if (!Number.isSafeInteger(numericValue)) return { code: 'integer' };
+    if (path.minValue != null && numericValue < path.minValue) {
+      return { code: 'minValue', bound: path.minValue };
+    }
+    if (path.maxValue != null && numericValue > path.maxValue) {
+      return { code: 'maxValue', bound: path.maxValue };
+    }
   }
 
-  const trimmed = value.trim();
-  if (!/^[+-]?\d+$/.test(trimmed)) return { code: 'integer' };
-  const numericValue = Number(trimmed);
-  if (!Number.isSafeInteger(numericValue)) return { code: 'integer' };
-  if (path.minValue != null && numericValue < path.minValue) {
-    return { code: 'minValue', bound: path.minValue };
+  if (path.validationPattern && !matchesValidationPattern(path.validationPattern, value)) {
+    return { code: 'pattern' };
   }
-  if (path.maxValue != null && numericValue > path.maxValue) {
-    return { code: 'maxValue', bound: path.maxValue };
-  }
+
   return null;
+}
+
+function matchesValidationPattern(pattern: string, value: string): boolean {
+  const rawPattern = pattern.trim();
+  const source = NAMED_VALIDATION_PATTERNS[rawPattern] ?? rawPattern;
+  try {
+    if (source.startsWith('/') && source.lastIndexOf('/') > 0) {
+      const end = source.lastIndexOf('/');
+      return new RegExp(source.slice(1, end), source.slice(end + 1)).test(value);
+    }
+    return new RegExp(source).test(value);
+  } catch {
+    return false;
+  }
 }
 
 export function getModParamValidationErrors(

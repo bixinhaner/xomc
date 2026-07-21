@@ -45,16 +45,16 @@ type IntersectInput struct {
 // Matched + SkippedNoStorable + Discarded = DefaultCount 中能在 CPE Entries 找到的部分。
 // 不在 CPE 集合中的默认条目计入 DefaultsMissing。
 type IntersectResult struct {
-	ProductID         uuid.UUID
-	SoftwareVersion   string
-	ParamModelID      uuid.UUID
-	DefaultCount      int   // param_mappings 该 paramModel 的总条目
-	UploadedCount     int   // CPE Entries 长度（去重前）
-	Matched           int   // 实际写入 discovered_param_mappings 的行数
-	DefaultsMissing   int   // CPE 中找不到的默认条目数（保留默认，不写 discovered）
-	UploadedExtras    int   // CPE 中没有对应默认的私有条目数（丢弃）
-	OverrideDataType  bool  // 是否检测到 data_type 覆盖请求（true 视为非法并降级为 false）
-	DurationMs        int64
+	ProductID        uuid.UUID
+	SoftwareVersion  string
+	ParamModelID     uuid.UUID
+	DefaultCount     int  // param_mappings 该 paramModel 的总条目
+	UploadedCount    int  // CPE Entries 长度（去重前）
+	Matched          int  // 实际写入 discovered_param_mappings 的行数
+	DefaultsMissing  int  // CPE 中找不到的默认条目数（保留默认，不写 discovered）
+	UploadedExtras   int  // CPE 中没有对应默认的私有条目数（丢弃）
+	OverrideDataType bool // 是否检测到 data_type 覆盖请求（true 视为非法并降级为 false）
+	DurationMs       int64
 }
 
 // ── 写路径仓库 ────────────────────────────────────────────────────────
@@ -82,12 +82,12 @@ type IntersectInvalidator interface {
 
 // IntersectService 实现设计 §1.8 交集逻辑：
 //
-//   1. 从 productGetter 取 product → ParamModelID 与 DeviceAttrsOverride
-//   2. 从 Repository 取该 paramModel 的全量默认 mappings
-//   3. 与 CPE Entries 按 privatePath 取交集
-//   4. 按 device_attrs_override 决定每条交集结果的 5 个元属性来源
-//   5. 通过 IntersectRepository 写入 discovered_param_mappings（DELETE+INSERT 事务）
-//   6. 通过 IntersectInvalidator 失效该 (productID, swVersion) 缓存
+//  1. 从 productGetter 取 product → ParamModelID 与 DeviceAttrsOverride
+//  2. 从 Repository 取该 paramModel 的全量默认 mappings
+//  3. 与 CPE Entries 按 privatePath 取交集
+//  4. 按 device_attrs_override 决定每条交集结果的 5 个元属性来源
+//  5. 通过 IntersectRepository 写入 discovered_param_mappings（DELETE+INSERT 事务）
+//  6. 通过 IntersectInvalidator 失效该 (productID, swVersion) 缓存
 //
 // 注意：本服务不解析 CPE XML——XML 解析由 P2-06 model_upload 阶段在调用前完成。
 type IntersectService struct {
@@ -306,18 +306,23 @@ func boolFromAny(v any) (bool, bool) {
 // standard_path / private_path / entry_type 总是用默认（设计 §1.8 第 1 段）。
 func buildIntersectRow(productID uuid.UUID, swVersion string, dm ParamMapping, cpe CPEEntry, of overrideFlags) ParamMapping {
 	row := ParamMapping{
-		StandardPath:    dm.StandardPath,
-		PrivatePath:     dm.PrivatePath,
-		EntryType:       dm.EntryType,
-		Access:          dm.Access,
-		DataType:        dm.DataType,
-		ChangeApplies:   dm.ChangeApplies,
-		MinValue:        dm.MinValue,
-		MaxValue:        dm.MaxValue,
-		IsStorable:      dm.IsStorable,
-		IsActive:        true,
-		IsSupported:     dm.IsSupported, // T-0103 从默认映射继承
-		SoftwareVersion: ptrStr(swVersion),
+		StandardPath:      dm.StandardPath,
+		PrivatePath:       dm.PrivatePath,
+		EntryType:         dm.EntryType,
+		Access:            dm.Access,
+		DataType:          dm.DataType,
+		ChangeApplies:     dm.ChangeApplies,
+		MinValue:          dm.MinValue,
+		MaxValue:          dm.MaxValue,
+		DefaultValue:      dm.DefaultValue,
+		ValidationPattern: dm.ValidationPattern,
+		EnumValues:        dm.EnumValues,
+		EnumLabels:        dm.EnumLabels,
+		MirrorWith:        dm.MirrorWith,
+		IsStorable:        dm.IsStorable,
+		IsActive:          true,
+		IsSupported:       dm.IsSupported, // T-0103 从默认映射继承
+		SoftwareVersion:   ptrStr(swVersion),
 	}
 	// productID 通过 write repo 显式传，row 内不冗余存储，但 PG INSERT 时按 productID 写入。
 	_ = productID

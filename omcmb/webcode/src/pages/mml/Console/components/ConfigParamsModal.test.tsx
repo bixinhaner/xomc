@@ -573,4 +573,129 @@ describe('ConfigParamsModal', () => {
 
     expect(screen.getByText('false', { exact: true })).toBeInTheDocument();
   });
+
+  it('renders model enum values as a select and applies defaultValue', () => {
+    renderModal({
+      command: {
+        ...command,
+        operationType: 'MOD',
+        paramPaths: [{
+          path: 'Device.Radio.Mode',
+          label: 'Mode',
+          writable: true,
+          isObject: false,
+          valueType: 'STRING',
+          defaultValue: '1',
+          enumOptions: [
+            { value: '0', label: 'Disabled' },
+            { value: '1', label: 'Enabled' },
+          ],
+        }],
+      },
+      selectedPathKeys: ['Device.Radio.Mode'],
+    });
+
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.getByText('Enabled', { exact: true })).toBeInTheDocument();
+  });
+
+  it('reinitializes values when the same path receives a new parameter model', () => {
+    const path = 'Device.Radio.Mode';
+    const firstCommand = {
+      ...command,
+      operationType: 'MOD' as const,
+      paramPaths: [{
+        path,
+        label: 'Mode',
+        writable: true,
+        isObject: false,
+        valueType: 'STRING',
+        defaultValue: '0',
+        enumOptions: [
+          { value: '0', label: 'Disabled' },
+          { value: '1', label: 'Enabled' },
+        ],
+      }],
+    };
+    const { rerender } = renderModal({ command: firstCommand, selectedPathKeys: [path] });
+
+    expect(screen.getByText('Disabled', { exact: true })).toBeInTheDocument();
+
+    rerender(modal({
+      command: {
+        ...firstCommand,
+        paramPaths: [{
+          ...firstCommand.paramPaths[0],
+          defaultValue: '1',
+        }],
+      },
+      selectedPathKeys: [path],
+    }));
+
+    expect(screen.getByText('Enabled', { exact: true })).toBeInTheDocument();
+  });
+
+  it('defers validationPattern errors until submit', () => {
+    const onConfirmAndExecute = vi.fn();
+    renderModal({
+      command: {
+        ...command,
+        operationType: 'MOD',
+        paramPaths: [{
+          path: 'Device.Radio.PLMNID',
+          label: 'PLMNID',
+          writable: true,
+          isObject: false,
+          valueType: 'STRING',
+          validationPattern: '/^\\d{5,6}$/',
+        }],
+      },
+      selectedPathKeys: ['Device.Radio.PLMNID'],
+      onConfirmAndExecute,
+    });
+
+    const input = screen.getByRole('textbox');
+    fireEvent.change(input, { target: { value: 'abc' } });
+    expect(screen.queryByText('mml.consoleV2.config.validation.pattern')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /mml.consoleV2.config.confirmAndExecute/ }));
+    expect(screen.getByText('mml.consoleV2.config.validation.pattern')).toBeInTheDocument();
+    expect(onConfirmAndExecute).not.toHaveBeenCalled();
+  });
+
+  it('keeps input and select controls at the same width with a right-aligned arrow', () => {
+    renderModal({
+      command: {
+        ...command,
+        operationType: 'MOD',
+        paramPaths: [
+          { path: 'Device.Param.Text', label: 'Text', writable: true, isObject: false },
+          {
+            path: 'Device.Param.Mode',
+            label: 'Mode',
+            writable: true,
+            isObject: false,
+            enumOptions: [{ value: 'a-very-long-enum-value', label: 'a-very-long-enum-value' }],
+          },
+          {
+            path: 'Device.Param.Enabled',
+            label: 'Enabled',
+            writable: true,
+            isObject: false,
+            valueType: 'boolean',
+          },
+        ],
+      },
+      selectedPathKeys: ['Device.Param.Text', 'Device.Param.Mode', 'Device.Param.Enabled'],
+    });
+
+    expect(document.querySelectorAll('.mml-config-param-control')).toHaveLength(3);
+    expect(document.querySelectorAll('.mml-config-param-select')).toHaveLength(2);
+
+    const selects = [...document.querySelectorAll<HTMLElement>('.mml-config-param-select')];
+    expect(selects).toHaveLength(2);
+    expect(selects.every((select) => select.style.width === '100%')).toBe(true);
+    expect(selects.every((select) => select.style.display !== 'block')).toBe(true);
+    expect(selects.every((select) => select.querySelector('.ant-select-suffix'))).toBe(true);
+  });
 });

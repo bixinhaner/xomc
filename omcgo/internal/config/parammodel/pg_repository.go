@@ -40,6 +40,7 @@ func (r *PgRepository) ListMappingsByParamModel(ctx context.Context, paramModelI
 		Select("id", "param_model_id", "standard_path", "private_path",
 			"entry_type", "access", "data_type", "change_applies",
 			"min_value", "max_value",
+			"default_value", "validation_pattern",
 			"enum_values", "enum_labels", // T-0158
 			"mirror_with", // T-0159
 			"is_storable", "is_active", "is_supported",
@@ -68,6 +69,7 @@ func (r *PgRepository) ListDiscoveredMappings(ctx context.Context, productID uui
 		Select("id", "product_id", "software_version", "standard_path", "private_path",
 			"entry_type", "access", "data_type", "change_applies",
 			"min_value", "max_value",
+			"default_value", "validation_pattern",
 			"enum_values", "enum_labels", // T-0158
 			"mirror_with", // T-0159
 			"is_storable", "is_active", "is_supported").
@@ -95,6 +97,7 @@ func scanDefaultMappings(rows pgx.Rows) ([]ParamMapping, error) {
 			&m.ID, &m.ParamModelID, &m.StandardPath, &m.PrivatePath,
 			&m.EntryType, &access, &dataType, &changeApplies,
 			&m.MinValue, &m.MaxValue,
+			&m.DefaultValue, &m.ValidationPattern,
 			&m.EnumValues, &m.EnumLabels, // T-0158
 			&m.MirrorWith, // T-0159
 			&m.IsStorable, &m.IsActive, &m.IsSupported,
@@ -128,6 +131,7 @@ func scanDiscoveredMappings(rows pgx.Rows) ([]ParamMapping, error) {
 			&m.ID, &productID, &swVersion, &m.StandardPath, &m.PrivatePath,
 			&m.EntryType, &access, &dataType, &changeApplies,
 			&m.MinValue, &m.MaxValue,
+			&m.DefaultValue, &m.ValidationPattern,
 			&m.EnumValues, &m.EnumLabels, // T-0158
 			&m.MirrorWith, // T-0159
 			&m.IsStorable, &m.IsActive, &m.IsSupported,
@@ -186,6 +190,7 @@ func (r *PgRepository) UpsertDiscoveredMappings(ctx context.Context, productID u
 				"product_id", "software_version", "standard_path", "private_path",
 				"entry_type", "access", "data_type", "change_applies",
 				"min_value", "max_value",
+				"default_value", "validation_pattern",
 				"enum_values", "enum_labels", // T-0158
 				"mirror_with", // T-0159
 				"is_storable", "is_active", "is_supported",
@@ -195,6 +200,7 @@ func (r *PgRepository) UpsertDiscoveredMappings(ctx context.Context, productID u
 				productID, swVersion, m.StandardPath, m.PrivatePath,
 				m.EntryType, nilIfEmpty(m.Access), nilIfEmpty(m.DataType), nilIfEmpty(m.ChangeApplies),
 				m.MinValue, m.MaxValue,
+				m.DefaultValue, m.ValidationPattern,
 				m.EnumValues, m.EnumLabels, // T-0158
 				m.MirrorWith, // T-0159
 				m.IsStorable, m.IsActive, m.IsSupported,

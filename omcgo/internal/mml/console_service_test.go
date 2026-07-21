@@ -63,6 +63,7 @@ func (f *fakeUnsupportedPathRepo) ListByProduct(context.Context, uuid.UUID) ([]U
 type fakeSubFieldRepo struct {
 	byCommandList     map[uuid.UUID][]MMLCommandSubField
 	byCommandEnriched map[uuid.UUID][]MMLCommandSubFieldEnriched
+	lastParamModelID  *uuid.UUID
 	listErr           error
 }
 
@@ -85,10 +86,11 @@ func (f *fakeSubFieldRepo) ListByCommand(_ context.Context, c uuid.UUID) ([]MMLC
 	}
 	return f.byCommandList[c], nil
 }
-func (f *fakeSubFieldRepo) ListEnrichedByCommand(_ context.Context, c uuid.UUID, _ *uuid.UUID) ([]MMLCommandSubFieldEnriched, error) {
+func (f *fakeSubFieldRepo) ListEnrichedByCommand(_ context.Context, c uuid.UUID, paramModelID *uuid.UUID) ([]MMLCommandSubFieldEnriched, error) {
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
+	f.lastParamModelID = paramModelID
 	return f.byCommandEnriched[c], nil
 }
 func (f *fakeSubFieldRepo) CountByParam(_ context.Context, _ uuid.UUID) (int64, error) {
@@ -591,6 +593,29 @@ func TestGetCommandSubFields_DeviceReturnsSupportedMMLIntersection(t *testing.T)
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, "Device.A", got[0].Tr069Path)
+}
+
+func TestGetCommandSubFields_DevicePassesParamModelIDToEnrichedRepo(t *testing.T) {
+	cmdID := uuid.New()
+	pmID := uuid.New()
+	sfRepo := newFakeSubFieldRepo()
+	sfRepo.byCommandEnriched[cmdID] = []MMLCommandSubFieldEnriched{{
+		MMLCommandSubField: MMLCommandSubField{ID: uuid.New(), CommandID: cmdID, MMLCode: "A"},
+		Tr069Path:          "Device.A",
+	}}
+
+	svc := NewConsoleService(&fakeGroupTreeRepo{}, sfRepo, newFakeCommandRepo(), nil)
+	svc.SetParamModelByDeviceResolver(func(context.Context, string) (*uuid.UUID, error) {
+		return &pmID, nil
+	})
+	svc.SetParamModelPathsResolver(func(context.Context, uuid.UUID) (map[string]struct{}, error) {
+		return map[string]struct{}{"Device.A": {}}, nil
+	})
+
+	_, err := svc.GetCommandSubFields(context.Background(), cmdID, "SN-1", "", "zh-CN")
+	require.NoError(t, err)
+	require.NotNil(t, sfRepo.lastParamModelID)
+	assert.Equal(t, pmID, *sfRepo.lastParamModelID)
 }
 
 // ============================================================

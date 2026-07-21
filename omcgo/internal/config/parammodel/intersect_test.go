@@ -114,7 +114,7 @@ func TestIntersect_HappyPath_NoOverride(t *testing.T) {
 
 	assert.Equal(t, 5, res.DefaultCount)
 	assert.Equal(t, 4, res.UploadedCount)
-	assert.Equal(t, 3, res.Matched)        // 3 个 path 双方都有
+	assert.Equal(t, 3, res.Matched)         // 3 个 path 双方都有
 	assert.Equal(t, 2, res.DefaultsMissing) // SSID. + System.Mode
 	assert.Equal(t, 1, res.UploadedExtras)  // Dev.Vendor.Extra
 	assert.False(t, res.OverrideDataType)
@@ -421,4 +421,29 @@ func TestNormalizeOverride_Variants(t *testing.T) {
 			assert.Equal(t, tc.dt, dt)
 		})
 	}
+}
+
+func TestBuildIntersectRow_InheritsValueRules(t *testing.T) {
+	defaultValue := "abc"
+	pattern := "/^abc$/"
+	dm := ParamMapping{
+		StandardPath:      "Device.Test.Value",
+		PrivatePath:       "Device.Test.Value",
+		EntryType:         "parameter",
+		MinValue:          mkInt64(1),
+		MaxValue:          mkInt64(8),
+		DefaultValue:      &defaultValue,
+		ValidationPattern: &pattern,
+		EnumValues:        ptrStr("a,b"),
+		EnumLabels:        ptrStr("A,B"),
+	}
+
+	row := buildIntersectRow(uuid.New(), "1.0", dm, CPEEntry{}, overrideFlags{})
+
+	assert.Equal(t, dm.MinValue, row.MinValue)
+	assert.Equal(t, dm.MaxValue, row.MaxValue)
+	assert.Equal(t, dm.DefaultValue, row.DefaultValue)
+	assert.Equal(t, dm.ValidationPattern, row.ValidationPattern)
+	assert.Equal(t, dm.EnumValues, row.EnumValues)
+	assert.Equal(t, dm.EnumLabels, row.EnumLabels)
 }

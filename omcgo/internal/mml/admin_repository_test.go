@@ -55,6 +55,31 @@ func Test_AdminRepository_SQLNoLongerFiltersBySubFieldIsSupported(t *testing.T) 
 		"PR-C: ListEnrichedByCommand EXISTS subquery must include pm.is_supported = true")
 }
 
+func TestBuildEnumOptions_UsesValuesWhenLabelsMissing(t *testing.T) {
+	values := "PSK，SIM"
+	got := buildEnumOptions(&values, nil)
+	assert.Equal(t, []MMLParamEnumOption{
+		{Value: "PSK", Label: "PSK"},
+		{Value: "SIM", Label: "SIM"},
+	}, got)
+}
+
+func Test_AdminRepository_SQLIncludesModelValueRules(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	body, err := os.ReadFile(filepath.Join(filepath.Dir(thisFile), "admin_repository.go"))
+	require.NoError(t, err)
+	src := string(body)
+
+	assert.Contains(t, src, "model_pm.default_value")
+	assert.Contains(t, src, "model_pm.validation_pattern")
+	assert.Contains(t, src, "COALESCE(model_pm.min_value, sp.min_value)")
+	assert.Contains(t, src, "COALESCE(model_pm.max_value, sp.max_value)")
+	assert.Contains(t, src, "model_pm.enum_values")
+	assert.Contains(t, src, "model_pm.enum_labels")
+	assert.Contains(t, src, "ORDER BY (pm.source = 'custom') DESC")
+}
+
 // Test_ListByCommand_NoLongerFiltersBySubFieldIsSupported 集成测试：
 //
 // 同一 command_id 下既有 is_supported=true 又有 is_supported=false 的 sub_field 行，
