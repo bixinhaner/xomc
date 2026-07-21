@@ -17740,6 +17740,376 @@ WHERE param_version = 'cmcc-td-lte-v2.3'
   AND source = 'admin';
 
 
+
+-- -----------------------------------------------------------------------------
+-- Source: merged 000002_mml_catalog_group_cleanup.sql
+-- -----------------------------------------------------------------------------
+WITH victim_group AS (
+    SELECT id
+    FROM public.mml_command_groups
+    WHERE group_code = 'MML350_G_DEVICE_SERVICES_FAPSERVICE'
+), victim_command AS (
+    SELECT c.id
+    FROM public.mml_commands c
+    JOIN victim_group g ON g.id = c.group_id
+)
+DELETE FROM public.mml_command_sub_fields sf
+USING victim_command c
+WHERE sf.command_id = c.id;
+
+WITH victim_group AS (
+    SELECT id
+    FROM public.mml_command_groups
+    WHERE group_code = 'MML350_G_DEVICE_SERVICES_FAPSERVICE'
+)
+DELETE FROM public.mml_commands c
+USING victim_group g
+WHERE c.group_id = g.id;
+
+DELETE FROM public.mml_command_groups
+WHERE group_code = 'MML350_G_DEVICE_SERVICES_FAPSERVICE';
+
+DELETE FROM public.mml_command_groups g
+WHERE g.group_code = 'MML350_G_DEVICE_SERVICES'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM public.mml_commands c
+      WHERE c.group_id = g.id
+        AND c.deprecated_at IS NULL
+  );
+
+UPDATE public.mml_command_groups
+SET group_name_zh = 'NTP 参数配置',
+    group_name_en = 'NTP Parameter Configuration',
+    name_i18n = '{"en-US":"NTP Parameter Configuration","zh-CN":"NTP 参数配置"}'::jsonb,
+    updated_at = NOW()
+WHERE group_code = 'MML350_G_INTERNETGATEWAYDEVICE';
+
+UPDATE public.mml_commands c
+SET command_name = '查询 NTP配置',
+    description = '查询 NTP配置',
+    rpc_method = 'GetParameterValues',
+    operation_type = 'LST',
+    command_name_i18n = '{"en-US":"List NTP Configuration","zh-CN":"查询 NTP配置"}'::jsonb,
+    logical_name_i18n = '{"en-US":"NTP Configuration","zh-CN":"NTP配置"}'::jsonb,
+    source = 'admin',
+    updated_at = NOW()
+FROM public.mml_command_groups g
+WHERE c.group_id = g.id
+  AND g.group_code = 'MML350_G_INTERNETGATEWAYDEVICE'
+  AND c.command_code = 'LST MML350_INTERNETGATEWAYDEVICE__TIME';
+
+INSERT INTO public.mml_commands (
+    command_name, command_code, category, description, rpc_method, operation_type,
+    target_paths, tree_node_refs, group_id, command_name_i18n, logical_name_i18n,
+    source, catalog_protected, platform_tags
+)
+SELECT
+    '修改 NTP配置',
+    'MOD MML350_INTERNETGATEWAYDEVICE__TIME',
+    '2',
+    '修改 NTP配置',
+    'SetParameterValues',
+    'MOD',
+    '[]'::jsonb,
+    '[]'::jsonb,
+    g.id,
+    '{"en-US":"Modify NTP Configuration","zh-CN":"修改 NTP配置"}'::jsonb,
+    '{"en-US":"NTP Configuration","zh-CN":"NTP配置"}'::jsonb,
+    'admin',
+    false,
+    '{}'::jsonb
+FROM public.mml_command_groups g
+WHERE g.group_code = 'MML350_G_INTERNETGATEWAYDEVICE'
+ON CONFLICT DO NOTHING;
+
+UPDATE public.mml_commands c
+SET command_name = '修改 NTP配置',
+    description = '修改 NTP配置',
+    rpc_method = 'SetParameterValues',
+    operation_type = 'MOD',
+    group_id = g.id,
+    command_name_i18n = '{"en-US":"Modify NTP Configuration","zh-CN":"修改 NTP配置"}'::jsonb,
+    logical_name_i18n = '{"en-US":"NTP Configuration","zh-CN":"NTP配置"}'::jsonb,
+    source = 'admin',
+    catalog_protected = false,
+    updated_at = NOW()
+FROM public.mml_command_groups g
+WHERE c.command_code = 'MOD MML350_INTERNETGATEWAYDEVICE__TIME'
+  AND g.group_code = 'MML350_G_INTERNETGATEWAYDEVICE';
+
+WITH ntp_command AS (
+    SELECT id
+    FROM public.mml_commands
+    WHERE command_code IN (
+        'LST MML350_INTERNETGATEWAYDEVICE__TIME',
+        'MOD MML350_INTERNETGATEWAYDEVICE__TIME'
+    )
+)
+DELETE FROM public.mml_command_sub_fields sf
+USING ntp_command c
+WHERE sf.command_id = c.id;
+
+WITH ntp_params(sort_order, mml_code, standard_path) AS (
+    VALUES
+        (1, 'NTPSERVER3', 'InternetGatewayDevice.Time.NTPServer3'),
+        (2, 'NTPSERVER5', 'InternetGatewayDevice.Time.NTPServer5'),
+        (3, 'LTE_X_COM_NTP_SYNC_INTERVAL', 'Device.Time.LTE_X_COM_NTP_SYNC_INTERVAL'),
+        (4, 'NTPPORT1', 'Device.Time.NTPPort1'),
+        (5, 'NTPPORT2', 'Device.Time.NTPPort2'),
+        (6, 'NTPPORT3', 'Device.Time.NTPPort3'),
+        (7, 'NTPPORT4', 'Device.Time.NTPPort4'),
+        (8, 'NTPSERVER1', 'Device.Time.NTPServer1'),
+        (9, 'NTPSERVER2', 'Device.Time.NTPServer2'),
+        (10, 'DEVICE_TIME_NTPSERVER3', 'Device.Time.NTPServer3'),
+        (11, 'NTPSERVER4', 'Device.Time.NTPServer4'),
+        (12, 'DEVICE_TIME_NTPSERVER5', 'Device.Time.NTPServer5')
+), ntp_command AS (
+    SELECT id
+    FROM public.mml_commands
+    WHERE command_code IN (
+        'LST MML350_INTERNETGATEWAYDEVICE__TIME',
+        'MOD MML350_INTERNETGATEWAYDEVICE__TIME'
+    )
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id, mml_code, label_i18n, default_selected, is_required,
+    sort_order, standard_path_id, access_type, is_supported
+)
+SELECT
+    c.id,
+    p.mml_code,
+    jsonb_build_object('en-US', p.mml_code, 'zh-CN', p.mml_code),
+    true,
+    false,
+    p.sort_order,
+    sp.id,
+    CASE sp.access WHEN 'READ_WRITE' THEN 'RW' ELSE 'RO' END,
+    true
+FROM ntp_command c
+JOIN ntp_params p ON true
+JOIN public.standard_params sp ON sp.standard_path = p.standard_path
+ON CONFLICT DO NOTHING;
+
+UPDATE public.mml_command_groups
+SET group_name_zh = 'HALOD 参数配置',
+    group_name_en = 'HALOD Parameter Configuration',
+    name_i18n = '{"en-US":"HALOD Parameter Configuration","zh-CN":"HALOD 参数配置"}'::jsonb,
+    updated_at = NOW()
+WHERE group_code = 'MML350_G_BOARDCONF';
+
+UPDATE public.mml_commands c
+SET command_name = '查询 HALOD参数配置',
+    description = '查询 HALOD参数配置',
+    rpc_method = 'GetParameterValues',
+    operation_type = 'LST',
+    command_name_i18n = '{"en-US":"List HALOD Parameter Configuration","zh-CN":"查询 HALOD参数配置"}'::jsonb,
+    logical_name_i18n = '{"en-US":"HALOD Parameter Configuration","zh-CN":"HALOD参数配置"}'::jsonb,
+    source = 'admin',
+    updated_at = NOW()
+FROM public.mml_command_groups g
+WHERE c.group_id = g.id
+  AND g.group_code = 'MML350_G_BOARDCONF'
+  AND c.command_code = 'LST MML350_BOARDCONF__HALOD';
+
+INSERT INTO public.mml_commands (
+    command_name, command_code, category, description, rpc_method, operation_type,
+    target_paths, tree_node_refs, group_id, command_name_i18n, logical_name_i18n,
+    source, catalog_protected, platform_tags
+)
+SELECT
+    '修改 HALOD参数配置',
+    'MOD MML350_BOARDCONF__HALOD',
+    '2',
+    '修改 HALOD参数配置',
+    'SetParameterValues',
+    'MOD',
+    '[]'::jsonb,
+    '[]'::jsonb,
+    g.id,
+    '{"en-US":"Modify HALOD Parameter Configuration","zh-CN":"修改 HALOD参数配置"}'::jsonb,
+    '{"en-US":"HALOD Parameter Configuration","zh-CN":"HALOD参数配置"}'::jsonb,
+    'admin',
+    false,
+    '{}'::jsonb
+FROM public.mml_command_groups g
+WHERE g.group_code = 'MML350_G_BOARDCONF'
+ON CONFLICT DO NOTHING;
+
+UPDATE public.mml_commands c
+SET command_name = '修改 HALOD参数配置',
+    description = '修改 HALOD参数配置',
+    rpc_method = 'SetParameterValues',
+    operation_type = 'MOD',
+    group_id = g.id,
+    command_name_i18n = '{"en-US":"Modify HALOD Parameter Configuration","zh-CN":"修改 HALOD参数配置"}'::jsonb,
+    logical_name_i18n = '{"en-US":"HALOD Parameter Configuration","zh-CN":"HALOD参数配置"}'::jsonb,
+    source = 'admin',
+    catalog_protected = false,
+    updated_at = NOW()
+FROM public.mml_command_groups g
+WHERE c.command_code = 'MOD MML350_BOARDCONF__HALOD'
+  AND g.group_code = 'MML350_G_BOARDCONF';
+
+WITH halod_mod AS (
+    SELECT id
+    FROM public.mml_commands
+    WHERE command_code = 'MOD MML350_BOARDCONF__HALOD'
+)
+DELETE FROM public.mml_command_sub_fields sf
+USING halod_mod c
+WHERE sf.command_id = c.id;
+
+WITH halod_lst AS (
+    SELECT c.id
+    FROM public.mml_commands c
+    WHERE c.command_code = 'LST MML350_BOARDCONF__HALOD'
+), halod_mod AS (
+    SELECT c.id
+    FROM public.mml_commands c
+    WHERE c.command_code = 'MOD MML350_BOARDCONF__HALOD'
+), writable_field AS (
+    SELECT
+        sf.mml_code,
+        sf.label_i18n,
+        sf.default_selected,
+        sf.is_required,
+        sf.sort_order,
+        sf.standard_path_id,
+        CASE sp.access WHEN 'READ_WRITE' THEN 'RW' ELSE 'RO' END AS access_type,
+        sf.is_supported
+    FROM public.mml_command_sub_fields sf
+    JOIN halod_lst lst ON lst.id = sf.command_id
+    JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+    WHERE sf.deprecated_at IS NULL
+      AND sp.access = 'READ_WRITE'
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id, mml_code, label_i18n, default_selected, is_required,
+    sort_order, standard_path_id, access_type, is_supported
+)
+SELECT
+    mod.id,
+    f.mml_code,
+    f.label_i18n,
+    f.default_selected,
+    f.is_required,
+    f.sort_order,
+    f.standard_path_id,
+    f.access_type,
+    f.is_supported
+FROM halod_mod mod
+JOIN writable_field f ON true
+ON CONFLICT DO NOTHING;
+
+UPDATE public.mml_command_groups
+SET group_name_zh = 'TR069连接配置',
+    group_name_en = 'TR069 Connection Configuration',
+    name_i18n = '{"en-US":"TR069 Connection Configuration","zh-CN":"TR069连接配置"}'::jsonb,
+    updated_at = NOW()
+WHERE group_code = 'MML350_G_DEVICE_HTTPS';
+
+UPDATE public.mml_commands c
+SET command_name = '查询TR069连接配置',
+    description = '查询TR069连接配置',
+    rpc_method = 'GetParameterValues',
+    operation_type = 'LST',
+    command_name_i18n = '{"en-US":"List TR069 Connection Configuration","zh-CN":"查询TR069连接配置"}'::jsonb,
+    logical_name_i18n = '{"en-US":"TR069 Connection Configuration","zh-CN":"TR069连接配置"}'::jsonb,
+    source = 'admin',
+    updated_at = NOW()
+FROM public.mml_command_groups g
+WHERE c.group_id = g.id
+  AND g.group_code = 'MML350_G_DEVICE_HTTPS'
+  AND c.command_code = 'LST MML350_DEVICE_HTTPS__HTTPSENABLE';
+
+WITH tr069_group AS (
+    SELECT id
+    FROM public.mml_command_groups
+    WHERE group_code = 'MML350_G_DEVICE_HTTPS'
+), tr069_command AS (
+    SELECT c.id
+    FROM public.mml_commands c
+    JOIN tr069_group g ON g.id = c.group_id
+), keep_param AS (
+    SELECT id
+    FROM public.standard_params
+    WHERE standard_path = 'Device.Https.HttpsEnable'
+)
+DELETE FROM public.mml_command_sub_fields sf
+USING tr069_command c, keep_param p
+WHERE sf.command_id = c.id
+  AND (c.id NOT IN (
+          SELECT id
+          FROM public.mml_commands
+          WHERE command_code = 'LST MML350_DEVICE_HTTPS__HTTPSENABLE'
+      )
+      OR sf.standard_path_id <> p.id);
+
+WITH tr069_group AS (
+    SELECT id
+    FROM public.mml_command_groups
+    WHERE group_code = 'MML350_G_DEVICE_HTTPS'
+)
+DELETE FROM public.mml_commands c
+USING tr069_group g
+WHERE c.group_id = g.id
+  AND c.command_code <> 'LST MML350_DEVICE_HTTPS__HTTPSENABLE';
+
+WITH tr069_command AS (
+    SELECT c.id
+    FROM public.mml_commands c
+    WHERE c.command_code = 'LST MML350_DEVICE_HTTPS__HTTPSENABLE'
+), tr069_param AS (
+    SELECT id, access
+    FROM public.standard_params
+    WHERE standard_path = 'Device.Https.HttpsEnable'
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id, mml_code, label_i18n, default_selected, is_required,
+    sort_order, standard_path_id, access_type, is_supported
+)
+SELECT
+    c.id,
+    'HTTPSENABLE',
+    '{"en-US":"HTTPSENABLE","zh-CN":"HTTPSENABLE"}'::jsonb,
+    true,
+    false,
+    0,
+    p.id,
+    CASE p.access WHEN 'READ_WRITE' THEN 'RW' ELSE 'RO' END,
+    true
+FROM tr069_command c
+JOIN tr069_param p ON true
+ON CONFLICT DO NOTHING;
+
+UPDATE public.mml_command_sub_fields sf
+SET mml_code = 'HTTPSENABLE',
+    label_i18n = '{"en-US":"HTTPSENABLE","zh-CN":"HTTPSENABLE"}'::jsonb,
+    default_selected = true,
+    is_required = false,
+    sort_order = 0,
+    access_type = CASE sp.access WHEN 'READ_WRITE' THEN 'RW' ELSE 'RO' END,
+    is_supported = true,
+    deprecated_at = NULL,
+    updated_at = NOW()
+FROM public.mml_commands c
+JOIN public.standard_params sp ON sp.standard_path = 'Device.Https.HttpsEnable'
+WHERE sf.command_id = c.id
+  AND sf.standard_path_id = sp.id
+  AND c.command_code = 'LST MML350_DEVICE_HTTPS__HTTPSENABLE';
+
+SELECT public.refresh_mml_command_target_paths(c.id)
+FROM public.mml_commands c
+WHERE c.command_code IN (
+    'LST MML350_INTERNETGATEWAYDEVICE__TIME',
+    'MOD MML350_INTERNETGATEWAYDEVICE__TIME',
+    'LST MML350_BOARDCONF__HALOD',
+    'MOD MML350_BOARDCONF__HALOD',
+    'LST MML350_DEVICE_HTTPS__HTTPSENABLE'
+);
+
+
 SELECT pg_catalog.set_config('search_path', 'public', false);
 -- +goose Down
 -- consolidated seed 无安全的逐行回滚；重置请重建数据库。
