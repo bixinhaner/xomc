@@ -60,6 +60,8 @@ export interface KPIDelta {
   trend: 'up' | 'down' | 'stable';
   /** 对比类型: "yesterday" | "last_week" */
   compareType: 'yesterday' | 'last_week';
+  /** 当前值与历史基线是否都有效，可用于百分比对比 */
+  hasComparison: boolean;
 }
 
 /**
@@ -215,6 +217,7 @@ export interface BackendKPIDelta {
   change_percent: number;
   trend: string;  // "up" | "down" | "stable"
   compare_type: string;  // "yesterday" | "last_week"
+  has_comparison: boolean;
 }
 
 /**

@@ -60,6 +60,7 @@ interface BackendKPIDelta {
   change_percent: number;
   trend: string;  // "up" | "down" | "stable"
   compare_type: string;  // "yesterday" | "last_week"
+  has_comparison: boolean;
 }
 
 // Backend response types for Sprint 7 chart endpoints
@@ -186,6 +187,7 @@ function mapBackendSummary(b: BackendDashboardSummary): DashboardSummary {
         changePercent: delta.change_percent,
         trend: delta.trend as 'up' | 'down' | 'stable',
         compareType: delta.compare_type as 'yesterday' | 'last_week',
+        hasComparison: delta.has_comparison,
       };
       return acc;
     }, {} as Record<string, KPIDelta>),

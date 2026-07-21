@@ -2853,6 +2853,7 @@ const messages: Record<string, string> = {
   'dashboard.vsLastWeek':        'vs last week',
   'dashboard.onlineRate':        'Online Rate',
   'dashboard.vsYesterday':       'vs yesterday',
+  'dashboard.notComparable':     'N/A',
   'dashboard.compareWindow.label':     'Compare with',
   'dashboard.compareWindow.yesterday': 'Yesterday',
   'dashboard.compareWindow.lastWeek':  'Last week',

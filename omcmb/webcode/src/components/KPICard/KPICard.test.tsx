@@ -60,4 +60,23 @@ describe('KPICard loading 态', () => {
     expect(screen.getByText('-3')).toBeTruthy();
     expect(screen.getByText('较昨日')).toBeTruthy();
   });
+
+  it('无有效历史基线时显示 N/A 且隐藏趋势箭头和对比周期', () => {
+    const { container } = render(
+      <KPICard
+        title="活跃告警"
+        value={3}
+        icon={<span>icon</span>}
+        trend="up"
+        delta="100.0%"
+        deltaLabel="较昨日"
+        hasComparison={false}
+      />,
+    );
+
+    expect(screen.getByText('N/A')).toBeTruthy();
+    expect(container.textContent).not.toContain('100.0%');
+    expect(container.textContent).not.toContain('较昨日');
+    expect(container.querySelector('.anticon-arrow-up')).toBeFalsy();
+  });
 });
