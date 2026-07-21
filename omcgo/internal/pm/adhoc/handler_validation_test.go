@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -355,6 +356,46 @@ func Test_Handler_Update_Adhoc_Success(t *testing.T) {
 	assert.Equal(t, []string{"K1001", "K1002"}, captured.MetricPaths)
 	assert.Equal(t, []string{"daily"}, captured.Granularities)
 	assert.False(t, captured.WindowStart.IsZero())
+	assert.Equal(t, ModeOneshot, captured.Mode)
+	assert.True(t, captured.RequeueTerminal)
+}
+
+func Test_Handler_Update_Adhoc_NameVisibilityOnly_DoesNotRequeueTerminal(t *testing.T) {
+	id := uuid.New()
+	windowStart := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
+	windowEnd := time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC)
+	var captured UpdateRequest
+	repo := &handlerStubRepo{
+		get: func(uuid.UUID) (*Task, error) {
+			return &Task{
+				ID:            id,
+				Name:          "old",
+				IsBuiltin:     false,
+				Mode:          ModeOneshot,
+				Dimension:     DimensionNetwork,
+				MetricPaths:   []string{"K1001"},
+				Granularities: []string{"hourly"},
+				WindowStart:   windowStart,
+				WindowEnd:     windowEnd,
+				Visibility:    VisibilityPrivate,
+				Creator:       "anonymous",
+			}, nil
+		},
+		update: func(_ uuid.UUID, req UpdateRequest) error { captured = req; return nil },
+	}
+	b := map[string]any{
+		"name":          "renamed",
+		"metric_paths":  []string{"K1001"},
+		"granularities": []string{"hourly"},
+		"window_start":  "2026-05-22T10:00:00Z",
+		"window_end":    "2026-05-22T11:00:00Z",
+		"visibility":    "public",
+	}
+	w := patchUpdate(t, repo, id, b)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "renamed", captured.Name)
+	assert.Equal(t, VisibilityPublic, captured.Visibility)
+	assert.False(t, captured.RequeueTerminal)
 }
 
 // 成功路径：自建 continuous 任务编辑粒度时同步派生 cron_expr。

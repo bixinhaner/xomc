@@ -159,6 +159,60 @@ func Test_Repository_CancelTerminalRejected(t *testing.T) {
 	assert.ErrorIs(t, err, ErrTerminalState)
 }
 
+func Test_Repository_Update_OneshotRequeueTerminalStatuses(t *testing.T) {
+	pool := openPoolOrSkip(t)
+	defer pool.Close()
+	r := NewPgRepository(pool, pool)
+	ctx := context.Background()
+
+	for _, tt := range []struct {
+		name           string
+		beforeStatus   Status
+		beforeProgress int
+		wantStatus     Status
+		wantProgress   int
+	}{
+		{name: "succeeded", beforeStatus: StatusSucceeded, beforeProgress: 100, wantStatus: StatusPending, wantProgress: 0},
+		{name: "failed", beforeStatus: StatusFailed, beforeProgress: 100, wantStatus: StatusPending, wantProgress: 0},
+		{name: "canceled", beforeStatus: StatusCanceled, beforeProgress: 40, wantStatus: StatusCanceled, wantProgress: 40},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			req := sampleReq()
+			req.Mode = ModeOneshot
+			req.CronExpr = nil
+			req.Name = "oneshot-requeue-" + tt.name + "-" + uuid.New().String()[:8]
+			id, err := r.Create(ctx, req)
+			require.NoError(t, err)
+			defer cleanup(t, pool, id)
+
+			_, err = pool.Exec(ctx,
+				`UPDATE pm_tasks SET status=$1, progress=$2 WHERE id=$3`,
+				string(tt.beforeStatus), tt.beforeProgress, id)
+			require.NoError(t, err)
+
+			require.NoError(t, r.Update(ctx, id, UpdateRequest{
+				IsBuiltin:       false,
+				Mode:            ModeOneshot,
+				RequeueTerminal: true,
+				Name:            req.Name,
+				DeviceSNs:       req.DeviceSNs,
+				MetricPaths:     req.MetricPaths,
+				Granularities:   req.Granularities,
+				WindowStart:     req.WindowStart.Add(-time.Hour),
+				WindowEnd:       req.WindowEnd.Add(-time.Hour),
+				Visibility:      req.Visibility,
+			}))
+
+			got, err := r.Get(ctx, id)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantStatus, got.Status)
+			assert.Equal(t, tt.wantProgress, got.Progress)
+			assert.True(t, got.WindowStart.Equal(req.WindowStart.Add(-time.Hour)))
+			assert.True(t, got.WindowEnd.Equal(req.WindowEnd.Add(-time.Hour)))
+		})
+	}
+}
+
 func Test_Repository_LockNextPending(t *testing.T) {
 	pool := openPoolOrSkip(t)
 	defer pool.Close()

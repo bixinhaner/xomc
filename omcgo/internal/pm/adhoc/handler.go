@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -502,6 +503,7 @@ func (h *Handler) Update(c *gin.Context) {
 		upd.ObjectLDNs = objectLDNs
 		upd.WindowStart = req.WindowStart
 		upd.WindowEnd = req.WindowEnd
+		upd.RequeueTerminal = existing.Mode == ModeOneshot && oneshotExecutionInputsChanged(existing, req, objectLDNs)
 	}
 
 	if err := h.repo.Update(c.Request.Context(), id, upd); err != nil {
@@ -520,6 +522,15 @@ func sameFirstGranularity(a, b []string) bool {
 		return len(a) == len(b)
 	}
 	return a[0] == b[0]
+}
+
+func oneshotExecutionInputsChanged(existing *Task, req updateRequestDTO, objectLDNs []string) bool {
+	return !slices.Equal(existing.DeviceSNs, req.DeviceSNs) ||
+		!slices.Equal(existing.MetricPaths, req.MetricPaths) ||
+		!slices.Equal(existing.Granularities, req.Granularities) ||
+		!slices.Equal(existing.ObjectLDNs, objectLDNs) ||
+		!existing.WindowStart.Equal(req.WindowStart) ||
+		!existing.WindowEnd.Equal(req.WindowEnd)
 }
 
 // Cancel DELETE /pm/adhoc/tasks/:id
