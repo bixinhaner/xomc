@@ -6,7 +6,6 @@ import {
   Checkbox,
   Form,
   Input,
-  InputNumber,
   Segmented,
   Select,
   Space,
@@ -31,6 +30,7 @@ import {
 } from '@core/hooks/api/useAgentConfig';
 import type { AgentAdminConfigUpdate } from '@core/types/agentConfig';
 import { useT } from '@/hooks/useT';
+import { AddonInput, AddonInputNumber } from '@/components/common/InputAddon';
 
 type AgentFormValues = AgentAdminConfigUpdate & {
   agentStudioServiceToken?: string;
@@ -153,7 +153,7 @@ export default function AgentSettings() {
             type="error"
             showIcon
             style={{ marginBottom: 16 }}
-            message={t('system.agent.lastError')}
+            title={t('system.agent.lastError')}
             description={config.lastError}
           />
         ) : null}
@@ -168,7 +168,7 @@ export default function AgentSettings() {
             label={t('system.agent.agentStudioBaseUrl')}
             rules={[urlRule]}
           >
-            <Input placeholder="https://agent.example.com" />
+            <Input placeholder="https://agent.example.com" autoComplete="off" />
           </Form.Item>
           <Form.Item
             name="agentStudioServiceToken"
@@ -196,7 +196,7 @@ export default function AgentSettings() {
             <Input.Password placeholder={t('system.agent.serviceTokenPlaceholder')} autoComplete="new-password" />
           </Form.Item>
           <Form.Item name="connectorSlug" label={t('system.agent.connectorSlug')}>
-            <Input placeholder="external-agent-..." />
+            <Input placeholder="external-agent-..." autoComplete="off" />
           </Form.Item>
         </Card>
 
@@ -205,7 +205,7 @@ export default function AgentSettings() {
           title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.agent.section.runtime')}</span>}
           style={{ marginBottom: 16 }}
         >
-          <Space direction="vertical" style={{ width: '100%' }} size={12}>
+          <Space orientation="vertical" style={{ width: '100%' }} size={12}>
             <Space>
               <Typography.Text type="secondary">{t('system.agent.status')}</Typography.Text>
               <Tag color={statusColor(config?.status ?? 'not_configured')}>
@@ -217,7 +217,7 @@ export default function AgentSettings() {
                 </Typography.Text>
               ) : null}
             </Space>
-            <Input
+            <AddonInput
               readOnly
               addonBefore={t('system.agent.connectorId')}
               value={config?.connectorId || t('system.agent.emptyValue')}
@@ -230,7 +230,7 @@ export default function AgentSettings() {
                 />
               }
             />
-            <Input
+            <AddonInput
               readOnly
               addonBefore={t('system.agent.runtimeStreamUrl')}
               value={config?.runtimeStreamUrl || t('system.agent.emptyValue')}
@@ -250,7 +250,7 @@ export default function AgentSettings() {
           size="small"
           title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.agent.section.security')}</span>}
         >
-          <Space direction="vertical" style={{ width: '100%' }} size={14}>
+          <Space orientation="vertical" style={{ width: '100%' }} size={14}>
             <Form.Item name="enabled" label={t('system.agent.visible')} valuePropName="checked" style={{ marginBottom: 0 }}>
               <Switch />
             </Form.Item>
@@ -287,14 +287,19 @@ export default function AgentSettings() {
                 label={t('system.agent.maxResponseBytes')}
                 rules={[{ type: 'number', min: 4096, max: 4194304 }]}
               >
-                <InputNumber min={4096} max={4194304} step={4096} style={{ width: 180 }} />
+                <AddonInputNumber min={4096} max={4194304} step={4096} compactStyle={{ width: 180 }} />
               </Form.Item>
               <Form.Item
                 name="toolTimeoutSeconds"
                 label={t('system.agent.toolTimeoutSeconds')}
                 rules={[{ type: 'number', min: 1, max: 300 }]}
               >
-                <InputNumber min={1} max={300} style={{ width: 160 }} addonAfter={t('common.seconds')} />
+                <AddonInputNumber
+                  min={1}
+                  max={300}
+                  compactStyle={{ width: 160 }}
+                  addonAfter={t('common.seconds')}
+                />
               </Form.Item>
             </Space>
             <Form.Item name="blockedPathPrefixes" label={t('system.agent.blockedPathPrefixes')}>
@@ -305,7 +310,7 @@ export default function AgentSettings() {
                 options={(config?.policy.blockedPathPrefixes ?? []).map((value) => ({ label: value, value }))}
               />
             </Form.Item>
-            <Alert type="info" showIcon message={t('system.agent.securityHint')} />
+            <Alert type="info" showIcon title={t('system.agent.securityHint')} />
           </Space>
         </Card>
 
