@@ -85,18 +85,11 @@ func TestSysConfigHandler_GetRedactsSecrets(t *testing.T) {
 	assert.Equal(t, true, item["is_configured"])
 }
 
-func TestSysConfigHandler_ListPublicCreateAndUpdateUseSafeDTO(t *testing.T) {
+func TestSysConfigHandler_ListPublicUsesSafeDTO(t *testing.T) {
 	id := uuid.New()
 	repo := &stubSysConfigRepo{
 		listFn: func(_ context.Context, _ string, _ bool) ([]SysConfig, error) {
 			return []SysConfig{{ID: id, Category: "system", Key: "system_name", Value: "OMC"}}, nil
-		},
-		createFn: func(_ context.Context, cfg *SysConfig) error {
-			cfg.ID = id
-			return nil
-		},
-		getByIDFn: func(_ context.Context, _ uuid.UUID) (*SysConfig, error) {
-			return &SysConfig{ID: id, Category: "system", Key: "system_name", Value: "old"}, nil
 		},
 	}
 	r := newSysConfigTestRouter(repo)
@@ -109,8 +102,6 @@ func TestSysConfigHandler_ListPublicCreateAndUpdateUseSafeDTO(t *testing.T) {
 		list   bool
 	}{
 		{name: "public list", method: http.MethodGet, path: "/admin/public/configs", list: true},
-		{name: "create", method: http.MethodPost, path: "/admin/sysConfig", body: `{"category":"system","key":"system_name","value":"OMC"}`},
-		{name: "update", method: http.MethodPut, path: "/admin/sysConfig/" + id.String(), body: `{"value":"new"}`},
 	}
 
 	for _, tt := range tests {
@@ -134,6 +125,22 @@ func TestSysConfigHandler_ListPublicCreateAndUpdateUseSafeDTO(t *testing.T) {
 			assert.Contains(t, item, "is_configured")
 			assert.Equal(t, true, item["is_public"])
 		})
+	}
+}
+
+func TestSysConfigHandlerRejectsDirectMutations(t *testing.T) {
+	r := newSysConfigTestRouter(&stubSysConfigRepo{})
+	id := uuid.New().String()
+	for _, tc := range []struct{ method, path, body string }{
+		{http.MethodPost, "/admin/sysConfig", `{"category":"system","key":"system_name","value":"OMC"}`},
+		{http.MethodPut, "/admin/sysConfig/" + id, `{"value":"new"}`},
+		{http.MethodDelete, "/admin/sysConfig/" + id, ""},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, bytes.NewBufferString(tc.body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
 	}
 }
 
@@ -164,6 +171,40 @@ func TestSysConfigHandler_BatchRejectsAgentTokenWith400(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.False(t, repoCalled)
+}
+
+func TestSysConfigHandler_BatchReturnsPersistedApplyStatus(t *testing.T) {
+	r := newSysConfigTestRouter(&stubSysConfigRepo{})
+	req := httptest.NewRequest(http.MethodPost, "/admin/sysConfig/batch",
+		bytes.NewBufferString(`{"category":"device","items":[{"key":"periodicSyncEnabled","value":"true"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	data := decodeResponseData(t, w).(map[string]any)
+	batch, ok := data["batch"].(map[string]any)
+	require.True(t, ok, "保存响应必须返回可查询的应用批次，而不仅是已写入条数")
+	assert.NotEmpty(t, batch["id"])
+	assert.Equal(t, "applied", batch["status"])
+	assert.Equal(t, "device", batch["category"])
+}
+
+func TestSysConfigHandler_BatchMarksPMRetentionAsPendingApplication(t *testing.T) {
+	r := newSysConfigTestRouter(&stubSysConfigRepo{})
+	req := httptest.NewRequest(http.MethodPost, "/admin/sysConfig/batch",
+		bytes.NewBufferString(`{"category":"pm.retention","items":[{"key":"raw_15min_days","value":"30","value_type":"int"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	batch := decodeResponseData(t, w).(map[string]any)["batch"].(map[string]any)
+	assert.Equal(t, "pending", batch["status"], "Timescale 策略尚未确认前不得显示已生效")
+	targets := batch["targets"].([]any)
+	require.Len(t, targets, 1)
+	assert.Equal(t, "pm_retention", targets[0].(map[string]any)["target"])
+	assert.Equal(t, "pending", targets[0].(map[string]any)["status"])
 }
 
 func TestSysConfigHandler_DeleteRejectsSecretWith400(t *testing.T) {

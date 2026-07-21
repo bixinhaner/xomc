@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Button,
+  Alert,
   Form,
   message,
   Tabs,
@@ -23,9 +24,11 @@ import LogRetentionSection from './LogRetentionSection';
 import {
   useSysConfigsByCategory,
   useBatchUpdateSysConfigs,
+  useSysConfigApplyBatch,
 } from '@core/hooks/api/useSystem';
 import type { SysConfigValueType } from '@core/types/system';
 import { buildBatchItems } from './sysConfigSerialize';
+import type { ConfigApplyBatch } from '@core/types/system';
 
 // 设置子页签类型（v1.0：移除 sas / ldap，参 omgo/docs/prd/system/config.md）
 // notify tab 已隐藏（#781）：邮件/短信后端未真实打通前不展示，避免误导用户
@@ -82,6 +85,9 @@ function decodeValue(raw: string, type: SysConfigValueType | undefined): unknown
 export default function SystemConfig() {
   const t = useT();
   const [activeTab, setActiveTab] = useState<SettingsTab>('basic');
+  const [submittedBatch, setSubmittedBatch] = useState<ConfigApplyBatch | null>(null);
+  const { data: refreshedBatch } = useSysConfigApplyBatch(submittedBatch?.id);
+  const applyBatch = refreshedBatch ?? submittedBatch;
 
   // 各设置模块的表单实例
   const [basicForm] = Form.useForm();
@@ -158,7 +164,8 @@ export default function SystemConfig() {
       return;
     }
     try {
-      await batchUpdate.mutateAsync({ category: activeTab, items });
+      const result = await batchUpdate.mutateAsync({ category: activeTab, items });
+      setSubmittedBatch(result.batch);
       void message.success(t('common.save'));
     } catch (err) {
       const msg = err instanceof Error ? err.message : t('sysconfig.error.saveFailed');
@@ -219,6 +226,21 @@ export default function SystemConfig() {
       <Spin spinning={isFetching}>
         {renderSettingsContent()}
       </Spin>
+      {applyBatch && (
+        <Alert
+          style={{ marginTop: 12 }}
+          type={applyBatch.status === 'failed' ? 'error' : applyBatch.status === 'applied' ? 'success' : 'info'}
+          showIcon
+          message={t(
+            applyBatch.category === 'acs_transfer' && applyBatch.status === 'applied'
+              ? 'sysconfig.apply.delivered'
+              : `sysconfig.apply.${applyBatch.status}`,
+          )}
+          description={applyBatch.status === 'failed'
+            ? applyBatch.targets.find((target) => target.lastError)?.lastError
+            : undefined}
+        />
+      )}
       {/* 底部保存按钮：仅对走全局表单的页签显示；自管表单页签（pm_retention）
           由其组件内部的保存/重置按钮负责，避免重复且避免对 undefined form 操作。 */}
       {formMap[activeTab] && (

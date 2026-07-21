@@ -23,6 +23,8 @@ var publicSysConfigs = map[validatorKey]struct{}{
 var secretSysConfigs = map[validatorKey]struct{}{
 	{Category: "security", Key: "defaultPasswd"}:           {},
 	{Category: "agent", Key: "agent_studio_service_token"}: {},
+	{Category: "acs_transfer", Key: "uploadPassword"}:      {},
+	{Category: "acs_transfer", Key: "downloadPassword"}:    {},
 }
 
 func isPublicSysConfig(category, key string) bool {
@@ -35,6 +37,21 @@ func isSecretSysConfig(category, key string) bool {
 	return ok
 }
 
+func isPreserveOnBlankSecret(category, key string) bool {
+	return category == "acs_transfer" && (key == "uploadPassword" || key == "downloadPassword")
+}
+
+func preserveBlankSecrets(category string, items []BatchItem) []BatchItem {
+	filtered := make([]BatchItem, 0, len(items))
+	for _, item := range items {
+		if isPreserveOnBlankSecret(category, item.Key) && item.Value == "" {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered
+}
+
 // validateGenericBatchWrite protects the generic system-config endpoint.
 // The default password remains writable here for the security settings page,
 // while Agent tokens must use the dedicated Agent configuration service.
@@ -44,6 +61,12 @@ func validateGenericBatchWrite(req BatchUpdateSysConfigRequest) error {
 			continue
 		}
 		if req.Category == "security" && item.Key == "defaultPasswd" && item.Value != "" {
+			continue
+		}
+		// Historical ACS credentials are write-only: a non-empty value rotates
+		// the secret, while an empty value is filtered before persistence and
+		// therefore preserves the existing credential.
+		if isPreserveOnBlankSecret(req.Category, item.Key) {
 			continue
 		}
 		return fmt.Errorf("%w: generic sys_config write is not allowed for %s.%s",

@@ -256,6 +256,15 @@ func Setup(r *gin.Engine, c *Container) error {
 		zap.Int("module_count", moduleCount),
 		zap.Duration("total_duration", time.Since(totalStart)),
 	)
+	if c.SysConfigSvc != nil {
+		stopRetry := c.SysConfigSvc.StartApplyRetry(15 * time.Second)
+		if c.GS != nil {
+			c.GS.Register("sys-config-apply-retry", 1, func(context.Context) error {
+				stopRetry()
+				return nil
+			})
+		}
+	}
 
 	// ===== Phase 2: 配置 Gin 中间件 =====
 	setupMiddleware(r, c)
