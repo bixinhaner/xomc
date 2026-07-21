@@ -11,7 +11,15 @@ interface DeviceListSyncParam {
 const DEVICE_LIST_SYNC_PARAMS: DeviceListSyncParam[] = [
   { key: 'deviceModel', scope: 'common', paths: ['Device.DeviceInfo.ModelName'] },
   { key: 'softwareVersion', scope: 'common', paths: ['Device.DeviceInfo.SoftwareVersion'] },
-  { key: 'macAddress', scope: 'common', paths: ['Device.Ethernet.Interface.{i}.MACAddress', 'Device.DeviceInfo.X_COM_MACAddress'] },
+  {
+    key: 'macAddress',
+    scope: 'common',
+    paths: [
+      'Device.Ethernet.Interface.MACAddress',
+      'Device.Ethernet.Interface.{i}.MACAddress',
+      'Device.DeviceInfo.X_COM_MACAddress',
+    ],
+  },
   { key: 'upTime', scope: 'common', paths: ['Device.DeviceInfo.UpTime', 'Device.DeviceInfo.X_COM_STATION_RUN_Time'] },
   { key: 'ueCount', scope: 'common', paths: ['Device.Services.FAPService.{i}.CellConfig.AccessMgmt.LTE.MaxUEsServed'] },
   {

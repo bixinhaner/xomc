@@ -61,6 +61,14 @@ describe('getDeviceListParamSyncPaths', () => {
     isOnline: true,
   } as Device;
 
+  it('下发固定、实例化和厂商兼容的 MAC 参数路径', () => {
+    const paths = getDeviceListParamSyncPaths(baseDevice);
+
+    expect(paths).toContain('Device.Ethernet.Interface.MACAddress');
+    expect(paths).toContain('Device.Ethernet.Interface.{i}.MACAddress');
+    expect(paths).toContain('Device.DeviceInfo.X_COM_MACAddress');
+  });
+
   it('下发列表 rfStatus 后端派生实际读取的 RF 参数', () => {
     const paths = getDeviceListParamSyncPaths(baseDevice);
 
