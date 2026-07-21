@@ -44,6 +44,10 @@ func Test_BuildTree_SQLNoSubFieldIsSupportedSubquery(t *testing.T) {
 		"PR-C: c.target_paths column should be SELECTed directly")
 	assert.Contains(t, src, "LEFT JOIN mml_commands c ON c.group_id = g.id AND c.deprecated_at IS NULL",
 		"deprecated commands must not be returned in the console command tree")
+	assert.Contains(t, src, "AND g.deleted_at IS NULL",
+		"deleted groups must not be returned in the console command tree")
+	assert.Contains(t, src, "AND g.deprecated_at IS NULL",
+		"deprecated groups must not be returned in the console command tree")
 }
 
 func Test_BuildTree_HidesDeprecatedCommands(t *testing.T) {
