@@ -43,7 +43,7 @@ const (
 	bpDefaultEnabled     = true
 	bpDefaultDiskHighPct = 85.0
 	bpDefaultDiskLowPct  = 75.0
-	bpDefaultIOSomeHigh  = 40.0
+	bpDefaultIOSomeHigh  = 70.0
 	bpDefaultIOSomeLow   = 20.0
 	bpDefaultMaxInflight = 2000
 	bpDefaultIntervalSec = 30
