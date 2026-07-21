@@ -2,6 +2,8 @@ package minio
 
 import (
 	"context"
+	"encoding/xml"
+	"errors"
 	"fmt"
 	"time"
 
@@ -17,10 +19,11 @@ import (
 // 由 MinIO ILM 自动过期删除，防「设备数 × 每天文件数 × 保留期」把盘单调撑满。其它桶
 // （firmware/config_backup/logs 等）内容需持久，不设此策略。
 //
-// issue #319：天数改为可配（sys_configs minio.retention.raw_object_days）。各进程启动期
-// EnsureBuckets 先用本默认值兜底；app 进程随后按 sys_configs 实配值幂等重设并热加载
-// （见 cmd/app/provider/minio_ilm.go）。acs/worker 无 SysConfigSvc 时沿用本默认值。
+// issue #319：天数改为可配（sys_configs minio.retention.raw_object_days）。只有 app
+// 进程的持久化 ILM applier 有权设置它；ACS/worker 的 EnsureBuckets 只建桶，不能覆盖配置。
 const DefaultRawFileRetentionDays = 60
+
+const lifecycleRollbackTimeout = 10 * time.Second
 
 // NewMinIOClient creates a new MinIO client for internal traffic
 // (后端 ↔ MinIO，走 cfg.Endpoint，通常是 docker 内网名 / k8s service)。
@@ -105,13 +108,9 @@ func EnsureBuckets(ctx context.Context, client *minio.Client, cfg appconfig.Buck
 		}
 	}
 
-	// #169 / #319：原始文件桶（pm-files / mr-files）设过期 ILM，防 PM/MR 文件把盘单调塞满；幂等。
-	// 此处用默认天数兜底；app 进程随后按 sys_configs(minio.retention.raw_object_days) 幂等重设
-	// 实配值（见 cmd/app/provider/minio_ilm.go）。其它桶内容需持久，不设。
-	// 失败由调用方降级为 warn（infra.go），不阻塞启动。
-	if err := ApplyRawFileLifecycle(ctx, client, []string{cfg.PMFiles, cfg.MRFiles}, DefaultRawFileRetentionDays); err != nil {
-		return err
-	}
+	// Lifecycle is intentionally not written here. EnsureBuckets runs in app,
+	// ACS, and worker; only the app-side persistent ILM applier is authoritative.
+	// Otherwise any ACS/worker restart could overwrite the configured value.
 	return nil
 }
 
@@ -128,12 +127,24 @@ func rawFileLifecycleConfig(days int) *lifecycle.Configuration {
 }
 
 // ensureRawFileLifecycle 幂等设置原始文件桶的 days 天过期生命周期（重设覆盖）。bucket 为空跳过。
-func ensureRawFileLifecycle(ctx context.Context, client *minio.Client, bucket string, days int) error {
+type bucketLifecycleClient interface {
+	GetBucketLifecycle(ctx context.Context, bucketName string) (*lifecycle.Configuration, error)
+	SetBucketLifecycle(ctx context.Context, bucketName string, config *lifecycle.Configuration) error
+}
+
+func ensureRawFileLifecycle(ctx context.Context, client bucketLifecycleClient, bucket string, days int) error {
 	if bucket == "" {
 		return nil
 	}
 	if err := client.SetBucketLifecycle(ctx, bucket, rawFileLifecycleConfig(days)); err != nil {
 		return fmt.Errorf("set lifecycle on bucket %s: %w", bucket, err)
+	}
+	actual, err := client.GetBucketLifecycle(ctx, bucket)
+	if err != nil {
+		return fmt.Errorf("read back lifecycle on bucket %s: %w", bucket, err)
+	}
+	if !rawFileLifecycleMatches(actual, days) {
+		return fmt.Errorf("verify lifecycle on bucket %s: expected one enabled %d-day raw-file rule", bucket, days)
 	}
 	return nil
 }
@@ -141,17 +152,101 @@ func ensureRawFileLifecycle(ctx context.Context, client *minio.Client, bucket st
 // ApplyRawFileLifecycle 对一组原始文件桶幂等重设 days 天过期 ILM（issue #319）。
 // SetBucketLifecycle 是服务端整桶覆盖操作，可随时重设——app 进程在启动期及
 // sys_configs(minio.retention.raw_object_days) 变更时调用本函数热更新天数。
-// client 为 nil 或 days<=0 时直接返回 nil（降级，不阻塞启动 / 不误删）。
+// 多桶更新无法依赖 S3 事务；先保存原配置，任一设置/回读失败时执行补偿回滚，
+// 避免 pm-files 与 mr-files 长时间处于不同保留策略。
 func ApplyRawFileLifecycle(ctx context.Context, client *minio.Client, buckets []string, days int) error {
-	if client == nil || days <= 0 {
-		return nil
+	if client == nil {
+		return fmt.Errorf("MinIO lifecycle client is nil")
 	}
-	for _, b := range buckets {
-		if err := ensureRawFileLifecycle(ctx, client, b, days); err != nil {
+	return applyRawFileLifecycle(ctx, client, buckets, days)
+}
+
+func applyRawFileLifecycle(ctx context.Context, client bucketLifecycleClient, buckets []string, days int) error {
+	if client == nil {
+		return fmt.Errorf("MinIO lifecycle client is nil")
+	}
+	if days <= 0 {
+		return fmt.Errorf("raw-file lifecycle days must be positive")
+	}
+
+	previous := make(map[string]*lifecycle.Configuration, len(buckets))
+	ordered := make([]string, 0, len(buckets))
+	for _, bucket := range buckets {
+		if bucket == "" {
+			continue
+		}
+		config, err := getBucketLifecycleOrEmpty(ctx, client, bucket)
+		if err != nil {
+			return fmt.Errorf("read existing lifecycle on bucket %s: %w", bucket, err)
+		}
+		previous[bucket] = config
+		ordered = append(ordered, bucket)
+	}
+
+	updated := make([]string, 0, len(ordered))
+	for _, bucket := range ordered {
+		// Include the current bucket in compensation: Set may have succeeded even
+		// when the subsequent read-back verification fails.
+		updated = append(updated, bucket)
+		if err := ensureRawFileLifecycle(ctx, client, bucket, days); err != nil {
+			rollbackCtx, cancelRollback := context.WithTimeout(context.WithoutCancel(ctx), lifecycleRollbackTimeout)
+			rollbackErr := rollbackRawFileLifecycles(rollbackCtx, client, updated, previous)
+			cancelRollback()
+			if rollbackErr != nil {
+				return fmt.Errorf("%w; compensating rollback failed: %v", err, rollbackErr)
+			}
 			return err
 		}
 	}
 	return nil
+}
+
+func rollbackRawFileLifecycles(ctx context.Context, client bucketLifecycleClient, updated []string, previous map[string]*lifecycle.Configuration) error {
+	var rollbackErrors []error
+	for i := len(updated) - 1; i >= 0; i-- {
+		bucket := updated[i]
+		if err := client.SetBucketLifecycle(ctx, bucket, previous[bucket]); err != nil {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("restore lifecycle on bucket %s: %w", bucket, err))
+			continue
+		}
+		actual, err := getBucketLifecycleOrEmpty(ctx, client, bucket)
+		if err != nil {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("read back restored lifecycle on bucket %s: %w", bucket, err))
+			continue
+		}
+		if !lifecycleConfigurationsEqual(actual, previous[bucket]) {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("verify restored lifecycle on bucket %s: configuration mismatch", bucket))
+		}
+	}
+	return errors.Join(rollbackErrors...)
+}
+
+func getBucketLifecycleOrEmpty(ctx context.Context, client bucketLifecycleClient, bucket string) (*lifecycle.Configuration, error) {
+	config, err := client.GetBucketLifecycle(ctx, bucket)
+	if err != nil {
+		if minio.ToErrorResponse(err).Code == "NoSuchLifecycleConfiguration" {
+			return lifecycle.NewConfiguration(), nil
+		}
+		return nil, err
+	}
+	if config == nil {
+		return lifecycle.NewConfiguration(), nil
+	}
+	return config, nil
+}
+
+func lifecycleConfigurationsEqual(left, right *lifecycle.Configuration) bool {
+	leftXML, leftErr := xml.Marshal(left)
+	rightXML, rightErr := xml.Marshal(right)
+	return leftErr == nil && rightErr == nil && string(leftXML) == string(rightXML)
+}
+
+func rawFileLifecycleMatches(config *lifecycle.Configuration, days int) bool {
+	if config == nil || len(config.Rules) != 1 {
+		return false
+	}
+	rule := config.Rules[0]
+	return rule.Status == "Enabled" && rule.RuleFilter.Prefix == "" && int(rule.Expiration.Days) == days
 }
 
 // MinIOHealthCheck verifies the MinIO connection is alive.

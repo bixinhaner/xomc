@@ -3,12 +3,13 @@ package provider
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/admin"
-	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	minioinfra "github.com/omcgo/omcgo/internal/core/components/minio"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 )
 
 // issue #548 切片 2 · D 后端 ── MinIO public_endpoint 运行时订阅桥 wiring。
@@ -22,12 +23,12 @@ import (
 //  1. 启动期建桥 NewPresignBridge：初值 = cfg.PublicEndpoint（YAML 已 expand env），
 //     空则回退内部 cfg.Endpoint + 一次 Warn（兜底语义保留，qa-614 #377）
 //  2. 启动期一次 reload：若 sys_configs.storage.minio_public_endpoint 已配，覆盖 envFallback
-//  3. 注册 SysConfigSavedHook on category="storage"：保存后重读 → bridge.SetPublicEndpoint
+//  3. 注册持久化 ConfigApplyHandler：保存后重读 → bridge.SetPublicEndpoint，并记录应用结果
 //  4. 注册 SysConfigValidator on (storage, minio_public_endpoint) = ValidatePublicEndpoint，
 //     非法值（带 scheme / path / 越界 port）BatchUpsert 整批拒绝并 HTTP 400
 //
 // 配置优先级（运行时合成）：
-//   sys_configs.storage.minio_public_endpoint  (UI 改 → SavedHook 热生效)
+//   sys_configs.storage.minio_public_endpoint  (UI 改 → 应用任务热生效)
 //     ↓ 空 则回退
 //   cfg.PublicEndpoint                         (启动期 envFallback，YAML 里 ${MINIO_PUBLIC_ENDPOINT} 已展开)
 //     ↓ 空 则回退
@@ -46,12 +47,12 @@ import (
 // 暂时只对 trace 生效——切片 3 / 后续主线统一切换。
 
 const (
-	storageCategory               = "storage"
-	storagePublicEndpointKey      = "minio_public_endpoint"
+	storageCategory          = "storage"
+	storagePublicEndpointKey = "minio_public_endpoint"
 )
 
 // initMinIOPresignBridgeModule 在 ModuleGraph 中作为 "minio-presign-bridge" 模块初始化，
-// 依赖 admin（拿 SysConfigSvc 挂 hook / validator）。
+// 依赖 admin（拿 SysConfigSvc 挂应用器 / validator）。
 func initMinIOPresignBridgeModule(c *Container) error {
 	logger := c.Logger.Named("minio-presign-bridge")
 
@@ -66,14 +67,18 @@ func initMinIOPresignBridgeModule(c *Container) error {
 	// 启动期一次 reload：若 sys_configs 已配 storage.minio_public_endpoint，
 	// 用它覆盖 envFallback（典型场景：运维先经 UI 改过、后又重启进程）。
 	if c.SysConfigSvc != nil {
-		applyFromSysConfigs(context.Background(), c, bridge, logger)
+		if _, err := applyFromSysConfigs(context.Background(), c, bridge); err != nil {
+			logger.Warn("initial MinIO presign bridge apply failed", zap.Error(err))
+		}
 
-		// 注册 SavedHook：category=storage 保存后重读并应用。
-		c.SysConfigSvc.RegisterSavedHook(func(ctx context.Context, category string) {
-			if category != storageCategory {
-				return
+		// 保存后的 endpoint 更新必须进入可重试的应用状态；不能使用只记录日志的
+		// SavedHook，否则数据库写入成功会被错误地报告为已生效。
+		c.SysConfigSvc.RegisterApplyHandler(storageCategory, "minio_presign_endpoint", func(ctx context.Context, _ admin.ConfigApplyWork) (map[string]any, error) {
+			endpoint, err := applyFromSysConfigs(ctx, c, bridge)
+			if err != nil {
+				return nil, err
 			}
-			applyFromSysConfigs(ctx, c, bridge, logger)
+			return map[string]any{"public_endpoint": endpoint}, nil
 		})
 
 		// 注册 Validator：BatchUpsert 写入非法值时整批 HTTP 400 拒绝。
@@ -91,32 +96,23 @@ func initMinIOPresignBridgeModule(c *Container) error {
 
 // applyFromSysConfigs 从 sys_configs 读 storage.minio_public_endpoint 并应用到桥。
 //
-// 三种结果（issue #548 切片 2 · 回合 2 修复 #Issue2，区分 ErrNotFound 与真 DB 错误）：
-//  1. ErrNotFound（首次部署 / 用户没填）：Debug 日志 + 等价 Set("") 回退 envFallback。
-//  2. 真实 DB 错误（pg 不可达、SQL 语法错等）：Warn 日志（运维需察觉）+ 等价 Set("") 回退；
-//     不阻塞启动——env/YAML fallback 仍能撑住绝大多数生产场景。
-//  3. 读到值但 SetPublicEndpoint 校验失败（历史脏数据：validator 是本切片新加，老库可能有非法值）：
-//     Warn 日志 + 保留桥当前 endpoint，运维去 UI 修正即可。
-func applyFromSysConfigs(ctx context.Context, c *Container, bridge *minioinfra.PresignBridge, logger *zap.Logger) {
+// Missing configuration is an intentional env/YAML fallback. Database and
+// endpoint validation failures are returned so the apply batch can be marked
+// failed and retried instead of silently claiming success.
+func applyFromSysConfigs(ctx context.Context, c *Container, bridge *minioinfra.PresignBridge) (string, error) {
 	repo := admin.NewPgSysConfigRepository(c.PgPool)
 	row, err := repo.GetByKey(ctx, storageCategory, storagePublicEndpointKey)
 	if err != nil {
-		switch {
-		case errors.Is(err, commonerrors.ErrNotFound):
-			// 正常路径：未配置 → 桥走 envFallback。Debug 仅供排查。
-			logger.Debug("sys_configs storage.minio_public_endpoint 未配置；桥使用 env/YAML fallback")
-		default:
-			// 真错误（DB 不可达、scan 失败等）：运维必须察觉，否则会误判"配置已生效"。
-			logger.Warn("sys_configs storage.minio_public_endpoint 读取失败；桥回退 env/YAML，请检查数据库",
-				zap.Error(err))
+		if errors.Is(err, commonerrors.ErrNotFound) {
+			if err := bridge.SetPublicEndpoint(""); err != nil {
+				return "", fmt.Errorf("apply MinIO endpoint fallback: %w", err)
+			}
+			return bridge.CurrentEndpoint(), nil
 		}
-		_ = bridge.SetPublicEndpoint("") // Set("") 自身不会失败（"" 合法）
-		return
+		return "", fmt.Errorf("read storage.minio_public_endpoint: %w", err)
 	}
 	if applyErr := bridge.SetPublicEndpoint(row.Value); applyErr != nil {
-		// 历史已落库的非法值（validator 是本切片新加，老库可能有脏数据）：
-		// Warn 不阻塞——保持桥当前 endpoint，运维去 UI 修正即可。
-		logger.Warn("sys_configs storage.minio_public_endpoint 当前值不合法，桥保留原值",
-			zap.String("value", row.Value), zap.Error(applyErr))
+		return "", fmt.Errorf("apply storage.minio_public_endpoint: %w", applyErr)
 	}
+	return bridge.CurrentEndpoint(), nil
 }

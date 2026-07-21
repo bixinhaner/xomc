@@ -2,11 +2,14 @@ package retention
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
 
 	"go.uber.org/zap"
+
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 )
 
 // SysConfigReader 是本包对 admin.SysConfigRepository 的最小依赖窄接口，
@@ -166,6 +169,32 @@ func (s *Service) Reload(ctx context.Context) error {
 		l(ctx, newVals, changed)
 	}
 	return nil
+}
+
+// ReloadStrict reloads every configured policy without defaulting or retaining
+// cached values. It is used by the persistent configuration apply pipeline:
+// reporting success after an invalid or unreadable value would otherwise claim
+// that a policy changed when the old/default policy is still active.
+func (s *Service) ReloadStrict(ctx context.Context) (map[PolicyKey]int, error) {
+	newVals := make(map[PolicyKey]int, len(AllKeys()))
+	for _, k := range AllKeys() {
+		v, err := s.readOne(ctx, k)
+		if err != nil {
+			// A partial category update is supported by the generic API. A
+			// missing sibling key is therefore an intentional default, unlike a
+			// malformed value or a database read failure.
+			if errors.Is(err, ErrUnknownPolicyKey) || errors.Is(err, commonerrors.ErrNotFound) {
+				v = DefaultDays[k]
+			} else {
+				return nil, fmt.Errorf("reload strict %s: %w", k, err)
+			}
+		}
+		newVals[k] = v
+	}
+	s.mu.Lock()
+	s.cache = newVals
+	s.mu.Unlock()
+	return newVals, nil
 }
 
 // OnSysConfigSaved 是注册给 admin.SysConfigService.RegisterSavedHook 的回调。
