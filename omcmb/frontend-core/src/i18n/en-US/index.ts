@@ -4644,7 +4644,7 @@ const messages: Record<string, string> = {
   'system.transfer.pathInvalid': 'The path must start with / and must not contain a query, fragment, or directory traversal',
   'system.transfer.uploadMaxFileSizeHelp': 'Unit: bytes. Default 1 GB (1073741824); edit as needed.',
   'system.transfer.runtimeHint': 'After saving, ACS instances pick up the change on the local cache refresh cycle. The current cache TTL is 30 seconds.',
-  'system.transfer.deviceReachabilityHelp': 'The address must be reachable from device networks. Production rejects localhost, loopback, link-local, and RFC1918 private addresses.',
+  'system.transfer.deviceReachabilityHelp': 'The address must be reachable from device networks. Production allows private addresses reachable within the operator network, but rejects localhost, loopback, link-local, and unspecified addresses.',
   'system.transfer.maxGlobalUpgradeConcurrency': 'System-wide Upgrade Concurrency Limit',
   'system.transfer.maxGlobalUpgradeConcurrencyHelp': 'Maximum devices upgrading/rolling back simultaneously across all tasks, preventing stacked tasks from saturating download bandwidth. Default 100.',
   'system.transfer.maxGlobalUpgradeConcurrencyRequired': 'Please enter the upgrade concurrency limit',

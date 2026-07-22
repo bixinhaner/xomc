@@ -4673,7 +4673,7 @@ const messages: Record<string, string> = {
   'system.transfer.pathInvalid': '路径必须以 / 开头，且不能包含查询参数、片段或目录跳转',
   'system.transfer.uploadMaxFileSizeHelp': '单位：字节，默认 1 GB（1073741824），可按需修改。',
   'system.transfer.runtimeHint': '配置保存后会由 ACS 进程按本地缓存周期刷新生效，当前缓存周期为 30 秒。',
-  'system.transfer.deviceReachabilityHelp': '填写的地址必须能从设备所在网络访问；生产环境不能使用 localhost、回环、链路本地或 RFC1918 私网地址。',
+  'system.transfer.deviceReachabilityHelp': '填写的地址必须能从设备所在网络访问；生产环境允许运营商网络中基站可达的私网地址，但不能使用 localhost、回环、链路本地或未指定地址。',
   'system.transfer.maxGlobalUpgradeConcurrency': '基站升级系统级并发上限',
   'system.transfer.maxGlobalUpgradeConcurrencyHelp': '全部升级/回退任务合计同时执行的基站数上限（跨任务共享），防止多任务叠加打爆下载带宽，默认 100 台。',
   'system.transfer.maxGlobalUpgradeConcurrencyRequired': '请输入升级并发上限',
