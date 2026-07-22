@@ -633,9 +633,8 @@ export default function FileTransferCenter() {
       const i18nLabel = t(`software.failureCode.${codeOrRaw}` as Parameters<typeof t>[0]);
       const display = i18nLabel && i18nLabel !== `software.failureCode.${codeOrRaw}` ? i18nLabel : value;
       // 设备厂商原始 fault（FaultCode + FaultString）放 Tooltip 里——i18n label 只看到统一
-      // 错误码描述，hover 后能拿到设备端原文（如 "Upgrade failed, there is FaultString in
-      // TransferComplete msg. FaultCode: 0, FaultString: httpUpload OM Http Put Upload stat
-      // file error"），方便厂商侧排查。
+      // 错误码描述，hover 后能拿到设备端原文（如 "FaultCode: 0, FaultString: httpUpload OM
+      // Http Put Upload stat file error"），方便厂商侧排查。
       const detail = record.failureDetail;
       const text = <span style={{ color: '#ff4d4f' }}>{display}</span>;
       if (!detail || detail === display) return text;

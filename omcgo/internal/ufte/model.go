@@ -142,8 +142,7 @@ type DeviceItem struct {
 	OperatorScope string     `json:"operatorScope"`
 	FailureReason string     `json:"failureReason,omitempty"`
 	// FailureDetail 是设备失败时的详细错误描述（含 FaultCode + FaultString 原文），
-	// 比如 TC 失败时填："Upgrade failed, there is FaultString in TransferComplete msg.
-	// FaultCode: 0, FaultString: httpUpload OM Http Put Upload stat file error"。
+	// 比如 TC 失败时填："FaultCode: 0, FaultString: httpUpload OM Http Put Upload stat file error"。
 	// 前端「设备失败信息」列展示原文，比单看 i18n 化的 FailureReason code（如 "TC_FAULT"）
 	// 更便于排查厂商侧故障。
 	FailureDetail string `json:"failureDetail,omitempty"`

@@ -1210,7 +1210,7 @@ func (s *SoftwareService) handleTCBody(ctx context.Context, commandKey string, f
 
 	// TC with fault → fail immediately
 	if hasFault {
-		reason := fmt.Sprintf("Upgrade failed, there is FaultString in TransferComplete msg. FaultCode: %d, FaultString: %s", fault.FaultCode, faultString)
+		reason := fmt.Sprintf("FaultCode: %d, FaultString: %s", fault.FaultCode, faultString)
 		s.executor.failSubTask(ctx, subTask, reason, FailureTCFault)
 		return nil
 	}

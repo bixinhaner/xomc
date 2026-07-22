@@ -589,6 +589,97 @@ func TestService_HandleTransferComplete_InvalidPayload(t *testing.T) {
 	assert.NoError(t, err) // should silently return nil
 }
 
+func TestService_HandleTransferComplete_LogCollectFaultMessage(t *testing.T) {
+	taskID := uuid.New()
+	subTaskID := uuid.New()
+	commandKey := "Collect LOG,abc123"
+
+	var capturedMsg string
+	subTaskRepo := &svcMockSubTaskRepo{
+		getByCommandKeyFn: func(_ context.Context, got string) (*UpgradeSubTask, error) {
+			require.Equal(t, commandKey, got)
+			return &UpgradeSubTask{
+				ID:         subTaskID,
+				TaskID:     taskID,
+				Status:     UpgradeUploading,
+				CommandKey: commandKey,
+			}, nil
+		},
+		updateStatusFn: func(_ context.Context, _ uuid.UUID, status UpgradeState, msg string) error {
+			require.Equal(t, UpgradeFailed, status)
+			capturedMsg = msg
+			return nil
+		},
+	}
+	svc := NewSoftwareService(
+		&svcMockFirmwareRepo{},
+		&svcMockTaskRepo{},
+		subTaskRepo,
+		&svcMockDeviceRepo{},
+		&svcMockCmdQueue{}, nil, nil, "test-bucket",
+		&svcMockEventBus{}, nil, zap.NewNop(),
+	)
+
+	evt, err := event.NewEvent(event.SubjectDeviceTransferComplete, map[string]any{
+		"command_key": commandKey,
+		"fault_struct": map[string]any{
+			"fault_code":   0,
+			"fault_string": "Download fail with exit status 1",
+		},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, svc.HandleTransferComplete(context.Background(), evt))
+	require.Equal(t, "FaultCode: 0, FaultString: Download fail with exit status 1", capturedMsg)
+	require.NotContains(t, capturedMsg, "Upgrade failed")
+	require.NotContains(t, capturedMsg, "File transfer failed")
+}
+
+func TestService_HandleTransferComplete_UpgradeFaultMessage(t *testing.T) {
+	taskID := uuid.New()
+	subTaskID := uuid.New()
+	commandKey := subTaskID.String()
+
+	var capturedMsg string
+	subTaskRepo := &svcMockSubTaskRepo{
+		getByCommandKeyFn: func(_ context.Context, got string) (*UpgradeSubTask, error) {
+			require.Equal(t, commandKey, got)
+			return &UpgradeSubTask{
+				ID:         subTaskID,
+				TaskID:     taskID,
+				Status:     UpgradeDownloading,
+				CommandKey: commandKey,
+			}, nil
+		},
+		updateStatusFn: func(_ context.Context, _ uuid.UUID, status UpgradeState, msg string) error {
+			require.Equal(t, UpgradeFailed, status)
+			capturedMsg = msg
+			return nil
+		},
+	}
+	svc := NewSoftwareService(
+		&svcMockFirmwareRepo{},
+		&svcMockTaskRepo{},
+		subTaskRepo,
+		&svcMockDeviceRepo{},
+		&svcMockCmdQueue{}, nil, nil, "test-bucket",
+		&svcMockEventBus{}, nil, zap.NewNop(),
+	)
+
+	evt, err := event.NewEvent(event.SubjectDeviceTransferComplete, map[string]any{
+		"command_key": commandKey,
+		"fault_struct": map[string]any{
+			"fault_code":   9010,
+			"fault_string": "install failed",
+		},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, svc.HandleTransferComplete(context.Background(), evt))
+	require.Equal(t, "FaultCode: 9010, FaultString: install failed", capturedMsg)
+	require.NotContains(t, capturedMsg, "Upgrade failed")
+}
+
 // ---------------------------------------------------------------------------
 // Executor event handling tests
 // ---------------------------------------------------------------------------
