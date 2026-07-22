@@ -3,7 +3,7 @@ package carrier
 import "github.com/omcgo/omcgo/internal/core/model"
 
 // OUIProductClassInfo 描述一个已知的厂商/产品小单元。
-// 用于设备首次 Inform 时根据 OUI 和 ProductClass 自动识别所属运营商（见 CarrierRegistry.ResolveByOUI）。
+// 用于设备首次 Inform 时根据 OUI 和 ProductClass 自动识别所属运营商（见 CarrierRegistry.ResolveByIdentity）。
 type OUIProductClassInfo struct {
 	OUI              string
 	ProductClass     string

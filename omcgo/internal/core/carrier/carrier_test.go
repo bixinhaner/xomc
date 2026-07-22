@@ -58,15 +58,28 @@ func TestRegistryResolveByOUI(t *testing.T) {
 		oui  string
 		want model.CarrierCode
 	}{
-		{"00E0FC", model.CarrierCMCC}, // Huawei (in CMCC known list)
-		{"001E7E", model.CarrierCMCC}, // ZTE (in CMCC known list)
-		{"FFFFFF", ""},                 // unknown OUI
+		{"00E0FC", ""},                // Huawei: shared by CMCC and CTCC
+		{"001E7E", ""},                // ZTE: shared by CMCC and CTCC
+		{"34CDBE", model.CarrierCUCC}, // Ericsson: unique CUCC OUI
+		{"FFFFFF", ""},                // unknown OUI
 	}
 
 	for _, tt := range tests {
 		got := r.ResolveByOUI(tt.oui)
 		assert.Equal(t, tt.want, got, "OUI: %s", tt.oui)
 	}
+}
+
+func TestRegistryResolveByIdentityWithRealCarrierProfiles(t *testing.T) {
+	r := newTestRegistry()
+
+	cmccCode, err := r.ResolveByIdentity("00E0FC", "SmallCell-LTE")
+	require.NoError(t, err)
+	assert.Equal(t, model.CarrierCMCC, cmccCode)
+
+	ctccCode, err := r.ResolveByIdentity("00E0FC", "eSmallCell-LTE")
+	require.NoError(t, err)
+	assert.Equal(t, model.CarrierCTCC, ctccCode)
 }
 
 func TestCMCCCarrier(t *testing.T) {
