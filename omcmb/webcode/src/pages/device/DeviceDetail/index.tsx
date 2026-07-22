@@ -43,6 +43,7 @@ import LineChart from '@/components/Charts/LineChart';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import { useSyncStatus } from '@core/hooks/api/useDeviceParameters';
 import { useDeviceTaskStatus } from '@core/hooks/api/useDeviceTask';
+import { deviceTaskApi, isAbortError } from '@core/services/api/deviceTaskApi';
 import { useDeviceBySn, useDeviceGroups, useRenameDevice, useSyncDeviceParams } from '@core/hooks/api/useDevices';
 import { deviceParameterApi } from '@core/services/api/deviceParameterApi';
 import { deviceApi } from '@core/services/api/deviceApi';
@@ -51,13 +52,14 @@ import { useDictionary } from '@core/hooks/api/useSystem';
 import { displayActivationStatusLabelOf, displayActivationStatusOf } from '@core/utils/activationStatus';
 import { useQuickSettingsGroups } from '@core/hooks/api/useQuickSettings';
 import { useResolvedCellInstances } from '@core/hooks/api/useResolvedCellInstances';
-import { useAcknowledgeAlarms, useClearAlarms, useCurrentAlarms, useUnacknowledgeAlarms } from '@core/hooks/api/useAlarms';
+import { useAcknowledgeAlarms, useClearAlarms, useCurrentAlarms, useTriggerAlarmSync, useUnacknowledgeAlarms } from '@core/hooks/api/useAlarms';
 import { useAggregatedMetricsByDevices, useMetricObjects } from '@core/hooks/api/usePmQuery';
 import { formatObjectLdn } from '@core/types/pmObject';
 import { useT } from '@/hooks/useT';
 import type { Alarm } from '@core/types/alarm';
 import type { Device } from '@core/types/device';
 import { buildKpiCharts, buildKpiCompareData } from './kpiSeries';
+import { runDeviceAlarmRefresh } from './alarmRefresh';
 import ParameterTreeTab from './ParameterTreeTab';
 import QuickSettingsTab from './QuickSettingsTab';
 import LicenseParamsTab from './LicenseParamsTab';
@@ -1379,6 +1381,12 @@ export default function DeviceDetail() {
   const notifiedPasswordTaskRef = useRef<Record<string, true>>({});
   const [passwordTaskId, setPasswordTaskId] = useState<string | undefined>();
   const { data: passwordTask } = useDeviceTaskStatus(passwordTaskId);
+  const triggerAlarmSync = useTriggerAlarmSync();
+  const alarmRefreshAbortRef = useRef<AbortController | null>(null);
+  const [alarmRefreshState, setAlarmRefreshState] = useState<{
+    deviceSn: string;
+    controller: AbortController;
+  } | null>(null);
   const isDeviceParamSyncBusy = paramSyncStatus?.status === 'syncing' || quickSettingsSyncPending || syncMutation.isPending;
   const isQuickSettingsRefreshSubmitting = syncMutation.isPending;
   const { data: detailComposite } = useQuery({
@@ -1400,6 +1408,15 @@ export default function DeviceDetail() {
       groupName: buildDeviceGroupDisplayName(merged, groups, appLocale),
     };
   }, [appLocale, detailComposite?.info, device, deviceGroupsData?.groups]);
+  const alarmRefreshPending = alarmRefreshState?.deviceSn === displayDevice?.sn;
+
+  useEffect(() => {
+    alarmRefreshAbortRef.current?.abort();
+    alarmRefreshAbortRef.current = null;
+    return () => {
+      alarmRefreshAbortRef.current?.abort();
+    };
+  }, [sn]);
 
   useEffect(() => {
     const deviceSn = displayDevice?.sn;
@@ -1648,6 +1665,40 @@ export default function DeviceDetail() {
     );
   }, [message, paramSyncStatus?.lastParamSyncAt, paramSyncStatus?.lastParamSyncFailedAt, refetchParamSyncStatus, syncMutation, t]);
 
+  const startAlarmRefresh = useCallback(() => {
+    if (alarmRefreshPending) return;
+
+    const deviceSn = displayDevice?.sn?.trim();
+    if (!deviceSn) {
+      void message.error(t('common.operationFailed'));
+      return;
+    }
+
+    alarmRefreshAbortRef.current?.abort();
+    const abortController = new AbortController();
+    alarmRefreshAbortRef.current = abortController;
+    setAlarmRefreshState({ deviceSn, controller: abortController });
+
+    void runDeviceAlarmRefresh({
+      deviceSn,
+      trigger: (targetSn) => triggerAlarmSync.mutateAsync(targetSn),
+      waitForTerminal: (taskId, signal) => deviceTaskApi.waitForTerminal(taskId, { signal }),
+      refreshCurrentAlarms: () => queryClient.invalidateQueries({ queryKey: ['alarms', 'current'] }),
+      signal: abortController.signal,
+    }).then(() => {
+      void message.success(t('status.success'));
+    }).catch((error) => {
+      if (!isAbortError(error)) {
+        void message.error(t('common.operationFailed'));
+      }
+    }).finally(() => {
+      if (alarmRefreshAbortRef.current === abortController) {
+        alarmRefreshAbortRef.current = null;
+      }
+      setAlarmRefreshState((current) => current?.controller === abortController ? null : current);
+    });
+  }, [alarmRefreshPending, displayDevice?.sn, message, queryClient, t, triggerAlarmSync]);
+
   const handleHeaderRefresh = useCallback(() => {
     void refetch();
     const deviceId = device?.id;
@@ -1663,7 +1714,7 @@ export default function DeviceDetail() {
         }
         break;
       case 'alarms':
-        void queryClient.invalidateQueries({ queryKey: ['alarms', 'current'] });
+        startAlarmRefresh();
         break;
       case 'quickSettings':
         if (deviceId) {
@@ -1692,7 +1743,7 @@ export default function DeviceDetail() {
       default:
         break;
     }
-  }, [activeTab, device?.id, licenseSyncTargetPaths, modal, queryClient, quickSettingsSyncTargetPaths, refetch, submitScopedParamRefresh, t]);
+  }, [activeTab, device?.id, licenseSyncTargetPaths, modal, queryClient, quickSettingsSyncTargetPaths, refetch, startAlarmRefresh, submitScopedParamRefresh, t]);
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     critical: t('alarm.severity.critical'),
@@ -2107,8 +2158,9 @@ export default function DeviceDetail() {
               <Button
                 icon={<ReloadOutlined />}
                 onClick={handleHeaderRefresh}
-                loading={(activeTab === 'quickSettings' || activeTab === 'license') && isQuickSettingsRefreshSubmitting}
-                disabled={isDeviceParamSyncBusy}
+                loading={((activeTab === 'quickSettings' || activeTab === 'license') && isQuickSettingsRefreshSubmitting)
+                  || (activeTab === 'alarms' && alarmRefreshPending)}
+                disabled={isDeviceParamSyncBusy || (activeTab === 'alarms' && alarmRefreshPending)}
               >
                 {t('common.refresh')}
               </Button>
