@@ -40,7 +40,8 @@ func initAdminModule(c *Container) error {
 	adminService := admin.NewAdminService(userRepo, roleRepo, menuRepo, auditRepo, jwtService, logger)
 	adminService.SetTokenRevoker(tokenRevoker)
 	// PRD §10 DoD：失效失败计数器 omc_perm_cache_invalidate_failed_total。
-	adminService.SetMetrics(admin.NewAdminMetrics(c.MetricsReg))
+	adminMetrics := admin.NewAdminMetrics(c.MetricsReg)
+	adminService.SetMetrics(adminMetrics)
 	adminHandler := admin.NewHandler(adminService, logger)
 
 	// 共享 SecurityPolicy 实例 — sys_configs (category='security') 全部字段
@@ -170,6 +171,21 @@ func initAdminModule(c *Container) error {
 	// System config module
 	sysConfigRepo := admin.NewPgSysConfigRepository(c.PgPool)
 	sysConfigService := admin.NewSysConfigService(sysConfigRepo)
+	sysConfigService.SetApplyObserver(func(observation admin.ConfigApplyObservation) {
+		adminMetrics.ObserveConfigApply(observation)
+		fields := []zap.Field{
+			zap.String("batch_id", observation.BatchID.String()),
+			zap.String("category", observation.Category),
+			zap.String("target", observation.Target),
+			zap.Int("attempts", observation.Attempts),
+			zap.String("result", observation.Result),
+		}
+		if observation.Err != nil {
+			logger.Error("system config apply attempt failed", append(fields, zap.Error(observation.Err))...)
+			return
+		}
+		logger.Info("system config apply attempt completed", fields...)
+	})
 	sysConfigHandler := admin.NewSysConfigHandler(sysConfigService)
 	agentConfigHTTPClient := &http.Client{Timeout: 10 * time.Second}
 	agentConfigService := agentconfig.NewService(sysConfigRepo, sysConfigService, agentConfigHTTPClient, logger)

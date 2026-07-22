@@ -486,3 +486,13 @@ func TestConfigApplyTargetsIncludeRequiredTargetsEvenWhenModuleDependencyIsMissi
 	require.Len(t, minioTargets, 1)
 	require.Equal(t, "minio_raw_file_lifecycle", minioTargets[0].Target)
 }
+
+func TestACSConfigApplyTargetOnlyClaimsEventDelivery(t *testing.T) {
+	svc := NewSysConfigService(&stubSysConfigRepo{})
+
+	targets := svc.configApplyTargetsForCategory("acs_transfer")
+
+	require.Len(t, targets, 1)
+	require.Equal(t, "acs_transfer_event_delivery", targets[0].Target)
+	require.Equal(t, ConfigApplySuccessScopeEventDelivered, targets[0].SuccessScope)
+}

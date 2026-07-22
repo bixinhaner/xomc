@@ -29,6 +29,7 @@ import {
 import type { SysConfigValueType } from '@core/types/system';
 import { buildBatchItems } from './sysConfigSerialize';
 import type { ConfigApplyBatch } from '@core/types/system';
+import { isApplyBatchForCategory, isEventDeliveryBatch } from './applyStatus';
 import styles from './SystemConfig.module.css';
 
 // 设置子页签类型（v1.0：移除 sas / ldap，参 omgo/docs/prd/system/config.md）
@@ -90,6 +91,7 @@ export default function SystemConfig() {
   const [submittedBatch, setSubmittedBatch] = useState<ConfigApplyBatch | null>(null);
   const { data: refreshedBatch } = useSysConfigApplyBatch(submittedBatch?.id);
   const applyBatch = refreshedBatch ?? submittedBatch;
+  const visibleApplyBatch = isApplyBatchForCategory(applyBatch, activeTab) ? applyBatch : null;
 
   // 各设置模块的表单实例
   const [basicForm] = Form.useForm();
@@ -219,6 +221,7 @@ export default function SystemConfig() {
   const handleTabChange = useCallback((key: string) => {
     const scrollContainer = tabsContainerRef.current?.closest('main');
     if (scrollContainer) scrollContainer.scrollTop = 0;
+    setSubmittedBatch(null);
     setActiveTab(key as SettingsTab);
   }, []);
 
@@ -236,18 +239,18 @@ export default function SystemConfig() {
       <Spin spinning={isFetching}>
         {renderSettingsContent()}
       </Spin>
-      {applyBatch && (
+      {visibleApplyBatch && (
         <Alert
           style={{ marginTop: 12 }}
-          type={applyBatch.status === 'failed' ? 'error' : applyBatch.status === 'applied' ? 'success' : 'info'}
+          type={visibleApplyBatch.status === 'failed' ? 'error' : visibleApplyBatch.status === 'applied' ? 'success' : 'info'}
           showIcon
           message={t(
-            applyBatch.category === 'acs_transfer' && applyBatch.status === 'applied'
+            visibleApplyBatch.status === 'applied' && isEventDeliveryBatch(visibleApplyBatch)
               ? 'sysconfig.apply.delivered'
-              : `sysconfig.apply.${applyBatch.status}`,
+              : `sysconfig.apply.${visibleApplyBatch.status}`,
           )}
-          description={applyBatch.status === 'failed'
-            ? applyBatch.targets.find((target) => target.lastError)?.lastError
+          description={visibleApplyBatch.status === 'failed'
+            ? visibleApplyBatch.targets.find((target) => target.lastError)?.lastError
             : undefined}
         />
       )}

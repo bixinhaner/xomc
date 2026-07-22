@@ -162,10 +162,13 @@ export interface BatchUpdateSysConfigPayload {
 }
 
 export type ConfigApplyStatus = 'pending' | 'applying' | 'applied' | 'failed';
+export type ConfigApplySuccessScope = 'runtime_applied' | 'event_delivered';
 
 export interface ConfigApplyTarget {
   target: string;
   status: ConfigApplyStatus;
+  /** A successful worker result may prove runtime application or only reliable event delivery. */
+  successScope: ConfigApplySuccessScope;
   attempts: number;
   appliedAt?: string;
   lastError?: string;

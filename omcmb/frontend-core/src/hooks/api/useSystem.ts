@@ -10,6 +10,7 @@ import type {
   SysConfigItem,
   BatchUpdateSysConfigPayload,
   BatchUpdateSysConfigResult,
+  ConfigApplyStatus,
 } from '../../types/system';
 import type { Dictionary } from '../../services/api/adminApi';
 import type { PageRequest } from '../../types/pagination';
@@ -461,6 +462,12 @@ export function useBatchUpdateSysConfigs() {
   });
 }
 
+export function sysConfigApplyRefetchInterval(status: ConfigApplyStatus | undefined): number | false {
+  if (status === 'applied') return false;
+  if (status === 'failed') return 15_000;
+  return 2_000;
+}
+
 export function useSysConfigApplyBatch(id: string | undefined) {
   return useQuery({
     queryKey: ['system', 'sysConfig', 'applyBatch', id],
@@ -468,7 +475,7 @@ export function useSysConfigApplyBatch(id: string | undefined) {
     enabled: Boolean(id),
     refetchInterval: (query) => {
       const status = query.state.data?.status;
-      return status === 'applied' || status === 'failed' ? false : 2000;
+      return sysConfigApplyRefetchInterval(status);
     },
   });
 }
