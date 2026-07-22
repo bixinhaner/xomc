@@ -1660,6 +1660,8 @@ const messages: Record<string, string> = {
   'device.gpsAcceptedCoordinates': 'OMC coordinates: Longitude {longitude}, Latitude {latitude}',
   'device.gpsReportedCoordinates': 'Device-reported coordinates: Longitude {longitude}, Latitude {latitude}, GPS Height(m) {gpsHeight}',
   'device.gpsHorizontalDifference': 'Horizontal difference: {distance} m',
+  'device.gpsObservedAt':        'Observed at: {observedAt}',
+  'device.gpsCoordinateSlot':    'Coordinate slot: {slot}',
   'device.gpsSyncAction':       'Review and synchronize GPS coordinates',
   'device.gpsCoordinateDetailsTitle': 'GPS Coordinate Details',
   'device.gpsInSync':           'GPS coordinates are synchronized',

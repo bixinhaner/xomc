@@ -1,6 +1,8 @@
 import { Alert, Button, Modal, Space, Typography, theme } from 'antd';
 import { useT } from '@/hooks/useT';
 import type { Device } from '@core/types/device';
+import { formatSystemTime } from '@core/utils/systemTime';
+import { parseGpsObservationSource } from './deviceGpsObservation';
 
 interface GpsSyncConfirmModalProps {
   open: boolean;
@@ -29,6 +31,12 @@ export default function GpsSyncConfirmModal({
   // Older observations may not carry height; the list's latest synchronized
   // GPS height is the compatible fallback until the next parameter sync.
   const reportedGPSHeight = reported?.gpsHeight ?? device?.gpsHeight ?? '--';
+  const observationSource = reported
+    ? parseGpsObservationSource(reported.sourcePath)
+    : null;
+  const observedAt = reported?.observedAt
+    ? formatSystemTime(reported.observedAt)
+    : '--';
 
   return (
     <Modal
@@ -78,6 +86,16 @@ export default function GpsSyncConfirmModal({
                   distance: Math.round(device.locationSync.distanceMeters),
                 })}
               </Typography.Text>
+            )}
+            {reported && observationSource && (
+              <>
+                <Typography.Text type="secondary">
+                  {t('device.gpsObservedAt', { observedAt })}
+                </Typography.Text>
+                <Typography.Text type="secondary">
+                  {t('device.gpsCoordinateSlot', { slot: observationSource.slot })}
+                </Typography.Text>
+              </>
             )}
           </Space>
         </div>

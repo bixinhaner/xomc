@@ -556,13 +556,21 @@ export default function DeviceList() {
     const displayValue = value == null ? '--' : value;
     if (!showSyncIndicator) return displayValue;
     return (
-      <Space size={4}>
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 2,
+          whiteSpace: 'nowrap',
+          fontVariantNumeric: 'tabular-nums',
+        }}
+      >
         <GpsSyncTrigger
           label={t('device.gpsSyncAction')}
           onClick={() => setGpsSyncConfirmDevice(record)}
         />
         {displayValue}
-      </Space>
+      </span>
     );
   }, [t]);
   const [refreshSpinnerActive, setRefreshSpinnerActive] = useState(false);
