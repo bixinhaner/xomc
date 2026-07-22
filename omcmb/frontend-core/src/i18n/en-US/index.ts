@@ -1935,6 +1935,8 @@ const messages: Record<string, string> = {
   'alarm.dealUser':         'Confirmed By',
   'alarm.dealTime':         'Confirmed At',
   'alarm.clearUser':        'Cleared By',
+  'alarm.noteLabel':        'Processing Description (Optional)',
+  'alarm.notePlaceholder':  'Enter a processing description or note',
 
   // -------------------------------------------------------------------------
   // User / System labels
