@@ -11,6 +11,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
+	"github.com/omcgo/omcgo/internal/core/components"
 	minioinfra "github.com/omcgo/omcgo/internal/core/components/minio"
 	"github.com/omcgo/omcgo/internal/core/dictloader"
 	"github.com/omcgo/omcgo/internal/core/systimezone"
@@ -91,7 +92,11 @@ func initPMModule(c *Container) error {
 
 	// T-0164-P7 / G7：adhoc 任务 REST 入口（worker 端跑实际执行）。
 	pmAdhocRepo := buildPMAdhocRepo(c.PgPool, c.TsPool, logger)
-	pmAdhocHandler := adhoc.NewHandler(pmAdhocRepo, c.TsPool, c.EventBus, logger.Named("adhoc"))
+	pmProgressHub, err := startPMAdhocProgress(c.Realtime, c.GS, logger.Named("adhoc"))
+	if err != nil {
+		return err
+	}
+	pmAdhocHandler := adhoc.NewHandler(pmAdhocRepo, c.TsPool, pmProgressHub, logger.Named("adhoc"))
 
 	// T-0174 阶段 1：指标查询页"查询模板"REST 入口（5 CRUD：list/get/create/update/delete）。
 	pmQueryTemplateRepo := querytemplate.NewPgRepository(c.PgPool)
@@ -186,6 +191,33 @@ func initPMModule(c *Container) error {
 
 	logger.Info("PM module initialized")
 	return nil
+}
+
+func startPMAdhocProgress(
+	realtimeBus adhoc.RealtimeSubscriber,
+	shutdown *components.GracefulShutdown,
+	logger *zap.Logger,
+) (*adhoc.ProgressHub, error) {
+	hub := adhoc.NewProgressHub()
+	bridge := adhoc.NewProgressBridge(realtimeBus, hub, logger)
+	stop, err := bridge.Subscribe()
+	if err != nil {
+		return nil, fmt.Errorf("start PM adhoc realtime progress bridge: %w", err)
+	}
+	if shutdown == nil {
+		wiringErr := errors.New("PM adhoc realtime progress shutdown not wired")
+		if stopErr := stop(); stopErr != nil {
+			return nil, errors.Join(
+				wiringErr,
+				fmt.Errorf("rollback PM adhoc realtime progress bridge: %w", stopErr),
+			)
+		}
+		return nil, wiringErr
+	}
+	// Priority 0: stop callbacks and close local SSE channels before HTTP (1)
+	// and the shared NATS connection (2) begin shutting down.
+	shutdown.Register("pm-adhoc-progress", 0, func(context.Context) error { return stop() })
+	return hub, nil
 }
 
 // buildPMAdhocRepo 构造 app 端 adhoc 任务 repository（建持续任务的唯一入口 = POST /pm/adhoc）。

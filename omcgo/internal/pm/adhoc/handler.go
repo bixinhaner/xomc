@@ -2,7 +2,6 @@ package adhoc
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -19,7 +18,6 @@ import (
 
 	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
-	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/jsonx"
 	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
@@ -28,17 +26,17 @@ import (
 // Handler 是 G7 adhoc 任务的 REST 入口。
 type Handler struct {
 	repo   Repository
-	pool   *pgxpool.Pool // results 查询 + SSE backplane（直接 SQL，避免再加一层 repository）
-	bus    event.EventBus
+	pool   *pgxpool.Pool // results 查询（直接 SQL，避免再加一层 repository）
+	hub    *ProgressHub
 	logger *zap.Logger
 }
 
 // NewHandler 构造 Handler。
-func NewHandler(repo Repository, pool *pgxpool.Pool, bus event.EventBus, logger *zap.Logger) *Handler {
+func NewHandler(repo Repository, pool *pgxpool.Pool, hub *ProgressHub, logger *zap.Logger) *Handler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Handler{repo: repo, pool: pool, bus: bus, logger: logger.Named("pm.adhoc.handler")}
+	return &Handler{repo: repo, pool: pool, hub: hub, logger: logger.Named("pm.adhoc.handler")}
 }
 
 // RegisterRoutes 把 6 个 REST 端点挂到 router group（不带 /pm 前缀，由调用方决定 group）。
@@ -1324,8 +1322,8 @@ func (h *Handler) Runs(c *gin.Context) {
 
 // Progress GET /pm/adhoc/tasks/:id/progress（SSE）
 //
-// 订阅 pm.adhoc.progress 与 pm.adhoc.completed 主题，过滤匹配 task_id 的事件流给客户端。
-// 客户端 EventSource 'progress'/'completed' 事件名分别接收。
+// 认证授权通过后只订阅当前 APP 实例的本地 ProgressHub。上游 Core NATS 订阅
+// 由 APP 启动期的 ProgressBridge 统一持有，不随 HTTP 连接数量增长。
 func (h *Handler) Progress(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -1345,75 +1343,109 @@ func (h *Handler) Progress(c *gin.Context) {
 		response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
 		return
 	}
-	if h.bus == nil {
-		response.Fail(c, http.StatusServiceUnavailable, "event bus not wired")
+	if h.hub == nil {
+		response.Fail(c, http.StatusServiceUnavailable, "progress hub not wired")
 		return
 	}
+	if _, ok := c.Writer.(http.Flusher); !ok {
+		response.Fail(c, http.StatusInternalServerError, "streaming unsupported")
+		return
+	}
+
+	events, unsubscribe := h.hub.Subscribe(id.String())
+	defer unsubscribe()
 
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
 	c.Writer.Header().Set("X-Accel-Buffering", "no") // nginx 不缓冲
 
-	taskID := id.String()
-	flusher, ok := c.Writer.(http.Flusher)
-	if !ok {
-		response.Fail(c, http.StatusInternalServerError, "streaming unsupported")
-		return
-	}
-
-	makeHandler := func(eventName string) event.EventHandler {
-		return func(ctx context.Context, evt event.Event) error {
-			var payload map[string]any
-			if err := evt.DecodePayload(&payload); err != nil {
-				return nil // 忽略解析错误，不阻塞订阅链
-			}
-			tid, _ := payload["task_id"].(string)
-			if tid != taskID {
-				return nil
-			}
-			data, _ := json.Marshal(payload)
-			h.writeSSE(c.Writer.(io.Writer), eventName, data)
-			flusher.Flush()
-			return nil
+	// SSE 必须越过 http.Server 的全响应 WriteTimeout，否则默认 30 秒后连接被切断。
+	if rc := http.NewResponseController(c.Writer); rc != nil {
+		if err := rc.SetWriteDeadline(time.Time{}); err != nil {
+			h.logger.Warn("clear adhoc progress SSE write deadline failed",
+				zap.String("task_id", id.String()), zap.Error(err))
 		}
 	}
 
-	subProgress, err := h.bus.Subscribe(SubjectProgress, makeHandler("progress"))
-	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+	// 立即提交状态和真正的 SSE comment，避免 EventSource/onopen 等到首个业务事件。
+	c.Status(http.StatusOK)
+	if err := writeSSEString(c.Writer, ":connected\n\n"); err != nil {
 		return
 	}
-	defer subProgress.Unsubscribe()
-
-	subCompleted, err := h.bus.Subscribe(SubjectCompleted, makeHandler("completed"))
-	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+	if err := flushSSE(c.Writer); err != nil {
 		return
 	}
-	defer subCompleted.Unsubscribe()
 
-	// 等客户端断开。SSE 心跳每 30s 发个 comment 防代理超时。
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
+		case event, ok := <-events:
+			if !ok {
+				return
+			}
+			if err := h.writeSSE(c.Writer, event.Name, event.Data); err != nil {
+				return
+			}
+			if err := flushSSE(c.Writer); err != nil {
+				return
+			}
+			if event.Name == "completed" {
+				return
+			}
 		case <-c.Request.Context().Done():
 			return
 		case <-ticker.C:
-			h.writeSSE(c.Writer.(io.Writer), "", []byte(": keep-alive"))
-			flusher.Flush()
+			if err := writeSSEString(c.Writer, ":keepalive\n\n"); err != nil {
+				return
+			}
+			if err := flushSSE(c.Writer); err != nil {
+				return
+			}
 		}
 	}
 }
 
-func (h *Handler) writeSSE(w io.Writer, eventName string, data []byte) {
+func flushSSE(w http.ResponseWriter) error {
+	return http.NewResponseController(w).Flush()
+}
+
+func (h *Handler) writeSSE(w io.Writer, eventName string, data []byte) error {
 	if eventName != "" {
-		_, _ = w.Write([]byte("event: " + eventName + "\n"))
+		if err := writeSSEString(w, "event: "+eventName+"\n"); err != nil {
+			return err
+		}
 	}
-	_, _ = w.Write([]byte("data: "))
-	_, _ = w.Write(data)
-	_, _ = w.Write([]byte("\n\n"))
+	if err := writeSSEString(w, "data: "); err != nil {
+		return err
+	}
+	if err := writeSSEBytes(w, data); err != nil {
+		return err
+	}
+	return writeSSEString(w, "\n\n")
+}
+
+func writeSSEString(w io.Writer, data string) error {
+	n, err := io.WriteString(w, data)
+	if err != nil {
+		return err
+	}
+	if n != len(data) {
+		return io.ErrShortWrite
+	}
+	return nil
+}
+
+func writeSSEBytes(w io.Writer, data []byte) error {
+	n, err := w.Write(data)
+	if err != nil {
+		return err
+	}
+	if n != len(data) {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 // canOperate 判断当前用户对自建任务有无管理权限（编辑/恢复/删除）。
