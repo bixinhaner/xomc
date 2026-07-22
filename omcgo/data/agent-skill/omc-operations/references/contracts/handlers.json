@@ -2333,6 +2333,10 @@
     "github.com/omcgo/omcgo/internal/admin.(*SysConfigHandler).Get-fm": {
       "found": true
     },
+    "github.com/omcgo/omcgo/internal/admin.(*SysConfigHandler).GetApplyBatch-fm": {
+      "found": true,
+      "description": "GetApplyBatch 返回一次配置保存对应的运行态应用状态；目标的期望/实际值不会出现在响应中。"
+    },
     "github.com/omcgo/omcgo/internal/admin.(*SysConfigHandler).List-fm": {
       "found": true,
       "queryParams": [
@@ -2352,7 +2356,7 @@
     },
     "github.com/omcgo/omcgo/internal/admin.(*SysConfigHandler).ListPublic-fm": {
       "found": true,
-      "description": "ListPublic 返回 (可选 category 过滤后) is_public=true 的全部配置。\n不携带敏感字段，无需登录态。",
+      "description": "ListPublic 返回 (可选 category 过滤后) 可公开读取的配置。\n不携带敏感字段，无需登录态。",
       "queryParams": [
         {
           "name": "category",
@@ -6314,6 +6318,27 @@
         }
       ]
     },
+    "github.com/omcgo/omcgo/internal/device.(*Handler).AcceptLocationSync-fm": {
+      "found": true,
+      "description": "AcceptLocationSync promotes the latest device-reported GPS coordinates to\nthe OMC accepted coordinates after an optimistic version check.",
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "AcceptLocationRequest",
+          "properties": {
+            "reported_version": {
+              "goType": "int64",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "reported_version"
+          ],
+          "type": "object"
+        }
+      }
+    },
     "github.com/omcgo/omcgo/internal/device.(*Handler).BatchDeleteDevices-fm": {
       "found": true,
       "description": "BatchDeleteDevices handles DELETE /api/v1/devices/batch.\nAccepts a JSON body with a list of device IDs and soft-deletes all of them.",
@@ -6981,6 +7006,10 @@
           "type": "object"
         }
       }
+    },
+    "github.com/omcgo/omcgo/internal/device.(*Handler).ResetLMTPassword-fm": {
+      "found": true,
+      "description": "ResetLMTPassword handles POST /api/v1/devices/:id/password/reset."
     },
     "github.com/omcgo/omcgo/internal/device.(*Handler).ResolveNameSync-fm": {
       "found": true,
@@ -8521,6 +8550,15 @@
       "description": "GetGroupTree 返回命令树。\n  - format=flat：Task #4 扁平格式（章节 + 命令 + 内联 object_path / 约束）\n  - 其他·缺省：3 列布局左侧递归树（含每节点 commands[]，原有合同）",
       "queryParams": [
         {
+          "name": "device_sn",
+          "in": "query",
+          "required": false,
+          "type": "string",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
           "name": "format",
           "in": "query",
           "required": false,
@@ -8955,6 +8993,9 @@
             "command_code": {
               "type": "string"
             },
+            "command_name": {
+              "type": "string"
+            },
             "commands": {
               "items": {
                 "additionalProperties": {
@@ -9181,6 +9222,9 @@
           "goType": "ExecuteHTTPRequest",
           "properties": {
             "command_code": {
+              "type": "string"
+            },
+            "command_name": {
               "type": "string"
             },
             "commands": {
@@ -9689,6 +9733,12 @@
             "minimum": 1,
             "type": "integer"
           }
+        },
+        {
+          "name": "product_id",
+          "in": "query",
+          "required": false,
+          "type": "string"
         },
         {
           "name": "sort_by",
@@ -12554,7 +12604,7 @@
     },
     "github.com/omcgo/omcgo/internal/pm.(*Handler).ListAggregatedMetrics-fm": {
       "found": true,
-      "description": "ListAggregatedMetrics 走 G5 aggregator.Query 按粒度路由聚合表（hourly+ 直查物化表，\n15min 退回 pm_metrics 原表）。device_group 维度可选。\n\nQuery params：\n  - granularity（必填）: 15min / hourly / daily / weekly / monthly\n  - dimension（可选）: device（默认）/ device_group\n  - device_oui+device_sn / device_group_id：维度过滤（与 dimension 配套）\n  - metric_path：单 metric 过滤（兼容 v1）；metric_paths：逗号分隔的多 metric 过滤（v2，PmDashboard panel 用）\n  - metric_type：counter / kpi\n  - start_time / end_time：RFC3339\n  - limit / offset\n\n没注入 aggregator（兼容老部署）时返 503。",
+      "description": "ListAggregatedMetrics 走 G5 aggregator.Query 按粒度路由聚合表（hourly+ 直查物化表，\n15min 退回 pm_metrics 原表）。device_group 维度可选。\n\nQuery params：\n  - granularity（必填）: 15min / hourly / daily / weekly / monthly\n  - dimension（可选）: device（默认）/ device_group\n  - device_oui+device_sn / device_group_id：维度过滤（与 dimension 配套）\n  - metric_path：单 metric 过滤（兼容 v1）；metric_paths：逗号分隔的多 metric 过滤（v2，PmDashboard panel 用）\n  - metric_type：counter / kpi\n  - start_time / end_time：RFC3339\n  - limit / offset\n  - page_by=pivot_row：limit / offset 按透视表行 key 分页，total 返回透视表行总数\n\n没注入 aggregator（兼容老部署）时返 503。",
       "queryParams": [
         {
           "name": "device_group_id",
@@ -12570,6 +12620,12 @@
         },
         {
           "name": "device_sn",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "device_sns",
           "in": "query",
           "required": false,
           "type": "string"
@@ -12636,6 +12692,12 @@
         },
         {
           "name": "offset",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "page_by",
           "in": "query",
           "required": false,
           "type": "string"
@@ -13510,6 +13572,14 @@
               ],
               "type": "string"
             },
+            "visibility": {
+              "description": "visibility：private（默认，仅创建者/超管可见可操作）/ public（登录用户可见可操作）",
+              "enum": [
+                "private",
+                "public"
+              ],
+              "type": "string"
+            },
             "window_end": {
               "format": "date-time",
               "goType": "time.Time",
@@ -13546,14 +13616,8 @@
     },
     "github.com/omcgo/omcgo/internal/pm/adhoc.(*Handler).List-fm": {
       "found": true,
-      "description": "List GET /pm/adhoc/tasks?mode=\u0026status=\u0026limit=\u0026offset=\u0026all=true\n\nT-0164 收尾 G7-Gap-7：默认按 creator=current_user 过滤（\"我的任务\"），\nadmin 角色传 ?all=true 可看全部任务（运维 / 审计场景）。",
+      "description": "List GET /pm/adhoc/tasks?mode=\u0026status=\u0026limit=\u0026offset=\n\n默认返回：内置任务 + 当前用户 private 自定义任务 + 所有 public 自定义任务。\n超管（source='builtIn'）由后端登录态自动识别，可看全部任务（运维 / 审计场景）。",
       "queryParams": [
-        {
-          "name": "all",
-          "in": "query",
-          "required": false,
-          "type": "string"
-        },
         {
           "name": "creator",
           "in": "query",
@@ -13703,6 +13767,13 @@
               },
               "type": "array"
             },
+            "visibility": {
+              "enum": [
+                "private",
+                "public"
+              ],
+              "type": "string"
+            },
             "window_end": {
               "format": "date-time",
               "goType": "time.Time",
@@ -13737,6 +13808,7 @@
             "source_type": {
               "enum": [
                 "dashboard",
+                "device_view",
                 "kpi_query",
                 "adhoc"
               ],
@@ -13829,6 +13901,15 @@
         }
       ]
     },
+    "github.com/omcgo/omcgo/internal/pm/export.(*Handler).canAccessAdhocExport-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/pm/export.(*Handler).canAccessExportTask-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/pm/export.(*Handler).filterVisibleExportTasks-fm": {
+      "found": true
+    },
     "github.com/omcgo/omcgo/internal/pm/export.(*Handler).parseListFilter-fm": {
       "found": true,
       "queryParams": [
@@ -13857,6 +13938,9 @@
           "type": "string"
         }
       ]
+    },
+    "github.com/omcgo/omcgo/internal/pm/export.(*Handler).respondAdhocExportAccessError-fm": {
+      "found": true
     },
     "github.com/omcgo/omcgo/internal/pm/export.(*Handler).respondDownloadURL-fm": {
       "found": true
@@ -16996,7 +17080,7 @@
     },
     "github.com/omcgo/omcgo/internal/stationlog.(*Handler).DeleteAbnormalReboot-fm": {
       "found": true,
-      "summary": "删除异常重启记录（软删 + 清理 MinIO 文件）"
+      "summary": "删除异常重启记录（兼容历史 file_received 行的 MinIO 清理）"
     },
     "github.com/omcgo/omcgo/internal/stationlog.(*Handler).Download-fm": {
       "found": true,
@@ -17012,7 +17096,7 @@
     },
     "github.com/omcgo/omcgo/internal/stationlog.(*Handler).DownloadAbnormalReboot-fm": {
       "found": true,
-      "summary": "下载异常重启日志文件（仅 file_received 状态有文件）",
+      "summary": "下载历史异常重启日志文件（兼容旧 file_received 行）",
       "queryParams": [
         {
           "name": "redirect",
@@ -17355,6 +17439,13 @@
                 "goType": "int",
                 "type": "integer"
               },
+              "fail_immediately": {
+                "description": "FailImmediately creates a terminal failed task row without enqueueing it.\nIt is used by callers that already know an RPC cannot be delivered, such\nas an MML task targeting an offline device without offline-wait enabled.",
+                "type": "boolean"
+              },
+              "fail_reason": {
+                "type": "string"
+              },
               "has_path_translation_miss": {
                 "description": "路径翻译元数据（MML fanout 阶段写入；详见 Task.HasPathTranslationMiss 注释）",
                 "type": "boolean"
@@ -17399,7 +17490,6 @@
               }
             },
             "required": [
-              "device_sn",
               "method"
             ],
             "type": "object"
@@ -17455,6 +17545,13 @@
               "goType": "int",
               "type": "integer"
             },
+            "fail_immediately": {
+              "description": "FailImmediately creates a terminal failed task row without enqueueing it.\nIt is used by callers that already know an RPC cannot be delivered, such\nas an MML task targeting an offline device without offline-wait enabled.",
+              "type": "boolean"
+            },
+            "fail_reason": {
+              "type": "string"
+            },
             "has_path_translation_miss": {
               "description": "路径翻译元数据（MML fanout 阶段写入；详见 Task.HasPathTranslationMiss 注释）",
               "type": "boolean"
@@ -17499,7 +17596,6 @@
             }
           },
           "required": [
-            "device_sn",
             "method"
           ],
           "type": "object"
