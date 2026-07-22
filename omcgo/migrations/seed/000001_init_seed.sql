@@ -18111,6 +18111,2854 @@ WHERE c.command_code IN (
 
 
 SELECT pg_catalog.set_config('search_path', 'public', false);
+
+
+-- 2026-07-22 MML catalog reviewed path bindings merged from retired seed 000002.
+BEGIN;
+
+-- Device.SoftwareCtrl.AccCard1PpsDelay belongs to GPS as "PPS OFFSET参数".
+-- If an older operational script put it under SOFTWARE_CTRL, remove that stale
+-- command binding first so the path has a single MML home.
+DELETE FROM public.mml_command_sub_fields sf
+USING public.standard_params sp,
+      public.mml_commands c
+WHERE sf.standard_path_id = sp.id
+  AND sf.command_id = c.id
+  AND sp.standard_path = 'Device.SoftwareCtrl.AccCard1PpsDelay'
+  AND c.command_code NOT IN ('LST SO_SUB_01', 'MOD SO_SUB_01');
+
+WITH target AS (
+    SELECT c.id AS command_id,
+           c.command_code,
+           sp.id AS standard_path_id,
+           CASE c.command_code
+               WHEN 'LST SO_SUB_01' THEN 9
+               WHEN 'MOD SO_SUB_01' THEN 5
+           END AS sort_order
+    FROM public.mml_commands c
+    JOIN public.mml_command_groups g ON g.id = c.group_id
+    JOIN public.standard_params sp ON sp.standard_path = 'Device.SoftwareCtrl.AccCard1PpsDelay'
+    WHERE c.command_code IN ('LST SO_SUB_01', 'MOD SO_SUB_01')
+      AND c.deprecated_at IS NULL
+      AND g.deleted_at IS NULL
+      AND g.deprecated_at IS NULL
+      AND g.is_active = true
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id,
+    standard_path_id,
+    mml_code,
+    label_i18n,
+    default_selected,
+    is_required,
+    sort_order,
+    access_type,
+    is_supported
+)
+SELECT command_id,
+       standard_path_id,
+       'PPS_OFFSET',
+       '{"zh-CN":"PPS OFFSET参数","en-US":"PPS OFFSET"}'::jsonb,
+       true,
+       false,
+       sort_order,
+       'RW',
+       true
+FROM target
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+-- Device.FAP.GPS.*, Device.DeviceInfo.GPS.* and Device.DeviceInfo.GPS_* also
+-- belong to GPS信息.
+WITH target_commands AS (
+    SELECT c.id AS command_id,
+           c.command_code,
+           COALESCE((
+               SELECT max(sf.sort_order)
+               FROM public.mml_command_sub_fields sf
+               JOIN public.standard_params sp
+                 ON sp.id = sf.standard_path_id
+               WHERE sf.command_id = c.id
+                 AND sf.deprecated_at IS NULL
+                 AND sp.standard_path NOT LIKE 'Device.FAP.GPS.%'
+                 AND sp.standard_path NOT LIKE 'Device.DeviceInfo.GPS.%'
+                 AND sp.standard_path NOT LIKE 'Device.DeviceInfo.GPS\_%' ESCAPE '\'
+           ), 0) AS base_sort_order
+    FROM public.mml_commands c
+    WHERE c.command_code IN ('LST SO_SUB_01', 'MOD SO_SUB_01')
+      AND c.deprecated_at IS NULL
+), target_params AS (
+    SELECT tc.command_id,
+           tc.command_code,
+           sp.id AS standard_path_id,
+           sp.standard_path,
+           sp.access,
+           COALESCE(NULLIF(sp.description, ''), split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1))) AS label_zh,
+           split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1)) AS leaf_name,
+           tc.base_sort_order + row_number() OVER (
+               PARTITION BY tc.command_code
+               ORDER BY sp.standard_path
+           ) AS sort_order
+    FROM target_commands tc
+    JOIN public.standard_params sp
+      ON (
+          sp.standard_path LIKE 'Device.FAP.GPS.%'
+          OR sp.standard_path LIKE 'Device.DeviceInfo.GPS.%'
+          OR sp.standard_path LIKE 'Device.DeviceInfo.GPS\_%' ESCAPE '\'
+      )
+    WHERE sp.entry_type = 'parameter'
+      AND (tc.command_code LIKE 'LST %' OR sp.access = 'READ_WRITE')
+), desired_param_fields AS (
+    SELECT command_id,
+           standard_path_id,
+           LEFT(UPPER(regexp_replace(
+               leaf_name,
+               '([a-z0-9])([A-Z])',
+               '\1_\2',
+               'g'
+           )), 100) AS mml_code,
+           jsonb_build_object('zh-CN', label_zh, 'en-US', leaf_name) AS label_i18n,
+           sort_order,
+           CASE access
+               WHEN 'READ_WRITE' THEN 'RW'
+               ELSE 'RO'
+           END AS access_type
+    FROM target_params
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id,
+    standard_path_id,
+    mml_code,
+    label_i18n,
+    default_selected,
+    is_required,
+    sort_order,
+    access_type,
+    is_supported
+)
+SELECT command_id,
+       standard_path_id,
+       mml_code,
+       label_i18n,
+       true,
+       false,
+       sort_order,
+       access_type,
+       true
+FROM desired_param_fields
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH command_paths AS (
+    SELECT c.id AS command_id,
+           jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path) AS target_paths
+    FROM public.mml_commands c
+    JOIN public.mml_command_sub_fields sf
+      ON sf.command_id = c.id
+     AND sf.deprecated_at IS NULL
+    JOIN public.standard_params sp
+      ON sp.id = sf.standard_path_id
+     AND sp.entry_type = 'parameter'
+    WHERE c.command_code IN ('LST SO_SUB_01', 'MOD SO_SUB_01')
+      AND c.deprecated_at IS NULL
+    GROUP BY c.id
+)
+UPDATE public.mml_commands c
+SET target_paths = cp.target_paths,
+    updated_at = now()
+FROM command_paths cp
+WHERE c.id = cp.command_id;
+
+-- Device.Ethernet.Interface.{i}.PortType and interfaceType are WAN interface
+-- base fields and belong to 查询/修改 WAN口配置参数管理.
+WITH target_commands AS (
+    SELECT c.id AS command_id,
+           c.command_code,
+           COALESCE((
+               SELECT max(sf.sort_order)
+               FROM public.mml_command_sub_fields sf
+               WHERE sf.command_id = c.id
+                 AND sf.deprecated_at IS NULL
+           ), 0) AS base_sort_order
+    FROM public.mml_commands c
+    WHERE c.command_code IN ('LST SL_SUB_01', 'MOD SL_SUB_01')
+      AND c.deprecated_at IS NULL
+), target_params AS (
+    SELECT tc.command_id,
+           tc.command_code,
+           sp.id AS standard_path_id,
+           sp.standard_path,
+           sp.access,
+           COALESCE(NULLIF(sp.description, ''), split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1))) AS label_zh,
+           split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1)) AS leaf_name,
+           tc.base_sort_order + row_number() OVER (
+               PARTITION BY tc.command_code
+               ORDER BY sp.standard_path
+           ) AS sort_order
+    FROM target_commands tc
+    JOIN public.standard_params sp
+      ON sp.standard_path IN (
+          'Device.Ethernet.Interface.{i}.PortType',
+          'Device.Ethernet.Interface.{i}.interfaceType'
+      )
+    WHERE sp.entry_type = 'parameter'
+      AND (tc.command_code LIKE 'LST %' OR sp.access = 'READ_WRITE')
+), desired_param_fields AS (
+    SELECT command_id,
+           standard_path_id,
+           LEFT(UPPER(regexp_replace(
+               leaf_name,
+               '([a-z0-9])([A-Z])',
+               '\1_\2',
+               'g'
+           )), 100) AS mml_code,
+           jsonb_build_object('zh-CN', label_zh, 'en-US', leaf_name) AS label_i18n,
+           sort_order,
+           CASE access
+               WHEN 'READ_WRITE' THEN 'RW'
+               ELSE 'RO'
+           END AS access_type
+    FROM target_params
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id,
+    standard_path_id,
+    mml_code,
+    label_i18n,
+    default_selected,
+    is_required,
+    sort_order,
+    access_type,
+    is_supported
+)
+SELECT command_id,
+       standard_path_id,
+       mml_code,
+       label_i18n,
+       true,
+       false,
+       sort_order,
+       access_type,
+       true
+FROM desired_param_fields
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH command_paths AS (
+    SELECT c.id AS command_id,
+           jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path) AS target_paths
+    FROM public.mml_commands c
+    JOIN public.mml_command_sub_fields sf
+      ON sf.command_id = c.id
+     AND sf.deprecated_at IS NULL
+    JOIN public.standard_params sp
+      ON sp.id = sf.standard_path_id
+     AND sp.entry_type = 'parameter'
+    WHERE c.command_code IN ('LST SO_SUB_01', 'MOD SO_SUB_01')
+      AND c.deprecated_at IS NULL
+    GROUP BY c.id
+)
+UPDATE public.mml_commands c
+SET target_paths = cp.target_paths,
+    updated_at = now()
+FROM command_paths cp
+WHERE c.id = cp.command_id;
+
+-- Keep 1588参数管理 as a first-level group.
+UPDATE public.mml_command_groups
+SET group_name_zh = '1588参数管理',
+    group_name_en = '1588 Parameters',
+    path = 'MML350_G_DEVICE_FAP_1588'::ltree,
+    display_order = 14,
+    is_active = true,
+    name_i18n = '{"zh-CN":"1588参数管理","en-US":"1588 Parameters"}'::jsonb,
+    source = 'admin',
+    catalog_protected = false,
+    chapter_code = NULL,
+    deprecated_at = NULL,
+    deleted_at = NULL,
+    updated_at = now()
+WHERE group_code = 'MML350_G_DEVICE_FAP_1588';
+
+-- Device.DeviceInfo.1588* and Device.DeviceInfo.X_COM_PTP1588* belong to
+-- 1588参数管理 together with Device.FAP.PTP1588.*.
+WITH target_commands AS (
+    SELECT c.id AS command_id,
+           c.command_code,
+           COALESCE((
+               SELECT max(sf.sort_order)
+               FROM public.mml_command_sub_fields sf
+               JOIN public.standard_params sp
+                 ON sp.id = sf.standard_path_id
+               WHERE sf.command_id = c.id
+                 AND sf.deprecated_at IS NULL
+                 AND sp.standard_path NOT LIKE 'Device.DeviceInfo.1588%'
+                 AND sp.standard_path NOT LIKE 'Device.DeviceInfo.X_COM_PTP1588%'
+           ), 0) AS base_sort_order
+    FROM public.mml_commands c
+    WHERE c.command_code IN (
+        'LST MML350_DEVICE_FAP__PTP1588',
+        'MOD MML350_DEVICE_FAP__PTP1588'
+    )
+      AND c.deprecated_at IS NULL
+), target_params AS (
+    SELECT tc.command_id,
+           tc.command_code,
+           sp.id AS standard_path_id,
+           sp.standard_path,
+           sp.access,
+           COALESCE(NULLIF(sp.description, ''), split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1))) AS label_zh,
+           split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1)) AS leaf_name,
+           tc.base_sort_order + row_number() OVER (
+               PARTITION BY tc.command_code
+               ORDER BY sp.standard_path
+           ) AS sort_order
+    FROM target_commands tc
+    JOIN public.standard_params sp
+      ON (
+          sp.standard_path LIKE 'Device.DeviceInfo.1588%'
+          OR sp.standard_path LIKE 'Device.DeviceInfo.X_COM_PTP1588%'
+      )
+    WHERE sp.entry_type = 'parameter'
+      AND (tc.command_code LIKE 'LST %' OR sp.access = 'READ_WRITE')
+), desired_param_fields AS (
+    SELECT command_id,
+           standard_path_id,
+           LEFT(UPPER(regexp_replace(
+               leaf_name,
+               '([a-z0-9])([A-Z])',
+               '\1_\2',
+               'g'
+           )), 100) AS mml_code,
+           jsonb_build_object('zh-CN', label_zh, 'en-US', leaf_name) AS label_i18n,
+           sort_order,
+           CASE access
+               WHEN 'READ_WRITE' THEN 'RW'
+               ELSE 'RO'
+           END AS access_type
+    FROM target_params
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id,
+    standard_path_id,
+    mml_code,
+    label_i18n,
+    default_selected,
+    is_required,
+    sort_order,
+    access_type,
+    is_supported
+)
+SELECT command_id,
+       standard_path_id,
+       mml_code,
+       label_i18n,
+       true,
+       false,
+       sort_order,
+       access_type,
+       true
+FROM desired_param_fields
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH command_paths AS (
+    SELECT c.id AS command_id,
+           jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path) AS target_paths
+    FROM public.mml_commands c
+    JOIN public.mml_command_sub_fields sf
+      ON sf.command_id = c.id
+     AND sf.deprecated_at IS NULL
+    JOIN public.standard_params sp
+      ON sp.id = sf.standard_path_id
+     AND sp.entry_type = 'parameter'
+    WHERE c.command_code IN (
+        'LST MML350_DEVICE_FAP__PTP1588',
+        'MOD MML350_DEVICE_FAP__PTP1588'
+    )
+      AND c.deprecated_at IS NULL
+    GROUP BY c.id
+)
+UPDATE public.mml_commands c
+SET target_paths = cp.target_paths,
+    updated_at = now()
+FROM command_paths cp
+WHERE c.id = cp.command_id;
+
+-- Add DeviceInfo EU/RU object nodes under 设备信息参数管理 using the same LST/MOD
+-- command-node pattern as 扩展型一体化皮基站参数.
+WITH device_group AS (
+    SELECT id
+    FROM public.mml_command_groups
+    WHERE group_code = 'chapter:SA'
+      AND deleted_at IS NULL
+      AND deprecated_at IS NULL
+      AND is_active = true
+    LIMIT 1
+), desired_commands AS (
+    SELECT *
+    FROM (VALUES
+        (
+            'LST DEVICE_INFO_EU',
+            '查询 设备信息-扩展型皮站-扩展单元（EU）参数管理',
+            'Query Device Info Extended Pico EU Parameters',
+            'LST',
+            '扩展型皮站-扩展单元（EU）参数管理',
+            'Extended Pico EU Parameters',
+            'Device.DeviceInfo.EU.',
+            '查询设备信息扩展型皮站扩展单元（EU）对象'
+        ),
+        (
+            'MOD DEVICE_INFO_EU',
+            '修改 设备信息-扩展型皮站-扩展单元（EU）参数管理',
+            'Modify Device Info Extended Pico EU Parameters',
+            'MOD',
+            '扩展型皮站-扩展单元（EU）参数管理',
+            'Extended Pico EU Parameters',
+            'Device.DeviceInfo.EU.',
+            '修改设备信息扩展型皮站扩展单元（EU）对象'
+        ),
+        (
+            'LST DEVICE_INFO_RU',
+            '查询 设备信息-扩展型皮站-远端单元（RU）参数管理',
+            'Query Device Info Extended Pico RU Parameters',
+            'LST',
+            '扩展型皮站-远端单元（RU）参数管理',
+            'Extended Pico RU Parameters',
+            'Device.DeviceInfo.EU.{i}.RU.',
+            '查询设备信息扩展型皮站远端单元（RU）对象'
+        ),
+        (
+            'MOD DEVICE_INFO_RU',
+            '修改 设备信息-扩展型皮站-远端单元（RU）参数管理',
+            'Modify Device Info Extended Pico RU Parameters',
+            'MOD',
+            '扩展型皮站-远端单元（RU）参数管理',
+            'Extended Pico RU Parameters',
+            'Device.DeviceInfo.EU.{i}.RU.',
+            '修改设备信息扩展型皮站远端单元（RU）对象'
+        ),
+        (
+            'LST DEVICE_INFO_DIRECT_RU',
+            '查询 设备信息-直连远端单元（RU）参数管理',
+            'Query Device Info Direct RU Parameters',
+            'LST',
+            '直连远端单元（RU）参数管理',
+            'Direct RU Parameters',
+            'Device.DeviceInfo.RU.',
+            '查询设备信息直连远端单元（RU）对象'
+        ),
+        (
+            'MOD DEVICE_INFO_DIRECT_RU',
+            '修改 设备信息-直连远端单元（RU）参数管理',
+            'Modify Device Info Direct RU Parameters',
+            'MOD',
+            '直连远端单元（RU）参数管理',
+            'Direct RU Parameters',
+            'Device.DeviceInfo.RU.',
+            '修改设备信息直连远端单元（RU）对象'
+        )
+    ) AS v(
+        command_code,
+        command_name,
+        command_name_en,
+        operation_type,
+        logical_name,
+        logical_name_en,
+        standard_path,
+        description
+    )
+), upsert_commands AS (
+    INSERT INTO public.mml_commands (
+        command_name,
+        command_code,
+        category,
+        description,
+        rpc_method,
+        target_paths,
+        target_object,
+        group_id,
+        command_name_i18n,
+        require_confirm,
+        confirm_msg_i18n,
+        operation_type,
+        logical_name_i18n,
+        source,
+        catalog_protected,
+        platform_tags,
+        tree_node_refs,
+        instance_range_meta
+    )
+    SELECT dc.command_name,
+           dc.command_code,
+           'device_info',
+           dc.description,
+           CASE dc.operation_type
+               WHEN 'LST' THEN 'GetParameterValues'
+               ELSE 'SetParameterValues'
+           END,
+           '[]'::jsonb,
+           dc.standard_path,
+           dg.id,
+           jsonb_build_object('zh-CN', dc.command_name, 'en-US', dc.command_name_en),
+           false,
+           '{}'::jsonb,
+           dc.operation_type,
+           jsonb_build_object('zh-CN', dc.logical_name, 'en-US', dc.logical_name_en),
+           'standard',
+           true,
+           '{}'::jsonb,
+           jsonb_build_array(dc.standard_path),
+           '[]'::jsonb
+    FROM desired_commands dc
+    CROSS JOIN device_group dg
+    ON CONFLICT (command_code) DO UPDATE
+    SET command_name = EXCLUDED.command_name,
+        category = EXCLUDED.category,
+        description = EXCLUDED.description,
+        rpc_method = EXCLUDED.rpc_method,
+        target_object = EXCLUDED.target_object,
+        group_id = EXCLUDED.group_id,
+        command_name_i18n = EXCLUDED.command_name_i18n,
+        require_confirm = EXCLUDED.require_confirm,
+        confirm_msg_i18n = EXCLUDED.confirm_msg_i18n,
+        operation_type = EXCLUDED.operation_type,
+        logical_name_i18n = EXCLUDED.logical_name_i18n,
+        source = EXCLUDED.source,
+        catalog_protected = EXCLUDED.catalog_protected,
+        platform_tags = EXCLUDED.platform_tags,
+        tree_node_refs = EXCLUDED.tree_node_refs,
+        instance_range_meta = EXCLUDED.instance_range_meta,
+        deprecated_at = NULL,
+        updated_at = now()
+    RETURNING id
+)
+SELECT count(*) FROM upsert_commands;
+
+-- Object paths identify the command node, but must not appear as PATH-list rows.
+DELETE FROM public.mml_command_sub_fields sf
+USING public.mml_commands c,
+      public.standard_params sp
+WHERE sf.command_id = c.id
+  AND sf.standard_path_id = sp.id
+  AND c.command_code IN (
+      'LST DEVICE_INFO_EU',
+      'MOD DEVICE_INFO_EU',
+      'LST DEVICE_INFO_RU',
+      'MOD DEVICE_INFO_RU',
+      'LST DEVICE_INFO_DIRECT_RU',
+      'MOD DEVICE_INFO_DIRECT_RU'
+  )
+  AND sp.standard_path IN (
+      'Device.DeviceInfo.EU.',
+      'Device.DeviceInfo.EU.{i}.RU.',
+      'Device.DeviceInfo.RU.'
+  );
+
+-- Expand EU/RU command nodes with child parameters. Query commands expose all
+-- child parameters; modify commands expose writable child parameters only,
+-- matching the LST/MOD split used by 扩展型一体化皮基站参数.
+WITH target_commands AS (
+    SELECT c.id AS command_id,
+           c.command_code
+    FROM public.mml_commands c
+    WHERE c.command_code IN (
+        'LST DEVICE_INFO_EU',
+        'MOD DEVICE_INFO_EU',
+        'LST DEVICE_INFO_RU',
+        'MOD DEVICE_INFO_RU',
+        'LST DEVICE_INFO_DIRECT_RU',
+        'MOD DEVICE_INFO_DIRECT_RU'
+    )
+      AND c.deprecated_at IS NULL
+), target_params AS (
+    SELECT tc.command_id,
+           tc.command_code,
+           sp.id AS standard_path_id,
+           sp.standard_path,
+           sp.access,
+           row_number() OVER (
+               PARTITION BY tc.command_code
+               ORDER BY sp.standard_path
+           ) AS sort_order
+    FROM target_commands tc
+    JOIN public.standard_params sp ON (
+        (
+            tc.command_code IN ('LST DEVICE_INFO_EU', 'MOD DEVICE_INFO_EU')
+            AND sp.standard_path LIKE 'Device.DeviceInfo.EU.{i}.%'
+            AND sp.standard_path NOT LIKE 'Device.DeviceInfo.EU.{i}.RU.{i}.%'
+        ) OR (
+            tc.command_code IN ('LST DEVICE_INFO_RU', 'MOD DEVICE_INFO_RU')
+            AND sp.standard_path LIKE 'Device.DeviceInfo.EU.{i}.RU.{i}.%'
+        ) OR (
+            tc.command_code IN ('LST DEVICE_INFO_DIRECT_RU', 'MOD DEVICE_INFO_DIRECT_RU')
+            AND sp.standard_path LIKE 'Device.DeviceInfo.RU.{i}.%'
+        )
+    )
+    WHERE sp.entry_type = 'parameter'
+      AND (tc.command_code LIKE 'LST %' OR sp.access = 'READ_WRITE')
+), desired_param_fields AS (
+    SELECT command_id,
+           standard_path_id,
+           LEFT(UPPER(regexp_replace(
+               split_part(standard_path, '.', array_length(string_to_array(standard_path, '.'), 1)),
+               '([a-z0-9])([A-Z])',
+               '\1_\2',
+               'g'
+           )), 100) AS mml_code,
+           jsonb_build_object(
+               'zh-CN',
+               LEFT(UPPER(regexp_replace(
+                   split_part(standard_path, '.', array_length(string_to_array(standard_path, '.'), 1)),
+                   '([a-z0-9])([A-Z])',
+                   '\1_\2',
+                   'g'
+               )), 100),
+               'en-US',
+               split_part(standard_path, '.', array_length(string_to_array(standard_path, '.'), 1))
+           ) AS label_i18n,
+           sort_order,
+           CASE access
+               WHEN 'READ_WRITE' THEN 'RW'
+               ELSE 'RO'
+           END AS access_type
+    FROM target_params
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id,
+    standard_path_id,
+    mml_code,
+    label_i18n,
+    default_selected,
+    is_required,
+    sort_order,
+    access_type,
+    is_supported
+)
+SELECT command_id,
+       standard_path_id,
+       mml_code,
+       label_i18n,
+       true,
+       false,
+       sort_order,
+       access_type,
+       true
+FROM desired_param_fields
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH command_paths AS (
+    SELECT c.id AS command_id,
+           jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path) AS target_paths
+    FROM public.mml_commands c
+    JOIN public.mml_command_sub_fields sf
+      ON sf.command_id = c.id
+     AND sf.deprecated_at IS NULL
+    JOIN public.standard_params sp
+      ON sp.id = sf.standard_path_id
+     AND sp.entry_type = 'parameter'
+    WHERE c.command_code IN (
+        'LST DEVICE_INFO_EU',
+        'MOD DEVICE_INFO_EU',
+        'LST DEVICE_INFO_RU',
+        'MOD DEVICE_INFO_RU',
+        'LST DEVICE_INFO_DIRECT_RU',
+        'MOD DEVICE_INFO_DIRECT_RU'
+    )
+      AND c.deprecated_at IS NULL
+    GROUP BY c.id
+)
+UPDATE public.mml_commands c
+SET target_paths = cp.target_paths,
+    updated_at = now()
+FROM command_paths cp
+WHERE c.id = cp.command_id;
+
+-- WAN口配置只保留接口自身参数；IPv4/IPv6 地址参数由专门的
+-- “IPv4地址配置”命令管理，不在 WAN口配置参数管理中重复展示。
+DELETE FROM public.mml_command_sub_fields sf
+USING public.mml_commands c,
+      public.standard_params sp
+WHERE sf.command_id = c.id
+  AND sf.standard_path_id = sp.id
+  AND sf.deprecated_at IS NULL
+  AND c.command_code IN ('LST SL_SUB_01', 'MOD SL_SUB_01')
+  AND (
+      sp.standard_path LIKE 'Device.Ethernet.Interface.{i}.IPv4Address.%'
+      OR sp.standard_path LIKE 'Device.Ethernet.Interface.{i}.IPv6Address.%'
+  );
+
+WITH command_paths AS (
+    SELECT c.id AS command_id,
+           COALESCE(jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path), '[]'::jsonb) AS target_paths
+    FROM public.mml_commands c
+    LEFT JOIN public.mml_command_sub_fields sf
+      ON sf.command_id = c.id
+     AND sf.deprecated_at IS NULL
+    LEFT JOIN public.standard_params sp
+      ON sp.id = sf.standard_path_id
+     AND sp.entry_type = 'parameter'
+    WHERE c.command_code IN ('LST SL_SUB_01', 'MOD SL_SUB_01')
+      AND c.deprecated_at IS NULL
+    GROUP BY c.id
+)
+UPDATE public.mml_commands c
+SET target_paths = cp.target_paths,
+    updated_at = now()
+FROM command_paths cp
+WHERE c.id = cp.command_id;
+
+-- Device.DeviceInfo.WAN_CONFIG* are the legacy WAN profile parameters and
+-- belong to WAN口配置参数管理. Keep them alongside the interface base fields.
+WITH target_commands AS (
+    SELECT c.id AS command_id,
+           c.command_code,
+           COALESCE((
+               SELECT max(sf.sort_order)
+               FROM public.mml_command_sub_fields sf
+               JOIN public.standard_params sp
+                 ON sp.id = sf.standard_path_id
+               WHERE sf.command_id = c.id
+                 AND sf.deprecated_at IS NULL
+                 AND sp.standard_path NOT LIKE 'Device.DeviceInfo.WAN_CONFIG%'
+           ), 0) AS base_sort_order
+    FROM public.mml_commands c
+    WHERE c.command_code IN ('LST SL_SUB_01', 'MOD SL_SUB_01')
+      AND c.deprecated_at IS NULL
+), target_params AS (
+    SELECT tc.command_id,
+           tc.command_code,
+           sp.id AS standard_path_id,
+           sp.standard_path,
+           sp.access,
+           tc.base_sort_order + row_number() OVER (
+               PARTITION BY tc.command_code
+               ORDER BY sp.standard_path
+           ) AS sort_order
+    FROM target_commands tc
+    JOIN public.standard_params sp
+      ON sp.standard_path LIKE 'Device.DeviceInfo.WAN_CONFIG%'
+    WHERE sp.entry_type = 'parameter'
+      AND (tc.command_code LIKE 'LST %' OR sp.access = 'READ_WRITE')
+), desired_param_fields AS (
+    SELECT command_id,
+           standard_path_id,
+           LEFT(UPPER(regexp_replace(
+               split_part(standard_path, '.', array_length(string_to_array(standard_path, '.'), 1)),
+               '([a-z0-9])([A-Z])',
+               '\1_\2',
+               'g'
+           )), 100) AS mml_code,
+           jsonb_build_object(
+               'zh-CN',
+               LEFT(UPPER(regexp_replace(
+                   split_part(standard_path, '.', array_length(string_to_array(standard_path, '.'), 1)),
+                   '([a-z0-9])([A-Z])',
+                   '\1_\2',
+                   'g'
+               )), 100),
+               'en-US',
+               split_part(standard_path, '.', array_length(string_to_array(standard_path, '.'), 1))
+           ) AS label_i18n,
+           sort_order,
+           CASE access
+               WHEN 'READ_WRITE' THEN 'RW'
+               ELSE 'RO'
+           END AS access_type
+    FROM target_params
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id,
+    standard_path_id,
+    mml_code,
+    label_i18n,
+    default_selected,
+    is_required,
+    sort_order,
+    access_type,
+    is_supported
+)
+SELECT command_id,
+       standard_path_id,
+       mml_code,
+       label_i18n,
+       true,
+       false,
+       sort_order,
+       access_type,
+       true
+FROM desired_param_fields
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH command_paths AS (
+    SELECT c.id AS command_id,
+           COALESCE(jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path), '[]'::jsonb) AS target_paths
+    FROM public.mml_commands c
+    LEFT JOIN public.mml_command_sub_fields sf
+      ON sf.command_id = c.id
+     AND sf.deprecated_at IS NULL
+    LEFT JOIN public.standard_params sp
+      ON sp.id = sf.standard_path_id
+     AND sp.entry_type = 'parameter'
+    WHERE c.command_code IN ('LST SL_SUB_01', 'MOD SL_SUB_01')
+      AND c.deprecated_at IS NULL
+    GROUP BY c.id
+)
+UPDATE public.mml_commands c
+SET target_paths = cp.target_paths,
+    updated_at = now()
+FROM command_paths cp
+WHERE c.id = cp.command_id;
+
+-- Device.DeviceInfo.ROUTE_CONFIG* are the legacy local route profile
+-- parameters and belong to 本地路由配置参数管理.
+WITH target_commands AS (
+    SELECT c.id AS command_id,
+           c.command_code,
+           COALESCE((
+               SELECT max(sf.sort_order)
+               FROM public.mml_command_sub_fields sf
+               JOIN public.standard_params sp
+                 ON sp.id = sf.standard_path_id
+               WHERE sf.command_id = c.id
+                 AND sf.deprecated_at IS NULL
+                 AND sp.standard_path NOT LIKE 'Device.DeviceInfo.ROUTE_CONFIG%'
+           ), 0) AS base_sort_order
+    FROM public.mml_commands c
+    WHERE c.command_code IN ('LST SL_SUB_03', 'MOD SL_SUB_03')
+      AND c.deprecated_at IS NULL
+), target_params AS (
+    SELECT tc.command_id,
+           tc.command_code,
+           sp.id AS standard_path_id,
+           sp.standard_path,
+           sp.access,
+           tc.base_sort_order + row_number() OVER (
+               PARTITION BY tc.command_code
+               ORDER BY sp.standard_path
+           ) AS sort_order
+    FROM target_commands tc
+    JOIN public.standard_params sp
+      ON sp.standard_path LIKE 'Device.DeviceInfo.ROUTE_CONFIG%'
+    WHERE sp.entry_type = 'parameter'
+      AND (tc.command_code LIKE 'LST %' OR sp.access = 'READ_WRITE')
+), desired_param_fields AS (
+    SELECT command_id,
+           standard_path_id,
+           LEFT(UPPER(regexp_replace(
+               split_part(standard_path, '.', array_length(string_to_array(standard_path, '.'), 1)),
+               '([a-z0-9])([A-Z])',
+               '\1_\2',
+               'g'
+           )), 100) AS mml_code,
+           jsonb_build_object(
+               'zh-CN',
+               LEFT(UPPER(regexp_replace(
+                   split_part(standard_path, '.', array_length(string_to_array(standard_path, '.'), 1)),
+                   '([a-z0-9])([A-Z])',
+                   '\1_\2',
+                   'g'
+               )), 100),
+               'en-US',
+               split_part(standard_path, '.', array_length(string_to_array(standard_path, '.'), 1))
+           ) AS label_i18n,
+           sort_order,
+           CASE access
+               WHEN 'READ_WRITE' THEN 'RW'
+               ELSE 'RO'
+           END AS access_type
+    FROM target_params
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id,
+    standard_path_id,
+    mml_code,
+    label_i18n,
+    default_selected,
+    is_required,
+    sort_order,
+    access_type,
+    is_supported
+)
+SELECT command_id,
+       standard_path_id,
+       mml_code,
+       label_i18n,
+       true,
+       false,
+       sort_order,
+       access_type,
+       true
+FROM desired_param_fields
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH command_paths AS (
+    SELECT c.id AS command_id,
+           COALESCE(jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path), '[]'::jsonb) AS target_paths
+    FROM public.mml_commands c
+    LEFT JOIN public.mml_command_sub_fields sf
+      ON sf.command_id = c.id
+     AND sf.deprecated_at IS NULL
+    LEFT JOIN public.standard_params sp
+      ON sp.id = sf.standard_path_id
+     AND sp.entry_type = 'parameter'
+    WHERE c.command_code IN ('LST SL_SUB_03', 'MOD SL_SUB_03')
+      AND c.deprecated_at IS NULL
+    GROUP BY c.id
+)
+UPDATE public.mml_commands c
+SET target_paths = cp.target_paths,
+    updated_at = now()
+FROM command_paths cp
+WHERE c.id = cp.command_id;
+
+-- Split WAN and VLAN IP address object management into dedicated IPv4/IPv6
+-- commands. The general WAN/VLAN commands keep only their own base fields.
+WITH desired_commands AS (
+    SELECT *
+    FROM (VALUES
+        ('ADD INTERFACE_I_PV4_ADDRESS', '添加 IPv4地址配置', 'Add IPv4 Address Configuration', 'ADD', 'IPv4地址配置', 'IPv4 Address Configuration', 'AddObject', 'Device.Ethernet.Interface.IPv4Address.', 'Device.Ethernet.Interface.{i}.IPv4Address.{i}'),
+        ('LST INTERFACE_I_PV4_ADDRESS', '查询 IPv4地址配置', 'Query IPv4 Address Configuration', 'LST', 'IPv4地址配置', 'IPv4 Address Configuration', 'GetParameterValues', NULL, NULL),
+        ('MOD INTERFACE_I_PV4_ADDRESS', '修改 IPv4地址配置', 'Modify IPv4 Address Configuration', 'MOD', 'IPv4地址配置', 'IPv4 Address Configuration', 'SetParameterValues', NULL, NULL),
+        ('RMV INTERFACE_I_PV4_ADDRESS', '删除 IPv4地址配置', 'Delete IPv4 Address Configuration', 'RMV', 'IPv4地址配置', 'IPv4 Address Configuration', 'DeleteObject', 'Device.Ethernet.Interface.IPv4Address.', 'Device.Ethernet.Interface.{i}.IPv4Address.{i}'),
+        ('ADD INTERFACE_I_PV6_ADDRESS', '添加 IPv6地址配置', 'Add IPv6 Address Configuration', 'ADD', 'IPv6地址配置', 'IPv6 Address Configuration', 'AddObject', 'Device.Ethernet.Interface.IPv6Address.', 'Device.Ethernet.Interface.{i}.IPv6Address.{i}'),
+        ('LST INTERFACE_I_PV6_ADDRESS', '查询 IPv6地址配置', 'Query IPv6 Address Configuration', 'LST', 'IPv6地址配置', 'IPv6 Address Configuration', 'GetParameterValues', NULL, NULL),
+        ('MOD INTERFACE_I_PV6_ADDRESS', '修改 IPv6地址配置', 'Modify IPv6 Address Configuration', 'MOD', 'IPv6地址配置', 'IPv6 Address Configuration', 'SetParameterValues', NULL, NULL),
+        ('RMV INTERFACE_I_PV6_ADDRESS', '删除 IPv6地址配置', 'Delete IPv6 Address Configuration', 'RMV', 'IPv6地址配置', 'IPv6 Address Configuration', 'DeleteObject', 'Device.Ethernet.Interface.IPv6Address.', 'Device.Ethernet.Interface.{i}.IPv6Address.{i}'),
+        ('ADD VLAN_INTERFACE_I_PV4_ADDRESS', '添加 vlan子接口 IPv4地址配置', 'Add VLAN IPv4 Address Configuration', 'ADD', 'vlan子接口 IPv4地址配置', 'VLAN IPv4 Address Configuration', 'AddObject', 'Device.Ethernet.Interface.VlanInterface.IPv4Address.', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}'),
+        ('LST VLAN_INTERFACE_I_PV4_ADDRESS', '查询 vlan子接口 IPv4地址配置', 'Query VLAN IPv4 Address Configuration', 'LST', 'vlan子接口 IPv4地址配置', 'VLAN IPv4 Address Configuration', 'GetParameterValues', NULL, NULL),
+        ('MOD VLAN_INTERFACE_I_PV4_ADDRESS', '修改 vlan子接口 IPv4地址配置', 'Modify VLAN IPv4 Address Configuration', 'MOD', 'vlan子接口 IPv4地址配置', 'VLAN IPv4 Address Configuration', 'SetParameterValues', NULL, NULL),
+        ('RMV VLAN_INTERFACE_I_PV4_ADDRESS', '删除 vlan子接口 IPv4地址配置', 'Delete VLAN IPv4 Address Configuration', 'RMV', 'vlan子接口 IPv4地址配置', 'VLAN IPv4 Address Configuration', 'DeleteObject', 'Device.Ethernet.Interface.VlanInterface.IPv4Address.', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}'),
+        ('ADD VLAN_INTERFACE_I_PV6_ADDRESS', '添加 vlan子接口 IPv6地址配置', 'Add VLAN IPv6 Address Configuration', 'ADD', 'vlan子接口 IPv6地址配置', 'VLAN IPv6 Address Configuration', 'AddObject', 'Device.Ethernet.Interface.VlanInterface.IPv6Address.', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}'),
+        ('LST VLAN_INTERFACE_I_PV6_ADDRESS', '查询 vlan子接口 IPv6地址配置', 'Query VLAN IPv6 Address Configuration', 'LST', 'vlan子接口 IPv6地址配置', 'VLAN IPv6 Address Configuration', 'GetParameterValues', NULL, NULL),
+        ('MOD VLAN_INTERFACE_I_PV6_ADDRESS', '修改 vlan子接口 IPv6地址配置', 'Modify VLAN IPv6 Address Configuration', 'MOD', 'vlan子接口 IPv6地址配置', 'VLAN IPv6 Address Configuration', 'SetParameterValues', NULL, NULL),
+        ('RMV VLAN_INTERFACE_I_PV6_ADDRESS', '删除 vlan子接口 IPv6地址配置', 'Delete VLAN IPv6 Address Configuration', 'RMV', 'vlan子接口 IPv6地址配置', 'VLAN IPv6 Address Configuration', 'DeleteObject', 'Device.Ethernet.Interface.VlanInterface.IPv6Address.', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}')
+    ) AS v(command_code, command_name_zh, command_name_en, operation_type, logical_name_zh, logical_name_en, rpc_method, target_object, object_path)
+), sl_group AS (
+    SELECT id
+    FROM public.mml_command_groups
+    WHERE group_code = 'chapter:SL'
+      AND deleted_at IS NULL
+    LIMIT 1
+)
+INSERT INTO public.mml_commands (
+    command_code,
+    command_name,
+    command_name_i18n,
+    operation_type,
+    logical_name_i18n,
+    rpc_method,
+    target_object,
+    target_paths,
+    group_id,
+    source,
+    catalog_protected,
+    category,
+    description
+)
+SELECT dc.command_code,
+       dc.command_name_zh,
+       jsonb_build_object('zh-CN', dc.command_name_zh, 'en-US', dc.command_name_en),
+       dc.operation_type,
+       jsonb_build_object('zh-CN', dc.logical_name_zh, 'en-US', dc.logical_name_en),
+       dc.rpc_method,
+       dc.target_object,
+       CASE
+           WHEN dc.object_path IS NULL THEN '[]'::jsonb
+           ELSE jsonb_build_array(dc.object_path)
+       END,
+       sl_group.id,
+       'standard',
+       true,
+       'SL',
+       dc.command_name_zh
+FROM desired_commands dc
+CROSS JOIN sl_group
+ON CONFLICT (command_code) DO UPDATE
+SET command_name = EXCLUDED.command_name,
+    command_name_i18n = EXCLUDED.command_name_i18n,
+    operation_type = EXCLUDED.operation_type,
+    logical_name_i18n = EXCLUDED.logical_name_i18n,
+    rpc_method = EXCLUDED.rpc_method,
+    target_object = EXCLUDED.target_object,
+    target_paths = EXCLUDED.target_paths,
+    group_id = EXCLUDED.group_id,
+    source = EXCLUDED.source,
+    catalog_protected = EXCLUDED.catalog_protected,
+    category = EXCLUDED.category,
+    description = EXCLUDED.description,
+    deprecated_at = NULL,
+    updated_at = now();
+
+DELETE FROM public.mml_command_sub_fields sf
+USING public.mml_commands c,
+      public.standard_params sp
+WHERE sf.command_id = c.id
+  AND sf.standard_path_id = sp.id
+  AND sf.deprecated_at IS NULL
+  AND c.command_code IN ('LST SL_SUB_02', 'MOD SL_SUB_02')
+  AND (
+      sp.standard_path LIKE 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.%'
+      OR sp.standard_path LIKE 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.%'
+  );
+
+WITH target_command_prefixes AS (
+    SELECT *
+    FROM (VALUES
+        ('LST INTERFACE_I_PV4_ADDRESS', 'Device.Ethernet.Interface.{i}.IPv4Address.{i}.'),
+        ('MOD INTERFACE_I_PV4_ADDRESS', 'Device.Ethernet.Interface.{i}.IPv4Address.{i}.'),
+        ('LST INTERFACE_I_PV6_ADDRESS', 'Device.Ethernet.Interface.{i}.IPv6Address.{i}.'),
+        ('MOD INTERFACE_I_PV6_ADDRESS', 'Device.Ethernet.Interface.{i}.IPv6Address.{i}.'),
+        ('LST VLAN_INTERFACE_I_PV4_ADDRESS', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.'),
+        ('MOD VLAN_INTERFACE_I_PV4_ADDRESS', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.'),
+        ('LST VLAN_INTERFACE_I_PV6_ADDRESS', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.'),
+        ('MOD VLAN_INTERFACE_I_PV6_ADDRESS', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.')
+    ) AS v(command_code, path_prefix)
+), target_params AS (
+    SELECT c.id AS command_id,
+           sp.id AS standard_path_id,
+           sp.standard_path,
+           sp.access,
+           COALESCE(NULLIF(sp.description, ''), split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1))) AS label_zh,
+           split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1)) AS leaf_name,
+           row_number() OVER (PARTITION BY c.id ORDER BY sp.standard_path) - 1 AS sort_order
+    FROM target_command_prefixes tcp
+    JOIN public.mml_commands c
+      ON c.command_code = tcp.command_code
+     AND c.deprecated_at IS NULL
+    JOIN public.standard_params sp
+      ON sp.standard_path LIKE tcp.path_prefix || '%'
+     AND sp.standard_path <> rtrim(tcp.path_prefix, '.')
+    WHERE sp.entry_type = 'parameter'
+      AND (c.operation_type = 'LST' OR sp.access = 'READ_WRITE')
+), desired_param_fields AS (
+    SELECT command_id,
+           standard_path_id,
+           leaf_name AS mml_code,
+           jsonb_build_object('zh-CN', label_zh, 'en-US', leaf_name) AS label_i18n,
+           sort_order,
+           CASE access
+               WHEN 'READ_WRITE' THEN 'RW'
+               ELSE 'RO'
+           END AS access_type
+    FROM target_params
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id,
+    standard_path_id,
+    mml_code,
+    label_i18n,
+    default_selected,
+    is_required,
+    sort_order,
+    access_type,
+    is_supported
+)
+SELECT command_id,
+       standard_path_id,
+       mml_code,
+       label_i18n,
+       true,
+       false,
+       sort_order,
+       access_type,
+       true
+FROM desired_param_fields
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH fixed_object_paths AS (
+    SELECT *
+    FROM (VALUES
+        ('ADD INTERFACE_I_PV4_ADDRESS', 'Device.Ethernet.Interface.{i}.IPv4Address.{i}'),
+        ('RMV INTERFACE_I_PV4_ADDRESS', 'Device.Ethernet.Interface.{i}.IPv4Address.{i}'),
+        ('ADD INTERFACE_I_PV6_ADDRESS', 'Device.Ethernet.Interface.{i}.IPv6Address.{i}'),
+        ('RMV INTERFACE_I_PV6_ADDRESS', 'Device.Ethernet.Interface.{i}.IPv6Address.{i}'),
+        ('ADD VLAN_INTERFACE_I_PV4_ADDRESS', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}'),
+        ('RMV VLAN_INTERFACE_I_PV4_ADDRESS', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}'),
+        ('ADD VLAN_INTERFACE_I_PV6_ADDRESS', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}'),
+        ('RMV VLAN_INTERFACE_I_PV6_ADDRESS', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}')
+    ) AS v(command_code, object_path)
+), field_paths AS (
+    SELECT c.id AS command_id,
+           jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path) AS target_paths
+    FROM public.mml_commands c
+    JOIN public.mml_command_sub_fields sf
+      ON sf.command_id = c.id
+     AND sf.deprecated_at IS NULL
+    JOIN public.standard_params sp
+      ON sp.id = sf.standard_path_id
+     AND sp.entry_type = 'parameter'
+    WHERE c.command_code IN (
+        'LST INTERFACE_I_PV4_ADDRESS',
+        'MOD INTERFACE_I_PV4_ADDRESS',
+        'LST INTERFACE_I_PV6_ADDRESS',
+        'MOD INTERFACE_I_PV6_ADDRESS',
+        'LST VLAN_INTERFACE_I_PV4_ADDRESS',
+        'MOD VLAN_INTERFACE_I_PV4_ADDRESS',
+        'LST VLAN_INTERFACE_I_PV6_ADDRESS',
+        'MOD VLAN_INTERFACE_I_PV6_ADDRESS',
+        'LST SL_SUB_02',
+        'MOD SL_SUB_02'
+    )
+      AND c.deprecated_at IS NULL
+    GROUP BY c.id
+), command_paths AS (
+    SELECT command_id, target_paths
+    FROM field_paths
+    UNION ALL
+    SELECT c.id, jsonb_build_array(fop.object_path)
+    FROM fixed_object_paths fop
+    JOIN public.mml_commands c
+      ON c.command_code = fop.command_code
+     AND c.deprecated_at IS NULL
+)
+UPDATE public.mml_commands c
+SET target_paths = cp.target_paths,
+    updated_at = now()
+FROM command_paths cp
+WHERE c.id = cp.command_id;
+
+-- Put Device.DeviceInfo.SAS.* under a dedicated first-level SAS参数管理 group.
+WITH upsert_group AS (
+    INSERT INTO public.mml_command_groups (
+        group_code,
+        group_name_zh,
+        group_name_en,
+        path,
+        param_version,
+        display_order,
+        is_active,
+        name_i18n,
+        source,
+        catalog_protected,
+        chapter_code,
+        instance_arity,
+        family_code,
+        family_name_zh
+    ) VALUES (
+        'DEVICE_INFO_SAS',
+        'SAS参数管理',
+        'SAS Parameters',
+        'DEVICE_INFO_SAS'::ltree,
+        'cmcc-td-lte-v2.3',
+        10,
+        true,
+        jsonb_build_object('zh-CN', 'SAS参数管理', 'en-US', 'SAS Parameters'),
+        'admin',
+        false,
+        NULL,
+        0,
+        '',
+        ''
+    )
+    ON CONFLICT (param_version, group_code) DO UPDATE
+    SET group_name_zh = EXCLUDED.group_name_zh,
+        group_name_en = EXCLUDED.group_name_en,
+        path = EXCLUDED.path,
+        display_order = EXCLUDED.display_order,
+        is_active = EXCLUDED.is_active,
+        name_i18n = EXCLUDED.name_i18n,
+        source = EXCLUDED.source,
+        catalog_protected = EXCLUDED.catalog_protected,
+        chapter_code = EXCLUDED.chapter_code,
+        deprecated_at = NULL,
+        deleted_at = NULL,
+        updated_at = now()
+    RETURNING id
+), desired_commands AS (
+    SELECT *
+    FROM (VALUES
+        (
+            'LST DEVICE_INFO_SAS',
+            '查询 SAS参数管理',
+            'Query SAS Parameters',
+            'LST',
+            'SAS参数管理',
+            'SAS Parameters',
+            '查询设备信息SAS参数'
+        ),
+        (
+            'MOD DEVICE_INFO_SAS',
+            '修改 SAS参数管理',
+            'Modify SAS Parameters',
+            'MOD',
+            'SAS参数管理',
+            'SAS Parameters',
+            '修改设备信息SAS参数'
+        )
+    ) AS v(
+        command_code,
+        command_name,
+        command_name_en,
+        operation_type,
+        logical_name,
+        logical_name_en,
+        description
+    )
+), upsert_commands AS (
+    INSERT INTO public.mml_commands (
+        command_name,
+        command_code,
+        category,
+        description,
+        rpc_method,
+        target_paths,
+        target_object,
+        group_id,
+        command_name_i18n,
+        require_confirm,
+        confirm_msg_i18n,
+        operation_type,
+        logical_name_i18n,
+        source,
+        catalog_protected,
+        platform_tags,
+        tree_node_refs,
+        instance_range_meta
+    )
+    SELECT dc.command_name,
+           dc.command_code,
+           'device_info',
+           dc.description,
+           CASE dc.operation_type
+               WHEN 'LST' THEN 'GetParameterValues'
+               ELSE 'SetParameterValues'
+           END,
+           '[]'::jsonb,
+           'Device.DeviceInfo.SAS.',
+           ug.id,
+           jsonb_build_object('zh-CN', dc.command_name, 'en-US', dc.command_name_en),
+           false,
+           '{}'::jsonb,
+           dc.operation_type,
+           jsonb_build_object('zh-CN', dc.logical_name, 'en-US', dc.logical_name_en),
+           'standard',
+           true,
+           '{}'::jsonb,
+           jsonb_build_array('Device.DeviceInfo.SAS.'),
+           '[]'::jsonb
+    FROM desired_commands dc
+    CROSS JOIN upsert_group ug
+    ON CONFLICT (command_code) DO UPDATE
+    SET command_name = EXCLUDED.command_name,
+        category = EXCLUDED.category,
+        description = EXCLUDED.description,
+        rpc_method = EXCLUDED.rpc_method,
+        target_object = EXCLUDED.target_object,
+        group_id = EXCLUDED.group_id,
+        command_name_i18n = EXCLUDED.command_name_i18n,
+        require_confirm = EXCLUDED.require_confirm,
+        confirm_msg_i18n = EXCLUDED.confirm_msg_i18n,
+        operation_type = EXCLUDED.operation_type,
+        logical_name_i18n = EXCLUDED.logical_name_i18n,
+        source = EXCLUDED.source,
+        catalog_protected = EXCLUDED.catalog_protected,
+        platform_tags = EXCLUDED.platform_tags,
+        tree_node_refs = EXCLUDED.tree_node_refs,
+        instance_range_meta = EXCLUDED.instance_range_meta,
+        deprecated_at = NULL,
+        updated_at = now()
+    RETURNING id
+)
+SELECT count(*) FROM upsert_commands;
+
+WITH target_commands AS (
+    SELECT c.id AS command_id,
+           c.command_code
+    FROM public.mml_commands c
+    WHERE c.command_code IN ('LST DEVICE_INFO_SAS', 'MOD DEVICE_INFO_SAS')
+      AND c.deprecated_at IS NULL
+), target_params AS (
+    SELECT tc.command_id,
+           tc.command_code,
+           sp.id AS standard_path_id,
+           sp.standard_path,
+           sp.access,
+           row_number() OVER (
+               PARTITION BY tc.command_code
+               ORDER BY sp.standard_path
+           ) AS sort_order
+    FROM target_commands tc
+    JOIN public.standard_params sp
+      ON sp.standard_path LIKE 'Device.DeviceInfo.SAS.%'
+    WHERE sp.entry_type = 'parameter'
+      AND (tc.command_code LIKE 'LST %' OR sp.access = 'READ_WRITE')
+), desired_param_fields AS (
+    SELECT command_id,
+           standard_path_id,
+           LEFT(UPPER(regexp_replace(
+               split_part(standard_path, '.', array_length(string_to_array(standard_path, '.'), 1)),
+               '([a-z0-9])([A-Z])',
+               '\1_\2',
+               'g'
+           )), 100) AS mml_code,
+           jsonb_build_object(
+               'zh-CN',
+               LEFT(UPPER(regexp_replace(
+                   split_part(standard_path, '.', array_length(string_to_array(standard_path, '.'), 1)),
+                   '([a-z0-9])([A-Z])',
+                   '\1_\2',
+                   'g'
+               )), 100),
+               'en-US',
+               split_part(standard_path, '.', array_length(string_to_array(standard_path, '.'), 1))
+           ) AS label_i18n,
+           sort_order,
+           CASE access
+               WHEN 'READ_WRITE' THEN 'RW'
+               ELSE 'RO'
+           END AS access_type
+    FROM target_params
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id,
+    standard_path_id,
+    mml_code,
+    label_i18n,
+    default_selected,
+    is_required,
+    sort_order,
+    access_type,
+    is_supported
+)
+SELECT command_id,
+       standard_path_id,
+       mml_code,
+       label_i18n,
+       true,
+       false,
+       sort_order,
+       access_type,
+       true
+FROM desired_param_fields
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH command_paths AS (
+    SELECT c.id AS command_id,
+           jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path) AS target_paths
+    FROM public.mml_commands c
+    JOIN public.mml_command_sub_fields sf
+      ON sf.command_id = c.id
+     AND sf.deprecated_at IS NULL
+    JOIN public.standard_params sp
+      ON sp.id = sf.standard_path_id
+     AND sp.entry_type = 'parameter'
+    WHERE c.command_code IN ('LST DEVICE_INFO_SAS', 'MOD DEVICE_INFO_SAS')
+      AND c.deprecated_at IS NULL
+    GROUP BY c.id
+)
+UPDATE public.mml_commands c
+SET target_paths = cp.target_paths,
+    updated_at = now()
+FROM command_paths cp
+WHERE c.id = cp.command_id;
+
+-- Split WAN and VLAN PPPoE object management into dedicated command leaves
+-- under WAN口配置参数管理.
+WITH desired_commands AS (
+    SELECT *
+    FROM (VALUES
+        ('LST SL_PPPOE', '查询 WAN口PPPOE参数管理', 'Query WAN PPPoE Parameters', 'LST', 'WAN口PPPOE参数管理', 'WAN PPPoE Parameters', 'GetParameterValues', NULL, NULL, '查询WAN口PPPOE参数'),
+        ('MOD SL_PPPOE', '修改 WAN口PPPOE参数管理', 'Modify WAN PPPoE Parameters', 'MOD', 'WAN口PPPOE参数管理', 'WAN PPPoE Parameters', 'SetParameterValues', NULL, NULL, '修改WAN口PPPOE参数'),
+        ('ADD SL_PPPOE', '添加 WAN口PPPOE参数管理', 'Add WAN PPPoE Parameters', 'ADD', 'WAN口PPPOE参数管理', 'WAN PPPoE Parameters', 'AddObject', 'Device.Ethernet.Interface.{i}.PppoeAddress.', 'Device.Ethernet.Interface.{i}.PppoeAddress.{i}', '添加WAN口PPPOE参数对象'),
+        ('RMV SL_PPPOE', '删除 WAN口PPPOE参数管理', 'Delete WAN PPPoE Parameters', 'RMV', 'WAN口PPPOE参数管理', 'WAN PPPoE Parameters', 'DeleteObject', 'Device.Ethernet.Interface.{i}.PppoeAddress.', 'Device.Ethernet.Interface.{i}.PppoeAddress.{i}', '删除WAN口PPPOE参数对象'),
+        ('LST SL_VLAN_PPPOE', '查询 VLAN PPPOE参数管理', 'Query VLAN PPPoE Parameters', 'LST', 'VLAN PPPOE参数管理', 'VLAN PPPoE Parameters', 'GetParameterValues', NULL, NULL, '查询VLAN PPPOE参数'),
+        ('MOD SL_VLAN_PPPOE', '修改 VLAN PPPOE参数管理', 'Modify VLAN PPPoE Parameters', 'MOD', 'VLAN PPPOE参数管理', 'VLAN PPPoE Parameters', 'SetParameterValues', NULL, NULL, '修改VLAN PPPOE参数'),
+        ('ADD SL_VLAN_PPPOE', '添加 VLAN PPPOE参数管理', 'Add VLAN PPPoE Parameters', 'ADD', 'VLAN PPPOE参数管理', 'VLAN PPPoE Parameters', 'AddObject', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}', '添加VLAN PPPOE参数对象'),
+        ('RMV SL_VLAN_PPPOE', '删除 VLAN PPPOE参数管理', 'Delete VLAN PPPoE Parameters', 'RMV', 'VLAN PPPOE参数管理', 'VLAN PPPoE Parameters', 'DeleteObject', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}', '删除VLAN PPPOE参数对象')
+    ) AS v(command_code, command_name, command_name_en, operation_type, logical_name, logical_name_en, rpc_method, target_object, object_path, description)
+), sl_group AS (
+    SELECT id
+    FROM public.mml_command_groups
+    WHERE group_code = 'chapter:SL'
+      AND deleted_at IS NULL
+      AND deprecated_at IS NULL
+    LIMIT 1
+), upsert_commands AS (
+    INSERT INTO public.mml_commands (
+        command_name,
+        command_code,
+        category,
+        description,
+        rpc_method,
+        target_paths,
+        target_object,
+        group_id,
+        command_name_i18n,
+        require_confirm,
+        confirm_msg_i18n,
+        operation_type,
+        logical_name_i18n,
+        source,
+        catalog_protected,
+        platform_tags,
+        tree_node_refs,
+        instance_range_meta
+    )
+    SELECT dc.command_name,
+           dc.command_code,
+           'SL',
+           dc.description,
+           dc.rpc_method,
+           CASE
+               WHEN dc.object_path IS NULL THEN '[]'::jsonb
+               ELSE jsonb_build_array(dc.object_path)
+           END,
+           dc.target_object,
+           sg.id,
+           jsonb_build_object('zh-CN', dc.command_name, 'en-US', dc.command_name_en),
+           false,
+           '{}'::jsonb,
+           dc.operation_type,
+           jsonb_build_object('zh-CN', dc.logical_name, 'en-US', dc.logical_name_en),
+           'standard',
+           true,
+           '{}'::jsonb,
+           CASE
+               WHEN dc.object_path IS NULL THEN '[]'::jsonb
+               ELSE jsonb_build_array(dc.object_path)
+           END,
+           '[]'::jsonb
+    FROM desired_commands dc
+    CROSS JOIN sl_group sg
+    ON CONFLICT (command_code) DO UPDATE
+    SET command_name = EXCLUDED.command_name,
+        category = EXCLUDED.category,
+        description = EXCLUDED.description,
+        rpc_method = EXCLUDED.rpc_method,
+        target_paths = EXCLUDED.target_paths,
+        target_object = EXCLUDED.target_object,
+        group_id = EXCLUDED.group_id,
+        command_name_i18n = EXCLUDED.command_name_i18n,
+        require_confirm = EXCLUDED.require_confirm,
+        confirm_msg_i18n = EXCLUDED.confirm_msg_i18n,
+        operation_type = EXCLUDED.operation_type,
+        logical_name_i18n = EXCLUDED.logical_name_i18n,
+        source = EXCLUDED.source,
+        catalog_protected = EXCLUDED.catalog_protected,
+        platform_tags = EXCLUDED.platform_tags,
+        tree_node_refs = EXCLUDED.tree_node_refs,
+        instance_range_meta = EXCLUDED.instance_range_meta,
+        deprecated_at = NULL,
+        updated_at = now()
+    RETURNING id
+)
+SELECT count(*) FROM upsert_commands;
+
+WITH target_command_prefixes AS (
+    SELECT *
+    FROM (VALUES
+        ('LST SL_PPPOE', 'Device.Ethernet.Interface.{i}.PppoeAddress.{i}.'),
+        ('MOD SL_PPPOE', 'Device.Ethernet.Interface.{i}.PppoeAddress.{i}.'),
+        ('LST SL_VLAN_PPPOE', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}.'),
+        ('MOD SL_VLAN_PPPOE', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}.')
+    ) AS v(command_code, path_prefix)
+), target_params AS (
+    SELECT c.id AS command_id,
+           sp.id AS standard_path_id,
+           sp.standard_path,
+           sp.access,
+           COALESCE(NULLIF(sp.description, ''), split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1))) AS label_zh,
+           split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1)) AS leaf_name,
+           row_number() OVER (PARTITION BY c.id ORDER BY sp.standard_path) - 1 AS sort_order
+    FROM target_command_prefixes tcp
+    JOIN public.mml_commands c
+      ON c.command_code = tcp.command_code
+     AND c.deprecated_at IS NULL
+    JOIN public.standard_params sp
+      ON sp.standard_path LIKE tcp.path_prefix || '%'
+     AND sp.standard_path <> rtrim(tcp.path_prefix, '.')
+    WHERE sp.entry_type = 'parameter'
+      AND (c.operation_type = 'LST' OR sp.access = 'READ_WRITE')
+), desired_param_fields AS (
+    SELECT command_id,
+           standard_path_id,
+           LEFT(UPPER(regexp_replace(
+               leaf_name,
+               '([a-z0-9])([A-Z])',
+               '\1_\2',
+               'g'
+           )), 100) AS mml_code,
+           jsonb_build_object('zh-CN', label_zh, 'en-US', leaf_name) AS label_i18n,
+           sort_order,
+           CASE access
+               WHEN 'READ_WRITE' THEN 'RW'
+               ELSE 'RO'
+           END AS access_type
+    FROM target_params
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id,
+    standard_path_id,
+    mml_code,
+    label_i18n,
+    default_selected,
+    is_required,
+    sort_order,
+    access_type,
+    is_supported
+)
+SELECT command_id,
+       standard_path_id,
+       mml_code,
+       label_i18n,
+       true,
+       false,
+       sort_order,
+       access_type,
+       true
+FROM desired_param_fields
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH fixed_object_paths AS (
+    SELECT *
+    FROM (VALUES
+        ('ADD SL_PPPOE', 'Device.Ethernet.Interface.{i}.PppoeAddress.{i}'),
+        ('RMV SL_PPPOE', 'Device.Ethernet.Interface.{i}.PppoeAddress.{i}'),
+        ('ADD SL_VLAN_PPPOE', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}'),
+        ('RMV SL_VLAN_PPPOE', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}')
+    ) AS v(command_code, object_path)
+), field_paths AS (
+    SELECT c.id AS command_id,
+           jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path) AS target_paths
+    FROM public.mml_commands c
+    JOIN public.mml_command_sub_fields sf
+      ON sf.command_id = c.id
+     AND sf.deprecated_at IS NULL
+    JOIN public.standard_params sp
+      ON sp.id = sf.standard_path_id
+     AND sp.entry_type = 'parameter'
+    WHERE c.command_code IN ('LST SL_PPPOE', 'MOD SL_PPPOE', 'LST SL_VLAN_PPPOE', 'MOD SL_VLAN_PPPOE')
+      AND c.deprecated_at IS NULL
+    GROUP BY c.id
+), command_paths AS (
+    SELECT command_id, target_paths
+    FROM field_paths
+    UNION ALL
+    SELECT c.id, jsonb_build_array(fop.object_path)
+    FROM fixed_object_paths fop
+    JOIN public.mml_commands c
+      ON c.command_code = fop.command_code
+     AND c.deprecated_at IS NULL
+)
+UPDATE public.mml_commands c
+SET target_paths = cp.target_paths,
+    updated_at = now()
+FROM command_paths cp
+WHERE c.id = cp.command_id;
+
+-- Device.Services.FAPService.Ipsec.* belongs to IPsec参数管理.
+WITH target_commands AS (
+    SELECT c.id AS command_id,
+           c.command_code,
+           COALESCE((
+               SELECT max(sf.sort_order)
+               FROM public.mml_command_sub_fields sf
+               JOIN public.standard_params sp
+                 ON sp.id = sf.standard_path_id
+               WHERE sf.command_id = c.id
+                 AND sf.deprecated_at IS NULL
+                 AND sp.standard_path NOT LIKE 'Device.Services.FAPService.Ipsec.%'
+           ), 0) AS base_sort_order
+    FROM public.mml_commands c
+    WHERE c.command_code IN ('LST SM_SUB_01', 'MOD SM_SUB_01')
+      AND c.deprecated_at IS NULL
+), target_params AS (
+    SELECT tc.command_id,
+           tc.command_code,
+           sp.id AS standard_path_id,
+           sp.standard_path,
+           sp.access,
+           COALESCE(NULLIF(sp.description, ''), split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1))) AS label_zh,
+           split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1)) AS leaf_name,
+           tc.base_sort_order + row_number() OVER (
+               PARTITION BY tc.command_code
+               ORDER BY sp.standard_path
+           ) AS sort_order
+    FROM target_commands tc
+    JOIN public.standard_params sp
+      ON sp.standard_path LIKE 'Device.Services.FAPService.Ipsec.%'
+    WHERE sp.entry_type = 'parameter'
+      AND (tc.command_code LIKE 'LST %' OR sp.access = 'READ_WRITE')
+), desired_param_fields AS (
+    SELECT command_id,
+           standard_path_id,
+           LEFT(UPPER(regexp_replace(
+               leaf_name,
+               '([a-z0-9])([A-Z])',
+               '\1_\2',
+               'g'
+           )), 100) AS mml_code,
+           jsonb_build_object('zh-CN', label_zh, 'en-US', leaf_name) AS label_i18n,
+           sort_order,
+           CASE access
+               WHEN 'READ_WRITE' THEN 'RW'
+               ELSE 'RO'
+           END AS access_type
+    FROM target_params
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id,
+    standard_path_id,
+    mml_code,
+    label_i18n,
+    default_selected,
+    is_required,
+    sort_order,
+    access_type,
+    is_supported
+)
+SELECT command_id,
+       standard_path_id,
+       mml_code,
+       label_i18n,
+       true,
+       false,
+       sort_order,
+       access_type,
+       true
+FROM desired_param_fields
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH command_paths AS (
+    SELECT c.id AS command_id,
+           jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path) AS target_paths
+    FROM public.mml_commands c
+    JOIN public.mml_command_sub_fields sf
+      ON sf.command_id = c.id
+     AND sf.deprecated_at IS NULL
+    JOIN public.standard_params sp
+      ON sp.id = sf.standard_path_id
+     AND sp.entry_type = 'parameter'
+    WHERE c.command_code IN ('LST SM_SUB_01', 'MOD SM_SUB_01')
+      AND c.deprecated_at IS NULL
+    GROUP BY c.id
+)
+UPDATE public.mml_commands c
+SET target_paths = cp.target_paths,
+    updated_at = now()
+FROM command_paths cp
+WHERE c.id = cp.command_id;
+
+-- Put Device.Services.FAPService.{i}.FAPControl.Halob.* under HALOB参数管理.
+WITH upsert_group AS (
+    INSERT INTO public.mml_command_groups (
+        group_code,
+        group_name_zh,
+        group_name_en,
+        path,
+        param_version,
+        display_order,
+        is_active,
+        name_i18n,
+        source,
+        catalog_protected,
+        chapter_code,
+        instance_arity,
+        family_code,
+        family_name_zh
+    ) VALUES (
+        'SF_HALOB',
+        'HALOB参数管理',
+        'HALOB Parameters',
+        'chapter_SF.SF_HALOB'::ltree,
+        'cmcc-td-lte-v2.3',
+        92,
+        true,
+        jsonb_build_object('zh-CN', 'HALOB参数管理', 'en-US', 'HALOB Parameters'),
+        'standard',
+        true,
+        'SF',
+        0,
+        '',
+        ''
+    )
+    ON CONFLICT (param_version, group_code) DO UPDATE
+    SET group_name_zh = EXCLUDED.group_name_zh,
+        group_name_en = EXCLUDED.group_name_en,
+        path = EXCLUDED.path,
+        display_order = EXCLUDED.display_order,
+        is_active = EXCLUDED.is_active,
+        name_i18n = EXCLUDED.name_i18n,
+        source = EXCLUDED.source,
+        catalog_protected = EXCLUDED.catalog_protected,
+        chapter_code = EXCLUDED.chapter_code,
+        deprecated_at = NULL,
+        deleted_at = NULL,
+        updated_at = now()
+    RETURNING id
+), desired_commands AS (
+    SELECT *
+    FROM (VALUES
+        (
+            'LST SF_HALOB',
+            '查询 HALOB参数管理',
+            'Query HALOB Parameters',
+            'LST',
+            'HALOB参数管理',
+            'HALOB Parameters',
+            'GetParameterValues',
+            '查询小区HALOB参数'
+        ),
+        (
+            'MOD SF_HALOB',
+            '修改 HALOB参数管理',
+            'Modify HALOB Parameters',
+            'MOD',
+            'HALOB参数管理',
+            'HALOB Parameters',
+            'SetParameterValues',
+            '修改小区HALOB参数'
+        )
+    ) AS v(
+        command_code,
+        command_name,
+        command_name_en,
+        operation_type,
+        logical_name,
+        logical_name_en,
+        rpc_method,
+        description
+    )
+), upsert_commands AS (
+    INSERT INTO public.mml_commands (
+        command_name,
+        command_code,
+        category,
+        description,
+        rpc_method,
+        target_paths,
+        target_object,
+        group_id,
+        command_name_i18n,
+        require_confirm,
+        confirm_msg_i18n,
+        operation_type,
+        logical_name_i18n,
+        source,
+        catalog_protected,
+        platform_tags,
+        tree_node_refs,
+        instance_range_meta
+    )
+    SELECT dc.command_name,
+           dc.command_code,
+           'cell_service',
+           dc.description,
+           dc.rpc_method,
+           '[]'::jsonb,
+           NULL,
+           ug.id,
+           jsonb_build_object('zh-CN', dc.command_name, 'en-US', dc.command_name_en),
+           false,
+           '{}'::jsonb,
+           dc.operation_type,
+           jsonb_build_object('zh-CN', dc.logical_name, 'en-US', dc.logical_name_en),
+           'standard',
+           true,
+           '{}'::jsonb,
+           '[]'::jsonb,
+           '[]'::jsonb
+    FROM desired_commands dc
+    CROSS JOIN upsert_group ug
+    ON CONFLICT (command_code) DO UPDATE
+    SET command_name = EXCLUDED.command_name,
+        category = EXCLUDED.category,
+        description = EXCLUDED.description,
+        rpc_method = EXCLUDED.rpc_method,
+        target_paths = EXCLUDED.target_paths,
+        target_object = EXCLUDED.target_object,
+        group_id = EXCLUDED.group_id,
+        command_name_i18n = EXCLUDED.command_name_i18n,
+        require_confirm = EXCLUDED.require_confirm,
+        confirm_msg_i18n = EXCLUDED.confirm_msg_i18n,
+        operation_type = EXCLUDED.operation_type,
+        logical_name_i18n = EXCLUDED.logical_name_i18n,
+        source = EXCLUDED.source,
+        catalog_protected = EXCLUDED.catalog_protected,
+        platform_tags = EXCLUDED.platform_tags,
+        tree_node_refs = EXCLUDED.tree_node_refs,
+        instance_range_meta = EXCLUDED.instance_range_meta,
+        deprecated_at = NULL,
+        updated_at = now()
+    RETURNING id
+)
+SELECT count(*) FROM upsert_commands;
+
+WITH target_commands AS (
+    SELECT c.id AS command_id,
+           c.command_code
+    FROM public.mml_commands c
+    WHERE c.command_code IN ('LST SF_HALOB', 'MOD SF_HALOB')
+      AND c.deprecated_at IS NULL
+), target_params AS (
+    SELECT tc.command_id,
+           tc.command_code,
+           sp.id AS standard_path_id,
+           sp.standard_path,
+           sp.access,
+           COALESCE(NULLIF(sp.description, ''), split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1))) AS label_zh,
+           split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1)) AS leaf_name,
+           row_number() OVER (
+               PARTITION BY tc.command_code
+               ORDER BY sp.standard_path
+           ) AS sort_order
+    FROM target_commands tc
+    JOIN public.standard_params sp
+      ON sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.Halob.%'
+    WHERE sp.entry_type = 'parameter'
+      AND (tc.command_code LIKE 'LST %' OR sp.access = 'READ_WRITE')
+), desired_param_fields AS (
+    SELECT command_id,
+           standard_path_id,
+           LEFT(UPPER(regexp_replace(
+               regexp_replace(
+                   regexp_replace(
+                       regexp_replace(
+                           standard_path,
+                           '^Device\.Services\.FAPService\.\{i\}\.FAPControl\.Halob\.',
+                           ''
+                       ),
+                       '\.\{i\}',
+                       '',
+                       'g'
+                   ),
+                   '([a-z0-9])([A-Z])',
+                   '\1_\2',
+                   'g'
+               ),
+               '[^A-Za-z0-9]+',
+               '_',
+               'g'
+           )), 100) AS mml_code,
+           jsonb_build_object('zh-CN', label_zh, 'en-US', leaf_name) AS label_i18n,
+           sort_order,
+           CASE access
+               WHEN 'READ_WRITE' THEN 'RW'
+               ELSE 'RO'
+           END AS access_type
+    FROM target_params
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id,
+    standard_path_id,
+    mml_code,
+    label_i18n,
+    default_selected,
+    is_required,
+    sort_order,
+    access_type,
+    is_supported
+)
+SELECT command_id,
+       standard_path_id,
+       mml_code,
+       label_i18n,
+       true,
+       false,
+       sort_order,
+       access_type,
+       true
+FROM desired_param_fields
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH command_paths AS (
+    SELECT c.id AS command_id,
+           jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path) AS target_paths
+    FROM public.mml_commands c
+    JOIN public.mml_command_sub_fields sf
+      ON sf.command_id = c.id
+     AND sf.deprecated_at IS NULL
+    JOIN public.standard_params sp
+      ON sp.id = sf.standard_path_id
+     AND sp.entry_type = 'parameter'
+    WHERE c.command_code IN ('LST SF_HALOB', 'MOD SF_HALOB')
+      AND c.deprecated_at IS NULL
+    GROUP BY c.id
+)
+UPDATE public.mml_commands c
+SET target_paths = cp.target_paths,
+    updated_at = now()
+FROM command_paths cp
+WHERE c.id = cp.command_id;
+
+-- Put Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.QOS.* under a
+-- dedicated QOS参数管理 group below 小区服务参数管理（总体）.
+WITH upsert_group AS (
+    INSERT INTO public.mml_command_groups (
+        group_code,
+        group_name_zh,
+        group_name_en,
+        path,
+        param_version,
+        display_order,
+        is_active,
+        name_i18n,
+        source,
+        catalog_protected,
+        chapter_code,
+        instance_arity,
+        family_code,
+        family_name_zh
+    ) VALUES (
+        'SF_NR_QOS',
+        'QOS参数管理',
+        'QOS Parameters',
+        'chapter_SF.SF_NR_QOS'::ltree,
+        'cmcc-td-lte-v2.3',
+        90,
+        true,
+        jsonb_build_object('zh-CN', 'QOS参数管理', 'en-US', 'QOS Parameters'),
+        'standard',
+        true,
+        'SF',
+        0,
+        '',
+        ''
+    )
+    ON CONFLICT (param_version, group_code) DO UPDATE
+    SET group_name_zh = EXCLUDED.group_name_zh,
+        group_name_en = EXCLUDED.group_name_en,
+        path = EXCLUDED.path,
+        display_order = EXCLUDED.display_order,
+        is_active = EXCLUDED.is_active,
+        name_i18n = EXCLUDED.name_i18n,
+        source = EXCLUDED.source,
+        catalog_protected = EXCLUDED.catalog_protected,
+        chapter_code = EXCLUDED.chapter_code,
+        deprecated_at = NULL,
+        deleted_at = NULL,
+        updated_at = now()
+    RETURNING id
+), desired_commands AS (
+    SELECT *
+    FROM (VALUES
+        (
+            'LST SF_NR_QOS',
+            '查询 QOS参数管理',
+            'Query QOS Parameters',
+            'LST',
+            'QOS参数管理',
+            'QOS Parameters',
+            'GetParameterValues',
+            NULL,
+            NULL,
+            '查询小区NR RAN QOS参数'
+        ),
+        (
+            'MOD SF_NR_QOS',
+            '修改 QOS参数管理',
+            'Modify QOS Parameters',
+            'MOD',
+            'QOS参数管理',
+            'QOS Parameters',
+            'SetParameterValues',
+            NULL,
+            NULL,
+            '修改小区NR RAN QOS参数'
+        ),
+        (
+            'ADD SF_NR_QOS',
+            '添加 QOS参数管理',
+            'Add QOS Parameters',
+            'ADD',
+            'QOS参数管理',
+            'QOS Parameters',
+            'AddObject',
+            'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.QOS.',
+            'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.QOS.{i}',
+            '添加小区NR RAN QOS参数对象'
+        ),
+        (
+            'RMV SF_NR_QOS',
+            '删除 QOS参数管理',
+            'Delete QOS Parameters',
+            'RMV',
+            'QOS参数管理',
+            'QOS Parameters',
+            'DeleteObject',
+            'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.QOS.',
+            'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.QOS.{i}',
+            '删除小区NR RAN QOS参数对象'
+        )
+    ) AS v(
+        command_code,
+        command_name,
+        command_name_en,
+        operation_type,
+        logical_name,
+        logical_name_en,
+        rpc_method,
+        target_object,
+        object_path,
+        description
+    )
+), upsert_commands AS (
+    INSERT INTO public.mml_commands (
+        command_name,
+        command_code,
+        category,
+        description,
+        rpc_method,
+        target_paths,
+        target_object,
+        group_id,
+        command_name_i18n,
+        require_confirm,
+        confirm_msg_i18n,
+        operation_type,
+        logical_name_i18n,
+        source,
+        catalog_protected,
+        platform_tags,
+        tree_node_refs,
+        instance_range_meta
+    )
+    SELECT dc.command_name,
+           dc.command_code,
+           'cell_service',
+           dc.description,
+           dc.rpc_method,
+           CASE
+               WHEN dc.object_path IS NULL THEN '[]'::jsonb
+               ELSE jsonb_build_array(dc.object_path)
+           END,
+           dc.target_object,
+           ug.id,
+           jsonb_build_object('zh-CN', dc.command_name, 'en-US', dc.command_name_en),
+           false,
+           '{}'::jsonb,
+           dc.operation_type,
+           jsonb_build_object('zh-CN', dc.logical_name, 'en-US', dc.logical_name_en),
+           'standard',
+           true,
+           '{}'::jsonb,
+           CASE
+               WHEN dc.object_path IS NULL THEN '[]'::jsonb
+               ELSE jsonb_build_array(dc.object_path)
+           END,
+           '[]'::jsonb
+    FROM desired_commands dc
+    CROSS JOIN upsert_group ug
+    ON CONFLICT (command_code) DO UPDATE
+    SET command_name = EXCLUDED.command_name,
+        category = EXCLUDED.category,
+        description = EXCLUDED.description,
+        rpc_method = EXCLUDED.rpc_method,
+        target_paths = EXCLUDED.target_paths,
+        target_object = EXCLUDED.target_object,
+        group_id = EXCLUDED.group_id,
+        command_name_i18n = EXCLUDED.command_name_i18n,
+        require_confirm = EXCLUDED.require_confirm,
+        confirm_msg_i18n = EXCLUDED.confirm_msg_i18n,
+        operation_type = EXCLUDED.operation_type,
+        logical_name_i18n = EXCLUDED.logical_name_i18n,
+        source = EXCLUDED.source,
+        catalog_protected = EXCLUDED.catalog_protected,
+        platform_tags = EXCLUDED.platform_tags,
+        tree_node_refs = EXCLUDED.tree_node_refs,
+        instance_range_meta = EXCLUDED.instance_range_meta,
+        deprecated_at = NULL,
+        updated_at = now()
+    RETURNING id
+)
+SELECT count(*) FROM upsert_commands;
+
+WITH target_commands AS (
+    SELECT c.id AS command_id,
+           c.command_code
+    FROM public.mml_commands c
+    WHERE c.command_code IN ('LST SF_NR_QOS', 'MOD SF_NR_QOS')
+      AND c.deprecated_at IS NULL
+), target_params AS (
+    SELECT tc.command_id,
+           tc.command_code,
+           sp.id AS standard_path_id,
+           sp.standard_path,
+           sp.access,
+           COALESCE(NULLIF(sp.description, ''), split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1))) AS label_zh,
+           split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1)) AS leaf_name,
+           row_number() OVER (
+               PARTITION BY tc.command_code
+               ORDER BY sp.standard_path
+           ) - 1 AS sort_order
+    FROM target_commands tc
+    JOIN public.standard_params sp
+      ON sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.QOS.{i}.%'
+    WHERE sp.entry_type = 'parameter'
+      AND (tc.command_code LIKE 'LST %' OR sp.access = 'READ_WRITE')
+), desired_param_fields AS (
+    SELECT command_id,
+           standard_path_id,
+           LEFT(UPPER(regexp_replace(
+               leaf_name,
+               '([a-z0-9])([A-Z])',
+               '\1_\2',
+               'g'
+           )), 100) AS mml_code,
+           jsonb_build_object('zh-CN', label_zh, 'en-US', leaf_name) AS label_i18n,
+           sort_order,
+           CASE access
+               WHEN 'READ_WRITE' THEN 'RW'
+               ELSE 'RO'
+           END AS access_type
+    FROM target_params
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id,
+    standard_path_id,
+    mml_code,
+    label_i18n,
+    default_selected,
+    is_required,
+    sort_order,
+    access_type,
+    is_supported
+)
+SELECT command_id,
+       standard_path_id,
+       mml_code,
+       label_i18n,
+       true,
+       false,
+       sort_order,
+       access_type,
+       true
+FROM desired_param_fields
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH field_paths AS (
+    SELECT c.id AS command_id,
+           jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path) AS target_paths
+    FROM public.mml_commands c
+    JOIN public.mml_command_sub_fields sf
+      ON sf.command_id = c.id
+     AND sf.deprecated_at IS NULL
+    JOIN public.standard_params sp
+      ON sp.id = sf.standard_path_id
+     AND sp.entry_type = 'parameter'
+    WHERE c.command_code IN ('LST SF_NR_QOS', 'MOD SF_NR_QOS')
+      AND c.deprecated_at IS NULL
+    GROUP BY c.id
+), object_paths AS (
+    SELECT c.id AS command_id,
+           jsonb_build_array('Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.QOS.{i}') AS target_paths
+    FROM public.mml_commands c
+    WHERE c.command_code IN ('ADD SF_NR_QOS', 'RMV SF_NR_QOS')
+      AND c.deprecated_at IS NULL
+), command_paths AS (
+    SELECT command_id, target_paths FROM field_paths
+    UNION ALL
+    SELECT command_id, target_paths FROM object_paths
+)
+UPDATE public.mml_commands c
+SET target_paths = cp.target_paths,
+    updated_at = now()
+FROM command_paths cp
+WHERE c.id = cp.command_id;
+
+-- Put Device.Services.FAPService.{i}.CellConfig.{i}.NrSibParams.* under a
+-- dedicated SIB参数管理 group below 小区服务参数管理（总体）.
+WITH upsert_group AS (
+    INSERT INTO public.mml_command_groups (
+        group_code,
+        group_name_zh,
+        group_name_en,
+        path,
+        param_version,
+        display_order,
+        is_active,
+        name_i18n,
+        source,
+        catalog_protected,
+        chapter_code,
+        instance_arity,
+        family_code,
+        family_name_zh
+    ) VALUES (
+        'SF_NR_SIB_PARAMS',
+        'SIB参数管理',
+        'SIB Parameters',
+        'chapter_SF.SF_NR_SIB_PARAMS'::ltree,
+        'cmcc-td-lte-v2.3',
+        91,
+        true,
+        jsonb_build_object('zh-CN', 'SIB参数管理', 'en-US', 'SIB Parameters'),
+        'standard',
+        true,
+        'SF',
+        0,
+        '',
+        ''
+    )
+    ON CONFLICT (param_version, group_code) DO UPDATE
+    SET group_name_zh = EXCLUDED.group_name_zh,
+        group_name_en = EXCLUDED.group_name_en,
+        path = EXCLUDED.path,
+        display_order = EXCLUDED.display_order,
+        is_active = EXCLUDED.is_active,
+        name_i18n = EXCLUDED.name_i18n,
+        source = EXCLUDED.source,
+        catalog_protected = EXCLUDED.catalog_protected,
+        chapter_code = EXCLUDED.chapter_code,
+        deprecated_at = NULL,
+        deleted_at = NULL,
+        updated_at = now()
+    RETURNING id
+), desired_commands AS (
+    SELECT *
+    FROM (VALUES
+        ('LST SF_NR_SIB_PARAMS', '查询 SIB参数管理', 'Query SIB Parameters', 'LST', 'SIB参数管理', 'SIB Parameters', 'GetParameterValues', NULL, NULL, '查询小区NR SIB参数'),
+        ('MOD SF_NR_SIB_PARAMS', '修改 SIB参数管理', 'Modify SIB Parameters', 'MOD', 'SIB参数管理', 'SIB Parameters', 'SetParameterValues', NULL, NULL, '修改小区NR SIB参数'),
+        ('ADD SF_NR_SIB_PARAMS', '添加 SIB参数管理', 'Add SIB Parameters', 'ADD', 'SIB参数管理', 'SIB Parameters', 'AddObject', 'Device.Services.FAPService.{i}.CellConfig.{i}.NrSibParams.', 'Device.Services.FAPService.{i}.CellConfig.{i}.NrSibParams.{i}', '添加小区NR SIB参数对象'),
+        ('RMV SF_NR_SIB_PARAMS', '删除 SIB参数管理', 'Delete SIB Parameters', 'RMV', 'SIB参数管理', 'SIB Parameters', 'DeleteObject', 'Device.Services.FAPService.{i}.CellConfig.{i}.NrSibParams.', 'Device.Services.FAPService.{i}.CellConfig.{i}.NrSibParams.{i}', '删除小区NR SIB参数对象')
+    ) AS v(command_code, command_name, command_name_en, operation_type, logical_name, logical_name_en, rpc_method, target_object, object_path, description)
+), upsert_commands AS (
+    INSERT INTO public.mml_commands (
+        command_name,
+        command_code,
+        category,
+        description,
+        rpc_method,
+        target_paths,
+        target_object,
+        group_id,
+        command_name_i18n,
+        require_confirm,
+        confirm_msg_i18n,
+        operation_type,
+        logical_name_i18n,
+        source,
+        catalog_protected,
+        platform_tags,
+        tree_node_refs,
+        instance_range_meta
+    )
+    SELECT dc.command_name,
+           dc.command_code,
+           'cell_service',
+           dc.description,
+           dc.rpc_method,
+           CASE
+               WHEN dc.object_path IS NULL THEN '[]'::jsonb
+               ELSE jsonb_build_array(dc.object_path)
+           END,
+           dc.target_object,
+           ug.id,
+           jsonb_build_object('zh-CN', dc.command_name, 'en-US', dc.command_name_en),
+           false,
+           '{}'::jsonb,
+           dc.operation_type,
+           jsonb_build_object('zh-CN', dc.logical_name, 'en-US', dc.logical_name_en),
+           'standard',
+           true,
+           '{}'::jsonb,
+           CASE
+               WHEN dc.object_path IS NULL THEN '[]'::jsonb
+               ELSE jsonb_build_array(dc.object_path)
+           END,
+           '[]'::jsonb
+    FROM desired_commands dc
+    CROSS JOIN upsert_group ug
+    ON CONFLICT (command_code) DO UPDATE
+    SET command_name = EXCLUDED.command_name,
+        category = EXCLUDED.category,
+        description = EXCLUDED.description,
+        rpc_method = EXCLUDED.rpc_method,
+        target_paths = EXCLUDED.target_paths,
+        target_object = EXCLUDED.target_object,
+        group_id = EXCLUDED.group_id,
+        command_name_i18n = EXCLUDED.command_name_i18n,
+        require_confirm = EXCLUDED.require_confirm,
+        confirm_msg_i18n = EXCLUDED.confirm_msg_i18n,
+        operation_type = EXCLUDED.operation_type,
+        logical_name_i18n = EXCLUDED.logical_name_i18n,
+        source = EXCLUDED.source,
+        catalog_protected = EXCLUDED.catalog_protected,
+        platform_tags = EXCLUDED.platform_tags,
+        tree_node_refs = EXCLUDED.tree_node_refs,
+        instance_range_meta = EXCLUDED.instance_range_meta,
+        deprecated_at = NULL,
+        updated_at = now()
+    RETURNING id
+)
+SELECT count(*) FROM upsert_commands;
+
+WITH target_commands AS (
+    SELECT c.id AS command_id,
+           c.command_code
+    FROM public.mml_commands c
+    WHERE c.command_code IN ('LST SF_NR_SIB_PARAMS', 'MOD SF_NR_SIB_PARAMS')
+      AND c.deprecated_at IS NULL
+), target_params AS (
+    SELECT tc.command_id,
+           tc.command_code,
+           sp.id AS standard_path_id,
+           sp.standard_path,
+           sp.access,
+           COALESCE(NULLIF(sp.description, ''), split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1))) AS label_zh,
+           split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1)) AS leaf_name,
+           row_number() OVER (
+               PARTITION BY tc.command_code
+               ORDER BY sp.standard_path
+           ) - 1 AS sort_order
+    FROM target_commands tc
+    JOIN public.standard_params sp
+      ON sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NrSibParams.{i}.%'
+    WHERE sp.entry_type = 'parameter'
+      AND (tc.command_code LIKE 'LST %' OR sp.access = 'READ_WRITE')
+), desired_param_fields AS (
+    SELECT command_id,
+           standard_path_id,
+           LEFT(UPPER(regexp_replace(
+               leaf_name,
+               '([a-z0-9])([A-Z])',
+               '\1_\2',
+               'g'
+           )), 100) AS mml_code,
+           jsonb_build_object('zh-CN', label_zh, 'en-US', leaf_name) AS label_i18n,
+           sort_order,
+           CASE access
+               WHEN 'READ_WRITE' THEN 'RW'
+               ELSE 'RO'
+           END AS access_type
+    FROM target_params
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id,
+    standard_path_id,
+    mml_code,
+    label_i18n,
+    default_selected,
+    is_required,
+    sort_order,
+    access_type,
+    is_supported
+)
+SELECT command_id,
+       standard_path_id,
+       mml_code,
+       label_i18n,
+       true,
+       false,
+       sort_order,
+       access_type,
+       true
+FROM desired_param_fields
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH field_paths AS (
+    SELECT c.id AS command_id,
+           jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path) AS target_paths
+    FROM public.mml_commands c
+    JOIN public.mml_command_sub_fields sf
+      ON sf.command_id = c.id
+     AND sf.deprecated_at IS NULL
+    JOIN public.standard_params sp
+      ON sp.id = sf.standard_path_id
+     AND sp.entry_type = 'parameter'
+    WHERE c.command_code IN ('LST SF_NR_SIB_PARAMS', 'MOD SF_NR_SIB_PARAMS')
+      AND c.deprecated_at IS NULL
+    GROUP BY c.id
+), object_paths AS (
+    SELECT c.id AS command_id,
+           jsonb_build_array('Device.Services.FAPService.{i}.CellConfig.{i}.NrSibParams.{i}') AS target_paths
+    FROM public.mml_commands c
+    WHERE c.command_code IN ('ADD SF_NR_SIB_PARAMS', 'RMV SF_NR_SIB_PARAMS')
+      AND c.deprecated_at IS NULL
+), command_paths AS (
+    SELECT command_id, target_paths FROM field_paths
+    UNION ALL
+    SELECT command_id, target_paths FROM object_paths
+)
+UPDATE public.mml_commands c
+SET target_paths = cp.target_paths,
+    updated_at = now()
+FROM command_paths cp
+WHERE c.id = cp.command_id;
+
+-- Device.FAP.MRMgmt.Config. object commands belong to MR参数管理.
+WITH mr_group AS (
+    SELECT id
+    FROM public.mml_command_groups
+    WHERE group_code = 'chapter:SP'
+      AND deleted_at IS NULL
+      AND deprecated_at IS NULL
+      AND is_active = true
+    LIMIT 1
+), desired_commands AS (
+    SELECT *
+    FROM (VALUES
+        (
+            'ADD MR_MGMT_CONFIG',
+            '添加 MR参数管理',
+            'Add MR Parameters',
+            'ADD',
+            'Device.FAP.MRMgmt.Config.',
+            'MR参数管理',
+            'MR Parameters'
+        ),
+        (
+            'RMV MR_MGMT_CONFIG',
+            '删除 MR参数管理',
+            'Remove MR Parameters',
+            'RMV',
+            'Device.FAP.MRMgmt.Config.',
+            'MR参数管理',
+            'MR Parameters'
+        )
+    ) AS v(
+        command_code,
+        command_name,
+        command_name_en,
+        operation_type,
+        target_object,
+        logical_name_zh,
+        logical_name_en
+    )
+)
+INSERT INTO public.mml_commands (
+    command_name,
+    command_code,
+    category,
+    description,
+    rpc_method,
+    target_paths,
+    target_object,
+    group_id,
+    command_name_i18n,
+    require_confirm,
+    confirm_msg_i18n,
+    operation_type,
+    logical_name_i18n,
+    source,
+    catalog_protected,
+    platform_tags,
+    tree_node_refs,
+    instance_range_meta
+)
+SELECT dc.command_name,
+       dc.command_code,
+       '3',
+       dc.command_name,
+       CASE dc.operation_type
+           WHEN 'ADD' THEN 'AddObject'
+           ELSE 'DeleteObject'
+       END,
+       jsonb_build_array(dc.target_object),
+       dc.target_object,
+       mg.id,
+       jsonb_build_object('zh-CN', dc.command_name, 'en-US', dc.command_name_en),
+       false,
+       '{}'::jsonb,
+       dc.operation_type,
+       jsonb_build_object('zh-CN', dc.logical_name_zh, 'en-US', dc.logical_name_en),
+       'standard',
+       true,
+       '{}'::jsonb,
+       '[]'::jsonb,
+       '[]'::jsonb
+FROM desired_commands dc
+CROSS JOIN mr_group mg
+ON CONFLICT (command_code) DO UPDATE
+SET command_name = EXCLUDED.command_name,
+    category = EXCLUDED.category,
+    description = EXCLUDED.description,
+    rpc_method = EXCLUDED.rpc_method,
+    target_paths = EXCLUDED.target_paths,
+    target_object = EXCLUDED.target_object,
+    group_id = EXCLUDED.group_id,
+    command_name_i18n = EXCLUDED.command_name_i18n,
+    require_confirm = EXCLUDED.require_confirm,
+    confirm_msg_i18n = EXCLUDED.confirm_msg_i18n,
+    operation_type = EXCLUDED.operation_type,
+    logical_name_i18n = EXCLUDED.logical_name_i18n,
+    source = EXCLUDED.source,
+    catalog_protected = EXCLUDED.catalog_protected,
+    platform_tags = EXCLUDED.platform_tags,
+    tree_node_refs = EXCLUDED.tree_node_refs,
+    instance_range_meta = EXCLUDED.instance_range_meta,
+    deprecated_at = NULL,
+    updated_at = now();
+
+-- Device.FAP.MRMgmt.Config.{i}.* belongs to MR参数管理.
+WITH target_commands AS (
+    SELECT c.id AS command_id,
+           c.command_code,
+           COALESCE((
+               SELECT max(sf.sort_order)
+               FROM public.mml_command_sub_fields sf
+               JOIN public.standard_params sp
+                 ON sp.id = sf.standard_path_id
+               WHERE sf.command_id = c.id
+                 AND sf.deprecated_at IS NULL
+                 AND sp.standard_path NOT LIKE 'Device.FAP.MRMgmt.Config.{i}.%'
+           ), 0) AS base_sort_order
+    FROM public.mml_commands c
+    WHERE c.command_code IN ('LST SP_SUB_01', 'MOD SP_SUB_01')
+      AND c.deprecated_at IS NULL
+), target_params AS (
+    SELECT tc.command_id,
+           tc.command_code,
+           sp.id AS standard_path_id,
+           sp.standard_path,
+           sp.access,
+           COALESCE(NULLIF(sp.description, ''), split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1))) AS label_zh,
+           split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1)) AS leaf_name,
+           tc.base_sort_order + row_number() OVER (
+               PARTITION BY tc.command_code
+               ORDER BY sp.standard_path
+           ) AS sort_order
+    FROM target_commands tc
+    JOIN public.standard_params sp
+      ON sp.standard_path LIKE 'Device.FAP.MRMgmt.Config.{i}.%'
+    WHERE sp.entry_type = 'parameter'
+      AND (tc.command_code LIKE 'LST %' OR sp.access = 'READ_WRITE')
+), desired_param_fields AS (
+    SELECT command_id,
+           standard_path_id,
+           LEFT(UPPER(regexp_replace(
+               leaf_name,
+               '([a-z0-9])([A-Z])',
+               '\1_\2',
+               'g'
+           )), 100) AS mml_code,
+           jsonb_build_object('zh-CN', label_zh, 'en-US', leaf_name) AS label_i18n,
+           sort_order,
+           CASE access
+               WHEN 'READ_WRITE' THEN 'RW'
+               ELSE 'RO'
+           END AS access_type
+    FROM target_params
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id,
+    standard_path_id,
+    mml_code,
+    label_i18n,
+    default_selected,
+    is_required,
+    sort_order,
+    access_type,
+    is_supported
+)
+SELECT command_id,
+       standard_path_id,
+       mml_code,
+       label_i18n,
+       true,
+       false,
+       sort_order,
+       access_type,
+       true
+FROM desired_param_fields
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH command_paths AS (
+    SELECT c.id AS command_id,
+           jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path) AS target_paths
+    FROM public.mml_commands c
+    JOIN public.mml_command_sub_fields sf
+      ON sf.command_id = c.id
+     AND sf.deprecated_at IS NULL
+    JOIN public.standard_params sp
+      ON sp.id = sf.standard_path_id
+     AND sp.entry_type = 'parameter'
+    WHERE c.command_code IN ('LST SP_SUB_01', 'MOD SP_SUB_01')
+      AND c.deprecated_at IS NULL
+    GROUP BY c.id
+)
+UPDATE public.mml_commands c
+SET target_paths = cp.target_paths,
+    updated_at = now()
+FROM command_paths cp
+WHERE c.id = cp.command_id;
+
+-- Complete BWPDL parameters under RAN协议栈参数 / 物理层参数管理.
+-- Earlier seed data only covered part of
+-- Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.*.
+WITH target_commands AS (
+    SELECT c.id AS command_id,
+           c.command_code,
+           COALESCE(max(sf.sort_order) FILTER (WHERE sf.deprecated_at IS NULL), 0) AS base_sort_order
+    FROM public.mml_commands c
+    LEFT JOIN public.mml_command_sub_fields sf
+      ON sf.command_id = c.id
+    WHERE c.command_code IN ('LST SH_SUB_01', 'MOD SH_SUB_01')
+      AND c.deprecated_at IS NULL
+    GROUP BY c.id, c.command_code
+), missing_params AS (
+    SELECT tc.command_id,
+           tc.command_code,
+           sp.id AS standard_path_id,
+           sp.standard_path,
+           sp.access,
+           COALESCE(NULLIF(sp.description, ''), split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1))) AS label_zh,
+           split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1)) AS leaf_name,
+           tc.base_sort_order + row_number() OVER (
+               PARTITION BY tc.command_code
+               ORDER BY sp.standard_path
+           ) AS sort_order
+    FROM target_commands tc
+    JOIN public.standard_params sp
+      ON sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.%'
+    WHERE sp.entry_type = 'parameter'
+      AND (tc.command_code LIKE 'LST %' OR sp.access = 'READ_WRITE')
+      AND NOT EXISTS (
+          SELECT 1
+          FROM public.mml_command_sub_fields existing_sf
+          WHERE existing_sf.command_id = tc.command_id
+            AND existing_sf.standard_path_id = sp.id
+            AND existing_sf.deprecated_at IS NULL
+      )
+), desired_param_fields AS (
+    SELECT command_id,
+           standard_path_id,
+           LEFT(
+               UPPER(regexp_replace(
+                   CASE
+                       WHEN standard_path = 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}' THEN 'BWPDL_OBJECT'
+                       ELSE regexp_replace(
+                           regexp_replace(
+                               standard_path,
+                               '^Device\.Services\.FAPService\.\{i\}\.CellConfig\.\{i\}\.NR\.RAN\.PHY\.BWP\.BWPDL\.\{i\}\.',
+                               ''
+                           ),
+                           '\.\{i\}',
+                           '',
+                           'g'
+                       )
+                   END,
+                   '([a-z0-9])([A-Z])',
+                   '\1_\2',
+                   'g'
+               )),
+               93
+           ) || '_' || UPPER(substr(md5(standard_path), 1, 6)) AS mml_code,
+           jsonb_build_object('zh-CN', label_zh, 'en-US', leaf_name) AS label_i18n,
+           sort_order,
+           CASE access
+               WHEN 'READ_WRITE' THEN 'RW'
+               ELSE 'RO'
+           END AS access_type
+    FROM missing_params
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id,
+    standard_path_id,
+    mml_code,
+    label_i18n,
+    default_selected,
+    is_required,
+    sort_order,
+    access_type,
+    is_supported
+)
+SELECT command_id,
+       standard_path_id,
+       mml_code,
+       label_i18n,
+       true,
+       false,
+       sort_order,
+       access_type,
+       true
+FROM desired_param_fields
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH command_paths AS (
+    SELECT c.id AS command_id,
+           jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path) AS target_paths
+    FROM public.mml_commands c
+    JOIN public.mml_command_sub_fields sf
+      ON sf.command_id = c.id
+     AND sf.deprecated_at IS NULL
+    JOIN public.standard_params sp
+      ON sp.id = sf.standard_path_id
+     AND sp.entry_type = 'parameter'
+    WHERE c.command_code IN ('LST SH_SUB_01', 'MOD SH_SUB_01')
+      AND c.deprecated_at IS NULL
+    GROUP BY c.id
+)
+UPDATE public.mml_commands c
+SET target_paths = cp.target_paths,
+    updated_at = now()
+FROM command_paths cp
+WHERE c.id = cp.command_id;
+
+-- QOS/SIB commands should be direct children of 小区服务参数管理（总体）,
+-- not nested under secondary folders.
+WITH sf_group AS (
+    SELECT id
+    FROM public.mml_command_groups
+    WHERE group_code = 'chapter:SF'
+      AND deleted_at IS NULL
+      AND deprecated_at IS NULL
+    LIMIT 1
+)
+UPDATE public.mml_commands c
+SET group_id = sf_group.id,
+    updated_at = now()
+FROM sf_group
+WHERE c.command_code IN (
+    'LST SF_NR_QOS',
+    'MOD SF_NR_QOS',
+    'ADD SF_NR_QOS',
+    'RMV SF_NR_QOS',
+    'LST SF_NR_SIB_PARAMS',
+    'MOD SF_NR_SIB_PARAMS',
+    'ADD SF_NR_SIB_PARAMS',
+    'RMV SF_NR_SIB_PARAMS'
+);
+
+UPDATE public.mml_command_groups
+SET is_active = false,
+    deprecated_at = COALESCE(deprecated_at, now()),
+    deleted_at = COALESCE(deleted_at, now()),
+    updated_at = now()
+WHERE group_code IN ('SF_NR_QOS', 'SF_NR_SIB_PARAMS');
+
+COMMIT;
+
 -- +goose Down
 -- consolidated seed 无安全的逐行回滚；重置请重建数据库。
 SELECT 1;
