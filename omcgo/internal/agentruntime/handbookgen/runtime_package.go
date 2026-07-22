@@ -28,6 +28,10 @@ func BuildRuntimePackage(templateArchive []byte, routes RouteExport) ([]byte, er
 	if err != nil {
 		return nil, err
 	}
+	contracts, err := loadContractAssets(templateFiles)
+	if err != nil {
+		return nil, err
+	}
 
 	templateDocuments := make(map[string]OperationDocument)
 	for name, raw := range templateFiles {
@@ -68,8 +72,17 @@ func BuildRuntimePackage(templateArchive []byte, routes RouteExport) ([]byte, er
 			return nil, fmt.Errorf("runtime routes contain duplicate operationId %s", route.OperationID)
 		}
 		seenOperations[route.OperationID] = struct{}{}
-		document, found := templateDocuments[route.OperationID]
-		if !found || document.Method != strings.ToUpper(route.Method) || document.Path != route.Path {
+		template, found := templateDocuments[route.OperationID]
+		if found && (template.Method != strings.ToUpper(route.Method) || template.Path != route.Path) {
+			found = false
+		}
+		document := template
+		if len(contracts.Handlers) > 0 || contracts.OpenAPI.operations != nil {
+			openAPI := contracts.OpenAPI.operation(route.Method, route.Path)
+			handler := contracts.Handlers[route.Handler]
+			generated := buildOperationDocument(route, openAPI, handler)
+			document = mergeRuntimeDocument(generated, template, found, openAPI.Found || handler.Found)
+		} else if !found {
 			document = buildOperationDocument(route, openAPIOperation{}, handlerContract{})
 		}
 		documentRaw, err := marshalHandbookJSON(document)
@@ -83,18 +96,10 @@ func BuildRuntimePackage(templateArchive []byte, routes RouteExport) ([]byte, er
 			category = "other"
 		}
 		categoryTitles[category] = chooseCategoryTitle(categoryTitles[category], document.Title, category)
-		summary := OperationSummary{
-			OperationID: document.OperationID,
-			Method:      document.Method,
-			Path:        document.Path,
-			Title:       document.Title,
-			Summary:     document.Summary,
-			Description: document.Description,
-			Intents:     document.Intents,
-			Risk:        document.Risk,
-			Document:    "api-docs/" + route.OperationID + ".json",
-		}
-		categoryDocuments[category] = append(categoryDocuments[category], summary)
+		summary := operationSummary(document, "api-docs/"+route.OperationID+".json")
+		categorySummary := summary
+		categorySummary.SearchTerms = nil
+		categoryDocuments[category] = append(categoryDocuments[category], categorySummary)
 		allSummaries = append(allSummaries, summary)
 	}
 
@@ -152,6 +157,33 @@ func BuildRuntimePackage(templateArchive []byte, routes RouteExport) ([]byte, er
 	}
 	sort.Strings(entries)
 	return buildPackageFiles(entries, files)
+}
+
+func mergeRuntimeDocument(generated, template OperationDocument, templateFound, freshContract bool) OperationDocument {
+	if !templateFound {
+		return generated
+	}
+	if !freshContract {
+		return template
+	}
+	generated.PathParams = mergeParameters(generated.PathParams, template.PathParams)
+	generated.QueryParams = mergeParameters(generated.QueryParams, template.QueryParams)
+	generated.FormParams = mergeParameters(generated.FormParams, template.FormParams)
+	if len(generated.RequestBody) == 0 {
+		generated.RequestBody = template.RequestBody
+	}
+	if generated.ContractCoverage["response"] == "standard-envelope" && template.ContractCoverage["response"] == "openapi" {
+		generated.Responses = template.Responses
+		generated.ReferencedSchemas = template.ReferencedSchemas
+		generated.ContractCoverage["response"] = "openapi"
+	}
+	if generated.EmptyResult == "" {
+		generated.EmptyResult = template.EmptyResult
+	}
+	generated.Intents = uniqueStrings(append(generated.Intents, template.Intents...))
+	generated.Tags = uniqueStrings(append(generated.Tags, template.Tags...))
+	generated.Sources = uniqueStrings(append(generated.Sources, template.Sources...))
+	return generated
 }
 
 func readPackageFiles(archive []byte) (map[string][]byte, error) {

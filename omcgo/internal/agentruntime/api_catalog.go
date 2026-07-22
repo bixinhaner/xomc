@@ -83,6 +83,7 @@ var apiResourceNames = map[string]string{
 	"topology":             "拓扑",
 	"upgrade-tasks":        "升级任务",
 	"users":                "用户",
+	"ufte":                 "统一文件传输",
 }
 
 var apiActionNames = map[string]string{

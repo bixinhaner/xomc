@@ -69,6 +69,7 @@ type OperationSummary struct {
 	Summary     string   `json:"summary"`
 	Description string   `json:"description"`
 	Intents     []string `json:"intents"`
+	SearchTerms []string `json:"searchTerms,omitempty"`
 	Risk        string   `json:"risk"`
 	Document    string   `json:"document"`
 }

@@ -195,19 +195,19 @@ type TaskTypeWriteRequest struct {
 }
 
 type TaskListFilter struct {
-	Status   string `form:"status"`
-	TypeCode string `form:"typeCode"`
-	Keyword  string `form:"keyword"`
-	Category string `form:"category"`
+	Status   string `form:"status"`   // 任务状态：pending、in_progress、suspended、ended。
+	TypeCode string `form:"typeCode"` // 任务类型，如 RUNTIME_LOG_COLLECT。
+	Keyword  string `form:"keyword"`  // 匹配任务名称、类型显示名或产品类型。
+	Category string `form:"category"` // 业务分类，如日志收集 station_log。
 	Page     int    `form:"page"`
 	PageSize int    `form:"page_size"`
 }
 
 type DeviceListFilter struct {
-	Status      string `form:"status"`
-	TypeCode    string `form:"typeCode"`
-	Keyword     string `form:"keyword"`
-	Category    string `form:"category"`
+	Status      string `form:"status"`   // 设备执行状态；failed 用于定位失败记录。
+	TypeCode    string `form:"typeCode"` // 任务类型，如 RUNTIME_LOG_COLLECT。
+	Keyword     string `form:"keyword"`  // 匹配任务名、设备名、设备 SN 或产品类型。
+	Category    string `form:"category"` // 业务分类，如日志收集 station_log。
 	ProductType string `form:"productType"`
 	// ProductName #524：设备列表筛选改按产品名（DeviceItem.ProductName 由 mapDeviceItem
 	// 经 productNameLookup 回填）。前端「产品名称」下拉传此参数；与 ProductType(productClass)

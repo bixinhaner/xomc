@@ -112,6 +112,11 @@ func (h *Handler) DeleteTaskType(c *gin.Context) {
 	response.OK(c, gin.H{"typeCode": c.Param("typeCode")})
 }
 
+// ListTasks returns transfer-center tasks across upgrades, log collection,
+// configuration backup and restore, and other unified file-transfer workflows.
+//
+// @Summary 查询传输中心任务
+// @Description 查询统一文件传输任务汇总；日志收集任务使用 category=station_log 和 typeCode=RUNTIME_LOG_COLLECT，结束任务的 result 可区分成功、部分成功和失败。
 func (h *Handler) ListTasks(c *gin.Context) {
 	var filter TaskListFilter
 	if err := c.ShouldBindQuery(&filter); err != nil {
@@ -162,6 +167,10 @@ func (h *Handler) CreateTask(c *gin.Context) {
 	response.OKWithStatus(c, http.StatusCreated, task)
 }
 
+// ListDevices returns device-level execution details for transfer-center tasks.
+//
+// @Summary 查询传输任务设备执行明细与失败原因
+// @Description 可按 taskId、category、typeCode 和 status 筛选；失败记录返回 failureReason 和设备上报的原始 failureDetail，适用于日志收集、升级、备份和恢复任务排障。
 func (h *Handler) ListDevices(c *gin.Context) {
 	var filter DeviceListFilter
 	if err := c.ShouldBindQuery(&filter); err != nil {
