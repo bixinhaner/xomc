@@ -14,6 +14,7 @@ import type {
 } from '../../types/dashboard';
 import { useMemo, useEffect } from 'react';
 import { useSystemTimezone, useSystemTimezoneValue } from './useSystemTimezone';
+import { fetchDeviceList } from './useDevices';
 import { nowInSystemTimezone } from '../../utils/systemTime';
 import dayjs from 'dayjs';
 
@@ -119,6 +120,26 @@ export function useDashboardSummary(apiScope: string, userScope: string | undefi
     queryKey: ['dashboard', 'summary', apiScope, userScope],
     queryFn: () => api.getSummary(),
     enabled: Boolean(userScope),
+  });
+}
+
+/**
+ * Dashboard 设备卡片复用设备列表的全量 stats，避免被重型 Summary 的告警、
+ * KPI 和历史趋势查询阻塞。无筛选参数时与设备列表首页统计口径及数据权限一致。
+ */
+export function useDashboardDeviceStats(apiScope: string, userScope: string | undefined) {
+  return useQuery({
+    queryKey: ['dashboard', 'device-stats', apiScope, userScope],
+    queryFn: async () => {
+      const { stats } = await fetchDeviceList({ page: 1, pageSize: 1 });
+      if (stats.online_count + stats.offline_count !== stats.total) {
+        throw new Error('device list returned incomplete page-level stats');
+      }
+      return stats;
+    },
+    enabled: Boolean(userScope),
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: 'always',
   });
 }
 
