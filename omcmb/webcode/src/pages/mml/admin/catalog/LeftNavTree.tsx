@@ -85,10 +85,10 @@ function filterBySearch(
 }
 
 const OPERATION_ORDER: Record<string, number> = {
-  LST: 1,
-  MOD: 2,
-  ADD: 3,
-  RMV: 4,
+  ADD: 1,
+  RMV: 2,
+  MOD: 3,
+  LST: 4,
 };
 
 const DISPLAY_VERB_PREFIX = /^(查询|修改|添加|新增|删除|Query|Modify|Add|Delete)\s+/i;
@@ -99,9 +99,9 @@ function operationOrder(op: string): number {
 
 function commandSectionKey(command: GroupTreeCommand): string {
   return (
-    command.logicalCode ||
     command.logicalName ||
     command.displayName.replace(DISPLAY_VERB_PREFIX, '') ||
+    command.logicalCode ||
     command.commandCode
   );
 }

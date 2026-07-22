@@ -264,6 +264,7 @@ ORDER BY g.chapter_code,
 	out := make([]FlatGroup, 0, len(chapterOrder))
 	for _, code := range chapterOrder {
 		ch := chapters[code]
+		sortFlatCommandOrder(ch.cmdOrder, ch.cmds)
 		fg := FlatGroup{
 			Code:     code,
 			Name:     resolveChapterName(code),
@@ -280,6 +281,20 @@ ORDER BY g.chapter_code,
 		out = append(out, fg)
 	}
 	return out, nil
+}
+
+func sortFlatCommandOrder(order []uuid.UUID, cmds map[uuid.UUID]*flatCmdAcc) {
+	sort.SliceStable(order, func(i, j int) bool {
+		a, b := cmds[order[i]], cmds[order[j]]
+		if a.nameZh != b.nameZh {
+			return a.nameZh < b.nameZh
+		}
+		ao, bo := operationSortRank(a.op), operationSortRank(b.op)
+		if ao != bo {
+			return ao < bo
+		}
+		return a.commandCode < b.commandCode
+	})
 }
 
 // chapterMetadata: MML 扁平树章节中文展示名。

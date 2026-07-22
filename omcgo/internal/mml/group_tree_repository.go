@@ -448,8 +448,9 @@ func chapterSortKey(chapter string) string {
 
 func sortCommandsByLogicalCode(cmds []GroupTreeCommand) {
 	sortSlice(cmds, func(a, b GroupTreeCommand) bool {
-		if a.LogicalCode != b.LogicalCode {
-			return a.LogicalCode < b.LogicalCode
+		al, bl := commandLogicalSortKey(a), commandLogicalSortKey(b)
+		if al != bl {
+			return al < bl
 		}
 		ao, bo := operationSortRank(a.OperationType), operationSortRank(b.OperationType)
 		if ao != bo {
@@ -459,15 +460,28 @@ func sortCommandsByLogicalCode(cmds []GroupTreeCommand) {
 	})
 }
 
+func commandLogicalSortKey(cmd GroupTreeCommand) string {
+	if key := strings.TrimSpace(cmd.LogicalName); key != "" {
+		return key
+	}
+	if key := strings.TrimSpace(cmd.LogicalNameI18n["zh-CN"]); key != "" {
+		return key
+	}
+	if key := strings.TrimSpace(cmd.LogicalNameI18n["en-US"]); key != "" {
+		return key
+	}
+	return strings.TrimSpace(cmd.LogicalCode)
+}
+
 func operationSortRank(op string) int {
 	switch op {
-	case "LST":
-		return 1
-	case "MOD":
-		return 2
 	case "ADD":
-		return 3
+		return 1
 	case "RMV":
+		return 2
+	case "MOD":
+		return 3
+	case "LST":
 		return 4
 	default:
 		return 99

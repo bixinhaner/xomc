@@ -13,7 +13,7 @@ import (
 
 // 本测试归属 issue #24（seed baseline 幂等性）。它守护两条不变量：
 //   1. seed/000001_init_seed.sql 的全部 public 部署数据 INSERT 都带
-//      `ON CONFLICT DO NOTHING`（静态检查，无需数据库，CI 永远运行）；
+//      `ON CONFLICT DO NOTHING` 或 `ON CONFLICT DO UPDATE`（静态检查，无需数据库，CI 永远运行）；
 //   2. 把这些 public INSERT 在已建好 schema 的库上重复前向应用，第二次不报错、
 //      行数稳定（DB 检查，未设 OMCGO_TEST_DB_DSN 时 t.Skip）。
 //
@@ -30,20 +30,23 @@ func seedFilePath() string {
 type publicInsert struct {
 	table     string // 不含 schema 前缀的表名，如 "users"
 	sql       string // 完整 SQL（含结尾 ON CONFLICT DO NOTHING;）
-	hasOnConf bool   // 是否带 ON CONFLICT DO NOTHING
+	hasOnConf bool   // 是否带 ON CONFLICT DO NOTHING/DO UPDATE
 	startLine int    // 起始行号（1-based，便于报错定位）
 }
 
 var (
 	insertStartRe = regexp.MustCompile(`^\s*INSERT INTO public\.(\w+)\s`)
-	// onConflictEndRe 匹配已加固语句的"独立成行"形态：`    ON CONFLICT ... DO NOTHING;`
+	// onConflictEndRe 匹配已加固语句的"独立成行"形态：`    ON CONFLICT ... DO NOTHING/UPDATE;`
 	// 单独占一行（pg_dump 重排或手写多行 INSERT 时出现）。
-	onConflictEndRe = regexp.MustCompile(`(?i)^\s*ON CONFLICT\b.*\bDO NOTHING\s*;\s*$`)
+	onConflictEndRe = regexp.MustCompile(`(?i)^\s*ON CONFLICT\b.*\bDO (NOTHING|UPDATE)\b.*;\s*$`)
+	// onConflictStartRe 匹配多行 upsert 的起始行：`ON CONFLICT (...) DO UPDATE`。
+	// 这类语句的 `SET ...;` 在后续行，不能在 ON CONFLICT 行提前截断。
+	onConflictStartRe = regexp.MustCompile(`(?i)^\s*ON CONFLICT\b.*\bDO (NOTHING|UPDATE)\b`)
 	// inlineOnConflictEndRe 匹配已加固语句的"内联"形态：最后一行数据行以
-	// `) ON CONFLICT ... DO NOTHING;` 收尾——seed baseline 由 PR #51 加固时
+	// `) ON CONFLICT ... DO NOTHING/UPDATE;` 收尾——seed baseline 由 PR #51 加固时
 	// 直接把 ON CONFLICT DO NOTHING 追加到 pg_dump 输出的末行尾部，与
 	// 独立成行形态语义等价、均触发幂等冲突静默跳过。
-	inlineOnConflictEndRe = regexp.MustCompile(`(?i)\)\s+ON CONFLICT\b.*\bDO NOTHING\s*;\s*$`)
+	inlineOnConflictEndRe = regexp.MustCompile(`(?i)\)\s+ON CONFLICT\b.*\bDO (NOTHING|UPDATE)\b.*;\s*$`)
 	// rowEndRe 匹配未加固语句的 pg_dump 行末 `);`（最后一行数据行直接收尾且未追加 ON CONFLICT）。
 	// 注意：内联形态的行末是 `... DO NOTHING;`，被 inlineOnConflictEndRe 捕获、不会落到这里。
 	rowEndRe = regexp.MustCompile(`\);\s*$`)
@@ -87,6 +90,9 @@ func parsePublicInserts(t *testing.T) []publicInsert {
 				hasOnConf = true
 				break
 			}
+			if onConflictStartRe.MatchString(lines[end]) {
+				hasOnConf = true
+			}
 			// 未加固语句：数据行以 `);` 直接收尾，且其后不是 ON CONFLICT 行。
 			if rowEndRe.MatchString(lines[end]) {
 				next := end + 1
@@ -109,7 +115,7 @@ func parsePublicInserts(t *testing.T) []publicInsert {
 }
 
 // TestSeedBaselineHasOnConflict 静态守护：seed baseline 的每条 public 部署 INSERT
-// 都带 ON CONFLICT DO NOTHING。无需数据库，CI 中始终执行。
+// 都带 ON CONFLICT。无需数据库，CI 中始终执行。
 func TestSeedBaselineHasOnConflict(t *testing.T) {
 	inserts := parsePublicInserts(t)
 	if len(inserts) == 0 {
@@ -118,12 +124,12 @@ func TestSeedBaselineHasOnConflict(t *testing.T) {
 
 	for _, ins := range inserts {
 		if !ins.hasOnConf {
-			t.Errorf("public.%s 的 INSERT（起始行 %d）缺少 ON CONFLICT DO NOTHING——"+
+			t.Errorf("public.%s 的 INSERT（起始行 %d）缺少 ON CONFLICT 处理——"+
 				"会破坏 baseline 全新库重复前向应用的幂等性", ins.table, ins.startLine)
 		}
 	}
 
-	t.Logf("校验通过：%d 条 INSERT INTO public.* 均带 ON CONFLICT DO NOTHING", len(inserts))
+	t.Logf("校验通过：%d 条 INSERT INTO public.* 均带 ON CONFLICT", len(inserts))
 }
 
 // TestSeedBaselineIdempotent DB 守护：在已建好 schema 的库上把每条 public INSERT
@@ -146,7 +152,7 @@ func TestSeedBaselineIdempotent(t *testing.T) {
 		ins := ins
 		t.Run(ins.table, func(t *testing.T) {
 			if !ins.hasOnConf {
-				t.Fatalf("public.%s 缺少 ON CONFLICT DO NOTHING，重复应用必然失败", ins.table)
+				t.Fatalf("public.%s 缺少 ON CONFLICT 处理，重复应用必然失败", ins.table)
 			}
 
 			countSQL := fmt.Sprintf("SELECT count(*) FROM public.%s", ins.table)
