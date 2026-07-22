@@ -81,12 +81,14 @@ func buildBackupUploadURL(upload transfercfg.UploadSettings, spec *BackupTypeSpe
 	if servicePath == "" {
 		servicePath = "/smallcell/FileUploadService"
 	}
-	return transfercfg.BuildURL(upload.BaseURL, servicePath, nil, url.Values{
-		"fileType": {spec.URLFileTypeParam},
-		"sn":       {sn},
-		"taskId":   {taskID},
-		"filename": {filename},
-	})
+	if err := transfercfg.ValidateServicePath(servicePath); err != nil {
+		return "", fmt.Errorf("validate backup upload service path: %w", err)
+	}
+	query := "fileType=" + url.QueryEscape(spec.URLFileTypeParam) +
+		"&sn=" + url.QueryEscape(sn) +
+		"&taskId=" + url.QueryEscape(taskID) +
+		"&filename=" + url.QueryEscape(filename)
+	return transfercfg.BuildTemplateURL(upload.BaseURL, servicePath+"?"+query)
 }
 
 // BackupExecutor subscribes to backup.task.created events and executes

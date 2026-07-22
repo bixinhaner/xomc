@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 修复系统配置 MR 引入的设备上传 URL 参数顺序回归和配置应用状态接口 RBAC 缺口。
+**Goal:** 修复 Issue #159 中由系统配置 MR 引入的设备上传 URL 参数顺序回归。
 
-**Architecture:** 下载 URL 继续使用结构化参数编码；设备上传模板使用独立构造入口，在完成基础地址和路径安全校验后原样保留业务查询串。RBAC 通过独立、幂等的 seed 增量在应用启动前注册端点并授予现有内置角色。
+**Architecture:** 下载 URL 继续使用结构化参数编码；设备上传模板使用独立构造入口，在完成基础地址和路径安全校验后原样保留业务查询串。
 
 **Tech Stack:** Go 1.24、`net/url`、Gin、PostgreSQL、goose、testify。
 
@@ -76,51 +76,13 @@ cd omcgo && go test ./internal/software ./internal/backup ./internal/acs/transfe
 
 Expected: PASS.
 
-### Task 2: Grant config apply-status endpoint to built-in roles
-
-**Files:**
-- Create: `omcgo/migrations/seed/000002_grant_sys_config_apply_status.sql`
-- Create: `omcgo/test/integration/sys_config_apply_status_seed_test.go`
-
-**Interfaces:**
-- Consumes: `api_endpoints(id, path, method, ...)`, `roles(id, name)`, and `role_api_permissions(role_id, endpoint_id)`.
-- Produces: an idempotently registered `GET /api/v1/admin/sysConfig/apply-batches/:id` endpoint and grants for `admin`, `operator`, and `viewer`.
-
-- [ ] **Step 1: Add a failing migration contract test**
-
-Read the new migration path and assert it contains the exact route, GET method, all three built-in role names, and `ON CONFLICT DO NOTHING`. The test initially fails because the migration file does not exist.
-
-- [ ] **Step 2: Verify the migration test fails**
-
-Run:
-
-```bash
-cd omcgo && go test ./test/integration -run TestSysConfigApplyStatusSeedContract
-```
-
-Expected: FAIL reading `000002_grant_sys_config_apply_status.sql`.
-
-- [ ] **Step 3: Add the idempotent seed migration**
-
-Use a stable UUID to insert the exact endpoint with `ON CONFLICT (path, method) DO NOTHING`, then insert role/endpoint pairs selected by role names `admin`, `operator`, and `viewer`, also with `ON CONFLICT DO NOTHING`. The Down section removes only those three grants and the endpoint created by this migration when safe.
-
-- [ ] **Step 4: Verify migration contract and focused packages**
-
-Run:
-
-```bash
-cd omcgo && go test ./test/integration -run TestSysConfigApplyStatusSeedContract
-```
-
-Expected: PASS.
-
-### Task 3: Regression verification
+### Task 2: Regression verification
 
 **Files:**
 - Verify only; no additional production changes.
 
 **Interfaces:**
-- Consumes: Task 1 URL contract and Task 2 migration contract.
+- Consumes: Task 1 URL contract.
 - Produces: build/test evidence for handoff.
 
 - [ ] **Step 1: Format modified Go files**
@@ -130,10 +92,10 @@ Run `gofmt -w` on the exact modified Go source and test files.
 - [ ] **Step 2: Run focused tests**
 
 ```bash
-cd omcgo && go test ./internal/acs/transfercfg ./internal/software ./internal/backup ./test/integration
+cd omcgo && go test ./internal/acs/transfercfg ./internal/software ./internal/backup
 ```
 
-Expected: PASS, with database-dependent integration cases skipped only when `OMCGO_TEST_DB_DSN` is absent.
+Expected: PASS.
 
 - [ ] **Step 3: Run backend build and full tests**
 
@@ -145,5 +107,4 @@ Expected: PASS. If a test needs local listening permission, rerun that command w
 
 - [ ] **Step 4: Review final diff**
 
-Confirm the diff contains only the upload-template contract fix, its tests, the RBAC seed migration, its test, and these approved design/plan documents. Confirm `AGENTS.md` and unrelated untracked files are absent.
-
+Confirm the diff contains only the upload-template contract fix, its tests, and these approved design/plan documents. Confirm `AGENTS.md` and unrelated untracked files are absent.

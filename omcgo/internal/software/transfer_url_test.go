@@ -1,25 +1,33 @@
 package software
 
 import (
-	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestBuildTransferUploadURL_PreservesPrefixAndEncodesResolvedQuery(t *testing.T) {
+func TestBuildTransferUploadURL_PreservesRuntimeLogFilenameTail(t *testing.T) {
 	got, err := buildTransferUploadURL(
 		"https://edge.example.com:9443/omc/",
-		"/smallcell/FileUploadService?fileType=LOG&filename=%E9%85%8D%E7%BD%AE+a%26b.log&sn=SN+100",
+		"/smallcell/FileUploadService?fileType=LOG&sn=SN100&taskId=abc123&filename=",
 	)
 	require.NoError(t, err)
+	require.Equal(t,
+		"https://edge.example.com:9443/omc/smallcell/FileUploadService?fileType=LOG&sn=SN100&taskId=abc123&filename=",
+		got,
+	)
+}
 
-	parsed, err := url.Parse(got)
+func TestBuildTransferUploadURL_PreservesFaultLogFileNameTail(t *testing.T) {
+	got, err := buildTransferUploadURL(
+		"https://edge.example.com:9443/omc/",
+		"/smallcell/FileUploadService?fileType=RL&id=task-1&sn=SN100&fileName=",
+	)
 	require.NoError(t, err)
-	require.Equal(t, "/omc/smallcell/FileUploadService", parsed.Path)
-	require.Equal(t, "LOG", parsed.Query().Get("fileType"))
-	require.Equal(t, "配置 a&b.log", parsed.Query().Get("filename"))
-	require.Equal(t, "SN 100", parsed.Query().Get("sn"))
+	require.Equal(t,
+		"https://edge.example.com:9443/omc/smallcell/FileUploadService?fileType=RL&id=task-1&sn=SN100&fileName=",
+		got,
+	)
 }
 
 func TestBuildTransferUploadURL_ProductionAllowsDeviceReachablePrivateBase(t *testing.T) {
