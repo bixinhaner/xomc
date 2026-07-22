@@ -22,6 +22,18 @@ func TestBuildTransferUploadURL_PreservesPrefixAndEncodesResolvedQuery(t *testin
 	require.Equal(t, "SN 100", parsed.Query().Get("sn"))
 }
 
+func TestBuildTransferUploadURL_ProductionAllowsDeviceReachablePrivateBase(t *testing.T) {
+	t.Setenv("OMCGO_ENV", "production")
+
+	got, err := buildTransferUploadURL(
+		"http://172.17.9.239:8081",
+		"/smallcell/FileUploadService?fileType=LOG",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, "http://172.17.9.239:8081/smallcell/FileUploadService?fileType=LOG", got)
+}
+
 func TestBuildTransferUploadURL_RejectsAbsoluteOrEscapingTransportPath(t *testing.T) {
 	for _, raw := range []string{
 		"https://attacker.example/upload",

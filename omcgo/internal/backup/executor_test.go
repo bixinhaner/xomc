@@ -42,6 +42,21 @@ func TestBuildBackupUploadURL_PreservesPrefixAndEncodesBusinessQuery(t *testing.
 	require.Equal(t, "配置 a&b.xml", parsed.Query().Get("filename"))
 }
 
+func TestBuildBackupUploadURL_ProductionAllowsDeviceReachablePrivateBase(t *testing.T) {
+	t.Setenv("OMCGO_ENV", "production")
+
+	got, err := buildBackupUploadURL(
+		transfercfg.UploadSettings{BaseURL: "http://172.17.9.239:8081"},
+		&BackupTypeSpec{URLFileTypeParam: "CONFIGBACKUP_XML"},
+		"SN100",
+		"task-100",
+		"backup.xml",
+	)
+
+	require.NoError(t, err)
+	require.Contains(t, got, "http://172.17.9.239:8081/smallcell/FileUploadService")
+}
+
 // ---------------------------------------------------------------------------
 // Mocks (prefixed with exec to avoid collision with service_test.go)
 // ---------------------------------------------------------------------------

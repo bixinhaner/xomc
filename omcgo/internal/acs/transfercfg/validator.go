@@ -13,9 +13,10 @@ import (
 // ValidateBaseURL validates an optional ACS transfer base URL without changing
 // the submitted value. Empty values keep the configured startup fallback.
 //
-// A CPE must be able to reach these endpoints. Development and test deployments
-// may use local addresses, while production rejects local-only literal hosts
-// before they can be saved as an apparently valid device endpoint.
+// A CPE must be able to reach these endpoints. Reachability depends on the
+// operator network topology, so private address ranges are valid production
+// endpoints. Production only rejects literal hosts that cannot identify the
+// OMC endpoint from a device network, such as loopback or unspecified addresses.
 func ValidateBaseURL(value string) error {
 	if value == "" {
 		return nil
@@ -53,11 +54,12 @@ func ValidateBaseURL(value string) error {
 }
 
 // ValidateServicePath validates the configured path appended after a transfer
-// Base URL. It must be an absolute path on the configured host, not another URL
-// or a path that can escape the Base URL prefix.
+// Base URL. Empty values keep the configured startup fallback. Non-empty values
+// must be absolute paths on the configured host, not another URL or a path that
+// can escape the Base URL prefix.
 func ValidateServicePath(value string) error {
 	if value == "" {
-		return fmt.Errorf("service path is required")
+		return nil
 	}
 	if value != strings.TrimSpace(value) {
 		return fmt.Errorf("service path must not contain leading or trailing whitespace")
@@ -113,7 +115,7 @@ func isLocalOnlyHost(host string) bool {
 	if ip == nil {
 		return false
 	}
-	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() || ip.IsPrivate()
+	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified()
 }
 
 func isNumericHost(host string) bool {
