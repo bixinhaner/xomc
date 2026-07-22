@@ -2,7 +2,7 @@ package transfercfg
 
 import "testing"
 
-func TestValidateBaseURL_ProductionRejectsPrivateAndLocalAddresses(t *testing.T) {
+func TestValidateBaseURL_ProductionRejectsLocalOnlyAddresses(t *testing.T) {
 	t.Setenv("OMCGO_ENV", "production")
 	t.Setenv("GIN_MODE", "release")
 
@@ -11,9 +11,6 @@ func TestValidateBaseURL_ProductionRejectsPrivateAndLocalAddresses(t *testing.T)
 		"http://127.0.0.1:8080",
 		"http://169.254.1.10:8080",
 		"http://0.0.0.0:8080",
-		"http://10.10.0.1:8080",
-		"http://172.16.0.1:8080",
-		"http://192.168.1.10:8080",
 		"http://127.1:8080",
 		"http://2130706433:8080",
 		"http://0:8080",
@@ -23,6 +20,24 @@ func TestValidateBaseURL_ProductionRejectsPrivateAndLocalAddresses(t *testing.T)
 		t.Run(raw, func(t *testing.T) {
 			if err := ValidateBaseURL(raw); err == nil {
 				t.Fatalf("ValidateBaseURL(%q) unexpectedly accepted a production-local address", raw)
+			}
+		})
+	}
+}
+
+func TestValidateBaseURL_ProductionAllowsDeviceReachablePrivateAddresses(t *testing.T) {
+	t.Setenv("OMCGO_ENV", "production")
+	t.Setenv("GIN_MODE", "release")
+
+	for _, raw := range []string{
+		"http://10.10.0.1:8080",
+		"http://172.17.9.239:8081",
+		"http://192.168.1.10:8080",
+		"http://[fd00::10]:8080",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			if err := ValidateBaseURL(raw); err != nil {
+				t.Fatalf("ValidateBaseURL(%q) returned error: %v", raw, err)
 			}
 		})
 	}
@@ -78,9 +93,14 @@ func TestValidateServicePath_AcceptsAbsoluteServicePath(t *testing.T) {
 	}
 }
 
+func TestValidateServicePath_EmptyUsesConfiguredFallback(t *testing.T) {
+	if err := ValidateServicePath(""); err != nil {
+		t.Fatalf("ValidateServicePath(empty) returned error: %v", err)
+	}
+}
+
 func TestValidateServicePath_RejectsAmbiguousOrEscapingPath(t *testing.T) {
 	for _, raw := range []string{
-		"",
 		"smallcell/FileUploadService",
 		"//edge.example.com/FileUploadService",
 		"https://edge.example.com/FileUploadService",
