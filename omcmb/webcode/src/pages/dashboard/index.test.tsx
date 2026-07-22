@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useUserStore } from '@core/store/userStore';
 import type { DashboardSummary } from '@core/types/dashboard';
+import type { DeviceListStats } from '@core/types/device';
 import {
   readDashboardCardSnapshot,
   resolveDashboardCardApiScope,
@@ -21,6 +22,13 @@ interface SummaryHookResult {
   refetch: ReturnType<typeof vi.fn>;
 }
 
+interface DeviceStatsHookResult {
+  data: DeviceListStats | undefined;
+  dataUpdatedAt: number;
+  isPending: boolean;
+  isFetching: boolean;
+}
+
 const dashboardMocks = vi.hoisted(() => ({
   summaryResult: {
     data: undefined,
@@ -30,7 +38,14 @@ const dashboardMocks = vi.hoisted(() => ({
     isFetching: true,
     refetch: vi.fn(),
   } as SummaryHookResult,
+  deviceStatsResult: {
+    data: undefined,
+    dataUpdatedAt: 0,
+    isPending: true,
+    isFetching: true,
+  } as DeviceStatsHookResult,
   useDashboardSummary: vi.fn(),
+  useDashboardDeviceStats: vi.fn(),
   useDashboardRealtime: vi.fn(),
 }));
 
@@ -44,6 +59,7 @@ vi.mock('react-router-dom', async (importOriginal) => {
 
 vi.mock('@core/hooks/api/useDashboard', () => ({
   useDashboardSummary: dashboardMocks.useDashboardSummary,
+  useDashboardDeviceStats: dashboardMocks.useDashboardDeviceStats,
   useDeviceStatusByType: () => ({ data: {}, isLoading: false }),
 }));
 
@@ -179,6 +195,15 @@ describe('DashboardPage card snapshot integration', () => {
     dashboardMocks.useDashboardSummary.mockImplementation(
       () => dashboardMocks.summaryResult
     );
+    dashboardMocks.deviceStatsResult = {
+      data: undefined,
+      dataUpdatedAt: 0,
+      isPending: true,
+      isFetching: true,
+    };
+    dashboardMocks.useDashboardDeviceStats.mockImplementation(
+      () => dashboardMocks.deviceStatsResult
+    );
     useUserStore.setState({
       currentUser: user,
       isAuthenticated: true,
@@ -198,6 +223,46 @@ describe('DashboardPage card snapshot integration', () => {
       'summary failed',
     );
     expect(refetch).toHaveBeenCalledWith({ throwOnError: true });
+  });
+
+  it('uses device-list stats for device cards without changing other Summary cards', () => {
+    dashboardMocks.summaryResult = {
+      data: successfulSummary,
+      dataUpdatedAt: 200,
+      isLoading: false,
+      isPending: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    };
+    dashboardMocks.deviceStatsResult = {
+      data: {
+        total: 20_002,
+        online_count: 19_572,
+        offline_count: 430,
+        alarmed: 0,
+      },
+      dataUpdatedAt: 300,
+      isPending: false,
+      isFetching: false,
+    };
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <DashboardPage />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByTestId('kpi-dashboard.totalDevices')).toHaveTextContent('20002');
+    expect(screen.getByTestId('kpi-dashboard.onlineDevices')).toHaveTextContent('19572');
+    expect(screen.getByTestId('kpi-dashboard.activeAlarmsEvents')).toHaveTextContent('4');
+    expect(screen.getByTestId('kpi-dashboard.activeUE')).toHaveTextContent('8');
+    expect(dashboardMocks.useDashboardDeviceStats).toHaveBeenCalledWith(
+      resolveDashboardCardApiScope('/api/v1', undefined, window.location.origin),
+      user.id,
+    );
   });
 
   it('loads the current user snapshot while Summary is pending', () => {
@@ -229,6 +294,46 @@ describe('DashboardPage card snapshot integration', () => {
     expect(screen.getByText(/dashboard\.lastUpdate/)).toHaveTextContent(
       'dashboard.daysAgo',
     );
+  });
+
+  it('shows current device stats while Summary is still pending under load', () => {
+    const apiScope = resolveDashboardCardApiScope(
+      '/api/v1',
+      undefined,
+      window.location.origin,
+    );
+    writeDashboardCardSnapshot(
+      window.localStorage,
+      apiScope,
+      user.id,
+      previousSnapshot,
+    );
+    dashboardMocks.deviceStatsResult = {
+      data: {
+        total: 20_002,
+        online_count: 19_572,
+        offline_count: 430,
+        alarmed: 0,
+      },
+      dataUpdatedAt: 300,
+      isPending: false,
+      isFetching: false,
+    };
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <DashboardPage />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByTestId('kpi-dashboard.totalDevices')).toHaveTextContent('20002');
+    expect(screen.getByTestId('kpi-dashboard.totalDevices')).toHaveAttribute('data-loading', 'false');
+    expect(screen.getByTestId('kpi-dashboard.onlineDevices')).toHaveTextContent('19572');
+    expect(screen.getByTestId('kpi-dashboard.activeAlarmsEvents')).toHaveTextContent('2');
+    expect(screen.getByTestId('kpi-dashboard.activeUE')).toHaveTextContent('3');
   });
 
   it('keeps the latest successful Summary in memory if Query data disappears', async () => {
