@@ -37,6 +37,19 @@ func TestBuildURL_AppendsEscapedObjectSegmentsWithinServicePath(t *testing.T) {
 	)
 }
 
+func TestBuildTemplateURL_PreservesBusinessQueryOrderAndEmptyFilenameTail(t *testing.T) {
+	got, err := BuildTemplateURL(
+		"https://edge.example.com:9443/omc/",
+		"/smallcell/FileUploadService?fileType=LOG&sn=SN100&taskId=abc123&filename=",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t,
+		"https://edge.example.com:9443/omc/smallcell/FileUploadService?fileType=LOG&sn=SN100&taskId=abc123&filename=",
+		got,
+	)
+}
+
 func TestBuildURL_RejectsInvalidConfiguredComponents(t *testing.T) {
 	for name, tc := range map[string]struct {
 		baseURL     string

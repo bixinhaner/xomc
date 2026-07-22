@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
 
@@ -487,21 +486,7 @@ func (e *UpgradeExecutor) resolveUploadBaseURL(ctx context.Context) string {
 }
 
 func buildTransferUploadURL(baseURL, resolvedTransport string) (string, error) {
-	reference, err := url.Parse(resolvedTransport)
-	if err != nil {
-		return "", fmt.Errorf("parse transfer path: %w", err)
-	}
-	if reference.IsAbs() || reference.Host != "" || reference.User != nil {
-		return "", fmt.Errorf("transfer path must not include a scheme or host")
-	}
-	if reference.Fragment != "" {
-		return "", fmt.Errorf("transfer path must not include a fragment")
-	}
-	query, err := url.ParseQuery(reference.RawQuery)
-	if err != nil {
-		return "", fmt.Errorf("parse transfer query: %w", err)
-	}
-	return transfercfg.BuildURL(baseURL, reference.EscapedPath(), nil, query)
+	return transfercfg.BuildTemplateURL(baseURL, resolvedTransport)
 }
 
 // resolveOUIPlaceholders 在 fileType / transportPath 模板里把 "{OUI}" 替换为

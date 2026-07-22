@@ -3,7 +3,6 @@ package backup
 import (
 	"context"
 	"encoding/json"
-	"net/url"
 	"testing"
 	"time"
 
@@ -30,16 +29,26 @@ func TestBuildBackupUploadURL_PreservesPrefixAndEncodesBusinessQuery(t *testing.
 		"配置 a&b.xml",
 	)
 	require.NoError(t, err)
+	require.Equal(t,
+		"https://edge.example.com:9443/omc/smallcell/FileUploadService?fileType=CONFIGBACKUP_XML&sn=SN+100%261&taskId=task%2F100&filename=%E9%85%8D%E7%BD%AE+a%26b.xml",
+		got,
+	)
+}
 
-	parsed, err := url.Parse(got)
+func TestBuildBackupUploadURL_PreservesNVFilenameAsLastParameter(t *testing.T) {
+	got, err := buildBackupUploadURL(
+		transfercfg.UploadSettings{BaseURL: "http://172.17.9.239:8081"},
+		&BackupTypeSpec{URLFileTypeParam: "CONFIGBACKUP_NV"},
+		"SN100",
+		"task-100",
+		"backup.nv",
+	)
+
 	require.NoError(t, err)
-	require.Equal(t, "https", parsed.Scheme)
-	require.Equal(t, "edge.example.com:9443", parsed.Host)
-	require.Equal(t, "/omc/smallcell/FileUploadService", parsed.Path)
-	require.Equal(t, "CONFIGBACKUP_XML", parsed.Query().Get("fileType"))
-	require.Equal(t, "SN 100&1", parsed.Query().Get("sn"))
-	require.Equal(t, "task/100", parsed.Query().Get("taskId"))
-	require.Equal(t, "配置 a&b.xml", parsed.Query().Get("filename"))
+	require.Equal(t,
+		"http://172.17.9.239:8081/smallcell/FileUploadService?fileType=CONFIGBACKUP_NV&sn=SN100&taskId=task-100&filename=backup.nv",
+		got,
+	)
 }
 
 func TestBuildBackupUploadURL_ProductionAllowsDeviceReachablePrivateBase(t *testing.T) {
