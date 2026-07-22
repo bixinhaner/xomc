@@ -22,6 +22,16 @@ type QueryClientLike = {
 const api = createApiSwitchWithMock(deviceService, deviceApi);
 const DEVICE_DETAIL_STALE_TIME_MS = 10 * 60 * 1000;
 
+/**
+ * 按当前前端 API 环境查询设备列表。
+ *
+ * 供需要在用户操作中即时校验设备的 UI 复用，保证真实 API 与 mock API
+ * 使用同一套筛选语义。
+ */
+export function fetchDeviceList(params: DeviceFilter & PageRequest) {
+  return api.getList(params);
+}
+
 function findDeviceInListCaches(queryClient: QueryClientLike, sn: string): Device | undefined {
   const cachedLists = queryClient.getQueriesData<DeviceListResponse>({
     queryKey: ['devices', 'list'],
@@ -96,7 +106,7 @@ export function useDeviceList(
 ) {
   return useQuery({
     queryKey: ['devices', 'list', params],
-    queryFn: () => api.getList(params),
+    queryFn: () => fetchDeviceList(params),
     refetchInterval: options?.refetchInterval || false,
     enabled: options?.enabled ?? true,
   });
@@ -272,16 +282,15 @@ export function useRebootDevice() {
   });
 }
 
-// T-0126: 手动触发 Path B 全量参数同步（reason="manual"）。
-// 后端走 Path B 完整链路：reason 通道 + 差异日志 + last_param_sync_at 回写 + Translator 翻译。
-// 替代旧 useSyncParameters（Path A 已下线）。
+// 手动触发 durable paramsync 参数同步（reason="manual"）。
+// sync-params 是兼容 URL；后端运行时通过 paramSyncStarter 提交 paramsync request/run。
 export function useSyncDeviceParams() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ deviceId, force, parameterPaths }: { deviceId: string; force?: boolean; parameterPaths?: string[] }) =>
       api.syncDeviceParams(deviceId, force !== undefined || parameterPaths !== undefined ? { force, parameterPaths } : undefined),
     onSuccess: (_data, variables) => {
-      // 失效设备参数缓存让前端在 Path B 完成后展示新值
+      // 失效设备参数缓存，让 paramsync 完成后展示新值。
       void queryClient.invalidateQueries({ queryKey: ['device-parameters', variables.deviceId] });
     },
   });
@@ -342,6 +351,8 @@ export function usePermanentDeleteDevices() {
     mutationFn: (ids: string[]) => deviceApi.permanentDeleteDevices(ids),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['devices', 'recycle-bin'] });
+      void queryClient.invalidateQueries({ queryKey: ['devices', 'list'] });
+      void queryClient.invalidateQueries({ queryKey: ['devices', 'groups'] });
     },
   });
 }

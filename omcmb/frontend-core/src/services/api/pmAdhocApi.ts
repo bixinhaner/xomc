@@ -88,6 +88,7 @@ export const pmAdhocApi = {
       technology: input.technology,
       is_builtin: input.isBuiltin,
       expire_days: input.expireDays,
+      visibility: input.visibility,
     };
     if (input.windowStart) payload.window_start = input.windowStart;
     if (input.windowEnd) payload.window_end = input.windowEnd;
@@ -106,6 +107,7 @@ export const pmAdhocApi = {
     if (input.name !== undefined) payload.name = input.name;
     if (input.deviceSns !== undefined) payload.device_sns = input.deviceSns;
     if (input.granularities !== undefined) payload.granularities = input.granularities;
+    if (input.visibility !== undefined) payload.visibility = input.visibility;
     if (input.windowStart) payload.window_start = input.windowStart;
     if (input.windowEnd) payload.window_end = input.windowEnd;
     if (input.objectLdns && input.objectLdns.length > 0) {
@@ -196,6 +198,7 @@ const mockTasks: AdhocTask[] = [
     technology: 'lte',
     isBuiltin: false,
     expireDays: 60,
+    visibility: 'private',
     status: 'succeeded',
     progress: 100,
     creator: 'mock-owner',
@@ -232,6 +235,7 @@ export const pmAdhocMock: typeof pmAdhocApi = {
       technology: input.technology,
       isBuiltin: input.isBuiltin ?? false,
       expireDays: input.expireDays ?? 60,
+      visibility: input.visibility ?? 'private',
       objectLdns: input.objectLdns && input.objectLdns.length > 0 ? input.objectLdns : undefined,
       status: 'pending',
       progress: 0,
@@ -249,6 +253,7 @@ export const pmAdhocMock: typeof pmAdhocApi = {
       if (input.name !== undefined) t.name = input.name;
       if (input.deviceSns !== undefined) t.deviceSns = input.deviceSns;
       if (input.granularities !== undefined) t.granularities = input.granularities;
+      if (input.visibility !== undefined) t.visibility = input.visibility;
       if (input.windowStart !== undefined) t.windowStart = input.windowStart;
       if (input.windowEnd !== undefined) t.windowEnd = input.windowEnd;
       t.objectLdns = input.objectLdns && input.objectLdns.length > 0 ? input.objectLdns : undefined;

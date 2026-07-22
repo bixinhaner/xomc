@@ -21,12 +21,18 @@ import {
   Divider,
   Select,
   theme,
+  App,
 } from 'antd';
-import { SearchOutlined, ClearOutlined } from '@ant-design/icons';
-import { useIndicatorList } from '@core/hooks/api/useIndicatorsLibrary';
+import { SearchOutlined, ClearOutlined, ImportOutlined } from '@ant-design/icons';
+import { useAllIndicators, useIndicatorList } from '@core/hooks/api/useIndicatorsLibrary';
 import type { DeviceType, IndicatorInfo } from '@core/types/indicatorLibrary';
 import { useAppStore } from '@core/store/appStore';
-
+import { formatIndicatorLevel, shouldShowIndicatorLevel } from '@core/utils/indicatorLevelDisplay';
+import MetricBatchInputModal from './MetricBatchInputModal';
+import {
+  formatMetricIdSamples,
+  type MetricBatchSelectionResult,
+} from './metricBatchSelection';
 const { Text } = Typography;
 
 // 选中值 = 该指标在 pm_metrics 里的 metric_path：
@@ -38,10 +44,10 @@ function metricValueOf(r: IndicatorInfo): string {
   return r.id;
 }
 
-// 选中标签的友好显示名：按当前界面语言优先取对应名，空则回退另一种 / 编号
-// （pm-name-i18n：英文态选 enName 优先，中文态选 cnName 优先）。
+// 选中标签的友好显示名：英文态缺英文名时显示编号，避免英文界面混入中文名；
+// 中文态仍可回退英文名。
 function metricLabelOf(r: IndicatorInfo, en: boolean): string {
-  return en ? r.enName || r.cnName || r.id : r.cnName || r.enName || r.id;
+  return en ? r.enName || r.id : r.cnName || r.enName || r.id;
 }
 
 interface MetricPickerModalProps {
@@ -57,6 +63,9 @@ interface MetricPickerModalProps {
   // 制式联动锁定（T-0188）：true 时隐藏内部「设备类型」下拉，deviceType 固定为
   // initialDeviceType 不可手动切换；不传/false 保持原下拉可切换行为（向后兼容 KPIQuery）。
   lockDeviceType?: boolean;
+  maxSelected?: number;
+  maxSelectedMessageId?: string;
+  enableBatchInput?: boolean;
 }
 
 const DEVICE_TYPE_OPTIONS: { label: string; value: DeviceType }[] = [
@@ -73,8 +82,12 @@ export default function MetricPickerModal({
   initialLabels,
   initialDeviceType = 'ENB',
   lockDeviceType = false,
+  maxSelected,
+  maxSelectedMessageId = 'perf.picker.metricLimitExceeded',
+  enableBatchInput = false,
 }: MetricPickerModalProps) {
   const intl = useIntl();
+  const { message } = App.useApp();
   const { token } = theme.useToken();
   const isEn = useAppStore((s) => s.locale) === 'en-US';
   // 非锁定态：用户可在弹窗内自行切换设备类型（KPIQuery 用法），用内部 state。
@@ -84,6 +97,7 @@ export default function MetricPickerModal({
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [selected, setSelected] = useState<string[]>(initialSelected);
+  const [pasteOpen, setPasteOpen] = useState(false);
   // initialLabels 预加载的指标名 map；声明须在 prevOpen 块之前（该块内调用 setLabelMap）。
   const [labelMap, setLabelMap] = useState<Record<string, string>>(initialLabels ?? {});
 
@@ -96,10 +110,11 @@ export default function MetricPickerModal({
     setPrevOpen(open);
     if (open) {
       setSelected(initialSelected);
-      // 弹窗重新打开时，把调用方预加载的指标名并入 labelMap（低优先级，不覆盖已有条目）。
-      if (initialLabels) {
-        setLabelMap((prev) => ({ ...initialLabels, ...prev }));
-      }
+      setKeyword('');
+      setKeywordDraft('');
+      setPage(1);
+      setPasteOpen(false);
+      setLabelMap(initialLabels ?? {});
     }
   }
 
@@ -113,8 +128,16 @@ export default function MetricPickerModal({
     page,
     pageSize,
   });
+  const { data: allIndicatorsData, isLoading: isAllIndicatorsLoading } = useAllIndicators(deviceType, {
+    enabled: open && enableBatchInput,
+  });
 
   const items = useMemo(() => data?.items ?? [], [data]);
+  const allItems = useMemo(() => allIndicatorsData?.items ?? [], [allIndicatorsData]);
+  const allItemById = useMemo(
+    () => new Map(allItems.map((item) => [metricValueOf(item), item])),
+    [allItems],
+  );
   const total = data?.total ?? 0;
 
   // 选中值 → 友好名 映射：items 变化时在渲染期幂等累积（与 PivotTable 列宽同款 render-phase sync，
@@ -173,8 +196,19 @@ export default function MetricPickerModal({
         render: (_: unknown, r: IndicatorInfo) =>
           r.isCounter ? <Tag color="blue">Counter</Tag> : <Tag color="orange">KPI</Tag>,
       },
+      ...(shouldShowIndicatorLevel(deviceType)
+        ? [
+            {
+              title: intl.formatMessage({ id: 'perf.picker.colIndicatorLevel' }),
+              key: 'indicatorLevel',
+              dataIndex: 'indicatorLevel',
+              width: 130,
+              render: (v: string | undefined) => formatIndicatorLevel(v, (id) => intl.formatMessage({ id })),
+            },
+          ]
+        : []),
     ],
-    [intl, isEn],
+    [intl, isEn, deviceType],
   );
 
   const handleSearch = () => {
@@ -182,7 +216,54 @@ export default function MetricPickerModal({
     setPage(1);
   };
 
+  const handleBatchApply = (result: MetricBatchSelectionResult) => {
+    setSelected(result.nextSelected);
+    setLabelMap((prev) => {
+      const next = { ...prev };
+      for (const id of result.validIds) {
+        const item = allItemById.get(id);
+        if (item) next[id] = metricLabelOf(item, isEn);
+      }
+      return next;
+    });
+    setPasteOpen(false);
+    message.success(
+      intl.formatMessage(
+        { id: 'perf.metricBatchInput.importSuccess' },
+        { added: result.addedIds.length, total: result.nextSelected.length },
+      ),
+    );
+    if (result.invalidIds.length > 0) {
+      message.warning(
+        intl.formatMessage(
+          { id: 'perf.metricBatchInput.notFound' },
+          { count: result.invalidIds.length, ids: formatMetricIdSamples(result.invalidIds) },
+        ),
+      );
+    }
+    if (result.omittedValidIds.length > 0 && maxSelected !== undefined) {
+      message.warning(
+        intl.formatMessage(
+          { id: 'perf.metricBatchInput.truncated' },
+          { max: maxSelected, count: result.omittedValidIds.length },
+        ),
+      );
+    }
+  };
+
+  const warnIfTooManySelected = (count: number) => {
+    if (maxSelected === undefined || count <= maxSelected) return false;
+    message.warning(
+      intl.formatMessage(
+        { id: maxSelectedMessageId },
+        { max: maxSelected, count },
+      ),
+    );
+    return true;
+  };
+
   const handleConfirm = () => {
+    if (warnIfTooManySelected(selected.length)) return;
     const labels: Record<string, string> = {};
     selected.forEach((v) => {
       labels[v] = labelMap[v] ?? v;
@@ -194,156 +275,182 @@ export default function MetricPickerModal({
   const rowSelection = {
     selectedRowKeys: selected,
     preserveSelectedRowKeys: true,
-    onChange: (keys: React.Key[]) => setSelected(keys as string[]),
+    onChange: (keys: React.Key[]) => {
+      if (warnIfTooManySelected(keys.length)) return;
+      setSelected(keys as string[]);
+    },
   };
 
   return (
-    <Modal
-      title={intl.formatMessage({ id: 'perf.picker.metricTitle' }, { count: selected.length })}
-      open={open}
-      onCancel={onClose}
-      onOk={handleConfirm}
-      okText={intl.formatMessage({ id: 'common.confirm' })}
-      cancelText={intl.formatMessage({ id: 'common.cancel' })}
-      width={820}
-      destroyOnHidden
-    >
-      <Space orientation="vertical" style={{ width: '100%' }} size="middle">
-        <Space>
-          {lockDeviceType ? null : (
-            <>
-              <Text>{intl.formatMessage({ id: 'perf.picker.deviceTypeLabel' })}</Text>
-              <Select<DeviceType>
-                value={deviceType}
-                onChange={(v) => {
-                  setDeviceType(v);
-                  setPage(1);
-                }}
-                options={DEVICE_TYPE_OPTIONS}
-                style={{ width: 140 }}
-              />
-            </>
-          )}
-          <Input
-            placeholder={intl.formatMessage({ id: 'perf.picker.searchMetricPlaceholder' })}
-            prefix={<SearchOutlined />}
-            value={keywordDraft}
-            onChange={(e) => setKeywordDraft(e.target.value)}
-            onPressEnter={handleSearch}
-            style={{ width: 280 }}
-            allowClear
-            onClear={() => {
-              setKeywordDraft('');
-              setKeyword('');
-              setPage(1);
+    <>
+      <Modal
+        title={intl.formatMessage({ id: 'perf.picker.metricTitle' }, { count: selected.length })}
+        open={open}
+        onCancel={onClose}
+        onOk={handleConfirm}
+        okText={intl.formatMessage({ id: 'common.confirm' })}
+        cancelText={intl.formatMessage({ id: 'common.cancel' })}
+        width={920}
+        destroyOnHidden
+      >
+        <Space orientation="vertical" style={{ width: '100%' }} size="middle">
+          <Space>
+            {lockDeviceType ? null : (
+              <>
+                <Text>{intl.formatMessage({ id: 'perf.picker.deviceTypeLabel' })}</Text>
+                <Select<DeviceType>
+                  value={deviceType}
+                  onChange={(v) => {
+                    setDeviceType(v);
+                    setPage(1);
+                  }}
+                  options={DEVICE_TYPE_OPTIONS}
+                  style={{ width: 140 }}
+                />
+              </>
+            )}
+            <Input
+              placeholder={intl.formatMessage({ id: 'perf.picker.searchMetricPlaceholder' })}
+              prefix={<SearchOutlined />}
+              value={keywordDraft}
+              onChange={(e) => setKeywordDraft(e.target.value)}
+              onPressEnter={handleSearch}
+              style={{ width: 280 }}
+              allowClear
+              onClear={() => {
+                setKeywordDraft('');
+                setKeyword('');
+                setPage(1);
+              }}
+            />
+            <Button onClick={handleSearch} type="primary">
+              {intl.formatMessage({ id: 'common.search' })}
+            </Button>
+            {enableBatchInput ? (
+              <Button
+                icon={<ImportOutlined />}
+                onClick={() => setPasteOpen(true)}
+                loading={isAllIndicatorsLoading}
+              >
+                {intl.formatMessage({ id: 'perf.metricBatchInput.title' })}
+              </Button>
+            ) : null}
+          </Space>
+
+          <Table<IndicatorInfo>
+            rowKey={metricValueOf}
+            size="small"
+            loading={isLoading}
+            columns={columns}
+            dataSource={items}
+            rowSelection={rowSelection}
+            pagination={false}
+            scroll={{ x: shouldShowIndicatorLevel(deviceType) ? 760 : undefined, y: 320 }}
+          />
+
+          <Pagination
+            current={page}
+            pageSize={pageSize}
+            total={total}
+            showSizeChanger
+            showTotal={(t) => intl.formatMessage({ id: 'perf.picker.totalCount' }, { total: t })}
+            onChange={(p, s) => {
+              setPage(p);
+              setPageSize(s);
             }}
           />
-          <Button onClick={handleSearch} type="primary">
-            {intl.formatMessage({ id: 'common.search' })}
-          </Button>
-        </Space>
 
-        <Table<IndicatorInfo>
-          rowKey={metricValueOf}
-          size="small"
-          loading={isLoading}
-          columns={columns}
-          dataSource={items}
-          rowSelection={rowSelection}
-          pagination={false}
-          scroll={{ y: 320 }}
-        />
+          <Divider style={{ margin: '4px 0' }} />
 
-        <Pagination
-          current={page}
-          pageSize={pageSize}
-          total={total}
-          showSizeChanger
-          showTotal={(t) => intl.formatMessage({ id: 'perf.picker.totalCount' }, { total: t })}
-          onChange={(p, s) => {
-            setPage(p);
-            setPageSize(s);
-          }}
-        />
-
-        <Divider style={{ margin: '4px 0' }} />
-
-        <div>
-          <Space style={{ marginBottom: 6 }}>
-            <Text strong>{intl.formatMessage({ id: 'perf.picker.selectedMetric' })}</Text>
-            <Button
-              size="small"
-              icon={<ClearOutlined />}
-              onClick={() => setSelected([])}
-              disabled={selected.length === 0}
-            >
-              {intl.formatMessage({ id: 'common.clear' })}
-            </Button>
-          </Space>
-          <div
-            style={{
-              minHeight: 40,
-              background: token.colorFillAlter,
-              border: `1px solid ${token.colorBorderSecondary}`,
-              padding: '6px 8px',
-              borderRadius: token.borderRadiusSM,
-            }}
-          >
-            {selected.length === 0 ? (
-              <Text type="secondary" style={{ lineHeight: '28px' }}>
-                {intl.formatMessage({ id: 'perf.picker.noSelectedMetric' })}
-              </Text>
-            ) : selected.length <= 10 ? (
-              // ≤10 个：逐个展示可删除 tag
-              <div style={{ lineHeight: '28px' }}>
-                {selected.map((path) => {
-                  const label = labelMap[path] ?? path;
-                  return (
-                    <Tag
-                      key={path}
-                      closable
-                      onClose={() => setSelected(selected.filter((p) => p !== path))}
-                      style={{
-                        marginBottom: 4,
-                        maxWidth: 200,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        display: 'inline-block',
-                        verticalAlign: 'middle',
-                      }}
-                    >
-                      <Tooltip title={label.length > 10 ? label : undefined}>
-                        {label}
-                      </Tooltip>
-                    </Tag>
-                  );
-                })}
-              </div>
-            ) : (
-              // >10 个：折叠为一个 tag，hover 展示全部名称
-              <Tooltip
-                title={
-                  <div style={{ maxHeight: 300, overflowY: 'auto' }}>
-                    {selected.map((path, i) => (
-                      <div key={path}>{i + 1}. {labelMap[path] ?? path}</div>
-                    ))}
-                  </div>
-                }
-                overlayStyle={{ maxWidth: 320 }}
+          <div>
+            <Space style={{ marginBottom: 6 }}>
+              <Text strong>{intl.formatMessage({ id: 'perf.picker.selectedMetric' })}</Text>
+              <Button
+                size="small"
+                icon={<ClearOutlined />}
+                onClick={() => setSelected([])}
+                disabled={selected.length === 0}
               >
-                <Tag
-                  style={{ cursor: 'default', marginBottom: 4, fontSize: 13, padding: '2px 10px' }}
-                  color="blue"
+                {intl.formatMessage({ id: 'common.clear' })}
+              </Button>
+            </Space>
+            <div
+              style={{
+                minHeight: 40,
+                background: token.colorFillAlter,
+                border: `1px solid ${token.colorBorderSecondary}`,
+                padding: '6px 8px',
+                borderRadius: token.borderRadiusSM,
+              }}
+            >
+              {selected.length === 0 ? (
+                <Text type="secondary" style={{ lineHeight: '28px' }}>
+                  {intl.formatMessage({ id: 'perf.picker.noSelectedMetric' })}
+                </Text>
+              ) : selected.length <= 10 ? (
+                // ≤10 个：逐个展示可删除 tag
+                <div style={{ lineHeight: '28px' }}>
+                  {selected.map((path) => {
+                    const label = labelMap[path] ?? path;
+                    return (
+                      <Tag
+                        key={path}
+                        closable
+                        onClose={() => setSelected(selected.filter((p) => p !== path))}
+                        style={{
+                          marginBottom: 4,
+                          maxWidth: 200,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          display: 'inline-block',
+                          verticalAlign: 'middle',
+                        }}
+                      >
+                        <Tooltip title={label.length > 10 ? label : undefined}>
+                          {label}
+                        </Tooltip>
+                      </Tag>
+                    );
+                  })}
+                </div>
+              ) : (
+                // >10 个：折叠为一个 tag，hover 展示全部名称
+                <Tooltip
+                  title={
+                    <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                      {selected.map((path, i) => (
+                        <div key={path}>{i + 1}. {labelMap[path] ?? path}</div>
+                      ))}
+                    </div>
+                  }
+                  overlayStyle={{ maxWidth: 320 }}
                 >
-                  {intl.formatMessage({ id: 'perf.picker.metricTitle' }, { count: selected.length })}
-                  {' '}···
-                </Tag>
-              </Tooltip>
-            )}
+                  <Tag
+                    style={{ cursor: 'default', marginBottom: 4, fontSize: 13, padding: '2px 10px' }}
+                    color="blue"
+                  >
+                    {intl.formatMessage({ id: 'perf.picker.metricTitle' }, { count: selected.length })}
+                    {' '}···
+                  </Tag>
+                </Tooltip>
+              )}
+            </div>
           </div>
-        </div>
-      </Space>
-    </Modal>
+        </Space>
+      </Modal>
+
+      {enableBatchInput ? (
+        <MetricBatchInputModal
+          open={pasteOpen}
+          candidates={allItems}
+          currentSelected={selected}
+          maxSelected={maxSelected}
+          loading={isAllIndicatorsLoading}
+          onApply={handleBatchApply}
+          onCancel={() => setPasteOpen(false)}
+        />
+      ) : null}
+    </>
   );
 }

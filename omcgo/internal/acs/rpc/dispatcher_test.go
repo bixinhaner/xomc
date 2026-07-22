@@ -31,16 +31,35 @@ func TestNewDispatcher_AllHandlersRegistered(t *testing.T) {
 		"Upload",
 		"Reboot",
 		"FactoryReset",
+		"X_BAICELLS_COM_PasswordReset",
+		"X_COMMON_COM_PasswordReset",
 		"GetParameterAttributes",
 		"SetParameterAttributes",
 		"GetRPCMethods",
 	}
 
-	assert.Len(t, d.handlers, 12)
+	assert.Len(t, d.handlers, len(expectedMethods))
 	for _, method := range expectedMethods {
 		_, ok := d.handlers[method]
 		assert.True(t, ok, "handler missing for %s", method)
 	}
+}
+
+func TestResetLMTPasswordHandler_BaicellsMethod(t *testing.T) {
+	d := NewDispatcher()
+	cmd := &Command{
+		Method:     "X_BAICELLS_COM_PasswordReset",
+		CommandKey: "password-reset-key",
+		Params:     json.RawMessage(`{}`),
+	}
+
+	result, err := d.BuildRequest(cmd, "cwmp-id-reset")
+
+	require.NoError(t, err)
+	body := string(result)
+	assert.Contains(t, body, "cwmp:X_BAICELLS_COM_PasswordReset")
+	assert.Contains(t, body, "<CommandKey>password-reset-key</CommandKey>")
+	assert.Contains(t, body, "cwmp-id-reset")
 }
 
 func TestDispatcher_BuildRequest_UnknownMethod(t *testing.T) {
@@ -166,6 +185,42 @@ func TestFactoryResetHandler(t *testing.T) {
 	assert.Contains(t, body, "cwmp:FactoryReset")
 }
 
+func TestResetLMTPasswordHandler(t *testing.T) {
+	d := NewDispatcher()
+	cmd := &Command{
+		Method:     "X_BAICELLS_COM_PasswordReset",
+		CommandKey: "reset-lmt-password-key-1",
+		Params:     json.RawMessage(`{}`),
+	}
+
+	result, err := d.BuildRequest(cmd, "cwmp-id-reset-lmt-password")
+
+	require.NoError(t, err)
+	body := string(result)
+	assert.Contains(t, body, "<cwmp:X_BAICELLS_COM_PasswordReset>")
+	assert.Contains(t, body, "<CommandKey>reset-lmt-password-key-1</CommandKey>")
+	assert.Contains(t, body, "</cwmp:X_BAICELLS_COM_PasswordReset>")
+	assert.NotContains(t, body, "cwmp:SetParameterValues")
+	assert.NotContains(t, body, "X_COM_Localweb_password")
+}
+
+func TestResetLMTPasswordHandler_LegacyCommonMethodStillBuildsBaicellsPayload(t *testing.T) {
+	d := NewDispatcher()
+	cmd := &Command{
+		Method:     "X_COMMON_COM_PasswordReset",
+		CommandKey: "legacy-reset-key-1",
+		Params:     json.RawMessage(`{}`),
+	}
+
+	result, err := d.BuildRequest(cmd, "cwmp-id-reset-lmt-password-legacy")
+
+	require.NoError(t, err)
+	body := string(result)
+	assert.Contains(t, body, "<cwmp:X_COMMON_COM_PasswordReset>")
+	assert.Contains(t, body, "<CommandKey>legacy-reset-key-1</CommandKey>")
+	assert.Contains(t, body, "</cwmp:X_COMMON_COM_PasswordReset>")
+}
+
 // TestGetRPCMethodsHandler verifies the TR-069 §A.3.1.2 GetRPCMethods RPC
 // renders as an empty <cwmp:GetRPCMethods/> tag with the cwmp:ID header.
 // Triggered from ops side by action="get_rpc_methods" (T-0102-c map).
@@ -232,7 +287,7 @@ func TestDownloadHandler_RuntimeTransferConfigOverride(t *testing.T) {
 	d := NewDispatcher(DispatcherConfig{
 		TransferConfigProvider: staticTransferProvider{snapshot: transfercfg.Snapshot{
 			Download: transfercfg.DownloadSettings{
-				BaseURL:  "http://gateway.example.com",
+				BaseURL:  "https://gateway.example.com:9443/omc/",
 				Path:     "/smallcell/FileDownloadService",
 				Username: "runtime-user",
 				Password: "runtime-pass",
@@ -244,7 +299,7 @@ func TestDownloadHandler_RuntimeTransferConfigOverride(t *testing.T) {
 		CommandKey: "dl-key-2",
 		Params: json.RawMessage(`{
 			"file_type": "1 Firmware Upgrade Image",
-			"url": "firmware/QAFA/V1/pkg.bin",
+			"url": "firmware/QAFA/V1/正式 pkg.bin",
 			"file_size": 2048,
 			"target_file_name": "pkg.bin",
 			"delay_seconds": 0
@@ -255,7 +310,7 @@ func TestDownloadHandler_RuntimeTransferConfigOverride(t *testing.T) {
 	require.NoError(t, err)
 	body := string(result)
 	// BaseURL/Path 拼接生效
-	assert.Contains(t, body, "http://gateway.example.com/smallcell/FileDownloadService/firmware/QAFA/V1/pkg.bin")
+	assert.Contains(t, body, "https://gateway.example.com:9443/omc/smallcell/FileDownloadService/firmware/QAFA/V1/%E6%AD%A3%E5%BC%8F%20pkg.bin")
 	// 凭据**不**应被注入（runtime config 里的 Username/Password 不进 SOAP）
 	assert.NotContains(t, body, "runtime-user",
 		"runtime transfer config 的 Username 不应注入 SOAP（产品决策）")

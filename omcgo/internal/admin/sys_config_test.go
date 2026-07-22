@@ -18,21 +18,48 @@ import (
 type stubSysConfigRepo struct {
 	mu sync.Mutex
 
+	createFn      func(ctx context.Context, cfg *SysConfig) error
+	getByIDFn     func(ctx context.Context, id uuid.UUID) (*SysConfig, error)
+	updateFn      func(ctx context.Context, cfg *SysConfig) error
+	deleteFn      func(ctx context.Context, id uuid.UUID) error
 	batchUpsertFn func(ctx context.Context, category string, items []BatchItem) (int, error)
+	listFn        func(ctx context.Context, category string, publicOnly bool) ([]SysConfig, error)
 }
 
-func (s *stubSysConfigRepo) Create(_ context.Context, _ *SysConfig) error { return nil }
-func (s *stubSysConfigRepo) GetByID(_ context.Context, _ uuid.UUID) (*SysConfig, error) {
+func (s *stubSysConfigRepo) Create(ctx context.Context, cfg *SysConfig) error {
+	if s.createFn != nil {
+		return s.createFn(ctx, cfg)
+	}
+	return nil
+}
+func (s *stubSysConfigRepo) GetByID(ctx context.Context, id uuid.UUID) (*SysConfig, error) {
+	if s.getByIDFn != nil {
+		return s.getByIDFn(ctx, id)
+	}
 	return nil, nil
 }
 func (s *stubSysConfigRepo) GetByKey(_ context.Context, _, _ string) (*SysConfig, error) {
 	return nil, nil
 }
-func (s *stubSysConfigRepo) List(_ context.Context, _ string, _ bool) ([]SysConfig, error) {
+
+func (s *stubSysConfigRepo) List(ctx context.Context, category string, publicOnly bool) ([]SysConfig, error) {
+	if s.listFn != nil {
+		return s.listFn(ctx, category, publicOnly)
+	}
 	return nil, nil
 }
-func (s *stubSysConfigRepo) Update(_ context.Context, _ *SysConfig) error { return nil }
-func (s *stubSysConfigRepo) Delete(_ context.Context, _ uuid.UUID) error  { return nil }
+func (s *stubSysConfigRepo) Update(ctx context.Context, cfg *SysConfig) error {
+	if s.updateFn != nil {
+		return s.updateFn(ctx, cfg)
+	}
+	return nil
+}
+func (s *stubSysConfigRepo) Delete(ctx context.Context, id uuid.UUID) error {
+	if s.deleteFn != nil {
+		return s.deleteFn(ctx, id)
+	}
+	return nil
+}
 
 func (s *stubSysConfigRepo) BatchUpsert(ctx context.Context, category string, items []BatchItem) (int, error) {
 	s.mu.Lock()
@@ -133,6 +160,141 @@ func TestSysConfigService_RegisterSavedHook_NilSafe(t *testing.T) {
 		Items:    []BatchItem{{Key: "k", Value: "v"}},
 	})
 	require.NoError(t, err)
+}
+
+func TestSysConfigService_ListPublic_SecurityUsesStrictAllowlist(t *testing.T) {
+	repo := &stubSysConfigRepo{
+		listFn: func(_ context.Context, category string, publicOnly bool) ([]SysConfig, error) {
+			assert.Equal(t, "security", category)
+			assert.False(t, publicOnly, "security 分类需先读取后按安全白名单过滤")
+			return []SysConfig{
+				{Category: "security", Key: "isBrowserAutoRecordPass", Value: "true", IsPublic: false},
+				{Category: "security", Key: "defaultPasswd", Value: "secret", IsPublic: false},
+				{Category: "security", Key: "legacyPublicKey", Value: "legacy", IsPublic: true},
+			}, nil
+		},
+	}
+
+	items, err := NewSysConfigService(repo).ListPublic(context.Background(), "security")
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, "isBrowserAutoRecordPass", items[0].Key)
+}
+
+func TestSysConfigService_Create_RejectsClientControlledPublicFlag(t *testing.T) {
+	called := false
+	requestedPublic := true
+	svc := NewSysConfigService(&stubSysConfigRepo{
+		createFn: func(_ context.Context, _ *SysConfig) error {
+			called = true
+			return nil
+		},
+	})
+
+	_, err := svc.Create(context.Background(), CreateSysConfigRequest{
+		Category: "system",
+		Key:      "system_name",
+		Value:    "OMC",
+		IsPublic: &requestedPublic,
+	})
+
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.False(t, called)
+}
+
+func TestSysConfigService_Create_RejectsSecretThroughDirectCRUD(t *testing.T) {
+	called := false
+	svc := NewSysConfigService(&stubSysConfigRepo{
+		createFn: func(_ context.Context, _ *SysConfig) error {
+			called = true
+			return nil
+		},
+	})
+
+	_, err := svc.Create(context.Background(), CreateSysConfigRequest{
+		Category: "security",
+		Key:      "defaultPasswd",
+		Value:    "secret",
+	})
+
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.False(t, called)
+}
+
+func TestSysConfigService_Create_RejectsDirectMutation(t *testing.T) {
+	svc := NewSysConfigService(&stubSysConfigRepo{})
+
+	_, err := svc.Create(context.Background(), CreateSysConfigRequest{
+		Category: "system",
+		Key:      "system_name",
+		Value:    "OMC",
+	})
+
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+}
+
+func TestSysConfigService_Update_RejectsClientControlledPublicFlag(t *testing.T) {
+	requestedPublic := true
+	getCalled := false
+	svc := NewSysConfigService(&stubSysConfigRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*SysConfig, error) {
+			getCalled = true
+			return &SysConfig{}, nil
+		},
+	})
+
+	_, err := svc.Update(context.Background(), uuid.New(), UpdateSysConfigRequest{IsPublic: &requestedPublic})
+
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.False(t, getCalled)
+}
+
+func TestSysConfigService_Update_RejectsSecretThroughDirectCRUD(t *testing.T) {
+	updated := false
+	value := "new secret"
+	svc := NewSysConfigService(&stubSysConfigRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*SysConfig, error) {
+			return &SysConfig{Category: "agent", Key: "agent_studio_service_token", Value: "old"}, nil
+		},
+		updateFn: func(_ context.Context, _ *SysConfig) error {
+			updated = true
+			return nil
+		},
+	})
+
+	_, err := svc.Update(context.Background(), uuid.New(), UpdateSysConfigRequest{Value: &value})
+
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.False(t, updated)
+}
+
+func TestSysConfigService_Update_RejectsDirectMutation(t *testing.T) {
+	value := "new value"
+	svc := NewSysConfigService(&stubSysConfigRepo{})
+
+	_, err := svc.Update(context.Background(), uuid.New(), UpdateSysConfigRequest{Value: &value})
+
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+}
+
+func TestSysConfigService_Delete_RejectsSecretThroughDirectCRUD(t *testing.T) {
+	id := uuid.New()
+	deleted := false
+	svc := NewSysConfigService(&stubSysConfigRepo{
+		getByIDFn: func(_ context.Context, gotID uuid.UUID) (*SysConfig, error) {
+			assert.Equal(t, id, gotID)
+			return &SysConfig{ID: id, Category: "agent", Key: "agent_studio_service_token"}, nil
+		},
+		deleteFn: func(_ context.Context, _ uuid.UUID) error {
+			deleted = true
+			return nil
+		},
+	})
+
+	err := svc.Delete(context.Background(), id)
+
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.False(t, deleted)
 }
 
 // ── Validator hook（issue #548 切片 2 D 后端 sys_configs validator）─────────────────
@@ -247,4 +409,90 @@ func TestSysConfigService_RegisterValidator_NilFnDeletes(t *testing.T) {
 		Items:    []BatchItem{{Key: "k", Value: "v"}},
 	})
 	require.NoError(t, err)
+}
+
+func TestBatchItemsToApplyState_RedactsSecrets(t *testing.T) {
+	state := batchItemsToApplyState("security", []BatchItem{
+		{Key: "defaultPasswd", Value: "plaintext-password"},
+		{Key: "isBrowserAutoRecordPass", Value: "true"},
+	})
+
+	assert.Equal(t, "[REDACTED]", state["defaultPasswd"])
+	assert.Equal(t, "true", state["isBrowserAutoRecordPass"])
+	assert.NotContains(t, state, "plaintext-password")
+
+	acsState := batchItemsToApplyState("acs_transfer", []BatchItem{
+		{Key: "uploadPassword", Value: "upload-secret"},
+		{Key: "downloadPassword", Value: "download-secret"},
+	})
+	assert.Equal(t, "[REDACTED]", acsState["uploadPassword"])
+	assert.Equal(t, "[REDACTED]", acsState["downloadPassword"])
+}
+
+func TestBatchUpsertPreservesBlankACSCredentials(t *testing.T) {
+	var persisted []BatchItem
+	svc := NewSysConfigService(&stubSysConfigRepo{batchUpsertFn: func(_ context.Context, _ string, items []BatchItem) (int, error) {
+		persisted = append([]BatchItem(nil), items...)
+		return len(items), nil
+	}})
+
+	updated, err := svc.BatchUpsert(context.Background(), BatchUpdateSysConfigRequest{
+		Category: "acs_transfer",
+		Items: []BatchItem{
+			{Key: "uploadPassword", Value: ""},
+			{Key: "downloadPassword", Value: "rotated"},
+			{Key: "uploadBaseURL", Value: "https://acs.example.com"},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 2, updated)
+	require.Equal(t, []BatchItem{
+		{Key: "downloadPassword", Value: "rotated"},
+		{Key: "uploadBaseURL", Value: "https://acs.example.com"},
+	}, persisted)
+}
+
+func TestBatchUpsertRejectsAllBlankACSCredentialPlaceholders(t *testing.T) {
+	repoCalled := false
+	svc := NewSysConfigService(&stubSysConfigRepo{batchUpsertFn: func(_ context.Context, _ string, _ []BatchItem) (int, error) {
+		repoCalled = true
+		return 0, nil
+	}})
+
+	_, err := svc.BatchUpsert(context.Background(), BatchUpdateSysConfigRequest{
+		Category: "acs_transfer",
+		Items: []BatchItem{
+			{Key: "uploadPassword", Value: ""},
+			{Key: "downloadPassword", Value: ""},
+		},
+	})
+
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.False(t, repoCalled)
+}
+
+func TestConfigApplyTargetsIncludeRequiredTargetsEvenWhenModuleDependencyIsMissing(t *testing.T) {
+	svc := NewSysConfigService(&stubSysConfigRepo{})
+	svc.RegisterApplyHandler("storage", "alarm_history_retention", func(context.Context, ConfigApplyWork) (map[string]any, error) {
+		return nil, nil
+	})
+
+	storageTargets := svc.configApplyTargetsForCategory("storage")
+	require.Equal(t, []string{"alarm_history_retention", "minio_presign_endpoint"}, []string{
+		storageTargets[0].Target, storageTargets[1].Target,
+	})
+	minioTargets := svc.configApplyTargetsForCategory("minio.retention")
+	require.Len(t, minioTargets, 1)
+	require.Equal(t, "minio_raw_file_lifecycle", minioTargets[0].Target)
+}
+
+func TestACSConfigApplyTargetOnlyClaimsEventDelivery(t *testing.T) {
+	svc := NewSysConfigService(&stubSysConfigRepo{})
+
+	targets := svc.configApplyTargetsForCategory("acs_transfer")
+
+	require.Len(t, targets, 1)
+	require.Equal(t, "acs_transfer_event_delivery", targets[0].Target)
+	require.Equal(t, ConfigApplySuccessScopeEventDelivered, targets[0].SuccessScope)
 }

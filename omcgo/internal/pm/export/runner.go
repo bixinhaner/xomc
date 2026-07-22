@@ -213,6 +213,7 @@ func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, []Wide
 		IncludeCell:                   true,
 		MissingMetricValuePlaceholder: missingMetricValuePlaceholder,
 	}
+	deviceViewLayout := dashboardLayout
 	kpiQueryLayout := csvLayout{
 		FirstColHeader:                deviceHeader,
 		Locale:                        loc,
@@ -222,6 +223,9 @@ func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, []Wide
 	switch task.SourceType {
 	case SourceDashboard:
 		return r.buildDashboardLikeSource(ctx, task, loc, dashboardLayout)
+
+	case SourceDeviceView:
+		return r.buildDashboardLikeSource(ctx, task, loc, deviceViewLayout)
 
 	case SourceKpiQuery:
 		return r.buildDashboardLikeSource(ctx, task, loc, kpiQueryLayout)
@@ -262,6 +266,7 @@ func (r *Runner) buildDashboardLikeSource(ctx context.Context, task *Task, loc a
 	if err != nil {
 		return nil, nil, csvLayout{}, err
 	}
+	req = normalizeStoredResultExportRequest(req)
 	dim := req.Dimension
 	if dim == "" {
 		dim = aggregator.DimensionDevice
@@ -288,9 +293,15 @@ func (r *Runner) buildDashboardLikeSource(ctx context.Context, task *Task, loc a
 	}
 	cols := newNameResolver(r.metricDB, loc).resolveColumns(ctx, keys)
 
-	// device 维度且表含行级 id → (time,id) keyset 直查；否则（聚合维度 / 无 id 的 device 表）走聚合批次游标。
-	if dim == aggregator.DimensionDevice && tableHasIDColumn(table) {
-		src := RowSource(newDashboardDeviceSource(r.metricDB, table, req, objectLDNs))
+	// 普通 device 导出只读取已经落库的 KPI/counter 结果，不进入 aggregator.Query 的
+	// KPI 现场重算路径。含行级 id 的表用 (time,id) keyset；无 id 的日/周/月表用稳定排序 offset。
+	if dim == aggregator.DimensionDevice {
+		var src RowSource
+		if tableHasIDColumn(table) {
+			src = newDashboardDeviceSource(r.metricDB, table, req, objectLDNs)
+		} else {
+			src = newDashboardDeviceOffsetSource(r.metricDB, table, req, objectLDNs)
+		}
 		if shouldFillExportSkeleton(task.SourceType, req) {
 			src = newFillEmptySource(src, req)
 		}

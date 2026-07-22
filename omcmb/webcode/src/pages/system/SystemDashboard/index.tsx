@@ -9,6 +9,7 @@ import {
 import GaugeChart from '@/components/Charts/GaugeChart';
 import StatusIndicator from '@/components/StatusIndicator';
 import { useSystemInfo } from '@core/hooks/api/useSystem';
+import type { SystemInfo } from '@core/services/api/systemApi';
 import { useT } from '@/hooks/useT';
 
 const serviceStatuses = [
@@ -37,13 +38,26 @@ const typeColors: Record<string, string> = {
   create: 'blue', confirm: 'green', update: 'cyan', export: 'purple', sync: 'orange', cleanup: 'default',
 };
 
+function formatBytes(value: number | undefined) {
+  if (value === undefined) return '—';
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
+  let amount = value;
+  let unit = 0;
+  while (amount >= 1024 && unit < units.length - 1) {
+    amount /= 1024;
+    unit += 1;
+  }
+  return `${Number.isInteger(amount) ? amount : amount.toFixed(1)} ${units[unit]}`;
+}
+
 export default function SystemDashboard() {
   const t = useT();
   const { data: systemInfo } = useSystemInfo();
+  const runtimeInfo = systemInfo as SystemInfo | undefined;
 
   const cpuUsage = (systemInfo as Record<string, unknown>)?.cpuUsage as number ?? 42;
   const memUsage = (systemInfo as Record<string, unknown>)?.memUsage as number ?? 67;
-  const diskUsage = (systemInfo as Record<string, unknown>)?.diskUsage as number ?? 58;
+  const storageMetrics = runtimeInfo?.storage ?? [];
   const activeSessions = (systemInfo as Record<string, unknown>)?.activeSessions as number ?? 8;
   const onlineDevices = (systemInfo as Record<string, unknown>)?.onlineDevices as number ?? 189;
   const totalDevices = (systemInfo as Record<string, unknown>)?.totalDevices as number ?? 215;
@@ -101,15 +115,47 @@ export default function SystemDashboard() {
             </div>
           </Card>
         </Col>
-        <Col span={8}>
-          <Card title={t('system.dashboard.disk')} size="small" style={{ textAlign: 'center' }}>
-            <GaugeChart value={diskUsage} max={100} unit="%" />
-            <div style={{ marginTop: 8, color: diskUsage > 85 ? '#ff4d4f' : diskUsage > 70 ? '#faad14' : '#52c41a', fontWeight: 500 }}>
-              {diskUsage}%
-            </div>
-          </Card>
-        </Col>
       </Row>
+
+      <Card title={t('system.dashboard.storage')} size="small">
+        {storageMetrics.length === 0 ? (
+          <div style={{ padding: 32, textAlign: 'center', color: '#999' }}>{t('common.notAvailable')}</div>
+        ) : (
+          <Row gutter={[16, 16]}>
+            {storageMetrics.map((metric) => {
+              const percentage = metric.status === 'available' ? metric.usedPercent : undefined;
+              return (
+                <Col span={8} key={metric.id}>
+                  <Card size="small" title={t(`system.dashboard.storage.kind.${metric.kind}`)}>
+                    <div style={{ marginBottom: 8, fontWeight: 500, wordBreak: 'break-all' }}>
+                      {metric.mountPath || metric.instance || metric.label}
+                    </div>
+                    {percentage !== undefined ? (
+                      <>
+                        <GaugeChart value={percentage} max={100} unit="%" />
+                        <div style={{ textAlign: 'center', fontWeight: 500 }}>{percentage}%</div>
+                      </>
+                    ) : metric.status === 'available' ? (
+                      <Statistic title={t('system.dashboard.storage.used')} value={formatBytes(metric.usedBytes)} />
+                    ) : (
+                      <div style={{ padding: '28px 0', color: '#999', textAlign: 'center' }}>
+                        {t('common.notAvailable')}
+                      </div>
+                    )}
+                    <div style={{ marginTop: 8, color: '#999', fontSize: 12, wordBreak: 'break-all' }}>
+                      <div>{t('common.source')}: {metric.source}</div>
+                      {metric.collectedAt && (
+                        <div>{t('common.updateTime')}: {new Date(metric.collectedAt).toLocaleString()}</div>
+                      )}
+                      {metric.error && <div>{metric.error}</div>}
+                    </div>
+                  </Card>
+                </Col>
+              );
+            })}
+          </Row>
+        )}
+      </Card>
 
       <Row gutter={16}>
         <Col span={14}>

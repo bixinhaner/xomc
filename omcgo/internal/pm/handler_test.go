@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
+	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
@@ -138,6 +141,15 @@ func pmHSetupRouterWithIndicator(ir indicator.IndicatorRepository) *gin.Engine {
 	return r
 }
 
+func pmHSetupRouterWithAggregator(aggr *aggregator.Aggregator) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	h := NewHandler(&pmHCounterRepo{}, &pmHKPIRepo{}, pmHNewEngine(), &pmHTaskRepo{}, nil, nil, "pm-files", nil, nil, zap.NewNop())
+	h.WithAggregator(aggr)
+	h.RegisterRoutes(r.Group(""))
+	return r
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -242,6 +254,34 @@ func TestHandler_ListAggregatedCounters_NoPagination(t *testing.T) {
 	assert.Equal(t, float64(5000), body.Items[0].SumValue)
 }
 
+func TestHandler_ListAggregatedMetrics_RejectsTooManyDeviceSNs(t *testing.T) {
+	router := pmHSetupRouterWithAggregator(&aggregator.Aggregator{})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(
+		http.MethodGet,
+		"/pm/metrics/aggregated?granularity=15min&device_sns="+pmHJoinStrings("SN", 51)+"&metric_paths=K1",
+		nil,
+	)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestHandler_ListAggregatedMetrics_RejectsTooManyMetricPaths(t *testing.T) {
+	router := pmHSetupRouterWithAggregator(&aggregator.Aggregator{})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(
+		http.MethodGet,
+		"/pm/metrics/aggregated?granularity=15min&device_sns=SN-1&metric_paths="+pmHJoinStrings("K", 51),
+		nil,
+	)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
 func TestHandler_ListKPIValues(t *testing.T) {
 	kr := &pmHKPIRepo{
 		queryFn: func(_ context.Context, _ kpi.KPIFilter) (*model.ListResponse[model.KPIValue], error) {
@@ -280,12 +320,13 @@ func TestHandler_ListKPIDefinitions(t *testing.T) {
 
 // kpiDefRespItem 镜像 handler 的响应 wire 形态（含 id / is_counter + 历史字段）。
 type kpiDefRespItem struct {
-	ID          string `json:"id"`
-	IsCounter   string `json:"is_counter"`
-	Name        string `json:"name"`
-	DisplayName string `json:"display_name"`
-	Formula     string `json:"formula"`
-	Unit        string `json:"unit"`
+	ID             string `json:"id"`
+	IsCounter      string `json:"is_counter"`
+	IndicatorLevel string `json:"indicator_level"`
+	Name           string `json:"name"`
+	DisplayName    string `json:"display_name"`
+	Formula        string `json:"formula"`
+	Unit           string `json:"unit"`
 }
 
 // 默认（不带 include_counters）：仅请求 is_counter='0' 的 KPI，响应含 id/is_counter，
@@ -390,6 +431,36 @@ func TestHandler_ListKPIDefinitions_IncludeCounters(t *testing.T) {
 	assert.Equal(t, "0", body.Items[0].IsCounter)
 	assert.Equal(t, "1", body.Items[1].IsCounter)
 	assert.Equal(t, "C2001", body.Items[1].ID)
+}
+
+func TestHandler_ListKPIDefinitions_IndicatorLevel(t *testing.T) {
+	level := "both"
+	ir := &pmHIndicatorRepo{
+		listAllFn: func(_ context.Context, f indicator.IndicatorListFilter) ([]indicator.IndicatorListItem, error) {
+			require.Equal(t, "GSM", f.DeviceType)
+			return []indicator.IndicatorListItem{
+				{PerfIndicator: indicator.PerfIndicator{
+					ID: "K3001", EnName: "gsm_call_sr", CnName: strPtr("GSM呼叫成功率"),
+					IsCounter: "0", IndicatorLevel: &level,
+				}},
+			}, nil
+		},
+	}
+	router := pmHSetupRouterWithIndicator(ir)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/pm/kpi/definitions?device_type=GSM", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var body struct {
+		Items []kpiDefRespItem `json:"items"`
+		Total int              `json:"total"`
+	}
+	response.DecodeData(t, w.Body, &body)
+	assert.Equal(t, 1, body.Total)
+	require.Len(t, body.Items, 1)
+	assert.Equal(t, "both", body.Items[0].IndicatorLevel)
 }
 
 // device_type 指定时只查该制式表（不传则三表合并）。
@@ -514,4 +585,12 @@ func TestHandler_CreateTask_MissingName(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func pmHJoinStrings(prefix string, n int) string {
+	parts := make([]string, n)
+	for i := range parts {
+		parts[i] = prefix + "-" + strconv.Itoa(i+1)
+	}
+	return strings.Join(parts, ",")
 }

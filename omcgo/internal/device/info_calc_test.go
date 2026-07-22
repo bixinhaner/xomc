@@ -3,6 +3,7 @@ package device
 import (
 	"testing"
 
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -250,9 +251,32 @@ func TestCalcMMEStatus(t *testing.T) {
 			want: "disconnected",
 		},
 		{
-			name:   "fallback no active MME",
+			name:   "no MME parameters returns empty",
 			params: map[string]string{},
-			want:   "disconnected",
+			want:   "",
+		},
+		{
+			name: "BLQ legacy LTE path returns partial",
+			params: map[string]string{
+				"Device.Services.FAPService.1.CellConfig.LTE.MmePoolConfigParam.1.MME1Status": "1",
+			},
+			want: "partial",
+		},
+		{
+			name: "EPC and legacy paths for one instance count once",
+			params: map[string]string{
+				"Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.1.MME1Status": "1",
+				"Device.Services.FAPService.1.CellConfig.LTE.MmePoolConfigParam.1.MME1Status":     "1",
+			},
+			want: "partial",
+		},
+		{
+			name: "empty EPC placeholder falls back to legacy LTE path",
+			params: map[string]string{
+				"Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.1.MME1Status": " ",
+				"Device.Services.FAPService.1.CellConfig.LTE.MmePoolConfigParam.1.MME1Status":     "1",
+			},
+			want: "partial",
 		},
 		{
 			name: "fallback one active MME",
@@ -284,6 +308,17 @@ func TestCalcMMEStatus(t *testing.T) {
 			assert.Equal(t, tt.want, CalcMMEStatus(tt.params))
 		})
 	}
+}
+
+func TestCalcCoreNetworkStatusByTechnology(t *testing.T) {
+	params := map[string]string{
+		"Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus": "connected",
+		amfsStatusPath: "0.0.0.0=0;0.0.0.1=1",
+	}
+
+	assert.Equal(t, "connected", CalcCoreNetworkStatus(params, model.TechLTE))
+	assert.Equal(t, "connected", CalcCoreNetworkStatus(params, model.TechNR))
+	assert.Empty(t, CalcCoreNetworkStatus(params, model.TechGSM))
 }
 
 func TestCalcLicenseStatus(t *testing.T) {
@@ -527,12 +562,70 @@ func TestCalcRFStatus(t *testing.T) {
 			params: map[string]string{
 				"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.RFTxStatus": "0",
 			},
-			want: "error",
+			want: "off",
+		},
+		{
+			name: "standard LTE FAPControl status",
+			params: map[string]string{
+				"Device.Services.FAPService.2.FAPControl.LTE.RFTxStatus": "true",
+			},
+			want: "on",
+		},
+		{
+			name: "standard NR cell status",
+			params: map[string]string{
+				"Device.Services.FAPService.1.CellConfig.2.NR.RAN.rftxEnable": "1",
+			},
+			want: "on",
+		},
+		{
+			name: "BaiBNQ SAS radio enable",
+			params: map[string]string{
+				"Device.DeviceInfo.SAS.RadioEnable": "true",
+			},
+			want: "on",
+		},
+		{
+			name: "BaiBNQ cell SAS radio enable",
+			params: map[string]string{
+				"Device.DeviceInfo.CellConfig.2.SAS.RadioEnable": "true",
+			},
+			want: "on",
+		},
+		{
+			name: "unknown direct status falls back to valid SAS status",
+			params: map[string]string{
+				"Device.Services.FAPService.1.CellConfig.1.NR.RAN.rftxEnable": "not-reported",
+				"Device.DeviceInfo.SAS.RadioEnable":                           "true",
+			},
+			want: "on",
+		},
+		{
+			name: "GSM BTS RF state",
+			params: map[string]string{
+				"Device.Services.GsmBTSCellDT.1.RfState": "1",
+			},
+			want: "on",
+		},
+		{
+			name: "multi cell NR status",
+			params: map[string]string{
+				"Device.Services.FAPService.1.CellConfig.2.NR.RAN.rftxEnable": "0",
+				"Device.Services.FAPService.1.CellConfig.1.NR.RAN.rftxEnable": "1",
+			},
+			want: "on,off",
+		},
+		{
+			name: "unknown RF value",
+			params: map[string]string{
+				"Device.DeviceInfo.SAS.RadioEnable": "not-reported",
+			},
+			want: "",
 		},
 		{
 			name:   "empty params",
 			params: map[string]string{},
-			want:   "off",
+			want:   "",
 		},
 	}
 	for _, tt := range tests {

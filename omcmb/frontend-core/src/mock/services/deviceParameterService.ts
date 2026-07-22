@@ -31,6 +31,8 @@ const baseParamTemplates = [
   { path: 'Device.DeviceInfo.MemoryStatus.Total', value: '524288', type: 'unsignedInt', writable: false },
   { path: 'Device.DeviceInfo.MemoryStatus.Free', value: '262144', type: 'unsignedInt', writable: false },
   { path: 'Device.DeviceInfo.ProcessStatus.CPUUsage', value: '45', type: 'unsignedInt', writable: false },
+  { path: 'Device.DeviceInfo.X_COM_Localweb_username', value: 'admin', type: 'string', writable: true },
+  { path: 'Device.DeviceInfo.X_COM_Localweb_password', value: '', type: 'string', writable: true },
   // ManagementServer
   { path: 'Device.ManagementServer.URL', value: 'http://acs.example.com:7547', type: 'string', writable: true },
   { path: 'Device.ManagementServer.PeriodicInformEnable', value: 'true', type: 'boolean', writable: true },

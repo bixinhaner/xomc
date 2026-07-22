@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -23,6 +24,11 @@ import (
 	"github.com/omcgo/omcgo/internal/topology"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+)
+
+const (
+	activeUEKPIAlias = "UE_ACTIVE"
+	activeUEKPIID    = "KGNB0568"
 )
 
 // FrontendDeviceStats matches the frontend's expected device_stats format.
@@ -59,6 +65,7 @@ type KPIDelta struct {
 	ChangePercent float64 `json:"change_percent"` // 变化百分比，正数表示增长
 	Trend         string  `json:"trend"`          // "up" | "down" | "stable"
 	CompareType   string  `json:"compare_type"`   // "yesterday" | "last_week"
+	HasComparison bool    `json:"has_comparison"` // 是否存在有效的非零历史基线
 }
 
 // DashboardSummary is the aggregated dashboard response.
@@ -336,9 +343,7 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 	// Map KPI values to named fields (use latest value per KPI name)
 	for _, v := range rawKPIValues {
 		key := v.KPIName
-		if _, exists := summary.KPIOverview[key]; !exists {
-			summary.KPIOverview[key] = v.KPIValue
-		}
+		setDashboardKPIOverviewValue(summary.KPIOverview, key, v.KPIValue)
 	}
 
 	// Map recent alarms to frontend format (aggregate by device)
@@ -367,9 +372,28 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 	}
 
 	// Calculate KPI deltas (trend data for cards)
-	summary.KPIDeltas = s.calculateKPIDeltas(ctx, totalDevices, summary.AlarmStats.Total)
+	currentActiveUE, hasCurrentActiveUE := summary.KPIOverview[activeUEKPIAlias]
+	summary.KPIDeltas = s.calculateKPIDeltas(
+		ctx,
+		totalDevices,
+		summary.AlarmStats.Total,
+		currentActiveUE,
+		hasCurrentActiveUE,
+	)
 
 	return summary, nil
+}
+
+func setDashboardKPIOverviewValue(overview map[string]float64, key string, value float64) {
+	if _, exists := overview[key]; !exists {
+		overview[key] = value
+	}
+	// PM 规范化入库使用指标编号作为 metric_path；Dashboard 对外继续提供稳定的展示别名。
+	if key == activeUEKPIID {
+		if _, exists := overview[activeUEKPIAlias]; !exists {
+			overview[activeUEKPIAlias] = value
+		}
+	}
 }
 
 func severityToLabel(s model.AlarmSeverity) string {
@@ -431,45 +455,91 @@ func derefOrEmpty(s *string) string {
 
 // calculateKPIDeltas calculates trend data for dashboard KPI cards.
 // Compares current values with previous period (yesterday for real-time metrics, last week for daily metrics).
-func (s *Service) calculateKPIDeltas(ctx context.Context, currentTotalDevices int64, currentTotalAlarms int64) map[string]KPIDelta {
+func (s *Service) calculateKPIDeltas(
+	ctx context.Context,
+	currentTotalDevices int64,
+	currentTotalAlarms int64,
+	currentActiveUE float64,
+	hasCurrentActiveUE bool,
+) map[string]KPIDelta {
 	now := time.Now()
-	yesterdayStart := now.Add(-24 * time.Hour).Truncate(24 * time.Hour)
-	yesterdayEnd := yesterdayStart.Add(24 * time.Hour)
-	lastWeekStart := now.Add(-7 * 24 * time.Hour).Truncate(24 * time.Hour)
-	lastWeekEnd := lastWeekStart.Add(24 * time.Hour)
+	windows := dashboardKPIDeltaWindows(now)
 
 	deltas := make(map[string]KPIDelta)
 
 	// 1. Total devices trend (compare with last week same time)
-	prevTotalDevices, err := s.countDevicesAtTime(ctx, lastWeekEnd)
-	if err == nil && prevTotalDevices > 0 {
-		deltas["total_devices"] = computeKPIDelta(float64(currentTotalDevices), float64(prevTotalDevices), "last_week")
-	} else {
-		// Fallback: no trend data if query fails
-		deltas["total_devices"] = KPIDelta{
-			CurrentValue:  float64(currentTotalDevices),
-			PreviousValue: 0,
-			ChangePercent: 0,
-			Trend:         "stable",
-			CompareType:   "last_week",
-		}
+	prevTotalDevices, err := s.countDevicesAtTime(ctx, windows.DeviceCompareAt)
+	if err != nil {
+		s.logger.Warn("dashboard: previous device count unavailable", zap.Error(err))
 	}
+	deltas["total_devices"] = computeKPIDelta(
+		float64(currentTotalDevices),
+		float64(prevTotalDevices),
+		err == nil,
+		"last_week",
+	)
 
 	// 2. Active alarms trend (compare with yesterday)
-	prevTotalAlarms, err := s.countAlarmsAtTime(ctx, yesterdayEnd)
-	if err == nil {
-		deltas["active_alarms"] = computeKPIDelta(float64(currentTotalAlarms), float64(prevTotalAlarms), "yesterday")
-	} else {
-		deltas["active_alarms"] = KPIDelta{
-			CurrentValue:  float64(currentTotalAlarms),
-			PreviousValue: 0,
-			ChangePercent: 0,
-			Trend:         "stable",
-			CompareType:   "yesterday",
+	prevTotalAlarms, err := s.countAlarmsAtTime(ctx, windows.AlarmCompareAt)
+	if err != nil {
+		s.logger.Warn("dashboard: previous alarm count unavailable", zap.Error(err))
+	}
+	deltas["active_alarms"] = computeKPIDelta(
+		float64(currentTotalAlarms),
+		float64(prevTotalAlarms),
+		err == nil,
+		"yesterday",
+	)
+
+	// 3. Active UE trend. Current value comes from the latest KPI overview sample;
+	// the baseline reuses the dashboard network KPI time-series data chain.
+	deltas[activeUEKPIAlias] = computeKPIDelta(currentActiveUE, 0, false, "last_week")
+	if hasCurrentActiveUE {
+		currentEntries, currentErr := s.queryNetworkKPISeries(
+			ctx,
+			activeUEKPIID,
+			windows.UECurrentStart,
+			windows.UECurrentEnd,
+		)
+		if currentErr != nil {
+			s.logger.Warn("dashboard: current active UE comparison unavailable", zap.Error(currentErr))
+		}
+		previousEntries, previousErr := s.queryNetworkKPISeries(
+			ctx,
+			activeUEKPIID,
+			windows.UEPreviousStart,
+			windows.UEPreviousEnd,
+		)
+		if previousErr != nil {
+			s.logger.Warn("dashboard: previous active UE comparison unavailable", zap.Error(previousErr))
+		}
+		if currentErr == nil && previousErr == nil {
+			deltas[activeUEKPIAlias] = computeSeriesKPIDelta(currentEntries, previousEntries, "last_week")
 		}
 	}
 
 	return deltas
+}
+
+type kpiDeltaWindows struct {
+	DeviceCompareAt time.Time
+	AlarmCompareAt  time.Time
+	UECurrentStart  time.Time
+	UECurrentEnd    time.Time
+	UEPreviousStart time.Time
+	UEPreviousEnd   time.Time
+}
+
+func dashboardKPIDeltaWindows(now time.Time) kpiDeltaWindows {
+	currentStart := dashboardStartOfDay(now)
+	return kpiDeltaWindows{
+		DeviceCompareAt: now.AddDate(0, 0, -7),
+		AlarmCompareAt:  now.AddDate(0, 0, -1),
+		UECurrentStart:  currentStart,
+		UECurrentEnd:    now,
+		UEPreviousStart: currentStart.AddDate(0, 0, -7),
+		UEPreviousEnd:   now.AddDate(0, 0, -7),
+	}
 }
 
 // summaryDeviceCountsQuery 给 dashboard /summary 接口的 KPI 卡用：取设备总数 +
@@ -492,13 +562,21 @@ const countDevicesAtTimeQuery = `
 	  AND (deleted_at IS NULL OR deleted_at > $1)
 `
 
-// countAlarmsAtTimeQuery 重建时刻 t 的活跃告警数：raised_at 在 t 之前，且
-// 截至 t 未被清除。alarms_history 在时序库（tsPool）上，是 7d chunk 的超表。
-const countAlarmsAtTimeQuery = `
-	SELECT COUNT(*)
+// 当前仍未清除的告警只存在主库 alarms_active；只要在 t 前发生，它在 t 时刻就是活跃告警。
+const listActiveAlarmIDsAtTimeQuery = `
+	SELECT id
+	FROM alarms_active
+	WHERE raised_at <= $1
+`
+
+// 已清除告警会从 alarms_active 搬到时序库 alarms_history。只有在 t 之后才清除的记录，
+// 在 t 时刻仍属于活跃告警。两表由告警清除链路迁移，稳定状态下互斥。
+const countHistoricalAlarmsAtTimeQuery = `
+	SELECT COUNT(DISTINCT alarm_id)
 	FROM alarms_history
 	WHERE raised_at <= $1
-	  AND (cleared_at IS NULL OR cleared_at > $1)
+	  AND cleared_at > $1
+	  AND NOT (alarm_id = ANY($2::uuid[]))
 `
 
 // countDevicesAtTime 返回时刻 t 在网设备总数（含历史已下线但当时尚在网的）。
@@ -517,35 +595,55 @@ func (s *Service) countDevicesAtTime(ctx context.Context, t time.Time) (int64, e
 // countAlarmsAtTime 返回时刻 t 的活跃告警数（已 raise 未 clear）。
 // 用于 dashboard KPI 卡片的同环比对比。
 func (s *Service) countAlarmsAtTime(ctx context.Context, t time.Time) (int64, error) {
+	if s.pgPool == nil {
+		return 0, fmt.Errorf("countAlarmsAtTime: pgPool not configured")
+	}
 	if s.tsPool == nil {
 		return 0, fmt.Errorf("countAlarmsAtTime: tsPool not configured")
 	}
-	var n int64
-	if err := s.tsPool.QueryRow(ctx, countAlarmsAtTimeQuery, t).Scan(&n); err != nil {
-		return 0, fmt.Errorf("countAlarmsAtTime: %w", err)
+	rows, err := s.pgPool.Query(ctx, listActiveAlarmIDsAtTimeQuery, t)
+	if err != nil {
+		return 0, fmt.Errorf("countAlarmsAtTime active: %w", err)
 	}
-	return n, nil
+	defer rows.Close()
+	activeIDs := make([]uuid.UUID, 0)
+	seenActiveIDs := make(map[uuid.UUID]struct{})
+	for rows.Next() {
+		var alarmID uuid.UUID
+		if err := rows.Scan(&alarmID); err != nil {
+			return 0, fmt.Errorf("countAlarmsAtTime scan active: %w", err)
+		}
+		if _, exists := seenActiveIDs[alarmID]; exists {
+			continue
+		}
+		seenActiveIDs[alarmID] = struct{}{}
+		activeIDs = append(activeIDs, alarmID)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("countAlarmsAtTime iterate active: %w", err)
+	}
+	var historicalCount int64
+	if err := s.tsPool.QueryRow(ctx, countHistoricalAlarmsAtTimeQuery, t, activeIDs).Scan(&historicalCount); err != nil {
+		return 0, fmt.Errorf("countAlarmsAtTime history: %w", err)
+	}
+	return int64(len(activeIDs)) + historicalCount, nil
 }
 
 // computeKPIDelta calculates delta values for a single KPI metric.
-func computeKPIDelta(current, previous float64, compareType string) KPIDelta {
+func computeKPIDelta(current, previous float64, hasComparison bool, compareType string) KPIDelta {
 	delta := KPIDelta{
 		CurrentValue:  current,
 		PreviousValue: previous,
 		CompareType:   compareType,
+		Trend:         "stable",
 	}
 
-	if previous == 0 {
-		// Avoid division by zero
-		if current > 0 {
-			delta.ChangePercent = 100
-			delta.Trend = "up"
-		} else {
-			delta.ChangePercent = 0
-			delta.Trend = "stable"
-		}
+	// 百分比变化必须有真实且非零的历史基线。缺样本、查询失败或历史值为 0
+	// 都不能被解释成“增长 100%”。
+	if !hasComparison || previous == 0 {
 		return delta
 	}
+	delta.HasComparison = true
 
 	delta.ChangePercent = ((current - previous) / previous) * 100
 
@@ -560,6 +658,28 @@ func computeKPIDelta(current, previous float64, compareType string) KPIDelta {
 	}
 
 	return delta
+}
+
+func averageKPITrendEntries(entries []KPITrendEntry) (float64, bool) {
+	var sum float64
+	count := 0
+	for _, entry := range entries {
+		if math.IsNaN(entry.Value) || math.IsInf(entry.Value, 0) {
+			continue
+		}
+		sum += entry.Value
+		count++
+	}
+	if count == 0 {
+		return 0, false
+	}
+	return sum / float64(count), true
+}
+
+func computeSeriesKPIDelta(currentEntries, previousEntries []KPITrendEntry, compareType string) KPIDelta {
+	current, hasCurrent := averageKPITrendEntries(currentEntries)
+	previous, hasPrevious := averageKPITrendEntries(previousEntries)
+	return computeKPIDelta(current, previous, hasCurrent && hasPrevious, compareType)
 }
 
 // alarmTrendByDateQuery 按天分级统计告警数。调用侧只用固定表名格式化，不接收用户输入。

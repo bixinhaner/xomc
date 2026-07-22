@@ -2,8 +2,12 @@ package device
 
 import (
 	"fmt"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 // CalcCellStatus computes the list-page activation summary from device_parameters.
@@ -67,12 +71,14 @@ func CalcOpState(params map[string]string) string {
 //
 // Priority:
 //  1. LTE strict path `Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus`
-//  2. Legacy fallback: count `...MmePoolConfigParam.{1-16}.MME1Status`
+//  2. For each pool instance, prefer the EPC path and fall back to the legacy
+//     LTE path `...MmePoolConfigParam.{1-16}.MME1Status` when EPC is empty.
 //
 // Returns:
 //
-//	"disconnected" — no active MME
-//	"partial"      — 1 active MME (legacy pool fallback only)
+//	""             — no MME status observed
+//	"disconnected" — observed MME statuses are all inactive
+//	"partial"      — 1 active MME
 //	"connected"    — 2+ active MMEs / gateway indicates connected
 func CalcMMEStatus(params map[string]string) string {
 	if gatewayStatus := strings.TrimSpace(params["Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus"]); gatewayStatus != "" {
@@ -90,16 +96,25 @@ func CalcMMEStatus(params map[string]string) string {
 	}
 
 	activeCount := 0
+	hasStatus := false
 	for i := 1; i <= 16; i++ {
-		prefix := fmt.Sprintf("Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.%d.", i)
-		if params[prefix+"MME1Status"] == "1" {
+		epCPrefix := fmt.Sprintf("Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.%d.", i)
+		status := strings.TrimSpace(params[epCPrefix+"MME1Status"])
+		if status == "" {
+			legacyPrefix := fmt.Sprintf("Device.Services.FAPService.1.CellConfig.LTE.MmePoolConfigParam.%d.", i)
+			status = strings.TrimSpace(params[legacyPrefix+"MME1Status"])
+		}
+		if status == "" {
+			continue
+		}
+
+		hasStatus = true
+		if status == "1" {
 			activeCount++
 		}
-		// Also check NR path
-		nrPrefix := fmt.Sprintf("Device.Services.FAPService.1.CellConfig.NR.Core.MmePoolConfigParam.%d.", i)
-		if params[nrPrefix+"MME1Status"] == "1" {
-			activeCount++
-		}
+	}
+	if !hasStatus {
+		return ""
 	}
 	switch {
 	case activeCount == 0:
@@ -108,6 +123,19 @@ func CalcMMEStatus(params map[string]string) string {
 		return "partial"
 	default:
 		return "connected"
+	}
+}
+
+// CalcCoreNetworkStatus computes the technology-appropriate core-network
+// quick-query status. LTE uses MME paths; NR uses the AMF status report.
+func CalcCoreNetworkStatus(params map[string]string, tech model.Technology) string {
+	switch tech {
+	case model.TechLTE:
+		return CalcMMEStatus(params)
+	case model.TechNR:
+		return normalizeAMFStatus(params[amfsStatusPath])
+	default:
+		return ""
 	}
 }
 
@@ -222,32 +250,84 @@ func CalcGPSStatus(params map[string]string) string {
 	}
 }
 
+var rfStatusPathFamilies = []*regexp.Regexp{
+	// 产品模型会把 BaiBNQ 私有 rftxEnable 和 LTE 私有 RadioEnable
+	// 归一为以下标准路径，优先读取小区级直接状态。
+	regexp.MustCompile(`^Device\.Services\.FAPService\.\d+\.CellConfig\.\d+\.NR\.RAN\.rftxEnable$`),
+	regexp.MustCompile(`^Device\.DeviceInfo\.CellConfig\.\d+\.SAS\.RadioEnable$`),
+	regexp.MustCompile(`^Device\.Services\.FAPService\.\d+\.FAPControl\.LTE\.RFTxStatus$`),
+	regexp.MustCompile(`^Device\.Services\.FAPService\.\d+\.CellConfig\.(?:LTE|NR)\.RAN\.RF\.X_COM_RadioEnable$`),
+	regexp.MustCompile(`^Device\.Services\.GsmBTSCellDT\.\d+\.RfState$`),
+	regexp.MustCompile(`^Device\.DeviceInfo\.SAS\.RadioEnable\d*$`),
+	regexp.MustCompile(`^Device\.DeviceInfo\.(?:EU\.\d+\.)?RU\.\d+\.RFTxStatus$`),
+	// 兼容历史已落库的非标准 RAN.RF 路径。
+	regexp.MustCompile(`^Device\.Services\.FAPService\.\d+\.CellConfig\.(?:LTE|NR)\.RAN\.RF\.RFTxStatus$`),
+}
+
+var rfStatusPathIndex = regexp.MustCompile(`\.(\d+)(?:\.|$)`)
+
 // CalcRFStatus computes the rf_status quick-query column from device_parameters.
-// RF status is driven by RF RadioEnable; RFTxStatus is only a legacy fallback.
+// It preserves three distinct states: explicit on, explicit off/error, and unknown.
+// Missing or unrecognized parameters must stay empty instead of being fabricated as off.
 func CalcRFStatus(params map[string]string) string {
-	rfTx := params["Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.RFTxStatus"]
-	if rfTx == "" {
-		rfTx = params["Device.Services.FAPService.1.CellConfig.NR.RAN.RF.RFTxStatus"]
-	}
-	radioEnable := params["Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable"]
-	if radioEnable == "" {
-		radioEnable = params["Device.Services.FAPService.1.CellConfig.NR.RAN.RF.X_COM_RadioEnable"]
-	}
-
-	if radioEnable != "" {
-		if isTrueValue(radioEnable) {
-			return "on"
+	for _, family := range rfStatusPathFamilies {
+		paths := make([]string, 0)
+		for path := range params {
+			if family.MatchString(path) {
+				paths = append(paths, path)
+			}
 		}
-		return "off"
-	}
+		if len(paths) == 0 {
+			continue
+		}
 
-	if isTrueValue(rfTx) || rfTx == "1" {
-		return "on"
+		sort.SliceStable(paths, func(i, j int) bool {
+			return lessRFStatusPath(paths[i], paths[j])
+		})
+		statuses := make([]string, 0, len(paths))
+		for _, path := range paths {
+			if status, ok := normalizeRFStatusValue(params[path]); ok {
+				statuses = append(statuses, status)
+			}
+		}
+		if len(statuses) > 0 {
+			return strings.Join(statuses, ",")
+		}
 	}
-	if rfTx == "0" || strings.EqualFold(rfTx, "false") {
-		return "error"
+	return ""
+}
+
+func normalizeRFStatusValue(value string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "3", "true", "on", "enabled":
+		return "on", true
+	case "0", "2", "false", "off", "disabled":
+		return "off", true
+	case "error", "abnormal", "failed", "fault":
+		return "error", true
+	default:
+		return "", false
 	}
-	return "off"
+}
+
+func lessRFStatusPath(left, right string) bool {
+	leftMatches := rfStatusPathIndex.FindAllStringSubmatch(left, -1)
+	rightMatches := rfStatusPathIndex.FindAllStringSubmatch(right, -1)
+	limit := len(leftMatches)
+	if len(rightMatches) < limit {
+		limit = len(rightMatches)
+	}
+	for i := 0; i < limit; i++ {
+		leftIndex, _ := strconv.Atoi(leftMatches[i][1])
+		rightIndex, _ := strconv.Atoi(rightMatches[i][1])
+		if leftIndex != rightIndex {
+			return leftIndex < rightIndex
+		}
+	}
+	if len(leftMatches) != len(rightMatches) {
+		return len(leftMatches) < len(rightMatches)
+	}
+	return left < right
 }
 
 // CalcNumOfCells extracts the number of cells (carriers) from device_parameters.

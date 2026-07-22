@@ -17,6 +17,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/rawarchive"
+	"github.com/omcgo/omcgo/internal/core/reliability"
 	"github.com/omcgo/omcgo/internal/core/reliability/runner"
 	"github.com/omcgo/omcgo/internal/core/tracing"
 	"github.com/omcgo/omcgo/internal/pm"
@@ -26,6 +27,27 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
+
+// isMinIONotFound 判定 MinIO 错误是否为对象/桶不存在（沿用 internal/core/rawarchive、
+// internal/backup/restore_service.go 已有的同款判定：minio-go 的 GetObject 不立即发
+// 请求，对象不存在的错误在首次 Read 时才暴露，故调用点在 MaybeGunzip/Parse 读取失败
+// 处判定，而不是 GetObject 调用本身的返回值）。
+//
+// 用 errors.As 而非直接 minio.ToErrorResponse(err).Code：MaybeGunzip/Parse 会用
+// fmt.Errorf("...: %w", err) 逐层包装底层读错误（如 "parse pm xml: decode pm xml: %w"），
+// minio.ToErrorResponse 内部是裸类型断言，遇到包装过的 error 会直接判定失败——必须先
+// errors.As 拆到底层 minio.ErrorResponse 再取 Code，否则本判定在真实调用链路上永远
+// 返回 false（2026-07-22 补单测时验证过这个坑，是本次改动最容易踩空的地方）。
+func isMinIONotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	var resp minio.ErrorResponse
+	if !errors.As(err, &resp) {
+		return false
+	}
+	return resp.Code == "NoSuchKey" || resp.Code == "NoSuchBucket"
+}
 
 // FileReceivedPayload is the event payload for pm.file.received.
 //
@@ -59,6 +81,13 @@ type FileReceivedPayload struct {
 // package internals just for this one method.
 type DeviceLookup interface {
 	GetBySerialNumber(ctx context.Context, sn string) (*model.Device, error)
+}
+
+// FileMarkerLookup checks whether a PM file already completed ingestion.
+// It deliberately exposes only the indexed file-level idempotency query needed
+// by the collector, rather than coupling the hot path to the full PMFileStore.
+type FileMarkerLookup interface {
+	IsFileParsed(ctx context.Context, deviceSN, fileName string) (bool, error)
 }
 
 // CounterMeta 是 CounterWhitelist 命中后回填给 PMCounter 的元数据（PM-P2）。
@@ -122,6 +151,7 @@ type PMCollector struct {
 	metrics             *pm.PMMetrics
 	runner              runner.Wrapper
 	deviceLookup        DeviceLookup
+	fileMarkerLookup    FileMarkerLookup
 	counterWhitelist    CounterWhitelist
 	numberProcessLookup NumberProcessLookup
 	copyIngestor        CopyIngestor
@@ -165,6 +195,13 @@ func (c *PMCollector) SetRunner(w runner.Wrapper) {
 // thin-payload events fail the existing uuid.Parse(DeviceID) check.
 func (c *PMCollector) SetDeviceLookup(lookup DeviceLookup) {
 	c.deviceLookup = lookup
+}
+
+// SetFileMarkerLookup wires the file-level idempotency lookup. When a completed
+// marker already exists, the collector ACKs a redelivered event before touching
+// the original MinIO path, which may have been renamed by the raw archiver.
+func (c *PMCollector) SetFileMarkerLookup(lookup FileMarkerLookup) {
+	c.fileMarkerLookup = lookup
 }
 
 // SetCounterWhitelist wires the indicator-library-driven counter whitelist
@@ -274,6 +311,26 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 		return err
 	}
 
+	if c.fileMarkerLookup != nil {
+		fileName := path.Base(payload.MinIOPath)
+		parsed, err := c.fileMarkerLookup.IsFileParsed(ctx, payload.DeviceSN, fileName)
+		if err != nil {
+			return fmt.Errorf("lookup parsed pm file marker: %w", err)
+		}
+		if parsed {
+			span.SetAttributes(attribute.Bool("pm.duplicate", true))
+			if c.metrics != nil {
+				c.metrics.FilesProcessedTotal.WithLabelValues("duplicate").Inc()
+				c.metrics.ProcessingDurationSecs.Observe(time.Since(startTime).Seconds())
+			}
+			c.logger.Info("skipping already ingested PM file",
+				zap.String("device_sn", payload.DeviceSN),
+				zap.String("file_name", fileName),
+			)
+			return nil
+		}
+	}
+
 	deviceID, err := uuid.Parse(payload.DeviceID)
 	if err != nil {
 		return fmt.Errorf("parse device_id: %w", err)
@@ -313,6 +370,15 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 			c.metrics.ProcessingDurationSecs.Observe(time.Since(startTime).Seconds())
 		}
 		tracing.RecordError(span, derr)
+		// 2026-07-22 压测实测：20000设备规模下磁盘长期逼近满载，观测到大量 PM 文件在
+		// worker 处理前对象已从 MinIO 消失（疑似磁盘压力下的写入/清理异常，根因还在查）。
+		// 这类错误重试注定必然失败（同一个已不存在的 key 重试多少次结果都一样），之前
+		// 走通用 3 次重试+指数退避（约7秒/条）在队列被大量此类消息淹没时会显著拖慢
+		// 真正可处理消息的吞吐——参照 resolveDevice 对「设备不存在」的处理，同样包一层
+		// reliability.ErrPermanent 首次即终止，不重试、直接进 DLQ。
+		if isMinIONotFound(derr) {
+			return fmt.Errorf("decompress pm file: %w: %w", derr, reliability.ErrPermanent)
+		}
 		return fmt.Errorf("decompress pm file: %w", derr)
 	}
 
@@ -324,6 +390,11 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 			c.metrics.ProcessingDurationSecs.Observe(time.Since(startTime).Seconds())
 		}
 		tracing.RecordError(span, err)
+		// 同上：MinIO 对象不存在的错误也可能延迟到这里（XML 解析器内部持续读取 obj）
+		// 才首次暴露，同样短路不重试。
+		if isMinIONotFound(err) {
+			return fmt.Errorf("parse pm xml: %w: %w", err, reliability.ErrPermanent)
+		}
 		return fmt.Errorf("parse pm xml: %w", err)
 	}
 
@@ -451,9 +522,19 @@ func (c *PMCollector) ingestViaCopy(
 // resolveDevice fills in DeviceID / DeviceOUI / Carrier / Technology on the
 // payload when the publisher only provided device_sn (T-0164 G1 真机闭环 —
 // acs.upload.Handler 发的瘦 payload）。transfer.Bridge 发的胖 payload device_id
-// 已填，函数直接 no-op 返回。Returning an error here triggers retry+DLQ in
-// the wrapping runner — transient cases (device row not yet inserted because
-// the inform/registration race) get retried and usually succeed.
+// 已填，函数直接 no-op 返回。
+//
+// 错误分类（2026-07-21 修订，产品决策：设备不在注册表就拒绝入库，不重试）：
+//   - lookup 本身出错（DB 连接等基础设施问题）→ 普通错误，触发 retry+DLQ，通常瞬时问题。
+//   - lookup 成功但 dev==nil（设备不在 device_info 注册表）→ 包装
+//     reliability.ErrPermanent，Runner/EventBus 会立即短路终止，不再重试、不落库。
+//     此前的设计（重试 5 次 + 指数退避 ~15s）是为了兜住"设备刚 Inform、注册尚未
+//     落库"的竞态窗口；实测 omc78 压测环境里触发该错误的绝大多数是从未注册/早已
+//     从回收站清理、但固件仍在自主上传 PM 文件的设备——重试 5 次全部落空，只是
+//     徒增 5 条 Error 日志和 5 条 DLQ 记录，最终结果依然是丢弃、不会真正入库。
+//     现改为首次即终止：代价是如果真的撞上"刚注册、尚未提交"的极短竞态，这台
+//     设备当次的 PM 文件会被直接丢弃而不是重试后捞回来；下一个上报周期（通常
+//     15 分钟）注册必然已完成，届时会正常入库，不会影响该设备后续所有数据。
 func (c *PMCollector) resolveDevice(ctx context.Context, payload *FileReceivedPayload) error {
 	if payload.DeviceID != "" {
 		return nil
@@ -469,7 +550,7 @@ func (c *PMCollector) resolveDevice(ctx context.Context, payload *FileReceivedPa
 		return fmt.Errorf("lookup device by sn %s: %w", payload.DeviceSN, err)
 	}
 	if dev == nil {
-		return fmt.Errorf("pm.file.received: device not found for sn=%s", payload.DeviceSN)
+		return fmt.Errorf("pm.file.received: device not found for sn=%s: %w", payload.DeviceSN, reliability.ErrPermanent)
 	}
 	payload.DeviceID = dev.ID.String()
 	payload.DeviceOUI = dev.OUI

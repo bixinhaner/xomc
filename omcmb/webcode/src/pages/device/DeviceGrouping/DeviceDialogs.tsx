@@ -129,6 +129,7 @@ export default function DeviceDialogs({
         onOk={onMoveToGroupOk}
         onCancel={onMoveToGroupCancel}
         okText={t('common.confirm')}
+        okButtonProps={{ disabled: !targetGroupId || targetGroupOptions.length === 0 }}
       >
         <div style={{ marginTop: 16 }}>
           <Text type="secondary">

@@ -221,7 +221,7 @@ if [ "$MAXIMIZE" = 1 ]; then
   WORKER_MEM=$(clampm 10 4096 24576)   # PM/MR XML 解析最吃内存
   ACS_MEM=$(clampm 6 4096 16384)       # TR-069 长连接会话堆
   APP_MEM=$(clampm 3 2048 8192)
-  MINIO_MEM=$(clampm 5 2048 8192)
+  MINIO_MEM=$(clampm 5 4096 8192)      # 对象存储；压测实测高并发 PM/MR 上传下内存可占满 1-2GiB，下限对齐 ACS/worker（2026-07-21）
   NATS_MEM=$(clampm 3 1024 4096)
   REDIS_MEM=$(clampm 2 1024 4096)      # OMC redis 实占极小，cap 给余量即可
   WEB_MEM=512
@@ -262,6 +262,9 @@ CPU_worker=$(cpu_share 0.6 2); CPU_acs=$(cpu_share 0.35 2); CPU_app=$(cpu_share 
 CPU_redis=$(cpu_share 0.15 1); CPU_nats=$(cpu_share 0.15 1)
 CPU_minio=$(cpu_share 0.15 1); CPU_web=$(cpu_share 0.1 1)
 fi
+
+# 两种规划模式都在最终 NATS_MEM 确定后统一派生，避免 maximize 分支漏定义。
+NATS_MAX_MEMORY_STORE=$(( NATS_MEM * 1024 * 1024 / 4 ))
 
 # ---- 联动派生 ----
 gomemlimit() { pct "$1" 90; }                          # GOMEMLIMIT = 0.90 × 内存限额（软限）
@@ -447,7 +450,7 @@ fi
   echo "REDIS_MAXMEMORY=${REDIS_MAXMEM}mb"; echo "REDIS_MAXMEMORY_POLICY=allkeys-lru"
   echo ""
   echo "# ── NATS / MinIO / Web ──"
-  echo "NATS_CPUS=$CPU_nats";     echo "NATS_MEM=${NATS_MEM}m"
+  echo "NATS_CPUS=$CPU_nats";     echo "NATS_MEM=${NATS_MEM}m"; echo "NATS_MAX_MEMORY_STORE=$NATS_MAX_MEMORY_STORE"
   echo "MINIO_CPUS=$CPU_minio";   echo "MINIO_MEM=${MINIO_MEM}m"
   echo "WEB_CPUS=$CPU_web";       echo "WEB_MEM=${WEB_MEM}m"
   echo ""

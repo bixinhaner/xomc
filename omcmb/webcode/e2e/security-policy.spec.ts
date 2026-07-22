@@ -114,8 +114,8 @@ async function mockSysConfigsByCategory(
 // P2-⑧ Autocomplete switching
 // ============================================================================
 
-test.describe('P2-⑧ Autocomplete behavior on login page', () => {
-  test('isBrowserAutoRecordPass=true → input autocomplete=off / password=new-password', async ({
+test.describe('P2-⑧ Browser password-save behavior on login page', () => {
+  test('isBrowserAutoRecordPass=true → text input + CSS mask + autocomplete=off', async ({
     page,
   }) => {
     await mockPublicSecurityConfigs(page, { isBrowserAutoRecordPass: true });
@@ -128,7 +128,9 @@ test.describe('P2-⑧ Autocomplete behavior on login page', () => {
     const passwordInput = page.getByPlaceholder(PASSWORD_PLACEHOLDER).first();
 
     await expect(usernameInput).toHaveAttribute('autocomplete', 'off');
-    await expect(passwordInput).toHaveAttribute('autocomplete', 'new-password');
+    await expect(passwordInput).toHaveAttribute('type', 'text');
+    await expect(passwordInput).toHaveAttribute('autocomplete', 'off');
+    await expect(passwordInput).toHaveCSS('-webkit-text-security', 'disc');
   });
 
   test('isBrowserAutoRecordPass=false → default autocomplete (username / current-password)', async ({
@@ -142,6 +144,7 @@ test.describe('P2-⑧ Autocomplete behavior on login page', () => {
     const passwordInput = page.getByPlaceholder(PASSWORD_PLACEHOLDER).first();
 
     await expect(usernameInput).toHaveAttribute('autocomplete', 'username');
+    await expect(passwordInput).toHaveAttribute('type', 'password');
     await expect(passwordInput).toHaveAttribute('autocomplete', 'current-password');
   });
 });
@@ -150,28 +153,36 @@ test.describe('P2-⑧ Autocomplete behavior on login page', () => {
 // P2-⑦ Idle timer (auto-logout after N minutes of inactivity)
 // ============================================================================
 
-test.describe('P2-⑦ Idle logout after inactivity', () => {
+test.describe('P2-⑦ Idle screen lock after inactivity', () => {
   test.beforeEach(async ({ page }) => {
     // 登录态请求需要 mock — 登录 hook 内拉 useSysConfigsByCategory
     // 也需要返回 idleLockMinutes 值才能驱动 useIdleLogout
     await mockSysConfigsByCategory(page, { userSessionExpirationMin: 1 });
   });
 
-  test('设 idleMinutes=1 + 跳时钟 65s → 自动跳回 /login', async ({ page }) => {
+  test('设 idleMinutes=1 + 跳时钟 65s → 显示解锁并恢复锁屏前页面', async ({ page }) => {
     // page.clock 1.45+ — install 后所有 setInterval/Date.now 走假时钟。
     // 必须在 navigation 之前 install。
     await page.clock.install();
 
     await localLogin(page); // 进 /dashboard
     await expect(page).toHaveURL(/\/dashboard/);
+    await page.goto('/system/config?tab=security');
+    await expect(page).toHaveURL(/\/system\/config\?tab=security/);
 
     // useIdleLogout 监听用户事件刷新 lastActivity；
     // 我们不触发任何事件，让 lastActivity 停在 login 完成时刻；
     // 跳时钟 65 秒 → 通过一轮 30s checkInterval 且 >= 1min idleMs，触发登出。
     await page.clock.fastForward('01:05'); // 65 秒（mm:ss）
 
-    // 期望被跳到 /login
+    // 仍复用认证页路由，但界面必须明确是锁屏/解锁态，而不是普通登录态。
     await expect(page).toHaveURL(/\/login/, { timeout: 10_000 });
+    await expect(page.getByRole('heading', { name: /屏幕已锁定|Screen Locked/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /解\s*锁|Unlock/i })).toBeVisible();
+
+    await page.getByPlaceholder(PASSWORD_PLACEHOLDER).first().fill('admin123');
+    await page.getByRole('button', { name: /解\s*锁|Unlock/i }).click();
+    await expect(page).toHaveURL(/\/system\/config\?tab=security/);
   });
 
   test('设 idleMinutes=0 → idle hook 不挂载，时钟跳过也不登出', async ({ page }) => {

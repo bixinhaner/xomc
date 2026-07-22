@@ -23,9 +23,8 @@ export function rfStatusOf(value: string | undefined | null): RFStatusKind | nul
 
 export function displayRFStatusOf(
   value: string | undefined | null,
-  isOnline: boolean | undefined | null,
+  _isOnline: boolean | undefined | null,
 ): RFStatusKind | null {
-  if (isOnline === false) return 'off';
   return rfStatusOf(value);
 }
 

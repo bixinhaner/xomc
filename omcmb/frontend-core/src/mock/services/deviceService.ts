@@ -39,6 +39,30 @@ function computeStats(items: Device[]) {
   };
 }
 
+function matchesDeviceSearch(device: Device, rawSearch: string): boolean {
+  const keywords = rawSearch
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+    .slice(0, 50);
+  if (keywords.length === 0) return true;
+
+  const values = [
+    device.sn,
+    device.name,
+    device.hostName,
+    device.deviceName,
+    device.ipAddress,
+    device.macAddress,
+    device.pci,
+    device.site,
+    device.deviceModel,
+    device.vendor,
+  ].map((v) => String(v ?? '').toLowerCase());
+
+  return keywords.some((kw) => values.some((v) => v.includes(kw)));
+}
+
 export const deviceService = {
   async getList(
     params: DeviceFilter & PageRequest
@@ -48,6 +72,9 @@ export const deviceService = {
 
     if (params.name) filtered = filterByText(filtered, 'name', params.name);
     if (params.sn) filtered = filterByText(filtered, 'sn', params.sn);
+    if (params.searchText) {
+      filtered = filtered.filter((d) => matchesDeviceSearch(d, params.searchText!));
+    }
     // 批量输入：按 SN 列表精确过滤（与后端 ?sn_list= 对齐）。
     if (params.snList && params.snList.length > 0) {
       const set = new Set(params.snList);

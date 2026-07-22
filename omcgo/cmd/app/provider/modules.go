@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"strconv"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/core/components"
 	minioinfra "github.com/omcgo/omcgo/internal/core/components/minio"
+	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/ratelimit"
@@ -180,7 +182,7 @@ func initMRTaskModule(c *Container) error {
 	cleaner := mrtask.NewCleaner(c.miscDeps.mrStore, mrtask.CleanerConfig{
 		Bucket: c.Cfg.MinIO.Buckets.MRFiles,
 	}, func(ctx context.Context) int {
-		return readMinIORetentionDays(ctx, mrSysCfg, logger)
+		return readMinIORetentionDaysOrDefault(ctx, mrSysCfg, logger)
 	}, logger)
 	cleaner.SetMetrics(metrics)
 	if err := cleaner.Start(context.Background()); err != nil {
@@ -471,6 +473,9 @@ func initUFTEModule(c *Container) error {
 			if files[i].FileName != fileName || files[i].ObjectPath == "" {
 				continue
 			}
+			if files[i].IsDeleted {
+				continue
+			}
 			bucket, objectPath, splitErr := backup.SplitBucketAndPath(files[i].ObjectPath)
 			if splitErr != nil {
 				return "", splitErr
@@ -526,11 +531,9 @@ func initUFTEModule(c *Container) error {
 		return "", false, nil
 	})
 
-	// 注入"日志文件是否已被配额清理"回调。UFTE 的文件名/下载列来自
-	// backup_restore_file；故障日志配额删除状态在 station_fault_logs.is_deleted。
-	// 这里先按 (sn, task_id, file_name) 找到当前 UFTE 任务的 MinIO 对象，再用同一个
-	// bucket/object_path 精确查询故障日志记录，避免同设备重复上传同名厂商日志时误判。
-	faultLogRepo := stationlog.NewPgFaultRepository(c.PgPool)
+	// 注入"日志文件元数据是否已标记删除"回调。UFTE 的文件名/下载列来自
+	// backup_restore_file；故障日志文件数配额清理也记录在 backup_restore_file.is_deleted。
+	// 按 (sn, task_id, file_name) 精确命中当前 UFTE 任务，避免同设备重复上传同名厂商日志时误判。
 	service.SetFileDeletedLookup(func(ctx context.Context, sn, mainTaskID, fileName string) (bool, error) {
 		if sn == "" || mainTaskID == "" || fileName == "" {
 			return false, nil
@@ -547,15 +550,7 @@ func initUFTEModule(c *Container) error {
 			if f.TaskID == nil || *f.TaskID != mainTaskID {
 				continue
 			}
-			bucket, objectPath, splitErr := backup.SplitBucketAndPath(f.ObjectPath)
-			if splitErr != nil {
-				return false, splitErr
-			}
-			logFile, fileErr := faultLogRepo.LatestByObject(ctx, bucket, objectPath)
-			if fileErr != nil || logFile == nil {
-				return false, fileErr
-			}
-			return logFile.IsDeleted, nil
+			return f.IsDeleted, nil
 		}
 		return false, nil
 	})
@@ -667,6 +662,7 @@ func initProvisionModule(c *Container) error {
 		c.Carriers, c.TaskSvc, c.EventBus, c.Cfg.Provision, logger,
 	)
 	provisionEngine.SetDeduper(c.Deduper)
+	provisionEngine.SetParamSyncRoutingMode(c.Cfg.ParamSync.RoutingMode)
 	// HIGH-27 / MEDIUM-19：provisioning 指标（discovery_log 状态写库失败、Redis 节流失败）。
 	provisionMetrics := provision.NewMetrics(c.MetricsReg)
 	provisionEngine.SetMetrics(provisionMetrics)
@@ -690,6 +686,9 @@ func initProvisionModule(c *Container) error {
 			c.Cfg.Provision.ModelUpload, logger,
 		)
 		modelUploadSvc.SetMetrics(provisionMetrics)
+		if c.miscDeps.paramSyncStarter != nil {
+			modelUploadSvc.SetParamSyncSubmitter(c.miscDeps.paramSyncStarter)
+		}
 		provisionEngine.SetModelUploadService(modelUploadSvc)
 		logger.Info("model upload service enabled",
 			zap.String("upload_url", c.Cfg.Provision.ModelUpload.UploadURL))
@@ -703,7 +702,7 @@ func initProvisionModule(c *Container) error {
 			SetRedisClient(c.Redis).
 			SetParamSyncWriter(c.DeviceRepo).
 			SetPathBSyncTaskReader(task.NewPgTaskRepository(c.PgPool)).
-			SetDeviceInfoRefresher(device.NewInfoSyncer(c.DeviceInfoRepo, c.ParamRepo, device.NewPgDeviceRepository(c.PgPool), c.Carriers, logger)) // Path B 参数落库后立即刷新 device_info 快照
+			SetDeviceInfoRefresher(device.NewInfoSyncer(c.DeviceInfoRepo, c.ParamRepo, device.NewPgDeviceRepository(c.PgPool), c.Carriers, logger, device.NewPgLocationObservationRepository(c.PgPool))) // Path B 参数落库后立即刷新 device_info 快照
 
 		// Issue #758: 设备名称同步钩子装配
 		// Path B 同步完成后比对 LMT 设备名与网管名，按配置方向自动同步或标记待确认。
@@ -717,8 +716,8 @@ func initProvisionModule(c *Container) error {
 		})
 		deviceNameSyncHook := provision.NewDeviceNameSyncHook(
 			nameSyncConfigLookup, c.ParamRepo, c.DeviceInfoRepo, c.DeviceInfoRepo, logger,
-		).SetSiteUpdater(device.NewPgDeviceRepository(c.PgPool)) // P1-1: 自动路径同步 devices.site_name
-		// TODO: 当配置方向为 omc_to_lmt 时，需注入 SPVSender 和 Translator 以支持下发
+		).SetSiteUpdater(device.NewPgDeviceRepository(c.PgPool)).
+			SetSPVSender(provision.NewDeviceNameTaskSender(c.TaskSvc))
 		syncSvc.SetDeviceNameSyncHook(deviceNameSyncHook)
 		logger.Info("device name sync hook enabled (Issue #758)")
 
@@ -727,8 +726,11 @@ func initProvisionModule(c *Container) error {
 			syncSvc.SetDurableStarter(c.miscDeps.paramSyncStarter)
 		}
 		provisionEngine.SetSyncService(syncSvc)
-		// T-0126: 注入 ParamSyncStarter 让 device.handler.SyncDeviceParams 调 Path B 手动同步（reason="manual"）
+		// T-0126: 注入 ParamSyncStarter 让手动同步先走 durable parameter_sync_*。
+		// 旧 sync-gpv Path B 仅作为临时兜底，待 param_sync_running 稳定后删除。
 		if c.DeviceService != nil {
+			c.DeviceService.SetParamSyncRoutingMode(c.Cfg.ParamSync.RoutingMode)
+			c.DeviceService.SetParamSyncManualOfflineMode(c.Cfg.ParamSync.ManualOfflineMode)
 			if c.miscDeps.paramSyncStarter != nil {
 				c.miscDeps.paramSyncStarter.SetLegacy(syncSvc)
 				c.DeviceService.SetParamSyncStarter(c.miscDeps.paramSyncStarter)
@@ -753,12 +755,14 @@ func initProvisionModule(c *Container) error {
 			logger.Info("device license params handler initialized")
 		}
 
-		// T-0124: 周期性参数同步兜底。
+		// T-0124: 周期性参数同步兜底（优先提交到 durable parameter_sync_* 数据面）。
 		// 配置从 sys_configs (category='device') 读，Enabled / Interval / BatchSize /
 		// MaxConcurrent / StaggerWindow 全部 runtime 动态生效（30s 缓存 + 1min 轮询）。
 		// 总是启动 scheduler；Enabled=false 时 scheduler 空跑等切换 — 这样用户在 FE
 		// 系统配置 → 设备设置面板里开关 enabled 不需要重启进程。
 		// PG advisory lock 协调多副本 leader，保证同一时刻只有一个 app 副本扫描入队。
+		// 所有同步（定时/手动/上线/固件变化等）统一先走 parameter_sync_*；
+		// 旧 sync-gpv Path B 只保留为临时兜底，待 param_sync_running 稳定后删除。
 		sysCfgRepo := admin.NewPgSysConfigRepository(c.PgPool)
 		periodicSyncLookup := provision.SysConfigLookup(func(ctx context.Context, cat, key string) (string, bool) {
 			cfg, err := sysCfgRepo.GetByKey(ctx, cat, key)
@@ -782,6 +786,7 @@ func initProvisionModule(c *Container) error {
 			c.DeviceRepo, syncSvc, leader,
 			periodicSyncPolicy, logger,
 		)
+		periodicSyncer.SetParamSyncRoutingMode(c.Cfg.ParamSync.RoutingMode)
 		go func() {
 			if err := periodicSyncer.Start(context.Background()); err != nil && err != context.Canceled {
 				logger.Warn("periodic syncer exited with error", zap.Error(err))
@@ -904,9 +909,38 @@ func initBackupModule(c *Container) error {
 	// after CPE finishes uploading. Both wire onto the same RestoreMetrics.
 	restoreService.SetBackupTaskFinder(backupTaskRepo)
 	filePathRecorder := backup.NewFilePathRecorder(backupTaskRepo, restoreMetrics, logger)
+	backupRestoreFileRepo := backup.NewPgFileRepository(c.PgPool)
 	// M1 of backup-restore-alignment-plan: 同步落库 backup_restore_file 元数据
 	// （SN/file_name/md5/size/operator_code/update_time），支撑后续查询与导出。
-	filePathRecorder.SetFileRepository(backup.NewPgFileRepository(c.PgPool))
+	filePathRecorder.SetFileRepository(backupRestoreFileRepo)
+	logFileRetentionSysCfg := admin.NewPgSysConfigRepository(c.PgPool)
+	logFileRetentionPolicy := stationlog.NewRetentionPolicy(
+		func(ctx context.Context, category, key string) (string, bool) {
+			row, err := logFileRetentionSysCfg.GetByKey(ctx, category, key)
+			if err != nil || row == nil {
+				return "", false
+			}
+			return row.Value, true
+		},
+		logger,
+	)
+	if c.MinIO != nil {
+		filePathRecorder.SetLogFileQuota(backupRestoreFileRepo, logFileRetentionPolicy, c.MinIO)
+	} else {
+		filePathRecorder.SetLogFileQuota(backupRestoreFileRepo, logFileRetentionPolicy, nil)
+	}
+	if c.SysConfigSvc != nil {
+		c.SysConfigSvc.RegisterSavedHook(func(_ context.Context, category string) {
+			if category == stationlog.RetentionCategory {
+				logFileRetentionPolicy.InvalidateCache()
+				go func() {
+					cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+					defer cancel()
+					filePathRecorder.EnforceAllLogFileQuotas(cleanupCtx)
+				}()
+			}
+		})
+	}
 	// FAULT_LOG_COLLECT / RUNTIME_LOG_COLLECT 的"文件落地即任务成功"hook：
 	// BACKUP stream 是 WorkQueuePolicy，软件包不能再订一份 backup.file.received，
 	// 走同进程 hook 让 FilePathRecorder 处理完元数据后回调 software 推进 sub_task。
@@ -1234,7 +1268,7 @@ func ensureSnapshotBucket(ctx context.Context, client *minio.Client, bucket stri
 	return nil
 }
 
-// initStationLogModule 初始化基站日志采集模块（运行日志 + 故障日志下载 / 配额管理）。
+// initStationLogModule 初始化基站日志采集模块（运行日志 + 异常重启记录）。
 func initStationLogModule(c *Container) error {
 	logger := c.Logger.Named("stationlog")
 
@@ -1266,7 +1300,7 @@ func initStationLogModule(c *Container) error {
 		})
 	}
 
-	// 订阅 SubjectLogFileReceived 事件，将上传的日志文件入库
+	// 订阅 SubjectLogFileReceived 事件；运行日志入库，故障日志上传由文件传输任务链路维护。
 	if c.EventBus != nil {
 		if _, err := c.EventBus.Subscribe(event.SubjectLogFileReceived, func(ctx context.Context, evt event.Event) error {
 			return svc.HandleLogFileReceived(ctx, evt)
@@ -1565,13 +1599,30 @@ func initMiscModules(c *Container) error {
 	mmlService.SetCmdParamRepo(mmlCmdParamRepo)
 	// issue #115 调整3（A1）：自定义命令 PATH 关联表仓库。
 	mmlService.SetCustomCommandPathRepo(mml.NewPgCustomCommandPathRepository(c.PgPool))
-	// CSV 导出「参数名称」列：standardPath → standard_params.description（友好名）。
+	// CSV 导出「参数名称」列：优先使用命令 sub-field 的请求语言标签；
+	// 中文缺失时回退 standard_params.description，英文缺失时回退 standardPath，避免中文泄漏到英文导出。
 	mmlService.SetPathNameResolver(func(ctx context.Context, paths []string) (map[string]string, error) {
 		if len(paths) == 0 {
 			return nil, nil
 		}
+		locale := string(appcontext.GetLocale(ctx))
 		rows, err := c.PgPool.Query(ctx,
-			`SELECT standard_path, COALESCE(description, '') FROM standard_params WHERE standard_path = ANY($1)`, paths)
+			`SELECT sp.standard_path,
+				COALESCE(
+					NULLIF((SELECT csf.label_i18n->>$1
+						FROM mml_command_sub_fields csf
+						WHERE csf.standard_path_id = sp.id
+						ORDER BY csf.sort_order, csf.id
+						LIMIT 1), ''),
+					NULLIF((SELECT csf.label_i18n->>'en-US'
+						FROM mml_command_sub_fields csf
+						WHERE csf.standard_path_id = sp.id
+						ORDER BY csf.sort_order, csf.id
+						LIMIT 1), ''),
+					CASE WHEN $1 = 'zh-CN' THEN COALESCE(sp.description, '') ELSE '' END
+				) AS display_name
+			 FROM standard_params sp
+			 WHERE sp.standard_path = ANY($2)`, locale, paths)
 		if err != nil {
 			return nil, fmt.Errorf("query standard_params descriptions: %w", err)
 		}
@@ -1580,7 +1631,7 @@ func initMiscModules(c *Container) error {
 		for rows.Next() {
 			var p, d string
 			if err := rows.Scan(&p, &d); err != nil {
-				return nil, fmt.Errorf("scan standard_params description: %w", err)
+				return nil, fmt.Errorf("scan standard parameter display name: %w", err)
 			}
 			if d != "" {
 				m[p] = d
@@ -1690,8 +1741,8 @@ func initMiscModules(c *Container) error {
 	//   - 设备不存在
 	//   - product_id 与 productClass 均无法路由到 product（孤儿）
 	//   - product 装配件未挂 paramModel
-	// 上层（ConsoleService）见 nil 即降级到"全集 sub_field"行为，与原 SQL NULL
-	// 返回路径等价。
+	// 上层（ConsoleService）见 nil 即返回空的设备过滤结果，避免设备未解析时放行
+	// 未过滤的全集 sub_field。
 	mmlConsoleSvc.SetParamModelByDeviceResolver(func(ctx context.Context, deviceKey string) (*uuid.UUID, error) {
 		dev, err := resolveDeviceByKey(ctx, c, deviceKey)
 		if err != nil {
@@ -1760,6 +1811,33 @@ func initMiscModules(c *Container) error {
 		pid := mr.Product.ID
 		return &pid, nil
 	}
+	// 控制台公有/私有自定义命令也必须使用当前产品参数模型的支持集合；否则
+	// 模板中的跨产品 path 会在树中显示，直到选中后才被过滤。
+	if c.ProductRegistry != nil && c.ParamRegistry != nil {
+		mmlService.SetCustomCommandSupportedPathsResolver(func(ctx context.Context, productID uuid.UUID) (map[string]struct{}, error) {
+			p, err := c.ProductRegistry.GetProductByID(ctx, productID)
+			if err != nil {
+				return nil, fmt.Errorf("get product %s: %w", productID, err)
+			}
+			if p == nil || p.ParamModelID == nil {
+				return map[string]struct{}{}, nil
+			}
+			set, err := c.ParamRegistry.GetByParamModel(ctx, *p.ParamModelID)
+			if err != nil {
+				if errors.Is(err, parammodel.ErrNoMapping) || errors.Is(err, parammodel.ErrInactiveParamModel) {
+					return map[string]struct{}{}, nil
+				}
+				return nil, fmt.Errorf("get param_model %s: %w", p.ParamModelID, err)
+			}
+			paths := make(map[string]struct{}, len(set.Mappings))
+			for _, mapping := range set.Mappings {
+				if mapping.StandardPath != "" && mapping.IsActive && mapping.IsSupported {
+					paths[mapping.StandardPath] = struct{}{}
+				}
+			}
+			return paths, nil
+		})
+	}
 	mmlConsoleSvc.SetUnsupportedPathsProvider(unsupportedPathRepo, productIDByDevice)
 	if c.SyncSvc != nil {
 		c.SyncSvc.SetUnsupportedPathRepo(unsupportedPathRepo)
@@ -1788,8 +1866,7 @@ func initMiscModules(c *Container) error {
 				return set, nil
 			}
 			if errors.Is(err, product.ErrOrphan) {
-				// 孤儿设备：保留 productResolved=false，前端按 user Q4 决定的策略
-				// 显示全部命令但每条标 0 supported。
+				// 孤儿产品：保留 productResolved=false，由控制台返回空过滤结果。
 				return &mml.SupportedSet{
 					ProductClass:    productClass,
 					ProductResolved: false,
@@ -1885,8 +1962,9 @@ func initMiscModules(c *Container) error {
 			c.ParamRegistry,
 			c.DeviceService,
 			c.ParamRepo,
-			device.NewInfoSyncer(c.DeviceInfoRepo, c.ParamRepo, device.NewPgDeviceRepository(c.PgPool), c.Carriers, logger),
+			device.NewInfoSyncer(c.DeviceInfoRepo, c.ParamRepo, device.NewPgDeviceRepository(c.PgPool), c.Carriers, logger, device.NewPgLocationObservationRepository(c.PgPool)),
 			c.DeviceRepo, // migration 000146: 写 last_param_sync_failed_at + error
+			c.miscDeps.taskSvc,
 			logger,
 		)
 		if err := rpcRespSub.Start(); err != nil {
@@ -2191,6 +2269,13 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 
 	// System Info endpoint
 	c.miscDeps.sysInfoHandler = components.NewSystemInfoHandler(c.PgPool, c.Redis, logger)
+	prometheusURL := os.Getenv("OMCGO_SYSTEM_INFO_PROMETHEUS_URL")
+	if prometheusURL == "" {
+		prometheusURL = "http://prometheus:9090"
+	}
+	c.miscDeps.sysInfoHandler.SetStorageCollector(
+		components.NewPrometheusStorageCollector(prometheusURL, 2*time.Second, time.Minute, nil),
+	)
 
 	// PM threshold
 	c.miscDeps.thresholdRepo = pm.NewPgThresholdRepository(c.PgPool)

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from 'react';
-import { Alert, AutoComplete, Button, Card, Col, Form, Input, Row, Select, Space, Spin, Switch, Table, Tag, Tooltip, Typography, message, notification } from 'antd';
+import { Alert, AutoComplete, Button, Card, Checkbox, Col, Form, Input, Row, Select, Space, Spin, Switch, Table, Tag, Tooltip, Typography, message, notification } from 'antd';
 import type { FormInstance } from 'antd';
 import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, DeleteOutlined, PlusOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
@@ -7,8 +7,6 @@ import { useParameterSchema, useSearchParameters, useUpdateParameters } from '@c
 import { deviceParameterApi } from '@core/services/api/deviceParameterApi';
 import { useDeviceTaskStatus } from '@core/hooks/api/useDeviceTask';
 import { notificationKeys } from '@core/hooks/api/useNotificationCenter';
-import { useRenameDevice } from '@core/hooks/api/useDevices';
-import { useDeviceNameSyncMode } from '@core/hooks/api/useDeviceNameSyncMode';
 import { getTimezoneAliasOptions, mapTimezoneAliasToDisplay } from '@core/utils/timezoneAliasConfig';
 import {
   feedbackKey,
@@ -22,8 +20,13 @@ import {
   applyInstanceContext,
   getEffectiveEnumMeta,
   getFeedbackScopeContext,
+  isBscCodecSupportParam,
   localizeEnumLabel,
+  normalizeBscCodecSupportValue,
+  parseQuickSettingsMultiCheckboxValue,
   resolveQuickSettingsParameterType,
+  serializeBscCodecSupportValue,
+  serializeQuickSettingsMultiCheckboxValue,
   validateMmeIp,
   validateMmeIpPlmnLimit,
   validateMmeIpPlmnRows,
@@ -38,8 +41,6 @@ import { useT } from '@/hooks/useT';
 const { Text } = Typography;
 const ERROR_FEEDBACK_DURATION_SECONDS = 2;
 
-// FAPService.1 HNBName 标准路径：命中此 path 的字段走 rename 接口（不走普通 SPV 下发）
-const HNB_NAME_PATH = 'Device.Services.FAPService.1.AccessMgmt.LTE.HNBName';
 const BM_GSM_CELL_OP_STATE_PATTERN = /^Device\.Services\.GsmBTSCellDT\.\d+\.OpState$/;
 const BITMASK_SELECT_PATHS = new Set([
   'Device.FAP.Synchronization.PpsTimeMode',
@@ -1020,8 +1021,6 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
   const dlSubCarrierSpacing = Form.useWatch('DLSubCarrierSpacing', form);
   const ulSubCarrierSpacing = Form.useWatch('ULSubCarrierSpacing', form);
   const updateMutation = useUpdateParameters();
-  const renameMutation = useRenameDevice(deviceId);
-  const nameSyncMode = useDeviceNameSyncMode();
   const queryClient = useQueryClient();
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const feedbackScope = useMemo(() => getFeedbackScopeContext(group.id, instanceContext), [group.id, instanceContext]);
@@ -1039,7 +1038,6 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
   });
   const setFeedback = useQuickSettingsFeedbackStore((s) => s.setFeedback);
   const patchFeedback = useQuickSettingsFeedbackStore((s) => s.patchFeedback);
-  const clearFeedback = useQuickSettingsFeedbackStore((s) => s.clearFeedback);
   const draft = useQuickSettingsFeedbackStore((s) => s.drafts[fbKey]);
   const setDraftField = useQuickSettingsFeedbackStore((s) => s.setDraftField);
   const clearDraft = useQuickSettingsFeedbackStore((s) => s.clearDraft);
@@ -1506,6 +1504,10 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
           ? normalizeConstrainedGnssSyncSourceValue(draft[p.name], enumValuesForPath, draftPath)
           : isEffectiveBitmaskPath(draftPath)
           ? normalizeBitmaskValue(draft[p.name])
+          : p.type === 'multiCheckbox'
+          ? isBscCodecSupportParam(p.standardPath ?? p.name)
+            ? normalizeBscCodecSupportValue(draft[p.name])
+            : parseQuickSettingsMultiCheckboxValue(draft[p.name])
           : isStringMultiSelectPath(draftPath)
           ? normalizeStringMultiSelectValue(draft[p.name])
           : isSwitchPath(draftPath)
@@ -1564,6 +1566,13 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
           gnssSyncSourceRef.current = nextValue;
         } else if (isEffectiveBitmaskPath(path)) {
           form.setFieldValue(p.name, normalizeBitmaskValue(raw));
+        } else if (p.type === 'multiCheckbox') {
+          form.setFieldValue(
+            p.name,
+            isBscCodecSupportParam(path)
+              ? normalizeBscCodecSupportValue(raw)
+              : parseQuickSettingsMultiCheckboxValue(raw),
+          );
         } else if (isStringMultiSelectPath(path)) {
           form.setFieldValue(p.name, normalizeStringMultiSelectValue(raw));
         } else if (isSwitchPath(path)) {
@@ -1614,12 +1623,18 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
       }
 
       const isBitmaskField = isEffectiveBitmaskPath(path);
+      const isMultiCheckboxField = p.type === 'multiCheckbox';
+      const isCodecSupportField = isMultiCheckboxField && isBscCodecSupportParam(path);
       const isStringMultiSelectField = isStringMultiSelectPath(path);
       const isSwitchField = isSwitchPath(path);
       const newVal = special?.kind === 'mme-ip-plmn-table'
         ? serializeMmeIpPlmnList(toMmeIpPlmnRows(values[p.name]))
         : isBitmaskField
         ? serializeBitmaskValue(values[p.name])
+        : isMultiCheckboxField
+        ? isCodecSupportField
+          ? serializeBscCodecSupportValue(values[p.name])
+          : serializeQuickSettingsMultiCheckboxValue(values[p.name])
         : isStringMultiSelectField
         ? serializeStringMultiSelectValue(values[p.name])
         : isSwitchField
@@ -1632,7 +1647,13 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         : (preferSchemaCurrentValue
           ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
           : (rawItem?.parameterValue ?? item?.currentValue ?? ''));
-      const oldVal = isSwitchField ? normalizeSwitchComparableValue(rawOldVal) : rawOldVal;
+      const oldVal = isSwitchField
+        ? normalizeSwitchComparableValue(rawOldVal)
+        : isMultiCheckboxField
+        ? isCodecSupportField
+          ? serializeBscCodecSupportValue(rawOldVal)
+          : serializeQuickSettingsMultiCheckboxValue(rawOldVal)
+        : rawOldVal;
       if (newVal === oldVal) continue;
 
       const parameterType = resolveQuickSettingsParameterType(p.type, item?.type, rawItem?.parameterType);
@@ -1652,6 +1673,8 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         ? validateConstrainedGnssSyncSourceValue(newVal, allowedValues, path, t)
         : isStringMultiSelectField
         ? null
+        : isMultiCheckboxField
+        ? validateValue(newVal, parameterType, item?.constraints)
         : isSwitchField
         ? null
         : validateValue(newVal, parameterType, item?.constraints);
@@ -1687,51 +1710,22 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
     }
 
     setFieldErrors({});
-    // 识别 FAPService.1 HNBName → 改走 rename 接口（不走普通 SPV 下发）
-    const hnbUpdate = updates.find((u) => u.parameterPath === HNB_NAME_PATH);
-    const regularUpdates = hnbUpdate
-      ? updates.filter((u) => u.parameterPath !== HNB_NAME_PATH)
-      : updates;
     try {
-      let renameTaskId: string | undefined;
-      if (hnbUpdate) {
-        const renameResult = await renameMutation.mutateAsync(hnbUpdate.parameterValue);
-        renameTaskId = renameResult.taskId;
-      }
-      if (regularUpdates.length > 0) {
-        const result = await updateMutation.mutateAsync({ deviceId, parameters: regularUpdates });
-        latestLocalEditAtRef.current = 0;
-        message.success({
-          content: t('device.cell.saveSuccessMsg', { count: updates.length }),
-          duration: 6,
-        });
-        setFeedback(fbKey, {
-          kind: 'cell',
-          submitStatus: 'queued',
-          taskId: result.taskId,
-          count: updates.length,
-          at: Date.now(),
-        });
-      } else if (hnbUpdate) {
-        // 只有 rename：auto_omc_to_lmt 可能返回设备侧 taskId；prompt / 仅 OMC 侧成功则无任务进度。
-        latestLocalEditAtRef.current = 0;
-        message.success({
-          content: t('device.cell.saveSuccessMsg', { count: 1 }),
-          duration: 6,
-        });
-        if (renameTaskId) {
-          setFeedback(fbKey, {
-            kind: 'cell',
-            submitStatus: 'queued',
-            taskId: renameTaskId,
-            count: 1,
-            at: Date.now(),
-          });
-        } else {
-          clearFeedback(fbKey);
-          clearDraft(fbKey);
-        }
-      }
+      // 快速设置始终修改设备/LMT 侧参数。HNBName、gNBName 与其他参数一样
+      // 通过 SetParameterValues 下发，不得转成网管设备改名操作。
+      const result = await updateMutation.mutateAsync({ deviceId, parameters: updates });
+      latestLocalEditAtRef.current = 0;
+      message.success({
+        content: t('device.cell.saveSuccessMsg', { count: updates.length }),
+        duration: 6,
+      });
+      setFeedback(fbKey, {
+        kind: 'cell',
+        submitStatus: 'queued',
+        taskId: result.taskId,
+        count: updates.length,
+        at: Date.now(),
+      });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       notification.error({
@@ -1833,6 +1827,10 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
             ? normalizeConstrainedGnssSyncSourceValue(refreshedValue, allowedEnumValues, path)
           : isEffectiveBitmaskPath(path)
             ? normalizeBitmaskValue(refreshedValue)
+          : p.type === 'multiCheckbox'
+            ? isBscCodecSupportParam(path)
+              ? normalizeBscCodecSupportValue(refreshedValue)
+              : parseQuickSettingsMultiCheckboxValue(refreshedValue)
           : isStringMultiSelectPath(path)
             ? normalizeStringMultiSelectValue(refreshedValue)
           : isSwitchPath(path)
@@ -1953,6 +1951,15 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
             }
             if (special?.kind === 'mme-ip-plmn-table') {
               setDraftField(fbKey, name, toMmeIpPlmnRows(value));
+            } else if (p?.type === 'multiCheckbox') {
+              const normalized = isBscCodecSupportParam(path)
+                ? normalizeBscCodecSupportValue(value)
+                : parseQuickSettingsMultiCheckboxValue(value);
+              changedValues[name] = normalized;
+              if (!formValueEquals(form.getFieldValue(name), normalized)) {
+                form.setFieldValue(name, normalized);
+              }
+              setDraftField(fbKey, name, normalized.join('-'));
             } else {
               setDraftField(fbKey, name, String(value ?? ''));
             }
@@ -2006,6 +2013,10 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                 ? serializeMmeIpPlmnList(toMmeIpPlmnRows(value))
                 : isEffectiveBitmaskPath(path)
                 ? serializeBitmaskValue(value)
+                : p.type === 'multiCheckbox'
+                ? isBscCodecSupportParam(path)
+                  ? serializeBscCodecSupportValue(value)
+                  : serializeQuickSettingsMultiCheckboxValue(value)
                 : isStringMultiSelectPath(path)
                 ? serializeStringMultiSelectValue(value)
                 : isSwitchPath(path)
@@ -2025,6 +2036,8 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                 ? validateConstrainedGnssSyncSourceValue(normalizedValue, allowedValues, path, t)
                 : isStringMultiSelectPath(path)
                 ? null
+                : p.type === 'multiCheckbox'
+                ? validateValue(normalizedValue, (sItem?.type as never) ?? 'string', sItem?.constraints)
                 : isSwitchPath(path)
                 ? null
                 : validateValue(
@@ -2178,10 +2191,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                 ?? rawItem?.writable
                 ?? item?.writable
                 ?? false);
-            // 策略联动：auto_lmt_to_omc 下 FAPService.1 HNBName 禁用（引导在 LMT 侧改名）
-            const resolvedStdPath = special?.configPath ?? resolveReadPath(p.standardPath || '');
-            const lmtLocked = resolvedStdPath === HNB_NAME_PATH && nameSyncMode === 'auto_lmt_to_omc';
-            const finalWritable = lmtLocked || p.readonly ? false : writable;
+            const finalWritable = p.readonly ? false : writable;
             const error = fieldErrors[p.name];
             const isSwitchField = isSwitchPath(path);
             // XML hideRangeHint="true" 或 Switch 字段时不在 label 后展示 schema 推导的 [min ~ max]
@@ -2198,8 +2208,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                 <span style={special?.kind === 'mme-ip-plmn-table' ? { whiteSpace: 'nowrap' } : undefined}>
                   {locale === 'zh-CN' ? p.titleZh : p.titleEn}
                 </span>
-                {lmtLocked && <Text type="secondary" style={{ fontSize: 12 }}>{t('device.cell.lmtLockedHint')}</Text>}
-                {!lmtLocked && (!writable || p.readonly) && <Text type="secondary" style={{ fontSize: 12 }}>{t('device.cell.readonly')}</Text>}
+                {(!writable || p.readonly) && <Text type="secondary" style={{ fontSize: 12 }}>{t('device.cell.readonly')}</Text>}
                 {constraintHint && (
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {constraintHint}
@@ -2243,6 +2252,8 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
             const isBitmaskEnum = isEnum && isEffectiveBitmaskPath(path);
             const isConstrainedGnssSyncSourceEnum = isEnum && isConstrainedGnssSyncSourceSelectPath(path);
             const isStringMultiSelectEnum = isEnum && isStringMultiSelectPath(path);
+            const isMultiCheckbox = !special && p.type === 'multiCheckbox';
+            const isCodecSupport = isMultiCheckbox && isBscCodecSupportParam(path);
             const baseEnumOptions = isBitmaskEnum
               ? isConstrainedGnssSyncSourceEnum
                 ? effectiveEnumValues.map((v, idx) => ({
@@ -2276,6 +2287,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                   label={special?.kind === 'mme-ip-plmn-table' ? undefined : label}
                   name={isTransmissionPowerField ? undefined : p.name}
                   valuePropName={!isTransmissionPowerField && isSwitchField ? 'checked' : undefined}
+                  normalize={isCodecSupport ? normalizeBscCodecSupportValue : undefined}
                   validateStatus={error ? 'error' : undefined}
                   help={error}
                   extra={extra}
@@ -2307,6 +2319,15 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                       checkedChildren={t('common.on')}
                       unCheckedChildren={t('common.off')}
                     />
+                  ) : isMultiCheckbox ? (
+                    <Checkbox.Group
+                      disabled={!finalWritable}
+                      options={(p.checkboxOptions ?? []).map((v) => ({
+                        value: v,
+                        label: v,
+                        disabled: isCodecSupport && v === 'fr',
+                      }))}
+                    />
                   ) : isEnum ? (
                     <Select
                       mode={isStringMultiSelectEnum || isConstrainedGnssSyncSourceEnum ? 'multiple' : undefined}
@@ -2335,7 +2356,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                   ruRouteItemByIdx={ruRouteItemByIdx}
                   locale={locale}
                   fieldName="LteCellWithRuList"
-                  disabled={lmtLocked}
+                  disabled={false}
                   error={fieldErrors.LteCellWithRuList}
                 />
               </Fragment>

@@ -72,6 +72,18 @@ func TestService_Get_ReadsSysConfigs_WhenPresent(t *testing.T) {
 	require.Equal(t, DefaultDays[KeyDailyDays], svc.Get(context.Background(), KeyDailyDays))
 }
 
+func TestService_ReloadStrict_UsesDefaultsForMissingSiblingPolicies(t *testing.T) {
+	svc := NewService(newStubReader(map[PolicyKey]string{
+		KeyRaw15MinDays: "45",
+	}), nil)
+
+	values, err := svc.ReloadStrict(context.Background())
+
+	require.NoError(t, err)
+	require.Equal(t, 45, values[KeyRaw15MinDays])
+	require.Equal(t, DefaultDays[KeyHourlyDays], values[KeyHourlyDays])
+}
+
 func TestService_Get_CachesAfterFirstRead(t *testing.T) {
 	reader := newStubReader(map[PolicyKey]string{KeyRaw15MinDays: "60"})
 	svc := NewService(reader, nil)
@@ -92,8 +104,8 @@ func TestService_Reload_NotifiesListener_OnChange(t *testing.T) {
 	svc := NewService(reader, nil)
 
 	var (
-		gotChanged []PolicyKey
-		gotCurrent map[PolicyKey]int
+		gotChanged    []PolicyKey
+		gotCurrent    map[PolicyKey]int
 		listenerCalls int
 	)
 	svc.RegisterListener(func(_ context.Context, current map[PolicyKey]int, changed []PolicyKey) {

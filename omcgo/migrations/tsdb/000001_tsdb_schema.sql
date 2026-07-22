@@ -7,7 +7,7 @@
 -- 从主库同步供本库 JOIN，含 mr_customize_task_dim）+ 1 个告警效率物化视图（原在 seed，建在
 -- alarms_history 上）。注：mr_files 随「MR 也记录到时序库」由主库迁来，与 mr_records 同库。
 --
--- 14 张表的「最终形态」= 主库 000001 原始定义 叠加 这些增量的净效果：
+-- 15 张表的「最终形态」= 主库 000001 原始定义 叠加 这些增量的净效果：
 --   - pm_metrics：去掉随机 uuid 主键 pm_metrics_pkey（000044）+ 去掉自然键唯一索引
 --     uq_pm_metrics_natural（000042）+ 去掉 idx_pm_metrics_ingest_time / idx_pm_metrics_object_ldn
 --     （000043）+ 带 insert-triggered autovacuum reloptions（000044）；chunk 间隔 4 小时（000045，修 B0）。
@@ -19,12 +19,17 @@
 --
 -- 超表 chunk 间隔 / 压缩 / 保留参数还原自 seed 的 _timescaledb_catalog（dimension.interval_length /
 -- bgw_job policy_compression/policy_retention / compression_settings），µs→人类可读换算见各处注释。
+--
+-- 2026-07-20 consolidated baseline：合并原 000002（alarms_history retention 固定为每天
+-- 01:08 Asia/Shanghai）+ 000003（删除与 Go 侧 internal/pm/aggregator 功能重复、全代码库无
+-- 查询引用的废弃 pm_metrics_hourly_cagg 连续聚合视图，压测实测其刷新与 autovacuum 抢 IO/Buffer
+-- 是「数据进得来、算不出来」的根因）。此后本 baseline 不再建 pm_metrics_hourly_cagg。
 -- =====================================================================================
 
 CREATE EXTENSION IF NOT EXISTS timescaledb;
 
 -- =====================================================================================
--- 1. 14 张时序/PM 表（最终形态）
+-- 1. 15 张时序/PM 表（最终形态）
 -- =====================================================================================
 
 -- ── alarms_history（超表：time 7d chunk，retention 365d，无压缩）─────────────────────
@@ -415,6 +420,7 @@ SELECT create_hypertable('public.mr_records', by_range('time', INTERVAL '1 day')
 SELECT create_hypertable('public.trace_messages', by_range('captured_at', INTERVAL '1 day'), if_not_exists => TRUE, migrate_data => TRUE);
 -- pm_metrics: seed 原为 86400000000 µs = 1 day，但 000045 已改 4 hours（修 B0）→ 这里直接以 4 hours 建表。
 SELECT create_hypertable('public.pm_metrics', by_range('time', INTERVAL '4 hours'), if_not_exists => TRUE, migrate_data => TRUE);
+
 -- pm_metrics_hourly: 604800000000 µs = 7 days; col "time"
 SELECT create_hypertable('public.pm_metrics_hourly', by_range('time', INTERVAL '7 days'), if_not_exists => TRUE, migrate_data => TRUE);
 -- pm_group_metrics_hourly: 604800000000 µs = 7 days; col "time"
@@ -444,6 +450,20 @@ SELECT add_compression_policy('public.pm_adhoc_aggregation_results', INTERVAL '9
 --   alarms_history 365d / mr_records 90d / trace_messages 3d / pm_metrics 30d /
 --   pm_metrics_hourly 180d / pm_group_metrics_hourly 180d / pm_adhoc 365d
 SELECT add_retention_policy('public.alarms_history', INTERVAL '365 days');
+
+-- alarms_history retention 固定为每天 01:08 Asia/Shanghai 执行（原 000002 增量）。
+SELECT alter_job(
+    j.job_id,
+    schedule_interval => INTERVAL '1 day',
+    fixed_schedule => TRUE,
+    initial_start => TIMESTAMPTZ '2000-01-01 01:08:00+08',
+    timezone => 'Asia/Shanghai'
+)
+  FROM timescaledb_information.jobs j
+ WHERE j.proc_name = 'policy_retention'
+   AND j.hypertable_schema = 'public'
+   AND j.hypertable_name = 'alarms_history';
+
 SELECT add_retention_policy('public.mr_records', INTERVAL '90 days');
 SELECT add_retention_policy('public.trace_messages', INTERVAL '3 days');
 SELECT add_retention_policy('public.pm_metrics', INTERVAL '30 days');
@@ -767,7 +787,7 @@ COMMENT ON FUNCTION public.refresh_alarm_efficiency_metrics() IS '刷新告警�
 
 
 -- +goose Down
--- DROP 全部对象（同名视图 → matview + 函数 → 镜像/归库表 → 影子表 → 14 张时序表；策略随 DROP TABLE 级联消失）。
+-- DROP 全部对象（同名视图 → matview + 函数 → 镜像/归库表 → 影子表 → 15 张时序表；策略随 DROP TABLE 级联消失）。
 DROP VIEW IF EXISTS public.alarm_definitions;
 DROP VIEW IF EXISTS public.cell_band;
 DROP VIEW IF EXISTS public.device_groups;
@@ -785,6 +805,7 @@ DROP TABLE IF EXISTS public.trace_tasks;
 DROP FUNCTION IF EXISTS public.refresh_alarm_efficiency_metrics();
 DROP MATERIALIZED VIEW IF EXISTS public.alarm_efficiency_metrics;
 
+DROP TABLE IF EXISTS public.mr_customize_task_dim;
 DROP TABLE IF EXISTS public.alarm_definition_dim;
 DROP TABLE IF EXISTS public.device_group_dim;
 DROP TABLE IF EXISTS public.product_dim;
@@ -803,6 +824,7 @@ DROP TABLE IF EXISTS public.pm_metrics_daily;
 DROP TABLE IF EXISTS public.pm_metrics_hourly;
 DROP TABLE IF EXISTS public.pm_metrics;
 DROP TABLE IF EXISTS public.pm_files;
+DROP TABLE IF EXISTS public.mr_files;
 DROP TABLE IF EXISTS public.trace_messages;
 DROP TABLE IF EXISTS public.mr_records;
 DROP TABLE IF EXISTS public.alarms_history;

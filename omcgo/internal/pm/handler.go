@@ -28,6 +28,11 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	maxAggregatedMetricDeviceSNs = 50
+	maxAggregatedMetricPaths     = 50
+)
+
 // Handler provides REST API endpoints for PM data.
 type Handler struct {
 	counterRepo counter.CounterRepository
@@ -341,6 +346,7 @@ func (h *Handler) ListAggregatedCounters(c *gin.Context) {
 //   - metric_type：counter / kpi
 //   - start_time / end_time：RFC3339
 //   - limit / offset
+//   - page_by=pivot_row：limit / offset 按透视表行 key 分页，total 返回透视表行总数
 //
 // 没注入 aggregator（兼容老部署）时返 503。
 func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
@@ -370,6 +376,16 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 	if v := c.Query("device_sn"); v != "" {
 		req.DeviceSNs = []string{v}
 	}
+	if v := c.Query("device_sns"); v != "" {
+		sns := splitCSVNonEmpty(v)
+		if len(sns) > maxAggregatedMetricDeviceSNs {
+			response.Fail(c, http.StatusBadRequest, fmt.Sprintf("device_sns exceeds maximum of %d", maxAggregatedMetricDeviceSNs))
+			return
+		}
+		if len(sns) > 0 {
+			req.DeviceSNs = sns
+		}
+	}
 	if v := c.Query("device_group_id"); v != "" {
 		id, err := uuid.Parse(v)
 		if err != nil {
@@ -384,12 +400,10 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 		req.DeviceGroupIDs = []uuid.UUID{id}
 	}
 	if v := c.Query("metric_paths"); v != "" {
-		parts := strings.Split(v, ",")
-		paths := make([]string, 0, len(parts))
-		for _, p := range parts {
-			if p = strings.TrimSpace(p); p != "" {
-				paths = append(paths, p)
-			}
+		paths := splitCSVNonEmpty(v)
+		if len(paths) > maxAggregatedMetricPaths {
+			response.Fail(c, http.StatusBadRequest, fmt.Sprintf("metric_paths exceeds maximum of %d", maxAggregatedMetricPaths))
+			return
 		}
 		if len(paths) > 0 {
 			req.MetricPaths = paths
@@ -421,6 +435,9 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 			req.Offset = n
 		}
 	}
+	if c.Query("page_by") == "pivot_row" {
+		req.PageByPivotRow = true
+	}
 	// #599：星期/小时段后端过滤（逗号分隔 int 列表，全选/空 = 不过滤）。
 	if v := c.Query("weekdays"); v != "" {
 		req.Weekdays = parseCSVInts(v)
@@ -443,16 +460,33 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 		}
 	}
 
-	rows, err := h.aggr.Query(c.Request.Context(), req)
-	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
-		return
-	}
 	// fill_empty=true：数据驱动补齐占位行（T-0192d）。只对"已存在真实记录组"里所查
 	// 但缺失的指标补一行占位，让透视表能区分"该时段有采样但此指标无值"与"此指标有值"。
 	// 没有任何真实行的时间桶/object 永不出现（空时段不凭空造桶）。
 	// 仅 device 维度（单 OUI+SN）+ metric_paths 非空时启用。
 	fillEmpty := c.Query("fill_empty") == "true"
+	if fillEmpty && req.PageByPivotRow && aggregator.CanAutoDiscoverObjectSkeletonRequest(req) {
+		objectLDNs, err := h.aggr.DiscoverObjectLDNs(c.Request.Context(), req)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+			return
+		}
+		req.ObjectLDNs = objectLDNs
+	}
+	if fillEmpty && req.PageByPivotRow && aggregator.IsExplicitObjectSkeletonRequest(req) {
+		pivotKeys, err := h.aggr.DevicePivotRowKeys(c.Request.Context(), req)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+			return
+		}
+		req.PivotRowKeys = pivotKeys
+	}
+
+	rows, err := h.aggr.Query(c.Request.Context(), req)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
 	if fillEmpty {
 		if aggregator.CanAutoDiscoverObjectSkeletonRequest(req) {
 			objectLDNs, err := h.aggr.DiscoverObjectLDNs(c.Request.Context(), req)
@@ -473,17 +507,53 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 	// 仅在指定了 limit 时才多跑一次（无 limit = 全量返回，total 即 len 无需 COUNT）；
 	// COUNT 失败不阻断结果返回，退回本页行数兜底。
 	total := len(rows)
-	if req.Limit > 0 && !(fillEmpty && aggregator.IsExplicitObjectSkeletonRequest(req)) {
-		if n, err := h.aggr.Count(c.Request.Context(), req); err == nil {
+	if req.Limit > 0 {
+		countReq := req
+		// page_by=pivot_row + fill_empty 的页面语义是「按对象骨架补齐透视行」。
+		// 当所选指标本身没有真实行时，按 metric_path count 会得到 0；此时 total 必须按
+		// 同设备/对象/时间桶的透视行骨架计数，才能和 UI 补出的行数一致。
+		if req.PageByPivotRow && fillEmpty && aggregator.IsExplicitObjectSkeletonRequest(req) {
+			countReq.MetricPaths = nil
+			countReq.MetricType = nil
+		}
+		if n, err := h.aggr.Count(c.Request.Context(), countReq); err == nil {
 			total = n
 		}
 	}
-	response.OK(c, gin.H{"items": rows, "total": total})
+	result := gin.H{"items": rows, "total": total}
+	if !req.StartTime.IsZero() && !req.EndTime.IsZero() {
+		win := aggregator.BuildBucketWindow(req)
+		result["requested_start_time"] = win.RequestedStartTime
+		result["requested_end_time"] = win.RequestedEndTime
+		result["actual_start_time"] = nilIfZeroTime(win.ActualStartTime)
+		result["actual_end_time"] = nilIfZeroTime(win.ActualEndTime)
+		result["granularity"] = win.Granularity
+		result["timezone"] = win.Timezone
+	}
+	response.OK(c, result)
 }
 
 // fillEmptyBuckets 保留 pm 包内测试入口，真实实现收敛在 aggregator 包，供页面接口和导出共用。
 func fillEmptyBuckets(rows []aggregator.Row, req aggregator.QueryRequest) []aggregator.Row {
 	return aggregator.FillEmptyBuckets(rows, req)
+}
+
+func splitCSVNonEmpty(v string) []string {
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func nilIfZeroTime(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
 }
 
 // RecomputeAggregation POST /pm/aggregation/recompute（T-0164 收尾 G5-Gap-2）
@@ -713,12 +783,13 @@ func (h *Handler) ListKPIDefinitions(c *gin.Context) {
 		}
 		for _, r := range rows {
 			items = append(items, kpiDefinitionItem{
-				ID:          r.ID,
-				IsCounter:   r.IsCounter,
-				Name:        r.EnName,
-				DisplayName: localizedIndicatorName(loc, r.EnName, r.CnName, r.ID),
-				Formula:     derefOr(r.Arithmetic, ""),
-				Unit:        derefOr(r.UnitID, ""),
+				ID:             r.ID,
+				IsCounter:      r.IsCounter,
+				IndicatorLevel: derefOr(r.IndicatorLevel, ""),
+				Name:           r.EnName,
+				DisplayName:    localizedIndicatorName(loc, r.EnName, r.CnName, r.ID),
+				Formula:        derefOr(r.Arithmetic, ""),
+				Unit:           derefOr(r.UnitID, ""),
 			})
 		}
 	}
@@ -729,12 +800,13 @@ func (h *Handler) ListKPIDefinitions(c *gin.Context) {
 // 历史字段（name/display_name/formula/unit）与旧 model.KPIDefinition 的 JSON 形态一致，
 // 额外补 id / is_counter。不污染共享的 model.KPIDefinition（KPI 计算引擎在用）。
 type kpiDefinitionItem struct {
-	ID          string `json:"id"`
-	IsCounter   string `json:"is_counter"`
-	Name        string `json:"name"`
-	DisplayName string `json:"display_name"`
-	Formula     string `json:"formula"`
-	Unit        string `json:"unit"`
+	ID             string `json:"id"`
+	IsCounter      string `json:"is_counter"`
+	IndicatorLevel string `json:"indicator_level"`
+	Name           string `json:"name"`
+	DisplayName    string `json:"display_name"`
+	Formula        string `json:"formula"`
+	Unit           string `json:"unit"`
 }
 
 // parseBoolQuery 把 query 字符串解析为 bool，仅 "true"/"1" 视为 true，其余（含空）为 false。

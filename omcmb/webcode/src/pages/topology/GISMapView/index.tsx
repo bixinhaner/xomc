@@ -21,7 +21,6 @@ import { useMapConfig } from '@/components/GISMap/useMapConfig';
 import { calculateCenterFromDevices, parseEnvCenter } from '@/utils/mapValidation';
 import type { GISMapRef } from '@/components/GISMap';
 import type { AntennaSector, MapDevice, DeviceGroupNode, DeviceGeo, MapViewport } from '@core/types/map';
-import type { Domain } from '@core/types/topology';
 import { useThemeToken } from '@/hooks/useThemeToken';
 // import { useMapDeviceCache } from '@/hooks/useMapDeviceCache'; // 暂未使用
 import {
@@ -35,6 +34,13 @@ import { useAntennaSectorEditor } from '@core/hooks/useAntennaSectorEditor';
 import { topologyApi } from '@core/services/api/topologyApi';
 import { SPACING, RADIUS, SHADOWS, COLORS, transitionString, DURATION, EASING } from './styles';
 import { hasValidCoord } from './coord';
+import {
+  buildGroupDisplayNameById,
+  domainToGroupNode,
+  filterGroupTreeBySearch,
+  getGroupNodeDisplayName,
+  normalizeGroupLocale,
+} from './groupDisplay';
 import './animations.css';
 
 // 环境变量在运行期不变，解析一次即可，避免每次 useMemo 重跑并重复打日志
@@ -67,21 +73,6 @@ function deviceGeoToMapDevice(device: DeviceGeo): MapDevice {
     ueCount: device.ueCount,
     highestAlarmSeverity: device.highestAlarmSeverity,
     highestSeverityAlarmCount: device.highestSeverityAlarmCount,
-  };
-}
-
-/**
- * 将 Domain 树转换为 DeviceGroupNode 树
- */
-function domainToGroupNode(domain: Domain): DeviceGroupNode {
-  return {
-    id: domain.id,
-    name: domain.name,
-    parentId: domain.parentId ?? null,
-    level: domain.level,
-    children: domain.children?.map(domainToGroupNode),
-    deviceCount: domain.deviceCount,
-    isLeaf: !domain.children?.length,
   };
 }
 
@@ -247,6 +238,21 @@ export default function GISMapView() {
     return domainTree.map(domainToGroupNode);
   }, [domainTree]);
 
+  const groupLocale = normalizeGroupLocale(intl.locale);
+
+  const groupDisplayNameById = useMemo(
+    () => buildGroupDisplayNameById(groupTree, groupLocale),
+    [groupTree, groupLocale],
+  );
+
+  const localizeMapDevice = useCallback((device: MapDevice): MapDevice => {
+    if (!device.groupId) return device;
+    return {
+      ...device,
+      groupName: groupDisplayNameById.get(device.groupId) ?? device.groupName,
+    };
+  }, [groupDisplayNameById]);
+
   // 计算所有组的 ID 集合（用于判断是否选中了"全部"）
   const allGroupIds = useMemo(() => {
     return new Set(groupTree.flatMap((node) => getAllDescendantIds(node)));
@@ -345,8 +351,19 @@ export default function GISMapView() {
     if (!devicesGeoData?.items?.length) return [];
     return devicesGeoData.items
       .filter(device => device.latitude != null && device.longitude != null)
-      .map(deviceGeoToMapDevice);
-  }, [devicesGeoData]);
+      .map(deviceGeoToMapDevice)
+      .map(localizeMapDevice);
+  }, [devicesGeoData, localizeMapDevice]);
+
+  const localizedSearchResultDevice = useMemo(
+    () => searchResultDevice ? localizeMapDevice(searchResultDevice) : null,
+    [searchResultDevice, localizeMapDevice],
+  );
+
+  const localizedSelectedDevice = useMemo(
+    () => selectedDevice ? localizeMapDevice(selectedDevice) : null,
+    [selectedDevice, localizeMapDevice],
+  );
 
   // 统计数据（匹配 MapStats 类型）
   const stats = useMemo(() => {
@@ -472,48 +489,10 @@ export default function GISMapView() {
   // ========== 设备组树处理 ==========
 
   // 过滤设备组树（根据搜索值）
-  const filteredGroupTree = useMemo(() => {
-    if (!groupSearchValue.trim()) {
-      return groupTree;
-    }
-
-    const searchLower = groupSearchValue.toLowerCase();
-
-    const filterNode = (node: DeviceGroupNode, parentMatch = false): DeviceGroupNode | null => {
-      const nameMatch = node.name.toLowerCase().includes(searchLower);
-      const idMatch = node.id.toLowerCase().includes(searchLower);
-      const selfMatch = nameMatch || idMatch;
-
-      const filteredChildren: DeviceGroupNode[] = [];
-      if (node.children) {
-        node.children.forEach((child) => {
-          const filteredChild = filterNode(child, selfMatch || parentMatch);
-          if (filteredChild) {
-            filteredChildren.push(filteredChild);
-          }
-        });
-      }
-
-      if (selfMatch || filteredChildren.length > 0) {
-        return {
-          ...node,
-          children: filteredChildren.length > 0 ? filteredChildren : node.children,
-        };
-      }
-
-      return null;
-    };
-
-    const result: DeviceGroupNode[] = [];
-    groupTree.forEach((node) => {
-      const filtered = filterNode(node);
-      if (filtered) {
-        result.push(filtered);
-      }
-    });
-
-    return result;
-  }, [groupSearchValue, groupTree]);
+  const filteredGroupTree = useMemo(
+    () => filterGroupTreeBySearch(groupTree, groupSearchValue, groupLocale),
+    [groupSearchValue, groupTree, groupLocale],
+  );
 
   // 自动展开匹配的节点
   /* eslint-disable react-hooks/set-state-in-effect -- 搜索时自动展开是预期的副作用 */
@@ -645,7 +624,7 @@ export default function GISMapView() {
               fontWeight: isSelected || node.level === 1 ? 500 : 400,
             }}
           >
-            {node.name}
+            {getGroupNodeDisplayName(node, groupLocale)}
           </span>
         </div>
 
@@ -1128,8 +1107,8 @@ export default function GISMapView() {
         <GISMap
           ref={mapRef}
           devices={mapDevices}
-          searchResultDevice={searchResultDevice}
-          selectedDevice={selectedDevice}
+          searchResultDevice={localizedSearchResultDevice}
+          selectedDevice={localizedSelectedDevice}
           antennaSectors={previewSectors}
           height="100%"
           defaultCenter={initialCenter}
@@ -1310,6 +1289,7 @@ export default function GISMapView() {
                                 name: result.name,
                                 status: result.status,
                                 sn: result.sn,
+                                groupId: result.groupId,
                                 groupName: result.groupName,
                                 address: '',
                                 alarmCount: result.alarmCount ?? 0,
@@ -1322,9 +1302,10 @@ export default function GISMapView() {
                                 highestAlarmSeverity: result.highestAlarmSeverity,
                                 highestSeverityAlarmCount: result.highestSeverityAlarmCount,
                               };
+                              const localizedMapDevice = localizeMapDevice(mapDevice);
                               // 设置搜索结果设备，让地图组件独立显示
-                              setSearchResultDevice(mapDevice);
-								setSelectedDevice(mapDevice);
+                              setSearchResultDevice(localizedMapDevice);
+                              setSelectedDevice(localizedMapDevice);
                             }}
                           >
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

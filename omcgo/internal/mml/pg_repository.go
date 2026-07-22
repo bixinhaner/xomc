@@ -106,6 +106,35 @@ var taskListColumns = []string{
 	"product_resolved", "matched_product_id", "matched_product_class", "path_translation_source",
 }
 
+func taskListColumnsWithLatestRun() []string {
+	cols := make([]string, 0, len(taskListColumns)+1)
+	cols = append(cols, taskListColumns...)
+	return append(cols, "latest_periodic_run.latest_run AS latest_run")
+}
+
+const latestPeriodicRunJoin = `LATERAL (
+	SELECT jsonb_build_object(
+		'id', child.id,
+		'execute_type', child.execute_type,
+		'execute_mode', child.execute_mode,
+		'status', child.status,
+		'result', child.result,
+		'total_devices', child.total_devices,
+		'success_count', child.success_count,
+		'failed_count', child.failed_count,
+		'command_count', COALESCE(jsonb_array_length(child.commands), 0),
+		'plan_item_count', COALESCE(jsonb_array_length(child.plan_items), 0),
+		'started_at', child.started_at,
+		'finished_at', child.finished_at,
+		'created_at', child.created_at,
+		'updated_at', child.updated_at
+	) AS latest_run
+	  FROM mml_tasks child
+	 WHERE child.parent_task_id = mml_tasks.id
+	 ORDER BY child.created_at DESC
+	 LIMIT 1
+) latest_periodic_run ON mml_tasks.execute_type = 'periodic' AND mml_tasks.parent_task_id IS NULL`
+
 // ======================================================================
 // PgCommandRepository (read-only)
 // ======================================================================
@@ -142,19 +171,24 @@ func (r *PgCommandRepository) GetByID(ctx context.Context, id uuid.UUID) (*MMLCo
 }
 
 // ListByGroupID 按 group_id 查询命令（Sprint B Q-V3-1 group 批量执行 API 基础）。
-// 排序：先按 operation_type 顺序（LST/MOD/ADD/RMV 习惯），再按 command_code 字典序。
+// 排序：同一小节（去掉 LST/MOD/ADD/RMV 前缀后的 command_code）聚在一起，
+// 小节内按 LST/MOD/ADD/RMV 习惯顺序。
 func (r *PgCommandRepository) ListByGroupID(ctx context.Context, groupID uuid.UUID) ([]MMLCommand, error) {
 	query, args, err := storage.Psql.Select(commandColumns...).
 		From("mml_commands").
 		Where(sq.Eq{"group_id": groupID}).
-		OrderBy(`
+		OrderBy(
+			"regexp_replace(COALESCE(command_code, ''), '^(LST|MOD|ADD|RMV)[[:space:]]+', '') ASC",
+			`
 			CASE operation_type
 				WHEN 'LST' THEN 1
 				WHEN 'MOD' THEN 2
 				WHEN 'ADD' THEN 3
 				WHEN 'RMV' THEN 4
 				ELSE 99
-			END`, "command_code ASC").
+			END`,
+			"command_code ASC",
+		).
 		ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build list mml_commands by group SQL: %w", err)
@@ -1007,6 +1041,27 @@ func (r *PgTaskRepository) GetByRequestID(ctx context.Context, creator, requestI
 	return task, nil
 }
 
+func (r *PgTaskRepository) GetLatestPeriodicChild(ctx context.Context, parentID uuid.UUID) (*MMLTask, error) {
+	query, args, err := storage.Psql.Select(taskColumns...).
+		From("mml_tasks").
+		Where(sq.Eq{"parent_task_id": parentID}).
+		OrderBy("created_at DESC").
+		Limit(1).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build get latest periodic child SQL: %w", err)
+	}
+
+	task, err := scanTask(r.pool.QueryRow(ctx, query, args...))
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, commonerrors.ErrNotFound
+		}
+		return nil, fmt.Errorf("get latest periodic child: %w", err)
+	}
+	return task, nil
+}
+
 func (r *PgTaskRepository) GetActiveByScriptID(ctx context.Context, scriptID uuid.UUID) (*MMLTask, error) {
 	query := `
 		SELECT ` + joinColumns(taskColumns) + `
@@ -1101,7 +1156,9 @@ func (r *PgTaskRepository) Update(ctx context.Context, task *MMLTask) error {
 }
 
 func (r *PgTaskRepository) List(ctx context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error) {
-	base := storage.Psql.Select(taskListColumns...).From("mml_tasks")
+	base := storage.Psql.Select(taskListColumnsWithLatestRun()...).
+		From("mml_tasks").
+		LeftJoin(latestPeriodicRunJoin)
 	countBase := storage.Psql.Select("COUNT(*)").From("mml_tasks")
 
 	if filter.Status != nil {
@@ -1335,6 +1392,7 @@ func scanTaskRow(rows pgx.Rows) (*MMLTask, error) {
 func scanTaskSummaryRow(rows pgx.Rows) (*MMLTask, error) {
 	var t MMLTask
 	var deviceSNsJSON []byte
+	var latestRunJSON []byte
 	var matchedProductClass, pathTranslationSource *string
 	var requestID *string
 
@@ -1352,6 +1410,7 @@ func scanTaskSummaryRow(rows pgx.Rows) (*MMLTask, error) {
 		&t.TotalDevices, &t.SuccessCount, &t.FailedCount, &t.Result,
 		&t.NextTriggerAt, &t.PeriodicParentID,
 		&t.ProductResolved, &t.MatchedProductID, &matchedProductClass, &pathTranslationSource,
+		&latestRunJSON,
 	)
 	if err != nil {
 		return nil, err
@@ -1364,6 +1423,13 @@ func scanTaskSummaryRow(rows pgx.Rows) (*MMLTask, error) {
 	}
 	if pathTranslationSource != nil {
 		t.PathTranslationSource = *pathTranslationSource
+	}
+	if len(latestRunJSON) > 0 {
+		var latestRun MMLTaskRun
+		if err := json.Unmarshal(latestRunJSON, &latestRun); err != nil {
+			return nil, fmt.Errorf("unmarshal latest_run: %w", err)
+		}
+		t.LatestRun = &latestRun
 	}
 	if deviceSNsJSON != nil {
 		if err := json.Unmarshal(deviceSNsJSON, &t.DeviceSNs); err != nil {
@@ -1391,6 +1457,9 @@ func scanTaskSummaryRow(rows pgx.Rows) (*MMLTask, error) {
 
 func (r *PgTaskRepository) GetResultStatsByID(ctx context.Context, id uuid.UUID) (*MMLTask, error) {
 	query, args, err := storage.Psql.Select(
+		"id",
+		"execute_type",
+		"parent_task_id",
 		"commands",
 		"execute_mode",
 		"plan_items",
@@ -1408,6 +1477,9 @@ func (r *PgTaskRepository) GetResultStatsByID(ctx context.Context, id uuid.UUID)
 	var planItemsJSON []byte
 	var matchedProductClass, pathTranslationSource *string
 	err = r.pool.QueryRow(ctx, query, args...).Scan(
+		&t.ID,
+		&t.ExecuteType,
+		&t.PeriodicParentID,
 		&commandsJSON,
 		&t.ExecuteMode,
 		&planItemsJSON,
@@ -1601,8 +1673,9 @@ func (r *PgTaskRepository) Delete(ctx context.Context, id uuid.UUID) error {
 // ListByScriptID 返回指定脚本关联的全部执行记录（模板 + 子实例），
 // 按 created_at 倒序分页。P4 C11：脚本详情页"历史执行"tab 用。
 func (r *PgTaskRepository) ListByScriptID(ctx context.Context, scriptID uuid.UUID, req model.ListRequest) (*model.ListResponse[MMLTask], error) {
-	base := storage.Psql.Select(taskListColumns...).
+	base := storage.Psql.Select(taskListColumnsWithLatestRun()...).
 		From("mml_tasks").
+		LeftJoin(latestPeriodicRunJoin).
 		Where(sq.Eq{"script_id": scriptID})
 	countBase := storage.Psql.Select("COUNT(*)").
 		From("mml_tasks").
@@ -1894,7 +1967,118 @@ func NewPgCustomCommandRepository(pool *pgxpool.Pool) *PgCustomCommandRepository
 	return &PgCustomCommandRepository{pool: pool}
 }
 
+func normalizeCustomCommandParamPaths(paramPaths []string) []string {
+	normalized := make([]string, 0, len(paramPaths))
+	seen := make(map[string]struct{}, len(paramPaths))
+	for _, path := range paramPaths {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		if _, exists := seen[path]; exists {
+			continue
+		}
+		seen[path] = struct{}{}
+		normalized = append(normalized, path)
+	}
+	return normalized
+}
+
+// syncCustomCommandPaths 让历史 JSON param_paths 与标准 Path 关联表保持一致。
+//
+// AddTemplateModal 及兼容 API 仍按字符串 Path 提交 param_paths；关联表只存
+// standard_path_id。这里在创建/更新自定义命令的同一事务中解析 standard_params，
+// 保留仍存在关联的 default_selected，仅删除已移除 Path 并按 JSON 顺序更新 sort_order。
+func syncCustomCommandPaths(
+	ctx context.Context,
+	tx pgx.Tx,
+	commandID uuid.UUID,
+	paramPaths []string,
+) error {
+	normalized := normalizeCustomCommandParamPaths(paramPaths)
+
+	if len(normalized) == 0 {
+		if _, err := tx.Exec(ctx,
+			`DELETE FROM mml_custom_command_paths WHERE command_id = $1`,
+			commandID,
+		); err != nil {
+			return fmt.Errorf("clear custom command paths: %w", err)
+		}
+		return nil
+	}
+
+	rows, err := tx.Query(ctx, `
+		SELECT requested.standard_path, sp.id
+		FROM unnest($1::text[]) WITH ORDINALITY AS requested(standard_path, sort_order)
+		JOIN standard_params sp ON sp.standard_path = requested.standard_path
+		ORDER BY requested.sort_order`,
+		normalized,
+	)
+	if err != nil {
+		return fmt.Errorf("resolve custom command standard paths: %w", err)
+	}
+	defer rows.Close()
+
+	standardPathIDs := make(map[string]uuid.UUID, len(normalized))
+	for rows.Next() {
+		var path string
+		var id uuid.UUID
+		if err := rows.Scan(&path, &id); err != nil {
+			return fmt.Errorf("scan custom command standard path: %w", err)
+		}
+		standardPathIDs[path] = id
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate custom command standard paths: %w", err)
+	}
+
+	missing := make([]string, 0)
+	orderedIDs := make([]uuid.UUID, 0, len(normalized))
+	for _, path := range normalized {
+		id, exists := standardPathIDs[path]
+		if !exists {
+			missing = append(missing, path)
+			continue
+		}
+		orderedIDs = append(orderedIDs, id)
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf(
+			"custom command paths missing from standard_params: %s: %w",
+			strings.Join(missing, ", "),
+			commonerrors.ErrInvalidInput,
+		)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM mml_custom_command_paths
+		WHERE command_id = $1
+		  AND NOT (standard_path_id = ANY($2::uuid[]))`,
+		commandID,
+		orderedIDs,
+	); err != nil {
+		return fmt.Errorf("delete removed custom command paths: %w", err)
+	}
+
+	for sortOrder, standardPathID := range orderedIDs {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO mml_custom_command_paths (command_id, standard_path_id, sort_order)
+			VALUES ($1, $2, $3)
+			ON CONFLICT (command_id, standard_path_id) DO UPDATE
+			SET sort_order = EXCLUDED.sort_order,
+			    updated_at = now()`,
+			commandID,
+			standardPathID,
+			sortOrder,
+		); err != nil {
+			return fmt.Errorf("upsert custom command path: %w", err)
+		}
+	}
+	return nil
+}
+
 func (r *PgCustomCommandRepository) Create(ctx context.Context, cmd *MMLCustomCommand) error {
+	cmd.ParamPaths = normalizeCustomCommandParamPaths(cmd.ParamPaths)
 	parametersJSON, err := json.Marshal(cmd.Parameters)
 	if err != nil {
 		return fmt.Errorf("marshal parameters: %w", err)
@@ -1919,10 +2103,22 @@ func (r *PgCustomCommandRepository) Create(ctx context.Context, cmd *MMLCustomCo
 		return fmt.Errorf("build insert mml_custom_command SQL: %w", err)
 	}
 
-	row := r.pool.QueryRow(ctx, query, args...)
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin create mml_custom_command: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	row := tx.QueryRow(ctx, query, args...)
 	created, err := scanCustomCommand(row)
 	if err != nil {
 		return fmt.Errorf("create mml_custom_command: %w", err)
+	}
+	if err := syncCustomCommandPaths(ctx, tx, created.ID, created.ParamPaths); err != nil {
+		return fmt.Errorf("sync mml custom command paths: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit create mml_custom_command: %w", err)
 	}
 	*cmd = *created
 	return nil
@@ -1952,6 +2148,22 @@ func (r *PgCustomCommandRepository) Update(ctx context.Context, cmd *MMLCustomCo
 	if err != nil {
 		return fmt.Errorf("marshal parameters: %w", err)
 	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin update mml_custom_command: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	latestParamPaths, err := lockCustomCommandParamPaths(ctx, tx, cmd.ID)
+	if err != nil {
+		return err
+	}
+	if cmd.ParamPathsProvided {
+		cmd.ParamPaths = normalizeCustomCommandParamPaths(cmd.ParamPaths)
+	} else {
+		cmd.ParamPaths = latestParamPaths
+	}
 	paramPathsJSON, err := json.Marshal(cmd.ParamPaths)
 	if err != nil {
 		return fmt.Errorf("marshal param_paths: %w", err)
@@ -1972,12 +2184,18 @@ func (r *PgCustomCommandRepository) Update(ctx context.Context, cmd *MMLCustomCo
 		return fmt.Errorf("build update mml_custom_command SQL: %w", err)
 	}
 
-	result, err := r.pool.Exec(ctx, query, args...)
+	result, err := tx.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("update mml_custom_command: %w", err)
 	}
 	if result.RowsAffected() == 0 {
 		return commonerrors.ErrNotFound
+	}
+	if err := syncCustomCommandPaths(ctx, tx, cmd.ID, cmd.ParamPaths); err != nil {
+		return fmt.Errorf("sync mml custom command paths: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit update mml_custom_command: %w", err)
 	}
 	return nil
 }
@@ -2645,6 +2863,93 @@ SELECT serial_number, COALESCE(product_class, ''), is_online, COALESCE(firmware_
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate validation devices: %w", err)
+	}
+	return result, nil
+}
+
+func (r *PgScriptValidationRepository) LoadStandardPathSupport(ctx context.Context, lookups []StandardPathLookup) (map[string]bool, error) {
+	result := make(map[string]bool, len(lookups))
+	if len(lookups) == 0 {
+		return result, nil
+	}
+	exactCandidates := make([]string, 0, len(lookups))
+	prefixCandidates := make([]string, 0, len(lookups))
+	for _, lookup := range lookups {
+		result[lookup.key()] = false
+		exactCandidates = append(exactCandidates, standardPathExactCandidates(lookup)...)
+		prefixCandidates = append(prefixCandidates, standardPathPrefixCandidates(lookup)...)
+	}
+	exactCandidates = uniqueStrings(exactCandidates)
+	prefixCandidates = uniqueStrings(prefixCandidates)
+
+	exactMatches := make(map[string]struct{}, len(exactCandidates))
+	if len(exactCandidates) > 0 {
+		rows, err := r.pool.Query(ctx, `
+SELECT standard_path
+  FROM standard_params
+ WHERE standard_path = ANY($1)`, exactCandidates)
+		if err != nil {
+			return nil, fmt.Errorf("load standard path exact matches: %w", err)
+		}
+		for rows.Next() {
+			var path string
+			if err := rows.Scan(&path); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan standard path exact match: %w", err)
+			}
+			exactMatches[path] = struct{}{}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("iterate standard path exact matches: %w", err)
+		}
+		rows.Close()
+	}
+
+	prefixMatches := make(map[string]struct{}, len(prefixCandidates))
+	if len(prefixCandidates) > 0 {
+		rows, err := r.pool.Query(ctx, `
+SELECT p.prefix
+  FROM unnest($1::text[]) AS p(prefix)
+ WHERE EXISTS (
+       SELECT 1
+         FROM standard_params sp
+        WHERE left(sp.standard_path, length(p.prefix)) = p.prefix
+ )`, prefixCandidates)
+		if err != nil {
+			return nil, fmt.Errorf("load standard path prefix matches: %w", err)
+		}
+		for rows.Next() {
+			var prefix string
+			if err := rows.Scan(&prefix); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan standard path prefix match: %w", err)
+			}
+			prefixMatches[prefix] = struct{}{}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("iterate standard path prefix matches: %w", err)
+		}
+		rows.Close()
+	}
+
+	for _, lookup := range lookups {
+		for _, candidate := range standardPathExactCandidates(lookup) {
+			if _, ok := exactMatches[candidate]; ok {
+				result[lookup.key()] = true
+				break
+			}
+		}
+		if result[lookup.key()] {
+			continue
+		}
+		for _, prefix := range standardPathPrefixCandidates(lookup) {
+			if _, ok := prefixMatches[prefix]; ok {
+				result[lookup.key()] = true
+				break
+			}
+		}
 	}
 	return result, nil
 }

@@ -58,6 +58,7 @@ describe('dashboardApi.getSummary — Backend → DashboardSummary 映射', () =
             change_percent: 0.5,
             trend: 'up',
             compare_type: 'yesterday',
+            has_comparison: true,
           },
         },
         recent_alarms: [],
@@ -79,6 +80,7 @@ describe('dashboardApi.getSummary — Backend → DashboardSummary 映射', () =
     expect(s.kpiDeltas.RRC_CONN_SETUP_SR.changePercent).toBe(0.5);
     expect(s.kpiDeltas.RRC_CONN_SETUP_SR.currentValue).toBe(99.5);
     expect(s.kpiDeltas.RRC_CONN_SETUP_SR.previousValue).toBe(99.0);
+    expect(s.kpiDeltas.RRC_CONN_SETUP_SR.hasComparison).toBe(true);
   });
 
   it('kpi_deltas 缺省（null）时不崩，返空对象', async () => {

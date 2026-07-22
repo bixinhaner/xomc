@@ -7,7 +7,7 @@ interface RequestValue {
 }
 
 function baseCommandText(row: DeviceTaskResultItem): string {
-  return row.mmlScript || row.planRawLine || row.commandCode || '';
+  return row.commandName || row.mmlScript || row.planRawLine || row.commandCode || '';
 }
 
 function normalizeOperation(value?: string): string {

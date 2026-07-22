@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -165,6 +166,57 @@ func TestCreate_PrivateByNormalUser_OK(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rr.Code)
 }
 
+func TestCreate_RejectsPayloadWithTooManyDevices(t *testing.T) {
+	alice := uuid.New()
+	r := setupRouter(newStubRepo(), alice, false)
+	rr := doJSON(t, r, http.MethodPost, "/api/v1/pm/query-templates", map[string]any{
+		"name":       "too-many-devices",
+		"visibility": "private",
+		"payload": map[string]any{
+			"device_sns":   makeStrings("SN", 51),
+			"metric_paths": []string{"K1"},
+		},
+	})
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestCreate_RejectsPayloadWithTooManyMetrics(t *testing.T) {
+	alice := uuid.New()
+	r := setupRouter(newStubRepo(), alice, false)
+	rr := doJSON(t, r, http.MethodPost, "/api/v1/pm/query-templates", map[string]any{
+		"name":       "too-many-metrics",
+		"visibility": "private",
+		"payload": map[string]any{
+			"device_sns":   []string{"SN-1"},
+			"metric_paths": makeStrings("K", 51),
+		},
+	})
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestCreate_AllowsPayloadAtLimitAndMissingLimitFields(t *testing.T) {
+	alice := uuid.New()
+	r := setupRouter(newStubRepo(), alice, false)
+	rr := doJSON(t, r, http.MethodPost, "/api/v1/pm/query-templates", map[string]any{
+		"name":       "at-limit",
+		"visibility": "private",
+		"payload": map[string]any{
+			"device_sns":   makeStrings("SN", 50),
+			"metric_paths": makeStrings("K", 50),
+		},
+	})
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	rr = doJSON(t, r, http.MethodPost, "/api/v1/pm/query-templates", map[string]any{
+		"name":       "missing-limit-fields",
+		"visibility": "private",
+		"payload":    map[string]any{"granularity": "15min"},
+	})
+	assert.Equal(t, http.StatusOK, rr.Code)
+}
+
 func TestCreate_PublicByNormalUser_Forbidden(t *testing.T) {
 	alice := uuid.New()
 	r := setupRouter(newStubRepo(), alice, false)
@@ -309,6 +361,44 @@ func TestUpdate_VisibilityPromoteRequiresSuperAdmin(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, rr.Code)
 }
 
+func TestUpdate_RejectsPayloadWithTooManyMetrics(t *testing.T) {
+	alice := uuid.New()
+	repo := newStubRepo()
+	id, err := repo.Create(context.Background(), CreateRequest{
+		Name: "my-priv", Visibility: VisibilityPrivate, CreatorID: alice, Payload: []byte("{}"),
+	})
+	require.NoError(t, err)
+
+	r := setupRouter(repo, alice, false)
+	rr := doJSON(t, r, http.MethodPatch, "/api/v1/pm/query-templates/"+id.String(), map[string]any{
+		"payload": map[string]any{
+			"device_sns":   []string{"SN-1"},
+			"metric_paths": makeStrings("K", 51),
+		},
+	})
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestUpdate_RejectsPayloadWithTooManyDevices(t *testing.T) {
+	alice := uuid.New()
+	repo := newStubRepo()
+	id, err := repo.Create(context.Background(), CreateRequest{
+		Name: "my-priv", Visibility: VisibilityPrivate, CreatorID: alice, Payload: []byte("{}"),
+	})
+	require.NoError(t, err)
+
+	r := setupRouter(repo, alice, false)
+	rr := doJSON(t, r, http.MethodPatch, "/api/v1/pm/query-templates/"+id.String(), map[string]any{
+		"payload": map[string]any{
+			"device_sns":   makeStrings("SN", 51),
+			"metric_paths": []string{"K1"},
+		},
+	})
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
 func TestDelete_OtherUserPrivate_Forbidden(t *testing.T) {
 	alice := uuid.New()
 	bob := uuid.New()
@@ -354,4 +444,12 @@ func TestValidVisibility(t *testing.T) {
 	assert.True(t, ValidVisibility("private"))
 	assert.False(t, ValidVisibility(""))
 	assert.False(t, ValidVisibility("internal"))
+}
+
+func makeStrings(prefix string, n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = prefix + "-" + strconv.Itoa(i+1)
+	}
+	return out
 }

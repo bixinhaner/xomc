@@ -2,7 +2,12 @@ import { useMemo, useState } from 'react';
 import { Button, Empty, Input, Modal, Space, Spin, Tag, Tooltip, Tree, Typography } from 'antd';
 import type { TreeDataNode } from 'antd';
 import { RightOutlined } from '@ant-design/icons';
-import { useGroupTree, useCommandSubFields, useUnsupportedPaths } from '@core/hooks/api/useMmlConsole';
+import {
+  useCommandSubFields,
+  useCustomCommandPaths,
+  useGroupTree,
+  useUnsupportedPaths,
+} from '@core/hooks/api/useMmlConsole';
 import type { MMLCustomCommand } from '@core/types/mml';
 import { useI18nText } from '@/hooks/useI18nText';
 import { useT } from '@/hooks/useT';
@@ -16,20 +21,29 @@ import {
 import type { CommandItem } from '../types';
 import { COMMAND_MODAL_BODY_HEIGHT, opColor } from '../constants';
 import {
+  commandUsesPathSelection,
+  getDefaultSelectedPathKeys,
+  getOrderedSelectedPathKeys,
+  getSelectableCommandPaths,
+} from '../pathSelection';
+import {
+  customCommandPathDefsToParamPaths,
   customCommandParamPaths,
   flattenGroupTree,
   mapCommandItem,
   mapCustomCommandItem,
   subFieldsToParamPaths,
 } from '../adapters';
+import CommandPathSelector from './CommandPathSelector';
 
 const { Text } = Typography;
 
 interface CommandSelectModalProps {
   open: boolean;
   value: CommandItem | null;
+  selectedPathKeys: string[];
   onCancel: () => void;
-  onConfirm: (command: CommandItem) => void;
+  onConfirm: (command: CommandItem, selectedPathKeys: string[]) => void;
   /** 「指定参数」快捷入口：跳过命令选择，直接进入「配置参数」弹框的「指定参数」标签（裸路径专家模式）。 */
   onGotoRawParams: () => void;
   /**
@@ -68,6 +82,9 @@ export default function CommandSelectModal({
   const [keyword, setKeyword] = useState('');
   const [selectedId, setSelectedId] = useState<string | undefined>();
   const [wasOpen, setWasOpen] = useState(false);
+  const [draftPathKeys, setDraftPathKeys] = useState<string[]>([]);
+  const [selectionEpoch, setSelectionEpoch] = useState(0);
+  const [draftSelectionEpoch, setDraftSelectionEpoch] = useState<number | undefined>();
   // §需求 B1：默认所有命令分组折叠。expandedKeys 由用户手动展开累积；搜索时另行整树展开。
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
 
@@ -79,11 +96,33 @@ export default function CommandSelectModal({
       setExpandedKeys([]); // 每次打开都重置为全部折叠
       // 自定义命令叶子 key 带 custom: 前缀，回填选中态时需还原前缀，否则匹配不到树节点。
       setSelectedId(value ? (value.isCustom ? `${CUSTOM_KEY_PREFIX}${value.id}` : value.id) : undefined);
+      setSelectionEpoch((epoch) => epoch + 1);
+      setDraftSelectionEpoch(undefined);
+      setDraftPathKeys([]);
     }
   }
 
-  const { data: treeNodes, isLoading: treeLoading } = useGroupTree(undefined, locale);
-  const { commands: customCommands } = useCustomCommands();
+  // 命令树和右侧 sub-fields 使用同一个设备支持集合；设备切换会重新加载两者。
+  const { data: treeNodes, isLoading: treeLoading } = useGroupTree(undefined, locale, undefined, deviceSn);
+  const { commands: customCommands } = useCustomCommands(productId);
+
+  // 产品参数模型过滤由 /mml/templates?product_id= 完成；这里继续叠加运行时
+  // 不支持 path 过滤，确保模板在树上没有任何可执行 path 时直接消失。
+  const { data: unsupportedPaths } = useUnsupportedPaths(productId);
+  const unsupportedPathsPending = Boolean(productId) && unsupportedPaths === undefined;
+
+  const customCommandsWithAvailablePaths = useMemo(() => {
+    if (!unsupportedPaths) return customCommands;
+    return customCommands.filter((cc) => {
+      const isWrite = cc.operationType === 'MOD' || cc.operationType === 'ADD' || cc.operationType === 'RMV';
+      const blocked = new Set(
+        unsupportedPaths
+          .filter((u) => (isWrite ? u.writeUnsupported : u.readUnsupported))
+          .map((u) => u.path),
+      );
+      return customCommandParamPaths(cc).some((p) => !blocked.has(p.path));
+    });
+  }, [customCommands, unsupportedPaths]);
 
   // 自定义命令分组名（随 locale 中英切换，复用命令树「自定义命令 / Customized」语料）。
   const customGroupLabel = t('mml.console.commandTree.customized');
@@ -97,9 +136,9 @@ export default function CommandSelectModal({
   }, [entries]);
   const customById = useMemo(() => {
     const m = new Map<string, MMLCustomCommand>();
-    customCommands.forEach((cc) => m.set(cc.id, cc));
+    customCommandsWithAvailablePaths.forEach((cc) => m.set(cc.id, cc));
     return m;
-  }, [customCommands]);
+  }, [customCommandsWithAvailablePaths]);
 
   const filtered = useMemo(() => {
     const kw = keyword.trim().toLowerCase();
@@ -114,14 +153,14 @@ export default function CommandSelectModal({
 
   const filteredCustoms = useMemo(() => {
     const kw = keyword.trim().toLowerCase();
-    if (!kw) return customCommands;
-    return customCommands.filter(
+    if (!kw) return customCommandsWithAvailablePaths;
+    return customCommandsWithAvailablePaths.filter(
       (cc) =>
         cc.commandCode.toLowerCase().includes(kw) ||
         cc.commandName.toLowerCase().includes(kw) ||
         customGroupLabel.toLowerCase().includes(kw),
     );
-  }, [customCommands, keyword, customGroupLabel]);
+  }, [customCommandsWithAvailablePaths, keyword, customGroupLabel]);
 
   const treeData: TreeDataNode[] = useMemo(() => {
     const byGroup = new Map<string, typeof entries>();
@@ -209,9 +248,11 @@ export default function CommandSelectModal({
     locale,
     deviceSn,
   );
+  const { data: customPathDefs, isFetching: customPathsLoading } = useCustomCommandPaths(
+    selectedCustomId ?? undefined,
+  );
 
   // 该产品执行 path 不支持类故障记录的自学习表——按命令读/写类型过滤（标准 + 自定义共用）。
-  const { data: unsupportedPaths } = useUnsupportedPaths(productId);
   const hiddenPaths = useMemo(() => {
     if (!unsupportedPaths || unsupportedPaths.length === 0) return new Set<string>();
     const op = selectedCustom?.operationType ?? selectedEntry?.command.operationType;
@@ -228,14 +269,20 @@ export default function CommandSelectModal({
     [subFields, hiddenPaths],
   );
   const customParamPaths = useMemo(
-    () => (selectedCustom ? customCommandParamPaths(selectedCustom).filter((p) => !hiddenPaths.has(p.path)) : []),
-    [selectedCustom, hiddenPaths],
+    () => {
+      if (!selectedCustom) return [];
+      // /mml/templates?product_id= 已把 selectedCustom.paramPaths 裁成当前产品支持集合；
+      // 富化端点按命令返回标准元数据，必须与该集合取交集，不能让产品不支持的关联
+      // Path 重新进入选择器和执行请求。
+      const productSupportedPaths = new Set(
+        selectedCustom.paramPaths.map((path) => path.trim()).filter(Boolean),
+      );
+      return customCommandPathDefsToParamPaths(customPathDefs ?? []).filter(
+        (p) => productSupportedPaths.has(p.path) && !hiddenPaths.has(p.path),
+      );
+    },
+    [selectedCustom, customPathDefs, hiddenPaths],
   );
-
-  // 统一的「当前选中命令的可执行参数路径」+ 加载态（右侧预览与确定按钮共用）。
-  const paramPaths = isCustomSelected ? customParamPaths : subFieldsToParamPaths(visibleSubFields);
-  const pathsLoading = isCustomSelected ? false : subFieldsLoading;
-  const hasSelection = !!selectedEntry || !!selectedCustom;
 
   // ADD/RMV 以「目标对象路径」(target_object)下发 RPC(AddObject/DeleteObject)，无参数 PATH；
   // 仅标准命令带 target_object。有 target_object 即可「确定选择」，不受 paramPaths 为空限制。
@@ -243,21 +290,53 @@ export default function CommandSelectModal({
   const selTargetObject = selectedEntry?.command.targetObject?.trim() ?? '';
   const isAddRmvWithObject =
     !isCustomSelected && (selOp === 'ADD' || selOp === 'RMV') && selTargetObject !== '';
+
+  // 统一的「当前选中命令的可执行参数路径」+ 加载态（右侧预览与确定按钮共用）。
+  const paramPaths = isCustomSelected ? customParamPaths : subFieldsToParamPaths(visibleSubFields);
+  const pathsLoading =
+    (!isAddRmvWithObject && unsupportedPathsPending) ||
+    (isCustomSelected ? customPathsLoading : subFieldsLoading);
+  const hasSelection = !!selectedEntry || !!selectedCustom;
+  const selectedOperation = selectedCustom?.operationType ?? selectedEntry?.command.operationType;
+  const usesPathSelection = commandUsesPathSelection(selectedOperation);
+  const selectablePaths = getSelectableCommandPaths(selectedOperation, paramPaths);
+  const visiblePathCount = usesPathSelection ? selectablePaths.length : paramPaths.length;
+  const defaultPathKeys = getDefaultSelectedPathKeys(selectablePaths);
+  const effectiveDraftPathKeys =
+    draftSelectionEpoch === selectionEpoch
+      ? getOrderedSelectedPathKeys(selectablePaths, draftPathKeys)
+      : defaultPathKeys;
+
+  const handleDraftPathKeysChange = (pathKeys: string[]): void => {
+    setDraftSelectionEpoch(selectionEpoch);
+    setDraftPathKeys(pathKeys);
+  };
+
   // §需求 3：LST/MOD 无可执行 PATH → 禁用；ADD/RMV 看 target_object。
   const okDisabled =
-    !hasSelection || pathsLoading || (isAddRmvWithObject ? false : paramPaths.length === 0);
+    !hasSelection ||
+    pathsLoading ||
+    (isAddRmvWithObject ? false : paramPaths.length === 0) ||
+    (usesPathSelection && effectiveDraftPathKeys.length === 0);
 
   const handleOk = (): void => {
+    if (pathsLoading) return;
     if (selectedCustom) {
       // 无可执行 path 不允许确认（§需求 3）；按钮已禁用，这里再兜底。
       if (customParamPaths.length === 0) return;
-      onConfirm(mapCustomCommandItem(selectedCustom, customGroupLabel, customParamPaths));
+      onConfirm(
+        mapCustomCommandItem(selectedCustom, customGroupLabel, customParamPaths),
+        usesPathSelection ? effectiveDraftPathKeys : [],
+      );
       return;
     }
     if (!selectedEntry || !subFields) return;
     // ADD/RMV 以 target_object 执行(允许空 paramPaths)；LST/MOD 需有可执行 PATH。
     if (!isAddRmvWithObject && paramPaths.length === 0) return;
-    onConfirm(mapCommandItem(selectedEntry.groupName, selectedEntry.command, visibleSubFields));
+    onConfirm(
+      mapCommandItem(selectedEntry.groupName, selectedEntry.command, visibleSubFields),
+      usesPathSelection ? effectiveDraftPathKeys : [],
+    );
   };
 
   return (
@@ -311,7 +390,14 @@ export default function CommandSelectModal({
               onSelect={(keys) => {
                 const k = keys[0] as string | undefined;
                 // 仅命令叶子可选（分组 / 私有公有骨架节点 selectable=false 不会触发，这里再排除前缀兜底）。
-                if (k && !k.startsWith('group:') && k !== CUSTOM_ROOT_KEY) setSelectedId(k);
+                if (k && !k.startsWith('group:') && k !== CUSTOM_ROOT_KEY) {
+                  if (k !== selectedId) {
+                    setSelectedId(k);
+                    setSelectionEpoch((epoch) => epoch + 1);
+                    setDraftSelectionEpoch(undefined);
+                    setDraftPathKeys([]);
+                  }
+                }
               }}
             />
           )}
@@ -322,8 +408,8 @@ export default function CommandSelectModal({
               {pathsLoading ? (
                 <Spin size="small" />
               ) : isAddRmvWithObject ? (
-                // §需求 1：ADD/RMV 无参数 PATH，展示执行 RPC 的「目标对象路径」提醒用户。
                 <>
+                  {/* §需求 1：ADD/RMV 无参数 PATH，展示执行 RPC 的「目标对象路径」提醒用户。 */}
                   <Text strong>{t('mml.consoleV2.cmdSelect.targetObjectPath')}</Text>
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {t('mml.consoleV2.cmdSelect.addRmvHint', {
@@ -337,9 +423,15 @@ export default function CommandSelectModal({
                 </>
               ) : (
                 <>
-                  <Text strong>{t('mml.consoleV2.cmdSelect.paramPathCount', { count: paramPaths.length })}</Text>
-                  {paramPaths.length === 0 ? (
+                  <Text strong>{t('mml.consoleV2.cmdSelect.paramPathCount', { count: visiblePathCount })}</Text>
+                  {visiblePathCount === 0 ? (
                     <Text type="secondary">{t('mml.consoleV2.cmdSelect.noParamPath')}</Text>
+                  ) : usesPathSelection ? (
+                    <CommandPathSelector
+                      paths={selectablePaths}
+                      value={effectiveDraftPathKeys}
+                      onChange={handleDraftPathKeysChange}
+                    />
                   ) : (
                     <Space orientation="vertical" size={4} style={{ width: '100%' }}>
                       {paramPaths.map((p) => (

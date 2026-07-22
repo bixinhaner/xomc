@@ -79,6 +79,8 @@ export interface ParameterSyncStatus {
   lastParamSyncFailedAt?: string;
   /** 上次失败原因 (CPE Fault 文案 / task 超时 / SOAP 错误) */
   lastParamSyncError?: string;
+  stalledFinalizing?: boolean;
+  stalledReason?: string;
   activeRun?: ParameterSyncRun;
 }
 

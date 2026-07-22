@@ -135,7 +135,7 @@ function safeFilenamePart(value: string): string {
 
 /** 默认导出任务名。adhoc/result 导出会带上当前任务名，便于任务列表和下载文件反查来源。 */
 export function defaultExportTaskName(
-  source: 'dashboard' | 'kpi_query' | 'adhoc',
+  source: 'dashboard' | 'device_view' | 'kpi_query' | 'adhoc',
   now: Date = new Date(),
   options: ExportTaskNameOptions = {},
 ): string {
@@ -147,11 +147,15 @@ export function defaultExportTaskName(
   const label = isEnglish
     ? source === 'dashboard'
       ? 'Dashboard'
+      : source === 'device_view'
+        ? 'Device_Performance_View'
       : source === 'kpi_query'
         ? 'KPI_Query'
         : 'Result'
     : source === 'dashboard'
       ? '仪表盘'
+      : source === 'device_view'
+        ? '设备性能查看'
       : source === 'kpi_query'
         ? '指标查询'
         : '任务结果';

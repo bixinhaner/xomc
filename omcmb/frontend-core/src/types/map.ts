@@ -263,6 +263,8 @@ export interface DeviceSearchResult {
   longitude: number | null;
   /** 纬度 */
   latitude: number | null;
+  /** 设备组ID */
+  groupId?: string;
   /** 设备组名称 */
   groupName?: string;
   /** IP 地址 */
@@ -307,6 +309,8 @@ export interface DeviceGroupNode {
   id: string;
   /** 设备组名称 */
   name: string;
+  /** 设备组多语言名称 */
+  nameI18n?: Record<string, string>;
   /** 父设备组ID */
   parentId: string | null;
   /** 层级 (1-5) */
@@ -546,6 +550,7 @@ export interface BackendSearchResult {
   status: string;
   longitude: number | null;
   latitude: number | null;
+  group_id?: string;
   group_name?: string;
   /** IP 地址 */
   ip_address?: string;

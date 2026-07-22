@@ -38,7 +38,8 @@ var ErrInvalidRequest = errors.New("mml: invalid request")
 //          SelectedSubFieldIDs → 选中的 sub_field.tr069_path 合成 param_refs
 //          SelectedSubFieldIDs 为空 → 默认全选（与老 OMC 默认勾选状态一致）
 //   - MOD: rpc_method=SetParameterValues
-//          param_refs = 所有 sub_fields（ParamCode=MMLCode 便于 SPV builder 查表）
+//          param_refs = Values 命中的 sub_fields（ParamCode=MMLCode 便于 SPV builder 查表）
+//          Values 全无命中时保留所有 sub_fields，兼容旧版手工 MML 文本
 //          parameters = Values（map[string]string → map[string]interface{}）
 //   - ADD: rpc_method=AddObject
 //          parameters["object_name"] = command.TargetObject（必含尾点）
@@ -396,9 +397,7 @@ func buildStatementCommandEntry(stmt Statement, cmd *MMLCommand, subFields []MML
 			return nil, fmt.Errorf("LST: no usable sub_fields (selected=%d, total=%d)",
 				len(stmt.SelectedSubFieldIDs), len(subFields))
 		}
-		if err := applyInstanceSelectorsToRefs(refs, stmt.InstanceSelectors); err != nil {
-			return nil, err
-		}
+		applyQueryInstanceSelectorsToRefs(refs, stmt.InstanceSelectors)
 		entry["rpc_method"] = "GetParameterValues"
 		entry["param_refs"] = refs
 
@@ -409,7 +408,19 @@ func buildStatementCommandEntry(stmt Statement, cmd *MMLCommand, subFields []MML
 			// 'READ_WRITE'）。Hint 提示常见排查点。
 			return nil, fmt.Errorf("MOD: empty values — 请确认至少勾选一个 READ_WRITE 字段并填入值；若调用 API 时按 access_type 过滤可写字段，注意使用完整字面值 'READ_WRITE'/'READ_ONLY'，而非缩写 'RW'/'RO'")
 		}
-		refs := buildMODParamRefs(subFields, cmd.Params)
+		selectedSubFields := make([]MMLCommandSubField, 0, len(stmt.Values))
+		for _, sf := range subFields {
+			if _, selected := stmt.Values[sf.MMLCode]; selected {
+				selectedSubFields = append(selectedSubFields, sf)
+			}
+		}
+		// 旧版手工 MML 文本允许解析未知 mml_code，并通过 UnknownCodes 提示调用方。
+		// 当全部 Values 均未知时，保持改动前的 refs 形状；结构化页面请求会更早在
+		// StructuredToStatement 以 ErrUnknownPaths 拒绝未知 Path，不会进入此回退。
+		if len(selectedSubFields) == 0 {
+			selectedSubFields = subFields
+		}
+		refs := buildMODParamRefs(selectedSubFields, cmd.Params)
 		if err := applyInstanceSelectorsToRefs(refs, stmt.InstanceSelectors); err != nil {
 			return nil, err
 		}
@@ -481,9 +492,10 @@ func buildStatementCommandEntry(stmt Statement, cmd *MMLCommand, subFields []MML
 //   - 空 selectors + 路径无 `.{i}.` → 原样返回（兼容老路径无 instance 的场景）
 //
 // 示例：
-//   path = "Device.DeviceInfo.MU.{i}.Slot.{i}.3GPPSpecVersion"
-//   selectors = {iα: "1", iβ: "2"}  → 排序后 keys=[iα, iβ]
-//   result = "Device.DeviceInfo.MU.1.Slot.2.3GPPSpecVersion"
+//
+//	path = "Device.DeviceInfo.MU.{i}.Slot.{i}.3GPPSpecVersion"
+//	selectors = {iα: "1", iβ: "2"}  → 排序后 keys=[iα, iβ]
+//	result = "Device.DeviceInfo.MU.1.Slot.2.3GPPSpecVersion"
 func substituteInstanceSelectors(path string, selectors map[string]string) (string, error) {
 	placeholderCount := strings.Count(path, ".{i}.")
 	if placeholderCount == 0 && len(selectors) == 0 {
@@ -511,6 +523,59 @@ func substituteInstanceSelectors(path string, selectors map[string]string) (stri
 		result = result[:idx] + "." + val + "." + result[idx+5:]
 	}
 	return result, nil
+}
+
+func substituteQueryInstanceSelectors(path string, selectors map[string]string) string {
+	if len(selectors) == 0 {
+		return path
+	}
+
+	placeholderCount := strings.Count(path, ".{i}.")
+	layerValues := make([]string, placeholderCount)
+	layerBound := make([]bool, placeholderCount)
+	legacyKeys := make([]string, 0, len(selectors))
+	for key, value := range selectors {
+		layer, numbered := queryInstanceSelectorLayer(key)
+		if !numbered {
+			legacyKeys = append(legacyKeys, key)
+			continue
+		}
+		if layer >= 1 && layer <= placeholderCount {
+			layerValues[layer-1] = value
+			layerBound[layer-1] = true
+		}
+	}
+
+	sort.Strings(legacyKeys)
+	nextLayer := 0
+	for _, key := range legacyKeys {
+		for nextLayer < placeholderCount && layerBound[nextLayer] {
+			nextLayer++
+		}
+		if nextLayer >= placeholderCount {
+			break
+		}
+		layerValues[nextLayer] = strings.TrimSpace(selectors[key])
+		layerBound[nextLayer] = true
+		nextLayer++
+	}
+
+	result := path
+	for layer := 0; layer < placeholderCount; layer++ {
+		idx := strings.Index(result, ".{i}.")
+		if !layerBound[layer] || strings.TrimSpace(layerValues[layer]) == "" {
+			return result[:idx+1]
+		}
+		result = result[:idx] + "." + layerValues[layer] + "." + result[idx+5:]
+	}
+	return result
+}
+
+func queryInstanceSelectorLayer(key string) (int, bool) {
+	if len(key) != 3 || key[0] != 'i' || key[1] < '0' || key[1] > '9' || key[2] < '0' || key[2] > '9' {
+		return 0, false
+	}
+	return int(key[1]-'0')*10 + int(key[2]-'0'), true
 }
 
 // buildLSTParamRefs 把 LST 选中的 sub_field 合成为 BuildTR069Params 可消费的 param_refs。
@@ -558,7 +623,7 @@ func buildLSTParamRefs(selected []uuid.UUID, subFields []MMLCommandSubField, cmd
 	return refs
 }
 
-// buildMODParamRefs 为 MOD 命令合成 param_refs：所有 sub_fields 都纳入，
+// buildMODParamRefs 为 MOD 命令合成 param_refs：纳入调用方选定的 sub_fields，
 // 让 BuildTR069Params.buildParameterValues 能按 ParamCode（=MMLCode）索引 Tr069Path。
 //
 // ParamCode 改写为 sub_field.MMLCode（命令上下文的 code），与 parser 解出的 Values key 对齐。
@@ -613,6 +678,21 @@ func applyInstanceSelectorsToRefs(refs []MMLParamRef, selectors map[string]strin
 		refs[i].Tr069Path = newPath
 	}
 	return nil
+}
+
+func applyQueryInstanceSelectorsToRefs(
+	refs []MMLParamRef,
+	selectors map[string]string,
+) {
+	if len(selectors) == 0 {
+		return
+	}
+	for i := range refs {
+		refs[i].Tr069Path = substituteQueryInstanceSelectors(
+			refs[i].Tr069Path,
+			selectors,
+		)
+	}
 }
 
 // 用户决策 2026-05-20 二次澄清（仍生效，核心约束）：

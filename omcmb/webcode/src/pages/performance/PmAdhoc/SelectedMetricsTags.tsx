@@ -12,6 +12,7 @@ import { useIndicatorCandidates } from '@core/hooks/api/usePerformance';
 import type { IndicatorCandidate } from '@core/services/api/pmApi';
 import type { DeviceType } from '@core/types/indicatorLibrary';
 import { useAppStore } from '@core/store/appStore';
+import { formatIndicatorLevel, shouldShowIndicatorLevel } from '@core/utils/indicatorLevelDisplay';
 
 const TECH_TO_DEVICE_TYPE: Record<string, DeviceType> = {
   lte: 'ENB',
@@ -55,7 +56,15 @@ export default function SelectedMetricsTags({ metricPaths, technology }: Props) 
           const label = ind
             ? `${ind.id} ${isEn ? ind.enName || ind.cnName : ind.cnName || ind.enName}`.trim()
             : code;
-          return <Tag key={code}>{label}</Tag>;
+          return (
+            <Tag key={code}>
+              {label}
+              {shouldShowIndicatorLevel(deviceType) && intl.formatMessage(
+                { id: 'perf.query.indicatorLevelInline' },
+                { level: formatIndicatorLevel(ind?.indicatorLevel, (id) => intl.formatMessage({ id })) },
+              )}
+            </Tag>
+          );
         })}
       </Space>
     </Spin>

@@ -76,4 +76,21 @@ describe('mapBackendKpiExportTask', () => {
     expect(t.status).toBe('failed');
     expect(t.error).toBe('aggregator: unknown granularity "bogus"');
   });
+
+  it('保留设备性能查看来源', () => {
+    const b = {
+      id: 'task-4',
+      task_name: 'KPI导出_设备性能查看_x',
+      source_type: 'device_view',
+      format: 'csv',
+      status: 'pending',
+      row_count: 0,
+      file_size: 0,
+      create_user: 'op',
+      created_at: '2026-06-04T11:00:00Z',
+    } as BackendKpiExportTask;
+    const t = mapBackendKpiExportTask(b);
+    expect(t.sourceType).toBe('device_view');
+    expect(t.taskName).not.toContain('仪表盘');
+  });
 });

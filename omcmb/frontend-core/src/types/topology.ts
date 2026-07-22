@@ -7,6 +7,7 @@ export type NodeType = 'eNB' | 'gNB' | 'CPE' | 'eGW' | 'domain' | 'site' | 'rout
 export interface Domain {
   id: string;
   name: string;
+  nameI18n?: Record<string, string>;
   level: DomainLevel;
   parentId: string | null;
   children?: Domain[];

@@ -1,0 +1,6 @@
+chapter_code,group_name,subgroup,add_command,rmv_command,target_object
+SI,邻区参数管理,NR邻区参数管理,ADD SI_SUB_01,RMV SI_SUB_01,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.
+SI,邻区参数管理,LTE邻区参数管理,ADD SI_SUB_02,RMV SI_SUB_02,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.
+SI,邻区参数管理,TD邻区参数管理,ADD SI_SUB_03,RMV SI_SUB_03,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.
+SI,邻区参数管理,GSM邻区参数管理,ADD SI_SUB_04,RMV SI_SUB_04,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.
+SI,邻区参数管理,5G邻区参数管理,ADD SI_SUB_05,RMV SI_SUB_05,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.

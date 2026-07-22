@@ -145,6 +145,81 @@ func TestBuildEntry_MOD(t *testing.T) {
 	assert.Equal(t, "newValue", params["MyField"])
 }
 
+func TestBuildEntry_MOD_OnlyIncludesSubFieldsWithValues(t *testing.T) {
+	cmdID := uuid.New()
+	firstSelectedSFID := uuid.New()
+	secondSelectedSFID := uuid.New()
+	unselectedSFID := uuid.New()
+	cmd := &MMLCommand{
+		ID:            cmdID,
+		CommandCode:   "MOD_DEVICE_INFO",
+		OperationType: "MOD",
+		Params: []MMLParamRef{
+			{ID: firstSelectedSFID, ParamCode: "ignored-first", Tr069Path: "Device.Info.First"},
+			{ID: secondSelectedSFID, ParamCode: "ignored-second", Tr069Path: "Device.Info.Second"},
+			{ID: unselectedSFID, ParamCode: "ignored-unselected", Tr069Path: "Device.Info.Unselected"},
+		},
+	}
+	subFields := []MMLCommandSubField{
+		{ID: firstSelectedSFID, CommandID: cmdID, MMLCode: "FIRST"},
+		{ID: secondSelectedSFID, CommandID: cmdID, MMLCode: "SECOND"},
+		{ID: unselectedSFID, CommandID: cmdID, MMLCode: "UNSELECTED"},
+	}
+	stmt := Statement{
+		CommandID:     &cmdID,
+		OperationType: "MOD",
+		Values: map[string]string{
+			"FIRST":  "first-value",
+			"SECOND": "second-value",
+		},
+	}
+
+	entry, err := buildStatementCommandEntry(stmt, cmd, subFields)
+	require.NoError(t, err)
+
+	refs := entry["param_refs"].([]MMLParamRef)
+	require.Len(t, refs, 2)
+	assert.Equal(t, "FIRST", refs[0].ParamCode)
+	assert.Equal(t, "Device.Info.First", refs[0].Tr069Path)
+	assert.Equal(t, "SECOND", refs[1].ParamCode)
+	assert.Equal(t, "Device.Info.Second", refs[1].Tr069Path)
+	params := entry["parameters"].(map[string]interface{})
+	assert.Equal(t, map[string]interface{}{
+		"FIRST":  "first-value",
+		"SECOND": "second-value",
+	}, params)
+}
+
+func TestBuildEntry_MOD_NoMatchingValuePreservesLegacyRefs(t *testing.T) {
+	cmdID := uuid.New()
+	sfID := uuid.New()
+	cmd := &MMLCommand{
+		ID:            cmdID,
+		CommandCode:   "MOD_DEVICE_INFO",
+		OperationType: "MOD",
+		Params: []MMLParamRef{
+			{ID: sfID, ParamCode: "ignored", Tr069Path: "Device.Info.Known"},
+		},
+	}
+	subFields := []MMLCommandSubField{
+		{ID: sfID, CommandID: cmdID, MMLCode: "KNOWN"},
+	}
+	stmt := Statement{
+		CommandID:     &cmdID,
+		OperationType: "MOD",
+		Values:        map[string]string{"UNKNOWN": "legacy-value"},
+	}
+
+	entry, err := buildStatementCommandEntry(stmt, cmd, subFields)
+	require.NoError(t, err)
+
+	refs := entry["param_refs"].([]MMLParamRef)
+	require.Len(t, refs, 1)
+	assert.Equal(t, "KNOWN", refs[0].ParamCode)
+	assert.Equal(t, "Device.Info.Known", refs[0].Tr069Path)
+	assert.Equal(t, "legacy-value", entry["parameters"].(map[string]interface{})["UNKNOWN"])
+}
+
 func TestBuildEntry_MOD_EmptyValues_Errors(t *testing.T) {
 	cmd := &MMLCommand{ID: uuid.New(), OperationType: "MOD"}
 	stmt := Statement{OperationType: "MOD"}

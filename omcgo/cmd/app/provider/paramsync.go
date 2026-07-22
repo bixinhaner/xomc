@@ -13,7 +13,9 @@ import (
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/config"
 	"github.com/omcgo/omcgo/internal/config/parammodel"
+	"github.com/omcgo/omcgo/internal/core/appconfig"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/paramsync"
@@ -36,7 +38,7 @@ type paramSyncMaintainer interface {
 	ReconcileCancellingRuns(context.Context, int) (int64, error)
 	ReconcileRunCounts(context.Context) (int64, error)
 	ReconcileTerminalBindings(context.Context) (int64, error)
-	RepublishMissingResults(context.Context, int) (int, error)
+	RecoverMissingResults(context.Context, int, int, int) (int, error)
 	CleanStaging(context.Context, time.Time, int) (int64, error)
 	CollectMetrics(context.Context) error
 }
@@ -45,10 +47,47 @@ type paramSyncProjector interface {
 	ReconcilePending(context.Context, int) (int, error)
 }
 
+type pullTuningSetter interface {
+	SetPullTuning(subject string, tuning event.PullTuning)
+}
+
 // runParamSyncMaintenance deliberately executes every independent repair. A
 // corrupt historical row must not suppress result republishing, staging cleanup,
 // or durable metrics for the whole service.
-func runParamSyncMaintenance(ctx context.Context, maintainer paramSyncMaintainer, now time.Time) error {
+type paramSyncMaintenanceConfig struct {
+	recoveryRunLimit   int
+	recoveryTaskLimit  int
+	recoveryTaskBudget int
+}
+
+func defaultParamSyncMaintenanceConfig() paramSyncMaintenanceConfig {
+	return paramSyncMaintenanceConfig{recoveryRunLimit: 20, recoveryTaskLimit: 200, recoveryTaskBudget: 200}
+}
+
+func paramSyncMaintenanceConfigFromApp(cfg appconfig.ParamSyncConfig) paramSyncMaintenanceConfig {
+	out := defaultParamSyncMaintenanceConfig()
+	if cfg.RecoveryRunLimit > 0 {
+		out.recoveryRunLimit = cfg.RecoveryRunLimit
+	}
+	if cfg.RecoveryTaskLimitPerRun > 0 {
+		out.recoveryTaskLimit = cfg.RecoveryTaskLimitPerRun
+	}
+	if cfg.RecoveryTaskBudget > 0 {
+		out.recoveryTaskBudget = cfg.RecoveryTaskBudget
+	}
+	return out
+}
+
+func paramSyncPullTuningFromApp(cfg appconfig.ParamSyncConfig) event.PullTuning {
+	return event.PullTuning{
+		BatchSize:     cfg.ResultConsumerPullBatchSize,
+		Concurrency:   cfg.ResultConsumerPullConcurrency,
+		AckWait:       cfg.ResultConsumerAckWait,
+		MaxAckPending: cfg.ResultConsumerMaxAckPending,
+	}
+}
+
+func runParamSyncMaintenance(ctx context.Context, maintainer paramSyncMaintainer, now time.Time, cfg paramSyncMaintenanceConfig) error {
 	var errs []error
 	if _, err := maintainer.SweepExpiredRequests(ctx, 100); err != nil {
 		errs = append(errs, fmt.Errorf("sweep expired requests: %w", err))
@@ -65,11 +104,11 @@ func runParamSyncMaintenance(ctx context.Context, maintainer paramSyncMaintainer
 	if _, err := maintainer.ReconcileRunCounts(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("reconcile run counts: %w", err))
 	}
+	if _, err := maintainer.RecoverMissingResults(ctx, cfg.recoveryRunLimit, cfg.recoveryTaskLimit, cfg.recoveryTaskBudget); err != nil {
+		errs = append(errs, fmt.Errorf("recover missing results: %w", err))
+	}
 	if _, err := maintainer.ReconcileTerminalBindings(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("reconcile terminal bindings: %w", err))
-	}
-	if _, err := maintainer.RepublishMissingResults(ctx, 100); err != nil {
-		errs = append(errs, fmt.Errorf("republish missing results: %w", err))
 	}
 	if _, err := maintainer.CleanStaging(ctx, now.Add(-24*time.Hour), 10000); err != nil {
 		errs = append(errs, fmt.Errorf("clean staging: %w", err))
@@ -80,10 +119,10 @@ func runParamSyncMaintenance(ctx context.Context, maintainer paramSyncMaintainer
 	return errors.Join(errs...)
 }
 
-func runParamSyncReconciliation(ctx context.Context, maintainer paramSyncMaintainer, projector paramSyncProjector, now time.Time) error {
+func runParamSyncReconciliation(ctx context.Context, maintainer paramSyncMaintainer, projector paramSyncProjector, now time.Time, cfg paramSyncMaintenanceConfig) error {
 	var errs []error
 	maintenanceCtx, cancelMaintenance := context.WithTimeout(ctx, 20*time.Second)
-	if err := runParamSyncMaintenance(maintenanceCtx, maintainer, now); err != nil {
+	if err := runParamSyncMaintenance(maintenanceCtx, maintainer, now, cfg); err != nil {
 		errs = append(errs, err)
 	}
 	cancelMaintenance()
@@ -180,6 +219,28 @@ func (s *paramSyncStarter) StartLicenseSync(ctx context.Context, dev *model.Devi
 	return submitLicenseParamSync(ctx, s.service, dev, sourceID, paths)
 }
 
+func (s *paramSyncStarter) SubmitModelUploadParamSync(ctx context.Context, dev *model.Device, sourceID string, modelUploadID uuid.UUID, status string) (bool, int, error) {
+	if !s.flags.EnabledForDevice(dev.ID.String()) {
+		return false, 0, fmt.Errorf("durable model-upload parameter sync is disabled for this device")
+	}
+	result, err := s.service.Submit(ctx, paramsync.SubmitCommand{
+		DeviceID: dev.ID, DeviceSN: dev.SerialNumber, CallerType: "provision",
+		TriggerReason: paramsync.TriggerModelUpload, Scope: paramsync.SyncScopeFull,
+		IdempotencyKey: sourceID, SourceEventID: sourceID, OriginEventType: "model_upload",
+		ModelUploadIntentID: &modelUploadID, ModelUploadStatus: status,
+	})
+	if err != nil {
+		return true, 0, err
+	}
+	if result.ResultCode == paramsync.ResultCodePathBUnavailable {
+		return true, 0, fmt.Errorf("durable model-upload parameter sync unavailable: %s", result.ResultCode)
+	}
+	if result.Status == paramsync.RequestStatusRejected && result.ResultCode == paramsync.ResultCodeActiveSyncExists {
+		return true, 0, fmt.Errorf("durable model-upload parameter sync is busy for this device")
+	}
+	return true, result.TaskCount, nil
+}
+
 func (s *paramSyncStarter) SubmitConfigPull(ctx context.Context, deviceSN string, paths []string, key string) (config.DurablePullResult, error) {
 	dev, err := s.devices.GetBySerialNumber(ctx, deviceSN)
 	if err != nil {
@@ -223,12 +284,16 @@ func (s *paramSyncStarter) SubmitConfigPull(ctx context.Context, deviceSN string
 }
 
 func (s *paramSyncStarter) StartDurableSync(ctx context.Context, dev *model.Device, sourceID, reason string, paths []string) (bool, int, error) {
-	if !s.flags.EnabledForDevice(dev.ID.String()) {
-		return false, 0, nil
-	}
 	trigger := paramsync.TriggerReason(reason)
 	if trigger == "" {
 		return true, 0, fmt.Errorf("durable parameter sync trigger reason is required")
+	}
+	if !s.flags.EnabledForDevice(dev.ID.String()) {
+		// All parameter sync triggers enter the durable parameter_sync_* path
+		// first. The legacy sync-gpv Path B path is retained only as a
+		// temporary fallback until param_sync_running is stable enough to remove
+		// the old pipeline.
+		return false, 0, nil
 	}
 	scope := paramsync.SyncScopeFull
 	if len(paths) > 0 {
@@ -243,6 +308,9 @@ func (s *paramSyncStarter) StartDurableSync(ctx context.Context, dev *model.Devi
 	}
 	if result.ResultCode == paramsync.ResultCodePathBUnavailable {
 		if s.flags.LegacyFallbackEnabled {
+			// Temporary fallback: all triggers prefer parameter_sync_*; legacy
+			// sync-gpv Path B remains only while param_sync_running rollout is
+			// being stabilized.
 			return false, 0, nil
 		}
 		return true, 0, fmt.Errorf("durable parameter sync unavailable: %s", result.ResultCode)
@@ -280,6 +348,11 @@ func (s *paramSyncStarter) StartManualSync(ctx context.Context, dev *model.Devic
 
 func (s *paramSyncStarter) StartManualSyncDetailed(ctx context.Context, dev *model.Device, sourceID string, paths []string) (*device.ManualParamSyncStart, error) {
 	if !s.flags.EnabledForDevice(dev.ID.String()) {
+		// Manual sync follows the same transition rule as periodic,
+		// device_online, firmware_changed, bootstrap, and model_upload:
+		// parameter_sync_* first; legacy sync-gpv Path B only as a temporary
+		// fallback until param_sync_running is stable and the old path can be
+		// deleted.
 		if s.legacy == nil {
 			return &device.ManualParamSyncStart{}, nil
 		}
@@ -298,6 +371,10 @@ func (s *paramSyncStarter) StartManualSyncDetailed(ctx context.Context, dev *mod
 		return &device.ManualParamSyncStart{Used: true}, err
 	}
 	if result.ResultCode == paramsync.ResultCodePathBUnavailable {
+		if s.flags.LegacyFallbackEnabled && s.legacy != nil {
+			used, count, err := s.legacy.StartManualSync(ctx, dev, sourceID, paths)
+			return &device.ManualParamSyncStart{Used: used, TaskCount: count, Status: "queued"}, err
+		}
 		return &device.ManualParamSyncStart{RequestID: result.RequestID, Status: string(result.Status), ResultCode: string(result.ResultCode)}, nil
 	}
 	if result.Status == paramsync.RequestStatusRejected && result.ResultCode == paramsync.ResultCodeActiveSyncExists {
@@ -330,12 +407,17 @@ func initParamSyncModule(c *Container) error {
 	planner := paramsync.NewPlanner(paramSyncMappingProvider{c: c}, c.Cfg.Provision.AutoSync.GPVBatchSize).
 		WithUnsupportedPaths(unsupportedPaths)
 	metrics := paramsync.NewMetrics(c.MetricsReg)
+	maintenanceCfg := paramSyncMaintenanceConfigFromApp(c.Cfg.ParamSync)
+	if setter, ok := c.EventBus.(pullTuningSetter); ok {
+		setter.SetPullTuning(event.SubjectParamSyncTaskResult, paramSyncPullTuningFromApp(c.Cfg.ParamSync))
+	}
 	service := paramsync.NewService(repo, planner).WithMetrics(metrics).WithDispatcher(paramsync.NewPGTaskDispatcher(c.PgPool))
 	outbox := paramsync.NewOutboxDispatcher(c.PgPool, c.TaskSvc, 20).WithEventBus(c.EventBus)
-	reconciler := paramsync.NewReconciler(c.PgPool, c.EventBus, metrics)
+	resultProcessor := paramsync.NewPGResultProcessor(c.PgPool).WithMetrics(metrics)
+	reconciler := paramsync.NewReconciler(c.PgPool, c.EventBus, metrics).WithResultProcessor(resultProcessor)
 	bridge := paramsync.NewTaskTerminalBridge(c.EventBus)
 	binding := paramsync.NewBindingCoordinator(c.PgPool, c.EventBus)
-	infoSyncer := device.NewInfoSyncer(c.DeviceInfoRepo, c.ParamRepo, device.NewPgDeviceRepository(c.PgPool), c.Carriers, logger)
+	infoSyncer := device.NewInfoSyncer(c.DeviceInfoRepo, c.ParamRepo, device.NewPgDeviceRepository(c.PgPool), c.Carriers, logger, device.NewPgLocationObservationRepository(c.PgPool))
 	nameSyncCfgRepo := admin.NewPgSysConfigRepository(c.PgPool)
 	nameSyncHook := provision.NewDeviceNameSyncHook(
 		func(ctx context.Context, category, key string) (string, bool) {
@@ -346,7 +428,8 @@ func initParamSyncModule(c *Container) error {
 			return cfg.Value, true
 		},
 		c.ParamRepo, c.DeviceInfoRepo, c.DeviceInfoRepo, logger,
-	).SetSiteUpdater(device.NewPgDeviceRepository(c.PgPool))
+	).SetSiteUpdater(device.NewPgDeviceRepository(c.PgPool)).
+		SetSPVSender(provision.NewDeviceNameTaskSender(c.TaskSvc))
 	projector := paramsync.NewCompletionProjector(c.PgPool, c.EventBus, &paramSyncFullRunProjection{
 		devices: c.DeviceRepo, info: infoSyncer, nameSync: nameSyncHook,
 	})
@@ -389,7 +472,9 @@ func initParamSyncModule(c *Container) error {
 		c.GS.Register("param-sync-request-consumer", 2, func(context.Context) error { return requestConsumer.Stop() })
 	}
 	if flags.ResultConsumerEnabled {
-		resultConsumer = paramsync.NewResultConsumer(c.EventBus, paramsync.NewPGResultProcessor(c.PgPool).WithMetrics(metrics))
+		resultConsumer = paramsync.NewResultConsumer(c.EventBus, resultProcessor).
+			WithMetrics(metrics).
+			WithWorkerConfig(c.Cfg.ParamSync.ResultConsumerShardCount, c.Cfg.ParamSync.ResultConsumerQueueDepth)
 		if err := resultConsumer.Start(); err != nil {
 			return err
 		}
@@ -432,7 +517,7 @@ func initParamSyncModule(c *Container) error {
 						logger.Warn("parameter sync outbox dispatch failed", zap.Error(err))
 					}
 				case <-reconcileTicker.C:
-					err := runParamSyncReconciliation(maintenanceCtx, reconciler, projector, time.Now())
+					err := runParamSyncReconciliation(maintenanceCtx, reconciler, projector, time.Now(), maintenanceCfg)
 					if err != nil && !errors.Is(err, context.Canceled) {
 						logger.Warn("parameter sync reconciliation failed", zap.Error(err))
 					}

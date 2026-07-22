@@ -100,12 +100,17 @@ func taskCostMs(t *task.Task) int {
 
 // parseOperatorID 把 Task.CreatorID（字符串）解析为 *uuid.UUID。
 // 非 UUID（系统/匿名任务的空串或非标识符）返回 nil —— operator_id 列允许 NULL。
+// 全零 UUID（uuid.Nil）同样视为"无操作人"返回 nil：users 表不会存在 id 全 0 的
+// 占位记录，一旦有调用方误把它当成"系统任务"标记传进来（曾经
+// internal/alarm/sync_service.go 就这么用过），写库会稳定触发
+// sys_task_logs_operator_id_fkey 外键违反；在这里兜底比要求每个调用方都记得用
+// 空串更可靠。
 func parseOperatorID(creatorID string) *uuid.UUID {
 	if creatorID == "" {
 		return nil
 	}
 	id, err := uuid.Parse(creatorID)
-	if err != nil {
+	if err != nil || id == uuid.Nil {
 		return nil
 	}
 	return &id

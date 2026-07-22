@@ -83,7 +83,7 @@ services:
           cpus: "0.5"
           memory: 512m
     volumes:
-      - pgdata:/var/lib/postgresql/data    # 生产建议改为数据盘 bind mount，如 /data/omc/pg
+      - ${POSTGRES_DATA_PATH:-pgdata}:/var/lib/postgresql/data
       - /etc/localtime:/etc/localtime:ro
     networks:
       - omcgo-net
@@ -142,7 +142,7 @@ services:
           cpus: "0.5"
           memory: 512m
     volumes:
-      - tsdbdata:/var/lib/postgresql/data   # 生产建议改为数据盘 bind mount，如 /data/omc/tsdb
+      - ${TSDB_DATA_PATH:-tsdbdata}:/var/lib/postgresql/data
       - /etc/localtime:/etc/localtime:ro
     networks:
       - omcgo-net
@@ -180,7 +180,7 @@ services:
           cpus: "0.25"
           memory: 256m
     volumes:
-      - redisdata:/data
+      - ${REDIS_DATA_PATH:-redisdata}:/data
       - /etc/localtime:/etc/localtime:ro
     networks:
       - omcgo-net
@@ -207,6 +207,7 @@ services:
         cat >/tmp/nats-server.conf <<'EOF'
         jetstream {
           store_dir: "/data"
+          max_memory_store: ${NATS_MAX_MEMORY_STORE:-134217728}
         }
         http_port: 8222
         max_payload: 5242880
@@ -223,12 +224,15 @@ services:
           cpus: "0.25"
           memory: 256m
     volumes:
-      - natsdata:/data
+      - ${NATS_DATA_PATH:-natsdata}:/data
       - /etc/localtime:/etc/localtime:ro
     networks:
       - omcgo-net
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      # 百万级 JetStream backlog 恢复实测可接近 3 分钟；宽限期内保持 starting，
+      # 避免安装器把正常恢复误判为 unhealthy。
+      start_period: 5m
       interval: 5s
       timeout: 5s
       retries: 10
@@ -242,6 +246,13 @@ services:
     restart: unless-stopped
     environment:
       TZ: "Asia/Shanghai"
+      # PM/KPI 批量上报场景下会有成百上千个设备在同一 15min 窗口边界集中上传，
+      # 短时并发远超日常均值。MinIO 未显式配置时按容器可见 CPU 配额自动估算
+      # 并发请求上限，CPU 配额较小时该上限会保守到不足以扛住这种突发，进而对
+      # 超出部分返回 503 "Please reduce your request rate"（PM 文件因此丢失，
+      # 上报端通常不重试）。这里显式拉高上限，不再依赖按 CPU 配额的保守自动估算。
+      MINIO_API_REQUESTS_MAX: "${MINIO_API_REQUESTS_MAX:-6000}"
+      MINIO_API_REQUESTS_DEADLINE: "${MINIO_API_REQUESTS_DEADLINE:-2m}"
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       # MinIO 自带 Prometheus 指标端点 /minio/v2/metrics/*；public 模式免 token 抓取（T-0151）。
@@ -256,12 +267,12 @@ services:
       resources:
         limits:
           cpus: "${MINIO_CPUS:-1}"
-          memory: "${MINIO_MEM:-1g}"
+          memory: "${MINIO_MEM:-4g}"
         reservations:
           cpus: "0.25"
-          memory: 512m
+          memory: 1g
     volumes:
-      - miniodata:/data
+      - ${MINIO_DATA_PATH:-miniodata}:/data
       - /etc/localtime:/etc/localtime:ro
     networks:
       - omcgo-net

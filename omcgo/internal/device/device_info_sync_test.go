@@ -80,6 +80,7 @@ type stubDeviceParamRepo struct {
 
 type stubDeviceCoordinateWriter struct {
 	updateCoordinates func(ctx context.Context, deviceID uuid.UUID, latitude, longitude float64) error
+	coordinates       *Location
 }
 
 func (s stubDeviceCoordinateWriter) UpdateCoordinates(ctx context.Context, deviceID uuid.UUID, latitude, longitude float64) error {
@@ -87,6 +88,25 @@ func (s stubDeviceCoordinateWriter) UpdateCoordinates(ctx context.Context, devic
 		return s.updateCoordinates(ctx, deviceID, latitude, longitude)
 	}
 	return nil
+}
+
+func (s stubDeviceCoordinateWriter) GetCoordinates(context.Context, uuid.UUID) (*Location, error) {
+	return s.coordinates, nil
+}
+
+type stubLocationObservationRepo struct {
+	upsert func(deviceID uuid.UUID, observation ReportedLocation) error
+}
+
+func (s stubLocationObservationRepo) UpsertLatest(_ context.Context, deviceID uuid.UUID, observation ReportedLocation) error {
+	if s.upsert != nil {
+		return s.upsert(deviceID, observation)
+	}
+	return nil
+}
+
+func (s stubLocationObservationRepo) GetLatest(context.Context, uuid.UUID) (*ReportedLocation, error) {
+	return nil, nil
 }
 
 func (s stubDeviceParamRepo) BatchUpsert(context.Context, uuid.UUID, []model.DeviceParameter) error {
@@ -532,6 +552,63 @@ func TestInfoSyncer_SyncFromParameters_BackfillsCoordinates(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestInfoSyncer_SyncFromParameters_StoresStandardGPSObservationWithoutOverwritingAccepted(t *testing.T) {
+	deviceID := uuid.New()
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+
+	paramRepo := stubDeviceParamRepo{params: []model.DeviceParameter{
+		{ParameterPath: "Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude", ParameterValue: "39904200"},
+		{ParameterPath: "Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude", ParameterValue: "116407400"},
+		{ParameterPath: "Device.FAP.GPS.Height", ParameterValue: "174"},
+	}}
+
+	accepted := &Location{Latitude: 31.2, Longitude: 121.5}
+	coordinateWriter := stubDeviceCoordinateWriter{coordinates: accepted, updateCoordinates: func(context.Context, uuid.UUID, float64, float64) error {
+		t.Fatal("existing accepted coordinates must not be overwritten during parameter sync")
+		return nil
+	}}
+	observationRepo := stubLocationObservationRepo{upsert: func(gotDeviceID uuid.UUID, observation ReportedLocation) error {
+		assert.Equal(t, deviceID, gotDeviceID)
+		assert.Equal(t, 39.9042, observation.Latitude)
+		assert.Equal(t, 116.4074, observation.Longitude)
+		if assert.NotNil(t, observation.GPSHeight) {
+			assert.Equal(t, 174.0, *observation.GPSHeight)
+		}
+		assert.Equal(t, "Device.DeviceInfo.SAS.FAP.GPS", observation.SourcePath)
+		return nil
+	}}
+
+	syncer := NewInfoSyncer(infoRepoNoop{}, paramRepo, coordinateWriter, registry, zap.NewNop(), observationRepo)
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE)
+	assert.NoError(t, err)
+}
+
+type infoRepoNoop struct{}
+
+func (infoRepoNoop) GetByDeviceID(context.Context, uuid.UUID) (*DeviceInfo, error) { return nil, nil }
+func (infoRepoNoop) Create(context.Context, *DeviceInfo) error                     { return nil }
+func (infoRepoNoop) UpdateManualFields(context.Context, uuid.UUID, UpdateDeviceInfoRequest, string) error {
+	return nil
+}
+func (infoRepoNoop) UpdateSyncFields(context.Context, uuid.UUID, map[string]interface{}) error {
+	return nil
+}
+func (infoRepoNoop) UpdateNameSyncFields(context.Context, uuid.UUID, bool, string) error { return nil }
+func (infoRepoNoop) UpdateDeviceName(context.Context, uuid.UUID, string) error           { return nil }
+func (infoRepoNoop) GetTopologyAttributes(context.Context, uuid.UUID) (map[string]string, error) {
+	return nil, nil
+}
+func (infoRepoNoop) ListDevicesWithInfo(context.Context, DeviceFilter) (*model.ListResponse[DeviceWithInfo], error) {
+	return nil, nil
+}
+func (infoRepoNoop) GetByIDWithInfo(context.Context, uuid.UUID) (*DeviceWithInfo, error) {
+	return nil, nil
+}
+func (infoRepoNoop) ComputeListStats(context.Context, DeviceFilter) (*DeviceListStats, error) {
+	return nil, nil
+}
+
 func TestInfoSyncer_SyncFromParameters_ComputesQuickFieldsWithoutCarrierMapping(t *testing.T) {
 	deviceID := uuid.New()
 	registry := carrier.NewRegistry()
@@ -549,6 +626,24 @@ func TestInfoSyncer_SyncFromParameters_ComputesQuickFieldsWithoutCarrierMapping(
 	}}
 
 	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
+
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechNR)
+	assert.NoError(t, err)
+}
+
+func TestInfoSyncer_SyncFromParameters_ClearsStaleCoreNetworkStatus(t *testing.T) {
+	deviceID := uuid.New()
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+
+	infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, gotDeviceID uuid.UUID, fields map[string]interface{}) error {
+		assert.Equal(t, deviceID, gotDeviceID)
+		mmeStatus, exists := fields["mme_status"]
+		assert.True(t, exists, "mme_status must be explicitly cleared when NR AMF status is absent")
+		assert.Equal(t, "", mmeStatus)
+		return nil
+	}}
+	syncer := NewInfoSyncer(infoRepo, stubDeviceParamRepo{}, nil, registry, zap.NewNop())
 
 	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechNR)
 	assert.NoError(t, err)
@@ -747,8 +842,8 @@ func TestUniversalInformMapping_NoTransmitPowerOverride(t *testing.T) {
 // 覆盖；删除任一条会令 BaiBNQ 等 NR 设备列表对应列长期空白。
 func TestUniversalInformMapping_NRBandAndULEARFCN(t *testing.T) {
 	assert.Contains(t, instanceTemplatesFor(t, "band"),
-		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.RAN.RF.FreqBandIndicator",
-		"NR FreqBandIndicator 必须在 band 列的实例聚合模板中")
+		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.RAN.PHY.FrequencyInfoDLSIB.MultiFrequencyBandListNRSIB.{b}.FreqBandIndicatorNR",
+		"BaiBNQ FreqBandIndicatorNR 必须在 band 列的实例聚合模板中")
 	assert.Contains(t, instanceTemplatesFor(t, "freq_point"),
 		"Device.Services.FAPService.{f}.CellConfig.LTE.RAN.RF.EARFCNDL",
 		"LTE RAN.RF.EARFCNDL 必须在 freq_point 列的实例聚合模板中，避免列表与详情页频点路径分叉")

@@ -43,4 +43,42 @@ describe('buildBatchItems (#203 设备离线阈值读写契约)', () => {
     const items = buildBatchItems({ newFlag: true }, []);
     expect(items[0]).toEqual({ key: 'newFlag', value: 'true', value_type: 'bool' });
   });
+
+  it('已配置 secret 留空时不覆盖原值', () => {
+    const existing: SysConfigItem[] = [
+      {
+        key: 'defaultPasswd',
+        value: '',
+        valueType: 'string',
+        isSecret: true,
+        isConfigured: true,
+      } as SysConfigItem,
+    ];
+
+    expect(buildBatchItems({ defaultPasswd: '', pwdMinLength: 10 }, existing)).toEqual([
+      { key: 'pwdMinLength', value: '10', value_type: 'int' },
+    ]);
+  });
+
+  it('输入新 secret 时生成更新项', () => {
+    const existing: SysConfigItem[] = [
+      {
+        key: 'defaultPasswd',
+        value: '',
+        valueType: 'string',
+        isSecret: true,
+        isConfigured: true,
+      } as SysConfigItem,
+    ];
+
+    expect(buildBatchItems({ defaultPasswd: 'New@123456' }, existing)).toEqual([
+      { key: 'defaultPasswd', value: 'New@123456', value_type: 'string' },
+    ]);
+  });
+
+  it('全新库没有 defaultPasswd 行时，留空保存其他安全项也不创建空密码', () => {
+    expect(buildBatchItems({ defaultPasswd: '', pwdMinLength: 10 }, [])).toEqual([
+      { key: 'pwdMinLength', value: '10', value_type: 'int' },
+    ]);
+  });
 });

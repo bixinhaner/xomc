@@ -40,6 +40,14 @@ const (
 	StatusScheduled Status = "scheduled" // continuous 等下次 tick
 )
 
+// Visibility 标识自定义 adhoc 任务的共享范围。
+type Visibility string
+
+const (
+	VisibilityPrivate Visibility = "private"
+	VisibilityPublic  Visibility = "public"
+)
+
 // TaskSubtype 标记 pm_tasks 行属于 G7 adhoc 任务（区别于老 extraction/report 等）。
 const TaskSubtype = "adhoc_aggregation"
 
@@ -82,6 +90,7 @@ type Task struct {
 	Technology  string    // T-0182：任务制式（lte/nr/gsm），空=不限制式；建后不可改
 	IsBuiltin   bool      // T-0182：内置任务标记（T-0184 预置 12 个内置任务）
 	ExpireDays  int       // T-0182：非持续型任务过期天数（默认 60，约束任务定义层）
+	Visibility  Visibility
 	Status      Status
 	Progress    int    // 0-100
 	Creator     string // user_id 字符串或用户名（与 pm_tasks 既有 creator 列对齐）
@@ -111,6 +120,7 @@ type CreateRequest struct {
 	Technology  string    // T-0182：lte/nr/gsm，空=不限
 	IsBuiltin   bool      // T-0182：内置任务标记
 	ExpireDays  int       // T-0182：非持续型过期天数，<=0 时 repository 兜底为 60
+	Visibility  Visibility
 	Creator     string
 }
 
@@ -120,31 +130,36 @@ type CreateRequest struct {
 //   - false（自建任务）：更新 Name/DeviceSNs/MetricPaths/Granularities/ObjectLDNs/WindowStart/WindowEnd。
 //   - true（内置任务）：只更新 MetricPaths，其余字段忽略。
 //
-// mode/technology/dimension/is_builtin/expire_days 不在本结构体内，不可改。
+// mode/technology/dimension/is_builtin/expire_days 不可改；其中 mode/dimension/is_builtin
+// 由 handler 按既有任务传入，只用于决定编辑守门和状态流转口径。
 type UpdateRequest struct {
-	IsBuiltin     bool // 由 service/handler 按既有任务标记填入，repository 据此决定更新字段集
-	Name          string
-	Mode          Mode
-	CronExpr      *string
-	ResetCursor   bool
-	Dimension     Dimension
-	DeviceSNs     []string
-	MetricPaths   []string
-	Granularities []string
-	ObjectLDNs    []string
-	WindowStart   time.Time
-	WindowEnd     time.Time
-	LastFireAt    time.Time
+	IsBuiltin       bool // 由 service/handler 按既有任务标记填入，repository 据此决定更新字段集
+	Name            string
+	Mode            Mode
+	RequeueTerminal bool // 自建 oneshot 的执行输入变化时，允许 repository 将终态任务重新排队
+	CronExpr        *string
+	ResetCursor     bool
+	Dimension       Dimension
+	DeviceSNs       []string
+	MetricPaths     []string
+	Granularities   []string
+	ObjectLDNs      []string
+	WindowStart     time.Time
+	WindowEnd       time.Time
+	LastFireAt      time.Time
+	Visibility      Visibility
 }
 
 // ListFilter 是 Repository.List 的过滤条件。
 type ListFilter struct {
-	Mode      *Mode
-	Status    *Status
-	Creator   string
-	IsBuiltin *bool // T-0184：内置任务过滤（前端分内置区/自建区）；nil=不过滤
-	Limit     int
-	Offset    int
+	Mode        *Mode
+	Status      *Status
+	Creator     string
+	CurrentUser string
+	IncludeAll  bool
+	IsBuiltin   *bool // T-0184：内置任务过滤（前端分内置区/自建区）；nil=不过滤
+	Limit       int
+	Offset      int
 }
 
 // TaskRun 是 pm_adhoc_task_runs 表一行的 Go 域模型（T-0186）。

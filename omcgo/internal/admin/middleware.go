@@ -192,12 +192,9 @@ func RequirePermission(roleRepo PermissionChecker, resource, action string) gin.
 	}
 }
 
-// RequireAPIPermission 保留为认证门禁，但不再做端点级 API 权限判断。
-//
-// 菜单权限已经足够表达页面可见性和页面内操作能力；再叠加 path+method 级 API
-// 权限只会增加角色配置复杂度，并容易制造“菜单能进但接口 403”的困惑。
-// 现在该中间件只要求请求已完成认证，然后直接放行。
-func RequireAPIPermission(_ PermissionChecker) gin.HandlerFunc {
+// RequireAPIPermission 使用标准路由模板和 HTTP 方法执行端点级 Casbin 鉴权。
+// 权限校验器缺失、路由模板缺失或校验异常时一律拒绝请求，避免故障时越权放行。
+func RequireAPIPermission(roleRepo PermissionChecker) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, exists := c.Get(CtxKeyUserID)
 		if !exists {
@@ -206,9 +203,60 @@ func RequireAPIPermission(_ PermissionChecker) gin.HandlerFunc {
 			return
 		}
 
-		if _, ok := userIDVal.(uuid.UUID); !ok {
+		userID, ok := userIDVal.(uuid.UUID)
+		if !ok {
 			commonerrors.AbortWithError(c, http.StatusInternalServerError,
 				errors.New("invalid user context"))
+			return
+		}
+
+		// builtIn 超管保留显式旁路，与其他权限中间件保持一致。
+		if isSuper, _ := c.Get(CtxKeyIsSuperAdmin); isSuper == true {
+			c.Next()
+			return
+		}
+
+		ctx := c.Request.Context()
+		if roleRepo == nil {
+			logger.L(ctx).Error("API permission checker is not configured",
+				zap.String("user_id", userID.String()),
+				zap.String("method", c.Request.Method),
+				zap.String("path", c.Request.URL.Path),
+			)
+			commonerrors.AbortWithError(c, http.StatusInternalServerError,
+				errors.New("permission check failed"))
+			return
+		}
+
+		resource := c.FullPath()
+		if resource == "" {
+			logger.L(ctx).Error("API permission route template is unavailable",
+				zap.String("user_id", userID.String()),
+				zap.String("method", c.Request.Method),
+				zap.String("path", c.Request.URL.Path),
+			)
+			commonerrors.AbortWithError(c, http.StatusInternalServerError,
+				errors.New("permission check failed"))
+			return
+		}
+
+		action := c.Request.Method
+		allowed, err := roleRepo.CheckPermission(ctx, userID, resource, action)
+		if err != nil {
+			logger.L(ctx).Error("API permission check failed",
+				zap.String("user_id", userID.String()),
+				zap.String("resource", resource),
+				zap.String("action", action),
+				zap.Error(err),
+			)
+			commonerrors.AbortWithError(c, http.StatusInternalServerError,
+				errors.New("permission check failed"))
+			return
+		}
+
+		if !allowed {
+			commonerrors.AbortWithError(c, http.StatusForbidden,
+				errors.New("insufficient permissions"))
 			return
 		}
 
@@ -305,88 +353,6 @@ func httpMethodToAction(method string) string {
 		return "delete"
 	default:
 		return "read"
-	}
-}
-
-// ApiPermissionChecker is implemented by CasbinAuthorizer and provides
-// role-based API path permission checking.
-type ApiPermissionChecker interface {
-	// GetRoleApiEndpoints returns allowed (path, method) pairs for the given role IDs.
-	// An empty result means no explicit API permissions are configured.
-	GetRoleApiEndpoints(ctx context.Context, roleNames []string) ([]RoleApiEndpoint, error)
-}
-
-// RoleApiEndpoint represents a single (path, method) permission entry for a role.
-type RoleApiEndpoint struct {
-	Path   string
-	Method string
-}
-
-// RequireApiPermission returns a Gin middleware that checks whether the current user's
-// roles have explicit permission to access the current request path + method.
-//
-// Bypass rules:
-//   - If apiChecker is nil, the middleware is a no-op (allows everything).
-//   - If the user has no roles, the check is skipped (other middleware handles auth).
-//   - If the role list is empty in the database (no API permissions configured), the
-//     middleware passes through to avoid a hard break during initial setup.
-//
-// Access rules:
-//   - Roles named "admin" or "super_admin" are always granted access.
-//   - Otherwise, at least one of the user's roles must have an explicit allow entry.
-func RequireApiPermission(apiChecker ApiPermissionChecker) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if apiChecker == nil {
-			c.Next()
-			return
-		}
-
-		// Extract role names from JWT context
-		rolesVal, exists := c.Get(CtxKeyRoles)
-		if !exists {
-			c.Next()
-			return
-		}
-		roleNames, ok := rolesVal.([]string)
-		if !ok || len(roleNames) == 0 {
-			c.Next()
-			return
-		}
-
-		// Admin roles bypass API permission check
-		for _, name := range roleNames {
-			if name == "admin" || name == "super_admin" {
-				c.Next()
-				return
-			}
-		}
-
-		// Query allowed endpoints for the current roles
-		allowed, err := apiChecker.GetRoleApiEndpoints(c.Request.Context(), roleNames)
-		if err != nil {
-			// On error, allow through to avoid service disruption
-			c.Next()
-			return
-		}
-
-		// If no API permissions are configured, allow through (initial setup mode)
-		if len(allowed) == 0 {
-			c.Next()
-			return
-		}
-
-		reqPath := c.FullPath()
-		reqMethod := c.Request.Method
-
-		for _, ep := range allowed {
-			if ep.Path == reqPath && strings.EqualFold(ep.Method, reqMethod) {
-				c.Next()
-				return
-			}
-		}
-
-		commonerrors.AbortWithError(c, http.StatusForbidden,
-			errors.New("API access not permitted"))
 	}
 }
 

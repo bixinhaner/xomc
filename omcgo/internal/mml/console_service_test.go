@@ -38,9 +38,32 @@ func (f *fakeGroupTreeRepo) BuildTree(_ context.Context, _, _ string) ([]GroupTr
 	return f.tree, f.err
 }
 
+type fakeFlatGroupTreeRepo struct {
+	groups []FlatGroup
+	err    error
+}
+
+func (f *fakeFlatGroupTreeRepo) BuildFlatTree(context.Context) ([]FlatGroup, error) {
+	return f.groups, f.err
+}
+
+type fakeUnsupportedPathRepo struct {
+	paths []UnsupportedPath
+	err   error
+}
+
+func (f *fakeUnsupportedPathRepo) Record(context.Context, uuid.UUID, string, bool, bool, int, string) error {
+	return nil
+}
+
+func (f *fakeUnsupportedPathRepo) ListByProduct(context.Context, uuid.UUID) ([]UnsupportedPath, error) {
+	return f.paths, f.err
+}
+
 type fakeSubFieldRepo struct {
 	byCommandList     map[uuid.UUID][]MMLCommandSubField
 	byCommandEnriched map[uuid.UUID][]MMLCommandSubFieldEnriched
+	lastParamModelID  *uuid.UUID
 	listErr           error
 }
 
@@ -51,9 +74,9 @@ func newFakeSubFieldRepo() *fakeSubFieldRepo {
 	}
 }
 
-func (f *fakeSubFieldRepo) Create(_ context.Context, _ *MMLCommandSubField) error  { return nil }
-func (f *fakeSubFieldRepo) Update(_ context.Context, _ *MMLCommandSubField) error  { return nil }
-func (f *fakeSubFieldRepo) Delete(_ context.Context, _ uuid.UUID) error            { return nil }
+func (f *fakeSubFieldRepo) Create(_ context.Context, _ *MMLCommandSubField) error { return nil }
+func (f *fakeSubFieldRepo) Update(_ context.Context, _ *MMLCommandSubField) error { return nil }
+func (f *fakeSubFieldRepo) Delete(_ context.Context, _ uuid.UUID) error           { return nil }
 func (f *fakeSubFieldRepo) GetByID(_ context.Context, _ uuid.UUID) (*MMLCommandSubField, error) {
 	return nil, nil
 }
@@ -63,10 +86,11 @@ func (f *fakeSubFieldRepo) ListByCommand(_ context.Context, c uuid.UUID) ([]MMLC
 	}
 	return f.byCommandList[c], nil
 }
-func (f *fakeSubFieldRepo) ListEnrichedByCommand(_ context.Context, c uuid.UUID, _ *uuid.UUID) ([]MMLCommandSubFieldEnriched, error) {
+func (f *fakeSubFieldRepo) ListEnrichedByCommand(_ context.Context, c uuid.UUID, paramModelID *uuid.UUID) ([]MMLCommandSubFieldEnriched, error) {
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
+	f.lastParamModelID = paramModelID
 	return f.byCommandEnriched[c], nil
 }
 func (f *fakeSubFieldRepo) CountByParam(_ context.Context, _ uuid.UUID) (int64, error) {
@@ -83,9 +107,9 @@ func (f *fakeSubFieldRepo) BatchCreate(_ context.Context, _ []*MMLCommandSubFiel
 }
 
 type fakeCommandRepo struct {
-	byID    map[uuid.UUID]*MMLCommand
-	byCode  map[string]*MMLCommand
-	getErr  error
+	byID   map[uuid.UUID]*MMLCommand
+	byCode map[string]*MMLCommand
+	getErr error
 }
 
 func newFakeCommandRepo() *fakeCommandRepo {
@@ -203,6 +227,81 @@ func TestAssembleHierarchy_DisplayOrderRespected(t *testing.T) {
 	assert.Equal(t, "A", nodes[0].GroupCode)
 	assert.Equal(t, "B", nodes[1].GroupCode)
 	assert.Equal(t, "C", nodes[2].GroupCode)
+}
+
+func TestBuildGroupTreeFilteredByDeviceUsesSupportedPaths(t *testing.T) {
+	groupID := uuid.New()
+	commandA := GroupTreeCommand{ID: uuid.New(), OperationType: "LST"}
+	commandA.SetTargetPathsRaw([]byte(`["Device.A"]`))
+	commandB := GroupTreeCommand{ID: uuid.New(), OperationType: "LST"}
+	commandB.SetTargetPathsRaw([]byte(`["Device.B"]`))
+
+	pmID := uuid.New()
+	svc := NewConsoleService(&fakeGroupTreeRepo{tree: []GroupTreeNode{
+		{ID: groupID, GroupCode: "ROOT", Commands: []GroupTreeCommand{commandA, commandB}},
+	}}, newFakeSubFieldRepo(), newFakeCommandRepo(), nil)
+	svc.SetParamModelByDeviceResolver(func(context.Context, string) (*uuid.UUID, error) {
+		return &pmID, nil
+	})
+	svc.SetParamModelPathsResolver(func(context.Context, uuid.UUID) (map[string]struct{}, error) {
+		return map[string]struct{}{"Device.A": {}}, nil
+	})
+
+	got, err := svc.BuildGroupTreeFilteredByDevice(context.Background(), "", "zh-CN", "SN-1")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Len(t, got[0].Commands, 1)
+	assert.Equal(t, commandA.ID, got[0].Commands[0].ID)
+}
+
+func TestBuildGroupTreeFilteredByDevicePrunesCommandWithOnlyRuntimeUnsupportedPaths(t *testing.T) {
+	groupID := uuid.New()
+	command := GroupTreeCommand{ID: uuid.New(), OperationType: "LST"}
+	command.SetTargetPathsRaw([]byte(`["Device.A"]`))
+	productID := uuid.New()
+	paramModelID := uuid.New()
+	svc := NewConsoleService(&fakeGroupTreeRepo{tree: []GroupTreeNode{
+		{ID: groupID, GroupCode: "ROOT", Commands: []GroupTreeCommand{command}},
+	}}, newFakeSubFieldRepo(), newFakeCommandRepo(), nil)
+	svc.SetParamModelByDeviceResolver(func(context.Context, string) (*uuid.UUID, error) {
+		return &paramModelID, nil
+	})
+	svc.SetParamModelPathsResolver(func(context.Context, uuid.UUID) (map[string]struct{}, error) {
+		return map[string]struct{}{"Device.A": {}}, nil
+	})
+	svc.SetUnsupportedPathsProvider(&fakeUnsupportedPathRepo{paths: []UnsupportedPath{
+		{Path: "Device.A", ReadUnsupported: true},
+	}}, func(context.Context, string) (*uuid.UUID, error) {
+		return &productID, nil
+	})
+
+	got, err := svc.BuildGroupTreeFilteredByDevice(context.Background(), "", "zh-CN", "SN-1")
+	require.NoError(t, err)
+	assert.Empty(t, got, "group with no remaining readable path must not be returned")
+}
+
+func TestBuildFlatGroupTreeFilteredByDeviceUsesSupportedPaths(t *testing.T) {
+	commandA := FlatCommand{ID: uuid.New(), Name: "LST A", ObjectPath: []string{"Device.A"}}
+	commandB := FlatCommand{ID: uuid.New(), Name: "LST B", ObjectPath: []string{"Device.B"}}
+	pmID := uuid.New()
+	svc := NewConsoleService(&fakeGroupTreeRepo{}, newFakeSubFieldRepo(), newFakeCommandRepo(), nil)
+	svc.SetFlatTreeRepo(&fakeFlatGroupTreeRepo{groups: []FlatGroup{{
+		Code:     "SA",
+		Name:     "设备信息参数管理",
+		Commands: []FlatCommand{commandA, commandB},
+	}}})
+	svc.SetParamModelByDeviceResolver(func(context.Context, string) (*uuid.UUID, error) {
+		return &pmID, nil
+	})
+	svc.SetParamModelPathsResolver(func(context.Context, uuid.UUID) (map[string]struct{}, error) {
+		return map[string]struct{}{"Device.A": {}}, nil
+	})
+
+	got, err := svc.BuildFlatGroupTreeFiltered(context.Background(), "", "SN-1")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Len(t, got[0].Commands, 1)
+	assert.Equal(t, commandA.ID, got[0].Commands[0].ID)
 }
 
 // ============================================================
@@ -399,6 +498,32 @@ func TestGetCommandSubFields_LangPicksZhCN(t *testing.T) {
 	assert.Equal(t, "只读字符串", got[0].ConstraintText)
 }
 
+func TestGetCommandSubFields_PropagatesStandardRange(t *testing.T) {
+	cmdID := uuid.New()
+	minValue, maxValue := int64(2), int64(32)
+	sfRepo := newFakeSubFieldRepo()
+	sfRepo.byCommandEnriched[cmdID] = []MMLCommandSubFieldEnriched{{
+		MMLCommandSubField: MMLCommandSubField{
+			ID: uuid.New(), CommandID: cmdID, MMLCode: "NAME",
+			LabelI18n: map[string]string{"zh-CN": "名称"},
+		},
+		Tr069Path:  "Device.Info.Name",
+		ValueType:  "string",
+		AccessType: "READ_WRITE",
+		MinValue:   &minValue,
+		MaxValue:   &maxValue,
+	}}
+
+	svc := NewConsoleService(&fakeGroupTreeRepo{}, sfRepo, newFakeCommandRepo(), nil)
+	got, err := svc.GetCommandSubFields(context.Background(), cmdID, "", "", "zh-CN")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.NotNil(t, got[0].MinValue)
+	require.NotNil(t, got[0].MaxValue)
+	assert.EqualValues(t, 2, *got[0].MinValue)
+	assert.EqualValues(t, 32, *got[0].MaxValue)
+}
+
 func TestGetCommandSubFields_LangFallbackToEn(t *testing.T) {
 	cmdID := uuid.New()
 	sfRepo := newFakeSubFieldRepo()
@@ -419,6 +544,78 @@ func TestGetCommandSubFields_LangFallbackToEn(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, "Only EN", got[0].Label) // fallback
+}
+
+func TestGetCommandSubFields_DeviceResolverErrorFailsClosed(t *testing.T) {
+	cmdID := uuid.New()
+	sfRepo := newFakeSubFieldRepo()
+	sfRepo.byCommandEnriched[cmdID] = []MMLCommandSubFieldEnriched{
+		{
+			MMLCommandSubField: MMLCommandSubField{ID: uuid.New(), CommandID: cmdID, MMLCode: "A"},
+			Tr069Path:          "Device.A",
+		},
+	}
+
+	svc := NewConsoleService(&fakeGroupTreeRepo{}, sfRepo, newFakeCommandRepo(), nil)
+	svc.SetParamModelByDeviceResolver(func(context.Context, string) (*uuid.UUID, error) {
+		return nil, errors.New("redis unavailable")
+	})
+
+	got, err := svc.GetCommandSubFields(context.Background(), cmdID, "SN-1", "", "zh-CN")
+	require.Error(t, err)
+	assert.Nil(t, got)
+	assert.Contains(t, err.Error(), "resolve param_model by device")
+}
+
+func TestGetCommandSubFields_DeviceReturnsSupportedMMLIntersection(t *testing.T) {
+	cmdID := uuid.New()
+	sfRepo := newFakeSubFieldRepo()
+	sfRepo.byCommandEnriched[cmdID] = []MMLCommandSubFieldEnriched{
+		{
+			MMLCommandSubField: MMLCommandSubField{ID: uuid.New(), CommandID: cmdID, MMLCode: "A"},
+			Tr069Path:          "Device.A",
+		},
+		{
+			MMLCommandSubField: MMLCommandSubField{ID: uuid.New(), CommandID: cmdID, MMLCode: "B"},
+			Tr069Path:          "Device.B",
+		},
+	}
+	pmID := uuid.New()
+	svc := NewConsoleService(&fakeGroupTreeRepo{}, sfRepo, newFakeCommandRepo(), nil)
+	svc.SetParamModelByDeviceResolver(func(context.Context, string) (*uuid.UUID, error) {
+		return &pmID, nil
+	})
+	svc.SetParamModelPathsResolver(func(context.Context, uuid.UUID) (map[string]struct{}, error) {
+		return map[string]struct{}{"Device.A": {}, "Device.C": {}}, nil
+	})
+
+	got, err := svc.GetCommandSubFields(context.Background(), cmdID, "SN-1", "", "zh-CN")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "Device.A", got[0].Tr069Path)
+}
+
+func TestGetCommandSubFields_DevicePassesParamModelIDToEnrichedRepo(t *testing.T) {
+	cmdID := uuid.New()
+	pmID := uuid.New()
+	sfRepo := newFakeSubFieldRepo()
+	sfRepo.byCommandEnriched[cmdID] = []MMLCommandSubFieldEnriched{{
+		MMLCommandSubField: MMLCommandSubField{ID: uuid.New(), CommandID: cmdID, MMLCode: "A"},
+		Tr069Path:          "Device.A",
+	}}
+
+	svc := NewConsoleService(&fakeGroupTreeRepo{}, sfRepo, newFakeCommandRepo(), nil)
+	svc.SetParamModelByDeviceResolver(func(context.Context, string) (*uuid.UUID, error) {
+		return &pmID, nil
+	})
+	svc.SetParamModelPathsResolver(func(context.Context, uuid.UUID) (map[string]struct{}, error) {
+		return map[string]struct{}{"Device.A": {}}, nil
+	})
+
+	_, err := svc.GetCommandSubFields(context.Background(), cmdID, "SN-1", "", "zh-CN")
+	require.NoError(t, err)
+	require.NotNil(t, sfRepo.lastParamModelID)
+	assert.Equal(t, pmID, *sfRepo.lastParamModelID)
 }
 
 // ============================================================

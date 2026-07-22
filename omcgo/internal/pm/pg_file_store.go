@@ -24,6 +24,24 @@ func NewPgPMFileStore(pool *pgxpool.Pool) *PgPMFileStore {
 	return &PgPMFileStore{pool: pool}
 }
 
+// IsFileParsed returns whether the unique (device_sn, file_name) marker has
+// completed ingestion. Missing and incomplete markers both return false so the
+// collector can continue the normal processing path.
+func (s *PgPMFileStore) IsFileParsed(ctx context.Context, deviceSN, fileName string) (bool, error) {
+	var parsed bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT parsed FROM pm_files WHERE device_sn = $1 AND file_name = $2`,
+		deviceSN, fileName,
+	).Scan(&parsed)
+	if err == pgx.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("query parsed pm_file marker: %w", err)
+	}
+	return parsed, nil
+}
+
 func (s *PgPMFileStore) SaveFile(ctx context.Context, info *PMFileInfo) error {
 	if info.ID == uuid.Nil {
 		info.ID = uuid.New()

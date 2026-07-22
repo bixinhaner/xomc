@@ -234,8 +234,45 @@ func (c ParamRegistryConfig) validate() error {
 }
 
 func (c ParamSyncConfig) validate() error {
+	if c.RoutingMode != "" {
+		switch c.RoutingMode {
+		case "legacy", "durable_shadow", "durable", "closed":
+		default:
+			return fmt.Errorf("param_sync.routing_mode must be one of legacy, durable_shadow, durable, closed, got %q", c.RoutingMode)
+		}
+	}
+	if c.ManualOfflineMode != "" && c.ManualOfflineMode != "queue" && c.ManualOfflineMode != "reject" {
+		return fmt.Errorf("param_sync.manual_offline_mode must be queue or reject, got %q", c.ManualOfflineMode)
+	}
 	if c.CanaryPercent < 0 || c.CanaryPercent > 100 {
 		return fmt.Errorf("param_sync.canary_percent must be between 0 and 100, got %d", c.CanaryPercent)
+	}
+	if c.ResultConsumerShardCount < 0 {
+		return fmt.Errorf("param_sync.result_consumer_shard_count must not be negative, got %d", c.ResultConsumerShardCount)
+	}
+	if c.ResultConsumerQueueDepth < 0 {
+		return fmt.Errorf("param_sync.result_consumer_queue_depth must not be negative, got %d", c.ResultConsumerQueueDepth)
+	}
+	if c.ResultConsumerPullBatchSize < 0 {
+		return fmt.Errorf("param_sync.result_consumer_pull_batch_size must not be negative, got %d", c.ResultConsumerPullBatchSize)
+	}
+	if c.ResultConsumerPullConcurrency < 0 {
+		return fmt.Errorf("param_sync.result_consumer_pull_concurrency must not be negative, got %d", c.ResultConsumerPullConcurrency)
+	}
+	if c.ResultConsumerAckWait < 0 {
+		return fmt.Errorf("param_sync.result_consumer_ack_wait must not be negative, got %s", c.ResultConsumerAckWait)
+	}
+	if c.ResultConsumerMaxAckPending < 0 {
+		return fmt.Errorf("param_sync.result_consumer_max_ack_pending must not be negative, got %d", c.ResultConsumerMaxAckPending)
+	}
+	if c.RecoveryRunLimit < 0 {
+		return fmt.Errorf("param_sync.recovery_run_limit must not be negative, got %d", c.RecoveryRunLimit)
+	}
+	if c.RecoveryTaskLimitPerRun < 0 {
+		return fmt.Errorf("param_sync.recovery_task_limit_per_run must not be negative, got %d", c.RecoveryTaskLimitPerRun)
+	}
+	if c.RecoveryTaskBudget < 0 {
+		return fmt.Errorf("param_sync.recovery_task_budget must not be negative, got %d", c.RecoveryTaskBudget)
 	}
 	if !c.RunEnabled {
 		if c.ResultConsumerEnabled || c.StagingEnabled || c.CanaryPercent != 0 {

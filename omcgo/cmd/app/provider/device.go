@@ -74,6 +74,7 @@ func initDeviceModule(c *Container) error {
 	deviceService.SetDisconnectedAlarmCleaner(c.AlarmPgStore, c.AlarmEngine)
 	deviceService.SetDeviceCache(deviceCache)
 	deviceService.SetDeviceInfoRepo(deviceInfoRepo)
+	deviceService.SetDeviceGroupCountsInvalidator(c.GroupRepo)
 	// IDOR 防护：按 ID 直读端点据此判定调用者对设备所属设备组的归属。
 	deviceService.SetDeviceGroupReader(device.NewPgDeviceGroupReader(c.PgPool))
 	deviceService.SetTaskService(c.TaskSvc)
@@ -104,7 +105,7 @@ func initDeviceModule(c *Container) error {
 	})
 
 	// InfoSyncer
-	infoSyncer := device.NewInfoSyncer(deviceInfoRepo, paramRepo, deviceRepo, c.Carriers, logger)
+	infoSyncer := device.NewInfoSyncer(deviceInfoRepo, paramRepo, deviceRepo, c.Carriers, logger, device.NewPgLocationObservationRepository(c.PgPool))
 	deviceService.SetInfoSyncer(infoSyncer)
 
 	// T-0173: OfflineDetector 已合并入 DeviceStatusReconciler（见上方 reconciler 初始化）。

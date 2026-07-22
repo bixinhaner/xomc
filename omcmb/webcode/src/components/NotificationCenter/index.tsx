@@ -8,7 +8,7 @@
 //   - 状态图标 5 色（蓝旋转/绿√/红×/黄⏰/灰⊘）
 //   - 未读条目左侧蓝色竖条 + 标题加粗
 //   - 已读条目灰色显示
-//   - 点击条目 markRead + navigate(link)
+//   - 点击条目 markRead + 跳转消息中心详情（不复用后端 related link）
 //
 // 数据：useNotificationCenter list + 三个 mutation hook（mark-all-read / clearAll / delete 单条隐式）
 
@@ -48,6 +48,11 @@ interface Props {
   onClose?: () => void;
 }
 
+export function buildNotificationMessageRoute(itemId: string): string {
+  const params = new URLSearchParams({ tab: 'messages', messageId: itemId });
+  return `/notifications?${params.toString()}`;
+}
+
 export default function NotificationCenter({ onClose }: Props) {
   const navigate = useNavigate();
   const t = useT();
@@ -69,10 +74,10 @@ export default function NotificationCenter({ onClose }: Props) {
         // 静默 — 用户跳转更重要
       }
     }
-    if (item.link) {
-      navigate(item.link);
-      onClose?.();
-    }
+    navigate(buildNotificationMessageRoute(item.id), {
+      state: { notificationItem: { ...item, isRead: true } },
+    });
+    onClose?.();
   };
 
   const handleMarkAllRead = async () => {

@@ -108,7 +108,7 @@ func (m *DeviceMatcher) MatchDevice(ctx context.Context, req MatchRequest) (*Mat
 
 func sourceGroupMatches(sourceGroupID uuid.UUID, currentGroupID *uuid.UUID) bool {
 	if sourceGroupID.String() == global.DefaultLevel2GroupID {
-		return currentGroupID == nil
+		return currentGroupID == nil || currentGroupID.String() == global.DefaultLevel2GroupID
 	}
 	return currentGroupID != nil && *currentGroupID == sourceGroupID
 }

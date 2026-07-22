@@ -41,6 +41,33 @@ func Test_Count_Device(t *testing.T) {
 	assert.NotContains(t, gotSQL, "ORDER BY")
 }
 
+func Test_Count_Device_PageByPivotRowCountsDistinctPivotKeys(t *testing.T) {
+	var gotSQL string
+	db := &stubDB{}
+	db.queryRowFn = func(ctx context.Context, sql string, args ...any) pgx.Row {
+		gotSQL = sql
+		return countRow{n: 88}
+	}
+	a := New(db, nil, nil)
+	n, err := a.Count(context.Background(), QueryRequest{
+		Granularity:    metrics.Granularity15Min,
+		Dimension:      DimensionDevice,
+		DeviceSNs:      []string{"SN-1"},
+		MetricPaths:    []string{"C1", "C2"},
+		PageByPivotRow: true,
+		Limit:          50,
+		Offset:         100,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 88, n)
+	assert.Contains(t, gotSQL, "SELECT COUNT(*) FROM (")
+	assert.Contains(t, gotSQL, "SELECT DISTINCT device_oui, device_sn, COALESCE(object_ldn, '') AS object_ldn, granularity, \"time\"")
+	assert.Contains(t, gotSQL, "FROM pm_metrics")
+	assert.NotContains(t, gotSQL, "LIMIT")
+	assert.NotContains(t, gotSQL, "OFFSET")
+	assert.NotContains(t, gotSQL, "metric_path, granularity, time")
+}
+
 // device_group 维度：GROUP BY 子查询包成 COUNT(*) FROM (...) sub，数的是分组数。
 func Test_Count_DeviceGroup_SubqueryCount(t *testing.T) {
 	var gotSQL string

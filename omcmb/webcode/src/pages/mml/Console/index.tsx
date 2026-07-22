@@ -19,6 +19,7 @@ import type {
   ResultRow,
 } from './types';
 import { isReadOp, opLabel } from './constants';
+import { commandUsesPathSelection } from './pathSelection';
 import { useConsoleHistory } from './useConsoleHistory';
 import { useExecStream } from './useExecStream';
 import {
@@ -27,7 +28,10 @@ import {
   buildColumnsFromRawPaths,
   buildDeviceRows,
   buildMODReadbackRows,
+  buildPerPathStatementPaths,
   buildRawExecutePayload,
+  buildStandardQueryColumns,
+  buildStandardRawRows,
   buildStructuredStatement,
   initialPendingRows,
   isStructuredOp,
@@ -76,6 +80,7 @@ export default function MMLConsole() {
   // 所选产品 ID（设备弹框强制同一产品）：用于「选择命令 / 配置参数」按产品拉不支持 path 过滤。
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [command, setCommand] = useState<CommandItem | null>(null);
+  const [selectedPathKeys, setSelectedPathKeys] = useState<string[]>([]);
   const [config, setConfig] = useState<ExecRequest | null>(null);
   const [configTouched, setConfigTouched] = useState(false);
   // 配置参数弹框打开时激活的标签：命令参数(standard) / 指定参数(raw)。
@@ -256,7 +261,9 @@ export default function MMLConsole() {
           setDispatching(false);
           return;
         }
-        columns = buildColumns(command, req.checkedPaths);
+        columns = isReadOp(command.operationType)
+          ? buildStandardQueryColumns(command, req.checkedPaths, req.instanceSelectors)
+          : buildColumns(command, req.checkedPaths);
         meta = {
           operationType: command.operationType,
           read: isReadOp(command.operationType),
@@ -282,10 +289,11 @@ export default function MMLConsole() {
             req.execMode === 'single-path' && splittable && req.checkedPaths.length > 1;
           let statements;
           if (perPath) {
-            const checkedSet = new Set(req.checkedPaths);
-            const orderedPaths = command.paramPaths
-              .filter((p) => checkedSet.has(p.path))
-              .map((p) => p.path);
+            const orderedPaths = buildPerPathStatementPaths(
+              command,
+              req.checkedPaths,
+              req.instanceSelectors,
+            );
             statements = orderedPaths.map((p) =>
               buildStructuredStatement(command, [p], req.values, req.instance, req.instanceSelectors),
             );
@@ -313,9 +321,16 @@ export default function MMLConsole() {
           // 按勾选 path + 用户填值下发；task_name 用命令名（req4）。
           const payload = buildRawExecutePayload(
             command.operationType,
-            req.checkedPaths.map((p) => ({ path: p, value: req.values?.[p] ?? '' })),
+            buildStandardRawRows(
+              command.operationType,
+              req.checkedPaths,
+              req.values,
+              req.instanceSelectors,
+            ),
             targetSns,
             taskNameWithSn(command.commandName),
+            'whole',
+            command.commandName,
           );
           const task = await rawMutation.mutateAsync({ payload });
           taskId = task.id;
@@ -351,6 +366,7 @@ export default function MMLConsole() {
           targetSns,
           taskNameWithSn(cmdName),
           req.execMode,
+          cmdName,
         );
         const task = await rawMutation.mutateAsync({ payload });
         taskId = task.id;
@@ -505,13 +521,20 @@ export default function MMLConsole() {
       <CommandSelectModal
         open={commandModalOpen}
         value={command}
+        selectedPathKeys={selectedPathKeys}
         deviceSn={selectedSns[0]}
         productId={selectedProductId}
         onCancel={() => setCommandModalOpen(false)}
-        onConfirm={(cmd) => {
+        onConfirm={(cmd, pathKeys) => {
           setCommand(cmd);
-          // 选命令后置默认配置(标准模式全部路径),让「执行」无需先开③
-          setConfig({ mode: 'standard', checkedPaths: cmd.paramPaths.map((p) => p.path) });
+          setSelectedPathKeys(pathKeys);
+          // 选命令后置默认配置，让「执行」无需先开③。
+          setConfig({
+            mode: 'standard',
+            checkedPaths: commandUsesPathSelection(cmd.operationType)
+              ? pathKeys
+              : cmd.paramPaths.map((p) => p.path),
+          });
           setConfigTouched(false);
           setConfigMode('standard');
           setCommandModalOpen(false);
@@ -529,6 +552,7 @@ export default function MMLConsole() {
       <ConfigParamsModal
         open={configModalOpen}
         command={command}
+        selectedPathKeys={selectedPathKeys}
         deviceCount={selectedSns.length}
         initialMode={configMode}
         onGotoCommand={() => {

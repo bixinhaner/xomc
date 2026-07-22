@@ -59,6 +59,62 @@ beforeEach(() => {
 });
 
 describe('deviceApi.getList — filter → query 映射', () => {
+	it('映射 location_sync 对账状态及设备上报坐标', async () => {
+		getMock.mockResolvedValue({
+			data: {
+				items: [backendDevice({
+					location_sync: {
+						status: 'pending',
+						accepted: { latitude: 30, longitude: 120 },
+						reported: {
+							latitude: 30.001,
+							longitude: 120.001,
+							observed_at: '2026-07-17T02:00:00Z',
+							version: 8,
+							source_path: 'Device.DeviceInfo.SAS.FAP.GPS',
+						},
+						distance_meters: 146,
+					},
+				})],
+				total: 1,
+				page: 1,
+				page_size: 20,
+				total_pages: 1,
+			},
+		});
+
+		const out = await deviceApi.getList({ page: 1, pageSize: 20 });
+		expect(out.items[0].locationSync.status).toBe('pending');
+		expect(out.items[0].locationSync.reported?.version).toBe(8);
+		expect(out.items[0].locationSync.distanceMeters).toBe(146);
+	});
+
+	it('确认 GPS 同步提交 reported_version', async () => {
+		postMock.mockResolvedValue({ data: { status: 'in_sync' } });
+		const result = await deviceApi.acceptLocationSync('d1', 8);
+		expect(result.status).toBe('in_sync');
+		expect(postMock).toHaveBeenCalledWith('/devices/d1/location-sync/accept', { reported_version: 8 });
+	});
+
+  it('分页和排序字段使用后端 snake_case 契约', async () => {
+    await deviceApi.getList({
+      page: 2,
+      pageSize: 50,
+      sortField: 'serial_number',
+      sortOrder: 'ascend',
+    });
+    const [, opts] = getMock.mock.calls[0];
+    expect(opts.params).toMatchObject({
+      page: 2,
+      page_size: 50,
+      sort_by: 'serial_number',
+      sort_dir: 'asc',
+    });
+    expect(opts.params.pageSize).toBeUndefined();
+    expect(opts.params.sortField).toBeUndefined();
+    expect(opts.params.sortOrder).toBeUndefined();
+  });
+
   it('多选字段序列化为 CSV（避免 axios key[] 形态被 gin 静默丢弃）', async () => {
     await deviceApi.getList({
       page: 1,
@@ -121,6 +177,32 @@ describe('deviceApi.getList — filter → query 映射', () => {
     expect(d.sourceType).toBe('manual');
     // 后端 stats 直读（不靠 items.filter 估算）
     expect(out.stats.online_count).toBe(1);
+  });
+
+  it('按制式映射核心网状态，非本制式字段保持为空', async () => {
+    getMock.mockResolvedValue({
+      data: {
+        items: [
+          backendDevice({ id: 'lte', technology: 'lte', mme_status: 'connected', amf_status: 'wrong', bsc_link_status: 'wrong' }),
+          backendDevice({ id: 'nr', technology: 'nr', mme_status: 'connected' }),
+          backendDevice({ id: 'gsm', technology: 'gsm', mme_status: 'disconnected', bsc_link_status: 'connected' }),
+        ],
+        total: 3,
+        page: 1,
+        page_size: 20,
+        total_pages: 1,
+      },
+    });
+
+    const out = await deviceApi.getList({ page: 1, pageSize: 20 });
+    const [lte, nr, gsm] = out.items;
+    expect(lte.mmeStatus).toBe('connected');
+    expect(lte.amfStatus).toBe('');
+    expect(nr.mmeStatus).toBe('');
+    expect(nr.amfStatus).toBe('connected');
+    expect(gsm.mmeStatus).toBe('');
+    expect(gsm.amfStatus).toBe('');
+    expect(gsm.bscLinkStatus).toBe('connected');
   });
 
   it('BackendDevice source_type=auto 映射为 Device.sourceType', async () => {
@@ -187,6 +269,21 @@ describe('deviceApi.getList — filter → query 映射', () => {
 
     const out = await deviceApi.getList({ page: 1, pageSize: 20 });
     expect(out.items[0].txPower).toBe('');
+  });
+
+  it('保留 LTE ReferenceSignalPower 的负 dBm 实际值', async () => {
+    getMock.mockResolvedValue({
+      data: {
+        items: [backendDevice({ transmit_power: -21, tx_power: '' })],
+        total: 1,
+        page: 1,
+        page_size: 20,
+        total_pages: 1,
+      },
+    });
+
+    const out = await deviceApi.getList({ page: 1, pageSize: 20 });
+    expect(out.items[0].txPower).toBe('-21');
   });
 
   it('stats 缺省时用当前页 items 估算（向下兼容兜底）', async () => {
@@ -266,7 +363,7 @@ describe('deviceApi.getBySn', () => {
     const d = await deviceApi.getBySn('SN001');
 
     expect(getMock).toHaveBeenNthCalledWith(1, '/devices', {
-      params: expect.objectContaining({ sn: 'SN001', page: 1, pageSize: 1 }),
+      params: expect.objectContaining({ sn: 'SN001', page: 1, page_size: 1 }),
     });
     expect(getMock).toHaveBeenNthCalledWith(2, '/devices/d1');
     expect(d?.groupId).toBe('group-1');
@@ -388,6 +485,41 @@ describe('deviceApi.getGroups', () => {
     expect(group?.matchingMode).toBe('serialNumber');
     expect(group?.serialNumberList).toEqual(['SN-001', 'SN-002']);
     expect(out.stats.totalDevices).toBe(6);
+  });
+
+  it('将省略 parent_id 的根分组归一为 null，避免被当成二级源分组', async () => {
+    getMock.mockResolvedValue({
+      data: {
+        items: [
+          {
+            id: 'root-group',
+            name: '默认设备组',
+            device_count: 0,
+            description: '',
+            remark: '',
+            is_default: true,
+            level: 1,
+            children: [
+              {
+                id: UNASSIGNED_GROUP_ID,
+                name: '默认设备组',
+                parent_id: 'root-group',
+                device_count: 6,
+                description: '',
+                remark: '',
+                is_default: true,
+                level: 2,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const out = await deviceApi.getGroups();
+
+    expect(out.groups.find((item) => item.id === 'root-group')?.parentId).toBeNull();
+    expect(out.groups.find((item) => item.id === UNASSIGNED_GROUP_ID)?.parentId).toBe('root-group');
   });
 });
 

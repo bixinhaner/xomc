@@ -48,6 +48,18 @@ func Test_MetricFromKPIValue_NoCellID_LdnNil(t *testing.T) {
 	assert.Equal(t, m.StartTime, m.Time, "不变量：time == start_time")
 }
 
+func Test_MetricFromKPIValue_CarriesStatisType(t *testing.T) {
+	m := MetricFromKPIValue(model.KPIValue{
+		Time:        time.Date(2026, 7, 20, 10, 15, 0, 0, time.UTC),
+		IndicatorID: "KAVG001",
+		KPIValue:    12.3,
+		StatisType:  "avg",
+	})
+
+	require.NotNil(t, m.StatisType)
+	assert.Equal(t, StatisAvg, *m.StatisType)
+}
+
 func Test_MetricFromCounter_StartWindow_NoRegression(t *testing.T) {
 	// counter 行起止本就正确（start = end - granularity），确保未被 KPI 改动波及。
 	end := time.Date(2026, 6, 13, 10, 15, 0, 0, time.UTC)

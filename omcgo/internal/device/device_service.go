@@ -53,34 +53,43 @@ type GroupAssigner interface {
 	BatchAddDevices(ctx context.Context, groupID uuid.UUID, deviceIDs []uuid.UUID) (int64, error)
 }
 
+// DeviceGroupCountsInvalidator clears cached device-group counts after a
+// device lifecycle write changes which active devices must be counted.
+type DeviceGroupCountsInvalidator interface {
+	InvalidateDeviceGroupCounts()
+}
+
 // DeviceService provides business logic for device management.
 type DeviceService struct {
-	redisClient       redis.UniversalClient
-	deviceRepo        DeviceRepository
-	paramRepo         DeviceParameterRepository
-	deviceInfoRepo    DeviceInfoRepository
-	disconnectAlarms  disconnectedAlarmStore
-	disconnectClearer disconnectedAlarmClearer
-	regRepo           RegistrationRepository
-	groupAssigner     GroupAssigner
-	infoSyncer        *InfoSyncer
-	reconciler        *DeviceStatusReconciler
-	eventBus          event.EventBus
-	taskSvc           task.Enqueuer
-	connReq           ConnectionRequester
-	stunUpdater       StunAddressUpdater
-	cache             *DeviceCache
-	metrics           *DeviceMetrics
-	licenseEnforcer   LicenseEnforcer
-	carrierRegistry   *carrier.CarrierRegistry // T-0029: RF control path lookup by carrier+tech
-	paramSyncStarter  ParamSyncStarter         // T-0126: 注入 *provision.SyncService 触发 Path B 手动同步
-	abnormalRecorder  AbnormalRebootRecorder   // T-0158: 异常重启识别即落库（nil = 禁用）
-	bootEventRecorder BootEventRecorder        // 普通 1 BOOT 事件日志写入（nil = 禁用）
-	productMatcher    ProductClassMatcher      // Phase 6 ModelName 回填（nil = 禁用）
-	productBinder     ProductBinder            // T-0176-PR-D：CreateDevice inline match 后写回 product_id（nil = 禁用）
-	groupReader       DeviceGroupReader        // 越权校验：读设备组归属（nil = 退化为不校验，见 AuthorizeDeviceGroupAccess）
-	sysConfigLookup   SysConfigLookup          // 读系统配置（nameSyncMode 等）
-	logger            *zap.Logger
+	redisClient            redis.UniversalClient
+	deviceRepo             DeviceRepository
+	paramRepo              DeviceParameterRepository
+	deviceInfoRepo         DeviceInfoRepository
+	disconnectAlarms       disconnectedAlarmStore
+	disconnectClearer      disconnectedAlarmClearer
+	regRepo                RegistrationRepository
+	groupAssigner          GroupAssigner
+	groupCountsInvalidator DeviceGroupCountsInvalidator
+	infoSyncer             *InfoSyncer
+	reconciler             *DeviceStatusReconciler
+	eventBus               event.EventBus
+	taskSvc                task.Enqueuer
+	connReq                ConnectionRequester
+	stunUpdater            StunAddressUpdater
+	cache                  *DeviceCache
+	metrics                *DeviceMetrics
+	licenseEnforcer        LicenseEnforcer
+	carrierRegistry        *carrier.CarrierRegistry // T-0029: RF control path lookup by carrier+tech
+	paramSyncStarter       ParamSyncStarter         // T-0126: 注入 *provision.SyncService 触发 Path B 手动同步
+	paramSyncRoutingMode   string
+	manualOfflineMode      string
+	abnormalRecorder       AbnormalRebootRecorder // T-0158: 异常重启识别即落库（nil = 禁用）
+	bootEventRecorder      BootEventRecorder      // 普通 1 BOOT 事件日志写入（nil = 禁用）
+	productMatcher         ProductClassMatcher    // Phase 6 ModelName 回填（nil = 禁用）
+	productBinder          ProductBinder          // T-0176-PR-D：CreateDevice inline match 后写回 product_id（nil = 禁用）
+	groupReader            DeviceGroupReader      // 越权校验：读设备组归属（nil = 退化为不校验，见 AuthorizeDeviceGroupAccess）
+	sysConfigLookup        SysConfigLookup        // 读系统配置（nameSyncMode 等）
+	logger                 *zap.Logger
 }
 
 type disconnectedAlarmStore interface {
@@ -120,6 +129,11 @@ type StunAddressUpdater interface {
 // SetRedis assigns the redis client to DeviceService for caching lookups.
 func (s *DeviceService) SetRedis(r redis.UniversalClient) {
 	s.redisClient = r
+}
+
+// SetDeviceGroupCountsInvalidator wires the topology count-cache invalidator.
+func (s *DeviceService) SetDeviceGroupCountsInvalidator(invalidator DeviceGroupCountsInvalidator) {
+	s.groupCountsInvalidator = invalidator
 }
 
 func NewDeviceService(
@@ -349,28 +363,41 @@ func (s *DeviceService) SyncDeviceParamsManualDetailed(ctx context.Context, devi
 	if s.paramSyncStarter == nil {
 		return nil, dev, fmt.Errorf("paramSyncStarter not configured")
 	}
-	if locker, ok := s.taskSvc.(syncGPVDeviceLocker); ok {
-		release, lockErr := locker.AcquireSyncGPVDeviceLock(ctx, dev.SerialNumber)
-		if lockErr != nil {
-			return nil, dev, fmt.Errorf("lock manual parameter sync: %w", lockErr)
-		}
-		defer release()
+	detailed, hasDurableStarter := s.paramSyncStarter.(DetailedParamSyncStarter)
+	if s.blocksLegacyParamSync() && !hasDurableStarter {
+		return nil, dev, fmt.Errorf("parameter sync routing mode %q does not expose the manual legacy path: %w", s.paramSyncRoutingMode, commonerrors.ErrUnavailable)
 	}
-	if guard, ok := s.taskSvc.(syncGPVOpenGuard); ok {
-		hasOpen, guardErr := guard.HasOpenSyncGPVTasksByDevice(ctx, dev.SerialNumber)
-		if guardErr != nil {
-			return nil, dev, fmt.Errorf("check manual sync running: %w", guardErr)
+	if !dev.IsOnline && s.manualOfflineModeRejects(hasDurableStarter) {
+		return nil, dev, commonerrors.NewBusinessError(
+			global.ErrCodeDeviceOffline,
+			"device is offline; parameter sync can only be started for online devices",
+			commonerrors.ErrUnavailable,
+		)
+	}
+	if !hasDurableStarter {
+		if locker, ok := s.taskSvc.(syncGPVDeviceLocker); ok {
+			release, lockErr := locker.AcquireSyncGPVDeviceLock(ctx, dev.SerialNumber)
+			if lockErr != nil {
+				return nil, dev, fmt.Errorf("lock manual parameter sync: %w", lockErr)
+			}
+			defer release()
 		}
-		if hasOpen {
-			return nil, dev, commonerrors.NewBusinessError(
-				global.ErrCodeRuleTaskRunning,
-				"parameter sync already running for this device, try again in a few seconds",
-				commonerrors.ErrAlreadyExists,
-			)
+		if guard, ok := s.taskSvc.(syncGPVOpenGuard); ok {
+			hasOpen, guardErr := guard.HasOpenSyncGPVTasksByDevice(ctx, dev.SerialNumber)
+			if guardErr != nil {
+				return nil, dev, fmt.Errorf("check manual sync running: %w", guardErr)
+			}
+			if hasOpen {
+				return nil, dev, commonerrors.NewBusinessError(
+					global.ErrCodeRuleTaskRunning,
+					"parameter sync already running for this device, try again in a few seconds",
+					commonerrors.ErrAlreadyExists,
+				)
+			}
 		}
 	}
 
-	if detailed, ok := s.paramSyncStarter.(DetailedParamSyncStarter); ok {
+	if hasDurableStarter {
 		result, err = detailed.StartManualSyncDetailed(ctx, dev, sourceID, parameterPaths)
 	} else {
 		used, taskCount, startErr := s.paramSyncStarter.StartManualSync(ctx, dev, sourceID, parameterPaths)
@@ -395,6 +422,35 @@ func (s *DeviceService) SyncDeviceParamsManualDetailed(ctx context.Context, devi
 // 唯一实现者 *provision.SyncService。nil 时 SyncDeviceParamsManual 会返错。
 func (s *DeviceService) SetParamSyncStarter(starter ParamSyncStarter) {
 	s.paramSyncStarter = starter
+}
+
+// SetParamSyncRoutingMode applies the P0 fail-closed gate to the manual
+// legacy starter. The durable manual submitter will replace this path before
+// routing_mode=durable is enabled.
+func (s *DeviceService) SetParamSyncRoutingMode(mode string) {
+	s.paramSyncRoutingMode = strings.TrimSpace(mode)
+}
+
+// SetParamSyncManualOfflineMode controls whether manual durable requests for
+// offline devices are queued or rejected before reaching the durable submitter.
+func (s *DeviceService) SetParamSyncManualOfflineMode(mode string) {
+	s.manualOfflineMode = strings.TrimSpace(mode)
+}
+
+func (s *DeviceService) blocksLegacyParamSync() bool {
+	switch s.paramSyncRoutingMode {
+	case "durable_shadow", "durable", "closed":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *DeviceService) manualOfflineModeRejects(hasDurableStarter bool) bool {
+	if !hasDurableStarter {
+		return true
+	}
+	return s.manualOfflineMode != "queue"
 }
 
 // SetRFSwitch queues a SetParameterValues command to enable/disable the
@@ -679,27 +735,34 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 		}
 	}
 
-	// Check pre-registration: assign to specified group if found.
-	if s.regRepo != nil && s.groupAssigner != nil {
-		preReg, _ := s.regRepo.GetBySerialNumber(ctx, device.SerialNumber)
+	// Assign new devices to the pre-registered group when present; otherwise to
+	// the default L2 group. Matching rules may move the device later.
+	if s.groupAssigner != nil {
+		var preReg *DeviceRegistration
+		if s.regRepo != nil {
+			preReg, _ = s.regRepo.GetBySerialNumber(ctx, device.SerialNumber)
+		}
+
+		targetGroupID := uuid.MustParse(global.DefaultLevel2GroupID)
 		if preReg != nil && preReg.GroupID != nil {
-			if _, err := s.groupAssigner.BatchAddDevices(ctx, *preReg.GroupID, []uuid.UUID{device.ID}); err != nil {
-				s.logger.Warn("assign device to pre-registered group",
-					zap.String("device_id", device.ID.String()),
-					zap.String("group_id", preReg.GroupID.String()),
-					zap.Error(err))
-			} else {
-				s.logger.Info("device assigned to pre-registered group",
-					zap.String("device_id", device.ID.String()),
-					zap.String("group_id", preReg.GroupID.String()))
-			}
+			targetGroupID = *preReg.GroupID
+		}
+
+		if _, err := s.groupAssigner.BatchAddDevices(ctx, targetGroupID, []uuid.UUID{device.ID}); err != nil {
+			s.logger.Warn("assign new device to group",
+				zap.String("device_id", device.ID.String()),
+				zap.String("group_id", targetGroupID.String()),
+				zap.Error(err))
+		} else {
+			s.logger.Info("new device assigned to group",
+				zap.String("device_id", device.ID.String()),
+				zap.String("group_id", targetGroupID.String()))
+		}
+
+		if preReg != nil {
 			// Mark registration as online.
 			s.regRepo.UpdateStatus(ctx, preReg.ID, string(global.RegistrationOnline))
 		}
-		// 2026-06-03 用户决策「未分组 = 未绑定任何分组」：取消"无预登记则自动归默认 L2 组"。
-		// 无预登记的新设备保持未分组(无 device_group_members 行),由 GroupMatchEngine
-		// (device.registered / device.attributes.changed / cron)按规则命中才归组;不命中即留在
-		// "未分组设备"。这样"未分组"是真正的无成员关系,而非默认组成员。
 	}
 
 	// Sync UDP address to STUN cache
@@ -988,11 +1051,16 @@ func (s *DeviceService) clearDisconnectedAlarmOnOnline(ctx context.Context, devi
 	}
 	alarm, err := s.disconnectAlarms.GetActiveByDeviceAndIdentifier(ctx, device.SerialNumber, identifier)
 	if err != nil {
-		s.logger.Warn("lookup disconnected alarm on device online failed",
-			zap.Error(err),
-			zap.String("device_id", device.ID.String()),
-			zap.String("serial_number", device.SerialNumber),
-			zap.String("alarm_identifier", identifier))
+		// 设备上线时没有活跃断连告警是最常见的正常情况（没触发过断连/已清除），
+		// 不是错误——只对真正的查询失败（DB错误等）打WARN，避免每次设备上线都
+		// 产生一条噪音日志（压测/大规模上线场景下会淹没真正的告警日志）。
+		if !errors.Is(err, commonerrors.ErrNotFound) {
+			s.logger.Warn("lookup disconnected alarm on device online failed",
+				zap.Error(err),
+				zap.String("device_id", device.ID.String()),
+				zap.String("serial_number", device.SerialNumber),
+				zap.String("alarm_identifier", identifier))
+		}
 		return
 	}
 	if alarm == nil {
@@ -2129,6 +2197,9 @@ func (s *DeviceService) BatchDeleteDevices(ctx context.Context, ids []uuid.UUID,
 
 	result.Succeeded = int(deleted)
 	result.Failed = len(ids) - int(deleted)
+	if deleted > 0 && s.groupCountsInvalidator != nil {
+		s.groupCountsInvalidator.InvalidateDeviceGroupCounts()
+	}
 
 	// C2 修复：删除成功后清 cache（cache key 用 SN，cache 不感知 ID）
 	if s.cache != nil {
@@ -2183,10 +2254,8 @@ func (s *DeviceService) BatchRebootDevices(ctx context.Context, ids []uuid.UUID)
 	return result
 }
 
-// splitGeoGroupIDs 把前端传来的 group_ids（可能混入 DefaultLevel2GroupID 这个「未分组设备」伪节点）
-// 拆分为「真实分组 ID」+「是否包含未分组」两路。Geo 三接口（list/stats/center）都先经过此归一，
-// 再由 repository 的 applyGeoGroupFilter 拼装为 (dg.id IN realIDs ∨ NOT EXISTS device_group_members)，
-// 与设备列表 / 拓扑徽标对未分组节点的口径保持一致。
+// splitGeoGroupIDs 归一化前端传来的 group_ids。默认组现在是真实设备组，
+// 保留 includeUngrouped 仅兼容历史无归属数据的显式空值分支。
 func splitGeoGroupIDs(ids []string) (realIDs []string, includeUngrouped bool) {
 	if len(ids) == 0 {
 		return nil, false
@@ -2194,9 +2263,6 @@ func splitGeoGroupIDs(ids []string) (realIDs []string, includeUngrouped bool) {
 	realIDs = make([]string, 0, len(ids))
 	for _, id := range ids {
 		if id == "" {
-			continue
-		}
-		if id == global.DefaultLevel2GroupID {
 			includeUngrouped = true
 			continue
 		}
@@ -2210,7 +2276,7 @@ func splitGeoGroupIDs(ids []string) (realIDs []string, includeUngrouped bool) {
 
 // ListGeo returns devices with geographic coordinates for map display.
 // filter.VisibleGroups 携带 #64 设备组数据权限，由 handler 解析调用者身份后注入。
-// filter.GroupIDs 经 splitGeoGroupIDs 归一后传给 repository，确保「未分组设备」节点选中场景能命中。
+// filter.GroupIDs 经 splitGeoGroupIDs 归一后传给 repository。
 func (s *DeviceService) ListGeo(ctx context.Context, filter GeoDeviceFilter) ([]GeoDevice, int64, error) {
 	filter.GroupIDs, filter.IncludeUngrouped = splitGeoGroupIDs(filter.GroupIDs)
 	devices, total, err := s.deviceRepo.ListGeo(ctx, filter)
@@ -2364,9 +2430,18 @@ func (s *DeviceService) GetProductClasses(ctx context.Context) ([]string, error)
 
 // ===== Device Name Sync (Issue #758) =====
 
-// hnbNameStandardPath 是 HNBName（设备名称）的标准 TR-069 路径。
-// 用于 use_omc 动作下发网管名称到设备。
-const hnbNameStandardPath = "Device.Services.FAPService.1.AccessMgmt.LTE.HNBName"
+const (
+	hnbNameStandardPath = "Device.Services.FAPService.1.AccessMgmt.LTE.HNBName"
+	gnbNameStandardPath = "Device.Services.FAPService.1.FAPControl.NR.RAN.Common.gNBName"
+)
+
+// lmtDeviceNameStandardPath 返回当前制式的基站侧名称参数。
+func lmtDeviceNameStandardPath(dev *model.Device) string {
+	if dev != nil && dev.Technology == model.TechNR {
+		return gnbNameStandardPath
+	}
+	return hnbNameStandardPath
+}
 
 // ResolveNameSync 处理设备名称同步人工确认。
 //
@@ -2437,7 +2512,7 @@ func (s *DeviceService) ResolveNameSync(ctx context.Context, deviceID uuid.UUID,
 		}
 
 		spvParams := []map[string]string{{
-			"name":  hnbNameStandardPath,
+			"name":  lmtDeviceNameStandardPath(dev),
 			"value": info.DeviceName,
 			"type":  "xsd:string",
 		}}
@@ -2510,7 +2585,7 @@ func (s *DeviceService) loadNameSyncMode(ctx context.Context) string {
 // RenameDevice 从网管侧修改设备名称并按 nameSyncMode 策略决定是否下发到基站。
 //
 // 行为矩阵（见设计文档 §2.1）：
-//   - auto_lmt_to_omc → 拒绝（LMT 覆盖策略下禁止从网管改名）
+//   - auto_lmt_to_omc → 仅修改网管名称；后续设备上报时仍按策略以 LMT 名称覆盖
 //   - auto_omc_to_lmt → 双写网管库 + 建 SPV 下发任务 + 清 pending
 //   - prompt          → 双写网管库 + 置 pending=true（lmtName 取旧值原样回写）
 //
@@ -2523,16 +2598,7 @@ func (s *DeviceService) RenameDevice(ctx context.Context, id uuid.UUID, newName 
 	result := &RenameDeviceResult{}
 	mode := s.loadNameSyncMode(ctx)
 
-	// 1. auto_lmt_to_omc → 直接拒绝
-	if mode == "auto_lmt_to_omc" {
-		return nil, commonerrors.NewBusinessError(
-			global.ErrCodeDeviceRenameNotAllowed,
-			"当前命名策略以基站为准，请在 LMT 侧修改名称",
-			commonerrors.ErrForbidden,
-		)
-	}
-
-	// 2. 读设备（需要 SN 做缓存清理和 SPV 下发）
+	// 1. 读设备（需要 SN 做缓存清理和 SPV 下发）
 	dev, err := s.deviceRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("get device: %w", err)
@@ -2541,7 +2607,7 @@ func (s *DeviceService) RenameDevice(ctx context.Context, id uuid.UUID, newName 
 		return nil, commonerrors.ErrNotFound
 	}
 
-	// 3. 读 device_info（prompt 模式下需要 lmt_device_name 旧值防止污染缓存）
+	// 2. 读 device_info（prompt 模式下需要 lmt_device_name 旧值防止污染缓存）
 	info, err := s.deviceInfoRepo.GetByDeviceID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("get device info: %w", err)
@@ -2550,7 +2616,7 @@ func (s *DeviceService) RenameDevice(ctx context.Context, id uuid.UUID, newName 
 		return nil, commonerrors.ErrNotFound
 	}
 
-	// 4. 双写：device_info.device_name（详情口径）+ devices.site_name（列表口径）
+	// 3. 双写：device_info.device_name（详情口径）+ devices.site_name（列表口径）
 	if err := s.deviceInfoRepo.UpdateDeviceName(ctx, id, newName); err != nil {
 		return nil, fmt.Errorf("update device_info.device_name: %w", err)
 	}
@@ -2568,16 +2634,18 @@ func (s *DeviceService) RenameDevice(ctx context.Context, id uuid.UUID, newName 
 	dev.DeviceName = newName
 	s.PublishDeviceAttributesChangedEvent(ctx, dev, []string{"site_name"})
 
-	// 5. 按策略决定下发与 pending
-	const hnbNameStdPath = "Device.Services.FAPService.1.AccessMgmt.LTE.HNBName"
+	// 4. 按策略决定下发与 pending
 	lmtName := info.LMTDeviceName // 旧值，用于 pending 时回写和 auto 路径清 pending
 
 	switch mode {
+	case "auto_lmt_to_omc":
+		// 人工修改只作用于网管名称，不下发 LMT，也不制造人工确认 pending。
+		// 后续设备名称上报时，自动同步逻辑仍会按当前策略采用 LMT 名称。
 	case "auto_omc_to_lmt":
-		// 建 SPV 下发任务（标准路径 HNBName，ACS 侧翻私有路径）
+		// 建 SPV 下发任务（按制式选择 HNBName/gNBName，ACS 侧翻私有路径）
 		if s.taskSvc != nil {
 			spvParams := []map[string]string{{
-				"name":  hnbNameStdPath,
+				"name":  lmtDeviceNameStandardPath(dev),
 				"value": newName,
 				"type":  "xsd:string",
 			}}

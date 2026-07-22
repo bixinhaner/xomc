@@ -230,6 +230,7 @@ type MMLTask struct {
 	SuccessCount int         `json:"success_count"`
 	FailedCount  int         `json:"failed_count"`
 	Result       *TaskResult `json:"result,omitempty"`
+	LatestRun    *MMLTaskRun `json:"latest_run,omitempty"`
 
 	// Scheduler 调度字段（P2/P3，docs/design/mml-task-flow-design-20260424.md）
 	// NextTriggerAt: 下次触发时刻；PeriodicParentID: periodic 子实例指向模板。
@@ -252,6 +253,25 @@ type MMLTask struct {
 	MatchedProductID      *uuid.UUID `json:"matched_product_id,omitempty"`
 	MatchedProductClass   string     `json:"matched_product_class,omitempty"`
 	PathTranslationSource string     `json:"path_translation_source,omitempty"` // discovered/default/passthrough/orphan_passthrough/mixed
+}
+
+// MMLTaskRun is a lightweight child-execution summary embedded in periodic
+// parent list rows so the UI can show the latest run progress without N+1 calls.
+type MMLTaskRun struct {
+	ID            uuid.UUID       `json:"id"`
+	ExecuteType   ExecuteType     `json:"execute_type"`
+	ExecuteMode   TaskExecuteMode `json:"execute_mode"`
+	Status        TaskStatus      `json:"status"`
+	Result        *TaskResult     `json:"result,omitempty"`
+	TotalDevices  int             `json:"total_devices"`
+	SuccessCount  int             `json:"success_count"`
+	FailedCount   int             `json:"failed_count"`
+	CommandCount  int             `json:"command_count"`
+	PlanItemCount int             `json:"plan_item_count"`
+	StartedAt     *time.Time      `json:"started_at,omitempty"`
+	FinishedAt    *time.Time      `json:"finished_at,omitempty"`
+	CreatedAt     time.Time       `json:"created_at"`
+	UpdatedAt     time.Time       `json:"updated_at"`
 }
 
 // PathTranslationWarning 是 MML 任务详情中关于 standardPath ↔ privatePath 翻译
@@ -307,11 +327,14 @@ type MMLCustomCommand struct {
 	CategoryGroup string                 `json:"category_group,omitempty"`
 	Parameters    map[string]interface{} `json:"parameters"`
 	ParamPaths    []string               `json:"param_paths"`
-	Description   string                 `json:"description"`
-	Creator       string                 `json:"creator"`
-	OwnerUserID   *uuid.UUID             `json:"owner_user_id,omitempty"`
-	CreatedAt     time.Time              `json:"created_at"`
-	UpdatedAt     time.Time              `json:"updated_at"`
+	// ParamPathsProvided 仅用于 Update 的字段掩码；防止省略 param_paths 的 PUT
+	// 用 service 层旧快照覆盖并发 Path 关联写入。
+	ParamPathsProvided bool       `json:"-"`
+	Description        string     `json:"description"`
+	Creator            string     `json:"creator"`
+	OwnerUserID        *uuid.UUID `json:"owner_user_id,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
 // CustomCommandFilter specifies criteria for listing MML custom commands.
@@ -325,10 +348,13 @@ type MMLCustomCommand struct {
 //
 // UserID 由 service 层接收后调 RoleQuerier 派生 VisibleGroupIDs；repo 层仅消费派生结果。
 type CustomCommandFilter struct {
-	CommandCode     *string
-	OperationType   *string
-	CommandScope    *string
-	CategoryGroup   *string
+	CommandCode   *string
+	OperationType *string
+	CommandScope  *string
+	CategoryGroup *string
+	// ProductID 非空时，列表只返回当前产品参数模型仍支持至少一个 path 的模板，
+	// 并把模板中的不支持 path 一并裁掉。管理端不传此字段，仍返回完整模板。
+	ProductID       *uuid.UUID
 	Creator         *string     // 当前 admin 的 username；用于 private 命令 self-fallback 可见性
 	UserID          *uuid.UUID  // 当前 admin 的 user_id；service 层据此派生 VisibleGroupIDs
 	VisibleGroupIDs []uuid.UUID // service 派生后填入；repo 层用作 group-share 可见性 SQL 参数
@@ -350,6 +376,7 @@ type MMLParamRef struct {
 	DefaultValue      string                 `json:"default_value,omitempty"`
 	JsRegex           string                 `json:"js_regex,omitempty"`
 	ValueConstraint   map[string]interface{} `json:"value_constraint,omitempty"`
+	PathMode          string                 `json:"path_mode,omitempty"`
 	PrivatePath       string                 `json:"private_path,omitempty"`
 	TranslationSource string                 `json:"translation_source,omitempty"`
 }

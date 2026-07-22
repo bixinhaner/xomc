@@ -8,8 +8,8 @@
  * 这里按 BackendXxx → mapBackendXxx → 前端 camelCase 的项目惯例落地。
  */
 
-/** 导出来源：dashboard 仪表盘曲线 / kpi_query 指标查询页 / adhoc 聚合任务结果。 */
-export type KpiExportSource = 'dashboard' | 'kpi_query' | 'adhoc';
+/** 导出来源：dashboard 仪表盘曲线 / device_view 设备性能查看 / kpi_query 指标查询页 / adhoc 聚合任务结果。 */
+export type KpiExportSource = 'dashboard' | 'device_view' | 'kpi_query' | 'adhoc';
 
 /** 导出任务生命周期状态。 */
 export type KpiExportStatus = 'pending' | 'running' | 'succeeded' | 'failed';

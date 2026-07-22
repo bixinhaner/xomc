@@ -139,11 +139,14 @@ func (h *ConsoleHandler) GetCommandCompatibility(c *gin.Context) {
 // format 缺省为 tree（向后兼容递归树）；format=flat 返 Task #4 扁平响应。
 // product_class 缺省时不做产品级过滤（向后兼容）；非空时按 T-0172 方案 X
 // 过滤命令并给每条命令挂 supported_path_count / unsupported_paths / product_resolved。
+// device_sn 非空时按该设备对应 ParamModel 的支持集合过滤，优先用于控制台，
+// 使命令树与 sub-fields 参数列表使用同一设备支持口径。
 type GroupTreeQuery struct {
 	Root         string `form:"root"`
 	Lang         string `form:"lang"`
 	Format       string `form:"format"`
 	ProductClass string `form:"product_class"`
+	DeviceSN     string `form:"device_sn"`
 }
 
 // GetGroupTree 返回命令树。
@@ -155,8 +158,10 @@ func (h *ConsoleHandler) GetGroupTree(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "invalid query: "+err.Error())
 		return
 	}
+	productClass := strings.TrimSpace(q.ProductClass)
+	deviceSN := strings.TrimSpace(q.DeviceSN)
 	if strings.EqualFold(strings.TrimSpace(q.Format), "flat") {
-		groups, err := h.svc.BuildFlatGroupTree(c.Request.Context())
+		groups, err := h.svc.BuildFlatGroupTreeFiltered(c.Request.Context(), productClass, deviceSN)
 		if err != nil {
 			if errors.Is(err, ErrFlatTreeNotConfigured) {
 				response.Fail(c, http.StatusServiceUnavailable, err.Error())
@@ -170,12 +175,18 @@ func (h *ConsoleHandler) GetGroupTree(c *gin.Context) {
 		return
 	}
 	lang := resolveLang(c, q.Lang)
-	productClass := strings.TrimSpace(q.ProductClass)
-	tree, err := h.svc.BuildGroupTreeFiltered(c.Request.Context(), q.Root, lang, productClass)
+	var tree []GroupTreeNode
+	var err error
+	if deviceSN != "" {
+		tree, err = h.svc.BuildGroupTreeFilteredByDevice(c.Request.Context(), q.Root, lang, deviceSN)
+	} else {
+		tree, err = h.svc.BuildGroupTreeFiltered(c.Request.Context(), q.Root, lang, productClass)
+	}
 	if err != nil {
 		h.logger.Error("build group tree", zap.Error(err),
 			zap.String("root", q.Root),
-			zap.String("product_class", productClass))
+			zap.String("product_class", productClass),
+			zap.String("device_sn", deviceSN))
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}

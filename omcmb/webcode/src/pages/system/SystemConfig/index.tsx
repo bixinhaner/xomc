@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
+  Alert,
   Form,
   message,
   Tabs,
@@ -23,9 +24,13 @@ import LogRetentionSection from './LogRetentionSection';
 import {
   useSysConfigsByCategory,
   useBatchUpdateSysConfigs,
+  useSysConfigApplyBatch,
 } from '@core/hooks/api/useSystem';
 import type { SysConfigValueType } from '@core/types/system';
 import { buildBatchItems } from './sysConfigSerialize';
+import type { ConfigApplyBatch } from '@core/types/system';
+import { isApplyBatchForCategory, isEventDeliveryBatch } from './applyStatus';
+import styles from './SystemConfig.module.css';
 
 // 设置子页签类型（v1.0：移除 sas / ldap，参 omgo/docs/prd/system/config.md）
 // notify tab 已隐藏（#781）：邮件/短信后端未真实打通前不展示，避免误导用户
@@ -81,7 +86,12 @@ function decodeValue(raw: string, type: SysConfigValueType | undefined): unknown
 
 export default function SystemConfig() {
   const t = useT();
+  const tabsContainerRef = useRef<HTMLDivElement>(null);
   const [activeTab, setActiveTab] = useState<SettingsTab>('basic');
+  const [submittedBatch, setSubmittedBatch] = useState<ConfigApplyBatch | null>(null);
+  const { data: refreshedBatch } = useSysConfigApplyBatch(submittedBatch?.id);
+  const applyBatch = refreshedBatch ?? submittedBatch;
+  const visibleApplyBatch = isApplyBatchForCategory(applyBatch, activeTab) ? applyBatch : null;
 
   // 各设置模块的表单实例
   const [basicForm] = Form.useForm();
@@ -118,12 +128,27 @@ export default function SystemConfig() {
     if (!configList || configList.length === 0) return;
     const fields: Record<string, unknown> = {};
     for (const item of configList) {
+      // write-only secret 的 value 固定为空，不能灌回表单形成“空值覆盖”。
+      if (item.isSecret) continue;
       fields[item.key] = decodeValue(item.value, item.valueType);
     }
+    if (
+      activeTab === 'device' &&
+      fields.periodicSyncIntervalMinutes === undefined &&
+      typeof fields.periodicSyncIntervalHours === 'number' &&
+      fields.periodicSyncIntervalHours > 0
+    ) {
+      fields.periodicSyncIntervalMinutes = fields.periodicSyncIntervalHours * 60;
+    }
     form.setFieldsValue(fields);
-  }, [activeForm, configList]);
+  }, [activeForm, activeTab, configList]);
 
   const batchUpdate = useBatchUpdateSysConfigs();
+
+  const defaultPasswordConfigured = useMemo(
+    () => configList?.some((item) => item.key === 'defaultPasswd' && item.isSecret && item.isConfigured) ?? false,
+    [configList],
+  );
 
   // 保存当前设置
   const handleSave = useCallback(async () => {
@@ -143,7 +168,8 @@ export default function SystemConfig() {
       return;
     }
     try {
-      await batchUpdate.mutateAsync({ category: activeTab, items });
+      const result = await batchUpdate.mutateAsync({ category: activeTab, items });
+      setSubmittedBatch(result.batch);
       void message.success(t('common.save'));
     } catch (err) {
       const msg = err instanceof Error ? err.message : t('sysconfig.error.saveFailed');
@@ -157,7 +183,12 @@ export default function SystemConfig() {
       case 'basic':
         return <BasicSettings form={basicForm} />;
       case 'security':
-        return <SecuritySettings form={securityForm} />;
+        return (
+          <SecuritySettings
+            form={securityForm}
+            defaultPasswordConfigured={defaultPasswordConfigured}
+          />
+        );
       case 'device':
         return <DeviceSettings form={deviceForm} />;
       case 'storage':
@@ -187,18 +218,42 @@ export default function SystemConfig() {
     label: t(tab.labelKey),
   }));
 
+  const handleTabChange = useCallback((key: string) => {
+    const scrollContainer = tabsContainerRef.current?.closest('main');
+    if (scrollContainer) scrollContainer.scrollTop = 0;
+    setSubmittedBatch(null);
+    setActiveTab(key as SettingsTab);
+  }, []);
+
   return (
     <ListPageLayout>
       {/* 页签切换 - 放在 Card 外部 */}
-      <Tabs
-        activeKey={activeTab}
-        onChange={(key) => setActiveTab(key as SettingsTab)}
-        items={tabItems}
-      />
+      <div ref={tabsContainerRef} className={styles.stickyTabs}>
+        <Tabs
+          activeKey={activeTab}
+          onChange={handleTabChange}
+          items={tabItems}
+        />
+      </div>
       {/* 设置内容（含 loading 遮罩） */}
       <Spin spinning={isFetching}>
         {renderSettingsContent()}
       </Spin>
+      {visibleApplyBatch && (
+        <Alert
+          style={{ marginTop: 12 }}
+          type={visibleApplyBatch.status === 'failed' ? 'error' : visibleApplyBatch.status === 'applied' ? 'success' : 'info'}
+          showIcon
+          message={t(
+            visibleApplyBatch.status === 'applied' && isEventDeliveryBatch(visibleApplyBatch)
+              ? 'sysconfig.apply.delivered'
+              : `sysconfig.apply.${visibleApplyBatch.status}`,
+          )}
+          description={visibleApplyBatch.status === 'failed'
+            ? visibleApplyBatch.targets.find((target) => target.lastError)?.lastError
+            : undefined}
+        />
+      )}
       {/* 底部保存按钮：仅对走全局表单的页签显示；自管表单页签（pm_retention）
           由其组件内部的保存/重置按钮负责，避免重复且避免对 undefined form 操作。 */}
       {formMap[activeTab] && (

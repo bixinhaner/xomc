@@ -22,6 +22,7 @@ import { useQuery } from '@tanstack/react-query';
 import { FolderOutlined, UserOutlined, PlusOutlined } from '@ant-design/icons';
 import { Tag, Tooltip, type TreeDataNode } from 'antd';
 import { mmlApi } from '@core/services/api/mmlApi';
+import { MML_CUSTOM_COMMANDS_QUERY_KEY } from '@core/hooks/api/mmlQueryKeys';
 import type { MMLCustomCommand, MMLOperationType } from '@core/types/mml';
 
 // 自定义命令叶子 key 前缀，Console 与 catalog 共用（两页 handleSelect 据此识别）。
@@ -34,7 +35,7 @@ export const CUSTOM_PUBLIC_ROOT_KEY = `${CUSTOM_KEY_PREFIX}root:public`;
 
 // 自定义命令共享 query key —— Console 与 catalog 用同一把 key，
 // 任一页的增删改 invalidate 后两页同时刷新。
-export const CUSTOM_COMMANDS_QUERY_KEY = ['mml', 'custom-commands'] as const;
+export const CUSTOM_COMMANDS_QUERY_KEY = MML_CUSTOM_COMMANDS_QUERY_KEY;
 
 /** 从 key 反解自定义命令 id；非 custom 叶子返回 null。 */
 export function parseCustomLeafId(key: string): string | null {
@@ -53,10 +54,10 @@ export function parseCustomLeafId(key: string): string | null {
  * 复用与 Console 原实现一致的 getTemplates 查询，但统一到共享 query key
  * CUSTOM_COMMANDS_QUERY_KEY，使 Console / catalog 两页的失效互相联动。
  */
-export function useCustomCommands() {
+export function useCustomCommands(productId?: string) {
   const query = useQuery({
-    queryKey: CUSTOM_COMMANDS_QUERY_KEY,
-    queryFn: () => mmlApi.getTemplates({ page: 1, pageSize: 100 }),
+    queryKey: [...CUSTOM_COMMANDS_QUERY_KEY, productId ?? ''],
+    queryFn: () => mmlApi.getTemplates({ page: 1, pageSize: 1000, productId }),
     staleTime: 5 * 60 * 1000,
   });
   return {

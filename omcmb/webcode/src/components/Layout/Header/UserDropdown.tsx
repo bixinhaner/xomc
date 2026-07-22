@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Avatar, Space, Modal, Form, Input, App, Alert, Button } from 'antd';
 import {
   UserOutlined,
@@ -16,6 +17,7 @@ import { adminApi } from '@core/services/api/adminApi';
 import styles from './Header.module.css';
 
 export default function UserDropdown() {
+  const navigate = useNavigate();
   const popupContainerRef = useRef<HTMLSpanElement>(null);
   const token = useThemeToken();
   const currentUser = useUserStore((s) => s.currentUser);
@@ -89,10 +91,15 @@ export default function UserDropdown() {
     };
   }, [menuOpen]);
 
+  const handleManualLogout = () => {
+    navigate('/login', { flushSync: true, replace: true, state: null });
+    logout();
+  };
+
   const handleMenuClick = (key: 'logout' | 'switchLang' | 'changePassword') => {
     setMenuOpen(false);
     if (key === 'logout') {
-      logout();
+      handleManualLogout();
     } else if (key === 'switchLang') {
       toggleLocale();
     } else if (key === 'changePassword') {
@@ -202,7 +209,7 @@ export default function UserDropdown() {
         cancelButtonProps={mustChangePassword ? { style: { display: 'none' } } : undefined}
         footer={mustChangePassword ? (_close, { OkBtn }) => (
           <Space>
-            <Button danger onClick={() => { setMustChangePassword(false); logout(); }}>
+            <Button danger onClick={() => { setMustChangePassword(false); handleManualLogout(); }}>
               {t('user.logout')}
             </Button>
             <OkBtn />

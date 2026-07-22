@@ -105,8 +105,11 @@ export interface BackendSubField {
   constraint_text_i18n: Record<string, string>;
   default_value?: string;
   js_regex?: string;
-  /** standard_params.min_value：MOD/ADD 填值时标量参数默认值（值默认取 min_value）。 */
+  validation_pattern?: string;
+  enum_options?: Array<{ value: string; label: string }>;
+	/** 当前参数模型 min/max；缺失时由后端回退 standard_params。 */
   min_value?: number | null;
+  max_value?: number | null;
   default_selected: boolean;
   is_required: boolean;
   sort_order: number;
@@ -248,8 +251,11 @@ export interface SubFieldDef {
   constraintTextI18n: Record<string, string>;
   defaultValue?: string;
   jsRegex?: string;
-  /** standard_params.min_value：MOD/ADD 填值时标量参数默认值（值默认取 min_value）。 */
+  validationPattern?: string;
+  enumOptions?: Array<{ value: string; label: string }>;
+	/** 当前参数模型 min/max；缺失时由后端回退 standard_params。 */
   minValue?: number;
+  maxValue?: number;
   defaultSelected: boolean;
   isRequired: boolean;
   sortOrder: number;

@@ -8,8 +8,8 @@
   "stats": {
     "chapters": 18,
     "objectsTotal": 71,
-    "commandLeavesTotal": 190,
-    "uniqueParams": 624,
+    "commandLeavesTotal": 183,
+    "uniqueParams": 621,
     "mergeEvents": 1,
     "nonCreatableFiltered": 17
   },
@@ -215,26 +215,6 @@
       "displayOrder": 4,
       "commands": [
         {
-          "commandCode": "LST:Device.FaultMgmt.*",
-          "operationType": "LST",
-          "rpcMethod": "GetParameterValues",
-          "logicalNameI18n": {
-            "zh-CN": "故障管理总览"
-          },
-          "groupCodeObject": "Device.FaultMgmt.*",
-          "instanceArity": 0,
-          "instanceLevels": [],
-          "instanceRangeMeta": [],
-          "treeNodeRefs": [
-            "Device.FaultMgmt.SupportedAlarmNumberOfEntries",
-            "Device.FaultMgmt.MaxCurrentAlarmEntries",
-            "Device.FaultMgmt.CurrentAlarmNumberOfEntries",
-            "Device.FaultMgmt.HistoryEventNumberOfEntries",
-            "Device.FaultMgmt.ExpeditedEventNumberOfEntries",
-            "Device.FaultMgmt.QueuedEventNumberOfEntries"
-          ]
-        },
-        {
           "commandCode": "LST:Device.FaultMgmt.CurrentAlarm.{i}.*",
           "operationType": "LST",
           "rpcMethod": "GetParameterValues",
@@ -272,43 +252,6 @@
           ]
         },
         {
-          "commandCode": "LST:Device.FaultMgmt.ExpeditedEvent.{i}.*",
-          "operationType": "LST",
-          "rpcMethod": "GetParameterValues",
-          "logicalNameI18n": {
-            "zh-CN": "实时告警实例"
-          },
-          "groupCodeObject": "Device.FaultMgmt.ExpeditedEvent.{i}.*",
-          "instanceArity": 1,
-          "instanceLevels": [
-            "ExpeditedEvent"
-          ],
-          "instanceRangeMeta": [
-            {
-              "layer": 1,
-              "rangeExpr": "0~N",
-              "rangeMin": 0,
-              "rangeMax": null,
-              "dynamic": true,
-              "nSource": null,
-              "description": "实时告警实例编号"
-            }
-          ],
-          "treeNodeRefs": [
-            "Device.FaultMgmt.ExpeditedEvent.{i}.EventTime",
-            "Device.FaultMgmt.ExpeditedEvent.{i}.AlarmIdentifier",
-            "Device.FaultMgmt.ExpeditedEvent.{i}.NotificationType",
-            "Device.FaultMgmt.ExpeditedEvent.{i}.FaultLocation",
-            "Device.FaultMgmt.ExpeditedEvent.{i}.ManagedObjectInstance",
-            "Device.FaultMgmt.ExpeditedEvent.{i}.EventType",
-            "Device.FaultMgmt.ExpeditedEvent.{i}.ProbableCause",
-            "Device.FaultMgmt.ExpeditedEvent.{i}.SpecificProblem",
-            "Device.FaultMgmt.ExpeditedEvent.{i}.PerceivedSeverity",
-            "Device.FaultMgmt.ExpeditedEvent.{i}.AdditionalText",
-            "Device.FaultMgmt.ExpeditedEvent.{i}.AdditionalInformation"
-          ]
-        },
-        {
           "commandCode": "LST:Device.FaultMgmt.HistoryEvent.{i}.*",
           "operationType": "LST",
           "rpcMethod": "GetParameterValues",
@@ -343,155 +286,6 @@
             "Device.FaultMgmt.HistoryEvent.{i}.PerceivedSeverity",
             "Device.FaultMgmt.HistoryEvent.{i}.AdditionalText",
             "Device.FaultMgmt.HistoryEvent.{i}.AdditionalInformation"
-          ]
-        },
-        {
-          "commandCode": "LST:Device.FaultMgmt.QueuedEvent.{i}.*",
-          "operationType": "LST",
-          "rpcMethod": "GetParameterValues",
-          "logicalNameI18n": {
-            "zh-CN": "队列告警实例"
-          },
-          "groupCodeObject": "Device.FaultMgmt.QueuedEvent.{i}.*",
-          "instanceArity": 1,
-          "instanceLevels": [
-            "QueuedEvent"
-          ],
-          "instanceRangeMeta": [
-            {
-              "layer": 1,
-              "rangeExpr": "0~N",
-              "rangeMin": 0,
-              "rangeMax": null,
-              "dynamic": true,
-              "nSource": null,
-              "description": "队列告警实例编号"
-            }
-          ],
-          "treeNodeRefs": [
-            "Device.FaultMgmt.QueuedEvent.{i}.EventTime",
-            "Device.FaultMgmt.QueuedEvent.{i}.AlarmIdentifier",
-            "Device.FaultMgmt.QueuedEvent.{i}.NotificationType",
-            "Device.FaultMgmt.QueuedEvent.{i}.FaultLocation",
-            "Device.FaultMgmt.QueuedEvent.{i}.ManagedObjectInstance",
-            "Device.FaultMgmt.QueuedEvent.{i}.EventType",
-            "Device.FaultMgmt.QueuedEvent.{i}.ProbableCause",
-            "Device.FaultMgmt.QueuedEvent.{i}.SpecificProblem",
-            "Device.FaultMgmt.QueuedEvent.{i}.PerceivedSeverity",
-            "Device.FaultMgmt.QueuedEvent.{i}.AdditionalText",
-            "Device.FaultMgmt.QueuedEvent.{i}.AdditionalInformation"
-          ]
-        },
-        {
-          "commandCode": "LST:Device.FaultMgmt.SupportedAlarm.{i}.*",
-          "operationType": "LST",
-          "rpcMethod": "GetParameterValues",
-          "logicalNameI18n": {
-            "zh-CN": "支持告警类型"
-          },
-          "groupCodeObject": "Device.FaultMgmt.SupportedAlarm.{i}.*",
-          "instanceArity": 1,
-          "instanceLevels": [
-            "SupportedAlarm"
-          ],
-          "instanceRangeMeta": [
-            {
-              "layer": 1,
-              "rangeExpr": "0~N",
-              "rangeMin": 0,
-              "rangeMax": null,
-              "dynamic": true,
-              "nSource": "SupportedAlarmNumberOfEntries",
-              "description": "告警实例编号，N由SupportedAlarmNumberOfEntries决定"
-            }
-          ],
-          "treeNodeRefs": [
-            "Device.FaultMgmt.SupportedAlarm.{i}.EventType",
-            "Device.FaultMgmt.SupportedAlarm.{i}.ProbableCause",
-            "Device.FaultMgmt.SupportedAlarm.{i}.SpecificProblem",
-            "Device.FaultMgmt.SupportedAlarm.{i}.PerceivedSeverity",
-            "Device.FaultMgmt.SupportedAlarm.{i}.ReportingMechanism"
-          ]
-        },
-        {
-          "commandCode": "MOD:Device.FaultMgmt.SupportedAlarm.{i}.*",
-          "operationType": "MOD",
-          "rpcMethod": "SetParameterValues",
-          "logicalNameI18n": {
-            "zh-CN": "支持告警类型"
-          },
-          "groupCodeObject": "Device.FaultMgmt.SupportedAlarm.{i}.*",
-          "instanceArity": 1,
-          "instanceLevels": [
-            "SupportedAlarm"
-          ],
-          "instanceRangeMeta": [
-            {
-              "layer": 1,
-              "rangeExpr": "0~N",
-              "rangeMin": 0,
-              "rangeMax": null,
-              "dynamic": true,
-              "nSource": "SupportedAlarmNumberOfEntries",
-              "description": "告警实例编号，N由SupportedAlarmNumberOfEntries决定"
-            }
-          ],
-          "treeNodeRefs": [
-            "Device.FaultMgmt.SupportedAlarm.{i}.ReportingMechanism"
-          ]
-        },
-        {
-          "commandCode": "ADD:Device.FaultMgmt.SupportedAlarm.{i}.*",
-          "operationType": "ADD",
-          "rpcMethod": "AddObject",
-          "logicalNameI18n": {
-            "zh-CN": "支持告警类型"
-          },
-          "groupCodeObject": "Device.FaultMgmt.SupportedAlarm.{i}.*",
-          "instanceArity": 1,
-          "instanceLevels": [
-            "SupportedAlarm"
-          ],
-          "instanceRangeMeta": [
-            {
-              "layer": 1,
-              "rangeExpr": "0~N",
-              "rangeMin": 0,
-              "rangeMax": null,
-              "dynamic": true,
-              "nSource": "SupportedAlarmNumberOfEntries",
-              "description": "告警实例编号，N由SupportedAlarmNumberOfEntries决定"
-            }
-          ],
-          "treeNodeRefs": [
-            "Device.FaultMgmt.SupportedAlarm.{i}."
-          ]
-        },
-        {
-          "commandCode": "RMV:Device.FaultMgmt.SupportedAlarm.{i}.*",
-          "operationType": "RMV",
-          "rpcMethod": "DeleteObject",
-          "logicalNameI18n": {
-            "zh-CN": "支持告警类型"
-          },
-          "groupCodeObject": "Device.FaultMgmt.SupportedAlarm.{i}.*",
-          "instanceArity": 1,
-          "instanceLevels": [
-            "SupportedAlarm"
-          ],
-          "instanceRangeMeta": [
-            {
-              "layer": 1,
-              "rangeExpr": "0~N",
-              "rangeMin": 0,
-              "rangeMax": null,
-              "dynamic": true,
-              "nSource": "SupportedAlarmNumberOfEntries",
-              "description": "告警实例编号，N由SupportedAlarmNumberOfEntries决定"
-            }
-          ],
-          "treeNodeRefs": [
-            "Device.FaultMgmt.SupportedAlarm.{i}."
           ]
         }
       ]
@@ -1208,7 +1002,9 @@
           ],
           "treeNodeRefs": [
             "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.PLMNID",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.CellReservedForOperatorUse"
+            "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.CellReservedForOperatorUse",
+            "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.Enable",
+            "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.IsPrimary"
           ]
         },
         {
@@ -1246,7 +1042,9 @@
           ],
           "treeNodeRefs": [
             "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.PLMNID",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.CellReservedForOperatorUse"
+            "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.CellReservedForOperatorUse",
+            "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.Enable",
+            "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.IsPrimary"
           ]
         },
         {
@@ -6571,6 +6369,280 @@
       ]
     },
     {
+      "chapter": "SF_NR",
+      "group_code": "Device.Services.FAPService.{i}.FAPControl.NR.*",
+      "command_zh_name": "基站配置参数管理",
+      "has_instance": true,
+      "paths": [
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.AmfName",
+          "param_name": "AmfName",
+          "chinese_name": "AMFName",
+          "access": "READ_ONLY",
+          "data_type": "string",
+          "max_length": 150
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.PLMNID",
+          "param_name": "PLMNID",
+          "chinese_name": "AMFPLMN标识",
+          "access": "READ_WRITE",
+          "data_type": "string",
+          "max_length": 6
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.GUAMI.{i}.AmfRegionID",
+          "param_name": "AmfRegionID",
+          "chinese_name": "AMFRegionID",
+          "access": "READ_ONLY",
+          "data_type": "string",
+          "max_length": 8
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.GUAMI.{i}.AmfSetID",
+          "param_name": "AmfSetID",
+          "chinese_name": "AMFSetID",
+          "access": "READ_ONLY",
+          "data_type": "string",
+          "max_length": 10
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.GUAMI.{i}.AmfPointer",
+          "param_name": "AmfPointer",
+          "chinese_name": "AMFPointer",
+          "access": "READ_ONLY",
+          "data_type": "string",
+          "max_length": 6
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.RelativeAmfCapacity",
+          "param_name": "RelativeAmfCapacity",
+          "chinese_name": "RelativeAMFCapacity",
+          "access": "READ_ONLY",
+          "data_type": "unsignedInt",
+          "min_value": 0,
+          "max_value": 255
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.AmfIP1",
+          "param_name": "AmfIP1",
+          "chinese_name": "AmfIP1",
+          "access": "READ_WRITE",
+          "data_type": "string",
+          "max_length": 64
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.AmfIP2",
+          "param_name": "AmfIP2",
+          "chinese_name": "AmfIP2",
+          "access": "READ_WRITE",
+          "data_type": "string",
+          "max_length": 64
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.TAISupportList.{i}.TAC",
+          "param_name": "TAC",
+          "chinese_name": "跟踪区编码",
+          "access": "READ_ONLY",
+          "data_type": "string",
+          "max_length": 24
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.TAISupportList.{i}.BroadcastPLMNs.{i}.PLMNID",
+          "param_name": "PLMNID",
+          "chinese_name": "PLMNID",
+          "access": "READ_ONLY",
+          "data_type": "string",
+          "max_length": 6
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.gNBID",
+          "param_name": "gNBID",
+          "chinese_name": "gNBID",
+          "access": "READ_WRITE",
+          "data_type": "unsignedInt"
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.RemoteAddress",
+          "param_name": "RemoteAddress",
+          "chinese_name": "对端IP",
+          "access": "READ_WRITE",
+          "data_type": "string",
+          "max_length": 64
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.SubnetMask",
+          "param_name": "SubnetMask",
+          "chinese_name": "子网掩码",
+          "access": "READ_ONLY",
+          "data_type": "string",
+          "max_length": 64
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.LocalAddress",
+          "param_name": "LocalAddress",
+          "chinese_name": "本端地址",
+          "access": "READ_ONLY",
+          "data_type": "string",
+          "max_length": 64
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBIdLength",
+          "param_name": "gNBIdLength",
+          "chinese_name": "gNB标识长度",
+          "access": "READ_WRITE",
+          "data_type": "unsignedInt",
+          "min_value": 22,
+          "max_value": 32
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBId",
+          "param_name": "gNBId",
+          "chinese_name": "gNB标识",
+          "access": "READ_WRITE",
+          "data_type": "unsignedInt",
+          "min_value": 0,
+          "max_value": 4294967295
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBName",
+          "param_name": "gNBName",
+          "chinese_name": "gNB名称",
+          "access": "READ_WRITE",
+          "data_type": "string",
+          "max_length": 150
+        },
+        {
+          "standard_path": "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.AdminState",
+          "param_name": "AdminState",
+          "chinese_name": "基站的管理状态",
+          "access": "READ_WRITE",
+          "data_type": "unsignedInt",
+          "min_value": 1,
+          "max_value": 3
+        }
+      ],
+      "commands": [
+        {
+          "command_code": "LST NR_AMF_POOL_CONFIG_PARAM",
+          "logical_code": "NR_AMF_POOL_CONFIG_PARAM",
+          "operation_type": "LST",
+          "rpc_method": "GetParameterValues",
+          "target_paths": [
+            "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.AmfName",
+            "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.PLMNID",
+            "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.GUAMI.{i}.AmfRegionID",
+            "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.GUAMI.{i}.AmfSetID",
+            "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.GUAMI.{i}.AmfPointer",
+            "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.RelativeAmfCapacity",
+            "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.AmfIP1",
+            "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.AmfIP2"
+          ]
+        },
+        {
+          "command_code": "MOD NR_AMF_POOL_CONFIG_PARAM",
+          "logical_code": "NR_AMF_POOL_CONFIG_PARAM",
+          "operation_type": "MOD",
+          "rpc_method": "SetParameterValues",
+          "target_paths": [
+            "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.PLMNID",
+            "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.AmfIP1",
+            "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.AmfIP2"
+          ]
+        },
+        {
+          "command_code": "ADD NR_AMF_POOL_CONFIG_PARAM",
+          "logical_code": "NR_AMF_POOL_CONFIG_PARAM",
+          "operation_type": "ADD",
+          "rpc_method": "AddObject",
+          "target_paths": [
+            "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam."
+          ],
+          "target_object": "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.",
+          "command_name": "添加 AMF地址"
+        },
+        {
+          "command_code": "RMV NR_AMF_POOL_CONFIG_PARAM",
+          "logical_code": "NR_AMF_POOL_CONFIG_PARAM",
+          "operation_type": "RMV",
+          "rpc_method": "DeleteObject",
+          "target_paths": [
+            "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam."
+          ],
+          "target_object": "Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam."
+        },
+        {
+          "command_code": "LST NR_XN_IP_ADDR_MAP_INFO",
+          "logical_code": "NR_XN_IP_ADDR_MAP_INFO",
+          "operation_type": "LST",
+          "rpc_method": "GetParameterValues",
+          "target_paths": [
+            "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.TAISupportList.{i}.TAC",
+            "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.TAISupportList.{i}.BroadcastPLMNs.{i}.PLMNID",
+            "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.gNBID",
+            "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.RemoteAddress",
+            "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.SubnetMask",
+            "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.LocalAddress"
+          ]
+        },
+        {
+          "command_code": "MOD NR_XN_IP_ADDR_MAP_INFO",
+          "logical_code": "NR_XN_IP_ADDR_MAP_INFO",
+          "operation_type": "MOD",
+          "rpc_method": "SetParameterValues",
+          "target_paths": [
+            "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.gNBID",
+            "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}.RemoteAddress"
+          ]
+        },
+        {
+          "command_code": "ADD NR_XN_IP_ADDR_MAP_INFO",
+          "logical_code": "NR_XN_IP_ADDR_MAP_INFO",
+          "operation_type": "ADD",
+          "rpc_method": "AddObject",
+          "target_paths": [
+            "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo."
+          ],
+          "target_object": "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.",
+          "command_name": "添加 Xn链接信息"
+        },
+        {
+          "command_code": "RMV NR_XN_IP_ADDR_MAP_INFO",
+          "logical_code": "NR_XN_IP_ADDR_MAP_INFO",
+          "operation_type": "RMV",
+          "rpc_method": "DeleteObject",
+          "target_paths": [
+            "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo."
+          ],
+          "target_object": "Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo."
+        },
+        {
+          "command_code": "LST NR_RAN_COMMON",
+          "logical_code": "NR_RAN_COMMON",
+          "operation_type": "LST",
+          "rpc_method": "GetParameterValues",
+          "target_paths": [
+            "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBIdLength",
+            "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBId",
+            "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBName",
+            "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.AdminState"
+          ]
+        },
+        {
+          "command_code": "MOD NR_RAN_COMMON",
+          "logical_code": "NR_RAN_COMMON",
+          "operation_type": "MOD",
+          "rpc_method": "SetParameterValues",
+          "target_paths": [
+            "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBIdLength",
+            "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBId",
+            "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBName",
+            "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.AdminState"
+          ]
+        }
+      ]
+    },
+    {
       "groupCode": "chapter:SR",
       "chapterCode": "SR",
       "nameI18n": {
@@ -11539,6 +11611,34 @@
       "constraint": "string(6)",
       "constraintHint": "字符串，长度 ≤ 6",
       "lengthMax": 6,
+      "rangeMin": null,
+      "rangeMax": null
+    },
+    {
+      "standardPath": "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.Enable",
+      "paramName": "Enable",
+      "labelI18n": {
+        "zh-CN": "PLMN列表使能"
+      },
+      "accessType": "RW",
+      "valueType": "boolean",
+      "constraint": "boolean",
+      "constraintHint": "`true` / `false`",
+      "lengthMax": null,
+      "rangeMin": null,
+      "rangeMax": null
+    },
+    {
+      "standardPath": "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.IsPrimary",
+      "paramName": "IsPrimary",
+      "labelI18n": {
+        "zh-CN": "主PLMN标识"
+      },
+      "accessType": "RW",
+      "valueType": "boolean",
+      "constraint": "boolean",
+      "constraintHint": "`true` / `false`",
+      "lengthMax": null,
       "rangeMin": null,
       "rangeMax": null
     },

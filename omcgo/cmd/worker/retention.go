@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/admin"
+	"github.com/omcgo/omcgo/internal/backup"
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
 	corelogger "github.com/omcgo/omcgo/internal/core/components/logger"
 	"github.com/omcgo/omcgo/internal/logretention"
@@ -124,9 +125,10 @@ func startRetentionCleanupCron(
 // startStationLogRetentionCleanup wire 起 #320：基站日志按时间保留（默认 60 天）的定时清理。
 //
 // 与 PM retention 同范式：retention.Service 角色由 stationlog.RetentionPolicy 承担（从 sys_configs
-// 读 stationlog.retention.max_retention_days / max_file_count，TTL 缓存）；CleanupRunner 删两表
-// （fault + running）过期记录的 MinIO 对象 + PG 软删；cron 每日 04:00（与 PM 03:00 错峰）触发 +
-// 启动补跑。文件数配额（事件驱动 enforceFaultLogQuota，app 进程）与本时间清理并存。
+// 读 stationlog.retention.max_retention_days / max_file_count，TTL 缓存）；CleanupRunner 按时间删
+// station_fault_logs / station_running_logs 旧表，以及 backup_restore_file 中运行/故障日志任务文件
+// 的过期 MinIO 对象 + PG 软删；cron 每日 04:00（与 PM 03:00 错峰）触发 + 启动补跑。
+// 文件数配额仅针对故障日志文件（事件驱动，app 进程）并与本时间清理并存。
 func startStationLogRetentionCleanup(
 	ctx context.Context,
 	w *workerInfra,
@@ -151,6 +153,7 @@ func startStationLogRetentionCleanup(
 	faultRepo := stationlog.NewPgFaultRepository(w.PgPool)
 	runningRepo := stationlog.NewPgRunningRepository(w.PgPool)
 	runner := stationlog.NewCleanupRunner(faultRepo, runningRepo, w.MinIO, policy, logger)
+	runner.SetTaskLogStore(&stationLogTaskFileStore{repo: backup.NewPgFileRepository(w.PgPool)})
 	registry.Register(runner)
 	logger.Info("registered stationlog retention cleanup runner",
 		zap.String("job_type", stationlog.JobTypeStationLogCleanup))
@@ -160,6 +163,38 @@ func startStationLogRetentionCleanup(
 	startStationLogCleanupCron(ctx, jobRepo, cronStateRepo, logger, asyncMetrics, tz)
 
 	logger.Info("stationlog retention cleanup pipeline ready (1 runner + 1 cron + catchup)")
+}
+
+type stationLogTaskFileStore struct {
+	repo backup.LogFileRetentionRepository
+}
+
+func (s *stationLogTaskFileStore) ListExpiredTaskLogs(ctx context.Context, cutoff time.Time, limit int) ([]stationlog.TaskLogFile, error) {
+	if s == nil || s.repo == nil {
+		return nil, nil
+	}
+	files, err := s.repo.ListExpiredStationLogFiles(ctx, cutoff, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]stationlog.TaskLogFile, 0, len(files))
+	for _, f := range files {
+		taskLog := stationlog.TaskLogFile{ID: f.ID}
+		bucket, objectPath, splitErr := backup.SplitBucketAndPath(f.ObjectPath)
+		if splitErr == nil {
+			taskLog.Bucket = bucket
+			taskLog.ObjectPath = objectPath
+		}
+		out = append(out, taskLog)
+	}
+	return out, nil
+}
+
+func (s *stationLogTaskFileStore) MarkTaskLogDeleted(ctx context.Context, id int64) error {
+	if s == nil || s.repo == nil {
+		return nil
+	}
+	return s.repo.MarkFileDeleted(ctx, id)
 }
 
 // startLogRetentionCleanup wire 起「审计/业务日志」按时间保留清理（internal/logretention）。

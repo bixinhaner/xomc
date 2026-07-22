@@ -2,10 +2,15 @@ import React from 'react';
 import type { FormInstance } from 'antd';
 import type { NameFilterItem, GroupItem } from './types';
 import type { AddGroupFormValues } from './useGroupActions';
+import { getRecordI18n } from '@core/utils/i18nText';
+import { useAppStore } from '@core/store/appStore';
+import { UNASSIGNED_GROUP_ID } from '@core/utils/deviceGroupTargets';
 import AddGroupDrawer from './AddGroupDrawer';
 import EditGroupModal from './EditGroupModal';
 import AddChildGroupDrawer from './AddChildGroupDrawer';
 import EditLevel2GroupDrawer from './EditLevel2GroupDrawer';
+
+const DEFAULT_ROOT_GROUP_ID = '00000000-0000-0000-0000-000000000001';
 
 export interface GroupDialogsProps {
   // Add Level-1 Group Drawer
@@ -86,6 +91,17 @@ export default function GroupDialogs({
   onEditLevel2NameFiltersChange,
   t,
 }: GroupDialogsProps) {
+  const locale = useAppStore((s) => s.locale);
+  const getGroupName = (group: GroupItem): string => getBuiltInGroupName(group, t) ||
+    getRecordI18n(group as unknown as Record<string, unknown>, 'name', locale) ||
+    group.name;
+  const getSourceGroupOptionLabel = (group: GroupItem): string => {
+    const parent = groups.find((item) => item.id === group.parentId);
+    const parentName = parent ? getGroupName(parent) : '';
+    const groupName = getGroupName(group);
+    return parentName ? `${parentName} / ${groupName}` : groupName;
+  };
+
   return (
     <>
       <AddGroupDrawer
@@ -114,9 +130,9 @@ export default function GroupDialogs({
         matchingMode={matchingMode}
         nameFilters={nameFilters}
         sourceGroupOptions={groups
-          .filter((group) => group.parentId !== null)
+          .filter((group) => group.parentId != null)
           .map((group) => ({
-            label: `${groups.find((parent) => parent.id === group.parentId)?.name ?? ''} / ${group.name}`,
+            label: getSourceGroupOptionLabel(group),
             value: group.id,
           }))}
         onClose={onAddChildDrawerClose}
@@ -135,9 +151,9 @@ export default function GroupDialogs({
         matchingMode={editLevel2MatchingMode}
         nameFilters={editLevel2NameFilters}
         sourceGroupOptions={groups
-          .filter((group) => group.parentId !== null && group.id !== editLevel2GroupId)
+          .filter((group) => group.parentId != null && group.id !== editLevel2GroupId)
           .map((group) => ({
-            label: `${groups.find((parent) => parent.id === group.parentId)?.name ?? ''} / ${group.name}`,
+            label: getSourceGroupOptionLabel(group),
             value: group.id,
           }))}
         onClose={onEditLevel2DrawerClose}
@@ -147,4 +163,10 @@ export default function GroupDialogs({
       />
     </>
   );
+}
+
+function getBuiltInGroupName(group: GroupItem, t: (id: string) => string): string {
+  const isDefaultGroup = group.id === DEFAULT_ROOT_GROUP_ID || group.id === UNASSIGNED_GROUP_ID;
+  if (!isDefaultGroup) return '';
+  return t('device.defaultGroupName');
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/global"
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/core/carrier"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
@@ -206,6 +207,17 @@ type mockParamRepo struct {
 	deleteByDevFn func(ctx context.Context, deviceID uuid.UUID) error
 }
 
+type mockGroupAssigner struct {
+	batchAddFn func(ctx context.Context, groupID uuid.UUID, deviceIDs []uuid.UUID) (int64, error)
+}
+
+func (m *mockGroupAssigner) BatchAddDevices(ctx context.Context, groupID uuid.UUID, deviceIDs []uuid.UUID) (int64, error) {
+	if m.batchAddFn != nil {
+		return m.batchAddFn(ctx, groupID, deviceIDs)
+	}
+	return int64(len(deviceIDs)), nil
+}
+
 func (m *mockParamRepo) BatchUpsert(ctx context.Context, deviceID uuid.UUID, params []model.DeviceParameter) error {
 	if m.batchUpsertFn != nil {
 		return m.batchUpsertFn(ctx, deviceID, params)
@@ -344,6 +356,40 @@ func TestDeviceService_RegisterFromInform_NewDevice(t *testing.T) {
 
 	// Verify parameters were stored
 	assert.Len(t, upsertedParams, 3)
+}
+
+func TestDeviceService_RegisterFromInform_NewDevice_AssignsDefaultGroup(t *testing.T) {
+	var createdID uuid.UUID
+	var assignedGroup uuid.UUID
+	var assignedDevices []uuid.UUID
+
+	deviceRepo := &mockDeviceRepo{
+		getBySerialNumberFn: func(ctx context.Context, sn string) (*model.Device, error) {
+			return nil, nil
+		},
+		createFn: func(ctx context.Context, device *model.Device) error {
+			createdID = device.ID
+			return nil
+		},
+	}
+	paramRepo := &mockParamRepo{}
+
+	svc := newTestDeviceService(deviceRepo, paramRepo)
+	svc.SetGroupAssigner(&mockGroupAssigner{
+		batchAddFn: func(_ context.Context, groupID uuid.UUID, deviceIDs []uuid.UUID) (int64, error) {
+			assignedGroup = groupID
+			assignedDevices = append([]uuid.UUID(nil), deviceIDs...)
+			return int64(len(deviceIDs)), nil
+		},
+	})
+
+	device, err := svc.RegisterFromInform(context.Background(), sampleInform("SN-DEFAULT-GROUP"), model.CarrierCMCC)
+	require.NoError(t, err)
+	require.NotNil(t, device)
+
+	assert.Equal(t, createdID, device.ID)
+	assert.Equal(t, uuid.MustParse(global.DefaultLevel2GroupID), assignedGroup)
+	assert.Equal(t, []uuid.UUID{device.ID}, assignedDevices)
 }
 
 func TestDeviceService_RegisterFromInform_ExistingDevice(t *testing.T) {
@@ -910,6 +956,31 @@ func TestDeviceService_BatchDeleteDevices_ExplicitDeletedByWins(t *testing.T) {
 
 	assert.Equal(t, 1, result.Succeeded)
 	assert.Equal(t, 0, result.Failed)
+}
+
+type recordingDeviceGroupCountsInvalidator struct {
+	calls int
+}
+
+func (r *recordingDeviceGroupCountsInvalidator) InvalidateDeviceGroupCounts() {
+	r.calls++
+}
+
+func TestDeviceService_BatchDeleteDevices_InvalidatesDeviceGroupCounts(t *testing.T) {
+	ids := []uuid.UUID{uuid.New()}
+	deviceRepo := &mockDeviceRepo{
+		batchDeleteFn: func(context.Context, []uuid.UUID, string) (int64, error) {
+			return 1, nil
+		},
+	}
+	invalidator := &recordingDeviceGroupCountsInvalidator{}
+	svc := newTestDeviceService(deviceRepo, &mockParamRepo{})
+	svc.SetDeviceGroupCountsInvalidator(invalidator)
+
+	result := svc.BatchDeleteDevices(context.Background(), ids, "alice")
+
+	assert.Equal(t, 1, result.Succeeded)
+	assert.Equal(t, 1, invalidator.calls)
 }
 
 // ---------------------------------------------------------------------------

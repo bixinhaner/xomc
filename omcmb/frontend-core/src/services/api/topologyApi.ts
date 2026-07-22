@@ -22,6 +22,7 @@ import { toDisplayStatus } from '../../types/map';
 interface BackendDeviceGroup {
   id: string;
   name: string;
+  name_i18n?: Record<string, string>;
   parent_id: string | null;
   carrier: string;
   description: string;
@@ -143,6 +144,7 @@ function mapGroupToDomain(
   return {
     id: bg.id,
     name: bg.name,
+    nameI18n: bg.name_i18n,
     level,
     parentId: bg.parent_id,
     children: bg.children?.map((c) =>
@@ -661,6 +663,7 @@ function mapBackendSearchResult(bs: BackendSearchResult): DeviceSearchResult {
     status: toDisplayStatus(bs.status as RawDeviceStatus),
     longitude: bs.longitude,
     latitude: bs.latitude,
+    groupId: bs.group_id,
     groupName: bs.group_name,
     ip_address: bs.ip_address,
     mac: bs.mac,

@@ -2,9 +2,9 @@
 // 让 PM/告警等时序查询无需跨库 JOIN（KPI/时序库物理分离）。
 //
 // 设计要点：
-//   - 全量重刷（TRUNCATE + CopyFrom）：维度表行数小（设备 ~10 万、产品 ~15、告警定义 ~442），
-//     全量比增量 UPSERT 简单且永远一致，避免漏删的脏行。
-//   - 单表事务：每张影子表一个 dst 事务（TRUNCATE + COPY 同一 tx 原子提交）；
+//   - 全量快照、增量落盘：源端读取完整快照，目标端经 staging 做 UPSERT + anti-join DELETE，
+//     既保证不漏删，又避免每分钟 TRUNCATE 和未变化行的 WAL 重写。
+//   - 单表事务：每张影子表一个 dst 事务（staging + merge 同一 tx 原子提交）；
 //     单表失败只 log 不中断其余表（健壮性 > 一次全成）。
 //   - device_dim 保留软删行（含 deleted_at），让影子表 JOIN 行为与原 devices 一致。
 //   - cell_band_dim 是派生表（主库无 cell_band），从 device_parameters 的
@@ -140,12 +140,13 @@ func (r *SyncRunner) runTable(ctx context.Context, dimTable string, fn func(cont
 }
 
 // syncFullMirror 镜像同步：以【dst 影子表的列】为准，只从源表 SELECT dst 拥有的列，
-// 在 dst 单事务内 TRUNCATE + CopyFrom。
+// 在 dst 单事务内 staging + 增量 merge。
 //
 // 为何按【src ∩ dst 列交集】而非 SELECT *：影子表 DDL 取自某次基线，与源表当前 schema 会双向漂移：
 //   - 源表新增列（增量迁移）：如 perf_indicators.report_key / products.is_builtin / alarm_definitions.description
 //     —— 这些不在影子表也不被时序库查询用到；
 //   - 源表删除列：如 000025 删了 alarm_definitions 的 cn_suggestion/en_suggestion，但影子表 DDL 仍留着。
+//
 // 任一方向的不一致都会让"按单边列 SELECT+COPY"整表失败。取交集 → 只同步两边都有的列，对 schema
 // 漂移完全免疫；时序库查询所需列（id/cn_name/en_name/identifier 等）始终在交集内。
 // 适用：device_group_member_dim / product_dim / alarm_definition_dim / perf_indicators_*。
@@ -320,8 +321,9 @@ func (r *SyncRunner) collectRows(ctx context.Context, query string, colCount int
 	return data, nil
 }
 
-// truncateAndCopy 在 dst 单事务内 TRUNCATE dstTable 后 CopyFrom 全量重灌。
-// 空数据集也照常 TRUNCATE（源表清空时影子表同步清空）。
+// truncateAndCopy 保留历史函数名，但实现改为 staging + 增量 merge，避免每分钟
+// TRUNCATE 触发 DataFileImmediateSync 并重写整张维表。无主键的旧影子表才安全回退
+// 到原 TRUNCATE + COPY 语义。
 func (r *SyncRunner) truncateAndCopy(ctx context.Context, dstTable string, cols []string, data [][]any) (int64, error) {
 	tx, err := r.dst.Begin(ctx)
 	if err != nil {
@@ -329,23 +331,146 @@ func (r *SyncRunner) truncateAndCopy(ctx context.Context, dstTable string, cols 
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // commit 成功后 rollback 是 no-op；失败路径用它回滚
 
-	if _, err := tx.Exec(ctx, fmt.Sprintf("TRUNCATE %s", dstTable)); err != nil {
-		return 0, fmt.Errorf("truncate %s: %w", dstTable, err)
+	keyCols, err := primaryKeyColumns(ctx, tx, dstTable)
+	if err != nil {
+		return 0, fmt.Errorf("load primary key for %s: %w", dstTable, err)
 	}
-
-	if len(data) > 0 {
-		n, err := tx.CopyFrom(ctx, pgx.Identifier{dstTable}, cols, pgx.CopyFromRows(data))
-		if err != nil {
-			return 0, fmt.Errorf("copy into %s: %w", dstTable, err)
+	if len(keyCols) == 0 || !containsAllColumns(cols, keyCols) {
+		r.logger.Warn("shadow table has no usable primary key; falling back to truncate copy",
+			zap.String("table", dstTable))
+		if _, err := tx.Exec(ctx, fmt.Sprintf("TRUNCATE %s", pgx.Identifier{dstTable}.Sanitize())); err != nil {
+			return 0, fmt.Errorf("truncate %s: %w", dstTable, err)
+		}
+		if len(data) > 0 {
+			if _, err := tx.CopyFrom(ctx, pgx.Identifier{dstTable}, cols, pgx.CopyFromRows(data)); err != nil {
+				return 0, fmt.Errorf("copy into %s: %w", dstTable, err)
+			}
 		}
 		if err := tx.Commit(ctx); err != nil {
-			return 0, fmt.Errorf("commit %s: %w", dstTable, err)
+			return 0, fmt.Errorf("commit fallback %s: %w", dstTable, err)
 		}
-		return n, nil
+		return int64(len(data)), nil
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return 0, fmt.Errorf("commit %s (empty): %w", dstTable, err)
+	stageTable := "sync_stage_" + dstTable
+	quotedCols := quoteColumns(cols)
+	createStage := fmt.Sprintf(
+		"CREATE TEMP TABLE %s ON COMMIT DROP AS SELECT %s FROM %s WITH NO DATA",
+		pgx.Identifier{stageTable}.Sanitize(),
+		strings.Join(quotedCols, ", "),
+		pgx.Identifier{dstTable}.Sanitize(),
+	)
+	if _, err := tx.Exec(ctx, createStage); err != nil {
+		return 0, fmt.Errorf("create staging table for %s: %w", dstTable, err)
 	}
-	return 0, nil
+	if len(data) > 0 {
+		if _, err := tx.CopyFrom(ctx, pgx.Identifier{stageTable}, cols, pgx.CopyFromRows(data)); err != nil {
+			return 0, fmt.Errorf("copy staging for %s: %w", dstTable, err)
+		}
+	}
+	upsertSQL, pruneSQL, err := buildMirrorMergeSQL(dstTable, stageTable, cols, keyCols)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(ctx, upsertSQL); err != nil {
+		return 0, fmt.Errorf("merge staging into %s: %w", dstTable, err)
+	}
+	if _, err := tx.Exec(ctx, pruneSQL); err != nil {
+		return 0, fmt.Errorf("prune stale rows from %s: %w", dstTable, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit %s: %w", dstTable, err)
+	}
+	return int64(len(data)), nil
+}
+
+type queryRower interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+func primaryKeyColumns(ctx context.Context, q queryRower, table string) ([]string, error) {
+	rows, err := q.Query(ctx, `
+		SELECT a.attname
+		FROM pg_index i
+		CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
+		JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum
+		WHERE i.indrelid = $1::regclass AND i.indisprimary
+		ORDER BY k.ord`, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var cols []string
+	for rows.Next() {
+		var col string
+		if err := rows.Scan(&col); err != nil {
+			return nil, err
+		}
+		cols = append(cols, col)
+	}
+	return cols, rows.Err()
+}
+
+func quoteColumns(cols []string) []string {
+	out := make([]string, len(cols))
+	for i, col := range cols {
+		out[i] = pgx.Identifier{col}.Sanitize()
+	}
+	return out
+}
+
+func containsAllColumns(cols, required []string) bool {
+	set := make(map[string]struct{}, len(cols))
+	for _, col := range cols {
+		set[col] = struct{}{}
+	}
+	for _, col := range required {
+		if _, ok := set[col]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func buildMirrorMergeSQL(dstTable, stageTable string, cols, keyCols []string) (string, string, error) {
+	if len(cols) == 0 || len(keyCols) == 0 || !containsAllColumns(cols, keyCols) {
+		return "", "", fmt.Errorf("mirror merge requires selected primary-key columns")
+	}
+	dst := pgx.Identifier{dstTable}.Sanitize()
+	stage := pgx.Identifier{stageTable}.Sanitize()
+	quotedCols := quoteColumns(cols)
+	quotedKeys := quoteColumns(keyCols)
+	keySet := make(map[string]struct{}, len(keyCols))
+	for _, key := range keyCols {
+		keySet[key] = struct{}{}
+	}
+	var assignments, changed []string
+	for _, col := range cols {
+		if _, key := keySet[col]; key {
+			continue
+		}
+		qcol := pgx.Identifier{col}.Sanitize()
+		assignments = append(assignments, fmt.Sprintf("%s = EXCLUDED.%s", qcol, qcol))
+		changed = append(changed, fmt.Sprintf("target.%s IS DISTINCT FROM EXCLUDED.%s", qcol, qcol))
+	}
+	action := "DO NOTHING"
+	if len(assignments) > 0 {
+		action = fmt.Sprintf("DO UPDATE SET %s WHERE %s",
+			strings.Join(assignments, ", "), strings.Join(changed, " OR "))
+	}
+	upsert := fmt.Sprintf(
+		"INSERT INTO %s AS target (%s) SELECT %s FROM %s ON CONFLICT (%s) %s",
+		dst, strings.Join(quotedCols, ", "), strings.Join(quotedCols, ", "), stage,
+		strings.Join(quotedKeys, ", "), action,
+	)
+	matches := make([]string, 0, len(keyCols))
+	for _, key := range keyCols {
+		qkey := pgx.Identifier{key}.Sanitize()
+		matches = append(matches, fmt.Sprintf("d.%s IS NOT DISTINCT FROM s.%s", qkey, qkey))
+	}
+	prune := fmt.Sprintf(
+		"DELETE FROM %s AS d WHERE NOT EXISTS (SELECT 1 FROM %s AS s WHERE %s)",
+		dst, stage, strings.Join(matches, " AND "),
+	)
+	return upsert, prune, nil
 }

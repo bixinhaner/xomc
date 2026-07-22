@@ -108,6 +108,7 @@ describe('defaultExportTaskName', () => {
   it('按来源 + 时间戳生成可读名', () => {
     const d = new Date(2026, 5, 4, 21, 23, 8); // 2026-06-04 21:23:08 本地
     expect(defaultExportTaskName('dashboard', d)).toBe('KPI导出_仪表盘_20260604_212308');
+    expect(defaultExportTaskName('device_view', d)).toBe('KPI导出_设备性能查看_20260604_212308');
     expect(defaultExportTaskName('kpi_query', d)).toBe('KPI导出_指标查询_20260604_212308');
     expect(defaultExportTaskName('adhoc', d)).toBe('KPI导出_任务结果_20260604_212308');
   });
@@ -120,6 +121,13 @@ describe('defaultExportTaskName', () => {
         subjectName: 'Built-in/Product:GSM',
       }),
     ).toBe('KPI_Export_Built-in_Product_GSM_20260713_145100');
+  });
+
+  it('英文设备性能查看导出名使用英文来源前缀', () => {
+    const d = new Date(2026, 5, 4, 21, 23, 8); // 2026-06-04 21:23:08 本地
+    expect(defaultExportTaskName('device_view', d, { locale: 'en-US' })).toBe(
+      'KPI_Export_Device_Performance_View_20260604_212308',
+    );
   });
 
   it('中文 adhoc 导出名保留中文体验并包含清理后的任务名', () => {

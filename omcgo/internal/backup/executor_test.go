@@ -3,6 +3,7 @@ package backup
 import (
 	"context"
 	"encoding/json"
+	"net/url"
 	"testing"
 	"time"
 
@@ -16,6 +17,45 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
+
+func TestBuildBackupUploadURL_PreservesPrefixAndEncodesBusinessQuery(t *testing.T) {
+	got, err := buildBackupUploadURL(
+		transfercfg.UploadSettings{
+			BaseURL: "https://edge.example.com:9443/omc/",
+			Path:    "/smallcell/FileUploadService",
+		},
+		&BackupTypeSpec{URLFileTypeParam: "CONFIGBACKUP_XML"},
+		"SN 100&1",
+		"task/100",
+		"配置 a&b.xml",
+	)
+	require.NoError(t, err)
+
+	parsed, err := url.Parse(got)
+	require.NoError(t, err)
+	require.Equal(t, "https", parsed.Scheme)
+	require.Equal(t, "edge.example.com:9443", parsed.Host)
+	require.Equal(t, "/omc/smallcell/FileUploadService", parsed.Path)
+	require.Equal(t, "CONFIGBACKUP_XML", parsed.Query().Get("fileType"))
+	require.Equal(t, "SN 100&1", parsed.Query().Get("sn"))
+	require.Equal(t, "task/100", parsed.Query().Get("taskId"))
+	require.Equal(t, "配置 a&b.xml", parsed.Query().Get("filename"))
+}
+
+func TestBuildBackupUploadURL_ProductionAllowsDeviceReachablePrivateBase(t *testing.T) {
+	t.Setenv("OMCGO_ENV", "production")
+
+	got, err := buildBackupUploadURL(
+		transfercfg.UploadSettings{BaseURL: "http://172.17.9.239:8081"},
+		&BackupTypeSpec{URLFileTypeParam: "CONFIGBACKUP_XML"},
+		"SN100",
+		"task-100",
+		"backup.xml",
+	)
+
+	require.NoError(t, err)
+	require.Contains(t, got, "http://172.17.9.239:8081/smallcell/FileUploadService")
+}
 
 // ---------------------------------------------------------------------------
 // Mocks (prefixed with exec to avoid collision with service_test.go)
@@ -210,7 +250,7 @@ func (m *execFTPConfigRepo) List(_ context.Context, _ FTPConfigFilter) (*model.L
 // ---------------------------------------------------------------------------
 
 func newTestExecutor(taskRepo *execTaskRepo, deviceRepo *execDeviceRepo, cmdQ *execCmdQueue) *BackupExecutor {
-	return &BackupExecutor{
+	executor := &BackupExecutor{
 		taskRepo:   taskRepo,
 		deviceRepo: deviceRepo,
 		taskSvc:    cmdQ,
@@ -218,6 +258,13 @@ func newTestExecutor(taskRepo *execTaskRepo, deviceRepo *execDeviceRepo, cmdQ *e
 		eventBus:   event.NewChannelEventBus(16, zap.NewNop()),
 		logger:     zap.NewNop(),
 	}
+	executor.SetTransferProvider(&execTransferProvider{
+		upload: transfercfg.UploadSettings{
+			BaseURL: "http://acs.test:7557",
+			Path:    "/smallcell/FileUploadService",
+		},
+	})
+	return executor
 }
 
 func TestHandleTask_PendingToRunning(t *testing.T) {

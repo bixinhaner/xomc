@@ -65,6 +65,18 @@ func (s *Service) Submit(ctx context.Context, cmd SubmitCommand) (*SubmitResult,
 	if cmd.IdempotencyKey != "" {
 		req.IdempotencyKey = &cmd.IdempotencyKey
 	}
+	if cmd.SourceEventID != "" {
+		req.SourceEventID = &cmd.SourceEventID
+	}
+	if cmd.OriginEventType != "" {
+		req.OriginEventType = &cmd.OriginEventType
+	}
+	if cmd.ModelUploadIntentID != nil {
+		req.ModelUploadIntentID = cmd.ModelUploadIntentID
+	}
+	if cmd.ModelUploadStatus != "" {
+		req.ModelUploadStatus = &cmd.ModelUploadStatus
+	}
 	allowed := true
 	var createErr error
 	if cmd.TriggerReason.Automatic() {

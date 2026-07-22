@@ -1,7 +1,7 @@
 {
   "name": "omc-codex-skills",
-  "version": "0.1.0+codex.20260708074101",
-  "description": "OMC \u9879\u76ee\u672c\u5730 Codex \u4ea4\u4ed8\u4e0e\u6d4f\u89c8\u5668\u63a7\u5236\u6280\u80fd\u96c6\u3002",
+  "version": "0.1.0+codex.20260717050835",
+  "description": "OMC \u9879\u76ee\u672c\u5730 Codex \u4ea4\u4ed8\u3001\u9a8c\u8bc1\u3001\u63d0\u4ea4\u4e0e\u6d4f\u89c8\u5668\u63a7\u5236\u6280\u80fd\u96c6\u3002",
   "author": {
     "name": "OMC project"
   },
@@ -12,26 +12,30 @@
     "workflow",
     "ship",
     "browser",
+    "e2e",
+    "acs",
+    "commit",
     "playwright",
     "omc"
   ],
   "skills": "./skills/",
   "interface": {
     "displayName": "OMC Codex \u6280\u80fd\u96c6",
-    "shortDescription": "\u6267\u884c OMC Issue \u5230 PR \u4ea4\u4ed8\uff0c\u5e76\u7edf\u4e00\u6d4f\u89c8\u5668\u63a7\u5236\u8def\u5f84\u3002",
-    "longDescription": "\u9879\u76ee\u672c\u5730 Codex \u63d2\u4ef6\uff0c\u63d0\u4f9b OMC \u4ece\u9700\u6c42\u3001GitHub Issue \u5230\u5b9e\u73b0\u3001\u9a8c\u8bc1\u3001\u5ba1\u67e5\u3001\u63d0\u4ea4\u548c PR \u7684\u4ea4\u4ed8\u7f16\u6392\u6d41\u7a0b\uff0c\u4ee5\u53ca Codex \u684c\u9762 app\u3001\u7ec8\u7aef Codex\u3001in-app Browser\u3001Playwright \u548c\u53ef\u89c1 Chrome \u4e4b\u95f4\u7684\u6d4f\u89c8\u5668\u63a7\u5236\u51b3\u7b56\u3002",
+    "shortDescription": "\u6267\u884c OMC Issue \u5230 MR \u4ea4\u4ed8\u3001\u9a8c\u8bc1\u3001\u63d0\u4ea4\u4e0e\u6d4f\u89c8\u5668\u63a7\u5236\u3002",
+    "longDescription": "\u9879\u76ee\u672c\u5730 Codex \u63d2\u4ef6\uff0c\u63d0\u4f9b OMC \u4ece\u9700\u6c42\u3001GitLab Issue \u5230\u5b9e\u73b0\u3001\u7aef\u5230\u7aef\u9a8c\u8bc1\u3001ACS \u5168\u94fe\u8def\u538b\u6d4b\u3001\u5ba1\u67e5\u3001\u89c4\u8303\u63d0\u4ea4\u548c MR \u7684\u4ea4\u4ed8\u7f16\u6392\u6d41\u7a0b\uff0c\u4ee5\u53ca Codex \u684c\u9762 app\u3001\u7ec8\u7aef Codex\u3001in-app Browser\u3001Playwright \u548c\u53ef\u89c1 Chrome \u4e4b\u95f4\u7684\u6d4f\u89c8\u5668\u63a7\u5236\u51b3\u7b56\u3002",
     "developerName": "OMC project",
     "category": "Productivity",
     "capabilities": [
       "Read",
       "Write",
       "Workflow",
-      "Browser"
+      "Browser",
+      "Verification"
     ],
     "defaultPrompt": [
       "\u4f7f\u7528 ship \u4ea4\u4ed8\u5f53\u524d Issue\u3002",
-      "\u4f7f\u7528 ship audit \u5ba1\u8ba1\u5f53\u524d\u9636\u6bb5\u3002",
-      "\u4f7f\u7528 browser-control \u9009\u62e9\u6d4f\u89c8\u5668\u63a7\u5236\u8def\u5f84\u3002"
+      "\u4f7f\u7528 browser-control \u9009\u62e9\u6d4f\u89c8\u5668\u63a7\u5236\u8def\u5f84\u3002",
+      "\u4f7f\u7528 e2e \u9a8c\u8bc1\u5f53\u524d OMC \u6539\u52a8\u7684\u7aef\u5230\u7aef\u884c\u4e3a\u3002"
     ]
   }
 }

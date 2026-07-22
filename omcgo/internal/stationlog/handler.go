@@ -304,7 +304,7 @@ func (h *Handler) GetAbnormalReboot(c *gin.Context) {
 }
 
 // DeleteAbnormalReboot godoc
-// @Summary  删除异常重启记录（软删 + 清理 MinIO 文件）
+// @Summary  删除异常重启记录（兼容历史 file_received 行的 MinIO 清理）
 // @Tags     device-abnormal-reboots
 // @Param    id  path  string  true  "记录 ID（UUID）"
 // @Success  200 {object} map[string]interface{}
@@ -320,8 +320,7 @@ func (h *Handler) DeleteAbnormalReboot(c *gin.Context) {
 	if !ok {
 		return
 	}
-	// 不论 detected 占位还是 file_received，都允许删除：detected 只做软删 + 标记，
-	// file_received 走完整的 MinIO 清理 + 标记。
+	// 新链路的异常重启记录不承载附件；历史 file_received 行仍走 MinIO 清理。
 	if err := h.svc.Delete(c.Request.Context(), id, LogTypeFault, groups); err != nil {
 		h.logger.Error("delete abnormal reboot record", zap.String("id", id.String()), zap.Error(err))
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
@@ -331,7 +330,7 @@ func (h *Handler) DeleteAbnormalReboot(c *gin.Context) {
 }
 
 // DownloadAbnormalReboot godoc
-// @Summary  下载异常重启日志文件（仅 file_received 状态有文件）
+// @Summary  下载历史异常重启日志文件（兼容旧 file_received 行）
 // @Tags     device-abnormal-reboots
 // @Param    id        path   string  true   "记录 ID（UUID）"
 // @Param    redirect  query  string  false  "传 true 时 302 跳转到下载地址"
@@ -349,7 +348,7 @@ func (h *Handler) DownloadAbnormalReboot(c *gin.Context) {
 	if !ok {
 		return
 	}
-	// 先取一遍记录，提前拦截 detected 状态（避免落到 minio presign 才报错）
+	// 新链路的异常重启记录不承载附件；仅兼容历史 file_received 行下载。
 	item, err := h.svc.GetByID(c.Request.Context(), id, LogTypeFault, groups)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)

@@ -37,6 +37,7 @@ source "$SCRIPT_DIR/release.conf"
 log()  { echo -e "\033[1;32m[release]\033[0m $*"; }
 warn() { echo -e "\033[1;33m[release][警告]\033[0m $*" >&2; }
 die()  { echo -e "\033[1;31m[release][错误]\033[0m $*" >&2; exit 1; }
+iso_time() { date -u '+%Y-%m-%dT%H:%M:%SZ'; }
 
 # ── 参数解析 ────────────────────────────────────────────────────────────
 VERSION=""
@@ -53,7 +54,7 @@ done
 
 case "$CHANNEL" in
   test|release) ;;
-  *) die "--channel 取值非法：$CHANNEL（应为 test 或 release）" ;;
+  *) die "--channel 取值非法：${CHANNEL}（应为 test 或 release）" ;;
 esac
 
 # 仅支持 amd64（见 release.conf 注释 "架构支持"）
@@ -84,6 +85,10 @@ fi
 # 经典 builder 不识别该语法会报 "the --mount option requires BuildKit"。
 # 这里强制开 BuildKit，老 docker (>=18.09) 都支持。
 export DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}"
+# macOS bsdtar/copyfile may otherwise materialize extended attributes as
+# AppleDouble files (._name). The runtime XML loader treats those as real
+# configuration files and fails on their binary header.
+export COPYFILE_DISABLE=1
 [ -n "${PROJECT_IMAGE_PREFIX:-}" ] || die "release.conf 未配置 PROJECT_IMAGE_PREFIX"
 if [ -z "${BUSINESS_IMAGES+x}" ] || [ "${#BUSINESS_IMAGES[@]}" -eq 0 ]; then
   die "release.conf 未配置 BUSINESS_IMAGES"
@@ -97,7 +102,7 @@ case "$PKG_COMPRESS" in
   gzip) TAR_OPT="-czf"; EXT="tar.gz" ;;
   zstd) TAR_OPT="--zstd -cf"; EXT="tar.zst"
         command -v zstd >/dev/null 2>&1 || die "PKG_COMPRESS=zstd 但未安装 zstd" ;;
-  *)    die "release.conf 的 PKG_COMPRESS 取值非法：$PKG_COMPRESS（应为 xz/gzip/zstd）" ;;
+  *)    die "release.conf 的 PKG_COMPRESS 取值非法：${PKG_COMPRESS}（应为 xz/gzip/zstd）" ;;
 esac
 
 # ── 项目版本号解析 ──────────────────────────────────────────────────────
@@ -132,8 +137,8 @@ for ARCH in $ARCHES; do
   STAGE="$WORK/$PKG_NAME"
   mkdir -p "$STAGE"/{etc,docs,images}
 
-  # 1.1 构建业务镜像（amd64-only：host 已在入口断言为 amd64，docker build 默认
-  # 按 host 架构产出，无需 --platform；arm64 host 上自行恢复 buildx 跨架构逻辑）
+  # 1.1 构建业务镜像。目标架构必须显式传给 Docker；否则 Apple Silicon 构建机会
+  # 产出 arm64 镜像，即使包名和 release.conf 标记为 amd64，目标机将 exec format error。
   #
   # --network host：build container 共用宿主网络栈，绕开默认 bridge 网络
   # （172.17.0.0/16）。某些服务器的 FORWARD/DOCKER-FORWARD 链被 ufw / fail2ban
@@ -153,10 +158,11 @@ for ARCH in $ARCHES; do
     [ "$SVC" = "web" ] && EXTRA_ARGS+=( --build-arg "APP_VERSION=$VERSION" )
     ( cd "$REPO_ROOT" && docker build \
         --network host \
+        --platform "linux/$ARCH" \
         -t "$TAG" \
         -f "$DOCKERFILE" \
         --build-arg APK_MIRROR=mirrors.aliyun.com \
-        "${EXTRA_ARGS[@]}" \
+        ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} \
         . )
     IMG_REFS+=( "$TAG" )
   done
@@ -231,6 +237,14 @@ MINIO_ROOT_USER=REPLACE_ME
 MINIO_ROOT_PASSWORD=REPLACE_ME
 GRAFANA_ADMIN_USER=admin
 GRAFANA_ADMIN_PASSWORD=REPLACE_ME
+# 有状态服务数据目录（非密钥）。留空继续使用原 Docker 命名卷，升级不会隐式切换数据。
+# 新部署建议先运行 deploy/plan-resources.sh 自动填入最大可用盘，再按物理 SSD/NVMe 人工拆分。
+# 已有数据修改这些值前必须停服并完成数据复制；脚本不会自动迁移。
+POSTGRES_DATA_PATH=
+TSDB_DATA_PATH=
+REDIS_DATA_PATH=
+NATS_DATA_PATH=
+MINIO_DATA_PATH=
 # OMC 运行环境（容器内 entrypoint.sh 读）
 OMCGO_ENV=prod
 # JWT 密钥（app 容器读）—— 由 install.sh ensure_secrets 自动生成（#175）
@@ -253,17 +267,17 @@ channel=$CHANNEL
 arch=$ARCH
 image_prefix=$PROJECT_IMAGE_PREFIX
 business_images=${BUSINESS_IMAGES[*]}
-build_time=$(date -Is)
+build_time=$(iso_time)
 git_commit=$GIT_COMMIT
 EOF
   cat > "$STAGE/README.md" <<EOF
 # OMC 项目交付包 — $VERSION ($ARCH)
 
 - 项目版本：$VERSION
-- 发布渠道：$CHANNEL（test=测试阶段 / release=正式发布）
-- 架构：$ARCH（目标机 \`uname -m\`：x86_64→amd64，aarch64→arm64）
-- 业务镜像：${BUSINESS_IMAGES[*]/#/$PROJECT_IMAGE_PREFIX/}（tag = $VERSION）
-- 构建时间：$(date -Is)　git commit：$GIT_COMMIT
+- 发布渠道：${CHANNEL}（test=测试阶段 / release=正式发布）
+- 架构：${ARCH}（目标机 \`uname -m\`：x86_64→amd64，aarch64→arm64）
+- 业务镜像：${BUSINESS_IMAGES[*]/#/$PROJECT_IMAGE_PREFIX/}（tag = ${VERSION}）
+- 构建时间：$(iso_time)　git commit：$GIT_COMMIT
 
 本包【全 docker compose 部署】，含业务镜像 tar（docker save）+ compose
 文件 + 配置模板 + 迁移 / 字典 / Casbin（可挂载覆盖）+ 监控栈配置 + 运维脚本。
@@ -277,11 +291,13 @@ sha256sum -c checksums.sha256
 PostgreSQL / MinIO / JWT / Grafana 默认口令必须在部署时修改（deploy/.env）。
 \`OMC_PUBLIC_HOST\` 必须在部署时填本机对外 IP（基站可达），否则基站无法回传 PM 文件（deploy/.env）。
 EOF
+  # 防止上游复制阶段已经带入 AppleDouble 文件；只清理本次临时 staging。
+  find "$STAGE" -type f -name '._*' -delete
   ( cd "$STAGE" && find . -type f ! -name checksums.sha256 -print0 \
       | sort -z | xargs -0 sha256sum > checksums.sha256 )
 
   # 1.7 压缩打包 → archive/project/<版本>/
-  log "[$ARCH] 压缩打包（$PKG_COMPRESS）..."
+  log "[$ARCH] 压缩打包（${PKG_COMPRESS}）..."
   # shellcheck disable=SC2086
   ( cd "$WORK" && tar $TAR_OPT "$OUT/$PKG_NAME.$EXT" "$PKG_NAME" )
   ( cd "$OUT" && sha256sum "$PKG_NAME.$EXT" > "$PKG_NAME.$EXT.sha256" )
@@ -294,7 +310,7 @@ rm -rf "$WORK"
 {
   echo "project_version=$VERSION"
   echo "channel=$CHANNEL"
-  echo "build_time=$(date -Is)"
+  echo "build_time=$(iso_time)"
   echo "git_commit=$GIT_COMMIT"
   echo "arches=$ARCHES"
   echo "compress=$PKG_COMPRESS"
@@ -305,7 +321,7 @@ rm -rf "$WORK"
   echo "项目版本：$VERSION"
   echo "发布渠道：$CHANNEL"
   echo "git commit：$GIT_COMMIT"
-  echo "业务镜像前缀：$PROJECT_IMAGE_PREFIX  （tag = $VERSION）"
+  echo "业务镜像前缀：$PROJECT_IMAGE_PREFIX  （tag = ${VERSION}）"
   echo "业务服务：${BUSINESS_IMAGES[*]}"
   echo ""
   echo "说明：本包【全 docker compose 部署】，含业务镜像 tar + compose 文件 + 配置。"

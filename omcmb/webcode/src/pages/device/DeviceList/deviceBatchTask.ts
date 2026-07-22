@@ -13,10 +13,18 @@ export function buildBatchTaskTypeMap(t: BatchTaskTypeLabel): Record<string, str
     'batch-reboot': t('common.batchReboot'),
     'batch-log-collect': t('device.action.logCollect'),
     'batch-alarm-sync': t('device.action.alarmSync'),
+    'batch-param-sync': t('device.action.paramSync'),
   };
 }
 
 /** 仅「日志采集」批量操作带任务详情（抓包入口移除后不再有 tr069-collect）。 */
 export function batchActionHasDetail(actionKey?: string): boolean {
   return actionKey === 'batch-log-collect';
+}
+
+export function removeParamSyncOptimisticDeviceId(prev: Set<string>, deviceId: string): Set<string> {
+  if (!prev.has(deviceId)) return prev;
+  const next = new Set(prev);
+  next.delete(deviceId);
+  return next;
 }

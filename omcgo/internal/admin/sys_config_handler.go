@@ -25,6 +25,7 @@ func (h *SysConfigHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	configs := rg.Group("/sysConfig")
 	{
 		configs.GET("", h.List)
+		configs.GET("/apply-batches/:id", h.GetApplyBatch)
 		configs.GET("/:id", h.Get)
 		configs.POST("", h.Create)
 		configs.POST("/batch", h.BatchUpdate)
@@ -33,26 +34,38 @@ func (h *SysConfigHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	}
 }
 
+// GetApplyBatch 返回一次配置保存对应的运行态应用状态；目标的期望/实际值不会出现在响应中。
+func (h *SysConfigHandler) GetApplyBatch(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.NewBusinessError(7, "invalid id", err))
+		return
+	}
+	batch, err := h.service.GetApplyBatch(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	response.OKWithMsg(c, batch, "查询成功")
+}
+
 // RegisterPublicRoutes 注册无需鉴权即可访问的子集端点。
-// 仅返回 is_public=true 的配置项，供登录页消费品牌化资产
-// （产品名、Logo、登录背景图等）。参 docs/prd/system/ui-customization.md §6。
+// 仅返回代码白名单允许的配置项，供认证前页面消费。
+// 参 docs/prd/system/ui-customization.md §6。
 func (h *SysConfigHandler) RegisterPublicRoutes(rg *gin.RouterGroup) {
 	rg.GET("/admin/public/configs", h.ListPublic)
 }
 
-// ListPublic 返回 (可选 category 过滤后) is_public=true 的全部配置。
+// ListPublic 返回 (可选 category 过滤后) 可公开读取的配置。
 // 不携带敏感字段，无需登录态。
 func (h *SysConfigHandler) ListPublic(c *gin.Context) {
 	category := c.Query("category")
-	result, err := h.service.List(c.Request.Context(), category, true)
+	result, err := h.service.ListPublic(c.Request.Context(), category)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	if result == nil {
-		result = []SysConfig{}
-	}
-	response.OKWithMsg(c, result, "查询成功")
+	response.OKWithMsg(c, toSysConfigResponses(result), "查询成功")
 }
 
 func (h *SysConfigHandler) Create(c *gin.Context) {
@@ -63,10 +76,10 @@ func (h *SysConfigHandler) Create(c *gin.Context) {
 	}
 	result, err := h.service.Create(c.Request.Context(), req)
 	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	response.OKWithMsg(c, result, "创建成功")
+	response.OKWithMsg(c, toSysConfigResponse(*result), "创建成功")
 }
 
 func (h *SysConfigHandler) Get(c *gin.Context) {
@@ -80,7 +93,7 @@ func (h *SysConfigHandler) Get(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	response.OKWithMsg(c, result, "查询成功")
+	response.OKWithMsg(c, toSysConfigResponse(*result), "查询成功")
 }
 
 func (h *SysConfigHandler) List(c *gin.Context) {
@@ -92,10 +105,7 @@ func (h *SysConfigHandler) List(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	if result == nil {
-		result = []SysConfig{}
-	}
-	response.OKWithMsg(c, result, "查询成功")
+	response.OKWithMsg(c, toSysConfigResponses(result), "查询成功")
 }
 
 func (h *SysConfigHandler) Update(c *gin.Context) {
@@ -111,10 +121,10 @@ func (h *SysConfigHandler) Update(c *gin.Context) {
 	}
 	result, err := h.service.Update(c.Request.Context(), id, req)
 	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	response.OKWithMsg(c, result, "更新成功")
+	response.OKWithMsg(c, toSysConfigResponse(*result), "更新成功")
 }
 
 func (h *SysConfigHandler) Delete(c *gin.Context) {
@@ -124,7 +134,7 @@ func (h *SysConfigHandler) Delete(c *gin.Context) {
 		return
 	}
 	if err := h.service.Delete(c.Request.Context(), id); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 	response.OKWithMsg(c, nil, "删除成功")
@@ -141,10 +151,14 @@ func (h *SysConfigHandler) BatchUpdate(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	count, err := h.service.BatchUpsert(c.Request.Context(), req)
+	if err := validateGenericBatchWrite(req); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	result, err := h.service.BatchUpsertWithResult(c.Request.Context(), req)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	response.OKWithMsg(c, gin.H{"updated": count}, "保存成功")
+	response.OKWithMsg(c, gin.H{"updated": result.Updated, "batch": result.Batch}, "保存成功")
 }

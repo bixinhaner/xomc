@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -485,6 +486,24 @@ func (e *UpgradeExecutor) resolveUploadBaseURL(ctx context.Context) string {
 	return strings.TrimRight(e.acsUploadBaseURL, "/")
 }
 
+func buildTransferUploadURL(baseURL, resolvedTransport string) (string, error) {
+	reference, err := url.Parse(resolvedTransport)
+	if err != nil {
+		return "", fmt.Errorf("parse transfer path: %w", err)
+	}
+	if reference.IsAbs() || reference.Host != "" || reference.User != nil {
+		return "", fmt.Errorf("transfer path must not include a scheme or host")
+	}
+	if reference.Fragment != "" {
+		return "", fmt.Errorf("transfer path must not include a fragment")
+	}
+	query, err := url.ParseQuery(reference.RawQuery)
+	if err != nil {
+		return "", fmt.Errorf("parse transfer query: %w", err)
+	}
+	return transfercfg.BuildURL(baseURL, reference.EscapedPath(), nil, query)
+}
+
 // resolveOUIPlaceholders 在 fileType / transportPath 模板里把 "{OUI}" 替换为
 // 设备真实 OUI；设备未上报 OUI 时退化到 fallbackOUI 并 warn 一次。
 // 必须在 Upload 命令入队前做——CPE 拿到的 FileType 字符串里再有字面 "{OUI}"
@@ -578,15 +597,12 @@ func (e *UpgradeExecutor) ExecuteOneUpload(ctx context.Context, subTask *Upgrade
 		// 运行日志收集对齐），普通 {taskId} (含连字符 36 字符) 用于 NV/XML 备份等保持兼容。
 		"taskId32": strings.ReplaceAll(subTask.TaskID.String(), "-", ""),
 	})
-	if uploadBaseURL == "" {
-		// 没配置会让 URL 变成纯路径（"/smallcell/..."），CPE 拿到后无法解析为绝对地址；
-		// 失败发生在 CPE 侧 → TransferComplete 永远不来 → 30min reaper 兜底。
-		// 抛 warn 比静默拼空字符串好排查得多。
-		e.logger.Warn("upload base URL is empty (check sys_config 'acs_transfer'.uploadBaseURL or YAML upgrade.acs_upload_base_url); CPE will receive a path-only URL and likely reject the upload",
-			zap.String("device_sn", dev.SerialNumber),
-			zap.String("sub_task_id", subTask.ID.String()))
+	uploadURL, err := buildTransferUploadURL(uploadBaseURL, resolvedPath)
+	if err != nil {
+		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		e.failSubTask(ctx, subTask, fmt.Sprintf("Log collect can not be started, invalid upload URL: %v", err), FailureInternalError)
+		return
 	}
-	uploadURL := uploadBaseURL + resolvedPath
 
 	// CommandKey 格式必须对齐厂商私有约定，否则 baicells/MMMM 系列 CPE 拿到纯 UUID
 	// 的 CommandKey 后**完全静默**（既不回 UploadResponse 也不上传文件，看似设备死机）。
@@ -711,12 +727,12 @@ func (e *UpgradeExecutor) ExecuteOneSetParamCollect(ctx context.Context, subTask
 		"id": subTask.TaskID.String(),
 		"sn": dev.SerialNumber,
 	})
-	if uploadBaseURL == "" {
-		e.logger.Warn("upload base URL is empty for set-param collect; CPE will receive path-only URL and likely reject",
-			zap.String("device_sn", dev.SerialNumber),
-			zap.String("sub_task_id", subTask.ID.String()))
+	uploadURL, err := buildTransferUploadURL(uploadBaseURL, resolvedPath)
+	if err != nil {
+		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		e.failSubTask(ctx, subTask, fmt.Sprintf("Log collect can not be started, invalid upload URL: %v", err), FailureInternalError)
+		return
 	}
-	uploadURL := uploadBaseURL + resolvedPath
 
 	// standardPath → privatePath 翻译（per-device，按 productClass + swVersion 路由
 	// ProductRegistry → ParamRegistry → Translator）。UFTE 模板里 url_template 字段

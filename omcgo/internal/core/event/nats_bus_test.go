@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+
+	"github.com/omcgo/omcgo/internal/core/reliability"
 )
 
 // --- Constructor tests ---
@@ -312,6 +316,118 @@ func TestDecideAck_ExtremeDeliveries_BackoffCapped(t *testing.T) {
 	assert.Greater(t, d.backoff, time.Duration(0))
 }
 
+func TestDecideAck_PermanentError_ReturnsTermRegardlessOfDeliveries(t *testing.T) {
+	// 包装了 reliability.ErrPermanent 的错误（如设备未注册）无论 deliveries 多少，
+	// 都应立即 Term，不走正常的指数退避 Nak 重投。
+	err := fmt.Errorf("device not found: %w", reliability.ErrPermanent)
+	d := decideAck(err, 1, 5)
+	assert.Equal(t, ackActionTerm, d.action)
+	assert.Zero(t, d.backoff)
+}
+
+func TestPullTuningForSubject_DefaultsAndOverride(t *testing.T) {
+	bus := NewNATSEventBus(nil, nil, zap.NewNop())
+
+	gpv := bus.pullTuningForSubject(SubjectCommandGetParamsResponse)
+	assert.Equal(t, 1, gpv.Concurrency)
+	assert.Equal(t, gpvPullBatchSize, gpv.BatchSize)
+	assert.Equal(t, gpvPullAckWait, gpv.AckWait)
+	assert.Equal(t, defaultPullMaxAckPending, gpv.MaxAckPending)
+
+	paramSync := bus.pullTuningForSubject(SubjectParamSyncTaskResult)
+	assert.Equal(t, paramSyncResultPullConcurrent, paramSync.Concurrency)
+	assert.Equal(t, paramSyncResultPullAckWait, paramSync.AckWait)
+	assert.Equal(t, paramSyncResultMaxAckPending, paramSync.MaxAckPending)
+
+	bus.SetPullTuning(SubjectParamSyncTaskResult, PullTuning{BatchSize: 12, Concurrency: 3, AckWait: 45 * time.Second, MaxAckPending: 99})
+	overridden := bus.pullTuningForSubject(SubjectParamSyncTaskResult)
+	assert.Equal(t, 12, overridden.BatchSize)
+	assert.Equal(t, 3, overridden.Concurrency)
+	assert.Equal(t, 45*time.Second, overridden.AckWait)
+	assert.Equal(t, 99, overridden.MaxAckPending)
+}
+
+func TestUpdatedPullConsumerConfig_OverwritesMutableTuning(t *testing.T) {
+	desired := PullTuning{BatchSize: 64, Concurrency: 64, AckWait: 2 * time.Minute, MaxAckPending: 512}
+	existing := &nats.ConsumerInfo{
+		Name:   "param-sync-results-pull",
+		Config: nats.ConsumerConfig{AckWait: 30 * time.Second, MaxAckPending: 2048},
+	}
+
+	got, changed := updatedPullConsumerConfig(existing, desired)
+
+	require.True(t, changed)
+	assert.Equal(t, "param-sync-results-pull", got.Durable)
+	assert.Equal(t, 2*time.Minute, got.AckWait)
+	assert.Equal(t, 512, got.MaxAckPending)
+}
+
+func TestUpdatedPullConsumerConfig_NoChangeWhenAlreadyAligned(t *testing.T) {
+	desired := PullTuning{BatchSize: 64, Concurrency: 64, AckWait: 2 * time.Minute, MaxAckPending: 512}
+	existing := &nats.ConsumerInfo{
+		Name:   "param-sync-results-pull",
+		Config: nats.ConsumerConfig{Durable: "param-sync-results-pull", AckWait: 2 * time.Minute, MaxAckPending: 512},
+	}
+
+	got, changed := updatedPullConsumerConfig(existing, desired)
+
+	require.False(t, changed)
+	assert.Equal(t, existing.Config, got)
+}
+
+func TestQueueTuningForSubjectDefaultsAndOverride(t *testing.T) {
+	bus := NewNATSEventBus(nil, nil, zap.NewNop())
+
+	got := bus.queueTuningForSubject(SubjectPMFileReceived)
+	assert.Equal(t, queueSubscribeAckWait, got.AckWait)
+	assert.Equal(t, maxDeliveries, got.MaxDeliver)
+	assert.Equal(t, defaultQueueMaxAckPending, got.MaxAckPending)
+
+	bus.SetQueueTuning(SubjectPMFileReceived, QueueTuning{
+		AckWait: 3 * time.Minute, MaxDeliver: 7, MaxAckPending: 16,
+	})
+	got = bus.queueTuningForSubject(SubjectPMFileReceived)
+	assert.Equal(t, 3*time.Minute, got.AckWait)
+	assert.Equal(t, 7, got.MaxDeliver)
+	assert.Equal(t, 16, got.MaxAckPending)
+}
+
+func TestUpdatedQueueConsumerConfigOverwritesMutableTuning(t *testing.T) {
+	desired := QueueTuning{AckWait: 2 * time.Minute, MaxDeliver: 5, MaxAckPending: 16}
+	existing := &nats.ConsumerInfo{
+		Name: "pm-workers",
+		Config: nats.ConsumerConfig{
+			AckWait: 30 * time.Second, MaxDeliver: -1, MaxAckPending: 1000,
+		},
+	}
+
+	got, changed := updatedQueueConsumerConfig(existing, desired)
+
+	require.True(t, changed)
+	assert.Equal(t, "pm-workers", got.Durable)
+	assert.Equal(t, desired.AckWait, got.AckWait)
+	assert.Equal(t, desired.MaxDeliver, got.MaxDeliver)
+	assert.Equal(t, desired.MaxAckPending, got.MaxAckPending)
+}
+
+func TestReconcilePullTuningWithExisting_NilKeepsDesired(t *testing.T) {
+	desired := PullTuning{BatchSize: 64, Concurrency: 64, AckWait: 2 * time.Minute, MaxAckPending: 512}
+
+	assert.Equal(t, desired, reconcilePullTuningWithExisting(desired, nil))
+}
+
+func TestReconcilePullTuningWithExisting_FallbackPreservesServerConsumerConfig(t *testing.T) {
+	desired := PullTuning{BatchSize: 64, Concurrency: 64, AckWait: 2 * time.Minute, MaxAckPending: 512}
+	existing := &nats.ConsumerInfo{Config: nats.ConsumerConfig{AckWait: 30 * time.Second, MaxAckPending: 2048}}
+
+	got := reconcilePullTuningWithExisting(desired, existing)
+
+	assert.Equal(t, desired.BatchSize, got.BatchSize)
+	assert.Equal(t, desired.Concurrency, got.Concurrency)
+	assert.Equal(t, 30*time.Second, got.AckWait)
+	assert.Equal(t, 2048, got.MaxAckPending)
+}
+
 // --- decodeEventBytes pure-function tests ---
 
 func TestDecodeEventBytes_ValidJSON(t *testing.T) {
@@ -344,17 +460,17 @@ func TestDecodeEventBytes_EmptyBytes_ReturnsError(t *testing.T) {
 func TestSubjectConstants_DotSeparated(t *testing.T) {
 	// All subjects should follow dot-separated naming convention
 	subjects := map[string]string{
-		"DeviceBootstrap":     SubjectDeviceBootstrap,
-		"DevicePeriodic":      SubjectDevicePeriodic,
+		"DeviceBootstrap":          SubjectDeviceBootstrap,
+		"DevicePeriodic":           SubjectDevicePeriodic,
 		"CommandGetParamsResponse": SubjectCommandGetParamsResponse,
 		"TaskCompleted":            SubjectTaskCompleted,
-		"PMFileReceived":      SubjectPMFileReceived,
-		"AlarmRaised":         SubjectAlarmRaised,
-		"ProvisionStarted":    SubjectProvisionStarted,
-		"FirmwareUploaded":    SubjectFirmwareUploaded,
-		"BackupTaskCreated":   SubjectBackupTaskCreated,
-		"OSSAlarmForward":     SubjectOSSAlarmForward,
-		"NEDirectRegister":    SubjectNEDirectRegister,
+		"PMFileReceived":           SubjectPMFileReceived,
+		"AlarmRaised":              SubjectAlarmRaised,
+		"ProvisionStarted":         SubjectProvisionStarted,
+		"FirmwareUploaded":         SubjectFirmwareUploaded,
+		"BackupTaskCreated":        SubjectBackupTaskCreated,
+		"OSSAlarmForward":          SubjectOSSAlarmForward,
+		"NEDirectRegister":         SubjectNEDirectRegister,
 	}
 
 	for name, subject := range subjects {
@@ -380,12 +496,25 @@ func TestPullDurableName_ShortName(t *testing.T) {
 	assert.Equal(t, "foo-pull", pullDurableName("foo"))
 }
 
-// --- pullBatchSizeForSubject tests ---
+// --- defaultPullTuningForSubject tests ---
 
-func TestPullBatchSizeForSubject_GPVSubject_Returns64(t *testing.T) {
-	assert.Equal(t, gpvPullBatchSize, pullBatchSizeForSubject(SubjectCommandGetParamsResponse))
+func TestDefaultPullTuningForSubject_GPVSubject_Returns64(t *testing.T) {
+	assert.Equal(t, gpvPullBatchSize, defaultPullTuningForSubject(SubjectCommandGetParamsResponse).BatchSize)
 }
 
-func TestPullBatchSizeForSubject_OtherSubject_Returns32(t *testing.T) {
-	assert.Equal(t, 32, pullBatchSizeForSubject("some.other.subject"))
+func TestDefaultPullTuningForSubject_OtherSubject_Returns32(t *testing.T) {
+	assert.Equal(t, 32, defaultPullTuningForSubject("some.other.subject").BatchSize)
+}
+
+func TestPullFetchBatchForAvailableSlots_LimitsFetchToFreeConcurrency(t *testing.T) {
+	assert.Equal(t, 64, pullFetchBatchForAvailableSlots(64, 64, 0))
+	assert.Equal(t, 1, pullFetchBatchForAvailableSlots(64, 64, 63))
+	assert.Equal(t, 0, pullFetchBatchForAvailableSlots(64, 64, 64))
+	assert.Equal(t, 8, pullFetchBatchForAvailableSlots(8, 64, 1))
+}
+
+func TestPullFetchBatchForAvailableSlots_InvalidInputsReturnZero(t *testing.T) {
+	assert.Equal(t, 0, pullFetchBatchForAvailableSlots(0, 64, 0))
+	assert.Equal(t, 0, pullFetchBatchForAvailableSlots(64, 0, 0))
+	assert.Equal(t, 0, pullFetchBatchForAvailableSlots(64, 64, 99))
 }

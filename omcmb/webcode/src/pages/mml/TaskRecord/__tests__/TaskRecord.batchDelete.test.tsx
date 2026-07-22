@@ -235,6 +235,39 @@ describe('TaskRecord batch delete and console task display', () => {
     expect(screen.getByText('DEVICE_INFO')).toBeInTheDocument();
   });
 
+  it('shows script task execution policy in the task detail', () => {
+    mocks.taskItems = [
+      buildTask({
+        id: 'task-script-policy-1',
+        taskName: '脚本周期任务',
+        taskOrigin: 'script',
+        executeType: 'periodic',
+        periodStart: '2026-07-18T01:00:00Z',
+        periodEnd: '2026-07-20T01:00:00Z',
+        periodTime: '02:30:00',
+        offlineRetry: true,
+        offlineRetryWait: 120,
+        failedRetry: true,
+        failedRetryCount: 2,
+        failedRetryInterval: 30,
+      }),
+    ];
+
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: '查看' }));
+
+    expect(screen.getByText('执行配置')).toBeInTheDocument();
+    expect(screen.getByText('执行方式')).toBeInTheDocument();
+    expect(screen.getAllByText('周期任务').length).toBeGreaterThan(0);
+    expect(screen.getByText('周期时间')).toBeInTheDocument();
+    expect(screen.getByText('02:30:00')).toBeInTheDocument();
+    expect(screen.getByText('离线等待重试')).toBeInTheDocument();
+    expect(screen.getByText('120 秒')).toBeInTheDocument();
+    expect(screen.getByText('失败重试')).toBeInTheDocument();
+    expect(screen.getByText('2 次 / 30 秒')).toBeInTheDocument();
+  });
+
   it('updates the open task detail summary when polling refreshes the task row', () => {
     mocks.taskItems = [
       buildTask({

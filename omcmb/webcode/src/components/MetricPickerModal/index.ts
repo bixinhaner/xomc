@@ -6,3 +6,5 @@
  */
 export { default } from './MetricPickerModal';
 export { default as MetricPickerModal } from './MetricPickerModal';
+export { default as MetricBatchInputModal } from './MetricBatchInputModal';
+export * from './metricBatchSelection';

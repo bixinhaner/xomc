@@ -39,17 +39,6 @@ type Repository interface {
 	LatestByDevice(ctx context.Context, deviceID uuid.UUID) (*LogFile, error)
 }
 
-// FaultExtraRepository 故障日志专用接口：提供 UpdateFile 等运行日志不需要的方法。
-//
-// detected → file_received 的转换在文件到达时通过 UpdateFile 完成；
-// LatestDetectedByDeviceSN 在文件到达时用于找到对应的占位记录。
-type FaultExtraRepository interface {
-	// UpdateFile 用文件信息更新一条 detected 记录，使其进入 file_received 状态。
-	UpdateFile(ctx context.Context, id uuid.UUID, fileName, objectPath, bucket string, fileSize int64) error
-	// LatestDetectedByDeviceSN 返回设备最近一条 detected 状态（未文件落地）的故障日志。
-	LatestDetectedByDeviceSN(ctx context.Context, sn string) (*LogFile, error)
-}
-
 // runningLogCols 运行日志表列（station_running_logs，无 fault_reason/fault_detail）
 var runningLogCols = []string{
 	"id", "device_id", "device_sn", "file_name",
@@ -457,56 +446,6 @@ func (r *PgRepository) LatestByObject(ctx context.Context, bucket, objectPath st
 		ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build latest by object %s: %w", r.tableName, err)
-	}
-	row := r.pool.QueryRow(ctx, query, args...)
-	f, err := r.scan(row)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	return f, err
-}
-
-// UpdateFile 把 detected 状态的故障日志记录推进到 file_received。
-// 仅在 station_fault_logs 上有意义；其他表调用会返回错误。
-func (r *PgRepository) UpdateFile(ctx context.Context, id uuid.UUID, fileName, objectPath, bucket string, fileSize int64) error {
-	if !r.withFaultFields {
-		return fmt.Errorf("UpdateFile only supported on fault log table, not %s", r.tableName)
-	}
-	query, args, err := storage.Psql.Update(r.tableName).
-		Set("file_name", fileName).
-		Set("object_path", objectPath).
-		Set("bucket", bucket).
-		Set("file_size", fileSize).
-		Set("record_status", FaultRecordStatusFileReceived).
-		Set("collected_at", time.Now()).
-		Set("updated_at", time.Now()).
-		Where(sq.Eq{"id": id}).
-		ToSql()
-	if err != nil {
-		return fmt.Errorf("build update file %s: %w", r.tableName, err)
-	}
-	_, err = r.pool.Exec(ctx, query, args...)
-	return err
-}
-
-// LatestDetectedByDeviceSN 取设备最近一条 detected 状态的故障日志，用于
-// 文件到达时把占位记录推进到 file_received。
-func (r *PgRepository) LatestDetectedByDeviceSN(ctx context.Context, sn string) (*LogFile, error) {
-	if !r.withFaultFields {
-		return nil, fmt.Errorf("LatestDetectedByDeviceSN only supported on fault log table, not %s", r.tableName)
-	}
-	query, args, err := storage.Psql.Select(r.cols()...).
-		From(r.tableName).
-		Where(sq.Eq{
-			"device_sn":     sn,
-			"is_deleted":    false,
-			"record_status": FaultRecordStatusDetected,
-		}).
-		OrderBy("collected_at DESC").
-		Limit(1).
-		ToSql()
-	if err != nil {
-		return nil, fmt.Errorf("build latest detected %s: %w", r.tableName, err)
 	}
 	row := r.pool.QueryRow(ctx, query, args...)
 	f, err := r.scan(row)

@@ -13,6 +13,9 @@ export interface KPICardProps {
   trend?: 'up' | 'down' | 'stable';
   delta?: string | number;
   deltaLabel?: string;
+  /** false 表示没有有效历史基线，此时仅显示 N/A，不显示伪造趋势 */
+  hasComparison?: boolean;
+  unavailableText?: string;
   unit?: string;
   onClick?: () => void;
   loading?: boolean;
@@ -28,6 +31,8 @@ const KPICard: React.FC<KPICardProps> = ({
   trend,
   delta,
   deltaLabel,
+  hasComparison,
+  unavailableText = 'N/A',
   unit,
   onClick,
   loading,
@@ -117,7 +122,7 @@ const KPICard: React.FC<KPICardProps> = ({
           </div>
 
           {/* Trend —— 加载期一并隐藏趋势/增量行（参照 v2），避免闪现旧 delta。issue #370 */}
-          {!loading && (trend || delta !== undefined) && (
+          {!loading && (hasComparison === false || trend || delta !== undefined) && (
             <div
               style={{
                 display: 'flex',
@@ -127,18 +132,26 @@ const KPICard: React.FC<KPICardProps> = ({
                 minHeight: minHeight,
               }}
             >
-              {TrendIcon && (
-                <TrendIcon style={{ fontSize: 12, color: trendColor }} />
-              )}
-              {delta !== undefined && (
-                <Typography.Text style={{ fontSize: 12, color: trendColor }}>
-                  {delta}
-                </Typography.Text>
-              )}
-              {deltaLabel && (
+              {hasComparison === false ? (
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  {deltaLabel}
+                  {unavailableText}
                 </Typography.Text>
+              ) : (
+                <>
+                  {TrendIcon && (
+                    <TrendIcon style={{ fontSize: 12, color: trendColor }} />
+                  )}
+                  {delta !== undefined && (
+                    <Typography.Text style={{ fontSize: 12, color: trendColor }}>
+                      {delta}
+                    </Typography.Text>
+                  )}
+                  {deltaLabel && (
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      {deltaLabel}
+                    </Typography.Text>
+                  )}
+                </>
               )}
             </div>
           )}

@@ -21,6 +21,7 @@ export interface AggregatedQueryParams {
   // 后端 v1 handler 只支持单 OUI+SN 过滤；多设备走多次查询或 group dimension。
   deviceOui?: string;
   deviceSn?: string;
+  deviceSns?: string[];
   deviceGroupId?: string;
   metricPaths?: string[];
   metricType?: 'counter' | 'kpi';
@@ -29,6 +30,7 @@ export interface AggregatedQueryParams {
   endTime?: string;
   limit?: number;
   offset?: number;
+  pageBy?: 'pivot_row';
   // 后端按 (时间桶 × 指标) 补齐占位行（filled=true，metric_value 前端 mapper 设 null）。
   // 适用 device 维度单设备查询；未启用时后端不补行。
   fillEmpty?: boolean;
@@ -63,6 +65,32 @@ export interface BackendAggregatedRow {
   // 后端 fill_empty 占位行（DB 无样本时补的空桶），前端 mapper 见 filled=true 把
   // metricValue 设 null 用于"-"渲染。
   filled?: boolean;
+}
+
+export interface AggregatedQueryMeta {
+  requestedStartTime?: string;
+  requestedEndTime?: string;
+  actualStartTime?: string | null;
+  actualEndTime?: string | null;
+  granularity?: Granularity | string;
+  timezone?: string;
+}
+
+export interface AggregatedQueryResult {
+  rows: AggregatedRow[];
+  total: number;
+  meta?: AggregatedQueryMeta;
+}
+
+export interface BackendAggregatedResponse {
+  items: BackendAggregatedRow[] | null;
+  total: number;
+  requested_start_time?: string;
+  requested_end_time?: string;
+  actual_start_time?: string | null;
+  actual_end_time?: string | null;
+  granularity?: string;
+  timezone?: string;
 }
 
 export interface AggregatedRow {
@@ -107,5 +135,16 @@ export function mapBackendAggregatedRow(b: BackendAggregatedRow): AggregatedRow 
     objectLdn: b.object_ldn ?? null,
     extra: b.extra ?? {},
     filled: b.filled,
+  };
+}
+
+export function mapBackendAggregatedMeta(b: BackendAggregatedResponse): AggregatedQueryMeta {
+  return {
+    requestedStartTime: b.requested_start_time,
+    requestedEndTime: b.requested_end_time,
+    actualStartTime: b.actual_start_time ?? null,
+    actualEndTime: b.actual_end_time ?? null,
+    granularity: b.granularity,
+    timezone: b.timezone,
   };
 }

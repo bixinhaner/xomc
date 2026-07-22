@@ -3,7 +3,7 @@
  *   - 列表/统计接口错误码 401/429/500 原样抛（不吞错，hook 走 React Query 错误态）。
  *   - getById 错误吞错返 null（详情抽屉不崩，现行 catch 兜底）。
  *   - 畸形载荷不崩：severity 越界 → 'warning' 兜底；items 缺失 → 空列表；
- *     by_severity 缺键 → 0；空 alarmName 三级回退；is_read 缺省 → unread='1'。
+ *     by_severity 缺键 → 0；空可能原因不跨字段回退；is_read 缺省 → unread='1'。
  *
  * 与既有 alarmApi.test.ts（severity CSV 序列化）互补，不重叠。
  */
@@ -125,7 +125,7 @@ describe('alarmApi — 畸形载荷兜底（type drift / field missing）', () =
     expect(out.total).toBe(0);
   });
 
-  it('alarmName 三级回退：无 probable_cause/description 时回退 alarm_identifier', async () => {
+  it('probable_cause 缺失时可能原因不回退到名称或 identifier', async () => {
     getMock.mockResolvedValue({
       data: {
         items: [backendAlarm({ probable_cause: '', description: '', alarm_identifier: 'ONLY_ID' })],
@@ -136,7 +136,7 @@ describe('alarmApi — 畸形载荷兜底（type drift / field missing）', () =
       },
     });
     const out = await alarmApi.getCurrentAlarms({ page: 1, pageSize: 20 });
-    expect(out.items[0].alarmName).toBe('ONLY_ID');
+    expect(out.items[0].alarmName).toBe('');
   });
 
   it('is_read 缺省 → unread="1"（未读）；event_type 未知 → communication 兜底', async () => {

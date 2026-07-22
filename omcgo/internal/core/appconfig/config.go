@@ -245,11 +245,25 @@ type ParamRegistryConfig struct {
 // default to false so deploying the binary and migration does not change the
 // legacy path until an operator explicitly enables a deterministic canary.
 type ParamSyncConfig struct {
-	RunEnabled            bool `mapstructure:"run_enabled"`
-	ResultConsumerEnabled bool `mapstructure:"result_consumer_enabled"`
-	StagingEnabled        bool `mapstructure:"staging_enabled"`
-	CanaryPercent         int  `mapstructure:"canary_percent"`
-	LegacyFallbackEnabled bool `mapstructure:"legacy_fallback_enabled"`
+	// RoutingMode controls which parameter-sync entry path is allowed. Empty
+	// keeps the pre-routing-mode legacy behavior for backward-compatible local
+	// configurations; production should explicitly use closed/durable.
+	RoutingMode                   string        `mapstructure:"routing_mode"`
+	ManualOfflineMode             string        `mapstructure:"manual_offline_mode"`
+	RunEnabled                    bool          `mapstructure:"run_enabled"`
+	ResultConsumerEnabled         bool          `mapstructure:"result_consumer_enabled"`
+	StagingEnabled                bool          `mapstructure:"staging_enabled"`
+	CanaryPercent                 int           `mapstructure:"canary_percent"`
+	LegacyFallbackEnabled         bool          `mapstructure:"legacy_fallback_enabled"`
+	ResultConsumerShardCount      int           `mapstructure:"result_consumer_shard_count"`
+	ResultConsumerQueueDepth      int           `mapstructure:"result_consumer_queue_depth"`
+	ResultConsumerPullBatchSize   int           `mapstructure:"result_consumer_pull_batch_size"`
+	ResultConsumerPullConcurrency int           `mapstructure:"result_consumer_pull_concurrency"`
+	ResultConsumerAckWait         time.Duration `mapstructure:"result_consumer_ack_wait"`
+	ResultConsumerMaxAckPending   int           `mapstructure:"result_consumer_max_ack_pending"`
+	RecoveryRunLimit              int           `mapstructure:"recovery_run_limit"`
+	RecoveryTaskLimitPerRun       int           `mapstructure:"recovery_task_limit_per_run"`
+	RecoveryTaskBudget            int           `mapstructure:"recovery_task_budget"`
 }
 
 // AppConfig 是 App 服务的完整配置。
@@ -288,7 +302,7 @@ type AppConfig struct {
 
 // TaskConfig 配置 task 子系统的全局默认行为（T-0157 C1 引入）。
 //
-// DefaultExpiresInSeconds: CreateTask 调用方未显式传 ExpiresIn 时使用的默认超时秒数。
+// DefaultExpiresInSeconds: device task 创建调用方未显式传 ExpiresIn 时使用的默认超时秒数。
 //
 //	调用方语义:
 //	  - req.ExpiresIn > 0  → 直接采用该值
@@ -641,7 +655,8 @@ type WorkerConfig struct {
 	// PMConsumerConcurrency 是 PM 文件入库消费者的进程内并发订阅数（pm.file.received → 解析入库）。
 	// NATS push 订阅 async 回调由 nats.go 单 goroutine 串行投递，单订阅只用 ~1 核；N 个订阅共享同一
 	// durable consumer "pm-workers" 由 JetStream 负载均衡，吃满 worker 多核。<=0 时 worker 启动期
-	// 回退到 GOMAXPROCS（即容器 CPU 配额），上限 16。建议设为 worker CPU 核数。
+	// 回退到 GOMAXPROCS（即容器 CPU 配额），上限 32（2026-07-21 从16上调，见 cmd/worker/main.go
+	// 注释）。设更大的值需同步核对 db.max_conns/tsdb.max_conns 连接池是否够用。
 	PMConsumerConcurrency int `mapstructure:"pm_consumer_concurrency"`
 	// PMAsyncCommit：PM 指标大批量写是否对本事务关掉 WAL 同步落盘（synchronous_commit=off）。
 	// PM 数据可从 MinIO 原文件重建，关掉后提交不阻塞 fsync、显著提吞吐（崩溃最多丢已提交未刷盘的

@@ -405,6 +405,20 @@ export const deviceParameterApi = {
     };
   },
 
+  async resetLMTPassword(deviceId: string, password?: string): Promise<ParameterUpdateResponse> {
+    const body = password ? { password } : {};
+    const { data } = await http.post<Partial<BackendUpdateResponse>>(
+      `/devices/${deviceId}/password/reset`,
+      body
+    );
+    return {
+      message: data.message ?? '',
+      parameters: data.parameters ?? 1,
+      rebootRequired: data.reboot_required ?? false,
+      taskId: data.task_id,
+    };
+  },
+
   // T-0126: syncParameters (Path A) 已下线，迁移到 deviceApi.syncDeviceParams (Path B + reason="manual")。
   // discoverParameters 保留 — discovery flow 与 Path B 全量同步并存。
 
@@ -418,13 +432,19 @@ export const deviceParameterApi = {
     );
     const status = mapBackendSyncStatus(data);
     try {
-      const { data: activeData } = await http.get<{ active_run?: BackendParamSyncRun }>(
+      const { data: activeData } = await http.get<{
+        active_run?: BackendParamSyncRun;
+        stalled_finalizing?: boolean;
+        reason?: string;
+      }>(
         `/devices/${deviceId}/parameter-sync/active`
       );
       const run = activeData.active_run;
       if (run) {
         status.status = 'syncing';
         status.pendingCommands = Math.max(run.expected_task_count - run.terminal_task_count, 0);
+        status.stalledFinalizing = !!activeData.stalled_finalizing;
+        status.stalledReason = activeData.reason;
         status.activeRun = {
           id: run.id,
           requestId: run.request_id,

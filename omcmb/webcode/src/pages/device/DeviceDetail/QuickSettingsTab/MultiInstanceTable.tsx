@@ -30,6 +30,7 @@ import {
   formatEnumDisplayValue,
   getEffectiveEnumMeta,
   getFeedbackScopeContext,
+  serializeQuickSettingsMultiCheckboxValue,
   validateLteQOffsetValue,
   validateValue,
   type QuickSettingsInstanceContext,
@@ -63,6 +64,13 @@ function normalizeIpsecEnableValue(value: unknown): string {
 
 function toDeviceIpsecEnableValue(value: unknown): string {
   return isEnabledValue(value) ? '1' : '0';
+}
+
+function normalizeComparableQuickSettingsValue(value: unknown, param?: QuickSettingsParam): string {
+  if (param?.type === 'multiCheckbox') {
+    return serializeQuickSettingsMultiCheckboxValue(value);
+  }
+  return String(value ?? '');
 }
 
 function isObjectInstanceNotFoundError(err: unknown): boolean {
@@ -1569,11 +1577,12 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     for (const [leaf, value] of Object.entries(edits)) {
       const item = schemaByPath.get(`${objectPath}${instId}.${leaf}`) ?? leafSchemaByLeaf.get(leaf);
       const param = groupParamByLeaf.get(leaf);
-      const oldVal = item?.currentValue ?? '';
-      if (value === oldVal) continue;
+      const nextValue = normalizeComparableQuickSettingsValue(value, param);
+      const oldVal = normalizeComparableQuickSettingsValue(item?.currentValue ?? '', param);
+      if (nextValue === oldVal) continue;
       updates.push({
         parameterPath: `${objectPath}${instId}.${leaf}`,
-        parameterValue: value,
+        parameterValue: nextValue,
         parameterType: effectiveParamType(item, param),
       });
     }
@@ -1708,17 +1717,18 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       }
 
       if (!targetInstanceId) {
-        pendingEdits[leaf] = value;
+        pendingEdits[leaf] = normalizeComparableQuickSettingsValue(value, param);
         continue;
       }
 
-      const oldVal = item?.currentValue ?? '';
-      if (value === oldVal) continue;
+      const nextValue = normalizeComparableQuickSettingsValue(value, param);
+      const oldVal = normalizeComparableQuickSettingsValue(item?.currentValue ?? '', param);
+      if (nextValue === oldVal) continue;
 
-      pendingEdits[leaf] = value;
+      pendingEdits[leaf] = nextValue;
       updates.push({
         parameterPath: `${objectPath}${targetInstanceId}.${leaf}`,
-        parameterValue: value,
+        parameterValue: nextValue,
         parameterType,
       });
     }

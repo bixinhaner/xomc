@@ -198,16 +198,16 @@ func (b *TransferBridge) handleAutonomousTransferComplete(ctx context.Context, e
 
 	case tr069.FileTypeDataModel:
 		dmPayload := map[string]interface{}{
-			"minio_bucket": bucket,
-			"minio_path":   objectPath,
-			"device_id":    dev.ID.String(),
-			"device_sn":    dev.SerialNumber,
-			"carrier":      string(dev.Carrier),
-			"technology":   string(dev.Technology),
-			"oui":          dev.OUI,
-			"product_class": dev.ProductClass,
+			"minio_bucket":     bucket,
+			"minio_path":       objectPath,
+			"device_id":        dev.ID.String(),
+			"device_sn":        dev.SerialNumber,
+			"carrier":          string(dev.Carrier),
+			"technology":       string(dev.Technology),
+			"oui":              dev.OUI,
+			"product_class":    dev.ProductClass,
 			"firmware_version": dev.FirmwareVersion,
-			"file_size":    fileSize,
+			"file_size":        fileSize,
 		}
 		dmEvt, err := event.NewEvent(event.SubjectDataModelFileReceived, dmPayload)
 		if err != nil {
@@ -222,11 +222,10 @@ func (b *TransferBridge) handleAutonomousTransferComplete(ctx context.Context, e
 
 	case tr069.FileTypeRunningLog, tr069.FileTypeFaultLog:
 		// #178/#222：自主传输上传运行日志/故障日志此前落进 default 分支被静默丢弃，
-		// 从不发「日志文件已接收」事件 → station_log_files 永不写库 → 前端列表查空、
-		// 提示「没有文件 / 暂无运行日志」。这里补上事件发布，与 ACS 直传路径
-		// （acs/upload/handler.go publishLogFileReceivedEvent）发同一 SubjectLogFileReceived，
-		// stationlog.Service 订阅后创建记录。两条上传路径互斥（ACS 直传 vs CPE 自主传输），
-		// 同一文件只经其一，不会双发重复入库。
+		// 从不发「日志文件已接收」事件。这里补上事件发布，与 ACS 直传路径
+		// （acs/upload/handler.go publishLogFileReceivedEvent）发同一 SubjectLogFileReceived。
+		// stationlog.Service 只持久化运行日志；故障日志任务/文件状态由文件传输链路维护，
+		// 不写入重启记录。两条上传路径互斥（ACS 直传 vs CPE 自主传输），同一文件只经其一。
 		taskID8, deviceSN := parseLogFilename(fileName)
 		if deviceSN == "" {
 			deviceSN = payload.DeviceSN

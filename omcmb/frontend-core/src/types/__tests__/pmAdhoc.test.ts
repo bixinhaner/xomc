@@ -44,4 +44,16 @@ describe('mapBackendAdhocTask — device_sns 健壮性（产品/频段/全网维
     const t = mapBackendAdhocTask(b);
     expect(t.deviceSns).toEqual(['SN1', 'SN2']);
   });
+
+  it('visibility 缺失时默认按私有任务处理', () => {
+    const b = baseBackendTask();
+    delete (b as Partial<BackendAdhocTask>).visibility;
+    const t = mapBackendAdhocTask(b);
+    expect(t.visibility).toBe('private');
+  });
+
+  it('visibility 为 public 时映射为公开任务', () => {
+    const t = mapBackendAdhocTask({ ...baseBackendTask(), visibility: 'public' });
+    expect(t.visibility).toBe('public');
+  });
 });

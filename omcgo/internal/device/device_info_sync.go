@@ -141,7 +141,7 @@ var universalInformInstanceMappings = []struct {
 	// Band（小区级）
 	{column: "band", templates: []string{
 		"Device.Services.GsmBTSCellDT.{g}.GsmBtsBand",
-		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.RAN.RF.FreqBandIndicator",
+		"Device.Services.FAPService.{f}.CellConfig.{c}.NR.RAN.PHY.FrequencyInfoDLSIB.MultiFrequencyBandListNRSIB.{b}.FreqBandIndicatorNR",
 		"Device.Services.FAPService.{f}.CellConfig.LTE.RAN.RF.FreqBandIndicator",
 	}},
 	// TAC（小区级，NR 走 CN.TA 子树，LTE 走 EPC.TAC）
@@ -645,12 +645,17 @@ type DeviceCoordinateWriter interface {
 	UpdateCoordinates(ctx context.Context, id uuid.UUID, latitude, longitude float64) error
 }
 
+type DeviceCoordinateReader interface {
+	GetCoordinates(ctx context.Context, id uuid.UUID) (*Location, error)
+}
+
 type InfoSyncer struct {
-	infoRepo         DeviceInfoRepository
-	paramRepo        DeviceParameterRepository
-	coordinateWriter DeviceCoordinateWriter
-	carrierRegistry  *carrier.CarrierRegistry
-	logger           *zap.Logger
+	infoRepo                DeviceInfoRepository
+	paramRepo               DeviceParameterRepository
+	coordinateWriter        DeviceCoordinateWriter
+	locationObservationRepo LocationObservationRepository
+	carrierRegistry         *carrier.CarrierRegistry
+	logger                  *zap.Logger
 }
 
 // NewInfoSyncer creates a new InfoSyncer.
@@ -660,13 +665,19 @@ func NewInfoSyncer(
 	coordinateWriter DeviceCoordinateWriter,
 	carrierRegistry *carrier.CarrierRegistry,
 	logger *zap.Logger,
+	locationObservationRepos ...LocationObservationRepository,
 ) *InfoSyncer {
+	var locationObservationRepo LocationObservationRepository
+	if len(locationObservationRepos) > 0 {
+		locationObservationRepo = locationObservationRepos[0]
+	}
 	return &InfoSyncer{
-		infoRepo:         infoRepo,
-		paramRepo:        paramRepo,
-		coordinateWriter: coordinateWriter,
-		carrierRegistry:  carrierRegistry,
-		logger:           logger,
+		infoRepo:                infoRepo,
+		paramRepo:               paramRepo,
+		coordinateWriter:        coordinateWriter,
+		locationObservationRepo: locationObservationRepo,
+		carrierRegistry:         carrierRegistry,
+		logger:                  logger,
 	}
 }
 
@@ -777,7 +788,7 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 	// Computed quick-query columns from multiple parameters
 	fields["cell_status"] = CalcCellStatus(paramValues)
 	fields["op_state"] = CalcOpState(paramValues)
-	fields["mme_status"] = CalcMMEStatus(paramValues)
+	fields["mme_status"] = CalcCoreNetworkStatus(paramValues, tech)
 	fields["sync_status"] = CalcSyncStatus(paramValues)
 	fields["rf_status"] = CalcRFStatus(paramValues)
 	fields["gps_status"] = CalcGPSStatus(paramValues)
@@ -786,8 +797,12 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 	fields["ue_count"] = CalcUECount(paramValues)
 
 	// Phase 3 派生字段（设计文档 §4.2 Layer C）：
+	var reportedGPSHeight *float64
 	if v, ok := lookupGPSHeight(paramValues); ok {
 		fields["gps_height"] = v
+		if height, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil && !math.IsNaN(height) && !math.IsInf(height, 0) {
+			reportedGPSHeight = &height
+		}
 	}
 	if eci, ok := fields["eci"].(string); ok {
 		if enb, ok := deriveEnbID(eci); ok {
@@ -805,7 +820,7 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 	aggregateInstanceFields(paramValues, fields)
 	enforceDeviceInfoFieldSizeLimits(fields)
 
-	latitude, longitude, hasCoordinates := lookupGPSCoordinates(paramValues)
+	latitude, longitude, sourcePath, hasCoordinates := LookupGPSCoordinates(paramValues)
 
 	if len(fields) == 0 && !hasCoordinates {
 		return nil, nil
@@ -841,9 +856,34 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 		}
 	}
 
-	if hasCoordinates && s.coordinateWriter != nil {
-		if err := s.coordinateWriter.UpdateCoordinates(ctx, deviceID, latitude, longitude); err != nil {
-			return nil, fmt.Errorf("update device coordinates: %w", err)
+	if hasCoordinates {
+		observation := ReportedLocation{
+			Latitude:   latitude,
+			Longitude:  longitude,
+			GPSHeight:  reportedGPSHeight,
+			ObservedAt: time.Now(),
+			SourcePath: sourcePath,
+		}
+		if s.locationObservationRepo != nil {
+			if err := s.locationObservationRepo.UpsertLatest(ctx, deviceID, observation); err != nil {
+				return nil, fmt.Errorf("update reported GPS coordinates: %w", err)
+			}
+		}
+
+		if s.coordinateWriter != nil {
+			var accepted *Location
+			if reader, ok := s.coordinateWriter.(DeviceCoordinateReader); ok {
+				var err error
+				accepted, err = reader.GetCoordinates(ctx, deviceID)
+				if err != nil {
+					return nil, fmt.Errorf("read accepted device coordinates: %w", err)
+				}
+			}
+			if accepted == nil {
+				if err := s.coordinateWriter.UpdateCoordinates(ctx, deviceID, latitude, longitude); err != nil {
+					return nil, fmt.Errorf("initialize device coordinates: %w", err)
+				}
+			}
 		}
 	}
 

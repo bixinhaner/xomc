@@ -212,6 +212,8 @@ docker compose ... exec -T postgres-tsdb psql -U omcgo -d omcgo -f - < deploymen
 - dev 数据走 Docker 命名卷，落在 Docker 引擎盘（Docker Desktop 下是 VM 盘）。脚本探测盘可用空间，
   < 40 GiB 时告警。Docker Desktop 下宿主读不到 VM 盘真实剩余（显示 0），属预期，请在 Docker
   Desktop 设置里看 Disk image size。
-- **生产**：时序数据量大（混合制式约 150MB/设备/30天，256GB 盘约 1.6k 设备即写满），须把
-  `pgdata/tsdbdata/miniodata` 改 bind-mount 到独立数据盘 + 配保留期/降采样。见容量规划 §4.3 与
-  §5。本地 dev 一般无需改卷路径（改卷会孤立既有数据，慎重）。
+- **生产**：时序数据量大（混合制式约 150MB/设备/30天，256GB 盘约 1.6k 设备即写满），可在
+  `.env` 分别配置 `POSTGRES_DATA_PATH`、`TSDB_DATA_PATH`、`REDIS_DATA_PATH`、
+  `NATS_DATA_PATH`、`MINIO_DATA_PATH`。未配置时仍使用原命名卷；配置绝对路径后切换为
+  bind mount。本地 dev 一般无需修改，生产迁移须停服并用
+  `rsync -aHAX --numeric-ids` 保留属主和扩展属性，详见 release `RESOURCE-PLANNING.md`。

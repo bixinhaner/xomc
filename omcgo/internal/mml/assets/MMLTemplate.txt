@@ -1,24 +1,33 @@
 # MML TXT脚本模板
-# 使用标准 PATH。每条有效行格式：
-# 操作 标准路径[=参数值][,标准路径2=参数值2];设备SN
+# 本文档为 MML TXT 脚本说明和示例。
+# 行首 # 表示注释行，导入时会被忽略；如需执行示例命令，请删除行首 #，并填写正确的参数、值以及设备SN。
+#
+# 默认使用标准 PATH。需要直接下发设备私有 PATH 时，在路径前加 PRIVATE:。
+# 每条有效行格式：
+# 标准 PATH - 操作 路径[=参数值][,路径2=参数值2];设备SN[,设备SN2...]
+# 私有 PATH - 操作 PRIVATE:路径[=参数值][,路径2=参数值2];设备SN[,设备SN2...]
 #
 # 支持操作：
-# LST 查询。操作后填写一个或多个标准参数路径。
+# LST 查询。操作后填写一个或多个标准参数路径；也支持以 . 结尾的对象或前缀路径，设备会返回该对象下的所有参数。
 # MOD 修改。操作后填写一个或多个 标准参数路径=参数值。
 # ADD 新增对象。操作后填写对象表路径；如需在新增对象后配置参数，可在对象路径后追加 :参数名=参数值。
 # RMV 删除对象。操作后填写具体对象实例路径。
 #
 # 规则：
-# 1. 每行只能写一条命令和一个设备SN。
+# 1. 每行只能写一条命令，可以填写一个或多个设备SN；多个设备SN用英文逗号分隔。
 # 2. 同一设备多行命令按文件从上到下顺序执行。
-# 3. 使用标准路径；对象实例索引由用户填写，例如第一个对象为 .1.，第二个对象为 .2.。
-# 4. ADD 使用对象表路径，例如 Device.IP.Interface.1.IPv4Address.；ADD 后的参数名是新对象内的相对参数名。
-# 5. 参数用英文逗号分隔；参数值包含逗号或分号时，可用双引号、单引号或 {} 包裹。
-# 6. 空行和 # 开头的行会被忽略。
-# 7. 单个文件最多 200 台设备、2000 条有效命令、2 MiB。
+# 3. 标准 PATH 会校验标准库是否存在，并在下发前按设备映射转换为私有 PATH。
+# 4. PRIVATE: 表示设备私有 PATH；不会校验标准库，也不会做标准 PATH 到私有 PATH 的转换，按原 PATH 下发。
+# 5. 对象实例索引由用户填写，例如第一个对象为 .1.，第二个对象为 .2.。
+# 6. ADD 使用对象表路径，例如 Device.IP.Interface.1.IPv4Address.；ADD 后的参数名是新对象内的相对参数名。
+# 7. 参数用英文逗号分隔；参数值包含逗号或分号时，可用双引号、单引号或 {} 包裹。
+# 8. 空行和 # 开头的行会被忽略。
+# 9. 单个文件最多 200 台设备、2000 条有效命令、2 MiB。
 #
-# 示例：将 DEVICE_SN 替换为真实基站编码。
-LST Device.DeviceInfo.SoftwareVersion;DEVICE_SN
-MOD Device.ManagementServer.URL=http://localhost:8080/smallcell/AcsService,Device.ManagementServer.Username=acs;DEVICE_SN
-ADD Device.IP.Interface.1.IPv4Address.:IPAddress=192.168.1.10,SubnetMask=255.255.255.0;DEVICE_SN
-RMV Device.IP.Interface.1.IPv4Address.3.;DEVICE_SN
+# 示例命令已注释，不会被导入执行。
+# LST Device.DeviceInfo.SoftwareVersion;DEVICE_SN
+# MOD Device.ManagementServer.URL=http://localhost:8080/smallcell/AcsService,Device.ManagementServer.Username=acs;DEVICE_SN
+# ADD Device.IP.Interface.1.IPv4Address.:IPAddress=192.168.1.10,SubnetMask=255.255.255.0;DEVICE_SN
+# RMV Device.IP.Interface.1.IPv4Address.3.;DEVICE_SN
+# LST PRIVATE:InternetGatewayDevice.DeviceInfo.SoftwareVersion;DEVICE_SN
+# LST Device.DeviceInfo.SoftwareVersion;DEVICE_SN,SECOND_SN

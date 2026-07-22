@@ -1,6 +1,6 @@
 import http from '../http';
 import { generateUid } from '../../utils/uid';
-import type { MMLCommand, MMLScript, MMLTask, MMLTaskCommandDetail, MMLTaskCommandInput, MMLParam, MMLCustomCommand, ParamPath, MMLOperationType, DeviceTaskResultItem, MMLParamRef, MMLTaskResultsStats, MMLPathTranslationView, PathTranslationSource, MMLTaskPlanItem, MMLTaskCreateInput, MMLScriptImportValidation, MMLScriptValidationSummary, MMLScriptIssue, MMLImportedScriptCreateInput, MMLImportedScriptReplaceInput, MMLScriptExecutionInput, MMLScriptImportTemplate } from '../../types/mml';
+import type { MMLCommand, MMLScript, MMLTask, MMLTaskCommandDetail, MMLTaskCommandInput, MMLParam, MMLCustomCommand, MMLCustomCommandPathDef, ParamPath, MMLOperationType, DeviceTaskResultItem, MMLParamRef, MMLTaskResultsStats, MMLPathTranslationView, PathTranslationSource, MMLTaskPlanItem, MMLTaskCreateInput, MMLScriptImportValidation, MMLScriptValidationSummary, MMLScriptIssue, MMLImportedScriptCreateInput, MMLImportedScriptReplaceInput, MMLScriptExecutionInput, MMLScriptImportTemplate } from '../../types/mml';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 import type {
   BackendStatement,
@@ -194,6 +194,7 @@ interface BackendMMLTask {
   success_count: number;
   failed_count: number;
   result: string | null;
+  latest_run?: BackendMMLTaskRun | null;
   // P2/P3 Scheduler fields
   next_trigger_at?: string | null;
   parent_task_id?: string | null;
@@ -209,6 +210,23 @@ interface BackendMMLTask {
   matched_product_id?: string | null;
   matched_product_class?: string | null;
   path_translation_source?: string | null;
+}
+
+interface BackendMMLTaskRun {
+  id: string;
+  execute_type: string;
+  execute_mode?: string | null;
+  status: string;
+  result?: string | null;
+  total_devices?: number;
+  success_count?: number;
+  failed_count?: number;
+  command_count?: number;
+  plan_item_count?: number;
+  started_at?: string | null;
+  finished_at?: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 interface BackendMMLPlanItem {
@@ -274,6 +292,22 @@ interface BackendMMLCustomCommand {
   creator: string;
   created_at: string;
   updated_at: string;
+}
+
+interface BackendMMLCustomCommandPath {
+  id: string;
+  command_id: string;
+  standard_path_id: string;
+  standard_path: string;
+  entry_type: string;
+  access: string;
+  data_type: string;
+  description: string;
+  min_value?: number | null;
+  max_value?: number | null;
+  default_selected: boolean;
+  sort_order: number;
+  mutable: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -607,6 +641,7 @@ function mapBackendResult(br: Record<string, unknown>): DeviceTaskResultItem {
     planOrder: typeof br.plan_order === 'number' ? (br.plan_order as number) : undefined,
     planRawLine: (br.plan_raw_line as string) || undefined,
     commandCode: (br.command_code as string) || undefined,
+    commandName: (br.command_name as string) || undefined,
     operationType: (br.operation_type as string) || undefined,
     deviceName: (br.device_name as string) || undefined,
     mmlScript: (br.mml_script as string) || (br.command as string) || undefined,
@@ -794,6 +829,7 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
     successCount: bt.success_count ?? 0,
     failedCount: bt.failed_count ?? 0,
     result: (bt.result || undefined) as MMLTask['result'],
+    latestRun: mapBackendTaskRun(bt.latest_run),
     // Scheduler fields (P2/P3)
     nextTriggerAt: bt.next_trigger_at || undefined,
     parentTaskId: bt.parent_task_id || undefined,
@@ -812,6 +848,26 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
   };
 }
 
+function mapBackendTaskRun(run?: BackendMMLTaskRun | null): MMLTask['latestRun'] {
+  if (!run) return undefined;
+  return {
+    id: run.id,
+    executeType: (run.execute_type ?? 'immediate') as MMLTask['executeType'],
+    executeMode: (run.execute_mode || 'common') as MMLTask['executeMode'],
+    status: run.status as MMLTask['status'],
+    result: (run.result || undefined) as MMLTask['result'],
+    totalDevices: run.total_devices ?? 0,
+    successCount: run.success_count ?? 0,
+    failedCount: run.failed_count ?? 0,
+    commandCount: run.command_count ?? 0,
+    planItemCount: run.plan_item_count ?? 0,
+    startedAt: run.started_at || undefined,
+    finishedAt: run.finished_at || undefined,
+    createdAt: run.created_at,
+    updatedAt: run.updated_at,
+  };
+}
+
 function mapBackendCustomCommand(bc: BackendMMLCustomCommand): MMLCustomCommand {
   return {
     id: bc.id,
@@ -826,6 +882,26 @@ function mapBackendCustomCommand(bc: BackendMMLCustomCommand): MMLCustomCommand 
     creator: bc.creator,
     createdAt: bc.created_at,
     updatedAt: bc.updated_at,
+  };
+}
+
+function mapBackendCustomCommandPath(
+  path: BackendMMLCustomCommandPath,
+): MMLCustomCommandPathDef {
+  return {
+    id: path.id,
+    commandId: path.command_id,
+    standardPathId: path.standard_path_id,
+    standardPath: path.standard_path,
+    entryType: path.entry_type,
+    access: path.access,
+    dataType: path.data_type,
+    description: path.description,
+    minValue: path.min_value ?? undefined,
+    maxValue: path.max_value ?? undefined,
+    defaultSelected: path.default_selected,
+    sortOrder: path.sort_order,
+    mutable: path.mutable,
   };
 }
 
@@ -1400,6 +1476,7 @@ export const mmlApi = {
       commandCode?: string;
       operationType?: string;
       templateScope?: string;
+      productId?: string;
     } & PageRequest
   ): Promise<PageResponse<MMLCustomCommand>> {
     const query: Record<string, unknown> = {
@@ -1411,6 +1488,7 @@ export const mmlApi = {
     // T-0090-d：后端 handler.go L722 实际读 `command_scope`，本端旧 `template_scope`
     // 与之不一致导致 scope 过滤被静默忽略；按后端契约对齐。
     if (params?.templateScope) query.command_scope = params.templateScope;
+    if (params?.productId) query.product_id = params.productId;
 
     const { data } = await http.get<BackendListResponse<BackendMMLCustomCommand>>(
       '/mml/templates',
@@ -1422,6 +1500,13 @@ export const mmlApi = {
       page: data.page,
       pageSize: data.page_size,
     };
+  },
+
+  async getTemplatePaths(commandId: string): Promise<MMLCustomCommandPathDef[]> {
+    const { data } = await http.get<{ items: BackendMMLCustomCommandPath[] }>(
+      `/mml/templates/${commandId}/paths`,
+    );
+    return (data.items ?? []).map(mapBackendCustomCommandPath);
   },
 
   async createTemplate(
@@ -1478,7 +1563,7 @@ export const mmlApi = {
   // --- T-0123-P2 Console 5 端点 ---
 
   /**
-   * GET /mml/group-tree?root=&lang=&product_class= — 命令分组树。
+   * GET /mml/group-tree?root=&lang=&product_class=&device_sn= — 命令分组树。
    *
    * productClass（T-0172）非空时后端按"该产品族 default param_mappings"过滤命令：
    *   - 命令的 target_paths 至少 1 条在 supported set → 显示
@@ -1487,16 +1572,19 @@ export const mmlApi = {
    *   - 每条返回命令带 supported_path_count / unsupported_paths / product_resolved 注解
    *   - 空 group（含 chapter）被剔除
    *
-   * productClass 缺省 / 空串 → 不做过滤（向后兼容旧调用）。
+   * deviceKey 非空时后端按设备对应 ParamModel 的支持集合过滤，和 sub-fields 使用同一口径。
+   * productClass 缺省 / 空串、deviceKey 缺省 / 空串 → 不做过滤（向后兼容旧调用）。
    */
   async buildGroupTree(
     root?: string,
     lang: string = 'zh-CN',
-    productClass?: string
+    productClass?: string,
+    deviceKey?: string,
   ): Promise<GroupTreeNode[]> {
     const params: Record<string, string> = { lang };
     if (root) params.root = root;
     if (productClass) params.product_class = productClass;
+    if (deviceKey) params.device_sn = deviceKey;
     const { data } = await http.get<{ tree: BackendGroupTreeNode[] } | BackendGroupTreeNode[]>(
       '/mml/group-tree',
       { params }
@@ -1507,7 +1595,7 @@ export const mmlApi = {
   },
 
   /**
-   * Task #9: GET /mml/group-tree?format=flat&lang= — 扁平化命令分组树。
+   * Task #9: GET /mml/group-tree?format=flat&lang=&product_class=&device_sn= — 扁平化命令分组树。
    *
    * 与 buildGroupTree 区别：
    *   - 后端预聚合为「分组 → 命令叶子」两层；不返回 ltree children/sub_fields
@@ -1520,10 +1608,15 @@ export const mmlApi = {
    * 等下划线字段被转 camel，调用方应在消费层做兼容；本层保持透传。
    */
   async buildGroupTreeFlat(
-    lang: string = 'zh-CN'
+    lang: string = 'zh-CN',
+    productClass?: string,
+    deviceKey?: string,
   ): Promise<FlatGroupTreeResponse> {
+    const params: Record<string, string> = { format: 'flat', lang };
+    if (productClass) params.product_class = productClass;
+    if (deviceKey) params.device_sn = deviceKey;
     const { data } = await http.get<FlatGroupTreeResponse>('/mml/group-tree', {
-      params: { format: 'flat', lang },
+      params,
     });
     return {
       groups: Array.isArray(data?.groups) ? data.groups : [],
@@ -1538,8 +1631,8 @@ export const mmlApi = {
    *   2. device_sn / device_id 非空 → 老 T-0170 路径(admin 工具兼容)
    *   3. 都不传 → admin 视图全集
    *
-   * console 前端始终传 productClass(从 productClassFilter dropdown 取),
-   * 让右栏 path 列表行数严格等于命令名 (N)。
+   * 控制台可传 deviceKey 或 productClass；传入后返回的 path 是
+   * 当前 ParamModel 支持集合与当前命令 MML sub-fields 的交集。
    */
   async getCommandSubFields(
     commandId: string,
@@ -1762,6 +1855,7 @@ function mapSubField(s: BackendSubField): SubFieldDef {
     accessType: s.access_type,
     isObject: s.is_object,
     minValue: s.min_value ?? undefined,
+    maxValue: s.max_value ?? undefined,
     supportsAdd: s.supports_add,
     supportsDelete: s.supports_delete,
     changeApplies: s.change_applies,
@@ -1769,6 +1863,8 @@ function mapSubField(s: BackendSubField): SubFieldDef {
     constraintTextI18n: s.constraint_text_i18n ?? {},
     defaultValue: s.default_value || undefined,
     jsRegex: s.js_regex || undefined,
+    validationPattern: s.validation_pattern || undefined,
+    enumOptions: s.enum_options?.length ? s.enum_options : undefined,
     defaultSelected: s.default_selected,
     isRequired: s.is_required,
     sortOrder: s.sort_order,

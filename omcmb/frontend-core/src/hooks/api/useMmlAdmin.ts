@@ -20,6 +20,7 @@ import {
 } from '@tanstack/react-query';
 import { mmlAdminApi } from '../../services/api/mmlAdminApi';
 import { STANDARD_PARAMS_PAGE_SIZE } from './standardParamPages';
+import { MML_CONSOLE_SUB_FIELDS_QUERY_KEY } from './mmlQueryKeys';
 // 纯分页辅助从 standardParamPages 提供，这里 re-export 让消费方（StandardParamSelect /
 // PathPicker）仍从 useMmlAdmin 一处导入。
 export { flattenStandardParamPages, STANDARD_PARAMS_PAGE_SIZE } from './standardParamPages';
@@ -50,6 +51,7 @@ const QK_STANDARD_PARAMS = ['mml', 'admin', 'standard-params'];
 function invalidateAfterWrite(qc: ReturnType<typeof useQueryClient>): void {
   // 写入后失效 console 端的读路径（避免老数据残留）+ admin 端的列表缓存
   void qc.invalidateQueries({ queryKey: QK_GROUP_TREE });
+  void qc.invalidateQueries({ queryKey: MML_CONSOLE_SUB_FIELDS_QUERY_KEY });
   void qc.invalidateQueries({ queryKey: QK_ADMIN_GROUPS });
   void qc.invalidateQueries({ queryKey: QK_ADMIN_COMMANDS });
   void qc.invalidateQueries({ queryKey: QK_ADMIN_SUB_FIELDS });

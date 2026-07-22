@@ -20,10 +20,17 @@ import (
 	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/response"
+	"github.com/omcgo/omcgo/internal/pm/adhoc"
 )
 
 // presignURLTTL 下载签名链接有效期（与备份/快照下载一致，短 TTL）。
 const presignURLTTL = time.Hour
+
+var (
+	errAdhocPermissionCheckerUnavailable = errors.New("adhoc task permission checker not available")
+	errInvalidAdhocExportParams          = errors.New("invalid adhoc export params")
+	errAdhocTaskNotVisible               = errors.New("adhoc task is not visible to current user")
+)
 
 // Presigner 生成对象存储签名 GET 链接的最小契约（便于单测 stub）。
 // 真实实现由 minio.Client（PresignedGetObject）满足。
@@ -38,12 +45,18 @@ type PresignClientProvider interface {
 	Get() *minio.Client
 }
 
+// AdhocTaskReader 是导出创建 adhoc 来源任务时需要的最小可见性检查能力。
+type AdhocTaskReader interface {
+	Get(ctx context.Context, id uuid.UUID) (*adhoc.Task, error)
+}
+
 // Handler 是 KPI 导出的 REST 入口。
 type Handler struct {
 	svc             *Service
 	presigner       Presigner             // 启动期默认；nil 时下载端点返 503
 	presignProvider PresignClientProvider // issue #548 切片 4：sys_configs 热改 endpoint 后下次 Download 即生效
 	objectClient    *minio.Client         // app 内部可达的 MinIO client；默认用于文件管理同源流式下载
+	adhocTasks      AdhocTaskReader       // adhoc 导出需复用任务可见性规则，避免 task_id 旁路私有数据
 	logger          *zap.Logger
 }
 
@@ -72,6 +85,14 @@ func (h *Handler) SetObjectClient(c *minio.Client) {
 	h.objectClient = c
 }
 
+// SetAdhocTaskReader 注入 adhoc 任务读取器，用于校验 source_type=adhoc 的导出权限。
+func (h *Handler) SetAdhocTaskReader(r AdhocTaskReader) {
+	if h == nil {
+		return
+	}
+	h.adhocTasks = r
+}
+
 // currentPresigner 返回当前 Download 该用的 Presigner：优先 provider.Get()、其次 h.presigner。
 func (h *Handler) currentPresigner() Presigner {
 	if h.presignProvider != nil {
@@ -97,7 +118,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 // ── 请求/响应 DTO ─────────────────────────────────────────────────────────
 
 type createRequestDTO struct {
-	SourceType string          `json:"source_type" binding:"required,oneof=dashboard kpi_query adhoc"`
+	SourceType string          `json:"source_type" binding:"required,oneof=dashboard device_view kpi_query adhoc"`
 	Params     json.RawMessage `json:"params"`
 	TaskName   string          `json:"task_name"`
 }
@@ -151,13 +172,26 @@ func (h *Handler) Create(c *gin.Context) {
 	if len(req.Params) > 0 {
 		params = []byte(req.Params)
 	}
-	params, err := withExportLocale(params, appcontext.GetLocale(c.Request.Context()))
+	locale := appcontext.GetLocale(c.Request.Context())
+	params, err := withExportLocale(params, locale)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
+	if requiresDashboardExportLimit(SourceType(req.SourceType)) {
+		if err := validateDashboardExportLimits(params); err != nil {
+			response.Fail(c, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if SourceType(req.SourceType) == SourceAdhoc {
+		if _, err := h.canAccessAdhocExport(c, params); err != nil {
+			h.respondAdhocExportAccessError(c, err)
+			return
+		}
+	}
 	task, err := h.svc.Create(c.Request.Context(), CreateRequest{
-		TaskName:   defaultTaskName(req.TaskName, SourceType(req.SourceType)),
+		TaskName:   defaultTaskName(req.TaskName, SourceType(req.SourceType), locale),
 		SourceType: SourceType(req.SourceType),
 		Params:     params,
 		CreateUser: extractCreateUser(c),
@@ -177,12 +211,93 @@ func (h *Handler) Create(c *gin.Context) {
 	response.OKWithStatus(c, http.StatusCreated, taskToDTO(task))
 }
 
+func requiresDashboardExportLimit(source SourceType) bool {
+	return source == SourceDashboard || source == SourceDeviceView || source == SourceKpiQuery
+}
+
+func (h *Handler) canAccessExportTask(c *gin.Context, task *Task) (bool, error) {
+	if task == nil || task.SourceType != SourceAdhoc {
+		return true, nil
+	}
+	return h.canAccessAdhocExport(c, task.Params)
+}
+
+func (h *Handler) canAccessAdhocExport(c *gin.Context, params []byte) (bool, error) {
+	if h.adhocTasks == nil {
+		return false, errAdhocPermissionCheckerUnavailable
+	}
+	taskID, _, _, err := parseAdhocParams(params)
+	if err != nil {
+		return false, fmt.Errorf("%w: %v", errInvalidAdhocExportParams, err)
+	}
+	task, err := h.adhocTasks.Get(c.Request.Context(), taskID)
+	if err != nil {
+		return false, err
+	}
+	if canExportAdhocTask(c, task) {
+		return true, nil
+	}
+	return false, errAdhocTaskNotVisible
+}
+
+func (h *Handler) respondAdhocExportAccessError(c *gin.Context, err error) {
+	if errors.Is(err, errAdhocPermissionCheckerUnavailable) {
+		response.Fail(c, http.StatusServiceUnavailable, errAdhocPermissionCheckerUnavailable.Error())
+		return
+	}
+	if errors.Is(err, errInvalidAdhocExportParams) {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if errors.Is(err, adhoc.ErrNotFound) {
+		response.Fail(c, http.StatusNotFound, "adhoc task not found")
+		return
+	}
+	if errors.Is(err, errAdhocTaskNotVisible) {
+		response.Fail(c, http.StatusForbidden, errAdhocTaskNotVisible.Error())
+		return
+	}
+	commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+}
+
+func canExportAdhocTask(c *gin.Context, task *adhoc.Task) bool {
+	if task == nil {
+		return false
+	}
+	if task.IsBuiltin || isPMExportAdmin(c) || task.Visibility == adhoc.VisibilityPublic {
+		return true
+	}
+	return task.Creator == extractCreateUser(c)
+}
+
+func isPMExportAdmin(c *gin.Context) bool {
+	if v, ok := c.Get("is_super_admin"); ok {
+		if b, ok := v.(bool); ok && b {
+			return true
+		}
+	}
+	if v, ok := c.Get("roles"); ok {
+		if roles, ok := v.([]string); ok {
+			for _, r := range roles {
+				if r == "admin" || r == "super_admin" {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // List GET /pm/exports — 列导出任务（任务管理 Tab）。
 func (h *Handler) List(c *gin.Context) {
 	filter := h.parseListFilter(c)
 	tasks, err := h.svc.List(c.Request.Context(), filter)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	tasks, ok := h.filterVisibleExportTasks(c, tasks)
+	if !ok {
 		return
 	}
 	response.OK(c, gin.H{"items": tasksToDTO(tasks)})
@@ -197,6 +312,10 @@ func (h *Handler) ListFiles(c *gin.Context) {
 	tasks, err := h.svc.List(c.Request.Context(), filter)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	tasks, ok := h.filterVisibleExportTasks(c, tasks)
+	if !ok {
 		return
 	}
 	response.OK(c, gin.H{"items": tasksToDTO(tasks)})
@@ -220,6 +339,10 @@ func (h *Handler) Download(c *gin.Context) {
 			return
 		}
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if _, err := h.canAccessExportTask(c, task); err != nil {
+		h.respondAdhocExportAccessError(c, err)
 		return
 	}
 	if task.Status != StatusSucceeded || task.FilePath == "" || task.Bucket == "" {
@@ -280,6 +403,19 @@ func (h *Handler) Delete(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "invalid export task id")
 		return
 	}
+	task, err := h.svc.Get(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			response.Fail(c, http.StatusNotFound, "export task not found")
+			return
+		}
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if _, err := h.canAccessExportTask(c, task); err != nil {
+		h.respondAdhocExportAccessError(c, err)
+		return
+	}
 	if err := h.svc.Delete(c.Request.Context(), id); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			response.Fail(c, http.StatusNotFound, "export task not found")
@@ -292,6 +428,26 @@ func (h *Handler) Delete(c *gin.Context) {
 }
 
 // ── helper ────────────────────────────────────────────────────────────────
+
+func (h *Handler) filterVisibleExportTasks(c *gin.Context, tasks []Task) ([]Task, bool) {
+	out := make([]Task, 0, len(tasks))
+	for i := range tasks {
+		allowed, err := h.canAccessExportTask(c, &tasks[i])
+		if err != nil {
+			if errors.Is(err, errAdhocTaskNotVisible) ||
+				errors.Is(err, adhoc.ErrNotFound) ||
+				errors.Is(err, errInvalidAdhocExportParams) {
+				continue
+			}
+			h.respondAdhocExportAccessError(c, err)
+			return nil, false
+		}
+		if allowed {
+			out = append(out, tasks[i])
+		}
+	}
+	return out, true
+}
 
 func (h *Handler) parseListFilter(c *gin.Context) ListFilter {
 	f := ListFilter{Limit: 20}
@@ -366,16 +522,31 @@ func tasksToDTO(tasks []Task) []taskResponseDTO {
 }
 
 // defaultTaskName 任务名缺省自动生成 KPI导出_{来源}_{时间戳}。
-func defaultTaskName(name string, source SourceType) string {
+func defaultTaskName(name string, source SourceType, locale appcontext.Locale) string {
 	if name != "" {
 		return name
 	}
+	if locale == appcontext.LocaleEN {
+		label := "Dashboard"
+		if source == SourceDeviceView {
+			label = "Device_Performance_View"
+		} else if source == SourceKpiQuery {
+			label = "KPI_Query"
+		} else if source == SourceAdhoc {
+			label = "Result"
+		}
+		return "KPI_Export_" + label + "_" + time.Now().Format("20060102_150405")
+	}
+
 	label := "仪表盘"
-	if source == SourceKpiQuery {
+	if source == SourceDeviceView {
+		label = "设备性能查看"
+	} else if source == SourceKpiQuery {
 		label = "指标查询"
 	} else if source == SourceAdhoc {
 		label = "任务结果"
 	}
+
 	return "KPI导出_" + label + "_" + time.Now().Format("20060102_150405")
 }
 

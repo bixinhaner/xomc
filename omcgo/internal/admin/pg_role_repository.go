@@ -25,8 +25,19 @@ var roleColumns = []string{
 
 // PgRoleRepository implements RoleRepository using PostgreSQL.
 type PgRoleRepository struct {
-	pool       *pgxpool.Pool
-	authorizer *CasbinAuthorizer // optional: set via SetAuthorizer
+	pool            storage.DB
+	authorizer      apiPermissionChecker // optional: set via SetAuthorizer
+	policyRefresher PolicyRefresher      // optional: set via SetAuthorizer
+}
+
+// PolicyRefresher updates the local Casbin policy and then notifies peer instances.
+type PolicyRefresher interface {
+	ReloadPolicy() error
+	NotifyPolicyChange() error
+}
+
+type apiPermissionChecker interface {
+	CheckPermission(context.Context, uuid.UUID, string, string) (bool, error)
 }
 
 var (
@@ -36,12 +47,26 @@ var (
 
 // NewPgRoleRepository creates a new PgRoleRepository.
 func NewPgRoleRepository(pool *pgxpool.Pool) *PgRoleRepository {
-	return &PgRoleRepository{pool: pool}
+	return &PgRoleRepository{pool: storage.NewPoolDB(pool)}
 }
 
 // SetAuthorizer sets the Casbin authorizer for in-memory permission checks.
 func (r *PgRoleRepository) SetAuthorizer(auth *CasbinAuthorizer) {
 	r.authorizer = auth
+	r.policyRefresher = auth
+}
+
+func (r *PgRoleRepository) refreshPolicyAfterPersist() error {
+	if r.policyRefresher == nil {
+		return nil
+	}
+	if err := r.policyRefresher.ReloadPolicy(); err != nil {
+		return fmt.Errorf("policy data persisted but reload current policy: %w", err)
+	}
+	if err := r.policyRefresher.NotifyPolicyChange(); err != nil {
+		return fmt.Errorf("policy data persisted and local policy reloaded but notify peers: %w", err)
+	}
+	return nil
 }
 
 func (r *PgRoleRepository) Create(ctx context.Context, role *Role) error {
@@ -407,10 +432,7 @@ func (r *PgRoleRepository) AssignRole(ctx context.Context, userID, roleID uuid.U
 		return fmt.Errorf("assign role: %w", err)
 	}
 
-	if r.authorizer != nil {
-		_ = r.authorizer.NotifyPolicyChange()
-	}
-	return nil
+	return r.refreshPolicyAfterPersist()
 }
 
 func (r *PgRoleRepository) RemoveRole(ctx context.Context, userID, roleID uuid.UUID) error {
@@ -429,10 +451,7 @@ func (r *PgRoleRepository) RemoveRole(ctx context.Context, userID, roleID uuid.U
 		return commonerrors.ErrNotFound
 	}
 
-	if r.authorizer != nil {
-		_ = r.authorizer.NotifyPolicyChange()
-	}
-	return nil
+	return r.refreshPolicyAfterPersist()
 }
 
 func (r *PgRoleRepository) GetDefaultRoleID(ctx context.Context, userID uuid.UUID) (*uuid.UUID, error) {
@@ -721,36 +740,6 @@ func (r *PgRoleRepository) SetDeviceGroupData(ctx context.Context, roleID uuid.U
 	return tx.Commit(ctx)
 }
 
-// GetRoleApiEndpoints returns (path, method) pairs for the given role names.
-func (r *PgRoleRepository) GetRoleApiEndpoints(ctx context.Context, roleNames []string) ([]RoleApiEndpoint, error) {
-	if len(roleNames) == 0 {
-		return nil, nil
-	}
-
-	const rawSQL = `
-		SELECT ae.path, ae.method
-		FROM role_api_permissions rap
-		JOIN api_endpoints ae ON ae.id = rap.endpoint_id
-		JOIN roles r ON r.id = rap.role_id
-		WHERE r.name = ANY($1)`
-
-	rows, err := r.pool.Query(ctx, rawSQL, roleNames)
-	if err != nil {
-		return nil, fmt.Errorf("get role api endpoints: %w", err)
-	}
-	defer rows.Close()
-
-	var endpoints []RoleApiEndpoint
-	for rows.Next() {
-		var ep RoleApiEndpoint
-		if err := rows.Scan(&ep.Path, &ep.Method); err != nil {
-			return nil, fmt.Errorf("scan role api endpoint: %w", err)
-		}
-		endpoints = append(endpoints, ep)
-	}
-	return endpoints, rows.Err()
-}
-
 // GetRoleApiEndpointIDs returns endpoint IDs granted to a role.
 func (r *PgRoleRepository) GetRoleApiEndpointIDs(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error) {
 	rows, err := r.pool.Query(ctx,
@@ -795,7 +784,10 @@ func (r *PgRoleRepository) SetRoleApiEndpoints(ctx context.Context, roleID uuid.
 		}
 	}
 
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit role api permissions: %w", err)
+	}
+	return r.refreshPolicyAfterPersist()
 }
 
 func (r *PgRoleRepository) GetUserVisibleGroupIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {

@@ -113,11 +113,12 @@ const (
 	ResultCodeResultProcessingFailed ResultCode = "RESULT_PROCESSING_FAILED"
 	ResultCodeDeadlineExceeded       ResultCode = "DEADLINE_EXCEEDED"
 	ResultCodeAutomaticBackoff       ResultCode = "AUTOMATIC_BACKOFF"
+	ResultCodeAutomaticBackpressure  ResultCode = "AUTOMATIC_BACKPRESSURE"
 )
 
 func (r TriggerReason) Automatic() bool {
 	switch r {
-	case TriggerDeviceOnline, TriggerPeriodic, TriggerFirmwareChanged:
+	case TriggerModelUpload, TriggerDeviceOnline, TriggerPeriodic, TriggerFirmwareChanged:
 		return true
 	default:
 		return false
@@ -125,28 +126,36 @@ func (r TriggerReason) Automatic() bool {
 }
 
 type SyncRequest struct {
-	ID             uuid.UUID       `json:"id"`
-	DeviceID       uuid.UUID       `json:"device_id"`
-	DeviceSN       string          `json:"device_sn"`
-	CallerType     string          `json:"caller_type"`
-	TriggerReason  TriggerReason   `json:"trigger_reason"`
-	SyncScope      SyncScope       `json:"sync_scope"`
-	RequestedPaths []string        `json:"requested_paths"`
-	Status         RequestStatus   `json:"status"`
-	RunID          *uuid.UUID      `json:"run_id,omitempty"`
-	ActiveRunID    *uuid.UUID      `json:"active_run_id,omitempty"`
-	Priority       int             `json:"priority"`
-	NextAttemptAt  time.Time       `json:"next_attempt_at"`
-	DeadlineAt     *time.Time      `json:"deadline_at,omitempty"`
-	IdempotencyKey *string         `json:"idempotency_key,omitempty"`
-	ResultCode     ResultCode      `json:"result_code,omitempty"`
-	ResultSummary  json.RawMessage `json:"result_summary,omitempty"`
-	ErrorMessage   string          `json:"error_message,omitempty"`
-	CampaignID     *uuid.UUID      `json:"campaign_id,omitempty"`
-	CreatedAt      time.Time       `json:"created_at"`
-	StartedAt      *time.Time      `json:"started_at,omitempty"`
-	CompletedAt    *time.Time      `json:"completed_at,omitempty"`
-	UpdatedAt      time.Time       `json:"updated_at"`
+	ID                      uuid.UUID       `json:"id"`
+	DeviceID                uuid.UUID       `json:"device_id"`
+	DeviceSN                string          `json:"device_sn"`
+	CallerType              string          `json:"caller_type"`
+	TriggerReason           TriggerReason   `json:"trigger_reason"`
+	SyncScope               SyncScope       `json:"sync_scope"`
+	RequestedPaths          []string        `json:"requested_paths"`
+	Status                  RequestStatus   `json:"status"`
+	RunID                   *uuid.UUID      `json:"run_id,omitempty"`
+	ActiveRunID             *uuid.UUID      `json:"active_run_id,omitempty"`
+	Priority                int             `json:"priority"`
+	NextAttemptAt           time.Time       `json:"next_attempt_at"`
+	DeadlineAt              *time.Time      `json:"deadline_at,omitempty"`
+	IdempotencyKey          *string         `json:"idempotency_key,omitempty"`
+	ResultCode              ResultCode      `json:"result_code,omitempty"`
+	ResultSummary           json.RawMessage `json:"result_summary,omitempty"`
+	ErrorMessage            string          `json:"error_message,omitempty"`
+	CampaignID              *uuid.UUID      `json:"campaign_id,omitempty"`
+	SourceEventID           *string         `json:"source_event_id,omitempty"`
+	OriginEventType         *string         `json:"origin_event_type,omitempty"`
+	ModelUploadIntentID     *uuid.UUID      `json:"model_upload_intent_id,omitempty"`
+	ModelUploadStatus       *string         `json:"model_upload_status,omitempty"`
+	AdmissionClass          *string         `json:"admission_class,omitempty"`
+	AdmissionReason         string          `json:"admission_reason,omitempty"`
+	AdmissionSnapshot       json.RawMessage `json:"admission_snapshot,omitempty"`
+	DeduplicatedToRequestID *uuid.UUID      `json:"deduplicated_to_request_id,omitempty"`
+	CreatedAt               time.Time       `json:"created_at"`
+	StartedAt               *time.Time      `json:"started_at,omitempty"`
+	CompletedAt             *time.Time      `json:"completed_at,omitempty"`
+	UpdatedAt               time.Time       `json:"updated_at"`
 }
 
 type SyncRun struct {
@@ -198,15 +207,19 @@ type StartResult struct {
 }
 
 type SubmitCommand struct {
-	DeviceID       uuid.UUID
-	DeviceSN       string
-	CallerType     string
-	TriggerReason  TriggerReason
-	Scope          SyncScope
-	RequestedPaths []string
-	Priority       int
-	DeadlineAt     *time.Time
-	IdempotencyKey string
+	DeviceID            uuid.UUID
+	DeviceSN            string
+	CallerType          string
+	TriggerReason       TriggerReason
+	Scope               SyncScope
+	RequestedPaths      []string
+	Priority            int
+	DeadlineAt          *time.Time
+	IdempotencyKey      string
+	SourceEventID       string
+	OriginEventType     string
+	ModelUploadIntentID *uuid.UUID
+	ModelUploadStatus   string
 }
 
 type SubmitResult struct {

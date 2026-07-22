@@ -2,13 +2,17 @@ package alarm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
+
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 )
 
 const (
@@ -73,8 +77,31 @@ func (s *HistoryRetentionService) ReloadAndApply(ctx context.Context) error {
 		)
 	}
 
+	return s.applyDays(ctx, days, false)
+}
+
+func (s *HistoryRetentionService) OnSysConfigSaved(ctx context.Context, category string) {
+	if err := s.ApplyForSysConfigCategory(ctx, category); err != nil {
+		s.logger.Warn("reload alarm history retention failed", zap.Error(err))
+	}
+}
+
+// ApplyForSysConfigCategory 将 storage 分类的保存同步到告警历史保留策略。
+// 它返回应用错误，供配置应用编排器记录和重试；保留 OnSysConfigSaved 以兼容旧的缓存 hook。
+func (s *HistoryRetentionService) ApplyForSysConfigCategory(ctx context.Context, category string) error {
+	if category != HistoryRetentionCategory {
+		return nil
+	}
+	days, err := s.resolveDays(ctx)
+	if err != nil {
+		return fmt.Errorf("resolve alarm history retention: %w", err)
+	}
+	return s.applyDays(ctx, days, true)
+}
+
+func (s *HistoryRetentionService) applyDays(ctx context.Context, days int, force bool) error {
 	s.mu.RLock()
-	if s.initialized && s.currentDays == days {
+	if !force && s.initialized && s.currentDays == days {
 		s.mu.RUnlock()
 		return nil
 	}
@@ -93,18 +120,12 @@ func (s *HistoryRetentionService) ReloadAndApply(ctx context.Context) error {
 	return nil
 }
 
-func (s *HistoryRetentionService) OnSysConfigSaved(ctx context.Context, category string) {
-	if category != HistoryRetentionCategory {
-		return
-	}
-	if err := s.ReloadAndApply(ctx); err != nil {
-		s.logger.Warn("reload alarm history retention failed", zap.Error(err))
-	}
-}
-
 func (s *HistoryRetentionService) resolveDays(ctx context.Context) (int, error) {
 	row, err := s.reader.GetByKey(ctx, HistoryRetentionCategory, HistoryRetentionKey)
 	if err != nil {
+		if errors.Is(err, commonerrors.ErrNotFound) {
+			return DefaultHistoryRetentionDays, nil
+		}
 		return DefaultHistoryRetentionDays, fmt.Errorf("read sys_configs (%s,%s): %w", HistoryRetentionCategory, HistoryRetentionKey, err)
 	}
 	if row == nil {
@@ -124,13 +145,42 @@ func (s *HistoryRetentionService) resolveDays(ctx context.Context) (int, error) 
 	return days, nil
 }
 
+type historyRetentionDB interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	BeginTx(ctx context.Context, txOptions pgx.TxOptions) (pgx.Tx, error)
+}
+
+type historyRetentionPolicyQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 type TimescaleHistoryRetentionApplier struct {
-	pool *pgxpool.Pool
+	pool historyRetentionDB
 }
 
 func NewTimescaleHistoryRetentionApplier(pool *pgxpool.Pool) *TimescaleHistoryRetentionApplier {
+	if pool == nil {
+		return &TimescaleHistoryRetentionApplier{}
+	}
 	return &TimescaleHistoryRetentionApplier{pool: pool}
 }
+
+const addAlarmHistoryRetentionPolicySQL = `
+SELECT add_retention_policy(
+    'alarms_history',
+    drop_after => $1::interval,
+    schedule_interval => INTERVAL '1 day',
+    initial_start => TIMESTAMPTZ '2000-01-01 01:08:00+08',
+    timezone => 'Asia/Shanghai'
+)`
+
+const alarmHistoryRetentionPolicyDropAfterSQL = `
+SELECT COALESCE(config ->> 'drop_after', '')
+FROM timescaledb_information.jobs
+WHERE proc_name = 'policy_retention'
+  AND hypertable_schema = 'public'
+  AND hypertable_name = 'alarms_history'`
 
 func (a *TimescaleHistoryRetentionApplier) Apply(ctx context.Context, days int) error {
 	if err := validateHistoryRetentionDays(days); err != nil {
@@ -149,14 +199,53 @@ func (a *TimescaleHistoryRetentionApplier) Apply(ctx context.Context, days int) 
 		return fmt.Errorf("check timescaledb extension: %w", err)
 	}
 
-	if _, err := a.pool.Exec(ctx, "SELECT remove_retention_policy('alarms_history', if_exists => TRUE)"); err != nil {
+	tx, err := a.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin alarms_history retention policy transaction: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	_, _, err = alarmHistoryRetentionPolicyDropAfter(ctx, tx)
+	if err != nil {
+		return fmt.Errorf("read existing alarms_history retention policy: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, "SELECT remove_retention_policy('alarms_history', if_exists => TRUE)"); err != nil {
 		return fmt.Errorf("remove alarms_history retention policy: %w", err)
 	}
 	interval := fmt.Sprintf("%d days", days)
-	if _, err := a.pool.Exec(ctx, "SELECT add_retention_policy('alarms_history', $1::interval, if_not_exists => TRUE)", interval); err != nil {
+	if _, err := tx.Exec(ctx, addAlarmHistoryRetentionPolicySQL, interval); err != nil {
 		return fmt.Errorf("add alarms_history retention policy: %w", err)
 	}
+	actualDropAfter, policyExists, err := alarmHistoryRetentionPolicyDropAfter(ctx, tx)
+	if err != nil {
+		return fmt.Errorf("post-check alarms_history retention policy: %w", err)
+	}
+	if !policyExists || actualDropAfter != interval {
+		return fmt.Errorf("post-check alarms_history retention policy: expected drop_after %q, got %q", interval, actualDropAfter)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit alarms_history retention policy transaction: %w", err)
+	}
+	committed = true
 	return nil
+}
+
+func alarmHistoryRetentionPolicyDropAfter(ctx context.Context, q historyRetentionPolicyQuerier) (string, bool, error) {
+	var dropAfter string
+	err := q.QueryRow(ctx, alarmHistoryRetentionPolicyDropAfterSQL).Scan(&dropAfter)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return dropAfter, true, nil
 }
 
 func validateHistoryRetentionDays(days int) error {

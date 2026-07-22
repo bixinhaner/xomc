@@ -65,3 +65,29 @@ func TestChapterSortKey(t *testing.T) {
 	// 空 chapter：高位 sentinel，排末位
 	assert.Equal(t, "~~~~~", chapterSortKey(""))
 }
+
+func TestSortCommandsByLogicalCode_SectionThenOperation(t *testing.T) {
+	cmds := []GroupTreeCommand{
+		{CommandCode: "RMV PLMN_LIST", LogicalCode: "PLMN_LIST", OperationType: "RMV"},
+		{CommandCode: "LST SECURITY_GATEWAY", LogicalCode: "SECURITY_GATEWAY", OperationType: "LST"},
+		{CommandCode: "MOD PLMN_LIST", LogicalCode: "PLMN_LIST", OperationType: "MOD"},
+		{CommandCode: "ADD PLMN_LIST", LogicalCode: "PLMN_LIST", OperationType: "ADD"},
+		{CommandCode: "LST PLMN_LIST", LogicalCode: "PLMN_LIST", OperationType: "LST"},
+		{CommandCode: "MOD SECURITY_GATEWAY", LogicalCode: "SECURITY_GATEWAY", OperationType: "MOD"},
+	}
+
+	sortCommandsByLogicalCode(cmds)
+
+	got := make([]string, len(cmds))
+	for i, cmd := range cmds {
+		got[i] = cmd.CommandCode
+	}
+	assert.Equal(t, []string{
+		"LST PLMN_LIST",
+		"MOD PLMN_LIST",
+		"ADD PLMN_LIST",
+		"RMV PLMN_LIST",
+		"LST SECURITY_GATEWAY",
+		"MOD SECURITY_GATEWAY",
+	}, got)
+}

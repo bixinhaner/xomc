@@ -1,6 +1,7 @@
 package paramsync
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -58,4 +59,10 @@ func TestApplyAuthoritativeRunCountsDoesNotDoubleCountReconciledTerminalTask(t *
 	assert.Equal(t, 1, run.TerminalTaskCount)
 	assert.Equal(t, 1, run.ProcessedTaskCount)
 	assert.Equal(t, 1, run.FailedTaskCount)
+}
+
+func TestRecoverMissingResultsWithoutProcessorOrBusReturnsError(t *testing.T) {
+	_, err := NewReconciler(nil, nil, nil).RecoverMissingResults(context.Background(), 20, 200, 200)
+
+	require.ErrorContains(t, err, "requires result processor or event bus")
 }

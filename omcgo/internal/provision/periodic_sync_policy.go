@@ -25,7 +25,8 @@ type SysConfigLookup func(ctx context.Context, category, key string) (value stri
 // FE 表单字段映射（pages/system/SystemConfig/DeviceSettings.tsx）：
 //
 //	periodicSyncEnabled              bool   总开关
-//	periodicSyncIntervalHours        int    扫描周期（小时）
+//	periodicSyncIntervalMinutes      int    扫描周期（分钟）
+//	periodicSyncIntervalHours        int    扫描周期（小时，旧字段，兼容读取）
 //	periodicSyncBatchSize            int    单轮最多挑多少台设备
 //	periodicSyncMaxConcurrent        int    入队并发度
 //	periodicSyncStaggerWindowMinutes int    打散窗口（分钟，0=关）
@@ -114,7 +115,11 @@ func (p *PeriodicSyncPolicy) loadFromSysConfig(ctx context.Context, s *PeriodicS
 			s.Enabled = b
 		}
 	}
-	if v, ok := p.lookup(ctx, cat, "periodicSyncIntervalHours"); ok {
+	if v, ok := p.lookup(ctx, cat, "periodicSyncIntervalMinutes"); ok {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			s.Interval = time.Duration(n) * time.Minute
+		}
+	} else if v, ok := p.lookup(ctx, cat, "periodicSyncIntervalHours"); ok {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			s.Interval = time.Duration(n) * time.Hour
 		}

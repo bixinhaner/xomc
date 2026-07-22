@@ -2,13 +2,13 @@ import { useMemo, useState } from 'react';
 import {
   Alert,
   Button,
-  Checkbox,
   Divider,
   Empty,
   Input,
   InputNumber,
   Modal,
   Radio,
+  Select,
   Space,
   Tabs,
   Tag,
@@ -17,12 +17,28 @@ import {
 } from 'antd';
 import { PlayCircleOutlined, RightOutlined } from '@ant-design/icons';
 import { InputAddon } from '@/components/common/InputAddon';
-import type { CommandItem, ExecMode, ExecRequest, OperationMode, RawPathPayload } from '../types';
+import type {
+  CommandItem,
+  CommandParamPath,
+  ExecMode,
+  ExecRequest,
+  OperationMode,
+  RawPathPayload,
+} from '../types';
 import { CONFIG_TAB_HEIGHT, isReadOp, opColor, opLabel } from '../constants';
 import RawPathPanel from './RawPathPanel';
 import { newRawPathRow } from '../rawPathRow';
 import { validateRawPath } from '../rawPathValidate';
-import { computeInstanceSlots, resolveObjectPath } from '../adapters';
+import {
+  buildDefaultInstanceSelectors,
+  computeInstanceSlots,
+  resolveObjectPath,
+} from '../adapters';
+import {
+  commandUsesPathSelection,
+  getOrderedSelectedCommandPaths,
+} from '../pathSelection';
+import { getModParamValidationErrors } from '../modParamValidation';
 import { useT } from '@/hooks/useT';
 import { usePermission } from '@core/hooks/usePermission';
 
@@ -35,9 +51,51 @@ const WRITE_REMINDER_KEYS: Record<string, string> = {
   MOD: 'mml.consoleV2.config.writeReminder.mod',
 };
 
+const BOOLEAN_OPTIONS = [
+  { label: 'true', value: 'true' },
+  { label: 'false', value: 'false' },
+];
+
+const PARAM_CONTROL_STYLE = {
+  width: '100%',
+  marginTop: 6,
+};
+
+const INPUT_CONTROL_STYLE = {
+  ...PARAM_CONTROL_STYLE,
+  display: 'block',
+};
+
+function isBooleanValueType(valueType?: string): boolean {
+  const normalized = valueType?.trim().toLowerCase();
+  return normalized === 'boolean' || normalized === 'bool';
+}
+
+function normalizeBooleanValue(value: unknown): 'true' | 'false' | undefined {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1') return 'true';
+  if (normalized === 'false' || normalized === '0') return 'false';
+  return undefined;
+}
+
+function paramModelKey(path: CommandParamPath): string {
+  return [
+    path.path,
+    path.writable,
+    path.isObject,
+    path.minValue ?? '',
+    path.maxValue ?? '',
+    path.valueType ?? '',
+    path.defaultValue ?? '',
+    path.validationPattern ?? '',
+    JSON.stringify(path.enumOptions ?? []),
+  ].join('\u001f');
+}
+
 interface ConfigParamsModalProps {
   open: boolean;
   command: CommandItem | null;
+  selectedPathKeys: string[];
   deviceCount: number;
   /** 打开时初始激活的标签：'standard'(命令参数) / 'raw'(指定参数)。默认 'standard'。 */
   initialMode?: OperationMode;
@@ -59,6 +117,7 @@ interface ConfigParamsModalProps {
 export default function ConfigParamsModal({
   open,
   command,
+  selectedPathKeys,
   deviceCount,
   initialMode,
   onGotoCommand,
@@ -72,15 +131,32 @@ export default function ConfigParamsModal({
   const [wasOpen, setWasOpen] = useState(false);
 
   const read = isReadOp(command?.operationType);
+  const usesPathSelection = commandUsesPathSelection(command?.operationType);
+  const selectedParamPaths = useMemo(
+    () => getOrderedSelectedCommandPaths(command?.paramPaths ?? [], selectedPathKeys),
+    [command, selectedPathKeys],
+  );
+  const standardParamPaths = useMemo(
+    () => (usesPathSelection ? selectedParamPaths : (command?.paramPaths ?? [])),
+    [command, selectedParamPaths, usesPathSelection],
+  );
+  const scopedCommand = useMemo(
+    () => (command && usesPathSelection ? { ...command, paramPaths: standardParamPaths } : command),
+    [command, standardParamPaths, usesPathSelection],
+  );
   const [checkedPaths, setCheckedPaths] = useState<string[]>([]);
   const [values, setValues] = useState<Record<string, string>>({});
+  const [showModValidationErrors, setShowModValidationErrors] = useState(false);
   const [instance, setInstance] = useState<number>(1);
   // 父级 `.{i}.` 实例选择器（key=i01/i02…），默认每个 1。
   const [instanceSelectors, setInstanceSelectors] = useState<Record<string, string>>({});
-  const [lastCmdId, setLastCmdId] = useState<string | null>(null);
+  const [lastConfigKey, setLastConfigKey] = useState('');
 
   // 需要用户填写的实例占位符槽位（ADD/RMV 看 targetObject，LST/MOD 看 paramPaths）。
-  const instanceSlots = useMemo(() => (command ? computeInstanceSlots(command) : []), [command]);
+  const instanceSlots = useMemo(
+    () => (scopedCommand ? computeInstanceSlots(scopedCommand) : []),
+    [scopedCommand],
+  );
 
   // 每次打开时按 initialMode 切换激活标签（渲染阶段调整 state，避开 set-state-in-effect）。
   // 「指定参数」快捷入口打开时 initialMode='raw'，直接落到裸路径标签。
@@ -96,39 +172,47 @@ export default function ConfigParamsModal({
 
   const [execMode, setExecMode] = useState<ExecMode>('whole');
 
-  // 命令变更时重置标准模式参数(渲染阶段按 command.id 调整,避开 set-state-in-effect)。
-  const cmdId = command?.id ?? null;
-  if (cmdId !== lastCmdId) {
-    setLastCmdId(cmdId);
+  // 命令或其确认的 PATH 变更时重置标准模式参数（渲染阶段调整，避开 set-state-in-effect）。
+  const configKey = command
+    ? `${command.id}:${command.operationType}:${standardParamPaths.map(paramModelKey).join('\u0000')}`
+    : '';
+  if (configKey !== lastConfigKey) {
+    setLastConfigKey(configKey);
+    setShowModValidationErrors(false);
     if (!command) {
       setCheckedPaths([]);
       setValues({});
       setInstanceSelectors({});
     } else {
       if (isReadOp(command.operationType)) {
-        setCheckedPaths(command.paramPaths.map((p) => p.path));
+        setCheckedPaths(standardParamPaths.map((p) => p.path));
       } else {
-        setCheckedPaths(command.paramPaths.filter((p) => p.writable).map((p) => p.path));
+        setCheckedPaths(standardParamPaths.filter((p) => p.writable).map((p) => p.path));
       }
       // MOD/ADD 标量参数「值」默认取 standard_params.min_value（值默认 min_value）。
       const initVals: Record<string, string> = {};
       if (!isReadOp(command.operationType)) {
-        command.paramPaths.forEach((p) => {
-          if (p.writable && p.minValue != null) initVals[p.path] = String(p.minValue);
+        standardParamPaths.forEach((p) => {
+          if (!p.writable) return;
+          if (isBooleanValueType(p.valueType)) {
+            initVals[p.path] = normalizeBooleanValue(p.defaultValue)
+              ?? normalizeBooleanValue(p.minValue)
+              ?? 'false';
+          } else if (p.defaultValue != null && p.defaultValue !== '') {
+            initVals[p.path] = p.defaultValue;
+          } else if (p.minValue != null) {
+            initVals[p.path] = String(p.minValue);
+          }
         });
       }
       setValues(initVals);
-      // 父级 `.{i}.` 实例选择器默认每个 1（实例默认 1）。
-      const initSel: Record<string, string> = {};
-      computeInstanceSlots(command).forEach((s) => {
-        initSel[s.key] = '1';
-      });
-      setInstanceSelectors(initSel);
+      const slots = computeInstanceSlots(scopedCommand ?? command);
+      setInstanceSelectors(buildDefaultInstanceSelectors(slots, command.operationType));
     }
     setInstance(1);
   }
 
-  const writablePaths = command?.paramPaths.filter((p) => p.writable) ?? [];
+  const writablePaths = standardParamPaths.filter((p) => p.writable);
   const suggestions = useMemo(
     () =>
       command?.paramPaths.map((p) => ({
@@ -148,6 +232,12 @@ export default function ConfigParamsModal({
   const rawAllValid = rawPayload.rows.every(
     (r) => validateRawPath(rawPayload.operationType, r.path) === null,
   );
+  const modValidationErrors = useMemo(
+    () => command?.operationType === 'MOD'
+      ? getModParamValidationErrors(writablePaths, values)
+      : {},
+    [command?.operationType, values, writablePaths],
+  );
 
   // 写类操作各自的提醒文案（取代原「写操作将对所有已选设备生效」通用提示，§需求 3）。
   const writeReminderKey = currentOp ? WRITE_REMINDER_KEYS[currentOp] : undefined;
@@ -159,8 +249,15 @@ export default function ConfigParamsModal({
   const isAddRmvCmd = command?.operationType === 'ADD' || command?.operationType === 'RMV';
   const standardValid =
     !!command &&
-    (isAddRmvCmd ? !!(command.targetObject && command.targetObject.trim()) : checkedPaths.length > 0);
+    (isAddRmvCmd
+      ? !!(command.targetObject && command.targetObject.trim())
+      : checkedPaths.length > 0);
   const valid = mode === 'standard' ? standardValid : rawHasPath && rawAllValid;
+
+  const checkedPathSet = new Set(checkedPaths);
+  const selectedValues = Object.fromEntries(
+    Object.entries(values).filter(([path]) => checkedPathSet.has(path)),
+  );
 
   const buildRequest = (): ExecRequest =>
     mode === 'standard'
@@ -168,11 +265,11 @@ export default function ConfigParamsModal({
           mode: 'standard',
           checkedPaths,
           execMode: effectiveExecMode,
-          // 父级 `.{i}.` 实例选择器（默认 1）。
+          // 父级 `.{i}.` 实例选择器：查询类允许留空，写类默认 1。
           ...(instanceSlots.length > 0 ? { instanceSelectors } : {}),
           // MOD/ADD 携带写入值；RMV 携带实例号。LST 两者均不消费。
           ...(command && !isReadOp(command.operationType) && command.operationType !== 'RMV'
-            ? { values }
+            ? { values: selectedValues }
             : {}),
           ...(command?.operationType === 'RMV' ? { instance } : {}),
         }
@@ -182,6 +279,14 @@ export default function ConfigParamsModal({
           rows: rawPayload.rows,
           execMode: effectiveExecMode,
         };
+
+  const handleConfirmAndExecute = () => {
+    if (command?.operationType === 'MOD' && Object.keys(modValidationErrors).length > 0) {
+      setShowModValidationErrors(true);
+      return;
+    }
+    onConfirmAndExecute(buildRequest());
+  };
 
   const standardBody = !command ? (
     <Empty
@@ -204,19 +309,8 @@ export default function ConfigParamsModal({
   ) : (
     <Space orientation="vertical" size={16} style={{ width: '100%' }}>
       <div>
-        {/* 统一头部（所有操作类型同一布局，参考 LST）：全选(仅读类) + 操作类型 + 命令名称 + 操作提示。 */}
+        {/* 统一头部（所有操作类型同一布局，参考 LST）：操作类型 + 命令名称 + 操作提示。 */}
         <Space size={8} wrap style={{ width: '100%' }}>
-          {read && (
-            <Checkbox
-              indeterminate={checkedPaths.length > 0 && checkedPaths.length < command.paramPaths.length}
-              checked={command.paramPaths.length > 0 && checkedPaths.length === command.paramPaths.length}
-              onChange={(e) =>
-                setCheckedPaths(e.target.checked ? command.paramPaths.map((p) => p.path) : [])
-              }
-            >
-              {t('mml.consoleV2.config.selectAll')}
-            </Checkbox>
-          )}
           <Tag color={opColor(command.operationType)} style={{ marginInlineEnd: 0 }}>
             {command.operationType} · {opLabel(command.operationType)}
           </Tag>
@@ -227,13 +321,13 @@ export default function ConfigParamsModal({
               ({checkedPaths.length})
             </Text>
           </Text>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            {read
-              ? t('mml.consoleV2.config.hintRead')
-              : command.operationType === 'RMV'
+          {!read && (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {command.operationType === 'RMV'
                 ? t('mml.consoleV2.config.hintRmv')
                 : t('mml.consoleV2.config.hintWrite')}
-          </Text>
+            </Text>
+          )}
         </Space>
 
         {/* §需求 2：ADD/RMV 无参数 PATH，展示执行 RPC 的「目标对象路径」（{i} 由下方实例号实时替换）。 */}
@@ -256,49 +350,68 @@ export default function ConfigParamsModal({
           </div>
         )}
 
-        {/* 父级 `.{i}.` 实例选择器：对象实例默认 1，按路径中占位符个数渲染。 */}
+        {/* 父级 `.{i}.` 实例选择器：查询前层默认 1、最后一层留空；写类默认 1。 */}
         {instanceSlots.length > 0 && (
           <div style={{ marginTop: 10 }}>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              {t('mml.consoleV2.config.objectInstance')}
+              {t(
+                read
+                  ? 'mml.consoleV2.config.objectInstanceRead'
+                  : 'mml.consoleV2.config.objectInstance',
+              )}
             </Text>
             <Space wrap style={{ marginTop: 6 }}>
-              {instanceSlots.map((s) => (
-                <span key={s.key}>
-                  <Text type="secondary" style={{ fontSize: 12, marginRight: 4 }}>
-                    {s.label}
-                  </Text>
-                  <InputNumber
-                    min={1}
-                    size="small"
-                    style={{ width: 96 }}
-                    value={Number(instanceSelectors[s.key] ?? '1')}
-                    onChange={(v) =>
-                      setInstanceSelectors((prev) => ({ ...prev, [s.key]: String(v ?? 1) }))
-                    }
-                  />
-                </span>
-              ))}
+              {instanceSlots.map((s) => {
+                const rawValue = instanceSelectors[s.key] ?? (read ? '' : '1');
+                return (
+                  <span key={s.key}>
+                    <Text type="secondary" style={{ fontSize: 12, marginRight: 4 }}>
+                      {s.label}
+                    </Text>
+                    <InputNumber
+                      min={1}
+                      precision={0}
+                      size="small"
+                      style={{ width: 96 }}
+                      value={rawValue === '' ? null : Number(rawValue)}
+                      onChange={(v) =>
+                        setInstanceSelectors((prev) => ({
+                          ...prev,
+                          [s.key]: String(v ?? (read ? '' : 1)),
+                        }))
+                      }
+                    />
+                  </span>
+                );
+              })}
             </Space>
           </div>
         )}
 
-        {/* 主体：读类勾选 PATH；RMV 填实例号；MOD/ADD 逐 PATH 填值。列表统一由标签页容器滚动。 */}
+        {/* 主体：读类确认 PATH；RMV 填实例号；MOD/ADD 逐 PATH 填值。列表统一由标签页容器滚动。 */}
         {read ? (
-          <Checkbox.Group
-            style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}
-            value={checkedPaths}
-            onChange={(v) => setCheckedPaths(v as string[])}
-          >
-            {command.paramPaths.map((p) => (
-              <Checkbox key={p.path} value={p.path} style={{ whiteSpace: 'nowrap' }}>
+          <Space orientation="vertical" size={6} style={{ width: '100%', marginTop: 8 }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {t('mml.consoleV2.config.confirmSelectedPaths')}
+            </Text>
+            {selectedParamPaths.map((p) => (
+              <div key={p.path} style={{ minWidth: 0 }}>
                 <Text>{p.label}</Text>{' '}
-                <Text type="secondary" code style={{ fontSize: 11 }}>
+                <Text
+                  type="secondary"
+                  code
+                  style={{
+                    fontSize: 11,
+                    whiteSpace: 'normal',
+                    overflowWrap: 'anywhere',
+                    wordBreak: 'break-word',
+                  }}
+                >
                   {p.path}
                 </Text>
-              </Checkbox>
+              </div>
             ))}
-          </Checkbox.Group>
+          </Space>
         ) : command.operationType === 'RMV' ? (
           // antd6 addonBefore 已废弃：改用 Space.Compact + InputAddon 复刻前缀盒子。
           <div style={{ marginTop: 8 }}>
@@ -314,19 +427,84 @@ export default function ConfigParamsModal({
           </div>
         ) : (
           <Space orientation="vertical" size={10} style={{ width: '100%', marginTop: 8 }}>
-            {writablePaths.map((p) => (
-              <div key={p.path} style={{ whiteSpace: 'nowrap' }}>
-                <Text>{p.label}</Text>{' '}
-                <Text type="secondary" code style={{ fontSize: 11 }}>
-                  {p.path}
-                </Text>
-                <Input
-                  placeholder={t('mml.consoleV2.config.inputFieldPlaceholder', { label: p.label })}
-                  value={values[p.path] ?? ''}
-                  onChange={(e) => setValues((prev) => ({ ...prev, [p.path]: e.target.value }))}
-                />
-              </div>
-            ))}
+            {writablePaths.map((p) => {
+              const error = command.operationType === 'MOD' && showModValidationErrors
+                ? modValidationErrors[p.path]
+                : undefined;
+              const isBoolean = isBooleanValueType(p.valueType);
+              const enumOptions = isBoolean ? BOOLEAN_OPTIONS : (p.enumOptions ?? []);
+
+              return (
+                <div key={p.path} style={{ minWidth: 0 }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      flexWrap: 'wrap',
+                      gap: 6,
+                      minWidth: 0,
+                    }}
+                  >
+                    <Text style={{ flexShrink: 0 }}>{p.label}</Text>
+                    <Text
+                      type="secondary"
+                      code
+                      style={{
+                        flex: '1 1 320px',
+                        minWidth: 0,
+                        fontSize: 11,
+                        whiteSpace: 'normal',
+                        overflowWrap: 'anywhere',
+                        wordBreak: 'break-word',
+                      }}
+                    >
+                      {p.path}
+                    </Text>
+                    {command.operationType === 'MOD' && p.valueType && (
+                      <Tag style={{ marginInlineStart: 0, flexShrink: 0 }}>{p.valueType}</Tag>
+                    )}
+                  </div>
+                  {enumOptions.length > 0 ? (
+                    <Select
+                      className="mml-config-param-select mml-config-param-control"
+                      aria-label={p.label}
+                      status={error ? 'error' : undefined}
+                      value={values[p.path] ?? (isBoolean ? 'false' : undefined)}
+                      options={enumOptions}
+                      onChange={(value) => setValues((prev) => ({ ...prev, [p.path]: value }))}
+                      style={PARAM_CONTROL_STYLE}
+                      styles={{
+                        root: { display: 'inline-flex', width: '100%' },
+                        content: {
+                          flex: '1 1 auto',
+                          minWidth: 0,
+                          paddingInlineEnd: 32,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        },
+                        suffix: { marginInlineStart: 'auto' },
+                      }}
+                    />
+                  ) : (
+                    <Input
+                      className="mml-config-param-control"
+                      status={error ? 'error' : undefined}
+                      aria-invalid={Boolean(error)}
+                      placeholder={t('mml.consoleV2.config.inputFieldPlaceholder', { label: p.label })}
+                      value={values[p.path] ?? ''}
+                      onChange={(e) => setValues((prev) => ({ ...prev, [p.path]: e.target.value }))}
+                      style={INPUT_CONTROL_STYLE}
+                    />
+                  )}
+                  {error && (
+                    <Text type="danger" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>
+                      {t(`mml.consoleV2.config.validation.${error.code}`, { bound: error.bound ?? '' })}
+                    </Text>
+                  )}
+                </div>
+              );
+            })}
           </Space>
         )}
       </div>
@@ -354,12 +532,12 @@ export default function ConfigParamsModal({
         <Button key="cancel" onClick={onCancel}>
           {t('common.cancel')}
         </Button>,
-        <Tooltip key="exec" title={canExecutePerm ? undefined : '无执行权限'}>
+        <Tooltip key="exec" title={canExecutePerm ? undefined : t('common.noPermission')}>
           <Button
             type="primary"
             icon={<PlayCircleOutlined />}
             disabled={!valid || deviceCount === 0 || !canExecutePerm}
-            onClick={() => onConfirmAndExecute(buildRequest())}
+            onClick={handleConfirmAndExecute}
           >
             {t('mml.consoleV2.config.confirmAndExecute', { count: deviceCount })}
           </Button>
@@ -375,7 +553,10 @@ export default function ConfigParamsModal({
             key: 'standard',
             label: t('mml.consoleV2.config.tabStandard'),
             children: (
-              <div style={{ height: CONFIG_TAB_HEIGHT, overflowY: 'auto', overflowX: 'auto', paddingRight: 4 }}>
+              <div
+                className="mml-config-tab-scroll"
+                style={{ height: CONFIG_TAB_HEIGHT, overflowY: 'auto', overflowX: 'hidden', paddingRight: 4 }}
+              >
                 {standardBody}
               </div>
             ),
@@ -384,7 +565,10 @@ export default function ConfigParamsModal({
             key: 'raw',
             label: t('mml.consoleV2.config.tabRaw'),
             children: (
-              <div style={{ height: CONFIG_TAB_HEIGHT, overflowY: 'auto', overflowX: 'auto', paddingRight: 4 }}>
+              <div
+                className="mml-config-tab-scroll"
+                style={{ height: CONFIG_TAB_HEIGHT, overflowY: 'auto', overflowX: 'hidden', paddingRight: 4 }}
+              >
                 <RawPathPanel value={rawPayload} onChange={setRawPayload} suggestions={suggestions} />
               </div>
             ),

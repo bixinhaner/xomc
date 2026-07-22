@@ -24,7 +24,7 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
       deviceOfflineSaveDay: 90,
       // 设备参数同步设置（与后端 internal/provision/periodic_sync_policy.go default 对齐）
       periodicSyncEnabled: false,
-      periodicSyncIntervalHours: 24,
+      periodicSyncIntervalMinutes: 1440,
       periodicSyncBatchSize: 200,
       periodicSyncMaxConcurrent: 10,
       periodicSyncStaggerWindowMinutes: 0,
@@ -121,8 +121,8 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
         <div style={settingRowStyle}>
           <Space wrap>
             <span>{t('system.device.periodicSync.intervalPrefix')}</span>
-            <Form.Item name="periodicSyncIntervalHours" noStyle>
-              <InputNumber min={1} max={168} style={{ width: 80 }} />
+            <Form.Item name="periodicSyncIntervalMinutes" noStyle>
+              <InputNumber min={1} max={10080} style={{ width: 80 }} />
             </Form.Item>
             <span>{t('system.device.periodicSync.intervalSuffix')}</span>
           </Space>

@@ -30,7 +30,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - ${POSTGRES_DATA_PATH:-pgdata}:/var/lib/postgresql/data
       - /etc/localtime:/etc/localtime:ro
     # max_connections=300：app(db60+tsdb40)+worker(db25+tsdb25)+acs(db30) 池上限合计 ~180，
     # 远超 PG 默认 100，最后启动的 acs 会 "too many clients already" 崩溃。给到 300 覆盖
@@ -92,7 +92,7 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - tsdbdata:/var/lib/postgresql/data
+      - ${TSDB_DATA_PATH:-tsdbdata}:/var/lib/postgresql/data
       - /etc/localtime:/etc/localtime:ro
     # 写吞吐优化档同主库 postgres（PM copy 入库走本库，写压力主要在此）。
     # ↓ TSDB_* 旋钮由 resources.env 注入；不传 env 取 :- 默认 = 历史值（与主库同档）。
@@ -129,7 +129,7 @@ services:
     # 768m（> maxmemory，给 AOF rewrite 的 fork COW 留余量）。见 docs/operations/OMC内存分配与容量规划-20260611.md。
     command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-512mb} --maxmemory-policy ${REDIS_MAXMEMORY_POLICY:-allkeys-lru}
     volumes:
-      - redisdata:/data
+      - ${REDIS_DATA_PATH:-redisdata}:/data
       - /etc/localtime:/etc/localtime:ro
     # AOF rewrite/fsync 落盘窗口
     stop_grace_period: 30s
@@ -163,13 +163,14 @@ services:
         cat >/tmp/nats-server.conf <<'EOF'
         jetstream {
           store_dir: "/data"
+          max_memory_store: ${NATS_MAX_MEMORY_STORE:-134217728}
         }
         http_port: 8222
         max_payload: 5242880
         EOF
         exec nats-server -c /tmp/nats-server.conf
     volumes:
-      - natsdata:/data
+      - ${NATS_DATA_PATH:-natsdata}:/data
       - /etc/localtime:/etc/localtime:ro
     # JetStream store 落盘窗口
     stop_grace_period: 30s
@@ -183,6 +184,9 @@ services:
           memory: 256m
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      # 百万级 JetStream backlog 恢复实测可接近 3 分钟；宽限期内保持 starting，
+      # 避免安装器把正常恢复误判为 unhealthy。
+      start_period: 5m
       interval: 5s
       timeout: 5s
       retries: 5
@@ -199,7 +203,7 @@ services:
       - "9000:9000"
       - "9001:9001"
     volumes:
-      - miniodata:/data
+      - ${MINIO_DATA_PATH:-miniodata}:/data
       - /etc/localtime:/etc/localtime:ro
     command: server /data --console-address ":9001"
     # 进行中的 multipart upload / 元数据落盘窗口
@@ -692,6 +696,9 @@ services:
     user: "0:0"
     environment:
       TZ: "Asia/Shanghai"
+      # postgresqlreceiver 连主库/tsdb 库用的凭据（config.yaml 里用 ${env:VAR} 引用）。
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_TSDB_PASSWORD: ${POSTGRES_TSDB_PASSWORD}
     # 仅容器内对接 SDK 与 Tempo，不对外暴露端口（trace 不上公网）。
     # ports 故意不开：宿主侧的 trace 查询走 Grafana，不直连 otelcol。
     volumes:

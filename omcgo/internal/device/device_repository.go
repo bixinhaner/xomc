@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/omcgo/omcgo/global"
 	"github.com/omcgo/omcgo/internal/authz"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -79,9 +80,7 @@ type RecycleBinFilter struct {
 }
 
 // GeoDeviceFilter specifies criteria for listing devices with geo data.
-// GroupIDs 仅包含「真实」分组（service 层在调用 repository 前已剥离 DefaultLevel2GroupID）。
-// IncludeUngrouped=true 表示调用方选中了「未分组设备」伪节点，repository 用
-// ungroupedDevicesWhere 子查询独立合并到 group 过滤里，口径与设备列表/拓扑徽标一致。
+// GroupIDs 是真实分组 ID；IncludeUngrouped 仅兼容历史无归属设备兜底。
 type GeoDeviceFilter struct {
 	GroupIDs         []string
 	IncludeUngrouped bool
@@ -242,6 +241,21 @@ type DeviceWriter interface {
 	PermanentDelete(ctx context.Context, ids []uuid.UUID) (int64, error)
 }
 
+type RecycleType string
+
+const (
+	RecycleTypeManual RecycleType = "manual"
+	RecycleTypeAuto   RecycleType = "auto"
+)
+
+// RecycleMetadata separates the business account shown in the recycle bin
+// from the process that actually executed the soft delete.
+type RecycleMetadata struct {
+	DeletedBy string
+	Type      RecycleType
+	Executor  string
+}
+
 // DeviceRepository defines the full interface for device persistence.
 // It composes smaller interfaces for backward compatibility.
 //
@@ -351,6 +365,38 @@ func (r *PgDeviceRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.
 		return nil, fmt.Errorf("build query: %w", err)
 	}
 	return r.scanDevice(ctx, query, args...)
+}
+
+func (r *PgDeviceRepository) GetCoordinates(ctx context.Context, id uuid.UUID) (*Location, error) {
+	query, args, err := buildGetCoordinatesQuery(id)
+	if err != nil {
+		return nil, err
+	}
+
+	var latitude, longitude *float64
+	if err := r.pool.QueryRow(ctx, query, args...).Scan(&latitude, &longitude); err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, commonerrors.ErrNotFound
+		}
+		return nil, fmt.Errorf("get device coordinates: %w", err)
+	}
+	if latitude == nil || longitude == nil {
+		return nil, nil
+	}
+	return &Location{Latitude: *latitude, Longitude: *longitude}, nil
+}
+
+func buildGetCoordinatesQuery(id uuid.UUID) (string, []interface{}, error) {
+	query, args, err := storage.Psql.Select("latitude", "longitude").
+		From("devices d").
+		Where(sq.Eq{"id": id}).
+		Where(notDeleted).
+		Limit(1).
+		ToSql()
+	if err != nil {
+		return "", nil, fmt.Errorf("build get device coordinates query: %w", err)
+	}
+	return query, args, nil
 }
 
 func (r *PgDeviceRepository) GetBySerialNumber(ctx context.Context, sn string) (*model.Device, error) {
@@ -505,6 +551,16 @@ func (r *PgDeviceRepository) Delete(ctx context.Context, id uuid.UUID) error {
 // bin can still display historical group and extended info.
 // Returns the number of devices actually soft-deleted.
 func (r *PgDeviceRepository) BatchDelete(ctx context.Context, ids []uuid.UUID, deletedBy string) (int64, error) {
+	return r.BatchDeleteWithMetadata(ctx, ids, RecycleMetadata{
+		DeletedBy: deletedBy,
+		Type:      RecycleTypeManual,
+		Executor:  deletedBy,
+	})
+}
+
+// BatchDeleteWithMetadata soft-deletes devices while preserving how the move
+// was initiated and which actor/process executed it.
+func (r *PgDeviceRepository) BatchDeleteWithMetadata(ctx context.Context, ids []uuid.UUID, metadata RecycleMetadata) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil
 	}
@@ -521,8 +577,10 @@ func (r *PgDeviceRepository) BatchDelete(ctx context.Context, ids []uuid.UUID, d
 	// Soft-delete devices with metadata
 	now := time.Now()
 	tag, err := tx.Exec(ctx,
-		`UPDATE devices SET deleted_at = $1, deleted_by = $2 WHERE id = ANY($3) AND deleted_at IS NULL`,
-		now, deletedBy, ids,
+		`UPDATE devices
+		 SET deleted_at = $1, deleted_by = $2, recycle_type = $3, recycle_executor = $4
+		 WHERE id = ANY($5) AND deleted_at IS NULL`,
+		now, metadata.DeletedBy, metadata.Type, metadata.Executor, ids,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("soft delete devices: %w", err)
@@ -867,6 +925,7 @@ func deviceColumns() []string {
 		"d.last_boot_at", "d.boot_count",
 		"d.inform_interval", "d.site_name", "d.site_id", "d.latitude", "d.longitude",
 		"d.extension_data", "d.created_at", "d.updated_at", "d.deleted_at", "d.deleted_by",
+		"d.recycle_type", "d.recycle_executor",
 		"d.last_param_sync_at",
 		"d.last_param_sync_failed_at", "d.last_param_sync_error", // migration 000142
 		"d.last_offline_reason", // T-0173: 离线原因诊断列（migration 000184）
@@ -885,7 +944,7 @@ func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 	// nullable string columns from devices table
 	var productClass, manufacturer, modelName *string
 	var firmwareVersion, connReqURL, siteName, siteID *string
-	var deletedBy *string
+	var deletedBy, recycleType, recycleExecutor *string
 
 	err := row.Scan(
 		&d.ID, &d.SerialNumber, &d.OUI, &productClass, &manufacturer, &modelName,
@@ -898,6 +957,7 @@ func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 		&d.LastBootAt, &d.BootCount,
 		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
 		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
+		&recycleType, &recycleExecutor,
 		&d.LastParamSyncAt,
 		&d.LastParamSyncFailedAt, &d.LastParamSyncError, // migration 000142
 		&d.LastOfflineReason, // T-0173: 离线原因（migration 000184)
@@ -908,6 +968,12 @@ func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 
 	if deletedBy != nil {
 		d.DeletedBy = *deletedBy
+	}
+	if recycleType != nil {
+		d.RecycleType = *recycleType
+	}
+	if recycleExecutor != nil {
+		d.RecycleExecutor = *recycleExecutor
 	}
 
 	if productClass != nil {
@@ -962,7 +1028,7 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 	var ipAddr, udpAddr *string
 	// nullable string columns from devices table
 	var productClass, manufacturer, modelName *string
-	var firmwareVersion, connReqURL, siteName, siteID, deletedBy *string
+	var firmwareVersion, connReqURL, siteName, siteID, deletedBy, recycleType, recycleExecutor *string
 
 	err := rows.Scan(
 		&d.ID, &d.SerialNumber, &d.OUI, &productClass, &manufacturer, &modelName,
@@ -975,6 +1041,7 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 		&d.LastBootAt, &d.BootCount,
 		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
 		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
+		&recycleType, &recycleExecutor,
 		&d.LastParamSyncAt,
 		&d.LastParamSyncFailedAt, &d.LastParamSyncError, // migration 000142
 		&d.LastOfflineReason, // T-0173: 离线原因（migration 000184)
@@ -982,6 +1049,12 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 
 	if deletedBy != nil {
 		d.DeletedBy = *deletedBy
+	}
+	if recycleType != nil {
+		d.RecycleType = *recycleType
+	}
+	if recycleExecutor != nil {
+		d.RecycleExecutor = *recycleExecutor
 	}
 	if err != nil {
 		return nil, err
@@ -1102,10 +1175,8 @@ func scanGeoDeviceRow(row scannable) (GeoDevice, error) {
 	return d, nil
 }
 
-// applyGeoGroupFilter 给 GIS Geo 查询（list/stats/center）拼上「真实分组 IN ∨ 未分组 NOT EXISTS」语义。
-// realIDs 与 includeUngrouped 由 service.splitGeoGroupIDs 归一化后传入，体口与设备列表一致
-// （参见 device_info_pg_repository.go ungroupedDevicesWhere），避免 Geo 链路对 DefaultLevel2GroupID
-// 简单 IN 导致「未分组」节点计数归 0 的口径分叉。
+// applyGeoGroupFilter 给 GIS Geo 查询（list/stats/center）拼上设备组过滤。
+// includeUngrouped 仅用于兼容历史无归属设备；默认组本身作为真实分组传入 realIDs。
 func applyGeoGroupFilter(builder sq.SelectBuilder, realIDs []string, includeUngrouped bool) sq.SelectBuilder {
 	switch {
 	case len(realIDs) > 0 && includeUngrouped:
@@ -1483,7 +1554,11 @@ func recycleBinSelectColumns() []string {
 		"d.last_inform_at", "d.last_inform_events",
 		"d.last_boot_at", "d.boot_count",
 		"d.inform_interval", "d.site_name", "d.site_id", "d.latitude", "d.longitude",
+		"dlo.latitude AS reported_latitude", "dlo.longitude AS reported_longitude",
+		"dlo.gps_height AS reported_gps_height", "dlo.observed_at AS reported_observed_at",
+		"dlo.version AS reported_version", "dlo.source_path AS reported_source_path",
 		"d.extension_data", "d.created_at", "d.updated_at", "d.deleted_at", "d.deleted_by",
+		"d.recycle_type", "d.recycle_executor",
 		"d.last_offline_reason",
 		// device_groups columns
 		"dg.id as group_id",
@@ -1524,27 +1599,29 @@ func recycleBinSelectColumns() []string {
 				THEN EXTRACT(EPOCH FROM (di.last_offline_time - di.last_online_time))::bigint
 			ELSE NULL
 		END AS online_duration`,
-		// 离线时长计算
+		// 回收时的离线时长快照：以 deleted_at - last_inform_at 计算，
+		// 避免记录进入回收站后继续随 NOW() 增长。
 		`CASE
-			WHEN d.lifecycle_state = 'commissioned' AND d.is_online = FALSE AND di.last_offline_time IS NOT NULL
-			THEN EXTRACT(EPOCH FROM (NOW() - di.last_offline_time))::bigint
+			WHEN d.deleted_at IS NOT NULL AND d.last_inform_at IS NOT NULL
+			THEN GREATEST(EXTRACT(EPOCH FROM (d.deleted_at - d.last_inform_at)), 0)::bigint
 			ELSE NULL
 		END AS offline_seconds`,
 		`CASE
-			WHEN d.lifecycle_state = 'commissioned' AND d.is_online = FALSE AND di.last_offline_time IS NOT NULL
-			THEN FLOOR(EXTRACT(EPOCH FROM (NOW() - di.last_offline_time)) / 86400)::bigint
+			WHEN d.deleted_at IS NOT NULL AND d.last_inform_at IS NOT NULL
+			THEN FLOOR(GREATEST(EXTRACT(EPOCH FROM (d.deleted_at - d.last_inform_at)), 0) / 86400)::bigint
 			ELSE NULL
 		END AS offline_days`,
 		`CASE
-			WHEN d.lifecycle_state = 'commissioned' AND d.is_online = FALSE AND di.last_offline_time IS NOT NULL
-			THEN FLOOR((EXTRACT(EPOCH FROM (NOW() - di.last_offline_time)) % 86400) / 3600)::bigint
+			WHEN d.deleted_at IS NOT NULL AND d.last_inform_at IS NOT NULL
+			THEN FLOOR((GREATEST(EXTRACT(EPOCH FROM (d.deleted_at - d.last_inform_at)), 0) % 86400) / 3600)::bigint
 			ELSE NULL
 		END AS offline_hours`,
 		`CASE
-			WHEN d.lifecycle_state = 'commissioned' AND d.is_online = FALSE AND di.last_offline_time IS NOT NULL
-			THEN FLOOR((EXTRACT(EPOCH FROM (NOW() - di.last_offline_time)) % 3600) / 60)::bigint
+			WHEN d.deleted_at IS NOT NULL AND d.last_inform_at IS NOT NULL
+			THEN FLOOR((GREATEST(EXTRACT(EPOCH FROM (d.deleted_at - d.last_inform_at)), 0) % 3600) / 60)::bigint
 			ELSE NULL
 		END AS offline_minutes`,
+		"FALSE AS param_sync_running", // Placeholder for shared DeviceWithInfo scanner
 		"NULL::int AS active_alarm_count", // Placeholder for compatibility
 	}
 }
@@ -1561,6 +1638,7 @@ func buildRecycleBinListBuilders(filter RecycleBinFilter) (sq.SelectBuilder, sq.
 	builder := storage.Psql.Select(recycleBinSelectColumns()...).
 		From("devices d").
 		LeftJoin("device_info di ON di.device_id = d.id").
+		LeftJoin("device_location_observations dlo ON d.id = dlo.device_id").
 		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
 		LeftJoin("device_groups dg ON dg.id = dgm.group_id").
 		Where(sq.NotEq{"d.deleted_at": nil})
@@ -1593,12 +1671,23 @@ func buildRecycleBinListBuilders(filter RecycleBinFilter) (sq.SelectBuilder, sq.
 		countBuilder = countBuilder.Where(sq.Like{"d.deleted_by": "%" + *filter.DeletedBy + "%"})
 	}
 
-	// GroupID filter (LEFT JOIN already in main query, just add WHERE)
+	// GroupID filter. 默认组额外兜底历史无归属设备；新数据仍写真实默认组 membership。
 	if filter.GroupID != nil {
-		builder = builder.Where(sq.Eq{"dgm.group_id": *filter.GroupID})
-		countBuilder = countBuilder.
-			Join("device_group_members dgm ON d.id = dgm.device_id").
-			Where(sq.Eq{"dgm.group_id": *filter.GroupID})
+		if filter.GroupID.String() == global.DefaultLevel2GroupID {
+			cond := sq.Or{
+				sq.Eq{"dgm.group_id": *filter.GroupID},
+				sq.Expr(ungroupedDevicesWhere),
+			}
+			builder = builder.Where(cond)
+			countBuilder = countBuilder.
+				LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
+				Where(cond)
+		} else {
+			builder = builder.Where(sq.Eq{"dgm.group_id": *filter.GroupID})
+			countBuilder = countBuilder.
+				Join("device_group_members dgm ON d.id = dgm.device_id").
+				Where(sq.Eq{"dgm.group_id": *filter.GroupID})
+		}
 	}
 
 	return builder, countBuilder
@@ -1701,7 +1790,8 @@ func (r *PgDeviceRepository) RestoreDevices(ctx context.Context, ids []uuid.UUID
 	// 1) 恢复——NOT EXISTS 守卫排除会撞部分唯一索引的冲突行。RETURNING 拿恢复 id。
 	rows, err := r.pool.Query(ctx,
 		`UPDATE devices d
-		    SET deleted_at = NULL, deleted_by = '', updated_at = NOW()
+		    SET deleted_at = NULL, deleted_by = '', recycle_type = '',
+		        recycle_executor = '', updated_at = NOW()
 		  WHERE d.id = ANY($1)
 		    AND d.deleted_at IS NOT NULL
 		    AND NOT EXISTS (

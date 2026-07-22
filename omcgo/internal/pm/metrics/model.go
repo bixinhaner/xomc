@@ -14,8 +14,8 @@ const (
 	MetricTypeKPI     MetricType = "kpi"
 )
 
-// StatisType 是 counter 类指标的聚合方式提示，驱动 G5 自然桶聚合（sum/avg/max/min/pct 五路）。
-// KPI 类不填（由 perf 平台公式决定），存 NULL。
+// StatisType 是指标聚合方式提示，驱动 G5 自然桶聚合（sum/avg/max/min/pct 五路）。
+// counter 与 KPI 都透传指标库 statis_type；pct KPI 走公式重算，avg/sum/max/min KPI 走直接值聚合。
 // 与老 OMC 系统 perf_indicators.statis_type 五个枚举一一对应；DB CHECK 约束亦同。
 type StatisType string
 

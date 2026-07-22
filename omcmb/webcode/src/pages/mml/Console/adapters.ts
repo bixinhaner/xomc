@@ -15,6 +15,7 @@ import type {
 import type {
   DeviceTaskResultItem,
   MMLCustomCommand,
+  MMLCustomCommandPathDef,
   MMLOperationType,
   MMLTask,
   MMLTaskCommandDetail,
@@ -67,9 +68,13 @@ export function subFieldsToParamPaths(subFields: SubFieldDef[]): CommandParamPat
       writable: sf.accessType === 'READ_WRITE',
       isObject: sf.isObject,
       minValue: sf.minValue,
+      maxValue: sf.maxValue,
       valueType: sf.valueType,
       defaultValue: sf.defaultValue,
+      validationPattern: sf.validationPattern,
+      enumOptions: sf.enumOptions,
       description: sf.description,
+      defaultSelected: sf.defaultSelected,
     }));
 }
 
@@ -106,6 +111,22 @@ export function customCommandParamPaths(cc: MMLCustomCommand): CommandParamPath[
       writable,
       isObject: false,
     }));
+}
+
+export function customCommandPathDefsToParamPaths(
+  paths: MMLCustomCommandPathDef[],
+): CommandParamPath[] {
+  return paths.map((p) => ({
+    path: p.standardPath,
+    label: p.description || p.standardPath.split('.').filter(Boolean).pop() || p.standardPath,
+    writable: p.access.replace(/[_-]/g, '').toLowerCase() === 'readwrite',
+    isObject: p.entryType === 'object',
+    valueType: p.dataType,
+    minValue: p.minValue,
+    maxValue: p.maxValue,
+    description: p.description,
+    defaultSelected: p.defaultSelected,
+  }));
 }
 
 /**
@@ -204,6 +225,38 @@ export function computeInstanceSlots(command: CommandItem): { key: string; label
   return slots;
 }
 
+export function buildDefaultInstanceSelectors(
+  slots: { key: string; label: string }[],
+  operationType: MMLOperationType,
+): Record<string, string> {
+  const finalIndex = slots.length - 1;
+  return Object.fromEntries(
+    slots.map((slot, index) => [
+      slot.key,
+      isReadOp(operationType) && index === finalIndex ? '' : '1',
+    ]),
+  );
+}
+
+export function resolveQueryPath(
+  path: string,
+  instanceSelectors?: Record<string, string>,
+): string {
+  let result = path;
+  let layer = 1;
+  while (true) {
+    const marker = result.indexOf('.{i}.');
+    if (marker < 0) return result;
+
+    const key = `i${String(layer).padStart(2, '0')}`;
+    const value = instanceSelectors?.[key]?.trim() ?? '';
+    if (value === '') return result.slice(0, marker + 1);
+
+    result = `${result.slice(0, marker)}.${value}.${result.slice(marker + 5)}`;
+    layer += 1;
+  }
+}
+
 /**
  * 把 targetObject 里的 `.{i}.` 占位按 instanceSelectors 替换为具体实例号，用于
  * ADD/RMV 命令「目标对象路径」展示（与 computeInstanceSlots 同序：左→右 i01/i02…，缺省 1）。
@@ -259,6 +312,63 @@ export function buildStructuredStatement(
   return stmt;
 }
 
+export function buildStandardQueryColumns(
+  command: CommandItem,
+  checkedPaths: string[],
+  instanceSelectors?: Record<string, string>,
+): ResultColumn[] {
+  const seen = new Set<string>();
+  return buildColumns(command, checkedPaths)
+    .map((column) => ({
+      ...column,
+      path: resolveQueryPath(column.path, instanceSelectors),
+    }))
+    .filter((column) => {
+      if (seen.has(column.path)) return false;
+      seen.add(column.path);
+      return true;
+    });
+}
+
+/**
+ * 逐 PATH 下发顺序与结果列保持一致。
+ * 查询 path 若因空实例截断为同一对象前缀，只保留首次出现的一条 statement；
+ * 写命令不做截断去重，继续严格按用户选择逐条下发。
+ */
+export function buildPerPathStatementPaths(
+  command: CommandItem,
+  checkedPaths: string[],
+  instanceSelectors?: Record<string, string>,
+): string[] {
+  const checked = new Set(checkedPaths);
+  const orderedPaths = command.paramPaths
+    .filter((item) => checked.has(item.path))
+    .map((item) => item.path);
+  if (!isReadOp(command.operationType)) return orderedPaths;
+
+  const seen = new Set<string>();
+  return orderedPaths.filter((path) => {
+    const resolved = resolveQueryPath(path, instanceSelectors);
+    if (seen.has(resolved)) return false;
+    seen.add(resolved);
+    return true;
+  });
+}
+
+export function buildStandardRawRows(
+  operationType: MMLOperationType,
+  checkedPaths: string[],
+  values?: Record<string, string>,
+  instanceSelectors?: Record<string, string>,
+): { path: string; value: string }[] {
+  return checkedPaths.map((path) => ({
+    path: isReadOp(operationType)
+      ? resolveQueryPath(path, instanceSelectors)
+      : path,
+    value: values?.[path] ?? '',
+  }));
+}
+
 /** 裸路径模式 ExecRequest → legacy POST /mml/execute 请求体（param_paths/param_values 下标对齐）。 */
 export function buildRawExecutePayload(
   operationType: MMLOperationType,
@@ -266,6 +376,7 @@ export function buildRawExecutePayload(
   deviceSns: string[],
   taskName?: string,
   execMode: ExecMode = 'whole',
+  commandName?: string,
 ): Record<string, unknown> {
   const valid = rows.filter((r) => r.path.trim() !== '');
   const paths = valid.map((r) => r.path.trim());
@@ -285,6 +396,7 @@ export function buildRawExecutePayload(
     // 逐 PATH：后端把每 path 拆成一条 command（每 path 一个 RPC），path 级成败独立。
     execute_mode: execMode === 'single-path' ? 'single_path' : 'whole',
     task_name: name,
+    ...(commandName?.trim() ? { command_name: commandName.trim() } : {}),
   };
 }
 
@@ -326,6 +438,50 @@ export function initialPendingRows(deviceSns: string[]): ResultRow[] {
 
 function leafName(path: string): string {
   return path.split('.').filter(Boolean).pop() ?? path;
+}
+
+/**
+ * GPV partial path（以 `.` 结尾）会返回该对象下的多个叶子参数。控制台初始列只有
+ * 用户输入的对象路径，因此要用设备实际返回并保存在 cells 中的叶子路径替换该占位列。
+ * 普通叶子查询保持原列不变；多设备结果按首次出现顺序去重。
+ */
+export function expandObjectPathColumns(
+  columns: ResultColumn[],
+  rows: ResultRow[],
+): ResultColumn[] {
+  const expanded: ResultColumn[] = [];
+  const emittedPaths = new Set<string>();
+  for (const column of columns) {
+    if (!column.path.endsWith('.')) {
+      if (emittedPaths.has(column.path)) continue;
+      emittedPaths.add(column.path);
+      expanded.push(column);
+      continue;
+    }
+
+    const descendantPaths: string[] = [];
+    let hasDescendant = false;
+    for (const row of rows) {
+      for (const path of Object.keys(row.cells)) {
+        if (path === column.path || !path.startsWith(column.path)) continue;
+        hasDescendant = true;
+        if (emittedPaths.has(path)) continue;
+        emittedPaths.add(path);
+        descendantPaths.push(path);
+      }
+    }
+
+    if (!hasDescendant) {
+      if (emittedPaths.has(column.path)) continue;
+      emittedPaths.add(column.path);
+      expanded.push(column);
+      continue;
+    }
+    descendantPaths.forEach((path, index) => {
+      expanded.push({ key: `${column.key}:child:${index}`, label: leafName(path), path });
+    });
+  }
+  return expanded;
 }
 
 /**
@@ -380,6 +536,8 @@ export function applyFrameToRow(
       if (parsed?.kind === 'gpv' && parsed.params) {
         const byPath = new Map(parsed.params.map((p) => [p.name, p.value]));
         const byLeaf = new Map(parsed.params.map((p) => [leafName(p.name), p.value]));
+        // partial object path 查询会返回多个后代叶子；全部保留，供结果表动态展开。
+        for (const p of parsed.params) cells[p.name] = p.value;
         for (const c of columns) {
           const v = byPath.get(c.path) ?? byLeaf.get(leafName(c.path));
           if (v != null) cells[c.path] = v;
@@ -417,6 +575,8 @@ export function mapResultItemToRow(
     if (parsed?.kind === 'gpv' && parsed.params) {
       const byPath = new Map(parsed.params.map((p) => [p.name, p.value]));
       const byLeaf = new Map(parsed.params.map((p) => [leafName(p.name), p.value]));
+      // 与 SSE 路径一致：保留 partial object path 返回的全部后代叶子。
+      for (const p of parsed.params) cells[p.name] = p.value;
       for (const c of columns) {
         const v = byPath.get(c.path) ?? byLeaf.get(leafName(c.path));
         if (v != null) cells[c.path] = v;
@@ -428,6 +588,7 @@ export function mapResultItemToRow(
     planOrder: item.planOrder,
     planRawLine: item.planRawLine,
     commandCode: item.commandCode,
+    commandName: item.commandName,
     deviceSn: item.deviceSn,
     deviceTaskId: item.deviceTaskId ?? '',
     status,
@@ -438,6 +599,11 @@ export function mapResultItemToRow(
     raw: item.result.rawOutput ?? '',
     elapsedMs: item.result.executionTime ?? 0,
   };
+}
+
+/** 普通 MML 子任务没有脚本计划行，不应显示永远为空的 Plan Row 列。 */
+export function hasPlanRows(rows: Pick<ResultRow, 'planLineNo'>[]): boolean {
+  return rows.some((row) => typeof row.planLineNo === 'number');
 }
 
 /**

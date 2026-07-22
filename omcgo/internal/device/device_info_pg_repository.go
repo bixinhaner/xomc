@@ -19,9 +19,8 @@ import (
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
-// ungroupedDevicesWhere 是"未分组设备"节点的过滤:设备未绑定任何分组(无成员关系行)。
-// 2026-06-03 用户决策「未分组 = 未绑定任何分组」——选中默认 L2 组(DefaultLevel2GroupID)时,
-// 不再按该组成员过滤,而是取 NOT EXISTS device_group_members 的设备。
+// ungroupedDevicesWhere 保留给历史无归属数据兜底；默认组本身按真实
+// device_group_members 归属查询。
 const ungroupedDevicesWhere = "NOT EXISTS (SELECT 1 FROM device_group_members m WHERE m.device_id = d.id)"
 
 // allowedSortColumnsWithInfo maps user-facing sort keys to qualified column names
@@ -273,18 +272,24 @@ func deviceListSearchFields() []string {
 	}
 }
 
+func deviceListCountSelect() sq.SelectBuilder {
+	return storage.Psql.Select("COUNT(DISTINCT d.id)")
+}
+
 func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter DeviceFilter) (*model.ListResponse[DeviceWithInfo], error) {
 	selectCols := deviceWithInfoSelectColumns()
 	builder := storage.Psql.Select(selectCols...).
 		From("devices d").
 		LeftJoin("device_info di ON di.device_id = d.id").
+		LeftJoin("device_location_observations dlo ON dlo.device_id = d.id").
 		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
 		LeftJoin("device_groups dg ON dg.id = dgm.group_id").
 		LeftJoin(alarmsActiveAggJoin). // #361: 告警级别/告警数实时聚合
 		Where(sq.Eq{"d.deleted_at": nil})
-	countBuilder := storage.Psql.Select("COUNT(*)").
+	countBuilder := deviceListCountSelect().
 		From("devices d").
 		LeftJoin("device_info di ON di.device_id = d.id").
+		LeftJoin("device_location_observations dlo ON dlo.device_id = d.id").
 		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
 		Where(sq.Eq{"d.deleted_at": nil})
 
@@ -520,6 +525,7 @@ func (r *PgDeviceInfoRepository) GetByIDWithInfo(ctx context.Context, deviceID u
 		Select(deviceWithInfoSelectColumns()...).
 		From("devices d").
 		LeftJoin("device_info di ON di.device_id = d.id").
+		LeftJoin("device_location_observations dlo ON dlo.device_id = d.id").
 		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
 		LeftJoin("device_groups dg ON dg.id = dgm.group_id").
 		LeftJoin(alarmsActiveAggJoin). // #361: 告警级别/告警数实时聚合
@@ -556,14 +562,14 @@ func (r *PgDeviceInfoRepository) GetByIDWithInfo(ctx context.Context, deviceID u
 func (r *PgDeviceInfoRepository) ComputeListStats(ctx context.Context, filter DeviceFilter) (*DeviceListStats, error) {
 	// 用子查询去重再聚合：先按筛选条件取所有命中设备的 (id, lifecycle, is_online)，
 	// 再 GROUP BY。避免 dgm/dg LEFT JOIN 引起的设备重复计数。
-	// #361: alarmed 标记——该设备是否存在未 cleared 活动告警（相关子查询 EXISTS）。
-	// 放进 DISTINCT 子查询的 SELECT 列里，外层用 COUNT FILTER 数有告警的设备，
-	// 与列表『告警级别』非『无』的口径一致（同一 alarms_active status<>'cleared' 源）。
-	const alarmedFlagExpr = `EXISTS (
-		SELECT 1 FROM alarms_active aa
+	// #361: 当前告警统计取活动告警条数，而不是"有告警的设备数"。
+	// 放进 DISTINCT 子查询的 SELECT 列里，外层 SUM 后得到与列表行内告警数量相同的口径。
+	const activeAlarmCountExpr = `(
+		SELECT COUNT(*)
+		FROM alarms_active aa
 		WHERE aa.device_id = d.id AND aa.status <> 'cleared'
-	) AS alarmed`
-	subBuilder := storage.Psql.Select("DISTINCT d.id", "d.lifecycle_state", "d.is_online", alarmedFlagExpr).
+	) AS active_alarm_count`
+	subBuilder := storage.Psql.Select("DISTINCT d.id", "d.lifecycle_state", "d.is_online", activeAlarmCountExpr).
 		From("devices d").
 		LeftJoin("device_info di ON di.device_id = d.id").
 		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
@@ -581,11 +587,11 @@ func (r *PgDeviceInfoRepository) ComputeListStats(ctx context.Context, filter De
 		return nil, fmt.Errorf("build stats subquery: %w", err)
 	}
 
-	// #361: 外层 GROUP BY 增加 alarmed 真实统计——COUNT FILTER 数有活动告警的设备。
-	// alarmed 已是子查询每设备唯一一行的布尔，外层直接 COUNT(*) FILTER 即得
-	// COUNT(DISTINCT device_id with active alarm)，与 list 列『告警级别』非『无』一致。
+	// #361: 外层 GROUP BY 增加 alarmed 真实统计——SUM 活动告警条数。
+	// active_alarm_count 已是子查询每设备唯一一行的数值，外层 SUM 后与列表行内
+	// active_alarm_count 加总一致。
 	groupQ := "SELECT lifecycle_state, is_online, COUNT(*), " +
-		"COUNT(*) FILTER (WHERE alarmed) FROM (" + subQ +
+		"COALESCE(SUM(active_alarm_count), 0) FROM (" + subQ +
 		") s GROUP BY lifecycle_state, is_online"
 
 	rows, err := r.pool.Query(ctx, groupQ, subArgs...)
@@ -719,27 +725,22 @@ func applyDeviceGroupFilter(b sq.SelectBuilder, filter DeviceFilter) sq.SelectBu
 	}
 	selectedGroupIDs = append(selectedGroupIDs, filter.GroupIDs...)
 
-	realGroupIDs := make([]uuid.UUID, 0, len(selectedGroupIDs))
-	includeUngrouped := false
-	for _, groupID := range selectedGroupIDs {
-		if groupID.String() == global.DefaultLevel2GroupID {
-			includeUngrouped = true
-			continue
+	if len(selectedGroupIDs) > 0 {
+		hasDefaultGroup := false
+		realGroupIDs := make([]uuid.UUID, 0, len(selectedGroupIDs))
+		for _, groupID := range selectedGroupIDs {
+			if groupID.String() == global.DefaultLevel2GroupID {
+				hasDefaultGroup = true
+			}
+			realGroupIDs = append(realGroupIDs, groupID)
 		}
-		realGroupIDs = append(realGroupIDs, groupID)
-	}
-
-	if includeUngrouped && len(realGroupIDs) > 0 {
-		return b.Where(sq.Or{
-			sq.Eq{"dgm.group_id": realGroupIDs},
-			sq.Expr(ungroupedDevicesWhere),
-		})
-	}
-	if includeUngrouped {
-		return b.Where(ungroupedDevicesWhere)
-	}
-	if len(realGroupIDs) > 0 {
-		return b.Where(sq.Eq{"dgm.group_id": realGroupIDs})
+		if hasDefaultGroup {
+			return b.Where(sq.Or{
+				sq.Eq{"dgm.group_id": realGroupIDs},
+				sq.Expr(ungroupedDevicesWhere),
+			})
+		}
+		return b.Where(sq.Eq{"dgm.group_id": selectedGroupIDs})
 	}
 	return b
 }
@@ -806,7 +807,11 @@ func deviceWithInfoSelectColumns() []string {
 		"d.last_inform_at", "d.last_inform_events",
 		"d.last_boot_at", "d.boot_count",
 		"d.inform_interval", "d.site_name", "d.site_id", "d.latitude", "d.longitude",
+		"dlo.latitude AS reported_latitude", "dlo.longitude AS reported_longitude",
+		"dlo.gps_height AS reported_gps_height", "dlo.observed_at AS reported_observed_at",
+		"dlo.version AS reported_version", "dlo.source_path AS reported_source_path",
 		"d.extension_data", "d.created_at", "d.updated_at", "d.deleted_at", "d.deleted_by",
+		"d.recycle_type", "d.recycle_executor",
 		"d.last_offline_reason", // T-0173: 离线原因诊断（migration 000184)
 		// device_groups columns
 		"dg.id as group_id",
@@ -890,6 +895,17 @@ func deviceWithInfoSelectColumns() []string {
 		END AS offline_minutes`,
 		// #361: 该设备未 cleared 活动告警数（来自 alarms_active 聚合子查询 aa）。
 		// 无活动告警时 LEFT JOIN 命中空 → NULL → 前端归 0。
+		`EXISTS (
+			SELECT 1
+			FROM parameter_sync_requests psr
+			WHERE psr.device_id = d.id
+			  AND psr.status IN ('accepted', 'queued', 'running')
+		) OR EXISTS (
+			SELECT 1
+			FROM parameter_sync_runs psrun
+			WHERE psrun.device_id = d.id
+			  AND psrun.status IN ('planning', 'enqueuing', 'waiting_device', 'executing', 'processing', 'cancelling')
+		) AS param_sync_running`,
 		"aa.active_alarm_count",
 	}
 }
@@ -941,12 +957,14 @@ func alarmSeverityFilterCond(text string) sq.Sqlizer {
 
 func scanDeviceInfoFromRow(row pgx.Row) (*DeviceInfo, error) {
 	var info DeviceInfo
-	// Issue #758: lmt_device_name 列可为 NULL（新设备从未触发过名称同步），
-	// pgx v5 不能直接将 NULL 扫描到 string，用临时 *string 接收后安全解引用。
+	// Issue #758: device_name / lmt_device_name 列可为 NULL（新设备从未人工命名、
+	// 或从未触发过名称同步），pgx v5 不能直接将 NULL 扫描到 string，用临时
+	// *string 接收后安全解引用。
+	var deviceName *string
 	var lmtDeviceName *string
 	err := row.Scan(
 		&info.DeviceID,
-		&info.DeviceName, &info.Address, &info.Remark, &info.ProjectStatus, &info.Height,
+		&deviceName, &info.Address, &info.Remark, &info.ProjectStatus, &info.Height,
 		&info.ECI, &info.PCI, &info.CellID, &info.FreqPoint, &info.Bandwidth, &info.TransmitPower, &info.PLMN,
 		&info.RFStatus, &info.CellStatus, &info.OpState, &info.MMEStatus, &info.SyncStatus, &info.KPIStatus,
 		&info.NumOfCells, &info.GPSStatus, &info.AlarmSeverity, &info.LicenseStatus,
@@ -969,6 +987,9 @@ func scanDeviceInfoFromRow(row pgx.Row) (*DeviceInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	if deviceName != nil {
+		info.DeviceName = *deviceName
+	}
 	if lmtDeviceName != nil {
 		info.LMTDeviceName = *lmtDeviceName
 	}
@@ -982,7 +1003,11 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	// nullable string columns from devices table
 	var productClass, manufacturer, modelName *string
 	var firmwareVersion, connReqURL, siteName, siteID *string
-	var deletedBy *string
+	var deletedBy, recycleType, recycleExecutor *string
+	var reportedLatitude, reportedLongitude, reportedGPSHeight *float64
+	var reportedObservedAt *time.Time
+	var reportedVersion *int64
+	var reportedSourcePath *string
 
 	// device_info nullable fields
 	var (
@@ -1042,10 +1067,11 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		// 在线时长派生（SQL计算，设计文档 §13）
 		onlineDuration *int64
 		// 离线时长（SQL计算）
-		offlineSeconds *int64
-		offlineDays    *int64
-		offlineHours   *int64
-		offlineMinutes *int64
+		offlineSeconds   *int64
+		offlineDays      *int64
+		offlineHours     *int64
+		offlineMinutes   *int64
+		paramSyncRunning bool
 		// #361: 活动告警数（alarms_active 聚合，LEFT JOIN 未命中→NULL）
 		activeAlarmCount *int
 	)
@@ -1061,7 +1087,10 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		&d.LastInformAt, &eventsData,
 		&d.LastBootAt, &d.BootCount,
 		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
+		&reportedLatitude, &reportedLongitude, &reportedGPSHeight, &reportedObservedAt,
+		&reportedVersion, &reportedSourcePath,
 		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
+		&recycleType, &recycleExecutor,
 		&d.LastOfflineReason, // T-0173: 离线原因（migration 000184)
 		// device_groups field (nullable from LEFT JOIN)
 		&d.GroupID,
@@ -1089,6 +1118,7 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		&onlineDuration,
 		// 离线时长（SQL计算）
 		&offlineSeconds, &offlineDays, &offlineHours, &offlineMinutes,
+		&paramSyncRunning,
 		// #361: 活动告警数（select 列末尾 aa.active_alarm_count）
 		&activeAlarmCount,
 	)
@@ -1099,6 +1129,12 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	// Assign nullable devices fields
 	if deletedBy != nil {
 		d.DeletedBy = *deletedBy
+	}
+	if recycleType != nil {
+		d.RecycleType = *recycleType
+	}
+	if recycleExecutor != nil {
+		d.RecycleExecutor = *recycleExecutor
 	}
 	if productClass != nil {
 		d.ProductClass = *productClass
@@ -1195,6 +1231,23 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	d.OfflineDays = offlineDays
 	d.OfflineHours = offlineHours
 	d.OfflineMinutes = offlineMinutes
+	d.ParamSyncRunning = paramSyncRunning
+	acceptedLocation := locationFromDeviceCoordinates(d.Latitude, d.Longitude, nil)
+	var reportedLocation *ReportedLocation
+	if reportedLatitude != nil && reportedLongitude != nil && reportedObservedAt != nil && reportedVersion != nil && reportedSourcePath != nil {
+		reportedLocation = &ReportedLocation{
+			Latitude:   *reportedLatitude,
+			Longitude:  *reportedLongitude,
+			GPSHeight:  reportedGPSHeight,
+			ObservedAt: *reportedObservedAt,
+			Version:    *reportedVersion,
+			SourcePath: *reportedSourcePath,
+		}
+	}
+	d.LocationSync = func() *LocationSync {
+		result := CompareLocations(acceptedLocation, reportedLocation)
+		return &result
+	}()
 	// T-0162: 派生老 Status 字段给读侧兼容（DeriveStatusFromLifecycle 用
 	// commissioned+online=Active / commissioned+offline=Offline / 等映射）
 	d.Status = DeriveStatusFromLifecycle(d.LifecycleState, d.IsOnline)

@@ -120,6 +120,7 @@ export default function KpiExportLibrary() {
             style={{ width: 160 }}
             options={[
               { value: 'dashboard', label: t('kpiExport.source.dashboard') },
+              { value: 'device_view', label: t('kpiExport.source.deviceView') },
               { value: 'kpi_query', label: t('kpiExport.source.kpiQuery') },
               { value: 'adhoc', label: t('kpiExport.source.adhoc') },
             ]}

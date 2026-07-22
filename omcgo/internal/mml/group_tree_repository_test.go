@@ -42,6 +42,34 @@ func Test_BuildTree_SQLNoSubFieldIsSupportedSubquery(t *testing.T) {
 	// 守住"直接读列"形态。
 	assert.Contains(t, src, "COALESCE(c.target_paths, '[]'::jsonb) AS target_paths",
 		"PR-C: c.target_paths column should be SELECTed directly")
+	assert.Contains(t, src, "LEFT JOIN mml_commands c ON c.group_id = g.id AND c.deprecated_at IS NULL",
+		"deprecated commands must not be returned in the console command tree")
+	assert.Contains(t, src, "AND g.deleted_at IS NULL",
+		"deleted groups must not be returned in the console command tree")
+	assert.Contains(t, src, "AND g.deprecated_at IS NULL",
+		"deprecated groups must not be returned in the console command tree")
+}
+
+func Test_BuildTree_HidesDeprecatedCommands(t *testing.T) {
+	pool := newMMLTestPool(t)
+	if pool == nil {
+		return
+	}
+	ctx := context.Background()
+	fx := newMMLFixture(t, pool)
+	defer fx.cleanup()
+
+	activeID := fx.insertCommand("LST_PRC_TEST_ACTIVE", "chapter:PRC")
+	deprecatedID := fx.insertCommand("LST_PRC_TEST_DEPRECATED", "chapter:PRC")
+	_, err := pool.Exec(ctx, `UPDATE mml_commands SET deprecated_at = now() WHERE id = $1`, deprecatedID)
+	require.NoError(t, err)
+
+	repo := NewPgGroupTreeRepository(pool)
+	nodes, err := repo.BuildTree(ctx, fx.chapterCode, "zh-CN")
+	require.NoError(t, err)
+
+	require.NotNil(t, findCommandTargetPaths(t, nodes, activeID), "active command should remain visible")
+	assert.Nil(t, findCommandTargetPaths(t, nodes, deprecatedID), "deprecated command should be hidden")
 }
 
 // Test_BuildTree_TargetPathsFromColumn_NoSubFieldFilter 集成测试：

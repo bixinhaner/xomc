@@ -16,6 +16,10 @@ import type { PageRequest, PageResponse } from '../../types/pagination';
 import { mmlService } from '../../mock/services/mmlService';
 import { MMLScriptImportApiError, mmlApi } from '../../services/api/mmlApi';
 import { createApiSwitch } from '../../services/apiSwitch';
+import {
+  MML_CUSTOM_COMMAND_PATHS_QUERY_KEY,
+  MML_CUSTOM_COMMANDS_QUERY_KEY,
+} from './mmlQueryKeys';
 
 const api = createApiSwitch(mmlService, mmlApi);
 
@@ -373,6 +377,8 @@ export function useCreateMMLTemplate() {
       api.createTemplate(data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['mml', 'templates'] });
+      void queryClient.invalidateQueries({ queryKey: MML_CUSTOM_COMMANDS_QUERY_KEY });
+      void queryClient.invalidateQueries({ queryKey: MML_CUSTOM_COMMAND_PATHS_QUERY_KEY });
     },
   });
 }
@@ -384,6 +390,8 @@ export function useUpdateMMLTemplate() {
       api.updateTemplate(id, data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['mml', 'templates'] });
+      void queryClient.invalidateQueries({ queryKey: MML_CUSTOM_COMMANDS_QUERY_KEY });
+      void queryClient.invalidateQueries({ queryKey: MML_CUSTOM_COMMAND_PATHS_QUERY_KEY });
     },
   });
 }
@@ -394,6 +402,8 @@ export function useDeleteMMLTemplate() {
     mutationFn: (id: string) => api.deleteTemplate(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['mml', 'templates'] });
+      void queryClient.invalidateQueries({ queryKey: MML_CUSTOM_COMMANDS_QUERY_KEY });
+      void queryClient.invalidateQueries({ queryKey: MML_CUSTOM_COMMAND_PATHS_QUERY_KEY });
     },
   });
 }
@@ -404,6 +414,8 @@ export function useCloneMMLTemplate() {
     mutationFn: (id: string) => api.cloneTemplate(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['mml', 'templates'] });
+      void queryClient.invalidateQueries({ queryKey: MML_CUSTOM_COMMANDS_QUERY_KEY });
+      void queryClient.invalidateQueries({ queryKey: MML_CUSTOM_COMMAND_PATHS_QUERY_KEY });
     },
   });
 }

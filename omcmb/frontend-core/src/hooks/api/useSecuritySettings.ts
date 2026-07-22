@@ -24,7 +24,9 @@ export interface SecuritySettings {
   // 密码长度策略（动态从 sys_configs 获取）
   pwdMinLength: number;
   pwdMaxLength: number;
-  // 其余字段以 raw 暴露，便于设置页消费
+  // 默认密码是 write-only，只暴露是否已配置。
+  defaultPasswordConfigured: boolean;
+  // 其余非敏感字段以 raw 暴露，便于设置页消费
   raw: Map<string, string>;
 }
 
@@ -34,13 +36,13 @@ export interface SecuritySettings {
  *
  * enabled=false 时不发请求 — 给登录页（用户未登录态可能拉不到）一个旁路。
  *
- * Issue #649：暴露 refetch，让重置密码弹窗 onClick 时强制拿最新 defaultPasswd
- * （绕开缓存避免管理员刚清空后弹错弹窗的 UX bug）。
+ * Issue #649：暴露 refetch，让重置密码弹窗 onClick 时强制拿最新的
+ * defaultPasswd is_configured 状态。
  */
 export function useSecuritySettings(enabled = true): {
   settings: SecuritySettings | undefined;
   isFetching: boolean;
-  refetch: () => Promise<unknown>;
+  refetch: () => Promise<boolean>;
 } {
   const { data, isFetching, refetch } = useSysConfigsByCategory('security', enabled);
 
@@ -48,6 +50,7 @@ export function useSecuritySettings(enabled = true): {
     if (!data) return undefined;
     const raw = new Map<string, string>();
     for (const item of data) {
+      if (item.isSecret) continue;
       raw.set(item.key, item.value);
     }
     return {
@@ -57,11 +60,21 @@ export function useSecuritySettings(enabled = true): {
       loginNotifyMsg: raw.get('msg') ?? '',
       pwdMinLength: parseIntSafe(raw.get('pwdMinLength'), 8),
       pwdMaxLength: parseIntSafe(raw.get('pwdMaxLength'), 32),
+      defaultPasswordConfigured: data.some(
+        (item) => item.key === 'defaultPasswd' && item.isSecret && item.isConfigured,
+      ),
       raw,
     };
   }, [data]);
 
-  return { settings, isFetching, refetch };
+  const refetchConfiguredState = async (): Promise<boolean> => {
+    const result = await refetch();
+    return result.data?.some(
+      (item) => item.key === 'defaultPasswd' && item.isSecret && item.isConfigured,
+    ) ?? false;
+  };
+
+  return { settings, isFetching, refetch: refetchConfiguredState };
 }
 
 function parseIntSafe(raw: string | undefined, fallback: number): number {
@@ -77,8 +90,8 @@ function parseBoolSafe(raw: string | undefined, fallback: boolean): boolean {
 
 /**
  * usePublicSecuritySettings 走 `/admin/public/configs?category=security` 无需鉴权，
- * 仅能拉 is_public=true 的 4 个字段：
- *   userSessionExpirationMin / isBrowserAutoRecordPass / enabledFlag / msg
+ * 仅消费代码白名单允许的登录前安全配置；security 分类当前只公开
+ * isBrowserAutoRecordPass。
  *
  * 主要消费方：登录页（未登录态拉不到 useSysConfigsByCategory）。
  *
@@ -115,6 +128,7 @@ export function usePublicSecuritySettings(enabled = true): {
       // 公开 API 不返回密码策略，用默认值
       pwdMinLength: parseIntSafe(raw.get('pwdMinLength'), 8),
       pwdMaxLength: parseIntSafe(raw.get('pwdMaxLength'), 32),
+      defaultPasswordConfigured: false,
       raw,
     };
   }, [data]);

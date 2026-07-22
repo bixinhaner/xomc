@@ -369,7 +369,12 @@ func (s *AlarmSyncService) TriggerSync(ctx context.Context, deviceSN string) (*t
 		Method:      "GetParameterValues",
 		Params:      params,
 		Source:      task.TaskSourceSystem,
-		CreatorID:   uuid.Nil.String(),
+		CreatorID:   "", // 系统任务：空串表示非用户发起，与其它 TaskSourceSystem 任务
+		// （见 pm/online_subscriber.go、notification/task_subscriber.go 等）保持一致。
+		// 之前误用 uuid.Nil.String()（"00000000-...-000000000000"）——该值能被
+		// uuid.Parse 成功解析，导致 taskLogObserver.parseOperatorID 把它当成合法
+		// operator_id 写入 sys_task_logs，因 users 表里没有全零 UUID 的占位用户而
+		// 触发外键约束违反（sys_task_logs_operator_id_fkey）。
 		Description: "alarm sync: query device current alarms",
 		Priority:    5,
 		MaxRetries:  &maxRetries,

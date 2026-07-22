@@ -2,30 +2,27 @@
 
 迁移工具：[`pressly/goose/v3`](https://github.com/pressly/goose)。由 `cmd/migrate` 包装执行，docker compose 的 `migrate-*` 服务在容器栈启动期跑。版本号记录在数据库的 goose 版本表里。
 
-## 当前状态：consolidated baseline（最近一次：2026-06-22）
+## 当前状态：consolidated baseline（2026-07-20，seed 流当天二次合并）
 
-三条**相互独立**的 goose 流，各自只有一个 `000001` 基线文件（面向全新发布部署）：
+2026-07-16 首次将三条**相互独立**的 goose 流分别合并为一个直接表达最终状态的 `000001` 基线。此后各流又累积了若干增量（2026-07-20 首次合并前：主库 schema 累积到 `000032`、seed 累积到 `000002`、TSDB 累积到 `000003`），2026-07-20 按同一套「重生 baseline」标准流程再次合并回各自的单 `000001`。首次合并当天 seed 流又新增了 `000002`/`000003` 两个增量（内置角色 API 权限修复 + DEVICE_INFO MML 子字段清理），故 seed 流当天又做了第二次合并，其余两条流未变。当前文件如下：
 
-| 流 | 目录 | 文件 | 版本表 | compose 服务 | 目标库 |
-|----|------|------|--------|--------------|--------|
-| 主库 schema (DDL) | `migrations/*.sql` | `000001_init_schema.sql` | `goose_db_version` | `migrate-schema` | postgres（主库，纯 PG16）|
-| 主库 seed (DML) | `migrations/seed/*.sql` | `000001_init_seed.sql` | `goose_db_version_seed` | `migrate-seed` | postgres |
-| 时序库 schema | `migrations/tsdb/*.sql` | `000001_tsdb_schema.sql` | `goose_db_version_tsdb` | `migrate-tsdb-schema` | postgres-tsdb（TimescaleDB）|
+| 流 | 合并范围 | 当前文件 | 版本表 | compose 服务 | 目标库 |
+|----|----------|----------|--------|--------------|--------|
+| 主库 schema (DDL) | 基线 `000001`（含原 `000001..000032` 全部增量） | `migrations/000001_init_schema.sql` | `goose_db_version` | `migrate-schema` | postgres（主库，纯 PG16）|
+| 主库 seed (DML) | 基线 `000001`（含第一次合并的 `000001..000002`，及第二次合并新增的 `000002_repair_builtin_role_api_permissions`/`000003_prune_device_info_mml_sub_fields` 全部增量） | `migrations/seed/000001_init_seed.sql` | `goose_db_version_seed` | `migrate-seed` | postgres |
+| 时序库 schema | 基线 `000001`（含原 `000001..000003` 全部增量） | `migrations/tsdb/000001_tsdb_schema.sql` | `goose_db_version_tsdb` | `migrate-tsdb-schema` | postgres-tsdb（TimescaleDB）|
 
-> **2026-06-22 复合**（产品尚未正式上线，允许清库重建）：把 schema 流的 `000002`（`pm_completion_watermarks` 表）折进 `000001` 基线 Up 段末尾，删除 `000002_pm_completion_watermark.sql`；同时确认上轮已合入 baseline 末尾的 `device_info` BTS/GSM 投影列段（`bsc_select`/`oml_remote_ip`/`oml_remote_ip_bak`/`ipa_unit_id`）在历史部署上未应用，本次通过 `docker compose down -v` 清空 volume 后重跑 baseline 直接生效（短期所有部署均按全新部署起跑）。seed/tsdb 流未变动。
->
-> **2026-06-17 复合**（首次）：把三条流自上次基线后积累的全部增量各自折叠回单个 `000001`——
-> - schema 的 `000002~000006`（`device_info` 加列 `op_state`/`admin_state`/`ipsec_addr` + 改 `transmit_power` 注释；`ufte_task_types.product_scope`；`firmware_versions.product_id` + 唯一索引改 `product_id`）折进 schema 基线 Up 段末尾（均幂等 `ADD COLUMN/CREATE INDEX IF [NOT] EXISTS` / `COMMENT`）。
-> - seed 的 `000002~000013`（菜单/字典/`sys_config` 变更 + `console_v2`→`console` 改名 + ufte 升级模板 `product_scope` 回填等）由全量迁移后的干净库重新 `pg_dump --data-only` 成**最终态** seed 基线（不再保留 insert-then-delete 的中间变更）。
-> - tsdb 流本就单文件，未改。
->
-> **验证**：全新双实例（postgres + postgres-tsdb）三流 `goose up` 全绿；折叠前（多文件）与折叠后（单 `000001`）逐表行数完全一致（196 表 diff=0）；全栈起来三皮肤均 200、login 400、dictloader 正常加载。
+三个 `000001` 文件是 2026-07-20 的 consolidated baseline（seed 当天二次合并）；此后允许按各自流继续追加增量迁移。schema 和 seed 基线来自完整迁移最终状态的 `pg_dump`；tsdb 基线仍是手写显式 DDL，本次手动合入了原 `000002`（alarms_history retention 固定每天 01:08 Asia/Shanghai）和 `000003`（删除与 Go 侧聚合管线重复的废弃 `pm_metrics_hourly_cagg`）的净效果。
+
+> ⚠️ 此基线仅兼容全新安装或允许清库重建的环境，不是既有数据库的就地升级路径。三条流在干净数据库上分别从版本 `000001` 起跑。
 
 ### 三个基线文件
 
 1. **`000001_init_schema.sql`**（主库 DDL）—— 全量业务表结构（所有 public 业务表 + 分区子表 + 扩展 `ltree`/`pg_trgm`/`pgcrypto`/`uuid-ossp` + 触发器/函数）。**纯 PostgreSQL 16，无 timescaledb 扩展、无任何超表**（时序对象全在 tsdb 流）。由全量迁移后的库 `pg_dump --schema-only` 生成；PL/pgSQL 函数体已用 goose `StatementBegin/End` 包裹。
 2. **`seed/000001_init_seed.sql`**（主库 DML）—— 全量内置参考数据（RBAC/菜单/权限/系统字典/`sys_configs`/MML 命令树/`standard_params` 等）。由干净 schema+seed 库 `pg_dump --data-only --inserts --on-conflict-do-nothing` 生成；**不含运行期 dictloader 从 `data/` XML 加载的 `param_models`/`param_mappings`/`products`/`alarm_definitions`/`perf_indicators` 等**。所有 INSERT 带**无目标 `ON CONFLICT DO NOTHING`**，对全新库重复前向应用幂等。
-3. **`tsdb/000001_tsdb_schema.sql`**（时序库）—— 14 张时序表（`pm_metrics` + 4 rollup、`pm_group_metrics_*`、`pm_adhoc_aggregation_results`、`alarms_history`、`mr_records`、`trace_messages`、`pm_files`、`mr_files`）+ 显式 `create_hypertable` + 压缩/保留策略 + 7 张影子维度表（worker `tsdbsync` 从主库同步，供本库 JOIN 替代跨库 JOIN）+ `alarm_efficiency_metrics` 物化视图。显式 DDL，不依赖 pg_restore catalog 注入。
+3. **`tsdb/000001_tsdb_schema.sql`**（时序库）—— 15 张时序表（`pm_metrics` + 4 rollup、`pm_group_metrics_*`、`pm_adhoc_aggregation_results`、`alarms_history`、`mr_records`、`trace_messages`、`pm_files`、`mr_files`）+ 显式 `create_hypertable` + 压缩/保留策略（`alarms_history` retention 固定每天 01:08 Asia/Shanghai）+ 7 张影子维度表（worker `tsdbsync` 从主库同步，供本库 JOIN 替代跨库 JOIN）+ `alarm_efficiency_metrics` 物化视图。显式 DDL，不依赖 pg_restore catalog 注入；**不再建已确认废弃且无任何查询引用的 `pm_metrics_hourly_cagg` 连续聚合视图**。
+
+参数同步基线有一个有意保留的无外键设计：`parameter_sync_task_results.task_id` 和 `parameter_sync_staging_values.task_id` 都不声明到 `device_tasks` 的外键。`device_tasks` 按 `device_sn` 做 hash 分区，物理主键是 `(id, device_sn)`，PostgreSQL 不允许只引用其中的 `id`。应用处理链会校验 payload 的 `device_sn` 与同步 run 的逻辑关联，并按 `(id, device_sn)` 加载设备任务；两张表的 `run_id` 外键仍然保留。不要补回不可成立的 `REFERENCES device_tasks(id)`；如果未来在这两张表持久化 `device_sn`，再评估复合外键。
 
 ## 双库（main + tsdb）物理分离
 
@@ -50,8 +47,8 @@ OMC 跑两个 PostgreSQL/TimescaleDB 实例，迁移分两条物理目标库的�
 
 三条流是相互独立的 goose 版本序列，记在不同版本表、**不共享号段**——所以 `000001` 在三处各出现一次是**正常的**（不是撞号）。查撞号要**分目录各查**，别把三个目录的文件名合并去重。
 
-- 新增 = 该流**现有最大号 + 1**。当前三流都在 `000001`，下一号都是 `000002`。
-- **不回填空号、不重排已有文件号、不复用已删号**——历史部署的 `goose_db_version*` 里可能仍有旧号，复用会让 goose 把新内容当「已应用」跳过。
+- 新增 = 该流**现有最大号 + 1**。当前主库 schema 下一号是 `000002`，seed 下一号是 `000002`，TSDB 下一号是 `000002`。
+- 从本基线开始，不回填空号、不重排或复用同一发布基线内已经应用过的版本号。三条流使用独立版本表，必须分目录判断下一号。
 - DDL → `migrations/`，DML 种子 → `migrations/seed/`，时序 DDL → `migrations/tsdb/`。
 - `DO $$` / `CREATE [OR REPLACE] FUNCTION` / 循环条件 → 必须 goose `StatementBegin/End` 包裹。
 - 幂等：`CREATE TABLE IF NOT EXISTS`、`ADD COLUMN IF NOT EXISTS`、`INSERT ... ON CONFLICT DO NOTHING`。
@@ -79,11 +76,13 @@ docker compose -f deployments/docker/docker-compose.yml up -d --build migrate-sc
 cd omcgo && make migrate-up   # = go run ./cmd/migrate up --paths migrations,migrations/seed
 ```
 
+> **版本表接口约束：**主库 schema 流（`migrations/`）的 Up/Down 必须使用 goose 默认版本表 `goose_db_version`，不得传自定义 `--table`；其 Down 会临时移动并恢复这个精确表名。只有 seed 和 TSDB 两条流使用已文档化的自定义接口：`--table goose_db_version_seed` 与 `--table goose_db_version_tsdb`。
+
 > ⚠️ **全新库验证 seed 必须用独立版本表**（compose 的 `migrate-seed` 已设 `GOOSE_TABLE=goose_db_version_seed`）。别用 `make migrate-up` 的 `--paths` 共享默认表跑全新库验证：schema 跑完默认版本表已占 `version_id=1`，seed 的 `000001` 会因撞号被当「已应用」跳过、不执行。
 
 ## 既有库升级约束
 
-本基线**面向全新发布部署**。既有（基线前已迁移过的）库的 `goose_db_version*` 里仍留着被折叠/删除的旧号，**不能**靠简单 `goose up` 平滑升级到本基线——要么按本基线重建，要么手工重置版本表。这是 re-baseline 的固有约束，符合「全新发布」场景。
+本基线**只面向全新发布部署或清库重建**。既有（合并前已迁移过的）库的 `goose_db_version*` 仍记录已经删除的增量版本，不能靠简单 `goose up` 升级，也不要仅重置版本表后在非空库上重跑基线。需要保留数据的环境必须另行设计和验证升级迁移；当前支持路径是备份所需数据、重建数据库，再从三个 `000001` 基线初始化。
 
 ## 连接池核定
 
@@ -135,7 +134,7 @@ docker compose exec -T postgres pg_dump -U omcgo -d omcgo \
 #    Down 用 DROP SCHEMA public CASCADE; seed 无回滚写 SELECT 1;），写入
 #    000001_init_schema.sql / seed/000001_init_seed.sql，删旧增量文件。
 
-# 6. 验证：down -v 再起，三流 goose up 全绿 + 逐表行数与 golden diff=0 + 全栈三皮肤 200。
+# 6. 验证：down -v 再起，三流 goose up 全绿 + 逐表行数与 golden diff=0 + 以浏览器实际页面验收 V1 webcode UI 壳。
 ```
 
 ## 相关位置

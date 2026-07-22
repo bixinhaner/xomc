@@ -109,7 +109,7 @@ func MetricFromKPIValue(v model.KPIValue) PMMetric {
 	}
 	endTime := v.Time
 	startTime := endTime.Add(-granularity15MinDuration)
-	return PMMetric{
+	m := PMMetric{
 		DeviceOUI:   v.OUI,
 		DeviceSN:    v.DeviceSN,
 		MetricPath:  v.IndicatorID,
@@ -123,6 +123,11 @@ func MetricFromKPIValue(v model.KPIValue) PMMetric {
 		ObjectLDN: ldn,
 		Extra:     extra,
 	}
+	if v.StatisType != "" {
+		st := StatisType(v.StatisType)
+		m.StatisType = &st
+	}
+	return m
 }
 
 // CopyIngest 原子写入一个 PM 文件的全部 metric 行 + pm_files 幂等标记（copy-direct 写路径）。

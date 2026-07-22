@@ -1,6 +1,7 @@
 package export
 
 import (
+	"strings"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -13,6 +14,11 @@ import (
 // deviceSelectCols 是 device / adhoc 行级表流式取数的固定列序（与 Scan 一一对应）。
 var deviceSelectCols = []string{
 	"id", "device_oui", "device_sn", "metric_path", "metric_type", "metric_value",
+	"statis_type", "granularity", "time", "start_time", "end_time", "object_ldn",
+}
+
+var deviceSelectColsNoID = []string{
+	"device_oui", "device_sn", "metric_path", "metric_type", "metric_value",
 	"statis_type", "granularity", "time", "start_time", "end_time", "object_ldn",
 }
 
@@ -29,6 +35,16 @@ func buildDeviceKeysetSQL(table string, req aggregator.QueryRequest, objectLDNs 
 		b = b.Where(sq.Expr(`("time", id) > (?, ?)`, curTime, curID))
 	}
 	b = b.OrderBy(`"time" ASC`, "id ASC").Limit(uint64(limit))
+	q, args, _ := b.ToSql()
+	return q, args
+}
+
+func buildDeviceOffsetSQL(table string, req aggregator.QueryRequest, objectLDNs []string, offset, limit int) (string, []any) {
+	b := storage.Psql.Select(deviceSelectColsNoID...).From(table)
+	b = applyDeviceExportFilters(b, req, objectLDNs)
+	b = b.OrderBy(`"time" ASC`, "device_oui ASC", "device_sn ASC", "object_ldn ASC", "metric_path ASC", "metric_type ASC").
+		Limit(uint64(limit)).
+		Offset(uint64(offset))
 	q, args, _ := b.ToSql()
 	return q, args
 }
@@ -82,7 +98,7 @@ func buildDistinctMetricsSQL(table string, metricPaths []string, start, end time
 		b = b.Where(sq.GtOrEq{"time": start})
 	}
 	if !end.IsZero() {
-		b = b.Where(sq.LtOrEq{"time": end})
+		b = b.Where(sq.Lt{"time": end})
 	}
 	q, args, _ := b.ToSql()
 	return q, args
@@ -133,7 +149,24 @@ func applyDeviceExportFilters(b sq.SelectBuilder, req aggregator.QueryRequest, o
 		b = b.Where(sq.Eq{"object_ldn": objectLDNs})
 	}
 	if len(req.MetricPaths) > 0 {
-		b = b.Where(sq.Eq{"metric_path": req.MetricPaths})
+		if req.MetricType != nil {
+			b = b.Where(sq.Eq{"metric_path": req.MetricPaths})
+		} else {
+			or := sq.Or{}
+			for _, raw := range req.MetricPaths {
+				path := strings.TrimSpace(raw)
+				if path == "" {
+					continue
+				}
+				or = append(or, sq.And{
+					sq.Eq{"metric_path": path},
+					sq.Eq{"metric_type": string(metricTypeFromPath(path))},
+				})
+			}
+			if len(or) > 0 {
+				b = b.Where(or)
+			}
+		}
 	}
 	if req.MetricType != nil {
 		b = b.Where(sq.Eq{"metric_type": string(*req.MetricType)})
@@ -145,7 +178,7 @@ func applyDeviceExportFilters(b sq.SelectBuilder, req aggregator.QueryRequest, o
 		b = b.Where(sq.GtOrEq{"time": req.StartTime})
 	}
 	if !req.EndTime.IsZero() {
-		b = b.Where(sq.LtOrEq{"time": req.EndTime})
+		b = b.Where(sq.Lt{"time": req.EndTime})
 	}
 	if len(req.Technologies) > 0 {
 		// buildDeviceKeysetSQL 跑在 metricDB=TsPool（device 维度直查 pm_metrics/pm_metrics_hourly），

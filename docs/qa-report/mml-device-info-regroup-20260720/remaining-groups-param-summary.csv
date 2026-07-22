@@ -1,0 +1,16 @@
+chapter_code,group_name,expected_paths,current_paths,to_add,to_delete,kept,source_sheets
+SG,SCTP参数管理,25,13,12,0,13,LTE:SG; NR:SN
+SH,RAN协议栈参数,215,63,152,0,63,LTE:SH; NR:SK
+SI,邻区参数管理,68,27,41,0,27,LTE:SI; NR:SL
+SJ,移动性参数管理,690,142,548,0,142,LTE:SJ; NR:SM
+SK,SON参数管理,62,28,34,0,28,LTE:SK; NR:SG
+SL,WAN口配置参数管理,37,36,1,0,36,LTE:SL; NR:SO
+SM,IPsec参数管理,9,9,0,0,9,LTE:SM
+SN,时间服务器参数管理,9,9,0,0,9,LTE:SN; NR:SP
+SO,GPS信息参数管理,3,3,0,0,3,LTE:SO; NR:SQ
+SP,MR参数管理,16,14,2,0,14,LTE:SP; NR:SR
+SQ,性能参数管理,10,10,0,0,10,LTE:SQ; NR:SS
+SR,扩展型一体化皮基站参数,83,29,54,0,29,LTE:SR
+SH_NR,本地分流规则,36,0,36,0,0,NR:SH
+SI_NR,基站能力参数管理,1,0,1,0,0,NR:SI
+ST_NR,软采规则,148,0,148,0,0,NR:ST

@@ -1,0 +1,4 @@
+interface:
+  display_name: "ACS 全链路压测"
+  short_description: "安全执行 ACS 服务与数据管线分级压力验证及结果分析"
+  default_prompt: "使用 $acs-stress-test 对当前 ACS 改动做分级压测。"

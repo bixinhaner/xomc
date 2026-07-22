@@ -253,6 +253,147 @@ FROM parameter_sync_runs WHERE id=$1`, runID).Scan(&runStatus, &expected, &termi
 	assert.Nil(t, stored.ActiveRunID)
 }
 
+func TestRecoverMissingResultsCallsProcessorForTerminalTasks(t *testing.T) {
+	pool := newParamSyncTestPool(t)
+	req := insertParamSyncRequestForTest(t, pool, RequestStatusRunning)
+	runID := uuid.New()
+	_, err := pool.Exec(context.Background(), `INSERT INTO parameter_sync_runs
+(id, request_id, device_id, device_sn, trigger_reason, sync_scope, status,
+ expected_task_count, terminal_task_count, processed_task_count, failed_task_count)
+VALUES ($1, $2, $3, $4, 'manual', 'full', 'waiting_device', 1, 1, 0, 0)`,
+		runID, req.ID, req.DeviceID, req.DeviceSN)
+	require.NoError(t, err)
+	_, err = pool.Exec(context.Background(), `UPDATE parameter_sync_requests SET run_id=$2, active_run_id=$2 WHERE id=$1`, req.ID, runID)
+	require.NoError(t, err)
+
+	completed := task.NewTask(&task.CreateTaskRequest{
+		DeviceSN: req.DeviceSN, Method: "GetParameterValues",
+		Params:     []byte(`{"names":["Device.Good"]}`),
+		CommandKey: "param-sync-" + runID.String() + "-0",
+		Source:     task.TaskSourceParamSync, SourceID: runID.String(), CreatorID: req.ID.String(),
+	})
+	require.NoError(t, task.NewPgTaskRepository(pool).Create(context.Background(), completed))
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM device_tasks WHERE id=$1`, completed.ID)
+	})
+	_, err = pool.Exec(context.Background(), `UPDATE device_tasks SET status='completed', completed_at=now() WHERE id=$1`, completed.ID)
+	require.NoError(t, err)
+
+	processor := &recordingResultProcessor{}
+	recovered, err := NewReconciler(pool, nil, nil).WithResultProcessor(processor).RecoverMissingResults(context.Background(), 20, 200, 200)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, recovered)
+	require.Len(t, processor.payloads, 1)
+	payload := processor.payloads[0]
+	assert.Equal(t, runID, payload.RunID)
+	assert.Equal(t, req.ID, payload.RequestID)
+	assert.Equal(t, completed.ID, payload.TaskID)
+	assert.Equal(t, req.DeviceSN, payload.DeviceSN)
+	assert.True(t, payload.Success)
+	assert.Equal(t, "device_tasks:"+completed.ID, payload.ResultRef)
+	assert.Contains(t, payload.EventID, "reconcile:"+runID.String()+":"+completed.ID)
+}
+
+func TestRecoverMissingResultsWithPGProcessorFinalizesSucceededRun(t *testing.T) {
+	pool := newParamSyncTestPool(t)
+	req := insertParamSyncRequestForTest(t, pool, RequestStatusRunning)
+	runID := uuid.New()
+	_, err := pool.Exec(context.Background(), `INSERT INTO parameter_sync_runs
+(id, request_id, device_id, device_sn, trigger_reason, sync_scope, status,
+ expected_task_count, terminal_task_count, processed_task_count, failed_task_count)
+VALUES ($1, $2, $3, $4, 'manual', 'partial', 'waiting_device', 1, 1, 0, 0)`,
+		runID, req.ID, req.DeviceID, req.DeviceSN)
+	require.NoError(t, err)
+	_, err = pool.Exec(context.Background(), `UPDATE parameter_sync_requests SET run_id=$2, active_run_id=$2 WHERE id=$1`, req.ID, runID)
+	require.NoError(t, err)
+
+	completed := task.NewTask(&task.CreateTaskRequest{
+		DeviceSN: req.DeviceSN, Method: "GetParameterValues",
+		Params:     []byte(`{"names":["Device.Good"]}`),
+		CommandKey: "param-sync-" + runID.String() + "-0",
+		Source:     task.TaskSourceParamSync, SourceID: runID.String(), CreatorID: req.ID.String(),
+	})
+	require.NoError(t, task.NewPgTaskRepository(pool).Create(context.Background(), completed))
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM device_tasks WHERE id=$1`, completed.ID)
+	})
+	_, err = pool.Exec(context.Background(), `UPDATE device_tasks SET status='completed', completed_at=now(),
+result='{"standard_parameter_values":[]}'::jsonb WHERE id=$1`, completed.ID)
+	require.NoError(t, err)
+
+	recovered, err := NewReconciler(pool, nil, nil).
+		WithResultProcessor(NewPGResultProcessor(pool)).
+		RecoverMissingResults(context.Background(), 20, 200, 200)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, recovered)
+	var resultStatus string
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT status FROM parameter_sync_task_results WHERE run_id=$1 AND task_id=$2`, runID, completed.ID).Scan(&resultStatus))
+	assert.Equal(t, "processed", resultStatus)
+	var runStatus RunStatus
+	var expected, terminal, processed int
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT status, expected_task_count, terminal_task_count, processed_task_count
+FROM parameter_sync_runs WHERE id=$1`, runID).Scan(&runStatus, &expected, &terminal, &processed))
+	assert.Equal(t, RunStatusSucceeded, runStatus)
+	assert.Equal(t, 1, expected)
+	assert.Equal(t, 1, terminal)
+	assert.Equal(t, 1, processed)
+	stored, err := NewPGRepository(pool).GetRequest(context.Background(), req.ID)
+	require.NoError(t, err)
+	assert.Equal(t, RequestStatusSucceeded, stored.Status)
+	assert.Nil(t, stored.ActiveRunID)
+}
+
+func TestRecoverMissingResultsWithPGProcessorFinalizesFailedRun(t *testing.T) {
+	pool := newParamSyncTestPool(t)
+	req := insertParamSyncRequestForTest(t, pool, RequestStatusRunning)
+	runID := uuid.New()
+	_, err := pool.Exec(context.Background(), `INSERT INTO parameter_sync_runs
+(id, request_id, device_id, device_sn, trigger_reason, sync_scope, status,
+ expected_task_count, terminal_task_count, processed_task_count, failed_task_count)
+VALUES ($1, $2, $3, $4, 'manual', 'partial', 'waiting_device', 1, 1, 0, 0)`,
+		runID, req.ID, req.DeviceID, req.DeviceSN)
+	require.NoError(t, err)
+	_, err = pool.Exec(context.Background(), `UPDATE parameter_sync_requests SET run_id=$2, active_run_id=$2 WHERE id=$1`, req.ID, runID)
+	require.NoError(t, err)
+
+	failed := task.NewTask(&task.CreateTaskRequest{
+		DeviceSN: req.DeviceSN, Method: "GetParameterValues",
+		Params:     []byte(`{"names":["Device.Bad"]}`),
+		CommandKey: "param-sync-" + runID.String() + "-0",
+		Source:     task.TaskSourceParamSync, SourceID: runID.String(), CreatorID: req.ID.String(),
+	})
+	require.NoError(t, task.NewPgTaskRepository(pool).Create(context.Background(), failed))
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM device_tasks WHERE id=$1`, failed.ID)
+	})
+	_, err = pool.Exec(context.Background(), `UPDATE device_tasks SET status='failed', completed_at=now(),
+error_code=9005, error_message='Invalid parameter name' WHERE id=$1`, failed.ID)
+	require.NoError(t, err)
+
+	recovered, err := NewReconciler(pool, nil, nil).
+		WithResultProcessor(NewPGResultProcessor(pool)).
+		RecoverMissingResults(context.Background(), 20, 200, 200)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, recovered)
+	var resultStatus string
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT status FROM parameter_sync_task_results WHERE run_id=$1 AND task_id=$2`, runID, failed.ID).Scan(&resultStatus))
+	assert.Equal(t, "failed", resultStatus)
+	var runStatus RunStatus
+	var processed, failedCount int
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT status, processed_task_count, failed_task_count
+FROM parameter_sync_runs WHERE id=$1`, runID).Scan(&runStatus, &processed, &failedCount))
+	assert.Equal(t, RunStatusFailed, runStatus)
+	assert.Equal(t, 1, processed)
+	assert.Equal(t, 1, failedCount)
+	stored, err := NewPGRepository(pool).GetRequest(context.Background(), req.ID)
+	require.NoError(t, err)
+	assert.Equal(t, RequestStatusFailed, stored.Status)
+	assert.Nil(t, stored.ActiveRunID)
+}
+
 func TestCancelAndRunFinalizationUseCompatibleLockOrder(t *testing.T) {
 	applicationName := "paramsync-lock-test-" + uuid.NewString()
 	pool := newParamSyncTestPoolWithApp(t, applicationName)

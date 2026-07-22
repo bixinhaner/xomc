@@ -10,8 +10,8 @@ import (
 //
 // #528：下游持续任务不再用「now − 固定 N 格」猜测目标桶，改为直接消费上游「完成水位」。
 // 水位记录的就是上游已确定卷完的那一格的桶起点，本身已对齐格边界；此函数仅做防御性对齐，
-// 保证无论传入的是水位桶起点还是任意时刻，落到的都是确定的格起点，作为 aggregator time 过滤边界
-// （StartTime==EndTime==桶起点 → 只命中这一格）。
+// 保证无论传入的是水位桶起点还是任意时刻，落到的都是确定的格起点，作为 aggregator time 半开过滤边界
+// 的起点。
 //
 // loc 为业务时区（daily/weekly/monthly 的零点对齐依赖时区；hourly/15min 与时区无关）。
 func truncateBucketStart(g metrics.Granularity, t time.Time, loc *time.Location) time.Time {
@@ -35,6 +35,42 @@ func truncateBucketStart(g metrics.Granularity, t time.Time, loc *time.Location)
 	default:
 		// 未知粒度：退回 hourly 口径（保守）。
 		return t.Truncate(time.Hour)
+	}
+}
+
+// nextBucketStart 返回给定桶起点之后的下一桶起点，用于构造 aggregator.Query 的半开窗口。
+func nextBucketStart(g metrics.Granularity, bucket time.Time) time.Time {
+	switch g {
+	case metrics.Granularity15Min:
+		return bucket.Add(15 * time.Minute)
+	case metrics.GranularityHourly:
+		return bucket.Add(time.Hour)
+	case metrics.GranularityDaily:
+		return bucket.AddDate(0, 0, 1)
+	case metrics.GranularityWeekly:
+		return bucket.AddDate(0, 0, 7)
+	case metrics.GranularityMonthly:
+		return bucket.AddDate(0, 1, 0)
+	default:
+		return bucket.Add(time.Hour)
+	}
+}
+
+// previousBucketStart 返回给定桶起点之前的上一桶起点。
+func previousBucketStart(g metrics.Granularity, bucket time.Time) time.Time {
+	switch g {
+	case metrics.Granularity15Min:
+		return bucket.Add(-15 * time.Minute)
+	case metrics.GranularityHourly:
+		return bucket.Add(-time.Hour)
+	case metrics.GranularityDaily:
+		return bucket.AddDate(0, 0, -1)
+	case metrics.GranularityWeekly:
+		return bucket.AddDate(0, 0, -7)
+	case metrics.GranularityMonthly:
+		return bucket.AddDate(0, -1, 0)
+	default:
+		return bucket.Add(-time.Hour)
 	}
 }
 

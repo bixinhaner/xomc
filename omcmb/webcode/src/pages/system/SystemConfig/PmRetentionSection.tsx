@@ -5,17 +5,16 @@
 // 接入方式：复用现有 useSysConfigsByCategory + useBatchUpdateSysConfigs
 // （sys_configs.changed 通过 admin.SysConfigService.RegisterSavedHook 触发后端 retention.Service.Reload）
 //
-// ⚠️ 本组件尚未挂载到 SystemConfig/index.tsx — 留早上人工挂载（避免改 chenbo01 多人编辑的 index.tsx）。
-// 早上挂载步骤：在 index.tsx 适当位置加 `<PmRetentionSection />` 即可。
-
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Card, Form, message, Space, Spin } from 'antd';
+import { Alert, Button, Card, Form, message, Space, Spin } from 'antd';
 import {
   useSysConfigsByCategory,
   useBatchUpdateSysConfigs,
+  useSysConfigApplyBatch,
 } from '@core/hooks/api/useSystem';
 import { AddonInputNumber } from '@/components/common/InputAddon';
 import { useT } from '@/hooks/useT';
+import type { ConfigApplyBatch } from '@core/types/system';
 
 // 与后端 internal/pm/retention/policies.go 的 PolicyKey 严格对齐。
 type PolicyKey =
@@ -51,6 +50,9 @@ export default function PmRetentionSection() {
   const t = useT();
   const [form] = Form.useForm<Record<PolicyKey, number>>();
   const [submitting, setSubmitting] = useState(false);
+  const [submittedBatch, setSubmittedBatch] = useState<ConfigApplyBatch | null>(null);
+  const { data: refreshedBatch } = useSysConfigApplyBatch(submittedBatch?.id);
+  const applyBatch = refreshedBatch ?? submittedBatch;
 
   const { data: configs, isLoading } = useSysConfigsByCategory(PM_RETENTION_CATEGORY);
   const { mutateAsync: batchUpdate } = useBatchUpdateSysConfigs();
@@ -80,7 +82,7 @@ export default function PmRetentionSection() {
     try {
       const values = await form.validateFields();
       setSubmitting(true);
-      await batchUpdate({
+      const result = await batchUpdate({
         category: PM_RETENTION_CATEGORY,
         items: KEYS.map((k) => ({
           key: k,
@@ -88,6 +90,7 @@ export default function PmRetentionSection() {
           value_type: 'int',
         })),
       });
+      setSubmittedBatch(result.batch);
       message.success(t('pmRetention.save.success'));
     } catch {
       // validateFields 失败或网络错误：交给 antd 自身的 UI 提示，不再额外弹错
@@ -157,6 +160,17 @@ export default function PmRetentionSection() {
           ))}
         </Form>
       </Spin>
+      {applyBatch && (
+        <Alert
+          style={{ marginTop: 12 }}
+          type={applyBatch.status === 'failed' ? 'error' : applyBatch.status === 'applied' ? 'success' : 'info'}
+          showIcon
+          message={t(`sysconfig.apply.${applyBatch.status}`)}
+          description={applyBatch.status === 'failed'
+            ? applyBatch.targets.find((target) => target.lastError)?.lastError
+            : undefined}
+        />
+      )}
     </Card>
   );
 }

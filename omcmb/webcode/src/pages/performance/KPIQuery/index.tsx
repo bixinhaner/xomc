@@ -83,6 +83,7 @@ import { getEffectiveLdns, type CellSelection } from '../PmDashboard/cellDrilldo
 import { synchronizeUpdatedTemplateState } from './templateUpdateState';
 import QueryTemplateDetailModal from './QueryTemplateDetailModal';
 import { resolveTemplateMetricPaths } from './templateMetricResolver';
+import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
 
 const { Text, Title } = Typography;
 const { RangePicker } = DatePicker;
@@ -120,6 +121,14 @@ const DEFAULT_PAYLOAD: QueryTemplatePayload = {
   deviceType: 'ENB',
 };
 
+const DEFAULT_PIVOT_PAGE_SIZE = 50;
+
+const createDefaultTemplatePayload = (): QueryTemplatePayload => ({
+  ...DEFAULT_PAYLOAD,
+  deviceSns: [...DEFAULT_PAYLOAD.deviceSns],
+  metricPaths: [...DEFAULT_PAYLOAD.metricPaths],
+});
+
 interface SaveTemplateFormState {
   open: boolean;
   mode: 'create' | 'update';
@@ -130,6 +139,16 @@ interface SaveTemplateFormState {
   payload: QueryTemplatePayload;
   customRange: [dayjs.Dayjs, dayjs.Dayjs] | null;
 }
+
+const createBlankSaveTemplateForm = (open: boolean): SaveTemplateFormState => ({
+  open,
+  mode: 'create',
+  name: '',
+  description: '',
+  visibility: 'private',
+  payload: createDefaultTemplatePayload(),
+  customRange: null,
+});
 
 export default function KPIQuery() {
   const token = useThemeToken();
@@ -193,20 +212,14 @@ export default function KPIQuery() {
   );
 
   // ── 存为模板 Modal ───────────────────────────────────────────────
-  const [saveForm, setSaveForm] = useState<SaveTemplateFormState>({
-    open: false,
-    mode: 'create',
-    name: '',
-    description: '',
-    visibility: 'private',
-    payload: DEFAULT_PAYLOAD,
-    customRange: null,
-  });
+  const [saveForm, setSaveForm] = useState<SaveTemplateFormState>(() => createBlankSaveTemplateForm(false));
 
   // ── 查询执行状态 ─────────────────────────────────────────────────
   // submittedPayload 是真正用于查询的快照；表单编辑时不立即查询，等用户点"查询"
   const [submittedPayload, setSubmittedPayload] = useState<QueryTemplatePayload | null>(null);
   const [submittedRange, setSubmittedRange] = useState<{ start: string; end: string } | null>(null);
+  const [pivotPage, setPivotPage] = useState(1);
+  const [pivotPageSize, setPivotPageSize] = useState(DEFAULT_PIVOT_PAGE_SIZE);
 
   // #619：加载当前选中设备的可用小区列表（供 CellDrilldownSelector 展示选项）。
   const { byDevice } = useMetricObjectsByDevices(
@@ -228,13 +241,15 @@ export default function KPIQuery() {
       metricPaths: submittedPayload.metricPaths,
       startTime: submittedRange.start,
       endTime: submittedRange.end,
-      limit: 5000,
+      limit: pivotPageSize,
+      offset: (pivotPage - 1) * pivotPageSize,
+      pageBy: 'pivot_row' as const,
       // 让后端按 (时间桶 × 指标) 补齐占位行，避免该设备此时段全空时整张表"暂无数据"
       fillEmpty: true,
       // #619：测量对象后端过滤（空 = 不过滤）。
       objectLdns: effectiveLdns.length > 0 ? effectiveLdns : undefined,
     };
-  }, [submittedPayload, submittedRange, effectiveLdns]);
+  }, [submittedPayload, submittedRange, effectiveLdns, pivotPage, pivotPageSize]);
 
   const {
     data: aggregatedRows,
@@ -263,6 +278,27 @@ export default function KPIQuery() {
   }, [aggErrors, message, t]);
 
   // ── 行为 ─────────────────────────────────────────────────────────
+  const isSelectionExceedsLimit = (target: QueryTemplatePayload): boolean =>
+    target.deviceSns.length > PM_QUERY_SELECTION_LIMIT || target.metricPaths.length > PM_QUERY_SELECTION_LIMIT;
+
+  const warnIfSelectionExceedsLimit = (target: QueryTemplatePayload): boolean => {
+    if (target.deviceSns.length > PM_QUERY_SELECTION_LIMIT) {
+      message.warning(t('perf.kpiQuery.deviceLimitExceeded', {
+        max: PM_QUERY_SELECTION_LIMIT,
+        count: target.deviceSns.length,
+      }));
+      return true;
+    }
+    if (target.metricPaths.length > PM_QUERY_SELECTION_LIMIT) {
+      message.warning(t('perf.kpiQuery.metricLimitExceeded', {
+        max: PM_QUERY_SELECTION_LIMIT,
+        count: target.metricPaths.length,
+      }));
+      return true;
+    }
+    return false;
+  };
+
   const handleQuery = () => {
     if (payload.deviceSns.length === 0) {
       message.warning(t('perf.kpiQuery.selectDeviceRequired'));
@@ -270,6 +306,9 @@ export default function KPIQuery() {
     }
     if (payload.metricPaths.length === 0) {
       message.warning(t('perf.kpiQuery.selectMetricRequired'));
+      return;
+    }
+    if (warnIfSelectionExceedsLimit(payload)) {
       return;
     }
     let range: { start: string; end: string } | null;
@@ -296,6 +335,7 @@ export default function KPIQuery() {
     }
     setSubmittedPayload(payload);
     setSubmittedRange(range);
+    setPivotPage(1);
     // #619：点查询时才把勾选起到快照，之后过滤才生效。
     setSubmittedCellSel(cellSel);
     // 「查询」兼并旧「刷新」按钮的强刷语义：同条件再次点击也强制重拉一次最新数据
@@ -303,10 +343,17 @@ export default function KPIQuery() {
     void refetchAgg();
   };
 
-  // 导出取「最近一次实际查询」的快照（submittedPayload/submittedRange），而非表单实时值，
-  // 保证"导出=屏幕所见"。复用 dashboard 取数链路，但用 kpi_query 来源输出查询页表格列。
+  // 导出取「最近一次实际查询」的筛选快照（submittedPayload/submittedRange），而非表单实时值。
+  // 表格已是后端分页，导出不带当前页 limit/offset，口径是当前筛选条件下的全量数据。
+  // 复用 dashboard 取数链路，但用 kpi_query 来源输出查询页表格列。
   const handleExport = () => {
+    if (warnIfSelectionExceedsLimit(payload)) {
+      return;
+    }
     if (!submittedPayload || !submittedRange) return; // 按钮已禁用，双保险
+    if (warnIfSelectionExceedsLimit(submittedPayload)) {
+      return;
+    }
     const sel = {
       ...kpiQueryToDashboardSelection(submittedPayload, submittedRange),
       objectLdns: effectiveLdns.length > 0 ? effectiveLdns : undefined,
@@ -343,8 +390,12 @@ export default function KPIQuery() {
     }
   };
 
-  const handleOpenSaveModal = () => {
-    // 从主表单复制当前条件作为初值（即"存为模板"工作流）；从侧栏 + 新建也走这里，复用主表单 default
+  const handleOpenCreateModal = () => {
+    setSaveForm(createBlankSaveTemplateForm(true));
+  };
+
+  const handleOpenSaveAsModal = () => {
+    // 从主表单复制当前条件作为初值（即"存为模板"工作流）。
     setSaveForm({
       open: true,
       mode: 'create',
@@ -356,7 +407,10 @@ export default function KPIQuery() {
     });
   };
 
-  const handleOpenUpdateModal = (tpl: QueryTemplate) => {
+  const handleOpenUpdateModal = async (tpl: QueryTemplate) => {
+    const dt = (tpl.payload.deviceType ?? 'ENB') as DeviceType;
+    const { paths, labels } = await resolveTemplateMetricPaths(dt, tpl.payload.metricPaths);
+    setMetricLabels((prev) => ({ ...prev, ...labels }));
     setSaveForm({
       open: true,
       mode: 'update',
@@ -364,7 +418,7 @@ export default function KPIQuery() {
       name: tpl.name,
       description: tpl.description ?? '',
       visibility: tpl.visibility,
-      payload: tpl.payload,
+      payload: { ...tpl.payload, metricPaths: paths },
       customRange:
         tpl.payload.timeRangePreset === 'custom' && tpl.payload.absoluteStart && tpl.payload.absoluteEnd
           ? [dayjs(tpl.payload.absoluteStart), dayjs(tpl.payload.absoluteEnd)]
@@ -386,6 +440,9 @@ export default function KPIQuery() {
     }
     if (saveForm.payload.timeRangePreset === 'custom' && !saveForm.customRange) {
       message.warning(t('perf.kpiQuery.selectCustomRangeRequired'));
+      return;
+    }
+    if (warnIfSelectionExceedsLimit(saveForm.payload)) {
       return;
     }
     // 保存时回填 custom 模式的绝对时间（使用 Modal 内部的 payload + customRange，不是主表单）
@@ -513,9 +570,10 @@ export default function KPIQuery() {
                     type="text"
                     size="small"
                     icon={<EditOutlined />}
+                    aria-label={t('common.edit')}
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleOpenUpdateModal(tpl);
+                      void handleOpenUpdateModal(tpl);
                     }}
                   />
                 </Tooltip>,
@@ -576,7 +634,8 @@ export default function KPIQuery() {
                 type="text"
                 size="small"
                 icon={<PlusOutlined />}
-                onClick={handleOpenSaveModal}
+                aria-label={t('perf.kpiQuery.newTemplate')}
+                onClick={handleOpenCreateModal}
               />
             </Tooltip>
             <Tooltip title={t('perf.kpiQuery.refreshList')}>
@@ -836,14 +895,14 @@ export default function KPIQuery() {
                 <Button type="primary" icon={<TableOutlined />} loading={aggFetching} onClick={handleQuery}>
                   {t('common.query')}
                 </Button>
-                <Button icon={<SaveOutlined />} onClick={handleOpenSaveModal}>
+                <Button icon={<SaveOutlined />} onClick={handleOpenSaveAsModal}>
                   {t('perf.kpiQuery.saveAsTemplate')}
                 </Button>
                 <Button
                   icon={<ExportOutlined />}
                   onClick={handleExport}
                   loading={createExport.isPending}
-                  disabled={!submittedPayload || aggFetching}
+                  disabled={aggFetching || (!submittedPayload && !isSelectionExceedsLimit(payload))}
                 >
                   {t('perf.kpiQuery.exportCsv')}
                 </Button>
@@ -858,6 +917,8 @@ export default function KPIQuery() {
                     setActiveTemplateId(undefined);
                     setSubmittedPayload(null);
                     setSubmittedRange(null);
+                    setPivotPage(1);
+                    setPivotPageSize(DEFAULT_PIVOT_PAGE_SIZE);
                   }}
                 >
                   {t('common.reset')}
@@ -896,6 +957,17 @@ export default function KPIQuery() {
           <PivotTable
             rows={aggregatedRows}
             loading={aggLoading || aggFetching}
+            pagination={{
+              current: pivotPage,
+              pageSize: pivotPageSize,
+              total: aggTotal,
+              showSizeChanger: true,
+              showTotal: (count) => t('perf.kpiQuery.pivot.totalRows', { count }),
+              onChange: (page, pageSize) => {
+                setPivotPage(page);
+                setPivotPageSize(pageSize);
+              },
+            }}
             // gNB 查空时给更明确的引导（#201）：5G 真机样本厂商错配会让 KPI 算不出、
             // 后端返回 items=null，泛化「暂无数据」无法区分「指标库未注册」与「时段无采样」。
             // 仅在已发起查询（submittedPayload 存在）且制式=gNB 时替换文案。
@@ -927,6 +999,7 @@ export default function KPIQuery() {
           technology={deviceTypeToNetworkTech(
             (pickerTarget === 'modal' ? saveForm.payload.deviceType : payload.deviceType) ?? 'ENB',
           )}
+          maxSelected={PM_QUERY_SELECTION_LIMIT}
         />
 
         <MetricPickerModal
@@ -946,6 +1019,8 @@ export default function KPIQuery() {
           }
           // 外层「设备类型」是唯一来源（#443）：锁定弹窗内部类型，隐藏其重复下拉，跟随外层值。
           lockDeviceType
+          maxSelected={PM_QUERY_SELECTION_LIMIT}
+          enableBatchInput
         />
 
         <QueryTemplateDetailModal
