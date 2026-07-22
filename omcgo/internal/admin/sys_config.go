@@ -67,6 +67,16 @@ const (
 	ConfigApplyStatusApplied  = "applied"
 	ConfigApplyStatusFailed   = "failed"
 
+	// ConfigApplySuccessScopeRuntimeApplied 表示目标成功后，运行态策略已经由目标系统应用。
+	ConfigApplySuccessScopeRuntimeApplied = "runtime_applied"
+	// ConfigApplySuccessScopeEventDelivered 只表示可靠消息已经发布，不代表所有消费实例已加载。
+	ConfigApplySuccessScopeEventDelivered = "event_delivered"
+
+	ConfigApplyObservationApplied       = "applied"
+	ConfigApplyObservationFailed        = "failed"
+	ConfigApplyObservationClaimFailed   = "claim_failed"
+	ConfigApplyObservationExecuteFailed = "execute_failed"
+
 	defaultApplyLeaseDuration      = time.Minute
 	defaultApplyLeaseRenewInterval = 20 * time.Second
 )
@@ -77,6 +87,7 @@ const (
 type ConfigApplyTarget struct {
 	Target        string         `json:"target"`
 	Status        string         `json:"status"`
+	SuccessScope  string         `json:"success_scope"`
 	Attempts      int            `json:"attempts"`
 	AppliedAt     *time.Time     `json:"applied_at,omitempty"`
 	LastError     string         `json:"last_error,omitempty"`
@@ -137,6 +148,19 @@ type ConfigApplyWork struct {
 // ConfigApplyHandler 执行一个目标的外部运行态更新。actualValue 只持久化给受控诊断，
 // 不通过状态 HTTP API 暴露；返回 error 表示意图已保存但尚未生效。
 type ConfigApplyHandler func(ctx context.Context, work ConfigApplyWork) (actualValue map[string]any, err error)
+
+// ConfigApplyObservation 是一次配置应用尝试的低基数、可观测结果。BatchID 仅用于日志关联，
+// Prometheus 指标只使用 category/target/result，避免把批次 ID 变成高基数标签。
+type ConfigApplyObservation struct {
+	BatchID  uuid.UUID
+	Category string
+	Target   string
+	Attempts int
+	Result   string
+	Err      error
+}
+
+type ConfigApplyObserver func(ConfigApplyObservation)
 
 // PgSysConfigRepository implements SysConfigRepository using PostgreSQL.
 type PgSysConfigRepository struct {
@@ -350,6 +374,9 @@ RETURNING id, created_at, updated_at
 		if target.Target == "" {
 			return BatchUpsertResult{}, fmt.Errorf("create config apply target: target is required")
 		}
+		if target.SuccessScope == "" {
+			target.SuccessScope = configApplySuccessScope(target.Target)
+		}
 		if target.Status == "" {
 			target.Status = ConfigApplyStatusPending
 		}
@@ -411,6 +438,7 @@ FROM config_apply_targets WHERE batch_id = $1 ORDER BY target ASC
 		if err := rows.Scan(&target.Target, &target.Status, &target.Attempts, &target.AppliedAt, &target.LastError); err != nil {
 			return nil, fmt.Errorf("scan config apply target: %w", err)
 		}
+		target.SuccessScope = configApplySuccessScope(target.Target)
 		batch.Targets = append(batch.Targets, target)
 	}
 	if err := rows.Err(); err != nil {
@@ -602,6 +630,7 @@ type SysConfigService struct {
 	hooks                   []SysConfigSavedHook
 	validators              map[validatorKey]SysConfigValidator
 	appliers                map[string]map[string]ConfigApplyHandler
+	applyObserver           ConfigApplyObserver
 	applyLeaseDuration      time.Duration
 	applyLeaseRenewInterval time.Duration
 }
@@ -646,6 +675,12 @@ func (s *SysConfigService) RegisterApplyHandler(category, target string, handler
 		s.appliers[category] = make(map[string]ConfigApplyHandler)
 	}
 	s.appliers[category][target] = handler
+}
+
+// SetApplyObserver 注入配置应用结果观察器。观察器只负责日志/指标，不参与业务状态推进；
+// 即使观察器异常也不能中断配置应用。
+func (s *SysConfigService) SetApplyObserver(observer ConfigApplyObserver) {
+	s.applyObserver = observer
 }
 
 // RegisterValidator 注册 (category, key) 的值校验器。仅在进程启动 wiring 阶段调用。
@@ -776,12 +811,26 @@ func (s *SysConfigService) configApplyTargetsForCategory(category string) []Conf
 		sort.Strings(names)
 		targets := make([]ConfigApplyTarget, 0, len(names))
 		for _, target := range names {
-			targets = append(targets, ConfigApplyTarget{Target: target, Status: ConfigApplyStatusPending})
+			targets = append(targets, ConfigApplyTarget{
+				Target:       target,
+				Status:       ConfigApplyStatusPending,
+				SuccessScope: configApplySuccessScope(target),
+			})
 		}
 		return targets
 	}
 	now := time.Now().UTC()
-	return []ConfigApplyTarget{{Target: "runtime_cache", Status: ConfigApplyStatusApplied, AppliedAt: &now}}
+	return []ConfigApplyTarget{{
+		Target: "runtime_cache", Status: ConfigApplyStatusApplied,
+		SuccessScope: ConfigApplySuccessScopeRuntimeApplied, AppliedAt: &now,
+	}}
+}
+
+func configApplySuccessScope(target string) string {
+	if target == "acs_transfer_event_delivery" {
+		return ConfigApplySuccessScopeEventDelivered
+	}
+	return ConfigApplySuccessScopeRuntimeApplied
 }
 
 // ApplyBatch 立即执行一个保存后的 batch。处理器失败会转为持久化 failed 状态，而不是
@@ -820,8 +869,12 @@ func (s *SysConfigService) RetryPendingApplyOnce(ctx context.Context) (bool, err
 		return false, nil
 	}
 	work, err := applyRepo.ClaimNextApplyTarget(ctx)
-	if err != nil || work == nil {
+	if err != nil {
+		s.observeApply(ConfigApplyObservation{Result: ConfigApplyObservationClaimFailed, Err: err})
 		return false, err
+	}
+	if work == nil {
+		return false, nil
 	}
 	return true, s.executeApplyWork(ctx, applyRepo, *work)
 }
@@ -829,7 +882,14 @@ func (s *SysConfigService) RetryPendingApplyOnce(ctx context.Context) (bool, err
 func (s *SysConfigService) executeApplyWork(ctx context.Context, repo SysConfigApplyRepository, work ConfigApplyWork) error {
 	handler := s.appliers[work.Batch.Category][work.Target.Target]
 	if handler == nil {
-		return repo.CompleteApplyTarget(ctx, work, nil, fmt.Errorf("no config apply handler registered for %s/%s", work.Batch.Category, work.Target.Target))
+		applyErr := fmt.Errorf("no config apply handler registered for %s/%s", work.Batch.Category, work.Target.Target)
+		completeErr := repo.CompleteApplyTarget(ctx, work, nil, applyErr)
+		if completeErr != nil {
+			s.observeApplyWork(work, ConfigApplyObservationExecuteFailed, completeErr)
+			return completeErr
+		}
+		s.observeApplyWork(work, ConfigApplyObservationFailed, applyErr)
+		return nil
 	}
 
 	leaseDuration := s.applyLeaseDuration
@@ -866,22 +926,56 @@ func (s *SysConfigService) executeApplyWork(ctx context.Context, repo SysConfigA
 	for {
 		select {
 		case result := <-resultCh:
-			return repo.CompleteApplyTarget(ctx, work, result.actual, result.err)
+			if err := repo.CompleteApplyTarget(ctx, work, result.actual, result.err); err != nil {
+				s.observeApplyWork(work, ConfigApplyObservationExecuteFailed, err)
+				return err
+			}
+			if result.err != nil {
+				s.observeApplyWork(work, ConfigApplyObservationFailed, result.err)
+			} else {
+				s.observeApplyWork(work, ConfigApplyObservationApplied, nil)
+			}
+			return nil
 		case <-ctx.Done():
-			return fmt.Errorf("config apply context ended for %s/%s: %w", work.Batch.Category, work.Target.Target, ctx.Err())
+			err := fmt.Errorf("config apply context ended for %s/%s: %w", work.Batch.Category, work.Target.Target, ctx.Err())
+			s.observeApplyWork(work, ConfigApplyObservationExecuteFailed, err)
+			return err
 		case <-ticker.C:
 			leaseExpiresAt := time.Now().UTC().Add(leaseDuration)
 			renewed, err := repo.RenewApplyTargetLease(ctx, work, leaseExpiresAt)
 			if err != nil {
 				cancelHandler()
-				return fmt.Errorf("renew config apply lease for %s/%s: %w", work.Batch.Category, work.Target.Target, err)
+				err = fmt.Errorf("renew config apply lease for %s/%s: %w", work.Batch.Category, work.Target.Target, err)
+				s.observeApplyWork(work, ConfigApplyObservationExecuteFailed, err)
+				return err
 			}
 			if !renewed {
 				cancelHandler()
-				return fmt.Errorf("config apply lease lost for %s/%s", work.Batch.Category, work.Target.Target)
+				err := fmt.Errorf("config apply lease lost for %s/%s", work.Batch.Category, work.Target.Target)
+				s.observeApplyWork(work, ConfigApplyObservationExecuteFailed, err)
+				return err
 			}
 		}
 	}
+}
+
+func (s *SysConfigService) observeApplyWork(work ConfigApplyWork, result string, err error) {
+	s.observeApply(ConfigApplyObservation{
+		BatchID:  work.Batch.ID,
+		Category: work.Batch.Category,
+		Target:   work.Target.Target,
+		Attempts: work.Target.Attempts,
+		Result:   result,
+		Err:      err,
+	})
+}
+
+func (s *SysConfigService) observeApply(observation ConfigApplyObservation) {
+	if s.applyObserver == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	s.applyObserver(observation)
 }
 
 // StartApplyRetry 启动单进程重试循环并返回停止函数。数据库级 SKIP LOCKED 保证多实例

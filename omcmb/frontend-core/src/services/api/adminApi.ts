@@ -1338,6 +1338,7 @@ export const adminApi = {
         targets?: Array<{
           target?: string;
           status?: ConfigApplyStatus;
+          success_scope?: 'runtime_applied' | 'event_delivered';
           attempts?: number;
           applied_at?: string;
           last_error?: string;
@@ -1360,6 +1361,8 @@ export const adminApi = {
         targets: (batch.targets ?? []).map((target) => ({
           target: target.target ?? '',
           status: target.status ?? 'pending',
+          successScope: target.success_scope
+            ?? (target.target === 'acs_transfer_event_delivery' ? 'event_delivered' : 'runtime_applied'),
           attempts: target.attempts ?? 0,
           appliedAt: target.applied_at,
           lastError: target.last_error,
@@ -1379,6 +1382,7 @@ export const adminApi = {
       targets: Array<{
         target: string;
         status: ConfigApplyStatus;
+        success_scope?: 'runtime_applied' | 'event_delivered';
         attempts: number;
         applied_at?: string;
         last_error?: string;
@@ -1394,6 +1398,8 @@ export const adminApi = {
       targets: data.targets.map((target) => ({
         target: target.target,
         status: target.status,
+        successScope: target.success_scope
+          ?? (target.target === 'acs_transfer_event_delivery' ? 'event_delivered' : 'runtime_applied'),
         attempts: target.attempts,
         appliedAt: target.applied_at,
         lastError: target.last_error,

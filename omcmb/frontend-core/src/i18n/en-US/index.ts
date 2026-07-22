@@ -1262,7 +1262,7 @@ const messages: Record<string, string> = {
   'sysconfig.apply.pending':              'Configuration saved; runtime policy is being applied.',
   'sysconfig.apply.applying':             'Runtime policy is being applied.',
   'sysconfig.apply.applied':              'Configuration is active.',
-  'sysconfig.apply.delivered':            'Configuration was delivered reliably; ACS will load it on refresh.',
+  'sysconfig.apply.delivered':            'The configuration event was delivered; ACS cluster loading is not yet confirmed.',
   'sysconfig.apply.failed':               'Configuration was saved, but runtime application failed; retry is scheduled.',
   'device.multi.actionAdd':               'Add',
   'device.multi.actionDelete':            'Delete',

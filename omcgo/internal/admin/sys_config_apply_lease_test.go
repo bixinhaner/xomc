@@ -23,6 +23,8 @@ type leaseApplyRepo struct {
 	batchResult    BatchUpsertResult
 	batch          *ConfigApplyBatch
 	claimErr       error
+	claimNextWork  *ConfigApplyWork
+	claimNextErr   error
 }
 
 func (r *leaseApplyRepo) Create(context.Context, *SysConfig) error { return nil }
@@ -48,7 +50,7 @@ func (r *leaseApplyRepo) ClaimApplyTarget(context.Context, uuid.UUID, string) (*
 	return nil, r.claimErr
 }
 func (r *leaseApplyRepo) ClaimNextApplyTarget(context.Context) (*ConfigApplyWork, error) {
-	return nil, nil
+	return r.claimNextWork, r.claimNextErr
 }
 func (r *leaseApplyRepo) RenewApplyTargetLease(_ context.Context, _ ConfigApplyWork, until time.Time) (bool, error) {
 	r.mu.Lock()
@@ -202,4 +204,56 @@ func TestBatchUpsertReturnsDurableBatchWhenImmediateApplyFails(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, batch.ID, result.Batch.ID)
 	require.Equal(t, ConfigApplyStatusPending, result.Batch.Status)
+}
+
+func TestRetryPendingApplyOnceReportsFailedAttempt(t *testing.T) {
+	work := ConfigApplyWork{
+		Batch: ConfigApplyBatch{ID: uuid.New(), Category: "storage"},
+		Target: ConfigApplyTarget{
+			Target:   "minio",
+			Status:   ConfigApplyStatusApplying,
+			Attempts: 2,
+		},
+		LeaseToken: uuid.New(),
+	}
+	repo := &leaseApplyRepo{renewOK: true, claimNextWork: &work}
+	svc := NewSysConfigService(repo)
+	svc.RegisterApplyHandler("storage", "minio", func(context.Context, ConfigApplyWork) (map[string]any, error) {
+		return nil, errors.New("minio unavailable")
+	})
+
+	observed := make(chan ConfigApplyObservation, 1)
+	svc.SetApplyObserver(func(observation ConfigApplyObservation) {
+		observed <- observation
+	})
+
+	didWork, err := svc.RetryPendingApplyOnce(context.Background())
+
+	require.True(t, didWork)
+	require.NoError(t, err)
+	observation := <-observed
+	require.Equal(t, work.Batch.ID, observation.BatchID)
+	require.Equal(t, "storage", observation.Category)
+	require.Equal(t, "minio", observation.Target)
+	require.Equal(t, 2, observation.Attempts)
+	require.Equal(t, ConfigApplyObservationFailed, observation.Result)
+	require.ErrorContains(t, observation.Err, "minio unavailable")
+}
+
+func TestRetryPendingApplyOnceReportsClaimFailure(t *testing.T) {
+	repo := &leaseApplyRepo{claimNextErr: errors.New("database unavailable")}
+	svc := NewSysConfigService(repo)
+
+	observed := make(chan ConfigApplyObservation, 1)
+	svc.SetApplyObserver(func(observation ConfigApplyObservation) {
+		observed <- observation
+	})
+
+	didWork, err := svc.RetryPendingApplyOnce(context.Background())
+
+	require.False(t, didWork)
+	require.ErrorContains(t, err, "database unavailable")
+	observation := <-observed
+	require.Equal(t, ConfigApplyObservationClaimFailed, observation.Result)
+	require.ErrorContains(t, observation.Err, "database unavailable")
 }
