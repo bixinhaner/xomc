@@ -10,6 +10,7 @@ import (
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/realtime"
 	"github.com/omcgo/omcgo/internal/pm/adhoc"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
@@ -51,7 +52,7 @@ func startPMAdhocPipeline(
 	// 但启用集表 enabled_pm_indicators_* 只在主库（PgPool）——必须双池注入，
 	// 否则 store_all_metrics=true 时解析启用集在时序库报 relation 不存在而整段降级（丢派生 KPI）。
 	aggr := aggregator.NewWithPools(w.TsPool, w.PgPool, kpiRouter, logger)
-	publisher := &adhoc.EventBusPublisher{Bus: w.EventBus}
+	publisher := realtime.NewCoreNATS(w.NATS.Conn)
 	// T-0182：存储范围全局开关（全存默认 / 仅存所选）。
 	// ISSUE-398：持续任务「最近一格」窗口的 daily/weekly/monthly 零点对齐用同一 PM 业务时区。
 	// #458：executor 经 SetLocationFunc 实时读当前业务时区（与 cron 调度读同一 sys_configs 源），

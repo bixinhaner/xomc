@@ -21,6 +21,7 @@ import (
 	minioinfra "github.com/omcgo/omcgo/internal/core/components/minio"
 	"github.com/omcgo/omcgo/internal/core/dictloader"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/realtime"
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
@@ -48,6 +49,7 @@ type Container struct {
 	Redis      redis.UniversalClient
 	MinIO      *minio.Client
 	EventBus   event.EventBus
+	Realtime   *realtime.CoreNATS
 	Deduper    *event.Deduper
 	TaskSvc    *task.TaskService
 	Carriers   *carrier.CarrierRegistry

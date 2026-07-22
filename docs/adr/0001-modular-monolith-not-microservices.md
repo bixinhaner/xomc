@@ -21,6 +21,8 @@ OMC 是面向运营商的小基站 TR-069/CWMP 无线网管，10 万基站起步
 4. **选 NATS（JetStream）而非 Kafka**：作为 EventBus 的多实例实现（`NATSEventBus`）与异步任务分发。单进程场景另有 `ChannelEventBus`（进程内 Go channel）。
 5. **演进路线**：保持模块化单体到 10 万规模无虞；逼近 100 万规模时按功能域**渐进拆分**，EventBus 的双实现抽象（`internal/core/event/`）使拆分时事件链路无需重写。
 
+允许一项受限例外：瞬时状态通知可使用 Core NATS 做非持久化 fan-out，但主题必须避开持久化 WorkQueue/EventBus，数据库必须保持权威来源。该通道不得承载命令、任务分发或任何需要历史重放的事件。
+
 ## Consequences
 
 **正向**：

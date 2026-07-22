@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	natscomp "github.com/omcgo/omcgo/internal/core/components/nats"
 	"github.com/omcgo/omcgo/internal/core/jsonx"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
@@ -33,9 +35,10 @@ func (s *stubAggr) Query(_ context.Context, req aggregator.QueryRequest) ([]aggr
 }
 
 type stubRepo struct {
-	mu            sync.Mutex
-	insertedRows  []ResultRow
-	statusUpdates []struct {
+	mu                      sync.Mutex
+	insertedRows            []ResultRow
+	updateStatusErrByStatus map[Status]error
+	statusUpdates           []struct {
 		id       uuid.UUID
 		status   Status
 		progress *int
@@ -59,7 +62,7 @@ func (s *stubRepo) UpdateStatus(_ context.Context, id uuid.UUID, status Status, 
 		status   Status
 		progress *int
 	}{id, status, progress})
-	return nil
+	return s.updateStatusErrByStatus[status]
 }
 
 func (s *stubRepo) InsertResults(_ context.Context, rows []ResultRow) error {
@@ -80,6 +83,7 @@ func (s *stubRepo) ListRuns(context.Context, uuid.UUID, int, int) ([]TaskRun, er
 
 type stubPublisher struct {
 	mu     sync.Mutex
+	err    error
 	events []struct {
 		subject string
 		payload any
@@ -93,7 +97,7 @@ func (s *stubPublisher) Publish(_ context.Context, subject string, payload any) 
 		subject string
 		payload any
 	}{subject, payload})
-	return nil
+	return s.err
 }
 
 func stubMetadataLookup(metadata map[string]resultnorm.Metadata) IndicatorMetadataLookup {
@@ -146,7 +150,13 @@ func Test_Executor_ExecuteOneshot_SingleGranularity(t *testing.T) {
 
 	// 1 个进度事件
 	require.Len(t, pub.events, 1)
-	assert.Equal(t, SubjectProgress, pub.events[0].subject)
+	assert.Equal(t, SubjectRealtimeProgress, pub.events[0].subject)
+	payload, ok := pub.events[0].payload.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, task.ID.String(), payload["task_id"])
+	assert.Equal(t, 100, payload["progress"])
+	assert.Equal(t, "hourly", payload["granularity"])
+	assert.Equal(t, 1, payload["rows"])
 }
 
 func Test_Executor_ExecuteOneshot_MultiGranularityProgress(t *testing.T) {
@@ -181,6 +191,67 @@ func Test_Executor_ExecuteOneshot_MultiGranularityProgress(t *testing.T) {
 	assert.Equal(t, 100, *repo.statusUpdates[2].progress)
 
 	require.Len(t, pub.events, 3)
+}
+
+func Test_Executor_ExecuteOneshot_DoesNotPublishProgressWhenPersistenceFails(t *testing.T) {
+	repo := &stubRepo{updateStatusErrByStatus: map[Status]error{
+		StatusRunning: errors.New("database unavailable"),
+	}}
+	pub := &stubPublisher{}
+	e := NewExecutor(&stubAggr{}, repo, pub, nil)
+	task := &Task{
+		ID:            uuid.New(),
+		Granularities: []string{"hourly"},
+		WindowStart:   time.Now().Add(-time.Hour),
+		WindowEnd:     time.Now(),
+	}
+
+	_, err := e.ExecuteOneshot(context.Background(), task)
+	require.NoError(t, err)
+	assert.Empty(t, pub.events, "unpersisted progress must not be broadcast")
+}
+
+func Test_Executor_ExecuteOneshot_PublisherFailureDoesNotFailPersistedProgress(t *testing.T) {
+	repo := &stubRepo{}
+	pub := &stubPublisher{err: errors.New("realtime channel unavailable")}
+	e := NewExecutor(&stubAggr{}, repo, pub, nil)
+	task := &Task{
+		ID:            uuid.New(),
+		Granularities: []string{"hourly"},
+		WindowStart:   time.Now().Add(-time.Hour),
+		WindowEnd:     time.Now(),
+	}
+
+	_, err := e.ExecuteOneshot(context.Background(), task)
+	require.NoError(t, err)
+	require.Len(t, repo.statusUpdates, 1)
+	assert.Equal(t, StatusRunning, repo.statusUpdates[0].status)
+	assert.Equal(t, 100, *repo.statusUpdates[0].progress)
+}
+
+func Test_RealtimeSubjects_AreOutsideJetStreamDefaultStreams(t *testing.T) {
+	for _, subject := range []string{SubjectRealtimeProgress, SubjectRealtimeCompleted} {
+		for _, stream := range natscomp.DefaultStreams() {
+			for _, pattern := range stream.Subjects {
+				assert.Falsef(t, testSubjectMatches(pattern, subject),
+					"realtime subject %q must not be captured by JetStream pattern %q", subject, pattern)
+			}
+		}
+	}
+}
+
+func testSubjectMatches(pattern, subject string) bool {
+	patternParts := strings.Split(pattern, ".")
+	subjectParts := strings.Split(subject, ".")
+	for i, part := range patternParts {
+		if part == ">" {
+			return true
+		}
+		if i >= len(subjectParts) || (part != "*" && part != subjectParts[i]) {
+			return false
+		}
+	}
+	return len(patternParts) == len(subjectParts)
 }
 
 func Test_Executor_ExecuteOneshot_NoGranularitiesError(t *testing.T) {

@@ -120,9 +120,9 @@ func (w *Worker) runOne(ctx context.Context, task *Task) {
 			zap.String("task_id", task.ID.String()),
 			zap.String("status", string(finalStatus)),
 			zap.Error(updateErr))
+	} else {
+		w.executor.PublishCompleted(context.Background(), task.ID, finalStatus, rowsTotal, errMsg)
 	}
-
-	w.executor.PublishCompleted(context.Background(), task.ID, finalStatus, rowsTotal, errMsg)
 	w.logger.Info("adhoc task finished",
 		zap.String("task_id", task.ID.String()),
 		zap.String("status", string(finalStatus)),

@@ -29,10 +29,11 @@ type workerStubRepo struct {
 	inserted []ResultRow
 
 	// T-0186：运行记录捕获
-	insertedRuns  []TaskRun           // 跑前 INSERT 的 run（status=running 快照）
-	finishedRuns  []finishedRunRecord // 跑后 FinishRun 的终态
-	nextSeq       int                 // NextRunSeq 返回值（默认 1）
-	insertResults func([]ResultRow) error
+	insertedRuns            []TaskRun           // 跑前 INSERT 的 run（status=running 快照）
+	finishedRuns            []finishedRunRecord // 跑后 FinishRun 的终态
+	nextSeq                 int                 // NextRunSeq 返回值（默认 1）
+	insertResults           func([]ResultRow) error
+	updateStatusErrByStatus map[Status]error
 }
 
 type finishedRunRecord struct {
@@ -70,7 +71,7 @@ func (s *workerStubRepo) UpdateStatus(_ context.Context, id uuid.UUID, status St
 		id     uuid.UUID
 		status Status
 	}{id, status})
-	return nil
+	return s.updateStatusErrByStatus[status]
 }
 
 func (s *workerStubRepo) InsertResults(_ context.Context, rows []ResultRow) error {
@@ -139,7 +140,18 @@ func Test_Worker_OneshotSuccess_TerminalStatusSucceeded(t *testing.T) {
 	for _, e := range pub.events {
 		subjects = append(subjects, e.subject)
 	}
-	assert.Contains(t, subjects, SubjectCompleted)
+	assert.Contains(t, subjects, SubjectRealtimeCompleted)
+	for _, published := range pub.events {
+		if published.subject != SubjectRealtimeCompleted {
+			continue
+		}
+		payload, ok := published.payload.(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, task.ID.String(), payload["task_id"])
+		assert.Equal(t, string(StatusSucceeded), payload["status"])
+		assert.Equal(t, 0, payload["rows_total"])
+		assert.NotContains(t, payload, "error")
+	}
 }
 
 func Test_Worker_ContinuousSuccess_TerminalStatusScheduled(t *testing.T) {
@@ -159,6 +171,54 @@ func Test_Worker_ContinuousSuccess_TerminalStatusScheduled(t *testing.T) {
 
 	last := repo.statusUpdates[len(repo.statusUpdates)-1].status
 	assert.Equal(t, StatusScheduled, last, "continuous should end in scheduled")
+}
+
+func Test_Worker_DoesNotPublishCompletedWhenTerminalStatusPersistenceFails(t *testing.T) {
+	task := &Task{
+		ID:            uuid.New(),
+		Mode:          ModeOneshot,
+		Granularities: []string{"hourly"},
+	}
+	repo := &workerStubRepo{
+		pendingTasks: []*Task{task},
+		updateStatusErrByStatus: map[Status]error{
+			StatusSucceeded: errors.New("database unavailable"),
+		},
+	}
+	pub := &stubPublisher{}
+	executor := NewExecutor(&stubAggr{}, repo, pub, nil)
+	w := NewWorker(repo, executor, "test-worker-1", time.Millisecond, nil)
+
+	require.True(t, w.tryRunOne(context.Background()))
+
+	var subjects []string
+	for _, published := range pub.events {
+		subjects = append(subjects, published.subject)
+		assert.NotEqual(t, SubjectRealtimeCompleted, published.subject,
+			"unpersisted terminal status must not be broadcast")
+	}
+	assert.Contains(t, subjects, SubjectRealtimeProgress,
+		"the earlier persisted progress update should still be broadcast")
+}
+
+func Test_Worker_PublisherFailureDoesNotFailPersistedTerminalStatus(t *testing.T) {
+	task := &Task{
+		ID:            uuid.New(),
+		Mode:          ModeOneshot,
+		Granularities: []string{"hourly"},
+	}
+	repo := &workerStubRepo{pendingTasks: []*Task{task}}
+	pub := &stubPublisher{err: errors.New("realtime channel unavailable")}
+	executor := NewExecutor(&stubAggr{}, repo, pub, nil)
+	w := NewWorker(repo, executor, "test-worker-1", time.Millisecond, nil)
+
+	require.True(t, w.tryRunOne(context.Background()))
+
+	var statuses []Status
+	for _, update := range repo.statusUpdates {
+		statuses = append(statuses, update.status)
+	}
+	assert.Contains(t, statuses, StatusSucceeded)
 }
 
 // T-0186：成功路径写出一行 run 记录（status=running 入库 + succeeded 终态 + rows_total + window/粒度/维度快照）。

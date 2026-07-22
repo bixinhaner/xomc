@@ -189,6 +189,8 @@ ratelimit:inform:{device_serial}     — 限流计数器
 
 **EventBus 双实现**：`ChannelEventBus`（进程内 Go channel，单进程）/ `NATSEventBus`（NATS JetStream，多实例）。实现在 `internal/core/event/`。
 
+**Core NATS 实时广播例外**：`internal/core/realtime/` 只用于可丢失、非持久化的多订阅者 fan-out；主题必须位于持久化 WorkQueue/EventBus 捕获范围之外，数据库仍是权威来源。禁止用于命令、任务分发或需要历史重放的事件。
+
 **Subject 命名**（点分层级 `domain.action.detail`）：
 ```
 device.inform.{bootstrap|periodic|value_change|alarm}

@@ -12,6 +12,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/middleware"
+	"github.com/omcgo/omcgo/internal/core/realtime"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
@@ -91,6 +92,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 		Redis:      app.Redis,
 		MinIO:      app.MinIO,
 		EventBus:   app.EventBus,
+		Realtime:   realtime.NewCoreNATS(app.NATS.Conn),
 		Deduper:    event.NewDeduper(app.Redis, 24*time.Hour, app.Logger),
 		TaskSvc:    app.TaskSvc,
 		Carriers:   app.Carriers,
