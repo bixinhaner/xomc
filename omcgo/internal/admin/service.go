@@ -61,11 +61,17 @@ var (
 // 删除保护的兜底口径：即便某环境 roles.is_system 标记被错误改写（issue #136 的
 // operator/viewer 历史误标 false），这三个内置角色仍不可删除。与 seed/000036
 // 把 is_system 收紧为 true 形成双重保护（白名单 + is_system 双重判定）。
-var builtInRoleIDs = map[uuid.UUID]struct{}{
-	uuid.MustParse("10000000-0000-0000-0000-000000000001"): {}, // admin
-	uuid.MustParse("10000000-0000-0000-0000-000000000002"): {}, // operator
-	uuid.MustParse("10000000-0000-0000-0000-000000000003"): {}, // viewer
-}
+var (
+	builtInAdminRoleID    = uuid.MustParse("10000000-0000-0000-0000-000000000001")
+	builtInOperatorRoleID = uuid.MustParse("10000000-0000-0000-0000-000000000002")
+	builtInViewerRoleID   = uuid.MustParse("10000000-0000-0000-0000-000000000003")
+
+	builtInRoleIDs = map[uuid.UUID]struct{}{
+		builtInAdminRoleID:    {},
+		builtInOperatorRoleID: {},
+		builtInViewerRoleID:   {},
+	}
+)
 
 // isBuiltInRole 判定给定角色 ID 是否为固定内置角色。
 func isBuiltInRole(id uuid.UUID) bool {
