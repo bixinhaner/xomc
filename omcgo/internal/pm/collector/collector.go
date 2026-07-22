@@ -28,6 +28,27 @@ import (
 	"go.uber.org/zap"
 )
 
+// isMinIONotFound 判定 MinIO 错误是否为对象/桶不存在（沿用 internal/core/rawarchive、
+// internal/backup/restore_service.go 已有的同款判定：minio-go 的 GetObject 不立即发
+// 请求，对象不存在的错误在首次 Read 时才暴露，故调用点在 MaybeGunzip/Parse 读取失败
+// 处判定，而不是 GetObject 调用本身的返回值）。
+//
+// 用 errors.As 而非直接 minio.ToErrorResponse(err).Code：MaybeGunzip/Parse 会用
+// fmt.Errorf("...: %w", err) 逐层包装底层读错误（如 "parse pm xml: decode pm xml: %w"），
+// minio.ToErrorResponse 内部是裸类型断言，遇到包装过的 error 会直接判定失败——必须先
+// errors.As 拆到底层 minio.ErrorResponse 再取 Code，否则本判定在真实调用链路上永远
+// 返回 false（2026-07-22 补单测时验证过这个坑，是本次改动最容易踩空的地方）。
+func isMinIONotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	var resp minio.ErrorResponse
+	if !errors.As(err, &resp) {
+		return false
+	}
+	return resp.Code == "NoSuchKey" || resp.Code == "NoSuchBucket"
+}
+
 // FileReceivedPayload is the event payload for pm.file.received.
 //
 // Two publish paths exist with different completeness levels:
@@ -349,6 +370,15 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 			c.metrics.ProcessingDurationSecs.Observe(time.Since(startTime).Seconds())
 		}
 		tracing.RecordError(span, derr)
+		// 2026-07-22 压测实测：20000设备规模下磁盘长期逼近满载，观测到大量 PM 文件在
+		// worker 处理前对象已从 MinIO 消失（疑似磁盘压力下的写入/清理异常，根因还在查）。
+		// 这类错误重试注定必然失败（同一个已不存在的 key 重试多少次结果都一样），之前
+		// 走通用 3 次重试+指数退避（约7秒/条）在队列被大量此类消息淹没时会显著拖慢
+		// 真正可处理消息的吞吐——参照 resolveDevice 对「设备不存在」的处理，同样包一层
+		// reliability.ErrPermanent 首次即终止，不重试、直接进 DLQ。
+		if isMinIONotFound(derr) {
+			return fmt.Errorf("decompress pm file: %w: %w", derr, reliability.ErrPermanent)
+		}
 		return fmt.Errorf("decompress pm file: %w", derr)
 	}
 
@@ -360,6 +390,11 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 			c.metrics.ProcessingDurationSecs.Observe(time.Since(startTime).Seconds())
 		}
 		tracing.RecordError(span, err)
+		// 同上：MinIO 对象不存在的错误也可能延迟到这里（XML 解析器内部持续读取 obj）
+		// 才首次暴露，同样短路不重试。
+		if isMinIONotFound(err) {
+			return fmt.Errorf("parse pm xml: %w: %w", err, reliability.ErrPermanent)
+		}
 		return fmt.Errorf("parse pm xml: %w", err)
 	}
 

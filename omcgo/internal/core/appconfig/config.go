@@ -655,7 +655,8 @@ type WorkerConfig struct {
 	// PMConsumerConcurrency 是 PM 文件入库消费者的进程内并发订阅数（pm.file.received → 解析入库）。
 	// NATS push 订阅 async 回调由 nats.go 单 goroutine 串行投递，单订阅只用 ~1 核；N 个订阅共享同一
 	// durable consumer "pm-workers" 由 JetStream 负载均衡，吃满 worker 多核。<=0 时 worker 启动期
-	// 回退到 GOMAXPROCS（即容器 CPU 配额），上限 16。建议设为 worker CPU 核数。
+	// 回退到 GOMAXPROCS（即容器 CPU 配额），上限 32（2026-07-21 从16上调，见 cmd/worker/main.go
+	// 注释）。设更大的值需同步核对 db.max_conns/tsdb.max_conns 连接池是否够用。
 	PMConsumerConcurrency int `mapstructure:"pm_consumer_concurrency"`
 	// PMAsyncCommit：PM 指标大批量写是否对本事务关掉 WAL 同步落盘（synchronous_commit=off）。
 	// PM 数据可从 MinIO 原文件重建，关掉后提交不阻塞 fsync、显著提吞吐（崩溃最多丢已提交未刷盘的
