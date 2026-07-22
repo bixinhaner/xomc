@@ -330,8 +330,52 @@ func TestResolveCarrier_RegistryMatch(t *testing.T) {
 	})
 	h := NewInformHandler(svc, registry, model.CarrierCMCC, zap.NewNop())
 
-	result := h.resolveCarrier("AABBCC")
+	result, err := h.resolveCarrier("AABBCC", "SmallCell")
+	require.NoError(t, err)
 	assert.Equal(t, model.CarrierCTCC, result)
+}
+
+func TestResolveCarrier_DisambiguatesSharedOUIByProductClass(t *testing.T) {
+	svc := newInfTestDeviceService(&infMockDeviceRepo{}, &infMockParamRepo{})
+	registry := carrier.NewRegistry()
+	registry.Register(&infMockCarrier{
+		code:         model.CarrierCMCC,
+		technologies: []model.Technology{model.TechLTE},
+		ouiProducts: map[model.Technology][]carrier.OUIProductClassInfo{
+			model.TechLTE: {{OUI: "AABBCC", ProductClass: "SmallCell-LTE"}},
+		},
+	})
+	registry.Register(&infMockCarrier{
+		code:         model.CarrierCTCC,
+		technologies: []model.Technology{model.TechLTE},
+		ouiProducts: map[model.Technology][]carrier.OUIProductClassInfo{
+			model.TechLTE: {{OUI: "AABBCC", ProductClass: "eSmallCell-LTE"}},
+		},
+	})
+	h := NewInformHandler(svc, registry, model.CarrierCMCC, zap.NewNop())
+
+	result, err := h.resolveCarrier("AABBCC", "eSmallCell-LTE")
+	require.NoError(t, err)
+	assert.Equal(t, model.CarrierCTCC, result)
+}
+
+func TestResolveCarrier_DoesNotFallbackForAmbiguousSharedOUI(t *testing.T) {
+	svc := newInfTestDeviceService(&infMockDeviceRepo{}, &infMockParamRepo{})
+	registry := carrier.NewRegistry()
+	for _, code := range []model.CarrierCode{model.CarrierCMCC, model.CarrierCTCC} {
+		registry.Register(&infMockCarrier{
+			code:         code,
+			technologies: []model.Technology{model.TechLTE},
+			ouiProducts: map[model.Technology][]carrier.OUIProductClassInfo{
+				model.TechLTE: {{OUI: "AABBCC", ProductClass: string(code) + "-product"}},
+			},
+		})
+	}
+	h := NewInformHandler(svc, registry, model.CarrierCMCC, zap.NewNop())
+
+	result, err := h.resolveCarrier("AABBCC", "")
+	assert.Empty(t, result)
+	assert.ErrorIs(t, err, carrier.ErrAmbiguousCarrier)
 }
 
 func TestResolveCarrier_DefaultFallback(t *testing.T) {
@@ -346,7 +390,8 @@ func TestResolveCarrier_DefaultFallback(t *testing.T) {
 	})
 	h := NewInformHandler(svc, registry, model.CarrierCMCC, zap.NewNop())
 
-	result := h.resolveCarrier("UNKNOWN_OUI")
+	result, err := h.resolveCarrier("UNKNOWN_OUI", "Unknown")
+	require.NoError(t, err)
 	assert.Equal(t, model.CarrierCMCC, result)
 }
 
@@ -354,7 +399,8 @@ func TestResolveCarrier_NilRegistry(t *testing.T) {
 	svc := newInfTestDeviceService(&infMockDeviceRepo{}, &infMockParamRepo{})
 	h := NewInformHandler(svc, nil, model.CarrierCUCC, zap.NewNop())
 
-	result := h.resolveCarrier("AABBCC")
+	result, err := h.resolveCarrier("AABBCC", "SmallCell")
+	require.NoError(t, err)
 	assert.Equal(t, model.CarrierCUCC, result)
 }
 
@@ -373,7 +419,9 @@ func TestResolveCarrier_RegistryDerivedDefault(t *testing.T) {
 		"registry without CMCC must derive a deterministic default, not hardcode CMCC")
 
 	h := NewInformHandler(svc, registry, defaultCarrier, zap.NewNop())
-	assert.Equal(t, model.CarrierCTCC, h.resolveCarrier("UNKNOWN_OUI"),
+	resolved, err := h.resolveCarrier("UNKNOWN_OUI", "Unknown")
+	require.NoError(t, err)
+	assert.Equal(t, model.CarrierCTCC, resolved,
 		"unresolved OUI must fall back to the registry-derived default carrier")
 }
 
@@ -402,6 +450,79 @@ func TestHandleBootstrap_Success(t *testing.T) {
 	assert.Equal(t, "AABBCC", createdDevice.OUI)
 	assert.Equal(t, model.CarrierCMCC, createdDevice.Carrier)
 	assert.Equal(t, model.DeviceActive, createdDevice.Status)
+}
+
+func TestHandleBootstrap_AmbiguousSharedOUIDoesNotRegisterDevice(t *testing.T) {
+	var createCalled bool
+	deviceRepo := &infMockDeviceRepo{
+		createFn: func(_ context.Context, _ *model.Device) error {
+			createCalled = true
+			return nil
+		},
+	}
+	svc := newInfTestDeviceService(deviceRepo, &infMockParamRepo{})
+	registry := carrier.NewRegistry()
+	for _, code := range []model.CarrierCode{model.CarrierCMCC, model.CarrierCTCC} {
+		registry.Register(&infMockCarrier{
+			code:         code,
+			technologies: []model.Technology{model.TechLTE},
+			ouiProducts: map[model.Technology][]carrier.OUIProductClassInfo{
+				model.TechLTE: {{OUI: "AABBCC", ProductClass: string(code) + "-product"}},
+			},
+		})
+	}
+	h := NewInformHandler(svc, registry, model.CarrierCMCC, zap.NewNop())
+
+	payload := sampleInformPayload("SN-SHARED-AMBIGUOUS")
+	payload.DeviceId.ProductClass = ""
+	evt, err := event.NewEvent(event.SubjectDeviceBootstrap, payload)
+	require.NoError(t, err)
+
+	err = h.handleBootstrap(context.Background(), evt)
+	assert.ErrorIs(t, err, carrier.ErrAmbiguousCarrier)
+	assert.False(t, createCalled)
+}
+
+func TestHandleBootstrap_ExistingDeviceKeepsStoredCarrierForAmbiguousIdentity(t *testing.T) {
+	existing := &model.Device{
+		ID:           uuid.New(),
+		SerialNumber: "SN-SHARED-EXISTING",
+		OUI:          "AABBCC",
+		ProductClass: "legacy-product",
+		Carrier:      model.CarrierCTCC,
+		Technology:   model.TechLTE,
+		Status:       model.DeviceActive,
+	}
+	deviceRepo := &infMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, _ string) (*model.Device, error) {
+			return existing, nil
+		},
+		updateFn: func(_ context.Context, device *model.Device) error {
+			assert.Equal(t, model.CarrierCTCC, device.Carrier)
+			return nil
+		},
+	}
+	svc := newInfTestDeviceService(deviceRepo, &infMockParamRepo{})
+	registry := carrier.NewRegistry()
+	for _, code := range []model.CarrierCode{model.CarrierCMCC, model.CarrierCTCC} {
+		registry.Register(&infMockCarrier{
+			code:         code,
+			technologies: []model.Technology{model.TechLTE},
+			ouiProducts: map[model.Technology][]carrier.OUIProductClassInfo{
+				model.TechLTE: {{OUI: "AABBCC", ProductClass: string(code) + "-product"}},
+			},
+		})
+	}
+	h := NewInformHandler(svc, registry, model.CarrierCMCC, zap.NewNop())
+
+	payload := sampleInformPayload(existing.SerialNumber)
+	payload.DeviceId.ProductClass = "legacy-product"
+	evt, err := event.NewEvent(event.SubjectDeviceBootstrap, payload)
+	require.NoError(t, err)
+
+	err = h.handleBootstrap(context.Background(), evt)
+	require.NoError(t, err)
+	assert.Equal(t, model.CarrierCTCC, existing.Carrier)
 }
 
 func TestHandleRebootComplete_NormalReboot(t *testing.T) {

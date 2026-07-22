@@ -8,6 +8,9 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/core/carrier"
+	"github.com/omcgo/omcgo/internal/core/carrier/cmcc"
+	"github.com/omcgo/omcgo/internal/core/carrier/ctcc"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/stretchr/testify/assert"
@@ -100,6 +103,35 @@ func TestHandler_BatchPreRegister_CarrierRequired(t *testing.T) {
 	resp := decodeBatchPreRegResp(t, w)
 	assert.Equal(t, 1, resp.Total)
 	assert.Equal(t, 0, resp.Created)
+	assert.Equal(t, 1, resp.Failed)
+	require.Len(t, resp.Errors, 1)
+	assert.Equal(t, "carrier_required", resp.Errors[0].ErrorCode)
+}
+
+func TestHandler_BatchPreRegister_SharedOUIRequiresExplicitCarrier(t *testing.T) {
+	h, _, _ := newTestHandler()
+	registry := carrier.NewRegistry()
+	registry.Register(cmcc.New())
+	registry.Register(ctcc.New())
+	h.service.SetCarrierRegistry(registry)
+	router := setupRouter(h)
+
+	body := BatchPreRegisterRequest{
+		Devices: []BatchPreRegisterRow{
+			{SerialNumber: "SHARED-OUI-NO-CARRIER", OUI: "00E0FC"},
+			{
+				SerialNumber: "SHARED-OUI-EXPLICIT-CTCC",
+				OUI:          "00E0FC",
+				Carrier:      model.CarrierCTCC,
+				Technology:   model.TechLTE,
+			},
+		},
+	}
+	w := postBatchPreReg(t, router, body)
+	assert.Equal(t, http.StatusOK, w.Code)
+	resp := decodeBatchPreRegResp(t, w)
+	assert.Equal(t, 2, resp.Total)
+	assert.Equal(t, 1, resp.Created)
 	assert.Equal(t, 1, resp.Failed)
 	require.Len(t, resp.Errors, 1)
 	assert.Equal(t, "carrier_required", resp.Errors[0].ErrorCode)

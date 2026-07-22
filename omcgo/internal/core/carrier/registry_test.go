@@ -1,6 +1,7 @@
 package carrier
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -132,25 +133,78 @@ func TestResolveByOUI_NoMatch(t *testing.T) {
 	assert.Equal(t, model.CarrierCode(""), got)
 }
 
-func TestResolveByOUI_PrefersFirstRegisteredCarrierForSharedOUI(t *testing.T) {
+func TestResolveByIdentity_DisambiguatesSharedOUIByProductClass(t *testing.T) {
 	r := NewRegistry()
 	sharedOUI := "AABBCC"
-	newCarrier := func(code model.CarrierCode) *registryMockCarrier {
+	newCarrier := func(code model.CarrierCode, productClass string) *registryMockCarrier {
 		return &registryMockCarrier{
 			code:         code,
 			technologies: []model.Technology{model.TechLTE},
 			ouiProductMap: map[model.Technology][]OUIProductClassInfo{
-				model.TechLTE: {{OUI: sharedOUI, ProductClass: "SmallCell"}},
+				model.TechLTE: {{OUI: sharedOUI, ProductClass: productClass}},
 			},
 		}
 	}
 
-	r.Register(newCarrier(model.CarrierCMCC))
-	r.Register(newCarrier(model.CarrierCTCC))
+	r.Register(newCarrier(model.CarrierCMCC, "SmallCell-LTE"))
+	r.Register(newCarrier(model.CarrierCTCC, "eSmallCell-LTE"))
 
-	for i := 0; i < 20; i++ {
-		assert.Equal(t, model.CarrierCMCC, r.ResolveByOUI(sharedOUI))
-	}
+	got, err := r.ResolveByIdentity(sharedOUI, "eSmallCell-LTE")
+	require.NoError(t, err)
+	assert.Equal(t, model.CarrierCTCC, got)
+}
+
+func TestResolveByIdentity_RejectsAmbiguousSharedOUIWithoutProductClass(t *testing.T) {
+	r := NewRegistry()
+	sharedOUI := "AABBCC"
+	r.Register(&registryMockCarrier{
+		code:         model.CarrierCMCC,
+		technologies: []model.Technology{model.TechLTE},
+		ouiProductMap: map[model.Technology][]OUIProductClassInfo{
+			model.TechLTE: {{OUI: sharedOUI, ProductClass: "SmallCell-LTE"}},
+		},
+	})
+	r.Register(&registryMockCarrier{
+		code:         model.CarrierCTCC,
+		technologies: []model.Technology{model.TechLTE},
+		ouiProductMap: map[model.Technology][]OUIProductClassInfo{
+			model.TechLTE: {{OUI: sharedOUI, ProductClass: "eSmallCell-LTE"}},
+		},
+	})
+
+	got, err := r.ResolveByIdentity(sharedOUI, "")
+	assert.Empty(t, got)
+	assert.True(t, errors.Is(err, ErrAmbiguousCarrier))
+}
+
+func TestResolveByIdentity_UsesUniqueOUIMatchWhenProductClassIsUnknown(t *testing.T) {
+	r := NewRegistry()
+	r.Register(&registryMockCarrier{
+		code:         model.CarrierCUCC,
+		technologies: []model.Technology{model.TechNR},
+		ouiProductMap: map[model.Technology][]OUIProductClassInfo{
+			model.TechNR: {{OUI: "DDEEFF", ProductClass: "SmallCell-NR-CU"}},
+		},
+	})
+
+	got, err := r.ResolveByIdentity("DDEEFF", "unknown-product")
+	require.NoError(t, err)
+	assert.Equal(t, model.CarrierCUCC, got)
+}
+
+func TestResolveByIdentity_ReturnsNoMatchForUnknownOUI(t *testing.T) {
+	r := NewRegistry()
+	r.Register(&registryMockCarrier{
+		code:         model.CarrierCMCC,
+		technologies: []model.Technology{model.TechLTE},
+		ouiProductMap: map[model.Technology][]OUIProductClassInfo{
+			model.TechLTE: {{OUI: "AABBCC", ProductClass: "SmallCell-LTE"}},
+		},
+	})
+
+	got, err := r.ResolveByIdentity("FFFFFF", "Unknown")
+	require.NoError(t, err)
+	assert.Empty(t, got)
 }
 
 // #17: DefaultCarrier 取代 InformHandler 处硬编码的 CarrierCMCC 默认值。
