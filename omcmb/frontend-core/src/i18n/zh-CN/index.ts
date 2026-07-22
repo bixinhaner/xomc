@@ -1664,6 +1664,8 @@ const messages: Record<string, string> = {
   'device.gpsAcceptedCoordinates': '网管坐标：经度 {longitude}，纬度 {latitude}',
   'device.gpsReportedCoordinates': '设备上报坐标：经度 {longitude}，纬度 {latitude}，GPS 高度(m) {gpsHeight}',
   'device.gpsHorizontalDifference': '水平差异：{distance} 米',
+  'device.gpsObservedAt':        '采集时间：{observedAt}',
+  'device.gpsCoordinateSlot':    '坐标槽位：第 {slot} 组',
   'device.gpsSyncAction':       '查看并同步 GPS 坐标',
   'device.gpsCoordinateDetailsTitle': 'GPS 坐标详情',
   'device.gpsInSync':           'GPS 坐标已同步',

@@ -14,6 +14,7 @@ export default function GpsSyncTrigger({ label, onClick }: GpsSyncTriggerProps) 
   return (
     <Tooltip title={label} open={tooltipOpen} onOpenChange={setTooltipOpen}>
       <Button
+        className="device-gps-sync-trigger"
         type="text"
         size="small"
         shape="circle"
@@ -25,11 +26,12 @@ export default function GpsSyncTrigger({ label, onClick }: GpsSyncTriggerProps) 
           onClick();
         }}
         style={{
-          width: 24,
-          minWidth: 24,
-          height: 24,
+          width: 20,
+          minWidth: 20,
+          height: 20,
           padding: 0,
           color: token.colorWarning,
+          fontSize: 13,
         }}
       />
     </Tooltip>

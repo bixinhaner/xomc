@@ -19,6 +19,8 @@ describe('GpsSyncTrigger', () => {
       name: 'Review and synchronize GPS coordinates',
     });
     expect(container.querySelector('.anticon-warning')).toBeInTheDocument();
+    expect(button).toHaveClass('device-gps-sync-trigger');
+    expect(button).toHaveStyle({ width: '20px', minWidth: '20px', height: '20px' });
     expect(button).toHaveStyle({ color: '#f0a500' });
 
     fireEvent.click(button);
