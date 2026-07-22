@@ -250,51 +250,261 @@ func CalcGPSStatus(params map[string]string) string {
 	}
 }
 
-var rfStatusPathFamilies = []*regexp.Regexp{
+type RFStatusProjectionState string
+
+const (
+	RFStatusValid        RFStatusProjectionState = "valid"
+	RFStatusUnknown      RFStatusProjectionState = "unknown"
+	RFStatusUnsupported  RFStatusProjectionState = "unsupported"
+	RFStatusInconsistent RFStatusProjectionState = "inconsistent"
+)
+
+type RFStatusProjection struct {
+	Status        string
+	State         RFStatusProjectionState
+	Reason        string
+	ExpectedCount int
+}
+
+type rfStatusPathFamily struct {
+	name                  string
+	pattern               *regexp.Regexp
+	physicalIndex         func(string) (int, bool)
+	requiresExpectedCount bool
+}
+
+var (
+	nrCellRFStatusPattern  = regexp.MustCompile(`^Device\.Services\.FAPService\.\d+\.CellConfig\.(\d+)\.NR\.RAN\.rftxEnable$`)
+	sasCellRFStatusPattern = regexp.MustCompile(`^Device\.DeviceInfo\.CellConfig\.(\d+)\.SAS\.RadioEnable$`)
+	lteFAPRFStatusPattern  = regexp.MustCompile(`^Device\.Services\.FAPService\.(\d+)\.FAPControl\.LTE\.RFTxStatus$`)
+	ranRFStatusPattern     = regexp.MustCompile(`^Device\.Services\.FAPService\.(\d+)\.CellConfig\.(?:LTE|NR)\.RAN\.RF\.X_COM_RadioEnable$`)
+	gsmCellRFStatusPattern = regexp.MustCompile(`^Device\.Services\.GsmBTSCellDT\.(\d+)\.RfState$`)
+	sasRFStatusPattern     = regexp.MustCompile(`^Device\.DeviceInfo\.SAS\.RadioEnable(\d*)$`)
+	ruRFStatusPattern      = regexp.MustCompile(`^Device\.DeviceInfo\.(?:EU\.\d+\.)?RU\.(\d+)\.RFTxStatus$`)
+	legacyRFStatusPattern  = regexp.MustCompile(`^Device\.Services\.FAPService\.(\d+)\.CellConfig\.(?:LTE|NR)\.RAN\.RF\.RFTxStatus$`)
+)
+
+var rfStatusPathFamilies = []rfStatusPathFamily{
 	// 产品模型会把 BaiBNQ 私有 rftxEnable 和 LTE 私有 RadioEnable
 	// 归一为以下标准路径，优先读取小区级直接状态。
-	regexp.MustCompile(`^Device\.Services\.FAPService\.\d+\.CellConfig\.\d+\.NR\.RAN\.rftxEnable$`),
-	regexp.MustCompile(`^Device\.DeviceInfo\.CellConfig\.\d+\.SAS\.RadioEnable$`),
-	regexp.MustCompile(`^Device\.Services\.FAPService\.\d+\.FAPControl\.LTE\.RFTxStatus$`),
-	regexp.MustCompile(`^Device\.Services\.FAPService\.\d+\.CellConfig\.(?:LTE|NR)\.RAN\.RF\.X_COM_RadioEnable$`),
-	regexp.MustCompile(`^Device\.Services\.GsmBTSCellDT\.\d+\.RfState$`),
-	regexp.MustCompile(`^Device\.DeviceInfo\.SAS\.RadioEnable\d*$`),
-	regexp.MustCompile(`^Device\.DeviceInfo\.(?:EU\.\d+\.)?RU\.\d+\.RFTxStatus$`),
+	{name: "nr_cell", pattern: nrCellRFStatusPattern, physicalIndex: regexRFPhysicalIndex(nrCellRFStatusPattern)},
+	{name: "sas_cell", pattern: sasCellRFStatusPattern, physicalIndex: regexRFPhysicalIndex(sasCellRFStatusPattern)},
+	{name: "lte_fap", pattern: lteFAPRFStatusPattern, physicalIndex: regexRFPhysicalIndex(lteFAPRFStatusPattern), requiresExpectedCount: true},
+	{name: "ran_radio", pattern: ranRFStatusPattern, physicalIndex: regexRFPhysicalIndex(ranRFStatusPattern), requiresExpectedCount: true},
+	{name: "gsm_cell", pattern: gsmCellRFStatusPattern, physicalIndex: regexRFPhysicalIndex(gsmCellRFStatusPattern)},
+	{name: "sas_radio", pattern: sasRFStatusPattern, physicalIndex: sasRFPhysicalIndex, requiresExpectedCount: true},
+	{name: "ru", pattern: ruRFStatusPattern, physicalIndex: regexRFPhysicalIndex(ruRFStatusPattern)},
 	// 兼容历史已落库的非标准 RAN.RF 路径。
-	regexp.MustCompile(`^Device\.Services\.FAPService\.\d+\.CellConfig\.(?:LTE|NR)\.RAN\.RF\.RFTxStatus$`),
+	{name: "legacy_ran_radio", pattern: legacyRFStatusPattern, physicalIndex: regexRFPhysicalIndex(legacyRFStatusPattern), requiresExpectedCount: true},
 }
 
 var rfStatusPathIndex = regexp.MustCompile(`\.(\d+)(?:\.|$)`)
+var carrierModeSuffix = regexp.MustCompile(`(?i)/(SC|DC|CA)$`)
 
 // CalcRFStatus computes the rf_status quick-query column from device_parameters.
 // It preserves three distinct states: explicit on, explicit off/error, and unknown.
 // Missing or unrecognized parameters must stay empty instead of being fabricated as off.
-func CalcRFStatus(params map[string]string) string {
+func CalcRFStatus(params map[string]string, tech model.Technology, productClass string) RFStatusProjection {
+	if strings.EqualFold(strings.TrimSpace(productClass), "FAP/PGSM") {
+		return RFStatusProjection{State: RFStatusUnsupported, Reason: "BSC has no device-level RF"}
+	}
+
+	expectedCount, countKnown, countReason, countInconsistent := resolveExpectedRFCarrierCount(params, productClass)
+	if countInconsistent {
+		return RFStatusProjection{
+			State:         RFStatusInconsistent,
+			Reason:        countReason,
+			ExpectedCount: expectedCount,
+		}
+	}
+
+	observedAny := false
+	lastReason := countReason
 	for _, family := range rfStatusPathFamilies {
 		paths := make([]string, 0)
 		for path := range params {
-			if family.MatchString(path) {
+			if family.pattern.MatchString(path) {
 				paths = append(paths, path)
 			}
 		}
 		if len(paths) == 0 {
 			continue
 		}
+		observedAny = true
+
+		if family.requiresExpectedCount && !countKnown {
+			lastReason = fmt.Sprintf("%s RF paths require a reliable carrier count", family.name)
+			continue
+		}
 
 		sort.SliceStable(paths, func(i, j int) bool {
 			return lessRFStatusPath(paths[i], paths[j])
 		})
-		statuses := make([]string, 0, len(paths))
+
+		statusesByIndex := make(map[int]string, len(paths))
+		conflict := false
 		for _, path := range paths {
-			if status, ok := normalizeRFStatusValue(params[path]); ok {
-				statuses = append(statuses, status)
+			index, indexed := family.physicalIndex(path)
+			if !indexed || index < 1 {
+				continue
+			}
+			if countKnown && index > expectedCount {
+				// FAPService may contain logical/phantom instances outside the
+				// configured physical carrier range. They do not enter the denominator.
+				continue
+			}
+			status, normalized := normalizeRFStatusValue(params[path])
+			if !normalized {
+				continue
+			}
+			if previous, exists := statusesByIndex[index]; exists && previous != status {
+				conflict = true
+				lastReason = fmt.Sprintf("%s RF index %d has conflicting values", family.name, index)
+				break
+			}
+			statusesByIndex[index] = status
+		}
+		if conflict {
+			return RFStatusProjection{
+				State:         RFStatusInconsistent,
+				Reason:        lastReason,
+				ExpectedCount: expectedCount,
 			}
 		}
-		if len(statuses) > 0 {
-			return strings.Join(statuses, ",")
+
+		if countKnown {
+			statuses := make([]string, 0, expectedCount)
+			complete := true
+			for index := 1; index <= expectedCount; index++ {
+				status, exists := statusesByIndex[index]
+				if !exists {
+					complete = false
+					lastReason = fmt.Sprintf("%s RF index %d is missing", family.name, index)
+					break
+				}
+				statuses = append(statuses, status)
+			}
+			if complete {
+				return RFStatusProjection{
+					Status:        strings.Join(statuses, ","),
+					State:         RFStatusValid,
+					ExpectedCount: expectedCount,
+				}
+			}
+			continue
+		}
+
+		indices := make([]int, 0, len(statusesByIndex))
+		for index := range statusesByIndex {
+			indices = append(indices, index)
+		}
+		sort.Ints(indices)
+		if len(indices) > 0 {
+			statuses := make([]string, 0, len(indices))
+			for _, index := range indices {
+				statuses = append(statuses, statusesByIndex[index])
+			}
+			return RFStatusProjection{Status: strings.Join(statuses, ","), State: RFStatusValid}
 		}
 	}
-	return ""
+
+	if observedAny && countKnown {
+		return RFStatusProjection{
+			State:         RFStatusInconsistent,
+			Reason:        lastReason,
+			ExpectedCount: expectedCount,
+		}
+	}
+	return RFStatusProjection{State: RFStatusUnknown, Reason: lastReason, ExpectedCount: expectedCount}
+}
+
+func regexRFPhysicalIndex(pattern *regexp.Regexp) func(string) (int, bool) {
+	return func(path string) (int, bool) {
+		matches := pattern.FindStringSubmatch(path)
+		if len(matches) != 2 {
+			return 0, false
+		}
+		index, err := strconv.Atoi(matches[1])
+		return index, err == nil && index > 0
+	}
+}
+
+func sasRFPhysicalIndex(path string) (int, bool) {
+	matches := sasRFStatusPattern.FindStringSubmatch(path)
+	if len(matches) != 2 {
+		return 0, false
+	}
+	if matches[1] == "" || matches[1] == "1" {
+		return 1, true
+	}
+	index, err := strconv.Atoi(matches[1])
+	return index, err == nil && index > 0
+}
+
+func resolveExpectedRFCarrierCount(params map[string]string, productClass string) (count int, known bool, reason string, inconsistent bool) {
+	reportedCount, reported, reportedReason, reportedInvalid := strictReportedNumOfCells(params)
+	if reportedInvalid {
+		return 0, false, reportedReason, true
+	}
+
+	modeCount, fixedMode, carrierAggregation := productClassCarrierCount(productClass)
+	if strings.EqualFold(strings.TrimSpace(productClass), "FAP/BTS") {
+		modeCount, fixedMode = 1, true
+	}
+
+	if reported && fixedMode && reportedCount != modeCount {
+		return reportedCount, true,
+			fmt.Sprintf("reported NumOfCells %d conflicts with product carrier mode count %d", reportedCount, modeCount), true
+	}
+	if reported {
+		return reportedCount, true, "", false
+	}
+	if fixedMode {
+		return modeCount, true, "", false
+	}
+	if carrierAggregation {
+		return 0, false, "CA product requires reported NumOfCells", false
+	}
+	return 0, false, "carrier count is unavailable", false
+}
+
+func strictReportedNumOfCells(params map[string]string) (count int, found bool, reason string, invalid bool) {
+	paths := []string{
+		"Device.Services.FAPService.1.CellConfig.LTE.RAN.CA.PARAMS.NumOfCells",
+		"Device.Services.FAPService.1.CellConfig.NR.RAN.CA.PARAMS.NumOfCells",
+	}
+	for _, path := range paths {
+		raw := strings.TrimSpace(params[path])
+		if raw == "" {
+			continue
+		}
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 {
+			return 0, false, fmt.Sprintf("invalid NumOfCells at %s", path), true
+		}
+		if found && parsed != count {
+			return count, true, "LTE and NR NumOfCells values conflict", true
+		}
+		count, found = parsed, true
+	}
+	return count, found, "", false
+}
+
+func productClassCarrierCount(productClass string) (count int, fixed bool, carrierAggregation bool) {
+	matches := carrierModeSuffix.FindStringSubmatch(strings.TrimSpace(productClass))
+	if len(matches) != 2 {
+		return 0, false, false
+	}
+	switch strings.ToUpper(matches[1]) {
+	case "SC":
+		return 1, true, false
+	case "DC":
+		return 2, true, false
+	case "CA":
+		return 0, false, true
+	default:
+		return 0, false, false
+	}
 }
 
 func normalizeRFStatusValue(value string) (string, bool) {

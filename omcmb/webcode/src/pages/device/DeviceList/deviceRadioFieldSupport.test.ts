@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatDeviceRadioField } from './deviceRadioFieldSupport';
+import { formatDeviceRadioField, formatDeviceRFStatus, supportsOwnRF } from './deviceRadioFieldSupport';
 
 describe('formatDeviceRadioField', () => {
   it('BSC/BTS 的 LTE/NR 专属字段显示为不适用', () => {
@@ -40,5 +40,23 @@ describe('formatDeviceRadioField', () => {
     const unknown = { networkType: 'future-radio', productClass: 'UNKNOWN' };
 
     expect(formatDeviceRadioField(unknown, 'pci', '')).toBe('');
+  });
+});
+
+describe('device RF support', () => {
+  it('BSC 不拥有设备级 RF，历史 RF 快照也显示为不适用', () => {
+    const bsc = { networkType: 'GSM', productClass: 'FAP/PGSM' };
+
+    expect(supportsOwnRF(bsc)).toBe(false);
+    expect(formatDeviceRFStatus(bsc, 'on,on')).toBe('-');
+  });
+
+  it('BTS 和 LTE 基站保留自身 RF 状态', () => {
+    const bts = { networkType: 'GSM', productClass: 'FAP/BTS' };
+    const lte = { networkType: 'eNB', productClass: 'FAP/MLN/DC' };
+
+    expect(supportsOwnRF(bts)).toBe(true);
+    expect(formatDeviceRFStatus(bts, 'on')).toBe('on');
+    expect(formatDeviceRFStatus(lte, 'on,off')).toBe('on,off');
   });
 });

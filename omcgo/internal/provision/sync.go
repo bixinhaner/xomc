@@ -95,7 +95,7 @@ type ParamSyncWriter interface {
 // DeviceInfoRefresher 在 Path B 参数全量落库后，把 device_parameters 投影刷新到
 // device_info，避免列表/详情读取到旧快照。
 type DeviceInfoRefresher interface {
-	SyncFromParameters(ctx context.Context, deviceID uuid.UUID, carrierCode model.CarrierCode, tech model.Technology) ([]string, error)
+	SyncFromParameters(ctx context.Context, deviceID uuid.UUID, carrierCode model.CarrierCode, tech model.Technology, productClass string) ([]string, error)
 }
 
 // PathBSyncTaskReader 查询某设备是否仍有未完成的 sync-gpv 任务。

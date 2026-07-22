@@ -75,7 +75,7 @@ type RPCDeviceLookup interface {
 }
 
 type rpcResponseDeviceInfoRefresher interface {
-	SyncFromParameters(ctx context.Context, deviceID uuid.UUID, carrierCode model.CarrierCode, tech model.Technology) ([]string, error)
+	SyncFromParameters(ctx context.Context, deviceID uuid.UUID, carrierCode model.CarrierCode, tech model.Technology, productClass string) ([]string, error)
 }
 
 // NewRPCResponseSubscriber 构造订阅者。Start() 时才真正订阅 bus。
@@ -485,7 +485,7 @@ func (s *RPCResponseSubscriber) persist(
 		return err
 	}
 	if refreshInfo && s.infoRefresher != nil {
-		if _, err := s.infoRefresher.SyncFromParameters(ctx, device.ID, device.Carrier, device.Technology); err != nil {
+		if _, err := s.infoRefresher.SyncFromParameters(ctx, device.ID, device.Carrier, device.Technology, device.ProductClass); err != nil {
 			s.logger.Warn("refresh device_info snapshot after rpc response persist failed",
 				zap.String("device_id", device.ID.String()),
 				zap.String("device_sn", device.SerialNumber),

@@ -443,7 +443,7 @@ func TestInfoSyncer_SyncFromParameters_BackfillsMACFromWANTraversalWhenDirectPat
 		paramRepo := stubDeviceParamRepo{params: params}
 		syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
 
-		_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechNR)
+		_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechNR, "")
 		assert.NoError(t, err)
 	})
 
@@ -455,7 +455,7 @@ func TestInfoSyncer_SyncFromParameters_BackfillsMACFromWANTraversalWhenDirectPat
 		paramRepo := stubDeviceParamRepo{params: params}
 		syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
 
-		_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE)
+		_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE, "")
 		assert.NoError(t, err)
 	})
 }
@@ -479,7 +479,7 @@ func TestInfoSyncer_SyncFromParameters_PrefersDirectMACPathOverTraversal(t *test
 	paramRepo := stubDeviceParamRepo{params: params}
 	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
 
-	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE)
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE, "")
 	assert.NoError(t, err)
 }
 
@@ -499,7 +499,7 @@ func TestInfoSyncer_SyncFromParameters_BackfillsMACFromXCOMWhenStandardPathMissi
 	paramRepo := stubDeviceParamRepo{params: params}
 	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
 
-	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE)
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE, "")
 	assert.NoError(t, err)
 }
 
@@ -520,7 +520,7 @@ func TestInfoSyncer_SyncFromParameters_DoesNotUseEUInstanceMAC(t *testing.T) {
 	paramRepo := stubDeviceParamRepo{params: params}
 	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
 
-	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE)
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE, "")
 	assert.NoError(t, err)
 }
 
@@ -548,7 +548,7 @@ func TestInfoSyncer_SyncFromParameters_BackfillsCoordinates(t *testing.T) {
 
 	syncer := NewInfoSyncer(infoRepo, paramRepo, coordinateWriter, registry, zap.NewNop())
 
-	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechNR)
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechNR, "")
 	assert.NoError(t, err)
 }
 
@@ -580,7 +580,7 @@ func TestInfoSyncer_SyncFromParameters_StoresStandardGPSObservationWithoutOverwr
 	}}
 
 	syncer := NewInfoSyncer(infoRepoNoop{}, paramRepo, coordinateWriter, registry, zap.NewNop(), observationRepo)
-	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE)
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE, "")
 	assert.NoError(t, err)
 }
 
@@ -627,8 +627,69 @@ func TestInfoSyncer_SyncFromParameters_ComputesQuickFieldsWithoutCarrierMapping(
 
 	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
 
-	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechNR)
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechNR, "")
 	assert.NoError(t, err)
+}
+
+func TestInfoSyncer_SyncFromParameters_RFProjection(t *testing.T) {
+	tests := []struct {
+		name         string
+		productClass string
+		tech         model.Technology
+		params       []model.DeviceParameter
+		want         string
+	}{
+		{
+			name:         "DC persists only physical carrier statuses",
+			productClass: "FAP/MLN/DC",
+			tech:         model.TechLTE,
+			params: []model.DeviceParameter{
+				{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.CA.PARAMS.NumOfCells", ParameterValue: "2"},
+				{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus", ParameterValue: "true"},
+				{ParameterPath: "Device.Services.FAPService.2.FAPControl.LTE.RFTxStatus", ParameterValue: "false"},
+				{ParameterPath: "Device.Services.FAPService.3.FAPControl.LTE.RFTxStatus", ParameterValue: "true"},
+			},
+			want: "on,off",
+		},
+		{
+			name:         "BSC clears child RF projection",
+			productClass: "FAP/PGSM",
+			tech:         model.TechGSM,
+			params: []model.DeviceParameter{
+				{ParameterPath: "Device.Services.GsmBTSCellDT.1.RfState", ParameterValue: "1"},
+			},
+			want: "",
+		},
+		{
+			name:         "incomplete DC clears stale RF projection",
+			productClass: "FAP/MLN/DC",
+			tech:         model.TechLTE,
+			params: []model.DeviceParameter{
+				{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.CA.PARAMS.NumOfCells", ParameterValue: "2"},
+				{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus", ParameterValue: "true"},
+			},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			deviceID := uuid.New()
+			registry := carrier.NewRegistry()
+			registry.Register(testCarrier{})
+			infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, gotDeviceID uuid.UUID, fields map[string]interface{}) error {
+				assert.Equal(t, deviceID, gotDeviceID)
+				assert.Equal(t, tt.want, fields["rf_status"])
+				return nil
+			}}
+			syncer := NewInfoSyncer(infoRepo, stubDeviceParamRepo{params: tt.params}, nil, registry, zap.NewNop())
+
+			_, err := syncer.SyncFromParameters(
+				context.Background(), deviceID, model.CarrierCMCC, tt.tech, tt.productClass,
+			)
+			assert.NoError(t, err)
+		})
+	}
 }
 
 func TestInfoSyncer_SyncFromParameters_ClearsStaleCoreNetworkStatus(t *testing.T) {
@@ -645,7 +706,7 @@ func TestInfoSyncer_SyncFromParameters_ClearsStaleCoreNetworkStatus(t *testing.T
 	}}
 	syncer := NewInfoSyncer(infoRepo, stubDeviceParamRepo{}, nil, registry, zap.NewNop())
 
-	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechNR)
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechNR, "")
 	assert.NoError(t, err)
 }
 
@@ -732,7 +793,7 @@ func TestInfoSyncer_SyncFromParameters_TransmitPowerSource(t *testing.T) {
 			paramRepo := stubDeviceParamRepo{params: tt.params}
 			syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
 
-			_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE)
+			_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE, "")
 			assert.NoError(t, err)
 		})
 	}
@@ -755,7 +816,7 @@ func TestInfoSyncer_SyncFromParameters_BLQPreferredBandwidthAndAdminState(t *tes
 	}}
 	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
 
-	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE)
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE, "")
 	assert.NoError(t, err)
 }
 
@@ -782,7 +843,7 @@ func TestInfoSyncer_SyncFromParameters_GSMBTSRadioFields(t *testing.T) {
 	}}
 	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
 
-	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechGSM)
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechGSM, "")
 	assert.NoError(t, err)
 }
 
@@ -804,7 +865,7 @@ func TestInfoSyncer_SyncFromParameters_LegacyBTSRadioFields(t *testing.T) {
 	}}
 	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
 
-	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechGSM)
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechGSM, "")
 	assert.NoError(t, err)
 }
 
@@ -823,7 +884,7 @@ func TestInfoSyncer_SyncFromParameters_BSCTrxARFCNAggregatesToFreqPoint(t *testi
 	}}
 	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
 
-	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechGSM)
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechGSM, "")
 	assert.NoError(t, err)
 }
 
@@ -1015,7 +1076,7 @@ func TestInfoSyncer_SyncFromParameters_OverlongIpsecCSVDoesNotAbortOtherFields(t
 	paramRepo := stubDeviceParamRepo{params: params}
 	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
 
-	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE)
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE, "")
 	assert.NoError(t, err)
 }
 
@@ -1035,7 +1096,7 @@ func TestInfoSyncer_SyncFromParameters_VendorRunTimeFallback(t *testing.T) {
 	paramRepo := stubDeviceParamRepo{params: params}
 	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
 
-	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE)
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE, "")
 	assert.NoError(t, err)
 }
 

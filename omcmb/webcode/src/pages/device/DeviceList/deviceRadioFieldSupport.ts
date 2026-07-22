@@ -5,12 +5,25 @@ interface RadioFieldDevice {
   productClass: string;
 }
 
+function normalizedProductClass(device: RadioFieldDevice): string {
+  return String(device.productClass ?? '').trim().toUpperCase();
+}
+
+export function supportsOwnRF(device: RadioFieldDevice): boolean {
+  return normalizedProductClass(device) !== 'FAP/PGSM';
+}
+
+export function formatDeviceRFStatus(device: RadioFieldDevice, value: unknown): string {
+  if (!supportsOwnRF(device)) return '-';
+  return value == null ? '' : String(value);
+}
+
 export function formatDeviceRadioField(
   device: RadioFieldDevice,
   field: DeviceRadioField,
   value: unknown,
 ): string {
-  const productClass = device.productClass.trim().toUpperCase();
+  const productClass = normalizedProductClass(device);
   if (productClass === 'FAP/PGSM') return '-';
   if (productClass === 'FAP/BTS' && field !== 'txPower') return '-';
 
