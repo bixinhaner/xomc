@@ -4,7 +4,7 @@
 
 **Goal:** 修复严格 API RBAC 启用后新增路由不具备内置角色基线授权的问题，并阻止未来再次漂移。
 
-**Architecture:** 增加 seed 增量修复当前数据库；在路由同步服务中注入内置角色权限对账器，每次自动或手工同步路由后幂等补齐 admin/operator 全部端点和 viewer GET 端点。对账仅触碰固定内置角色，实际新增授权后刷新本实例 Casbin 并广播其他实例。
+**Architecture:** 增加 seed 增量修复当前数据库；在路由同步服务中注入内置角色权限对账器，每次自动或手工同步路由后幂等补齐 admin/operator 全部端点和 viewer GET 端点。对账仅触碰固定内置角色，成功后刷新本实例 Casbin 并广播其他实例，覆盖 seed 先执行的滚动发布场景。
 
 **Tech Stack:** Go 1.24、Gin、pgx、Squirrel、Casbin、PostgreSQL 16、goose、testify/gomock。
 
@@ -34,7 +34,7 @@
 
 - [ ] **Step 2: 编写 repository 失败测试**
 
-覆盖三条基线插入、事务提交、仅新增时刷新策略、持久化失败时不刷新。
+覆盖三条基线插入、事务提交、零新增时仍刷新策略、持久化失败时不刷新。
 
 - [ ] **Step 3: 验证 RED**
 
@@ -130,4 +130,3 @@ Expected:
 Run: `cd omcgo && go test ./...`
 
 Expected: PASS；若存在与本修改无关的既有失败，记录完整命令和错误，不扩大修复范围。
-
