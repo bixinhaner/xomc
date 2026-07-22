@@ -23597,6 +23597,310 @@ SET target_paths = r.paths,
 FROM refreshed r
 WHERE c.id = r.id;
 
+-- Add MOCN配置 commands directly under 小区服务参数管理（总体）.
+WITH target_group AS (
+    SELECT id
+    FROM public.mml_command_groups
+    WHERE group_code = 'chapter:SF'
+      AND param_version = 'cmcc-td-lte-v2.3'
+      AND deleted_at IS NULL
+      AND deprecated_at IS NULL
+    LIMIT 1
+), cmd_defs(command_code, command_name, logical_name, operation_type, rpc_method, target_object) AS (
+    VALUES
+        ('LST LTE_MOCN_CONFIG_PARAM', '查询 MOCN配置', 'MOCN配置', 'LST', 'GetParameterValues', 'Device.Services.FAPService.{i}.CellConfig.LTE.MocnConfigParam.'),
+        ('MOD LTE_MOCN_CONFIG_PARAM', '修改 MOCN配置', 'MOCN配置', 'MOD', 'SetParameterValues', 'Device.Services.FAPService.{i}.CellConfig.LTE.MocnConfigParam.'),
+        ('ADD LTE_MOCN_CONFIG_PARAM', '添加 MOCN配置', 'MOCN配置', 'ADD', 'AddObject', 'Device.Services.FAPService.{i}.CellConfig.LTE.MocnConfigParam.'),
+        ('RMV LTE_MOCN_CONFIG_PARAM', '删除 MOCN配置', 'MOCN配置', 'RMV', 'DeleteObject', 'Device.Services.FAPService.{i}.CellConfig.LTE.MocnConfigParam.')
+)
+INSERT INTO public.mml_commands (
+    command_name, command_code, category, description, rpc_method, operation_type,
+    target_paths, target_object, tree_node_refs, group_id, command_name_i18n,
+    logical_name_i18n, source, catalog_protected, help_doc
+)
+SELECT
+    c.command_name,
+    c.command_code,
+    'MML',
+    c.command_name,
+    c.rpc_method,
+    c.operation_type,
+    '[]'::jsonb,
+    c.target_object,
+    jsonb_build_array(c.target_object),
+    g.id,
+    jsonb_build_object('zh-CN', c.command_name, 'en-US', c.command_code),
+    jsonb_build_object('zh-CN', c.logical_name, 'en-US', c.command_code),
+    'standard',
+    true,
+    ''
+FROM cmd_defs c
+CROSS JOIN target_group g
+ON CONFLICT (command_code) DO UPDATE
+SET command_name = EXCLUDED.command_name,
+    description = EXCLUDED.description,
+    rpc_method = EXCLUDED.rpc_method,
+    operation_type = EXCLUDED.operation_type,
+    target_object = EXCLUDED.target_object,
+    group_id = EXCLUDED.group_id,
+    command_name_i18n = EXCLUDED.command_name_i18n,
+    logical_name_i18n = EXCLUDED.logical_name_i18n,
+    source = EXCLUDED.source,
+    catalog_protected = EXCLUDED.catalog_protected,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH target_cmds AS (
+    SELECT
+        c.id AS command_id,
+        c.operation_type,
+        c.target_object
+    FROM public.mml_commands c
+    WHERE c.command_code IN (
+        'LST LTE_MOCN_CONFIG_PARAM',
+        'MOD LTE_MOCN_CONFIG_PARAM',
+        'ADD LTE_MOCN_CONFIG_PARAM',
+        'RMV LTE_MOCN_CONFIG_PARAM'
+    )
+      AND c.deprecated_at IS NULL
+), source_paths AS (
+    SELECT
+        t.command_id,
+        t.operation_type,
+        sp.id AS standard_path_id,
+        sp.standard_path,
+        sp.access,
+        row_number() OVER (PARTITION BY t.command_id ORDER BY sp.standard_path) AS sort_order
+    FROM target_cmds t
+    JOIN public.standard_params sp
+      ON sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.MocnConfigParam.%'
+     AND sp.entry_type = 'parameter'
+    WHERE t.operation_type IN ('LST', 'ADD', 'RMV')
+       OR (t.operation_type = 'MOD' AND sp.access = 'READ_WRITE')
+), base_fields AS (
+    SELECT
+        command_id,
+        standard_path_id,
+        standard_path,
+        LEFT(UPPER(regexp_replace(
+            CASE
+                WHEN split_part(standard_path, '.', array_length(string_to_array(standard_path, '.'), 1)) = '{i}'
+                    THEN split_part(standard_path, '.', array_length(string_to_array(standard_path, '.'), 1) - 1) || 'Instance'
+                ELSE split_part(standard_path, '.', array_length(string_to_array(standard_path, '.'), 1))
+            END,
+            '([a-z0-9])([A-Z])', '\1_\2', 'g'
+        )), 93) AS base_mml_code,
+        jsonb_build_object(
+            'zh-CN', LEFT(UPPER(regexp_replace(
+                CASE
+                    WHEN split_part(standard_path, '.', array_length(string_to_array(standard_path, '.'), 1)) = '{i}'
+                        THEN split_part(standard_path, '.', array_length(string_to_array(standard_path, '.'), 1) - 1) || 'Instance'
+                    ELSE split_part(standard_path, '.', array_length(string_to_array(standard_path, '.'), 1))
+                END,
+                '([a-z0-9])([A-Z])', '\1_\2', 'g'
+            )), 100),
+            'en-US', split_part(standard_path, '.', array_length(string_to_array(standard_path, '.'), 1))
+        ) AS label_i18n,
+        sort_order,
+        CASE WHEN access = 'READ_WRITE' THEN 'RW' ELSE 'RO' END AS access_type,
+        operation_type
+    FROM source_paths
+), ranked_fields AS (
+    SELECT
+        base_fields.*,
+        row_number() OVER (PARTITION BY command_id, base_mml_code ORDER BY standard_path) AS code_rank
+    FROM base_fields
+), desired_fields AS (
+    SELECT
+        command_id,
+        standard_path_id,
+        CASE WHEN code_rank > 1 THEN base_mml_code || '_' || UPPER(substr(md5(standard_path), 1, 6)) ELSE base_mml_code END AS mml_code,
+        label_i18n,
+        sort_order,
+        CASE WHEN operation_type IN ('ADD', 'MOD') THEN 'RW' ELSE access_type END AS access_type,
+        operation_type
+    FROM ranked_fields
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id, standard_path_id, mml_code, label_i18n, default_selected,
+    is_required, sort_order, access_type, is_supported
+)
+SELECT
+    command_id,
+    standard_path_id,
+    mml_code,
+    label_i18n,
+    true,
+    operation_type IN ('ADD', 'MOD'),
+    sort_order,
+    access_type,
+    true
+FROM desired_fields
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH target_cmds AS (
+    SELECT id, target_object
+    FROM public.mml_commands
+    WHERE command_code IN (
+        'LST LTE_MOCN_CONFIG_PARAM',
+        'MOD LTE_MOCN_CONFIG_PARAM',
+        'ADD LTE_MOCN_CONFIG_PARAM',
+        'RMV LTE_MOCN_CONFIG_PARAM'
+    )
+      AND deprecated_at IS NULL
+), refreshed AS (
+    SELECT
+        t.id,
+        t.target_object,
+        COALESCE(jsonb_agg(to_jsonb(sp.standard_path) ORDER BY sf.sort_order, sp.standard_path)
+                 FILTER (WHERE sp.standard_path IS NOT NULL), '[]'::jsonb) AS field_paths
+    FROM target_cmds t
+    LEFT JOIN public.mml_command_sub_fields sf ON sf.command_id = t.id AND sf.deprecated_at IS NULL
+    LEFT JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+    GROUP BY t.id, t.target_object
+)
+UPDATE public.mml_commands c
+SET target_paths = CASE WHEN r.target_object IS NULL THEN r.field_paths ELSE jsonb_build_array(r.target_object) || r.field_paths END,
+    tree_node_refs = CASE WHEN r.target_object IS NULL THEN r.field_paths ELSE jsonb_build_array(r.target_object) || r.field_paths END,
+    updated_at = now()
+FROM refreshed r
+WHERE c.id = r.id;
+
+-- Add CellConfig LTE MmePoolConfigParam paths to the existing MME 池配置 commands.
+UPDATE public.mml_commands
+SET command_name = CASE command_code
+        WHEN 'LST LTE_MME_POOL_CONFIG_PARAM' THEN '查询 MME 池配置'
+        WHEN 'ADD LTE_MME_POOL_CONFIG_PARAM' THEN '添加 MME 池配置'
+        ELSE command_name
+    END,
+    command_name_i18n = CASE command_code
+        WHEN 'LST LTE_MME_POOL_CONFIG_PARAM' THEN jsonb_build_object('zh-CN', '查询 MME 池配置', 'en-US', 'Query MME Pool Config')
+        WHEN 'ADD LTE_MME_POOL_CONFIG_PARAM' THEN jsonb_build_object('zh-CN', '添加 MME 池配置', 'en-US', 'Add MME Pool Config')
+        ELSE command_name_i18n
+    END,
+    updated_at = now()
+WHERE command_code IN ('LST LTE_MME_POOL_CONFIG_PARAM', 'ADD LTE_MME_POOL_CONFIG_PARAM')
+  AND deprecated_at IS NULL;
+
+WITH target_cmds AS (
+    SELECT
+        c.id AS command_id,
+        c.command_code,
+        c.operation_type,
+        COALESCE(MAX(sf.sort_order), 0) AS base_sort
+    FROM public.mml_commands c
+    LEFT JOIN public.mml_command_sub_fields sf ON sf.command_id = c.id AND sf.deprecated_at IS NULL
+    WHERE c.command_code IN (
+        'LST LTE_MME_POOL_CONFIG_PARAM',
+        'MOD LTE_MME_POOL_CONFIG_PARAM',
+        'ADD LTE_MME_POOL_CONFIG_PARAM',
+        'RMV LTE_MME_POOL_CONFIG_PARAM'
+    )
+      AND c.deprecated_at IS NULL
+    GROUP BY c.id, c.command_code, c.operation_type
+), source_paths AS (
+    SELECT
+        t.command_id,
+        t.operation_type,
+        sp.id AS standard_path_id,
+        sp.standard_path,
+        sp.access,
+        t.base_sort + row_number() OVER (PARTITION BY t.command_id ORDER BY sp.standard_path) AS sort_order
+    FROM target_cmds t
+    JOIN public.standard_params sp
+      ON sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.MmePoolConfigParam.{i}.%'
+     AND sp.entry_type = 'parameter'
+    WHERE t.operation_type IN ('LST', 'ADD', 'RMV')
+       OR (t.operation_type = 'MOD' AND sp.access = 'READ_WRITE')
+), desired_fields AS (
+    SELECT
+        command_id,
+        standard_path_id,
+        LEFT('CELL_CONFIG_' || UPPER(regexp_replace(
+            split_part(standard_path, '.', array_length(string_to_array(standard_path, '.'), 1)),
+            '([a-z0-9])([A-Z])', '\1_\2', 'g'
+        )), 100) AS mml_code,
+        jsonb_build_object(
+            'zh-CN', LEFT('CELL_CONFIG_' || UPPER(regexp_replace(
+                split_part(standard_path, '.', array_length(string_to_array(standard_path, '.'), 1)),
+                '([a-z0-9])([A-Z])', '\1_\2', 'g'
+            )), 100),
+            'en-US', split_part(standard_path, '.', array_length(string_to_array(standard_path, '.'), 1))
+        ) AS label_i18n,
+        sort_order,
+        CASE WHEN access = 'READ_WRITE' THEN 'RW' ELSE 'RO' END AS access_type,
+        operation_type
+    FROM source_paths
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id, standard_path_id, mml_code, label_i18n, default_selected,
+    is_required, sort_order, access_type, is_supported
+)
+SELECT
+    command_id,
+    standard_path_id,
+    mml_code,
+    label_i18n,
+    true,
+    operation_type IN ('ADD', 'MOD'),
+    sort_order,
+    CASE WHEN operation_type IN ('ADD', 'MOD') THEN 'RW' ELSE access_type END,
+    true
+FROM desired_fields
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH target_cmds AS (
+    SELECT id, target_object
+    FROM public.mml_commands
+    WHERE command_code IN (
+        'LST LTE_MME_POOL_CONFIG_PARAM',
+        'MOD LTE_MME_POOL_CONFIG_PARAM',
+        'ADD LTE_MME_POOL_CONFIG_PARAM',
+        'RMV LTE_MME_POOL_CONFIG_PARAM'
+    )
+      AND deprecated_at IS NULL
+), refreshed AS (
+    SELECT
+        t.id,
+        t.target_object,
+        COALESCE(jsonb_agg(to_jsonb(sp.standard_path) ORDER BY sf.sort_order, sp.standard_path)
+                 FILTER (WHERE sp.standard_path IS NOT NULL), '[]'::jsonb) AS field_paths
+    FROM target_cmds t
+    LEFT JOIN public.mml_command_sub_fields sf ON sf.command_id = t.id AND sf.deprecated_at IS NULL
+    LEFT JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+    GROUP BY t.id, t.target_object
+)
+UPDATE public.mml_commands c
+SET target_paths = CASE WHEN r.target_object IS NULL THEN r.field_paths ELSE jsonb_build_array(r.target_object) || r.field_paths END,
+    tree_node_refs = CASE WHEN r.target_object IS NULL THEN r.field_paths ELSE jsonb_build_array(r.target_object) || r.field_paths END,
+    updated_at = now()
+FROM refreshed r
+WHERE c.id = r.id;
+
+-- Hide duplicate legacy ADD MME 池配置 command with no field bindings.
+UPDATE public.mml_commands
+SET deprecated_at = now(),
+    updated_at = now()
+WHERE command_code = 'ADD MME_POOL_CONFIG_PARAM';
+
 -- Hide legacy Ipsec query/modify commands after their fields are merged into SM_SUB_01.
 UPDATE public.mml_commands
 SET deprecated_at = now(),
