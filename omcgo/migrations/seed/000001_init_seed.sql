@@ -4292,7 +4292,7 @@ INSERT INTO public.mml_command_groups VALUES
 	('60408227-4b3e-4e99-9fbe-5dad8c7f71aa', 'chapter:SQ', '性能参数管理', 'Performance Parameters', 'chapter_SQ', 'cmcc-td-lte-v2.3', 16, true, NULL, '2026-05-31 11:28:48.258248+08', '2026-06-12 18:16:52.492019+08', NULL, '{"en-US": "Performance Parameters", "zh-CN": "性能参数管理"}', 'standard', true, NULL, 'SQ', 0, NULL, NULL, '', ''),
 	('bbb5289b-c5f7-4298-8920-41b5833d6d76', 'chapter:SR', '扩展型一体化皮基站参数', 'Extended Integrated Picocell Parameters', 'chapter_SR', 'cmcc-td-lte-v2.3', 17, true, NULL, '2026-05-31 11:28:48.258248+08', '2026-06-12 18:16:52.492019+08', NULL, '{"en-US": "Extended Integrated Picocell Parameters", "zh-CN": "扩展型一体化皮基站参数"}', 'standard', true, NULL, 'SR', 0, NULL, NULL, '', ''),
 	('e2157662-c1d3-4b60-876f-0525f3f7a32d', 'MML350_G_DEVICE_ETHERNET', 'Device.Ethernet', 'Device.Ethernet', 'MML350_G_DEVICE_ETHERNET', 'cmcc-td-lte-v2.3', 18, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "Device.Ethernet", "zh-CN": "Device.Ethernet"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
-	('695a7a41-0ff7-4b44-9ef3-55c93b9b9b44', 'MML350_G_DEVICE_FAP', 'Device.FAP', 'Device.FAP', 'MML350_G_DEVICE_FAP', 'cmcc-td-lte-v2.3', 19, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "Device.FAP", "zh-CN": "Device.FAP"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
+	('695a7a41-0ff7-4b44-9ef3-55c93b9b9b44', 'MML350_G_DEVICE_FAP', 'LAN口配置', 'LAN Port Configuration', 'MML350_G_DEVICE_FAP', 'cmcc-td-lte-v2.3', 19, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "LAN Port Configuration", "zh-CN": "LAN口配置"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
 	('c3206e05-3f07-4088-aaa5-602213ba9334', 'MML350_G_DEVICE_HALTREASON', '重启原因', 'Reboot Reason', 'MML350_G_DEVICE_HALTREASON', 'cmcc-td-lte-v2.3', 20, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "Reboot Reason", "zh-CN": "重启原因"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
 	('5ddd69a0-90d2-4ce0-9e9a-d91bda1c97e4', 'MML350_G_DEVICE_HTTPS', 'Device.Https', 'Device.Https', 'MML350_G_DEVICE_HTTPS', 'cmcc-td-lte-v2.3', 21, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "Device.Https", "zh-CN": "Device.Https"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
 	('5dad78d4-a471-4f14-9027-4f0611e9960b', 'MML350_G_DEVICE_IP', 'Device.IP', 'Device.IP', 'MML350_G_DEVICE_IP', 'cmcc-td-lte-v2.3', 22, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "Device.IP", "zh-CN": "Device.IP"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
@@ -4305,7 +4305,8 @@ INSERT INTO public.mml_command_groups VALUES
 	('0e9aa286-3d26-4c08-a878-b9be9e29bb7c', 'MML350_G_DEVICE_WEBCONFIG', 'Device.WebConfig', 'Device.WebConfig', 'MML350_G_DEVICE_WEBCONFIG', 'cmcc-td-lte-v2.3', 29, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "Device.WebConfig", "zh-CN": "Device.WebConfig"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
 	('67d3e9e4-0c35-47a6-bfb2-d7f0aa4cc106', 'MML350_G_DEVICEGSM', 'DeviceGSM', 'DeviceGSM', 'MML350_G_DEVICEGSM', 'cmcc-td-lte-v2.3', 30, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "DeviceGSM", "zh-CN": "DeviceGSM"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
 	('986ffbd6-66d0-41a9-b19a-60e87b7f8455', 'MML350_G_INTERNETGATEWAYDEVICE', 'InternetGatewayDevice', 'InternetGatewayDevice', 'MML350_G_INTERNETGATEWAYDEVICE', 'cmcc-td-lte-v2.3', 31, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "InternetGatewayDevice", "zh-CN": "InternetGatewayDevice"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
-	('f299350f-4eed-400c-9a7f-ba3141f290f9', 'MML350_G_BOARDCONF', 'boardconf', 'boardconf', 'MML350_G_BOARDCONF', 'cmcc-td-lte-v2.3', 32, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "boardconf", "zh-CN": "boardconf"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', '') ON CONFLICT DO NOTHING;
+	('f299350f-4eed-400c-9a7f-ba3141f290f9', 'MML350_G_BOARDCONF', 'boardconf', 'boardconf', 'MML350_G_BOARDCONF', 'cmcc-td-lte-v2.3', 32, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "boardconf", "zh-CN": "boardconf"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
+	('15b0b31b-7ad1-4ad8-9dc3-7f18a05d0470', 'MML350_G_DNS_CONFIG', 'DNS配置', 'DNS Configuration', 'MML350_G_DNS_CONFIG', 'cmcc-td-lte-v2.3', 33, true, NULL, '2026-07-21 16:53:00+08', '2026-07-21 16:53:00+08', NULL, '{"en-US": "DNS Configuration", "zh-CN": "DNS配置"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', '') ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.mml_command_groups ENABLE TRIGGER ALL;
@@ -4459,16 +4460,16 @@ INSERT INTO public.mml_commands VALUES
 	('fd38b978-63be-4f81-8e9f-370d27345fd8', '列出 EPC 核心网参数', 'LST LTE_EPC', '1', '列出 EPC 核心网参数', 'GetParameterValues', '2026-05-31 11:28:48.258248+08', '["Device.Services.FAPService.{i}.CellConfig.LTE.EPC.EAID", "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.TAC", "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.AllowedCipheringAlgorithmList", "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.AllowedIntegrityProtectionAlgorithmList"]', NULL, '641903c0-7306-4637-87db-46f36da2466f', '{"en-US": "List EPC 核心网参数", "zh-CN": "列出 EPC 核心网参数"}', false, '{}', 'LST', '{"en-US": "LTE EPC", "zh-CN": "EPC 核心网参数"}', 'standard', true, '{}', '2026-07-16 10:27:00.495542+08', NULL, '[]', '[]', '', ''),
 	('fe7e29ee-4f3c-4d06-80af-9b941c8a4a69', '列出 EPC PLMN 列表', 'LST PLMN_LIST', '1', '列出 EPC PLMN 列表', 'GetParameterValues', '2026-05-31 11:28:48.258248+08', '["Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.PLMNID", "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.CellReservedForOperatorUse", "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.Enable", "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.IsPrimary"]', NULL, '641903c0-7306-4637-87db-46f36da2466f', '{"en-US": "List Plmn List", "zh-CN": "列出 EPC PLMN 列表"}', false, '{}', 'LST', '{"en-US": "Plmn List", "zh-CN": "EPC PLMN 列表"}', 'standard', true, '{}', '2026-07-16 10:27:00.495542+08', NULL, '[]', '[]', '', ''),
 	('0242b43b-7948-4d93-8cd3-5735dff9f214', 'MML350 DeviceGSM / NriNullDel', 'LST MML350_DEVICEGSM__NRINULLDEL', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["DeviceGSM.NriNullDel"]', NULL, '67d3e9e4-0c35-47a6-bfb2-d7f0aa4cc106', '{"en-US": "MML350 DeviceGSM / NriNullDel", "zh-CN": "MML350 DeviceGSM / NriNullDel"}', false, '{}', 'LST', '{"en-US": "NriNullDel", "zh-CN": "NriNullDel"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
-	('0517ebb0-de4b-4c61-a697-6562f711991b', 'MML350 Device.FAP / NL', 'LST MML350_DEVICE_FAP__NL', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.FAP.NL.{i}", "Device.FAP.NL.{i}.band", "Device.FAP.NL.{i}.cellID", "Device.FAP.NL.{i}.channelNum", "Device.FAP.NL.{i}.freqUncerThreshlod", "Device.FAP.NL.{i}.phaseOffset", "Device.FAP.NL.{i}.priority", "Device.FAP.NL.{i}.syncInterval", "Device.FAP.NL.{i}.technology"]', NULL, 'b4e9f4c1-4324-4592-8c58-17fa95c7faad', '{"en-US": "MML350 Device.FAP / NL", "zh-CN": "MML350 Device.FAP / NL"}', false, '{}', 'LST', '{"en-US": "NL", "zh-CN": "NL"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
+	('0517ebb0-de4b-4c61-a697-6562f711991b', '查询 NL', 'LST MML350_DEVICE_FAP__NL', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.FAP.NL.{i}", "Device.FAP.NL.{i}.band", "Device.FAP.NL.{i}.cellID", "Device.FAP.NL.{i}.channelNum", "Device.FAP.NL.{i}.freqUncerThreshlod", "Device.FAP.NL.{i}.phaseOffset", "Device.FAP.NL.{i}.priority", "Device.FAP.NL.{i}.syncInterval", "Device.FAP.NL.{i}.technology"]', NULL, 'b4e9f4c1-4324-4592-8c58-17fa95c7faad', '{"en-US": "Query NL", "zh-CN": "查询 NL"}', false, '{}', 'LST', '{"en-US": "NL", "zh-CN": "NL"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('0594c31a-6f62-4fc3-85bf-712eba364ac4', 'MML350 DeviceGSM / Cs7Instance.Asp', 'LST MML350_DEVICEGSM__CS7INSTANCE_ASP', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["DeviceGSM.Cs7Instance.{i}.Asp.{i}.AspRole", "DeviceGSM.Cs7Instance.{i}.Asp.{i}.LocalIp", "DeviceGSM.Cs7Instance.{i}.Asp.{i}.LocalPort", "DeviceGSM.Cs7Instance.{i}.Asp.{i}.Name", "DeviceGSM.Cs7Instance.{i}.Asp.{i}.Protocol", "DeviceGSM.Cs7Instance.{i}.Asp.{i}.RemoteIp", "DeviceGSM.Cs7Instance.{i}.Asp.{i}.RemotePort", "DeviceGSM.Cs7Instance.{i}.Asp.{i}.SctpRole"]', NULL, '67d3e9e4-0c35-47a6-bfb2-d7f0aa4cc106', '{"en-US": "MML350 DeviceGSM / Cs7Instance.Asp", "zh-CN": "MML350 DeviceGSM / Cs7Instance.Asp"}', false, '{}', 'LST', '{"en-US": "Cs7Instance.Asp", "zh-CN": "Cs7Instance.Asp"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
-	('098daf55-9069-412e-abf0-a1ed2cf6dea4', 'MML350 Device.FAP / gNB.config', 'LST MML350_DEVICE_FAP__GNB_CONFIG', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.FAP.gNB.config.DhcpDns", "Device.FAP.gNB.config.DnsType", "Device.FAP.gNB.config.dns"]', NULL, '695a7a41-0ff7-4b44-9ef3-55c93b9b9b44', '{"en-US": "MML350 Device.FAP / gNB.config", "zh-CN": "MML350 Device.FAP / gNB.config"}', false, '{}', 'LST', '{"en-US": "gNB.config", "zh-CN": "gNB.config"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
+	('098daf55-9069-412e-abf0-a1ed2cf6dea4', '查询 DNS', 'LST MML350_DEVICE_FAP__GNB_CONFIG', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.FAP.gNB.config.DhcpDns", "Device.FAP.gNB.config.DnsType", "Device.FAP.gNB.config.dns"]', NULL, '15b0b31b-7ad1-4ad8-9dc3-7f18a05d0470', '{"en-US": "Query DNS", "zh-CN": "查询 DNS"}', false, '{}', 'LST', '{"en-US": "DNS", "zh-CN": "DNS"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('14032000-1dce-404c-b9e8-94a28d43770c', 'MML350 DeviceGSM / Mgw', 'LST MML350_DEVICEGSM__MGW', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["DeviceGSM.Mgw.{i}.MgwEndpointDomain", "DeviceGSM.Mgw.{i}.MgwLocalPort", "DeviceGSM.Mgw.{i}.MgwRemoteIp", "DeviceGSM.Mgw.{i}.MgwRemotePort"]', NULL, '67d3e9e4-0c35-47a6-bfb2-d7f0aa4cc106', '{"en-US": "MML350 DeviceGSM / Mgw", "zh-CN": "MML350 DeviceGSM / Mgw"}', false, '{}', 'LST', '{"en-US": "Mgw", "zh-CN": "Mgw"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('21226bdc-85b9-495a-9e19-53653c92f4ee', 'MML350 Device.Services.FAPService / MmePoolConfigParam', 'LST MML350_DEVICE_SERVICES_FAPSERVICE__MMEPOOLCONFIGPARAM', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.Services.FAPService.MmePoolConfigParam.{i}.MMEIp"]', NULL, '98d07353-7d12-4981-b9a3-25bf3e9ebc35', '{"en-US": "MML350 Device.Services.FAPService / MmePoolConfigParam", "zh-CN": "MML350 Device.Services.FAPService / MmePoolConfigParam"}', false, '{}', 'LST', '{"en-US": "MmePoolConfigParam", "zh-CN": "MmePoolConfigParam"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('09d4dbf2-3862-4b00-bc21-8a0c2967f2c2', 'MML350 Device.Services / GsmBTSCellDT', 'LST MML350_DEVICE_SERVICES__GSMBTSCELLDT', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.Services.GsmBTSCellDT.{i}.BscSelect", "Device.Services.GsmBTSCellDT.{i}.CellStateControl", "Device.Services.GsmBTSCellDT.{i}.CurrLocAreaCode", "Device.Services.GsmBTSCellDT.{i}.CurrentArfcn", "Device.Services.GsmBTSCellDT.{i}.GsmBSIC", "Device.Services.GsmBTSCellDT.{i}.GsmBtsBand", "Device.Services.GsmBTSCellDT.{i}.GsmBtsBindMib", "Device.Services.GsmBTSCellDT.{i}.GsmBtsCellActiveBefore", "Device.Services.GsmBTSCellDT.{i}.GsmBtsIfname", "Device.Services.GsmBTSCellDT.{i}.GsmBtsIpAddr", "Device.Services.GsmBTSCellDT.{i}.GsmBtsRFPower", "Device.Services.GsmBTSCellDT.{i}.GsmCellID", "Device.Services.GsmBTSCellDT.{i}.GsmCellWithRuRelation", "Device.Services.GsmBTSCellDT.{i}.GsmDlPhyDelayTime", "Device.Services.GsmBTSCellDT.{i}.GsmMACStubVal", "Device.Services.GsmBTSCellDT.{i}.GsmMACTraceMsgType", "Device.Services.GsmBTSCellDT.{i}.GsmMACTraceNum", "Device.Services.GsmBTSCellDT.{i}.GsmMACTtiSwitch", "Device.Services.GsmBTSCellDT.{i}.GsmUlPhyDelayTime", "Device.Services.GsmBTSCellDT.{i}.IPAUnitID", "Device.Services.GsmBTSCellDT.{i}.InUse", "Device.Services.GsmBTSCellDT.{i}.MobileNetworkCode", "Device.Services.GsmBTSCellDT.{i}.NetworkCountryCode", "Device.Services.GsmBTSCellDT.{i}.OMLRemoteIP", "Device.Services.GsmBTSCellDT.{i}.OMLRemoteIPBak", "Device.Services.GsmBTSCellDT.{i}.OpState", "Device.Services.GsmBTSCellDT.{i}.PhyCatchIq", "Device.Services.GsmBTSCellDT.{i}.PhyStop", "Device.Services.GsmBTSCellDT.{i}.RTPJitterBuffer", "Device.Services.GsmBTSCellDT.{i}.RfState", "Device.Services.GsmBTSCellDT.{i}.TrxNum", "Device.Services.GsmBTSCellDT.{i}.UeCount"]', NULL, '843cbc01-2ab4-4963-b3ab-36921fb8dae8', '{"en-US": "MML350 Device.Services / GsmBTSCellDT", "zh-CN": "MML350 Device.Services / GsmBTSCellDT"}', false, '{}', 'LST', '{"en-US": "GsmBTSCellDT", "zh-CN": "GsmBTSCellDT"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('864101d3-b966-4581-bc4f-c41d3fc62f0e', 'MML350 Device.LAN_HostConfigManagement / IPInterface.NRDU', 'LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NRDU', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.LAN_HostConfigManagement.IPInterface.NRDU.DuF1UIpAddr", "Device.LAN_HostConfigManagement.IPInterface.NRDU.DuF1apLocalIpAddr", "Device.LAN_HostConfigManagement.IPInterface.NRDU.DuF1apRemoteIpAddr"]', NULL, 'dbaf234a-3d34-47e3-93b1-be9766de95aa', '{"en-US": "MML350 Device.LAN_HostConfigManagement / IPInterface.NRDU", "zh-CN": "MML350 Device.LAN_HostConfigManagement / IPInterface.NRDU"}', false, '{}', 'LST', '{"en-US": "IPInterface.NRDU", "zh-CN": "IPInterface.NRDU"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('11ef3253-ed79-4550-8ad6-f73d79633a19', 'MML350 Device.Services.FAPService / EMBEDDED_EPCBearerLBOTft', 'LST MML350_DEVICE_SERVICES_FAPSERVICE__EMBEDDED_EPCBEARERLBOTFT', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.Services.FAPService.EMBEDDED_EPCBearerLBOTft.{i}", "Device.Services.FAPService.EMBEDDED_EPCBearerLBOTft.{i}.AppName", "Device.Services.FAPService.EMBEDDED_EPCBearerLBOTft.{i}.IpMask", "Device.Services.FAPService.EMBEDDED_EPCBearerLBOTft.{i}.IpPort", "Device.Services.FAPService.EMBEDDED_EPCBearerLBOTft.{i}.PfId", "Device.Services.FAPService.EMBEDDED_EPCBearerLBOTft.{i}.ProtocolId"]', NULL, '98d07353-7d12-4981-b9a3-25bf3e9ebc35', '{"en-US": "MML350 Device.Services.FAPService / EMBEDDED_EPCBearerLBOTft", "zh-CN": "MML350 Device.Services.FAPService / EMBEDDED_EPCBearerLBOTft"}', false, '{}', 'LST', '{"en-US": "EMBEDDED_EPCBearerLBOTft", "zh-CN": "EMBEDDED_EPCBearerLBOTft"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('1242cc84-4103-4753-b542-f8b4fc576ff0', 'MML350 Device.RemoteDeviceList / RemoteDeviceList', 'LST MML350_DEVICE_REMOTEDEVICELIST__REMOTEDEVICELIST', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.RemoteDeviceList.{i}.AdminState", "Device.RemoteDeviceList.{i}.ConnStatus", "Device.RemoteDeviceList.{i}.HardwareVersion", "Device.RemoteDeviceList.{i}.IpAddress", "Device.RemoteDeviceList.{i}.LastLogin", "Device.RemoteDeviceList.{i}.LastLogout", "Device.RemoteDeviceList.{i}.Latitude", "Device.RemoteDeviceList.{i}.Longitude", "Device.RemoteDeviceList.{i}.PhyState", "Device.RemoteDeviceList.{i}.SerialNumber", "Device.RemoteDeviceList.{i}.SoftwareVersion", "Device.RemoteDeviceList.{i}.SyncState", "Device.RemoteDeviceList.{i}.TfcsSyncMgrState"]', NULL, '5b7ad256-4fa1-441e-a4a5-990f725f5500', '{"en-US": "MML350 Device.RemoteDeviceList / RemoteDeviceList", "zh-CN": "MML350 Device.RemoteDeviceList / RemoteDeviceList"}', false, '{}', 'LST', '{"en-US": "RemoteDeviceList", "zh-CN": "RemoteDeviceList"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
-	('24272126-0847-4008-8b3d-8c9d3f3e5480', 'MML350 Device.FAP / HANRU', 'LST MML350_DEVICE_FAP__HANRU', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.FAP.HANRU.LockBand", "Device.FAP.HANRU.LockCellId", "Device.FAP.HANRU.LockFrequency", "Device.FAP.HANRU.LockParam", "Device.FAP.HANRU.LockParamNettype"]', NULL, '55ef278a-bb8d-4d61-a515-80b4bf0a0c11', '{"en-US": "MML350 Device.FAP / HANRU", "zh-CN": "MML350 Device.FAP / HANRU"}', false, '{}', 'LST', '{"en-US": "HANRU", "zh-CN": "HANRU"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
+	('24272126-0847-4008-8b3d-8c9d3f3e5480', '查询 HANRU', 'LST MML350_DEVICE_FAP__HANRU', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.FAP.HANRU.LockBand", "Device.FAP.HANRU.LockCellId", "Device.FAP.HANRU.LockFrequency", "Device.FAP.HANRU.LockParam", "Device.FAP.HANRU.LockParamNettype"]', NULL, '55ef278a-bb8d-4d61-a515-80b4bf0a0c11', '{"en-US": "Query HANRU", "zh-CN": "查询 HANRU"}', false, '{}', 'LST', '{"en-US": "HANRU", "zh-CN": "HANRU"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('40dd4362-bce6-4861-b725-f577d5aff7ea', 'MML350 DeviceGSM / Mnc', 'LST MML350_DEVICEGSM__MNC', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["DeviceGSM.Mnc"]', NULL, '67d3e9e4-0c35-47a6-bfb2-d7f0aa4cc106', '{"en-US": "MML350 DeviceGSM / Mnc", "zh-CN": "MML350 DeviceGSM / Mnc"}', false, '{}', 'LST', '{"en-US": "Mnc", "zh-CN": "Mnc"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('4bc9378b-f0f1-41fb-a81e-df6ac8702ccd', 'MML350 boardconf / HALOD', 'LST MML350_BOARDCONF__HALOD', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["boardconf.HALOD.HALOD_ENB1_IP", "boardconf.HALOD.HALOD_ENB2_IP", "boardconf.HALOD.HALOD_IP", "boardconf.HALOD.HALOD_PORT", "boardconf.HALOD.HALOD_WCG_S1C_IFNAME", "boardconf.HALOD.HALOD_WCG_S1U_IFNAME", "boardconf.HaloD.baseStationForm"]', NULL, 'f299350f-4eed-400c-9a7f-ba3141f290f9', '{"en-US": "MML350 boardconf / HALOD", "zh-CN": "MML350 boardconf / HALOD"}', false, '{}', 'LST', '{"en-US": "HALOD", "zh-CN": "HALOD"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('52da2391-7e27-4865-adce-34609c59fc01', 'MML350 Device.WebConfig / WebConfig', 'LST MML350_DEVICE_WEBCONFIG__WEBCONFIG', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.WebConfig.WanVisitEnable"]', NULL, '0e9aa286-3d26-4c08-a878-b9be9e29bb7c', '{"en-US": "MML350 Device.WebConfig / WebConfig", "zh-CN": "MML350 Device.WebConfig / WebConfig"}', false, '{}', 'LST', '{"en-US": "WebConfig", "zh-CN": "WebConfig"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
@@ -4477,8 +4478,8 @@ INSERT INTO public.mml_commands VALUES
 	('69ff228b-781f-4e18-86c2-dd78ad072cc6', 'MML350 DeviceGSM / Cs7Instance.SccpAddr', 'LST MML350_DEVICEGSM__CS7INSTANCE_SCCPADDR', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.Name", "DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.PointCode", "DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.RoutingIndicator", "DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.SubsystemNumber"]', NULL, '67d3e9e4-0c35-47a6-bfb2-d7f0aa4cc106', '{"en-US": "MML350 DeviceGSM / Cs7Instance.SccpAddr", "zh-CN": "MML350 DeviceGSM / Cs7Instance.SccpAddr"}', false, '{}', 'LST', '{"en-US": "Cs7Instance.SccpAddr", "zh-CN": "Cs7Instance.SccpAddr"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('89b54e24-d722-4d68-ae70-ade1081ea34b', 'MML350 DeviceGSM / OmlRemoteIp', 'LST MML350_DEVICEGSM__OMLREMOTEIP', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["DeviceGSM.OmlRemoteIp"]', NULL, '67d3e9e4-0c35-47a6-bfb2-d7f0aa4cc106', '{"en-US": "MML350 DeviceGSM / OmlRemoteIp", "zh-CN": "MML350 DeviceGSM / OmlRemoteIp"}', false, '{}', 'LST', '{"en-US": "OmlRemoteIp", "zh-CN": "OmlRemoteIp"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('90356b89-7136-4d80-83a9-09c69eafab9c', '查询 重启原因', 'LST MML350_DEVICE_HALTREASON__REBOOT_REASON', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.HaltReason.DetailReason", "Device.HaltReason.MainReason"]', NULL, 'c3206e05-3f07-4088-aaa5-602213ba9334', '{"en-US": "List Reboot Reason", "zh-CN": "查询 重启原因"}', false, '{}', 'LST', '{"en-US": "Reboot Reason", "zh-CN": "重启原因"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
-	('57392981-db23-4289-bfd0-db79d32324b7', 'MML350 Device.FAP / Ipsec', 'LST MML350_DEVICE_FAP__IPSEC', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.FAP.Ipsec.{i}", "Device.FAP.Ipsec.{i}.DPDACTION", "Device.FAP.Ipsec.{i}.DPDDELAY", "Device.FAP.Ipsec.{i}.ESP_AUTHENTICATION", "Device.FAP.Ipsec.{i}.ESP_DH_GROUP", "Device.FAP.Ipsec.{i}.ESP_ENCRYPTION", "Device.FAP.Ipsec.{i}.FRAGMENTATION", "Device.FAP.Ipsec.{i}.IKELIFETIME", "Device.FAP.Ipsec.{i}.IKE_AUTHENTICATION", "Device.FAP.Ipsec.{i}.IKE_DH_GROUP", "Device.FAP.Ipsec.{i}.IKE_ENCRYPTION", "Device.FAP.Ipsec.{i}.KEYLIFE", "Device.FAP.Ipsec.{i}.LEFTSOURCEIP", "Device.FAP.Ipsec.{i}.LEFTSUBNET", "Device.FAP.Ipsec.{i}.LEFT_AUTH", "Device.FAP.Ipsec.{i}.LEFT_CERT", "Device.FAP.Ipsec.{i}.LEFT_IDENTIFIER", "Device.FAP.Ipsec.{i}.LEFT_INTERFACE", "Device.FAP.Ipsec.{i}.LEFT_SUBNET", "Device.FAP.Ipsec.{i}.REKEYMARGIN", "Device.FAP.Ipsec.{i}.RIGHT_AUTH", "Device.FAP.Ipsec.{i}.RIGHT_IDENTIFIER", "Device.FAP.Ipsec.{i}.RIGHT_SUBNET", "Device.FAP.Ipsec.{i}.SECRET_KEY", "Device.FAP.Ipsec.{i}.STATUS", "Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_LEFTIP", "Device.FAP.Ipsec.{i}.TUNNEL_ENABLE", "Device.FAP.Ipsec.{i}.TUNNEL_FRAGMENTATION", "Device.FAP.Ipsec.{i}.TUNNEL_GATEWAY", "Device.FAP.Ipsec.{i}.TUNNEL_LEFT_AUTH", "Device.FAP.Ipsec.{i}.TUNNEL_LEFT_CERT", "Device.FAP.Ipsec.{i}.TUNNEL_NAME", "Device.FAP.Ipsec.{i}.TUNNEL_RIGHT_AUTH", "Device.FAP.Ipsec.{i}.TUNNEL_SECRET_KEY", "Device.FAP.Ipsec.{i}.USED_SOURCE_IP"]', NULL, 'cb400439-1c3d-4320-994b-d1047ffd8857', '{"en-US": "MML350 Device.FAP / Ipsec", "zh-CN": "MML350 Device.FAP / Ipsec"}', false, '{}', 'LST', '{"en-US": "Ipsec", "zh-CN": "Ipsec"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
-	('5e2dd9d8-d099-4d80-9e6c-4bee0312c605', 'MML350 Device.FAP / Synchronization', 'LST MML350_DEVICE_FAP__SYNCHRONIZATION', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.FAP.Synchronization.ClockSourceSyncState", "Device.FAP.Synchronization.PpsTimeMode"]', NULL, '0f6bdf37-101f-4e83-82c1-163a85b99481', '{"en-US": "MML350 Device.FAP / Synchronization", "zh-CN": "MML350 Device.FAP / Synchronization"}', false, '{}', 'LST', '{"en-US": "Synchronization", "zh-CN": "Synchronization"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
+	('57392981-db23-4289-bfd0-db79d32324b7', '查询 Ipsec', 'LST MML350_DEVICE_FAP__IPSEC', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.FAP.Ipsec.{i}", "Device.FAP.Ipsec.{i}.DPDACTION", "Device.FAP.Ipsec.{i}.DPDDELAY", "Device.FAP.Ipsec.{i}.ESP_AUTHENTICATION", "Device.FAP.Ipsec.{i}.ESP_DH_GROUP", "Device.FAP.Ipsec.{i}.ESP_ENCRYPTION", "Device.FAP.Ipsec.{i}.FRAGMENTATION", "Device.FAP.Ipsec.{i}.IKELIFETIME", "Device.FAP.Ipsec.{i}.IKE_AUTHENTICATION", "Device.FAP.Ipsec.{i}.IKE_DH_GROUP", "Device.FAP.Ipsec.{i}.IKE_ENCRYPTION", "Device.FAP.Ipsec.{i}.KEYLIFE", "Device.FAP.Ipsec.{i}.LEFTSOURCEIP", "Device.FAP.Ipsec.{i}.LEFTSUBNET", "Device.FAP.Ipsec.{i}.LEFT_AUTH", "Device.FAP.Ipsec.{i}.LEFT_CERT", "Device.FAP.Ipsec.{i}.LEFT_IDENTIFIER", "Device.FAP.Ipsec.{i}.LEFT_INTERFACE", "Device.FAP.Ipsec.{i}.LEFT_SUBNET", "Device.FAP.Ipsec.{i}.REKEYMARGIN", "Device.FAP.Ipsec.{i}.RIGHT_AUTH", "Device.FAP.Ipsec.{i}.RIGHT_IDENTIFIER", "Device.FAP.Ipsec.{i}.RIGHT_SUBNET", "Device.FAP.Ipsec.{i}.SECRET_KEY", "Device.FAP.Ipsec.{i}.STATUS", "Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_LEFTIP", "Device.FAP.Ipsec.{i}.TUNNEL_ENABLE", "Device.FAP.Ipsec.{i}.TUNNEL_FRAGMENTATION", "Device.FAP.Ipsec.{i}.TUNNEL_GATEWAY", "Device.FAP.Ipsec.{i}.TUNNEL_LEFT_AUTH", "Device.FAP.Ipsec.{i}.TUNNEL_LEFT_CERT", "Device.FAP.Ipsec.{i}.TUNNEL_NAME", "Device.FAP.Ipsec.{i}.TUNNEL_RIGHT_AUTH", "Device.FAP.Ipsec.{i}.TUNNEL_SECRET_KEY", "Device.FAP.Ipsec.{i}.USED_SOURCE_IP"]', NULL, 'cb400439-1c3d-4320-994b-d1047ffd8857', '{"en-US": "Query Ipsec", "zh-CN": "查询 Ipsec"}', false, '{}', 'LST', '{"en-US": "Ipsec", "zh-CN": "Ipsec"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
+	('5e2dd9d8-d099-4d80-9e6c-4bee0312c605', '查询 Synchronization', 'LST MML350_DEVICE_FAP__SYNCHRONIZATION', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.FAP.Synchronization.ClockSourceSyncState", "Device.FAP.Synchronization.PpsTimeMode"]', NULL, '0f6bdf37-101f-4e83-82c1-163a85b99481', '{"en-US": "Query Synchronization", "zh-CN": "查询 Synchronization"}', false, '{}', 'LST', '{"en-US": "Synchronization", "zh-CN": "Synchronization"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('636c4bac-25e0-4cae-8979-c161ca6a00ca', 'MML350 DeviceGSM / TimerNetT3212', 'LST MML350_DEVICEGSM__TIMERNETT3212', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["DeviceGSM.TimerNetT3212"]', NULL, '67d3e9e4-0c35-47a6-bfb2-d7f0aa4cc106', '{"en-US": "MML350 DeviceGSM / TimerNetT3212", "zh-CN": "MML350 DeviceGSM / TimerNetT3212"}', false, '{}', 'LST', '{"en-US": "TimerNetT3212", "zh-CN": "TimerNetT3212"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('6b781503-6ba2-4bc6-803c-68d0fbca3037', 'MML350 Device.IP / IPv4Address', 'LST MML350_DEVICE_IP__IPV4ADDRESS', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.IP.Interface.{i}.IPv4Address.{i}.AddressingType", "Device.IP.Interface.{i}.IPv4Address.{i}.DefaultGateway", "Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress", "Device.IP.Interface.{i}.IPv4Address.{i}.SubnetMask"]', NULL, '5dad78d4-a471-4f14-9027-4f0611e9960b', '{"en-US": "MML350 Device.IP / IPv4Address", "zh-CN": "MML350 Device.IP / IPv4Address"}', false, '{}', 'LST', '{"en-US": "IPv4Address", "zh-CN": "IPv4Address"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('76d14b19-d7fe-4c2e-b2a1-735826a19caf', 'MML350 Device.KeepalivedMgmt / KeepalivedMgmt', 'LST MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.KeepalivedMgmt.CounterCheck", "Device.KeepalivedMgmt.Enable", "Device.KeepalivedMgmt.LocalUplinkIpAddr", "Device.KeepalivedMgmt.ManualSwitch", "Device.KeepalivedMgmt.MaxVrrpEntries", "Device.KeepalivedMgmt.RemoteUplinkIpAddr", "Device.KeepalivedMgmt.RouterId", "Device.KeepalivedMgmt.SecondTimeout", "Device.KeepalivedMgmt.VrrpNumberOfEntries"]', NULL, '777212fe-ba49-4ca2-b528-26416bbe444f', '{"en-US": "MML350 Device.KeepalivedMgmt / KeepalivedMgmt", "zh-CN": "MML350 Device.KeepalivedMgmt / KeepalivedMgmt"}', false, '{}', 'LST', '{"en-US": "KeepalivedMgmt", "zh-CN": "KeepalivedMgmt"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
@@ -4491,18 +4492,18 @@ INSERT INTO public.mml_commands VALUES
 	('a5e4c091-3e1b-4f75-aca7-a2a39e8d732c', 'MML350 InternetGatewayDevice / Time', 'LST MML350_INTERNETGATEWAYDEVICE__TIME', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["InternetGatewayDevice.Time.NTPServer3", "InternetGatewayDevice.Time.NTPServer5"]', NULL, '986ffbd6-66d0-41a9-b19a-60e87b7f8455', '{"en-US": "MML350 InternetGatewayDevice / Time", "zh-CN": "MML350 InternetGatewayDevice / Time"}', false, '{}', 'LST', '{"en-US": "Time", "zh-CN": "Time"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('9b325987-c371-4e3f-b77d-022577f30a70', 'MML350 Device.KeepalivedMgmt / VrrpMgmt', 'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.KeepalivedMgmt.VrrpMgmt.Index", "Device.KeepalivedMgmt.VrrpMgmt.{i}.AdvertInt", "Device.KeepalivedMgmt.VrrpMgmt.{i}.DstIpAddr", "Device.KeepalivedMgmt.VrrpMgmt.{i}.Enable", "Device.KeepalivedMgmt.VrrpMgmt.{i}.Interface", "Device.KeepalivedMgmt.VrrpMgmt.{i}.MaxVirtualIpEntries", "Device.KeepalivedMgmt.VrrpMgmt.{i}.Name", "Device.KeepalivedMgmt.VrrpMgmt.{i}.Priority", "Device.KeepalivedMgmt.VrrpMgmt.{i}.SrcIpAddr", "Device.KeepalivedMgmt.VrrpMgmt.{i}.State", "Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.IP", "Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Interface", "Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Label", "Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.NetmaskPrefix", "Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpNumberOfEntries", "Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualRouterId"]', NULL, '777212fe-ba49-4ca2-b528-26416bbe444f', '{"en-US": "MML350 Device.KeepalivedMgmt / VrrpMgmt", "zh-CN": "MML350 Device.KeepalivedMgmt / VrrpMgmt"}', false, '{}', 'LST', '{"en-US": "VrrpMgmt", "zh-CN": "VrrpMgmt"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('b3aad92e-1f6a-4551-8934-27f5aa5f58d5', 'MML350 DeviceGSM / Bts', 'LST MML350_DEVICEGSM__BTS', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["DeviceGSM.Bts.Index", "DeviceGSM.Bts.Trx.Index", "DeviceGSM.Bts.{i}.Band", "DeviceGSM.Bts.{i}.Bsic", "DeviceGSM.Bts.{i}.C0PowerRed", "DeviceGSM.Bts.{i}.CellId", "DeviceGSM.Bts.{i}.CellReselectHysteresis", "DeviceGSM.Bts.{i}.CellReselectOffset", "DeviceGSM.Bts.{i}.CellReselectPenaltyTime", "DeviceGSM.Bts.{i}.CodecSupport", "DeviceGSM.Bts.{i}.GprsMode", "DeviceGSM.Bts.{i}.HandoverAlgorithm", "DeviceGSM.Bts.{i}.IpaRslIp", "DeviceGSM.Bts.{i}.IpaUnitId", "DeviceGSM.Bts.{i}.LocationAreaCode", "DeviceGSM.Bts.{i}.MsMaxPower", "DeviceGSM.Bts.{i}.NeighborCgiAdd", "DeviceGSM.Bts.{i}.NeighborCgiDel", "DeviceGSM.Bts.{i}.NeighborListMode", "DeviceGSM.Bts.{i}.NumofTrxChannel", "DeviceGSM.Bts.{i}.OmlConnectState", "DeviceGSM.Bts.{i}.OmlIpaStreamId", "DeviceGSM.Bts.{i}.RachCellBarred", "DeviceGSM.Bts.{i}.Si2quaterNeighborListAdd", "DeviceGSM.Bts.{i}.Si2quaterNeighborListDel", "DeviceGSM.Bts.{i}.Trx.{i}.Arfcn", "DeviceGSM.Bts.{i}.Trx.{i}.MaxPowerRed", "DeviceGSM.Bts.{i}.Trx.{i}.RfLocked", "DeviceGSM.Bts.{i}.Trx.{i}.Ts.{i}.PhyChanConfig", "DeviceGSM.Bts.{i}.handover", "DeviceGSM.Bts.{i}.handover1.maximum.distance", "DeviceGSM.Bts.{i}.handover1.power.budget.hysteresis", "DeviceGSM.Bts.{i}.handover1.power.budget.interval", "DeviceGSM.Bts.{i}.handover1.window.rxlev.averaging", "DeviceGSM.Bts.{i}.handover1.window.rxlev.neighbor.averaging", "DeviceGSM.Bts.{i}.handover1.window.rxqual.averaging", "DeviceGSM.Bts.{i}.handover2.afs-bias.rxlev", "DeviceGSM.Bts.{i}.handover2.afs-bias.rxqual", "DeviceGSM.Bts.{i}.handover2.assignment", "DeviceGSM.Bts.{i}.handover2.max-handovers", "DeviceGSM.Bts.{i}.handover2.maximum.distance", "DeviceGSM.Bts.{i}.handover2.min-free-slots.tch-f", "DeviceGSM.Bts.{i}.handover2.min-free-slots.tch-h", "DeviceGSM.Bts.{i}.handover2.min.rxlev", "DeviceGSM.Bts.{i}.handover2.min.rxqual", "DeviceGSM.Bts.{i}.handover2.penalty-time.failed-assignment", "DeviceGSM.Bts.{i}.handover2.penalty-time.failed-ho", "DeviceGSM.Bts.{i}.handover2.penalty-time.low-rxqual-assignment", "DeviceGSM.Bts.{i}.handover2.penalty-time.low-rxqual-ho", "DeviceGSM.Bts.{i}.handover2.penalty-time.max-distance", "DeviceGSM.Bts.{i}.handover2.power.budget.hysteresis", "DeviceGSM.Bts.{i}.handover2.power.budget.interval", "DeviceGSM.Bts.{i}.handover2.retries", "DeviceGSM.Bts.{i}.handover2.tdma-measurement", "DeviceGSM.Bts.{i}.handover2.window.rxlev.averaging", "DeviceGSM.Bts.{i}.handover2.window.rxlev.neighbor.averaging", "DeviceGSM.Bts.{i}.handover2.window.rxqual.averaging"]', NULL, '67d3e9e4-0c35-47a6-bfb2-d7f0aa4cc106', '{"en-US": "MML350 DeviceGSM / Bts", "zh-CN": "MML350 DeviceGSM / Bts"}', false, '{}', 'LST', '{"en-US": "Bts", "zh-CN": "Bts"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
-	('c2a1f6f6-4fa8-423f-91a4-1786ab8458ca', 'MML350 Device.FAP / PTP1588', 'LST MML350_DEVICE_FAP__PTP1588', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.FAP.PTP1588.DelayInterval", "Device.FAP.PTP1588.Domain", "Device.FAP.PTP1588.Interface", "Device.FAP.PTP1588.IpAddr", "Device.FAP.PTP1588.Profile", "Device.FAP.PTP1588.ServerAddr", "Device.FAP.PTP1588.SyncInterval", "Device.FAP.PTP1588.Transmode", "Device.FAP.PTP1588.UnicastMode", "Device.FAP.PTP1588.VlanId"]', NULL, 'f75bff35-e50a-4c40-b7d8-9d3e87107d7a', '{"en-US": "MML350 Device.FAP / PTP1588", "zh-CN": "MML350 Device.FAP / PTP1588"}', false, '{}', 'LST', '{"en-US": "PTP1588", "zh-CN": "PTP1588"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
+	('c2a1f6f6-4fa8-423f-91a4-1786ab8458ca', '查询 PTP1588', 'LST MML350_DEVICE_FAP__PTP1588', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.FAP.PTP1588.DelayInterval", "Device.FAP.PTP1588.Domain", "Device.FAP.PTP1588.Interface", "Device.FAP.PTP1588.IpAddr", "Device.FAP.PTP1588.Profile", "Device.FAP.PTP1588.ServerAddr", "Device.FAP.PTP1588.SyncInterval", "Device.FAP.PTP1588.Transmode", "Device.FAP.PTP1588.UnicastMode", "Device.FAP.PTP1588.VlanId"]', NULL, 'f75bff35-e50a-4c40-b7d8-9d3e87107d7a', '{"en-US": "Query PTP1588", "zh-CN": "查询 PTP1588"}', false, '{}', 'LST', '{"en-US": "PTP1588", "zh-CN": "PTP1588"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('c2eb2ea1-fed3-484e-ba55-8c441cc18dbf', 'MML350 Device.LAN_HostConfigManagement / IPInterface.NgapMgmt.', 'LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NGAPMGMT', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.LAN_HostConfigManagement.IPInterface.NgapMgmt.NgapLocalIpAddrList", "Device.LAN_HostConfigManagement.IPInterface.NgapMgmt.NguLocalIpAddrList"]', NULL, 'dbaf234a-3d34-47e3-93b1-be9766de95aa', '{"en-US": "MML350 Device.LAN_HostConfigManagement / IPInterface.NgapMgmt.", "zh-CN": "MML350 Device.LAN_HostConfigManagement / IPInterface.NgapMgmt."}', false, '{}', 'LST', '{"en-US": "IPInterface.NgapMgmt.", "zh-CN": "IPInterface.NgapMgmt."}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('c6a3203b-e645-4244-8de9-4adf1d3caf05', 'MML350 Device.Services.FAPService / Ipsec', 'LST MML350_DEVICE_SERVICES_FAPSERVICE__IPSEC', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.Services.FAPService.Ipsec.IPSEC_ASN_DEBUG_LEVEL", "Device.Services.FAPService.Ipsec.IPSEC_CFG_DEBUG_LEVEL", "Device.Services.FAPService.Ipsec.IPSEC_CHD_DEBUG_LEVEL", "Device.Services.FAPService.Ipsec.IPSEC_ESP_DEBUG_LEVEL", "Device.Services.FAPService.Ipsec.IPSEC_IKE_DEBUG_LEVEL", "Device.Services.FAPService.Ipsec.IPSEC_IMSI", "Device.Services.FAPService.Ipsec.IPSEC_KEY", "Device.Services.FAPService.Ipsec.IPSEC_KNL_DEBUG_LEVEL", "Device.Services.FAPService.Ipsec.IPSEC_LIB_DEBUG_LEVEL", "Device.Services.FAPService.Ipsec.IPSEC_MGR_DEBUG_LEVEL", "Device.Services.FAPService.Ipsec.IPSEC_MSS", "Device.Services.FAPService.Ipsec.IPSEC_MTU", "Device.Services.FAPService.Ipsec.IPSEC_OPC", "Device.Services.FAPService.Ipsec.IPSEC_PORT", "Device.Services.FAPService.Ipsec.IPSEC_PORT_NAT_T", "Device.Services.FAPService.Ipsec.IPSEC_RETRY_INITIATE_INTERVAL", "Device.Services.FAPService.Ipsec.IPSEC_RIGHTIKEPORT", "Device.Services.FAPService.Ipsec.IPSEC_USIM_ENABLE", "Device.Services.FAPService.Ipsec.IpsecUsimAuthenticationEnable", "Device.Services.FAPService.Ipsec.LEFT_INTERFACE"]', NULL, '98d07353-7d12-4981-b9a3-25bf3e9ebc35', '{"en-US": "MML350 Device.Services.FAPService / Ipsec", "zh-CN": "MML350 Device.Services.FAPService / Ipsec"}', false, '{}', 'LST', '{"en-US": "Ipsec", "zh-CN": "Ipsec"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('cfccea18-5aa3-4087-b479-ebb71d9ae1c8', 'MML350 Device.Services.FAPService / Device.Services.FAPService', 'LST MML350_DEVICE_SERVICES_FAPSERVICE__DEVICE_SERVICES_FAPSERVICE', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.Services.FAPService.Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth"]', NULL, '98d07353-7d12-4981-b9a3-25bf3e9ebc35', '{"en-US": "MML350 Device.Services.FAPService / Device.Services.FAPService", "zh-CN": "MML350 Device.Services.FAPService / Device.Services.FAPService"}', false, '{}', 'LST', '{"en-US": "Device.Services.FAPService", "zh-CN": "Device.Services.FAPService"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('cff7da90-9df5-4693-beef-ecb8a00449b0', 'MML350 DeviceGSM / NriNullAdd', 'LST MML350_DEVICEGSM__NRINULLADD', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["DeviceGSM.NriNullAdd"]', NULL, '67d3e9e4-0c35-47a6-bfb2-d7f0aa4cc106', '{"en-US": "MML350 DeviceGSM / NriNullAdd", "zh-CN": "MML350 DeviceGSM / NriNullAdd"}', false, '{}', 'LST', '{"en-US": "NriNullAdd", "zh-CN": "NriNullAdd"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
-	('d183035e-44ef-4d8f-80d1-2803151a4b0c', 'MML350 Device.FAP / LanConfig', 'LST MML350_DEVICE_FAP__LANCONFIG', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.FAP.LanConfig.LanDhcpEndIp", "Device.FAP.LanConfig.LanDhcpNetmask", "Device.FAP.LanConfig.LanDhcpStartIp", "Device.FAP.LanConfig.LanNetctlSwitch"]', NULL, '695a7a41-0ff7-4b44-9ef3-55c93b9b9b44', '{"en-US": "MML350 Device.FAP / LanConfig", "zh-CN": "MML350 Device.FAP / LanConfig"}', false, '{}', 'LST', '{"en-US": "LanConfig", "zh-CN": "LanConfig"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
+	('d183035e-44ef-4d8f-80d1-2803151a4b0c', '查询 LAN口配置', 'LST MML350_DEVICE_FAP__LANCONFIG', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.FAP.LanConfig.LanDhcpEndIp", "Device.FAP.LanConfig.LanDhcpNetmask", "Device.FAP.LanConfig.LanDhcpStartIp", "Device.FAP.LanConfig.LanNetctlSwitch"]', NULL, '695a7a41-0ff7-4b44-9ef3-55c93b9b9b44', '{"en-US": "Query LAN Port Configuration", "zh-CN": "查询 LAN口配置"}', false, '{}', 'LST', '{"en-US": "LAN Port Configuration", "zh-CN": "LAN口配置"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('d8c3e897-12a9-439a-9975-dac6225dbd48', 'MML350 Device.Services / lmt.userConfig', 'LST MML350_DEVICE_SERVICES__LMT_USERCONFIG', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.Services.lmt.userConfig.{i}.pass"]', NULL, '843cbc01-2ab4-4963-b3ab-36921fb8dae8', '{"en-US": "MML350 Device.Services / lmt.userConfig", "zh-CN": "MML350 Device.Services / lmt.userConfig"}', false, '{}', 'LST', '{"en-US": "lmt.userConfig", "zh-CN": "lmt.userConfig"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('dcf56c08-8fcb-4a10-b581-6aa3e5c2c60b', 'MML350 Device.Nr / Ipsec', 'LST MML350_DEVICE_NR__IPSEC', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.Nr.Ipsec.NgapIpsecBindInterface", "Device.Nr.Ipsec.NguIpsecBindInterface"]', NULL, '71014e9f-f8de-4954-ad97-e7534115732f', '{"en-US": "MML350 Device.Nr / Ipsec", "zh-CN": "MML350 Device.Nr / Ipsec"}', false, '{}', 'LST', '{"en-US": "Ipsec", "zh-CN": "Ipsec"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('df643fea-d9cf-4382-8bc5-439b183c0f71', 'MML350 DeviceGSM / handover', 'LST MML350_DEVICEGSM__HANDOVER', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["DeviceGSM.handover"]', NULL, '67d3e9e4-0c35-47a6-bfb2-d7f0aa4cc106', '{"en-US": "MML350 DeviceGSM / handover", "zh-CN": "MML350 DeviceGSM / handover"}', false, '{}', 'LST', '{"en-US": "handover", "zh-CN": "handover"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
-	('e3e7d0fb-7bcf-47c1-a998-073e033d090d', 'MML350 Device.FAP / TfcsParams', 'LST MML350_DEVICE_FAP__TFCSPARAMS', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.FAP.TfcsParams.PrimSrc", "Device.FAP.TfcsParams.SyncMode"]', NULL, '0f6bdf37-101f-4e83-82c1-163a85b99481', '{"en-US": "MML350 Device.FAP / TfcsParams", "zh-CN": "MML350 Device.FAP / TfcsParams"}', false, '{}', 'LST', '{"en-US": "TfcsParams", "zh-CN": "TfcsParams"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
+	('e3e7d0fb-7bcf-47c1-a998-073e033d090d', '查询 TfcsParams', 'LST MML350_DEVICE_FAP__TFCSPARAMS', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.FAP.TfcsParams.PrimSrc", "Device.FAP.TfcsParams.SyncMode"]', NULL, '0f6bdf37-101f-4e83-82c1-163a85b99481', '{"en-US": "Query TfcsParams", "zh-CN": "查询 TfcsParams"}', false, '{}', 'LST', '{"en-US": "TfcsParams", "zh-CN": "TfcsParams"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('e4bcd4ac-9b89-4232-bd5f-7195b3458a65', 'MML350 Device.Https / HttpsEnable', 'LST MML350_DEVICE_HTTPS__HTTPSENABLE', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.Https.HttpsEnable"]', NULL, '5ddd69a0-90d2-4ce0-9e9a-d91bda1c97e4', '{"en-US": "MML350 Device.Https / HttpsEnable", "zh-CN": "MML350 Device.Https / HttpsEnable"}', false, '{}', 'LST', '{"en-US": "HttpsEnable", "zh-CN": "HttpsEnable"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
-	('e50f477a-aaf1-4cb3-9c1a-3a0d852a4ee8', 'MML350 Device.FAP / TFCS', 'LST MML350_DEVICE_FAP__TFCS', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.FAP.TFCS.primSrc"]', NULL, '0f6bdf37-101f-4e83-82c1-163a85b99481', '{"en-US": "MML350 Device.FAP / TFCS", "zh-CN": "MML350 Device.FAP / TFCS"}', false, '{}', 'LST', '{"en-US": "TFCS", "zh-CN": "TFCS"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
+	('e50f477a-aaf1-4cb3-9c1a-3a0d852a4ee8', '查询 TFCS', 'LST MML350_DEVICE_FAP__TFCS', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.FAP.TFCS.primSrc"]', NULL, '0f6bdf37-101f-4e83-82c1-163a85b99481', '{"en-US": "Query TFCS", "zh-CN": "查询 TFCS"}', false, '{}', 'LST', '{"en-US": "TFCS", "zh-CN": "TFCS"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('e6cfbd12-5666-4ee8-a957-f05119127f07', 'MML350 Device.LAN_HostConfigManagement / IPInterface.NRCU', 'LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NRCU', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.LAN_HostConfigManagement.IPInterface.NRCU.F1UIpAddr", "Device.LAN_HostConfigManagement.IPInterface.NRCU.F1apLocalIpAddr", "Device.LAN_HostConfigManagement.IPInterface.NRCU.XnapLocalIpAddr"]', NULL, 'dbaf234a-3d34-47e3-93b1-be9766de95aa', '{"en-US": "MML350 Device.LAN_HostConfigManagement / IPInterface.NRCU", "zh-CN": "MML350 Device.LAN_HostConfigManagement / IPInterface.NRCU"}', false, '{}', 'LST', '{"en-US": "IPInterface.NRCU", "zh-CN": "IPInterface.NRCU"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('ee1c904a-609b-4b93-91cd-679b276d5275', 'MML350 DeviceGSM / Msc', 'LST MML350_DEVICEGSM__MSC', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["DeviceGSM.Msc.{i}.AllowEmergency", "DeviceGSM.Msc.{i}.Amr10_2", "DeviceGSM.Msc.{i}.Amr12_2", "DeviceGSM.Msc.{i}.Amr4_75", "DeviceGSM.Msc.{i}.Amr5_15", "DeviceGSM.Msc.{i}.Amr5_90", "DeviceGSM.Msc.{i}.Amr6_70", "DeviceGSM.Msc.{i}.Amr7_40", "DeviceGSM.Msc.{i}.Amr7_95", "DeviceGSM.Msc.{i}.AmrPayload", "DeviceGSM.Msc.{i}.AspProtocol", "DeviceGSM.Msc.{i}.AttachProportion", "DeviceGSM.Msc.{i}.LclsMismatch", "DeviceGSM.Msc.{i}.LclsMode", "DeviceGSM.Msc.{i}.MscAddr", "DeviceGSM.Msc.{i}.MscCodecList", "DeviceGSM.Msc.{i}.NriAdd", "DeviceGSM.Msc.{i}.NriDel"]', NULL, '67d3e9e4-0c35-47a6-bfb2-d7f0aa4cc106', '{"en-US": "MML350 DeviceGSM / Msc", "zh-CN": "MML350 DeviceGSM / Msc"}', false, '{}', 'LST', '{"en-US": "Msc", "zh-CN": "Msc"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('f8a495a2-f51f-46c2-9978-6d392a42294e', 'MML350 DeviceGSM / Encryption', 'LST MML350_DEVICEGSM__ENCRYPTION', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["DeviceGSM.Encryption"]', NULL, '67d3e9e4-0c35-47a6-bfb2-d7f0aa4cc106', '{"en-US": "MML350 DeviceGSM / Encryption", "zh-CN": "MML350 DeviceGSM / Encryption"}', false, '{}', 'LST', '{"en-US": "Encryption", "zh-CN": "Encryption"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
@@ -11135,6 +11136,160 @@ SET group_id = groups.lan_group_id,
 FROM groups
 WHERE c.command_code IN ('LST MML350_DEVICE_FAP__LANCONFIG', 'MOD MML350_DEVICE_FAP__LANCONFIG');
 
+WITH target_cmds AS (
+    SELECT id, command_code, operation_type
+    FROM public.mml_commands
+    WHERE command_code IN ('LST MML350_DEVICE_FAP__GNB_CONFIG', 'MOD MML350_DEVICE_FAP__GNB_CONFIG')
+      AND deprecated_at IS NULL
+), max_sort AS (
+    SELECT
+        t.id AS command_id,
+        COALESCE(
+            MAX(sf.sort_order) FILTER (
+                WHERE sp.standard_path IS NULL
+                   OR sp.standard_path NOT LIKE 'Device.DeviceInfo.HOST_CONFIG_DNS%'
+            ),
+            0
+        ) AS base_sort
+    FROM target_cmds t
+    LEFT JOIN public.mml_command_sub_fields sf ON sf.command_id = t.id AND sf.deprecated_at IS NULL
+    LEFT JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+    GROUP BY t.id
+), host_dns_paths AS (
+    SELECT
+        sp.id AS standard_path_id,
+        sp.standard_path,
+        upper(regexp_replace(replace(sp.standard_path, 'Device.DeviceInfo.', ''), '[^A-Za-z0-9]+', '_', 'g')) AS mml_code,
+        row_number() OVER (ORDER BY sp.standard_path) AS path_order
+    FROM public.standard_params sp
+    WHERE sp.standard_path LIKE 'Device.DeviceInfo.HOST_CONFIG_DNS%'
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id, mml_code, label_i18n, default_selected, is_required,
+    sort_order, standard_path_id, access_type, is_supported
+)
+SELECT
+    t.id,
+    p.mml_code,
+    jsonb_build_object('zh-CN', p.mml_code, 'en-US', initcap(replace(lower(p.mml_code), '_', ' '))),
+    true,
+    t.operation_type = 'MOD',
+    ms.base_sort + p.path_order,
+    p.standard_path_id,
+    'RW',
+    true
+FROM target_cmds t
+JOIN max_sort ms ON ms.command_id = t.id
+CROSS JOIN host_dns_paths p
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH target_cmds AS (
+    SELECT id
+    FROM public.mml_commands
+    WHERE command_code IN ('LST MML350_DEVICE_FAP__GNB_CONFIG', 'MOD MML350_DEVICE_FAP__GNB_CONFIG')
+), refreshed AS (
+    SELECT
+        t.id,
+        COALESCE(jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path)
+                 FILTER (WHERE sp.standard_path IS NOT NULL), '[]'::jsonb) AS paths
+    FROM target_cmds t
+    LEFT JOIN public.mml_command_sub_fields sf ON sf.command_id = t.id AND sf.deprecated_at IS NULL
+    LEFT JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+    GROUP BY t.id
+)
+UPDATE public.mml_commands c
+SET target_paths = r.paths,
+    tree_node_refs = r.paths,
+    updated_at = now()
+FROM refreshed r
+WHERE c.id = r.id;
+
+WITH target_cmds AS (
+    SELECT id, command_code, operation_type
+    FROM public.mml_commands
+    WHERE command_code IN ('LST MML350_DEVICE_FAP__LANCONFIG', 'MOD MML350_DEVICE_FAP__LANCONFIG')
+      AND deprecated_at IS NULL
+), max_sort AS (
+    SELECT
+        t.id AS command_id,
+        COALESCE(
+            MAX(sf.sort_order) FILTER (
+                WHERE sp.standard_path IS NULL
+                   OR sp.standard_path NOT LIKE 'Device.DeviceInfo.LAN_CONFIG_%'
+            ),
+            0
+        ) AS base_sort
+    FROM target_cmds t
+    LEFT JOIN public.mml_command_sub_fields sf ON sf.command_id = t.id AND sf.deprecated_at IS NULL
+    LEFT JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+    GROUP BY t.id
+), lan_config_paths AS (
+    SELECT
+        sp.id AS standard_path_id,
+        sp.standard_path,
+        upper(regexp_replace(replace(sp.standard_path, 'Device.DeviceInfo.', ''), '[^A-Za-z0-9]+', '_', 'g')) AS mml_code,
+        row_number() OVER (ORDER BY sp.standard_path) AS path_order
+    FROM public.standard_params sp
+    WHERE sp.standard_path LIKE 'Device.DeviceInfo.LAN_CONFIG_%'
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id, mml_code, label_i18n, default_selected, is_required,
+    sort_order, standard_path_id, access_type, is_supported
+)
+SELECT
+    t.id,
+    p.mml_code,
+    jsonb_build_object('zh-CN', p.mml_code, 'en-US', initcap(replace(lower(p.mml_code), '_', ' '))),
+    true,
+    t.operation_type = 'MOD',
+    ms.base_sort + p.path_order,
+    p.standard_path_id,
+    'RW',
+    true
+FROM target_cmds t
+JOIN max_sort ms ON ms.command_id = t.id
+CROSS JOIN lan_config_paths p
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH target_cmds AS (
+    SELECT id
+    FROM public.mml_commands
+    WHERE command_code IN ('LST MML350_DEVICE_FAP__LANCONFIG', 'MOD MML350_DEVICE_FAP__LANCONFIG')
+), refreshed AS (
+    SELECT
+        t.id,
+        COALESCE(jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path)
+                 FILTER (WHERE sp.standard_path IS NOT NULL), '[]'::jsonb) AS paths
+    FROM target_cmds t
+    LEFT JOIN public.mml_command_sub_fields sf ON sf.command_id = t.id AND sf.deprecated_at IS NULL
+    LEFT JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+    GROUP BY t.id
+)
+UPDATE public.mml_commands c
+SET target_paths = r.paths,
+    tree_node_refs = r.paths,
+    updated_at = now()
+FROM refreshed r
+WHERE c.id = r.id;
+
 -- Device.IP IPv4Address is covered by WAN IPv4 address configuration; hide the duplicate path group.
 UPDATE public.mml_commands
 SET deprecated_at = NOW(),
@@ -12127,7 +12282,6 @@ LEFT JOIN LATERAL (
     AND csf.deprecated_at IS NULL
 ) paths ON true
 WHERE c.id = rc.id;
-
 
 -- -----------------------------------------------------------------------------
 -- Source: 000006_rebuild_remaining_mml_subgroup_params.sql
@@ -17741,6 +17895,418 @@ WHERE param_version = 'cmcc-td-lte-v2.3'
 
 
 
+-- Cover all LTE NeighborList standard TRPaths under neighbor cell parameter commands.
+WITH si_group AS (
+    SELECT id
+    FROM public.mml_command_groups
+    WHERE group_code = 'chapter:SI'
+      AND param_version = 'cmcc-td-lte-v2.3'
+      AND deleted_at IS NULL
+    ORDER BY updated_at DESC
+    LIMIT 1
+), desired_commands(command_code, command_name_zh, command_name_en, logical_name_zh, logical_name_en, operation_type, rpc_method, target_object) AS (
+    VALUES
+        ('ADD 5G_CELL', '新增 5G邻区', 'Add 5G Neighbor Cell', '5G邻区', '5G Neighbor Cell', 'ADD', 'AddObject', 'Device.Services.FAPService.CellConfig.LTE.RAN.NeighborList.5GCell.'),
+        ('RMV 5G_CELL', '删除 5G邻区', 'Remove 5G Neighbor Cell', '5G邻区', '5G Neighbor Cell', 'RMV', 'DeleteObject', 'Device.Services.FAPService.CellConfig.LTE.RAN.NeighborList.5GCell.'),
+        ('ADD INTER_RAT_CELL_NR', '新增 NR异系统邻区', 'Add NR Inter-RAT Neighbor Cell', 'NR异系统邻区', 'NR Inter-RAT Neighbor Cell', 'ADD', 'AddObject', 'Device.Services.FAPService.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.'),
+        ('RMV INTER_RAT_CELL_NR', '删除 NR异系统邻区', 'Remove NR Inter-RAT Neighbor Cell', 'NR异系统邻区', 'NR Inter-RAT Neighbor Cell', 'RMV', 'DeleteObject', 'Device.Services.FAPService.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.'),
+        ('ADD INTER_RAT_CELL_UMTS', '新增 UMTS异系统邻区', 'Add UMTS Inter-RAT Neighbor Cell', 'UMTS异系统邻区', 'UMTS Inter-RAT Neighbor Cell', 'ADD', 'AddObject', 'Device.Services.FAPService.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.'),
+        ('RMV INTER_RAT_CELL_UMTS', '删除 UMTS异系统邻区', 'Remove UMTS Inter-RAT Neighbor Cell', 'UMTS异系统邻区', 'UMTS Inter-RAT Neighbor Cell', 'RMV', 'DeleteObject', 'Device.Services.FAPService.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.'),
+        ('ADD INTER_RAT_CELL_GSM', '新增 GSM异系统邻区', 'Add GSM Inter-RAT Neighbor Cell', 'GSM异系统邻区', 'GSM Inter-RAT Neighbor Cell', 'ADD', 'AddObject', 'Device.Services.FAPService.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.'),
+        ('RMV INTER_RAT_CELL_GSM', '删除 GSM异系统邻区', 'Remove GSM Inter-RAT Neighbor Cell', 'GSM异系统邻区', 'GSM Inter-RAT Neighbor Cell', 'RMV', 'DeleteObject', 'Device.Services.FAPService.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.'),
+        ('ADD LTE_CELL', '新增 LTE同系统邻区', 'Add LTE Neighbor Cell', 'LTE同系统邻区', 'LTE Neighbor Cell', 'ADD', 'AddObject', 'Device.Services.FAPService.CellConfig.LTE.RAN.NeighborList.LTECell.'),
+        ('RMV LTE_CELL', '删除 LTE同系统邻区', 'Remove LTE Neighbor Cell', 'LTE同系统邻区', 'LTE Neighbor Cell', 'RMV', 'DeleteObject', 'Device.Services.FAPService.CellConfig.LTE.RAN.NeighborList.LTECell.')
+)
+INSERT INTO public.mml_commands (
+    command_name, command_code, category, description, rpc_method, target_paths,
+    target_object, group_id, command_name_i18n, require_confirm, confirm_msg_i18n,
+    operation_type, logical_name_i18n, source, catalog_protected, platform_tags,
+    deprecated_at, tree_node_refs, instance_range_meta, help_doc, notes
+)
+SELECT
+    d.command_name_zh,
+    d.command_code,
+    'neighbor-list-coverage',
+    'NeighborList multi-instance operation restored for MML neighbor cell group',
+    d.rpc_method,
+    jsonb_build_array(d.target_object),
+    d.target_object,
+    g.id,
+    jsonb_build_object('zh-CN', d.command_name_zh, 'en-US', d.command_name_en),
+    false,
+    '{}'::jsonb,
+    d.operation_type,
+    jsonb_build_object('zh-CN', d.logical_name_zh, 'en-US', d.logical_name_en),
+    'standard',
+    true,
+    '{}'::jsonb,
+    NULL,
+    jsonb_build_array(d.target_object),
+    '[]'::jsonb,
+    '',
+    ''
+FROM desired_commands d
+CROSS JOIN si_group g
+ON CONFLICT (command_code) DO UPDATE
+SET command_name = EXCLUDED.command_name,
+    category = EXCLUDED.category,
+    description = EXCLUDED.description,
+    rpc_method = EXCLUDED.rpc_method,
+    target_object = EXCLUDED.target_object,
+    group_id = EXCLUDED.group_id,
+    command_name_i18n = EXCLUDED.command_name_i18n,
+    operation_type = EXCLUDED.operation_type,
+    logical_name_i18n = EXCLUDED.logical_name_i18n,
+    source = EXCLUDED.source,
+    catalog_protected = EXCLUDED.catalog_protected,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH neighbor_paths AS (
+    SELECT
+        sp.id AS standard_path_id,
+        sp.standard_path,
+        CASE
+            WHEN sp.standard_path LIKE 'Device.Services.FAPService.%CellConfig.LTE.RAN.NeighborList.5GCell.%' THEN '5G'
+            WHEN sp.standard_path LIKE 'Device.Services.FAPService.%CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.%' THEN 'NR'
+            WHEN sp.standard_path LIKE 'Device.Services.FAPService.%CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.%' THEN 'UMTS'
+            WHEN sp.standard_path LIKE 'Device.Services.FAPService.%CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.%' THEN 'GSM'
+            WHEN sp.standard_path LIKE 'Device.Services.FAPService.%CellConfig.LTE.RAN.NeighborList.LTECell.%'
+              OR sp.standard_path LIKE 'Device.Services.FAPService.%CellConfig.{i}.LTE.RAN.NeighborList.LTECell.%'
+              OR sp.standard_path LIKE 'Device.Services.FAPService.%CellConfig.LTE.RAN.NeighborListInUse.LTECell.%' THEN 'LTE'
+        END AS bucket,
+        CASE WHEN sp.access = 'READ_WRITE' THEN 'RW' ELSE 'RO' END AS access_type,
+        row_number() OVER (
+            PARTITION BY
+                CASE
+                    WHEN sp.standard_path LIKE 'Device.Services.FAPService.%CellConfig.LTE.RAN.NeighborList.5GCell.%' THEN '5G'
+                    WHEN sp.standard_path LIKE 'Device.Services.FAPService.%CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.%' THEN 'NR'
+                    WHEN sp.standard_path LIKE 'Device.Services.FAPService.%CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.%' THEN 'UMTS'
+                    WHEN sp.standard_path LIKE 'Device.Services.FAPService.%CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.%' THEN 'GSM'
+                    WHEN sp.standard_path LIKE 'Device.Services.FAPService.%CellConfig.LTE.RAN.NeighborList.LTECell.%'
+                      OR sp.standard_path LIKE 'Device.Services.FAPService.%CellConfig.LTE.RAN.NeighborListInUse.LTECell.%' THEN 'LTE'
+                END
+            ORDER BY sp.standard_path
+        ) AS bucket_order,
+        LEFT(UPPER(regexp_replace(replace(replace(sp.standard_path, 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborListInUse.', 'IN_USE.'), 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.', ''), '[^A-Za-z0-9]+', '_', 'g')), 91)
+            || '_' || substr(md5(sp.standard_path), 1, 8) AS mml_code
+    FROM public.standard_params sp
+    WHERE (sp.standard_path LIKE 'Device.Services.FAPService.%CellConfig.LTE.RAN.NeighborList%'
+        OR sp.standard_path LIKE 'Device.Services.FAPService.%CellConfig.{i}.LTE.RAN.NeighborList%')
+      AND sp.entry_type = 'parameter'
+), command_path_targets AS (
+    SELECT 'LST SI_SUB_01' AS command_code, standard_path_id, standard_path, access_type, bucket_order, mml_code FROM neighbor_paths WHERE bucket IN ('5G', 'NR')
+    UNION ALL SELECT 'MOD SI_SUB_01', standard_path_id, standard_path, access_type, bucket_order, mml_code FROM neighbor_paths WHERE bucket IN ('5G', 'NR') AND access_type = 'RW'
+    UNION ALL SELECT 'LST SI_SUB_02', standard_path_id, standard_path, access_type, bucket_order, mml_code FROM neighbor_paths WHERE bucket = 'LTE'
+    UNION ALL SELECT 'MOD SI_SUB_02', standard_path_id, standard_path, access_type, bucket_order, mml_code FROM neighbor_paths WHERE bucket = 'LTE' AND access_type = 'RW'
+    UNION ALL SELECT 'LST SI_SUB_03', standard_path_id, standard_path, access_type, bucket_order, mml_code FROM neighbor_paths WHERE bucket = 'UMTS'
+    UNION ALL SELECT 'MOD SI_SUB_03', standard_path_id, standard_path, access_type, bucket_order, mml_code FROM neighbor_paths WHERE bucket = 'UMTS' AND access_type = 'RW'
+    UNION ALL SELECT 'LST SI_SUB_04', standard_path_id, standard_path, access_type, bucket_order, mml_code FROM neighbor_paths WHERE bucket = 'GSM'
+    UNION ALL SELECT 'MOD SI_SUB_04', standard_path_id, standard_path, access_type, bucket_order, mml_code FROM neighbor_paths WHERE bucket = 'GSM' AND access_type = 'RW'
+    UNION ALL SELECT 'ADD 5G_CELL', standard_path_id, standard_path, access_type, bucket_order, mml_code FROM neighbor_paths WHERE bucket = '5G' AND access_type = 'RW'
+    UNION ALL SELECT 'RMV 5G_CELL', standard_path_id, standard_path, access_type, bucket_order, mml_code FROM neighbor_paths WHERE bucket = '5G'
+    UNION ALL SELECT 'ADD INTER_RAT_CELL_NR', standard_path_id, standard_path, access_type, bucket_order, mml_code FROM neighbor_paths WHERE bucket = 'NR' AND access_type = 'RW'
+    UNION ALL SELECT 'RMV INTER_RAT_CELL_NR', standard_path_id, standard_path, access_type, bucket_order, mml_code FROM neighbor_paths WHERE bucket = 'NR'
+    UNION ALL SELECT 'ADD INTER_RAT_CELL_UMTS', standard_path_id, standard_path, access_type, bucket_order, mml_code FROM neighbor_paths WHERE bucket = 'UMTS' AND access_type = 'RW'
+    UNION ALL SELECT 'RMV INTER_RAT_CELL_UMTS', standard_path_id, standard_path, access_type, bucket_order, mml_code FROM neighbor_paths WHERE bucket = 'UMTS'
+    UNION ALL SELECT 'ADD INTER_RAT_CELL_GSM', standard_path_id, standard_path, access_type, bucket_order, mml_code FROM neighbor_paths WHERE bucket = 'GSM' AND access_type = 'RW'
+    UNION ALL SELECT 'RMV INTER_RAT_CELL_GSM', standard_path_id, standard_path, access_type, bucket_order, mml_code FROM neighbor_paths WHERE bucket = 'GSM'
+    UNION ALL SELECT 'ADD LTE_CELL', standard_path_id, standard_path, access_type, bucket_order, mml_code FROM neighbor_paths WHERE bucket = 'LTE' AND standard_path NOT LIKE '%NeighborListInUse%' AND access_type = 'RW'
+    UNION ALL SELECT 'RMV LTE_CELL', standard_path_id, standard_path, access_type, bucket_order, mml_code FROM neighbor_paths WHERE bucket = 'LTE' AND standard_path NOT LIKE '%NeighborListInUse%'
+), numbered AS (
+    SELECT
+        cpt.*,
+        row_number() OVER (PARTITION BY command_code ORDER BY bucket_order, standard_path) AS sort_order
+    FROM command_path_targets cpt
+), target_cmds AS (
+    SELECT id, command_code, operation_type
+    FROM public.mml_commands
+    WHERE command_code IN (
+        'LST SI_SUB_01', 'MOD SI_SUB_01', 'LST SI_SUB_02', 'MOD SI_SUB_02',
+        'LST SI_SUB_03', 'MOD SI_SUB_03', 'LST SI_SUB_04', 'MOD SI_SUB_04',
+        'ADD 5G_CELL', 'RMV 5G_CELL',
+        'ADD INTER_RAT_CELL_NR', 'RMV INTER_RAT_CELL_NR',
+        'ADD INTER_RAT_CELL_UMTS', 'RMV INTER_RAT_CELL_UMTS',
+        'ADD INTER_RAT_CELL_GSM', 'RMV INTER_RAT_CELL_GSM',
+        'ADD LTE_CELL', 'RMV LTE_CELL'
+    )
+      AND deprecated_at IS NULL
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id, mml_code, label_i18n, default_selected, is_required,
+    sort_order, standard_path_id, access_type, is_supported
+)
+SELECT
+    tc.id,
+    n.mml_code,
+    jsonb_build_object('zh-CN', n.mml_code, 'en-US', initcap(replace(lower(n.mml_code), '_', ' '))),
+    true,
+    tc.operation_type IN ('MOD', 'ADD'),
+    n.sort_order,
+    n.standard_path_id,
+    n.access_type,
+    true
+FROM numbered n
+JOIN target_cmds tc ON tc.command_code = n.command_code
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH target_cmds AS (
+    SELECT id
+    FROM public.mml_commands
+    WHERE command_code IN (
+        'LST SI_SUB_01', 'MOD SI_SUB_01', 'LST SI_SUB_02', 'MOD SI_SUB_02',
+        'LST SI_SUB_03', 'MOD SI_SUB_03', 'LST SI_SUB_04', 'MOD SI_SUB_04',
+        'ADD 5G_CELL', 'RMV 5G_CELL',
+        'ADD INTER_RAT_CELL_NR', 'RMV INTER_RAT_CELL_NR',
+        'ADD INTER_RAT_CELL_UMTS', 'RMV INTER_RAT_CELL_UMTS',
+        'ADD INTER_RAT_CELL_GSM', 'RMV INTER_RAT_CELL_GSM',
+        'ADD LTE_CELL', 'RMV LTE_CELL'
+    )
+), refreshed AS (
+    SELECT
+        t.id,
+        COALESCE(jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path)
+                 FILTER (WHERE sp.standard_path IS NOT NULL), '[]'::jsonb) AS paths
+    FROM target_cmds t
+    LEFT JOIN public.mml_command_sub_fields sf ON sf.command_id = t.id AND sf.deprecated_at IS NULL
+    LEFT JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+    GROUP BY t.id
+)
+UPDATE public.mml_commands c
+SET target_paths = r.paths,
+    tree_node_refs = r.paths,
+    updated_at = now()
+FROM refreshed r
+WHERE c.id = r.id;
+
+WITH object_paths(command_code, object_path) AS (
+    VALUES
+        ('ADD 5G_CELL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.'),
+        ('RMV 5G_CELL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.'),
+        ('ADD INTER_RAT_CELL_NR', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.'),
+        ('RMV INTER_RAT_CELL_NR', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.'),
+        ('ADD INTER_RAT_CELL_UMTS', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.'),
+        ('RMV INTER_RAT_CELL_UMTS', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.'),
+        ('ADD INTER_RAT_CELL_GSM', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.'),
+        ('RMV INTER_RAT_CELL_GSM', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.'),
+        ('ADD LTE_CELL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.'),
+        ('RMV LTE_CELL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.'),
+        ('ADD LTE_CELL', 'Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.'),
+        ('RMV LTE_CELL', 'Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.')
+), merged AS (
+    SELECT
+        c.id,
+        jsonb_agg(DISTINCT path_value ORDER BY path_value) AS paths
+    FROM public.mml_commands c
+    JOIN object_paths op ON op.command_code = c.command_code
+    CROSS JOIN LATERAL (
+        SELECT jsonb_array_elements_text(c.target_paths) AS path_value
+        UNION
+        SELECT op.object_path
+    ) p
+    WHERE c.deprecated_at IS NULL
+    GROUP BY c.id
+)
+UPDATE public.mml_commands c
+SET target_paths = m.paths,
+    tree_node_refs = m.paths,
+    updated_at = now()
+FROM merged m
+WHERE c.id = m.id;
+
+WITH si_group AS (
+    SELECT id
+    FROM public.mml_command_groups
+    WHERE group_code = 'chapter:SI'
+      AND param_version = 'cmcc-td-lte-v2.3'
+      AND deleted_at IS NULL
+    ORDER BY updated_at DESC
+    LIMIT 1
+), desired_commands(command_code, command_name_zh, command_name_en, logical_name_zh, logical_name_en, operation_type, rpc_method, target_object) AS (
+    VALUES
+        ('ADD NR_CELL', '新增 5G邻区参数管理', 'Add 5G Neighbor Parameter Management', '5G邻区参数管理', '5G Neighbor Parameter Management', 'ADD', 'AddObject', 'Device.Services.FAPService.CellConfig.NR.RAN.NeighborList.NRCell.'),
+        ('RMV NR_CELL', '删除 5G邻区参数管理', 'Remove 5G Neighbor Parameter Management', '5G邻区参数管理', '5G Neighbor Parameter Management', 'RMV', 'DeleteObject', 'Device.Services.FAPService.CellConfig.NR.RAN.NeighborList.NRCell.')
+)
+INSERT INTO public.mml_commands (
+    command_name, command_code, category, description, rpc_method, target_paths,
+    target_object, group_id, command_name_i18n, require_confirm, confirm_msg_i18n,
+    operation_type, logical_name_i18n, source, catalog_protected, platform_tags,
+    deprecated_at, tree_node_refs, instance_range_meta, help_doc, notes
+)
+SELECT
+    d.command_name_zh,
+    d.command_code,
+    'neighbor-list-coverage',
+    'NR RAN NeighborList multi-instance operation restored for MML neighbor cell group',
+    d.rpc_method,
+    jsonb_build_array(d.target_object),
+    d.target_object,
+    g.id,
+    jsonb_build_object('zh-CN', d.command_name_zh, 'en-US', d.command_name_en),
+    false,
+    '{}'::jsonb,
+    d.operation_type,
+    jsonb_build_object('zh-CN', d.logical_name_zh, 'en-US', d.logical_name_en),
+    'standard',
+    true,
+    '{}'::jsonb,
+    NULL,
+    jsonb_build_array(d.target_object),
+    '[]'::jsonb,
+    '',
+    ''
+FROM desired_commands d
+CROSS JOIN si_group g
+ON CONFLICT (command_code) DO UPDATE
+SET command_name = EXCLUDED.command_name,
+    category = EXCLUDED.category,
+    description = EXCLUDED.description,
+    rpc_method = EXCLUDED.rpc_method,
+    target_object = EXCLUDED.target_object,
+    group_id = EXCLUDED.group_id,
+    command_name_i18n = EXCLUDED.command_name_i18n,
+    operation_type = EXCLUDED.operation_type,
+    logical_name_i18n = EXCLUDED.logical_name_i18n,
+    source = EXCLUDED.source,
+    catalog_protected = EXCLUDED.catalog_protected,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH source_fields AS (
+    SELECT
+        sf.mml_code,
+        sf.label_i18n,
+        sf.default_selected,
+        sf.sort_order,
+        sf.standard_path_id,
+        sf.access_type,
+        sf.is_supported
+    FROM public.mml_commands c
+    JOIN public.mml_command_sub_fields sf ON sf.command_id = c.id AND sf.deprecated_at IS NULL
+    WHERE c.command_code = 'LST SI_SUB_05'
+      AND c.deprecated_at IS NULL
+), target_cmds AS (
+    SELECT id, operation_type
+    FROM public.mml_commands
+    WHERE command_code IN ('ADD NR_CELL', 'RMV NR_CELL')
+      AND deprecated_at IS NULL
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id, mml_code, label_i18n, default_selected, is_required,
+    sort_order, standard_path_id, access_type, is_supported
+)
+SELECT
+    t.id,
+    sf.mml_code,
+    sf.label_i18n,
+    sf.default_selected,
+    t.operation_type = 'ADD',
+    sf.sort_order,
+    sf.standard_path_id,
+    sf.access_type,
+    sf.is_supported
+FROM target_cmds t
+CROSS JOIN source_fields sf
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH target_cmds AS (
+    SELECT id
+    FROM public.mml_commands
+    WHERE command_code IN ('ADD NR_CELL', 'RMV NR_CELL')
+), refreshed AS (
+    SELECT
+        t.id,
+        COALESCE(jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path)
+                 FILTER (WHERE sp.standard_path IS NOT NULL), '[]'::jsonb) AS paths
+    FROM target_cmds t
+    LEFT JOIN public.mml_command_sub_fields sf ON sf.command_id = t.id AND sf.deprecated_at IS NULL
+    LEFT JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+    GROUP BY t.id
+), object_paths(command_code, object_path) AS (
+    VALUES
+        ('ADD NR_CELL', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.'),
+        ('RMV NR_CELL', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.')
+), merged AS (
+    SELECT
+        c.id,
+        jsonb_agg(DISTINCT path_value ORDER BY path_value) AS paths
+    FROM public.mml_commands c
+    JOIN refreshed r ON r.id = c.id
+    LEFT JOIN object_paths op ON op.command_code = c.command_code
+    CROSS JOIN LATERAL (
+        SELECT jsonb_array_elements_text(r.paths) AS path_value
+        UNION
+        SELECT op.object_path
+        WHERE op.object_path IS NOT NULL
+    ) p
+    GROUP BY c.id
+)
+UPDATE public.mml_commands c
+SET target_paths = m.paths,
+    tree_node_refs = m.paths,
+    updated_at = now()
+FROM merged m
+WHERE c.id = m.id;
+
+-- The SI_SUB_01..05 ADD/RMV commands are zero-field AddObject/DeleteObject shells.
+-- ADD/RMV 5G_CELL is also hidden because its parameters are covered by the
+-- NR neighbor parameter management command set, and showing it creates an
+-- extra business name in the neighbor command tree.
+-- Keep LST/MOD SI_SUB_* for parameter management, and use the object-specific
+-- ADD/RMV commands above for multi-instance neighbor add/delete.
+UPDATE public.mml_commands
+SET deprecated_at = now(),
+    updated_at = now()
+WHERE command_code IN (
+    'ADD 5G_CELL', 'RMV 5G_CELL',
+    'ADD SI_SUB_01', 'RMV SI_SUB_01',
+    'ADD SI_SUB_02', 'RMV SI_SUB_02',
+    'ADD SI_SUB_03', 'RMV SI_SUB_03',
+    'ADD SI_SUB_04', 'RMV SI_SUB_04',
+    'ADD SI_SUB_05', 'RMV SI_SUB_05'
+)
+  AND deprecated_at IS NULL;
+
+WITH desired_names(command_code, command_name_zh, command_name_en, logical_name_zh, logical_name_en) AS (
+    VALUES
+        ('ADD INTER_RAT_CELL_NR', '新增 NR邻区参数管理', 'Add NR Neighbor Parameter Management', 'NR邻区参数管理', 'NR Neighbor Parameter Management'),
+        ('RMV INTER_RAT_CELL_NR', '删除 NR邻区参数管理', 'Remove NR Neighbor Parameter Management', 'NR邻区参数管理', 'NR Neighbor Parameter Management'),
+        ('ADD LTE_CELL', '新增 LTE邻区参数管理', 'Add LTE Neighbor Parameter Management', 'LTE邻区参数管理', 'LTE Neighbor Parameter Management'),
+        ('RMV LTE_CELL', '删除 LTE邻区参数管理', 'Remove LTE Neighbor Parameter Management', 'LTE邻区参数管理', 'LTE Neighbor Parameter Management'),
+        ('ADD INTER_RAT_CELL_UMTS', '新增 TD邻区参数管理', 'Add TD Neighbor Parameter Management', 'TD邻区参数管理', 'TD Neighbor Parameter Management'),
+        ('RMV INTER_RAT_CELL_UMTS', '删除 TD邻区参数管理', 'Remove TD Neighbor Parameter Management', 'TD邻区参数管理', 'TD Neighbor Parameter Management'),
+        ('ADD INTER_RAT_CELL_GSM', '新增 GSM邻区参数管理', 'Add GSM Neighbor Parameter Management', 'GSM邻区参数管理', 'GSM Neighbor Parameter Management'),
+        ('RMV INTER_RAT_CELL_GSM', '删除 GSM邻区参数管理', 'Remove GSM Neighbor Parameter Management', 'GSM邻区参数管理', 'GSM Neighbor Parameter Management'),
+        ('ADD NR_CELL', '新增 5G邻区参数管理', 'Add 5G Neighbor Parameter Management', '5G邻区参数管理', '5G Neighbor Parameter Management'),
+        ('RMV NR_CELL', '删除 5G邻区参数管理', 'Remove 5G Neighbor Parameter Management', '5G邻区参数管理', '5G Neighbor Parameter Management')
+)
+UPDATE public.mml_commands c
+SET command_name = d.command_name_zh,
+    command_name_i18n = jsonb_build_object('zh-CN', d.command_name_zh, 'en-US', d.command_name_en),
+    logical_name_i18n = jsonb_build_object('zh-CN', d.logical_name_zh, 'en-US', d.logical_name_en),
+    updated_at = now()
+FROM desired_names d
+WHERE c.command_code = d.command_code;
+
+
 -- -----------------------------------------------------------------------------
 -- Source: merged 000002_mml_catalog_group_cleanup.sql
 -- -----------------------------------------------------------------------------
@@ -19855,7 +20421,7 @@ WITH upsert_group AS (
         'SF_HALOB',
         'HALOB参数管理',
         'HALOB Parameters',
-        'chapter_SF.SF_HALOB'::ltree,
+        'SF_HALOB'::ltree,
         'cmcc-td-lte-v2.3',
         92,
         true,
@@ -20956,6 +21522,854 @@ SET is_active = false,
     deleted_at = COALESCE(deleted_at, now()),
     updated_at = now()
 WHERE group_code IN ('SF_NR_QOS', 'SF_NR_SIB_PARAMS');
+
+-- GSM Bts command regrouping: keep Bts instance leaves under GSM cell command,
+-- and split multi-instance subtrees into their own commands.
+WITH gsm_group AS (
+    SELECT id
+    FROM public.mml_command_groups
+    WHERE param_version = 'cmcc-td-lte-v2.3'
+      AND group_code = 'MML350_G_DEVICEGSM'
+      AND deleted_at IS NULL
+    ORDER BY updated_at DESC
+    LIMIT 1
+), desired_commands(command_code, command_name_zh, command_name_en, logical_name_zh, logical_name_en, display_order) AS (
+    VALUES
+        ('LST MML350_DEVICEGSM__BTS_TRX', '查询Bts.Trx', 'Query Bts.Trx', 'Bts.Trx', 'Bts.Trx', 33),
+        ('LST MML350_DEVICEGSM__BTS_TRX_TS', '查询Bts.Trx.Ts', 'Query Bts.Trx.Ts', 'Bts.Trx.Ts', 'Bts.Trx.Ts', 34)
+)
+INSERT INTO public.mml_commands (
+    command_name, command_code, category, description, rpc_method, target_paths,
+    target_object, group_id, command_name_i18n, require_confirm, confirm_msg_i18n,
+    operation_type, logical_name_i18n, source, catalog_protected, platform_tags,
+    deprecated_at, tree_node_refs, instance_range_meta, help_doc, notes
+)
+SELECT
+    d.command_name_zh,
+    d.command_code,
+    'mml-350-20260704',
+    'DeviceGSM.Bts multi-instance subcommands split from LST MML350_DEVICEGSM__BTS',
+    'GetParameterValues',
+    '[]'::jsonb,
+    '',
+    g.id,
+    jsonb_build_object('zh-CN', d.command_name_zh, 'en-US', d.command_name_en),
+    false,
+    '{}'::jsonb,
+    'LST',
+    jsonb_build_object('zh-CN', d.logical_name_zh, 'en-US', d.logical_name_en),
+    'admin',
+    false,
+    '{}'::jsonb,
+    NULL,
+    '[]'::jsonb,
+    '[]'::jsonb,
+    '',
+    ''
+FROM desired_commands d
+CROSS JOIN gsm_group g
+ON CONFLICT (command_code) DO UPDATE
+SET command_name = EXCLUDED.command_name,
+    category = EXCLUDED.category,
+    description = EXCLUDED.description,
+    rpc_method = EXCLUDED.rpc_method,
+    target_object = EXCLUDED.target_object,
+    group_id = EXCLUDED.group_id,
+    command_name_i18n = EXCLUDED.command_name_i18n,
+    operation_type = EXCLUDED.operation_type,
+    logical_name_i18n = EXCLUDED.logical_name_i18n,
+    source = EXCLUDED.source,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH bts_source AS (
+    SELECT id
+    FROM public.mml_commands
+    WHERE command_code = 'LST MML350_DEVICEGSM__BTS'
+), bts_paths AS (
+    SELECT
+        sf.label_i18n,
+        sf.default_selected,
+        sf.is_required,
+        sf.standard_path_id,
+        sf.access_type,
+        sf.is_supported,
+        sp.standard_path,
+        CASE
+            WHEN sp.standard_path LIKE 'DeviceGSM.Bts.{i}.Trx.{i}.Ts.{i}.%' THEN 'LST MML350_DEVICEGSM__BTS_TRX_TS'
+            WHEN sp.standard_path = 'DeviceGSM.Bts.Trx.Index'
+              OR sp.standard_path LIKE 'DeviceGSM.Bts.{i}.Trx.{i}.%' THEN 'LST MML350_DEVICEGSM__BTS_TRX'
+            ELSE 'LST MML350_DEVICE_SERVICES__GSMBTSCELLDT'
+        END AS target_code
+    FROM bts_source src
+    JOIN public.mml_command_sub_fields sf ON sf.command_id = src.id
+    JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+    WHERE sf.deprecated_at IS NULL
+      AND sp.standard_path LIKE 'DeviceGSM.Bts.%'
+), numbered AS (
+    SELECT
+        bp.*,
+        row_number() OVER (PARTITION BY bp.target_code ORDER BY bp.standard_path) AS target_order
+    FROM bts_paths bp
+), target_rows AS (
+    SELECT
+        dst.id AS command_id,
+        CASE
+            WHEN n.target_code = 'LST MML350_DEVICE_SERVICES__GSMBTSCELLDT'
+                THEN LEFT('BTS_' || UPPER(regexp_replace(replace(replace(n.standard_path, 'DeviceGSM.Bts.{i}.', ''), 'DeviceGSM.Bts.', ''), '[^A-Za-z0-9]+', '_', 'g')), 100)
+            WHEN n.target_code = 'LST MML350_DEVICEGSM__BTS_TRX'
+                THEN LEFT('BTS_TRX_' || UPPER(regexp_replace(replace(replace(n.standard_path, 'DeviceGSM.Bts.{i}.Trx.{i}.', ''), 'DeviceGSM.Bts.Trx.', ''), '[^A-Za-z0-9]+', '_', 'g')), 100)
+            ELSE LEFT('BTS_TRX_TS_' || UPPER(regexp_replace(replace(n.standard_path, 'DeviceGSM.Bts.{i}.Trx.{i}.Ts.{i}.', ''), '[^A-Za-z0-9]+', '_', 'g')), 100)
+        END AS mml_code,
+        n.label_i18n,
+        n.default_selected,
+        n.is_required,
+        CASE
+            WHEN n.target_code = 'LST MML350_DEVICE_SERVICES__GSMBTSCELLDT' THEN 1000 + n.target_order
+            ELSE n.target_order
+        END AS sort_order,
+        n.standard_path_id,
+        n.access_type,
+        n.is_supported
+    FROM numbered n
+    JOIN public.mml_commands dst ON dst.command_code = n.target_code
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id, mml_code, label_i18n, default_selected, is_required,
+    sort_order, standard_path_id, access_type, is_supported
+)
+SELECT
+    command_id, mml_code, label_i18n, default_selected, is_required,
+    sort_order, standard_path_id, access_type, is_supported
+FROM target_rows
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH bts_source AS (
+    SELECT id
+    FROM public.mml_commands
+    WHERE command_code = 'LST MML350_DEVICEGSM__BTS'
+)
+DELETE FROM public.mml_command_sub_fields sf
+USING bts_source src, public.standard_params sp
+WHERE sf.command_id = src.id
+  AND sp.id = sf.standard_path_id
+  AND sp.standard_path LIKE 'DeviceGSM.Bts.%';
+
+UPDATE public.mml_commands
+SET deprecated_at = now(),
+    target_paths = '[]'::jsonb,
+    tree_node_refs = '[]'::jsonb,
+    updated_at = now()
+WHERE command_code = 'LST MML350_DEVICEGSM__BTS';
+
+WITH target_cmds AS (
+    SELECT id
+    FROM public.mml_commands
+    WHERE command_code IN (
+        'LST MML350_DEVICE_SERVICES__GSMBTSCELLDT',
+        'LST MML350_DEVICEGSM__BTS_TRX',
+        'LST MML350_DEVICEGSM__BTS_TRX_TS'
+    )
+), refreshed AS (
+    SELECT
+        t.id,
+        COALESCE(jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path)
+                 FILTER (WHERE sp.standard_path IS NOT NULL), '[]'::jsonb) AS paths
+    FROM target_cmds t
+    LEFT JOIN public.mml_command_sub_fields sf ON sf.command_id = t.id AND sf.deprecated_at IS NULL
+    LEFT JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+    GROUP BY t.id
+)
+UPDATE public.mml_commands c
+SET target_paths = r.paths,
+    tree_node_refs = r.paths,
+    updated_at = now()
+FROM refreshed r
+WHERE c.id = r.id;
+
+-- GSM object-boundary correction: GSM cell and BTS cell are separate objects.
+WITH gsm_group AS (
+    SELECT id
+    FROM public.mml_command_groups
+    WHERE param_version = 'cmcc-td-lte-v2.3'
+      AND group_code = 'MML350_G_DEVICEGSM'
+      AND deleted_at IS NULL
+    ORDER BY updated_at DESC
+    LIMIT 1
+)
+UPDATE public.mml_commands c
+SET group_id = g.id,
+    command_name = '查询BTS小区',
+    command_name_i18n = '{"zh-CN":"查询BTS小区","en-US":"Query BTS Cells"}'::jsonb,
+    logical_name_i18n = '{"zh-CN":"BTS小区","en-US":"BTS Cells"}'::jsonb,
+    target_object = 'DeviceGSM.Bts.',
+    deprecated_at = NULL,
+    updated_at = now()
+FROM gsm_group g
+WHERE c.command_code = 'LST MML350_DEVICEGSM__BTS'
+  AND c.source = 'admin';
+
+UPDATE public.mml_commands
+SET target_object = CASE command_code
+        WHEN 'LST MML350_DEVICE_SERVICES__GSMBTSCELLDT' THEN 'Device.Services.GsmBTSCellDT.{i}.'
+        WHEN 'LST MML350_DEVICEGSM__BTS_TRX' THEN 'DeviceGSM.Bts.{i}.Trx.{i}.'
+        WHEN 'LST MML350_DEVICEGSM__BTS_TRX_TS' THEN 'DeviceGSM.Bts.{i}.Trx.{i}.Ts.{i}.'
+        WHEN 'LST MML350_DEVICEGSM__CS7INSTANCE' THEN 'DeviceGSM.Cs7Instance.{i}.'
+        WHEN 'LST MML350_DEVICEGSM__CS7INSTANCE_AS' THEN 'DeviceGSM.Cs7Instance.{i}.As.{i}.'
+        WHEN 'LST MML350_DEVICEGSM__CS7INSTANCE_ASP' THEN 'DeviceGSM.Cs7Instance.{i}.Asp.{i}.'
+        WHEN 'LST MML350_DEVICEGSM__CS7INSTANCE_SCCPADDR' THEN 'DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.'
+        WHEN 'LST MML350_DEVICEGSM__MGW' THEN 'DeviceGSM.Mgw.{i}.'
+        WHEN 'LST MML350_DEVICEGSM__MSC' THEN 'DeviceGSM.Msc.{i}.'
+        ELSE target_object
+    END,
+    command_name = CASE command_code
+        WHEN 'LST MML350_DEVICEGSM__BTS_TRX' THEN '查询Bts.Trx'
+        WHEN 'LST MML350_DEVICEGSM__BTS_TRX_TS' THEN '查询Bts.Trx.Ts'
+        WHEN 'LST MML350_DEVICEGSM__CS7INSTANCE' THEN '查询Cs7Instance'
+        WHEN 'LST MML350_DEVICEGSM__CS7INSTANCE_AS' THEN '查询Cs7Instance.As'
+        WHEN 'LST MML350_DEVICEGSM__CS7INSTANCE_ASP' THEN '查询Cs7Instance.Asp'
+        WHEN 'LST MML350_DEVICEGSM__CS7INSTANCE_SCCPADDR' THEN '查询Cs7Instance.SccpAddr'
+        WHEN 'LST MML350_DEVICEGSM__MGW' THEN '查询Mgw'
+        WHEN 'LST MML350_DEVICEGSM__MSC' THEN '查询Msc'
+        ELSE command_name
+    END,
+    command_name_i18n = CASE command_code
+        WHEN 'LST MML350_DEVICEGSM__BTS_TRX' THEN '{"zh-CN":"查询Bts.Trx","en-US":"Query Bts.Trx"}'::jsonb
+        WHEN 'LST MML350_DEVICEGSM__BTS_TRX_TS' THEN '{"zh-CN":"查询Bts.Trx.Ts","en-US":"Query Bts.Trx.Ts"}'::jsonb
+        WHEN 'LST MML350_DEVICEGSM__CS7INSTANCE' THEN '{"zh-CN":"查询Cs7Instance","en-US":"Query Cs7Instance"}'::jsonb
+        WHEN 'LST MML350_DEVICEGSM__CS7INSTANCE_AS' THEN '{"zh-CN":"查询Cs7Instance.As","en-US":"Query Cs7Instance.As"}'::jsonb
+        WHEN 'LST MML350_DEVICEGSM__CS7INSTANCE_ASP' THEN '{"zh-CN":"查询Cs7Instance.Asp","en-US":"Query Cs7Instance.Asp"}'::jsonb
+        WHEN 'LST MML350_DEVICEGSM__CS7INSTANCE_SCCPADDR' THEN '{"zh-CN":"查询Cs7Instance.SccpAddr","en-US":"Query Cs7Instance.SccpAddr"}'::jsonb
+        WHEN 'LST MML350_DEVICEGSM__MGW' THEN '{"zh-CN":"查询Mgw","en-US":"Query Mgw"}'::jsonb
+        WHEN 'LST MML350_DEVICEGSM__MSC' THEN '{"zh-CN":"查询Msc","en-US":"Query Msc"}'::jsonb
+        ELSE command_name_i18n
+    END,
+    logical_name_i18n = CASE command_code
+        WHEN 'LST MML350_DEVICEGSM__BTS_TRX' THEN '{"zh-CN":"Bts.Trx","en-US":"Bts.Trx"}'::jsonb
+        WHEN 'LST MML350_DEVICEGSM__BTS_TRX_TS' THEN '{"zh-CN":"Bts.Trx.Ts","en-US":"Bts.Trx.Ts"}'::jsonb
+        WHEN 'LST MML350_DEVICEGSM__CS7INSTANCE' THEN '{"zh-CN":"Cs7Instance","en-US":"Cs7Instance"}'::jsonb
+        WHEN 'LST MML350_DEVICEGSM__CS7INSTANCE_AS' THEN '{"zh-CN":"Cs7Instance.As","en-US":"Cs7Instance.As"}'::jsonb
+        WHEN 'LST MML350_DEVICEGSM__CS7INSTANCE_ASP' THEN '{"zh-CN":"Cs7Instance.Asp","en-US":"Cs7Instance.Asp"}'::jsonb
+        WHEN 'LST MML350_DEVICEGSM__CS7INSTANCE_SCCPADDR' THEN '{"zh-CN":"Cs7Instance.SccpAddr","en-US":"Cs7Instance.SccpAddr"}'::jsonb
+        WHEN 'LST MML350_DEVICEGSM__MGW' THEN '{"zh-CN":"Mgw","en-US":"Mgw"}'::jsonb
+        WHEN 'LST MML350_DEVICEGSM__MSC' THEN '{"zh-CN":"Msc","en-US":"Msc"}'::jsonb
+        ELSE logical_name_i18n
+    END,
+    updated_at = now()
+WHERE command_code IN (
+    'LST MML350_DEVICE_SERVICES__GSMBTSCELLDT',
+    'LST MML350_DEVICEGSM__BTS_TRX',
+    'LST MML350_DEVICEGSM__BTS_TRX_TS',
+    'LST MML350_DEVICEGSM__CS7INSTANCE',
+    'LST MML350_DEVICEGSM__CS7INSTANCE_AS',
+    'LST MML350_DEVICEGSM__CS7INSTANCE_ASP',
+    'LST MML350_DEVICEGSM__CS7INSTANCE_SCCPADDR',
+    'LST MML350_DEVICEGSM__MGW',
+    'LST MML350_DEVICEGSM__MSC'
+);
+
+WITH source_fields AS (
+    SELECT DISTINCT ON (sp.standard_path)
+        sp.id AS standard_path_id,
+        sp.standard_path,
+        sf.label_i18n,
+        sf.default_selected,
+        sf.is_required,
+        sf.access_type,
+        sf.is_supported
+    FROM public.standard_params sp
+    LEFT JOIN public.mml_command_sub_fields sf ON sf.standard_path_id = sp.id
+    LEFT JOIN public.mml_commands c ON c.id = sf.command_id
+    WHERE sp.standard_path LIKE 'DeviceGSM.Bts.%'
+      AND sp.standard_path <> 'DeviceGSM.Bts.Trx.Index'
+      AND sp.standard_path NOT LIKE 'DeviceGSM.Bts.{i}.Trx.{i}.%'
+    ORDER BY sp.standard_path,
+             CASE WHEN c.command_code = 'LST MML350_DEVICEGSM__BTS' THEN 0
+                  WHEN c.command_code = 'LST MML350_DEVICE_SERVICES__GSMBTSCELLDT' THEN 1
+                  ELSE 2
+             END
+), numbered AS (
+    SELECT
+        sf.*,
+        row_number() OVER (ORDER BY sf.standard_path) AS sort_order
+    FROM source_fields sf
+), target_cmd AS (
+    SELECT id
+    FROM public.mml_commands
+    WHERE command_code = 'LST MML350_DEVICEGSM__BTS'
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id, mml_code, label_i18n, default_selected, is_required,
+    sort_order, standard_path_id, access_type, is_supported
+)
+SELECT
+    t.id,
+    LEFT('BTS_' || UPPER(regexp_replace(replace(replace(n.standard_path, 'DeviceGSM.Bts.{i}.', ''), 'DeviceGSM.Bts.', ''), '[^A-Za-z0-9]+', '_', 'g')), 100),
+    COALESCE(n.label_i18n, jsonb_build_object('zh-CN', upper(regexp_replace(n.standard_path, '^.*\.', '')), 'en-US', upper(regexp_replace(n.standard_path, '^.*\.', '')))),
+    COALESCE(n.default_selected, true),
+    COALESCE(n.is_required, false),
+    n.sort_order,
+    n.standard_path_id,
+    COALESCE(n.access_type, 'RO'),
+    COALESCE(n.is_supported, true)
+FROM numbered n
+CROSS JOIN target_cmd t
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH gsm_cmd AS (
+    SELECT id
+    FROM public.mml_commands
+    WHERE command_code = 'LST MML350_DEVICE_SERVICES__GSMBTSCELLDT'
+), bts_cmd AS (
+    SELECT id
+    FROM public.mml_commands
+    WHERE command_code = 'LST MML350_DEVICEGSM__BTS'
+)
+DELETE FROM public.mml_command_sub_fields sf
+USING public.standard_params sp
+WHERE sp.id = sf.standard_path_id
+  AND (
+      (sf.command_id IN (SELECT id FROM gsm_cmd) AND sp.standard_path LIKE 'DeviceGSM.Bts.%')
+      OR
+      (sf.command_id IN (SELECT id FROM bts_cmd) AND (
+          sp.standard_path = 'DeviceGSM.Bts.Trx.Index'
+          OR sp.standard_path LIKE 'DeviceGSM.Bts.{i}.Trx.{i}.%'
+      ))
+  );
+
+WITH target_cmds AS (
+    SELECT id
+    FROM public.mml_commands
+    WHERE command_code IN (
+        'LST MML350_DEVICE_SERVICES__GSMBTSCELLDT',
+        'LST MML350_DEVICEGSM__BTS',
+        'LST MML350_DEVICEGSM__BTS_TRX',
+        'LST MML350_DEVICEGSM__BTS_TRX_TS',
+        'LST MML350_DEVICEGSM__CS7INSTANCE',
+        'LST MML350_DEVICEGSM__CS7INSTANCE_AS',
+        'LST MML350_DEVICEGSM__CS7INSTANCE_ASP',
+        'LST MML350_DEVICEGSM__CS7INSTANCE_SCCPADDR',
+        'LST MML350_DEVICEGSM__MGW',
+        'LST MML350_DEVICEGSM__MSC'
+    )
+), refreshed AS (
+    SELECT
+        t.id,
+        COALESCE(jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path)
+                 FILTER (WHERE sp.standard_path IS NOT NULL), '[]'::jsonb) AS paths
+    FROM target_cmds t
+    LEFT JOIN public.mml_command_sub_fields sf ON sf.command_id = t.id AND sf.deprecated_at IS NULL
+    LEFT JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+    GROUP BY t.id
+)
+UPDATE public.mml_commands c
+SET target_paths = r.paths,
+    tree_node_refs = r.paths,
+    updated_at = now()
+FROM refreshed r
+WHERE c.id = r.id;
+
+-- GSM writable and multi-instance operation commands.
+WITH rw_lst AS (
+    SELECT
+        c.id AS lst_id,
+        c.command_code AS lst_code,
+        replace(c.command_code, 'LST ', 'MOD ') AS mod_code,
+        c.category,
+        c.description,
+        c.group_id,
+        c.logical_name_i18n,
+        COALESCE(c.logical_name_i18n->>'zh-CN', c.command_name) AS logical_zh,
+        COALESCE(c.logical_name_i18n->>'en-US', c.command_name) AS logical_en,
+        jsonb_agg(to_jsonb(sp.standard_path) ORDER BY sf.sort_order, sp.standard_path) AS target_paths
+    FROM public.mml_commands c
+    JOIN public.mml_command_sub_fields sf ON sf.command_id = c.id AND sf.deprecated_at IS NULL AND sf.access_type = 'RW'
+    JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+    WHERE c.operation_type = 'LST'
+      AND c.deprecated_at IS NULL
+      AND c.command_code IN (
+          'LST MML350_DEVICE_SERVICES__GSMBTSCELLDT',
+          'LST MML350_DEVICEGSM__BTS',
+          'LST MML350_DEVICEGSM__BTS_TRX',
+          'LST MML350_DEVICEGSM__BTS_TRX_TS',
+          'LST MML350_DEVICEGSM__CS7INSTANCE',
+          'LST MML350_DEVICEGSM__CS7INSTANCE_AS',
+          'LST MML350_DEVICEGSM__CS7INSTANCE_ASP',
+          'LST MML350_DEVICEGSM__CS7INSTANCE_SCCPADDR',
+          'LST MML350_DEVICEGSM__MGW',
+          'LST MML350_DEVICEGSM__MSC'
+      )
+    GROUP BY c.id, c.command_code, c.category, c.description, c.group_id, c.logical_name_i18n, c.command_name
+), upserted_mod AS (
+    INSERT INTO public.mml_commands (
+        command_name, command_code, category, description, rpc_method,
+        target_paths, target_object, group_id, command_name_i18n, require_confirm,
+        confirm_msg_i18n, operation_type, logical_name_i18n, source,
+        catalog_protected, platform_tags, tree_node_refs
+    )
+    SELECT
+        '修改' || logical_zh,
+        mod_code,
+        category,
+        description,
+        'SetParameterValues',
+        target_paths,
+        '',
+        group_id,
+        jsonb_build_object('zh-CN', '修改' || logical_zh, 'en-US', 'Modify ' || logical_en),
+        false,
+        '{}'::jsonb,
+        'MOD',
+        logical_name_i18n,
+        'admin',
+        false,
+        '{}'::jsonb,
+        target_paths
+    FROM rw_lst
+    ON CONFLICT (command_code) DO UPDATE
+    SET command_name = EXCLUDED.command_name,
+        category = EXCLUDED.category,
+        description = EXCLUDED.description,
+        rpc_method = EXCLUDED.rpc_method,
+        target_paths = EXCLUDED.target_paths,
+        target_object = EXCLUDED.target_object,
+        group_id = EXCLUDED.group_id,
+        command_name_i18n = EXCLUDED.command_name_i18n,
+        operation_type = EXCLUDED.operation_type,
+        logical_name_i18n = EXCLUDED.logical_name_i18n,
+        tree_node_refs = EXCLUDED.tree_node_refs,
+        deprecated_at = NULL,
+        updated_at = now()
+    RETURNING id, command_code
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id, mml_code, label_i18n, default_selected, is_required,
+    sort_order, standard_path_id, access_type, is_supported
+)
+SELECT
+    u.id,
+    sf.mml_code,
+    sf.label_i18n,
+    sf.default_selected,
+    sf.is_required,
+    sf.sort_order,
+    sf.standard_path_id,
+    'RW',
+    sf.is_supported
+FROM rw_lst r
+JOIN public.mml_command_sub_fields sf ON sf.command_id = r.lst_id AND sf.deprecated_at IS NULL AND sf.access_type = 'RW'
+JOIN upserted_mod u ON u.command_code = r.mod_code
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH multi_lst AS (
+    SELECT
+        c.command_code,
+        c.category,
+        c.description,
+        c.group_id,
+        c.logical_name_i18n,
+        COALESCE(c.logical_name_i18n->>'zh-CN', c.command_name) AS logical_zh,
+        COALESCE(c.logical_name_i18n->>'en-US', c.command_name) AS logical_en,
+        c.target_object,
+        CASE
+            WHEN c.target_object LIKE '%.{i}.' THEN regexp_replace(c.target_object, '\.\{i\}\.$', '.')
+            ELSE c.target_object
+        END AS rpc_object,
+        jsonb_build_array(c.target_object) AS target_paths
+    FROM public.mml_commands c
+    WHERE c.operation_type = 'LST'
+      AND c.deprecated_at IS NULL
+      AND c.command_code IN (
+          'LST MML350_DEVICE_SERVICES__GSMBTSCELLDT',
+          'LST MML350_DEVICEGSM__BTS',
+          'LST MML350_DEVICEGSM__BTS_TRX',
+          'LST MML350_DEVICEGSM__BTS_TRX_TS',
+          'LST MML350_DEVICEGSM__CS7INSTANCE',
+          'LST MML350_DEVICEGSM__CS7INSTANCE_AS',
+          'LST MML350_DEVICEGSM__CS7INSTANCE_ASP',
+          'LST MML350_DEVICEGSM__CS7INSTANCE_SCCPADDR',
+          'LST MML350_DEVICEGSM__MGW',
+          'LST MML350_DEVICEGSM__MSC'
+      )
+      AND c.target_object IS NOT NULL
+      AND c.target_object <> ''
+), desired_ops AS (
+    SELECT
+        op.operation_type,
+        op.rpc_method,
+        op.zh_prefix,
+        op.en_prefix,
+        replace(m.command_code, 'LST ', op.operation_type || ' ') AS command_code,
+        m.category,
+        m.description,
+        m.group_id,
+        m.logical_name_i18n,
+        m.logical_zh,
+        m.logical_en,
+        m.rpc_object,
+        m.target_paths
+    FROM multi_lst m
+    CROSS JOIN (VALUES
+        ('ADD', 'AddObject', '新增', 'Add'),
+        ('RMV', 'DeleteObject', '删除', 'Delete')
+    ) AS op(operation_type, rpc_method, zh_prefix, en_prefix)
+)
+INSERT INTO public.mml_commands (
+    command_name, command_code, category, description, rpc_method,
+    target_paths, target_object, group_id, command_name_i18n, require_confirm,
+    confirm_msg_i18n, operation_type, logical_name_i18n, source,
+    catalog_protected, platform_tags, tree_node_refs
+)
+SELECT
+    zh_prefix || logical_zh,
+    command_code,
+    category,
+    description,
+    rpc_method,
+    target_paths,
+    rpc_object,
+    group_id,
+    jsonb_build_object('zh-CN', zh_prefix || logical_zh, 'en-US', en_prefix || ' ' || logical_en),
+    false,
+    '{}'::jsonb,
+    operation_type,
+    logical_name_i18n,
+    'admin',
+    false,
+    '{}'::jsonb,
+    target_paths
+FROM desired_ops
+ON CONFLICT (command_code) DO UPDATE
+SET command_name = EXCLUDED.command_name,
+    category = EXCLUDED.category,
+    description = EXCLUDED.description,
+    rpc_method = EXCLUDED.rpc_method,
+    target_paths = EXCLUDED.target_paths,
+    target_object = EXCLUDED.target_object,
+    group_id = EXCLUDED.group_id,
+    command_name_i18n = EXCLUDED.command_name_i18n,
+    operation_type = EXCLUDED.operation_type,
+    logical_name_i18n = EXCLUDED.logical_name_i18n,
+    tree_node_refs = EXCLUDED.tree_node_refs,
+    deprecated_at = NULL,
+    updated_at = now();
+
+-- GSM single-leaf commands should be one consolidated query command.
+WITH gsm_group AS (
+    SELECT id
+    FROM public.mml_command_groups
+    WHERE param_version = 'cmcc-td-lte-v2.3'
+      AND group_code = 'MML350_G_DEVICEGSM'
+      AND deleted_at IS NULL
+    ORDER BY updated_at DESC
+    LIMIT 1
+)
+INSERT INTO public.mml_commands (
+    command_name, command_code, category, description, rpc_method, target_paths,
+    target_object, group_id, command_name_i18n, require_confirm, confirm_msg_i18n,
+    operation_type, logical_name_i18n, source, catalog_protected, platform_tags,
+    deprecated_at, tree_node_refs, instance_range_meta, help_doc, notes
+)
+SELECT
+    '查询GSM全局参数',
+    'LST MML350_DEVICEGSM__GLOBAL',
+    'mml-350-20260704',
+    'Consolidated DeviceGSM single-leaf query command',
+    'GetParameterValues',
+    '[]'::jsonb,
+    'DeviceGSM.',
+    g.id,
+    '{"zh-CN":"查询GSM全局参数","en-US":"Query GSM Global Parameters"}'::jsonb,
+    false,
+    '{}'::jsonb,
+    'LST',
+    '{"zh-CN":"GSM全局参数","en-US":"GSM Global Parameters"}'::jsonb,
+    'admin',
+    false,
+    '{}'::jsonb,
+    NULL,
+    '[]'::jsonb,
+    '[]'::jsonb,
+    '',
+    ''
+FROM gsm_group g
+ON CONFLICT (command_code) DO UPDATE
+SET command_name = EXCLUDED.command_name,
+    category = EXCLUDED.category,
+    description = EXCLUDED.description,
+    rpc_method = EXCLUDED.rpc_method,
+    target_object = EXCLUDED.target_object,
+    group_id = EXCLUDED.group_id,
+    command_name_i18n = EXCLUDED.command_name_i18n,
+    operation_type = EXCLUDED.operation_type,
+    logical_name_i18n = EXCLUDED.logical_name_i18n,
+    source = EXCLUDED.source,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH source_fields AS (
+    SELECT DISTINCT ON (sp.standard_path)
+        sp.id AS standard_path_id,
+        sp.standard_path,
+        sf.mml_code,
+        sf.label_i18n,
+        sf.default_selected,
+        sf.is_required,
+        sf.access_type,
+        sf.is_supported
+    FROM public.standard_params sp
+    LEFT JOIN public.mml_command_sub_fields sf ON sf.standard_path_id = sp.id
+    LEFT JOIN public.mml_commands c ON c.id = sf.command_id
+    WHERE sp.standard_path ~ '^DeviceGSM\.[^.]+$'
+    ORDER BY sp.standard_path,
+             CASE WHEN c.command_code = 'LST MML350_DEVICEGSM__GLOBAL' THEN 0
+                  WHEN c.command_code LIKE 'LST MML350_DEVICEGSM__%' THEN 1
+                  ELSE 2
+             END
+), numbered AS (
+    SELECT
+        sf.*,
+        row_number() OVER (ORDER BY sf.standard_path) AS sort_order
+    FROM source_fields sf
+), target_cmd AS (
+    SELECT id
+    FROM public.mml_commands
+    WHERE command_code = 'LST MML350_DEVICEGSM__GLOBAL'
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id, mml_code, label_i18n, default_selected, is_required,
+    sort_order, standard_path_id, access_type, is_supported
+)
+SELECT
+    t.id,
+    LEFT('GSM_' || UPPER(regexp_replace(replace(n.standard_path, 'DeviceGSM.', ''), '[^A-Za-z0-9]+', '_', 'g')), 100),
+    COALESCE(n.label_i18n, jsonb_build_object('zh-CN', upper(replace(n.standard_path, 'DeviceGSM.', '')), 'en-US', upper(replace(n.standard_path, 'DeviceGSM.', '')))),
+    COALESCE(n.default_selected, true),
+    COALESCE(n.is_required, false),
+    n.sort_order,
+    n.standard_path_id,
+    COALESCE(n.access_type, 'RO'),
+    COALESCE(n.is_supported, true)
+FROM numbered n
+CROSS JOIN target_cmd t
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH leaf_commands AS (
+    SELECT DISTINCT c.id
+    FROM public.mml_commands c
+    JOIN public.mml_command_sub_fields sf ON sf.command_id = c.id AND sf.deprecated_at IS NULL
+    JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+    WHERE c.command_code <> 'LST MML350_DEVICEGSM__GLOBAL'
+      AND c.operation_type = 'LST'
+      AND c.command_code LIKE 'LST MML350_DEVICEGSM__%'
+      AND sp.standard_path ~ '^DeviceGSM\.[^.]+$'
+      AND NOT EXISTS (
+          SELECT 1
+          FROM public.mml_command_sub_fields sf2
+          JOIN public.standard_params sp2 ON sp2.id = sf2.standard_path_id
+          WHERE sf2.command_id = c.id
+            AND sf2.deprecated_at IS NULL
+            AND sp2.standard_path !~ '^DeviceGSM\.[^.]+$'
+      )
+)
+UPDATE public.mml_commands c
+SET deprecated_at = now(),
+    target_paths = '[]'::jsonb,
+    tree_node_refs = '[]'::jsonb,
+    updated_at = now()
+FROM leaf_commands lc
+WHERE c.id = lc.id;
+
+WITH target_cmd AS (
+    SELECT id
+    FROM public.mml_commands
+    WHERE command_code = 'LST MML350_DEVICEGSM__GLOBAL'
+), refreshed AS (
+    SELECT
+        t.id,
+        COALESCE(jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path)
+                 FILTER (WHERE sp.standard_path IS NOT NULL), '[]'::jsonb) AS paths
+    FROM target_cmd t
+    LEFT JOIN public.mml_command_sub_fields sf ON sf.command_id = t.id AND sf.deprecated_at IS NULL
+    LEFT JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+    GROUP BY t.id
+)
+UPDATE public.mml_commands c
+SET target_paths = r.paths,
+    tree_node_refs = r.paths,
+    updated_at = now()
+FROM refreshed r
+WHERE c.id = r.id;
+
+-- DeviceInfo SignallingTrace should be an independent command group.
+WITH desired_group AS (
+    SELECT
+        'a4894949-ebb5-44c7-8905-4d7460326408'::uuid AS id,
+        'MML_DEVICEINFO_SIGNALLING_TRACE'::varchar AS group_code,
+        '信令跟踪'::varchar AS group_name_zh,
+        'Signalling Trace'::varchar AS group_name_en,
+        'MML_DEVICEINFO_SIGNALLING_TRACE'::ltree AS path,
+        11 AS display_order,
+        '{"zh-CN":"信令跟踪","en-US":"Signalling Trace"}'::jsonb AS name_i18n
+)
+INSERT INTO public.mml_command_groups (
+    id, group_code, group_name_zh, group_name_en, path, param_version,
+    display_order, is_active, name_i18n, source, catalog_protected, chapter_code
+)
+SELECT id, group_code, group_name_zh, group_name_en, path, 'cmcc-td-lte-v2.3',
+       display_order, true, name_i18n, 'admin', false, 'SA'
+FROM desired_group
+ON CONFLICT (param_version, group_code) DO UPDATE
+SET group_name_zh = EXCLUDED.group_name_zh,
+    group_name_en = EXCLUDED.group_name_en,
+    path = EXCLUDED.path,
+    display_order = EXCLUDED.display_order,
+    is_active = true,
+    name_i18n = EXCLUDED.name_i18n,
+    source = EXCLUDED.source,
+    catalog_protected = EXCLUDED.catalog_protected,
+    chapter_code = EXCLUDED.chapter_code,
+    deleted_at = NULL,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH group_row AS (
+    SELECT id
+    FROM public.mml_command_groups
+    WHERE param_version = 'cmcc-td-lte-v2.3'
+      AND group_code = 'MML_DEVICEINFO_SIGNALLING_TRACE'
+      AND deleted_at IS NULL
+    LIMIT 1
+), paths AS (
+    SELECT jsonb_agg(to_jsonb(standard_path) ORDER BY standard_path) AS target_paths
+    FROM public.standard_params
+    WHERE standard_path LIKE 'Device.DeviceInfo.SignallingTrace.%'
+), desired_commands(command_code, command_name, command_name_en, rpc_method, operation_type) AS (
+    VALUES
+        ('LST SIGNALLING_TRACE', '查询信令跟踪', 'Query Signalling Trace', 'GetParameterValues', 'LST'),
+        ('MOD SIGNALLING_TRACE', '修改信令跟踪', 'Modify Signalling Trace', 'SetParameterValues', 'MOD')
+)
+INSERT INTO public.mml_commands (
+    command_name, command_code, category, description, rpc_method,
+    target_paths, target_object, group_id, command_name_i18n, require_confirm,
+    confirm_msg_i18n, operation_type, logical_name_i18n, source,
+    catalog_protected, platform_tags, tree_node_refs
+)
+SELECT
+    d.command_name,
+    d.command_code,
+    '3',
+    'DeviceInfo SignallingTrace parameters',
+    d.rpc_method,
+    COALESCE(p.target_paths, '[]'::jsonb),
+    CASE WHEN d.operation_type = 'LST' THEN 'Device.DeviceInfo.SignallingTrace.' ELSE '' END,
+    g.id,
+    jsonb_build_object('zh-CN', d.command_name, 'en-US', d.command_name_en),
+    false,
+    '{}'::jsonb,
+    d.operation_type,
+    '{"zh-CN":"信令跟踪","en-US":"Signalling Trace"}'::jsonb,
+    'admin',
+    false,
+    '{}'::jsonb,
+    COALESCE(p.target_paths, '[]'::jsonb)
+FROM desired_commands d
+CROSS JOIN group_row g
+CROSS JOIN paths p
+ON CONFLICT (command_code) DO UPDATE
+SET command_name = EXCLUDED.command_name,
+    category = EXCLUDED.category,
+    description = EXCLUDED.description,
+    rpc_method = EXCLUDED.rpc_method,
+    target_paths = EXCLUDED.target_paths,
+    target_object = EXCLUDED.target_object,
+    group_id = EXCLUDED.group_id,
+    command_name_i18n = EXCLUDED.command_name_i18n,
+    operation_type = EXCLUDED.operation_type,
+    logical_name_i18n = EXCLUDED.logical_name_i18n,
+    source = EXCLUDED.source,
+    tree_node_refs = EXCLUDED.tree_node_refs,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH target_cmds AS (
+    SELECT id, operation_type
+    FROM public.mml_commands
+    WHERE command_code IN ('LST SIGNALLING_TRACE', 'MOD SIGNALLING_TRACE')
+), source_paths AS (
+    SELECT
+        id AS standard_path_id,
+        standard_path,
+        upper(regexp_replace(replace(standard_path, 'Device.DeviceInfo.SignallingTrace.', ''), '[^A-Za-z0-9]+', '_', 'g')) AS mml_code,
+        row_number() OVER (ORDER BY standard_path) AS sort_order,
+        CASE WHEN access = 'READ_WRITE' THEN 'RW' ELSE 'RO' END AS access_type
+    FROM public.standard_params
+    WHERE standard_path LIKE 'Device.DeviceInfo.SignallingTrace.%'
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id, mml_code, label_i18n, default_selected, is_required,
+    sort_order, standard_path_id, access_type, is_supported
+)
+SELECT
+    t.id,
+    p.mml_code,
+    jsonb_build_object('zh-CN', p.mml_code, 'en-US', initcap(replace(lower(p.mml_code), '_', ' '))),
+    true,
+    t.operation_type = 'MOD',
+    p.sort_order,
+    p.standard_path_id,
+    CASE WHEN t.operation_type = 'MOD' THEN 'RW' ELSE p.access_type END,
+    true
+FROM target_cmds t
+CROSS JOIN source_paths p
+WHERE t.operation_type = 'LST'
+   OR (t.operation_type = 'MOD' AND p.access_type = 'RW')
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
 
 COMMIT;
 
