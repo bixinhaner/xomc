@@ -884,7 +884,7 @@ func (f *fakeParamSyncWriter) callCount() int {
 
 type fakeDeviceInfoRefresher struct{}
 
-func (f *fakeDeviceInfoRefresher) SyncFromParameters(_ context.Context, _ uuid.UUID, _ model.CarrierCode, _ model.Technology) ([]string, error) {
+func (f *fakeDeviceInfoRefresher) SyncFromParameters(_ context.Context, _ uuid.UUID, _ model.CarrierCode, _ model.Technology, _ string) ([]string, error) {
 	return nil, nil
 }
 

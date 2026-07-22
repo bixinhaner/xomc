@@ -1,4 +1,5 @@
 import type { Device } from '@core/types/device';
+import { supportsOwnRF } from './deviceRadioFieldSupport';
 
 type NetworkScope = 'common' | 'eNB' | 'gNB' | 'GSM';
 
@@ -157,6 +158,7 @@ const DEVICE_LIST_SYNC_PARAMS: DeviceListSyncParam[] = [
 ];
 
 function paramAppliesToDevice(param: DeviceListSyncParam, device: Device): boolean {
+  if (param.key === 'rfStatus' && !supportsOwnRF(device)) return false;
   if (param.scope === 'common') return true;
   return device.networkType === param.scope;
 }

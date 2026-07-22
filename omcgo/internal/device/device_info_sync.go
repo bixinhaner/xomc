@@ -696,7 +696,7 @@ var topologyAttributeColumns = []string{"lac", "tac"}
 // 变成了不同的新值**（NULL→有值 / 有值→不同新值 / 有值→NULL 全算变化）的列名
 // 列表。调用方据此决定是否发 device.attributes.changed 事件触发分组重匹配。
 // 当 sync 不涉及这些列、或值未变时，返回 nil（避免事件风暴）。
-func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID, carrierCode model.CarrierCode, tech model.Technology) ([]string, error) {
+func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID, carrierCode model.CarrierCode, tech model.Technology, productClass string) ([]string, error) {
 	c, err := s.carrierRegistry.Get(carrierCode)
 	if err != nil {
 		return nil, fmt.Errorf("get carrier adapter: %w", err)
@@ -790,7 +790,15 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 	fields["op_state"] = CalcOpState(paramValues)
 	fields["mme_status"] = CalcCoreNetworkStatus(paramValues, tech)
 	fields["sync_status"] = CalcSyncStatus(paramValues)
-	fields["rf_status"] = CalcRFStatus(paramValues)
+	rfProjection := CalcRFStatus(paramValues, tech, productClass)
+	fields["rf_status"] = rfProjection.Status
+	if rfProjection.State == RFStatusInconsistent {
+		s.logger.Warn("RF status projection is inconsistent",
+			zap.String("device_id", deviceID.String()),
+			zap.String("product_class", productClass),
+			zap.Int("expected_count", rfProjection.ExpectedCount),
+			zap.String("reason", rfProjection.Reason))
+	}
 	fields["gps_status"] = CalcGPSStatus(paramValues)
 	fields["num_of_cells"] = CalcNumOfCells(paramValues)
 	fields["license_status"] = CalcLicenseStatus(paramValues)

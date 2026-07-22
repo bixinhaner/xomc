@@ -60,7 +60,7 @@ import { buildDefaultUfteTaskName } from '@/pages/transfer/shared';
 import dayjs from 'dayjs';
 import { buildBatchTaskTypeMap, batchActionHasDetail, removeParamSyncOptimisticDeviceId } from './deviceBatchTask';
 import { getDeviceListParamSyncPaths } from './deviceListParamSync';
-import { formatDeviceRadioField } from './deviceRadioFieldSupport';
+import { formatDeviceRadioField, formatDeviceRFStatus } from './deviceRadioFieldSupport';
 import { amfStatusForDevice, bscLinkStatusForDevice, mmeStatusForDevice } from './deviceCoreNetworkStatus';
 import { shouldShowLocationSyncIndicator } from './deviceGpsSyncIndicator';
 import GpsSyncConfirmModal from './GpsSyncConfirmModal';
@@ -1940,12 +1940,16 @@ export default function DeviceList() {
         hidden: true,
         group: 'common',
         // 原始 JSP: 支持多小区 "on,off,on"，汇总 + [N/M] Popover
-        render: (_val, record) => renderMultiCellStatus(
-          record.rfStatus,
-          ['on', '1', '3'],
-          { on: t('status.rfOn'), off: t('status.rfOff'), title: t('device.multiCellStatus') },
-          { on: 'success', off: 'error', mixed: 'warning' },
-        ),
+        render: (_val, record) => {
+          const rfStatus = formatDeviceRFStatus(record, record.rfStatus);
+          if (rfStatus === '-') return '-';
+          return renderMultiCellStatus(
+            rfStatus,
+            ['on', '1', '3'],
+            { on: t('status.rfOn'), off: t('status.rfOff'), title: t('device.multiCellStatus') },
+            { on: 'success', off: 'error', mixed: 'warning' },
+          );
+        },
       },
       {
         key: 'syncStatus',

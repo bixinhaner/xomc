@@ -171,7 +171,7 @@ func (p *paramSyncFullRunProjection) Refresh(ctx context.Context, deviceID uuid.
 	if dev == nil {
 		return fmt.Errorf("device %s not found for parameter sync projection", deviceID)
 	}
-	if _, err := p.info.SyncFromParameters(ctx, deviceID, dev.Carrier, dev.Technology); err != nil {
+	if _, err := p.info.SyncFromParameters(ctx, deviceID, dev.Carrier, dev.Technology, dev.ProductClass); err != nil {
 		return fmt.Errorf("refresh device_info from parameters: %w", err)
 	}
 	if p.nameSync != nil {

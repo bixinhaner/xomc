@@ -94,6 +94,24 @@ describe('getDeviceListParamSyncPaths', () => {
     expect(gsmPaths).toContain('Device.Services.GsmBTSCellDT.{i}.RfState');
   });
 
+  it('BSC 不同步下级 RF 路径，BTS 仍同步自身 RF 路径', () => {
+    const bscPaths = getDeviceListParamSyncPaths({
+      ...baseDevice,
+      networkType: 'GSM',
+      productClass: 'FAP/PGSM',
+    });
+    const btsPaths = getDeviceListParamSyncPaths({
+      ...baseDevice,
+      networkType: 'GSM',
+      productClass: 'FAP/BTS',
+    });
+
+    expect(bscPaths).not.toContain('Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus');
+    expect(bscPaths).not.toContain('Device.Services.GsmBTSCellDT.{i}.RfState');
+    expect(btsPaths).toContain('Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus');
+    expect(btsPaths).toContain('Device.Services.GsmBTSCellDT.{i}.RfState');
+  });
+
   it('下发列表 opState 后端派生实际读取的 LTE/NR/GSM 参数', () => {
     const paths = getDeviceListParamSyncPaths(baseDevice);
 

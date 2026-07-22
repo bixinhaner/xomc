@@ -790,7 +790,7 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 	// 注册就能命中，而不必等下一次周期 Inform。NULL→有值 也算变化，会触发
 	// device.attributes.changed 事件 → GroupMatchEngine 异步归组。
 	if s.infoSyncer != nil {
-		changedAttrs, err := s.infoSyncer.SyncFromParameters(ctx, device.ID, device.Carrier, device.Technology)
+		changedAttrs, err := s.infoSyncer.SyncFromParameters(ctx, device.ID, device.Carrier, device.Technology, device.ProductClass)
 		if err != nil {
 			s.logger.Warn("RegisterFromInform: sync device info from parameters",
 				zap.String("device_id", device.ID.String()),
@@ -1007,7 +1007,7 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	// 同时拿到 topology 关键列（LAC/TAC）的变化集，若非空发 device.attributes.changed
 	// 让 GroupMatchEngine 异步重匹配该设备，避免等 @hourly cron 兜底。
 	if s.infoSyncer != nil {
-		changedAttrs, err := s.infoSyncer.SyncFromParameters(ctx, device.ID, device.Carrier, device.Technology)
+		changedAttrs, err := s.infoSyncer.SyncFromParameters(ctx, device.ID, device.Carrier, device.Technology, device.ProductClass)
 		if err != nil {
 			s.logger.Warn("sync device info from parameters",
 				zap.String("device_id", device.ID.String()),

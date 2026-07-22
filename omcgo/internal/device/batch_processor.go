@@ -772,7 +772,7 @@ func (p *BatchInformProcessor) asyncSyncDeviceInfo(hit []*informUpdate) {
 			// 批量参数回填路径不持有 EventBus,即便 LAC/TAC 变化也不在这里发
 			// device.attributes.changed —— 走 @hourly cron 兜底重匹配。若后续需要
 			// 让批量路径也实时归组,需把 eventBus 注入到 batch_processor。
-			if _, err := p.infoSyncer.SyncFromParameters(ctx, d.ID, d.Carrier, d.Technology); err != nil {
+			if _, err := p.infoSyncer.SyncFromParameters(ctx, d.ID, d.Carrier, d.Technology, d.ProductClass); err != nil {
 				p.logger.Warn("batch path InfoSyncer.SyncFromParameters failed (non-fatal)",
 					zap.String("serial_number", d.SerialNumber),
 					zap.Error(err))
