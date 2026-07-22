@@ -5,6 +5,7 @@ import type { PageRequest } from '../../types/pagination';
 import { alarmService } from '../../mock/services/alarmService';
 import { alarmApi } from '../../services/api/alarmApi';
 import { createApiSwitchWithMock } from '../../services/apiSwitch';
+import { useAppStore } from '../../store/appStore';
 
 // Real API is the canonical surface; mock is best-effort and adapted at runtime.
 const api = createApiSwitchWithMock(alarmService, alarmApi);
@@ -19,8 +20,9 @@ export function useCurrentAlarms(
   params: AlarmFilter & PageRequest,
   options?: AlarmQueryOptions
 ) {
+  const locale = useAppStore((s) => s.locale);
   return useQuery({
-    queryKey: ['alarms', 'current', params],
+    queryKey: ['alarms', 'current', params, locale],
     queryFn: () => api.getCurrentAlarms(params),
     // 实时页（性能 #15）：比全局 30s staleTime 更短，进入页面/切回前台更快补刷
     staleTime: 5_000,
@@ -36,8 +38,9 @@ export function useHistoricalAlarms(
   params: AlarmFilter & PageRequest,
   options?: AlarmQueryOptions
 ) {
+  const locale = useAppStore((s) => s.locale);
   return useQuery({
-    queryKey: ['alarms', 'historical', params],
+    queryKey: ['alarms', 'historical', params, locale],
     queryFn: () => api.getHistoricalAlarms(params),
     refetchInterval: options?.refetchIntervalMs ?? false,
     refetchIntervalInBackground: options?.refetchIntervalInBackground ?? false,

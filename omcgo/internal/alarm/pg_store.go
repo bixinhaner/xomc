@@ -412,36 +412,34 @@ func activeAlarmSelect() squirrel.SelectBuilder {
 
 // localizedAlarmNameExpr 返回列表查询里 description 列的 locale 化表达式（issue #67）。
 //
-// 按请求 locale 在 alarm_definitions.en_name / cn_name 间取名，并 COALESCE 回退到设备上报
-// 的 <table>.description——字典未命中（LEFT JOIN 为 NULL）或字典对应语言列为空时不留空白。
-//   - en-US：COALESCE(NULLIF(ad.en_name,”), ad.cn_name, <table>.description)
-//   - 其它（含 zh-CN/缺省）：COALESCE(NULLIF(ad.cn_name,”), ad.en_name, <table>.description)
+// 按请求 locale 在 alarm_definitions.en_name / cn_name 间取名：identifier 命中
+// 时仅在中英文字典列间回退，未命中时才保留告警记录原文。
 //
 // 别名固定为 description，使列表 scan 顺序与既有 scanAlarmRow / ListHistory 解码完全一致。
 func localizedAlarmNameExpr(loc appcontext.Locale, table string) string {
 	descCol := table + ".description"
-	// 末尾 '' 兜底：字典三源（ad.en_name/ad.cn_name/原文 description）若全 NULL，
-	// 整体退回空串，避免 NULL 扫进非空 string 字段 model.Alarm.Description（issue：历史告警 500）。
+	primary, fallback := "ad.cn_name", "ad.en_name"
 	if loc == appcontext.LocaleEN {
-		return fmt.Sprintf("COALESCE(NULLIF(ad.en_name, ''), NULLIF(ad.cn_name, ''), %s, '') AS description", descCol)
+		primary, fallback = fallback, primary
 	}
-	return fmt.Sprintf("COALESCE(NULLIF(ad.cn_name, ''), NULLIF(ad.en_name, ''), %s, '') AS description", descCol)
+	return fmt.Sprintf(
+		"CASE WHEN ad.identifier IS NULL THEN COALESCE(%s, '') "+
+			"ELSE COALESCE(NULLIF(%s, ''), NULLIF(%s, ''), '') END AS description",
+		descCol, primary, fallback,
+	)
 }
 
-// localizedProbableCauseExpr 仅对 OMC 自身生成的告警使用告警定义库的本地化原因；
-// 设备告警始终保留设备上报原文，避免运维字典覆盖现场诊断信息。
+// localizedProbableCauseExpr 与告警名称使用同一 identifier 命中规则，不区分告警来源。
 func localizedProbableCauseExpr(loc appcontext.Locale, table string) string {
-	sourceCol := table + ".alarm_source"
 	causeCol := table + ".probable_cause"
 	primary, fallback := "ad.cn_probable_cause", "ad.en_probable_cause"
 	if loc == appcontext.LocaleEN {
 		primary, fallback = fallback, primary
 	}
 	return fmt.Sprintf(
-		"CASE WHEN LOWER(TRIM(COALESCE(%s, ''))) = 'omc' THEN "+
-			"COALESCE(NULLIF(%s, ''), NULLIF(%s, ''), NULLIF(%s, ''), '') "+
-			"ELSE COALESCE(%s, '') END AS probable_cause",
-		sourceCol, primary, fallback, causeCol, causeCol,
+		"CASE WHEN ad.identifier IS NULL THEN COALESCE(%s, '') "+
+			"ELSE COALESCE(NULLIF(%s, ''), NULLIF(%s, ''), '') END AS probable_cause",
+		causeCol, primary, fallback,
 	)
 }
 
