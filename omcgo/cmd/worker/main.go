@@ -263,13 +263,16 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	pmCollector.SetRunner(pmRunner)
 
 	// PM 入库进程内并发：NATS push 订阅 async 回调单 goroutine 串行（单订阅只用 ~1 核）。
-	// 配 N 个订阅共享 durable consumer 吃满 worker 多核。<=0 回退 GOMAXPROCS（容器 CPU 配额），上限 16。
+	// 配 N 个订阅共享 durable consumer 吃满 worker 多核。<=0 回退 GOMAXPROCS（容器 CPU 配额）。
+	// 上限 32（2026-07-21 压测实测：20000 设备规模下旧上限 16 把并发顶死，worker CPU 却只用了
+	// ~30%（远未跑满）；提到 32 后隔离测量消费吞吐从约10/s提升到约20-27/s，稳定验证有效。
+	// 已同步把 tsdb 连接池上限从 25 提到 40，避免瓶颈从「并发数」转移到「DB 连接池耗尽」。
 	pmConcurrency := cfg.PMConsumerConcurrency
 	if pmConcurrency <= 0 {
 		pmConcurrency = runtime.GOMAXPROCS(0)
 	}
-	if pmConcurrency > 16 {
-		pmConcurrency = 16
+	if pmConcurrency > 32 {
+		pmConcurrency = 32
 	}
 	pmCollector.SetConcurrency(pmConcurrency)
 	// 服务端 durable consumer 的 MaxAckPending 必须与实际处理能力绑定。默认 1000 会在
