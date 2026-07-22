@@ -20,6 +20,13 @@ function TransferSettingsHarness({ values }: { values: Record<string, unknown> }
 }
 
 describe('TransferSettings', () => {
+  it('说明生产环境允许运营商网络中基站可达的私网地址', () => {
+    render(<TransferSettingsHarness values={{}} />);
+
+    expect(screen.getByText(/生产环境允许运营商网络中基站可达的私网地址/)).toBeInTheDocument();
+    expect(screen.queryByText(/生产环境不能使用 localhost、回环、链路本地或 RFC1918 私网地址/)).not.toBeInTheDocument();
+  });
+
   it('保留已保存的 HTTPS、自定义端口和路径，不回写固定地址', async () => {
     render(
       <TransferSettingsHarness
