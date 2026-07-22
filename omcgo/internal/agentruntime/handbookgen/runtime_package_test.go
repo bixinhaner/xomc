@@ -78,6 +78,13 @@ func TestBuildRuntimePackageUsesActualRoutesAndPreservesTemplateDetails(t *testi
 	require.Equal(t, templateDocument.Description, preserved.Description)
 	require.Equal(t, templateDocument.QueryParams, preserved.QueryParams)
 	require.Equal(t, templateDocument.Sources, preserved.Sources)
+	var indexEntries []OperationSummary
+	for _, line := range strings.Split(strings.TrimSpace(string(files[handbookPackageRoot+"/api-index.jsonl"])), "\n") {
+		var entry OperationSummary
+		require.NoError(t, json.Unmarshal([]byte(line), &entry))
+		indexEntries = append(indexEntries, entry)
+	}
+	require.Contains(t, indexEntries[0].SearchTerms, "status")
 
 	var generated OperationDocument
 	require.NoError(t, json.Unmarshal(files[handbookPackageRoot+"/api-docs/get.optional.status.json"], &generated))
@@ -102,4 +109,46 @@ func TestBuildRuntimePackageRejectsUnsafeOperationID(t *testing.T) {
 		Routes:         []Route{{OperationID: "../escape", Method: "GET", Path: "/api/v1/test"}},
 	})
 	require.ErrorContains(t, err, "invalid operationId")
+}
+
+func TestBuildRuntimePackageUsesGeneratedContractForNewRoute(t *testing.T) {
+	templateRoot := t.TempDir()
+	references := filepath.Join(templateRoot, handbookPackageRoot)
+	require.NoError(t, os.MkdirAll(filepath.Join(references, contractsDirectory), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(references, "common-operations.md"), []byte("# Common\n"), 0o644))
+	handlerName := "github.com/omcgo/omcgo/internal/devices.(*Handler).Failures-fm"
+	contractsRaw, err := marshalHandbookJSON(contractAssets{
+		SchemaVersion: SchemaVersion,
+		Handlers: map[string]handlerContract{
+			handlerName: {
+				Found:       true,
+				Summary:     "查询设备失败明细",
+				Description: "返回设备执行失败原因。",
+				QueryParams: []Parameter{{Name: "status", In: "query", Type: "string"}},
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(references, contractsDirectory, contractsFile), contractsRaw, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(references, contractsDirectory, contractsOpenAPI), []byte("openapi: 3.0.3\npaths: {}\n"), 0o644))
+	templateArchive, err := BuildPackage(templateRoot)
+	require.NoError(t, err)
+
+	runtimeArchive, err := BuildRuntimePackage(templateArchive, RouteExport{
+		SchemaVersion: SchemaVersion, CatalogVersion: "runtime", TotalRoutes: 1,
+		Routes: []Route{{
+			OperationID: "get.devices.failures", Method: "GET", Path: "/api/v1/devices/failures",
+			Handler: handlerName, Category: "devices", Title: "devices - 列表",
+		}},
+	})
+	require.NoError(t, err)
+	files, err := readPackageFiles(runtimeArchive)
+	require.NoError(t, err)
+	var document OperationDocument
+	require.NoError(t, json.Unmarshal(files[handbookPackageRoot+"/api-docs/get.devices.failures.json"], &document))
+	require.Equal(t, "查询设备失败明细", document.Summary)
+	require.Equal(t, "返回设备执行失败原因。", document.Description)
+	require.Len(t, document.QueryParams, 1)
+	require.Equal(t, "status", document.QueryParams[0].Name)
+	require.Contains(t, document.Sources, "go-handler")
 }

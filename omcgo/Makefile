@@ -1,7 +1,7 @@
 .PHONY: build build-acs build-app build-worker build-migrate build-omcctl build-rpctool \
        test test-race test-coverage test-integration test-integration-up test-integration-down test-e2e \
        test-cover cover-report cover-summary cover-check \
-       lint vet generate generate-mocks sqlc-generate \
+       lint vet generate generate-mocks agent-handbook-generate agent-handbook-check sqlc-generate \
        migrate-up migrate-down migrate-reset migrate-schema-up migrate-schema-down migrate-seed-up migrate-seed-down \
        migrate-tsdb-up migrate-tsdb-down \
        docker-build docker-up docker-down clean
@@ -86,6 +86,12 @@ generate: generate-mocks
 
 generate-mocks:  ## Generate mock implementations for key interfaces
 	go generate ./internal/core/storage/... ./internal/admin/... ./internal/device/... ./internal/topology/...
+
+agent-handbook-generate:  ## Refresh source-derived Agent handbook contracts and embedded package
+	go run ./cmd/agent-handbook -contracts-only
+
+agent-handbook-check:  ## Fail when Agent handbook contracts or embedded package are stale
+	go run ./cmd/agent-handbook -check-contracts
 
 sqlc-generate:  ## Generate type-safe Go code from SQL queries
 	sqlc generate

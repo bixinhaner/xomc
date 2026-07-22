@@ -14,11 +14,12 @@ import (
 )
 
 type handlerContract struct {
-	Found       bool
-	Description string
-	QueryParams []Parameter
-	FormParams  []Parameter
-	RequestBody map[string]any
+	Found       bool           `json:"found"`
+	Summary     string         `json:"summary,omitempty"`
+	Description string         `json:"description,omitempty"`
+	QueryParams []Parameter    `json:"queryParams,omitempty"`
+	FormParams  []Parameter    `json:"formParams,omitempty"`
+	RequestBody map[string]any `json:"requestBody,omitempty"`
 }
 
 type goSourceAnalyzer struct {
@@ -57,6 +58,83 @@ func (analyzer *goSourceAnalyzer) analyze(handler string) handlerContract {
 	return analyzeGoFunction(index, receiver, function, map[string]bool{})
 }
 
+func (analyzer *goSourceAnalyzer) allHandlerContracts() map[string]handlerContract {
+	if analyzer == nil || analyzer.root == "" {
+		return map[string]handlerContract{}
+	}
+	packagePaths := map[string]struct{}{}
+	_ = filepath.WalkDir(analyzer.root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if entry.IsDir() {
+			if path != analyzer.root && (strings.HasPrefix(entry.Name(), ".") || entry.Name() == "vendor" || entry.Name() == "node_modules") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		relative, relativeErr := filepath.Rel(analyzer.root, filepath.Dir(path))
+		if relativeErr == nil && relative != "." {
+			packagePaths[filepath.ToSlash(relative)] = struct{}{}
+		}
+		return nil
+	})
+
+	orderedPackages := make([]string, 0, len(packagePaths))
+	for packagePath := range packagePaths {
+		orderedPackages = append(orderedPackages, packagePath)
+	}
+	sort.Strings(orderedPackages)
+	contracts := make(map[string]handlerContract)
+	for _, packagePath := range orderedPackages {
+		index := analyzer.packageIndex(packagePath)
+		if index == nil {
+			continue
+		}
+		functionKeys := make([]string, 0, len(index.functions))
+		for key := range index.functions {
+			functionKeys = append(functionKeys, key)
+		}
+		sort.Strings(functionKeys)
+		for _, key := range functionKeys {
+			receiver, method, found := strings.Cut(key, ".")
+			function := index.functions[key]
+			if !found || receiver == "" || method == "" || !acceptsGinContext(function) {
+				continue
+			}
+			handler := "github.com/omcgo/omcgo/" + packagePath + ".(*" + receiver + ")." + method + "-fm"
+			contract := analyzeGoFunction(index, receiver, function, map[string]bool{})
+			if contract.Found {
+				contracts[handler] = contract
+			}
+		}
+	}
+	return contracts
+}
+
+func acceptsGinContext(function *ast.FuncDecl) bool {
+	if function == nil || function.Type == nil || function.Type.Params == nil {
+		return false
+	}
+	for _, field := range function.Type.Params.List {
+		expression := field.Type
+		if pointer, ok := expression.(*ast.StarExpr); ok {
+			expression = pointer.X
+		}
+		selector, ok := expression.(*ast.SelectorExpr)
+		if !ok || selector.Sel == nil || selector.Sel.Name != "Context" {
+			continue
+		}
+		if identifier, ok := selector.X.(*ast.Ident); ok && identifier.Name == "gin" {
+			return true
+		}
+	}
+	return false
+}
+
 func analyzeGoFunction(index *goPackageIndex, receiver string, function *ast.FuncDecl, visiting map[string]bool) handlerContract {
 	key := receiver + "." + function.Name.Name
 	if visiting[key] {
@@ -67,7 +145,12 @@ func analyzeGoFunction(index *goPackageIndex, receiver string, function *ast.Fun
 
 	contract := handlerContract{Found: true}
 	if function.Doc != nil {
-		contract.Description = strings.TrimSpace(function.Doc.Text())
+		raw := strings.TrimSpace(function.Doc.Text())
+		contract.Summary = goDocDirective(raw, "@Summary")
+		contract.Description = goDocDirective(raw, "@Description")
+		if contract.Summary == "" && contract.Description == "" {
+			contract.Description = raw
+		}
 	}
 
 	variables := variableTypes(function.Body)
@@ -134,6 +217,17 @@ func mergeHandlerContracts(primary, secondary handlerContract) handlerContract {
 		primary.RequestBody = secondary.RequestBody
 	}
 	return primary
+}
+
+func goDocDirective(comment, name string) string {
+	for _, line := range strings.Split(comment, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, name) {
+			continue
+		}
+		return strings.TrimSpace(strings.TrimPrefix(line, name))
+	}
+	return ""
 }
 
 func (analyzer *goSourceAnalyzer) packageIndex(packagePath string) *goPackageIndex {

@@ -82,18 +82,10 @@ func Generate(options Options) (Manifest, error) {
 			category = "other"
 		}
 		categoryTitles[category] = chooseCategoryTitle(categoryTitles[category], doc.Title, category)
-		summary := OperationSummary{
-			OperationID: route.OperationID,
-			Method:      strings.ToUpper(route.Method),
-			Path:        route.Path,
-			Title:       doc.Title,
-			Summary:     doc.Summary,
-			Description: doc.Description,
-			Intents:     doc.Intents,
-			Risk:        doc.Risk,
-			Document:    "api-docs/" + filename,
-		}
-		categoryDocuments[category] = append(categoryDocuments[category], summary)
+		summary := operationSummary(doc, "api-docs/"+filename)
+		categorySummary := summary
+		categorySummary.SearchTerms = nil
+		categoryDocuments[category] = append(categoryDocuments[category], categorySummary)
 		allSummaries = append(allSummaries, summary)
 	}
 	sort.Slice(allSummaries, func(i, j int) bool { return allSummaries[i].OperationID < allSummaries[j].OperationID })
@@ -144,8 +136,11 @@ func Generate(options Options) (Manifest, error) {
 
 func buildOperationDocument(route Route, openAPI openAPIOperation, handler handlerContract) OperationDocument {
 	method := strings.ToUpper(route.Method)
-	summary := firstNonEmpty(openAPI.Summary, route.Summary, route.Title, method+" "+route.Path)
+	summary := firstNonEmpty(openAPI.Summary, handler.Summary, route.Summary, route.Title, method+" "+route.Path)
 	description := firstNonEmpty(openAPI.Description, route.Description, summary)
+	if openAPI.Description == "" && handler.Summary != "" && handler.Description != "" {
+		description = handler.Description
+	}
 	sources := []string{"runtime-route"}
 	if openAPI.Found {
 		sources = append(sources, "openapi")
@@ -187,7 +182,7 @@ func buildOperationDocument(route Route, openAPI openAPIOperation, handler handl
 		Path:                 route.Path,
 		Handler:              route.Handler,
 		Category:             firstNonEmpty(route.Category, "other"),
-		Title:                firstNonEmpty(openAPI.Title, route.Title, summary),
+		Title:                firstNonEmpty(openAPI.Title, handler.Summary, route.Title, summary),
 		Summary:              summary,
 		Description:          description,
 		Intents:              operationIntents(route, summary, description),
@@ -208,6 +203,94 @@ func buildOperationDocument(route Route, openAPI openAPIOperation, handler handl
 		},
 		EmptyResult: emptyResultGuidance(method),
 		Sources:     sources,
+	}
+}
+
+func operationSummary(document OperationDocument, path string) OperationSummary {
+	return OperationSummary{
+		OperationID: document.OperationID,
+		Method:      document.Method,
+		Path:        document.Path,
+		Title:       document.Title,
+		Summary:     document.Summary,
+		Description: document.Description,
+		Intents:     document.Intents,
+		SearchTerms: operationSearchTerms(document),
+		Risk:        document.Risk,
+		Document:    path,
+	}
+}
+
+func operationSearchTerms(document OperationDocument) []string {
+	values := append([]string{document.Category}, document.Tags...)
+	for _, parameters := range [][]Parameter{document.PathParams, document.QueryParams, document.FormParams} {
+		for _, parameter := range parameters {
+			values = append(values, parameter.Name, parameter.Description)
+			appendSearchLiterals(parameter.Enum, &values)
+			collectSchemaSearchTerms(parameter.Schema, &values, true)
+		}
+	}
+	collectSchemaSearchTerms(document.RequestBody, &values, true)
+	collectSchemaSearchTerms(document.Responses, &values, false)
+	collectSchemaSearchTerms(document.ReferencedSchemas, &values, true)
+	return uniqueStrings(values)
+}
+
+func collectSchemaSearchTerms(value any, output *[]string, includeDescriptions bool) {
+	switch typed := value.(type) {
+	case map[string]any:
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			child := typed[key]
+			switch key {
+			case "description", "summary", "title", "name":
+				if text, ok := child.(string); ok && includeDescriptions {
+					*output = append(*output, text)
+				}
+			case "enum":
+				appendSearchLiterals(child, output)
+			case "properties":
+				if properties, ok := child.(map[string]any); ok {
+					propertyNames := make([]string, 0, len(properties))
+					for property := range properties {
+						propertyNames = append(propertyNames, property)
+					}
+					sort.Strings(propertyNames)
+					*output = append(*output, propertyNames...)
+				}
+			case "$ref":
+				if reference, ok := child.(string); ok {
+					parts := strings.Split(reference, "/")
+					*output = append(*output, parts[len(parts)-1])
+				}
+			}
+			collectSchemaSearchTerms(child, output, includeDescriptions)
+		}
+	case []any:
+		for _, item := range typed {
+			collectSchemaSearchTerms(item, output, includeDescriptions)
+		}
+	}
+}
+
+func appendSearchLiterals(value any, output *[]string) {
+	switch typed := value.(type) {
+	case []any:
+		for _, item := range typed {
+			appendSearchLiterals(item, output)
+		}
+	case []string:
+		*output = append(*output, typed...)
+	case string:
+		if len(typed) <= 160 {
+			*output = append(*output, typed)
+		}
+	case bool, int, int32, int64, float32, float64:
+		*output = append(*output, fmt.Sprint(typed))
 	}
 }
 

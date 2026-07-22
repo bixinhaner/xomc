@@ -40,6 +40,14 @@ func loadOpenAPI(path string) (openAPIDocument, error) {
 	if err != nil {
 		return document, fmt.Errorf("read OpenAPI document: %w", err)
 	}
+	return loadOpenAPIRaw(raw)
+}
+
+func loadOpenAPIRaw(raw []byte) (openAPIDocument, error) {
+	document := openAPIDocument{operations: map[string]map[string]any{}}
+	if len(raw) == 0 {
+		return document, nil
+	}
 	if err := yaml.Unmarshal(raw, &document.root); err != nil {
 		return document, fmt.Errorf("decode OpenAPI document: %w", err)
 	}

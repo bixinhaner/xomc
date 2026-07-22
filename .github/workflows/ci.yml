@@ -131,6 +131,28 @@ jobs:
         working-directory: omcgo
         run: go build ./...
 
+  agent-handbook:
+    name: Backend · Agent handbook contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go 1.25.11
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.11'
+          cache-dependency-path: omcgo/go.sum
+
+      - name: Verify generated contracts and embedded package
+        working-directory: omcgo
+        run: make agent-handbook-check
+
+      - name: Test handbook generation and runtime assembly
+        working-directory: omcgo
+        run: go test ./internal/agentruntime/handbookgen ./internal/agentruntime
+
   frontend-typecheck:
     name: Frontend · typecheck
     runs-on: ubuntu-latest

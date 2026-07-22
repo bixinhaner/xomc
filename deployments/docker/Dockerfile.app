@@ -15,6 +15,13 @@ WORKDIR /build
 
 COPY omcgo/ .
 
+# Refresh API contracts from the exact source and OpenAPI document used for
+# this image. The app combines these contracts with its actual Gin routes at
+# startup, so release packages cannot ship a stale Agent handbook.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go run ./cmd/agent-handbook -contracts-only
+
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcgo-app ./cmd/app && \
