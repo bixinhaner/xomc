@@ -42,7 +42,11 @@ import {
 import KPICard from '@/components/KPICard';
 import BarChart from '@/components/Charts/BarChart';
 import EmptyState from '@/components/common/EmptyState';
-import { useDashboardSummary, useDeviceStatusByType } from '@core/hooks/api/useDashboard';
+import {
+  useDashboardDeviceStats,
+  useDashboardSummary,
+  useDeviceStatusByType,
+} from '@core/hooks/api/useDashboard';
 import { useDashboardRealtime } from '@core/hooks/api/useDashboardRealtime';
 import { DashboardKPIModules } from './DashboardKPIModules';
 import type { TechnologyType } from './kpi-config';
@@ -126,6 +130,10 @@ export default function DashboardPage() {
     isPending,
     refetch: refetchDashboardSummary,
   } = useDashboardSummary(dashboardApiScope, currentUserId);
+  const { data: dashboardDeviceStats } = useDashboardDeviceStats(
+    dashboardApiScope,
+    currentUserId,
+  );
   // 每次渲染读取一个小型快照，确保成功 effect 写入后，后续任意 Query 状态变化
   // 都会拿到最近值；避免额外 state/effect 级联渲染，也不会跨用户复用。
   const dashboardSnapshot = currentUserId
@@ -228,11 +236,12 @@ export default function DashboardPage() {
     dashboardSnapshot,
     isPending
   );
-  const totalDevices = cardDisplay.totalDevices;
-  const onlineDevices = cardDisplay.onlineDevices;
+  const totalDevices = dashboardDeviceStats?.total ?? cardDisplay.totalDevices;
+  const onlineDevices = dashboardDeviceStats?.online_count ?? cardDisplay.onlineDevices;
   const activeAlarms = cardDisplay.activeAlarms;
   const currentActiveUE = cardDisplay.activeUE;
-  const cardsLoading = cardDisplay.loading;
+  const deviceCardsLoading = !dashboardDeviceStats && cardDisplay.loading;
+  const summaryCardsLoading = cardDisplay.loading;
   const runningTasks = dashboardSummary?.taskSummary?.running ?? 0;
 
   // KPI trend data — 用于卡片显示趋势
@@ -375,7 +384,7 @@ export default function DashboardPage() {
             icon={<AppstoreOutlined />}
             iconBgColor="#e6f4ff"
             iconColor={token.colorPrimary}
-            loading={cardsLoading}
+            loading={deviceCardsLoading}
             hasComparison={totalDevicesDelta?.hasComparison === true}
             unavailableText={t('dashboard.notComparable')}
             trend={totalDevicesDelta?.trend ?? 'stable'}
@@ -394,7 +403,7 @@ export default function DashboardPage() {
             icon={<WifiOutlined />}
             iconBgColor="#f6ffed"
             iconColor="#52C41A"
-            loading={cardsLoading}
+            loading={deviceCardsLoading}
             trend="up"
             delta={totalDevices > 0
               ? `${Math.round((onlineDevices / totalDevices) * 100)}%`
@@ -413,7 +422,7 @@ export default function DashboardPage() {
             icon={<AlertOutlined />}
             iconBgColor="#fff2f0"
             iconColor="#F5222D"
-            loading={cardsLoading}
+            loading={summaryCardsLoading}
             hasComparison={activeAlarmsDelta?.hasComparison === true}
             unavailableText={t('dashboard.notComparable')}
             trend={activeAlarmsDelta?.trend ?? 'stable'}
@@ -432,7 +441,7 @@ export default function DashboardPage() {
             icon={<TeamOutlined />}
             iconBgColor="#f6ffed"
             iconColor="#10B981"
-            loading={cardsLoading}
+            loading={summaryCardsLoading}
             hasComparison={ueTrendDelta?.hasComparison === true}
             unavailableText={t('dashboard.notComparable')}
             trend={ueTrendDelta?.trend ?? 'stable'}
