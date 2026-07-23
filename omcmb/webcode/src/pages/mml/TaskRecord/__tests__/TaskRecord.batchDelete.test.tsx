@@ -45,6 +45,13 @@ vi.mock('@core/hooks/api/useMML', () => ({
       isFetching: false,
     };
   },
+  useMMLScriptRuns: () => ({
+    data: {
+      total: 0,
+      items: [],
+    },
+    isLoading: false,
+  }),
   getMMLTaskResultsPage: mocks.getTaskResultsPage,
   useStartMMLTasks: () => ({ mutate: mocks.startTasks, isPending: false }),
   useCancelMMLTasks: () => ({ mutate: mocks.cancelTasks, isPending: false }),
@@ -63,6 +70,7 @@ vi.mock('@/components/FilterBar', () => ({
     <div data-testid="filter-bar">
       <button onClick={() => onSearch({ taskOrigin: 'console' })} type="button">search-console</button>
       <button onClick={() => onSearch({ taskOrigin: 'script' })} type="button">search-script</button>
+      <button onClick={() => onSearch({ scriptName: ' 巡检脚本 ' })} type="button">search-script-name</button>
       <button onClick={onReset} type="button">reset</button>
     </div>
   ),
@@ -235,6 +243,28 @@ describe('TaskRecord batch delete and console task display', () => {
     expect(screen.getByText('DEVICE_INFO')).toBeInTheDocument();
   });
 
+  it('shows current script name for script task records and double dash for console records', () => {
+    mocks.taskItems = [
+      buildTask({
+        id: 'task-script-name-1',
+        taskName: '用户改过的任务名',
+        taskOrigin: 'script',
+        scriptName: '当前脚本名称',
+      }),
+      buildTask({
+        id: 'task-console-name-1',
+        taskName: '控制台任务',
+        taskOrigin: 'console',
+      }),
+    ];
+
+    const { container } = renderPage();
+
+    const scriptNameCells = Array.from(container.querySelectorAll('td[data-column-key="scriptName"]'))
+      .map((cell) => cell.textContent?.trim());
+    expect(scriptNameCells).toEqual(['当前脚本名称', '--']);
+  });
+
   it('shows script task execution policy in the task detail', () => {
     mocks.taskItems = [
       buildTask({
@@ -381,6 +411,38 @@ describe('TaskRecord batch delete and console task display', () => {
 
     expect(container.querySelector('td[data-column-key="result"]')?.textContent).toContain('部分成功');
     expect(container.querySelector('td[data-column-key="progress"]')?.textContent).toBe('5/5');
+  });
+
+  it('shows latest periodic run progress without the latest-run label in task list', () => {
+    mocks.taskItems = [
+      buildTask({
+        id: 'task-periodic-parent-1',
+        taskName: '周期主任务',
+        taskOrigin: 'script',
+        executeType: 'periodic',
+        successCount: 0,
+        failedCount: 0,
+        latestRun: {
+          id: 'task-periodic-child-1',
+          executeType: 'periodic',
+          executeMode: 'device_bound',
+          status: 'running',
+          totalDevices: 3,
+          successCount: 2,
+          failedCount: 0,
+          commandCount: 3,
+          planItemCount: 3,
+          createdAt: '2026-07-23T01:00:00Z',
+          updatedAt: '2026-07-23T01:01:00Z',
+        },
+      }),
+    ];
+
+    const { container } = renderPage();
+
+    const progressText = container.querySelector('td[data-column-key="progress"]')?.textContent;
+    expect(progressText).toBe('2/3');
+    expect(screen.queryByText('最近一次')).not.toBeInTheDocument();
   });
 
   it('does not render failed device task results as pending', () => {
@@ -662,6 +724,16 @@ describe('TaskRecord batch delete and console task display', () => {
 
     expect(mocks.useMMLTasks).toHaveBeenLastCalledWith(expect.objectContaining({
       taskOrigin: 'console',
+    }));
+  });
+
+  it('passes script name through to the task list query', () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'search-script-name' }));
+
+    expect(mocks.useMMLTasks).toHaveBeenLastCalledWith(expect.objectContaining({
+      scriptName: '巡检脚本',
     }));
   });
 });

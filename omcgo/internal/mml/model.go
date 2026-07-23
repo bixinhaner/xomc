@@ -191,6 +191,7 @@ type MMLTask struct {
 	TaskName                string                   `json:"task_name"`
 	RequestID               string                   `json:"request_id,omitempty"`
 	ScriptID                *uuid.UUID               `json:"script_id,omitempty"`
+	ScriptName              string                   `json:"script_name,omitempty"`
 	TaskOrigin              TaskOrigin               `json:"task_origin"`
 	ScriptContentSHA256     string                   `json:"script_content_sha256"`
 	ScriptValidationVersion string                   `json:"script_validation_version"`
@@ -308,6 +309,7 @@ type TaskFilter struct {
 	ExecuteType *ExecuteType
 	Result      *TaskResult
 	TaskName    *string // case-insensitive substring match on task_name
+	ScriptName  *string // case-insensitive substring match on current mml_scripts.script_name
 	TaskOrigin  *TaskOrigin
 	model.ListRequest
 }

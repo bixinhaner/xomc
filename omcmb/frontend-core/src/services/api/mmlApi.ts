@@ -162,6 +162,7 @@ interface BackendMMLTask {
   id: string;
   task_name: string;
   script_id: string;
+  script_name?: string | null;
   task_origin?: string;
   device_sns: string[] | null;
   commands: Array<Record<string, unknown>> | null;
@@ -783,6 +784,7 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
     id: bt.id,
     taskName: bt.task_name,
     scriptId: bt.script_id || undefined,
+    scriptName: bt.script_name || undefined,
     taskOrigin: (bt.task_origin || (bt.script_id ? 'script' : 'console')) as MMLTask['taskOrigin'],
     deviceSns: bt.device_sns || [],
     commands: (bt.commands || []).map((c) => {
@@ -1219,7 +1221,7 @@ export const mmlApi = {
   // --- Tasks ---
 
   async getTasks(
-    p: PageRequest & { status?: string; executeType?: string; result?: string; taskName?: string; taskOrigin?: string }
+    p: PageRequest & { status?: string; executeType?: string; result?: string; taskName?: string; scriptName?: string; taskOrigin?: string }
   ): Promise<PageResponse<MMLTask>> {
     const query: Record<string, unknown> = {
       page: p.page,
@@ -1229,6 +1231,7 @@ export const mmlApi = {
     if (p.executeType) query.execute_type = p.executeType;
     if (p.result) query.result = p.result;
     if (p.taskName) query.task_name = p.taskName;
+    if (p.scriptName) query.script_name = p.scriptName;
     if (p.taskOrigin) query.task_origin = p.taskOrigin;
 
     const { data } = await http.get<BackendListResponse<BackendMMLTask>>(

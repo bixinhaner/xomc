@@ -91,19 +91,20 @@ var taskColumns = []string{
 }
 
 var taskListColumns = []string{
-	"id", "task_name", "request_id", "script_id", "script_content_sha256", "script_validation_version", "device_sns",
-	"COALESCE(jsonb_array_length(commands), 0) AS command_count",
-	"execute_mode", "status", "creator", "executor",
-	"COALESCE(jsonb_array_length(plan_items), 0) AS plan_item_count",
-	"created_at", "updated_at",
-	"execute_type", "scheduled_at",
-	"period_start", "period_end", "period_time",
-	"offline_retry", "offline_retry_wait",
-	"failed_retry", "failed_retry_count", "failed_retry_interval",
-	"started_at", "finished_at",
-	"total_devices", "success_count", "failed_count", "result",
-	"next_trigger_at", "parent_task_id",
-	"product_resolved", "matched_product_id", "matched_product_class", "path_translation_source",
+	"mml_tasks.id", "mml_tasks.task_name", "mml_tasks.request_id", "mml_tasks.script_id", "mml_scripts.script_name",
+	"mml_tasks.script_content_sha256", "mml_tasks.script_validation_version", "mml_tasks.device_sns",
+	"COALESCE(jsonb_array_length(mml_tasks.commands), 0) AS command_count",
+	"mml_tasks.execute_mode", "mml_tasks.status", "mml_tasks.creator", "mml_tasks.executor",
+	"COALESCE(jsonb_array_length(mml_tasks.plan_items), 0) AS plan_item_count",
+	"mml_tasks.created_at", "mml_tasks.updated_at",
+	"mml_tasks.execute_type", "mml_tasks.scheduled_at",
+	"mml_tasks.period_start", "mml_tasks.period_end", "mml_tasks.period_time",
+	"mml_tasks.offline_retry", "mml_tasks.offline_retry_wait",
+	"mml_tasks.failed_retry", "mml_tasks.failed_retry_count", "mml_tasks.failed_retry_interval",
+	"mml_tasks.started_at", "mml_tasks.finished_at",
+	"mml_tasks.total_devices", "mml_tasks.success_count", "mml_tasks.failed_count", "mml_tasks.result",
+	"mml_tasks.next_trigger_at", "mml_tasks.parent_task_id",
+	"mml_tasks.product_resolved", "mml_tasks.matched_product_id", "mml_tasks.matched_product_class", "mml_tasks.path_translation_source",
 }
 
 func taskListColumnsWithLatestRun() []string {
@@ -1158,34 +1159,42 @@ func (r *PgTaskRepository) Update(ctx context.Context, task *MMLTask) error {
 func (r *PgTaskRepository) List(ctx context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error) {
 	base := storage.Psql.Select(taskListColumnsWithLatestRun()...).
 		From("mml_tasks").
+		LeftJoin("mml_scripts ON mml_tasks.script_id = mml_scripts.id").
 		LeftJoin(latestPeriodicRunJoin)
-	countBase := storage.Psql.Select("COUNT(*)").From("mml_tasks")
+	countBase := storage.Psql.Select("COUNT(*)").
+		From("mml_tasks").
+		LeftJoin("mml_scripts ON mml_tasks.script_id = mml_scripts.id")
 
 	if filter.Status != nil {
-		base = base.Where(sq.Eq{"status": *filter.Status})
-		countBase = countBase.Where(sq.Eq{"status": *filter.Status})
+		base = base.Where(sq.Eq{"mml_tasks.status": *filter.Status})
+		countBase = countBase.Where(sq.Eq{"mml_tasks.status": *filter.Status})
 	}
 	if filter.ExecuteType != nil {
-		base = base.Where(sq.Eq{"execute_type": *filter.ExecuteType})
-		countBase = countBase.Where(sq.Eq{"execute_type": *filter.ExecuteType})
+		base = base.Where(sq.Eq{"mml_tasks.execute_type": *filter.ExecuteType})
+		countBase = countBase.Where(sq.Eq{"mml_tasks.execute_type": *filter.ExecuteType})
 	}
 	if filter.Result != nil {
-		base = base.Where(sq.Eq{"result": *filter.Result})
-		countBase = countBase.Where(sq.Eq{"result": *filter.Result})
+		base = base.Where(sq.Eq{"mml_tasks.result": *filter.Result})
+		countBase = countBase.Where(sq.Eq{"mml_tasks.result": *filter.Result})
 	}
 	if filter.TaskName != nil && *filter.TaskName != "" {
 		like := "%" + *filter.TaskName + "%"
-		base = base.Where(sq.ILike{"task_name": like})
-		countBase = countBase.Where(sq.ILike{"task_name": like})
+		base = base.Where(sq.ILike{"mml_tasks.task_name": like})
+		countBase = countBase.Where(sq.ILike{"mml_tasks.task_name": like})
+	}
+	if filter.ScriptName != nil && *filter.ScriptName != "" {
+		like := "%" + *filter.ScriptName + "%"
+		base = base.Where(sq.ILike{"mml_scripts.script_name": like})
+		countBase = countBase.Where(sq.ILike{"mml_scripts.script_name": like})
 	}
 	if filter.TaskOrigin != nil {
 		switch *filter.TaskOrigin {
 		case TaskOriginConsole:
-			base = base.Where("script_id IS NULL")
-			countBase = countBase.Where("script_id IS NULL")
+			base = base.Where("mml_tasks.script_id IS NULL")
+			countBase = countBase.Where("mml_tasks.script_id IS NULL")
 		case TaskOriginScript:
-			base = base.Where("script_id IS NOT NULL")
-			countBase = countBase.Where("script_id IS NOT NULL")
+			base = base.Where("mml_tasks.script_id IS NOT NULL")
+			countBase = countBase.Where("mml_tasks.script_id IS NOT NULL")
 		}
 	}
 
@@ -1209,7 +1218,7 @@ func (r *PgTaskRepository) List(ctx context.Context, filter TaskFilter) (*model.
 		sortDir = "ASC"
 	}
 	base = base.
-		OrderBy(sortBy + " " + sortDir).
+		OrderBy("mml_tasks." + sortBy + " " + sortDir).
 		Limit(uint64(filter.Limit())).
 		Offset(uint64(filter.Offset()))
 
@@ -1393,11 +1402,11 @@ func scanTaskSummaryRow(rows pgx.Rows) (*MMLTask, error) {
 	var t MMLTask
 	var deviceSNsJSON []byte
 	var latestRunJSON []byte
-	var matchedProductClass, pathTranslationSource *string
+	var scriptName, matchedProductClass, pathTranslationSource *string
 	var requestID *string
 
 	err := rows.Scan(
-		&t.ID, &t.TaskName, &requestID, &t.ScriptID, &t.ScriptContentSHA256, &t.ScriptValidationVersion, &deviceSNsJSON,
+		&t.ID, &t.TaskName, &requestID, &t.ScriptID, &scriptName, &t.ScriptContentSHA256, &t.ScriptValidationVersion, &deviceSNsJSON,
 		&t.CommandCount,
 		&t.ExecuteMode, &t.Status, &t.Creator, &t.Executor,
 		&t.PlanItemCount,
@@ -1417,6 +1426,9 @@ func scanTaskSummaryRow(rows pgx.Rows) (*MMLTask, error) {
 	}
 	if requestID != nil {
 		t.RequestID = *requestID
+	}
+	if scriptName != nil {
+		t.ScriptName = *scriptName
 	}
 	if matchedProductClass != nil {
 		t.MatchedProductClass = *matchedProductClass
@@ -1675,11 +1687,12 @@ func (r *PgTaskRepository) Delete(ctx context.Context, id uuid.UUID) error {
 func (r *PgTaskRepository) ListByScriptID(ctx context.Context, scriptID uuid.UUID, req model.ListRequest) (*model.ListResponse[MMLTask], error) {
 	base := storage.Psql.Select(taskListColumnsWithLatestRun()...).
 		From("mml_tasks").
+		LeftJoin("mml_scripts ON mml_tasks.script_id = mml_scripts.id").
 		LeftJoin(latestPeriodicRunJoin).
-		Where(sq.Eq{"script_id": scriptID})
+		Where(sq.Eq{"mml_tasks.script_id": scriptID})
 	countBase := storage.Psql.Select("COUNT(*)").
 		From("mml_tasks").
-		Where(sq.Eq{"script_id": scriptID})
+		Where(sq.Eq{"mml_tasks.script_id": scriptID})
 
 	countSQL, countArgs, err := countBase.ToSql()
 	if err != nil {
@@ -1691,7 +1704,7 @@ func (r *PgTaskRepository) ListByScriptID(ctx context.Context, scriptID uuid.UUI
 	}
 
 	base = base.
-		OrderBy("created_at DESC").
+		OrderBy("mml_tasks.created_at DESC").
 		Limit(uint64(req.Limit())).
 		Offset(uint64(req.Offset()))
 
