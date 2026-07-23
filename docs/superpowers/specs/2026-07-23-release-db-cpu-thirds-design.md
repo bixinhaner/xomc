@@ -22,5 +22,5 @@
 
 - 32 核、32 GiB 探测覆盖运行规划器后，主库/TimescaleDB/worker 输出 10/16/8。
 - 64 核 large 档输出 21/32/16，验证三种比例规则而非固定字面量。
-- release Compose 中三个变量的兜底默认值为 10/10/3。
+- release Compose 中三个变量的兜底默认值为 10/16/8。
 - 现有 release shell 测试通过，Compose 配置能够成功渲染。
