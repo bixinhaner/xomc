@@ -18125,6 +18125,14 @@ SET target_paths = m.paths,
 FROM merged m
 WHERE c.id = m.id;
 
+-- Hide superseded zero-field NRCell object operation shells before inserting
+-- object-specific replacements with the same active command names.
+UPDATE public.mml_commands
+SET deprecated_at = now(),
+    updated_at = now()
+WHERE command_code IN ('ADD SI_SUB_05', 'RMV SI_SUB_05')
+  AND deprecated_at IS NULL;
+
 WITH si_group AS (
     SELECT id
     FROM public.mml_command_groups
