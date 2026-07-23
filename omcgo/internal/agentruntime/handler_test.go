@@ -3,13 +3,16 @@ package agentruntime
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -17,6 +20,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/agentconfig"
+	"github.com/omcgo/omcgo/internal/agentruntime/handbookgen"
 )
 
 type fakeConfigProvider struct {
@@ -179,6 +183,102 @@ func TestUploadAttachmentUsesServiceTokenAndActiveConversation(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Equal(t, []byte("hello"), received)
 	require.Contains(t, recorder.Body.String(), `"attachmentId":"a1"`)
+}
+
+func TestChatStreamTransfersToolDownloadAndPostsFileReference(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	secret := strings.Repeat("s", 32)
+	jwtSvc, err := admin.NewJWTService(secret)
+	require.NoError(t, err)
+	userID := uuid.New()
+	fileContent := []byte("site,status\nsite-1,online\n")
+	fileDigest := fmt.Sprintf("%x", sha256.Sum256(fileContent))
+	uploaded := make(chan []byte, 1)
+	results := make(chan ToolResult, 1)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/action-connectors/connector-1/chat/stream":
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte(`data: {"type":"tool_request","runId":"run-1","toolCallId":"tool-1","tool":"rest.request","input":{"method":"GET","path":"/api/v1/exports/export-1"}}` + "\n\n"))
+			_, _ = w.Write([]byte(`data: {"type":"done"}` + "\n\n"))
+		case "/api/integrations/action-connectors/connector-1/conversations/conversation-1/attachments":
+			require.Equal(t, "Bearer service-secret", r.Header.Get("Authorization"))
+			require.Equal(t, userID.String(), r.Header.Get("X-External-User-ID"))
+			require.Equal(t, "status%20report.csv", r.Header.Get("X-File-Name"))
+			body, readErr := io.ReadAll(r.Body)
+			require.NoError(t, readErr)
+			uploaded <- body
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"attachment":{"attachmentId":"0123456789abcdef0123456789abcdef","filename":"status report.csv","mimeType":"text/csv","sizeBytes":%d,"sha256":"%s","createdAt":"2026-07-23T00:00:00Z"}}`, len(fileContent), fileDigest)
+		case "/api/action-connectors/connector-1/tool-results":
+			require.True(t, strings.HasPrefix(r.Header.Get("Authorization"), "Bearer "))
+			var result ToolResult
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&result))
+			results <- result
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	r := gin.New()
+	r.GET("/api/v1/exports/:id", func(c *gin.Context) {
+		c.Header("Content-Disposition", `attachment; filename="status report.csv"`)
+		c.Data(http.StatusOK, "text/csv", fileContent)
+	})
+	group := r.Group("/api/v1")
+	group.Use(func(c *gin.Context) {
+		c.Set(admin.CtxKeyClaims, &admin.Claims{UserID: userID, Username: "operator"})
+		c.Next()
+	})
+	handler := NewHandler(fakeConfigProvider{target: &agentconfig.RuntimeTarget{
+		Enabled:                 true,
+		AgentStudioBaseURL:      upstream.URL,
+		AgentStudioServiceToken: "service-secret",
+		ConnectorID:             "connector-1",
+		Status:                  agentconfig.StatusConnected,
+		Policy: agentconfig.RuntimePolicy{
+			AllowedMethods: []string{http.MethodGet}, ToolTimeoutSeconds: 30, MaxResponseBytes: 262144,
+		},
+	}}, jwtSvc, upstream.Client(), nil, r, r, fakeConversationManager{active: "conversation-1"})
+	handler.RegisterRoutes(group)
+	handler.tools.handbook = &handbookPackage{operations: map[string]handbookgen.OperationDocument{
+		"get.exports.by.id": {
+			OperationID:      "get.exports.by.id",
+			Method:           http.MethodGet,
+			Path:             "/api/v1/exports/:id",
+			ContractCoverage: map[string]string{"request": "path-only"},
+		},
+	}}
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agent/chat/stream", strings.NewReader(`{"message":"download the report"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(recorder, req)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var result ToolResult
+	select {
+	case result = <-results:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for tool result callback")
+	}
+	require.Equal(t, "ok", result.Status, "tool result error: %#v", result.Error)
+	var uploadedContent []byte
+	select {
+	case uploadedContent = <-uploaded:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for tool result file upload")
+	}
+	require.Equal(t, fileContent, uploadedContent)
+	require.Len(t, result.Files, 1)
+	require.Equal(t, "0123456789abcdef0123456789abcdef", result.Files[0].AttachmentID)
+	require.Equal(t, "status report.csv", result.Files[0].Filename)
+	require.Equal(t, fileDigest, result.Files[0].SHA256)
+	require.Equal(t, "file", result.Output.(map[string]any)["type"])
 }
 
 func TestChatStreamRequiresConfiguredRuntime(t *testing.T) {

@@ -368,7 +368,7 @@ func (h *Handler) ChatStream(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, fmt.Errorf("read agent chat body: %w", err))
 		return
 	}
-	rawBody, err = h.applyActiveConversation(c.Request.Context(), rawBody, target.ConnectorID, claims)
+	rawBody, conversationID, err := h.applyActiveConversation(c.Request.Context(), rawBody, target.ConnectorID, claims)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -415,7 +415,7 @@ func (h *Handler) ChatStream(c *gin.Context) {
 	c.Writer.Header().Set("Connection", "keep-alive")
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	c.Status(http.StatusOK)
-	h.streamAgentStudioResponse(c.Request.Context(), c.Writer, resp.Body, claims, delegationToken, target)
+	h.streamAgentStudioResponse(c.Request.Context(), c.Writer, resp.Body, claims, conversationID, delegationToken, target)
 }
 
 func (h *Handler) handleConversation(c *gin.Context, rotate bool) {
@@ -478,24 +478,24 @@ type sseFrame struct {
 	data      string
 }
 
-func (h *Handler) applyActiveConversation(ctx context.Context, raw []byte, connectorID string, claims *admin.Claims) ([]byte, error) {
+func (h *Handler) applyActiveConversation(ctx context.Context, raw []byte, connectorID string, claims *admin.Claims) ([]byte, string, error) {
 	if h.conversations == nil {
-		return raw, nil
+		return raw, "", nil
 	}
 	conversationID, err := h.conversations.Active(ctx, connectorID, claims)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil, fmt.Errorf("%w: decode agent chat body: %v", commonerrors.ErrInvalidInput, err)
+		return nil, "", fmt.Errorf("%w: decode agent chat body: %v", commonerrors.ErrInvalidInput, err)
 	}
 	payload["conversationId"] = conversationID
 	next, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("encode agent chat body: %w", err)
+		return nil, "", fmt.Errorf("encode agent chat body: %w", err)
 	}
-	return next, nil
+	return next, conversationID, nil
 }
 
 func (h *Handler) injectExternalIdentity(ctx context.Context, raw []byte, claims *admin.Claims, target *agentconfig.RuntimeTarget) []byte {
@@ -676,7 +676,7 @@ func toolRequestFromFrame(frame sseFrame) (ToolRequest, bool) {
 	}, true
 }
 
-func (h *Handler) streamAgentStudioResponse(ctx context.Context, w gin.ResponseWriter, body io.Reader, claims *admin.Claims, delegationToken string, target *agentconfig.RuntimeTarget) {
+func (h *Handler) streamAgentStudioResponse(ctx context.Context, w gin.ResponseWriter, body io.Reader, claims *admin.Claims, conversationID, delegationToken string, target *agentconfig.RuntimeTarget) {
 	flusher, _ := w.(http.Flusher)
 	reader := bufio.NewReader(body)
 	var frame strings.Builder
@@ -686,7 +686,7 @@ func (h *Handler) streamAgentStudioResponse(ctx context.Context, w gin.ResponseW
 			if strings.TrimRight(line, "\r\n") == "" {
 				rawFrame := frame.String()
 				frame.Reset()
-				if !h.handleSSEFrame(ctx, w, rawFrame, claims, delegationToken, target, flusher) {
+				if !h.handleSSEFrame(ctx, w, rawFrame, claims, conversationID, delegationToken, target, flusher) {
 					return
 				}
 				if flusher != nil {
@@ -698,7 +698,7 @@ func (h *Handler) streamAgentStudioResponse(ctx context.Context, w gin.ResponseW
 		}
 		if err == io.EOF {
 			if frame.Len() > 0 {
-				_ = h.handleSSEFrame(ctx, w, frame.String(), claims, delegationToken, target, flusher)
+				_ = h.handleSSEFrame(ctx, w, frame.String(), claims, conversationID, delegationToken, target, flusher)
 			}
 			return
 		}
@@ -709,7 +709,7 @@ func (h *Handler) streamAgentStudioResponse(ctx context.Context, w gin.ResponseW
 	}
 }
 
-func (h *Handler) handleSSEFrame(ctx context.Context, w gin.ResponseWriter, raw string, claims *admin.Claims, delegationToken string, target *agentconfig.RuntimeTarget, flusher http.Flusher) bool {
+func (h *Handler) handleSSEFrame(ctx context.Context, w gin.ResponseWriter, raw string, claims *admin.Claims, conversationID, delegationToken string, target *agentconfig.RuntimeTarget, flusher http.Flusher) bool {
 	if strings.TrimSpace(raw) == "" {
 		return true
 	}
@@ -726,10 +726,75 @@ func (h *Handler) handleSSEFrame(ctx context.Context, w gin.ResponseWriter, raw 
 		return true
 	}
 	result := h.tools.Execute(ctx, claims, request, target.Policy)
+	if result.file != nil {
+		file, err := h.uploadToolResultFile(ctx, target, claims, conversationID, result.file)
+		if err != nil {
+			result.Status = "error"
+			result.Output = nil
+			result.Error = &ToolError{
+				Code:      "FILE_TRANSFER_FAILED",
+				Message:   fmt.Sprintf("transfer tool result file: %v", err),
+				Retryable: true,
+			}
+		} else {
+			result.Files = []ToolResultFile{file}
+		}
+		result.file = nil
+	}
 	if err := h.postToolResult(ctx, target, delegationToken, result); err != nil {
 		h.logger.Warn("agent tool result callback failed", zap.Error(err))
 	}
 	return true
+}
+
+func (h *Handler) uploadToolResultFile(
+	ctx context.Context,
+	target *agentconfig.RuntimeTarget,
+	claims *admin.Claims,
+	conversationID string,
+	file *toolFilePayload,
+) (ToolResultFile, error) {
+	if target == nil || claims == nil || file == nil || strings.TrimSpace(conversationID) == "" {
+		return ToolResultFile{}, fmt.Errorf("tool result file context is incomplete")
+	}
+	if strings.TrimSpace(target.AgentStudioServiceToken) == "" {
+		return ToolResultFile{}, fmt.Errorf("Agent Studio service token is not configured")
+	}
+	suffix := "/conversations/" + url.PathEscape(conversationID) + "/attachments"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, actionConnectorServiceURL(target, suffix), bytes.NewReader(file.content))
+	if err != nil {
+		return ToolResultFile{}, fmt.Errorf("build file upload request: %w", err)
+	}
+	req.ContentLength = int64(len(file.content))
+	req.Header.Set("Authorization", "Bearer "+target.AgentStudioServiceToken)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", file.mimeType)
+	req.Header.Set("X-External-User-ID", claims.UserID.String())
+	req.Header.Set("X-File-Name", url.PathEscape(file.filename))
+	resp, err := h.http.Do(req)
+	if err != nil {
+		return ToolResultFile{}, fmt.Errorf("upload file: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return ToolResultFile{}, fmt.Errorf("read file upload response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return ToolResultFile{}, fmt.Errorf("file upload HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var payload struct {
+		Attachment ToolResultFile `json:"attachment"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return ToolResultFile{}, fmt.Errorf("decode file upload response: %w", err)
+	}
+	if payload.Attachment.AttachmentID == "" ||
+		payload.Attachment.SizeBytes != len(file.content) ||
+		!strings.EqualFold(payload.Attachment.SHA256, file.sha256) {
+		return ToolResultFile{}, fmt.Errorf("file upload integrity validation failed")
+	}
+	return payload.Attachment, nil
 }
 
 func (h *Handler) postToolResult(ctx context.Context, target *agentconfig.RuntimeTarget, delegationToken string, result ToolResult) error {
