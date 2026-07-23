@@ -3489,8 +3489,6 @@ CREATE TABLE public.discovered_param_mappings (
     enum_values text,
     enum_labels text,
     mirror_with character varying(256),
-    default_value text,
-    validation_pattern text,
     CONSTRAINT discovered_param_mappings_entry_type_check CHECK (((entry_type)::text = ANY (ARRAY[('object'::character varying)::text, ('parameter'::character varying)::text])))
 );
 
@@ -3521,20 +3519,6 @@ COMMENT ON COLUMN public.discovered_param_mappings.is_storable IS '从默认映�
 --
 
 COMMENT ON COLUMN public.discovered_param_mappings.is_supported IS 'T-0103 从 param_mappings 继承（intersect 时复制），默认 TRUE';
-
-
---
--- Name: COLUMN discovered_param_mappings.default_value; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.discovered_param_mappings.default_value IS '从 param_mappings 继承的 defaultValue';
-
-
---
--- Name: COLUMN discovered_param_mappings.validation_pattern; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.discovered_param_mappings.validation_pattern IS '从 param_mappings 继承的 validationPattern';
 
 
 --
@@ -5122,8 +5106,6 @@ CREATE TABLE public.param_mappings (
     enum_labels text,
     mirror_with character varying(256),
     source character varying(16) DEFAULT 'builtin'::character varying NOT NULL,
-    default_value text,
-    validation_pattern text,
     CONSTRAINT param_mappings_entry_type_check CHECK (((entry_type)::text = ANY (ARRAY[('object'::character varying)::text, ('parameter'::character varying)::text]))),
     CONSTRAINT param_mappings_source_check CHECK (((source)::text = ANY (ARRAY[('builtin'::character varying)::text, ('custom'::character varying)::text])))
 );
@@ -5155,20 +5137,6 @@ COMMENT ON COLUMN public.param_mappings.is_storable IS '是否纳入 OMC 自动�
 --
 
 COMMENT ON COLUMN public.param_mappings.is_supported IS 'T-0103 XML supported="false" → false；path-b sync 据此过滤，默认 TRUE';
-
-
---
--- Name: COLUMN param_mappings.default_value; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.param_mappings.default_value IS '参数模型 XML defaultValue；用于 MML 控制台默认填值提示';
-
-
---
--- Name: COLUMN param_mappings.validation_pattern; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.param_mappings.validation_pattern IS '参数模型 XML validationPattern；用于 MML 控制台输入校验';
 
 
 --
