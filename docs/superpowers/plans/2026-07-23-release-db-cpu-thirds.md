@@ -2,7 +2,8 @@
 
 **目标：** 将 10000 基站压测验证通过的主库/TimescaleDB/worker 10/10/3 核配置固化到 release 规划器和默认配置。
 
-**范围：** 仅修改 release medium 档、release Compose 默认值、对应测试和资源规划说明。
+**范围：** 修改 release medium/large 档的数据库 CPU 规则、release Compose 默认值、
+对应测试和资源规划说明。
 
 ## 任务
 
