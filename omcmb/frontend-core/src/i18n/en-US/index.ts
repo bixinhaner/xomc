@@ -1680,8 +1680,6 @@ const messages: Record<string, string> = {
   'device.horizontalAzimuth':   'Horizontal Azimuth',
   'device.installAddress':      'Install Address',
   'device.installAddress.doubleClickEdit': 'Double-click to edit install address',
-  'device.latestLog':           'Runtime Log',
-  'device.noLogFile':           'No log file available',
 
   // Monitor page extended fields (5G NR Others)
   'device.rollbackVersion':     'Rollback Version',
@@ -1702,6 +1700,7 @@ const messages: Record<string, string> = {
   'device.action.halobOn':       'HaloB On',
   'device.action.halobOff':      'HaloB Off',
   'device.action.logCollect':    'Log Collect',
+  'device.action.logCollectTriggered': 'Log collection triggered. Check progress in File Transfer > Task Management.',
   'device.action.tr069Collect':  'Collect TR069 Msg',
   'device.action.alarmSync':     'Alarm Sync',
   'device.action.paramSync':      'Parameter Sync',
@@ -7479,8 +7478,6 @@ const messages: Record<string, string> = {
   'mrTask.batchSN.emptyInput':    'Paste SNs (separated by space / comma / semicolon / newline)',
   'mrTask.batchSN.partialHits':   '{hits} SN(s) added; {misses} not in current candidates: {samples}',
   'mrTask.batchSN.allHits':       'Added {count} device(s)',
-  'ufte.taskCreatedAndNavigate':  'Task created, redirecting...',
-
   // File Management batch download (bundle shared)
   'bundle.batchDownload':         'Batch Download',
   'bundle.creating':              'Creating bundle task',

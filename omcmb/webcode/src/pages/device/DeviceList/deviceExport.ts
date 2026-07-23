@@ -19,7 +19,7 @@ export type { PageResult } from '../exportPaging';
 // 这里只负责"列解析 + 文件生成",不关心数据来源与单元格取值。
 
 /** 不可导出的"纯动作"列(无业务文本值)。 */
-const NON_EXPORTABLE_KEYS = new Set<string>(['actions', 'latestLog']);
+const NON_EXPORTABLE_KEYS = new Set<string>(['actions']);
 
 /** 列定义的最小可导出形态(从 DataTableColumn 收窄)。 */
 export interface ExportColumnInput {
@@ -51,7 +51,7 @@ function readJsonArray(storageKey: string): string[] | null {
  * 依据"列设置"(localStorage)解析出当前应导出的列：
  *  - 顺序：用户拖拽后的顺序(omc_col_order_<tableId>)，缺省按列定义顺序；
  *  - 可见性：未隐藏的列(omc_col_vis_<tableId> 记录隐藏 key)，缺省取列定义 hidden；
- *  - 排除纯动作列(actions / latestLog)。
+ *  - 排除纯动作列(actions)。
  * 与 ColumnVisibility 组件读取的是同一份状态，确保"导出 == 列表展示"。
  */
 export function resolveVisibleExportColumns(
