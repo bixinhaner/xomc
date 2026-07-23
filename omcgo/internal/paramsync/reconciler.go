@@ -228,7 +228,9 @@ WITH stalled AS (
   SELECT run.device_id, 1, $3 + interval '1 minute',
     'parameter sync task plan was not durably dispatched', $3
   FROM updated_runs run
-  WHERE run.trigger_reason IN ('device_online','periodic','firmware_changed')
+  WHERE run.trigger_reason IN (
+    'device_online','periodic','firmware_changed','device_registered','omc_upgrade'
+  )
   ON CONFLICT (device_id) DO UPDATE SET
     consecutive_failures=parameter_sync_device_state.consecutive_failures+1,
     next_auto_sync_at=$3 + CASE

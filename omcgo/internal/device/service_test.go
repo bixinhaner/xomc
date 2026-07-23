@@ -334,8 +334,11 @@ func TestDeviceService_RegisterFromInform_NewDevice(t *testing.T) {
 	svc := newTestDeviceService(deviceRepo, paramRepo)
 	inform := sampleInform("SN001")
 
-	device, err := svc.RegisterFromInform(context.Background(), inform, model.CarrierCMCC)
+	registration, err := svc.RegisterFromInform(context.Background(), inform, model.CarrierCMCC)
 	require.NoError(t, err)
+	require.NotNil(t, registration)
+	assert.True(t, registration.Created)
+	device := registration.Device
 	require.NotNil(t, device)
 
 	// Verify created device fields
@@ -383,8 +386,10 @@ func TestDeviceService_RegisterFromInform_NewDevice_AssignsDefaultGroup(t *testi
 		},
 	})
 
-	device, err := svc.RegisterFromInform(context.Background(), sampleInform("SN-DEFAULT-GROUP"), model.CarrierCMCC)
+	registration, err := svc.RegisterFromInform(context.Background(), sampleInform("SN-DEFAULT-GROUP"), model.CarrierCMCC)
 	require.NoError(t, err)
+	require.NotNil(t, registration)
+	device := registration.Device
 	require.NotNil(t, device)
 
 	assert.Equal(t, createdID, device.ID)
@@ -413,13 +418,62 @@ func TestDeviceService_RegisterFromInform_ExistingDevice(t *testing.T) {
 	svc := newTestDeviceService(deviceRepo, &mockParamRepo{})
 	inform := sampleInform("SN001")
 
-	device, err := svc.RegisterFromInform(context.Background(), inform, model.CarrierCMCC)
+	registration, err := svc.RegisterFromInform(context.Background(), inform, model.CarrierCMCC)
 	require.NoError(t, err)
+	require.NotNil(t, registration)
+	device := registration.Device
 	require.NotNil(t, device)
+	assert.False(t, registration.Created)
 
 	// Should have delegated to UpdateFromInform, which calls repo.Update
 	assert.True(t, updateCalled, "expected Update to be called for existing device")
 	assert.Equal(t, existingID, device.ID)
+}
+
+func TestDeviceService_RegisterFromInformEvent_RedeliveryPreservesCreated(t *testing.T) {
+	var stored *model.Device
+	deviceRepo := &mockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, _ string) (*model.Device, error) {
+			return stored, nil
+		},
+		createFn: func(_ context.Context, device *model.Device) error {
+			stored = device
+			return nil
+		},
+		updateFn: func(_ context.Context, device *model.Device) error {
+			stored = device
+			return nil
+		},
+	}
+	svc := newTestDeviceService(deviceRepo, &mockParamRepo{})
+	inform := sampleInform("SN-EVENT-RETRY")
+
+	first, err := svc.RegisterFromInformEvent(
+		context.Background(),
+		inform,
+		model.CarrierCMCC,
+		"bootstrap-event-1",
+	)
+	require.NoError(t, err)
+	require.True(t, first.Created)
+
+	redelivered, err := svc.RegisterFromInformEvent(
+		context.Background(),
+		inform,
+		model.CarrierCMCC,
+		"bootstrap-event-1",
+	)
+	require.NoError(t, err)
+	assert.True(t, redelivered.Created)
+
+	differentEvent, err := svc.RegisterFromInformEvent(
+		context.Background(),
+		inform,
+		model.CarrierCMCC,
+		"bootstrap-event-2",
+	)
+	require.NoError(t, err)
+	assert.False(t, differentEvent.Created)
 }
 
 func TestDeviceService_RegisterFromInform_DeletedDeviceSkipped(t *testing.T) {
@@ -1298,6 +1352,33 @@ func TestFindParamValue(t *testing.T) {
 // newTestDeviceServiceWithBus 构造一个挂事件总线的 DeviceService（T-0123 测试用）。
 func newTestDeviceServiceWithBus(deviceRepo *mockDeviceRepo, paramRepo *mockParamRepo, bus event.EventBus) *DeviceService {
 	return NewDeviceService(deviceRepo, paramRepo, nil, bus, zap.NewNop())
+}
+
+func TestPublishDeviceRegistered_UsesStableSourceEventID(t *testing.T) {
+	bus := event.NewChannelEventBus(16, zap.NewNop())
+	t.Cleanup(func() { _ = bus.Close() })
+	received := make(chan event.Event, 1)
+	_, err := bus.Subscribe(event.SubjectDeviceRegistered, func(_ context.Context, evt event.Event) error {
+		received <- evt
+		return nil
+	})
+	require.NoError(t, err)
+	svc := newTestDeviceServiceWithBus(&mockDeviceRepo{}, &mockParamRepo{}, bus)
+
+	err = svc.PublishDeviceRegistered(
+		context.Background(),
+		&model.Device{ID: uuid.New(), SerialNumber: "SN-STABLE-EVENT"},
+		true,
+		"bootstrap-event-1",
+	)
+	require.NoError(t, err)
+
+	select {
+	case evt := <-received:
+		assert.Equal(t, "bootstrap-event-1", evt.ID)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for device.registered event")
+	}
 }
 
 // captureOnlineEvent 订阅 device.online 主题，把收到的事件压进 channel。

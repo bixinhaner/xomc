@@ -615,6 +615,89 @@ func TestHandleRPCResult_TaskNotFound(t *testing.T) {
 // do not require real DataModelRegistry / ConfigTemplateService backends)
 // ---------------------------------------------------------------------------
 
+type registeredDeviceSyncCall struct {
+	deviceID uuid.UUID
+	sourceID string
+}
+
+type fakeRegisteredDeviceSyncStarter struct {
+	calls []registeredDeviceSyncCall
+}
+
+func (f *fakeRegisteredDeviceSyncStarter) StartRegisteredDeviceSync(
+	_ context.Context,
+	dev *model.Device,
+	sourceID string,
+) error {
+	f.calls = append(f.calls, registeredDeviceSyncCall{deviceID: dev.ID, sourceID: sourceID})
+	return nil
+}
+
+func TestHandleBootstrap_CreatedDeviceDurableModeStartsRegisteredSync(t *testing.T) {
+	h := newFullEngineHarness()
+	deviceID := uuid.New()
+	h.devRepo.GetByIDFn = func(context.Context, uuid.UUID) (*model.Device, error) {
+		return &model.Device{
+			ID:           deviceID,
+			SerialNumber: "SN-REGISTERED-SYNC",
+			Carrier:      model.CarrierCMCC,
+			Technology:   model.TechLTE,
+			ProductClass: "SmallCell-LTE",
+		}, nil
+	}
+	starter := &fakeRegisteredDeviceSyncStarter{}
+	h.engine.SetParamSyncRoutingMode("durable")
+	h.engine.SetRegisteredDeviceSyncStarter(starter)
+
+	err := h.engine.HandleBootstrap(context.Background(), bootstrapEvent{
+		DeviceID:     deviceID,
+		SerialNumber: "SN-REGISTERED-SYNC",
+		ProductClass: "SmallCell-LTE",
+		Created:      true,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, starter.calls, 1)
+	assert.Equal(t, deviceID, starter.calls[0].deviceID)
+	assert.Equal(t, "device_registered:"+deviceID.String(), starter.calls[0].sourceID)
+}
+
+func TestHandleBootstrap_ExistingBootstrapDoesNotStartRegisteredSync(t *testing.T) {
+	h := newFullEngineHarness()
+	deviceID := uuid.New()
+	h.devRepo.GetByIDFn = func(context.Context, uuid.UUID) (*model.Device, error) {
+		return &model.Device{ID: deviceID, SerialNumber: "SN-EXISTING"}, nil
+	}
+	starter := &fakeRegisteredDeviceSyncStarter{}
+	h.engine.SetParamSyncRoutingMode("durable")
+	h.engine.SetRegisteredDeviceSyncStarter(starter)
+
+	err := h.engine.HandleBootstrap(context.Background(), bootstrapEvent{
+		DeviceID: deviceID, SerialNumber: "SN-EXISTING", Created: false,
+	})
+
+	require.NoError(t, err)
+	assert.Empty(t, starter.calls)
+}
+
+func TestHandleBootstrap_CreatedDeviceClosedModeDoesNotStartRegisteredSync(t *testing.T) {
+	h := newFullEngineHarness()
+	deviceID := uuid.New()
+	h.devRepo.GetByIDFn = func(context.Context, uuid.UUID) (*model.Device, error) {
+		return &model.Device{ID: deviceID, SerialNumber: "SN-CLOSED"}, nil
+	}
+	starter := &fakeRegisteredDeviceSyncStarter{}
+	h.engine.SetParamSyncRoutingMode("closed")
+	h.engine.SetRegisteredDeviceSyncStarter(starter)
+
+	err := h.engine.HandleBootstrap(context.Background(), bootstrapEvent{
+		DeviceID: deviceID, SerialNumber: "SN-CLOSED", Created: true,
+	})
+
+	require.NoError(t, err)
+	assert.Empty(t, starter.calls)
+}
+
 func TestHandleBootstrap_CreateTaskError(t *testing.T) {
 	devRepo := &mockDeviceRepo{}
 	h := newEngineHarness(devRepo)

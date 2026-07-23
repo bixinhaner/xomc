@@ -452,6 +452,61 @@ func TestHandleBootstrap_Success(t *testing.T) {
 	assert.Equal(t, model.DeviceActive, createdDevice.Status)
 }
 
+func TestHandleBootstrap_NewDevicePublishesCreated(t *testing.T) {
+	deviceRepo := &infMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, _ string) (*model.Device, error) {
+			return nil, nil
+		},
+	}
+	bus := event.NewChannelEventBus(16, zap.NewNop())
+	defer bus.Close()
+	received := make(chan event.Event, 1)
+	_, err := bus.Subscribe(event.SubjectDeviceRegistered, func(_ context.Context, evt event.Event) error {
+		received <- evt
+		return nil
+	})
+	require.NoError(t, err)
+
+	svc := NewDeviceService(deviceRepo, &infMockParamRepo{}, nil, bus, zap.NewNop())
+	h := NewInformHandler(svc, nil, model.CarrierCMCC, zap.NewNop())
+	evt, err := event.NewEvent(event.SubjectDeviceBootstrap, sampleInformPayload("SN-BOOT-CREATED"))
+	require.NoError(t, err)
+
+	require.NoError(t, h.handleBootstrap(context.Background(), evt))
+
+	select {
+	case published := <-received:
+		assert.Equal(t, evt.ID, published.ID)
+		var payload struct {
+			DeviceID uuid.UUID `json:"device_id"`
+			Created  bool      `json:"created"`
+		}
+		require.NoError(t, published.DecodePayload(&payload))
+		assert.NotEqual(t, uuid.Nil, payload.DeviceID)
+		assert.True(t, payload.Created)
+	case <-time.After(time.Second):
+		t.Fatal("expected device.registered event")
+	}
+}
+
+func TestHandleBootstrap_DeviceRegisteredPublishFailureIsRetryable(t *testing.T) {
+	deviceRepo := &infMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, _ string) (*model.Device, error) {
+			return nil, nil
+		},
+	}
+	bus := event.NewChannelEventBus(16, zap.NewNop())
+	require.NoError(t, bus.Close())
+	svc := NewDeviceService(deviceRepo, &infMockParamRepo{}, nil, bus, zap.NewNop())
+	h := NewInformHandler(svc, nil, model.CarrierCMCC, zap.NewNop())
+	evt, err := event.NewEvent(event.SubjectDeviceBootstrap, sampleInformPayload("SN-BOOT-PUBLISH-FAIL"))
+	require.NoError(t, err)
+
+	err = h.handleBootstrap(context.Background(), evt)
+
+	require.ErrorIs(t, err, event.ErrBusClosed)
+}
+
 func TestHandleBootstrap_AmbiguousSharedOUIDoesNotRegisterDevice(t *testing.T) {
 	var createCalled bool
 	deviceRepo := &infMockDeviceRepo{
@@ -690,6 +745,26 @@ func TestHandleRebootComplete_AutoRegisterWhenMissing(t *testing.T) {
 	err = h.handleRebootComplete(context.Background(), evt)
 	require.NoError(t, err)
 	assert.True(t, created, "expected auto-register to call Create")
+}
+
+func TestHandleRebootComplete_AutoRegisterPublishFailureIsRetryable(t *testing.T) {
+	deviceRepo := &infMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, _ string) (*model.Device, error) {
+			return nil, nil
+		},
+	}
+	bus := event.NewChannelEventBus(16, zap.NewNop())
+	require.NoError(t, bus.Close())
+	svc := NewDeviceService(deviceRepo, &infMockParamRepo{}, nil, bus, zap.NewNop())
+	h := NewInformHandler(svc, nil, model.CarrierCMCC, zap.NewNop())
+	payload := sampleInformPayload("SN-REBOOT-PUBLISH-FAIL")
+	payload.Events = []string{tr069.EventBoot}
+	evt, err := event.NewEvent(event.SubjectDeviceRebootComplete, payload)
+	require.NoError(t, err)
+
+	err = h.handleRebootComplete(context.Background(), evt)
+
+	require.ErrorIs(t, err, event.ErrBusClosed)
 }
 
 func TestHandleRebootComplete_NormalRecordUsesPreRebootDeviceSnapshot(t *testing.T) {
@@ -1068,6 +1143,51 @@ func TestHandlePeriodic_DeletedDeviceSkipsAutoRegister(t *testing.T) {
 	err = h.handlePeriodic(context.Background(), evt)
 	require.NoError(t, err)
 	assert.False(t, createCalled, "recycle-bin device must not be auto-registered")
+}
+
+func TestHandlePeriodic_AutoRegisterPublishFailureIsRetryable(t *testing.T) {
+	deviceRepo := &infMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, _ string) (*model.Device, error) {
+			return nil, nil
+		},
+	}
+	bus := event.NewChannelEventBus(16, zap.NewNop())
+	require.NoError(t, bus.Close())
+	svc := NewDeviceService(deviceRepo, &infMockParamRepo{}, nil, bus, zap.NewNop())
+	h := NewInformHandler(svc, nil, model.CarrierCMCC, zap.NewNop())
+	payload := sampleInformPayload("SN-PERIODIC-PUBLISH-FAIL")
+	payload.Events = []string{"2 PERIODIC"}
+	evt, err := event.NewEvent(event.SubjectDevicePeriodic, payload)
+	require.NoError(t, err)
+
+	err = h.handlePeriodic(context.Background(), evt)
+
+	require.ErrorIs(t, err, event.ErrBusClosed)
+}
+
+func TestHandlePeriodic_StaleCacheAutoRegisterPublishFailureIsRetryable(t *testing.T) {
+	lookupCount := 0
+	deviceRepo := &infMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			lookupCount++
+			if lookupCount == 1 {
+				return &model.Device{ID: uuid.New(), SerialNumber: sn}, nil
+			}
+			return nil, nil
+		},
+	}
+	bus := event.NewChannelEventBus(16, zap.NewNop())
+	require.NoError(t, bus.Close())
+	svc := NewDeviceService(deviceRepo, &infMockParamRepo{}, nil, bus, zap.NewNop())
+	h := NewInformHandler(svc, nil, model.CarrierCMCC, zap.NewNop())
+	payload := sampleInformPayload("SN-PERIODIC-STALE-PUBLISH-FAIL")
+	payload.Events = []string{"2 PERIODIC"}
+	evt, err := event.NewEvent(event.SubjectDevicePeriodic, payload)
+	require.NoError(t, err)
+
+	err = h.handlePeriodic(context.Background(), evt)
+
+	require.ErrorIs(t, err, event.ErrBusClosed)
 }
 
 func TestHandlePeriodic_Success(t *testing.T) {

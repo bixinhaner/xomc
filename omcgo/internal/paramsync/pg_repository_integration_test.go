@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/task"
 )
 
@@ -451,4 +452,147 @@ SELECT EXISTS (
 	assertNotDeadlock("cancellation", cancelErr)
 	require.NoError(t, finalizeErr)
 	require.Error(t, cancelErr, "the terminal request must win over cancellation")
+}
+
+func insertReleaseCandidateForTest(
+	t *testing.T,
+	pool *pgxpool.Pool,
+	deviceID uuid.UUID,
+	online bool,
+) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(), `
+		INSERT INTO devices (
+			id, serial_number, oui, carrier, technology, lifecycle_state, is_online
+		) VALUES ($1, $2, 'AABBCC', $3, $4, $5, $6)
+	`, deviceID, "TEST-RELEASE-"+deviceID.String(), model.CarrierCMCC,
+		model.TechLTE, model.LifecycleCommissioned, online)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM devices WHERE id=$1`, deviceID)
+	})
+}
+
+func insertReleaseRequestForPGRepoTest(
+	t *testing.T,
+	pool *pgxpool.Pool,
+	campaignID uuid.UUID,
+	deviceID uuid.UUID,
+	status RequestStatus,
+) {
+	t.Helper()
+	now := time.Now().UTC()
+	sourceEventID := "omc_upgrade:" + campaignID.String() + ":" + deviceID.String()
+	req := &SyncRequest{
+		ID:            uuid.New(),
+		DeviceID:      deviceID,
+		DeviceSN:      "TEST-RELEASE-" + deviceID.String(),
+		CallerType:    "test",
+		TriggerReason: TriggerOMCUpgrade,
+		SyncScope:     SyncScopeFull,
+		Status:        status,
+		Priority:      10,
+		NextAttemptAt: now,
+		CampaignID:    &campaignID,
+		SourceEventID: &sourceEventID,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if status.Terminal() {
+		req.CompletedAt = &now
+	}
+	query, args, err := buildCreateRequest(req)
+	require.NoError(t, err)
+	_, err = pool.Exec(context.Background(), query, args...)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM parameter_sync_requests WHERE id=$1`, req.ID)
+	})
+}
+
+func TestPGRepository_ListReleaseCandidatesFiltersState(t *testing.T) {
+	pool := newParamSyncTestPool(t)
+	campaignID := uuid.New()
+	noRequestID := uuid.New()
+	offlineID := uuid.New()
+	succeededID := uuid.New()
+	backedOffID := uuid.New()
+	retryableID := uuid.New()
+
+	insertReleaseCandidateForTest(t, pool, noRequestID, true)
+	insertReleaseCandidateForTest(t, pool, offlineID, false)
+	insertReleaseCandidateForTest(t, pool, succeededID, true)
+	insertReleaseCandidateForTest(t, pool, backedOffID, true)
+	insertReleaseCandidateForTest(t, pool, retryableID, true)
+	insertReleaseRequestForPGRepoTest(t, pool, campaignID, succeededID, RequestStatusSucceeded)
+	insertReleaseRequestForPGRepoTest(t, pool, campaignID, retryableID, RequestStatusFailed)
+
+	now := time.Now().UTC()
+	_, err := pool.Exec(context.Background(), `
+		INSERT INTO parameter_sync_device_state (
+			device_id, consecutive_failures, next_auto_sync_at, updated_at
+		) VALUES
+			($1, 1, $2, $3),
+			($4, 1, $5, $3)
+	`, backedOffID, now.Add(time.Hour), now, retryableID, now.Add(-time.Minute))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			context.Background(),
+			`DELETE FROM parameter_sync_device_state WHERE device_id = ANY($1)`,
+			[]uuid.UUID{backedOffID, retryableID},
+		)
+	})
+
+	devices, err := NewPGRepository(pool).ListReleaseCandidates(
+		context.Background(),
+		campaignID,
+		20,
+	)
+
+	require.NoError(t, err)
+	ids := make(map[uuid.UUID]bool, len(devices))
+	for _, dev := range devices {
+		ids[dev.ID] = true
+	}
+	assert.True(t, ids[noRequestID])
+	assert.True(t, ids[retryableID])
+	assert.False(t, ids[offlineID])
+	assert.False(t, ids[succeededID])
+	assert.False(t, ids[backedOffID])
+}
+
+func TestPGRepository_ListReleaseCandidatesPrioritizesUnattemptedDevices(t *testing.T) {
+	pool := newParamSyncTestPool(t)
+	campaignID := uuid.New()
+	attemptedLowID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	unattemptedHighID := uuid.MustParse("00000000-0000-0000-0000-000000000002")
+	insertReleaseCandidateForTest(t, pool, attemptedLowID, true)
+	insertReleaseCandidateForTest(t, pool, unattemptedHighID, true)
+
+	now := time.Now().UTC()
+	_, err := pool.Exec(context.Background(), `
+		INSERT INTO parameter_sync_device_state (
+			device_id, consecutive_failures, last_attempt_at,
+			next_auto_sync_at, updated_at
+		) VALUES ($1, 1, $2, $3, $4)
+	`, attemptedLowID, now.Add(-2*time.Minute), now.Add(-time.Minute), now)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			context.Background(),
+			`DELETE FROM parameter_sync_device_state WHERE device_id=$1`,
+			attemptedLowID,
+		)
+	})
+
+	devices, err := NewPGRepository(pool).ListReleaseCandidates(
+		context.Background(),
+		campaignID,
+		1,
+	)
+
+	require.NoError(t, err)
+	require.Len(t, devices, 1)
+	assert.Equal(t, unattemptedHighID, devices[0].ID)
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
@@ -21,6 +22,66 @@ type PGRepository struct {
 }
 
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository { return &PGRepository{pool: pool} }
+
+func (r *PGRepository) ListReleaseCandidates(
+	ctx context.Context,
+	campaignID uuid.UUID,
+	limit int,
+) ([]*model.Device, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	completedOrActive := sq.
+		Select("1").
+		From("parameter_sync_requests req").
+		Where("req.device_id = d.id").
+		Where(sq.Eq{
+			"req.campaign_id":    campaignID,
+			"req.trigger_reason": TriggerOMCUpgrade,
+			"req.status": []RequestStatus{
+				RequestStatusAccepted,
+				RequestStatusQueued,
+				RequestStatusRunning,
+				RequestStatusSucceeded,
+			},
+		})
+	query, args, err := storage.Psql.
+		Select("d.id", "d.serial_number").
+		From("devices d").
+		LeftJoin("parameter_sync_device_state state ON state.device_id = d.id").
+		Where(sq.Eq{
+			"d.deleted_at":      nil,
+			"d.lifecycle_state": model.LifecycleCommissioned,
+			"d.is_online":       true,
+		}).
+		Where("(state.next_auto_sync_at IS NULL OR state.next_auto_sync_at <= now())").
+		Where(sq.Expr("NOT EXISTS (?)", completedOrActive)).
+		OrderBy("state.last_attempt_at ASC NULLS FIRST", "d.id").
+		Limit(uint64(limit)).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list OMC release candidates: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list OMC release candidates: %w", err)
+	}
+	defer rows.Close()
+
+	devices := make([]*model.Device, 0)
+	for rows.Next() {
+		dev := &model.Device{}
+		if err := rows.Scan(&dev.ID, &dev.SerialNumber); err != nil {
+			return nil, fmt.Errorf("scan OMC release candidate: %w", err)
+		}
+		devices = append(devices, dev)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate OMC release candidates: %w", err)
+	}
+	return devices, nil
+}
 
 func (r *PGRepository) CreateRequest(ctx context.Context, req *SyncRequest) error {
 	query, args, err := buildCreateRequest(req)

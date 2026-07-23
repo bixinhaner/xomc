@@ -84,6 +84,59 @@ type fakeLeader struct {
 func (f *fakeLeader) TryAcquire(_ context.Context) (bool, error) { return f.acquired, f.err }
 func (f *fakeLeader) Release(_ context.Context) error            { f.released.Store(true); return nil }
 
+type fakeReleaseCandidateLister struct {
+	devices           []*model.Device
+	requestCampaignID uuid.UUID
+	listCalls         int
+	listLimit         int
+}
+
+func (f *fakeReleaseCandidateLister) ListReleaseCandidates(
+	_ context.Context,
+	campaignID uuid.UUID,
+	limit int,
+) ([]*model.Device, error) {
+	f.listCalls++
+	f.listLimit = limit
+	f.requestCampaignID = campaignID
+	return f.devices, nil
+}
+
+type releaseSyncCall struct {
+	deviceID   uuid.UUID
+	campaignID uuid.UUID
+	attemptID  uuid.UUID
+}
+
+type fakeReleaseSyncStarter struct {
+	mu        sync.Mutex
+	calls     []releaseSyncCall
+	perDevice map[uuid.UUID]error
+}
+
+func (f *fakeReleaseSyncStarter) StartReleaseSync(
+	_ context.Context,
+	dev *model.Device,
+	campaignID uuid.UUID,
+	attemptID uuid.UUID,
+) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, releaseSyncCall{
+		deviceID: dev.ID, campaignID: campaignID, attemptID: attemptID,
+	})
+	if err := f.perDevice[dev.ID]; err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (f *fakeReleaseSyncStarter) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.calls)
+}
+
 func mkDevices(n int) []*model.Device {
 	out := make([]*model.Device, n)
 	for i := 0; i < n; i++ {
@@ -116,6 +169,132 @@ func makePolicySnap(snap PeriodicSyncSnapshot) *PeriodicSyncPolicy {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+func TestPeriodicSyncer_ReleasePassRunsWhenPeriodicDisabled(t *testing.T) {
+	devices := mkDevices(2)
+	campaignID := uuid.New()
+	store := &fakeReleaseCandidateLister{devices: devices}
+	starter := &fakeReleaseSyncStarter{perDevice: map[uuid.UUID]error{}}
+	policy := makePolicySnap(PeriodicSyncSnapshot{
+		Enabled: false, Interval: time.Hour, BatchSize: 200, MaxConcurrent: 10,
+	})
+	p := NewPeriodicSyncer(nil, nil, nil, policy, zap.NewNop())
+	p.SetParamSyncRoutingMode("durable")
+	p.SetReleaseSync(store, starter, campaignID)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- p.Start(ctx) }()
+	require.Eventually(t, func() bool {
+		return starter.callCount() == 2
+	}, 500*time.Millisecond, 10*time.Millisecond)
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+
+	starter.mu.Lock()
+	defer starter.mu.Unlock()
+	for _, call := range starter.calls {
+		assert.Equal(t, campaignID, call.campaignID)
+		assert.NotEqual(t, uuid.Nil, call.attemptID)
+	}
+	assert.Equal(t, campaignID, store.requestCampaignID)
+	assert.Equal(t, 200, store.listLimit)
+}
+
+func TestPeriodicSyncer_ReleasePassClosedModeSkips(t *testing.T) {
+	store := &fakeReleaseCandidateLister{devices: mkDevices(1)}
+	starter := &fakeReleaseSyncStarter{perDevice: map[uuid.UUID]error{}}
+	p := NewPeriodicSyncer(nil, nil, nil, nil, zap.NewNop())
+	p.SetParamSyncRoutingMode("closed")
+	p.SetReleaseSync(store, starter, uuid.New())
+
+	p.runReleaseOnce(context.Background(), defaultPeriodicSyncSnapshot())
+
+	assert.Zero(t, store.listCalls)
+	assert.Zero(t, starter.callCount())
+}
+
+func TestPeriodicSyncer_ReleasePassFailureDoesNotStopOtherDevices(t *testing.T) {
+	devices := mkDevices(3)
+	store := &fakeReleaseCandidateLister{devices: devices}
+	starter := &fakeReleaseSyncStarter{perDevice: map[uuid.UUID]error{
+		devices[1].ID: errors.New("submit failed"),
+	}}
+	p := NewPeriodicSyncer(nil, nil, nil, nil, zap.NewNop())
+	p.SetParamSyncRoutingMode("durable")
+	p.SetReleaseSync(store, starter, uuid.New())
+
+	p.runReleaseOnce(context.Background(), PeriodicSyncSnapshot{
+		BatchSize: 200, MaxConcurrent: 2,
+	})
+
+	assert.Equal(t, 3, starter.callCount())
+}
+
+type trackingReleaseSyncStarter struct {
+	calls       atomic.Int32
+	inFlight    atomic.Int32
+	maxInFlight atomic.Int32
+}
+
+func (s *trackingReleaseSyncStarter) StartReleaseSync(
+	context.Context,
+	*model.Device,
+	uuid.UUID,
+	uuid.UUID,
+) (bool, error) {
+	s.calls.Add(1)
+	current := s.inFlight.Add(1)
+	for {
+		maximum := s.maxInFlight.Load()
+		if current <= maximum || s.maxInFlight.CompareAndSwap(maximum, current) {
+			break
+		}
+	}
+	time.Sleep(20 * time.Millisecond)
+	s.inFlight.Add(-1)
+	return true, nil
+}
+
+func TestPeriodicSyncer_ReleasePassRespectsMaxConcurrent(t *testing.T) {
+	store := &fakeReleaseCandidateLister{devices: mkDevices(12)}
+	starter := &trackingReleaseSyncStarter{}
+	p := NewPeriodicSyncer(nil, nil, nil, nil, zap.NewNop())
+	p.SetParamSyncRoutingMode("durable")
+	p.SetReleaseSync(store, starter, uuid.New())
+
+	p.runReleaseOnce(context.Background(), PeriodicSyncSnapshot{
+		BatchSize: 200, MaxConcurrent: 3,
+	})
+
+	assert.Equal(t, int32(12), starter.calls.Load())
+	assert.LessOrEqual(t, starter.maxInFlight.Load(), int32(3))
+}
+
+func TestPeriodicSyncer_ReleaseStaggerDoesNotOccupyConcurrencySlot(t *testing.T) {
+	devices := mkDevices(4)
+	starter := &fakeReleaseSyncStarter{perDevice: map[uuid.UUID]error{}}
+	p := NewPeriodicSyncer(nil, nil, nil, nil, zap.NewNop())
+	p.releaseStarter = starter
+	p.releaseStaggerDelay = func(window time.Duration) time.Duration {
+		return window
+	}
+
+	startedAt := time.Now()
+	p.enqueueReleaseBatch(
+		context.Background(),
+		devices,
+		uuid.New(),
+		PeriodicSyncSnapshot{
+			BatchSize:     len(devices),
+			MaxConcurrent: 1,
+			StaggerWindow: 100 * time.Millisecond,
+		},
+	)
+
+	assert.Less(t, time.Since(startedAt), 250*time.Millisecond)
+	assert.Equal(t, len(devices), starter.callCount())
+}
 
 func TestPeriodicSyncer_Snapshot_DefaultsWhenLookupNil(t *testing.T) {
 	p := NewPeriodicSyncPolicy(nil, zap.NewNop())

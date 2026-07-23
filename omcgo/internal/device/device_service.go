@@ -608,8 +608,29 @@ func (s *DeviceService) SetMetrics(m *DeviceMetrics) {
 	s.metrics = m
 }
 
+// InformRegistration reports both the current device and whether this Inform
+// created a new device identity.
+type InformRegistration struct {
+	Device  *model.Device
+	Created bool
+}
+
+const registrationSourceEventIDKey = "_system_registration_source_event_id"
+
 // RegisterFromInform creates a new device from a bootstrap Inform message.
-func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.InformMessage, carrier model.CarrierCode) (*model.Device, error) {
+func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.InformMessage, carrier model.CarrierCode) (*InformRegistration, error) {
+	return s.RegisterFromInformEvent(ctx, inform, carrier, "")
+}
+
+// RegisterFromInformEvent preserves the source Inform event identity so a
+// redelivered Bootstrap can recover a device.registered publication that
+// failed after the device row was committed.
+func (s *DeviceService) RegisterFromInformEvent(
+	ctx context.Context,
+	inform *tr069.InformMessage,
+	carrier model.CarrierCode,
+	sourceEventID string,
+) (*InformRegistration, error) {
 	ctx, span := tracing.StartSpan(ctx, tracing.DeviceTracerName, "Device RegisterFromInform",
 		attribute.String("device.serial_number", inform.DeviceId.SerialNumber),
 		attribute.String("device.oui", inform.DeviceId.OUI),
@@ -635,16 +656,22 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 		return nil, fmt.Errorf("lookup device: %w", err)
 	}
 	if existing != nil {
+		registrationSourceEventID, _ := existing.ExtensionData[registrationSourceEventIDKey].(string)
+		createdBySourceEvent := sourceEventID != "" && registrationSourceEventID == sourceEventID
 		// Device already registered, just update it
 		s.logger.Info("RegisterFromInform: device already exists, updating instead",
 			zap.String("serial_number", inform.DeviceId.SerialNumber),
 			zap.String("existing_device_id", existing.ID.String()))
-		return s.UpdateFromInform(ctx, inform)
+		updated, err := s.UpdateFromInform(ctx, inform)
+		if err != nil {
+			return nil, err
+		}
+		return &InformRegistration{Device: updated, Created: createdBySourceEvent}, nil
 	}
 
 	// Device not found as active — check if it's soft-deleted in the recycle bin.
-	// A recycle-bin device sending Inform means it's still operational; auto-restore
-	// it rather than creating a duplicate active row with a new UUID.
+	// Recycle-bin devices are intentionally not auto-restored and must not create
+	// a duplicate active row with a new UUID.
 	deletedDevice, err := s.deviceRepo.GetDeletedBySerialNumber(ctx, inform.DeviceId.SerialNumber, carrier)
 	if err != nil {
 		s.logger.Error("RegisterFromInform: GetDeletedBySerialNumber failed",
@@ -691,6 +718,11 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 		InformInterval:              300,
 		CreatedAt:                   now,
 		UpdatedAt:                   now,
+	}
+	if sourceEventID != "" {
+		device.ExtensionData = map[string]interface{}{
+			registrationSourceEventIDKey: sourceEventID,
+		}
 	}
 
 	// Phase 6: ProductRegistry 回填 model_name（TR-069 DeviceId 不含 ModelName）
@@ -811,7 +843,7 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 		zap.String("oui", device.OUI),
 	)
 
-	return device, nil
+	return &InformRegistration{Device: device, Created: true}, nil
 }
 
 func deriveInformIPAddress(udpAddr, connReqURL string) string {
@@ -1544,9 +1576,14 @@ func (s *DeviceService) PublishDeviceAttributesChangedEvent(ctx context.Context,
 
 // PublishDeviceRegistered publishes a device.registered event for the given device.
 // Called by InformHandler on BOOTSTRAP/BOOT events to trigger provisioning engine.
-func (s *DeviceService) PublishDeviceRegistered(ctx context.Context, device *model.Device) {
+func (s *DeviceService) PublishDeviceRegistered(
+	ctx context.Context,
+	device *model.Device,
+	created bool,
+	sourceEventIDs ...string,
+) error {
 	if s.eventBus == nil {
-		return
+		return nil
 	}
 	payload := map[string]interface{}{
 		"device_id":     device.ID,
@@ -1555,15 +1592,21 @@ func (s *DeviceService) PublishDeviceRegistered(ctx context.Context, device *mod
 		"product_class": device.ProductClass,
 		"carrier":       string(device.Carrier),
 		"technology":    string(device.Technology),
+		"created":       created,
 	}
 	evt, err := event.NewEvent(event.SubjectDeviceRegistered, payload)
 	if err != nil {
 		s.logger.Error("create device.registered event", zap.Error(err))
-		return
+		return err
+	}
+	if len(sourceEventIDs) > 0 && sourceEventIDs[0] != "" {
+		evt.ID = sourceEventIDs[0]
 	}
 	if err := s.eventBus.Publish(ctx, event.SubjectDeviceRegistered, evt); err != nil {
 		s.logger.Warn("publish device.registered event", zap.Error(err))
+		return err
 	}
+	return nil
 }
 
 // HaltReasonMainPath / HaltReasonDetailPath are the standard TR-181 paths

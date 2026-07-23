@@ -65,6 +65,10 @@ func (s *Service) Submit(ctx context.Context, cmd SubmitCommand) (*SubmitResult,
 	if cmd.IdempotencyKey != "" {
 		req.IdempotencyKey = &cmd.IdempotencyKey
 	}
+	if cmd.CampaignID != nil {
+		campaignID := *cmd.CampaignID
+		req.CampaignID = &campaignID
+	}
 	if cmd.SourceEventID != "" {
 		req.SourceEventID = &cmd.SourceEventID
 	}
