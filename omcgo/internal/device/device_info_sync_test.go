@@ -692,6 +692,57 @@ func TestInfoSyncer_SyncFromParameters_RFProjection(t *testing.T) {
 	}
 }
 
+func TestInfoSyncer_SyncFromParameters_RadioFrequencyProjection(t *testing.T) {
+	deviceID := uuid.New()
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.CA.PARAMS.NumOfCells", ParameterValue: "2"},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.EARFCNDL", ParameterValue: "39751"},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.EARFCNDL", ParameterValue: "42599"},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.EARFCNUL", ParameterValue: "39751"},
+		{ParameterPath: "Device.Services.FAPService.2.CellConfig.LTE.RAN.RF.EARFCNDL", ParameterValue: "39952"},
+		{ParameterPath: "Device.Services.FAPService.2.CellConfig.LTE.RAN.RF.EARFCNUL", ParameterValue: "39751"},
+		{ParameterPath: "Device.Services.FAPService.3.CellConfig.LTE.RAN.RF.EARFCNDL", ParameterValue: "42599"},
+		{ParameterPath: "Device.Services.FAPService.3.CellConfig.LTE.RAN.RF.EARFCNUL", ParameterValue: "42599"},
+	}
+
+	infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, gotDeviceID uuid.UUID, fields map[string]interface{}) error {
+		assert.Equal(t, deviceID, gotDeviceID)
+		assert.Equal(t, "39751,39952", fields["freq_point"])
+		assert.Equal(t, "39751,39751", fields["ul_earfcn"])
+		return nil
+	}}
+	syncer := NewInfoSyncer(infoRepo, stubDeviceParamRepo{params: params}, nil, registry, zap.NewNop())
+
+	_, err := syncer.SyncFromParameters(
+		context.Background(), deviceID, model.CarrierCMCC, model.TechLTE, "FAP/MLN/DC",
+	)
+	assert.NoError(t, err)
+}
+
+func TestInfoSyncer_SyncFromParameters_ClearsIncompleteRadioFrequencyProjection(t *testing.T) {
+	deviceID := uuid.New()
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.CA.PARAMS.NumOfCells", ParameterValue: "2"},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.EARFCNDL", ParameterValue: "39751"},
+	}
+	infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, _ uuid.UUID, fields map[string]interface{}) error {
+		assert.Equal(t, "", fields["freq_point"], "不完整投影必须覆盖并清除通用聚合生成的单值")
+		return nil
+	}}
+	syncer := NewInfoSyncer(infoRepo, stubDeviceParamRepo{params: params}, nil, registry, zap.NewNop())
+
+	_, err := syncer.SyncFromParameters(
+		context.Background(), deviceID, model.CarrierCMCC, model.TechLTE, "FAP/MLN/DC",
+	)
+	assert.NoError(t, err)
+}
+
 func TestInfoSyncer_SyncFromParameters_ClearsStaleCoreNetworkStatus(t *testing.T) {
 	deviceID := uuid.New()
 	registry := carrier.NewRegistry()

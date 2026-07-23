@@ -309,7 +309,7 @@ func CalcRFStatus(params map[string]string, tech model.Technology, productClass 
 		return RFStatusProjection{State: RFStatusUnsupported, Reason: "BSC has no device-level RF"}
 	}
 
-	expectedCount, countKnown, countReason, countInconsistent := resolveExpectedRFCarrierCount(params, productClass)
+	expectedCount, countKnown, countReason, countInconsistent := resolveExpectedPhysicalCarrierCount(params, productClass)
 	if countInconsistent {
 		return RFStatusProjection{
 			State:         RFStatusInconsistent,
@@ -441,7 +441,7 @@ func sasRFPhysicalIndex(path string) (int, bool) {
 	return index, err == nil && index > 0
 }
 
-func resolveExpectedRFCarrierCount(params map[string]string, productClass string) (count int, known bool, reason string, inconsistent bool) {
+func resolveExpectedPhysicalCarrierCount(params map[string]string, productClass string) (count int, known bool, reason string, inconsistent bool) {
 	reportedCount, reported, reportedReason, reportedInvalid := strictReportedNumOfCells(params)
 	if reportedInvalid {
 		return 0, false, reportedReason, true
