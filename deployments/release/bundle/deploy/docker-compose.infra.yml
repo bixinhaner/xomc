@@ -139,10 +139,10 @@ services:
     deploy:
       resources:
         limits:
-          # CPU 缺省 10 核，对齐 plan-resources.sh medium 档（32核/32G 目标机型，约总核数
-          # 1/3）。2026-07-23 10000 基站压测中，4 核配额时约 376% 持续接近上限；
-          # 调至 10 核后 PM 队列可稳定清零。
-          cpus: "${TSDB_CPUS:-10}"
+          # CPU 缺省 16 核，对齐 plan-resources.sh medium 档（32核/32G 目标机型的
+          # 1/2）。2026-07-23 10000 基站压测中，10 核配额仍会在 PM 波峰触顶；
+          # 16 核配合 8 核 worker 后实际使用约 13-15 核，排空吞吐继续提升。
+          cpus: "${TSDB_CPUS:-16}"
           memory: "${TSDB_MEM:-7g}"
         reservations:
           cpus: "0.5"
