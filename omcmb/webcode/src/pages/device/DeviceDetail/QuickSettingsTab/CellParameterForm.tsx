@@ -36,6 +36,18 @@ import {
 } from './validators';
 import { inferDeviceTimeMode, isNrNetworkType, mapDeviceTimeModeLabel } from './deviceTimeMode';
 import { formatDeviceFaultBrief } from './MultiInstanceTable';
+import {
+  parsePlmnList,
+  serializePlmnList,
+  validatePlmnList,
+  type PlmnListValidationError,
+  type PlmnRow,
+} from './plmnList';
+import {
+  canApplySubmittedReadback,
+  ParameterReadbackTimeoutError,
+  waitForExpectedParameterValues,
+} from './parameterReadback';
 import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
@@ -714,7 +726,7 @@ interface BindSelectOption {
 type BindSelectValueMode = 'path' | 'ip';
 
 interface SpecialFieldConfig {
-  kind: 'input' | 'mme-ip-plmn-table' | 'bind-select';
+  kind: 'input' | 'mme-ip-plmn-table' | 'plmn-list-table' | 'bind-select';
   configPath: string;
   displayPath?: string;
   bindValueMode?: BindSelectValueMode;
@@ -737,6 +749,128 @@ interface MmeIpPlmnTableProps {
   disabled?: boolean;
   locale: 'zh-CN' | 'en-US';
   maxRows?: number;
+}
+
+interface PlmnListTableProps {
+  value?: PlmnRow[];
+  onChange?: (value: PlmnRow[]) => void;
+  disabled?: boolean;
+  maxRows?: number;
+}
+
+function isPlmnRows(value: unknown): value is PlmnRow[] {
+  return Array.isArray(value)
+    && value.every((item) => item && typeof item === 'object' && 'plmn' in item);
+}
+
+function toPlmnRows(value: unknown): PlmnRow[] {
+  if (isPlmnRows(value)) {
+    return value.map((row, index) => ({
+      key: row.key || `plmn-${index}`,
+      plmn: String(row.plmn ?? ''),
+    }));
+  }
+  return parsePlmnList(value);
+}
+
+function plmnValidationMessage(
+  error: PlmnListValidationError | null,
+  maxRows: number,
+  t: TFn,
+): string | null {
+  if (error === 'format') return t('device.cell.plmnFormatInvalid');
+  if (error === 'duplicate') return t('device.cell.plmnDuplicate');
+  if (error === 'limit') return t('device.cell.plmnLimitReached', { max: maxRows });
+  return null;
+}
+
+function PlmnListTable({
+  value = [],
+  onChange,
+  disabled = false,
+  maxRows = 6,
+}: PlmnListTableProps) {
+  const t = useT();
+  const rows = isPlmnRows(value) ? value : [];
+  const configuredCount = rows.filter((row) => String(row.plmn ?? '').trim()).length;
+  const maxReached = configuredCount >= maxRows;
+
+  const updateRow = (key: string, plmn: string) => {
+    onChange?.(rows.map((row) => (row.key === key ? { ...row, plmn } : row)));
+  };
+
+  const addRow = () => {
+    if (maxReached) {
+      message.warning(t('device.cell.plmnLimitReached', { max: maxRows }));
+      return;
+    }
+    onChange?.([
+      ...rows,
+      { key: `plmn-${Date.now()}-${rows.length}`, plmn: '' },
+    ]);
+  };
+
+  const columns = [
+    {
+      title: 'PLMN',
+      dataIndex: 'plmn',
+      key: 'plmn',
+      render: (_: unknown, row: PlmnRow) => {
+        const invalid = Boolean(row.plmn.trim()) && !/^\d{5,6}$/.test(row.plmn.trim());
+        return (
+          <Tooltip title={invalid ? t('device.cell.plmnFormatInvalid') : ''}>
+            <Input
+              value={row.plmn}
+              disabled={disabled}
+              status={invalid ? 'error' : undefined}
+              placeholder="46000"
+              onChange={(event) => updateRow(row.key, event.target.value)}
+            />
+          </Tooltip>
+        );
+      },
+    },
+    {
+      title: t('table.operation'),
+      key: 'actions',
+      width: 80,
+      render: (_: unknown, row: PlmnRow) => (
+        <Button
+          danger
+          type="text"
+          icon={<DeleteOutlined />}
+          disabled={disabled}
+          onClick={() => onChange?.(rows.filter((item) => item.key !== row.key))}
+        />
+      ),
+    },
+  ];
+
+  return (
+    <Space orientation="vertical" style={{ width: '100%' }} size={8}>
+      <Table<PlmnRow>
+        size="small"
+        rowKey="key"
+        pagination={false}
+        dataSource={rows}
+        columns={columns}
+      />
+      <Button
+        type="dashed"
+        block
+        icon={<PlusOutlined />}
+        onClick={addRow}
+        disabled={disabled || maxReached}
+      >
+        {t('device.cell.addRow')}
+      </Button>
+      <Alert
+        type={maxReached ? 'warning' : 'info'}
+        showIcon
+        message={t('device.cell.plmnLimitHint', { max: maxRows })}
+      />
+    </Space>
+  );
 }
 
 function normalizeMmeIpPlmnRows(rows: MmeIpPlmnRow[]): MmeIpPlmnRow[] {
@@ -914,6 +1048,13 @@ function buildSpecialFieldConfig(
       forceWritable: true,
     };
   }
+  if (groupId === 'enb-plmn' && paramName === 'ExistPlmnidList') {
+    return {
+      kind: 'plmn-list-table',
+      configPath: applyInstanceContext('Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.ExistPlmnidList', instanceContext),
+      forceWritable: true,
+    };
+  }
   if (groupId === 'gnb-core' && paramName === 'gNBName') {
     return {
       kind: 'input',
@@ -1013,7 +1154,6 @@ function findRawValueBySuffix(parameters: DeviceParameter[] | undefined, suffix:
 export default function CellParameterForm({ deviceId, active = true, group, instanceContext, locale, onIpsecControlChange }: CellParameterFormProps) {
   const t = useT();
   const [form] = Form.useForm();
-  const latestLocalEditAtRef = useRef(0);
   const gnssSyncSourceRef = useRef<string[]>([]);
   const watchedLocalTimeZoneName = Form.useWatch('LocalTimeZoneName', form);
   const watchedIpsecEnable = Form.useWatch('IPSEC_ENABLE', form);
@@ -1039,6 +1179,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
   const setFeedback = useQuickSettingsFeedbackStore((s) => s.setFeedback);
   const patchFeedback = useQuickSettingsFeedbackStore((s) => s.patchFeedback);
   const draft = useQuickSettingsFeedbackStore((s) => s.drafts[fbKey]);
+  const draftRevision = useQuickSettingsFeedbackStore((s) => s.draftRevisions[fbKey] ?? 0);
   const setDraftField = useQuickSettingsFeedbackStore((s) => s.setDraftField);
   const clearDraft = useQuickSettingsFeedbackStore((s) => s.clearDraft);
   const isDeviceTimeGroup = group.id === 'device-time';
@@ -1047,6 +1188,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
   const preferSchemaCurrentValue = isDeviceTimeGroup
     || isGnbSyncSourceGroup
     || group.id === 'device-ipsec-control'
+    || group.id === 'enb-plmn'
     || group.id === 'enb-mme'
     || group.id === 'gnb-core';
   const isEffectiveBitmaskPath = useCallback(
@@ -1498,8 +1640,11 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
       const draftItem = schemaByPath.get(draftPath);
       const enumValuesForPath = p.enumOptions?.map((option) => option.value) ?? draftItem?.constraints?.enumValues ?? [];
       if (draft && draft[p.name] !== undefined) {
-        const nextValue = resolveRuntimeSpecialConfig(p.name)?.kind === 'mme-ip-plmn-table'
+        const specialKind = resolveRuntimeSpecialConfig(p.name)?.kind;
+        const nextValue = specialKind === 'mme-ip-plmn-table'
           ? toMmeIpPlmnRows(draft[p.name])
+          : specialKind === 'plmn-list-table'
+          ? toPlmnRows(draft[p.name])
           : isConstrainedGnssSyncSourceSelectPath(draftPath)
           ? normalizeConstrainedGnssSyncSourceValue(draft[p.name], enumValuesForPath, draftPath)
           : isEffectiveBitmaskPath(draftPath)
@@ -1540,6 +1685,11 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
           ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
           : (rawItem?.parameterValue ?? item?.currentValue ?? '');
         form.setFieldValue(p.name, toMmeIpPlmnRows(raw));
+      } else if (special?.kind === 'plmn-list-table') {
+        const raw = preferSchemaCurrentValue
+          ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
+          : (rawItem?.parameterValue ?? item?.currentValue ?? '');
+        form.setFieldValue(p.name, toPlmnRows(raw));
       } else {
         // 这些分组会同时读 search + schema。优先采用 schema 当前值，避免 search 缓存
         // 在 refreshTick remount 后短暂覆盖刚回读的新值。
@@ -1621,6 +1771,20 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
           continue;
         }
       }
+      if (special?.kind === 'plmn-list-table') {
+        const normalizedRows = toPlmnRows(values[p.name]);
+        values[p.name] = normalizedRows;
+        const maxRows = p.maxValue ?? 6;
+        const validationError = plmnValidationMessage(
+          validatePlmnList(normalizedRows, maxRows),
+          maxRows,
+          t,
+        );
+        if (validationError) {
+          errors[p.name] = validationError;
+          continue;
+        }
+      }
 
       const isBitmaskField = isEffectiveBitmaskPath(path);
       const isMultiCheckboxField = p.type === 'multiCheckbox';
@@ -1629,6 +1793,8 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
       const isSwitchField = isSwitchPath(path);
       const newVal = special?.kind === 'mme-ip-plmn-table'
         ? serializeMmeIpPlmnList(toMmeIpPlmnRows(values[p.name]))
+        : special?.kind === 'plmn-list-table'
+        ? serializePlmnList(toPlmnRows(values[p.name]))
         : isBitmaskField
         ? serializeBitmaskValue(values[p.name])
         : isMultiCheckboxField
@@ -1710,11 +1876,11 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
     }
 
     setFieldErrors({});
+    const submittedDraftRevision = useQuickSettingsFeedbackStore.getState().draftRevisions[fbKey] ?? 0;
     try {
       // 快速设置始终修改设备/LMT 侧参数。HNBName、gNBName 与其他参数一样
       // 通过 SetParameterValues 下发，不得转成网管设备改名操作。
       const result = await updateMutation.mutateAsync({ deviceId, parameters: updates });
-      latestLocalEditAtRef.current = 0;
       message.success({
         content: t('device.cell.saveSuccessMsg', { count: updates.length }),
         duration: 6,
@@ -1725,6 +1891,10 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         taskId: result.taskId,
         count: updates.length,
         at: Date.now(),
+        expectedReadback: Object.fromEntries(
+          updates.map((update) => [update.parameterPath, update.parameterValue]),
+        ),
+        submittedDraftRevision,
       });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -1757,34 +1927,41 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
   useEffect(() => {
     if (!active) return;
     if (!lastTask || !['completed', 'failed', 'expired', 'cancelled'].includes(lastTask.status)) return;
-    if ((lastSubmit?.at ?? 0) < latestLocalEditAtRef.current) return;
+    // 非成功终态必须保留本地草稿，供用户修正后重试；失败提示由下方独立 effect 负责。
+    if (lastTask.status !== 'completed') return;
+    if (!canApplySubmittedReadback({
+      taskId: lastTask.id,
+      syncedForTaskId: lastSubmit?.syncedForTaskId,
+      submittedDraftRevision: lastSubmit?.submittedDraftRevision,
+      currentDraftRevision: draftRevision,
+    })) return;
     let cancelled = false;
+    const abortController = new AbortController();
     void (async () => {
-      const refreshedSchemaByPath = new Map<string, ParameterSchemaItem>();
-      try {
-        // SPV 完成后后端会自动追加一次 GPV 回读并写 device_parameters。
-        // 这里稍等回读落库，并清掉 deviceParameterApi 的 5min schema 内存缓存，
-        // 否则会把 SPV 前的旧 currentValue 重新写回表单，用户必须刷新页面才看到新值。
-        if (lastTask.status === 'completed') {
-          await new Promise((resolve) => window.setTimeout(resolve, 500));
-          if (cancelled) return;
-          deviceParameterApi.invalidateParameterSchemaCache(deviceId);
-          await Promise.all([
-            queryClient.invalidateQueries({ queryKey: ['devices', 'parameters', 'search', deviceId] }),
-            queryClient.invalidateQueries({ queryKey: ['devices', 'parameter-schema', deviceId] }),
-          ]);
-          if (cancelled) return;
-        }
+      let refreshedSchemaByPath = new Map<string, ParameterSchemaItem>();
+      const fetchRefreshedSchema = async (): Promise<Map<string, ParameterSchemaItem>> => {
+        deviceParameterApi.invalidateParameterSchemaCache(deviceId);
+        await Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: ['devices', 'parameters', 'search', deviceId],
+            refetchType: 'none',
+          }),
+          queryClient.invalidateQueries({
+            queryKey: ['devices', 'parameter-schema', deviceId],
+            refetchType: 'none',
+          }),
+        ]);
+        const nextSchemaByPath = new Map<string, ParameterSchemaItem>();
         if (isDeviceTimeGroup) {
           const [refreshedDeviceTime, refreshedManagementServer] = await Promise.all([
             refetchDeviceTimeSchema(),
             refetchManagementServerSchema(),
           ]);
           for (const item of refreshedDeviceTime.data?.parameters ?? []) {
-            refreshedSchemaByPath.set(item.path, item);
+            nextSchemaByPath.set(item.path, item);
           }
           for (const item of refreshedManagementServer.data?.parameters ?? []) {
-            refreshedSchemaByPath.set(item.path, item);
+            nextSchemaByPath.set(item.path, item);
           }
         } else if (isGnbSyncSourceGroup) {
           const [refreshedGnbSyncFap, refreshedGnbSyncDeviceInfo] = await Promise.all([
@@ -1792,20 +1969,53 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
             refetchGnbSyncDeviceInfoSchema(),
           ]);
           for (const item of refreshedGnbSyncFap.data?.parameters ?? []) {
-            refreshedSchemaByPath.set(item.path, item);
+            nextSchemaByPath.set(item.path, item);
           }
           for (const item of refreshedGnbSyncDeviceInfo.data?.parameters ?? []) {
-            refreshedSchemaByPath.set(item.path, item);
+            nextSchemaByPath.set(item.path, item);
           }
         } else {
           const refreshed = await refetchCommonSchema();
           for (const item of refreshed.data?.parameters ?? []) {
-            refreshedSchemaByPath.set(item.path, item);
+            nextSchemaByPath.set(item.path, item);
           }
         }
+        return nextSchemaByPath;
+      };
+      try {
+        const expectedReadback = new Map(Object.entries(lastSubmit?.expectedReadback ?? {}));
+        if (group.id === 'enb-mme' && expectedReadback.size > 0) {
+          // SPV completed 只代表设备接受设置。后端自动 GPV 落库前 schema 仍可能是旧值，
+          // 因此持续读取目标 path，只有实际观察到本次提交值才允许覆盖表单和清理草稿。
+          await waitForExpectedParameterValues({
+            expected: expectedReadback,
+            read: async () => {
+              refreshedSchemaByPath = await fetchRefreshedSchema();
+              return new Map(
+                Array.from(refreshedSchemaByPath.entries()).map(([path, item]) => [
+                  path,
+                  String(item.currentValue ?? ''),
+                ]),
+              );
+            },
+            intervalMs: 500,
+            timeoutMs: 30_000,
+            signal: abortController.signal,
+          });
+        } else {
+          // 其它既有快速设置分组保持原有刷新节奏；Issue 158 的 MME 路径不再依赖该固定延时。
+          await new Promise((resolve) => window.setTimeout(resolve, 500));
+          if (cancelled) return;
+          refreshedSchemaByPath = await fetchRefreshedSchema();
+        }
       } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') return;
         if (!cancelled) {
-          const errMsg = err instanceof Error ? err.message : String(err);
+          const errMsg = err instanceof ParameterReadbackTimeoutError
+            ? t('device.cell.readbackPendingTimeout')
+            : err instanceof Error
+            ? err.message
+            : String(err);
           notification.error({
             message: t('device.multi.readbackFailed', { group: group.titleZh }),
             description: errMsg,
@@ -1815,6 +2025,13 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         return;
       }
       if (cancelled) return;
+      const currentDraftRevision = useQuickSettingsFeedbackStore.getState().draftRevisions[fbKey] ?? 0;
+      if (!canApplySubmittedReadback({
+        taskId: lastTask.id,
+        syncedForTaskId: lastSubmit?.syncedForTaskId,
+        submittedDraftRevision: lastSubmit?.submittedDraftRevision,
+        currentDraftRevision,
+      })) return;
       const nextValues: Record<string, unknown> = {};
       for (const p of effectiveParams) {
         const special = resolveRuntimeSpecialConfig(p.name);
@@ -1823,6 +2040,8 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         const allowedEnumValues = p.enumOptions?.map((option) => option.value) ?? refreshedSchemaByPath.get(path)?.constraints?.enumValues ?? [];
         nextValues[p.name] = special?.kind === 'mme-ip-plmn-table'
           ? toMmeIpPlmnRows(refreshedValue)
+          : special?.kind === 'plmn-list-table'
+          ? toPlmnRows(refreshedValue)
           : isConstrainedGnssSyncSourceSelectPath(path)
             ? normalizeConstrainedGnssSyncSourceValue(refreshedValue, allowedEnumValues, path)
           : isEffectiveBitmaskPath(path)
@@ -1854,13 +2073,15 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
       if (Array.isArray(syncSourceValue)) {
         gnssSyncSourceRef.current = syncSourceValue.map(String);
       }
+      patchFeedback(fbKey, { syncedForTaskId: lastTask.id });
       clearDraft(fbKey);
       setFieldErrors({});
     })();
     return () => {
       cancelled = true;
+      abortController.abort();
     };
-  }, [active, lastTask?.id, lastTask?.status, lastSubmit?.at, refetchCommonSchema, refetchDeviceTimeSchema, refetchManagementServerSchema, refetchGnbSyncFapSchema, refetchGnbSyncDeviceInfoSchema, effectiveParams, instanceContext, form, clearDraft, fbKey, group.titleZh, resolveRuntimeSpecialConfig, t, isDeviceTimeGroup, isGnbSyncSourceGroup, deviceTimeModeOptionsKey, queryClient, deviceId, isEffectiveBitmaskPath, isConstrainedGnssSyncSourceSelectPath]);
+  }, [active, lastTask?.id, lastTask?.status, lastSubmit?.at, lastSubmit?.expectedReadback, lastSubmit?.submittedDraftRevision, lastSubmit?.syncedForTaskId, draftRevision, refetchCommonSchema, refetchDeviceTimeSchema, refetchManagementServerSchema, refetchGnbSyncFapSchema, refetchGnbSyncDeviceInfoSchema, effectiveParams, instanceContext, form, clearDraft, patchFeedback, fbKey, group.id, group.titleZh, resolveRuntimeSpecialConfig, t, isDeviceTimeGroup, isGnbSyncSourceGroup, deviceTimeModeOptionsKey, queryClient, deviceId, isEffectiveBitmaskPath, isConstrainedGnssSyncSourceSelectPath]);
 
   // T-0146:基站应答失败时弹一次 notification(只在 status 第一次变成 failed 时触发,避免重复弹)
   // notifiedFailedTaskId 同样存 store —— 切顶层 tab 再切回不会重复弹。
@@ -1930,7 +2151,6 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         form={form}
         layout="vertical"
         onValuesChange={(changedValues) => {
-          latestLocalEditAtRef.current = Date.now();
           // 同步到 store draft，跨顶层 TabBar 切走切回可恢复
           for (const [name, value] of Object.entries(changedValues)) {
             const p = visibleParams.find((q) => q.name === name);
@@ -1951,6 +2171,8 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
             }
             if (special?.kind === 'mme-ip-plmn-table') {
               setDraftField(fbKey, name, toMmeIpPlmnRows(value));
+            } else if (special?.kind === 'plmn-list-table') {
+              setDraftField(fbKey, name, serializePlmnList(toPlmnRows(value)));
             } else if (p?.type === 'multiCheckbox') {
               const normalized = isBscCodecSupportParam(path)
                 ? normalizeBscCodecSupportValue(value)
@@ -2011,6 +2233,8 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
               const sItem = schemaByPath.get(path);
               const normalizedValue = special?.kind === 'mme-ip-plmn-table'
                 ? serializeMmeIpPlmnList(toMmeIpPlmnRows(value))
+                : special?.kind === 'plmn-list-table'
+                ? serializePlmnList(toPlmnRows(value))
                 : isEffectiveBitmaskPath(path)
                 ? serializeBitmaskValue(value)
                 : p.type === 'multiCheckbox'
@@ -2023,7 +2247,9 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                 ? serializeSwitchValue(value)
                 : String(value ?? '');
               const allowedValues = p.enumOptions?.map((option) => option.value) ?? sItem?.constraints?.enumValues ?? [];
-              const err = isEffectiveBitmaskPath(path)
+              const err = special?.kind === 'plmn-list-table'
+                ? null
+                : isEffectiveBitmaskPath(path)
                 ? isConstrainedGnssSyncSourceSelectPath(path)
                   ? validateConstrainedGnssSyncSourceValue(normalizedValue, allowedValues, path, t)
                   : validateBitmaskValue(
@@ -2051,13 +2277,20 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
               const mmeRowsErr = special?.kind === 'mme-ip-plmn-table'
                 ? validateMmeIpPlmnRows(toMmeIpPlmnRows(value))
                 : null;
+              const plmnRowsErr = special?.kind === 'plmn-list-table'
+                ? plmnValidationMessage(
+                  validatePlmnList(toPlmnRows(value), p.maxValue ?? 6),
+                  p.maxValue ?? 6,
+                  t,
+                )
+                : null;
               // XML 驱动的 extraInfoPath 范围校验:在 schema 校验之后追加;
               // schema 已报错时优先展示 schema 错误,避免双错信息互盖。
               const extraBounds = extraInfoBoundsByName.get(name);
-              const rangeErr = !err && !mmeRowsErr && !mmeLimitErr && extraBounds
+              const rangeErr = !err && !mmeRowsErr && !mmeLimitErr && !plmnRowsErr && extraBounds
                 ? validateExtraInfoBounds(normalizedValue, extraBounds)
                 : null;
-              const finalErr = err ?? mmeRowsErr ?? mmeLimitErr ?? rangeErr;
+              const finalErr = err ?? mmeRowsErr ?? mmeLimitErr ?? plmnRowsErr ?? rangeErr;
               if (finalErr) next[name] = finalErr;
               else delete next[name];
               // 镜像字段同时清/重新校验（值刚被程序性写入，旧 error 应失效）
@@ -2205,7 +2438,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
             const extraInfoFormatted = extraInfoRaw ? formatExtraInfoRange(extraInfoRaw) : '';
             const label = (
               <Space size={4}>
-                <span style={special?.kind === 'mme-ip-plmn-table' ? { whiteSpace: 'nowrap' } : undefined}>
+                <span style={special?.kind === 'mme-ip-plmn-table' || special?.kind === 'plmn-list-table' ? { whiteSpace: 'nowrap' } : undefined}>
                   {locale === 'zh-CN' ? p.titleZh : p.titleEn}
                 </span>
                 {(!writable || p.readonly) && <Text type="secondary" style={{ fontSize: 12 }}>{t('device.cell.readonly')}</Text>}
@@ -2273,6 +2506,8 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
               : baseEnumOptions;
             const extra = special?.kind === 'mme-ip-plmn-table'
               ? t('device.cell.mmeIpPlmnExtra')
+              : special?.kind === 'plmn-list-table'
+              ? t('device.cell.plmnListExtra')
               : undefined;
             const effectiveBindOptions = special?.kind === 'bind-select'
               ? appendCurrentBindOption(
@@ -2282,9 +2517,9 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                 )
               : [];
             const input = (
-              <Col span={special?.kind === 'mme-ip-plmn-table' ? 24 : 8} key={p.name}>
+              <Col span={special?.kind === 'mme-ip-plmn-table' || special?.kind === 'plmn-list-table' ? 24 : 8} key={p.name}>
                 <Form.Item
-                  label={special?.kind === 'mme-ip-plmn-table' ? undefined : label}
+                  label={special?.kind === 'mme-ip-plmn-table' || special?.kind === 'plmn-list-table' ? undefined : label}
                   name={isTransmissionPowerField ? undefined : p.name}
                   valuePropName={!isTransmissionPowerField && isSwitchField ? 'checked' : undefined}
                   normalize={isCodecSupport ? normalizeBscCodecSupportValue : undefined}
@@ -2312,6 +2547,11 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                       disabled={!finalWritable}
                       locale={locale}
                       maxRows={p.maxValue}
+                    />
+                  ) : special?.kind === 'plmn-list-table' ? (
+                    <PlmnListTable
+                      disabled={!finalWritable}
+                      maxRows={p.maxValue ?? 6}
                     />
                   ) : isSwitchField ? (
                     <Switch

@@ -64,6 +64,26 @@ func TestBMNeighborListHasPrivateArfcnAlias(t *testing.T) {
 	t.Fatalf("expected BM.xml to define alias %s -> %s", privatePath, standardPath)
 }
 
+func TestMLQPLMNListObjectIsWritable(t *testing.T) {
+	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "MLQ.xml")
+	body, err := os.ReadFile(xmlPath)
+	require.NoError(t, err)
+
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal(body, &doc))
+
+	const path = "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList."
+	for _, object := range doc.Objects {
+		if object.StandardPath == path {
+			assert.Equal(t, path, object.Name)
+			assert.Equal(t, "READ_WRITE", object.Access)
+			return
+		}
+	}
+
+	t.Fatalf("expected MLQ.xml to define writable PLMNList object at %s", path)
+}
+
 func TestBMUpTimeUsesStandardPath(t *testing.T) {
 	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BM.xml")
 	body, err := os.ReadFile(xmlPath)

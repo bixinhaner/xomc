@@ -35,6 +35,7 @@ import {
   validateValue,
   type QuickSettingsInstanceContext,
 } from './validators';
+import { buildEffectivePlmnRows, validatePlmnList } from './plmnList';
 
 import { useT } from '@/hooks/useT';
 
@@ -1872,6 +1873,33 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
         if (err) validationErrors.push(err);
       });
     });
+    if (group.id === 'enb-plmn') {
+      const finalPlmnRows = buildEffectivePlmnRows({
+        existingRows: instanceIds.map((instId) => ({
+          key: instId,
+          plmn: schemaByPath.get(`${objectPath}${instId}.PLMNID`)?.currentValue ?? '',
+        })),
+        deletedKeys: pendingDeletes,
+        editedValues: new Map(editedRows.map(([instId, state]) => [
+          instId,
+          state.edits.PLMNID
+            ?? schemaByPath.get(`${objectPath}${instId}.PLMNID`)?.currentValue
+            ?? '',
+        ])),
+        addedRows: addRows.map((row) => ({
+          key: row.tempId,
+          plmn: row.values.PLMNID ?? '',
+        })),
+      });
+      const plmnError = validatePlmnList(finalPlmnRows, group.maxInstances ?? 6);
+      if (plmnError === 'format') {
+        validationErrors.push(t('device.cell.plmnFormatInvalid'));
+      } else if (plmnError === 'duplicate') {
+        validationErrors.push(t('device.cell.plmnDuplicate'));
+      } else if (plmnError === 'limit') {
+        validationErrors.push(t('device.cell.plmnLimitReached', { max: group.maxInstances ?? 6 }));
+      }
+    }
 
     if (validationErrors.length > 0) {
       const detail = validationErrors.slice(0, 4).join('; ');
@@ -2006,8 +2034,11 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     deviceId,
     fbKey,
     group.titleZh,
+    group.id,
+    group.maxInstances,
     groupParamByLeaf,
     hideStaleInstance,
+    instanceIds,
     leafSchemaByLeaf,
     objectPath,
     pendingAdds,
