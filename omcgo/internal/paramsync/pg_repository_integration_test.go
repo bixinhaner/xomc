@@ -2,6 +2,7 @@ package paramsync
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"testing"
@@ -595,4 +596,133 @@ func TestPGRepository_ListReleaseCandidatesPrioritizesUnattemptedDevices(t *test
 	require.NoError(t, err)
 	require.Len(t, devices, 1)
 	assert.Equal(t, unattemptedHighID, devices[0].ID)
+}
+
+func insertRegisteredSyncCandidateForTest(t *testing.T, pool *pgxpool.Pool, deviceID uuid.UUID, deleted bool) string {
+	t.Helper()
+	sourceEventID := "device_registered:" + deviceID.String()
+	extensionData, err := json.Marshal(map[string]string{
+		"_system_registration_source_event_id": "inform:" + uuid.NewString(),
+	})
+	require.NoError(t, err)
+	_, err = pool.Exec(context.Background(), `
+		INSERT INTO devices (
+			id, serial_number, oui, carrier, technology, lifecycle_state, extension_data, deleted_at
+		) VALUES ($1, $2, 'AABBCC', $3, $4, $5, $6, CASE WHEN $7 THEN now() ELSE NULL END)
+	`, deviceID, "TEST-REGISTERED-"+deviceID.String(), model.CarrierCMCC,
+		model.TechLTE, model.LifecycleRegistered, extensionData, deleted)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM devices WHERE id=$1`, deviceID)
+	})
+	return sourceEventID
+}
+
+func insertRegisteredSyncRequestForTest(
+	t *testing.T,
+	pool *pgxpool.Pool,
+	deviceID uuid.UUID,
+	sourceEventID string,
+	status RequestStatus,
+	activeRunStatus *RunStatus,
+) {
+	t.Helper()
+	now := time.Now().UTC()
+	req := &SyncRequest{
+		ID:            uuid.New(),
+		DeviceID:      deviceID,
+		DeviceSN:      "TEST-REGISTERED-" + deviceID.String(),
+		CallerType:    "provision",
+		TriggerReason: TriggerDeviceRegistered,
+		SyncScope:     SyncScopeFull,
+		Status:        status,
+		Priority:      10,
+		NextAttemptAt: now,
+		SourceEventID: &sourceEventID,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if status.Terminal() {
+		req.CompletedAt = &now
+	}
+	query, args, err := buildCreateRequest(req)
+	require.NoError(t, err)
+	_, err = pool.Exec(context.Background(), query, args...)
+	require.NoError(t, err)
+	if activeRunStatus != nil {
+		runID := uuid.New()
+		_, err = pool.Exec(context.Background(), `
+			INSERT INTO parameter_sync_runs (
+				id, request_id, device_id, device_sn, trigger_reason, sync_scope, status
+			) VALUES ($1, $2, $3, $4, 'device_registered', 'full', $5)
+		`, runID, req.ID, deviceID, req.DeviceSN, *activeRunStatus)
+		require.NoError(t, err)
+		_, err = pool.Exec(context.Background(), `UPDATE parameter_sync_requests SET active_run_id=$2 WHERE id=$1`, req.ID, runID)
+		require.NoError(t, err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM parameter_sync_requests WHERE id=$1`, req.ID)
+	})
+}
+
+func TestPGRepository_ListRegisteredSyncCandidatesRetriesOnlyUncoveredRegistrations(t *testing.T) {
+	pool := newParamSyncTestPool(t)
+	repo, ok := any(NewPGRepository(pool)).(interface {
+		ListRegisteredSyncCandidates(context.Context, int) ([]*model.Device, error)
+	})
+	require.True(t, ok, "PG repository must find registrations requiring durable reconciliation")
+
+	noRequestID := uuid.New()
+	failedID := uuid.New()
+	rejectedID := uuid.New()
+	deduplicatedFailedID := uuid.New()
+	coveredID := uuid.New()
+	deduplicatedActiveID := uuid.New()
+	backedOffID := uuid.New()
+	deletedID := uuid.New()
+
+	noRequestSource := insertRegisteredSyncCandidateForTest(t, pool, noRequestID, false)
+	failedSource := insertRegisteredSyncCandidateForTest(t, pool, failedID, false)
+	rejectedSource := insertRegisteredSyncCandidateForTest(t, pool, rejectedID, false)
+	deduplicatedFailedSource := insertRegisteredSyncCandidateForTest(t, pool, deduplicatedFailedID, false)
+	coveredSource := insertRegisteredSyncCandidateForTest(t, pool, coveredID, false)
+	deduplicatedActiveSource := insertRegisteredSyncCandidateForTest(t, pool, deduplicatedActiveID, false)
+	backedOffSource := insertRegisteredSyncCandidateForTest(t, pool, backedOffID, false)
+	deletedSource := insertRegisteredSyncCandidateForTest(t, pool, deletedID, true)
+	_ = noRequestSource
+
+	insertRegisteredSyncRequestForTest(t, pool, failedID, failedSource, RequestStatusFailed, nil)
+	insertRegisteredSyncRequestForTest(t, pool, rejectedID, rejectedSource, RequestStatusRejected, nil)
+	failedRun := RunStatusFailed
+	insertRegisteredSyncRequestForTest(t, pool, deduplicatedFailedID, deduplicatedFailedSource, RequestStatusDeduplicated, &failedRun)
+	insertRegisteredSyncRequestForTest(t, pool, coveredID, coveredSource, RequestStatusSucceeded, nil)
+	executingRun := RunStatusExecuting
+	insertRegisteredSyncRequestForTest(t, pool, deduplicatedActiveID, deduplicatedActiveSource, RequestStatusDeduplicated, &executingRun)
+	insertRegisteredSyncRequestForTest(t, pool, backedOffID, backedOffSource, RequestStatusFailed, nil)
+	insertRegisteredSyncRequestForTest(t, pool, deletedID, deletedSource, RequestStatusFailed, nil)
+
+	_, err := pool.Exec(context.Background(), `
+		INSERT INTO parameter_sync_device_state (device_id, consecutive_failures, next_auto_sync_at, updated_at)
+		VALUES ($1, 1, now() + interval '1 hour', now())
+	`, backedOffID)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM parameter_sync_device_state WHERE device_id=$1`, backedOffID)
+	})
+
+	devices, err := repo.ListRegisteredSyncCandidates(context.Background(), 20)
+
+	require.NoError(t, err)
+	ids := make(map[uuid.UUID]bool, len(devices))
+	for _, dev := range devices {
+		ids[dev.ID] = true
+	}
+	assert.True(t, ids[noRequestID])
+	assert.True(t, ids[failedID])
+	assert.True(t, ids[rejectedID])
+	assert.True(t, ids[deduplicatedFailedID])
+	assert.False(t, ids[coveredID])
+	assert.False(t, ids[deduplicatedActiveID])
+	assert.False(t, ids[backedOffID])
+	assert.False(t, ids[deletedID])
 }

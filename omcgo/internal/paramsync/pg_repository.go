@@ -83,6 +83,81 @@ func (r *PGRepository) ListReleaseCandidates(
 	return devices, nil
 }
 
+// ListRegisteredSyncCandidates returns registrations whose durable full sync
+// was never completed. The registration marker is written with the device, so
+// it survives the at-least-once event consumer after its NATS delivery budget
+// has been exhausted.
+func (r *PGRepository) ListRegisteredSyncCandidates(ctx context.Context, limit int) ([]*model.Device, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	covered := sq.
+		Select("1").
+		From("parameter_sync_requests req").
+		Where("req.device_id = d.id").
+		Where(sq.Eq{"req.trigger_reason": TriggerDeviceRegistered}).
+		Where("req.source_event_id = 'device_registered:' || d.id::text").
+		Where(sq.Or{
+			sq.Eq{"req.status": []RequestStatus{
+				RequestStatusAccepted,
+				RequestStatusQueued,
+				RequestStatusRunning,
+				RequestStatusSucceeded,
+			}},
+			sq.And{
+				sq.Eq{"req.status": RequestStatusDeduplicated},
+				sq.Expr(`EXISTS (
+					SELECT 1 FROM parameter_sync_runs run
+					WHERE run.id = req.active_run_id
+					  AND run.sync_scope = ?
+					  AND run.status IN (?, ?, ?, ?, ?, ?, ?)
+				)`,
+					SyncScopeFull,
+					RunStatusPlanning,
+					RunStatusEnqueuing,
+					RunStatusWaitingDevice,
+					RunStatusExecuting,
+					RunStatusProcessing,
+					RunStatusCancelling,
+					RunStatusSucceeded,
+				),
+			},
+		})
+	query, args, err := storage.Psql.
+		Select("d.id", "d.serial_number").
+		From("devices d").
+		LeftJoin("parameter_sync_device_state state ON state.device_id = d.id").
+		Where(sq.Eq{"d.deleted_at": nil}).
+		Where("d.extension_data ->> '_system_registration_source_event_id' IS NOT NULL").
+		Where("(state.next_auto_sync_at IS NULL OR state.next_auto_sync_at <= now())").
+		Where(sq.Expr("NOT EXISTS (?)", covered)).
+		OrderBy("state.last_attempt_at ASC NULLS FIRST", "d.id").
+		Limit(uint64(limit)).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list registered parameter sync candidates: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list registered parameter sync candidates: %w", err)
+	}
+	defer rows.Close()
+
+	devices := make([]*model.Device, 0)
+	for rows.Next() {
+		dev := &model.Device{}
+		if err := rows.Scan(&dev.ID, &dev.SerialNumber); err != nil {
+			return nil, fmt.Errorf("scan registered parameter sync candidate: %w", err)
+		}
+		devices = append(devices, dev)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate registered parameter sync candidates: %w", err)
+	}
+	return devices, nil
+}
+
 func (r *PGRepository) CreateRequest(ctx context.Context, req *SyncRequest) error {
 	query, args, err := buildCreateRequest(req)
 	if err != nil {
