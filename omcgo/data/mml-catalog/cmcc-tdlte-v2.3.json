@@ -1704,83 +1704,6 @@
           "access": "READ_WRITE",
           "data_type": "string",
           "max_length": 64
-        },
-        {
-          "standard_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T300",
-          "param_name": "T300",
-          "chinese_name": "T300定时器",
-          "access": "READ_WRITE",
-          "data_type": "string",
-          "max_length": 64
-        },
-        {
-          "standard_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T301",
-          "param_name": "T301",
-          "chinese_name": "T301定时器",
-          "access": "READ_WRITE",
-          "data_type": "string",
-          "max_length": 64
-        },
-        {
-          "standard_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T302",
-          "param_name": "T302",
-          "chinese_name": "T302定时器",
-          "access": "READ_WRITE",
-          "data_type": "unsignedInt",
-          "min_value": 1,
-          "max_value": 16
-        },
-        {
-          "standard_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304EUTRA",
-          "param_name": "T304EUTRA",
-          "chinese_name": "T304(EUTRA)定时器",
-          "access": "READ_WRITE",
-          "data_type": "string",
-          "max_length": 64
-        },
-        {
-          "standard_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304IRAT",
-          "param_name": "T304IRAT",
-          "chinese_name": "T304(异系统)定时器",
-          "access": "READ_WRITE",
-          "data_type": "string",
-          "max_length": 64
-        },
-        {
-          "standard_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T310",
-          "param_name": "T310",
-          "chinese_name": "T310定时器",
-          "access": "READ_WRITE",
-          "data_type": "unsignedInt"
-        },
-        {
-          "standard_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T311",
-          "param_name": "T311",
-          "chinese_name": "T311定时器",
-          "access": "READ_WRITE",
-          "data_type": "string",
-          "max_length": 64
-        },
-        {
-          "standard_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T320",
-          "param_name": "T320",
-          "chinese_name": "T320定时器",
-          "access": "READ_WRITE",
-          "data_type": "unsignedInt"
-        },
-        {
-          "standard_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N310",
-          "param_name": "N310",
-          "chinese_name": "T310定时器",
-          "access": "READ_WRITE",
-          "data_type": "unsignedInt"
-        },
-        {
-          "standard_path": "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N311",
-          "param_name": "N311",
-          "chinese_name": "T311定时器",
-          "access": "READ_WRITE",
-          "data_type": "unsignedInt"
         }
       ],
       "commands": [
@@ -1813,17 +1736,7 @@
             "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.EnbType",
             "Device.Services.FAPService.{i}.CellConfig.LTE.VoLTEParam.SPSSwitchQCI1Ul",
             "Device.Services.FAPService.{i}.CellConfig.LTE.CAParam.CASwitchUl",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.CAParam.CASwitchDl",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T300",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T301",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T302",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304EUTRA",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304IRAT",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T310",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T311",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T320",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N310",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N311"
+            "Device.Services.FAPService.{i}.CellConfig.LTE.CAParam.CASwitchDl"
           ]
         },
         {
@@ -1853,17 +1766,7 @@
             "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.EnbType",
             "Device.Services.FAPService.{i}.CellConfig.LTE.VoLTEParam.SPSSwitchQCI1Ul",
             "Device.Services.FAPService.{i}.CellConfig.LTE.CAParam.CASwitchUl",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.CAParam.CASwitchDl",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T300",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T301",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T302",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304EUTRA",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304IRAT",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T310",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T311",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T320",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N310",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N311"
+            "Device.Services.FAPService.{i}.CellConfig.LTE.CAParam.CASwitchDl"
           ]
         }
       ]
