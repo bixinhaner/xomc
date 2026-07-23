@@ -622,6 +622,7 @@ type registeredDeviceSyncCall struct {
 
 type fakeRegisteredDeviceSyncStarter struct {
 	calls []registeredDeviceSyncCall
+	errs  []error
 }
 
 func (f *fakeRegisteredDeviceSyncStarter) StartRegisteredDeviceSync(
@@ -630,10 +631,67 @@ func (f *fakeRegisteredDeviceSyncStarter) StartRegisteredDeviceSync(
 	sourceID string,
 ) error {
 	f.calls = append(f.calls, registeredDeviceSyncCall{deviceID: dev.ID, sourceID: sourceID})
+	if len(f.errs) > 0 {
+		err := f.errs[0]
+		f.errs = f.errs[1:]
+		return err
+	}
 	return nil
 }
 
-func TestHandleBootstrap_CreatedDeviceDurableModeStartsRegisteredSync(t *testing.T) {
+func TestProvisioningEngine_Subscribe_RegisteredSyncRetriesSubmitFailure(t *testing.T) {
+	deviceID := uuid.New()
+	devRepo := &mockDeviceRepo{
+		GetByIDFn: func(context.Context, uuid.UUID) (*model.Device, error) {
+			return &model.Device{ID: deviceID, SerialNumber: "SN-REGISTERED-RETRY"}, nil
+		},
+	}
+	h := newEngineHarness(devRepo)
+	starter := &fakeRegisteredDeviceSyncStarter{
+		errs: []error{errors.New("temporary submit failure"), nil},
+	}
+	h.engine.SetParamSyncRoutingMode("durable")
+	h.engine.SetRegisteredDeviceSyncStarter(starter)
+
+	var syncHandler event.EventHandler
+	h.eventBus.QueueSubscribeFn = func(subject, queue string, handler event.EventHandler) (event.Subscription, error) {
+		if subject == event.SubjectDeviceRegistered && queue == "device-registered-param-sync" {
+			syncHandler = handler
+		}
+		return &mockSubscription{}, nil
+	}
+	require.NoError(t, h.engine.Subscribe(h.eventBus))
+	require.NotNil(t, syncHandler)
+	evt, err := event.NewEvent(event.SubjectDeviceRegistered, bootstrapEvent{
+		DeviceID: deviceID, SerialNumber: "SN-REGISTERED-RETRY", Created: true,
+	})
+	require.NoError(t, err)
+
+	require.Error(t, syncHandler(context.Background(), evt))
+	require.NoError(t, syncHandler(context.Background(), evt))
+	require.Len(t, starter.calls, 2)
+	assert.Equal(t, "device_registered:"+deviceID.String(), starter.calls[1].sourceID)
+}
+
+func TestHandleRegisteredDeviceSyncEvent_DeletedBeforeConsumptionIsSkipped(t *testing.T) {
+	h := newEngineHarness(&mockDeviceRepo{
+		GetByIDFn: func(context.Context, uuid.UUID) (*model.Device, error) {
+			return nil, nil
+		},
+	})
+	starter := &fakeRegisteredDeviceSyncStarter{}
+	h.engine.SetParamSyncRoutingMode("durable")
+	h.engine.SetRegisteredDeviceSyncStarter(starter)
+	evt, err := event.NewEvent(event.SubjectDeviceRegistered, bootstrapEvent{
+		DeviceID: uuid.New(), SerialNumber: "SN-DELETED-BEFORE-SYNC", Created: true,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, h.engine.handleRegisteredDeviceSyncEvent(context.Background(), evt))
+	assert.Empty(t, starter.calls)
+}
+
+func TestHandleRegisteredDeviceSyncEvent_CreatedDeviceDurableModeStartsSync(t *testing.T) {
 	h := newFullEngineHarness()
 	deviceID := uuid.New()
 	h.devRepo.GetByIDFn = func(context.Context, uuid.UUID) (*model.Device, error) {
@@ -649,20 +707,22 @@ func TestHandleBootstrap_CreatedDeviceDurableModeStartsRegisteredSync(t *testing
 	h.engine.SetParamSyncRoutingMode("durable")
 	h.engine.SetRegisteredDeviceSyncStarter(starter)
 
-	err := h.engine.HandleBootstrap(context.Background(), bootstrapEvent{
+	evt, err := event.NewEvent(event.SubjectDeviceRegistered, bootstrapEvent{
 		DeviceID:     deviceID,
 		SerialNumber: "SN-REGISTERED-SYNC",
 		ProductClass: "SmallCell-LTE",
 		Created:      true,
 	})
+	require.NoError(t, err)
 
+	err = h.engine.handleRegisteredDeviceSyncEvent(context.Background(), evt)
 	require.NoError(t, err)
 	require.Len(t, starter.calls, 1)
 	assert.Equal(t, deviceID, starter.calls[0].deviceID)
 	assert.Equal(t, "device_registered:"+deviceID.String(), starter.calls[0].sourceID)
 }
 
-func TestHandleBootstrap_ExistingBootstrapDoesNotStartRegisteredSync(t *testing.T) {
+func TestHandleRegisteredDeviceSyncEvent_ExistingDeviceDoesNotStartSync(t *testing.T) {
 	h := newFullEngineHarness()
 	deviceID := uuid.New()
 	h.devRepo.GetByIDFn = func(context.Context, uuid.UUID) (*model.Device, error) {
@@ -672,15 +732,17 @@ func TestHandleBootstrap_ExistingBootstrapDoesNotStartRegisteredSync(t *testing.
 	h.engine.SetParamSyncRoutingMode("durable")
 	h.engine.SetRegisteredDeviceSyncStarter(starter)
 
-	err := h.engine.HandleBootstrap(context.Background(), bootstrapEvent{
+	evt, err := event.NewEvent(event.SubjectDeviceRegistered, bootstrapEvent{
 		DeviceID: deviceID, SerialNumber: "SN-EXISTING", Created: false,
 	})
+	require.NoError(t, err)
 
+	err = h.engine.handleRegisteredDeviceSyncEvent(context.Background(), evt)
 	require.NoError(t, err)
 	assert.Empty(t, starter.calls)
 }
 
-func TestHandleBootstrap_CreatedDeviceClosedModeDoesNotStartRegisteredSync(t *testing.T) {
+func TestHandleRegisteredDeviceSyncEvent_CreatedDeviceClosedModeDoesNotStartSync(t *testing.T) {
 	h := newFullEngineHarness()
 	deviceID := uuid.New()
 	h.devRepo.GetByIDFn = func(context.Context, uuid.UUID) (*model.Device, error) {
@@ -690,10 +752,12 @@ func TestHandleBootstrap_CreatedDeviceClosedModeDoesNotStartRegisteredSync(t *te
 	h.engine.SetParamSyncRoutingMode("closed")
 	h.engine.SetRegisteredDeviceSyncStarter(starter)
 
-	err := h.engine.HandleBootstrap(context.Background(), bootstrapEvent{
+	evt, err := event.NewEvent(event.SubjectDeviceRegistered, bootstrapEvent{
 		DeviceID: deviceID, SerialNumber: "SN-CLOSED", Created: true,
 	})
+	require.NoError(t, err)
 
+	err = h.engine.handleRegisteredDeviceSyncEvent(context.Background(), evt)
 	require.NoError(t, err)
 	assert.Empty(t, starter.calls)
 }

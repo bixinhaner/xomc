@@ -334,6 +334,14 @@ func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
 	}
 	e.logger.Info("provisioning engine subscribed to device.registered events")
 
+	if _, err := bus.QueueSubscribe(
+		event.SubjectDeviceRegistered,
+		"device-registered-param-sync",
+		e.handleRegisteredDeviceSyncEvent,
+	); err != nil {
+		return fmt.Errorf("subscribe registered-device parameter sync: %w", err)
+	}
+
 	// Subscribe to datamodel.file.received for Path C model upload processing.
 	if _, err := bus.QueueSubscribe(event.SubjectDataModelFileReceived, "provision-model-upload", func(ctx context.Context, evt event.Event) error {
 		return e.handleDataModelFileReceived(ctx, evt)
@@ -612,10 +620,6 @@ func (e *ProvisioningEngine) HandleBootstrap(ctx context.Context, evt bootstrapE
 	// cache 还没写入；后续读再触发 GetOrLoad 即可）。返回值丢弃。
 	_ = e.bindDeviceProduct(ctx, dev)
 
-	if err := e.startRegisteredDeviceSync(ctx, evt, dev); err != nil {
-		return e.failTask(ctx, task, err)
-	}
-
 	// 3. Try matching template first (Path A).
 	if err := e.transitionTask(ctx, task, StateMatching); err != nil {
 		return e.failTask(ctx, task, fmt.Errorf("transition to matching: %w", err))
@@ -653,6 +657,26 @@ func (e *ProvisioningEngine) HandleBootstrap(ctx context.Context, evt bootstrapE
 		zap.String("device_sn", evt.SerialNumber),
 	)
 	return e.failTask(ctx, task, fmt.Errorf("no provisioning path for device %s", evt.SerialNumber))
+}
+
+func (e *ProvisioningEngine) handleRegisteredDeviceSyncEvent(ctx context.Context, evt event.Event) error {
+	var registered bootstrapEvent
+	if err := evt.DecodePayload(&registered); err != nil {
+		return fmt.Errorf("decode registered-device sync event: %w", err)
+	}
+	if !registered.Created ||
+		e.paramSyncRoutingMode != "durable" ||
+		e.registeredSync == nil {
+		return nil
+	}
+	dev, err := e.deviceService.GetDevice(ctx, registered.DeviceID)
+	if err != nil {
+		return fmt.Errorf("get registered device for parameter sync: %w", err)
+	}
+	if dev == nil {
+		return nil
+	}
+	return e.startRegisteredDeviceSync(ctx, registered, dev)
 }
 
 func (e *ProvisioningEngine) startRegisteredDeviceSync(
