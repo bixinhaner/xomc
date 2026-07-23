@@ -3,6 +3,30 @@ export interface PlmnRow {
   plmn: string;
 }
 
+export interface PlmnBatchState {
+  existingRows: PlmnRow[];
+  deletedKeys: ReadonlySet<string>;
+  editedValues: ReadonlyMap<string, string>;
+  addedRows: PlmnRow[];
+}
+
+export function buildEffectivePlmnRows({
+  existingRows,
+  deletedKeys,
+  editedValues,
+  addedRows,
+}: PlmnBatchState): PlmnRow[] {
+  return [
+    ...existingRows
+      .filter((row) => !deletedKeys.has(row.key))
+      .map((row) => ({
+        ...row,
+        plmn: editedValues.get(row.key) ?? row.plmn,
+      })),
+    ...addedRows,
+  ];
+}
+
 export function parsePlmnList(raw: unknown): PlmnRow[] {
   const text = String(raw ?? '').trim();
   if (!text) return [];

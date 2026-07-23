@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { parsePlmnList, serializePlmnList, validatePlmnList } from '../plmnList';
+import {
+  buildEffectivePlmnRows,
+  parsePlmnList,
+  serializePlmnList,
+  validatePlmnList,
+} from '../plmnList';
 
 describe('parsePlmnList', () => {
   it('parses a comma-separated device value into editable rows', () => {
@@ -40,5 +45,22 @@ describe('validatePlmnList', () => {
       })),
       6,
     )).toBe('limit');
+  });
+});
+
+describe('buildEffectivePlmnRows', () => {
+  it('combines retained instances, staged edits, and staged additions', () => {
+    expect(buildEffectivePlmnRows({
+      existingRows: [
+        { key: '1', plmn: '46000' },
+        { key: '2', plmn: '46001' },
+      ],
+      deletedKeys: new Set(['2']),
+      editedValues: new Map([['1', '46002']]),
+      addedRows: [{ key: 'new:1', plmn: '46002' }],
+    })).toEqual([
+      { key: '1', plmn: '46002' },
+      { key: 'new:1', plmn: '46002' },
+    ]);
   });
 });
