@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -36,6 +37,14 @@ type PolicyRefresher interface {
 	NotifyPolicyChange() error
 }
 
+// BuiltInAPIPermissionGrantResult records how many missing baseline grants were
+// added for each immutable built-in role during endpoint reconciliation.
+type BuiltInAPIPermissionGrantResult struct {
+	Admin    int64
+	Operator int64
+	Viewer   int64
+}
+
 type apiPermissionChecker interface {
 	CheckPermission(context.Context, uuid.UUID, string, string) (bool, error)
 }
@@ -67,6 +76,66 @@ func (r *PgRoleRepository) refreshPolicyAfterPersist() error {
 		return fmt.Errorf("policy data persisted and local policy reloaded but notify peers: %w", err)
 	}
 	return nil
+}
+
+// ReconcileBuiltInAPIPermissions restores the documented compatibility
+// baseline after Gin routes have been synchronized into api_endpoints:
+// admin/operator receive every endpoint and viewer receives GET endpoints.
+// Custom roles are intentionally not queried or modified.
+func (r *PgRoleRepository) ReconcileBuiltInAPIPermissions(ctx context.Context) (BuiltInAPIPermissionGrantResult, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return BuiltInAPIPermissionGrantResult{}, fmt.Errorf("begin built-in API permission reconciliation: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	grant := func(roleID uuid.UUID, method string) (int64, error) {
+		endpointSelect := storage.Psql.
+			Select().
+			Column(sq.Expr("?::uuid", roleID)).
+			Column("ae.id").
+			From("api_endpoints AS ae")
+		if method != "" {
+			endpointSelect = endpointSelect.Where(sq.Eq{"ae.method": method})
+		}
+
+		query, args, buildErr := storage.Psql.
+			Insert("role_api_permissions").
+			Columns("role_id", "endpoint_id").
+			Select(endpointSelect).
+			Suffix("ON CONFLICT (role_id, endpoint_id) DO NOTHING").
+			ToSql()
+		if buildErr != nil {
+			return 0, fmt.Errorf("build built-in API permission grant: %w", buildErr)
+		}
+		tag, execErr := tx.Exec(ctx, query, args...)
+		if execErr != nil {
+			return 0, execErr
+		}
+		return tag.RowsAffected(), nil
+	}
+
+	var result BuiltInAPIPermissionGrantResult
+	result.Admin, err = grant(builtInAdminRoleID, "")
+	if err != nil {
+		return BuiltInAPIPermissionGrantResult{}, fmt.Errorf("grant admin API permission baseline: %w", err)
+	}
+	result.Operator, err = grant(builtInOperatorRoleID, "")
+	if err != nil {
+		return BuiltInAPIPermissionGrantResult{}, fmt.Errorf("grant operator API permission baseline: %w", err)
+	}
+	result.Viewer, err = grant(builtInViewerRoleID, http.MethodGet)
+	if err != nil {
+		return BuiltInAPIPermissionGrantResult{}, fmt.Errorf("grant viewer API permission baseline: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return BuiltInAPIPermissionGrantResult{}, fmt.Errorf("commit built-in API permission reconciliation: %w", err)
+	}
+	if err := r.refreshPolicyAfterPersist(); err != nil {
+		return result, fmt.Errorf("built-in API permissions persisted but policy refresh failed: %w", err)
+	}
+	return result, nil
 }
 
 func (r *PgRoleRepository) Create(ctx context.Context, role *Role) error {

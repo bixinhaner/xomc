@@ -247,11 +247,13 @@ func initAdminModule(c *Container) error {
 	// API Endpoint module
 	apiEndpointRepo := admin.NewPgApiEndpointRepository(c.PgPool)
 	apiEndpointService := admin.NewApiEndpointService(apiEndpointRepo, logger)
+	apiEndpointService.SetBuiltInPermissionReconciler(roleRepo)
 	adminHandler.SetApiEndpointService(apiEndpointService)
 
 	// Store handlers for route registration
 	c.adminHandlerDeps = &adminHandlerDeps{
 		adminHandler:       adminHandler,
+		apiEndpointService: apiEndpointService,
 		apiKeyHandler:      apiKeyHandler,
 		dictHandler:        dictHandler,
 		sysConfigHandler:   sysConfigHandler,
@@ -313,6 +315,7 @@ func (a *roleAffectedQueryAdapter) ListRolesByGroupIDs(ctx context.Context, grou
 
 type adminHandlerDeps struct {
 	adminHandler       *admin.Handler
+	apiEndpointService apiEndpointSyncer
 	apiKeyHandler      *admin.APIKeyHandler
 	dictHandler        *admin.DictionaryHandler
 	sysConfigHandler   *admin.SysConfigHandler

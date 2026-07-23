@@ -760,9 +760,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// Auto-sync API endpoints from Gin routes at startup
 	if err := syncApiEndpoints(c, ad); err != nil {
-		c.Logger.Warn("api endpoint auto-sync failed, manual sync required",
-			zap.Error(err),
-		)
+		return fmt.Errorf("sync API endpoints and built-in permission baseline: %w", err)
 	}
 
 	return nil
@@ -778,8 +776,13 @@ func statusFromResults(results []components.ComponentHealth) string {
 	return "ok"
 }
 
-// syncApiEndpoints auto-syncs Gin routes into the api_endpoints table at startup.
-// Only runs if api_endpointService is available; failures are logged but non-fatal.
+// syncApiEndpoints auto-syncs Gin routes and the immutable built-in role
+// permission baseline before the HTTP server starts. Failure is fatal so the
+// process cannot advertise readiness while normal roles would receive 403s.
+type apiEndpointSyncer interface {
+	SyncApiEndpoints(context.Context, gin.RoutesInfo) (admin.SyncResult, error)
+}
+
 func syncApiEndpoints(c *Container, ad *adminHandlerDeps) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -789,11 +792,11 @@ func syncApiEndpoints(c *Container, ad *adminHandlerDeps) error {
 		return nil
 	}
 
-	svc := admin.NewApiEndpointService(
-		admin.NewPgApiEndpointRepository(c.PgPool),
-		c.Logger,
-	)
-	result, err := svc.SyncApiEndpoints(ctx, routes)
+	if ad.apiEndpointService == nil {
+		return fmt.Errorf("API endpoint sync service is not configured")
+	}
+
+	result, err := ad.apiEndpointService.SyncApiEndpoints(ctx, routes)
 	if err != nil {
 		return err
 	}
