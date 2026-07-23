@@ -188,6 +188,37 @@ func TestDeviceGroupService_CreateGroup_InvalidatesTreeCache(t *testing.T) {
 	assert.Equal(t, 1, repo.invalidateCountsCalls)
 }
 
+func TestDeviceGroupService_UpdateGroup_InvalidatesTreeCache(t *testing.T) {
+	groupID := uuid.New()
+	repo := &mockGroupRepo{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*DeviceGroup, error) {
+			return &DeviceGroup{ID: id, Name: "old", Level: 1}, nil
+		},
+	}
+	name := "updated"
+
+	_, err := newTestGroupService(repo).UpdateGroup(context.Background(), groupID, UpdateGroupRequest{
+		Name: &name,
+	}, "tester")
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, repo.invalidateCountsCalls)
+}
+
+func TestDeviceGroupService_DeleteGroup_InvalidatesTreeCache(t *testing.T) {
+	groupID := uuid.New()
+	repo := &mockGroupRepo{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*DeviceGroup, error) {
+			return &DeviceGroup{ID: id, Name: "to-delete", Level: 2}, nil
+		},
+	}
+
+	err := newTestGroupService(repo).DeleteGroup(context.Background(), groupID)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, repo.invalidateCountsCalls)
+}
+
 func TestDeviceGroupService_CreateGroup_PersistsRuleSource(t *testing.T) {
 	parentID := uuid.New()
 	sourceID := uuid.New()
