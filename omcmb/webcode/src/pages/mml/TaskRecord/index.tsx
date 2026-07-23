@@ -195,16 +195,6 @@ function renderTaskProgress(task: MMLTask, t: (key: string) => string) {
       </Space>
     );
   }
-  if (isPeriodicParentTask(task) && task.latestRun) {
-    return (
-      <Space orientation="vertical" size={2}>
-        <span>{progress.done}/{progress.total}</span>
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          {t('mml.latestRun')}
-        </Typography.Text>
-      </Space>
-    );
-  }
   return `${progress.done}/${progress.total}`;
 }
 
@@ -279,6 +269,7 @@ export default function TaskRecord() {
   const [pageSize, setPageSize] = useState(50);
   const [filters, setFilters] = useState<{
     taskName?: string;
+    scriptName?: string;
     taskOrigin?: string;
     status?: string;
     executeType?: string;
@@ -289,6 +280,7 @@ export default function TaskRecord() {
     page,
     pageSize,
     taskName: filters.taskName,
+    scriptName: filters.scriptName,
     taskOrigin: filters.taskOrigin && filters.taskOrigin !== 'all' ? filters.taskOrigin : undefined,
     status: filters.status && filters.status !== 'all' ? filters.status : undefined,
     executeType: filters.executeType && filters.executeType !== 'all' ? filters.executeType : undefined,
@@ -307,6 +299,12 @@ export default function TaskRecord() {
       label: t('mml.taskName'),
       type: 'input',
       placeholder: t('mml.inputTaskNameRequired'),
+    },
+    {
+      name: 'scriptName',
+      label: t('mml.scriptName'),
+      type: 'input',
+      placeholder: t('mml.inputScriptName'),
     },
     {
       name: 'taskOrigin',
@@ -365,6 +363,7 @@ export default function TaskRecord() {
     setPage(1);
     setFilters({
       taskName: typeof values.taskName === 'string' ? values.taskName.trim() : undefined,
+      scriptName: typeof values.scriptName === 'string' ? values.scriptName.trim() : undefined,
       taskOrigin: typeof values.taskOrigin === 'string' ? values.taskOrigin : undefined,
       status: typeof values.status === 'string' ? values.status : undefined,
       executeType: typeof values.executeType === 'string' ? values.executeType : undefined,
@@ -827,6 +826,23 @@ export default function TaskRecord() {
       },
     },
     { key: 'taskName', title: t('mml.taskName'), dataIndex: 'taskName', ellipsis: true },
+    {
+      key: 'scriptName',
+      title: t('mml.scriptName'),
+      dataIndex: 'scriptName',
+      width: 180,
+      ellipsis: true,
+      render: (_: unknown, record: MMLTask) => {
+        if (record.taskOrigin !== 'script' || !record.scriptName) return '--';
+        return (
+          <Tooltip title={record.scriptName}>
+            <Typography.Text style={{ maxWidth: 160 }} ellipsis>
+              {record.scriptName}
+            </Typography.Text>
+          </Tooltip>
+        );
+      },
+    },
     { key: 'creator',  title: t('mml.creator'),  dataIndex: 'creator', width: 100 },
     {
       key: 'taskOrigin',
@@ -970,7 +986,7 @@ export default function TaskRecord() {
         onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
         onRefresh={() => void refetch()}
         hideToolbar
-        scroll={{ x: 1200 }}
+        scroll={{ x: 1380 }}
       />
 
       <Modal

@@ -323,6 +323,7 @@ export interface MMLTask {
   id: string;
   taskName: string;
   scriptId?: string;
+  scriptName?: string;
   taskOrigin: MMLTaskOrigin;
   deviceSns: string[];
   commands: string[];

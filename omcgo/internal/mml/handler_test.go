@@ -617,6 +617,27 @@ func TestHandler_ListTasksBindsTaskOrigin(t *testing.T) {
 	}
 }
 
+func TestHandler_ListTasksBindsScriptName(t *testing.T) {
+	taskRepo := &hTaskRepo{
+		ListFn: func(_ context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error) {
+			require.NotNil(t, filter.ScriptName)
+			assert.Equal(t, "巡检脚本", *filter.ScriptName)
+			return model.NewListResponse([]MMLTask{}, 0, 1, 20), nil
+		},
+	}
+
+	logger := zap.NewNop()
+	svc := NewService(&hCmdRepo{}, &hScriptRepo{}, taskRepo, &hCustomCommandRepo{}, nil, logger)
+	h := NewHandler(svc, logger)
+	router := setupMMLRouter(h)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/mml/tasks?page=1&page_size=20&script_name="+url.QueryEscape("巡检脚本"), nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
 func TestHandler_ListTasksRejectsInvalidTaskOrigin(t *testing.T) {
 	taskRepo := &hTaskRepo{
 		ListFn: func(_ context.Context, _ TaskFilter) (*model.ListResponse[MMLTask], error) {

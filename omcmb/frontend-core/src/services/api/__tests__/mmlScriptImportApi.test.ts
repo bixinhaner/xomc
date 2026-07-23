@@ -66,6 +66,41 @@ describe('mmlApi TXT script import', () => {
     expect(result.items[0].taskOrigin).toBe(taskOrigin);
   });
 
+  it('maps the current script name on script-origin task records', async () => {
+    getMock.mockResolvedValue({
+      data: {
+        items: [{ ...taskResponse(), task_origin: 'script', script_name: '当前巡检脚本' }],
+        total: 1,
+        page: 1,
+        page_size: 20,
+        total_pages: 1,
+      },
+    });
+
+    const result = await mmlApi.getTasks({ page: 1, pageSize: 20, taskOrigin: 'script' });
+
+    expect(result.items[0].scriptName).toBe('当前巡检脚本');
+  });
+
+  it('filters MML task records by script name', async () => {
+    getMock.mockResolvedValue({
+      data: {
+        items: [{ ...taskResponse(), task_origin: 'script', script_name: '当前巡检脚本' }],
+        total: 1,
+        page: 1,
+        page_size: 20,
+        total_pages: 1,
+      },
+    });
+
+    await mmlApi.getTasks({ page: 1, pageSize: 20, scriptName: '巡检' });
+
+    expect(getMock.mock.calls[0]).toEqual([
+      '/mml/tasks',
+      { params: { page: 1, page_size: 20, script_name: '巡检' } },
+    ]);
+  });
+
   it('maps task result request and response messages separately', async () => {
     getMock.mockResolvedValue({
       data: {

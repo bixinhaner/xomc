@@ -735,6 +735,9 @@ func (h *Handler) ListTasks(c *gin.Context) {
 	if taskName := c.Query("task_name"); taskName != "" {
 		filter.TaskName = &taskName
 	}
+	if scriptName := c.Query("script_name"); scriptName != "" {
+		filter.ScriptName = &scriptName
+	}
 	if taskOrigin := c.Query("task_origin"); taskOrigin != "" {
 		origin, ok := normalizeTaskOriginQuery(taskOrigin)
 		if !ok {
