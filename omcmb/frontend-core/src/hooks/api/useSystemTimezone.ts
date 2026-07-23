@@ -37,15 +37,9 @@ export function useSystemTimezone(): { systemTimezone: string | undefined } {
   const setSystemTimezone = useAppStore((s) => s.setSystemTimezone);
   const stored = useAppStore((s) => s.systemTimezone);
 
-  const { data } = useQuery<SysConfigItem[] | undefined>({
+  const { data } = useQuery<SysConfigItem[]>({
     queryKey: ['sysConfig', 'basic', 'timezone'],
-    queryFn: async () => {
-      try {
-        return await adminApi.getSysConfigsByCategory(TIMEZONE_CONFIG_CATEGORY);
-      } catch {
-        return undefined; // 失败安全 — 让消费方回落 UTC
-      }
-    },
+    queryFn: () => adminApi.getSysConfigsByCategory(TIMEZONE_CONFIG_CATEGORY),
     enabled: isAuthenticated,
     staleTime: 5 * 60_000,
     retry: false,

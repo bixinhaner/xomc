@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
   Alert,
@@ -116,14 +116,25 @@ export default function SystemConfig() {
 
   // 拉当前 tab 的所有 KV（按 category）。切 tab 自动重发请求。
   const activeForm = formMap[activeTab];
-  const { data: configList, isFetching } = useSysConfigsByCategory(activeTab, Boolean(activeForm));
+  const {
+    data: configList,
+    isFetching,
+    isError,
+    isSuccess,
+    refetch,
+  } = useSysConfigsByCategory(activeTab, Boolean(activeForm));
+  const canSave = isSuccess && !isFetching;
+  const canSaveRef = useRef(canSave);
+  useLayoutEffect(() => {
+    canSaveRef.current = canSave;
+  }, [canSave]);
 
   // 把后端返回的 KV 灌进对应 tab 的 form。空数据也照样 reset，避免显示其他 tab 的残留值。
   useEffect(() => {
     const form = activeForm;
     // 自管表单页签（pm_retention / agent 等）无对应 form，跳过 —— 否则 form.resetFields()
     // 会抛 "Cannot read properties of undefined (reading 'resetFields')"。
-    if (!form) return;
+    if (!form || !isSuccess) return;
     form.resetFields();
     if (!configList || configList.length === 0) return;
     const fields: Record<string, unknown> = {};
@@ -140,8 +151,10 @@ export default function SystemConfig() {
     ) {
       fields.periodicSyncIntervalMinutes = fields.periodicSyncIntervalHours * 60;
     }
-    form.setFieldsValue(fields);
-  }, [activeForm, activeTab, configList]);
+    form.setFields(
+      Object.entries(fields).map(([name, value]) => ({ name, value, touched: false })),
+    );
+  }, [activeForm, activeTab, configList, isSuccess]);
 
   const batchUpdate = useBatchUpdateSysConfigs();
 
@@ -155,6 +168,10 @@ export default function SystemConfig() {
     const form = formMap[activeTab];
     // 自管表单页签（pm_retention）由其组件内部按钮保存，不走这里的全局保存。
     if (!form) return;
+    if (!canSaveRef.current) {
+      void message.error(t('empty.loadFailed'));
+      return;
+    }
     let values: Record<string, unknown>;
     try {
       values = (await form.validateFields()) as Record<string, unknown>;
@@ -162,7 +179,14 @@ export default function SystemConfig() {
       void message.error(t('common.formValidationFailed'));
       return;
     }
-    const items = buildBatchItems(values, configList);
+    if (!canSaveRef.current) {
+      void message.error(t('empty.loadFailed'));
+      return;
+    }
+    const changedValues = Object.fromEntries(
+      Object.entries(values).filter(([key]) => form.isFieldTouched(key)),
+    );
+    const items = buildBatchItems(changedValues, configList);
     if (items.length === 0) {
       void message.warning(t('sysconfig.warn.noSaveable'));
       return;
@@ -239,6 +263,15 @@ export default function SystemConfig() {
       <Spin spinning={isFetching}>
         {renderSettingsContent()}
       </Spin>
+      {activeForm && isError && (
+        <Alert
+          type="error"
+          showIcon
+          title={t('empty.loadFailed')}
+          description={t('empty.loadFailedDesc')}
+          action={<Button onClick={() => void refetch()}>{t('common.retry')}</Button>}
+        />
+      )}
       {visibleApplyBatch && (
         <Alert
           style={{ marginTop: 12 }}
@@ -263,6 +296,7 @@ export default function SystemConfig() {
               type="primary"
               icon={<SaveOutlined />}
               loading={batchUpdate.isPending}
+              disabled={!canSave}
               onClick={handleSave}
             >
               {t('common.save')}
