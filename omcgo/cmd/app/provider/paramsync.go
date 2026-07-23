@@ -47,6 +47,31 @@ type paramSyncProjector interface {
 	ReconcilePending(context.Context, int) (int, error)
 }
 
+type registeredDeviceSyncCandidateRepository interface {
+	ListRegisteredSyncCandidates(context.Context, int) ([]*model.Device, error)
+}
+
+type registeredDeviceSyncReconciler struct {
+	repo      registeredDeviceSyncCandidateRepository
+	submitter licenseParamSyncSubmitter
+}
+
+func (r registeredDeviceSyncReconciler) Reconcile(ctx context.Context, limit int) (int, error) {
+	devices, err := r.repo.ListRegisteredSyncCandidates(ctx, limit)
+	if err != nil {
+		return 0, fmt.Errorf("list registered-device parameter sync candidates: %w", err)
+	}
+	var errs []error
+	for _, dev := range devices {
+		sourceEventID := "device_registered:" + dev.ID.String()
+		attemptKey := sourceEventID + ":" + uuid.NewString()
+		if err := submitRegisteredDeviceSync(ctx, r.submitter, dev, sourceEventID, attemptKey); err != nil {
+			errs = append(errs, fmt.Errorf("resubmit registered-device parameter sync for %s: %w", dev.ID, err))
+		}
+	}
+	return len(devices), errors.Join(errs...)
+}
+
 type pullTuningSetter interface {
 	SetPullTuning(subject string, tuning event.PullTuning)
 }
@@ -222,14 +247,19 @@ func submitRegisteredDeviceSync(
 	submitter licenseParamSyncSubmitter,
 	dev *model.Device,
 	sourceID string,
+	idempotencyKeys ...string,
 ) error {
+	idempotencyKey := sourceID
+	if len(idempotencyKeys) > 0 {
+		idempotencyKey = idempotencyKeys[0]
+	}
 	result, err := submitter.Submit(ctx, paramsync.SubmitCommand{
 		DeviceID:        dev.ID,
 		DeviceSN:        dev.SerialNumber,
 		CallerType:      "provision",
 		TriggerReason:   paramsync.TriggerDeviceRegistered,
 		Scope:           paramsync.SyncScopeFull,
-		IdempotencyKey:  sourceID,
+		IdempotencyKey:  idempotencyKey,
 		SourceEventID:   sourceID,
 		OriginEventType: "device_registered",
 	})
@@ -534,6 +564,13 @@ func initParamSyncModule(c *Container) error {
 	outbox := paramsync.NewOutboxDispatcher(c.PgPool, c.TaskSvc, 20).WithEventBus(c.EventBus)
 	resultProcessor := paramsync.NewPGResultProcessor(c.PgPool).WithMetrics(metrics)
 	reconciler := paramsync.NewReconciler(c.PgPool, c.EventBus, metrics).WithResultProcessor(resultProcessor)
+	var registeredSyncReconciler *registeredDeviceSyncReconciler
+	if c.Cfg.ParamSync.RoutingMode == "durable" {
+		registeredSyncReconciler = &registeredDeviceSyncReconciler{
+			repo:      repo,
+			submitter: service,
+		}
+	}
 	bridge := paramsync.NewTaskTerminalBridge(c.EventBus)
 	binding := paramsync.NewBindingCoordinator(c.PgPool, c.EventBus)
 	infoSyncer := device.NewInfoSyncer(c.DeviceInfoRepo, c.ParamRepo, device.NewPgDeviceRepository(c.PgPool), c.Carriers, logger, device.NewPgLocationObservationRepository(c.PgPool))
@@ -637,6 +674,10 @@ func initParamSyncModule(c *Container) error {
 					}
 				case <-reconcileTicker.C:
 					err := runParamSyncReconciliation(maintenanceCtx, reconciler, projector, time.Now(), maintenanceCfg)
+					if registeredSyncReconciler != nil {
+						_, registeredErr := registeredSyncReconciler.Reconcile(maintenanceCtx, 100)
+						err = errors.Join(err, registeredErr)
+					}
 					if err != nil && !errors.Is(err, context.Canceled) {
 						logger.Warn("parameter sync reconciliation failed", zap.Error(err))
 					}

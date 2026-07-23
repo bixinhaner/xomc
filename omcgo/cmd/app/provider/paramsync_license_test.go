@@ -97,6 +97,21 @@ func TestSubmitRegisteredDeviceSync_PathUnavailableDoesNotFallBackOrFailProvisio
 	require.NoError(t, err)
 }
 
+func TestSubmitRegisteredDeviceSync_RetryUsesNewIdempotencyKeyAndStableSourceEvent(t *testing.T) {
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "registered-device"}
+	sourceID := "device_registered:" + dev.ID.String()
+	attemptKey := sourceID + ":" + uuid.NewString()
+	submitter := &fakeLicenseParamSyncSubmitter{result: &paramsync.SubmitResult{
+		Status: paramsync.RequestStatusRunning,
+	}}
+
+	err := submitRegisteredDeviceSync(context.Background(), submitter, dev, sourceID, attemptKey)
+
+	require.NoError(t, err)
+	assert.Equal(t, attemptKey, submitter.command.IdempotencyKey)
+	assert.Equal(t, sourceID, submitter.command.SourceEventID)
+}
+
 func TestParamSyncStarter_RegisteredDeviceBypassesDeviceCanary(t *testing.T) {
 	dev := &model.Device{ID: uuid.Nil, SerialNumber: "registered-device"}
 	submitter := &fakeLicenseParamSyncSubmitter{result: &paramsync.SubmitResult{
