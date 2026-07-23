@@ -40,3 +40,7 @@ The old standalone `000003_mml_standard_trpath_remaining_regrouping_20260723.sql
 ## Gate Result
 
 No CRITICAL findings were identified. This change is ready to commit.
+
+## Merge Request Note
+
+MR description should be kept in normal Markdown text; avoid URL-encoded line breaks in GitLab push options.
