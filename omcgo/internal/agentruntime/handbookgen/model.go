@@ -74,6 +74,13 @@ type OperationSummary struct {
 	Document    string   `json:"document"`
 }
 
+type RelatedOperation struct {
+	OperationID string `json:"operationId"`
+	Method      string `json:"method"`
+	Path        string `json:"path"`
+	Relation    string `json:"relation"`
+}
+
 type CategoryIndex struct {
 	SchemaVersion string             `json:"schemaVersion"`
 	Category      string             `json:"category"`
@@ -82,30 +89,31 @@ type CategoryIndex struct {
 }
 
 type OperationDocument struct {
-	SchemaVersion        string            `json:"schemaVersion"`
-	OperationID          string            `json:"operationId"`
-	Method               string            `json:"method"`
-	Path                 string            `json:"path"`
-	Handler              string            `json:"handler,omitempty"`
-	Category             string            `json:"category"`
-	Title                string            `json:"title"`
-	Summary              string            `json:"summary"`
-	Description          string            `json:"description"`
-	Intents              []string          `json:"intents"`
-	Tags                 []string          `json:"tags"`
-	Risk                 string            `json:"risk"`
-	ConfirmationRequired bool              `json:"confirmationRequired"`
-	Idempotent           bool              `json:"idempotent"`
-	SideEffects          string            `json:"sideEffects"`
-	PathParams           []Parameter       `json:"pathParams"`
-	QueryParams          []Parameter       `json:"queryParams"`
-	FormParams           []Parameter       `json:"formParams"`
-	RequestBody          map[string]any    `json:"requestBody,omitempty"`
-	Responses            map[string]any    `json:"responses,omitempty"`
-	ReferencedSchemas    map[string]any    `json:"referencedSchemas,omitempty"`
-	ContractCoverage     map[string]string `json:"contractCoverage"`
-	EmptyResult          string            `json:"emptyResult,omitempty"`
-	Sources              []string          `json:"sources"`
+	SchemaVersion        string             `json:"schemaVersion"`
+	OperationID          string             `json:"operationId"`
+	Method               string             `json:"method"`
+	Path                 string             `json:"path"`
+	Handler              string             `json:"handler,omitempty"`
+	Category             string             `json:"category"`
+	Title                string             `json:"title"`
+	Summary              string             `json:"summary"`
+	Description          string             `json:"description"`
+	Intents              []string           `json:"intents"`
+	Tags                 []string           `json:"tags"`
+	Risk                 string             `json:"risk"`
+	ConfirmationRequired bool               `json:"confirmationRequired"`
+	Idempotent           bool               `json:"idempotent"`
+	SideEffects          string             `json:"sideEffects"`
+	PathParams           []Parameter        `json:"pathParams"`
+	QueryParams          []Parameter        `json:"queryParams"`
+	FormParams           []Parameter        `json:"formParams"`
+	RequestBody          map[string]any     `json:"requestBody,omitempty"`
+	Responses            map[string]any     `json:"responses,omitempty"`
+	ReferencedSchemas    map[string]any     `json:"referencedSchemas,omitempty"`
+	ContractCoverage     map[string]string  `json:"contractCoverage"`
+	EmptyResult          string             `json:"emptyResult,omitempty"`
+	RelatedOperations    []RelatedOperation `json:"relatedOperations,omitempty"`
+	Sources              []string           `json:"sources"`
 }
 
 func DecodeRouteExport(raw []byte) (RouteExport, error) {

@@ -2459,10 +2459,6 @@
               "nullable": true,
               "type": "array"
             },
-            "connectorSlug": {
-              "nullable": true,
-              "type": "string"
-            },
             "enabled": {
               "nullable": true,
               "type": "boolean"
@@ -2511,10 +2507,6 @@
               },
               "nullable": true,
               "type": "array"
-            },
-            "connectorSlug": {
-              "nullable": true,
-              "type": "string"
             },
             "enabled": {
               "nullable": true,
@@ -2565,10 +2557,6 @@
               "nullable": true,
               "type": "array"
             },
-            "connectorSlug": {
-              "nullable": true,
-              "type": "string"
-            },
             "enabled": {
               "nullable": true,
               "type": "boolean"
@@ -2617,10 +2605,6 @@
               },
               "nullable": true,
               "type": "array"
-            },
-            "connectorSlug": {
-              "nullable": true,
-              "type": "string"
             },
             "enabled": {
               "nullable": true,

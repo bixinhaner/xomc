@@ -56,10 +56,6 @@
           "nullable": true,
           "type": "array"
         },
-        "connectorSlug": {
-          "nullable": true,
-          "type": "string"
-        },
         "enabled": {
           "nullable": true,
           "type": "boolean"

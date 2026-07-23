@@ -63,6 +63,7 @@ func BuildRuntimePackage(templateArchive []byte, routes RouteExport) ([]byte, er
 	categoryTitles := make(map[string]string)
 	allSummaries := make([]OperationSummary, 0, len(runtimeRoutes))
 	seenOperations := make(map[string]struct{}, len(runtimeRoutes))
+	documents := make([]OperationDocument, 0, len(runtimeRoutes))
 
 	for _, route := range runtimeRoutes {
 		if route.OperationID == "" || route.OperationID == "." || route.OperationID == ".." || strings.ContainsAny(route.OperationID, `/\\`) {
@@ -85,6 +86,18 @@ func BuildRuntimePackage(templateArchive []byte, routes RouteExport) ([]byte, er
 		} else if !found {
 			document = buildOperationDocument(route, openAPIOperation{}, handlerContract{})
 		}
+		if isReadMethod(document.Method) {
+			document.EmptyResult = emptyResultGuidance(document.Method)
+		}
+		documents = append(documents, document)
+	}
+	applyRelatedOperations(documents)
+	if err := validateOperationDocuments(documents); err != nil {
+		return nil, fmt.Errorf("validate runtime operation contracts: %w", err)
+	}
+
+	for index, route := range runtimeRoutes {
+		document := documents[index]
 		documentRaw, err := marshalHandbookJSON(document)
 		if err != nil {
 			return nil, fmt.Errorf("encode runtime document %s: %w", route.OperationID, err)
@@ -167,8 +180,8 @@ func mergeRuntimeDocument(generated, template OperationDocument, templateFound, 
 		return template
 	}
 	generated.PathParams = mergeParameters(generated.PathParams, template.PathParams)
-	generated.QueryParams = mergeParameters(generated.QueryParams, template.QueryParams)
-	generated.FormParams = mergeParameters(generated.FormParams, template.FormParams)
+	generated.QueryParams = mergeAuthoritativeParameters(generated.QueryParams, template.QueryParams)
+	generated.FormParams = mergeAuthoritativeParameters(generated.FormParams, template.FormParams)
 	if len(generated.RequestBody) == 0 {
 		generated.RequestBody = template.RequestBody
 	}
@@ -176,9 +189,6 @@ func mergeRuntimeDocument(generated, template OperationDocument, templateFound, 
 		generated.Responses = template.Responses
 		generated.ReferencedSchemas = template.ReferencedSchemas
 		generated.ContractCoverage["response"] = "openapi"
-	}
-	if generated.EmptyResult == "" {
-		generated.EmptyResult = template.EmptyResult
 	}
 	generated.Intents = uniqueStrings(append(generated.Intents, template.Intents...))
 	generated.Tags = uniqueStrings(append(generated.Tags, template.Tags...))

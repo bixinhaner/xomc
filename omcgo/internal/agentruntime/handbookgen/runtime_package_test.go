@@ -94,6 +94,41 @@ func TestBuildRuntimePackageUsesActualRoutesAndPreservesTemplateDetails(t *testi
 	require.Contains(t, generated.Sources, "runtime-route")
 }
 
+func TestBuildOperationDocumentUsesHandlerParametersAsExecutionAuthority(t *testing.T) {
+	document := buildOperationDocument(
+		Route{OperationID: "get.pm.definitions", Method: "GET", Path: "/api/v1/pm/definitions"},
+		openAPIOperation{
+			Found: true,
+			QueryParams: []Parameter{
+				{Name: "technology", In: "query", Type: "string"},
+				{Name: "device_type", In: "query", Type: "string", Description: "OpenAPI description"},
+			},
+		},
+		handlerContract{
+			Found:       true,
+			QueryParams: []Parameter{{Name: "device_type", In: "query", Type: "string"}},
+		},
+	)
+
+	require.Equal(t, []string{"device_type"}, parameterNames(document.QueryParams))
+	require.Equal(t, "OpenAPI description", document.QueryParams[0].Description)
+}
+
+func TestApplyRelatedOperationsLinksSameResourceContracts(t *testing.T) {
+	documents := []OperationDocument{
+		{OperationID: "get.devices", Method: "GET", Path: "/api/v1/devices", Category: "devices"},
+		{OperationID: "get.devices.stats", Method: "GET", Path: "/api/v1/devices/stats", Category: "devices"},
+		{OperationID: "get.alarms", Method: "GET", Path: "/api/v1/alarms", Category: "alarms"},
+	}
+
+	applyRelatedOperations(documents)
+
+	require.Len(t, documents[0].RelatedOperations, 1)
+	require.Equal(t, "get.devices.stats", documents[0].RelatedOperations[0].OperationID)
+	require.Equal(t, "same-resource", documents[0].RelatedOperations[0].Relation)
+	require.Empty(t, documents[2].RelatedOperations)
+}
+
 func TestBuildRuntimePackageRejectsUnsafeOperationID(t *testing.T) {
 	templateRoot := t.TempDir()
 	references := filepath.Join(templateRoot, handbookPackageRoot)
