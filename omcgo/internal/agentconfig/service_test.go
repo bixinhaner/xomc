@@ -88,6 +88,19 @@ func TestAdminConfigMasksServiceToken(t *testing.T) {
 	require.True(t, cfg.ServiceTokenConfigured)
 }
 
+func TestAdminConfigUsesBuiltInConnectionDefaults(t *testing.T) {
+	store := newFakeConfigStore(nil)
+	svc := NewService(store, store, nil, nil)
+
+	cfg, err := svc.GetAdminConfig(context.Background())
+
+	require.NoError(t, err)
+	require.Equal(t, DefaultAgentStudioBaseURL, cfg.AgentStudioBaseURL)
+	require.True(t, cfg.ServiceTokenConfigured)
+	require.Equal(t, DefaultConnectorSlug, cfg.ConnectorSlug)
+	require.Equal(t, StatusDisabled, cfg.Status)
+}
+
 func TestSaveKeepsExistingServiceTokenWhenOmitted(t *testing.T) {
 	store := newFakeConfigStore(map[string]string{
 		KeyAgentStudioServiceToken: "old-token",
@@ -111,7 +124,7 @@ func TestSavePatchDoesNotClearExistingValuesWhenFieldsAreOmitted(t *testing.T) {
 		KeyEnabled:                 "true",
 		KeyAgentStudioBaseURL:      "https://agent.example.com",
 		KeyAgentStudioServiceToken: "old-token",
-		KeyConnectorSlug:           "ops",
+		KeyConnectorSlug:           "legacy-connector",
 	})
 	svc := NewService(store, store, nil, nil)
 
@@ -124,7 +137,7 @@ func TestSavePatchDoesNotClearExistingValuesWhenFieldsAreOmitted(t *testing.T) {
 	require.False(t, cfg.Enabled)
 	require.Equal(t, "https://agent.example.com", store.values[KeyAgentStudioBaseURL])
 	require.Equal(t, "old-token", store.values[KeyAgentStudioServiceToken])
-	require.Equal(t, "ops", store.values[KeyConnectorSlug])
+	require.Equal(t, DefaultConnectorSlug, store.values[KeyConnectorSlug])
 }
 
 func TestRuntimeVisibilitySeparatesSwitchFromConnectedRuntime(t *testing.T) {
@@ -150,7 +163,7 @@ func TestRuntimeTargetIncludesInstanceDisplayMetadata(t *testing.T) {
 	store := newFakeConfigStore(map[string]string{
 		KeyEnabled:            "true",
 		KeyAgentStudioBaseURL: "https://agent.example.com",
-		KeyConnectorSlug:      "external-agent-connector",
+		KeyConnectorSlug:      "legacy-connector",
 		KeyConnectorID:        "connector-1",
 		KeyStatus:             StatusConnected,
 	})
@@ -161,7 +174,7 @@ func TestRuntimeTargetIncludesInstanceDisplayMetadata(t *testing.T) {
 
 	require.NoError(t, err)
 	require.True(t, target.Enabled)
-	require.Equal(t, "external-agent-connector", target.ConnectorSlug)
+	require.Equal(t, DefaultConnectorSlug, target.ConnectorSlug)
 	require.Equal(t, "connector-1", target.ConnectorID)
 	require.Equal(t, "OMC 陕西", target.InstanceName)
 	require.False(t, target.InstanceNameIsDefault)

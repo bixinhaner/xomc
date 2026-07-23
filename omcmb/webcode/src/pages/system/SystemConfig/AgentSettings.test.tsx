@@ -22,9 +22,9 @@ describe('AgentSettings', () => {
     agentMocks.query.mockReturnValue({
       data: {
         enabled: false,
-        agentStudioBaseUrl: '',
-        serviceTokenConfigured: false,
-        connectorSlug: '',
+        agentStudioBaseUrl: 'https://bailey.baicells.com',
+        serviceTokenConfigured: true,
+        connectorSlug: 'local-omc-agent',
         connectorId: '',
         runtimeStreamUrl: '',
         status: 'disabled',
@@ -56,7 +56,7 @@ describe('AgentSettings', () => {
 
     await waitFor(() => expect(screen.getByDisplayValue('30')).toBeInTheDocument());
     expect(screen.getByPlaceholderText('https://agent.example.com')).toHaveAttribute('autocomplete', 'off');
-    expect(screen.getByPlaceholderText('external-agent-...')).toHaveAttribute('autocomplete', 'off');
+    expect(screen.getByDisplayValue('local-omc-agent')).toHaveAttribute('readonly');
 
     const output = consoleError.mock.calls.flat().join(' ');
     expect(output).not.toMatch(/addonBefore|addonAfter|\[antd: Alert\].*message|\[antd: Space\].*direction/);
