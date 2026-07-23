@@ -263,13 +263,10 @@ services:
     deploy:
       resources:
         limits:
-          # 缺省对齐 plan-resources.sh medium 档并上调（32核/32G 目标机型）：worker PM
-          # consumer 的 MaxAckPending = max(pmConcurrency*4, 16)，pmConcurrency 在
-          # pm_consumer_concurrency=0(自动) 时取自 GOMAXPROCS（即容器 CPU 配额）；
-          # CPU<5 核时 pmConcurrency<=4 会被 16 这个下限硬顶死（2026-07-23 omc78
-          # 20000设备压测实测复现：num_ack_pending 精确卡在16，PM队列积压超百万条）。
-          # 故这里不采用 medium 档字面值 3，直接给 5 核以确保突破该硬顶。
-          cpus: "${WORKER_CPUS:-5}"
+          # 缺省对齐 plan-resources.sh medium 档（32核/32G 目标机型）。2026-07-23
+          # 10000 基站压测采用主库/TSDB/worker=10/10/3 核，PM 队列约一分钟从
+          # 3492 清零，且无新增 flush 失败、超时或 DLQ，故固化实测值 3 核。
+          cpus: "${WORKER_CPUS:-3}"
           memory: "${WORKER_MEM:-1024m}"
         reservations:
           cpus: "0.5"

@@ -121,6 +121,14 @@ CPU 空闲预算 = nproc − 主机CPU保留 − max(其它容器CPU, ⌈load15�
 | medium | ≥ 24 GiB | 100k 满突发 / 300-500k | 单机 + pgbouncer + acs/worker ×2-3（Phase 2/手动） |
 | large | ≥ 48 GiB | 1M | **多机**：acs/worker ×6-8 + pgbouncer + Redis 拆分；脚本仅规划单机切片并告警 |
 
+medium/large 档的 `POSTGRES_CPUS`、`TSDB_CPUS` 均按宿主总核数三分之一向下取整
+（最低 2 核），为其余业务和系统合计保留至少约三分之一。当前 32 核 / 32 GiB
+生产机型因此得到 `POSTGRES_CPUS=10`、`TSDB_CPUS=10`、`WORKER_CPUS=3`。
+这些是 2026-07-23 10000 基站压测验证值：数据库原 4 核配额下
+主库约 406%、TimescaleDB 约 376% 持续接近上限；调整为 10/10/3 后，PM 队列约
+一分钟从 3492 降至 0，且未出现新的 flush 失败、超时或 DLQ。CPU limit 是可同时
+超分的上限而非预留量；其他核留给 ACS、app、Redis、NATS、MinIO 和系统调度。
+
 **最低配置门禁（带 30% 容忍度）**：`空闲预算 < Σfloor` 时，缺口 ≤ `--floor-tolerance-pct`
 （默认 30%）先降级为 WARN 按下限分配放行；缺口超过容忍度才 `die`，给出检测值 vs 需求值 +
 建议最低配 + 逃生口（`--skip-monitoring` 约降到 20 GiB / `--assume-dedicated` / 释放其它
@@ -269,6 +277,6 @@ docker compose -p omcgo --env-file .env --env-file resources.env \
 | 场景 | 结果 |
 |------|------|
 | 8c/16g, `--skip-monitoring` | 恰好贴下限（Σ13.0/预算13.0），PG 饱和告警正确触发 |
-| 16c/32g 近空闲 | medium 档，余量按权重分配，Σ23.8 ≤ 预算25.2 |
-| 64c/128g | large 档，各组件封顶 ceiling，余 62.7 GiB 不分配 + 多机拓扑告警 |
+| 32c/32g 近空闲 | medium 档，主库/TimescaleDB/worker CPU=10/10/3，内存按权重分配 |
+| 64c/128g | large 档，主库/TimescaleDB CPU 各取 21 核，内存封顶 ceiling + 多机拓扑告警 |
 | 11g 可用的繁忙主机 | 命中门禁，die + 建议 ≥23 GiB + 逃生口 |
