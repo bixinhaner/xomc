@@ -32,6 +32,7 @@ type mockGroupRepo struct {
 	batchAddDevicesFn            func(ctx context.Context, groupID uuid.UUID, deviceIDs []uuid.UUID) (int64, error)
 	moveDevicesFn                func(ctx context.Context, deviceIDs []uuid.UUID, targetGroupID uuid.UUID) (int64, error)
 	removeDevicesFromAllGroupsFn func(ctx context.Context, deviceIDs []uuid.UUID) (int64, error)
+	invalidateCountsCalls        int
 }
 
 func (m *mockGroupRepo) Create(ctx context.Context, group *DeviceGroup) error {
@@ -166,11 +167,25 @@ func (m *mockGroupRepo) ClearBoundRule(_ context.Context, _ uuid.UUID) error {
 func (m *mockGroupRepo) UpdateBoundRule(_ context.Context, _, _ uuid.UUID) error {
 	return nil
 }
+func (m *mockGroupRepo) InvalidateDeviceGroupCounts() {
+	m.invalidateCountsCalls++
+}
 
 // --- Helper ---
 
 func newTestGroupService(repo *mockGroupRepo) *DeviceGroupService {
 	return NewDeviceGroupService(repo, nil, nil, zap.NewNop())
+}
+
+func TestDeviceGroupService_CreateGroup_InvalidatesTreeCache(t *testing.T) {
+	repo := &mockGroupRepo{}
+
+	_, err := newTestGroupService(repo).CreateGroup(context.Background(), CreateGroupRequest{
+		Name: "new-root",
+	}, "tester")
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, repo.invalidateCountsCalls)
 }
 
 func TestDeviceGroupService_CreateGroup_PersistsRuleSource(t *testing.T) {
