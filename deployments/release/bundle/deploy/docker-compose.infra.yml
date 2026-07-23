@@ -77,7 +77,10 @@ services:
         limits:
           # resources.env 注入。缺省(#167 Step 0)：mem 2g→7g 容 max_connections=300(每连接
           # ~8-10MB,300×~10MB=3g + shared_buffers 1.8g + 余量)，与上方 -c 调优同源。
-          cpus: "${POSTGRES_CPUS:-2}"
+          # CPU 2→6核对齐 plan-resources.sh medium 档（32核/32G 目标机型）：2026-07-23
+          # omc78 20000设备压测实测主库 cgroup 节流 nr_throttled/nr_periods≈99.2%
+          # （几乎每个调度周期都被限流），是当时 LWLock/LockManager 锁等待堆积的主因。
+          cpus: "${POSTGRES_CPUS:-6}"
           memory: "${POSTGRES_MEM:-7g}"
         reservations:
           cpus: "0.5"
@@ -136,7 +139,9 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${TSDB_CPUS:-2}"
+          # CPU 2→4核对齐 plan-resources.sh medium 档（32核/32G 目标机型）：2026-07-23
+          # omc78 压测实测节流率约20%，也偏高。
+          cpus: "${TSDB_CPUS:-4}"
           memory: "${TSDB_MEM:-7g}"
         reservations:
           cpus: "0.5"
@@ -174,7 +179,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${REDIS_CPUS:-1}"
+          # CPU 1→2核对齐 plan-resources.sh medium 档（32核/32G 目标机型）。
+          cpus: "${REDIS_CPUS:-2}"
           memory: "${REDIS_MEM:-3g}"
         reservations:
           cpus: "0.25"
@@ -218,8 +224,9 @@ services:
     deploy:
       resources:
         limits:
+          # 内存 512m→1024m 对齐 plan-resources.sh medium 档（32核/32G 目标机型）。
           cpus: "${NATS_CPUS:-1}"
-          memory: "${NATS_MEM:-512m}"
+          memory: "${NATS_MEM:-1024m}"
         reservations:
           cpus: "0.25"
           memory: 256m
@@ -266,7 +273,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${MINIO_CPUS:-1}"
+          # CPU 1→4核对齐 plan-resources.sh medium 档（32核/32G 目标机型）。
+          cpus: "${MINIO_CPUS:-4}"
           memory: "${MINIO_MEM:-4g}"
         reservations:
           cpus: "0.25"

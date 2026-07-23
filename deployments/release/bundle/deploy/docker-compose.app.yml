@@ -135,9 +135,10 @@ services:
       resources:
         limits:
           # 资源限额由 plan-resources.sh 生成的 resources.env 经 --env-file 注入；
-          # 缺省 = 历史字面量，未跑 plan-resources.sh 的部署行为不变。
+          # 缺省对齐 plan-resources.sh medium 档（32核/32G 目标机型），未跑脚本的
+          # 部署也有合理开箱起点；机型差异较大仍建议实跑 plan-resources.sh 精确适配。
           cpus: "${APP_CPUS:-2}"
-          memory: "${APP_MEM:-1g}"
+          memory: "${APP_MEM:-1536m}"
         reservations:
           cpus: "0.5"
           memory: 512m
@@ -145,10 +146,10 @@ services:
       TZ: "Asia/Shanghai"
       OMCGO_ENV: ${OMCGO_ENV}
       OMCGO_SERVICE: app
-      # Go 运行时上限（resources.env 注入）。缺省(#167 Step 0)：GOMEMLIMIT off→900MiB(≈0.9×1g 内存
+      # Go 运行时上限（resources.env 注入）。缺省：GOMEMLIMIT off→1382MiB(≈0.9×1536m 内存
       # 默认,软限须 < limits.memory)，把硬 OOM-kill 换成 GC 背压(纯安全网)。GOMAXPROCS 空则
       # Go 1.25 自动按 cgroup CPU 配额推导。
-      GOMEMLIMIT: "${APP_GOMEMLIMIT:-900MiB}"
+      GOMEMLIMIT: "${APP_GOMEMLIMIT:-1382MiB}"
       GOMAXPROCS: "${APP_GOMAXPROCS:-}"
       # 配置凭据单一真值源 = deploy/.env；app.prod.yaml 用 ${VAR} 引用，Load() 解析前展开。
       POSTGRES_USER: ${POSTGRES_USER}
@@ -200,7 +201,9 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${ACS_CPUS:-2}"
+          # 缺省对齐 plan-resources.sh medium 档（32核/32G 目标机型）；ACS 是 TR-069
+          # 长连接最热的组件，2 核在万级并发会话下富余很小。
+          cpus: "${ACS_CPUS:-5}"
           memory: "${ACS_MEM:-4g}"
         reservations:
           cpus: "0.5"
@@ -260,8 +263,14 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${WORKER_CPUS:-1.5}"
-          memory: "${WORKER_MEM:-768m}"
+          # 缺省对齐 plan-resources.sh medium 档并上调（32核/32G 目标机型）：worker PM
+          # consumer 的 MaxAckPending = max(pmConcurrency*4, 16)，pmConcurrency 在
+          # pm_consumer_concurrency=0(自动) 时取自 GOMAXPROCS（即容器 CPU 配额）；
+          # CPU<5 核时 pmConcurrency<=4 会被 16 这个下限硬顶死（2026-07-23 omc78
+          # 20000设备压测实测复现：num_ack_pending 精确卡在16，PM队列积压超百万条）。
+          # 故这里不采用 medium 档字面值 3，直接给 5 核以确保突破该硬顶。
+          cpus: "${WORKER_CPUS:-5}"
+          memory: "${WORKER_MEM:-1024m}"
         reservations:
           cpus: "0.5"
           memory: 384m
@@ -270,8 +279,8 @@ services:
       OMCGO_ENV: ${OMCGO_ENV}
       OMCGO_SERVICE: worker
       # Go 运行时上限（resources.env 注入）；worker PM/MR 解析吃内存，GOMEMLIMIT 兜底 OOM。
-      # 缺省(#167) off→690MiB(≈0.9×768m)。
-      GOMEMLIMIT: "${WORKER_GOMEMLIMIT:-690MiB}"
+      # 缺省 off→921MiB(≈0.9×1024m)。
+      GOMEMLIMIT: "${WORKER_GOMEMLIMIT:-921MiB}"
       GOMAXPROCS: "${WORKER_GOMAXPROCS:-}"
       # 配置凭据单一真值源 = deploy/.env；worker.prod.yaml 用 ${VAR} 引用，Load() 解析前展开。
       POSTGRES_USER: ${POSTGRES_USER}
