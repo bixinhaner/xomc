@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Button, Card, Dropdown, Typography } from 'antd';
 import type { MenuProps } from 'antd';
-import { DownloadOutlined, DownOutlined, UploadOutlined } from '@ant-design/icons';
+import { DownloadOutlined, DownOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import SearchInput from '@/components/SearchInput';
 import type { BatchAction } from '@/components/DataTable';
@@ -16,6 +16,7 @@ export interface DeviceListPanelProps {
   devices: Device[];
   total: number;
   loading: boolean;
+  refreshing: boolean;
   selectedDeviceIds: React.Key[];
   currentPage: number;
   pageSize: number;
@@ -26,6 +27,7 @@ export interface DeviceListPanelProps {
   onPageChange: (page: number, size: number) => void;
   /** SN / 设备名称 模糊搜索（多个以逗号分隔），回车或点搜索触发。 */
   onSearch: (value: string) => void;
+  onRefresh: () => void | Promise<void>;
   onExport: () => void | Promise<void>;
   /**
    * 批量导入完成回调。
@@ -42,6 +44,7 @@ export default function DeviceListPanel({
   devices,
   total,
   loading,
+  refreshing,
   selectedDeviceIds,
   currentPage,
   pageSize,
@@ -51,6 +54,7 @@ export default function DeviceListPanel({
   onSelectionChange,
   onPageChange,
   onSearch,
+  onRefresh,
   onExport,
   onImport,
   onDownloadTemplate,
@@ -94,7 +98,7 @@ export default function DeviceListPanel({
     [onSearch, t],
   );
 
-  // 导出 / 导入按钮放到工具栏「删除」按钮之后（DataTable.extraToolbarAfterBatch）。
+  // 页面刷新 / 导出 / 导入按钮放到工具栏「删除」按钮之后（DataTable.extraToolbarAfterBatch）。
   // Import 升级为下拉：「更新名称/备注」和「批量预登记」两个选项。
   const importMenuItems: MenuProps['items'] = useMemo(() => [
     { key: 'import', label: t('common.import'), icon: <UploadOutlined />, onClick: handleImportClick },
@@ -104,6 +108,14 @@ export default function DeviceListPanel({
   const importExportButtons = useMemo(
     () => (
       <>
+        <Button
+          size="small"
+          icon={<ReloadOutlined />}
+          loading={refreshing}
+          onClick={() => void onRefresh()}
+        >
+          {t('common.refresh')}
+        </Button>
         <Button size="small" type="primary" icon={<DownloadOutlined />} onClick={onExport}>
           {t('common.export')}
         </Button>
@@ -114,7 +126,7 @@ export default function DeviceListPanel({
         </Dropdown>
       </>
     ),
-    [importMenuItems, onExport, t],
+    [importMenuItems, onExport, onRefresh, refreshing, t],
   );
 
   return (

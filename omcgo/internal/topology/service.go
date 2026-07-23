@@ -39,6 +39,10 @@ type groupMatcher interface {
 	MatchGroup(ctx context.Context, groupID uuid.UUID) error
 }
 
+type deviceGroupTreeCacheInvalidator interface {
+	InvalidateDeviceGroupCounts()
+}
+
 // NewDeviceGroupService creates a new DeviceGroupService.
 func NewDeviceGroupService(repo DeviceGroupRepository, topoNodeRepo TopoNodeRepository, pool *pgxpool.Pool, logger *zap.Logger) *DeviceGroupService {
 	return &DeviceGroupService{repo: repo, topoNodeRepo: topoNodeRepo, pool: pool, logger: logger}
@@ -194,6 +198,7 @@ func (s *DeviceGroupService) CreateGroup(ctx context.Context, req CreateGroupReq
 	if err := s.repo.Create(ctx, group); err != nil {
 		return nil, fmt.Errorf("create group: %w", err)
 	}
+	s.invalidateTreeCache()
 
 	// Create sub-groups if this is a L1 group.
 	if level == 1 && len(req.SubGroups) > 0 {
@@ -211,6 +216,7 @@ func (s *DeviceGroupService) CreateGroup(ctx context.Context, req CreateGroupReq
 			if err := s.repo.Create(ctx, childGroup); err != nil {
 				return nil, fmt.Errorf("create sub-group %q: %w", sub.Name, err)
 			}
+			s.invalidateTreeCache()
 
 			// Assign devices to sub-group.
 			if len(sub.DeviceIDs) > 0 {
@@ -230,6 +236,12 @@ func (s *DeviceGroupService) CreateGroup(ctx context.Context, req CreateGroupReq
 	// 异步回灌：按新分组（及其子分组）的匹配规则把命中设备归入。
 	s.fireGroupMatch(group)
 	return group, nil
+}
+
+func (s *DeviceGroupService) invalidateTreeCache() {
+	if invalidator, ok := s.repo.(deviceGroupTreeCacheInvalidator); ok {
+		invalidator.InvalidateDeviceGroupCounts()
+	}
 }
 
 // UpdateGroup updates a device group (default groups cannot be modified).

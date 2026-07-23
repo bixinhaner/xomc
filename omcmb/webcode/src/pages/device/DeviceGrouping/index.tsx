@@ -49,7 +49,11 @@ export default function DeviceGrouping() {
   const { fromRecord } = useI18nText();
   const locale = useAppStore((s) => s.locale);
   const { modal, message } = App.useApp();
-  const { data: groupsData, refetch: refetchGroups } = useDeviceGroups();
+  const {
+    data: groupsData,
+    isFetching: isFetchingGroups,
+    refetch: refetchGroups,
+  } = useDeviceGroups();
   const groups = groupsData?.groups ?? [];
   const totalDevicesFromStats = groupsData?.stats?.totalDevices ?? 0;
 
@@ -108,7 +112,12 @@ export default function DeviceGrouping() {
       ...filteredExportParams,
     } as DeviceQueryParams;
   }, [currentPage, pageSize, filteredExportParams]);
-  const { data: deviceData, isLoading, refetch } = useDeviceList(queryParams);
+  const {
+    data: deviceData,
+    isLoading,
+    isFetching: isFetchingDevices,
+    refetch,
+  } = useDeviceList(queryParams);
   const devices: Device[] = useMemo(
     () => withDeviceGroupDisplayName(deviceData?.items ?? [], groups, locale),
     [deviceData?.items, groups, locale]
@@ -322,6 +331,10 @@ export default function DeviceGrouping() {
     clearDeviceSelection();
   }, [clearDeviceSelection]);
 
+  const handleRefresh = useCallback(async () => {
+    await Promise.all([refetchGroups(), refetch()]);
+  }, [refetchGroups, refetch]);
+
   const handleExportClick = useCallback(() => {
     setExportScope(selectedDeviceIds.length > 0 ? 'selected' : (hasSearchFilter ? 'filtered' : 'groupAll'));
     setExportModalOpen(true);
@@ -398,6 +411,7 @@ export default function DeviceGrouping() {
           devices={devices}
           total={total}
           loading={isLoading}
+          refreshing={isFetchingGroups || isFetchingDevices}
           selectedDeviceIds={selectedDeviceIds}
           currentPage={currentPage}
           pageSize={pageSize}
@@ -410,6 +424,7 @@ export default function DeviceGrouping() {
             setPageSize(size);
           }}
           onSearch={handleSearch}
+          onRefresh={handleRefresh}
           onExport={handleExportClick}
           onImport={handleImport}
           onDownloadTemplate={handleDownloadTemplate}
