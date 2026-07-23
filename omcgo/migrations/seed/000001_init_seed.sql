@@ -18795,16 +18795,12 @@ WITH target_commands AS (
 ), desired_param_fields AS (
     SELECT command_id,
            standard_path_id,
-           CASE standard_path
-               WHEN 'Device.Ethernet.Interface.{i}.PortType' THEN 'ETHERNET_INTERFACE_PORT_TYPE'
-               WHEN 'Device.Ethernet.Interface.{i}.interfaceType' THEN 'ETHERNET_INTERFACE_TYPE'
-               ELSE LEFT(UPPER(regexp_replace(
-                   leaf_name,
-                   '([a-z0-9])([A-Z])',
-                   '\1_\2',
-                   'g'
-               )), 100)
-           END AS mml_code,
+           LEFT(UPPER(regexp_replace(
+               leaf_name,
+               '([a-z0-9])([A-Z])',
+               '\1_\2',
+               'g'
+           )), 100) AS mml_code,
            jsonb_build_object('zh-CN', label_zh, 'en-US', leaf_name) AS label_i18n,
            sort_order,
            CASE access
@@ -21285,13 +21281,6 @@ SET command_name = EXCLUDED.command_name,
     instance_range_meta = EXCLUDED.instance_range_meta,
     deprecated_at = NULL,
     updated_at = now();
-
--- MR参数管理不展示对象级添加/删除；参数维护统一走 LST/MOD SP_SUB_01。
-UPDATE public.mml_commands
-SET deprecated_at = now(),
-    updated_at = now()
-WHERE command_code IN ('ADD MR_MGMT_CONFIG', 'RMV MR_MGMT_CONFIG')
-  AND deprecated_at IS NULL;
 
 -- Device.FAP.MRMgmt.Config.{i}.* belongs to MR参数管理.
 WITH target_commands AS (
@@ -23924,6 +23913,32 @@ UPDATE public.mml_commands
 SET deprecated_at = now(),
     updated_at = now()
 WHERE command_code IN ('LST MML350_DEVICE_FAP__IPSEC', 'MOD MML350_DEVICE_FAP__IPSEC');
+
+-- Remove the temporary MML350 Device.Services.FAPService grouping from the active catalog.
+-- The standard parameters remain in standard_params; only the MML group/commands are removed.
+DELETE FROM public.mml_command_sub_fields sf
+USING public.mml_commands c
+WHERE sf.command_id = c.id
+  AND c.command_code IN (
+      'LST MML350_DEVICE_SERVICES_FAPSERVICE__DEVICE_SERVICES_FAPSERVICE',
+      'LST MML350_DEVICE_SERVICES_FAPSERVICE__EMBEDDED_EPCBEARERLBOQOS',
+      'LST MML350_DEVICE_SERVICES_FAPSERVICE__EMBEDDED_EPCBEARERLBOTFT',
+      'LST MML350_DEVICE_SERVICES_FAPSERVICE__IPSEC',
+      'LST MML350_DEVICE_SERVICES_FAPSERVICE__MMEPOOLCONFIGPARAM'
+  );
+
+DELETE FROM public.mml_commands
+WHERE command_code IN (
+    'LST MML350_DEVICE_SERVICES_FAPSERVICE__DEVICE_SERVICES_FAPSERVICE',
+    'LST MML350_DEVICE_SERVICES_FAPSERVICE__EMBEDDED_EPCBEARERLBOQOS',
+    'LST MML350_DEVICE_SERVICES_FAPSERVICE__EMBEDDED_EPCBEARERLBOTFT',
+    'LST MML350_DEVICE_SERVICES_FAPSERVICE__IPSEC',
+    'LST MML350_DEVICE_SERVICES_FAPSERVICE__MMEPOOLCONFIGPARAM'
+);
+
+DELETE FROM public.mml_command_groups
+WHERE group_code = 'MML350_G_DEVICE_SERVICES_FAPSERVICE'
+  AND param_version = 'cmcc-td-lte-v2.3';
 
 COMMIT;
 

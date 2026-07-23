@@ -10,25 +10,6 @@
 --
 -- This file consolidates the former omcgo/scripts/mml_*.sql files.
 
-\if :{?mml_rollback}
-\else
-\if :{?mml_verify}
-\else
-ALTER TABLE public.param_mappings
-    ADD COLUMN IF NOT EXISTS default_value text,
-    ADD COLUMN IF NOT EXISTS validation_pattern text;
-
-ALTER TABLE public.discovered_param_mappings
-    ADD COLUMN IF NOT EXISTS default_value text,
-    ADD COLUMN IF NOT EXISTS validation_pattern text;
-
-COMMENT ON COLUMN public.param_mappings.default_value IS '参数模型 XML defaultValue；用于 MML 控制台默认填值提示';
-COMMENT ON COLUMN public.param_mappings.validation_pattern IS '参数模型 XML validationPattern；用于 MML 控制台输入校验';
-COMMENT ON COLUMN public.discovered_param_mappings.default_value IS '从 param_mappings 继承的 defaultValue';
-COMMENT ON COLUMN public.discovered_param_mappings.validation_pattern IS '从 param_mappings 继承的 validationPattern';
-\endif
-\endif
-
 \if :{?mml_verify}
 \echo 'Verifying MML direct standard parameter bindings...'
 -- No standalone verify script existed for mml_add_direct_standard_params_to_tree_20260703.sql.
@@ -6311,7 +6292,7 @@ BEGIN
         WHERE c.id IS NULL
     ) t;
     IF v_missing_commands IS NOT NULL THEN
-        RAISE NOTICE 'skipping missing or deprecated mml_commands for command_code: %', v_missing_commands;
+        RAISE EXCEPTION 'missing mml_commands for command_code: %', v_missing_commands;
     END IF;
 
     SELECT string_agg(t.standard_path, ', ' ORDER BY t.standard_path)
@@ -8282,7 +8263,7 @@ BEGIN
     ) s;
 
     IF v_missing_commands IS NOT NULL THEN
-        RAISE NOTICE 'skipping missing or deprecated mml_commands:%', E'\n' || v_missing_commands;
+        RAISE EXCEPTION 'missing mml_commands:%', E'\n' || v_missing_commands;
     END IF;
 
     SELECT string_agg(standard_path || ' (' || rows || ' rows)', E'\n' ORDER BY standard_path)
@@ -9317,7 +9298,7 @@ BEGIN
     FROM tmp_mml_350_commands t
     JOIN public.mml_commands c ON c.command_code = t.command_code AND c.deprecated_at IS NULL;
     IF v_actual_commands <> 54 THEN
-        RAISE NOTICE 'expected up to 54 imported commands, got % after cleanup/deprecation', v_actual_commands;
+        RAISE EXCEPTION 'expected 54 imported commands, got %', v_actual_commands;
     END IF;
 
     SELECT COUNT(*) INTO v_actual_bindings
@@ -11695,6 +11676,11 @@ WITH log_defs(group_code, path_prefix) AS (
      AND sp.entry_type = 'parameter'
     WHERE t.operation_type = 'LST'
        OR (t.operation_type = 'MOD' AND sp.access = 'READ_WRITE')
+), ranked_fields AS (
+    SELECT
+        base_fields.*,
+        row_number() OVER (PARTITION BY command_id, base_mml_code ORDER BY standard_path) AS code_rank
+    FROM base_fields
 ), desired_fields AS (
     SELECT
         command_id,
@@ -13103,314 +13089,31 @@ SET deprecated_at = NOW(),
     updated_at = NOW()
 WHERE command_code IN ('LST MML350_DEVICE_FAP__IPSEC', 'MOD MML350_DEVICE_FAP__IPSEC');
 
--- Normalize reviewed MML350 groups so the command tree shows business names
--- instead of raw TR-069 object path prefixes in upgraded databases.
-WITH desired_groups(group_code, group_name_zh, group_name_en) AS (
-    VALUES
-        ('MML350_G_DEVICE_ETHERNET', '以太网参数', 'Ethernet Parameters'),
-        ('MML350_G_DEVICE_HTTPS', 'TR069连接配置', 'TR069 Connection Configuration'),
-        ('MML350_G_DEVICE_IP', 'IP参数', 'IP Parameters'),
-        ('MML350_G_DEVICE_KEEPALIVEDMGMT', '主备热备', 'High Availability'),
-        ('MML350_G_DEVICE_REMOTEDEVICELIST', '远程设备管理', 'Remote Device Management'),
-        ('MML350_G_DEVICE_SERVICES', '业务服务参数', 'Service Parameters'),
-        ('MML350_G_DEVICE_SERVICES_FAPSERVICE', '小区服务参数管理', 'FAP Service Parameters'),
-        ('MML350_G_DEVICE_WEBCONFIG', 'LMT配置', 'LMT Configuration'),
-        ('MML350_G_DEVICEGSM', 'GSM小区管理', 'GSM Cell Management'),
-        ('MML350_G_INTERNETGATEWAYDEVICE', 'NTP 参数配置', 'NTP Parameter Configuration'),
-        ('MML350_G_BOARDCONF', 'HALOD 参数配置', 'HALOD Parameter Configuration')
-)
-UPDATE public.mml_command_groups g
-SET group_name_zh = d.group_name_zh,
-    group_name_en = d.group_name_en,
-    name_i18n = jsonb_build_object('zh-CN', d.group_name_zh, 'en-US', d.group_name_en),
-    updated_at = NOW()
-FROM desired_groups d
-WHERE g.param_version = 'cmcc-td-lte-v2.3'
-  AND g.group_code = d.group_code
-  AND g.source = 'admin';
-
-WITH desired_groups(group_code, group_name_zh, group_name_en, display_order) AS (
-    VALUES
-        ('MML350_G_INTERFACE_BINDING', '接口绑定', 'Interface Binding', 24)
-)
-INSERT INTO public.mml_command_groups (
-    group_code, group_name_zh, group_name_en, name_i18n, path, param_version,
-    display_order, is_active, source, catalog_protected, chapter_code, instance_arity, instance_levels
-)
-SELECT
-    group_code,
-    group_name_zh,
-    group_name_en,
-    jsonb_build_object('zh-CN', group_name_zh, 'en-US', group_name_en),
-    group_code::ltree,
-    'cmcc-td-lte-v2.3',
-    display_order,
-    true,
-    'admin',
-    false,
-    NULL,
-    0,
-    ARRAY[]::text[]
-FROM desired_groups
-ON CONFLICT (param_version, group_code) DO UPDATE
-SET group_name_zh = EXCLUDED.group_name_zh,
-    group_name_en = EXCLUDED.group_name_en,
-    name_i18n = EXCLUDED.name_i18n,
-    path = EXCLUDED.path,
-    display_order = EXCLUDED.display_order,
-    is_active = true,
-    source = EXCLUDED.source,
-    catalog_protected = EXCLUDED.catalog_protected,
-    deleted_at = NULL,
-    deprecated_at = NULL,
-    updated_at = NOW();
-
-WITH canonical(command_code, logical_zh, logical_en, command_zh, command_en, target_paths) AS (
-    VALUES
-        (
-            'LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NRCU',
-            'F1接口绑定',
-            'F1 Interface Binding',
-            '查询F1接口绑定',
-            'Query F1 Interface Binding',
-            '[
-                "Device.LAN_HostConfigManagement.IPInterface.NRCU.F1UIpAddr",
-                "Device.LAN_HostConfigManagement.IPInterface.NRCU.F1apLocalIpAddr",
-                "Device.LAN_HostConfigManagement.IPInterface.NRCU.XnapLocalIpAddr",
-                "Device.LAN_HostConfigManagement.IPInterface.NRDU.DuF1UIpAddr",
-                "Device.LAN_HostConfigManagement.IPInterface.NRDU.DuF1apLocalIpAddr",
-                "Device.LAN_HostConfigManagement.IPInterface.NRDU.DuF1apRemoteIpAddr"
-            ]'::jsonb
-        ),
-        (
-            'LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NGAPMGMT',
-            'NG接口绑定',
-            'NG Interface Binding',
-            '查询NG接口绑定',
-            'Query NG Interface Binding',
-            '[
-                "Device.LAN_HostConfigManagement.IPInterface.NgapMgmt.NgapLocalIpAddrList",
-                "Device.LAN_HostConfigManagement.IPInterface.NgapMgmt.NguLocalIpAddrList",
-                "Device.Nr.Ipsec.NgapIpsecBindInterface",
-                "Device.Nr.Ipsec.NguIpsecBindInterface"
-            ]'::jsonb
-        )
-)
-UPDATE public.mml_commands c
-SET group_id = g.id,
-    command_name = canonical.command_zh,
-    description = canonical.command_zh,
-    command_name_i18n = jsonb_build_object('zh-CN', canonical.command_zh, 'en-US', canonical.command_en),
-    logical_name_i18n = jsonb_build_object('zh-CN', canonical.logical_zh, 'en-US', canonical.logical_en),
-    target_paths = canonical.target_paths,
-    tree_node_refs = canonical.target_paths,
-    deprecated_at = NULL,
-    updated_at = NOW()
-FROM canonical
-JOIN public.mml_command_groups g
-  ON g.param_version = 'cmcc-td-lte-v2.3'
- AND g.group_code = 'MML350_G_INTERFACE_BINDING'
- AND g.deleted_at IS NULL
-WHERE c.command_code = canonical.command_code
-  AND c.source = 'admin';
-
-WITH moved_fields(command_code, standard_path, mml_code, sort_order) AS (
-    VALUES
-        ('LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NRCU', 'Device.LAN_HostConfigManagement.IPInterface.NRCU.F1UIpAddr', 'F1UIPADDR', 1),
-        ('LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NRCU', 'Device.LAN_HostConfigManagement.IPInterface.NRCU.F1apLocalIpAddr', 'F1APLOCALIPADDR', 2),
-        ('LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NRCU', 'Device.LAN_HostConfigManagement.IPInterface.NRCU.XnapLocalIpAddr', 'XNAPLOCALIPADDR', 3),
-        ('LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NRCU', 'Device.LAN_HostConfigManagement.IPInterface.NRDU.DuF1UIpAddr', 'DUF1UIPADDR', 4),
-        ('LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NRCU', 'Device.LAN_HostConfigManagement.IPInterface.NRDU.DuF1apLocalIpAddr', 'DUF1APLOCALIPADDR', 5),
-        ('LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NRCU', 'Device.LAN_HostConfigManagement.IPInterface.NRDU.DuF1apRemoteIpAddr', 'DUF1APREMOTEIPADDR', 6),
-        ('LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NGAPMGMT', 'Device.LAN_HostConfigManagement.IPInterface.NgapMgmt.NgapLocalIpAddrList', 'NGAPLOCALIPADDRLIST', 1),
-        ('LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NGAPMGMT', 'Device.LAN_HostConfigManagement.IPInterface.NgapMgmt.NguLocalIpAddrList', 'NGULOCALIPADDRLIST', 2),
-        ('LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NGAPMGMT', 'Device.Nr.Ipsec.NgapIpsecBindInterface', 'NGAPIPSECBINDINTERFACE', 3),
-        ('LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NGAPMGMT', 'Device.Nr.Ipsec.NguIpsecBindInterface', 'NGUIPSECBINDINTERFACE', 4)
-)
-INSERT INTO public.mml_command_sub_fields (
-    command_id, standard_path_id, mml_code, label_i18n,
-    default_selected, is_required, sort_order, access_type, is_supported
-)
-SELECT
-    c.id,
-    sp.id,
-    mf.mml_code,
-    jsonb_build_object('zh-CN', mf.mml_code, 'en-US', mf.mml_code),
-    true,
-    false,
-    mf.sort_order,
-    CASE WHEN sp.access = 'READ_WRITE' THEN 'RW' ELSE 'RO' END,
-    true
-FROM moved_fields mf
-JOIN public.mml_commands c ON c.command_code = mf.command_code
-JOIN public.standard_params sp ON sp.standard_path = mf.standard_path
-ON CONFLICT (command_id, standard_path_id) DO UPDATE
-SET mml_code = EXCLUDED.mml_code,
-    label_i18n = EXCLUDED.label_i18n,
-    sort_order = EXCLUDED.sort_order,
-    access_type = EXCLUDED.access_type,
-    deprecated_at = NULL,
-    is_supported = true,
-    updated_at = NOW();
-
-UPDATE public.mml_commands
-SET deprecated_at = NOW(),
-    updated_at = NOW()
-WHERE command_code IN (
-    'LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NRDU',
-    'LST MML350_DEVICE_NR__IPSEC'
-)
-  AND source = 'admin';
-
-UPDATE public.mml_commands
-SET command_name = '查询TR069连接配置',
-    description = '查询TR069连接配置',
-    command_name_i18n = '{"zh-CN":"查询TR069连接配置","en-US":"List TR069 Connection Configuration"}'::jsonb,
-    logical_name_i18n = '{"zh-CN":"TR069连接配置","en-US":"TR069 Connection Configuration"}'::jsonb,
-    updated_at = NOW()
-WHERE command_code = 'LST MML350_DEVICE_HTTPS__HTTPSENABLE'
-  AND source = 'admin';
-
-UPDATE public.mml_commands
-SET command_name = '查询热备配置',
-    description = '查询热备配置',
-    command_name_i18n = '{"zh-CN":"查询热备配置","en-US":"Query HA Configuration"}'::jsonb,
-    logical_name_i18n = '{"zh-CN":"热备配置","en-US":"HA Configuration"}'::jsonb,
-    updated_at = NOW()
-WHERE command_code = 'LST MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT'
-  AND source = 'admin';
-
-UPDATE public.mml_commands
-SET command_name = '查询VRRP实例',
-    description = '查询VRRP实例',
-    command_name_i18n = '{"zh-CN":"查询VRRP实例","en-US":"Query VRRP Instances"}'::jsonb,
-    logical_name_i18n = '{"zh-CN":"VRRP实例","en-US":"VRRP Instances"}'::jsonb,
-    updated_at = NOW()
-WHERE command_code = 'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT'
-  AND source = 'admin';
-
-UPDATE public.mml_commands
-SET command_name = '查询远程设备',
-    description = '查询远程设备',
-    command_name_i18n = '{"zh-CN":"查询远程设备","en-US":"Query Remote Devices"}'::jsonb,
-    logical_name_i18n = '{"zh-CN":"远程设备","en-US":"Remote Devices"}'::jsonb,
-    updated_at = NOW()
-WHERE command_code = 'LST MML350_DEVICE_REMOTEDEVICELIST__REMOTEDEVICELIST'
-  AND source = 'admin';
-
-UPDATE public.mml_commands c
-SET group_id = g.id,
-    command_name = CASE c.operation_type
-        WHEN 'ADD' THEN '新增GSM小区'
-        WHEN 'MOD' THEN '修改GSM小区'
-        WHEN 'RMV' THEN '删除GSM小区'
-        ELSE '查询GSM小区'
-    END,
-    description = CASE c.operation_type
-        WHEN 'ADD' THEN '新增GSM小区'
-        WHEN 'MOD' THEN '修改GSM小区'
-        WHEN 'RMV' THEN '删除GSM小区'
-        ELSE '查询GSM小区'
-    END,
-    command_name_i18n = jsonb_build_object(
-        'zh-CN',
-        CASE c.operation_type
-            WHEN 'ADD' THEN '新增GSM小区'
-            WHEN 'MOD' THEN '修改GSM小区'
-            WHEN 'RMV' THEN '删除GSM小区'
-            ELSE '查询GSM小区'
-        END,
-        'en-US',
-        CASE c.operation_type
-            WHEN 'ADD' THEN 'Add GSM Cell'
-            WHEN 'MOD' THEN 'Modify GSM Cell'
-            WHEN 'RMV' THEN 'Remove GSM Cell'
-            ELSE 'Query GSM Cell'
-        END
-    ),
-    logical_name_i18n = '{"zh-CN":"GSM小区","en-US":"GSM Cell"}'::jsonb,
-    deprecated_at = NULL,
-    updated_at = NOW()
-FROM public.mml_command_groups g
-WHERE c.command_code IN (
-    'ADD MML350_DEVICE_SERVICES__GSMBTSCELLDT',
-    'LST MML350_DEVICE_SERVICES__GSMBTSCELLDT',
-    'MOD MML350_DEVICE_SERVICES__GSMBTSCELLDT',
-    'RMV MML350_DEVICE_SERVICES__GSMBTSCELLDT'
-)
-  AND c.source = 'admin'
-  AND g.param_version = 'cmcc-td-lte-v2.3'
-  AND g.group_code = 'MML350_G_DEVICEGSM'
-  AND g.deleted_at IS NULL;
-
-UPDATE public.mml_commands c
-SET group_id = g.id,
-    command_name = '查询LMT用户配置',
-    description = '查询LMT用户配置',
-    command_name_i18n = '{"zh-CN":"查询LMT用户配置","en-US":"Query LMT User Configuration"}'::jsonb,
-    logical_name_i18n = '{"zh-CN":"LMT用户配置","en-US":"LMT User Configuration"}'::jsonb,
-    deprecated_at = NULL,
-    updated_at = NOW()
-FROM public.mml_command_groups g
-WHERE c.command_code = 'LST MML350_DEVICE_SERVICES__LMT_USERCONFIG'
-  AND c.source = 'admin'
-  AND g.param_version = 'cmcc-td-lte-v2.3'
-  AND g.group_code = 'MML350_G_DEVICE_WEBCONFIG'
-  AND g.deleted_at IS NULL;
-
-UPDATE public.mml_commands
-SET command_name = '查询Web访问配置',
-    description = '查询Web访问配置',
-    command_name_i18n = '{"zh-CN":"查询Web访问配置","en-US":"Query Web Access Configuration"}'::jsonb,
-    logical_name_i18n = '{"zh-CN":"Web访问配置","en-US":"Web Access Configuration"}'::jsonb,
-    updated_at = NOW()
-WHERE command_code = 'LST MML350_DEVICE_WEBCONFIG__WEBCONFIG'
-  AND source = 'admin';
-
-UPDATE public.mml_commands
-SET command_name = '查询 NTP配置',
-    description = '查询 NTP配置',
-    command_name_i18n = '{"zh-CN":"查询 NTP配置","en-US":"List NTP Configuration"}'::jsonb,
-    logical_name_i18n = '{"zh-CN":"NTP配置","en-US":"NTP Configuration"}'::jsonb,
-    updated_at = NOW()
-WHERE command_code = 'LST MML350_INTERNETGATEWAYDEVICE__TIME'
-  AND source = 'admin';
-
-UPDATE public.mml_commands
-SET command_name = '查询 HALOD参数配置',
-    description = '查询 HALOD参数配置',
-    command_name_i18n = '{"zh-CN":"查询 HALOD参数配置","en-US":"List HALOD Parameter Configuration"}'::jsonb,
-    logical_name_i18n = '{"zh-CN":"HALOD参数配置","en-US":"HALOD Parameter Configuration"}'::jsonb,
-    updated_at = NOW()
-WHERE command_code = 'LST MML350_BOARDCONF__HALOD'
-  AND source = 'admin';
-
-UPDATE public.mml_command_groups g
-SET is_active = false,
-    deleted_at = COALESCE(g.deleted_at, NOW()),
-    deprecated_at = COALESCE(g.deprecated_at, NOW()),
-    updated_at = NOW()
-WHERE g.param_version = 'cmcc-td-lte-v2.3'
-  AND g.source = 'admin'
-  AND g.group_code IN (
-      'MML350_G_DEVICE_ETHERNET',
-      'MML350_G_DEVICE_IP',
-      'MML350_G_DEVICE_LAN_HOSTCONFIGMANAGEMENT',
-      'MML350_G_DEVICE_NR',
-      'MML350_G_DEVICE_SERVICES'
-  )
-  AND NOT EXISTS (
-      SELECT 1
-      FROM public.mml_commands c
-      WHERE c.group_id = g.id
-        AND c.deprecated_at IS NULL
+-- Remove the temporary MML350 Device.Services.FAPService grouping from the active catalog.
+-- The standard parameters remain in standard_params; only the MML group/commands are removed.
+DELETE FROM public.mml_command_sub_fields sf
+USING public.mml_commands c
+WHERE sf.command_id = c.id
+  AND c.command_code IN (
+      'LST MML350_DEVICE_SERVICES_FAPSERVICE__DEVICE_SERVICES_FAPSERVICE',
+      'LST MML350_DEVICE_SERVICES_FAPSERVICE__EMBEDDED_EPCBEARERLBOQOS',
+      'LST MML350_DEVICE_SERVICES_FAPSERVICE__EMBEDDED_EPCBEARERLBOTFT',
+      'LST MML350_DEVICE_SERVICES_FAPSERVICE__IPSEC',
+      'LST MML350_DEVICE_SERVICES_FAPSERVICE__MMEPOOLCONFIGPARAM'
   );
 
--- MR参数管理不展示对象级添加/删除；参数维护统一走 LST/MOD SP_SUB_01。
-UPDATE public.mml_commands
-SET deprecated_at = NOW(),
-    updated_at = NOW()
-WHERE command_code IN ('ADD MR_MGMT_CONFIG', 'RMV MR_MGMT_CONFIG');
+DELETE FROM public.mml_commands
+WHERE command_code IN (
+    'LST MML350_DEVICE_SERVICES_FAPSERVICE__DEVICE_SERVICES_FAPSERVICE',
+    'LST MML350_DEVICE_SERVICES_FAPSERVICE__EMBEDDED_EPCBEARERLBOQOS',
+    'LST MML350_DEVICE_SERVICES_FAPSERVICE__EMBEDDED_EPCBEARERLBOTFT',
+    'LST MML350_DEVICE_SERVICES_FAPSERVICE__IPSEC',
+    'LST MML350_DEVICE_SERVICES_FAPSERVICE__MMEPOOLCONFIGPARAM'
+);
+
+DELETE FROM public.mml_command_groups
+WHERE group_code = 'MML350_G_DEVICE_SERVICES_FAPSERVICE'
+  AND param_version = 'cmcc-td-lte-v2.3';
 
 COMMIT;
 -- END DeviceInfo SignallingTrace grouping
