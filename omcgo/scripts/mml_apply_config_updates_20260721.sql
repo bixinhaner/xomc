@@ -1495,6 +1495,52 @@ $$;
 
 SELECT public.cleanup_mml_duplicate_group_bindings();
 
+WITH duplicate_paths(standard_path) AS (
+    VALUES
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T300'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T301'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T302'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304EUTRA'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304IRAT'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T310'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T311'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T320'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N310'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N311')
+),
+fap_commands AS (
+    SELECT id
+    FROM public.mml_commands
+    WHERE command_code IN ('LST FAP_SERVICE', 'MOD FAP_SERVICE')
+)
+DELETE FROM public.mml_command_sub_fields sf
+USING fap_commands c, public.standard_params sp, duplicate_paths dp
+WHERE sf.command_id = c.id
+  AND sf.standard_path_id = sp.id
+  AND sp.standard_path = dp.standard_path;
+
+WITH target_cmds AS (
+    SELECT id
+    FROM public.mml_commands
+    WHERE command_code IN ('LST FAP_SERVICE', 'MOD FAP_SERVICE')
+),
+refreshed AS (
+    SELECT
+        t.id,
+        COALESCE(jsonb_agg(to_jsonb(sp.standard_path) ORDER BY sf.sort_order, sp.standard_path)
+                 FILTER (WHERE sp.standard_path IS NOT NULL), '[]'::jsonb) AS paths
+    FROM target_cmds t
+    LEFT JOIN public.mml_command_sub_fields sf ON sf.command_id = t.id AND sf.deprecated_at IS NULL
+    LEFT JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+    GROUP BY t.id
+)
+UPDATE public.mml_commands c
+SET target_paths = r.paths,
+    tree_node_refs = r.paths,
+    updated_at = NOW()
+FROM refreshed r
+WHERE c.id = r.id;
+
 COMMIT;
 \echo 'MML standard TRPath remaining regrouping completed.'
 \elif :{?mml_verify}
