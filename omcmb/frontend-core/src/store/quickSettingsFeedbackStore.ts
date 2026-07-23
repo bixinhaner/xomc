@@ -9,6 +9,8 @@ export interface CellFeedback {
   at: number;
   errorMsg?: string;
   notifiedFailedTaskId?: string;
+  /** 本次 SPV 实际下发的 path/value；需要设备回读核实时用于判断何时可以清理草稿。 */
+  expectedReadback?: Record<string, string>;
 }
 
 export interface MultiPendingAddRow {

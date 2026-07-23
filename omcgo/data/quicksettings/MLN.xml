@@ -32,6 +32,11 @@
     <param name="CellName" titleZh="小区名称" titleEn="Cell Name"
            standardPath="Device.Services.FAPService.{i}.AccessMgmt.LTE.HNBName"/>
   </group>
+  <group id="enb-plmn" titleZh="服务 PLMN 列表" titleEn="Serving PLMN List">
+    <param name="ExistPlmnidList" titleZh="服务 PLMN 列表" titleEn="Serving PLMN List"
+           standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.ExistPlmnidList"
+           maxValue="6"/>
+  </group>
   <group id="enb-mme" titleZh="MME IP+PLMN 列表" titleEn="MME IP + PLMN List">
     <param name="MmeIpPlmnList" titleZh="MME IP+PLMN 列表" titleEn="MME IP + PLMN List"
            standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmeIpPlmnList"
