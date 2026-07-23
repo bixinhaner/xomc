@@ -25406,6 +25406,152 @@ SET target_paths = COALESCE(
     updated_at = now()
 WHERE c.command_code IN ('LST FAP_SERVICE', 'MOD FAP_SERVICE');
 
+-- 2026-07-23: cover remaining standard TRPath parameters in effective MML groups.
+-- Keep this aligned with omcgo/scripts/mml_apply_config_updates_20260721.sql so
+-- fresh baseline installs and incremental upgrades converge to the same catalog.
+
+-- Device basic info: existing bindings were present but marked unsupported.
+UPDATE public.mml_command_sub_fields sf
+SET is_supported = true,
+    access_type = 'RO',
+    updated_at = now()
+FROM public.mml_commands c
+JOIN public.standard_params sp ON true
+WHERE sf.command_id = c.id
+  AND sp.id = sf.standard_path_id
+  AND c.command_code = 'LST DEVICE_INFO'
+  AND sp.standard_path IN (
+      'Device.DeviceInfo.DataModelSpecVersion',
+      'Device.DeviceInfo.HardwarePlatform'
+  );
+
+-- Software version control: existing SoftwareCtrl bindings were present but marked unsupported.
+UPDATE public.mml_command_sub_fields sf
+SET is_supported = true,
+    access_type = CASE sp.access WHEN 'READ_WRITE' THEN 'RW' ELSE 'RO' END,
+    updated_at = now()
+FROM public.mml_commands c
+JOIN public.standard_params sp ON true
+WHERE sf.command_id = c.id
+  AND sp.id = sf.standard_path_id
+  AND c.command_code IN ('LST SOFTWARE_CTRL', 'MOD SOFTWARE_CTRL')
+  AND sp.standard_path IN (
+      'Device.SoftwareCtrl.ActivateEnable',
+      'Device.SoftwareCtrl.ActivateTime',
+      'Device.SoftwareCtrl.AutoActivateEnable',
+      'Device.SoftwareCtrl.SystemCurrentVersion'
+  );
+
+-- DeviceInfo.SwUpgrade status fields belong to the software version control query.
+WITH wanted(command_code, standard_path, mml_code, zh_label, sort_order) AS (
+    VALUES
+        ('LST SOFTWARE_CTRL', 'Device.DeviceInfo.SwUpgrade.FailureCause', 'FAILURE_CAUSE', 'FailureCause', 7),
+        ('LST SOFTWARE_CTRL', 'Device.DeviceInfo.SwUpgrade.Stage', 'STAGE', 'Stage', 8),
+        ('LST SOFTWARE_CTRL', 'Device.DeviceInfo.SwUpgrade.Status', 'STATUS', 'Status', 9)
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id,
+    standard_path_id,
+    mml_code,
+    label_i18n,
+    default_selected,
+    is_required,
+    sort_order,
+    access_type,
+    is_supported
+)
+SELECT c.id,
+       sp.id,
+       w.mml_code,
+       COALESCE(existing.label_i18n, jsonb_build_object('en-US', w.mml_code, 'zh-CN', w.zh_label)),
+       true,
+       false,
+       w.sort_order,
+       CASE sp.access WHEN 'READ_WRITE' THEN 'RW' ELSE 'RO' END,
+       true
+FROM wanted w
+JOIN public.mml_commands c ON c.command_code = w.command_code
+JOIN public.standard_params sp ON sp.standard_path = w.standard_path
+LEFT JOIN LATERAL (
+    SELECT sf.label_i18n
+    FROM public.mml_command_sub_fields sf
+    WHERE sf.standard_path_id = sp.id
+    ORDER BY sf.updated_at DESC
+    LIMIT 1
+) existing ON true
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = true,
+    deprecated_at = NULL,
+    updated_at = now();
+
+-- Device.Time.* belongs to the active NTP configuration commands.
+WITH wanted(command_code, standard_path, mml_code, zh_label, sort_order) AS (
+    VALUES
+        ('LST MML350_INTERNETGATEWAYDEVICE__TIME', 'Device.Time.CurrentLocalTime', 'CURRENT_LOCAL_TIME', '本地时间', 13),
+        ('LST MML350_INTERNETGATEWAYDEVICE__TIME', 'Device.Time.Enable', 'ENABLE', 'NTP使能开关', 14),
+        ('MOD MML350_INTERNETGATEWAYDEVICE__TIME', 'Device.Time.Enable', 'ENABLE', 'NTP使能开关', 13),
+        ('LST MML350_INTERNETGATEWAYDEVICE__TIME', 'Device.Time.LocalTimeZone', 'LOCAL_TIME_ZONE', '本地时区', 15),
+        ('MOD MML350_INTERNETGATEWAYDEVICE__TIME', 'Device.Time.LocalTimeZone', 'LOCAL_TIME_ZONE', '本地时区', 14),
+        ('LST MML350_INTERNETGATEWAYDEVICE__TIME', 'Device.Time.LocalTimeZoneName', 'LOCAL_TIME_ZONE_NAME', '本地时区', 16),
+        ('MOD MML350_INTERNETGATEWAYDEVICE__TIME', 'Device.Time.LocalTimeZoneName', 'LOCAL_TIME_ZONE_NAME', '本地时区', 15)
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id,
+    standard_path_id,
+    mml_code,
+    label_i18n,
+    default_selected,
+    is_required,
+    sort_order,
+    access_type,
+    is_supported
+)
+SELECT c.id,
+       sp.id,
+       w.mml_code,
+       COALESCE(existing.label_i18n, jsonb_build_object('en-US', w.mml_code, 'zh-CN', w.zh_label)),
+       true,
+       false,
+       w.sort_order,
+       CASE sp.access WHEN 'READ_WRITE' THEN 'RW' ELSE 'RO' END,
+       true
+FROM wanted w
+JOIN public.mml_commands c ON c.command_code = w.command_code
+JOIN public.standard_params sp ON sp.standard_path = w.standard_path
+LEFT JOIN LATERAL (
+    SELECT sf.label_i18n
+    FROM public.mml_command_sub_fields sf
+    WHERE sf.standard_path_id = sp.id
+    ORDER BY sf.updated_at DESC
+    LIMIT 1
+) existing ON true
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = true,
+    deprecated_at = NULL,
+    updated_at = now();
+
+SELECT public.refresh_mml_command_target_paths(c.id)
+FROM public.mml_commands c
+WHERE c.command_code IN (
+    'LST DEVICE_INFO',
+    'LST SOFTWARE_CTRL',
+    'MOD SOFTWARE_CTRL',
+    'LST MML350_INTERNETGATEWAYDEVICE__TIME',
+    'MOD MML350_INTERNETGATEWAYDEVICE__TIME'
+);
+
 COMMIT;
 
 -- +goose Down
