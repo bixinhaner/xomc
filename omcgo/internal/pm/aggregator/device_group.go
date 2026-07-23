@@ -26,7 +26,7 @@ func (a *Aggregator) AggregateDeviceGroup(ctx context.Context, deviceTarget, gro
 		return 0, err
 	}
 	sql, args := buildDeviceGroupSQLWithNumberProcess(deviceTarget, groupTarget, w, numberProcess)
-	tag, err := a.db.Exec(ctx, sql, args...)
+	tag, err := a.execAggregateSQL(ctx, sql, args...)
 	if err != nil {
 		return 0, fmt.Errorf("aggregator.AggregateDeviceGroup %s→%s: %w", deviceTarget, groupTarget, err)
 	}
