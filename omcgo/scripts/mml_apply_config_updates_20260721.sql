@@ -6173,13 +6173,13 @@ COMMIT;
 -- MML 配置树补充标准参数 path 回滚脚本
 -- 生成日期：2026-07-03
 -- 来源：migrations/seed/000007_add_direct_standard_params_to_mml_tree.sql
--- 作用：删除 mml_add_direct_standard_params_to_tree_20260703.sql 补充的 659 条命令-path 绑定。
+-- 作用：删除 mml_add_direct_standard_params_to_tree_20260703.sql 补充的 655 条命令-path 绑定。
 -- 注意：不删除 standard_params / mml_commands / mml_command_groups。
 -- 执行示例：psql "$DATABASE_URL" -f omcgo/scripts/mml_add_direct_standard_params_to_tree_20260703_rollback.sql
 
 BEGIN;
 
--- 回滚本脚本补充的 659 条命令-path 绑定；不删除 standard_params / mml_commands / mml_command_groups。
+-- 回滚本脚本补充的 655 条命令-path 绑定；不删除 standard_params / mml_commands / mml_command_groups。
 
 CREATE TEMP TABLE tmp_mml_direct_standard_sub_fields_down (
     command_code text NOT NULL,
@@ -6776,12 +6776,8 @@ INSERT INTO tmp_mml_direct_standard_sub_fields_down (command_code, standard_path
     ('MOD MANAGEMENT_SERVER', 'Device.ManagementServer.tfcsManagerPrimsrc'),
     ('LST MANAGEMENT_SERVER', 'Device.ManagementServer.tfcsSyncState'),
     ('MOD MANAGEMENT_SERVER', 'Device.ManagementServer.tfcsSyncState'),
-    ('LST FAULT_MGMT_HISTORY_EVENT', 'Device.FaultMgmt.HistoryEvent.{i}.OUI'),
-    ('LST FAULT_MGMT_HISTORY_EVENT', 'Device.FaultMgmt.HistoryEvent.{i}.SerialNumber'),
     ('LST FAULT_MGMT_EXPEDITED_EVENT', 'Device.FaultMgmt.ExpeditedEvent.{i}.OUI'),
     ('LST FAULT_MGMT_EXPEDITED_EVENT', 'Device.FaultMgmt.ExpeditedEvent.{i}.SerialNumber'),
-    ('LST FAULT_MGMT_CURRENT_ALARM', 'Device.FaultMgmt.CurrentAlarm.{i}.OUI'),
-    ('LST FAULT_MGMT_CURRENT_ALARM', 'Device.FaultMgmt.CurrentAlarm.{i}.SerialNumber'),
     ('LST FAULT_MGMT_QUEUED_EVENT', 'Device.FaultMgmt.QueuedEvent.{i}.OUI'),
     ('LST FAULT_MGMT_QUEUED_EVENT', 'Device.FaultMgmt.QueuedEvent.{i}.SerialNumber'),
     ('LST PLMN_LIST', 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.Enable'),
@@ -6950,16 +6946,16 @@ COMMIT;
 -- BEGIN former mml_add_direct_standard_params_to_tree_20260703.sql
 -- 生成日期：2026-07-03
 -- 来源：migrations/seed/000007_add_direct_standard_params_to_mml_tree.sql
--- 作用：将 350 个可直接加入现有 MML 树分组的 standard_params path 写入 mml_command_sub_fields。
--- 结果：新增/刷新 659 条命令-path 绑定；重复执行幂等。
+-- 作用：将 346 个可直接加入现有 MML 树分组的 standard_params path 写入 mml_command_sub_fields。
+-- 结果：新增/刷新 655 条命令-path 绑定；重复执行幂等。
 -- 执行示例：psql "$DATABASE_URL" -f omcgo/scripts/mml_add_direct_standard_params_to_tree_20260703.sql
 
 BEGIN;
 
--- 将标准参数树中可直接挂到现有 MML 命令节点的 350 条参数加入 MML 配置树。
+-- 将标准参数树中可直接挂到现有 MML 命令节点的 346 条参数加入 MML 配置树。
 -- 来源：omcgo/data/model-library/standard-params-to-mml-tree-analysis-20260703.detail.csv
 -- 范围：mml_action = add_parameter_to_existing_command。
--- 350 条标准 path 按真实现有 LST/MOD 命令展开为 659 条 mml_command_sub_fields 绑定。
+-- 346 条标准 path 按真实现有 LST/MOD 命令展开为 655 条 mml_command_sub_fields 绑定。
 -- 说明：Device.FAP.GPS.LockedAltitude / Device.FAP.GPS.SyncSource 没有现成 MOD FAP_GPS 命令，
 --       本脚本只加入已有的 LST FAP_GPS；如需 MOD 入口，应另建 MOD 命令节点。
 -- 仅新增/刷新命令-参数绑定；不新增 standard_params，不新增 mml_commands/mml_command_groups。
@@ -7568,12 +7564,8 @@ INSERT INTO tmp_mml_direct_standard_sub_fields (
     ('MOD MANAGEMENT_SERVER', 'Device.ManagementServer.tfcsManagerPrimsrc', 'TFCS_MANAGER_PRIMSRC', '{"zh-CN":"TFCS_MANAGER_PRIMSRC","en-US":"tfcs Manager Primsrc"}'::jsonb, true, true, 10002, 'RW'),
     ('LST MANAGEMENT_SERVER', 'Device.ManagementServer.tfcsSyncState', 'TFCS_SYNC_STATE', '{"zh-CN":"TFCS_SYNC_STATE","en-US":"tfcs Sync State"}'::jsonb, true, true, 10003, 'RW'),
     ('MOD MANAGEMENT_SERVER', 'Device.ManagementServer.tfcsSyncState', 'TFCS_SYNC_STATE', '{"zh-CN":"TFCS_SYNC_STATE","en-US":"tfcs Sync State"}'::jsonb, true, true, 10003, 'RW'),
-    ('LST FAULT_MGMT_HISTORY_EVENT', 'Device.FaultMgmt.HistoryEvent.{i}.OUI', 'OUI', '{"zh-CN":"OUI","en-US":"OUI"}'::jsonb, true, false, 10001, 'RO'),
-    ('LST FAULT_MGMT_HISTORY_EVENT', 'Device.FaultMgmt.HistoryEvent.{i}.SerialNumber', 'SERIAL_NUMBER', '{"zh-CN":"SERIAL_NUMBER","en-US":"Serial Number"}'::jsonb, true, false, 10002, 'RO'),
     ('LST FAULT_MGMT_EXPEDITED_EVENT', 'Device.FaultMgmt.ExpeditedEvent.{i}.OUI', 'OUI', '{"zh-CN":"OUI","en-US":"OUI"}'::jsonb, true, false, 10001, 'RO'),
     ('LST FAULT_MGMT_EXPEDITED_EVENT', 'Device.FaultMgmt.ExpeditedEvent.{i}.SerialNumber', 'SERIAL_NUMBER', '{"zh-CN":"SERIAL_NUMBER","en-US":"Serial Number"}'::jsonb, true, false, 10002, 'RO'),
-    ('LST FAULT_MGMT_CURRENT_ALARM', 'Device.FaultMgmt.CurrentAlarm.{i}.OUI', 'OUI', '{"zh-CN":"OUI","en-US":"OUI"}'::jsonb, true, false, 10001, 'RO'),
-    ('LST FAULT_MGMT_CURRENT_ALARM', 'Device.FaultMgmt.CurrentAlarm.{i}.SerialNumber', 'SERIAL_NUMBER', '{"zh-CN":"SERIAL_NUMBER","en-US":"Serial Number"}'::jsonb, true, false, 10002, 'RO'),
     ('LST FAULT_MGMT_QUEUED_EVENT', 'Device.FaultMgmt.QueuedEvent.{i}.OUI', 'OUI', '{"zh-CN":"OUI","en-US":"OUI"}'::jsonb, true, false, 10001, 'RO'),
     ('LST FAULT_MGMT_QUEUED_EVENT', 'Device.FaultMgmt.QueuedEvent.{i}.SerialNumber', 'SERIAL_NUMBER', '{"zh-CN":"SERIAL_NUMBER","en-US":"Serial Number"}'::jsonb, true, false, 10002, 'RO'),
     ('LST PLMN_LIST', 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.Enable', 'ENABLE', '{"zh-CN":"ENABLE","en-US":"Enable"}'::jsonb, true, true, 10001, 'RW'),
@@ -7647,13 +7639,13 @@ DECLARE
     v_missing_paths text;
 BEGIN
     SELECT COUNT(*) INTO v_binding_count FROM tmp_mml_direct_standard_sub_fields;
-    IF v_binding_count <> 659 THEN
-        RAISE EXCEPTION 'expected 659 command/path bindings, got %', v_binding_count;
+    IF v_binding_count <> 655 THEN
+        RAISE EXCEPTION 'expected 655 command/path bindings, got %', v_binding_count;
     END IF;
 
     SELECT COUNT(DISTINCT standard_path) INTO v_path_count FROM tmp_mml_direct_standard_sub_fields;
-    IF v_path_count <> 350 THEN
-        RAISE EXCEPTION 'expected 350 distinct standard paths, got %', v_path_count;
+    IF v_path_count <> 346 THEN
+        RAISE EXCEPTION 'expected 346 distinct standard paths, got %', v_path_count;
     END IF;
 
     SELECT string_agg(t.command_code, ', ' ORDER BY t.command_code)
@@ -10822,6 +10814,31 @@ END $$;
 
 COMMIT;
 -- END DefaultIpRoute WAN group fix
+
+\echo 'Removing 告警参数管理 group and its MML command leaves...'
+-- BEGIN alarm group removal
+BEGIN;
+
+DELETE FROM public.mml_command_sub_fields sf
+USING public.mml_commands c
+WHERE sf.command_id = c.id
+  AND c.command_code IN (
+      'LST FAULT_MGMT_CURRENT_ALARM',
+      'LST FAULT_MGMT_HISTORY_EVENT'
+  );
+
+DELETE FROM public.mml_commands
+WHERE command_code IN (
+    'LST FAULT_MGMT_CURRENT_ALARM',
+    'LST FAULT_MGMT_HISTORY_EVENT'
+);
+
+DELETE FROM public.mml_command_groups
+WHERE group_code = 'chapter:SD'
+  AND param_version = 'cmcc-td-lte-v2.3';
+
+COMMIT;
+-- END alarm group removal
 
 -- BEGIN Device.FAP catalog regrouping
 BEGIN;
