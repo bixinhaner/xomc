@@ -826,6 +826,20 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 	// 必须在所有 carrier mapping + universalInformMapping 写入之后执行,
 	// 单实例设备聚合结果与之前单值等价,多实例设备 list 直接显示 csv 串。
 	aggregateInstanceFields(paramValues, fields)
+	frequencyProjection := projectRadioFrequencyFields(paramValues, tech, productClass)
+	if frequencyProjection.dlObserved {
+		fields["freq_point"] = frequencyProjection.dlValue
+	}
+	if frequencyProjection.ulObserved {
+		fields["ul_earfcn"] = frequencyProjection.ulValue
+	}
+	if !frequencyProjection.complete {
+		s.logger.Warn("radio frequency projection is incomplete",
+			zap.String("device_id", deviceID.String()),
+			zap.String("product_class", productClass),
+			zap.String("technology", string(tech)),
+			zap.String("reason", frequencyProjection.reason))
+	}
 	enforceDeviceInfoFieldSizeLimits(fields)
 
 	latitude, longitude, sourcePath, hasCoordinates := LookupGPSCoordinates(paramValues)
