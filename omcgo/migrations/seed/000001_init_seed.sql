@@ -10799,16 +10799,16 @@ WITH gps AS (
     UPDATE public.mml_commands c
     SET group_id = gps.id,
         command_name = CASE c.command_code
-            WHEN 'LST SO_SUB_01' THEN '查询 GPS信息'
-            WHEN 'MOD SO_SUB_01' THEN '修改 GPS信息'
+            WHEN 'LST SO_SUB_01' THEN '查询 GPS信息参数管理'
+            WHEN 'MOD SO_SUB_01' THEN '修改 GPS信息参数管理'
             ELSE c.command_name
         END,
         command_name_i18n = CASE c.command_code
-            WHEN 'LST SO_SUB_01' THEN '{"zh-CN":"查询 GPS信息","en-US":"Query GPS Information"}'::jsonb
-            WHEN 'MOD SO_SUB_01' THEN '{"zh-CN":"修改 GPS信息","en-US":"Modify GPS Information"}'::jsonb
+            WHEN 'LST SO_SUB_01' THEN '{"zh-CN":"查询 GPS信息参数管理","en-US":"Query GPS Information Parameters"}'::jsonb
+            WHEN 'MOD SO_SUB_01' THEN '{"zh-CN":"修改 GPS信息参数管理","en-US":"Modify GPS Information Parameters"}'::jsonb
             ELSE c.command_name_i18n
         END,
-        logical_name_i18n = '{"zh-CN":"GPS信息","en-US":"GPS Information"}'::jsonb,
+        logical_name_i18n = '{"zh-CN":"GPS信息参数管理","en-US":"GPS Information Parameters"}'::jsonb,
         deprecated_at = NULL,
         updated_at = NOW()
     FROM gps
@@ -13848,8 +13848,8 @@ WITH cmd_defs(command_code, command_name, logical_name, operation_type, group_co
     ('MOD SM_SUB_01', '修改 IPsec参数管理', 'IPsec参数管理', 'MOD', 'chapter:SM', 341),
     ('LST SN_SUB_01', '查询 时间服务器参数管理', '时间服务器参数管理', 'LST', 'chapter:SN', 350),
     ('MOD SN_SUB_01', '修改 时间服务器参数管理', '时间服务器参数管理', 'MOD', 'chapter:SN', 351),
-    ('LST SO_SUB_01', '查询 GPS 经纬度信息', 'GPS 经纬度信息', 'LST', 'chapter:SO', 360),
-    ('MOD SO_SUB_01', '修改 GPS 经纬度信息', 'GPS 经纬度信息', 'MOD', 'chapter:SO', 361),
+    ('LST SO_SUB_01', '查询 GPS信息参数管理', 'GPS信息参数管理', 'LST', 'chapter:SO', 360),
+    ('MOD SO_SUB_01', '修改 GPS信息参数管理', 'GPS信息参数管理', 'MOD', 'chapter:SO', 361),
     ('LST SP_SUB_01', '查询 MR参数管理', 'MR参数管理', 'LST', 'chapter:SP', 370),
     ('MOD SP_SUB_01', '修改 MR参数管理', 'MR参数管理', 'MOD', 'chapter:SP', 371),
     ('LST SQ_SUB_01', '查询 性能参数管理', '性能参数管理', 'LST', 'chapter:SQ', 380),
@@ -16223,6 +16223,15 @@ WITH wanted(command_code, mml_code, label_zh, standard_path, sort_order) AS (
     ('LST SO_SUB_01', 'LOCKED_LATITUDE', '纬度', 'Device.FAP.GPS.LockedLatitude', 1),
     ('LST SO_SUB_01', 'LOCKED_LONGITUDE', '经度', 'Device.FAP.GPS.LockedLongitude', 2),
     ('LST SO_SUB_01', 'NUMBER_OF_SATELLITES', '星个数', 'Device.FAP.GPS.NumberOfSatellites', 3),
+    ('LST SO_SUB_01', 'CLOCK_SOURCE_SYNC_STATE', 'ClockSourceSyncState', 'Device.FAP.Synchronization.ClockSourceSyncState', 20),
+    ('LST SO_SUB_01', 'PPS_TIME_MODE', 'PpsTimeMode', 'Device.FAP.Synchronization.PpsTimeMode', 21),
+    ('LST SO_SUB_01', 'PRIM_SRC', 'primSrc', 'Device.FAP.TFCS.primSrc', 22),
+    ('LST SO_SUB_01', 'TFCS_PARAMS_PRIM_SRC', 'PrimSrc', 'Device.FAP.TfcsParams.PrimSrc', 23),
+    ('LST SO_SUB_01', 'SYNC_MODE', 'SyncMode', 'Device.FAP.TfcsParams.SyncMode', 24),
+    ('MOD SO_SUB_01', 'PPS_TIME_MODE', 'PpsTimeMode', 'Device.FAP.Synchronization.PpsTimeMode', 10),
+    ('MOD SO_SUB_01', 'PRIM_SRC', 'primSrc', 'Device.FAP.TFCS.primSrc', 11),
+    ('MOD SO_SUB_01', 'TFCS_PARAMS_PRIM_SRC', 'PrimSrc', 'Device.FAP.TfcsParams.PrimSrc', 12),
+    ('MOD SO_SUB_01', 'SYNC_MODE', 'SyncMode', 'Device.FAP.TfcsParams.SyncMode', 13),
     ('LST SP_SUB_01', 'MR_ENABLE', 'MR开关', 'Device.FAP.MRMgmt.Config.{i}.MrEnable', 1),
     ('MOD SP_SUB_01', 'MR_ENABLE', 'MR开关', 'Device.FAP.MRMgmt.Config.{i}.MrEnable', 1),
     ('LST SP_SUB_01', 'MR_URL', 'Url地址', 'Device.FAP.MRMgmt.Config.{i}.MrUrl', 2),
@@ -24433,11 +24442,6 @@ WITH command_defs(command_code, group_code, operation_type, command_name_zh, com
             ('LST STD_TRPATH_G06', 'Device.DeviceInfo.UeInfoUpload.Enable', 4),
             ('LST STD_TRPATH_G06', 'Device.DeviceInfo.UeInfoUpload.Url', 5),
             ('LST STD_TRPATH_G06', 'Device.DeviceInfo.X_COM_ApLteturboEnable', 6),
-            ('LST STD_TRPATH_G06', 'Device.FAP.Synchronization.ClockSourceSyncState', 7),
-            ('LST STD_TRPATH_G06', 'Device.FAP.Synchronization.PpsTimeMode', 8),
-            ('LST STD_TRPATH_G06', 'Device.FAP.TFCS.primSrc', 9),
-            ('LST STD_TRPATH_G06', 'Device.FAP.TfcsParams.PrimSrc', 10),
-            ('LST STD_TRPATH_G06', 'Device.FAP.TfcsParams.SyncMode', 11),
             ('LST STD_TRPATH_G06', 'Device.SoftwareCtrl.ActivateEnable', 12),
             ('LST STD_TRPATH_G06', 'Device.SoftwareCtrl.ActivateTime', 13),
             ('LST STD_TRPATH_G06', 'Device.SoftwareCtrl.AutoActivateEnable', 14),
@@ -24445,10 +24449,6 @@ WITH command_defs(command_code, group_code, operation_type, command_name_zh, com
             ('MOD STD_TRPATH_G06', 'Device.DeviceInfo.FAPService.UeAccess.Enable', 1),
             ('MOD STD_TRPATH_G06', 'Device.DeviceInfo.UeInfoUpload.Enable', 4),
             ('MOD STD_TRPATH_G06', 'Device.DeviceInfo.UeInfoUpload.Url', 5),
-            ('MOD STD_TRPATH_G06', 'Device.FAP.Synchronization.PpsTimeMode', 8),
-            ('MOD STD_TRPATH_G06', 'Device.FAP.TFCS.primSrc', 9),
-            ('MOD STD_TRPATH_G06', 'Device.FAP.TfcsParams.PrimSrc', 10),
-            ('MOD STD_TRPATH_G06', 'Device.FAP.TfcsParams.SyncMode', 11),
             ('MOD STD_TRPATH_G06', 'Device.SoftwareCtrl.ActivateEnable', 12),
             ('MOD STD_TRPATH_G06', 'Device.SoftwareCtrl.ActivateTime', 13),
             ('MOD STD_TRPATH_G06', 'Device.SoftwareCtrl.AutoActivateEnable', 14),
@@ -24921,11 +24921,6 @@ WITH desired_fields(command_code, standard_path, mml_code, label_zh, sort_order)
     ('LST STD_TRPATH_G06', 'Device.DeviceInfo.UeInfoUpload.Enable', 'UE_INFO_UPLOAD_ENABLE', 'Enable', 4),
     ('LST STD_TRPATH_G06', 'Device.DeviceInfo.UeInfoUpload.Url', 'URL', 'Url', 5),
     ('LST STD_TRPATH_G06', 'Device.DeviceInfo.X_COM_ApLteturboEnable', 'X_COM_AP_LTETURBO_ENABLE', 'X_COM_ApLteturboEnable', 6),
-    ('LST STD_TRPATH_G06', 'Device.FAP.Synchronization.ClockSourceSyncState', 'CLOCK_SOURCE_SYNC_STATE', 'ClockSourceSyncState', 7),
-    ('LST STD_TRPATH_G06', 'Device.FAP.Synchronization.PpsTimeMode', 'PPS_TIME_MODE', 'PpsTimeMode', 8),
-    ('LST STD_TRPATH_G06', 'Device.FAP.TFCS.primSrc', 'PRIM_SRC', 'primSrc', 9),
-    ('LST STD_TRPATH_G06', 'Device.FAP.TfcsParams.PrimSrc', 'TFCS_PARAMS_PRIM_SRC', 'PrimSrc', 10),
-    ('LST STD_TRPATH_G06', 'Device.FAP.TfcsParams.SyncMode', 'SYNC_MODE', 'SyncMode', 11),
     ('LST STD_TRPATH_G06', 'Device.SoftwareCtrl.ActivateEnable', 'ACTIVATE_ENABLE', '激活备份版本使能开关', 12),
     ('LST STD_TRPATH_G06', 'Device.SoftwareCtrl.ActivateTime', 'ACTIVATE_TIME', '软件激活时间', 13),
     ('LST STD_TRPATH_G06', 'Device.SoftwareCtrl.AutoActivateEnable', 'AUTO_ACTIVATE_ENABLE', '立即激活目标升级版本使能开关', 14),
@@ -24933,10 +24928,6 @@ WITH desired_fields(command_code, standard_path, mml_code, label_zh, sort_order)
     ('MOD STD_TRPATH_G06', 'Device.DeviceInfo.FAPService.UeAccess.Enable', 'ENABLE', 'Enable', 1),
     ('MOD STD_TRPATH_G06', 'Device.DeviceInfo.UeInfoUpload.Enable', 'UE_INFO_UPLOAD_ENABLE', 'Enable', 4),
     ('MOD STD_TRPATH_G06', 'Device.DeviceInfo.UeInfoUpload.Url', 'URL', 'Url', 5),
-    ('MOD STD_TRPATH_G06', 'Device.FAP.Synchronization.PpsTimeMode', 'PPS_TIME_MODE', 'PpsTimeMode', 8),
-    ('MOD STD_TRPATH_G06', 'Device.FAP.TFCS.primSrc', 'PRIM_SRC', 'primSrc', 9),
-    ('MOD STD_TRPATH_G06', 'Device.FAP.TfcsParams.PrimSrc', 'TFCS_PARAMS_PRIM_SRC', 'PrimSrc', 10),
-    ('MOD STD_TRPATH_G06', 'Device.FAP.TfcsParams.SyncMode', 'SYNC_MODE', 'SyncMode', 11),
     ('MOD STD_TRPATH_G06', 'Device.SoftwareCtrl.ActivateEnable', 'ACTIVATE_ENABLE', '激活备份版本使能开关', 12),
     ('MOD STD_TRPATH_G06', 'Device.SoftwareCtrl.ActivateTime', 'ACTIVATE_TIME', '软件激活时间', 13),
     ('MOD STD_TRPATH_G06', 'Device.SoftwareCtrl.AutoActivateEnable', 'AUTO_ACTIVATE_ENABLE', '立即激活目标升级版本使能开关', 14),
@@ -25243,6 +25234,177 @@ SET target_paths = r.paths,
     updated_at = now()
 FROM refreshed r
 WHERE c.id = r.id;
+
+-- Consolidate legacy seed dump rows so a fresh deployment starts with one
+-- canonical group per standard path.
+WITH retired_bindings(command_code, standard_path) AS (
+    VALUES
+        ('LST STD_TRPATH_G01', 'Device.DeviceInfo.AdditionalHardwareVersion'),
+        ('LST STD_TRPATH_G01', 'Device.DeviceInfo.AdditionalSoftwareVersion'),
+        ('LST STD_TRPATH_G01', 'Device.DeviceInfo.DataModelSpecVersion'),
+        ('LST STD_TRPATH_G01', 'Device.DeviceInfo.HardwarePlatform'),
+        ('LST STD_TRPATH_G01', 'Device.DeviceInfo.SwUpgrade.FailureCause'),
+        ('LST STD_TRPATH_G01', 'Device.DeviceInfo.SwUpgrade.Stage'),
+        ('LST STD_TRPATH_G01', 'Device.DeviceInfo.SwUpgrade.Status'),
+        ('LST STD_TRPATH_G01', 'Device.DeviceInfo.UserLabel'),
+        ('MOD STD_TRPATH_G01', 'Device.DeviceInfo.UserLabel'),
+        ('LST STD_TRPATH_G01', 'Device.SoftwareCtrl.SystemCurrentVersion'),
+        ('LST STD_TRPATH_G06', 'Device.SoftwareCtrl.ActivateEnable'),
+        ('LST STD_TRPATH_G06', 'Device.SoftwareCtrl.ActivateTime'),
+        ('LST STD_TRPATH_G06', 'Device.SoftwareCtrl.AutoActivateEnable'),
+        ('MOD STD_TRPATH_G06', 'Device.SoftwareCtrl.ActivateEnable'),
+        ('MOD STD_TRPATH_G06', 'Device.SoftwareCtrl.ActivateTime'),
+        ('MOD STD_TRPATH_G06', 'Device.SoftwareCtrl.AutoActivateEnable'),
+        ('LST STD_TRPATH_G08', 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.CellReservedForOperatorUse'),
+        ('MOD STD_TRPATH_G08', 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.CellReservedForOperatorUse'),
+        ('LST STD_TRPATH_G08', 'Device.Services.FAPService.{i}.CellConfig.LTE.VoLTE.PdcpInitParam.{i}.RohcEn'),
+        ('MOD STD_TRPATH_G08', 'Device.Services.FAPService.{i}.CellConfig.LTE.VoLTE.PdcpInitParam.{i}.RohcEn')
+)
+DELETE FROM public.mml_command_sub_fields sf
+USING public.mml_commands c, public.standard_params sp, retired_bindings rb
+WHERE sf.command_id = c.id
+  AND sf.standard_path_id = sp.id
+  AND c.command_code = rb.command_code
+  AND sp.standard_path = rb.standard_path;
+
+DELETE FROM public.mml_commands
+WHERE command_code IN (
+    'LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NGAPMGMT',
+    'LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NRCU',
+    'LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NRDU',
+    'LST SN_SUB_01',
+    'MOD SN_SUB_01'
+);
+
+UPDATE public.mml_command_groups g
+SET is_active = false,
+    deleted_at = COALESCE(g.deleted_at, NOW()),
+    deprecated_at = COALESCE(g.deprecated_at, NOW()),
+    updated_at = NOW()
+WHERE g.group_code = 'chapter:SN'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM public.mml_commands c
+      WHERE c.group_id = g.id
+        AND c.deprecated_at IS NULL
+  );
+
+UPDATE public.mml_commands
+SET logical_name_i18n = jsonb_set(
+        COALESCE(logical_name_i18n, '{}'::jsonb),
+        '{zh-CN}',
+        to_jsonb(CASE
+            WHEN command_code IN ('LST DEVICE_INFO_EU', 'MOD DEVICE_INFO_EU')
+                THEN '设备信息-扩展型皮站-扩展单元（EU）参数管理'
+            ELSE '设备信息-扩展型皮站-远端单元（RU）参数管理'
+        END::text),
+        true
+    ),
+    updated_at = NOW()
+WHERE command_code IN (
+    'LST DEVICE_INFO_EU',
+    'MOD DEVICE_INFO_EU',
+    'LST DEVICE_INFO_RU',
+    'MOD DEVICE_INFO_RU'
+);
+
+WITH target_cmds AS (
+    SELECT id
+    FROM public.mml_commands
+    WHERE command_code IN (
+        'LST STD_TRPATH_G01',
+        'MOD STD_TRPATH_G01',
+        'LST STD_TRPATH_G06',
+        'MOD STD_TRPATH_G06',
+        'LST STD_TRPATH_G08',
+        'MOD STD_TRPATH_G08',
+        'LST SO_SUB_01',
+        'MOD SO_SUB_01'
+    )
+),
+refreshed AS (
+    SELECT
+        t.id,
+        COALESCE(jsonb_agg(to_jsonb(sp.standard_path) ORDER BY sf.sort_order, sp.standard_path)
+                 FILTER (WHERE sp.standard_path IS NOT NULL), '[]'::jsonb) AS paths
+    FROM target_cmds t
+    LEFT JOIN public.mml_command_sub_fields sf ON sf.command_id = t.id AND sf.deprecated_at IS NULL
+    LEFT JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+    GROUP BY t.id
+)
+UPDATE public.mml_commands c
+SET target_paths = r.paths,
+    tree_node_refs = r.paths,
+    updated_at = NOW()
+FROM refreshed r
+WHERE c.id = r.id;
+
+-- RRC timer parameters belong to "RRC参数管理（RRC计时器）" (SH_SUB_03).
+-- Keep FAP_SERVICE focused on carrier base config and remove the duplicate bindings.
+WITH duplicate_paths(standard_path) AS (
+    VALUES
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T300'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T301'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T302'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304EUTRA'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304IRAT'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T310'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T311'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T320'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N310'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N311')
+),
+fap_commands AS (
+    SELECT id
+    FROM public.mml_commands
+    WHERE command_code IN ('LST FAP_SERVICE', 'MOD FAP_SERVICE')
+)
+DELETE FROM public.mml_command_sub_fields sf
+USING fap_commands c, public.standard_params sp, duplicate_paths dp
+WHERE sf.command_id = c.id
+  AND sf.standard_path_id = sp.id
+  AND sp.standard_path = dp.standard_path;
+
+WITH duplicate_paths(standard_path) AS (
+    VALUES
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T300'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T301'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T302'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304EUTRA'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304IRAT'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T310'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T311'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T320'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N310'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N311')
+)
+UPDATE public.mml_commands c
+SET target_paths = COALESCE(
+        (
+            SELECT jsonb_agg(path_value ORDER BY ord)
+            FROM jsonb_array_elements_text(c.target_paths) WITH ORDINALITY AS p(path_value, ord)
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM duplicate_paths dp
+                WHERE dp.standard_path = p.path_value
+            )
+        ),
+        '[]'::jsonb
+    ),
+    tree_node_refs = COALESCE(
+        (
+            SELECT jsonb_agg(path_value ORDER BY ord)
+            FROM jsonb_array_elements_text(c.tree_node_refs) WITH ORDINALITY AS p(path_value, ord)
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM duplicate_paths dp
+                WHERE dp.standard_path = p.path_value
+            )
+        ),
+        '[]'::jsonb
+    ),
+    updated_at = now()
+WHERE c.command_code IN ('LST FAP_SERVICE', 'MOD FAP_SERVICE');
 
 COMMIT;
 

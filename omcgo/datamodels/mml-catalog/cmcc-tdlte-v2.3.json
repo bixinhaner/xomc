@@ -730,17 +730,7 @@
             "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.EnbType",
             "Device.Services.FAPService.{i}.CellConfig.LTE.VoLTEParam.SPSSwitchQCI1Ul",
             "Device.Services.FAPService.{i}.CellConfig.LTE.CAParam.CASwitchUl",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.CAParam.CASwitchDl",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T300",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T301",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T302",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304EUTRA",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304IRAT",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T310",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T311",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T320",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N310",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N311"
+            "Device.Services.FAPService.{i}.CellConfig.LTE.CAParam.CASwitchDl"
           ]
         },
         {
@@ -788,17 +778,7 @@
             "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.EnbType",
             "Device.Services.FAPService.{i}.CellConfig.LTE.VoLTEParam.SPSSwitchQCI1Ul",
             "Device.Services.FAPService.{i}.CellConfig.LTE.CAParam.CASwitchUl",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.CAParam.CASwitchDl",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T300",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T301",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T302",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304EUTRA",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304IRAT",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T310",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T311",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T320",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N310",
-            "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N311"
+            "Device.Services.FAPService.{i}.CellConfig.LTE.CAParam.CASwitchDl"
           ]
         },
         {
