@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import {
   Alert,
   Button,
@@ -66,6 +66,11 @@ export default function AgentSettings() {
   const testM = useTestAdminAgentConfig();
   const syncM = useSyncAdminAgentConfig();
   const config = configQ.data;
+  const canOperate = configQ.isSuccess && !configQ.isFetching && Boolean(config);
+  const canOperateRef = useRef(canOperate);
+  useLayoutEffect(() => {
+    canOperateRef.current = canOperate;
+  }, [canOperate]);
   const enabled = Form.useWatch('enabled', form);
   const allowedMethods = Form.useWatch('allowedMethods', form) ?? READ_ONLY_METHODS;
   const executionMode = allowedMethods.some((method) => method !== 'GET') ? 'write' : 'read';
@@ -84,9 +89,17 @@ export default function AgentSettings() {
     });
   }, [config, form]);
 
+  const ensureCanOperate = () => {
+    if (canOperateRef.current) return true;
+    void message.error(t('empty.loadFailed'));
+    return false;
+  };
+
   const buildPayload = async (): Promise<AgentAdminConfigUpdate | null> => {
+    if (!ensureCanOperate()) return null;
     try {
       const values = await form.validateFields();
+      if (!ensureCanOperate()) return null;
       const token = values.agentStudioServiceToken?.trim();
       return {
         enabled: Boolean(values.enabled),
@@ -106,7 +119,7 @@ export default function AgentSettings() {
 
   const handleSave = async () => {
     const payload = await buildPayload();
-    if (!payload) return;
+    if (!payload || !ensureCanOperate()) return;
     try {
       await saveM.mutateAsync(payload);
       void message.success(t('system.agent.saveSuccess'));
@@ -117,7 +130,7 @@ export default function AgentSettings() {
 
   const handleTest = async () => {
     const payload = await buildPayload();
-    if (!payload) return;
+    if (!payload || !ensureCanOperate()) return;
     try {
       await testM.mutateAsync(payload);
       void message.success(t('system.agent.testSuccess'));
@@ -128,7 +141,7 @@ export default function AgentSettings() {
 
   const handleSync = async () => {
     const payload = await buildPayload();
-    if (!payload) return;
+    if (!payload || !ensureCanOperate()) return;
     try {
       await syncM.mutateAsync(payload);
       void message.success(t('system.agent.syncSuccess'));
@@ -148,6 +161,16 @@ export default function AgentSettings() {
   return (
     <Spin spinning={configQ.isLoading || configQ.isFetching}>
       <Form form={form} layout="vertical" size="small" initialValues={{ enabled: false }}>
+        {configQ.isError ? (
+          <Alert
+            type="error"
+            showIcon
+            style={{ marginBottom: 16 }}
+            title={t('empty.loadFailed')}
+            description={t('empty.loadFailedDesc')}
+            action={<Button onClick={() => void configQ.refetch()}>{t('common.retry')}</Button>}
+          />
+        ) : null}
         {config?.lastError ? (
           <Alert
             type="error"
@@ -319,13 +342,19 @@ export default function AgentSettings() {
             <Button icon={<ReloadOutlined />} onClick={() => configQ.refetch()}>
               {t('system.agent.reset')}
             </Button>
-            <Button icon={<ApiOutlined />} loading={testM.isPending} onClick={handleTest}>
+            <Button icon={<ApiOutlined />} loading={testM.isPending} disabled={!canOperate} onClick={handleTest}>
               {t('system.agent.test')}
             </Button>
-            <Button icon={<SaveOutlined />} loading={saveM.isPending} onClick={handleSave}>
+            <Button icon={<SaveOutlined />} loading={saveM.isPending} disabled={!canOperate} onClick={handleSave}>
               {t('system.agent.save')}
             </Button>
-            <Button type="primary" icon={<CheckCircleOutlined />} loading={syncM.isPending} onClick={handleSync}>
+            <Button
+              type="primary"
+              icon={<CheckCircleOutlined />}
+              loading={syncM.isPending}
+              disabled={!canOperate}
+              onClick={handleSync}
+            >
               {t('system.agent.sync')}
             </Button>
           </Space>

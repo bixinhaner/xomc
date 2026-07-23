@@ -95,20 +95,15 @@ function parseBoolSafe(raw: string | undefined, fallback: boolean): boolean {
  *
  * 主要消费方：登录页（未登录态拉不到 useSysConfigsByCategory）。
  *
- * 失败安全：401/500 一律返 undefined，让 LoginPage 走 default 行为。
+ * 失败安全：401/500 由 React Query 记录为 error，data 保持 undefined，
+ * 让 LoginPage 走 default 行为。
  */
 export function usePublicSecuritySettings(enabled = true): {
   settings: SecuritySettings | undefined;
 } {
-  const { data } = useQuery<SysConfigItem[] | undefined>({
+  const { data } = useQuery<SysConfigItem[]>({
     queryKey: ['public', 'sysConfig', 'security'],
-    queryFn: async () => {
-      try {
-        return await adminApi.getPublicSysConfigsByCategory('security');
-      } catch {
-        return undefined; // 失败安全 — 不阻塞登录
-      }
-    },
+    queryFn: () => adminApi.getPublicSysConfigsByCategory('security'),
     enabled,
     staleTime: 60_000,
     retry: false,

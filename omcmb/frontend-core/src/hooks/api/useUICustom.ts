@@ -30,22 +30,17 @@ export const UI_CUSTOM_DEFAULTS: UICustomSettings = {
  * usePublicUICustom 走 `/admin/public/configs?category=ui_custom`（is_public=true，
  * 无需鉴权）拉取登录页 / 侧栏 / 主题用得到的品牌化资产，登录前 / 登录后都可用。
  *
- * 失败安全：网络 / 401 / 解析失败 → 返回 UI_CUSTOM_DEFAULTS，让消费方走默认样式而非空白。
+ * 失败安全：网络 / 401 / 解析失败由 React Query 记录为 error，data 保持 undefined，
+ * 返回 UI_CUSTOM_DEFAULTS，让消费方走默认样式而非空白。
  *
  * 缓存：5 分钟 staleTime — 管理员保存"UI 定制化"页后通过
  * `queryClient.invalidateQueries(['public','sysConfig','ui_custom'])` 主动刷新
  * （详见 useBatchUpdateSysConfigs onSuccess）。
  */
 export function usePublicUICustom(enabled = true): { settings: UICustomSettings } {
-  const { data } = useQuery<SysConfigItem[] | undefined>({
+  const { data } = useQuery<SysConfigItem[]>({
     queryKey: ['public', 'sysConfig', 'ui_custom'],
-    queryFn: async () => {
-      try {
-        return await adminApi.getPublicSysConfigsByCategory('ui_custom');
-      } catch {
-        return undefined; // 失败安全 — 让 settings 走 default
-      }
-    },
+    queryFn: () => adminApi.getPublicSysConfigsByCategory('ui_custom'),
     enabled,
     staleTime: 5 * 60_000,
     retry: false,
