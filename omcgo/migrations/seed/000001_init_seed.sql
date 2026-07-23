@@ -4291,21 +4291,21 @@ INSERT INTO public.mml_command_groups VALUES
 	('ebdc0420-56c2-4080-a3f3-9559fdc3d467', 'chapter:SP', 'MR参数管理', 'Measurement Report Parameters', 'chapter_SP', 'cmcc-td-lte-v2.3', 15, true, NULL, '2026-05-31 11:28:48.258248+08', '2026-06-12 18:16:52.492019+08', NULL, '{"en-US": "Measurement Report Parameters", "zh-CN": "MR参数管理"}', 'standard', true, NULL, 'SP', 0, NULL, NULL, '', ''),
 	('60408227-4b3e-4e99-9fbe-5dad8c7f71aa', 'chapter:SQ', '性能参数管理', 'Performance Parameters', 'chapter_SQ', 'cmcc-td-lte-v2.3', 16, true, NULL, '2026-05-31 11:28:48.258248+08', '2026-06-12 18:16:52.492019+08', NULL, '{"en-US": "Performance Parameters", "zh-CN": "性能参数管理"}', 'standard', true, NULL, 'SQ', 0, NULL, NULL, '', ''),
 	('bbb5289b-c5f7-4298-8920-41b5833d6d76', 'chapter:SR', '扩展型一体化皮基站参数', 'Extended Integrated Picocell Parameters', 'chapter_SR', 'cmcc-td-lte-v2.3', 17, true, NULL, '2026-05-31 11:28:48.258248+08', '2026-06-12 18:16:52.492019+08', NULL, '{"en-US": "Extended Integrated Picocell Parameters", "zh-CN": "扩展型一体化皮基站参数"}', 'standard', true, NULL, 'SR', 0, NULL, NULL, '', ''),
-	('e2157662-c1d3-4b60-876f-0525f3f7a32d', 'MML350_G_DEVICE_ETHERNET', 'Device.Ethernet', 'Device.Ethernet', 'MML350_G_DEVICE_ETHERNET', 'cmcc-td-lte-v2.3', 18, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "Device.Ethernet", "zh-CN": "Device.Ethernet"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
+	('e2157662-c1d3-4b60-876f-0525f3f7a32d', 'MML350_G_DEVICE_ETHERNET', '以太网参数', 'Ethernet Parameters', 'MML350_G_DEVICE_ETHERNET', 'cmcc-td-lte-v2.3', 18, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "Ethernet Parameters", "zh-CN": "以太网参数"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
 	('695a7a41-0ff7-4b44-9ef3-55c93b9b9b44', 'MML350_G_DEVICE_FAP', 'LAN口配置', 'LAN Port Configuration', 'MML350_G_DEVICE_FAP', 'cmcc-td-lte-v2.3', 19, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "LAN Port Configuration", "zh-CN": "LAN口配置"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
 	('c3206e05-3f07-4088-aaa5-602213ba9334', 'MML350_G_DEVICE_HALTREASON', '重启原因', 'Reboot Reason', 'MML350_G_DEVICE_HALTREASON', 'cmcc-td-lte-v2.3', 20, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "Reboot Reason", "zh-CN": "重启原因"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
-	('5ddd69a0-90d2-4ce0-9e9a-d91bda1c97e4', 'MML350_G_DEVICE_HTTPS', 'Device.Https', 'Device.Https', 'MML350_G_DEVICE_HTTPS', 'cmcc-td-lte-v2.3', 21, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "Device.Https", "zh-CN": "Device.Https"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
-	('5dad78d4-a471-4f14-9027-4f0611e9960b', 'MML350_G_DEVICE_IP', 'Device.IP', 'Device.IP', 'MML350_G_DEVICE_IP', 'cmcc-td-lte-v2.3', 22, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "Device.IP", "zh-CN": "Device.IP"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
-	('777212fe-ba49-4ca2-b528-26416bbe444f', 'MML350_G_DEVICE_KEEPALIVEDMGMT', 'Device.KeepalivedMgmt', 'Device.KeepalivedMgmt', 'MML350_G_DEVICE_KEEPALIVEDMGMT', 'cmcc-td-lte-v2.3', 23, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "Device.KeepalivedMgmt", "zh-CN": "Device.KeepalivedMgmt"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
-	('dbaf234a-3d34-47e3-93b1-be9766de95aa', 'MML350_G_DEVICE_LAN_HOSTCONFIGMANAGEMENT', 'Device.LAN_HostConfigManagement', 'Device.LAN_HostConfigManagement', 'MML350_G_DEVICE_LAN_HOSTCONFIGMANAGEMENT', 'cmcc-td-lte-v2.3', 24, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "Device.LAN_HostConfigManagement", "zh-CN": "Device.LAN_HostConfigManagement"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
-	('71014e9f-f8de-4954-ad97-e7534115732f', 'MML350_G_DEVICE_NR', 'Device.Nr', 'Device.Nr', 'MML350_G_DEVICE_NR', 'cmcc-td-lte-v2.3', 25, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "Device.Nr", "zh-CN": "Device.Nr"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
-	('5b7ad256-4fa1-441e-a4a5-990f725f5500', 'MML350_G_DEVICE_REMOTEDEVICELIST', 'Device.RemoteDeviceList', 'Device.RemoteDeviceList', 'MML350_G_DEVICE_REMOTEDEVICELIST', 'cmcc-td-lte-v2.3', 26, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "Device.RemoteDeviceList", "zh-CN": "Device.RemoteDeviceList"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
-	('843cbc01-2ab4-4963-b3ab-36921fb8dae8', 'MML350_G_DEVICE_SERVICES', 'Device.Services', 'Device.Services', 'MML350_G_DEVICE_SERVICES', 'cmcc-td-lte-v2.3', 27, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "Device.Services", "zh-CN": "Device.Services"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
-	('98d07353-7d12-4981-b9a3-25bf3e9ebc35', 'MML350_G_DEVICE_SERVICES_FAPSERVICE', 'Device.Services.FAPService', 'Device.Services.FAPService', 'MML350_G_DEVICE_SERVICES_FAPSERVICE', 'cmcc-td-lte-v2.3', 28, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "Device.Services.FAPService", "zh-CN": "Device.Services.FAPService"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
-	('0e9aa286-3d26-4c08-a878-b9be9e29bb7c', 'MML350_G_DEVICE_WEBCONFIG', 'Device.WebConfig', 'Device.WebConfig', 'MML350_G_DEVICE_WEBCONFIG', 'cmcc-td-lte-v2.3', 29, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "Device.WebConfig", "zh-CN": "Device.WebConfig"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
-	('67d3e9e4-0c35-47a6-bfb2-d7f0aa4cc106', 'MML350_G_DEVICEGSM', 'DeviceGSM', 'DeviceGSM', 'MML350_G_DEVICEGSM', 'cmcc-td-lte-v2.3', 30, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "DeviceGSM", "zh-CN": "DeviceGSM"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
-	('986ffbd6-66d0-41a9-b19a-60e87b7f8455', 'MML350_G_INTERNETGATEWAYDEVICE', 'InternetGatewayDevice', 'InternetGatewayDevice', 'MML350_G_INTERNETGATEWAYDEVICE', 'cmcc-td-lte-v2.3', 31, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "InternetGatewayDevice", "zh-CN": "InternetGatewayDevice"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
-	('f299350f-4eed-400c-9a7f-ba3141f290f9', 'MML350_G_BOARDCONF', 'boardconf', 'boardconf', 'MML350_G_BOARDCONF', 'cmcc-td-lte-v2.3', 32, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "boardconf", "zh-CN": "boardconf"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
+	('5ddd69a0-90d2-4ce0-9e9a-d91bda1c97e4', 'MML350_G_DEVICE_HTTPS', 'TR069连接配置', 'TR069 Connection Configuration', 'MML350_G_DEVICE_HTTPS', 'cmcc-td-lte-v2.3', 21, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "TR069 Connection Configuration", "zh-CN": "TR069连接配置"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
+	('5dad78d4-a471-4f14-9027-4f0611e9960b', 'MML350_G_DEVICE_IP', 'IP参数', 'IP Parameters', 'MML350_G_DEVICE_IP', 'cmcc-td-lte-v2.3', 22, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "IP Parameters", "zh-CN": "IP参数"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
+	('777212fe-ba49-4ca2-b528-26416bbe444f', 'MML350_G_DEVICE_KEEPALIVEDMGMT', '主备热备', 'High Availability', 'MML350_G_DEVICE_KEEPALIVEDMGMT', 'cmcc-td-lte-v2.3', 23, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "High Availability", "zh-CN": "主备热备"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
+	('dbaf234a-3d34-47e3-93b1-be9766de95aa', 'MML350_G_DEVICE_LAN_HOSTCONFIGMANAGEMENT', '接口绑定', 'Interface Binding', 'MML350_G_DEVICE_LAN_HOSTCONFIGMANAGEMENT', 'cmcc-td-lte-v2.3', 24, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "Interface Binding", "zh-CN": "接口绑定"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
+	('71014e9f-f8de-4954-ad97-e7534115732f', 'MML350_G_DEVICE_NR', '接口绑定', 'Interface Binding', 'MML350_G_DEVICE_NR', 'cmcc-td-lte-v2.3', 25, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "Interface Binding", "zh-CN": "接口绑定"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
+	('5b7ad256-4fa1-441e-a4a5-990f725f5500', 'MML350_G_DEVICE_REMOTEDEVICELIST', '远程设备管理', 'Remote Device Management', 'MML350_G_DEVICE_REMOTEDEVICELIST', 'cmcc-td-lte-v2.3', 26, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "Remote Device Management", "zh-CN": "远程设备管理"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
+	('843cbc01-2ab4-4963-b3ab-36921fb8dae8', 'MML350_G_DEVICE_SERVICES', '业务服务参数', 'Service Parameters', 'MML350_G_DEVICE_SERVICES', 'cmcc-td-lte-v2.3', 27, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "Service Parameters", "zh-CN": "业务服务参数"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
+	('98d07353-7d12-4981-b9a3-25bf3e9ebc35', 'MML350_G_DEVICE_SERVICES_FAPSERVICE', '小区服务参数管理', 'FAP Service Parameters', 'MML350_G_DEVICE_SERVICES_FAPSERVICE', 'cmcc-td-lte-v2.3', 28, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "FAP Service Parameters", "zh-CN": "小区服务参数管理"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
+	('0e9aa286-3d26-4c08-a878-b9be9e29bb7c', 'MML350_G_DEVICE_WEBCONFIG', 'LMT配置', 'LMT Configuration', 'MML350_G_DEVICE_WEBCONFIG', 'cmcc-td-lte-v2.3', 29, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "LMT Configuration", "zh-CN": "LMT配置"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
+	('67d3e9e4-0c35-47a6-bfb2-d7f0aa4cc106', 'MML350_G_DEVICEGSM', 'GSM小区管理', 'GSM Cell Management', 'MML350_G_DEVICEGSM', 'cmcc-td-lte-v2.3', 30, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "GSM Cell Management", "zh-CN": "GSM小区管理"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
+	('986ffbd6-66d0-41a9-b19a-60e87b7f8455', 'MML350_G_INTERNETGATEWAYDEVICE', 'NTP 参数配置', 'NTP Parameter Configuration', 'MML350_G_INTERNETGATEWAYDEVICE', 'cmcc-td-lte-v2.3', 31, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "NTP Parameter Configuration", "zh-CN": "NTP 参数配置"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
+	('f299350f-4eed-400c-9a7f-ba3141f290f9', 'MML350_G_BOARDCONF', 'HALOD 参数配置', 'HALOD Parameter Configuration', 'MML350_G_BOARDCONF', 'cmcc-td-lte-v2.3', 32, true, NULL, '2026-07-16 10:27:00.870631+08', '2026-07-16 10:27:00.870631+08', NULL, '{"en-US": "HALOD Parameter Configuration", "zh-CN": "HALOD 参数配置"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', ''),
 	('15b0b31b-7ad1-4ad8-9dc3-7f18a05d0470', 'MML350_G_DNS_CONFIG', 'DNS配置', 'DNS Configuration', 'MML350_G_DNS_CONFIG', 'cmcc-td-lte-v2.3', 33, true, NULL, '2026-07-21 16:53:00+08', '2026-07-21 16:53:00+08', NULL, '{"en-US": "DNS Configuration", "zh-CN": "DNS配置"}', 'admin', false, NULL, NULL, 0, NULL, NULL, '', '') ON CONFLICT DO NOTHING;
 
 
@@ -18125,6 +18125,14 @@ SET target_paths = m.paths,
 FROM merged m
 WHERE c.id = m.id;
 
+-- Hide superseded zero-field NRCell object operation shells before inserting
+-- object-specific replacements with the same active command names.
+UPDATE public.mml_commands
+SET deprecated_at = now(),
+    updated_at = now()
+WHERE command_code IN ('ADD SI_SUB_05', 'RMV SI_SUB_05')
+  AND deprecated_at IS NULL;
+
 WITH si_group AS (
     SELECT id
     FROM public.mml_command_groups
@@ -18890,12 +18898,16 @@ WITH target_commands AS (
 ), desired_param_fields AS (
     SELECT command_id,
            standard_path_id,
-           LEFT(UPPER(regexp_replace(
-               leaf_name,
-               '([a-z0-9])([A-Z])',
-               '\1_\2',
-               'g'
-           )), 100) AS mml_code,
+           CASE standard_path
+               WHEN 'Device.Ethernet.Interface.{i}.PortType' THEN 'ETHERNET_INTERFACE_PORT_TYPE'
+               WHEN 'Device.Ethernet.Interface.{i}.interfaceType' THEN 'ETHERNET_INTERFACE_TYPE'
+               ELSE LEFT(UPPER(regexp_replace(
+                   leaf_name,
+                   '([a-z0-9])([A-Z])',
+                   '\1_\2',
+                   'g'
+               )), 100)
+           END AS mml_code,
            jsonb_build_object('zh-CN', label_zh, 'en-US', leaf_name) AS label_i18n,
            sort_order,
            CASE access
@@ -22503,11 +22515,6 @@ WITH log_defs(group_code, path_prefix) AS (
      AND sp.entry_type = 'parameter'
     WHERE t.operation_type = 'LST'
        OR (t.operation_type = 'MOD' AND sp.access = 'READ_WRITE')
-), ranked_fields AS (
-    SELECT
-        base_fields.*,
-        row_number() OVER (PARTITION BY command_id, base_mml_code ORDER BY standard_path) AS code_rank
-    FROM base_fields
 ), desired_fields AS (
     SELECT
         command_id,
@@ -23906,6 +23913,32 @@ UPDATE public.mml_commands
 SET deprecated_at = now(),
     updated_at = now()
 WHERE command_code IN ('LST MML350_DEVICE_FAP__IPSEC', 'MOD MML350_DEVICE_FAP__IPSEC');
+
+-- Remove the temporary MML350 Device.Services.FAPService grouping from the active catalog.
+-- The standard parameters remain in standard_params; only the MML group/commands are removed.
+DELETE FROM public.mml_command_sub_fields sf
+USING public.mml_commands c
+WHERE sf.command_id = c.id
+  AND c.command_code IN (
+      'LST MML350_DEVICE_SERVICES_FAPSERVICE__DEVICE_SERVICES_FAPSERVICE',
+      'LST MML350_DEVICE_SERVICES_FAPSERVICE__EMBEDDED_EPCBEARERLBOQOS',
+      'LST MML350_DEVICE_SERVICES_FAPSERVICE__EMBEDDED_EPCBEARERLBOTFT',
+      'LST MML350_DEVICE_SERVICES_FAPSERVICE__IPSEC',
+      'LST MML350_DEVICE_SERVICES_FAPSERVICE__MMEPOOLCONFIGPARAM'
+  );
+
+DELETE FROM public.mml_commands
+WHERE command_code IN (
+    'LST MML350_DEVICE_SERVICES_FAPSERVICE__DEVICE_SERVICES_FAPSERVICE',
+    'LST MML350_DEVICE_SERVICES_FAPSERVICE__EMBEDDED_EPCBEARERLBOQOS',
+    'LST MML350_DEVICE_SERVICES_FAPSERVICE__EMBEDDED_EPCBEARERLBOTFT',
+    'LST MML350_DEVICE_SERVICES_FAPSERVICE__IPSEC',
+    'LST MML350_DEVICE_SERVICES_FAPSERVICE__MMEPOOLCONFIGPARAM'
+);
+
+DELETE FROM public.mml_command_groups
+WHERE group_code = 'MML350_G_DEVICE_SERVICES_FAPSERVICE'
+  AND param_version = 'cmcc-td-lte-v2.3';
 
 COMMIT;
 
