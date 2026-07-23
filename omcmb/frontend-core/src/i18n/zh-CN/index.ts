@@ -1684,8 +1684,6 @@ const messages: Record<string, string> = {
   'device.horizontalAzimuth':   '水平方位角',
   'device.installAddress':      '安装详细地址',
   'device.installAddress.doubleClickEdit': '双击编辑安装详细地址',
-  'device.latestLog':           '运行日志',
-  'device.noLogFile':           '暂无日志文件',
 
   // 监控页面扩展字段 (5G NR Others)
   'device.rollbackVersion':     '回滚版本',
@@ -1706,6 +1704,7 @@ const messages: Record<string, string> = {
   'device.action.halobOn':       'HaloB 开启',
   'device.action.halobOff':      'HaloB 关闭',
   'device.action.logCollect':    '日志收集',
+  'device.action.logCollectTriggered': '日志收集已触发，请前往“文件传输 > 任务管理”查看任务进度。',
   'device.action.tr069Collect':  '收集报文',
   'device.action.alarmSync':     '告警同步',
   'device.action.paramSync':      '参数同步',
@@ -7514,8 +7513,6 @@ const messages: Record<string, string> = {
   'mrTask.batchSN.emptyInput':    '请粘贴 SN（支持空格 / 逗号 / 分号 / 换行分隔）',
   'mrTask.batchSN.partialHits':   '{hits} 个 SN 已加入选择；{misses} 个不在当前候选名单：{samples}',
   'mrTask.batchSN.allHits':       '已加入 {count} 个设备',
-  'ufte.taskCreatedAndNavigate':  '任务已创建，即将跳转',
-
   // 文件管理批量下载（bundle 模块共用）
   'bundle.batchDownload':         '批量下载',
   'bundle.creating':              '正在创建打包任务',

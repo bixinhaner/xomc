@@ -39,8 +39,6 @@ import { useAlarmCountWithDeviceListInvalidation } from '@core/hooks/api/useAlar
 import { useTriggerAlarmSync } from '@core/hooks/api/useAlarms';
 import { deviceTaskApi, isAbortError } from '@core/services/api/deviceTaskApi';
 import { useCreateUnifiedFileTransferTask } from '@core/hooks/api/useUnifiedFileTransfer';
-import { useDownloadStationLog } from '@core/hooks/api/useStationLog';
-import { stationLogApi } from '@core/services/api/stationLogApi';
 import { deviceApi } from '@core/services/api/deviceApi';
 import { createApiSwitch } from '@core/services/apiSwitch';
 import { deviceService } from '@core/mock/services/deviceService';
@@ -582,7 +580,6 @@ export default function DeviceList() {
   const syncDeviceParams = useSyncDeviceParams();
   useAlarmCountWithDeviceListInvalidation();
   const createUfteTask = useCreateUnifiedFileTransferTask();
-  const downloadStationLog = useDownloadStationLog();
   const taskNameUser = currentUser?.username || currentUser?.displayName || 'user';
   // 性能优化：使用 useMemo 避免每次渲染创建新引用，防止下游 callback/useMemo 依赖变化
   const devices = useMemo(
@@ -1088,8 +1085,10 @@ export default function DeviceList() {
                   deviceCount: selectedDevices.length,
                   executionMode: 'immediate',
                 });
-                void message.success(t('ufte.taskCreatedAndNavigate'));
-                navigate('/transfer/center?category=station_log&typeCode=RUNTIME_LOG_COLLECT');
+                void message.success({
+                  content: t('device.action.logCollectTriggered'),
+                  duration: 5,
+                });
               } catch {
                 void message.error(t('common.operationFailed'));
               }
@@ -1442,7 +1441,6 @@ export default function DeviceList() {
       devices,
       message,
       modal,
-      navigate,
       queryClient,
       t,
       taskNameUser,
@@ -2129,36 +2127,9 @@ export default function DeviceList() {
         render: (_val, record) => fmtStatus(record.adminState, adminStateStatusMap),
       },
       { key: 'ipsecAddr', title: t('device.ipsecAddr'), dataIndex: 'ipsecAddr', width: 140, hidden: true, mono: true, group: 'common' },
-      {
-        key: 'latestLog',
-        title: t('device.latestLog'),
-        dataIndex: 'id',
-        width: 100,
-        hidden: true,
-        group: 'common',
-        render: (_val, record) => (
-          <Button
-            type="link"
-            size="small"
-            loading={downloadStationLog.isPending}
-            onClick={async () => {
-              const res = await stationLogApi.list({ deviceId: record.id, logType: 'running', page: 1, pageSize: 1 });
-              const log = res.items[0];
-              if (!log) {
-                void message.info(t('device.noLogFile'));
-                return;
-              }
-              downloadStationLog.mutate(log.id);
-            }}
-          >
-            {t('common.download')}
-          </Button>
-        ),
-      },
-
     ],
     // remarkHeaderRender 暂从 dep 列表移除：remark 列定义已注释，恢复时同步加回。
-    [navigate, openDeviceDetail, prefetchDeviceDetailEntry, t, fmtTime, fmtDuration, fmtStatus, adminStateStatusMap, renderMultiCellStatus, renderActivationStatus, message, downloadStationLog, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails, editingInstallAddressId, editingInstallAddressValue, savingInstallAddressId, saveInstallAddressEdit, cancelInstallAddressEdit, startInstallAddressEdit, optimisticParamSyncDeviceIds, renderLocationCell]
+    [navigate, openDeviceDetail, prefetchDeviceDetailEntry, t, fmtTime, fmtDuration, fmtStatus, adminStateStatusMap, renderMultiCellStatus, renderActivationStatus, message, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails, editingInstallAddressId, editingInstallAddressValue, savingInstallAddressId, saveInstallAddressEdit, cancelInstallAddressEdit, startInstallAddressEdit, optimisticParamSyncDeviceIds, renderLocationCell]
   );
 
   // ─── 列表导出(用户决策 2026-06-02) ──────────────────────────────────────

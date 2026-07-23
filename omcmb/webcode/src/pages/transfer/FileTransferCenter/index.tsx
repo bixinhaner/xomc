@@ -202,11 +202,11 @@ export default function FileTransferCenter() {
   const appLocale = useAppStore((s) => s.locale);
 
   // #375: 自注册「任务管理」页签。v1 多页签机制下激活页签标题取自 tabStore 的
-  // 激活 tab.label；从设备列表「日志收集」navigate('/transfer/center?...') 直跳进
-  // 本页时没有任何 openTab，AppShell 的 syncActiveTabPath 又被同 pathname 守卫拦截
-  // （旧激活 tab 是 /device/list），导致激活页签标题仍停留在「设备列表」、内容却已
-  // 是本页。仿 DeviceDetail 在自身 effect 里 openTab 自注册，覆盖任何入口（设备列表
-  // 跳入 / 北向直链 / 侧栏点击均命中同一页签）。
+  // 激活 tab.label；从其它页面通过 navigate('/transfer/center?...') 直跳进本页时
+  // 没有任何 openTab，AppShell 的 syncActiveTabPath 又被同 pathname 守卫拦截
+  // （旧激活 tab 仍是来源页面），导致激活页签标题未更新、内容却已是本页。仿
+  // DeviceDetail 在自身 effect 里 openTab 自注册，覆盖任何入口（页面内跳转 /
+  // 北向直链 / 侧栏点击均命中同一页签）。
   const location = useLocation();
   const openTab = useTabStore((s) => s.openTab);
   const flatMenus = useMenuStore((s) => s.flatMenus);
@@ -260,8 +260,8 @@ export default function FileTransferCenter() {
       },
     ];
   }, [taskTypes, t]);
-  // URL 参数初始化：?category=...&typeCode=... 用于外部 deep link（如
-  // 设备列表批量"日志收集"自动跳到 station_log + RUNTIME_LOG_COLLECT tab）。
+  // URL 参数初始化：?category=...&typeCode=... 用于外部 deep link，直接定位到
+  // 指定分类及任务类型。
   const [urlSearchParams] = useSearchParams();
   const [selectedCategory, setSelectedCategory] = useState(() => urlSearchParams.get('category') ?? '');
   // #127：标记 selectedCategory 是否来自用户主动选择（点击 Tab / URL deep link）。
