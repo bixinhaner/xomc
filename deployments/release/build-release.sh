@@ -153,9 +153,15 @@ for ARCH in $ARCHES; do
     [ -f "$DOCKERFILE" ] || die "缺 Dockerfile：$DOCKERFILE"
     TAG="$PROJECT_IMAGE_PREFIX/$SVC:$VERSION"
     log "[$ARCH]   docker build -t $TAG -f $DOCKERFILE"
-    # web 镜像额外注入 APP_VERSION，前端构建期内联到产物，左侧菜单底部显示版本号。
+    # 正式构建期注入版本信息：web 用于页面展示，app 用于识别 OMC 发布切换。
     EXTRA_ARGS=()
     [ "$SVC" = "web" ] && EXTRA_ARGS+=( --build-arg "APP_VERSION=$VERSION" )
+    if [ "$SVC" = "app" ]; then
+      EXTRA_ARGS+=(
+        --build-arg "RELEASE_VERSION=$VERSION"
+        --build-arg "GIT_COMMIT=$GIT_COMMIT"
+      )
+    fi
     ( cd "$REPO_ROOT" && docker build \
         --network host \
         --platform "linux/$ARCH" \

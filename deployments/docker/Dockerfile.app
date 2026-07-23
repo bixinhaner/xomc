@@ -9,6 +9,8 @@ RUN sed -i "s|dl-cdn.alpinelinux.org|${APK_MIRROR}|g" /etc/apk/repositories
 RUN apk add --no-cache git
 
 ARG GOPROXY=https://goproxy.cn,https://proxy.golang.org,direct
+ARG RELEASE_VERSION=dev
+ARG GIT_COMMIT=unknown
 ENV GOPROXY=${GOPROXY}
 
 WORKDIR /build
@@ -24,7 +26,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcgo-app ./cmd/app && \
+    CGO_ENABLED=0 GOOS=linux go build \
+      -ldflags="-s -w -X github.com/omcgo/omcgo/internal/buildinfo.ReleaseVersion=${RELEASE_VERSION} -X github.com/omcgo/omcgo/internal/buildinfo.GitCommit=${GIT_COMMIT}" \
+      -o /build/bin/omcgo-app ./cmd/app && \
     CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcgo-migrate ./cmd/migrate
 
 # ---

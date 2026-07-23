@@ -182,16 +182,21 @@ func (p *paramSyncFullRunProjection) Refresh(ctx context.Context, deviceID uuid.
 	return nil
 }
 
+type licenseParamSyncSubmitter interface {
+	Submit(context.Context, paramsync.SubmitCommand) (*paramsync.SubmitResult, error)
+}
+
+type paramSyncService interface {
+	licenseParamSyncSubmitter
+	GetRequest(context.Context, uuid.UUID) (*paramsync.SyncRequest, error)
+}
+
 type paramSyncStarter struct {
-	service *paramsync.Service
+	service paramSyncService
 	flags   paramsync.FeatureFlags
 	legacy  device.ParamSyncStarter
 	binding *paramsync.BindingCoordinator
 	devices device.DeviceRepository
-}
-
-type licenseParamSyncSubmitter interface {
-	Submit(context.Context, paramsync.SubmitCommand) (*paramsync.SubmitResult, error)
 }
 
 func submitLicenseParamSync(ctx context.Context, submitter licenseParamSyncSubmitter, dev *model.Device, sourceID string, paths []string) (int, error) {
@@ -212,11 +217,125 @@ func submitLicenseParamSync(ctx context.Context, submitter licenseParamSyncSubmi
 	return result.TaskCount, nil
 }
 
+func submitRegisteredDeviceSync(
+	ctx context.Context,
+	submitter licenseParamSyncSubmitter,
+	dev *model.Device,
+	sourceID string,
+) error {
+	result, err := submitter.Submit(ctx, paramsync.SubmitCommand{
+		DeviceID:        dev.ID,
+		DeviceSN:        dev.SerialNumber,
+		CallerType:      "provision",
+		TriggerReason:   paramsync.TriggerDeviceRegistered,
+		Scope:           paramsync.SyncScopeFull,
+		IdempotencyKey:  sourceID,
+		SourceEventID:   sourceID,
+		OriginEventType: "device_registered",
+	})
+	if err != nil {
+		return err
+	}
+	switch result.ResultCode {
+	case paramsync.ResultCodePathBUnavailable,
+		paramsync.ResultCodeAutomaticBackoff,
+		paramsync.ResultCodeActiveSyncExists:
+		return nil
+	}
+	if result.Status == paramsync.RequestStatusRejected {
+		return fmt.Errorf(
+			"durable registered-device parameter sync rejected: %s",
+			result.ResultCode,
+		)
+	}
+	return nil
+}
+
+func submitReleaseSync(
+	ctx context.Context,
+	submitter licenseParamSyncSubmitter,
+	dev *model.Device,
+	campaignID uuid.UUID,
+	attemptID uuid.UUID,
+) (bool, error) {
+	attemptKey := fmt.Sprintf(
+		"omc_upgrade:%s:%s:%s",
+		campaignID,
+		dev.ID,
+		attemptID,
+	)
+	sourceEventID := fmt.Sprintf(
+		"omc_upgrade:%s:%s",
+		campaignID,
+		dev.ID,
+	)
+	result, err := submitter.Submit(ctx, paramsync.SubmitCommand{
+		DeviceID:        dev.ID,
+		DeviceSN:        dev.SerialNumber,
+		CallerType:      "provision",
+		TriggerReason:   paramsync.TriggerOMCUpgrade,
+		Scope:           paramsync.SyncScopeFull,
+		IdempotencyKey:  attemptKey,
+		CampaignID:      &campaignID,
+		SourceEventID:   sourceEventID,
+		OriginEventType: "omc_upgrade",
+	})
+	if err != nil {
+		return false, err
+	}
+	switch result.ResultCode {
+	case paramsync.ResultCodeAutomaticBackoff,
+		paramsync.ResultCodeActiveSyncExists:
+		return false, nil
+	case paramsync.ResultCodePathBUnavailable:
+		return false, fmt.Errorf(
+			"durable OMC release parameter sync unavailable: %s",
+			result.ResultCode,
+		)
+	}
+	if result.Status == paramsync.RequestStatusRejected {
+		return false, fmt.Errorf(
+			"durable OMC release parameter sync rejected: %s",
+			result.ResultCode,
+		)
+	}
+	return true, nil
+}
+
 func (s *paramSyncStarter) StartLicenseSync(ctx context.Context, dev *model.Device, paths []string, sourceID string) (int, error) {
 	if !s.flags.EnabledForDevice(dev.ID.String()) {
 		return 0, fmt.Errorf("durable license parameter sync is disabled for this device")
 	}
 	return submitLicenseParamSync(ctx, s.service, dev, sourceID, paths)
+}
+
+func (s *paramSyncStarter) StartRegisteredDeviceSync(
+	ctx context.Context,
+	dev *model.Device,
+	sourceID string,
+) error {
+	if !s.flags.RunEnabled {
+		return nil
+	}
+	return submitRegisteredDeviceSync(ctx, s.service, dev, sourceID)
+}
+
+func (s *paramSyncStarter) StartReleaseSync(
+	ctx context.Context,
+	dev *model.Device,
+	campaignID uuid.UUID,
+	attemptID uuid.UUID,
+) (bool, error) {
+	if !s.flags.RunEnabled {
+		return false, nil
+	}
+	return submitReleaseSync(
+		ctx,
+		s.service,
+		dev,
+		campaignID,
+		attemptID,
+	)
 }
 
 func (s *paramSyncStarter) SubmitModelUploadParamSync(ctx context.Context, dev *model.Device, sourceID string, modelUploadID uuid.UUID, status string) (bool, int, error) {

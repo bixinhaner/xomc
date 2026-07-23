@@ -24,6 +24,10 @@ func (f *fakeLicenseParamSyncSubmitter) Submit(_ context.Context, command params
 	return f.result, f.err
 }
 
+func (f *fakeLicenseParamSyncSubmitter) GetRequest(context.Context, uuid.UUID) (*paramsync.SyncRequest, error) {
+	return nil, nil
+}
+
 func TestSubmitLicenseParamSync_UsesDurableLicenseRequest(t *testing.T) {
 	dev := &model.Device{ID: uuid.New(), SerialNumber: "license-device"}
 	sourceID := uuid.NewString()
@@ -51,6 +55,145 @@ func TestSubmitLicenseParamSync_RejectsUnavailablePlan(t *testing.T) {
 	_, err := submitLicenseParamSync(context.Background(), submitter, dev, uuid.NewString(), []string{"Device.LICENSE."})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "durable license parameter sync unavailable")
+}
+
+func TestSubmitRegisteredDeviceSync_UsesDurableFullRequest(t *testing.T) {
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "registered-device"}
+	sourceID := "device_registered:" + dev.ID.String()
+	submitter := &fakeLicenseParamSyncSubmitter{result: &paramsync.SubmitResult{
+		Status: paramsync.RequestStatusRunning, TaskCount: 4,
+	}}
+
+	err := submitRegisteredDeviceSync(
+		context.Background(),
+		submitter,
+		dev,
+		sourceID,
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, "provision", submitter.command.CallerType)
+	assert.Equal(t, paramsync.TriggerDeviceRegistered, submitter.command.TriggerReason)
+	assert.Equal(t, paramsync.SyncScopeFull, submitter.command.Scope)
+	assert.Equal(t, sourceID, submitter.command.IdempotencyKey)
+	assert.Equal(t, sourceID, submitter.command.SourceEventID)
+	assert.Equal(t, "device_registered", submitter.command.OriginEventType)
+}
+
+func TestSubmitRegisteredDeviceSync_PathUnavailableDoesNotFallBackOrFailProvisioning(t *testing.T) {
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "registered-device"}
+	submitter := &fakeLicenseParamSyncSubmitter{result: &paramsync.SubmitResult{
+		Status:     paramsync.RequestStatusRejected,
+		ResultCode: paramsync.ResultCodePathBUnavailable,
+	}}
+
+	err := submitRegisteredDeviceSync(
+		context.Background(),
+		submitter,
+		dev,
+		"device_registered:"+dev.ID.String(),
+	)
+
+	require.NoError(t, err)
+}
+
+func TestParamSyncStarter_RegisteredDeviceBypassesDeviceCanary(t *testing.T) {
+	dev := &model.Device{ID: uuid.Nil, SerialNumber: "registered-device"}
+	submitter := &fakeLicenseParamSyncSubmitter{result: &paramsync.SubmitResult{
+		Status: paramsync.RequestStatusRunning,
+	}}
+	flags := paramsync.FeatureFlags{
+		RunEnabled:            true,
+		ResultConsumerEnabled: true,
+		StagingEnabled:        true,
+		CanaryPercent:         1,
+	}
+	require.NoError(t, flags.Validate())
+	require.False(t, flags.EnabledForDevice(dev.ID.String()))
+	starter := &paramSyncStarter{
+		service: submitter,
+		flags:   flags,
+	}
+
+	err := starter.StartRegisteredDeviceSync(
+		context.Background(),
+		dev,
+		"device_registered:"+dev.ID.String(),
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, paramsync.TriggerDeviceRegistered, submitter.command.TriggerReason)
+}
+
+func TestSubmitReleaseSync_UsesCampaignAndAttemptMetadata(t *testing.T) {
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "release-device"}
+	campaignID := uuid.New()
+	attemptID := uuid.New()
+	submitter := &fakeLicenseParamSyncSubmitter{result: &paramsync.SubmitResult{
+		Status: paramsync.RequestStatusRunning, TaskCount: 5,
+	}}
+
+	submitted, err := submitReleaseSync(
+		context.Background(),
+		submitter,
+		dev,
+		campaignID,
+		attemptID,
+	)
+
+	require.NoError(t, err)
+	assert.True(t, submitted)
+	assert.Equal(t, paramsync.TriggerOMCUpgrade, submitter.command.TriggerReason)
+	assert.Equal(t, paramsync.SyncScopeFull, submitter.command.Scope)
+	require.NotNil(t, submitter.command.CampaignID)
+	assert.Equal(t, campaignID, *submitter.command.CampaignID)
+	assert.Equal(t, "omc_upgrade", submitter.command.OriginEventType)
+	assert.Contains(t, submitter.command.SourceEventID, campaignID.String())
+	assert.Contains(t, submitter.command.IdempotencyKey, attemptID.String())
+}
+
+func TestParamSyncStarter_StartReleaseSync_DisabledSkips(t *testing.T) {
+	starter := &paramSyncStarter{flags: paramsync.FeatureFlags{RunEnabled: false}}
+
+	submitted, err := starter.StartReleaseSync(
+		context.Background(),
+		&model.Device{ID: uuid.New(), SerialNumber: "release-device"},
+		uuid.New(),
+		uuid.New(),
+	)
+
+	require.NoError(t, err)
+	assert.False(t, submitted)
+}
+
+func TestParamSyncStarter_ReleaseBypassesDeviceCanary(t *testing.T) {
+	dev := &model.Device{ID: uuid.Nil, SerialNumber: "release-device"}
+	submitter := &fakeLicenseParamSyncSubmitter{result: &paramsync.SubmitResult{
+		Status: paramsync.RequestStatusRunning,
+	}}
+	flags := paramsync.FeatureFlags{
+		RunEnabled:            true,
+		ResultConsumerEnabled: true,
+		StagingEnabled:        true,
+		CanaryPercent:         1,
+	}
+	require.NoError(t, flags.Validate())
+	require.False(t, flags.EnabledForDevice(dev.ID.String()))
+	starter := &paramSyncStarter{
+		service: submitter,
+		flags:   flags,
+	}
+
+	submitted, err := starter.StartReleaseSync(
+		context.Background(),
+		dev,
+		uuid.New(),
+		uuid.New(),
+	)
+
+	require.NoError(t, err)
+	assert.True(t, submitted)
+	assert.Equal(t, paramsync.TriggerOMCUpgrade, submitter.command.TriggerReason)
 }
 
 func TestParamSyncStarter_StartDurableSync_PeriodicUsesLegacyFallbackWhenDisabled(t *testing.T) {

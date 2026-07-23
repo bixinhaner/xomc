@@ -154,6 +154,35 @@ func submitCommand(reason TriggerReason) SubmitCommand {
 	return SubmitCommand{DeviceID: uuid.New(), DeviceSN: "SN-1", CallerType: "api", TriggerReason: reason, Scope: SyncScopeFull}
 }
 
+func TestIssue148TriggerReasonsAreAutomatic(t *testing.T) {
+	for _, reason := range []TriggerReason{
+		TriggerDeviceRegistered,
+		TriggerOMCUpgrade,
+	} {
+		assert.True(t, reason.Valid())
+		assert.True(t, reason.Automatic())
+	}
+}
+
+func TestService_SubmitCopiesCampaignID(t *testing.T) {
+	repo := newMemoryRequestRepo()
+	service := NewService(repo, stubPlanner{
+		plan: &Plan{Batches: []TaskBatch{{Paths: []string{"Device."}}}},
+	})
+	campaignID := uuid.New()
+	cmd := submitCommand(TriggerOMCUpgrade)
+	cmd.CampaignID = &campaignID
+
+	result, err := service.Submit(context.Background(), cmd)
+
+	require.NoError(t, err)
+	require.Len(t, repo.requests, 1)
+	stored := repo.requests[result.RequestID]
+	require.NotNil(t, stored)
+	require.NotNil(t, stored.CampaignID)
+	assert.Equal(t, campaignID, *stored.CampaignID)
+}
+
 func TestService_SubmitReturnsDurableRequestAndRunIDs(t *testing.T) {
 	repo := newMemoryRequestRepo()
 	service := NewService(repo, stubPlanner{plan: &Plan{Batches: []TaskBatch{{Paths: []string{"Device."}}}}})

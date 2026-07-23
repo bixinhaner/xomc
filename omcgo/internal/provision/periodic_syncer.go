@@ -3,9 +3,11 @@ package provision
 import (
 	"context"
 	"math/rand"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"go.uber.org/zap"
 )
@@ -20,6 +22,19 @@ type StaleDeviceLister interface {
 // 当前由 *SyncService 适配到 durable parameter_sync 数据面）。
 type PathBSyncStarter interface {
 	StartPathBSync(ctx context.Context, dev *model.Device, sourceID string, opts ...PathBOption) (bool, int, error)
+}
+
+type ReleaseCandidateLister interface {
+	ListReleaseCandidates(ctx context.Context, campaignID uuid.UUID, limit int) ([]*model.Device, error)
+}
+
+type ReleaseSyncStarter interface {
+	StartReleaseSync(
+		ctx context.Context,
+		dev *model.Device,
+		campaignID uuid.UUID,
+		attemptID uuid.UUID,
+	) (submitted bool, err error)
 }
 
 // PeriodicSyncer 周期性参数同步兜底（T-0124 设计 §2）。
@@ -45,12 +60,32 @@ type PeriodicSyncer struct {
 	leader LeaderElector
 	policy *PeriodicSyncPolicy
 	logger *zap.Logger
+
+	paramSyncRoutingMode string
+	releaseLister        ReleaseCandidateLister
+	releaseStarter       ReleaseSyncStarter
+	releaseCampaignID    uuid.UUID
+	releaseStaggerDelay  func(time.Duration) time.Duration
 }
 
 // SetParamSyncRoutingMode is kept for provider compatibility. Periodic sync is
 // an allowed automatic entry and must still call StartPathBSync so the durable
 // parameter_sync path can accept it before any legacy fallback decision.
 func (p *PeriodicSyncer) SetParamSyncRoutingMode(mode string) {
+	p.paramSyncRoutingMode = strings.TrimSpace(mode)
+}
+
+func (p *PeriodicSyncer) SetReleaseSync(
+	lister ReleaseCandidateLister,
+	starter ReleaseSyncStarter,
+	campaignID uuid.UUID,
+) {
+	if lister == nil || starter == nil || campaignID == uuid.Nil {
+		return
+	}
+	p.releaseLister = lister
+	p.releaseStarter = starter
+	p.releaseCampaignID = campaignID
 }
 
 // NewPeriodicSyncer 创建周期同步器。leader / policy 可为 nil：
@@ -105,7 +140,9 @@ func (p *PeriodicSyncer) Start(ctx context.Context) error {
 			return ctx.Err()
 		case <-timer.C:
 			snap := p.snapshot(ctx)
-			if snap.Enabled && (lastRunAt.IsZero() || time.Since(lastRunAt) >= snap.Interval) {
+			p.runReleaseOnce(ctx, snap)
+			if snap.Enabled && p.lister != nil && p.syncer != nil &&
+				(lastRunAt.IsZero() || time.Since(lastRunAt) >= snap.Interval) {
 				if p.runOnce(ctx, snap) {
 					lastRunAt = time.Now()
 				}
@@ -160,6 +197,109 @@ func (p *PeriodicSyncer) runOnce(ctx context.Context, snap PeriodicSyncSnapshot)
 		zap.Int("max_concurrent", snap.MaxConcurrent),
 		zap.Duration("stagger_window", snap.StaggerWindow))
 	return true
+}
+
+func (p *PeriodicSyncer) runReleaseOnce(ctx context.Context, snap PeriodicSyncSnapshot) bool {
+	if p.paramSyncRoutingMode != "durable" ||
+		p.releaseLister == nil ||
+		p.releaseStarter == nil ||
+		p.releaseCampaignID == uuid.Nil {
+		return false
+	}
+	if p.leader != nil {
+		isLeader, err := p.leader.TryAcquire(ctx)
+		if err != nil {
+			p.logger.Warn("release sync: leader TryAcquire failed", zap.Error(err))
+			return false
+		}
+		if !isLeader {
+			return false
+		}
+	}
+	devices, err := p.releaseLister.ListReleaseCandidates(
+		ctx,
+		p.releaseCampaignID,
+		snap.BatchSize,
+	)
+	if err != nil {
+		p.logger.Warn("release sync: list candidates failed", zap.Error(err))
+		return false
+	}
+	if len(devices) == 0 {
+		return true
+	}
+	enqueued, skipped, failed := p.enqueueReleaseBatch(
+		ctx,
+		devices,
+		p.releaseCampaignID,
+		snap,
+	)
+	p.logger.Info("release sync: batch submitted",
+		zap.String("campaign_id", p.releaseCampaignID.String()),
+		zap.Int("device_count", len(devices)),
+		zap.Int("enqueued", enqueued),
+		zap.Int("skipped", skipped),
+		zap.Int("failed", failed))
+	return true
+}
+
+func (p *PeriodicSyncer) enqueueReleaseBatch(
+	ctx context.Context,
+	devices []*model.Device,
+	campaignID uuid.UUID,
+	snap PeriodicSyncSnapshot,
+) (enqueued, skipped, failed int) {
+	sem := make(chan struct{}, snap.MaxConcurrent)
+	var wg sync.WaitGroup
+	var countMu sync.Mutex
+
+	for _, dev := range devices {
+		wg.Add(1)
+		go func(d *model.Device) {
+			defer wg.Done()
+
+			if snap.StaggerWindow > 0 {
+				delay := time.Duration(rand.Int63n(int64(snap.StaggerWindow)))
+				if p.releaseStaggerDelay != nil {
+					delay = p.releaseStaggerDelay(snap.StaggerWindow)
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(delay):
+				}
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case sem <- struct{}{}:
+			}
+			defer func() { <-sem }()
+
+			submitted, err := p.releaseStarter.StartReleaseSync(
+				ctx,
+				d,
+				campaignID,
+				uuid.New(),
+			)
+			countMu.Lock()
+			defer countMu.Unlock()
+			switch {
+			case err != nil:
+				failed++
+				p.logger.Warn("release sync: device submission failed",
+					zap.String("device_id", d.ID.String()),
+					zap.String("device_sn", d.SerialNumber),
+					zap.Error(err))
+			case !submitted:
+				skipped++
+			default:
+				enqueued++
+			}
+		}(dev)
+	}
+	wg.Wait()
+	return
 }
 
 // enqueueBatch 并发入队参数同步，返回 (成功入队 / durable 数据面不可用跳过 / 失败) 计数。

@@ -17,6 +17,7 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/backup"
+	"github.com/omcgo/omcgo/internal/buildinfo"
 	"github.com/omcgo/omcgo/internal/bundle"
 	"github.com/omcgo/omcgo/internal/config"
 	"github.com/omcgo/omcgo/internal/config/baseline"
@@ -663,6 +664,9 @@ func initProvisionModule(c *Container) error {
 	)
 	provisionEngine.SetDeduper(c.Deduper)
 	provisionEngine.SetParamSyncRoutingMode(c.Cfg.ParamSync.RoutingMode)
+	if c.miscDeps.paramSyncStarter != nil {
+		provisionEngine.SetRegisteredDeviceSyncStarter(c.miscDeps.paramSyncStarter)
+	}
 	// HIGH-27 / MEDIUM-19：provisioning 指标（discovery_log 状态写库失败、Redis 节流失败）。
 	provisionMetrics := provision.NewMetrics(c.MetricsReg)
 	provisionEngine.SetMetrics(provisionMetrics)
@@ -693,6 +697,7 @@ func initProvisionModule(c *Container) error {
 		logger.Info("model upload service enabled",
 			zap.String("upload_url", c.Cfg.Provision.ModelUpload.UploadURL))
 	}
+	var periodicSyncStarter provision.PathBSyncStarter
 	if c.Cfg.Provision.AutoSync.Enabled {
 		planStore := provision.NewSyncPlanStore(c.Redis)
 		syncSvc := provision.NewSyncService(
@@ -722,6 +727,7 @@ func initProvisionModule(c *Container) error {
 		logger.Info("device name sync hook enabled (Issue #758)")
 
 		c.SyncSvc = syncSvc
+		periodicSyncStarter = syncSvc
 		if c.miscDeps.paramSyncStarter != nil {
 			syncSvc.SetDurableStarter(c.miscDeps.paramSyncStarter)
 		}
@@ -755,14 +761,15 @@ func initProvisionModule(c *Container) error {
 			logger.Info("device license params handler initialized")
 		}
 
-		// T-0124: 周期性参数同步兜底（优先提交到 durable parameter_sync_* 数据面）。
-		// 配置从 sys_configs (category='device') 读，Enabled / Interval / BatchSize /
-		// MaxConcurrent / StaggerWindow 全部 runtime 动态生效（30s 缓存 + 1min 轮询）。
-		// 总是启动 scheduler；Enabled=false 时 scheduler 空跑等切换 — 这样用户在 FE
-		// 系统配置 → 设备设置面板里开关 enabled 不需要重启进程。
-		// PG advisory lock 协调多副本 leader，保证同一时刻只有一个 app 副本扫描入队。
-		// 所有同步（定时/手动/上线/固件变化等）统一先走 parameter_sync_*；
-		// 旧 sync-gpv Path B 只保留为临时兜底，待 param_sync_running 稳定后删除。
+	}
+
+	releaseCampaignID, hasReleaseIdentity := buildinfo.ReleaseCampaignID()
+	releaseSyncReady := hasReleaseIdentity &&
+		c.miscDeps.paramSyncStarter != nil &&
+		c.Cfg.ParamSync.RoutingMode == "durable"
+	if periodicSyncStarter != nil || releaseSyncReady {
+		// T-0124 周期同步与 Issue #148 发布同步共用同一个 scheduler、
+		// PG leader、批次、并发和 stagger 参数。
 		sysCfgRepo := admin.NewPgSysConfigRepository(c.PgPool)
 		periodicSyncLookup := provision.SysConfigLookup(func(ctx context.Context, cat, key string) (string, bool) {
 			cfg, err := sysCfgRepo.GetByKey(ctx, cat, key)
@@ -783,16 +790,25 @@ func initProvisionModule(c *Container) error {
 		}
 		leader := provision.NewPGAdvisoryLeaderElector(c.PgPool, "periodic_param_syncer", logger)
 		periodicSyncer := provision.NewPeriodicSyncer(
-			c.DeviceRepo, syncSvc, leader,
+			c.DeviceRepo, periodicSyncStarter, leader,
 			periodicSyncPolicy, logger,
 		)
 		periodicSyncer.SetParamSyncRoutingMode(c.Cfg.ParamSync.RoutingMode)
+		if releaseSyncReady {
+			periodicSyncer.SetReleaseSync(
+				paramsync.NewPGRepository(c.PgPool),
+				c.miscDeps.paramSyncStarter,
+				releaseCampaignID,
+			)
+		}
 		go func() {
 			if err := periodicSyncer.Start(context.Background()); err != nil && err != context.Canceled {
 				logger.Warn("periodic syncer exited with error", zap.Error(err))
 			}
 		}()
-		logger.Info("periodic syncer scheduler started (driven by sys_configs category=device)")
+		logger.Info("parameter sync scheduler started",
+			zap.Bool("periodic_enabled", periodicSyncStarter != nil),
+			zap.Bool("release_sync_enabled", releaseSyncReady))
 	}
 
 	if err := provisionEngine.Subscribe(c.EventBus); err != nil {

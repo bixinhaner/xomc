@@ -88,13 +88,16 @@ const (
 	TriggerSPVReadback       TriggerReason = "spv_readback"
 	TriggerAddObjectReadback TriggerReason = "add_object_readback"
 	TriggerInformPeriodProbe TriggerReason = "inform_period_probe"
+	TriggerDeviceRegistered  TriggerReason = "device_registered"
+	TriggerOMCUpgrade        TriggerReason = "omc_upgrade"
 )
 
 func (r TriggerReason) Valid() bool {
 	switch r {
 	case TriggerBootstrap, TriggerModelUpload, TriggerDeviceOnline, TriggerFirmwareChanged,
 		TriggerPeriodic, TriggerManual, TriggerConfigPull, TriggerLicense,
-		TriggerSPVReadback, TriggerAddObjectReadback, TriggerInformPeriodProbe:
+		TriggerSPVReadback, TriggerAddObjectReadback, TriggerInformPeriodProbe,
+		TriggerDeviceRegistered, TriggerOMCUpgrade:
 		return true
 	default:
 		return false
@@ -118,7 +121,8 @@ const (
 
 func (r TriggerReason) Automatic() bool {
 	switch r {
-	case TriggerModelUpload, TriggerDeviceOnline, TriggerPeriodic, TriggerFirmwareChanged:
+	case TriggerModelUpload, TriggerDeviceOnline, TriggerPeriodic, TriggerFirmwareChanged,
+		TriggerDeviceRegistered, TriggerOMCUpgrade:
 		return true
 	default:
 		return false
@@ -216,6 +220,7 @@ type SubmitCommand struct {
 	Priority            int
 	DeadlineAt          *time.Time
 	IdempotencyKey      string
+	CampaignID          *uuid.UUID
 	SourceEventID       string
 	OriginEventType     string
 	ModelUploadIntentID *uuid.UUID

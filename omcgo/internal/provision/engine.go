@@ -52,6 +52,16 @@ type deviceCacheInvalidator interface {
 	Delete(ctx context.Context, sn string)
 }
 
+// RegisteredDeviceSyncStarter submits the Issue #148 new-device trigger
+// directly to the durable parameter-sync data plane.
+type RegisteredDeviceSyncStarter interface {
+	StartRegisteredDeviceSync(
+		ctx context.Context,
+		dev *model.Device,
+		sourceID string,
+	) error
+}
+
 type ProvisioningEngine struct {
 	taskRepo           ProvisioningTaskRepository
 	deviceService      *device.DeviceService
@@ -62,6 +72,7 @@ type ProvisioningEngine struct {
 	deduper            *event.Deduper
 	modelUploadService *ModelUploadService
 	syncService        *SyncService
+	registeredSync     RegisteredDeviceSyncStarter
 	productRegistry    productClassMatcher
 	productRepo        productBinder
 	// deviceCache 在 lazy bind 写库成功后失效 SN 缓存。
@@ -109,6 +120,10 @@ func (e *ProvisioningEngine) SetModelUploadService(svc *ModelUploadService) {
 // SetSyncService sets the sync service for parameter synchronization.
 func (e *ProvisioningEngine) SetSyncService(svc *SyncService) {
 	e.syncService = svc
+}
+
+func (e *ProvisioningEngine) SetRegisteredDeviceSyncStarter(starter RegisteredDeviceSyncStarter) {
+	e.registeredSync = starter
 }
 
 // SetParamSyncRoutingMode configures the P0 routing gate. Empty keeps the
@@ -292,6 +307,7 @@ type bootstrapEvent struct {
 	ProductClass string    `json:"product_class"`
 	Carrier      string    `json:"carrier"`
 	Technology   string    `json:"technology"`
+	Created      bool      `json:"created"`
 }
 
 // Subscribe registers the engine to listen for bootstrap and model file events.
@@ -596,6 +612,10 @@ func (e *ProvisioningEngine) HandleBootstrap(ctx context.Context, evt bootstrapE
 	// cache 还没写入；后续读再触发 GetOrLoad 即可）。返回值丢弃。
 	_ = e.bindDeviceProduct(ctx, dev)
 
+	if err := e.startRegisteredDeviceSync(ctx, evt, dev); err != nil {
+		return e.failTask(ctx, task, err)
+	}
+
 	// 3. Try matching template first (Path A).
 	if err := e.transitionTask(ctx, task, StateMatching); err != nil {
 		return e.failTask(ctx, task, fmt.Errorf("transition to matching: %w", err))
@@ -633,6 +653,25 @@ func (e *ProvisioningEngine) HandleBootstrap(ctx context.Context, evt bootstrapE
 		zap.String("device_sn", evt.SerialNumber),
 	)
 	return e.failTask(ctx, task, fmt.Errorf("no provisioning path for device %s", evt.SerialNumber))
+}
+
+func (e *ProvisioningEngine) startRegisteredDeviceSync(
+	ctx context.Context,
+	evt bootstrapEvent,
+	dev *model.Device,
+) error {
+	if !evt.Created || e.paramSyncRoutingMode != "durable" || e.registeredSync == nil {
+		return nil
+	}
+	err := e.registeredSync.StartRegisteredDeviceSync(
+		ctx,
+		dev,
+		"device_registered:"+dev.ID.String(),
+	)
+	if err != nil {
+		return fmt.Errorf("start registered-device parameter sync: %w", err)
+	}
+	return nil
 }
 
 // handleTemplateProvisioning executes the classic provisioning flow (Path A).

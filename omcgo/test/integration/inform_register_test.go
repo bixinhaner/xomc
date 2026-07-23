@@ -59,8 +59,10 @@ func TestInformBootstrapRegister(t *testing.T) {
 	paramRepo := device.NewPgDeviceParameterRepository(pool)
 	svc := device.NewDeviceService(deviceRepo, paramRepo, nil, nil, logger)
 
-	registered, err := svc.RegisterFromInform(ctx, inform, model.CarrierCMCC)
+	registration, err := svc.RegisterFromInform(ctx, inform, model.CarrierCMCC)
 	require.NoError(t, err)
+	require.True(t, registration.Created)
+	registered := registration.Device
 	assert.Equal(t, "TEST-SN-001", registered.SerialNumber)
 	assert.Equal(t, "001122", registered.OUI)
 	assert.Equal(t, model.CarrierCMCC, registered.Carrier)
