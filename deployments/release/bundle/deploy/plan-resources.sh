@@ -285,15 +285,17 @@ elif [ "$IDLE_MEM_MIB" -ge 49152 ]; then TIER=large     # ≥48 GiB 空闲
 elif [ "$IDLE_MEM_MIB" -ge 24576 ]; then TIER=medium    # ≥24 GiB 空闲
 else TIER=small; fi
 
-# CPU 限额（突发可超分；按档位给值）。medium/large 的两套数据库各取宿主总核数
-# 的三分之一（向下取整），给其余业务与系统保留至少约三分之一；最低仍为 2 核。
+# CPU 限额（突发可超分；按档位给值）。medium/large 按 10000 基站压测验证的
+# 热点比例分配：主库=总核数1/3、时序库=1/2、worker=1/4，均向下取整且最低2核。
+# 三者限额之和可超过物理核数；cgroup CPU limit 是各自上限而非预留，实际由调度器共享。
 CPU_DB_THIRD=$(( HOST_CPU / 3 )); [ "$CPU_DB_THIRD" -lt 2 ] && CPU_DB_THIRD=2
+CPU_TSDB_HALF=$(( HOST_CPU / 2 )); [ "$CPU_TSDB_HALF" -lt 2 ] && CPU_TSDB_HALF=2
+CPU_WORKER_QUARTER=$(( HOST_CPU / 4 )); [ "$CPU_WORKER_QUARTER" -lt 2 ] && CPU_WORKER_QUARTER=2
 case "$TIER" in
   small)  CPU_app=1;   CPU_acs=2; CPU_worker=2; CPU_pg=2; CPU_tsdb=2; CPU_redis=1; CPU_nats=1; CPU_minio=1; CPU_web=1 ;;
-  # 32核/32GiB medium 目标机压测验证：主库与时序库各 10 核（约总核数 1/3），
-  # worker 3 核。10000 基站 PM 队列约一分钟从 3492 清零，无新增 flush 失败/超时/DLQ。
-  medium) CPU_app="1.5"; CPU_acs=5; CPU_worker=3; CPU_pg=$CPU_DB_THIRD; CPU_tsdb=$CPU_DB_THIRD; CPU_redis=2; CPU_nats=1; CPU_minio=4; CPU_web=1 ;;
-  large)  CPU_app=2;   CPU_acs=8; CPU_worker=4; CPU_pg=$CPU_DB_THIRD; CPU_tsdb=$CPU_DB_THIRD; CPU_redis=2; CPU_nats=2; CPU_minio=6; CPU_web=1 ;;
+  # 32核/32GiB medium 实测 10/16/8：worker/TSDB 吞吐被充分利用，PM 无重投/OOM。
+  medium) CPU_app="1.5"; CPU_acs=5; CPU_worker=$CPU_WORKER_QUARTER; CPU_pg=$CPU_DB_THIRD; CPU_tsdb=$CPU_TSDB_HALF; CPU_redis=2; CPU_nats=1; CPU_minio=4; CPU_web=1 ;;
+  large)  CPU_app=2;   CPU_acs=8; CPU_worker=$CPU_WORKER_QUARTER; CPU_pg=$CPU_DB_THIRD; CPU_tsdb=$CPU_TSDB_HALF; CPU_redis=2; CPU_nats=2; CPU_minio=6; CPU_web=1 ;;
 esac
 CPU_LIST=("$CPU_app" "$CPU_acs" "$CPU_worker" "$CPU_pg" "$CPU_tsdb" "$CPU_redis" "$CPU_nats" "$CPU_minio" "$CPU_web")
 

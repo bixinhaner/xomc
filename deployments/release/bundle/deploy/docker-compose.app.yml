@@ -263,10 +263,10 @@ services:
     deploy:
       resources:
         limits:
-          # 缺省对齐 plan-resources.sh medium 档（32核/32G 目标机型）。2026-07-23
-          # 10000 基站压测采用主库/TSDB/worker=10/10/3 核，PM 队列约一分钟从
-          # 3492 清零，且无新增 flush 失败、超时或 DLQ，故固化实测值 3 核。
-          cpus: "${WORKER_CPUS:-3}"
+          # 缺省 8 核，对齐 plan-resources.sh medium 档（32核/32G 目标机型的 1/4）。
+          # 2026-07-23 10000 基站压测：3→5 核使 backlog 峰值下降约31%、排空提升
+          # 约35%-45%；继续用 8 核并把 TSDB 提到16核后，预热后吞吐约45-56条/s。
+          cpus: "${WORKER_CPUS:-8}"
           memory: "${WORKER_MEM:-1024m}"
         reservations:
           cpus: "0.5"
