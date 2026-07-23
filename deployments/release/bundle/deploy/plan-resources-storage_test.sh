@@ -58,18 +58,19 @@ if run_planner "$ENV_FILE" "$TMP/resources.env" > "$TMP/output" 2>&1; then
     bad "resources.env 应输出 NATS_MAX_MEMORY_STORE"
   fi
   check_eq "32核 medium 主库 CPU" "$(storage_env_get "$TMP/resources.env" POSTGRES_CPUS)" "10"
-  check_eq "32核 medium TimescaleDB CPU" "$(storage_env_get "$TMP/resources.env" TSDB_CPUS)" "10"
-  check_eq "32核 medium worker CPU" "$(storage_env_get "$TMP/resources.env" WORKER_CPUS)" "3"
+  check_eq "32核 medium TimescaleDB CPU" "$(storage_env_get "$TMP/resources.env" TSDB_CPUS)" "16"
+  check_eq "32核 medium worker CPU" "$(storage_env_get "$TMP/resources.env" WORKER_CPUS)" "8"
 else
   bad "planner 应成功运行"
 fi
 
-echo "── 大机型数据库 CPU 保持总核数三分之一 ──"
+echo "── 大机型按主库1/3、时序库1/2、worker1/4分配 CPU ──"
 LARGE_ENV="$TMP/large.env"
 printf 'OMC_PUBLIC_HOST=10.0.0.3\n' > "$LARGE_ENV"
 if run_large_planner "$LARGE_ENV" "$TMP/large-resources.env" > "$TMP/large-output" 2>&1; then
   check_eq "64核 large 主库 CPU" "$(storage_env_get "$TMP/large-resources.env" POSTGRES_CPUS)" "21"
-  check_eq "64核 large TimescaleDB CPU" "$(storage_env_get "$TMP/large-resources.env" TSDB_CPUS)" "21"
+  check_eq "64核 large TimescaleDB CPU" "$(storage_env_get "$TMP/large-resources.env" TSDB_CPUS)" "32"
+  check_eq "64核 large worker CPU" "$(storage_env_get "$TMP/large-resources.env" WORKER_CPUS)" "16"
 else
   bad "large planner 应成功运行"
 fi

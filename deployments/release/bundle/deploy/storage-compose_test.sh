@@ -31,8 +31,8 @@ contains "MinIO 可配置挂载" '${MINIO_DATA_PATH:-miniodata}:/data' "$RELEASE
 
 echo "── 32核生产默认 CPU 配额 ──"
 contains "PostgreSQL 默认 10 核" 'cpus: "${POSTGRES_CPUS:-10}"' "$RELEASE_COMPOSE"
-contains "TimescaleDB 默认 10 核" 'cpus: "${TSDB_CPUS:-10}"' "$RELEASE_COMPOSE"
-contains "worker 默认 3 核" 'cpus: "${WORKER_CPUS:-3}"' "$RELEASE_APP_COMPOSE"
+contains "TimescaleDB 默认 16 核" 'cpus: "${TSDB_CPUS:-16}"' "$RELEASE_COMPOSE"
+contains "worker 默认 8 核" 'cpus: "${WORKER_CPUS:-8}"' "$RELEASE_APP_COMPOSE"
 
 echo "── release .env 模板和升级继承 ──"
 for key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH; do
