@@ -1,9 +1,30 @@
 export interface WaitForExpectedParameterValuesOptions {
   expected: ReadonlyMap<string, string>;
-  read: () => Promise<ReadonlyMap<string, string>>;
+  read: (signal: AbortSignal) => Promise<ReadonlyMap<string, string>>;
   intervalMs?: number;
   timeoutMs?: number;
   signal?: AbortSignal;
+}
+
+export interface SubmittedReadbackState {
+  taskId?: string;
+  syncedForTaskId?: string;
+  submittedDraftRevision?: number;
+  currentDraftRevision: number;
+}
+
+export function canApplySubmittedReadback({
+  taskId,
+  syncedForTaskId,
+  submittedDraftRevision,
+  currentDraftRevision,
+}: SubmittedReadbackState): boolean {
+  return Boolean(
+    taskId
+    && syncedForTaskId !== taskId
+    && submittedDraftRevision !== undefined
+    && submittedDraftRevision === currentDraftRevision,
+  );
 }
 
 export class ParameterReadbackTimeoutError extends Error {
@@ -29,6 +50,7 @@ function throwIfAborted(signal?: AbortSignal): void {
 }
 
 async function delayWithSignal(delayMs: number, signal?: AbortSignal): Promise<void> {
+  throwIfAborted(signal);
   if (!signal) {
     await new Promise<void>((resolve) => {
       globalThis.setTimeout(resolve, delayMs);
@@ -47,6 +69,55 @@ async function delayWithSignal(delayMs: number, signal?: AbortSignal): Promise<v
       reject(createAbortError());
     };
     signal.addEventListener('abort', onAbort, { once: true });
+    if (signal.aborted) {
+      onAbort();
+    }
+  });
+}
+
+async function readWithDeadline(
+  read: (signal: AbortSignal) => Promise<ReadonlyMap<string, string>>,
+  remainingMs: number,
+  signal?: AbortSignal,
+): Promise<ReadonlyMap<string, string>> {
+  throwIfAborted(signal);
+  const readController = new AbortController();
+
+  return new Promise<ReadonlyMap<string, string>>((resolve, reject) => {
+    let settled = false;
+    const finish = (
+      callback: (value: ReadonlyMap<string, string> | Error) => void,
+      value: ReadonlyMap<string, string> | Error,
+    ) => {
+      if (settled) return;
+      settled = true;
+      globalThis.clearTimeout(timeoutId);
+      signal?.removeEventListener('abort', onAbort);
+      callback(value);
+    };
+    const onAbort = () => {
+      readController.abort();
+      finish((error) => reject(error), createAbortError());
+    };
+    const timeoutId = globalThis.setTimeout(() => {
+      readController.abort();
+      finish((error) => reject(error), new ParameterReadbackTimeoutError());
+    }, Math.max(0, remainingMs));
+
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    void Promise.resolve()
+      .then(() => read(readController.signal))
+      .then(
+        (value) => finish((result) => resolve(result as ReadonlyMap<string, string>), value),
+        (error: unknown) => finish(
+          (reason) => reject(reason),
+          error instanceof Error ? error : new Error(String(error)),
+        ),
+      );
   });
 }
 
@@ -72,14 +143,19 @@ export async function waitForExpectedParameterValues({
   const deadlineAt = Date.now() + timeoutMs;
   while (true) {
     throwIfAborted(signal);
-    const actual = await read();
+    const remainingBeforeRead = deadlineAt - Date.now();
+    if (remainingBeforeRead <= 0) {
+      throw new ParameterReadbackTimeoutError();
+    }
+    const actual = await readWithDeadline(read, remainingBeforeRead, signal);
     throwIfAborted(signal);
     if (parameterValuesMatch(expected, actual)) {
       return actual;
     }
-    if (Date.now() >= deadlineAt) {
+    const remainingBeforeDelay = deadlineAt - Date.now();
+    if (remainingBeforeDelay <= 0) {
       throw new ParameterReadbackTimeoutError();
     }
-    await delayWithSignal(intervalMs, signal);
+    await delayWithSignal(Math.min(intervalMs, remainingBeforeDelay), signal);
   }
 }

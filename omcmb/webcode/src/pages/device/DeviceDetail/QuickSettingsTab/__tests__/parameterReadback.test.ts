@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canApplySubmittedReadback,
   ParameterReadbackTimeoutError,
   waitForExpectedParameterValues,
 } from '../parameterReadback';
@@ -49,5 +50,58 @@ describe('waitForExpectedParameterValues', () => {
       signal: controller.signal,
     })).rejects.toMatchObject({ name: 'AbortError' });
     expect(calls).toBe(0);
+  });
+
+  it('times out even when the schema read never settles', async () => {
+    await expect(waitForExpectedParameterValues({
+      expected: new Map([['Device.X', 'new']]),
+      read: async () => new Promise<ReadonlyMap<string, string>>(() => undefined),
+      timeoutMs: 20,
+    })).rejects.toBeInstanceOf(ParameterReadbackTimeoutError);
+  }, 250);
+
+  it('aborts an in-flight schema read immediately', async () => {
+    const controller = new AbortController();
+    let readSignal: AbortSignal | undefined;
+    const pending = waitForExpectedParameterValues({
+      expected: new Map([['Device.X', 'new']]),
+      read: async (signal) => {
+        readSignal = signal;
+        return new Promise<ReadonlyMap<string, string>>(() => undefined);
+      },
+      signal: controller.signal,
+      timeoutMs: 1_000,
+    });
+
+    await Promise.resolve();
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(readSignal?.aborted).toBe(true);
+  }, 250);
+});
+
+describe('canApplySubmittedReadback', () => {
+  it('only accepts the unsynced task whose submitted draft revision is still current', () => {
+    expect(canApplySubmittedReadback({
+      taskId: 'task-1',
+      syncedForTaskId: undefined,
+      submittedDraftRevision: 3,
+      currentDraftRevision: 3,
+    })).toBe(true);
+
+    expect(canApplySubmittedReadback({
+      taskId: 'task-1',
+      syncedForTaskId: undefined,
+      submittedDraftRevision: 3,
+      currentDraftRevision: 4,
+    })).toBe(false);
+
+    expect(canApplySubmittedReadback({
+      taskId: 'task-1',
+      syncedForTaskId: 'task-1',
+      submittedDraftRevision: 3,
+      currentDraftRevision: 3,
+    })).toBe(false);
   });
 });

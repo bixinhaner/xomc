@@ -44,6 +44,7 @@ import {
   type PlmnRow,
 } from './plmnList';
 import {
+  canApplySubmittedReadback,
   ParameterReadbackTimeoutError,
   waitForExpectedParameterValues,
 } from './parameterReadback';
@@ -1153,7 +1154,6 @@ function findRawValueBySuffix(parameters: DeviceParameter[] | undefined, suffix:
 export default function CellParameterForm({ deviceId, active = true, group, instanceContext, locale, onIpsecControlChange }: CellParameterFormProps) {
   const t = useT();
   const [form] = Form.useForm();
-  const latestLocalEditAtRef = useRef(0);
   const gnssSyncSourceRef = useRef<string[]>([]);
   const watchedLocalTimeZoneName = Form.useWatch('LocalTimeZoneName', form);
   const watchedIpsecEnable = Form.useWatch('IPSEC_ENABLE', form);
@@ -1179,6 +1179,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
   const setFeedback = useQuickSettingsFeedbackStore((s) => s.setFeedback);
   const patchFeedback = useQuickSettingsFeedbackStore((s) => s.patchFeedback);
   const draft = useQuickSettingsFeedbackStore((s) => s.drafts[fbKey]);
+  const draftRevision = useQuickSettingsFeedbackStore((s) => s.draftRevisions[fbKey] ?? 0);
   const setDraftField = useQuickSettingsFeedbackStore((s) => s.setDraftField);
   const clearDraft = useQuickSettingsFeedbackStore((s) => s.clearDraft);
   const isDeviceTimeGroup = group.id === 'device-time';
@@ -1875,11 +1876,11 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
     }
 
     setFieldErrors({});
+    const submittedDraftRevision = useQuickSettingsFeedbackStore.getState().draftRevisions[fbKey] ?? 0;
     try {
       // 快速设置始终修改设备/LMT 侧参数。HNBName、gNBName 与其他参数一样
       // 通过 SetParameterValues 下发，不得转成网管设备改名操作。
       const result = await updateMutation.mutateAsync({ deviceId, parameters: updates });
-      latestLocalEditAtRef.current = 0;
       message.success({
         content: t('device.cell.saveSuccessMsg', { count: updates.length }),
         duration: 6,
@@ -1893,6 +1894,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         expectedReadback: Object.fromEntries(
           updates.map((update) => [update.parameterPath, update.parameterValue]),
         ),
+        submittedDraftRevision,
       });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -1925,9 +1927,14 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
   useEffect(() => {
     if (!active) return;
     if (!lastTask || !['completed', 'failed', 'expired', 'cancelled'].includes(lastTask.status)) return;
-    if ((lastSubmit?.at ?? 0) < latestLocalEditAtRef.current) return;
     // 非成功终态必须保留本地草稿，供用户修正后重试；失败提示由下方独立 effect 负责。
     if (lastTask.status !== 'completed') return;
+    if (!canApplySubmittedReadback({
+      taskId: lastTask.id,
+      syncedForTaskId: lastSubmit?.syncedForTaskId,
+      submittedDraftRevision: lastSubmit?.submittedDraftRevision,
+      currentDraftRevision: draftRevision,
+    })) return;
     let cancelled = false;
     const abortController = new AbortController();
     void (async () => {
@@ -2018,6 +2025,13 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         return;
       }
       if (cancelled) return;
+      const currentDraftRevision = useQuickSettingsFeedbackStore.getState().draftRevisions[fbKey] ?? 0;
+      if (!canApplySubmittedReadback({
+        taskId: lastTask.id,
+        syncedForTaskId: lastSubmit?.syncedForTaskId,
+        submittedDraftRevision: lastSubmit?.submittedDraftRevision,
+        currentDraftRevision,
+      })) return;
       const nextValues: Record<string, unknown> = {};
       for (const p of effectiveParams) {
         const special = resolveRuntimeSpecialConfig(p.name);
@@ -2059,6 +2073,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
       if (Array.isArray(syncSourceValue)) {
         gnssSyncSourceRef.current = syncSourceValue.map(String);
       }
+      patchFeedback(fbKey, { syncedForTaskId: lastTask.id });
       clearDraft(fbKey);
       setFieldErrors({});
     })();
@@ -2066,7 +2081,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
       cancelled = true;
       abortController.abort();
     };
-  }, [active, lastTask?.id, lastTask?.status, lastSubmit?.at, lastSubmit?.expectedReadback, refetchCommonSchema, refetchDeviceTimeSchema, refetchManagementServerSchema, refetchGnbSyncFapSchema, refetchGnbSyncDeviceInfoSchema, effectiveParams, instanceContext, form, clearDraft, fbKey, group.id, group.titleZh, resolveRuntimeSpecialConfig, t, isDeviceTimeGroup, isGnbSyncSourceGroup, deviceTimeModeOptionsKey, queryClient, deviceId, isEffectiveBitmaskPath, isConstrainedGnssSyncSourceSelectPath]);
+  }, [active, lastTask?.id, lastTask?.status, lastSubmit?.at, lastSubmit?.expectedReadback, lastSubmit?.submittedDraftRevision, lastSubmit?.syncedForTaskId, draftRevision, refetchCommonSchema, refetchDeviceTimeSchema, refetchManagementServerSchema, refetchGnbSyncFapSchema, refetchGnbSyncDeviceInfoSchema, effectiveParams, instanceContext, form, clearDraft, patchFeedback, fbKey, group.id, group.titleZh, resolveRuntimeSpecialConfig, t, isDeviceTimeGroup, isGnbSyncSourceGroup, deviceTimeModeOptionsKey, queryClient, deviceId, isEffectiveBitmaskPath, isConstrainedGnssSyncSourceSelectPath]);
 
   // T-0146:基站应答失败时弹一次 notification(只在 status 第一次变成 failed 时触发,避免重复弹)
   // notifiedFailedTaskId 同样存 store —— 切顶层 tab 再切回不会重复弹。
@@ -2136,7 +2151,6 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         form={form}
         layout="vertical"
         onValuesChange={(changedValues) => {
-          latestLocalEditAtRef.current = Date.now();
           // 同步到 store draft，跨顶层 TabBar 切走切回可恢复
           for (const [name, value] of Object.entries(changedValues)) {
             const p = visibleParams.find((q) => q.name === name);
