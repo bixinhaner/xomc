@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/pm/adhoc"
@@ -46,20 +47,42 @@ func TestHandler_Create_AdhocExportRejectsPrivateTaskFromOtherUser(t *testing.T)
 }
 
 func TestHandler_Create_AdhocExportAllowsPublicTaskFromOtherUser(t *testing.T) {
+	for _, source := range []SourceType{SourcePMDashboard, SourceAdhocResult} {
+		t.Run(string(source), func(t *testing.T) {
+			adhocTaskID := uuid.New()
+			repo, enq, router := newAdhocExportTestRouter(&stubAdhocTaskReader{task: &adhoc.Task{
+				ID:         adhocTaskID,
+				Creator:    "alice",
+				Visibility: adhoc.VisibilityPublic,
+			}}, func(c *gin.Context) {
+				c.Set("username", "bob")
+			})
+
+			w := performAdhocExportCreateForSource(router, source, adhocTaskID)
+
+			assert.Equal(t, http.StatusCreated, w.Code)
+			require.NotNil(t, repo.created)
+			assert.Equal(t, source, repo.created.SourceType)
+			assert.Len(t, enq.inserted, 1)
+		})
+	}
+}
+
+func TestHandler_Create_RejectsDeprecatedAdhocSourceType(t *testing.T) {
 	adhocTaskID := uuid.New()
 	repo, enq, router := newAdhocExportTestRouter(&stubAdhocTaskReader{task: &adhoc.Task{
 		ID:         adhocTaskID,
 		Creator:    "alice",
 		Visibility: adhoc.VisibilityPublic,
 	}}, func(c *gin.Context) {
-		c.Set("username", "bob")
+		c.Set("username", "alice")
 	})
 
-	w := performAdhocExportCreate(router, adhocTaskID)
+	w := performAdhocExportCreateForSource(router, SourceType("adhoc"), adhocTaskID)
 
-	assert.Equal(t, http.StatusCreated, w.Code)
-	assert.NotNil(t, repo.created)
-	assert.Len(t, enq.inserted, 1)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Nil(t, repo.created)
+	assert.Empty(t, enq.inserted)
 }
 
 func TestHandler_Create_AdhocExportAllowsPrivateTaskOwner(t *testing.T) {
@@ -124,8 +147,8 @@ func TestHandler_List_HidesPrivateAdhocExportsFromOtherUser(t *testing.T) {
 		c.Set("username", "bob")
 	})
 	repo.listResult = []Task{
-		{ID: privateExportID, SourceType: SourceAdhoc, Params: adhocExportParams(privateTaskID), Status: StatusSucceeded},
-		{ID: publicExportID, SourceType: SourceAdhoc, Params: adhocExportParams(publicTaskID), Status: StatusSucceeded},
+		{ID: privateExportID, SourceType: SourcePMDashboard, Params: adhocExportParams(privateTaskID), Status: StatusSucceeded},
+		{ID: publicExportID, SourceType: SourceAdhocResult, Params: adhocExportParams(publicTaskID), Status: StatusSucceeded},
 		{ID: dashboardExportID, SourceType: SourceDashboard, Status: StatusSucceeded},
 	}
 
@@ -152,7 +175,7 @@ func TestHandler_Download_RejectsPrivateAdhocExportFromOtherUser(t *testing.T) {
 	})
 	repo.getTask = &Task{
 		ID:         exportID,
-		SourceType: SourceAdhoc,
+		SourceType: SourcePMDashboard,
 		Params:     adhocExportParams(adhocTaskID),
 		Status:     StatusSucceeded,
 		Bucket:     "pm",
@@ -180,7 +203,7 @@ func TestHandler_Delete_RejectsPrivateAdhocExportFromOtherUser(t *testing.T) {
 	})
 	repo.getTask = &Task{
 		ID:         exportID,
-		SourceType: SourceAdhoc,
+		SourceType: SourceAdhocResult,
 		Params:     adhocExportParams(adhocTaskID),
 		Status:     StatusSucceeded,
 	}
@@ -197,7 +220,7 @@ func newAdhocExportTestRouter(reader AdhocTaskReader, inject func(*gin.Context))
 	gin.SetMode(gin.TestMode)
 	repo := &stubRepo{
 		createID: uuid.New(),
-		getTask:  &Task{ID: uuid.New(), SourceType: SourceAdhoc, Status: StatusPending},
+		getTask:  &Task{ID: uuid.New(), SourceType: SourceAdhocResult, Status: StatusPending},
 	}
 	enq := &stubEnqueuer{insertID: uuid.New()}
 	h := NewHandler(NewService(repo, enq), nil, zap.NewNop())
@@ -214,7 +237,11 @@ func newAdhocExportTestRouter(reader AdhocTaskReader, inject func(*gin.Context))
 }
 
 func performAdhocExportCreate(router http.Handler, taskID uuid.UUID) *httptest.ResponseRecorder {
-	body := []byte(`{"source_type":"adhoc","params":{"task_id":"` + taskID.String() + `"}}`)
+	return performAdhocExportCreateForSource(router, SourceAdhocResult, taskID)
+}
+
+func performAdhocExportCreateForSource(router http.Handler, source SourceType, taskID uuid.UUID) *httptest.ResponseRecorder {
+	body := []byte(`{"source_type":"` + string(source) + `","params":{"task_id":"` + taskID.String() + `"}}`)
 	req := httptest.NewRequest(http.MethodPost, "/pm/exports", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()

@@ -22,7 +22,8 @@ describe('buildDeviceViewExportInput', () => {
   it('设备性能查看导出使用独立 sourceType 和中文任务名前缀', () => {
     const input = buildDeviceViewExportInput(
       selection,
-      'zh-CN',
+      'KPI导出',
+      '设备性能查看',
       new Date(2026, 6, 16, 18, 40, 5),
     );
 
@@ -34,7 +35,8 @@ describe('buildDeviceViewExportInput', () => {
   it('英文界面下使用英文设备性能查看任务名前缀', () => {
     const input = buildDeviceViewExportInput(
       selection,
-      'en-US',
+      'KPI Export',
+      'Device Performance View',
       new Date(2026, 6, 16, 18, 40, 5),
     );
 

@@ -202,15 +202,16 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
     setWindowRange(defaultWindowByGranularity(effectiveGran, systemTimezone));
   }, [effectiveGran, windowTouched, systemTimezone]);
 
-  // 导出（KPI-EXPORT adhoc 来源）：建后端异步任务 → 文件传输菜单下载，带当前二次时窗。
+  // 导出（KPI-EXPORT 自定义聚合任务结果来源）：建后端异步任务 → 文件传输菜单下载，带当前二次时窗。
   const createExport = useCreateKpiExport();
   const handleExport = () => {
     createExport.mutate(
       {
-        sourceType: 'adhoc',
+        sourceType: 'adhoc_result',
         params: buildAdhocExportParams({ taskId, startTime: startISO, endTime: endISO }),
-        taskName: defaultExportTaskName('adhoc', new Date(), {
-          locale: intl.locale,
+        taskName: defaultExportTaskName('adhoc_result', new Date(), {
+          prefixLabel: intl.formatMessage({ id: 'kpiExport.fileName.prefix' }),
+          sourceLabel: intl.formatMessage({ id: 'kpiExport.source.adhocResult' }),
           subjectName: taskQuery.data?.name,
         }),
       },

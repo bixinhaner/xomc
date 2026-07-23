@@ -170,33 +170,37 @@ func newTestTask(src SourceType) *Task {
 
 // #38：adhoc 导出必须从任务元数据读取配置指标集，并传到表头发现与流式数据源。
 func TestRunner_BuildSource_AdhocUsesTaskMetricPaths(t *testing.T) {
-	taskID := uuid.New()
-	metricPaths := []string{"KGSM0101", "KGSM0102"}
-	params, err := json.Marshal(AdhocParams{TaskID: taskID.String()})
-	require.NoError(t, err)
+	for _, source := range []SourceType{SourcePMDashboard, SourceAdhocResult} {
+		t.Run(string(source), func(t *testing.T) {
+			taskID := uuid.New()
+			metricPaths := []string{"KGSM0101", "KGSM0102"}
+			params, err := json.Marshal(AdhocParams{TaskID: taskID.String()})
+			require.NoError(t, err)
 
-	metaDB := &recordingExportQuerier{row: &exportMetaRow{
-		dimension:   "product",
-		deviceCount: 0,
-		metricPaths: metricPaths,
-	}}
-	adhocDB := &recordingExportQuerier{results: []pgx.Rows{
-		&adhocFakeRows{rows: [][]any{{"KGSM0101", "kpi"}, {"KGSM9999", "kpi"}}},
-		&adhocFakeRows{}, // 指标名解析查询无命中，回退编号本身。
-	}}
-	runner := NewRunner(RunnerDeps{AdhocDB: adhocDB, TaskMetaDB: metaDB})
+			metaDB := &recordingExportQuerier{row: &exportMetaRow{
+				dimension:   "product",
+				deviceCount: 0,
+				metricPaths: metricPaths,
+			}}
+			adhocDB := &recordingExportQuerier{results: []pgx.Rows{
+				&adhocFakeRows{rows: [][]any{{"KGSM0101", "kpi"}, {"KGSM9999", "kpi"}}},
+				&adhocFakeRows{}, // 指标名解析查询无命中，回退编号本身。
+			}}
+			runner := NewRunner(RunnerDeps{AdhocDB: adhocDB, TaskMetaDB: metaDB})
 
-	src, _, _, err := runner.buildSource(context.Background(), &Task{
-		ID:         uuid.New(),
-		SourceType: SourceAdhoc,
-		Params:     params,
-	})
-	require.NoError(t, err)
+			src, _, _, err := runner.buildSource(context.Background(), &Task{
+				ID:         uuid.New(),
+				SourceType: source,
+				Params:     params,
+			})
+			require.NoError(t, err)
 
-	assert.Contains(t, metaDB.queryRowSQL, "metric_paths")
-	require.NotEmpty(t, adhocDB.queries)
-	assert.Contains(t, adhocDB.queries[0].sql, "metric_path IN (")
-	assert.Equal(t, metricPaths, src.(*adhocSource).metricPaths)
+			assert.Contains(t, metaDB.queryRowSQL, "metric_paths")
+			require.NotEmpty(t, adhocDB.queries)
+			assert.Contains(t, adhocDB.queries[0].sql, "metric_path IN (")
+			assert.Equal(t, metricPaths, src.(*adhocSource).metricPaths)
+		})
+	}
 }
 
 func TestRunner_BuildSource_UsesStoredEnglishLocaleWithoutRequestContext(t *testing.T) {
@@ -213,7 +217,7 @@ func TestRunner_BuildSource_UsesStoredEnglishLocaleWithoutRequestContext(t *test
 
 	_, _, _, err := runner.buildSource(context.Background(), &Task{
 		ID:         uuid.New(),
-		SourceType: SourceAdhoc,
+		SourceType: SourceAdhocResult,
 		Params: []byte(fmt.Sprintf(
 			`{"task_id":%q,"locale":"en-US"}`,
 			taskID.String(),

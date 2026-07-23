@@ -37,7 +37,7 @@ type DashboardParams struct {
 	ObjectLDNs []string `json:"object_ldns"`
 }
 
-// AdhocParams 是 source_type=adhoc 时 params(jsonb) 的字段集。
+// AdhocParams 是 adhoc 结果类导出 params(jsonb) 的字段集。
 type AdhocParams struct {
 	TaskID    string `json:"task_id"`
 	StartTime string `json:"start_time"` // 可选二次时窗筛选

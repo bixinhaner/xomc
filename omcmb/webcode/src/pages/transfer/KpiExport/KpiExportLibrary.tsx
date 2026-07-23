@@ -119,10 +119,10 @@ export default function KpiExportLibrary() {
             onChange={(v) => setSourceFilter(v ?? '')}
             style={{ width: 160 }}
             options={[
-              { value: 'dashboard', label: t('kpiExport.source.dashboard') },
+              { value: 'pm_dashboard', label: t('kpiExport.source.pmDashboard') },
+              { value: 'adhoc_result', label: t('kpiExport.source.adhocResult') },
               { value: 'device_view', label: t('kpiExport.source.deviceView') },
               { value: 'kpi_query', label: t('kpiExport.source.kpiQuery') },
-              { value: 'adhoc', label: t('kpiExport.source.adhoc') },
             ]}
           />
           <Button icon={<ReloadOutlined />} onClick={() => refetch()}>

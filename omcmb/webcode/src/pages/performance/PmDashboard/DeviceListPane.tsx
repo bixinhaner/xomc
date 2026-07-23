@@ -83,13 +83,14 @@ const TECH_TO_DEVICE_TYPE: Record<Tech, DeviceType> = {
 
 export function buildDeviceViewExportInput(
   selection: DashboardExportSelection,
-  locale: string,
+  prefixLabel: string,
+  sourceLabel: string,
   now: Date = new Date(),
 ): CreateKpiExportInput {
   return {
     sourceType: 'device_view',
     params: buildDashboardExportParams(selection),
-    taskName: defaultExportTaskName('device_view', now, { locale }),
+    taskName: defaultExportTaskName('device_view', now, { prefixLabel, sourceLabel }),
   };
 }
 
@@ -354,7 +355,11 @@ export default function DeviceListPane() {
       return;
     }
     createExport.mutate(
-      buildDeviceViewExportInput(sel, intl.locale),
+      buildDeviceViewExportInput(
+        sel,
+        intl.formatMessage({ id: 'kpiExport.fileName.prefix' }),
+        intl.formatMessage({ id: 'kpiExport.source.deviceView' }),
+      ),
       {
         onSuccess: () => {
           message.success(intl.formatMessage({ id: 'kpiExport.export.submitted' }));

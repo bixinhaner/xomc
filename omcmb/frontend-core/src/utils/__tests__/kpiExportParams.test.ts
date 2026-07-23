@@ -107,37 +107,43 @@ describe('validateDashboardExportSelection', () => {
 describe('defaultExportTaskName', () => {
   it('按来源 + 时间戳生成可读名', () => {
     const d = new Date(2026, 5, 4, 21, 23, 8); // 2026-06-04 21:23:08 本地
-    expect(defaultExportTaskName('dashboard', d)).toBe('KPI导出_仪表盘_20260604_212308');
-    expect(defaultExportTaskName('device_view', d)).toBe('KPI导出_设备性能查看_20260604_212308');
-    expect(defaultExportTaskName('kpi_query', d)).toBe('KPI导出_指标查询_20260604_212308');
-    expect(defaultExportTaskName('adhoc', d)).toBe('KPI导出_任务结果_20260604_212308');
+    expect(defaultExportTaskName('dashboard', d, { prefixLabel: 'KPI导出', sourceLabel: '仪表盘' })).toBe('KPI导出_仪表盘_20260604_212308');
+    expect(defaultExportTaskName('device_view', d, { prefixLabel: 'KPI导出', sourceLabel: '设备性能查看' })).toBe('KPI导出_设备性能查看_20260604_212308');
+    expect(defaultExportTaskName('kpi_query', d, { prefixLabel: 'KPI导出', sourceLabel: '指标查询' })).toBe('KPI导出_指标查询_20260604_212308');
+    expect(defaultExportTaskName('pm_dashboard', d, { prefixLabel: 'KPI导出', sourceLabel: '性能仪表盘' })).toBe('KPI导出_性能仪表盘_20260604_212308');
+    expect(defaultExportTaskName('adhoc_result', d, { prefixLabel: 'KPI导出', sourceLabel: '自定义聚合任务' })).toBe('KPI导出_自定义聚合任务_20260604_212308');
   });
 
-  it('英文 adhoc 导出名使用英文固定词并包含清理后的任务名', () => {
+  it('英文自定义聚合任务导出名使用英文固定词并包含清理后的任务名', () => {
     const d = new Date(2026, 6, 13, 14, 51, 0); // 2026-07-13 14:51:00 本地
     expect(
-      defaultExportTaskName('adhoc', d, {
-        locale: 'en-US',
+      defaultExportTaskName('adhoc_result', d, {
+        prefixLabel: 'KPI Export',
+        sourceLabel: 'Adhoc Aggregation Task',
         subjectName: 'Built-in/Product:GSM',
       }),
-    ).toBe('KPI_Export_Built-in_Product_GSM_20260713_145100');
+    ).toBe('KPI_Export_Adhoc_Aggregation_Task_Built-in_Product_GSM_20260713_145100');
   });
 
   it('英文设备性能查看导出名使用英文来源前缀', () => {
     const d = new Date(2026, 5, 4, 21, 23, 8); // 2026-06-04 21:23:08 本地
-    expect(defaultExportTaskName('device_view', d, { locale: 'en-US' })).toBe(
+    expect(defaultExportTaskName('device_view', d, {
+      prefixLabel: 'KPI Export',
+      sourceLabel: 'Device Performance View',
+    })).toBe(
       'KPI_Export_Device_Performance_View_20260604_212308',
     );
   });
 
-  it('中文 adhoc 导出名保留中文体验并包含清理后的任务名', () => {
+  it('中文自定义聚合任务导出名保留中文体验并包含清理后的任务名', () => {
     const d = new Date(2026, 6, 13, 14, 51, 0); // 2026-07-13 14:51:00 本地
     expect(
-      defaultExportTaskName('adhoc', d, {
-        locale: 'zh-CN',
+      defaultExportTaskName('adhoc_result', d, {
+        prefixLabel: 'KPI导出',
+        sourceLabel: '自定义聚合任务',
         subjectName: '产品/汇总:模板',
       }),
-    ).toBe('KPI导出_任务结果_产品_汇总_模板_20260713_145100');
+    ).toBe('KPI导出_自定义聚合任务_产品_汇总_模板_20260713_145100');
   });
 });
 
