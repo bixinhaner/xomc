@@ -4,6 +4,7 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 RELEASE_DEPLOY="$REPO_ROOT/deployments/release/bundle/deploy"
 RELEASE_COMPOSE="$RELEASE_DEPLOY/docker-compose.infra.yml"
+RELEASE_APP_COMPOSE="$RELEASE_DEPLOY/docker-compose.app.yml"
 DEV_COMPOSE="$REPO_ROOT/deployments/docker/docker-compose.yml"
 INSTALL="$RELEASE_DEPLOY/install.sh"
 SVC="$RELEASE_DEPLOY/svc.sh"
@@ -27,6 +28,11 @@ contains "TimescaleDB 可配置挂载" '${TSDB_DATA_PATH:-tsdbdata}:/var/lib/pos
 contains "Redis 可配置挂载" '${REDIS_DATA_PATH:-redisdata}:/data' "$RELEASE_COMPOSE"
 contains "NATS 可配置挂载" '${NATS_DATA_PATH:-natsdata}:/data' "$RELEASE_COMPOSE"
 contains "MinIO 可配置挂载" '${MINIO_DATA_PATH:-miniodata}:/data' "$RELEASE_COMPOSE"
+
+echo "── 32核生产默认 CPU 配额 ──"
+contains "PostgreSQL 默认 10 核" 'cpus: "${POSTGRES_CPUS:-10}"' "$RELEASE_COMPOSE"
+contains "TimescaleDB 默认 10 核" 'cpus: "${TSDB_CPUS:-10}"' "$RELEASE_COMPOSE"
+contains "worker 默认 3 核" 'cpus: "${WORKER_CPUS:-3}"' "$RELEASE_APP_COMPOSE"
 
 echo "── release .env 模板和升级继承 ──"
 for key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH; do

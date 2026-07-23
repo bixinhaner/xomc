@@ -77,10 +77,10 @@ services:
         limits:
           # resources.env 注入。缺省(#167 Step 0)：mem 2g→7g 容 max_connections=300(每连接
           # ~8-10MB,300×~10MB=3g + shared_buffers 1.8g + 余量)，与上方 -c 调优同源。
-          # CPU 2→6核对齐 plan-resources.sh medium 档（32核/32G 目标机型）：2026-07-23
-          # omc78 20000设备压测实测主库 cgroup 节流 nr_throttled/nr_periods≈99.2%
-          # （几乎每个调度周期都被限流），是当时 LWLock/LockManager 锁等待堆积的主因。
-          cpus: "${POSTGRES_CPUS:-6}"
+          # CPU 缺省 10 核，对齐 plan-resources.sh medium 档（32核/32G 目标机型，约总核数
+          # 1/3）。2026-07-23 10000 基站压测中，4 核配额时主库约 406% 持续触顶；
+          # 调至 10 核后与 TSDB/worker 配合，PM 队列约一分钟清零。
+          cpus: "${POSTGRES_CPUS:-10}"
           memory: "${POSTGRES_MEM:-7g}"
         reservations:
           cpus: "0.5"
@@ -139,9 +139,10 @@ services:
     deploy:
       resources:
         limits:
-          # CPU 2→4核对齐 plan-resources.sh medium 档（32核/32G 目标机型）：2026-07-23
-          # omc78 压测实测节流率约20%，也偏高。
-          cpus: "${TSDB_CPUS:-4}"
+          # CPU 缺省 10 核，对齐 plan-resources.sh medium 档（32核/32G 目标机型，约总核数
+          # 1/3）。2026-07-23 10000 基站压测中，4 核配额时约 376% 持续接近上限；
+          # 调至 10 核后 PM 队列可稳定清零。
+          cpus: "${TSDB_CPUS:-10}"
           memory: "${TSDB_MEM:-7g}"
         reservations:
           cpus: "0.5"

@@ -24,12 +24,23 @@ MOUNTS='107374182400|/
 run_planner() {
   env \
     OMC_PROBE_CPU=32 \
-    OMC_PROBE_MEM_TOTAL_MIB=65536 \
-    OMC_PROBE_MEM_AVAIL_MIB=61440 \
+    OMC_PROBE_MEM_TOTAL_MIB=32768 \
+    OMC_PROBE_MEM_AVAIL_MIB=32768 \
     OMC_PROBE_LOAD15=0 \
     OMC_PROBE_STORAGE_MOUNTS="$MOUNTS" \
     OMC_STORAGE_ENV_FILE="$1" \
     bash "$PLANNER" --assume-dedicated --skip-monitoring -o "$2" "${@:3}"
+}
+
+run_large_planner() {
+  env \
+    OMC_PROBE_CPU=64 \
+    OMC_PROBE_MEM_TOTAL_MIB=131072 \
+    OMC_PROBE_MEM_AVAIL_MIB=131072 \
+    OMC_PROBE_LOAD15=0 \
+    OMC_PROBE_STORAGE_MOUNTS="$MOUNTS" \
+    OMC_STORAGE_ENV_FILE="$1" \
+    bash "$PLANNER" --assume-dedicated --skip-monitoring -o "$2"
 }
 
 echo "── 最大可用存储写入 .env ──"
@@ -46,8 +57,21 @@ if run_planner "$ENV_FILE" "$TMP/resources.env" > "$TMP/output" 2>&1; then
   else
     bad "resources.env 应输出 NATS_MAX_MEMORY_STORE"
   fi
+  check_eq "32核 medium 主库 CPU" "$(storage_env_get "$TMP/resources.env" POSTGRES_CPUS)" "10"
+  check_eq "32核 medium TimescaleDB CPU" "$(storage_env_get "$TMP/resources.env" TSDB_CPUS)" "10"
+  check_eq "32核 medium worker CPU" "$(storage_env_get "$TMP/resources.env" WORKER_CPUS)" "3"
 else
   bad "planner 应成功运行"
+fi
+
+echo "── 大机型数据库 CPU 保持总核数三分之一 ──"
+LARGE_ENV="$TMP/large.env"
+printf 'OMC_PUBLIC_HOST=10.0.0.3\n' > "$LARGE_ENV"
+if run_large_planner "$LARGE_ENV" "$TMP/large-resources.env" > "$TMP/large-output" 2>&1; then
+  check_eq "64核 large 主库 CPU" "$(storage_env_get "$TMP/large-resources.env" POSTGRES_CPUS)" "21"
+  check_eq "64核 large TimescaleDB CPU" "$(storage_env_get "$TMP/large-resources.env" TSDB_CPUS)" "21"
+else
+  bad "large planner 应成功运行"
 fi
 
 echo "── 不覆盖人工路径 ──"
