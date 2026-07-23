@@ -25,7 +25,7 @@ func TestHandler_Create_CapturesRequestLocaleInParams(t *testing.T) {
 	adhocTaskID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	repo := &stubRepo{
 		createID: taskID,
-		getTask:  &Task{ID: taskID, SourceType: SourceAdhoc, Status: StatusPending},
+		getTask:  &Task{ID: taskID, SourceType: SourceAdhocResult, Status: StatusPending},
 	}
 	h := NewHandler(NewService(repo, &stubEnqueuer{insertID: uuid.New()}), nil, zap.NewNop())
 	h.SetAdhocTaskReader(&stubAdhocTaskReader{task: &adhoc.Task{
@@ -36,7 +36,7 @@ func TestHandler_Create_CapturesRequestLocaleInParams(t *testing.T) {
 	router := gin.New()
 	h.RegisterRoutes(router.Group(""))
 
-	body := []byte(`{"source_type":"adhoc","params":{"task_id":"11111111-1111-1111-1111-111111111111"}}`)
+	body := []byte(`{"source_type":"adhoc_result","params":{"task_id":"11111111-1111-1111-1111-111111111111"}}`)
 	req := httptest.NewRequest(http.MethodPost, "/pm/exports", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(appcontext.WithLocale(context.Background(), appcontext.LocaleEN))
@@ -98,6 +98,13 @@ func TestHandler_Create_DeviceViewDefaultTaskNameUsesEnglishLocale(t *testing.T)
 	assert.Contains(t, repo.created.TaskName, "KPI_Export_Device_Performance_View_")
 	assert.NotContains(t, repo.created.TaskName, "仪表盘")
 	assert.NotContains(t, repo.created.TaskName, "设备性能查看")
+}
+
+func TestDefaultTaskName_NewAdhocResultSourcesUseLocaleLabels(t *testing.T) {
+	assert.Contains(t, defaultTaskName("", SourcePMDashboard, appcontext.LocaleZH), "KPI导出_性能仪表盘_")
+	assert.Contains(t, defaultTaskName("", SourceAdhocResult, appcontext.LocaleZH), "KPI导出_自定义聚合任务_")
+	assert.Contains(t, defaultTaskName("", SourcePMDashboard, appcontext.LocaleEN), "KPI_Export_Performance_Dashboard_")
+	assert.Contains(t, defaultTaskName("", SourceAdhocResult, appcontext.LocaleEN), "KPI_Export_Adhoc_Aggregation_Task_")
 }
 
 func TestHandler_Create_RejectsTooManyExportDeviceSNs(t *testing.T) {

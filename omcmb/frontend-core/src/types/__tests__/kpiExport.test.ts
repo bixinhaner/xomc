@@ -43,14 +43,14 @@ describe('mapBackendKpiExportTask', () => {
     const b = {
       id: 'task-2',
       task_name: 'pending-task',
-      source_type: 'adhoc',
+      source_type: 'adhoc_result',
       format: 'csv',
       status: 'pending',
       create_user: 'op',
       created_at: '2026-06-04T11:00:00Z',
     } as BackendKpiExportTask;
     const t = mapBackendKpiExportTask(b);
-    expect(t.sourceType).toBe('adhoc');
+    expect(t.sourceType).toBe('adhoc_result');
     expect(t.params).toEqual({});
     expect(t.rowCount).toBe(0);
     expect(t.fileSize).toBe(0);

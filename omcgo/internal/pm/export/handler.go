@@ -85,7 +85,7 @@ func (h *Handler) SetObjectClient(c *minio.Client) {
 	h.objectClient = c
 }
 
-// SetAdhocTaskReader 注入 adhoc 任务读取器，用于校验 source_type=adhoc 的导出权限。
+// SetAdhocTaskReader 注入 adhoc 任务读取器，用于校验 adhoc 结果类导出的权限。
 func (h *Handler) SetAdhocTaskReader(r AdhocTaskReader) {
 	if h == nil {
 		return
@@ -118,7 +118,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 // ── 请求/响应 DTO ─────────────────────────────────────────────────────────
 
 type createRequestDTO struct {
-	SourceType string          `json:"source_type" binding:"required,oneof=dashboard device_view kpi_query adhoc"`
+	SourceType string          `json:"source_type" binding:"required,oneof=dashboard device_view kpi_query pm_dashboard adhoc_result"`
 	Params     json.RawMessage `json:"params"`
 	TaskName   string          `json:"task_name"`
 }
@@ -184,7 +184,7 @@ func (h *Handler) Create(c *gin.Context) {
 			return
 		}
 	}
-	if SourceType(req.SourceType) == SourceAdhoc {
+	if SourceType(req.SourceType).usesAdhocResultExport() {
 		if _, err := h.canAccessAdhocExport(c, params); err != nil {
 			h.respondAdhocExportAccessError(c, err)
 			return
@@ -216,7 +216,7 @@ func requiresDashboardExportLimit(source SourceType) bool {
 }
 
 func (h *Handler) canAccessExportTask(c *gin.Context, task *Task) (bool, error) {
-	if task == nil || task.SourceType != SourceAdhoc {
+	if task == nil || !task.SourceType.usesAdhocResultExport() {
 		return true, nil
 	}
 	return h.canAccessAdhocExport(c, task.Params)
@@ -532,8 +532,10 @@ func defaultTaskName(name string, source SourceType, locale appcontext.Locale) s
 			label = "Device_Performance_View"
 		} else if source == SourceKpiQuery {
 			label = "KPI_Query"
-		} else if source == SourceAdhoc {
-			label = "Result"
+		} else if source == SourcePMDashboard {
+			label = "Performance_Dashboard"
+		} else if source == SourceAdhocResult {
+			label = "Adhoc_Aggregation_Task"
 		}
 		return "KPI_Export_" + label + "_" + time.Now().Format("20060102_150405")
 	}
@@ -543,8 +545,10 @@ func defaultTaskName(name string, source SourceType, locale appcontext.Locale) s
 		label = "设备性能查看"
 	} else if source == SourceKpiQuery {
 		label = "指标查询"
-	} else if source == SourceAdhoc {
-		label = "任务结果"
+	} else if source == SourcePMDashboard {
+		label = "性能仪表盘"
+	} else if source == SourceAdhocResult {
+		label = "自定义聚合任务"
 	}
 
 	return "KPI导出_" + label + "_" + time.Now().Format("20060102_150405")

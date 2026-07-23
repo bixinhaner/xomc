@@ -230,35 +230,39 @@ func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, []Wide
 	case SourceKpiQuery:
 		return r.buildDashboardLikeSource(ctx, task, loc, kpiQueryLayout)
 
-	case SourceAdhoc:
-		taskID, startTime, endTime, err := parseAdhocParams(task.Params)
-		if err != nil {
-			return nil, nil, csvLayout{}, err
-		}
-		// 先查任务聚合维度、圈选设备数和配置指标集：决定首列表头 / 对象名解析口径，
-		// 并确保全量落库模式下导出仍只包含任务配置的 N 个指标。
-		// pm_tasks 在主库（PgPool），用 taskMetaDB 读；adhoc 结果表查询走 adhocDB（TsPool）。
-		meta, derr := loadAdhocTaskMeta(ctx, r.taskMetaDB, taskID)
-		if derr != nil {
-			return nil, nil, csvLayout{}, derr
-		}
-		keys, kerr := discoverAdhocColumns(ctx, r.adhocDB, taskID, meta.metricPaths, startTime, endTime)
-		if kerr != nil {
-			return nil, nil, csvLayout{}, kerr
-		}
-		cols := newNameResolver(r.adhocDB, loc).resolveColumns(ctx, keys)
-		layout := csvLayout{
-			FirstColHeader:                adhocFirstColHeader(meta.dimension, loc),
-			Locale:                        loc,
-			IncludeTechnology:             meta.dimension == "device_group", // 设备组维度按制式分行，导出补「制式」列（与页面表格一致）
-			IncludeCell:                   adhocIncludesCell(meta.dimension),
-			MissingMetricValuePlaceholder: missingMetricValuePlaceholder,
-		}
-		return newAdhocSource(r.adhocDB, taskID, meta.metricPaths, startTime, endTime, meta.dimension, meta.deviceCount, loc), cols, layout, nil
+	case SourcePMDashboard, SourceAdhocResult:
+		return r.buildAdhocResultSource(ctx, task, loc)
 
 	default:
 		return nil, nil, csvLayout{}, fmt.Errorf("export runner: unsupported source_type %q", task.SourceType)
 	}
+}
+
+func (r *Runner) buildAdhocResultSource(ctx context.Context, task *Task, loc appcontext.Locale) (RowSource, []WideColumn, csvLayout, error) {
+	taskID, startTime, endTime, err := parseAdhocParams(task.Params)
+	if err != nil {
+		return nil, nil, csvLayout{}, err
+	}
+	// 先查任务聚合维度、圈选设备数和配置指标集：决定首列表头 / 对象名解析口径，
+	// 并确保全量落库模式下导出仍只包含任务配置的 N 个指标。
+	// pm_tasks 在主库（PgPool），用 taskMetaDB 读；adhoc 结果表查询走 adhocDB（TsPool）。
+	meta, derr := loadAdhocTaskMeta(ctx, r.taskMetaDB, taskID)
+	if derr != nil {
+		return nil, nil, csvLayout{}, derr
+	}
+	keys, kerr := discoverAdhocColumns(ctx, r.adhocDB, taskID, meta.metricPaths, startTime, endTime)
+	if kerr != nil {
+		return nil, nil, csvLayout{}, kerr
+	}
+	cols := newNameResolver(r.adhocDB, loc).resolveColumns(ctx, keys)
+	layout := csvLayout{
+		FirstColHeader:                adhocFirstColHeader(meta.dimension, loc),
+		Locale:                        loc,
+		IncludeTechnology:             meta.dimension == "device_group", // 设备组维度按制式分行，导出补「制式」列（与页面表格一致）
+		IncludeCell:                   adhocIncludesCell(meta.dimension),
+		MissingMetricValuePlaceholder: missingMetricValuePlaceholder,
+	}
+	return newAdhocSource(r.adhocDB, taskID, meta.metricPaths, startTime, endTime, meta.dimension, meta.deviceCount, loc), cols, layout, nil
 }
 
 func (r *Runner) buildDashboardLikeSource(ctx context.Context, task *Task, loc appcontext.Locale, layout csvLayout) (RowSource, []WideColumn, csvLayout, error) {

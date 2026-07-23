@@ -21,19 +21,29 @@ import (
 //   - dashboard：仪表盘曲线导出（带当前筛选，全量不受 5000 行上限约束）
 //   - device_view：设备性能查看导出（复用 dashboard-like 设备维度取数）
 //   - kpi_query：指标查询页导出（复用 dashboard 取数，CSV 固定列贴近查询页表格）
-//   - adhoc：adhoc 聚合任务结果导出
+//   - pm_dashboard：性能仪表盘中的 adhoc 结果面板导出
+//   - adhoc_result：自定义聚合任务结果导出
 type SourceType string
 
 const (
-	SourceDashboard  SourceType = "dashboard"
-	SourceDeviceView SourceType = "device_view"
-	SourceKpiQuery   SourceType = "kpi_query"
-	SourceAdhoc      SourceType = "adhoc"
+	SourceDashboard   SourceType = "dashboard"
+	SourceDeviceView  SourceType = "device_view"
+	SourceKpiQuery    SourceType = "kpi_query"
+	SourcePMDashboard SourceType = "pm_dashboard"
+	SourceAdhocResult SourceType = "adhoc_result"
 )
 
 // Valid 校验来源是否受支持。
 func (s SourceType) Valid() bool {
-	return s == SourceDashboard || s == SourceDeviceView || s == SourceKpiQuery || s == SourceAdhoc
+	return s == SourceDashboard ||
+		s == SourceDeviceView ||
+		s == SourceKpiQuery ||
+		s == SourcePMDashboard ||
+		s == SourceAdhocResult
+}
+
+func (s SourceType) usesAdhocResultExport() bool {
+	return s == SourcePMDashboard || s == SourceAdhocResult
 }
 
 // Status 导出任务生命周期状态。

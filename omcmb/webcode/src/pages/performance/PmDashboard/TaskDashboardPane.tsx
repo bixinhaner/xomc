@@ -207,7 +207,7 @@ export default function TaskDashboardPane({ taskId }: Props) {
     chartLocale,
   ]);
 
-  // ── 导出（T4 adhoc 来源）：带 task_id + 当前筛选条件 POST 建任务 ──────────
+  // ── 导出：性能仪表盘任务图表来源，复用 adhoc 结果参数和后端 CSV 链路 ──────────
   const createExport = useCreateKpiExport();
   const handleExport = () => {
     // #599：导出与出图同口径——用提交态的筛选快照（未出图时用当前 filter）。
@@ -226,10 +226,11 @@ export default function TaskDashboardPane({ taskId }: Props) {
     if (hr.length > 0 && hr.length < 24) exportParams.hours = hr;
     createExport.mutate(
       {
-        sourceType: 'adhoc',
+        sourceType: 'pm_dashboard',
         params: exportParams,
-        taskName: defaultExportTaskName('adhoc', new Date(), {
-          locale: intl.locale,
+        taskName: defaultExportTaskName('pm_dashboard', new Date(), {
+          prefixLabel: intl.formatMessage({ id: 'kpiExport.fileName.prefix' }),
+          sourceLabel: intl.formatMessage({ id: 'kpiExport.source.pmDashboard' }),
           subjectName: taskQuery.data?.name,
         }),
       },

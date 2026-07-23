@@ -5725,7 +5725,7 @@ CREATE TABLE public.pm_kpi_export_tasks (
     started_at timestamp with time zone,
     finished_at timestamp with time zone,
     expire_at timestamp with time zone,
-    CONSTRAINT pm_kpi_export_tasks_source_type_chk CHECK ((source_type = ANY (ARRAY['dashboard'::text, 'device_view'::text, 'kpi_query'::text, 'adhoc'::text]))),
+    CONSTRAINT pm_kpi_export_tasks_source_type_chk CHECK ((source_type = ANY (ARRAY['dashboard'::text, 'device_view'::text, 'kpi_query'::text, 'pm_dashboard'::text, 'adhoc_result'::text]))),
     CONSTRAINT pm_kpi_export_tasks_status_chk CHECK ((status = ANY (ARRAY['pending'::text, 'running'::text, 'succeeded'::text, 'failed'::text])))
 );
 
