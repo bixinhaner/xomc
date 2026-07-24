@@ -63,6 +63,52 @@ type PgQuerier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
+// aggregateWorkMem 是 AggregateCounters/AggregateDeviceGroup 这类大 GROUP BY 聚合
+// 语句临时调大的 work_mem，只在该语句自己的事务内生效（SET LOCAL），不影响其余连接/
+// 查询——避免像调大全局默认值那样被 max_connections 放大成 OOM 风险（教训见
+// docs/operations/OMC内存分配与容量规划-20260611.md 的 "work_mem × 活跃连接" 上界）。
+//
+// 2026-07-23 omc78 压测实测：20000设备规模下，1小时窗口的小时聚合要 HashAggregate
+// 约4500万行，16MB 默认 work_mem 下落盘 512 路分区、跑了 2+ 小时不返回（wait_event
+// 持续 IO/DataFileRead）；同一查询用 512MB 实测降到 16 路分区，显著加速。更大的
+// work_mem 边际收益递减（完全消除落盘在此数据量下需要 GB 级、不现实），512MB 是
+// 兼顾效果与安全（事务级隔离，不随设备规模乘以连接数放大）的折中值。
+const aggregateWorkMem = "512MB"
+
+// txBeginner 是 a.db 的可选能力：真实 *pgxpool.Pool 天然实现 Begin；单测用的简单
+// stub 不需要实现，execAggregateSQL 会自动退回不加 SET LOCAL 的普通 Exec（行为与
+// 改动前一致，无需改造现有测试 stub）。
+type txBeginner interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+}
+
+// execAggregateSQL 在独立事务内执行大聚合 SQL，事务开始时先 SET LOCAL work_mem
+// 放大到 aggregateWorkMem，减少大 GROUP BY 的落盘分区数（见 aggregateWorkMem 注释）。
+// a.db 不支持开事务时优雅退回普通 Exec。
+func (a *Aggregator) execAggregateSQL(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	beginner, ok := a.db.(txBeginner)
+	if !ok {
+		return a.db.Exec(ctx, sql, args...)
+	}
+	tx, err := beginner.Begin(ctx)
+	if err != nil {
+		return pgconn.CommandTag{}, fmt.Errorf("begin aggregate tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL work_mem = '%s'", aggregateWorkMem)); err != nil {
+		return pgconn.CommandTag{}, fmt.Errorf("set local work_mem: %w", err)
+	}
+	tag, err := tx.Exec(ctx, sql, args...)
+	if err != nil {
+		return pgconn.CommandTag{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return pgconn.CommandTag{}, fmt.Errorf("commit aggregate tx: %w", err)
+	}
+	return tag, nil
+}
+
 // Aggregator 是 G5 聚合主入口；线程安全，可被多个 asyncjob runner 共享。
 //
 // 双库说明（KPI/时序库物理分离，#532 P2）：
@@ -142,7 +188,7 @@ func (a *Aggregator) AggregateCounters(ctx context.Context, source, target strin
 		return 0, err
 	}
 	sql, args := buildCountersSQLWithNumberProcess(source, target, w, numberProcess)
-	tag, err := a.db.Exec(ctx, sql, args...)
+	tag, err := a.execAggregateSQL(ctx, sql, args...)
 	if err != nil {
 		return 0, fmt.Errorf("aggregator.AggregateCounters %s→%s: %w", source, target, err)
 	}
