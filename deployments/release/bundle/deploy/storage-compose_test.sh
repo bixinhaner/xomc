@@ -44,6 +44,11 @@ contains "PostgreSQL 默认 10 核" 'cpus: "${POSTGRES_CPUS:-10}"' "$RELEASE_COM
 contains "TimescaleDB 默认 16 核" 'cpus: "${TSDB_CPUS:-16}"' "$RELEASE_COMPOSE"
 contains "worker 默认 8 核" 'cpus: "${WORKER_CPUS:-8}"' "$RELEASE_APP_COMPOSE"
 
+echo "── PM 小时聚合生产旋钮 ──"
+contains "release worker 透传小时批次" 'PM_HOURLY_BATCH_DEVICES: "${PM_HOURLY_BATCH_DEVICES:-500}"' "$RELEASE_APP_COMPOSE"
+contains "release worker 透传迟到窗口" 'PM_LATE_DATA_WINDOW: "${PM_LATE_DATA_WINDOW:-168h}"' "$RELEASE_APP_COMPOSE"
+contains "开发 worker 默认 500 台/批" 'PM_HOURLY_BATCH_DEVICES: "${PM_HOURLY_BATCH_DEVICES:-500}"' "$DEV_COMPOSE"
+
 echo "── release .env 模板和升级继承 ──"
 for key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH; do
   contains "$key 模板" "$key=" "$BUILD"

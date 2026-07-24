@@ -792,7 +792,8 @@ curl -fsS http://localhost:8081/healthz
 `pm_measurement_anchors` 和不可变指标集在查询时恢复。小时汇总按整桶版本发布：
 构建中的版本不可见，全部设备批次完成后一次切换为 active。
 
-- `PM_HOURLY_BATCH_DEVICES`：每个小时批次的设备数，默认 `200`。
+- `PM_HOURLY_BATCH_DEVICES`：每个小时批次的设备数，默认 `500`；该值已按 10000
+  基站压测下“一小时内完成”和 worker 1 GiB 内存限制联合校准。
 - `PM_LATE_DATA_WINDOW`：迟到数据与压缩安全窗口，默认 `168h`，不改变原 7 天压缩等待。
 - PM 上传背压以 MinIO 所在文件系统的已用空间加“已接收但尚未物化”的 PM 文件预计
   入库量计算；同文件系统上的 TSDB 临时文件、WAL 和文件预分配已包含在实际已用空间，

@@ -90,10 +90,10 @@ func TestVersionedHourlyDeviceBatchCount(t *testing.T) {
 }
 
 func TestParseHourlyBatchDevices(t *testing.T) {
-	assert.Equal(t, 200, ParseHourlyBatchDevices(""))
+	assert.Equal(t, 500, ParseHourlyBatchDevices(""))
 	assert.Equal(t, 350, ParseHourlyBatchDevices("350"))
-	assert.Equal(t, 200, ParseHourlyBatchDevices("0"))
-	assert.Equal(t, 200, ParseHourlyBatchDevices("invalid"))
+	assert.Equal(t, 500, ParseHourlyBatchDevices("0"))
+	assert.Equal(t, 500, ParseHourlyBatchDevices("invalid"))
 }
 
 func TestVersionedHourlyFormulaDependencies(t *testing.T) {

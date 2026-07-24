@@ -284,6 +284,9 @@ services:
       # 缺省 off→921MiB(≈0.9×1024m)。
       GOMEMLIMIT: "${WORKER_GOMEMLIMIT:-921MiB}"
       GOMAXPROCS: "${WORKER_GOMAXPROCS:-}"
+      # 稀疏 PM 小时汇总：500 台/批来自 10000 基站现场吞吐与 1 GiB worker 内存联合验收。
+      PM_HOURLY_BATCH_DEVICES: "${PM_HOURLY_BATCH_DEVICES:-500}"
+      PM_LATE_DATA_WINDOW: "${PM_LATE_DATA_WINDOW:-168h}"
       # 配置凭据单一真值源 = deploy/.env；worker.prod.yaml 用 ${VAR} 引用，Load() 解析前展开。
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}

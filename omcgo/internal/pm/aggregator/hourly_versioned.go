@@ -19,7 +19,7 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
-const DefaultHourlyBatchDevices = 200
+const DefaultHourlyBatchDevices = 500
 
 // ParseHourlyBatchDevices validates PM_HOURLY_BATCH_DEVICES and returns the
 // conservative default for missing, invalid, or non-positive values.
