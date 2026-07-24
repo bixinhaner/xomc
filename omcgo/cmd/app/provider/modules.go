@@ -1794,6 +1794,132 @@ func initMiscModules(c *Container) error {
 		}
 		return mr.Product.ParamModelID, nil
 	})
+	mmlConsoleSvc.SetDeviceSupportedPathsResolver(func(ctx context.Context, deviceKey string) (*mml.SupportedSet, error) {
+		dev, err := resolveDeviceByKey(ctx, c, deviceKey)
+		if err != nil {
+			return nil, fmt.Errorf("resolve device %q: %w", deviceKey, err)
+		}
+		if dev == nil {
+			return &mml.SupportedSet{ProductResolved: false, Paths: map[string]struct{}{}}, nil
+		}
+
+		var productID uuid.UUID
+		var paramModelID *uuid.UUID
+		if dev.ProductID != nil {
+			p, err := c.ProductRegistry.GetProductByID(ctx, *dev.ProductID)
+			if err != nil {
+				return nil, fmt.Errorf("get product %s for device %q: %w", dev.ProductID, deviceKey, err)
+			}
+			if p != nil {
+				productID = p.ID
+				paramModelID = p.ParamModelID
+			}
+		}
+		if productID == uuid.Nil {
+			if dev.ProductClass == "" {
+				return &mml.SupportedSet{ProductResolved: false, Paths: map[string]struct{}{}}, nil
+			}
+			mr, err := c.ProductRegistry.MatchProductClass(ctx, dev.ProductClass)
+			if errors.Is(err, product.ErrOrphan) {
+				return &mml.SupportedSet{
+					ProductClass:    dev.ProductClass,
+					ProductResolved: false,
+					Paths:           map[string]struct{}{},
+				}, nil
+			}
+			if errors.Is(err, product.ErrInactiveParamModel) {
+				if mr != nil && mr.Product != nil {
+					productID = mr.Product.ID
+					paramModelID = mr.Product.ParamModelID
+				}
+				var pidPtr *uuid.UUID
+				if productID != uuid.Nil {
+					pid := productID
+					pidPtr = &pid
+				}
+				return &mml.SupportedSet{
+					ProductClass:    dev.ProductClass,
+					ProductID:       pidPtr,
+					ParamModelID:    paramModelID,
+					ProductResolved: true,
+					Paths:           map[string]struct{}{},
+				}, nil
+			}
+			if err != nil {
+				return nil, fmt.Errorf("match product_class %q for device %q: %w", dev.ProductClass, deviceKey, err)
+			}
+			if mr == nil || mr.Product == nil {
+				return &mml.SupportedSet{ProductResolved: false, Paths: map[string]struct{}{}}, nil
+			}
+			productID = mr.Product.ID
+			paramModelID = mr.Product.ParamModelID
+		}
+		if paramModelID == nil {
+			pid := productID
+			return &mml.SupportedSet{
+				ProductClass:    dev.ProductClass,
+				ProductID:       &pid,
+				ProductResolved: false,
+				Paths:           map[string]struct{}{},
+			}, nil
+		}
+
+		set, err := c.ParamRegistry.GetByProduct(ctx, productID, dev.FirmwareVersion)
+		if err != nil {
+			if errors.Is(err, parammodel.ErrNoMapping) ||
+				errors.Is(err, parammodel.ErrNoParamModel) ||
+				errors.Is(err, parammodel.ErrInactiveParamModel) {
+				pid := productID
+				pmID := *paramModelID
+				return &mml.SupportedSet{
+					ProductClass:    dev.ProductClass,
+					ProductID:       &pid,
+					ParamModelID:    &pmID,
+					ProductResolved: true,
+					Paths:           map[string]struct{}{},
+				}, nil
+			}
+			return nil, fmt.Errorf("get product %s paths for device %q @ firmware %q: %w", productID, deviceKey, dev.FirmwareVersion, err)
+		}
+
+		paths := make(map[string]struct{}, len(set.Mappings))
+		for _, m := range set.Mappings {
+			if m.StandardPath != "" && m.IsActive && m.IsSupported {
+				paths[m.StandardPath] = struct{}{}
+			}
+		}
+		rows, err := c.PgPool.Query(ctx, `
+SELECT DISTINCT regexp_replace(parameter_path::text, '\.[0-9]+\.', '.{i}.', 'g') AS standard_path
+  FROM device_parameters
+ WHERE device_id = $1`, dev.ID)
+		if err != nil {
+			return nil, fmt.Errorf("list observed parameter paths for device %q: %w", deviceKey, err)
+		}
+		for rows.Next() {
+			var path string
+			if err := rows.Scan(&path); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan observed parameter path for device %q: %w", deviceKey, err)
+			}
+			if path != "" {
+				paths[path] = struct{}{}
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("iterate observed parameter paths for device %q: %w", deviceKey, err)
+		}
+		rows.Close()
+		pid := productID
+		pmID := set.ParamModelID
+		return &mml.SupportedSet{
+			ProductClass:    dev.ProductClass,
+			ProductID:       &pid,
+			ParamModelID:    &pmID,
+			ProductResolved: true,
+			Paths:           paths,
+		}, nil
+	})
 
 	// 产品不支持 path 自学习表（migration 000029）：MML path 不支持类故障时按 product_id 录入，
 	// 前端「选择命令 / 配置参数」据此按读/写过滤。deviceSN → product_id 复用 resolveDeviceByKey + ProductRegistry。

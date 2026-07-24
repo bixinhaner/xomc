@@ -128,6 +128,33 @@ func TestBaiBNQGNBNameIsWritableNRCommonPath(t *testing.T) {
 	t.Fatalf("expected BaiBNQ.xml to define writable gNBName mapping at %s", path)
 }
 
+func TestBaiBNQTopLevelDeviceInfoUsesStandardPaths(t *testing.T) {
+	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BaiBNQ.xml")
+	body, err := os.ReadFile(xmlPath)
+	require.NoError(t, err)
+
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal(body, &doc))
+
+	want := map[string]string{
+		"Device.DeviceInfo.HardwareVersion": "Device.DeviceInfo.HardwareVersion",
+		"Device.DeviceInfo.ModelName":       "Device.DeviceInfo.ModelName",
+		"Device.DeviceInfo.SoftwareVersion": "Device.DeviceInfo.SoftwareVersion",
+		"Device.DeviceInfo.UpTime":          "Device.DeviceInfo.UpTime",
+	}
+	got := make(map[string]string, len(want))
+	for _, param := range doc.Params {
+		if _, ok := want[param.Name]; ok {
+			got[param.Name] = param.StandardPath
+		}
+	}
+
+	for privatePath, standardPath := range want {
+		require.Contains(t, got, privatePath, "expected BaiBNQ.xml to define %s", privatePath)
+		assert.Equal(t, standardPath, got[privatePath])
+	}
+}
+
 func TestBaiBNQNguBindInterfaceAndFallbackAreWritable(t *testing.T) {
 	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BaiBNQ.xml")
 	body, err := os.ReadFile(xmlPath)

@@ -25552,6 +25552,54 @@ WHERE c.command_code IN (
     'MOD MML350_INTERNETGATEWAYDEVICE__TIME'
 );
 
+-- BaiBNQ top-level DeviceInfo paths must use the standard TR-181 paths.
+-- Older seed/XML imports mapped these leaves to legacy *_OLD aliases, which
+-- made device-filtered MML command selection hide normal DeviceInfo fields.
+WITH baibnq AS (
+    SELECT id
+      FROM public.param_models
+     WHERE name = 'BaiBNQ'
+),
+fixes(private_path, standard_path, data_type) AS (
+    VALUES
+        ('Device.DeviceInfo.HardwareVersion', 'Device.DeviceInfo.HardwareVersion', 'STRING'),
+        ('Device.DeviceInfo.ModelName',       'Device.DeviceInfo.ModelName',       'STRING'),
+        ('Device.DeviceInfo.SoftwareVersion', 'Device.DeviceInfo.SoftwareVersion', 'STRING'),
+        ('Device.DeviceInfo.UpTime',          'Device.DeviceInfo.UpTime',          'STRING')
+)
+UPDATE public.param_mappings pm
+   SET standard_path = fixes.standard_path,
+       data_type = fixes.data_type,
+       is_active = true,
+       is_supported = true,
+       updated_at = now()
+  FROM baibnq, fixes
+ WHERE pm.param_model_id = baibnq.id
+   AND pm.private_path = fixes.private_path
+   AND pm.source = 'builtin';
+
+WITH baibnq_products AS (
+    SELECT id
+      FROM public.products
+     WHERE param_model_id = (SELECT id FROM public.param_models WHERE name = 'BaiBNQ')
+),
+fixes(private_path, standard_path, data_type) AS (
+    VALUES
+        ('Device.DeviceInfo.HardwareVersion', 'Device.DeviceInfo.HardwareVersion', 'STRING'),
+        ('Device.DeviceInfo.ModelName',       'Device.DeviceInfo.ModelName',       'STRING'),
+        ('Device.DeviceInfo.SoftwareVersion', 'Device.DeviceInfo.SoftwareVersion', 'STRING'),
+        ('Device.DeviceInfo.UpTime',          'Device.DeviceInfo.UpTime',          'STRING')
+)
+UPDATE public.discovered_param_mappings d
+   SET standard_path = fixes.standard_path,
+       data_type = fixes.data_type,
+       is_active = true,
+       is_supported = true,
+       updated_at = now()
+  FROM baibnq_products p, fixes
+ WHERE d.product_id = p.id
+   AND d.private_path = fixes.private_path;
+
 COMMIT;
 
 -- +goose Down
