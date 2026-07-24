@@ -646,8 +646,8 @@ func (c *PMCollector) filterByWhitelistWithAllow(ctx context.Context, deviceSN, 
 	if unknown > 0 {
 		if c.metrics != nil {
 			c.metrics.DiscoveredCountersTotal.WithLabelValues(carrier, technology, "whitelist_miss").Add(float64(unknown))
-			// 一个发布周期的兼容别名；与新指标同点递增，保证值严格一致。
-			c.metrics.DroppedCountersTotal.WithLabelValues(carrier, technology, "whitelist_miss").Add(float64(unknown))
+			// 一个发布周期的兼容别名由同一个 collector 从共享快照发出，
+			// 不能再单独 Add，否则会破坏严格别名语义。
 		}
 		c.logger.Info("preserved counters not in indicator library for dynamic registration",
 			zap.String("device_sn", deviceSN),

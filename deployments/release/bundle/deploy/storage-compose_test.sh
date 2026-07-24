@@ -7,6 +7,7 @@ RELEASE_COMPOSE="$RELEASE_DEPLOY/docker-compose.infra.yml"
 RELEASE_APP_COMPOSE="$RELEASE_DEPLOY/docker-compose.app.yml"
 RELEASE_MONITORING_COMPOSE="$RELEASE_DEPLOY/docker-compose.monitoring.yml"
 RELEASE_HEALTHCHECK="$RELEASE_DEPLOY/healthcheck.sh"
+MONITORING_PROFILE_LIB="$RELEASE_DEPLOY/monitoring-profile-lib.sh"
 DEV_COMPOSE="$REPO_ROOT/deployments/docker/docker-compose.yml"
 OTELCOL_CONFIG="$REPO_ROOT/deployments/monitoring/otelcol/config.yaml"
 OMC_ALERTS="$REPO_ROOT/deployments/monitoring/alerts/omc-rules.yml"
@@ -73,15 +74,21 @@ contains "ACS 请求体不落临时文件" 'proxy_request_buffering off;' "$NGIN
 contains "本地 ACS 请求体不落临时文件" 'proxy_request_buffering off;' "$NGINX_LOCAL"
 
 echo "── production tracing + monitoring profile ──"
+if bash "$RELEASE_DEPLOY/monitoring-profile_test.sh"; then
+  ok
+else
+  bad "monitoring profile executable regression"
+fi
 for config in "$APP_PROD_CONFIG" "$ACS_PROD_CONFIG" "$WORKER_PROD_CONFIG"; do
   contains "生产 tracing 已启用" 'enabled: true' "$config"
   contains "生产 tracing 指向随包 collector" 'endpoint: "otelcol:4317"' "$config"
 done
 contains "默认安装包含完整监控 compose" '[ "$SKIP_MONITORING" = 0 ] && COMPOSE_FILES+=( -f docker-compose.monitoring.yml )' "$INSTALL"
-contains "跳过监控时关闭 tracing" 'export OMCGO_TRACER_ENABLED=false' "$INSTALL"
-contains "服务控制跳过监控时关闭 tracing" 'export OMCGO_TRACER_ENABLED=false' "$SVC"
+contains "install 在 source 后应用监控 profile" 'monitoring_profile_apply_install "$ENV_FILE" "$SKIP_MONITORING"' "$INSTALL"
+contains "服务控制读取持久化监控 profile" 'monitoring_profile_apply_runtime ".env" "$SKIP_MONITORING"' "$SVC"
+contains "监控 profile 关闭 tracing" 'export OMCGO_TRACER_ENABLED=false' "$MONITORING_PROFILE_LIB"
 contains "业务容器 tracing 尊重配置与显式覆盖" 'OMCGO_TRACER_ENABLED: "${OMCGO_TRACER_ENABLED:-}"' "$RELEASE_APP_COMPOSE"
-contains "跳过监控时健康检查同步跳过" 'OMCGO_SKIP_MONITORING' "$RELEASE_HEALTHCHECK"
+contains "健康检查读取持久化监控 profile" 'monitoring_profile_apply_runtime "$DEPLOY_DIR/.env" "$SKIP_MONITORING"' "$RELEASE_HEALTHCHECK"
 contains "collector 启用 health_check extension" 'extensions: [health_check, zpages]' "$OTELCOL_CONFIG"
 contains "collector health 仅绑定宿主回环" '127.0.0.1:13133:13133' "$RELEASE_MONITORING_COMPOSE"
 contains "healthcheck 从 collector 外部探测" 'curl -fsS http://127.0.0.1:13133/' "$RELEASE_HEALTHCHECK"

@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/omcgo/omcgo/internal/core/appconfig"
 	coremodel "github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/software"
 )
@@ -540,10 +541,10 @@ func builtInTaskTypes() []TaskType {
 			FileType:               "10 <OUI> Configuration File",
 			FileTypeLabel:          "10 <OUI> Configuration File",
 			FileTypeEditable:       false,
-			URLTemplate:            "config_backup/{object_path}",
+			URLTemplate:            "config-backup/{object_path}",
 			TargetFileNameTemplate: "{file_name}",
 			FileNameTemplate:       "{file_name}",
-			TransportPath:          "/smallcell/FileDownloadService/config_backup/{object_path}",
+			TransportPath:          "/smallcell/FileDownloadService/config-backup/{object_path}",
 			LastEditor:             "system",
 			UpdatedAt:              now,
 			// 走 LogCollect 桶以便复用 ufte.loadAllTasks 的 typeSet 过滤，
@@ -811,6 +812,8 @@ func materializeTaskTypes(stored []TaskType) []TaskType {
 		item.StepChain = normalizeStringSlice(item.StepChain)
 		item.PlatformScope = normalizeStringSlice(item.PlatformScope)
 		item.Products = normalizeStringSlice(item.Products)
+		item.URLTemplate = appconfig.NormalizeConfigBackupReference(item.URLTemplate)
+		item.TransportPath = appconfig.NormalizeConfigBackupReference(item.TransportPath)
 		item.FirmwareFileType = normalizeTaskTypeFirmwareFileType(item.RPCType, item.FirmwareFileType, item.FileType)
 		if base, ok := defaultByCode[item.TypeCode]; ok {
 			item.BuiltIn = item.BuiltIn || base.BuiltIn

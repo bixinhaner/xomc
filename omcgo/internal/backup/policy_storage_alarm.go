@@ -17,7 +17,7 @@ type StorageThresholdAlarmPayload struct {
 	Severity         string `json:"severity"`   // "major" — disk fill = data-loss precursor
 	Identifier       string `json:"identifier"` // "backup_storage_threshold_exceeded"
 	Summary          string `json:"summary"`
-	BucketName       string `json:"bucket_name"` // "config_backup"
+	BucketName       string `json:"bucket_name"` // "config-backup"
 	UsedBytes        int64  `json:"used_bytes"`
 	CapacityBytes    int64  `json:"capacity_bytes"`
 	UsagePercent     int    `json:"usage_percent"`     // 0..N (may exceed 100 when over capacity)

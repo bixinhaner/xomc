@@ -69,11 +69,6 @@ done
 
 [ -z "$ACTION" ] && ACTION="status"
 
-# 与 install.sh 保持一致：未部署 collector 时强制使用 no-op tracer。
-if [ "$SKIP_MONITORING" = 1 ]; then
-  export OMCGO_TRACER_ENABLED=false
-fi
-
 # docker compose v2 / v1 兼容
 if docker compose version >/dev/null 2>&1; then
   COMPOSE="docker compose"
@@ -91,6 +86,15 @@ if [ -f "$SCRIPT_DIR/storage-paths-lib.sh" ]; then
 else
   die "缺 $SCRIPT_DIR/storage-paths-lib.sh"
 fi
+if [ -f "$SCRIPT_DIR/monitoring-profile-lib.sh" ]; then
+  . "$SCRIPT_DIR/monitoring-profile-lib.sh"
+else
+  die "缺 $SCRIPT_DIR/monitoring-profile-lib.sh"
+fi
+
+# 显式 flag 优先；无 flag 时读取 install.sh 持久化在 .env 的部署模式。
+monitoring_profile_apply_runtime ".env" "$SKIP_MONITORING" ||
+  die "无法读取 monitoring profile"
 
 COMPOSE_FILES=()
 [ -f docker-compose.infra.yml ] && COMPOSE_FILES+=( -f docker-compose.infra.yml )

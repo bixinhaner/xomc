@@ -72,6 +72,11 @@ if [ -f "$DEPLOY_DIR/storage-paths-lib.sh" ]; then
 else
   die "缺 $DEPLOY_DIR/storage-paths-lib.sh（有状态服务数据路径库，由 build-release.sh 随包发布）" 1
 fi
+if [ -f "$DEPLOY_DIR/monitoring-profile-lib.sh" ]; then
+  . "$DEPLOY_DIR/monitoring-profile-lib.sh"
+else
+  die "缺 $DEPLOY_DIR/monitoring-profile-lib.sh（监控部署模式状态库，由 build-release.sh 随包发布）" 1
+fi
 
 # 升级时 deploy/.env 里【运维自定义】的键 —— 跨版本继承,不被新包默认值覆盖。
 # 注：6 个密钥键虽仍在此列（升级时把上一版有效凭证带进新 .env，供 ensure_secrets 首迁导入），
@@ -154,14 +159,6 @@ while [ $# -gt 0 ]; do
     *)                 die "未知参数：$1（-h 查看用法）" ;;
   esac
 done
-
-# 生产默认拉起完整 monitoring profile，三个业务服务按 prod.yaml 启用 tracing。
-# 显式 --skip-monitoring 时 collector 不存在，强制覆盖为 false，让 Go 端保持
-# no-op tracer，避免持续连接不存在的 otelcol。
-if [ "$SKIP_MONITORING" = 1 ]; then
-  export OMCGO_TRACER_ENABLED=false
-  export OMCGO_SKIP_MONITORING=1
-fi
 
 [ "$(id -u)" = 0 ] || die "请以 root 执行（sudo bash $0 ...）"
 
@@ -598,6 +595,10 @@ ENV_FILE="$OMC_ROOT/current/deploy/.env"
 if [ -f "$ENV_FILE" ]; then
   set -a; source "$ENV_FILE"; set +a
 fi
+# 必须在 source .env 之后应用：旧 .env 可能显式写了 tracer=true。
+# 同时把安装 profile 持久化，供后续独立运行的 svc/healthcheck 使用。
+monitoring_profile_apply_install "$ENV_FILE" "$SKIP_MONITORING" ||
+  die "无法持久化 monitoring profile 到 $ENV_FILE" 1
 storage_prepare_configured_env_paths "$ENV_FILE" ||
   die "有状态服务数据路径校验/创建失败；请检查 $ENV_FILE 中五个 *_DATA_PATH" 1
 

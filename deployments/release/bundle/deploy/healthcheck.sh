@@ -26,6 +26,17 @@ set -u
 
 DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_PROJECT="${COMPOSE_PROJECT:-omcgo}"
+SKIP_MONITORING=0
+if [ -f "$DEPLOY_DIR/monitoring-profile-lib.sh" ]; then
+  . "$DEPLOY_DIR/monitoring-profile-lib.sh"
+else
+  echo "  [FAIL] 缺 $DEPLOY_DIR/monitoring-profile-lib.sh"
+  exit 1
+fi
+monitoring_profile_apply_runtime "$DEPLOY_DIR/.env" "$SKIP_MONITORING" || {
+  echo "  [FAIL] 无法读取 monitoring profile"
+  exit 1
+}
 
 # docker compose 命令
 if docker compose version >/dev/null 2>&1; then
@@ -39,9 +50,12 @@ fi
 
 # 组装 -f 参数（按文件存在情况）
 COMPOSE_FILES=()
-for f in docker-compose.infra.yml docker-compose.app.yml docker-compose.web.yml docker-compose.monitoring.yml; do
+for f in docker-compose.infra.yml docker-compose.app.yml docker-compose.web.yml; do
   [ -f "$DEPLOY_DIR/$f" ] && COMPOSE_FILES+=( -f "$DEPLOY_DIR/$f" )
 done
+if [ "$SKIP_MONITORING" = 0 ] && [ -f "$DEPLOY_DIR/docker-compose.monitoring.yml" ]; then
+  COMPOSE_FILES+=( -f "$DEPLOY_DIR/docker-compose.monitoring.yml" )
+fi
 DC=( $COMPOSE -p "$COMPOSE_PROJECT" "${COMPOSE_FILES[@]}" )
 
 ok=0; fail=0
@@ -78,7 +92,7 @@ if [ -f "$DEPLOY_DIR/docker-compose.web.yml" ]; then
   check "web 容器 running" container_running web
 fi
 
-if [ -f "$DEPLOY_DIR/docker-compose.monitoring.yml" ] && [ "${OMCGO_SKIP_MONITORING:-0}" != 1 ]; then
+if [ -f "$DEPLOY_DIR/docker-compose.monitoring.yml" ] && [ "$SKIP_MONITORING" = 0 ]; then
   echo "== docker compose 监控容器 =="
   for svc in prometheus alertmanager grafana loki tempo otelcol; do
     check "$svc 容器 running" container_running "$svc"

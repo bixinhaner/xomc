@@ -28,6 +28,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/core/appconfig"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	devtask "github.com/omcgo/omcgo/internal/task"
@@ -50,11 +51,11 @@ type TaskCreator interface {
 
 // CanonicalRestoreBucket is the physical S3/MinIO bucket used for
 // configuration backups. S3 bucket names cannot contain underscores.
-const CanonicalRestoreBucket = "config-backup"
+const CanonicalRestoreBucket = appconfig.ConfigBackupBucket
 
 // LegacyRestoreBucket is accepted only as a logical API/config compatibility
 // alias. It must be normalized before crossing any MinIO boundary.
-const LegacyRestoreBucket = "config_backup"
+const LegacyRestoreBucket = appconfig.LegacyConfigBackupBucket
 
 // MinIOStater abstracts the bucket/object existence check. *minio.Client
 // satisfies this via StatObject; tests inject a fake.
@@ -794,8 +795,5 @@ func validateRestorePath(bucket, objectPath string) error {
 }
 
 func normalizeRestoreBucket(bucket string) string {
-	if bucket == LegacyRestoreBucket {
-		return CanonicalRestoreBucket
-	}
-	return bucket
+	return appconfig.NormalizeConfigBackupBucket(bucket)
 }

@@ -320,3 +320,42 @@ func TestDownloadHandler_RuntimeTransferConfigOverride(t *testing.T) {
 	assert.Contains(t, body, "<Username></Username>")
 	assert.Contains(t, body, "<Password></Password>")
 }
+
+func TestDownloadHandler_NormalizesLegacyConfigBackupBucketInURL(t *testing.T) {
+	d := NewDispatcher(DispatcherConfig{
+		DownloadBaseURL: "https://gateway.example.com",
+		DownloadPath:    "/smallcell/FileDownloadService",
+	})
+	cmd := &Command{
+		Method: "Download",
+		Params: json.RawMessage(`{
+			"file_type": "3 Vendor Configuration File",
+			"url": "config_backup/backup/2026/07/24/SN001_CFG.xml"
+		}`),
+	}
+
+	result, err := d.BuildRequest(cmd, "cwmp-config-restore")
+
+	require.NoError(t, err)
+	body := string(result)
+	assert.Contains(t, body, "https://gateway.example.com/smallcell/FileDownloadService/config-backup/backup/2026/07/24/SN001_CFG.xml")
+	assert.NotContains(t, body, "FileDownloadService/config_backup/")
+}
+
+func TestDownloadHandler_NormalizesLegacyConfigBackupBucketInAbsoluteURL(t *testing.T) {
+	d := NewDispatcher()
+	cmd := &Command{
+		Method: "Download",
+		Params: json.RawMessage(`{
+			"file_type": "3 Vendor Configuration File",
+			"url": "https://gateway.example.com/smallcell/FileDownloadService/config_backup/backup/SN001_CFG.xml"
+		}`),
+	}
+
+	result, err := d.BuildRequest(cmd, "cwmp-config-restore")
+
+	require.NoError(t, err)
+	body := string(result)
+	assert.Contains(t, body, "https://gateway.example.com/smallcell/FileDownloadService/config-backup/backup/SN001_CFG.xml")
+	assert.NotContains(t, body, "FileDownloadService/config_backup/")
+}

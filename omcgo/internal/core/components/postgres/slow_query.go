@@ -126,9 +126,14 @@ func (t *SlowQueryTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data
 // TraceQueryEnd inspects the elapsed duration and emits a structured warning
 // plus a Prometheus counter increment when the threshold is exceeded.
 func (t *SlowQueryTracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
-	if errors.Is(data.Err, context.Canceled) || errors.Is(data.Err, context.DeadlineExceeded) ||
-		errors.Is(ctx.Err(), context.Canceled) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return
+	if data.Err != nil {
+		if errors.Is(data.Err, context.Canceled) || errors.Is(data.Err, context.DeadlineExceeded) {
+			return
+		}
+	} else {
+		if errors.Is(ctx.Err(), context.Canceled) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return
+		}
 	}
 	startTime, ok := ctx.Value(slowQueryStartKey{}).(time.Time)
 	if !ok {

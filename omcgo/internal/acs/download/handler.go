@@ -15,6 +15,7 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/omcgo/omcgo/internal/acs/transfercfg"
+	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/backup"
@@ -141,6 +142,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
 	}
+	bucket = appconfig.NormalizeConfigBackupBucket(bucket)
 
 	// Fetch object from MinIO
 	obj, err := h.minioClient.GetObject(r.Context(), bucket, objectPath, minio.GetObjectOptions{})

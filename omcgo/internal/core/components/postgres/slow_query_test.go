@@ -144,6 +144,22 @@ func TestSlowQueryTracer_RequestCancellationDoesNotCountOrWarn(t *testing.T) {
 	}
 }
 
+func TestSlowQueryTracer_RealQueryErrorWinsOverConcurrentContextCancellation(t *testing.T) {
+	tr, recorded, _ := newObservableTracer(t, 10*time.Millisecond)
+	const sql = "SELECT * FROM pm_metrics WHERE time >= $1"
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	ctx = fakeStartAndElapse(ctx, sql, 100*time.Millisecond)
+	queryErr := &pgconn.PgError{Code: "08006", Message: "connection failure"}
+
+	tr.TraceQueryEnd(ctx, nil, pgx.TraceQueryEndData{Err: queryErr})
+
+	require.Equal(t, 1, recorded.Len(), "real pg error must remain authoritative")
+	count := testutil.ToFloat64(tr.metrics.Total.WithLabelValues("pm_metrics", fingerprintSQL(sql)))
+	assert.Equal(t, float64(1), count)
+	assert.Equal(t, queryErr.Error(), recorded.All()[0].ContextMap()["error"])
+}
+
 func TestSlowQueryTracer_DefaultsApplied(t *testing.T) {
 	// Threshold <= 0 should fall back to DefaultSlowQueryThreshold.
 	tr := NewSlowQueryTracer(0, nil, nil)

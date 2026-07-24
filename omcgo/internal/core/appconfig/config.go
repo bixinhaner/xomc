@@ -920,6 +920,51 @@ type BucketConfig struct {
 	FileBundles string `mapstructure:"file_bundles"`
 }
 
+const (
+	// ConfigBackupBucket is the only physical S3/MinIO bucket name used for
+	// device configuration backups.
+	ConfigBackupBucket = "config-backup"
+	// LegacyConfigBackupBucket is accepted only at API/config boundaries.
+	LegacyConfigBackupBucket = "config_backup"
+)
+
+// NormalizeConfigBackupBucket converts the legacy logical compatibility name
+// before it reaches an S3/MinIO client. Other bucket names are left untouched.
+func NormalizeConfigBackupBucket(bucket string) string {
+	if bucket == LegacyConfigBackupBucket {
+		return ConfigBackupBucket
+	}
+	return bucket
+}
+
+// NormalizeConfigBackupReference normalizes a bucket-qualified object path or
+// download URL/path at an API/config boundary while leaving unrelated
+// references unchanged.
+func NormalizeConfigBackupReference(reference string) string {
+	if reference == LegacyConfigBackupBucket {
+		return ConfigBackupBucket
+	}
+	if strings.HasPrefix(reference, LegacyConfigBackupBucket+"/") {
+		return ConfigBackupBucket + strings.TrimPrefix(reference, LegacyConfigBackupBucket)
+	}
+	legacySegment := "/" + LegacyConfigBackupBucket + "/"
+	if strings.Contains(reference, legacySegment) {
+		return strings.Replace(reference, legacySegment, "/"+ConfigBackupBucket+"/", 1)
+	}
+	return reference
+}
+
+func normalizeLoadedConfigBackup(target interface{}) {
+	switch cfg := target.(type) {
+	case *AppConfig:
+		cfg.MinIO.Buckets.ConfigBackup = NormalizeConfigBackupBucket(cfg.MinIO.Buckets.ConfigBackup)
+	case *ACSConfig:
+		cfg.MinIO.Buckets.ConfigBackup = NormalizeConfigBackupBucket(cfg.MinIO.Buckets.ConfigBackup)
+	case *WorkerConfig:
+		cfg.MinIO.Buckets.ConfigBackup = NormalizeConfigBackupBucket(cfg.MinIO.Buckets.ConfigBackup)
+	}
+}
+
 // MetricsConfig 配置 Prometheus 指标暴露端口。
 // 各服务在此端口提供 /metrics 端点，供 Prometheus 采集。
 // 同一端口也提供 /healthz 健康检查接口（由 HealthChecker 驱动）。
@@ -1058,6 +1103,7 @@ func Load(path string, target interface{}) error {
 	if err := v.Unmarshal(target); err != nil {
 		return fmt.Errorf("unmarshal config: %w", err)
 	}
+	normalizeLoadedConfigBackup(target)
 
 	// Validate if target implements Validatable
 	if v, ok := target.(Validatable); ok {
@@ -1094,6 +1140,7 @@ func LoadWithEnvOverride(path string, target interface{}, envOverrides map[strin
 	if err := v.Unmarshal(target); err != nil {
 		return fmt.Errorf("unmarshal config: %w", err)
 	}
+	normalizeLoadedConfigBackup(target)
 
 	// Validate if target implements Validatable
 	if v, ok := target.(Validatable); ok {
