@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
+	"regexp"
 	"time"
 
 	"github.com/google/uuid"
@@ -249,23 +249,30 @@ func recoverFailedHourlyBuckets(
 	if horizon <= 0 {
 		horizon = DefaultLateDataWindow
 	}
-	jobs, err := repo.ListFailedNaturalBuckets(
-		ctx,
-		JobTypeHourly,
-		time.Now().Add(-horizon),
-		DefaultHourlyRecoveryScanLimit,
-	)
-	if err != nil {
-		return fmt.Errorf("discover failed hourly buckets: %w", err)
+	req := asyncjob.FailedBucketMaintenanceRequest{
+		JobType:       JobTypeHourly,
+		Since:         time.Now().Add(-horizon),
+		Limit:         DefaultHourlyRecoveryScanLimit,
+		MaxRecoveries: DefaultHourlyRecoveryMax,
+		Cooldown:      DefaultHourlyRecoveryCooldown,
+		AgedAfter:     DefaultHourlyRecoveryCooldown,
 	}
-	m.SetFailedBuckets(float64(len(jobs)))
+	m.SetFailedBuckets(0)
+	m.SetAgedFailedBuckets(0)
+	m.SetRecoveryExhaustedBuckets(0)
+	stats, err := repo.GetFailedBucketStats(ctx, req)
+	if err != nil {
+		return fmt.Errorf("sample failed hourly buckets: %w", err)
+	}
+	m.SetFailedBuckets(float64(stats.FailedCount))
+	m.SetAgedFailedBuckets(float64(stats.AgedCount))
+	m.SetRecoveryExhaustedBuckets(float64(stats.ExhaustedCount))
 
-	exhausted := 0
+	jobs, err := repo.ListRecoverableFailedNaturalBuckets(ctx, req)
+	if err != nil {
+		return fmt.Errorf("discover recoverable failed hourly buckets: %w", err)
+	}
 	for _, job := range jobs {
-		if job.RecoveryCount >= DefaultHourlyRecoveryMax {
-			exhausted++
-			continue
-		}
 		if !retriableFailedBucketMarker(job.ErrorMessage) ||
 			job.BucketStart == nil || job.BucketEnd == nil {
 			continue
@@ -307,13 +314,15 @@ func recoverFailedHourlyBuckets(
 			)
 		}
 	}
-	m.SetRecoveryExhaustedBuckets(float64(exhausted))
 	return nil
 }
 
+var retriableFailedBucketMarkerRE = regexp.MustCompile(
+	`(^|[^[:alnum:]])SQLSTATE (40P01|40001)([^[:alnum:]]|$)`,
+)
+
 func retriableFailedBucketMarker(message string) bool {
-	return strings.Contains(message, "SQLSTATE 40P01") ||
-		strings.Contains(message, "SQLSTATE 40001")
+	return retriableFailedBucketMarkerRE.MatchString(message)
 }
 
 func hourlyBucketRecoveryState(

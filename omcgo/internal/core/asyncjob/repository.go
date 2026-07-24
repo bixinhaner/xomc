@@ -58,6 +58,11 @@ func NewPgRepository(pool *pgxpool.Pool) *PgRepository {
 
 var _ Repository = (*PgRepository)(nil)
 
+const (
+	recoverableHourlyJobType = "pm_aggregate_hourly"
+	maxFailedBucketScanLimit = 500
+)
+
 func (r *PgRepository) Insert(ctx context.Context, req InsertRequest) (uuid.UUID, error) {
 	q, args, err := buildInsertSQL(req)
 	if err != nil {
@@ -125,7 +130,7 @@ func (r *PgRepository) RequeueRetriableFailedBucket(
 }
 
 func buildRequeueRetriableFailedBucketSQL(req FailedBucketRecoveryRequest) (string, []any, error) {
-	if req.JobType != "pm_aggregate_hourly" {
+	if req.JobType != recoverableHourlyJobType {
 		return "", nil, fmt.Errorf("recover failed bucket: unsupported job type %q", req.JobType)
 	}
 	if req.BucketStart.IsZero() ||
@@ -161,8 +166,7 @@ UPDATE async_jobs
    AND bucket_end <= NOW()
    AND status = 'failed'
    AND finished_at IS NOT NULL
-   AND (error_message LIKE '%SQLSTATE 40P01%'
-        OR error_message LIKE '%SQLSTATE 40001%')
+   AND error_message ~ '(^|[^[:alnum:]])SQLSTATE (40P01|40001)([^[:alnum:]]|$)'
    AND recovery_count < $5
    AND GREATEST(
            COALESCE(finished_at, '-infinity'::timestamptz),
@@ -179,38 +183,48 @@ RETURNING id`
 	}, nil
 }
 
-// ListFailedNaturalBuckets returns a bounded, recent set for maintenance. The
-// guarded recovery update remains the final authority because these rows may
-// change after this observational scan.
-func (r *PgRepository) ListFailedNaturalBuckets(
+// ListRecoverableFailedNaturalBuckets filters non-retriable, exhausted and
+// cooling-down rows before LIMIT so blocking terminal rows cannot starve newer
+// eligible buckets. The guarded update remains the final authority after scan.
+func (r *PgRepository) ListRecoverableFailedNaturalBuckets(
 	ctx context.Context,
-	jobType string,
-	since time.Time,
-	limit int,
+	req FailedBucketMaintenanceRequest,
 ) ([]Job, error) {
-	if limit <= 0 || limit > 500 {
-		limit = 500
+	if err := validateFailedBucketMaintenanceRequest(req); err != nil {
+		return nil, err
 	}
-	rows, err := r.pool.Query(ctx, buildListFailedNaturalBucketsSQL(), jobType, since, limit)
+	limit := req.Limit
+	if limit > maxFailedBucketScanLimit {
+		limit = maxFailedBucketScanLimit
+	}
+	rows, err := r.pool.Query(
+		ctx,
+		buildListRecoverableFailedNaturalBucketsSQL(),
+		req.JobType,
+		req.Since,
+		limit,
+		req.MaxRecoveries,
+		req.Cooldown.String(),
+	)
 	if err != nil {
-		return nil, fmt.Errorf("list failed natural hourly buckets: %w", err)
+		return nil, fmt.Errorf("list recoverable failed natural hourly buckets: %w", err)
 	}
 	defer rows.Close()
 	var jobs []Job
 	for rows.Next() {
 		job, err := scanJob(rows)
 		if err != nil {
-			return nil, fmt.Errorf("scan failed natural hourly bucket: %w", err)
+			return nil, fmt.Errorf("scan recoverable failed natural hourly bucket: %w", err)
 		}
 		jobs = append(jobs, *job)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate failed natural hourly buckets: %w", err)
+		return nil, fmt.Errorf("iterate recoverable failed natural hourly buckets: %w", err)
 	}
 	return jobs, nil
 }
 
-func buildListFailedNaturalBucketsSQL() string {
+func buildListRecoverableFailedNaturalBucketsSQL() string {
 	return fmt.Sprintf(`
 SELECT %s
   FROM async_jobs
@@ -221,8 +235,77 @@ SELECT %s
    AND bucket_start=date_trunc('hour', bucket_start)
    AND bucket_end=bucket_start+interval '1 hour'
    AND bucket_end <= NOW()
- ORDER BY bucket_start
+   AND finished_at IS NOT NULL
+   AND error_message ~ '(^|[^[:alnum:]])SQLSTATE (40P01|40001)([^[:alnum:]]|$)'
+   AND recovery_count < $4
+   AND GREATEST(
+           finished_at,
+           COALESCE(last_recovered_at, '-infinity'::timestamptz)
+       ) <= NOW() - $5::interval
+ ORDER BY bucket_start, id
  LIMIT $3`, joinJobCols())
+}
+
+// GetFailedBucketStats samples bounded failure health independently of the
+// eligible recovery LIMIT, so aged/exhausted alerts reflect all recent failures.
+func (r *PgRepository) GetFailedBucketStats(
+	ctx context.Context,
+	req FailedBucketMaintenanceRequest,
+) (FailedBucketStats, error) {
+	if err := validateFailedBucketMaintenanceRequest(req); err != nil {
+		return FailedBucketStats{}, err
+	}
+	var stats FailedBucketStats
+	err := r.pool.QueryRow(
+		ctx,
+		buildFailedBucketStatsSQL(),
+		req.JobType,
+		req.Since,
+		req.MaxRecoveries,
+		req.AgedAfter.String(),
+	).Scan(&stats.FailedCount, &stats.ExhaustedCount, &stats.AgedCount)
+	if err != nil {
+		return FailedBucketStats{}, fmt.Errorf("get failed natural hourly bucket stats: %w", err)
+	}
+	return stats, nil
+}
+
+func buildFailedBucketStatsSQL() string {
+	return `
+SELECT count(*)::int,
+       count(*) FILTER (WHERE recovery_count >= $3)::int,
+       count(*) FILTER (WHERE finished_at <= NOW() - $4::interval)::int
+  FROM async_jobs
+ WHERE job_type=$1
+   AND job_type='pm_aggregate_hourly'
+   AND status='failed'
+   AND bucket_start >= $2
+   AND bucket_start=date_trunc('hour', bucket_start)
+   AND bucket_end=bucket_start+interval '1 hour'
+   AND bucket_end <= NOW()
+   AND finished_at IS NOT NULL`
+}
+
+func validateFailedBucketMaintenanceRequest(req FailedBucketMaintenanceRequest) error {
+	if req.JobType != recoverableHourlyJobType {
+		return fmt.Errorf("maintain failed bucket: unsupported job type %q", req.JobType)
+	}
+	if req.Since.IsZero() {
+		return fmt.Errorf("maintain failed bucket: since must be set")
+	}
+	if req.Limit <= 0 {
+		return fmt.Errorf("maintain failed bucket: limit must be positive")
+	}
+	if req.MaxRecoveries <= 0 {
+		return fmt.Errorf("maintain failed bucket: max recoveries must be positive")
+	}
+	if req.Cooldown < 0 {
+		return fmt.Errorf("maintain failed bucket: cooldown must not be negative")
+	}
+	if req.AgedAfter <= 0 {
+		return fmt.Errorf("maintain failed bucket: aged-after must be positive")
+	}
+	return nil
 }
 
 // FindNaturalBucketJob resolves the current main-database job state for stale

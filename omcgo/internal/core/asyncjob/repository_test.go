@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,8 +75,9 @@ func TestBuildRequeueRetriableFailedBucketSQLIsAtomicAndBounded(t *testing.T) {
 	require.Contains(t, sql, "bucket_start = date_trunc('hour', bucket_start)")
 	require.Contains(t, sql, "bucket_end = bucket_start + interval '1 hour'")
 	require.Contains(t, sql, "bucket_end <= NOW()")
-	require.Contains(t, sql, "error_message LIKE '%SQLSTATE 40P01%'")
-	require.Contains(t, sql, "error_message LIKE '%SQLSTATE 40001%'")
+	require.Contains(t, sql, "error_message ~")
+	require.Contains(t, sql, "SQLSTATE (40P01|40001)")
+	require.NotContains(t, sql, "error_message LIKE")
 	require.Contains(t, sql, "recovery_count <")
 	require.Contains(t, sql, "GREATEST")
 	require.Contains(t, sql, "RETURNING id")
@@ -102,13 +104,26 @@ func TestBuildRequeueRetriableFailedBucketSQLRejectsNonHourlyWindows(t *testing.
 	}
 }
 
-func TestFailedBucketScanIsBoundedToRecentNaturalHourlyBuckets(t *testing.T) {
-	sql := buildListFailedNaturalBucketsSQL()
+func TestRecoverableFailedBucketScanFiltersBlockingRowsAndOrdersDeterministically(t *testing.T) {
+	sql := buildListRecoverableFailedNaturalBucketsSQL()
 	require.Contains(t, sql, "job_type=$1")
 	require.Contains(t, sql, "status='failed'")
 	require.Contains(t, sql, "bucket_start >= $2")
 	require.Contains(t, sql, "bucket_end=bucket_start+interval '1 hour'")
+	require.Contains(t, sql, "error_message ~")
+	require.Contains(t, sql, "recovery_count < $4")
+	require.Contains(t, sql, "NOW() - $5::interval")
+	require.Contains(t, sql, "ORDER BY bucket_start, id")
 	require.Contains(t, sql, "LIMIT $3")
+	require.Equal(t, 1, strings.Count(sql, "bucket_start >= $2"))
+}
+
+func TestFailedBucketStatsUsePersistedFailureAge(t *testing.T) {
+	sql := buildFailedBucketStatsSQL()
+	require.Contains(t, sql, "count(*) FILTER (WHERE finished_at <= NOW() - $4::interval)")
+	require.Contains(t, sql, "count(*) FILTER (WHERE recovery_count >= $3)")
+	require.Contains(t, sql, "bucket_start >= $2")
+	require.Contains(t, sql, "status='failed'")
 }
 
 func TestAsyncJobRecoveryMigrationMatchesFreshInstallSchema(t *testing.T) {
@@ -128,4 +143,8 @@ func TestAsyncJobRecoveryMigrationMatchesFreshInstallSchema(t *testing.T) {
 	require.Contains(t, string(incremental), "ADD COLUMN IF NOT EXISTS recovery_count")
 	require.Contains(t, string(incremental), "ADD COLUMN IF NOT EXISTS last_recovered_at")
 	require.Contains(t, string(incremental), "CREATE INDEX IF NOT EXISTS idx_async_jobs_hourly_failed_recovery")
+	require.Contains(t, string(incremental), "-- +goose Up")
+	require.Contains(t, string(incremental), "-- +goose Down")
+	require.Contains(t, string(incremental), "DROP INDEX IF EXISTS idx_async_jobs_hourly_failed_recovery")
+	require.Contains(t, string(incremental), "DROP COLUMN IF EXISTS recovery_count")
 }

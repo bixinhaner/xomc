@@ -87,6 +87,24 @@ type FailedBucketRecoveryRequest struct {
 	Cooldown      time.Duration
 }
 
+// FailedBucketMaintenanceRequest bounds recovery discovery and observability
+// to a recent horizon while applying the same budget/cooldown policy.
+type FailedBucketMaintenanceRequest struct {
+	JobType       string
+	Since         time.Time
+	Limit         int
+	MaxRecoveries int
+	Cooldown      time.Duration
+	AgedAfter     time.Duration
+}
+
+// FailedBucketStats is an aggregate over the bounded maintenance horizon.
+type FailedBucketStats struct {
+	FailedCount    int
+	ExhaustedCount int
+	AgedCount      int
+}
+
 // DefaultMaxAttempts 是 InsertRequest.MaxAttempts 未指定时的默认值。
 const DefaultMaxAttempts = 3
 

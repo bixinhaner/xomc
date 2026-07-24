@@ -335,8 +335,8 @@ groups:
             Action: 检查并发 PM 写入、长事务和数据库锁等待；必要时降低作业重叠。
 
       - alert: OMCPMHourlyFailedBucketStale
-        expr: omc_pm_hourly_failed_buckets > 0
-        for: 1h
+        expr: omc_pm_hourly_aged_failed_buckets > 0
+        for: 5m
         labels:
           severity: critical
           domain: omc
@@ -344,7 +344,7 @@ groups:
         annotations:
           summary: "PM 失败小时桶超过一个维护周期"
           description: |
-            最近窗口内至少一个自然小时聚合任务持续 failed 超过 1 小时。
+            最近窗口内至少一个自然小时聚合任务的 finished_at 已超过 1 小时。
             Impact: 对应小时没有可发布的新 active 版本，聚合水位可能停止推进。
             Action: 检查任务 error_message、原始 anchor 和恢复指标；永久错误需人工修复，
                     可重试 SQLSTATE 应由维护循环在冷却期后自动恢复。

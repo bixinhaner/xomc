@@ -29,7 +29,14 @@ type JobEnqueuer interface {
 // terminal jobs and preserves normal natural-bucket idempotency.
 type HourlyRecoveryRepository interface {
 	JobEnqueuer
-	ListFailedNaturalBuckets(ctx context.Context, jobType string, since time.Time, limit int) ([]asyncjob.Job, error)
+	ListRecoverableFailedNaturalBuckets(
+		ctx context.Context,
+		req asyncjob.FailedBucketMaintenanceRequest,
+	) ([]asyncjob.Job, error)
+	GetFailedBucketStats(
+		ctx context.Context,
+		req asyncjob.FailedBucketMaintenanceRequest,
+	) (asyncjob.FailedBucketStats, error)
 	FindNaturalBucketJob(ctx context.Context, jobType string, start, end time.Time) (*asyncjob.Job, bool, error)
 	RequeueRetriableFailedBucket(
 		ctx context.Context,

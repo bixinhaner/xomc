@@ -39,6 +39,7 @@ type Metrics struct {
 	RecoveryExhaustedBuckets prometheus.Gauge
 	StaleBuildingVersions    prometheus.Gauge
 	FailedBuckets            prometheus.Gauge
+	AgedFailedBuckets        prometheus.Gauge
 	FailedVersions           prometheus.Gauge
 	WatermarkLag             prometheus.Gauge
 
@@ -96,6 +97,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "omc_pm_hourly_failed_buckets",
 			Help: "Recent natural hourly PM jobs in failed state",
 		}),
+		AgedFailedBuckets: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "omc_pm_hourly_aged_failed_buckets",
+			Help: "Recent natural hourly PM jobs failed longer than one maintenance interval",
+		}),
 		FailedVersions: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "omc_pm_hourly_failed_versions",
 			Help: "Hourly PM bucket versions in failed state",
@@ -126,7 +131,8 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			m.Runs, m.Duration, m.RowsWritten, m.BucketLag, m.BatchDevices,
 			m.HourlyTxRetries, m.HourlyTxRetryExhausted,
 			m.HourlyRecoveries, m.RecoveryExhaustedBuckets,
-			m.StaleBuildingVersions, m.FailedBuckets, m.FailedVersions, m.WatermarkLag,
+			m.StaleBuildingVersions, m.FailedBuckets, m.AgedFailedBuckets,
+			m.FailedVersions, m.WatermarkLag,
 			m.DirtyBuckets, m.WatermarkTimestamp, m.TempBytes, m.SparseAmplification,
 		)
 	}
@@ -203,6 +209,12 @@ func (m *Metrics) SetStaleBuildingVersions(n float64) {
 func (m *Metrics) SetFailedBuckets(n float64) {
 	if m != nil {
 		m.FailedBuckets.Set(n)
+	}
+}
+
+func (m *Metrics) SetAgedFailedBuckets(n float64) {
+	if m != nil {
+		m.AgedFailedBuckets.Set(n)
 	}
 }
 

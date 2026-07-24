@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 )
@@ -270,6 +271,167 @@ UPDATE async_jobs
 	job, err := repo.GetByID(ctx, id)
 	require.NoError(t, err)
 	require.Equal(t, 1, job.RecoveryCount)
+}
+
+func TestPgRepository_RequeueRetriableFailedBucketRejectsNonCanonicalMarkers_WithPostgres(t *testing.T) {
+	dsn := os.Getenv("OMCGO_ASYNCJOB_TEST_DSN")
+	if dsn == "" {
+		t.Skip("set OMCGO_ASYNCJOB_TEST_DSN to run PostgreSQL repository behavior test")
+	}
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	defer pool.Close()
+	createAsyncJobRecoveryTestTable(t, ctx, pool)
+
+	repo := NewPgRepository(pool)
+	start := time.Now().UTC().Truncate(time.Hour).Add(-2 * time.Hour)
+	end := start.Add(time.Hour)
+	id, err := repo.Insert(ctx, InsertRequest{
+		JobType: "pm_aggregate_hourly", ScheduledAt: start,
+		BucketStart: &start, BucketEnd: &end,
+	})
+	require.NoError(t, err)
+	req := FailedBucketRecoveryRequest{
+		JobType: "pm_aggregate_hourly", BucketStart: start, BucketEnd: end,
+		MaxRecoveries: 3, Cooldown: time.Hour,
+	}
+	for _, message := range []string{
+		"serialization failure (SQLSTATE 40001X)",
+		"prosePrefixSQLSTATE 40001 is not a database token",
+	} {
+		_, err = pool.Exec(ctx, `
+UPDATE async_jobs
+   SET status='failed', finished_at=now()-interval '2 hours',
+       error_message=$2, recovery_count=0, last_recovered_at=NULL
+ WHERE id=$1`, id, message)
+		require.NoError(t, err)
+		_, recovered, err := repo.RequeueRetriableFailedBucket(ctx, req)
+		require.NoError(t, err)
+		require.False(t, recovered, message)
+	}
+	_, err = pool.Exec(ctx, `
+UPDATE async_jobs
+   SET error_message='serialization failure (SQLSTATE 40001)'
+ WHERE id=$1`, id)
+	require.NoError(t, err)
+	_, recovered, err := repo.RequeueRetriableFailedBucket(ctx, req)
+	require.NoError(t, err)
+	require.True(t, recovered)
+}
+
+func TestPgRepository_ListRecoverableFailedNaturalBucketsSkipsBlockingPrefix_WithPostgres(t *testing.T) {
+	dsn := os.Getenv("OMCGO_ASYNCJOB_TEST_DSN")
+	if dsn == "" {
+		t.Skip("set OMCGO_ASYNCJOB_TEST_DSN to run PostgreSQL repository behavior test")
+	}
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	defer pool.Close()
+	createAsyncJobRecoveryTestTable(t, ctx, pool)
+
+	repo := NewPgRepository(pool)
+	base := time.Now().UTC().Truncate(time.Hour).Add(-400 * time.Hour)
+	for i := range 201 {
+		start := base.Add(time.Duration(i) * time.Hour)
+		end := start.Add(time.Hour)
+		id, err := repo.Insert(ctx, InsertRequest{
+			JobType: "pm_aggregate_hourly", ScheduledAt: start,
+			BucketStart: &start, BucketEnd: &end,
+		})
+		require.NoError(t, err)
+		message := "constraint violation (SQLSTATE 23514)"
+		recoveryCount := 0
+		if i%2 == 1 {
+			message = "deadlock detected (SQLSTATE 40P01)"
+			recoveryCount = 3
+		}
+		_, err = pool.Exec(ctx, `
+UPDATE async_jobs
+   SET status='failed', finished_at=now()-interval '2 hours',
+       error_message=$2, recovery_count=$3
+ WHERE id=$1`, id, message, recoveryCount)
+		require.NoError(t, err)
+	}
+	eligibleStart := base.Add(201 * time.Hour)
+	eligibleEnd := eligibleStart.Add(time.Hour)
+	eligibleID, err := repo.Insert(ctx, InsertRequest{
+		JobType: "pm_aggregate_hourly", ScheduledAt: eligibleStart,
+		BucketStart: &eligibleStart, BucketEnd: &eligibleEnd,
+	})
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `
+UPDATE async_jobs
+   SET status='failed', finished_at=now()-interval '2 hours',
+       error_message='serialization failure (SQLSTATE 40001)'
+ WHERE id=$1`, eligibleID)
+	require.NoError(t, err)
+
+	jobs, err := repo.ListRecoverableFailedNaturalBuckets(ctx, FailedBucketMaintenanceRequest{
+		JobType: "pm_aggregate_hourly", Since: base.Add(-time.Hour), Limit: 1,
+		MaxRecoveries: 3, Cooldown: time.Hour, AgedAfter: time.Hour,
+	})
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+	require.Equal(t, eligibleID, jobs[0].ID)
+}
+
+func TestPgRepository_GetFailedBucketStatsUsesFinishedAtAge_WithPostgres(t *testing.T) {
+	dsn := os.Getenv("OMCGO_ASYNCJOB_TEST_DSN")
+	if dsn == "" {
+		t.Skip("set OMCGO_ASYNCJOB_TEST_DSN to run PostgreSQL repository behavior test")
+	}
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	defer pool.Close()
+	createAsyncJobRecoveryTestTable(t, ctx, pool)
+
+	repo := NewPgRepository(pool)
+	base := time.Now().UTC().Truncate(time.Hour).Add(-3 * time.Hour)
+	var ids []uuid.UUID
+	for i := range 2 {
+		start := base.Add(time.Duration(i) * time.Hour)
+		end := start.Add(time.Hour)
+		id, err := repo.Insert(ctx, InsertRequest{
+			JobType: "pm_aggregate_hourly", ScheduledAt: start,
+			BucketStart: &start, BucketEnd: &end,
+		})
+		require.NoError(t, err)
+		ids = append(ids, id)
+		_, err = pool.Exec(ctx, `
+UPDATE async_jobs
+   SET status='failed', finished_at=now()-interval '30 minutes',
+       error_message='deadlock detected (SQLSTATE 40P01)'
+ WHERE id=$1`, id)
+		require.NoError(t, err)
+	}
+	req := FailedBucketMaintenanceRequest{
+		JobType: "pm_aggregate_hourly", Since: base.Add(-time.Hour), Limit: 100,
+		MaxRecoveries: 3, Cooldown: time.Hour, AgedAfter: time.Hour,
+	}
+
+	stats, err := repo.GetFailedBucketStats(ctx, req)
+	require.NoError(t, err)
+	require.Equal(t, FailedBucketStats{FailedCount: 2}, stats)
+
+	_, err = pool.Exec(ctx,
+		`UPDATE async_jobs SET finished_at=now()-interval '2 hours' WHERE id=$1`,
+		ids[0])
+	require.NoError(t, err)
+	stats, err = repo.GetFailedBucketStats(ctx, req)
+	require.NoError(t, err)
+	require.Equal(t, FailedBucketStats{FailedCount: 2, AgedCount: 1}, stats)
+
+	_, err = pool.Exec(ctx, `UPDATE async_jobs SET status='pending'`)
+	require.NoError(t, err)
+	stats, err = repo.GetFailedBucketStats(ctx, req)
+	require.NoError(t, err)
+	require.Equal(t, FailedBucketStats{}, stats)
 }
 
 func createAsyncJobRecoveryTestTable(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {

@@ -3,6 +3,9 @@ package aggregator
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -58,6 +61,7 @@ func TestRecoveryMetricsExposeBoundedRecoveryAndWatermarkFailures(t *testing.T) 
 	m.IncHourlyRecovery()
 	m.SetRecoveryExhaustedBuckets(2)
 	m.SetFailedBuckets(3)
+	m.SetAgedFailedBuckets(0)
 	m.SetFailedVersions(4)
 	m.SetStaleBuildingVersions(5)
 	m.SetWatermarkLag(3 * time.Hour)
@@ -65,9 +69,67 @@ func TestRecoveryMetricsExposeBoundedRecoveryAndWatermarkFailures(t *testing.T) 
 	require.Equal(t, float64(1), testutil.ToFloat64(m.HourlyRecoveries))
 	require.Equal(t, float64(2), testutil.ToFloat64(m.RecoveryExhaustedBuckets))
 	require.Equal(t, float64(3), testutil.ToFloat64(m.FailedBuckets))
+	require.Equal(t, float64(0), testutil.ToFloat64(m.AgedFailedBuckets))
 	require.Equal(t, float64(4), testutil.ToFloat64(m.FailedVersions))
 	require.Equal(t, float64(5), testutil.ToFloat64(m.StaleBuildingVersions))
 	require.Equal(t, (3 * time.Hour).Seconds(), testutil.ToFloat64(m.WatermarkLag))
+}
+
+func TestRetriableFailedBucketMarkerRequiresCanonicalTokenBoundaries(t *testing.T) {
+	for _, message := range []string{
+		"deadlock detected (SQLSTATE 40P01)",
+		"serialization failure: SQLSTATE 40001",
+	} {
+		assert.True(t, retriableFailedBucketMarker(message), message)
+	}
+	for _, message := range []string{
+		"serialization failure (SQLSTATE 40001X)",
+		"prosePrefixSQLSTATE 40001 is not a database token",
+		"mentions 40001 without canonical token",
+	} {
+		assert.False(t, retriableFailedBucketMarker(message), message)
+	}
+}
+
+func TestFailedBucketMetricsUseDatabaseAgeAndClearBeforeErrors(t *testing.T) {
+	repo := &maintenanceRecoveryRepo{
+		stats: asyncjob.FailedBucketStats{FailedCount: 1, AgedCount: 0},
+	}
+	db := &maintenanceTestDB{}
+	m := NewMetrics(nil)
+
+	err := recoverFailedHourlyBuckets(
+		context.Background(), db, repo, DefaultLateDataWindow, m, zap.NewNop(),
+	)
+	require.NoError(t, err)
+	assert.Equal(t, float64(1), testutil.ToFloat64(m.FailedBuckets))
+	assert.Equal(t, float64(0), testutil.ToFloat64(m.AgedFailedBuckets),
+		"a succession of newly failed jobs must not look older than maintenance interval")
+
+	m.SetFailedBuckets(9)
+	m.SetAgedFailedBuckets(8)
+	m.SetRecoveryExhaustedBuckets(7)
+	repo.statsErr = fmt.Errorf("database unavailable")
+	err = recoverFailedHourlyBuckets(
+		context.Background(), db, repo, DefaultLateDataWindow, m, zap.NewNop(),
+	)
+	require.Error(t, err)
+	assert.Equal(t, float64(0), testutil.ToFloat64(m.FailedBuckets))
+	assert.Equal(t, float64(0), testutil.ToFloat64(m.AgedFailedBuckets))
+	assert.Equal(t, float64(0), testutil.ToFloat64(m.RecoveryExhaustedBuckets))
+}
+
+func TestFailedBucketAlertUsesPersistedAgedFailureMetric(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	raw, err := os.ReadFile(filepath.Join(
+		filepath.Dir(file), "..", "..", "..", "..",
+		"deployments", "monitoring", "alerts", "omc-rules.yml",
+	))
+	require.NoError(t, err)
+	alerts := string(raw)
+	require.Contains(t, alerts, "expr: omc_pm_hourly_aged_failed_buckets > 0")
+	require.NotContains(t, alerts, "expr: omc_pm_hourly_failed_buckets > 0\n        for: 1h")
 }
 
 func TestRecoverFailedHourlyBucketsRequeuesOnlyRetriableSourceBucketWithoutActiveVersion(t *testing.T) {
@@ -82,11 +144,12 @@ func TestRecoverFailedHourlyBucketsRequeuesOnlyRetriableSourceBucketWithoutActiv
 		}
 	}
 	eligible := bucket(0, "deadlock detected (SQLSTATE 40P01)", 0)
-	nonRetriable := bucket(time.Hour, "violates check constraint (SQLSTATE 23514)", 0)
-	exhausted := bucket(2*time.Hour, "serialization failure (SQLSTATE 40001)", DefaultHourlyRecoveryMax)
 	alreadyActive := bucket(3*time.Hour, "serialization failure (SQLSTATE 40001)", 0)
 	repo := &maintenanceRecoveryRepo{
-		failed: []asyncjob.Job{eligible, nonRetriable, exhausted, alreadyActive},
+		failed: []asyncjob.Job{eligible, alreadyActive},
+		stats: asyncjob.FailedBucketStats{
+			FailedCount: 4, ExhaustedCount: 1,
+		},
 	}
 	db := &maintenanceTestDB{
 		queryRows: []pgx.Row{
@@ -144,6 +207,8 @@ type maintenanceRecoveryRepo struct {
 	failed           []asyncjob.Job
 	find             map[time.Time]*asyncjob.Job
 	recoveryRequests []asyncjob.FailedBucketRecoveryRequest
+	stats            asyncjob.FailedBucketStats
+	statsErr         error
 }
 
 func (r *maintenanceRecoveryRepo) Insert(
@@ -153,13 +218,18 @@ func (r *maintenanceRecoveryRepo) Insert(
 	return uuid.New(), nil
 }
 
-func (r *maintenanceRecoveryRepo) ListFailedNaturalBuckets(
+func (r *maintenanceRecoveryRepo) ListRecoverableFailedNaturalBuckets(
 	context.Context,
-	string,
-	time.Time,
-	int,
+	asyncjob.FailedBucketMaintenanceRequest,
 ) ([]asyncjob.Job, error) {
 	return r.failed, nil
+}
+
+func (r *maintenanceRecoveryRepo) GetFailedBucketStats(
+	context.Context,
+	asyncjob.FailedBucketMaintenanceRequest,
+) (asyncjob.FailedBucketStats, error) {
+	return r.stats, r.statsErr
 }
 
 func (r *maintenanceRecoveryRepo) FindNaturalBucketJob(
