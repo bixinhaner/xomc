@@ -194,13 +194,21 @@ func TestVersionedHourlyProductionLockOrder(t *testing.T) {
 	assert.Equal(t, int64(2), anchors)
 	assert.Equal(t, int64(2), values)
 	assert.Contains(t, tx.objectQuerySQL, "SELECT DISTINCT")
-	assert.Contains(t, tx.objectQuerySQL, `ha."time"=$3`)
+	assert.Contains(t, tx.objectQuerySQL, "FROM pm_measurement_anchors")
+	assert.Contains(t, tx.objectQuerySQL, `a."time">=$1`)
+	assert.Contains(t, tx.objectQuerySQL, `a."time"<$2`)
 	require.Len(t, tx.objectQueryArgs, 3)
-	assert.Equal(t, w.Start, tx.objectQueryArgs[2])
-	assert.Contains(t, tx.counterQuerySQL, `ha."time"=$3`)
+	assert.Equal(t, w.Start, tx.objectQueryArgs[0])
+	assert.Equal(t, w.End, tx.objectQueryArgs[1])
+	assert.Contains(t, tx.counterQuerySQL, "FROM pm_measurement_anchors")
+	assert.NotContains(t, tx.counterQuerySQL, "pm_hourly_values")
 	assert.Contains(t, tx.counterQuerySQL, `d.metric_path=ANY($4::text[])`)
-	require.Len(t, tx.counterQueryArgs, 4)
-	assert.Equal(t, w.Start, tx.counterQueryArgs[2])
+	assert.Contains(t, tx.counterQuerySQL, `WHEN 'sum' THEN sum(v.metric_value)`)
+	assert.Contains(t, tx.counterQuerySQL, `WHEN 'avg' THEN avg(v.metric_value)`)
+	assert.Contains(t, tx.counterQuerySQL, "missing PM indicator metadata")
+	require.Len(t, tx.counterQueryArgs, 5)
+	assert.Equal(t, w.Start, tx.counterQueryArgs[0])
+	assert.Equal(t, w.End, tx.counterQueryArgs[1])
 	assert.Equal(t, []string{"CLOCK1"}, tx.counterQueryArgs[3])
 	assert.Equal(t, []string{
 		"dictionary",
@@ -399,13 +407,14 @@ func (tx *recordingFormulaBatchTx) record(event string) {
 
 func (tx *recordingFormulaBatchTx) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
 	switch {
-	case strings.Contains(sql, "SELECT DISTINCT ha.device_dim_id"):
+	case strings.Contains(sql, "SELECT DISTINCT a.device_dim_id"):
 		tx.objectQuerySQL = sql
 		tx.objectQueryArgs = args
 		return &recordingFormulaRows{rows: [][]any{{
 			tx.deviceID, int16(0), "",
 		}}}, nil
-	case strings.Contains(sql, "SELECT ha.device_dim_id, ha.object_type"):
+	case strings.Contains(sql,
+		"SELECT a.device_dim_id, a.object_type, a.object_ldn, d.metric_path"):
 		tx.counterQuerySQL = sql
 		tx.counterQueryArgs = args
 		return &recordingFormulaRows{rows: [][]any{{

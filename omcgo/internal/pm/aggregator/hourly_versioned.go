@@ -750,13 +750,12 @@ func (a *Aggregator) insertVersionedHourlyFormulaKPIs(
 	order := make([]uuid.UUID, 0, len(deviceIDs))
 
 	objectRows, err := tx.Query(ctx, `
-		SELECT DISTINCT ha.device_dim_id, ha.object_type, ha.object_ldn
-		  FROM pm_hourly_anchors ha
-		 WHERE ha.bucket_version=$1
-		   AND ha.device_dim_id=ANY($2::uuid[])
-		   AND ha."time"=$3
-		 ORDER BY ha.device_dim_id, ha.object_ldn`,
-		version, deviceIDs, w.Start)
+		SELECT DISTINCT a.device_dim_id, a.object_type, a.object_ldn
+		  FROM pm_measurement_anchors a
+		 WHERE a."time">=$1 AND a."time"<$2
+		   AND a.device_dim_id=ANY($3::uuid[])
+		 ORDER BY a.device_dim_id, a.object_ldn`,
+		w.Start, w.End, deviceIDs)
 	if err != nil {
 		return 0, 0, fmt.Errorf("load versioned hourly formula objects: %w", err)
 	}
@@ -792,21 +791,28 @@ func (a *Aggregator) insertVersionedHourlyFormulaKPIs(
 
 	dependencies, loadCounters := versionedHourlyFormulaDependencies(prepared)
 	if loadCounters {
-		rows, err := tx.Query(ctx, `
-		SELECT ha.device_dim_id, ha.object_type, ha.object_ldn,
-		       d.metric_path, hv.metric_value
-		  FROM pm_hourly_anchors ha
-		  JOIN pm_hourly_values hv
-		    ON hv.bucket_version=ha.bucket_version
-		   AND hv."time"=ha."time" AND hv.anchor_id=ha.anchor_id
-		  JOIN pm_metric_dictionary d ON d.metric_id=hv.metric_id
-		 WHERE ha.bucket_version=$1
-		   AND ha.device_dim_id=ANY($2::uuid[])
-		   AND ha."time"=$3
+		counterQuery := `
+		SELECT a.device_dim_id, a.object_type, a.object_ldn, d.metric_path,
+		       ` + normalizeSQLValue(`CASE lower(d.statis_type)
+		         WHEN 'sum' THEN sum(v.metric_value)
+		         WHEN 'avg' THEN avg(v.metric_value)
+		         WHEN 'max' THEN max(v.metric_value)
+		         WHEN 'min' THEN min(v.metric_value)
+		       END`, "d.unit", "d.statis_type", "$5", "d.metric_path") + `
+		  FROM pm_measurement_anchors a
+		  JOIN pm_metric_values v
+		    ON v."time"=a."time" AND v.anchor_id=a.anchor_id
+		  JOIN pm_metric_dictionary d ON d.metric_id=v.metric_id
+		 WHERE a."time">=$1 AND a."time"<$2
+		   AND a.device_dim_id=ANY($3::uuid[])
 		   AND d.metric_type='counter'
 		   AND d.metric_path=ANY($4::text[])
-		 ORDER BY ha.device_dim_id, ha.object_ldn, d.metric_path`,
-			version, deviceIDs, w.Start, dependencies)
+		   AND lower(d.statis_type) IN ('sum','avg','max','min')
+		 GROUP BY a.device_dim_id, a.object_type, a.object_ldn,
+		          d.metric_path, d.unit, d.statis_type
+		 ORDER BY a.device_dim_id, a.object_ldn, d.metric_path`
+		rows, err := tx.Query(ctx, counterQuery,
+			w.Start, w.End, deviceIDs, dependencies, numberProcess)
 		if err != nil {
 			return 0, 0, fmt.Errorf("load versioned hourly counters: %w", err)
 		}
