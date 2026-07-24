@@ -1559,6 +1559,7 @@ func recycleBinSelectColumns() []string {
 		"dlo.version AS reported_version", "dlo.source_path AS reported_source_path",
 		"d.extension_data", "d.created_at", "d.updated_at", "d.deleted_at", "d.deleted_by",
 		"d.recycle_type", "d.recycle_executor",
+		"d.last_param_sync_at",
 		"d.last_offline_reason",
 		// device_groups columns
 		"dg.id as group_id",
@@ -1621,7 +1622,7 @@ func recycleBinSelectColumns() []string {
 			THEN FLOOR((GREATEST(EXTRACT(EPOCH FROM (d.deleted_at - d.last_inform_at)), 0) % 3600) / 60)::bigint
 			ELSE NULL
 		END AS offline_minutes`,
-		"FALSE AS param_sync_running", // Placeholder for shared DeviceWithInfo scanner
+		"FALSE AS param_sync_running",     // Placeholder for shared DeviceWithInfo scanner
 		"NULL::int AS active_alarm_count", // Placeholder for compatibility
 	}
 }
@@ -2206,10 +2207,10 @@ const cpeProductClassPredicate = `(
 // 返回按 last_inform_at ASC 排序，优先处理最久未心跳的设备。
 func (r *PgDeviceRepository) FindStaleDevicesByClass(ctx context.Context, enbThresholdSec, cpeThresholdSec, limit int) ([]*model.Device, error) {
 	if enbThresholdSec <= 0 {
-		enbThresholdSec = 100
+		enbThresholdSec = defaultENBOfflineSec
 	}
 	if cpeThresholdSec <= 0 {
-		cpeThresholdSec = 600
+		cpeThresholdSec = defaultCPEOfflineSec
 	}
 	if limit <= 0 {
 		limit = 1000
