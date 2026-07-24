@@ -24,7 +24,10 @@ const (
 	StatusConnected     = "connected"
 	StatusError         = "error"
 
-	DefaultRuntimeStreamPath = "/api/v1/agent/chat/stream"
+	DefaultAgentStudioBaseURL      = "https://bailey.baicells.com"
+	DefaultAgentStudioServiceToken = "8c6d8a31d5007ebf54c80eae2c39c353665b9031e24b2f95ebcfafb24058946c"
+	DefaultConnectorSlug           = "local-omc-agent"
+	DefaultRuntimeStreamPath       = "/api/v1/agent/chat/stream"
 
 	DefaultAllowedMethods      = "GET"
 	DefaultBlockedPathPrefixes = "/api/v1/auth/*\n/api/v1/agent/*\n/api/v1/admin/agent-config*\n/api/v1/admin/sysConfig*"
@@ -93,7 +96,6 @@ type UpdateRequest struct {
 	Enabled                 *bool     `json:"enabled"`
 	AgentStudioBaseURL      *string   `json:"agentStudioBaseUrl"`
 	AgentStudioServiceToken *string   `json:"agentStudioServiceToken"`
-	ConnectorSlug           *string   `json:"connectorSlug"`
 	AllowedMethods          *[]string `json:"allowedMethods"`
 	BlockedPathPrefixes     *[]string `json:"blockedPathPrefixes"`
 	ToolTimeoutSeconds      *int      `json:"toolTimeoutSeconds"`

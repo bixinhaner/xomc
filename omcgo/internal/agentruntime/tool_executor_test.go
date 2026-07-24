@@ -11,6 +11,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/agentconfig"
+	"github.com/omcgo/omcgo/internal/agentruntime/handbookgen"
 )
 
 func TestToolExecutorExecutesLocalReadAPIWithUserToken(t *testing.T) {
@@ -49,6 +50,46 @@ func TestToolExecutorExecutesLocalReadAPIWithUserToken(t *testing.T) {
 	require.EqualValues(t, 1, output["total"])
 }
 
+func TestToolExecutorReturnsDownloadAsFilePayload(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	jwtSvc, err := admin.NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
+
+	router := gin.New()
+	router.GET("/api/v1/exports/:id", func(c *gin.Context) {
+		c.Header("Content-Disposition", `attachment; filename="status report.csv"`)
+		c.Data(http.StatusOK, "text/csv; charset=utf-8", []byte("name,status\nsite-1,online\n"))
+	})
+
+	executor := NewToolExecutor(router, router, jwtSvc)
+	result := executor.Execute(context.Background(), &admin.Claims{
+		UserID: uuid.New(), Username: "operator",
+	}, ToolRequest{
+		RunID: "run-1", ToolCallID: "tool-file",
+		Input: ToolRequestBody{
+			Method: http.MethodGet,
+			Path:   "/api/v1/exports/export-1",
+		},
+	}, agentconfig.RuntimePolicy{
+		AllowedMethods: []string{http.MethodGet}, ToolTimeoutSeconds: 30, MaxResponseBytes: 262144,
+	})
+
+	require.Equal(t, "ok", result.Status)
+	require.NotNil(t, result.file)
+	require.Equal(t, "status report.csv", result.file.filename)
+	require.Equal(t, "text/csv", result.file.mimeType)
+	require.Equal(t, []byte("name,status\nsite-1,online\n"), result.file.content)
+	require.NotEmpty(t, result.file.sha256)
+	require.Empty(t, result.Files)
+}
+
+func TestDownloadableResponseDoesNotTreatMissingContentTypeAsFile(t *testing.T) {
+	filename, mimeType, ok := downloadableResponse(http.Header{}, "/api/v1/status")
+	require.False(t, ok)
+	require.Empty(t, filename)
+	require.Empty(t, mimeType)
+}
+
 func TestToolExecutorRejectsMethodsOutsidePolicy(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	jwtSvc, err := admin.NewJWTService("test-secret-minimum-32-characters!!")
@@ -79,6 +120,50 @@ func TestToolExecutorRejectsMethodsOutsidePolicy(t *testing.T) {
 	require.Equal(t, "error", result.Status)
 	require.NotNil(t, result.Error)
 	require.Contains(t, result.Error.Message, "method POST is not enabled")
+}
+
+func TestToolExecutorRejectsUndocumentedQueryBeforeCallingBusinessAPI(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	jwtSvc, err := admin.NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
+
+	called := false
+	router := gin.New()
+	router.GET("/api/v1/pm/definitions", func(c *gin.Context) {
+		called = true
+		c.JSON(http.StatusOK, gin.H{"items": []any{}})
+	})
+	executor := NewToolExecutor(router, router, jwtSvc)
+	executor.handbook = &handbookPackage{
+		operations: map[string]handbookgen.OperationDocument{
+			"get.pm.definitions": {
+				OperationID:      "get.pm.definitions",
+				Method:           http.MethodGet,
+				Path:             "/api/v1/pm/definitions",
+				QueryParams:      []handbookgen.Parameter{{Name: "device_type", In: "query"}},
+				ContractCoverage: map[string]string{"request": "go-handler"},
+			},
+		},
+	}
+
+	result := executor.Execute(context.Background(), &admin.Claims{
+		UserID: uuid.New(), Username: "operator",
+	}, ToolRequest{
+		RunID: "run-1", ToolCallID: "tool-1",
+		Input: ToolRequestBody{
+			OperationID: "get.pm.definitions",
+			Method:      http.MethodGet,
+			Path:        "/api/v1/pm/definitions",
+			Query:       map[string]any{"technology": "lte"},
+		},
+	}, agentconfig.RuntimePolicy{
+		AllowedMethods: []string{http.MethodGet}, ToolTimeoutSeconds: 30, MaxResponseBytes: 262144,
+	})
+
+	require.Equal(t, "error", result.Status)
+	require.Equal(t, "INVALID_QUERY_PARAMETER", result.Error.Code)
+	require.Equal(t, []string{"device_type"}, result.Error.Details["allowedParameters"])
+	require.False(t, called)
 }
 
 func TestToolExecutorCatalogRespectsPolicy(t *testing.T) {

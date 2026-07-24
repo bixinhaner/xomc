@@ -5,11 +5,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,6 +23,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/agentconfig"
+	"github.com/omcgo/omcgo/internal/agentruntime/handbookgen"
 )
 
 type RouteProvider interface {
@@ -44,17 +48,46 @@ type ToolRequestBody struct {
 }
 
 type ToolResult struct {
-	RunID      string     `json:"runId"`
-	ToolCallID string     `json:"toolCallId"`
-	Status     string     `json:"status"`
-	Output     any        `json:"output,omitempty"`
-	Error      *ToolError `json:"error,omitempty"`
+	RunID      string           `json:"runId"`
+	ToolCallID string           `json:"toolCallId"`
+	Status     string           `json:"status"`
+	Output     any              `json:"output,omitempty"`
+	Files      []ToolResultFile `json:"files,omitempty"`
+	Error      *ToolError       `json:"error,omitempty"`
+	file       *toolFilePayload
+}
+
+type ToolResultFile struct {
+	AttachmentID string `json:"attachmentId"`
+	Filename     string `json:"filename"`
+	MimeType     string `json:"mimeType"`
+	SizeBytes    int    `json:"sizeBytes"`
+	SHA256       string `json:"sha256"`
+	CreatedAt    string `json:"createdAt,omitempty"`
+}
+
+type toolFilePayload struct {
+	filename string
+	mimeType string
+	content  []byte
+	sha256   string
 }
 
 type ToolError struct {
-	Code      string `json:"code"`
-	Message   string `json:"message"`
-	Retryable bool   `json:"retryable,omitempty"`
+	Code      string         `json:"code"`
+	Message   string         `json:"message"`
+	Retryable bool           `json:"retryable,omitempty"`
+	Details   map[string]any `json:"details,omitempty"`
+}
+
+type toolExecutionError struct {
+	code    string
+	message string
+	details map[string]any
+}
+
+func (e *toolExecutionError) Error() string {
+	return e.message
 }
 
 type ToolExecutor struct {
@@ -76,10 +109,26 @@ func (e *ToolExecutor) Execute(ctx context.Context, claims *admin.Claims, reques
 	if err != nil {
 		result.Status = "error"
 		result.Error = &ToolError{Code: "TOOL_EXECUTION_FAILED", Message: err.Error(), Retryable: false}
+		var executionError *toolExecutionError
+		if errors.As(err, &executionError) {
+			result.Error.Code = executionError.code
+			result.Error.Details = executionError.details
+		}
 		return result
 	}
 	result.Status = "ok"
-	result.Output = output
+	if file, ok := output.(*toolFilePayload); ok {
+		result.file = file
+		result.Output = map[string]any{
+			"type":      "file",
+			"filename":  file.filename,
+			"mimeType":  file.mimeType,
+			"sizeBytes": len(file.content),
+			"sha256":    file.sha256,
+		}
+	} else {
+		result.Output = output
+	}
 	return result
 }
 
@@ -122,8 +171,103 @@ func (e *ToolExecutor) execute(ctx context.Context, claims *admin.Claims, input 
 	if pathBlocked(policy, requestPath) {
 		return nil, fmt.Errorf("path %s is blocked by agent policy", requestPath)
 	}
+	if err := e.validateToolRequest(input, method, requestPath); err != nil {
+		return nil, err
+	}
 
 	return e.callLocalAPI(ctx, claims, method, requestPath, input.Query, input.Body, policy)
+}
+
+func (e *ToolExecutor) validateToolRequest(input ToolRequestBody, method, requestPath string) error {
+	e.ensureRuntimeHandbook()
+	if e.handbookErr != nil {
+		return &toolExecutionError{
+			code:    "HANDBOOK_UNAVAILABLE",
+			message: "the running API contract is unavailable",
+			details: map[string]any{"cause": e.handbookErr.Error()},
+		}
+	}
+	expected, matched := e.handbook.matchOperation(method, requestPath)
+	if !matched {
+		return &toolExecutionError{
+			code:    "OPERATION_NOT_FOUND",
+			message: fmt.Sprintf("no running API operation matches %s %s", method, requestPath),
+			details: map[string]any{"method": method, "path": requestPath},
+		}
+	}
+	if operationID := strings.TrimSpace(input.OperationID); operationID != "" {
+		document, exists := e.handbook.operation(operationID)
+		if !exists {
+			return &toolExecutionError{
+				code:    "OPERATION_NOT_FOUND",
+				message: fmt.Sprintf("operationId %s is not published by the running OMC", operationID),
+				details: map[string]any{"expectedOperationId": expected.OperationID},
+			}
+		}
+		if document.Method != method || !handbookPathMatches(document.Path, requestPath) {
+			return &toolExecutionError{
+				code:    "OPERATION_CONTRACT_MISMATCH",
+				message: fmt.Sprintf("operationId %s does not match %s %s", operationID, method, requestPath),
+				details: map[string]any{
+					"expectedOperationId": expected.OperationID,
+					"expectedMethod":      expected.Method,
+					"expectedPath":        expected.Path,
+				},
+			}
+		}
+		expected = document
+	}
+	if expected.ContractCoverage["request"] == "path-only" {
+		return nil
+	}
+	return validateQueryContract(expected, input.Query)
+}
+
+func validateQueryContract(document handbookgen.OperationDocument, query map[string]any) error {
+	allowed := make(map[string]handbookgen.Parameter, len(document.QueryParams))
+	allowedNames := make([]string, 0, len(document.QueryParams))
+	for _, parameter := range document.QueryParams {
+		allowed[parameter.Name] = parameter
+		allowedNames = append(allowedNames, parameter.Name)
+		if parameter.Required {
+			if value, ok := query[parameter.Name]; !ok || value == nil || strings.TrimSpace(fmt.Sprint(value)) == "" {
+				return &toolExecutionError{
+					code:    "MISSING_QUERY_PARAMETER",
+					message: fmt.Sprintf("required query parameter %s is missing for %s", parameter.Name, document.OperationID),
+					details: map[string]any{"parameter": parameter.Name, "allowedParameters": allowedNames},
+				}
+			}
+		}
+	}
+	sort.Strings(allowedNames)
+	for name, value := range query {
+		parameter, ok := allowed[name]
+		if !ok {
+			return &toolExecutionError{
+				code:    "INVALID_QUERY_PARAMETER",
+				message: fmt.Sprintf("query parameter %s is not accepted by %s", name, document.OperationID),
+				details: map[string]any{"parameter": name, "allowedParameters": allowedNames},
+			}
+		}
+		if len(parameter.Enum) > 0 && !enumContains(parameter.Enum, value) {
+			return &toolExecutionError{
+				code:    "INVALID_QUERY_VALUE",
+				message: fmt.Sprintf("query parameter %s has an unsupported value", name),
+				details: map[string]any{"parameter": name, "allowedValues": parameter.Enum},
+			}
+		}
+	}
+	return nil
+}
+
+func enumContains(allowed []any, value any) bool {
+	actual := strings.TrimSpace(fmt.Sprint(value))
+	for _, candidate := range allowed {
+		if strings.EqualFold(actual, strings.TrimSpace(fmt.Sprint(candidate))) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *ToolExecutor) handbookManifest() (HandbookPackageManifest, error) {
@@ -185,7 +329,7 @@ func (e *ToolExecutor) callLocalAPI(
 		bodyReader = bytes.NewReader(raw)
 	}
 	req := httptest.NewRequest(method, buildTarget(requestPath, query), bodyReader).WithContext(callCtx)
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", "application/json, */*")
 	req.Header.Set("X-Agent-Source", "agent")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -201,7 +345,63 @@ func (e *ToolExecutor) callLocalAPI(
 	if rec.Code < 200 || rec.Code >= 300 {
 		return nil, fmt.Errorf("local API returned HTTP %d: %s", rec.Code, strings.TrimSpace(limitString(rec.Body.String(), 4096)))
 	}
+	if filename, mimeType, ok := downloadableResponse(rec.Header(), requestPath); ok {
+		content := rec.Body.Bytes()
+		if len(content) == 0 {
+			return nil, fmt.Errorf("local API returned an empty file")
+		}
+		if len(content) > maxAgentAttachmentBytes {
+			return nil, fmt.Errorf("local API file exceeds %d bytes", maxAgentAttachmentBytes)
+		}
+		digest := sha256.Sum256(content)
+		return &toolFilePayload{
+			filename: filename,
+			mimeType: mimeType,
+			content:  bytes.Clone(content),
+			sha256:   fmt.Sprintf("%x", digest),
+		}, nil
+	}
 	return decodeLimitedResponse(rec.Body.Bytes(), policy.MaxResponseBytes)
+}
+
+func downloadableResponse(header http.Header, requestPath string) (string, string, bool) {
+	contentType, _, _ := mime.ParseMediaType(strings.TrimSpace(header.Get("Content-Type")))
+	filename := strings.TrimSpace(header.Get("X-File-Name"))
+	disposition, params, _ := mime.ParseMediaType(strings.TrimSpace(header.Get("Content-Disposition")))
+	if filename == "" {
+		filename = strings.TrimSpace(params["filename"])
+	}
+	isFile := filename != "" || strings.EqualFold(disposition, "attachment") ||
+		contentType == "application/octet-stream"
+	if !isFile {
+		return "", "", false
+	}
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	if decoded, err := url.PathUnescape(filename); err == nil {
+		filename = decoded
+	}
+	filename = sanitizeToolFilename(filename)
+	if filename == "" {
+		filename = sanitizeToolFilename(path.Base(requestPath))
+	}
+	if filename == "" || filename == "." || filename == "/" {
+		filename = "download"
+	}
+	return filename, contentType, true
+}
+
+func sanitizeToolFilename(value string) string {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
+	value = path.Base(value)
+	value = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, value)
+	return strings.TrimSpace(value)
 }
 
 func buildTarget(requestPath string, query map[string]any) string {

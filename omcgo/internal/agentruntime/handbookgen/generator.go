@@ -71,8 +71,16 @@ func Generate(options Options) (Manifest, error) {
 	categoryDocuments := make(map[string][]OperationSummary)
 	categoryTitles := make(map[string]string)
 	allSummaries := make([]OperationSummary, 0, len(routes))
+	documents := make([]OperationDocument, 0, len(routes))
 	for _, route := range routes {
-		doc := buildOperationDocument(route, openAPI.operation(route.Method, route.Path), sources.analyze(route.Handler))
+		documents = append(documents, buildOperationDocument(route, openAPI.operation(route.Method, route.Path), sources.analyze(route.Handler)))
+	}
+	applyRelatedOperations(documents)
+	if err := validateOperationDocuments(documents); err != nil {
+		return Manifest{}, err
+	}
+	for index, route := range routes {
+		doc := documents[index]
 		filename := route.OperationID + ".json"
 		if err := writeJSON(filepath.Join(docsDir, filename), doc); err != nil {
 			return Manifest{}, err
@@ -154,8 +162,12 @@ func buildOperationDocument(route Route, openAPI openAPIOperation, handler handl
 
 	pathParams := mergeParameters(openAPI.PathParams, route.PathParams)
 	pathParams = mergeParameters(pathParams, inferPathParameters(route.Path))
-	queryParams := mergeParameters(openAPI.QueryParams, handler.QueryParams)
-	formParams := mergeParameters(openAPI.FormParams, handler.FormParams)
+	queryParams := openAPI.QueryParams
+	formParams := openAPI.FormParams
+	if handler.Found {
+		queryParams = mergeAuthoritativeParameters(handler.QueryParams, openAPI.QueryParams)
+		formParams = mergeAuthoritativeParameters(handler.FormParams, openAPI.FormParams)
+	}
 	requestBody := openAPI.RequestBody
 	if len(requestBody) == 0 {
 		requestBody = handler.RequestBody
@@ -429,6 +441,12 @@ func mergeParameters(primary, secondary []Parameter) []Parameter {
 			if result[index].Default == nil {
 				result[index].Default = parameter.Default
 			}
+			if len(result[index].Enum) == 0 {
+				result[index].Enum = parameter.Enum
+			}
+			if len(result[index].Schema) == 0 {
+				result[index].Schema = parameter.Schema
+			}
 			result[index].Required = result[index].Required || parameter.Required
 			continue
 		}
@@ -442,6 +460,143 @@ func mergeParameters(primary, secondary []Parameter) []Parameter {
 		return result[i].In < result[j].In
 	})
 	return result
+}
+
+func mergeAuthoritativeParameters(authoritative, descriptive []Parameter) []Parameter {
+	allowed := make(map[string]struct{}, len(authoritative))
+	for _, parameter := range authoritative {
+		allowed[parameter.In+"\x00"+parameter.Name] = struct{}{}
+	}
+	filtered := make([]Parameter, 0, len(descriptive))
+	for _, parameter := range descriptive {
+		if _, ok := allowed[parameter.In+"\x00"+parameter.Name]; ok {
+			filtered = append(filtered, parameter)
+		}
+	}
+	return mergeParameters(authoritative, filtered)
+}
+
+func applyRelatedOperations(documents []OperationDocument) {
+	type candidate struct {
+		index int
+		score int
+	}
+	for index := range documents {
+		current := documents[index]
+		currentTokens := operationPathTokens(current.Path)
+		candidates := make([]candidate, 0, len(documents))
+		for otherIndex := range documents {
+			if index == otherIndex {
+				continue
+			}
+			other := documents[otherIndex]
+			shared := sharedStringCount(currentTokens, operationPathTokens(other.Path))
+			sameCategory := current.Category != "" && current.Category == other.Category
+			if shared == 0 || (!sameCategory && shared < 2) {
+				continue
+			}
+			score := shared * 4
+			if sameCategory {
+				score += 3
+			}
+			if pathContains(current.Path, other.Path) {
+				score += 3
+			}
+			if isReadMethod(current.Method) == isReadMethod(other.Method) {
+				score++
+			}
+			candidates = append(candidates, candidate{index: otherIndex, score: score})
+		}
+		sort.Slice(candidates, func(i, j int) bool {
+			if candidates[i].score == candidates[j].score {
+				return documents[candidates[i].index].OperationID < documents[candidates[j].index].OperationID
+			}
+			return candidates[i].score > candidates[j].score
+		})
+		if len(candidates) > 5 {
+			candidates = candidates[:5]
+		}
+		related := make([]RelatedOperation, 0, len(candidates))
+		for _, item := range candidates {
+			other := documents[item.index]
+			relation := "same-domain"
+			if pathContains(current.Path, other.Path) {
+				relation = "same-resource"
+			}
+			related = append(related, RelatedOperation{
+				OperationID: other.OperationID,
+				Method:      other.Method,
+				Path:        other.Path,
+				Relation:    relation,
+			})
+		}
+		documents[index].RelatedOperations = related
+	}
+}
+
+func operationPathTokens(value string) []string {
+	var tokens []string
+	for _, token := range strings.Split(strings.Trim(value, "/"), "/") {
+		token = strings.TrimSpace(strings.ToLower(token))
+		if token == "" || token == "api" || strings.HasPrefix(token, "v") || strings.HasPrefix(token, ":") || strings.HasPrefix(token, "*") {
+			continue
+		}
+		tokens = append(tokens, token)
+	}
+	return uniqueStrings(tokens)
+}
+
+func sharedStringCount(left, right []string) int {
+	values := make(map[string]struct{}, len(left))
+	for _, value := range left {
+		values[value] = struct{}{}
+	}
+	count := 0
+	for _, value := range right {
+		if _, ok := values[value]; ok {
+			count++
+		}
+	}
+	return count
+}
+
+func pathContains(left, right string) bool {
+	left = strings.TrimSuffix(left, "/")
+	right = strings.TrimSuffix(right, "/")
+	return strings.HasPrefix(left+"/", right+"/") || strings.HasPrefix(right+"/", left+"/")
+}
+
+func validateOperationDocuments(documents []OperationDocument) error {
+	operations := make(map[string]struct{}, len(documents))
+	for _, document := range documents {
+		if document.OperationID == "" || document.Method == "" || document.Path == "" {
+			return fmt.Errorf("operation contract is incomplete: operationId=%q method=%q path=%q", document.OperationID, document.Method, document.Path)
+		}
+		if _, exists := operations[document.OperationID]; exists {
+			return fmt.Errorf("operation contract %s is duplicated", document.OperationID)
+		}
+		operations[document.OperationID] = struct{}{}
+		if document.ContractCoverage["request"] == "" || document.ContractCoverage["response"] == "" {
+			return fmt.Errorf("operation contract %s has incomplete coverage metadata", document.OperationID)
+		}
+		if isReadMethod(document.Method) && strings.TrimSpace(document.EmptyResult) == "" {
+			return fmt.Errorf("read operation contract %s has no empty-result semantics", document.OperationID)
+		}
+	}
+	for _, document := range documents {
+		for _, related := range document.RelatedOperations {
+			if related.OperationID == document.OperationID {
+				return fmt.Errorf("operation contract %s references itself", document.OperationID)
+			}
+			if _, exists := operations[related.OperationID]; !exists {
+				return fmt.Errorf("operation contract %s references missing operation %s", document.OperationID, related.OperationID)
+			}
+			if related.Method == "" || related.Path == "" || related.Relation == "" {
+				return fmt.Errorf("operation contract %s has incomplete relation to %s", document.OperationID, related.OperationID)
+			}
+		}
+	}
+	return nil
 }
 
 func inferPathParameters(path string) []Parameter {
@@ -529,7 +684,7 @@ func emptyResultGuidance(method string) string {
 	if !isReadMethod(method) {
 		return ""
 	}
-	return "空数组或 total=0 表示当前用户权限和过滤条件下没有可见记录；除非接口另有明确语义，不要改用其他接口猜测数据。"
+	return "空数组或 total=0 只说明该操作在当前用户权限和本次过滤条件下没有返回记录，不能单独证明业务对象、源数据或系统能力不存在。先核对参数、标识符、时间范围和权限；若用户目标仍未回答，再沿 relatedOperations 选择汇总、明细、原始或派生数据操作补充证据。"
 }
 
 func standardEnvelopeResponses() map[string]any {

@@ -81,7 +81,6 @@ export default function AgentSettings() {
       enabled: config.enabled,
       agentStudioBaseUrl: config.agentStudioBaseUrl,
       agentStudioServiceToken: '',
-      connectorSlug: config.connectorSlug,
       allowedMethods: config.policy.allowedMethods,
       blockedPathPrefixes: config.policy.blockedPathPrefixes,
       toolTimeoutSeconds: config.policy.toolTimeoutSeconds,
@@ -105,7 +104,6 @@ export default function AgentSettings() {
         enabled: Boolean(values.enabled),
         agentStudioBaseUrl: values.agentStudioBaseUrl?.trim() ?? '',
         agentStudioServiceToken: token || undefined,
-        connectorSlug: values.connectorSlug?.trim() || undefined,
         allowedMethods: values.allowedMethods?.length ? values.allowedMethods : READ_ONLY_METHODS,
         blockedPathPrefixes: values.blockedPathPrefixes ?? [],
         toolTimeoutSeconds: values.toolTimeoutSeconds,
@@ -218,8 +216,11 @@ export default function AgentSettings() {
           >
             <Input.Password placeholder={t('system.agent.serviceTokenPlaceholder')} autoComplete="new-password" />
           </Form.Item>
-          <Form.Item name="connectorSlug" label={t('system.agent.connectorSlug')}>
-            <Input placeholder="external-agent-..." autoComplete="off" />
+          <Form.Item
+            label={t('system.agent.connectorSlug')}
+            extra={t('system.agent.connectorSlugManaged')}
+          >
+            <Input value={config?.connectorSlug ?? ''} readOnly />
           </Form.Item>
         </Card>
 

@@ -2,6 +2,14 @@
 
 These are stable, high-frequency fast paths. Call them directly when they match the user intent. Use the local handbook index and selected operation document for every other operation.
 
+## Evidence completeness
+
+- Treat every filtered list as a subset, not a system-wide total. Use a documented summary/count operation or query the complementary states before claiming totals, absence, or overall health.
+- Use identifiers returned by list, definition, or discovery operations as the canonical input to dependent calls. Do not replace IDs, metric paths, enum values, or object keys with display labels unless the selected contract explicitly allows names.
+- An empty result answers only the selected operation and exact filters. Recheck parameters, time range, identity scope, and the operation document's `relatedOperations` before concluding that data or capability is unavailable.
+- When derived, report, or aggregate data is empty but ingestion/file/task metadata proves source data exists, follow related operations toward raw records, counters, task details, or processing status. Explain the evidence boundary if the chain still cannot answer the goal.
+- Stop after the evidence is sufficient or after relevant operations repeat the same boundary. Do not invent a complement, infer hidden records, or report a healthy system from one successful subset query.
+
 ## Device status totals
 
 Use one of these endpoints, not both, unless their different response shapes are needed:

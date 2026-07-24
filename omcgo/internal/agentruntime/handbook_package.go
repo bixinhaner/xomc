@@ -50,8 +50,9 @@ type HandbookPackageChunk struct {
 }
 
 type handbookPackage struct {
-	archive  []byte
-	manifest HandbookPackageManifest
+	archive    []byte
+	manifest   HandbookPackageManifest
+	operations map[string]handbookgen.OperationDocument
 }
 
 var (
@@ -132,6 +133,7 @@ func newHandbookPackage(archive []byte) (*handbookPackage, error) {
 	defer gzipReader.Close()
 
 	var manifestRaw []byte
+	operations := make(map[string]handbookgen.OperationDocument)
 	fileCount := 0
 	documentCount := 0
 	totalSize := int64(0)
@@ -172,6 +174,21 @@ func newHandbookPackage(archive []byte) (*handbookPackage, error) {
 		}
 		if strings.HasPrefix(cleanName, handbookContentRoot+"/api-docs/") && strings.HasSuffix(cleanName, ".json") {
 			documentCount++
+			raw, readErr := io.ReadAll(io.LimitReader(tarReader, 4<<20))
+			if readErr != nil {
+				return nil, fmt.Errorf("read embedded handbook document %s: %w", cleanName, readErr)
+			}
+			var document handbookgen.OperationDocument
+			if err := json.Unmarshal(raw, &document); err != nil {
+				return nil, fmt.Errorf("decode embedded handbook document %s: %w", cleanName, err)
+			}
+			if document.OperationID == "" {
+				continue
+			}
+			if _, exists := operations[document.OperationID]; exists {
+				return nil, fmt.Errorf("embedded handbook contains duplicate operation %s", document.OperationID)
+			}
+			operations[document.OperationID] = document
 		}
 	}
 	if _, err := io.Copy(io.Discard, gzipReader); err != nil {
@@ -198,7 +215,8 @@ func newHandbookPackage(archive []byte) (*handbookPackage, error) {
 	archiveCopy := append([]byte(nil), archive...)
 	totalChunks := (len(archiveCopy) + handbookChunkBytes - 1) / handbookChunkBytes
 	return &handbookPackage{
-		archive: archiveCopy,
+		archive:    archiveCopy,
+		operations: operations,
 		manifest: HandbookPackageManifest{
 			SchemaVersion:   sourceManifest.SchemaVersion,
 			CatalogVersion:  sourceManifest.CatalogVersion,
@@ -213,6 +231,55 @@ func newHandbookPackage(archive []byte) (*handbookPackage, error) {
 			ContentRoot:     handbookContentRoot,
 		},
 	}, nil
+}
+
+func (p *handbookPackage) operation(operationID string) (handbookgen.OperationDocument, bool) {
+	if p == nil {
+		return handbookgen.OperationDocument{}, false
+	}
+	document, ok := p.operations[strings.TrimSpace(operationID)]
+	return document, ok
+}
+
+func (p *handbookPackage) matchOperation(method, requestPath string) (handbookgen.OperationDocument, bool) {
+	if p == nil {
+		return handbookgen.OperationDocument{}, false
+	}
+	method = strings.ToUpper(strings.TrimSpace(method))
+	for _, document := range p.operations {
+		if document.Method == method && document.Path == requestPath {
+			return document, true
+		}
+	}
+	for _, document := range p.operations {
+		if document.Method == method && handbookPathMatches(document.Path, requestPath) {
+			return document, true
+		}
+	}
+	return handbookgen.OperationDocument{}, false
+}
+
+func handbookPathMatches(templatePath, requestPath string) bool {
+	templateSegments := strings.Split(strings.Trim(templatePath, "/"), "/")
+	requestSegments := strings.Split(strings.Trim(requestPath, "/"), "/")
+	for index, templateSegment := range templateSegments {
+		if strings.HasPrefix(templateSegment, "*") {
+			return index < len(requestSegments)
+		}
+		if index >= len(requestSegments) {
+			return false
+		}
+		if strings.HasPrefix(templateSegment, ":") {
+			if requestSegments[index] == "" {
+				return false
+			}
+			continue
+		}
+		if templateSegment != requestSegments[index] {
+			return false
+		}
+	}
+	return len(templateSegments) == len(requestSegments)
 }
 
 func (p *handbookPackage) validatedManifest(routes HandbookRouteExport) (HandbookPackageManifest, error) {
