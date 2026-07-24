@@ -2,12 +2,81 @@ package event
 
 import (
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestEventBusMetricsObserveQueueStats(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewEventBusMetrics(reg)
+	sampledAt := time.Date(2026, time.July, 24, 12, 0, 0, 0, time.UTC)
+
+	m.observeQueueStats("pm.file.received", "pm-workers", QueueStats{
+		Pending:          7,
+		AckPending:       2,
+		Redelivered:      3,
+		OldestPendingAge: 45 * time.Second,
+		LastSequence:     20,
+		AckSequence:      11,
+		SampledAt:        sampledAt,
+	})
+
+	labels := []string{"pm.file.received", "pm-workers"}
+	assert.Equal(t, float64(7), testutil.ToFloat64(m.QueuePending.WithLabelValues(labels...)))
+	assert.Equal(t, float64(2), testutil.ToFloat64(m.QueueAckPending.WithLabelValues(labels...)))
+	assert.Equal(t, float64(3), testutil.ToFloat64(m.QueueRedelivered.WithLabelValues(labels...)))
+	assert.Equal(t, float64(45), testutil.ToFloat64(m.QueueOldestAgeSeconds.WithLabelValues(labels...)))
+	assert.Equal(t, float64(20), testutil.ToFloat64(m.QueueLastSequence.WithLabelValues(labels...)))
+	assert.Equal(t, float64(11), testutil.ToFloat64(m.QueueAckSequence.WithLabelValues(labels...)))
+	assert.Equal(t, float64(sampledAt.Unix()), testutil.ToFloat64(m.QueueSampleTimestampSeconds.WithLabelValues(labels...)))
+}
+
+func TestEventBusMetricsObserveQueueStatsBoundsPMLabels(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewEventBusMetrics(reg)
+	stats := QueueStats{Pending: 1, SampledAt: time.Now()}
+
+	m.observeQueueStats(SubjectPMFileReceived, "pm-workers", stats)
+	m.observeQueueStats("unbounded.subject", "unbounded-durable", stats)
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		if family.GetName() == "omc_pm_queue_pending" {
+			assert.Len(t, family.Metric, 1, "only the fixed PM queue may create a queue metric series")
+			return
+		}
+	}
+	t.Fatal("omc_pm_queue_pending was not registered")
+}
+
+func TestEventBusMetricsRegistersPMQueueMetricContract(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewEventBusMetrics(reg)
+	m.observeQueueStats(SubjectPMFileReceived, "pm-workers", QueueStats{SampledAt: time.Now()})
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	names := make(map[string]bool, len(families))
+	for _, family := range families {
+		names[family.GetName()] = true
+	}
+	for _, name := range []string{
+		"omc_pm_queue_pending",
+		"omc_pm_queue_ack_pending",
+		"omc_pm_queue_redelivered",
+		"omc_pm_queue_oldest_age_seconds",
+		"omc_pm_queue_last_sequence",
+		"omc_pm_queue_ack_sequence",
+		"omc_pm_queue_sample_timestamp_seconds",
+	} {
+		assert.True(t, names[name], "queue metric %s must be registered", name)
+	}
+}
 
 func TestNewEventBusMetrics_Registered(t *testing.T) {
 	reg := prometheus.NewRegistry()

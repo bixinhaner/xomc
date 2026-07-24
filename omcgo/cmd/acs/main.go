@@ -255,11 +255,21 @@ func runACS(cmd *cobra.Command, args []string) error {
 			return row.Value, true
 		}
 		var pmPendingCount upload.PendingCountFunc
-		if pendingBus, ok := inf.EventBus.(interface {
-			PendingCount(subject, durable string) (uint64, error)
+		if queueBus, ok := inf.EventBus.(interface {
+			QueueStats(ctx context.Context, subject, durable string) (event.QueueStats, error)
 		}); ok {
-			pmPendingCount = func(context.Context) (uint64, error) {
-				return pendingBus.PendingCount(event.SubjectPMFileReceived, "pm-workers")
+			// Keep the projection's aggregate-count interface for this release, but
+			// collect the complete QueueStats sample so its PM queue health metrics
+			// are refreshed on every watchdog observation.
+			pmPendingCount = func(ctx context.Context) (uint64, error) {
+				stats, err := queueBus.QueueStats(ctx, event.SubjectPMFileReceived, "pm-workers")
+				if err != nil {
+					return 0, fmt.Errorf("sample PM queue stats: %w", err)
+				}
+				if stats.AckPending <= 0 {
+					return stats.Pending, nil
+				}
+				return stats.Pending + uint64(stats.AckPending), nil
 			}
 		}
 		bpWatchdog := upload.NewWatchdog(
