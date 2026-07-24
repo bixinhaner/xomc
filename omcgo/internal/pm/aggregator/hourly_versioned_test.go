@@ -43,7 +43,7 @@ func TestVersionedHourlyValidateWindow(t *testing.T) {
 
 func TestVersionedHourlyBatchSQLIsBoundedAndAppendOnly(t *testing.T) {
 	sql := buildVersionedHourlyBatchSQL()
-	assert.Contains(t, sql, "a.device_dim_id = ANY($4::uuid[])")
+	assert.Contains(t, sql, "unnest($4::uuid[]")
 	assert.Contains(t, sql, "INSERT INTO pm_hourly_anchors")
 	assert.Contains(t, sql, "INSERT INTO pm_hourly_values")
 	assert.Contains(t, sql, "pm_hourly_rollup_batches")
@@ -51,6 +51,8 @@ func TestVersionedHourlyBatchSQLIsBoundedAndAppendOnly(t *testing.T) {
 	assert.NotContains(t, valueInsert, "ON CONFLICT")
 	assert.NotContains(t, sql, "DO UPDATE SET metric_ids",
 		"stable metric sets must not be updated merely to resolve their IDs")
+	assert.NotContains(t, sql, "pm_metric_sets",
+		"all base metric-set access must finish before the anchor/value statement")
 	assert.NotContains(t, sql, "work_mem")
 }
 
@@ -118,18 +120,58 @@ func TestFormulaDictionaryRegisteredBeforeVersionLock(t *testing.T) {
 		},
 	}}, nil)
 
-	prepared, batchTx, err := a.prepareAndBeginVersionedHourlyBatch(ctx, db, 55, []uuid.UUID{deviceID})
+	_, _, err := a.prepareAndBeginVersionedHourlyBatch(ctx, db, 55, []uuid.UUID{deviceID})
 	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"dictionary", "begin", "bucket/version transaction",
+	}, events)
+}
+
+func TestVersionedHourlyProductionLockOrder(t *testing.T) {
+	ctx := context.Background()
+	deviceID := uuid.New()
+	events := make([]string, 0)
+	tx := &recordingFormulaBatchTx{
+		events:   &events,
+		deviceID: deviceID,
+		metricID: 89,
+		setID:    144,
+	}
+	db := &recordingFormulaPreparationDB{
+		events:   &events,
+		deviceID: deviceID,
+		metricID: 89,
+		tx:       tx,
+	}
+	a := New(db, &stubKPIRouter{byDevice: map[string]*router.KPIRoute{
+		"LOCK-FORMULA-1": {
+			KPIs: []router.KPIDef{{
+				IndicatorID: "KLOCK1", Unit: "%", Formula: "CLOCK1",
+			}},
+		},
+	}}, nil)
 	w := WindowSpec{
 		Granularity: metrics.GranularityHourly,
 		Start:       time.Date(2026, 7, 24, 10, 0, 0, 0, time.UTC),
 		End:         time.Date(2026, 7, 24, 11, 0, 0, 0, time.UTC),
 	}
 
-	_, _, err = a.insertVersionedHourlyFormulaKPIs(ctx, batchTx, 55, []uuid.UUID{deviceID}, w, "", prepared)
+	anchors, values, err := a.runVersionedHourlyBatch(
+		ctx, db, 55, 0, []uuid.UUID{deviceID}, w, "")
+
 	require.NoError(t, err)
+	assert.Equal(t, int64(2), anchors)
+	assert.Equal(t, int64(2), values)
 	assert.Equal(t, []string{
-		"dictionary", "bucket/version transaction", "metric set", "anchor", "values",
+		"dictionary",
+		"begin",
+		"bucket/version transaction",
+		"base metric set",
+		"formula metric set",
+		"base anchors/values",
+		"formula anchor",
+		"formula values",
+		"commit",
 	}, events)
 }
 
@@ -172,6 +214,7 @@ func (db *recordingFormulaPreparationDB) QueryRow(_ context.Context, sql string,
 }
 
 func (db *recordingFormulaPreparationDB) Begin(_ context.Context) (pgx.Tx, error) {
+	*db.events = append(*db.events, "begin")
 	return db.tx, nil
 }
 
@@ -184,20 +227,33 @@ type recordingFormulaBatchTx struct {
 	setQueries int
 }
 
+func (tx *recordingFormulaBatchTx) record(event string) {
+	if len(*tx.events) == 0 || (*tx.events)[len(*tx.events)-1] != event {
+		*tx.events = append(*tx.events, event)
+	}
+}
+
 func (tx *recordingFormulaBatchTx) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
 	switch {
 	case strings.Contains(sql, "FROM pm_hourly_anchors"):
 		return &recordingFormulaRows{rows: [][]any{{
 			tx.deviceID, int16(0), "", "CLOCK1", float64(5),
 		}}}, nil
+	case strings.Contains(sql, "SELECT gs.device_dim_id") &&
+		strings.Contains(sql, "resolved.metric_set_id"):
+		tx.record("base metric set")
+		return &recordingFormulaRows{rows: [][]any{{
+			tx.deviceID, int16(0), "", "LOCK", int64(201),
+		}}}, nil
 	case strings.Contains(sql, "FROM pm_metric_sets"):
+		tx.record("formula metric set")
 		tx.setQueries++
 		if tx.setQueries == 1 {
 			return &recordingFormulaRows{}, nil
 		}
 		return &recordingFormulaRows{rows: [][]any{{tx.setID, []int64{tx.metricID}}}}, nil
 	case strings.Contains(sql, "INSERT INTO pm_hourly_anchors"):
-		*tx.events = append(*tx.events, "anchor")
+		tx.record("formula anchor")
 		return &recordingFormulaRows{rows: [][]any{{
 			int64(233), tx.deviceID, int16(0), "",
 		}}}, nil
@@ -209,8 +265,18 @@ func (tx *recordingFormulaBatchTx) Query(_ context.Context, sql string, _ ...any
 func (tx *recordingFormulaBatchTx) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
 	if strings.Contains(sql, "FROM pm_hourly_bucket_versions") &&
 		strings.Contains(sql, "FOR UPDATE") {
-		*tx.events = append(*tx.events, "bucket/version transaction")
+		tx.record("bucket/version transaction")
 		return recordingFormulaRow{values: []any{int64(55)}}
+	}
+	if strings.Contains(sql, "INSERT INTO pm_hourly_anchors") &&
+		strings.Contains(sql, "pm_hourly_rollup_batches") {
+		if strings.Contains(sql, "pm_metric_sets") {
+			return recordingFormulaRow{err: fmt.Errorf(
+				"base anchor/value statement must not access metric sets",
+			)}
+		}
+		tx.record("base anchors/values")
+		return recordingFormulaRow{values: []any{int64(1), int64(1)}}
 	}
 	return recordingFormulaRow{err: fmt.Errorf("unexpected batch query row: %s", sql)}
 }
@@ -220,7 +286,11 @@ func (tx *recordingFormulaBatchTx) Exec(_ context.Context, sql string, _ ...any)
 	case strings.Contains(sql, "INSERT INTO pm_metric_dictionary"):
 		return pgconn.CommandTag{}, fmt.Errorf("batch transaction must not write dictionary")
 	case strings.Contains(sql, "INSERT INTO pm_metric_sets"):
-		*tx.events = append(*tx.events, "metric set")
+		if strings.Contains(sql, "SELECT DISTINCT '__hourly__'") {
+			tx.record("base metric set")
+		} else {
+			tx.record("formula metric set")
+		}
 	}
 	return pgconn.NewCommandTag("INSERT 0 1"), nil
 }
@@ -231,8 +301,17 @@ func (tx *recordingFormulaBatchTx) CopyFrom(
 	_ []string,
 	_ pgx.CopyFromSource,
 ) (int64, error) {
-	*tx.events = append(*tx.events, "values")
+	tx.record("formula values")
 	return 1, nil
+}
+
+func (tx *recordingFormulaBatchTx) Commit(_ context.Context) error {
+	tx.record("commit")
+	return nil
+}
+
+func (tx *recordingFormulaBatchTx) Rollback(_ context.Context) error {
+	return nil
 }
 
 type recordingFormulaRows struct {

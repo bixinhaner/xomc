@@ -66,6 +66,14 @@ type preparedFormulaDevice struct {
 	kpis    []preparedFormulaKPI
 }
 
+type preparedHourlyBaseGroup struct {
+	deviceID     uuid.UUID
+	objectType   int16
+	objectLDN    string
+	counterGroup string
+	metricSetID  int64
+}
+
 func (a *Aggregator) supportsVersionedHourly() bool {
 	_, ok := a.db.(poolAcquirer)
 	return ok
@@ -148,58 +156,10 @@ func (a *Aggregator) RunHourlyVersioned(ctx context.Context, w WindowSpec, batch
 	}
 
 	for batchNo, deviceIDs := range batches {
-		preparedFormulaKPIs, tx, openErr := a.prepareAndBeginVersionedHourlyBatch(
-			ctx, conn, version, deviceIDs)
-		if openErr != nil {
-			return stats, fmt.Errorf("open hourly batch %d: %w", batchNo, openErr)
-		}
-		var anchorCount, valueCount int64
-		if _, insertErr := tx.Exec(ctx, `
-			INSERT INTO pm_hourly_rollup_batches
-			    (bucket_version, batch_no, status, device_count)
-			VALUES ($1,$2,'building',$3)`,
-			version, batchNo, len(deviceIDs)); insertErr != nil {
-			_ = tx.Rollback(ctx)
-			return stats, fmt.Errorf("start hourly batch %d: %w", batchNo, insertErr)
-		}
-		if _, setErr := tx.Exec(ctx, buildEnsureVersionedHourlyMetricSetsSQL(),
-			w.Start, w.End, deviceIDs); setErr != nil {
-			_ = tx.Rollback(ctx)
-			return stats, fmt.Errorf("resolve hourly metric sets for batch %d: %w", batchNo, setErr)
-		}
-		scanErr := tx.QueryRow(ctx, buildVersionedHourlyBatchSQL(),
-			version, w.Start, w.End, deviceIDs, batchNo, numberProcess).Scan(&anchorCount, &valueCount)
-		if scanErr != nil {
-			_ = tx.Rollback(ctx)
-			return stats, fmt.Errorf("build hourly batch %d: %w", batchNo, scanErr)
-		}
-		formulaAnchors, formulaValues, formulaErr := a.insertVersionedHourlyFormulaKPIs(
-			ctx, tx, version, deviceIDs, w, numberProcess, preparedFormulaKPIs)
-		if formulaErr != nil {
-			_ = tx.Rollback(ctx)
-			return stats, fmt.Errorf("build hourly formula KPI batch %d: %w", batchNo, formulaErr)
-		}
-		if formulaAnchors > 0 || formulaValues > 0 {
-			if _, updateErr := tx.Exec(ctx, `
-				WITH batch_accounted AS (
-				    UPDATE pm_hourly_rollup_batches
-				   SET anchor_count=anchor_count+$3, value_count=value_count+$4
-				 WHERE bucket_version=$1 AND batch_no=$2
-				   RETURNING bucket_version
-				)
-				UPDATE pm_hourly_bucket_versions v
-				   SET anchor_count=anchor_count+$3, value_count=value_count+$4
-				  FROM batch_accounted b
-				 WHERE v.bucket_version=b.bucket_version AND v.status='building'`,
-				version, batchNo, formulaAnchors, formulaValues); updateErr != nil {
-				_ = tx.Rollback(ctx)
-				return stats, fmt.Errorf("account hourly formula KPI batch %d: %w", batchNo, updateErr)
-			}
-			anchorCount += formulaAnchors
-			valueCount += formulaValues
-		}
-		if commitErr := tx.Commit(ctx); commitErr != nil {
-			return stats, fmt.Errorf("commit hourly batch %d: %w", batchNo, commitErr)
+		anchorCount, valueCount, batchErr := a.runVersionedHourlyBatch(
+			ctx, conn, version, batchNo, deviceIDs, w, numberProcess)
+		if batchErr != nil {
+			return stats, fmt.Errorf("run hourly batch %d: %w", batchNo, batchErr)
 		}
 		stats.CompletedBatches++
 		stats.AnchorCount += anchorCount
@@ -330,6 +290,90 @@ func (a *Aggregator) prepareAndBeginVersionedHourlyBatch(
 		return nil, nil, fmt.Errorf("lock hourly bucket version: got %d, want %d", lockedVersion, version)
 	}
 	return prepared, tx, nil
+}
+
+func (a *Aggregator) runVersionedHourlyBatch(
+	ctx context.Context,
+	conn versionedHourlyBatchBeginner,
+	version int64,
+	batchNo int,
+	deviceIDs []uuid.UUID,
+	w WindowSpec,
+	numberProcess string,
+) (anchorCount, valueCount int64, err error) {
+	preparedFormulaKPIs, tx, err := a.prepareAndBeginVersionedHourlyBatch(
+		ctx, conn, version, deviceIDs)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO pm_hourly_rollup_batches
+		    (bucket_version, batch_no, status, device_count)
+		VALUES ($1,$2,'building',$3)`,
+		version, batchNo, len(deviceIDs)); err != nil {
+		return 0, 0, fmt.Errorf("start hourly batch: %w", err)
+	}
+	if _, err := tx.Exec(ctx, buildEnsureVersionedHourlyMetricSetsSQL(),
+		w.Start, w.End, deviceIDs); err != nil {
+		return 0, 0, fmt.Errorf("resolve base hourly metric sets: %w", err)
+	}
+	baseGroups, err := resolveVersionedHourlyBaseGroups(ctx, tx, w, deviceIDs)
+	if err != nil {
+		return 0, 0, fmt.Errorf("prepare base hourly metric-set IDs: %w", err)
+	}
+	formulaSetIDs, err := resolveVersionedHourlyFormulaMetricSets(ctx, tx, preparedFormulaKPIs)
+	if err != nil {
+		return 0, 0, fmt.Errorf("resolve hourly formula KPI metric sets: %w", err)
+	}
+
+	baseDeviceIDs := make([]uuid.UUID, len(baseGroups))
+	baseObjectTypes := make([]int16, len(baseGroups))
+	baseObjectLDNs := make([]string, len(baseGroups))
+	baseCounterGroups := make([]string, len(baseGroups))
+	baseMetricSetIDs := make([]int64, len(baseGroups))
+	for i, group := range baseGroups {
+		baseDeviceIDs[i] = group.deviceID
+		baseObjectTypes[i] = group.objectType
+		baseObjectLDNs[i] = group.objectLDN
+		baseCounterGroups[i] = group.counterGroup
+		baseMetricSetIDs[i] = group.metricSetID
+	}
+	if err := tx.QueryRow(ctx, buildVersionedHourlyBatchSQL(),
+		version, w.Start, w.End,
+		baseDeviceIDs, baseObjectTypes, baseObjectLDNs, baseCounterGroups, baseMetricSetIDs,
+		batchNo, numberProcess).
+		Scan(&anchorCount, &valueCount); err != nil {
+		return 0, 0, fmt.Errorf("build base hourly batch: %w", err)
+	}
+	formulaAnchors, formulaValues, err := a.insertVersionedHourlyFormulaKPIs(
+		ctx, tx, version, deviceIDs, w, numberProcess, preparedFormulaKPIs, formulaSetIDs)
+	if err != nil {
+		return 0, 0, fmt.Errorf("build hourly formula KPIs: %w", err)
+	}
+	if formulaAnchors > 0 || formulaValues > 0 {
+		if _, err := tx.Exec(ctx, `
+			WITH batch_accounted AS (
+			    UPDATE pm_hourly_rollup_batches
+			   SET anchor_count=anchor_count+$3, value_count=value_count+$4
+			 WHERE bucket_version=$1 AND batch_no=$2
+			   RETURNING bucket_version
+			)
+			UPDATE pm_hourly_bucket_versions v
+			   SET anchor_count=anchor_count+$3, value_count=value_count+$4
+			  FROM batch_accounted b
+			 WHERE v.bucket_version=b.bucket_version AND v.status='building'`,
+			version, batchNo, formulaAnchors, formulaValues); err != nil {
+			return 0, 0, fmt.Errorf("account hourly formula KPIs: %w", err)
+		}
+		anchorCount += formulaAnchors
+		valueCount += formulaValues
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, 0, fmt.Errorf("commit hourly batch: %w", err)
+	}
+	return anchorCount, valueCount, nil
 }
 
 func (a *Aggregator) prepareVersionedHourlyFormulaKPIs(
@@ -546,6 +590,97 @@ func validatePreparedFormulaDictionaryRow(
 	return nil
 }
 
+func resolveVersionedHourlyBaseGroups(
+	ctx context.Context,
+	tx DBTX,
+	w WindowSpec,
+	deviceIDs []uuid.UUID,
+) ([]preparedHourlyBaseGroup, error) {
+	rows, err := tx.Query(ctx, buildResolveVersionedHourlyBaseGroupsSQL(),
+		w.Start, w.End, deviceIDs)
+	if err != nil {
+		return nil, fmt.Errorf("resolve hourly base groups: %w", err)
+	}
+	defer rows.Close()
+	groups := make([]preparedHourlyBaseGroup, 0)
+	for rows.Next() {
+		var group preparedHourlyBaseGroup
+		if err := rows.Scan(
+			&group.deviceID,
+			&group.objectType,
+			&group.objectLDN,
+			&group.counterGroup,
+			&group.metricSetID,
+		); err != nil {
+			return nil, fmt.Errorf("scan hourly base group: %w", err)
+		}
+		groups = append(groups, group)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate hourly base groups: %w", err)
+	}
+	return groups, nil
+}
+
+func resolveVersionedHourlyFormulaMetricSets(
+	ctx context.Context,
+	tx DBTX,
+	prepared map[uuid.UUID]preparedFormulaDevice,
+) (map[uuid.UUID]int64, error) {
+	type formulaSet struct {
+		hash      []byte
+		metricIDs []int64
+	}
+	setsByKey := make(map[string]formulaSet)
+	deviceSetKeys := make(map[uuid.UUID]string, len(prepared))
+	for deviceID, device := range prepared {
+		metricIDs := make([]int64, 0, len(device.kpis))
+		for _, kpi := range device.kpis {
+			metricIDs = append(metricIDs, kpi.MetricID)
+		}
+		if len(metricIDs) == 0 {
+			continue
+		}
+		sort.Slice(metricIDs, func(i, j int) bool { return metricIDs[i] < metricIDs[j] })
+		hash := metrics.MetricSetHash(metricIDs)
+		key := fmt.Sprintf("%x", hash[:])
+		if current, ok := setsByKey[key]; ok {
+			if len(current.metricIDs) != len(metricIDs) {
+				return nil, fmt.Errorf("prepare hourly formula KPI metric set %q: inconsistent metric IDs", key)
+			}
+			for i := range metricIDs {
+				if current.metricIDs[i] != metricIDs[i] {
+					return nil, fmt.Errorf("prepare hourly formula KPI metric set %q: inconsistent metric IDs", key)
+				}
+			}
+		} else {
+			setsByKey[key] = formulaSet{hash: hash[:], metricIDs: metricIDs}
+		}
+		deviceSetKeys[deviceID] = key
+	}
+
+	keys := make([]string, 0, len(setsByKey))
+	for key := range setsByKey {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	setIDs := make(map[string]int64, len(keys))
+	for _, key := range keys {
+		set := setsByKey[key]
+		setID, err := resolveVersionedHourlyFormulaMetricSet(ctx, tx, set.hash, set.metricIDs)
+		if err != nil {
+			return nil, err
+		}
+		setIDs[key] = setID
+	}
+
+	out := make(map[uuid.UUID]int64, len(deviceSetKeys))
+	for deviceID, key := range deviceSetKeys {
+		out[deviceID] = setIDs[key]
+	}
+	return out, nil
+}
+
 func (a *Aggregator) insertVersionedHourlyFormulaKPIs(
 	ctx context.Context,
 	tx pgx.Tx,
@@ -554,6 +689,7 @@ func (a *Aggregator) insertVersionedHourlyFormulaKPIs(
 	w WindowSpec,
 	numberProcess string,
 	prepared map[uuid.UUID]preparedFormulaDevice,
+	formulaSetIDs map[uuid.UUID]int64,
 ) (int64, int64, error) {
 	if len(prepared) == 0 || len(deviceIDs) == 0 {
 		return 0, 0, nil
@@ -661,22 +797,13 @@ func (a *Aggregator) insertVersionedHourlyFormulaKPIs(
 	}
 
 	groupSetIDs := make([]int64, len(groups))
-	setCache := make(map[string]int64)
 	for index, group := range groups {
-		setIDs := make([]int64, 0, len(group.rows))
-		for _, row := range group.rows {
-			setIDs = append(setIDs, metricIDs[row.path])
-		}
-		sort.Slice(setIDs, func(i, j int) bool { return setIDs[i] < setIDs[j] })
-		hash := metrics.MetricSetHash(setIDs)
-		cacheKey := string(hash[:])
-		setID, ok := setCache[cacheKey]
+		setID, ok := formulaSetIDs[group.deviceID]
 		if !ok {
-			setID, err = resolveVersionedHourlyFormulaMetricSet(ctx, tx, hash[:], setIDs)
-			if err != nil {
-				return 0, 0, err
-			}
-			setCache[cacheKey] = setID
+			return 0, 0, fmt.Errorf(
+				"resolve prepared hourly formula KPI metric set for device %s",
+				group.deviceID,
+			)
 		}
 		groupSetIDs[index] = setID
 	}
@@ -855,42 +982,39 @@ SELECT DISTINCT '__hourly__', gs.counter_group,
 ON CONFLICT (product_key, counter_group, content_hash) DO NOTHING`
 }
 
-func buildVersionedHourlyBatchSQL() string {
+func buildResolveVersionedHourlyBaseGroupsSQL() string {
 	return `
 WITH group_sets AS (
     SELECT a.device_dim_id, a.object_type, a.object_ldn, a.counter_group,
            array_agg(DISTINCT member.metric_id ORDER BY member.metric_id) AS metric_ids
       FROM pm_measurement_anchors a
-      JOIN pm_metric_sets s ON s.metric_set_id = a.metric_set_id
-      CROSS JOIN LATERAL unnest(s.metric_ids) member(metric_id)
-     WHERE a."time" >= $2 AND a."time" < $3
-       AND a.device_dim_id = ANY($4::uuid[])
+      JOIN pm_metric_sets source_set ON source_set.metric_set_id = a.metric_set_id
+      CROSS JOIN LATERAL unnest(source_set.metric_ids) member(metric_id)
+     WHERE a."time" >= $1 AND a."time" < $2
+       AND a.device_dim_id = ANY($3::uuid[])
      GROUP BY a.device_dim_id, a.object_type, a.object_ldn, a.counter_group
-),
-desired_sets AS (
-    SELECT DISTINCT '__hourly__'::text AS product_key, gs.counter_group,
-           decode(md5(array_to_string(gs.metric_ids, ',')), 'hex') AS content_hash,
-           gs.metric_ids
-      FROM group_sets gs
-),
-resolved_sets AS (
-    SELECT s.metric_set_id, s.counter_group, s.content_hash
-      FROM pm_metric_sets s
-      JOIN desired_sets desired
-        ON desired.product_key=s.product_key
-       AND desired.counter_group=s.counter_group
-       AND desired.content_hash=s.content_hash
-),
-anchors AS (
+)
+SELECT gs.device_dim_id, gs.object_type, gs.object_ldn, gs.counter_group,
+       resolved.metric_set_id
+  FROM group_sets gs
+  JOIN pm_metric_sets resolved
+    ON resolved.product_key='__hourly__'
+   AND resolved.counter_group=gs.counter_group
+   AND resolved.content_hash=decode(md5(array_to_string(gs.metric_ids, ',')), 'hex')
+   AND resolved.metric_ids=gs.metric_ids
+ ORDER BY gs.device_dim_id, gs.object_type, gs.object_ldn, gs.counter_group`
+}
+
+func buildVersionedHourlyBatchSQL() string {
+	return `
+WITH anchors AS (
     INSERT INTO pm_hourly_anchors
         ("time", bucket_version, device_dim_id, object_type, object_ldn,
          counter_group, metric_set_id, granularity, start_time, end_time)
-    SELECT $2, $1, gs.device_dim_id, gs.object_type, gs.object_ldn,
-           gs.counter_group, ms.metric_set_id, 'hourly', $2, $3
-      FROM group_sets gs
-      JOIN resolved_sets ms
-        ON ms.counter_group = gs.counter_group
-       AND ms.content_hash = decode(md5(array_to_string(gs.metric_ids, ',')), 'hex')
+    SELECT $2, $1, input.device_dim_id, input.object_type, input.object_ldn,
+           input.counter_group, input.metric_set_id, 'hourly', $2, $3
+      FROM unnest($4::uuid[], $5::smallint[], $6::text[], $7::text[], $8::bigint[])
+        AS input(device_dim_id, object_type, object_ldn, counter_group, metric_set_id)
     RETURNING anchor_id, "time", device_dim_id, object_type, object_ldn, counter_group
 ),
 values_inserted AS (
@@ -901,7 +1025,7 @@ values_inserted AS (
              WHEN 'avg' THEN avg(v.metric_value)
              WHEN 'max' THEN max(v.metric_value)
              WHEN 'min' THEN min(v.metric_value)
-           END`, "d.unit", "d.statis_type", "$6", "d.metric_path") + `
+           END`, "d.unit", "d.statis_type", "$10", "d.metric_path") + `
       FROM anchors ha
       JOIN pm_measurement_anchors a
         ON a.device_dim_id = ha.device_dim_id
@@ -922,8 +1046,8 @@ counts AS (
 batch_completed AS (
     UPDATE pm_hourly_rollup_batches b
        SET status='completed', anchor_count=c.anchors, value_count=c.values, finished_at=now()
-      FROM counts c
-     WHERE b.bucket_version=$1 AND b.batch_no=$5
+     FROM counts c
+     WHERE b.bucket_version=$1 AND b.batch_no=$9
     RETURNING c.anchors, c.values
 ),
 version_progress AS (
