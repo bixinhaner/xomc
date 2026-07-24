@@ -9618,6 +9618,12 @@
           "type": "string"
         },
         {
+          "name": "script_name",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
           "name": "sort_by",
           "in": "query",
           "required": false,
@@ -13642,7 +13648,7 @@
     },
     "github.com/omcgo/omcgo/internal/pm/adhoc.(*Handler).Progress-fm": {
       "found": true,
-      "description": "Progress GET /pm/adhoc/tasks/:id/progress（SSE）\n\n订阅 pm.adhoc.progress 与 pm.adhoc.completed 主题，过滤匹配 task_id 的事件流给客户端。\n客户端 EventSource 'progress'/'completed' 事件名分别接收。"
+      "description": "Progress GET /pm/adhoc/tasks/:id/progress（SSE）\n\n认证授权通过后只订阅当前 APP 实例的本地 ProgressHub。上游 Core NATS 订阅\n由 APP 启动期的 ProgressBridge 统一持有，不随 HTTP 连接数量增长。"
     },
     "github.com/omcgo/omcgo/internal/pm/adhoc.(*Handler).Results-fm": {
       "found": true,
@@ -13794,7 +13800,8 @@
                 "dashboard",
                 "device_view",
                 "kpi_query",
-                "adhoc"
+                "pm_dashboard",
+                "adhoc_result"
               ],
               "type": "string"
             },
