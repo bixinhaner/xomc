@@ -3,6 +3,7 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/omcgo/omcgo/internal/acs/transfercfg"
@@ -358,4 +359,27 @@ func TestDownloadHandler_NormalizesLegacyConfigBackupBucketInAbsoluteURL(t *test
 	body := string(result)
 	assert.Contains(t, body, "https://gateway.example.com/smallcell/FileDownloadService/config-backup/backup/SN001_CFG.xml")
 	assert.NotContains(t, body, "FileDownloadService/config_backup/")
+}
+
+func TestDownloadHandler_PreservesExternalURLsContainingLegacyBucketSegment(t *testing.T) {
+	d := NewDispatcher()
+	for _, externalURL := range []string{
+		"https://vendor.example/files/config_backup/fw.bin",
+		"ftp://vendor.example/files/config_backup/fw.bin",
+	} {
+		t.Run(externalURL, func(t *testing.T) {
+			cmd := &Command{
+				Method: "Download",
+				Params: json.RawMessage(fmt.Sprintf(`{
+					"file_type": "1 Firmware Upgrade Image",
+					"url": %q
+				}`, externalURL)),
+			}
+
+			result, err := d.BuildRequest(cmd, "cwmp-vendor-download")
+
+			require.NoError(t, err)
+			assert.Contains(t, string(result), "<URL>"+externalURL+"</URL>")
+		})
+	}
 }

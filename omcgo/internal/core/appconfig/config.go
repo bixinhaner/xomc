@@ -937,9 +937,10 @@ func NormalizeConfigBackupBucket(bucket string) string {
 	return bucket
 }
 
-// NormalizeConfigBackupReference normalizes a bucket-qualified object path or
-// download URL/path at an API/config boundary while leaving unrelated
-// references unchanged.
+// NormalizeConfigBackupReference normalizes bucket-qualified internal object
+// paths and OMC FileDownloadService HTTP(S) routes. Arbitrary external URLs
+// are returned byte-for-byte, even when their object path happens to contain a
+// directory named config_backup.
 func NormalizeConfigBackupReference(reference string) string {
 	if reference == LegacyConfigBackupBucket {
 		return ConfigBackupBucket
@@ -947,9 +948,18 @@ func NormalizeConfigBackupReference(reference string) string {
 	if strings.HasPrefix(reference, LegacyConfigBackupBucket+"/") {
 		return ConfigBackupBucket + strings.TrimPrefix(reference, LegacyConfigBackupBucket)
 	}
-	legacySegment := "/" + LegacyConfigBackupBucket + "/"
-	if strings.Contains(reference, legacySegment) {
-		return strings.Replace(reference, legacySegment, "/"+ConfigBackupBucket+"/", 1)
+	legacyDownloadSegment := "/smallcell/FileDownloadService/" + LegacyConfigBackupBucket + "/"
+	canonicalDownloadSegment := "/smallcell/FileDownloadService/" + ConfigBackupBucket + "/"
+	lowerReference := strings.ToLower(reference)
+	if strings.Contains(reference, "://") {
+		if (strings.HasPrefix(lowerReference, "http://") || strings.HasPrefix(lowerReference, "https://")) &&
+			strings.Contains(reference, legacyDownloadSegment) {
+			return strings.Replace(reference, legacyDownloadSegment, canonicalDownloadSegment, 1)
+		}
+		return reference
+	}
+	if strings.Contains(reference, legacyDownloadSegment) {
+		return strings.Replace(reference, legacyDownloadSegment, canonicalDownloadSegment, 1)
 	}
 	return reference
 }

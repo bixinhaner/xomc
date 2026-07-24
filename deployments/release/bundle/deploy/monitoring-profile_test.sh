@@ -5,7 +5,8 @@ DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$DEPLOY_DIR/monitoring-profile-lib.sh"
 
 tmp_env="$(mktemp)"
-trap 'rm -f "$tmp_env"' EXIT
+tmp_meta_dir="$(mktemp -d)"
+trap 'rm -f "$tmp_env"; rm -rf "$tmp_meta_dir"' EXIT
 printf '%s\n' 'OMCGO_TRACER_ENABLED=true' > "$tmp_env"
 
 # Reproduce install ordering: package .env is sourced first, then the selected
@@ -48,5 +49,36 @@ apply_line="$(grep -n 'monitoring_profile_apply_install "$ENV_FILE" "$SKIP_MONIT
 
 grep -Fq 'monitoring_profile_apply_runtime ".env" "$SKIP_MONITORING"' "$DEPLOY_DIR/svc.sh"
 grep -Fq 'monitoring_profile_apply_runtime "$DEPLOY_DIR/.env" "$SKIP_MONITORING"' "$DEPLOY_DIR/healthcheck.sh"
+
+portable_mode() {
+  stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1"
+}
+
+portable_owner_group() {
+  stat -f '%u:%g' "$1" 2>/dev/null || stat -c '%u:%g' "$1"
+}
+
+metadata_env="$tmp_meta_dir/.env"
+printf '%s\n' 'OMCGO_TRACER_ENABLED=true' > "$metadata_env"
+chmod 0640 "$metadata_env"
+# Root CI can exercise a real owner/group transition; unprivileged runs still
+# verify that the caller's existing ownership is retained.
+if [ "$(id -u)" = 0 ]; then
+  chown 1:1 "$metadata_env"
+fi
+mode_before="$(portable_mode "$metadata_env")"
+owner_group_before="$(portable_owner_group "$metadata_env")"
+
+monitoring_profile_write_state "$metadata_env" 1
+
+[ "$(portable_mode "$metadata_env")" = "$mode_before" ]
+[ "$(portable_owner_group "$metadata_env")" = "$owner_group_before" ]
+grep -qx 'OMCGO_TRACER_ENABLED=true' "$metadata_env"
+grep -qx 'OMCGO_SKIP_MONITORING=1' "$metadata_env"
+
+new_env="$tmp_meta_dir/new.env"
+monitoring_profile_write_state "$new_env" 0
+[ "$(portable_mode "$new_env")" = 640 ]
+grep -qx 'OMCGO_SKIP_MONITORING=0' "$new_env"
 
 echo "monitoring profile behavior: PASS"
