@@ -10,7 +10,6 @@ import {
   CloseOutlined,
   EditOutlined,
   ExportOutlined,
-  EyeOutlined,
   FileTextOutlined,
   LinkOutlined,
   ReloadOutlined,
@@ -304,6 +303,7 @@ export default function DeviceList() {
   const { data: periodicSyncConfigs, isFetching: periodicSyncLoading } = useSysConfigsByCategory('device', periodicSyncModalOpen);
   const batchUpdateSysConfigs = useBatchUpdateSysConfigs();
   const [optimisticParamSyncDeviceIds, setOptimisticParamSyncDeviceIds] = useState<Set<string>>(() => new Set());
+  const [optimisticAlarmSyncDeviceIds, setOptimisticAlarmSyncDeviceIds] = useState<Set<string>>(() => new Set());
   const [periodicSyncWatchUntil, setPeriodicSyncWatchUntil] = useState(0);
 
   useEffect(() => {
@@ -373,6 +373,10 @@ export default function DeviceList() {
 
   const clearOptimisticParamSyncDevice = useCallback((deviceId: string) => {
     setOptimisticParamSyncDeviceIds((prev) => removeParamSyncOptimisticDeviceId(prev, deviceId));
+  }, []);
+
+  const clearOptimisticAlarmSyncDevice = useCallback((deviceId: string) => {
+    setOptimisticAlarmSyncDeviceIds((prev) => removeParamSyncOptimisticDeviceId(prev, deviceId));
   }, []);
 
   const [logModalOpen, setLogModalOpen] = useState(false);
@@ -1199,7 +1203,14 @@ export default function DeviceList() {
                 return;
               }
 
-		      setBatchAlarmSyncRunning(true);
+              setBatchAlarmSyncRunning(true);
+              setOptimisticAlarmSyncDeviceIds((prev) => {
+                const next = new Set(prev);
+                for (const { device } of runnableAlarmSyncEntries) {
+                  next.add(device.id);
+                }
+                return next;
+              });
               const abortController = new AbortController();
               alarmSyncBatchAbortRef.current = abortController;
 
@@ -1207,7 +1218,7 @@ export default function DeviceList() {
                 const results = await mapWithConcurrencyLimit(
                   runnableAlarmSyncEntries,
                   ALARM_SYNC_BATCH_CONCURRENCY,
-                  async ({ task }) => {
+                  async ({ device, task }) => {
                     const taskId = task.id;
                     const sn = task.sn;
                     try {
@@ -1241,11 +1252,13 @@ export default function DeviceList() {
                           logContent: `[${timestamp}] INFO: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${sn}\n[${timestamp}] INFO: alarm sync completed and persisted\n[${timestamp}] INFO: ${t('task.log.success')}`,
                         } : item
                       ));
+                      clearOptimisticAlarmSyncDevice(device.id);
                       return true;
                     } catch (err) {
                       if (isAbortError(err)) {
                         throw err;
                       }
+                      clearOptimisticAlarmSyncDevice(device.id);
                       const timestamp = new Date().toISOString();
                       const errMsg = err instanceof Error ? err.message : t('task.log.failed');
                       setCollectTasks((prev) => prev.map((item) =>
@@ -1282,6 +1295,7 @@ export default function DeviceList() {
                 }
               } finally {
                 setBatchAlarmSyncRunning(false);
+                setOptimisticAlarmSyncDeviceIds(new Set());
                 if (alarmSyncBatchAbortRef.current === abortController) {
                   alarmSyncBatchAbortRef.current = null;
                 }
@@ -1436,6 +1450,7 @@ export default function DeviceList() {
       batchAlarmSyncRunning,
       batchParamSyncRunning,
       batchReboot,
+      clearOptimisticAlarmSyncDevice,
       clearOptimisticParamSyncDevice,
       createUfteTask,
       devices,
@@ -1643,18 +1658,23 @@ export default function DeviceList() {
         key: 'connStatus',
         title: t('device.connStatus'),
         dataIndex: 'connStatus',
-        width: 170,
+        width: 125,
         fixed: 'left',
         group: 'common',
         render: (_val, record) => {
           const mappedStatus = mapConnStatus(record.connStatus);
+          const syncing = mappedStatus === 'online' && (
+            record.paramSyncRunning
+            || optimisticParamSyncDeviceIds.has(record.id)
+            || optimisticAlarmSyncDeviceIds.has(record.id)
+          );
           return (
             <Space size={6} wrap={false}>
               <StatusIndicator
                 status={mappedStatus}
                 text={mappedStatus === 'online' ? t('status.online') : t('status.offline')}
               />
-              {(record.paramSyncRunning || optimisticParamSyncDeviceIds.has(record.id)) && (
+              {syncing && (
                 <Tooltip title={t('device.periodicParamSync.running')}>
                   <Tag
                     style={{
@@ -1843,6 +1863,32 @@ export default function DeviceList() {
         hidden: true,
         group: 'common',
         render: (_val, record) => fmtTime(record.offlineTime),
+      },
+      {
+        key: 'lastParamSyncAt',
+        title: t('device.lastParamSyncAt'),
+        dataIndex: 'lastParamSyncAt',
+        width: 170,
+        group: 'common',
+        render: (_val, record) => {
+          const syncText = record.lastParamSyncAt ? fmtTime(record.lastParamSyncAt) : t('device.paramTree.neverSynced');
+          return (
+            <Tooltip title={record.lastParamSyncAt ? t('device.paramSync.lastSyncedAt', { time: fmtTime(record.lastParamSyncAt) }) : syncText}>
+              <span
+                style={{
+                  display: 'inline-block',
+                  maxWidth: 150,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  verticalAlign: 'middle',
+                }}
+              >
+                {syncText}
+              </span>
+            </Tooltip>
+          );
+        },
       },
       {
         key: 'onlineDuration',
@@ -2129,7 +2175,7 @@ export default function DeviceList() {
       { key: 'ipsecAddr', title: t('device.ipsecAddr'), dataIndex: 'ipsecAddr', width: 140, hidden: true, mono: true, group: 'common' },
     ],
     // remarkHeaderRender 暂从 dep 列表移除：remark 列定义已注释，恢复时同步加回。
-    [navigate, openDeviceDetail, prefetchDeviceDetailEntry, t, fmtTime, fmtDuration, fmtStatus, adminStateStatusMap, renderMultiCellStatus, renderActivationStatus, message, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails, editingInstallAddressId, editingInstallAddressValue, savingInstallAddressId, saveInstallAddressEdit, cancelInstallAddressEdit, startInstallAddressEdit, optimisticParamSyncDeviceIds, renderLocationCell]
+    [navigate, openDeviceDetail, prefetchDeviceDetailEntry, t, fmtTime, fmtDuration, fmtStatus, adminStateStatusMap, renderMultiCellStatus, renderActivationStatus, message, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails, editingInstallAddressId, editingInstallAddressValue, savingInstallAddressId, saveInstallAddressEdit, cancelInstallAddressEdit, startInstallAddressEdit, optimisticParamSyncDeviceIds, optimisticAlarmSyncDeviceIds, renderLocationCell]
   );
 
   // ─── 列表导出(用户决策 2026-06-02) ──────────────────────────────────────
@@ -2143,6 +2189,8 @@ export default function DeviceList() {
       switch (key) {
         case 'connStatus':
           return mapConnStatus(record.connStatus) === 'online' ? t('status.online') : t('status.offline');
+        case 'lastParamSyncAt':
+          return record.lastParamSyncAt ? fmtTime(record.lastParamSyncAt) : t('device.paramTree.neverSynced');
         case 'alarmLevel':
           return getSeverityLabel(record.alarmLevel);
         case 'onlineTime':
@@ -2341,36 +2389,11 @@ export default function DeviceList() {
   // 任务面板表格列定义
   const taskColumns: ColumnsType<LocalTask> = useMemo(() => [
     {
-      title: t('table.action'),
-      key: 'action',
-      width: 70,
-      fixed: 'left',
-      render: (_: unknown, record: LocalTask) => {
-        // 只有收集操作（hasDetail=true）且完成或失败状态才显示查看按钮
-        if (!record.hasDetail) return null;
-        if (record.status !== 'success' && record.status !== 'failed') return null;
-        return (
-          <Button
-            type="link"
-            size="small"
-            icon={<EyeOutlined />}
-            onClick={() => handleViewLog(record)}
-            style={{ padding: 0, fontSize: 12 }}
-          >
-            {t('common.view')}
-          </Button>
-        );
-      },
-    },
-    {
       title: 'SN',
       dataIndex: 'sn',
       key: 'sn',
       width: 140,
       ellipsis: true,
-      render: (sn: string) => (
-        <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{sn}</span>
-      ),
     },
     {
       title: t('alarm.deviceName'),
@@ -2378,13 +2401,6 @@ export default function DeviceList() {
       key: 'deviceName',
       ellipsis: true,
       width: 120,
-    },
-    {
-      title: t('table.type'),
-      dataIndex: 'type',
-      key: 'type',
-      width: 100,
-      ellipsis: true,
     },
     {
       title: t('table.status'),

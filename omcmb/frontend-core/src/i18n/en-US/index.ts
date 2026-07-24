@@ -1381,6 +1381,7 @@ const messages: Record<string, string> = {
   'device.type.eGW':        'Enterprise Gateway',
   'device.type.all':        'All Types',
   'device.connStatus':      'Connection Status',
+  'device.lastParamSyncAt': 'Last Sync Time',
   // T-0162: decoupled into two filter dropdowns
   'device.lifecycleState':  'Lifecycle',
   'device.isOnline':        'Connectivity',
@@ -3311,6 +3312,8 @@ const messages: Record<string, string> = {
   'device.periodicParamSync.saveSuccess': 'Scheduled auto sync settings saved',
   'device.periodicParamSync.running': 'Parameter sync in progress',
   'device.periodicParamSync.runningShort': 'Syncing',
+  'device.paramSync.syncedAgo': 'Synced {time}',
+  'device.paramSync.lastSyncedAt': 'Last synced: {time}',
 
   // -------------------------------------------------------------------------
   // EmptyState
