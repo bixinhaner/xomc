@@ -96,6 +96,35 @@ func TestParseHourlyBatchDevices(t *testing.T) {
 	assert.Equal(t, 200, ParseHourlyBatchDevices("invalid"))
 }
 
+func TestVersionedHourlyFormulaDependencies(t *testing.T) {
+	firstID := uuid.New()
+	secondID := uuid.New()
+	prepared := map[uuid.UUID]preparedFormulaDevice{
+		firstID: {
+			kpis: []preparedFormulaKPI{{Definition: router.KPIDef{
+				Dependencies: []string{"counter.b", "counter.a"},
+			}}},
+		},
+		secondID: {
+			kpis: []preparedFormulaKPI{{Definition: router.KPIDef{
+				Dependencies: []string{"counter.a", "counter.c"},
+			}}},
+		},
+	}
+
+	dependencies, filtered := versionedHourlyFormulaDependencies(prepared)
+
+	assert.True(t, filtered)
+	assert.Equal(t, []string{"counter.a", "counter.b", "counter.c"}, dependencies)
+
+	prepared[secondID] = preparedFormulaDevice{
+		kpis: []preparedFormulaKPI{{Definition: router.KPIDef{Formula: "42"}}},
+	}
+	dependencies, filtered = versionedHourlyFormulaDependencies(prepared)
+	assert.True(t, filtered)
+	assert.Equal(t, []string{"counter.a", "counter.b"}, dependencies)
+}
+
 func TestFormulaDictionaryRegisteredBeforeVersionLock(t *testing.T) {
 	ctx := context.Background()
 	deviceID := uuid.New()
@@ -116,6 +145,7 @@ func TestFormulaDictionaryRegisteredBeforeVersionLock(t *testing.T) {
 		"LOCK-FORMULA-1": {
 			KPIs: []router.KPIDef{{
 				IndicatorID: "KLOCK1", Unit: "%", Formula: "CLOCK1",
+				Dependencies: []string{"CLOCK1"},
 			}},
 		},
 	}}, nil)
@@ -147,6 +177,7 @@ func TestVersionedHourlyProductionLockOrder(t *testing.T) {
 		"LOCK-FORMULA-1": {
 			KPIs: []router.KPIDef{{
 				IndicatorID: "KLOCK1", Unit: "%", Formula: "CLOCK1",
+				Dependencies: []string{"CLOCK1"},
 			}},
 		},
 	}}, nil)
@@ -162,9 +193,15 @@ func TestVersionedHourlyProductionLockOrder(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), anchors)
 	assert.Equal(t, int64(2), values)
+	assert.Contains(t, tx.objectQuerySQL, "SELECT DISTINCT")
+	assert.Contains(t, tx.objectQuerySQL, `ha."time"=$3`)
+	require.Len(t, tx.objectQueryArgs, 3)
+	assert.Equal(t, w.Start, tx.objectQueryArgs[2])
 	assert.Contains(t, tx.counterQuerySQL, `ha."time"=$3`)
-	require.Len(t, tx.counterQueryArgs, 3)
+	assert.Contains(t, tx.counterQuerySQL, `d.metric_path=ANY($4::text[])`)
+	require.Len(t, tx.counterQueryArgs, 4)
 	assert.Equal(t, w.Start, tx.counterQueryArgs[2])
+	assert.Equal(t, []string{"CLOCK1"}, tx.counterQueryArgs[3])
 	assert.Equal(t, []string{
 		"dictionary",
 		"begin",
@@ -176,6 +213,56 @@ func TestVersionedHourlyProductionLockOrder(t *testing.T) {
 		"formula values",
 		"commit",
 	}, events)
+}
+
+func TestVersionedHourlyMixedConstantFormulaKeepsDependencyFilter(t *testing.T) {
+	ctx := context.Background()
+	deviceID := uuid.New()
+	events := make([]string, 0)
+	tx := &recordingFormulaBatchTx{
+		events:   &events,
+		deviceID: deviceID,
+		metricID: 89,
+		setID:    144,
+	}
+	w := WindowSpec{
+		Granularity: metrics.GranularityHourly,
+		Start:       time.Date(2026, 7, 24, 10, 0, 0, 0, time.UTC),
+		End:         time.Date(2026, 7, 24, 11, 0, 0, 0, time.UTC),
+	}
+	prepared := map[uuid.UUID]preparedFormulaDevice{
+		deviceID: {
+			oui: "48BF74",
+			sn:  "LOCK-FORMULA-1",
+			kpis: []preparedFormulaKPI{
+				{
+					MetricID: 89,
+					Definition: router.KPIDef{
+						IndicatorID: "KLOCK1", Unit: "%", Formula: "CLOCK1",
+						Dependencies: []string{"CLOCK1"},
+					},
+				},
+				{
+					MetricID: 90,
+					Definition: router.KPIDef{
+						IndicatorID: "KCONST", Unit: "%", Formula: "42",
+					},
+				},
+			},
+		},
+	}
+
+	anchors, values, err := (&Aggregator{}).insertVersionedHourlyFormulaKPIs(
+		ctx, tx, 55, []uuid.UUID{deviceID}, w, "", prepared,
+		map[uuid.UUID]int64{deviceID: 144},
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), anchors)
+	assert.Equal(t, int64(2), values)
+	assert.Contains(t, tx.objectQuerySQL, "SELECT DISTINCT")
+	assert.Contains(t, tx.counterQuerySQL, `d.metric_path=ANY($4::text[])`)
+	assert.Equal(t, []string{"CLOCK1"}, tx.counterQueryArgs[3])
 }
 
 func TestVersionedHourlyBatchRetriesTransactionWithoutRepeatingFormulaPreparation(t *testing.T) {
@@ -204,6 +291,7 @@ func TestVersionedHourlyBatchRetriesTransactionWithoutRepeatingFormulaPreparatio
 		"LOCK-FORMULA-1": {
 			KPIs: []router.KPIDef{{
 				IndicatorID: "KLOCK1", Unit: "%", Formula: "CLOCK1",
+				Dependencies: []string{"CLOCK1"},
 			}},
 		},
 	}}, nil)
@@ -297,6 +385,8 @@ type recordingFormulaBatchTx struct {
 	failLockErr      error
 	commits          int
 	rollbacks        int
+	objectQuerySQL   string
+	objectQueryArgs  []any
 	counterQuerySQL  string
 	counterQueryArgs []any
 }
@@ -309,7 +399,13 @@ func (tx *recordingFormulaBatchTx) record(event string) {
 
 func (tx *recordingFormulaBatchTx) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
 	switch {
-	case strings.Contains(sql, "FROM pm_hourly_anchors"):
+	case strings.Contains(sql, "SELECT DISTINCT ha.device_dim_id"):
+		tx.objectQuerySQL = sql
+		tx.objectQueryArgs = args
+		return &recordingFormulaRows{rows: [][]any{{
+			tx.deviceID, int16(0), "",
+		}}}, nil
+	case strings.Contains(sql, "SELECT ha.device_dim_id, ha.object_type"):
 		tx.counterQuerySQL = sql
 		tx.counterQueryArgs = args
 		return &recordingFormulaRows{rows: [][]any{{

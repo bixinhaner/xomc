@@ -737,25 +737,6 @@ func (a *Aggregator) insertVersionedHourlyFormulaKPIs(
 	if len(prepared) == 0 || len(deviceIDs) == 0 {
 		return 0, 0, nil
 	}
-	rows, err := tx.Query(ctx, `
-		SELECT ha.device_dim_id, ha.object_type, ha.object_ldn,
-		       d.metric_path, hv.metric_value
-		  FROM pm_hourly_anchors ha
-		  JOIN pm_hourly_values hv
-		    ON hv.bucket_version=ha.bucket_version
-		   AND hv."time"=ha."time" AND hv.anchor_id=ha.anchor_id
-		  JOIN pm_metric_dictionary d ON d.metric_id=hv.metric_id
-		 WHERE ha.bucket_version=$1
-		   AND ha.device_dim_id=ANY($2::uuid[])
-		   AND ha."time"=$3
-		   AND d.metric_type='counter'
-		 ORDER BY ha.device_dim_id, ha.object_ldn, d.metric_path`,
-		version, deviceIDs, w.Start)
-	if err != nil {
-		return 0, 0, fmt.Errorf("load versioned hourly counters: %w", err)
-	}
-	defer rows.Close()
-
 	type formulaObject struct {
 		objectType int16
 		objectLDN  string
@@ -767,13 +748,25 @@ func (a *Aggregator) insertVersionedHourlyFormulaKPIs(
 	}
 	byID := make(map[uuid.UUID]*deviceData, len(deviceIDs))
 	order := make([]uuid.UUID, 0, len(deviceIDs))
-	for rows.Next() {
+
+	objectRows, err := tx.Query(ctx, `
+		SELECT DISTINCT ha.device_dim_id, ha.object_type, ha.object_ldn
+		  FROM pm_hourly_anchors ha
+		 WHERE ha.bucket_version=$1
+		   AND ha.device_dim_id=ANY($2::uuid[])
+		   AND ha."time"=$3
+		 ORDER BY ha.device_dim_id, ha.object_ldn`,
+		version, deviceIDs, w.Start)
+	if err != nil {
+		return 0, 0, fmt.Errorf("load versioned hourly formula objects: %w", err)
+	}
+	for objectRows.Next() {
 		var id uuid.UUID
-		var objectLDN, path string
+		var objectLDN string
 		var objectType int16
-		var value float64
-		if err := rows.Scan(&id, &objectType, &objectLDN, &path, &value); err != nil {
-			return 0, 0, fmt.Errorf("scan versioned hourly counter: %w", err)
+		if err := objectRows.Scan(&id, &objectType, &objectLDN); err != nil {
+			objectRows.Close()
+			return 0, 0, fmt.Errorf("scan versioned hourly formula object: %w", err)
 		}
 		preparedDevice, ok := prepared[id]
 		if !ok {
@@ -788,18 +781,62 @@ func (a *Aggregator) insertVersionedHourlyFormulaKPIs(
 			byID[id] = dev
 			order = append(order, id)
 		}
-		object := formulaObject{objectType: objectType, objectLDN: objectLDN}
-		counters := dev.objects[object]
-		if counters == nil {
-			counters = make(map[string]float64)
-			dev.objects[object] = counters
+		dev.objects[formulaObject{objectType: objectType, objectLDN: objectLDN}] =
+			make(map[string]float64)
+	}
+	if err := objectRows.Err(); err != nil {
+		objectRows.Close()
+		return 0, 0, fmt.Errorf("iterate versioned hourly formula objects: %w", err)
+	}
+	objectRows.Close()
+
+	dependencies, loadCounters := versionedHourlyFormulaDependencies(prepared)
+	if loadCounters {
+		rows, err := tx.Query(ctx, `
+		SELECT ha.device_dim_id, ha.object_type, ha.object_ldn,
+		       d.metric_path, hv.metric_value
+		  FROM pm_hourly_anchors ha
+		  JOIN pm_hourly_values hv
+		    ON hv.bucket_version=ha.bucket_version
+		   AND hv."time"=ha."time" AND hv.anchor_id=ha.anchor_id
+		  JOIN pm_metric_dictionary d ON d.metric_id=hv.metric_id
+		 WHERE ha.bucket_version=$1
+		   AND ha.device_dim_id=ANY($2::uuid[])
+		   AND ha."time"=$3
+		   AND d.metric_type='counter'
+		   AND d.metric_path=ANY($4::text[])
+		 ORDER BY ha.device_dim_id, ha.object_ldn, d.metric_path`,
+			version, deviceIDs, w.Start, dependencies)
+		if err != nil {
+			return 0, 0, fmt.Errorf("load versioned hourly counters: %w", err)
 		}
-		counters[path] = value
+		for rows.Next() {
+			var id uuid.UUID
+			var objectLDN, path string
+			var objectType int16
+			var value float64
+			if err := rows.Scan(&id, &objectType, &objectLDN, &path, &value); err != nil {
+				rows.Close()
+				return 0, 0, fmt.Errorf("scan versioned hourly counter: %w", err)
+			}
+			dev := byID[id]
+			if dev == nil {
+				continue
+			}
+			object := formulaObject{objectType: objectType, objectLDN: objectLDN}
+			counters := dev.objects[object]
+			if counters == nil {
+				counters = make(map[string]float64)
+				dev.objects[object] = counters
+			}
+			counters[path] = value
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return 0, 0, fmt.Errorf("iterate versioned hourly counters: %w", err)
+		}
+		rows.Close()
 	}
-	if err := rows.Err(); err != nil {
-		return 0, 0, fmt.Errorf("iterate versioned hourly counters: %w", err)
-	}
-	rows.Close()
 
 	type formulaGroup struct {
 		deviceID uuid.UUID
@@ -915,6 +952,25 @@ func (a *Aggregator) insertVersionedHourlyFormulaKPIs(
 		return 0, 0, fmt.Errorf("copy hourly formula KPI values: %w", err)
 	}
 	return int64(len(anchorIDs)), int64(len(valueRows)), nil
+}
+
+func versionedHourlyFormulaDependencies(
+	prepared map[uuid.UUID]preparedFormulaDevice,
+) ([]string, bool) {
+	unique := make(map[string]struct{})
+	for _, device := range prepared {
+		for _, kpi := range device.kpis {
+			for _, dependency := range kpi.Definition.Dependencies {
+				unique[dependency] = struct{}{}
+			}
+		}
+	}
+	dependencies := make([]string, 0, len(unique))
+	for dependency := range unique {
+		dependencies = append(dependencies, dependency)
+	}
+	sort.Strings(dependencies)
+	return dependencies, len(dependencies) > 0
 }
 
 func resolveVersionedHourlyFormulaMetricSet(
