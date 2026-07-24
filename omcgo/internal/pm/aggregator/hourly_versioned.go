@@ -9,10 +9,13 @@ import (
 	"strings"
 	"time"
 
+	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/omcgo/omcgo/internal/pm/kpi/router"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
@@ -39,6 +42,28 @@ type RollupStats struct {
 
 type poolAcquirer interface {
 	Acquire(context.Context) (*pgxpool.Conn, error)
+}
+
+// DBTX is the pgx surface shared by a pool connection and a transaction.
+type DBTX interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+type versionedHourlyBatchBeginner interface {
+	DBTX
+	Begin(context.Context) (pgx.Tx, error)
+}
+
+type preparedFormulaKPI struct {
+	MetricID   int64
+	Definition router.KPIDef
+}
+
+type preparedFormulaDevice struct {
+	oui, sn string
+	kpis    []preparedFormulaKPI
 }
 
 func (a *Aggregator) supportsVersionedHourly() bool {
@@ -123,9 +148,10 @@ func (a *Aggregator) RunHourlyVersioned(ctx context.Context, w WindowSpec, batch
 	}
 
 	for batchNo, deviceIDs := range batches {
-		tx, beginErr := conn.Begin(ctx)
-		if beginErr != nil {
-			return stats, fmt.Errorf("begin hourly batch %d: %w", batchNo, beginErr)
+		preparedFormulaKPIs, tx, openErr := a.prepareAndBeginVersionedHourlyBatch(
+			ctx, conn, version, deviceIDs)
+		if openErr != nil {
+			return stats, fmt.Errorf("open hourly batch %d: %w", batchNo, openErr)
 		}
 		var anchorCount, valueCount int64
 		if _, insertErr := tx.Exec(ctx, `
@@ -136,6 +162,11 @@ func (a *Aggregator) RunHourlyVersioned(ctx context.Context, w WindowSpec, batch
 			_ = tx.Rollback(ctx)
 			return stats, fmt.Errorf("start hourly batch %d: %w", batchNo, insertErr)
 		}
+		if _, setErr := tx.Exec(ctx, buildEnsureVersionedHourlyMetricSetsSQL(),
+			w.Start, w.End, deviceIDs); setErr != nil {
+			_ = tx.Rollback(ctx)
+			return stats, fmt.Errorf("resolve hourly metric sets for batch %d: %w", batchNo, setErr)
+		}
 		scanErr := tx.QueryRow(ctx, buildVersionedHourlyBatchSQL(),
 			version, w.Start, w.End, deviceIDs, batchNo, numberProcess).Scan(&anchorCount, &valueCount)
 		if scanErr != nil {
@@ -143,7 +174,7 @@ func (a *Aggregator) RunHourlyVersioned(ctx context.Context, w WindowSpec, batch
 			return stats, fmt.Errorf("build hourly batch %d: %w", batchNo, scanErr)
 		}
 		formulaAnchors, formulaValues, formulaErr := a.insertVersionedHourlyFormulaKPIs(
-			ctx, tx, version, deviceIDs, w, numberProcess)
+			ctx, tx, version, deviceIDs, w, numberProcess, preparedFormulaKPIs)
 		if formulaErr != nil {
 			_ = tx.Rollback(ctx)
 			return stats, fmt.Errorf("build hourly formula KPI batch %d: %w", batchNo, formulaErr)
@@ -269,6 +300,252 @@ func listHourlyDeviceIDs(ctx context.Context, db queryer, w WindowSpec) ([]uuid.
 	return out, nil
 }
 
+func (a *Aggregator) prepareAndBeginVersionedHourlyBatch(
+	ctx context.Context,
+	conn versionedHourlyBatchBeginner,
+	version int64,
+	deviceIDs []uuid.UUID,
+) (map[uuid.UUID]preparedFormulaDevice, pgx.Tx, error) {
+	// Formula dictionary rows are resolved before the transaction that locks
+	// and writes bucket/version progress. The transaction receives immutable IDs.
+	prepared, err := a.prepareVersionedHourlyFormulaKPIs(ctx, conn, deviceIDs)
+	if err != nil {
+		return nil, nil, fmt.Errorf("prepare hourly formula KPIs: %w", err)
+	}
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("begin hourly batch: %w", err)
+	}
+	var lockedVersion int64
+	if err := tx.QueryRow(ctx, `
+		SELECT bucket_version
+		  FROM pm_hourly_bucket_versions
+		 WHERE bucket_version=$1 AND status='building'
+		 FOR UPDATE`, version).Scan(&lockedVersion); err != nil {
+		_ = tx.Rollback(ctx)
+		return nil, nil, fmt.Errorf("lock hourly bucket version: %w", err)
+	}
+	if lockedVersion != version {
+		_ = tx.Rollback(ctx)
+		return nil, nil, fmt.Errorf("lock hourly bucket version: got %d, want %d", lockedVersion, version)
+	}
+	return prepared, tx, nil
+}
+
+func (a *Aggregator) prepareVersionedHourlyFormulaKPIs(
+	ctx context.Context,
+	db DBTX,
+	deviceIDs []uuid.UUID,
+) (map[uuid.UUID]preparedFormulaDevice, error) {
+	prepared := make(map[uuid.UUID]preparedFormulaDevice)
+	if a.kpiRouter == nil || len(deviceIDs) == 0 {
+		return prepared, nil
+	}
+
+	deviceSQL, args, err := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).
+		Select("id", "COALESCE(oui,'')", "COALESCE(serial_number,'')").
+		From("device_dim").
+		Where(sq.Eq{"id": deviceIDs}).
+		OrderBy("id").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build hourly formula device query: %w", err)
+	}
+	rows, err := db.Query(ctx, deviceSQL, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list hourly formula devices: %w", err)
+	}
+	type formulaDevice struct {
+		id      uuid.UUID
+		oui, sn string
+	}
+	devices := make([]formulaDevice, 0, len(deviceIDs))
+	for rows.Next() {
+		var device formulaDevice
+		if err := rows.Scan(&device.id, &device.oui, &device.sn); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan hourly formula device: %w", err)
+		}
+		devices = append(devices, device)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("iterate hourly formula devices: %w", err)
+	}
+	rows.Close()
+
+	definitions := make(map[string]router.KPIDef)
+	deviceDefinitions := make(map[uuid.UUID][]router.KPIDef, len(devices))
+	for _, device := range devices {
+		route, err := a.kpiRouter.LookupByDevice(ctx, device.sn)
+		if err != nil {
+			return nil, fmt.Errorf("lookup hourly KPI route for %s: %w", device.sn, err)
+		}
+		if route == nil {
+			continue
+		}
+		formulas, _ := splitKPIDefsByRollupMode(route.KPIs)
+		if len(formulas) == 0 {
+			continue
+		}
+		canonicalFormulas := make([]router.KPIDef, 0, len(formulas))
+		for _, definition := range formulas {
+			if strings.TrimSpace(definition.StatisType) == "" {
+				definition.StatisType = string(metrics.StatisPct)
+			}
+			if current, ok := definitions[definition.IndicatorID]; ok {
+				if current.StatisType != definition.StatisType || current.Unit != definition.Unit {
+					return nil, fmt.Errorf("prepare hourly formula KPI %q: inconsistent immutable metadata", definition.IndicatorID)
+				}
+			} else {
+				definitions[definition.IndicatorID] = definition
+			}
+			canonicalFormulas = append(canonicalFormulas, definition)
+		}
+		deviceDefinitions[device.id] = canonicalFormulas
+		prepared[device.id] = preparedFormulaDevice{oui: device.oui, sn: device.sn}
+	}
+	if len(definitions) == 0 {
+		return prepared, nil
+	}
+
+	metricIDs, err := resolveVersionedHourlyFormulaDictionary(ctx, db, definitions)
+	if err != nil {
+		return nil, err
+	}
+	for deviceID, formulas := range deviceDefinitions {
+		device := prepared[deviceID]
+		device.kpis = make([]preparedFormulaKPI, 0, len(formulas))
+		for _, definition := range formulas {
+			metricID, ok := metricIDs[definition.IndicatorID]
+			if !ok {
+				return nil, fmt.Errorf("prepare hourly formula KPI %q: metric ID was not resolved", definition.IndicatorID)
+			}
+			device.kpis = append(device.kpis, preparedFormulaKPI{
+				MetricID: metricID, Definition: definition,
+			})
+		}
+		prepared[deviceID] = device
+	}
+	return prepared, nil
+}
+
+type preparedFormulaDictionaryRow struct {
+	metricID         int64
+	metricType       metrics.MetricType
+	statisType, unit string
+}
+
+func resolveVersionedHourlyFormulaDictionary(
+	ctx context.Context,
+	db DBTX,
+	definitions map[string]router.KPIDef,
+) (map[string]int64, error) {
+	paths := make([]string, 0, len(definitions))
+	for path := range definitions {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+
+	existing, err := queryVersionedHourlyFormulaDictionary(ctx, db, paths)
+	if err != nil {
+		return nil, err
+	}
+	insert := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).
+		Insert("pm_metric_dictionary").
+		Columns("metric_path", "report_key", "metric_type", "statis_type", "unit")
+	missing := 0
+	for _, path := range paths {
+		definition := definitions[path]
+		if current, ok := existing[path]; ok {
+			if err := validatePreparedFormulaDictionaryRow(path, definition, current); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		insert = insert.Values(path, path, metrics.MetricTypeKPI,
+			sq.Expr("NULLIF(?, '')", definition.StatisType),
+			sq.Expr("NULLIF(?, '')", definition.Unit))
+		missing++
+	}
+	if missing > 0 {
+		insertSQL, args, err := insert.Suffix("ON CONFLICT (metric_path) DO NOTHING").ToSql()
+		if err != nil {
+			return nil, fmt.Errorf("build hourly formula KPI dictionary insert: %w", err)
+		}
+		if _, err := db.Exec(ctx, insertSQL, args...); err != nil {
+			return nil, fmt.Errorf("register hourly formula KPI dictionary: %w", err)
+		}
+	}
+
+	resolved, err := queryVersionedHourlyFormulaDictionary(ctx, db, paths)
+	if err != nil {
+		return nil, err
+	}
+	metricIDs := make(map[string]int64, len(paths))
+	for _, path := range paths {
+		current, ok := resolved[path]
+		if !ok {
+			return nil, fmt.Errorf("resolve hourly formula KPI dictionary: metric path %q was not resolved", path)
+		}
+		if err := validatePreparedFormulaDictionaryRow(path, definitions[path], current); err != nil {
+			return nil, err
+		}
+		metricIDs[path] = current.metricID
+	}
+	return metricIDs, nil
+}
+
+func queryVersionedHourlyFormulaDictionary(
+	ctx context.Context,
+	db DBTX,
+	paths []string,
+) (map[string]preparedFormulaDictionaryRow, error) {
+	sql, args, err := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).
+		Select("metric_path", "metric_id", "metric_type",
+			"COALESCE(statis_type,'')", "COALESCE(unit,'')").
+		From("pm_metric_dictionary").
+		Where(sq.Eq{"metric_path": paths}).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build hourly formula KPI dictionary query: %w", err)
+	}
+	rows, err := db.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("resolve hourly formula KPI dictionary: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]preparedFormulaDictionaryRow, len(paths))
+	for rows.Next() {
+		var path string
+		var row preparedFormulaDictionaryRow
+		if err := rows.Scan(&path, &row.metricID, &row.metricType, &row.statisType, &row.unit); err != nil {
+			return nil, fmt.Errorf("scan hourly formula KPI dictionary: %w", err)
+		}
+		out[path] = row
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate hourly formula KPI dictionary: %w", err)
+	}
+	return out, nil
+}
+
+func validatePreparedFormulaDictionaryRow(
+	path string,
+	definition router.KPIDef,
+	row preparedFormulaDictionaryRow,
+) error {
+	if row.metricType != metrics.MetricTypeKPI ||
+		row.statisType != definition.StatisType ||
+		row.unit != definition.Unit {
+		return fmt.Errorf(
+			"resolve hourly formula KPI dictionary: incompatible immutable metadata for path %q",
+			path,
+		)
+	}
+	return nil
+}
+
 func (a *Aggregator) insertVersionedHourlyFormulaKPIs(
 	ctx context.Context,
 	tx pgx.Tx,
@@ -276,19 +553,19 @@ func (a *Aggregator) insertVersionedHourlyFormulaKPIs(
 	deviceIDs []uuid.UUID,
 	w WindowSpec,
 	numberProcess string,
+	prepared map[uuid.UUID]preparedFormulaDevice,
 ) (int64, int64, error) {
-	if a.kpiRouter == nil || len(deviceIDs) == 0 {
+	if len(prepared) == 0 || len(deviceIDs) == 0 {
 		return 0, 0, nil
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT ha.device_dim_id, COALESCE(dev.oui,''), COALESCE(dev.serial_number,''),
-		       ha.object_type, ha.object_ldn, d.metric_path, hv.metric_value
+		SELECT ha.device_dim_id, ha.object_type, ha.object_ldn,
+		       d.metric_path, hv.metric_value
 		  FROM pm_hourly_anchors ha
 		  JOIN pm_hourly_values hv
 		    ON hv.bucket_version=ha.bucket_version
 		   AND hv."time"=ha."time" AND hv.anchor_id=ha.anchor_id
 		  JOIN pm_metric_dictionary d ON d.metric_id=hv.metric_id
-		  LEFT JOIN device_dim dev ON dev.id=ha.device_dim_id
 		 WHERE ha.bucket_version=$1
 		   AND ha.device_dim_id=ANY($2::uuid[])
 		   AND d.metric_type='counter'
@@ -312,15 +589,22 @@ func (a *Aggregator) insertVersionedHourlyFormulaKPIs(
 	order := make([]uuid.UUID, 0, len(deviceIDs))
 	for rows.Next() {
 		var id uuid.UUID
-		var oui, sn, objectLDN, path string
+		var objectLDN, path string
 		var objectType int16
 		var value float64
-		if err := rows.Scan(&id, &oui, &sn, &objectType, &objectLDN, &path, &value); err != nil {
+		if err := rows.Scan(&id, &objectType, &objectLDN, &path, &value); err != nil {
 			return 0, 0, fmt.Errorf("scan versioned hourly counter: %w", err)
+		}
+		preparedDevice, ok := prepared[id]
+		if !ok {
+			continue
 		}
 		dev := byID[id]
 		if dev == nil {
-			dev = &deviceData{id: id, oui: oui, sn: sn, objects: make(map[formulaObject]map[string]float64)}
+			dev = &deviceData{
+				id: id, oui: preparedDevice.oui, sn: preparedDevice.sn,
+				objects: make(map[formulaObject]map[string]float64),
+			}
 			byID[id] = dev
 			order = append(order, id)
 		}
@@ -345,14 +629,11 @@ func (a *Aggregator) insertVersionedHourlyFormulaKPIs(
 	var groups []formulaGroup
 	for _, id := range order {
 		dev := byID[id]
-		route, err := a.kpiRouter.LookupByDevice(ctx, dev.sn)
-		if err != nil {
-			return 0, 0, fmt.Errorf("lookup hourly KPI route for %s: %w", dev.sn, err)
+		preparedDevice := prepared[id]
+		formulas := make([]router.KPIDef, 0, len(preparedDevice.kpis))
+		for _, kpi := range preparedDevice.kpis {
+			formulas = append(formulas, kpi.Definition)
 		}
-		if route == nil {
-			continue
-		}
-		formulas, _ := splitKPIDefsByRollupMode(route.KPIs)
 		for object, counters := range dev.objects {
 			calculated, err := a.evalKPIs(
 				entityKey{oui: dev.oui, sn: dev.sn, objectLdn: object.objectLDN},
@@ -369,52 +650,15 @@ func (a *Aggregator) insertVersionedHourlyFormulaKPIs(
 		return 0, 0, nil
 	}
 
-	meta := make(map[string]kpiRow)
-	for _, group := range groups {
-		for _, row := range group.rows {
-			meta[row.path] = row
+	metricIDs := make(map[string]int64)
+	for _, device := range prepared {
+		for _, kpi := range device.kpis {
+			if current, ok := metricIDs[kpi.Definition.IndicatorID]; ok && current != kpi.MetricID {
+				return 0, 0, fmt.Errorf("prepared hourly formula KPI %q has inconsistent metric IDs", kpi.Definition.IndicatorID)
+			}
+			metricIDs[kpi.Definition.IndicatorID] = kpi.MetricID
 		}
 	}
-	paths := make([]string, 0, len(meta))
-	for path := range meta {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
-	statis, units := make([]string, len(paths)), make([]string, len(paths))
-	for i, path := range paths {
-		statis[i], units[i] = meta[path].stype, meta[path].unit
-	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO pm_metric_dictionary (metric_path, report_key, metric_type, statis_type, unit)
-		SELECT path, path, 'kpi', NULLIF(statis,''), NULLIF(unit,'')
-		  FROM unnest($1::text[], $2::text[], $3::text[]) x(path,statis,unit)
-		ON CONFLICT (metric_path) DO UPDATE SET
-		  metric_type='kpi',
-		  statis_type=COALESCE(EXCLUDED.statis_type,pm_metric_dictionary.statis_type),
-		  unit=COALESCE(EXCLUDED.unit,pm_metric_dictionary.unit),
-		  updated_at=now()`, paths, statis, units); err != nil {
-		return 0, 0, fmt.Errorf("register hourly formula KPI dictionary: %w", err)
-	}
-	dictRows, err := tx.Query(ctx,
-		`SELECT metric_path, metric_id FROM pm_metric_dictionary WHERE metric_path=ANY($1::text[])`, paths)
-	if err != nil {
-		return 0, 0, fmt.Errorf("resolve hourly formula KPI dictionary: %w", err)
-	}
-	metricIDs := make(map[string]int64, len(paths))
-	for dictRows.Next() {
-		var path string
-		var metricID int64
-		if err := dictRows.Scan(&path, &metricID); err != nil {
-			dictRows.Close()
-			return 0, 0, fmt.Errorf("scan hourly formula KPI dictionary: %w", err)
-		}
-		metricIDs[path] = metricID
-	}
-	if err := dictRows.Err(); err != nil {
-		dictRows.Close()
-		return 0, 0, fmt.Errorf("iterate hourly formula KPI dictionary: %w", err)
-	}
-	dictRows.Close()
 
 	groupSetIDs := make([]int64, len(groups))
 	setCache := make(map[string]int64)
@@ -428,13 +672,9 @@ func (a *Aggregator) insertVersionedHourlyFormulaKPIs(
 		cacheKey := string(hash[:])
 		setID, ok := setCache[cacheKey]
 		if !ok {
-			if err := tx.QueryRow(ctx, `
-				INSERT INTO pm_metric_sets (product_key,counter_group,content_hash,metric_ids)
-				VALUES ('__hourly_formula__','__kpi_formula__',$1,$2)
-				ON CONFLICT (product_key,counter_group,content_hash)
-				DO UPDATE SET metric_ids=EXCLUDED.metric_ids
-				RETURNING metric_set_id`, hash[:], setIDs).Scan(&setID); err != nil {
-				return 0, 0, fmt.Errorf("resolve hourly formula KPI metric set: %w", err)
+			setID, err = resolveVersionedHourlyFormulaMetricSet(ctx, tx, hash[:], setIDs)
+			if err != nil {
+				return 0, 0, err
 			}
 			setCache[cacheKey] = setID
 		}
@@ -506,6 +746,115 @@ func (a *Aggregator) insertVersionedHourlyFormulaKPIs(
 	return int64(len(anchorIDs)), int64(len(valueRows)), nil
 }
 
+func resolveVersionedHourlyFormulaMetricSet(
+	ctx context.Context,
+	tx DBTX,
+	hash []byte,
+	metricIDs []int64,
+) (int64, error) {
+	query := func() (int64, []int64, bool, error) {
+		sql, args, err := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).
+			Select("metric_set_id", "metric_ids").
+			From("pm_metric_sets").
+			Where(sq.Eq{
+				"product_key":   "__hourly_formula__",
+				"counter_group": "__kpi_formula__",
+				"content_hash":  hash,
+			}).
+			ToSql()
+		if err != nil {
+			return 0, nil, false, fmt.Errorf("build hourly formula KPI metric set query: %w", err)
+		}
+		rows, err := tx.Query(ctx, sql, args...)
+		if err != nil {
+			return 0, nil, false, fmt.Errorf("query hourly formula KPI metric set: %w", err)
+		}
+		defer rows.Close()
+		if !rows.Next() {
+			if err := rows.Err(); err != nil {
+				return 0, nil, false, fmt.Errorf("iterate hourly formula KPI metric set: %w", err)
+			}
+			return 0, nil, false, nil
+		}
+		var setID int64
+		var storedIDs []int64
+		if err := rows.Scan(&setID, &storedIDs); err != nil {
+			return 0, nil, false, fmt.Errorf("scan hourly formula KPI metric set: %w", err)
+		}
+		if rows.Next() {
+			return 0, nil, false, fmt.Errorf("query hourly formula KPI metric set: duplicate stable key")
+		}
+		if err := rows.Err(); err != nil {
+			return 0, nil, false, fmt.Errorf("iterate hourly formula KPI metric set: %w", err)
+		}
+		return setID, storedIDs, true, nil
+	}
+	validate := func(setID int64, storedIDs []int64) error {
+		if len(storedIDs) != len(metricIDs) {
+			return fmt.Errorf("resolve hourly formula KPI metric set %d: inconsistent metric IDs", setID)
+		}
+		for i := range metricIDs {
+			if storedIDs[i] != metricIDs[i] {
+				return fmt.Errorf("resolve hourly formula KPI metric set %d: inconsistent metric IDs", setID)
+			}
+		}
+		return nil
+	}
+
+	setID, storedIDs, ok, err := query()
+	if err != nil {
+		return 0, err
+	}
+	if ok {
+		if err := validate(setID, storedIDs); err != nil {
+			return 0, err
+		}
+		return setID, nil
+	}
+	insertSQL, args, err := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).
+		Insert("pm_metric_sets").
+		Columns("product_key", "counter_group", "content_hash", "metric_ids").
+		Values("__hourly_formula__", "__kpi_formula__", hash, metricIDs).
+		Suffix("ON CONFLICT (product_key,counter_group,content_hash) DO NOTHING").
+		ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("build hourly formula KPI metric set insert: %w", err)
+	}
+	if _, err := tx.Exec(ctx, insertSQL, args...); err != nil {
+		return 0, fmt.Errorf("insert hourly formula KPI metric set: %w", err)
+	}
+	setID, storedIDs, ok, err = query()
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		return 0, fmt.Errorf("resolve hourly formula KPI metric set: stable key was not resolved")
+	}
+	if err := validate(setID, storedIDs); err != nil {
+		return 0, err
+	}
+	return setID, nil
+}
+
+func buildEnsureVersionedHourlyMetricSetsSQL() string {
+	return `
+WITH group_sets AS (
+    SELECT a.counter_group,
+           array_agg(DISTINCT member.metric_id ORDER BY member.metric_id) AS metric_ids
+      FROM pm_measurement_anchors a
+      JOIN pm_metric_sets s ON s.metric_set_id = a.metric_set_id
+      CROSS JOIN LATERAL unnest(s.metric_ids) member(metric_id)
+     WHERE a."time" >= $1 AND a."time" < $2
+       AND a.device_dim_id = ANY($3::uuid[])
+     GROUP BY a.device_dim_id, a.object_type, a.object_ldn, a.counter_group
+)
+INSERT INTO pm_metric_sets (product_key, counter_group, content_hash, metric_ids)
+SELECT DISTINCT '__hourly__', gs.counter_group,
+       decode(md5(array_to_string(gs.metric_ids, ',')), 'hex'), gs.metric_ids
+  FROM group_sets gs
+ON CONFLICT (product_key, counter_group, content_hash) DO NOTHING`
+}
+
 func buildVersionedHourlyBatchSQL() string {
 	return `
 WITH group_sets AS (
@@ -518,14 +867,19 @@ WITH group_sets AS (
        AND a.device_dim_id = ANY($4::uuid[])
      GROUP BY a.device_dim_id, a.object_type, a.object_ldn, a.counter_group
 ),
-resolved_sets AS (
-    INSERT INTO pm_metric_sets (product_key, counter_group, content_hash, metric_ids)
-    SELECT DISTINCT '__hourly__', gs.counter_group,
-           decode(md5(array_to_string(gs.metric_ids, ',')), 'hex'), gs.metric_ids
+desired_sets AS (
+    SELECT DISTINCT '__hourly__'::text AS product_key, gs.counter_group,
+           decode(md5(array_to_string(gs.metric_ids, ',')), 'hex') AS content_hash,
+           gs.metric_ids
       FROM group_sets gs
-    ON CONFLICT (product_key, counter_group, content_hash)
-    DO UPDATE SET metric_ids=EXCLUDED.metric_ids
-    RETURNING metric_set_id, counter_group, content_hash
+),
+resolved_sets AS (
+    SELECT s.metric_set_id, s.counter_group, s.content_hash
+      FROM pm_metric_sets s
+      JOIN desired_sets desired
+        ON desired.product_key=s.product_key
+       AND desired.counter_group=s.counter_group
+       AND desired.content_hash=s.content_hash
 ),
 anchors AS (
     INSERT INTO pm_hourly_anchors

@@ -50,6 +50,11 @@ func writeSparseMeasurements(ctx context.Context, tx pgx.Tx, fileID, batchID *uu
 		v := meta[path]
 		defs = append(defs, metricDefinition{path: path, metricType: v.MetricType, statisType: v.StatisType, unit: v.Unit})
 	}
+	// Lock order invariant: hourly bucket/version state → dictionary → metric set
+	// → anchors/values. This remains in the ingest transaction for atomic rollback.
+	if err := markHourlyBucketsDirty(ctx, tx, measurements); err != nil {
+		return err
+	}
 	ids, err := resolveMetricDictionary(ctx, tx, defs)
 	if err != nil {
 		return fmt.Errorf("resolve pm metric dictionary: %w", err)
@@ -96,9 +101,6 @@ RETURNING anchor_id`,
 			[]string{"time", "anchor_id", "metric_id", "metric_value"}, pgx.CopyFromRows(valueRows)); err != nil {
 			return fmt.Errorf("copy pm sparse values: %w", err)
 		}
-	}
-	if err := markHourlyBucketsDirty(ctx, tx, measurements); err != nil {
-		return err
 	}
 	return nil
 }

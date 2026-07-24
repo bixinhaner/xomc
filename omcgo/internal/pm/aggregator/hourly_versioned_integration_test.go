@@ -155,3 +155,154 @@ func TestIntegrationVersionedHourlyPublishesSparseBucketAtomically(t *testing.T)
 	require.NoError(t, err)
 	require.NoError(t, cleanupObsoleteHourlyVersions(ctx, pool))
 }
+
+func TestIntegrationVersionedHourlyLockOrderAvoidsIngestDeadlock(t *testing.T) {
+	dsn := os.Getenv("OMCGO_DB_DSN")
+	if dsn == "" {
+		t.Skip("OMCGO_DB_DSN not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	defer pool.Close()
+	rollupConfig, err := pgxpool.ParseConfig(dsn)
+	require.NoError(t, err)
+	rollupConfig.MaxConns = 1
+	rollupPool, err := pgxpool.NewWithConfig(ctx, rollupConfig)
+	require.NoError(t, err)
+	defer rollupPool.Close()
+
+	deviceID := uuid.New()
+	suffix := deviceID.String()[:8]
+	sn := "LOCK-ORDER-" + suffix
+	counterPath := "CLOCK-" + suffix
+	formulaPath := "KLOCK-" + suffix
+	start := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC).
+		Add(time.Duration(binary.BigEndian.Uint32(deviceID[:4])%200000) * time.Hour)
+	end := start.Add(time.Hour)
+	_, err = pool.Exec(ctx, `
+		INSERT INTO device_dim (id,oui,serial_number,technology,carrier)
+		VALUES ($1,'INT003',$2,'lte','cmcc')`, deviceID, sn)
+	require.NoError(t, err)
+	var counterMetricID int64
+	err = pool.QueryRow(ctx, `
+		INSERT INTO pm_metric_dictionary (metric_path,metric_type,statis_type,unit)
+		VALUES ($1,'counter','sum','number')
+		RETURNING metric_id`, counterPath).Scan(&counterMetricID)
+	require.NoError(t, err)
+	var sourceSetID int64
+	err = pool.QueryRow(ctx, `
+		INSERT INTO pm_metric_sets (product_key,counter_group,content_hash,metric_ids)
+		VALUES ($1,'LOCK',decode(md5($2),'hex'),ARRAY[$3::bigint])
+		RETURNING metric_set_id`, "lock-order-"+suffix, counterPath, counterMetricID).Scan(&sourceSetID)
+	require.NoError(t, err)
+	var sourceAnchorID int64
+	err = pool.QueryRow(ctx, `
+		INSERT INTO pm_measurement_anchors
+		    ("time",device_dim_id,object_ldn,counter_group,metric_set_id,granularity,start_time,end_time)
+		VALUES ($1,$2,'','LOCK',$3,'15min',$1,$4)
+		RETURNING anchor_id`, start, deviceID, sourceSetID, start.Add(15*time.Minute)).Scan(&sourceAnchorID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `
+		INSERT INTO pm_metric_values ("time",anchor_id,metric_id,metric_value)
+		VALUES ($1,$2,$3,5)`, start, sourceAnchorID, counterMetricID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `
+		INSERT INTO pm_hourly_bucket_versions (bucket_start,bucket_end,status,published_at)
+		VALUES ($1,$2,'active',now())`, start, end)
+	require.NoError(t, err)
+
+	ingestConn, err := pool.Acquire(ctx)
+	require.NoError(t, err)
+	defer ingestConn.Release()
+	ingestTx, err := ingestConn.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = ingestTx.Rollback(context.Background()) }()
+	// Recreate the former ingestion half-cycle deliberately: hold dictionary/set/
+	// value locks first, then request the bucket lock only after rollup is waiting.
+	// The fixed rollup must wait during pre-transaction dictionary preparation,
+	// so it cannot already hold the bucket lock needed to close the deadlock cycle.
+	var formulaMetricID int64
+	err = ingestTx.QueryRow(ctx, `
+		INSERT INTO pm_metric_dictionary (metric_path,report_key,metric_type,statis_type,unit)
+		VALUES ($1,$1,'kpi','pct','%')
+		RETURNING metric_id`, formulaPath).Scan(&formulaMetricID)
+	require.NoError(t, err)
+	var ingestSetID int64
+	err = ingestTx.QueryRow(ctx, `
+		INSERT INTO pm_metric_sets (product_key,counter_group,content_hash,metric_ids)
+		VALUES ($1,'__kpi__',decode(md5($2),'hex'),ARRAY[$3::bigint])
+		RETURNING metric_set_id`, "ingest-lock-order-"+suffix, formulaPath, formulaMetricID).Scan(&ingestSetID)
+	require.NoError(t, err)
+	var ingestAnchorID int64
+	err = ingestTx.QueryRow(ctx, `
+		INSERT INTO pm_measurement_anchors
+		    ("time",device_dim_id,object_ldn,counter_group,metric_set_id,granularity,start_time,end_time)
+		VALUES ($1,$2,'','__kpi__',$3,'15min',$1,$4)
+		RETURNING anchor_id`,
+		start, deviceID, ingestSetID, start.Add(15*time.Minute)).Scan(&ingestAnchorID)
+	require.NoError(t, err)
+	_, err = ingestTx.Exec(ctx, `
+		INSERT INTO pm_metric_values ("time",anchor_id,metric_id,metric_value)
+		VALUES ($1,$2,$3,5)`, start, ingestAnchorID, formulaMetricID)
+	require.NoError(t, err)
+
+	probe, err := rollupPool.Acquire(ctx)
+	require.NoError(t, err)
+	var rollupPID int32
+	require.NoError(t, probe.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&rollupPID))
+	probe.Release()
+
+	a := NewWithPool(rollupPool, &stubKPIRouter{byDevice: map[string]*router.KPIRoute{
+		sn: {
+			KPIs: []router.KPIDef{{
+				IndicatorID: formulaPath, StatisType: "pct", Unit: "%", Formula: counterPath,
+			}},
+		},
+	}}, nil)
+	type rollupResult struct {
+		stats RollupStats
+		err   error
+	}
+	resultCh := make(chan rollupResult, 1)
+	go func() {
+		stats, runErr := a.RunHourlyVersioned(ctx, WindowSpec{
+			Granularity: metrics.GranularityHourly, Start: start, End: end,
+		}, 1)
+		resultCh <- rollupResult{stats: stats, err: runErr}
+	}()
+
+	require.Eventually(t, func() bool {
+		var waiting bool
+		queryErr := pool.QueryRow(ctx, `
+			SELECT COALESCE(wait_event_type='Lock',false)
+			  FROM pg_stat_activity
+			 WHERE pid=$1`, rollupPID).Scan(&waiting)
+		return queryErr == nil && waiting
+	}, 5*time.Second, 20*time.Millisecond,
+		"rollup must reach its pre-transaction dictionary barrier while ingestion holds the dictionary lock")
+	_, err = ingestTx.Exec(ctx, `
+		UPDATE pm_hourly_bucket_versions
+		   SET dirty=true
+		 WHERE bucket_start=$1 AND status IN ('active','building')`, start)
+	require.NoError(t, err,
+		"rollup must still be outside its bucket/version transaction while dictionary preparation waits")
+	require.NoError(t, ingestTx.Commit(ctx))
+
+	select {
+	case result := <-resultCh:
+		require.Error(t, result.err, "late ingestion must prevent publishing the now-dirty building version")
+		require.NotContains(t, result.err.Error(), "deadlock detected")
+		require.Equal(t, 1, result.stats.DeviceCount)
+	case <-ctx.Done():
+		t.Fatalf("concurrent ingestion and hourly rollup did not finish before deadline: %v", ctx.Err())
+	}
+	var active int
+	err = pool.QueryRow(ctx, `
+		SELECT count(*) FROM pm_hourly_bucket_versions
+		 WHERE bucket_start=$1 AND status='active'`, start).Scan(&active)
+	require.NoError(t, err)
+	require.Equal(t, 1, active)
+}

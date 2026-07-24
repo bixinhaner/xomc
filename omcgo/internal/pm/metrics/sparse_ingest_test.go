@@ -1,11 +1,15 @@
 package metrics
 
 import (
+	"context"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -128,4 +132,87 @@ func TestMarkDirtySQLProtectsActiveAndBuildingHourlyVersions(t *testing.T) {
 	assert.Contains(t, sql, "status IN ('active','building')")
 	assert.Contains(t, sql, "bucket_start = ANY($1::timestamptz[])")
 	assert.Contains(t, sql, "dirty = true")
+}
+
+func TestSparseIngestLockOrder(t *testing.T) {
+	deviceID := uuid.New()
+	start := time.Date(2026, 7, 24, 10, 0, 0, 0, time.UTC)
+	tx := &recordingSparseIngestTx{
+		deviceID: deviceID,
+		metricID: 41,
+		setID:    73,
+	}
+
+	err := writeSparseMeasurements(context.Background(), tx, nil, nil, []SparseMeasurement{{
+		DeviceID: deviceID, DeviceSN: "LOCK-ORDER-1", CounterGroup: "RRC",
+		Time: start, StartTime: start, EndTime: start.Add(15 * time.Minute), Granularity: 15,
+		MetricPaths: []string{"CLOCK1"},
+		Metrics: []SparseValue{{
+			Path: "CLOCK1", MetricType: MetricTypeCounter, StatisType: "sum", Unit: "number",
+		}},
+		Values: []SparseValue{{
+			Path: "CLOCK1", MetricType: MetricTypeCounter, Value: 1, StatisType: "sum", Unit: "number",
+		}},
+	}})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"bucket/version", "dictionary", "metric set", "anchor", "values",
+	}, tx.operations)
+}
+
+type recordingSparseIngestTx struct {
+	pgx.Tx
+	deviceID   uuid.UUID
+	metricID   int64
+	setID      int64
+	operations []string
+}
+
+func (tx *recordingSparseIngestTx) record(operation string) {
+	if len(tx.operations) == 0 || tx.operations[len(tx.operations)-1] != operation {
+		tx.operations = append(tx.operations, operation)
+	}
+}
+
+func (tx *recordingSparseIngestTx) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+	switch {
+	case strings.Contains(sql, "FROM pm_metric_dictionary"):
+		tx.record("dictionary")
+		return &sparseMetadataRows{rows: [][]any{{
+			"CLOCK1", tx.metricID, MetricTypeCounter, "sum", "number",
+		}}}, nil
+	case strings.Contains(sql, "FROM device_dim"):
+		return &sparseMetadataRows{}, nil
+	case strings.Contains(sql, "FROM pm_metric_sets"):
+		tx.record("metric set")
+		return &sparseMetadataRows{rows: [][]any{{tx.setID, []int64{tx.metricID}}}}, nil
+	default:
+		return nil, assert.AnError
+	}
+}
+
+func (tx *recordingSparseIngestTx) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
+	if strings.Contains(sql, "INSERT INTO pm_measurement_anchors") {
+		tx.record("anchor")
+		return sparseMetadataRow{values: []any{int64(101)}}
+	}
+	return sparseMetadataRow{err: assert.AnError}
+}
+
+func (tx *recordingSparseIngestTx) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
+	if strings.Contains(sql, "UPDATE pm_hourly_bucket_versions") {
+		tx.record("bucket/version")
+	}
+	return pgconn.NewCommandTag("UPDATE 1"), nil
+}
+
+func (tx *recordingSparseIngestTx) CopyFrom(
+	_ context.Context,
+	_ pgx.Identifier,
+	_ []string,
+	_ pgx.CopyFromSource,
+) (int64, error) {
+	tx.record("values")
+	return 1, nil
 }
