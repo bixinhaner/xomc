@@ -82,6 +82,7 @@ type queueStatsReader interface {
 	StreamNameBySubject(ctx context.Context, subject string) (string, error)
 	ConsumerInfo(ctx context.Context, stream, durable string) (*nats.ConsumerInfo, error)
 	StreamInfo(ctx context.Context, stream string) (*nats.StreamInfo, error)
+	NextMessage(ctx context.Context, stream string, startSequence uint64, subject string) (*nats.RawStreamMsg, error)
 }
 
 type jetStreamQueueStatsReader struct {
@@ -98,6 +99,10 @@ func (r jetStreamQueueStatsReader) ConsumerInfo(ctx context.Context, stream, dur
 
 func (r jetStreamQueueStatsReader) StreamInfo(ctx context.Context, stream string) (*nats.StreamInfo, error) {
 	return r.js.StreamInfo(stream, nats.Context(ctx))
+}
+
+func (r jetStreamQueueStatsReader) NextMessage(ctx context.Context, stream string, startSequence uint64, subject string) (*nats.RawStreamMsg, error) {
+	return r.js.GetMsg(stream, startSequence, nats.DirectGetNext(subject), nats.Context(ctx))
 }
 
 // NATSEventBus 是基于 NATS JetStream 的生产级事件总线实现。
@@ -150,9 +155,16 @@ func (b *NATSEventBus) QueueStats(ctx context.Context, subject, durable string) 
 		return QueueStats{}, fmt.Errorf("load queue stream info for stream %q: empty response", stream)
 	}
 
-	// A stream's FirstTime is the server-maintained timestamp for the oldest
-	// retained message. It remains correct when old sequences have been purged
-	// or individually deleted, so do not derive age from sequence arithmetic.
+	var oldest *nats.RawStreamMsg
+	if startSequence := oldestRelevantPendingStart(consumer, streamInfo.State); startSequence > 0 {
+		oldest, err = reader.NextMessage(ctx, stream, startSequence, subject)
+		if err != nil && !errors.Is(err, nats.ErrMsgNotFound) {
+			return QueueStats{}, fmt.Errorf("load oldest pending message for stream %q subject %q from sequence %d: %w", stream, subject, startSequence, err)
+		}
+	}
+
+	// The sample completes only after the optional subject-filtered raw-message
+	// lookup, so SampledAt always represents the successful collection end.
 	sampledAt := time.Now()
 	stats := QueueStats{
 		Pending:      consumer.NumPending,
@@ -162,15 +174,48 @@ func (b *NATSEventBus) QueueStats(ctx context.Context, subject, durable string) 
 		AckSequence:  consumer.AckFloor.Stream,
 		SampledAt:    sampledAt,
 	}
-	if (stats.Pending > 0 || stats.AckPending > 0) && !streamInfo.State.FirstTime.IsZero() {
-		stats.OldestPendingAge = sampledAt.Sub(streamInfo.State.FirstTime)
+	if oldest != nil && !oldest.Time.IsZero() {
+		stats.OldestPendingAge = sampledAt.Sub(oldest.Time)
 		if stats.OldestPendingAge < 0 {
 			stats.OldestPendingAge = 0
 		}
 	}
 
-	b.metrics.observeQueueStats(subject, durable, stats)
 	return stats, nil
+}
+
+// oldestRelevantPendingStart returns a safe lower bound for a single
+// subject-filtered lookup. For queued work, the consumer has not delivered
+// anything beyond Delivered.Stream. For ack-only work, JetStream exposes only
+// the contiguous AckFloor; later acknowledgement gaps are not enumerable via
+// ConsumerInfo, so AckFloor+1 is the oldest conservative candidate.
+func oldestRelevantPendingStart(consumer *nats.ConsumerInfo, state nats.StreamState) uint64 {
+	if consumer == nil || state.FirstSeq == 0 || state.LastSeq == 0 || (consumer.NumPending == 0 && consumer.NumAckPending <= 0) {
+		return 0
+	}
+	start := state.FirstSeq
+	if consumer.NumAckPending > 0 {
+		if consumer.AckFloor.Stream == ^uint64(0) {
+			return 0
+		}
+		start = maxQueueSequence(start, consumer.AckFloor.Stream+1)
+	} else {
+		if consumer.Delivered.Stream == ^uint64(0) {
+			return 0
+		}
+		start = maxQueueSequence(start, consumer.Delivered.Stream+1)
+	}
+	if start > state.LastSeq {
+		return 0
+	}
+	return start
+}
+
+func maxQueueSequence(left, right uint64) uint64 {
+	if left > right {
+		return left
+	}
+	return right
 }
 
 // PendingCount returns queued plus delivered-but-unacked messages for one
@@ -216,6 +261,13 @@ func (b *NATSEventBus) SetQueueTuning(subject string, tuning QueueTuning) {
 // the legacy log-only behaviour.
 func (b *NATSEventBus) SetMetrics(m *EventBusMetrics) {
 	b.metrics = m
+}
+
+// NewQueueHealthSampler returns the single owner for PM queue-health metric
+// observation. QueueStats itself remains a read-only collection method so
+// disk-projection callers cannot accidentally create duplicate samples.
+func (b *NATSEventBus) NewQueueHealthSampler(interval time.Duration) *QueueHealthSampler {
+	return NewQueueHealthSampler(b, b.metrics, interval, b.logger)
 }
 
 func (b *NATSEventBus) SetPullTuning(subject string, tuning PullTuning) {

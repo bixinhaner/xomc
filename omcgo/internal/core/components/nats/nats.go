@@ -19,9 +19,10 @@ type NATSClient struct {
 
 // StreamDef defines a JetStream stream.
 type StreamDef struct {
-	Name      string
-	Subjects  []string
-	Retention nats.RetentionPolicy
+	Name        string
+	Subjects    []string
+	Retention   nats.RetentionPolicy
+	AllowDirect bool
 }
 
 // DefaultStreams 列出所有 JetStream 流。每条流以一个点分前缀吸纳一类事件，
@@ -45,7 +46,10 @@ func DefaultStreams() []StreamDef {
 		// Parameter-sync task results and run terminal events fan out to the
 		// result processor, provisioning bindings, and operational consumers.
 		{Name: "PARAM_SYNC", Subjects: []string{"param_sync.>"}, Retention: nats.InterestPolicy},
-		{Name: "PM", Subjects: []string{"pm.>"}, Retention: nats.WorkQueuePolicy},
+		// Queue health needs one subject-filtered, read-only raw-message lookup
+		// to calculate oldest pm.file.received age without confusing it with
+		// other pm.> subjects in this shared stream.
+		{Name: "PM", Subjects: []string{"pm.>"}, Retention: nats.WorkQueuePolicy, AllowDirect: true},
 		{Name: "MR", Subjects: []string{"mr.>"}, Retention: nats.WorkQueuePolicy},
 		{Name: "ALARM", Subjects: []string{"alarm.>"}, Retention: nats.WorkQueuePolicy},
 		{Name: "OSS", Subjects: []string{"oss.>"}, Retention: nats.WorkQueuePolicy},
@@ -126,6 +130,14 @@ func (c *NATSClient) EnsureStreams(ctx context.Context, allowRebuild bool) error
 		}
 
 		if info.Config.Retention == def.Retention {
+			if def.AllowDirect && !info.Config.AllowDirect {
+				config := info.Config
+				config.AllowDirect = true
+				if _, err := c.JS.UpdateStream(&config); err != nil {
+					return fmt.Errorf("enable direct message lookup for stream %s: %w", def.Name, err)
+				}
+				c.logger.Info("enabled JetStream direct message lookup", zap.String("name", def.Name))
+			}
 			continue
 		}
 
@@ -189,12 +201,13 @@ func (c *NATSClient) EnsureStreams(ctx context.Context, allowRebuild bool) error
 
 func (c *NATSClient) createStream(def StreamDef) error {
 	_, err := c.JS.AddStream(&nats.StreamConfig{
-		Name:      def.Name,
-		Subjects:  def.Subjects,
-		Retention: def.Retention,
-		MaxAge:    72 * time.Hour,
-		Storage:   nats.FileStorage,
-		Replicas:  1, // single node for dev; set 3 for production
+		Name:        def.Name,
+		Subjects:    def.Subjects,
+		Retention:   def.Retention,
+		MaxAge:      72 * time.Hour,
+		Storage:     nats.FileStorage,
+		Replicas:    1, // single node for dev; set 3 for production
+		AllowDirect: def.AllowDirect,
 	})
 	if err != nil {
 		return fmt.Errorf("create stream %s: %w", def.Name, err)

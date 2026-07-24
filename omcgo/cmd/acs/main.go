@@ -217,6 +217,23 @@ func runACS(cmd *cobra.Command, args []string) error {
 
 	deps.RPCDispatcher = rpc.NewDispatcher(rpc.DispatcherConfig{TransferConfigProvider: transferPolicy})
 
+	// PM queue-health metrics have an independent lifecycle: they must continue
+	// to sample when uploads/backpressure are disabled or when MinIO/TSDB is not
+	// configured. The NATS bus owns metric observation so disk projections only
+	// consume aggregate counts and cannot duplicate samples.
+	var pmQueueHealthSampler *event.QueueHealthSampler
+	if samplerBus, ok := inf.EventBus.(interface {
+		NewQueueHealthSampler(interval time.Duration) *event.QueueHealthSampler
+	}); ok {
+		queueHealthCtx, queueHealthCancel := context.WithCancel(context.Background())
+		pmQueueHealthSampler = samplerBus.NewQueueHealthSampler(30 * time.Second)
+		go pmQueueHealthSampler.Run(queueHealthCtx)
+		inf.GS.Register("pm-queue-health-sampler", 1, func(context.Context) error {
+			queueHealthCancel()
+			return nil
+		})
+	}
+
 	// Setup upload handler for CPE file upload (PM/MR/DataModel files).
 	if inf.MinIO != nil {
 		tokenMgr := upload.NewTokenManager(cfg.Upload.TokenSecret, cfg.Upload.TokenTTL)
@@ -255,16 +272,13 @@ func runACS(cmd *cobra.Command, args []string) error {
 			return row.Value, true
 		}
 		var pmPendingCount upload.PendingCountFunc
-		if queueBus, ok := inf.EventBus.(interface {
-			QueueStats(ctx context.Context, subject, durable string) (event.QueueStats, error)
-		}); ok {
-			// Keep the projection's aggregate-count interface for this release, but
-			// collect the complete QueueStats sample so its PM queue health metrics
-			// are refreshed on every watchdog observation.
-			pmPendingCount = func(ctx context.Context) (uint64, error) {
-				stats, err := queueBus.QueueStats(ctx, event.SubjectPMFileReceived, "pm-workers")
-				if err != nil {
-					return 0, fmt.Errorf("sample PM queue stats: %w", err)
+		if pmQueueHealthSampler != nil {
+			// Keep the projection's aggregate-count interface for this release,
+			// while reusing the independent sampler's last successful snapshot.
+			pmPendingCount = func(context.Context) (uint64, error) {
+				stats, ok := pmQueueHealthSampler.LatestStats()
+				if !ok {
+					return 0, fmt.Errorf("PM queue health sample unavailable")
 				}
 				if stats.AckPending <= 0 {
 					return stats.Pending, nil

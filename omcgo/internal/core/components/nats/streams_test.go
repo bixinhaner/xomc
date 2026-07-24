@@ -80,3 +80,15 @@ func TestDefaultStreams_NamesUnique(t *testing.T) {
 		seen[s.Name] = true
 	}
 }
+
+func TestDefaultStreams_PMAllowsDirectLookupForQueueHealth(t *testing.T) {
+	for _, stream := range DefaultStreams() {
+		if stream.Name == "PM" {
+			if !stream.AllowDirect {
+				t.Fatal("PM stream must allow direct subject-filtered lookup for queue health")
+			}
+			return
+		}
+	}
+	t.Fatal("PM stream is not registered")
+}
