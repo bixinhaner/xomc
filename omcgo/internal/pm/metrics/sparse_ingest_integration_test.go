@@ -51,6 +51,36 @@ func TestIntegrationCopyIngestStoresSparseValuesAndLogicalMissingRows(t *testing
 	require.NoError(t, err)
 	require.True(t, ingested)
 
+	type dictionaryVersion struct {
+		path      string
+		xmin      string
+		updatedAt time.Time
+	}
+	dictionaryRows, err := pool.Query(ctx, `
+		SELECT metric_path, xmin::text, updated_at
+		FROM pm_metric_dictionary
+		WHERE metric_path = ANY($1::text[])
+		ORDER BY metric_path`, []string{"CSPARSE1", "CSPARSE2"})
+	require.NoError(t, err)
+	var dictionaryBefore []dictionaryVersion
+	for dictionaryRows.Next() {
+		var version dictionaryVersion
+		require.NoError(t, dictionaryRows.Scan(&version.path, &version.xmin, &version.updatedAt))
+		dictionaryBefore = append(dictionaryBefore, version)
+	}
+	require.NoError(t, dictionaryRows.Err())
+	dictionaryRows.Close()
+	require.Len(t, dictionaryBefore, 2)
+
+	var metricSetID int64
+	var metricSetXMinBefore string
+	err = pool.QueryRow(ctx, `
+		SELECT s.metric_set_id, s.xmin::text
+		FROM pm_metric_sets s
+		JOIN pm_measurement_anchors a ON a.metric_set_id = s.metric_set_id
+		WHERE a.source_file_id = $1`, marker.ID).Scan(&metricSetID, &metricSetXMinBefore)
+	require.NoError(t, err)
+
 	var anchors, physical, logical, missing int
 	err = pool.QueryRow(ctx, `
 		SELECT (SELECT count(*) FROM pm_measurement_anchors WHERE source_file_id=$1),
@@ -121,4 +151,46 @@ func TestIntegrationCopyIngestStoresSparseValuesAndLogicalMissingRows(t *testing
 		 WHERE bucket_start=$1 AND status='active'`, hourStart).Scan(&dirty)
 	require.NoError(t, err)
 	require.True(t, dirty, "removing old measurements must dirty their previously published hour")
+
+	// Resolve the same metadata through the hot write path again. This is kept
+	// after the compatibility-view assertions because it intentionally creates a
+	// second anchor; the point here is to isolate metadata immutability from
+	// file-marker idempotency.
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	require.NoError(t, writeSparseMeasurements(ctx, tx, nil, nil, BuildSparseMeasurements(counters, nil)))
+	require.NoError(t, tx.Commit(ctx))
+
+	dictionaryRows, err = pool.Query(ctx, `
+		SELECT metric_path, xmin::text, updated_at
+		FROM pm_metric_dictionary
+		WHERE metric_path = ANY($1::text[])
+		ORDER BY metric_path`, []string{"CSPARSE1", "CSPARSE2"})
+	require.NoError(t, err)
+	var dictionaryAfter []dictionaryVersion
+	for dictionaryRows.Next() {
+		var version dictionaryVersion
+		require.NoError(t, dictionaryRows.Scan(&version.path, &version.xmin, &version.updatedAt))
+		dictionaryAfter = append(dictionaryAfter, version)
+	}
+	require.NoError(t, dictionaryRows.Err())
+	dictionaryRows.Close()
+	require.Equal(t, dictionaryBefore, dictionaryAfter, "repeat metadata resolution must not update dictionary rows")
+
+	var metricSetXMinAfter string
+	err = pool.QueryRow(ctx, `SELECT xmin::text FROM pm_metric_sets WHERE metric_set_id = $1`, metricSetID).Scan(&metricSetXMinAfter)
+	require.NoError(t, err)
+	require.Equal(t, metricSetXMinBefore, metricSetXMinAfter, "repeat metadata resolution must not update metric sets")
+	var dictionaryCount, metricSetCount int64
+	err = pool.QueryRow(ctx, `
+		SELECT
+		  (SELECT count(*) FROM pm_metric_dictionary WHERE metric_path = ANY($1::text[])),
+		  (SELECT count(*) FROM pm_metric_sets
+		     WHERE (product_key, counter_group, content_hash) =
+		       (SELECT product_key, counter_group, content_hash
+		          FROM pm_metric_sets WHERE metric_set_id = $2))`,
+		[]string{"CSPARSE1", "CSPARSE2"}, metricSetID).Scan(&dictionaryCount, &metricSetCount)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), dictionaryCount)
+	require.Equal(t, int64(1), metricSetCount)
 }

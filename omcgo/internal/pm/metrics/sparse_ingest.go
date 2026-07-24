@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"sort"
@@ -44,46 +45,15 @@ func writeSparseMeasurements(ctx context.Context, tx pgx.Tx, fileID, batchID *uu
 			meta[value.Path] = value
 		}
 	}
-	paths := make([]string, 0, len(meta))
+	defs := make([]metricDefinition, 0, len(meta))
 	for path := range meta {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
-	types, statis, units := make([]string, len(paths)), make([]string, len(paths)), make([]string, len(paths))
-	for i, path := range paths {
 		v := meta[path]
-		types[i], statis[i], units[i] = string(v.MetricType), v.StatisType, v.Unit
+		defs = append(defs, metricDefinition{path: path, metricType: v.MetricType, statisType: v.StatisType, unit: v.Unit})
 	}
-	if _, err := tx.Exec(ctx, `
-INSERT INTO pm_metric_dictionary (metric_path, report_key, metric_type, statis_type, unit)
-SELECT p, p, t, NULLIF(s,''), NULLIF(u,'')
-FROM unnest($1::text[], $2::text[], $3::text[], $4::text[]) AS x(p,t,s,u)
-ON CONFLICT (metric_path) DO UPDATE SET
-  metric_type = EXCLUDED.metric_type,
-  statis_type = COALESCE(EXCLUDED.statis_type, pm_metric_dictionary.statis_type),
-  unit = COALESCE(EXCLUDED.unit, pm_metric_dictionary.unit),
-  updated_at = now()`, paths, types, statis, units); err != nil {
-		return fmt.Errorf("upsert pm metric dictionary: %w", err)
-	}
-	rows, err := tx.Query(ctx, `SELECT metric_path, metric_id FROM pm_metric_dictionary WHERE metric_path = ANY($1)`, paths)
+	ids, err := resolveMetricDictionary(ctx, tx, defs)
 	if err != nil {
 		return fmt.Errorf("resolve pm metric dictionary: %w", err)
 	}
-	ids := make(map[string]int64, len(paths))
-	for rows.Next() {
-		var path string
-		var id int64
-		if err := rows.Scan(&path, &id); err != nil {
-			rows.Close()
-			return fmt.Errorf("scan pm metric dictionary: %w", err)
-		}
-		ids[path] = id
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return fmt.Errorf("iterate pm metric dictionary: %w", err)
-	}
-	rows.Close()
 
 	productKeys, err := resolveSparseProductKeys(ctx, tx, measurements)
 	if err != nil {
@@ -102,13 +72,8 @@ ON CONFLICT (metric_path) DO UPDATE SET
 		sort.Slice(setIDs, func(i, j int) bool { return setIDs[i] < setIDs[j] })
 		hash := MetricSetHash(setIDs)
 		productKey := productKeys[m.DeviceID]
-		var setID int64
-		if err := tx.QueryRow(ctx, `
-INSERT INTO pm_metric_sets (product_key, counter_group, content_hash, metric_ids)
-VALUES ($1,$2,$3,$4)
-ON CONFLICT (product_key, counter_group, content_hash)
-DO UPDATE SET metric_ids = EXCLUDED.metric_ids
-RETURNING metric_set_id`, productKey, m.CounterGroup, hash[:], setIDs).Scan(&setID); err != nil {
+		setID, err := resolveMetricSet(ctx, tx, productKey, m.CounterGroup, hex.EncodeToString(hash[:]), setIDs)
+		if err != nil {
 			return fmt.Errorf("resolve pm metric set: %w", err)
 		}
 		var anchorID int64
