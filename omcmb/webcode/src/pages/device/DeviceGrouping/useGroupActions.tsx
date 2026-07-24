@@ -19,6 +19,7 @@ export interface AddGroupFormValues {
 export interface AddChildFormValues {
   /** 单值名称 — 与一级分组一致，单个 antd Input。 */
   name?: string;
+  autoAssignEnabled?: boolean;
   matchingMode: 'deviceName' | 'lac' | 'tac' | 'serialNumber';
   tacRag: string;
   sourceGroupId?: string;
@@ -54,7 +55,7 @@ interface UpdateGroupArgs {
      * 之前类型只允许 name/parent_id/remark，导致 L2 编辑改匹配规则时被 TS 静默
      * 截断 → 后端收不到 → fireGroupMatch 跑旧规则 → 设备不重新入组。
      */
-    matching_mode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber';
+    matching_mode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber' | '';
     source_group_id?: string;
     name_rule_list?: NameFilterItem[];
     lac_list?: number[];
@@ -162,7 +163,9 @@ export function useGroupActions(deps: {
   const [editLevel2Form] = Form.useForm<AddChildFormValues>();
 
   const matchingMode = Form.useWatch('matchingMode', addChildForm);
+  const autoAssignEnabled = Form.useWatch('autoAssignEnabled', addChildForm);
   const editLevel2MatchingMode = Form.useWatch('matchingMode', editLevel2Form);
+  const editLevel2AutoAssignEnabled = Form.useWatch('autoAssignEnabled', editLevel2Form);
   const getGroupName = useCallback(
     (group: GroupItem): string => getBuiltInGroupName(group, t) ||
       getRecordI18n(group as unknown as Record<string, unknown>, 'name', locale) ||
@@ -180,7 +183,13 @@ export function useGroupActions(deps: {
     (groupId: string) => {
       setParentGroupId(groupId);
       addChildForm.resetFields();
-      addChildForm.setFieldsValue({ matchingMode: 'deviceName', tacRag: '', serialNumbers: '', sourceGroupId: undefined });
+      addChildForm.setFieldsValue({
+        autoAssignEnabled: false,
+        matchingMode: 'deviceName',
+        tacRag: '',
+        serialNumbers: '',
+        sourceGroupId: undefined,
+      });
       childNameFilters.reset();
       setAddChildDrawerOpen(true);
     },
@@ -216,6 +225,7 @@ export function useGroupActions(deps: {
         grp.matchingMode === 'lac' || grp.matchingMode === 'tac' || grp.matchingMode === 'serialNumber'
           ? grp.matchingMode
           : 'deviceName';
+      const autoAssign = Boolean(grp.matchingMode && grp.sourceGroupId);
 
       let tacRag = '';
       if (mode === 'lac' && grp.lacList && grp.lacList.length > 0) {
@@ -227,6 +237,7 @@ export function useGroupActions(deps: {
       // 单值名称回填：按当前语言展示，缺失时由 i18n 工具回退到中文/legacy。
       editLevel2Form.setFieldsValue({
         name: getGroupName(grp),
+        autoAssignEnabled: autoAssign,
         matchingMode: mode,
         tacRag,
         sourceGroupId: grp.sourceGroupId,
@@ -234,7 +245,7 @@ export function useGroupActions(deps: {
       });
 
       // 回填 name_rule_list 到 NameFilters hook 的内部状态
-      if (mode === 'deviceName' && Array.isArray(grp.nameRuleList) && grp.nameRuleList.length > 0) {
+      if (autoAssign && mode === 'deviceName' && Array.isArray(grp.nameRuleList) && grp.nameRuleList.length > 0) {
         // 注入既有规则；保持原 ID 让 React key 稳定（避免不必要重渲染）
         editLevel2NameFilters.setFilters(grp.nameRuleList.map((r, i) => ({
           // 后端返回的 NameFilterItem 可能缺 id（仅 condition/value/andOr）；缺失时补一个
@@ -368,7 +379,9 @@ export function useGroupActions(deps: {
       let tac_list: number[] | undefined;
       let serial_number_list: string[] | undefined;
 
-      if (values.matchingMode === 'deviceName') {
+      if (!values.autoAssignEnabled) {
+        matching_mode = undefined;
+      } else if (values.matchingMode === 'deviceName') {
         matching_mode = 'deviceName';
         name_rule_list = childNameFilters.filters.filter((f) => f.value && f.value.trim() !== '');
       } else if (values.matchingMode === 'lac') {
@@ -388,7 +401,7 @@ export function useGroupActions(deps: {
         parent_id: parentGroupId ?? undefined,
         remark: '',
         matching_mode,
-        source_group_id: values.sourceGroupId,
+        source_group_id: values.autoAssignEnabled ? values.sourceGroupId : undefined,
         name_rule_list,
         lac_list,
         tac_list,
@@ -411,13 +424,15 @@ export function useGroupActions(deps: {
 
       // R1.3: 全量替换语义 — 用户在表单上看到的就是最终落库的，避免增量合并歧义。
       // 切换 matchingMode 时显式清空非当前模式的列表字段，让后端覆盖为空数组。
-      let matching_mode: 'deviceName' | 'lac' | 'tac' | 'serialNumber' | undefined;
+      let matching_mode: 'deviceName' | 'lac' | 'tac' | 'serialNumber' | '' = '';
       let name_rule_list: NameFilterItem[] = [];
       let lac_list: number[] = [];
       let tac_list: number[] = [];
       let serial_number_list: string[] = [];
 
-      if (values.matchingMode === 'deviceName') {
+      if (!values.autoAssignEnabled) {
+        matching_mode = '';
+      } else if (values.matchingMode === 'deviceName') {
         matching_mode = 'deviceName';
         name_rule_list = editLevel2NameFilters.filters.filter(
           (f) => f.value && f.value.trim() !== ''
@@ -439,7 +454,7 @@ export function useGroupActions(deps: {
           name,
           name_i18n: { ...(currentGroup?.nameI18n ?? {}), [locale]: name },
           matching_mode,
-          source_group_id: values.sourceGroupId,
+          source_group_id: values.autoAssignEnabled ? values.sourceGroupId : '',
           name_rule_list,
           lac_list,
           tac_list,
@@ -482,7 +497,9 @@ export function useGroupActions(deps: {
       editLevel2DrawerOpen,
       editLevel2GroupId,
       matchingMode,
+      autoAssignEnabled,
       editLevel2MatchingMode,
+      editLevel2AutoAssignEnabled,
       // 上级（一级）分组名称，供子分组新增/编辑抽屉只读展示。
       addChildParentName: parentGroupId
         ? (() => {

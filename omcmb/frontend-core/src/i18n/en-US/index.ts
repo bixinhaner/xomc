@@ -1573,6 +1573,7 @@ const messages: Record<string, string> = {
   'device.selectParentGroup':   'Select parent group',
   'device.rules.matchingMode':  'Matching Mode',
   'device.rules.sourceGroup': 'Source Device Group',
+  'device.rules.autoAssign': 'Auto Assign Device Group',
   'device.rules.sourceGroupRequired': 'Please select a source device group',
   'device.rules.sourceGroupPlaceholder': 'Select the only group devices may be moved from',
   'device.rules.serialNumber': 'Device Serial Number',

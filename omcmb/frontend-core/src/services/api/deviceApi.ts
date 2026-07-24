@@ -973,7 +973,7 @@ export const deviceApi = {
     remark_i18n?: Record<string, string>;
     parent_id?: string;
     remark?: string;
-    matching_mode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber';
+    matching_mode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber' | '';
     source_group_id?: string;
     name_rule_list?: NameFilterItem[];
     lac_list?: number[];
@@ -992,7 +992,7 @@ export const deviceApi = {
     remark_i18n?: Record<string, string>;
     parent_id?: string;
     remark?: string;
-    matching_mode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber';
+    matching_mode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber' | '';
     source_group_id?: string;
     name_rule_list?: NameFilterItem[];
     lac_list?: number[];
