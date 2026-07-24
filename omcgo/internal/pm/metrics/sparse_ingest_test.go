@@ -98,6 +98,84 @@ func TestBuildSparseMeasurementsFromMetricsKeepsKPIAnchorAndFiniteValues(t *test
 	assert.Equal(t, 99.5, got[0].Values[0].Value)
 }
 
+func TestBuildSparseMeasurementsFromMetricsPreservesDuplicateMetadataForCanonicalValidation(t *testing.T) {
+	deviceID := uuid.New()
+	end := time.Date(2026, 7, 25, 11, 15, 0, 0, time.UTC)
+	sum, avg := StatisSum, StatisAvg
+	input := []PMMetric{
+		{DeviceOUI: "48BF74", DeviceSN: "SN-1", MetricPath: "RRC.Attempts", MetricType: MetricTypeCounter,
+			MetricValue: 1, StatisType: &sum, Granularity: Granularity15Min, Time: end, StartTime: end.Add(-15 * time.Minute), EndTime: end,
+			Extra: map[string]any{"device_id": deviceID.String()}},
+		{DeviceOUI: "48BF74", DeviceSN: "SN-1", MetricPath: "RRC.Attempts", MetricType: MetricTypeCounter,
+			MetricValue: 2, StatisType: &avg, Granularity: Granularity15Min, Time: end, StartTime: end.Add(-15 * time.Minute), EndTime: end,
+			Extra: map[string]any{"device_id": deviceID.String()}},
+	}
+
+	got, err := BuildSparseMeasurementsFromMetrics(input)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Len(t, got[0].Metrics, 2, "metadata must reach canonical validation uncollapsed")
+	require.Len(t, got[0].Values, 1)
+	assert.Equal(t, float64(2), got[0].Values[0].Value, "reported values retain last-wins behavior")
+	_, err = sparseMeasurementDefinitions(got)
+	require.ErrorContains(t, err, "duplicate metric definition for path \"RRC.Attempts\" is inconsistent")
+}
+
+func TestBuildSparseMeasurementsFromMetricsKeepsConsistentDuplicateMetadataAndLastValue(t *testing.T) {
+	deviceID := uuid.New()
+	end := time.Date(2026, 7, 25, 11, 15, 0, 0, time.UTC)
+	sum := StatisSum
+	input := []PMMetric{
+		{DeviceOUI: "48BF74", DeviceSN: "SN-1", MetricPath: "RRC.Success", MetricType: MetricTypeCounter,
+			MetricValue: 1, StatisType: &sum, Granularity: Granularity15Min, Time: end, StartTime: end.Add(-15 * time.Minute), EndTime: end,
+			Extra: map[string]any{"device_id": deviceID.String()}},
+		{DeviceOUI: "48BF74", DeviceSN: "SN-1", MetricPath: "RRC.Success", MetricType: MetricTypeCounter,
+			MetricValue: 2, StatisType: &sum, Granularity: Granularity15Min, Time: end, StartTime: end.Add(-15 * time.Minute), EndTime: end,
+			Extra: map[string]any{"device_id": deviceID.String()}},
+	}
+
+	got, err := BuildSparseMeasurementsFromMetrics(input)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Len(t, got[0].Metrics, 2)
+	require.Len(t, got[0].Values, 1)
+	assert.Equal(t, float64(2), got[0].Values[0].Value)
+	_, err = sparseMeasurementDefinitions(got)
+	require.NoError(t, err)
+}
+
+func TestBuildSparseMeasurementsPreservesDuplicateMetadataForCanonicalValidation(t *testing.T) {
+	deviceID := uuid.New()
+	end := time.Date(2026, 7, 25, 11, 15, 0, 0, time.UTC)
+	got := BuildSparseMeasurements([]model.PMCounter{
+		{DeviceID: deviceID, DeviceSN: "SN-1", CounterGroup: "RRC", CounterName: "RRC.Attempts", CounterValue: 1, StatisType: "sum", Unit: "count", Granularity: 15, Time: end},
+		{DeviceID: deviceID, DeviceSN: "SN-1", CounterGroup: "RRC", CounterName: "RRC.Attempts", CounterValue: 2, StatisType: "avg", Unit: "count", Granularity: 15, Time: end},
+	}, nil)
+
+	require.Len(t, got, 1)
+	assert.Len(t, got[0].Metrics, 2, "metadata must reach canonical validation uncollapsed")
+	require.Len(t, got[0].Values, 1)
+	assert.Equal(t, float64(2), got[0].Values[0].Value, "reported values retain last-wins behavior")
+	_, err := sparseMeasurementDefinitions(got)
+	require.ErrorContains(t, err, "duplicate metric definition for path \"RRC.Attempts\" is inconsistent")
+}
+
+func TestBuildSparseMeasurementsKeepsConsistentDuplicateMetadataAndLastValue(t *testing.T) {
+	deviceID := uuid.New()
+	end := time.Date(2026, 7, 25, 11, 15, 0, 0, time.UTC)
+	got := BuildSparseMeasurements([]model.PMCounter{
+		{DeviceID: deviceID, DeviceSN: "SN-1", CounterGroup: "RRC", CounterName: "RRC.Success", CounterValue: 1, StatisType: "sum", Unit: "count", Granularity: 15, Time: end},
+		{DeviceID: deviceID, DeviceSN: "SN-1", CounterGroup: "RRC", CounterName: "RRC.Success", CounterValue: 2, StatisType: "sum", Unit: "count", Granularity: 15, Time: end},
+	}, nil)
+
+	require.Len(t, got, 1)
+	assert.Len(t, got[0].Metrics, 2)
+	require.Len(t, got[0].Values, 1)
+	assert.Equal(t, float64(2), got[0].Values[0].Value)
+	_, err := sparseMeasurementDefinitions(got)
+	require.NoError(t, err)
+}
+
 func TestBuildSparseMeasurementsFromMetricsRejectsMissingDeviceIdentity(t *testing.T) {
 	_, err := BuildSparseMeasurementsFromMetrics([]PMMetric{{
 		DeviceOUI: "48BF74", DeviceSN: "SN-1", MetricPath: "K1",

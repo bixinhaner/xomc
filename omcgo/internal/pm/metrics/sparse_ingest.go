@@ -184,14 +184,8 @@ func BuildSparseMeasurementsFromMetrics(ms []PMMetric) ([]SparseMeasurement, err
 	for _, k := range order {
 		g := groups[k]
 		g.MetricPaths = uniqueSorted(g.MetricPaths)
-		lastMeta := make(map[string]SparseValue, len(g.Metrics))
-		for _, metric := range g.Metrics {
-			lastMeta[metric.Path] = metric
-		}
-		g.Metrics = g.Metrics[:0]
-		for _, path := range g.MetricPaths {
-			g.Metrics = append(g.Metrics, lastMeta[path])
-		}
+		// Preserve every encountered metadata definition for canonical validation
+		// in writeSparseMeasurements. Only physical values are last-wins.
 		last := make(map[string]SparseValue, len(g.Values))
 		for _, value := range g.Values {
 			last[value.Path] = value
@@ -367,14 +361,7 @@ func BuildSparseMeasurements(counters []model.PMCounter, kpis []model.KPIValue) 
 	for _, k := range order {
 		g := groups[k]
 		g.MetricPaths = uniqueSorted(g.MetricPaths)
-		lastMeta := make(map[string]SparseValue, len(g.Metrics))
-		for _, metric := range g.Metrics {
-			lastMeta[metric.Path] = metric
-		}
-		g.Metrics = g.Metrics[:0]
-		for _, path := range g.MetricPaths {
-			g.Metrics = append(g.Metrics, lastMeta[path])
-		}
+		// Keep duplicate metadata until sparseMeasurementDefinitions validates it.
 		// Preserve last-wins behavior for duplicate reported paths.
 		last := make(map[string]SparseValue, len(g.Values))
 		for _, v := range g.Values {

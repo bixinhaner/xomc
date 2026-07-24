@@ -676,7 +676,7 @@ git commit -m "test(pm): 增加稀疏存储对照验证"
 - Modify only files required by discovered defects.
 - Update: `docs/superpowers/plans/2026-07-24-pm-load-hardening.md`
 
-- [ ] **Step 1: Inspect the complete diff**
+- [x] **Step 1: Inspect the complete diff**
 
 ```bash
 git status --short
@@ -687,7 +687,7 @@ git log --oneline --decorate -12
 
 Confirm local AI configuration files are not tracked.
 
-- [ ] **Step 2: Run backend verification**
+- [x] **Step 2: Run backend verification**
 
 ```bash
 cd omcgo
@@ -698,27 +698,29 @@ go test ./...
 
 If local-listener tests are sandbox-blocked, rerun with the required permission and distinguish environment failures from real failures.
 
-- [ ] **Step 3: Run frontend verification**
+- [x] **Step 3: Run frontend verification**
 
 ```bash
 cd omcmb
 npm run typecheck
 ```
 
-- [ ] **Step 4: Run deployment/static validation**
+- [x] **Step 4: Run deployment/static validation**
 
 ```bash
 bash deployments/release/bundle/deploy/storage-compose_test.sh
 docker compose -f deployments/docker/docker-compose.yml config
 ```
 
-- [ ] **Step 5: Review every P0/P1/P2 acceptance item**
+- [x] **Step 5: Review every P0/P1/P2 acceptance item**
 
 Use `superpowers:requesting-code-review`. Resolve every actionable finding, rerun affected tests, then repeat the full verification. Do not waive an item without evidence.
 
-- [ ] **Step 6: Commit verification-only fixes if necessary**
+- [x] **Step 6: Commit verification-only fixes if necessary**
 
 Use a Conventional Commit message describing the actual fix.
+
+**Task 9 evidence (2026-07-25):** final local verification passed after independent-review fixes, including `go build ./...`, `go test ./...`, `npm run typecheck`, release static validation, and Compose configuration parsing. Verification-only follow-up commits are `a141a9868` and the subsequent metadata-builder review fix. The detailed local report is intentionally ignored at `.superpowers/sdd/pm-task-9-report.md`. Task 8's isolated EXPLAIN/dual-run evidence and every deployment/load threshold remain Task 10 live gates and are not completed here.
 
 ---
 
