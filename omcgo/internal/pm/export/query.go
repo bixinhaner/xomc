@@ -28,7 +28,7 @@ var deviceSelectColsNoID = []string{
 // granularity、时窗、制式）；ORDER BY time, id 配 keyset 游标保证不漏不重。
 // started=false 时取首批（无游标谓词）；之后用 (time, id) > (curTime, curID) 推进。
 func buildDeviceKeysetSQL(table string, req aggregator.QueryRequest, objectLDNs []string, started bool, curTime time.Time, curID uuid.UUID, limit int) (string, []any) {
-	b := storage.Psql.Select(deviceSelectCols...).From(table)
+	b := newRawAwareExportSelect(table, req, deviceSelectCols...)
 	b = applyDeviceExportFilters(b, req, objectLDNs)
 	if started {
 		// keyset：(time, id) 严格大于游标。time 列名带引号避免与保留字冲突。
@@ -40,13 +40,54 @@ func buildDeviceKeysetSQL(table string, req aggregator.QueryRequest, objectLDNs 
 }
 
 func buildDeviceOffsetSQL(table string, req aggregator.QueryRequest, objectLDNs []string, offset, limit int) (string, []any) {
-	b := storage.Psql.Select(deviceSelectColsNoID...).From(table)
+	b := newRawAwareExportSelect(table, req, deviceSelectColsNoID...)
 	b = applyDeviceExportFilters(b, req, objectLDNs)
 	b = b.OrderBy(`"time" ASC`, "device_oui ASC", "device_sn ASC", "object_ldn ASC", "metric_path ASC", "metric_type ASC").
 		Limit(uint64(limit)).
 		Offset(uint64(offset))
 	q, args, _ := b.ToSql()
 	return q, args
+}
+
+func newRawAwareExportSelect(
+	table string,
+	req aggregator.QueryRequest,
+	columns ...string,
+) sq.SelectBuilder {
+	if len(req.MetricPaths) == 0 || (table != "pm_metrics" && table != "pm_metrics_hourly") {
+		return storage.Psql.Select(columns...).From(table)
+	}
+	var targeted sq.SelectBuilder
+	if table == "pm_metrics" {
+		targeted = storage.Psql.Select(
+			"md5(a.anchor_id::text||':'||d.metric_id::text)::uuid AS id",
+			"COALESCE(dev.oui,'')::text AS device_oui",
+			"COALESCE(dev.serial_number,f.device_sn)::text AS device_sn",
+			"d.metric_path", "d.metric_type", "v.metric_value", "d.statis_type", "a.granularity",
+			`a."time"`, "a.start_time", "a.end_time", "a.object_ldn",
+		).From("pm_measurement_anchors a").
+			Join("pm_metric_sets s ON s.metric_set_id=a.metric_set_id").
+			Join("pm_metric_dictionary d ON d.metric_id=ANY(s.metric_ids)").
+			LeftJoin(`pm_metric_values v ON v."time"=a."time" AND v.anchor_id=a.anchor_id AND v.metric_id=d.metric_id`).
+			LeftJoin("pm_files f ON f.id=a.source_file_id").
+			LeftJoin("device_dim dev ON dev.id=a.device_dim_id")
+	} else {
+		targeted = storage.Psql.Select(
+			"md5(a.bucket_version::text||':'||a.anchor_id::text||':'||d.metric_id::text)::uuid AS id",
+			"COALESCE(dev.oui,'')::text AS device_oui",
+			"COALESCE(dev.serial_number,'')::text AS device_sn",
+			"d.metric_path", "d.metric_type", "v.metric_value", "d.statis_type", "a.granularity",
+			`a."time"`, "a.start_time", "a.end_time", "a.object_ldn",
+		).From("pm_hourly_bucket_versions ver").
+			Join("pm_hourly_anchors a ON a.bucket_version=ver.bucket_version").
+			Join("pm_metric_sets s ON s.metric_set_id=a.metric_set_id").
+			Join("pm_metric_dictionary d ON d.metric_id=ANY(s.metric_ids)").
+			LeftJoin(`pm_hourly_values v ON v.bucket_version=a.bucket_version AND v."time"=a."time" AND v.anchor_id=a.anchor_id AND v.metric_id=d.metric_id`).
+			LeftJoin("device_dim dev ON dev.id=a.device_dim_id").
+			Where(sq.Eq{"ver.status": "active"})
+	}
+	targeted = targeted.Where(sq.Eq{"d.metric_path": req.MetricPaths})
+	return storage.Psql.Select(columns...).FromSelect(targeted, table)
 }
 
 // adhocSelectCols 是 adhoc 取数的扩展列序（含 product_id::text 与关联名），与 adhocSource 扫描一一对应。
@@ -90,7 +131,10 @@ func buildAdhocKeysetSQL(taskID uuid.UUID, metricPaths []string, startTime, endT
 // buildDistinctMetricsSQL 发现 dashboard 源的横表指标列集：DISTINCT(metric_path, metric_type)。
 // 指标的编号/类型与设备/小区无关，故只按 metric_paths（非空时）+ 时窗收口即得列全集（含 counter/kpi 类型）。
 func buildDistinctMetricsSQL(table string, metricPaths []string, start, end time.Time) (string, []any) {
-	b := storage.Psql.Select("DISTINCT metric_path", "metric_type").From(table)
+	b := newRawAwareExportSelect(
+		table, aggregator.QueryRequest{MetricPaths: metricPaths},
+		"DISTINCT metric_path", "metric_type",
+	)
 	if len(metricPaths) > 0 {
 		b = b.Where(sq.Eq{"metric_path": metricPaths})
 	}

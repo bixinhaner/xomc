@@ -47,7 +47,16 @@ services:
               "-c", "max_connections=${PG_MAX_CONNECTIONS:-300}",
               "-c", "shared_buffers=${PG_SHARED_BUFFERS:-3GB}", "-c", "effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-7GB}",
               "-c", "work_mem=${PG_WORK_MEM:-16MB}", "-c", "maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-1GB}",
-              "-c", "max_wal_size=${PG_MAX_WAL_SIZE:-4GB}", "-c", "checkpoint_completion_target=0.9"]
+              "-c", "max_wal_size=${PG_MAX_WAL_SIZE:-4GB}", "-c", "checkpoint_completion_target=0.9",
+              "-c", "log_checkpoints=${PG_LOG_CHECKPOINTS:-off}", "-c", "log_autovacuum_min_duration=${PG_LOG_AUTOVACUUM_MIN_DURATION:--1}",
+              "-c", "log_statement=${PG_LOG_STATEMENT:-none}", "-c", "log_min_duration_statement=${PG_LOG_MIN_DURATION_STATEMENT:--1}",
+              "-c", "log_connections=${PG_LOG_CONNECTIONS:-off}", "-c", "log_disconnections=${PG_LOG_DISCONNECTIONS:-off}",
+              "-c", "log_temp_files=${PG_LOG_TEMP_FILES:--1}", "-c", "log_min_messages=${PG_LOG_MIN_MESSAGES:-warning}"]
+    logging:
+      driver: json-file
+      options:
+        max-size: "${DB_LOG_MAX_SIZE:-20m}"
+        max-file: "${DB_LOG_MAX_FILES:-5}"
     # 有状态服务给足 60s 优雅退出窗口：checkpoint flush + WAL 落盘，避免被 SIGKILL
     # 截断导致 recovery（详见 README §13 资源与优雅关闭）。
     stop_grace_period: 60s
@@ -100,7 +109,16 @@ services:
               "-c", "max_connections=${TSDB_MAX_CONNECTIONS:-300}",
               "-c", "shared_buffers=${TSDB_SHARED_BUFFERS:-3GB}", "-c", "effective_cache_size=${TSDB_EFFECTIVE_CACHE_SIZE:-7GB}",
               "-c", "work_mem=${TSDB_WORK_MEM:-16MB}", "-c", "maintenance_work_mem=${TSDB_MAINTENANCE_WORK_MEM:-1GB}",
-              "-c", "max_wal_size=${TSDB_MAX_WAL_SIZE:-4GB}", "-c", "checkpoint_completion_target=0.9"]
+              "-c", "max_wal_size=${TSDB_MAX_WAL_SIZE:-4GB}", "-c", "checkpoint_completion_target=0.9",
+              "-c", "log_checkpoints=${TSDB_LOG_CHECKPOINTS:-off}", "-c", "log_autovacuum_min_duration=${TSDB_LOG_AUTOVACUUM_MIN_DURATION:--1}",
+              "-c", "log_statement=${TSDB_LOG_STATEMENT:-none}", "-c", "log_min_duration_statement=${TSDB_LOG_MIN_DURATION_STATEMENT:--1}",
+              "-c", "log_connections=${TSDB_LOG_CONNECTIONS:-off}", "-c", "log_disconnections=${TSDB_LOG_DISCONNECTIONS:-off}",
+              "-c", "log_temp_files=${TSDB_LOG_TEMP_FILES:--1}", "-c", "log_min_messages=${TSDB_LOG_MIN_MESSAGES:-warning}"]
+    logging:
+      driver: json-file
+      options:
+        max-size: "${DB_LOG_MAX_SIZE:-20m}"
+        max-file: "${DB_LOG_MAX_FILES:-5}"
     stop_grace_period: 60s
     deploy:
       resources:
@@ -424,6 +442,9 @@ services:
       # 缺省空串 = 历史行为（GOMEMLIMIT 关、GOMAXPROCS 由 cgroup 推断）。
       GOMEMLIMIT: "${WORKER_GOMEMLIMIT:-}"
       GOMAXPROCS: "${WORKER_GOMAXPROCS:-}"
+      # 稀疏 PM 小时汇总：单批设备上限与迟到数据/压缩安全窗口。
+      PM_HOURLY_BATCH_DEVICES: "${PM_HOURLY_BATCH_DEVICES:-200}"
+      PM_LATE_DATA_WINDOW: "${PM_LATE_DATA_WINDOW:-168h}"
     volumes:
       - ../../run/logs/worker:/run/logs/worker
       # 共享 secrets 卷只读 — omcctl/scripts 默认从此读 .api-key

@@ -70,6 +70,37 @@ func (r *PgRepository) Insert(ctx context.Context, req InsertRequest) (uuid.UUID
 	return id, nil
 }
 
+// RequeueSucceededBucket makes a previously completed natural bucket runnable
+// again. It is intentionally separate from Insert so normal cron/catch-up
+// idempotency never replays successful work; late PM data is the explicit caller.
+func (r *PgRepository) RequeueSucceededBucket(
+	ctx context.Context,
+	jobType string,
+	start, end time.Time,
+	payload json.RawMessage,
+) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := r.pool.QueryRow(ctx, `
+		UPDATE async_jobs
+		   SET status='pending', scheduled_at=now(), payload=$4,
+		       started_at=NULL, finished_at=NULL, heartbeat_at=NULL,
+		       lock_owner=NULL, attempt=1, result=NULL, error_message=NULL
+		 WHERE job_type=$1 AND bucket_start=$2 AND bucket_end=$3
+		   AND status='succeeded'
+		RETURNING id`, jobType, start, end, payload).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, fmt.Errorf("requeue succeeded async bucket: %w", err)
+	}
+	bucketStart, bucketEnd := start, end
+	return r.Insert(ctx, InsertRequest{
+		JobType: jobType, Payload: payload,
+		BucketStart: &bucketStart, BucketEnd: &bucketEnd,
+	})
+}
+
 func buildInsertSQL(req InsertRequest) (string, []any, error) {
 	maxAttempts := req.MaxAttempts
 	if maxAttempts <= 0 {
@@ -274,6 +305,31 @@ GROUP BY job_type, status`
 			out[jobType] = make(map[string]int)
 		}
 		out[jobType][status] = n
+	}
+	return out, rows.Err()
+}
+
+// OldestPendingAgeSeconds returns queue age independently of queue depth so a
+// steady-size but permanently stalled PM queue remains observable.
+func (r *PgRepository) OldestPendingAgeSeconds(ctx context.Context) (map[string]float64, error) {
+	const q = `
+SELECT job_type, EXTRACT(EPOCH FROM (now()-MIN(scheduled_at)))::float8
+FROM async_jobs
+WHERE status='pending' AND scheduled_at <= now()
+GROUP BY job_type`
+	rows, err := r.pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("oldest pending age: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]float64)
+	for rows.Next() {
+		var jobType string
+		var seconds float64
+		if err := rows.Scan(&jobType, &seconds); err != nil {
+			return nil, err
+		}
+		out[jobType] = seconds
 	}
 	return out, rows.Err()
 }

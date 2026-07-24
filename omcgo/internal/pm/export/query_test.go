@@ -28,7 +28,9 @@ func TestBuildDeviceKeysetSQL_FirstBatch_NoCursor(t *testing.T) {
 	// ORDER BY time, id + LIMIT。
 	assert.Contains(t, q, `ORDER BY "time" ASC, id ASC`)
 	assert.Contains(t, q, "LIMIT 5000")
-	assert.Contains(t, q, "FROM pm_metrics_hourly")
+	assert.Contains(t, q, "FROM pm_hourly_bucket_versions")
+	assert.Contains(t, q, "d.metric_id=ANY(s.metric_ids)")
+	assert.NotContains(t, q, "unnest(s.metric_ids)")
 	// 过滤参数都进了 args。
 	assert.NotEmpty(t, args)
 }
@@ -203,7 +205,8 @@ func TestBuildDistinctMetricsSQL(t *testing.T) {
 	et := time.Now()
 	q, args := buildDistinctMetricsSQL("pm_metrics_hourly", []string{"K001", "C002"}, st, et)
 	assert.Contains(t, q, "DISTINCT metric_path, metric_type")
-	assert.Contains(t, q, "FROM pm_metrics_hourly")
+	assert.Contains(t, q, "FROM pm_hourly_bucket_versions")
+	assert.Contains(t, q, "d.metric_id=ANY(s.metric_ids)")
 	assert.Contains(t, q, "metric_path IN (")
 	assert.Contains(t, q, "time >=")
 	assert.Contains(t, q, "time < ")

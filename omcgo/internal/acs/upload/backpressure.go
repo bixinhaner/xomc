@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 )
@@ -41,8 +42,8 @@ const (
 	bpKeyInterval    = "check_interval_sec"
 
 	bpDefaultEnabled     = true
-	bpDefaultDiskHighPct = 85.0
-	bpDefaultDiskLowPct  = 75.0
+	bpDefaultDiskHighPct = 70.0
+	bpDefaultDiskLowPct  = 60.0
 	bpDefaultIOSomeHigh  = 70.0
 	bpDefaultIOSomeLow   = 20.0
 	bpDefaultMaxInflight = 2000
@@ -79,6 +80,14 @@ type ConfigLookup func(ctx context.Context, category, key string) (value string,
 
 // DiskUsageFunc 返回数据盘使用率百分比（0-100）。
 type DiskUsageFunc func(ctx context.Context) (pct float64, err error)
+
+// ProjectedBytesFunc estimates bytes that are already accepted but not yet
+// materialized in the database (for example pending raw PM files).
+type ProjectedBytesFunc func(ctx context.Context) (bytes float64, err error)
+
+// PendingCountFunc returns the number of PM messages accepted by the durable
+// queue but not fully acknowledged by workers yet.
+type PendingCountFunc func(ctx context.Context) (count uint64, err error)
 
 // loadBackpressureConfig 从 sys_configs 读全部背压阈值，缺失/非法回落默认值并做迟滞防呆。
 func loadBackpressureConfig(ctx context.Context, lookup ConfigLookup) BackpressureConfig {
@@ -465,6 +474,19 @@ func MinIOMetricsURL(endpoint string, useSSL bool) string {
 // 端点需 MINIO_PROMETHEUS_AUTH_TYPE=public（本栈已配）；非 200 / 解析失败均返回 error，
 // 由 watchdog 降级为「磁盘信号不可用」（不误堵）。
 func NewMinIODiskUsage(metricsURL string, timeout time.Duration, client *http.Client) DiskUsageFunc {
+	return NewProjectedMinIODiskUsage(metricsURL, timeout, client, nil)
+}
+
+// NewProjectedMinIODiskUsage adds accepted-but-not-yet-materialized bytes to
+// the filesystem usage reported by MinIO. Database temp files, WAL and
+// filesystem preallocation already consume that same filesystem and are
+// therefore included in the reported used bytes rather than double-counted.
+func NewProjectedMinIODiskUsage(
+	metricsURL string,
+	timeout time.Duration,
+	client *http.Client,
+	projected ProjectedBytesFunc,
+) DiskUsageFunc {
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
@@ -490,13 +512,85 @@ func NewMinIODiskUsage(metricsURL string, timeout time.Duration, client *http.Cl
 		if err != nil {
 			return 0, fmt.Errorf("read minio metrics: %w", err)
 		}
-		return parseDiskUsagePct(string(body))
+		total, used, err := parseDiskCapacity(string(body))
+		if err != nil {
+			return 0, err
+		}
+		if projected != nil {
+			if pending, projectionErr := projected(ctx); projectionErr == nil && pending > 0 {
+				used += pending
+			}
+		}
+		return projectedUsagePct(total, used, 0), nil
+	}
+}
+
+// NewDatabasePendingProjection estimates future TSDB bytes from PM work that
+// has already been accepted. JetStream backlog is projected using the recent
+// average PM file size; legacy pm_files rows not parsed yet are added directly.
+// amplification should be derived from the latest sparse-storage observation;
+// invalid values use a conservative 1.0.
+func NewDatabasePendingProjection(
+	tsdb *pgxpool.Pool,
+	pendingCount PendingCountFunc,
+	amplification float64,
+) ProjectedBytesFunc {
+	if amplification <= 0 {
+		amplification = 1
+	}
+	return func(ctx context.Context) (float64, error) {
+		var pending float64
+		if tsdb != nil && pendingCount != nil {
+			if count, err := pendingCount(ctx); err == nil && count > 0 {
+				var averageFileSize float64
+				err = tsdb.QueryRow(ctx, `
+					SELECT COALESCE(NULLIF(avg(file_size),0), $1)::float8
+					  FROM (
+					    SELECT file_size
+					      FROM pm_files
+					     WHERE parsed = true
+					       AND file_size > 0
+					     ORDER BY created_at DESC
+					     LIMIT 1000
+					  ) recent`,
+					float64(1<<20),
+				).Scan(&averageFileSize)
+				if err == nil {
+					pending += float64(count) * averageFileSize
+				}
+			}
+		}
+		if tsdb != nil {
+			var bytes float64
+			err := tsdb.QueryRow(ctx,
+				`SELECT COALESCE(sum(file_size),0)::float8 FROM pm_files WHERE parsed=false`,
+			).Scan(&bytes)
+			if err == nil {
+				pending += bytes
+			}
+		}
+		return pending * amplification, nil
 	}
 }
 
 // parseDiskUsagePct 从 MinIO 集群指标文本计算磁盘使用率%。按指标版本差异依次尝试多组容量指标：
 // usable 容量 → raw 容量 → 节点磁盘 free → 节点磁盘 used，取首个可用组。
 func parseDiskUsagePct(text string) (float64, error) {
+	total, used, err := parseDiskCapacity(text)
+	if err != nil {
+		return 0, err
+	}
+	return projectedUsagePct(total, used, 0), nil
+}
+
+func projectedUsagePct(total, used, pending float64) float64 {
+	if total <= 0 {
+		return 0
+	}
+	return clampPct((used + pending) / total * 100)
+}
+
+func parseDiskCapacity(text string) (total, used float64, err error) {
 	sums, present := sumMetrics(text, []string{
 		"minio_cluster_capacity_usable_total_bytes",
 		"minio_cluster_capacity_usable_free_bytes",
@@ -508,20 +602,20 @@ func parseDiskUsagePct(text string) (float64, error) {
 	})
 
 	if t := sums["minio_cluster_capacity_usable_total_bytes"]; t > 0 && present["minio_cluster_capacity_usable_free_bytes"] {
-		return usedPctFromFree(t, sums["minio_cluster_capacity_usable_free_bytes"]), nil
+		return t, t - sums["minio_cluster_capacity_usable_free_bytes"], nil
 	}
 	if t := sums["minio_cluster_capacity_raw_total_bytes"]; t > 0 && present["minio_cluster_capacity_raw_free_bytes"] {
-		return usedPctFromFree(t, sums["minio_cluster_capacity_raw_free_bytes"]), nil
+		return t, t - sums["minio_cluster_capacity_raw_free_bytes"], nil
 	}
 	if t := sums["minio_node_disk_total_bytes"]; t > 0 {
 		if present["minio_node_disk_free_bytes"] {
-			return usedPctFromFree(t, sums["minio_node_disk_free_bytes"]), nil
+			return t, t - sums["minio_node_disk_free_bytes"], nil
 		}
 		if present["minio_node_disk_used_bytes"] {
-			return clampPct(sums["minio_node_disk_used_bytes"] / t * 100), nil
+			return t, sums["minio_node_disk_used_bytes"], nil
 		}
 	}
-	return 0, fmt.Errorf("no usable minio capacity metrics found")
+	return 0, 0, fmt.Errorf("no usable minio capacity metrics found")
 }
 
 func usedPctFromFree(total, free float64) float64 {

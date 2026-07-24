@@ -16,7 +16,7 @@ import (
 
 // T-0194 C2：Aggregator.Count 返回与 Query 同过滤下命中真实总数（忽略 Limit/Offset）。
 
-// device 维度：直查 COUNT(*)（无聚合），WHERE 含过滤项、不带 LIMIT/OFFSET/ORDER BY。
+// device 维度：按 Query 的自然键去重后计数，WHERE 含过滤项、不带分页。
 func Test_Count_Device(t *testing.T) {
 	var gotSQL string
 	db := &stubDB{}
@@ -35,10 +35,11 @@ func Test_Count_Device(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1234, n)
 	assert.True(t, strings.HasPrefix(strings.TrimSpace(gotSQL), "SELECT COUNT(*)"), gotSQL)
+	assert.Contains(t, gotSQL, "SELECT DISTINCT ON (device_oui, device_sn, metric_path, granularity, \"time\", object_ldn) 1")
 	assert.Contains(t, gotSQL, "pm_metrics_hourly")
 	assert.NotContains(t, gotSQL, "LIMIT")
 	assert.NotContains(t, gotSQL, "OFFSET")
-	assert.NotContains(t, gotSQL, "ORDER BY")
+	assert.Contains(t, gotSQL, "ORDER BY device_oui, device_sn, metric_path, granularity, \"time\", object_ldn, ingest_time DESC")
 }
 
 func Test_Count_Device_PageByPivotRowCountsDistinctPivotKeys(t *testing.T) {
@@ -62,7 +63,9 @@ func Test_Count_Device_PageByPivotRowCountsDistinctPivotKeys(t *testing.T) {
 	assert.Equal(t, 88, n)
 	assert.Contains(t, gotSQL, "SELECT COUNT(*) FROM (")
 	assert.Contains(t, gotSQL, "SELECT DISTINCT device_oui, device_sn, COALESCE(object_ldn, '') AS object_ldn, granularity, \"time\"")
-	assert.Contains(t, gotSQL, "FROM pm_metrics")
+	assert.Contains(t, gotSQL, "FROM pm_measurement_anchors")
+	assert.Contains(t, gotSQL, "d.metric_id=ANY(s.metric_ids)")
+	assert.NotContains(t, gotSQL, "unnest(s.metric_ids)")
 	assert.NotContains(t, gotSQL, "LIMIT")
 	assert.NotContains(t, gotSQL, "OFFSET")
 	assert.NotContains(t, gotSQL, "metric_path, granularity, time")

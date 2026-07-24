@@ -13,20 +13,25 @@ import (
 	"go.uber.org/zap"
 )
 
-// hypertableTables maps PolicyKey to the hypertables it governs.
-// Only hypertable keys are listed; ordinary tables (daily/weekly/monthly) are
-// managed by the cleanup_runner cron and are not covered here.
+// hypertableTables maps PolicyKey to the hypertables governed by TimescaleDB
+// automatic retention policies. Ordinary tables (daily/weekly/monthly) are
+// managed by cleanup_runner and raw sparse tables are managed by worker's
+// watermark-safe chunk maintenance, so neither group is listed here.
 //
-// 注：migrations/tsdb 中共有 4 张 hypertable，此处仅列 3 张：
+// 小时级策略覆盖两张稀疏物理表和一张设备组表：
 //
-//	pm_metrics                  ← KeyRaw15MinDays
-//	pm_metrics_hourly           ← KeyHourlyDays
-//	pm_group_metrics_hourly     ← KeyHourlyDays
-//	pm_adhoc_aggregation_results ← 有意跳过：retention 365d hardcode 于 migration，
-//	                                无 UI 配置键，不受本 applier 管辖。
+//	pm_hourly_anchors            ← KeyHourlyDays
+//	pm_hourly_values             ← KeyHourlyDays
+//	pm_group_metrics_hourly      ← KeyHourlyDays
+//
+// pm_metrics / pm_metrics_hourly 是兼容视图，不能传给 TimescaleDB policy API。
+// pm_adhoc_aggregation_results 的 365d policy 固定在 migration，无 UI 配置键。
 var hypertableTables = map[PolicyKey][]string{
-	KeyRaw15MinDays: {"public.pm_metrics"},
-	KeyHourlyDays:   {"public.pm_metrics_hourly", "public.pm_group_metrics_hourly"},
+	KeyHourlyDays: {
+		"public.pm_hourly_anchors",
+		"public.pm_hourly_values",
+		"public.pm_group_metrics_hourly",
+	},
 }
 
 // retentionQuerier is the minimal DB interface required by PMRetentionApplier,
@@ -49,8 +54,8 @@ WHERE proc_name = 'policy_retention'
   AND format('%I.%I', hypertable_schema, hypertable_name) = $1`
 
 // PMRetentionApplier 对 TimescaleDB 的 retention policy 做 remove+add 幂等更新。
-// 仅操作 hypertable（pm_metrics、pm_metrics_hourly、pm_group_metrics_hourly）；
-// daily/weekly/monthly 为普通表，由 cleanup_runner cron 处理，不在本 applier 范畴。
+// 仅操作允许自动清理的 hypertable；原始稀疏表由 worker 做水位安全清理，
+// daily/weekly/monthly 由 cleanup_runner cron 处理，均不在本 applier 范畴。
 type PMRetentionApplier struct {
 	db         retentionQuerier
 	logger     *zap.Logger
@@ -172,8 +177,8 @@ func (a *PMRetentionApplier) ApplyAll(ctx context.Context, current map[PolicyKey
 
 // ApplyAllWithError 批量更新 changed keys 对应的 hypertable retention policy，并返回第一个错误。
 // 调用方可将错误持久化为配置应用失败状态，而不是只记录日志后报告保存成功。
-// 仅 KeyRaw15MinDays 和 KeyHourlyDays 对应 hypertable；其余 key（daily/weekly/monthly）忽略，
-// 由 cleanup_runner 按天数清理。
+// 仅 KeyHourlyDays 对应自动 retention hypertable；KeyRaw15MinDays 由 worker
+// 做水位安全清理，其余 key（daily/weekly/monthly）由 cleanup_runner 按天数清理。
 func (a *PMRetentionApplier) ApplyAllWithError(ctx context.Context, current map[PolicyKey]int, changed []PolicyKey) error {
 	policies := make(map[string]int)
 	for _, k := range changed {

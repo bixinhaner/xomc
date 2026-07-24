@@ -16,6 +16,24 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
+func TestRawAwareDeviceSelectUsesCorrectPhysicalSource(t *testing.T) {
+	req := QueryRequest{MetricPaths: []string{"C1"}}
+	rawSQL, _, err := newRawAwareDeviceSelect(
+		storage.Psql, "pm_metrics", req, deviceTableColumns...,
+	).ToSql()
+	require.NoError(t, err)
+	assert.Contains(t, rawSQL, "FROM pm_measurement_anchors")
+	assert.NotContains(t, rawSQL, "FROM pm_hourly_bucket_versions")
+
+	hourlySQL, _, err := newRawAwareDeviceSelect(
+		storage.Psql, "pm_metrics_hourly", req, deviceTableColumns...,
+	).ToSql()
+	require.NoError(t, err)
+	assert.Contains(t, hourlySQL, "FROM pm_hourly_bucket_versions")
+	assert.Contains(t, hourlySQL, "ver.status")
+	assert.NotContains(t, hourlySQL, "FROM pm_measurement_anchors")
+}
+
 func Test_applyScalarFilters_TimeRangeIsHalfOpen(t *testing.T) {
 	start := time.Date(2026, 7, 6, 16, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 7, 7, 16, 0, 0, 0, time.UTC)

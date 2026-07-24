@@ -1,0 +1,131 @@
+package metrics
+
+import (
+	"math"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestBuildSparseMeasurementsKeepsAnchorAndDropsMissingPhysicalValue(t *testing.T) {
+	end := time.Date(2026, 7, 24, 10, 15, 0, 0, time.UTC)
+	deviceID := uuid.New()
+	counters := []model.PMCounter{
+		{DeviceID: deviceID, OUI: "48BF74", DeviceSN: "SN-1", CellID: "Cellid=1", CounterGroup: "RRC", CounterName: "C1", CounterValue: 10, StatisType: "sum", Unit: "number", Granularity: 15, Time: end},
+		{DeviceID: deviceID, OUI: "48BF74", DeviceSN: "SN-1", CellID: "Cellid=1", CounterGroup: "RRC", CounterName: "C2", CounterValue: math.NaN(), StatisType: "sum", Unit: "number", Granularity: 15, Time: end},
+	}
+
+	got := BuildSparseMeasurements(counters, nil)
+
+	require.Len(t, got, 1)
+	assert.Equal(t, []string{"C1", "C2"}, got[0].MetricPaths)
+	require.Len(t, got[0].Metrics, 2)
+	assert.Equal(t, "sum", got[0].Metrics[1].StatisType)
+	assert.Equal(t, "number", got[0].Metrics[1].Unit)
+	require.Len(t, got[0].Values, 1)
+	assert.Equal(t, "C1", got[0].Values[0].Path)
+	assert.Equal(t, float64(10), got[0].Values[0].Value)
+}
+
+func TestBuildSparseMeasurementsKeepsAllMissingKPIMetadata(t *testing.T) {
+	end := time.Date(2026, 7, 24, 10, 15, 0, 0, time.UTC)
+	got := BuildSparseMeasurements(nil, []model.KPIValue{{
+		DeviceID: uuid.New(), DeviceSN: "SN-1", CellID: "Cellid=1",
+		IndicatorID: "K1", KPIValue: math.NaN(), StatisType: "pct", Unit: "%",
+		Time: end,
+	}})
+
+	require.Len(t, got, 1)
+	require.Len(t, got[0].Metrics, 1)
+	assert.Equal(t, MetricTypeKPI, got[0].Metrics[0].MetricType)
+	assert.Equal(t, "pct", got[0].Metrics[0].StatisType)
+	assert.Equal(t, "%", got[0].Metrics[0].Unit)
+	assert.Empty(t, got[0].Values)
+}
+
+func TestBuildSparseMeasurementsKeepsAllMissingMeasurementAnchor(t *testing.T) {
+	end := time.Date(2026, 7, 24, 10, 15, 0, 0, time.UTC)
+	got := BuildSparseMeasurements([]model.PMCounter{{
+		DeviceID: uuid.New(), DeviceSN: "SN-1", CellID: "Cellid=1", CounterGroup: "RRC",
+		CounterName: "C1", CounterValue: math.NaN(), Granularity: 15, Time: end,
+	}}, nil)
+
+	require.Len(t, got, 1)
+	assert.Equal(t, []string{"C1"}, got[0].MetricPaths)
+	assert.Empty(t, got[0].Values)
+}
+
+func TestMetricSetHashIsOrderIndependent(t *testing.T) {
+	assert.Equal(t, MetricSetHash([]int64{9, 2, 5}), MetricSetHash([]int64{5, 9, 2}))
+}
+
+func TestSparseProductKeyReusesSetsAcrossDevicesOfSameProduct(t *testing.T) {
+	productID := uuid.New()
+	assert.Equal(t, productID.String(), sparseProductKey(&productID, uuid.New()))
+	assert.Equal(t, productID.String(), sparseProductKey(&productID, uuid.New()))
+	deviceID := uuid.New()
+	assert.Equal(t, "device:"+deviceID.String(), sparseProductKey(nil, deviceID))
+}
+
+func TestBuildSparseMeasurementsFromMetricsKeepsKPIAnchorAndFiniteValues(t *testing.T) {
+	deviceID := uuid.New()
+	end := time.Date(2026, 7, 24, 11, 15, 0, 0, time.UTC)
+	statis := StatisPct
+	ldn := "Cellid=1"
+
+	got, err := BuildSparseMeasurementsFromMetrics([]PMMetric{{
+		DeviceOUI: "48BF74", DeviceSN: "SN-1", MetricPath: "K1",
+		MetricType: MetricTypeKPI, MetricValue: 99.5, StatisType: &statis,
+		Granularity: Granularity15Min, Time: end.Add(-15 * time.Minute),
+		StartTime: end.Add(-15 * time.Minute), EndTime: end, ObjectLDN: &ldn,
+		Extra: map[string]any{"device_id": deviceID.String()},
+	}})
+
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, deviceID, got[0].DeviceID)
+	assert.Equal(t, "__kpi__", got[0].CounterGroup)
+	assert.Equal(t, []string{"K1"}, got[0].MetricPaths)
+	require.Len(t, got[0].Values, 1)
+	assert.Equal(t, 99.5, got[0].Values[0].Value)
+}
+
+func TestBuildSparseMeasurementsFromMetricsRejectsMissingDeviceIdentity(t *testing.T) {
+	_, err := BuildSparseMeasurementsFromMetrics([]PMMetric{{
+		DeviceOUI: "48BF74", DeviceSN: "SN-1", MetricPath: "K1",
+		MetricType: MetricTypeKPI, MetricValue: 1,
+	}})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "device_id")
+}
+
+func TestBuildDeleteKPIAnchorsSQLTargetsSparsePhysicalTables(t *testing.T) {
+	statements := buildDeleteKPIAnchorsSQL()
+	require.Len(t, statements, 2)
+	assert.Contains(t, statements[0], "DELETE FROM pm_metric_values")
+	assert.Contains(t, statements[0], "pm_measurement_anchors")
+	assert.Contains(t, statements[1], "DELETE FROM pm_measurement_anchors")
+	for _, sql := range statements {
+		assert.NotContains(t, sql, "DELETE FROM pm_metrics ")
+	}
+}
+
+func TestGranularityTextUsesDatabaseEnumValues(t *testing.T) {
+	assert.Equal(t, "15min", granularityText(15))
+	assert.Equal(t, "hourly", granularityText(60))
+	assert.Equal(t, "daily", granularityText(24*60))
+	assert.Equal(t, "weekly", granularityText(7*24*60))
+	assert.Equal(t, "monthly", granularityText(30*24*60))
+}
+
+func TestMarkDirtySQLProtectsActiveAndBuildingHourlyVersions(t *testing.T) {
+	sql := buildMarkHourlyBucketsDirtySQL()
+	assert.Contains(t, sql, "status IN ('active','building')")
+	assert.Contains(t, sql, "bucket_start = ANY($1::timestamptz[])")
+	assert.Contains(t, sql, "dirty = true")
+}

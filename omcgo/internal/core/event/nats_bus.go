@@ -80,6 +80,21 @@ type NATSEventBus struct {
 	cancel            context.CancelFunc
 }
 
+// PendingCount returns queued plus delivered-but-unacked messages for one
+// durable consumer. Capacity protection uses it to estimate PM bytes already
+// accepted into JetStream but not yet materialized in TimescaleDB.
+func (b *NATSEventBus) PendingCount(subject, durable string) (uint64, error) {
+	stream, err := b.js.StreamNameBySubject(subject)
+	if err != nil {
+		return 0, fmt.Errorf("resolve pending consumer stream: %w", err)
+	}
+	info, err := b.js.ConsumerInfo(stream, durable)
+	if err != nil {
+		return 0, fmt.Errorf("load pending consumer info: %w", err)
+	}
+	return info.NumPending + uint64(info.NumAckPending), nil
+}
+
 // NewNATSEventBus creates an EventBus backed by NATS JetStream.
 func NewNATSEventBus(conn *nats.Conn, js nats.JetStreamContext, logger *zap.Logger) *NATSEventBus {
 	ctx, cancel := context.WithCancel(context.Background())

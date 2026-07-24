@@ -254,9 +254,22 @@ func runACS(cmd *cobra.Command, args []string) error {
 			}
 			return row.Value, true
 		}
+		var pmPendingCount upload.PendingCountFunc
+		if pendingBus, ok := inf.EventBus.(interface {
+			PendingCount(subject, durable string) (uint64, error)
+		}); ok {
+			pmPendingCount = func(context.Context) (uint64, error) {
+				return pendingBus.PendingCount(event.SubjectPMFileReceived, "pm-workers")
+			}
+		}
 		bpWatchdog := upload.NewWatchdog(
 			bpLookup,
-			upload.NewMinIODiskUsage(upload.MinIOMetricsURL(cfg.MinIO.Endpoint, cfg.MinIO.UseSSL), 5*time.Second, nil),
+			upload.NewProjectedMinIODiskUsage(
+				upload.MinIOMetricsURL(cfg.MinIO.Endpoint, cfg.MinIO.UseSSL),
+				5*time.Second,
+				nil,
+				upload.NewDatabasePendingProjection(inf.TsPool, pmPendingCount, 1),
+			),
 			upload.NewBackpressureMetrics(inf.MetricsReg),
 			inf.Logger.Named("backpressure"),
 		)

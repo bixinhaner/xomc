@@ -77,7 +77,10 @@ func TestIngestViaCopy_NormalizesCounterValuesBeforeCopyIngest(t *testing.T) {
 		"C.MISSING": {IndicatorID: "C-MISSING", ReportKey: "C.MISSING", Unit: "number", StatisType: "sum"},
 	}
 
-	err := c.ingestViaCopy(ctx, trace.SpanFromContext(ctx), time.Now(), time.Now(), 123, uuid.New(), payload, content, allow)
+	err := c.ingestViaCopy(
+		ctx, trace.SpanFromContext(ctx), time.Now(), time.Now(), 123, uuid.New(),
+		payload, content, allow, make([]byte, 32),
+	)
 
 	require.NoError(t, err)
 	require.Len(t, copyIngestor.counters, 3)
@@ -111,6 +114,16 @@ func TestNormalizeResults_NormalizesKPIValuesAndFailsMissingMetadata(t *testing.
 	require.Error(t, err)
 	assert.ErrorIs(t, err, resultnorm.ErrMissingMetadata)
 	assert.Contains(t, err.Error(), "C-MISSING")
+}
+
+func TestNormalizeResults_PreservesUnknownCounterWithoutMetadata(t *testing.T) {
+	c := &PMCollector{}
+	counters := []model.PMCounter{{CounterName: "Vendor.New.Counter", CounterValue: 12.345}}
+
+	err := c.normalizeResults(context.Background(), counters, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, 12.345, counters[0].CounterValue)
 }
 
 type recordingCopyIngestor struct {

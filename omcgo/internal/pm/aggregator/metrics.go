@@ -22,6 +22,14 @@ type Metrics struct {
 	// BucketLag 当前最后一个成功聚合桶距 now 的滞后秒数（按 job_type 分桶，gauge）。
 	// 用于监控聚合是否堵塞 — 正常 hourly job 该值应 < 7200s（2 个桶以内）。
 	BucketLag *prometheus.GaugeVec
+
+	// BatchDevices records bounded hourly batch completion and device throughput.
+	BatchDevices *prometheus.CounterVec
+
+	DirtyBuckets        prometheus.Gauge
+	WatermarkTimestamp  prometheus.Gauge
+	TempBytes           prometheus.Gauge
+	SparseAmplification prometheus.Gauge
 }
 
 // NewMetrics 构造并注册指标。reg nil 时返不注册的 metrics（测试场景）。
@@ -44,11 +52,71 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "omc_pm_aggregator_bucket_lag_seconds",
 			Help: "Seconds between last successfully-aggregated bucket end and now (by job_type)",
 		}, []string{"job_type"}),
+		BatchDevices: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_pm_aggregator_batch_total",
+			Help: "Completed PM rollup batches and devices by job_type and kind",
+		}, []string{"job_type", "kind"}),
+		DirtyBuckets: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "omc_pm_hourly_dirty_buckets",
+			Help: "Number of active or building hourly buckets marked dirty",
+		}),
+		WatermarkTimestamp: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "omc_pm_hourly_watermark_timestamp_seconds",
+			Help: "Unix timestamp of the newest clean active hourly bucket end",
+		}),
+		TempBytes: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "omc_pm_tsdb_temp_bytes_total",
+			Help: "Cumulative temporary bytes reported by the PM TimescaleDB",
+		}),
+		SparseAmplification: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "omc_pm_sparse_logical_to_physical_ratio",
+			Help: "Recent logical PM rows divided by sparse physical value rows",
+		}),
 	}
 	if reg != nil {
-		reg.MustRegister(m.Runs, m.Duration, m.RowsWritten, m.BucketLag)
+		reg.MustRegister(
+			m.Runs, m.Duration, m.RowsWritten, m.BucketLag, m.BatchDevices,
+			m.DirtyBuckets, m.WatermarkTimestamp, m.TempBytes, m.SparseAmplification,
+		)
 	}
 	return m
+}
+
+func (m *Metrics) SetDirtyBuckets(n float64) {
+	if m != nil {
+		m.DirtyBuckets.Set(n)
+	}
+}
+
+func (m *Metrics) SetWatermark(unixSeconds int64) {
+	if m != nil {
+		m.WatermarkTimestamp.Set(float64(unixSeconds))
+	}
+}
+
+func (m *Metrics) SetTempBytes(n float64) {
+	if m != nil {
+		m.TempBytes.Set(n)
+	}
+}
+
+func (m *Metrics) SetSparseAmplification(n float64) {
+	if m != nil {
+		m.SparseAmplification.Set(n)
+	}
+}
+
+// AddBatch records completed bounded batches and their device count.
+func (m *Metrics) AddBatch(jobType string, batches, devices int) {
+	if m == nil {
+		return
+	}
+	if batches > 0 {
+		m.BatchDevices.WithLabelValues(jobType, "batch").Add(float64(batches))
+	}
+	if devices > 0 {
+		m.BatchDevices.WithLabelValues(jobType, "device").Add(float64(devices))
+	}
 }
 
 // IncRun 记一次 Run 结果。status="succeeded" / "failed"。

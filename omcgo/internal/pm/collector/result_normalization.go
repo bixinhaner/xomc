@@ -27,6 +27,11 @@ func (c *PMCollector) normalizeResults(ctx context.Context, counters []model.PMC
 		if math.IsNaN(counters[i].CounterValue) {
 			continue
 		}
+		// 配置外新指标没有 Unit/StatisType；保留厂家上报的有限原值并交给
+		// 稀疏入库层动态登记，不能因为字典尚未同步而丢整份 PM 文件。
+		if counters[i].Unit == "" && counters[i].StatisType == "" {
+			continue
+		}
 		normalized, err := resultnorm.Normalize(counters[i].CounterValue, &resultnorm.Metadata{
 			Unit:       counters[i].Unit,
 			StatisType: counters[i].StatisType,

@@ -38,7 +38,7 @@ func duplicateFileReceivedEvent(t *testing.T) event.Event {
 	return evt
 }
 
-func TestHandleFileReceived_ParsedMarkerSkipsMinIO(t *testing.T) {
+func TestHandleFileReceived_ParsedMarkerStillChecksSourceForChangedContent(t *testing.T) {
 	lookup := &fakeFileMarkerLookup{parsed: true}
 	c := &PMCollector{
 		logger:           zap.NewNop(),
@@ -47,7 +47,7 @@ func TestHandleFileReceived_ParsedMarkerSkipsMinIO(t *testing.T) {
 
 	err := c.handleFileReceived(context.Background(), duplicateFileReceivedEvent(t))
 
-	require.NoError(t, err)
+	require.ErrorContains(t, err, "download pm file")
 	require.Equal(t, "SN001", lookup.deviceSN)
 	require.Equal(t, "report.xml", lookup.fileName)
 }

@@ -55,6 +55,11 @@ minio_node_disk_used_bytes 900`,
 	}
 }
 
+func TestProjectedUsagePctIncludesAcceptedPendingBytes(t *testing.T) {
+	assert.Equal(t, 70.0, projectedUsagePct(1000, 600, 100))
+	assert.Equal(t, 100.0, projectedUsagePct(1000, 950, 100))
+}
+
 func TestDecideBackpressure_Hysteresis(t *testing.T) {
 	cfg := BackpressureConfig{
 		Enabled: true, DiskHighPct: 85, DiskLowPct: 75,
@@ -95,8 +100,8 @@ func TestLoadBackpressureConfig_DefaultsAndClamp(t *testing.T) {
 	// nil lookup → 全默认。
 	def := loadBackpressureConfig(context.Background(), nil)
 	assert.True(t, def.Enabled)
-	assert.Equal(t, 85.0, def.DiskHighPct)
-	assert.Equal(t, 75.0, def.DiskLowPct)
+	assert.Equal(t, 70.0, def.DiskHighPct)
+	assert.Equal(t, 60.0, def.DiskLowPct)
 	assert.Equal(t, 70.0, def.IOSomeHighPct)
 	assert.Equal(t, 20.0, def.IOSomeLowPct)
 	assert.Equal(t, int64(2000), def.MaxInflight)

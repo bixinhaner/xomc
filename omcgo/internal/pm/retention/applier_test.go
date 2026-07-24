@@ -252,9 +252,9 @@ func TestPMRetentionApplierApplyRejectsInvalidDays(t *testing.T) {
 	assert.Empty(t, stub.execCalls) // 校验失败不应触发任何 SQL
 }
 
-// TestPMRetentionApplierApplyAllRoutesRaw15MinToCorrectTable 验证 KeyRaw15MinDays
-// 变更时只更新 public.pm_metrics。
-func TestPMRetentionApplierApplyAllRoutesRaw15MinToCorrectTable(t *testing.T) {
+// TestPMRetentionApplierApplyAllSkipsRawSparseTables 验证 KeyRaw15MinDays
+// 不安装 TimescaleDB 自动 retention。原始稀疏表必须由 worker 在聚合水位安全后删 chunk。
+func TestPMRetentionApplierApplyAllSkipsRawSparseTables(t *testing.T) {
 	stub := &stubRetentionQuerier{}
 	a := newApplierWithStub(stub)
 
@@ -263,13 +263,12 @@ func TestPMRetentionApplierApplyAllRoutesRaw15MinToCorrectTable(t *testing.T) {
 		[]PolicyKey{KeyRaw15MinDays},
 	)
 
-	// 1 张表 × 2 条 SQL = 2 次 Exec
-	require.Len(t, stub.execCalls, 2)
+	assert.Empty(t, stub.execCalls)
 }
 
-// TestPMRetentionApplierApplyAllRoutesHourlyToBothTables 验证 KeyHourlyDays
-// 变更时同时更新 pm_metrics_hourly + pm_group_metrics_hourly。
-func TestPMRetentionApplierApplyAllRoutesHourlyToBothTables(t *testing.T) {
+// TestPMRetentionApplierApplyAllRoutesHourlyToSparseTables 验证 KeyHourlyDays
+// 变更时同时更新两张小时稀疏表和设备组小时表。
+func TestPMRetentionApplierApplyAllRoutesHourlyToSparseTables(t *testing.T) {
 	stub := &stubRetentionQuerier{}
 	a := newApplierWithStub(stub)
 
@@ -278,8 +277,8 @@ func TestPMRetentionApplierApplyAllRoutesHourlyToBothTables(t *testing.T) {
 		[]PolicyKey{KeyHourlyDays},
 	)
 
-	// 2 张表 × 2 条 SQL = 4 次 Exec
-	require.Len(t, stub.execCalls, 4)
+	// 3 张表 × 2 条 SQL = 6 次 Exec
+	require.Len(t, stub.execCalls, 6)
 }
 
 // TestPMRetentionApplierApplyAllIgnoresOrdinaryTableKeys 验证 daily/weekly/monthly
@@ -306,14 +305,13 @@ func TestPMRetentionApplierApplyAllOnlyUpdatesChangedKeys(t *testing.T) {
 	stub := &stubRetentionQuerier{}
 	a := newApplierWithStub(stub)
 
-	// 只传 KeyRaw15MinDays 变更，KeyHourlyDays 未变更不应出现
+	// 只传 KeyRaw15MinDays 变更；原始稀疏表由 worker 水位安全维护。
 	a.ApplyAll(context.Background(),
 		map[PolicyKey]int{KeyRaw15MinDays: 30, KeyHourlyDays: 180},
 		[]PolicyKey{KeyRaw15MinDays}, // 只有这一个变了
 	)
 
-	// 1 张表 × 2 条 SQL = 2 次 Exec
-	require.Len(t, stub.execCalls, 2)
+	assert.Empty(t, stub.execCalls)
 }
 
 // TestPMRetentionApplierApplyAllContinuesOnError 验证某张表 Exec 失败时
@@ -342,5 +340,5 @@ func TestPMRetentionApplierApplyAllUpdatesAffectedHypertablesInOneTransaction(t 
 	require.Equal(t, 1, stub.beginCalls)
 	require.Equal(t, 1, stub.commitCalls)
 	require.Equal(t, 0, stub.rollbackCalls)
-	require.Len(t, stub.execCalls, 6) // three hypertables, remove + add each
+	require.Len(t, stub.execCalls, 6) // three hourly hypertables, remove + add each
 }
