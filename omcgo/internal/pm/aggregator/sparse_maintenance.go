@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,7 +14,13 @@ import (
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
 )
 
-const DefaultLateDataWindow = 7 * 24 * time.Hour
+const (
+	DefaultLateDataWindow          = 7 * 24 * time.Hour
+	DefaultHourlyRecoveryCooldown  = time.Hour
+	DefaultHourlyRecoveryMax       = 3
+	DefaultHourlyRecoveryScanLimit = 200
+	DefaultStaleBuildingTimeout    = time.Hour
+)
 
 func ParseLateDataWindow(raw string) time.Duration {
 	d, err := time.ParseDuration(raw)
@@ -48,10 +55,25 @@ func RunSparseMaintenance(
 	defer maintenanceTicker.Stop()
 
 	sample := func() {
+		cleanupOK := true
+		recoveryRepo, supportsRecovery := enqueuer.(HourlyRecoveryRepository)
+		if supportsRecovery {
+			if err := failStaleBuildingVersions(
+				ctx, tsdb, recoveryRepo, DefaultStaleBuildingTimeout, logger,
+			); err != nil {
+				cleanupOK = false
+				logger.Warn("fail stale building PM versions failed", zap.Error(err))
+			}
+			if err := recoverFailedHourlyBuckets(
+				ctx, tsdb, recoveryRepo, lateWindow, m, logger,
+			); err != nil {
+				logger.Warn("recover failed hourly PM buckets failed", zap.Error(err))
+			}
+		}
 		if err := sampleSparseState(ctx, tsdb, m); err != nil {
 			logger.Warn("sample sparse PM state failed", zap.Error(err))
 		}
-		if enqueuer != nil {
+		if enqueuer != nil && cleanupOK {
 			if err := enqueueDirtyHourlyBuckets(ctx, tsdb, enqueuer, lateWindow); err != nil {
 				logger.Warn("enqueue dirty PM buckets failed", zap.Error(err))
 			}
@@ -99,7 +121,7 @@ ORDER BY bucket_start
 LIMIT 100`
 }
 
-func enqueueDirtyHourlyBuckets(ctx context.Context, db *pgxpool.Pool, enq JobEnqueuer, late time.Duration) error {
+func enqueueDirtyHourlyBuckets(ctx context.Context, db DBTX, enq JobEnqueuer, late time.Duration) error {
 	_ = late
 	rows, err := db.Query(ctx, buildDirtyBucketSQL())
 	if err != nil {
@@ -134,17 +156,207 @@ func enqueueDirtyHourlyBuckets(ctx context.Context, db *pgxpool.Pool, enq JobEnq
 	return rows.Err()
 }
 
-func sampleSparseState(ctx context.Context, db *pgxpool.Pool, m *Metrics) error {
+func buildStaleBuildingVersionsSQL() string {
+	return `
+SELECT bucket_version, bucket_start, bucket_end
+  FROM pm_hourly_bucket_versions
+ WHERE status='building'
+   AND created_at < now() - $1::interval
+ ORDER BY created_at
+ LIMIT 100`
+}
+
+func buildFailStaleBuildingVersionSQL() string {
+	return `
+UPDATE pm_hourly_bucket_versions
+   SET status='failed'
+ WHERE bucket_version=$1
+   AND status='building'`
+}
+
+type staleBuildingVersion struct {
+	version    int64
+	start, end time.Time
+}
+
+func failStaleBuildingVersions(
+	ctx context.Context,
+	db DBTX,
+	repo HourlyRecoveryRepository,
+	timeout time.Duration,
+	logger *zap.Logger,
+) error {
+	rows, err := db.Query(ctx, buildStaleBuildingVersionsSQL(), timeout.String())
+	if err != nil {
+		return fmt.Errorf("list stale building hourly versions: %w", err)
+	}
+	defer rows.Close()
+	var versions []staleBuildingVersion
+	for rows.Next() {
+		var version staleBuildingVersion
+		if err := rows.Scan(&version.version, &version.start, &version.end); err != nil {
+			return fmt.Errorf("scan stale building hourly version: %w", err)
+		}
+		versions = append(versions, version)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate stale building hourly versions: %w", err)
+	}
+
+	for _, version := range versions {
+		job, found, err := repo.FindNaturalBucketJob(
+			ctx, JobTypeHourly, version.start, version.end,
+		)
+		if err != nil {
+			return fmt.Errorf("find job for stale hourly version %d: %w", version.version, err)
+		}
+		if found && !terminalAsyncJobStatus(job.Status) {
+			continue
+		}
+		tag, err := db.Exec(ctx, buildFailStaleBuildingVersionSQL(), version.version)
+		if err != nil {
+			return fmt.Errorf("fail stale building hourly version %d: %w", version.version, err)
+		}
+		if tag.RowsAffected() > 0 {
+			logger.Warn("stale hourly building version marked failed",
+				zap.Int64("bucket_version", version.version),
+				zap.Time("bucket_start", version.start),
+				zap.Time("bucket_end", version.end),
+				zap.Bool("job_found", found),
+			)
+		}
+	}
+	return nil
+}
+
+func terminalAsyncJobStatus(status asyncjob.Status) bool {
+	switch status {
+	case asyncjob.StatusSucceeded, asyncjob.StatusFailed, asyncjob.StatusZombie, asyncjob.StatusCanceled:
+		return true
+	default:
+		return false
+	}
+}
+
+func recoverFailedHourlyBuckets(
+	ctx context.Context,
+	db DBTX,
+	repo HourlyRecoveryRepository,
+	horizon time.Duration,
+	m *Metrics,
+	logger *zap.Logger,
+) error {
+	if horizon <= 0 {
+		horizon = DefaultLateDataWindow
+	}
+	jobs, err := repo.ListFailedNaturalBuckets(
+		ctx,
+		JobTypeHourly,
+		time.Now().Add(-horizon),
+		DefaultHourlyRecoveryScanLimit,
+	)
+	if err != nil {
+		return fmt.Errorf("discover failed hourly buckets: %w", err)
+	}
+	m.SetFailedBuckets(float64(len(jobs)))
+
+	exhausted := 0
+	for _, job := range jobs {
+		if job.RecoveryCount >= DefaultHourlyRecoveryMax {
+			exhausted++
+			continue
+		}
+		if !retriableFailedBucketMarker(job.ErrorMessage) ||
+			job.BucketStart == nil || job.BucketEnd == nil {
+			continue
+		}
+		hasSource, hasActive, err := hourlyBucketRecoveryState(
+			ctx, db, *job.BucketStart, *job.BucketEnd,
+		)
+		if err != nil {
+			return fmt.Errorf("inspect failed hourly bucket %s: %w", job.ID, err)
+		}
+		if !hasSource || hasActive {
+			continue
+		}
+		payload, err := BuildPayload(*job.BucketStart, *job.BucketEnd)
+		if err != nil {
+			return fmt.Errorf("build failed hourly bucket payload: %w", err)
+		}
+		recoveredID, recovered, err := repo.RequeueRetriableFailedBucket(
+			ctx,
+			asyncjob.FailedBucketRecoveryRequest{
+				JobType:       JobTypeHourly,
+				BucketStart:   *job.BucketStart,
+				BucketEnd:     *job.BucketEnd,
+				Payload:       payload,
+				MaxRecoveries: DefaultHourlyRecoveryMax,
+				Cooldown:      DefaultHourlyRecoveryCooldown,
+			},
+		)
+		if err != nil {
+			return fmt.Errorf("requeue failed hourly bucket %s: %w", job.ID, err)
+		}
+		if recovered {
+			m.IncHourlyRecovery()
+			logger.Info("failed hourly bucket recovered",
+				zap.String("job_id", recoveredID.String()),
+				zap.Time("bucket_start", *job.BucketStart),
+				zap.Time("bucket_end", *job.BucketEnd),
+				zap.Int("recovery_count", job.RecoveryCount+1),
+			)
+		}
+	}
+	m.SetRecoveryExhaustedBuckets(float64(exhausted))
+	return nil
+}
+
+func retriableFailedBucketMarker(message string) bool {
+	return strings.Contains(message, "SQLSTATE 40P01") ||
+		strings.Contains(message, "SQLSTATE 40001")
+}
+
+func hourlyBucketRecoveryState(
+	ctx context.Context,
+	db DBTX,
+	start, end time.Time,
+) (hasSource, hasActive bool, err error) {
+	err = db.QueryRow(ctx, `
+SELECT EXISTS (
+           SELECT 1
+             FROM pm_measurement_anchors
+            WHERE "time" >= $1 AND "time" < $2
+       ),
+       EXISTS (
+           SELECT 1
+             FROM pm_hourly_bucket_versions
+            WHERE bucket_start=$1 AND bucket_end=$2 AND status='active'
+       )`, start, end).Scan(&hasSource, &hasActive)
+	if err != nil {
+		return false, false, fmt.Errorf("query hourly bucket recovery state: %w", err)
+	}
+	return hasSource, hasActive, nil
+}
+
+func sampleSparseState(ctx context.Context, db DBTX, m *Metrics) error {
 	if m == nil {
 		return nil
 	}
-	var dirty float64
+	var dirty, failedVersions, staleBuilding float64
 	if err := db.QueryRow(ctx,
-		`SELECT count(*)::float8 FROM pm_hourly_bucket_versions WHERE dirty=true AND status IN ('active','building')`,
-	).Scan(&dirty); err != nil {
-		return err
+		`SELECT count(*) FILTER (WHERE dirty=true AND status IN ('active','building'))::float8,
+		        count(*) FILTER (WHERE status='failed')::float8,
+		        count(*) FILTER (
+		            WHERE status='building' AND created_at < now()-$1::interval
+		        )::float8
+		   FROM pm_hourly_bucket_versions`,
+		DefaultStaleBuildingTimeout.String(),
+	).Scan(&dirty, &failedVersions, &staleBuilding); err != nil {
+		return fmt.Errorf("sample hourly version state: %w", err)
 	}
 	m.SetDirtyBuckets(dirty)
+	m.SetFailedVersions(failedVersions)
+	m.SetStaleBuildingVersions(staleBuilding)
 
 	var watermark *time.Time
 	var amplification *float64
@@ -162,10 +374,17 @@ func sampleSparseState(ctx context.Context, db *pgxpool.Pool, m *Metrics) error 
 		       (SELECT temp_bytes::float8 FROM pg_stat_database WHERE datname=current_database())
 		  FROM pm_hourly_bucket_versions`,
 	).Scan(&watermark, &amplification, &tempBytes); err != nil {
-		return err
+		return fmt.Errorf("sample sparse watermark state: %w", err)
 	}
 	if watermark != nil {
 		m.SetWatermark(watermark.Unix())
+		lag := time.Since(*watermark)
+		if lag < 0 {
+			lag = 0
+		}
+		m.SetWatermarkLag(lag)
+	} else {
+		m.SetWatermarkLag(time.Since(time.Unix(0, 0)))
 	}
 	if amplification != nil {
 		m.SetSparseAmplification(*amplification)
@@ -258,8 +477,7 @@ func cleanupObsoleteHourlyVersions(ctx context.Context, db *pgxpool.Pool) error 
 	_, err := db.Exec(ctx, `
 WITH doomed AS (
     SELECT bucket_version FROM pm_hourly_bucket_versions
-     WHERE (status IN ('failed','superseded') AND created_at < now()-interval '24 hours')
-        OR (status='building' AND created_at < now()-interval '1 hour')
+     WHERE status IN ('failed','superseded') AND created_at < now()-interval '24 hours'
 ),
 deleted_values AS (
     DELETE FROM pm_hourly_values v

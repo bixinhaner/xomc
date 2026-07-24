@@ -101,6 +101,158 @@ func (r *PgRepository) RequeueSucceededBucket(
 	})
 }
 
+// RequeueRetriableFailedBucket atomically requeues one terminal natural hourly
+// bucket when its error is a retriable PostgreSQL transaction failure, its
+// independent recovery budget remains, and its cooldown has elapsed. A false
+// result is a normal guarded no-op, including a concurrent caller losing the
+// status='failed' race.
+func (r *PgRepository) RequeueRetriableFailedBucket(
+	ctx context.Context,
+	req FailedBucketRecoveryRequest,
+) (uuid.UUID, bool, error) {
+	q, args, err := buildRequeueRetriableFailedBucketSQL(req)
+	if err != nil {
+		return uuid.Nil, false, err
+	}
+	var id uuid.UUID
+	if err := r.pool.QueryRow(ctx, q, args...).Scan(&id); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return uuid.Nil, false, nil
+		}
+		return uuid.Nil, false, fmt.Errorf("requeue retriable failed hourly bucket: %w", err)
+	}
+	return id, true, nil
+}
+
+func buildRequeueRetriableFailedBucketSQL(req FailedBucketRecoveryRequest) (string, []any, error) {
+	if req.JobType != "pm_aggregate_hourly" {
+		return "", nil, fmt.Errorf("recover failed bucket: unsupported job type %q", req.JobType)
+	}
+	if req.BucketStart.IsZero() ||
+		!req.BucketStart.Equal(req.BucketStart.Truncate(time.Hour)) ||
+		req.BucketEnd.Sub(req.BucketStart) != time.Hour {
+		return "", nil, fmt.Errorf("recover failed bucket: window must be one natural hour")
+	}
+	if req.MaxRecoveries <= 0 {
+		return "", nil, fmt.Errorf("recover failed bucket: max recoveries must be positive")
+	}
+	if req.Cooldown < 0 {
+		return "", nil, fmt.Errorf("recover failed bucket: cooldown must not be negative")
+	}
+	const q = `
+UPDATE async_jobs
+   SET status = 'pending',
+       scheduled_at = NOW(),
+       payload = $4,
+       started_at = NULL,
+       finished_at = NULL,
+       heartbeat_at = NULL,
+       lock_owner = NULL,
+       attempt = 1,
+       result = NULL,
+       recovery_count = recovery_count + 1,
+       last_recovered_at = NOW()
+ WHERE job_type = $1
+   AND job_type = 'pm_aggregate_hourly'
+   AND bucket_start = $2
+   AND bucket_end = $3
+   AND bucket_start = date_trunc('hour', bucket_start)
+   AND bucket_end = bucket_start + interval '1 hour'
+   AND bucket_end <= NOW()
+   AND status = 'failed'
+   AND finished_at IS NOT NULL
+   AND (error_message LIKE '%SQLSTATE 40P01%'
+        OR error_message LIKE '%SQLSTATE 40001%')
+   AND recovery_count < $5
+   AND GREATEST(
+           COALESCE(finished_at, '-infinity'::timestamptz),
+           COALESCE(last_recovered_at, '-infinity'::timestamptz)
+       ) <= NOW() - $6::interval
+RETURNING id`
+	return q, []any{
+		req.JobType,
+		req.BucketStart,
+		req.BucketEnd,
+		req.Payload,
+		req.MaxRecoveries,
+		req.Cooldown.String(),
+	}, nil
+}
+
+// ListFailedNaturalBuckets returns a bounded, recent set for maintenance. The
+// guarded recovery update remains the final authority because these rows may
+// change after this observational scan.
+func (r *PgRepository) ListFailedNaturalBuckets(
+	ctx context.Context,
+	jobType string,
+	since time.Time,
+	limit int,
+) ([]Job, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 500
+	}
+	rows, err := r.pool.Query(ctx, buildListFailedNaturalBucketsSQL(), jobType, since, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list failed natural hourly buckets: %w", err)
+	}
+	defer rows.Close()
+	var jobs []Job
+	for rows.Next() {
+		job, err := scanJob(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan failed natural hourly bucket: %w", err)
+		}
+		jobs = append(jobs, *job)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate failed natural hourly buckets: %w", err)
+	}
+	return jobs, nil
+}
+
+func buildListFailedNaturalBucketsSQL() string {
+	return fmt.Sprintf(`
+SELECT %s
+  FROM async_jobs
+ WHERE job_type=$1
+   AND job_type='pm_aggregate_hourly'
+   AND status='failed'
+   AND bucket_start >= $2
+   AND bucket_start=date_trunc('hour', bucket_start)
+   AND bucket_end=bucket_start+interval '1 hour'
+   AND bucket_end <= NOW()
+ ORDER BY bucket_start
+ LIMIT $3`, joinJobCols())
+}
+
+// FindNaturalBucketJob resolves the current main-database job state for stale
+// TimescaleDB building-version cleanup.
+func (r *PgRepository) FindNaturalBucketJob(
+	ctx context.Context,
+	jobType string,
+	start, end time.Time,
+) (*Job, bool, error) {
+	q, args, err := storage.Psql.Select(jobCols...).
+		From("async_jobs").
+		Where(sq.Eq{
+			"job_type":     jobType,
+			"bucket_start": start,
+			"bucket_end":   end,
+		}).
+		ToSql()
+	if err != nil {
+		return nil, false, fmt.Errorf("build find natural bucket job: %w", err)
+	}
+	job, err := scanJob(r.pool.QueryRow(ctx, q, args...))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("find natural bucket job: %w", err)
+	}
+	return job, true, nil
+}
+
 func buildInsertSQL(req InsertRequest) (string, []any, error) {
 	maxAttempts := req.MaxAttempts
 	if maxAttempts <= 0 {
@@ -114,47 +266,58 @@ ON CONFLICT (job_type, bucket_start, bucket_end)
 WHERE bucket_start IS NOT NULL AND bucket_end IS NOT NULL
 DO UPDATE SET
     status = CASE
-        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN 'pending'
+        WHEN async_jobs.status IN ('canceled', 'zombie')
+          OR (async_jobs.status = 'failed' AND async_jobs.job_type <> 'pm_aggregate_hourly') THEN 'pending'
         ELSE async_jobs.status
     END,
     scheduled_at = CASE
-        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN EXCLUDED.scheduled_at
+        WHEN async_jobs.status IN ('canceled', 'zombie')
+          OR (async_jobs.status = 'failed' AND async_jobs.job_type <> 'pm_aggregate_hourly') THEN EXCLUDED.scheduled_at
         ELSE async_jobs.scheduled_at
     END,
     payload = CASE
-        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN EXCLUDED.payload
+        WHEN async_jobs.status IN ('canceled', 'zombie')
+          OR (async_jobs.status = 'failed' AND async_jobs.job_type <> 'pm_aggregate_hourly') THEN EXCLUDED.payload
         ELSE async_jobs.payload
     END,
     max_attempts = CASE
-        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN EXCLUDED.max_attempts
+        WHEN async_jobs.status IN ('canceled', 'zombie')
+          OR (async_jobs.status = 'failed' AND async_jobs.job_type <> 'pm_aggregate_hourly') THEN EXCLUDED.max_attempts
         ELSE async_jobs.max_attempts
     END,
     started_at = CASE
-        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN NULL
+        WHEN async_jobs.status IN ('canceled', 'zombie')
+          OR (async_jobs.status = 'failed' AND async_jobs.job_type <> 'pm_aggregate_hourly') THEN NULL
         ELSE async_jobs.started_at
     END,
     finished_at = CASE
-        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN NULL
+        WHEN async_jobs.status IN ('canceled', 'zombie')
+          OR (async_jobs.status = 'failed' AND async_jobs.job_type <> 'pm_aggregate_hourly') THEN NULL
         ELSE async_jobs.finished_at
     END,
     heartbeat_at = CASE
-        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN NULL
+        WHEN async_jobs.status IN ('canceled', 'zombie')
+          OR (async_jobs.status = 'failed' AND async_jobs.job_type <> 'pm_aggregate_hourly') THEN NULL
         ELSE async_jobs.heartbeat_at
     END,
     lock_owner = CASE
-        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN NULL
+        WHEN async_jobs.status IN ('canceled', 'zombie')
+          OR (async_jobs.status = 'failed' AND async_jobs.job_type <> 'pm_aggregate_hourly') THEN NULL
         ELSE async_jobs.lock_owner
     END,
     attempt = CASE
-        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN 1
+        WHEN async_jobs.status IN ('canceled', 'zombie')
+          OR (async_jobs.status = 'failed' AND async_jobs.job_type <> 'pm_aggregate_hourly') THEN 1
         ELSE async_jobs.attempt
     END,
     result = CASE
-        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN NULL
+        WHEN async_jobs.status IN ('canceled', 'zombie')
+          OR (async_jobs.status = 'failed' AND async_jobs.job_type <> 'pm_aggregate_hourly') THEN NULL
         ELSE async_jobs.result
     END,
     error_message = CASE
-        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN NULL
+        WHEN async_jobs.status IN ('canceled', 'zombie')
+          OR (async_jobs.status = 'failed' AND async_jobs.job_type <> 'pm_aggregate_hourly') THEN NULL
         ELSE async_jobs.error_message
     END`).
 		Suffix("RETURNING id").
@@ -197,7 +360,8 @@ SET status = 'running',
 FROM next
 WHERE aj.id = next.id
 RETURNING aj.id, aj.job_type, aj.status, aj.schedule_expr, aj.scheduled_at, aj.started_at, aj.finished_at,
-          aj.bucket_start, aj.bucket_end, aj.heartbeat_at, aj.lock_owner, aj.attempt, aj.max_attempts, aj.payload, aj.result, aj.error_message,
+          aj.bucket_start, aj.bucket_end, aj.heartbeat_at, aj.lock_owner, aj.attempt, aj.max_attempts,
+          aj.recovery_count, aj.last_recovered_at, aj.payload, aj.result, aj.error_message,
           aj.created_at, aj.updated_at
 `
 	row := r.pool.QueryRow(ctx, q, jobType, lockOwner)
@@ -368,7 +532,8 @@ RETURNING status
 
 var jobCols = []string{
 	"id", "job_type", "status", "schedule_expr", "scheduled_at", "started_at", "finished_at",
-	"bucket_start", "bucket_end", "heartbeat_at", "lock_owner", "attempt", "max_attempts", "payload", "result", "error_message",
+	"bucket_start", "bucket_end", "heartbeat_at", "lock_owner", "attempt", "max_attempts",
+	"recovery_count", "last_recovered_at", "payload", "result", "error_message",
 	"created_at", "updated_at",
 }
 
@@ -393,7 +558,8 @@ func scanJob(row rowScanner) (*Job, error) {
 	var payload, result []byte
 	if err := row.Scan(
 		&j.ID, &j.JobType, &j.Status, &scheduleExpr, &j.ScheduledAt, &j.StartedAt, &j.FinishedAt,
-		&j.BucketStart, &j.BucketEnd, &j.HeartbeatAt, &lockOwner, &j.Attempt, &j.MaxAttempts, &payload, &result, &errMsg,
+		&j.BucketStart, &j.BucketEnd, &j.HeartbeatAt, &lockOwner, &j.Attempt, &j.MaxAttempts,
+		&j.RecoveryCount, &j.LastRecoveredAt, &payload, &result, &errMsg,
 		&j.CreatedAt, &j.UpdatedAt,
 	); err != nil {
 		return nil, err

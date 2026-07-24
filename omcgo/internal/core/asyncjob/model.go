@@ -43,24 +43,26 @@ const (
 
 // Job 对应 async_jobs 表的一行。
 type Job struct {
-	ID           uuid.UUID
-	JobType      string
-	Status       Status
-	ScheduleExpr string // cron expression（cron-triggered 任务才填）
-	ScheduledAt  time.Time
-	BucketStart  *time.Time
-	BucketEnd    *time.Time
-	StartedAt    *time.Time
-	FinishedAt   *time.Time
-	HeartbeatAt  *time.Time
-	LockOwner    string
-	Attempt      int
-	MaxAttempts  int
-	Payload      json.RawMessage
-	Result       json.RawMessage
-	ErrorMessage string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID              uuid.UUID
+	JobType         string
+	Status          Status
+	ScheduleExpr    string // cron expression（cron-triggered 任务才填）
+	ScheduledAt     time.Time
+	BucketStart     *time.Time
+	BucketEnd       *time.Time
+	StartedAt       *time.Time
+	FinishedAt      *time.Time
+	HeartbeatAt     *time.Time
+	LockOwner       string
+	Attempt         int
+	MaxAttempts     int
+	RecoveryCount   int
+	LastRecoveredAt *time.Time
+	Payload         json.RawMessage
+	Result          json.RawMessage
+	ErrorMessage    string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 // InsertRequest 创建新任务（status='pending'）。
@@ -72,6 +74,17 @@ type InsertRequest struct {
 	BucketEnd    *time.Time
 	Payload      json.RawMessage
 	MaxAttempts  int // 0 表示用 DefaultMaxAttempts
+}
+
+// FailedBucketRecoveryRequest guards an explicit recovery of one terminal
+// natural hourly bucket. MaxRecoveries is independent of per-run MaxAttempts.
+type FailedBucketRecoveryRequest struct {
+	JobType       string
+	BucketStart   time.Time
+	BucketEnd     time.Time
+	Payload       json.RawMessage
+	MaxRecoveries int
+	Cooldown      time.Duration
 }
 
 // DefaultMaxAttempts 是 InsertRequest.MaxAttempts 未指定时的默认值。

@@ -1,6 +1,10 @@
 package aggregator
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
 
 // Metrics 是 G5 自然桶聚合 + G7 adhoc 任务的 Prometheus 指标。
 //
@@ -30,6 +34,13 @@ type Metrics struct {
 	// failed hourly batch transactions, grouped by PostgreSQL SQLSTATE.
 	HourlyTxRetries        *prometheus.CounterVec
 	HourlyTxRetryExhausted *prometheus.CounterVec
+
+	HourlyRecoveries         prometheus.Counter
+	RecoveryExhaustedBuckets prometheus.Gauge
+	StaleBuildingVersions    prometheus.Gauge
+	FailedBuckets            prometheus.Gauge
+	FailedVersions           prometheus.Gauge
+	WatermarkLag             prometheus.Gauge
 
 	DirtyBuckets        prometheus.Gauge
 	WatermarkTimestamp  prometheus.Gauge
@@ -69,6 +80,30 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "omc_pm_hourly_tx_retry_exhausted_total",
 			Help: "Hourly PM batch transactions exhausting retries by PostgreSQL SQLSTATE",
 		}, []string{"sqlstate"}),
+		HourlyRecoveries: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_hourly_recoveries_total",
+			Help: "Terminal hourly PM bucket jobs atomically requeued by maintenance",
+		}),
+		RecoveryExhaustedBuckets: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "omc_pm_hourly_recovery_exhausted_buckets",
+			Help: "Recent failed hourly PM buckets that exhausted bounded recovery",
+		}),
+		StaleBuildingVersions: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "omc_pm_hourly_stale_building_versions",
+			Help: "Hourly PM versions still building beyond the maintenance timeout",
+		}),
+		FailedBuckets: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "omc_pm_hourly_failed_buckets",
+			Help: "Recent natural hourly PM jobs in failed state",
+		}),
+		FailedVersions: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "omc_pm_hourly_failed_versions",
+			Help: "Hourly PM bucket versions in failed state",
+		}),
+		WatermarkLag: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "omc_pm_hourly_watermark_lag_seconds",
+			Help: "Seconds since the newest clean active hourly PM bucket ended",
+		}),
 		DirtyBuckets: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "omc_pm_hourly_dirty_buckets",
 			Help: "Number of active or building hourly buckets marked dirty",
@@ -90,6 +125,8 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		reg.MustRegister(
 			m.Runs, m.Duration, m.RowsWritten, m.BucketLag, m.BatchDevices,
 			m.HourlyTxRetries, m.HourlyTxRetryExhausted,
+			m.HourlyRecoveries, m.RecoveryExhaustedBuckets,
+			m.StaleBuildingVersions, m.FailedBuckets, m.FailedVersions, m.WatermarkLag,
 			m.DirtyBuckets, m.WatermarkTimestamp, m.TempBytes, m.SparseAmplification,
 		)
 	}
@@ -142,6 +179,42 @@ func (m *Metrics) IncHourlyTxRetry(sqlState string) {
 func (m *Metrics) IncHourlyTxRetryExhausted(sqlState string) {
 	if m != nil {
 		m.HourlyTxRetryExhausted.WithLabelValues(sqlState).Inc()
+	}
+}
+
+func (m *Metrics) IncHourlyRecovery() {
+	if m != nil {
+		m.HourlyRecoveries.Inc()
+	}
+}
+
+func (m *Metrics) SetRecoveryExhaustedBuckets(n float64) {
+	if m != nil {
+		m.RecoveryExhaustedBuckets.Set(n)
+	}
+}
+
+func (m *Metrics) SetStaleBuildingVersions(n float64) {
+	if m != nil {
+		m.StaleBuildingVersions.Set(n)
+	}
+}
+
+func (m *Metrics) SetFailedBuckets(n float64) {
+	if m != nil {
+		m.FailedBuckets.Set(n)
+	}
+}
+
+func (m *Metrics) SetFailedVersions(n float64) {
+	if m != nil {
+		m.FailedVersions.Set(n)
+	}
+}
+
+func (m *Metrics) SetWatermarkLag(lag time.Duration) {
+	if m != nil {
+		m.WatermarkLag.Set(lag.Seconds())
 	}
 }
 

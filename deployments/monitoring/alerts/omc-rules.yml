@@ -333,3 +333,60 @@ groups:
             PM 小时聚合批事务在过去 10 分钟持续因 PostgreSQL deadlock 或序列化冲突重试。
             当前尚未耗尽重试，但持续冲突会降低桶发布吞吐并可能升级为构建失败。
             Action: 检查并发 PM 写入、长事务和数据库锁等待；必要时降低作业重叠。
+
+      - alert: OMCPMHourlyFailedBucketStale
+        expr: omc_pm_hourly_failed_buckets > 0
+        for: 1h
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 失败小时桶超过一个维护周期"
+          description: |
+            最近窗口内至少一个自然小时聚合任务持续 failed 超过 1 小时。
+            Impact: 对应小时没有可发布的新 active 版本，聚合水位可能停止推进。
+            Action: 检查任务 error_message、原始 anchor 和恢复指标；永久错误需人工修复，
+                    可重试 SQLSTATE 应由维护循环在冷却期后自动恢复。
+
+      - alert: OMCPMHourlyRecoveryExhausted
+        expr: omc_pm_hourly_recovery_exhausted_buckets > 0
+        for: 5m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 小时桶自动恢复次数已耗尽"
+          description: |
+            至少一个失败小时桶已达到独立 recovery_count 上限，维护循环不会继续重放。
+            Impact: poison bucket 保持失败，避免无限重放，但需要人工处置。
+            Action: 检查 PostgreSQL 锁竞争和该桶数据；修复根因后再决定是否人工恢复。
+
+      - alert: OMCPMHourlyStaleBuildingVersion
+        expr: omc_pm_hourly_stale_building_versions > 0
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 小时桶存在过期 building 版本"
+          description: |
+            小时版本持续 building 超过 1 小时，且尚未被维护循环收敛。
+            Impact: 孤立批次数据占用空间，并可能掩盖失败桶。
+            Action: 检查维护循环、对应 async_jobs 状态和 TimescaleDB 写入错误。
+
+      - alert: OMCPMHourlyWatermarkLag
+        expr: omc_pm_hourly_watermark_lag_seconds > 7200
+        for: 10m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 小时聚合水位滞后超过两个桶"
+          description: |
+            最新 clean active 小时桶结束时间落后当前时间超过 7200 秒。
+            Impact: 小时 KPI、看板和后续日聚合读取陈旧数据。
+            Action: 联查 failed bucket、recovery exhausted、stale building 和队列积压指标。

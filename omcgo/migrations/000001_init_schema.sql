@@ -619,6 +619,8 @@ CREATE TABLE public.async_jobs (
     lock_owner text,
     attempt integer DEFAULT 1 NOT NULL,
     max_attempts integer DEFAULT 3 NOT NULL,
+    recovery_count integer DEFAULT 0 NOT NULL,
+    last_recovered_at timestamp with time zone,
     payload jsonb,
     result jsonb,
     error_message text,
@@ -12376,6 +12378,13 @@ CREATE INDEX idx_async_jobs_type_created ON public.async_jobs USING btree (job_t
 --
 
 CREATE INDEX idx_async_jobs_zombie_check ON public.async_jobs USING btree (status, heartbeat_at) WHERE (status = 'running'::text);
+
+
+--
+-- Name: idx_async_jobs_hourly_failed_recovery; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_async_jobs_hourly_failed_recovery ON public.async_jobs USING btree (bucket_start, recovery_count, last_recovered_at) WHERE ((job_type = 'pm_aggregate_hourly'::text) AND (status = 'failed'::text) AND (bucket_start IS NOT NULL) AND (bucket_end IS NOT NULL));
 
 
 --

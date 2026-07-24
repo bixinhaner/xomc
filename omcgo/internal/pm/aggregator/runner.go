@@ -24,6 +24,19 @@ type JobEnqueuer interface {
 	Insert(ctx context.Context, req asyncjob.InsertRequest) (uuid.UUID, error)
 }
 
+// HourlyRecoveryRepository is the main-database surface used by sparse
+// maintenance. Keeping recovery explicit prevents generic Insert from replaying
+// terminal jobs and preserves normal natural-bucket idempotency.
+type HourlyRecoveryRepository interface {
+	JobEnqueuer
+	ListFailedNaturalBuckets(ctx context.Context, jobType string, since time.Time, limit int) ([]asyncjob.Job, error)
+	FindNaturalBucketJob(ctx context.Context, jobType string, start, end time.Time) (*asyncjob.Job, bool, error)
+	RequeueRetriableFailedBucket(
+		ctx context.Context,
+		req asyncjob.FailedBucketRecoveryRequest,
+	) (uuid.UUID, bool, error)
+}
+
 // Runner 是单粒度（hourly/daily/weekly/monthly）的 asyncjob.JobRunner 实现。
 //
 // 由 worker/main.go 创建 4 个实例（用 NewHourlyRunner / NewDailyRunner / ... 构造），
