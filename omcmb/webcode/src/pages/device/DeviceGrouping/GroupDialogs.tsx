@@ -29,8 +29,9 @@ export interface GroupDialogsProps {
 
   // Add Child Group (Level-2) Drawer
   addChildDrawerOpen: boolean;
-  addChildForm: FormInstance<{ name_i18n?: Record<string, string>; matchingMode: 'deviceName' | 'lac' | 'tac' | 'serialNumber'; tacRag: string; sourceGroupId?: string; serialNumbers?: string }>;
+  addChildForm: FormInstance<{ name_i18n?: Record<string, string>; autoAssignEnabled?: boolean; matchingMode: 'deviceName' | 'lac' | 'tac' | 'serialNumber'; tacRag: string; sourceGroupId?: string; serialNumbers?: string }>;
   addChildParentName?: string;
+  autoAssignEnabled?: boolean;
   matchingMode: string | undefined;
   nameFilters: NameFilterItem[];
   onAddChildDrawerClose: () => void;
@@ -43,8 +44,9 @@ export interface GroupDialogsProps {
   // Edit Level-2 Group Drawer
   editLevel2DrawerOpen: boolean;
   editLevel2GroupId?: string;
-  editLevel2Form: FormInstance<{ name_i18n?: Record<string, string>; matchingMode: 'deviceName' | 'lac' | 'tac' | 'serialNumber'; tacRag: string; sourceGroupId?: string; serialNumbers?: string }>;
+  editLevel2Form: FormInstance<{ name_i18n?: Record<string, string>; autoAssignEnabled?: boolean; matchingMode: 'deviceName' | 'lac' | 'tac' | 'serialNumber'; tacRag: string; sourceGroupId?: string; serialNumbers?: string }>;
   editLevel2ParentName?: string;
+  editLevel2AutoAssignEnabled?: boolean;
   editLevel2MatchingMode: string | undefined;
   editLevel2NameFilters: NameFilterItem[];
   onEditLevel2DrawerClose: () => void;
@@ -72,6 +74,7 @@ export default function GroupDialogs({
   addChildDrawerOpen,
   addChildForm,
   addChildParentName,
+  autoAssignEnabled,
   matchingMode,
   nameFilters,
   onAddChildDrawerClose,
@@ -84,6 +87,7 @@ export default function GroupDialogs({
   editLevel2GroupId,
   editLevel2Form,
   editLevel2ParentName,
+  editLevel2AutoAssignEnabled,
   editLevel2MatchingMode,
   editLevel2NameFilters,
   onEditLevel2DrawerClose,
@@ -127,6 +131,7 @@ export default function GroupDialogs({
         open={addChildDrawerOpen}
         form={addChildForm}
         parentGroupName={addChildParentName}
+        autoAssignEnabled={Boolean(autoAssignEnabled)}
         matchingMode={matchingMode}
         nameFilters={nameFilters}
         sourceGroupOptions={groups
@@ -148,6 +153,7 @@ export default function GroupDialogs({
         open={editLevel2DrawerOpen}
         form={editLevel2Form}
         parentGroupName={editLevel2ParentName}
+        autoAssignEnabled={Boolean(editLevel2AutoAssignEnabled)}
         matchingMode={editLevel2MatchingMode}
         nameFilters={editLevel2NameFilters}
         sourceGroupOptions={groups

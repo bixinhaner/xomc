@@ -1575,6 +1575,7 @@ const messages: Record<string, string> = {
   'device.selectParentGroup':   '请选择父级分组',
   'device.rules.matchingMode':  '匹配方式',
   'device.rules.sourceGroup': '源设备组',
+  'device.rules.autoAssign': '自动归属设备组',
   'device.rules.sourceGroupRequired': '请选择源设备组',
   'device.rules.sourceGroupPlaceholder': '请选择只允许移出设备的源设备组',
   'device.rules.serialNumber': '设备序列号',
