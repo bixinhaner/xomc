@@ -415,6 +415,24 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	}
 	logger.Info("reboot task closer started")
 
+	// PROVISION drain consumer（F09 自动开站暂不支持）：provision.Engine 仍会发布
+	// provision.started/completed/failed/step.done，但 PROVISION 是 WorkQueue 流——没有
+	// 任何 consumer ack 时消息会一直堆到 MaxAge（72h）才过期，期间在 nats jsz 里表现为
+	// 持续增长的积压（实测 2 万+条无人消费）。在功能正式落地前，用一个 no-op drain
+	// consumer 把 provision.* 全部 ack 掉，保持 workqueue 清空、监控干净。
+	// 用单个 `provision.>` 通配 consumer 覆盖整条流（WorkQueue 流不允许同一 filter subject
+	// 挂多个 consumer；通配即流本身的 subject，最稳）。功能上线时删掉此处、换成真正的订阅者即可。
+	if _, err := w.EventBus.QueueSubscribe("provision.>", "provision-drain",
+		func(_ context.Context, evt event.Event) error {
+			logger.Debug("provision event drained (auto-provisioning not yet supported)",
+				zap.String("subject", evt.Subject), zap.String("event_id", evt.ID))
+			return nil
+		}); err != nil {
+		logger.Warn("subscribe provision drain consumer", zap.Error(err))
+	} else {
+		logger.Info("provision drain consumer started (no-op ack; auto-provisioning not yet supported)")
+	}
+
 	// T-0157 C5: 消息中心 task 订阅器 — 监听 task.created/completed/failed 事件，按 user_id
 	// 隔离写 notifications 表，dedup_key=task.ID 保证同 task 多次状态变更 upsert 同一行。
 	// 依赖 task.created 主题（service.CreateTask 末尾 publish）+ 已有 task.completed/failed。
