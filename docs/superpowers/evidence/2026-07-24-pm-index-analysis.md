@@ -49,16 +49,19 @@ not migrate it and do not create it in any live database.
 
 ```bash
 cd omcgo
+set -o pipefail
 psql "$TASK8_TSDB_DSN" \
   -v task8_isolated_safe_environment=on \
   -v task8_expected_database=omc_task8_sparse_clone \
-  -f scripts/pm_explain_core_queries.sql \
+  -f scripts/pm_explain_core_queries.sql 2>&1 \
   | tee pm-task8-explain.txt
 ```
 
 Before any `EXPLAIN ANALYZE` or `DELETE`, the script requires the client flag,
 an exact `current_database()` match, and a matching server-side clone
 sentinel. Every refusal raises an `ON_ERROR_STOP` error, so `psql` exits 3.
+`set -o pipefail` is mandatory: without it, `tee` can turn that refusal into
+an apparent zero exit status.
 The script pins `search_path`, fully qualifies PM relations, requires
 representative joined rows, executes every plan in one transaction, and ends
 with `ROLLBACK`. It covers:

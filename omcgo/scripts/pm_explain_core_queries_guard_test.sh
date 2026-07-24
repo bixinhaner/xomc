@@ -58,6 +58,35 @@ expect_refusal() {
   fi
 }
 
+expect_refusal_through_tee() {
+  local output="$test_root/flag_false_through_tee.out"
+  local status
+
+  set +e
+  psql -X -h "$socket_dir" -U postgres -d "$database" \
+    -v task8_isolated_safe_environment=off \
+    -v task8_expected_database="$database" \
+    -f "$sql_path" 2>&1 | tee "$output" >/dev/null
+  status=$?
+  set -e
+
+  if [[ "$status" -ne 3 ]]; then
+    echo "flag_false_through_tee: exit=$status, want psql exit 3 preserved by pipefail"
+    cat "$output"
+    return 1
+  fi
+  if ! grep -Fq "isolation flag must be on" "$output"; then
+    echo "flag_false_through_tee: missing refusal message"
+    cat "$output"
+    return 1
+  fi
+  if grep -Fq "QUERY " "$output"; then
+    echo "flag_false_through_tee: reached an EXPLAIN/DELETE query"
+    cat "$output"
+    return 1
+  fi
+}
+
 expect_refusal \
   flag_false \
   "isolation flag must be on" \
@@ -76,4 +105,6 @@ expect_refusal \
   -v task8_isolated_safe_environment=on \
   -v task8_expected_database="$database"
 
-echo "PASS: EXPLAIN guard refusal paths exit 3 before dangerous statements"
+expect_refusal_through_tee
+
+echo "PASS: EXPLAIN guard refusal paths and tee pipeline preserve exit 3 before dangerous statements"

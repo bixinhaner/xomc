@@ -260,6 +260,9 @@ func TestReadRowsSupportsNormalizedJSONAndCSV(t *testing.T) {
 		"rows.csv": "device,object,time,counter,value\n" +
 			"001/serial-a,Cell=1,2026-07-24T00:00:00Z,Signal.RSRP,-95.5\n" +
 			"001/serial-a,Cell=2,2026-07-24T00:15:00Z,Traffic.Bytes,\n",
+		"rows-reordered.csv": "value,counter,time,object,device\n" +
+			"-95.5,Signal.RSRP,2026-07-24T00:00:00Z,Cell=1,001/serial-a\n" +
+			",Traffic.Bytes,2026-07-24T00:15:00Z,Cell=2,001/serial-a\n",
 	}
 
 	for name, contents := range tests {
@@ -299,6 +302,10 @@ func TestReadRowsRejectsMalformedInput(t *testing.T) {
 		"missing-object.json":   `[{"device":"001/serial-a","time":"2026-07-24T00:00:00Z","counter":"Signal.RSRP","value":1}]`,
 		"missing-counter.json":  `[{"device":"001/serial-a","object":"Cell=1","time":"2026-07-24T00:00:00Z","value":1}]`,
 		"missing-time.json":     `[{"device":"001/serial-a","object":"Cell=1","counter":"Signal.RSRP","value":1}]`,
+		"missing-value.json":    `[{"device":"001/serial-a","object":"Cell=1","time":"2026-07-24T00:00:00Z","counter":"Signal.RSRP"}]`,
+		"case-variant.json":     `[{"Device":"001/serial-a","object":"Cell=1","time":"2026-07-24T00:00:00Z","counter":"Signal.RSRP","value":1}]`,
+		"duplicate-device.json": `[{"device":"001/serial-a","device":"other","object":"Cell=1","time":"2026-07-24T00:00:00Z","counter":"Signal.RSRP","value":1}]`,
+		"duplicate-value.json":  `[{"device":"001/serial-a","object":"Cell=1","time":"2026-07-24T00:00:00Z","counter":"Signal.RSRP","value":null,"value":1}]`,
 		"empty-device.json":     `[{"device":" ","object":"Cell=1","time":"2026-07-24T00:00:00Z","counter":"Signal.RSRP","value":1}]`,
 		"empty-object.json":     `[{"device":"001/serial-a","object":"","time":"2026-07-24T00:00:00Z","counter":"Signal.RSRP","value":1}]`,
 		"empty-counter.json":    `[{"device":"001/serial-a","object":"Cell=1","time":"2026-07-24T00:00:00Z","counter":" ","value":1}]`,
@@ -308,6 +315,8 @@ func TestReadRowsRejectsMalformedInput(t *testing.T) {
 		"empty.csv":             "",
 		"missing.csv":           "device,time,counter,value\n001/serial-a,2026-07-24T00:00:00Z,Signal.RSRP,1\n",
 		"duplicate-header.csv":  "device,object,time,counter,value,device\n001/serial-a,Cell=1,2026-07-24T00:00:00Z,Signal.RSRP,1,other\n",
+		"extra-header.csv":      "device,object,time,counter,value,extra\n001/serial-a,Cell=1,2026-07-24T00:00:00Z,Signal.RSRP,1,ignored\n",
+		"case-header.csv":       "Device,object,time,counter,value\n001/serial-a,Cell=1,2026-07-24T00:00:00Z,Signal.RSRP,1\n",
 		"empty-device.csv":      "device,object,time,counter,value\n,Cell=1,2026-07-24T00:00:00Z,Signal.RSRP,1\n",
 		"empty-object.csv":      "device,object,time,counter,value\n001/serial-a,,2026-07-24T00:00:00Z,Signal.RSRP,1\n",
 		"empty-counter.csv":     "device,object,time,counter,value\n001/serial-a,Cell=1,2026-07-24T00:00:00Z,,1\n",

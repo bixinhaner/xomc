@@ -81,7 +81,6 @@ func TestExplainSQLRequiresCorrelatedRepresentativeRows(t *testing.T) {
 		`v."time" = a."time" AND v.anchor_id = a.anchor_id`,
 		"representative cleanup source with values is required",
 		"representative_cleanup_sample_available",
-		"sample_cleanup_bucket_version",
 		"representative active hourly rows are required",
 		"representative_active_hourly_sample_available",
 		"QUERY active hourly latest metric",
@@ -97,18 +96,86 @@ func TestExplainSQLRequiresCorrelatedRepresentativeRows(t *testing.T) {
 	}
 }
 
+func TestExplainSQLCleanupMatchesProductionPredicate(t *testing.T) {
+	t.Parallel()
+
+	explainPredicate := normalizedSQL(doomedWhereClause(t, readExplainSQL(t)))
+	production := readRelativeFile(t, "..", "aggregator", "sparse_maintenance.go")
+	productionPredicate := normalizedSQL(doomedWhereClause(t, production))
+	const wantProductionPredicate = "statusIN('failed','superseded')ANDcreated_at<now()-interval'24hours'"
+	if productionPredicate != wantProductionPredicate {
+		t.Fatalf("production cleanup predicate = %q, want %q", productionPredicate, wantProductionPredicate)
+	}
+	if explainPredicate != productionPredicate {
+		t.Fatalf("EXPLAIN cleanup predicate = %q, production = %q", explainPredicate, productionPredicate)
+	}
+}
+
+func TestEvidencePipelinePreservesPSQLExitStatus(t *testing.T) {
+	t.Parallel()
+
+	document := readRelativeFile(
+		t,
+		"..", "..", "..", "..",
+		"docs", "superpowers", "evidence", "2026-07-24-pm-index-analysis.md",
+	)
+	teeIndex := strings.Index(document, "| tee pm-task8-explain.txt")
+	if teeIndex < 0 {
+		t.Fatal("evidence command has no tee pipeline")
+	}
+	blockStart := strings.LastIndex(document[:teeIndex], "```bash")
+	if blockStart < 0 {
+		t.Fatal("evidence command is not in a bash block")
+	}
+	if !strings.Contains(document[blockStart:teeIndex], "set -o pipefail") {
+		t.Fatal("evidence pipeline can hide psql exit 3 because pipefail is not enabled")
+	}
+}
+
 func readExplainSQL(t *testing.T) string {
+	t.Helper()
+	return readRelativeFile(t, "..", "..", "..", "scripts", "pm_explain_core_queries.sql")
+}
+
+func readRelativeFile(t *testing.T, elements ...string) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("resolve test source path")
 	}
-	path := filepath.Join(filepath.Dir(file), "..", "..", "..", "scripts", "pm_explain_core_queries.sql")
+	path := filepath.Join(append([]string{filepath.Dir(file)}, elements...)...)
 	contents, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("read EXPLAIN SQL: %v", err)
+		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(contents)
+}
+
+func doomedWhereClause(t *testing.T, source string) string {
+	t.Helper()
+	const (
+		startMarker = "WITH doomed AS ("
+		endMarker   = "),\ndeleted_values AS ("
+	)
+	start := strings.Index(source, startMarker)
+	if start < 0 {
+		t.Fatal("cleanup SQL has no doomed CTE")
+	}
+	block := source[start+len(startMarker):]
+	end := strings.Index(block, endMarker)
+	if end < 0 {
+		t.Fatal("cleanup SQL doomed CTE has no deleted_values successor")
+	}
+	block = block[:end]
+	where := strings.Index(block, "WHERE")
+	if where < 0 {
+		t.Fatal("cleanup SQL doomed CTE has no WHERE clause")
+	}
+	return strings.TrimSpace(block[where+len("WHERE"):])
+}
+
+func normalizedSQL(value string) string {
+	return strings.Join(strings.Fields(value), "")
 }
 
 func firstPositiveIndex(values ...int) int {

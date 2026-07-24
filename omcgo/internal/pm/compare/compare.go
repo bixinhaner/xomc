@@ -79,6 +79,7 @@ type rowKey struct {
 var (
 	minLogicalTimestamp = time.Unix(0, 0).UTC()
 	maxLogicalTimestamp = time.Date(9999, 12, 31, 23, 59, 59, 999999999, time.UTC)
+	canonicalRowFields  = [...]string{"device", "object", "time", "counter", "value"}
 )
 
 func ReadRows(path string) ([]Row, error) {
@@ -161,18 +162,97 @@ func readJSONRows(reader io.Reader) ([]Row, error) {
 		return nil, fmt.Errorf("decode JSON rows: %w", err)
 	}
 
-	rowDecoder := json.NewDecoder(bytes.NewReader(trimmed))
-	rowDecoder.DisallowUnknownFields()
-	var rows []Row
-	if err := rowDecoder.Decode(&rows); err != nil {
+	var documents []json.RawMessage
+	if err := json.Unmarshal(trimmed, &documents); err != nil {
 		return nil, fmt.Errorf("decode JSON rows: %w", err)
 	}
-	for index := range rows {
-		if err := validateRow(&rows[index]); err != nil {
+	rows := make([]Row, 0, len(documents))
+	for index, document := range documents {
+		row, err := decodeJSONRow(document)
+		if err != nil {
 			return nil, fmt.Errorf("decode JSON row %d: %w", index+1, err)
 		}
+		if err := validateRow(&row); err != nil {
+			return nil, fmt.Errorf("decode JSON row %d: %w", index+1, err)
+		}
+		rows = append(rows, row)
 	}
 	return rows, nil
+}
+
+func decodeJSONRow(document json.RawMessage) (Row, error) {
+	decoder := json.NewDecoder(bytes.NewReader(document))
+	token, err := decoder.Token()
+	if err != nil {
+		return Row{}, fmt.Errorf("decode object: %w", err)
+	}
+	if delimiter, ok := token.(json.Delim); !ok || delimiter != '{' {
+		return Row{}, fmt.Errorf("row must be an object")
+	}
+
+	seen := make(map[string]struct{}, len(canonicalRowFields))
+	row := Row{}
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return Row{}, fmt.Errorf("decode member name: %w", err)
+		}
+		name, ok := token.(string)
+		if !ok {
+			return Row{}, fmt.Errorf("row member name must be a string")
+		}
+		if !canonicalRowField(name) {
+			return Row{}, fmt.Errorf("unknown member %q", name)
+		}
+		if _, duplicate := seen[name]; duplicate {
+			return Row{}, fmt.Errorf("duplicate member %q", name)
+		}
+		seen[name] = struct{}{}
+
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return Row{}, fmt.Errorf("decode member %q: %w", name, err)
+		}
+		switch name {
+		case "device":
+			err = json.Unmarshal(value, &row.Device)
+		case "object":
+			err = json.Unmarshal(value, &row.Object)
+		case "time":
+			err = json.Unmarshal(value, &row.Time)
+		case "counter":
+			err = json.Unmarshal(value, &row.Counter)
+		case "value":
+			err = json.Unmarshal(value, &row.Value)
+		}
+		if err != nil {
+			return Row{}, fmt.Errorf("decode member %q: %w", name, err)
+		}
+	}
+	if _, err := decoder.Token(); err != nil {
+		return Row{}, fmt.Errorf("decode object end: %w", err)
+	}
+	if err := decoder.Decode(&token); err != io.EOF {
+		if err == nil {
+			return Row{}, fmt.Errorf("multiple values in row object")
+		}
+		return Row{}, fmt.Errorf("decode object: %w", err)
+	}
+	for _, required := range canonicalRowFields {
+		if _, ok := seen[required]; !ok {
+			return Row{}, fmt.Errorf("missing member %q", required)
+		}
+	}
+	return row, nil
+}
+
+func canonicalRowField(name string) bool {
+	for _, canonical := range canonicalRowFields {
+		if name == canonical {
+			return true
+		}
+	}
+	return false
 }
 
 func readCSVRows(reader io.Reader) ([]Row, error) {
@@ -190,7 +270,10 @@ func readCSVRows(reader io.Reader) ([]Row, error) {
 		}
 		columns[name] = index
 	}
-	for _, required := range []string{"device", "object", "time", "counter", "value"} {
+	if len(columns) != len(canonicalRowFields) {
+		return nil, fmt.Errorf("decode CSV rows: header must contain exactly device, object, time, counter, value")
+	}
+	for _, required := range canonicalRowFields {
 		if _, ok := columns[required]; !ok {
 			return nil, fmt.Errorf("decode CSV rows: missing %q column", required)
 		}

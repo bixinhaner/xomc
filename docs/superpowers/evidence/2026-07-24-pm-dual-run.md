@@ -29,9 +29,12 @@ The comparator treats `(device, object, time, counter)` as the logical key.
 Rows may be in any order. Missing rows, changed values, and duplicate keys are
 reported with the exact key and both sides' rows.
 
-JSON must be a top-level array with no unknown row fields. CSV must have one
-unique header for each exact column `device,object,time,counter,value`; a
-header-only CSV and `[]` are valid empty exports. Example:
+JSON must be a top-level array; every row must contain each exact lowercase
+member `device`, `object`, `time`, `counter`, and `value` once, with no
+unknown members. `value` may be explicit JSON `null`, but it may not be
+omitted. CSV must have exactly one header for each of those five lowercase
+names and no extra headers; header order may vary. A header-only CSV and `[]`
+are valid empty exports. Example:
 
 ```csv
 device,object,time,counter,value

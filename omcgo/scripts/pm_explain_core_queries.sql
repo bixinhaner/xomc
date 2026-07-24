@@ -119,20 +119,6 @@ SELECT EXISTS (
   SELECT 1 / 0 AS task8_guard_refusal;
 \endif
 
-SELECT ver.bucket_version::text AS sample_cleanup_bucket_version
-  FROM public.pm_hourly_bucket_versions ver
-  JOIN public.pm_hourly_anchors a
-    ON a.bucket_version = ver.bucket_version
-  JOIN public.pm_hourly_values v
-    ON v.bucket_version = a.bucket_version
-   AND v."time" = a."time"
-   AND v.anchor_id = a.anchor_id
- WHERE ver.status IN ('failed', 'superseded')
-   AND ver.created_at < now() - interval '24 hours'
- ORDER BY ver.created_at
- LIMIT 1
-\gset
-
 -- Require an active hourly version with a dictionary-backed value for the
 -- latest and dashboard-range read plans.
 SELECT EXISTS (
@@ -294,8 +280,7 @@ EXPLAIN (ANALYZE, BUFFERS, WAL, SETTINGS)
 WITH doomed AS (
     SELECT bucket_version
       FROM public.pm_hourly_bucket_versions
-     WHERE bucket_version = :'sample_cleanup_bucket_version'::bigint
-       AND status IN ('failed', 'superseded')
+     WHERE status IN ('failed', 'superseded')
        AND created_at < now() - interval '24 hours'
 ),
 deleted_values AS (
