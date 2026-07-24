@@ -18,8 +18,8 @@ import (
 func TestResolveMetricDictionaryQueriesThenInsertsOnlyMissingPaths(t *testing.T) {
 	tx := &recordingSparseMetadataTx{
 		queryRows: [][][]any{
-			{{"existing", int64(10), MetricTypeCounter}},
-			{{"existing", int64(10), MetricTypeCounter}, {"new", int64(20), MetricTypeKPI}},
+			{{"existing", int64(10), MetricTypeCounter, "sum", "number"}},
+			{{"existing", int64(10), MetricTypeCounter, "sum", "number"}, {"new", int64(20), MetricTypeKPI, "pct", "%"}},
 		},
 	}
 
@@ -57,8 +57,32 @@ func TestResolveMetricDictionaryRejectsDuplicateMissingAndInconsistentMetadata(t
 	})
 
 	t.Run("existing immutable identity differs", func(t *testing.T) {
-		tx := &recordingSparseMetadataTx{queryRows: [][][]any{{{"path", int64(10), MetricTypeKPI}}}}
+		tx := &recordingSparseMetadataTx{queryRows: [][][]any{{{"path", int64(10), MetricTypeKPI, "pct", "%"}}}}
 		_, err := resolveMetricDictionary(context.Background(), tx, []metricDefinition{{path: "path", metricType: MetricTypeCounter}})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "incompatible immutable metadata")
+	})
+}
+
+func TestResolveMetricDictionaryTreatsStatisTypeAndUnitAsImmutableMetadata(t *testing.T) {
+	t.Run("queries every immutable metadata field", func(t *testing.T) {
+		tx := &recordingSparseMetadataTx{queryRows: [][][]any{
+			{{"path", int64(10), MetricTypeCounter, "sum", "number"}},
+			{{"path", int64(10), MetricTypeCounter, "sum", "number"}},
+		}}
+		_, err := resolveMetricDictionary(context.Background(), tx, []metricDefinition{{
+			path: "path", metricType: MetricTypeCounter, statisType: "sum", unit: "number",
+		}})
+		require.NoError(t, err)
+		assert.Contains(t, tx.queries[0], "statis_type")
+		assert.Contains(t, tx.queries[0], "unit")
+	})
+
+	t.Run("rejects incompatible stored fields", func(t *testing.T) {
+		err := validateMetricDefinition(
+			metricDefinition{path: "path", metricType: MetricTypeCounter, statisType: "sum", unit: "number"},
+			resolvedMetricDefinition{metricDefinition: metricDefinition{path: "path", metricType: MetricTypeCounter, statisType: "pct", unit: "%"}, id: 10},
+		)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "incompatible immutable metadata")
 	})
@@ -91,6 +115,13 @@ func TestResolveMetricSetRejectsExistingMismatchedMetricIDs(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "inconsistent metric set")
 	assert.Empty(t, tx.execs)
+}
+
+func TestResolveMetricSetRejectsNonCanonicalStoredMetricIDOrder(t *testing.T) {
+	err := validateMetricSet([]int64{2, 5, 9}, resolvedMetricSet{id: 77, metricIDs: []int64{9, 2, 5}})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "inconsistent metric set")
 }
 
 type recordingSparseMetadataTx struct {

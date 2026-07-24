@@ -119,7 +119,8 @@ func canonicalMetricDefinitions(defs []metricDefinition) ([]metricDefinition, er
 
 func queryMetricDictionary(ctx context.Context, tx sparseMetadataQuerier, paths []string) (map[string]resolvedMetricDefinition, error) {
 	rows, err := tx.Query(ctx, `
-SELECT metric_path, metric_id, metric_type
+SELECT metric_path, metric_id, metric_type,
+       COALESCE(statis_type, ''), COALESCE(unit, '')
 FROM pm_metric_dictionary
 WHERE metric_path = ANY($1::text[])`, paths)
 	if err != nil {
@@ -132,13 +133,16 @@ WHERE metric_path = ANY($1::text[])`, paths)
 		var path string
 		var id int64
 		var metricType MetricType
-		if err := rows.Scan(&path, &id, &metricType); err != nil {
+		var statisType, unit string
+		if err := rows.Scan(&path, &id, &metricType, &statisType, &unit); err != nil {
 			return nil, fmt.Errorf("scan metric dictionary: %w", err)
 		}
 		if _, exists := resolved[path]; exists {
 			return nil, fmt.Errorf("query metric dictionary: duplicate metadata row for path %q", path)
 		}
-		resolved[path] = resolvedMetricDefinition{metricDefinition: metricDefinition{path: path, metricType: metricType}, id: id}
+		resolved[path] = resolvedMetricDefinition{metricDefinition: metricDefinition{
+			path: path, metricType: metricType, statisType: statisType, unit: unit,
+		}, id: id}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate metric dictionary: %w", err)
@@ -147,8 +151,8 @@ WHERE metric_path = ANY($1::text[])`, paths)
 }
 
 func validateMetricDefinition(want metricDefinition, got resolvedMetricDefinition) error {
-	if want.metricType != got.metricType {
-		return fmt.Errorf("resolve metric dictionary: incompatible immutable metadata for path %q: metric type is %q, want %q", want.path, got.metricType, want.metricType)
+	if want.metricType != got.metricType || want.statisType != got.statisType || want.unit != got.unit {
+		return fmt.Errorf("resolve metric dictionary: incompatible immutable metadata for path %q: got type=%q statis_type=%q unit=%q, want type=%q statis_type=%q unit=%q", want.path, got.metricType, got.statisType, got.unit, want.metricType, want.statisType, want.unit)
 	}
 	return nil
 }
@@ -266,15 +270,11 @@ func canonicalMetricIDs(ids []int64) ([]int64, error) {
 }
 
 func validateMetricSet(want []int64, got resolvedMetricSet) error {
-	gotIDs, err := canonicalMetricIDs(got.metricIDs)
-	if err != nil {
-		return fmt.Errorf("resolve metric set: inconsistent metric set %d: %w", got.id, err)
-	}
-	if len(want) != len(gotIDs) {
+	if len(want) != len(got.metricIDs) {
 		return fmt.Errorf("resolve metric set: inconsistent metric set %d: stored metric IDs do not match content hash input", got.id)
 	}
 	for i := range want {
-		if want[i] != gotIDs[i] {
+		if want[i] != got.metricIDs[i] {
 			return fmt.Errorf("resolve metric set: inconsistent metric set %d: stored metric IDs do not match content hash input", got.id)
 		}
 	}
