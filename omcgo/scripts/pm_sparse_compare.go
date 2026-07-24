@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"math"
 	"os"
 
 	pmcompare "github.com/omcgo/omcgo/internal/pm/compare"
@@ -21,7 +20,11 @@ func main() {
 	sparseBytes := flag.Int64("sparse-bytes", -1, "sparse table+index+TOAST physical bytes")
 	flag.Parse()
 
-	if *oldPath == "" || *sparsePath == "" || *oldBytes < 0 || *sparseBytes < 0 {
+	provided := make(map[string]bool)
+	flag.Visit(func(item *flag.Flag) {
+		provided[item.Name] = true
+	})
+	if *oldPath == "" || *sparsePath == "" || !provided["old-bytes"] || !provided["sparse-bytes"] {
 		fmt.Fprintln(os.Stderr, "--old, --sparse, --old-bytes, and --sparse-bytes are required")
 		flag.Usage()
 		os.Exit(2)
@@ -38,12 +41,9 @@ func main() {
 	}
 
 	result := pmcompare.Compare(oldRows, sparseRows, *oldBytes, *sparseBytes)
-	ratio := fmt.Sprintf("%.6f", result.SparseRatio)
-	if math.IsInf(result.SparseRatio, 1) {
-		ratio = "+Inf"
-	}
-	fmt.Printf("logical_equal=%t\nold_bytes=%d\nsparse_bytes=%d\nsparse_ratio=%s\nwithin_size_target=%t\naccepted=%t\n",
-		result.LogicalEqual, result.OldBytes, result.SparseBytes, ratio, result.WithinSizeTarget, result.Accepted)
+	fmt.Printf("logical_equal=%t\nold_bytes=%d\nsparse_bytes=%d\nsparse_ratio=%s\nphysical_valid=%t\nphysical_reason=%s\nwithin_size_target=%t\naccepted=%t\n",
+		result.LogicalEqual, result.OldBytes, result.SparseBytes, result.SparseRatioText(),
+		result.PhysicalValid, result.PhysicalReason, result.WithinSizeTarget, result.Accepted)
 	if len(result.Mismatches) > 0 {
 		encoded, err := json.MarshalIndent(result.Mismatches, "", "  ")
 		if err != nil {

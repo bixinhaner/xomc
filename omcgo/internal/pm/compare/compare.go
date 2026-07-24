@@ -3,6 +3,7 @@
 package compare
 
 import (
+	"bytes"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -12,14 +13,18 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
-const MaxSparseRatio = 0.20
+const (
+	MaxSparseRatio         = 1.0 / 5.0
+	sparseRatioDenominator = int64(5)
+)
 
 type Row struct {
 	Device  string    `json:"device"`
-	Object  string    `json:"object,omitempty"`
+	Object  string    `json:"object"`
 	Time    time.Time `json:"time"`
 	Counter string    `json:"counter"`
 	Value   *float64  `json:"value"`
@@ -27,7 +32,7 @@ type Row struct {
 
 type Key struct {
 	Device  string    `json:"device"`
-	Object  string    `json:"object,omitempty"`
+	Object  string    `json:"object"`
 	Time    time.Time `json:"time"`
 	Counter string    `json:"counter"`
 }
@@ -54,16 +59,27 @@ type Result struct {
 	OldBytes         int64      `json:"old_bytes"`
 	SparseBytes      int64      `json:"sparse_bytes"`
 	SparseRatio      float64    `json:"sparse_ratio"`
+	PhysicalValid    bool       `json:"physical_valid"`
+	PhysicalReason   string     `json:"physical_reason"`
 	WithinSizeTarget bool       `json:"within_size_target"`
 	Accepted         bool       `json:"accepted"`
+}
+
+func (r Result) SparseRatioText() string {
+	return strconv.FormatFloat(r.SparseRatio, 'g', 17, 64)
 }
 
 type rowKey struct {
 	device  string
 	object  string
-	timeNS  int64
+	time    time.Time
 	counter string
 }
+
+var (
+	minLogicalTimestamp = time.Unix(0, 0).UTC()
+	maxLogicalTimestamp = time.Date(9999, 12, 31, 23, 59, 59, 999999999, time.UTC)
+)
 
 func ReadRows(path string) ([]Row, error) {
 	file, err := os.Open(path)
@@ -99,7 +115,7 @@ func Compare(oldRows, sparseRows []Row, oldBytes, sparseBytes int64) Result {
 			Key: Key{
 				Device:  key.device,
 				Object:  key.object,
-				Time:    time.Unix(0, key.timeNS).UTC(),
+				Time:    key.time,
 				Counter: key.counter,
 			},
 			Kind:       kind,
@@ -108,7 +124,11 @@ func Compare(oldRows, sparseRows []Row, oldBytes, sparseBytes int64) Result {
 		})
 	}
 
-	ratio, withinTarget := physicalRatio(oldBytes, sparseBytes)
+	ratio, physicalValid, withinTarget, physicalReason := physicalAssessment(
+		oldBytes,
+		sparseBytes,
+		len(oldRows) == 0 && len(sparseRows) == 0,
+	)
 	logicalEqual := len(mismatches) == 0
 	return Result{
 		LogicalEqual:     logicalEqual,
@@ -116,16 +136,22 @@ func Compare(oldRows, sparseRows []Row, oldBytes, sparseBytes int64) Result {
 		OldBytes:         oldBytes,
 		SparseBytes:      sparseBytes,
 		SparseRatio:      ratio,
+		PhysicalValid:    physicalValid,
+		PhysicalReason:   physicalReason,
 		WithinSizeTarget: withinTarget,
-		Accepted:         logicalEqual && withinTarget,
+		Accepted:         logicalEqual && physicalValid && withinTarget,
 	}
 }
 
 func readJSONRows(reader io.Reader) ([]Row, error) {
 	decoder := json.NewDecoder(reader)
-	var rows []Row
-	if err := decoder.Decode(&rows); err != nil {
+	var document json.RawMessage
+	if err := decoder.Decode(&document); err != nil {
 		return nil, fmt.Errorf("decode JSON rows: %w", err)
+	}
+	trimmed := bytes.TrimSpace(document)
+	if len(trimmed) == 0 || trimmed[0] != '[' {
+		return nil, fmt.Errorf("decode JSON rows: top-level value must be an array")
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
@@ -133,6 +159,18 @@ func readJSONRows(reader io.Reader) ([]Row, error) {
 			return nil, fmt.Errorf("decode JSON rows: multiple JSON values")
 		}
 		return nil, fmt.Errorf("decode JSON rows: %w", err)
+	}
+
+	rowDecoder := json.NewDecoder(bytes.NewReader(trimmed))
+	rowDecoder.DisallowUnknownFields()
+	var rows []Row
+	if err := rowDecoder.Decode(&rows); err != nil {
+		return nil, fmt.Errorf("decode JSON rows: %w", err)
+	}
+	for index := range rows {
+		if err := validateRow(&rows[index]); err != nil {
+			return nil, fmt.Errorf("decode JSON row %d: %w", index+1, err)
+		}
 	}
 	return rows, nil
 }
@@ -143,13 +181,16 @@ func readCSVRows(reader io.Reader) ([]Row, error) {
 		return nil, fmt.Errorf("decode CSV rows: %w", err)
 	}
 	if len(records) == 0 {
-		return []Row{}, nil
+		return nil, fmt.Errorf("decode CSV rows: header row is required")
 	}
 	columns := make(map[string]int, len(records[0]))
 	for index, name := range records[0] {
+		if _, duplicate := columns[name]; duplicate {
+			return nil, fmt.Errorf("decode CSV rows: duplicate %q column", name)
+		}
 		columns[name] = index
 	}
-	for _, required := range []string{"device", "time", "counter", "value"} {
+	for _, required := range []string{"device", "object", "time", "counter", "value"} {
 		if _, ok := columns[required]; !ok {
 			return nil, fmt.Errorf("decode CSV rows: missing %q column", required)
 		}
@@ -169,28 +210,69 @@ func readCSVRows(reader io.Reader) ([]Row, error) {
 			}
 			value = &parsed
 		}
-		object := ""
-		if objectColumn, ok := columns["object"]; ok {
-			object = record[objectColumn]
-		}
-		rows = append(rows, Row{
+		row := Row{
 			Device:  record[columns["device"]],
-			Object:  object,
+			Object:  record[columns["object"]],
 			Time:    timestamp,
 			Counter: record[columns["counter"]],
 			Value:   value,
-		})
+		}
+		if err := validateRow(&row); err != nil {
+			return nil, fmt.Errorf("decode CSV row %d: %w", index+2, err)
+		}
+		rows = append(rows, row)
 	}
 	return rows, nil
+}
+
+func validateRow(row *Row) error {
+	switch {
+	case strings.TrimSpace(row.Device) == "":
+		return fmt.Errorf("device is required")
+	case strings.TrimSpace(row.Object) == "":
+		return fmt.Errorf("object is required")
+	case strings.TrimSpace(row.Counter) == "":
+		return fmt.Errorf("counter is required")
+	case row.Time.IsZero():
+		return fmt.Errorf("time must not be zero")
+	}
+	row.Time = row.Time.Round(0).UTC()
+	if row.Time.Before(minLogicalTimestamp) || row.Time.After(maxLogicalTimestamp) {
+		return fmt.Errorf("time %s is outside the supported range [%s, %s]",
+			row.Time.Format(time.RFC3339Nano),
+			minLogicalTimestamp.Format(time.RFC3339Nano),
+			maxLogicalTimestamp.Format(time.RFC3339Nano),
+		)
+	}
+	if row.Value != nil {
+		if math.IsNaN(*row.Value) || math.IsInf(*row.Value, 0) {
+			return fmt.Errorf("value must be finite")
+		}
+		if *row.Value == 0 {
+			zero := float64(0)
+			row.Value = &zero
+		}
+	}
+	return nil
 }
 
 func groupRows(rows []Row) map[rowKey][]Row {
 	grouped := make(map[rowKey][]Row, len(rows))
 	for _, row := range rows {
-		key := rowKey{device: row.Device, object: row.Object, timeNS: row.Time.UnixNano(), counter: row.Counter}
+		row = canonicalRow(row)
+		key := rowKey{device: row.Device, object: row.Object, time: row.Time, counter: row.Counter}
 		grouped[key] = append(grouped[key], row)
 	}
 	return grouped
+}
+
+func canonicalRow(row Row) Row {
+	row.Time = row.Time.Round(0).UTC()
+	if row.Value != nil && *row.Value == 0 {
+		zero := float64(0)
+		row.Value = &zero
+	}
+	return row
 }
 
 func unionKeys(left, right map[rowKey][]Row) []rowKey {
@@ -212,8 +294,8 @@ func unionKeys(left, right map[rowKey][]Row) []rowKey {
 		if keys[i].object != keys[j].object {
 			return keys[i].object < keys[j].object
 		}
-		if keys[i].timeNS != keys[j].timeNS {
-			return keys[i].timeNS < keys[j].timeNS
+		if !keys[i].time.Equal(keys[j].time) {
+			return keys[i].time.Before(keys[j].time)
 		}
 		return keys[i].counter < keys[j].counter
 	})
@@ -260,16 +342,39 @@ func equalValues(left, right *float64) bool {
 	return *left == *right
 }
 
-func physicalRatio(oldBytes, sparseBytes int64) (float64, bool) {
+func physicalAssessment(oldBytes, sparseBytes int64, logicalInputsEmpty bool) (float64, bool, bool, string) {
 	if oldBytes < 0 || sparseBytes < 0 {
-		return math.Inf(1), false
+		return math.Inf(1), false, false, fmt.Sprintf(
+			"invalid physical measurement: old_bytes=%d and sparse_bytes=%d must both be nonnegative",
+			oldBytes,
+			sparseBytes,
+		)
 	}
 	if oldBytes == 0 {
 		if sparseBytes == 0 {
-			return 0, true
+			if logicalInputsEmpty {
+				return 0, true, true, "empty run: both logical inputs and physical byte counts are empty"
+			}
+			return 0, false, false,
+				"unmeasured physical size: nonempty logical inputs cannot use old_bytes=0 and sparse_bytes=0"
 		}
-		return math.Inf(1), false
+		return math.Inf(1), true, false, fmt.Sprintf(
+			"exact size gate failed: old_bytes=0 cannot cover sparse_bytes=%d",
+			sparseBytes,
+		)
 	}
 	ratio := float64(sparseBytes) / float64(oldBytes)
-	return ratio, ratio <= MaxSparseRatio
+	maxSparseBytes := oldBytes / sparseRatioDenominator
+	if sparseBytes <= maxSparseBytes {
+		return ratio, true, true, fmt.Sprintf(
+			"exact size gate passed: sparse_bytes=%d <= floor(old_bytes/5)=%d (equivalent to 5*sparse_bytes <= old_bytes)",
+			sparseBytes,
+			maxSparseBytes,
+		)
+	}
+	return ratio, true, false, fmt.Sprintf(
+		"exact size gate failed: sparse_bytes=%d > floor(old_bytes/5)=%d (equivalent to 5*sparse_bytes > old_bytes)",
+		sparseBytes,
+		maxSparseBytes,
+	)
 }

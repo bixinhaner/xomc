@@ -19,22 +19,55 @@ is not proof that an index is redundant.
 Use a copied, production-shaped TimescaleDB only. Do not put credentials in the
 repository or captured output.
 
+Create the sentinel only after independently cloning the database into the
+dedicated identity `omc_task8_sparse_clone`. Never run this block on the
+production database:
+
+```sql
+\set ON_ERROR_STOP on
+SELECT current_database() = 'omc_task8_sparse_clone' AS is_expected_clone
+\gset
+\if :is_expected_clone
+\else
+  \echo 'refusing sentinel creation: not the exact isolated clone database'
+  SELECT 1 / 0 AS task8_sentinel_creation_refusal;
+\endif
+
+CREATE SCHEMA task8_validation;
+CREATE TABLE task8_validation.pm_explain_clone_sentinel (
+    database_name name PRIMARY KEY,
+    purpose text NOT NULL CHECK (purpose = 'pm-task8-isolated-clone'),
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+INSERT INTO task8_validation.pm_explain_clone_sentinel
+    (database_name, purpose)
+VALUES (current_database(), 'pm-task8-isolated-clone');
+```
+
+The sentinel is clone-local evidence, not a general configuration table. Do
+not migrate it and do not create it in any live database.
+
 ```bash
 cd omcgo
 psql "$TASK8_TSDB_DSN" \
   -v task8_isolated_safe_environment=on \
+  -v task8_expected_database=omc_task8_sparse_clone \
   -f scripts/pm_explain_core_queries.sql \
   | tee pm-task8-explain.txt
 ```
 
-The script refuses to run without the explicit isolation flag, requires
-populated sparse tables, executes every plan in one transaction, and ends with
-`ROLLBACK`. It covers:
+Before any `EXPLAIN ANALYZE` or `DELETE`, the script requires the client flag,
+an exact `current_database()` match, and a matching server-side clone
+sentinel. Every refusal raises an `ON_ERROR_STOP` error, so `psql` exits 3.
+The script pins `search_path`, fully qualifies PM relations, requires
+representative joined rows, executes every plan in one transaction, and ends
+with `ROLLBACK`. It covers:
 
 - ingest idempotency lookup by `pm_ingest_batches.source_file_id`;
 - latest device/counter lookup;
 - raw-to-hourly aggregation;
 - dashboard device/time/counter range;
+- active-hourly latest and dashboard range reads;
 - object/time range;
 - source-file value and anchor cleanup;
 - obsolete hourly-version cleanup;
@@ -51,6 +84,15 @@ are not silently omitted; TimescaleDB chunk statistics are summed separately
 so parent-table zeros are not mistaken for an idle workload. The installed
 TimescaleDB catalog maps each chunk index back to its candidate hypertable
 index for cumulative per-candidate scans.
+
+Guard behavior can be verified without TimescaleDB data. The test starts a
+temporary Unix-socket-only PostgreSQL instance and proves false flag, wrong
+database, and absent sentinel all exit 3 before a query marker:
+
+```bash
+cd omcgo
+./scripts/pm_explain_core_queries_guard_test.sh
+```
 
 ## Candidate evidence register
 

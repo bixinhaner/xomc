@@ -1,6 +1,7 @@
 package compare
 
 import (
+	"encoding/json"
 	"math"
 	"os"
 	"path/filepath"
@@ -132,8 +133,29 @@ func TestCompareHandlesEmptyAndZeroByteRuns(t *testing.T) {
 	t.Run("both representations empty", func(t *testing.T) {
 		got := Compare(nil, nil, 0, 0)
 
-		if !got.LogicalEqual || got.SparseRatio != 0 || !got.WithinSizeTarget || !got.Accepted {
+		if !got.LogicalEqual || got.SparseRatio != 0 || !got.PhysicalValid || !got.WithinSizeTarget || !got.Accepted {
 			t.Fatalf("empty result = %#v", got)
+		}
+	})
+
+	t.Run("nonempty rows without a physical measurement", func(t *testing.T) {
+		row := Row{
+			Device:  "device-a",
+			Object:  "Cell=1",
+			Time:    mustTime(t, "2026-07-24T00:00:00Z"),
+			Counter: "Signal.RSRP",
+			Value:   value(-95),
+		}
+		got := Compare([]Row{row}, []Row{row}, 0, 0)
+
+		if !got.LogicalEqual {
+			t.Fatalf("LogicalEqual = false, mismatches = %#v", got.Mismatches)
+		}
+		if got.PhysicalValid || got.WithinSizeTarget || got.Accepted {
+			t.Fatalf("nonempty zero-byte result = %#v, want explicit unmeasured failure", got)
+		}
+		if got.PhysicalReason == "" {
+			t.Fatal("PhysicalReason is empty")
 		}
 	})
 
@@ -143,23 +165,71 @@ func TestCompareHandlesEmptyAndZeroByteRuns(t *testing.T) {
 		if !math.IsInf(got.SparseRatio, 1) {
 			t.Fatalf("SparseRatio = %v, want +Inf", got.SparseRatio)
 		}
-		if got.WithinSizeTarget || got.Accepted {
-			t.Fatalf("WithinSizeTarget = %v, Accepted = %v, want false/false", got.WithinSizeTarget, got.Accepted)
+		if !got.PhysicalValid || got.WithinSizeTarget || got.Accepted {
+			t.Fatalf("PhysicalValid = %v, WithinSizeTarget = %v, Accepted = %v, want true/false/false",
+				got.PhysicalValid, got.WithinSizeTarget, got.Accepted)
 		}
 	})
 }
 
-func TestCompareFailsAboveTwentyPercentPhysicalThreshold(t *testing.T) {
+func TestCompareUsesExactTwentyPercentPhysicalThreshold(t *testing.T) {
 	t.Parallel()
 
-	atLimit := Compare(nil, nil, 1000, 200)
-	if !atLimit.WithinSizeTarget || !atLimit.Accepted {
-		t.Fatalf("20%% result = %#v, want accepted", atLimit)
+	tests := []struct {
+		name        string
+		oldBytes    int64
+		sparseBytes int64
+		want        bool
+	}{
+		{name: "exact boundary", oldBytes: 1000, sparseBytes: 200, want: true},
+		{name: "one byte above", oldBytes: 1000, sparseBytes: 201, want: false},
+		{name: "fractional boundary below", oldBytes: 9, sparseBytes: 1, want: true},
+		{name: "fractional boundary above", oldBytes: 9, sparseBytes: 2, want: false},
+		{name: "max int64 below", oldBytes: math.MaxInt64, sparseBytes: math.MaxInt64 / 5, want: true},
+		{name: "max int64 above", oldBytes: math.MaxInt64, sparseBytes: math.MaxInt64/5 + 1, want: false},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			got := Compare(nil, nil, tt.oldBytes, tt.sparseBytes)
+			if !got.PhysicalValid {
+				t.Fatalf("PhysicalValid = false, reason = %q", got.PhysicalReason)
+			}
+			if got.WithinSizeTarget != tt.want || got.Accepted != tt.want {
+				t.Fatalf("result = %#v, want WithinSizeTarget/Accepted = %v", got, tt.want)
+			}
+			if got.PhysicalReason == "" {
+				t.Fatal("PhysicalReason is empty")
+			}
+		})
+	}
+}
+
+func TestCompareRejectsNegativePhysicalBytes(t *testing.T) {
+	t.Parallel()
+
+	for _, bytes := range [][2]int64{{-1, 0}, {0, -1}, {-1, -1}} {
+		got := Compare(nil, nil, bytes[0], bytes[1])
+		if got.PhysicalValid || got.WithinSizeTarget || got.Accepted {
+			t.Fatalf("Compare(nil, nil, %d, %d) = %#v, want invalid", bytes[0], bytes[1], got)
+		}
+		if got.PhysicalReason == "" {
+			t.Fatal("PhysicalReason is empty")
+		}
+	}
+}
+
+func TestResultSparseRatioTextPreservesDecisionPrecision(t *testing.T) {
+	t.Parallel()
+
+	got := Compare(nil, nil, 9, 1)
+	if got.SparseRatioText() != "0.1111111111111111" {
+		t.Fatalf("SparseRatioText() = %q", got.SparseRatioText())
 	}
 
-	overLimit := Compare(nil, nil, 1000, 201)
-	if overLimit.WithinSizeTarget || overLimit.Accepted {
-		t.Fatalf("20.1%% result = %#v, want rejected", overLimit)
+	infinite := Compare(nil, nil, 0, 1)
+	if infinite.SparseRatioText() != "+Inf" {
+		t.Fatalf("infinite SparseRatioText() = %q", infinite.SparseRatioText())
 	}
 }
 
@@ -222,10 +292,31 @@ func TestReadRowsRejectsMalformedInput(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]string{
-		"unsupported.txt": "not a supported export",
-		"missing.csv":     "device,time,value\n001/serial-a,2026-07-24T00:00:00Z,1\n",
-		"bad-time.csv":    "device,time,counter,value\n001/serial-a,yesterday,Signal.RSRP,1\n",
-		"bad-value.csv":   "device,time,counter,value\n001/serial-a,2026-07-24T00:00:00Z,Signal.RSRP,nope\n",
+		"unsupported.txt":       "not a supported export",
+		"null.json":             "null",
+		"object.json":           "{}",
+		"missing-device.json":   `[{"object":"Cell=1","time":"2026-07-24T00:00:00Z","counter":"Signal.RSRP","value":1}]`,
+		"missing-object.json":   `[{"device":"001/serial-a","time":"2026-07-24T00:00:00Z","counter":"Signal.RSRP","value":1}]`,
+		"missing-counter.json":  `[{"device":"001/serial-a","object":"Cell=1","time":"2026-07-24T00:00:00Z","value":1}]`,
+		"missing-time.json":     `[{"device":"001/serial-a","object":"Cell=1","counter":"Signal.RSRP","value":1}]`,
+		"empty-device.json":     `[{"device":" ","object":"Cell=1","time":"2026-07-24T00:00:00Z","counter":"Signal.RSRP","value":1}]`,
+		"empty-object.json":     `[{"device":"001/serial-a","object":"","time":"2026-07-24T00:00:00Z","counter":"Signal.RSRP","value":1}]`,
+		"empty-counter.json":    `[{"device":"001/serial-a","object":"Cell=1","time":"2026-07-24T00:00:00Z","counter":" ","value":1}]`,
+		"zero-time.json":        `[{"device":"001/serial-a","object":"Cell=1","time":"0001-01-01T00:00:00Z","counter":"Signal.RSRP","value":1}]`,
+		"out-of-range.json":     `[{"device":"001/serial-a","object":"Cell=1","time":"1969-12-31T23:59:59Z","counter":"Signal.RSRP","value":1}]`,
+		"unknown-field.json":    `[{"device":"001/serial-a","object":"Cell=1","time":"2026-07-24T00:00:00Z","counter":"Signal.RSRP","value":1,"extra":true}]`,
+		"empty.csv":             "",
+		"missing.csv":           "device,time,counter,value\n001/serial-a,2026-07-24T00:00:00Z,Signal.RSRP,1\n",
+		"duplicate-header.csv":  "device,object,time,counter,value,device\n001/serial-a,Cell=1,2026-07-24T00:00:00Z,Signal.RSRP,1,other\n",
+		"empty-device.csv":      "device,object,time,counter,value\n,Cell=1,2026-07-24T00:00:00Z,Signal.RSRP,1\n",
+		"empty-object.csv":      "device,object,time,counter,value\n001/serial-a,,2026-07-24T00:00:00Z,Signal.RSRP,1\n",
+		"empty-counter.csv":     "device,object,time,counter,value\n001/serial-a,Cell=1,2026-07-24T00:00:00Z,,1\n",
+		"empty-time.csv":        "device,object,time,counter,value\n001/serial-a,Cell=1,,Signal.RSRP,1\n",
+		"bad-time.csv":          "device,object,time,counter,value\n001/serial-a,Cell=1,yesterday,Signal.RSRP,1\n",
+		"out-of-range-time.csv": "device,object,time,counter,value\n001/serial-a,Cell=1,1969-12-31T23:59:59Z,Signal.RSRP,1\n",
+		"bad-value.csv":         "device,object,time,counter,value\n001/serial-a,Cell=1,2026-07-24T00:00:00Z,Signal.RSRP,nope\n",
+		"nan-value.csv":         "device,object,time,counter,value\n001/serial-a,Cell=1,2026-07-24T00:00:00Z,Signal.RSRP,NaN\n",
+		"inf-value.csv":         "device,object,time,counter,value\n001/serial-a,Cell=1,2026-07-24T00:00:00Z,Signal.RSRP,+Inf\n",
 	}
 
 	for name, contents := range tests {
@@ -242,6 +333,58 @@ func TestReadRowsRejectsMalformedInput(t *testing.T) {
 	}
 }
 
+func TestReadRowsAllowsStrictEmptyExports(t *testing.T) {
+	t.Parallel()
+
+	for name, contents := range map[string]string{
+		"empty.json": "[]",
+		"empty.csv":  "device,object,time,counter,value\n",
+	} {
+		path := filepath.Join(t.TempDir(), name)
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatalf("write fixture: %v", err)
+		}
+		rows, err := ReadRows(path)
+		if err != nil {
+			t.Fatalf("ReadRows(%s) error = %v", name, err)
+		}
+		if len(rows) != 0 {
+			t.Fatalf("ReadRows(%s) = %#v, want empty", name, rows)
+		}
+	}
+}
+
+func TestCompareDuplicateOutputIsDeterministicAndCanonicalizesSignedZero(t *testing.T) {
+	t.Parallel()
+
+	timestamp := mustTime(t, "2026-07-24T00:00:00Z")
+	base := Row{Device: "device-a", Object: "Cell=1", Time: timestamp, Counter: "Signal.RSRP"}
+	negativeZero := math.Copysign(0, -1)
+	rows := []Row{
+		withValue(base, 2),
+		withValue(base, negativeZero),
+		withValue(base, 0),
+		withValue(base, 1),
+	}
+	reversed := []Row{rows[3], rows[2], rows[1], rows[0]}
+	sparse := []Row{withValue(base, 0)}
+
+	first, err := json.Marshal(Compare(rows, sparse, 1000, 100).Mismatches)
+	if err != nil {
+		t.Fatalf("marshal first mismatch: %v", err)
+	}
+	second, err := json.Marshal(Compare(reversed, sparse, 1000, 100).Mismatches)
+	if err != nil {
+		t.Fatalf("marshal second mismatch: %v", err)
+	}
+	if string(first) != string(second) {
+		t.Fatalf("duplicate output depends on input ordering:\nfirst:  %s\nsecond: %s", first, second)
+	}
+	if string(first) == "" || containsJSONNegativeZero(first) {
+		t.Fatalf("duplicate output did not canonicalize signed zero: %s", first)
+	}
+}
+
 func mustTime(t *testing.T, value string) time.Time {
 	t.Helper()
 	parsed, err := time.Parse(time.RFC3339Nano, value)
@@ -253,4 +396,18 @@ func mustTime(t *testing.T, value string) time.Time {
 
 func value(v float64) *float64 {
 	return &v
+}
+
+func withValue(row Row, v float64) Row {
+	row.Value = value(v)
+	return row
+}
+
+func containsJSONNegativeZero(value []byte) bool {
+	for i := 0; i+2 < len(value); i++ {
+		if value[i] == ':' && value[i+1] == '-' && value[i+2] == '0' {
+			return true
+		}
+	}
+	return false
 }

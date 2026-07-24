@@ -19,18 +19,19 @@ Both implementations export the same logical columns:
 
 | Column | Meaning |
 |---|---|
-| `device` | stable device key, normally `device_oui/device_sn` |
-| `object` | object LDN; optional only for objectless counters |
-| `time` | RFC3339 timestamp |
-| `counter` | metric path |
-| `value` | numeric value or null/empty |
+| `device` | nonblank stable device key, normally `device_oui/device_sn` |
+| `object` | nonblank object LDN; use the canonical `__device__` token for objectless counters |
+| `time` | nonzero RFC3339 timestamp from `1970-01-01T00:00:00Z` through year 9999 |
+| `counter` | nonblank metric path |
+| `value` | finite numeric value or null/empty; NaN and infinities are rejected |
 
 The comparator treats `(device, object, time, counter)` as the logical key.
 Rows may be in any order. Missing rows, changed values, and duplicate keys are
 reported with the exact key and both sides' rows.
 
-Accepted inputs are a JSON array of normalized rows or CSV with
-`device,time,counter,value` and optional `object`. Example:
+JSON must be a top-level array with no unknown row fields. CSV must have one
+unique header for each exact column `device,object,time,counter,value`; a
+header-only CSV and `[]` are valid empty exports. Example:
 
 ```csv
 device,object,time,counter,value
@@ -66,7 +67,7 @@ device,object,time,counter,value
    ```sql
    \copy (
      SELECT concat_ws('/', device_oui, device_sn) AS device,
-            object_ldn AS object,
+            COALESCE(NULLIF(object_ldn, ''), '__device__') AS object,
             to_char(
               "time" AT TIME ZONE 'UTC',
               'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
@@ -136,9 +137,16 @@ logical_equal = true
 sparse_bytes / old_bytes <= 0.20
 ```
 
-It exits one for any logical mismatch, duplicate key, or ratio above 20%.
-Zero/zero is a valid empty measurement; positive sparse bytes with a zero
-legacy baseline cannot pass.
+The physical decision uses exact overflow-safe integer arithmetic:
+`sparse_bytes <= floor(old_bytes/5)`, equivalent to
+`5*sparse_bytes <= old_bytes`. The printed floating ratio uses 17-digit
+round-trip precision for diagnosis only and never decides acceptance. The CLI
+also prints the exact byte decision reason.
+
+It exits one for any logical mismatch, duplicate key, invalid measurement, or
+ratio above 20%. Zero/zero is valid only when both logical inputs are empty.
+Nonempty logical inputs with zero/zero bytes are explicitly unmeasured and
+fail; positive sparse bytes with a zero legacy baseline also fail.
 
 ## Evidence still required
 
