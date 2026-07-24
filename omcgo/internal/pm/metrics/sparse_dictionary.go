@@ -98,9 +98,18 @@ func canonicalMetricDefinitions(defs []metricDefinition) ([]metricDefinition, er
 			return nil, fmt.Errorf("canonical metric definitions: metric path %q has invalid metric type %q", def.path, def.metricType)
 		}
 		if existing, ok := byPath[def.path]; ok {
-			if existing != def {
+			if existing.metricType != def.metricType ||
+				(existing.statisType != "" && def.statisType != "" && existing.statisType != def.statisType) ||
+				(existing.unit != "" && def.unit != "" && existing.unit != def.unit) {
 				return nil, fmt.Errorf("canonical metric definitions: duplicate metric definition for path %q is inconsistent", def.path)
 			}
+			if existing.statisType == "" {
+				existing.statisType = def.statisType
+			}
+			if existing.unit == "" {
+				existing.unit = def.unit
+			}
+			byPath[def.path] = existing
 			continue
 		}
 		byPath[def.path] = def
@@ -151,7 +160,9 @@ WHERE metric_path = ANY($1::text[])`, paths)
 }
 
 func validateMetricDefinition(want metricDefinition, got resolvedMetricDefinition) error {
-	if want.metricType != got.metricType || want.statisType != got.statisType || want.unit != got.unit {
+	if want.metricType != got.metricType ||
+		(want.statisType != "" && got.statisType != "" && want.statisType != got.statisType) ||
+		(want.unit != "" && got.unit != "" && want.unit != got.unit) {
 		return fmt.Errorf("resolve metric dictionary: incompatible immutable metadata for path %q: got type=%q statis_type=%q unit=%q, want type=%q statis_type=%q unit=%q", want.path, got.metricType, got.statisType, got.unit, want.metricType, want.statisType, want.unit)
 	}
 	return nil

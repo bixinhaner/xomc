@@ -210,6 +210,8 @@ func TestMarkDirtySQLProtectsActiveAndBuildingHourlyVersions(t *testing.T) {
 	assert.Contains(t, sql, "status IN ('active','building')")
 	assert.Contains(t, sql, "bucket_start = ANY($1::timestamptz[])")
 	assert.Contains(t, sql, "dirty = true")
+	assert.Contains(t, sql, "dirty = false",
+		"level-triggered dirtiness must not rewrite an already-dirty shared bucket row")
 }
 
 func TestSparseIngestLockOrder(t *testing.T) {

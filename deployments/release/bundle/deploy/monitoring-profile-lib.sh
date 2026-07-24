@@ -10,11 +10,11 @@ monitoring_profile_read_state() {
 }
 
 monitoring_profile_stat_mode() {
-  stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1"
+  stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"
 }
 
 monitoring_profile_stat_owner_group() {
-  stat -f '%u:%g' "$1" 2>/dev/null || stat -c '%u:%g' "$1"
+  stat -c '%u:%g' "$1" 2>/dev/null || stat -f '%u:%g' "$1"
 }
 
 monitoring_profile_write_state() {

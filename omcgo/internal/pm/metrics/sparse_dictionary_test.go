@@ -88,6 +88,48 @@ func TestResolveMetricDictionaryTreatsStatisTypeAndUnitAsImmutableMetadata(t *te
 	})
 }
 
+func TestMetricDictionaryTreatsMissingOptionalMetadataAsUnknown(t *testing.T) {
+	t.Run("accepts backlog input missing metadata already enriched in dictionary", func(t *testing.T) {
+		err := validateMetricDefinition(
+			metricDefinition{path: "Cqi.00", metricType: MetricTypeCounter},
+			resolvedMetricDefinition{metricDefinition: metricDefinition{
+				path: "Cqi.00", metricType: MetricTypeCounter, statisType: "sum", unit: "number",
+			}, id: 10},
+		)
+		require.NoError(t, err)
+	})
+
+	t.Run("accepts richer input when dictionary metadata is not known yet", func(t *testing.T) {
+		err := validateMetricDefinition(
+			metricDefinition{path: "Cqi.00", metricType: MetricTypeCounter, statisType: "sum", unit: "number"},
+			resolvedMetricDefinition{metricDefinition: metricDefinition{
+				path: "Cqi.00", metricType: MetricTypeCounter,
+			}, id: 10},
+		)
+		require.NoError(t, err)
+	})
+
+	t.Run("merges partial definitions from one ingest", func(t *testing.T) {
+		defs, err := canonicalMetricDefinitions([]metricDefinition{
+			{path: "Cqi.00", metricType: MetricTypeCounter},
+			{path: "Cqi.00", metricType: MetricTypeCounter, statisType: "sum", unit: "number"},
+		})
+		require.NoError(t, err)
+		require.Equal(t, []metricDefinition{{
+			path: "Cqi.00", metricType: MetricTypeCounter, statisType: "sum", unit: "number",
+		}}, defs)
+	})
+
+	t.Run("still rejects explicit immutable metadata conflicts", func(t *testing.T) {
+		_, err := canonicalMetricDefinitions([]metricDefinition{
+			{path: "Cqi.00", metricType: MetricTypeCounter, statisType: "sum", unit: "number"},
+			{path: "Cqi.00", metricType: MetricTypeCounter, statisType: "avg", unit: "number"},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "inconsistent")
+	})
+}
+
 func TestResolveMetricSetQueriesThenInsertsWithoutUpdatingMetricIDs(t *testing.T) {
 	tx := &recordingSparseMetadataTx{queryRows: [][][]any{{}, {{int64(77), []int64{2, 5, 9}}}}}
 	hash := MetricSetHash([]int64{9, 2, 5})

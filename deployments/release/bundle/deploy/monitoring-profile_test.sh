@@ -51,11 +51,11 @@ grep -Fq 'monitoring_profile_apply_runtime ".env" "$SKIP_MONITORING"' "$DEPLOY_D
 grep -Fq 'monitoring_profile_apply_runtime "$DEPLOY_DIR/.env" "$SKIP_MONITORING"' "$DEPLOY_DIR/healthcheck.sh"
 
 portable_mode() {
-  stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1"
+  stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"
 }
 
 portable_owner_group() {
-  stat -f '%u:%g' "$1" 2>/dev/null || stat -c '%u:%g' "$1"
+  stat -c '%u:%g' "$1" 2>/dev/null || stat -f '%u:%g' "$1"
 }
 
 metadata_env="$tmp_meta_dir/.env"
@@ -80,5 +80,23 @@ new_env="$tmp_meta_dir/new.env"
 monitoring_profile_write_state "$new_env" 0
 [ "$(portable_mode "$new_env")" = 640 ]
 grep -qx 'OMCGO_SKIP_MONITORING=0' "$new_env"
+
+# GNU stat accepts -f but treats it as filesystem statistics. Verify the
+# portable helpers prefer GNU's -c form so successful, unrelated -f output is
+# never mistaken for file mode or ownership.
+fake_bin="$tmp_meta_dir/bin"
+mkdir -p "$fake_bin"
+cat > "$fake_bin/stat" <<'EOF'
+#!/usr/bin/env sh
+case "$1:$2" in
+  -c:%a) printf '640\n' ;;
+  -c:%u:%g) printf '7:8\n' ;;
+  -f:*) printf 'GNU filesystem statistics that must not be parsed\n' ;;
+  *) exit 1 ;;
+esac
+EOF
+chmod +x "$fake_bin/stat"
+[ "$(PATH="$fake_bin:$PATH" monitoring_profile_stat_mode "$metadata_env")" = 640 ]
+[ "$(PATH="$fake_bin:$PATH" monitoring_profile_stat_owner_group "$metadata_env")" = 7:8 ]
 
 echo "monitoring profile behavior: PASS"

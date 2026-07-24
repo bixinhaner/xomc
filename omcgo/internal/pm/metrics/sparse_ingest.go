@@ -277,6 +277,7 @@ func buildMarkHourlyBucketsDirtySQL() string {
 	return `UPDATE pm_hourly_bucket_versions
 SET dirty = true
 WHERE status IN ('active','building')
+  AND dirty = false
   AND bucket_start = ANY($1::timestamptz[])`
 }
 

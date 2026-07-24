@@ -126,10 +126,7 @@ func (r *SyncRunner) Sync(ctx context.Context) error {
 	return nil
 }
 
-func (r *SyncRunner) syncMetricDictionary(ctx context.Context) (int64, error) {
-	var count int64
-	err := r.dst.QueryRow(ctx, `
-WITH source AS (
+const metricDictionarySyncSQL = `WITH source AS (
     SELECT DISTINCT ON (id) id,report_key,en_name,cn_name,unit_id,statis_type,is_counter
       FROM (
         SELECT id,report_key,en_name,cn_name,unit_id,statis_type,is_counter,updated_at FROM perf_indicators_enb
@@ -154,21 +151,41 @@ registered AS (
       unit=COALESCE(NULLIF(EXCLUDED.unit,''),pm_metric_dictionary.unit),
       statis_type=COALESCE(NULLIF(EXCLUDED.statis_type,''),pm_metric_dictionary.statis_type),
       updated_at=now()
+    WHERE (pm_metric_dictionary.report_key,pm_metric_dictionary.metric_type,
+           pm_metric_dictionary.metric_name,pm_metric_dictionary.unit,
+           pm_metric_dictionary.statis_type)
+      IS DISTINCT FROM
+          (COALESCE(NULLIF(EXCLUDED.report_key,''),pm_metric_dictionary.report_key),
+           EXCLUDED.metric_type,
+           COALESCE(NULLIF(EXCLUDED.metric_name,''),pm_metric_dictionary.metric_name),
+           COALESCE(NULLIF(EXCLUDED.unit,''),pm_metric_dictionary.unit),
+           COALESCE(NULLIF(EXCLUDED.statis_type,''),pm_metric_dictionary.statis_type))
     RETURNING metric_id
 ),
 enriched_unknowns AS (
     UPDATE pm_metric_dictionary d
        SET report_key=s.report_key,
-           metric_type=CASE WHEN s.is_counter='1' THEN 'counter' ELSE 'kpi' END,
+           metric_type='counter',
            metric_name=COALESCE(NULLIF(s.cn_name,''),NULLIF(s.en_name,''),d.metric_name),
            unit=COALESCE(NULLIF(s.unit_id,''),d.unit),
            statis_type=COALESCE(NULLIF(s.statis_type,''),d.statis_type),
            updated_at=now()
       FROM source s
      WHERE NULLIF(s.report_key,'')=d.metric_path AND d.metric_path<>s.id
+       AND s.is_counter='1'
+       AND (d.report_key,d.metric_type,d.metric_name,d.unit,d.statis_type)
+         IS DISTINCT FROM
+             (s.report_key,'counter',
+              COALESCE(NULLIF(s.cn_name,''),NULLIF(s.en_name,''),d.metric_name),
+              COALESCE(NULLIF(s.unit_id,''),d.unit),
+              COALESCE(NULLIF(s.statis_type,''),d.statis_type))
     RETURNING d.metric_id
 )
-SELECT (SELECT count(*) FROM registered)+(SELECT count(*) FROM enriched_unknowns)`).Scan(&count)
+SELECT (SELECT count(*) FROM registered)+(SELECT count(*) FROM enriched_unknowns)`
+
+func (r *SyncRunner) syncMetricDictionary(ctx context.Context) (int64, error) {
+	var count int64
+	err := r.dst.QueryRow(ctx, metricDictionarySyncSQL).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("sync PM metric dictionary: %w", err)
 	}
