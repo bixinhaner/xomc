@@ -111,3 +111,24 @@ func TestQueueHealthSamplerTimeoutDoesNotObserveOrCache(t *testing.T) {
 	require.NoError(t, gatherErr)
 	assert.Empty(t, families)
 }
+
+func TestQueueHealthSamplerProjectionPendingCountRequiresFreshStats(t *testing.T) {
+	sampler := NewQueueHealthSampler(nil, nil, time.Hour, zap.NewNop())
+
+	_, err := sampler.ProjectionPendingCount()
+	require.Error(t, err, "missing cached stats must preserve projection failure behavior")
+
+	sampler.latestMu.Lock()
+	sampler.latest = QueueStats{Pending: 7, AckPending: 2, SampledAt: time.Now()}
+	sampler.hasLatest = true
+	sampler.latestMu.Unlock()
+	count, err := sampler.ProjectionPendingCount()
+	require.NoError(t, err)
+	assert.Equal(t, uint64(9), count)
+
+	sampler.latestMu.Lock()
+	sampler.latest.SampledAt = time.Now().Add(-queueHealthProjectionMaxAge - time.Millisecond)
+	sampler.latestMu.Unlock()
+	_, err = sampler.ProjectionPendingCount()
+	require.Error(t, err, "stale cached stats must not be used for disk projection")
+}

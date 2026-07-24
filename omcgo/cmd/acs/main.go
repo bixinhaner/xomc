@@ -276,14 +276,7 @@ func runACS(cmd *cobra.Command, args []string) error {
 			// Keep the projection's aggregate-count interface for this release,
 			// while reusing the independent sampler's last successful snapshot.
 			pmPendingCount = func(context.Context) (uint64, error) {
-				stats, ok := pmQueueHealthSampler.LatestStats()
-				if !ok {
-					return 0, fmt.Errorf("PM queue health sample unavailable")
-				}
-				if stats.AckPending <= 0 {
-					return stats.Pending, nil
-				}
-				return stats.Pending + uint64(stats.AckPending), nil
+				return pmQueueHealthSampler.ProjectionPendingCount()
 			}
 		}
 		bpWatchdog := upload.NewWatchdog(

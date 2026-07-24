@@ -92,3 +92,28 @@ func TestDefaultStreams_PMAllowsDirectLookupForQueueHealth(t *testing.T) {
 	}
 	t.Fatal("PM stream is not registered")
 }
+
+func TestEnableDirectLookupRunsBeforeRetentionRebuildPolicy(t *testing.T) {
+	pm := StreamDef{Name: "PM", Retention: gonats.WorkQueuePolicy, AllowDirect: true}
+	info := &gonats.StreamInfo{Config: gonats.StreamConfig{
+		Name:        "PM",
+		Retention:   gonats.LimitsPolicy,
+		AllowDirect: false,
+	}}
+	updated := false
+
+	err := enableDirectLookup(pm, info, func(config *gonats.StreamConfig) (*gonats.StreamInfo, error) {
+		updated = true
+		if !config.AllowDirect {
+			t.Fatal("AllowDirect must be enabled even when retention rebuild is disabled")
+		}
+		return &gonats.StreamInfo{Config: *config}, nil
+	})
+
+	if err != nil {
+		t.Fatalf("enable direct lookup: %v", err)
+	}
+	if !updated {
+		t.Fatal("direct lookup upgrade was not attempted")
+	}
+}

@@ -12,6 +12,7 @@ import (
 
 const defaultQueueHealthSampleInterval = 30 * time.Second
 const defaultQueueHealthSampleTimeout = 5 * time.Second
+const queueHealthProjectionMaxAge = 2 * defaultQueueHealthSampleInterval
 
 // QueueStatsProvider is the read-only queue-health contract used by the
 // independent PM sampler.
@@ -85,6 +86,24 @@ func (s *QueueHealthSampler) LatestStats() (QueueStats, bool) {
 	s.latestMu.RLock()
 	defer s.latestMu.RUnlock()
 	return s.latest, s.hasLatest
+}
+
+// ProjectionPendingCount provides the legacy aggregate projection from the
+// independent sampler cache only when the latest successful sample is fresh.
+// Stale telemetry remains exported with its timestamp but is not trusted for
+// disk-capacity projections.
+func (s *QueueHealthSampler) ProjectionPendingCount() (uint64, error) {
+	stats, ok := s.LatestStats()
+	if !ok || stats.SampledAt.IsZero() {
+		return 0, fmt.Errorf("PM queue health sample unavailable")
+	}
+	if time.Since(stats.SampledAt) > queueHealthProjectionMaxAge {
+		return 0, fmt.Errorf("PM queue health sample stale: sampled at %s", stats.SampledAt.Format(time.RFC3339Nano))
+	}
+	if stats.AckPending <= 0 {
+		return stats.Pending, nil
+	}
+	return stats.Pending + uint64(stats.AckPending), nil
 }
 
 // LastSuccessfulSample returns zero until the first successful collection.

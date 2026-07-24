@@ -129,15 +129,13 @@ func (c *NATSClient) EnsureStreams(ctx context.Context, allowRebuild bool) error
 			return fmt.Errorf("get stream info %s: %w", def.Name, err)
 		}
 
+		if err := enableDirectLookup(def, info, func(config *nats.StreamConfig) (*nats.StreamInfo, error) {
+			return c.JS.UpdateStream(config)
+		}); err != nil {
+			return err
+		}
+
 		if info.Config.Retention == def.Retention {
-			if def.AllowDirect && !info.Config.AllowDirect {
-				config := info.Config
-				config.AllowDirect = true
-				if _, err := c.JS.UpdateStream(&config); err != nil {
-					return fmt.Errorf("enable direct message lookup for stream %s: %w", def.Name, err)
-				}
-				c.logger.Info("enabled JetStream direct message lookup", zap.String("name", def.Name))
-			}
 			continue
 		}
 
@@ -196,6 +194,21 @@ func (c *NATSClient) EnsureStreams(ctx context.Context, allowRebuild bool) error
 		}
 	}
 
+	return nil
+}
+
+// enableDirectLookup is intentionally independent of retention reconciliation:
+// AllowDirect is a safe in-place read capability, while a retention mismatch
+// may be left unchanged in production when stream rebuilding is disabled.
+func enableDirectLookup(def StreamDef, info *nats.StreamInfo, update func(*nats.StreamConfig) (*nats.StreamInfo, error)) error {
+	if !def.AllowDirect || info == nil || info.Config.AllowDirect {
+		return nil
+	}
+	config := info.Config
+	config.AllowDirect = true
+	if _, err := update(&config); err != nil {
+		return fmt.Errorf("enable direct message lookup for stream %s: %w", def.Name, err)
+	}
 	return nil
 }
 
