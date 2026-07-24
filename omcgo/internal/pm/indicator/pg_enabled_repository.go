@@ -52,6 +52,35 @@ func (r *PgEnabledRepository) List(ctx context.Context, dt DeviceType, operatorC
 	return ids, nil
 }
 
+func (r *PgEnabledRepository) ListAll(ctx context.Context, dt DeviceType) ([]string, error) {
+	table := dt.EnabledTable()
+	query, args, err := storage.Psql.Select("DISTINCT indicator_id").
+		From(table).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list all %s SQL: %w", table, err)
+	}
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list all %s: %w", table, err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan enabled indicator ID: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating enabled indicator rows: %w", err)
+	}
+	return ids, nil
+}
+
 func (r *PgEnabledRepository) BatchCreate(ctx context.Context, dt DeviceType, operatorCode string, indicatorIDs []string, tx pgx.Tx) error {
 	if len(indicatorIDs) == 0 {
 		return nil

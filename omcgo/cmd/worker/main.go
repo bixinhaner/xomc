@@ -23,6 +23,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/rawarchive"
 	"github.com/omcgo/omcgo/internal/core/reliability"
 	"github.com/omcgo/omcgo/internal/core/reliability/dlq"
@@ -242,6 +243,9 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// filterByWhitelist 本阶段 fail-open（lookup 失败 / 空集合时跳过过滤，避免误删）；#866
 	// normalizeResults 会在写入前要求 Unit/StatisType 齐全，缺失时失败并暴露。
 	pmCollector.SetCounterWhitelist(&routerCounterWhitelist{r: pmKPIRouter, log: logger})
+	pmCollector.SetEnabledIndicatorLookup(&enabledIndicatorLookup{
+		repo: indicator.NewPgEnabledRepository(w.PgPool),
+	})
 	pmResultNormSysCfg := admin.NewPgSysConfigRepository(w.PgPool)
 	pmCollector.SetNumberProcessLookup(func(ctx context.Context) (string, error) {
 		row, err := pmResultNormSysCfg.GetByKey(ctx, resultnorm.ConfigCategory, resultnorm.ConfigKey)
@@ -1209,6 +1213,41 @@ func (a *routerCounterWhitelist) LookupCounters(ctx context.Context, deviceSN st
 		}
 	}
 	return out, nil
+}
+
+type enabledIndicatorLookup struct {
+	repo *indicator.PgEnabledRepository
+}
+
+func (l *enabledIndicatorLookup) LookupEnabledIndicators(ctx context.Context, technology string) (map[string]struct{}, error) {
+	dt, err := indicatorDeviceTypeFromTechnology(technology)
+	if err != nil {
+		return nil, err
+	}
+	ids, err := l.repo.ListAll(ctx, dt)
+	if err != nil {
+		return nil, fmt.Errorf("list enabled PM indicators (%s): %w", dt, err)
+	}
+	out := make(map[string]struct{})
+	for _, id := range ids {
+		if id != "" {
+			out[id] = struct{}{}
+		}
+	}
+	return out, nil
+}
+
+func indicatorDeviceTypeFromTechnology(technology string) (indicator.DeviceType, error) {
+	switch model.NormalizeTechnology(technology) {
+	case model.TechLTE:
+		return indicator.DeviceTypeENB, nil
+	case model.TechNR:
+		return indicator.DeviceTypeGNB, nil
+	case model.TechGSM:
+		return indicator.DeviceTypeGSM, nil
+	default:
+		return "", fmt.Errorf("unsupported PM technology for enabled indicators: %q", technology)
+	}
 }
 
 func parseStringSlice(s string) []string {
