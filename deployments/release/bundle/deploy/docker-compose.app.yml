@@ -146,6 +146,9 @@ services:
       TZ: "Asia/Shanghai"
       OMCGO_ENV: ${OMCGO_ENV}
       OMCGO_SERVICE: app
+      # 默认完整生产栈启用 tracing；install/svc --skip-monitoring 会显式置 false，
+      # 保证没有 otelcol 时回到 Go 端 no-op provider。
+      OMCGO_TRACER_ENABLED: "${OMCGO_TRACER_ENABLED:-}"
       # Go 运行时上限（resources.env 注入）。缺省：GOMEMLIMIT off→1382MiB(≈0.9×1536m 内存
       # 默认,软限须 < limits.memory)，把硬 OOM-kill 换成 GC 背压(纯安全网)。GOMAXPROCS 空则
       # Go 1.25 自动按 cgroup CPU 配额推导。
@@ -212,6 +215,7 @@ services:
       TZ: "Asia/Shanghai"
       OMCGO_ENV: ${OMCGO_ENV}
       OMCGO_SERVICE: acs
+      OMCGO_TRACER_ENABLED: "${OMCGO_TRACER_ENABLED:-}"
       # Go 运行时上限（resources.env 注入）；ACS 堆压力最大，GOMEMLIMIT 价值最高。
       # 缺省(#167) off→3600MiB(≈0.9×4g)。压测实测 1g 在 max_inflight 调大后并发
       # PM 上传缓冲内存需求上升，触发 cgroup OOMKilled 循环重启（RestartCount 短时间
@@ -275,6 +279,7 @@ services:
       TZ: "Asia/Shanghai"
       OMCGO_ENV: ${OMCGO_ENV}
       OMCGO_SERVICE: worker
+      OMCGO_TRACER_ENABLED: "${OMCGO_TRACER_ENABLED:-}"
       # Go 运行时上限（resources.env 注入）；worker PM/MR 解析吃内存，GOMEMLIMIT 兜底 OOM。
       # 缺省 off→921MiB(≈0.9×1024m)。
       GOMEMLIMIT: "${WORKER_GOMEMLIMIT:-921MiB}"

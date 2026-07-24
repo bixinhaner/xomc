@@ -163,9 +163,9 @@ func TestFilterByWhitelist_BUG6_BaicellsOrphans(t *testing.T) {
 	assert.Equal(t, "C000010099", out[len(out)-1].CounterName)
 }
 
-// issue #20：被丢弃的孤儿 counter 数应记入 omc_pm_dropped_counters_total
-// （reason=whitelist_miss），让"上报名漂移导致大批 counter 被静默丢弃"可告警。
-func TestFilterByWhitelist_DroppedCountersMetric(t *testing.T) {
+// 配置外 counter 会被保留并登记，因此主指标必须描述为 discovered；
+// 旧 dropped 名仅作为一个发布周期的兼容别名，并始终与主指标同值。
+func TestFilterByWhitelist_DiscoveredCountersMetricWithDeprecatedAlias(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]CounterMeta{
 		"L.Cell.Avail": {IndicatorID: "C000010001", StatisType: "avg"},
@@ -177,8 +177,23 @@ func TestFilterByWhitelist_DroppedCountersMetric(t *testing.T) {
 	out := c.filterByWhitelist(context.Background(), "SN-1", "cmcc", "lte", in)
 	require.Len(t, out, 3)
 
-	got := testutil.ToFloat64(c.metrics.DroppedCountersTotal.WithLabelValues("cmcc", "lte", "whitelist_miss"))
-	assert.Equal(t, float64(2), got, "应记录 2 个被丢弃的孤儿 counter")
+	discovered := testutil.ToFloat64(c.metrics.DiscoveredCountersTotal.WithLabelValues("cmcc", "lte", "whitelist_miss"))
+	deprecatedAlias := testutil.ToFloat64(c.metrics.DroppedCountersTotal.WithLabelValues("cmcc", "lte", "whitelist_miss"))
+	assert.Equal(t, float64(2), discovered, "应记录 2 个被保留的配置外 counter")
+	assert.Equal(t, discovered, deprecatedAlias, "兼容别名必须与新指标同值")
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		switch family.GetName() {
+		case "omc_pm_discovered_counters_total":
+			assert.NotContains(t, family.GetHelp(), "dropped")
+			assert.Contains(t, family.GetHelp(), "preserved")
+		case "omc_pm_dropped_counters_total":
+			assert.Contains(t, family.GetHelp(), "Deprecated alias")
+			assert.Contains(t, family.GetHelp(), "preserved")
+		}
+	}
 }
 
 func TestFilterAndFillByWhitelist_AddsNullRowsForSupportedMissingCounters(t *testing.T) {

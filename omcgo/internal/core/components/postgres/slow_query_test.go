@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -123,6 +124,24 @@ func TestSlowQueryTracer_QueryErrorAttached(t *testing.T) {
 	gotErr, ok := fields["error"].(string)
 	require.True(t, ok, "error field should be present, got: %#v", fields)
 	assert.Equal(t, queryErr.Error(), gotErr)
+}
+
+func TestSlowQueryTracer_RequestCancellationDoesNotCountOrWarn(t *testing.T) {
+	for _, queryErr := range []error{
+		context.Canceled,
+		context.DeadlineExceeded,
+		fmt.Errorf("dashboard query: %w", context.Canceled),
+		fmt.Errorf("monitoring query: %w", context.DeadlineExceeded),
+	} {
+		tr, recorded, _ := newObservableTracer(t, 10*time.Millisecond)
+		const sql = "SELECT * FROM pm_metrics WHERE time >= $1"
+
+		runQuery(t, tr, sql, 100*time.Millisecond, queryErr)
+
+		assert.Zero(t, recorded.Len(), "canceled query must not emit slow/failure warning: %v", queryErr)
+		count := testutil.ToFloat64(tr.metrics.Total.WithLabelValues("pm_metrics", fingerprintSQL(sql)))
+		assert.Zero(t, count, "canceled query must not inflate query counter: %v", queryErr)
+	}
 }
 
 func TestSlowQueryTracer_DefaultsApplied(t *testing.T) {

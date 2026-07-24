@@ -261,6 +261,17 @@
         {"expr": "sum(rate(omc_pm_queue_sample_failures_total{subject=\"pm.file.received\",durable=\"pm-workers\"}[5m]))", "legendFormat": "sample failures/s"},
         {"expr": "time() - omc_pm_queue_sample_timestamp_seconds{subject=\"pm.file.received\",durable=\"pm-workers\"}", "legendFormat": "sample age (s)"}
       ]
+    },
+    {
+      "title": "PM Counters Discovered Outside Indicator Library",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 84},
+      "targets": [
+        {
+          "expr": "sum by (carrier, technology, reason) (rate(omc_pm_discovered_counters_total[5m]))",
+          "legendFormat": "{{carrier}} / {{technology}} / {{reason}}"
+        }
+      ]
     }
   ],
   "schemaVersion": 39,

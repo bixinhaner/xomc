@@ -6,9 +6,10 @@
 // N rows in `device_tasks` (where N = len(target_device_sns) excluding any
 // devices that the device repo cannot find).
 //
-// Path inputs are validated (no traversal, restricted to the config_backup
-// bucket by default) before any device task is enqueued, so a 400 surfaces
-// before any side effect.
+// Path inputs are validated (no traversal, restricted to the config-backup
+// physical bucket with config_backup accepted as a logical compatibility
+// alias) before any device task is enqueued, so a 400 surfaces before any
+// side effect.
 package backup
 
 import (
@@ -47,10 +48,13 @@ type TaskCreator interface {
 	CreateTask(ctx context.Context, req *devtask.CreateTaskRequest) (*devtask.Task, error)
 }
 
-// CanonicalRestoreBucket is the only bucket allowed as a restore source by
-// default. Future expansion (e.g. allow firmware/* for image rollback) would
-// require an explicit allow-list extension on the service.
-const CanonicalRestoreBucket = "config_backup"
+// CanonicalRestoreBucket is the physical S3/MinIO bucket used for
+// configuration backups. S3 bucket names cannot contain underscores.
+const CanonicalRestoreBucket = "config-backup"
+
+// LegacyRestoreBucket is accepted only as a logical API/config compatibility
+// alias. It must be normalized before crossing any MinIO boundary.
+const LegacyRestoreBucket = "config_backup"
 
 // MinIOStater abstracts the bucket/object existence check. *minio.Client
 // satisfies this via StatObject; tests inject a fake.
@@ -202,8 +206,8 @@ func (s *RestoreService) computeSourceMD5(ctx context.Context, bucket, object st
 // minioNotFoundCodes 是被视为"源桶/对象不存在或不可能存在"的 MinIO/S3 错误码集合。
 // NoSuchKey/NoSuchBucket 是服务端"不存在"；InvalidBucketName/XMinioInvalidObjectName
 // 是 minio-go 客户端在发请求前对桶名/对象名做 S3 命名校验时直接返回的拒绝
-// （例如 CanonicalRestoreBucket="config_backup" 含下划线违反 S3 桶命名 → StatObject
-// 返 InvalidBucketName）。这类名字下不可能存在合法对象，语义上等同"源不存在"，
+// （例如外部调用绕过边界传入含下划线的物理桶名 → StatObject 返
+// InvalidBucketName）。这类名字下不可能存在合法对象，语义上等同"源不存在"，
 // 故一并翻译为 404 而非 500，避免把内部命名细节当服务器错误外泄给运维。
 var minioNotFoundCodes = map[string]struct{}{
 	"NoSuchKey":               {},
@@ -244,6 +248,7 @@ func (s *RestoreService) Create(ctx context.Context, req *CreateRestoreRequest, 
 		s.metrics.RecordRequest("rejected_invalid_path")
 		return nil, err
 	}
+	physicalBucket := normalizeRestoreBucket(req.Bucket)
 	if len(req.TargetDeviceSNs) == 0 {
 		s.metrics.RecordRequest("rejected_no_target")
 		return nil, fmt.Errorf("at least one target device required: %w", commonerrors.ErrInvalidInput)
@@ -254,8 +259,8 @@ func (s *RestoreService) Create(ctx context.Context, req *CreateRestoreRequest, 
 	// 时（DI 漏装或 typed-nil），这里跳过，由 computeSourceMD5 的 GetObject 兜底
 	// 翻译 NotFound → 404，不会落到 default 500。
 	if s.stater != nil {
-		if _, err := s.stater.StatObject(ctx, req.Bucket, req.ObjectPath, minio.StatObjectOptions{}); err != nil {
-			if nfErr := translateMinIONotFound(req.Bucket, req.ObjectPath, err); nfErr != nil {
+		if _, err := s.stater.StatObject(ctx, physicalBucket, req.ObjectPath, minio.StatObjectOptions{}); err != nil {
+			if nfErr := translateMinIONotFound(physicalBucket, req.ObjectPath, err); nfErr != nil {
 				s.metrics.RecordRequest("rejected_object_not_found")
 				return nil, nfErr
 			}
@@ -266,14 +271,14 @@ func (s *RestoreService) Create(ctx context.Context, req *CreateRestoreRequest, 
 	// 配置文件恢复：下发时读取源文件流现算 MD5（Download 报文必填，供 CPE 下载后校验）。
 	// 放在建 restore_task 行之前 → md5 失败不留孤儿行。同一份文件发给所有目标设备，
 	// 故循环外只算一次。
-	srcMD5, md5Err := s.computeSourceMD5(ctx, req.Bucket, req.ObjectPath)
+	srcMD5, md5Err := s.computeSourceMD5(ctx, physicalBucket, req.ObjectPath)
 	if md5Err != nil {
 		return nil, fmt.Errorf("compute restore source md5: %w", md5Err)
 	}
 
 	now := time.Now()
 	created := &RestoreTask{
-		SourceBucket:     req.Bucket,
+		SourceBucket:     physicalBucket,
 		SourceObjectPath: req.ObjectPath,
 		TargetDeviceSNs:  req.TargetDeviceSNs,
 		Status:           RestorePending,
@@ -300,7 +305,7 @@ func (s *RestoreService) Create(ctx context.Context, req *CreateRestoreRequest, 
 	// Fan out: enqueue one Download device task per (existing) device. Missing
 	// SNs are recorded in error_message JSON so the operator sees what was
 	// skipped without an aggregate failure.
-	restoreURL := req.Bucket + "/" + req.ObjectPath
+	restoreURL := physicalBucket + "/" + req.ObjectPath
 	skipped := make([]string, 0)
 	enqueued := 0
 	for _, sn := range req.TargetDeviceSNs {
@@ -363,7 +368,7 @@ func (s *RestoreService) Create(ctx context.Context, req *CreateRestoreRequest, 
 	}
 	s.logger.Info("restore created",
 		zap.String("restore_id", created.ID.String()),
-		zap.String("bucket", req.Bucket),
+		zap.String("bucket", physicalBucket),
 		zap.String("path", req.ObjectPath),
 		zap.Int("target_count", len(req.TargetDeviceSNs)),
 		zap.Int("enqueued", enqueued),
@@ -748,7 +753,11 @@ func splitBucketAndPath(combined string) (bucket, objectPath string, err error) 
 		return "", "", fmt.Errorf("file_path %q missing bucket/path separator: %w",
 			combined, commonerrors.ErrInvalidInput)
 	}
-	return combined[:idx], combined[idx+1:], nil
+	bucket = combined[:idx]
+	if bucket == LegacyRestoreBucket {
+		bucket = CanonicalRestoreBucket
+	}
+	return bucket, combined[idx+1:], nil
 }
 
 // List proxies to the repo.
@@ -764,8 +773,8 @@ func (s *RestoreService) GetByID(ctx context.Context, id uuid.UUID) (*RestoreTas
 // validateRestorePath enforces:
 //   - non-empty bucket + object_path
 //   - no path traversal (".." / leading "/")
-//   - bucket must equal CanonicalRestoreBucket (operators cannot restore from
-//     unrelated buckets like firmware/ or pm/)
+//   - bucket must be CanonicalRestoreBucket or the legacy logical API alias
+//     (operators cannot restore from unrelated buckets like firmware/ or pm/)
 func validateRestorePath(bucket, objectPath string) error {
 	if bucket == "" || objectPath == "" {
 		return fmt.Errorf("bucket and object_path required: %w", commonerrors.ErrInvalidInput)
@@ -777,9 +786,16 @@ func validateRestorePath(bucket, objectPath string) error {
 		cleanedBucket != bucket || cleanedPath != objectPath {
 		return fmt.Errorf("path traversal or non-canonical path: %w", commonerrors.ErrInvalidInput)
 	}
-	if bucket != CanonicalRestoreBucket {
-		return fmt.Errorf("only %q bucket is allowed for restore: %w",
-			CanonicalRestoreBucket, commonerrors.ErrInvalidInput)
+	if bucket != CanonicalRestoreBucket && bucket != LegacyRestoreBucket {
+		return fmt.Errorf("only %q bucket (%q compatibility alias) is allowed for restore: %w",
+			CanonicalRestoreBucket, LegacyRestoreBucket, commonerrors.ErrInvalidInput)
 	}
 	return nil
+}
+
+func normalizeRestoreBucket(bucket string) string {
+	if bucket == LegacyRestoreBucket {
+		return CanonicalRestoreBucket
+	}
+	return bucket
 }

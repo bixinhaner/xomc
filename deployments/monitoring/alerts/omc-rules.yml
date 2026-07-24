@@ -210,6 +210,24 @@ groups:
             Action: 检查 Redis 连通性与 kpi.router 日志；恢复后确认
                     omc_kpi_router_stale_evictions_total 增长且本告警自动解除。
 
+  - name: omc.pm_ingest
+    interval: 30s
+    rules:
+      - alert: PMCountersDiscoveredOutsideLibrary
+        expr: sum by (carrier, technology) (increase(omc_pm_discovered_counters_total[15m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 发现指标库外 counter（{{ $labels.carrier }}/{{ $labels.technology }}）"
+          description: |
+            最近 15 分钟持续发现指标库外 counter。这些值已被保留并进入动态登记，
+            没有被丢弃；告警表示厂家上报名或指标库配置发生漂移。
+            Action: 检查 worker 的 "preserved counters not in indicator library" 日志，
+                    核对对应产品指标库 report_key 并完成正式登记。
+
   - name: omc.meta
     interval: 30s
     rules:

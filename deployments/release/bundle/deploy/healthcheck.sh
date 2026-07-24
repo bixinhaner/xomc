@@ -78,11 +78,14 @@ if [ -f "$DEPLOY_DIR/docker-compose.web.yml" ]; then
   check "web 容器 running" container_running web
 fi
 
-if [ -f "$DEPLOY_DIR/docker-compose.monitoring.yml" ]; then
+if [ -f "$DEPLOY_DIR/docker-compose.monitoring.yml" ] && [ "${OMCGO_SKIP_MONITORING:-0}" != 1 ]; then
   echo "== docker compose 监控容器 =="
   for svc in prometheus alertmanager grafana loki tempo otelcol; do
     check "$svc 容器 running" container_running "$svc"
   done
+  # otelcol-contrib 是 distroless 镜像，不能假设容器内有 shell/curl/wget。
+  # monitoring compose 将 health_check extension 仅映射到宿主回环供外部探测。
+  check "otelcol health extension (:13133)" curl -fsS http://127.0.0.1:13133/
 fi
 
 echo "== 服务健康端点 =="

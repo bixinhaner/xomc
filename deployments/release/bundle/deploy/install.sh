@@ -155,6 +155,14 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# 生产默认拉起完整 monitoring profile，三个业务服务按 prod.yaml 启用 tracing。
+# 显式 --skip-monitoring 时 collector 不存在，强制覆盖为 false，让 Go 端保持
+# no-op tracer，避免持续连接不存在的 otelcol。
+if [ "$SKIP_MONITORING" = 1 ]; then
+  export OMCGO_TRACER_ENABLED=false
+  export OMCGO_SKIP_MONITORING=1
+fi
+
 [ "$(id -u)" = 0 ] || die "请以 root 执行（sudo bash $0 ...）"
 
 confirm() {

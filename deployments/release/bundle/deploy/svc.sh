@@ -69,6 +69,11 @@ done
 
 [ -z "$ACTION" ] && ACTION="status"
 
+# 与 install.sh 保持一致：未部署 collector 时强制使用 no-op tracer。
+if [ "$SKIP_MONITORING" = 1 ]; then
+  export OMCGO_TRACER_ENABLED=false
+fi
+
 # docker compose v2 / v1 兼容
 if docker compose version >/dev/null 2>&1; then
   COMPOSE="docker compose"

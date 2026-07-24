@@ -587,9 +587,9 @@ func applyPayloadIdentity(counters []model.PMCounter, oui, sn string) {
 // fail-open：whitelist 未注入 / 查询失败 / 空集合 → 返回原 counters 不过滤。
 // #866 接入结果值规范化后，最终写入前仍会要求每条结果具备 Unit/StatisType。
 //
-// issue #20：被丢弃的孤儿 counter 数除 log 外，额外记 omc_pm_dropped_counters_total
-// （reason=whitelist_miss，标签带 carrier × technology），让"厂家上报名漂移导致大批
-// counter 被静默丢弃"成为可告警的可观测信号，而非只在 worker 日志里翻 grep。
+// 配置外 counter 会保留并由稀疏入库层登记；同时记录
+// omc_pm_discovered_counters_total（reason=whitelist_miss，标签带
+// carrier × technology），让厂家上报名漂移成为可告警的可观测信号。
 func (c *PMCollector) filterByWhitelist(ctx context.Context, deviceSN, carrier, technology string, counters []model.PMCounter) []model.PMCounter {
 	out, _ := c.filterByWhitelistWithAllow(ctx, deviceSN, carrier, technology, counters)
 	return out
@@ -645,7 +645,8 @@ func (c *PMCollector) filterByWhitelistWithAllow(ctx context.Context, deviceSN, 
 	}
 	if unknown > 0 {
 		if c.metrics != nil {
-			// 保留原指标名以兼容现有告警面板；语义从“丢弃”调整为“配置外发现”。
+			c.metrics.DiscoveredCountersTotal.WithLabelValues(carrier, technology, "whitelist_miss").Add(float64(unknown))
+			// 一个发布周期的兼容别名；与新指标同点递增，保证值严格一致。
 			c.metrics.DroppedCountersTotal.WithLabelValues(carrier, technology, "whitelist_miss").Add(float64(unknown))
 		}
 		c.logger.Info("preserved counters not in indicator library for dynamic registration",

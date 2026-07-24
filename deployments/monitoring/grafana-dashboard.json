@@ -125,6 +125,17 @@
       "fieldConfig": {
         "defaults": {"unit": "s"}
       }
+    },
+    {
+      "title": "PM Counters Discovered Outside Indicator Library",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 36},
+      "targets": [
+        {
+          "expr": "sum by (carrier, technology, reason) (rate(omc_pm_discovered_counters_total[5m]))",
+          "legendFormat": "{{carrier}} / {{technology}} / {{reason}}"
+        }
+      ]
     }
   ],
   "schemaVersion": 39,

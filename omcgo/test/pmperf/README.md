@@ -133,7 +133,7 @@ DELETE FROM devices    WHERE serial_number LIKE 'KPILT-%';
 - **阶段一 文件存储**：每制式 + 合计的上传成功率、墙钟、吞吐（文件/s、MB/s）、p50/p99 时延、状态码。
 - **阶段二 解析入库**：等待入库收敛后给出解析文件数、新增 `pm_metrics` 行（counter + KPI 分列）、
   入库吞吐（文件/s、行/s）、每制式新增 counter/KPI 行，以及 worker Prometheus 增量
-  （成功/失败/迟到文件、丢弃 counter、单文件处理均值、上报延迟均值）。
+  （成功/失败/迟到文件、发现并保留的配置外 counter、单文件处理均值、上报延迟均值）。
 
 > 「上报延迟均值」很大是因为压测把时间窗设在最近的已完成 15min 窗（end_time 在当前时刻之前若干分钟），
 > 不是真实问题。入库文件数 < 上传成功数时查 worker 日志/指标（设备未注入 / 迟到压缩 chunk / DLQ）。

@@ -10,21 +10,21 @@ import (
 // EfficiencyMetrics represents alarm handling efficiency metrics.
 // 告警处理效率指标，包含 MTTA、MTTR、确认率、清除率等关键运维指标
 type EfficiencyMetrics struct {
-	Severity               string                `json:"severity"`                // 告警级别
-	AcknowledgedCount      int64                 `json:"acknowledged_count"`      // 已确认告警数
-	ClearedCount           int64                 `json:"cleared_count"`           // 已清除告警数
-	TotalCount             int64                 `json:"total_count"`             // 总告警数
-	AvgAcknowledgeMinutes  float64               `json:"avg_acknowledge_minutes"`  // 平均确认时间(MTTA)
-	AvgResolveMinutes      float64               `json:"avg_resolve_minutes"`      // 平均解决时间(MTTR)
-	AcknowledgeRate        *float64              `json:"acknowledge_rate"`        // 确认率(%)
-	ClearRate              *float64              `json:"clear_rate"`              // 清除率(%)
-	DailyTrend             []DailyEfficiencyTrend `json:"daily_trend"`           // 近7天趋势
+	Severity              string                 `json:"severity"`                // 告警级别
+	AcknowledgedCount     int64                  `json:"acknowledged_count"`      // 已确认告警数
+	ClearedCount          int64                  `json:"cleared_count"`           // 已清除告警数
+	TotalCount            int64                  `json:"total_count"`             // 总告警数
+	AvgAcknowledgeMinutes float64                `json:"avg_acknowledge_minutes"` // 平均确认时间(MTTA)
+	AvgResolveMinutes     float64                `json:"avg_resolve_minutes"`     // 平均解决时间(MTTR)
+	AcknowledgeRate       *float64               `json:"acknowledge_rate"`        // 确认率(%)
+	ClearRate             *float64               `json:"clear_rate"`              // 清除率(%)
+	DailyTrend            []DailyEfficiencyTrend `json:"daily_trend"`             // 近7天趋势
 }
 
 // DailyEfficiencyTrend represents daily efficiency trend data.
 // 每日效率趋势数据点
 type DailyEfficiencyTrend struct {
-	Date                  string  `json:"date"`                  // 日期
+	Date                  string  `json:"date"`                    // 日期
 	AvgAcknowledgeMinutes float64 `json:"avg_acknowledge_minutes"` // 当日平均确认时间
 	AvgResolveMinutes     float64 `json:"avg_resolve_minutes"`     // 当日平均解决时间
 }
@@ -59,7 +59,7 @@ func (s *Service) GetEfficiencyMetrics(ctx context.Context) (*EfficiencyMetrics,
 	// alarm_efficiency_metrics matview 建在时序库（TsPool）的 alarms_history 上。
 	rows, err := s.tsPool.Query(ctx, query)
 	if err != nil {
-		s.logger.Error("failed to query efficiency metrics", zap.Error(err))
+		logDashboardQueryError(s.logger, "failed to query efficiency metrics", err)
 		return nil, fmt.Errorf("query efficiency metrics: %w", err)
 	}
 	defer rows.Close()
@@ -86,9 +86,8 @@ func (s *Service) GetEfficiencyMetrics(ctx context.Context) (*EfficiencyMetrics,
 		// 获取该严重程度的7天趋势
 		m.DailyTrend, err = s.getEfficiencyTrend(ctx, m.Severity)
 		if err != nil {
-			s.logger.Warn("failed to get efficiency trend",
-				zap.String("severity", m.Severity),
-				zap.Error(err))
+			logDashboardQueryFailure(s.logger, "failed to get efficiency trend", err,
+				zap.String("severity", m.Severity))
 		}
 
 		metrics = append(metrics, m)
@@ -152,7 +151,7 @@ func (s *Service) RefreshEfficiencyMetrics(ctx context.Context) error {
 	// alarm_efficiency_metrics matview 建在时序库（TsPool）。
 	_, err := s.tsPool.Exec(ctx, "REFRESH MATERIALIZED VIEW CONCURRENTLY alarm_efficiency_metrics")
 	if err != nil {
-		s.logger.Error("failed to refresh efficiency metrics", zap.Error(err))
+		logDashboardQueryError(s.logger, "failed to refresh efficiency metrics", err)
 		return fmt.Errorf("refresh efficiency metrics: %w", err)
 	}
 
@@ -201,14 +200,14 @@ func (s *Service) GetOverallEfficiencyMetrics(ctx context.Context) (*EfficiencyM
 		&m.ClearRate,
 	)
 	if err != nil {
-		s.logger.Error("failed to query overall efficiency metrics", zap.Error(err))
+		logDashboardQueryError(s.logger, "failed to query overall efficiency metrics", err)
 		return nil, fmt.Errorf("query overall efficiency metrics: %w", err)
 	}
 
 	// 获取近7天趋势（所有严重程度）
 	m.DailyTrend, err = s.getOverallEfficiencyTrend(ctx)
 	if err != nil {
-		s.logger.Warn("failed to get overall efficiency trend", zap.Error(err))
+		logDashboardQueryFailure(s.logger, "failed to get overall efficiency trend", err)
 	}
 
 	return &m, nil
