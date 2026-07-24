@@ -159,6 +159,16 @@ describe('resolveQueryPath', () => {
     );
   });
 
+  it('末级对象实例为空时截断为对象集合路径，非空时替换为具体实例', () => {
+    const objectPath = 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}';
+    expect(resolveQueryPath(objectPath, { i01: '1', i02: '' })).toBe(
+      'Device.Services.FAPService.1.CellConfig.LTE.RAN.NeighborList.LTECell.',
+    );
+    expect(resolveQueryPath(objectPath, { i01: '1', i02: '2' })).toBe(
+      'Device.Services.FAPService.1.CellConfig.LTE.RAN.NeighborList.LTECell.2',
+    );
+  });
+
   it('无占位符 Path 原样返回', () => {
     expect(resolveQueryPath('Device.Info.SerialNumber', { i01: '' })).toBe(
       'Device.Info.SerialNumber',

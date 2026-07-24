@@ -530,7 +530,9 @@ func substituteQueryInstanceSelectors(path string, selectors map[string]string) 
 		return path
 	}
 
-	placeholderCount := strings.Count(path, ".{i}.")
+	// 查询路径既可能把实例占位符放在中间（.{i}.），也可能把对象实例放在末级（.{i}）。
+	// 末级对象占位符在最后一层 selector 为空时应归一化为对象集合路径（末尾保留 .）。
+	placeholderCount := strings.Count(path, ".{i}")
 	layerValues := make([]string, placeholderCount)
 	layerBound := make([]bool, placeholderCount)
 	legacyKeys := make([]string, 0, len(selectors))
@@ -562,11 +564,18 @@ func substituteQueryInstanceSelectors(path string, selectors map[string]string) 
 
 	result := path
 	for layer := 0; layer < placeholderCount; layer++ {
-		idx := strings.Index(result, ".{i}.")
+		idx := strings.Index(result, ".{i}")
 		if !layerBound[layer] || strings.TrimSpace(layerValues[layer]) == "" {
 			return result[:idx+1]
 		}
-		result = result[:idx] + "." + layerValues[layer] + "." + result[idx+5:]
+		hasTrailingDot := idx+4 < len(result) && result[idx+4] == '.'
+		markerLength := 4
+		trailingDot := ""
+		if hasTrailingDot {
+			markerLength = 5
+			trailingDot = "."
+		}
+		result = result[:idx] + "." + layerValues[layer] + trailingDot + result[idx+markerLength:]
 	}
 	return result
 }
