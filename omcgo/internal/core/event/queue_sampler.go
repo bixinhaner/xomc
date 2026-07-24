@@ -10,9 +10,12 @@ import (
 	"go.uber.org/zap"
 )
 
-const defaultQueueHealthSampleInterval = 30 * time.Second
+// QueueHealthSampleInterval is the fixed cadence shared by the independent PM
+// sampler and consumers that validate freshness/rate windows.
+const QueueHealthSampleInterval = 30 * time.Second
+
 const defaultQueueHealthSampleTimeout = 5 * time.Second
-const queueHealthProjectionMaxAge = 2 * defaultQueueHealthSampleInterval
+const queueHealthProjectionMaxAge = 2 * QueueHealthSampleInterval
 
 // QueueStatsProvider is the read-only queue-health contract used by the
 // independent PM sampler.
@@ -40,7 +43,7 @@ type QueueHealthSampler struct {
 
 func NewQueueHealthSampler(provider QueueStatsProvider, metrics *EventBusMetrics, interval time.Duration, logger *zap.Logger) *QueueHealthSampler {
 	if interval <= 0 {
-		interval = defaultQueueHealthSampleInterval
+		interval = QueueHealthSampleInterval
 	}
 	if logger == nil {
 		logger = zap.NewNop()

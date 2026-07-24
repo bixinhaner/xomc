@@ -5,11 +5,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -59,7 +61,7 @@ const (
 	bpDefaultQueueOldestHigh  = 10 * time.Minute
 	bpDefaultQueueOldestLow   = 2 * time.Minute
 	bpDefaultQueueSlopeWindow = 5 * time.Minute
-	bpMinQueueSlopeWindow     = 60 * time.Second
+	bpMinQueueSlopeWindow     = 2 * event.QueueHealthSampleInterval
 	bpMinInterval             = 5 * time.Second
 
 	rejectReasonResourcePressure = "resource_pressure"
@@ -412,18 +414,27 @@ type Watchdog struct {
 	logger        *zap.Logger
 	queueStats    QueueStatsSource
 	previousQueue *event.QueueStats
+	queueRates    QueueRates
+	queueRatesAt  time.Time
+	queueRatesOK  bool
 	defaults      BackpressureConfig
+	stateMu       sync.Mutex
 
-	cfg      atomic.Pointer[BackpressureConfig]
-	active   atomic.Bool // true = 背压中（拒收 PM）
-	inflight atomic.Int64
+	cfg                atomic.Pointer[BackpressureConfig]
+	active             atomic.Bool // true = 背压中（拒收 PM）
+	rememberedPressure atomic.Bool // policy state retained while Enabled=false
+	inflight           atomic.Int64
 }
 
 // SetQueueStatsSource wires the independent queue sampler cache into the
 // watchdog. The source must not issue queue management I/O from LatestStats.
 func (w *Watchdog) SetQueueStatsSource(source QueueStatsSource) {
 	if w != nil {
+		w.stateMu.Lock()
+		defer w.stateMu.Unlock()
 		w.queueStats = source
+		w.previousQueue = nil
+		w.invalidateQueueRates()
 	}
 }
 
@@ -436,6 +447,8 @@ func (w *Watchdog) SetQueueThresholdDefaults(
 	if w == nil {
 		return
 	}
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
 	defaults := w.defaults
 	if pendingHigh > 0 {
 		defaults.QueuePendingHigh = pendingHigh
@@ -562,8 +575,10 @@ func (w *Watchdog) Run(ctx context.Context) {
 // JetStream workqueue 流上 SubjectSysConfigSaved 已被 transfercfg 占用（同一 filter subject
 // 不允许第二个 consumer），故背压配置走轮询刷新（变更 ≤1 个采样周期生效），不另开订阅。
 func (w *Watchdog) sample(ctx context.Context) {
+	w.stateMu.Lock()
 	cfg := loadBackpressureConfigWithDefaults(ctx, w.lookup, w.defaults)
 	w.cfg.Store(&cfg)
+	w.stateMu.Unlock()
 
 	diskPct := -1.0
 	if cfg.Enabled && w.diskUsage != nil {
@@ -598,10 +613,16 @@ func (w *Watchdog) sample(ctx context.Context) {
 	}
 
 	queueSignal := w.sampleQueueSignal(time.Now(), cfg)
-	prev := w.active.Load()
-	decision := decideBackpressureWithQueue(prev, diskPct, ioSomePct, queueSignal, cfg)
-	next := decision.Active
-	if next != prev {
+	prevActive := w.active.Load()
+	decision := BackpressureDecision{Reason: pressureReasonDisabled}
+	next := false
+	if cfg.Enabled {
+		policyCurrent := prevActive || w.rememberedPressure.Load()
+		decision = decideBackpressureWithQueue(policyCurrent, diskPct, ioSomePct, queueSignal, cfg)
+		next = decision.Active
+		w.rememberedPressure.Store(next)
+	}
+	if next != prevActive {
 		w.active.Store(next)
 		if w.metrics != nil {
 			state := "released"
@@ -626,8 +647,11 @@ func (w *Watchdog) sample(ctx context.Context) {
 }
 
 func (w *Watchdog) sampleQueueSignal(now time.Time, cfg BackpressureConfig) QueueSignal {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
 	signal := QueueSignal{Configured: w.queueStats != nil}
 	if w.queueStats == nil {
+		w.invalidateQueueRates()
 		return signal
 	}
 	stats, ok := w.queueStats.LatestStats()
@@ -638,12 +662,27 @@ func (w *Watchdog) sampleQueueSignal(now time.Time, cfg BackpressureConfig) Queu
 		newerAttemptFailed = !attemptedAt.IsZero() && attemptedAt.After(stats.SampledAt) && !succeeded
 	}
 	if !ok || stats.SampledAt.IsZero() || age > cfg.QueueSlopeWindow || newerAttemptFailed {
+		w.invalidateQueueRates()
+		return signal
+	}
+	if w.previousQueue != nil && stats.SampledAt.Before(w.previousQueue.SampledAt) {
+		w.invalidateQueueRates()
 		return signal
 	}
 	signal.Available = true
 	signal.Stats = stats
 	if w.previousQueue != nil && stats.SampledAt.After(w.previousQueue.SampledAt) {
 		signal.Rates, signal.RatesAvailable = deriveQueueRates(*w.previousQueue, stats, cfg.QueueSlopeWindow)
+		if signal.RatesAvailable {
+			w.queueRates = signal.Rates
+			w.queueRatesAt = stats.SampledAt
+			w.queueRatesOK = true
+		} else {
+			w.invalidateQueueRates()
+		}
+	} else if w.queueRatesOK && w.queueRatesAt.Equal(stats.SampledAt) {
+		signal.Rates = w.queueRates
+		signal.RatesAvailable = true
 	}
 	if w.previousQueue == nil || stats.SampledAt.After(w.previousQueue.SampledAt) {
 		snapshot := stats
@@ -655,12 +694,22 @@ func (w *Watchdog) sampleQueueSignal(now time.Time, cfg BackpressureConfig) Queu
 			w.metrics.queueAckRate.Set(signal.Rates.AckAdvancePerSecond)
 			w.metrics.queueBacklogSlope.Set(signal.Rates.PendingPerSecond)
 		} else {
-			w.metrics.queueDeliveryRate.Set(0)
-			w.metrics.queueAckRate.Set(0)
-			w.metrics.queueBacklogSlope.Set(0)
+			w.invalidateQueueRates()
 		}
 	}
 	return signal
+}
+
+func (w *Watchdog) invalidateQueueRates() {
+	w.queueRates = QueueRates{}
+	w.queueRatesAt = time.Time{}
+	w.queueRatesOK = false
+	if w.metrics == nil {
+		return
+	}
+	w.metrics.queueDeliveryRate.Set(math.NaN())
+	w.metrics.queueAckRate.Set(math.NaN())
+	w.metrics.queueBacklogSlope.Set(math.NaN())
 }
 
 // ioSomeAvg10 读取 Linux PSI 的 IO some avg10。非 Linux 或未启用 PSI 时返回错误，

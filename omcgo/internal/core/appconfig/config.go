@@ -118,9 +118,6 @@ func (c BackpressureConfig) Defaults() BackpressureConfig {
 	if c.QueueSlopeWindow <= 0 {
 		c.QueueSlopeWindow = 5 * time.Minute
 	}
-	if c.QueueSlopeWindow < time.Minute {
-		c.QueueSlopeWindow = time.Minute
-	}
 	return c
 }
 

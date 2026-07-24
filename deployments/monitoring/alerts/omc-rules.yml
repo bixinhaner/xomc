@@ -348,6 +348,9 @@ groups:
           ) > 0
           and acs_pm_queue_ack_rate < acs_pm_queue_delivery_rate
           and acs_pm_queue_backlog_slope > 0
+          and max without (subject, durable) (
+            time() - omc_pm_queue_sample_timestamp_seconds{subject="pm.file.received",durable="pm-workers"}
+          ) < 60
         for: 10m
         labels:
           severity: warning

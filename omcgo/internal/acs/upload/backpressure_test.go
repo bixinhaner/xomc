@@ -2,12 +2,19 @@ package upload
 
 import (
 	"context"
+	"math"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type queueStatsSourceStub struct {
@@ -200,6 +207,11 @@ func TestQueueSignalRates_DerivesRatesAndRejectsResetOrStaleSample(t *testing.T)
 	assert.InDelta(t, 1, rates.AckAdvancePerSecond, 0.001)
 	assert.InDelta(t, 2, rates.DeliveryPerSecond, 0.001)
 
+	jittered := current
+	jittered.SampledAt = at.Add(event.QueueHealthSampleInterval + time.Millisecond)
+	rates, ok = deriveQueueRates(previous, jittered, bpMinQueueSlopeWindow)
+	assert.True(t, ok, "two sampler intervals must absorb query-duration jitter beyond 30s")
+
 	reset := current
 	reset.DeliverySequence = 1
 	reset.AckConsumerSequence = 1
@@ -267,6 +279,180 @@ func TestQueueSignalWatchdog_RecentCachedSuccessCannotHideNewerSampleFailure(t *
 
 	assert.True(t, w.active.Load(),
 		"a newer failed sample attempt must preserve pressure despite a fresh cached success")
+}
+
+func TestQueueSignalWatchdog_DisableDoesNotForgetObservedPressure(t *testing.T) {
+	enabled := true
+	lookup := func(_ context.Context, category, key string) (string, bool) {
+		if category == BackpressureCategory && key == bpKeyEnabled {
+			if enabled {
+				return "true", true
+			}
+			return "false", true
+		}
+		return "", false
+	}
+	base := time.Now().Add(-50 * time.Second)
+	source := &queueStatsSourceStub{
+		ok: true,
+		stats: event.QueueStats{
+			Pending:             bpDefaultQueuePendingHigh,
+			DeliverySequence:    100,
+			AckConsumerSequence: 90,
+			SampledAt:           base,
+		},
+		lastAttempt:      base.Add(time.Second),
+		attemptSucceeded: true,
+	}
+	w := NewWatchdog(lookup, nil, NewBackpressureMetrics(nil), nil)
+	w.ioPressure = nil
+	w.loadFn = nil
+	w.SetQueueStatsSource(source)
+
+	w.sample(context.Background())
+	assert.True(t, w.active.Load())
+
+	enabled = false
+	w.sample(context.Background())
+	assert.False(t, w.active.Load(), "disabled gate must admit uploads")
+
+	source.lastAttempt = base.Add(10 * time.Second)
+	source.attemptSucceeded = false
+	enabled = true
+	w.sample(context.Background())
+	assert.True(t, w.active.Load(),
+		"re-enable after a failed sample must restore remembered pressure")
+
+	source.stats = event.QueueStats{
+		Pending:             400,
+		DeliverySequence:    140,
+		AckConsumerSequence: 130,
+		SampledAt:           base.Add(40 * time.Second),
+	}
+	source.lastAttempt = base.Add(41 * time.Second)
+	source.attemptSucceeded = true
+	w.sample(context.Background())
+	assert.False(t, w.active.Load(),
+		"a fresh low sample with a non-positive slope proves recovery")
+
+	startupFailure := NewWatchdog(nil, nil, NewBackpressureMetrics(nil), nil)
+	startupFailure.ioPressure = nil
+	startupFailure.loadFn = nil
+	startupFailure.SetQueueStatsSource(&queueStatsSourceStub{
+		lastAttempt: time.Now(), attemptSucceeded: false,
+	})
+	startupFailure.sample(context.Background())
+	assert.False(t, startupFailure.active.Load(), "never-pressured startup failure remains fail-open")
+}
+
+func TestQueueSignalWatchdog_InvalidSamplesInvalidateRates(t *testing.T) {
+	tests := []struct {
+		name       string
+		invalidate func(source *queueStatsSourceStub, now time.Time)
+	}{
+		{
+			name: "stale sample",
+			invalidate: func(source *queueStatsSourceStub, now time.Time) {
+				source.stats.SampledAt = now.Add(-10 * time.Minute)
+			},
+		},
+		{
+			name: "newer failed attempt",
+			invalidate: func(source *queueStatsSourceStub, _ time.Time) {
+				source.lastAttempt = source.stats.SampledAt.Add(time.Second)
+				source.attemptSucceeded = false
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			now := time.Now()
+			source := &queueStatsSourceStub{
+				ok: true,
+				stats: event.QueueStats{
+					Pending:             100,
+					DeliverySequence:    100,
+					AckConsumerSequence: 80,
+					SampledAt:           now.Add(-40 * time.Second),
+				},
+				lastAttempt:      now.Add(-39 * time.Second),
+				attemptSucceeded: true,
+			}
+			metrics := NewBackpressureMetrics(nil)
+			w := NewWatchdog(nil, nil, metrics, nil)
+			w.ioPressure = nil
+			w.loadFn = nil
+			w.SetQueueStatsSource(source)
+			w.sample(context.Background())
+
+			source.stats = event.QueueStats{
+				Pending:             130,
+				DeliverySequence:    160,
+				AckConsumerSequence: 110,
+				SampledAt:           now.Add(-10 * time.Second),
+			}
+			source.lastAttempt = now.Add(-9 * time.Second)
+			w.sample(context.Background())
+			assert.InDelta(t, 2, testutil.ToFloat64(metrics.queueDeliveryRate), 0.001)
+			assert.InDelta(t, 1, testutil.ToFloat64(metrics.queueAckRate), 0.001)
+			assert.InDelta(t, 1, testutil.ToFloat64(metrics.queueBacklogSlope), 0.001)
+
+			w.sample(context.Background())
+			assert.InDelta(t, 2, testutil.ToFloat64(metrics.queueDeliveryRate), 0.001,
+				"re-reading the same fresh snapshot must retain its derived rates")
+			assert.InDelta(t, 1, testutil.ToFloat64(metrics.queueAckRate), 0.001)
+			assert.InDelta(t, 1, testutil.ToFloat64(metrics.queueBacklogSlope), 0.001)
+
+			tt.invalidate(source, now)
+			w.sample(context.Background())
+			assert.True(t, math.IsNaN(testutil.ToFloat64(metrics.queueDeliveryRate)))
+			assert.True(t, math.IsNaN(testutil.ToFloat64(metrics.queueAckRate)))
+			assert.True(t, math.IsNaN(testutil.ToFloat64(metrics.queueBacklogSlope)))
+		})
+	}
+}
+
+func TestWatchdogSettersAreSafeDuringSampling(t *testing.T) {
+	w := NewWatchdog(nil, nil, NewBackpressureMetrics(nil), nil)
+	w.ioPressure = nil
+	w.loadFn = nil
+	source := &queueStatsSourceStub{
+		ok:    true,
+		stats: event.QueueStats{Pending: 1, SampledAt: time.Now()},
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for range 100 {
+			w.SetQueueStatsSource(source)
+			w.SetQueueThresholdDefaults(2000, 500, 10*time.Minute, 2*time.Minute, 5*time.Minute)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range 100 {
+			w.sample(context.Background())
+		}
+	}()
+	wg.Wait()
+}
+
+func TestQueueSaturationAlertRequiresFreshSamplerData(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	raw, err := os.ReadFile(filepath.Join(
+		filepath.Dir(file), "..", "..", "..", "..",
+		"deployments", "monitoring", "alerts", "omc-rules.yml",
+	))
+	require.NoError(t, err)
+	alerts := string(raw)
+	require.Contains(t, alerts, "alert: OMCPMQueueAckRateBelowDelivery")
+	require.Contains(t, alerts, "and max without (subject, durable) (")
+	require.Contains(t, alerts,
+		`time() - omc_pm_queue_sample_timestamp_seconds{subject="pm.file.received",durable="pm-workers"}`)
+	require.Contains(t, alerts, ") < 60")
 }
 
 func TestQueueSignalMetrics_ExportsStateTransitionsRatesAndFreshness(t *testing.T) {
@@ -341,6 +527,7 @@ func TestLoadBackpressureConfig_DefaultsAndClamp(t *testing.T) {
 	assert.Equal(t, time.Minute, cfg.QueueOldestHigh)
 	assert.Equal(t, time.Minute, cfg.QueueOldestLow)
 	assert.Equal(t, 60*time.Second, cfg.QueueSlopeWindow)
+	assert.Equal(t, 2*event.QueueHealthSampleInterval, cfg.QueueSlopeWindow)
 }
 
 func TestParseIOSomeAvg10(t *testing.T) {
