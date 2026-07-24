@@ -290,6 +290,17 @@ func runACS(cmd *cobra.Command, args []string) error {
 			upload.NewBackpressureMetrics(inf.MetricsReg),
 			inf.Logger.Named("backpressure"),
 		)
+		queueBackpressure := cfg.Backpressure.Defaults()
+		bpWatchdog.SetQueueThresholdDefaults(
+			queueBackpressure.QueuePendingHigh,
+			queueBackpressure.QueuePendingLow,
+			queueBackpressure.QueueOldestHigh,
+			queueBackpressure.QueueOldestLow,
+			queueBackpressure.QueueSlopeWindow,
+		)
+		if pmQueueHealthSampler != nil {
+			bpWatchdog.SetQueueStatsSource(pmQueueHealthSampler)
+		}
 		uploadHandler.SetBackpressureGate(bpWatchdog)
 		// watchdog 周期性自刷新 sys_configs(acs.backpressure) 阈值（见 Watchdog.sample）——
 		// 不订阅 SubjectSysConfigSaved：ACS 的 JetStream workqueue 流上该 subject 已被

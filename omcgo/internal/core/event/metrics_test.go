@@ -58,6 +58,7 @@ func TestEventBusMetricsRegistersPMQueueMetricContract(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	m := NewEventBusMetrics(reg)
 	m.observeQueueStats(SubjectPMFileReceived, "pm-workers", QueueStats{SampledAt: time.Now()})
+	m.observeQueueSampleFailure(SubjectPMFileReceived, "pm-workers")
 
 	families, err := reg.Gather()
 	require.NoError(t, err)
@@ -73,6 +74,7 @@ func TestEventBusMetricsRegistersPMQueueMetricContract(t *testing.T) {
 		"omc_pm_queue_last_sequence",
 		"omc_pm_queue_ack_sequence",
 		"omc_pm_queue_sample_timestamp_seconds",
+		"omc_pm_queue_sample_failures_total",
 	} {
 		assert.True(t, names[name], "queue metric %s must be registered", name)
 	}

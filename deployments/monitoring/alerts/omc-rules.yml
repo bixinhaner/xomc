@@ -302,6 +302,63 @@ groups:
             Impact: KPI 计算与时序数据入库滞后，性能看板不实时。
             Action: 看 worker CPU / TimescaleDB 写入压力；评估 PM 文件体积与并发。
 
+      - alert: OMCPMQueuePendingHigh
+        expr: omc_pm_queue_pending{subject="pm.file.received",durable="pm-workers"} >= 2000
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 队列 pending 持续达到背压高水位"
+          description: |
+            PM durable consumer 的待投递消息持续 10 分钟不少于 2000，
+            ACS 上传背压应已启动。检查 worker 吞吐、NATS durable 状态和 TimescaleDB 写入。
+
+      - alert: OMCPMQueueOldestAgeHigh
+        expr: omc_pm_queue_oldest_age_seconds{subject="pm.file.received",durable="pm-workers"} >= 600
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 队列最老消息持续超过 10 分钟"
+          description: |
+            最老待处理 PM 消息年龄达到背压高水位，说明处理延迟已影响数据时效。
+            联查 pending、redelivery、delivery/ack rate 和 worker 错误日志。
+
+      - alert: OMCPMQueueSampleStale
+        expr: time() - omc_pm_queue_sample_timestamp_seconds{subject="pm.file.received",durable="pm-workers"} > 300
+        for: 2m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 队列健康样本已陈旧"
+          description: |
+            ACS 背压超过 5 分钟没有消费到新鲜队列样本。若背压已经生效，
+            watchdog 会保守保持拒收状态。检查 NATS 管理查询、采样器日志与连接状态。
+
+      - alert: OMCPMQueueAckRateBelowDelivery
+        expr: |
+          max without (subject, durable) (
+            omc_pm_queue_ack_pending{subject="pm.file.received",durable="pm-workers"}
+          ) > 0
+          and acs_pm_queue_ack_rate < acs_pm_queue_delivery_rate
+          and acs_pm_queue_backlog_slope > 0
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 确认速率持续低于 consumer 投递速率"
+          description: |
+            durable consumer 存在未确认消息，且 ack rate 持续低于 delivery rate，
+            backlog slope 同时为正。worker 已无法追平输入，需扩容或排查数据库瓶颈。
+
       - alert: OMCPMHourlyTransactionRetryExhausted
         # 单个 bounded hourly batch 在 3 次总尝试后仍遇到 PostgreSQL deadlock /
         # serialization failure；该桶不会发布，必须立即排查锁竞争或事务冲突。

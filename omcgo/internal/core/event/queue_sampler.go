@@ -31,6 +31,8 @@ type QueueHealthSampler struct {
 	logger        *zap.Logger
 
 	lastSuccessfulSample atomic.Int64
+	lastSampleAttempt    atomic.Int64
+	lastSampleSucceeded  atomic.Bool
 	latestMu             sync.RWMutex
 	latest               QueueStats
 	hasLatest            bool
@@ -54,8 +56,18 @@ func NewQueueHealthSampler(provider QueueStatsProvider, metrics *EventBusMetrics
 
 // Sample collects and observes one PM queue-health point. Metrics and the
 // last-success timestamp change only after a complete successful collection.
-func (s *QueueHealthSampler) Sample(ctx context.Context) error {
-	if s == nil || s.provider == nil {
+func (s *QueueHealthSampler) Sample(ctx context.Context) (err error) {
+	if s == nil {
+		return fmt.Errorf("queue health sampler has no queue stats provider")
+	}
+	defer func() {
+		s.lastSampleSucceeded.Store(err == nil)
+		s.lastSampleAttempt.Store(time.Now().UnixNano())
+		if err != nil {
+			s.metrics.observeQueueSampleFailure(SubjectPMFileReceived, pmQueueStatsDurable)
+		}
+	}()
+	if s.provider == nil {
 		return fmt.Errorf("queue health sampler has no queue stats provider")
 	}
 	sampleCtx, cancel := context.WithTimeout(ctx, s.sampleTimeout)
@@ -74,6 +86,19 @@ func (s *QueueHealthSampler) Sample(ctx context.Context) error {
 	s.latestMu.Unlock()
 	s.lastSuccessfulSample.Store(stats.SampledAt.UnixNano())
 	return nil
+}
+
+// LastSampleAttempt reports the completion time and result of the most recent
+// sampling attempt. Consumers can distinguish a fresh cached success from a
+// newer failed read without issuing a second QueueStats query.
+func (s *QueueHealthSampler) LastSampleAttempt() (time.Time, bool) {
+	if s == nil {
+		return time.Time{}, false
+	}
+	if timestamp := s.lastSampleAttempt.Load(); timestamp != 0 {
+		return time.Unix(0, timestamp), s.lastSampleSucceeded.Load()
+	}
+	return time.Time{}, false
 }
 
 // LatestStats returns the last successfully collected queue sample. It lets

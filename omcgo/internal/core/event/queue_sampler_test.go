@@ -66,6 +66,9 @@ func TestQueueHealthSamplerRunsWithoutBackpressureOrStorageDependencies(t *testi
 	assert.Equal(t, pmQueueStatsDurable, source.durable)
 	assert.Equal(t, float64(5), testutil.ToFloat64(metrics.QueuePending.WithLabelValues(SubjectPMFileReceived, pmQueueStatsDurable)))
 	assert.False(t, sampler.LastSuccessfulSample().IsZero())
+	attemptedAt, succeeded := sampler.LastSampleAttempt()
+	assert.False(t, attemptedAt.IsZero())
+	assert.True(t, succeeded)
 	latest, ok := sampler.LatestStats()
 	require.True(t, ok)
 	assert.Equal(t, uint64(5), latest.Pending)
@@ -90,9 +93,15 @@ func TestQueueHealthSamplerOnlyObservesSuccessfulSamples(t *testing.T) {
 	err := sampler.Sample(context.Background())
 	require.Error(t, err)
 	assert.True(t, sampler.LastSuccessfulSample().IsZero())
+	assert.Equal(t, float64(1), testutil.ToFloat64(
+		metrics.QueueSampleFailures.WithLabelValues(SubjectPMFileReceived, pmQueueStatsDurable),
+	))
+	attemptedAt, succeeded := sampler.LastSampleAttempt()
+	assert.False(t, attemptedAt.IsZero())
+	assert.False(t, succeeded)
 	families, gatherErr := reg.Gather()
 	require.NoError(t, gatherErr)
-	assert.Empty(t, families)
+	assert.NotEmpty(t, families)
 }
 
 func TestQueueHealthSamplerTimeoutDoesNotObserveOrCache(t *testing.T) {
@@ -109,7 +118,7 @@ func TestQueueHealthSamplerTimeoutDoesNotObserveOrCache(t *testing.T) {
 	assert.False(t, ok)
 	families, gatherErr := reg.Gather()
 	require.NoError(t, gatherErr)
-	assert.Empty(t, families)
+	assert.NotEmpty(t, families, "timeout is an observed queue sample failure")
 }
 
 func TestQueueHealthSamplerProjectionPendingCountRequiresFreshStats(t *testing.T) {

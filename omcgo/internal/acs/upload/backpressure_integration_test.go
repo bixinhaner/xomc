@@ -10,8 +10,35 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/stretchr/testify/require"
 )
+
+type integrationQueueStatsSource struct {
+	stats event.QueueStats
+	calls int
+}
+
+func (s *integrationQueueStatsSource) LatestStats() (event.QueueStats, bool) {
+	s.calls++
+	return s.stats, true
+}
+
+func TestIntegrationQueueBackpressureConsumesSamplerSnapshot(t *testing.T) {
+	source := &integrationQueueStatsSource{stats: event.QueueStats{
+		Pending:   bpDefaultQueuePendingHigh,
+		SampledAt: time.Now(),
+	}}
+	watchdog := NewWatchdog(nil, nil, NewBackpressureMetrics(nil), nil)
+	watchdog.ioPressure = nil
+	watchdog.loadFn = nil
+	watchdog.SetQueueStatsSource(source)
+
+	watchdog.sample(context.Background())
+
+	require.True(t, watchdog.active.Load())
+	require.Equal(t, 1, source.calls, "one watchdog pass must consume one cached snapshot")
+}
 
 func TestIntegrationDatabasePendingProjectionIncludesAcceptedWork(t *testing.T) {
 	tsdbDSN := os.Getenv("OMCGO_DB_DSN")

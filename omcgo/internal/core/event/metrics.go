@@ -28,6 +28,7 @@ type EventBusMetrics struct {
 	QueueLastSequence           *prometheus.GaugeVec
 	QueueAckSequence            *prometheus.GaugeVec
 	QueueSampleTimestampSeconds *prometheus.GaugeVec
+	QueueSampleFailures         *prometheus.CounterVec
 }
 
 const pmQueueStatsDurable = "pm-workers"
@@ -46,7 +47,12 @@ func NewEventBusMetrics(reg prometheus.Registerer) *EventBusMetrics {
 		QueueLastSequence:           newQueueGauge("omc_pm_queue_last_sequence", "Latest sequence retained by the PM JetStream stream."),
 		QueueAckSequence:            newQueueGauge("omc_pm_queue_ack_sequence", "Acknowledgement floor sequence for the PM durable consumer."),
 		QueueSampleTimestampSeconds: newQueueGauge("omc_pm_queue_sample_timestamp_seconds", "Unix timestamp of the last successful PM queue sample."),
+		QueueSampleFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_pm_queue_sample_failures_total",
+			Help: "Failed PM queue health sampling attempts.",
+		}, []string{"subject", "durable"}),
 	}
+	m.QueueSampleTimestampSeconds.WithLabelValues(SubjectPMFileReceived, pmQueueStatsDurable).Set(0)
 	if reg != nil {
 		reg.MustRegister(
 			m.DeliveryTotal,
@@ -57,9 +63,17 @@ func NewEventBusMetrics(reg prometheus.Registerer) *EventBusMetrics {
 			m.QueueLastSequence,
 			m.QueueAckSequence,
 			m.QueueSampleTimestampSeconds,
+			m.QueueSampleFailures,
 		)
 	}
 	return m
+}
+
+func (m *EventBusMetrics) observeQueueSampleFailure(subject, durable string) {
+	if m == nil || subject != SubjectPMFileReceived || durable != pmQueueStatsDurable {
+		return
+	}
+	m.QueueSampleFailures.WithLabelValues(subject, durable).Inc()
 }
 
 // The ACS wiring supplies fixed PM subject and durable names, making these

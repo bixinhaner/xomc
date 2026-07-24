@@ -66,13 +66,15 @@ type QueueTuning struct {
 // Pending and AckPending are kept separate so callers can distinguish queued
 // work from messages already delivered to a worker but not yet acknowledged.
 type QueueStats struct {
-	Pending          uint64
-	AckPending       int
-	Redelivered      int
-	OldestPendingAge time.Duration
-	LastSequence     uint64
-	AckSequence      uint64
-	SampledAt        time.Time
+	Pending             uint64
+	AckPending          int
+	Redelivered         int
+	OldestPendingAge    time.Duration
+	LastSequence        uint64
+	AckSequence         uint64
+	DeliverySequence    uint64
+	AckConsumerSequence uint64
+	SampledAt           time.Time
 }
 
 // queueStatsReader keeps the QueueStats NATS management calls small and
@@ -167,12 +169,14 @@ func (b *NATSEventBus) QueueStats(ctx context.Context, subject, durable string) 
 	// lookup, so SampledAt always represents the successful collection end.
 	sampledAt := time.Now()
 	stats := QueueStats{
-		Pending:      consumer.NumPending,
-		AckPending:   consumer.NumAckPending,
-		Redelivered:  consumer.NumRedelivered,
-		LastSequence: streamInfo.State.LastSeq,
-		AckSequence:  consumer.AckFloor.Stream,
-		SampledAt:    sampledAt,
+		Pending:             consumer.NumPending,
+		AckPending:          consumer.NumAckPending,
+		Redelivered:         consumer.NumRedelivered,
+		LastSequence:        streamInfo.State.LastSeq,
+		AckSequence:         consumer.AckFloor.Stream,
+		DeliverySequence:    consumer.Delivered.Consumer,
+		AckConsumerSequence: consumer.AckFloor.Consumer,
+		SampledAt:           sampledAt,
 	}
 	if oldest != nil && !oldest.Time.IsZero() {
 		stats.OldestPendingAge = sampledAt.Sub(oldest.Time)

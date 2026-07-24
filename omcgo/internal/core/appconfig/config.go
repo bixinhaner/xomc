@@ -33,6 +33,7 @@ type ACSConfig struct {
 	TSDB                    PostgresConfig        `mapstructure:"tsdb"` // KPI/时序库物理分离：ACS 写 trace_messages（已迁时序库）所需的第二个连接池
 	MinIO                   MinIOConfig           `mapstructure:"minio"`
 	Upload                  UploadConfig          `mapstructure:"upload"`
+	Backpressure            BackpressureConfig    `mapstructure:"backpressure"`
 	Download                DownloadConfig        `mapstructure:"download"`
 	Metrics                 MetricsConfig         `mapstructure:"metrics"`
 	Tracer                  TracerConfig          `mapstructure:"tracer"`
@@ -81,6 +82,46 @@ type UploadConfig struct {
 	TokenSecret string        `mapstructure:"token_secret"`  // JWT signing secret (optional)
 	TokenTTL    time.Duration `mapstructure:"token_ttl"`     // Token validity duration
 	MaxFileSize int64         `mapstructure:"max_file_size"` // Max file size in bytes
+}
+
+// BackpressureConfig supplies deployment defaults for queue-risk admission.
+// Runtime sys_configs may override these values without restarting ACS.
+type BackpressureConfig struct {
+	QueuePendingHigh int           `mapstructure:"queue_pending_high"`
+	QueuePendingLow  int           `mapstructure:"queue_pending_low"`
+	QueueOldestHigh  time.Duration `mapstructure:"queue_oldest_high"`
+	QueueOldestLow   time.Duration `mapstructure:"queue_oldest_low"`
+	QueueSlopeWindow time.Duration `mapstructure:"queue_slope_window"`
+}
+
+// Defaults preserves safe queue hysteresis when older configuration files do
+// not yet contain a backpressure section.
+func (c BackpressureConfig) Defaults() BackpressureConfig {
+	if c.QueuePendingHigh <= 0 {
+		c.QueuePendingHigh = 2000
+	}
+	if c.QueuePendingLow <= 0 {
+		c.QueuePendingLow = 500
+	}
+	if c.QueuePendingLow > c.QueuePendingHigh {
+		c.QueuePendingLow = c.QueuePendingHigh
+	}
+	if c.QueueOldestHigh <= 0 {
+		c.QueueOldestHigh = 10 * time.Minute
+	}
+	if c.QueueOldestLow <= 0 {
+		c.QueueOldestLow = 2 * time.Minute
+	}
+	if c.QueueOldestLow > c.QueueOldestHigh {
+		c.QueueOldestLow = c.QueueOldestHigh
+	}
+	if c.QueueSlopeWindow <= 0 {
+		c.QueueSlopeWindow = 5 * time.Minute
+	}
+	if c.QueueSlopeWindow < time.Minute {
+		c.QueueSlopeWindow = time.Minute
+	}
+	return c
 }
 
 // DownloadConfig 配置 ACS 的文件下载分发服务。

@@ -125,7 +125,8 @@ func TestNATSEventBusQueueStats(t *testing.T) {
 				NumPending:     7,
 				NumAckPending:  2,
 				NumRedelivered: 3,
-				AckFloor:       nats.SequenceInfo{Stream: 11},
+				AckFloor:       nats.SequenceInfo{Consumer: 9, Stream: 11},
+				Delivered:      nats.SequenceInfo{Consumer: 18, Stream: 19},
 			},
 			stream: &nats.StreamInfo{State: nats.StreamState{
 				Msgs:      9,
@@ -142,6 +143,8 @@ func TestNATSEventBusQueueStats(t *testing.T) {
 				assert.InDelta(t, 3*time.Minute, stats.OldestPendingAge, float64(250*time.Millisecond))
 				assert.Equal(t, uint64(20), stats.LastSequence)
 				assert.Equal(t, uint64(11), stats.AckSequence)
+				assert.Equal(t, uint64(18), stats.DeliverySequence)
+				assert.Equal(t, uint64(9), stats.AckConsumerSequence)
 			},
 		},
 		{
@@ -281,7 +284,10 @@ func TestNATSEventBusQueueStatsDoesNotObservePMMetricsDirectly(t *testing.T) {
 	require.NoError(t, err)
 	families, err := reg.Gather()
 	require.NoError(t, err)
-	assert.Empty(t, families)
+	require.Len(t, families, 1)
+	assert.Equal(t, "omc_pm_queue_sample_timestamp_seconds", families[0].GetName())
+	assert.Zero(t, families[0].Metric[0].GetGauge().GetValue(),
+		"QueueStats itself must not turn an initialized timestamp into a successful observation")
 }
 
 // --- Event serialization round-trip ---
