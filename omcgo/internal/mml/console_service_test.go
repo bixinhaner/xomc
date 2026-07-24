@@ -254,6 +254,38 @@ func TestBuildGroupTreeFilteredByDeviceUsesSupportedPaths(t *testing.T) {
 	assert.Equal(t, commandA.ID, got[0].Commands[0].ID)
 }
 
+func TestBuildGroupTreeFilteredByDevicePrefersDeviceSupportedSet(t *testing.T) {
+	groupID := uuid.New()
+	commandDefault := GroupTreeCommand{ID: uuid.New(), OperationType: "LST"}
+	commandDefault.SetTargetPathsRaw([]byte(`["Device.DefaultOnly"]`))
+	commandDiscovered := GroupTreeCommand{ID: uuid.New(), OperationType: "LST"}
+	commandDiscovered.SetTargetPathsRaw([]byte(`["Device.Discovered"]`))
+
+	pmID := uuid.New()
+	svc := NewConsoleService(&fakeGroupTreeRepo{tree: []GroupTreeNode{
+		{ID: groupID, GroupCode: "ROOT", Commands: []GroupTreeCommand{commandDefault, commandDiscovered}},
+	}}, newFakeSubFieldRepo(), newFakeCommandRepo(), nil)
+	svc.SetParamModelByDeviceResolver(func(context.Context, string) (*uuid.UUID, error) {
+		return &pmID, nil
+	})
+	svc.SetParamModelPathsResolver(func(context.Context, uuid.UUID) (map[string]struct{}, error) {
+		return map[string]struct{}{"Device.DefaultOnly": {}}, nil
+	})
+	svc.SetDeviceSupportedPathsResolver(func(context.Context, string) (*SupportedSet, error) {
+		return &SupportedSet{
+			ParamModelID:    &pmID,
+			ProductResolved: true,
+			Paths:           map[string]struct{}{"Device.Discovered": {}},
+		}, nil
+	})
+
+	got, err := svc.BuildGroupTreeFilteredByDevice(context.Background(), "", "zh-CN", "SN-1")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Len(t, got[0].Commands, 1)
+	assert.Equal(t, commandDiscovered.ID, got[0].Commands[0].ID)
+}
+
 func TestBuildGroupTreeFilteredByDevicePrunesCommandWithOnlyRuntimeUnsupportedPaths(t *testing.T) {
 	groupID := uuid.New()
 	command := GroupTreeCommand{ID: uuid.New(), OperationType: "LST"}
@@ -595,7 +627,43 @@ func TestGetCommandSubFields_DeviceReturnsSupportedMMLIntersection(t *testing.T)
 	assert.Equal(t, "Device.A", got[0].Tr069Path)
 }
 
-func TestGetCommandSubFields_DevicePassesParamModelIDToEnrichedRepo(t *testing.T) {
+func TestGetCommandSubFields_DevicePrefersDeviceSupportedSet(t *testing.T) {
+	cmdID := uuid.New()
+	sfRepo := newFakeSubFieldRepo()
+	sfRepo.byCommandEnriched[cmdID] = []MMLCommandSubFieldEnriched{
+		{
+			MMLCommandSubField: MMLCommandSubField{ID: uuid.New(), CommandID: cmdID, MMLCode: "DEFAULT"},
+			Tr069Path:          "Device.DefaultOnly",
+		},
+		{
+			MMLCommandSubField: MMLCommandSubField{ID: uuid.New(), CommandID: cmdID, MMLCode: "DISCOVERED"},
+			Tr069Path:          "Device.Discovered",
+		},
+	}
+
+	pmID := uuid.New()
+	svc := NewConsoleService(&fakeGroupTreeRepo{}, sfRepo, newFakeCommandRepo(), nil)
+	svc.SetParamModelByDeviceResolver(func(context.Context, string) (*uuid.UUID, error) {
+		return &pmID, nil
+	})
+	svc.SetParamModelPathsResolver(func(context.Context, uuid.UUID) (map[string]struct{}, error) {
+		return map[string]struct{}{"Device.DefaultOnly": {}}, nil
+	})
+	svc.SetDeviceSupportedPathsResolver(func(context.Context, string) (*SupportedSet, error) {
+		return &SupportedSet{
+			ParamModelID:    &pmID,
+			ProductResolved: true,
+			Paths:           map[string]struct{}{"Device.Discovered": {}},
+		}, nil
+	})
+
+	got, err := svc.GetCommandSubFields(context.Background(), cmdID, "SN-1", "", "zh-CN")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "Device.Discovered", got[0].Tr069Path)
+}
+
+func TestGetCommandSubFields_DeviceLoadsAllSubFieldsBeforeSupportedIntersection(t *testing.T) {
 	cmdID := uuid.New()
 	pmID := uuid.New()
 	sfRepo := newFakeSubFieldRepo()
@@ -614,8 +682,7 @@ func TestGetCommandSubFields_DevicePassesParamModelIDToEnrichedRepo(t *testing.T
 
 	_, err := svc.GetCommandSubFields(context.Background(), cmdID, "SN-1", "", "zh-CN")
 	require.NoError(t, err)
-	require.NotNil(t, sfRepo.lastParamModelID)
-	assert.Equal(t, pmID, *sfRepo.lastParamModelID)
+	assert.Nil(t, sfRepo.lastParamModelID)
 }
 
 // ============================================================

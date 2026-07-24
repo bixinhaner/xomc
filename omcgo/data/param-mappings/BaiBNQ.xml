@@ -33,7 +33,7 @@
         <param name="Device.DeviceInfo.CellConfig.{i}.SAS.Status" standardPath="Device.DeviceInfo.CellConfig.{i}.SAS.Status" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="65535"/>
         <param name="Device.DeviceInfo.GPS.horizontalAccuracy" standardPath="Device.DeviceInfo.GPS.horizontalAccuracy" access="READ_WRITE" type="INT" changeApplies="Immediate" max="65535"/>
         <param name="Device.DeviceInfo.GPS.verticalAccuracy" standardPath="Device.DeviceInfo.GPS.verticalAccuracy" access="READ_WRITE" type="INT" changeApplies="Immediate" max="65535"/>
-        <param name="Device.DeviceInfo.HardwareVersion" standardPath="Device.DeviceInfo.HardwareVersion_OLD" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.HardwareVersion" standardPath="Device.DeviceInfo.HardwareVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.MU.{i}.AdditionalHardwareVersion" standardPath="Device.DeviceInfo.MU.{i}.AdditionalHardwareVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.MU.{i}.AdditionalSoftwareVersion" standardPath="Device.DeviceInfo.MU.{i}.AdditionalSoftwareVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.MU.{i}.FirstUseDate" standardPath="Device.DeviceInfo.MU.{i}.FirstUseDate" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
@@ -50,7 +50,7 @@
         <param name="Device.DeviceInfo.MU.{i}.Slot.{i}.SwUpgrade.Status" standardPath="Device.DeviceInfo.MU.{i}.Slot.{i}.SwUpgrade.Status" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.MU.{i}.SoftwareVersion" standardPath="Device.DeviceInfo.MU.{i}.SoftwareVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.MU.{i}.UpTime" standardPath="Device.DeviceInfo.MU.{i}.UpTime" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.DeviceInfo.ModelName" standardPath="Device.DeviceInfo.MODULE_TYPE_OLD" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.ModelName" standardPath="Device.DeviceInfo.ModelName" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.SAS.CallSign" standardPath="Device.DeviceInfo.SAS.CallSign" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="256"/>
         <param name="Device.DeviceInfo.SAS.EirpCapability" standardPath="Device.DeviceInfo.SAS.EirpCapability" access="READ_WRITE" type="INT" changeApplies="Immediate" min="-127" max="47"/>
         <param name="Device.DeviceInfo.SAS.FccId" standardPath="Device.DeviceInfo.SAS.FccId" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="256"/>
@@ -60,9 +60,9 @@
         <param name="Device.DeviceInfo.SAS.enableMode" standardPath="Device.DeviceInfo.SAS.enableMode" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.SAS.groupId" standardPath="Device.DeviceInfo.SAS.groupId" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="256"/>
         <param name="Device.DeviceInfo.SAS.groupType" standardPath="Device.DeviceInfo.SAS.groupType" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="128"/>
-        <param name="Device.DeviceInfo.SoftwareVersion" standardPath="Device.DeviceInfo.SoftwareVersion_OLD" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.SoftwareVersion" standardPath="Device.DeviceInfo.SoftwareVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.SupportedPowerLevel" standardPath="Device.DeviceInfo.SupportedPowerRange" access="READ_ONLY" type="STRING" changeApplies="Immediate" max="50"/>
-        <param name="Device.DeviceInfo.UpTime" standardPath="Device.DeviceInfo.UpTime_OLD" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.UpTime" standardPath="Device.DeviceInfo.UpTime" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.X_COM_IpAddr" standardPath="Device.DeviceInfo.IpAddr" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="1" max="15"/>
         <param name="Device.DeviceInfo.X_COM_Localweb_password" standardPath="Device.DeviceInfo.X_COM_Localweb_password" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="5" max="64"/>
         <param name="Device.DeviceInfo.X_COM_Localweb_username" standardPath="Device.DeviceInfo.X_COM_Localweb_username" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="1" max="64"/>

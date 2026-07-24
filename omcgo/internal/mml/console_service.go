@@ -48,6 +48,10 @@ type ConsoleService struct {
 	// 取 supported paths；用于 deviceKey 分支（productClass 分支直接用 SupportedSet.Paths）。
 	// 未装配时 deviceKey 过滤请求返回错误。
 	resolvePathsByParamModel func(ctx context.Context, paramModelID uuid.UUID) (map[string]struct{}, error)
+	// resolveSupportedSetForDevice 按具体设备解析 supported set。新装配路径会使用
+	// product_id/product_class + firmware_version，和执行期 path translator 的
+	// ParamRegistry.GetByProduct 口径一致；未装配时回退到上面的 paramModel 默认映射。
+	resolveSupportedSetForDevice func(ctx context.Context, deviceKey string) (*SupportedSet, error)
 
 	// 产品（product_id）不支持 path 自学习表查询 + deviceSN→product_id 解析闭包（兼容旧入参）。
 	// 供 GetUnsupportedPaths 给前端「选择命令 / 配置参数」按读/写过滤展示；nil 时返回空集。
@@ -158,6 +162,16 @@ func (s *ConsoleService) BuildGroupTreeFilteredByDevice(
 func (s *ConsoleService) resolveSupportedSetByDevice(
 	ctx context.Context, deviceKey string,
 ) (*SupportedSet, error) {
+	if s.resolveSupportedSetForDevice != nil {
+		supported, err := s.resolveSupportedSetForDevice(ctx, deviceKey)
+		if err != nil {
+			return nil, fmt.Errorf("resolve supported paths by device %q: %w", deviceKey, err)
+		}
+		if supported != nil && supported.Paths == nil {
+			supported.Paths = map[string]struct{}{}
+		}
+		return supported, nil
+	}
 	if s.resolveParamModelByDevice == nil {
 		return nil, fmt.Errorf("resolve param_model by device %q: resolver not configured", deviceKey)
 	}
@@ -265,6 +279,13 @@ func (s *ConsoleService) SetSupportedPathsRepository(repo SupportedPathsReposito
 // 未注入时带 deviceKey 的过滤请求返回错误。
 func (s *ConsoleService) SetParamModelPathsResolver(fn func(ctx context.Context, paramModelID uuid.UUID) (map[string]struct{}, error)) {
 	s.resolvePathsByParamModel = fn
+}
+
+// SetDeviceSupportedPathsResolver 注入 deviceKey → SupportedSet 反查，供具体设备选择
+// 分支使用。provider 中应走 ParamRegistry.GetByProduct(productID, firmwareVersion)，
+// 保持命令选择弹窗和 MML 执行期 path translator 的 supported 口径一致。
+func (s *ConsoleService) SetDeviceSupportedPathsResolver(fn func(ctx context.Context, deviceKey string) (*SupportedSet, error)) {
+	s.resolveSupportedSetForDevice = fn
 }
 
 // SetFlatTreeRepo 装配 Task #4 扁平命令树仓储。不走构造函数以避免贩及
@@ -577,10 +598,14 @@ func (s *ConsoleService) GetCommandSubFields(ctx context.Context, commandID uuid
 			return []SubFieldDTO{}, nil
 		}
 		supportedPaths = set.Paths
-		paramModelID = set.ParamModelID
+		// 具体设备场景的 supported set 可能包含设备已上报但尚未回填到
+		// param_mappings/discovered_param_mappings 的 path。这里必须取命令
+		// sub_fields 全集，再在 Go 层与 supportedPaths 求交集；否则
+		// ListEnrichedByCommand 的 paramModel SQL EXISTS 会提前把这些 path 裁掉。
+		paramModelID = nil
 	}
-	// 取命令 sub_fields 全集；产品上下文下 SQL 先按模型支持状态过滤，随后在 Go 层
-	// 按 Redis 路径集做交集，保证命令树与参数模型缓存口径一致。
+	// 取命令 sub_fields；产品上下文下仍可让 SQL 按模型支持状态预过滤。
+	// 具体设备上下文下取全集，由 Go 层使用设备 supportedPaths 做最终交集。
 	enriched, err := s.subFieldRepo.ListEnrichedByCommand(ctx, commandID, paramModelID)
 	if err != nil {
 		return nil, fmt.Errorf("list enriched sub_fields: %w", err)
