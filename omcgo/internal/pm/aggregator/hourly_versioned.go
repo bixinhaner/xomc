@@ -19,7 +19,7 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
-const DefaultHourlyBatchDevices = 500
+const DefaultHourlyBatchDevices = 2500
 
 // ParseHourlyBatchDevices validates PM_HOURLY_BATCH_DEVICES and returns the
 // conservative default for missing, invalid, or non-positive values.
@@ -400,6 +400,9 @@ func (a *Aggregator) runPreparedVersionedHourlyBatch(
 		}
 		anchorCount += formulaAnchors
 		valueCount += formulaValues
+	}
+	if _, err := tx.Exec(ctx, buildCompleteVersionedHourlyBatchSQL(), version, batchNo); err != nil {
+		return 0, 0, fmt.Errorf("complete hourly batch: %w", err)
 	}
 	return anchorCount, valueCount, nil
 }
@@ -1151,7 +1154,7 @@ counts AS (
 ),
 batch_completed AS (
     UPDATE pm_hourly_rollup_batches b
-       SET status='completed', anchor_count=c.anchors, value_count=c.values, finished_at=now()
+       SET anchor_count=c.anchors, value_count=c.values
      FROM counts c
      WHERE b.bucket_version=$1 AND b.batch_no=$9
     RETURNING c.anchors, c.values
@@ -1166,6 +1169,13 @@ version_progress AS (
     RETURNING b.anchors, b.values
 )
 SELECT anchors, values FROM version_progress`
+}
+
+func buildCompleteVersionedHourlyBatchSQL() string {
+	return `
+UPDATE pm_hourly_rollup_batches
+   SET status='completed', finished_at=clock_timestamp()
+ WHERE bucket_version=$1 AND batch_no=$2`
 }
 
 func buildPublishHourlyVersionSQL() string {

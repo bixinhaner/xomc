@@ -54,6 +54,10 @@ func TestVersionedHourlyBatchSQLIsBoundedAndAppendOnly(t *testing.T) {
 	assert.NotContains(t, sql, "pm_metric_sets",
 		"all base metric-set access must finish before the anchor/value statement")
 	assert.NotContains(t, sql, "work_mem")
+	assert.NotContains(t, sql, "finished_at",
+		"the base aggregation finishes before formula KPIs and must not close the batch")
+	assert.Contains(t, buildCompleteVersionedHourlyBatchSQL(), "finished_at=clock_timestamp()",
+		"batch completion must record wall-clock time after every aggregation phase")
 }
 
 func TestVersionedHourlyMetricSetPreparationIsSeparateAndInsertOnly(t *testing.T) {
@@ -90,10 +94,10 @@ func TestVersionedHourlyDeviceBatchCount(t *testing.T) {
 }
 
 func TestParseHourlyBatchDevices(t *testing.T) {
-	assert.Equal(t, 500, ParseHourlyBatchDevices(""))
+	assert.Equal(t, 2500, ParseHourlyBatchDevices(""))
 	assert.Equal(t, 350, ParseHourlyBatchDevices("350"))
-	assert.Equal(t, 500, ParseHourlyBatchDevices("0"))
-	assert.Equal(t, 500, ParseHourlyBatchDevices("invalid"))
+	assert.Equal(t, 2500, ParseHourlyBatchDevices("0"))
+	assert.Equal(t, 2500, ParseHourlyBatchDevices("invalid"))
 }
 
 func TestVersionedHourlyFormulaDependencies(t *testing.T) {
@@ -219,8 +223,49 @@ func TestVersionedHourlyProductionLockOrder(t *testing.T) {
 		"base anchors/values",
 		"formula anchor",
 		"formula values",
+		"complete batch",
 		"commit",
 	}, events)
+}
+
+func TestVersionedHourlyBatchCompletionFailureRollsBack(t *testing.T) {
+	ctx := context.Background()
+	deviceID := uuid.New()
+	events := make([]string, 0)
+	tx := &recordingFormulaBatchTx{
+		events:          &events,
+		deviceID:        deviceID,
+		metricID:        89,
+		setID:           144,
+		failCompleteErr: fmt.Errorf("completion write failed"),
+	}
+	db := &recordingFormulaPreparationDB{
+		events:   &events,
+		deviceID: deviceID,
+		metricID: 89,
+		tx:       tx,
+	}
+	a := New(db, &stubKPIRouter{byDevice: map[string]*router.KPIRoute{
+		"LOCK-FORMULA-1": {
+			KPIs: []router.KPIDef{{
+				IndicatorID: "KLOCK1", Unit: "%", Formula: "CLOCK1",
+				Dependencies: []string{"CLOCK1"},
+			}},
+		},
+	}}, nil)
+	w := WindowSpec{
+		Granularity: metrics.GranularityHourly,
+		Start:       time.Date(2026, 7, 24, 10, 0, 0, 0, time.UTC),
+		End:         time.Date(2026, 7, 24, 11, 0, 0, 0, time.UTC),
+	}
+
+	_, _, err := a.runVersionedHourlyBatch(
+		ctx, db, 55, 0, []uuid.UUID{deviceID}, w, "")
+
+	require.ErrorContains(t, err, "complete hourly batch")
+	assert.Equal(t, 0, tx.commits)
+	assert.Equal(t, 1, tx.rollbacks)
+	assert.Contains(t, events, "complete batch")
 }
 
 func TestVersionedHourlyMixedConstantFormulaKeepsDependencyFilter(t *testing.T) {
@@ -329,6 +374,7 @@ func TestVersionedHourlyBatchRetriesTransactionWithoutRepeatingFormulaPreparatio
 		"base anchors/values",
 		"formula anchor",
 		"formula values",
+		"complete batch",
 		"commit",
 	}, events)
 }
@@ -391,6 +437,7 @@ type recordingFormulaBatchTx struct {
 	setID            int64
 	setQueries       int
 	failLockErr      error
+	failCompleteErr  error
 	commits          int
 	rollbacks        int
 	objectQuerySQL   string
@@ -474,6 +521,11 @@ func (tx *recordingFormulaBatchTx) Exec(_ context.Context, sql string, _ ...any)
 			tx.record("base metric set")
 		} else {
 			tx.record("formula metric set")
+		}
+	case strings.Contains(sql, "SET status='completed', finished_at=clock_timestamp()"):
+		tx.record("complete batch")
+		if tx.failCompleteErr != nil {
+			return pgconn.CommandTag{}, tx.failCompleteErr
 		}
 	}
 	return pgconn.NewCommandTag("INSERT 0 1"), nil

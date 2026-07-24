@@ -443,7 +443,7 @@ services:
       GOMEMLIMIT: "${WORKER_GOMEMLIMIT:-}"
       GOMAXPROCS: "${WORKER_GOMAXPROCS:-}"
       # 稀疏 PM 小时汇总：单批设备上限与迟到数据/压缩安全窗口。
-      PM_HOURLY_BATCH_DEVICES: "${PM_HOURLY_BATCH_DEVICES:-500}"
+      PM_HOURLY_BATCH_DEVICES: "${PM_HOURLY_BATCH_DEVICES:-2500}"
       PM_LATE_DATA_WINDOW: "${PM_LATE_DATA_WINDOW:-168h}"
     volumes:
       - ../../run/logs/worker:/run/logs/worker
