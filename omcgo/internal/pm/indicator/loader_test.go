@@ -2,8 +2,13 @@ package indicator
 
 import (
 	"context"
+	"encoding/xml"
 	"errors"
+	"os"
 	"path/filepath"
+	"reflect"
+	"regexp"
+	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,113 +17,48 @@ import (
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 )
 
-// 单元测试范围限定为 P2-09 引入的纯函数：
-//   - parseEnabledFlag
-//   - aggregateEnabledOR
-//
-// SQL 路径（refreshDefaultEnabledBucket）需要 testcontainers/dockertest，
-// 留给集成测试覆盖（P3-03 KPI 端点上线后端到端）。
-
-func TestParseEnabledFlag(t *testing.T) {
-	cases := []struct {
-		in   string
-		want bool
-	}{
-		{"", true},
-		{"true", true},
-		{"TRUE", true},
-		{"True", true},
-		{"1", true},
-		{"t", true},
-		{"yes", true}, // 容错：默认 true
-		{"random", true},
-		{"false", false},
-		{"FALSE", false},
-		{"0", false},
-		{"f", false},
-		{"  false  ", false}, // trim
-		{"no", false},
-		{"n", false},
-	}
-	for _, c := range cases {
-		t.Run(c.in, func(t *testing.T) {
-			assert.Equal(t, c.want, parseEnabledFlag(c.in))
-		})
-	}
+func TestXMLIndicatorDoesNotModelEnabledAttribute(t *testing.T) {
+	_, ok := reflect.TypeOf(xmlIndicator{}).FieldByName("Enabled")
+	assert.False(t, ok, "Loader 不应再解析 XML enabled 属性或维护 enabled_pm_indicators_*")
 }
 
-func TestAggregateEnabledOR_Empty(t *testing.T) {
-	got := aggregateEnabledOR(nil)
-	assert.Empty(t, got)
+func TestFlattenDocsByDeviceTypeIgnoresXMLEnabledAttribute(t *testing.T) {
+	var doc xmlIndicatorModel
+	require.NoError(t, xml.Unmarshal([]byte(`
+<indicatorModel platform="BLQ">
+  <indicators>
+    <indicator id="C0001" enabled="false" isCounter="1" formula="C0001" />
+  </indicators>
+</indicatorModel>`), &doc))
 
-	got = aggregateEnabledOR([]xmlIndicatorModel{{}})
-	assert.Empty(t, got)
+	records, formulas := flattenDocsByDeviceType([]xmlIndicatorModel{doc}, false)
+
+	require.Contains(t, records, "C0001")
+	assert.Equal(t, "C0001", records["C0001"].Ind.ID)
+	require.Len(t, formulas, 1)
+	assert.Equal(t, "C0001", formulas[0].IndicatorID)
 }
 
-func TestAggregateEnabledOR_SingleFile(t *testing.T) {
-	docs := []xmlIndicatorModel{
-		{Indicators: []xmlIndicator{
-			{ID: "X", Enabled: "true"},
-			{ID: "Y", Enabled: "false"},
-			{ID: "Z", Enabled: ""}, // 缺省视 true
-		}},
+func TestSeedBaselineGNBDefaultEnabledMatchesGNBXML(t *testing.T) {
+	docs := parseLibFiles(t, "GNB.xml")
+	want := make([]string, 0, len(docs[0].Indicators))
+	for _, ind := range docs[0].Indicators {
+		if ind.ID != "" {
+			want = append(want, ind.ID)
+		}
 	}
-	got := aggregateEnabledOR(docs)
-	assert.True(t, got["X"])
-	assert.False(t, got["Y"])
-	assert.True(t, got["Z"])
-	assert.Len(t, got, 3)
-}
+	sort.Strings(want)
 
-func TestAggregateEnabledOR_MultiFile_TrueWins(t *testing.T) {
-	// 同一 id "A" 在文件 1 false / 文件 2 true → 应得 true（OR 合并）
-	docs := []xmlIndicatorModel{
-		{Indicators: []xmlIndicator{{ID: "A", Enabled: "false"}}},
-		{Indicators: []xmlIndicator{{ID: "A", Enabled: "true"}}},
-	}
-	got := aggregateEnabledOR(docs)
-	assert.True(t, got["A"], "OR 合并：任意一个文件 enabled=true → true")
-}
+	seed, err := os.ReadFile(filepath.Join("..", "..", "..", "migrations", "seed", "000001_init_seed.sql"))
+	require.NoError(t, err)
+	re := regexp.MustCompile(`(?s)INSERT INTO public\.enabled_pm_indicators_gnb \(operator_code, indicator_id\).*?FROM regexp_split_to_table\(\$ids\$\n(.*?)\n\$ids\$`)
+	m := re.FindSubmatch(seed)
+	require.Len(t, m, 2, "seed 基线应包含 GNB 默认启用清单")
 
-func TestAggregateEnabledOR_MultiFile_AllFalseStaysFalse(t *testing.T) {
-	docs := []xmlIndicatorModel{
-		{Indicators: []xmlIndicator{{ID: "B", Enabled: "false"}}},
-		{Indicators: []xmlIndicator{{ID: "B", Enabled: "0"}}},
-	}
-	got := aggregateEnabledOR(docs)
-	assert.False(t, got["B"], "全 false → false")
-}
-
-func TestAggregateEnabledOR_MultiFile_OrderAgnostic(t *testing.T) {
-	// 反向：true 先出现，再 false 不应该把 true 翻回去
-	docs := []xmlIndicatorModel{
-		{Indicators: []xmlIndicator{{ID: "C", Enabled: "true"}}},
-		{Indicators: []xmlIndicator{{ID: "C", Enabled: "false"}}},
-	}
-	got := aggregateEnabledOR(docs)
-	assert.True(t, got["C"], "OR 不受顺序影响")
-}
-
-func TestAggregateEnabledOR_EmptyIDIgnored(t *testing.T) {
-	docs := []xmlIndicatorModel{
-		{Indicators: []xmlIndicator{
-			{ID: "", Enabled: "true"},
-			{ID: "ok", Enabled: "true"},
-		}},
-	}
-	got := aggregateEnabledOR(docs)
-	assert.NotContains(t, got, "")
-	assert.True(t, got["ok"])
-	assert.Len(t, got, 1)
-}
-
-func TestAggregateEnabledOR_DefaultEnabledTreatedAsTrue(t *testing.T) {
-	// 缺省 enabled 属性视为 true（XML 现网约定）
-	docs := []xmlIndicatorModel{
-		{Indicators: []xmlIndicator{{ID: "D"}}}, // Enabled = "" 缺省
-	}
-	got := aggregateEnabledOR(docs)
-	assert.True(t, got["D"])
+	got := regexp.MustCompile(`\s+`).Split(string(m[1]), -1)
+	got = compactNonEmpty(got)
+	sort.Strings(got)
+	assert.Equal(t, want, got, "GNB 默认全部启用清单必须与 GNB.xml 保持一致")
 }
 
 // #98：reload 重灌 builtin 公式时，已被用户自定义公式覆盖的 (平台, 指标) 必须跳过，
@@ -161,6 +101,16 @@ func findIndicatorByID(docs []xmlIndicatorModel, id string) (xmlIndicator, bool)
 		}
 	}
 	return xmlIndicator{}, false
+}
+
+func compactNonEmpty(in []string) []string {
+	out := in[:0]
+	for _, s := range in {
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // parseLibFiles 读取并解析给定相对路径（相对 data/indicator-library）的 XML 文件集合。
