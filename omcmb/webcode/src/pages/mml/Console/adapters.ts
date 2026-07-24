@@ -245,14 +245,17 @@ export function resolveQueryPath(
   let result = path;
   let layer = 1;
   while (true) {
-    const marker = result.indexOf('.{i}.');
+    const marker = result.indexOf('.{i}');
     if (marker < 0) return result;
 
     const key = `i${String(layer).padStart(2, '0')}`;
     const value = instanceSelectors?.[key]?.trim() ?? '';
     if (value === '') return result.slice(0, marker + 1);
 
-    result = `${result.slice(0, marker)}.${value}.${result.slice(marker + 5)}`;
+    const hasTrailingDot = result[marker + 4] === '.';
+    const markerLength = hasTrailingDot ? 5 : 4;
+    const trailingDot = hasTrailingDot ? '.' : '';
+    result = `${result.slice(0, marker)}.${value}${trailingDot}${result.slice(marker + markerLength)}`;
     layer += 1;
   }
 }
