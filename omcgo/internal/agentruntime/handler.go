@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -414,8 +415,15 @@ func (h *Handler) ChatStream(c *gin.Context) {
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	if err := clearAgentStreamWriteDeadline(c.Writer); err != nil {
+		h.logger.Warn("clear agent stream write deadline failed", zap.Error(err))
+	}
 	c.Status(http.StatusOK)
 	h.streamAgentStudioResponse(c.Request.Context(), c.Writer, resp.Body, claims, conversationID, delegationToken, target)
+}
+
+func clearAgentStreamWriteDeadline(w http.ResponseWriter) error {
+	return http.NewResponseController(w).SetWriteDeadline(time.Time{})
 }
 
 func (h *Handler) handleConversation(c *gin.Context, rotate bool) {
