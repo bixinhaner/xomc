@@ -162,6 +162,9 @@ func TestVersionedHourlyProductionLockOrder(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), anchors)
 	assert.Equal(t, int64(2), values)
+	assert.Contains(t, tx.counterQuerySQL, `ha."time"=$3`)
+	require.Len(t, tx.counterQueryArgs, 3)
+	assert.Equal(t, w.Start, tx.counterQueryArgs[2])
 	assert.Equal(t, []string{
 		"dictionary",
 		"begin",
@@ -286,14 +289,16 @@ func (db *recordingFormulaPreparationDB) Begin(_ context.Context) (pgx.Tx, error
 
 type recordingFormulaBatchTx struct {
 	pgx.Tx
-	events      *[]string
-	deviceID    uuid.UUID
-	metricID    int64
-	setID       int64
-	setQueries  int
-	failLockErr error
-	commits     int
-	rollbacks   int
+	events           *[]string
+	deviceID         uuid.UUID
+	metricID         int64
+	setID            int64
+	setQueries       int
+	failLockErr      error
+	commits          int
+	rollbacks        int
+	counterQuerySQL  string
+	counterQueryArgs []any
 }
 
 func (tx *recordingFormulaBatchTx) record(event string) {
@@ -302,9 +307,11 @@ func (tx *recordingFormulaBatchTx) record(event string) {
 	}
 }
 
-func (tx *recordingFormulaBatchTx) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+func (tx *recordingFormulaBatchTx) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
 	switch {
 	case strings.Contains(sql, "FROM pm_hourly_anchors"):
+		tx.counterQuerySQL = sql
+		tx.counterQueryArgs = args
 		return &recordingFormulaRows{rows: [][]any{{
 			tx.deviceID, int16(0), "", "CLOCK1", float64(5),
 		}}}, nil

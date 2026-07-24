@@ -747,9 +747,10 @@ func (a *Aggregator) insertVersionedHourlyFormulaKPIs(
 		  JOIN pm_metric_dictionary d ON d.metric_id=hv.metric_id
 		 WHERE ha.bucket_version=$1
 		   AND ha.device_dim_id=ANY($2::uuid[])
+		   AND ha."time"=$3
 		   AND d.metric_type='counter'
 		 ORDER BY ha.device_dim_id, ha.object_ldn, d.metric_path`,
-		version, deviceIDs)
+		version, deviceIDs, w.Start)
 	if err != nil {
 		return 0, 0, fmt.Errorf("load versioned hourly counters: %w", err)
 	}
