@@ -161,6 +161,24 @@ func TestSparseIngestLockOrder(t *testing.T) {
 	}, tx.operations)
 }
 
+func TestWriteSparseMeasurementsRejectsInconsistentRepeatedMetadataBeforeDictionaryResolution(t *testing.T) {
+	tx := &recordingSparseIngestTx{deviceID: uuid.New(), metricID: 41, setID: 73}
+	now := time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC)
+
+	err := writeSparseMeasurements(context.Background(), tx, nil, nil, []SparseMeasurement{{
+		DeviceID: tx.deviceID, DeviceSN: "DUPLICATE-METADATA", CounterGroup: "RRC",
+		Time: now, StartTime: now, EndTime: now.Add(15 * time.Minute), Granularity: 15,
+		MetricPaths: []string{"RRC.Attempts"},
+		Metrics: []SparseValue{
+			{Path: "RRC.Attempts", MetricType: MetricTypeCounter, StatisType: "sum", Unit: "count"},
+			{Path: "RRC.Attempts", MetricType: MetricTypeCounter, StatisType: "avg", Unit: "count"},
+		},
+	}})
+
+	require.ErrorContains(t, err, "duplicate metric definition for path \"RRC.Attempts\" is inconsistent")
+	assert.Empty(t, tx.operations, "invalid metadata must fail before dictionary writes or bucket dirtiness")
+}
+
 type recordingSparseIngestTx struct {
 	pgx.Tx
 	deviceID   uuid.UUID

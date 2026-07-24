@@ -79,6 +79,11 @@ func TestAppConfig_Validate(t *testing.T) {
 			modify:  func(c *AppConfig) { c.DictLoader.CacheVersionPollInterval = -1 * time.Second },
 			wantErr: "dict_loader.cache_version_poll_interval must not be negative",
 		},
+		{
+			name:    "invalid config backup bucket",
+			modify:  func(c *AppConfig) { c.MinIO.Buckets.ConfigBackup = "config_backup_invalid" },
+			wantErr: "minio.buckets.config_backup must be a valid S3 bucket name",
+		},
 	}
 
 	for _, tt := range tests {

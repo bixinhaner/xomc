@@ -94,7 +94,7 @@ fi
 
 if [ -f "$DEPLOY_DIR/docker-compose.monitoring.yml" ] && [ "$SKIP_MONITORING" = 0 ]; then
   echo "== docker compose 监控容器 =="
-  for svc in prometheus alertmanager grafana loki tempo otelcol; do
+  for svc in prometheus alertmanager grafana loki tempo otelcol nats-exporter nginx-exporter node-exporter cadvisor; do
     check "$svc 容器 running" container_running "$svc"
   done
   # otelcol-contrib 是 distroless 镜像，不能假设容器内有 shell/curl/wget。

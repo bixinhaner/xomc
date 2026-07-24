@@ -31,24 +31,9 @@ func writeSparseMeasurements(ctx context.Context, tx pgx.Tx, fileID, batchID *uu
 	if len(measurements) == 0 {
 		return nil
 	}
-	meta := make(map[string]SparseValue)
-	for _, m := range measurements {
-		for _, metric := range m.Metrics {
-			meta[metric.Path] = metric
-		}
-		for _, path := range m.MetricPaths {
-			if _, ok := meta[path]; !ok {
-				meta[path] = SparseValue{Path: path, MetricType: MetricTypeCounter}
-			}
-		}
-		for _, value := range m.Values {
-			meta[value.Path] = value
-		}
-	}
-	defs := make([]metricDefinition, 0, len(meta))
-	for path := range meta {
-		v := meta[path]
-		defs = append(defs, metricDefinition{path: path, metricType: v.MetricType, statisType: v.StatisType, unit: v.Unit})
+	defs, err := sparseMeasurementDefinitions(measurements)
+	if err != nil {
+		return fmt.Errorf("collect sparse metric definitions: %w", err)
 	}
 	// Lock order invariant: hourly bucket/version state → dictionary → metric set
 	// → anchors/values. This remains in the ingest transaction for atomic rollback.
@@ -103,6 +88,34 @@ RETURNING anchor_id`,
 		}
 	}
 	return nil
+}
+
+func sparseMeasurementDefinitions(measurements []SparseMeasurement) ([]metricDefinition, error) {
+	defs := make([]metricDefinition, 0)
+	explicitPaths := make(map[string]struct{})
+	appendValue := func(value SparseValue) {
+		defs = append(defs, metricDefinition{
+			path: value.Path, metricType: value.MetricType,
+			statisType: value.StatisType, unit: value.Unit,
+		})
+		explicitPaths[value.Path] = struct{}{}
+	}
+	for _, measurement := range measurements {
+		for _, metric := range measurement.Metrics {
+			appendValue(metric)
+		}
+		for _, value := range measurement.Values {
+			appendValue(value)
+		}
+	}
+	for _, measurement := range measurements {
+		for _, path := range measurement.MetricPaths {
+			if _, ok := explicitPaths[path]; !ok {
+				defs = append(defs, metricDefinition{path: path, metricType: MetricTypeCounter})
+			}
+		}
+	}
+	return canonicalMetricDefinitions(defs)
 }
 
 // BuildSparseMeasurementsFromMetrics adapts administrative counter/KPI writes

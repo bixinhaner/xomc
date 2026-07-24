@@ -105,32 +105,39 @@ floori() { awk -v x="$1" 'BEGIN{printf "%d", int(x)}'; }
 # 1. 探测「容器可用天花板」—— 优先 docker info（= VM 上限 / 宿主总量）
 # ---------------------------------------------------------------------------
 sep "1/4 探测 Docker 引擎可用资源"
-OS="$(uname -s)"
 VM_CPU=0; VM_MEM_MIB=0; DISK_FREE_GIB=0
 DETECT_SRC="docker info"
 
-if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-  VM_CPU="$(docker info --format '{{.NCPU}}' 2>/dev/null || echo 0)"
-  _mb="$(docker info --format '{{.MemTotal}}' 2>/dev/null || echo 0)"
-  VM_MEM_MIB="$(awk -v b="$_mb" 'BEGIN{printf "%d", b/1024/1024}')"
-  # docker root 盘可用空间（Docker Desktop 下为 VM 盘；Linux 下为 /var/lib/docker 所在盘）
-  DOCKER_ROOT="$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)"
-  DISK_FREE_GIB="$(df -g "$DOCKER_ROOT" 2>/dev/null | awk 'NR==2{print $4}' || echo 0)"
-  [ -z "$DISK_FREE_GIB" ] && DISK_FREE_GIB="$(df -BG "$DOCKER_ROOT" 2>/dev/null | awk 'NR==2{gsub(/G/,"");print $4}' || echo 0)"
+if [ -n "${OMC_PROBE_CPU:-}" ] && [ -n "${OMC_PROBE_MEM_TOTAL_MIB:-}" ]; then
+  # what-if / CI 探测值是完整输入，不能再依赖 docker、uname 或 sysctl。
+  VM_CPU="$OMC_PROBE_CPU"
+  VM_MEM_MIB="$OMC_PROBE_MEM_TOTAL_MIB"
+  DETECT_SRC="OMC_PROBE_* 覆盖"
 else
-  # docker 不可用：回退到宿主探测（仅供预览；实际容器仍受 docker 引擎限制）
-  DETECT_SRC="宿主探测（docker 不可用，仅预览）"
-  warn "docker 引擎不可达——回退宿主探测；实际请在 docker 可用时重跑以读 VM 真实上限。"
-  if [ "$OS" = "Linux" ]; then
-    VM_CPU="$(nproc)"
-    VM_MEM_MIB="$(awk '/^MemTotal:/ {printf "%d", $2/1024}' /proc/meminfo)"
-    DISK_FREE_GIB="$(df -BG /var/lib/docker 2>/dev/null | awk 'NR==2{gsub(/G/,"");print $4}' || echo 0)"
-  elif [ "$OS" = "Darwin" ]; then
-    VM_CPU="$(sysctl -n hw.ncpu)"
-    VM_MEM_MIB="$(sysctl -n hw.memsize | awk '{printf "%d", $1/1024/1024}')"
-    warn "macOS 物理内存 ≠ Docker VM 上限；按物理算会超分，请在 docker 可用时重跑。"
+  OS="$(uname -s)"
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    VM_CPU="$(docker info --format '{{.NCPU}}' 2>/dev/null || echo 0)"
+    _mb="$(docker info --format '{{.MemTotal}}' 2>/dev/null || echo 0)"
+    VM_MEM_MIB="$(awk -v b="$_mb" 'BEGIN{printf "%d", b/1024/1024}')"
+    # docker root 盘可用空间（Docker Desktop 下为 VM 盘；Linux 下为 /var/lib/docker 所在盘）
+    DOCKER_ROOT="$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)"
+    DISK_FREE_GIB="$(df -g "$DOCKER_ROOT" 2>/dev/null | awk 'NR==2{print $4}' || echo 0)"
+    [ -z "$DISK_FREE_GIB" ] && DISK_FREE_GIB="$(df -BG "$DOCKER_ROOT" 2>/dev/null | awk 'NR==2{gsub(/G/,"");print $4}' || echo 0)"
   else
-    die "不支持的系统：$OS" 2
+    # docker 不可用：回退到宿主探测（仅供预览；实际容器仍受 docker 引擎限制）
+    DETECT_SRC="宿主探测（docker 不可用，仅预览）"
+    warn "docker 引擎不可达——回退宿主探测；实际请在 docker 可用时重跑以读 VM 真实上限。"
+    if [ "$OS" = "Linux" ]; then
+      VM_CPU="$(nproc)"
+      VM_MEM_MIB="$(awk '/^MemTotal:/ {printf "%d", $2/1024}' /proc/meminfo)"
+      DISK_FREE_GIB="$(df -BG /var/lib/docker 2>/dev/null | awk 'NR==2{gsub(/G/,"");print $4}' || echo 0)"
+    elif [ "$OS" = "Darwin" ]; then
+      VM_CPU="$(sysctl -n hw.ncpu)"
+      VM_MEM_MIB="$(sysctl -n hw.memsize | awk '{printf "%d", $1/1024/1024}')"
+      warn "macOS 物理内存 ≠ Docker VM 上限；按物理算会超分，请在 docker 可用时重跑。"
+    else
+      die "不支持的系统：$OS" 2
+    fi
   fi
 fi
 

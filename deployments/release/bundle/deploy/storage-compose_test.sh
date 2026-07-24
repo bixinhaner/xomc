@@ -92,6 +92,10 @@ contains "健康检查读取持久化监控 profile" 'monitoring_profile_apply_r
 contains "collector 启用 health_check extension" 'extensions: [health_check, zpages]' "$OTELCOL_CONFIG"
 contains "collector health 仅绑定宿主回环" '127.0.0.1:13133:13133' "$RELEASE_MONITORING_COMPOSE"
 contains "healthcheck 从 collector 外部探测" 'curl -fsS http://127.0.0.1:13133/' "$RELEASE_HEALTHCHECK"
+contains "healthcheck 覆盖 NATS exporter" 'nats-exporter' "$RELEASE_HEALTHCHECK"
+contains "healthcheck 覆盖 nginx exporter" 'nginx-exporter' "$RELEASE_HEALTHCHECK"
+contains "healthcheck 覆盖 node exporter" 'node-exporter' "$RELEASE_HEALTHCHECK"
+contains "healthcheck 覆盖 cAdvisor" 'cadvisor' "$RELEASE_HEALTHCHECK"
 
 echo "── discovered counter operational queries ──"
 contains "PM 配置外指标告警使用新名称" 'omc_pm_discovered_counters_total' "$OMC_ALERTS"
@@ -100,13 +104,18 @@ contains "overview dashboard 使用新名称" 'omc_pm_discovered_counters_total'
 
 echo "── 开发 planner maximize 分支 ──"
 TMP_MAX="$(mktemp)"
-trap 'rm -f "$TMP_MAX"' EXIT
-if OMC_PROBE_CPU=32 OMC_PROBE_MEM_TOTAL_MIB=32768 \
+TMP_PROBE_BIN="$(mktemp -d)"
+trap 'rm -f "$TMP_MAX"; rm -rf "$TMP_PROBE_BIN"' EXIT
+for command in docker sysctl uname; do
+  printf '#!/usr/bin/env bash\nexit 97\n' > "$TMP_PROBE_BIN/$command"
+  chmod +x "$TMP_PROBE_BIN/$command"
+done
+if env PATH="$TMP_PROBE_BIN:$PATH" OMC_PROBE_CPU=32 OMC_PROBE_MEM_TOTAL_MIB=32768 \
    bash "$DEV_PLANNER" --maximize --assume-dedicated --disk-gib 900 -o "$TMP_MAX" >/dev/null 2>&1 &&
    grep -q '^NATS_MAX_MEMORY_STORE=[0-9][0-9]*$' "$TMP_MAX"; then
   ok
 else
-  bad "开发 planner maximize 模式应输出 NATS_MAX_MEMORY_STORE"
+  bad "开发 planner what-if 模式不应依赖宿主探测且应输出 NATS_MAX_MEMORY_STORE"
 fi
 
 echo "════ Results: PASS=$PASS FAIL=$FAIL ════"
