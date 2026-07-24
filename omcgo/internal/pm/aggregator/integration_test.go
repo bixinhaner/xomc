@@ -16,6 +16,71 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
+func Test_Integration_IndicatorMeta_DictionaryPriorityAndLegacyFallback(t *testing.T) {
+	dsn := os.Getenv("OMCGO_DB_DSN")
+	if dsn == "" {
+		t.Skip("OMCGO_DB_DSN not set; skipping integration test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	defer pool.Close()
+
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	for _, ddl := range []string{
+		`CREATE TEMP TABLE perf_indicators_enb (id text, unit_id text, statis_type text) ON COMMIT DROP`,
+		`CREATE TEMP TABLE perf_indicators_gnb (id text, unit_id text, statis_type text) ON COMMIT DROP`,
+		`CREATE TEMP TABLE perf_indicators_gsm (id text, unit_id text, statis_type text) ON COMMIT DROP`,
+		`CREATE TEMP TABLE pm_metric_dictionary (
+			metric_path text PRIMARY KEY, unit text, statis_type text, metric_type text
+		) ON COMMIT DROP`,
+	} {
+		_, err = tx.Exec(ctx, ddl)
+		require.NoError(t, err)
+	}
+	_, err = tx.Exec(ctx, `
+INSERT INTO perf_indicators_enb (id, unit_id, statis_type) VALUES
+    ('same', 'number', 'sum'),
+    ('conflict', 'number', 'sum'),
+    ('fallback', 'number', 'sum'),
+    ('legacy-complete', NULL, NULL);
+INSERT INTO perf_indicators_gnb (id, unit_id, statis_type) VALUES
+    ('legacy-complete', 'number', 'max');
+INSERT INTO pm_metric_dictionary (metric_path, unit, statis_type, metric_type) VALUES
+    ('dictionary-only', 'number', 'sum', 'counter'),
+    ('same', 'number', 'sum', 'counter'),
+    ('conflict', '%', 'pct', 'counter'),
+    ('fallback', '', 'avg', 'counter'),
+    ('ignored-kpi', '%', 'pct', 'kpi')`)
+	require.NoError(t, err)
+
+	rows, err := tx.Query(ctx, "WITH "+indicatorMetaSQL()+`
+SELECT id, unit_id, statis_type FROM indicator_meta ORDER BY id`)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	type meta struct{ unit, statis string }
+	got := make(map[string]meta)
+	for rows.Next() {
+		var id, unit, statis string
+		require.NoError(t, rows.Scan(&id, &unit, &statis))
+		got[id] = meta{unit: unit, statis: statis}
+	}
+	require.NoError(t, rows.Err())
+	assert.Equal(t, map[string]meta{
+		"conflict":        {unit: "%", statis: "pct"},
+		"dictionary-only": {unit: "number", statis: "sum"},
+		"fallback":        {unit: "number", statis: "avg"},
+		"legacy-complete": {unit: "number", statis: "max"},
+		"same":            {unit: "number", statis: "sum"},
+	}, got)
+}
+
 // #31/#32/#33：完整业务日必须包含 24 个 hourly 源桶；sum/avg 结果与上海本地
 // [00:00, 24:00) 桶边界必须同时正确。历史独立 daily cron 会抢在最后一个 hourly
 // 桶完成前执行，固定漏最后一小时；本测试锁住链式触发后的最终聚合口径。

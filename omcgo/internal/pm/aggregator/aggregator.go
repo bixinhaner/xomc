@@ -695,15 +695,36 @@ ON CONFLICT %s DO UPDATE SET
 
 func indicatorMetaSQL() string {
 	return `indicator_meta AS (
-    SELECT id, MIN(unit_id) AS unit_id, MIN(statis_type) AS statis_type
-    FROM (
-        SELECT id, unit_id, statis_type FROM perf_indicators_enb
+    WITH legacy_indicator_candidates AS (
+        SELECT id, unit_id, statis_type, 1 AS source_priority FROM perf_indicators_enb
         UNION ALL
-        SELECT id, unit_id, statis_type FROM perf_indicators_gnb
+        SELECT id, unit_id, statis_type, 2 AS source_priority FROM perf_indicators_gnb
         UNION ALL
-        SELECT id, unit_id, statis_type FROM perf_indicators_gsm
-    ) im
-    GROUP BY id
+        SELECT id, unit_id, statis_type, 3 AS source_priority FROM perf_indicators_gsm
+    ),
+    legacy_indicator_meta AS (
+        SELECT DISTINCT ON (id)
+               id,
+               NULLIF(btrim(unit_id), '') AS unit_id,
+               NULLIF(btrim(statis_type), '') AS statis_type
+        FROM legacy_indicator_candidates
+        ORDER BY id,
+                 (NULLIF(btrim(unit_id), '') IS NOT NULL
+                  AND NULLIF(btrim(statis_type), '') IS NOT NULL) DESC,
+                 source_priority
+    ),
+    dictionary_indicator_meta AS (
+        SELECT metric_path AS id,
+               NULLIF(btrim(unit), '') AS unit_id,
+               NULLIF(btrim(statis_type), '') AS statis_type
+        FROM pm_metric_dictionary
+        WHERE metric_type = 'counter'
+    )
+    SELECT COALESCE(d.id, l.id) AS id,
+           COALESCE(d.unit_id, l.unit_id) AS unit_id,
+           COALESCE(d.statis_type, l.statis_type) AS statis_type
+    FROM dictionary_indicator_meta d
+    FULL OUTER JOIN legacy_indicator_meta l ON l.id = d.id
 )`
 }
 
