@@ -27,6 +27,78 @@ func TestParseLateDataWindow(t *testing.T) {
 	assert.Equal(t, 7*24*time.Hour, ParseLateDataWindow("bad"))
 }
 
+func TestRecoverFailedHourlyBucketsCapsDiscoveryAtSevenDays(t *testing.T) {
+	const configuredLateWindow = 30 * 24 * time.Hour
+	require.Equal(t, 7*24*time.Hour, MaxHourlyRecoveryScanHorizon)
+	repo := &maintenanceRecoveryRepo{}
+	before := time.Now()
+
+	err := recoverFailedHourlyBuckets(
+		context.Background(), &maintenanceTestDB{}, repo,
+		configuredLateWindow, NewMetrics(nil), zap.NewNop(),
+	)
+
+	require.NoError(t, err)
+	require.Len(t, repo.listRequests, 1)
+	require.Len(t, repo.statsRequests, 1)
+	after := time.Now()
+	assert.False(t, repo.listRequests[0].Since.Before(before.Add(-MaxHourlyRecoveryScanHorizon)),
+		"recovery discovery must never start more than seven days ago")
+	assert.False(t, repo.listRequests[0].Since.After(after.Add(-MaxHourlyRecoveryScanHorizon)))
+	assert.False(t, repo.statsRequests[0].Since.Before(before.Add(-configuredLateWindow)),
+		"the independent failure-health horizon should retain the configured late-data window")
+	assert.False(t, repo.statsRequests[0].Since.After(after.Add(-configuredLateWindow)))
+}
+
+func TestRecoverFailedHourlyBucketsUsesDefaultAndShorterDiscoveryWindows(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		horizon time.Duration
+		want    time.Duration
+	}{
+		{name: "invalid uses default", horizon: 0, want: 7 * 24 * time.Hour},
+		{name: "default seven days", horizon: DefaultLateDataWindow, want: 7 * 24 * time.Hour},
+		{name: "shorter window", horizon: 48 * time.Hour, want: 48 * time.Hour},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &maintenanceRecoveryRepo{}
+			before := time.Now()
+
+			err := recoverFailedHourlyBuckets(
+				context.Background(), &maintenanceTestDB{}, repo,
+				tc.horizon, NewMetrics(nil), zap.NewNop(),
+			)
+
+			require.NoError(t, err)
+			require.Len(t, repo.listRequests, 1)
+			after := time.Now()
+			assert.False(t, repo.listRequests[0].Since.Before(before.Add(-tc.want)))
+			assert.False(t, repo.listRequests[0].Since.After(after.Add(-tc.want)))
+		})
+	}
+}
+
+func TestHourlyRecoveryScanLimitCoversCappedNaturalBucketUniverse(t *testing.T) {
+	windowEnd := time.Date(2026, time.July, 24, 20, 0, 0, 0, time.UTC)
+	windowStart := windowEnd.Add(-MaxHourlyRecoveryScanHorizon)
+	uniqueNaturalBuckets := make(map[[2]time.Time]struct{})
+	completedBuckets := 0
+
+	for start := windowStart; !start.After(windowEnd); start = start.Add(time.Hour) {
+		end := start.Add(time.Hour)
+		uniqueNaturalBuckets[[2]time.Time{start, end}] = struct{}{}
+		if !end.After(windowEnd) {
+			completedBuckets++
+		}
+	}
+
+	require.Equal(t, 168, completedBuckets)
+	require.Len(t, uniqueNaturalBuckets, 169,
+		"even conservatively retaining both boundary instants yields only 169 unique buckets")
+	assert.Less(t, len(uniqueNaturalBuckets), DefaultHourlyRecoveryScanLimit,
+		"the unique natural-bucket invariant prevents more than 200 post-limit blockers")
+}
+
 func TestEligibleChunkSQLRequiresCleanActiveHourlyVersions(t *testing.T) {
 	compressSQL := buildEligibleChunkSQL(true)
 	assert.Contains(t, compressSQL, "v.status='active'")
@@ -207,6 +279,8 @@ type maintenanceRecoveryRepo struct {
 	failed           []asyncjob.Job
 	find             map[time.Time]*asyncjob.Job
 	recoveryRequests []asyncjob.FailedBucketRecoveryRequest
+	listRequests     []asyncjob.FailedBucketMaintenanceRequest
+	statsRequests    []asyncjob.FailedBucketMaintenanceRequest
 	stats            asyncjob.FailedBucketStats
 	statsErr         error
 }
@@ -219,16 +293,18 @@ func (r *maintenanceRecoveryRepo) Insert(
 }
 
 func (r *maintenanceRecoveryRepo) ListRecoverableFailedNaturalBuckets(
-	context.Context,
-	asyncjob.FailedBucketMaintenanceRequest,
+	_ context.Context,
+	req asyncjob.FailedBucketMaintenanceRequest,
 ) ([]asyncjob.Job, error) {
+	r.listRequests = append(r.listRequests, req)
 	return r.failed, nil
 }
 
 func (r *maintenanceRecoveryRepo) GetFailedBucketStats(
-	context.Context,
-	asyncjob.FailedBucketMaintenanceRequest,
+	_ context.Context,
+	req asyncjob.FailedBucketMaintenanceRequest,
 ) (asyncjob.FailedBucketStats, error) {
+	r.statsRequests = append(r.statsRequests, req)
 	return r.stats, r.statsErr
 }
 

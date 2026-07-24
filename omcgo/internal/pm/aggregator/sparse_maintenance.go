@@ -19,6 +19,7 @@ const (
 	DefaultHourlyRecoveryCooldown  = time.Hour
 	DefaultHourlyRecoveryMax       = 3
 	DefaultHourlyRecoveryScanLimit = 200
+	MaxHourlyRecoveryScanHorizon   = 7 * 24 * time.Hour
 	DefaultStaleBuildingTimeout    = time.Hour
 )
 
@@ -249,9 +250,10 @@ func recoverFailedHourlyBuckets(
 	if horizon <= 0 {
 		horizon = DefaultLateDataWindow
 	}
+	now := time.Now()
 	req := asyncjob.FailedBucketMaintenanceRequest{
 		JobType:       JobTypeHourly,
-		Since:         time.Now().Add(-horizon),
+		Since:         now.Add(-horizon),
 		Limit:         DefaultHourlyRecoveryScanLimit,
 		MaxRecoveries: DefaultHourlyRecoveryMax,
 		Cooldown:      DefaultHourlyRecoveryCooldown,
@@ -268,7 +270,9 @@ func recoverFailedHourlyBuckets(
 	m.SetAgedFailedBuckets(float64(stats.AgedCount))
 	m.SetRecoveryExhaustedBuckets(float64(stats.ExhaustedCount))
 
-	jobs, err := repo.ListRecoverableFailedNaturalBuckets(ctx, req)
+	recoveryReq := req
+	recoveryReq.Since = now.Add(-min(horizon, MaxHourlyRecoveryScanHorizon))
+	jobs, err := repo.ListRecoverableFailedNaturalBuckets(ctx, recoveryReq)
 	if err != nil {
 		return fmt.Errorf("discover recoverable failed hourly buckets: %w", err)
 	}
