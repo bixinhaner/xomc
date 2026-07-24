@@ -357,6 +357,7 @@ func TestDeviceWithInfoSelectColumns_AlarmAggregation(t *testing.T) {
 	assert.Contains(t, joined, "31004", "warning 需兼容 31004 编码")
 	assert.Contains(t, joined, "AS alarm_severity", "派生列别名仍为 alarm_severity（前端契约不变）")
 	assert.Contains(t, joined, "aa.active_alarm_count", "必须暴露活动告警数列")
+	assert.Contains(t, joined, "d.last_param_sync_at", "列表 DTO 必须暴露最近参数同步完成时间")
 	assert.Contains(t, joined, "AS param_sync_running", "列表 DTO 必须暴露参数同步动态状态列")
 	assert.Contains(t, joined, "parameter_sync_requests", "durable paramsync 请求未终态时应显示同步中")
 	assert.Contains(t, joined, "parameter_sync_runs", "durable paramsync 运行未终态时应显示同步中")
@@ -469,6 +470,7 @@ func TestRecycleBinSelectColumns_ExposeStableRecycleMetadata(t *testing.T) {
 		"回收站复用 scanDeviceWithInfoRow，SELECT 列数必须与共享 scanner 对齐")
 	assert.Contains(t, joined, "d.recycle_type")
 	assert.Contains(t, joined, "d.recycle_executor")
+	assert.Contains(t, joined, "d.last_param_sync_at")
 	assert.Contains(t, joined, "FALSE AS param_sync_running")
 	assert.Contains(t, joined, "d.deleted_at - d.last_inform_at",
 		"离线时长必须固定在移入回收站时刻，不能随查询时间继续增长")

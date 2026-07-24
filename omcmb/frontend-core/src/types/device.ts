@@ -196,6 +196,8 @@ export interface Device {
   nameSyncPending: boolean;
   lmtDeviceName: string;
   paramSyncRunning: boolean;
+  /** 最近一次全量参数同步成功完成时间；manual / periodic / online-trigger 共用后端回写口径。 */
+  lastParamSyncAt?: string;
 
   // 小区信息组 (Cell)
   enbId: string;

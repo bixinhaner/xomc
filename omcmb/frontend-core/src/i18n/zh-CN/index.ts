@@ -1383,6 +1383,7 @@ const messages: Record<string, string> = {
   'device.type.eGW':        '企业网关',
   'device.type.all':        '全部',
   'device.connStatus':      '连接状态',
+  'device.lastParamSyncAt': '上次同步时间',
   // T-0162: 解耦后的两个新筛选项
   'device.lifecycleState':  '生命周期',
   'device.isOnline':        '在线状态',
@@ -3325,6 +3326,8 @@ const messages: Record<string, string> = {
   'device.periodicParamSync.saveSuccess': '定时自动同步设置已保存',
   'device.periodicParamSync.running': '参数同步中',
   'device.periodicParamSync.runningShort': '同步中',
+  'device.paramSync.syncedAgo': '{time}同步',
+  'device.paramSync.lastSyncedAt': '上次同步：{time}',
 
   // -------------------------------------------------------------------------
   // EmptyState

@@ -752,15 +752,15 @@ WHERE ` + deviceParameterUnchangedGuard
 				return fmt.Errorf("reconcile full parameter sync: %w", err)
 			}
 		}
-		deviceUpdate, deviceArgs, err := storage.Psql.Update("devices").Set("last_param_sync_at", now).
-			Set("last_param_sync_failed_at", nil).Set("last_param_sync_error", nil).
-			Set("updated_at", now).Where(sq.Eq{"id": run.DeviceID}).ToSql()
-		if err != nil {
-			return fmt.Errorf("build mark full parameter sync time: %w", err)
-		}
-		if _, err := tx.Exec(ctx, deviceUpdate, deviceArgs...); err != nil {
-			return fmt.Errorf("mark full parameter sync time: %w", err)
-		}
+	}
+	deviceUpdate, deviceArgs, err := storage.Psql.Update("devices").Set("last_param_sync_at", now).
+		Set("last_param_sync_failed_at", nil).Set("last_param_sync_error", nil).
+		Set("updated_at", now).Where(sq.Eq{"id": run.DeviceID}).ToSql()
+	if err != nil {
+		return fmt.Errorf("build mark parameter sync time: %w", err)
+	}
+	if _, err := tx.Exec(ctx, deviceUpdate, deviceArgs...); err != nil {
+		return fmt.Errorf("mark parameter sync time: %w", err)
 	}
 	if err := updateTerminalState(ctx, tx, run, RequestStatusSucceeded, RunStatusSucceeded, ResultCodeOK, "", now); err != nil {
 		return err
