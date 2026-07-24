@@ -34,14 +34,13 @@ import {
 } from 'antd';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { ReloadOutlined, LineChartOutlined, ExportOutlined } from '@ant-design/icons';
-import dayjs from 'dayjs';
-import type { Dayjs } from 'dayjs';
 import {
   useAggregatedMetricsByDevices,
   useMetricObjectsByDevices,
 } from '@core/hooks/api/usePmQuery';
 import { usePmAdhocList } from '@core/hooks/api/usePmAdhoc';
 import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
+import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
 import type { DeviceType } from '@core/types/indicatorLibrary';
 import type { CreateKpiExportInput } from '@core/types/kpiExport';
 import type { Granularity } from '@core/types/pmDashboard';
@@ -59,6 +58,12 @@ import {
   attachCompareSeries,
   previousWindow,
 } from './dashboardFilterUtils';
+import {
+  actualRangeFromMeta,
+  buildDeviceViewRequestTimeWindow,
+  defaultRangeForGranularity,
+  toDeviceViewRequestRFC3339,
+} from './deviceListPaneTimeUtils';
 import {
   buildDashboardExportParams,
   validateDashboardExportSelection,
@@ -111,39 +116,10 @@ export function isDeviceViewMetricSelectionOverLimit(metricPaths: string[]): boo
   return metricPaths.length > PM_QUERY_SELECTION_LIMIT;
 }
 
-function defaultRangeForGranularity(g: Granularity): [Dayjs, Dayjs] {
-  const end = dayjs().millisecond(0);
-  switch (g) {
-    case '15min':
-      return [end.subtract(3, 'hour'), end];
-    case 'hourly':
-      return [end.subtract(24, 'hour'), end];
-    case 'daily':
-      return [end.subtract(7, 'day'), end];
-    case 'weekly':
-      return [end.subtract(30, 'day'), end];
-    case 'monthly':
-      return [end.subtract(6, 'month'), end];
-    default:
-      return [end.subtract(24, 'hour'), end];
-  }
-}
-
-export function toDeviceViewRequestISOString(value: Dayjs): string {
-  return value.millisecond(0).toISOString();
-}
-
-function actualRangeFromMeta(meta: { actualStartTime?: string | null; actualEndTime?: string | null } | undefined): [Dayjs, Dayjs] | null {
-  if (!meta?.actualStartTime || !meta.actualEndTime) return null;
-  const start = dayjs(meta.actualStartTime);
-  const end = dayjs(meta.actualEndTime);
-  if (!start.isValid() || !end.isValid()) return null;
-  return [start, end];
-}
-
 export default function DeviceListPane() {
   const intl = useIntl();
   const { message } = App.useApp();
+  const systemTimezone = useSystemTimezoneValue();
 
   const granularityOptions = useMemo(
     () =>
@@ -165,14 +141,32 @@ export default function DeviceListPane() {
   const [granularity, setGranularity] = useState<Granularity>('15min');
   const [rangeTouched, setRangeTouched] = useState(false);
   // 共用三级筛选 + 周期对比开关（大时间段 + 星期 + 小时段 + 对比）。
-  const [filter, setFilter] = useState<DashboardFilterValue>({
-    range: defaultRangeForGranularity('15min'),
+  const [filter, setFilter] = useState<DashboardFilterValue>(() => ({
+    range: defaultRangeForGranularity('15min', systemTimezone),
     weekdays: [...ALL_WEEKDAYS],
     hours: [...ALL_HOURS],
     compare: false,
-  });
+  }));
+  const [defaultRangeKey, setDefaultRangeKey] = useState<{
+    granularity: Granularity;
+    systemTimezone?: string;
+  }>({ granularity: '15min', systemTimezone });
   const [devicePickerOpen, setDevicePickerOpen] = useState(false);
   const [metricPickerOpen, setMetricPickerOpen] = useState(false);
+
+  useEffect(() => {
+    if (
+      rangeTouched ||
+      (defaultRangeKey.granularity === granularity && defaultRangeKey.systemTimezone === systemTimezone)
+    ) {
+      return;
+    }
+    setDefaultRangeKey({ granularity, systemTimezone });
+    setFilter((cur) => ({
+      ...cur,
+      range: defaultRangeForGranularity(granularity, systemTimezone),
+    }));
+  }, [defaultRangeKey.granularity, defaultRangeKey.systemTimezone, granularity, rangeTouched, systemTimezone]);
 
   // ── 默认指标集：选中制式的内置任务指标集（单一真相源）─────────────────
   const { data: builtinTasks = [] } = usePmAdhocList({ isBuiltin: true });
@@ -242,20 +236,23 @@ export default function DeviceListPane() {
   const actualRange = useMemo(() => actualRangeFromMeta(currentMeta), [currentMeta]);
   const prevParams = useMemo(() => {
     if (!submitted || !submitted.compare) return null;
-    const [prevStart, prevEnd] = actualRange ? previousWindow(actualRange) : [null, null];
-    if (!prevStart || !prevEnd) return null;
+    const actualPrevRange = actualRange ? previousWindow(actualRange) : null;
     return {
       granularity: submitted.granularity,
       metricPaths: submitted.metricPaths,
-      startTime: toDeviceViewRequestISOString(prevStart),
-      endTime: toDeviceViewRequestISOString(prevEnd),
+      startTime: actualPrevRange
+        ? toDeviceViewRequestRFC3339(actualPrevRange[0], systemTimezone)
+        : submitted.prevStartTime,
+      endTime: actualPrevRange
+        ? toDeviceViewRequestRFC3339(actualPrevRange[1], systemTimezone)
+        : submitted.prevEndTime,
       limit: 5000,
       fillEmpty: true,
       // #599：周期对比同口径传 weekdays/hours。
       weekdays: submitted.weekdays.length < 7 ? submitted.weekdays : undefined,
       hours: submitted.hours.length < 24 ? submitted.hours : undefined,
     };
-  }, [actualRange, submitted]);
+  }, [actualRange, submitted, systemTimezone]);
 
   const {
     data: rawPrevRows = [],
@@ -309,9 +306,6 @@ export default function DeviceListPane() {
 
   const handleGranularityChange = (next: Granularity) => {
     setGranularity(next);
-    if (!rangeTouched) {
-      setFilter((cur) => ({ ...cur, range: defaultRangeForGranularity(next) }));
-    }
   };
 
   const handleFilterChange = (next: DashboardFilterValue) => {
@@ -331,15 +325,18 @@ export default function DeviceListPane() {
   // A1：下钻定格的小区/PLMN 白名单一并带进导出（复用 handleQuery 的 getEffectiveLdns，空=不过滤）。
   const buildExportSelection = (): DashboardExportSelection => {
     const [start, end] = filter.range;
-    const actualStartTime = submitted ? currentMeta?.actualStartTime : undefined;
-    const actualEndTime = submitted ? currentMeta?.actualEndTime : undefined;
+    const actualExportRange = submitted ? actualRange : null;
     return {
       technology: tech,
       deviceSns: submitted?.deviceSns ?? deviceSns,
       metricPaths: submitted?.metricPaths ?? metricPaths,
       granularity: submitted?.granularity ?? granularity,
-      startTime: actualStartTime ?? submitted?.startTime ?? toDeviceViewRequestISOString(start),
-      endTime: actualEndTime ?? submitted?.endTime ?? toDeviceViewRequestISOString(end),
+      startTime: actualExportRange
+        ? toDeviceViewRequestRFC3339(actualExportRange[0], systemTimezone)
+        : submitted?.startTime ?? toDeviceViewRequestRFC3339(start, systemTimezone),
+      endTime: actualExportRange
+        ? toDeviceViewRequestRFC3339(actualExportRange[1], systemTimezone)
+        : submitted?.endTime ?? toDeviceViewRequestRFC3339(end, systemTimezone),
       objectLdns: submitted?.allowedLdns ?? getEffectiveLdns(cellSel, objectsByDevice),
       // #599：导出与出图同口径。
       weekdays: submitted?.weekdays ?? filter.weekdays,
@@ -400,19 +397,19 @@ export default function DeviceListPane() {
       return;
     }
     const [start, end] = filter.range;
-    const [prevStart, prevEnd] = previousWindow(filter.range);
+    const requestWindow = buildDeviceViewRequestTimeWindow(filter.range, systemTimezone);
     setSubmitted({
       deviceSns,
       metricPaths,
       granularity,
-      startTime: toDeviceViewRequestISOString(start),
-      endTime: toDeviceViewRequestISOString(end),
+      startTime: requestWindow.startTime,
+      endTime: requestWindow.endTime,
       weekdays: filter.weekdays,
       hours: filter.hours,
       compare: filter.compare,
       offsetMs: end.valueOf() - start.valueOf(),
-      prevStartTime: toDeviceViewRequestISOString(prevStart),
-      prevEndTime: toDeviceViewRequestISOString(prevEnd),
+      prevStartTime: requestWindow.prevStartTime,
+      prevEndTime: requestWindow.prevEndTime,
       // 定格当前下钻白名单（空=全选不过滤）。
       allowedLdns: getEffectiveLdns(cellSel, objectsByDevice),
     });
