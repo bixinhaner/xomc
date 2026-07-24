@@ -81,7 +81,7 @@ func (a *Aggregator) supportsVersionedHourly() bool {
 
 // RunHourlyVersioned builds a complete invisible version in bounded transactions,
 // then atomically makes it the only active version for the bucket.
-func (a *Aggregator) RunHourlyVersioned(ctx context.Context, w WindowSpec, batchSize int) (stats RollupStats, err error) {
+func (a *Aggregator) RunHourlyVersioned(ctx context.Context, w WindowSpec, batchSize int, retryMetrics ...*Metrics) (stats RollupStats, err error) {
 	if err := validateVersionedHourlyWindow(w, time.Now()); err != nil {
 		return stats, err
 	}
@@ -157,7 +157,7 @@ func (a *Aggregator) RunHourlyVersioned(ctx context.Context, w WindowSpec, batch
 
 	for batchNo, deviceIDs := range batches {
 		anchorCount, valueCount, batchErr := a.runVersionedHourlyBatch(
-			ctx, conn, version, batchNo, deviceIDs, w, numberProcess)
+			ctx, conn, version, batchNo, deviceIDs, w, numberProcess, retryMetrics...)
 		if batchErr != nil {
 			return stats, fmt.Errorf("run hourly batch %d: %w", batchNo, batchErr)
 		}
@@ -300,13 +300,44 @@ func (a *Aggregator) runVersionedHourlyBatch(
 	deviceIDs []uuid.UUID,
 	w WindowSpec,
 	numberProcess string,
+	retryMetrics ...*Metrics,
 ) (anchorCount, valueCount int64, err error) {
-	preparedFormulaKPIs, tx, err := a.prepareAndBeginVersionedHourlyBatch(
-		ctx, conn, version, deviceIDs)
+	preparedFormulaKPIs, err := a.prepareVersionedHourlyFormulaKPIs(ctx, conn, deviceIDs)
+	if err != nil {
+		return 0, 0, fmt.Errorf("prepare hourly formula KPIs: %w", err)
+	}
+	var m *Metrics
+	if len(retryMetrics) > 0 {
+		m = retryMetrics[0]
+	}
+	err = runTransactionWithRetryObserved(ctx, conn.Begin, maxHourlyTxRetryAttempts,
+		func(ctx context.Context, tx pgx.Tx) error {
+			anchorCount, valueCount, err = a.runPreparedVersionedHourlyBatch(
+				ctx, tx, version, batchNo, deviceIDs, w, numberProcess, preparedFormulaKPIs)
+			return err
+		},
+		m.IncHourlyTxRetry,
+		m.IncHourlyTxRetryExhausted,
+	)
 	if err != nil {
 		return 0, 0, err
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	return anchorCount, valueCount, nil
+}
+
+func (a *Aggregator) runPreparedVersionedHourlyBatch(
+	ctx context.Context,
+	tx pgx.Tx,
+	version int64,
+	batchNo int,
+	deviceIDs []uuid.UUID,
+	w WindowSpec,
+	numberProcess string,
+	preparedFormulaKPIs map[uuid.UUID]preparedFormulaDevice,
+) (anchorCount, valueCount int64, err error) {
+	if err := lockVersionedHourlyBatch(ctx, tx, version); err != nil {
+		return 0, 0, err
+	}
 
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO pm_hourly_rollup_batches
@@ -370,10 +401,22 @@ func (a *Aggregator) runVersionedHourlyBatch(
 		anchorCount += formulaAnchors
 		valueCount += formulaValues
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return 0, 0, fmt.Errorf("commit hourly batch: %w", err)
-	}
 	return anchorCount, valueCount, nil
+}
+
+func lockVersionedHourlyBatch(ctx context.Context, tx pgx.Tx, version int64) error {
+	var lockedVersion int64
+	if err := tx.QueryRow(ctx, `
+		SELECT bucket_version
+		  FROM pm_hourly_bucket_versions
+		 WHERE bucket_version=$1 AND status='building'
+		 FOR UPDATE`, version).Scan(&lockedVersion); err != nil {
+		return fmt.Errorf("lock hourly bucket version: %w", err)
+	}
+	if lockedVersion != version {
+		return fmt.Errorf("lock hourly bucket version: got %d, want %d", lockedVersion, version)
+	}
+	return nil
 }
 
 func (a *Aggregator) prepareVersionedHourlyFormulaKPIs(

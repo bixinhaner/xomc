@@ -175,12 +175,73 @@ func TestVersionedHourlyProductionLockOrder(t *testing.T) {
 	}, events)
 }
 
+func TestVersionedHourlyBatchRetriesTransactionWithoutRepeatingFormulaPreparation(t *testing.T) {
+	withRetryTiming(t, func(min, max time.Duration) time.Duration { return min }, sleepImmediately)
+
+	ctx := context.Background()
+	deviceID := uuid.New()
+	events := make([]string, 0)
+	first := &recordingFormulaBatchTx{
+		events:      &events,
+		failLockErr: &pgconn.PgError{Code: "40P01"},
+	}
+	second := &recordingFormulaBatchTx{
+		events:   &events,
+		deviceID: deviceID,
+		metricID: 89,
+		setID:    144,
+	}
+	db := &recordingFormulaPreparationDB{
+		events:       &events,
+		deviceID:     deviceID,
+		metricID:     89,
+		transactions: []pgx.Tx{first, second},
+	}
+	a := New(db, &stubKPIRouter{byDevice: map[string]*router.KPIRoute{
+		"LOCK-FORMULA-1": {
+			KPIs: []router.KPIDef{{
+				IndicatorID: "KLOCK1", Unit: "%", Formula: "CLOCK1",
+			}},
+		},
+	}}, nil)
+	w := WindowSpec{
+		Granularity: metrics.GranularityHourly,
+		Start:       time.Date(2026, 7, 24, 10, 0, 0, 0, time.UTC),
+		End:         time.Date(2026, 7, 24, 11, 0, 0, 0, time.UTC),
+	}
+
+	anchors, values, err := a.runVersionedHourlyBatch(
+		ctx, db, 55, 0, []uuid.UUID{deviceID}, w, "")
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), anchors)
+	assert.Equal(t, int64(2), values)
+	assert.Equal(t, 1, first.rollbacks)
+	assert.Equal(t, 0, first.commits)
+	assert.Equal(t, 1, second.commits)
+	assert.Equal(t, []string{
+		"dictionary",
+		"begin",
+		"bucket/version transaction",
+		"begin",
+		"bucket/version transaction",
+		"base metric set",
+		"formula metric set",
+		"base anchors/values",
+		"formula anchor",
+		"formula values",
+		"commit",
+	}, events)
+}
+
 type recordingFormulaPreparationDB struct {
 	events            *[]string
 	deviceID          uuid.UUID
 	metricID          int64
 	dictionaryQueries int
 	tx                pgx.Tx
+	transactions      []pgx.Tx
+	beginCalls        int
 }
 
 func (db *recordingFormulaPreparationDB) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
@@ -215,16 +276,24 @@ func (db *recordingFormulaPreparationDB) QueryRow(_ context.Context, sql string,
 
 func (db *recordingFormulaPreparationDB) Begin(_ context.Context) (pgx.Tx, error) {
 	*db.events = append(*db.events, "begin")
+	if len(db.transactions) > 0 {
+		tx := db.transactions[db.beginCalls]
+		db.beginCalls++
+		return tx, nil
+	}
 	return db.tx, nil
 }
 
 type recordingFormulaBatchTx struct {
 	pgx.Tx
-	events     *[]string
-	deviceID   uuid.UUID
-	metricID   int64
-	setID      int64
-	setQueries int
+	events      *[]string
+	deviceID    uuid.UUID
+	metricID    int64
+	setID       int64
+	setQueries  int
+	failLockErr error
+	commits     int
+	rollbacks   int
 }
 
 func (tx *recordingFormulaBatchTx) record(event string) {
@@ -266,6 +335,9 @@ func (tx *recordingFormulaBatchTx) QueryRow(_ context.Context, sql string, _ ...
 	if strings.Contains(sql, "FROM pm_hourly_bucket_versions") &&
 		strings.Contains(sql, "FOR UPDATE") {
 		tx.record("bucket/version transaction")
+		if tx.failLockErr != nil {
+			return recordingFormulaRow{err: tx.failLockErr}
+		}
 		return recordingFormulaRow{values: []any{int64(55)}}
 	}
 	if strings.Contains(sql, "INSERT INTO pm_hourly_anchors") &&
@@ -307,10 +379,12 @@ func (tx *recordingFormulaBatchTx) CopyFrom(
 
 func (tx *recordingFormulaBatchTx) Commit(_ context.Context) error {
 	tx.record("commit")
+	tx.commits++
 	return nil
 }
 
 func (tx *recordingFormulaBatchTx) Rollback(_ context.Context) error {
+	tx.rollbacks++
 	return nil
 }
 

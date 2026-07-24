@@ -301,3 +301,35 @@ groups:
             PM 文件处理 p95 耗时持续 10 分钟超过 60 秒。
             Impact: KPI 计算与时序数据入库滞后，性能看板不实时。
             Action: 看 worker CPU / TimescaleDB 写入压力；评估 PM 文件体积与并发。
+
+      - alert: OMCPMHourlyTransactionRetryExhausted
+        # 单个 bounded hourly batch 在 3 次总尝试后仍遇到 PostgreSQL deadlock /
+        # serialization failure；该桶不会发布，必须立即排查锁竞争或事务冲突。
+        expr: increase(omc_pm_hourly_tx_retry_exhausted_total[5m]) > 0
+        for: 0s
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 小时聚合事务重试已耗尽（SQLSTATE={{ $labels.sqlstate }}）"
+          description: |
+            过去 5 分钟存在小时聚合批事务在 3 次总尝试后仍无法完成。
+            仅 SQLSTATE 40P01（deadlock）和 40001（serialization failure）会触发此指标。
+            Impact: 对应小时桶构建失败，新的稀疏聚合版本不会发布。
+            Action: 检查 PostgreSQL 锁等待、deadlock 日志和同时运行的 PM 写入；确认
+                    omc_pm_hourly_tx_retries_total 是否持续升高后再恢复任务。
+
+      - alert: OMCPMHourlyTransactionRetryRateSustained
+        expr: sum(rate(omc_pm_hourly_tx_retries_total[5m])) by (sqlstate) > 0
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 小时聚合事务持续重试（SQLSTATE={{ $labels.sqlstate }}）"
+          description: |
+            PM 小时聚合批事务在过去 10 分钟持续因 PostgreSQL deadlock 或序列化冲突重试。
+            当前尚未耗尽重试，但持续冲突会降低桶发布吞吐并可能升级为构建失败。
+            Action: 检查并发 PM 写入、长事务和数据库锁等待；必要时降低作业重叠。

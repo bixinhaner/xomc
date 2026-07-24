@@ -177,7 +177,7 @@ func (r *Runner) Run(ctx context.Context, job *asyncjob.Job) (result json.RawMes
 	w := WindowSpec{Granularity: r.granularity, Start: p.Start, End: p.End}
 
 	if r.granularity == metrics.GranularityHourly && r.hourlyBatchDevices > 0 && r.aggregator.supportsVersionedHourly() {
-		stats, rollupErr := r.aggregator.RunHourlyVersioned(ctx, w, r.hourlyBatchDevices)
+		stats, rollupErr := r.aggregator.RunHourlyVersioned(ctx, w, r.hourlyBatchDevices, r.metrics)
 		if rollupErr != nil {
 			runStatus = "failed"
 			return nil, fmt.Errorf("runner %s: versioned hourly rollup: %w", r.jobType, rollupErr)

@@ -26,6 +26,11 @@ type Metrics struct {
 	// BatchDevices records bounded hourly batch completion and device throughput.
 	BatchDevices *prometheus.CounterVec
 
+	// HourlyTxRetries and HourlyTxRetryExhausted expose retried and finally
+	// failed hourly batch transactions, grouped by PostgreSQL SQLSTATE.
+	HourlyTxRetries        *prometheus.CounterVec
+	HourlyTxRetryExhausted *prometheus.CounterVec
+
 	DirtyBuckets        prometheus.Gauge
 	WatermarkTimestamp  prometheus.Gauge
 	TempBytes           prometheus.Gauge
@@ -56,6 +61,14 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "omc_pm_aggregator_batch_total",
 			Help: "Completed PM rollup batches and devices by job_type and kind",
 		}, []string{"job_type", "kind"}),
+		HourlyTxRetries: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_pm_hourly_tx_retries_total",
+			Help: "Retried hourly PM batch transactions by PostgreSQL SQLSTATE",
+		}, []string{"sqlstate"}),
+		HourlyTxRetryExhausted: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_pm_hourly_tx_retry_exhausted_total",
+			Help: "Hourly PM batch transactions exhausting retries by PostgreSQL SQLSTATE",
+		}, []string{"sqlstate"}),
 		DirtyBuckets: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "omc_pm_hourly_dirty_buckets",
 			Help: "Number of active or building hourly buckets marked dirty",
@@ -76,6 +89,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	if reg != nil {
 		reg.MustRegister(
 			m.Runs, m.Duration, m.RowsWritten, m.BucketLag, m.BatchDevices,
+			m.HourlyTxRetries, m.HourlyTxRetryExhausted,
 			m.DirtyBuckets, m.WatermarkTimestamp, m.TempBytes, m.SparseAmplification,
 		)
 	}
@@ -116,6 +130,18 @@ func (m *Metrics) AddBatch(jobType string, batches, devices int) {
 	}
 	if devices > 0 {
 		m.BatchDevices.WithLabelValues(jobType, "device").Add(float64(devices))
+	}
+}
+
+func (m *Metrics) IncHourlyTxRetry(sqlState string) {
+	if m != nil {
+		m.HourlyTxRetries.WithLabelValues(sqlState).Inc()
+	}
+}
+
+func (m *Metrics) IncHourlyTxRetryExhausted(sqlState string) {
+	if m != nil {
+		m.HourlyTxRetryExhausted.WithLabelValues(sqlState).Inc()
 	}
 }
 
