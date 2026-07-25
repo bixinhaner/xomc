@@ -8,9 +8,9 @@
 
 | 流 | 合并范围 | 当前文件 | 版本表 | compose 服务 | 目标库 |
 |----|----------|----------|--------|--------------|--------|
-| 主库 schema (DDL) | 基线 `000001`（含原 `000001..000032` 全部增量） | `migrations/000001_init_schema.sql` | `goose_db_version` | `migrate-schema` | postgres（主库，纯 PG16）|
+| 主库 schema (DDL) | consolidated baseline + incremental migrations | `migrations/000001_init_schema.sql`、`000003..000006` | `goose_db_version` | `migrate-schema` | postgres（主库，纯 PG16）|
 | 主库 seed (DML) | consolidated baseline + 后续增量 | `migrations/seed/000001_init_seed.sql`、`000002_repair_builtin_role_api_permission_drift.sql`、`000003_pm_backpressure_70.sql` | `goose_db_version_seed` | `migrate-seed` | postgres |
-| 时序库 schema | 基线 `000001`（含原 `000001..000003` 全部增量） | `migrations/tsdb/000001_tsdb_schema.sql` | `goose_db_version_tsdb` | `migrate-tsdb-schema` | postgres-tsdb（TimescaleDB）|
+| 时序库 schema | consolidated baseline + streaming aggregation cutover | `migrations/tsdb/000001_tsdb_schema.sql`、`000002_pm_streaming_aggregation.sql` | `goose_db_version_tsdb` | `migrate-tsdb-schema` | postgres-tsdb（TimescaleDB）|
 
 三个 `000001` 文件是 2026-07-20 的 consolidated baseline（seed 当天二次合并）；此后允许按各自流继续追加增量迁移。schema 和 seed 基线来自完整迁移最终状态的 `pg_dump`；tsdb 基线仍是手写显式 DDL，本次手动合入了原 `000002`（alarms_history retention 固定每天 01:08 Asia/Shanghai）和 `000003`（删除与 Go 侧聚合管线重复的废弃 `pm_metrics_hourly_cagg`）的净效果。
 
@@ -38,7 +38,7 @@ OMC 跑两个 PostgreSQL/TimescaleDB 实例，迁移分两条物理目标库的�
 | `pm_measurement_anchors` / `pm_metric_values` | 4 hours | 水位感知维护任务 | 30 days |
 | `pm_hourly_anchors` / `pm_hourly_values` | 7 days | 水位感知维护任务 | 180 days |
 | `pm_group_metrics_hourly` | 7 days | 14 days | 180 days |
-| `pm_adhoc_aggregation_results` | 30 days | 90 days | 365 days |
+| `pm_aggregation_results` | 30 days | 90 days | 365 days |
 | `mr_records` | 1 day | 7 days | 90 days |
 | `alarms_history` | 7 days | （无压缩）| 365 days |
 | `trace_messages` | 1 day | （无压缩）| 3 days |
@@ -47,7 +47,7 @@ OMC 跑两个 PostgreSQL/TimescaleDB 实例，迁移分两条物理目标库的�
 
 三条流是相互独立的 goose 版本序列，记在不同版本表、**不共享号段**——所以 `000001` 在三处各出现一次是**正常的**（不是撞号）。查撞号要**分目录各查**，别把三个目录的文件名合并去重。
 
-- 新增 = 该流**现有最大号 + 1**。当前主库 schema 下一号是 `000002`，seed 下一号是 `000004`，TSDB 下一号是 `000002`。
+- 新增 = 该流**现有最大号 + 1**。当前主库 schema 下一号是 `000007`，seed 下一号是 `000004`，TSDB 下一号是 `000003`。
 - 从本基线开始，不回填空号、不重排或复用同一发布基线内已经应用过的版本号。三条流使用独立版本表，必须分目录判断下一号。
 - DDL → `migrations/`，DML 种子 → `migrations/seed/`，时序 DDL → `migrations/tsdb/`。
 - `DO $$` / `CREATE [OR REPLACE] FUNCTION` / 循环条件 → 必须 goose `StatementBegin/End` 包裹。

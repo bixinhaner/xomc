@@ -8,8 +8,19 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
+	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
 )
+
+var (
+	// AggregationOutboxEnabled 允许纯入库压测显式关闭 outbox；生产默认开启。
+	AggregationOutboxEnabled = true
+	// AggregationMaxEventBytes 必须不超过 NATS max_payload。
+	AggregationMaxEventBytes = 8 << 20
+)
+
+var ErrSourceContentChanged = fmt.Errorf("PM source identity content changed")
 
 // FileMarker 是 pm_files 幂等标记的最小字段集（copy-direct 入库路径用）。
 //
@@ -183,52 +194,8 @@ func (r *PgRepository) CopyIngest(ctx context.Context, marker FileMarker, counte
 	case findErr == nil && string(existingDigest) == string(marker.ContentSHA256):
 		return false, nil
 	case findErr == nil:
-		// Same source identity with changed content is an explicit reparse. Remove
-		// the old sparse batch in this transaction before replacing its marker.
-		oldRows, err := tx.Query(ctx, `
-			SELECT DISTINCT date_trunc('hour',"time")
-			  FROM pm_measurement_anchors WHERE source_file_id=$1`, existingID)
-		if err != nil {
-			return false, fmt.Errorf("load previous sparse file hours: %w", err)
-		}
-		var oldHours []time.Time
-		for oldRows.Next() {
-			var hour time.Time
-			if err := oldRows.Scan(&hour); err != nil {
-				oldRows.Close()
-				return false, fmt.Errorf("scan previous sparse file hour: %w", err)
-			}
-			oldHours = append(oldHours, hour)
-		}
-		if err := oldRows.Err(); err != nil {
-			oldRows.Close()
-			return false, fmt.Errorf("iterate previous sparse file hours: %w", err)
-		}
-		oldRows.Close()
-		for _, statement := range []string{
-			`DELETE FROM pm_metric_values v USING pm_measurement_anchors a
-			  WHERE a.source_file_id=$1 AND v."time"=a."time" AND v.anchor_id=a.anchor_id`,
-			`DELETE FROM pm_measurement_anchors WHERE source_file_id=$1`,
-			`DELETE FROM pm_ingest_batches WHERE source_file_id=$1`,
-		} {
-			if _, err := tx.Exec(ctx, statement, existingID); err != nil {
-				return false, fmt.Errorf("remove previous sparse file batch: %w", err)
-			}
-		}
-		if err := markHourlyStartsDirty(ctx, tx, oldHours); err != nil {
-			return false, err
-		}
-		id = existingID
-		if _, err := tx.Exec(ctx, `
-			UPDATE pm_files
-			   SET device_id=$2,carrier=$3,technology=$4,file_size=$5,collect_time=$6,
-			       minio_path=$7,content_sha256=$8,parsed=true,parsed_at=now(),
-			       counter_count=$9,created_at=now()
-			 WHERE id=$1`,
-			id, marker.DeviceID, marker.Carrier, marker.Technology, marker.FileSize,
-			marker.CollectTime, marker.MinioPath, marker.ContentSHA256, marker.CounterCount); err != nil {
-			return false, fmt.Errorf("replace pm_files marker: %w", err)
-		}
+		return false, fmt.Errorf("%w: device_sn=%s file_name=%s",
+			ErrSourceContentChanged, marker.DeviceSN, marker.FileName)
 	case findErr != pgx.ErrNoRows:
 		return false, fmt.Errorf("lookup pm_files marker: %w", findErr)
 	default:
@@ -258,6 +225,15 @@ func (r *PgRepository) CopyIngest(ctx context.Context, marker FileMarker, counte
 	if err := writeSparseMeasurements(ctx, tx, &id, &batchID, measurements); err != nil {
 		return false, classifyInsertError(err)
 	}
+	if AggregationOutboxEnabled {
+		payload, err := buildAggregationEvent(marker, id, batchID, measurements)
+		if err != nil {
+			return false, err
+		}
+		if err := pmstream.InsertOutbox(ctx, tx, payload, AggregationMaxEventBytes); err != nil {
+			return false, err
+		}
+	}
 	if _, err := tx.Exec(ctx,
 		`UPDATE pm_ingest_batches SET status='committed', committed_at=now() WHERE ingest_batch_id=$1`,
 		batchID); err != nil {
@@ -267,6 +243,51 @@ func (r *PgRepository) CopyIngest(ctx context.Context, marker FileMarker, counte
 		return false, classifyInsertError(err)
 	}
 	return true, nil
+}
+
+func buildAggregationEvent(
+	marker FileMarker,
+	sourceFileID, ingestBatchID uuid.UUID,
+	measurements []SparseMeasurement,
+) (event.PMAggregationNormalizedPayload, error) {
+	payload := event.PMAggregationNormalizedPayload{
+		SchemaVersion: pmstream.SchemaVersion,
+		EventID:       uuid.New(), SourceFileID: sourceFileID, IngestBatchID: ingestBatchID,
+		DeviceID: marker.DeviceID, DeviceSN: marker.DeviceSN,
+		Technology: marker.Technology,
+	}
+	for _, measurement := range measurements {
+		if payload.DeviceOUI == "" {
+			payload.DeviceOUI = measurement.DeviceOUI
+		}
+		if payload.WindowStart.IsZero() {
+			payload.WindowStart = measurement.StartTime.UTC()
+			payload.WindowEnd = measurement.EndTime.UTC()
+		} else if !payload.WindowStart.Equal(measurement.StartTime.UTC()) ||
+			!payload.WindowEnd.Equal(measurement.EndTime.UTC()) {
+			return event.PMAggregationNormalizedPayload{},
+				fmt.Errorf("PM aggregation event contains multiple collection windows")
+		}
+		normalized := event.PMAggregationMeasurement{
+			ObjectLDN: measurement.ObjectLDN, CounterGroup: measurement.CounterGroup,
+		}
+		for _, value := range measurement.Values {
+			normalized.Metrics = append(normalized.Metrics, event.PMAggregationMetric{
+				MetricPath: value.Path, MetricType: string(value.MetricType),
+				StatisType: value.StatisType, Value: value.Value,
+			})
+		}
+		if len(normalized.Metrics) > 0 {
+			payload.Measurements = append(payload.Measurements, normalized)
+		}
+	}
+	if len(payload.Measurements) == 0 {
+		// A committed empty PM file still needs a valid event for observability,
+		// but it contributes to no task and therefore carries its marker time.
+		payload.WindowEnd = marker.CollectTime.UTC().Truncate(15 * time.Minute)
+		payload.WindowStart = payload.WindowEnd.Add(-15 * time.Minute)
+	}
+	return payload, nil
 }
 
 // dedupeByNaturalKey 把同自然键的多条 PMMetric 折叠成一条（保留切片中最后出现的那条），

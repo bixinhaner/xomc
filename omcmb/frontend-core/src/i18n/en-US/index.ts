@@ -8121,9 +8121,10 @@ const messages: Record<string, string> = {
   'perf.adhoc.btnSubmit':                'Submit',
   'perf.adhoc.btnSaveEdit':              'Save Changes',
   'perf.adhoc.checkStepsIncomplete':     'Please check that all steps are completed',
-  'perf.adhoc.taskCreated':              'Task created; the worker will start executing',
+  'perf.adhoc.taskCreated':              'Task created; it takes effect from the next complete aggregation window without historical backfill',
   'perf.adhoc.createFailed':             'Creation failed: {msg}',
-  'perf.adhoc.taskUpdated':              'Task updated',
+  'perf.adhoc.taskUpdated':              'Task updated; the new version takes effect from the next complete aggregation window',
+  'perf.adhoc.incompleteWindowTip':       '{windows} aggregation window(s) timed out and were stored as incomplete, with {slots} device slot(s) missing',
   'perf.adhoc.updateFailed':             'Update failed: {msg}',
   // Result panel
   'perf.adhoc.aggregateGroupUnit':       'Aggregation Group · {count} devices',

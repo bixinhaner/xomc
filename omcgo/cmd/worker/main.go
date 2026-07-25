@@ -714,11 +714,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	pmTz.shutdownOnCtx(pipeCtx)
 	pmTz.startReloadPoller(pipeCtx, defaultReloadPollInterval)
 	startPMAggregatorPipeline(pipeCtx, w, pmKPIRouter, pmTz, exportBucket)
-
-	// T-0164-P7 / G7：自定义聚合任务（oneshot + continuous）。
-	// 复用同一 kpiRouter；4 个 worker 抢 pm_tasks 中 task_subtype='adhoc_aggregation' 的 pending 行；
-	// continuous scheduler 单 goroutine 每分钟扫 scheduled 任务切回 pending。
-	startPMAdhocPipeline(pipeCtx, w, pmKPIRouter, cfg, pmTz)
+	startPMAggregationStream(pipeCtx, w, pmTz)
 
 	// M3: 周期备份调度器 + 任务 reaper（event-loss 兜底恢复）
 	backupScheduleRepo := backup.NewPgScheduleRepository(w.PgPool)
@@ -758,8 +754,6 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// T-0184: adhoc 过期任务定义清理 cron(每天 03:00)。
 	// 删 mode='oneshot' 且 is_builtin=false 且 created_at < now()-expire_days 天 的任务定义行；
 	// 只删 pm_tasks 行,绝不碰结果表 pm_adhoc_aggregation_results(两层口径分离,设计 §2.3)。
-	startPMAdhocExpireCleanup(w, logger)
-
 	// #779: 回收站自动移入 cron（每天 00:10，与 UI 配置说明对齐）。
 	// 读取 sys_configs device:deviceOfflineEnable / deviceOfflineSaveDay，
 	// 满足离线天数阈值的设备批量软删除（deleted_by='system'，executor='system:auto_recycle'）。

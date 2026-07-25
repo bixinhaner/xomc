@@ -141,11 +141,9 @@ services:
       TZ: "Asia/Shanghai"
     ports:
       - "6379:6379"
-    # maxmemory 512mb + allkeys-lru：实测稳态仅数 MB（会话/任务队列 O(N) 键，数万设备也只数十 MB），
-    # 原 3g/2gb 是历史 OOM 事故(数据集 2.36GB)后的过度保险，对 OMC 实际量级是浪费——回收喂给 PG。
-    # 保留 maxmemory 上限 + LRU 淘汰防失控（队列/会话丢失可从 PG 双写或重新上报恢复）；容器 limit
-    # 768m（> maxmemory，给 AOF rewrite 的 fork COW 留余量）。见 docs/operations/OMC内存分配与容量规划-20260611.md。
-    command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-512mb} --maxmemory-policy ${REDIS_MAXMEMORY_POLICY:-allkeys-lru}
+    # PM 在线聚合窗口是运行期权威状态，禁止淘汰；AOF everysec 保证进程重启可恢复。
+    # 内存不足必须告警和扩容，不能通过 LRU 静默损坏窗口。
+    command: redis-server --appendonly yes --appendfsync everysec --maxmemory ${REDIS_MAXMEMORY:-2gb} --maxmemory-policy noeviction
     volumes:
       - ${REDIS_DATA_PATH:-redisdata}:/data
       - /etc/localtime:/etc/localtime:ro
@@ -155,7 +153,7 @@ services:
       resources:
         limits:
           cpus: "${REDIS_CPUS:-1}"
-          memory: ${REDIS_MEM:-768m}
+          memory: ${REDIS_MEM:-3g}
         reservations:
           cpus: "0.25"
           memory: 256m
@@ -173,7 +171,7 @@ services:
       - "4222:4222"
       - "8222:8222"
     # Path B 需要允许 DeviceGSM.Bts. 等对象一次返回全部实例。
-    # max_payload=5MB 对齐 provision/sync_pathb_expand.go 的预算。
+    # PM 标准事件上限 8MB，NATS 留出 envelope 余量。
     entrypoint:
       - /bin/sh
       - -c
@@ -184,7 +182,7 @@ services:
           max_memory_store: ${NATS_MAX_MEMORY_STORE:-134217728}
         }
         http_port: 8222
-        max_payload: 5242880
+        max_payload: 10485760
         EOF
         exec nats-server -c /tmp/nats-server.conf
     volumes:
@@ -442,9 +440,13 @@ services:
       # 缺省空串 = 历史行为（GOMEMLIMIT 关、GOMAXPROCS 由 cgroup 推断）。
       GOMEMLIMIT: "${WORKER_GOMEMLIMIT:-}"
       GOMAXPROCS: "${WORKER_GOMAXPROCS:-}"
-      # 稀疏 PM 小时汇总：单批设备上限与迟到数据/压缩安全窗口。
-      PM_HOURLY_BATCH_DEVICES: "${PM_HOURLY_BATCH_DEVICES:-2500}"
-      PM_LATE_DATA_WINDOW: "${PM_LATE_DATA_WINDOW:-168h}"
+      PM_AGGREGATION_ENABLED: "${PM_AGGREGATION_ENABLED:-true}"
+      PM_AGGREGATION_CLOSE_GRACE: "${PM_AGGREGATION_CLOSE_GRACE:-5m}"
+      PM_AGGREGATION_OUTBOX_BATCH: "${PM_AGGREGATION_OUTBOX_BATCH:-100}"
+      PM_AGGREGATION_CONSUMER_CONCURRENCY: "${PM_AGGREGATION_CONSUMER_CONCURRENCY:-8}"
+      PM_AGGREGATION_FINALIZE_CONCURRENCY: "${PM_AGGREGATION_FINALIZE_CONCURRENCY:-4}"
+      PM_AGGREGATION_MAX_EVENT_BYTES: "${PM_AGGREGATION_MAX_EVENT_BYTES:-8388608}"
+      PM_AGGREGATION_WINDOW_TTL: "${PM_AGGREGATION_WINDOW_TTL:-1080h}"
     volumes:
       - ../../run/logs/worker:/run/logs/worker
       # 共享 secrets 卷只读 — omcctl/scripts 默认从此读 .api-key

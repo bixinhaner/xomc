@@ -2,6 +2,7 @@ package adhoc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -52,8 +53,6 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		adhoc.DELETE("/tasks/:id/definition", h.Delete) // #392：硬删终态自建任务定义行
 		adhoc.GET("/tasks/:id/results", h.Results)
 		adhoc.GET("/tasks/:id/filter-options", h.FilterOptions) // PM-DASH-DIMFILTER：按维度列出可筛子集选项
-		adhoc.GET("/tasks/:id/runs", h.Runs)                    // T-0186：运行历史
-		adhoc.GET("/tasks/:id/progress", h.Progress)            // SSE
 	}
 }
 
@@ -61,7 +60,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 
 type createRequestDTO struct {
 	Name     string `json:"name" binding:"required"`
-	Mode     string `json:"mode" binding:"required,oneof=oneshot continuous"`
+	Mode     string `json:"mode" binding:"required,oneof=continuous"`
 	CronExpr string `json:"cron_expr"`
 	// T-0185：device_sns 仅在 device/aggregate_group 维度必填（向导期放宽）；
 	// network/product/band/device_group 维度按制式全量聚合，不限设备，device_sns 可空。
@@ -171,17 +170,9 @@ func (h *Handler) Create(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "device_sns is required for device/aggregate_group dimension")
 		return
 	}
-	// T-0185：oneshot 必须给有效时间窗（end > start）；continuous 留空 → NULL 开窗滚动聚合。
-	if Mode(req.Mode) == ModeOneshot {
-		if !req.WindowEnd.After(req.WindowStart) {
-			response.Fail(c, http.StatusBadRequest, "window_end must be after window_start for oneshot task")
-			return
-		}
-	} else {
-		// continuous：忽略传入窗口，强制开窗（与内置任务一致，每次滚动聚合最新可用桶）。
-		req.WindowStart = time.Time{}
-		req.WindowEnd = time.Time{}
-	}
+	// 在线聚合只从下一个完整窗口开始，不接受历史执行时间窗。
+	req.WindowStart = time.Time{}
+	req.WindowEnd = time.Time{}
 	// 制式过滤：建任务拒跨制式 —— 选定制式后，范围内的设备必须全部属于该制式（设计 §2.5）。
 	if req.Technology != "" && len(req.DeviceSNs) > 0 {
 		if err := h.rejectCrossTechnology(c.Request.Context(), req.Technology, req.DeviceSNs); err != nil {
@@ -933,14 +924,17 @@ func (h *Handler) Results(c *gin.Context) {
 		MetricType  string `json:"metric_type"`
 		// MetricValue 用 jsonx.Float（底层 float64）兜底非有限值（NaN/Inf → null），
 		// 避免单个 NaN 行致整批 JSON 编码失败、返回空 body（issue #387）。
-		MetricValue jsonx.Float `json:"metric_value"`
-		StatisType  *string     `json:"statis_type,omitempty"`
-		Granularity string      `json:"granularity"`
-		Time        time.Time   `json:"time"`
-		StartTime   time.Time   `json:"start_time"`
-		EndTime     time.Time   `json:"end_time"`
-		IngestTime  time.Time   `json:"ingest_time"`
-		ObjectLDN   *string     `json:"object_ldn,omitempty"`
+		MetricValue   jsonx.Float `json:"metric_value"`
+		StatisType    *string     `json:"statis_type,omitempty"`
+		Granularity   string      `json:"granularity"`
+		Time          time.Time   `json:"time"`
+		StartTime     time.Time   `json:"start_time"`
+		EndTime       time.Time   `json:"end_time"`
+		IngestTime    time.Time   `json:"ingest_time"`
+		ObjectLDN     *string     `json:"object_ldn,omitempty"`
+		TaskVersionID string      `json:"task_version_id,omitempty"`
+		Complete      bool        `json:"complete"`
+		MissingSlots  int64       `json:"missing_slots"`
 	}
 	items := make([]resultDTO, 0)
 	for rows.Next() {
@@ -960,6 +954,17 @@ func (h *Handler) Results(c *gin.Context) {
 		}
 		dto.ID = resultID.String()
 		dto.TaskID = taskID.String()
+		var aggregateMeta struct {
+			TaskVersionID string `json:"task_version_id"`
+			Complete      bool   `json:"complete"`
+			MissingSlots  int64  `json:"missing_slots"`
+		}
+		if len(extraBytes) > 0 {
+			_ = json.Unmarshal(extraBytes, &aggregateMeta)
+			dto.TaskVersionID = aggregateMeta.TaskVersionID
+			dto.Complete = aggregateMeta.Complete
+			dto.MissingSlots = aggregateMeta.MissingSlots
+		}
 		if productID != nil && *productID != uuid.Nil {
 			dto.ProductID = productID.String()
 		}

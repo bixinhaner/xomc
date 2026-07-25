@@ -795,6 +795,28 @@ curl -fsS http://localhost:8081/healthz
 - `PM_HOURLY_BATCH_DEVICES`：每个小时批次的设备数，默认 `2500`；该值已按 10000
   基站压测下“一小时内完成”和 worker 1 GiB 内存限制联合校准。
 - `PM_LATE_DATA_WINDOW`：迟到数据与压缩安全窗口，默认 `168h`，不改变原 7 天压缩等待。
+
+### PM 在线流式聚合
+
+小时、日、周、月聚合由 worker 在 PM 文件完成 15 分钟 Counter/KPI 入库后直接消费同一份
+标准事件，不再回查原始 PM 表。任务创建或更新后从下一个完整聚合窗口生效，不补算历史。
+
+- Redis 必须开启 AOF、`appendfsync everysec` 和 `maxmemory-policy noeviction`；worker 启动时会校验。
+- `PM_AGGREGATION_ENABLED`：是否启用在线聚合，默认 `true`。
+- `PM_AGGREGATION_CLOSE_GRACE`：缺数据窗口的关闭宽限，默认 `5m`。
+- `PM_AGGREGATION_OUTBOX_BATCH`：发布/拉取批量，默认 `100`。
+- `PM_AGGREGATION_CONSUMER_CONCURRENCY`：标准事件消费并发，默认 `8`。
+- `PM_AGGREGATION_FINALIZE_CONCURRENCY`：窗口落库并发预算，默认 `4`。
+- `PM_AGGREGATION_MAX_EVENT_BYTES`：单个标准事件上限，默认 `8MiB`，必须小于 NATS `max_payload`。
+- `PM_AGGREGATION_WINDOW_TTL`：Redis 窗口状态保留期，默认 `45d`。
+
+JetStream 的 `PM_AGGREGATION` stream 使用 LimitsPolicy、S2 压缩并保留 40 天，专门用于
+Redis 状态丢失后的事件重放。发布完成的窗口只写 `pm_aggregation_results` 一次；超时窗口会
+带 `complete=false` 和 `missing_slots` 落库，迟到事件不会重开窗口。
+
+故障恢复顺序：先恢复 NATS 和 Redis，再启动 worker。worker 会扫描未完成窗口；Redis 中状态
+不存在时，从 `PM_AGGREGATION` retained stream 重建。若保留期不足，窗口标为 failed 并告警，
+禁止从原始 PM 表回查或伪造完整结果。
 - PM 上传背压以 MinIO 所在文件系统的已用空间加“已接收但尚未物化”的 PM 文件预计
   入库量计算；同文件系统上的 TSDB 临时文件、WAL 和文件预分配已包含在实际已用空间，
   不重复累加。默认预计入库放大系数为保守的 `1.0`。

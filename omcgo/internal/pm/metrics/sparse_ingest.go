@@ -35,11 +35,6 @@ func writeSparseMeasurements(ctx context.Context, tx pgx.Tx, fileID, batchID *uu
 	if err != nil {
 		return fmt.Errorf("collect sparse metric definitions: %w", err)
 	}
-	// Lock order invariant: hourly bucket/version state → dictionary → metric set
-	// → anchors/values. This remains in the ingest transaction for atomic rollback.
-	if err := markHourlyBucketsDirty(ctx, tx, measurements); err != nil {
-		return err
-	}
 	ids, err := resolveMetricDictionary(ctx, tx, defs)
 	if err != nil {
 		return fmt.Errorf("resolve pm metric dictionary: %w", err)

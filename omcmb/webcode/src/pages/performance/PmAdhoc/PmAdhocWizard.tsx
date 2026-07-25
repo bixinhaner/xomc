@@ -153,7 +153,7 @@ export default function PmAdhocWizard() {
   // ① 基本信息
   const [name, setName] = useState('');
   const [technology, setTechnology] = useState<WizardTech>('lte');
-  const [mode, setMode] = useState<AdhocMode>('oneshot');
+  const [mode] = useState<AdhocMode>('continuous');
   const [expireDays, setExpireDays] = useState<number>(60);
   const [visibility, setVisibility] = useState<AdhocVisibility>('private');
 
@@ -189,7 +189,6 @@ export default function PmAdhocWizard() {
     if (editTask.technology === 'lte' || editTask.technology === 'nr' || editTask.technology === 'gsm') {
       setTechnology(editTask.technology);
     }
-    setMode(editTask.mode);
     setExpireDays(editTask.expireDays || 60);
     setVisibility(editTask.visibility ?? 'private');
     setDimension(editTask.dimension);
@@ -430,10 +429,8 @@ export default function PmAdhocWizard() {
           optionType="button"
           buttonStyle="solid"
           value={mode}
-          disabled={isEdit}
-          onChange={(e) => setMode(e.target.value as AdhocMode)}
+          disabled
           options={[
-            { label: intl.formatMessage({ id: 'perf.adhoc.modeOneshotFull' }), value: 'oneshot' },
             { label: intl.formatMessage({ id: 'perf.adhoc.modeContinuousFull' }), value: 'continuous' },
           ]}
         />

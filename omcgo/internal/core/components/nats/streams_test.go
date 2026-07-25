@@ -3,6 +3,7 @@ package nats
 import (
 	"strings"
 	"testing"
+	"time"
 
 	gonats "github.com/nats-io/nats.go"
 )
@@ -15,6 +16,28 @@ func subjectMatchesStream(subject, pattern string) bool {
 		return strings.HasPrefix(subject, prefix)
 	}
 	return subject == pattern
+}
+
+func TestDefaultStreams_PMAggregationIsRetainedForRecovery(t *testing.T) {
+	for _, stream := range DefaultStreams() {
+		if stream.Name != "PM_AGGREGATION" {
+			continue
+		}
+		if stream.Retention != gonats.LimitsPolicy {
+			t.Fatalf("PM_AGGREGATION retention = %v, want LimitsPolicy", stream.Retention)
+		}
+		if stream.MaxAge < 40*24*time.Hour {
+			t.Fatalf("PM_AGGREGATION max age = %v, want at least 40 days", stream.MaxAge)
+		}
+		if stream.Compression != gonats.S2Compression {
+			t.Fatalf("PM_AGGREGATION compression = %v, want S2", stream.Compression)
+		}
+		if !subjectMatchesStream("pmaggregation.normalized", stream.Subjects[0]) {
+			t.Fatalf("PM aggregation normalized subject not covered by %v", stream.Subjects)
+		}
+		return
+	}
+	t.Fatal("PM_AGGREGATION stream is not registered")
 }
 
 func subjectCovered(subject string, streams []StreamDef) bool {

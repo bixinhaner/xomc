@@ -165,16 +165,12 @@ services:
       TZ: "Asia/Shanghai"
     ports:
       - "6379:6379"                        # 内网开放(0.0.0.0),供其它服务器直连
-    # maxmemory 2gb + allkeys-lru：Redis 无上限增长会撞 cgroup 触发 OOM。曾因数据集 2.36GB
-    # 远超 512m 限额，启动 load 即被 kill → 死循环、永不 healthy，拖垮 app/acs/worker。设
-    # maxmemory 上限 + LRU 淘汰（队列/会话等丢失可从 PG 双写或重新上报恢复）；容器 limit 抬到
-    # 3g（> maxmemory，给 AOF rewrite 的 fork COW 留余量）。
-    # maxmemory / 淘汰策略由 resources.env 注入。缺省(#167 Step 0)：policy allkeys-lru→volatile-lru
-    # （只淘汰带 TTL 的键，保护无 TTL 的命令队列；OMC 键均有 TTL，被淘汰可从 PG 双写/重报恢复）。
+    # PM 在线聚合窗口是运行期权威状态，必须 AOF everysec + noeviction。
+    # 内存不足时显式失败并告警，不能以 LRU 静默破坏窗口完整性。
     # 约束：limits.memory 须 ≥ maxmemory + 1GiB（AOF rewrite 的 fork COW 余量）。
     # --no-appendfsync-on-rewrite：rewrite 期不 fsync，削峰；--save ""：AOF 已开，关 RDB save
     # 点避免双 fork COW（重启恢复走 AOF）。
-    command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-2gb} --maxmemory-policy ${REDIS_MAXMEMORY_POLICY:-volatile-lru} --no-appendfsync-on-rewrite yes --save ""
+    command: redis-server --appendonly yes --appendfsync everysec --maxmemory ${REDIS_MAXMEMORY:-2gb} --maxmemory-policy noeviction --no-appendfsync-on-rewrite yes --save ""
     # AOF rewrite/fsync 落盘窗口
     stop_grace_period: 30s
     deploy:
@@ -206,7 +202,7 @@ services:
       - "4222:4222"                        # NATS 客户端,内网开放(0.0.0.0)
       - "127.0.0.1:8222:8222"              # NATS HTTP 监控,仅本机回环(运维 dashboard)
     # Path B 需要允许 DeviceGSM.Bts. 等对象一次返回全部实例。
-    # max_payload=5MB 对齐 provision/sync_pathb_expand.go 的预算。
+    # PM 标准事件上限 8MiB，预留 envelope 余量。
     entrypoint:
       - /bin/sh
       - -c
@@ -217,7 +213,7 @@ services:
           max_memory_store: ${NATS_MAX_MEMORY_STORE:-134217728}
         }
         http_port: 8222
-        max_payload: 5242880
+        max_payload: 10485760
         EOF
         exec nats-server -c /tmp/nats-server.conf
     # JetStream store 落盘窗口

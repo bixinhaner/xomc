@@ -36,11 +36,9 @@ func postCreate(t *testing.T, body map[string]any) *httptest.ResponseRecorder {
 
 func baseCreateBody() map[string]any {
 	return map[string]any{
-		"name": "t", "mode": "oneshot",
+		"name": "t", "mode": "continuous",
 		"device_sns":   []string{"S1"},
 		"metric_paths": []string{"M1"},
-		"window_start": "2026-05-22T10:00:00Z",
-		"window_end":   "2026-05-22T11:00:00Z",
 	}
 }
 
@@ -287,8 +285,8 @@ func Test_Handler_Create_Oneshot_NoWindow_Rejected(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-// 成功路径：oneshot + 有效 window（end>start）→ 201。
-func Test_Handler_Create_Oneshot_ValidWindow_OK(t *testing.T) {
+// 失败路径：新架构不接受 oneshot，即使提供有效历史窗口也不回算。
+func Test_Handler_Create_Oneshot_ValidWindow_Rejected(t *testing.T) {
 	b := map[string]any{
 		"name": "o", "mode": "oneshot",
 		"dimension":     "network",
@@ -298,7 +296,7 @@ func Test_Handler_Create_Oneshot_ValidWindow_OK(t *testing.T) {
 		"window_end":    "2026-05-22T11:00:00Z",
 	}
 	w := postCreate(t, b)
-	assert.Equal(t, http.StatusCreated, w.Code)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 // 失败路径：oneshot + window_end <= window_start → 400。

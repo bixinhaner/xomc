@@ -189,6 +189,11 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
   });
   const rows = resultsResp?.rows ?? [];
   const totalRows = resultsResp?.total ?? rows.length;
+  const incompleteRows = rows.filter((row) => row.complete === false);
+  const incompleteWindowCount = new Set(
+    incompleteRows.map((row) => `${row.taskVersionId}|${row.granularity}|${row.startTime}|${row.endTime}`),
+  ).size;
+  const missingSlotCount = incompleteRows.reduce((total, row) => total + (row.missingSlots ?? 0), 0);
   // T-0194：真实总数 > 返回行数 = 被 limit 截断，给诚实提示。
   const truncated = totalRows > rows.length;
 
@@ -309,6 +314,17 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
       )}
     />
   ) : null;
+  const incompleteAlert = incompleteRows.length > 0 ? (
+    <Alert
+      type="warning"
+      showIcon
+      style={{ marginBottom: 8 }}
+      message={intl.formatMessage(
+        { id: 'perf.adhoc.incompleteWindowTip' },
+        { windows: incompleteWindowCount, slots: missingSlotCount },
+      )}
+    />
+  ) : null;
 
   // 嵌入仪表盘 Panel：外层卡片由 Panel 提供，这里不再套 Card
   if (embedded) {
@@ -316,6 +332,7 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
       <div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>{summary}</div>
         {truncationAlert}
+        {incompleteAlert}
         {body}
       </div>
     );
@@ -340,6 +357,7 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
       extra={summary}
     >
       {truncationAlert}
+      {incompleteAlert}
       {body}
     </Card>
   );

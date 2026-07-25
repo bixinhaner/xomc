@@ -8156,9 +8156,10 @@ const messages: Record<string, string> = {
   'perf.adhoc.btnSubmit':                '提交',
   'perf.adhoc.btnSaveEdit':              '保存修改',
   'perf.adhoc.checkStepsIncomplete':     '请检查各步骤填写是否完整',
-  'perf.adhoc.taskCreated':              '任务已创建，worker 将开始执行',
+  'perf.adhoc.taskCreated':              '任务已创建，将从下一个完整聚合窗口生效，不补算历史数据',
   'perf.adhoc.createFailed':             '创建失败：{msg}',
-  'perf.adhoc.taskUpdated':              '任务已更新',
+  'perf.adhoc.taskUpdated':              '任务已更新，新版本将从下一个完整聚合窗口生效',
+  'perf.adhoc.incompleteWindowTip':       '有 {windows} 个聚合窗口因超时按不完整结果落库，共缺少 {slots} 个设备时隙',
   'perf.adhoc.updateFailed':             '更新失败：{msg}',
   // 结果面板
   'perf.adhoc.aggregateGroupUnit':       '聚合组·{count} 台',
