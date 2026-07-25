@@ -143,22 +143,27 @@ export default function CommandSelectModal({
   const filtered = useMemo(() => {
     const kw = keyword.trim().toLowerCase();
     if (!kw) return entries;
-    return entries.filter(
-      (e) =>
-        e.command.commandCode.toLowerCase().includes(kw) ||
-        e.command.displayName.toLowerCase().includes(kw) ||
-        e.groupName.toLowerCase().includes(kw),
+    return entries.filter((e) =>
+      [
+        e.command.commandCode,
+        e.command.displayName,
+        e.groupName,
+        e.command.targetObject ?? '',
+        ...(e.command.targetPaths ?? []),
+      ].some((field) => field.toLowerCase().includes(kw)),
     );
   }, [entries, keyword]);
 
   const filteredCustoms = useMemo(() => {
     const kw = keyword.trim().toLowerCase();
     if (!kw) return customCommandsWithAvailablePaths;
-    return customCommandsWithAvailablePaths.filter(
-      (cc) =>
-        cc.commandCode.toLowerCase().includes(kw) ||
-        cc.commandName.toLowerCase().includes(kw) ||
-        customGroupLabel.toLowerCase().includes(kw),
+    return customCommandsWithAvailablePaths.filter((cc) =>
+      [
+        cc.commandCode,
+        cc.commandName,
+        customGroupLabel,
+        ...(cc.paramPaths ?? []),
+      ].some((field) => field.toLowerCase().includes(kw)),
     );
   }, [customCommandsWithAvailablePaths, keyword, customGroupLabel]);
 

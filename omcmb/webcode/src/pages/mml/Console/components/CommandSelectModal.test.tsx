@@ -29,6 +29,7 @@ const fixtures = vi.hoisted(() => {
       displayName: '查询设备信息',
       operationType: 'LST',
       targetObject: '',
+      targetPaths: ['Device.Info.Serial', 'Device.Info.Name'],
     },
     {
       id: 'dsp-1',
@@ -172,6 +173,19 @@ function renderModal(props: Partial<ModalProps> = {}) {
 }
 
 describe('CommandSelectModal', () => {
+  it('filters standard commands by target path', async () => {
+    renderModal();
+
+    fireEvent.change(
+      screen.getByPlaceholderText('mml.consoleV2.cmdSelect.searchPlaceholder'),
+      { target: { value: 'Device.Info.Serial' } },
+    );
+
+    expect(await screen.findByText('查询设备信息')).toBeInTheDocument();
+    expect(screen.queryByText('展示设备信息')).not.toBeInTheDocument();
+    expect(screen.queryByText('修改设备信息')).not.toBeInTheDocument();
+  });
+
   it('disables confirmation until an LST Path is selected and returns only selected keys', async () => {
     const onConfirm = vi.fn();
     renderModal({ onConfirm, value: null, selectedPathKeys: [] });
