@@ -9,12 +9,75 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/core/reliability"
 )
+
+type queueStatsReaderStub struct {
+	streamName string
+	streamErr  error
+
+	consumerInfo *nats.ConsumerInfo
+	consumerErr  error
+
+	streamInfo            *nats.StreamInfo
+	streamInfoErr         error
+	streamInfoCompletedAt time.Time
+	streamInfoDelay       time.Duration
+
+	nextMessage     *nats.RawStreamMsg
+	nextErr         error
+	nextStart       uint64
+	nextSubject     string
+	nextCalls       int
+	nextCompletedAt time.Time
+
+	calls int
+}
+
+func (s *queueStatsReaderStub) StreamNameBySubject(ctx context.Context, _ string) (string, error) {
+	s.calls++
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return s.streamName, s.streamErr
+}
+
+func (s *queueStatsReaderStub) ConsumerInfo(ctx context.Context, _, _ string) (*nats.ConsumerInfo, error) {
+	s.calls++
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return s.consumerInfo, s.consumerErr
+}
+
+func (s *queueStatsReaderStub) StreamInfo(ctx context.Context, _ string) (*nats.StreamInfo, error) {
+	s.calls++
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if s.streamInfoDelay > 0 {
+		time.Sleep(s.streamInfoDelay)
+	}
+	s.streamInfoCompletedAt = time.Now()
+	return s.streamInfo, s.streamInfoErr
+}
+
+func (s *queueStatsReaderStub) NextMessage(ctx context.Context, _ string, start uint64, subject string) (*nats.RawStreamMsg, error) {
+	s.calls++
+	s.nextCalls++
+	s.nextStart = start
+	s.nextSubject = subject
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.nextCompletedAt = time.Now()
+	return s.nextMessage, s.nextErr
+}
 
 // --- Constructor tests ---
 
@@ -29,6 +92,202 @@ func TestNewNATSEventBus_ReturnsNonNil(t *testing.T) {
 	assert.Nil(t, bus.js)
 	assert.NotNil(t, bus.logger)
 	assert.Nil(t, bus.subs)
+}
+
+func TestNATSEventBusQueueStats(t *testing.T) {
+	now := time.Now()
+	firstRetainedAt := now.Add(-3 * time.Minute)
+	tests := []struct {
+		name          string
+		consumer      *nats.ConsumerInfo
+		stream        *nats.StreamInfo
+		nextMessage   *nats.RawStreamMsg
+		nextErr       error
+		expectedStart uint64
+		assert        func(t *testing.T, stats QueueStats)
+	}{
+		{
+			name:     "empty stream has no oldest pending age",
+			consumer: &nats.ConsumerInfo{},
+			stream:   &nats.StreamInfo{State: nats.StreamState{}},
+			assert: func(t *testing.T, stats QueueStats) {
+				assert.Zero(t, stats.Pending)
+				assert.Zero(t, stats.AckPending)
+				assert.Zero(t, stats.Redelivered)
+				assert.Zero(t, stats.OldestPendingAge)
+				assert.Zero(t, stats.LastSequence)
+				assert.Zero(t, stats.AckSequence)
+			},
+		},
+		{
+			name: "pending age ignores older unrelated shared stream messages",
+			consumer: &nats.ConsumerInfo{
+				NumPending:     7,
+				NumAckPending:  2,
+				NumRedelivered: 3,
+				AckFloor:       nats.SequenceInfo{Consumer: 9, Stream: 11},
+				Delivered:      nats.SequenceInfo{Consumer: 18, Stream: 19},
+			},
+			stream: &nats.StreamInfo{State: nats.StreamState{
+				Msgs:      9,
+				FirstSeq:  12,
+				FirstTime: now.Add(-30 * time.Minute),
+				LastSeq:   20,
+			}},
+			nextMessage:   &nats.RawStreamMsg{Subject: SubjectPMFileReceived, Sequence: 14, Time: firstRetainedAt},
+			expectedStart: 12,
+			assert: func(t *testing.T, stats QueueStats) {
+				assert.Equal(t, uint64(7), stats.Pending)
+				assert.Equal(t, 2, stats.AckPending)
+				assert.Equal(t, 3, stats.Redelivered)
+				assert.InDelta(t, 3*time.Minute, stats.OldestPendingAge, float64(250*time.Millisecond))
+				assert.Equal(t, uint64(20), stats.LastSequence)
+				assert.Equal(t, uint64(11), stats.AckSequence)
+				assert.Equal(t, uint64(18), stats.DeliverySequence)
+				assert.Equal(t, uint64(9), stats.AckConsumerSequence)
+			},
+		},
+		{
+			name: "advanced and deleted first sequence uses next matching retained message",
+			consumer: &nats.ConsumerInfo{
+				NumPending: 3,
+				AckFloor:   nats.SequenceInfo{Stream: 4},
+			},
+			stream: &nats.StreamInfo{State: nats.StreamState{
+				Msgs:      3,
+				FirstSeq:  8,
+				FirstTime: now.Add(-30 * time.Minute),
+				LastSeq:   11,
+				Deleted:   []uint64{9},
+			}},
+			nextMessage:   &nats.RawStreamMsg{Subject: SubjectPMFileReceived, Sequence: 10, Time: now.Add(-time.Minute)},
+			expectedStart: 8,
+			assert: func(t *testing.T, stats QueueStats) {
+				assert.Equal(t, uint64(3), stats.Pending)
+				assert.InDelta(t, time.Minute, stats.OldestPendingAge, float64(250*time.Millisecond))
+				assert.Equal(t, uint64(11), stats.LastSequence)
+				assert.Equal(t, uint64(4), stats.AckSequence)
+			},
+		},
+		{
+			name: "ack only uses consumer acknowledgement floor as the bounded lookup start",
+			consumer: &nats.ConsumerInfo{
+				NumAckPending: 1,
+				AckFloor:      nats.SequenceInfo{Stream: 4},
+				Delivered:     nats.SequenceInfo{Stream: 10},
+			},
+			stream:        &nats.StreamInfo{State: nats.StreamState{FirstSeq: 3, LastSeq: 10}},
+			nextMessage:   &nats.RawStreamMsg{Subject: SubjectPMFileReceived, Sequence: 7, Time: now.Add(-2 * time.Minute)},
+			expectedStart: 5,
+			assert: func(t *testing.T, stats QueueStats) {
+				assert.Zero(t, stats.Pending)
+				assert.Equal(t, 1, stats.AckPending)
+				assert.InDelta(t, 2*time.Minute, stats.OldestPendingAge, float64(250*time.Millisecond))
+			},
+		},
+		{
+			name:          "no matching retained message has zero age",
+			consumer:      &nats.ConsumerInfo{NumPending: 1, Delivered: nats.SequenceInfo{Stream: 4}},
+			stream:        &nats.StreamInfo{State: nats.StreamState{FirstSeq: 1, LastSeq: 8}},
+			nextErr:       nats.ErrMsgNotFound,
+			expectedStart: 5,
+			assert: func(t *testing.T, stats QueueStats) {
+				assert.Zero(t, stats.OldestPendingAge)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := &queueStatsReaderStub{
+				streamName:      "PM",
+				consumerInfo:    tt.consumer,
+				streamInfo:      tt.stream,
+				streamInfoDelay: time.Millisecond,
+				nextMessage:     tt.nextMessage,
+				nextErr:         tt.nextErr,
+			}
+			bus := NewNATSEventBus(nil, nil, zap.NewNop())
+			bus.queueStatsReader = reader
+
+			stats, err := bus.QueueStats(context.Background(), SubjectPMFileReceived, "pm-workers")
+			require.NoError(t, err)
+			tt.assert(t, stats)
+			assert.False(t, stats.SampledAt.Before(reader.streamInfoCompletedAt), "sample timestamp must be at or after collection completes")
+			if reader.nextCalls > 0 {
+				assert.False(t, stats.SampledAt.Before(reader.nextCompletedAt), "sample timestamp must be at or after the oldest-message lookup completes")
+			}
+			if tt.expectedStart > 0 {
+				assert.Equal(t, tt.expectedStart, reader.nextStart)
+				assert.Equal(t, SubjectPMFileReceived, reader.nextSubject)
+			}
+		})
+	}
+}
+
+func TestNATSEventBusQueueStatsMissingConsumer(t *testing.T) {
+	bus := NewNATSEventBus(nil, nil, zap.NewNop())
+	bus.queueStatsReader = &queueStatsReaderStub{
+		streamName:  "PM",
+		consumerErr: nats.ErrConsumerNotFound,
+	}
+
+	_, err := bus.QueueStats(context.Background(), SubjectPMFileReceived, "pm-workers")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, nats.ErrConsumerNotFound)
+	assert.Contains(t, err.Error(), "load queue consumer info")
+}
+
+func TestNATSEventBusQueueStatsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	reader := &queueStatsReaderStub{}
+	bus := NewNATSEventBus(nil, nil, zap.NewNop())
+	bus.queueStatsReader = reader
+
+	_, err := bus.QueueStats(ctx, SubjectPMFileReceived, "pm-workers")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Zero(t, reader.calls, "a canceled context must not make NATS requests")
+}
+
+func TestNATSEventBusPendingCountUsesQueueStats(t *testing.T) {
+	bus := NewNATSEventBus(nil, nil, zap.NewNop())
+	bus.queueStatsReader = &queueStatsReaderStub{
+		streamName: "PM",
+		consumerInfo: &nats.ConsumerInfo{
+			NumPending:    7,
+			NumAckPending: 2,
+		},
+		streamInfo: &nats.StreamInfo{},
+	}
+
+	count, err := bus.PendingCount(SubjectPMFileReceived, "pm-workers")
+	require.NoError(t, err)
+	assert.Equal(t, uint64(9), count)
+}
+
+func TestNATSEventBusQueueStatsDoesNotObservePMMetricsDirectly(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	metrics := NewEventBusMetrics(reg)
+	bus := NewNATSEventBus(nil, nil, zap.NewNop())
+	bus.SetMetrics(metrics)
+	bus.queueStatsReader = &queueStatsReaderStub{
+		streamName: "PM",
+		consumerInfo: &nats.ConsumerInfo{
+			NumPending: 5,
+		},
+		streamInfo: &nats.StreamInfo{},
+	}
+
+	_, err := bus.QueueStats(context.Background(), SubjectPMFileReceived, "pm-workers")
+	require.NoError(t, err)
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	require.Len(t, families, 1)
+	assert.Equal(t, "omc_pm_queue_sample_timestamp_seconds", families[0].GetName())
+	assert.Zero(t, families[0].Metric[0].GetGauge().GetValue(),
+		"QueueStats itself must not turn an initialized timestamp into a successful observation")
 }
 
 // --- Event serialization round-trip ---

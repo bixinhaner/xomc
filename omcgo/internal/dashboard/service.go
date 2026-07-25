@@ -225,7 +225,7 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 	// 导致 KPI 卡与同页柱图数字漂移。
 	g.Go(func() error {
 		if err := s.pgPool.QueryRow(gctx, summaryDeviceCountsQuery).Scan(&totalDevices, &onlineDevices); err != nil {
-			s.logger.Warn("dashboard: device counts query failed", zap.Error(err))
+			logDashboardQueryFailure(s.logger, "dashboard: device counts query failed", err)
 			totalDevices = 0
 			onlineDevices = 0
 		}
@@ -236,7 +236,7 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 	g.Go(func() error {
 		stats, err := s.alarmStore.Statistics(gctx, alarm.AlarmFilter{})
 		if err != nil {
-			s.logger.Warn("dashboard: alarm stats failed", zap.Error(err))
+			logDashboardQueryFailure(s.logger, "dashboard: alarm stats failed", err)
 			rawAlarmStats = &alarm.AlarmStatistics{
 				BySeverity: make(map[model.AlarmSeverity]int64),
 				ByType:     make(map[string]int64),
@@ -261,7 +261,7 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 		}
 		rows, err := s.tsPool.Query(gctx, query, args...)
 		if err != nil {
-			s.logger.Warn("dashboard: latest kpi query failed", zap.Error(err))
+			logDashboardQueryFailure(s.logger, "dashboard: latest kpi query failed", err)
 			return nil
 		}
 		defer rows.Close()
@@ -280,7 +280,7 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 			})
 		}
 		if err := rows.Err(); err != nil {
-			s.logger.Warn("dashboard: iterate latest kpi rows failed", zap.Error(err))
+			logDashboardQueryFailure(s.logger, "dashboard: iterate latest kpi rows failed", err)
 		}
 		return nil
 	})
@@ -294,7 +294,7 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 		filter.SortDir = "desc"
 		result, err := s.alarmStore.ListActive(gctx, filter)
 		if err != nil {
-			s.logger.Warn("dashboard: recent alarms failed", zap.Error(err))
+			logDashboardQueryFailure(s.logger, "dashboard: recent alarms failed", err)
 			rawAlarms = []model.Alarm{}
 			return nil
 		}
@@ -313,7 +313,7 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 			return nil
 		}
 		if err := s.pgPool.QueryRow(gctx, query, args...).Scan(&alarmDeviceCount); err != nil {
-			s.logger.Warn("dashboard: alarm device count failed", zap.Error(err))
+			logDashboardQueryFailure(s.logger, "dashboard: alarm device count failed", err)
 		}
 		return nil
 	})
@@ -470,7 +470,7 @@ func (s *Service) calculateKPIDeltas(
 	// 1. Total devices trend (compare with last week same time)
 	prevTotalDevices, err := s.countDevicesAtTime(ctx, windows.DeviceCompareAt)
 	if err != nil {
-		s.logger.Warn("dashboard: previous device count unavailable", zap.Error(err))
+		logDashboardQueryFailure(s.logger, "dashboard: previous device count unavailable", err)
 	}
 	deltas["total_devices"] = computeKPIDelta(
 		float64(currentTotalDevices),
@@ -482,7 +482,7 @@ func (s *Service) calculateKPIDeltas(
 	// 2. Active alarms trend (compare with yesterday)
 	prevTotalAlarms, err := s.countAlarmsAtTime(ctx, windows.AlarmCompareAt)
 	if err != nil {
-		s.logger.Warn("dashboard: previous alarm count unavailable", zap.Error(err))
+		logDashboardQueryFailure(s.logger, "dashboard: previous alarm count unavailable", err)
 	}
 	deltas["active_alarms"] = computeKPIDelta(
 		float64(currentTotalAlarms),
@@ -502,7 +502,7 @@ func (s *Service) calculateKPIDeltas(
 			windows.UECurrentEnd,
 		)
 		if currentErr != nil {
-			s.logger.Warn("dashboard: current active UE comparison unavailable", zap.Error(currentErr))
+			logDashboardQueryFailure(s.logger, "dashboard: current active UE comparison unavailable", currentErr)
 		}
 		previousEntries, previousErr := s.queryNetworkKPISeries(
 			ctx,
@@ -511,7 +511,7 @@ func (s *Service) calculateKPIDeltas(
 			windows.UEPreviousEnd,
 		)
 		if previousErr != nil {
-			s.logger.Warn("dashboard: previous active UE comparison unavailable", zap.Error(previousErr))
+			logDashboardQueryFailure(s.logger, "dashboard: previous active UE comparison unavailable", previousErr)
 		}
 		if currentErr == nil && previousErr == nil {
 			deltas[activeUEKPIAlias] = computeSeriesKPIDelta(currentEntries, previousEntries, "last_week")
@@ -887,7 +887,7 @@ func (s *Service) GetKPITrendComparison(ctx context.Context, kpiName string, com
 func (s *Service) GetRegionStats(ctx context.Context) ([]RegionStatEntry, error) {
 	groups, err := s.groupRepo.GetTree(ctx)
 	if err != nil {
-		s.logger.Warn("dashboard: get group tree failed", zap.Error(err))
+		logDashboardQueryFailure(s.logger, "dashboard: get group tree failed", err)
 		return []RegionStatEntry{}, nil
 	}
 	if len(groups) == 0 {
@@ -902,8 +902,8 @@ func (s *Service) GetRegionStats(ctx context.Context) ([]RegionStatEntry, error)
 
 		deviceIDs, err := s.groupRepo.ListDeviceIDs(ctx, g.ID)
 		if err != nil {
-			s.logger.Warn("dashboard: list device IDs for group failed",
-				zap.String("group", g.Name), zap.Error(err))
+			logDashboardQueryFailure(s.logger, "dashboard: list device IDs for group failed", err,
+				zap.String("group", g.Name))
 			entries = append(entries, entry)
 			continue
 		}
@@ -926,8 +926,8 @@ func (s *Service) GetRegionStats(ctx context.Context) ([]RegionStatEntry, error)
 					return nil
 				}
 				if err := s.pgPool.QueryRow(gctx, onlineQuery, args...).Scan(&entry.OnlineCount); err != nil {
-					s.logger.Warn("dashboard: count online devices failed",
-						zap.String("group", entry.Region), zap.Error(err))
+					logDashboardQueryFailure(s.logger, "dashboard: count online devices failed", err,
+						zap.String("group", entry.Region))
 				}
 				return nil
 			})
@@ -943,8 +943,8 @@ func (s *Service) GetRegionStats(ctx context.Context) ([]RegionStatEntry, error)
 					return nil
 				}
 				if err := s.pgPool.QueryRow(gctx, alarmQuery, args...).Scan(&entry.AlarmCount); err != nil {
-					s.logger.Warn("dashboard: count group alarms failed",
-						zap.String("group", entry.Region), zap.Error(err))
+					logDashboardQueryFailure(s.logger, "dashboard: count group alarms failed", err,
+						zap.String("group", entry.Region))
 				}
 				return nil
 			})

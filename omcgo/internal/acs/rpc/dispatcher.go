@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/omcgo/omcgo/internal/acs/transfercfg"
+	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/pkg/soap"
 )
 
@@ -202,6 +203,7 @@ func (h *DownloadHandler) BuildRequest(cmd *Command) ([]byte, error) {
 	// Username / Password 不再自动从 transfercfg.Download 注入——产品线要求 Download
 	// 不走 HTTP Basic Auth（与 Upload 对齐），CPE 拿到的 <cwmp:Username></cwmp:Username>
 	// 应该是空标签。Params.URL 上层若已显式塞凭据走透传；空字符串则渲染成空标签。
+	params.URL = appconfig.NormalizeConfigBackupReference(params.URL)
 	current := h.currentSettings()
 	if current.BaseURL != "" && params.URL != "" && !strings.Contains(params.URL, "://") {
 		servicePath := current.Path

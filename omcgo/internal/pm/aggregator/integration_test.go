@@ -13,19 +13,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/omcgo/omcgo/internal/core/asyncjob"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
-// Integration test：注入 15min pm_metrics 数据 → 调 AggregateCounters → 验证 pm_metrics_hourly 行正确。
-//
-// 运行方式：
-//
-//	OMCGO_DB_DSN=postgres://omcgo:omcgo123@localhost:5432/omcgo?sslmode=disable \
-//	  go test -tags integration -count=1 -run Integration ./internal/pm/aggregator/...
-//
-// 注意：本测试会修改 pm_metrics / pm_metrics_hourly；用唯一 device_sn 'AGGR-INT-TEST-001' 隔离。
-func Test_Integration_HourlyAggregateCounters_SumPath(t *testing.T) {
+func Test_Integration_IndicatorMeta_DictionaryPriorityAndLegacyFallback(t *testing.T) {
 	dsn := os.Getenv("OMCGO_DB_DSN")
 	if dsn == "" {
 		t.Skip("OMCGO_DB_DSN not set; skipping integration test")
@@ -37,140 +28,57 @@ func Test_Integration_HourlyAggregateCounters_SumPath(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
-	const (
-		testOUI = "INTTST"
-		testSN  = "AGGR-INT-TEST-001"
-		path    = "L.Cell.Avail.Dur"
-	)
-	// 唯一 bucket 时间：2026-05-22 10:00 ~ 11:00 UTC（避免与现网数据冲突）
-	bucketStart := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
-	bucketEnd := bucketStart.Add(time.Hour)
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
 
-	// 1) 清理上次运行残留
-	cleanup := func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM pm_metrics WHERE device_oui=$1 AND device_sn=$2`, testOUI, testSN)
-		_, _ = pool.Exec(ctx, `DELETE FROM pm_metrics_hourly WHERE device_oui=$1 AND device_sn=$2`, testOUI, testSN)
-	}
-	cleanup()
-	defer cleanup()
-
-	// 2) 注入 4 个 15min 行：值 100/200/150/250 → SUM=700
-	values := []float64{100, 200, 150, 250}
-	for i, v := range values {
-		endTime := bucketStart.Add(time.Duration(i+1) * 15 * time.Minute) // 10:15, 10:30, 10:45, 11:00
-		startTime := endTime.Add(-15 * time.Minute)
-		_, err := pool.Exec(ctx, `
-INSERT INTO pm_metrics (device_oui, device_sn, metric_path, metric_type, metric_value, statis_type, granularity, time, start_time, end_time)
-VALUES ($1, $2, $3, 'counter', $4, 'sum', '15min', $5, $6, $5)`,
-			testOUI, testSN, path, v, endTime, startTime)
+	for _, ddl := range []string{
+		`CREATE TEMP TABLE perf_indicators_enb (id text, unit_id text, statis_type text) ON COMMIT DROP`,
+		`CREATE TEMP TABLE perf_indicators_gnb (id text, unit_id text, statis_type text) ON COMMIT DROP`,
+		`CREATE TEMP TABLE perf_indicators_gsm (id text, unit_id text, statis_type text) ON COMMIT DROP`,
+		`CREATE TEMP TABLE pm_metric_dictionary (
+			metric_path text PRIMARY KEY, unit text, statis_type text, metric_type text
+		) ON COMMIT DROP`,
+	} {
+		_, err = tx.Exec(ctx, ddl)
 		require.NoError(t, err)
 	}
-
-	// 3) 跑 AggregateCounters (window 10:00–11:00 排除 11:00 的最后一行 → end_time>=$4 AND end_time<$5)
-	//    bucketEnd 是开区间，所以 endTime=11:00 的行不会被 SUM。期望取 10:15/10:30/10:45 三行 = 100+200+150 = 450
-	a := NewWithPool(pool, nil, nil)
-	w := WindowSpec{Granularity: metrics.GranularityHourly, Start: bucketStart, End: bucketEnd}
-	n, err := a.AggregateCounters(ctx, "pm_metrics", "pm_metrics_hourly", w)
+	_, err = tx.Exec(ctx, `
+INSERT INTO perf_indicators_enb (id, unit_id, statis_type) VALUES
+    ('same', 'number', 'sum'),
+    ('conflict', 'number', 'sum'),
+    ('fallback', 'number', 'sum'),
+    ('legacy-complete', NULL, NULL);
+INSERT INTO perf_indicators_gnb (id, unit_id, statis_type) VALUES
+    ('legacy-complete', 'number', 'max');
+INSERT INTO pm_metric_dictionary (metric_path, unit, statis_type, metric_type) VALUES
+    ('dictionary-only', 'number', 'sum', 'counter'),
+    ('same', 'number', 'sum', 'counter'),
+    ('conflict', '%', 'pct', 'counter'),
+    ('fallback', '', 'avg', 'counter'),
+    ('ignored-kpi', '%', 'pct', 'kpi')`)
 	require.NoError(t, err)
-	assert.GreaterOrEqual(t, n, 1)
 
-	// 4) 验证 pm_metrics_hourly 行
-	var aggValue float64
-	var aggStatis, aggGran string
-	err = pool.QueryRow(ctx, `
-SELECT metric_value, statis_type, granularity
-FROM pm_metrics_hourly
-WHERE device_oui=$1 AND device_sn=$2 AND metric_path=$3 AND end_time=$4`,
-		testOUI, testSN, path, bucketEnd).Scan(&aggValue, &aggStatis, &aggGran)
+	rows, err := tx.Query(ctx, "WITH "+indicatorMetaSQL()+`
+SELECT id, unit_id, statis_type FROM indicator_meta ORDER BY id`)
 	require.NoError(t, err)
-	assert.InDelta(t, 450.0, aggValue, 0.001, "10:15+10:30+10:45 = 100+200+150 = 450 (11:00 falls outside half-open [10:00,11:00))")
-	assert.Equal(t, "sum", aggStatis)
-	assert.Equal(t, "hourly", aggGran)
+	defer rows.Close()
 
-	// 5) 再次跑：UPSERT 幂等
-	n2, err := a.AggregateCounters(ctx, "pm_metrics", "pm_metrics_hourly", w)
-	require.NoError(t, err)
-	assert.GreaterOrEqual(t, n2, 1)
-	err = pool.QueryRow(ctx, `
-SELECT metric_value FROM pm_metrics_hourly
-WHERE device_oui=$1 AND device_sn=$2 AND metric_path=$3 AND end_time=$4`,
-		testOUI, testSN, path, bucketEnd).Scan(&aggValue)
-	require.NoError(t, err)
-	assert.InDelta(t, 450.0, aggValue, 0.001, "idempotent: second run yields same value")
-
-	// 6) Query 路由：hourly × device → pm_metrics_hourly
-	rows, err := a.Query(ctx, QueryRequest{
-		Granularity: metrics.GranularityHourly,
-		Dimension:   DimensionDevice,
-		DeviceOUIs:  []string{testOUI},
-		DeviceSNs:   []string{testSN},
-		StartTime:   bucketStart,
-		EndTime:     bucketEnd,
-	})
-	require.NoError(t, err)
-	require.NotEmpty(t, rows)
-	assert.Equal(t, path, rows[0].MetricPath)
-	assert.InDelta(t, 450.0, float64(rows[0].MetricValue), 0.001)
-}
-
-// Test runner via asyncjob payload — 验证 Runner.Run 能完整跑通 hourly pipeline
-func Test_Integration_HourlyRunner_PayloadDrivesPipeline(t *testing.T) {
-	dsn := os.Getenv("OMCGO_DB_DSN")
-	if dsn == "" {
-		t.Skip("OMCGO_DB_DSN not set; skipping integration test")
+	type meta struct{ unit, statis string }
+	got := make(map[string]meta)
+	for rows.Next() {
+		var id, unit, statis string
+		require.NoError(t, rows.Scan(&id, &unit, &statis))
+		got[id] = meta{unit: unit, statis: statis}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	pool, err := pgxpool.New(ctx, dsn)
-	require.NoError(t, err)
-	defer pool.Close()
-
-	const (
-		testOUI = "INTTST"
-		testSN  = "AGGR-RUNNER-TEST-001"
-		path    = "L.Cell.Throughput.Sum"
-	)
-	bucketStart := time.Date(2026, 5, 22, 12, 0, 0, 0, time.UTC)
-	bucketEnd := bucketStart.Add(time.Hour)
-
-	cleanup := func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM pm_metrics WHERE device_oui=$1 AND device_sn=$2`, testOUI, testSN)
-		_, _ = pool.Exec(ctx, `DELETE FROM pm_metrics_hourly WHERE device_oui=$1 AND device_sn=$2`, testOUI, testSN)
-	}
-	cleanup()
-	defer cleanup()
-
-	// 注入 2 个 15min 行：50 + 75 = 125
-	for i, v := range []float64{50, 75} {
-		endTime := bucketStart.Add(time.Duration(i+1) * 15 * time.Minute)
-		startTime := endTime.Add(-15 * time.Minute)
-		_, err := pool.Exec(ctx, `
-INSERT INTO pm_metrics (device_oui, device_sn, metric_path, metric_type, metric_value, statis_type, granularity, time, start_time, end_time)
-VALUES ($1, $2, $3, 'counter', $4, 'sum', '15min', $5, $6, $5)`,
-			testOUI, testSN, path, v, endTime, startTime)
-		require.NoError(t, err)
-	}
-
-	a := NewWithPool(pool, nil, nil)
-	runner := NewHourlyRunner(a)
-
-	payload, err := BuildPayload(bucketStart, bucketEnd)
-	require.NoError(t, err)
-
-	// 走 Runner.Run（模拟 asyncjob 调度）
-	job := &asyncjob.Job{ID: uuid.New(), JobType: runner.JobType(), Payload: payload}
-	result, err := runner.Run(ctx, job)
-	require.NoError(t, err)
-	assert.Contains(t, string(result), `"counter_rows"`)
-
-	var aggValue float64
-	err = pool.QueryRow(ctx, `
-SELECT metric_value FROM pm_metrics_hourly
-WHERE device_oui=$1 AND device_sn=$2 AND metric_path=$3`,
-		testOUI, testSN, path).Scan(&aggValue)
-	require.NoError(t, err)
-	assert.InDelta(t, 125.0, aggValue, 0.001)
+	require.NoError(t, rows.Err())
+	assert.Equal(t, map[string]meta{
+		"conflict":        {unit: "%", statis: "pct"},
+		"dictionary-only": {unit: "number", statis: "sum"},
+		"fallback":        {unit: "number", statis: "avg"},
+		"legacy-complete": {unit: "number", statis: "max"},
+		"same":            {unit: "number", statis: "sum"},
+	}, got)
 }
 
 // #31/#32/#33：完整业务日必须包含 24 个 hourly 源桶；sum/avg 结果与上海本地
@@ -189,7 +97,7 @@ func Test_Integration_DailyAggregateCounters_CompleteBusinessDay(t *testing.T) {
 	defer pool.Close()
 
 	const (
-		testOUI = "ISSUE31"
+		testOUI = "ISSU31"
 		testSN  = "ISSUE31-33-DAILY-001"
 		sumPath = "C010070002"
 		avgPath = "C010070004"
@@ -200,9 +108,11 @@ func Test_Integration_DailyAggregateCounters_CompleteBusinessDay(t *testing.T) {
 	localEnd := localStart.AddDate(0, 0, 1)
 	bucketStart := localStart.UTC()
 	bucketEnd := localEnd.UTC()
+	require.NoError(t, ensureAggregationMetadata(ctx, pool, sumPath, "sum"))
+	require.NoError(t, ensureAggregationMetadata(ctx, pool, avgPath, "avg"))
 
 	cleanup := func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM pm_metrics_hourly WHERE device_oui=$1 AND device_sn=$2`, testOUI, testSN)
+		cleanupVersionedHourlyDevice(ctx, pool, testOUI, testSN)
 		_, _ = pool.Exec(ctx, `DELETE FROM pm_metrics_daily WHERE device_oui=$1 AND device_sn=$2`, testOUI, testSN)
 	}
 	cleanup()
@@ -218,13 +128,8 @@ func Test_Integration_DailyAggregateCounters_CompleteBusinessDay(t *testing.T) {
 			{path: sumPath, statis: "sum"},
 			{path: avgPath, statis: "avg"},
 		} {
-			_, err = pool.Exec(ctx, `
-INSERT INTO pm_metrics_hourly
-    (device_oui, device_sn, metric_path, metric_type, metric_value, statis_type,
-     granularity, time, start_time, end_time, object_ldn)
-VALUES ($1, $2, $3, 'counter', $4, $5, 'hourly', $6, $6, $7, '')`,
-				testOUI, testSN, metric.path, float64(i+1), metric.statis, start, end)
-			require.NoError(t, err)
+			require.NoError(t, insertVersionedHourlyMetric(
+				ctx, pool, testOUI, testSN, metric.path, metric.statis, float64(i+1), start, end))
 		}
 	}
 
@@ -269,6 +174,99 @@ ORDER BY metric_path`, testOUI, testSN)
 	}
 }
 
+func insertVersionedHourlyMetric(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	oui, sn, path, statis string,
+	value float64,
+	start, end time.Time,
+) error {
+	deviceID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(oui+"\x00"+sn))
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO device_dim (id,oui,serial_number)
+		VALUES ($1,$2,$3)
+		ON CONFLICT (id) DO UPDATE SET oui=EXCLUDED.oui, serial_number=EXCLUDED.serial_number`,
+		deviceID, oui, sn); err != nil {
+		return err
+	}
+	var metricID int64
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO pm_metric_dictionary (metric_path,metric_type,statis_type)
+		VALUES ($1,'counter',$2)
+		ON CONFLICT (metric_path) DO UPDATE SET statis_type=EXCLUDED.statis_type
+		RETURNING metric_id`, path, statis).Scan(&metricID); err != nil {
+		return err
+	}
+	var setID int64
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO pm_metric_sets (product_key,counter_group,content_hash,metric_ids)
+		VALUES ('integration-hourly','integration',decode(md5($1::bigint::text),'hex'),ARRAY[$1::bigint])
+		ON CONFLICT (product_key,counter_group,content_hash)
+		DO UPDATE SET metric_ids=EXCLUDED.metric_ids
+		RETURNING metric_set_id`, metricID).Scan(&setID); err != nil {
+		return err
+	}
+	var version int64
+	err := pool.QueryRow(ctx,
+		`SELECT bucket_version FROM pm_hourly_bucket_versions WHERE bucket_start=$1 AND status='active'`,
+		start).Scan(&version)
+	if err != nil {
+		if err := pool.QueryRow(ctx, `
+			INSERT INTO pm_hourly_bucket_versions
+			    (bucket_start,bucket_end,status,published_at)
+			VALUES ($1,$2,'active',now()) RETURNING bucket_version`,
+			start, end).Scan(&version); err != nil {
+			return err
+		}
+	}
+	var anchorID int64
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO pm_hourly_anchors
+		    ("time",bucket_version,device_dim_id,object_ldn,counter_group,metric_set_id,
+		     granularity,start_time,end_time)
+		VALUES ($1,$2,$3,'','integration',$4,'hourly',$1,$5)
+		RETURNING anchor_id`,
+		start, version, deviceID, setID, end).Scan(&anchorID); err != nil {
+		return err
+	}
+	_, err = pool.Exec(ctx, `
+		INSERT INTO pm_hourly_values ("time",bucket_version,anchor_id,metric_id,metric_value)
+		VALUES ($1,$2,$3,$4,$5)`, start, version, anchorID, metricID, value)
+	return err
+}
+
+func cleanupVersionedHourlyDevice(ctx context.Context, pool *pgxpool.Pool, oui, sn string) {
+	deviceID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(oui+"\x00"+sn))
+	_, _ = pool.Exec(ctx, `
+		WITH target_versions AS MATERIALIZED (
+		    SELECT DISTINCT bucket_version
+		      FROM pm_hourly_anchors
+		     WHERE device_dim_id=$1
+		),
+		deleted_values AS (
+		    DELETE FROM pm_hourly_values v USING pm_hourly_anchors a
+		     WHERE a.device_dim_id=$1
+		       AND v."time"=a."time" AND v.anchor_id=a.anchor_id
+		),
+		deleted_anchors AS (
+		    DELETE FROM pm_hourly_anchors WHERE device_dim_id=$1
+		),
+		deleted_batches AS (
+		    DELETE FROM pm_hourly_rollup_batches b USING target_versions t
+		     WHERE b.bucket_version=t.bucket_version
+		       AND NOT EXISTS (
+		           SELECT 1 FROM pm_hourly_anchors a
+		            WHERE a.bucket_version=t.bucket_version
+		       )
+		)
+		DELETE FROM pm_hourly_bucket_versions v USING target_versions t
+		 WHERE v.bucket_version=t.bucket_version
+		   AND NOT EXISTS (
+		       SELECT 1 FROM pm_hourly_anchors a
+		        WHERE a.bucket_version=t.bucket_version
+		   )`, deviceID)
+}
+
 // #30：七个完整业务日必须能卷成一条周数据；周桶按系统时区周一 00:00 对齐。
 func Test_Integration_WeeklyAggregateCounters_CompleteBusinessWeek(t *testing.T) {
 	dsn := os.Getenv("OMCGO_DB_DSN")
@@ -294,6 +292,8 @@ func Test_Integration_WeeklyAggregateCounters_CompleteBusinessWeek(t *testing.T)
 	localEnd := localStart.AddDate(0, 0, 7)
 	bucketStart := localStart.UTC()
 	bucketEnd := localEnd.UTC()
+	require.NoError(t, ensureAggregationMetadata(ctx, pool, sumPath, "sum"))
+	require.NoError(t, ensureAggregationMetadata(ctx, pool, avgPath, "avg"))
 
 	cleanup := func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM pm_metrics_daily WHERE device_oui=$1 AND device_sn=$2`, testOUI, testSN)
@@ -384,6 +384,7 @@ func Test_Integration_QueryCustomRange_ExcludesBucketAtEndBoundary(t *testing.T)
 	)
 	start := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	end := start.AddDate(0, 0, 1)
+	require.NoError(t, ensureAggregationMetadata(ctx, pool, path, "sum"))
 	cleanup := func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM pm_metrics_daily WHERE device_oui=$1 AND device_sn=$2`, testOUI, testSN)
 	}
@@ -414,4 +415,15 @@ VALUES ($1, $2, $3, 'counter', $4, 'sum', 'daily', $5, $5, $6, '')`,
 	require.Len(t, rows, 1)
 	assert.True(t, rows[0].Time.Equal(start), "returned bucket head=%s", rows[0].Time)
 	assert.InDelta(t, 1.0, float64(rows[0].MetricValue), 0.001)
+}
+
+func ensureAggregationMetadata(ctx context.Context, pool *pgxpool.Pool, path, statis string) error {
+	_, err := pool.Exec(ctx, `
+		INSERT INTO perf_indicators_enb
+		    (id,report_key,en_name,cn_name,group_id,unit_id,is_counter,statis_type)
+		VALUES ($1,$1,$1,$1,'integration','number','1',$2)
+		ON CONFLICT (id) DO UPDATE
+		    SET unit_id=EXCLUDED.unit_id, statis_type=EXCLUDED.statis_type`,
+		path, statis)
+	return err
 }

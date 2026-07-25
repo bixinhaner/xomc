@@ -222,6 +222,56 @@
       "targets": [
         {"expr": "sum by (kind) (omc_backup_storage_threshold_alarm_total{kind=~\"raised|cleared\"})", "legendFormat": "{{kind}}"}
       ]
+    },
+    {
+      "title": "PM Queue Depth and Delivery State",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 68},
+      "targets": [
+        {"expr": "omc_pm_queue_pending{subject=\"pm.file.received\",durable=\"pm-workers\"}", "legendFormat": "pending"},
+        {"expr": "omc_pm_queue_ack_pending{subject=\"pm.file.received\",durable=\"pm-workers\"}", "legendFormat": "ack pending"},
+        {"expr": "omc_pm_queue_redelivered{subject=\"pm.file.received\",durable=\"pm-workers\"}", "legendFormat": "redelivered"}
+      ]
+    },
+    {
+      "title": "PM Queue Age and Upload Pressure",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 68},
+      "targets": [
+        {"expr": "omc_pm_queue_oldest_age_seconds{subject=\"pm.file.received\",durable=\"pm-workers\"}", "legendFormat": "oldest age (s)"},
+        {"expr": "acs_pm_upload_backpressure_active", "legendFormat": "pressure active"}
+      ]
+    },
+    {
+      "title": "PM Queue Delivery, Ack Rate and Backlog Slope",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 76},
+      "targets": [
+        {"expr": "acs_pm_queue_delivery_rate", "legendFormat": "consumer delivery/s"},
+        {"expr": "acs_pm_queue_ack_rate", "legendFormat": "ack/s"},
+        {"expr": "acs_pm_queue_backlog_slope", "legendFormat": "pending slope/s"}
+      ]
+    },
+    {
+      "title": "PM Backpressure Transitions and Queue Sample Health",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 76},
+      "targets": [
+        {"expr": "sum by (state, reason) (rate(acs_pm_upload_backpressure_transitions_total[5m]))", "legendFormat": "{{state}} / {{reason}}"},
+        {"expr": "sum(rate(omc_pm_queue_sample_failures_total{subject=\"pm.file.received\",durable=\"pm-workers\"}[5m]))", "legendFormat": "sample failures/s"},
+        {"expr": "time() - omc_pm_queue_sample_timestamp_seconds{subject=\"pm.file.received\",durable=\"pm-workers\"}", "legendFormat": "sample age (s)"}
+      ]
+    },
+    {
+      "title": "PM Counters Discovered Outside Indicator Library",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 84},
+      "targets": [
+        {
+          "expr": "sum by (carrier, technology, reason) (rate(omc_pm_discovered_counters_total[5m]))",
+          "legendFormat": "{{carrier}} / {{technology}} / {{reason}}"
+        }
+      ]
     }
   ],
   "schemaVersion": 39,

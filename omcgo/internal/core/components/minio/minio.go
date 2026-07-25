@@ -17,7 +17,7 @@ import (
 // DefaultRawFileRetentionDays 是 PM/MR 原始文件桶（pm-files / mr-files）自动过期天数的
 // 兜底默认值（#169 / #319）。KPI/聚合结果落 PG/TimescaleDB；原始 XML 仅供回溯/重算，到期后
 // 由 MinIO ILM 自动过期删除，防「设备数 × 每天文件数 × 保留期」把盘单调撑满。其它桶
-// （firmware/config_backup/logs 等）内容需持久，不设此策略。
+// （firmware/config-backup/logs 等）内容需持久，不设此策略。
 //
 // issue #319：天数改为可配（sys_configs minio.retention.raw_object_days）。只有 app
 // 进程的持久化 ILM applier 有权设置它；ACS/worker 的 EnsureBuckets 只建桶，不能覆盖配置。
@@ -79,13 +79,18 @@ func NewPresignClient(cfg appconfig.MinIOConfig, log ...*zap.Logger) (*minio.Cli
 	return client, nil
 }
 
+type bucketCreator interface {
+	BucketExists(ctx context.Context, bucketName string) (bool, error)
+	MakeBucket(ctx context.Context, bucketName string, opts minio.MakeBucketOptions) error
+}
+
 // EnsureBuckets creates all required buckets if they don't exist.
-func EnsureBuckets(ctx context.Context, client *minio.Client, cfg appconfig.BucketConfig) error {
+func EnsureBuckets(ctx context.Context, client bucketCreator, cfg appconfig.BucketConfig) error {
 	buckets := []string{
 		cfg.PMFiles,
 		cfg.MRFiles,
 		cfg.Firmware,
-		cfg.ConfigBackup,
+		appconfig.NormalizeConfigBackupBucket(cfg.ConfigBackup),
 		cfg.Logs,
 		cfg.Reports,
 		cfg.Exchange,

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<products totalProducts="15" totalPatterns="29" generatedAt="2026-05-06">
+<products totalProducts="15" totalPatterns="52" generatedAt="2026-05-06">
   <!-- ============ 1. BAIBLQ 产品 ============ -->
   <product name="BAIBLQ 产品" vendor="Baicells" tech="4G" radioModes="SC">
     <description>Baicells BAIBLQ</description>
@@ -111,6 +111,29 @@
     <alarm neType="GNB" />
     <patterns>
       <pattern globalOrder="14">FAP/\w*BSC\w+</pattern>
+      <pattern globalOrder="30">FAP/BU1521</pattern>
+      <pattern globalOrder="31">FAP/BU1520</pattern>
+      <pattern globalOrder="32">FAP/BSP7001A249</pattern>
+      <pattern globalOrder="33">FAP/BSP7028B249</pattern>
+      <pattern globalOrder="34">FAP/BSQ7041A454</pattern>
+      <pattern globalOrder="35">FAP/BSQ7078H454</pattern>
+      <pattern globalOrder="36">FAP/BSQ7050A452</pattern>
+      <pattern globalOrder="37">FAP/BSC7257A249</pattern>
+      <pattern globalOrder="38">FAP/BSQ7258L254D</pattern>
+      <pattern globalOrder="39">FAP/BSQ7040A452</pattern>
+      <pattern globalOrder="40">FAP/BSC7079B243</pattern>
+      <pattern globalOrder="41">FAP/BSC7079C243</pattern>
+      <pattern globalOrder="42">FAP/BSQ7041A452</pattern>
+      <pattern globalOrder="43">FAP/BSQ7078H452</pattern>
+      <pattern globalOrder="44">FAP/BSQ7078L452</pattern>
+      <pattern globalOrder="45">FAP/BSQ7050A454</pattern>
+      <pattern globalOrder="46">FAP/BSQ7258L254</pattern>
+      <pattern globalOrder="47">FAP/MPC 454 gNB</pattern>
+      <pattern globalOrder="48">FAP/xBU211100</pattern>
+      <pattern globalOrder="49">FAP/xBU211200</pattern>
+      <pattern globalOrder="50">FAP/xBU211170</pattern>
+      <pattern globalOrder="51">FAP/xBU211270</pattern>
+      <pattern globalOrder="52">FAP/xBU211300</pattern>
     </patterns>
   </product>
   <!-- ============ 10. CICT SC3400(L1821) 产品 ============ -->

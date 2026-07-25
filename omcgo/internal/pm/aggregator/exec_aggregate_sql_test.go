@@ -39,7 +39,7 @@ func (f *fakeAggTx) CopyFrom(context.Context, pgx.Identifier, []string, pgx.Copy
 	return 0, nil
 }
 func (f *fakeAggTx) SendBatch(context.Context, *pgx.Batch) pgx.BatchResults { return nil }
-func (f *fakeAggTx) LargeObjects() pgx.LargeObjects                        { return pgx.LargeObjects{} }
+func (f *fakeAggTx) LargeObjects() pgx.LargeObjects                         { return pgx.LargeObjects{} }
 func (f *fakeAggTx) Prepare(context.Context, string, string) (*pgconn.StatementDescription, error) {
 	return nil, nil
 }
@@ -82,7 +82,7 @@ func (f *fakeAggBeginner) QueryRow(context.Context, string, ...any) pgx.Row {
 	return errRow{err: errors.New("fakeAggBeginner.QueryRow unimplemented")}
 }
 
-func Test_execAggregateSQL_WithTxBeginner_SetsLocalWorkMemBeforeSQL_ThenCommits(t *testing.T) {
+func Test_execAggregateSQL_WithTxBeginner_DoesNotOverrideWorkMem(t *testing.T) {
 	tx := &fakeAggTx{execErrAt: -1}
 	beginner := &fakeAggBeginner{tx: tx}
 	a := New(beginner, nil, nil)
@@ -91,11 +91,10 @@ func Test_execAggregateSQL_WithTxBeginner_SetsLocalWorkMemBeforeSQL_ThenCommits(
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), tag.RowsAffected())
 
-	require.Len(t, tx.execSQLs, 2, "应先 SET LOCAL work_mem 再跑聚合 SQL，两次 Exec")
-	assert.Contains(t, tx.execSQLs[0], "SET LOCAL work_mem")
-	assert.Contains(t, tx.execSQLs[0], aggregateWorkMem)
-	assert.Equal(t, "INSERT INTO pm_metrics_hourly ...", tx.execSQLs[1])
-	assert.Equal(t, []any{"hourly"}, tx.execArgs[1])
+	require.Len(t, tx.execSQLs, 1, "有界聚合不应再用大 work_mem 掩盖无界查询")
+	assert.NotContains(t, tx.execSQLs[0], "work_mem")
+	assert.Equal(t, "INSERT INTO pm_metrics_hourly ...", tx.execSQLs[0])
+	assert.Equal(t, []any{"hourly"}, tx.execArgs[0])
 	assert.Equal(t, 1, tx.commits, "应提交一次")
 	assert.Equal(t, 1, beginner.begins, "应开一次事务")
 }
@@ -119,21 +118,9 @@ func Test_execAggregateSQL_BeginFails_ReturnsWrappedError_NoCommit(t *testing.T)
 	assert.Contains(t, err.Error(), "begin aggregate tx")
 }
 
-func Test_execAggregateSQL_SetLocalWorkMemFails_ReturnsError_NoCommit(t *testing.T) {
-	tx := &fakeAggTx{execErrAt: 0, execErr: errors.New("syntax error")}
-	beginner := &fakeAggBeginner{tx: tx}
-	a := New(beginner, nil, nil)
-
-	_, err := a.execAggregateSQL(context.Background(), "INSERT INTO pm_metrics_hourly ...", "hourly")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "set local work_mem")
-	assert.Equal(t, 0, tx.commits, "SET LOCAL 失败不应提交")
-	assert.Len(t, tx.execSQLs, 1, "SET LOCAL 失败后不应再跑聚合 SQL")
-}
-
 func Test_execAggregateSQL_MainSQLFails_ReturnsRawError_NoCommit(t *testing.T) {
 	wantErr := errors.New("deadlock detected")
-	tx := &fakeAggTx{execErrAt: 1, execErr: wantErr}
+	tx := &fakeAggTx{execErrAt: 0, execErr: wantErr}
 	beginner := &fakeAggBeginner{tx: tx}
 	a := New(beginner, nil, nil)
 

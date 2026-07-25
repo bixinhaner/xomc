@@ -75,7 +75,7 @@ func (s *Service) queryAlarmHeatmapInto(ctx context.Context, pool *pgxpool.Pool,
 	}
 	rows, err := pool.Query(ctx, fmt.Sprintf(alarmHeatmapQuery, tableName), days)
 	if err != nil {
-		s.logger.Error("failed to query alarm heatmap", zap.String("table", tableName), zap.Error(err))
+		logDashboardQueryError(s.logger, "failed to query alarm heatmap", err, zap.String("table", tableName))
 		return fmt.Errorf("query alarm heatmap from %s: %w", tableName, err)
 	}
 	defer rows.Close()
@@ -143,7 +143,7 @@ func (s *Service) queryHeatmapBySeverityInto(ctx context.Context, pool *pgxpool.
 	}
 	rows, err := pool.Query(ctx, fmt.Sprintf(alarmHeatmapBySeverityQuery, tableName), days, severityFilterValue(severity))
 	if err != nil {
-		s.logger.Error("failed to query alarm heatmap by severity", zap.String("table", tableName), zap.Error(err))
+		logDashboardQueryError(s.logger, "failed to query alarm heatmap by severity", err, zap.String("table", tableName))
 		return fmt.Errorf("query alarm heatmap by severity from %s: %w", tableName, err)
 	}
 	defer rows.Close()
@@ -317,7 +317,7 @@ func (s *Service) GetAlarmHeatmapAll(ctx context.Context, days int) (map[string]
 	// alarms_history 在时序库（TsPool）。
 	rows, err := s.tsPool.Query(ctx, query, days)
 	if err != nil {
-		s.logger.Error("failed to query all alarm heatmaps", zap.Error(err))
+		logDashboardQueryError(s.logger, "failed to query all alarm heatmaps", err)
 		return nil, fmt.Errorf("query all alarm heatmaps: %w", err)
 	}
 	defer rows.Close()

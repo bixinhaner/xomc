@@ -3,8 +3,6 @@ package metrics
 import (
 	"errors"
 	"fmt"
-	"math"
-	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +12,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestBuildQuerySQLTargetsDictionaryBeforeMetricSetExpansion(t *testing.T) {
+	sql, args, err := buildQuerySQL(QueryRequest{MetricPaths: []string{"C1", "K1"}, Limit: 50})
+	require.NoError(t, err)
+	assert.Contains(t, sql, "d.metric_id=ANY(s.metric_ids)")
+	assert.NotContains(t, sql, "unnest(s.metric_ids)")
+	assert.Contains(t, sql, "d.metric_path IN")
+	assert.NotEmpty(t, args)
+}
 
 // ---------------------------------------------------------------------------
 // applyFilters 各条件单测（不依赖 pgx pool）
@@ -26,23 +33,6 @@ func Test_applyFilters_Empty(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "SELECT * FROM pm_metrics", sql)
 	assert.Empty(t, args)
-}
-
-func Test_metricRowValues_NaNMetricValueWritesSQLNull(t *testing.T) {
-	vals, err := metricRowValues(PMMetric{
-		DeviceOUI:   "48BF74",
-		DeviceSN:    "SN-1",
-		MetricPath:  "C000010002",
-		MetricType:  MetricTypeCounter,
-		MetricValue: math.NaN(),
-		Granularity: Granularity15Min,
-		Time:        time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC),
-		StartTime:   time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC),
-		EndTime:     time.Date(2026, 7, 7, 10, 15, 0, 0, time.UTC),
-	})
-	require.NoError(t, err)
-	require.Len(t, vals, len(pmMetricsColumns))
-	assert.Nil(t, vals[5], "metric_value 列应写 SQL NULL")
 }
 
 func Test_applyFilters_DeviceSNs_IN(t *testing.T) {
@@ -243,83 +233,6 @@ func Test_buildQuerySQL_EmptyRequest_StillBounded(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// buildBatchInsertSQL：BUG-6 自然键含 object_ldn 回归测试
-// ---------------------------------------------------------------------------
-
-// metricWithLDN 构造一个最小有效 PMMetric，object_ldn 通过参数控制（nil = 不设）。
-func metricWithLDN(path, ldn string, setLDN bool) PMMetric {
-	t := time.Date(2026, 5, 25, 17, 0, 0, 0, time.UTC)
-	m := PMMetric{
-		DeviceOUI:   "48BF74",
-		DeviceSN:    "1202000240194DP0015",
-		MetricPath:  path,
-		MetricType:  MetricTypeCounter,
-		MetricValue: 123,
-		Granularity: Granularity15Min,
-		Time:        t,
-		StartTime:   t.Add(-15 * time.Minute),
-		EndTime:     t,
-		IngestTime:  t,
-	}
-	if setLDN {
-		v := ldn
-		m.ObjectLDN = &v
-	}
-	return m
-}
-
-// migration 000042 删 uq_pm_metrics_natural 后 BatchInsert 改 plain INSERT：SQL 不得再含
-// ON CONFLICT（无唯一索引可冲突，幂等已外移到 CopyIngest marker / RecomputeKPIs scoped DELETE）。
-func Test_buildBatchInsertSQL_PlainInsert_NoOnConflict(t *testing.T) {
-	ms := []PMMetric{metricWithLDN("L.Cell.Avail", "cell-1", true)}
-	sql, _, err := buildBatchInsertSQL(ms)
-	require.NoError(t, err)
-	assert.NotContains(t, sql, "ON CONFLICT", "plain INSERT 不应再带 ON CONFLICT 子句")
-	assert.NotContains(t, sql, "DO UPDATE", "plain INSERT 不应再带 DO UPDATE")
-	assert.Contains(t, sql, "INSERT INTO pm_metrics", "仍是 INSERT INTO pm_metrics")
-}
-
-// BUG-6 回归：同 device+path+time 跨多个 cell（不同 object_ldn）在 SQL 参数中
-// 必须出现各自的 ldn 值（不被合并 / 不被丢弃 / 不为 NULL）。
-func Test_buildBatchInsertSQL_MultiCell_NoNaturalKeyCollision(t *testing.T) {
-	ms := []PMMetric{
-		metricWithLDN("L.Cell.Avail", "cell-1", true),
-		metricWithLDN("L.Cell.Avail", "cell-2", true),
-		metricWithLDN("L.Cell.Avail", "cell-3", true),
-	}
-	sql, args, err := buildBatchInsertSQL(ms)
-	require.NoError(t, err)
-
-	// 三行 → 14 列 × 3 = 42 占位符；其中 object_ldn 是第 13 列（0-index 12）
-	// 不同 cell-N 都应作为独立参数出现。
-	require.Len(t, args, 14*3)
-
-	ldnValues := []string{}
-	for _, a := range args {
-		if s, ok := a.(string); ok && strings.HasPrefix(s, "cell-") {
-			ldnValues = append(ldnValues, s)
-		}
-	}
-	assert.ElementsMatch(t, []string{"cell-1", "cell-2", "cell-3"}, ldnValues,
-		"三 cell 的 object_ldn 必须各自落参数（不合并）")
-
-	// SQL 不应出现 NULL 字面量（object_ldn nil → '' 落值后由 squirrel 占位符承载）
-	assert.NotContains(t, sql, "NULL")
-}
-
-// nil ObjectLDN 落参数时统一为 ”（migration 000171 要求 NOT NULL DEFAULT ”）。
-func Test_buildBatchInsertSQL_NilObjectLDN_FallsBackToEmptyString(t *testing.T) {
-	ms := []PMMetric{metricWithLDN("L.Cell.Avail", "", false)}
-	_, args, err := buildBatchInsertSQL(ms)
-	require.NoError(t, err)
-
-	// 第 13 个 args（0-index 12）是 object_ldn。
-	// 14 列分别：id, oui, sn, path, type, value, statis, gran, time, start, end, ingest, ldn, extra
-	require.Len(t, args, 14)
-	assert.Equal(t, "", args[12], "ObjectLDN=nil 必须落空字符串而非 NULL")
-}
-
-// ---------------------------------------------------------------------------
 // MetricType / StatisType / Granularity 常量稳定性（避免误改字符串值）
 // ---------------------------------------------------------------------------
 
@@ -336,105 +249,6 @@ func Test_Constants_Stable(t *testing.T) {
 	assert.Equal(t, "daily", string(GranularityDaily))
 	assert.Equal(t, "weekly", string(GranularityWeekly))
 	assert.Equal(t, "monthly", string(GranularityMonthly))
-}
-
-// ---------------------------------------------------------------------------
-// issue #14: COPY 路径行值与 VALUES INSERT 参数等价（数据写出一致性）
-// ---------------------------------------------------------------------------
-
-// buildRows（COPY 路径）每行的列值必须与 buildBatchInsertSQL（VALUES 路径）拆出的
-// per-row 参数逐列一致 —— 两条路径写出的数据完全相同，只是传输方式不同。
-// id / ingest_time 含随机 / 时钟默认值，单独按位置比对其余确定列。
-func Test_buildRows_ParityWith_buildBatchInsertSQL(t *testing.T) {
-	ms := []PMMetric{
-		metricWithLDN("L.Cell.Avail", "cell-1", true),
-		metricWithLDN("L.Cell.Drop", "cell-2", true),
-		metricWithLDN("L.Cell.Att", "", false), // ObjectLDN nil → ''
-	}
-
-	rows, err := buildRows(ms)
-	require.NoError(t, err)
-	require.Len(t, rows, len(ms))
-
-	_, args, err := buildBatchInsertSQL(ms)
-	require.NoError(t, err)
-	const cols = 14
-	require.Len(t, args, cols*len(ms))
-
-	// 列序：id, oui, sn, path, type, value, statis, gran, time, start, end, ingest, ldn, extra
-	// 索引 0(id) 与 11(ingest_time) 是默认值列（uuid.New / time.Now），不参与确定性比对。
-	for i := range ms {
-		rowVals := rows[i]
-		valuesArgs := args[i*cols : (i+1)*cols]
-		require.Len(t, rowVals, cols)
-		for col := 0; col < cols; col++ {
-			if col == 0 || col == 11 {
-				continue // id / ingest_time 默认值列
-			}
-			assert.EqualValues(t, valuesArgs[col], rowVals[col],
-				"row %d col %d 必须 COPY 与 VALUES 一致", i, col)
-		}
-		// object_ldn（列 12）必须为非 NULL 字符串（含 nil→'' 兜底）。
-		_, ok := rowVals[12].(string)
-		assert.True(t, ok, "object_ldn 必须落字符串而非 nil")
-	}
-}
-
-// buildRows 对 ObjectLDN nil 也落空字符串（与 VALUES 路径、UNIQUE 索引语义一致）。
-func Test_buildRows_NilObjectLDN_EmptyString(t *testing.T) {
-	rows, err := buildRows([]PMMetric{metricWithLDN("L.Cell.Avail", "", false)})
-	require.NoError(t, err)
-	require.Len(t, rows, 1)
-	assert.Equal(t, "", rows[0][12], "ObjectLDN=nil 必须落空字符串")
-}
-
-// #479 改动二：metricRowValues 写出的 time（列 8）必须恒等于 start_time（列 9），
-// 即 15min 写入端的「time == start_time」不变量。覆盖：
-//  1. 显式设了 Time 的行——按显式值落库且与 start_time 一致（构造器已保证）。
-//  2. Time 为零的缺省行——time 退化取 start_time（非旧的 end_time）。
-//  3. Time 与 StartTime 都为零的兜底行——退化到 end_time（防御不写零时刻）。
-func Test_metricRowValues_TimeEqualsStartTime_Invariant(t *testing.T) {
-	start := time.Date(2026, 6, 14, 10, 0, 0, 0, time.UTC)
-	end := time.Date(2026, 6, 14, 11, 0, 0, 0, time.UTC)
-
-	// 1. 显式 Time == StartTime（构造器产出形态）。
-	explicit := PMMetric{
-		DeviceOUI: "A", DeviceSN: "S1", MetricPath: "C1", MetricType: MetricTypeCounter,
-		Granularity: Granularity15Min, Time: start, StartTime: start, EndTime: end,
-	}
-	vals, err := metricRowValues(explicit)
-	require.NoError(t, err)
-	assert.Equal(t, start, vals[8], "time 列（idx 8）应为桶起点")
-	assert.Equal(t, vals[9], vals[8], "不变量：time == start_time")
-
-	// 2. Time 缺省（零值）→ 取 start_time，绝不取 end_time。
-	noTime := PMMetric{
-		DeviceOUI: "A", DeviceSN: "S1", MetricPath: "C1", MetricType: MetricTypeCounter,
-		Granularity: Granularity15Min, StartTime: start, EndTime: end,
-	}
-	vals2, err := metricRowValues(noTime)
-	require.NoError(t, err)
-	assert.Equal(t, start, vals2[8], "Time 缺省时 time 应退化取 start_time（#479），而非 end_time")
-	assert.NotEqual(t, end, vals2[8], "Time 缺省时 time 绝不取 end_time")
-	assert.Equal(t, vals2[9], vals2[8], "不变量：time == start_time")
-
-	// 3. Time 与 StartTime 都为零 → 防御退化到 end_time（不写零时刻）。
-	onlyEnd := PMMetric{
-		DeviceOUI: "A", DeviceSN: "S1", MetricPath: "C1", MetricType: MetricTypeCounter,
-		Granularity: Granularity15Min, EndTime: end,
-	}
-	vals3, err := metricRowValues(onlyEnd)
-	require.NoError(t, err)
-	assert.Equal(t, end, vals3[8], "start_time 也为零时防御退化到 end_time")
-}
-
-// 列序常量稳定性：pmMetricsColumns 必须与 buildBatchInsertSQL 的 14 列一致，
-// 否则 COPY 写入列错位。
-func Test_pmMetricsColumns_Count(t *testing.T) {
-	require.Len(t, pmMetricsColumns, 14)
-	assert.Equal(t, "id", pmMetricsColumns[0])
-	assert.Equal(t, "object_ldn", pmMetricsColumns[12])
-	assert.Equal(t, "extra", pmMetricsColumns[13])
 }
 
 // ---------------------------------------------------------------------------
@@ -480,9 +294,4 @@ func Test_classifyInsertError_OtherError_NotLateArrival(t *testing.T) {
 // classifyInsertError(nil) == nil（成功路径不构造错误）。
 func Test_classifyInsertError_Nil(t *testing.T) {
 	assert.NoError(t, classifyInsertError(nil))
-}
-
-// 批量阈值常量稳定（防误改导致小批量也走建表开销 / 大批量回退慢路径）。
-func Test_batchInsertThreshold_Stable(t *testing.T) {
-	assert.Equal(t, 50, batchInsertThreshold)
 }

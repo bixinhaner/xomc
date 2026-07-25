@@ -125,9 +125,9 @@ func TestPolicyMonitor_RunCleanupOnce_PhysicalDelete_AllSuccess(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), deleted)
 	require.Len(t, mr.calls, 2, "RemoveObject called once per non-empty file_path")
-	assert.Equal(t, "config_backup", mr.calls[0].bucket)
+	assert.Equal(t, "config-backup", mr.calls[0].bucket)
 	assert.Equal(t, "backup/2026/04/29/a.xml.gz", mr.calls[0].object)
-	assert.Equal(t, "config_backup", mr.calls[1].bucket)
+	assert.Equal(t, "config-backup", mr.calls[1].bucket)
 	assert.Equal(t, "backup/2026/04/28/b.xml.zst", mr.calls[1].object)
 }
 
@@ -194,7 +194,7 @@ func TestPolicyMonitor_RunCleanupOnce_PhysicalDelete_MalformedPathSkipped(t *tes
 	_, err := mon.RunCleanupOnce(context.Background())
 	require.NoError(t, err)
 	require.Len(t, mr.calls, 1, "malformed path must NOT call RemoveObject; only valid path proceeds")
-	assert.Equal(t, "config_backup", mr.calls[0].bucket)
+	assert.Equal(t, "config-backup", mr.calls[0].bucket)
 }
 
 // TestPolicyMonitor_RunCleanupOnce_PhysicalDelete_NoMinIONoCalls verifies

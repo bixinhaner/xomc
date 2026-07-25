@@ -45,8 +45,10 @@ func initPMRetentionModule(c *Container) error {
 
 	svc := retention.NewService(reader, logger)
 
-	// hypertable 只有 pm_metrics / pm_metrics_hourly / pm_group_metrics_hourly（#825）；
-	// daily/weekly/monthly 为普通表，由 cleanup_runner cron 按天数清理，不经此 applier。
+	// 小时策略应用到 pm_hourly_anchors / pm_hourly_values /
+	// pm_group_metrics_hourly；兼容视图不能传给 TimescaleDB policy API。
+	// 原始稀疏表由 worker 做水位安全清理，daily/weekly/monthly 由
+	// cleanup_runner cron 按天数清理，均不经此 applier。
 	// 运行态应用改由 SysConfigService 的有错误返回应用器驱动，不能沿用只写 warn 的 listener。
 	applier := retention.NewPMRetentionApplier(c.TsPool, logger)
 

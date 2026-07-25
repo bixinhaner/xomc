@@ -79,7 +79,10 @@ func TestIngestViaCopy_NormalizesCounterValuesBeforeCopyIngest(t *testing.T) {
 		"C.MISSING": {IndicatorID: "C-MISSING", ReportKey: "C.MISSING", Unit: "number", StatisType: "sum"},
 	}
 
-	err := c.ingestViaCopy(ctx, trace.SpanFromContext(ctx), time.Now(), time.Now(), 123, uuid.New(), payload, content, allow)
+	err := c.ingestViaCopy(
+		ctx, trace.SpanFromContext(ctx), time.Now(), time.Now(), 123, uuid.New(),
+		payload, content, allow, make([]byte, 32),
+	)
 
 	require.NoError(t, err)
 	require.Len(t, copyIngestor.counters, 3)
@@ -161,7 +164,10 @@ func TestIngestViaCopy_Filters15MinRowsByEnabledIndicatorsAfterKPICalculation(t 
 		"C.DEP":  {IndicatorID: "C0002", ReportKey: "C.DEP", Unit: "number", StatisType: "sum"},
 	}
 
-	err := c.ingestViaCopy(ctx, trace.SpanFromContext(ctx), time.Now(), time.Now(), 123, uuid.New(), payload, content, allow)
+	err := c.ingestViaCopy(
+		ctx, trace.SpanFromContext(ctx), time.Now(), time.Now(), 123, uuid.New(),
+		payload, content, allow, make([]byte, 32),
+	)
 
 	require.NoError(t, err)
 	require.Len(t, copyIngestor.counters, 1, "未启用依赖 counter 可参与 KPI 计算，但自身不落 15min counter 行")
@@ -194,7 +200,10 @@ func TestIngestViaCopy_EmptyEnabledSetWritesNoRows(t *testing.T) {
 		"C0001": {IndicatorID: "C0001", ReportKey: "C0001", Unit: "number", StatisType: "sum"},
 	}
 
-	err := c.ingestViaCopy(ctx, trace.SpanFromContext(ctx), time.Now(), time.Now(), 123, uuid.New(), payload, content, allow)
+	err := c.ingestViaCopy(
+		ctx, trace.SpanFromContext(ctx), time.Now(), time.Now(), 123, uuid.New(),
+		payload, content, allow, make([]byte, 32),
+	)
 
 	require.NoError(t, err)
 	assert.True(t, copyIngestor.called, "空启用集代表全部禁用，应完成文件 marker 写入而不是跳过 CopyIngest")
@@ -221,7 +230,10 @@ func TestIngestViaCopy_EnabledIndicatorLookupFailureFailsFile(t *testing.T) {
 	}
 	payload := &FileReceivedPayload{MinIOPath: "pm/A20260706.xml", DeviceSN: "SN-1", Carrier: "cmcc", Technology: "lte"}
 
-	err := c.ingestViaCopy(ctx, trace.SpanFromContext(ctx), time.Now(), time.Now(), 123, uuid.New(), payload, content, nil)
+	err := c.ingestViaCopy(
+		ctx, trace.SpanFromContext(ctx), time.Now(), time.Now(), 123, uuid.New(),
+		payload, content, nil, make([]byte, 32),
+	)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "lookup enabled PM indicators")
@@ -253,6 +265,16 @@ func TestNormalizeResults_NormalizesKPIValuesAndFailsMissingMetadata(t *testing.
 	require.Error(t, err)
 	assert.ErrorIs(t, err, resultnorm.ErrMissingMetadata)
 	assert.Contains(t, err.Error(), "C-MISSING")
+}
+
+func TestNormalizeResults_PreservesUnknownCounterWithoutMetadata(t *testing.T) {
+	c := &PMCollector{}
+	counters := []model.PMCounter{{CounterName: "Vendor.New.Counter", CounterValue: 12.345}}
+
+	err := c.normalizeResults(context.Background(), counters, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, 12.345, counters[0].CounterValue)
 }
 
 type recordingCopyIngestor struct {

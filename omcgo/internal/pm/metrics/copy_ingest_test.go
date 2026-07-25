@@ -10,6 +10,20 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
+func metricWithLDN(path, ldn string, setLDN bool) PMMetric {
+	t := time.Date(2026, 5, 25, 17, 0, 0, 0, time.UTC)
+	m := PMMetric{
+		DeviceOUI: "48BF74", DeviceSN: "1202000240194DP0015",
+		MetricPath: path, MetricType: MetricTypeCounter, MetricValue: 123,
+		Granularity: Granularity15Min, Time: t,
+		StartTime: t.Add(-15 * time.Minute), EndTime: t, IngestTime: t,
+	}
+	if setLDN {
+		m.ObjectLDN = &ldn
+	}
+	return m
+}
+
 // MetricFromKPIValue 必须给 KPI 行补出完整 15min 窗口（start = end - 15min），否则
 // pm_metrics.start_time == end_time，前端悬浮框「开始/结束」显示同一时刻（#199 / #208）。
 

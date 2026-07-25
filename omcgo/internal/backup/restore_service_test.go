@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/s3utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -109,9 +110,11 @@ type fakeStater struct {
 	// statErr（可选）覆盖 !exists 时返回的默认 NoSuchKey 错误，用于模拟其它
 	// MinIO 错误码（如 InvalidBucketName）。仅在 exists==false 时生效。
 	statErr error
+	buckets []string
 }
 
-func (f *fakeStater) StatObject(_ context.Context, _ string, _ string, _ minio.StatObjectOptions) (minio.ObjectInfo, error) {
+func (f *fakeStater) StatObject(_ context.Context, bucket string, _ string, _ minio.StatObjectOptions) (minio.ObjectInfo, error) {
+	f.buckets = append(f.buckets, bucket)
 	if !f.exists {
 		if f.statErr != nil {
 			return minio.ObjectInfo{}, f.statErr
@@ -130,9 +133,11 @@ type fakeObjReader struct {
 	content []byte
 	err     error
 	readErr error
+	buckets []string
 }
 
-func (f *fakeObjReader) GetObjectStream(_ context.Context, _, _ string) (io.ReadCloser, error) {
+func (f *fakeObjReader) GetObjectStream(_ context.Context, bucket, _ string) (io.ReadCloser, error) {
+	f.buckets = append(f.buckets, bucket)
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -183,8 +188,31 @@ func TestCreate_validRequest_fanOut(t *testing.T) {
 		// FileType = "10 <OUI> Configuration File"；fake device 没填 OUI →
 		// 退化到 fallback OUI 48BF74（Baicells）。
 		assert.Contains(t, string(req.Params), `"file_type":"10 48BF74 Configuration File"`)
-		assert.Contains(t, string(req.Params), `"url":"config_backup/backup/2026/04/29/cfg.xml.gz"`)
+		assert.Contains(t, string(req.Params), `"url":"config-backup/backup/2026/04/29/cfg.xml.gz"`)
 	}
+}
+
+func TestCreate_LegacyLogicalBucketUsesValidPhysicalBucketForMinIO(t *testing.T) {
+	svc, repo, _ := newSvc(t, []string{"SN001"}, true)
+	reader := &fakeObjReader{content: []byte("config")}
+	svc.SetObjectReader(reader)
+	stater := svc.stater.(*fakeStater)
+
+	_, err := svc.Create(context.Background(), &CreateRestoreRequest{
+		Bucket:          "config_backup",
+		ObjectPath:      "backup/cfg.xml",
+		TargetDeviceSNs: []string{"SN001"},
+	}, "alice")
+	require.NoError(t, err)
+
+	require.Equal(t, []string{"config-backup"}, stater.buckets)
+	require.Equal(t, []string{"config-backup"}, reader.buckets)
+	for _, bucket := range append(append([]string{}, stater.buckets...), reader.buckets...) {
+		require.NoError(t, s3utils.CheckValidBucketNameStrict(bucket),
+			"every bucket sent to MinIO must satisfy strict S3 naming")
+	}
+	require.Len(t, repo.created, 1)
+	assert.Equal(t, "config-backup", repo.created[0].SourceBucket)
 }
 
 // TestCreate_computesMD5FromStream 验证配置文件恢复在下发时读取源文件流现算 MD5
@@ -276,11 +304,8 @@ func TestCreate_objectNotFound(t *testing.T) {
 	assert.True(t, errors.Is(err, commonerrors.ErrNotFound))
 }
 
-// TestCreate_statInvalidBucketName 复现 issue #145-B：CanonicalRestoreBucket
-// ="config_backup" 含下划线违反 S3 桶命名，minio-go 在 StatObject 阶段返
-// InvalidBucketName（"The specified bucket is not valid."）。修复前
-// translateMinIONotFound 漏识别 → 落 default 500；修复后翻译为 ErrNotFound →
-// handler 映射 404，且不外泄裸 SDK 错误消息。
+// InvalidBucketName 仍按 not-found 类错误收敛，避免 SDK 细节泄露。正常 restore
+// 路径已在进入 MinIO 前把 legacy config_backup 归一为 config-backup。
 func TestCreate_statInvalidBucketName(t *testing.T) {
 	svc, repo, enq := newSvc(t, []string{"SN001"}, false)
 	// 覆盖默认 NoSuchKey，模拟桶名非法时 minio-go 的客户端校验拒绝。
@@ -389,8 +414,7 @@ func TestCreate_staterNil_genericMinIOError_notTranslated(t *testing.T) {
 // TestTranslateMinIONotFound_table 直接覆盖错误翻译函数：NoSuchKey/NoSuchBucket
 // 及客户端命名校验拒绝 InvalidBucketName/XMinioInvalidObjectName → ErrNotFound 且
 // 不外泄裸 SDK 细节；其它错误 → nil（调用方按内部错误处理）。
-// InvalidBucketName 用例对应 issue #145-B：CanonicalRestoreBucket="config_backup"
-// 含下划线违反 S3 桶命名，StatObject 返 InvalidBucketName，须翻译为 404 而非 500。
+// InvalidBucketName 用例覆盖外部/异常调用传入非法物理桶名时的错误翻译。
 func TestTranslateMinIONotFound_table(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -408,7 +432,7 @@ func TestTranslateMinIONotFound_table(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := translateMinIONotFound("config_backup", "backup/x.xml", tc.err)
+			got := translateMinIONotFound("config-backup", "backup/x.xml", tc.err)
 			if tc.wantNil {
 				assert.Nil(t, got)
 				return
@@ -420,7 +444,7 @@ func TestTranslateMinIONotFound_table(t *testing.T) {
 			assert.NotContains(t, got.Error(), "NoSuchBucket")
 			assert.NotContains(t, got.Error(), "InvalidBucketName")
 			assert.NotContains(t, got.Error(), "bucket is not valid")
-			assert.Contains(t, got.Error(), "config_backup/backup/x.xml")
+			assert.Contains(t, got.Error(), "config-backup/backup/x.xml")
 		})
 	}
 }
@@ -457,7 +481,7 @@ func TestCreateByTaskID_resolvesAndDispatches(t *testing.T) {
 	require.NotNil(t, res.Task)
 	require.Nil(t, res.Warning, "single-device source must have no warning")
 	require.Len(t, enq.requests, 1)
-	assert.Contains(t, string(enq.requests[0].Params), `"url":"config_backup/backup/2026/04/29/backup-abcdef12-SN001.xml.gz"`)
+	assert.Contains(t, string(enq.requests[0].Params), `"url":"config-backup/backup/2026/04/29/backup-abcdef12-SN001.xml.gz"`)
 }
 
 func TestCreateByTaskID_multiDeviceWarning(t *testing.T) {
@@ -610,7 +634,7 @@ func TestCreateBySnapshot_EmptyTargets(t *testing.T) {
 func TestSplitBucketAndPath(t *testing.T) {
 	bucket, path, err := splitBucketAndPath("config_backup/backup/2026/04/29/x.xml.gz")
 	require.NoError(t, err)
-	assert.Equal(t, "config_backup", bucket)
+	assert.Equal(t, "config-backup", bucket)
 	assert.Equal(t, "backup/2026/04/29/x.xml.gz", path)
 
 	_, _, err = splitBucketAndPath("nopath")

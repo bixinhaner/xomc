@@ -5,14 +5,18 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 )
@@ -32,25 +36,46 @@ const (
 	// BackpressureCategory 是 sys_configs 中背压配置的 category。
 	BackpressureCategory = "acs.backpressure"
 
-	bpKeyEnabled     = "enabled"
-	bpKeyDiskHighPct = "disk_high_pct"
-	bpKeyDiskLowPct  = "disk_low_pct"
-	bpKeyIOSomeHigh  = "io_some_high_pct"
-	bpKeyIOSomeLow   = "io_some_low_pct"
-	bpKeyMaxInflight = "max_inflight"
-	bpKeyInterval    = "check_interval_sec"
+	bpKeyEnabled          = "enabled"
+	bpKeyDiskHighPct      = "disk_high_pct"
+	bpKeyDiskLowPct       = "disk_low_pct"
+	bpKeyIOSomeHigh       = "io_some_high_pct"
+	bpKeyIOSomeLow        = "io_some_low_pct"
+	bpKeyMaxInflight      = "max_inflight"
+	bpKeyInterval         = "check_interval_sec"
+	bpKeyQueuePendingHigh = "queue_pending_high"
+	bpKeyQueuePendingLow  = "queue_pending_low"
+	bpKeyQueueOldestHigh  = "queue_oldest_high_sec"
+	bpKeyQueueOldestLow   = "queue_oldest_low_sec"
+	bpKeyQueueSlopeWindow = "queue_slope_window_sec"
 
-	bpDefaultEnabled     = true
-	bpDefaultDiskHighPct = 85.0
-	bpDefaultDiskLowPct  = 75.0
-	bpDefaultIOSomeHigh  = 70.0
-	bpDefaultIOSomeLow   = 20.0
-	bpDefaultMaxInflight = 2000
-	bpDefaultIntervalSec = 30
-	bpMinInterval        = 5 * time.Second
+	bpDefaultEnabled          = true
+	bpDefaultDiskHighPct      = 70.0
+	bpDefaultDiskLowPct       = 60.0
+	bpDefaultIOSomeHigh       = 70.0
+	bpDefaultIOSomeLow        = 20.0
+	bpDefaultMaxInflight      = 2000
+	bpDefaultIntervalSec      = 30
+	bpDefaultQueuePendingHigh = 2000
+	bpDefaultQueuePendingLow  = 500
+	bpDefaultQueueOldestHigh  = 10 * time.Minute
+	bpDefaultQueueOldestLow   = 2 * time.Minute
+	bpDefaultQueueSlopeWindow = 5 * time.Minute
+	bpMinQueueSlopeWindow     = 2 * event.QueueHealthSampleInterval
+	bpMinInterval             = 5 * time.Second
 
 	rejectReasonResourcePressure = "resource_pressure"
 	rejectReasonInflightLimit    = "inflight_limit"
+
+	pressureReasonDisabled          = "disabled"
+	pressureReasonDisk              = "disk"
+	pressureReasonIO                = "io"
+	pressureReasonQueuePending      = "queue_pending"
+	pressureReasonQueueOldest       = "queue_oldest"
+	pressureReasonQueueGrowing      = "queue_growing"
+	pressureReasonQueueSlopeUnknown = "queue_slope_unknown"
+	pressureReasonQueueFailure      = "queue_sample_failure"
+	pressureReasonRecovered         = "recovered"
 )
 
 // BackpressureGate 是 PM 上传背压门闸的最小读取接口（便于 handler 测试）。
@@ -65,13 +90,51 @@ type BackpressureGate interface {
 
 // BackpressureConfig 是背压判定阈值，来自 sys_configs，可热刷新。
 type BackpressureConfig struct {
-	Enabled       bool
-	DiskHighPct   float64 // 磁盘高水位%：≥ 则进入背压
-	DiskLowPct    float64 // 磁盘低水位%：≤ 才解除（迟滞）
-	IOSomeHighPct float64 // /proc/pressure/io some avg10 高水位
-	IOSomeLowPct  float64 // /proc/pressure/io some avg10 低水位
-	MaxInflight   int64   // PM 上传最大在途数
-	Interval      time.Duration
+	Enabled          bool
+	DiskHighPct      float64 // 磁盘高水位%：≥ 则进入背压
+	DiskLowPct       float64 // 磁盘低水位%：≤ 才解除（迟滞）
+	IOSomeHighPct    float64 // /proc/pressure/io some avg10 高水位
+	IOSomeLowPct     float64 // /proc/pressure/io some avg10 低水位
+	MaxInflight      int64   // PM 上传最大在途数
+	Interval         time.Duration
+	QueuePendingHigh int
+	QueuePendingLow  int
+	QueueOldestHigh  time.Duration
+	QueueOldestLow   time.Duration
+	QueueSlopeWindow time.Duration
+}
+
+// QueueRates are derived only from two fresh, monotonic queue samples.
+type QueueRates struct {
+	PendingPerSecond    float64
+	AckAdvancePerSecond float64
+	DeliveryPerSecond   float64
+}
+
+// QueueSignal is a point-in-time input to the pure backpressure decision.
+// Configured distinguishes an absent queue source from a configured source
+// whose latest read failed or became stale.
+type QueueSignal struct {
+	Configured     bool
+	Available      bool
+	RatesAvailable bool
+	Stats          event.QueueStats
+	Rates          QueueRates
+}
+
+type BackpressureDecision struct {
+	Active bool
+	Reason string
+}
+
+// QueueStatsSource exposes only the independent sampler cache. Implementations
+// must not perform a new JetStream management query here.
+type QueueStatsSource interface {
+	LatestStats() (event.QueueStats, bool)
+}
+
+type queueSampleAttemptSource interface {
+	LastSampleAttempt() (time.Time, bool)
 }
 
 // ConfigLookup 读 sys_configs 单值（value, found）。
@@ -80,26 +143,56 @@ type ConfigLookup func(ctx context.Context, category, key string) (value string,
 // DiskUsageFunc 返回数据盘使用率百分比（0-100）。
 type DiskUsageFunc func(ctx context.Context) (pct float64, err error)
 
+// ProjectedBytesFunc estimates bytes that are already accepted but not yet
+// materialized in the database (for example pending raw PM files).
+type ProjectedBytesFunc func(ctx context.Context) (bytes float64, err error)
+
+// PendingCountFunc returns the number of PM messages accepted by the durable
+// queue but not fully acknowledged by workers yet.
+type PendingCountFunc func(ctx context.Context) (count uint64, err error)
+
 // loadBackpressureConfig 从 sys_configs 读全部背压阈值，缺失/非法回落默认值并做迟滞防呆。
 func loadBackpressureConfig(ctx context.Context, lookup ConfigLookup) BackpressureConfig {
-	cfg := BackpressureConfig{
-		Enabled:       bpDefaultEnabled,
-		DiskHighPct:   bpDefaultDiskHighPct,
-		DiskLowPct:    bpDefaultDiskLowPct,
-		IOSomeHighPct: bpDefaultIOSomeHigh,
-		IOSomeLowPct:  bpDefaultIOSomeLow,
-		MaxInflight:   bpDefaultMaxInflight,
-		Interval:      time.Duration(bpDefaultIntervalSec) * time.Second,
+	return loadBackpressureConfigWithDefaults(ctx, lookup, defaultBackpressureConfig())
+}
+
+func defaultBackpressureConfig() BackpressureConfig {
+	return BackpressureConfig{
+		Enabled:          bpDefaultEnabled,
+		DiskHighPct:      bpDefaultDiskHighPct,
+		DiskLowPct:       bpDefaultDiskLowPct,
+		IOSomeHighPct:    bpDefaultIOSomeHigh,
+		IOSomeLowPct:     bpDefaultIOSomeLow,
+		MaxInflight:      bpDefaultMaxInflight,
+		Interval:         time.Duration(bpDefaultIntervalSec) * time.Second,
+		QueuePendingHigh: bpDefaultQueuePendingHigh,
+		QueuePendingLow:  bpDefaultQueuePendingLow,
+		QueueOldestHigh:  bpDefaultQueueOldestHigh,
+		QueueOldestLow:   bpDefaultQueueOldestLow,
+		QueueSlopeWindow: bpDefaultQueueSlopeWindow,
 	}
+}
+
+func loadBackpressureConfigWithDefaults(
+	ctx context.Context,
+	lookup ConfigLookup,
+	defaults BackpressureConfig,
+) BackpressureConfig {
+	cfg := defaults
 	if lookup != nil {
-		cfg.Enabled = bpReadBool(ctx, lookup, bpKeyEnabled, bpDefaultEnabled)
-		cfg.DiskHighPct = float64(bpReadInt(ctx, lookup, bpKeyDiskHighPct, int(bpDefaultDiskHighPct), 1, 100))
-		cfg.DiskLowPct = float64(bpReadInt(ctx, lookup, bpKeyDiskLowPct, int(bpDefaultDiskLowPct), 0, 100))
-		cfg.IOSomeHighPct = float64(bpReadInt(ctx, lookup, bpKeyIOSomeHigh, int(bpDefaultIOSomeHigh), 1, 100))
-		cfg.IOSomeLowPct = float64(bpReadInt(ctx, lookup, bpKeyIOSomeLow, int(bpDefaultIOSomeLow), 0, 100))
-		cfg.MaxInflight = int64(bpReadInt(ctx, lookup, bpKeyMaxInflight, bpDefaultMaxInflight, 1, 10000))
-		sec := bpReadInt(ctx, lookup, bpKeyInterval, bpDefaultIntervalSec, 1, 3600)
+		cfg.Enabled = bpReadBool(ctx, lookup, bpKeyEnabled, defaults.Enabled)
+		cfg.DiskHighPct = float64(bpReadInt(ctx, lookup, bpKeyDiskHighPct, int(defaults.DiskHighPct), 1, 100))
+		cfg.DiskLowPct = float64(bpReadInt(ctx, lookup, bpKeyDiskLowPct, int(defaults.DiskLowPct), 0, 100))
+		cfg.IOSomeHighPct = float64(bpReadInt(ctx, lookup, bpKeyIOSomeHigh, int(defaults.IOSomeHighPct), 1, 100))
+		cfg.IOSomeLowPct = float64(bpReadInt(ctx, lookup, bpKeyIOSomeLow, int(defaults.IOSomeLowPct), 0, 100))
+		cfg.MaxInflight = int64(bpReadInt(ctx, lookup, bpKeyMaxInflight, int(defaults.MaxInflight), 1, 10000))
+		sec := bpReadInt(ctx, lookup, bpKeyInterval, int(defaults.Interval/time.Second), 1, 3600)
 		cfg.Interval = time.Duration(sec) * time.Second
+		cfg.QueuePendingHigh = bpReadInt(ctx, lookup, bpKeyQueuePendingHigh, defaults.QueuePendingHigh, 1, 10000000)
+		cfg.QueuePendingLow = bpReadInt(ctx, lookup, bpKeyQueuePendingLow, defaults.QueuePendingLow, 0, 10000000)
+		cfg.QueueOldestHigh = time.Duration(bpReadInt(ctx, lookup, bpKeyQueueOldestHigh, int(defaults.QueueOldestHigh/time.Second), 1, 86400)) * time.Second
+		cfg.QueueOldestLow = time.Duration(bpReadInt(ctx, lookup, bpKeyQueueOldestLow, int(defaults.QueueOldestLow/time.Second), 0, 86400)) * time.Second
+		cfg.QueueSlopeWindow = time.Duration(bpReadInt(ctx, lookup, bpKeyQueueSlopeWindow, int(defaults.QueueSlopeWindow/time.Second), 1, 86400)) * time.Second
 	}
 	if cfg.Interval < bpMinInterval {
 		cfg.Interval = bpMinInterval
@@ -110,6 +203,15 @@ func loadBackpressureConfig(ctx context.Context, lookup ConfigLookup) Backpressu
 	}
 	if cfg.IOSomeLowPct > cfg.IOSomeHighPct {
 		cfg.IOSomeLowPct = cfg.IOSomeHighPct
+	}
+	if cfg.QueuePendingLow > cfg.QueuePendingHigh {
+		cfg.QueuePendingLow = cfg.QueuePendingHigh
+	}
+	if cfg.QueueOldestLow > cfg.QueueOldestHigh {
+		cfg.QueueOldestLow = cfg.QueueOldestHigh
+	}
+	if cfg.QueueSlopeWindow < bpMinQueueSlopeWindow {
+		cfg.QueueSlopeWindow = bpMinQueueSlopeWindow
 	}
 	return cfg
 }
@@ -144,34 +246,93 @@ func bpReadInt(ctx context.Context, lookup ConfigLookup, key string, def, lo, hi
 // decideBackpressure 是纯函数迟滞决策（便于单测）。diskPct 为负表示该信号不可用
 // （探测失败），不可用时进入判定忽略、解除判定视作已达标（fail-open，不长期误堵）。
 func decideBackpressure(current bool, diskPct, ioSomePct float64, cfg BackpressureConfig) bool {
+	return decideBackpressureWithQueue(current, diskPct, ioSomePct, QueueSignal{}, cfg).Active
+}
+
+func decideBackpressureWithQueue(
+	current bool,
+	diskPct, ioSomePct float64,
+	queue QueueSignal,
+	cfg BackpressureConfig,
+) BackpressureDecision {
 	if !cfg.Enabled {
-		return false
+		return BackpressureDecision{Reason: pressureReasonDisabled}
 	}
 	if !current {
-		// 未背压：磁盘越高水位 → 进入背压。
 		if diskPct >= 0 && diskPct >= cfg.DiskHighPct {
-			return true
+			return BackpressureDecision{Active: true, Reason: pressureReasonDisk}
 		}
 		if ioSomePct >= 0 && ioSomePct >= cfg.IOSomeHighPct {
-			return true
+			return BackpressureDecision{Active: true, Reason: pressureReasonIO}
 		}
-		return false
+		if queue.Configured && queue.Available {
+			if queue.Stats.Pending >= uint64(cfg.QueuePendingHigh) {
+				return BackpressureDecision{Active: true, Reason: pressureReasonQueuePending}
+			}
+			if queue.Stats.OldestPendingAge >= cfg.QueueOldestHigh {
+				return BackpressureDecision{Active: true, Reason: pressureReasonQueueOldest}
+			}
+		}
+		return BackpressureDecision{}
 	}
-	// 已背压：磁盘回落到低水位以下才解除（迟滞）。
+
 	diskOK := diskPct < 0 || diskPct <= cfg.DiskLowPct
 	ioOK := ioSomePct < 0 || ioSomePct <= cfg.IOSomeLowPct
-	return !(diskOK && ioOK)
+	if !diskOK {
+		return BackpressureDecision{Active: true, Reason: pressureReasonDisk}
+	}
+	if !ioOK {
+		return BackpressureDecision{Active: true, Reason: pressureReasonIO}
+	}
+	if queue.Configured {
+		if !queue.Available {
+			return BackpressureDecision{Active: true, Reason: pressureReasonQueueFailure}
+		}
+		if queue.Stats.Pending > uint64(cfg.QueuePendingLow) {
+			return BackpressureDecision{Active: true, Reason: pressureReasonQueuePending}
+		}
+		if queue.Stats.OldestPendingAge > cfg.QueueOldestLow {
+			return BackpressureDecision{Active: true, Reason: pressureReasonQueueOldest}
+		}
+		if !queue.RatesAvailable {
+			return BackpressureDecision{Active: true, Reason: pressureReasonQueueSlopeUnknown}
+		}
+		if queue.Rates.PendingPerSecond > 0 {
+			return BackpressureDecision{Active: true, Reason: pressureReasonQueueGrowing}
+		}
+	}
+	return BackpressureDecision{Reason: pressureReasonRecovered}
+}
+
+func deriveQueueRates(previous, current event.QueueStats, window time.Duration) (QueueRates, bool) {
+	elapsed := current.SampledAt.Sub(previous.SampledAt)
+	if previous.SampledAt.IsZero() || current.SampledAt.IsZero() ||
+		elapsed <= 0 || window <= 0 || elapsed > window ||
+		current.DeliverySequence < previous.DeliverySequence ||
+		current.AckConsumerSequence < previous.AckConsumerSequence {
+		return QueueRates{}, false
+	}
+	seconds := elapsed.Seconds()
+	return QueueRates{
+		PendingPerSecond:    (float64(current.Pending) - float64(previous.Pending)) / seconds,
+		AckAdvancePerSecond: float64(current.AckConsumerSequence-previous.AckConsumerSequence) / seconds,
+		DeliveryPerSecond:   float64(current.DeliverySequence-previous.DeliverySequence) / seconds,
+	}, true
 }
 
 // BackpressureMetrics 暴露背压可观测指标。
 type BackpressureMetrics struct {
-	active           prometheus.Gauge
-	rejected         prometheus.Counter
-	rejectedByReason *prometheus.CounterVec
-	diskPct          prometheus.Gauge
-	ioSomePct        prometheus.Gauge
-	inflight         prometheus.Gauge
-	loadPerCore      prometheus.Gauge
+	active            prometheus.Gauge
+	transitions       *prometheus.CounterVec
+	rejected          prometheus.Counter
+	rejectedByReason  *prometheus.CounterVec
+	diskPct           prometheus.Gauge
+	ioSomePct         prometheus.Gauge
+	inflight          prometheus.Gauge
+	loadPerCore       prometheus.Gauge
+	queueDeliveryRate prometheus.Gauge
+	queueAckRate      prometheus.Gauge
+	queueBacklogSlope prometheus.Gauge
 }
 
 // NewBackpressureMetrics 注册并返回背压指标。reg 为 nil 时不注册（测试用）。
@@ -181,6 +342,10 @@ func NewBackpressureMetrics(reg prometheus.Registerer) *BackpressureMetrics {
 			Name: "acs_pm_upload_backpressure_active",
 			Help: "PM 上传背压是否生效（1=拒收中，0=正常），issue #318",
 		}),
+		transitions: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "acs_pm_upload_backpressure_transitions_total",
+			Help: "PM upload backpressure state transitions by target state and deciding reason.",
+		}, []string{"state", "reason"}),
 		rejected: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "acs_pm_upload_backpressure_rejected_total",
 			Help: "因背压被拒收的 PM 上传总数（设备会重传，不丢数据）",
@@ -205,9 +370,35 @@ func NewBackpressureMetrics(reg prometheus.Registerer) *BackpressureMetrics {
 			Name: "acs_host_load_per_core",
 			Help: "watchdog 观测到的主机每核 1 分钟负载（loadavg ÷ NumCPU）",
 		}),
+		queueDeliveryRate: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "acs_pm_queue_delivery_rate",
+			Help: "PM durable consumer delivery sequence advance per second across fresh monotonic samples.",
+		}),
+		queueAckRate: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "acs_pm_queue_ack_rate",
+			Help: "PM durable acknowledgement sequence advance per second across fresh monotonic samples.",
+		}),
+		queueBacklogSlope: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "acs_pm_queue_backlog_slope",
+			Help: "PM pending backlog change per second across fresh monotonic samples.",
+		}),
+	}
+	for _, label := range [][2]string{
+		{"engaged", pressureReasonDisk},
+		{"engaged", pressureReasonIO},
+		{"engaged", pressureReasonQueuePending},
+		{"engaged", pressureReasonQueueOldest},
+		{"released", pressureReasonRecovered},
+		{"released", pressureReasonDisabled},
+	} {
+		m.transitions.WithLabelValues(label[0], label[1])
 	}
 	if reg != nil {
-		reg.MustRegister(m.active, m.rejected, m.rejectedByReason, m.diskPct, m.ioSomePct, m.inflight, m.loadPerCore)
+		reg.MustRegister(
+			m.active, m.transitions, m.rejected, m.rejectedByReason,
+			m.diskPct, m.ioSomePct, m.inflight, m.loadPerCore,
+			m.queueDeliveryRate, m.queueAckRate, m.queueBacklogSlope,
+		)
 	}
 	return m
 }
@@ -215,16 +406,68 @@ func NewBackpressureMetrics(reg prometheus.Registerer) *BackpressureMetrics {
 // Watchdog 周期采样磁盘使用率，带迟滞维护背压态，并对 handler 暴露 Allowed()。
 // CPU 负载另行探测并上报 acs_host_load_per_core 指标，但不参与背压决策（#827）。
 type Watchdog struct {
-	lookup     ConfigLookup
-	diskUsage  DiskUsageFunc
-	ioPressure func() (float64, error)
-	loadFn     func() (float64, error)
-	metrics    *BackpressureMetrics
-	logger     *zap.Logger
+	lookup        ConfigLookup
+	diskUsage     DiskUsageFunc
+	ioPressure    func() (float64, error)
+	loadFn        func() (float64, error)
+	metrics       *BackpressureMetrics
+	logger        *zap.Logger
+	queueStats    QueueStatsSource
+	previousQueue *event.QueueStats
+	queueRates    QueueRates
+	queueRatesAt  time.Time
+	queueRatesOK  bool
+	defaults      BackpressureConfig
+	stateMu       sync.Mutex
 
-	cfg      atomic.Pointer[BackpressureConfig]
-	active   atomic.Bool // true = 背压中（拒收 PM）
-	inflight atomic.Int64
+	cfg                atomic.Pointer[BackpressureConfig]
+	active             atomic.Bool // true = 背压中（拒收 PM）
+	rememberedPressure atomic.Bool // policy state retained while Enabled=false
+	inflight           atomic.Int64
+}
+
+// SetQueueStatsSource wires the independent queue sampler cache into the
+// watchdog. The source must not issue queue management I/O from LatestStats.
+func (w *Watchdog) SetQueueStatsSource(source QueueStatsSource) {
+	if w != nil {
+		w.stateMu.Lock()
+		defer w.stateMu.Unlock()
+		w.queueStats = source
+		w.previousQueue = nil
+		w.invalidateQueueRates()
+	}
+}
+
+// SetQueueThresholdDefaults applies deployment-level queue defaults while
+// retaining sys_configs as the hot-reload override layer.
+func (w *Watchdog) SetQueueThresholdDefaults(
+	pendingHigh, pendingLow int,
+	oldestHigh, oldestLow, slopeWindow time.Duration,
+) {
+	if w == nil {
+		return
+	}
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	defaults := w.defaults
+	if pendingHigh > 0 {
+		defaults.QueuePendingHigh = pendingHigh
+	}
+	if pendingLow >= 0 {
+		defaults.QueuePendingLow = pendingLow
+	}
+	if oldestHigh > 0 {
+		defaults.QueueOldestHigh = oldestHigh
+	}
+	if oldestLow >= 0 {
+		defaults.QueueOldestLow = oldestLow
+	}
+	if slopeWindow > 0 {
+		defaults.QueueSlopeWindow = slopeWindow
+	}
+	w.defaults = defaults
+	cfg := loadBackpressureConfigWithDefaults(context.Background(), w.lookup, defaults)
+	w.cfg.Store(&cfg)
 }
 
 // NewWatchdog 构造 watchdog。diskUsage 为 nil 时跳过磁盘空间信号，Linux IO PSI 和
@@ -240,8 +483,9 @@ func NewWatchdog(lookup ConfigLookup, diskUsage DiskUsageFunc, metrics *Backpres
 		loadFn:     loadPerCore,
 		metrics:    metrics,
 		logger:     logger,
+		defaults:   defaultBackpressureConfig(),
 	}
-	cfg := loadBackpressureConfig(context.Background(), lookup)
+	cfg := loadBackpressureConfigWithDefaults(context.Background(), lookup, w.defaults)
 	w.cfg.Store(&cfg)
 	return w
 }
@@ -331,18 +575,13 @@ func (w *Watchdog) Run(ctx context.Context) {
 // JetStream workqueue 流上 SubjectSysConfigSaved 已被 transfercfg 占用（同一 filter subject
 // 不允许第二个 consumer），故背压配置走轮询刷新（变更 ≤1 个采样周期生效），不另开订阅。
 func (w *Watchdog) sample(ctx context.Context) {
-	cfg := loadBackpressureConfig(ctx, w.lookup)
+	w.stateMu.Lock()
+	cfg := loadBackpressureConfigWithDefaults(ctx, w.lookup, w.defaults)
 	w.cfg.Store(&cfg)
-	if !cfg.Enabled {
-		if w.active.Swap(false) {
-			w.logger.Info("PM upload backpressure RELEASED (disabled by config)")
-		}
-		w.setActiveGauge(false)
-		return
-	}
+	w.stateMu.Unlock()
 
 	diskPct := -1.0
-	if w.diskUsage != nil {
+	if cfg.Enabled && w.diskUsage != nil {
 		if p, err := w.diskUsage(ctx); err != nil {
 			w.logger.Warn("disk usage probe failed; skip disk signal", zap.Error(err))
 		} else {
@@ -353,7 +592,7 @@ func (w *Watchdog) sample(ctx context.Context) {
 		}
 	}
 	ioSomePct := -1.0
-	if w.ioPressure != nil {
+	if cfg.Enabled && w.ioPressure != nil {
 		if p, err := w.ioPressure(); err != nil {
 			w.logger.Warn("io pressure probe failed; skip PSI signal", zap.Error(err))
 		} else {
@@ -373,20 +612,104 @@ func (w *Watchdog) sample(ctx context.Context) {
 		}
 	}
 
-	prev := w.active.Load()
-	next := decideBackpressure(prev, diskPct, ioSomePct, cfg)
-	if next != prev {
+	queueSignal := w.sampleQueueSignal(time.Now(), cfg)
+	prevActive := w.active.Load()
+	decision := BackpressureDecision{Reason: pressureReasonDisabled}
+	next := false
+	if cfg.Enabled {
+		policyCurrent := prevActive || w.rememberedPressure.Load()
+		decision = decideBackpressureWithQueue(policyCurrent, diskPct, ioSomePct, queueSignal, cfg)
+		next = decision.Active
+		w.rememberedPressure.Store(next)
+	}
+	if next != prevActive {
 		w.active.Store(next)
+		if w.metrics != nil {
+			state := "released"
+			if next {
+				state = "engaged"
+			}
+			w.metrics.transitions.WithLabelValues(state, decision.Reason).Inc()
+		}
 		if next {
 			w.logger.Warn("PM upload backpressure ENGAGED — rejecting PM uploads (devices will retry)",
 				zap.Float64("disk_pct", diskPct), zap.Float64("io_some_avg10_pct", ioSomePct),
-				zap.Float64("disk_high_pct", cfg.DiskHighPct), zap.Float64("io_some_high_pct", cfg.IOSomeHighPct))
+				zap.Float64("disk_high_pct", cfg.DiskHighPct), zap.Float64("io_some_high_pct", cfg.IOSomeHighPct),
+				zap.String("reason", decision.Reason))
+		} else if decision.Reason == pressureReasonDisabled {
+			w.logger.Info("PM upload backpressure RELEASED (disabled by config)")
 		} else {
 			w.logger.Info("PM upload backpressure RELEASED — resuming PM uploads",
-				zap.Float64("disk_pct", diskPct))
+				zap.Float64("disk_pct", diskPct), zap.String("reason", decision.Reason))
 		}
 	}
 	w.setActiveGauge(next)
+}
+
+func (w *Watchdog) sampleQueueSignal(now time.Time, cfg BackpressureConfig) QueueSignal {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	signal := QueueSignal{Configured: w.queueStats != nil}
+	if w.queueStats == nil {
+		w.invalidateQueueRates()
+		return signal
+	}
+	stats, ok := w.queueStats.LatestStats()
+	age := now.Sub(stats.SampledAt)
+	newerAttemptFailed := false
+	if attempts, exposesAttempts := w.queueStats.(queueSampleAttemptSource); exposesAttempts {
+		attemptedAt, succeeded := attempts.LastSampleAttempt()
+		newerAttemptFailed = !attemptedAt.IsZero() && attemptedAt.After(stats.SampledAt) && !succeeded
+	}
+	if !ok || stats.SampledAt.IsZero() || age > cfg.QueueSlopeWindow || newerAttemptFailed {
+		w.invalidateQueueRates()
+		return signal
+	}
+	if w.previousQueue != nil && stats.SampledAt.Before(w.previousQueue.SampledAt) {
+		w.invalidateQueueRates()
+		return signal
+	}
+	signal.Available = true
+	signal.Stats = stats
+	if w.previousQueue != nil && stats.SampledAt.After(w.previousQueue.SampledAt) {
+		signal.Rates, signal.RatesAvailable = deriveQueueRates(*w.previousQueue, stats, cfg.QueueSlopeWindow)
+		if signal.RatesAvailable {
+			w.queueRates = signal.Rates
+			w.queueRatesAt = stats.SampledAt
+			w.queueRatesOK = true
+		} else {
+			w.invalidateQueueRates()
+		}
+	} else if w.queueRatesOK && w.queueRatesAt.Equal(stats.SampledAt) {
+		signal.Rates = w.queueRates
+		signal.RatesAvailable = true
+	}
+	if w.previousQueue == nil || stats.SampledAt.After(w.previousQueue.SampledAt) {
+		snapshot := stats
+		w.previousQueue = &snapshot
+	}
+	if w.metrics != nil {
+		if signal.RatesAvailable {
+			w.metrics.queueDeliveryRate.Set(signal.Rates.DeliveryPerSecond)
+			w.metrics.queueAckRate.Set(signal.Rates.AckAdvancePerSecond)
+			w.metrics.queueBacklogSlope.Set(signal.Rates.PendingPerSecond)
+		} else {
+			w.invalidateQueueRates()
+		}
+	}
+	return signal
+}
+
+func (w *Watchdog) invalidateQueueRates() {
+	w.queueRates = QueueRates{}
+	w.queueRatesAt = time.Time{}
+	w.queueRatesOK = false
+	if w.metrics == nil {
+		return
+	}
+	w.metrics.queueDeliveryRate.Set(math.NaN())
+	w.metrics.queueAckRate.Set(math.NaN())
+	w.metrics.queueBacklogSlope.Set(math.NaN())
 }
 
 // ioSomeAvg10 读取 Linux PSI 的 IO some avg10。非 Linux 或未启用 PSI 时返回错误，
@@ -465,6 +788,19 @@ func MinIOMetricsURL(endpoint string, useSSL bool) string {
 // 端点需 MINIO_PROMETHEUS_AUTH_TYPE=public（本栈已配）；非 200 / 解析失败均返回 error，
 // 由 watchdog 降级为「磁盘信号不可用」（不误堵）。
 func NewMinIODiskUsage(metricsURL string, timeout time.Duration, client *http.Client) DiskUsageFunc {
+	return NewProjectedMinIODiskUsage(metricsURL, timeout, client, nil)
+}
+
+// NewProjectedMinIODiskUsage adds accepted-but-not-yet-materialized bytes to
+// the filesystem usage reported by MinIO. Database temp files, WAL and
+// filesystem preallocation already consume that same filesystem and are
+// therefore included in the reported used bytes rather than double-counted.
+func NewProjectedMinIODiskUsage(
+	metricsURL string,
+	timeout time.Duration,
+	client *http.Client,
+	projected ProjectedBytesFunc,
+) DiskUsageFunc {
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
@@ -490,13 +826,85 @@ func NewMinIODiskUsage(metricsURL string, timeout time.Duration, client *http.Cl
 		if err != nil {
 			return 0, fmt.Errorf("read minio metrics: %w", err)
 		}
-		return parseDiskUsagePct(string(body))
+		total, used, err := parseDiskCapacity(string(body))
+		if err != nil {
+			return 0, err
+		}
+		if projected != nil {
+			if pending, projectionErr := projected(ctx); projectionErr == nil && pending > 0 {
+				used += pending
+			}
+		}
+		return projectedUsagePct(total, used, 0), nil
+	}
+}
+
+// NewDatabasePendingProjection estimates future TSDB bytes from PM work that
+// has already been accepted. JetStream backlog is projected using the recent
+// average PM file size; legacy pm_files rows not parsed yet are added directly.
+// amplification should be derived from the latest sparse-storage observation;
+// invalid values use a conservative 1.0.
+func NewDatabasePendingProjection(
+	tsdb *pgxpool.Pool,
+	pendingCount PendingCountFunc,
+	amplification float64,
+) ProjectedBytesFunc {
+	if amplification <= 0 {
+		amplification = 1
+	}
+	return func(ctx context.Context) (float64, error) {
+		var pending float64
+		if tsdb != nil && pendingCount != nil {
+			if count, err := pendingCount(ctx); err == nil && count > 0 {
+				var averageFileSize float64
+				err = tsdb.QueryRow(ctx, `
+					SELECT COALESCE(NULLIF(avg(file_size),0), $1)::float8
+					  FROM (
+					    SELECT file_size
+					      FROM pm_files
+					     WHERE parsed = true
+					       AND file_size > 0
+					     ORDER BY created_at DESC
+					     LIMIT 1000
+					  ) recent`,
+					float64(1<<20),
+				).Scan(&averageFileSize)
+				if err == nil {
+					pending += float64(count) * averageFileSize
+				}
+			}
+		}
+		if tsdb != nil {
+			var bytes float64
+			err := tsdb.QueryRow(ctx,
+				`SELECT COALESCE(sum(file_size),0)::float8 FROM pm_files WHERE parsed=false`,
+			).Scan(&bytes)
+			if err == nil {
+				pending += bytes
+			}
+		}
+		return pending * amplification, nil
 	}
 }
 
 // parseDiskUsagePct 从 MinIO 集群指标文本计算磁盘使用率%。按指标版本差异依次尝试多组容量指标：
 // usable 容量 → raw 容量 → 节点磁盘 free → 节点磁盘 used，取首个可用组。
 func parseDiskUsagePct(text string) (float64, error) {
+	total, used, err := parseDiskCapacity(text)
+	if err != nil {
+		return 0, err
+	}
+	return projectedUsagePct(total, used, 0), nil
+}
+
+func projectedUsagePct(total, used, pending float64) float64 {
+	if total <= 0 {
+		return 0
+	}
+	return clampPct((used + pending) / total * 100)
+}
+
+func parseDiskCapacity(text string) (total, used float64, err error) {
 	sums, present := sumMetrics(text, []string{
 		"minio_cluster_capacity_usable_total_bytes",
 		"minio_cluster_capacity_usable_free_bytes",
@@ -508,20 +916,20 @@ func parseDiskUsagePct(text string) (float64, error) {
 	})
 
 	if t := sums["minio_cluster_capacity_usable_total_bytes"]; t > 0 && present["minio_cluster_capacity_usable_free_bytes"] {
-		return usedPctFromFree(t, sums["minio_cluster_capacity_usable_free_bytes"]), nil
+		return t, t - sums["minio_cluster_capacity_usable_free_bytes"], nil
 	}
 	if t := sums["minio_cluster_capacity_raw_total_bytes"]; t > 0 && present["minio_cluster_capacity_raw_free_bytes"] {
-		return usedPctFromFree(t, sums["minio_cluster_capacity_raw_free_bytes"]), nil
+		return t, t - sums["minio_cluster_capacity_raw_free_bytes"], nil
 	}
 	if t := sums["minio_node_disk_total_bytes"]; t > 0 {
 		if present["minio_node_disk_free_bytes"] {
-			return usedPctFromFree(t, sums["minio_node_disk_free_bytes"]), nil
+			return t, t - sums["minio_node_disk_free_bytes"], nil
 		}
 		if present["minio_node_disk_used_bytes"] {
-			return clampPct(sums["minio_node_disk_used_bytes"] / t * 100), nil
+			return t, sums["minio_node_disk_used_bytes"], nil
 		}
 	}
-	return 0, fmt.Errorf("no usable minio capacity metrics found")
+	return 0, 0, fmt.Errorf("no usable minio capacity metrics found")
 }
 
 func usedPctFromFree(total, free float64) float64 {

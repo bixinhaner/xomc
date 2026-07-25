@@ -62,6 +62,51 @@ type QueueTuning struct {
 	MaxAckPending int
 }
 
+// QueueStats is a point-in-time JetStream durable consumer health sample.
+// Pending and AckPending are kept separate so callers can distinguish queued
+// work from messages already delivered to a worker but not yet acknowledged.
+type QueueStats struct {
+	Pending             uint64
+	AckPending          int
+	Redelivered         int
+	OldestPendingAge    time.Duration
+	LastSequence        uint64
+	AckSequence         uint64
+	DeliverySequence    uint64
+	AckConsumerSequence uint64
+	SampledAt           time.Time
+}
+
+// queueStatsReader keeps the QueueStats NATS management calls small and
+// directly testable while the bus continues to use nats.JetStreamContext for
+// all publishing and subscription operations.
+type queueStatsReader interface {
+	StreamNameBySubject(ctx context.Context, subject string) (string, error)
+	ConsumerInfo(ctx context.Context, stream, durable string) (*nats.ConsumerInfo, error)
+	StreamInfo(ctx context.Context, stream string) (*nats.StreamInfo, error)
+	NextMessage(ctx context.Context, stream string, startSequence uint64, subject string) (*nats.RawStreamMsg, error)
+}
+
+type jetStreamQueueStatsReader struct {
+	js nats.JetStreamContext
+}
+
+func (r jetStreamQueueStatsReader) StreamNameBySubject(ctx context.Context, subject string) (string, error) {
+	return r.js.StreamNameBySubject(subject, nats.Context(ctx))
+}
+
+func (r jetStreamQueueStatsReader) ConsumerInfo(ctx context.Context, stream, durable string) (*nats.ConsumerInfo, error) {
+	return r.js.ConsumerInfo(stream, durable, nats.Context(ctx))
+}
+
+func (r jetStreamQueueStatsReader) StreamInfo(ctx context.Context, stream string) (*nats.StreamInfo, error) {
+	return r.js.StreamInfo(stream, nats.Context(ctx))
+}
+
+func (r jetStreamQueueStatsReader) NextMessage(ctx context.Context, stream string, startSequence uint64, subject string) (*nats.RawStreamMsg, error) {
+	return r.js.GetMsg(stream, startSequence, nats.DirectGetNext(subject), nats.Context(ctx))
+}
+
 // NATSEventBus 是基于 NATS JetStream 的生产级事件总线实现。
 // 每个事件通过 JetStream 持久化存储，支持 At-Least-Once 交付语义。
 // QueueSubscribe 使用 Durable Consumer，各实例彺负载均衡，适用于多实例水平扩展。
@@ -76,8 +121,120 @@ type NATSEventBus struct {
 	queueTuning       map[string]QueueTuning
 	logger            *zap.Logger
 	metrics           *EventBusMetrics // issue #20：投递结果指标；nil 时（单进程/单测）静默 no-op。
+	queueStatsReader  queueStatsReader // nil 时直接通过 js 读取；测试可替换为受控 reader。
 	ctx               context.Context
 	cancel            context.CancelFunc
+}
+
+// QueueStats returns a consistent read-only health sample for one durable
+// consumer. It does not create, update, or otherwise change JetStream state.
+func (b *NATSEventBus) QueueStats(ctx context.Context, subject, durable string) (QueueStats, error) {
+	if err := ctx.Err(); err != nil {
+		return QueueStats{}, fmt.Errorf("queue stats context: %w", err)
+	}
+
+	reader := b.queueStatsReader
+	if reader == nil {
+		reader = jetStreamQueueStatsReader{js: b.js}
+	}
+
+	stream, err := reader.StreamNameBySubject(ctx, subject)
+	if err != nil {
+		return QueueStats{}, fmt.Errorf("resolve queue stream for subject %q: %w", subject, err)
+	}
+	consumer, err := reader.ConsumerInfo(ctx, stream, durable)
+	if err != nil {
+		return QueueStats{}, fmt.Errorf("load queue consumer info for stream %q durable %q: %w", stream, durable, err)
+	}
+	if consumer == nil {
+		return QueueStats{}, fmt.Errorf("load queue consumer info for stream %q durable %q: empty response", stream, durable)
+	}
+	streamInfo, err := reader.StreamInfo(ctx, stream)
+	if err != nil {
+		return QueueStats{}, fmt.Errorf("load queue stream info for stream %q: %w", stream, err)
+	}
+	if streamInfo == nil {
+		return QueueStats{}, fmt.Errorf("load queue stream info for stream %q: empty response", stream)
+	}
+
+	var oldest *nats.RawStreamMsg
+	if startSequence := oldestRelevantPendingStart(consumer, streamInfo.State); startSequence > 0 {
+		oldest, err = reader.NextMessage(ctx, stream, startSequence, subject)
+		if err != nil && !errors.Is(err, nats.ErrMsgNotFound) {
+			return QueueStats{}, fmt.Errorf("load oldest pending message for stream %q subject %q from sequence %d: %w", stream, subject, startSequence, err)
+		}
+	}
+
+	// The sample completes only after the optional subject-filtered raw-message
+	// lookup, so SampledAt always represents the successful collection end.
+	sampledAt := time.Now()
+	stats := QueueStats{
+		Pending:             consumer.NumPending,
+		AckPending:          consumer.NumAckPending,
+		Redelivered:         consumer.NumRedelivered,
+		LastSequence:        streamInfo.State.LastSeq,
+		AckSequence:         consumer.AckFloor.Stream,
+		DeliverySequence:    consumer.Delivered.Consumer,
+		AckConsumerSequence: consumer.AckFloor.Consumer,
+		SampledAt:           sampledAt,
+	}
+	if oldest != nil && !oldest.Time.IsZero() {
+		stats.OldestPendingAge = sampledAt.Sub(oldest.Time)
+		if stats.OldestPendingAge < 0 {
+			stats.OldestPendingAge = 0
+		}
+	}
+
+	return stats, nil
+}
+
+// oldestRelevantPendingStart returns a safe lower bound for a single
+// subject-filtered lookup. For queued work, the consumer has not delivered
+// anything beyond Delivered.Stream. For ack-only work, JetStream exposes only
+// the contiguous AckFloor; later acknowledgement gaps are not enumerable via
+// ConsumerInfo, so AckFloor+1 is the oldest conservative candidate.
+func oldestRelevantPendingStart(consumer *nats.ConsumerInfo, state nats.StreamState) uint64 {
+	if consumer == nil || state.FirstSeq == 0 || state.LastSeq == 0 || (consumer.NumPending == 0 && consumer.NumAckPending <= 0) {
+		return 0
+	}
+	start := state.FirstSeq
+	if consumer.NumAckPending > 0 {
+		if consumer.AckFloor.Stream == ^uint64(0) {
+			return 0
+		}
+		start = maxQueueSequence(start, consumer.AckFloor.Stream+1)
+	} else {
+		if consumer.Delivered.Stream == ^uint64(0) {
+			return 0
+		}
+		start = maxQueueSequence(start, consumer.Delivered.Stream+1)
+	}
+	if start > state.LastSeq {
+		return 0
+	}
+	return start
+}
+
+func maxQueueSequence(left, right uint64) uint64 {
+	if left > right {
+		return left
+	}
+	return right
+}
+
+// PendingCount returns queued plus delivered-but-unacked messages for one
+// durable consumer. It is kept as a one-release compatibility wrapper around
+// QueueStats for capacity projections that have not yet adopted the full
+// health sample.
+func (b *NATSEventBus) PendingCount(subject, durable string) (uint64, error) {
+	stats, err := b.QueueStats(context.Background(), subject, durable)
+	if err != nil {
+		return 0, err
+	}
+	if stats.AckPending <= 0 {
+		return stats.Pending, nil
+	}
+	return stats.Pending + uint64(stats.AckPending), nil
 }
 
 // NewNATSEventBus creates an EventBus backed by NATS JetStream.
@@ -108,6 +265,13 @@ func (b *NATSEventBus) SetQueueTuning(subject string, tuning QueueTuning) {
 // the legacy log-only behaviour.
 func (b *NATSEventBus) SetMetrics(m *EventBusMetrics) {
 	b.metrics = m
+}
+
+// NewQueueHealthSampler returns the single owner for PM queue-health metric
+// observation. QueueStats itself remains a read-only collection method so
+// disk-projection callers cannot accidentally create duplicate samples.
+func (b *NATSEventBus) NewQueueHealthSampler(interval time.Duration) *QueueHealthSampler {
+	return NewQueueHealthSampler(b, b.metrics, interval, b.logger)
 }
 
 func (b *NATSEventBus) SetPullTuning(subject string, tuning PullTuning) {

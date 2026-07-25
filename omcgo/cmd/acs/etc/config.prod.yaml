@@ -113,6 +113,13 @@ upload:
   password: ""
   max_file_size: 524288000   # 500MB (设备日志包动辄 50-300MB)
 
+backpressure:
+  queue_pending_high: 2000
+  queue_pending_low: 500
+  queue_oldest_high: 10m
+  queue_oldest_low: 2m
+  queue_slope_window: 5m
+
 download:
   base_url: "http://acs:7557"
   path: "/smallcell/FileDownloadService"

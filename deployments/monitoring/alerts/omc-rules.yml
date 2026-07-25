@@ -210,6 +210,24 @@ groups:
             Action: 检查 Redis 连通性与 kpi.router 日志；恢复后确认
                     omc_kpi_router_stale_evictions_total 增长且本告警自动解除。
 
+  - name: omc.pm_ingest
+    interval: 30s
+    rules:
+      - alert: PMCountersDiscoveredOutsideLibrary
+        expr: sum by (carrier, technology) (increase(omc_pm_discovered_counters_total[15m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 发现指标库外 counter（{{ $labels.carrier }}/{{ $labels.technology }}）"
+          description: |
+            最近 15 分钟持续发现指标库外 counter。这些值已被保留并进入动态登记，
+            没有被丢弃；告警表示厂家上报名或指标库配置发生漂移。
+            Action: 检查 worker 的 "preserved counters not in indicator library" 日志，
+                    核对对应产品指标库 report_key 并完成正式登记。
+
   - name: omc.meta
     interval: 30s
     rules:
@@ -301,3 +319,152 @@ groups:
             PM 文件处理 p95 耗时持续 10 分钟超过 60 秒。
             Impact: KPI 计算与时序数据入库滞后，性能看板不实时。
             Action: 看 worker CPU / TimescaleDB 写入压力；评估 PM 文件体积与并发。
+
+      - alert: OMCPMQueuePendingHigh
+        expr: omc_pm_queue_pending{subject="pm.file.received",durable="pm-workers"} >= 2000
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 队列 pending 持续达到背压高水位"
+          description: |
+            PM durable consumer 的待投递消息持续 10 分钟不少于 2000，
+            ACS 上传背压应已启动。检查 worker 吞吐、NATS durable 状态和 TimescaleDB 写入。
+
+      - alert: OMCPMQueueOldestAgeHigh
+        expr: omc_pm_queue_oldest_age_seconds{subject="pm.file.received",durable="pm-workers"} >= 600
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 队列最老消息持续超过 10 分钟"
+          description: |
+            最老待处理 PM 消息年龄达到背压高水位，说明处理延迟已影响数据时效。
+            联查 pending、redelivery、delivery/ack rate 和 worker 错误日志。
+
+      - alert: OMCPMQueueSampleStale
+        expr: time() - omc_pm_queue_sample_timestamp_seconds{subject="pm.file.received",durable="pm-workers"} > 300
+        for: 2m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 队列健康样本已陈旧"
+          description: |
+            ACS 背压超过 5 分钟没有消费到新鲜队列样本。若背压已经生效，
+            watchdog 会保守保持拒收状态。检查 NATS 管理查询、采样器日志与连接状态。
+
+      - alert: OMCPMQueueAckRateBelowDelivery
+        expr: |
+          max without (subject, durable) (
+            omc_pm_queue_ack_pending{subject="pm.file.received",durable="pm-workers"}
+          ) > 0
+          and acs_pm_queue_ack_rate < acs_pm_queue_delivery_rate
+          and acs_pm_queue_backlog_slope > 0
+          and max without (subject, durable) (
+            time() - omc_pm_queue_sample_timestamp_seconds{subject="pm.file.received",durable="pm-workers"}
+          ) < 60
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 确认速率持续低于 consumer 投递速率"
+          description: |
+            durable consumer 存在未确认消息，且 ack rate 持续低于 delivery rate，
+            backlog slope 同时为正。worker 已无法追平输入，需扩容或排查数据库瓶颈。
+
+      - alert: OMCPMHourlyTransactionRetryExhausted
+        # 单个 bounded hourly batch 在 3 次总尝试后仍遇到 PostgreSQL deadlock /
+        # serialization failure；该桶不会发布，必须立即排查锁竞争或事务冲突。
+        expr: increase(omc_pm_hourly_tx_retry_exhausted_total[5m]) > 0
+        for: 0s
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 小时聚合事务重试已耗尽（SQLSTATE={{ $labels.sqlstate }}）"
+          description: |
+            过去 5 分钟存在小时聚合批事务在 3 次总尝试后仍无法完成。
+            仅 SQLSTATE 40P01（deadlock）和 40001（serialization failure）会触发此指标。
+            Impact: 对应小时桶构建失败，新的稀疏聚合版本不会发布。
+            Action: 检查 PostgreSQL 锁等待、deadlock 日志和同时运行的 PM 写入；确认
+                    omc_pm_hourly_tx_retries_total 是否持续升高后再恢复任务。
+
+      - alert: OMCPMHourlyTransactionRetryRateSustained
+        expr: sum(rate(omc_pm_hourly_tx_retries_total[5m])) by (sqlstate) > 0
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 小时聚合事务持续重试（SQLSTATE={{ $labels.sqlstate }}）"
+          description: |
+            PM 小时聚合批事务在过去 10 分钟持续因 PostgreSQL deadlock 或序列化冲突重试。
+            当前尚未耗尽重试，但持续冲突会降低桶发布吞吐并可能升级为构建失败。
+            Action: 检查并发 PM 写入、长事务和数据库锁等待；必要时降低作业重叠。
+
+      - alert: OMCPMHourlyFailedBucketStale
+        expr: omc_pm_hourly_aged_failed_buckets > 0
+        for: 5m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 失败小时桶超过一个维护周期"
+          description: |
+            最近窗口内至少一个自然小时聚合任务的 finished_at 已超过 1 小时。
+            Impact: 对应小时没有可发布的新 active 版本，聚合水位可能停止推进。
+            Action: 检查任务 error_message、原始 anchor 和恢复指标；永久错误需人工修复，
+                    可重试 SQLSTATE 应由维护循环在冷却期后自动恢复。
+
+      - alert: OMCPMHourlyRecoveryExhausted
+        expr: omc_pm_hourly_recovery_exhausted_buckets > 0
+        for: 5m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 小时桶自动恢复次数已耗尽"
+          description: |
+            至少一个失败小时桶已达到独立 recovery_count 上限，维护循环不会继续重放。
+            Impact: poison bucket 保持失败，避免无限重放，但需要人工处置。
+            Action: 检查 PostgreSQL 锁竞争和该桶数据；修复根因后再决定是否人工恢复。
+
+      - alert: OMCPMHourlyStaleBuildingVersion
+        expr: omc_pm_hourly_stale_building_versions > 0
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 小时桶存在过期 building 版本"
+          description: |
+            小时版本持续 building 超过 1 小时，且尚未被维护循环收敛。
+            Impact: 孤立批次数据占用空间，并可能掩盖失败桶。
+            Action: 检查维护循环、对应 async_jobs 状态和 TimescaleDB 写入错误。
+
+      - alert: OMCPMHourlyWatermarkLag
+        expr: omc_pm_hourly_watermark_lag_seconds > 7200
+        for: 10m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 小时聚合水位滞后超过两个桶"
+          description: |
+            最新 clean active 小时桶结束时间落后当前时间超过 7200 秒。
+            Impact: 小时 KPI、看板和后续日聚合读取陈旧数据。
+            Action: 联查 failed bucket、recovery exhausted、stale building 和队列积压指标。

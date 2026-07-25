@@ -11,18 +11,80 @@ import (
 	"testing"
 
 	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/s3utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
+type recordingReencryptObjectIO struct {
+	blob       []byte
+	getBuckets []string
+	putBuckets []string
+}
+
+func (r *recordingReencryptObjectIO) GetObject(
+	_ context.Context,
+	bucket string,
+	_ string,
+	_ minio.GetObjectOptions,
+) (io.ReadCloser, error) {
+	r.getBuckets = append(r.getBuckets, bucket)
+	return io.NopCloser(bytes.NewReader(r.blob)), nil
+}
+
+func (r *recordingReencryptObjectIO) PutObject(
+	_ context.Context,
+	bucket string,
+	_ string,
+	reader io.Reader,
+	_ int64,
+	_ minio.PutObjectOptions,
+) (minio.UploadInfo, error) {
+	r.putBuckets = append(r.putBuckets, bucket)
+	_, err := io.Copy(io.Discard, reader)
+	return minio.UploadInfo{}, err
+}
+
+func TestReencryptor_NormalizesLegacyBucketForListGetAndPut(t *testing.T) {
+	keyV1 := makeTestKey(t)
+	keyV2 := makeTestKey(t)
+	sourceProvider := newMultiKeyProvider("v1", map[string][]byte{"v1": keyV1})
+	targetProvider := newMultiKeyProvider("v2", map[string][]byte{"v1": keyV1, "v2": keyV2})
+	key := "backup/2026/07/24/SN001_CFG.xml.enc"
+	blob := encryptUnder(t, sourceProvider, "AES-256-GCM", []byte("<cfg/>"), []byte("SN001_CFG.xml"))
+	lister := &fakeBucketLister{objects: []minio.ObjectInfo{{Key: key}}}
+	objectIO := &recordingReencryptObjectIO{blob: blob}
+
+	reencryptor, err := NewReencryptor(ReencryptorConfig{
+		Bucket:      "config_backup",
+		TargetKekID: "v2",
+		Concurrency: 1,
+		Lister:      lister,
+		IO:          objectIO,
+		KeyProvider: targetProvider,
+		Logger:      zap.NewNop(),
+	})
+	require.NoError(t, err)
+
+	stats, err := reencryptor.Run(context.Background())
+
+	require.NoError(t, err)
+	require.Equal(t, int64(1), stats.Reencrypted)
+	require.Equal(t, []string{"config-backup"}, lister.buckets)
+	require.Equal(t, []string{"config-backup"}, objectIO.getBuckets)
+	require.Equal(t, []string{"config-backup"}, objectIO.putBuckets)
+	for _, bucket := range append(append(lister.buckets, objectIO.getBuckets...), objectIO.putBuckets...) {
+		require.NoError(t, s3utils.CheckValidBucketNameStrict(bucket))
+	}
+}
+
 // =============================================================================
 // fakeObjectIO — in-memory MinIO substitute for Reencryptor tests
 // =============================================================================
 //
-// Holds a map of key → blob; GetObject returns a *minio.Object wrapping
-// a bytes.Buffer; PutObject overwrites the map entry. Errors can be
-// injected per-key for failure-path tests.
+// Holds a map of key → blob; GetObject returns an in-memory ReadCloser and
+// PutObject overwrites the map entry. Errors can be injected per key.
 
 type fakeObjectIO struct {
 	mu       sync.Mutex
@@ -41,36 +103,17 @@ func newFakeObjectIO() *fakeObjectIO {
 	}
 }
 
-func (f *fakeObjectIO) GetObject(_ context.Context, _, key string, _ minio.GetObjectOptions) (*minio.Object, error) {
+func (f *fakeObjectIO) GetObject(_ context.Context, _, key string, _ minio.GetObjectOptions) (io.ReadCloser, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err, ok := f.getErrs[key]; ok {
 		return nil, err
 	}
-	if _, ok := f.store[key]; !ok {
+	blob, ok := f.store[key]
+	if !ok {
 		return nil, errors.New("fake-minio: key not found")
 	}
-	// Use the test-only minio constructor to wrap a reader. minio-go does
-	// not export such a constructor, so we work around by writing a
-	// tempfile-less *minio.Object via reflection — too fragile. Instead,
-	// the test uses a custom mini-Object via the reader-based path that
-	// the SUT consumes.
-	//
-	// Trick: construct a real-shaped *minio.Object with internal fields
-	// minio-go expects. Since minio-go doesn't expose a constructor for
-	// tests, we rely on the package's documented behavior that
-	// GetObject's error path returns nil + err (which we test) and the
-	// success path returns a Reader. The SUT uses io.LimitReader + ReadAll
-	// so any io.ReadCloser shape works through the reader, not the
-	// *minio.Object methods.
-	//
-	// Build the object via the unexported NewObject hook used in
-	// minio-go's own tests: there is none. So we MUST use a real Get
-	// against a real minio.Client. To avoid that, refactor the SUT to
-	// accept io.ReadCloser instead of *minio.Object.
-	//
-	// — see ReencryptorAdapter helper below.
-	return nil, errors.New("fakeObjectIO: callers must use objectIOWrapper")
+	return io.NopCloser(bytes.NewReader(blob)), nil
 }
 
 func (f *fakeObjectIO) PutObject(_ context.Context, _, key string, reader io.Reader, _ int64, _ minio.PutObjectOptions) (minio.UploadInfo, error) {
@@ -87,39 +130,6 @@ func (f *fakeObjectIO) PutObject(_ context.Context, _, key string, reader io.Rea
 	f.putCalls[key]++
 	return minio.UploadInfo{Key: key, Size: int64(len(body))}, nil
 }
-
-// =============================================================================
-// readerObjectIO — io.ReadCloser-based ObjectIO that bypasses *minio.Object
-// =============================================================================
-//
-// The Reencryptor SUT calls obj.Close() and io.ReadAll(obj). To avoid
-// constructing a real *minio.Object (whose constructor is internal to
-// minio-go), we declare a parallel narrow interface in the test that
-// adapts *fakeObjectIO and matches the consumer surface. The Reencryptor
-// uses ObjectIO declared in reencryptor.go (which DOES require
-// *minio.Object). For tests we install a thin wrapper using
-// minio.Object's package-level export of NewObject — which doesn't exist.
-//
-// Workaround: Reencryptor uses obj only as an io.Reader (via io.LimitReader
-// + io.ReadAll). We can satisfy the interface by returning a real
-// *minio.Object whose Reader has been pre-loaded, using the public
-// minio.Client.GetObjectReadCloser path… but that path isn't exported
-// either.
-//
-// Final approach: refactor the test to use a stub that returns nil + a
-// special sentinel error, then in this same file declare an alternative
-// InternalReencryptOneAdapter helper (test-only) that exercises
-// reencryptOne via direct in-memory bytes — bypassing GetObject entirely
-// for the success-path tests. Failure-path tests hit GetObject's error
-// branch which doesn't need a *minio.Object.
-//
-// In short: for SUCCESS paths we test reencryptOne via a sister test
-// helper that takes ([]byte, key) directly (see reencryptOneInMemory
-// below). For FAILURE paths we exercise the full Reencryptor.Run via
-// GetObject errors injected on fakeObjectIO.
-//
-// This keeps the test surface honest without forcing the production
-// interface to expose io.ReadCloser purely for testability.
 
 // reencryptOneInMemory is a test-only shim that mirrors reencryptOne's
 // logic using an in-memory blob source instead of calling GetObject.

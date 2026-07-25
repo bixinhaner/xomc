@@ -122,6 +122,8 @@ func TestBuiltInTaskTypes_CoversRequiredTemplates(t *testing.T) {
 	assert.Equal(t, "station_log", seen["RUNTIME_LOG_COLLECT"].Category)
 	assert.Equal(t, "config_backup", seen["CONFIG_BACKUP_XML"].Category)
 	assert.Equal(t, "config_restore", seen["CONFIG_RESTORE"].Category)
+	assert.Equal(t, "config-backup/{object_path}", seen["CONFIG_RESTORE"].URLTemplate)
+	assert.Equal(t, "/smallcell/FileDownloadService/config-backup/{object_path}", seen["CONFIG_RESTORE"].TransportPath)
 	assert.Equal(t, "1 Firmware Upgrade Image", seen["ENB_IMG_UPGRADE"].FileType)
 	assert.Equal(t, "X {OUI} Software Upgrade Patch", seen["ENB_PATCH_UPGRADE"].FileType)
 	assert.Equal(t, "Firmware Upgrade Fpga", seen["ENB_FPGA_UPGRADE"].FileType)
@@ -133,6 +135,22 @@ func TestBuiltInTaskTypes_CoversRequiredTemplates(t *testing.T) {
 	assert.Equal(t, software.FileTypeFPGA, *seen["ENB_FPGA_UPGRADE"].FirmwareFileType)
 	_, has5GFpga := seen["GNB_FPGA_UPGRADE"]
 	assert.False(t, has5GFpga)
+}
+
+func TestMaterializeTaskTypes_NormalizesLegacyConfigBackupReferences(t *testing.T) {
+	catalog := materializeTaskTypes([]TaskType{{
+		TypeCode:      "CONFIG_RESTORE",
+		Category:      "config_restore",
+		RPCType:       "DOWNLOAD",
+		BuiltIn:       true,
+		Enabled:       true,
+		URLTemplate:   "config_backup/{object_path}",
+		TransportPath: "/smallcell/FileDownloadService/config_backup/{object_path}",
+	}})
+
+	require.Len(t, catalog, 1)
+	assert.Equal(t, "config-backup/{object_path}", catalog[0].URLTemplate)
+	assert.Equal(t, "/smallcell/FileDownloadService/config-backup/{object_path}", catalog[0].TransportPath)
 }
 
 func TestService_LoadTaskTypeCatalog_UsesStoredRowsAsSourceOfTruth(t *testing.T) {

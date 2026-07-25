@@ -33,12 +33,14 @@ const latestKPISummaryLimit = 500
 func buildLatestKPIPerNameQuery(startTimeArg, endTimeArg any) (string, []any, error) {
 	// DISTINCT ON 必须与 ORDER BY 首键一致（metric_path），由 PG 强校验。
 	// squirrel 没有 DISTINCT ON 一等支持，把它嵌入第一列字符串原样输出即可。
-	return storage.Psql.Select("DISTINCT ON (metric_path) metric_path", "metric_value").
-		From("pm_metrics").
-		Where(sq.Eq{"metric_type": "kpi"}).
-		Where(sq.GtOrEq{"time": startTimeArg}).
-		Where(sq.LtOrEq{"time": endTimeArg}).
-		OrderBy("metric_path", "time DESC").
+	return storage.Psql.Select("DISTINCT ON (d.metric_path) d.metric_path", "v.metric_value").
+		From("pm_metric_values v").
+		Join(`pm_measurement_anchors a ON a."time"=v."time" AND a.anchor_id=v.anchor_id`).
+		Join("pm_metric_dictionary d ON d.metric_id=v.metric_id").
+		Where(sq.Eq{"d.metric_type": "kpi"}).
+		Where(sq.GtOrEq{`a."time"`: startTimeArg}).
+		Where(sq.LtOrEq{`a."time"`: endTimeArg}).
+		OrderBy("d.metric_path", `a."time" DESC`).
 		Limit(latestKPISummaryLimit).
 		ToSql()
 }

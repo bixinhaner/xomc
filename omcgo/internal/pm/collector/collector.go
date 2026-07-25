@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -327,24 +328,19 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 		return err
 	}
 
+	// A parsed marker no longer short-circuits an existing source object: the
+	// content digest must still be compared so same-name replacements can be
+	// reparsed safely. It is retained as a fallback when the raw archiver has
+	// already renamed the original object and a duplicate event is redelivered.
+	knownParsed := false
 	if c.fileMarkerLookup != nil {
-		fileName := path.Base(payload.MinIOPath)
-		parsed, err := c.fileMarkerLookup.IsFileParsed(ctx, payload.DeviceSN, fileName)
-		if err != nil {
-			return fmt.Errorf("lookup parsed pm file marker: %w", err)
+		parsed, lookupErr := c.fileMarkerLookup.IsFileParsed(
+			ctx, payload.DeviceSN, path.Base(payload.MinIOPath),
+		)
+		if lookupErr != nil {
+			return fmt.Errorf("lookup parsed pm file marker: %w", lookupErr)
 		}
-		if parsed {
-			span.SetAttributes(attribute.Bool("pm.duplicate", true))
-			if c.metrics != nil {
-				c.metrics.FilesProcessedTotal.WithLabelValues("duplicate").Inc()
-				c.metrics.ProcessingDurationSecs.Observe(time.Since(startTime).Seconds())
-			}
-			c.logger.Info("skipping already ingested PM file",
-				zap.String("device_sn", payload.DeviceSN),
-				zap.String("file_name", fileName),
-			)
-			return nil
-		}
+		knownParsed = parsed
 	}
 
 	deviceID, err := uuid.Parse(payload.DeviceID)
@@ -393,13 +389,17 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 		// 真正可处理消息的吞吐——参照 resolveDevice 对「设备不存在」的处理，同样包一层
 		// reliability.ErrPermanent 首次即终止，不重试、直接进 DLQ。
 		if isMinIONotFound(derr) {
+			if knownParsed {
+				return nil
+			}
 			return fmt.Errorf("decompress pm file: %w: %w", derr, reliability.ErrPermanent)
 		}
 		return fmt.Errorf("decompress pm file: %w", derr)
 	}
 
 	// io.LimitReader 兜底：Stat 不可用/谎报时,解析最多读 maxPMFileBytes,截断 → 解析报错被捕获。
-	content, err := c.parser.Parse(io.LimitReader(decoded, maxPMFileBytes), deviceID)
+	contentHasher := sha256.New()
+	content, err := c.parser.Parse(io.LimitReader(io.TeeReader(decoded, contentHasher), maxPMFileBytes), deviceID)
 	if err != nil {
 		if c.metrics != nil {
 			c.metrics.FilesProcessedTotal.WithLabelValues("failed").Inc()
@@ -409,6 +409,9 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 		// 同上：MinIO 对象不存在的错误也可能延迟到这里（XML 解析器内部持续读取 obj）
 		// 才首次暴露，同样短路不重试。
 		if isMinIONotFound(err) {
+			if knownParsed {
+				return nil
+			}
 			return fmt.Errorf("parse pm xml: %w: %w", err, reliability.ErrPermanent)
 		}
 		return fmt.Errorf("parse pm xml: %w", err)
@@ -443,7 +446,9 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 	if c.copyIngestor == nil {
 		return fmt.Errorf("pm collector: copy ingestor not wired (copy is the sole write path)")
 	}
-	return c.ingestViaCopy(ctx, span, startTime, now, fileSize, deviceID, &payload, content, allow)
+	return c.ingestViaCopy(
+		ctx, span, startTime, now, fileSize, deviceID, &payload, content, allow, contentHasher.Sum(nil),
+	)
 }
 
 // ingestViaCopy 是 copy 模式的写收尾：用内存 counter 算出 KPI（只算不写），把 counter + KPI +
@@ -456,6 +461,7 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 func (c *PMCollector) ingestViaCopy(
 	ctx context.Context, span trace.Span, startTime, now time.Time, fileSize int64,
 	deviceID uuid.UUID, payload *FileReceivedPayload, content *PMFileContent, allow map[string]CounterMeta,
+	contentSHA256 []byte,
 ) error {
 	// KPI：用本文件已过白名单、已编号化的内存 counter 直接算，不落库（随 counter 一起 COPY）。
 	var kpis []model.KPIValue
@@ -504,15 +510,16 @@ func (c *PMCollector) ingestViaCopy(
 	content.Counters = fillMissingSupportedCounters(content.Counters, enabledAllow)
 
 	marker := metrics.FileMarker{
-		DeviceID:     deviceID,
-		DeviceSN:     payload.DeviceSN,
-		Carrier:      payload.Carrier,
-		Technology:   payload.Technology,
-		FileName:     path.Base(payload.MinIOPath),
-		FileSize:     fileSize,
-		CollectTime:  now,
-		MinioPath:    payload.MinIOPath,
-		CounterCount: len(content.Counters),
+		DeviceID:      deviceID,
+		DeviceSN:      payload.DeviceSN,
+		Carrier:       payload.Carrier,
+		Technology:    payload.Technology,
+		FileName:      path.Base(payload.MinIOPath),
+		FileSize:      fileSize,
+		CollectTime:   now,
+		MinioPath:     payload.MinIOPath,
+		ContentSHA256: contentSHA256,
+		CounterCount:  len(content.Counters),
 	}
 	ingested, err := c.copyIngestor.CopyIngest(ctx, marker, content.Counters, kpis)
 	if err != nil {
@@ -671,9 +678,9 @@ func applyPayloadIdentity(counters []model.PMCounter, oui, sn string) {
 // fail-open：whitelist 未注入 / 查询失败 / 空集合 → 返回原 counters 不过滤。
 // #866 接入结果值规范化后，最终写入前仍会要求每条结果具备 Unit/StatisType。
 //
-// issue #20：被丢弃的孤儿 counter 数除 log 外，额外记 omc_pm_dropped_counters_total
-// （reason=whitelist_miss，标签带 carrier × technology），让"厂家上报名漂移导致大批
-// counter 被静默丢弃"成为可告警的可观测信号，而非只在 worker 日志里翻 grep。
+// 配置外 counter 会保留并由稀疏入库层登记；同时记录
+// omc_pm_discovered_counters_total（reason=whitelist_miss，标签带
+// carrier × technology），让厂家上报名漂移成为可告警的可观测信号。
 func (c *PMCollector) filterByWhitelist(ctx context.Context, deviceSN, carrier, technology string, counters []model.PMCounter) []model.PMCounter {
 	out, _ := c.filterByWhitelistWithAllow(ctx, deviceSN, carrier, technology, counters)
 	return out
@@ -704,7 +711,7 @@ func (c *PMCollector) filterByWhitelistWithAllow(ctx context.Context, deviceSN, 
 	}
 
 	kept := counters[:0] // 原地 reslice 复用 slice
-	dropped := 0
+	unknown := 0
 	for _, ctr := range counters {
 		// PM-P2：按 report_key（=上报名 ctr.CounterName）命中白名单。命中后
 		// 把 CounterName 改写成指标编号（落库即编号化的唯一翻译入口），并填 statis_type。
@@ -721,17 +728,22 @@ func (c *PMCollector) filterByWhitelistWithAllow(ctx context.Context, deviceSN, 
 			ctr.Unit = meta.Unit               // #866：填充单位元数据，入库前规范化 result value
 			kept = append(kept, ctr)
 		} else {
-			dropped++
+			// 配置外指标仍是文件实际报告的数据：保留原始 report key 和值，
+			// 由稀疏入库层登记最小字典记录，后续指标同步再补齐元数据。
+			kept = append(kept, ctr)
+			unknown++
 		}
 	}
-	if dropped > 0 {
+	if unknown > 0 {
 		if c.metrics != nil {
-			c.metrics.DroppedCountersTotal.WithLabelValues(carrier, technology, "whitelist_miss").Add(float64(dropped))
+			c.metrics.DiscoveredCountersTotal.WithLabelValues(carrier, technology, "whitelist_miss").Add(float64(unknown))
+			// 一个发布周期的兼容别名由同一个 collector 从共享快照发出，
+			// 不能再单独 Add，否则会破坏严格别名语义。
 		}
-		c.logger.Info("filtered orphan counters not in indicator library",
+		c.logger.Info("preserved counters not in indicator library for dynamic registration",
 			zap.String("device_sn", deviceSN),
 			zap.Int("kept", len(kept)),
-			zap.Int("dropped_orphans", dropped),
+			zap.Int("unknown_metrics", unknown),
 			zap.Int("whitelist_size", len(allow)))
 	}
 	return kept, allow

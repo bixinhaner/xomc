@@ -10,7 +10,7 @@
 //	OMC_BACKUP_ENCRYPTION_KEY_HISTORY="v1=<old-hex>" \
 //	OMC_MINIO_ENDPOINT=minio:9000 \
 //	OMC_MINIO_ACCESS_KEY=... OMC_MINIO_SECRET_KEY=... \
-//	OMC_MINIO_BUCKET=config_backup \
+//	OMC_MINIO_BUCKET=config-backup \
 //	backup-reencrypt --target-kek-id=v2 --concurrency=4
 //
 // Operates idempotently: re-running skips files already on the target
@@ -20,6 +20,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -30,6 +31,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/backup"
+	"github.com/omcgo/omcgo/internal/core/appconfig"
 )
 
 const (
@@ -64,7 +66,8 @@ Required env vars:
   OMC_MINIO_ENDPOINT                 e.g. "minio:9000"
   OMC_MINIO_ACCESS_KEY / SECRET_KEY  MinIO credentials
   OMC_MINIO_USE_SSL                  "true" or "false"
-  OMC_MINIO_BUCKET                   defaults to "config_backup"`,
+  OMC_MINIO_BUCKET                   defaults to "config-backup";
+                                      legacy "config_backup" is accepted as input`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return run(cmd.Context(), targetKekID, concurrency, dryRun, progressEvery, bucketFlag)
 		},
@@ -114,13 +117,7 @@ func run(ctx context.Context, targetKekID string, concurrency int, dryRun bool, 
 		return fmt.Errorf("init minio: %w", err)
 	}
 
-	bucket := bucketFlag
-	if bucket == "" {
-		bucket = os.Getenv(envMinIOBucket)
-	}
-	if bucket == "" {
-		bucket = backup.CanonicalRestoreBucket
-	}
+	bucket := resolveBackupBucket(bucketFlag, os.Getenv)
 
 	r, err := backup.NewReencryptor(backup.ReencryptorConfig{
 		Bucket:        bucket,
@@ -129,7 +126,7 @@ func run(ctx context.Context, targetKekID string, concurrency int, dryRun bool, 
 		DryRun:        dryRun,
 		ProgressEvery: progressEvery,
 		Lister:        mc,
-		IO:            mc,
+		IO:            reencryptObjectIO{Client: mc},
 		KeyProvider:   kp,
 		Logger:        logger,
 	})
@@ -159,9 +156,33 @@ func run(ctx context.Context, targetKekID string, concurrency int, dryRun bool, 
 	return nil
 }
 
-// minioFromEnv constructs a MinIO client purely from env vars. Mirrors
-// internal/core/components/minio.NewMinIOClient but stays standalone so
-// this binary doesn't pull in viper / appconfig.
+type reencryptObjectIO struct {
+	*miniogo.Client
+}
+
+func (c reencryptObjectIO) GetObject(
+	ctx context.Context,
+	bucket string,
+	key string,
+	opts miniogo.GetObjectOptions,
+) (io.ReadCloser, error) {
+	return c.Client.GetObject(ctx, bucket, key, opts)
+}
+
+func resolveBackupBucket(bucketFlag string, getenv func(string) string) string {
+	bucket := bucketFlag
+	if bucket == "" {
+		bucket = getenv(envMinIOBucket)
+	}
+	if bucket == "" {
+		bucket = appconfig.ConfigBackupBucket
+	}
+	return appconfig.NormalizeConfigBackupBucket(bucket)
+}
+
+// minioFromEnv constructs a MinIO client purely from env vars. It mirrors
+// internal/core/components/minio.NewMinIOClient without loading a YAML config
+// or viper.
 func minioFromEnv() (*miniogo.Client, error) {
 	endpoint := os.Getenv(envMinIOEndpoint)
 	if endpoint == "" {
