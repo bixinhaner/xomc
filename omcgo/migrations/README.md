@@ -2,17 +2,17 @@
 
 迁移工具：[`pressly/goose/v3`](https://github.com/pressly/goose)。由 `cmd/migrate` 包装执行，docker compose 的 `migrate-*` 服务在容器栈启动期跑。版本号记录在数据库的 goose 版本表里。
 
-## 当前状态：consolidated baseline + incremental migrations
+## 当前状态：三个 consolidated baseline
 
-2026-07-16 首次将三条**相互独立**的 goose 流分别合并为一个直接表达最终状态的 `000001` 基线。此后各流又累积了若干增量（2026-07-20 首次合并前：主库 schema 累积到 `000032`、seed 累积到 `000002`、TSDB 累积到 `000003`），2026-07-20 按同一套「重生 baseline」标准流程再次合并回各自的单 `000001`。首次合并当天 seed 流又新增了 `000002`/`000003` 两个增量（内置角色 API 权限修复 + DEVICE_INFO MML 子字段清理），故 seed 流当天又做了第二次合并，其余两条流未变。当前文件如下：
+2026-07-25 在明确不保留旧数据、不提供就地升级兼容的前提下，将主库 schema、主库 seed 和 TSDB schema 三条**相互独立**的 goose 流重新收敛为各自一个 `000001`。当前文件如下：
 
 | 流 | 合并范围 | 当前文件 | 版本表 | compose 服务 | 目标库 |
 |----|----------|----------|--------|--------------|--------|
-| 主库 schema (DDL) | consolidated baseline + incremental migrations | `migrations/000001_init_schema.sql`、`000003..000006` | `goose_db_version` | `migrate-schema` | postgres（主库，纯 PG16）|
-| 主库 seed (DML) | consolidated baseline + 后续增量 | `migrations/seed/000001_init_seed.sql`、`000002_repair_builtin_role_api_permission_drift.sql`、`000003_pm_backpressure_70.sql` | `goose_db_version_seed` | `migrate-seed` | postgres |
-| 时序库 schema | consolidated baseline + streaming aggregation cutover | `migrations/tsdb/000001_tsdb_schema.sql`、`000002_pm_streaming_aggregation.sql` | `goose_db_version_tsdb` | `migrate-tsdb-schema` | postgres-tsdb（TimescaleDB）|
+| 主库 schema (DDL) | 最终状态 baseline | `migrations/000001_init_schema.sql` | `goose_db_version` | `migrate-schema` | postgres（主库，纯 PG16）|
+| 主库 seed (DML) | 最终状态 baseline | `migrations/seed/000001_init_seed.sql` | `goose_db_version_seed` | `migrate-seed` | postgres |
+| 时序库 schema | 最终状态 baseline | `migrations/tsdb/000001_tsdb_schema.sql` | `goose_db_version_tsdb` | `migrate-tsdb-schema` | postgres-tsdb（TimescaleDB）|
 
-三个 `000001` 文件是 2026-07-20 的 consolidated baseline（seed 当天二次合并）；此后允许按各自流继续追加增量迁移。schema 和 seed 基线来自完整迁移最终状态的 `pg_dump`；tsdb 基线仍是手写显式 DDL，本次手动合入了原 `000002`（alarms_history retention 固定每天 01:08 Asia/Shanghai）和 `000003`（删除与 Go 侧聚合管线重复的废弃 `pm_metrics_hourly_cagg`）的净效果。
+三个 `000001` 文件包含截至 2026-07-25 的最终结构、流式 PM 聚合表、12 个内置聚合任务、内置角色权限修复和 PM 反压默认值。后续新需求再按各自流从 `000002` 开始追加。
 
 > ⚠️ 此基线仅兼容全新安装或允许清库重建的环境，不是既有数据库的就地升级路径。三条流在干净数据库上分别从版本 `000001` 起跑。
 
@@ -47,7 +47,7 @@ OMC 跑两个 PostgreSQL/TimescaleDB 实例，迁移分两条物理目标库的�
 
 三条流是相互独立的 goose 版本序列，记在不同版本表、**不共享号段**——所以 `000001` 在三处各出现一次是**正常的**（不是撞号）。查撞号要**分目录各查**，别把三个目录的文件名合并去重。
 
-- 新增 = 该流**现有最大号 + 1**。当前主库 schema 下一号是 `000007`，seed 下一号是 `000004`，TSDB 下一号是 `000003`。
+- 新增 = 该流**现有最大号 + 1**。当前三条流的下一号均是 `000002`。
 - 从本基线开始，不回填空号、不重排或复用同一发布基线内已经应用过的版本号。三条流使用独立版本表，必须分目录判断下一号。
 - DDL → `migrations/`，DML 种子 → `migrations/seed/`，时序 DDL → `migrations/tsdb/`。
 - `DO $$` / `CREATE [OR REPLACE] FUNCTION` / 循环条件 → 必须 goose `StatementBegin/End` 包裹。

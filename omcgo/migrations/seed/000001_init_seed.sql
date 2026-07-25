@@ -8360,16 +8360,6 @@ ALTER TABLE public.pm_adhoc_task_runs DISABLE TRIGGER ALL;
 ALTER TABLE public.pm_adhoc_task_runs ENABLE TRIGGER ALL;
 
 --
--- Data for Name: pm_completion_watermarks; Type: TABLE DATA; Schema: public; Owner: -
---
-
-ALTER TABLE public.pm_completion_watermarks DISABLE TRIGGER ALL;
-
-
-
-ALTER TABLE public.pm_completion_watermarks ENABLE TRIGGER ALL;
-
---
 -- Data for Name: pm_dashboards; Type: TABLE DATA; Schema: public; Owner: -
 --
 
@@ -26119,6 +26109,40 @@ UPDATE public.discovered_param_mappings d
   FROM baibnq_products p, fixes
  WHERE d.product_id = p.id
    AND d.private_path = fixes.private_path;
+
+
+-- Consolidated from former incremental migrations: seed 000002-000003
+
+-- admin：沿用内置角色兼容基线，补齐全部已登记 API。
+INSERT INTO public.role_api_permissions (role_id, endpoint_id)
+SELECT '10000000-0000-0000-0000-000000000001'::uuid, ae.id
+FROM public.api_endpoints AS ae
+ON CONFLICT (role_id, endpoint_id) DO NOTHING;
+
+-- operator：沿用内置角色兼容基线，补齐全部已登记 API。
+INSERT INTO public.role_api_permissions (role_id, endpoint_id)
+SELECT '10000000-0000-0000-0000-000000000002'::uuid, ae.id
+FROM public.api_endpoints AS ae
+ON CONFLICT (role_id, endpoint_id) DO NOTHING;
+
+-- viewer：只补齐只读 API，不授予写操作。
+INSERT INTO public.role_api_permissions (role_id, endpoint_id)
+SELECT '10000000-0000-0000-0000-000000000003'::uuid, ae.id
+FROM public.api_endpoints AS ae
+WHERE ae.method = 'GET'
+ON CONFLICT (role_id, endpoint_id) DO NOTHING;
+
+-- Keep the confirmed PM disk protection default at 70% without overwriting an
+-- operator-customized threshold. Existing baseline 85/75 values are upgraded;
+-- any other values are treated as intentional local configuration.
+UPDATE sys_configs
+   SET value='70', updated_at=now()
+ WHERE category='acs.backpressure' AND key='disk_high_pct' AND value='85';
+
+UPDATE sys_configs
+   SET value='60', updated_at=now()
+ WHERE category='acs.backpressure' AND key='disk_low_pct' AND value='75';
+
 
 COMMIT;
 

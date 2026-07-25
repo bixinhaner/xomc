@@ -1,6 +1,6 @@
 # Seed Migrations
 
-主库种子数据（DML）迁移目录，独立 goose 版本表 `goose_db_version_seed`，由 docker compose 的 `migrate-seed` 服务在 `migrate-schema` 完成后执行。当前由 consolidated baseline `000001_init_seed.sql` 加后续增量迁移组成（见 `../README.md`）。
+主库种子数据（DML）迁移目录，独立 goose 版本表 `goose_db_version_seed`，由 docker compose 的 `migrate-seed` 服务在 `migrate-schema` 完成后执行。当前仅保留最终状态 consolidated baseline `000001_init_seed.sql`（见 `../README.md`）。
 
 > ⚠️ **必须用独立版本表执行**（生产做法）：
 > ```bash
@@ -42,4 +42,4 @@
 
 ## 新增 seed 迁移
 
-从该流**现有最大版本号 + 1** 起递增（当前在 `000003`，下一号 `000004`）。版本号规则、重生 baseline 标准流程、连接池核定见 `../README.md`；完整迁移规范见 `../../CLAUDE.md` §4.6。
+从该流**现有最大版本号 + 1** 起递增（当前在 `000001`，下一号 `000002`）。版本号规则、重生 baseline 标准流程、连接池核定见 `../README.md`；完整迁移规范见 `../../CLAUDE.md` §4.6。

@@ -85,6 +85,7 @@ services:
     environment:
       TZ: "Asia/Shanghai"
       GOOSE_VERBOSITY: "1"
+      GOOSE_TABLE: "goose_db_version_seed"
     entrypoint: ["omcgo-migrate"]
     command: ["--dsn", "postgres://omcgo_test:omcgo_test@postgres-test:5432/omcgo_test?sslmode=disable", "--path", "/etc/omcgo/migrations/seed", "up"]
     volumes:

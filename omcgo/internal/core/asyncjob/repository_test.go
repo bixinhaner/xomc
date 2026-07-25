@@ -131,20 +131,10 @@ func TestAsyncJobRecoveryMigrationMatchesFreshInstallSchema(t *testing.T) {
 	require.True(t, ok)
 	migrations := filepath.Join(filepath.Dir(file), "..", "..", "..", "migrations")
 
-	incremental, err := os.ReadFile(filepath.Join(migrations, "000005_async_job_recovery.sql"))
-	require.NoError(t, err)
 	baseline, err := os.ReadFile(filepath.Join(migrations, "000001_init_schema.sql"))
 	require.NoError(t, err)
 
-	for _, sql := range []string{string(incremental), string(baseline)} {
-		require.Contains(t, sql, "recovery_count")
-		require.Contains(t, sql, "last_recovered_at")
-	}
-	require.Contains(t, string(incremental), "ADD COLUMN IF NOT EXISTS recovery_count")
-	require.Contains(t, string(incremental), "ADD COLUMN IF NOT EXISTS last_recovered_at")
-	require.Contains(t, string(incremental), "CREATE INDEX IF NOT EXISTS idx_async_jobs_hourly_failed_recovery")
-	require.Contains(t, string(incremental), "-- +goose Up")
-	require.Contains(t, string(incremental), "-- +goose Down")
-	require.Contains(t, string(incremental), "DROP INDEX IF EXISTS idx_async_jobs_hourly_failed_recovery")
-	require.Contains(t, string(incremental), "DROP COLUMN IF EXISTS recovery_count")
+	require.Contains(t, string(baseline), "recovery_count")
+	require.Contains(t, string(baseline), "last_recovered_at")
+	require.Contains(t, string(baseline), "idx_async_jobs_hourly_failed_recovery")
 }

@@ -23,6 +23,9 @@ func (r *PgRepository) syncStreamingTask(ctx context.Context, task *Task, enable
 	if err != nil {
 		return err
 	}
+	if len(members) == 0 {
+		return fmt.Errorf("PM aggregation task resolved no devices")
+	}
 	granularities := make([]pmstream.Granularity, 0, len(task.Granularities))
 	for _, value := range task.Granularities {
 		granularities = append(granularities, pmstream.Granularity(value))
@@ -154,9 +157,6 @@ func (r *PgRepository) resolveStreamingMembers(
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate PM aggregation members: %w", err)
-	}
-	if len(members) == 0 {
-		return nil, fmt.Errorf("PM aggregation task resolved no devices")
 	}
 	return members, nil
 }

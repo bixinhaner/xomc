@@ -109,7 +109,12 @@ type PgRepository struct {
 	// nil 安全：不注入则 last_fire_at 留 NULL（退化到 created_at），行为不回归。
 	watermarks WatermarkReader
 	loc        func() *time.Location // #528 P3：初始游标桶对齐用业务时区
-	streamRepo *pmstream.PgTaskRepository
+	streamRepo streamingTaskRepository
+}
+
+type streamingTaskRepository interface {
+	Save(context.Context, pmstream.SaveTaskRequest) (*pmstream.TaskVersionSnapshot, error)
+	Delete(context.Context, uuid.UUID) error
 }
 
 // NewPgRepository 创建 PgRepository。
@@ -120,7 +125,7 @@ func NewPgRepository(pgPool, tsPool *pgxpool.Pool) *PgRepository {
 }
 
 // SetStreamingRepository 把现有任务 CRUD 接到新的不可变版本控制面。
-func (r *PgRepository) SetStreamingRepository(repo *pmstream.PgTaskRepository) *PgRepository {
+func (r *PgRepository) SetStreamingRepository(repo streamingTaskRepository) *PgRepository {
 	r.streamRepo = repo
 	return r
 }

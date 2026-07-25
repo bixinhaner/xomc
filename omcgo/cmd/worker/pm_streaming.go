@@ -9,6 +9,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/pm/adhoc"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	pmexport "github.com/omcgo/omcgo/internal/pm/export"
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
@@ -17,6 +18,24 @@ import (
 	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
 	"go.uber.org/zap"
 )
+
+const pmBuiltinReconcileInterval = 5 * time.Minute
+
+type pmBuiltinReconcileFunc func(context.Context) (adhoc.BuiltinReconcileResult, error)
+type pmSnapshotReloadFunc func(context.Context) error
+
+func runPMBuiltinReconcile(
+	ctx context.Context,
+	reconcile pmBuiltinReconcileFunc,
+	reload pmSnapshotReloadFunc,
+) (adhoc.BuiltinReconcileResult, error) {
+	result, reconcileErr := reconcile(ctx)
+	var reloadErr error
+	if result.Changed > 0 {
+		reloadErr = reload(ctx)
+	}
+	return result, errors.Join(reconcileErr, reloadErr)
+}
 
 func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager) {
 	cfg := pmstream.ConfigFromEnv()
@@ -35,6 +54,16 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 		return
 	}
 	taskRepo := pmstream.NewPgTaskRepository(w.PgPool, w.EventBus)
+	adhocRepo := adhoc.NewPgRepository(w.PgPool, w.TsPool).SetStreamingRepository(taskRepo)
+	builtinReconciler := adhoc.NewBuiltinReconciler(adhocRepo)
+	initialResult, initialErr := builtinReconciler.Reconcile(ctx)
+	recordPMBuiltinReconcile(streamMetrics, initialResult)
+	if initialErr != nil {
+		logger.Error("reconcile initial built-in PM aggregation tasks",
+			zap.Int("definitions", initialResult.Definitions),
+			zap.Int("failed", initialResult.Failed),
+			zap.Error(initialErr))
+	}
 	snapshot := pmstream.NewSnapshotStore(taskRepo, logger)
 	if err := snapshot.Reload(ctx); err != nil {
 		logger.Error("load initial PM aggregation task snapshot", zap.Error(err))
@@ -75,6 +104,9 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 			logger.Error("PM aggregation outbox relay stopped", zap.Error(err))
 		}
 	}()
+	go runPMBuiltinReconcileLoop(
+		ctx, builtinReconciler.Reconcile, snapshot.Reload, streamMetrics, logger,
+	)
 	go snapshot.RunRefresh(ctx, time.Minute)
 	go recovery.Run(ctx, time.Minute)
 	go scanner.Run(ctx)
@@ -82,6 +114,45 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	logger.Info("PM streaming aggregation ready",
 		zap.Duration("close_grace", cfg.CloseGrace),
 		zap.Duration("window_ttl", cfg.WindowTTL))
+}
+
+func runPMBuiltinReconcileLoop(
+	ctx context.Context,
+	reconcile pmBuiltinReconcileFunc,
+	reload pmSnapshotReloadFunc,
+	metrics *pmstream.Metrics,
+	logger *zap.Logger,
+) {
+	ticker := time.NewTicker(pmBuiltinReconcileInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			result, err := runPMBuiltinReconcile(ctx, reconcile, reload)
+			recordPMBuiltinReconcile(metrics, result)
+			if err != nil {
+				logger.Error("reconcile built-in PM aggregation tasks",
+					zap.Int("definitions", result.Definitions),
+					zap.Int("failed", result.Failed),
+					zap.Error(err))
+				continue
+			}
+			logger.Info("reconciled built-in PM aggregation tasks",
+				zap.Int("definitions", result.Definitions),
+				zap.Int("saved", result.Saved),
+				zap.Int("changed", result.Changed),
+				zap.Int("empty", result.Empty))
+		}
+	}
+}
+
+func recordPMBuiltinReconcile(metrics *pmstream.Metrics, result adhoc.BuiltinReconcileResult) {
+	metrics.BuiltinReconcileRunsTotal.Inc()
+	metrics.BuiltinReconcileErrorsTotal.Add(float64(result.Failed))
+	metrics.BuiltinVersionsChangedTotal.Add(float64(result.Changed))
+	metrics.BuiltinDefinitionsEmpty.Set(float64(result.Empty))
 }
 
 func startPMExportOnly(
