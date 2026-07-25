@@ -196,9 +196,9 @@ CREATE TABLE public.pm_measurement_anchors (
 );
 CREATE INDEX idx_pm_anchors_device_time ON public.pm_measurement_anchors (device_dim_id, "time" DESC, anchor_id);
 CREATE INDEX idx_pm_anchors_object_time ON public.pm_measurement_anchors (object_ldn, "time" DESC);
--- Issue #170 的 15min 设备性能查询在稀疏模型中先按设备与时间收窄锚点；
+-- 设备性能查看默认 15min 查询在稀疏模型中先按设备与时间收窄锚点；
 -- metric_path / metric_type 随后通过指标字典和 metric_set 解析，不能再索引兼容视图 pm_metrics。
-CREATE INDEX idx_pm_anchors_issue170_15min_device_time
+CREATE INDEX idx_pm_anchors_15min_device_time_default
     ON public.pm_measurement_anchors (device_dim_id, "time" DESC, anchor_id)
     WHERE granularity = '15min';
 
