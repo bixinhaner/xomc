@@ -9,6 +9,8 @@ type Metrics struct {
 	Ready                       prometheus.Gauge
 	OutboxPublishedTotal        prometheus.Counter
 	OutboxErrorsTotal           prometheus.Counter
+	RollupOutboxPublishedTotal  prometheus.Counter
+	RollupOutboxErrorsTotal     prometheus.Counter
 	EventsProcessedTotal        prometheus.Counter
 	EventsFailedTotal           prometheus.Counter
 	DuplicateEventsTotal        prometheus.Counter
@@ -35,6 +37,14 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		OutboxErrorsTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "omc_pm_aggregation_outbox_errors_total",
 			Help: "Transactional PM outbox publish failures.",
+		}),
+		RollupOutboxPublishedTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_rollup_outbox_published_total",
+			Help: "Compact hourly and daily Counter rollups published from the transactional outbox.",
+		}),
+		RollupOutboxErrorsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_rollup_outbox_errors_total",
+			Help: "Compact Counter rollup outbox publish failures.",
 		}),
 		EventsProcessedTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "omc_pm_aggregation_events_processed_total",
@@ -86,6 +96,8 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.Ready,
 		m.OutboxPublishedTotal,
 		m.OutboxErrorsTotal,
+		m.RollupOutboxPublishedTotal,
+		m.RollupOutboxErrorsTotal,
 		m.EventsProcessedTotal,
 		m.EventsFailedTotal,
 		m.DuplicateEventsTotal,

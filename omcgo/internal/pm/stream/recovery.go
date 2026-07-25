@@ -13,7 +13,11 @@ import (
 	"go.uber.org/zap"
 )
 
-const aggregationStreamName = "PM_AGGREGATION"
+const (
+	aggregationRawStreamName    = "PM_AGG_15M"
+	aggregationHourlyStreamName = "PM_AGG_HOURLY"
+	aggregationDailyStreamName  = "PM_AGG_DAILY"
+)
 
 type Recovery struct {
 	js       nats.JetStreamContext
@@ -21,6 +25,7 @@ type Recovery struct {
 	store    *RedisWindowStore
 	snapshot *SnapshotStore
 	matcher  *Matcher
+	rollups  *RollupOutboxRepository
 	logger   *zap.Logger
 }
 
@@ -37,7 +42,7 @@ func NewRecovery(
 	}
 	return &Recovery{
 		js: js, windows: windows, store: store, snapshot: snapshot,
-		matcher: matcher, logger: logger,
+		matcher: matcher, rollups: NewRollupOutboxRepository(windows.pool), logger: logger,
 	}
 }
 
@@ -85,10 +90,17 @@ func (r *Recovery) ReplayWindow(ctx context.Context, key WindowKey) error {
 	if r.js == nil {
 		return errors.New("PM aggregation recovery JetStream is nil")
 	}
+	if key.Granularity == GranularityHourly {
+		return r.replayRawWindow(ctx, key)
+	}
+	return r.replayRollupWindow(ctx, key)
+}
+
+func (r *Recovery) replayRawWindow(ctx context.Context, key WindowKey) error {
 	subscription, err := r.js.PullSubscribe(
 		event.SubjectPMAggregationNormalized,
 		"",
-		nats.BindStream(aggregationStreamName),
+		nats.BindStream(aggregationRawStreamName),
 		nats.StartTime(key.Start),
 		nats.AckNone(),
 	)
@@ -113,7 +125,7 @@ func (r *Recovery) ReplayWindow(ctx context.Context, key WindowKey) error {
 				return fmt.Errorf("decode replay PM aggregation payload: %w", err)
 			}
 			contributions, err := r.matcher.MatchGranularity(
-				payload, r.snapshot.Current(), key.Granularity,
+				payload, r.snapshot.Current(), GranularityHourly,
 			)
 			if err != nil {
 				return err
@@ -138,7 +150,106 @@ func (r *Recovery) ReplayWindow(ctx context.Context, key WindowKey) error {
 		}
 	}
 	if matched == 0 {
-		return fmt.Errorf("no retained PM aggregation events matched active window")
+		return fmt.Errorf("no retained 15-minute PM events matched active hourly window")
+	}
+	return nil
+}
+
+func (r *Recovery) replayRollupWindow(ctx context.Context, key WindowKey) error {
+	streamName := aggregationHourlyStreamName
+	subject := event.SubjectPMAggregationHourlyRollup
+	if key.Granularity == GranularityWeekly || key.Granularity == GranularityMonthly {
+		streamName = aggregationDailyStreamName
+		subject = event.SubjectPMAggregationDailyRollup
+	}
+	subscription, err := r.js.PullSubscribe(
+		subject,
+		"",
+		nats.BindStream(streamName),
+		nats.StartTime(key.Start),
+		nats.AckNone(),
+	)
+	if err != nil {
+		return fmt.Errorf("create PM compact rollup replay consumer: %w", err)
+	}
+	defer func() { _ = subscription.Unsubscribe() }()
+
+	matched := 0
+	for {
+		messages, fetchErr := subscription.Fetch(256, nats.MaxWait(time.Second))
+		if fetchErr != nil && !errors.Is(fetchErr, nats.ErrTimeout) {
+			return fmt.Errorf("fetch PM compact rollup replay messages: %w", fetchErr)
+		}
+		for _, message := range messages {
+			var envelope event.Event
+			if err := json.Unmarshal(message.Data, &envelope); err != nil {
+				return fmt.Errorf("decode compact rollup replay envelope: %w", err)
+			}
+			var payload RollupPayload
+			if err := envelope.DecodePayload(&payload); err != nil {
+				return fmt.Errorf("decode compact rollup replay payload: %w", err)
+			}
+			current := r.snapshot.Current()
+			if current == nil {
+				return fmt.Errorf("PM aggregation task snapshot missing")
+			}
+			contributions, err := rollupContributions(
+				payload, current.ByVersion[payload.TaskVersionID], r.matcher.location,
+			)
+			if err != nil {
+				return err
+			}
+			for _, contribution := range contributions {
+				if !sameWindowKey(contribution.Key, key) {
+					continue
+				}
+				if _, err := r.store.Accumulate(ctx, contribution); err != nil {
+					return err
+				}
+				matched++
+			}
+		}
+		if errors.Is(fetchErr, nats.ErrTimeout) || len(messages) == 0 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+	}
+	if matched == 0 {
+		source := GranularityHourly
+		if key.Granularity == GranularityWeekly || key.Granularity == GranularityMonthly {
+			source = GranularityDaily
+		}
+		snapshots, err := r.rollups.ListSnapshots(
+			ctx, key.TaskVersionID, source, key.Start, key.End,
+		)
+		if err != nil {
+			return err
+		}
+		current := r.snapshot.Current()
+		for _, payload := range snapshots {
+			contributions, err := rollupContributions(
+				payload, current.ByVersion[payload.TaskVersionID], r.matcher.location,
+			)
+			if err != nil {
+				return err
+			}
+			for _, contribution := range contributions {
+				if !sameWindowKey(contribution.Key, key) {
+					continue
+				}
+				if _, err := r.store.Accumulate(ctx, contribution); err != nil {
+					return err
+				}
+				matched++
+			}
+		}
+	}
+	if matched == 0 {
+		return fmt.Errorf("no compact PM rollups matched active %s window", key.Granularity)
 	}
 	return nil
 }

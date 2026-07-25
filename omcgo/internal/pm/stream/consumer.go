@@ -9,7 +9,12 @@ import (
 	"go.uber.org/zap"
 )
 
-const aggregationConsumer = "pm-aggregation-workers"
+const (
+	aggregationConsumer        = "pm-aggregation-workers"
+	hourlyRollupConsumer       = "pm-aggregation-hourly-rollup"
+	dailyRollupConsumer        = "pm-aggregation-daily-rollup"
+	aggregationControlConsumer = "pm-aggregation-control"
+)
 
 type Consumer struct {
 	bus       event.EventBus
@@ -54,18 +59,65 @@ func (c *Consumer) Subscribe() ([]event.Subscription, error) {
 	if err != nil {
 		return nil, fmt.Errorf("subscribe PM aggregation data stream: %w", err)
 	}
+	hourlySub, err := c.bus.PullSubscribe(
+		event.SubjectPMAggregationHourlyRollup,
+		hourlyRollupConsumer,
+		c.handleRollup,
+	)
+	if err != nil {
+		_ = dataSub.Unsubscribe()
+		return nil, fmt.Errorf("subscribe PM hourly rollup stream: %w", err)
+	}
+	dailySub, err := c.bus.PullSubscribe(
+		event.SubjectPMAggregationDailyRollup,
+		dailyRollupConsumer,
+		c.handleRollup,
+	)
+	if err != nil {
+		_ = dataSub.Unsubscribe()
+		_ = hourlySub.Unsubscribe()
+		return nil, fmt.Errorf("subscribe PM daily rollup stream: %w", err)
+	}
 	controlSub, err := c.bus.PullSubscribe(
 		event.SubjectPMAggregationTaskVersionChanged,
-		"pm-aggregation-control",
+		aggregationControlConsumer,
 		func(ctx context.Context, _ event.Event) error {
 			return c.snapshot.Reload(ctx)
 		},
 	)
 	if err != nil {
 		_ = dataSub.Unsubscribe()
+		_ = hourlySub.Unsubscribe()
+		_ = dailySub.Unsubscribe()
 		return nil, fmt.Errorf("subscribe PM aggregation task changes: %w", err)
 	}
-	return []event.Subscription{dataSub, controlSub}, nil
+	return []event.Subscription{dataSub, hourlySub, dailySub, controlSub}, nil
+}
+
+func (c *Consumer) handleRollup(ctx context.Context, envelope event.Event) error {
+	var payload RollupPayload
+	if err := envelope.DecodePayload(&payload); err != nil {
+		return fmt.Errorf("decode PM compact rollup event: %w", err)
+	}
+	current := c.snapshot.Current()
+	if current == nil {
+		return fmt.Errorf("PM aggregation task snapshot missing")
+	}
+	version := current.ByVersion[payload.TaskVersionID]
+	contributions, err := rollupContributions(payload, version, c.matcher.location)
+	if err != nil {
+		return fmt.Errorf("build PM parent rollup contributions: %w", err)
+	}
+	if err := c.processContributions(ctx, contributions); err != nil {
+		if c.metrics != nil {
+			c.metrics.EventsFailedTotal.Inc()
+		}
+		return err
+	}
+	if c.metrics != nil {
+		c.metrics.EventsProcessedTotal.Inc()
+	}
+	return nil
 }
 
 func (c *Consumer) handle(ctx context.Context, envelope event.Event) error {

@@ -107,10 +107,6 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 		SetConcurrency(cfg.FinalizeConcurrency).
 		SetSnapshot(snapshot).
 		SetMetrics(streamMetrics)
-	promoter := pmstream.NewDirectRollupPromoter(
-		snapshot, windowRepo, store, finalizer, tz.Current(), logger,
-	)
-	finalizer.SetRollupPromoter(promoter.Promote)
 	recovery := pmstream.NewRecovery(w.NATS.JS, windowRepo, store, snapshot, matcher, logger)
 	if err := recovery.RestoreActiveWindows(ctx); err != nil {
 		logger.Error("restore active PM aggregation windows", zap.Error(err))
@@ -127,6 +123,17 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 			AckWait:       2 * time.Minute,
 			MaxAckPending: cfg.ConsumerConcurrency * 4,
 		})
+		for _, subject := range []string{
+			event.SubjectPMAggregationHourlyRollup,
+			event.SubjectPMAggregationDailyRollup,
+		} {
+			setter.SetPullTuning(subject, event.PullTuning{
+				BatchSize:     cfg.OutboxBatch,
+				Concurrency:   cfg.ConsumerConcurrency,
+				AckWait:       2 * time.Minute,
+				MaxAckPending: cfg.ConsumerConcurrency * 4,
+			})
+		}
 	}
 	if _, err := consumer.Subscribe(); err != nil {
 		logger.Error("subscribe PM streaming aggregation", zap.Error(err))
@@ -135,11 +142,19 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	relay := pmstream.NewOutboxRelay(
 		pmstream.NewOutboxRepository(w.TsPool), w.EventBus, logger,
 	).SetBatch(cfg.OutboxBatch).SetMetrics(streamMetrics)
+	rollupRelay := pmstream.NewRollupOutboxRelay(
+		pmstream.NewRollupOutboxRepository(w.TsPool), w.EventBus, logger,
+	).SetBatch(cfg.OutboxBatch).SetMetrics(streamMetrics)
 	scanner := pmstream.NewTimeoutScanner(windowRepo, finalizer, cfg.CloseGrace, logger).
 		SetGranularityGrace(cfg.DailyCloseGrace, cfg.WeeklyCloseGrace, cfg.MonthlyCloseGrace)
 	go func() {
 		if err := relay.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("PM aggregation outbox relay stopped", zap.Error(err))
+		}
+	}()
+	go func() {
+		if err := rollupRelay.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			logger.Error("PM aggregation rollup outbox relay stopped", zap.Error(err))
 		}
 	}()
 	go runPMBuiltinReconcileLoop(

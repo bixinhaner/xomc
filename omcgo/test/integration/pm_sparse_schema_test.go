@@ -28,6 +28,6 @@ func TestTSDBBaselineDefinesSparsePMStorage(t *testing.T) {
 	require.Contains(t, sql, "CREATE VIEW public.pm_metrics_hourly AS")
 	require.NotContains(t, sql, "CREATE TABLE public.pm_metrics (")
 	require.NotContains(t, sql, "CREATE TABLE public.pm_metrics_hourly (")
-	require.NotContains(t, sql, "add_retention_policy('public.pm_metric_values'")
-	require.NotContains(t, sql, "add_retention_policy('public.pm_measurement_anchors'")
+	require.Contains(t, sql, "add_retention_policy('public.pm_metric_values', INTERVAL '30 days')")
+	require.Contains(t, sql, "add_retention_policy('public.pm_measurement_anchors', INTERVAL '30 days')")
 }

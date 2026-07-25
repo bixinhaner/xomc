@@ -511,8 +511,8 @@ ALTER TABLE public.pm_adhoc_aggregation_results SET (timescaledb.compress, times
 -- compress_after 还原自 seed bgw_job policy_compression：
 --   mr_records 7d / pm_metrics 7d / pm_metrics_hourly 14d / pm_group_metrics_hourly 14d / pm_adhoc 90d
 SELECT add_compression_policy('public.mr_records', INTERVAL '7 days');
--- PM chunk 压缩由水位感知维护任务触发：超过迟到窗口、小时版本 active 且非 dirty 后才压缩，
--- 不再安装只按数据年龄执行的自动策略。
+SELECT add_compression_policy('public.pm_measurement_anchors', INTERVAL '7 days');
+SELECT add_compression_policy('public.pm_metric_values', INTERVAL '7 days');
 SELECT add_compression_policy('public.pm_group_metrics_hourly', INTERVAL '14 days');
 SELECT add_compression_policy('public.pm_adhoc_aggregation_results', INTERVAL '90 days');
 
@@ -536,8 +536,10 @@ SELECT alter_job(
 
 SELECT add_retention_policy('public.mr_records', INTERVAL '90 days');
 SELECT add_retention_policy('public.trace_messages', INTERVAL '3 days');
--- 原始 PM 明细的 30 天保留由 worker 水位感知维护任务执行：只有对应小时存在
--- clean active 版本的完整 chunk 才允许 drop_chunks，保留周期仍为 30 天。
+-- 原始 PM 明细默认保留 30 天；app 启动和 pm.retention 配置保存时会
+-- 把两张稀疏表原子更新为 raw_15min_days 的当前值。
+SELECT add_retention_policy('public.pm_measurement_anchors', INTERVAL '30 days');
+SELECT add_retention_policy('public.pm_metric_values', INTERVAL '30 days');
 SELECT add_retention_policy('public.pm_hourly_anchors', INTERVAL '180 days');
 SELECT add_retention_policy('public.pm_hourly_values', INTERVAL '180 days');
 SELECT add_retention_policy('public.pm_group_metrics_hourly', INTERVAL '180 days');
@@ -945,6 +947,52 @@ CREATE INDEX idx_pm_aggregation_outbox_pending
     ON public.pm_aggregation_outbox (created_at, event_id)
     WHERE published_at IS NULL;
 
+CREATE TABLE public.pm_aggregation_counter_rollups (
+    event_id uuid PRIMARY KEY,
+    task_id uuid NOT NULL,
+    task_version_id uuid NOT NULL,
+    granularity varchar(16) NOT NULL,
+    window_start timestamptz NOT NULL,
+    window_end timestamptz NOT NULL,
+    chunk_index integer NOT NULL,
+    chunk_count integer NOT NULL,
+    complete boolean NOT NULL,
+    payload jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT chk_pm_aggregation_counter_rollups_granularity
+        CHECK (granularity IN ('hourly', 'daily')),
+    CONSTRAINT chk_pm_aggregation_counter_rollups_window
+        CHECK (window_end > window_start),
+    CONSTRAINT chk_pm_aggregation_counter_rollups_chunk
+        CHECK (chunk_index >= 0 AND chunk_count > 0 AND chunk_index < chunk_count)
+);
+CREATE INDEX idx_pm_aggregation_counter_rollups_recovery
+    ON public.pm_aggregation_counter_rollups (
+        task_version_id, granularity, window_start, chunk_index
+    );
+CREATE INDEX idx_pm_aggregation_counter_rollups_retention
+    ON public.pm_aggregation_counter_rollups (granularity, window_start);
+
+CREATE TABLE public.pm_aggregation_rollup_outbox (
+    event_id uuid PRIMARY KEY,
+    subject text NOT NULL,
+    granularity varchar(16) NOT NULL,
+    window_start timestamptz NOT NULL,
+    payload jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    published_at timestamptz,
+    publish_attempts integer NOT NULL DEFAULT 0,
+    last_error text,
+    CONSTRAINT chk_pm_aggregation_rollup_outbox_granularity
+        CHECK (granularity IN ('hourly', 'daily'))
+);
+CREATE INDEX idx_pm_aggregation_rollup_outbox_pending
+    ON public.pm_aggregation_rollup_outbox (created_at, event_id)
+    WHERE published_at IS NULL;
+CREATE INDEX idx_pm_aggregation_rollup_outbox_retention
+    ON public.pm_aggregation_rollup_outbox (published_at)
+    WHERE published_at IS NOT NULL;
+
 CREATE TABLE public.pm_aggregation_windows (
     task_id uuid NOT NULL,
     task_version_id uuid NOT NULL,
@@ -1043,11 +1091,8 @@ SELECT add_compression_policy(
     INTERVAL '90 days',
     if_not_exists => TRUE
 );
-SELECT add_retention_policy(
-    'public.pm_aggregation_results',
-    INTERVAL '365 days',
-    if_not_exists => TRUE
-);
+-- 各粒度保留时间读取主库 sys_configs(pm.retention)，由 worker 分批清理；
+-- 同一 hypertable 内存在小时/日/周/月多种期限，不能挂单一 drop_after policy。
 
 -- 现有报表/导出 API 的只读投影。它不保留旧结果，也不触发原始 PM 查询。
 CREATE VIEW public.pm_adhoc_aggregation_results AS
@@ -1192,6 +1237,14 @@ DROP VIEW IF EXISTS public.products;
 DROP VIEW IF EXISTS public.device_group_members;
 DROP VIEW IF EXISTS public.devices;
 DROP VIEW IF EXISTS public.pm_metrics_hourly;
+DROP VIEW IF EXISTS public.pm_metrics_daily;
+DROP VIEW IF EXISTS public.pm_metrics_weekly;
+DROP VIEW IF EXISTS public.pm_metrics_monthly;
+DROP VIEW IF EXISTS public.pm_group_metrics_hourly;
+DROP VIEW IF EXISTS public.pm_group_metrics_daily;
+DROP VIEW IF EXISTS public.pm_group_metrics_weekly;
+DROP VIEW IF EXISTS public.pm_group_metrics_monthly;
+DROP VIEW IF EXISTS public.pm_adhoc_aggregation_results;
 DROP VIEW IF EXISTS public.pm_metrics;
 
 DROP TABLE IF EXISTS public.perf_indicators_gsm;
@@ -1224,6 +1277,11 @@ DROP TABLE IF EXISTS public.pm_hourly_values;
 DROP TABLE IF EXISTS public.pm_hourly_anchors;
 DROP TABLE IF EXISTS public.pm_hourly_rollup_batches;
 DROP TABLE IF EXISTS public.pm_hourly_bucket_versions;
+DROP TABLE IF EXISTS public.pm_aggregation_rollup_outbox;
+DROP TABLE IF EXISTS public.pm_aggregation_counter_rollups;
+DROP TABLE IF EXISTS public.pm_aggregation_results;
+DROP TABLE IF EXISTS public.pm_aggregation_windows;
+DROP TABLE IF EXISTS public.pm_aggregation_outbox;
 DROP TABLE IF EXISTS public.pm_metric_values;
 DROP TABLE IF EXISTS public.pm_measurement_anchors;
 DROP TABLE IF EXISTS public.pm_ingest_batches;

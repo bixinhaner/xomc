@@ -18,26 +18,43 @@ func subjectMatchesStream(subject, pattern string) bool {
 	return subject == pattern
 }
 
-func TestDefaultStreams_PMAggregationIsRetainedForRecovery(t *testing.T) {
+func TestDefaultStreams_PMAggregationTieredRetention(t *testing.T) {
+	expected := map[string]struct {
+		age     time.Duration
+		subject string
+	}{
+		"PM_AGG_15M":    {age: 2 * time.Hour, subject: "pmaggregation.15m.normalized"},
+		"PM_AGG_HOURLY": {age: 48 * time.Hour, subject: "pmaggregation.hourly.rollup"},
+		"PM_AGG_DAILY":  {age: 40 * 24 * time.Hour, subject: "pmaggregation.daily.rollup"},
+	}
+	found := map[string]bool{}
 	for _, stream := range DefaultStreams() {
-		if stream.Name != "PM_AGGREGATION" {
+		want, ok := expected[stream.Name]
+		if !ok {
 			continue
 		}
+		found[stream.Name] = true
 		if stream.Retention != gonats.LimitsPolicy {
-			t.Fatalf("PM_AGGREGATION retention = %v, want LimitsPolicy", stream.Retention)
+			t.Fatalf("%s retention = %v, want LimitsPolicy", stream.Name, stream.Retention)
 		}
-		if stream.MaxAge < 40*24*time.Hour {
-			t.Fatalf("PM_AGGREGATION max age = %v, want at least 40 days", stream.MaxAge)
+		if stream.MaxAge != want.age {
+			t.Fatalf("%s max age = %v, want %v", stream.Name, stream.MaxAge, want.age)
+		}
+		if stream.MaxBytes <= 0 {
+			t.Fatalf("%s must have a hard byte limit", stream.Name)
 		}
 		if stream.Compression != gonats.S2Compression {
-			t.Fatalf("PM_AGGREGATION compression = %v, want S2", stream.Compression)
+			t.Fatalf("%s compression = %v, want S2", stream.Name, stream.Compression)
 		}
-		if !subjectMatchesStream("pmaggregation.normalized", stream.Subjects[0]) {
-			t.Fatalf("PM aggregation normalized subject not covered by %v", stream.Subjects)
+		if !subjectMatchesStream(want.subject, stream.Subjects[0]) {
+			t.Fatalf("%s subject not covered by %v", want.subject, stream.Subjects)
 		}
-		return
 	}
-	t.Fatal("PM_AGGREGATION stream is not registered")
+	for name := range expected {
+		if !found[name] {
+			t.Fatalf("%s stream is not registered", name)
+		}
+	}
 }
 
 func subjectCovered(subject string, streams []StreamDef) bool {

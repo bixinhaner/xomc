@@ -16,12 +16,9 @@ import (
 	"github.com/omcgo/omcgo/internal/stationlog"
 )
 
-// startPMRetentionCleanup wire 起 T-0164 收尾 G2-Gap-2：普通表（pm_metrics_{daily,weekly,monthly}
-// + pm_group_metrics_{daily,weekly,monthly}）的定时清理。
-//
-// hypertable（pm_metrics 15min + pm_metrics_hourly + pm_group_metrics_hourly）走
-// TimescaleDB add_retention_policy 自动 drop_chunks（已在 migration 内挂）；本函数仅负责
-// 普通表 6 张的 DELETE 清理。
+// startPMRetentionCleanup wires configured cleanup for PM metadata, compact
+// Counter snapshots and mixed-granularity aggregation results. Raw sparse
+// hypertables use TimescaleDB drop-chunk policies applied by app startup.
 //
 // 装配：
 //  1. retention.Service（worker 进程本地实例，复用 app 端 SysConfigRepository → sys_configs 读取）

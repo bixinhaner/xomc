@@ -37,6 +37,8 @@ services:
       interval: 2s
       timeout: 5s
       retries: 5
+    tmpfs:
+      - /data
 
   nats-test:
     image: nats:2.10-alpine
@@ -59,6 +61,8 @@ services:
       interval: 2s
       timeout: 5s
       retries: 5
+    tmpfs:
+      - /tmp/nats
 
   migrate-schema-test:
     build:

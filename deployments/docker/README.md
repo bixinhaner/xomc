@@ -808,15 +808,19 @@ curl -fsS http://localhost:8081/healthz
 - `PM_AGGREGATION_CONSUMER_CONCURRENCY`：标准事件消费并发，默认 `8`。
 - `PM_AGGREGATION_FINALIZE_CONCURRENCY`：窗口落库并发预算，默认 `4`。
 - `PM_AGGREGATION_MAX_EVENT_BYTES`：单个标准事件上限，默认 `8MiB`，必须小于 NATS `max_payload`。
-- `PM_AGGREGATION_WINDOW_TTL`：Redis 窗口状态保留期，默认 `45d`。
+- `PM_AGGREGATION_WINDOW_TTL`：未知粒度的 Redis 窗口兜底 TTL；小时/日/周/月分别固定为
+  `4h`、`72h`、`14d`、`45d`。
 
-JetStream 的 `PM_AGGREGATION` stream 使用 LimitsPolicy、S2 压缩并保留 40 天，专门用于
-Redis 状态丢失后的事件重放。发布完成的窗口只写 `pm_aggregation_results` 一次；超时窗口会
-带 `complete=false` 和 `missing_slots` 落库，迟到事件不会重开窗口。
+JetStream 按计算层级拆分，均使用 LimitsPolicy、S2 压缩、10GiB 硬容量上限和
+`DiscardOld`：`PM_AGG_15M` 保留 2 小时，`PM_AGG_HOURLY` 保留 48 小时，
+`PM_AGG_DAILY` 保留 40 天。15 分钟事件只进入小时窗口；小时完成后通过事务 outbox
+发布紧凑 Counter 状态给日窗口；日完成后发布紧凑 Counter 状态给周和月。周、月没有
+下游，不再产生 Rollup 事件。
 
-故障恢复顺序：先恢复 NATS 和 Redis，再启动 worker。worker 会扫描未完成窗口；Redis 中状态
-不存在时，从 `PM_AGGREGATION` retained stream 重建。若保留期不足，窗口标为 failed 并告警，
-禁止从原始 PM 表回查或伪造完整结果。
+故障恢复顺序：先恢复 NATS 和 Redis，再启动 worker。小时窗口重放最近 2 小时的 15 分钟
+事件，日窗口重放小时 Rollup，周/月窗口重放日 Rollup；紧凑流不足时允许读取
+`pm_aggregation_counter_rollups` 快照，但正常计算不扫描原始 PM 表。无法恢复的窗口标为
+failed 并告警，不伪造完整结果。
 - PM 上传背压以 MinIO 所在文件系统的已用空间加“已接收但尚未物化”的 PM 文件预计
   入库量计算；同文件系统上的 TSDB 临时文件、WAL 和文件预分配已包含在实际已用空间，
   不重复累加。默认预计入库放大系数为保守的 `1.0`。

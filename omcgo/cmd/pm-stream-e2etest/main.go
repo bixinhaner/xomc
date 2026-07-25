@@ -41,6 +41,7 @@ type report struct {
 	WriteFailureKept   bool          `json:"write_failure_kept_state"`
 	ConcurrentSafe     bool          `json:"concurrent_finalizer_safe"`
 	OutboxRetrySafe    bool          `json:"outbox_retry_safe"`
+	RollupPropagated   bool          `json:"hourly_rollup_propagated"`
 	StartedAt          time.Time     `json:"started_at"`
 	FinishedAt         time.Time     `json:"finished_at"`
 	WindowStart        time.Time     `json:"window_start"`
@@ -127,7 +128,8 @@ func main() {
 			pmstream.GranularityHourly, pmstream.GranularityDaily,
 			pmstream.GranularityWeekly, pmstream.GranularityMonthly,
 		},
-		Metrics: rules, Counters: counters, Members: members, Now: windowStart.Add(-time.Minute),
+		Metrics: rules, Counters: counters, Members: members,
+		Now: windowStart.Truncate(24 * time.Hour).Add(-time.Minute),
 	})
 	if err != nil {
 		fail(fmt.Errorf("create test task version: %w", err))
@@ -144,16 +146,21 @@ func main() {
 	finalizer := pmstream.NewFinalizer(windowRepo, store, logger).
 		SetConcurrency(concurrency).
 		SetSnapshot(snapshot)
-	promoter := pmstream.NewDirectRollupPromoter(
-		snapshot, windowRepo, store, finalizer, time.UTC, logger,
-	)
-	finalizer.SetRollupPromoter(promoter.Promote)
 	bus := event.NewNATSEventBus(nc, js, logger)
 	defer bus.Close()
 	bus.SetPullTuning(event.SubjectPMAggregationNormalized, event.PullTuning{
 		BatchSize: 100, Concurrency: concurrency, AckWait: 2 * time.Minute,
 		MaxAckPending: concurrency * 4,
 	})
+	for _, subject := range []string{
+		event.SubjectPMAggregationHourlyRollup,
+		event.SubjectPMAggregationDailyRollup,
+	} {
+		bus.SetPullTuning(subject, event.PullTuning{
+			BatchSize: 100, Concurrency: concurrency, AckWait: 2 * time.Minute,
+			MaxAckPending: concurrency * 4,
+		})
+	}
 	consumer := pmstream.NewConsumer(
 		bus, snapshot, pmstream.NewMatcher(time.UTC), windowRepo, store, finalizer, logger,
 	)
@@ -166,6 +173,10 @@ func main() {
 			_ = subscription.Unsubscribe()
 		}
 	}()
+	rollupRelay := pmstream.NewRollupOutboxRelay(
+		pmstream.NewRollupOutboxRepository(tsPool), bus, logger,
+	).SetBatch(100)
+	go func() { _ = rollupRelay.Run(ctx) }()
 
 	started := time.Now().UTC()
 	var published, failed atomic.Int64
@@ -260,6 +271,12 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
+	rollupPropagated, err := waitForHourlyRollup(
+		ctx, store, version, windowStart, int64(devices*slots*metrics),
+	)
+	if err != nil {
+		fail(err)
+	}
 	beforeDuplicate := result
 	duplicateGenerator := streamtest.Generator{
 		Devices: devices, Metrics: metrics, SlotStart: windowStart, Technology: "lte",
@@ -296,7 +313,7 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
-	info, err := js.ConsumerInfo("PM_AGGREGATION", "pm-aggregation-workers-pull")
+	info, err := js.ConsumerInfo("PM_AGG_15M", "pm-aggregation-workers-pull")
 	if err != nil {
 		fail(err)
 	}
@@ -312,14 +329,15 @@ func main() {
 		DuplicateStable: beforeDuplicate == afterDuplicate, NATSReplayRestored: replayRestored,
 		TimeoutFinalized: timeoutFinalized, WriteFailureKept: writeFailureKept,
 		ConcurrentSafe: concurrentSafe, OutboxRetrySafe: outboxRetrySafe,
-		StartedAt: started, FinishedAt: finished, WindowStart: windowStart, WindowEnd: windowEnd,
+		RollupPropagated: rollupPropagated,
+		StartedAt:        started, FinishedAt: finished, WindowStart: windowStart, WindowEnd: windowEnd,
 	}
 	writeReport(output, out)
 	if out.ResultRows != int64(metrics) || out.SampleCount != int64(devices*slots*metrics) ||
 		!out.Complete || out.MissingSlots != 0 || out.Pending != 0 || out.AckPending != 0 ||
 		!out.DuplicateStable || (replayRecovery && !out.NATSReplayRestored) ||
 		!out.TimeoutFinalized || !out.WriteFailureKept || !out.ConcurrentSafe ||
-		!out.OutboxRetrySafe {
+		!out.OutboxRetrySafe || !out.RollupPropagated {
 		fail(fmt.Errorf("end-to-end assertions failed; see %s", output))
 	}
 }
@@ -575,7 +593,7 @@ func resetState(
 	if _, err := pgPool.Exec(ctx, "TRUNCATE pm_aggregation_tasks CASCADE"); err != nil {
 		return fmt.Errorf("reset main aggregation state: %w", err)
 	}
-	if _, err := tsPool.Exec(ctx, "TRUNCATE pm_aggregation_outbox, pm_aggregation_results, pm_aggregation_windows"); err != nil {
+	if _, err := tsPool.Exec(ctx, "TRUNCATE pm_aggregation_outbox, pm_aggregation_rollup_outbox, pm_aggregation_counter_rollups, pm_aggregation_results, pm_aggregation_windows"); err != nil {
 		return fmt.Errorf("reset TSDB aggregation state: %w", err)
 	}
 	var cursor uint64
@@ -594,25 +612,22 @@ func resetState(
 			break
 		}
 	}
-	if _, err := js.StreamInfo("PM_AGGREGATION"); errors.Is(err, nats.ErrStreamNotFound) {
-		_, err = js.AddStream(&nats.StreamConfig{
-			Name: "PM_AGGREGATION", Subjects: []string{"pmaggregation.>"},
-			Retention: nats.LimitsPolicy, MaxAge: 40 * 24 * time.Hour,
-			AllowDirect: true, Compression: nats.S2Compression,
-		})
-		if err != nil {
-			return fmt.Errorf("create PM_AGGREGATION stream: %w", err)
+	streams := []nats.StreamConfig{
+		{Name: "PM_AGG_15M", Subjects: []string{"pmaggregation.15m.>"}, Retention: nats.LimitsPolicy, MaxAge: 2 * time.Hour, MaxBytes: 512 << 20, AllowDirect: true, Compression: nats.S2Compression},
+		{Name: "PM_AGG_HOURLY", Subjects: []string{"pmaggregation.hourly.>"}, Retention: nats.LimitsPolicy, MaxAge: 48 * time.Hour, MaxBytes: 512 << 20, AllowDirect: true, Compression: nats.S2Compression},
+		{Name: "PM_AGG_DAILY", Subjects: []string{"pmaggregation.daily.>"}, Retention: nats.LimitsPolicy, MaxAge: 40 * 24 * time.Hour, MaxBytes: 512 << 20, AllowDirect: true, Compression: nats.S2Compression},
+		{Name: "PM_AGG_CONTROL", Subjects: []string{"pmaggregation.control.>"}, Retention: nats.InterestPolicy},
+	}
+	for _, config := range streams {
+		if _, err := js.StreamInfo(config.Name); errors.Is(err, nats.ErrStreamNotFound) {
+			if _, err := js.AddStream(&config); err != nil {
+				return fmt.Errorf("create %s stream: %w", config.Name, err)
+			}
+		} else if err != nil {
+			return err
 		}
-	} else if err != nil {
-		return err
-	}
-	if err := js.PurgeStream("PM_AGGREGATION"); err != nil {
-		return fmt.Errorf("purge PM_AGGREGATION test stream: %w", err)
-	}
-	for _, durable := range []string{"pm-aggregation-workers-pull", "pm-aggregation-control-pull"} {
-		if err := js.DeleteConsumer("PM_AGGREGATION", durable); err != nil &&
-			!errors.Is(err, nats.ErrConsumerNotFound) {
-			return fmt.Errorf("delete test consumer %s: %w", durable, err)
+		if err := js.PurgeStream(config.Name); err != nil {
+			return fmt.Errorf("purge %s test stream: %w", config.Name, err)
 		}
 	}
 	return nil
@@ -643,6 +658,44 @@ func waitForResult(
 	}
 }
 
+func waitForHourlyRollup(
+	ctx context.Context,
+	store *pmstream.RedisWindowStore,
+	version *pmstream.TaskVersionSnapshot,
+	hourStart time.Time,
+	expectedSamples int64,
+) (bool, error) {
+	parent, err := pmstream.WindowFor(hourStart, pmstream.GranularityDaily, time.UTC)
+	if err != nil {
+		return false, err
+	}
+	key := pmstream.WindowKey{
+		TaskID: version.TaskID, TaskVersionID: version.VersionID,
+		Granularity: pmstream.GranularityDaily, Start: parent.Start, End: parent.End,
+	}
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		state, readErr := store.Read(ctx, key)
+		if readErr == nil {
+			var samples int64
+			for _, accumulator := range state.Accumulators {
+				samples += accumulator.Count
+			}
+			if state.ReceivedSlots == 1 && samples == expectedSamples {
+				return true, nil
+			}
+		} else if !errors.Is(readErr, redis.Nil) {
+			return false, readErr
+		}
+		select {
+		case <-ctx.Done():
+			return false, fmt.Errorf("wait for hourly rollup propagation: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
 func loadResult(
 	ctx context.Context,
 	pool *pgxpool.Pool,
@@ -666,7 +719,7 @@ func waitConsumerIdle(ctx context.Context, js nats.JetStreamContext) error {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		info, err := js.ConsumerInfo("PM_AGGREGATION", "pm-aggregation-workers-pull")
+		info, err := js.ConsumerInfo("PM_AGG_15M", "pm-aggregation-workers-pull")
 		if err != nil {
 			return err
 		}
