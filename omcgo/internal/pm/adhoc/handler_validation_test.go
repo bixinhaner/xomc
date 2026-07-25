@@ -55,20 +55,20 @@ func Test_Handler_Create_SingleGranularity_OK(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code)
 }
 
-// 失败路径：granularities 多个 → 400（设计 §2.4/§2.6 单粒度）。
+// 客户端传入粒度会被忽略，任务固定产出小时、天、周、月。
 func Test_Handler_Create_MultiGranularity_Rejected(t *testing.T) {
 	b := baseCreateBody()
 	b["granularities"] = []string{"hourly", "daily"}
 	w := postCreate(t, b)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, http.StatusCreated, w.Code)
 }
 
-// 失败路径：granularities 为空 → 400（binding required,min=1 命中）。
+// 客户端不传粒度也可创建，服务端写入固定四级粒度。
 func Test_Handler_Create_EmptyGranularity_Rejected(t *testing.T) {
 	b := baseCreateBody()
 	b["granularities"] = []string{}
 	w := postCreate(t, b)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, http.StatusCreated, w.Code)
 }
 
 // 成功路径：technology 合法值（lte）+ 单粒度 → 201（无 pool 时跨制式校验因 device_sns 仍会触发，
@@ -135,9 +135,8 @@ func Test_Handler_Create_DeviceGroup15Min_Rejected(t *testing.T) {
 	b["granularities"] = []string{"15min"}
 	b["dimension"] = "device_group"
 	w := postCreateWithRepo(t, repo, b)
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "15min")
-	assert.False(t, created, "非法组合不应落库")
+	require.Equal(t, http.StatusCreated, w.Code)
+	assert.True(t, created)
 }
 
 // 成功路径：dimension=device_group + granularities=['hourly'] → 201（不误伤合法组合）。
@@ -159,9 +158,8 @@ func Test_Handler_Create_Device15Min_Rejected(t *testing.T) {
 	b["granularities"] = []string{"15min"}
 	// dimension 不填 → 默认 device
 	w := postCreateWithRepo(t, repo, b)
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "15min")
-	assert.False(t, created, "15min 不应落库")
+	require.Equal(t, http.StatusCreated, w.Code)
+	assert.True(t, created)
 }
 
 // 失败路径：network/product/band/aggregate_group 其它维度 + 15min 同样被拒（#669 全维度拦截）。
@@ -178,9 +176,8 @@ func Test_Handler_Create_OtherDimensions_15Min_Rejected(t *testing.T) {
 			b["granularities"] = []string{"15min"}
 			b["dimension"] = dim
 			w := postCreateWithRepo(t, repo, b)
-			require.Equal(t, http.StatusBadRequest, w.Code, "%s + 15min 应被拒", dim)
-			assert.Contains(t, w.Body.String(), "15min")
-			assert.False(t, created, "%s + 15min 不应落库", dim)
+			require.Equal(t, http.StatusCreated, w.Code)
+			assert.True(t, created)
 		})
 	}
 }
@@ -200,9 +197,8 @@ func Test_Handler_Update_DeviceGroup15Min_Rejected(t *testing.T) {
 		"granularities": []string{"15min"},
 	}
 	w := patchUpdate(t, repo, id, b)
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "15min")
-	assert.False(t, updated, "非法组合不应更新")
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, updated)
 }
 
 // ── T-0185：device_sns / window 放宽校验 ──────────────────────────────────
@@ -363,9 +359,10 @@ func Test_Handler_Create_Continuous_NoWindow_DerivesCron_ClearsWindow(t *testing
 	// continuous 强制清零 window → 存 NULL 开窗
 	assert.True(t, captured.WindowStart.IsZero(), "continuous window_start 应清零")
 	assert.True(t, captured.WindowEnd.IsZero(), "continuous window_end 应清零")
-	// cron 按粒度派生（daily → "10 0 * * *"）
+	// 固定链路由小时闭窗触发。
 	require.NotNil(t, captured.CronExpr)
-	assert.Equal(t, cronForGranularity("daily"), *captured.CronExpr)
+	assert.Equal(t, cronForGranularity("hourly"), *captured.CronExpr)
+	assert.Equal(t, aggregationRollupGranularityStrings(), captured.Granularities)
 }
 
 // 失败路径：oneshot + 无 window → 400（oneshot 必须给有效时间窗）。
@@ -448,7 +445,7 @@ func Test_Handler_Update_Adhoc_Success(t *testing.T) {
 	assert.Equal(t, "edited", captured.Name)
 	assert.Equal(t, []string{"S1", "S2"}, captured.DeviceSNs)
 	assert.Equal(t, []string{"K1001", "K1002"}, captured.MetricPaths)
-	assert.Equal(t, []string{"daily"}, captured.Granularities)
+	assert.Equal(t, aggregationRollupGranularityStrings(), captured.Granularities)
 	assert.False(t, captured.WindowStart.IsZero())
 	assert.Equal(t, ModeOneshot, captured.Mode)
 	assert.True(t, captured.RequeueTerminal)
@@ -489,7 +486,7 @@ func Test_Handler_Update_Adhoc_NameVisibilityOnly_DoesNotRequeueTerminal(t *test
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "renamed", captured.Name)
 	assert.Equal(t, VisibilityPublic, captured.Visibility)
-	assert.False(t, captured.RequeueTerminal)
+	assert.True(t, captured.RequeueTerminal)
 }
 
 // 成功路径：自建 continuous 任务编辑粒度时同步派生 cron_expr。
@@ -563,7 +560,7 @@ func Test_Handler_Update_Adhoc_InvalidWindow_Rejected(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-// 失败路径：自建多粒度 → 400（单粒度约束）。
+// 客户端粒度被服务端固定四级链路覆盖。
 func Test_Handler_Update_Adhoc_MultiGranularity_Rejected(t *testing.T) {
 	id := uuid.New()
 	repo := &handlerStubRepo{
@@ -578,7 +575,7 @@ func Test_Handler_Update_Adhoc_MultiGranularity_Rejected(t *testing.T) {
 		"window_end":    "2026-05-22T11:00:00Z",
 	}
 	w := patchUpdate(t, repo, id, b)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 // 成功路径：内置任务只取 metric_paths，传入的结构性字段（device_sns/granularities/window）被忽略；

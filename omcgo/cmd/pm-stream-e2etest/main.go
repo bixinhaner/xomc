@@ -108,18 +108,26 @@ func main() {
 		})
 	}
 	rules := make([]pmstream.MetricRule, 0, metrics)
+	counters := make([]pmstream.CounterRule, 0, metrics)
 	for index := 0; index < metrics; index++ {
-		path := fmt.Sprintf("K%04d", index+1)
+		path := fmt.Sprintf("C%04d", index+1)
 		rules = append(rules, pmstream.MetricRule{
-			MetricID: path, MetricPath: path, MetricType: "kpi",
-			Aggregation: pmstream.AggregationAvg,
+			MetricID: path, MetricPath: path, MetricType: "counter",
+			Aggregation: pmstream.AggregationSum, Dependencies: []string{path},
+		})
+		counters = append(counters, pmstream.CounterRule{
+			MetricPath: path, Aggregation: pmstream.AggregationSum,
 		})
 	}
 	version, err := taskRepo.Save(ctx, pmstream.SaveTaskRequest{
 		Name: "PM stream 10000-device verification", Enabled: true,
 		Visibility: "private", Creator: "loadtest", Technology: "lte",
-		Dimension: pmstream.DimensionNetwork, Granularities: []pmstream.Granularity{pmstream.GranularityHourly},
-		Metrics: rules, Members: members, Now: windowStart.Add(-time.Minute),
+		Dimension: pmstream.DimensionNetwork,
+		Granularities: []pmstream.Granularity{
+			pmstream.GranularityHourly, pmstream.GranularityDaily,
+			pmstream.GranularityWeekly, pmstream.GranularityMonthly,
+		},
+		Metrics: rules, Counters: counters, Members: members, Now: windowStart.Add(-time.Minute),
 	})
 	if err != nil {
 		fail(fmt.Errorf("create test task version: %w", err))
@@ -133,7 +141,13 @@ func main() {
 		fail(err)
 	}
 	windowRepo := pmstream.NewWindowRepository(tsPool)
-	finalizer := pmstream.NewFinalizer(windowRepo, store, logger).SetConcurrency(concurrency)
+	finalizer := pmstream.NewFinalizer(windowRepo, store, logger).
+		SetConcurrency(concurrency).
+		SetSnapshot(snapshot)
+	promoter := pmstream.NewDirectRollupPromoter(
+		snapshot, windowRepo, store, finalizer, time.UTC, logger,
+	)
+	finalizer.SetRollupPromoter(promoter.Promote)
 	bus := event.NewNATSEventBus(nc, js, logger)
 	defer bus.Close()
 	bus.SetPullTuning(event.SubjectPMAggregationNormalized, event.PullTuning{
@@ -269,8 +283,11 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
+	faultFinalizer := pmstream.NewFinalizer(windowRepo, store, logger).
+		SetConcurrency(concurrency).
+		SetSnapshot(snapshot)
 	timeoutFinalized, writeFailureKept, concurrentSafe, err := verifyFinalizerFaults(
-		ctx, tsPool, windowRepo, store, finalizer,
+		ctx, tsPool, windowRepo, store, faultFinalizer, version,
 	)
 	if err != nil {
 		fail(err)
@@ -390,10 +407,11 @@ func verifyFinalizerFaults(
 	windows *pmstream.WindowRepository,
 	store *pmstream.RedisWindowStore,
 	finalizer *pmstream.Finalizer,
+	version *pmstream.TaskVersionSnapshot,
 ) (bool, bool, bool, error) {
 	base := time.Now().UTC().Truncate(time.Hour).Add(-4 * time.Hour)
-	timeoutKey := testWindowKey(base)
-	timeoutContribution := testContribution(timeoutKey, "timeout", 8, "kpi")
+	timeoutKey := testWindowKey(base, version)
+	timeoutContribution := testContribution(timeoutKey, "timeout", 8, "counter")
 	if err := accumulateTestWindow(ctx, windows, store, timeoutContribution); err != nil {
 		return false, false, false, err
 	}
@@ -405,13 +423,14 @@ func verifyFinalizerFaults(
 	if err := pool.QueryRow(ctx, `
 SELECT complete, missing_slots
   FROM pm_aggregation_results
- WHERE task_version_id=$1`, timeoutKey.TaskVersionID).
+ WHERE task_version_id=$1 AND window_start=$2`,
+		timeoutKey.TaskVersionID, timeoutKey.Start).
 		Scan(&timeoutComplete, &timeoutMissing); err != nil {
 		return false, false, false, fmt.Errorf("read timeout result: %w", err)
 	}
 	timeoutOK := !timeoutComplete && timeoutMissing == 7
 
-	failureKey := testWindowKey(base.Add(time.Hour))
+	failureKey := testWindowKey(base.Add(time.Hour), version)
 	failureContribution := testContribution(
 		failureKey, "write-failure", 1, "metric-type-too-long-for-varchar",
 	)
@@ -424,14 +443,15 @@ SELECT complete, missing_slots
 	var failureStatus string
 	if err := pool.QueryRow(ctx, `
 SELECT status FROM pm_aggregation_windows
- WHERE task_version_id=$1`, failureKey.TaskVersionID).Scan(&failureStatus); err != nil {
+ WHERE task_version_id=$1 AND window_start=$2`,
+		failureKey.TaskVersionID, failureKey.Start).Scan(&failureStatus); err != nil {
 		return false, false, false, fmt.Errorf("read failed window: %w", err)
 	}
 	_, stateErr := store.Read(ctx, failureKey)
 	failureOK := failureStatus == "failed" && stateErr == nil
 
-	concurrentKey := testWindowKey(base.Add(2 * time.Hour))
-	concurrentContribution := testContribution(concurrentKey, "concurrent", 1, "kpi")
+	concurrentKey := testWindowKey(base.Add(2*time.Hour), version)
+	concurrentContribution := testContribution(concurrentKey, "concurrent", 1, "counter")
 	if err := accumulateTestWindow(ctx, windows, store, concurrentContribution); err != nil {
 		return false, false, false, err
 	}
@@ -455,12 +475,14 @@ SELECT status FROM pm_aggregation_windows
 	var windowStatus string
 	if err := pool.QueryRow(ctx, `
 SELECT COUNT(*) FROM pm_aggregation_results
- WHERE task_version_id=$1`, concurrentKey.TaskVersionID).Scan(&resultRows); err != nil {
+ WHERE task_version_id=$1 AND window_start=$2`,
+		concurrentKey.TaskVersionID, concurrentKey.Start).Scan(&resultRows); err != nil {
 		return false, false, false, err
 	}
 	if err := pool.QueryRow(ctx, `
 SELECT status FROM pm_aggregation_windows
- WHERE task_version_id=$1`, concurrentKey.TaskVersionID).Scan(&windowStatus); err != nil {
+ WHERE task_version_id=$1 AND window_start=$2`,
+		concurrentKey.TaskVersionID, concurrentKey.Start).Scan(&windowStatus); err != nil {
 		return false, false, false, err
 	}
 	concurrentOK := resultRows == 1 && windowStatus == "published"
@@ -468,9 +490,9 @@ SELECT status FROM pm_aggregation_windows
 	return timeoutOK, failureOK, concurrentOK, nil
 }
 
-func testWindowKey(start time.Time) pmstream.WindowKey {
+func testWindowKey(start time.Time, version *pmstream.TaskVersionSnapshot) pmstream.WindowKey {
 	return pmstream.WindowKey{
-		TaskID: uuid.New(), TaskVersionID: uuid.New(),
+		TaskID: version.TaskID, TaskVersionID: version.VersionID,
 		Granularity: pmstream.GranularityHourly, Start: start, End: start.Add(time.Hour),
 	}
 }
@@ -481,13 +503,17 @@ func testContribution(
 	expected int64,
 	metricType string,
 ) pmstream.Contribution {
+	dimension := pmstream.DimensionNetwork
+	if metricType == "metric-type-too-long-for-varchar" {
+		dimension = pmstream.Dimension("invalid")
+	}
 	return pmstream.Contribution{
 		Key: key, SourceFileID: source + "-" + uuid.NewString(),
 		DeviceID: source, SlotStart: key.Start, ExpectedSlots: expected,
 		Values: []pmstream.ContributionValue{{
-			Dimension: pmstream.DimensionNetwork, DimensionKey: "network",
+			Dimension: dimension, DimensionKey: "network",
 			DimensionName: "Network", Technology: "lte",
-			MetricPath: "K-FAULT", MetricType: metricType,
+			MetricPath: "C0001", MetricType: metricType,
 			Operation: pmstream.AggregationSum, Value: 1,
 		}},
 	}

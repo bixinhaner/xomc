@@ -14,8 +14,9 @@ type MatchableLoader interface {
 }
 
 type TaskSnapshot struct {
-	LoadedAt time.Time
-	ByDevice map[uuid.UUID][]*TaskVersionSnapshot
+	LoadedAt  time.Time
+	ByDevice  map[uuid.UUID][]*TaskVersionSnapshot
+	ByVersion map[uuid.UUID]*TaskVersionSnapshot
 }
 
 type SnapshotStore struct {
@@ -29,7 +30,11 @@ func NewSnapshotStore(loader MatchableLoader, logger *zap.Logger) *SnapshotStore
 		logger = zap.NewNop()
 	}
 	store := &SnapshotStore{loader: loader, logger: logger}
-	store.value.Store(&TaskSnapshot{LoadedAt: time.Now().UTC(), ByDevice: map[uuid.UUID][]*TaskVersionSnapshot{}})
+	store.value.Store(&TaskSnapshot{
+		LoadedAt:  time.Now().UTC(),
+		ByDevice:  map[uuid.UUID][]*TaskVersionSnapshot{},
+		ByVersion: map[uuid.UUID]*TaskVersionSnapshot{},
+	})
 	return store
 }
 
@@ -47,10 +52,12 @@ func (s *SnapshotStore) Reload(ctx context.Context) error {
 
 func BuildTaskSnapshot(versions []*TaskVersionSnapshot) *TaskSnapshot {
 	next := &TaskSnapshot{
-		LoadedAt: time.Now().UTC(),
-		ByDevice: make(map[uuid.UUID][]*TaskVersionSnapshot),
+		LoadedAt:  time.Now().UTC(),
+		ByDevice:  make(map[uuid.UUID][]*TaskVersionSnapshot),
+		ByVersion: make(map[uuid.UUID]*TaskVersionSnapshot),
 	}
 	for _, version := range versions {
+		next.ByVersion[version.VersionID] = version
 		for deviceID := range version.Members {
 			next.ByDevice[deviceID] = append(next.ByDevice[deviceID], version)
 		}

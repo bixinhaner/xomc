@@ -10,15 +10,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBuiltinReconcilerKeepsEmptyDefinitionWithoutSavingVersion(t *testing.T) {
+func TestBuiltinReconcilerSavesEmptyDefinitionForLaterMembershipRefresh(t *testing.T) {
 	task := builtinTaskForTest()
 	saveCalls := 0
 	reconciler := &BuiltinReconciler{
 		list: func(context.Context) ([]Task, error) {
 			return []Task{task}, nil
 		},
-		resolveRules: func(context.Context, []string) ([]pmstream.MetricRule, error) {
+		resolveRules: func(context.Context, string, []string) ([]pmstream.MetricRule, error) {
 			return builtinRulesForTest(), nil
+		},
+		resolveCounters: func(context.Context, string, []pmstream.MetricRule) ([]pmstream.CounterRule, error) {
+			return builtinCountersForTest(), nil
 		},
 		resolveMembers: func(context.Context, *Task) ([]pmstream.TaskMember, error) {
 			return nil, nil
@@ -32,8 +35,8 @@ func TestBuiltinReconcilerKeepsEmptyDefinitionWithoutSavingVersion(t *testing.T)
 	result, err := reconciler.Reconcile(context.Background())
 
 	require.NoError(t, err)
-	require.Equal(t, BuiltinReconcileResult{Definitions: 1, Empty: 1}, result)
-	require.Zero(t, saveCalls)
+	require.Equal(t, BuiltinReconcileResult{Definitions: 1, Saved: 1, Empty: 1}, result)
+	require.Equal(t, 1, saveCalls)
 }
 
 func TestBuiltinReconcilerSavesEditedDefinitionWithFixedIdentity(t *testing.T) {
@@ -48,9 +51,13 @@ func TestBuiltinReconcilerSavesEditedDefinitionWithFixedIdentity(t *testing.T) {
 		list: func(context.Context) ([]Task, error) {
 			return []Task{task}, nil
 		},
-		resolveRules: func(_ context.Context, paths []string) ([]pmstream.MetricRule, error) {
+		resolveRules: func(_ context.Context, technology string, paths []string) ([]pmstream.MetricRule, error) {
+			require.Equal(t, "lte", technology)
 			require.Equal(t, []string{"K-EDITED"}, paths)
 			return builtinRulesForTest(), nil
+		},
+		resolveCounters: func(context.Context, string, []pmstream.MetricRule) ([]pmstream.CounterRule, error) {
+			return builtinCountersForTest(), nil
 		},
 		resolveMembers: func(context.Context, *Task) ([]pmstream.TaskMember, error) {
 			return members, nil
@@ -71,9 +78,13 @@ func TestBuiltinReconcilerSavesEditedDefinitionWithFixedIdentity(t *testing.T) {
 	require.Equal(t, task.Name, captured.Name)
 	require.Equal(t, "lte", captured.Technology)
 	require.Equal(t, pmstream.DimensionNetwork, captured.Dimension)
-	require.Equal(t, []pmstream.Granularity{pmstream.GranularityHourly}, captured.Granularities)
+	require.Equal(t, []pmstream.Granularity{
+		pmstream.GranularityHourly, pmstream.GranularityDaily,
+		pmstream.GranularityWeekly, pmstream.GranularityMonthly,
+	}, captured.Granularities)
 	require.Equal(t, members, captured.Members)
 	require.Equal(t, builtinRulesForTest(), captured.Metrics)
+	require.Equal(t, builtinCountersForTest(), captured.Counters)
 }
 
 func TestBuiltinReconcilerContinuesAfterOneDefinitionFails(t *testing.T) {
@@ -87,12 +98,15 @@ func TestBuiltinReconcilerContinuesAfterOneDefinitionFails(t *testing.T) {
 		list: func(context.Context) ([]Task, error) {
 			return []Task{first, second}, nil
 		},
-		resolveRules: func(_ context.Context, paths []string) ([]pmstream.MetricRule, error) {
+		resolveRules: func(_ context.Context, _ string, paths []string) ([]pmstream.MetricRule, error) {
 			if saveCalls == 0 {
 				saveCalls++
 				return nil, errors.New("metadata unavailable")
 			}
 			return builtinRulesForTest(), nil
+		},
+		resolveCounters: func(context.Context, string, []pmstream.MetricRule) ([]pmstream.CounterRule, error) {
+			return builtinCountersForTest(), nil
 		},
 		resolveMembers: func(context.Context, *Task) ([]pmstream.TaskMember, error) {
 			return []pmstream.TaskMember{{
@@ -123,7 +137,11 @@ func TestBuiltinReconcilerRejectsNonBuiltinOrNonContinuousDefinitions(t *testing
 		list: func(context.Context) ([]Task, error) {
 			return []Task{custom, oneshot}, nil
 		},
-		resolveRules: func(context.Context, []string) ([]pmstream.MetricRule, error) {
+		resolveRules: func(context.Context, string, []string) ([]pmstream.MetricRule, error) {
+			t.Fatal("ineligible definitions must not be resolved")
+			return nil, nil
+		},
+		resolveCounters: func(context.Context, string, []pmstream.MetricRule) ([]pmstream.CounterRule, error) {
 			t.Fatal("ineligible definitions must not be resolved")
 			return nil, nil
 		},
@@ -162,5 +180,11 @@ func builtinRulesForTest() []pmstream.MetricRule {
 	return []pmstream.MetricRule{{
 		MetricID: "K1", MetricPath: "K1", MetricType: "counter",
 		Aggregation: pmstream.AggregationSum,
+	}}
+}
+
+func builtinCountersForTest() []pmstream.CounterRule {
+	return []pmstream.CounterRule{{
+		MetricPath: "K1", Aggregation: pmstream.AggregationSum,
 	}}
 }

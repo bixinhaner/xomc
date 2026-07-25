@@ -26,8 +26,8 @@ func validNormalizedEvent() event.PMAggregationNormalizedPayload {
 		Measurements: []event.PMAggregationMeasurement{{
 			ObjectLDN: "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.1",
 			Metrics: []event.PMAggregationMetric{{
-				MetricPath: "K001",
-				MetricType: "kpi",
+				MetricPath: "C001",
+				MetricType: "counter",
 				Value:      12.5,
 			}},
 		}},

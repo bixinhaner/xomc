@@ -93,6 +93,10 @@ func (c *Consumer) process(ctx context.Context, envelope event.Event) error {
 	if err != nil {
 		return fmt.Errorf("match PM aggregation event: %w", err)
 	}
+	return c.processContributions(ctx, contributions)
+}
+
+func (c *Consumer) processContributions(ctx context.Context, contributions []Contribution) error {
 	for _, contribution := range contributions {
 		published, err := c.windows.IsPublished(ctx, contribution.Key)
 		if err != nil {
@@ -131,10 +135,11 @@ func (c *Consumer) process(ctx context.Context, envelope event.Event) error {
 }
 
 type TimeoutScanner struct {
-	windows   *WindowRepository
-	finalizer *Finalizer
-	grace     time.Duration
-	logger    *zap.Logger
+	windows            *WindowRepository
+	finalizer          *Finalizer
+	grace              time.Duration
+	graceByGranularity map[Granularity]time.Duration
+	logger             *zap.Logger
 }
 
 func NewTimeoutScanner(
@@ -146,7 +151,30 @@ func NewTimeoutScanner(
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &TimeoutScanner{windows: windows, finalizer: finalizer, grace: grace, logger: logger}
+	return &TimeoutScanner{
+		windows: windows, finalizer: finalizer, grace: grace, logger: logger,
+		graceByGranularity: map[Granularity]time.Duration{
+			GranularityHourly:  grace,
+			GranularityDaily:   15 * time.Minute,
+			GranularityWeekly:  30 * time.Minute,
+			GranularityMonthly: 30 * time.Minute,
+		},
+	}
+}
+
+func (s *TimeoutScanner) SetGranularityGrace(
+	daily, weekly, monthly time.Duration,
+) *TimeoutScanner {
+	if daily > 0 {
+		s.graceByGranularity[GranularityDaily] = daily
+	}
+	if weekly > 0 {
+		s.graceByGranularity[GranularityWeekly] = weekly
+	}
+	if monthly > 0 {
+		s.graceByGranularity[GranularityMonthly] = monthly
+	}
+	return s
 }
 
 func (s *TimeoutScanner) Run(ctx context.Context) {
@@ -165,7 +193,9 @@ func (s *TimeoutScanner) Run(ctx context.Context) {
 }
 
 func (s *TimeoutScanner) runOnce(ctx context.Context) error {
-	windows, err := s.windows.ListDue(ctx, time.Now().UTC(), s.grace, 100)
+	windows, err := s.windows.ListDueByGranularity(
+		ctx, time.Now().UTC(), s.graceByGranularity, s.grace, 100,
+	)
 	if err != nil {
 		return err
 	}

@@ -15,16 +15,31 @@ import (
 type CloseReason string
 
 const (
-	CloseComplete CloseReason = "complete"
-	CloseTimeout  CloseReason = "timeout"
+	CloseComplete        CloseReason = "complete"
+	CloseTimeout         CloseReason = "timeout"
+	finalResultBatchSize             = 1000
 )
 
 type Finalizer struct {
-	windows *WindowRepository
-	store   *RedisWindowStore
-	logger  *zap.Logger
-	metrics *Metrics
-	slots   chan struct{}
+	windows  *WindowRepository
+	store    *RedisWindowStore
+	logger   *zap.Logger
+	metrics  *Metrics
+	slots    chan struct{}
+	snapshot *SnapshotStore
+	promote  func(context.Context, WindowKey, CloseReason, WindowState) error
+}
+
+func (f *Finalizer) SetSnapshot(snapshot *SnapshotStore) *Finalizer {
+	f.snapshot = snapshot
+	return f
+}
+
+func (f *Finalizer) SetRollupPromoter(
+	promote func(context.Context, WindowKey, CloseReason, WindowState) error,
+) *Finalizer {
+	f.promote = promote
+	return f
 }
 
 func NewFinalizer(
@@ -90,6 +105,17 @@ func (f *Finalizer) Finalize(ctx context.Context, key WindowKey, reason CloseRea
 		}
 		return err
 	}
+	if f.promote != nil &&
+		(key.Granularity == GranularityHourly || key.Granularity == GranularityDaily) {
+		if err := f.promote(ctx, key, reason, state); err != nil {
+			promoteErr := fmt.Errorf("promote PM aggregation counter state: %w", err)
+			if f.metrics != nil {
+				f.metrics.FinalizeErrorsTotal.Inc()
+			}
+			_ = f.windows.MarkFailed(ctx, key, promoteErr)
+			return promoteErr
+		}
+	}
 	if err := f.writeFinal(ctx, key, reason, state); err != nil {
 		if f.metrics != nil {
 			f.metrics.FinalizeErrorsTotal.Inc()
@@ -120,12 +146,35 @@ func (f *Finalizer) writeFinal(
 		return fmt.Errorf("begin finalize PM aggregation window: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	var version *TaskVersionSnapshot
+	if f.snapshot != nil && f.snapshot.Current() != nil {
+		version = f.snapshot.Current().ByVersion[key.TaskVersionID]
+	}
+	finalMetrics, formulaIncomplete, err := buildFinalizedMetrics(version, state)
+	if err != nil {
+		return err
+	}
+	sourceExpected := state.SourceExpectedSlots
+	sourceReceived := state.SourceReceivedSlots
+	if sourceExpected == 0 {
+		sourceExpected = state.ExpectedSlots
+		sourceReceived = state.ReceivedSlots
+	}
+	childrenComplete := state.ReceivedSlots >= state.ExpectedSlots
+	missing := max64(0, sourceExpected-sourceReceived)
+	dataComplete := childrenComplete && missing == 0 &&
+		state.SourceIncompleteSlots == 0 && !formulaIncomplete
 
 	claimSQL, claimArgs, err := storage.Psql.Update("pm_aggregation_windows").
 		Set("status", "finalizing").
 		Set("close_reason", string(reason)).
 		Set("received_slots", state.ReceivedSlots).
-		Set("missing_slots", max64(0, state.ExpectedSlots-state.ReceivedSlots)).
+		Set("source_expected_slots", sourceExpected).
+		Set("source_received_slots", sourceReceived).
+		Set("missing_slots", missing).
+		Set("children_complete", childrenComplete).
+		Set("source_incomplete_slots", state.SourceIncompleteSlots).
+		Set("data_complete", dataComplete).
 		Set("updated_at", time.Now().UTC()).
 		Where(windowKeyPredicate(key)).
 		Where(sq.Eq{"status": []string{"open", "failed", "finalizing"}}).
@@ -141,37 +190,37 @@ func (f *Finalizer) writeFinal(
 		return nil
 	}
 
-	missing := max64(0, state.ExpectedSlots-state.ReceivedSlots)
-	complete := reason == CloseComplete && missing == 0
+	complete := reason == CloseComplete && dataComplete
 	resultCount := 0
-	for _, accumulator := range state.Accumulators {
-		if accumulator.Count == 0 {
-			continue
+	for start := 0; start < len(finalMetrics); start += finalResultBatchSize {
+		end := start + finalResultBatchSize
+		if end > len(finalMetrics) {
+			end = len(finalMetrics)
 		}
-		value := accumulatorValue(accumulator)
-		definition := accumulator.Definition
-		query, args, buildErr := storage.Psql.Insert("pm_aggregation_results").
+		builder := storage.Psql.Insert("pm_aggregation_results").
 			Columns(
 				"window_start", "window_end", "task_id", "task_version_id",
 				"granularity", "dimension", "dimension_key", "dimension_name",
 				"object_ldn", "device_oui", "device_sn", "technology",
 				"metric_id", "metric_path", "metric_type",
 				"aggregation_op", "metric_value", "sample_count", "complete", "missing_slots",
-			).
-			Values(
+			)
+		for _, metric := range finalMetrics[start:end] {
+			definition := metric.Definition
+			builder = builder.Values(
 				key.Start, key.End, key.TaskID, key.TaskVersionID,
 				string(key.Granularity), string(definition.Dimension),
 				definition.DimensionKey, definition.DimensionName,
 				definition.ObjectLDN, definition.DeviceOUI, definition.DeviceSN,
-				definition.Technology, definition.MetricPath, definition.MetricPath,
-				definition.MetricType, string(definition.Operation), value,
-				accumulator.Count, complete, missing,
-			).
-			Suffix(`
+				definition.Technology, metric.MetricID, definition.MetricPath,
+				metric.MetricType, string(metric.Operation), metric.Value,
+				metric.SampleCount, complete, missing,
+			)
+		}
+		query, args, buildErr := builder.Suffix(`
 ON CONFLICT (
   task_version_id, granularity, window_start, dimension_key, object_ldn, technology, metric_id
-) DO NOTHING`).
-			ToSql()
+) DO NOTHING`).ToSql()
 		if buildErr != nil {
 			return fmt.Errorf("build insert PM aggregation result SQL: %w", buildErr)
 		}

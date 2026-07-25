@@ -21,15 +21,26 @@ type ContributionValue struct {
 	MetricType    string
 	Operation     AggregationOp
 	Value         float64
+	Sum           float64
+	Count         int64
+	Min           float64
+	Max           float64
+	Composed      bool
 }
 
 type Contribution struct {
-	Key           WindowKey
-	SourceFileID  string
-	DeviceID      string
-	SlotStart     time.Time
-	ExpectedSlots int64
-	Values        []ContributionValue
+	Key                   WindowKey
+	SourceFileID          string
+	DeviceID              string
+	SlotStart             time.Time
+	ExpectedSlots         int64
+	SourceExpectedSlots   int64
+	SourceReceivedSlots   int64
+	SourceIncompleteSlots int64
+	Rollup                bool
+	RollupChunkIndex      int
+	RollupChunkCount      int
+	Values                []ContributionValue
 }
 
 type Matcher struct {
@@ -47,6 +58,16 @@ func (m *Matcher) Match(
 	payload event.PMAggregationNormalizedPayload,
 	snapshot *TaskSnapshot,
 ) ([]Contribution, error) {
+	return m.MatchGranularity(payload, snapshot, GranularityHourly)
+}
+
+// MatchGranularity rebuilds a Redis window directly from retained original
+// 15-minute events. Normal ingestion only calls Match (hourly).
+func (m *Matcher) MatchGranularity(
+	payload event.PMAggregationNormalizedPayload,
+	snapshot *TaskSnapshot,
+	target Granularity,
+) ([]Contribution, error) {
 	if snapshot == nil {
 		return nil, nil
 	}
@@ -62,7 +83,12 @@ func (m *Matcher) Match(
 			continue
 		}
 		for _, granularity := range version.Granularities {
-			window, err := WindowFor(payload.WindowStart, granularity, m.location)
+			// Raw 15-minute PM events only feed hourly windows. Coarser
+			// windows consume finalized child counter events.
+			if granularity != target {
+				continue
+			}
+			window, err := WindowFor(payload.WindowStart, target, m.location)
 			if err != nil {
 				return nil, err
 			}
@@ -93,7 +119,10 @@ func (m *Matcher) Match(
 						continue
 					}
 					for _, metric := range measurement.Metrics {
-						rule, ok := version.Metrics[metric.MetricPath]
+						if metric.MetricType != "counter" {
+							continue
+						}
+						counterRule, ok := version.Counters[metric.MetricPath]
 						if !ok {
 							continue
 						}
@@ -107,7 +136,7 @@ func (m *Matcher) Match(
 							ObjectLDN:     measurement.ObjectLDN,
 							DeviceOUI:     deviceOUI, DeviceSN: deviceSN, Technology: payload.Technology,
 							MetricPath: metric.MetricPath,
-							MetricType: metric.MetricType, Operation: rule.Aggregation, Value: metric.Value,
+							MetricType: "counter", Operation: counterRule.Aggregation, Value: metric.Value,
 						})
 					}
 				}
@@ -118,6 +147,25 @@ func (m *Matcher) Match(
 		}
 	}
 	return out, nil
+}
+
+func expectedChildWindows(window Window, target Granularity, location *time.Location) int64 {
+	switch target {
+	case GranularityDaily:
+		return 24
+	case GranularityWeekly:
+		return 7
+	case GranularityMonthly:
+		localStart := window.Start.In(location)
+		localEnd := window.End.In(location)
+		days := int64(0)
+		for cursor := localStart; cursor.Before(localEnd); cursor = cursor.AddDate(0, 0, 1) {
+			days++
+		}
+		return days
+	default:
+		return 0
+	}
 }
 
 func (c Contribution) Validate() error {

@@ -111,6 +111,41 @@ func (r *WindowRepository) ListDue(
 	return r.queryWindows(ctx, query, args...)
 }
 
+func (r *WindowRepository) ListDueByGranularity(
+	ctx context.Context,
+	now time.Time,
+	graceByGranularity map[Granularity]time.Duration,
+	fallbackGrace time.Duration,
+	limit uint64,
+) ([]WindowRecord, error) {
+	due := sq.Or{}
+	for _, granularity := range []Granularity{
+		GranularityHourly, GranularityDaily, GranularityWeekly, GranularityMonthly,
+	} {
+		grace := graceByGranularity[granularity]
+		if grace <= 0 {
+			grace = fallbackGrace
+		}
+		due = append(due, sq.And{
+			sq.Eq{"granularity": string(granularity)},
+			sq.LtOrEq{"window_end": now.Add(-grace)},
+		})
+	}
+	query, args, err := storage.Psql.Select(
+		"task_id", "task_version_id", "granularity", "window_start", "window_end",
+		"status", "expected_slots", "received_slots",
+	).From("pm_aggregation_windows").
+		Where(sq.Eq{"status": []string{"open", "failed"}}).
+		Where(due).
+		OrderBy("window_end").
+		Limit(limit).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list due PM aggregation windows by granularity SQL: %w", err)
+	}
+	return r.queryWindows(ctx, query, args...)
+}
+
 func (r *WindowRepository) ListActive(ctx context.Context, limit uint64) ([]WindowRecord, error) {
 	query, args, err := storage.Psql.Select(
 		"task_id", "task_version_id", "granularity", "window_start", "window_end",

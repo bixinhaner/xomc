@@ -112,7 +112,9 @@ func (r *Recovery) ReplayWindow(ctx context.Context, key WindowKey) error {
 			if err := envelope.DecodePayload(&payload); err != nil {
 				return fmt.Errorf("decode replay PM aggregation payload: %w", err)
 			}
-			contributions, err := r.matcher.Match(payload, r.snapshot.Current())
+			contributions, err := r.matcher.MatchGranularity(
+				payload, r.snapshot.Current(), key.Granularity,
+			)
 			if err != nil {
 				return err
 			}

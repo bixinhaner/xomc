@@ -8167,6 +8167,8 @@ const messages: Record<string, string> = {
   'perf.adhoc.metricPathsLabel':         'Metric Paths (comma-separated)',
   'perf.adhoc.metricPathsPlaceholder':   'L.RRC.SuccRate, L.ERAB.SuccRate',
   'perf.adhoc.granMultiLabel':           'Granularity (multi-select)',
+  'perf.adhoc.fixedRollupLabel':         'Fixed rollup levels',
+  'perf.adhoc.fixedRollupDesc':          'The task automatically produces hourly, daily, weekly, and monthly results. KPI values at every level are calculated from aggregated raw counters.',
   'perf.adhoc.windowLabel':              'Time Window',
   'perf.adhoc.aggregateGroupLabel':      'Aggregate to Group',
   'perf.adhoc.aggregateGroupTooltip':    'Checked: all selected SNs form a temporary group for aggregation (by time bucket + LDN GROUP BY), result device_sn=AGGREGATED; unchecked: one result per device',
