@@ -14,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/model"
-	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/netutil"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/pkg/tr069"
@@ -65,8 +64,20 @@ type BatchInformProcessor struct {
 	//   的 11 个新列 + mac / transmit_power 等。flush 成功后异步调用。
 	//
 	// 两者为 nil 时退化为原 batch path 行为（无回填），与改造前等价。
-	productMatcher ProductClassMatcher
-	infoSyncer     *InfoSyncer
+	productMatcher      ProductClassMatcher
+	infoSyncer          deviceInfoParameterSyncer
+	infoProjectionSlots chan struct{}
+	infoProjectionRetry sync.Map
+}
+
+type deviceInfoParameterSyncer interface {
+	SyncFromParameters(
+		ctx context.Context,
+		deviceID uuid.UUID,
+		carrier model.CarrierCode,
+		technology model.Technology,
+		productClass string,
+	) ([]string, error)
 }
 
 // SetProductMatcher 注入 ProductRegistry 用于 batch path 回填 device.ModelName。
@@ -130,19 +141,20 @@ func NewBatchInformProcessor(
 	}
 
 	return &BatchInformProcessor{
-		workers:         workers,
-		flushInterval:   flushInterval,
-		maxBatchSize:    maxBatchSize,
-		shutdownTimeout: shutdownTimeout,
-		pool:            pool,
-		redisClient:     redisClient,
-		reconciler:      reconciler,
-		cache:           cache,
-		stunUpdater:     stunUpdater,
-		metrics:         metrics,
-		logger:          logger,
-		workerChans:     workerChans,
-		stopCh:          make(chan struct{}),
+		workers:             workers,
+		flushInterval:       flushInterval,
+		maxBatchSize:        maxBatchSize,
+		shutdownTimeout:     shutdownTimeout,
+		pool:                pool,
+		redisClient:         redisClient,
+		reconciler:          reconciler,
+		cache:               cache,
+		stunUpdater:         stunUpdater,
+		metrics:             metrics,
+		logger:              logger,
+		workerChans:         workerChans,
+		stopCh:              make(chan struct{}),
+		infoProjectionSlots: make(chan struct{}, 8),
 	}
 }
 
@@ -335,7 +347,8 @@ func (p *BatchInformProcessor) doFlush(ctx context.Context, buffer map[string]*i
 	}
 
 	// 2. 批量更新参数表（仅 hit，避免 device_id 外键悬空）
-	if err := p.batchUpsertParams(ctx, hit); err != nil {
+	paramResult, err := p.batchUpsertParams(ctx, hit)
+	if err != nil {
 		return fmt.Errorf("batch upsert params: %w", err)
 	}
 
@@ -346,8 +359,22 @@ func (p *BatchInformProcessor) doFlush(ctx context.Context, buffer map[string]*i
 	// 把 device_parameters 投影到 device_info 的 tac/band/mac/transmit_power 等
 	// 11 个 Phase 2 新列。异步执行（不阻塞 flush 主路径），失败仅 WARN，下次
 	// Inform 周期会重试。
-	if p.infoSyncer != nil && len(hit) > 0 {
-		go p.asyncSyncDeviceInfo(hit)
+	if p.infoSyncer != nil {
+		changed := make([]*informUpdate, 0, len(paramResult.changedDevices))
+		for _, update := range hit {
+			_, parameterChanged := paramResult.changedDevices[update.device.ID]
+			_, retryPending := p.infoProjectionRetry.Load(update.device.ID)
+			if parameterChanged || retryPending {
+				changed = append(changed, update)
+			}
+		}
+		if p.metrics != nil {
+			p.metrics.BatchInfoProjection.WithLabelValues("queued").Add(float64(len(changed)))
+			p.metrics.BatchInfoProjection.WithLabelValues("skipped").Add(float64(len(hit) - len(changed)))
+		}
+		if len(changed) > 0 {
+			go p.asyncSyncDeviceInfo(changed)
+		}
 	}
 
 	// 4. T-0123/T-0125: PG + cache 写入成功后发 transition 事件。
@@ -474,43 +501,30 @@ func (p *BatchInformProcessor) batchUpdateDevices(ctx context.Context, updates [
 	return affected, nil
 }
 
-// batchUpsertParams 将所有设备的参数合并到一个 pgx.Batch 中执行。
-func (p *BatchInformProcessor) batchUpsertParams(ctx context.Context, updates []*informUpdate) error {
-	batch := &pgx.Batch{}
-	totalParams := 0
-
+// batchUpsertParams 将所有设备的参数收敛为多行 UPSERT。只有字段实际变化时
+// PostgreSQL 才执行 UPDATE，并返回需要刷新 device_info 投影的设备集合。
+func (p *BatchInformProcessor) batchUpsertParams(
+	ctx context.Context,
+	updates []*informUpdate,
+) (deviceParameterUpsertResult, error) {
+	rows := make([]deviceParameterUpsertRow, 0)
 	for _, u := range updates {
-		if len(u.params) == 0 {
-			continue
-		}
-		now := time.Now()
 		for _, param := range u.params {
-			query, args, err := storage.Psql.Insert("device_parameters").
-				Columns("device_id", "parameter_path", "parameter_value", "parameter_type", "writable", "last_updated_at").
-				Values(u.device.ID, param.ParameterPath, param.ParameterValue, param.ParameterType, param.Writable, now).
-				Suffix("ON CONFLICT (device_id, parameter_path) DO UPDATE SET parameter_value = EXCLUDED.parameter_value, parameter_type = EXCLUDED.parameter_type, writable = EXCLUDED.writable, last_updated_at = EXCLUDED.last_updated_at").
-				ToSql()
-			if err != nil {
-				return fmt.Errorf("build upsert query: %w", err)
-			}
-			batch.Queue(query, args...)
-			totalParams++
+			rows = append(rows, deviceParameterUpsertRow{
+				deviceID: u.device.ID, parameter: param,
+			})
 		}
 	}
-
-	if totalParams == 0 {
-		return nil
+	result, err := bulkUpsertDeviceParameters(ctx, p.pool, rows)
+	if err != nil {
+		return result, err
 	}
-
-	br := p.pool.SendBatch(ctx, batch)
-	defer br.Close()
-
-	for i := 0; i < totalParams; i++ {
-		if _, err := br.Exec(); err != nil {
-			return fmt.Errorf("exec batch param upsert item %d: %w", i, err)
-		}
+	if p.metrics != nil {
+		p.metrics.BatchParameterRows.WithLabelValues("attempted").Add(float64(result.attempted))
+		p.metrics.BatchParameterRows.WithLabelValues("changed").Add(float64(result.changed))
+		p.metrics.BatchParameterRows.WithLabelValues("skipped").Add(float64(result.attempted - result.changed))
 	}
-	return nil
+	return result, nil
 }
 
 // batchRedisOps 批量刷新设备缓存和 STUN 地址。
@@ -760,23 +774,49 @@ func applyProductMetadataInline(ctx context.Context, matcher ProductClassMatcher
 // 异步执行避免阻塞 flush 主路径;失败仅 WARN,下次 Inform 周期会自动重试
 // (InfoSyncer 内部从 paramRepo.GetByDevice 全量读取,幂等)。
 //
-// 设计权衡:每个 hit device 单独起一次 SyncFromParameters,N=200 时 200 个 goroutine
-// 短时并发。infoRepo.UpdateSyncFields 用 squirrel 动态构建+pgxpool,内部连接池处理
-// 并发。如未来观测到 P99 抖动,可改为 worker pool 或事件驱动。
+// 固定大小 worker pool + processor 级 semaphore 限制短时并发，避免多个 flush
+// 同时执行时把设备数直接放大为相同数量的 goroutine 和主库连接。
 func (p *BatchInformProcessor) asyncSyncDeviceInfo(hit []*informUpdate) {
-	for _, u := range hit {
-		dev := u.device
-		go func(d *model.Device) {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			// 批量参数回填路径不持有 EventBus,即便 LAC/TAC 变化也不在这里发
-			// device.attributes.changed —— 走 @hourly cron 兜底重匹配。若后续需要
-			// 让批量路径也实时归组,需把 eventBus 注入到 batch_processor。
-			if _, err := p.infoSyncer.SyncFromParameters(ctx, d.ID, d.Carrier, d.Technology, d.ProductClass); err != nil {
-				p.logger.Warn("batch path InfoSyncer.SyncFromParameters failed (non-fatal)",
-					zap.String("serial_number", d.SerialNumber),
-					zap.Error(err))
-			}
-		}(dev)
+	const maxProjectionWorkers = 8
+	workerCount := min(maxProjectionWorkers, len(hit))
+	slots := p.infoProjectionSlots
+	if slots == nil {
+		slots = make(chan struct{}, maxProjectionWorkers)
 	}
+	jobs := make(chan *model.Device)
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+	for range workerCount {
+		go func() {
+			defer workers.Done()
+			for device := range jobs {
+				slots <- struct{}{}
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				_, err := p.infoSyncer.SyncFromParameters(
+					ctx, device.ID, device.Carrier, device.Technology, device.ProductClass,
+				)
+				cancel()
+				<-slots
+				if err != nil {
+					p.infoProjectionRetry.Store(device.ID, struct{}{})
+					if p.metrics != nil {
+						p.metrics.BatchInfoProjection.WithLabelValues("failed").Inc()
+					}
+					p.logger.Warn("batch path InfoSyncer.SyncFromParameters failed (non-fatal)",
+						zap.String("serial_number", device.SerialNumber),
+						zap.Error(err))
+					continue
+				}
+				p.infoProjectionRetry.Delete(device.ID)
+				if p.metrics != nil {
+					p.metrics.BatchInfoProjection.WithLabelValues("completed").Inc()
+				}
+			}
+		}()
+	}
+	for _, update := range hit {
+		jobs <- update.device
+	}
+	close(jobs)
+	workers.Wait()
 }

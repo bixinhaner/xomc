@@ -161,21 +161,33 @@ func (r *PgDeviceInfoRepository) UpdateSyncFields(ctx context.Context, deviceID 
 		return nil
 	}
 
-	builder := storage.Psql.Update("device_info").Where(sq.Eq{"device_id": deviceID})
-	for col, val := range fields {
-		builder = builder.Set(col, val)
-	}
-
-	query, args, err := builder.ToSql()
+	query, args, err := buildDeviceInfoSyncFieldsUpdate(deviceID, fields)
 	if err != nil {
-		return fmt.Errorf("build sync update query: %w", err)
+		return err
 	}
-
-	_, err = r.pool.Exec(ctx, query, args...)
-	if err != nil {
+	if _, err = r.pool.Exec(ctx, query, args...); err != nil {
 		return fmt.Errorf("update device_info sync fields: %w", err)
 	}
 	return nil
+}
+
+func buildDeviceInfoSyncFieldsUpdate(
+	deviceID uuid.UUID,
+	fields map[string]interface{},
+) (string, []any, error) {
+	builder := storage.Psql.Update("device_info").Where(sq.Eq{"device_id": deviceID})
+	changed := sq.Or{}
+	for col, val := range fields {
+		builder = builder.Set(col, val)
+		changed = append(changed, sq.Expr(fmt.Sprintf("%s IS DISTINCT FROM ?", col), val))
+	}
+	builder = builder.Where(changed)
+
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return "", nil, fmt.Errorf("build sync update query: %w", err)
+	}
+	return query, args, nil
 }
 
 // UpdateNameSyncFields 更新设备名称同步相关字段（Issue #758）。
