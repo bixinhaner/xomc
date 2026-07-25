@@ -165,6 +165,23 @@ func Test_buildDeviceTableSQL_PreservesWhereFilters(t *testing.T) {
 	assert.Contains(t, sql, "granularity =")
 }
 
+func Test_buildDeviceTableSQL_BindsMetricPathToInferredMetricTypeWhenTypeAbsent(t *testing.T) {
+	sql, args, err := buildDeviceTableSQL("pm_metrics", QueryRequest{
+		DeviceSNs:   []string{"SN-1"},
+		MetricPaths: []string{" K900010015 ", "C000060216"},
+		Granularity: metrics.Granularity15Min,
+	})
+	require.NoError(t, err)
+
+	assert.Contains(t, sql, "metric_path =")
+	assert.Contains(t, sql, "metric_type =")
+	assert.Contains(t, sql, " OR ")
+	assert.Contains(t, args, "K900010015")
+	assert.Contains(t, args, "kpi")
+	assert.Contains(t, args, "C000060216")
+	assert.Contains(t, args, "counter")
+}
+
 func Test_buildDeviceTableSQL_PageByPivotRowPagesKeysThenReturnsAllMetrics(t *testing.T) {
 	sql, args, err := buildDeviceTableSQL("pm_metrics", QueryRequest{
 		Granularity:    metrics.Granularity15Min,
@@ -296,16 +313,19 @@ func Test_applyCommonFilters_TechnologyDeviceSubquery_Unaffected(t *testing.T) {
 	assert.Contains(t, args, []string{"nr"})
 }
 
-// 设备维度（applyDeviceFilters）制式过滤同样走设备编号子查询，分流不破坏既有行为。
-func Test_applyDeviceFilters_TechnologyDeviceSubquery_Unaffected(t *testing.T) {
+// 设备维度（applyDeviceFilters）带 device_sn + technology 时先收窄用户选中的设备集合。
+func Test_applyDeviceFilters_TechnologyNarrowsSelectedDeviceSNsFirst(t *testing.T) {
 	q := QueryRequest{
 		DeviceSNs:    []string{"SN1"},
 		Technologies: []string{"lte"},
 	}
 	qb := storage.Psql.Select("metric_path").From("pm_metrics_hourly")
-	sql, _, err := applyDeviceFilters(qb, q).ToSql()
+	sql, args, err := applyDeviceFilters(qb, q).ToSql()
 	require.NoError(t, err)
-	assert.Contains(t, sql, "(device_oui, device_sn) IN (SELECT oui, serial_number FROM device_dim WHERE technology = ANY(")
+	assert.Contains(t, sql, "(device_oui, device_sn) IN (SELECT oui, serial_number FROM device_dim WHERE serial_number = ANY(")
+	assert.Contains(t, sql, "AND technology = ANY(")
+	assert.Contains(t, args, []string{"SN1"})
+	assert.Contains(t, args, []string{"lte"})
 }
 
 // #64 设备维度可见分组：applyCommonFilters 按 device_sn 两层子查询 fail-closed 收口。

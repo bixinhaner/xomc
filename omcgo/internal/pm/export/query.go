@@ -28,8 +28,13 @@ var deviceSelectColsNoID = []string{
 // granularity、时窗、制式）；ORDER BY time, id 配 keyset 游标保证不漏不重。
 // started=false 时取首批（无游标谓词）；之后用 (time, id) > (curTime, curID) 推进。
 func buildDeviceKeysetSQL(table string, req aggregator.QueryRequest, objectLDNs []string, started bool, curTime time.Time, curID uuid.UUID, limit int) (string, []any) {
-	b := newRawAwareExportSelect(table, req, deviceSelectCols...)
-	b = applyDeviceExportFilters(b, req, objectLDNs)
+	inner := newRawAwareExportSelect(table, req, appendExportColumn(deviceSelectCols, "ingest_time")...).
+		Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
+	inner = applyDeviceExportFilters(inner, req, objectLDNs)
+	inner = inner.OrderBy(
+		"device_oui", "device_sn", "metric_path", "granularity", `"time"`, "object_ldn", "ingest_time DESC", "id DESC",
+	)
+	b := storage.Psql.Select(prefixedExportColumns("d", deviceSelectCols)...).FromSelect(inner, "d")
 	if started {
 		// keyset：(time, id) 严格大于游标。time 列名带引号避免与保留字冲突。
 		b = b.Where(sq.Expr(`("time", id) > (?, ?)`, curTime, curID))
@@ -40,8 +45,13 @@ func buildDeviceKeysetSQL(table string, req aggregator.QueryRequest, objectLDNs 
 }
 
 func buildDeviceOffsetSQL(table string, req aggregator.QueryRequest, objectLDNs []string, offset, limit int) (string, []any) {
-	b := newRawAwareExportSelect(table, req, deviceSelectColsNoID...)
-	b = applyDeviceExportFilters(b, req, objectLDNs)
+	inner := newRawAwareExportSelect(table, req, appendExportColumn(deviceSelectColsNoID, "ingest_time")...).
+		Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
+	inner = applyDeviceExportFilters(inner, req, objectLDNs)
+	inner = inner.OrderBy(
+		"device_oui", "device_sn", "metric_path", "granularity", `"time"`, "object_ldn", "ingest_time DESC",
+	)
+	b := storage.Psql.Select(prefixedExportColumns("d", deviceSelectColsNoID)...).FromSelect(inner, "d")
 	b = b.OrderBy(`"time" ASC`, "device_oui ASC", "device_sn ASC", "object_ldn ASC", "metric_path ASC", "metric_type ASC").
 		Limit(uint64(limit)).
 		Offset(uint64(offset))
@@ -64,12 +74,14 @@ func newRawAwareExportSelect(
 			"COALESCE(dev.oui,'')::text AS device_oui",
 			"COALESCE(dev.serial_number,f.device_sn)::text AS device_sn",
 			"d.metric_path", "d.metric_type", "v.metric_value", "d.statis_type", "a.granularity",
-			`a."time"`, "a.start_time", "a.end_time", "a.object_ldn",
+			`a."time"`, "a.start_time", "a.end_time",
+			"COALESCE(b.committed_at,f.created_at,now()) AS ingest_time", "a.object_ldn",
 		).From("pm_measurement_anchors a").
 			Join("pm_metric_sets s ON s.metric_set_id=a.metric_set_id").
 			Join("pm_metric_dictionary d ON d.metric_id=ANY(s.metric_ids)").
 			LeftJoin(`pm_metric_values v ON v."time"=a."time" AND v.anchor_id=a.anchor_id AND v.metric_id=d.metric_id`).
 			LeftJoin("pm_files f ON f.id=a.source_file_id").
+			LeftJoin("pm_ingest_batches b ON b.ingest_batch_id=a.ingest_batch_id").
 			LeftJoin("device_dim dev ON dev.id=a.device_dim_id")
 	} else {
 		targeted = storage.Psql.Select(
@@ -77,7 +89,8 @@ func newRawAwareExportSelect(
 			"COALESCE(dev.oui,'')::text AS device_oui",
 			"COALESCE(dev.serial_number,'')::text AS device_sn",
 			"d.metric_path", "d.metric_type", "v.metric_value", "d.statis_type", "a.granularity",
-			`a."time"`, "a.start_time", "a.end_time", "a.object_ldn",
+			`a."time"`, "a.start_time", "a.end_time",
+			"COALESCE(ver.published_at,ver.created_at) AS ingest_time", "a.object_ldn",
 		).From("pm_hourly_bucket_versions ver").
 			Join("pm_hourly_anchors a ON a.bucket_version=ver.bucket_version").
 			Join("pm_metric_sets s ON s.metric_set_id=a.metric_set_id").
@@ -88,6 +101,20 @@ func newRawAwareExportSelect(
 	}
 	targeted = targeted.Where(sq.Eq{"d.metric_path": req.MetricPaths})
 	return storage.Psql.Select(columns...).FromSelect(targeted, table)
+}
+
+func prefixedExportColumns(prefix string, cols []string) []string {
+	out := make([]string, 0, len(cols))
+	for _, col := range cols {
+		out = append(out, prefix+"."+col)
+	}
+	return out
+}
+
+func appendExportColumn(cols []string, col string) []string {
+	out := make([]string, len(cols), len(cols)+1)
+	copy(out, cols)
+	return append(out, col)
 }
 
 // adhocSelectCols 是 adhoc 取数的扩展列序（含 product_id::text 与关联名），与 adhocSource 扫描一一对应。
@@ -227,10 +254,18 @@ func applyDeviceExportFilters(b sq.SelectBuilder, req aggregator.QueryRequest, o
 	if len(req.Technologies) > 0 {
 		// buildDeviceKeysetSQL 跑在 metricDB=TsPool（device 维度直查 pm_metrics/pm_metrics_hourly），
 		// devices 制式子查询改读本库影子表 device_dim（跨库分离）。
-		b = b.Where(
-			"(device_oui, device_sn) IN (SELECT oui, serial_number FROM device_dim WHERE technology = ANY(?))",
-			req.Technologies,
-		)
+		if len(req.DeviceSNs) > 0 && len(req.DeviceOUIs) == 0 {
+			b = b.Where(
+				"(device_oui, device_sn) IN (SELECT oui, serial_number FROM device_dim WHERE serial_number = ANY(?) AND technology = ANY(?))",
+				req.DeviceSNs,
+				req.Technologies,
+			)
+		} else {
+			b = b.Where(
+				"(device_oui, device_sn) IN (SELECT oui, serial_number FROM device_dim WHERE technology = ANY(?))",
+				req.Technologies,
+			)
+		}
 	}
 	return b
 }

@@ -1381,6 +1381,7 @@ const messages: Record<string, string> = {
   'device.type.eGW':        'Enterprise Gateway',
   'device.type.all':        'All Types',
   'device.connStatus':      'Connection Status',
+  'device.lastParamSyncAt': 'Last Sync Time',
   // T-0162: decoupled into two filter dropdowns
   'device.lifecycleState':  'Lifecycle',
   'device.isOnline':        'Connectivity',
@@ -3311,6 +3312,8 @@ const messages: Record<string, string> = {
   'device.periodicParamSync.saveSuccess': 'Scheduled auto sync settings saved',
   'device.periodicParamSync.running': 'Parameter sync in progress',
   'device.periodicParamSync.runningShort': 'Syncing',
+  'device.paramSync.syncedAgo': 'Synced {time}',
+  'device.paramSync.lastSyncedAt': 'Last synced: {time}',
 
   // -------------------------------------------------------------------------
   // EmptyState
@@ -7788,7 +7791,7 @@ const messages: Record<string, string> = {
   'perf.dashboard.emptyNoDataForCondition':'No data under the selected conditions',
   'perf.dashboard.clickQueryToStart':    'Select filters and click "Plot" to start',
   'perf.dashboard.deviceListSummary':    'Device list plot',
-  'perf.dashboard.truncatedTip':         'Results truncated: showing latest {shown} of {total} rows. Narrow the time range or reduce metrics.',
+  'perf.dashboard.truncatedTip':         'Results truncated: showing latest {shown} rows. Narrow the time range, reduce metrics, or use export.',
   'perf.dashboard.deviceUnit':           '{count} devices',
 
   // -------------------------------------------------------------------------

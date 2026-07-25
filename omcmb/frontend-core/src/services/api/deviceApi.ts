@@ -82,6 +82,7 @@ interface BackendDevice {
   name_sync_pending?: boolean;
   lmt_device_name?: string;
   param_sync_running?: boolean;
+  last_param_sync_at?: string;
 
   // Cell
   enb_id?: string;
@@ -559,6 +560,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
     nameSyncPending: bd.name_sync_pending ?? false,
     lmtDeviceName: bd.lmt_device_name || '',
     paramSyncRunning: bd.param_sync_running ?? false,
+    lastParamSyncAt: bd.last_param_sync_at,
 
     enbId: bd.enb_id || '',
     cellId: bd.cell_id || '',

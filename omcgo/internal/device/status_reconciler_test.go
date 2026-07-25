@@ -498,7 +498,7 @@ func TestNextScanInterval_ExplicitOverridesDynamic(t *testing.T) {
 // ---------------------------------------------------------------------------
 // issue #203：离线阈值 / limit 的 guard 默认值（DB-free 纯函数）
 //
-// 任务点：FindStaleDevicesByClass 的 guard 默认值须被尊重（enb<=0→100,
+// 任务点：FindStaleDevicesByClass 的 guard 默认值须被尊重（enb<=0→600,
 // cpe<=0→600, limit<=0→1000）。enb/cpe 的钳制在 resolveOfflineThresholds
 // （offline_threshold.go）这一纯函数里发生；limit 默认值由 reconciler 的
 // batchSize（默认 1000，SetBatchSize 拒非正数）经 FindStaleDevicesByClass 第三参

@@ -111,6 +111,18 @@ func TestSubstituteQueryInstanceSelectors(t *testing.T) {
 			want:      "Device.A.1.B.",
 		},
 		{
+			name:      "terminal object placeholder blank selector truncates to collection path",
+			path:      "Device.A.{i}.B.{i}",
+			selectors: map[string]string{"i01": "1", "i02": ""},
+			want:      "Device.A.1.B.",
+		},
+		{
+			name:      "terminal object placeholder concrete selector resolves instance",
+			path:      "Device.A.{i}.B.{i}",
+			selectors: map[string]string{"i01": "1", "i02": "2"},
+			want:      "Device.A.1.B.2",
+		},
+		{
 			name:      "missing trailing selector truncates at that layer",
 			path:      "Device.A.{i}.B.{i}.Value",
 			selectors: map[string]string{"i01": "3"},

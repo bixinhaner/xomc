@@ -43,6 +43,12 @@ func groupTableRow(gid uuid.UUID, tech, path, mtype string, val float64, statis,
 	return []any{gid, tech, path, mtype, val, statis, gran, t, t, t, t, []byte(nil)}
 }
 
+// deviceTableRow 是 queryDeviceTable SELECT 的一行：
+// device_oui, device_sn, path, type, value, statis, gran, time×4, object_ldn, extra([]byte)。
+func deviceTableRow(deviceOUI, deviceSN, path, mtype string, val float64, statis, gran string, t time.Time, objectLDN any) []any {
+	return []any{deviceOUI, deviceSN, path, mtype, val, statis, gran, t, t, t, t, objectLDN, []byte(nil)}
+}
+
 // directRollupRow 是 queryDirectRollupKPIs SELECT 的统一行：
 // device_oui, device_sn, group_id, technology, product_id, object_ldn, path, type, value, statis, gran, time×4。
 func directRollupRow(deviceOUI, deviceSN string, groupID any, tech string, productID any, objectLDN any, path, mtype string, val float64, statis, gran string, t time.Time) []any {
@@ -155,16 +161,13 @@ func Test_Query_DerivedAvgKPI_ProductAggregatesExistingKPIValues(t *testing.T) {
 	assert.NotContains(t, db.sqls[1], "numerator", "avg 派生 KPI 不应下推公式依赖 counter")
 }
 
-func Test_Query_DerivedAvgKPI_DeviceAggregatesExisting15MinKPIValues(t *testing.T) {
+func Test_Query_DerivedAvgKPI_DeviceReadsStoredRows(t *testing.T) {
 	now := time.Date(2026, 5, 30, 0, 0, 0, 0, time.UTC)
 	visibleGroup := uuid.New()
 	db := &recordingDB{
 		results: []pgx.Rows{
 			&fakeRows{rows: [][]any{
-				metaRow("KAVG001", "avg", "numerator/denominator"),
-			}},
-			&fakeRows{rows: [][]any{
-				directRollupRow("48BF74", "SN-1", nil, "", nil, "Cellid=1", "KAVG001", "kpi", 16.688172, "avg", "daily", now),
+				deviceTableRow("48BF74", "SN-1", "KAVG001", "kpi", 16.688172, "avg", "daily", now, "Cellid=1"),
 			}},
 			&fakeRows{},
 		},
@@ -194,25 +197,23 @@ func Test_Query_DerivedAvgKPI_DeviceAggregatesExisting15MinKPIValues(t *testing.
 	assert.InDelta(t, 16.688172, float64(rows[0].MetricValue), 1e-9)
 	require.NotNil(t, rows[0].StatisType)
 	assert.Equal(t, metrics.StatisAvg, *rows[0].StatisType)
-	assert.Contains(t, db.sqls[1], "FROM pm_metrics m", "device daily avg 应从 15 分钟 KPI 源表聚合")
-	assert.Contains(t, db.sqls[1], "m.granularity = '15min'", "device daily avg 不应依赖旧 daily KPI 行")
-	assert.Contains(t, db.sqls[1], "SELECT oui, serial_number FROM device_dim WHERE technology = ANY(", "device direct KPI 应保留制式过滤")
-	assert.Contains(t, db.sqls[1], "m.device_sn IN (SELECT serial_number FROM devices WHERE id IN (SELECT device_id FROM device_group_members WHERE group_id = ANY(", "device direct KPI 应保留可见分组过滤")
-	assert.Contains(t, db.argsLog[1], []string{"nr"})
-	assert.Contains(t, db.argsLog[1], []uuid.UUID{visibleGroup})
-	assert.NotContains(t, db.sqls[1], "pm_metrics_daily", "device direct KPI 不应读旧 daily 表")
-	assert.NotContains(t, db.sqls[1], "numerator", "avg 派生 KPI 不应下推公式依赖 counter")
+	require.Len(t, db.sqls, 2)
+	assert.Contains(t, db.sqls[0], "FROM pm_metrics_daily", "device daily KPI 应直接读已落库 daily 表")
+	assert.Contains(t, db.sqls[0], "SELECT oui, serial_number FROM device_dim WHERE serial_number = ANY(", "device direct KPI 应先收窄用户选中的设备")
+	assert.Contains(t, db.sqls[0], "AND technology = ANY(", "device direct KPI 应保留制式过滤")
+	assert.Contains(t, db.sqls[0], "device_sn IN (SELECT serial_number FROM devices WHERE id IN (SELECT device_id FROM device_group_members WHERE group_id IN (", "device direct KPI 应保留可见分组过滤")
+	assert.Contains(t, db.argsLog[0], []string{"SN-1"})
+	assert.Contains(t, db.argsLog[0], []string{"nr"})
+	assert.Contains(t, db.argsLog[0], visibleGroup)
+	assert.NotContains(t, db.sqls[0], "numerator", "device 维度不应下推公式依赖 counter")
 }
 
-func Test_Query_DerivedAvgKPI_DeviceInfersKPIPathWithoutMetricType(t *testing.T) {
+func Test_Query_DerivedAvgKPI_DeviceInfersKPIPathWithoutMetricTypeFromStoredRows(t *testing.T) {
 	now := time.Date(2026, 5, 30, 0, 0, 0, 0, time.UTC)
 	db := &recordingDB{
 		results: []pgx.Rows{
 			&fakeRows{rows: [][]any{
-				metaRow("KAVG001", "avg", "numerator/denominator"),
-			}},
-			&fakeRows{rows: [][]any{
-				directRollupRow("48BF74", "SN-1", nil, "", nil, "Cellid=1", "KAVG001", "kpi", 16.688172, "avg", "daily", now),
+				deviceTableRow("48BF74", "SN-1", "KAVG001", "kpi", 16.688172, "avg", "daily", now, "Cellid=1"),
 			}},
 			&fakeRows{},
 		},
@@ -230,23 +231,16 @@ func Test_Query_DerivedAvgKPI_DeviceInfersKPIPathWithoutMetricType(t *testing.T)
 	})
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	assert.Contains(t, db.sqls[1], "FROM pm_metrics m")
-	assert.Contains(t, db.sqls[1], "m.granularity = '15min'")
-	assert.NotContains(t, db.sqls[1], "pm_metrics_daily")
+	require.Len(t, db.sqls, 2)
+	assert.Contains(t, db.sqls[0], "FROM pm_metrics_daily")
+	assert.Contains(t, db.sqls[0], "metric_path =")
+	assert.NotContains(t, db.sqls[0], "FROM pm_metrics m")
 }
 
 func Test_Count_DerivedAvgKPI_DeviceCountsDirectRollupRows(t *testing.T) {
 	now := time.Date(2026, 5, 30, 0, 0, 0, 0, time.UTC)
 	db := &recordingDB{
-		results: []pgx.Rows{
-			&fakeRows{rows: [][]any{
-				metaRow("KAVG001", "avg", "numerator/denominator"),
-			}},
-			&fakeRows{rows: [][]any{
-				directRollupRow("48BF74", "SN-1", nil, "", nil, "Cellid=1", "KAVG001", "kpi", 16.688172, "avg", "daily", now),
-			}},
-			&fakeRows{},
-		},
+		rowResults: []int{1},
 	}
 	a := New(db, nil, nil)
 	mt := metrics.MetricTypeKPI
@@ -264,8 +258,9 @@ func Test_Count_DerivedAvgKPI_DeviceCountsDirectRollupRows(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, 1, n)
-	assert.Contains(t, db.sqls[1], "FROM pm_metrics m")
-	assert.NotContains(t, db.sqls[1], "pm_metrics_daily")
+	require.Len(t, db.sqls, 1)
+	assert.Contains(t, db.sqls[0], "FROM pm_metrics_daily")
+	assert.NotContains(t, db.sqls[0], "FROM pm_metrics m")
 }
 
 func Test_Query_DerivedAvgKPI_DeviceGroupAggregates15MinKPIValues(t *testing.T) {

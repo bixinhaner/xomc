@@ -37,6 +37,26 @@ type fakeConversationManager struct {
 	instance string
 }
 
+type deadlineTrackingWriter struct {
+	header   http.Header
+	deadline time.Time
+}
+
+func (w *deadlineTrackingWriter) Header() http.Header {
+	return w.header
+}
+
+func (w *deadlineTrackingWriter) Write(body []byte) (int, error) {
+	return len(body), nil
+}
+
+func (w *deadlineTrackingWriter) WriteHeader(int) {}
+
+func (w *deadlineTrackingWriter) SetWriteDeadline(deadline time.Time) error {
+	w.deadline = deadline
+	return nil
+}
+
 func (m fakeConversationManager) Active(context.Context, string, *admin.Claims) (string, error) {
 	return m.active, nil
 }
@@ -47,6 +67,16 @@ func (m fakeConversationManager) Rotate(context.Context, string, *admin.Claims) 
 
 func (m fakeConversationManager) InstanceID(context.Context) (string, error) {
 	return m.instance, nil
+}
+
+func TestClearAgentStreamWriteDeadline(t *testing.T) {
+	writer := &deadlineTrackingWriter{
+		header:   make(http.Header),
+		deadline: time.Now(),
+	}
+
+	require.NoError(t, clearAgentStreamWriteDeadline(writer))
+	require.True(t, writer.deadline.IsZero())
 }
 
 func TestChatStreamProxiesToAgentStudioWithDelegation(t *testing.T) {

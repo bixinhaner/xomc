@@ -21,6 +21,7 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
+	"github.com/omcgo/omcgo/internal/pm/metrics"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -280,6 +281,38 @@ func TestHandler_ListAggregatedMetrics_RejectsTooManyMetricPaths(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestTruncateAggregatedRows_NPlusOnePlainRows(t *testing.T) {
+	rows := []aggregator.Row{
+		{DeviceSN: "SN-1", MetricPath: "K1"},
+		{DeviceSN: "SN-1", MetricPath: "K2"},
+		{DeviceSN: "SN-1", MetricPath: "K3"},
+	}
+
+	got, truncated := truncateAggregatedRows(rows, 2, false)
+
+	require.True(t, truncated)
+	require.Len(t, got, 2)
+	assert.Equal(t, "K1", got[0].MetricPath)
+	assert.Equal(t, "K2", got[1].MetricPath)
+}
+
+func TestTruncateAggregatedRows_NPlusOnePivotRowsKeepsFullMetricSet(t *testing.T) {
+	t1 := time.Date(2026, 7, 24, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 7, 24, 9, 45, 0, 0, time.UTC)
+	ldn := "Cellid=1"
+	rows := []aggregator.Row{
+		{DeviceOUI: "48BF74", DeviceSN: "SN-1", ObjectLDN: &ldn, Granularity: metrics.Granularity15Min, Time: t1, MetricPath: "K1"},
+		{DeviceOUI: "48BF74", DeviceSN: "SN-1", ObjectLDN: &ldn, Granularity: metrics.Granularity15Min, Time: t1, MetricPath: "K2"},
+		{DeviceOUI: "48BF74", DeviceSN: "SN-1", ObjectLDN: &ldn, Granularity: metrics.Granularity15Min, Time: t2, MetricPath: "K1"},
+	}
+
+	got, truncated := truncateAggregatedRows(rows, 1, true)
+
+	require.True(t, truncated)
+	require.Len(t, got, 2)
+	assert.Equal(t, []string{"K1", "K2"}, []string{got[0].MetricPath, got[1].MetricPath})
 }
 
 func TestHandler_ListKPIValues(t *testing.T) {

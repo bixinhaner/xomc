@@ -162,19 +162,14 @@ func (a *Aggregator) Query(ctx context.Context, q QueryRequest) ([]Row, error) {
 	case DimensionNetwork:
 		rows, err = a.queryWithKPIRecompute(ctx, table, q, a.queryNetworkTable)
 	default:
-		// device 维度也要按 KPI statis_type 分流：pct 等公式类用 counter 聚合后重算，
-		// avg/sum/max/min 从 15min KPI 点直接聚合。否则旧 daily/hourly 表缺历史 KPI 行时，
-		// API 会返回空，且 avg 也无法表达"只平均已有 15 分钟点"。
+		// 设备维度的 KPI/counter 已在写入侧落库。页面直查时不能进入现场 KPI 重算路径，
+		// 否则会把用户选中的少量设备放大成重算大查询。
 		if q.StoreAllEnabled && len(q.MetricPaths) == 0 {
 			if enabled := a.resolveEnabledIndicators(ctx, q.Technologies); len(enabled) > 0 {
 				q.MetricPaths = enabled
 			}
 		}
-		if usesKPIQueryPath(q) {
-			rows, err = a.queryWithKPIRecompute(ctx, table, q, a.queryDeviceTable)
-		} else {
-			rows, err = a.queryDeviceTable(ctx, table, q)
-		}
+		rows, err = a.queryDeviceTable(ctx, table, q)
 	}
 	if err != nil {
 		return nil, err
@@ -204,7 +199,7 @@ func (a *Aggregator) Count(ctx context.Context, q QueryRequest) (int, error) {
 	// Count 不分页：清掉 Limit/Offset，避免被带进子查询。
 	q.Limit = 0
 	q.Offset = 0
-	if usesKPIQueryPath(q) {
+	if q.Dimension != DimensionDevice && usesKPIQueryPath(q) {
 		return a.countByQueryResult(ctx, q)
 	}
 
@@ -1288,6 +1283,18 @@ func joinOr(conds []string) string {
 // ── 过滤条件 ───────────────────────────────────────────────────────────────
 
 func applyDeviceFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
+	if len(q.DeviceSNs) > 0 && len(q.Technologies) > 0 {
+		if len(q.DeviceOUIs) > 0 {
+			qb = qb.Where(sq.Eq{"device_oui": q.DeviceOUIs})
+		}
+		qb = qb.Where(
+			"(device_oui, device_sn) IN (SELECT oui, serial_number FROM device_dim WHERE serial_number = ANY(?) AND technology = ANY(?))",
+			q.DeviceSNs,
+			q.Technologies,
+		)
+		q.Technologies = nil
+		return applyCommonFilters(qb, q)
+	}
 	if len(q.DeviceOUIs) > 0 && len(q.DeviceSNs) > 0 {
 		n := len(q.DeviceOUIs)
 		if len(q.DeviceSNs) < n {
@@ -1332,7 +1339,28 @@ func applyGroupFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
 // device_group 走直接列筛）。
 func applyScalarFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
 	if len(q.MetricPaths) > 0 {
-		qb = qb.Where(sq.Eq{"metric_path": q.MetricPaths})
+		if q.MetricType == nil {
+			or := sq.Or{}
+			for _, raw := range q.MetricPaths {
+				path := strings.TrimSpace(raw)
+				if path == "" {
+					continue
+				}
+				if mt, ok := metricTypeFromIndicatorPath(path); ok {
+					or = append(or, sq.And{
+						sq.Eq{"metric_path": path},
+						sq.Eq{"metric_type": string(mt)},
+					})
+				} else {
+					or = append(or, sq.Eq{"metric_path": path})
+				}
+			}
+			if len(or) > 0 {
+				qb = qb.Where(or)
+			}
+		} else {
+			qb = qb.Where(sq.Eq{"metric_path": q.MetricPaths})
+		}
 	}
 	if q.MetricType != nil {
 		qb = qb.Where(sq.Eq{"metric_type": string(*q.MetricType)})
@@ -1360,6 +1388,17 @@ func applyScalarFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
 		qb = qb.Where(sq.Eq{"object_ldn": q.ObjectLDNs})
 	}
 	return qb
+}
+
+func metricTypeFromIndicatorPath(path string) (metrics.MetricType, bool) {
+	switch {
+	case strings.HasPrefix(strings.ToUpper(strings.TrimSpace(path)), "K"):
+		return metrics.MetricTypeKPI, true
+	case strings.HasPrefix(strings.ToUpper(strings.TrimSpace(path)), "C"):
+		return metrics.MetricTypeCounter, true
+	default:
+		return "", false
+	}
 }
 
 // applyCommonFilters 设备维度表（device / aggregate_group / network）公共过滤：标量过滤 +

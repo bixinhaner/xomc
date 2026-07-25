@@ -300,8 +300,15 @@ VALUES ($1, $2, $3, $4, 'manual', 'full', 'waiting_device', 1, 1, 0, 0)`,
 func TestRecoverMissingResultsWithPGProcessorFinalizesSucceededRun(t *testing.T) {
 	pool := newParamSyncTestPool(t)
 	req := insertParamSyncRequestForTest(t, pool, RequestStatusRunning)
+	insertReleaseCandidateForTest(t, pool, req.DeviceID, true)
+	oldSyncAt := time.Now().UTC().Add(-6 * time.Hour)
+	_, err := pool.Exec(context.Background(), `
+UPDATE devices
+SET last_param_sync_at=$2, last_param_sync_failed_at=$3, last_param_sync_error='previous failure'
+WHERE id=$1`, req.DeviceID, oldSyncAt, oldSyncAt.Add(time.Hour))
+	require.NoError(t, err)
 	runID := uuid.New()
-	_, err := pool.Exec(context.Background(), `INSERT INTO parameter_sync_runs
+	_, err = pool.Exec(context.Background(), `INSERT INTO parameter_sync_runs
 (id, request_id, device_id, device_sn, trigger_reason, sync_scope, status,
  expected_task_count, terminal_task_count, processed_task_count, failed_task_count)
 VALUES ($1, $2, $3, $4, 'manual', 'partial', 'waiting_device', 1, 1, 0, 0)`,
@@ -345,6 +352,15 @@ FROM parameter_sync_runs WHERE id=$1`, runID).Scan(&runStatus, &expected, &termi
 	require.NoError(t, err)
 	assert.Equal(t, RequestStatusSucceeded, stored.Status)
 	assert.Nil(t, stored.ActiveRunID)
+	var lastParamSyncAt time.Time
+	var failedAt *time.Time
+	var syncErr *string
+	require.NoError(t, pool.QueryRow(context.Background(), `
+SELECT last_param_sync_at, last_param_sync_failed_at, last_param_sync_error
+FROM devices WHERE id=$1`, req.DeviceID).Scan(&lastParamSyncAt, &failedAt, &syncErr))
+	assert.True(t, lastParamSyncAt.After(oldSyncAt), "partial sync success must refresh devices.last_param_sync_at")
+	assert.Nil(t, failedAt)
+	assert.Nil(t, syncErr)
 }
 
 func TestRecoverMissingResultsWithPGProcessorFinalizesFailedRun(t *testing.T) {

@@ -1383,6 +1383,7 @@ const messages: Record<string, string> = {
   'device.type.eGW':        '企业网关',
   'device.type.all':        '全部',
   'device.connStatus':      '连接状态',
+  'device.lastParamSyncAt': '上次同步时间',
   // T-0162: 解耦后的两个新筛选项
   'device.lifecycleState':  '生命周期',
   'device.isOnline':        '在线状态',
@@ -3325,6 +3326,8 @@ const messages: Record<string, string> = {
   'device.periodicParamSync.saveSuccess': '定时自动同步设置已保存',
   'device.periodicParamSync.running': '参数同步中',
   'device.periodicParamSync.runningShort': '同步中',
+  'device.paramSync.syncedAgo': '{time}同步',
+  'device.paramSync.lastSyncedAt': '上次同步：{time}',
 
   // -------------------------------------------------------------------------
   // EmptyState
@@ -7823,7 +7826,7 @@ const messages: Record<string, string> = {
   'perf.dashboard.emptyNoDataForCondition':'所选条件下暂无数据',
   'perf.dashboard.clickQueryToStart':    '请选择筛选条件后点击「出图」',
   'perf.dashboard.deviceListSummary':    '设备列表出图',
-  'perf.dashboard.truncatedTip':         '结果已截断：仅显示最新 {shown} / 共 {total} 行，请缩小时间范围或减少指标数',
+  'perf.dashboard.truncatedTip':         '结果已截断：仅显示最新 {shown} 行，请缩小时间范围、减少指标数或使用导出',
   'perf.dashboard.deviceUnit':           '{count} 设备',
 
   // -------------------------------------------------------------------------

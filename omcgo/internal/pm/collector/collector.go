@@ -126,6 +126,15 @@ type CounterWhitelist interface {
 	LookupCounters(ctx context.Context, deviceSN string) (map[string]CounterMeta, error)
 }
 
+// EnabledIndicatorLookup 读取当前制式下已启用的指标编号集。
+//
+// 真实实现必须走主库控制面元数据（enabled_pm_indicators_<tech>），不能走时序库。
+// 查询失败时返回 error，collector 会让当前文件处理失败并进入既有 retry/DLQ；这样比
+// fail-open 写入禁用指标或 fail-closed 静默丢光指标更保守、可观测。
+type EnabledIndicatorLookup interface {
+	LookupEnabledIndicators(ctx context.Context, technology string) (map[string]struct{}, error)
+}
+
 // CopyIngestor 是 copy-direct 写路径（copy 模式）的最小接口：把一个 PM 文件的全部 metric 行
 // （counter + KPI）与 pm_files 幂等标记在单事务里 plain COPY 原子入库（去掉每行自然键 UPSERT
 // 的写 CPU 大头，幂等下沉到每文件一次 pm_files 唯一约束）。由 metrics.PgRepository 实现
@@ -154,6 +163,7 @@ type PMCollector struct {
 	deviceLookup        DeviceLookup
 	fileMarkerLookup    FileMarkerLookup
 	counterWhitelist    CounterWhitelist
+	enabledIndicators   EnabledIndicatorLookup
 	numberProcessLookup NumberProcessLookup
 	copyIngestor        CopyIngestor
 	archiver            *rawarchive.Archiver
@@ -210,6 +220,12 @@ func (c *PMCollector) SetFileMarkerLookup(lookup FileMarkerLookup) {
 // counter。Nil-safe — 未设置时 collector 不过滤，行为退化到注入前。
 func (c *PMCollector) SetCounterWhitelist(w CounterWhitelist) {
 	c.counterWhitelist = w
+}
+
+// SetEnabledIndicatorLookup wires the enabled-indicator filter for 15min raw ingest.
+// Nil-safe — unset keeps the pre-#171 behavior and is used by narrow unit tests.
+func (c *PMCollector) SetEnabledIndicatorLookup(lookup EnabledIndicatorLookup) {
+	c.enabledIndicators = lookup
 }
 
 // SetNumberProcessLookup 注入 indicator.process.number 读取函数，供 15min 入库前结果值规范化使用。
@@ -458,10 +474,40 @@ func (c *PMCollector) ingestViaCopy(
 			kpis = ks
 		}
 	}
+	var enabledAllow map[string]CounterMeta
+	if c.enabledIndicators != nil {
+		enabled, err := c.enabledIndicators.LookupEnabledIndicators(ctx, payload.Technology)
+		if err != nil {
+			c.logger.Warn("enabled PM indicator lookup failed",
+				zap.String("device_sn", payload.DeviceSN),
+				zap.String("carrier", payload.Carrier),
+				zap.String("technology", payload.Technology),
+				zap.Error(err))
+			return fmt.Errorf("lookup enabled PM indicators: %w", err)
+		}
+		beforeCounters, beforeKPIs := len(content.Counters), len(kpis)
+		content.Counters = filterCountersByEnabled(content.Counters, enabled)
+		kpis = filterKPIsByEnabled(kpis, enabled)
+		enabledAllow = filterAllowByEnabled(allow, enabled)
+		if droppedCounters, droppedKPIs := beforeCounters-len(content.Counters), beforeKPIs-len(kpis); droppedCounters > 0 || droppedKPIs > 0 {
+			if c.metrics != nil && droppedCounters > 0 {
+				c.metrics.DroppedCountersTotal.WithLabelValues(payload.Carrier, payload.Technology, "disabled").Add(float64(droppedCounters))
+			}
+			c.logger.Info("filtered disabled PM indicators before 15min ingest",
+				zap.String("device_sn", payload.DeviceSN),
+				zap.String("carrier", payload.Carrier),
+				zap.String("technology", payload.Technology),
+				zap.Int("enabled_size", len(enabled)),
+				zap.Int("dropped_counters", droppedCounters),
+				zap.Int("dropped_kpis", droppedKPIs))
+		}
+	} else {
+		enabledAllow = allow
+	}
 	if err := c.normalizeResults(ctx, content.Counters, kpis); err != nil {
 		return err
 	}
-	content.Counters = fillMissingSupportedCounters(content.Counters, allow)
+	content.Counters = fillMissingSupportedCounters(content.Counters, enabledAllow)
 
 	marker := metrics.FileMarker{
 		DeviceID:      deviceID,
@@ -524,6 +570,51 @@ func (c *PMCollector) ingestViaCopy(
 		_ = c.eventBus.Publish(ctx, event.SubjectPMFileParsed, parsedEvt)
 	}
 	return nil
+}
+
+func filterCountersByEnabled(counters []model.PMCounter, enabled map[string]struct{}) []model.PMCounter {
+	if len(counters) == 0 {
+		return counters
+	}
+	if len(enabled) == 0 {
+		return counters[:0]
+	}
+	out := counters[:0]
+	for _, ctr := range counters {
+		if _, ok := enabled[ctr.CounterName]; ok {
+			out = append(out, ctr)
+		}
+	}
+	return out
+}
+
+func filterKPIsByEnabled(kpis []model.KPIValue, enabled map[string]struct{}) []model.KPIValue {
+	if len(kpis) == 0 {
+		return kpis
+	}
+	if len(enabled) == 0 {
+		return kpis[:0]
+	}
+	out := kpis[:0]
+	for _, k := range kpis {
+		if _, ok := enabled[k.IndicatorID]; ok {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+func filterAllowByEnabled(allow map[string]CounterMeta, enabled map[string]struct{}) map[string]CounterMeta {
+	if len(allow) == 0 || len(enabled) == 0 {
+		return nil
+	}
+	out := make(map[string]CounterMeta, len(allow))
+	for reportKey, meta := range allow {
+		if _, ok := enabled[meta.IndicatorID]; ok {
+			out[reportKey] = meta
+		}
+	}
+	return out
 }
 
 // resolveDevice fills in DeviceID / DeviceOUI / Carrier / Technology on the

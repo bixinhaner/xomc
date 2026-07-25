@@ -24,6 +24,18 @@ import (
 //     与 sub_field.is_supported 取值无关
 // ============================================================
 
+func TestGroupTreeCommandJSONIncludesTargetPaths(t *testing.T) {
+	cmd := GroupTreeCommand{CommandCode: "LST_DEVICE_INFO"}
+	cmd.SetTargetPathsRaw([]byte(`["Device.Info.Serial","Device.Info.Name"]`))
+
+	payload, err := json.Marshal(cmd)
+	require.NoError(t, err)
+
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(payload, &decoded))
+	assert.Equal(t, []any{"Device.Info.Serial", "Device.Info.Name"}, decoded["target_paths"])
+}
+
 // Test_BuildTree_SQLNoSubFieldIsSupportedSubquery 源码守门：T-0176-PR-C 删了
 // "SELECT jsonb_agg ... WHERE csf.is_supported = true" 子查询，命令树 SQL 不再
 // 二次读 sub_field.is_supported 决定 target_paths。trigger refresh_mml_command_target_paths

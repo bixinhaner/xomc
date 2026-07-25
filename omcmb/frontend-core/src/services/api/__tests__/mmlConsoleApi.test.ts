@@ -25,6 +25,32 @@ describe('mmlApi console product filtering', () => {
     });
   });
 
+  it('maps command target paths for command-tree search', async () => {
+    getMock.mockResolvedValue({ data: { tree: [{
+      id: 'group-1',
+      code: 'DEVICE',
+      path: 'DEVICE',
+      name: 'Device',
+      commands: [{
+        id: 'command-1',
+        command_code: 'LST_DEVICE_INFO',
+        logical_code: 'DEVICE_INFO',
+        operation_type: 'LST',
+        display_name: 'Device Info',
+        require_confirm: false,
+        target_paths: ['Device.Info.Serial', 'Device.Info.Name'],
+      }],
+      children: [],
+    }] } });
+
+    const result = await mmlApi.buildGroupTree();
+
+    expect(result[0].commands[0].targetPaths).toEqual([
+      'Device.Info.Serial',
+      'Device.Info.Name',
+    ]);
+  });
+
   it('passes the selected device to the command sub-fields request', async () => {
     getMock.mockResolvedValue({ data: { sub_fields: [] } });
 

@@ -812,6 +812,7 @@ func deviceWithInfoSelectColumns() []string {
 		"dlo.version AS reported_version", "dlo.source_path AS reported_source_path",
 		"d.extension_data", "d.created_at", "d.updated_at", "d.deleted_at", "d.deleted_by",
 		"d.recycle_type", "d.recycle_executor",
+		"d.last_param_sync_at",
 		"d.last_offline_reason", // T-0173: 离线原因诊断（migration 000184)
 		// device_groups columns
 		"dg.id as group_id",
@@ -1091,6 +1092,7 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		&reportedVersion, &reportedSourcePath,
 		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
 		&recycleType, &recycleExecutor,
+		&d.LastParamSyncAt,
 		&d.LastOfflineReason, // T-0173: 离线原因（migration 000184)
 		// device_groups field (nullable from LEFT JOIN)
 		&d.GroupID,

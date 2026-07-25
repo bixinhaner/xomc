@@ -222,6 +222,21 @@ describe('deviceApi.getList — filter → query 映射', () => {
     expect(out.items[0].sourceType).toBe('auto');
   });
 
+  it('映射最近一次参数同步完成时间，供设备列表展示周期同步结果', async () => {
+    getMock.mockResolvedValue({
+      data: {
+        items: [backendDevice({ last_param_sync_at: '2026-07-24T07:30:00Z' })],
+        total: 1,
+        page: 1,
+        page_size: 20,
+        total_pages: 1,
+      },
+    });
+
+    const out = await deviceApi.getList({ page: 1, pageSize: 20 });
+    expect(out.items[0].lastParamSyncAt).toBe('2026-07-24T07:30:00Z');
+  });
+
   it('列表接口返回 device_address 时也能映射成 installAddress', async () => {
     getMock.mockResolvedValue({
       data: {

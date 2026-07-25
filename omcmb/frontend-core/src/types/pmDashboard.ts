@@ -25,12 +25,15 @@ export interface AggregatedQueryParams {
   deviceGroupId?: string;
   metricPaths?: string[];
   metricType?: 'counter' | 'kpi';
+  technology?: string;
+  technologies?: string[];
   // ISO RFC3339 字符串。
   startTime?: string;
   endTime?: string;
   limit?: number;
   offset?: number;
   pageBy?: 'pivot_row';
+  countMode?: 'n_plus_one';
   // 后端按 (时间桶 × 指标) 补齐占位行（filled=true，metric_value 前端 mapper 设 null）。
   // 适用 device 维度单设备查询；未启用时后端不补行。
   fillEmpty?: boolean;
@@ -79,12 +82,14 @@ export interface AggregatedQueryMeta {
 export interface AggregatedQueryResult {
   rows: AggregatedRow[];
   total: number;
+  truncated: boolean;
   meta?: AggregatedQueryMeta;
 }
 
 export interface BackendAggregatedResponse {
   items: BackendAggregatedRow[] | null;
   total: number;
+  truncated?: boolean;
   requested_start_time?: string;
   requested_end_time?: string;
   actual_start_time?: string | null;
