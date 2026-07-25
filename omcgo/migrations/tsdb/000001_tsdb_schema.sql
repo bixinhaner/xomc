@@ -169,9 +169,9 @@ CREATE TABLE public.pm_metrics (
 CREATE INDEX idx_pm_metrics_device_time ON public.pm_metrics USING btree (device_oui, device_sn, "time" DESC);
 CREATE INDEX idx_pm_metrics_path_time ON public.pm_metrics USING btree (metric_path, "time" DESC);
 CREATE INDEX pm_metrics_time_idx ON public.pm_metrics USING btree ("time" DESC);
--- Issue #170：设备性能查看默认 15min + LTE 内置 14 指标场景。
--- 78 上验证过的 chunk 级索引方向有效；baseline 建在 hypertable 上，由 TimescaleDB 下发到相关 chunk。
-CREATE INDEX idx_pm_metrics_issue170_15min_device_metric_time ON public.pm_metrics USING btree (
+-- 设备性能查看默认 15min + 内置 14 指标查询场景。
+-- 面向按设备、指标和时间范围出图的部分索引；baseline 建在 hypertable 上，由 TimescaleDB 下发到相关 chunk。
+CREATE INDEX idx_pm_metrics_15min_device_metric_time_default ON public.pm_metrics USING btree (
     device_oui,
     device_sn,
     metric_path,
