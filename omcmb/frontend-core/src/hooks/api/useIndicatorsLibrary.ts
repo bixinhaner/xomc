@@ -33,17 +33,21 @@ export function useIndicatorList(deviceType: DeviceType, filter?: IndicatorListF
  * 供首页面板「编号 → 中文名/单位」元数据反查。复用 api.list，不动后端分页上限。
  */
 const ALL_INDICATORS_PAGE_SIZE = 1000; // 后端分页契约上限（model/pagination.go），按此循环翻页取全
-export function useAllIndicators(deviceType: DeviceType, options?: { enabled?: boolean }) {
+export function useAllIndicators(
+  deviceType: DeviceType,
+  options?: { enabled?: boolean; isEnabled?: boolean },
+) {
   return useQuery({
-    queryKey: [...IL_KEY, 'all', deviceType],
+    queryKey: [...IL_KEY, 'all', deviceType, { isEnabled: options?.isEnabled }],
     queryFn: async () => {
-      const first = await api.list(deviceType, { page: 1, pageSize: ALL_INDICATORS_PAGE_SIZE });
+      const baseFilter = { isEnabled: options?.isEnabled };
+      const first = await api.list(deviceType, { ...baseFilter, page: 1, pageSize: ALL_INDICATORS_PAGE_SIZE });
       const items = [...first.items];
       const total = first.total;
       let page = 2;
       // 防御上限：最多 100 页（远超任何单制式库规模），避免异常下死循环。
       while (items.length < total && page <= 100) {
-        const next = await api.list(deviceType, { page, pageSize: ALL_INDICATORS_PAGE_SIZE });
+        const next = await api.list(deviceType, { ...baseFilter, page, pageSize: ALL_INDICATORS_PAGE_SIZE });
         if (!next.items.length) break; // 空页防御
         items.push(...next.items);
         page += 1;

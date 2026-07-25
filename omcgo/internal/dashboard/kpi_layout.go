@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/storage"
+	"github.com/omcgo/omcgo/internal/pm/indicator"
 )
 
 // kpi_layout.go —— Dashboard 首页 KPI 折线图区全局布局存储（issue #213 S1）。
@@ -30,9 +33,38 @@ const (
 // ErrInvalidTech 表示传入了非 lte/nr/gsm 的制式。
 var ErrInvalidTech = errors.New("invalid technology (must be lte / nr / gsm)")
 
+// ErrDisabledKPILayoutMetric 表示首页 KPI 布局引用了当前未启用的指标。
+var ErrDisabledKPILayoutMetric = fmt.Errorf("%w: dashboard KPI layout contains disabled indicators", commonerrors.ErrInvalidInput)
+
 // isValidTech 校验制式取值。
 func isValidTech(tech string) bool {
 	return tech == techLTE || tech == techNR || tech == techGSM
+}
+
+func deviceTypeForTech(tech string) (indicator.DeviceType, error) {
+	switch tech {
+	case techLTE:
+		return indicator.DeviceTypeENB, nil
+	case techNR:
+		return indicator.DeviceTypeGNB, nil
+	case techGSM:
+		return indicator.DeviceTypeGSM, nil
+	default:
+		return "", ErrInvalidTech
+	}
+}
+
+func techForDeviceType(dt indicator.DeviceType) (string, error) {
+	switch dt {
+	case indicator.DeviceTypeENB:
+		return techLTE, nil
+	case indicator.DeviceTypeGNB:
+		return techNR, nil
+	case indicator.DeviceTypeGSM:
+		return techGSM, nil
+	default:
+		return "", fmt.Errorf("unsupported dashboard KPI layout device type: %q", dt)
+	}
 }
 
 // KPILayout 是单个制式的全局首页布局（dashboard_kpi_layouts 一行）。
@@ -72,6 +104,63 @@ type pgKPILayoutRepository struct {
 // NewKPILayoutRepository 构造主库实现。pool 走主库（dashboard_kpi_layouts 在主库）。
 func NewKPILayoutRepository(pool layoutQuerier) KPILayoutRepository {
 	return &pgKPILayoutRepository{pool: pool}
+}
+
+type KPILayoutReferenceChecker struct {
+	repo KPILayoutRepository
+}
+
+func NewKPILayoutReferenceChecker(pool layoutQuerier) *KPILayoutReferenceChecker {
+	if pool == nil {
+		return nil
+	}
+	return &KPILayoutReferenceChecker{repo: NewKPILayoutRepository(pool)}
+}
+
+func NewKPILayoutReferenceCheckerFromRepository(repo KPILayoutRepository) *KPILayoutReferenceChecker {
+	if repo == nil {
+		return nil
+	}
+	return &KPILayoutReferenceChecker{repo: repo}
+}
+
+func (c *KPILayoutReferenceChecker) ReferencedIndicators(ctx context.Context, dt indicator.DeviceType, indicatorIDs []string) ([]string, error) {
+	if c == nil || c.repo == nil || len(indicatorIDs) == 0 {
+		return nil, nil
+	}
+	tech, err := techForDeviceType(dt)
+	if err != nil {
+		return nil, err
+	}
+	layout, err := c.repo.GetByTech(ctx, tech)
+	if err != nil {
+		return nil, fmt.Errorf("query dashboard KPI layout references: %w", err)
+	}
+	if layout == nil {
+		layout = defaultKPILayout(tech)
+	}
+	metrics, err := extractKPILayoutMetrics(layout.Layout)
+	if err != nil {
+		return nil, err
+	}
+	targets := make(map[string]struct{}, len(indicatorIDs))
+	for _, id := range indicatorIDs {
+		if id != "" {
+			targets[id] = struct{}{}
+		}
+	}
+	referenced := map[string]struct{}{}
+	for _, metric := range metrics {
+		if _, ok := targets[metric]; ok {
+			referenced[metric] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(referenced))
+	for id := range referenced {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 // GetByTech 读单制式布局；无行返回 (nil, nil)。
@@ -154,5 +243,71 @@ func (s *Service) SaveKPILayout(ctx context.Context, tech string, layout json.Ra
 	if !json.Valid(layout) {
 		return nil, fmt.Errorf("layout is not valid JSON")
 	}
+	if err := s.validateKPILayoutEnabledMetrics(ctx, tech, layout); err != nil {
+		return nil, err
+	}
 	return s.layoutRepo.Upsert(ctx, tech, layout, updatedBy)
+}
+
+type kpiLayoutPayload struct {
+	Panels []struct {
+		Metrics []string `json:"metrics"`
+	} `json:"panels"`
+}
+
+func (s *Service) validateKPILayoutEnabledMetrics(ctx context.Context, tech string, layout json.RawMessage) error {
+	if s.enabledIndicatorRepo == nil {
+		return nil
+	}
+	dt, err := deviceTypeForTech(tech)
+	if err != nil {
+		return err
+	}
+	metrics, err := extractKPILayoutMetrics(layout)
+	if err != nil {
+		return err
+	}
+	if len(metrics) == 0 {
+		return nil
+	}
+	enabledIDs, err := s.enabledIndicatorRepo.List(ctx, dt, "default")
+	if err != nil {
+		return fmt.Errorf("list enabled dashboard KPI indicators: %w", err)
+	}
+	enabled := make(map[string]struct{}, len(enabledIDs))
+	for _, id := range enabledIDs {
+		enabled[id] = struct{}{}
+	}
+	var disabled []string
+	for _, id := range metrics {
+		if _, ok := enabled[id]; !ok {
+			disabled = append(disabled, id)
+		}
+	}
+	if len(disabled) > 0 {
+		return fmt.Errorf("%w: %v", ErrDisabledKPILayoutMetric, disabled)
+	}
+	return nil
+}
+
+func extractKPILayoutMetrics(layout json.RawMessage) ([]string, error) {
+	var payload kpiLayoutPayload
+	if err := json.Unmarshal(layout, &payload); err != nil {
+		return nil, fmt.Errorf("parse dashboard KPI layout: %w", err)
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0)
+	for _, panel := range payload.Panels {
+		for _, metric := range panel.Metrics {
+			if metric == "" {
+				continue
+			}
+			if _, ok := seen[metric]; ok {
+				continue
+			}
+			seen[metric] = struct{}{}
+			out = append(out, metric)
+		}
+	}
+	return out, nil
 }

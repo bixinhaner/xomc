@@ -363,7 +363,7 @@ func (h *Handler) SaveKPILayout(c *gin.Context) {
 			commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 			return
 		}
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 	response.OK(c, layout)

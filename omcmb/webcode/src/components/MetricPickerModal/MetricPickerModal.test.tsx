@@ -9,9 +9,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { App } from 'antd';
 
-// 捕获 useIndicatorList 收到的 deviceType。
-const { useIndicatorListSpy, indicatorListData, allIndicatorsData } = vi.hoisted(() => ({
+// 捕获 useIndicatorList / useAllIndicators 收到的参数。
+const { useIndicatorListSpy, useAllIndicatorsSpy, indicatorListData, allIndicatorsData } = vi.hoisted(() => ({
   useIndicatorListSpy: vi.fn(),
+  useAllIndicatorsSpy: vi.fn(),
   indicatorListData: { items: [] as unknown[], total: 0 },
   allIndicatorsData: { items: [] as unknown[], total: 0 },
 }));
@@ -26,7 +27,10 @@ vi.mock('@core/hooks/api/useIndicatorsLibrary', () => {
       useIndicatorListSpy(deviceType, params);
       return STABLE;
     },
-    useAllIndicators: () => ALL_STABLE,
+    useAllIndicators: (deviceType: unknown, options: unknown) => {
+      useAllIndicatorsSpy(deviceType, options);
+      return ALL_STABLE;
+    },
   };
 });
 
@@ -52,6 +56,7 @@ function renderModal(props: Partial<React.ComponentProps<typeof MetricPickerModa
 describe('MetricPickerModal 制式锁定', () => {
   beforeEach(() => {
     useIndicatorListSpy.mockClear();
+    useAllIndicatorsSpy.mockClear();
     indicatorListData.items = [];
     indicatorListData.total = 0;
     allIndicatorsData.items = [];
@@ -94,6 +99,7 @@ describe('MetricPickerModal 制式锁定', () => {
 describe('MetricPickerModal 已选回显', () => {
   beforeEach(() => {
     useIndicatorListSpy.mockClear();
+    useAllIndicatorsSpy.mockClear();
     indicatorListData.items = [];
     indicatorListData.total = 0;
     allIndicatorsData.items = [];
@@ -132,6 +138,7 @@ describe('MetricPickerModal 已选回显', () => {
 describe('MetricPickerModal 搜索状态', () => {
   beforeEach(() => {
     useIndicatorListSpy.mockClear();
+    useAllIndicatorsSpy.mockClear();
     indicatorListData.items = [];
     indicatorListData.total = 0;
     allIndicatorsData.items = [];
@@ -171,6 +178,7 @@ describe('MetricPickerModal 搜索状态', () => {
 describe('MetricPickerModal 选择数量限制', () => {
   beforeEach(() => {
     useIndicatorListSpy.mockClear();
+    useAllIndicatorsSpy.mockClear();
     indicatorListData.items = [];
     indicatorListData.total = 0;
     allIndicatorsData.items = [];
@@ -212,6 +220,7 @@ describe('MetricPickerModal 选择数量限制', () => {
 describe('MetricPickerModal 批量输入指标 ID', () => {
   beforeEach(() => {
     useIndicatorListSpy.mockClear();
+    useAllIndicatorsSpy.mockClear();
     indicatorListData.items = [];
     indicatorListData.total = 0;
     allIndicatorsData.items = [
@@ -241,6 +250,18 @@ describe('MetricPickerModal 批量输入指标 ID', () => {
     expect(screen.queryByRole('button', { name: /批量输入/ })).toBeNull();
   });
 
+  it('enabled-only 模式下列表和批量候选都只请求已启用指标', () => {
+    renderModal({ enableBatchInput: true, onlyEnabledIndicators: true });
+
+    expect(useIndicatorListSpy.mock.calls.at(-1)?.[1]).toMatchObject({
+      isEnabled: true,
+    });
+    expect(useAllIndicatorsSpy.mock.calls.at(-1)?.[1]).toMatchObject({
+      enabled: true,
+      isEnabled: true,
+    });
+  });
+
   it('只把全量真实指标库里存在的 ID 加入已选，并忽略不存在 ID', async () => {
     const onConfirm = vi.fn();
     renderModal({ initialSelected: ['EXISTING'], onConfirm, enableBatchInput: true });
@@ -260,6 +281,50 @@ describe('MetricPickerModal 批量输入指标 ID', () => {
         C000060011: 'RRC请求次数',
       }),
     );
+  });
+
+  it('enabled-only 模式下，批量输入只允许加入已启用候选里的 ID', async () => {
+    const onConfirm = vi.fn();
+    allIndicatorsData.items = [
+      {
+        id: 'K900010002',
+        name: 'availability',
+        cnName: '可用率',
+        enName: 'Availability',
+        isCounter: false,
+        deviceType: 'ENB',
+      },
+    ];
+    allIndicatorsData.total = 1;
+
+    renderModal({ onConfirm, enableBatchInput: true, onlyEnabledIndicators: true });
+
+    fireEvent.click(screen.getByRole('button', { name: /批量输入/ }));
+    const input = await screen.findByPlaceholderText(/K000000001/);
+    fireEvent.change(input, {
+      target: { value: 'K900010002 C000060011' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /加入已选/ }));
+    fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
+
+    expect(onConfirm).toHaveBeenCalledWith(
+      ['K900010002'],
+      expect.objectContaining({ K900010002: '可用率' }),
+    );
+  });
+
+  it('enabled-only 模式下，已有不可选指标不会被确认提交', () => {
+    const onConfirm = vi.fn();
+    renderModal({
+      initialSelected: ['DISABLED_METRIC'],
+      enableBatchInput: true,
+      onlyEnabledIndicators: true,
+      onConfirm,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
+
+    expect(onConfirm).not.toHaveBeenCalled();
   });
 
   it('全部 ID 不存在时不改变原已选', async () => {
@@ -296,6 +361,7 @@ describe('MetricPickerModal 批量输入指标 ID', () => {
 describe('MetricPickerModal 指标级别列', () => {
   beforeEach(() => {
     useIndicatorListSpy.mockClear();
+    useAllIndicatorsSpy.mockClear();
     indicatorListData.items = [
       {
         id: 'K-BOTH',

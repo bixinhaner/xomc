@@ -235,6 +235,7 @@ export default function PmAdhocWizard() {
   const deviceType = TECH_TO_DEVICE_TYPE[technology];
   const { data: candidates, isLoading: indicatorsLoading } = useIndicatorCandidates(deviceType, {
     includeCounters: true,
+    enabledOnly: true,
   });
   const indicatorItems = useMemo<IndicatorCandidate[]>(() => candidates ?? [], [candidates]);
   // 完整 lookup（id → 候选项），用于已选侧渲染与确认页指标名解析——不受类型筛选影响（D5）。

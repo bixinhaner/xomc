@@ -5,18 +5,48 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { postMock } = vi.hoisted(() => ({
+const { getMock, postMock } = vi.hoisted(() => ({
+  getMock: vi.fn(),
   postMock: vi.fn(),
 }));
 
 vi.mock('../../http', () => ({
-  default: { get: vi.fn(), post: postMock, put: vi.fn(), delete: vi.fn() },
+  default: { get: getMock, post: postMock, put: vi.fn(), delete: vi.fn() },
 }));
 
 import { indicatorLibraryApi } from '../indicatorLibraryApi';
 
 beforeEach(() => {
+  getMock.mockReset();
   postMock.mockReset();
+});
+
+describe('indicatorLibraryApi.list', () => {
+  it('启用状态过滤使用后端可识别的 1/0 参数', async () => {
+    getMock.mockResolvedValue({
+      data: {
+        items: [],
+        total: 0,
+      },
+    });
+
+    await indicatorLibraryApi.list('ENB', {
+      operatorCode: 'default',
+      isEnabled: true,
+      page: 1,
+      pageSize: 20,
+    });
+
+    expect(getMock).toHaveBeenCalledWith('/indicators', {
+      params: {
+        deviceType: 'ENB',
+        operatorCode: 'default',
+        isEnabled: '1',
+        page: 1,
+        pageSize: 20,
+      },
+    });
+  });
 });
 
 describe('indicatorLibraryApi.create', () => {

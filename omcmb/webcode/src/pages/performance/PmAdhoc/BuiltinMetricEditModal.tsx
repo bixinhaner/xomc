@@ -67,6 +67,7 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
   const deviceType = TECH_TO_DEVICE_TYPE[task?.technology ?? ''] ?? 'ENB';
   const { data: candidates, isLoading } = useIndicatorCandidates(deviceType, {
     includeCounters: true,
+    enabledOnly: true,
   });
   const indicatorItems = useMemo<IndicatorCandidate[]>(() => candidates ?? [], [candidates]);
 

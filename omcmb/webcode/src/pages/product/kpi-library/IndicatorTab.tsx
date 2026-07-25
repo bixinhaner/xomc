@@ -10,6 +10,7 @@ import {
 } from '@core/hooks/api/useIndicatorsLibrary';
 import type { DeviceType, IndicatorInfo } from '@core/types/indicatorLibrary';
 import IndicatorDrawer from './IndicatorDrawer';
+import { enabledIndicatorErrorMessage } from './enabledIndicatorErrors';
 import SearchInput from '@/components/SearchInput';
 import { useT } from '@/hooks/useT';
 
@@ -35,6 +36,7 @@ export default function IndicatorTab({ deviceType }: Props) {
   const { data, isLoading } = useIndicatorList(deviceType, {
     keyword: keyword || undefined,
     platformName: platform,
+    operatorCode: OPERATOR_CODE,
     page,
     pageSize,
   });
@@ -84,7 +86,7 @@ export default function IndicatorTab({ deviceType }: Props) {
               },
               {
                 onSettled: () => setPendingId(null),
-                onError: (e) => message.error((e as Error).message),
+                onError: (e) => message.error(enabledIndicatorErrorMessage(e, t)),
               }
             );
           }}

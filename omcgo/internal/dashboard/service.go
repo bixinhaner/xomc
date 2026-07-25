@@ -155,6 +155,9 @@ type Service struct {
 	// 给 GetKPIDefinitions（issue #213 Phase1）按别名表的 K 编号反查中文名与单位用。
 	// 可能为 nil（测试 / 退化场景）：此时 GetKPIDefinitions 仅返回别名表静态元数据，不富化。
 	indicatorRepo indicator.IndicatorRepository
+	// enabledIndicatorRepo 读取 enabled_pm_indicators_*，用于保存首页 KPI 布局时拒绝未启用指标。
+	// 生产由 NewService 基于主库 PgPool 注入；nil 时跳过校验（测试/退化场景）。
+	enabledIndicatorRepo indicator.EnabledIndicatorRepository
 	// pmAggregator 复用 PM 的 network 维度查询链路，为首页 KPI 折线图提供 counter-first KPI 重算口径。
 	// 可能为 nil（部分测试场景）：运行时应由 provider 注入，缺失时 KPI 时序查询返回配置错误。
 	pmAggregator dashboardKPIAggregator
@@ -197,6 +200,7 @@ func NewService(
 	// 全局 KPI 布局仓库走主库（dashboard_kpi_layouts 在主库）。pgPool 为 nil 时（测试）留空。
 	if pgPool != nil {
 		s.layoutRepo = NewKPILayoutRepository(pgPool)
+		s.enabledIndicatorRepo = indicator.NewPgEnabledRepository(pgPool)
 	}
 	return s
 }

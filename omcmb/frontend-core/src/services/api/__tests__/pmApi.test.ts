@@ -44,4 +44,19 @@ describe('pmApi.getIndicatorCandidates', () => {
       }),
     ]);
   });
+
+  it('enabledOnly=true 时透传已启用过滤参数', async () => {
+    getMock.mockResolvedValue({
+      data: {
+        items: [],
+        total: 0,
+      },
+    });
+
+    await pmApi.getIndicatorCandidates('ENB', { includeCounters: true, enabledOnly: true });
+
+    expect(getMock).toHaveBeenCalledWith('/pm/kpi/definitions', {
+      params: { device_type: 'ENB', include_counters: true, is_enabled: '1' },
+    });
+  });
 });
