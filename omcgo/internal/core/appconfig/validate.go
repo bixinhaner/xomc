@@ -3,6 +3,8 @@ package appconfig
 import (
 	"fmt"
 	"strings"
+
+	"github.com/minio/minio-go/v7/pkg/s3utils"
 )
 
 // Validatable is implemented by config types that support self-validation.
@@ -48,6 +50,9 @@ func (c *AppConfig) Validate() error {
 	if err := c.Notification.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
+	if err := c.MinIO.Buckets.validateConfigBackup(); err != nil {
+		errs = append(errs, err.Error())
+	}
 
 	if len(errs) > 0 {
 		return fmt.Errorf("config validation failed:\n  - %s", strings.Join(errs, "\n  - "))
@@ -87,6 +92,9 @@ func (c *ACSConfig) Validate() error {
 	if c.Auth.Mode != "" && c.Auth.Mode != "digest" && c.Auth.Mode != "basic" && c.Auth.Mode != "none" {
 		errs = append(errs, fmt.Sprintf("auth.mode must be digest, basic, or none, got %q", c.Auth.Mode))
 	}
+	if err := c.MinIO.Buckets.validateConfigBackup(); err != nil {
+		errs = append(errs, err.Error())
+	}
 
 	if len(errs) > 0 {
 		return fmt.Errorf("config validation failed:\n  - %s", strings.Join(errs, "\n  - "))
@@ -116,9 +124,22 @@ func (c *WorkerConfig) Validate() error {
 	if err := c.ParamSync.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
+	if err := c.MinIO.Buckets.validateConfigBackup(); err != nil {
+		errs = append(errs, err.Error())
+	}
 
 	if len(errs) > 0 {
 		return fmt.Errorf("config validation failed:\n  - %s", strings.Join(errs, "\n  - "))
+	}
+	return nil
+}
+
+func (c BucketConfig) validateConfigBackup() error {
+	if c.ConfigBackup == "" {
+		return nil
+	}
+	if err := s3utils.CheckValidBucketNameStrict(c.ConfigBackup); err != nil {
+		return fmt.Errorf("minio.buckets.config_backup must be a valid S3 bucket name: %w", err)
 	}
 	return nil
 }

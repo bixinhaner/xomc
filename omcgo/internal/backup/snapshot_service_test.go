@@ -264,7 +264,7 @@ func TestPromoteFromBackup_PlaintextSource(t *testing.T) {
 	}
 	repo := newFakeSnapshotRepo()
 	mover := &fakeMover{}
-	mover.seed("config_backup", "backup/2026/05/22/backup-12345678-SN001.xml", plain)
+	mover.seed("config-backup", "backup/2026/05/22/backup-12345678-SN001.xml", plain)
 	fl := &fakeFileLookup{bySN: map[string][]BackupRestoreFile{"SN001": {srcRow}}}
 	dl := &fakeSnapshotDeviceLookup{bySN: map[string]*model.Device{
 		"SN001": {DeviceName: "eNB-001", ProductClass: "FAP/BSC"},
@@ -321,7 +321,7 @@ func TestPromoteFromBackup_EncryptedCompressedSource_DecodesToPlaintext(t *testi
 	}
 	repo := newFakeSnapshotRepo()
 	mover := &fakeMover{}
-	mover.seed("config_backup", srcKey, blob)
+	mover.seed("config-backup", srcKey, blob)
 	fl := &fakeFileLookup{bySN: map[string][]BackupRestoreFile{"SN777": {srcRow}}}
 	svc := newTestSnapshotService(t, repo, mover, fl, nil)
 	svc.SetPromoteDecoder(mover, enc)
@@ -354,7 +354,7 @@ func TestPromoteFromBackup_CompressedOnlySource_Decompresses(t *testing.T) {
 	}
 	repo := newFakeSnapshotRepo()
 	mover := &fakeMover{}
-	mover.seed("config_backup", srcKey, gzipBytes(t, plain))
+	mover.seed("config-backup", srcKey, gzipBytes(t, plain))
 	fl := &fakeFileLookup{bySN: map[string][]BackupRestoreFile{"SN9": {srcRow}}}
 	svc := newTestSnapshotService(t, repo, mover, fl, nil)
 	svc.SetPromoteDecoder(mover, nil) // 未加密，无需解密器
@@ -376,7 +376,7 @@ func TestPromoteFromBackup_EncryptedSourceNoDecryptor_Rejected(t *testing.T) {
 	}
 	repo := newFakeSnapshotRepo()
 	mover := &fakeMover{}
-	mover.seed("config_backup", srcKey, []byte("OENC...ciphertext..."))
+	mover.seed("config-backup", srcKey, []byte("OENC...ciphertext..."))
 	fl := &fakeFileLookup{bySN: map[string][]BackupRestoreFile{"SN8": {srcRow}}}
 	svc := newTestSnapshotService(t, repo, mover, fl, nil)
 	svc.SetPromoteDecoder(mover, nil) // 没有解密器
@@ -404,7 +404,7 @@ func TestPromoteFromBackup_TamperedAAD_DecryptFails(t *testing.T) {
 	}
 	repo := newFakeSnapshotRepo()
 	mover := &fakeMover{}
-	mover.seed("config_backup", srcKey, blob)
+	mover.seed("config-backup", srcKey, blob)
 	fl := &fakeFileLookup{bySN: map[string][]BackupRestoreFile{"SN5": {srcRow}}}
 	svc := newTestSnapshotService(t, repo, mover, fl, nil)
 	svc.SetPromoteDecoder(mover, enc)
@@ -427,7 +427,7 @@ func TestPromoteFromBackup_NVFile(t *testing.T) {
 	}
 	repo := newFakeSnapshotRepo()
 	mover := &fakeMover{}
-	mover.seed("config_backup", "backup/mib-home-fap.nv", plain)
+	mover.seed("config-backup", "backup/mib-home-fap.nv", plain)
 	fl := &fakeFileLookup{bySN: map[string][]BackupRestoreFile{"SN_NV1": {srcRow}}}
 	svc := newTestSnapshotService(t, repo, mover, fl, nil)
 	svc.SetPromoteDecoder(mover, nil)
@@ -463,7 +463,7 @@ func TestPromoteFromBackup_PutObjectFails_DoesNotUpsert(t *testing.T) {
 	}
 	repo := newFakeSnapshotRepo()
 	mover := &fakeMover{putErr: errors.New("simulated minio failure")}
-	mover.seed("config_backup", srcKey, []byte("<cfg/>"))
+	mover.seed("config-backup", srcKey, []byte("<cfg/>"))
 	fl := &fakeFileLookup{bySN: map[string][]BackupRestoreFile{"SN001": {srcRow}}}
 	svc := newTestSnapshotService(t, repo, mover, fl, nil)
 	svc.SetPromoteDecoder(mover, nil)
@@ -516,7 +516,7 @@ func TestPromoteFromBackup_RejectsInvalidExtension(t *testing.T) {
 	}
 	repo := newFakeSnapshotRepo()
 	mover := &fakeMover{}
-	mover.seed("config_backup", srcKey, []byte("whatever"))
+	mover.seed("config-backup", srcKey, []byte("whatever"))
 	fl := &fakeFileLookup{bySN: map[string][]BackupRestoreFile{"SN001": {srcRow}}}
 	svc := newTestSnapshotService(t, repo, mover, fl, nil)
 	svc.SetPromoteDecoder(mover, nil)
@@ -544,7 +544,7 @@ func TestPromoteFromBackup_FallbackToLatestWhenTaskIDMismatch(t *testing.T) {
 	}
 	repo := newFakeSnapshotRepo()
 	mover := &fakeMover{}
-	mover.seed("config_backup", "backup/newer.xml", []byte("<newer/>"))
+	mover.seed("config-backup", "backup/newer.xml", []byte("<newer/>"))
 	fl := &fakeFileLookup{bySN: map[string][]BackupRestoreFile{"SN001": {row1, row2}}}
 	svc := newTestSnapshotService(t, repo, mover, fl, nil)
 	svc.SetPromoteDecoder(mover, nil)

@@ -1833,6 +1833,7 @@ function mapGroupTreeCommand(c: BackendGroupTreeNode['commands'][number]): Group
     displayName: c.display_name,
     rpcMethod: c.rpc_method,
     targetObject: c.target_object || undefined,
+    targetPaths: c.target_paths,
     requireConfirm: c.require_confirm,
     source: c.source,
     catalogProtected: c.catalog_protected,

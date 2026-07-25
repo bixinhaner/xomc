@@ -38,10 +38,11 @@ func Test_queryNetworkTable_SQLShape(t *testing.T) {
 
 	sql := db.sqls[0]
 	// 分组键仅 metric_path/granularity/time（全网无实体键）
-	assert.Contains(t, sql, "GROUP BY metric_path, granularity, time")
-	assert.NotContains(t, sql, "object_ldn", "全网汇总不带 object_ldn 实体键")
+	groupBy := sql[strings.LastIndex(sql, "GROUP BY"):]
+	assert.Contains(t, groupBy, "GROUP BY metric_path, granularity, time")
+	assert.NotContains(t, groupBy, "object_ldn", "全网汇总不按 object_ldn 分组")
 	assert.NotContains(t, sql, "product_id", "全网汇总不带 product_id 分组")
-	assert.NotContains(t, sql, "device_sn", "全网汇总不带 device_sn 分组")
+	assert.NotContains(t, groupBy, "device_sn", "全网汇总不按 device_sn 分组")
 	// statis_type 路由算子在
 	assert.Contains(t, sql, "WHEN 'sum' THEN SUM(metric_value)")
 }

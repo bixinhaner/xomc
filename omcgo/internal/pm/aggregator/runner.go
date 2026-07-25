@@ -24,6 +24,26 @@ type JobEnqueuer interface {
 	Insert(ctx context.Context, req asyncjob.InsertRequest) (uuid.UUID, error)
 }
 
+// HourlyRecoveryRepository is the main-database surface used by sparse
+// maintenance. Keeping recovery explicit prevents generic Insert from replaying
+// terminal jobs and preserves normal natural-bucket idempotency.
+type HourlyRecoveryRepository interface {
+	JobEnqueuer
+	ListRecoverableFailedNaturalBuckets(
+		ctx context.Context,
+		req asyncjob.FailedBucketMaintenanceRequest,
+	) ([]asyncjob.Job, error)
+	GetFailedBucketStats(
+		ctx context.Context,
+		req asyncjob.FailedBucketMaintenanceRequest,
+	) (asyncjob.FailedBucketStats, error)
+	FindNaturalBucketJob(ctx context.Context, jobType string, start, end time.Time) (*asyncjob.Job, bool, error)
+	RequeueRetriableFailedBucket(
+		ctx context.Context,
+		req asyncjob.FailedBucketRecoveryRequest,
+	) (uuid.UUID, bool, error)
+}
+
 // Runner 是单粒度（hourly/daily/weekly/monthly）的 asyncjob.JobRunner 实现。
 //
 // 由 worker/main.go 创建 4 个实例（用 NewHourlyRunner / NewDailyRunner / ... 构造），
@@ -61,6 +81,11 @@ type Runner struct {
 	// 语义是「已处理」非「有数据」：只要 Run 走到成功收尾就推进，与该桶是否产生聚合行无关。
 	// 由 worker 装配时注入（传主库 PgPool）。nil 则退化为不写水位（不回归既有行为）。
 	watermarkExec WatermarkExecer
+
+	// hourlyBatchDevices > 0 enables the sparse, versioned hourly path when the
+	// Aggregator is backed by a real pgx pool. Other granularities retain the
+	// compatibility-table rollup path.
+	hourlyBatchDevices int
 }
 
 // JobType 返回 asyncjob 注册主键。
@@ -94,6 +119,13 @@ func (r *Runner) SetRollupChain(enq JobEnqueuer, locFn func() *time.Location) {
 // 设备级该桶聚合成功后用它把 (granularity, device) 水位推进到本格起点。
 // nil 关闭水位写入（退化为既有行为，不回归）。
 func (r *Runner) SetWatermarkExec(exec WatermarkExecer) { r.watermarkExec = exec }
+
+// SetHourlyBatchDevices configures the bounded device batch size.
+func (r *Runner) SetHourlyBatchDevices(n int) {
+	if n > 0 {
+		r.hourlyBatchDevices = n
+	}
+}
 
 // runPayload 是 cron 注入到 async_jobs.payload 的字段集。Start/End 半开区间 [Start, End)。
 type runPayload struct {
@@ -164,19 +196,30 @@ func (r *Runner) Run(ctx context.Context, job *asyncjob.Job) (result json.RawMes
 
 	w := WindowSpec{Granularity: r.granularity, Start: p.Start, End: p.End}
 
-	counterRows, err = r.aggregator.AggregateCounters(ctx, r.source, r.target, w)
-	if err != nil {
-		runStatus = "failed"
-		return nil, fmt.Errorf("runner %s: aggregate counters: %w", r.jobType, err)
-	}
-	r.metrics.AddRows(r.jobType, "counter", counterRows)
+	if r.granularity == metrics.GranularityHourly && r.hourlyBatchDevices > 0 && r.aggregator.supportsVersionedHourly() {
+		stats, rollupErr := r.aggregator.RunHourlyVersioned(ctx, w, r.hourlyBatchDevices, r.metrics)
+		if rollupErr != nil {
+			runStatus = "failed"
+			return nil, fmt.Errorf("runner %s: versioned hourly rollup: %w", r.jobType, rollupErr)
+		}
+		counterRows = int(stats.ValueCount)
+		r.metrics.AddRows(r.jobType, "sparse_value", counterRows)
+		r.metrics.AddBatch(r.jobType, stats.CompletedBatches, stats.DeviceCount)
+	} else {
+		counterRows, err = r.aggregator.AggregateCounters(ctx, r.source, r.target, w)
+		if err != nil {
+			runStatus = "failed"
+			return nil, fmt.Errorf("runner %s: aggregate counters: %w", r.jobType, err)
+		}
+		r.metrics.AddRows(r.jobType, "counter", counterRows)
 
-	kpiRows, err = r.aggregator.AggregateKPIs(ctx, r.target, w)
-	if err != nil {
-		runStatus = "failed"
-		return nil, fmt.Errorf("runner %s: aggregate kpis: %w", r.jobType, err)
+		kpiRows, err = r.aggregator.AggregateKPIs(ctx, r.target, w)
+		if err != nil {
+			runStatus = "failed"
+			return nil, fmt.Errorf("runner %s: aggregate kpis: %w", r.jobType, err)
+		}
+		r.metrics.AddRows(r.jobType, "kpi", kpiRows)
 	}
-	r.metrics.AddRows(r.jobType, "kpi", kpiRows)
 
 	// 更新桶滞后秒数（end 到现在的秒差），Grafana 用它判断是否堵塞
 	r.metrics.SetBucketLag(r.jobType, time.Since(p.End).Seconds())

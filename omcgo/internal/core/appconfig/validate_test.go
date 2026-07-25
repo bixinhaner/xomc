@@ -79,6 +79,11 @@ func TestAppConfig_Validate(t *testing.T) {
 			modify:  func(c *AppConfig) { c.DictLoader.CacheVersionPollInterval = -1 * time.Second },
 			wantErr: "dict_loader.cache_version_poll_interval must not be negative",
 		},
+		{
+			name:    "invalid config backup bucket",
+			modify:  func(c *AppConfig) { c.MinIO.Buckets.ConfigBackup = "config_backup_invalid" },
+			wantErr: "minio.buckets.config_backup must be a valid S3 bucket name",
+		},
 	}
 
 	for _, tt := range tests {
@@ -135,6 +140,24 @@ func TestACSConfig_Validate(t *testing.T) {
 	}
 }
 
+func TestBackpressureConfigDefaults(t *testing.T) {
+	cfg := (BackpressureConfig{}).Defaults()
+	assert.Equal(t, 2000, cfg.QueuePendingHigh)
+	assert.Equal(t, 500, cfg.QueuePendingLow)
+	assert.Equal(t, 10*time.Minute, cfg.QueueOldestHigh)
+	assert.Equal(t, 2*time.Minute, cfg.QueueOldestLow)
+	assert.Equal(t, 5*time.Minute, cfg.QueueSlopeWindow)
+
+	clamped := (BackpressureConfig{
+		QueuePendingHigh: 100,
+		QueuePendingLow:  200,
+		QueueOldestHigh:  time.Minute,
+		QueueOldestLow:   2 * time.Minute,
+	}).Defaults()
+	assert.Equal(t, 100, clamped.QueuePendingLow)
+	assert.Equal(t, time.Minute, clamped.QueueOldestLow)
+}
+
 func TestLoad_ValidatesConfig(t *testing.T) {
 	// Write a minimal valid config to a temp file, then load it.
 	// This tests that Load() calls Validate() automatically.
@@ -149,12 +172,12 @@ func TestLoad_ValidatesConfig(t *testing.T) {
 // validAppConfig returns a minimal valid AppConfig for testing.
 func validAppConfig() AppConfig {
 	return AppConfig{
-		Server: AppServerConfig{Port: 8080},
-		DB:     PostgresConfig{DSN: "postgres://user:pass@localhost:5432/omcgo", MaxConns: 10},
-		TSDB:   PostgresConfig{DSN: "postgres://user:pass@localhost:5432/omcgo_ts", MaxConns: 5},
-		Redis:  RedisConfig{Addrs: []string{"localhost:6379"}},
-		JWT:    JWTConfig{Secret: "this-is-a-valid-secret-1234567890"},
-		Log:    LogConfig{Level: "info", Format: "json"},
+		Server:  AppServerConfig{Port: 8080},
+		DB:      PostgresConfig{DSN: "postgres://user:pass@localhost:5432/omcgo", MaxConns: 10},
+		TSDB:    PostgresConfig{DSN: "postgres://user:pass@localhost:5432/omcgo_ts", MaxConns: 5},
+		Redis:   RedisConfig{Addrs: []string{"localhost:6379"}},
+		JWT:     JWTConfig{Secret: "this-is-a-valid-secret-1234567890"},
+		Log:     LogConfig{Level: "info", Format: "json"},
 		Metrics: MetricsConfig{Port: 9090},
 	}
 }

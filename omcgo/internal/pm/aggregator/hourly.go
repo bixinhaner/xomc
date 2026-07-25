@@ -13,10 +13,11 @@ const JobTypeHourly = "pm_aggregate_hourly"
 // 由 worker/main.go 在初始化期调用，注册到 asyncjob.Registry。
 func NewHourlyRunner(a *Aggregator) *Runner {
 	return &Runner{
-		aggregator:  a,
-		jobType:     JobTypeHourly,
-		source:      "pm_metrics",
-		target:      "pm_metrics_hourly",
-		granularity: metrics.GranularityHourly,
+		aggregator:         a,
+		jobType:            JobTypeHourly,
+		source:             "pm_metrics",
+		target:             "pm_metrics_hourly",
+		granularity:        metrics.GranularityHourly,
+		hourlyBatchDevices: DefaultHourlyBatchDevices,
 	}
 }

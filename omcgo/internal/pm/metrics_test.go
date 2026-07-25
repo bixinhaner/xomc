@@ -2,12 +2,60 @@ package pm
 
 import (
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 )
+
+func TestPMMetrics_DiscoveredAndDeprecatedAliasShareConcurrentSnapshot(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewPMMetrics(reg)
+	counter := m.DiscoveredCountersTotal.WithLabelValues("cmcc", "lte", "whitelist_miss")
+	counter.Inc()
+
+	stop := make(chan struct{})
+	var updater sync.WaitGroup
+	updater.Add(1)
+	go func() {
+		defer updater.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				counter.Inc()
+			}
+		}
+	}()
+	defer func() {
+		close(stop)
+		updater.Wait()
+	}()
+
+	for i := 0; i < 100; i++ {
+		families, err := reg.Gather()
+		require.NoError(t, err)
+
+		values := make(map[string]float64, 2)
+		for _, family := range families {
+			switch family.GetName() {
+			case "omc_pm_discovered_counters_total", "omc_pm_dropped_counters_total":
+				require.Len(t, family.Metric, 1)
+				values[family.GetName()] = family.Metric[0].GetCounter().GetValue()
+			}
+		}
+		require.Contains(t, values, "omc_pm_discovered_counters_total")
+		require.Contains(t, values, "omc_pm_dropped_counters_total")
+		require.Equal(t,
+			values["omc_pm_discovered_counters_total"],
+			values["omc_pm_dropped_counters_total"],
+			"deprecated alias must be emitted from the same gathered snapshot",
+		)
+	}
+}
 
 // G4-Gap-1: 验证 ReportDelaySeconds histogram 注册成功且能按 carrier×technology 维度记录。
 func TestPMMetrics_ReportDelaySeconds(t *testing.T) {

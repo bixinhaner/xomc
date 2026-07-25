@@ -217,6 +217,23 @@ func runACS(cmd *cobra.Command, args []string) error {
 
 	deps.RPCDispatcher = rpc.NewDispatcher(rpc.DispatcherConfig{TransferConfigProvider: transferPolicy})
 
+	// PM queue-health metrics have an independent lifecycle: they must continue
+	// to sample when uploads/backpressure are disabled or when MinIO/TSDB is not
+	// configured. The NATS bus owns metric observation so disk projections only
+	// consume aggregate counts and cannot duplicate samples.
+	var pmQueueHealthSampler *event.QueueHealthSampler
+	if samplerBus, ok := inf.EventBus.(interface {
+		NewQueueHealthSampler(interval time.Duration) *event.QueueHealthSampler
+	}); ok {
+		queueHealthCtx, queueHealthCancel := context.WithCancel(context.Background())
+		pmQueueHealthSampler = samplerBus.NewQueueHealthSampler(30 * time.Second)
+		go pmQueueHealthSampler.Run(queueHealthCtx)
+		inf.GS.Register("pm-queue-health-sampler", 1, func(context.Context) error {
+			queueHealthCancel()
+			return nil
+		})
+	}
+
 	// Setup upload handler for CPE file upload (PM/MR/DataModel files).
 	if inf.MinIO != nil {
 		tokenMgr := upload.NewTokenManager(cfg.Upload.TokenSecret, cfg.Upload.TokenTTL)
@@ -254,12 +271,36 @@ func runACS(cmd *cobra.Command, args []string) error {
 			}
 			return row.Value, true
 		}
+		var pmPendingCount upload.PendingCountFunc
+		if pmQueueHealthSampler != nil {
+			// Keep the projection's aggregate-count interface for this release,
+			// while reusing the independent sampler's last successful snapshot.
+			pmPendingCount = func(context.Context) (uint64, error) {
+				return pmQueueHealthSampler.ProjectionPendingCount()
+			}
+		}
 		bpWatchdog := upload.NewWatchdog(
 			bpLookup,
-			upload.NewMinIODiskUsage(upload.MinIOMetricsURL(cfg.MinIO.Endpoint, cfg.MinIO.UseSSL), 5*time.Second, nil),
+			upload.NewProjectedMinIODiskUsage(
+				upload.MinIOMetricsURL(cfg.MinIO.Endpoint, cfg.MinIO.UseSSL),
+				5*time.Second,
+				nil,
+				upload.NewDatabasePendingProjection(inf.TsPool, pmPendingCount, 1),
+			),
 			upload.NewBackpressureMetrics(inf.MetricsReg),
 			inf.Logger.Named("backpressure"),
 		)
+		queueBackpressure := cfg.Backpressure.Defaults()
+		bpWatchdog.SetQueueThresholdDefaults(
+			queueBackpressure.QueuePendingHigh,
+			queueBackpressure.QueuePendingLow,
+			queueBackpressure.QueueOldestHigh,
+			queueBackpressure.QueueOldestLow,
+			queueBackpressure.QueueSlopeWindow,
+		)
+		if pmQueueHealthSampler != nil {
+			bpWatchdog.SetQueueStatsSource(pmQueueHealthSampler)
+		}
 		uploadHandler.SetBackpressureGate(bpWatchdog)
 		// watchdog 周期性自刷新 sys_configs(acs.backpressure) 阈值（见 Watchdog.sample）——
 		// 不订阅 SubjectSysConfigSaved：ACS 的 JetStream workqueue 流上该 subject 已被

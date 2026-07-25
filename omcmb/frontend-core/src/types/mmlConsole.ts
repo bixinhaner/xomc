@@ -62,6 +62,7 @@ export interface BackendGroupTreeCommand {
   display_name: string;
   rpc_method?: string;
   target_object?: string;
+  target_paths?: string[];
   require_confirm: boolean;
   source?: string;
   catalog_protected?: boolean;
@@ -180,6 +181,7 @@ export interface GroupTreeCommand {
   displayName: string;
   rpcMethod?: string;
   targetObject?: string;
+  targetPaths?: string[];
   requireConfirm: boolean;
   source?: 'standard' | 'admin' | string;
   /** catalog_protected=true 时 admin 不可改/删（PRD §7.3） */

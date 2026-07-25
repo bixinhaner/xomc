@@ -786,3 +786,32 @@ curl -fsS http://localhost:8081/healthz
 `reset-script-data` 的 `--apply` 必须同时带有精确确认串；PostgreSQL 清理由迁移负责，
 不会清理其他来源的设备任务。该迁移不提供数据恢复回滚，若发布中止只能恢复数据库快照，
 然后重新执行迁移前的验证和切换演练。
+### PM 稀疏存储与小时汇总
+
+新部署将 PM 真实值写入 `pm_metric_values`，缺失但受支持的指标由
+`pm_measurement_anchors` 和不可变指标集在查询时恢复。小时汇总按整桶版本发布：
+构建中的版本不可见，全部设备批次完成后一次切换为 active。
+
+- `PM_HOURLY_BATCH_DEVICES`：每个小时批次的设备数，默认 `2500`；该值已按 10000
+  基站压测下“一小时内完成”和 worker 1 GiB 内存限制联合校准。
+- `PM_LATE_DATA_WINDOW`：迟到数据与压缩安全窗口，默认 `168h`，不改变原 7 天压缩等待。
+- PM 上传背压以 MinIO 所在文件系统的已用空间加“已接收但尚未物化”的 PM 文件预计
+  入库量计算；同文件系统上的 TSDB 临时文件、WAL 和文件预分配已包含在实际已用空间，
+  不重复累加。默认预计入库放大系数为保守的 `1.0`。
+- 数据库 release 默认只保留 warning/error/fatal，关闭 checkpoint、autovacuum、SQL、
+  慢查询、连接和临时文件逐条诊断日志；可用对应 `PG_LOG_*` / `TSDB_LOG_*` 环境变量临时开启。
+- PostgreSQL/TimescaleDB 的 Docker JSON 日志默认按 `20m × 5` 轮转。
+
+PM 重建是破坏性操作，但 **不得直接删除整个 TimescaleDB 数据卷**：该卷同时保存
+告警历史、MR、trace、adhoc、设备组汇总以及可能由用户维护的 KPI 定义。发布时应先备份
+这些非 PM 对象，再仅清理并重建下列 PM 对象：
+
+- `pm_files`、`pm_ingest_batches`、`pm_metric_dictionary`、`pm_metric_sets`；
+- `pm_measurement_anchors`、`pm_metric_values`；
+- `pm_hourly_bucket_versions`、`pm_hourly_rollup_batches`、
+  `pm_hourly_anchors`、`pm_hourly_values`；
+- 旧 PM 明细/小时对象（如目标环境仍为旧 schema）。
+
+执行前必须再次核对服务器、数据库和上述精确对象清单，并确认原始 PM 文件可重放。
+只有在已经单独备份并验证恢复所有非 PM 对象、且用户再次明确确认精确卷名时，才允许
+选择整卷重建；不得把主库业务数据卷纳入任何删除范围。

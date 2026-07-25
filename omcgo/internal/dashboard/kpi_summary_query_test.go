@@ -17,17 +17,18 @@ func TestBuildLatestKPIPerNameQuery_Basic(t *testing.T) {
 	q, args, err := buildLatestKPIPerNameQuery(start, end)
 	require.NoError(t, err)
 
-	// 读 pm_metrics 原始明细。
-	assert.Contains(t, q, "FROM pm_metrics")
+	// 只读物理 KPI 值，不展开缺失指标集合。
+	assert.Contains(t, q, "FROM pm_metric_values")
+	assert.Contains(t, q, "JOIN pm_measurement_anchors")
 	// DISTINCT ON (metric_path)：每指标编号一行（HD01 修复点）。
-	assert.Contains(t, q, "DISTINCT ON (metric_path)")
+	assert.Contains(t, q, "DISTINCT ON (d.metric_path)")
 	// 只读 KPI 类，counter 不进首页卡。
 	assert.Contains(t, q, "metric_type = $1")
 	// 时间窗。
-	assert.Contains(t, q, "time >= $2")
-	assert.Contains(t, q, "time <= $3")
+	assert.Contains(t, q, `a."time" >= $2`)
+	assert.Contains(t, q, `a."time" <= $3`)
 	// ORDER BY 首键必须是 metric_path（PG DISTINCT ON 硬约束），再 time DESC 取最新。
-	assert.Contains(t, q, "ORDER BY metric_path, time DESC")
+	assert.Contains(t, q, `ORDER BY d.metric_path, a."time" DESC`)
 	// 按"不同指标数"上界（非"行数"上界），防 OOM。
 	assert.Contains(t, q, "LIMIT 500")
 
@@ -52,8 +53,8 @@ func TestBuildLatestKPIPerNameQuery_NoGranularityOrDeviceFilter(t *testing.T) {
 func TestBuildLatestKPIPerNameQuery_DistinctOnOrderingInvariant(t *testing.T) {
 	q, _, err := buildLatestKPIPerNameQuery(time.Time{}, time.Time{})
 	require.NoError(t, err)
-	distinctIdx := strings.Index(q, "DISTINCT ON (metric_path)")
-	orderIdx := strings.Index(q, "ORDER BY metric_path")
+	distinctIdx := strings.Index(q, "DISTINCT ON (d.metric_path)")
+	orderIdx := strings.Index(q, "ORDER BY d.metric_path")
 	require.Positive(t, distinctIdx)
 	require.Positive(t, orderIdx)
 	require.Greater(t, orderIdx, distinctIdx, "ORDER BY must follow SELECT DISTINCT ON")

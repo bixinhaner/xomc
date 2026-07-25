@@ -19,16 +19,17 @@ import (
 //   - 需要强制重灌某文件时，先删其 pm_files 标记行（device_sn+file_name）再重新 publish 事件。
 //   - 源文件仍留在 MinIO（入库后不删），故标记被清后总可重放重建。
 type FileMarker struct {
-	ID           uuid.UUID
-	DeviceID     uuid.UUID
-	DeviceSN     string
-	Carrier      string
-	Technology   string
-	FileName     string
-	FileSize     int64
-	CollectTime  time.Time
-	MinioPath    string
-	CounterCount int
+	ID            uuid.UUID
+	DeviceID      uuid.UUID
+	DeviceSN      string
+	Carrier       string
+	Technology    string
+	FileName      string
+	FileSize      int64
+	CollectTime   time.Time
+	MinioPath     string
+	ContentSHA256 []byte
+	CounterCount  int
 }
 
 // MetricFromCounter 把 model.PMCounter 转 PMMetric。
@@ -149,22 +150,7 @@ func MetricFromKPIValue(v model.KPIValue) PMMetric {
 // 必已落盘，崩溃只会落在"提交前"从而重投重做。（删 uq_pm_metrics_natural 后 plain COPY 不再受
 // 唯一索引约束，文件内重复自然键已由 dedupeByNaturalKey 折叠。）
 func (r *PgRepository) CopyIngest(ctx context.Context, marker FileMarker, counters []model.PMCounter, kpis []model.KPIValue) (ingested bool, err error) {
-	ms := make([]PMMetric, 0, len(counters)+len(kpis))
-	for _, c := range counters {
-		ms = append(ms, MetricFromCounter(c))
-	}
-	for _, k := range kpis {
-		ms = append(ms, MetricFromKPIValue(k))
-	}
-	// 文件内按自然键去重（last-wins），复刻旧 UPSERT 的 ON CONFLICT DO UPDATE"后写覆盖"语义：
-	// 删 uq_pm_metrics_natural 后 plain COPY 不再因重复键失败，但若同一文件出现重复自然键（多个
-	// 上报名经白名单改写命中同一 IndicatorID、或厂商把同 measType 重复上报），不折叠会写成两行 →
-	// 读侧 SUM 重复计数。先在内存折叠成一行（取最后值）避免文件内 double-count。
-	ms = dedupeByNaturalKey(ms)
-	rows, err := buildRows(ms)
-	if err != nil {
-		return false, err
-	}
+	measurements := BuildSparseMeasurements(counters, kpis)
 
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -179,25 +165,103 @@ func (r *PgRepository) CopyIngest(ctx context.Context, marker FileMarker, counte
 	if id == uuid.Nil {
 		id = uuid.New()
 	}
-	ct, err := tx.Exec(ctx,
-		`INSERT INTO pm_files (id, device_id, device_sn, carrier, technology, file_name, file_size,
-		                       collect_time, minio_path, parsed, counter_count, created_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,true,$10,NOW())
-		 ON CONFLICT (device_sn, file_name) DO NOTHING`,
-		id, marker.DeviceID, marker.DeviceSN, marker.Carrier, marker.Technology, marker.FileName,
-		marker.FileSize, marker.CollectTime, marker.MinioPath, marker.CounterCount)
-	if err != nil {
-		return false, fmt.Errorf("insert pm_files marker: %w", err)
+	if len(marker.ContentSHA256) != 32 {
+		return false, fmt.Errorf("copy-ingest marker content SHA-256 must be 32 bytes")
 	}
-	if ct.RowsAffected() == 0 {
-		// 标记冲突：该文件已入库 → 跳过（回滚，不写 metrics）。
+	if _, err := tx.Exec(ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,
+		marker.DeviceSN+"\x1f"+marker.FileName); err != nil {
+		return false, fmt.Errorf("lock pm_files source identity: %w", err)
+	}
+	var existingID uuid.UUID
+	var existingDigest []byte
+	findErr := tx.QueryRow(ctx, `
+		SELECT id,content_sha256 FROM pm_files
+		 WHERE device_sn=$1 AND file_name=$2
+		 FOR UPDATE`, marker.DeviceSN, marker.FileName).Scan(&existingID, &existingDigest)
+	switch {
+	case findErr == nil && string(existingDigest) == string(marker.ContentSHA256):
 		return false, nil
-	}
-
-	if len(rows) > 0 {
-		if _, err := tx.CopyFrom(ctx, pgx.Identifier{"pm_metrics"}, pmMetricsColumns, pgx.CopyFromRows(rows)); err != nil {
-			return false, classifyInsertError(err)
+	case findErr == nil:
+		// Same source identity with changed content is an explicit reparse. Remove
+		// the old sparse batch in this transaction before replacing its marker.
+		oldRows, err := tx.Query(ctx, `
+			SELECT DISTINCT date_trunc('hour',"time")
+			  FROM pm_measurement_anchors WHERE source_file_id=$1`, existingID)
+		if err != nil {
+			return false, fmt.Errorf("load previous sparse file hours: %w", err)
 		}
+		var oldHours []time.Time
+		for oldRows.Next() {
+			var hour time.Time
+			if err := oldRows.Scan(&hour); err != nil {
+				oldRows.Close()
+				return false, fmt.Errorf("scan previous sparse file hour: %w", err)
+			}
+			oldHours = append(oldHours, hour)
+		}
+		if err := oldRows.Err(); err != nil {
+			oldRows.Close()
+			return false, fmt.Errorf("iterate previous sparse file hours: %w", err)
+		}
+		oldRows.Close()
+		for _, statement := range []string{
+			`DELETE FROM pm_metric_values v USING pm_measurement_anchors a
+			  WHERE a.source_file_id=$1 AND v."time"=a."time" AND v.anchor_id=a.anchor_id`,
+			`DELETE FROM pm_measurement_anchors WHERE source_file_id=$1`,
+			`DELETE FROM pm_ingest_batches WHERE source_file_id=$1`,
+		} {
+			if _, err := tx.Exec(ctx, statement, existingID); err != nil {
+				return false, fmt.Errorf("remove previous sparse file batch: %w", err)
+			}
+		}
+		if err := markHourlyStartsDirty(ctx, tx, oldHours); err != nil {
+			return false, err
+		}
+		id = existingID
+		if _, err := tx.Exec(ctx, `
+			UPDATE pm_files
+			   SET device_id=$2,carrier=$3,technology=$4,file_size=$5,collect_time=$6,
+			       minio_path=$7,content_sha256=$8,parsed=true,parsed_at=now(),
+			       counter_count=$9,created_at=now()
+			 WHERE id=$1`,
+			id, marker.DeviceID, marker.Carrier, marker.Technology, marker.FileSize,
+			marker.CollectTime, marker.MinioPath, marker.ContentSHA256, marker.CounterCount); err != nil {
+			return false, fmt.Errorf("replace pm_files marker: %w", err)
+		}
+	case findErr != pgx.ErrNoRows:
+		return false, fmt.Errorf("lookup pm_files marker: %w", findErr)
+	default:
+		ct, err := tx.Exec(ctx,
+			`INSERT INTO pm_files (id, device_id, device_sn, carrier, technology, file_name, file_size,
+			                       collect_time, minio_path, content_sha256, parsed, parsed_at,
+			                       counter_count, created_at)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,now(),$11,NOW())
+			 ON CONFLICT DO NOTHING`,
+			id, marker.DeviceID, marker.DeviceSN, marker.Carrier, marker.Technology, marker.FileName,
+			marker.FileSize, marker.CollectTime, marker.MinioPath, marker.ContentSHA256, marker.CounterCount)
+		if err != nil {
+			return false, fmt.Errorf("insert pm_files marker: %w", err)
+		}
+		if ct.RowsAffected() == 0 {
+			// A concurrent transaction or a differently named copy with the same
+			// device/content digest already committed.
+			return false, nil
+		}
+	}
+	batchID := uuid.New()
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO pm_ingest_batches (ingest_batch_id, source_file_id, status) VALUES ($1,$2,'building')`,
+		batchID, id); err != nil {
+		return false, fmt.Errorf("insert pm ingest batch: %w", err)
+	}
+	if err := writeSparseMeasurements(ctx, tx, &id, &batchID, measurements); err != nil {
+		return false, classifyInsertError(err)
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE pm_ingest_batches SET status='committed', committed_at=now() WHERE ingest_batch_id=$1`,
+		batchID); err != nil {
+		return false, fmt.Errorf("commit pm ingest batch: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, classifyInsertError(err)

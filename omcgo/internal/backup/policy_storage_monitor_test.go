@@ -3,13 +3,17 @@ package backup
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
 	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/s3utils"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/omcgo/omcgo/internal/core/event"
 )
@@ -20,9 +24,11 @@ import (
 type fakeBucketLister struct {
 	objects []minio.ObjectInfo
 	err     error
+	buckets []string
 }
 
-func (f *fakeBucketLister) ListObjects(_ context.Context, _ string, _ minio.ListObjectsOptions) <-chan minio.ObjectInfo {
+func (f *fakeBucketLister) ListObjects(_ context.Context, bucket string, _ minio.ListObjectsOptions) <-chan minio.ObjectInfo {
+	f.buckets = append(f.buckets, bucket)
 	ch := make(chan minio.ObjectInfo, len(f.objects)+1)
 	if f.err != nil {
 		ch <- minio.ObjectInfo{Err: f.err}
@@ -147,6 +153,17 @@ func TestStorageCheck_BelowThreshold_NoAlarm(t *testing.T) {
 	assert.False(t, mon.lastAboveThreshold, "edge state stays below")
 }
 
+func TestStorageCheck_UsesValidPhysicalBackupBucket(t *testing.T) {
+	policy := makeStoragePolicy(10, 80, true)
+	lister := &fakeBucketLister{}
+	mon, _ := newStorageMonitor(t, policy, lister, &fakeEventBus{})
+
+	_, err := mon.RunStorageCheckOnce(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, []string{"config-backup"}, lister.buckets)
+	require.NoError(t, s3utils.CheckValidBucketNameStrict(lister.buckets[0]))
+}
+
 // V2 — first crossing above threshold publishes alarm.raised once.
 func TestStorageCheck_FirstAboveThreshold_PublishesRaised(t *testing.T) {
 	policy := makeStoragePolicy(10, 80, true) // threshold = 8 GB
@@ -166,7 +183,7 @@ func TestStorageCheck_FirstAboveThreshold_PublishesRaised(t *testing.T) {
 	assert.Equal(t, "backup", payload.Source)
 	assert.Equal(t, "major", payload.Severity)
 	assert.Equal(t, storageThresholdIdentifier, payload.Identifier)
-	assert.Equal(t, "config_backup", payload.BucketName)
+	assert.Equal(t, "config-backup", payload.BucketName)
 	assert.Equal(t, gigabyte(9), payload.UsedBytes)
 	assert.Equal(t, gigabyte(10), payload.CapacityBytes)
 	assert.Equal(t, 90, payload.UsagePercent)
@@ -246,6 +263,28 @@ func TestStorageCheck_ListError_FailOpen(t *testing.T) {
 	mon.storageMu.Lock()
 	defer mon.storageMu.Unlock()
 	assert.False(t, mon.lastAboveThreshold, "edge state untouched on list failure")
+}
+
+func TestStorageCheck_RequestCancellationDoesNotInflateFailureMetricOrWarning(t *testing.T) {
+	for _, queryErr := range []error{
+		context.Canceled,
+		context.DeadlineExceeded,
+		fmt.Errorf("list backup bucket: %w", context.Canceled),
+		fmt.Errorf("list backup bucket: %w", context.DeadlineExceeded),
+	} {
+		core, logs := observer.New(zap.WarnLevel)
+		metrics := NewPolicyMetrics(nil)
+		policySvc := NewPolicyService(&monPolicyRepo{current: makeStoragePolicy(10, 80, true)}, zap.NewNop())
+		mon := NewPolicyMonitor(policySvc, &monTaskRepo{}, metrics, zap.New(core))
+		mon.SetBucketLister(&fakeBucketLister{err: queryErr})
+		mon.SetEventBus(&fakeEventBus{})
+
+		_, err := mon.RunStorageCheckOnce(context.Background())
+		require.ErrorIs(t, err, queryErr)
+		assert.Zero(t, testutil.ToFloat64(metrics.storageCheckTotal.WithLabelValues("failure")),
+			"request cancellation must not increment storage failure metric")
+		assert.Zero(t, logs.Len(), "request cancellation must not emit warning")
+	}
 }
 
 // V6 — AlertOnFailure=false skips entire check (no list, no alarm).

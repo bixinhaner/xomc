@@ -58,6 +58,11 @@ func NewPgRepository(pool *pgxpool.Pool) *PgRepository {
 
 var _ Repository = (*PgRepository)(nil)
 
+const (
+	recoverableHourlyJobType = "pm_aggregate_hourly"
+	maxFailedBucketScanLimit = 500
+)
+
 func (r *PgRepository) Insert(ctx context.Context, req InsertRequest) (uuid.UUID, error) {
 	q, args, err := buildInsertSQL(req)
 	if err != nil {
@@ -68,6 +73,267 @@ func (r *PgRepository) Insert(ctx context.Context, req InsertRequest) (uuid.UUID
 		return uuid.Nil, fmt.Errorf("insert async_jobs: %w", err)
 	}
 	return id, nil
+}
+
+// RequeueSucceededBucket makes a previously completed natural bucket runnable
+// again. It is intentionally separate from Insert so normal cron/catch-up
+// idempotency never replays successful work; late PM data is the explicit caller.
+func (r *PgRepository) RequeueSucceededBucket(
+	ctx context.Context,
+	jobType string,
+	start, end time.Time,
+	payload json.RawMessage,
+) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := r.pool.QueryRow(ctx, `
+		UPDATE async_jobs
+		   SET status='pending', scheduled_at=now(), payload=$4,
+		       started_at=NULL, finished_at=NULL, heartbeat_at=NULL,
+		       lock_owner=NULL, attempt=1, result=NULL, error_message=NULL
+		 WHERE job_type=$1 AND bucket_start=$2 AND bucket_end=$3
+		   AND status='succeeded'
+		RETURNING id`, jobType, start, end, payload).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, fmt.Errorf("requeue succeeded async bucket: %w", err)
+	}
+	bucketStart, bucketEnd := start, end
+	return r.Insert(ctx, InsertRequest{
+		JobType: jobType, Payload: payload,
+		BucketStart: &bucketStart, BucketEnd: &bucketEnd,
+	})
+}
+
+// RequeueRetriableFailedBucket atomically requeues one terminal natural hourly
+// bucket when its error is a retriable PostgreSQL transaction failure, its
+// independent recovery budget remains, and its cooldown has elapsed. A false
+// result is a normal guarded no-op, including a concurrent caller losing the
+// status='failed' race.
+func (r *PgRepository) RequeueRetriableFailedBucket(
+	ctx context.Context,
+	req FailedBucketRecoveryRequest,
+) (uuid.UUID, bool, error) {
+	q, args, err := buildRequeueRetriableFailedBucketSQL(req)
+	if err != nil {
+		return uuid.Nil, false, err
+	}
+	var id uuid.UUID
+	if err := r.pool.QueryRow(ctx, q, args...).Scan(&id); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return uuid.Nil, false, nil
+		}
+		return uuid.Nil, false, fmt.Errorf("requeue retriable failed hourly bucket: %w", err)
+	}
+	return id, true, nil
+}
+
+func buildRequeueRetriableFailedBucketSQL(req FailedBucketRecoveryRequest) (string, []any, error) {
+	if req.JobType != recoverableHourlyJobType {
+		return "", nil, fmt.Errorf("recover failed bucket: unsupported job type %q", req.JobType)
+	}
+	if req.BucketStart.IsZero() ||
+		!req.BucketStart.Equal(req.BucketStart.Truncate(time.Hour)) ||
+		req.BucketEnd.Sub(req.BucketStart) != time.Hour {
+		return "", nil, fmt.Errorf("recover failed bucket: window must be one natural hour")
+	}
+	if req.MaxRecoveries <= 0 {
+		return "", nil, fmt.Errorf("recover failed bucket: max recoveries must be positive")
+	}
+	if req.Cooldown < 0 {
+		return "", nil, fmt.Errorf("recover failed bucket: cooldown must not be negative")
+	}
+	const q = `
+UPDATE async_jobs
+   SET status = 'pending',
+       scheduled_at = NOW(),
+       payload = $4,
+       started_at = NULL,
+       finished_at = NULL,
+       heartbeat_at = NULL,
+       lock_owner = NULL,
+       attempt = 1,
+       result = NULL,
+       recovery_count = recovery_count + 1,
+       last_recovered_at = NOW()
+ WHERE job_type = $1
+   AND job_type = 'pm_aggregate_hourly'
+   AND bucket_start = $2
+   AND bucket_end = $3
+   AND bucket_start = date_trunc('hour', bucket_start)
+   AND bucket_end = bucket_start + interval '1 hour'
+   AND bucket_end <= NOW()
+   AND status = 'failed'
+   AND finished_at IS NOT NULL
+   AND error_message ~ '(^|[^[:alnum:]])SQLSTATE (40P01|40001)([^[:alnum:]]|$)'
+   AND recovery_count < $5
+   AND GREATEST(
+           COALESCE(finished_at, '-infinity'::timestamptz),
+           COALESCE(last_recovered_at, '-infinity'::timestamptz)
+       ) <= NOW() - $6::interval
+RETURNING id`
+	return q, []any{
+		req.JobType,
+		req.BucketStart,
+		req.BucketEnd,
+		req.Payload,
+		req.MaxRecoveries,
+		req.Cooldown.String(),
+	}, nil
+}
+
+// ListRecoverableFailedNaturalBuckets filters non-retriable, exhausted and
+// cooling-down rows before LIMIT so blocking terminal rows cannot starve newer
+// eligible buckets. The guarded update remains the final authority after scan.
+func (r *PgRepository) ListRecoverableFailedNaturalBuckets(
+	ctx context.Context,
+	req FailedBucketMaintenanceRequest,
+) ([]Job, error) {
+	if err := validateFailedBucketMaintenanceRequest(req); err != nil {
+		return nil, err
+	}
+	limit := req.Limit
+	if limit > maxFailedBucketScanLimit {
+		limit = maxFailedBucketScanLimit
+	}
+	rows, err := r.pool.Query(
+		ctx,
+		buildListRecoverableFailedNaturalBucketsSQL(),
+		req.JobType,
+		req.Since,
+		limit,
+		req.MaxRecoveries,
+		req.Cooldown.String(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list recoverable failed natural hourly buckets: %w", err)
+	}
+	defer rows.Close()
+	var jobs []Job
+	for rows.Next() {
+		job, err := scanJob(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan recoverable failed natural hourly bucket: %w", err)
+		}
+		jobs = append(jobs, *job)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate recoverable failed natural hourly buckets: %w", err)
+	}
+	return jobs, nil
+}
+
+func buildListRecoverableFailedNaturalBucketsSQL() string {
+	return fmt.Sprintf(`
+SELECT %s
+  FROM async_jobs
+ WHERE job_type=$1
+   AND job_type='pm_aggregate_hourly'
+   AND status='failed'
+   AND bucket_start >= $2
+   AND bucket_start=date_trunc('hour', bucket_start)
+   AND bucket_end=bucket_start+interval '1 hour'
+   AND bucket_end <= NOW()
+   AND finished_at IS NOT NULL
+   AND error_message ~ '(^|[^[:alnum:]])SQLSTATE (40P01|40001)([^[:alnum:]]|$)'
+   AND recovery_count < $4
+   AND GREATEST(
+           finished_at,
+           COALESCE(last_recovered_at, '-infinity'::timestamptz)
+       ) <= NOW() - $5::interval
+ ORDER BY bucket_start, id
+ LIMIT $3`, joinJobCols())
+}
+
+// GetFailedBucketStats samples bounded failure health independently of the
+// eligible recovery LIMIT, so aged/exhausted alerts reflect all recent failures.
+func (r *PgRepository) GetFailedBucketStats(
+	ctx context.Context,
+	req FailedBucketMaintenanceRequest,
+) (FailedBucketStats, error) {
+	if err := validateFailedBucketMaintenanceRequest(req); err != nil {
+		return FailedBucketStats{}, err
+	}
+	var stats FailedBucketStats
+	err := r.pool.QueryRow(
+		ctx,
+		buildFailedBucketStatsSQL(),
+		req.JobType,
+		req.Since,
+		req.MaxRecoveries,
+		req.AgedAfter.String(),
+	).Scan(&stats.FailedCount, &stats.ExhaustedCount, &stats.AgedCount)
+	if err != nil {
+		return FailedBucketStats{}, fmt.Errorf("get failed natural hourly bucket stats: %w", err)
+	}
+	return stats, nil
+}
+
+func buildFailedBucketStatsSQL() string {
+	return `
+SELECT count(*)::int,
+       count(*) FILTER (WHERE recovery_count >= $3)::int,
+       count(*) FILTER (WHERE finished_at <= NOW() - $4::interval)::int
+  FROM async_jobs
+ WHERE job_type=$1
+   AND job_type='pm_aggregate_hourly'
+   AND status='failed'
+   AND bucket_start >= $2
+   AND bucket_start=date_trunc('hour', bucket_start)
+   AND bucket_end=bucket_start+interval '1 hour'
+   AND bucket_end <= NOW()
+   AND finished_at IS NOT NULL`
+}
+
+func validateFailedBucketMaintenanceRequest(req FailedBucketMaintenanceRequest) error {
+	if req.JobType != recoverableHourlyJobType {
+		return fmt.Errorf("maintain failed bucket: unsupported job type %q", req.JobType)
+	}
+	if req.Since.IsZero() {
+		return fmt.Errorf("maintain failed bucket: since must be set")
+	}
+	if req.Limit <= 0 {
+		return fmt.Errorf("maintain failed bucket: limit must be positive")
+	}
+	if req.MaxRecoveries <= 0 {
+		return fmt.Errorf("maintain failed bucket: max recoveries must be positive")
+	}
+	if req.Cooldown < 0 {
+		return fmt.Errorf("maintain failed bucket: cooldown must not be negative")
+	}
+	if req.AgedAfter <= 0 {
+		return fmt.Errorf("maintain failed bucket: aged-after must be positive")
+	}
+	return nil
+}
+
+// FindNaturalBucketJob resolves the current main-database job state for stale
+// TimescaleDB building-version cleanup.
+func (r *PgRepository) FindNaturalBucketJob(
+	ctx context.Context,
+	jobType string,
+	start, end time.Time,
+) (*Job, bool, error) {
+	q, args, err := storage.Psql.Select(jobCols...).
+		From("async_jobs").
+		Where(sq.Eq{
+			"job_type":     jobType,
+			"bucket_start": start,
+			"bucket_end":   end,
+		}).
+		ToSql()
+	if err != nil {
+		return nil, false, fmt.Errorf("build find natural bucket job: %w", err)
+	}
+	job, err := scanJob(r.pool.QueryRow(ctx, q, args...))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("find natural bucket job: %w", err)
+	}
+	return job, true, nil
 }
 
 func buildInsertSQL(req InsertRequest) (string, []any, error) {
@@ -83,47 +349,58 @@ ON CONFLICT (job_type, bucket_start, bucket_end)
 WHERE bucket_start IS NOT NULL AND bucket_end IS NOT NULL
 DO UPDATE SET
     status = CASE
-        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN 'pending'
+        WHEN async_jobs.status IN ('canceled', 'zombie')
+          OR (async_jobs.status = 'failed' AND async_jobs.job_type <> 'pm_aggregate_hourly') THEN 'pending'
         ELSE async_jobs.status
     END,
     scheduled_at = CASE
-        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN EXCLUDED.scheduled_at
+        WHEN async_jobs.status IN ('canceled', 'zombie')
+          OR (async_jobs.status = 'failed' AND async_jobs.job_type <> 'pm_aggregate_hourly') THEN EXCLUDED.scheduled_at
         ELSE async_jobs.scheduled_at
     END,
     payload = CASE
-        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN EXCLUDED.payload
+        WHEN async_jobs.status IN ('canceled', 'zombie')
+          OR (async_jobs.status = 'failed' AND async_jobs.job_type <> 'pm_aggregate_hourly') THEN EXCLUDED.payload
         ELSE async_jobs.payload
     END,
     max_attempts = CASE
-        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN EXCLUDED.max_attempts
+        WHEN async_jobs.status IN ('canceled', 'zombie')
+          OR (async_jobs.status = 'failed' AND async_jobs.job_type <> 'pm_aggregate_hourly') THEN EXCLUDED.max_attempts
         ELSE async_jobs.max_attempts
     END,
     started_at = CASE
-        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN NULL
+        WHEN async_jobs.status IN ('canceled', 'zombie')
+          OR (async_jobs.status = 'failed' AND async_jobs.job_type <> 'pm_aggregate_hourly') THEN NULL
         ELSE async_jobs.started_at
     END,
     finished_at = CASE
-        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN NULL
+        WHEN async_jobs.status IN ('canceled', 'zombie')
+          OR (async_jobs.status = 'failed' AND async_jobs.job_type <> 'pm_aggregate_hourly') THEN NULL
         ELSE async_jobs.finished_at
     END,
     heartbeat_at = CASE
-        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN NULL
+        WHEN async_jobs.status IN ('canceled', 'zombie')
+          OR (async_jobs.status = 'failed' AND async_jobs.job_type <> 'pm_aggregate_hourly') THEN NULL
         ELSE async_jobs.heartbeat_at
     END,
     lock_owner = CASE
-        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN NULL
+        WHEN async_jobs.status IN ('canceled', 'zombie')
+          OR (async_jobs.status = 'failed' AND async_jobs.job_type <> 'pm_aggregate_hourly') THEN NULL
         ELSE async_jobs.lock_owner
     END,
     attempt = CASE
-        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN 1
+        WHEN async_jobs.status IN ('canceled', 'zombie')
+          OR (async_jobs.status = 'failed' AND async_jobs.job_type <> 'pm_aggregate_hourly') THEN 1
         ELSE async_jobs.attempt
     END,
     result = CASE
-        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN NULL
+        WHEN async_jobs.status IN ('canceled', 'zombie')
+          OR (async_jobs.status = 'failed' AND async_jobs.job_type <> 'pm_aggregate_hourly') THEN NULL
         ELSE async_jobs.result
     END,
     error_message = CASE
-        WHEN async_jobs.status IN ('failed', 'canceled', 'zombie') THEN NULL
+        WHEN async_jobs.status IN ('canceled', 'zombie')
+          OR (async_jobs.status = 'failed' AND async_jobs.job_type <> 'pm_aggregate_hourly') THEN NULL
         ELSE async_jobs.error_message
     END`).
 		Suffix("RETURNING id").
@@ -166,7 +443,8 @@ SET status = 'running',
 FROM next
 WHERE aj.id = next.id
 RETURNING aj.id, aj.job_type, aj.status, aj.schedule_expr, aj.scheduled_at, aj.started_at, aj.finished_at,
-          aj.bucket_start, aj.bucket_end, aj.heartbeat_at, aj.lock_owner, aj.attempt, aj.max_attempts, aj.payload, aj.result, aj.error_message,
+          aj.bucket_start, aj.bucket_end, aj.heartbeat_at, aj.lock_owner, aj.attempt, aj.max_attempts,
+          aj.recovery_count, aj.last_recovered_at, aj.payload, aj.result, aj.error_message,
           aj.created_at, aj.updated_at
 `
 	row := r.pool.QueryRow(ctx, q, jobType, lockOwner)
@@ -278,6 +556,31 @@ GROUP BY job_type, status`
 	return out, rows.Err()
 }
 
+// OldestPendingAgeSeconds returns queue age independently of queue depth so a
+// steady-size but permanently stalled PM queue remains observable.
+func (r *PgRepository) OldestPendingAgeSeconds(ctx context.Context) (map[string]float64, error) {
+	const q = `
+SELECT job_type, EXTRACT(EPOCH FROM (now()-MIN(scheduled_at)))::float8
+FROM async_jobs
+WHERE status='pending' AND scheduled_at <= now()
+GROUP BY job_type`
+	rows, err := r.pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("oldest pending age: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]float64)
+	for rows.Next() {
+		var jobType string
+		var seconds float64
+		if err := rows.Scan(&jobType, &seconds); err != nil {
+			return nil, err
+		}
+		out[jobType] = seconds
+	}
+	return out, rows.Err()
+}
+
 // ResetZombie 单 SQL 原子做"attempt 检查 + 重置"，避免读改写竞态。
 // 若 attempt < max_attempts → status pending, attempt+1, heartbeat_at=NULL；
 // 若 attempt >= max_attempts → status failed, finished_at=NOW(), error_message='attempts exhausted (zombie)'；
@@ -312,7 +615,8 @@ RETURNING status
 
 var jobCols = []string{
 	"id", "job_type", "status", "schedule_expr", "scheduled_at", "started_at", "finished_at",
-	"bucket_start", "bucket_end", "heartbeat_at", "lock_owner", "attempt", "max_attempts", "payload", "result", "error_message",
+	"bucket_start", "bucket_end", "heartbeat_at", "lock_owner", "attempt", "max_attempts",
+	"recovery_count", "last_recovered_at", "payload", "result", "error_message",
 	"created_at", "updated_at",
 }
 
@@ -337,7 +641,8 @@ func scanJob(row rowScanner) (*Job, error) {
 	var payload, result []byte
 	if err := row.Scan(
 		&j.ID, &j.JobType, &j.Status, &scheduleExpr, &j.ScheduledAt, &j.StartedAt, &j.FinishedAt,
-		&j.BucketStart, &j.BucketEnd, &j.HeartbeatAt, &lockOwner, &j.Attempt, &j.MaxAttempts, &payload, &result, &errMsg,
+		&j.BucketStart, &j.BucketEnd, &j.HeartbeatAt, &lockOwner, &j.Attempt, &j.MaxAttempts,
+		&j.RecoveryCount, &j.LastRecoveredAt, &payload, &result, &errMsg,
 		&j.CreatedAt, &j.UpdatedAt,
 	); err != nil {
 		return nil, err

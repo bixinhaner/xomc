@@ -81,7 +81,7 @@ func TestOrphanReaper_V1_SuccessPath(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, reaped)
 	require.Len(t, remover.calls, 1)
-	assert.Equal(t, "config_backup", remover.calls[0].bucket)
+	assert.Equal(t, "config-backup", remover.calls[0].bucket)
 	assert.Equal(t, "backup/2026/03/29/aabbccdd/SN999_CFG.xml", remover.calls[0].object)
 }
 
@@ -130,8 +130,8 @@ func TestOrphanReaper_V4_PatternMismatchSkipped(t *testing.T) {
 		[]minio.ObjectInfo{
 			obj("unrelated/manual-upload.xml", 60),
 			obj("backup/garbage.txt", 60),
-			obj("backup/2026/03/29/XYZINVHX/SN001_CFG.xml", 60),     // taskID8 must be hex
-			obj("backup/2026/03/29/aabbccdd/SN001_log.xml", 60),     // non-CFG payload ignored
+			obj("backup/2026/03/29/XYZINVHX/SN001_CFG.xml", 60), // taskID8 must be hex
+			obj("backup/2026/03/29/aabbccdd/SN001_log.xml", 60), // non-CFG payload ignored
 		},
 		map[string]struct{}{},
 	)
@@ -297,7 +297,7 @@ func TestParseBackupFilename(t *testing.T) {
 		{"backup-deadbeef-SN001.xml", "", false},
 		// 非 CFG 命名 / 缺 taskID8 目录 / 非 hex / 大写 hex 均拒绝。
 		{"manual-upload.xml", "", false},
-		{"config_backup/2026/06/23/SN999_CFG.xml", "", false},      // missing taskID8 segment
+		{"config_backup/2026/06/23/SN999_CFG.xml", "", false}, // missing taskID8 segment
 		{"config_backup/2026/06/23/aabbccdd/SN999_log.xml", "", false},
 		{"config_backup/2026/06/23/AABBCCDD/SN999_CFG.xml", "", false}, // case-sensitive lowercase
 	}

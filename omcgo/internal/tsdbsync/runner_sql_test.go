@@ -40,3 +40,10 @@ func TestBuildMirrorMergeSQLRejectsMissingKeyColumn(t *testing.T) {
 	_, _, err := buildMirrorMergeSQL("dst", "stage", []string{"name"}, []string{"id"})
 	assert.Error(t, err)
 }
+
+func TestMetricDictionarySyncDoesNotRewriteStableRowsOrPromoteKPIReportKeys(t *testing.T) {
+	assert.Contains(t, metricDictionarySyncSQL, "AND s.is_counter='1'",
+		"only configured counters may enrich dynamically discovered report-key rows")
+	assert.GreaterOrEqual(t, strings.Count(metricDictionarySyncSQL, "IS DISTINCT FROM"), 2,
+		"both configured-path upserts and unknown-path enrichment must skip unchanged rows")
+}

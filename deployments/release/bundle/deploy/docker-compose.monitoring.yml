@@ -184,6 +184,10 @@ services:
       # 每 30s scrape 一次全部认证失败（线上巡检发现），必须从 .env 同源注入。
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_TSDB_PASSWORD: ${POSTGRES_TSDB_PASSWORD}
+    ports:
+      # Collector 镜像是 distroless；由宿主 healthcheck.sh 通过 health_check
+      # extension 外部探测，只绑定回环，不对生产网络暴露。
+      - "127.0.0.1:13133:13133"
     volumes:
       - ./monitoring/otelcol/config.yaml:/etc/otelcol-contrib/config.yaml:ro
       # 采集业务容器的日志：与 app/acs/worker 容器 /run/logs 挂载源同路径
@@ -198,8 +202,8 @@ services:
         reservations:
           cpus: "0.25"
           memory: 256m
-    # otelcol-contrib 是 distroless 镜像，无 shell/wget；不配 healthcheck。
-    # 详见 deployments/docker/docker-compose.yml 中同段注释。
+    # otelcol-contrib 是 distroless 镜像，无 shell/wget；不配置容器内 CMD
+    # healthcheck。deploy/healthcheck.sh 从宿主探测 :13133 health extension。
     depends_on:
       tempo:
         condition: service_healthy

@@ -86,6 +86,15 @@ if [ -f "$SCRIPT_DIR/storage-paths-lib.sh" ]; then
 else
   die "缺 $SCRIPT_DIR/storage-paths-lib.sh"
 fi
+if [ -f "$SCRIPT_DIR/monitoring-profile-lib.sh" ]; then
+  . "$SCRIPT_DIR/monitoring-profile-lib.sh"
+else
+  die "缺 $SCRIPT_DIR/monitoring-profile-lib.sh"
+fi
+
+# 显式 flag 优先；无 flag 时读取 install.sh 持久化在 .env 的部署模式。
+monitoring_profile_apply_runtime ".env" "$SKIP_MONITORING" ||
+  die "无法读取 monitoring profile"
 
 COMPOSE_FILES=()
 [ -f docker-compose.infra.yml ] && COMPOSE_FILES+=( -f docker-compose.infra.yml )

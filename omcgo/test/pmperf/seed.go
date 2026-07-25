@@ -125,8 +125,8 @@ type cleanupResult struct {
 	dlq     int64
 }
 
-// cleanupAll 一键清除测试数据：pm_metrics（含 KPI 行）、pm_files、devices、dead_letters
-// （按 SN 前缀 / payload 命中）。pm_metrics 无外键，删除顺序无要求。
+// cleanupAll 一键清除测试数据：稀疏 PM 值/锚点、pm_files、devices、dead_letters
+// （按 SN 前缀 / payload 命中）。值必须先于锚点删除。
 // KPI/时序库物理分离后 pm_metrics/pm_files 在时序库（tsPool），devices/dead_letters 在主库
 // （mainPool）；未分离部署时两者指向同一池。
 func cleanupAll(ctx context.Context, mainPool, tsPool *pgxpool.Pool, prefix string) (cleanupResult, error) {
@@ -144,8 +144,18 @@ func cleanupAll(ctx context.Context, mainPool, tsPool *pgxpool.Pool, prefix stri
 	}
 
 	var err error
-	if r.metrics, err = exec(tsPool, `DELETE FROM pm_metrics WHERE device_sn LIKE $1`, pat); err != nil {
-		return r, fmt.Errorf("delete pm_metrics: %w", err)
+	if r.metrics, err = exec(tsPool, `
+DELETE FROM pm_metric_values v
+USING pm_measurement_anchors a, device_dim d
+WHERE v."time"=a."time" AND v.anchor_id=a.anchor_id
+  AND d.id=a.device_dim_id AND d.serial_number LIKE $1`, pat); err != nil {
+		return r, fmt.Errorf("delete pm_metric_values: %w", err)
+	}
+	if _, err = exec(tsPool, `
+DELETE FROM pm_measurement_anchors a
+USING device_dim d
+WHERE d.id=a.device_dim_id AND d.serial_number LIKE $1`, pat); err != nil {
+		return r, fmt.Errorf("delete pm_measurement_anchors: %w", err)
 	}
 	if r.files, err = exec(tsPool, `DELETE FROM pm_files WHERE device_sn LIKE $1`, pat); err != nil {
 		return r, fmt.Errorf("delete pm_files: %w", err)

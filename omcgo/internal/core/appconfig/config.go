@@ -33,6 +33,7 @@ type ACSConfig struct {
 	TSDB                    PostgresConfig        `mapstructure:"tsdb"` // KPI/时序库物理分离：ACS 写 trace_messages（已迁时序库）所需的第二个连接池
 	MinIO                   MinIOConfig           `mapstructure:"minio"`
 	Upload                  UploadConfig          `mapstructure:"upload"`
+	Backpressure            BackpressureConfig    `mapstructure:"backpressure"`
 	Download                DownloadConfig        `mapstructure:"download"`
 	Metrics                 MetricsConfig         `mapstructure:"metrics"`
 	Tracer                  TracerConfig          `mapstructure:"tracer"`
@@ -81,6 +82,43 @@ type UploadConfig struct {
 	TokenSecret string        `mapstructure:"token_secret"`  // JWT signing secret (optional)
 	TokenTTL    time.Duration `mapstructure:"token_ttl"`     // Token validity duration
 	MaxFileSize int64         `mapstructure:"max_file_size"` // Max file size in bytes
+}
+
+// BackpressureConfig supplies deployment defaults for queue-risk admission.
+// Runtime sys_configs may override these values without restarting ACS.
+type BackpressureConfig struct {
+	QueuePendingHigh int           `mapstructure:"queue_pending_high"`
+	QueuePendingLow  int           `mapstructure:"queue_pending_low"`
+	QueueOldestHigh  time.Duration `mapstructure:"queue_oldest_high"`
+	QueueOldestLow   time.Duration `mapstructure:"queue_oldest_low"`
+	QueueSlopeWindow time.Duration `mapstructure:"queue_slope_window"`
+}
+
+// Defaults preserves safe queue hysteresis when older configuration files do
+// not yet contain a backpressure section.
+func (c BackpressureConfig) Defaults() BackpressureConfig {
+	if c.QueuePendingHigh <= 0 {
+		c.QueuePendingHigh = 2000
+	}
+	if c.QueuePendingLow <= 0 {
+		c.QueuePendingLow = 500
+	}
+	if c.QueuePendingLow > c.QueuePendingHigh {
+		c.QueuePendingLow = c.QueuePendingHigh
+	}
+	if c.QueueOldestHigh <= 0 {
+		c.QueueOldestHigh = 10 * time.Minute
+	}
+	if c.QueueOldestLow <= 0 {
+		c.QueueOldestLow = 2 * time.Minute
+	}
+	if c.QueueOldestLow > c.QueueOldestHigh {
+		c.QueueOldestLow = c.QueueOldestHigh
+	}
+	if c.QueueSlopeWindow <= 0 {
+		c.QueueSlopeWindow = 5 * time.Minute
+	}
+	return c
 }
 
 // DownloadConfig 配置 ACS 的文件下载分发服务。
@@ -882,6 +920,61 @@ type BucketConfig struct {
 	FileBundles string `mapstructure:"file_bundles"`
 }
 
+const (
+	// ConfigBackupBucket is the only physical S3/MinIO bucket name used for
+	// device configuration backups.
+	ConfigBackupBucket = "config-backup"
+	// LegacyConfigBackupBucket is accepted only at API/config boundaries.
+	LegacyConfigBackupBucket = "config_backup"
+)
+
+// NormalizeConfigBackupBucket converts the legacy logical compatibility name
+// before it reaches an S3/MinIO client. Other bucket names are left untouched.
+func NormalizeConfigBackupBucket(bucket string) string {
+	if bucket == LegacyConfigBackupBucket {
+		return ConfigBackupBucket
+	}
+	return bucket
+}
+
+// NormalizeConfigBackupReference normalizes bucket-qualified internal object
+// paths and OMC FileDownloadService HTTP(S) routes. Arbitrary external URLs
+// are returned byte-for-byte, even when their object path happens to contain a
+// directory named config_backup.
+func NormalizeConfigBackupReference(reference string) string {
+	if reference == LegacyConfigBackupBucket {
+		return ConfigBackupBucket
+	}
+	if strings.HasPrefix(reference, LegacyConfigBackupBucket+"/") {
+		return ConfigBackupBucket + strings.TrimPrefix(reference, LegacyConfigBackupBucket)
+	}
+	legacyDownloadSegment := "/smallcell/FileDownloadService/" + LegacyConfigBackupBucket + "/"
+	canonicalDownloadSegment := "/smallcell/FileDownloadService/" + ConfigBackupBucket + "/"
+	lowerReference := strings.ToLower(reference)
+	if strings.Contains(reference, "://") {
+		if (strings.HasPrefix(lowerReference, "http://") || strings.HasPrefix(lowerReference, "https://")) &&
+			strings.Contains(reference, legacyDownloadSegment) {
+			return strings.Replace(reference, legacyDownloadSegment, canonicalDownloadSegment, 1)
+		}
+		return reference
+	}
+	if strings.Contains(reference, legacyDownloadSegment) {
+		return strings.Replace(reference, legacyDownloadSegment, canonicalDownloadSegment, 1)
+	}
+	return reference
+}
+
+func normalizeLoadedConfigBackup(target interface{}) {
+	switch cfg := target.(type) {
+	case *AppConfig:
+		cfg.MinIO.Buckets.ConfigBackup = NormalizeConfigBackupBucket(cfg.MinIO.Buckets.ConfigBackup)
+	case *ACSConfig:
+		cfg.MinIO.Buckets.ConfigBackup = NormalizeConfigBackupBucket(cfg.MinIO.Buckets.ConfigBackup)
+	case *WorkerConfig:
+		cfg.MinIO.Buckets.ConfigBackup = NormalizeConfigBackupBucket(cfg.MinIO.Buckets.ConfigBackup)
+	}
+}
+
 // MetricsConfig 配置 Prometheus 指标暴露端口。
 // 各服务在此端口提供 /metrics 端点，供 Prometheus 采集。
 // 同一端口也提供 /healthz 健康检查接口（由 HealthChecker 驱动）。
@@ -1020,6 +1113,7 @@ func Load(path string, target interface{}) error {
 	if err := v.Unmarshal(target); err != nil {
 		return fmt.Errorf("unmarshal config: %w", err)
 	}
+	normalizeLoadedConfigBackup(target)
 
 	// Validate if target implements Validatable
 	if v, ok := target.(Validatable); ok {
@@ -1056,6 +1150,7 @@ func LoadWithEnvOverride(path string, target interface{}, envOverrides map[strin
 	if err := v.Unmarshal(target); err != nil {
 		return fmt.Errorf("unmarshal config: %w", err)
 	}
+	normalizeLoadedConfigBackup(target)
 
 	// Validate if target implements Validatable
 	if v, ok := target.(Validatable); ok {

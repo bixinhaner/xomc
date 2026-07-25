@@ -67,6 +67,14 @@ func startPMAggregatorPipeline(
 	aggregatorMetrics := aggregator.NewMetrics(w.MetricsReg)
 	asyncMetrics := asyncjob.NewMetrics(w.MetricsReg)
 	registry.SetMetrics(asyncMetrics)
+	go aggregator.RunSparseMaintenance(
+		ctx,
+		w.TsPool,
+		jobRepo,
+		aggregator.ParseLateDataWindow(os.Getenv("PM_LATE_DATA_WINDOW")),
+		aggregatorMetrics,
+		logger.Named("sparse-maintenance"),
+	)
 
 	// 2) 注册 4 个 G5 设备级 asyncjob runner
 	runners := []*aggregator.Runner{
@@ -75,6 +83,8 @@ func startPMAggregatorPipeline(
 		aggregator.NewWeeklyRunner(aggr),
 		aggregator.NewMonthlyRunner(aggr),
 	}
+	runners[0].SetHourlyBatchDevices(
+		aggregator.ParseHourlyBatchDevices(os.Getenv("PM_HOURLY_BATCH_DEVICES")))
 	for _, r := range runners {
 		r.SetMetrics(aggregatorMetrics)
 		// #479 改动三：设备级该桶聚合成功后，确定性串联对应粒度的设备组聚合任务

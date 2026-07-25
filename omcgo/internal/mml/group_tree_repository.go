@@ -53,6 +53,7 @@ type GroupTreeCommand struct {
 	RPCMethod        string            `json:"rpc_method"`
 	RequireConfirm   bool              `json:"require_confirm"`
 	TargetObject     string            `json:"target_object,omitempty"`
+	TargetPaths      []string          `json:"target_paths,omitempty"`
 	Source           string            `json:"source"`
 	CatalogProtected bool              `json:"catalog_protected"`
 	// InstanceRangeMeta 是 spec §R-4.1.1 每层 {i} 占位符的取值范围 metadata，
@@ -79,7 +80,10 @@ func (c *GroupTreeCommand) TargetPathsRaw() []byte { return c.rawTargetPaths }
 
 // SetTargetPathsRaw 由 repository 调用时填入。导出 setter 让 repository（同 pkg）
 // 在 BuildTree 时塞值；外部 pkg 不需要。
-func (c *GroupTreeCommand) SetTargetPathsRaw(raw []byte) { c.rawTargetPaths = raw }
+func (c *GroupTreeCommand) SetTargetPathsRaw(raw []byte) {
+	c.rawTargetPaths = raw
+	c.TargetPaths = parseTargetPathsJSON(raw)
+}
 
 // GroupTreeRepository 提供命令树查询能力。
 type GroupTreeRepository interface {

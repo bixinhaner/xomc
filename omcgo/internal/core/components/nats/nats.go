@@ -19,9 +19,10 @@ type NATSClient struct {
 
 // StreamDef defines a JetStream stream.
 type StreamDef struct {
-	Name      string
-	Subjects  []string
-	Retention nats.RetentionPolicy
+	Name        string
+	Subjects    []string
+	Retention   nats.RetentionPolicy
+	AllowDirect bool
 }
 
 // DefaultStreams 列出所有 JetStream 流。每条流以一个点分前缀吸纳一类事件，
@@ -45,7 +46,10 @@ func DefaultStreams() []StreamDef {
 		// Parameter-sync task results and run terminal events fan out to the
 		// result processor, provisioning bindings, and operational consumers.
 		{Name: "PARAM_SYNC", Subjects: []string{"param_sync.>"}, Retention: nats.InterestPolicy},
-		{Name: "PM", Subjects: []string{"pm.>"}, Retention: nats.WorkQueuePolicy},
+		// Queue health needs one subject-filtered, read-only raw-message lookup
+		// to calculate oldest pm.file.received age without confusing it with
+		// other pm.> subjects in this shared stream.
+		{Name: "PM", Subjects: []string{"pm.>"}, Retention: nats.WorkQueuePolicy, AllowDirect: true},
 		{Name: "MR", Subjects: []string{"mr.>"}, Retention: nats.WorkQueuePolicy},
 		{Name: "ALARM", Subjects: []string{"alarm.>"}, Retention: nats.WorkQueuePolicy},
 		{Name: "OSS", Subjects: []string{"oss.>"}, Retention: nats.WorkQueuePolicy},
@@ -125,6 +129,12 @@ func (c *NATSClient) EnsureStreams(ctx context.Context, allowRebuild bool) error
 			return fmt.Errorf("get stream info %s: %w", def.Name, err)
 		}
 
+		if err := enableDirectLookup(def, info, func(config *nats.StreamConfig) (*nats.StreamInfo, error) {
+			return c.JS.UpdateStream(config)
+		}); err != nil {
+			return err
+		}
+
 		if info.Config.Retention == def.Retention {
 			continue
 		}
@@ -187,14 +197,30 @@ func (c *NATSClient) EnsureStreams(ctx context.Context, allowRebuild bool) error
 	return nil
 }
 
+// enableDirectLookup is intentionally independent of retention reconciliation:
+// AllowDirect is a safe in-place read capability, while a retention mismatch
+// may be left unchanged in production when stream rebuilding is disabled.
+func enableDirectLookup(def StreamDef, info *nats.StreamInfo, update func(*nats.StreamConfig) (*nats.StreamInfo, error)) error {
+	if !def.AllowDirect || info == nil || info.Config.AllowDirect {
+		return nil
+	}
+	config := info.Config
+	config.AllowDirect = true
+	if _, err := update(&config); err != nil {
+		return fmt.Errorf("enable direct message lookup for stream %s: %w", def.Name, err)
+	}
+	return nil
+}
+
 func (c *NATSClient) createStream(def StreamDef) error {
 	_, err := c.JS.AddStream(&nats.StreamConfig{
-		Name:      def.Name,
-		Subjects:  def.Subjects,
-		Retention: def.Retention,
-		MaxAge:    72 * time.Hour,
-		Storage:   nats.FileStorage,
-		Replicas:  1, // single node for dev; set 3 for production
+		Name:        def.Name,
+		Subjects:    def.Subjects,
+		Retention:   def.Retention,
+		MaxAge:      72 * time.Hour,
+		Storage:     nats.FileStorage,
+		Replicas:    1, // single node for dev; set 3 for production
+		AllowDirect: def.AllowDirect,
 	})
 	if err != nil {
 		return fmt.Errorf("create stream %s: %w", def.Name, err)

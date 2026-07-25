@@ -182,7 +182,7 @@ func (a *Aggregator) Query(ctx context.Context, q QueryRequest) ([]Row, error) {
 // 用于截断诚实提示（T-0194 C2）：handler 拿它和实际返回行数比，命中 limit 时前端提示「已截断」。
 //
 // 各维度的「行」口径与 Query 一致：
-//   - device：直接表行（无聚合），COUNT(*)。
+//   - device：与 Query 一样按自然键保留最新补报后计数。
 //   - device_group / aggregate_group / product / band / network：现场 GROUP BY 后的分组数，
 //     故 COUNT(*) FROM (<同 Query 的 GROUP BY 子查询，去 ORDER BY/LIMIT/OFFSET>) sub。
 //
@@ -208,9 +208,13 @@ func (a *Aggregator) Count(ctx context.Context, q QueryRequest) (int, error) {
 		if q.PageByPivotRow {
 			return a.countDevicePivotRows(ctx, table, q)
 		}
-		qb := storage.Psql.Select("COUNT(*)").From(table)
-		qb = applyDeviceFilters(qb, q)
-		return a.scanCount(ctx, qb)
+		inner := newRawAwareDeviceSelect(storage.Psql, table, q, "1").
+			Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
+		inner = applyDeviceFilters(inner, q)
+		inner = inner.OrderBy(
+			"device_oui", "device_sn", "metric_path", "granularity", `"time"`, "object_ldn", "ingest_time DESC",
+		)
+		return a.scanCountSub(ctx, inner)
 	case DimensionDeviceGroup:
 		inner := storage.Psql.Select("1").From(table)
 		inner = applyGroupFilters(inner, q)
@@ -218,13 +222,13 @@ func (a *Aggregator) Count(ctx context.Context, q QueryRequest) (int, error) {
 		inner = inner.GroupBy("device_group_id", "technology", "metric_path", "granularity", "time")
 		return a.scanCountSub(ctx, inner)
 	case DimensionAggregateGroup:
-		inner := storage.Psql.Select("1").From(table)
+		inner := newRawAwareDeviceSelect(storage.Psql, table, q, "1")
 		inner = applyDeviceFilters(inner, q)
 		// 单条聚合：分组键不含 object_ldn（与 queryAggregateGroupTable 一致），保证截断计数口径相符。
 		inner = inner.GroupBy("metric_path", "granularity", "time")
 		return a.scanCountSub(ctx, inner)
 	case DimensionNetwork:
-		inner := storage.Psql.Select("1").From(table)
+		inner := newRawAwareDeviceSelect(storage.Psql, table, q, "1")
 		inner = applyCommonFilters(inner, q)
 		inner = inner.GroupBy("metric_path", "granularity", "time")
 		return a.scanCountSub(ctx, inner)
@@ -467,8 +471,24 @@ func (a *Aggregator) queryAggregateGroupTable(ctx context.Context, table string,
 		"MIN(start_time) AS start_time",
 		"MIN(end_time) AS end_time",
 		"MAX(ingest_time) AS ingest_time",
-	).From(table)
-	qb = applyDeviceFilters(qb, q)
+	)
+	// Raw rows can overlap when a device retransmits the same natural
+	// measurement window under another file name. Match the device query's
+	// last-write-wins semantics before aggregating across devices and objects.
+	if table == "pm_metrics" || (table == "pm_metrics_hourly" && len(q.MetricPaths) > 0) {
+		inner := newRawAwareDeviceSelect(storage.Psql, table, q,
+			"device_oui", "device_sn", "metric_path", "metric_type", "metric_value",
+			"statis_type", "granularity", "time", "start_time", "end_time", "ingest_time", "object_ldn",
+		).Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
+		inner = applyDeviceFilters(inner, q)
+		inner = inner.OrderBy(
+			"device_oui", "device_sn", "metric_path", "granularity", `"time"`, "object_ldn", "ingest_time DESC",
+		)
+		qb = qb.FromSelect(inner, "m")
+	} else {
+		qb = qb.From(table)
+		qb = applyDeviceFilters(qb, q)
+	}
 	qb = qb.GroupBy("metric_path", "granularity", "time")
 	qb = qb.OrderBy("time DESC")
 	if q.Limit > 0 {
@@ -518,6 +538,58 @@ var deviceTableColumns = []string{
 	"statis_type", "granularity", "time", "start_time", "end_time", "ingest_time", "object_ldn", "extra",
 }
 
+func newRawAwareDeviceSelect(
+	builder sq.StatementBuilderType,
+	table string,
+	q QueryRequest,
+	columns ...string,
+) sq.SelectBuilder {
+	if len(q.MetricPaths) == 0 || (table != "pm_metrics" && table != "pm_metrics_hourly") {
+		return builder.Select(columns...).From(table)
+	}
+	var targeted sq.SelectBuilder
+	if table == "pm_metrics" {
+		targeted = builder.Select(
+			"COALESCE(dev.oui,'')::text AS device_oui",
+			"COALESCE(dev.serial_number,f.device_sn)::text AS device_sn",
+			"d.metric_path", "d.metric_type", "v.metric_value", "d.statis_type", "a.granularity",
+			`a."time"`, "a.start_time", "a.end_time",
+			"COALESCE(b.committed_at,f.created_at,now()) AS ingest_time",
+			"a.object_ldn",
+			`jsonb_strip_nulls(jsonb_build_object(
+				'device_id',a.device_dim_id::text,'counter_group',a.counter_group,
+				'carrier',COALESCE(dev.carrier,f.carrier),
+				'technology',COALESCE(dev.technology,f.technology))) AS extra`,
+		).From("pm_measurement_anchors a").
+			Join("pm_metric_sets s ON s.metric_set_id=a.metric_set_id").
+			Join("pm_metric_dictionary d ON d.metric_id=ANY(s.metric_ids)").
+			LeftJoin(`pm_metric_values v ON v."time"=a."time" AND v.anchor_id=a.anchor_id AND v.metric_id=d.metric_id`).
+			LeftJoin("pm_files f ON f.id=a.source_file_id").
+			LeftJoin("pm_ingest_batches b ON b.ingest_batch_id=a.ingest_batch_id").
+			LeftJoin("device_dim dev ON dev.id=a.device_dim_id")
+	} else {
+		targeted = builder.Select(
+			"COALESCE(dev.oui,'')::text AS device_oui",
+			"COALESCE(dev.serial_number,'')::text AS device_sn",
+			"d.metric_path", "d.metric_type", "v.metric_value", "d.statis_type", "a.granularity",
+			`a."time"`, "a.start_time", "a.end_time",
+			"COALESCE(ver.published_at,ver.created_at) AS ingest_time",
+			"a.object_ldn",
+			`jsonb_strip_nulls(jsonb_build_object(
+				'device_id',a.device_dim_id::text,'counter_group',a.counter_group,
+				'carrier',dev.carrier,'technology',dev.technology)) AS extra`,
+		).From("pm_hourly_bucket_versions ver").
+			Join("pm_hourly_anchors a ON a.bucket_version=ver.bucket_version").
+			Join("pm_metric_sets s ON s.metric_set_id=a.metric_set_id").
+			Join("pm_metric_dictionary d ON d.metric_id=ANY(s.metric_ids)").
+			LeftJoin(`pm_hourly_values v ON v.bucket_version=a.bucket_version AND v."time"=a."time" AND v.anchor_id=a.anchor_id AND v.metric_id=d.metric_id`).
+			LeftJoin("device_dim dev ON dev.id=a.device_dim_id").
+			Where(sq.Eq{"ver.status": "active"})
+	}
+	targeted = targeted.Where(sq.Eq{"d.metric_path": q.MetricPaths})
+	return builder.Select(columns...).FromSelect(targeted, "pm_metrics")
+}
+
 // buildDeviceTableSQL 构造 device 维度直读 pm_metrics 的去重查询（纯函数，便于单测）。
 //
 // 同窗口多文件去重（#208 数值偏差）：删 uq_pm_metrics_natural（#256）后，同设备同 15min 窗口但
@@ -531,9 +603,8 @@ func buildDeviceTableSQL(table string, q QueryRequest) (string, []any, error) {
 	if q.PageByPivotRow {
 		return buildDevicePivotRowPageSQL(table, q)
 	}
-	inner := storage.Psql.Select(deviceTableColumns...).
-		Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`).
-		From(table)
+	inner := newRawAwareDeviceSelect(storage.Psql, table, q, deviceTableColumns...).
+		Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
 	inner = applyDeviceFilters(inner, q)
 	inner = inner.OrderBy(
 		"device_oui", "device_sn", "metric_path", "granularity", `"time"`, "object_ldn", "ingest_time DESC",
@@ -552,9 +623,8 @@ func buildDeviceTableSQL(table string, q QueryRequest) (string, []any, error) {
 
 func buildDevicePivotRowPageSQL(table string, q QueryRequest) (string, []any, error) {
 	builder := sq.StatementBuilder.PlaceholderFormat(sq.Question)
-	inner := builder.Select(deviceTableColumns...).
-		Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`).
-		From(table)
+	inner := newRawAwareDeviceSelect(builder, table, q, deviceTableColumns...).
+		Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
 	inner = applyDeviceFilters(inner, q)
 	inner = inner.OrderBy(
 		"device_oui", "device_sn", "metric_path", "granularity", `"time"`, "object_ldn", "ingest_time DESC",
@@ -569,9 +639,8 @@ func buildDevicePivotRowPageSQL(table string, q QueryRequest) (string, []any, er
 		pageReq.MetricPaths = nil
 		pageReq.MetricType = nil
 	}
-	pageInner := builder.Select(deviceTableColumns...).
-		Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`).
-		From(table)
+	pageInner := newRawAwareDeviceSelect(builder, table, pageReq, deviceTableColumns...).
+		Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
 	pageInner = applyDeviceFilters(pageInner, pageReq)
 	pageInner = pageInner.OrderBy(
 		"device_oui", "device_sn", "metric_path", "granularity", `"time"`, "object_ldn", "ingest_time DESC",
@@ -659,9 +728,8 @@ func buildDevicePivotRowKeysSQL(table string, q QueryRequest) (string, []any, er
 		pageReq.MetricPaths = nil
 		pageReq.MetricType = nil
 	}
-	inner := builder.Select(deviceTableColumns...).
-		Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`).
-		From(table)
+	inner := newRawAwareDeviceSelect(builder, table, pageReq, deviceTableColumns...).
+		Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
 	inner = applyDeviceFilters(inner, pageReq)
 	inner = inner.OrderBy(
 		"device_oui", "device_sn", "metric_path", "granularity", `"time"`, "object_ldn", "ingest_time DESC",
@@ -701,13 +769,10 @@ func prefixedColumns(prefix string, cols []string) string {
 }
 
 func (a *Aggregator) countDevicePivotRows(ctx context.Context, table string, q QueryRequest) (int, error) {
-	keySub := storage.Psql.Select(
-		"device_oui",
-		"device_sn",
-		"COALESCE(object_ldn, '') AS object_ldn",
-		"granularity",
-		`"time"`,
-	).Distinct().From(table)
+	keySub := newRawAwareDeviceSelect(
+		storage.Psql, table, q,
+		"device_oui", "device_sn", "COALESCE(object_ldn, '') AS object_ldn", "granularity", `"time"`,
+	).Distinct()
 	keySub = applyDeviceFilters(keySub, q)
 	return a.scanCountSub(ctx, keySub)
 }
@@ -968,13 +1033,11 @@ func (a *Aggregator) queryNetworkTable(ctx context.Context, table string, q Quer
 	)
 	// 15min raw 表可能存在同设备同对象同窗口重复上报；network 汇总前按 device 直读口径
 	// 保留最新 ingest 行，避免首页尾部补点把重复 raw 行计入全网 counter。
-	if table == "pm_metrics" {
-		inner := storage.Psql.Select(
+	if table == "pm_metrics" || (table == "pm_metrics_hourly" && len(q.MetricPaths) > 0) {
+		inner := newRawAwareDeviceSelect(storage.Psql, table, q,
 			"device_oui", "device_sn", "metric_path", "metric_type", "metric_value",
 			"statis_type", "granularity", "time", "start_time", "end_time", "ingest_time", "object_ldn",
-		).
-			Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`).
-			From(table)
+		).Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
 		inner = applyCommonFilters(inner, q)
 		inner = inner.OrderBy(
 			"device_oui", "device_sn", "metric_path", "granularity", `"time"`, "object_ldn", "ingest_time DESC",
