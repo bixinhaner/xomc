@@ -466,6 +466,30 @@ func TestHandler_ListKPIDefinitions_IncludeCounters(t *testing.T) {
 	assert.Equal(t, "C2001", body.Items[1].ID)
 }
 
+func TestHandler_ListKPIDefinitions_OnlyEnabled(t *testing.T) {
+	var captured indicator.IndicatorListFilter
+	ir := &pmHIndicatorRepo{
+		listAllFn: func(_ context.Context, f indicator.IndicatorListFilter) ([]indicator.IndicatorListItem, error) {
+			captured = f
+			return []indicator.IndicatorListItem{
+				{PerfIndicator: indicator.PerfIndicator{ID: "K1001", EnName: "kpi_a", IsCounter: "0"}},
+			}, nil
+		},
+	}
+	router := pmHSetupRouterWithIndicator(ir)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/pm/kpi/definitions?device_type=ENB&include_counters=true&only_enabled=true", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Nil(t, captured.IsCounter, "include_counters=true should still include counters")
+	require.NotNil(t, captured.IsEnabled)
+	assert.Equal(t, "1", *captured.IsEnabled)
+	require.NotNil(t, captured.OperatorCode)
+	assert.Equal(t, "default", *captured.OperatorCode)
+}
+
 func TestHandler_ListKPIDefinitions_IndicatorLevel(t *testing.T) {
 	level := "both"
 	ir := &pmHIndicatorRepo{

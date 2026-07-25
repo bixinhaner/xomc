@@ -259,11 +259,12 @@ export const pmApi = {
   // 走 pm 权限的 /pm/kpi/definitions（运维可访问、全量无截断），替代 super_admin 的 /indicators。
   async getIndicatorCandidates(
     deviceType: string,
-    opts?: { includeCounters?: boolean }
+    opts?: { includeCounters?: boolean; enabledOnly?: boolean }
   ): Promise<IndicatorCandidate[]> {
     const params: Record<string, unknown> = {};
     if (deviceType) params.device_type = deviceType;
     if (opts?.includeCounters) params.include_counters = true;
+    if (opts?.enabledOnly) params.is_enabled = '1';
 
     const { data } = await http.get<BackendDefinitionsResponse>(
       '/pm/kpi/definitions',

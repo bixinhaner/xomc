@@ -1799,6 +1799,9 @@ K900010034
 K900010035
 K900010036
 K900010037
+K900010040
+K900010041
+K900010076
 $ids$, '[[:space:]]+') AS t(indicator_id)
 WHERE indicator_id <> ''
 ON CONFLICT (operator_code, indicator_id) DO NOTHING;

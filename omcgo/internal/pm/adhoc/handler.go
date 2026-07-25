@@ -26,10 +26,11 @@ import (
 
 // Handler 是 G7 adhoc 任务的 REST 入口。
 type Handler struct {
-	repo   Repository
-	pool   *pgxpool.Pool // results 查询（直接 SQL，避免再加一层 repository）
-	hub    *ProgressHub
-	logger *zap.Logger
+	repo                   Repository
+	pool                   *pgxpool.Pool // results 查询（直接 SQL，避免再加一层 repository）
+	hub                    *ProgressHub
+	enabledMetricValidator *EnabledMetricSelectionService
+	logger                 *zap.Logger
 }
 
 // NewHandler 构造 Handler。
@@ -38,6 +39,11 @@ func NewHandler(repo Repository, pool *pgxpool.Pool, hub *ProgressHub, logger *z
 		logger = zap.NewNop()
 	}
 	return &Handler{repo: repo, pool: pool, hub: hub, logger: logger.Named("pm.adhoc.handler")}
+}
+
+func (h *Handler) WithEnabledMetricSelectionService(svc *EnabledMetricSelectionService) *Handler {
+	h.enabledMetricValidator = svc
+	return h
 }
 
 // RegisterRoutes 把 6 个 REST 端点挂到 router group（不带 /pm 前缀，由调用方决定 group）。
@@ -179,6 +185,10 @@ func (h *Handler) Create(c *gin.Context) {
 			response.Fail(c, http.StatusBadRequest, err.Error())
 			return
 		}
+	}
+	if err := h.enabledMetricValidator.ValidateTechnology(c.Request.Context(), req.Technology, req.MetricPaths); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
 	}
 	// T-0185：continuous 任务的 cron 由粒度自动派生（向导不暴露 cron 字段）；显式传 cron 则尊重。
 	cronExpr := req.CronExpr
@@ -432,6 +442,11 @@ func (h *Handler) Update(c *gin.Context) {
 		Mode:        existing.Mode,
 		Dimension:   existing.Dimension,
 		MetricPaths: req.MetricPaths,
+	}
+
+	if err := h.enabledMetricValidator.ValidateTechnology(c.Request.Context(), existing.Technology, req.MetricPaths); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
 	}
 
 	if !existing.IsBuiltin {

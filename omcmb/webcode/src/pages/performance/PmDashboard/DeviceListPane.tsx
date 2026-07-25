@@ -644,6 +644,7 @@ export default function DeviceListPane() {
         lockDeviceType
         maxSelected={PM_QUERY_SELECTION_LIMIT}
         enableBatchInput
+        onlyEnabledIndicators
       />
     </div>
   );

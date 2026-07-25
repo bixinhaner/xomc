@@ -2,15 +2,20 @@ package adhoc
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/omcgo/omcgo/internal/pm/indicator"
 )
 
 // T-0182：建任务校验单测。
@@ -213,6 +218,97 @@ func postCreateWithRepo(t *testing.T, repo Repository, body map[string]any) *htt
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	return w
+}
+
+func postCreateWithEnabledRepo(t *testing.T, repo Repository, enabledRepo indicator.EnabledIndicatorRepository, body map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	h := NewHandler(repo, nil, nil, nil).
+		WithEnabledMetricSelectionService(NewEnabledMetricSelectionService(enabledRepo))
+	h.RegisterRoutes(r.Group(""))
+	jsonBody, err := json.Marshal(body)
+	require.NoError(t, err)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/pm/adhoc/tasks", bytes.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func patchUpdateWithEnabledRepo(t *testing.T, repo Repository, enabledRepo indicator.EnabledIndicatorRepository, id uuid.UUID, body map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	h := NewHandler(repo, nil, nil, nil).
+		WithEnabledMetricSelectionService(NewEnabledMetricSelectionService(enabledRepo))
+	h.RegisterRoutes(r.Group(""))
+	jsonBody, err := json.Marshal(body)
+	require.NoError(t, err)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/pm/adhoc/tasks/"+id.String(), bytes.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	return w
+}
+
+type enabledRepoStub struct {
+	enabled map[indicator.DeviceType][]string
+}
+
+func (s enabledRepoStub) List(_ context.Context, dt indicator.DeviceType, _ string) ([]string, error) {
+	return s.enabled[dt], nil
+}
+
+func (s enabledRepoStub) BatchCreate(context.Context, indicator.DeviceType, string, []string, pgx.Tx) error {
+	return nil
+}
+
+func (s enabledRepoStub) BatchDelete(context.Context, indicator.DeviceType, string, []string, pgx.Tx) error {
+	return nil
+}
+
+func (s enabledRepoStub) Exists(context.Context, indicator.DeviceType, string, string) (bool, error) {
+	return false, nil
+}
+
+func Test_Handler_Create_RejectsDisabledMetrics(t *testing.T) {
+	var created bool
+	repo := &handlerStubRepo{
+		create: func(CreateRequest) (uuid.UUID, error) { created = true; return uuid.New(), nil },
+	}
+	b := map[string]any{
+		"name":          "lte task",
+		"mode":          "continuous",
+		"dimension":     "network",
+		"technology":    "lte",
+		"metric_paths":  []string{"K_ENABLED", "K_DISABLED"},
+		"granularities": []string{"hourly"},
+	}
+	w := postCreateWithEnabledRepo(t, repo, enabledRepoStub{
+		enabled: map[indicator.DeviceType][]string{indicator.DeviceTypeENB: {"K_ENABLED"}},
+	}, b)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "K_DISABLED")
+	assert.False(t, created, "未启用指标不应落库")
+}
+
+func Test_Handler_Update_RejectsDisabledMetrics(t *testing.T) {
+	id := uuid.New()
+	var updated bool
+	repo := &handlerStubRepo{
+		get: func(uuid.UUID) (*Task, error) {
+			return &Task{ID: id, IsBuiltin: true, Mode: ModeContinuous, Dimension: DimensionNetwork, Technology: "nr"}, nil
+		},
+		update: func(uuid.UUID, UpdateRequest) error { updated = true; return nil },
+	}
+	b := map[string]any{"metric_paths": []string{"KGNB_ENABLED", "KGNB_DISABLED"}}
+	w := patchUpdateWithEnabledRepo(t, repo, enabledRepoStub{
+		enabled: map[indicator.DeviceType][]string{indicator.DeviceTypeGNB: {"KGNB_ENABLED"}},
+	}, id, b)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "KGNB_DISABLED")
+	assert.False(t, updated, "未启用指标不应更新")
 }
 
 // 成功路径：非 device 维度（network）+ 空 device_sns → 201（T-0185 放宽：

@@ -13,7 +13,7 @@
  */
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Card, Button, Space } from 'antd';
+import { Card, Button, Space, Select } from 'antd';
 import {
   ArrowLeftOutlined,
   InboxOutlined,
@@ -39,6 +39,7 @@ const TECH_LABEL: Record<TechLower, string> = {
 const VALID_TECHS: TechLower[] = ['enb', 'gsm', 'gnb'];
 
 const OPERATOR_CODE = 'default';
+type EnabledFilterValue = 'all' | 'enabled' | 'disabled';
 
 function parseTech(raw: string | null): TechLower | undefined {
   if (!raw) return undefined;
@@ -74,16 +75,19 @@ export default function KpiLibraryPage() {
   // ── 详情态 filter 状态(无 platform — 已由 URL 锁定) ───────────────────────
   const [detailKeyword, setDetailKeyword] = useState('');
   const [detailGroupId, setDetailGroupId] = useState<string | undefined>(undefined);
+  const [detailEnabledFilter, setDetailEnabledFilter] = useState<EnabledFilterValue>('all');
 
   const onSelectPlatform = (tech: TechLower, platform: string) => {
     setDetailKeyword('');
     setDetailGroupId(undefined);
+    setDetailEnabledFilter('all');
     setTechPlatform(tech, platform);
   };
 
   const onBack = () => {
     setDetailKeyword('');
     setDetailGroupId(undefined);
+    setDetailEnabledFilter('all');
     setTechPlatform(undefined, undefined);
   };
 
@@ -147,6 +151,17 @@ export default function KpiLibraryPage() {
                     style={{ width: 220 }}
                   />
                 ) : null}
+                <Select
+                  placeholder={t('product.kpi.enabledFilterPh')}
+                  value={detailEnabledFilter}
+                  onChange={(v) => setDetailEnabledFilter(v)}
+                  options={[
+                    { label: t('common.all'), value: 'all' },
+                    { label: t('product.kpi.indicator.enabledTag'), value: 'enabled' },
+                    { label: t('product.kpi.indicator.disabledTag'), value: 'disabled' },
+                  ]}
+                  style={{ width: 140 }}
+                />
                 <Button onClick={() => setGroupsOpen(true)}>
                   {t('product.kpi.group.manage')}
                 </Button>
@@ -183,6 +198,7 @@ export default function KpiLibraryPage() {
             keyword: detailKeyword,
             platform: selectedPlatform,
             groupId: detailGroupId,
+            isEnabled: detailEnabledFilter === 'all' ? undefined : detailEnabledFilter === 'enabled',
           }}
         />
       ) : (

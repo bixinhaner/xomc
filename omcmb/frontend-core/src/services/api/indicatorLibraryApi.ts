@@ -259,7 +259,7 @@ export const indicatorLibraryApi = {
     if (filter?.operatorCode) params.operatorCode = filter.operatorCode;
     if (filter?.productClass) params.productClass = filter.productClass;
     if (filter?.indicatorLevel) params.indicatorLevel = filter.indicatorLevel;
-    if (filter?.isEnabled !== undefined) params.isEnabled = filter.isEnabled;
+    if (filter?.isEnabled !== undefined) params.isEnabled = filter.isEnabled ? '1' : '0';
     if (filter?.isCounter !== undefined) params.isCounter = filter.isCounter;
     if (filter?.platformName) params.platformName = filter.platformName;
     if (filter?.page) params.page = filter.page;

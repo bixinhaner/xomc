@@ -7,16 +7,20 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/admin"
+	"github.com/omcgo/omcgo/internal/pm/indicator"
 )
 
 // fakeLayoutRepo 是 KPILayoutRepository 的内存假实现，按制式隔离存储，供 service 测试。
@@ -55,6 +59,26 @@ func newTestService(repo KPILayoutRepository) *Service {
 	return &Service{layoutRepo: repo, logger: zap.NewNop()}
 }
 
+type fakeEnabledIndicatorRepo struct {
+	ids map[indicator.DeviceType][]string
+}
+
+func (f fakeEnabledIndicatorRepo) List(_ context.Context, dt indicator.DeviceType, _ string) ([]string, error) {
+	return append([]string(nil), f.ids[dt]...), nil
+}
+
+func (f fakeEnabledIndicatorRepo) BatchCreate(context.Context, indicator.DeviceType, string, []string, pgx.Tx) error {
+	return nil
+}
+
+func (f fakeEnabledIndicatorRepo) BatchDelete(context.Context, indicator.DeviceType, string, []string, pgx.Tx) error {
+	return nil
+}
+
+func (f fakeEnabledIndicatorRepo) Exists(context.Context, indicator.DeviceType, string, string) (bool, error) {
+	return false, nil
+}
+
 // --- 读：无配置时回退内置默认 ---
 
 func TestGetKPILayout_FallbackToDefaultWhenNoConfig(t *testing.T) {
@@ -81,6 +105,54 @@ func TestGetKPILayout_FallbackWhenRepoNil(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	assert.Equal(t, techLTE, got.Tech)
+}
+
+func TestDefaultKPILayoutMetricsAreEnabledInSeedBaseline(t *testing.T) {
+	seedBytes, err := os.ReadFile("../../migrations/seed/000001_init_seed.sql")
+	require.NoError(t, err)
+	seed := string(seedBytes)
+
+	for _, tech := range []string{techLTE, techNR, techGSM} {
+		t.Run(tech, func(t *testing.T) {
+			layout := defaultKPILayout(tech)
+			metrics, err := extractKPILayoutMetrics(layout.Layout)
+			require.NoError(t, err)
+			require.NotEmpty(t, metrics)
+			for _, metric := range metrics {
+				assert.Truef(t, strings.Contains(seed, "\n"+metric+"\n"), "seed enabled baseline missing dashboard metric %s", metric)
+			}
+		})
+	}
+}
+
+func TestKPILayoutReferenceChecker_FallsBackToDefaultLayout(t *testing.T) {
+	checker := NewKPILayoutReferenceCheckerFromRepository(newFakeLayoutRepo())
+
+	got, err := checker.ReferencedIndicators(context.Background(), indicator.DeviceTypeENB, []string{
+		"K900010040",
+		"K900099999",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"K900010040"}, got)
+}
+
+func TestKPILayoutReferenceChecker_UsesStoredLayout(t *testing.T) {
+	repo := newFakeLayoutRepo()
+	repo.store[techLTE] = &KPILayout{
+		Tech:   techLTE,
+		Layout: json.RawMessage(`{"panels":[{"metrics":["K900099999","K900010040"]}]}`),
+	}
+	checker := NewKPILayoutReferenceCheckerFromRepository(repo)
+
+	got, err := checker.ReferencedIndicators(context.Background(), indicator.DeviceTypeENB, []string{
+		"K900010040",
+		"K900099999",
+		"K900088888",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"K900010040", "K900099999"}, got)
 }
 
 // --- 读：有配置时返回所存布局 ---
@@ -147,6 +219,21 @@ func TestSaveKPILayout_RejectsEmptyLayout(t *testing.T) {
 	svc := newTestService(newFakeLayoutRepo())
 	_, err := svc.SaveKPILayout(context.Background(), techLTE, json.RawMessage(``), uuid.New())
 	assert.Error(t, err)
+}
+
+func TestSaveKPILayout_RejectsDisabledMetrics(t *testing.T) {
+	svc := newTestService(newFakeLayoutRepo())
+	svc.enabledIndicatorRepo = fakeEnabledIndicatorRepo{
+		ids: map[indicator.DeviceType][]string{
+			indicator.DeviceTypeENB: {"K900010015"},
+		},
+	}
+	body := json.RawMessage(`{"panels":[{"title":"t","metrics":["K900010015","K900010076"],"x":0,"y":0,"w":6,"h":8}]}`)
+
+	_, err := svc.SaveKPILayout(context.Background(), techLTE, body, uuid.New())
+
+	assert.ErrorIs(t, err, ErrDisabledKPILayoutMetric)
+	assert.Contains(t, err.Error(), "K900010076")
 }
 
 func TestSaveKPILayout_NoRepoConfigured(t *testing.T) {

@@ -372,6 +372,7 @@ function TechEditor({ tech }: { tech: TechnologyType }) {
         initialLabels={indicatorNameMap}
         initialDeviceType={TECH_TO_DEVICE_TYPE[tech]}
         lockDeviceType
+        onlyEnabledIndicators
       />
     </div>
   );

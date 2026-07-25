@@ -12,6 +12,7 @@ import (
 	minioinfra "github.com/omcgo/omcgo/internal/core/components/minio"
 	"github.com/omcgo/omcgo/internal/core/dictloader"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/dashboard"
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/pm/adhoc"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
@@ -90,11 +91,14 @@ func initPMModule(c *Container) error {
 
 	// T-0164-P7 / G7：adhoc 任务 REST 入口（worker 端跑实际执行）。
 	pmAdhocRepo := buildPMAdhocRepo(c.PgPool, c.TsPool, c.EventBus, logger)
-	pmAdhocHandler := adhoc.NewHandler(pmAdhocRepo, c.TsPool, nil, logger.Named("adhoc"))
+	enabledRepo := indicator.NewPgEnabledRepository(c.PgPool)
+	pmAdhocHandler := adhoc.NewHandler(pmAdhocRepo, c.TsPool, nil, logger.Named("adhoc")).
+		WithEnabledMetricSelectionService(adhoc.NewEnabledMetricSelectionService(enabledRepo))
 
 	// T-0174 阶段 1：指标查询页"查询模板"REST 入口（5 CRUD：list/get/create/update/delete）。
 	pmQueryTemplateRepo := querytemplate.NewPgRepository(c.PgPool)
-	pmQueryTemplateHandler := querytemplate.NewHandler(pmQueryTemplateRepo, logger.Named("querytemplate"))
+	pmQueryTemplateHandler := querytemplate.NewHandler(pmQueryTemplateRepo, logger.Named("querytemplate")).
+		WithEnabledMetricPayloadService(querytemplate.NewEnabledMetricPayloadService(enabledRepo))
 
 	// KPI-EXPORT T1：KPI 数据导出 REST 入口（建任务落表 + 入队 pm_kpi_export job）。
 	// 文件管理下载默认走 app 同源流式响应；presign client 仅保留给 ?mode=url 兼容路径。
@@ -117,7 +121,6 @@ func initPMModule(c *Container) error {
 		pmExportHandler.SetPresignProvider(c.PresignBridge)
 	}
 
-	enabledRepo := indicator.NewPgEnabledRepository(c.PgPool)
 	templateRelRepo := indicator.NewPgTemplateRelRepository(c.PgPool)
 	custNameRepo := indicator.NewPgCustNameRepository(c.PgPool)
 	thresholdRepo := indicator.NewPgIndicatorThresholdRepository(c.PgPool)
@@ -133,6 +136,8 @@ func initPMModule(c *Container) error {
 		c.PgPool,
 		c.Redis,
 		logger.Named("indicator"),
+	).WithDashboardLayoutReferenceChecker(
+		dashboard.NewKPILayoutReferenceChecker(c.PgPool),
 	).WithRouteInvalidator(func(ctx context.Context, trigger indicator.RouteInvalidationTrigger) error {
 		_, err := c.KPIRouteInvalidator.Invalidate(ctx, router.InvalidationTrigger(trigger))
 		return err

@@ -9,6 +9,7 @@ import type { AdhocTask } from '@core/types/pmAdhoc';
 import BuiltinMetricEditModal from './BuiltinMetricEditModal';
 
 const updateMutateAsync = vi.fn();
+const useIndicatorCandidatesSpy = vi.fn();
 
 let indicatorCandidates = [
   { id: 'K0001', name: 'availability', cnName: '可用率', enName: 'Availability', isCounter: false },
@@ -20,10 +21,13 @@ vi.mock('@core/hooks/api/usePmAdhoc', () => ({
 }));
 
 vi.mock('@core/hooks/api/usePerformance', () => ({
-  useIndicatorCandidates: () => ({
-    data: indicatorCandidates,
-    isLoading: false,
-  }),
+  useIndicatorCandidates: (deviceType: unknown, opts: unknown) => {
+    useIndicatorCandidatesSpy(deviceType, opts);
+    return {
+      data: indicatorCandidates,
+      isLoading: false,
+    };
+  },
 }));
 
 const task: AdhocTask = {
@@ -59,6 +63,7 @@ function renderModal(targetTask: AdhocTask = task) {
 describe('BuiltinMetricEditModal batch metric input', () => {
   beforeEach(() => {
     updateMutateAsync.mockReset();
+    useIndicatorCandidatesSpy.mockClear();
     indicatorCandidates = [
       { id: 'K0001', name: 'availability', cnName: '可用率', enName: 'Availability', isCounter: false },
       { id: 'C0001', name: 'rrc_att', cnName: 'RRC请求次数', enName: 'RRC Attempts', isCounter: true },
@@ -67,6 +72,10 @@ describe('BuiltinMetricEditModal batch metric input', () => {
 
   it('adds valid metric IDs from batch input and ignores missing IDs before saving', async () => {
     renderModal();
+    expect(useIndicatorCandidatesSpy).toHaveBeenCalledWith(
+      'ENB',
+      expect.objectContaining({ includeCounters: true, enabledOnly: true }),
+    );
 
     fireEvent.click(screen.getByRole('button', { name: /批量输入指标 ID/ }));
     fireEvent.change(screen.getByPlaceholderText(/K000000001/), {

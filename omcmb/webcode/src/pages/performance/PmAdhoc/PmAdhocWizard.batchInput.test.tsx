@@ -12,6 +12,7 @@ const navigateSpy = vi.fn();
 const createMutateAsync = vi.fn();
 let routeParams: { id?: string } = {};
 let adhocDetail: AdhocTask | undefined;
+const useIndicatorCandidatesSpy = vi.fn();
 
 let indicatorCandidates = [
   { id: 'K0001', name: 'availability', cnName: '可用率', enName: 'Availability', isCounter: false },
@@ -38,10 +39,13 @@ vi.mock('@core/hooks/api/usePmQuery', () => ({
 }));
 
 vi.mock('@core/hooks/api/usePerformance', () => ({
-  useIndicatorCandidates: () => ({
-    data: indicatorCandidates,
-    isLoading: false,
-  }),
+  useIndicatorCandidates: (deviceType: unknown, opts: unknown) => {
+    useIndicatorCandidatesSpy(deviceType, opts);
+    return {
+      data: indicatorCandidates,
+      isLoading: false,
+    };
+  },
 }));
 
 vi.mock('../PmDashboard/CellDrilldownSelector', () => ({
@@ -62,6 +66,7 @@ describe('PmAdhocWizard batch metric input', () => {
   beforeEach(() => {
     navigateSpy.mockReset();
     createMutateAsync.mockReset();
+    useIndicatorCandidatesSpy.mockClear();
     routeParams = {};
     adhocDetail = undefined;
     indicatorCandidates = [
@@ -86,6 +91,10 @@ describe('PmAdhocWizard batch metric input', () => {
     fireEvent.click(screen.getByRole('button', { name: /加入已选/ }));
 
     expect(screen.getByText('已选 2 个指标')).toBeInTheDocument();
+    expect(useIndicatorCandidatesSpy).toHaveBeenCalledWith(
+      'ENB',
+      expect.objectContaining({ includeCounters: true, enabledOnly: true }),
+    );
   });
 
   it('caps batch-added metrics at the PM query selection limit', () => {
