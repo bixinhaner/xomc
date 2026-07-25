@@ -8,7 +8,7 @@
  *     默认集 = 选中制式的内置任务指标集（usePmAdhocList isBuiltin，按 technology 找一个取 metricPaths）。
  *     用户未手动改过指标时，切制式默认集随之切换；手动改过则保留用户选择。
  *   - 粒度选择（默认 15min）。
- *   - 共用三级筛选（DashboardFilterBar）：大时间段（默认近 7 天）+ 星期多选 + 小时段多选 + 周期对比开关（T-0189）。
+ *   - 共用三级筛选（DashboardFilterBar）：大时间段（15min 默认近 1 天）+ 星期多选 + 小时段多选 + 周期对比开关（T-0189）。
  *   - 出图：取数 useAggregatedMetricsByDevices → 星期/小时段前端筛 → buildDeviceMetricCharts → 每指标一张 ChartCard（每设备一条线）。
  *   - 周期对比开关打开：再拉上一周期窗口数据，套同口径星期/小时段，叠加虚线（T-0189）。
  *
@@ -206,21 +206,22 @@ export default function DeviceListPane() {
     if (!submitted) return null;
     return {
       granularity: submitted.granularity,
+      technology: tech,
       metricPaths: submitted.metricPaths,
       startTime: submitted.startTime,
       endTime: submitted.endTime,
       limit: 5000,
+      countMode: 'n_plus_one' as const,
       fillEmpty: true,
       // #599：星期/小时段后端过滤（全选不传 = 不过滤，向后兼容）。
       weekdays: submitted.weekdays.length < 7 ? submitted.weekdays : undefined,
       hours: submitted.hours.length < 24 ? submitted.hours : undefined,
     };
-  }, [submitted]);
+  }, [submitted, tech]);
 
   const {
     data: rawRows = [],
     meta: currentMeta,
-    total: rawTotal,
     truncated,
     isLoading,
     isFetching,
@@ -239,6 +240,7 @@ export default function DeviceListPane() {
     const actualPrevRange = actualRange ? previousWindow(actualRange) : null;
     return {
       granularity: submitted.granularity,
+      technology: tech,
       metricPaths: submitted.metricPaths,
       startTime: actualPrevRange
         ? toDeviceViewRequestRFC3339(actualPrevRange[0], systemTimezone)
@@ -247,12 +249,13 @@ export default function DeviceListPane() {
         ? toDeviceViewRequestRFC3339(actualPrevRange[1], systemTimezone)
         : submitted.prevEndTime,
       limit: 5000,
+      countMode: 'n_plus_one' as const,
       fillEmpty: true,
       // #599：周期对比同口径传 weekdays/hours。
       weekdays: submitted.weekdays.length < 7 ? submitted.weekdays : undefined,
       hours: submitted.hours.length < 24 ? submitted.hours : undefined,
     };
-  }, [actualRange, submitted, systemTimezone]);
+  }, [actualRange, submitted, systemTimezone, tech]);
 
   const {
     data: rawPrevRows = [],
@@ -573,8 +576,11 @@ export default function DeviceListPane() {
               showIcon
               style={{ marginBottom: 12 }}
               message={intl.formatMessage(
-                { id: 'perf.dashboard.truncatedTip' },
-                { shown: rawRows.length, total: rawTotal },
+                { id: 'perf.dashboard.truncated' },
+              )}
+              description={intl.formatMessage(
+                { id: 'perf.dashboard.truncatedDesc' },
+                { limit: 5000 },
               )}
             />
           ) : null}

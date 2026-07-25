@@ -97,7 +97,7 @@ describe('defaultRangeForGranularity', () => {
     const now = dayjs('2026-07-24 02:41:30.456');
 
     expect(defaultRangeForGranularity('15min', 'UTC', now).map((d) => d.format('YYYY-MM-DD HH:mm:ss')))
-      .toEqual(['2026-07-23 23:41:30', '2026-07-24 02:41:30']);
+      .toEqual(['2026-07-23 02:41:30', '2026-07-24 02:41:30']);
     expect(defaultRangeForGranularity('hourly', 'UTC', now).map((d) => d.format('YYYY-MM-DD HH:mm:ss')))
       .toEqual(['2026-07-23 02:41:30', '2026-07-24 02:41:30']);
     expect(defaultRangeForGranularity('daily', 'UTC', now).map((d) => d.format('YYYY-MM-DD HH:mm:ss')))

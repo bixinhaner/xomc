@@ -7823,7 +7823,7 @@ const messages: Record<string, string> = {
   'perf.dashboard.emptyNoDataForCondition':'所选条件下暂无数据',
   'perf.dashboard.clickQueryToStart':    '请选择筛选条件后点击「出图」',
   'perf.dashboard.deviceListSummary':    '设备列表出图',
-  'perf.dashboard.truncatedTip':         '结果已截断：仅显示最新 {shown} / 共 {total} 行，请缩小时间范围或减少指标数',
+  'perf.dashboard.truncatedTip':         '结果已截断：仅显示最新 {shown} 行，请缩小时间范围、减少指标数或使用导出',
   'perf.dashboard.deviceUnit':           '{count} 设备',
 
   // -------------------------------------------------------------------------

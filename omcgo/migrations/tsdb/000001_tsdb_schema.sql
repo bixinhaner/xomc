@@ -169,6 +169,26 @@ CREATE TABLE public.pm_metrics (
 CREATE INDEX idx_pm_metrics_device_time ON public.pm_metrics USING btree (device_oui, device_sn, "time" DESC);
 CREATE INDEX idx_pm_metrics_path_time ON public.pm_metrics USING btree (metric_path, "time" DESC);
 CREATE INDEX pm_metrics_time_idx ON public.pm_metrics USING btree ("time" DESC);
+-- Issue #170：设备性能查看默认 15min + LTE 内置 14 指标场景。
+-- 78 上验证过的 chunk 级索引方向有效；baseline 建在 hypertable 上，由 TimescaleDB 下发到相关 chunk。
+CREATE INDEX idx_pm_metrics_issue170_15min_device_metric_time ON public.pm_metrics USING btree (
+    device_oui,
+    device_sn,
+    metric_path,
+    metric_type,
+    "time" DESC
+) WHERE granularity = '15min'
+  AND metric_path IN (
+    'K900010015','K900010016','C000060216','K900010014',
+    'K900010013','K900010006','K900010002','K900010005',
+    'K900010029','K900010027','K900010017','K900010022',
+    'K900010021','K900010026'
+  )
+  AND (
+    (left(metric_path, 1) = 'K' AND metric_type = 'kpi')
+    OR (left(metric_path, 1) = 'C' AND metric_type = 'counter')
+    OR left(metric_path, 1) NOT IN ('K', 'C')
+  );
 
 -- ── pm_metrics_hourly（超表：time 7d chunk，compress 14d，retention 180d；pkey(id,time)）──
 -- 最终形态：object_ldn NOT NULL DEFAULT ''；自然唯一索引尾部含 object_ldn（000020）。
