@@ -7791,7 +7791,7 @@ const messages: Record<string, string> = {
   'perf.dashboard.emptyNoDataForCondition':'No data under the selected conditions',
   'perf.dashboard.clickQueryToStart':    'Select filters and click "Plot" to start',
   'perf.dashboard.deviceListSummary':    'Device list plot',
-  'perf.dashboard.truncatedTip':         'Results truncated: showing latest {shown} of {total} rows. Narrow the time range or reduce metrics.',
+  'perf.dashboard.truncatedTip':         'Results truncated: showing latest {shown} rows. Narrow the time range, reduce metrics, or use export.',
   'perf.dashboard.deviceUnit':           '{count} devices',
 
   // -------------------------------------------------------------------------

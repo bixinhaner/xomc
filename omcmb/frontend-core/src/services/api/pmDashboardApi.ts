@@ -40,11 +40,15 @@ export const pmDashboardApi = {
         ? params.metricPaths.join(',')
         : undefined,
       metric_type: params.metricType,
+      technologies: params.technologies && params.technologies.length > 0
+        ? params.technologies.join(',')
+        : params.technology,
       start_time: params.startTime,
       end_time: params.endTime,
       limit: params.limit,
       offset: params.offset,
       page_by: params.pageBy,
+      count_mode: params.countMode,
       fill_empty: params.fillEmpty ? 'true' : undefined,
       // #599：星期/小时段后端过滤（全选/空不传 = 不过滤，向后兼容）。
       weekdays: params.weekdays?.length && params.weekdays.length < 7
@@ -67,8 +71,12 @@ export const pmDashboardApi = {
       },
     );
     const rows = (data.items ?? []).map(mapBackendAggregatedRow);
-    // T-0194：total 是后端真实 COUNT（命中 limit 时 > rows.length），前端据此提示截断。
-    return { rows, total: data.total ?? rows.length, meta: mapBackendAggregatedMeta(data) };
+    return {
+      rows,
+      total: data.total ?? rows.length,
+      truncated: data.truncated ?? false,
+      meta: mapBackendAggregatedMeta(data),
+    };
   },
 };
 
@@ -105,6 +113,7 @@ export const pmDashboardMock: typeof pmDashboardApi = {
     return {
       rows: out,
       total: out.length,
+      truncated: false,
       meta: {
         requestedStartTime: params.startTime,
         requestedEndTime: params.endTime,

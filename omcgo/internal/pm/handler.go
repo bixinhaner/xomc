@@ -344,9 +344,11 @@ func (h *Handler) ListAggregatedCounters(c *gin.Context) {
 //   - device_oui+device_sn / device_group_id：维度过滤（与 dimension 配套）
 //   - metric_path：单 metric 过滤（兼容 v1）；metric_paths：逗号分隔的多 metric 过滤（v2，PmDashboard panel 用）
 //   - metric_type：counter / kpi
+//   - technology / technologies：制式过滤（lte/nr/gsm）
 //   - start_time / end_time：RFC3339
 //   - limit / offset
 //   - page_by=pivot_row：limit / offset 按透视表行 key 分页，total 返回透视表行总数
+//   - count_mode=n_plus_one：取 limit+1 判断 truncated，不执行精确 COUNT
 //
 // 没注入 aggregator（兼容老部署）时返 503。
 func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
@@ -415,6 +417,11 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 		mt := metrics.MetricType(v)
 		req.MetricType = &mt
 	}
+	if v := c.Query("technologies"); v != "" {
+		req.Technologies = splitCSVNonEmpty(v)
+	} else if v := c.Query("technology"); v != "" {
+		req.Technologies = splitCSVNonEmpty(v)
+	}
 	if v := c.Query("start_time"); v != "" {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {
 			req.StartTime = t
@@ -425,9 +432,15 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 			req.EndTime = t
 		}
 	}
+	clientLimit := 0
+	useNPlusOneCount := c.Query("count_mode") == "n_plus_one"
 	if v := c.Query("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			clientLimit = n
 			req.Limit = n
+			if useNPlusOneCount {
+				req.Limit = n + 1
+			}
 		}
 	}
 	if v := c.Query("offset"); v != "" {
@@ -487,6 +500,14 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
+	var truncated bool
+	if useNPlusOneCount && clientLimit > 0 {
+		rows, truncated = truncateAggregatedRows(rows, clientLimit, req.PageByPivotRow)
+		req.Limit = clientLimit
+		if len(req.PivotRowKeys) > clientLimit {
+			req.PivotRowKeys = req.PivotRowKeys[:clientLimit]
+		}
+	}
 	if fillEmpty {
 		if aggregator.CanAutoDiscoverObjectSkeletonRequest(req) {
 			objectLDNs, err := h.aggr.DiscoverObjectLDNs(c.Request.Context(), req)
@@ -502,12 +523,8 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 		// 退化成裸编号（查不到名的合成计数器仍回退编号本身，行为不变）。
 		h.aggr.BackfillDisplayNames(c.Request.Context(), rows)
 	}
-	// 真实总数：跑一次同过滤的 COUNT，让 total 反映命中真实总数而非本页返回行数
-	// （T-0194 截断诚实提示）。命中 limit 时 total>len(rows)，前端据此提示「已截断」。
-	// 仅在指定了 limit 时才多跑一次（无 limit = 全量返回，total 即 len 无需 COUNT）；
-	// COUNT 失败不阻断结果返回，退回本页行数兜底。
 	total := len(rows)
-	if req.Limit > 0 {
+	if !useNPlusOneCount && req.Limit > 0 {
 		countReq := req
 		// page_by=pivot_row + fill_empty 的页面语义是「按对象骨架补齐透视行」。
 		// 当所选指标本身没有真实行时，按 metric_path count 会得到 0；此时 total 必须按
@@ -520,7 +537,7 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 			total = n
 		}
 	}
-	result := gin.H{"items": rows, "total": total}
+	result := gin.H{"items": rows, "total": total, "truncated": truncated}
 	if !req.StartTime.IsZero() && !req.EndTime.IsZero() {
 		win := aggregator.BuildBucketWindow(req)
 		result["requested_start_time"] = win.RequestedStartTime
@@ -554,6 +571,49 @@ func nilIfZeroTime(t time.Time) *time.Time {
 		return nil
 	}
 	return &t
+}
+
+func truncateAggregatedRows(rows []aggregator.Row, limit int, pageByPivotRow bool) ([]aggregator.Row, bool) {
+	if limit <= 0 {
+		return rows, false
+	}
+	if !pageByPivotRow {
+		if len(rows) <= limit {
+			return rows, false
+		}
+		return rows[:limit], true
+	}
+	seen := make(map[aggregator.PivotRowKey]struct{}, limit+1)
+	ordered := make([]aggregator.PivotRowKey, 0, limit+1)
+	out := make([]aggregator.Row, 0, len(rows))
+	truncated := false
+	allowed := make(map[aggregator.PivotRowKey]struct{}, limit)
+	for _, row := range rows {
+		objectLDN := ""
+		if row.ObjectLDN != nil {
+			objectLDN = *row.ObjectLDN
+		}
+		key := aggregator.PivotRowKey{
+			DeviceOUI:   row.DeviceOUI,
+			DeviceSN:    row.DeviceSN,
+			ObjectLDN:   objectLDN,
+			Granularity: row.Granularity,
+			Time:        row.Time,
+		}
+		if _, ok := seen[key]; !ok {
+			seen[key] = struct{}{}
+			ordered = append(ordered, key)
+			if len(ordered) > limit {
+				truncated = true
+			} else {
+				allowed[key] = struct{}{}
+			}
+		}
+		if _, ok := allowed[key]; ok {
+			out = append(out, row)
+		}
+	}
+	return out, truncated
 }
 
 // RecomputeAggregation POST /pm/aggregation/recompute（T-0164 收尾 G5-Gap-2）

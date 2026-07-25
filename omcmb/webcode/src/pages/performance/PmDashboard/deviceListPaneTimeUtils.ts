@@ -20,7 +20,7 @@ export function defaultRangeForGranularity(
   const end = (now ?? safeNowInSystemTimezone(systemTimezone)).millisecond(0);
   switch (g) {
     case '15min':
-      return [end.subtract(3, 'hour'), end];
+      return [end.subtract(1, 'day'), end];
     case 'hourly':
       return [end.subtract(24, 'hour'), end];
     case 'daily':

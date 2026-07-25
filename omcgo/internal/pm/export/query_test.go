@@ -26,6 +26,8 @@ func TestBuildDeviceKeysetSQL_FirstBatch_NoCursor(t *testing.T) {
 	// 首批无 keyset 游标谓词。
 	assert.NotContains(t, q, `("time", id) >`)
 	// ORDER BY time, id + LIMIT。
+	assert.Contains(t, q, `DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
+	assert.Contains(t, q, `ingest_time DESC`)
 	assert.Contains(t, q, `ORDER BY "time" ASC, id ASC`)
 	assert.Contains(t, q, "LIMIT 5000")
 	assert.Contains(t, q, "FROM pm_metrics_hourly")
@@ -114,6 +116,8 @@ func TestBuildDeviceOffsetSQL_UsesStoredResultTableWithoutID(t *testing.T) {
 	q, args := buildDeviceOffsetSQL("pm_metrics_daily", req, nil, 5000, 5000)
 
 	assert.Contains(t, q, "FROM pm_metrics_daily")
+	assert.Contains(t, q, `DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
+	assert.Contains(t, q, `ingest_time DESC`)
 	assert.NotContains(t, q, " id,")
 	assert.Contains(t, q, "metric_path = ")
 	assert.Contains(t, q, "metric_type = ")
