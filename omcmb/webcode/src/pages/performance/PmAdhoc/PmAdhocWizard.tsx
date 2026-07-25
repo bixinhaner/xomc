@@ -43,7 +43,6 @@ import { useIndicatorCandidates } from '@core/hooks/api/usePerformance';
 import type { IndicatorCandidate } from '@core/services/api/pmApi';
 import type { AdhocDimension, AdhocMode, AdhocVisibility } from '@core/types/pmAdhoc';
 import type { DeviceType } from '@core/types/indicatorLibrary';
-import { isGranularityDimensionSupported } from '@core/utils/pmAdhocConstraints';
 import { formatIndicatorLevel, shouldShowIndicatorLevel } from '@core/utils/indicatorLevelDisplay';
 import CellDrilldownSelector from '../PmDashboard/CellDrilldownSelector';
 import { getEffectiveLdns, type CellSelection } from '../PmDashboard/cellDrilldownUtils';
@@ -56,6 +55,7 @@ import { resolveLimitedTransferSelection } from './selectionLimit';
 
 // 制式（含 GSM，networkType 过滤直接用小写值）
 type WizardTech = 'lte' | 'nr' | 'gsm';
+const ROLLUP_GRANULARITIES = ['hourly', 'daily', 'weekly', 'monthly'];
 
 // 制式 → 指标库 deviceType（大写枚举）。
 const TECH_TO_DEVICE_TYPE: Record<WizardTech, DeviceType> = {
@@ -96,7 +96,7 @@ export default function PmAdhocWizard() {
   const updateMut = useUpdatePmAdhoc();
   const { data: editTask } = usePmAdhocDetail(editId);
 
-  // 制式 / 维度 / 粒度选项：value 不变，仅 label / hint 走 i18n。
+  // 制式 / 维度选项：value 不变，仅 label / hint 走 i18n。
   const TECH_OPTIONS = useMemo<{ label: string; value: WizardTech }[]>(
     () => [
       { label: intl.formatMessage({ id: 'perf.adhoc.techLte' }), value: 'lte' },
@@ -137,7 +137,6 @@ export default function PmAdhocWizard() {
     [intl],
   );
 
-  // #669：自定义聚合任务下线 15min，最细粒度限定 hourly（详见 pmAdhocConstraints.ts）。
   const GRANULARITY_OPTIONS = useMemo(
     () => [
       { label: intl.formatMessage({ id: 'perf.adhoc.granularHourly' }), value: 'hourly' },
@@ -169,8 +168,7 @@ export default function PmAdhocWizard() {
   const [metricTypeFilter, setMetricTypeFilter] = useState<'all' | 'kpi' | 'counter'>('all');
   const [metricBatchOpen, setMetricBatchOpen] = useState(false);
 
-  // ④ 聚合设置
-  const [granularity, setGranularity] = useState<string>('hourly');
+  // ④ 聚合设置（小时、天、周、月由后端固定产出）
   const [window, setWindow] = useState<[dayjs.Dayjs, dayjs.Dayjs]>([
     dayjs().subtract(1, 'day'),
     dayjs(),
@@ -194,9 +192,6 @@ export default function PmAdhocWizard() {
     setDimension(editTask.dimension);
     setSelectedSns(editTask.deviceSns ?? []);
     setMetricPaths(editTask.metricPaths ?? []);
-    if (editTask.granularities && editTask.granularities.length > 0) {
-      setGranularity(editTask.granularities[0]);
-    }
     if (editTask.mode === 'oneshot' && editTask.windowStart && editTask.windowEnd) {
       const ws = dayjs(editTask.windowStart);
       const we = dayjs(editTask.windowEnd);
@@ -277,10 +272,7 @@ export default function PmAdhocWizard() {
     : true;
   const step3Valid = metricPaths.length >= 1 && metricPaths.length <= PM_QUERY_SELECTION_LIMIT;
   const step4Valid =
-    granularity.length > 0 &&
-    // #669：兜底——15min 已从粒度选项删除，但编辑模式遇旧任务仍可能传入 15min，由此拦截。
-    isGranularityDimensionSupported(granularity, dimension) &&
-    (mode === 'continuous' || (window[0] && window[1] && window[1].isAfter(window[0])));
+    mode === 'continuous' || (window[0] && window[1] && window[1].isAfter(window[0]));
 
   const canNext = [step1Valid, step2Valid, step3Valid, step4Valid][current];
 
@@ -336,7 +328,7 @@ export default function PmAdhocWizard() {
             name: name.trim(),
             deviceSns: needsDevicePick ? selectedSns : [],
             metricPaths,
-            granularities: [granularity],
+            granularities: ROLLUP_GRANULARITIES,
             visibility,
             windowStart: mode === 'oneshot' ? window[0].toISOString() : undefined,
             windowEnd: mode === 'oneshot' ? window[1].toISOString() : undefined,
@@ -354,7 +346,7 @@ export default function PmAdhocWizard() {
         technology,
         deviceSns: needsDevicePick ? selectedSns : [],
         metricPaths,
-        granularities: [granularity],
+        granularities: ROLLUP_GRANULARITIES,
         visibility,
         // oneshot 带 window；continuous 不带（后端开窗滚动）
         windowStart: mode === 'oneshot' ? window[0].toISOString() : undefined,
@@ -477,10 +469,6 @@ export default function PmAdhocWizard() {
             onChange={(e) => {
               const next = e.target.value as AdhocDimension;
               setDimension(next);
-              // #669：编辑模式遇旧 15min 任务，切维度时一并回落 hourly（新建路径已无 15min 选项）。
-              if (!isGranularityDimensionSupported(granularity, next)) {
-                setGranularity('hourly');
-              }
             }}
           >
             <Space orientation="vertical">
@@ -672,20 +660,12 @@ export default function PmAdhocWizard() {
   const renderStep4 = () => (
     <Space orientation="vertical" size="large" style={{ width: '100%', maxWidth: 560 }}>
       <div>
-        <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldGranReq' })}</div>
-        {/* #669：自定义聚合任务最细粒度限定 hourly，15min 选项已从数组中移除。 */}
-        <Radio.Group
-          optionType="button"
-          buttonStyle="solid"
-          value={granularity}
-          onChange={(e) => setGranularity(e.target.value)}
-        >
-          {GRANULARITY_OPTIONS.map((g) => (
-            <Radio.Button key={g.value} value={g.value}>
-              {g.label}
-            </Radio.Button>
-          ))}
-        </Radio.Group>
+        <Alert
+          type="info"
+          showIcon
+          title={intl.formatMessage({ id: 'perf.adhoc.fixedRollupLabel' })}
+          description={intl.formatMessage({ id: 'perf.adhoc.fixedRollupDesc' })}
+        />
       </div>
       {mode === 'oneshot' ? (
         <div>
@@ -792,7 +772,9 @@ export default function PmAdhocWizard() {
           )}
         </Descriptions.Item>
         <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmGranularity' })}>
-          {GRANULARITY_OPTIONS.find((g) => g.value === granularity)?.label ?? granularity}
+          <Space size={[4, 4]} wrap>
+            {GRANULARITY_OPTIONS.map((g) => <Tag key={g.value}>{g.label}</Tag>)}
+          </Space>
         </Descriptions.Item>
         {mode === 'oneshot' && (
           <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmTimeRange' })}>

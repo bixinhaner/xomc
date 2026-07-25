@@ -19456,7 +19456,10 @@ CREATE TABLE public.pm_aggregation_task_versions (
     CONSTRAINT chk_pm_aggregation_task_versions_dimension
         CHECK (dimension IN ('device', 'aggregate_group', 'device_group', 'product', 'band', 'network')),
     CONSTRAINT chk_pm_aggregation_task_versions_granularities
-        CHECK (granularities <@ ARRAY['hourly', 'daily', 'weekly', 'monthly']::text[])
+        CHECK (
+            cardinality(granularities) = 4
+            AND granularities @> ARRAY['hourly', 'daily', 'weekly', 'monthly']::text[]
+        )
 );
 
 ALTER TABLE public.pm_aggregation_tasks
@@ -19473,10 +19476,22 @@ CREATE TABLE public.pm_aggregation_version_metrics (
     metric_path text NOT NULL,
     metric_type varchar(16) NOT NULL,
     aggregation_op varchar(8) NOT NULL,
+    formula text NOT NULL DEFAULT '',
+    dependencies text[] NOT NULL DEFAULT '{}',
     PRIMARY KEY (task_version_id, metric_id),
     CONSTRAINT chk_pm_aggregation_version_metrics_type
         CHECK (metric_type IN ('counter', 'kpi')),
     CONSTRAINT chk_pm_aggregation_version_metrics_op
+        CHECK (aggregation_op IN ('sum', 'avg', 'min', 'max', 'formula'))
+);
+
+CREATE TABLE public.pm_aggregation_version_counters (
+    task_version_id uuid NOT NULL
+        REFERENCES public.pm_aggregation_task_versions(id) ON DELETE CASCADE,
+    metric_path text NOT NULL,
+    aggregation_op varchar(8) NOT NULL,
+    PRIMARY KEY (task_version_id, metric_path),
+    CONSTRAINT chk_pm_aggregation_version_counters_op
         CHECK (aggregation_op IN ('sum', 'avg', 'min', 'max'))
 );
 

@@ -43,9 +43,12 @@ type Accumulator struct {
 }
 
 type WindowState struct {
-	ExpectedSlots int64
-	ReceivedSlots int64
-	Accumulators  []Accumulator
+	ExpectedSlots         int64
+	ReceivedSlots         int64
+	SourceExpectedSlots   int64
+	SourceReceivedSlots   int64
+	SourceIncompleteSlots int64
+	Accumulators          []Accumulator
 }
 
 type RedisWindowStore struct {
@@ -96,17 +99,27 @@ func (s *RedisWindowStore) Accumulate(
 		int64(s.ttl.Seconds()),
 		len(contribution.Values),
 		time.Now().UTC().Unix(),
+		boolInt(contribution.Rollup),
+		contribution.SourceExpectedSlots,
+		contribution.SourceReceivedSlots,
+		contribution.SourceIncompleteSlots,
+		contribution.RollupChunkIndex,
+		contribution.RollupChunkCount,
 	}
 	for _, value := range contribution.Values {
 		encoded, err := encodeDefinition(value)
 		if err != nil {
 			return AccumulateResult{}, err
 		}
-		args = append(args, encoded, value.Value)
+		sum, count, minValue, maxValue := value.Value, int64(1), value.Value, value.Value
+		if value.Composed {
+			sum, count, minValue, maxValue = value.Sum, value.Count, value.Min, value.Max
+		}
+		args = append(args, encoded, sum, count, minValue, maxValue)
 	}
 	raw, err := accumulateScript.Run(
 		ctx, s.client,
-		[]string{keys.seen, keys.slots, keys.meta, keys.acc},
+		[]string{keys.seen, keys.slots, keys.meta, keys.acc, keys.chunks},
 		args...,
 	).Slice()
 	if err != nil {
@@ -132,6 +145,13 @@ func (s *RedisWindowStore) Accumulate(
 	}, nil
 }
 
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
 func (s *RedisWindowStore) Read(ctx context.Context, key WindowKey) (WindowState, error) {
 	keys := redisKeys(key)
 	pipe := s.client.Pipeline()
@@ -147,6 +167,9 @@ func (s *RedisWindowStore) Read(ctx context.Context, key WindowKey) (WindowState
 	state := WindowState{}
 	state.ExpectedSlots, _ = strconv.ParseInt(meta["expected_slots"], 10, 64)
 	state.ReceivedSlots, _ = strconv.ParseInt(meta["received_slots"], 10, 64)
+	state.SourceExpectedSlots, _ = strconv.ParseInt(meta["source_expected_slots"], 10, 64)
+	state.SourceReceivedSlots, _ = strconv.ParseInt(meta["source_received_slots"], 10, 64)
+	state.SourceIncompleteSlots, _ = strconv.ParseInt(meta["source_incomplete_slots"], 10, 64)
 
 	type partial struct {
 		def   ContributionValue
@@ -229,14 +252,14 @@ func (l *Lock) Release(ctx context.Context) error {
 
 func (s *RedisWindowStore) Delete(ctx context.Context, key WindowKey) error {
 	keys := redisKeys(key)
-	if err := s.client.Del(ctx, keys.seen, keys.slots, keys.meta, keys.acc).Err(); err != nil {
+	if err := s.client.Del(ctx, keys.seen, keys.slots, keys.meta, keys.acc, keys.chunks).Err(); err != nil {
 		return fmt.Errorf("delete PM aggregation Redis window: %w", err)
 	}
 	return nil
 }
 
 type windowRedisKeys struct {
-	seen, slots, meta, acc, lock string
+	seen, slots, meta, acc, chunks, lock string
 }
 
 func redisKeys(key WindowKey) windowRedisKeys {
@@ -247,12 +270,18 @@ func redisKeys(key WindowKey) windowRedisKeys {
 	prefix := "pmagg:" + tag
 	return windowRedisKeys{
 		seen: prefix + ":seen", slots: prefix + ":slots",
-		meta: prefix + ":meta", acc: prefix + ":acc", lock: prefix + ":finalize-lock",
+		meta: prefix + ":meta", acc: prefix + ":acc",
+		chunks: prefix + ":chunks", lock: prefix + ":finalize-lock",
 	}
 }
 
 func encodeDefinition(value ContributionValue) (string, error) {
 	value.Value = 0
+	value.Sum = 0
+	value.Count = 0
+	value.Min = 0
+	value.Max = 0
+	value.Composed = false
 	data, err := json.Marshal(value)
 	if err != nil {
 		return "", fmt.Errorf("marshal PM aggregation accumulator definition: %w", err)

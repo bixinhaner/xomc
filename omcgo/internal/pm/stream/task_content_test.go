@@ -23,6 +23,10 @@ func TestTaskContentHashIgnoresCollectionOrder(t *testing.T) {
 			{MetricID: "K2", MetricPath: "K2", MetricType: "kpi", Aggregation: AggregationAvg},
 			{MetricID: "K1", MetricPath: "K1", MetricType: "counter", Aggregation: AggregationSum},
 		},
+		Counters: []CounterRule{
+			{MetricPath: "C2", Aggregation: AggregationAvg},
+			{MetricPath: "C1", Aggregation: AggregationSum},
+		},
 		Members: []TaskMember{
 			{DeviceID: secondDevice, DeviceSN: "SN-2", DimensionKey: "network", ObjectLDN: "Cell=2"},
 			{DeviceID: firstDevice, DeviceSN: "SN-1", DimensionKey: "network", ObjectLDN: "Cell=1"},
@@ -32,6 +36,7 @@ func TestTaskContentHashIgnoresCollectionOrder(t *testing.T) {
 	right.Granularities = []Granularity{GranularityHourly, GranularityDaily}
 	right.ObjectLDNs = []string{"Cell=1", "Cell=2"}
 	right.Metrics = []MetricRule{left.Metrics[1], left.Metrics[0]}
+	right.Counters = []CounterRule{left.Counters[1], left.Counters[0]}
 	right.Members = []TaskMember{left.Members[1], left.Members[0]}
 
 	require.Equal(t, taskContentHash(left), taskContentHash(right))
@@ -46,6 +51,7 @@ func TestTaskContentHashChangesWithExecutableContent(t *testing.T) {
 		Metrics: []MetricRule{
 			{MetricID: "K1", MetricPath: "K1", MetricType: "counter", Aggregation: AggregationSum},
 		},
+		Counters: []CounterRule{{MetricPath: "K1", Aggregation: AggregationSum}},
 		Members: []TaskMember{
 			{DeviceID: deviceID, DeviceSN: "SN-1", DimensionKey: "network"},
 		},
@@ -57,6 +63,7 @@ func TestTaskContentHashChangesWithExecutableContent(t *testing.T) {
 		"dimension":     func(req *SaveTaskRequest) { req.Dimension = DimensionProduct },
 		"granularity":   func(req *SaveTaskRequest) { req.Granularities = []Granularity{GranularityDaily} },
 		"metric rule":   func(req *SaveTaskRequest) { req.Metrics[0].Aggregation = AggregationAvg },
+		"counter rule":  func(req *SaveTaskRequest) { req.Counters[0].Aggregation = AggregationAvg },
 		"member device": func(req *SaveTaskRequest) { req.Members[0].DeviceID = uuid.New() },
 		"dimension key": func(req *SaveTaskRequest) { req.Members[0].DimensionKey = "changed" },
 	}
@@ -77,6 +84,7 @@ func TestTaskContentHashExcludesDisplayAndSchedulingMetadata(t *testing.T) {
 		Metrics: []MetricRule{
 			{MetricID: "K1", MetricPath: "K1", MetricType: "counter", Aggregation: AggregationSum},
 		},
+		Counters: []CounterRule{{MetricPath: "K1", Aggregation: AggregationSum}},
 		Members: []TaskMember{
 			{DeviceID: uuid.MustParse("10000000-0000-4000-8000-000000000001"), DeviceSN: "SN-1", DimensionKey: "network"},
 		},
@@ -94,6 +102,7 @@ func cloneSaveTaskRequest(req SaveTaskRequest) SaveTaskRequest {
 	cloned.Granularities = append([]Granularity(nil), req.Granularities...)
 	cloned.ObjectLDNs = append([]string(nil), req.ObjectLDNs...)
 	cloned.Metrics = append([]MetricRule(nil), req.Metrics...)
+	cloned.Counters = append([]CounterRule(nil), req.Counters...)
 	cloned.Members = append([]TaskMember(nil), req.Members...)
 	return cloned
 }

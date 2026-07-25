@@ -29,16 +29,26 @@ const (
 type AggregationOp string
 
 const (
-	AggregationSum AggregationOp = "sum"
-	AggregationAvg AggregationOp = "avg"
-	AggregationMin AggregationOp = "min"
-	AggregationMax AggregationOp = "max"
+	AggregationSum     AggregationOp = "sum"
+	AggregationAvg     AggregationOp = "avg"
+	AggregationMin     AggregationOp = "min"
+	AggregationMax     AggregationOp = "max"
+	AggregationFormula AggregationOp = "formula"
 )
 
 type MetricRule struct {
-	MetricID    string
+	MetricID     string
+	MetricPath   string
+	MetricType   string
+	Aggregation  AggregationOp
+	Formula      string
+	Dependencies []string
+}
+
+// CounterRule is the composable state retained between aggregation levels.
+// Average counters carry sum+count; KPI values never enter this path.
+type CounterRule struct {
 	MetricPath  string
-	MetricType  string
 	Aggregation AggregationOp
 }
 
@@ -61,6 +71,7 @@ type SaveTaskRequest struct {
 	Granularities []Granularity
 	ObjectLDNs    []string
 	Metrics       []MetricRule
+	Counters      []CounterRule
 	Members       []TaskMember
 	Now           time.Time
 }
@@ -79,5 +90,6 @@ type TaskVersionSnapshot struct {
 	EffectiveFrom time.Time
 	EffectiveTo   *time.Time
 	Metrics       map[string]MetricRule
+	Counters      map[string]CounterRule
 	Members       map[uuid.UUID][]TaskMember
 }

@@ -954,7 +954,12 @@ CREATE TABLE public.pm_aggregation_windows (
     status varchar(16) NOT NULL DEFAULT 'open',
     expected_slots bigint NOT NULL,
     received_slots bigint NOT NULL DEFAULT 0,
+    source_expected_slots bigint NOT NULL DEFAULT 0,
+    source_received_slots bigint NOT NULL DEFAULT 0,
+    source_incomplete_slots bigint NOT NULL DEFAULT 0,
     missing_slots bigint NOT NULL DEFAULT 0,
+    children_complete boolean NOT NULL DEFAULT false,
+    data_complete boolean NOT NULL DEFAULT false,
     close_reason varchar(16),
     result_count integer NOT NULL DEFAULT 0,
     opened_at timestamptz NOT NULL DEFAULT now(),
@@ -1006,7 +1011,7 @@ CREATE TABLE public.pm_aggregation_results (
     CONSTRAINT chk_pm_aggregation_results_metric_type
         CHECK (metric_type IN ('counter', 'kpi')),
     CONSTRAINT chk_pm_aggregation_results_op
-        CHECK (aggregation_op IN ('sum', 'avg', 'min', 'max')),
+        CHECK (aggregation_op IN ('sum', 'avg', 'min', 'max', 'formula')),
     CONSTRAINT chk_pm_aggregation_results_time CHECK (window_end > window_start)
 );
 

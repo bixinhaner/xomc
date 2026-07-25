@@ -22,8 +22,12 @@ func TestMatcherUsesImmutableVersionWindowBoundary(t *testing.T) {
 		EffectiveFrom: time.Date(2026, 7, 25, 0, 0, 0, 0, time.UTC),
 		EffectiveTo:   &changeAt,
 		Metrics: map[string]MetricRule{
-			"K001": {MetricID: "K001", MetricPath: "K001", MetricType: "kpi", Aggregation: AggregationAvg},
+			"K001": {
+				MetricID: "K001", MetricPath: "K001", MetricType: "kpi",
+				Aggregation: AggregationFormula, Formula: "C001", Dependencies: []string{"C001"},
+			},
 		},
+		Counters: map[string]CounterRule{"C001": {MetricPath: "C001", Aggregation: AggregationSum}},
 		Members: map[uuid.UUID][]TaskMember{
 			deviceID: {{DeviceID: deviceID, DeviceSN: "SN-1", DimensionKey: deviceID.String(), DimensionName: "SN-1"}},
 		},
@@ -64,8 +68,12 @@ func TestMatcherFiltersMetricAndObjectLDNWithoutDatabaseReads(t *testing.T) {
 		EffectiveFrom: time.Date(2026, 7, 25, 0, 0, 0, 0, time.UTC),
 		ObjectLDNs:    map[string]struct{}{ldn: {}},
 		Metrics: map[string]MetricRule{
-			"K001": {MetricID: "K001", MetricPath: "K001", MetricType: "kpi", Aggregation: AggregationAvg},
+			"K001": {
+				MetricID: "K001", MetricPath: "K001", MetricType: "kpi",
+				Aggregation: AggregationFormula, Formula: "C001", Dependencies: []string{"C001"},
+			},
 		},
+		Counters: map[string]CounterRule{"C001": {MetricPath: "C001", Aggregation: AggregationSum}},
 		Members: map[uuid.UUID][]TaskMember{
 			deviceID: {{DeviceID: deviceID, DeviceSN: "SN-1", DimensionKey: "network", DimensionName: "Network"}},
 		},
@@ -84,6 +92,36 @@ func TestMatcherFiltersMetricAndObjectLDNWithoutDatabaseReads(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, contributions, 1)
 	require.Len(t, contributions[0].Values, 1)
-	require.Equal(t, "K001", contributions[0].Values[0].MetricPath)
+	require.Equal(t, "C001", contributions[0].Values[0].MetricPath)
 	require.EqualValues(t, 4, contributions[0].ExpectedSlots)
+}
+
+func TestMatcherCanRecoverMonthlyWindowDirectlyFromOriginalCounters(t *testing.T) {
+	deviceID := uuid.New()
+	version := &TaskVersionSnapshot{
+		TaskID: uuid.New(), VersionID: uuid.New(), Enabled: true,
+		Dimension: DimensionNetwork,
+		Granularities: []Granularity{
+			GranularityHourly, GranularityDaily, GranularityWeekly, GranularityMonthly,
+		},
+		EffectiveFrom: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+		Counters: map[string]CounterRule{
+			"C001": {MetricPath: "C001", Aggregation: AggregationSum},
+		},
+		Members: map[uuid.UUID][]TaskMember{
+			deviceID: {{DeviceID: deviceID, DeviceSN: "SN-1", DimensionKey: "network"}},
+		},
+	}
+	snapshot := BuildTaskSnapshot([]*TaskVersionSnapshot{version})
+	payload := validNormalizedEvent()
+	payload.DeviceID = deviceID
+	payload.WindowStart = time.Date(2026, 7, 25, 3, 15, 0, 0, time.UTC)
+	payload.WindowEnd = payload.WindowStart.Add(slotDuration)
+	matcher := NewMatcher(time.UTC)
+	contributions, err := matcher.MatchGranularity(payload, snapshot, GranularityMonthly)
+	require.NoError(t, err)
+	require.Len(t, contributions, 1)
+	require.Equal(t, GranularityMonthly, contributions[0].Key.Granularity)
+	require.EqualValues(t, 31*24*4, contributions[0].ExpectedSlots)
+	require.Equal(t, "C001", contributions[0].Values[0].MetricPath)
 }

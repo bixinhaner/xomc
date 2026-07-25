@@ -20,6 +20,8 @@ import (
 )
 
 const pmBuiltinReconcileInterval = 5 * time.Minute
+const pmBuiltinInitialRetryInterval = 2 * time.Second
+const pmBuiltinInitialRetryTimeout = time.Minute
 
 type pmBuiltinReconcileFunc func(context.Context) (adhoc.BuiltinReconcileResult, error)
 type pmSnapshotReloadFunc func(context.Context) error
@@ -35,6 +37,29 @@ func runPMBuiltinReconcile(
 		reloadErr = reload(ctx)
 	}
 	return result, errors.Join(reconcileErr, reloadErr)
+}
+
+func reconcilePMBuiltinsUntilReady(
+	ctx context.Context,
+	reconcile pmBuiltinReconcileFunc,
+	reload pmSnapshotReloadFunc,
+	retryInterval time.Duration,
+) (adhoc.BuiltinReconcileResult, error) {
+	var lastResult adhoc.BuiltinReconcileResult
+	var lastErr error
+	for {
+		lastResult, lastErr = runPMBuiltinReconcile(ctx, reconcile, reload)
+		if lastErr == nil {
+			return lastResult, nil
+		}
+		timer := time.NewTimer(retryInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return lastResult, errors.Join(lastErr, ctx.Err())
+		case <-timer.C:
+		}
+	}
 }
 
 func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager) {
@@ -56,7 +81,14 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	taskRepo := pmstream.NewPgTaskRepository(w.PgPool, w.EventBus)
 	adhocRepo := adhoc.NewPgRepository(w.PgPool, w.TsPool).SetStreamingRepository(taskRepo)
 	builtinReconciler := adhoc.NewBuiltinReconciler(adhocRepo)
-	initialResult, initialErr := builtinReconciler.Reconcile(ctx)
+	initialCtx, initialCancel := context.WithTimeout(ctx, pmBuiltinInitialRetryTimeout)
+	initialResult, initialErr := reconcilePMBuiltinsUntilReady(
+		initialCtx,
+		builtinReconciler.Reconcile,
+		func(context.Context) error { return nil },
+		pmBuiltinInitialRetryInterval,
+	)
+	initialCancel()
 	recordPMBuiltinReconcile(streamMetrics, initialResult)
 	if initialErr != nil {
 		logger.Error("reconcile initial built-in PM aggregation tasks",
@@ -73,7 +105,12 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	windowRepo := pmstream.NewWindowRepository(w.TsPool)
 	finalizer := pmstream.NewFinalizer(windowRepo, store, logger).
 		SetConcurrency(cfg.FinalizeConcurrency).
+		SetSnapshot(snapshot).
 		SetMetrics(streamMetrics)
+	promoter := pmstream.NewDirectRollupPromoter(
+		snapshot, windowRepo, store, finalizer, tz.Current(), logger,
+	)
+	finalizer.SetRollupPromoter(promoter.Promote)
 	recovery := pmstream.NewRecovery(w.NATS.JS, windowRepo, store, snapshot, matcher, logger)
 	if err := recovery.RestoreActiveWindows(ctx); err != nil {
 		logger.Error("restore active PM aggregation windows", zap.Error(err))
@@ -98,7 +135,8 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	relay := pmstream.NewOutboxRelay(
 		pmstream.NewOutboxRepository(w.TsPool), w.EventBus, logger,
 	).SetBatch(cfg.OutboxBatch).SetMetrics(streamMetrics)
-	scanner := pmstream.NewTimeoutScanner(windowRepo, finalizer, cfg.CloseGrace, logger)
+	scanner := pmstream.NewTimeoutScanner(windowRepo, finalizer, cfg.CloseGrace, logger).
+		SetGranularityGrace(cfg.DailyCloseGrace, cfg.WeeklyCloseGrace, cfg.MonthlyCloseGrace)
 	go func() {
 		if err := relay.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("PM aggregation outbox relay stopped", zap.Error(err))

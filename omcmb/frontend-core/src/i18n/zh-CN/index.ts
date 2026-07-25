@@ -8202,6 +8202,8 @@ const messages: Record<string, string> = {
   'perf.adhoc.metricPathsLabel':         '指标路径（逗号分隔）',
   'perf.adhoc.metricPathsPlaceholder':   'L.RRC.SuccRate, L.ERAB.SuccRate',
   'perf.adhoc.granMultiLabel':           '粒度（多选）',
+  'perf.adhoc.fixedRollupLabel':         '固定汇聚层级',
+  'perf.adhoc.fixedRollupDesc':          '任务自动产出小时、天、周、月结果；各层 KPI 均基于原始 Counter 汇总后计算。',
   'perf.adhoc.windowLabel':              '时间窗',
   'perf.adhoc.aggregateGroupLabel':      '聚合到组',
   'perf.adhoc.aggregateGroupTooltip':    '勾选：所有选中 SN 临时组成一组聚合（按时间桶 + LDN GROUP BY），结果 device_sn=AGGREGATED；不勾：每设备一条结果',

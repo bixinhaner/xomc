@@ -83,7 +83,7 @@ export const pmAdhocApi = {
       cron_expr: input.cronExpr,
       device_sns: input.deviceSns,
       metric_paths: input.metricPaths,
-      granularities: input.granularities,
+      granularities: ['hourly', 'daily', 'weekly', 'monthly'],
       dimension: input.dimension,
       technology: input.technology,
       is_builtin: input.isBuiltin,
@@ -106,7 +106,9 @@ export const pmAdhocApi = {
     };
     if (input.name !== undefined) payload.name = input.name;
     if (input.deviceSns !== undefined) payload.device_sns = input.deviceSns;
-    if (input.granularities !== undefined) payload.granularities = input.granularities;
+    if (input.granularities !== undefined) {
+      payload.granularities = ['hourly', 'daily', 'weekly', 'monthly'];
+    }
     if (input.visibility !== undefined) payload.visibility = input.visibility;
     if (input.windowStart) payload.window_start = input.windowStart;
     if (input.windowEnd) payload.window_end = input.windowEnd;
@@ -228,7 +230,7 @@ export const pmAdhocMock: typeof pmAdhocApi = {
       cronExpr: input.cronExpr,
       deviceSns: input.deviceSns,
       metricPaths: input.metricPaths,
-      granularities: input.granularities,
+	      granularities: ['hourly', 'daily', 'weekly', 'monthly'],
       windowStart: input.windowStart ?? '',
       windowEnd: input.windowEnd ?? '',
       dimension: input.dimension ?? 'device',

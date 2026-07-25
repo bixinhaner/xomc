@@ -8,6 +8,8 @@ import (
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/storage"
+	"github.com/omcgo/omcgo/internal/pm/indicator"
+	"github.com/omcgo/omcgo/internal/pm/kpi/expr"
 	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
 )
 
@@ -15,7 +17,11 @@ func (r *PgRepository) syncStreamingTask(ctx context.Context, task *Task, enable
 	if r.streamRepo == nil || task == nil {
 		return nil
 	}
-	rules, err := r.resolveStreamingRules(ctx, task.MetricPaths)
+	rules, err := r.resolveStreamingRules(ctx, task.Technology, task.MetricPaths)
+	if err != nil {
+		return err
+	}
+	counters, err := r.resolveStreamingCounters(ctx, task.Technology, rules)
 	if err != nil {
 		return err
 	}
@@ -26,16 +32,13 @@ func (r *PgRepository) syncStreamingTask(ctx context.Context, task *Task, enable
 	if len(members) == 0 {
 		return fmt.Errorf("PM aggregation task resolved no devices")
 	}
-	granularities := make([]pmstream.Granularity, 0, len(task.Granularities))
-	for _, value := range task.Granularities {
-		granularities = append(granularities, pmstream.Granularity(value))
-	}
+	granularities := streamingRollupGranularities()
 	_, err = r.streamRepo.Save(ctx, pmstream.SaveTaskRequest{
 		TaskID: task.ID, Name: task.Name, Enabled: enabled,
 		Visibility: string(normalizeVisibility(task.Visibility)), Creator: task.Creator,
 		Technology: task.Technology, Dimension: pmstream.Dimension(task.Dimension),
 		Granularities: granularities, ObjectLDNs: task.ObjectLDNs,
-		Metrics: rules, Members: members,
+		Metrics: rules, Counters: counters, Members: members,
 	})
 	if err != nil {
 		return fmt.Errorf("save PM streaming task version: %w", err)
@@ -43,21 +46,31 @@ func (r *PgRepository) syncStreamingTask(ctx context.Context, task *Task, enable
 	return nil
 }
 
+func streamingRollupGranularities() []pmstream.Granularity {
+	return []pmstream.Granularity{
+		pmstream.GranularityHourly,
+		pmstream.GranularityDaily,
+		pmstream.GranularityWeekly,
+		pmstream.GranularityMonthly,
+	}
+}
+
 func (r *PgRepository) resolveStreamingRules(
 	ctx context.Context,
+	technology string,
 	paths []string,
 ) ([]pmstream.MetricRule, error) {
 	if len(paths) == 0 {
 		return nil, fmt.Errorf("PM aggregation task has no metrics")
 	}
 	const query = `
-SELECT id, COALESCE(is_counter, '0'), COALESCE(statis_type, '')
+SELECT id, COALESCE(is_counter, '0'), COALESCE(statis_type, ''), COALESCE(arithmetic, ''), 'ENB'
   FROM perf_indicators_enb WHERE id = ANY($1)
 UNION ALL
-SELECT id, COALESCE(is_counter, '0'), COALESCE(statis_type, '')
+SELECT id, COALESCE(is_counter, '0'), COALESCE(statis_type, ''), COALESCE(arithmetic, ''), 'GNB'
   FROM perf_indicators_gnb WHERE id = ANY($1)
 UNION ALL
-SELECT id, COALESCE(is_counter, '0'), COALESCE(statis_type, '')
+SELECT id, COALESCE(is_counter, '0'), COALESCE(statis_type, ''), COALESCE(arithmetic, ''), 'GSM'
   FROM perf_indicators_gsm WHERE id = ANY($1)`
 	rows, err := r.pool.Query(ctx, query, paths)
 	if err != nil {
@@ -66,9 +79,18 @@ SELECT id, COALESCE(is_counter, '0'), COALESCE(statis_type, '')
 	defer rows.Close()
 	resolved := make(map[string]pmstream.MetricRule, len(paths))
 	for rows.Next() {
-		var path, isCounter, statisType string
-		if err := rows.Scan(&path, &isCounter, &statisType); err != nil {
+		var path, isCounter, statisType, formula, deviceType string
+		if err := rows.Scan(&path, &isCounter, &statisType, &formula, &deviceType); err != nil {
 			return nil, fmt.Errorf("scan PM aggregation metric rule: %w", err)
+		}
+		if technology != "" {
+			expectedType, typeErr := indicatorDeviceTypeForTechnology(technology)
+			if typeErr != nil {
+				return nil, typeErr
+			}
+			if string(expectedType) != deviceType {
+				continue
+			}
 		}
 		if _, exists := resolved[path]; exists {
 			continue
@@ -77,10 +99,26 @@ SELECT id, COALESCE(is_counter, '0'), COALESCE(statis_type, '')
 		if isCounter == "1" {
 			metricType = "counter"
 		}
-		resolved[path] = pmstream.MetricRule{
+		rule := pmstream.MetricRule{
 			MetricID: path, MetricPath: path, MetricType: metricType,
 			Aggregation: streamAggregationOp(statisType),
 		}
+		if metricType == "counter" {
+			rule.Dependencies = []string{path}
+		} else {
+			formula = indicator.CompileRuntimeArithmetic(indicator.DeviceType(deviceType), formula)
+			parsed, parseErr := expr.Parse(formula)
+			if parseErr != nil {
+				return nil, fmt.Errorf("parse PM aggregation KPI %s formula: %w", path, parseErr)
+			}
+			rule.Formula = formula
+			rule.Dependencies = parsed.Identifiers()
+			rule.Aggregation = pmstream.AggregationFormula
+			if len(rule.Dependencies) == 0 {
+				return nil, fmt.Errorf("PM aggregation KPI %s formula has no counter dependencies", path)
+			}
+		}
+		resolved[path] = rule
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate PM aggregation metric rules: %w", err)
@@ -94,6 +132,72 @@ SELECT id, COALESCE(is_counter, '0'), COALESCE(statis_type, '')
 		rules = append(rules, rule)
 	}
 	return rules, nil
+}
+
+func (r *PgRepository) resolveStreamingCounters(
+	ctx context.Context,
+	technology string,
+	metrics []pmstream.MetricRule,
+) ([]pmstream.CounterRule, error) {
+	seen := make(map[string]struct{})
+	var paths []string
+	for _, metric := range metrics {
+		for _, dependency := range metric.Dependencies {
+			if _, ok := seen[dependency]; ok {
+				continue
+			}
+			seen[dependency] = struct{}{}
+			paths = append(paths, dependency)
+		}
+	}
+	const query = `
+SELECT id, COALESCE(is_counter, '0'), COALESCE(statis_type, ''), 'ENB'
+  FROM perf_indicators_enb WHERE id = ANY($1)
+UNION ALL
+SELECT id, COALESCE(is_counter, '0'), COALESCE(statis_type, ''), 'GNB'
+  FROM perf_indicators_gnb WHERE id = ANY($1)
+UNION ALL
+SELECT id, COALESCE(is_counter, '0'), COALESCE(statis_type, ''), 'GSM'
+  FROM perf_indicators_gsm WHERE id = ANY($1)`
+	rows, err := r.pool.Query(ctx, query, paths)
+	if err != nil {
+		return nil, fmt.Errorf("resolve PM aggregation counter dependencies: %w", err)
+	}
+	defer rows.Close()
+	resolved := make(map[string]pmstream.CounterRule, len(paths))
+	for rows.Next() {
+		var path, isCounter, statisType, deviceType string
+		if err := rows.Scan(&path, &isCounter, &statisType, &deviceType); err != nil {
+			return nil, fmt.Errorf("scan PM aggregation counter dependency: %w", err)
+		}
+		if technology != "" {
+			expectedType, typeErr := indicatorDeviceTypeForTechnology(technology)
+			if typeErr != nil {
+				return nil, typeErr
+			}
+			if string(expectedType) != deviceType {
+				continue
+			}
+		}
+		if isCounter != "1" {
+			continue
+		}
+		resolved[path] = pmstream.CounterRule{
+			MetricPath: path, Aggregation: streamAggregationOp(statisType),
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate PM aggregation counter dependencies: %w", err)
+	}
+	out := make([]pmstream.CounterRule, 0, len(paths))
+	for _, path := range paths {
+		rule, ok := resolved[path]
+		if !ok {
+			return nil, fmt.Errorf("PM aggregation counter dependency %s has no registered counter metadata", path)
+		}
+		out = append(out, rule)
+	}
+	return out, nil
 }
 
 func streamAggregationOp(statisType string) pmstream.AggregationOp {

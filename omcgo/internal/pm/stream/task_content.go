@@ -13,6 +13,7 @@ type canonicalTaskContent struct {
 	Granularities []Granularity     `json:"granularities"`
 	ObjectLDNs    []string          `json:"object_ldns"`
 	Metrics       []MetricRule      `json:"metrics"`
+	Counters      []CounterRule     `json:"counters"`
 	Members       []canonicalMember `json:"members"`
 }
 
@@ -30,6 +31,7 @@ func taskContentHash(req SaveTaskRequest) []byte {
 		Granularities: append([]Granularity(nil), req.Granularities...),
 		ObjectLDNs:    append([]string(nil), req.ObjectLDNs...),
 		Metrics:       append([]MetricRule(nil), req.Metrics...),
+		Counters:      append([]CounterRule(nil), req.Counters...),
 		Members:       make([]canonicalMember, 0, len(req.Members)),
 	}
 	sort.Slice(content.Granularities, func(i, j int) bool {
@@ -48,6 +50,12 @@ func taskContentHash(req SaveTaskRequest) []byte {
 			return left.MetricType < right.MetricType
 		}
 		return left.Aggregation < right.Aggregation
+	})
+	sort.Slice(content.Counters, func(i, j int) bool {
+		if content.Counters[i].MetricPath != content.Counters[j].MetricPath {
+			return content.Counters[i].MetricPath < content.Counters[j].MetricPath
+		}
+		return content.Counters[i].Aggregation < content.Counters[j].Aggregation
 	})
 	for _, member := range req.Members {
 		content.Members = append(content.Members, canonicalMember{

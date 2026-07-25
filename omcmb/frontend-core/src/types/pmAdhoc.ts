@@ -65,7 +65,8 @@ export interface CreateAdhocTaskInput {
   cronExpr?: string;
   deviceSns: string[];
   metricPaths: string[];
-  granularities: string[];
+  /** Fixed by the service to hourly/daily/weekly/monthly. */
+  granularities?: string[];
   // T-0185：window 仅 oneshot 必填；continuous 不传 → 后端开窗滚动聚合。
   windowStart?: string;
   windowEnd?: string;

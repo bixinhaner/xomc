@@ -9,6 +9,9 @@ import (
 type Config struct {
 	Enabled             bool
 	CloseGrace          time.Duration
+	DailyCloseGrace     time.Duration
+	WeeklyCloseGrace    time.Duration
+	MonthlyCloseGrace   time.Duration
 	OutboxBatch         int
 	ConsumerConcurrency int
 	FinalizeConcurrency int
@@ -20,6 +23,9 @@ func DefaultConfig() Config {
 	return Config{
 		Enabled:             true,
 		CloseGrace:          5 * time.Minute,
+		DailyCloseGrace:     15 * time.Minute,
+		WeeklyCloseGrace:    30 * time.Minute,
+		MonthlyCloseGrace:   30 * time.Minute,
 		OutboxBatch:         100,
 		ConsumerConcurrency: 8,
 		FinalizeConcurrency: 4,
@@ -32,6 +38,9 @@ func ConfigFromEnv() Config {
 	cfg := DefaultConfig()
 	cfg.Enabled = envBool("PM_AGGREGATION_ENABLED", cfg.Enabled)
 	cfg.CloseGrace = envDuration("PM_AGGREGATION_CLOSE_GRACE", cfg.CloseGrace)
+	cfg.DailyCloseGrace = envDuration("PM_AGGREGATION_DAILY_CLOSE_GRACE", cfg.DailyCloseGrace)
+	cfg.WeeklyCloseGrace = envDuration("PM_AGGREGATION_WEEKLY_CLOSE_GRACE", cfg.WeeklyCloseGrace)
+	cfg.MonthlyCloseGrace = envDuration("PM_AGGREGATION_MONTHLY_CLOSE_GRACE", cfg.MonthlyCloseGrace)
 	cfg.OutboxBatch = envInt("PM_AGGREGATION_OUTBOX_BATCH", cfg.OutboxBatch)
 	cfg.ConsumerConcurrency = envInt("PM_AGGREGATION_CONSUMER_CONCURRENCY", cfg.ConsumerConcurrency)
 	cfg.FinalizeConcurrency = envInt("PM_AGGREGATION_FINALIZE_CONCURRENCY", cfg.FinalizeConcurrency)

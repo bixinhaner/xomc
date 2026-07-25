@@ -34,9 +34,9 @@ func (g Generator) Event(deviceIndex int) (event.PMAggregationNormalizedPayload,
 	metrics := make([]event.PMAggregationMetric, 0, g.Metrics)
 	for index := 0; index < g.Metrics; index++ {
 		metrics = append(metrics, event.PMAggregationMetric{
-			MetricPath: fmt.Sprintf("K%04d", index+1),
-			MetricType: "kpi",
-			StatisType: "avg",
+			MetricPath: fmt.Sprintf("C%04d", index+1),
+			MetricType: "counter",
+			StatisType: "sum",
 			Value:      float64(deviceIndex+index) + 0.5,
 		})
 	}

@@ -163,6 +163,9 @@ func (r *PgTaskRepository) Save(ctx context.Context, req SaveTaskRequest) (*Task
 	if err := insertMetricRules(ctx, tx, versionID, req.Metrics); err != nil {
 		return nil, err
 	}
+	if err := insertCounterRules(ctx, tx, versionID, req.Counters); err != nil {
+		return nil, err
+	}
 	if err := insertTaskMembers(ctx, tx, versionID, req.Members); err != nil {
 		return nil, err
 	}
@@ -241,14 +244,18 @@ func (r *PgTaskRepository) Delete(ctx context.Context, taskID uuid.UUID) error {
 
 func insertMetricRules(ctx context.Context, tx pgx.Tx, versionID uuid.UUID, rules []MetricRule) error {
 	builder := storage.Psql.Insert("pm_aggregation_version_metrics").
-		Columns("task_version_id", "metric_id", "metric_path", "metric_type", "aggregation_op")
+		Columns(
+			"task_version_id", "metric_id", "metric_path", "metric_type",
+			"aggregation_op", "formula", "dependencies",
+		)
 	for _, rule := range rules {
 		metricID := rule.MetricID
 		if metricID == "" {
 			metricID = rule.MetricPath
 		}
 		builder = builder.Values(
-			versionID, metricID, rule.MetricPath, rule.MetricType, string(rule.Aggregation),
+			versionID, metricID, rule.MetricPath, rule.MetricType,
+			string(rule.Aggregation), rule.Formula, rule.Dependencies,
 		)
 	}
 	query, args, err := builder.ToSql()
@@ -261,7 +268,26 @@ func insertMetricRules(ctx context.Context, tx pgx.Tx, versionID uuid.UUID, rule
 	return nil
 }
 
+func insertCounterRules(ctx context.Context, tx pgx.Tx, versionID uuid.UUID, rules []CounterRule) error {
+	builder := storage.Psql.Insert("pm_aggregation_version_counters").
+		Columns("task_version_id", "metric_path", "aggregation_op")
+	for _, rule := range rules {
+		builder = builder.Values(versionID, rule.MetricPath, string(rule.Aggregation))
+	}
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return fmt.Errorf("build insert PM aggregation counter rules SQL: %w", err)
+	}
+	if _, err := tx.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("insert PM aggregation counter rules: %w", err)
+	}
+	return nil
+}
+
 func insertTaskMembers(ctx context.Context, tx pgx.Tx, versionID uuid.UUID, members []TaskMember) error {
+	if len(members) == 0 {
+		return nil
+	}
 	builder := storage.Psql.Insert("pm_aggregation_version_members").
 		Columns(
 			"task_version_id", "device_id", "device_sn",
@@ -316,6 +342,7 @@ func (r *PgTaskRepository) LoadMatchable(ctx context.Context, at time.Time) ([]*
 			return nil, fmt.Errorf("scan matchable PM aggregation task version: %w", err)
 		}
 		version.Metrics = make(map[string]MetricRule)
+		version.Counters = make(map[string]CounterRule)
 		version.Members = make(map[uuid.UUID][]TaskMember)
 		version.ObjectLDNs = make(map[string]struct{}, len(objectLDNs))
 		for _, value := range granularityStrings {
@@ -351,7 +378,8 @@ func (r *PgTaskRepository) loadDetails(
 		ids = append(ids, version.VersionID)
 	}
 	ruleSQL, ruleArgs, err := storage.Psql.Select(
-		"task_version_id", "metric_id", "metric_path", "metric_type", "aggregation_op",
+		"task_version_id", "metric_id", "metric_path", "metric_type",
+		"aggregation_op", "formula", "dependencies",
 	).From("pm_aggregation_version_metrics").
 		Where(sq.Eq{"task_version_id": ids}).
 		ToSql()
@@ -366,7 +394,8 @@ func (r *PgTaskRepository) loadDetails(
 		var versionID uuid.UUID
 		var rule MetricRule
 		if err := ruleRows.Scan(
-			&versionID, &rule.MetricID, &rule.MetricPath, &rule.MetricType, &rule.Aggregation,
+			&versionID, &rule.MetricID, &rule.MetricPath, &rule.MetricType,
+			&rule.Aggregation, &rule.Formula, &rule.Dependencies,
 		); err != nil {
 			ruleRows.Close()
 			return fmt.Errorf("scan PM aggregation rule: %w", err)
@@ -380,6 +409,35 @@ func (r *PgTaskRepository) loadDetails(
 		return fmt.Errorf("iterate PM aggregation rules: %w", err)
 	}
 	ruleRows.Close()
+
+	counterSQL, counterArgs, err := storage.Psql.Select(
+		"task_version_id", "metric_path", "aggregation_op",
+	).From("pm_aggregation_version_counters").
+		Where(sq.Eq{"task_version_id": ids}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build load PM aggregation counter rules SQL: %w", err)
+	}
+	counterRows, err := r.pool.Query(ctx, counterSQL, counterArgs...)
+	if err != nil {
+		return fmt.Errorf("query PM aggregation counter rules: %w", err)
+	}
+	for counterRows.Next() {
+		var versionID uuid.UUID
+		var rule CounterRule
+		if err := counterRows.Scan(&versionID, &rule.MetricPath, &rule.Aggregation); err != nil {
+			counterRows.Close()
+			return fmt.Errorf("scan PM aggregation counter rule: %w", err)
+		}
+		if version := byID[versionID]; version != nil {
+			version.Counters[rule.MetricPath] = rule
+		}
+	}
+	if err := counterRows.Err(); err != nil {
+		counterRows.Close()
+		return fmt.Errorf("iterate PM aggregation counter rules: %w", err)
+	}
+	counterRows.Close()
 
 	memberSQL, memberArgs, err := storage.Psql.Select(
 		"task_version_id", "device_id", "device_sn",
@@ -414,61 +472,10 @@ func (r *PgTaskRepository) loadDetails(
 	return nil
 }
 
-func (r *PgTaskRepository) loadRules(ctx context.Context, version *TaskVersionSnapshot) error {
-	query, args, err := storage.Psql.Select(
-		"metric_id", "metric_path", "metric_type", "aggregation_op",
-	).From("pm_aggregation_version_metrics").
-		Where(sq.Eq{"task_version_id": version.VersionID}).
-		ToSql()
-	if err != nil {
-		return fmt.Errorf("build load PM aggregation rules SQL: %w", err)
-	}
-	rows, err := r.pool.Query(ctx, query, args...)
-	if err != nil {
-		return fmt.Errorf("query PM aggregation rules: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var rule MetricRule
-		if err := rows.Scan(&rule.MetricID, &rule.MetricPath, &rule.MetricType, &rule.Aggregation); err != nil {
-			return fmt.Errorf("scan PM aggregation rule: %w", err)
-		}
-		version.Metrics[rule.MetricPath] = rule
-	}
-	return rows.Err()
-}
-
-func (r *PgTaskRepository) loadMembers(ctx context.Context, version *TaskVersionSnapshot) error {
-	query, args, err := storage.Psql.Select(
-		"device_id", "device_sn", "dimension_key", "dimension_name", "object_ldn",
-	).From("pm_aggregation_version_members").
-		Where(sq.Eq{"task_version_id": version.VersionID}).
-		ToSql()
-	if err != nil {
-		return fmt.Errorf("build load PM aggregation members SQL: %w", err)
-	}
-	rows, err := r.pool.Query(ctx, query, args...)
-	if err != nil {
-		return fmt.Errorf("query PM aggregation members: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var member TaskMember
-		if err := rows.Scan(
-			&member.DeviceID, &member.DeviceSN, &member.DimensionKey,
-			&member.DimensionName, &member.ObjectLDN,
-		); err != nil {
-			return fmt.Errorf("scan PM aggregation member: %w", err)
-		}
-		version.Members[member.DeviceID] = append(version.Members[member.DeviceID], member)
-	}
-	return rows.Err()
-}
-
 func validateSaveTask(req SaveTaskRequest) error {
 	if req.Name == "" || req.Creator == "" || len(req.Granularities) == 0 ||
-		len(req.Metrics) == 0 || len(req.Members) == 0 {
-		return fmt.Errorf("PM aggregation task requires name, creator, granularities, metrics and members")
+		len(req.Metrics) == 0 || len(req.Counters) == 0 {
+		return fmt.Errorf("PM aggregation task requires name, creator, granularities, metrics and counters")
 	}
 	switch req.Dimension {
 	case DimensionDevice, DimensionAggregateGroup, DimensionDeviceGroup,
@@ -488,6 +495,13 @@ func validateSaveTask(req SaveTaskRequest) error {
 		}
 		seenGranularities[granularity] = struct{}{}
 	}
+	for _, required := range []Granularity{
+		GranularityHourly, GranularityDaily, GranularityWeekly, GranularityMonthly,
+	} {
+		if _, exists := seenGranularities[required]; !exists {
+			return fmt.Errorf("PM aggregation task requires fixed hourly, daily, weekly and monthly granularities")
+		}
+	}
 	seenMetrics := make(map[string]struct{}, len(req.Metrics))
 	for _, rule := range req.Metrics {
 		if rule.MetricPath == "" {
@@ -498,12 +512,30 @@ func validateSaveTask(req SaveTaskRequest) error {
 		}
 		seenMetrics[rule.MetricPath] = struct{}{}
 		switch rule.Aggregation {
-		case AggregationSum, AggregationAvg, AggregationMin, AggregationMax:
+		case AggregationSum, AggregationAvg, AggregationMin, AggregationMax, AggregationFormula:
 		default:
 			return fmt.Errorf("unsupported PM aggregation operation %q", rule.Aggregation)
 		}
 		if rule.MetricType != "counter" && rule.MetricType != "kpi" {
 			return fmt.Errorf("unsupported PM aggregation metric type %q", rule.MetricType)
+		}
+		if rule.MetricType == "kpi" && (rule.Formula == "" || len(rule.Dependencies) == 0) {
+			return fmt.Errorf("PM aggregation KPI %q requires formula and counter dependencies", rule.MetricPath)
+		}
+	}
+	seenCounters := make(map[string]struct{}, len(req.Counters))
+	for _, rule := range req.Counters {
+		if rule.MetricPath == "" {
+			return fmt.Errorf("PM aggregation counter path is empty")
+		}
+		if _, exists := seenCounters[rule.MetricPath]; exists {
+			return fmt.Errorf("duplicate PM aggregation counter %q", rule.MetricPath)
+		}
+		seenCounters[rule.MetricPath] = struct{}{}
+		switch rule.Aggregation {
+		case AggregationSum, AggregationAvg, AggregationMin, AggregationMax:
+		default:
+			return fmt.Errorf("unsupported PM aggregation counter operation %q", rule.Aggregation)
 		}
 	}
 	for _, member := range req.Members {
@@ -525,10 +557,14 @@ func snapshotFromRequest(
 		Name: req.Name, Enabled: req.Enabled, Technology: req.Technology,
 		Dimension: req.Dimension, Granularities: req.Granularities,
 		EffectiveFrom: effectiveFrom, Metrics: make(map[string]MetricRule),
-		Members: make(map[uuid.UUID][]TaskMember), ObjectLDNs: make(map[string]struct{}),
+		Counters: make(map[string]CounterRule),
+		Members:  make(map[uuid.UUID][]TaskMember), ObjectLDNs: make(map[string]struct{}),
 	}
 	for _, rule := range req.Metrics {
 		snapshot.Metrics[rule.MetricPath] = rule
+	}
+	for _, rule := range req.Counters {
+		snapshot.Counters[rule.MetricPath] = rule
 	}
 	for _, member := range req.Members {
 		snapshot.Members[member.DeviceID] = append(snapshot.Members[member.DeviceID], member)

@@ -17,10 +17,11 @@ type BuiltinReconcileResult struct {
 }
 
 type BuiltinReconciler struct {
-	list           func(context.Context) ([]Task, error)
-	resolveRules   func(context.Context, []string) ([]pmstream.MetricRule, error)
-	resolveMembers func(context.Context, *Task) ([]pmstream.TaskMember, error)
-	save           func(context.Context, pmstream.SaveTaskRequest) (*pmstream.TaskVersionSnapshot, error)
+	list            func(context.Context) ([]Task, error)
+	resolveRules    func(context.Context, string, []string) ([]pmstream.MetricRule, error)
+	resolveCounters func(context.Context, string, []pmstream.MetricRule) ([]pmstream.CounterRule, error)
+	resolveMembers  func(context.Context, *Task) ([]pmstream.TaskMember, error)
+	save            func(context.Context, pmstream.SaveTaskRequest) (*pmstream.TaskVersionSnapshot, error)
 }
 
 func NewBuiltinReconciler(repo *PgRepository) *BuiltinReconciler {
@@ -29,8 +30,9 @@ func NewBuiltinReconciler(repo *PgRepository) *BuiltinReconciler {
 			builtin := true
 			return repo.List(ctx, ListFilter{IsBuiltin: &builtin, IncludeAll: true})
 		},
-		resolveRules:   repo.resolveStreamingRules,
-		resolveMembers: repo.resolveStreamingMembers,
+		resolveRules:    repo.resolveStreamingRules,
+		resolveCounters: repo.resolveStreamingCounters,
+		resolveMembers:  repo.resolveStreamingMembers,
 		save: func(ctx context.Context, req pmstream.SaveTaskRequest) (*pmstream.TaskVersionSnapshot, error) {
 			if repo.streamRepo == nil {
 				return nil, errors.New("PM streaming task repository is not configured")
@@ -53,7 +55,13 @@ func (r *BuiltinReconciler) Reconcile(ctx context.Context) (BuiltinReconcileResu
 			continue
 		}
 		result.Definitions++
-		rules, resolveErr := r.resolveRules(ctx, task.MetricPaths)
+		rules, resolveErr := r.resolveRules(ctx, task.Technology, task.MetricPaths)
+		if resolveErr != nil {
+			result.Failed++
+			reconcileErrors = append(reconcileErrors, builtinReconcileError(task, resolveErr))
+			continue
+		}
+		counters, resolveErr := r.resolveCounters(ctx, task.Technology, rules)
 		if resolveErr != nil {
 			result.Failed++
 			reconcileErrors = append(reconcileErrors, builtinReconcileError(task, resolveErr))
@@ -67,12 +75,8 @@ func (r *BuiltinReconciler) Reconcile(ctx context.Context) (BuiltinReconcileResu
 		}
 		if len(members) == 0 {
 			result.Empty++
-			continue
 		}
-		granularities := make([]pmstream.Granularity, 0, len(task.Granularities))
-		for _, value := range task.Granularities {
-			granularities = append(granularities, pmstream.Granularity(value))
-		}
+		granularities := streamingRollupGranularities()
 		creator := task.Creator
 		if creator == "" {
 			creator = "system"
@@ -82,7 +86,7 @@ func (r *BuiltinReconciler) Reconcile(ctx context.Context) (BuiltinReconcileResu
 			Visibility: string(normalizeVisibility(task.Visibility)), Creator: creator,
 			Technology: task.Technology, Dimension: pmstream.Dimension(task.Dimension),
 			Granularities: granularities, ObjectLDNs: task.ObjectLDNs,
-			Metrics: rules, Members: members,
+			Metrics: rules, Counters: counters, Members: members,
 		})
 		if saveErr != nil {
 			result.Failed++

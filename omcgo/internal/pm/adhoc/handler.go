@@ -72,7 +72,7 @@ type createRequestDTO struct {
 	// network/product/band/device_group 维度按制式全量聚合，不限设备，device_sns 可空。
 	DeviceSNs     []string `json:"device_sns"`
 	MetricPaths   []string `json:"metric_paths" binding:"required,min=1"`
-	Granularities []string `json:"granularities" binding:"required,min=1"`
+	Granularities []string `json:"granularities"`
 	// T-0193：小区/PLMN 白名单（完整 object_ldn 字符串）。可选，不传/空 = 全小区（向后兼容）。
 	// 仅 device/aggregate_group 维度生效；其他维度忽略（不落库、不报错）。
 	ObjectLDNs []string `json:"object_ldns"`
@@ -156,21 +156,13 @@ func (h *Handler) Create(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	// 单粒度（设计 §2.4/§2.6 单选一个；要别的粒度另建任务）。保留数组结构不动 executor 循环。
-	if len(req.Granularities) != 1 {
-		response.Fail(c, http.StatusBadRequest, "granularities must contain exactly one value (single granularity per task)")
-		return
-	}
+	req.Granularities = aggregationRollupGranularityStrings()
 	dim := Dimension(req.Dimension)
 	if dim == "" {
 		dim = DimensionDevice
 	}
 	// #669：粒度前置守门——15min 已整组下线（详见 unsupportedGranularity 注释）。
 	// 保留 dim 入参以便日后扩展新的（粒度,维度）限制。
-	if msg := unsupportedGranularity(req.Granularities[0], dim); msg != "" {
-		response.Fail(c, http.StatusBadRequest, msg)
-		return
-	}
 	// T-0185：device_sns 仅 device/aggregate_group（自选设备）维度必填；其余维度按制式全量聚合。
 	if (dim == DimensionDevice || dim == DimensionAggregateGroup) && len(req.DeviceSNs) == 0 {
 		response.Fail(c, http.StatusBadRequest, "device_sns is required for device/aggregate_group dimension")
@@ -450,22 +442,14 @@ func (h *Handler) Update(c *gin.Context) {
 	}
 
 	if !existing.IsBuiltin {
-		// 自建任务：复用创建校验。
-		// 单粒度（设计 §2.4/§2.6）。
-		if len(req.Granularities) != 1 {
-			response.Fail(c, http.StatusBadRequest, "granularities must contain exactly one value (single granularity per task)")
-			return
-		}
+		// 聚合任务固定产出小时、天、周、月，粒度不再是用户可编辑字段。
+		req.Granularities = aggregationRollupGranularityStrings()
 		// device_sns 仅 device/aggregate_group 维度必填（沿用既有维度，不可改）。
 		dim := existing.Dimension
 		if dim == "" {
 			dim = DimensionDevice
 		}
 		// #669：编辑自建任务时同样守门粒度——15min 已整组下线，不允许把任意维度的任务粒度改回 15min。
-		if msg := unsupportedGranularity(req.Granularities[0], dim); msg != "" {
-			response.Fail(c, http.StatusBadRequest, msg)
-			return
-		}
 		if (dim == DimensionDevice || dim == DimensionAggregateGroup) && len(req.DeviceSNs) == 0 {
 			response.Fail(c, http.StatusBadRequest, "device_sns is required for device/aggregate_group dimension")
 			return
@@ -519,6 +503,10 @@ func (h *Handler) Update(c *gin.Context) {
 		return
 	}
 	response.OK(c, gin.H{"id": id.String()})
+}
+
+func aggregationRollupGranularityStrings() []string {
+	return []string{"hourly", "daily", "weekly", "monthly"}
 }
 
 func sameFirstGranularity(a, b []string) bool {
