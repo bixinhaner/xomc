@@ -6,16 +6,20 @@ import "github.com/prometheus/client_golang/prometheus"
 // aggregation path. Task, device and metric identifiers are deliberately not
 // labels because a production system can have tens of thousands of each.
 type Metrics struct {
-	Ready                 prometheus.Gauge
-	OutboxPublishedTotal  prometheus.Counter
-	OutboxErrorsTotal     prometheus.Counter
-	EventsProcessedTotal  prometheus.Counter
-	EventsFailedTotal     prometheus.Counter
-	DuplicateEventsTotal  prometheus.Counter
-	LateEventsTotal       prometheus.Counter
-	WindowsFinalizedTotal *prometheus.CounterVec
-	FinalizeErrorsTotal   prometheus.Counter
-	FinalizeDuration      prometheus.Histogram
+	Ready                       prometheus.Gauge
+	OutboxPublishedTotal        prometheus.Counter
+	OutboxErrorsTotal           prometheus.Counter
+	EventsProcessedTotal        prometheus.Counter
+	EventsFailedTotal           prometheus.Counter
+	DuplicateEventsTotal        prometheus.Counter
+	LateEventsTotal             prometheus.Counter
+	WindowsFinalizedTotal       *prometheus.CounterVec
+	FinalizeErrorsTotal         prometheus.Counter
+	FinalizeDuration            prometheus.Histogram
+	BuiltinReconcileRunsTotal   prometheus.Counter
+	BuiltinReconcileErrorsTotal prometheus.Counter
+	BuiltinVersionsChangedTotal prometheus.Counter
+	BuiltinDefinitionsEmpty     prometheus.Gauge
 }
 
 func NewMetrics(reg prometheus.Registerer) *Metrics {
@@ -61,6 +65,22 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Help:    "Time spent finalizing one aggregation window.",
 			Buckets: prometheus.DefBuckets,
 		}),
+		BuiltinReconcileRunsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_builtin_reconcile_runs_total",
+			Help: "Built-in PM aggregation reconciliation runs.",
+		}),
+		BuiltinReconcileErrorsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_builtin_reconcile_errors_total",
+			Help: "Built-in PM aggregation definitions that failed reconciliation.",
+		}),
+		BuiltinVersionsChangedTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_builtin_versions_changed_total",
+			Help: "Immutable built-in PM aggregation versions created after content changes.",
+		}),
+		BuiltinDefinitionsEmpty: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "omc_pm_aggregation_builtin_definitions_empty",
+			Help: "Built-in PM aggregation definitions currently resolving no members.",
+		}),
 	}
 	reg.MustRegister(
 		m.Ready,
@@ -73,6 +93,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.WindowsFinalizedTotal,
 		m.FinalizeErrorsTotal,
 		m.FinalizeDuration,
+		m.BuiltinReconcileRunsTotal,
+		m.BuiltinReconcileErrorsTotal,
+		m.BuiltinVersionsChangedTotal,
+		m.BuiltinDefinitionsEmpty,
 	)
 	return m
 }

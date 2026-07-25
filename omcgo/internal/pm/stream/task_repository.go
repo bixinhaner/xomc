@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"time"
@@ -26,6 +27,7 @@ func (r *PgTaskRepository) Save(ctx context.Context, req SaveTaskRequest) (*Task
 	if err := validateSaveTask(req); err != nil {
 		return nil, err
 	}
+	contentHash := taskContentHash(req)
 	now := req.Now.UTC()
 	if now.IsZero() {
 		now = time.Now().UTC()
@@ -41,53 +43,73 @@ func (r *PgTaskRepository) Save(ctx context.Context, req SaveTaskRequest) (*Task
 	taskID := req.TaskID
 	if taskID == uuid.Nil {
 		taskID = uuid.New()
-		query, args, buildErr := storage.Psql.Insert("pm_aggregation_tasks").
-			Columns("id", "name", "enabled", "visibility", "creator").
-			Values(taskID, req.Name, req.Enabled, req.Visibility, req.Creator).
+	}
+	insertSQL, insertArgs, buildErr := storage.Psql.Insert("pm_aggregation_tasks").
+		Columns("id", "name", "enabled", "visibility", "creator").
+		Values(taskID, req.Name, req.Enabled, req.Visibility, req.Creator).
+		Suffix("ON CONFLICT (id) DO NOTHING").
+		ToSql()
+	if buildErr != nil {
+		return nil, fmt.Errorf("build create PM aggregation task SQL: %w", buildErr)
+	}
+	if _, err := tx.Exec(ctx, insertSQL, insertArgs...); err != nil {
+		return nil, fmt.Errorf("create PM aggregation task: %w", err)
+	}
+	lockSQL, lockArgs, buildErr := storage.Psql.Select("id", "current_version_id").
+		From("pm_aggregation_tasks").
+		Where(sq.Eq{"id": taskID, "deleted_at": nil}).
+		Suffix("FOR UPDATE").
+		ToSql()
+	if buildErr != nil {
+		return nil, fmt.Errorf("build lock PM aggregation task SQL: %w", buildErr)
+	}
+	var locked uuid.UUID
+	var currentVersionID *uuid.UUID
+	if err := tx.QueryRow(ctx, lockSQL, lockArgs...).Scan(&locked, &currentVersionID); err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, fmt.Errorf("PM aggregation task %s is deleted", taskID)
+		}
+		return nil, fmt.Errorf("lock PM aggregation task: %w", err)
+	}
+	updateSQL, updateArgs, buildErr := storage.Psql.Update("pm_aggregation_tasks").
+		Set("name", req.Name).
+		Set("enabled", req.Enabled).
+		Set("visibility", req.Visibility).
+		Where(sq.Eq{"id": taskID}).
+		ToSql()
+	if buildErr != nil {
+		return nil, fmt.Errorf("build update PM aggregation task SQL: %w", buildErr)
+	}
+	if _, err := tx.Exec(ctx, updateSQL, updateArgs...); err != nil {
+		return nil, fmt.Errorf("update PM aggregation task: %w", err)
+	}
+
+	if currentVersionID != nil {
+		var currentHash []byte
+		var currentVersionNo int
+		var currentEffectiveFrom time.Time
+		hashSQL, hashArgs, buildErr := storage.Psql.Select(
+			"version_no", "effective_from", "content_hash",
+		).From("pm_aggregation_task_versions").
+			Where(sq.Eq{"id": *currentVersionID, "task_id": taskID}).
 			ToSql()
 		if buildErr != nil {
-			return nil, fmt.Errorf("build create PM aggregation task SQL: %w", buildErr)
+			return nil, fmt.Errorf("build load current PM aggregation content hash SQL: %w", buildErr)
 		}
-		if _, err := tx.Exec(ctx, query, args...); err != nil {
-			return nil, fmt.Errorf("create PM aggregation task: %w", err)
+		if err := tx.QueryRow(ctx, hashSQL, hashArgs...).Scan(
+			&currentVersionNo, &currentEffectiveFrom, &currentHash,
+		); err != nil {
+			return nil, fmt.Errorf("load current PM aggregation content hash: %w", err)
 		}
-	} else {
-		lockSQL, lockArgs, buildErr := storage.Psql.Select("id").
-			From("pm_aggregation_tasks").
-			Where(sq.Eq{"id": taskID, "deleted_at": nil}).
-			Suffix("FOR UPDATE").
-			ToSql()
-		if buildErr != nil {
-			return nil, fmt.Errorf("build lock PM aggregation task SQL: %w", buildErr)
-		}
-		var locked uuid.UUID
-		if err := tx.QueryRow(ctx, lockSQL, lockArgs...).Scan(&locked); err != nil {
-			if err != pgx.ErrNoRows {
-				return nil, fmt.Errorf("lock PM aggregation task: %w", err)
+		if len(currentHash) > 0 && bytes.Equal(currentHash, contentHash) {
+			if err := tx.Commit(ctx); err != nil {
+				return nil, fmt.Errorf("commit unchanged PM aggregation task: %w", err)
 			}
-			insertSQL, insertArgs, buildErr := storage.Psql.Insert("pm_aggregation_tasks").
-				Columns("id", "name", "enabled", "visibility", "creator").
-				Values(taskID, req.Name, req.Enabled, req.Visibility, req.Creator).
-				ToSql()
-			if buildErr != nil {
-				return nil, fmt.Errorf("build mirror PM aggregation task SQL: %w", buildErr)
-			}
-			if _, err := tx.Exec(ctx, insertSQL, insertArgs...); err != nil {
-				return nil, fmt.Errorf("mirror PM aggregation task: %w", err)
-			}
-			locked = taskID
-		}
-		updateSQL, updateArgs, buildErr := storage.Psql.Update("pm_aggregation_tasks").
-			Set("name", req.Name).
-			Set("enabled", req.Enabled).
-			Set("visibility", req.Visibility).
-			Where(sq.Eq{"id": taskID}).
-			ToSql()
-		if buildErr != nil {
-			return nil, fmt.Errorf("build update PM aggregation task SQL: %w", buildErr)
-		}
-		if _, err := tx.Exec(ctx, updateSQL, updateArgs...); err != nil {
-			return nil, fmt.Errorf("update PM aggregation task: %w", err)
+			snapshot := snapshotFromRequest(
+				req, taskID, *currentVersionID, currentVersionNo, currentEffectiveFrom,
+			)
+			snapshot.NewVersion = false
+			return snapshot, nil
 		}
 	}
 
@@ -125,11 +147,11 @@ func (r *PgTaskRepository) Save(ctx context.Context, req SaveTaskRequest) (*Task
 	versionInsert, versionInsertArgs, err := storage.Psql.Insert("pm_aggregation_task_versions").
 		Columns(
 			"id", "task_id", "version_no", "enabled", "effective_from", "technology",
-			"dimension", "granularities", "object_ldns", "created_by",
+			"dimension", "granularities", "object_ldns", "created_by", "content_hash",
 		).
 		Values(
 			versionID, taskID, versionNo, req.Enabled, effectiveFrom, nullableString(req.Technology),
-			string(req.Dimension), granularities, objectLDNs, req.Creator,
+			string(req.Dimension), granularities, objectLDNs, req.Creator, contentHash,
 		).
 		ToSql()
 	if err != nil {
@@ -159,6 +181,7 @@ func (r *PgTaskRepository) Save(ctx context.Context, req SaveTaskRequest) (*Task
 	}
 
 	snapshot := snapshotFromRequest(req, taskID, versionID, versionNo, effectiveFrom)
+	snapshot.NewVersion = true
 	if r.bus != nil {
 		payload := event.PMAggregationTaskVersionChangedPayload{
 			TaskID: taskID, TaskVersionID: versionID, EffectiveFrom: effectiveFrom,

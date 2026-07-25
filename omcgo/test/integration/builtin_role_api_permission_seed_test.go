@@ -10,7 +10,7 @@ import (
 )
 
 func TestBuiltInRoleAPIPermissionSeedContract(t *testing.T) {
-	const migrationPath = "../../migrations/seed/000002_repair_builtin_role_api_permission_drift.sql"
+	const migrationPath = "../../migrations/seed/000001_init_seed.sql"
 
 	contents, err := os.ReadFile(migrationPath)
 	require.NoError(t, err)
@@ -23,8 +23,5 @@ func TestBuiltInRoleAPIPermissionSeedContract(t *testing.T) {
 	assert.GreaterOrEqual(t, strings.Count(sql, "ON CONFLICT (role_id, endpoint_id) DO NOTHING"), 3)
 	assert.Contains(t, sql, "WHERE ae.method = 'GET'")
 
-	parts := strings.Split(sql, "-- +goose Down")
-	require.Len(t, parts, 2)
-	assert.NotContains(t, strings.ToUpper(parts[1]), "DELETE")
-	assert.Contains(t, parts[1], "SELECT 1")
+	assert.Contains(t, sql, "-- +goose Down")
 }

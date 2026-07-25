@@ -10,8 +10,8 @@ import (
 )
 
 func TestPMStreamingAggregationMigrationContract(t *testing.T) {
-	mainSQL := readMigration(t, filepath.Join("..", "..", "migrations", "000006_pm_streaming_aggregation.sql"))
-	tsdbSQL := readMigration(t, filepath.Join("..", "..", "migrations", "tsdb", "000002_pm_streaming_aggregation.sql"))
+	mainSQL := readMigration(t, filepath.Join("..", "..", "migrations", "000001_init_schema.sql"))
+	tsdbSQL := readMigration(t, filepath.Join("..", "..", "migrations", "tsdb", "000001_tsdb_schema.sql"))
 
 	for _, table := range []string{
 		"pm_aggregation_tasks",
@@ -32,6 +32,34 @@ func TestPMStreamingAggregationMigrationContract(t *testing.T) {
 	require.Contains(t, tsdbSQL, "DROP TABLE IF EXISTS public.pm_metrics_daily")
 	require.Contains(t, mainSQL, "DROP TABLE IF EXISTS public.pm_completion_watermarks")
 	require.NotContains(t, strings.ToUpper(tsdbSQL), "INSERT INTO PUBLIC.PM_AGGREGATION_RESULTS SELECT")
+}
+
+func TestPMBuiltinTaskRecoveryMigrationContract(t *testing.T) {
+	mainSQL := readMigration(t, filepath.Join("..", "..", "migrations", "000001_init_schema.sql"))
+	seedSQL := readMigration(t, filepath.Join("..", "..", "migrations", "seed", "000001_init_seed.sql"))
+	baselineSQL := readMigration(t, filepath.Join("..", "..", "migrations", "seed", "000001_init_seed.sql"))
+	testCompose := readMigration(t, filepath.Join("..", "..", "..", "deployments", "docker", "docker-compose.test.yml"))
+
+	require.Contains(t, mainSQL, "ADD COLUMN content_hash bytea")
+	require.Contains(t, seedSQL, ") ON CONFLICT DO NOTHING;")
+	require.NotContains(t, baselineSQL, "pm_completion_watermarks")
+	require.Contains(t, testCompose, `GOOSE_TABLE: "goose_db_version_seed"`)
+	for _, id := range []string{
+		"0184dddd-0001-4000-8000-000000000001",
+		"0184dddd-0001-4000-8000-000000000002",
+		"0184dddd-0001-4000-8000-000000000003",
+		"0184dddd-0002-4000-8000-000000000001",
+		"0184dddd-0002-4000-8000-000000000002",
+		"0184dddd-0002-4000-8000-000000000003",
+		"0184dddd-0003-4000-8000-000000000001",
+		"0184dddd-0003-4000-8000-000000000002",
+		"0184dddd-0003-4000-8000-000000000003",
+		"0184dddd-0004-4000-8000-000000000001",
+		"0184dddd-0004-4000-8000-000000000002",
+		"0184dddd-0004-4000-8000-000000000003",
+	} {
+		require.Equalf(t, 1, strings.Count(seedSQL, id), "builtin task %s must be inserted exactly once", id)
+	}
 }
 
 func TestStreamingWorkerDoesNotReferenceRawPMTables(t *testing.T) {

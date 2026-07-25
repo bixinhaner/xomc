@@ -69,6 +69,7 @@ type TaskVersionSnapshot struct {
 	TaskID        uuid.UUID
 	VersionID     uuid.UUID
 	VersionNo     int
+	NewVersion    bool
 	Name          string
 	Enabled       bool
 	Technology    string
