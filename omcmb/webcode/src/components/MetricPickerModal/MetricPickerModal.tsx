@@ -66,6 +66,7 @@ interface MetricPickerModalProps {
   maxSelected?: number;
   maxSelectedMessageId?: string;
   enableBatchInput?: boolean;
+  onlyEnabledIndicators?: boolean;
 }
 
 const DEVICE_TYPE_OPTIONS: { label: string; value: DeviceType }[] = [
@@ -85,6 +86,7 @@ export default function MetricPickerModal({
   maxSelected,
   maxSelectedMessageId = 'perf.picker.metricLimitExceeded',
   enableBatchInput = false,
+  onlyEnabledIndicators = false,
 }: MetricPickerModalProps) {
   const intl = useIntl();
   const { message } = App.useApp();
@@ -125,11 +127,13 @@ export default function MetricPickerModal({
 
   const { data, isLoading } = useIndicatorList(deviceType, {
     keyword: keyword || undefined,
+    isEnabled: onlyEnabledIndicators ? true : undefined,
     page,
     pageSize,
   });
   const { data: allIndicatorsData, isLoading: isAllIndicatorsLoading } = useAllIndicators(deviceType, {
-    enabled: open && enableBatchInput,
+    enabled: open && (enableBatchInput || onlyEnabledIndicators),
+    isEnabled: onlyEnabledIndicators ? true : undefined,
   });
 
   const items = useMemo(() => data?.items ?? [], [data]);
@@ -264,6 +268,18 @@ export default function MetricPickerModal({
 
   const handleConfirm = () => {
     if (warnIfTooManySelected(selected.length)) return;
+    if (onlyEnabledIndicators) {
+      const unavailableIds = selected.filter((id) => !allItemById.has(id));
+      if (unavailableIds.length > 0) {
+        message.warning(
+          intl.formatMessage(
+            { id: 'perf.picker.enabledOnlyUnavailable' },
+            { count: unavailableIds.length, ids: formatMetricIdSamples(unavailableIds) },
+          ),
+        );
+        return;
+      }
+    }
     const labels: Record<string, string> = {};
     selected.forEach((v) => {
       labels[v] = labelMap[v] ?? v;
@@ -290,6 +306,10 @@ export default function MetricPickerModal({
         onOk={handleConfirm}
         okText={intl.formatMessage({ id: 'common.confirm' })}
         cancelText={intl.formatMessage({ id: 'common.cancel' })}
+        confirmLoading={onlyEnabledIndicators && isAllIndicatorsLoading}
+        okButtonProps={{
+          disabled: onlyEnabledIndicators && isAllIndicatorsLoading,
+        }}
         width={920}
         destroyOnHidden
       >

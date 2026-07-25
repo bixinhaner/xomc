@@ -24,6 +24,7 @@ type IndicatorManagementService struct {
 	templateRel      TemplateRelRepository
 	custNameRepo     CustNameRepository
 	thresholdRepo    IndicatorThresholdRepository
+	dashboardLayout  DashboardLayoutReferenceChecker
 	pool             transactionBeginner
 	redis            redis.UniversalClient
 	routeInvalidator RouteInvalidator
@@ -32,6 +33,11 @@ type IndicatorManagementService struct {
 
 type transactionBeginner interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
+}
+
+// DashboardLayoutReferenceChecker checks whether dashboard KPI layouts reference PM indicators.
+type DashboardLayoutReferenceChecker interface {
+	ReferencedIndicators(ctx context.Context, dt DeviceType, indicatorIDs []string) ([]string, error)
 }
 
 // RouteInvalidationTrigger 是 indicator 包暴露给 provider 的低基数失效来源。
@@ -72,6 +78,11 @@ func NewIndicatorManagementService(
 		redis:         rdb,
 		logger:        logger,
 	}
+}
+
+func (s *IndicatorManagementService) WithDashboardLayoutReferenceChecker(checker DashboardLayoutReferenceChecker) *IndicatorManagementService {
+	s.dashboardLayout = checker
+	return s
 }
 
 func (s *IndicatorManagementService) WithRouteInvalidator(invalidator RouteInvalidator) *IndicatorManagementService {
@@ -502,6 +513,8 @@ func (s *IndicatorManagementService) DeletePlatformFormula(ctx context.Context, 
 
 // ── Enable/Disable ────────────────────────────────────────────────────────────
 
+var ErrIndicatorUsedByDashboardLayout = fmt.Errorf("%w: indicator is used by dashboard KPI layout", commonerrors.ErrInvalidInput)
+
 func (s *IndicatorManagementService) EnableIndicators(ctx context.Context, req *EnableIndicatorsRequest) error {
 	dt, err := ParseDeviceType(req.DeviceType)
 	if err != nil {
@@ -515,6 +528,9 @@ func (s *IndicatorManagementService) DisableIndicators(ctx context.Context, req 
 	if err != nil {
 		return fmt.Errorf("parse device type: %w", err)
 	}
+	if err := s.ensureNotReferencedByDashboardLayout(ctx, dt, req.IndicatorIDs); err != nil {
+		return err
+	}
 	return s.enabledRepo.BatchDelete(ctx, dt, req.OperatorCode, req.IndicatorIDs, nil)
 }
 
@@ -526,6 +542,20 @@ func (s *IndicatorManagementService) GetEnabledIndicatorIDs(ctx context.Context,
 
 func (s *IndicatorManagementService) IsIndicatorInTemplate(ctx context.Context, indicatorID string) (bool, error) {
 	return s.templateRel.ExistsByIndicatorID(ctx, indicatorID)
+}
+
+func (s *IndicatorManagementService) ensureNotReferencedByDashboardLayout(ctx context.Context, dt DeviceType, indicatorIDs []string) error {
+	if s.dashboardLayout == nil || len(indicatorIDs) == 0 {
+		return nil
+	}
+	referenced, err := s.dashboardLayout.ReferencedIndicators(ctx, dt, indicatorIDs)
+	if err != nil {
+		return fmt.Errorf("check dashboard KPI layout references: %w", err)
+	}
+	if len(referenced) > 0 {
+		return fmt.Errorf("%w: %v", ErrIndicatorUsedByDashboardLayout, referenced)
+	}
+	return nil
 }
 
 // ── Export ────────────────────────────────────────────────────────────────────

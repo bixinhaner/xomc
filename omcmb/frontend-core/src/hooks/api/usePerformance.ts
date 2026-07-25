@@ -13,8 +13,13 @@ export const performanceKpiQueryKeys = {
   list: (params: KPIListParams, locale: Locale) =>
     ['performance', 'kpis', params, locale] as const,
   all: (locale: Locale) => ['performance', 'kpis', 'all', locale] as const,
-  candidates: (deviceType: string | undefined, includeCounters: boolean, locale: Locale) =>
-    ['performance', 'indicator-candidates', deviceType, { includeCounters }, locale] as const,
+  candidates: (
+    deviceType: string | undefined,
+    includeCounters: boolean,
+    enabledOnly: boolean,
+    locale: Locale,
+  ) =>
+    ['performance', 'indicator-candidates', deviceType, { includeCounters, enabledOnly }, locale] as const,
 };
 
 export function useKPIList(params: KPIListParams) {
@@ -41,12 +46,13 @@ export function useAllKPIs() {
 // 走 pm 权限的 /pm/kpi/definitions（运维可访问、全量无截断），不再用 super_admin 的 /indicators。
 export function useIndicatorCandidates(
   deviceType: string | undefined,
-  opts?: { includeCounters?: boolean }
+  opts?: { includeCounters?: boolean; enabledOnly?: boolean }
 ) {
   const includeCounters = opts?.includeCounters ?? true;
+  const enabledOnly = opts?.enabledOnly ?? false;
   const locale = useAppStore((s) => s.locale);
   return useQuery({
-    queryKey: performanceKpiQueryKeys.candidates(deviceType, includeCounters, locale),
+    queryKey: performanceKpiQueryKeys.candidates(deviceType, includeCounters, enabledOnly, locale),
     queryFn: async () => {
       if (useMock) {
         // Mock 模式退化：把 mock KPI 列表映射为候选（无 counter 区分，统一当 KPI）。
@@ -59,7 +65,7 @@ export function useIndicatorCandidates(
           isCounter: false,
         }));
       }
-      return pmApi.getIndicatorCandidates(deviceType as string, { includeCounters });
+      return pmApi.getIndicatorCandidates(deviceType as string, { includeCounters, enabledOnly });
     },
     enabled: Boolean(deviceType),
     staleTime: 5 * 60 * 1000,

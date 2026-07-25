@@ -794,6 +794,8 @@ func (h *Handler) ListKPIValues(c *gin.Context) {
 //   - device_type：ENB / GSM / GNB（不传 → 三表合并枚举）
 //   - include_counters：可选开关（缺省 false）。false 时维持 is_counter='0'（仅 KPI），
 //     行为与历史完全一致；true 时不按 is_counter 过滤，返回 KPI + 计数器，供向导穿梭框消费。
+//   - only_enabled：可选开关（缺省 false）。true 时只返回 operator_code='default' 下已启用指标，
+//     供性能查询、设备性能查看、首页 KPI 配置和自定义聚合候选使用。
 //
 // 响应每条在历史字段（name/display_name/formula/unit）之外，补 id（= perf_indicators 行 ID，
 // K/C 编号）与 is_counter（"0" KPI / "1" 计数器）。默认调用方只读历史字段，零回归。
@@ -805,6 +807,9 @@ func (h *Handler) ListKPIDefinitions(c *gin.Context) {
 	}
 	dtParam := c.Query("device_type")
 	includeCounters := parseBoolQuery(c.Query("include_counters"))
+	onlyEnabled := parseBoolQuery(c.Query("only_enabled")) ||
+		parseBoolQuery(c.Query("is_enabled")) ||
+		parseBoolQuery(c.Query("isEnabled"))
 
 	dts := []indicator.DeviceType{indicator.DeviceTypeENB, indicator.DeviceTypeGSM, indicator.DeviceTypeGNB}
 	if dtParam != "" {
@@ -831,6 +836,12 @@ func (h *Handler) ListKPIDefinitions(c *gin.Context) {
 		if !includeCounters {
 			isCounter := "0" // 仅 KPI（默认行为，不变）
 			filter.IsCounter = &isCounter
+		}
+		if onlyEnabled {
+			isEnabled := "1"
+			operatorCode := "default"
+			filter.IsEnabled = &isEnabled
+			filter.OperatorCode = &operatorCode
 		}
 		if keyword != "" {
 			kw := keyword

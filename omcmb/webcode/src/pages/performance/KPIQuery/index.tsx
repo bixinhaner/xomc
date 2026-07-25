@@ -1021,6 +1021,7 @@ export default function KPIQuery() {
           lockDeviceType
           maxSelected={PM_QUERY_SELECTION_LIMIT}
           enableBatchInput
+          onlyEnabledIndicators
         />
 
         <QueryTemplateDetailModal

@@ -13,8 +13,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/omcgo/omcgo/internal/pm/indicator"
 )
 
 // stubRepo 是 Repository 的内存实现，专供 handler 单测使用。
@@ -133,6 +136,43 @@ func setupRouter(repo Repository, callerID uuid.UUID, isSuperAdmin bool) *gin.En
 	return r
 }
 
+func setupRouterWithEnabledRepo(repo Repository, callerID uuid.UUID, isSuperAdmin bool, enabledRepo indicator.EnabledIndicatorRepository) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	h := NewHandler(repo, nil).
+		WithEnabledMetricPayloadService(NewEnabledMetricPayloadService(enabledRepo))
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		if callerID != uuid.Nil {
+			c.Set("user_id", callerID)
+		}
+		c.Set("is_super_admin", isSuperAdmin)
+		c.Next()
+	})
+	rg := r.Group("/api/v1")
+	h.RegisterRoutes(rg)
+	return r
+}
+
+type enabledRepoStub struct {
+	enabled map[indicator.DeviceType][]string
+}
+
+func (s enabledRepoStub) List(_ context.Context, dt indicator.DeviceType, _ string) ([]string, error) {
+	return s.enabled[dt], nil
+}
+
+func (s enabledRepoStub) BatchCreate(context.Context, indicator.DeviceType, string, []string, pgx.Tx) error {
+	return nil
+}
+
+func (s enabledRepoStub) BatchDelete(context.Context, indicator.DeviceType, string, []string, pgx.Tx) error {
+	return nil
+}
+
+func (s enabledRepoStub) Exists(context.Context, indicator.DeviceType, string, string) (bool, error) {
+	return false, nil
+}
+
 func doJSON(t *testing.T, r *gin.Engine, method, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	var buf *bytes.Buffer
@@ -194,6 +234,24 @@ func TestCreate_RejectsPayloadWithTooManyMetrics(t *testing.T) {
 	})
 
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestCreate_RejectsPayloadWithDisabledMetrics(t *testing.T) {
+	alice := uuid.New()
+	r := setupRouterWithEnabledRepo(newStubRepo(), alice, false, enabledRepoStub{
+		enabled: map[indicator.DeviceType][]string{indicator.DeviceTypeENB: {"K_ENABLED"}},
+	})
+	rr := doJSON(t, r, http.MethodPost, "/api/v1/pm/query-templates", map[string]any{
+		"name":       "disabled-metric",
+		"visibility": "private",
+		"payload": map[string]any{
+			"device_type":  "ENB",
+			"metric_paths": []string{"K_ENABLED", "K_DISABLED"},
+		},
+	})
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	assert.Contains(t, rr.Body.String(), "K_DISABLED")
 }
 
 func TestCreate_AllowsPayloadAtLimitAndMissingLimitFields(t *testing.T) {
@@ -378,6 +436,28 @@ func TestUpdate_RejectsPayloadWithTooManyMetrics(t *testing.T) {
 	})
 
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestUpdate_RejectsPayloadWithDisabledMetrics(t *testing.T) {
+	alice := uuid.New()
+	repo := newStubRepo()
+	id, err := repo.Create(context.Background(), CreateRequest{
+		Name: "my-priv", Visibility: VisibilityPrivate, CreatorID: alice, Payload: []byte("{}"),
+	})
+	require.NoError(t, err)
+
+	r := setupRouterWithEnabledRepo(repo, alice, false, enabledRepoStub{
+		enabled: map[indicator.DeviceType][]string{indicator.DeviceTypeGNB: {"KGNB_ENABLED"}},
+	})
+	rr := doJSON(t, r, http.MethodPatch, "/api/v1/pm/query-templates/"+id.String(), map[string]any{
+		"payload": map[string]any{
+			"device_type":  "GNB",
+			"metric_paths": []string{"KGNB_ENABLED", "KGNB_DISABLED"},
+		},
+	})
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	assert.Contains(t, rr.Body.String(), "KGNB_DISABLED")
 }
 
 func TestUpdate_RejectsPayloadWithTooManyDevices(t *testing.T) {
