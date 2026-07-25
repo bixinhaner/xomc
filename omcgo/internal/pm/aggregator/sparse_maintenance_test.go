@@ -191,7 +191,7 @@ func TestFailedBucketMetricsUseDatabaseAgeAndClearBeforeErrors(t *testing.T) {
 	assert.Equal(t, float64(0), testutil.ToFloat64(m.RecoveryExhaustedBuckets))
 }
 
-func TestFailedBucketAlertUsesPersistedAgedFailureMetric(t *testing.T) {
+func TestStreamingAggregationAlertsReplaceHourlyBucketAlerts(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
 	require.True(t, ok)
 	raw, err := os.ReadFile(filepath.Join(
@@ -200,8 +200,10 @@ func TestFailedBucketAlertUsesPersistedAgedFailureMetric(t *testing.T) {
 	))
 	require.NoError(t, err)
 	alerts := string(raw)
-	require.Contains(t, alerts, "expr: omc_pm_hourly_aged_failed_buckets > 0")
-	require.NotContains(t, alerts, "expr: omc_pm_hourly_failed_buckets > 0\n        for: 1h")
+	require.Contains(t, alerts, "alert: OMCPMStreamingAggregationNotReady")
+	require.Contains(t, alerts, "alert: OMCPMStreamingAggregationOutboxErrors")
+	require.Contains(t, alerts, "alert: OMCPMStreamingAggregationFinalizeErrors")
+	require.NotContains(t, alerts, "omc_pm_hourly_aged_failed_buckets")
 }
 
 func TestRecoverFailedHourlyBucketsRequeuesOnlyRetriableSourceBucketWithoutActiveVersion(t *testing.T) {

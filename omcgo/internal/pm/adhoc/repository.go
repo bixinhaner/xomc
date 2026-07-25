@@ -16,6 +16,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
+	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
 )
 
 // Repository 是 G7 adhoc 任务的持久化接口。
@@ -108,6 +109,7 @@ type PgRepository struct {
 	// nil 安全：不注入则 last_fire_at 留 NULL（退化到 created_at），行为不回归。
 	watermarks WatermarkReader
 	loc        func() *time.Location // #528 P3：初始游标桶对齐用业务时区
+	streamRepo *pmstream.PgTaskRepository
 }
 
 // NewPgRepository 创建 PgRepository。
@@ -115,6 +117,16 @@ type PgRepository struct {
 // pgPool=主库（pm_tasks/pm_adhoc_task_runs），tsPool=时序库（pm_adhoc_aggregation_results）。
 func NewPgRepository(pgPool, tsPool *pgxpool.Pool) *PgRepository {
 	return &PgRepository{pool: pgPool, tsPool: tsPool, loc: func() *time.Location { return time.UTC }}
+}
+
+// SetStreamingRepository 把现有任务 CRUD 接到新的不可变版本控制面。
+func (r *PgRepository) SetStreamingRepository(repo *pmstream.PgTaskRepository) *PgRepository {
+	r.streamRepo = repo
+	return r
+}
+
+func (r *PgRepository) HasStreamingRepository() bool {
+	return r.streamRepo != nil
 }
 
 // SetWatermarkReader 注入「上游完成水位」读取器（#528 P3，新建持续任务初始游标用）。
@@ -222,7 +234,7 @@ func (r *PgRepository) Create(ctx context.Context, req CreateRequest) (uuid.UUID
 			req.Name, "extraction", TaskSubtype, string(req.Mode), nullableString(req.CronExpr),
 			deviceSNsJSON, req.MetricPaths, req.Granularities,
 			nullableTime(req.WindowStart), nullableTime(req.WindowEnd), string(dim), nullableTech(req.Technology), req.IsBuiltin, expireDays,
-			string(visibility), string(StatusPending), 0, req.Creator, nullableStrSlice(req.ObjectLDNs), initialFire,
+			string(visibility), string(StatusScheduled), 0, req.Creator, nullableStrSlice(req.ObjectLDNs), initialFire,
 		).
 		Suffix("RETURNING id").
 		ToSql()
@@ -232,6 +244,16 @@ func (r *PgRepository) Create(ctx context.Context, req CreateRequest) (uuid.UUID
 	var id uuid.UUID
 	if err := r.pool.QueryRow(ctx, q, args...).Scan(&id); err != nil {
 		return uuid.Nil, fmt.Errorf("adhoc.Create: insert: %w", err)
+	}
+	if r.streamRepo != nil {
+		task, loadErr := r.Get(ctx, id)
+		if loadErr != nil {
+			return uuid.Nil, loadErr
+		}
+		if syncErr := r.syncStreamingTask(ctx, task, true); syncErr != nil {
+			_, _ = r.pool.Exec(ctx, "DELETE FROM pm_tasks WHERE id=$1", id)
+			return uuid.Nil, syncErr
+		}
 	}
 	return id, nil
 }
@@ -263,6 +285,15 @@ func (r *PgRepository) Update(ctx context.Context, id uuid.UUID, req UpdateReque
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
+	}
+	if r.streamRepo != nil {
+		task, loadErr := r.Get(ctx, id)
+		if loadErr != nil {
+			return loadErr
+		}
+		if syncErr := r.syncStreamingTask(ctx, task, task.Status != StatusCanceled); syncErr != nil {
+			return syncErr
+		}
 	}
 	return nil
 }
@@ -410,6 +441,15 @@ RETURNING status`
 		}
 		return fmt.Errorf("adhoc.Cancel: %w", err)
 	}
+	if r.streamRepo != nil {
+		task, loadErr := r.Get(ctx, id)
+		if loadErr != nil {
+			return loadErr
+		}
+		if syncErr := r.syncStreamingTask(ctx, task, false); syncErr != nil {
+			return syncErr
+		}
+	}
 	return nil
 }
 
@@ -440,6 +480,15 @@ RETURNING status`
 			return "", ErrNotCanceled
 		}
 		return "", fmt.Errorf("adhoc.Resume: %w", err)
+	}
+	if r.streamRepo != nil {
+		task, loadErr := r.Get(ctx, id)
+		if loadErr != nil {
+			return "", loadErr
+		}
+		if syncErr := r.syncStreamingTask(ctx, task, true); syncErr != nil {
+			return "", syncErr
+		}
 	}
 	return Status(newStatus), nil
 }
@@ -477,6 +526,11 @@ WHERE id = $1
 			return ErrBuiltinNotDeletable
 		}
 		return ErrNotTerminal
+	}
+	if r.streamRepo != nil {
+		if err := r.streamRepo.Delete(ctx, id); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
 	}
 	return nil
 }

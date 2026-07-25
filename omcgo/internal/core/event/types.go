@@ -60,6 +60,43 @@ type ParamSyncRequestedPayload struct {
 	IdempotencyKey string   `json:"idempotency_key"`
 }
 
+// PMAggregationMetric 是已完成 15 分钟计算、可直接进入窗口累加的有限数值。
+type PMAggregationMetric struct {
+	MetricPath string  `json:"metric_path"`
+	MetricType string  `json:"metric_type"`
+	StatisType string  `json:"statis_type"`
+	Value      float64 `json:"value"`
+}
+
+// PMAggregationMeasurement 保留对象和 CounterGroup 语义，不引用时序库行。
+type PMAggregationMeasurement struct {
+	ObjectLDN    string                `json:"object_ldn"`
+	CounterGroup string                `json:"counter_group"`
+	Metrics      []PMAggregationMetric `json:"metrics"`
+}
+
+// PMAggregationNormalizedPayload 是 PM 入库事务写入 outbox 的版本化标准事件。
+type PMAggregationNormalizedPayload struct {
+	SchemaVersion int                        `json:"schema_version"`
+	EventID       uuid.UUID                  `json:"event_id"`
+	SourceFileID  uuid.UUID                  `json:"source_file_id"`
+	IngestBatchID uuid.UUID                  `json:"ingest_batch_id"`
+	DeviceID      uuid.UUID                  `json:"device_id"`
+	DeviceOUI     string                     `json:"device_oui"`
+	DeviceSN      string                     `json:"device_sn"`
+	Technology    string                     `json:"technology"`
+	WindowStart   time.Time                  `json:"window_start"`
+	WindowEnd     time.Time                  `json:"window_end"`
+	Measurements  []PMAggregationMeasurement `json:"measurements"`
+}
+
+// PMAggregationTaskVersionChangedPayload 是轻量控制面刷新通知。
+type PMAggregationTaskVersionChangedPayload struct {
+	TaskID        uuid.UUID `json:"task_id"`
+	TaskVersionID uuid.UUID `json:"task_version_id"`
+	EffectiveFrom time.Time `json:"effective_from"`
+}
+
 // NewEvent creates a new Event with a generated ID and current timestamp.
 func NewEvent(subject string, payload interface{}) (Event, error) {
 	data, err := json.Marshal(payload)

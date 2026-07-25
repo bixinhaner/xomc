@@ -132,6 +132,9 @@ export interface AdhocResultRow {
   // device_group 任务才有 deviceGroupName；缺失则空，前端图例回退 id 前 8 位）。
   productName?: string;
   deviceGroupName?: string;
+  taskVersionId?: string;
+  complete?: boolean;
+  missingSlots?: number;
 }
 
 /**
@@ -213,6 +216,9 @@ export interface BackendAdhocResultRow {
   // PM-线名解析：后端读时 JOIN 解析出的可读名（缺失则 omitempty 不下发）。
   product_name?: string;
   device_group_name?: string;
+  task_version_id?: string;
+  complete?: boolean;
+  missing_slots?: number;
 }
 
 export interface BackendAdhocTaskRun {
@@ -295,5 +301,8 @@ export function mapBackendAdhocResult(b: BackendAdhocResultRow): AdhocResultRow 
     objectLdn: b.object_ldn || undefined,
     productName: b.product_name || undefined,
     deviceGroupName: b.device_group_name || undefined,
+    taskVersionId: b.task_version_id || undefined,
+    complete: b.complete ?? false,
+    missingSlots: b.missing_slots ?? 0,
   };
 }

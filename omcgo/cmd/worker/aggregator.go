@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -15,27 +14,13 @@ import (
 
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
-	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	pmexport "github.com/omcgo/omcgo/internal/pm/export"
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
-	"github.com/omcgo/omcgo/internal/pm/resultnorm"
 )
 
-// startPMAggregatorPipeline wire 起 T-0164-P5 / G5 自然桶聚合 + T-0164-P8 / G8 asyncjob 框架。
-//
-// 三个组件协作：
-//  1. asyncjob.Registry — 把 4 个 Runner（hourly/daily/weekly/monthly）注册进框架
-//  2. asyncjob.Sweeper  — 后台扫描 zombie 任务，过期 reset 重试
-//  3. cron Scheduler    — 整点对齐入队 async_jobs（payload 含本轮聚合时间窗）
-//
-// 每个 JobType 单独开一个 worker goroutine，每 5 秒尝试抢一个待执行任务。
-// 单进程内串行（避免同 JobType 重复跑同一 bucket）；多 worker 跨进程靠
-// LockNextPending 的 SKIP LOCKED 自然分配。
-//
-// G8-Gap-1（启动补跑）：cronScheduler 启动前先扫 async_jobs_cron_state 表，对每个 job_type
-// 算"上次成功触发到现在之间所有应触发但漏掉的 bucket"逐个 enqueue，保证 worker 停机期间
-// 的 cron 触发不丢失。补跑后才启动 cron 走正常调度。
+// startPMAggregatorPipeline 仅保留 KPI 导出和通用异步任务维护。
+// 自然桶、组聚合、补跑、水位和 adhoc worker 已由在线流式聚合替代，不再装配。
 func startPMAggregatorPipeline(
 	ctx context.Context,
 	w *workerInfra,
@@ -43,152 +28,7 @@ func startPMAggregatorPipeline(
 	tz *tzManager,
 	exportBucket string,
 ) {
-	logger := w.Logger.Named("pm-aggregator")
-
-	// 1) 构造 aggregator + asyncjob 基础设施
-	aggr := aggregator.NewWithPool(w.TsPool, kpiRouter, logger)
-	pmResultNormSysCfg := admin.NewPgSysConfigRepository(w.PgPool)
-	aggr.SetNumberProcessLookup(func(ctx context.Context) (string, error) {
-		row, err := pmResultNormSysCfg.GetByKey(ctx, resultnorm.ConfigCategory, resultnorm.ConfigKey)
-		if err != nil {
-			if errors.Is(err, commonerrors.ErrNotFound) {
-				return "", nil
-			}
-			return "", err
-		}
-		return row.Value, nil
-	})
-	jobRepo := asyncjob.NewPgRepository(w.PgPool)
-	cronStateRepo := asyncjob.NewPgCronStateRepository(w.PgPool)
-	lockOwner := buildLockOwner()
-	registry := asyncjob.NewRegistry(jobRepo, lockOwner, logger)
-
-	// 1b) Prometheus 指标注册 + 注入（T-0164 P1 收尾：aggregator + asyncjob hooks 全注入）
-	aggregatorMetrics := aggregator.NewMetrics(w.MetricsReg)
-	asyncMetrics := asyncjob.NewMetrics(w.MetricsReg)
-	registry.SetMetrics(asyncMetrics)
-	go aggregator.RunSparseMaintenance(
-		ctx,
-		w.TsPool,
-		jobRepo,
-		aggregator.ParseLateDataWindow(os.Getenv("PM_LATE_DATA_WINDOW")),
-		aggregatorMetrics,
-		logger.Named("sparse-maintenance"),
-	)
-
-	// 2) 注册 4 个 G5 设备级 asyncjob runner
-	runners := []*aggregator.Runner{
-		aggregator.NewHourlyRunner(aggr),
-		aggregator.NewDailyRunner(aggr),
-		aggregator.NewWeeklyRunner(aggr),
-		aggregator.NewMonthlyRunner(aggr),
-	}
-	runners[0].SetHourlyBatchDevices(
-		aggregator.ParseHourlyBatchDevices(os.Getenv("PM_HOURLY_BATCH_DEVICES")))
-	for _, r := range runners {
-		r.SetMetrics(aggregatorMetrics)
-		// #479 改动三：设备级该桶聚合成功后，确定性串联对应粒度的设备组聚合任务
-		// （同一 [Start,End)，读到的必是已提交的完整设备级数据）。取代旧组级独立 cron + 10 分钟错峰。
-		if gjt := aggregator.GroupJobTypeFor(r.JobType()); gjt != "" {
-			r.SetGroupChain(gjt, jobRepo)
-		}
-		r.SetRollupChain(jobRepo, tz.Current)
-		// #528 P1：设备级该桶聚合成功后推进设备级完成水位（水位表在主库，故传 PgPool）。
-		r.SetWatermarkExec(w.PgPool)
-		registry.Register(r)
-		logger.Info("registered pm aggregator runner (device)",
-			zap.String("job_type", r.JobType()),
-			zap.String("source", r.Source()),
-			zap.String("target", r.Target()),
-			zap.String("chained_group_job_type", aggregator.GroupJobTypeFor(r.JobType())),
-			zap.String("granularity", string(r.Granularity())))
-	}
-
-	// 2b) 注册 4 个 G5 设备组级 asyncjob runner（T-0164 收尾 G5-Gap-1）
-	groupRunners := []*aggregator.GroupRunner{
-		aggregator.NewHourlyGroupRunner(aggr),
-		aggregator.NewDailyGroupRunner(aggr),
-		aggregator.NewWeeklyGroupRunner(aggr),
-		aggregator.NewMonthlyGroupRunner(aggr),
-	}
-	for _, r := range groupRunners {
-		r.SetMetrics(aggregatorMetrics)
-		// #528 P1：组级该桶聚合成功后推进组级完成水位（水位表在主库，故传 PgPool）。
-		r.SetWatermarkExec(w.PgPool)
-		registry.Register(r)
-		logger.Info("registered pm aggregator runner (group)",
-			zap.String("job_type", r.JobType()),
-			zap.String("device_target", r.DeviceTarget()),
-			zap.String("group_target", r.GroupTarget()),
-			zap.String("granularity", string(r.Granularity())))
-	}
-
-	// 2c) 注册 KPI-EXPORT 导出处理器（job_type=pm_kpi_export）。
-	// T2 真生成：载任务 → running → 按 source_type 取数 → 流式写 CSV 直传对象存储 → 回填 succeeded。
-	// KPI/时序库物理分离后池路由：
-	//   - metricDB   = TsPool（PM 指标超表 pm_metrics*，dashboard device 维度直查 + 指标名解析）
-	//   - adhocDB    = TsPool（pm_adhoc_aggregation_results 已迁时序库，直查 + 指标名解析）
-	//   - taskMetaDB = PgPool（pm_tasks 留主库，loadAdhocDimension 取 adhoc 任务维度/设备数）
-	//   - aggr 复用上面的 device 级聚合查询入口（dashboard 聚合维度 + KPI 反算）
-	//   - bucket 复用报表桶（设计 §5.6）
-	exportRunner := pmexport.NewRunner(pmexport.RunnerDeps{
-		Repo:             pmexport.NewPgRepository(w.PgPool),
-		Aggr:             aggr,
-		MetricDB:         w.TsPool,
-		AdhocDB:          w.TsPool,
-		TaskMetaDB:       w.PgPool,
-		Uploader:         w.MinIO,
-		Bucket:           exportBucket,
-		Logger:           logger,
-		TimezoneProvider: exportTimezoneProvider(tz),
-	})
-	registry.Register(exportRunner)
-	logger.Info("registered pm kpi export runner (T2)",
-		zap.String("job_type", exportRunner.JobType()),
-		zap.String("bucket", exportBucket))
-
-	// 3) 启动 Sweeper（zombie reset + 心跳监控）
-	// T-0164 收尾 G8-Gap-3：从 sys_configs 读 sweeper_interval / zombie_threshold / heartbeat_interval；
-	// 缺失 / 解析失败 fallback 走 asyncjob 包默认值（与原行为一致）。
-	// heartbeat_interval 写回 asyncjob.HeartbeatInterval（var），后续 Runner.runOnce 启 ticker 时读取。
-	sweeperInterval, zombieThreshold := loadAsyncJobThresholds(ctx, w.PgPool, logger)
-	sweeper := asyncjob.NewSweeper(jobRepo, sweeperInterval, zombieThreshold, logger)
-	sweeper.SetMetrics(asyncMetrics)
-	go sweeper.Run(ctx)
-	logger.Info("asyncjob sweeper started",
-		zap.Duration("interval", sweeperInterval),
-		zap.Duration("zombie_threshold", zombieThreshold),
-		zap.Duration("heartbeat_interval", asyncjob.HeartbeatInterval))
-
-	// 3b) 启动 QueueDepthSampler — 每 30s 扫 async_jobs 表更新 omc_async_jobs_queue_depth gauge
-	go asyncjob.RunQueueDepthSampler(ctx, jobRepo, asyncMetrics, 30*time.Second, &queueDepthSamplerLogger{logger: logger})
-	logger.Info("asyncjob queue depth sampler started", zap.Duration("interval", 30*time.Second))
-
-	// 4) 每个 JobType 开一个 worker goroutine（设备级 4 + 设备组级 4 = 8 个）
-	for _, r := range runners {
-		jt := r.JobType()
-		go runJobTypeWorker(ctx, registry, jt, logger)
-	}
-	for _, r := range groupRunners {
-		jt := r.JobType()
-		go runJobTypeWorker(ctx, registry, jt, logger)
-	}
-	// KPI 导出处理器单独一个 worker goroutine（按需触发，无 cron）。
-	go runJobTypeWorker(ctx, registry, exportRunner.JobType(), logger)
-
-	// 5) 启动 cron 调度器（含启动补跑）。注册到 tzManager：改时区时随其余 cron 一并用新 loc 重建。
-	startCronScheduler(ctx, jobRepo, cronStateRepo, logger, asyncMetrics, tz)
-
-	// 6) PM retention cleanup（T-0164 收尾 G2-Gap-2）— 共享 jobRepo / cronStateRepo / registry / asyncMetrics
-	startPMRetentionCleanup(ctx, w, jobRepo, cronStateRepo, registry, asyncMetrics, tz)
-
-	// 7) 基站日志按时间保留清理（#320）— 复用同一 jobRepo / cronStateRepo / registry / asyncMetrics
-	startStationLogRetentionCleanup(ctx, w, jobRepo, cronStateRepo, registry, asyncMetrics, tz)
-
-	// 8) 审计/业务日志按时间保留清理（log.retention）— 复用同一 jobRepo / cronStateRepo / registry / asyncMetrics
-	startLogRetentionCleanup(ctx, w, jobRepo, cronStateRepo, registry, asyncMetrics, tz)
-
-	logger.Info("PM aggregator pipeline ready (8 aggregator runners + 3 retention runners + sweeper + cron triggers + catchup)")
+	startPMExportOnly(ctx, w, kpiRouter, tz, exportBucket)
 }
 
 // runJobTypeWorker 单 JobType 内串行循环 RunNext。

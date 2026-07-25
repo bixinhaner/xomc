@@ -164,12 +164,10 @@ func Test_Handler_Create_Success(t *testing.T) {
 	r := newTestRouter(repo)
 
 	body := map[string]any{
-		"name": "test", "mode": "oneshot",
+		"name": "test", "mode": "continuous",
 		"device_sns":    []string{"S1"},
 		"metric_paths":  []string{"M1"},
 		"granularities": []string{"hourly"},
-		"window_start":  "2026-05-22T10:00:00Z",
-		"window_end":    "2026-05-22T11:00:00Z",
 	}
 	jsonBody, _ := json.Marshal(body)
 	w := httptest.NewRecorder()
@@ -787,8 +785,8 @@ func Test_Handler_FilterOptions_PublicNonOwner_Allowed(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
-// Runs：非 owner 普通用户读他人自建任务的运行历史 → 403。
-func Test_Handler_Runs_NonOwner_Forbidden(t *testing.T) {
+// 新架构不再暴露运行历史端点，聚合结果按窗口持续产生。
+func Test_Handler_Runs_RouteRemoved(t *testing.T) {
 	taskID := uuid.New()
 	repo := &handlerStubRepo{
 		get: func(id uuid.UUID) (*Task, error) {
@@ -801,28 +799,11 @@ func Test_Handler_Runs_NonOwner_Forbidden(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/pm/adhoc/tasks/"+taskID.String()+"/runs", nil)
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
-// Runs：非 owner 普通用户可读 public 自建任务运行历史。
-func Test_Handler_Runs_PublicNonOwner_Allowed(t *testing.T) {
-	taskID := uuid.New()
-	repo := &handlerStubRepo{
-		get: func(id uuid.UUID) (*Task, error) {
-			return &Task{ID: taskID, IsBuiltin: false, Creator: "alice", Visibility: VisibilityPublic}, nil
-		},
-	}
-	r := newTestRouterWithUser(repo, "bob", false)
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/pm/adhoc/tasks/"+taskID.String()+"/runs", nil)
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-// Progress：非 owner 普通用户订阅 private 自建任务进度 → 403。
-func Test_Handler_Progress_PrivateNonOwner_Forbidden(t *testing.T) {
+// 新架构不再暴露任务执行进度端点；窗口完整性随结果返回。
+func Test_Handler_Progress_RouteRemoved(t *testing.T) {
 	taskID := uuid.New()
 	repo := &handlerStubRepo{
 		get: func(id uuid.UUID) (*Task, error) {
@@ -835,24 +816,7 @@ func Test_Handler_Progress_PrivateNonOwner_Forbidden(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/pm/adhoc/tasks/"+taskID.String()+"/progress", nil)
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusForbidden, w.Code)
-}
-
-// Progress：非 owner 普通用户订阅 public 自建任务进度通过权限层，随后因测试未注入 bus 返回 503。
-func Test_Handler_Progress_PublicNonOwner_PermissionPasses(t *testing.T) {
-	taskID := uuid.New()
-	repo := &handlerStubRepo{
-		get: func(id uuid.UUID) (*Task, error) {
-			return &Task{ID: taskID, IsBuiltin: false, Creator: "alice", Visibility: VisibilityPublic}, nil
-		},
-	}
-	r := newTestRouterWithUser(repo, "bob", false)
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/pm/adhoc/tasks/"+taskID.String()+"/progress", nil)
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 // ── #674 Resume 端点 ──────────────────────────────────────────────────────

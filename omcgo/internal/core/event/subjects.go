@@ -172,6 +172,13 @@ const (
 	// SubjectPMFileParsed 是 PM XML 解析完成后发布。
 	// 发布者：pm.Collector，订阅者：暂无（可用于选择性后续处理）
 	SubjectPMFileParsed = "pm.file.parsed"
+
+	// SubjectPMAggregationNormalized 承载已完成 15 分钟 Counter/KPI 计算的标准事件。
+	// 它使用独立 LimitsPolicy JetStream，ACK 不删除历史消息，供活动窗口恢复重放。
+	SubjectPMAggregationNormalized = "pmaggregation.normalized"
+
+	// SubjectPMAggregationTaskVersionChanged 通知 worker 刷新不可变任务版本快照。
+	SubjectPMAggregationTaskVersionChanged = "pmaggregation.task_version.changed"
 )
 
 // MR events

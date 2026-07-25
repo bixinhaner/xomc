@@ -3,7 +3,7 @@
  *
  * T-0186：
  *   - 列表分两区：内置区（is_builtin=true）+ 自建区（is_builtin=false），各一张 Table。
- *   - 任务详情 Drawer 加 Tabs：运行历史（pm_adhoc_task_runs）+ 结果（AdhocResultPanel）。
+ *   - 任务详情直接展示在线聚合结果；新执行模型不提供补跑进度。
  *   - 详情顶部制式渲染为只读 Tag（建后不可改、无切换控件）。
  *
  * T-0164 收尾：
@@ -22,7 +22,6 @@ import {
   Modal,
   Space,
   Table,
-  Tabs,
   Tag,
   Progress,
   Descriptions,
@@ -164,7 +163,7 @@ function fmtTime(v?: string): string {
 }
 
 /** 运行历史表（任务详情 Tab）。 */
-function RunHistoryTab({ taskId }: { taskId: string }) {
+export function RunHistoryTab({ taskId }: { taskId: string }) {
   const intl = useIntl();
   // 运行中任务会持续产生 run；issue #399 SSE 接通后轮询降为低频兜底。
   const { data: runs = [], isLoading } = usePmAdhocRuns(taskId, {
@@ -696,21 +695,7 @@ export default function PmAdhocPage() {
               )}
             </Descriptions>
 
-            <Tabs
-              defaultActiveKey="runs"
-              items={[
-                {
-                  key: 'runs',
-                  label: intl.formatMessage({ id: 'perf.adhoc.tabRuns' }),
-                  children: <RunHistoryTab taskId={selectedTask.id} />,
-                },
-                {
-                  key: 'results',
-                  label: intl.formatMessage({ id: 'perf.adhoc.tabResults' }),
-                  children: <AdhocResultPanel taskId={selectedTask.id} />,
-                },
-              ]}
-            />
+            <AdhocResultPanel taskId={selectedTask.id} />
           </>
         )}
       </Drawer>

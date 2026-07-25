@@ -237,7 +237,7 @@ func TestSparseIngestLockOrder(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, []string{
-		"bucket/version", "dictionary", "metric set", "anchor", "values",
+		"dictionary", "metric set", "anchor", "values",
 	}, tx.operations)
 }
 

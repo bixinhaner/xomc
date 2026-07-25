@@ -4,17 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
-	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
-	"github.com/omcgo/omcgo/internal/core/components"
 	minioinfra "github.com/omcgo/omcgo/internal/core/components/minio"
 	"github.com/omcgo/omcgo/internal/core/dictloader"
-	"github.com/omcgo/omcgo/internal/core/systimezone"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/dashboard"
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/pm/adhoc"
@@ -25,6 +22,7 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
 	"github.com/omcgo/omcgo/internal/pm/querytemplate"
+	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
 )
 
 // initPMModule 初始化 F03 性能管理模块。
@@ -92,13 +90,9 @@ func initPMModule(c *Container) error {
 	pmAsyncJobRepo := asyncjob.NewPgRepository(c.PgPool)
 
 	// T-0164-P7 / G7：adhoc 任务 REST 入口（worker 端跑实际执行）。
-	pmAdhocRepo := buildPMAdhocRepo(c.PgPool, c.TsPool, logger)
-	pmProgressHub, err := startPMAdhocProgress(c.Realtime, c.GS, logger.Named("adhoc"))
-	if err != nil {
-		return err
-	}
+	pmAdhocRepo := buildPMAdhocRepo(c.PgPool, c.TsPool, c.EventBus, logger)
 	enabledRepo := indicator.NewPgEnabledRepository(c.PgPool)
-	pmAdhocHandler := adhoc.NewHandler(pmAdhocRepo, c.TsPool, pmProgressHub, logger.Named("adhoc")).
+	pmAdhocHandler := adhoc.NewHandler(pmAdhocRepo, c.TsPool, nil, logger.Named("adhoc")).
 		WithEnabledMetricSelectionService(adhoc.NewEnabledMetricSelectionService(enabledRepo))
 
 	// T-0174 阶段 1：指标查询页"查询模板"REST 入口（5 CRUD：list/get/create/update/delete）。
@@ -198,56 +192,15 @@ func initPMModule(c *Container) error {
 	return nil
 }
 
-func startPMAdhocProgress(
-	realtimeBus adhoc.RealtimeSubscriber,
-	shutdown *components.GracefulShutdown,
-	logger *zap.Logger,
-) (*adhoc.ProgressHub, error) {
-	hub := adhoc.NewProgressHub()
-	bridge := adhoc.NewProgressBridge(realtimeBus, hub, logger)
-	stop, err := bridge.Subscribe()
-	if err != nil {
-		return nil, fmt.Errorf("start PM adhoc realtime progress bridge: %w", err)
-	}
-	if shutdown == nil {
-		wiringErr := errors.New("PM adhoc realtime progress shutdown not wired")
-		if stopErr := stop(); stopErr != nil {
-			return nil, errors.Join(
-				wiringErr,
-				fmt.Errorf("rollback PM adhoc realtime progress bridge: %w", stopErr),
-			)
-		}
-		return nil, wiringErr
-	}
-	// Priority 0: stop callbacks and close local SSE channels before HTTP (1)
-	// and the shared NATS connection (2) begin shutting down.
-	shutdown.Register("pm-adhoc-progress", 0, func(context.Context) error { return stop() })
-	return hub, nil
-}
-
-// buildPMAdhocRepo 构造 app 端 adhoc 任务 repository（建持续任务的唯一入口 = POST /pm/adhoc）。
-//
-// KPI/时序库物理分离：pm_tasks 留主库（pgPool），pm_adhoc_aggregation_results 迁时序库（tsPool），双池。
-// #528 P3：Create 只在 app 端调用（worker 端 repo 从不建任务），故水位读取器 + 业务时区**必须**
-// 注入到这里的 repo——新建持续任务初始游标 = 建任务时刻当前对应水位桶起点（从「现在」起算，
-// 不回扫历史，结果表不冒出史前空格批量行）。水位表在主库（pgPool），与上游 runner 写水位、
-// cron/executor 读水位同库同源；业务时区与全局响应、cron 调度读同一 sys_configs 源
-// （category='basic', key='timezoneCode'）。
-//
-// 抽成包级函数供装配回归测试（pm_adhoc_wiring_test.go）以 nil pool 直接调用，钉死注入链路。
-func buildPMAdhocRepo(pgPool, tsPool *pgxpool.Pool, logger *zap.Logger) *adhoc.PgRepository {
-	watermarks := aggregator.NewWatermarkRepository(pgPool)
-	tzFetcher := func(ctx context.Context, category, key string) (string, bool) {
-		row, err := admin.NewPgSysConfigRepository(pgPool).GetByKey(ctx, category, key)
-		if err != nil || row == nil {
-			return "", false
-		}
-		return row.Value, true
-	}
-	tzProvider := systimezone.New(tzFetcher, logger.Named("adhoc-timezone"))
+// buildPMAdhocRepo 将现有任务管理 API 接到新的逻辑任务 + 不可变版本控制面。
+// pm_tasks 只承载用户可编辑的展示定义；worker 不再扫描它执行历史窗口。
+func buildPMAdhocRepo(
+	pgPool, tsPool *pgxpool.Pool,
+	bus event.EventBus,
+	_ *zap.Logger,
+) *adhoc.PgRepository {
 	return adhoc.NewPgRepository(pgPool, tsPool).
-		SetWatermarkReader(watermarks).
-		SetLocationFunc(func() *time.Location { return tzProvider.Location(context.Background()) })
+		SetStreamingRepository(pmstream.NewPgTaskRepository(pgPool, bus))
 }
 
 // indicatorReloader 把 dictloader.Registry.ReloadOne(...)(Report, error)

@@ -23,6 +23,8 @@ type StreamDef struct {
 	Subjects    []string
 	Retention   nats.RetentionPolicy
 	AllowDirect bool
+	MaxAge      time.Duration
+	Compression nats.StoreCompression
 }
 
 // DefaultStreams 列出所有 JetStream 流。每条流以一个点分前缀吸纳一类事件，
@@ -50,6 +52,14 @@ func DefaultStreams() []StreamDef {
 		// to calculate oldest pm.file.received age without confusing it with
 		// other pm.> subjects in this shared stream.
 		{Name: "PM", Subjects: []string{"pm.>"}, Retention: nats.WorkQueuePolicy, AllowDirect: true},
+		{
+			Name:        "PM_AGGREGATION",
+			Subjects:    []string{"pmaggregation.>"},
+			Retention:   nats.LimitsPolicy,
+			AllowDirect: true,
+			MaxAge:      40 * 24 * time.Hour,
+			Compression: nats.S2Compression,
+		},
 		{Name: "MR", Subjects: []string{"mr.>"}, Retention: nats.WorkQueuePolicy},
 		{Name: "ALARM", Subjects: []string{"alarm.>"}, Retention: nats.WorkQueuePolicy},
 		{Name: "OSS", Subjects: []string{"oss.>"}, Retention: nats.WorkQueuePolicy},
@@ -213,14 +223,19 @@ func enableDirectLookup(def StreamDef, info *nats.StreamInfo, update func(*nats.
 }
 
 func (c *NATSClient) createStream(def StreamDef) error {
+	maxAge := def.MaxAge
+	if maxAge <= 0 {
+		maxAge = 72 * time.Hour
+	}
 	_, err := c.JS.AddStream(&nats.StreamConfig{
 		Name:        def.Name,
 		Subjects:    def.Subjects,
 		Retention:   def.Retention,
-		MaxAge:      72 * time.Hour,
+		MaxAge:      maxAge,
 		Storage:     nats.FileStorage,
 		Replicas:    1, // single node for dev; set 3 for production
 		AllowDirect: def.AllowDirect,
+		Compression: def.Compression,
 	})
 	if err != nil {
 		return fmt.Errorf("create stream %s: %w", def.Name, err)
