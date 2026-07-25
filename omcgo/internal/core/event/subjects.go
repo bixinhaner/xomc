@@ -174,11 +174,18 @@ const (
 	SubjectPMFileParsed = "pm.file.parsed"
 
 	// SubjectPMAggregationNormalized 承载已完成 15 分钟 Counter/KPI 计算的标准事件。
-	// 它使用独立 LimitsPolicy JetStream，ACK 不删除历史消息，供活动窗口恢复重放。
-	SubjectPMAggregationNormalized = "pmaggregation.normalized"
+	// ACK 后仅短期保留，供当前小时窗口恢复；日/周/月不再重放原始 15 分钟事件。
+	SubjectPMAggregationNormalized = "pmaggregation.15m.normalized"
+
+	// SubjectPMAggregationHourlyRollup 承载已发布小时窗口的紧凑 Counter 状态。
+	SubjectPMAggregationHourlyRollup = "pmaggregation.hourly.rollup"
+
+	// SubjectPMAggregationDailyRollup 承载已发布日窗口的紧凑 Counter 状态。
+	// 同一事件同时供周窗口和月窗口累计。
+	SubjectPMAggregationDailyRollup = "pmaggregation.daily.rollup"
 
 	// SubjectPMAggregationTaskVersionChanged 通知 worker 刷新不可变任务版本快照。
-	SubjectPMAggregationTaskVersionChanged = "pmaggregation.task_version.changed"
+	SubjectPMAggregationTaskVersionChanged = "pmaggregation.control.task_version.changed"
 )
 
 // MR events

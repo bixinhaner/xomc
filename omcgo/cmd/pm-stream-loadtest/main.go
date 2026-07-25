@@ -97,7 +97,7 @@ func main() {
 		DurationMS: finished.Sub(started).Milliseconds(),
 		Published:  published.Load(), Failed: failedCount.Load(),
 	}
-	if info, infoErr := js.StreamInfo("PM_AGGREGATION"); infoErr == nil {
+	if info, infoErr := js.StreamInfo("PM_AGG_15M"); infoErr == nil {
 		result.StreamMessages = info.State.Msgs
 	}
 	data, err := json.MarshalIndent(result, "", "  ")
@@ -114,21 +114,22 @@ func main() {
 }
 
 func ensureAggregationStream(js nats.JetStreamContext) error {
-	if _, err := js.StreamInfo("PM_AGGREGATION"); err == nil {
+	if _, err := js.StreamInfo("PM_AGG_15M"); err == nil {
 		return nil
 	} else if err != nats.ErrStreamNotFound {
-		return fmt.Errorf("inspect PM_AGGREGATION stream: %w", err)
+		return fmt.Errorf("inspect PM_AGG_15M stream: %w", err)
 	}
 	_, err := js.AddStream(&nats.StreamConfig{
-		Name:        "PM_AGGREGATION",
-		Subjects:    []string{"pmaggregation.>"},
+		Name:        "PM_AGG_15M",
+		Subjects:    []string{"pmaggregation.15m.>"},
 		Retention:   nats.LimitsPolicy,
-		MaxAge:      40 * 24 * time.Hour,
+		MaxAge:      2 * time.Hour,
+		MaxBytes:    512 << 20,
 		AllowDirect: true,
 		Compression: nats.S2Compression,
 	})
 	if err != nil {
-		return fmt.Errorf("create PM_AGGREGATION stream: %w", err)
+		return fmt.Errorf("create PM_AGG_15M stream: %w", err)
 	}
 	return nil
 }

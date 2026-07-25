@@ -252,9 +252,7 @@ func TestPMRetentionApplierApplyRejectsInvalidDays(t *testing.T) {
 	assert.Empty(t, stub.execCalls) // 校验失败不应触发任何 SQL
 }
 
-// TestPMRetentionApplierApplyAllSkipsRawSparseTables 验证 KeyRaw15MinDays
-// 不安装 TimescaleDB 自动 retention。原始稀疏表必须由 worker 在聚合水位安全后删 chunk。
-func TestPMRetentionApplierApplyAllSkipsRawSparseTables(t *testing.T) {
+func TestPMRetentionApplierApplyAllRoutesRawSparseTables(t *testing.T) {
 	stub := &stubRetentionQuerier{}
 	a := newApplierWithStub(stub)
 
@@ -263,12 +261,10 @@ func TestPMRetentionApplierApplyAllSkipsRawSparseTables(t *testing.T) {
 		[]PolicyKey{KeyRaw15MinDays},
 	)
 
-	assert.Empty(t, stub.execCalls)
+	require.Len(t, stub.execCalls, 4)
 }
 
-// TestPMRetentionApplierApplyAllRoutesHourlyToSparseTables 验证 KeyHourlyDays
-// 变更时同时更新两张小时稀疏表和设备组小时表。
-func TestPMRetentionApplierApplyAllRoutesHourlyToSparseTables(t *testing.T) {
+func TestPMRetentionApplierApplyAllIgnoresHourlyMixedResultTable(t *testing.T) {
 	stub := &stubRetentionQuerier{}
 	a := newApplierWithStub(stub)
 
@@ -277,8 +273,7 @@ func TestPMRetentionApplierApplyAllRoutesHourlyToSparseTables(t *testing.T) {
 		[]PolicyKey{KeyHourlyDays},
 	)
 
-	// 3 张表 × 2 条 SQL = 6 次 Exec
-	require.Len(t, stub.execCalls, 6)
+	assert.Empty(t, stub.execCalls)
 }
 
 // TestPMRetentionApplierApplyAllIgnoresOrdinaryTableKeys 验证 daily/weekly/monthly
@@ -305,13 +300,13 @@ func TestPMRetentionApplierApplyAllOnlyUpdatesChangedKeys(t *testing.T) {
 	stub := &stubRetentionQuerier{}
 	a := newApplierWithStub(stub)
 
-	// 只传 KeyRaw15MinDays 变更；原始稀疏表由 worker 水位安全维护。
+	// 只传 KeyRaw15MinDays 变更；两张原始稀疏表原子更新。
 	a.ApplyAll(context.Background(),
 		map[PolicyKey]int{KeyRaw15MinDays: 30, KeyHourlyDays: 180},
 		[]PolicyKey{KeyRaw15MinDays}, // 只有这一个变了
 	)
 
-	assert.Empty(t, stub.execCalls)
+	require.Len(t, stub.execCalls, 4)
 }
 
 // TestPMRetentionApplierApplyAllContinuesOnError 验证某张表 Exec 失败时
@@ -321,8 +316,8 @@ func TestPMRetentionApplierApplyAllReturnsFirstError(t *testing.T) {
 	a := newApplierWithStub(stub)
 
 	err := a.ApplyAllWithError(context.Background(),
-		map[PolicyKey]int{KeyHourlyDays: 180},
-		[]PolicyKey{KeyHourlyDays},
+		map[PolicyKey]int{KeyRaw15MinDays: 30},
+		[]PolicyKey{KeyRaw15MinDays},
 	)
 	require.ErrorContains(t, err, "db error")
 }
@@ -340,5 +335,5 @@ func TestPMRetentionApplierApplyAllUpdatesAffectedHypertablesInOneTransaction(t 
 	require.Equal(t, 1, stub.beginCalls)
 	require.Equal(t, 1, stub.commitCalls)
 	require.Equal(t, 0, stub.rollbackCalls)
-	require.Len(t, stub.execCalls, 6) // three hourly hypertables, remove + add each
+	require.Len(t, stub.execCalls, 4) // two raw hypertables, remove + add each
 }

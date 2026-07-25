@@ -35,10 +35,10 @@ OMC 跑两个 PostgreSQL/TimescaleDB 实例，迁移分两条物理目标库的�
 
 | 超表 | chunk 间隔 | compress_after | drop_after（retention）|
 |------|-----------|----------------|------------------------|
-| `pm_measurement_anchors` / `pm_metric_values` | 4 hours | 水位感知维护任务 | 30 days |
-| `pm_hourly_anchors` / `pm_hourly_values` | 7 days | 水位感知维护任务 | 180 days |
+| `pm_measurement_anchors` / `pm_metric_values` | 4 hours | 7 days | `pm.retention.raw_15min_days` |
+| `pm_hourly_anchors` / `pm_hourly_values` | 已由流式聚合替代 | — | — |
 | `pm_group_metrics_hourly` | 7 days | 14 days | 180 days |
-| `pm_aggregation_results` | 30 days | 90 days | 365 days |
+| `pm_aggregation_results` | 30 days | 90 days | 按粒度读取 `pm.retention` |
 | `mr_records` | 1 day | 7 days | 90 days |
 | `alarms_history` | 7 days | （无压缩）| 365 days |
 | `trace_messages` | 1 day | （无压缩）| 3 days |

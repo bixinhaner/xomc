@@ -23,6 +23,8 @@ func TestPMStreamingAggregationMigrationContract(t *testing.T) {
 	}
 	for _, table := range []string{
 		"pm_aggregation_outbox",
+		"pm_aggregation_rollup_outbox",
+		"pm_aggregation_counter_rollups",
 		"pm_aggregation_windows",
 		"pm_aggregation_results",
 	} {

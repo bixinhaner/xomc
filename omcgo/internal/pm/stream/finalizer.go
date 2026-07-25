@@ -27,18 +27,10 @@ type Finalizer struct {
 	metrics  *Metrics
 	slots    chan struct{}
 	snapshot *SnapshotStore
-	promote  func(context.Context, WindowKey, CloseReason, WindowState) error
 }
 
 func (f *Finalizer) SetSnapshot(snapshot *SnapshotStore) *Finalizer {
 	f.snapshot = snapshot
-	return f
-}
-
-func (f *Finalizer) SetRollupPromoter(
-	promote func(context.Context, WindowKey, CloseReason, WindowState) error,
-) *Finalizer {
-	f.promote = promote
 	return f
 }
 
@@ -105,17 +97,6 @@ func (f *Finalizer) Finalize(ctx context.Context, key WindowKey, reason CloseRea
 		}
 		return err
 	}
-	if f.promote != nil &&
-		(key.Granularity == GranularityHourly || key.Granularity == GranularityDaily) {
-		if err := f.promote(ctx, key, reason, state); err != nil {
-			promoteErr := fmt.Errorf("promote PM aggregation counter state: %w", err)
-			if f.metrics != nil {
-				f.metrics.FinalizeErrorsTotal.Inc()
-			}
-			_ = f.windows.MarkFailed(ctx, key, promoteErr)
-			return promoteErr
-		}
-	}
 	if err := f.writeFinal(ctx, key, reason, state); err != nil {
 		if f.metrics != nil {
 			f.metrics.FinalizeErrorsTotal.Inc()
@@ -149,6 +130,12 @@ func (f *Finalizer) writeFinal(
 	var version *TaskVersionSnapshot
 	if f.snapshot != nil && f.snapshot.Current() != nil {
 		version = f.snapshot.Current().ByVersion[key.TaskVersionID]
+	}
+	rollups, err := buildRollupPayloads(
+		key, reason, state, version, defaultRollupBatchValues,
+	)
+	if err != nil {
+		return err
 	}
 	finalMetrics, formulaIncomplete, err := buildFinalizedMetrics(version, state)
 	if err != nil {
@@ -188,6 +175,11 @@ func (f *Finalizer) writeFinal(
 	}
 	if tag.RowsAffected() == 0 {
 		return nil
+	}
+	for _, payload := range rollups {
+		if err := insertRollupTx(ctx, tx, payload); err != nil {
+			return fmt.Errorf("persist compact PM Counter rollup: %w", err)
+		}
 	}
 
 	complete := reason == CloseComplete && dataComplete

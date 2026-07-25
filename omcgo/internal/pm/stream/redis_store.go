@@ -63,6 +63,21 @@ func NewRedisWindowStore(client redis.UniversalClient, ttl time.Duration) *Redis
 	return &RedisWindowStore{client: client, ttl: ttl}
 }
 
+func (s *RedisWindowStore) windowTTL(granularity Granularity) time.Duration {
+	switch granularity {
+	case GranularityHourly:
+		return 4 * time.Hour
+	case GranularityDaily:
+		return 72 * time.Hour
+	case GranularityWeekly:
+		return 14 * 24 * time.Hour
+	case GranularityMonthly:
+		return 45 * 24 * time.Hour
+	default:
+		return s.ttl
+	}
+}
+
 func (s *RedisWindowStore) ValidateConfiguration(ctx context.Context) error {
 	if s.client == nil {
 		return errors.New("PM aggregation Redis client is nil")
@@ -96,7 +111,7 @@ func (s *RedisWindowStore) Accumulate(
 		contribution.SourceFileID,
 		contribution.DeviceID + "|" + contribution.SlotStart.UTC().Format(time.RFC3339Nano),
 		contribution.ExpectedSlots,
-		int64(s.ttl.Seconds()),
+		int64(s.windowTTL(contribution.Key.Granularity).Seconds()),
 		len(contribution.Values),
 		time.Now().UTC().Unix(),
 		boolInt(contribution.Rollup),

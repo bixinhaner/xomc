@@ -13,24 +13,13 @@ import (
 	"go.uber.org/zap"
 )
 
-// hypertableTables maps PolicyKey to the hypertables governed by TimescaleDB
-// automatic retention policies. Ordinary tables (daily/weekly/monthly) are
-// managed by cleanup_runner and raw sparse tables are managed by worker's
-// watermark-safe chunk maintenance, so neither group is listed here.
-//
-// 小时级策略覆盖两张稀疏物理表和一张设备组表：
-//
-//	pm_hourly_anchors            ← KeyHourlyDays
-//	pm_hourly_values             ← KeyHourlyDays
-//	pm_group_metrics_hourly      ← KeyHourlyDays
-//
-// pm_metrics / pm_metrics_hourly 是兼容视图，不能传给 TimescaleDB policy API。
-// pm_adhoc_aggregation_results 的 365d policy 固定在 migration，无 UI 配置键。
+// hypertableTables maps policies that can be expressed as one TimescaleDB
+// drop_after value. The mixed-granularity result hypertable is cleaned by the
+// worker because each granularity has a different configured lifetime.
 var hypertableTables = map[PolicyKey][]string{
-	KeyHourlyDays: {
-		"public.pm_hourly_anchors",
-		"public.pm_hourly_values",
-		"public.pm_group_metrics_hourly",
+	KeyRaw15MinDays: {
+		"public.pm_measurement_anchors",
+		"public.pm_metric_values",
 	},
 }
 
@@ -177,8 +166,8 @@ func (a *PMRetentionApplier) ApplyAll(ctx context.Context, current map[PolicyKey
 
 // ApplyAllWithError 批量更新 changed keys 对应的 hypertable retention policy，并返回第一个错误。
 // 调用方可将错误持久化为配置应用失败状态，而不是只记录日志后报告保存成功。
-// 仅 KeyHourlyDays 对应自动 retention hypertable；KeyRaw15MinDays 由 worker
-// 做水位安全清理，其余 key（daily/weekly/monthly）由 cleanup_runner 按天数清理。
+// 原始稀疏表按 raw_15min_days 自动 drop chunk；混合粒度结果和 Counter
+// 快照由 cleanup_runner 按 granularity 分批清理。
 func (a *PMRetentionApplier) ApplyAllWithError(ctx context.Context, current map[PolicyKey]int, changed []PolicyKey) error {
 	policies := make(map[string]int)
 	for _, k := range changed {
