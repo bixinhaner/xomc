@@ -70,6 +70,8 @@ services:
       - "maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-64MB}"
       - "-c"
       - "max_wal_size=${PG_MAX_WAL_SIZE:-1GB}"
+      - "-c"
+      - "wal_compression=on"
     # 有状态服务给足 60s：checkpoint flush + WAL 落盘，避免被 SIGKILL 截断触发 recovery。
     stop_grace_period: 60s
     deploy:
@@ -170,7 +172,8 @@ services:
     # 约束：limits.memory 须 ≥ maxmemory + 1GiB（AOF rewrite 的 fork COW 余量）。
     # --no-appendfsync-on-rewrite：rewrite 期不 fsync，削峰；--save ""：AOF 已开，关 RDB save
     # 点避免双 fork COW（重启恢复走 AOF）。
-    command: redis-server --appendonly yes --appendfsync everysec --maxmemory ${REDIS_MAXMEMORY:-2gb} --maxmemory-policy noeviction --no-appendfsync-on-rewrite yes --save ""
+    # 256MiB + 300% 避免在线聚合高写入下频繁重写，AOF everysec 与 noeviction 保持不变。
+    command: redis-server --appendonly yes --appendfsync everysec --maxmemory ${REDIS_MAXMEMORY:-2gb} --maxmemory-policy noeviction --no-appendfsync-on-rewrite yes --save "" --auto-aof-rewrite-min-size 256mb --auto-aof-rewrite-percentage 300
     # AOF rewrite/fsync 落盘窗口
     stop_grace_period: 30s
     deploy:

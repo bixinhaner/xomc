@@ -8,11 +8,13 @@ type DeviceMetrics struct {
 	RegistrationsTotal *prometheus.CounterVec
 
 	// 批量处理器指标
-	BatchFlushTotal    prometheus.Counter
-	BatchFlushSize     prometheus.Histogram
-	BatchFlushDuration prometheus.Histogram
-	BatchFlushFailed   prometheus.Counter
-	BatchDropped       prometheus.Counter
+	BatchFlushTotal     prometheus.Counter
+	BatchFlushSize      prometheus.Histogram
+	BatchFlushDuration  prometheus.Histogram
+	BatchFlushFailed    prometheus.Counter
+	BatchDropped        prometheus.Counter
+	BatchParameterRows  *prometheus.CounterVec
+	BatchInfoProjection *prometheus.CounterVec
 
 	// CreateDevice inline ProductRegistry 路由（T-0176-PR-D）：
 	// productClass 命中没有任何 active pattern 时 +1，devices.product_id 留 NULL。
@@ -54,6 +56,14 @@ func NewDeviceMetrics(reg prometheus.Registerer) *DeviceMetrics {
 			Name: "omc_device_batch_dropped_total",
 			Help: "Total number of inform events dropped due to full worker channel",
 		}),
+		BatchParameterRows: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_device_batch_parameter_rows_total",
+			Help: "Device parameter rows attempted, changed, or skipped by Inform batches",
+		}, []string{"result"}),
+		BatchInfoProjection: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_device_batch_info_projection_total",
+			Help: "Device info projections completed or failed after changed Inform parameters",
+		}, []string{"result"}),
 		DeviceCreateOrphan: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "omc_device_create_orphan_total",
 			Help: "Total number of CreateDevice calls whose productClass matched no product pattern (product_id left NULL)",
@@ -63,7 +73,7 @@ func NewDeviceMetrics(reg prometheus.Registerer) *DeviceMetrics {
 	reg.MustRegister(
 		m.DevicesTotal, m.RegistrationsTotal,
 		m.BatchFlushTotal, m.BatchFlushSize, m.BatchFlushDuration,
-		m.BatchFlushFailed, m.BatchDropped,
+		m.BatchFlushFailed, m.BatchDropped, m.BatchParameterRows, m.BatchInfoProjection,
 		m.DeviceCreateOrphan,
 	)
 	return m

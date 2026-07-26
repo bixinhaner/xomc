@@ -47,7 +47,7 @@ services:
               "-c", "max_connections=${PG_MAX_CONNECTIONS:-300}",
               "-c", "shared_buffers=${PG_SHARED_BUFFERS:-3GB}", "-c", "effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-7GB}",
               "-c", "work_mem=${PG_WORK_MEM:-16MB}", "-c", "maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-1GB}",
-              "-c", "max_wal_size=${PG_MAX_WAL_SIZE:-4GB}", "-c", "checkpoint_completion_target=0.9",
+              "-c", "max_wal_size=${PG_MAX_WAL_SIZE:-4GB}", "-c", "checkpoint_completion_target=0.9", "-c", "wal_compression=on",
               "-c", "log_checkpoints=${PG_LOG_CHECKPOINTS:-off}", "-c", "log_autovacuum_min_duration=${PG_LOG_AUTOVACUUM_MIN_DURATION:--1}",
               "-c", "log_statement=${PG_LOG_STATEMENT:-none}", "-c", "log_min_duration_statement=${PG_LOG_MIN_DURATION_STATEMENT:--1}",
               "-c", "log_connections=${PG_LOG_CONNECTIONS:-off}", "-c", "log_disconnections=${PG_LOG_DISCONNECTIONS:-off}",
@@ -143,7 +143,8 @@ services:
       - "6379:6379"
     # PM 在线聚合窗口是运行期权威状态，禁止淘汰；AOF everysec 保证进程重启可恢复。
     # 内存不足必须告警和扩容，不能通过 LRU 静默损坏窗口。
-    command: redis-server --appendonly yes --appendfsync everysec --maxmemory ${REDIS_MAXMEMORY:-2gb} --maxmemory-policy noeviction
+    # 提高 rewrite 阈值，避免高频聚合写入下小 AOF 约每分钟重写一次。
+    command: redis-server --appendonly yes --appendfsync everysec --maxmemory ${REDIS_MAXMEMORY:-2gb} --maxmemory-policy noeviction --auto-aof-rewrite-min-size 256mb --auto-aof-rewrite-percentage 300
     volumes:
       - ${REDIS_DATA_PATH:-redisdata}:/data
       - /etc/localtime:/etc/localtime:ro

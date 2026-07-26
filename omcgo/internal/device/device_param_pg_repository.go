@@ -3,7 +3,6 @@ package device
 import (
 	"context"
 	"fmt"
-	"time"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
@@ -45,38 +44,12 @@ func (r *PgDeviceParameterRepository) BatchUpsert(ctx context.Context, deviceID 
 	if len(params) == 0 {
 		return nil
 	}
-
-	batch := &pgx.Batch{}
-	now := time.Now()
-
+	rows := make([]deviceParameterUpsertRow, 0, len(params))
 	for _, p := range params {
-		query, args, err := storage.Psql.Insert("device_parameters").
-			Columns("device_id", "parameter_path", "parameter_value",
-				"parameter_type", "writable", "last_updated_at",
-				"fap_instance", "param_group").
-			Values(deviceID, p.ParameterPath, p.ParameterValue,
-				p.ParameterType, p.Writable, now,
-				ExtractFAPInstance(p.ParameterPath),
-				ClassifyParamGroup(p.ParameterPath)).
-			Suffix("ON CONFLICT (device_id, parameter_path) DO UPDATE SET " +
-				"parameter_value = EXCLUDED.parameter_value, " +
-				"parameter_type = EXCLUDED.parameter_type, " +
-				"writable = EXCLUDED.writable, " +
-				"last_updated_at = EXCLUDED.last_updated_at").
-			ToSql()
-		if err != nil {
-			return fmt.Errorf("build upsert query: %w", err)
-		}
-		batch.Queue(query, args...)
+		rows = append(rows, deviceParameterUpsertRow{deviceID: deviceID, parameter: p})
 	}
-
-	br := r.pool.SendBatch(ctx, batch)
-	defer br.Close()
-
-	for i := 0; i < len(params); i++ {
-		if _, err := br.Exec(); err != nil {
-			return fmt.Errorf("exec batch upsert item %d: %w", i, err)
-		}
+	if _, err := bulkUpsertDeviceParameters(ctx, r.pool, rows); err != nil {
+		return fmt.Errorf("batch upsert device parameters: %w", err)
 	}
 	return nil
 }
