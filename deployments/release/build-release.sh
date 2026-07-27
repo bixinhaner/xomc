@@ -14,10 +14,11 @@
 #   release → omc-release-<版本>-<架构>.tar.xz  （正式发布）
 #   默认取 release.conf 的 RELEASE_CHANNEL，--channel 可临时覆盖。
 #
-# 项目版本号（与基础设施版本独立，最终格式统一为 X.Y.Z-YYYYMMDD-HHMM）：
+# 项目版本号（交付包与镜像 tag 始终使用 X.Y.Z-YYYYMMDD-HHMM）：
 #   不带 -v  → 自动生成：<RELEASE_BASE_VERSION>-<构建时间戳>
 #   带  -v   → 指定基础版本：<X.Y.Z>-<构建时间戳>（指定的版本号会自动追加时间戳，
 #              保证镜像 tag 永远唯一，使 install.sh 的 images_exist 智能跳过逻辑安全）
+#   release 渠道的前端左下角显示基础版本 X.Y.Z；test 渠道继续显示完整版本。
 #   例： ./build-release.sh -v 1.0.0   →  1.0.0-20260522-1530
 #
 # 产物：archive/project/<版本>/omc-<渠道>-<版本>-<架构>.tar.<压缩>（+ .sha256）
@@ -115,6 +116,13 @@ else
   VERSION="${RELEASE_BASE_VERSION}-${TIMESTAMP}"
   log "项目版本【自动生成】：$VERSION"
 fi
+# 交付包、镜像 tag 和后端版本继续使用带时间戳的 VERSION；只有前端展示版本
+# 按发布渠道裁剪，避免 release 页面显示构建时间。
+if [ "$CHANNEL" = "release" ]; then
+  DISPLAY_VERSION="${VERSION%-${TIMESTAMP}}"
+else
+  DISPLAY_VERSION="$VERSION"
+fi
 GIT_COMMIT="$(cd "$REPO_ROOT" && git rev-parse --short HEAD 2>/dev/null || echo n/a)"
 
 ARCHIVE="$SCRIPT_DIR/archive"
@@ -155,7 +163,7 @@ for ARCH in $ARCHES; do
     log "[$ARCH]   docker build -t $TAG -f $DOCKERFILE"
     # 正式构建期注入版本信息：web 用于页面展示，app 用于识别 OMC 发布切换。
     EXTRA_ARGS=()
-    [ "$SVC" = "web" ] && EXTRA_ARGS+=( --build-arg "APP_VERSION=$VERSION" )
+    [ "$SVC" = "web" ] && EXTRA_ARGS+=( --build-arg "APP_VERSION=$DISPLAY_VERSION" )
     if [ "$SVC" = "app" ]; then
       EXTRA_ARGS+=(
         --build-arg "RELEASE_VERSION=$VERSION"
