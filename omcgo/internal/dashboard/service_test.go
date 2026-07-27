@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -35,6 +36,110 @@ func TestAlarmTrendQueryIncludesLegacySeverityCodes(t *testing.T) {
 
 func TestAlarmTrendQueryHasTablePlaceholder(t *testing.T) {
 	assert.Contains(t, alarmTrendByDateQuery, "FROM %s")
+}
+
+func TestBuildAlarmTrendSnapshotsUsesDayEndAndNow(t *testing.T) {
+	location, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	now := time.Date(2026, time.July, 27, 18, 30, 15, 123, location)
+
+	got := buildAlarmTrendSnapshots(now, 3)
+
+	require.Len(t, got, 3)
+	assert.Equal(t, "2026-07-25", got[0].Date)
+	assert.Equal(t, time.Date(2026, time.July, 25, 23, 59, 59, int(time.Second-time.Nanosecond), location), got[0].At)
+	assert.Equal(t, "2026-07-26", got[1].Date)
+	assert.Equal(t, time.Date(2026, time.July, 26, 23, 59, 59, int(time.Second-time.Nanosecond), location), got[1].At)
+	assert.Equal(t, "2026-07-27", got[2].Date)
+	assert.Equal(t, now, got[2].At)
+}
+
+func TestMergeAlarmTrendSnapshotCountsAddsSourcesAndKeepsZeroDays(t *testing.T) {
+	entries := []AlarmTrendEntry{
+		{Date: "2026-07-25"},
+		{Date: "2026-07-26"},
+		{Date: "2026-07-27"},
+	}
+
+	err := mergeAlarmTrendSnapshotCounts(entries, []alarmTrendSnapshotCount{
+		{Ordinal: 1, Critical: 2, Major: 1},
+		{Ordinal: 3, Critical: 5, Minor: 2},
+	})
+	require.NoError(t, err)
+	err = mergeAlarmTrendSnapshotCounts(entries, []alarmTrendSnapshotCount{
+		{Ordinal: 1, Warning: 3},
+		{Ordinal: 3, Major: 1},
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, AlarmTrendEntry{Date: "2026-07-25", Critical: 2, Major: 1, Warning: 3}, entries[0])
+	assert.Equal(t, AlarmTrendEntry{Date: "2026-07-26"}, entries[1])
+	assert.Equal(t, AlarmTrendEntry{Date: "2026-07-27", Critical: 5, Major: 1, Minor: 2}, entries[2])
+}
+
+func TestMergeAlarmTrendSnapshotCountsRejectsInvalidOrdinal(t *testing.T) {
+	entries := []AlarmTrendEntry{{Date: "2026-07-27"}}
+	err := mergeAlarmTrendSnapshotCounts(entries, []alarmTrendSnapshotCount{{Ordinal: 2}})
+	require.Error(t, err)
+}
+
+func TestActiveAlarmTrendQueriesUseSnapshotInventorySemantics(t *testing.T) {
+	activeSQL, _, err := buildActiveAlarmTrendSnapshotQuery([]time.Time{time.Now()}, nil)
+	require.NoError(t, err)
+	historySQL, _, err := buildHistoryAlarmTrendSnapshotQuery([]time.Time{time.Now()}, nil, nil)
+	require.NoError(t, err)
+
+	assert.Contains(t, activeSQL, "FROM unnest($1::timestamptz[]) WITH ORDINALITY")
+	assert.Contains(t, activeSQL, "alarm.raised_at <= snapshots.snapshot_at")
+	assert.Contains(t, historySQL, "alarm.raised_at <= snapshots.snapshot_at")
+	assert.Contains(t, historySQL, "alarm.cleared_at > snapshots.snapshot_at")
+}
+
+func TestActiveAlarmTrendQueriesApplyVisibleGroups(t *testing.T) {
+	groupID := uuid.New()
+	activeSQL, activeArgs, err := buildActiveAlarmTrendSnapshotQuery(
+		[]time.Time{time.Now()},
+		[]uuid.UUID{groupID},
+	)
+	require.NoError(t, err)
+	historySQL, historyArgs, err := buildHistoryAlarmTrendSnapshotQuery(
+		[]time.Time{time.Now()},
+		[]uuid.UUID{groupID},
+		nil,
+	)
+	require.NoError(t, err)
+
+	assert.Contains(t, activeSQL, "device_group_members")
+	assert.Contains(t, historySQL, "device_group_members")
+	require.Len(t, activeArgs, 2)
+	require.Len(t, historyArgs, 3)
+	assert.Equal(t, groupID, activeArgs[1])
+	assert.Equal(t, groupID, historyArgs[1])
+}
+
+func TestHistoryAlarmTrendQueryExcludesIDsAlreadyCountedAsActive(t *testing.T) {
+	activeID := uuid.New()
+	query, args, err := buildHistoryAlarmTrendSnapshotQuery(
+		[]time.Time{time.Now()},
+		nil,
+		[]uuid.UUID{activeID},
+	)
+	require.NoError(t, err)
+
+	assert.Contains(t, query, "NOT (alarm.alarm_id = ANY($2::uuid[]))")
+	require.Len(t, args, 2)
+	assert.Equal(t, []uuid.UUID{activeID}, args[1])
+}
+
+func TestCollectAlarmTrendSnapshotIDsDeduplicatesAcrossBuckets(t *testing.T) {
+	firstID := uuid.New()
+	secondID := uuid.New()
+	got := collectAlarmTrendSnapshotIDs([]alarmTrendSnapshotCount{
+		{AlarmIDs: []uuid.UUID{firstID}},
+		{AlarmIDs: []uuid.UUID{firstID, secondID}},
+	})
+
+	assert.ElementsMatch(t, []uuid.UUID{firstID, secondID}, got)
 }
 
 // ---------------------------------------------------------------------------

@@ -15,9 +15,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type dashTopDevicesVisibleGroupsResolver struct{}
+type dashVisibleGroupsResolver struct{}
 
-func (dashTopDevicesVisibleGroupsResolver) GetUserVisibleGroupIDs(context.Context, uuid.UUID, bool) ([]uuid.UUID, error) {
+func (dashVisibleGroupsResolver) GetUserVisibleGroupIDs(context.Context, uuid.UUID, bool) ([]uuid.UUID, error) {
 	return nil, nil
 }
 
@@ -68,7 +68,7 @@ func TestDashHandler_RegisterRoutes_MethodNotAllowed(t *testing.T) {
 
 func TestDashHandler_TopAlarmDevicesRequiresVisibilityContext(t *testing.T) {
 	router, handler := dashHSetupRouter()
-	handler.SetPermissionService(dashTopDevicesVisibleGroupsResolver{})
+	handler.SetPermissionService(dashVisibleGroupsResolver{})
 
 	w := dashHDoRequest(router, http.MethodGet, "/api/v1/dashboard/top-alarm-devices")
 
@@ -95,6 +95,21 @@ func TestDashHandler_AlarmTrend_ZeroDays(t *testing.T) {
 	router, _ := dashHSetupRouter()
 	w := dashHDoRequest(router, http.MethodGet, "/api/v1/dashboard/alarm-trend?days=0")
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestDashHandler_AlarmTrend_InvalidMetric(t *testing.T) {
+	router, _ := dashHSetupRouter()
+	w := dashHDoRequest(router, http.MethodGet, "/api/v1/dashboard/alarm-trend?metric=cleared")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestDashHandler_ActiveAlarmTrendRequiresVisibilityContext(t *testing.T) {
+	router, handler := dashHSetupRouter()
+	handler.SetPermissionService(dashVisibleGroupsResolver{})
+
+	w := dashHDoRequest(router, http.MethodGet, "/api/v1/dashboard/alarm-trend?metric=active")
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
 // ---------------------------------------------------------------------------
