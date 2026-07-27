@@ -74,6 +74,7 @@ type SaveTaskRequest struct {
 	Counters      []CounterRule
 	Members       []TaskMember
 	Now           time.Time
+	EffectiveFrom time.Time
 }
 
 type TaskVersionSnapshot struct {
