@@ -9,6 +9,24 @@ import KPIQuery from './index';
 const refetchAggSpy = vi.fn();
 const createTemplateSpy = vi.fn();
 const createExportSpy = vi.fn();
+const technologyDictionaryState = vi.hoisted(() => {
+  const defaultDictionary = {
+    options: [
+      { label: 'eNB(LTE)', value: 'lte', sort: 1 },
+      { label: 'gNB(NR)', value: 'nr', sort: 2 },
+      { label: 'GSM', value: 'gsm', sort: 3 },
+    ],
+    deviceTypeOptions: [
+      { label: 'eNB(LTE)', value: 'ENB', sort: 1, technology: 'lte' },
+      { label: 'gNB(NR)', value: 'GNB', sort: 2, technology: 'nr' },
+      { label: 'GSM', value: 'GSM', sort: 3, technology: 'gsm' },
+    ],
+    labelForTechnology: (tech?: string | null) => (tech ? tech.toUpperCase() : '—'),
+    labelForRadioMode: (radioMode?: string | null) => (radioMode ? radioMode : '—'),
+    isLoading: false,
+  };
+  return { current: defaultDictionary, defaultDictionary };
+});
 
 const validTemplate: QueryTemplate = {
   id: 'tpl-valid',
@@ -78,6 +96,12 @@ vi.mock('@core/hooks/api/useKpiExport', () => ({
   useCreateKpiExport: () => ({ mutate: createExportSpy, isPending: false }),
 }));
 
+vi.mock('@core/hooks/api/useTechnologyDictionary', () => ({
+  useTechnologyDictionary: () => technologyDictionaryState.current,
+  deviceTypeToTechnology: (deviceType: string) =>
+    ({ ENB: 'lte', GNB: 'nr', GSM: 'gsm' })[deviceType] ?? 'lte',
+}));
+
 vi.mock('@/hooks/useThemeToken', () => ({
   useThemeToken: () => ({
     colorBgContainer: '#fff',
@@ -142,6 +166,7 @@ describe('KPIQuery 模板数量限制', () => {
     refetchAggSpy.mockClear();
     createTemplateSpy.mockReset();
     createExportSpy.mockReset();
+    technologyDictionaryState.current = technologyDictionaryState.defaultDictionary;
   });
 
   it('老模板仍可展示，但超 50 个设备时点击查询不会执行聚合查询', async () => {
@@ -197,6 +222,30 @@ describe('KPIQuery 模板数量限制', () => {
 
     expect(createExportSpy).not.toHaveBeenCalled();
   });
+
+  it('字典禁用 ENB 时，主查询和模板弹窗切到首个可用设备类型', async () => {
+    technologyDictionaryState.current = {
+      ...technologyDictionaryState.defaultDictionary,
+      options: [
+        { label: 'gNB(NR)', value: 'nr', sort: 2 },
+        { label: 'GSM', value: 'gsm', sort: 3 },
+      ],
+      deviceTypeOptions: [
+        { label: 'gNB(NR)', value: 'GNB', sort: 2, technology: 'nr' },
+        { label: 'GSM', value: 'GSM', sort: 3, technology: 'gsm' },
+      ],
+    };
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getAllByText('gNB(NR)').length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '新建查询模板' }));
+    const dialog = await findModalByTitle('新建查询模板');
+    expect(within(dialog).getAllByText('gNB(NR)').length).toBeGreaterThan(0);
+  });
 });
 
 describe('KPIQuery 模板弹窗初始值', () => {
@@ -204,6 +253,7 @@ describe('KPIQuery 模板弹窗初始值', () => {
     refetchAggSpy.mockClear();
     createTemplateSpy.mockReset();
     createExportSpy.mockReset();
+    technologyDictionaryState.current = technologyDictionaryState.defaultDictionary;
   });
 
   it('侧栏新建模板每次打开都使用干净初始值', async () => {

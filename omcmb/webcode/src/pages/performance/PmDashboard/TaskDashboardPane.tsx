@@ -23,6 +23,8 @@ import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
 import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
 import { nowInSystemTimezone, toSystemTimezoneRFC3339 } from '@core/utils/systemTime';
 import { buildAdhocExportParams, defaultExportTaskName } from '@core/utils/kpiExportParams';
+import { useTechnologyDictionary } from '@core/hooks/api/useTechnologyDictionary';
+import { displayAdhocTaskName } from '../adhocTaskDisplay';
 import { buildMetricCharts, filterChartsByMetricPaths } from './taskDashboardUtils';
 import ChartCard from './ChartCard';
 import DashboardFilterBar, { type DashboardFilterValue } from './DashboardFilterBar';
@@ -53,6 +55,7 @@ const GRAN_MSG_IDS: Record<string, string> = {
 export default function TaskDashboardPane({ taskId }: Props) {
   const intl = useIntl();
   const { message } = App.useApp();
+  const { labelForTechnology } = useTechnologyDictionary();
   // #563：筛选器按系统时区展示和序列化，与图表 X 轴统一参照系。
   const systemTimezone = useSystemTimezoneValue();
   // 粒度短标签：有对应键走语料，无键回退原值（等价旧 GRAN_LABEL[g] ?? g）。
@@ -281,8 +284,8 @@ export default function TaskDashboardPane({ taskId }: Props) {
           style={{ width: '100%', justifyContent: 'space-between' }}
         >
           <Space size={8} wrap>
-            <Typography.Text strong>{task.name}</Typography.Text>
-            {task.technology && <Tag color="geekblue">{task.technology.toUpperCase()}</Tag>}
+            <Typography.Text strong>{displayAdhocTaskName(task, labelForTechnology)}</Typography.Text>
+            {task.technology && <Tag color="geekblue">{labelForTechnology(task.technology)}</Tag>}
             <Tag color="purple">
               {task.mode === 'continuous'
                 ? intl.formatMessage({ id: 'perf.dashboard.modeContinuous' })

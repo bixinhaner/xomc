@@ -2,7 +2,7 @@
  * T-0188 性能仪表盘 · 页签2 设备列表（独立即席查看，不依赖任何聚合任务）。
  *
  * 交互：
- *   - 制式 Segmented（默认 LTE；ENB/GNB/GSM）。
+ *   - 制式 Select（network_type 字典 label，提交值 lte/nr/gsm）。
  *   - 设备多选（最多 50，复用 KPIQuery/components/DevicePickerModal；超限拦截提示并截断）。
  *   - 指标可换（最多 50，复用共享件 components/MetricPickerModal，initialDeviceType 随制式）；
  *     默认集 = 选中制式的内置任务指标集（usePmAdhocList isBuiltin，按 technology 找一个取 metricPaths）。
@@ -27,7 +27,7 @@ import {
   Form,
   Input,
   Radio,
-  Segmented,
+  Select,
   Space,
   Tag,
   Typography,
@@ -41,9 +41,10 @@ import {
 import { usePmAdhocList } from '@core/hooks/api/usePmAdhoc';
 import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
 import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
-import type { DeviceType } from '@core/types/indicatorLibrary';
 import type { CreateKpiExportInput } from '@core/types/kpiExport';
 import type { Granularity } from '@core/types/pmDashboard';
+import type { TechnologyType } from '@core/types/technology';
+import { technologyToDeviceType, useTechnologyDictionary } from '@core/hooks/api/useTechnologyDictionary';
 import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
 import DevicePickerModal from '../KPIQuery/components/DevicePickerModal';
 import MetricPickerModal from '@/components/MetricPickerModal';
@@ -72,19 +73,7 @@ import {
 } from '@core/utils/kpiExportParams';
 
 // 制式 ↔ 设备类型 ↔ 内置任务 technology 三者映射。
-type Tech = 'lte' | 'nr' | 'gsm';
-
-const TECH_OPTIONS: { label: string; value: Tech }[] = [
-  { label: 'LTE', value: 'lte' },
-  { label: 'NR', value: 'nr' },
-  { label: 'GSM', value: 'gsm' },
-];
-
-const TECH_TO_DEVICE_TYPE: Record<Tech, DeviceType> = {
-  lte: 'ENB',
-  nr: 'GNB',
-  gsm: 'GSM',
-};
+type Tech = TechnologyType;
 
 export function buildDeviceViewExportInput(
   selection: DashboardExportSelection,
@@ -120,6 +109,12 @@ export default function DeviceListPane() {
   const intl = useIntl();
   const { message } = App.useApp();
   const systemTimezone = useSystemTimezoneValue();
+  const {
+    options: techOptions,
+    isLoading: techOptionsLoading,
+    labelForTechnology,
+  } = useTechnologyDictionary();
+  const hasAvailableTechOptions = techOptions.length > 0;
 
   const granularityOptions = useMemo(
     () =>
@@ -167,6 +162,15 @@ export default function DeviceListPane() {
       range: defaultRangeForGranularity(granularity, systemTimezone),
     }));
   }, [defaultRangeKey.granularity, defaultRangeKey.systemTimezone, granularity, rangeTouched, systemTimezone]);
+
+  useEffect(() => {
+    if (!hasAvailableTechOptions || techOptions.some((option) => option.value === tech)) {
+      return;
+    }
+    setTech(techOptions[0].value);
+    setDeviceSns([]);
+    setCellSel({});
+  }, [hasAvailableTechOptions, tech, techOptions]);
 
   // ── 默认指标集：选中制式的内置任务指标集（单一真相源）─────────────────
   const { data: builtinTasks = [] } = usePmAdhocList({ isBuiltin: true });
@@ -348,6 +352,7 @@ export default function DeviceListPane() {
   };
 
   const handleExport = () => {
+    if (!hasAvailableTechOptions) return;
     const sel = buildExportSelection();
     const missing = validateDashboardExportSelection(sel);
     if (missing) {
@@ -377,6 +382,7 @@ export default function DeviceListPane() {
   };
 
   const handleQuery = () => {
+    if (!hasAvailableTechOptions) return;
     if (deviceSns.length === 0) {
       message.warning(intl.formatMessage({ id: 'perf.dashboard.selectAtLeastOneDevice' }));
       return;
@@ -427,10 +433,13 @@ export default function DeviceListPane() {
               label={intl.formatMessage({ id: 'perf.dashboard.fieldTech' })}
               style={{ marginBottom: 0 }}
             >
-              <Segmented
+              <Select
+                style={{ width: 180 }}
                 value={tech}
-                onChange={(v) => handleTechChange(v as Tech)}
-                options={TECH_OPTIONS}
+                loading={techOptionsLoading}
+                disabled={!hasAvailableTechOptions}
+                onChange={(v: Tech) => handleTechChange(v)}
+                options={techOptions}
               />
             </Form.Item>
 
@@ -455,7 +464,7 @@ export default function DeviceListPane() {
                   }
                   placeholder={intl.formatMessage({ id: 'perf.dashboard.devicePlaceholder' })}
                 />
-                <Button onClick={() => setDevicePickerOpen(true)}>
+                <Button disabled={!hasAvailableTechOptions} onClick={() => setDevicePickerOpen(true)}>
                   {intl.formatMessage({ id: 'perf.dashboard.pickFromList' })}
                 </Button>
               </Space.Compact>
@@ -482,7 +491,7 @@ export default function DeviceListPane() {
                   }
                   placeholder={intl.formatMessage({ id: 'perf.dashboard.metricPlaceholder' })}
                 />
-                <Button onClick={() => setMetricPickerOpen(true)}>
+                <Button disabled={!hasAvailableTechOptions} onClick={() => setMetricPickerOpen(true)}>
                   {intl.formatMessage({ id: 'perf.dashboard.pickFromList' })}
                 </Button>
               </Space.Compact>
@@ -529,6 +538,7 @@ export default function DeviceListPane() {
                 type="primary"
                 icon={<LineChartOutlined />}
                 loading={isFetching}
+                disabled={!hasAvailableTechOptions}
                 onClick={handleQuery}
               >
                 {intl.formatMessage({ id: 'perf.dashboard.btnPlot' })}
@@ -536,7 +546,7 @@ export default function DeviceListPane() {
               <Button
                 icon={<ReloadOutlined />}
                 onClick={() => void refetch()}
-                disabled={!submitted}
+                disabled={!submitted || !hasAvailableTechOptions}
               >
                 {intl.formatMessage({ id: 'common.refresh' })}
               </Button>
@@ -544,6 +554,7 @@ export default function DeviceListPane() {
                 icon={<ExportOutlined />}
                 loading={createExport.isPending}
                 onClick={handleExport}
+                disabled={!hasAvailableTechOptions}
                 title={intl.formatMessage({ id: 'kpiExport.export.tooltip' })}
               >
                 {intl.formatMessage({ id: 'kpiExport.export.button' })}
@@ -589,7 +600,7 @@ export default function DeviceListPane() {
               <Typography.Text strong>
                 {intl.formatMessage({ id: 'perf.dashboard.deviceListSummary' })}
               </Typography.Text>
-              <Tag color="geekblue">{tech.toUpperCase()}</Tag>
+              <Tag color="geekblue">{labelForTechnology(tech)}</Tag>
               <Tag color="blue">
                 {intl.formatMessage(
                   { id: 'perf.dashboard.deviceUnit' },
@@ -640,7 +651,7 @@ export default function DeviceListPane() {
           setMetricsTouched(true);
         }}
         initialSelected={metricPaths}
-        initialDeviceType={TECH_TO_DEVICE_TYPE[tech]}
+        initialDeviceType={technologyToDeviceType(tech)}
         lockDeviceType
         maxSelected={PM_QUERY_SELECTION_LIMIT}
         enableBatchInput

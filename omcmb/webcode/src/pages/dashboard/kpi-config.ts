@@ -16,7 +16,8 @@
 // Type Definitions
 // ============================================================================
 
-export type TechnologyType = 'lte' | 'nr' | 'gsm';
+import type { TechnologyType } from '@core/types/technology';
+export type { TechnologyType } from '@core/types/technology';
 
 /**
  * KPI单个指标配置

@@ -50,7 +50,7 @@ import {
 import { useDashboardRealtime } from '@core/hooks/api/useDashboardRealtime';
 import { DashboardKPIModules } from './DashboardKPIModules';
 import type { TechnologyType } from './kpi-config';
-import { useTechnologyDictionary } from '@/components/dashboard/useTechnologyDictionary';
+import { useTechnologyDictionary } from '@core/hooks/api/useTechnologyDictionary';
 import { useAppStore } from '@core/store/appStore';
 import { useMenuStore } from '@core/store/menuStore';
 import { useUserStore } from '@core/store/userStore';
