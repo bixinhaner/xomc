@@ -32,7 +32,7 @@ func (r *PgTaskRepository) Save(ctx context.Context, req SaveTaskRequest) (*Task
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	effectiveFrom := now.Truncate(slotDuration).Add(slotDuration)
+	effectiveFrom := saveEffectiveFrom(req, now)
 
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -102,6 +102,19 @@ func (r *PgTaskRepository) Save(ctx context.Context, req SaveTaskRequest) (*Task
 			return nil, fmt.Errorf("load current PM aggregation content hash: %w", err)
 		}
 		if len(currentHash) > 0 && bytes.Equal(currentHash, contentHash) {
+			if shouldAdjustEffectiveFrom(req, currentVersionNo, currentEffectiveFrom, effectiveFrom) {
+				adjustSQL, adjustArgs, buildErr := storage.Psql.Update("pm_aggregation_task_versions").
+					Set("effective_from", effectiveFrom).
+					Where(sq.Eq{"id": *currentVersionID, "task_id": taskID}).
+					ToSql()
+				if buildErr != nil {
+					return nil, fmt.Errorf("build adjust PM aggregation effective time SQL: %w", buildErr)
+				}
+				if _, err := tx.Exec(ctx, adjustSQL, adjustArgs...); err != nil {
+					return nil, fmt.Errorf("adjust PM aggregation effective time: %w", err)
+				}
+				currentEffectiveFrom = effectiveFrom
+			}
 			if err := tx.Commit(ctx); err != nil {
 				return nil, fmt.Errorf("commit unchanged PM aggregation task: %w", err)
 			}
@@ -194,6 +207,24 @@ func (r *PgTaskRepository) Save(ctx context.Context, req SaveTaskRequest) (*Task
 		}
 	}
 	return snapshot, nil
+}
+
+func saveEffectiveFrom(req SaveTaskRequest, now time.Time) time.Time {
+	if !req.EffectiveFrom.IsZero() {
+		return req.EffectiveFrom.UTC()
+	}
+	return now.UTC().Truncate(slotDuration).Add(slotDuration)
+}
+
+func shouldAdjustEffectiveFrom(
+	req SaveTaskRequest,
+	currentVersionNo int,
+	currentEffectiveFrom time.Time,
+	targetEffectiveFrom time.Time,
+) bool {
+	return !req.EffectiveFrom.IsZero() &&
+		currentVersionNo == 1 &&
+		currentEffectiveFrom.After(targetEffectiveFrom)
 }
 
 func (r *PgTaskRepository) Delete(ctx context.Context, taskID uuid.UUID) error {

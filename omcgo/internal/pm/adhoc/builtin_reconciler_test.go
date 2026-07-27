@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
@@ -50,8 +51,10 @@ func TestBuiltinReconcilerSavesEditedDefinitionAndHiddenDeviceDefinition(t *test
 		DeviceID: uuid.MustParse("10000000-0000-4000-8000-000000000001"),
 		DeviceSN: "SN-1", DimensionKey: "10000000-0000-4000-8000-000000000001", DimensionName: "SN-1",
 	}}
+	now := time.Date(2026, 7, 27, 6, 4, 30, 0, time.UTC)
 	var captured []pmstream.SaveTaskRequest
 	reconciler := &BuiltinReconciler{
+		now: func() time.Time { return now },
 		list: func(context.Context) ([]Task, error) {
 			return []Task{task}, nil
 		},
@@ -99,6 +102,7 @@ func TestBuiltinReconcilerSavesEditedDefinitionAndHiddenDeviceDefinition(t *test
 	require.Equal(t, "lte", captured[1].Technology)
 	require.Equal(t, pmstream.DimensionDevice, captured[1].Dimension)
 	require.Equal(t, string(VisibilityPrivate), captured[1].Visibility)
+	require.True(t, captured[1].EffectiveFrom.Equal(time.Date(2026, 7, 27, 6, 0, 0, 0, time.UTC)))
 	require.Equal(t, builtinRulesForTest(), captured[1].Metrics)
 	require.Equal(t, builtinCountersForTest(), captured[1].Counters)
 	require.Equal(t, deviceMembers, captured[1].Members)

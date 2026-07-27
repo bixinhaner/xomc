@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
@@ -24,6 +25,7 @@ type BuiltinReconciler struct {
 	resolveCounters func(context.Context, string, []pmstream.MetricRule) ([]pmstream.CounterRule, error)
 	resolveMembers  func(context.Context, *Task) ([]pmstream.TaskMember, error)
 	save            func(context.Context, pmstream.SaveTaskRequest) (*pmstream.TaskVersionSnapshot, error)
+	now             func() time.Time
 }
 
 var hiddenDeviceBuiltinTaskIDs = map[string]uuid.UUID{
@@ -63,7 +65,7 @@ func (r *BuiltinReconciler) Reconcile(ctx context.Context) (BuiltinReconcileResu
 			continue
 		}
 		result.Definitions++
-		empty, changed, saveErr := r.saveStreamingDefinition(ctx, task)
+		empty, changed, saveErr := r.saveStreamingDefinition(ctx, task, time.Time{})
 		if saveErr != nil {
 			result.Failed++
 			reconcileErrors = append(reconcileErrors, builtinReconcileError(task, saveErr))
@@ -81,7 +83,7 @@ func (r *BuiltinReconciler) Reconcile(ctx context.Context) (BuiltinReconcileResu
 			continue
 		}
 		result.Definitions++
-		empty, changed, saveErr = r.saveStreamingDefinition(ctx, &hidden)
+		empty, changed, saveErr = r.saveStreamingDefinition(ctx, &hidden, hiddenDeviceEffectiveFrom(r.currentTime()))
 		if saveErr != nil {
 			result.Failed++
 			reconcileErrors = append(reconcileErrors, builtinReconcileError(&hidden, saveErr))
@@ -102,7 +104,7 @@ func builtinReconcileError(task *Task, err error) error {
 	return fmt.Errorf("reconcile builtin PM aggregation task %s (%s): %w", task.ID, task.Name, err)
 }
 
-func (r *BuiltinReconciler) saveStreamingDefinition(ctx context.Context, task *Task) (bool, bool, error) {
+func (r *BuiltinReconciler) saveStreamingDefinition(ctx context.Context, task *Task, effectiveFrom time.Time) (bool, bool, error) {
 	rules, resolveErr := r.resolveRules(ctx, task.Technology, task.MetricPaths)
 	if resolveErr != nil {
 		return false, false, resolveErr
@@ -124,12 +126,23 @@ func (r *BuiltinReconciler) saveStreamingDefinition(ctx context.Context, task *T
 		Visibility: string(normalizeVisibility(task.Visibility)), Creator: creator,
 		Technology: task.Technology, Dimension: pmstream.Dimension(task.Dimension),
 		Granularities: streamingRollupGranularities(), ObjectLDNs: task.ObjectLDNs,
-		Metrics: rules, Counters: counters, Members: members,
+		Metrics: rules, Counters: counters, Members: members, EffectiveFrom: effectiveFrom,
 	})
 	if saveErr != nil {
 		return false, false, saveErr
 	}
 	return len(members) == 0, snapshot != nil && snapshot.NewVersion, nil
+}
+
+func (r *BuiltinReconciler) currentTime() time.Time {
+	if r.now != nil {
+		return r.now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+func hiddenDeviceEffectiveFrom(now time.Time) time.Time {
+	return now.UTC().Truncate(time.Hour)
 }
 
 func hiddenDeviceDefinition(source *Task) (Task, bool) {
