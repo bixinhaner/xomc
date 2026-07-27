@@ -24,13 +24,17 @@ func TestRawAwareDeviceSelectUsesCorrectPhysicalSource(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, rawSQL, "FROM pm_measurement_anchors")
 	assert.NotContains(t, rawSQL, "FROM pm_hourly_bucket_versions")
+	assert.NotContains(t, rawSQL, "FROM pm_hourly_anchors")
+	assert.NotContains(t, rawSQL, "FROM pm_hourly_values")
 
 	hourlySQL, _, err := newRawAwareDeviceSelect(
 		storage.Psql, "pm_metrics_hourly", req, deviceTableColumns...,
 	).ToSql()
 	require.NoError(t, err)
-	assert.Contains(t, hourlySQL, "FROM pm_hourly_bucket_versions")
-	assert.Contains(t, hourlySQL, "ver.status")
+	assert.Contains(t, hourlySQL, "FROM pm_metrics_hourly")
+	assert.NotContains(t, hourlySQL, "pm_hourly_bucket_versions")
+	assert.NotContains(t, hourlySQL, "pm_hourly_anchors")
+	assert.NotContains(t, hourlySQL, "pm_hourly_values")
 	assert.NotContains(t, hourlySQL, "FROM pm_measurement_anchors")
 }
 
