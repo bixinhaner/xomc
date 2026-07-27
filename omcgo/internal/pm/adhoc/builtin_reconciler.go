@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
+	"github.com/google/uuid"
 	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
 )
 
@@ -22,6 +24,12 @@ type BuiltinReconciler struct {
 	resolveCounters func(context.Context, string, []pmstream.MetricRule) ([]pmstream.CounterRule, error)
 	resolveMembers  func(context.Context, *Task) ([]pmstream.TaskMember, error)
 	save            func(context.Context, pmstream.SaveTaskRequest) (*pmstream.TaskVersionSnapshot, error)
+}
+
+var hiddenDeviceBuiltinTaskIDs = map[string]uuid.UUID{
+	"lte": uuid.MustParse("0184dddd-0005-4000-8000-000000000001"),
+	"nr":  uuid.MustParse("0184dddd-0005-4000-8000-000000000002"),
+	"gsm": uuid.MustParse("0184dddd-0005-4000-8000-000000000003"),
 }
 
 func NewBuiltinReconciler(repo *PgRepository) *BuiltinReconciler {
@@ -55,46 +63,35 @@ func (r *BuiltinReconciler) Reconcile(ctx context.Context) (BuiltinReconcileResu
 			continue
 		}
 		result.Definitions++
-		rules, resolveErr := r.resolveRules(ctx, task.Technology, task.MetricPaths)
-		if resolveErr != nil {
-			result.Failed++
-			reconcileErrors = append(reconcileErrors, builtinReconcileError(task, resolveErr))
-			continue
-		}
-		counters, resolveErr := r.resolveCounters(ctx, task.Technology, rules)
-		if resolveErr != nil {
-			result.Failed++
-			reconcileErrors = append(reconcileErrors, builtinReconcileError(task, resolveErr))
-			continue
-		}
-		members, resolveErr := r.resolveMembers(ctx, task)
-		if resolveErr != nil {
-			result.Failed++
-			reconcileErrors = append(reconcileErrors, builtinReconcileError(task, resolveErr))
-			continue
-		}
-		if len(members) == 0 {
-			result.Empty++
-		}
-		granularities := streamingRollupGranularities()
-		creator := task.Creator
-		if creator == "" {
-			creator = "system"
-		}
-		snapshot, saveErr := r.save(ctx, pmstream.SaveTaskRequest{
-			TaskID: task.ID, Name: task.Name, Enabled: task.Status != StatusCanceled,
-			Visibility: string(normalizeVisibility(task.Visibility)), Creator: creator,
-			Technology: task.Technology, Dimension: pmstream.Dimension(task.Dimension),
-			Granularities: granularities, ObjectLDNs: task.ObjectLDNs,
-			Metrics: rules, Counters: counters, Members: members,
-		})
+		empty, changed, saveErr := r.saveStreamingDefinition(ctx, task)
 		if saveErr != nil {
 			result.Failed++
 			reconcileErrors = append(reconcileErrors, builtinReconcileError(task, saveErr))
 			continue
 		}
 		result.Saved++
-		if snapshot != nil && snapshot.NewVersion {
+		if empty {
+			result.Empty++
+		}
+		if changed {
+			result.Changed++
+		}
+		hidden, ok := hiddenDeviceDefinition(task)
+		if !ok {
+			continue
+		}
+		result.Definitions++
+		empty, changed, saveErr = r.saveStreamingDefinition(ctx, &hidden)
+		if saveErr != nil {
+			result.Failed++
+			reconcileErrors = append(reconcileErrors, builtinReconcileError(&hidden, saveErr))
+			continue
+		}
+		result.Saved++
+		if empty {
+			result.Empty++
+		}
+		if changed {
 			result.Changed++
 		}
 	}
@@ -103,4 +100,56 @@ func (r *BuiltinReconciler) Reconcile(ctx context.Context) (BuiltinReconcileResu
 
 func builtinReconcileError(task *Task, err error) error {
 	return fmt.Errorf("reconcile builtin PM aggregation task %s (%s): %w", task.ID, task.Name, err)
+}
+
+func (r *BuiltinReconciler) saveStreamingDefinition(ctx context.Context, task *Task) (bool, bool, error) {
+	rules, resolveErr := r.resolveRules(ctx, task.Technology, task.MetricPaths)
+	if resolveErr != nil {
+		return false, false, resolveErr
+	}
+	counters, resolveErr := r.resolveCounters(ctx, task.Technology, rules)
+	if resolveErr != nil {
+		return false, false, resolveErr
+	}
+	members, resolveErr := r.resolveMembers(ctx, task)
+	if resolveErr != nil {
+		return false, false, resolveErr
+	}
+	creator := task.Creator
+	if creator == "" {
+		creator = "system"
+	}
+	snapshot, saveErr := r.save(ctx, pmstream.SaveTaskRequest{
+		TaskID: task.ID, Name: task.Name, Enabled: task.Status != StatusCanceled,
+		Visibility: string(normalizeVisibility(task.Visibility)), Creator: creator,
+		Technology: task.Technology, Dimension: pmstream.Dimension(task.Dimension),
+		Granularities: streamingRollupGranularities(), ObjectLDNs: task.ObjectLDNs,
+		Metrics: rules, Counters: counters, Members: members,
+	})
+	if saveErr != nil {
+		return false, false, saveErr
+	}
+	return len(members) == 0, snapshot != nil && snapshot.NewVersion, nil
+}
+
+func hiddenDeviceDefinition(source *Task) (Task, bool) {
+	if source.Dimension != DimensionNetwork || source.Technology == "" {
+		return Task{}, false
+	}
+	technology := strings.ToLower(source.Technology)
+	taskID, ok := hiddenDeviceBuiltinTaskIDs[technology]
+	if !ok {
+		taskID = uuid.NewSHA1(uuid.NameSpaceOID, []byte("omcgo.pm.hidden-device."+technology))
+	}
+	creator := source.Creator
+	if creator == "" {
+		creator = "system"
+	}
+	return Task{
+		ID: taskID, Name: "内置-设备-" + strings.ToUpper(technology),
+		Mode: ModeContinuous, MetricPaths: append([]string(nil), source.MetricPaths...),
+		Dimension: DimensionDevice, Technology: source.Technology,
+		IsBuiltin: true, Visibility: VisibilityPrivate, Status: source.Status,
+		Creator: creator, ExpireDays: source.ExpireDays,
+	}, true
 }

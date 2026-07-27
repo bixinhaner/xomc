@@ -35,18 +35,22 @@ func TestBuiltinReconcilerSavesEmptyDefinitionForLaterMembershipRefresh(t *testi
 	result, err := reconciler.Reconcile(context.Background())
 
 	require.NoError(t, err)
-	require.Equal(t, BuiltinReconcileResult{Definitions: 1, Saved: 1, Empty: 1}, result)
-	require.Equal(t, 1, saveCalls)
+	require.Equal(t, BuiltinReconcileResult{Definitions: 2, Saved: 2, Empty: 2}, result)
+	require.Equal(t, 2, saveCalls)
 }
 
-func TestBuiltinReconcilerSavesEditedDefinitionWithFixedIdentity(t *testing.T) {
+func TestBuiltinReconcilerSavesEditedDefinitionAndHiddenDeviceDefinition(t *testing.T) {
 	task := builtinTaskForTest()
 	task.MetricPaths = []string{"K-EDITED"}
-	members := []pmstream.TaskMember{{
+	networkMembers := []pmstream.TaskMember{{
 		DeviceID: uuid.MustParse("10000000-0000-4000-8000-000000000001"),
 		DeviceSN: "SN-1", DimensionKey: "network", DimensionName: "Network",
 	}}
-	var captured pmstream.SaveTaskRequest
+	deviceMembers := []pmstream.TaskMember{{
+		DeviceID: uuid.MustParse("10000000-0000-4000-8000-000000000001"),
+		DeviceSN: "SN-1", DimensionKey: "10000000-0000-4000-8000-000000000001", DimensionName: "SN-1",
+	}}
+	var captured []pmstream.SaveTaskRequest
 	reconciler := &BuiltinReconciler{
 		list: func(context.Context) ([]Task, error) {
 			return []Task{task}, nil
@@ -59,11 +63,14 @@ func TestBuiltinReconcilerSavesEditedDefinitionWithFixedIdentity(t *testing.T) {
 		resolveCounters: func(context.Context, string, []pmstream.MetricRule) ([]pmstream.CounterRule, error) {
 			return builtinCountersForTest(), nil
 		},
-		resolveMembers: func(context.Context, *Task) ([]pmstream.TaskMember, error) {
-			return members, nil
+		resolveMembers: func(_ context.Context, task *Task) ([]pmstream.TaskMember, error) {
+			if task.Dimension == DimensionDevice {
+				return deviceMembers, nil
+			}
+			return networkMembers, nil
 		},
 		save: func(_ context.Context, req pmstream.SaveTaskRequest) (*pmstream.TaskVersionSnapshot, error) {
-			captured = req
+			captured = append(captured, req)
 			return &pmstream.TaskVersionSnapshot{NewVersion: true}, nil
 		},
 	}
@@ -71,20 +78,30 @@ func TestBuiltinReconcilerSavesEditedDefinitionWithFixedIdentity(t *testing.T) {
 	result, err := reconciler.Reconcile(context.Background())
 
 	require.NoError(t, err)
-	require.Equal(t, 1, result.Definitions)
-	require.Equal(t, 1, result.Saved)
-	require.Equal(t, 1, result.Changed)
-	require.Equal(t, task.ID, captured.TaskID)
-	require.Equal(t, task.Name, captured.Name)
-	require.Equal(t, "lte", captured.Technology)
-	require.Equal(t, pmstream.DimensionNetwork, captured.Dimension)
+	require.Equal(t, 2, result.Definitions)
+	require.Equal(t, 2, result.Saved)
+	require.Equal(t, 2, result.Changed)
+	require.Len(t, captured, 2)
+	require.Equal(t, task.ID, captured[0].TaskID)
+	require.Equal(t, task.Name, captured[0].Name)
+	require.Equal(t, "lte", captured[0].Technology)
+	require.Equal(t, pmstream.DimensionNetwork, captured[0].Dimension)
 	require.Equal(t, []pmstream.Granularity{
 		pmstream.GranularityHourly, pmstream.GranularityDaily,
 		pmstream.GranularityWeekly, pmstream.GranularityMonthly,
-	}, captured.Granularities)
-	require.Equal(t, members, captured.Members)
-	require.Equal(t, builtinRulesForTest(), captured.Metrics)
-	require.Equal(t, builtinCountersForTest(), captured.Counters)
+	}, captured[0].Granularities)
+	require.Equal(t, networkMembers, captured[0].Members)
+	require.Equal(t, builtinRulesForTest(), captured[0].Metrics)
+	require.Equal(t, builtinCountersForTest(), captured[0].Counters)
+
+	require.Equal(t, hiddenDeviceBuiltinTaskIDs["lte"], captured[1].TaskID)
+	require.Equal(t, "内置-设备-LTE", captured[1].Name)
+	require.Equal(t, "lte", captured[1].Technology)
+	require.Equal(t, pmstream.DimensionDevice, captured[1].Dimension)
+	require.Equal(t, string(VisibilityPrivate), captured[1].Visibility)
+	require.Equal(t, builtinRulesForTest(), captured[1].Metrics)
+	require.Equal(t, builtinCountersForTest(), captured[1].Counters)
+	require.Equal(t, deviceMembers, captured[1].Members)
 }
 
 func TestBuiltinReconcilerContinuesAfterOneDefinitionFails(t *testing.T) {
@@ -122,9 +139,9 @@ func TestBuiltinReconcilerContinuesAfterOneDefinitionFails(t *testing.T) {
 	result, err := reconciler.Reconcile(context.Background())
 
 	require.ErrorContains(t, err, first.ID.String())
-	require.Equal(t, 2, result.Definitions)
+	require.Equal(t, 3, result.Definitions)
 	require.Equal(t, 1, result.Failed)
-	require.Equal(t, 1, result.Saved)
+	require.Equal(t, 2, result.Saved)
 	require.Zero(t, result.Changed)
 }
 
