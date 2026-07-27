@@ -139,6 +139,18 @@ describe('dashboardApi.getSummary — Backend → DashboardSummary 映射', () =
   });
 });
 
+describe('dashboardApi.getAlarmTrend', () => {
+  it('告警统计页可显式请求当前库存口径', async () => {
+    getMock.mockResolvedValue({ data: [] });
+
+    await dashboardApi.getAlarmTrend(7, 'active');
+
+    expect(getMock).toHaveBeenCalledWith('/dashboard/alarm-trend', {
+      params: { days: 7, metric: 'active' },
+    });
+  });
+});
+
 describe('dashboardApi — 告警热力图集成（Dashboard heatmap）', () => {
   it('getAlarmHeatmap 打 /dashboard/alarm-heatmap 带 days，回 7×24 矩阵 + max_count', async () => {
     const heatmap = buildHeatmap(42);

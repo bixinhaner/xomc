@@ -1,7 +1,6 @@
 import { useMemo, useState, useCallback, useEffect, type ReactNode } from 'react';
 import { Card, Col, Row, Typography, DatePicker, Radio, Space, Button, Switch, Tag, Tooltip, Spin } from 'antd';
 import type { Dayjs } from 'dayjs';
-import dayjs from 'dayjs';
 import { ReloadOutlined, SyncOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import PieChart, { type PieDataItem } from '@/components/Charts/PieChart';
 import BarChart from '@/components/Charts/BarChart';
@@ -15,6 +14,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import EfficiencyCard from './EfficiencyCard';
 import AlarmHeatmap from './AlarmHeatmap';
+import { selectAlarmTrendBuckets } from './alarmTrend';
 import { buildDrillDownSearch } from '../drillDown';
 
 // 扩展的饼图数据项，包含严重度信息
@@ -49,16 +49,6 @@ interface StatisticsFilters {
   timeRange: TimeRange;
   customStartDate?: Dayjs | null;
   customEndDate?: Dayjs | null;
-}
-
-// 生成时间标签
-function generateDayBuckets(count: number): Array<{ date: string; label: string }> {
-  const buckets: Array<{ date: string; label: string }> = [];
-  for (let i = count - 1; i >= 0; i--) {
-    const d = dayjs().subtract(i, 'day');
-    buckets.push({ date: d.format('YYYY-MM-DD'), label: d.format('MM/DD') });
-  }
-  return buckets;
 }
 
 // 告警级别分布图组件
@@ -158,22 +148,15 @@ function AlarmTrendChart({
   t: (key: string) => string;
   extra?: ReactNode;
 }) {
-  const dayBuckets = useMemo(() => generateDayBuckets(days), [days]);
-  const normalizedTrendData = useMemo(() => {
-    const byDate = new Map((trendData || []).map((item) => [item.date, item]));
-    return dayBuckets.map(({ date }) => {
-      const item = byDate.get(date);
-      return {
-        date,
-        critical: item?.critical || 0,
-        major: item?.major || 0,
-        minor: item?.minor || 0,
-        warning: item?.warning || 0,
-      };
-    });
-  }, [trendData, dayBuckets]);
+  const normalizedTrendData = useMemo(
+    () => selectAlarmTrendBuckets(trendData, days),
+    [trendData, days],
+  );
 
-  const xData = useMemo(() => dayBuckets.map((bucket) => bucket.label), [dayBuckets]);
+  const xData = useMemo(
+    () => normalizedTrendData.map((bucket) => bucket.label),
+    [normalizedTrendData],
+  );
 
   const hasData = useMemo(() => {
     return normalizedTrendData.some(d =>
@@ -461,7 +444,7 @@ export default function AlarmStatistics() {
 
   // 数据hooks
   const { data: alarmCount, isError: countError, refetch: refetchCount } = useAlarmCount();
-  const { data: trendData, isError: trendError, refetch: refetchTrend } = useAlarmTrend(days);
+  const { data: trendData, isError: trendError, refetch: refetchTrend } = useAlarmTrend(days, 'active');
   const { data: devicesData, isError: devicesError, refetch: refetchDevices } = useTopAlarmDevices();
 
   // 手动刷新

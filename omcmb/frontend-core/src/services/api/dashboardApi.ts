@@ -381,10 +381,13 @@ export const dashboardApi = {
   },
 
   /** Alarm trend from GET /dashboard/alarm-trend */
-  async getAlarmTrend(days: number = 7): Promise<DashboardChartData['alarmTrend']> {
+  async getAlarmTrend(
+    days: number = 7,
+    metric: 'raised' | 'active' = 'raised',
+  ): Promise<DashboardChartData['alarmTrend']> {
     const { data } = await http.get<BackendAlarmTrendItem[]>(
       '/dashboard/alarm-trend',
-      { params: { days } }
+      { params: { days, metric } }
     );
     return data;
   },
