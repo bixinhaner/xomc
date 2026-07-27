@@ -52,7 +52,7 @@ const SeedImportSource = "standard"
 //
 // 调用方负责传入 *pgxpool.Pool + 文件绝对路径。失败返回 error，事务自动回滚。
 //
-// 性能预算：71 commands + 624 params + 18 groups
+// 性能预算：71 commands + 616 params + 18 groups
 //
 //	典型耗时 1-3s（每行单独 UPSERT；后续可改 batch）。
 //	standard_params 不写入，仅一次批量 SELECT 解析 path → id 映射。

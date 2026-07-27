@@ -161,7 +161,7 @@ func (r *SeedRoot) CountCommands() int {
 
 // CountParams 返回 seed 中所有 leaf path 总数。
 //
-// 验证用：cmcc_tdlte_v23.json = 624。
+// 验证用：cmcc_tdlte_v23.json = 616。
 func (r *SeedRoot) CountParams() int {
 	n := 0
 	for _, g := range r.Groups {
