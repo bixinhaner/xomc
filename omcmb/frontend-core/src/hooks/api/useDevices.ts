@@ -154,18 +154,20 @@ export function useDeviceGroups() {
   });
 }
 
-function invalidateDeviceGroupCaches(queryClient: ReturnType<typeof useQueryClient>) {
-  void queryClient.invalidateQueries({ queryKey: ['devices', 'groups'] });
-  void queryClient.invalidateQueries({ queryKey: ['system', 'deviceGroups', 'all'] });
+type DeviceGroupCacheInvalidator = Pick<ReturnType<typeof useQueryClient>, 'invalidateQueries'>;
+
+export async function invalidateDeviceGroupCaches(queryClient: DeviceGroupCacheInvalidator) {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: ['devices', 'groups'] }),
+    queryClient.invalidateQueries({ queryKey: ['system', 'deviceGroups', 'all'] }),
+  ]);
 }
 
 export function useCreateGroup() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: CreateGroupRequest) => api.createGroup(data),
-    onSuccess: () => {
-      invalidateDeviceGroupCaches(queryClient);
-    },
+    onSuccess: () => invalidateDeviceGroupCaches(queryClient),
   });
 }
 
@@ -174,12 +176,14 @@ export function useUpdateGroup() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: UpdateGroupRequest }) =>
       api.updateGroup(id, data),
-    onSuccess: () => {
-      invalidateDeviceGroupCaches(queryClient);
-      // 分组「设备匹配规则」改动后后端会异步重算归属，必须同时失效设备列表
-      // 缓存，否则用户在 DeviceGrouping 页面里看到的还是旧的归属结果。
-      // （仅改名也 invalidate 一次代价可忽略——分组更新本身就是低频操作。）
-      void queryClient.invalidateQueries({ queryKey: ['devices', 'list'] });
+    onSuccess: async () => {
+      await Promise.all([
+        invalidateDeviceGroupCaches(queryClient),
+        // 分组「设备匹配规则」改动后后端会异步重算归属，必须同时失效设备列表
+        // 缓存，否则用户在 DeviceGrouping 页面里看到的还是旧的归属结果。
+        // （仅改名也 invalidate 一次代价可忽略——分组更新本身就是低频操作。）
+        queryClient.invalidateQueries({ queryKey: ['devices', 'list'] }),
+      ]);
     },
   });
 }
@@ -188,9 +192,7 @@ export function useDeleteGroup() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.deleteGroup(id),
-    onSuccess: () => {
-      invalidateDeviceGroupCaches(queryClient);
-    },
+    onSuccess: () => invalidateDeviceGroupCaches(queryClient),
   });
 }
 

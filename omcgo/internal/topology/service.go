@@ -354,6 +354,7 @@ func (s *DeviceGroupService) UpdateGroup(ctx context.Context, id uuid.UUID, req 
 	if err := s.repo.Update(ctx, group); err != nil {
 		return nil, fmt.Errorf("update group: %w", err)
 	}
+	s.invalidateTreeCache()
 
 	// 异步回灌：按编辑后的匹配规则把命中设备归入本分组。
 	s.fireGroupMatch(group)
@@ -419,6 +420,7 @@ func (s *DeviceGroupService) DeleteGroup(ctx context.Context, id uuid.UUID) erro
 			return err
 		}
 	}
+	s.invalidateTreeCache()
 
 	// 3) 删后处理：写审计 + 失效缓存（任一失败仅日志，不阻塞删除结果）。
 	s.afterGroupDeleted(ctx, id, group, affected)
