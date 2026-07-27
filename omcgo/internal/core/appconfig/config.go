@@ -82,6 +82,16 @@ type UploadConfig struct {
 	TokenSecret string        `mapstructure:"token_secret"`  // JWT signing secret (optional)
 	TokenTTL    time.Duration `mapstructure:"token_ttl"`     // Token validity duration
 	MaxFileSize int64         `mapstructure:"max_file_size"` // Max file size in bytes
+	PMDedupTTL  time.Duration `mapstructure:"pm_dedup_ttl"`  // PM upload event deduplication TTL
+}
+
+// EffectivePMDedupTTL 返回 PM 上传事件去重窗口。四小时覆盖正常上报重试和短时
+// NATS 重投，同时避免每台设备的 24 小时历史键长期占用 Redis。
+func (c UploadConfig) EffectivePMDedupTTL() time.Duration {
+	if c.PMDedupTTL <= 0 {
+		return 4 * time.Hour
+	}
+	return c.PMDedupTTL
 }
 
 // BackpressureConfig supplies deployment defaults for queue-risk admission.

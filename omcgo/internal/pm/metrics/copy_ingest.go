@@ -41,6 +41,7 @@ type FileMarker struct {
 	MinioPath     string
 	ContentSHA256 []byte
 	CounterCount  int
+	RawCompressed bool
 }
 
 // MetricFromCounter 把 model.PMCounter 转 PMMetric。
@@ -202,11 +203,12 @@ func (r *PgRepository) CopyIngest(ctx context.Context, marker FileMarker, counte
 		ct, err := tx.Exec(ctx,
 			`INSERT INTO pm_files (id, device_id, device_sn, carrier, technology, file_name, file_size,
 			                       collect_time, minio_path, content_sha256, parsed, parsed_at,
-			                       counter_count, created_at)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,now(),$11,NOW())
+			                       counter_count, raw_compressed, created_at)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,now(),$11,$12,NOW())
 			 ON CONFLICT DO NOTHING`,
 			id, marker.DeviceID, marker.DeviceSN, marker.Carrier, marker.Technology, marker.FileName,
-			marker.FileSize, marker.CollectTime, marker.MinioPath, marker.ContentSHA256, marker.CounterCount)
+			marker.FileSize, marker.CollectTime, marker.MinioPath, marker.ContentSHA256,
+			marker.CounterCount, marker.RawCompressed)
 		if err != nil {
 			return false, fmt.Errorf("insert pm_files marker: %w", err)
 		}

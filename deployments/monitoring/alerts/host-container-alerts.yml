@@ -115,6 +115,39 @@ groups:
             Impact: 早于实际写满给出处置窗口，避免磁盘满引发的级联故障。
             Action: 提前扩容 / 清理；定位异常增长来源（PM 采集量？日志暴涨？备份未清理？）。
 
+      - alert: HostDiskIOSaturated
+        # Linux 5.x 的 io_time 只能说明采样时钟内持续有 I/O 活动，不能单独等价为
+        # 设备饱和。必须同时满足：活动时钟 >95%、平均 await >20ms、平均队列 >1。
+        expr: |
+          (rate(node_disk_io_time_seconds_total{device!~"loop.*|ram.*"}[5m]) > 0.95)
+          and on (instance, device)
+          (
+            (
+              rate(node_disk_read_time_seconds_total{device!~"loop.*|ram.*"}[5m])
+              + rate(node_disk_write_time_seconds_total{device!~"loop.*|ram.*"}[5m])
+            )
+            /
+            clamp_min(
+              rate(node_disk_reads_completed_total{device!~"loop.*|ram.*"}[5m])
+              + rate(node_disk_writes_completed_total{device!~"loop.*|ram.*"}[5m]),
+              0.001
+            ) > 0.020
+          )
+          and on (instance, device)
+          (rate(node_disk_io_time_weighted_seconds_total{device!~"loop.*|ram.*"}[5m]) > 1)
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          service: node
+        annotations:
+          summary: "宿主磁盘 I/O 持续饱和：{{ $labels.device }}"
+          description: |
+            磁盘 {{ $labels.device }} 同时满足活动时钟 >95%、平均等待 >20ms、平均队列 >1，
+            已持续 10 分钟。此复合条件排除了“小而连续的 I/O 令活动占比接近 100%”的误报。
+            Impact: 数据库提交、MinIO 上传和队列持久化时延可能同步升高。
+            Action: 在主机面板对照吞吐、IOPS、MinIO scanner 与容器 blkio，定位读写来源。
+
   - name: omc.container
     interval: 30s
     rules:

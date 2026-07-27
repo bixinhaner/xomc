@@ -112,6 +112,7 @@ upload:
   username: ""
   password: ""
   max_file_size: 524288000   # 500MB (设备日志包动辄 50-300MB)
+  pm_dedup_ttl: 4h           # 覆盖短时重投，降低 Redis 历史键数量
 
 backpressure:
   queue_pending_high: 2000

@@ -9,10 +9,13 @@ RELEASE_MONITORING_COMPOSE="$RELEASE_DEPLOY/docker-compose.monitoring.yml"
 RELEASE_HEALTHCHECK="$RELEASE_DEPLOY/healthcheck.sh"
 MONITORING_PROFILE_LIB="$RELEASE_DEPLOY/monitoring-profile-lib.sh"
 DEV_COMPOSE="$REPO_ROOT/deployments/docker/docker-compose.yml"
+TEST_COMPOSE="$REPO_ROOT/deployments/docker/docker-compose.test.yml"
 OTELCOL_CONFIG="$REPO_ROOT/deployments/monitoring/otelcol/config.yaml"
 OMC_ALERTS="$REPO_ROOT/deployments/monitoring/alerts/omc-rules.yml"
+HOST_ALERTS="$REPO_ROOT/deployments/monitoring/alerts/host-container-alerts.yml"
 GRAFANA_DASHBOARD="$REPO_ROOT/deployments/monitoring/grafana-dashboard.json"
 GRAFANA_OVERVIEW="$REPO_ROOT/deployments/monitoring/grafana/dashboards/omc-overview.json"
+HOST_DASHBOARD="$REPO_ROOT/deployments/monitoring/grafana/dashboards/nginx-host-overview.json"
 APP_PROD_CONFIG="$REPO_ROOT/omcgo/cmd/app/etc/config.prod.yaml"
 ACS_PROD_CONFIG="$REPO_ROOT/omcgo/cmd/acs/etc/config.prod.yaml"
 WORKER_PROD_CONFIG="$REPO_ROOT/omcgo/cmd/worker/etc/config.prod.yaml"
@@ -29,7 +32,7 @@ ok() { PASS=$((PASS + 1)); }
 bad() { echo "FAIL: $*" >&2; FAIL=$((FAIL + 1)); }
 contains() {
   local name="$1" pattern="$2" file="$3"
-  if grep -Fq "$pattern" "$file"; then ok; else bad "$name: $file 未包含 [$pattern]"; fi
+  if grep -Fq -- "$pattern" "$file"; then ok; else bad "$name: $file 未包含 [$pattern]"; fi
 }
 
 echo "── release compose 五个 bind mount ──"
@@ -44,10 +47,10 @@ contains "PostgreSQL 默认 10 核" 'cpus: "${POSTGRES_CPUS:-10}"' "$RELEASE_COM
 contains "TimescaleDB 默认 16 核" 'cpus: "${TSDB_CPUS:-16}"' "$RELEASE_COMPOSE"
 contains "worker 默认 8 核" 'cpus: "${WORKER_CPUS:-8}"' "$RELEASE_APP_COMPOSE"
 
-echo "── PM 小时聚合生产旋钮 ──"
-contains "release worker 透传小时批次" 'PM_HOURLY_BATCH_DEVICES: "${PM_HOURLY_BATCH_DEVICES:-2500}"' "$RELEASE_APP_COMPOSE"
-contains "release worker 透传迟到窗口" 'PM_LATE_DATA_WINDOW: "${PM_LATE_DATA_WINDOW:-168h}"' "$RELEASE_APP_COMPOSE"
-contains "开发 worker 默认 2500 台/批" 'PM_HOURLY_BATCH_DEVICES: "${PM_HOURLY_BATCH_DEVICES:-2500}"' "$DEV_COMPOSE"
+echo "── PM 流式聚合生产旋钮 ──"
+contains "release worker 启用流式聚合" 'PM_AGGREGATION_ENABLED: "${PM_AGGREGATION_ENABLED:-true}"' "$RELEASE_APP_COMPOSE"
+contains "release worker 透传窗口状态 TTL" 'PM_AGGREGATION_WINDOW_TTL: "${PM_AGGREGATION_WINDOW_TTL:-1080h}"' "$RELEASE_APP_COMPOSE"
+contains "开发 worker 启用流式聚合" 'PM_AGGREGATION_ENABLED: "${PM_AGGREGATION_ENABLED:-true}"' "$DEV_COMPOSE"
 
 echo "── release .env 模板和升级继承 ──"
 for key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH; do
@@ -77,6 +80,20 @@ contains "ACS access log 默认关闭" 'access_log off; # ACS 高频请求由应
 contains "本地 ACS access log 默认关闭" 'access_log off; # ACS 高频请求由应用指标观测，避免与数据盘竞争 IO' "$NGINX_LOCAL"
 contains "ACS 请求体不落临时文件" 'proxy_request_buffering off;' "$NGINX_DEFAULT"
 contains "本地 ACS 请求体不落临时文件" 'proxy_request_buffering off;' "$NGINX_LOCAL"
+contains "release MinIO scanner 降速" 'MINIO_SCANNER_SPEED: "slow"' "$RELEASE_COMPOSE"
+contains "开发 MinIO scanner 降速" 'MINIO_SCANNER_SPEED: "slow"' "$DEV_COMPOSE"
+contains "release Redis AOF 基线增大" '--auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500' "$RELEASE_COMPOSE"
+contains "开发 Redis AOF 基线增大" '--auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500' "$DEV_COMPOSE"
+contains "测试 Redis AOF 基线增大" '--auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500' "$TEST_COMPOSE"
+
+echo "── 磁盘 I/O 可观测性 ──"
+contains "磁盘活动时钟面板不称为利用率" '磁盘 I/O 活动时钟占比' "$HOST_DASHBOARD"
+contains "磁盘排队面板" 'node_disk_io_time_weighted_seconds_total' "$HOST_DASHBOARD"
+contains "MinIO scanner 面板" 'minio_node_scanner_objects_scanned' "$HOST_DASHBOARD"
+contains "磁盘复合饱和告警" 'alert: HostDiskIOSaturated' "$HOST_ALERTS"
+contains "磁盘告警要求活动时间" 'node_disk_io_time_seconds_total' "$HOST_ALERTS"
+contains "磁盘告警要求等待时延" 'node_disk_read_time_seconds_total' "$HOST_ALERTS"
+contains "磁盘告警要求排队" 'node_disk_io_time_weighted_seconds_total' "$HOST_ALERTS"
 
 echo "── production tracing + monitoring profile ──"
 if bash "$RELEASE_DEPLOY/monitoring-profile_test.sh"; then

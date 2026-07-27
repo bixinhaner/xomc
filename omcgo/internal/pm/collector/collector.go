@@ -91,6 +91,11 @@ type FileMarkerLookup interface {
 	IsFileParsed(ctx context.Context, deviceSN, fileName string) (bool, error)
 }
 
+type rawArchiver interface {
+	Schedule(bucket, object string, onTerminal func(context.Context, string, string, string))
+	RemoveOld(ctx context.Context, bucket, object string)
+}
+
 // CounterMeta 是 CounterWhitelist 命中后回填给 PMCounter 的元数据（PM-P2）。
 //   - IndicatorID：指标编号（perf_indicators_*.id，如 C000060216），落库即编号化的目标。
 //   - StatisType：'sum' / 'avg' / 'max' / 'pct'，或空串（indicator 元数据未填），驱动 G5 自然桶聚合。
@@ -166,7 +171,7 @@ type PMCollector struct {
 	enabledIndicators   EnabledIndicatorLookup
 	numberProcessLookup NumberProcessLookup
 	copyIngestor        CopyIngestor
-	archiver            *rawarchive.Archiver
+	archiver            rawArchiver
 	concurrency         int
 	logger              *zap.Logger
 }
@@ -375,7 +380,7 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 	// issue #321：真机/模拟器按 TR-069 上传 .xml.gz，MinIO 原样存压缩字节；解析前按
 	// gzip 魔数嗅探透明解压（明文 .xml 原样透传）。解压在 LimitReader 之前 → 体积
 	// 上限作用于解压后内容，兼防 gzip 炸弹。
-	decoded, _, derr := compress.MaybeGunzip(obj)
+	decoded, rawCompressed, derr := compress.MaybeGunzip(obj)
 	if derr != nil {
 		if c.metrics != nil {
 			c.metrics.FilesProcessedTotal.WithLabelValues("failed").Inc()
@@ -447,7 +452,8 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 		return fmt.Errorf("pm collector: copy ingestor not wired (copy is the sole write path)")
 	}
 	return c.ingestViaCopy(
-		ctx, span, startTime, now, fileSize, deviceID, &payload, content, allow, contentHasher.Sum(nil),
+		ctx, span, startTime, now, fileSize, deviceID, &payload, content, allow,
+		rawCompressed, contentHasher.Sum(nil),
 	)
 }
 
@@ -461,7 +467,7 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 func (c *PMCollector) ingestViaCopy(
 	ctx context.Context, span trace.Span, startTime, now time.Time, fileSize int64,
 	deviceID uuid.UUID, payload *FileReceivedPayload, content *PMFileContent, allow map[string]CounterMeta,
-	contentSHA256 []byte,
+	rawCompressed bool, contentSHA256 []byte,
 ) error {
 	// KPI：用本文件已过白名单、已编号化的内存 counter 直接算，不落库（随 counter 一起 COPY）。
 	var kpis []model.KPIValue
@@ -520,6 +526,7 @@ func (c *PMCollector) ingestViaCopy(
 		MinioPath:     payload.MinIOPath,
 		ContentSHA256: contentSHA256,
 		CounterCount:  len(content.Counters),
+		RawCompressed: rawCompressed,
 	}
 	ingested, err := c.copyIngestor.CopyIngest(ctx, marker, content.Counters, kpis)
 	if err != nil {
@@ -548,7 +555,7 @@ func (c *PMCollector) ingestViaCopy(
 		// marker 冲突：该文件已入库（NATS 重投 / 并发已写）→ 当作成功跳过，正常 ack。
 		c.logger.Info("PM file already ingested (marker conflict), skip",
 			zap.String("path", payload.MinIOPath), zap.String("device_sn", payload.DeviceSN))
-	} else {
+	} else if !rawCompressed && c.archiver != nil {
 		// issue #321：仅新入库时把原始 XML 压缩回写 MinIO 省盘（已 gzip 则零成本跳过）。
 		// 异步有界并发，不阻塞 ack；nil-safe。压成功后经 onTerminal 标记 pm_files.raw_compressed=true。
 		c.archiver.Schedule(c.bucket, payload.MinIOPath, c.markRawCompressed)
