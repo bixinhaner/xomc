@@ -5834,6 +5834,7 @@ CREATE TABLE public.pm_tasks (
     is_builtin boolean DEFAULT false NOT NULL,
     expire_days integer DEFAULT 60 NOT NULL,
     object_ldns text[],
+    planned_end_at timestamp with time zone,
     visibility character varying(16) DEFAULT 'private'::character varying NOT NULL,
     CONSTRAINT chk_pm_tasks_continuous_cron CHECK (((mode IS DISTINCT FROM 'continuous'::text) OR (cron_expr IS NOT NULL))),
     CONSTRAINT chk_pm_tasks_dimension CHECK ((dimension = ANY (ARRAY['device'::text, 'aggregate_group'::text, 'device_group'::text, 'product'::text, 'band'::text, 'network'::text]))),
@@ -5855,6 +5856,13 @@ COMMENT ON COLUMN public.pm_tasks.last_fire_at IS 'G7 continuous 任务上次 cr
 --
 
 COMMENT ON COLUMN public.pm_tasks.visibility IS 'PM adhoc 自定义聚合任务可见性：private=仅创建者/超管可见可操作；public=登录用户可见可操作。旧任务默认 private。';
+
+
+--
+-- Name: COLUMN pm_tasks.planned_end_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.pm_tasks.planned_end_at IS 'PM adhoc 自建 continuous 任务计划结束时间；NULL 表示老任务或内置任务不设置计划结束。';
 
 
 --
@@ -19427,6 +19435,7 @@ CREATE TABLE public.pm_aggregation_tasks (
     enabled boolean NOT NULL DEFAULT true,
     visibility varchar(16) NOT NULL DEFAULT 'private',
     creator varchar(100) NOT NULL,
+    planned_end_at timestamptz,
     current_version_id uuid,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),

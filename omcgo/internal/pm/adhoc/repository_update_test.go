@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -22,15 +23,17 @@ func Test_buildUpdateSQL_Adhoc_AllFields(t *testing.T) {
 	id := uuid.New()
 	cronExpr := "5 * * * *"
 	req := UpdateRequest{
-		IsBuiltin:     false,
-		Name:          "edited",
-		CronExpr:      &cronExpr,
-		DeviceSNs:     []string{"S1", "S2"},
-		MetricPaths:   []string{"K1", "K2"},
-		Granularities: []string{"daily"},
-		ObjectLDNs:    []string{"LDN-A"},
-		WindowStart:   time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
-		WindowEnd:     time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+		IsBuiltin:       false,
+		Name:            "edited",
+		CronExpr:        &cronExpr,
+		DeviceSNs:       []string{"S1", "S2"},
+		MetricPaths:     []string{"K1", "K2"},
+		Granularities:   []string{"daily"},
+		ObjectLDNs:      []string{"LDN-A"},
+		WindowStart:     time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+		WindowEnd:       time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+		PlannedEndAt:    ptrTime(time.Date(2026, 8, 22, 11, 0, 0, 0, time.UTC)),
+		PlannedEndAtSet: true,
 	}
 	sql, _, err := buildUpdateSQL(id, req)
 	require.NoError(t, err)
@@ -39,7 +42,7 @@ func Test_buildUpdateSQL_Adhoc_AllFields(t *testing.T) {
 	if idx := strings.Index(sql, "WHERE"); idx >= 0 {
 		setClause = sql[:idx]
 	}
-	for _, col := range []string{"metric_paths", "task_name", "device_sns", "granularities", "cron_expr", "object_ldns", "window_start", "window_end", "updated_at"} {
+	for _, col := range []string{"metric_paths", "task_name", "device_sns", "granularities", "cron_expr", "object_ldns", "window_start", "window_end", "planned_end_at", "updated_at"} {
 		assert.Contains(t, setClause, col, "自建任务应更新 %s", col)
 	}
 	assert.Contains(t, setClause, "visibility", "自建任务应允许更新 visibility")
@@ -48,6 +51,31 @@ func Test_buildUpdateSQL_Adhoc_AllFields(t *testing.T) {
 		assert.NotContains(t, setClause, col, "不可改字段 %s 不应进 SET", col)
 	}
 	assert.Contains(t, sql, "task_subtype", "WHERE 应限定 task_subtype")
+}
+
+func ptrTime(t time.Time) *time.Time {
+	return &t
+}
+
+func Test_buildUpdateSQL_Adhoc_PlannedEndAtNullClearsValue(t *testing.T) {
+	id := uuid.New()
+	req := UpdateRequest{
+		IsBuiltin:       false,
+		Name:            "edited",
+		MetricPaths:     []string{"K1"},
+		Granularities:   []string{"hourly"},
+		PlannedEndAtSet: true,
+		PlannedEndAt:    nil,
+	}
+	sql, args, err := buildUpdateSQL(id, req)
+	require.NoError(t, err)
+
+	setClause := sql
+	if idx := strings.Index(sql, "WHERE"); idx >= 0 {
+		setClause = sql[:idx]
+	}
+	assert.Contains(t, setClause, "planned_end_at", "传 null 时应显式更新 planned_end_at")
+	assert.Contains(t, args, nil, "传 null 时 planned_end_at 参数应为 SQL NULL")
 }
 
 func Test_buildUpdateSQL_Adhoc_ResetCursorWhenGranularityChanges(t *testing.T) {
@@ -166,10 +194,48 @@ func Test_buildUpdateSQL_Builtin_OnlyMetricPaths(t *testing.T) {
 	if idx := strings.Index(sql, "WHERE"); idx >= 0 {
 		setClause = sql[:idx]
 	}
-	for _, col := range []string{"task_name", "device_sns", "granularities", "cron_expr", "object_ldns", "window_start", "window_end"} {
+	for _, col := range []string{"task_name", "device_sns", "granularities", "cron_expr", "object_ldns", "window_start", "window_end", "planned_end_at"} {
 		assert.NotContains(t, setClause, col, "内置任务不应更新 %s", col)
 	}
 	assert.NotContains(t, setClause, "visibility", "内置任务不应更新 visibility")
 	assert.NotContains(t, setClause, "status = CASE", "内置 oneshot 不应被重新排队")
 	assert.NotContains(t, setClause, "progress = CASE", "内置 oneshot 不应重置进度")
+}
+
+func Test_plannedEndValue_CustomContinuous_DefaultsToCreateTimePlus30Days(t *testing.T) {
+	value := plannedEndValue(CreateRequest{Mode: ModeContinuous})
+
+	sqlizer, ok := value.(sq.Sqlizer)
+	require.True(t, ok)
+	sql, args, err := sqlizer.ToSql()
+	require.NoError(t, err)
+	assert.Empty(t, args)
+	assert.Equal(t, "NOW() + INTERVAL '30 days'", sql)
+}
+
+func Test_plannedEndValue_BuiltinIgnoresExplicitPlannedEndAt(t *testing.T) {
+	planned := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+
+	assert.Nil(t, plannedEndValue(CreateRequest{
+		Mode:         ModeContinuous,
+		IsBuiltin:    true,
+		PlannedEndAt: &planned,
+	}))
+}
+
+func Test_plannedEndValue_CustomContinuous_ExplicitNullClearsDefault(t *testing.T) {
+	assert.Nil(t, plannedEndValue(CreateRequest{
+		Mode:            ModeContinuous,
+		PlannedEndAtSet: true,
+		PlannedEndAt:    nil,
+	}))
+}
+
+func Test_plannedEndValue_NonContinuousDoesNotSetLifecycleEnd(t *testing.T) {
+	planned := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+
+	assert.Nil(t, plannedEndValue(CreateRequest{
+		Mode:         ModeOneshot,
+		PlannedEndAt: &planned,
+	}))
 }

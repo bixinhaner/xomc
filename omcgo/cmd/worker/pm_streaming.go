@@ -160,6 +160,7 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	go runPMBuiltinReconcileLoop(
 		ctx, builtinReconciler.Reconcile, snapshot.Reload, streamMetrics, logger,
 	)
+	go adhoc.NewPlannedEndScheduler(adhocRepo, time.Minute, logger).Run(ctx)
 	go snapshot.RunRefresh(ctx, time.Minute)
 	go recovery.Run(ctx, time.Minute)
 	go scanner.Run(ctx)

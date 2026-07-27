@@ -119,6 +119,32 @@ describe('PmAdhocWizard batch metric input', () => {
     expect(screen.getByText(`已选 ${PM_QUERY_SELECTION_LIMIT} 个指标`)).toBeInTheDocument();
   });
 
+  it('新建时未手动修改计划结束时间则交给后端按创建时间默认', async () => {
+    createMutateAsync.mockResolvedValue({ id: 'created-task' });
+    renderWizard();
+
+    fireEvent.change(screen.getByPlaceholderText('如：小时级 RRC 成功率'), {
+      target: { value: '默认计划结束任务' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /下一步/ }));
+    fireEvent.click(screen.getByRole('button', { name: /下一步/ }));
+
+    fireEvent.click(screen.getByRole('button', { name: /批量输入指标 ID/ }));
+    fireEvent.change(screen.getByPlaceholderText(/K000000001/), {
+      target: { value: 'K0001' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /加入已选/ }));
+
+    fireEvent.click(screen.getByRole('button', { name: /下一步/ }));
+    fireEvent.click(screen.getByRole('button', { name: /下一步/ }));
+    fireEvent.click(screen.getByRole('button', { name: /提\s*交/ }));
+
+    await waitFor(() => {
+      expect(createMutateAsync).toHaveBeenCalled();
+    });
+    expect(createMutateAsync.mock.calls[0][0]).not.toHaveProperty('plannedEndAt');
+  });
+
   it('does not allow an edited custom-device task with more than the PM query selection limit to leave the scope step', async () => {
     routeParams = { id: 'adhoc-over-limit' };
     adhocDetail = {

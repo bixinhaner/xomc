@@ -43,7 +43,6 @@ import {
   type AdhocLiveProgress,
 } from '@core/hooks/api/useAdhocProgress';
 import type {
-  AdhocMode,
   AdhocStatus,
   AdhocTask,
   AdhocTaskRun,
@@ -157,7 +156,7 @@ function technologyLabel(intl: IntlShape, t?: string): string {
   return id ? intl.formatMessage({ id }) : (t ?? '');
 }
 
-function fmtTime(v?: string): string {
+function fmtTime(v?: string | null): string {
   if (!v) return '—';
   return formatSystemTime(v, { placeholder: '—' });
 }
@@ -285,17 +284,6 @@ function TaskTable({
     () => [
       { title: intl.formatMessage({ id: 'perf.adhoc.colName' }), dataIndex: 'name' },
       {
-        title: intl.formatMessage({ id: 'perf.adhoc.colMode' }),
-        dataIndex: 'mode',
-        width: 90,
-        render: (m: AdhocMode) =>
-          m === 'continuous' ? (
-            <Tag color="purple">{intl.formatMessage({ id: 'perf.adhoc.modeContinuous' })}</Tag>
-          ) : (
-            <Tag>{intl.formatMessage({ id: 'perf.adhoc.modeOneshot' })}</Tag>
-          ),
-      },
-      {
         title: intl.formatMessage({ id: 'perf.adhoc.colStatus' }),
         dataIndex: 'status',
         width: 100,
@@ -338,6 +326,13 @@ function TaskTable({
               dataIndex: 'createdAt',
               width: 180,
               render: (v: string) => fmtTime(v),
+            } as ColumnsType<AdhocTask>[number],
+            {
+              title: intl.formatMessage({ id: 'perf.adhoc.colPlannedEndAt' }),
+              dataIndex: 'plannedEndAt',
+              width: 180,
+              render: (_: string | undefined, r: AdhocTask) =>
+                r.mode === 'continuous' ? fmtTime(r.plannedEndAt) : '—',
             } as ColumnsType<AdhocTask>[number],
           ]),
       {
@@ -606,11 +601,6 @@ export default function PmAdhocPage() {
         {selectedTask && (
           <>
             <Descriptions size="small" column={2} bordered style={{ marginBottom: 16 }}>
-              <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.descMode' })}>
-                {selectedTask.mode === 'continuous'
-                  ? intl.formatMessage({ id: 'perf.adhoc.modeContinuous' })
-                  : intl.formatMessage({ id: 'perf.adhoc.modeOneshot' })}
-              </Descriptions.Item>
               <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.descDimension' })}>
                 {dimensionLabel(intl, selectedTask.dimension)}
               </Descriptions.Item>
@@ -639,6 +629,11 @@ export default function PmAdhocPage() {
                         : 'perf.adhoc.visibilityPrivate',
                     })}
                   </Tag>
+                </Descriptions.Item>
+              )}
+              {!selectedTask.isBuiltin && selectedTask.mode === 'continuous' && (
+                <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.descPlannedEndAt' })}>
+                  {fmtTime(selectedTask.plannedEndAt)}
                 </Descriptions.Item>
               )}
               {/* T-0194：已选指标 — 按制式解析为可读指标名（编号+名），查不到回退显编号 */}
