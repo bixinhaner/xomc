@@ -54,7 +54,17 @@ function escapeTooltipHtml(value: number | string | undefined): string {
     .replace(/'/g, '&#39;');
 }
 
-function formatTooltipRowHtml(param: TooltipParam): string {
+function formatMetricValueWithUnit(
+  value: number | string | null | undefined,
+  unit: string | undefined,
+): string {
+  if (value == null || value === '-') return '-';
+  const text = String(value);
+  const normalizedUnit = unit?.trim();
+  return normalizedUnit ? `${text} ${normalizedUnit}` : text;
+}
+
+function formatTooltipRowHtml(param: TooltipParam, unit: string | undefined): string {
   return [
     `<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:12px;align-items:start;padding:6px 0;border-bottom:1px solid ${TOOLTIP_ROW_DIVIDER_COLOR};">`,
     `<span style="min-width:0;font-size:13px;line-height:18px;color:${TOOLTIP_TEXT_COLOR};font-family:${TOOLTIP_MONO_FONT_FAMILY};overflow-wrap:anywhere;word-break:break-word;">`,
@@ -62,7 +72,7 @@ function formatTooltipRowHtml(param: TooltipParam): string {
     escapeTooltipHtml(param.seriesName),
     '</span>',
     `<strong style="font-size:13px;line-height:18px;color:${TOOLTIP_STRONG_COLOR};font-family:${TOOLTIP_FONT_FAMILY};">`,
-    escapeTooltipHtml(param.value),
+    escapeTooltipHtml(formatMetricValueWithUnit(param.value, unit)),
     '</strong>',
     '</div>',
   ].join('');
@@ -132,6 +142,7 @@ function chartContentEqual(prev: { chart: MetricChart }, next: { chart: MetricCh
   return (
     a.metricPath === b.metricPath &&
     a.displayName === b.displayName &&
+    a.unit === b.unit &&
     strArrEqual(a.buckets, b.buckets) &&
     strArrEqual(a.bucketEnds, b.bucketEnds) &&
     seriesEqual(a.series, b.series) &&
@@ -188,7 +199,7 @@ function ChartCard({ chart }: { chart: MetricChart }) {
       if (arr.length === 0) return '';
       const idx = arr[0].dataIndex;
       const header = formatTooltipHeader(chart, idx, t);
-      const lines = arr.map(formatTooltipRowHtml).join('');
+      const lines = arr.map((param) => formatTooltipRowHtml(param, chart.unit)).join('');
       const pinHint = arr.length > MANY_OBJECT_THRESHOLD
         ? `<div style="padding:6px 0;border-bottom:1px solid ${TOOLTIP_DIVIDER_COLOR};color:#667085;font-size:12px;line-height:18px;">${t('pm.chart.tooltipPinHint')}</div>`
         : '';
@@ -257,16 +268,18 @@ function ChartCard({ chart }: { chart: MetricChart }) {
       key: s.key,
       name: s.name,
       value: s.values[effectiveLockedIndex] ?? '-',
+      displayValue: formatMetricValueWithUnit(s.values[effectiveLockedIndex] ?? '-', chart.unit),
       dashed: false,
     }));
     const previous = (chart.compareSeries ?? []).map((s) => ({
       key: `compare-${s.key}`,
       name: s.name,
       value: s.values[effectiveLockedIndex] ?? '-',
+      displayValue: formatMetricValueWithUnit(s.values[effectiveLockedIndex] ?? '-', chart.unit),
       dashed: true,
     }));
     return [...current, ...previous];
-  }, [chart.series, chart.compareSeries, effectiveLockedIndex]);
+  }, [chart.series, chart.compareSeries, chart.unit, effectiveLockedIndex]);
 
   return (
     <Card size="small" title={chart.displayName} style={{ marginBottom: 12 }}>
@@ -355,7 +368,7 @@ function ChartCard({ chart }: { chart: MetricChart }) {
                     {row.name}
                   </Typography.Text>
                   <Typography.Text strong style={{ fontSize: 13, lineHeight: '18px', color: TOOLTIP_STRONG_COLOR }}>
-                    {row.value}
+                    {row.displayValue}
                   </Typography.Text>
                 </div>
               ))}

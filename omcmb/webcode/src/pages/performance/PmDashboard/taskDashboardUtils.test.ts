@@ -16,6 +16,7 @@ function row(p: Partial<AdhocResultRow>): AdhocResultRow {
     deviceSn: p.deviceSn ?? 'AGGREGATED',
     metricPath: p.metricPath ?? 'M1',
     displayName: p.displayName,
+    unit: p.unit,
     metricType: 'counter',
     metricValue: p.metricValue === undefined ? 0 : p.metricValue,
     statisType: 'sum',
@@ -216,6 +217,30 @@ describe('buildMetricCharts — 转置', () => {
     expect(charts[0].displayName).toBe('RRC 成功率');
     expect(charts[0].series[0].name).toBe('全网');
   });
+  it('同一指标多行单位一致时，图表保留该单位', () => {
+    const rows = [
+      row({ metricPath: 'K001', unit: '%', startTime: 't0', metricValue: 98.1 }),
+      row({ metricPath: 'K001', unit: '%', startTime: 't1', metricValue: 98.2 }),
+    ];
+    const charts = buildMetricCharts(rows, 'network', 'hourly');
+    expect(charts[0].unit).toBe('%');
+  });
+
+  it('单位为空时保持 undefined；同一指标单位冲突时不展示单位', () => {
+    expect(
+      buildMetricCharts([row({ metricPath: 'K001', unit: '   ' })], 'network', 'hourly')[0].unit,
+    ).toBeUndefined();
+    const charts = buildMetricCharts(
+      [
+        row({ metricPath: 'K001', unit: '%', startTime: 't0' }),
+        row({ metricPath: 'K001', unit: 'Mbps', startTime: 't1' }),
+      ],
+      'network',
+      'hourly',
+    );
+    expect(charts[0].unit).toBeUndefined();
+  });
+
   it('英文环境下图表系列名使用英文系统前缀', () => {
     const rows = [row({ metricPath: 'M1', objectLdn: 'Band=42', startTime: 't0', metricValue: 1 })];
     const charts = buildMetricCharts(rows, 'band', 'hourly', 'en-US');

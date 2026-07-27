@@ -25,7 +25,7 @@ vi.mock('echarts-for-react', () => ({
     option,
     onEvents,
   }: {
-    option: { series: { data: number[] }[]; tooltip?: unknown };
+    option: { series: { data: Array<number | '-'> }[]; tooltip?: unknown };
     onEvents?: { click?: (params: { dataIndex: number }) => void };
   }) => {
     echartsRenderSpy(option);
@@ -51,7 +51,7 @@ function wrapIntl(node: React.ReactElement) {
   );
 }
 
-function makeChart(values: number[]): MetricChart {
+function makeChart(values: Array<number | '-'>): MetricChart {
   return {
     metricPath: 'm1',
     displayName: '指标A',
@@ -123,6 +123,41 @@ describe('ChartCard 渲染隔离 (#444)', () => {
     expect(html.indexOf('对象较多，点击图表固定后可滚动查看')).toBeLessThan(html.indexOf(rawNrObjectLdn));
   });
 
+  it('hover tooltip 显示值加单位，缺值和空单位不拼接', () => {
+    const chart = makeChart([12, '-']);
+    chart.unit = 'Mbps';
+    chart.series = [
+      { key: 'dev1', name: 'dev1', values: [12, '-'] },
+      { key: 'dev2', name: 'dev2', values: ['-', '-'] },
+    ];
+    render(wrapIntl(<ChartCard chart={chart} />));
+    const option = echartsRenderSpy.mock.calls[0][0] as {
+      tooltip: {
+        formatter: (params: Array<{ dataIndex: number; seriesName: string; value: number | '-' }>) => string;
+      };
+    };
+    const html = option.tooltip.formatter([
+      { dataIndex: 0, seriesName: 'dev1', value: 12 },
+      { dataIndex: 0, seriesName: 'dev2', value: '-' },
+    ]);
+    expect(html).toContain('12 Mbps');
+    expect(html).not.toContain('- Mbps');
+    expect(html).not.toContain('undefined');
+    expect(html).not.toContain('null');
+
+    echartsRenderSpy.mockClear();
+    const noUnitChart = makeChart([12]);
+    render(wrapIntl(<ChartCard chart={noUnitChart} />));
+    const noUnitOption = echartsRenderSpy.mock.calls[0][0] as {
+      tooltip: {
+        formatter: (params: Array<{ dataIndex: number; seriesName: string; value: number }>) => string;
+      };
+    };
+    const noUnitHtml = noUnitOption.tooltip.formatter([{ dataIndex: 0, seriesName: 'dev1', value: 12 }]);
+    expect(noUnitHtml).toContain('12');
+    expect(noUnitHtml).not.toContain('12 Mbps');
+  });
+
   it('点击图表数据点后固定 tooltip，用户可关闭固定浮层', async () => {
     const userEventMod = await import('@testing-library/user-event');
     const user = userEventMod.default.setup();
@@ -149,6 +184,24 @@ describe('ChartCard 渲染隔离 (#444)', () => {
     await user.click(screen.getByLabelText('关闭固定提示'));
 
     expect(screen.queryByRole('dialog', { name: '已固定的图表提示' })).not.toBeInTheDocument();
+  });
+
+  it('点击固定 tooltip 显示值加单位，缺值不拼单位', async () => {
+    const userEventMod = await import('@testing-library/user-event');
+    const user = userEventMod.default.setup();
+    const chart = makeChart([1, 2]);
+    chart.unit = '%';
+    chart.series = [
+      { key: 'dev1', name: 'dev1', values: [1, 2] },
+      { key: 'dev2', name: 'dev2', values: [3, '-'] },
+    ];
+    render(wrapIntl(<ChartCard chart={chart} />));
+
+    await user.click(screen.getByText('mock-chart-click'));
+
+    expect(screen.getByText('2 %')).toBeInTheDocument();
+    expect(screen.getByText('-')).toBeInTheDocument();
+    expect(screen.queryByText('- %')).not.toBeInTheDocument();
   });
 
   it('固定 tooltip 后按 Escape 可关闭', async () => {
@@ -214,5 +267,21 @@ describe('ChartCard 渲染隔离 (#444)', () => {
 
     expect(echartsRenderSpy).toHaveBeenCalledTimes(2); // 重绘一次
     expect(screen.getByTestId('echart').getAttribute('data-first-series')).toBe('[7,8]');
+  });
+
+  it('chart 内容比较包含 unit：单位变化时触发重绘', async () => {
+    const userEventMod = await import('@testing-library/user-event');
+    const user = userEventMod.default.setup();
+    const initial = makeChart([1, 2]);
+    initial.unit = '%';
+    const swapped = makeChart([1, 2]);
+    swapped.unit = 'Mbps';
+    render(wrapIntl(<Harness initial={initial} swapped={swapped} />));
+
+    expect(echartsRenderSpy).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByText('swap-chart'));
+
+    expect(echartsRenderSpy).toHaveBeenCalledTimes(2);
   });
 });

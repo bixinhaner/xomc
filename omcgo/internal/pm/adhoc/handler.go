@@ -115,6 +115,38 @@ type taskResponseDTO struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
+type adhocResultDTO struct {
+	ID        string `json:"id"`
+	TaskID    string `json:"task_id"`
+	DeviceOUI string `json:"device_oui"`
+	DeviceSN  string `json:"device_sn"`
+	// product 维度结果的分组键（T-0182-fix）；device/aggregate_group 维度为空。
+	ProductID string `json:"product_id,omitempty"`
+	// PM-线名解析：读时 LEFT JOIN 解析出的可读名。product 任务才有 ProductName，
+	// device_group 任务才有 DeviceGroupName；缺失（已删/脏数据）则空，前端回退 id 前 8 位。
+	ProductName     string `json:"product_name,omitempty"`
+	DeviceGroupName string `json:"device_group_name,omitempty"`
+	MetricPath      string `json:"metric_path"`
+	// KPI 行 metric_path 是 K 编号；display_name 为按编号回填的友好名（PLMN 级带标记）。counter 行 = metric_path。
+	DisplayName string `json:"display_name,omitempty"`
+	// Unit 来自指标库 unit_id；空/查不到时 omitempty 不下发，保持旧结果兼容。
+	Unit       string `json:"unit,omitempty"`
+	MetricType string `json:"metric_type"`
+	// MetricValue 用 jsonx.Float（底层 float64）兜底非有限值（NaN/Inf → null），
+	// 避免单个 NaN 行致整批 JSON 编码失败、返回空 body（issue #387）。
+	MetricValue   jsonx.Float `json:"metric_value"`
+	StatisType    *string     `json:"statis_type,omitempty"`
+	Granularity   string      `json:"granularity"`
+	Time          time.Time   `json:"time"`
+	StartTime     time.Time   `json:"start_time"`
+	EndTime       time.Time   `json:"end_time"`
+	IngestTime    time.Time   `json:"ingest_time"`
+	ObjectLDN     *string     `json:"object_ldn,omitempty"`
+	TaskVersionID string      `json:"task_version_id,omitempty"`
+	Complete      bool        `json:"complete"`
+	MissingSlots  int64       `json:"missing_slots"`
+}
+
 func taskToDTO(ctx context.Context, t *Task) taskResponseDTO {
 	dimVal := t.Dimension
 	if dimVal == "" {
@@ -910,38 +942,9 @@ func (h *Handler) Results(c *gin.Context) {
 	}
 	defer rows.Close()
 
-	type resultDTO struct {
-		ID        string `json:"id"`
-		TaskID    string `json:"task_id"`
-		DeviceOUI string `json:"device_oui"`
-		DeviceSN  string `json:"device_sn"`
-		// product 维度结果的分组键（T-0182-fix）；device/aggregate_group 维度为空。
-		ProductID string `json:"product_id,omitempty"`
-		// PM-线名解析：读时 LEFT JOIN 解析出的可读名。product 任务才有 ProductName，
-		// device_group 任务才有 DeviceGroupName；缺失（已删/脏数据）则空，前端回退 id 前 8 位。
-		ProductName     string `json:"product_name,omitempty"`
-		DeviceGroupName string `json:"device_group_name,omitempty"`
-		MetricPath      string `json:"metric_path"`
-		// KPI 行 metric_path 是 K 编号；display_name 为按编号回填的友好名（PLMN 级带标记）。counter 行 = metric_path。
-		DisplayName string `json:"display_name,omitempty"`
-		MetricType  string `json:"metric_type"`
-		// MetricValue 用 jsonx.Float（底层 float64）兜底非有限值（NaN/Inf → null），
-		// 避免单个 NaN 行致整批 JSON 编码失败、返回空 body（issue #387）。
-		MetricValue   jsonx.Float `json:"metric_value"`
-		StatisType    *string     `json:"statis_type,omitempty"`
-		Granularity   string      `json:"granularity"`
-		Time          time.Time   `json:"time"`
-		StartTime     time.Time   `json:"start_time"`
-		EndTime       time.Time   `json:"end_time"`
-		IngestTime    time.Time   `json:"ingest_time"`
-		ObjectLDN     *string     `json:"object_ldn,omitempty"`
-		TaskVersionID string      `json:"task_version_id,omitempty"`
-		Complete      bool        `json:"complete"`
-		MissingSlots  int64       `json:"missing_slots"`
-	}
-	items := make([]resultDTO, 0)
+	items := make([]adhocResultDTO, 0)
 	for rows.Next() {
-		var dto resultDTO
+		var dto adhocResultDTO
 		var resultID, taskID uuid.UUID
 		var productID *uuid.UUID // product_id 列可空（仅 product 维度有值）
 		var extraBytes []byte
@@ -989,21 +992,15 @@ func (h *Handler) Results(c *gin.Context) {
 			codeSet[items[i].MetricPath] = struct{}{}
 		}
 	}
-	var nameByCode map[string]string
+	var metadataByCode map[string]indicatorDisplayMetadata
 	if len(codeSet) > 0 {
 		codes := make([]string, 0, len(codeSet))
 		for code := range codeSet {
 			codes = append(codes, code)
 		}
-		nameByCode = h.lookupIndicatorNames(c.Request.Context(), codes)
+		metadataByCode = h.lookupIndicatorDisplayMetadata(c.Request.Context(), codes)
 	}
-	for i := range items {
-		if name, ok := nameByCode[items[i].MetricPath]; ok && name != "" {
-			items[i].DisplayName = name
-		} else {
-			items[i].DisplayName = items[i].MetricPath
-		}
-	}
+	backfillAdhocResultDisplayMetadata(items, metadataByCode)
 
 	// 真实总数：跑一次同 WHERE 的 COUNT(*)，让 total 反映命中行真实总数而非本页返回行数
 	// （T-0194 截断诚实提示）。COUNT 失败不阻断结果返回，退回本页行数作兜底。
@@ -1217,31 +1214,56 @@ func (h *Handler) FilterOptions(c *gin.Context) {
 	response.OK(c, gin.H{"dimension": string(dim), "options": options})
 }
 
-// lookupIndicatorNames 按编号集合一次性查三张指标表，返回 code → 本地化显示名。
+type indicatorDisplayMetadata struct {
+	DisplayName string
+	Unit        string
+}
+
+func backfillAdhocResultDisplayMetadata(items []adhocResultDTO, metadataByCode map[string]indicatorDisplayMetadata) {
+	for i := range items {
+		if meta, ok := metadataByCode[items[i].MetricPath]; ok {
+			if meta.DisplayName != "" {
+				items[i].DisplayName = meta.DisplayName
+			} else {
+				items[i].DisplayName = items[i].MetricPath
+			}
+			items[i].Unit = strings.TrimSpace(meta.Unit)
+			continue
+		}
+		items[i].DisplayName = items[i].MetricPath
+	}
+}
+
+// lookupIndicatorDisplayMetadata 按编号集合一次性查三张指标表，返回 code → 本地化显示名 + unit_id。
 // 取名方向按 ctx 中的 locale 决定（中文 cn_name 优先 / 英文 en_name 优先，空则回退另一种）。
 // K 编号在 perf_indicators_{enb,gnb,gsm} 三表全局唯一，一次 UNION 即可覆盖（与 aggregator 查询层一致）。
-func (h *Handler) lookupIndicatorNames(ctx context.Context, codes []string) map[string]string {
-	out := make(map[string]string, len(codes))
+func (h *Handler) lookupIndicatorDisplayMetadata(ctx context.Context, codes []string) map[string]indicatorDisplayMetadata {
+	out := make(map[string]indicatorDisplayMetadata, len(codes))
 	nameExpr := metrics.IndicatorDisplayNameExpr(appcontext.GetLocale(ctx))
 	tmpl := fmt.Sprintf(`
-SELECT id, %[1]s AS display_name FROM perf_indicators_enb  WHERE id = ANY($1)
+SELECT id, %[1]s AS display_name, unit_id FROM perf_indicators_enb  WHERE id = ANY($1)
 UNION ALL
-SELECT id, %[1]s AS display_name FROM perf_indicators_gnb  WHERE id = ANY($1)
+SELECT id, %[1]s AS display_name, unit_id FROM perf_indicators_gnb  WHERE id = ANY($1)
 UNION ALL
-SELECT id, %[1]s AS display_name FROM perf_indicators_gsm  WHERE id = ANY($1)`, nameExpr)
+SELECT id, %[1]s AS display_name, unit_id FROM perf_indicators_gsm  WHERE id = ANY($1)`, nameExpr)
 	rows, err := h.pool.Query(ctx, tmpl, codes)
 	if err != nil {
-		h.logger.Warn("backfill adhoc display names query failed; fall back to codes", zap.Error(err))
+		h.logger.Warn("backfill adhoc display metadata query failed; fall back to codes", zap.Error(err))
 		return out
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var id, name string
-		if err := rows.Scan(&id, &name); err != nil {
-			h.logger.Warn("backfill adhoc display names scan failed", zap.Error(err))
+		var unit *string
+		if err := rows.Scan(&id, &name, &unit); err != nil {
+			h.logger.Warn("backfill adhoc display metadata scan failed", zap.Error(err))
 			return out
 		}
-		out[id] = name
+		meta := indicatorDisplayMetadata{DisplayName: name}
+		if unit != nil {
+			meta.Unit = strings.TrimSpace(*unit)
+		}
+		out[id] = meta
 	}
 	return out
 }
