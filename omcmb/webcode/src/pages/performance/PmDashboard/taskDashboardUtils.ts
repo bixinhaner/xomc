@@ -34,6 +34,7 @@ export interface MetricSeries {
 export interface MetricChart {
   metricPath: string;
   displayName: string;
+  unit?: string;
   /** 该图横轴桶（startTime 升序去重） */
   buckets: string[];
   /** 与 buckets 一一对应的桶结束时间（endTime），供 tooltip 显示「开始~结束」时间段 */
@@ -151,6 +152,8 @@ export function buildMetricCharts(
     string,
     {
       displayName: string;
+      unit?: string;
+      unitConflict: boolean;
       buckets: Set<string>;
       // startTime → endTime（同桶各行 endTime 相同，后到覆盖）
       ends: Map<string, string>;
@@ -165,6 +168,8 @@ export function buildMetricCharts(
     if (!m) {
       m = {
         displayName: r.displayName || r.metricPath,
+        unit: undefined,
+        unitConflict: false,
         buckets: new Set(),
         ends: new Map(),
         seriesOrder: [],
@@ -173,6 +178,15 @@ export function buildMetricCharts(
       };
       byMetric.set(r.metricPath, m);
       metricOrder.push(r.metricPath);
+    }
+    const unit = r.unit?.trim();
+    if (unit) {
+      if (!m.unit && !m.unitConflict) {
+        m.unit = unit;
+      } else if (m.unit !== unit) {
+        m.unit = undefined;
+        m.unitConflict = true;
+      }
     }
     m.buckets.add(r.startTime);
     m.ends.set(r.startTime, r.endTime);
@@ -243,6 +257,6 @@ export function buildMetricCharts(
       const name = m.seriesName.get(key) ?? globalName.get(key) ?? key;
       return { key, name, values };
     });
-    return { metricPath, displayName: m.displayName, buckets, bucketEnds, series };
+    return { metricPath, displayName: m.displayName, unit: m.unit, buckets, bucketEnds, series };
   });
 }

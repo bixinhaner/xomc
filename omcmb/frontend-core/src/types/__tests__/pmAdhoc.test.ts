@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { mapBackendAdhocTask, type BackendAdhocTask } from '../pmAdhoc';
+import {
+  mapBackendAdhocResult,
+  mapBackendAdhocTask,
+  type BackendAdhocResultRow,
+  type BackendAdhocTask,
+} from '../pmAdhoc';
 
 // 一份合法的后端任务基底；各用例只覆盖差异字段。
 function baseBackendTask(): BackendAdhocTask {
@@ -55,5 +60,34 @@ describe('mapBackendAdhocTask — device_sns 健壮性（产品/频段/全网维
   it('visibility 为 public 时映射为公开任务', () => {
     const t = mapBackendAdhocTask({ ...baseBackendTask(), visibility: 'public' });
     expect(t.visibility).toBe('public');
+  });
+});
+
+function baseBackendResult(): BackendAdhocResultRow {
+  return {
+    id: 'result-1',
+    task_id: 'task-1',
+    device_oui: '',
+    device_sn: 'AGGREGATED',
+    metric_path: 'K001',
+    display_name: 'RRC 成功率',
+    metric_type: 'kpi',
+    metric_value: 98.5,
+    granularity: 'hourly',
+    time: '2026-06-01T00:00:00Z',
+    start_time: '2026-06-01T00:00:00Z',
+    end_time: '2026-06-01T01:00:00Z',
+  };
+}
+
+describe('mapBackendAdhocResult — unit 透传', () => {
+  it('后端返回 unit 时映射为前端 unit', () => {
+    const row = mapBackendAdhocResult({ ...baseBackendResult(), unit: '%' });
+    expect(row.unit).toBe('%');
+  });
+
+  it('后端 unit 为空或空白时保持 undefined', () => {
+    expect(mapBackendAdhocResult({ ...baseBackendResult(), unit: '' }).unit).toBeUndefined();
+    expect(mapBackendAdhocResult({ ...baseBackendResult(), unit: '   ' }).unit).toBeUndefined();
   });
 });
