@@ -63,6 +63,17 @@ minio:
 # CPU 配额），上限 16。worker 容器配 4 核，故设 4。
 pm_consumer_concurrency: 4
 
+raw_cleanup:
+  enabled: true
+  mode: shadow
+  batch_size: 100
+  min_rate: 5
+  max_rate: 100
+  rate_headroom: 1.5
+  recalculate_interval: 5m
+  object_timeout: 10s
+  prometheus_url: "http://prometheus:9090"
+
 # PM 指标大批量写关掉 WAL 同步落盘（synchronous_commit=off）换吞吐：PM 数据可从 MinIO 重建，
 # 崩溃最多丢已提交未刷盘的最后几 ms 行，可接受。默认 false（durable），写瓶颈下开。
 pm_async_commit: true

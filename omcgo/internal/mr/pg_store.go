@@ -195,23 +195,6 @@ func (s *PgMRStore) ListFileDeviceAggregates(ctx context.Context, filter MRFileD
 	return model.NewListResponse(items, total, page, pageSize), nil
 }
 
-// DeleteFilesBefore 删除 collect_time < cutoff 的 mr_files 行。返回删除行数。
-// 由 internal/mr/task/cleaner.go 在 MinIO 目录清理后调用，保持 MinIO 与 PG 一致。
-//
-// 注意：mr_records 是 TimescaleDB hypertable，通常按 time 列分区。本方法仅删
-// mr_files 元数据行；记录表的清理由 TimescaleDB retention policy 单独管（详见
-// migrations/000006_alarms_mr_firmware.sql 中 mr_records 的 add_retention_policy）。
-func (s *PgMRStore) DeleteFilesBefore(ctx context.Context, cutoff time.Time) (int64, error) {
-	tag, err := s.pool.Exec(ctx,
-		`DELETE FROM mr_files WHERE collect_time < $1`,
-		cutoff,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("delete mr_files before %s: %w", cutoff.Format(time.RFC3339), err)
-	}
-	return tag.RowsAffected(), nil
-}
-
 // ListFilesBySN 取某 SN 名下全部 mr_files 元数据（无分页）。
 func (s *PgMRStore) ListFilesBySN(ctx context.Context, sn string) ([]MRFileInfo, error) {
 	rows, err := s.pool.Query(ctx,

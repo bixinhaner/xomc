@@ -72,6 +72,17 @@ minio:
 # 避免连接池变成新瓶颈。
 pm_consumer_concurrency: 32
 
+raw_cleanup:
+  enabled: true
+  mode: shadow
+  batch_size: 100
+  min_rate: 5
+  max_rate: 100
+  rate_headroom: 1.5
+  recalculate_interval: 5m
+  object_timeout: 10s
+  prometheus_url: "http://prometheus:9090"
+
 # PM 指标大批量写关掉 WAL 同步落盘（synchronous_commit=off）换吞吐：PM 数据可从 MinIO 重建。
 # 默认 false（durable）；写吞吐瓶颈下置 true。
 # 2026-07-21 压测实测（20000设备/32并发）过 true：tsdb pg_stat_activity 观测到 WALWrite

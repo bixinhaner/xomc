@@ -19,15 +19,12 @@ import "github.com/prometheus/client_golang/prometheus"
 //	  scheduler 心跳巡检每次 missed +1（含未到阈值的）。
 //	mr_heartbeat_abnormal_total
 //	  跨过阈值切到 abnormal 时 +1（告警触发点）。
-//	mr_files_cleaned_total{kind=minio|pg}
-//	  cleaner 每次 RunOnce 删的对象 / PG 行数累计。
 type Metrics struct {
-	Dispatched       *prometheus.CounterVec
-	ActiveCount      prometheus.Gauge
-	FileUploaded     *prometheus.CounterVec
-	HeartbeatMissed  prometheus.Counter
+	Dispatched        *prometheus.CounterVec
+	ActiveCount       prometheus.Gauge
+	FileUploaded      *prometheus.CounterVec
+	HeartbeatMissed   prometheus.Counter
 	HeartbeatAbnormal prometheus.Counter
-	FilesCleaned     *prometheus.CounterVec
 }
 
 // NewMetrics 注册并返回所有 MR 任务相关指标。reg 为 nil 时返回 nil（调用方降级到无指标模式）。
@@ -68,13 +65,6 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 				Help: "Total MR cells flipped to abnormal due to consecutive missed heartbeats.",
 			},
 		),
-		FilesCleaned: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "omc_mr_files_cleaned_total",
-				Help: "Total MR files cleaned by daily cleaner (kind=minio for objects, kind=pg for rows).",
-			},
-			[]string{"kind"},
-		),
 	}
 	reg.MustRegister(
 		m.Dispatched,
@@ -82,7 +72,6 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.FileUploaded,
 		m.HeartbeatMissed,
 		m.HeartbeatAbnormal,
-		m.FilesCleaned,
 	)
 	return m
 }
@@ -122,11 +111,4 @@ func (m *Metrics) IncHeartbeatAbnormal() {
 		return
 	}
 	m.HeartbeatAbnormal.Inc()
-}
-
-func (m *Metrics) AddFilesCleaned(kind string, n float64) {
-	if m == nil || n <= 0 {
-		return
-	}
-	m.FilesCleaned.WithLabelValues(kind).Add(n)
 }
