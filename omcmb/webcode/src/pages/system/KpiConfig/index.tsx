@@ -48,8 +48,8 @@ import {
   formatKpiPanelViolations,
 } from '@core/utils/kpiPanelValidation';
 import { resolveLayout } from '@/pages/dashboard/layoutMapping';
-import type { TechnologyType } from '@/pages/dashboard/kpi-config';
-import { useTechnologyDictionary } from '@/components/dashboard/useTechnologyDictionary';
+import type { TechnologyType } from '@core/types/technology';
+import { useTechnologyDictionary } from '@core/hooks/api/useTechnologyDictionary';
 import {
   addPanel,
   applyGridLayout,

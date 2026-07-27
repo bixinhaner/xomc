@@ -18,9 +18,36 @@ const fetchDeviceListSpy = vi.fn();
 vi.mock('@core/hooks/api/useDevices', () => ({
   useDeviceList: (params: unknown, options: unknown) => {
     useDeviceListSpy(params, options);
-    return { data: { items: [], total: 0 }, isLoading: false };
+    return {
+      data: {
+        items: [{ sn: 'SN-GNB-001', hostName: '站点A', networkType: 'gNB' }],
+        total: 1,
+      },
+      isLoading: false,
+    };
   },
   fetchDeviceList: (params: unknown) => fetchDeviceListSpy(params),
+}));
+
+vi.mock('@core/hooks/api/useTechnologyDictionary', () => ({
+  useTechnologyDictionary: () => ({
+    options: [
+      { label: 'eNB(LTE)', value: 'lte', sort: 1 },
+      { label: 'gNB(NR)', value: 'nr', sort: 2 },
+      { label: 'GSM', value: 'gsm', sort: 3 },
+    ],
+    deviceTypeOptions: [
+      { label: 'eNB(LTE)', value: 'ENB', sort: 1, technology: 'lte' },
+      { label: 'gNB(NR)', value: 'GNB', sort: 2, technology: 'nr' },
+      { label: 'GSM', value: 'GSM', sort: 3, technology: 'gsm' },
+    ],
+    labelForTechnology: (tech?: string | null) =>
+      ({ lte: 'eNB(LTE)', nr: 'gNB(NR)', gsm: 'GSM' })[tech ?? ''] ?? (tech ? tech.toUpperCase() : '—'),
+    labelForRadioMode: (radioMode?: string | null) =>
+      ({ eNB: 'eNB(LTE)', ENB: 'eNB(LTE)', gNB: 'gNB(NR)', GNB: 'gNB(NR)', GSM: 'GSM' })[radioMode ?? ''] ??
+      (radioMode || '—'),
+    isLoading: false,
+  }),
 }));
 
 import DevicePickerModal from './DevicePickerModal';
@@ -46,6 +73,7 @@ describe('DevicePickerModal 制式联动', () => {
     renderModal({ technology: 'nr' });
     const lastParams = useDeviceListSpy.mock.calls.at(-1)?.[0] as { networkType?: string };
     expect(lastParams.networkType).toBe('nr');
+    expect(screen.getByText('gNB(NR)')).toBeTruthy();
   });
 
   it('不传 technology 时 networkType 为 undefined（向后兼容，列全部设备）', () => {

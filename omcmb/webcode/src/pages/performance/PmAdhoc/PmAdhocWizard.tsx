@@ -2,7 +2,7 @@
  * T-0185：自定义聚合任务「新建向导」整页 5 步。
  *
  * 顶部横向 antd Steps，5 步：
- *   ① 基本信息   — 任务名 / 制式（LTE/NR/GSM）
+ *   ① 基本信息   — 任务名 / 制式（network_type 字典下拉，提交值 lte/nr/gsm）
  *   ② 聚合范围   — 维度 5 选；自选设备按制式过滤多选到 SN；network/band 无需选；
  *                  device_group/product 全量聚合不给子选（给说明文案）
  *   ③ 指标选择   — 按制式 → deviceType 列指标库多选（收集指标 id = K/C 码，min 1）
@@ -42,8 +42,9 @@ import { useMetricObjectsByDevices } from '@core/hooks/api/usePmQuery';
 import { useIndicatorCandidates } from '@core/hooks/api/usePerformance';
 import type { IndicatorCandidate } from '@core/services/api/pmApi';
 import type { AdhocDimension, AdhocMode, AdhocVisibility, CreateAdhocTaskInput } from '@core/types/pmAdhoc';
-import type { DeviceType } from '@core/types/indicatorLibrary';
 import { formatIndicatorLevel, shouldShowIndicatorLevel } from '@core/utils/indicatorLevelDisplay';
+import type { TechnologyType } from '@core/types/technology';
+import { technologyToDeviceType, useTechnologyDictionary } from '@core/hooks/api/useTechnologyDictionary';
 import CellDrilldownSelector from '../PmDashboard/CellDrilldownSelector';
 import { getEffectiveLdns, type CellSelection } from '../PmDashboard/cellDrilldownUtils';
 import {
@@ -54,15 +55,8 @@ import {
 import { resolveLimitedTransferSelection } from './selectionLimit';
 
 // 制式（含 GSM，networkType 过滤直接用小写值）
-type WizardTech = 'lte' | 'nr' | 'gsm';
+type WizardTech = TechnologyType;
 const ROLLUP_GRANULARITIES = ['hourly', 'daily', 'weekly', 'monthly'];
-
-// 制式 → 指标库 deviceType（大写枚举）。
-const TECH_TO_DEVICE_TYPE: Record<WizardTech, DeviceType> = {
-  lte: 'ENB',
-  nr: 'GNB',
-  gsm: 'GSM',
-};
 
 interface DeviceTransferItem {
   key: string; // SN
@@ -89,6 +83,12 @@ function isSameStringArray(a: string[], b: string[]): boolean {
 export default function PmAdhocWizard() {
   const intl = useIntl();
   const navigate = useNavigate();
+  const {
+    options: techOptions,
+    isLoading: techOptionsLoading,
+    labelForTechnology,
+  } = useTechnologyDictionary();
+  const hasAvailableTechOptions = techOptions.length > 0;
   const createMut = useCreatePmAdhoc();
   // T-0194：编辑模式 —— 路由带 :id 即编辑（复用本向导），无 id 则为新建。
   const { id: editId } = useParams<{ id: string }>();
@@ -96,16 +96,7 @@ export default function PmAdhocWizard() {
   const updateMut = useUpdatePmAdhoc();
   const { data: editTask } = usePmAdhocDetail(editId);
 
-  // 制式 / 维度选项：value 不变，仅 label / hint 走 i18n。
-  const TECH_OPTIONS = useMemo<{ label: string; value: WizardTech }[]>(
-    () => [
-      { label: intl.formatMessage({ id: 'perf.adhoc.techLte' }), value: 'lte' },
-      { label: intl.formatMessage({ id: 'perf.adhoc.techNr' }), value: 'nr' },
-      { label: intl.formatMessage({ id: 'perf.adhoc.techGsm' }), value: 'gsm' },
-    ],
-    [intl],
-  );
-
+  // 制式选项来自 network_type 字典；value 仍保持 lte/nr/gsm。
   const DIMENSION_OPTIONS = useMemo<{ label: string; value: AdhocDimension; hint: string }[]>(
     () => [
       {
@@ -214,12 +205,26 @@ export default function PmAdhocWizard() {
     setPlannedEndTouched(false);
   }, [isEdit]);
 
+  useEffect(() => {
+    if (
+      isEdit ||
+      !hasAvailableTechOptions ||
+      techOptions.some((option) => option.value === technology)
+    ) {
+      return;
+    }
+    setTechnology(techOptions[0].value);
+    setSelectedSns([]);
+    setCellSel({});
+    setMetricPaths([]);
+  }, [hasAvailableTechOptions, isEdit, techOptions, technology]);
+
   const needsDevicePick = dimension === 'device' || dimension === 'aggregate_group';
 
   // 设备列表（自选设备步用，按制式过滤）。仅在需要选设备时才发请求。
   const { data: deviceResp, isLoading: devicesLoading } = useDeviceList(
     { networkType: technology, page: 1, pageSize: 500 },
-    { enabled: needsDevicePick },
+    { enabled: needsDevicePick && (isEdit || hasAvailableTechOptions) },
   );
   const deviceItems: DeviceTransferItem[] = useMemo(
     () =>
@@ -239,7 +244,7 @@ export default function PmAdhocWizard() {
 
   // 指标候选（按制式 → deviceType）。走 pm 权限的 /pm/kpi/definitions：运维可访问、
   // 全量加载无截断、含计数器。替代原 super_admin 的 /indicators（截断 + 403）。
-  const deviceType = TECH_TO_DEVICE_TYPE[technology];
+  const deviceType = technologyToDeviceType(technology);
   const { data: candidates, isLoading: indicatorsLoading } = useIndicatorCandidates(deviceType, {
     includeCounters: true,
     enabledOnly: true,
@@ -279,7 +284,7 @@ export default function PmAdhocWizard() {
   );
 
   // ── 步骤校验（决定"下一步"是否可点 / 提交是否可点）──────────────────────
-  const step1Valid = name.trim().length > 0;
+  const step1Valid = name.trim().length > 0 && (isEdit || hasAvailableTechOptions);
   const step2Valid = needsDevicePick
     ? selectedSns.length > 0 && selectedSns.length <= PM_QUERY_SELECTION_LIMIT
     : true;
@@ -322,6 +327,7 @@ export default function PmAdhocWizard() {
   };
 
   const handleSubmit = async () => {
+    if (!isEdit && !hasAvailableTechOptions) return;
     if (needsDevicePick && warnDeviceLimitExceeded(selectedSns.length)) return;
     if (warnMetricLimitExceeded(metricPaths.length)) return;
     if (!step1Valid || !step2Valid || !step3Valid || !step4Valid) {
@@ -418,20 +424,24 @@ export default function PmAdhocWizard() {
       <div>
         <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldTechReq' })}</div>
         {/* T-0194 编辑模式：制式锁定只读（建后不可改） */}
-        <Radio.Group
-          optionType="button"
-          buttonStyle="solid"
-          options={TECH_OPTIONS}
-          value={technology}
-          disabled={isEdit}
-          onChange={(e) => {
-            setTechnology(e.target.value);
-            // 制式切换后清空已选设备 / 指标（避免跨制式残留）
-            setSelectedSns([]);
-            setCellSel({}); // 下钻选择重置（全选）
-            setMetricPaths([]);
-          }}
-        />
+        {isEdit ? (
+          <Tag color="geekblue">{labelForTechnology(technology)}</Tag>
+        ) : (
+          <Select
+            style={{ width: 220 }}
+            value={technology}
+            loading={techOptionsLoading}
+            disabled={!hasAvailableTechOptions}
+            options={techOptions}
+            onChange={(next: WizardTech) => {
+              setTechnology(next);
+              // 制式切换后清空已选设备 / 指标（避免跨制式残留）
+              setSelectedSns([]);
+              setCellSel({}); // 下钻选择重置（全选）
+              setMetricPaths([]);
+            }}
+          />
+        )}
         {isEdit && (
           <div style={{ marginTop: 6, color: '#999', fontSize: 12 }}>
             {intl.formatMessage({ id: 'perf.adhoc.editLockedTech' })}
@@ -491,7 +501,7 @@ export default function PmAdhocWizard() {
             <div style={{ marginBottom: 8, fontWeight: 500 }}>
               {intl.formatMessage(
                 { id: 'perf.adhoc.devicePickLabel' },
-                { tech: technology.toUpperCase(), count: selectedSns.length },
+                { tech: labelForTechnology(technology), count: selectedSns.length },
               )}
             </div>
             <Spin spinning={devicesLoading}>
@@ -571,7 +581,7 @@ export default function PmAdhocWizard() {
         showIcon
         title={intl.formatMessage(
           { id: 'perf.adhoc.metricHint' },
-          { tech: technology.toUpperCase(), deviceType },
+          { tech: labelForTechnology(technology), deviceType },
         )}
       />
       <Space size="middle" align="center">
@@ -726,7 +736,9 @@ export default function PmAdhocWizard() {
         <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmTaskName' })}>
           {name || <Tag>{intl.formatMessage({ id: 'perf.adhoc.confirmNotFilled' })}</Tag>}
         </Descriptions.Item>
-        <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmTech' })}>{technology.toUpperCase()}</Descriptions.Item>
+        <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmTech' })}>
+          {labelForTechnology(technology)}
+        </Descriptions.Item>
         <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmVisibility' })}>
           <Tag color={visibility === 'public' ? 'green' : undefined}>
             {intl.formatMessage({

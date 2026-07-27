@@ -8,6 +8,7 @@ import { saveBlob } from '@core/utils/saveBlob';
 import { useT } from '@/hooks/useT';
 import dayjs from 'dayjs';
 import { buildTemplateMetricExportFilename, buildTemplateMetricExportText } from './templateMetricExport';
+import { useTechnologyDictionary } from '@core/hooks/api/useTechnologyDictionary';
 
 const { Text } = Typography;
 
@@ -27,6 +28,7 @@ export default function QueryTemplateDetailModal(props: QueryTemplateDetailModal
 function QueryTemplateDetailModalContent({ open, template, metricLabels, onClose }: QueryTemplateDetailModalProps & { template: QueryTemplate }) {
   const t = useT();
   const { message } = App.useApp();
+  const { labelForRadioMode } = useTechnologyDictionary();
   const deviceType = template.payload.deviceType ?? 'ENB';
   const { data: indicatorsData } = useAllIndicators(deviceType);
   const indicatorById = new Map((indicatorsData?.items ?? []).map((ind) => [ind.id, ind]));
@@ -79,7 +81,9 @@ function QueryTemplateDetailModalContent({ open, template, metricLabels, onClose
           </Tag>
         </Descriptions.Item>
         <Descriptions.Item label={t('perf.kpiQuery.description')}>{template.description || '-'}</Descriptions.Item>
-        <Descriptions.Item label={t('perf.kpiQuery.deviceType')}>{template.payload.deviceType || '-'}</Descriptions.Item>
+        <Descriptions.Item label={t('perf.kpiQuery.deviceType')}>
+          {template.payload.deviceType ? labelForRadioMode(template.payload.deviceType) : '-'}
+        </Descriptions.Item>
         <Descriptions.Item label={t('perf.kpiQuery.device')}>
           {template.payload.deviceSns.length === 0
             ? '-'
