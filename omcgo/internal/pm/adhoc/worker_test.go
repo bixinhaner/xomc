@@ -112,6 +112,9 @@ func (s *workerStubRepo) FinishRun(_ context.Context, runID uuid.UUID, status St
 func (s *workerStubRepo) ListRuns(context.Context, uuid.UUID, int, int) ([]TaskRun, error) {
 	return nil, nil
 }
+func (s *workerStubRepo) ListResultMetricPaths(context.Context, uuid.UUID, resultsFilter) ([]string, error) {
+	return nil, nil
+}
 
 func Test_Worker_OneshotSuccess_TerminalStatusSucceeded(t *testing.T) {
 	task := &Task{
