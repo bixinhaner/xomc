@@ -123,8 +123,10 @@ type CreateRequest struct {
 	IsBuiltin    bool      // T-0182：内置任务标记
 	ExpireDays   int       // T-0182：非持续型过期天数，<=0 时 repository 兜底为 60
 	PlannedEndAt *time.Time
-	Visibility   Visibility
-	Creator      string
+	// PlannedEndAtSet 区分“字段未传”（新建时默认 +30 天）和“字段传 null”（用户主动清空）。
+	PlannedEndAtSet bool
+	Visibility      Visibility
+	Creator         string
 }
 
 // UpdateRequest 是 Repository.Update / handler.Update 的输入（T-0194 编辑任务定义）。
@@ -151,6 +153,7 @@ type UpdateRequest struct {
 	WindowEnd       time.Time
 	LastFireAt      time.Time
 	PlannedEndAt    *time.Time
+	PlannedEndAtSet bool
 	Visibility      Visibility
 }
 

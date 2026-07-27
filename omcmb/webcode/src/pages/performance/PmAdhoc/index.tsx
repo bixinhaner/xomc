@@ -156,7 +156,7 @@ function technologyLabel(intl: IntlShape, t?: string): string {
   return id ? intl.formatMessage({ id }) : (t ?? '');
 }
 
-function fmtTime(v?: string): string {
+function fmtTime(v?: string | null): string {
   if (!v) return '—';
   return formatSystemTime(v, { placeholder: '—' });
 }

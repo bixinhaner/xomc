@@ -88,8 +88,8 @@ type createRequestDTO struct {
 	IsBuiltin bool `json:"is_builtin"`
 	// 非持续型过期天数（T-0182，默认 60）
 	ExpireDays int `json:"expire_days" binding:"omitempty,min=1"`
-	// planned_end_at：自建 continuous 任务计划结束时间；不传由 repository 默认 created_at+30d。
-	PlannedEndAt *time.Time `json:"planned_end_at"`
+	// planned_end_at：自建 continuous 任务计划结束时间；不传由 repository 默认 created_at+30d，传 null 表示用户主动清空。
+	PlannedEndAt optionalTime `json:"planned_end_at"`
 	// visibility：private（默认，仅创建者/超管可见可操作）/ public（登录用户可见可操作）
 	Visibility string `json:"visibility" binding:"omitempty,oneof=private public"`
 }
@@ -148,6 +148,25 @@ type adhocResultDTO struct {
 	TaskVersionID string      `json:"task_version_id,omitempty"`
 	Complete      bool        `json:"complete"`
 	MissingSlots  int64       `json:"missing_slots"`
+}
+
+type optionalTime struct {
+	Set   bool
+	Value *time.Time
+}
+
+func (o *optionalTime) UnmarshalJSON(data []byte) error {
+	o.Set = true
+	if string(data) == "null" {
+		o.Value = nil
+		return nil
+	}
+	var t time.Time
+	if err := json.Unmarshal(data, &t); err != nil {
+		return err
+	}
+	o.Value = &t
+	return nil
 }
 
 func taskToDTO(ctx context.Context, t *Task) taskResponseDTO {
@@ -209,8 +228,8 @@ func (h *Handler) Create(c *gin.Context) {
 	req.WindowStart = time.Time{}
 	req.WindowEnd = time.Time{}
 	if req.IsBuiltin || mode != ModeContinuous {
-		req.PlannedEndAt = nil
-	} else if req.PlannedEndAt != nil && !req.PlannedEndAt.After(time.Now()) {
+		req.PlannedEndAt = optionalTime{}
+	} else if req.PlannedEndAt.Set && req.PlannedEndAt.Value != nil && !req.PlannedEndAt.Value.After(time.Now()) {
 		response.Fail(c, http.StatusBadRequest, "planned_end_at must be in the future")
 		return
 	}
@@ -242,22 +261,23 @@ func (h *Handler) Create(c *gin.Context) {
 	}
 	creator := extractCreator(c)
 	id, err := h.repo.Create(c.Request.Context(), CreateRequest{
-		Name:          req.Name,
-		Mode:          mode,
-		CronExpr:      cronPtr,
-		DeviceSNs:     req.DeviceSNs,
-		MetricPaths:   req.MetricPaths,
-		Granularities: req.Granularities,
-		ObjectLDNs:    objectLDNs,
-		WindowStart:   req.WindowStart,
-		WindowEnd:     req.WindowEnd,
-		Dimension:     dim,
-		Technology:    req.Technology,
-		IsBuiltin:     req.IsBuiltin,
-		ExpireDays:    req.ExpireDays,
-		PlannedEndAt:  req.PlannedEndAt,
-		Visibility:    Visibility(req.Visibility),
-		Creator:       creator,
+		Name:            req.Name,
+		Mode:            mode,
+		CronExpr:        cronPtr,
+		DeviceSNs:       req.DeviceSNs,
+		MetricPaths:     req.MetricPaths,
+		Granularities:   req.Granularities,
+		ObjectLDNs:      objectLDNs,
+		WindowStart:     req.WindowStart,
+		WindowEnd:       req.WindowEnd,
+		Dimension:       dim,
+		Technology:      req.Technology,
+		IsBuiltin:       req.IsBuiltin,
+		ExpireDays:      req.ExpireDays,
+		PlannedEndAt:    req.PlannedEndAt.Value,
+		PlannedEndAtSet: req.PlannedEndAt.Set,
+		Visibility:      Visibility(req.Visibility),
+		Creator:         creator,
 	})
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
@@ -427,15 +447,15 @@ func (h *Handler) Get(c *gin.Context) {
 // 字段集与编辑能力对齐：自建任务可改 name/device_sns/metric_paths/granularities/object_ldns/window；
 // 内置任务只取 metric_paths（其余字段服务端忽略）。mode/technology/dimension/is_builtin/expire_days 不在此结构体，不可改。
 type updateRequestDTO struct {
-	Name          string     `json:"name"`
-	DeviceSNs     []string   `json:"device_sns"`
-	MetricPaths   []string   `json:"metric_paths" binding:"required,min=1"`
-	Granularities []string   `json:"granularities"`
-	ObjectLDNs    []string   `json:"object_ldns"`
-	WindowStart   time.Time  `json:"window_start"`
-	WindowEnd     time.Time  `json:"window_end"`
-	PlannedEndAt  *time.Time `json:"planned_end_at"`
-	Visibility    string     `json:"visibility" binding:"omitempty,oneof=private public"`
+	Name          string       `json:"name"`
+	DeviceSNs     []string     `json:"device_sns"`
+	MetricPaths   []string     `json:"metric_paths" binding:"required,min=1"`
+	Granularities []string     `json:"granularities"`
+	ObjectLDNs    []string     `json:"object_ldns"`
+	WindowStart   time.Time    `json:"window_start"`
+	WindowEnd     time.Time    `json:"window_end"`
+	PlannedEndAt  optionalTime `json:"planned_end_at"`
+	Visibility    string       `json:"visibility" binding:"omitempty,oneof=private public"`
 }
 
 // Update PATCH /pm/adhoc/tasks/:id
@@ -536,7 +556,8 @@ func (h *Handler) Update(c *gin.Context) {
 		upd.ObjectLDNs = objectLDNs
 		upd.WindowStart = req.WindowStart
 		upd.WindowEnd = req.WindowEnd
-		upd.PlannedEndAt = req.PlannedEndAt
+		upd.PlannedEndAt = req.PlannedEndAt.Value
+		upd.PlannedEndAtSet = req.PlannedEndAt.Set
 		upd.RequeueTerminal = existing.Mode == ModeOneshot && oneshotExecutionInputsChanged(existing, req, objectLDNs)
 	}
 

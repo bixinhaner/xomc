@@ -23,16 +23,17 @@ func Test_buildUpdateSQL_Adhoc_AllFields(t *testing.T) {
 	id := uuid.New()
 	cronExpr := "5 * * * *"
 	req := UpdateRequest{
-		IsBuiltin:     false,
-		Name:          "edited",
-		CronExpr:      &cronExpr,
-		DeviceSNs:     []string{"S1", "S2"},
-		MetricPaths:   []string{"K1", "K2"},
-		Granularities: []string{"daily"},
-		ObjectLDNs:    []string{"LDN-A"},
-		WindowStart:   time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
-		WindowEnd:     time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
-		PlannedEndAt:  ptrTime(time.Date(2026, 8, 22, 11, 0, 0, 0, time.UTC)),
+		IsBuiltin:       false,
+		Name:            "edited",
+		CronExpr:        &cronExpr,
+		DeviceSNs:       []string{"S1", "S2"},
+		MetricPaths:     []string{"K1", "K2"},
+		Granularities:   []string{"daily"},
+		ObjectLDNs:      []string{"LDN-A"},
+		WindowStart:     time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+		WindowEnd:       time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+		PlannedEndAt:    ptrTime(time.Date(2026, 8, 22, 11, 0, 0, 0, time.UTC)),
+		PlannedEndAtSet: true,
 	}
 	sql, _, err := buildUpdateSQL(id, req)
 	require.NoError(t, err)
@@ -54,6 +55,27 @@ func Test_buildUpdateSQL_Adhoc_AllFields(t *testing.T) {
 
 func ptrTime(t time.Time) *time.Time {
 	return &t
+}
+
+func Test_buildUpdateSQL_Adhoc_PlannedEndAtNullClearsValue(t *testing.T) {
+	id := uuid.New()
+	req := UpdateRequest{
+		IsBuiltin:       false,
+		Name:            "edited",
+		MetricPaths:     []string{"K1"},
+		Granularities:   []string{"hourly"},
+		PlannedEndAtSet: true,
+		PlannedEndAt:    nil,
+	}
+	sql, args, err := buildUpdateSQL(id, req)
+	require.NoError(t, err)
+
+	setClause := sql
+	if idx := strings.Index(sql, "WHERE"); idx >= 0 {
+		setClause = sql[:idx]
+	}
+	assert.Contains(t, setClause, "planned_end_at", "传 null 时应显式更新 planned_end_at")
+	assert.Contains(t, args, nil, "传 null 时 planned_end_at 参数应为 SQL NULL")
 }
 
 func Test_buildUpdateSQL_Adhoc_ResetCursorWhenGranularityChanges(t *testing.T) {
@@ -198,6 +220,14 @@ func Test_plannedEndValue_BuiltinIgnoresExplicitPlannedEndAt(t *testing.T) {
 		Mode:         ModeContinuous,
 		IsBuiltin:    true,
 		PlannedEndAt: &planned,
+	}))
+}
+
+func Test_plannedEndValue_CustomContinuous_ExplicitNullClearsDefault(t *testing.T) {
+	assert.Nil(t, plannedEndValue(CreateRequest{
+		Mode:            ModeContinuous,
+		PlannedEndAtSet: true,
+		PlannedEndAt:    nil,
 	}))
 }
 

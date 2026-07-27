@@ -330,7 +330,7 @@ func applyUpdateToTask(task *Task, req UpdateRequest) *Task {
 	updated.WindowStart = req.WindowStart
 	updated.WindowEnd = req.WindowEnd
 	updated.Visibility = normalizeVisibility(req.Visibility)
-	if req.PlannedEndAt != nil {
+	if req.PlannedEndAtSet {
 		updated.PlannedEndAt = req.PlannedEndAt
 	}
 	return &updated
@@ -361,7 +361,7 @@ func buildUpdateSQL(id uuid.UUID, req UpdateRequest) (string, []any, error) {
 			Set("object_ldns", nullableStrSlice(req.ObjectLDNs)).
 			Set("window_start", nullableTime(req.WindowStart)).
 			Set("window_end", nullableTime(req.WindowEnd))
-		if req.PlannedEndAt != nil {
+		if req.PlannedEndAtSet {
 			qb = qb.Set("planned_end_at", nullablePtrTime(req.PlannedEndAt))
 		}
 		if req.Mode == ModeOneshot && req.RequeueTerminal {
@@ -1003,6 +1003,9 @@ func nullablePtrTime(t *time.Time) any {
 func plannedEndValue(req CreateRequest) any {
 	if req.Mode != ModeContinuous || req.IsBuiltin {
 		return nil
+	}
+	if req.PlannedEndAtSet {
+		return nullablePtrTime(req.PlannedEndAt)
 	}
 	if req.PlannedEndAt != nil && !req.PlannedEndAt.IsZero() {
 		return *req.PlannedEndAt

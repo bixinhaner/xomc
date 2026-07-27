@@ -286,7 +286,7 @@ export default function PmAdhocWizard() {
   const step3Valid = metricPaths.length >= 1 && metricPaths.length <= PM_QUERY_SELECTION_LIMIT;
   const step4Valid =
     mode === 'continuous'
-      ? isEdit || !plannedEndTouched || (plannedEndAt != null && plannedEndAt.isAfter(dayjs()))
+      ? isEdit || plannedEndAt == null || !plannedEndTouched || plannedEndAt.isAfter(dayjs())
       : (window[0] && window[1] && window[1].isAfter(window[0]));
 
   const canNext = [step1Valid, step2Valid, step3Valid, step4Valid][current];
@@ -335,8 +335,8 @@ export default function PmAdhocWizard() {
       if (isEdit && !drilldownTouched && objectLdns.length === 0) {
         objectLdns = originalObjectLdns;
       }
-      const submitPlannedEndAt = mode === 'continuous' && plannedEndAt
-        ? (!isEdit && !plannedEndTouched ? undefined : plannedEndAt.toISOString())
+      const submitPlannedEndAt = mode === 'continuous'
+        ? (!isEdit && !plannedEndTouched ? undefined : plannedEndAt?.toISOString() ?? null)
         : undefined;
       if (isEdit && editId) {
         // 编辑：mode/technology/dimension 锁定不可改，只发可改字段；后端按既有任务校验。
@@ -693,7 +693,6 @@ export default function PmAdhocWizard() {
             showTime
             style={{ width: '100%' }}
             value={plannedEndAt}
-            allowClear={false}
             disabledDate={
               isEdit
                 ? undefined

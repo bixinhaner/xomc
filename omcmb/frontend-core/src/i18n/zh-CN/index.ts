@@ -8143,7 +8143,7 @@ const messages: Record<string, string> = {
   'perf.adhoc.fieldTimeRangeReq':        '时间范围 *',
   'perf.adhoc.continuousNoRange':        '持续型任务无需时间范围',
   'perf.adhoc.continuousNoRangeDesc':    '后端按粒度自动滚动聚合最新数据（不固定时间窗）。',
-  'perf.adhoc.fieldPlannedEndAt':        '计划结束时间 *',
+  'perf.adhoc.fieldPlannedEndAt':        '计划结束时间',
   'perf.adhoc.plannedEndAtHint':         '到达计划结束时间后任务会自动停止，不再产生新的聚合窗口结果。',
   'perf.adhoc.confirmTaskName':          '任务名称',
   'perf.adhoc.confirmVisibility':        '可见性',

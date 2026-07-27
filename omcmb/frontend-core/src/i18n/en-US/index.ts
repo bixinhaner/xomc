@@ -8108,7 +8108,7 @@ const messages: Record<string, string> = {
   'perf.adhoc.fieldTimeRangeReq':        'Time Range *',
   'perf.adhoc.continuousNoRange':        'Continuous tasks need no time range',
   'perf.adhoc.continuousNoRangeDesc':    'The backend automatically rolls up the latest data by granularity (no fixed time window).',
-  'perf.adhoc.fieldPlannedEndAt':        'Planned End *',
+  'perf.adhoc.fieldPlannedEndAt':        'Planned End',
   'perf.adhoc.plannedEndAtHint':         'When the planned end is reached, the task stops automatically and no new aggregation windows are produced.',
   'perf.adhoc.confirmTaskName':          'Task Name',
   'perf.adhoc.confirmVisibility':        'Visibility',

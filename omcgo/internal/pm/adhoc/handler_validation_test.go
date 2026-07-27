@@ -384,8 +384,29 @@ func Test_Handler_Create_Continuous_PlannedEndAt_Captured(t *testing.T) {
 	require.Equal(t, http.StatusCreated, w.Code)
 	require.NotNil(t, captured.PlannedEndAt)
 	assert.Equal(t, plannedEndAt, captured.PlannedEndAt.UTC().Format(time.RFC3339))
+	assert.True(t, captured.PlannedEndAtSet)
 	assert.True(t, captured.WindowStart.IsZero())
 	assert.True(t, captured.WindowEnd.IsZero())
+}
+
+func Test_Handler_Create_Continuous_PlannedEndAtNull_ClearsDefault(t *testing.T) {
+	var captured CreateRequest
+	repo := &handlerStubRepo{
+		create: func(req CreateRequest) (uuid.UUID, error) {
+			captured = req
+			return uuid.New(), nil
+		},
+	}
+	b := map[string]any{
+		"name": "c", "mode": "continuous",
+		"dimension":      "network",
+		"metric_paths":   []string{"M1"},
+		"planned_end_at": nil,
+	}
+	w := postCreateWithRepo(t, repo, b)
+	require.Equal(t, http.StatusCreated, w.Code)
+	assert.True(t, captured.PlannedEndAtSet)
+	assert.Nil(t, captured.PlannedEndAt)
 }
 
 func Test_Handler_Create_Builtin_IgnoresPlannedEndAt(t *testing.T) {
@@ -405,6 +426,7 @@ func Test_Handler_Create_Builtin_IgnoresPlannedEndAt(t *testing.T) {
 	}
 	w := postCreateWithRepo(t, repo, b)
 	require.Equal(t, http.StatusCreated, w.Code)
+	assert.False(t, captured.PlannedEndAtSet)
 	assert.Nil(t, captured.PlannedEndAt)
 }
 
@@ -589,6 +611,33 @@ func Test_Handler_Update_Adhoc_Continuous_PlannedEndAt_Captured(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	require.NotNil(t, captured.PlannedEndAt)
 	assert.Equal(t, plannedEndAt, captured.PlannedEndAt.UTC().Format(time.RFC3339))
+	assert.True(t, captured.PlannedEndAtSet)
+	assert.True(t, captured.WindowStart.IsZero())
+	assert.True(t, captured.WindowEnd.IsZero())
+}
+
+func Test_Handler_Update_Adhoc_Continuous_PlannedEndAtNull_Captured(t *testing.T) {
+	id := uuid.New()
+	var captured UpdateRequest
+	repo := &handlerStubRepo{
+		get: func(uuid.UUID) (*Task, error) {
+			return &Task{
+				ID: id, IsBuiltin: false, Mode: ModeContinuous,
+				Granularities: []string{"hourly"}, Dimension: DimensionNetwork,
+				Creator: "anonymous",
+			}, nil
+		},
+		update: func(_ uuid.UUID, req UpdateRequest) error { captured = req; return nil },
+	}
+	b := map[string]any{
+		"name":           "edited",
+		"metric_paths":   []string{"K1001"},
+		"planned_end_at": nil,
+	}
+	w := patchUpdate(t, repo, id, b)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, captured.PlannedEndAtSet)
+	assert.Nil(t, captured.PlannedEndAt)
 	assert.True(t, captured.WindowStart.IsZero())
 	assert.True(t, captured.WindowEnd.IsZero())
 }

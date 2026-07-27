@@ -28,7 +28,7 @@ interface CreateForm {
   name: string;
   deviceSns: string; // csv
   metricPaths: string; // csv
-  plannedEndAt?: dayjs.Dayjs;
+  plannedEndAt?: dayjs.Dayjs | null;
   aggregateGroup: boolean;
 }
 
@@ -94,8 +94,8 @@ export function CreateAdhocTaskDrawer({ open, preset, onClose, onCreated }: Prop
       granularities: ROLLUP_GRANULARITIES,
       dimension: v.aggregateGroup ? 'aggregate_group' : 'device',
     };
-    if (plannedEndTouched && v.plannedEndAt) {
-      input.plannedEndAt = v.plannedEndAt.toISOString();
+    if (plannedEndTouched) {
+      input.plannedEndAt = v.plannedEndAt ? v.plannedEndAt.toISOString() : null;
     }
     const task = await createMut.mutateAsync(input);
     message.success(intl.formatMessage({ id: 'perf.adhoc.taskCreated' }));
@@ -162,7 +162,6 @@ export function CreateAdhocTaskDrawer({ open, preset, onClose, onCreated }: Prop
         <Form.Item
           label={intl.formatMessage({ id: 'perf.adhoc.fieldPlannedEndAt' })}
           name="plannedEndAt"
-          rules={[{ required: true }]}
         >
           <DatePicker
             showTime
