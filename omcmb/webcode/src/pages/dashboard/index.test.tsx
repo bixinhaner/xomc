@@ -1,4 +1,11 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useUserStore } from '@core/store/userStore';
@@ -49,13 +56,24 @@ const dashboardMocks = vi.hoisted(() => ({
   useDashboardRealtime: vi.fn(),
 }));
 
+const navigationMocks = vi.hoisted(() => ({
+  navigate: vi.fn(),
+  openTab: vi.fn(),
+}));
+
 vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-router-dom')>();
   return {
     ...actual,
-    useNavigate: () => vi.fn(),
+    useNavigate: () => navigationMocks.navigate,
   };
 });
+
+vi.mock('@core/store/tabStore', () => ({
+  useTabStore: (
+    selector: (state: { openTab: typeof navigationMocks.openTab }) => unknown,
+  ) => selector({ openTab: navigationMocks.openTab }),
+}));
 
 vi.mock('@core/hooks/api/useDashboard', () => ({
   useDashboardSummary: dashboardMocks.useDashboardSummary,
@@ -184,6 +202,8 @@ const successfulSummary: DashboardSummary = {
 describe('DashboardPage card snapshot integration', () => {
   beforeEach(() => {
     window.localStorage.clear();
+    navigationMocks.navigate.mockReset();
+    navigationMocks.openTab.mockReset();
     dashboardMocks.summaryResult = {
       data: undefined,
       dataUpdatedAt: 0,
@@ -547,6 +567,65 @@ describe('DashboardPage card snapshot integration', () => {
     expect(dashboardMocks.useDashboardSummary).toHaveBeenLastCalledWith(
       apiScope,
       userB.id,
+    );
+  });
+
+  it('shows only production-ready quick access entries', () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <DashboardPage />
+      </QueryClientProvider>,
+    );
+
+    [
+      'nav.device.ne',
+      'nav.device.monitor',
+      'nav.device.commission',
+      'nav.device.stats',
+      'nav.log.system',
+    ].forEach((label) => {
+      expect(screen.queryByText(label)).not.toBeInTheDocument();
+    });
+
+    [
+      'nav.device.list',
+      'nav.alarm.current',
+      'nav.alarm.statistics',
+      'nav.performance.kpiStandard',
+      'nav.alarm.rules',
+      'nav.system.users',
+    ].forEach((label) => {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    });
+  });
+
+  it('opens a tab before navigating from quick access', () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <DashboardPage />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByText('nav.device.list'));
+
+    expect(navigationMocks.openTab).toHaveBeenCalledWith({
+      key: '/device/list',
+      label: 'nav.device.list',
+      path: '/device/list',
+      closable: true,
+      labelRaw: false,
+    });
+    expect(navigationMocks.navigate).toHaveBeenCalledWith('/device/list');
+    expect(navigationMocks.openTab.mock.invocationCallOrder[0]).toBeLessThan(
+      navigationMocks.navigate.mock.invocationCallOrder[0],
     );
   });
 });
