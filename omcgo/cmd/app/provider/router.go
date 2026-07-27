@@ -559,6 +559,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	}
 
 	// ----- Dashboard routes → resource "devices" -----
+	md.dashboardHandler.SetPermissionService(c.PermService)
 	md.dashboardHandler.RegisterRoutes(permGroup("devices"))
 
 	// ----- Syslog routes → resource "devices" -----

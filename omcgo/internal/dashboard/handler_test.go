@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type dashTopDevicesVisibleGroupsResolver struct{}
+
+func (dashTopDevicesVisibleGroupsResolver) GetUserVisibleGroupIDs(context.Context, uuid.UUID, bool) ([]uuid.UUID, error) {
+	return nil, nil
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -57,6 +64,15 @@ func TestDashHandler_RegisterRoutes_MethodNotAllowed(t *testing.T) {
 	// Gin by default returns 404 for unmatched method+path combos unless
 	// HandleMethodNotAllowed is enabled, so we just verify it's not 200.
 	assert.NotEqual(t, http.StatusOK, w.Code)
+}
+
+func TestDashHandler_TopAlarmDevicesRequiresVisibilityContext(t *testing.T) {
+	router, handler := dashHSetupRouter()
+	handler.SetPermissionService(dashTopDevicesVisibleGroupsResolver{})
+
+	w := dashHDoRequest(router, http.MethodGet, "/api/v1/dashboard/top-alarm-devices")
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
 // ---------------------------------------------------------------------------
