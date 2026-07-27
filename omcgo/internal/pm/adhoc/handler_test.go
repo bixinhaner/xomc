@@ -43,7 +43,8 @@ func (s *handlerStubRepo) Create(_ context.Context, req CreateRequest) (uuid.UUI
 		ID: id, Name: req.Name, Mode: req.Mode, CronExpr: req.CronExpr,
 		DeviceSNs: req.DeviceSNs, MetricPaths: req.MetricPaths, Granularities: req.Granularities,
 		WindowStart: req.WindowStart, WindowEnd: req.WindowEnd, Status: StatusPending,
-		Creator: req.Creator, Visibility: normalizeVisibility(req.Visibility), CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		PlannedEndAt: req.PlannedEndAt,
+		Creator:      req.Creator, Visibility: normalizeVisibility(req.Visibility), CreatedAt: time.Now(), UpdatedAt: time.Now(),
 	}
 	return id, nil
 }

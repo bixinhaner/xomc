@@ -33,6 +33,7 @@ func (r *PgTaskRepository) Save(ctx context.Context, req SaveTaskRequest) (*Task
 		now = time.Now().UTC()
 	}
 	effectiveFrom := saveEffectiveFrom(req, now)
+	plannedEndAt := nullablePtrTime(req.PlannedEndAt)
 
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -45,8 +46,8 @@ func (r *PgTaskRepository) Save(ctx context.Context, req SaveTaskRequest) (*Task
 		taskID = uuid.New()
 	}
 	insertSQL, insertArgs, buildErr := storage.Psql.Insert("pm_aggregation_tasks").
-		Columns("id", "name", "enabled", "visibility", "creator").
-		Values(taskID, req.Name, req.Enabled, req.Visibility, req.Creator).
+		Columns("id", "name", "enabled", "visibility", "creator", "planned_end_at").
+		Values(taskID, req.Name, req.Enabled, req.Visibility, req.Creator, plannedEndAt).
 		Suffix("ON CONFLICT (id) DO NOTHING").
 		ToSql()
 	if buildErr != nil {
@@ -55,7 +56,7 @@ func (r *PgTaskRepository) Save(ctx context.Context, req SaveTaskRequest) (*Task
 	if _, err := tx.Exec(ctx, insertSQL, insertArgs...); err != nil {
 		return nil, fmt.Errorf("create PM aggregation task: %w", err)
 	}
-	lockSQL, lockArgs, buildErr := storage.Psql.Select("id", "current_version_id").
+	lockSQL, lockArgs, buildErr := storage.Psql.Select("id", "current_version_id", "planned_end_at").
 		From("pm_aggregation_tasks").
 		Where(sq.Eq{"id": taskID, "deleted_at": nil}).
 		Suffix("FOR UPDATE").
@@ -65,7 +66,8 @@ func (r *PgTaskRepository) Save(ctx context.Context, req SaveTaskRequest) (*Task
 	}
 	var locked uuid.UUID
 	var currentVersionID *uuid.UUID
-	if err := tx.QueryRow(ctx, lockSQL, lockArgs...).Scan(&locked, &currentVersionID); err != nil {
+	var currentPlannedEndAt *time.Time
+	if err := tx.QueryRow(ctx, lockSQL, lockArgs...).Scan(&locked, &currentVersionID, &currentPlannedEndAt); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, fmt.Errorf("PM aggregation task %s is deleted", taskID)
 		}
@@ -75,6 +77,7 @@ func (r *PgTaskRepository) Save(ctx context.Context, req SaveTaskRequest) (*Task
 		Set("name", req.Name).
 		Set("enabled", req.Enabled).
 		Set("visibility", req.Visibility).
+		Set("planned_end_at", plannedEndAt).
 		Where(sq.Eq{"id": taskID}).
 		ToSql()
 	if buildErr != nil {
@@ -122,6 +125,9 @@ func (r *PgTaskRepository) Save(ctx context.Context, req SaveTaskRequest) (*Task
 				req, taskID, *currentVersionID, currentVersionNo, currentEffectiveFrom,
 			)
 			snapshot.NewVersion = false
+			if !sameOptionalTime(currentPlannedEndAt, req.PlannedEndAt) {
+				r.publishTaskVersionChanged(ctx, taskID, *currentVersionID, currentEffectiveFrom)
+			}
 			return snapshot, nil
 		}
 	}
@@ -198,15 +204,20 @@ func (r *PgTaskRepository) Save(ctx context.Context, req SaveTaskRequest) (*Task
 
 	snapshot := snapshotFromRequest(req, taskID, versionID, versionNo, effectiveFrom)
 	snapshot.NewVersion = true
-	if r.bus != nil {
-		payload := event.PMAggregationTaskVersionChangedPayload{
-			TaskID: taskID, TaskVersionID: versionID, EffectiveFrom: effectiveFrom,
-		}
-		if evt, eventErr := event.NewEvent(event.SubjectPMAggregationTaskVersionChanged, payload); eventErr == nil {
-			_ = r.bus.Publish(ctx, event.SubjectPMAggregationTaskVersionChanged, evt)
-		}
-	}
+	r.publishTaskVersionChanged(ctx, taskID, versionID, effectiveFrom)
 	return snapshot, nil
+}
+
+func (r *PgTaskRepository) publishTaskVersionChanged(ctx context.Context, taskID, versionID uuid.UUID, effectiveFrom time.Time) {
+	if r.bus == nil {
+		return
+	}
+	payload := event.PMAggregationTaskVersionChangedPayload{
+		TaskID: taskID, TaskVersionID: versionID, EffectiveFrom: effectiveFrom,
+	}
+	if evt, eventErr := event.NewEvent(event.SubjectPMAggregationTaskVersionChanged, payload); eventErr == nil {
+		_ = r.bus.Publish(ctx, event.SubjectPMAggregationTaskVersionChanged, evt)
+	}
 }
 
 func saveEffectiveFrom(req SaveTaskRequest, now time.Time) time.Time {
@@ -214,6 +225,23 @@ func saveEffectiveFrom(req SaveTaskRequest, now time.Time) time.Time {
 		return req.EffectiveFrom.UTC()
 	}
 	return now.UTC().Truncate(slotDuration).Add(slotDuration)
+}
+
+func nullablePtrTime(t *time.Time) any {
+	if t == nil || t.IsZero() {
+		return nil
+	}
+	return t.UTC()
+}
+
+func sameOptionalTime(a, b *time.Time) bool {
+	if a == nil || a.IsZero() {
+		return b == nil || b.IsZero()
+	}
+	if b == nil || b.IsZero() {
+		return false
+	}
+	return a.UTC().Equal(b.UTC())
 }
 
 func shouldAdjustEffectiveFrom(
@@ -344,7 +372,7 @@ func (r *PgTaskRepository) LoadMatchable(ctx context.Context, at time.Time) ([]*
 	query, args, err := storage.Psql.Select(
 		"t.id", "v.id", "v.version_no", "t.name", "v.enabled",
 		"COALESCE(v.technology, '')", "v.dimension", "v.granularities",
-		"v.object_ldns", "v.effective_from", "v.effective_to",
+		"v.object_ldns", "v.effective_from", "v.effective_to", "t.planned_end_at",
 	).From("pm_aggregation_task_versions v").
 		Join("pm_aggregation_tasks t ON t.id = v.task_id").
 		Where(sq.Or{
@@ -368,7 +396,7 @@ func (r *PgTaskRepository) LoadMatchable(ctx context.Context, at time.Time) ([]*
 		if err := rows.Scan(
 			&version.TaskID, &version.VersionID, &version.VersionNo, &version.Name, &version.Enabled,
 			&version.Technology, &version.Dimension, &granularityStrings, &objectLDNs,
-			&version.EffectiveFrom, &version.EffectiveTo,
+			&version.EffectiveFrom, &version.EffectiveTo, &version.PlannedEndAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan matchable PM aggregation task version: %w", err)
 		}
@@ -587,7 +615,8 @@ func snapshotFromRequest(
 		TaskID: taskID, VersionID: versionID, VersionNo: versionNo,
 		Name: req.Name, Enabled: req.Enabled, Technology: req.Technology,
 		Dimension: req.Dimension, Granularities: req.Granularities,
-		EffectiveFrom: effectiveFrom, Metrics: make(map[string]MetricRule),
+		EffectiveFrom: effectiveFrom, PlannedEndAt: req.PlannedEndAt,
+		Metrics:  make(map[string]MetricRule),
 		Counters: make(map[string]CounterRule),
 		Members:  make(map[uuid.UUID][]TaskMember), ObjectLDNs: make(map[string]struct{}),
 	}

@@ -62,6 +62,23 @@ describe('pmAdhocApi.create / update — 可见性字段透传', () => {
     expect(url).toBe('/pm/adhoc/tasks/task-1');
     expect(payload.visibility).toBe('private');
   });
+
+  it('create / update 透传计划结束时间为 planned_end_at', async () => {
+    await pmAdhocApi.create({
+      name: '临时观察',
+      mode: 'continuous',
+      deviceSns: [],
+      metricPaths: ['K0001'],
+      plannedEndAt: '2026-08-26T12:00:00.000Z',
+    });
+    expect(postMock.mock.calls[0][1].planned_end_at).toBe('2026-08-26T12:00:00.000Z');
+
+    await pmAdhocApi.update('task-1', {
+      metricPaths: ['K0001'],
+      plannedEndAt: '2026-08-27T12:00:00.000Z',
+    });
+    expect(patchMock.mock.calls[0][1].planned_end_at).toBe('2026-08-27T12:00:00.000Z');
+  });
 });
 
 describe('pmAdhocApi.results — 维度子集过滤 query（手动 snake_case，CSV 形态）', () => {

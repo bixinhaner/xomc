@@ -90,12 +90,14 @@ type Task struct {
 	Technology  string    // T-0182：任务制式（lte/nr/gsm），空=不限制式；建后不可改
 	IsBuiltin   bool      // T-0182：内置任务标记（T-0184 预置 12 个内置任务）
 	ExpireDays  int       // T-0182：非持续型任务过期天数（默认 60，约束任务定义层）
-	Visibility  Visibility
-	Status      Status
-	Progress    int    // 0-100
-	Creator     string // user_id 字符串或用户名（与 pm_tasks 既有 creator 列对齐）
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// PlannedEndAt 是自建 continuous 任务的计划结束时间。nil 表示老任务/内置任务不设计划结束。
+	PlannedEndAt *time.Time
+	Visibility   Visibility
+	Status       Status
+	Progress     int    // 0-100
+	Creator      string // user_id 字符串或用户名（与 pm_tasks 既有 creator 列对齐）
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 
 	// 运行期字段（DB 中通过 pm_tasks 其它列承载）
 	StartedAt  *time.Time
@@ -113,15 +115,16 @@ type CreateRequest struct {
 	MetricPaths   []string
 	Granularities []string
 	// ObjectLDNs T-0193：小区/PLMN 白名单（完整 object_ldn 字符串）。空 = 不过滤 = 全小区。
-	ObjectLDNs  []string
-	WindowStart time.Time
-	WindowEnd   time.Time
-	Dimension   Dimension // 默认 device
-	Technology  string    // T-0182：lte/nr/gsm，空=不限
-	IsBuiltin   bool      // T-0182：内置任务标记
-	ExpireDays  int       // T-0182：非持续型过期天数，<=0 时 repository 兜底为 60
-	Visibility  Visibility
-	Creator     string
+	ObjectLDNs   []string
+	WindowStart  time.Time
+	WindowEnd    time.Time
+	Dimension    Dimension // 默认 device
+	Technology   string    // T-0182：lte/nr/gsm，空=不限
+	IsBuiltin    bool      // T-0182：内置任务标记
+	ExpireDays   int       // T-0182：非持续型过期天数，<=0 时 repository 兜底为 60
+	PlannedEndAt *time.Time
+	Visibility   Visibility
+	Creator      string
 }
 
 // UpdateRequest 是 Repository.Update / handler.Update 的输入（T-0194 编辑任务定义）。
@@ -147,6 +150,7 @@ type UpdateRequest struct {
 	WindowStart     time.Time
 	WindowEnd       time.Time
 	LastFireAt      time.Time
+	PlannedEndAt    *time.Time
 	Visibility      Visibility
 }
 

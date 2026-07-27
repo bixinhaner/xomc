@@ -365,6 +365,49 @@ func Test_Handler_Create_Continuous_NoWindow_DerivesCron_ClearsWindow(t *testing
 	assert.Equal(t, aggregationRollupGranularityStrings(), captured.Granularities)
 }
 
+func Test_Handler_Create_Continuous_PlannedEndAt_Captured(t *testing.T) {
+	var captured CreateRequest
+	repo := &handlerStubRepo{
+		create: func(req CreateRequest) (uuid.UUID, error) {
+			captured = req
+			return uuid.New(), nil
+		},
+	}
+	plannedEndAt := "2027-08-26T12:00:00Z"
+	b := map[string]any{
+		"name": "c", "mode": "continuous",
+		"dimension":      "network",
+		"metric_paths":   []string{"M1"},
+		"planned_end_at": plannedEndAt,
+	}
+	w := postCreateWithRepo(t, repo, b)
+	require.Equal(t, http.StatusCreated, w.Code)
+	require.NotNil(t, captured.PlannedEndAt)
+	assert.Equal(t, plannedEndAt, captured.PlannedEndAt.UTC().Format(time.RFC3339))
+	assert.True(t, captured.WindowStart.IsZero())
+	assert.True(t, captured.WindowEnd.IsZero())
+}
+
+func Test_Handler_Create_Builtin_IgnoresPlannedEndAt(t *testing.T) {
+	var captured CreateRequest
+	repo := &handlerStubRepo{
+		create: func(req CreateRequest) (uuid.UUID, error) {
+			captured = req
+			return uuid.New(), nil
+		},
+	}
+	b := map[string]any{
+		"name": "builtin", "mode": "continuous",
+		"dimension":      "network",
+		"metric_paths":   []string{"M1"},
+		"is_builtin":     true,
+		"planned_end_at": "2026-01-01T00:00:00Z",
+	}
+	w := postCreateWithRepo(t, repo, b)
+	require.Equal(t, http.StatusCreated, w.Code)
+	assert.Nil(t, captured.PlannedEndAt)
+}
+
 // 失败路径：oneshot + 无 window → 400（oneshot 必须给有效时间窗）。
 func Test_Handler_Create_Oneshot_NoWindow_Rejected(t *testing.T) {
 	b := map[string]any{
@@ -521,6 +564,33 @@ func Test_Handler_Update_Adhoc_ContinuousGranularity_DerivesCron(t *testing.T) {
 	assert.True(t, captured.ResetCursor, "粒度变化后应重置调度游标，避免沿用旧 daily 游标")
 	assert.Equal(t, ModeContinuous, captured.Mode)
 	assert.Equal(t, DimensionNetwork, captured.Dimension)
+}
+
+func Test_Handler_Update_Adhoc_Continuous_PlannedEndAt_Captured(t *testing.T) {
+	id := uuid.New()
+	var captured UpdateRequest
+	repo := &handlerStubRepo{
+		get: func(uuid.UUID) (*Task, error) {
+			return &Task{
+				ID: id, IsBuiltin: false, Mode: ModeContinuous,
+				Granularities: []string{"hourly"}, Dimension: DimensionNetwork,
+				Creator: "anonymous",
+			}, nil
+		},
+		update: func(_ uuid.UUID, req UpdateRequest) error { captured = req; return nil },
+	}
+	plannedEndAt := "2027-08-26T12:00:00Z"
+	b := map[string]any{
+		"name":           "edited",
+		"metric_paths":   []string{"K1001"},
+		"planned_end_at": plannedEndAt,
+	}
+	w := patchUpdate(t, repo, id, b)
+	require.Equal(t, http.StatusOK, w.Code)
+	require.NotNil(t, captured.PlannedEndAt)
+	assert.Equal(t, plannedEndAt, captured.PlannedEndAt.UTC().Format(time.RFC3339))
+	assert.True(t, captured.WindowStart.IsZero())
+	assert.True(t, captured.WindowEnd.IsZero())
 }
 
 // 失败路径：自建 device 维度 + 空 device_sns → 400（必填设备）。

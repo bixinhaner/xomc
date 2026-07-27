@@ -334,6 +334,18 @@ func Test_Worker_NoPendingReturnsFalse(t *testing.T) {
 	assert.False(t, ran)
 }
 
+func Test_Worker_TerminalStatus_CancelsExpiredContinuousTask(t *testing.T) {
+	w := NewWorker(nil, nil, "test-worker-1", time.Hour, nil)
+	plannedEndAt := time.Now().Add(-time.Minute)
+
+	status := w.terminalStatus(&Task{
+		Mode:         ModeContinuous,
+		PlannedEndAt: &plannedEndAt,
+	}, nil)
+
+	assert.Equal(t, StatusCanceled, status)
+}
+
 // ---------------------------------------------------------------------------
 // ContinuousScheduler.sweepOnce：scheduled→pending 切换
 // ---------------------------------------------------------------------------
@@ -397,6 +409,30 @@ func Test_ContinuousScheduler_ListErrorTolerated(t *testing.T) {
 	s := NewContinuousScheduler(repo, time.Hour, nil)
 	// 不 panic
 	s.sweepOnce(context.Background(), time.Now())
+}
+
+type plannedEndRepoStub struct {
+	calledAt time.Time
+	limit    int
+	count    int
+	err      error
+}
+
+func (s *plannedEndRepoStub) StopExpiredPlannedContinuous(_ context.Context, now time.Time, limit int) (int, error) {
+	s.calledAt = now
+	s.limit = limit
+	return s.count, s.err
+}
+
+func Test_PlannedEndScheduler_StopsExpiredContinuousTasks(t *testing.T) {
+	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	repo := &plannedEndRepoStub{count: 2}
+	s := NewPlannedEndScheduler(repo, time.Hour, nil)
+
+	s.sweepOnce(context.Background(), now)
+
+	assert.Equal(t, now, repo.calledAt)
+	assert.Equal(t, 1000, repo.limit)
 }
 
 // G7-Gap-9: lossless catchup

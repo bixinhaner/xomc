@@ -88,31 +88,34 @@ type createRequestDTO struct {
 	IsBuiltin bool `json:"is_builtin"`
 	// 非持续型过期天数（T-0182，默认 60）
 	ExpireDays int `json:"expire_days" binding:"omitempty,min=1"`
+	// planned_end_at：自建 continuous 任务计划结束时间；不传由 repository 默认 created_at+30d。
+	PlannedEndAt *time.Time `json:"planned_end_at"`
 	// visibility：private（默认，仅创建者/超管可见可操作）/ public（登录用户可见可操作）
 	Visibility string `json:"visibility" binding:"omitempty,oneof=private public"`
 }
 
 type taskResponseDTO struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	Mode          string    `json:"mode"`
-	CronExpr      *string   `json:"cron_expr,omitempty"`
-	DeviceSNs     []string  `json:"device_sns"`
-	MetricPaths   []string  `json:"metric_paths"`
-	Granularities []string  `json:"granularities"`
-	ObjectLDNs    []string  `json:"object_ldns"` // T-0193：小区/PLMN 白名单回吐（空=全小区）
-	WindowStart   time.Time `json:"window_start"`
-	WindowEnd     time.Time `json:"window_end"`
-	Dimension     string    `json:"dimension"`
-	Technology    string    `json:"technology,omitempty"`
-	IsBuiltin     bool      `json:"is_builtin"`
-	ExpireDays    int       `json:"expire_days"`
-	Visibility    string    `json:"visibility"`
-	Status        string    `json:"status"`
-	Progress      int       `json:"progress"`
-	Creator       string    `json:"creator"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID            string     `json:"id"`
+	Name          string     `json:"name"`
+	Mode          string     `json:"mode"`
+	CronExpr      *string    `json:"cron_expr,omitempty"`
+	DeviceSNs     []string   `json:"device_sns"`
+	MetricPaths   []string   `json:"metric_paths"`
+	Granularities []string   `json:"granularities"`
+	ObjectLDNs    []string   `json:"object_ldns"` // T-0193：小区/PLMN 白名单回吐（空=全小区）
+	WindowStart   time.Time  `json:"window_start"`
+	WindowEnd     time.Time  `json:"window_end"`
+	Dimension     string     `json:"dimension"`
+	Technology    string     `json:"technology,omitempty"`
+	IsBuiltin     bool       `json:"is_builtin"`
+	ExpireDays    int        `json:"expire_days"`
+	PlannedEndAt  *time.Time `json:"planned_end_at,omitempty"`
+	Visibility    string     `json:"visibility"`
+	Status        string     `json:"status"`
+	Progress      int        `json:"progress"`
+	Creator       string     `json:"creator"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 type adhocResultDTO struct {
@@ -170,6 +173,7 @@ func taskToDTO(ctx context.Context, t *Task) taskResponseDTO {
 		Technology:    t.Technology,
 		IsBuiltin:     t.IsBuiltin,
 		ExpireDays:    t.ExpireDays,
+		PlannedEndAt:  t.PlannedEndAt,
 		Visibility:    string(normalizeVisibility(t.Visibility)),
 		Status:        string(t.Status),
 		Progress:      t.Progress,
@@ -193,6 +197,7 @@ func (h *Handler) Create(c *gin.Context) {
 	if dim == "" {
 		dim = DimensionDevice
 	}
+	mode := Mode(req.Mode)
 	// #669：粒度前置守门——15min 已整组下线（详见 unsupportedGranularity 注释）。
 	// 保留 dim 入参以便日后扩展新的（粒度,维度）限制。
 	// T-0185：device_sns 仅 device/aggregate_group（自选设备）维度必填；其余维度按制式全量聚合。
@@ -203,6 +208,12 @@ func (h *Handler) Create(c *gin.Context) {
 	// 在线聚合只从下一个完整窗口开始，不接受历史执行时间窗。
 	req.WindowStart = time.Time{}
 	req.WindowEnd = time.Time{}
+	if req.IsBuiltin || mode != ModeContinuous {
+		req.PlannedEndAt = nil
+	} else if req.PlannedEndAt != nil && !req.PlannedEndAt.After(time.Now()) {
+		response.Fail(c, http.StatusBadRequest, "planned_end_at must be in the future")
+		return
+	}
 	// 制式过滤：建任务拒跨制式 —— 选定制式后，范围内的设备必须全部属于该制式（设计 §2.5）。
 	if req.Technology != "" && len(req.DeviceSNs) > 0 {
 		if err := h.rejectCrossTechnology(c.Request.Context(), req.Technology, req.DeviceSNs); err != nil {
@@ -216,7 +227,7 @@ func (h *Handler) Create(c *gin.Context) {
 	}
 	// T-0185：continuous 任务的 cron 由粒度自动派生（向导不暴露 cron 字段）；显式传 cron 则尊重。
 	cronExpr := req.CronExpr
-	if Mode(req.Mode) == ModeContinuous && cronExpr == "" {
+	if mode == ModeContinuous && cronExpr == "" {
 		cronExpr = cronForGranularity(req.Granularities[0])
 	}
 	var cronPtr *string
@@ -232,7 +243,7 @@ func (h *Handler) Create(c *gin.Context) {
 	creator := extractCreator(c)
 	id, err := h.repo.Create(c.Request.Context(), CreateRequest{
 		Name:          req.Name,
-		Mode:          Mode(req.Mode),
+		Mode:          mode,
 		CronExpr:      cronPtr,
 		DeviceSNs:     req.DeviceSNs,
 		MetricPaths:   req.MetricPaths,
@@ -244,6 +255,7 @@ func (h *Handler) Create(c *gin.Context) {
 		Technology:    req.Technology,
 		IsBuiltin:     req.IsBuiltin,
 		ExpireDays:    req.ExpireDays,
+		PlannedEndAt:  req.PlannedEndAt,
 		Visibility:    Visibility(req.Visibility),
 		Creator:       creator,
 	})
@@ -415,14 +427,15 @@ func (h *Handler) Get(c *gin.Context) {
 // 字段集与编辑能力对齐：自建任务可改 name/device_sns/metric_paths/granularities/object_ldns/window；
 // 内置任务只取 metric_paths（其余字段服务端忽略）。mode/technology/dimension/is_builtin/expire_days 不在此结构体，不可改。
 type updateRequestDTO struct {
-	Name          string    `json:"name"`
-	DeviceSNs     []string  `json:"device_sns"`
-	MetricPaths   []string  `json:"metric_paths" binding:"required,min=1"`
-	Granularities []string  `json:"granularities"`
-	ObjectLDNs    []string  `json:"object_ldns"`
-	WindowStart   time.Time `json:"window_start"`
-	WindowEnd     time.Time `json:"window_end"`
-	Visibility    string    `json:"visibility" binding:"omitempty,oneof=private public"`
+	Name          string     `json:"name"`
+	DeviceSNs     []string   `json:"device_sns"`
+	MetricPaths   []string   `json:"metric_paths" binding:"required,min=1"`
+	Granularities []string   `json:"granularities"`
+	ObjectLDNs    []string   `json:"object_ldns"`
+	WindowStart   time.Time  `json:"window_start"`
+	WindowEnd     time.Time  `json:"window_end"`
+	PlannedEndAt  *time.Time `json:"planned_end_at"`
+	Visibility    string     `json:"visibility" binding:"omitempty,oneof=private public"`
 }
 
 // Update PATCH /pm/adhoc/tasks/:id
@@ -523,6 +536,7 @@ func (h *Handler) Update(c *gin.Context) {
 		upd.ObjectLDNs = objectLDNs
 		upd.WindowStart = req.WindowStart
 		upd.WindowEnd = req.WindowEnd
+		upd.PlannedEndAt = req.PlannedEndAt
 		upd.RequeueTerminal = existing.Mode == ModeOneshot && oneshotExecutionInputsChanged(existing, req, objectLDNs)
 	}
 

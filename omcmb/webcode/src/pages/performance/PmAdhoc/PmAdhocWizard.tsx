@@ -41,7 +41,7 @@ import { useDeviceList } from '@core/hooks/api/useDevices';
 import { useMetricObjectsByDevices } from '@core/hooks/api/usePmQuery';
 import { useIndicatorCandidates } from '@core/hooks/api/usePerformance';
 import type { IndicatorCandidate } from '@core/services/api/pmApi';
-import type { AdhocDimension, AdhocMode, AdhocVisibility } from '@core/types/pmAdhoc';
+import type { AdhocDimension, AdhocMode, AdhocVisibility, CreateAdhocTaskInput } from '@core/types/pmAdhoc';
 import type { DeviceType } from '@core/types/indicatorLibrary';
 import { formatIndicatorLevel, shouldShowIndicatorLevel } from '@core/utils/indicatorLevelDisplay';
 import CellDrilldownSelector from '../PmDashboard/CellDrilldownSelector';
@@ -173,6 +173,8 @@ export default function PmAdhocWizard() {
     dayjs().subtract(1, 'day'),
     dayjs(),
   ]);
+  const [plannedEndAt, setPlannedEndAt] = useState<dayjs.Dayjs | null>(() => dayjs().add(30, 'day'));
+  const [plannedEndTouched, setPlannedEndTouched] = useState(false);
 
   // T-0194 编辑模式：预填守卫（只预填一次，避免覆盖用户后续编辑）+ 下钻是否被用户改动。
   const [prefilled, setPrefilled] = useState(false);
@@ -197,9 +199,20 @@ export default function PmAdhocWizard() {
       const we = dayjs(editTask.windowEnd);
       if (ws.isValid() && we.isValid()) setWindow([ws, we]);
     }
+    if (editTask.mode === 'continuous') {
+      const planned = editTask.plannedEndAt ? dayjs(editTask.plannedEndAt) : null;
+      setPlannedEndAt(planned && planned.isValid() ? planned : null);
+    }
+    setPlannedEndTouched(false);
     setOriginalObjectLdns(editTask.objectLdns ?? []);
     setPrefilled(true);
   }, [isEdit, prefilled, editTask]);
+
+  useEffect(() => {
+    if (isEdit) return;
+    setPlannedEndAt(dayjs().add(30, 'day'));
+    setPlannedEndTouched(false);
+  }, [isEdit]);
 
   const needsDevicePick = dimension === 'device' || dimension === 'aggregate_group';
 
@@ -272,7 +285,9 @@ export default function PmAdhocWizard() {
     : true;
   const step3Valid = metricPaths.length >= 1 && metricPaths.length <= PM_QUERY_SELECTION_LIMIT;
   const step4Valid =
-    mode === 'continuous' || (window[0] && window[1] && window[1].isAfter(window[0]));
+    mode === 'continuous'
+      ? isEdit || !plannedEndTouched || (plannedEndAt != null && plannedEndAt.isAfter(dayjs()))
+      : (window[0] && window[1] && window[1].isAfter(window[0]));
 
   const canNext = [step1Valid, step2Valid, step3Valid, step4Valid][current];
 
@@ -320,6 +335,9 @@ export default function PmAdhocWizard() {
       if (isEdit && !drilldownTouched && objectLdns.length === 0) {
         objectLdns = originalObjectLdns;
       }
+      const submitPlannedEndAt = mode === 'continuous' && plannedEndAt
+        ? (!isEdit && !plannedEndTouched ? undefined : plannedEndAt.toISOString())
+        : undefined;
       if (isEdit && editId) {
         // 编辑：mode/technology/dimension 锁定不可改，只发可改字段；后端按既有任务校验。
         await updateMut.mutateAsync({
@@ -330,6 +348,7 @@ export default function PmAdhocWizard() {
             metricPaths,
             granularities: ROLLUP_GRANULARITIES,
             visibility,
+            plannedEndAt: submitPlannedEndAt,
             windowStart: mode === 'oneshot' ? window[0].toISOString() : undefined,
             windowEnd: mode === 'oneshot' ? window[1].toISOString() : undefined,
             objectLdns: objectLdns.length > 0 ? objectLdns : undefined,
@@ -339,7 +358,7 @@ export default function PmAdhocWizard() {
         navigate('/performance/pm-adhoc');
         return;
       }
-      await createMut.mutateAsync({
+      const createInput: CreateAdhocTaskInput = {
         name: name.trim(),
         mode,
         dimension,
@@ -348,14 +367,18 @@ export default function PmAdhocWizard() {
         metricPaths,
         granularities: ROLLUP_GRANULARITIES,
         visibility,
-        // oneshot 带 window；continuous 不带（后端开窗滚动）
+        // oneshot 带 window；continuous 源数据窗口不带（后端开窗滚动）
         windowStart: mode === 'oneshot' ? window[0].toISOString() : undefined,
         windowEnd: mode === 'oneshot' ? window[1].toISOString() : undefined,
         // 过期天数仅非持续型生效
         expireDays: mode === 'oneshot' ? expireDays : undefined,
         // 小区/PLMN 白名单（空=不传）
         objectLdns: objectLdns.length > 0 ? objectLdns : undefined,
-      });
+      };
+      if (submitPlannedEndAt !== undefined) {
+        createInput.plannedEndAt = submitPlannedEndAt;
+      }
+      await createMut.mutateAsync(createInput);
       message.success(intl.formatMessage({ id: 'perf.adhoc.taskCreated' }));
       navigate('/performance/pm-adhoc');
     } catch (e) {
@@ -680,12 +703,29 @@ export default function PmAdhocWizard() {
           />
         </div>
       ) : (
-        <Alert
-          type="info"
-          showIcon
-          title={intl.formatMessage({ id: 'perf.adhoc.continuousNoRange' })}
-          description={intl.formatMessage({ id: 'perf.adhoc.continuousNoRangeDesc' })}
-        />
+        <div>
+          <div style={{ marginBottom: 8, fontWeight: 500 }}>
+            {intl.formatMessage({ id: 'perf.adhoc.fieldPlannedEndAt' })}
+          </div>
+          <DatePicker
+            showTime
+            style={{ width: '100%' }}
+            value={plannedEndAt}
+            allowClear={false}
+            disabledDate={
+              isEdit
+                ? undefined
+                : (currentDate) => Boolean(currentDate && currentDate.isBefore(dayjs().startOf('day')))
+            }
+            onChange={(v) => {
+              setPlannedEndAt(v);
+              setPlannedEndTouched(true);
+            }}
+          />
+          <div style={{ marginTop: 8, color: '#888' }}>
+            {intl.formatMessage({ id: 'perf.adhoc.plannedEndAtHint' })}
+          </div>
+        </div>
       )}
     </Space>
   );
@@ -725,6 +765,13 @@ export default function PmAdhocWizard() {
         {mode === 'oneshot' && (
           <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmExpireDays' })}>
             {expireDays} {intl.formatMessage({ id: 'perf.adhoc.daySuffix' })}
+          </Descriptions.Item>
+        )}
+        {mode === 'continuous' && (
+          <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmPlannedEndAt' })}>
+            {plannedEndAt
+              ? plannedEndAt.format('YYYY-MM-DD HH:mm:ss')
+              : <Tag>{intl.formatMessage({ id: 'perf.adhoc.confirmNoPlannedEndAt' })}</Tag>}
           </Descriptions.Item>
         )}
         <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmDimension' })}>

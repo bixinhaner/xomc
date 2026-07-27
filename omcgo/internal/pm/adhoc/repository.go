@@ -196,7 +196,7 @@ var taskCols = []string{
 	"id", "task_name", "task_subtype", "mode", "cron_expr",
 	"device_sns", "metric_paths", "granularities",
 	"window_start", "window_end", "dimension", "technology", "is_builtin", "expire_days",
-	"visibility", "status", "progress",
+	"planned_end_at", "visibility", "status", "progress",
 	"creator", "created_at", "updated_at",
 	"object_ldns", // T-0193：小区/PLMN 白名单（TEXT[]，NULL=不过滤）
 }
@@ -228,18 +228,19 @@ func (r *PgRepository) Create(ctx context.Context, req CreateRequest) (uuid.UUID
 			initialFire = bucket
 		}
 	}
+	plannedEndAt := plannedEndValue(req)
 	q, args, err := storage.Psql.Insert("pm_tasks").
 		Columns(
 			"task_name", "task_type", "task_subtype", "mode", "cron_expr",
 			"device_sns", "metric_paths", "granularities",
 			"window_start", "window_end", "dimension", "technology", "is_builtin", "expire_days",
-			"visibility", "status", "progress", "creator", "object_ldns", "last_fire_at",
+			"planned_end_at", "visibility", "status", "progress", "creator", "object_ldns", "last_fire_at",
 		).
 		Values(
 			req.Name, "extraction", TaskSubtype, string(req.Mode), nullableString(req.CronExpr),
 			deviceSNsJSON, req.MetricPaths, req.Granularities,
 			nullableTime(req.WindowStart), nullableTime(req.WindowEnd), string(dim), nullableTech(req.Technology), req.IsBuiltin, expireDays,
-			string(visibility), string(StatusScheduled), 0, req.Creator, nullableStrSlice(req.ObjectLDNs), initialFire,
+			plannedEndAt, string(visibility), string(StatusScheduled), 0, req.Creator, nullableStrSlice(req.ObjectLDNs), initialFire,
 		).
 		Suffix("RETURNING id").
 		ToSql()
@@ -280,27 +281,59 @@ func (r *PgRepository) Update(ctx context.Context, id uuid.UUID, req UpdateReque
 			req.LastFireAt = time.Now().UTC()
 		}
 	}
+	var originalTask *Task
+	if r.streamRepo != nil {
+		task, loadErr := r.Get(ctx, id)
+		if loadErr != nil {
+			return loadErr
+		}
+		originalTask = task
+		candidate := applyUpdateToTask(task, req)
+		if syncErr := r.syncStreamingTask(ctx, candidate, candidate.Status != StatusCanceled); syncErr != nil {
+			return syncErr
+		}
+	}
 	q, args, err := buildUpdateSQL(id, req)
 	if err != nil {
 		return fmt.Errorf("adhoc.Update: build SQL: %w", err)
 	}
 	tag, err := r.pool.Exec(ctx, q, args...)
 	if err != nil {
+		if originalTask != nil {
+			_ = r.syncStreamingTask(ctx, originalTask, originalTask.Status != StatusCanceled)
+		}
 		return fmt.Errorf("adhoc.Update: exec: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
+		if originalTask != nil {
+			_ = r.syncStreamingTask(ctx, originalTask, originalTask.Status != StatusCanceled)
+		}
 		return ErrNotFound
 	}
-	if r.streamRepo != nil {
-		task, loadErr := r.Get(ctx, id)
-		if loadErr != nil {
-			return loadErr
-		}
-		if syncErr := r.syncStreamingTask(ctx, task, task.Status != StatusCanceled); syncErr != nil {
-			return syncErr
-		}
-	}
 	return nil
+}
+
+func applyUpdateToTask(task *Task, req UpdateRequest) *Task {
+	if task == nil {
+		return nil
+	}
+	updated := *task
+	updated.MetricPaths = append([]string(nil), req.MetricPaths...)
+	if req.IsBuiltin {
+		return &updated
+	}
+	updated.Name = req.Name
+	updated.CronExpr = req.CronExpr
+	updated.DeviceSNs = append([]string(nil), req.DeviceSNs...)
+	updated.Granularities = append([]string(nil), req.Granularities...)
+	updated.ObjectLDNs = append([]string(nil), req.ObjectLDNs...)
+	updated.WindowStart = req.WindowStart
+	updated.WindowEnd = req.WindowEnd
+	updated.Visibility = normalizeVisibility(req.Visibility)
+	if req.PlannedEndAt != nil {
+		updated.PlannedEndAt = req.PlannedEndAt
+	}
+	return &updated
 }
 
 // buildUpdateSQL 构建编辑任务的 UPDATE SQL（T-0194）。抽出便于单测断言守门口径（哪些列进 SET）。
@@ -328,6 +361,9 @@ func buildUpdateSQL(id uuid.UUID, req UpdateRequest) (string, []any, error) {
 			Set("object_ldns", nullableStrSlice(req.ObjectLDNs)).
 			Set("window_start", nullableTime(req.WindowStart)).
 			Set("window_end", nullableTime(req.WindowEnd))
+		if req.PlannedEndAt != nil {
+			qb = qb.Set("planned_end_at", nullablePtrTime(req.PlannedEndAt))
+		}
 		if req.Mode == ModeOneshot && req.RequeueTerminal {
 			qb = qb.
 				Set("status", sq.Expr("CASE WHEN status IN ('succeeded','failed') THEN 'pending' ELSE status END")).
@@ -418,16 +454,10 @@ func visibleTaskExpr(currentUser string) sq.Sqlizer {
 }
 
 func (r *PgRepository) Cancel(ctx context.Context, id uuid.UUID) error {
-	// T-0164 收尾 G7-Gap-6：continuous 任务停止时把 window_end 设为 NOW()
-	// （之后清理按 oneshot 走自动 drop_chunks；运行中 continuous endTime 空不被清）。
-	//
-	// SQL 用 CASE 同时处理 oneshot / continuous 两种 mode：
-	//   - oneshot:   window_end 不动
-	//   - continuous: window_end = NOW()（覆盖原 endTime 表"停止后这是终止时刻"）
+	// #188：planned_end_at 独立承载计划结束时间，取消任务不再覆盖 window_end/planned_end_at。
 	const q = `
 UPDATE pm_tasks
 SET status = 'canceled',
-    window_end = CASE WHEN mode = 'continuous' THEN NOW() ELSE window_end END,
     updated_at = NOW()
 WHERE id = $1
   AND task_subtype = $2
@@ -462,12 +492,11 @@ RETURNING status`
 //
 // continuous → scheduled（让 ContinuousScheduler 下次 sweep 推 pending）；
 // oneshot → pending（让 worker 直接捞）。
-// 同时清 window_end（避免 cancel 留下的 NOW() 把窗口卡死）+ 清 last_fire_at（避免恢复后狂追历史）。
+// 同时清 last_fire_at（避免恢复后狂追历史）；planned_end_at 保留，继续约束恢复后的后续调度。
 func (r *PgRepository) Resume(ctx context.Context, id uuid.UUID) (Status, error) {
 	const q = `
 UPDATE pm_tasks
 SET status       = CASE WHEN mode = 'continuous' THEN 'scheduled' ELSE 'pending' END,
-    window_end   = CASE WHEN mode = 'continuous' THEN NULL ELSE window_end END,
     last_fire_at = NULL,
     updated_at   = NOW()
 WHERE id = $1
@@ -547,6 +576,7 @@ WITH next AS (
     SELECT id FROM pm_tasks
     WHERE task_subtype = $1
       AND status = 'pending'
+      AND (is_builtin = true OR planned_end_at IS NULL OR planned_end_at > NOW())
     ORDER BY created_at
     FOR UPDATE SKIP LOCKED
     LIMIT 1
@@ -575,9 +605,21 @@ RETURNING %s`, joinCols(taskCols, "t"))
 
 func (r *PgRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status Status, progress *int, errMsg string) error {
 	qb := storage.Psql.Update("pm_tasks").
-		Set("status", string(status)).
 		Set("updated_at", time.Now()).
 		Where(sq.Eq{"id": id, "task_subtype": TaskSubtype})
+	if status == StatusScheduled {
+		qb = qb.Set("status", sq.Expr(`
+CASE
+  WHEN mode = 'continuous'
+   AND is_builtin = false
+   AND planned_end_at IS NOT NULL
+   AND planned_end_at <= NOW()
+  THEN 'canceled'
+  ELSE ?
+END`, string(status)))
+	} else {
+		qb = qb.Set("status", string(status))
+	}
 	if progress != nil {
 		qb = qb.Set("progress", *progress)
 	}
@@ -595,6 +637,93 @@ func (r *PgRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status St
 		return ErrNotFound
 	}
 	return nil
+}
+
+// StopExpiredPlannedContinuous 把到达计划结束时间的自建 continuous 任务停止，并同步关闭流式任务。
+//
+// 只处理自建任务（is_builtin=false），内置任务不受 planned_end_at 影响。结果数据不回填、不清理。
+func (r *PgRepository) StopExpiredPlannedContinuous(ctx context.Context, now time.Time, limit int) (int, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	const activeOnlySQL = `
+WITH expired AS (
+    SELECT t.id
+    FROM pm_tasks t
+    WHERE t.task_subtype = $1
+      AND t.mode = 'continuous'
+      AND t.is_builtin = false
+      AND t.planned_end_at IS NOT NULL
+      AND t.planned_end_at <= $2
+      AND t.status IN ('pending','running','scheduled')
+    ORDER BY t.planned_end_at ASC
+    LIMIT $3
+    FOR UPDATE OF t SKIP LOCKED
+)
+UPDATE pm_tasks t
+SET status = 'canceled',
+    updated_at = NOW()
+FROM expired
+WHERE t.id = expired.id
+RETURNING t.id`
+	const activeOrUnsyncedSQL = `
+WITH expired AS (
+    SELECT t.id
+    FROM pm_tasks t
+    WHERE t.task_subtype = $1
+      AND t.mode = 'continuous'
+      AND t.is_builtin = false
+      AND t.planned_end_at IS NOT NULL
+      AND t.planned_end_at <= $2
+      AND (t.status IN ('pending','running','scheduled') OR (
+        t.status = 'canceled'
+        AND EXISTS (
+            SELECT 1 FROM pm_aggregation_tasks st
+            WHERE st.id = t.id AND st.enabled = true
+        )
+      ))
+    ORDER BY t.planned_end_at ASC
+    LIMIT $3
+    FOR UPDATE OF t SKIP LOCKED
+)
+UPDATE pm_tasks t
+SET status = 'canceled',
+    updated_at = NOW()
+FROM expired
+WHERE t.id = expired.id
+RETURNING t.id`
+	q := activeOnlySQL
+	if r.streamRepo != nil {
+		q = activeOrUnsyncedSQL
+	}
+	rows, err := r.pool.Query(ctx, q, TaskSubtype, now, limit)
+	if err != nil {
+		return 0, fmt.Errorf("adhoc.StopExpiredPlannedContinuous: %w", err)
+	}
+	defer rows.Close()
+	ids := make([]uuid.UUID, 0)
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if r.streamRepo != nil {
+		for _, id := range ids {
+			task, loadErr := r.Get(ctx, id)
+			if loadErr != nil {
+				return len(ids), loadErr
+			}
+			if syncErr := r.syncStreamingTask(ctx, task, false); syncErr != nil {
+				return len(ids), syncErr
+			}
+		}
+	}
+	return len(ids), nil
 }
 
 // resultBusinessKey 是结果行的业务唯一键（与 migrations/000018 的唯一索引 8 列一致）。
@@ -871,6 +1000,16 @@ func nullablePtrTime(t *time.Time) any {
 	return *t
 }
 
+func plannedEndValue(req CreateRequest) any {
+	if req.Mode != ModeContinuous || req.IsBuiltin {
+		return nil
+	}
+	if req.PlannedEndAt != nil && !req.PlannedEndAt.IsZero() {
+		return *req.PlannedEndAt
+	}
+	return sq.Expr("NOW() + INTERVAL '30 days'")
+}
+
 // ── scan helper ───────────────────────────────────────────────────────────
 
 type rowScanner interface {
@@ -882,7 +1021,7 @@ func scanTask(row rowScanner) (*Task, error) {
 	var subtype, mode, cronExpr *string
 	var deviceSNsJSON []byte
 	var metricPaths, granularities []string
-	var windowStart, windowEnd *time.Time
+	var windowStart, windowEnd, plannedEndAt *time.Time
 	var dimension string
 	var technology *string
 	var isBuiltin bool
@@ -895,7 +1034,7 @@ func scanTask(row rowScanner) (*Task, error) {
 	err := row.Scan(
 		&t.ID, &t.Name, &subtype, &mode, &cronExpr,
 		&deviceSNsJSON, &metricPaths, &granularities,
-		&windowStart, &windowEnd, &dimension, &technology, &isBuiltin, &expireDays, &visibility, &status, &t.Progress,
+		&windowStart, &windowEnd, &dimension, &technology, &isBuiltin, &expireDays, &plannedEndAt, &visibility, &status, &t.Progress,
 		&creator, &t.CreatedAt, &t.UpdatedAt, &objectLDNs,
 	)
 	if err != nil {
@@ -925,6 +1064,7 @@ func scanTask(row rowScanner) (*Task, error) {
 	if windowEnd != nil {
 		t.WindowEnd = *windowEnd
 	}
+	t.PlannedEndAt = plannedEndAt
 	if dimension != "" {
 		t.Dimension = Dimension(dimension)
 	} else {
@@ -1054,7 +1194,10 @@ UPDATE pm_tasks
 SET status = 'pending',
     updated_at = NOW(),
     last_fire_at = $3
-WHERE id = $1::uuid AND task_subtype = $2 AND status = 'scheduled'`
+WHERE id = $1::uuid
+  AND task_subtype = $2
+  AND status = 'scheduled'
+  AND (is_builtin = true OR planned_end_at IS NULL OR planned_end_at > NOW())`
 	tag, err := r.pool.Exec(ctx, q, id, TaskSubtype, fireAt)
 	if err != nil {
 		return fmt.Errorf("PgContinuousRepository.MarkPending: %w", err)

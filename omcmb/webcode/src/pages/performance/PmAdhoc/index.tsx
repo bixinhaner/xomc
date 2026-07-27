@@ -339,6 +339,13 @@ function TaskTable({
               width: 180,
               render: (v: string) => fmtTime(v),
             } as ColumnsType<AdhocTask>[number],
+            {
+              title: intl.formatMessage({ id: 'perf.adhoc.colPlannedEndAt' }),
+              dataIndex: 'plannedEndAt',
+              width: 180,
+              render: (_: string | undefined, r: AdhocTask) =>
+                r.mode === 'continuous' ? fmtTime(r.plannedEndAt) : '—',
+            } as ColumnsType<AdhocTask>[number],
           ]),
       {
         title: intl.formatMessage({ id: 'perf.adhoc.colOperation' }),
@@ -639,6 +646,11 @@ export default function PmAdhocPage() {
                         : 'perf.adhoc.visibilityPrivate',
                     })}
                   </Tag>
+                </Descriptions.Item>
+              )}
+              {!selectedTask.isBuiltin && selectedTask.mode === 'continuous' && (
+                <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.descPlannedEndAt' })}>
+                  {fmtTime(selectedTask.plannedEndAt)}
                 </Descriptions.Item>
               )}
               {/* T-0194：已选指标 — 按制式解析为可读指标名（编号+名），查不到回退显编号 */}
