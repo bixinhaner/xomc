@@ -60,7 +60,9 @@ function filterBySearch(
       (c) =>
         c.displayName.toLowerCase().includes(lower) ||
         c.commandCode.toLowerCase().includes(lower) ||
-        c.logicalCode.toLowerCase().includes(lower),
+        c.logicalCode.toLowerCase().includes(lower) ||
+        c.targetObject?.toLowerCase().includes(lower) === true ||
+        c.targetPaths?.some((path) => path.toLowerCase().includes(lower)) === true,
     );
     const matchedChildren = (g.children ?? [])
       .map(visit)
