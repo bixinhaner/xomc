@@ -81,7 +81,7 @@ func TestIngestViaCopy_NormalizesCounterValuesBeforeCopyIngest(t *testing.T) {
 
 	err := c.ingestViaCopy(
 		ctx, trace.SpanFromContext(ctx), time.Now(), time.Now(), 123, uuid.New(),
-		payload, content, allow, make([]byte, 32),
+		payload, content, allow, false, make([]byte, 32),
 	)
 
 	require.NoError(t, err)
@@ -166,7 +166,7 @@ func TestIngestViaCopy_Filters15MinRowsByEnabledIndicatorsAfterKPICalculation(t 
 
 	err := c.ingestViaCopy(
 		ctx, trace.SpanFromContext(ctx), time.Now(), time.Now(), 123, uuid.New(),
-		payload, content, allow, make([]byte, 32),
+		payload, content, allow, false, make([]byte, 32),
 	)
 
 	require.NoError(t, err)
@@ -202,7 +202,7 @@ func TestIngestViaCopy_EmptyEnabledSetWritesNoRows(t *testing.T) {
 
 	err := c.ingestViaCopy(
 		ctx, trace.SpanFromContext(ctx), time.Now(), time.Now(), 123, uuid.New(),
-		payload, content, allow, make([]byte, 32),
+		payload, content, allow, false, make([]byte, 32),
 	)
 
 	require.NoError(t, err)
@@ -232,7 +232,7 @@ func TestIngestViaCopy_EnabledIndicatorLookupFailureFailsFile(t *testing.T) {
 
 	err := c.ingestViaCopy(
 		ctx, trace.SpanFromContext(ctx), time.Now(), time.Now(), 123, uuid.New(),
-		payload, content, nil, make([]byte, 32),
+		payload, content, nil, false, make([]byte, 32),
 	)
 
 	require.Error(t, err)
@@ -279,15 +279,18 @@ func TestNormalizeResults_PreservesUnknownCounterWithoutMetadata(t *testing.T) {
 
 type recordingCopyIngestor struct {
 	called   bool
+	ingested bool
+	marker   metrics.FileMarker
 	counters []model.PMCounter
 	kpis     []model.KPIValue
 }
 
-func (r *recordingCopyIngestor) CopyIngest(_ context.Context, _ metrics.FileMarker, counters []model.PMCounter, kpis []model.KPIValue) (bool, error) {
+func (r *recordingCopyIngestor) CopyIngest(_ context.Context, marker metrics.FileMarker, counters []model.PMCounter, kpis []model.KPIValue) (bool, error) {
 	r.called = true
+	r.marker = marker
 	r.counters = append([]model.PMCounter(nil), counters...)
 	r.kpis = append([]model.KPIValue(nil), kpis...)
-	return false, nil
+	return r.ingested, nil
 }
 
 type noopEventBus struct{}
