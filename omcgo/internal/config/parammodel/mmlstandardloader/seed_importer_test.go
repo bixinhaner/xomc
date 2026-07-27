@@ -2,6 +2,7 @@ package mmlstandardloader
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -9,8 +10,92 @@ import (
 	"testing"
 )
 
+func TestManagementServerSSLStatusPathsAreGlobalReadOnlyMMLParams(t *testing.T) {
+	_, thisFile, _, _ := runtime.Caller(0)
+	seedPath := filepath.Join(filepath.Dir(thisFile), "seeds", "cmcc_tdlte_v23.json")
+
+	seed, err := ParseSeedFile(seedPath)
+	if err != nil {
+		t.Fatalf("parse seed: %v", err)
+	}
+
+	const (
+		endDate   = "Device.ManagementServer.sslStatus.endDate"
+		startDate = "Device.ManagementServer.sslStatus.startDate"
+	)
+	wantPaths := map[string]bool{endDate: false, startDate: false}
+	for _, group := range seed.Groups {
+		for _, command := range group.Commands {
+			if command.ObjectPath != "Device.ManagementServer." {
+				continue
+			}
+			for _, param := range command.Params {
+				if _, ok := wantPaths[param.Path]; !ok {
+					continue
+				}
+				if param.Access != AccessR || param.Type != "string" {
+					t.Errorf("%s metadata = access %q type %q, want R/string", param.Path, param.Access, param.Type)
+				}
+				wantPaths[param.Path] = true
+			}
+		}
+	}
+	for path, found := range wantPaths {
+		if !found {
+			t.Errorf("global MML seed is missing %s", path)
+		}
+	}
+
+	var lstParams, modParams map[string]bool
+	for _, command := range DeriveCommandsFromSeed(seed) {
+		switch command.CommandCode {
+		case "LST MANAGEMENT_SERVER":
+			lstParams = make(map[string]bool, len(command.SubFields))
+			for _, param := range command.SubFields {
+				lstParams[param.Path] = true
+			}
+		case "MOD MANAGEMENT_SERVER":
+			modParams = make(map[string]bool, len(command.SubFields))
+			for _, param := range command.SubFields {
+				modParams[param.Path] = true
+			}
+		}
+	}
+	for path := range wantPaths {
+		if !lstParams[path] {
+			t.Errorf("LST MANAGEMENT_SERVER is missing %s", path)
+		}
+		if modParams[path] {
+			t.Errorf("MOD MANAGEMENT_SERVER must not contain read-only %s", path)
+		}
+	}
+
+	blqPath := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "..", "data", "param-mappings", "BLQ.xml")
+	blq, err := os.ReadFile(blqPath)
+	if err != nil {
+		t.Fatalf("read BLQ mapping: %v", err)
+	}
+	for path := range wantPaths {
+		marker := `standardPath="` + path + `"`
+		idx := strings.Index(string(blq), marker)
+		if idx < 0 {
+			t.Errorf("BLQ mapping is missing %s", path)
+			continue
+		}
+		lineStart := strings.LastIndex(string(blq[:idx]), "\n") + 1
+		lineEnd := strings.Index(string(blq[idx:]), "\n")
+		if lineEnd < 0 {
+			lineEnd = len(blq) - idx
+		}
+		line := string(blq[lineStart : idx+lineEnd])
+		if strings.Contains(line, `supported="false"`) {
+			t.Errorf("BLQ mapping marks %s unsupported: %s", path, strings.TrimSpace(line))
+		}
+	}
+}
+
 // TestSmokeSeedDerivation: 在 cmcc_tdlte_v23.json 上验证：
-//   - 18 chapter / 71 command / 614 param 数量精确匹配
+//   - 18 chapter / 71 command / 616 param 数量精确匹配
 //     （RRCTimers 的 10 个 LTE 计时器参数已归入专用 RRC 计时器命令，避免 FAP_SERVICE 重复）
 //   - LST 总生成；MOD 仅在含 RW 时；ADD/RMV 双门槛
 //   - logical_code 全集唯一
@@ -29,8 +114,8 @@ func TestSmokeSeedDerivation(t *testing.T) {
 	if got := seed.CountCommands(); got != 71 {
 		t.Errorf("seed commands: got %d, want 71", got)
 	}
-	if got := seed.CountParams(); got != 614 {
-		t.Errorf("seed params: got %d, want 614", got)
+	if got := seed.CountParams(); got != 616 {
+		t.Errorf("seed params: got %d, want 616", got)
 	}
 
 	derived := DeriveCommandsFromSeed(seed)

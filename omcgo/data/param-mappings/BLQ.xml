@@ -199,8 +199,8 @@
         <param name="Device.ManagementServer.UDPConnectionRequestAddress" standardPath="Device.ManagementServer.UDPConnectionRequestAddress" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.ManagementServer.URL" standardPath="Device.ManagementServer.URL" access="READ_ONLY" type="STRING" changeApplies="OnReboot" max="120" min="0"/>
         <param name="Device.ManagementServer.X_COM_ssl_enable" standardPath="Device.Https.HttpsEnable" access="READ_ONLY" type="BOOLEAN" changeApplies="Immediate" enumValues="true,false" enumLabels="true,false"/>
-        <param name="Device.ManagementServer.sslStatus.endDate" standardPath="Device.ManagementServer.sslStatus.endDate" access="READ_ONLY" type="STRING" changeApplies="Immediate" supported="false"/>
-        <param name="Device.ManagementServer.sslStatus.startDate" standardPath="Device.ManagementServer.sslStatus.startDate" access="READ_ONLY" type="STRING" changeApplies="Immediate" supported="false"/>
+        <param name="Device.ManagementServer.sslStatus.endDate" standardPath="Device.ManagementServer.sslStatus.endDate" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.ManagementServer.sslStatus.startDate" standardPath="Device.ManagementServer.sslStatus.startDate" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.ManagementServer.tfcsManagerPrimsrc" standardPath="Device.ManagementServer.tfcsManagerPrimsrc" access="READ_WRITE" type="INT" changeApplies="Immediate"/>
         <param name="Device.ManagementServer.tfcsSyncState" standardPath="Device.ManagementServer.tfcsSyncState" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.2.CellConfig.LTE.RAN.CA.PARAMS.CARRIER_MODE" standardPath="Device.Services.FAPService.2.CellConfig.LTE.RAN.CA.PARAMS.CARRIER_MODE" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
