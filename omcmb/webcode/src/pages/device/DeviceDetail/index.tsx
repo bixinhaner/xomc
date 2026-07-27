@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTabStore } from '@core/store/tabStore';
@@ -12,6 +13,8 @@ import {
   Descriptions,
   Dropdown,
   Empty,
+  Input,
+  Modal,
   Radio,
   Row,
   Select,
@@ -26,31 +29,41 @@ import {
 } from 'antd';
 import {
   ArrowLeftOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  ClockCircleOutlined,
+  EditOutlined,
   MoreOutlined,
   ReloadOutlined,
+  SyncOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import LineChart from '@/components/Charts/LineChart';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import { useSyncStatus } from '@core/hooks/api/useDeviceParameters';
-import { useDeviceBySn, useDeviceGroups, useSyncDeviceParams } from '@core/hooks/api/useDevices';
+import { useDeviceTaskStatus } from '@core/hooks/api/useDeviceTask';
+import { deviceTaskApi, isAbortError } from '@core/services/api/deviceTaskApi';
+import { useDeviceBySn, useDeviceGroups, useRenameDevice, useSyncDeviceParams } from '@core/hooks/api/useDevices';
 import { deviceParameterApi } from '@core/services/api/deviceParameterApi';
 import { deviceApi } from '@core/services/api/deviceApi';
+import { isDeviceTaskTerminal, type DeviceTaskStatus } from '@core/types/deviceTask';
 import { useDictionary } from '@core/hooks/api/useSystem';
-import { activationStatusLabelOf, activationStatusOf } from '@core/utils/activationStatus';
+import { displayActivationStatusLabelOf, displayActivationStatusOf } from '@core/utils/activationStatus';
 import { useQuickSettingsGroups } from '@core/hooks/api/useQuickSettings';
 import { useResolvedCellInstances } from '@core/hooks/api/useResolvedCellInstances';
-import { useAcknowledgeAlarms, useClearAlarms, useCurrentAlarms, useUnacknowledgeAlarms } from '@core/hooks/api/useAlarms';
+import { useAcknowledgeAlarms, useClearAlarms, useCurrentAlarms, useTriggerAlarmSync, useUnacknowledgeAlarms } from '@core/hooks/api/useAlarms';
 import { useAggregatedMetricsByDevices, useMetricObjects } from '@core/hooks/api/usePmQuery';
 import { formatObjectLdn } from '@core/types/pmObject';
 import { useT } from '@/hooks/useT';
 import type { Alarm } from '@core/types/alarm';
 import type { Device } from '@core/types/device';
 import { buildKpiCharts, buildKpiCompareData } from './kpiSeries';
+import { runDeviceAlarmRefresh } from './alarmRefresh';
 import ParameterTreeTab from './ParameterTreeTab';
 import QuickSettingsTab from './QuickSettingsTab';
 import LicenseParamsTab from './LicenseParamsTab';
+import PasswordManagementTab from './PasswordManagementTab';
 import { formatLteBandwidthDisplay } from './QuickSettingsTab/validators';
 import AlarmDetail from '@/pages/alarm/AlarmDetail';
 import AutoRefreshDropdown from '@/pages/alarm/components/AutoRefreshDropdown';
@@ -59,7 +72,7 @@ import { formatSystemTime } from '@core/utils/systemTime';
 import { useAppStore } from '@core/store/appStore';
 import { formatDeviceSyncStatus, getDeviceSyncStatusKind, normalizeDeviceSyncStatus } from '@core/utils/deviceSyncStatus';
 import { computeCumulativeOnlineDurationSeconds, computeCurrentOnlineDurationSeconds } from '@core/utils/onlineDuration';
-import { rfStatusLabelOf, rfStatusOf } from '@core/utils/rfStatus';
+import { displayRFStatusLabelOf, displayRFStatusOf } from '@core/utils/rfStatus';
 import { buildDeviceGroupDisplayName } from '@core/utils/deviceGroupDisplay';
 import { resolveNetworkTypeLabel } from '@core/utils/networkType';
 import { localizeDeviceProductName } from '@core/utils/deviceDisplay';
@@ -74,6 +87,28 @@ const SEVERITY_COLOR: Record<string, string> = {
   warning: 'blue',
   none: 'default',
 };
+
+const passwordTaskStorageKey = (deviceSn: string) => `xomc:device-password-task:${deviceSn}`;
+
+function passwordTaskStatusTagSpec(status: DeviceTaskStatus | undefined): {
+  color: string;
+  icon: ReactNode;
+} {
+  switch (status) {
+    case 'completed':
+      return { color: 'success', icon: <CheckCircleOutlined /> };
+    case 'failed':
+      return { color: 'error', icon: <CloseCircleOutlined /> };
+    case 'expired':
+      return { color: 'warning', icon: <ClockCircleOutlined /> };
+    case 'cancelled':
+      return { color: 'default', icon: <CloseCircleOutlined /> };
+    case 'sent':
+    case 'pending':
+    default:
+      return { color: 'processing', icon: <SyncOutlined spin /> };
+  }
+}
 
 // ─── KPI 指标配置 ────────────────────────────────────────────────────────
 
@@ -290,6 +325,13 @@ interface DeviceDetailInfo {
   omlRemoteIp?: string;
   omlRemoteIpBak?: string;
   connectedBscIp?: string;
+}
+
+function isParameterSyncAlreadyRunningError(err: unknown) {
+  const e = err as { bizCode?: number; response?: { data?: { biz_code?: number; code?: number } }; message?: string } | null;
+  const code = e?.bizCode ?? e?.response?.data?.biz_code ?? e?.response?.data?.code;
+  const msg = e?.message ?? '';
+  return code === 1305 || code === 1205 || msg.includes('parameter sync already running');
 }
 
 interface BackendDeviceDetailCell {
@@ -566,6 +608,7 @@ const getStationFields = (
   t: ReturnType<typeof useT>,
   networkType: string,
   onResolveNameSync?: (action: 'use_lmt' | 'use_omc' | 'ignore') => void,
+  onEditOMCName?: () => void,
   renderNetworkType?: FieldItem['render'],
   locale: Locale = 'zh-CN',
 ): FieldGroup => {
@@ -584,6 +627,18 @@ const getStationFields = (
                 <Badge status="processing" />
                 <Text strong>{d.name || '-'}</Text>
                 <Text type="secondary">({t('device.nameSyncPending.omcName')})</Text>
+                {onEditOMCName && (
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<EditOutlined />}
+                    title={t('device.nameSync.editOmcName')}
+                    aria-label={t('device.nameSync.editOmcName')}
+                    onClick={onEditOMCName}
+                  >
+                    {t('common.edit')}
+                  </Button>
+                )}
               </Space>
               <Space>
                 <Text>{d.lmtDeviceName}</Text>
@@ -605,7 +660,23 @@ const getStationFields = (
             </Space>
           );
         }
-        return d.name || '-';
+        return (
+          <Space size={4}>
+            <Text>{d.name || '-'}</Text>
+            {onEditOMCName && (
+              <Button
+                type="text"
+                size="small"
+                icon={<EditOutlined />}
+                title={t('device.nameSync.editOmcName')}
+                aria-label={t('device.nameSync.editOmcName')}
+                onClick={onEditOMCName}
+              >
+                {t('common.edit')}
+              </Button>
+            )}
+          </Space>
+        );
       },
     },
     {
@@ -872,21 +943,22 @@ const buildCellRecords = (device: Device, detailCells?: DeviceDetailCell[]): Cel
 
 const renderCellOpState = (
   value: string | undefined,
+  isOnline: boolean | undefined | null,
   t: ReturnType<typeof useT>,
   details?: { label?: string; value?: string; status?: boolean }[],
   locale: 'zh-CN' | 'en-US' = 'zh-CN',
 ) => {
-  const status = activationStatusOf(value);
+  const status = displayActivationStatusOf(value, isOnline);
   if (status == null) return '-';
-  const label = activationStatusLabelOf(value, details, {
+  const label = displayActivationStatusLabelOf(value, isOnline, details, {
     active: t('status.active'),
     inactive: t('status.inactive'),
   }, locale);
   return <Tag color={status === 'active' ? 'success' : 'error'}>{label}</Tag>;
 };
 
-const renderCellRfStatus = (value: string | undefined, t: ReturnType<typeof useT>) => {
-  const kind = rfStatusOf(value);
+const renderCellRfStatus = (value: string | undefined, isOnline: boolean | undefined | null, t: ReturnType<typeof useT>) => {
+  const kind = displayRFStatusOf(value, isOnline);
   if (!kind) return '-';
   const labels = {
     on: t('status.rfOn'),
@@ -894,7 +966,7 @@ const renderCellRfStatus = (value: string | undefined, t: ReturnType<typeof useT
     error: t('status.failed'),
   };
   const color = kind === 'on' ? 'success' : 'error';
-  return <Tag color={color}>{rfStatusLabelOf(value, labels)}</Tag>;
+  return <Tag color={color}>{displayRFStatusLabelOf(value, isOnline, labels)}</Tag>;
 };
 
 const renderCellAdminState = (
@@ -1280,7 +1352,7 @@ function KPITabContent({ device, t }: KPITabContentProps) {
 
 export default function DeviceDetail() {
   const t = useT();
-  const { modal, message } = App.useApp();
+  const { modal, message, notification } = App.useApp();
   const { sn = '' } = useParams<{ sn: string }>();
   const detailTabKey = sn ? `device-detail:${sn}` : 'device-detail';
   const location = useLocation();
@@ -1296,12 +1368,25 @@ export default function DeviceDetail() {
   const { data: opStateDict } = useDictionary('op_state');
   const { data: networkTypeDict } = useDictionary('network_type');
   const syncMutation = useSyncDeviceParams();
+  const renameMutation = useRenameDevice(device?.id ?? '');
+  const [omcNameEditorOpen, setOmcNameEditorOpen] = useState(false);
+  const [omcNameDraft, setOmcNameDraft] = useState('');
   const { data: paramSyncStatus, refetch: refetchParamSyncStatus } = useSyncStatus(device?.id ?? '');
   const [quickSettingsSyncTargetPaths, setQuickSettingsSyncTargetPaths] = useState<string[]>([]);
+  const [licenseSyncTargetPaths, setLicenseSyncTargetPaths] = useState<string[]>([]);
   const quickSettingsSync = useQuickSettingsFeedbackStore((s) => (device?.id ? s.quickSettingsSyncs[device.id] : undefined));
   const quickSettingsSyncPending = Boolean(quickSettingsSync);
   const lastQuickSettingsParamSync = useQuickSettingsFeedbackStore((s) => (device?.id ? s.lastScopedSyncs[device.id] : undefined)) ?? null;
   const observedParamSyncAtRef = useRef<Record<string, string>>({});
+  const notifiedPasswordTaskRef = useRef<Record<string, true>>({});
+  const [passwordTaskId, setPasswordTaskId] = useState<string | undefined>();
+  const { data: passwordTask } = useDeviceTaskStatus(passwordTaskId);
+  const triggerAlarmSync = useTriggerAlarmSync();
+  const alarmRefreshAbortRef = useRef<AbortController | null>(null);
+  const [alarmRefreshState, setAlarmRefreshState] = useState<{
+    deviceSn: string;
+    controller: AbortController;
+  } | null>(null);
   const isDeviceParamSyncBusy = paramSyncStatus?.status === 'syncing' || quickSettingsSyncPending || syncMutation.isPending;
   const isQuickSettingsRefreshSubmitting = syncMutation.isPending;
   const { data: detailComposite } = useQuery({
@@ -1323,6 +1408,76 @@ export default function DeviceDetail() {
       groupName: buildDeviceGroupDisplayName(merged, groups, appLocale),
     };
   }, [appLocale, detailComposite?.info, device, deviceGroupsData?.groups]);
+  const alarmRefreshPending = alarmRefreshState?.deviceSn === displayDevice?.sn;
+
+  useEffect(() => {
+    alarmRefreshAbortRef.current?.abort();
+    alarmRefreshAbortRef.current = null;
+    return () => {
+      alarmRefreshAbortRef.current?.abort();
+    };
+  }, [sn]);
+
+  useEffect(() => {
+    const deviceSn = displayDevice?.sn;
+    if (!deviceSn || typeof window === 'undefined') {
+      setPasswordTaskId(undefined);
+      return;
+    }
+    setPasswordTaskId(window.localStorage.getItem(passwordTaskStorageKey(deviceSn)) || undefined);
+  }, [displayDevice?.sn]);
+
+  const handlePasswordTaskSubmitted = useCallback((taskId: string) => {
+    setPasswordTaskId(taskId);
+    const deviceSn = displayDevice?.sn;
+    if (deviceSn && typeof window !== 'undefined') {
+      window.localStorage.setItem(passwordTaskStorageKey(deviceSn), taskId);
+    }
+  }, [displayDevice?.sn]);
+
+  const handlePasswordTaskCleared = useCallback(() => {
+    setPasswordTaskId(undefined);
+    const deviceSn = displayDevice?.sn;
+    if (deviceSn && typeof window !== 'undefined') {
+      window.localStorage.removeItem(passwordTaskStorageKey(deviceSn));
+    }
+  }, [displayDevice?.sn]);
+
+  useEffect(() => {
+    if (!device?.id || !passwordTask || !isDeviceTaskTerminal(passwordTask.status)) return;
+
+    const deviceSn = displayDevice?.sn;
+    if (deviceSn && typeof window !== 'undefined') {
+      window.localStorage.removeItem(passwordTaskStorageKey(deviceSn));
+    }
+
+    deviceParameterApi.invalidateParameterSchemaCache(device.id);
+    void queryClient.invalidateQueries({ queryKey: ['devices', 'parameters', device.id] });
+    void queryClient.invalidateQueries({ queryKey: ['devices', 'parameters', 'search', device.id] });
+    void queryClient.invalidateQueries({ queryKey: ['devices', 'parameter-schema', device.id] });
+
+    if (notifiedPasswordTaskRef.current[passwordTask.id]) return;
+    notifiedPasswordTaskRef.current[passwordTask.id] = true;
+
+    if (passwordTask.status === 'completed') return;
+
+    notification.error({
+      message: t('device.password.taskFailed'),
+      description: passwordTask.errorMessage || t('device.multi.unknownErrorHint'),
+      duration: 8,
+    });
+  }, [device?.id, displayDevice?.sn, message, notification, passwordTask, queryClient, t]);
+
+  const passwordTaskTag = useMemo(() => {
+    if (!passwordTaskId) return null;
+    const status = passwordTask?.status ?? 'pending';
+    const spec = passwordTaskStatusTagSpec(status);
+    return (
+      <Tag icon={spec.icon} color={spec.color} style={{ marginInlineEnd: 0 }}>
+        {t('device.password.statusPrefix')}: {t(`device.taskStatus.${status}`)}
+      </Tag>
+    );
+  }, [passwordTask?.status, passwordTaskId, t]);
 
   useEffect(() => {
     const deviceId = device?.id;
@@ -1463,6 +1618,87 @@ export default function DeviceDetail() {
   const detailQuickSettingsCellInstances = detailResolved.instances;
   const detailQuickSettingsRuleReady = showQuickSettingsTab && detailResolved.ready;
 
+  const submitScopedParamRefresh = useCallback((
+    deviceId: string,
+    targetPaths: string[],
+    scope: 'quickSettings' | 'license' = 'quickSettings',
+  ) => {
+    const parameterPaths = targetPaths.length > 0 ? targetPaths : undefined;
+    const targetCountHint = targetPaths.length;
+
+    useQuickSettingsFeedbackStore.getState().startQuickSettingsSync(deviceId, {
+      scope,
+      lastParamSyncAt: paramSyncStatus?.lastParamSyncAt,
+      lastParamSyncFailedAt: paramSyncStatus?.lastParamSyncFailedAt,
+      targetCount: targetCountHint,
+      gpvTaskCount: 0,
+      startedAt: Date.now(),
+    });
+    syncMutation.mutate(
+      { deviceId, parameterPaths },
+      {
+        onSuccess: (data) => {
+          const targetCount = data.parameterPathsCount ?? targetCountHint;
+          const gpvTaskCount = data.gpvTaskCount ?? 0;
+          useQuickSettingsFeedbackStore.getState().patchQuickSettingsSync(deviceId, {
+            sourceId: data.sourceId,
+            requestId: data.requestId,
+            runId: data.runId,
+            targetCount,
+            gpvTaskCount,
+          });
+          message.success(targetCount > 0
+            ? t('device.detail.deviceFetchQueuedScoped', { id: data.sourceId, count: targetCount, gpvCount: gpvTaskCount })
+            : t('device.detail.deviceFetchQueued', { id: data.sourceId }));
+          void refetchParamSyncStatus();
+        },
+        onError: (err) => {
+          useQuickSettingsFeedbackStore.getState().finishQuickSettingsSync(deviceId);
+          if (isParameterSyncAlreadyRunningError(err)) {
+            void refetchParamSyncStatus();
+            return;
+          }
+          const errMsg = err instanceof Error ? err.message : t('device.detail.deviceFetchTriggerFailed');
+          message.error(errMsg);
+        },
+      },
+    );
+  }, [message, paramSyncStatus?.lastParamSyncAt, paramSyncStatus?.lastParamSyncFailedAt, refetchParamSyncStatus, syncMutation, t]);
+
+  const startAlarmRefresh = useCallback(() => {
+    if (alarmRefreshPending) return;
+
+    const deviceSn = displayDevice?.sn?.trim();
+    if (!deviceSn) {
+      void message.error(t('common.operationFailed'));
+      return;
+    }
+
+    alarmRefreshAbortRef.current?.abort();
+    const abortController = new AbortController();
+    alarmRefreshAbortRef.current = abortController;
+    setAlarmRefreshState({ deviceSn, controller: abortController });
+
+    void runDeviceAlarmRefresh({
+      deviceSn,
+      trigger: (targetSn) => triggerAlarmSync.mutateAsync(targetSn),
+      waitForTerminal: (taskId, signal) => deviceTaskApi.waitForTerminal(taskId, { signal }),
+      refreshCurrentAlarms: () => queryClient.invalidateQueries({ queryKey: ['alarms', 'current'] }),
+      signal: abortController.signal,
+    }).then(() => {
+      void message.success(t('status.success'));
+    }).catch((error) => {
+      if (!isAbortError(error)) {
+        void message.error(t('common.operationFailed'));
+      }
+    }).finally(() => {
+      if (alarmRefreshAbortRef.current === abortController) {
+        alarmRefreshAbortRef.current = null;
+      }
+      setAlarmRefreshState((current) => current?.controller === abortController ? null : current);
+    });
+  }, [alarmRefreshPending, displayDevice?.sn, message, queryClient, t, triggerAlarmSync]);
+
   const handleHeaderRefresh = useCallback(() => {
     void refetch();
     const deviceId = device?.id;
@@ -1478,7 +1714,7 @@ export default function DeviceDetail() {
         }
         break;
       case 'alarms':
-        void queryClient.invalidateQueries({ queryKey: ['alarms', 'current'] });
+        startAlarmRefresh();
         break;
       case 'quickSettings':
         if (deviceId) {
@@ -1491,76 +1727,23 @@ export default function DeviceDetail() {
               okText: t('common.confirm'),
               cancelText: t('common.cancel'),
               onOk: () => {
-                useQuickSettingsFeedbackStore.getState().startQuickSettingsSync(deviceId, {
-                  lastParamSyncAt: paramSyncStatus?.lastParamSyncAt,
-                  lastParamSyncFailedAt: paramSyncStatus?.lastParamSyncFailedAt,
-                  targetCount: quickSettingsSyncTargetPaths.length,
-                  gpvTaskCount: 0,
-                  startedAt: Date.now(),
-                });
-                syncMutation.mutate(
-                  { deviceId, parameterPaths: quickSettingsSyncTargetPaths },
-                  {
-                    onSuccess: (data) => {
-                      const targetCount = data.parameterPathsCount ?? quickSettingsSyncTargetPaths.length;
-                      const gpvTaskCount = data.gpvTaskCount ?? 0;
-                      useQuickSettingsFeedbackStore.getState().patchQuickSettingsSync(deviceId, {
-                        sourceId: data.sourceId,
-                        targetCount,
-                        gpvTaskCount,
-                      });
-                      message.success(targetCount > 0
-                        ? t('device.detail.deviceFetchQueuedScoped', { id: data.sourceId, count: targetCount, gpvCount: gpvTaskCount })
-                        : t('device.detail.deviceFetchQueued', { id: data.sourceId }));
-                      void refetchParamSyncStatus();
-                    },
-                    onError: (err) => {
-                      useQuickSettingsFeedbackStore.getState().finishQuickSettingsSync(deviceId);
-                      const errMsg = err instanceof Error ? err.message : t('device.detail.deviceFetchTriggerFailed');
-                      message.error(errMsg);
-                    },
-                  },
-                );
+                submitScopedParamRefresh(deviceId, quickSettingsSyncTargetPaths);
               },
             });
             break;
           }
-          useQuickSettingsFeedbackStore.getState().startQuickSettingsSync(deviceId, {
-            lastParamSyncAt: paramSyncStatus?.lastParamSyncAt,
-            lastParamSyncFailedAt: paramSyncStatus?.lastParamSyncFailedAt,
-            targetCount: quickSettingsSyncTargetPaths.length,
-            gpvTaskCount: 0,
-            startedAt: Date.now(),
-          });
-          syncMutation.mutate(
-            { deviceId, parameterPaths: quickSettingsSyncTargetPaths },
-            {
-              onSuccess: (data) => {
-                const targetCount = data.parameterPathsCount ?? quickSettingsSyncTargetPaths.length;
-                const gpvTaskCount = data.gpvTaskCount ?? 0;
-                useQuickSettingsFeedbackStore.getState().patchQuickSettingsSync(deviceId, {
-                  sourceId: data.sourceId,
-                  targetCount,
-                  gpvTaskCount,
-                });
-                message.success(targetCount > 0
-                  ? t('device.detail.deviceFetchQueuedScoped', { id: data.sourceId, count: targetCount, gpvCount: gpvTaskCount })
-                  : t('device.detail.deviceFetchQueued', { id: data.sourceId }));
-                void refetchParamSyncStatus();
-              },
-              onError: (err) => {
-                useQuickSettingsFeedbackStore.getState().finishQuickSettingsSync(deviceId);
-                const errMsg = err instanceof Error ? err.message : t('device.detail.deviceFetchTriggerFailed');
-                message.error(errMsg);
-              },
-            },
-          );
+          submitScopedParamRefresh(deviceId, quickSettingsSyncTargetPaths);
+        }
+        break;
+      case 'license':
+        if (deviceId) {
+          submitScopedParamRefresh(deviceId, licenseSyncTargetPaths, 'license');
         }
         break;
       default:
         break;
     }
-  }, [activeTab, device?.id, message, modal, paramSyncStatus?.lastParamSyncAt, paramSyncStatus?.lastParamSyncFailedAt, queryClient, quickSettingsSyncTargetPaths, refetch, refetchParamSyncStatus, syncMutation, t]);
+  }, [activeTab, device?.id, licenseSyncTargetPaths, modal, queryClient, quickSettingsSyncTargetPaths, refetch, startAlarmRefresh, submitScopedParamRefresh, t]);
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     critical: t('alarm.severity.critical'),
@@ -1768,14 +1951,35 @@ export default function DeviceDetail() {
       try {
         await deviceApi.resolveNameSync(displayDevice.id, action);
         void message.success(t('common.operationSuccess'));
-        // 刷新设备详情
-        void queryClient.invalidateQueries({ queryKey: ['device'] });
-      } catch (err) {
+        // 刷新设备列表、SN 详情和 composite 详情缓存。
+        void queryClient.invalidateQueries({ queryKey: ['devices'] });
+      } catch (_err) {
         void message.error(t('common.operationFailed'));
       }
     },
     [displayDevice?.id, message, queryClient, t]
   );
+
+  const handleOpenOMCNameEditor = useCallback(() => {
+    if (!displayDevice) return;
+    setOmcNameDraft(displayDevice.name || '');
+    setOmcNameEditorOpen(true);
+  }, [displayDevice]);
+
+  const handleRenameOMCName = useCallback(async () => {
+    const nextName = omcNameDraft.trim();
+    if (!nextName) {
+      void message.error(t('device.nameSync.omcNameRequired'));
+      return;
+    }
+    try {
+      await renameMutation.mutateAsync(nextName);
+      setOmcNameEditorOpen(false);
+      void message.success(t('device.nameSync.editOmcNameSuccess'));
+    } catch {
+      void message.error(t('common.operationFailed'));
+    }
+  }, [message, omcNameDraft, renameMutation, t]);
 
   const renderDeviceNetworkType = useCallback<FieldItem['render']>(
     (d) => {
@@ -1791,13 +1995,20 @@ export default function DeviceDetail() {
     const networkType = normalizeNetworkType(displayDevice.networkType);
 
     // BSC（独立 GSM 设备，paramModel === 'BSC'）按需求隐藏「状态信息」组；BTS 保留显示。
-    const groups: FieldGroup[] = [getStationFields(t, networkType, handleResolveNameSync, renderDeviceNetworkType, appLocale)];
+    const groups: FieldGroup[] = [getStationFields(
+      t,
+      networkType,
+      handleResolveNameSync,
+      handleOpenOMCNameEditor,
+      renderDeviceNetworkType,
+      appLocale,
+    )];
     if (!detailResolved.isBSC) {
       groups.push(getStatusFields(t, networkType));
     }
     groups.push(getOtherFields(t, networkType, displayDevice));
     return groups;
-  }, [appLocale, detailResolved.isBSC, displayDevice, handleResolveNameSync, renderDeviceNetworkType, t]);
+  }, [appLocale, detailResolved.isBSC, displayDevice, handleOpenOMCNameEditor, handleResolveNameSync, renderDeviceNetworkType, t]);
 
   const cellGroup = useMemo((): FieldGroup | null => {
     if (!displayDevice) return null;
@@ -1815,6 +2026,7 @@ export default function DeviceDetail() {
     }
     return normalizeNetworkType(displayDevice?.networkType);
   }, [activeBmTech, displayDevice?.networkType, isBmProduct]);
+  const displayDeviceIsOnline = displayDevice?.isOnline;
 
   const activeDetailCells = isBmProduct && activeBmTech === 'GSM'
     ? detailComposite?.gsmCells
@@ -1843,6 +2055,7 @@ export default function DeviceDetail() {
         render: column.key === 'opState'
           ? (_: unknown, row: CellRecord) => renderCellOpState(
             row.values.opState as string | undefined,
+            displayDeviceIsOnline,
             t,
             opStateDict?.sysDictionaryDetails,
             appLocale,
@@ -1854,13 +2067,17 @@ export default function DeviceDetail() {
               t,
             )
           : column.key === 'rfStatus'
-            ? (_: unknown, row: CellRecord) => renderCellRfStatus(row.values.rfStatus as string | undefined, t)
+            ? (_: unknown, row: CellRecord) => renderCellRfStatus(
+              row.values.rfStatus as string | undefined,
+              displayDeviceIsOnline,
+              t,
+            )
           : isLteBandwidth
             ? (_: unknown, row: CellRecord) => formatLteBandwidthDisplay(row.values.bandwidth as string | undefined)
             : (value: string | number | undefined) => value ?? '-',
       };
     }),
-    [appLocale, displayCellNetworkType, isBtsProduct, opStateDict?.sysDictionaryDetails, t],
+    [appLocale, displayCellNetworkType, displayDeviceIsOnline, isBtsProduct, opStateDict?.sysDictionaryDetails, t],
   );
 
   if (isLoading) {
@@ -1915,10 +2132,10 @@ export default function DeviceDetail() {
               详情页小区表列标题已拆为 device.cellOpState「小区激活态」，避免同名误解。
             */}
             {(() => {
-              const status = activationStatusOf(displayDevice.opState);
+              const status = displayActivationStatusOf(displayDevice.opState, displayDevice.isOnline);
               if (status == null) return '-';
               const isActive = status === 'active';
-              const label = activationStatusLabelOf(displayDevice.opState, opStateDict?.sysDictionaryDetails, {
+              const label = displayActivationStatusLabelOf(displayDevice.opState, displayDevice.isOnline, opStateDict?.sysDictionaryDetails, {
                 active: t('status.active'),
                 inactive: t('status.inactive'),
               }, appLocale);
@@ -1935,13 +2152,15 @@ export default function DeviceDetail() {
             )}
           </div>
           <Space>
-            {/* license/parameters tab 自带明确操作入口，此处头部刷新隐藏，避免语义重复或误导 */}
-            {activeTab !== 'license' && activeTab !== 'parameters' && (
+            {passwordTaskTag}
+            {/* parameters tab 自带全量同步入口；quickSettings/license 使用页头刷新触发同一套参数同步。 */}
+            {activeTab !== 'parameters' && activeTab !== 'password' && (
               <Button
                 icon={<ReloadOutlined />}
                 onClick={handleHeaderRefresh}
-                loading={activeTab === 'quickSettings' && isQuickSettingsRefreshSubmitting}
-                disabled={isDeviceParamSyncBusy}
+                loading={((activeTab === 'quickSettings' || activeTab === 'license') && isQuickSettingsRefreshSubmitting)
+                  || (activeTab === 'alarms' && alarmRefreshPending)}
+                disabled={isDeviceParamSyncBusy || (activeTab === 'alarms' && alarmRefreshPending)}
               >
                 {t('common.refresh')}
               </Button>
@@ -2095,14 +2314,55 @@ export default function DeviceDetail() {
               children: (
                 <div style={{ padding: '0 0 16px' }}>
                   <ErrorBoundary>
-                    <LicenseParamsTab deviceId={device.id} />
+                    <LicenseParamsTab
+                      deviceId={device.id}
+                      onSyncTargetPathsChange={setLicenseSyncTargetPaths}
+                    />
                   </ErrorBoundary>
                 </div>
+              ),
+            },
+            {
+              key: 'password',
+              label: t('device.password.title'),
+              forceRender: true,
+              children: (
+                <ErrorBoundary>
+                  <PasswordManagementTab
+                    deviceId={device.id}
+                    deviceSn={displayDevice.sn}
+                    productClass={displayDevice.productClass}
+                    deviceModel={displayDevice.deviceModel}
+                    networkType={displayDevice.networkType}
+                    onTaskSubmitted={handlePasswordTaskSubmitted}
+                    onTaskCleared={handlePasswordTaskCleared}
+                  />
+                </ErrorBoundary>
               ),
             },
           ]}
         />
       </Card>
+
+      <Modal
+        title={t('device.nameSync.editOmcName')}
+        open={omcNameEditorOpen}
+        okText={t('common.save')}
+        cancelText={t('common.cancel')}
+        confirmLoading={renameMutation.isPending}
+        onOk={() => void handleRenameOMCName()}
+        onCancel={() => setOmcNameEditorOpen(false)}
+        destroyOnHidden
+      >
+        <Input
+          value={omcNameDraft}
+          maxLength={128}
+          autoFocus
+          placeholder={t('device.nameSync.omcNamePlaceholder')}
+          onChange={(event) => setOmcNameDraft(event.target.value)}
+          onPressEnter={() => void handleRenameOMCName()}
+        />
+      </Modal>
 
       <AlarmDetail alarm={detailAlarm} open={detailOpen} onClose={handleCloseAlarmDetail} />
       <ConfirmWithNoteModal

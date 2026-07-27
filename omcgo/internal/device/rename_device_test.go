@@ -2,11 +2,11 @@ package device
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/global"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/task"
@@ -29,22 +29,28 @@ func newRenameTestService(ctrl *gomock.Controller, devRepo DeviceRepository, inf
 	return svc
 }
 
-func TestRenameDevice_AutoLMTToOMC_Rejected(t *testing.T) {
+func TestRenameDevice_AutoLMTToOMC_UpdatesOMCNameOnly(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
+	deviceID := uuid.New()
 	devRepo := NewMockDeviceRepository(ctrl)
 	infoRepo := NewMockDeviceInfoRepository(ctrl)
 	svc := newRenameTestService(ctrl, devRepo, infoRepo, "auto_lmt_to_omc")
 
-	result, err := svc.RenameDevice(context.Background(), uuid.New(), "新名称", "")
+	dev := &model.Device{ID: deviceID, SerialNumber: "TEST000", DeviceName: "旧名称"}
+	info := &DeviceInfo{DeviceName: "旧名称", LMTDeviceName: "基站侧名称"}
 
-	require.Error(t, err)
-	assert.Nil(t, result)
-	var bizErr *commonerrors.BusinessError
-	assert.True(t, errors.As(err, &bizErr))
-	assert.Equal(t, global.ErrCodeDeviceRenameNotAllowed, bizErr.Code)
-	assert.True(t, errors.Is(err, commonerrors.ErrForbidden))
+	devRepo.EXPECT().GetByID(gomock.Any(), deviceID).Return(dev, nil)
+	infoRepo.EXPECT().GetByDeviceID(gomock.Any(), deviceID).Return(info, nil)
+	infoRepo.EXPECT().UpdateDeviceName(gomock.Any(), deviceID, "新名称").Return(nil)
+	devRepo.EXPECT().UpdateSiteName(gomock.Any(), deviceID, "新名称").Return(nil)
+
+	result, err := svc.RenameDevice(context.Background(), deviceID, "新名称", "")
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Empty(t, result.TaskID)
 }
 
 func TestRenameDevice_Prompt_SetsPendingWithOldLMTName(t *testing.T) {
@@ -134,7 +140,7 @@ func TestRenameDevice_AutoOMCToLMT_ReturnsTaskID(t *testing.T) {
 	taskSvc := &stubSuccessTaskSvc{taskID: "rename-task-1"}
 	svc.taskSvc = taskSvc
 
-	dev := &model.Device{ID: deviceID, SerialNumber: "TEST006", DeviceName: "旧名"}
+	dev := &model.Device{ID: deviceID, SerialNumber: "TEST006", DeviceName: "旧名", Technology: model.TechNR}
 	info := &DeviceInfo{DeviceName: "旧名", LMTDeviceName: "lmt旧名"}
 
 	devRepo.EXPECT().GetByID(gomock.Any(), deviceID).Return(dev, nil)
@@ -150,6 +156,19 @@ func TestRenameDevice_AutoOMCToLMT_ReturnsTaskID(t *testing.T) {
 	assert.Equal(t, "rename-task-1", result.TaskID)
 	require.NotNil(t, taskSvc.lastReq)
 	assert.Equal(t, "user-rename", taskSvc.lastReq.CreatorID)
+	var params struct {
+		Values []struct {
+			Name string `json:"name"`
+		} `json:"values"`
+	}
+	require.NoError(t, json.Unmarshal(taskSvc.lastReq.Params, &params))
+	require.Len(t, params.Values, 1)
+	assert.Equal(t, gnbNameStandardPath, params.Values[0].Name)
+}
+
+func TestLMTDeviceNameStandardPath_ByTechnology(t *testing.T) {
+	assert.Equal(t, hnbNameStandardPath, lmtDeviceNameStandardPath(&model.Device{Technology: model.TechLTE}))
+	assert.Equal(t, gnbNameStandardPath, lmtDeviceNameStandardPath(&model.Device{Technology: model.TechNR}))
 }
 
 func TestRenameDevice_FailedSPV_DoesNotRollback(t *testing.T) {

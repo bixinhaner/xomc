@@ -32,6 +32,11 @@
     <param name="PowerClass" titleZh="功率等级(*2dbm)" titleEn="Power Class (*2dbm)"
            standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.X_COM_MaxTxPowerExpanded"/>
   </group>
+  <group id="enb-plmn" titleZh="服务 PLMN 列表" titleEn="Serving PLMN List"
+         multiInstance="true" maxInstances="6"
+         objectPath="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.">
+    <param name="PLMNID" titleZh="PLMN" titleEn="PLMN" leaf="PLMNID"/>
+  </group>
        <group id="enb-mme" titleZh="MME IP+PLMN 列表" titleEn="MME IP + PLMN List">
               <param name="MmeIpPlmnList" titleZh="MME IP+PLMN 列表" titleEn="MME IP + PLMN List"
                                     standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmeIpPlmnList"/>

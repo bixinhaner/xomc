@@ -140,6 +140,10 @@ export interface SysConfigItem {
   valueType?: SysConfigValueType;
   description?: string;
   isPublic?: boolean;
+  /** 后端标记该配置为 write-only 敏感值；value 始终为空。 */
+  isSecret?: boolean;
+  /** 仅对敏感值有意义：服务端是否已保存非空值。 */
+  isConfigured?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -155,6 +159,34 @@ export interface BatchUpdateSysConfigItem {
 export interface BatchUpdateSysConfigPayload {
   category: string;
   items: BatchUpdateSysConfigItem[];
+}
+
+export type ConfigApplyStatus = 'pending' | 'applying' | 'applied' | 'failed';
+export type ConfigApplySuccessScope = 'runtime_applied' | 'event_delivered';
+
+export interface ConfigApplyTarget {
+  target: string;
+  status: ConfigApplyStatus;
+  /** A successful worker result may prove runtime application or only reliable event delivery. */
+  successScope: ConfigApplySuccessScope;
+  attempts: number;
+  appliedAt?: string;
+  lastError?: string;
+}
+
+export interface ConfigApplyBatch {
+  id: string;
+  category: string;
+  configVersion: number;
+  status: ConfigApplyStatus;
+  createdAt: string;
+  updatedAt: string;
+  targets: ConfigApplyTarget[];
+}
+
+export interface BatchUpdateSysConfigResult {
+  updated: number;
+  batch: ConfigApplyBatch;
 }
 
 export type OperationResult = 'success' | 'failure' | 'partial';

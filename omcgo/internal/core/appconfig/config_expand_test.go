@@ -29,6 +29,20 @@ func TestExpandEnv(t *testing.T) {
 	}
 }
 
+func TestNormalizeLoadedConfigBackup_AppliesToAllServiceConfigs(t *testing.T) {
+	app := &AppConfig{MinIO: MinIOConfig{Buckets: BucketConfig{ConfigBackup: "config_backup"}}}
+	acs := &ACSConfig{MinIO: MinIOConfig{Buckets: BucketConfig{ConfigBackup: "config_backup"}}}
+	worker := &WorkerConfig{MinIO: MinIOConfig{Buckets: BucketConfig{ConfigBackup: "config_backup"}}}
+
+	for _, target := range []any{app, acs, worker} {
+		normalizeLoadedConfigBackup(target)
+	}
+
+	assert.Equal(t, "config-backup", app.MinIO.Buckets.ConfigBackup)
+	assert.Equal(t, "config-backup", acs.MinIO.Buckets.ConfigBackup)
+	assert.Equal(t, "config-backup", worker.MinIO.Buckets.ConfigBackup)
+}
+
 // TestLoad_ExpandsEnvPlaceholders 验证 Load 在解析前对整份 YAML 做 ${VAR} 展开，
 // 即 .env 经环境变量注入、配置文件用 ${VAR} 引用的统一机制端到端可用。
 func TestLoad_ExpandsEnvPlaceholders(t *testing.T) {

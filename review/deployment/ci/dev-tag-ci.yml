@@ -1,0 +1,34 @@
+validate:dev-tag:
+  stage: validate
+  image: alpine/git:2.49.1
+  script:
+    - git fetch origin master
+    - |
+      if git merge-base --is-ancestor "$CI_COMMIT_SHA" origin/master; then
+        echo "Dev tags must not point to master commits: $CI_COMMIT_TAG"
+        exit 1
+      fi
+    - |
+      echo "Validated dev tag $CI_COMMIT_TAG for commit $CI_COMMIT_SHA"
+
+image:build:dev:
+  stage: package
+  image: $DOCKER_VERSION_IMAGE
+  services:
+    - name: docker:29-dind
+      command: ["--tls=false"]
+  needs:
+    - validate:dev-tag
+    - backend:quality
+    - frontend:quality
+    - backend:govulncheck
+    - frontend:audit
+  parallel:
+    matrix:
+      - SERVICE: ["app", "acs", "worker", "web"]
+  script:
+    - DEV_IMAGE="$OMC_DEV_REGISTRY/omc/$SERVICE:$CI_COMMIT_TAG"
+    - docker build --network host -t "$DEV_IMAGE" -f "deployments/docker/Dockerfile.$SERVICE" --build-arg APK_MIRROR=mirrors.aliyun.com .
+    - echo "$OMC_DEV_REGISTRY_PASSWORD" | docker login "$OMC_DEV_REGISTRY" -u "$OMC_DEV_REGISTRY_USER" --password-stdin
+    - docker push "$DEV_IMAGE"
+    - docker image inspect "$DEV_IMAGE" --format "$SERVICE image=$DEV_IMAGE id={{.Id}} created={{.Created}}"

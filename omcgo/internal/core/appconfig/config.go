@@ -28,10 +28,12 @@ type ACSConfig struct {
 	PostSessionWake         PostSessionWakeConfig `mapstructure:"post_session_wake"`
 	Redis                   RedisConfig           `mapstructure:"redis"`
 	NATS                    NATSConfig            `mapstructure:"nats"`
+	ParamSync               ParamSyncConfig       `mapstructure:"param_sync"`
 	DB                      PostgresConfig        `mapstructure:"db"`
 	TSDB                    PostgresConfig        `mapstructure:"tsdb"` // KPI/时序库物理分离：ACS 写 trace_messages（已迁时序库）所需的第二个连接池
 	MinIO                   MinIOConfig           `mapstructure:"minio"`
 	Upload                  UploadConfig          `mapstructure:"upload"`
+	Backpressure            BackpressureConfig    `mapstructure:"backpressure"`
 	Download                DownloadConfig        `mapstructure:"download"`
 	Metrics                 MetricsConfig         `mapstructure:"metrics"`
 	Tracer                  TracerConfig          `mapstructure:"tracer"`
@@ -80,6 +82,43 @@ type UploadConfig struct {
 	TokenSecret string        `mapstructure:"token_secret"`  // JWT signing secret (optional)
 	TokenTTL    time.Duration `mapstructure:"token_ttl"`     // Token validity duration
 	MaxFileSize int64         `mapstructure:"max_file_size"` // Max file size in bytes
+}
+
+// BackpressureConfig supplies deployment defaults for queue-risk admission.
+// Runtime sys_configs may override these values without restarting ACS.
+type BackpressureConfig struct {
+	QueuePendingHigh int           `mapstructure:"queue_pending_high"`
+	QueuePendingLow  int           `mapstructure:"queue_pending_low"`
+	QueueOldestHigh  time.Duration `mapstructure:"queue_oldest_high"`
+	QueueOldestLow   time.Duration `mapstructure:"queue_oldest_low"`
+	QueueSlopeWindow time.Duration `mapstructure:"queue_slope_window"`
+}
+
+// Defaults preserves safe queue hysteresis when older configuration files do
+// not yet contain a backpressure section.
+func (c BackpressureConfig) Defaults() BackpressureConfig {
+	if c.QueuePendingHigh <= 0 {
+		c.QueuePendingHigh = 2000
+	}
+	if c.QueuePendingLow <= 0 {
+		c.QueuePendingLow = 500
+	}
+	if c.QueuePendingLow > c.QueuePendingHigh {
+		c.QueuePendingLow = c.QueuePendingHigh
+	}
+	if c.QueueOldestHigh <= 0 {
+		c.QueueOldestHigh = 10 * time.Minute
+	}
+	if c.QueueOldestLow <= 0 {
+		c.QueueOldestLow = 2 * time.Minute
+	}
+	if c.QueueOldestLow > c.QueueOldestHigh {
+		c.QueueOldestLow = c.QueueOldestHigh
+	}
+	if c.QueueSlopeWindow <= 0 {
+		c.QueueSlopeWindow = 5 * time.Minute
+	}
+	return c
 }
 
 // DownloadConfig 配置 ACS 的文件下载分发服务。
@@ -240,6 +279,31 @@ type ParamRegistryConfig struct {
 	DiscoveredTTL time.Duration `mapstructure:"discovered_ttl"`
 }
 
+// ParamSyncConfig controls the reliable parameter-sync data plane. All switches
+// default to false so deploying the binary and migration does not change the
+// legacy path until an operator explicitly enables a deterministic canary.
+type ParamSyncConfig struct {
+	// RoutingMode controls which parameter-sync entry path is allowed. Empty
+	// keeps the pre-routing-mode legacy behavior for backward-compatible local
+	// configurations; production should explicitly use closed/durable.
+	RoutingMode                   string        `mapstructure:"routing_mode"`
+	ManualOfflineMode             string        `mapstructure:"manual_offline_mode"`
+	RunEnabled                    bool          `mapstructure:"run_enabled"`
+	ResultConsumerEnabled         bool          `mapstructure:"result_consumer_enabled"`
+	StagingEnabled                bool          `mapstructure:"staging_enabled"`
+	CanaryPercent                 int           `mapstructure:"canary_percent"`
+	LegacyFallbackEnabled         bool          `mapstructure:"legacy_fallback_enabled"`
+	ResultConsumerShardCount      int           `mapstructure:"result_consumer_shard_count"`
+	ResultConsumerQueueDepth      int           `mapstructure:"result_consumer_queue_depth"`
+	ResultConsumerPullBatchSize   int           `mapstructure:"result_consumer_pull_batch_size"`
+	ResultConsumerPullConcurrency int           `mapstructure:"result_consumer_pull_concurrency"`
+	ResultConsumerAckWait         time.Duration `mapstructure:"result_consumer_ack_wait"`
+	ResultConsumerMaxAckPending   int           `mapstructure:"result_consumer_max_ack_pending"`
+	RecoveryRunLimit              int           `mapstructure:"recovery_run_limit"`
+	RecoveryTaskLimitPerRun       int           `mapstructure:"recovery_task_limit_per_run"`
+	RecoveryTaskBudget            int           `mapstructure:"recovery_task_budget"`
+}
+
 // AppConfig 是 App 服务的完整配置。
 // 由 cmd/app/main.go 读取 config.yaml 后初始化，包含 REST API、认证、
 // 北向接口、开站引擎、数据模型过期策略和可观测性配置。
@@ -262,6 +326,7 @@ type AppConfig struct {
 	DataModelExpiry DataModelExpiryConfig `mapstructure:"datamodel_expiry"`
 	DictLoader      DictLoaderConfig      `mapstructure:"dict_loader"`
 	ParamRegistry   ParamRegistryConfig   `mapstructure:"param_registry"`
+	ParamSync       ParamSyncConfig       `mapstructure:"param_sync"`
 	BatchProcessor  BatchProcessorConfig  `mapstructure:"batch_processor"`
 	License         LicenseConfig         `mapstructure:"license"`
 	Task            TaskConfig            `mapstructure:"task"`
@@ -275,7 +340,7 @@ type AppConfig struct {
 
 // TaskConfig 配置 task 子系统的全局默认行为（T-0157 C1 引入）。
 //
-// DefaultExpiresInSeconds: CreateTask 调用方未显式传 ExpiresIn 时使用的默认超时秒数。
+// DefaultExpiresInSeconds: device task 创建调用方未显式传 ExpiresIn 时使用的默认超时秒数。
 //
 //	调用方语义:
 //	  - req.ExpiresIn > 0  → 直接采用该值
@@ -621,13 +686,15 @@ type WorkerConfig struct {
 	Redis               RedisConfig               `mapstructure:"redis"`
 	NATS                NATSConfig                `mapstructure:"nats"`
 	MinIO               MinIOConfig               `mapstructure:"minio"`
-	Task                TaskConfig                `mapstructure:"task"`                  // T-0157 C2: 任务过期扫描器配置
+	Task                TaskConfig                `mapstructure:"task"` // T-0157 C2: 任务过期扫描器配置
+	ParamSync           ParamSyncConfig           `mapstructure:"param_sync"`
 	OfflineAlarmCleanup OfflineAlarmCleanupConfig `mapstructure:"offline_alarm_cleanup"` // #358: 离线设备活动告警清理阈值/周期/批量可配
 	PM                  PMConfig                  `mapstructure:"pm"`                    // 设备上线时自动下发 PM 上传配置
 	// PMConsumerConcurrency 是 PM 文件入库消费者的进程内并发订阅数（pm.file.received → 解析入库）。
 	// NATS push 订阅 async 回调由 nats.go 单 goroutine 串行投递，单订阅只用 ~1 核；N 个订阅共享同一
 	// durable consumer "pm-workers" 由 JetStream 负载均衡，吃满 worker 多核。<=0 时 worker 启动期
-	// 回退到 GOMAXPROCS（即容器 CPU 配额），上限 16。建议设为 worker CPU 核数。
+	// 回退到 GOMAXPROCS（即容器 CPU 配额），上限 32（2026-07-21 从16上调，见 cmd/worker/main.go
+	// 注释）。设更大的值需同步核对 db.max_conns/tsdb.max_conns 连接池是否够用。
 	PMConsumerConcurrency int `mapstructure:"pm_consumer_concurrency"`
 	// PMAsyncCommit：PM 指标大批量写是否对本事务关掉 WAL 同步落盘（synchronous_commit=off）。
 	// PM 数据可从 MinIO 原文件重建，关掉后提交不阻塞 fsync、显著提吞吐（崩溃最多丢已提交未刷盘的
@@ -853,6 +920,61 @@ type BucketConfig struct {
 	FileBundles string `mapstructure:"file_bundles"`
 }
 
+const (
+	// ConfigBackupBucket is the only physical S3/MinIO bucket name used for
+	// device configuration backups.
+	ConfigBackupBucket = "config-backup"
+	// LegacyConfigBackupBucket is accepted only at API/config boundaries.
+	LegacyConfigBackupBucket = "config_backup"
+)
+
+// NormalizeConfigBackupBucket converts the legacy logical compatibility name
+// before it reaches an S3/MinIO client. Other bucket names are left untouched.
+func NormalizeConfigBackupBucket(bucket string) string {
+	if bucket == LegacyConfigBackupBucket {
+		return ConfigBackupBucket
+	}
+	return bucket
+}
+
+// NormalizeConfigBackupReference normalizes bucket-qualified internal object
+// paths and OMC FileDownloadService HTTP(S) routes. Arbitrary external URLs
+// are returned byte-for-byte, even when their object path happens to contain a
+// directory named config_backup.
+func NormalizeConfigBackupReference(reference string) string {
+	if reference == LegacyConfigBackupBucket {
+		return ConfigBackupBucket
+	}
+	if strings.HasPrefix(reference, LegacyConfigBackupBucket+"/") {
+		return ConfigBackupBucket + strings.TrimPrefix(reference, LegacyConfigBackupBucket)
+	}
+	legacyDownloadSegment := "/smallcell/FileDownloadService/" + LegacyConfigBackupBucket + "/"
+	canonicalDownloadSegment := "/smallcell/FileDownloadService/" + ConfigBackupBucket + "/"
+	lowerReference := strings.ToLower(reference)
+	if strings.Contains(reference, "://") {
+		if (strings.HasPrefix(lowerReference, "http://") || strings.HasPrefix(lowerReference, "https://")) &&
+			strings.Contains(reference, legacyDownloadSegment) {
+			return strings.Replace(reference, legacyDownloadSegment, canonicalDownloadSegment, 1)
+		}
+		return reference
+	}
+	if strings.Contains(reference, legacyDownloadSegment) {
+		return strings.Replace(reference, legacyDownloadSegment, canonicalDownloadSegment, 1)
+	}
+	return reference
+}
+
+func normalizeLoadedConfigBackup(target interface{}) {
+	switch cfg := target.(type) {
+	case *AppConfig:
+		cfg.MinIO.Buckets.ConfigBackup = NormalizeConfigBackupBucket(cfg.MinIO.Buckets.ConfigBackup)
+	case *ACSConfig:
+		cfg.MinIO.Buckets.ConfigBackup = NormalizeConfigBackupBucket(cfg.MinIO.Buckets.ConfigBackup)
+	case *WorkerConfig:
+		cfg.MinIO.Buckets.ConfigBackup = NormalizeConfigBackupBucket(cfg.MinIO.Buckets.ConfigBackup)
+	}
+}
+
 // MetricsConfig 配置 Prometheus 指标暴露端口。
 // 各服务在此端口提供 /metrics 端点，供 Prometheus 采集。
 // 同一端口也提供 /healthz 健康检查接口（由 HealthChecker 驱动）。
@@ -991,6 +1113,7 @@ func Load(path string, target interface{}) error {
 	if err := v.Unmarshal(target); err != nil {
 		return fmt.Errorf("unmarshal config: %w", err)
 	}
+	normalizeLoadedConfigBackup(target)
 
 	// Validate if target implements Validatable
 	if v, ok := target.(Validatable); ok {
@@ -1027,6 +1150,7 @@ func LoadWithEnvOverride(path string, target interface{}, envOverrides map[strin
 	if err := v.Unmarshal(target); err != nil {
 		return fmt.Errorf("unmarshal config: %w", err)
 	}
+	normalizeLoadedConfigBackup(target)
 
 	// Validate if target implements Validatable
 	if v, ok := target.(Validatable); ok {

@@ -86,6 +86,18 @@ func TestAdhocObjectLabel(t *testing.T) {
 	}
 }
 
+func TestAdhocObjectLabel_EnglishSystemValues(t *testing.T) {
+	if got := adhocObjectLabel("network", "", "AGGREGATED", "", "", "", "", 0, appcontext.LocaleEN); got != "Network" {
+		t.Errorf("network english label=%q", got)
+	}
+	if got := adhocObjectLabel("aggregate_group", "", "AGGREGATED", "", "", "", "", 3, appcontext.LocaleEN); got != "Aggregate Group (3 devices)" {
+		t.Errorf("aggregate_group english label=%q", got)
+	}
+	if got := adhocObjectLabel("device_group", "", "", "", "", "DeviceGroup=abcdef1234-xx", "华东A组", 0, appcontext.LocaleEN); got != "华东A组" {
+		t.Errorf("user-authored group name should stay unchanged, got %q", got)
+	}
+}
+
 // adhocTechnology 从 device_group 维度 object_ldn 解析制式（设备组制式治本 B 方案），
 // 与前端 adhocObjectColumn.ts 同口径（取 ,Tech= 后段、大写；无段返空）。
 func TestAdhocTechnology(t *testing.T) {

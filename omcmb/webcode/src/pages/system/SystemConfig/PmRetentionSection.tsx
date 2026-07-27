@@ -5,17 +5,16 @@
 // 接入方式：复用现有 useSysConfigsByCategory + useBatchUpdateSysConfigs
 // （sys_configs.changed 通过 admin.SysConfigService.RegisterSavedHook 触发后端 retention.Service.Reload）
 //
-// ⚠️ 本组件尚未挂载到 SystemConfig/index.tsx — 留早上人工挂载（避免改 chenbo01 多人编辑的 index.tsx）。
-// 早上挂载步骤：在 index.tsx 适当位置加 `<PmRetentionSection />` 即可。
-
-import { useEffect, useMemo, useState } from 'react';
-import { Button, Card, Form, message, Space, Spin } from 'antd';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Button, Card, Form, message, Space, Spin } from 'antd';
 import {
   useSysConfigsByCategory,
   useBatchUpdateSysConfigs,
+  useSysConfigApplyBatch,
 } from '@core/hooks/api/useSystem';
 import { AddonInputNumber } from '@/components/common/InputAddon';
 import { useT } from '@/hooks/useT';
+import type { ConfigApplyBatch } from '@core/types/system';
 
 // 与后端 internal/pm/retention/policies.go 的 PolicyKey 严格对齐。
 type PolicyKey =
@@ -51,9 +50,24 @@ export default function PmRetentionSection() {
   const t = useT();
   const [form] = Form.useForm<Record<PolicyKey, number>>();
   const [submitting, setSubmitting] = useState(false);
+  const [submittedBatch, setSubmittedBatch] = useState<ConfigApplyBatch | null>(null);
+  const { data: refreshedBatch } = useSysConfigApplyBatch(submittedBatch?.id);
+  const applyBatch = refreshedBatch ?? submittedBatch;
 
-  const { data: configs, isLoading } = useSysConfigsByCategory(PM_RETENTION_CATEGORY);
+  const {
+    data: configs,
+    isLoading,
+    isFetching,
+    isError,
+    isSuccess,
+    refetch,
+  } = useSysConfigsByCategory(PM_RETENTION_CATEGORY);
   const { mutateAsync: batchUpdate } = useBatchUpdateSysConfigs();
+  const canEdit = isSuccess && !isFetching;
+  const canEditRef = useRef(canEdit);
+  useLayoutEffect(() => {
+    canEditRef.current = canEdit;
+  }, [canEdit]);
 
   // 把后端返回的 sys_configs 行映射为 { key: int }
   const initialValues = useMemo<Record<PolicyKey, number>>(() => {
@@ -73,21 +87,38 @@ export default function PmRetentionSection() {
   }, [configs]);
 
   useEffect(() => {
-    form.setFieldsValue(initialValues);
-  }, [form, initialValues]);
+    if (!isSuccess) return;
+    form.setFields(
+      KEYS.map((name) => ({ name, value: initialValues[name], touched: false })),
+    );
+  }, [form, initialValues, isSuccess]);
 
   const handleSave = async () => {
+    if (!canEditRef.current) {
+      message.error(t('empty.loadFailed'));
+      return;
+    }
     try {
       const values = await form.validateFields();
+      if (!canEditRef.current) {
+        message.error(t('empty.loadFailed'));
+        return;
+      }
+      const changedKeys = KEYS.filter((key) => form.isFieldTouched(key));
+      if (changedKeys.length === 0) {
+        message.warning(t('sysconfig.warn.noSaveable'));
+        return;
+      }
       setSubmitting(true);
-      await batchUpdate({
+      const result = await batchUpdate({
         category: PM_RETENTION_CATEGORY,
-        items: KEYS.map((k) => ({
+        items: changedKeys.map((k) => ({
           key: k,
           value: String(values[k]),
           value_type: 'int',
         })),
       });
+      setSubmittedBatch(result.batch);
       message.success(t('pmRetention.save.success'));
     } catch {
       // validateFields 失败或网络错误：交给 antd 自身的 UI 提示，不再额外弹错
@@ -97,7 +128,10 @@ export default function PmRetentionSection() {
   };
 
   const handleReset = () => {
-    form.setFieldsValue(DEFAULTS);
+    if (!canEdit) return;
+    form.setFields(
+      KEYS.map((name) => ({ name, value: DEFAULTS[name], touched: true })),
+    );
   };
 
   return (
@@ -109,10 +143,10 @@ export default function PmRetentionSection() {
       style={{ marginBottom: 16 }}
       extra={
         <Space>
-          <Button size="small" onClick={handleReset} disabled={submitting}>
+          <Button size="small" onClick={handleReset} disabled={submitting || !canEdit}>
             {t('pmRetention.reset')}
           </Button>
-          <Button size="small" type="primary" onClick={handleSave} loading={submitting}>
+          <Button size="small" type="primary" onClick={handleSave} loading={submitting} disabled={!canEdit}>
             {t('pmRetention.save')}
           </Button>
         </Space>
@@ -121,7 +155,17 @@ export default function PmRetentionSection() {
       <div style={{ color: '#888', fontSize: 12, marginBottom: 12 }}>
         {t('pmRetention.description')}
       </div>
-      <Spin spinning={isLoading}>
+      {isError && (
+        <Alert
+          type="error"
+          showIcon
+          title={t('empty.loadFailed')}
+          description={t('empty.loadFailedDesc')}
+          action={<Button size="small" onClick={() => void refetch()}>{t('common.retry')}</Button>}
+          style={{ marginBottom: 12 }}
+        />
+      )}
+      <Spin spinning={isLoading || isFetching}>
         <Form form={form} layout="vertical" size="small" initialValues={DEFAULTS}>
           {KEYS.map((k) => (
             <Form.Item
@@ -157,6 +201,17 @@ export default function PmRetentionSection() {
           ))}
         </Form>
       </Spin>
+      {applyBatch && (
+        <Alert
+          style={{ marginTop: 12 }}
+          type={applyBatch.status === 'failed' ? 'error' : applyBatch.status === 'applied' ? 'success' : 'info'}
+          showIcon
+          message={t(`sysconfig.apply.${applyBatch.status}`)}
+          description={applyBatch.status === 'failed'
+            ? applyBatch.targets.find((target) => target.lastError)?.lastError
+            : undefined}
+        />
+      )}
     </Card>
   );
 }

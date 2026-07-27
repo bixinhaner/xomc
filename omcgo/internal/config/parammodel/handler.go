@@ -83,14 +83,15 @@ func (o *optInt64) Ptr() *int64 {
 // fileLocks 提供 per-filename 进程内互斥(Upload + Delete + ReloadOne 三方共用,
 // 避免同名文件并发写入竞态)。
 type Handler struct {
-	repo          *PgRepository
-	registry      *Registry
-	reloader      Reloader
-	dictRefresher DictSourceRefresher
-	logger        *zap.Logger
-	baseDir       string
-	builtinDir    string   // absolute path = filepath.Join(baseDir, BuiltinDirSubdir)
-	fileLocks     sync.Map // map[basename]*sync.Mutex
+	repo             *PgRepository
+	registry         *Registry
+	reloader         Reloader
+	dictRefresher    DictSourceRefresher
+	productRefresher RegistryRefresher
+	logger           *zap.Logger
+	baseDir          string
+	builtinDir       string   // absolute path = filepath.Join(baseDir, BuiltinDirSubdir)
+	fileLocks        sync.Map // map[basename]*sync.Mutex
 }
 
 // Reloader 抽象 dictloader.Registry.ReloadOne — 让 handler 不强依赖 dictloader 包。
@@ -102,6 +103,16 @@ type Reloader interface {
 // best-effort:刷新失败不阻断导入(daily cron 兜底)。可为 nil(未接入时整段跳过)。
 type DictSourceRefresher interface {
 	RefreshSourceBoundByTable(ctx context.Context, sourceTable string) (int, error)
+}
+
+// RegistryRefresher 用于在参数模型启停后刷新依赖该状态的产品路由缓存。
+type RegistryRefresher interface {
+	Refresh(ctx context.Context) error
+}
+
+// SetProductRegistryRefresher 注入 ProductRegistry，避免 parammodel 包直接依赖 product 包。
+func (h *Handler) SetProductRegistryRefresher(refresher RegistryRefresher) {
+	h.productRefresher = refresher
 }
 
 // NewHandler 构造 Handler；reloader 可为 nil（导入 XML 时 destructiveReload 跳过重载，
@@ -169,7 +180,7 @@ func (h *Handler) RegisterWriteRoutes(rg *gin.RouterGroup) {
 	// 导入 XML:名称取自 XML paramModel 属性 + 重复二次确认覆盖(?force=true)→
 	// destructive 重载(全量+删孤儿)→ 刷新缓存,在单端点内顺序完成。
 	g.POST("/upload-xml", h.UploadXML)
-	g.POST("/standard", h.UpsertStandard)
+	g.POST("/standard", h.CreateStandard)
 	g.PUT("/standard/:path", h.UpdateStandard)
 	g.DELETE("/standard/:path", h.DeleteStandard)
 	g.PUT("/:name", h.UpdateModel)
@@ -939,13 +950,15 @@ func (h *Handler) DeleteDiscoveredVersion(c *gin.Context) {
 // ── Standard params ─────────────────────────────────────────────────
 
 type standardView struct {
-	StandardPath  string `json:"standard_path"`
-	EntryType     string `json:"entry_type"`
-	Access        string `json:"access"`
-	DataType      string `json:"data_type"`
-	ChangeApplies string `json:"change_applies"`
-	MinValue      *int64 `json:"min_value,omitempty"`
-	MaxValue      *int64 `json:"max_value,omitempty"`
+	StandardPath  string    `json:"standard_path"`
+	EntryType     string    `json:"entry_type"`
+	Access        string    `json:"access"`
+	DataType      string    `json:"data_type"`
+	ChangeApplies string    `json:"change_applies"`
+	MinValue      *int64    `json:"min_value,omitempty"`
+	MaxValue      *int64    `json:"max_value,omitempty"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	UpdatedFields []string  `json:"updated_fields"`
 }
 
 func toStandardView(sp *StandardParam) standardView {
@@ -953,6 +966,7 @@ func toStandardView(sp *StandardParam) standardView {
 		StandardPath: sp.StandardPath, EntryType: sp.EntryType,
 		Access: sp.Access, DataType: sp.DataType, ChangeApplies: sp.ChangeApplies,
 		MinValue: sp.MinValue, MaxValue: sp.MaxValue,
+		UpdatedAt: sp.UpdatedAt, UpdatedFields: sp.UpdatedFields,
 	}
 }
 
@@ -991,13 +1005,13 @@ type upsertStandardReq struct {
 	MaxValue      *optInt64 `json:"max_value"`
 }
 
-func (h *Handler) UpsertStandard(c *gin.Context) {
+func (h *Handler) CreateStandard(c *gin.Context) {
 	var req upsertStandardReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	sp, err := h.repo.UpsertStandardParam(c.Request.Context(), UpsertStandardParamInput{
+	sp, err := h.repo.CreateStandardParam(c.Request.Context(), UpsertStandardParamInput{
 		StandardPath:  req.StandardPath,
 		EntryType:     req.EntryType,
 		Access:        req.Access,
@@ -1007,6 +1021,11 @@ func (h *Handler) UpsertStandard(c *gin.Context) {
 		MaxValue:      req.MaxValue.Ptr(),
 	})
 	if err != nil {
+		if errors.Is(err, ErrStandardParamExists) {
+			commonerrors.AbortWithError(c, http.StatusConflict,
+				fmt.Errorf("参数 path %q 已存在，只能在原有记录上修改", req.StandardPath))
+			return
+		}
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
@@ -1028,7 +1047,7 @@ func (h *Handler) UpdateStandard(c *gin.Context) {
 			fmt.Errorf("standard_path in body (%q) differs from URL (%q)", req.StandardPath, standardPath))
 		return
 	}
-	sp, err := h.repo.UpsertStandardParam(c.Request.Context(), UpsertStandardParamInput{
+	sp, err := h.repo.UpdateStandardParam(c.Request.Context(), UpsertStandardParamInput{
 		StandardPath:  req.StandardPath,
 		EntryType:     req.EntryType,
 		Access:        req.Access,
@@ -1038,6 +1057,10 @@ func (h *Handler) UpdateStandard(c *gin.Context) {
 		MaxValue:      req.MaxValue.Ptr(),
 	})
 	if err != nil {
+		if errors.Is(err, ErrStandardParamNotFound) {
+			commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
+			return
+		}
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
@@ -1197,11 +1220,15 @@ func (h *Handler) refreshBoundDict(ctx context.Context, sourceTable string) {
 // ── helpers ─────────────────────────────────────────────────────────
 
 func (h *Handler) refreshAsync(ctx context.Context, op string) {
-	if h.registry == nil {
-		return
+	if h.registry != nil {
+		if err := h.registry.Refresh(ctx); err != nil {
+			h.logger.Warn("param registry refresh after write failed", zap.String("op", op), zap.Error(err))
+		}
 	}
-	if err := h.registry.Refresh(ctx); err != nil {
-		h.logger.Warn("param registry refresh after write failed", zap.String("op", op), zap.Error(err))
+	if h.productRefresher != nil {
+		if err := h.productRefresher.Refresh(ctx); err != nil {
+			h.logger.Warn("product registry refresh after param model write failed", zap.String("op", op), zap.Error(err))
+		}
 	}
 }
 

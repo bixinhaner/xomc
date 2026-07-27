@@ -121,9 +121,9 @@ func Test_buildObjectsQuery_DeviceOnly(t *testing.T) {
 	q, args := buildObjectsQuery([]string{"SN-1", "SN-2"}, nil)
 
 	assert.Contains(t, q, "SELECT DISTINCT object_ldn")
-	assert.Contains(t, q, "FROM pm_metrics")
-	assert.Contains(t, q, "device_sn = ANY($1)")
-	assert.Contains(t, q, "object_ldn <> ''")
+	assert.Contains(t, q, "FROM pm_measurement_anchors")
+	assert.Contains(t, q, "d.serial_number = ANY($1)")
+	assert.Contains(t, q, "a.object_ldn <> ''")
 	assert.NotContains(t, q, "FROM device_dim WHERE technology")
 	assert.Contains(t, q, "ORDER BY object_ldn")
 	assert.Equal(t, []any{[]string{"SN-1", "SN-2"}}, args)
@@ -133,8 +133,8 @@ func Test_buildObjectsQuery_DeviceOnly(t *testing.T) {
 func Test_buildObjectsQuery_WithTechnology(t *testing.T) {
 	q, args := buildObjectsQuery([]string{"SN-1"}, []string{"lte"})
 
-	assert.Contains(t, q, "device_sn = ANY($1)")
-	assert.Contains(t, q, "(device_oui, device_sn) IN (SELECT oui, serial_number FROM device_dim WHERE technology = ANY($2))")
+	assert.Contains(t, q, "d.serial_number = ANY($1)")
+	assert.Contains(t, q, "d.technology = ANY($2)")
 	assert.Len(t, args, 2)
 	assert.Equal(t, []string{"SN-1"}, args[0])
 	assert.Equal(t, []string{"lte"}, args[1])
@@ -144,7 +144,7 @@ func Test_buildObjectsQuery_WithTechnology(t *testing.T) {
 func Test_buildObjectsQuery_EmptyDevices(t *testing.T) {
 	q, args := buildObjectsQuery([]string{}, nil)
 
-	assert.Contains(t, q, "device_sn = ANY($1)")
+	assert.Contains(t, q, "d.serial_number = ANY($1)")
 	assert.NotContains(t, q, "technology")
 	assert.Len(t, args, 1)
 }

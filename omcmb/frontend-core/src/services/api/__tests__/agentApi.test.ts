@@ -85,7 +85,7 @@ describe('agentApi', () => {
         enabled: true,
         agentStudioBaseUrl: payload.agentStudioBaseUrl,
         serviceTokenConfigured: true,
-        connectorSlug: 'external-agent',
+        connectorSlug: 'local-omc-agent',
         connectorId: 'c1',
         runtimeStreamUrl: '/api/v1/agent/chat/stream',
         status: 'connected',

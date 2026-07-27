@@ -99,6 +99,12 @@ func (s *Service) CreateScriptExecution(ctx context.Context, scriptID uuid.UUID,
 	if len(plan) == 0 {
 		return nil, nil, fmt.Errorf("script has no executable plan: %w", commonerrors.ErrInvalidInput)
 	}
+	if active, lookupErr := s.taskRepo.GetActiveByScriptID(ctx, scriptID); lookupErr == nil {
+		return nil, nil, fmt.Errorf("该脚本已存在未完成的脚本任务 %s（%s/%s），请先等待执行完成或终止后再创建: %w",
+			active.TaskName, active.Status, active.ExecuteType, commonerrors.ErrAlreadyExists)
+	} else if !errors.Is(lookupErr, commonerrors.ErrNotFound) {
+		return nil, nil, fmt.Errorf("check active script task: %w", lookupErr)
+	}
 
 	validation := &ScriptValidationResult{PlanItems: cloneScriptPlanItems(plan)}
 	if s.scriptExecutionValidator != nil {
@@ -158,7 +164,7 @@ func (s *Service) CreateScriptExecution(ctx context.Context, scriptID uuid.UUID,
 	}
 	task, err := s.ExecuteCommand(ctx, execReq)
 	if err != nil {
-		if req.RequestID != "" && isUniqueViolation(err) {
+		if req.RequestID != "" && (isUniqueViolation(err) || errors.Is(err, commonerrors.ErrAlreadyExists)) {
 			if existing, lookupErr := s.taskRepo.GetByRequestID(ctx, actor, req.RequestID); lookupErr == nil {
 				return existing, validation, nil
 			}

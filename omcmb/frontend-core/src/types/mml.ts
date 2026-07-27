@@ -94,7 +94,7 @@ export interface MMLResult {
   timestamp: string;
 }
 
-export type DeviceResultStatus = 'completed' | 'running' | 'pending';
+export type DeviceResultStatus = 'completed' | 'running' | 'pending' | 'failed' | 'expired';
 
 export interface MMLTaskRequestMessage {
   method: string;
@@ -116,6 +116,8 @@ export interface DeviceTaskResultItem {
   planOrder?: number;
   planRawLine?: string;
   commandCode?: string;
+  /** 后端任务快照中的用户可见命令名（自定义命令也必须保留）。 */
+  commandName?: string;
   operationType?: string;
   deviceName?: string;
   mmlScript?: string;
@@ -321,6 +323,7 @@ export interface MMLTask {
   id: string;
   taskName: string;
   scriptId?: string;
+  scriptName?: string;
   taskOrigin: MMLTaskOrigin;
   deviceSns: string[];
   commands: string[];
@@ -360,6 +363,7 @@ export interface MMLTask {
   successCount: number;
   failedCount: number;
   result?: MMLTaskResult;
+  latestRun?: MMLTaskLatestRun;
 
   // Scheduler fields (P2/P3, docs/design/mml-task-flow-design-20260424.md)
   // nextTriggerAt: 下次触发时刻（scheduled 一次性；periodic 滚动更新）
@@ -402,6 +406,23 @@ export interface MMLTask {
   matchedProductClass?: string;
   /** 任务级翻译来源汇总：discovered/default/passthrough/orphan_passthrough/mixed */
   pathTranslationSource?: PathTranslationSource;
+}
+
+export interface MMLTaskLatestRun {
+  id: string;
+  executeType: MMLExecuteType;
+  executeMode?: MMLTaskExecuteMode;
+  status: MMLTaskStatus;
+  result?: MMLTaskResult;
+  totalDevices: number;
+  successCount: number;
+  failedCount: number;
+  commandCount?: number;
+  planItemCount?: number;
+  startedAt?: string;
+  finishedAt?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 /** T-0168: 路径翻译来源枚举（per-path 与 task 级共用）。 */
@@ -458,4 +479,21 @@ export interface MMLCustomCommand {
   creator: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface MMLCustomCommandPathDef {
+  id: string;
+  commandId: string;
+  standardPathId: string;
+  standardPath: string;
+  entryType: string;
+  access: string;
+  dataType: string;
+  description: string;
+  minValue?: number;
+  maxValue?: number;
+  defaultSelected: boolean;
+  sortOrder: number;
+  /** false 表示仅由历史 param_paths JSON 补出的只读兼容行。 */
+  mutable: boolean;
 }

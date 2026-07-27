@@ -127,6 +127,8 @@ export interface UnifiedFileTransferDeviceItem {
   /** CPE 上传完成、ACS 落 MinIO、backup_restore_file 元数据就绪后由后端生成的
    *  1h 有效 presigned GET URL；未到位时为空，UI 仅灰显文件名不可点击。 */
   downloadUrl?: string;
+  /** targetFile 对应的日志文件已被配额清理；文件名保留展示，但不可下载。 */
+  fileDeleted?: boolean;
   status: UnifiedFileTransferDeviceStatus;
   result?: TransferTaskResult;
   progress: number;

@@ -3,7 +3,11 @@ import { App, Form } from 'antd';
 import type { GroupItem, NameFilterItem } from './types';
 import { parseRangeString } from './types';
 import type { UseNameFiltersReturn } from './useNameFilters';
+import { getRecordI18n, type Locale } from '@core/utils/i18nText';
+import { UNASSIGNED_GROUP_ID } from '@core/utils/deviceGroupTargets';
 import styles from './DeviceGrouping.module.css';
+
+const DEFAULT_ROOT_GROUP_ID = '00000000-0000-0000-0000-000000000001';
 
 export interface AddGroupFormValues {
   /** 单值名称 — 表单只有一个 antd Input（去多语言，方案 A）。 */
@@ -15,6 +19,7 @@ export interface AddGroupFormValues {
 export interface AddChildFormValues {
   /** 单值名称 — 与一级分组一致，单个 antd Input。 */
   name?: string;
+  autoAssignEnabled?: boolean;
   matchingMode: 'deviceName' | 'lac' | 'tac' | 'serialNumber';
   tacRag: string;
   sourceGroupId?: string;
@@ -50,7 +55,7 @@ interface UpdateGroupArgs {
      * 之前类型只允许 name/parent_id/remark，导致 L2 编辑改匹配规则时被 TS 静默
      * 截断 → 后端收不到 → fireGroupMatch 跑旧规则 → 设备不重新入组。
      */
-    matching_mode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber';
+    matching_mode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber' | '';
     source_group_id?: string;
     name_rule_list?: NameFilterItem[];
     lac_list?: number[];
@@ -90,6 +95,7 @@ export function useGroupActions(deps: {
   modal: ReturnType<typeof App.useApp>['modal'];
   message: ReturnType<typeof App.useApp>['message'];
   t: (id: string, values?: Record<string, string | number>) => string;
+  locale: Locale;
   selectedGroupId: string | null;
   setSelectedGroupId: React.Dispatch<React.SetStateAction<string | null>>;
   createGroupMutation: MutationLike<CreateGroupArgs>;
@@ -99,7 +105,7 @@ export function useGroupActions(deps: {
   editLevel2NameFilters: UseNameFiltersReturn;
 }) {
   const {
-    groups, refetchGroups, modal, message, t,
+    groups, refetchGroups, modal, message, t, locale,
     selectedGroupId, setSelectedGroupId,
     createGroupMutation, updateGroupMutation, deleteGroupMutation,
     childNameFilters, editLevel2NameFilters,
@@ -157,7 +163,15 @@ export function useGroupActions(deps: {
   const [editLevel2Form] = Form.useForm<AddChildFormValues>();
 
   const matchingMode = Form.useWatch('matchingMode', addChildForm);
+  const autoAssignEnabled = Form.useWatch('autoAssignEnabled', addChildForm);
   const editLevel2MatchingMode = Form.useWatch('matchingMode', editLevel2Form);
+  const editLevel2AutoAssignEnabled = Form.useWatch('autoAssignEnabled', editLevel2Form);
+  const getGroupName = useCallback(
+    (group: GroupItem): string => getBuiltInGroupName(group, t) ||
+      getRecordI18n(group as unknown as Record<string, unknown>, 'name', locale) ||
+      group.name,
+    [locale, t]
+  );
 
   // ── Open handlers ──
   const openAdd = useCallback(() => {
@@ -169,7 +183,13 @@ export function useGroupActions(deps: {
     (groupId: string) => {
       setParentGroupId(groupId);
       addChildForm.resetFields();
-      addChildForm.setFieldsValue({ matchingMode: 'deviceName', tacRag: '', serialNumbers: '', sourceGroupId: undefined });
+      addChildForm.setFieldsValue({
+        autoAssignEnabled: false,
+        matchingMode: 'deviceName',
+        tacRag: '',
+        serialNumbers: '',
+        sourceGroupId: undefined,
+      });
       childNameFilters.reset();
       setAddChildDrawerOpen(true);
     },
@@ -181,15 +201,15 @@ export function useGroupActions(deps: {
       const grp = groups.find((g) => g.id === groupId);
       if (!grp) return;
       setEditingGroupId(groupId);
-      // 单值回填:顶层 name/description 优先,fallback 到 i18n 的 zh-CN(向后兼容)。
+      // 单值回填:按当前语言展示，缺失时由 i18n 工具回退到中文/legacy。
       editForm.setFieldsValue({
-        name: grp.name || grp.nameI18n?.['zh-CN'] || '',
+        name: getGroupName(grp),
         description: grp.description || grp.descriptionI18n?.['zh-CN'] || '',
         parentId: grp.parentId || undefined,
       });
       setEditModalOpen(true);
     },
-    [editForm, groups]
+    [editForm, getGroupName, groups]
   );
 
   const openEditLevel2 = useCallback(
@@ -205,6 +225,7 @@ export function useGroupActions(deps: {
         grp.matchingMode === 'lac' || grp.matchingMode === 'tac' || grp.matchingMode === 'serialNumber'
           ? grp.matchingMode
           : 'deviceName';
+      const autoAssign = Boolean(grp.matchingMode && grp.sourceGroupId);
 
       let tacRag = '';
       if (mode === 'lac' && grp.lacList && grp.lacList.length > 0) {
@@ -213,9 +234,10 @@ export function useGroupActions(deps: {
         tacRag = grp.tacList.join(',');
       }
 
-      // 单值名称回填：顶层 name 优先，fallback 到 i18n 的 zh-CN（与一级编辑同策略）。
+      // 单值名称回填：按当前语言展示，缺失时由 i18n 工具回退到中文/legacy。
       editLevel2Form.setFieldsValue({
-        name: grp.name || grp.nameI18n?.['zh-CN'] || '',
+        name: getGroupName(grp),
+        autoAssignEnabled: autoAssign,
         matchingMode: mode,
         tacRag,
         sourceGroupId: grp.sourceGroupId,
@@ -223,7 +245,7 @@ export function useGroupActions(deps: {
       });
 
       // 回填 name_rule_list 到 NameFilters hook 的内部状态
-      if (mode === 'deviceName' && Array.isArray(grp.nameRuleList) && grp.nameRuleList.length > 0) {
+      if (autoAssign && mode === 'deviceName' && Array.isArray(grp.nameRuleList) && grp.nameRuleList.length > 0) {
         // 注入既有规则；保持原 ID 让 React key 稳定（避免不必要重渲染）
         editLevel2NameFilters.setFilters(grp.nameRuleList.map((r, i) => ({
           // 后端返回的 NameFilterItem 可能缺 id（仅 condition/value/andOr）；缺失时补一个
@@ -238,7 +260,7 @@ export function useGroupActions(deps: {
 
       setEditLevel2DrawerOpen(true);
     },
-    [editLevel2Form, editLevel2NameFilters, groups]
+    [editLevel2Form, editLevel2NameFilters, getGroupName, groups]
   );
 
   const confirmDelete = useCallback(
@@ -255,7 +277,7 @@ export function useGroupActions(deps: {
         content: (
           <div className={styles.groupDeleteConfirm}>
             <div className={styles.groupDeleteConfirmTitle}>
-              {t('device.group.deleteConfirmMsg', { name: group.name })}
+              {t('device.group.deleteConfirmMsg', { name: getGroupName(group) })}
             </div>
             <div className={styles.groupDeleteImpactList}>
               {isLevel1 ? (
@@ -293,7 +315,7 @@ export function useGroupActions(deps: {
         },
       });
     },
-    [deleteGroupMutation, groups, modal, message, selectedGroupId, setSelectedGroupId, t]
+    [deleteGroupMutation, getGroupName, groups, modal, message, selectedGroupId, setSelectedGroupId, t]
   );
 
   // ── Save handlers ──
@@ -305,7 +327,7 @@ export function useGroupActions(deps: {
       const desc = values.description || '';
       await createGroupMutation.mutateAsync({
         name,
-        name_i18n: { 'zh-CN': name },
+        name_i18n: { [locale]: name },
         description_i18n: { 'zh-CN': desc },
         parent_id: values.parentId || undefined,
         remark: desc,
@@ -316,7 +338,7 @@ export function useGroupActions(deps: {
     } catch (err) {
       handleSaveError(err);
     }
-  }, [addForm, createGroupMutation, message, t, handleSaveError]);
+  }, [addForm, createGroupMutation, locale, message, t, handleSaveError]);
 
   const handleEditGroup = useCallback(async () => {
     try {
@@ -325,11 +347,12 @@ export function useGroupActions(deps: {
       // 单值表单 → 同时发顶层单值与 i18n 单键({'zh-CN': 值})。
       const name = values.name || '';
       const desc = values.description || '';
+      const currentGroup = groups.find((g) => g.id === editingGroupId);
       await updateGroupMutation.mutateAsync({
         id: editingGroupId,
         data: {
           name,
-          name_i18n: { 'zh-CN': name },
+          name_i18n: { ...(currentGroup?.nameI18n ?? {}), [locale]: name },
           description_i18n: { 'zh-CN': desc },
           parent_id: values.parentId || undefined,
           remark: desc,
@@ -342,7 +365,7 @@ export function useGroupActions(deps: {
     } catch (err) {
       handleSaveError(err);
     }
-  }, [editForm, editingGroupId, updateGroupMutation, message, t, refetchGroups, handleSaveError]);
+  }, [editForm, editingGroupId, groups, locale, updateGroupMutation, message, t, refetchGroups, handleSaveError]);
 
   const handleSaveChildGroup = useCallback(async () => {
     try {
@@ -356,7 +379,9 @@ export function useGroupActions(deps: {
       let tac_list: number[] | undefined;
       let serial_number_list: string[] | undefined;
 
-      if (values.matchingMode === 'deviceName') {
+      if (!values.autoAssignEnabled) {
+        matching_mode = undefined;
+      } else if (values.matchingMode === 'deviceName') {
         matching_mode = 'deviceName';
         name_rule_list = childNameFilters.filters.filter((f) => f.value && f.value.trim() !== '');
       } else if (values.matchingMode === 'lac') {
@@ -372,11 +397,11 @@ export function useGroupActions(deps: {
 
       await createGroupMutation.mutateAsync({
         name,
-        name_i18n: { 'zh-CN': name },
+        name_i18n: { [locale]: name },
         parent_id: parentGroupId ?? undefined,
         remark: '',
         matching_mode,
-        source_group_id: values.sourceGroupId,
+        source_group_id: values.autoAssignEnabled ? values.sourceGroupId : undefined,
         name_rule_list,
         lac_list,
         tac_list,
@@ -387,7 +412,7 @@ export function useGroupActions(deps: {
     } catch (err) {
       handleSaveError(err);
     }
-  }, [addChildForm, parentGroupId, createGroupMutation, message, t, childNameFilters.filters, handleSaveError]);
+  }, [addChildForm, parentGroupId, createGroupMutation, locale, message, t, childNameFilters.filters, handleSaveError]);
 
   const handleSaveEditLevel2 = useCallback(async () => {
     try {
@@ -395,16 +420,19 @@ export function useGroupActions(deps: {
       if (!editLevel2GroupId) return;
       // 单值名称 → 同时发顶层单值与 i18n 单键({'zh-CN': 值})（同一级）。
       const name = values.name || '';
+      const currentGroup = groups.find((g) => g.id === editLevel2GroupId);
 
       // R1.3: 全量替换语义 — 用户在表单上看到的就是最终落库的，避免增量合并歧义。
       // 切换 matchingMode 时显式清空非当前模式的列表字段，让后端覆盖为空数组。
-      let matching_mode: 'deviceName' | 'lac' | 'tac' | 'serialNumber' | undefined;
+      let matching_mode: 'deviceName' | 'lac' | 'tac' | 'serialNumber' | '' = '';
       let name_rule_list: NameFilterItem[] = [];
       let lac_list: number[] = [];
       let tac_list: number[] = [];
       let serial_number_list: string[] = [];
 
-      if (values.matchingMode === 'deviceName') {
+      if (!values.autoAssignEnabled) {
+        matching_mode = '';
+      } else if (values.matchingMode === 'deviceName') {
         matching_mode = 'deviceName';
         name_rule_list = editLevel2NameFilters.filters.filter(
           (f) => f.value && f.value.trim() !== ''
@@ -424,17 +452,16 @@ export function useGroupActions(deps: {
         id: editLevel2GroupId,
         data: {
           name,
-          name_i18n: { 'zh-CN': name },
+          name_i18n: { ...(currentGroup?.nameI18n ?? {}), [locale]: name },
           matching_mode,
-          source_group_id: values.sourceGroupId,
+          source_group_id: values.autoAssignEnabled ? values.sourceGroupId : '',
           name_rule_list,
           lac_list,
           tac_list,
           serial_number_list,
         },
       });
-      // 改匹配方式会触发后端异步 fireGroupMatch 重新入组，设备数据非即时刷新，
-      // 提示用户稍后再刷新页面（区别于一级编辑的通用「成功」）。
+      // 后端异步 fireGroupMatch 可能命中 0 台，提示只确认规则保存和匹配触发。
       void message.success(t('device.group.editMatchingSuccess'));
       setEditLevel2DrawerOpen(false);
       void refetchGroups();
@@ -445,6 +472,8 @@ export function useGroupActions(deps: {
     editLevel2Form,
     editLevel2GroupId,
     editLevel2NameFilters.filters,
+    groups,
+    locale,
     updateGroupMutation,
     message,
     t,
@@ -468,12 +497,22 @@ export function useGroupActions(deps: {
       editLevel2DrawerOpen,
       editLevel2GroupId,
       matchingMode,
+      autoAssignEnabled,
       editLevel2MatchingMode,
+      editLevel2AutoAssignEnabled,
       // 上级（一级）分组名称，供子分组新增/编辑抽屉只读展示。
-      addChildParentName: groups.find((g) => g.id === parentGroupId)?.name,
-      editLevel2ParentName: groups.find(
+      addChildParentName: parentGroupId
+        ? (() => {
+            const group = groups.find((g) => g.id === parentGroupId);
+            return group ? getGroupName(group) : undefined;
+          })()
+        : undefined,
+      editLevel2ParentName: (() => {
+        const parent = groups.find(
         (g) => g.id === groups.find((x) => x.id === editLevel2GroupId)?.parentId
-      )?.name,
+        );
+        return parent ? getGroupName(parent) : undefined;
+      })(),
     },
     open: {
       add: openAdd,
@@ -500,6 +539,12 @@ export function useGroupActions(deps: {
 
 function parseSerialNumbers(value?: string): string[] {
   return [...new Set((value ?? '').split(/[\s,;]+/).map((item) => item.trim()).filter(Boolean))];
+}
+
+function getBuiltInGroupName(group: GroupItem, t: (id: string) => string): string {
+  const isDefaultGroup = group.id === DEFAULT_ROOT_GROUP_ID || group.id === UNASSIGNED_GROUP_ID;
+  if (!isDefaultGroup) return '';
+  return t('device.defaultGroupName');
 }
 
 // ── 错误抽取辅助（文件内私有） ──

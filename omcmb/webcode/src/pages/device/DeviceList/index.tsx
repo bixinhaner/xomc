@@ -1,18 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { App, Badge, Button, Card, Drawer, Input, Modal, Popconfirm, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { App, Badge, Button, Card, Checkbox, Drawer, Form, Input, InputNumber, Modal, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   AlertOutlined,
+  ClockCircleOutlined,
   CheckOutlined,
   CloseOutlined,
   EditOutlined,
   ExportOutlined,
-  EyeOutlined,
   FileTextOutlined,
+  LinkOutlined,
   ReloadOutlined,
-  WarningOutlined,
+  SyncOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn, BatchAction } from '@/components/DataTable';
@@ -22,11 +23,11 @@ import StatisticsPanel from '@/components/StatisticsPanel';
 import StatusIndicator from '@/components/StatusIndicator';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import AutoRefreshDropdown from '@/pages/alarm/components/AutoRefreshDropdown';
-import { prefetchDeviceDetailContext, useDeviceList, useBatchRebootDevices, useDeviceGroups, useUpdateDevice } from '@core/hooks/api/useDevices';
+import { prefetchDeviceDetailContext, useDeviceList, useBatchRebootDevices, useDeviceGroups, useUpdateDevice, useSyncDeviceParams } from '@core/hooks/api/useDevices';
 import { useProductList } from '@core/hooks/api/useProducts';
-import { useDictionaryBatch } from '@core/hooks/api/useSystem';
+import { useBatchUpdateSysConfigs, useDictionaryBatch, useSysConfigsByCategory } from '@core/hooks/api/useSystem';
 import { resolveNetworkTypeLabel } from '@core/utils/networkType';
-import { activationStatusLabelOf, activationStatusOf } from '@core/utils/activationStatus';
+import { activationStatusLabelOf, displayActivationStatusLabelOf, displayActivationStatusOf } from '@core/utils/activationStatus';
 import { formatDeviceSyncStatus, getDeviceSyncStatusKind, normalizeDeviceSyncStatus } from '@core/utils/deviceSyncStatus';
 import { expandSelectedGroupIds } from '@core/utils/deviceGroupFilter';
 import { withDeviceGroupDisplayName } from '@core/utils/deviceGroupDisplay';
@@ -37,8 +38,6 @@ import { useAlarmCountWithDeviceListInvalidation } from '@core/hooks/api/useAlar
 import { useTriggerAlarmSync } from '@core/hooks/api/useAlarms';
 import { deviceTaskApi, isAbortError } from '@core/services/api/deviceTaskApi';
 import { useCreateUnifiedFileTransferTask } from '@core/hooks/api/useUnifiedFileTransfer';
-import { useDownloadStationLog } from '@core/hooks/api/useStationLog';
-import { stationLogApi } from '@core/services/api/stationLogApi';
 import { deviceApi } from '@core/services/api/deviceApi';
 import { createApiSwitch } from '@core/services/apiSwitch';
 import { deviceService } from '@core/mock/services/deviceService';
@@ -56,10 +55,19 @@ import { useUserStore } from '@core/store/userStore';
 import { useAppStore } from '@core/store/appStore';
 import { buildDefaultUfteTaskName } from '@/pages/transfer/shared';
 import dayjs from 'dayjs';
-import { buildBatchTaskTypeMap, batchActionHasDetail } from './deviceBatchTask';
-import type { Device } from '@core/types/device';
+import { buildBatchTaskTypeMap, batchActionHasDetail, removeParamSyncOptimisticDeviceId } from './deviceBatchTask';
+import { getDeviceListParamSyncPaths } from './deviceListParamSync';
+import { formatDeviceRadioField, formatDeviceRFStatus } from './deviceRadioFieldSupport';
+import { amfStatusForDevice, bscLinkStatusForDevice, mmeStatusForDevice } from './deviceCoreNetworkStatus';
+import { shouldShowLocationSyncIndicator } from './deviceGpsSyncIndicator';
+import GpsSyncConfirmModal from './GpsSyncConfirmModal';
+import GpsSyncTrigger from './GpsSyncTrigger';
+import { applyLocationSyncResult, applyLocationSyncResultToList } from './deviceLocationSync';
+import type { Device, DeviceListResponse } from '@core/types/device';
 import { formatSystemTime } from '@core/utils/systemTime';
 import { computeCumulativeOnlineDurationSeconds, computeCurrentOnlineDurationSeconds } from '@core/utils/onlineDuration';
+import type { SysConfigItem } from '@core/types/system';
+import { buildBatchItems } from '@/pages/system/SystemConfig/sysConfigSerialize';
 
 const { Link } = Typography;
 
@@ -76,6 +84,64 @@ const exportDeviceApi = createApiSwitch(deviceService as unknown as typeof devic
 // DataTable tableId,导出时据此读取"列设置"localStorage(须与 <DataTable tableId> 一致)。
 const DEVICE_LIST_TABLE_ID = 'device-list-table';
 const ALARM_SYNC_BATCH_CONCURRENCY = 4;
+const PARAM_SYNC_BATCH_CONCURRENCY = 4;
+const PARAM_SYNC_ACTIVE_REFETCH_MS = 3000;
+const PERIODIC_SYNC_WATCH_MS = 2 * 60 * 1000;
+const PERIODIC_PARAM_SYNC_DEFAULTS = {
+  periodicSyncEnabled: false,
+  periodicSyncIntervalMinutes: 1440,
+  periodicSyncBatchSize: 200,
+  periodicSyncMaxConcurrent: 10,
+  periodicSyncStaggerWindowMinutes: 0,
+};
+
+function decodeSysConfigValue(item: SysConfigItem): unknown {
+  switch (item.valueType) {
+    case 'bool':
+      return item.value === 'true' || item.value === '1';
+    case 'int': {
+      const n = parseInt(item.value, 10);
+      return Number.isFinite(n) ? n : 0;
+    }
+    case 'float': {
+      const n = parseFloat(item.value);
+      return Number.isFinite(n) ? n : 0;
+    }
+    case 'json':
+      try {
+        return JSON.parse(item.value) as unknown;
+      } catch {
+        return item.value;
+      }
+    default:
+      return item.value;
+  }
+}
+
+function createBatchAbortError(): Error {
+  if (typeof DOMException !== 'undefined') {
+    return new DOMException('The operation was aborted.', 'AbortError');
+  }
+  const error = new Error('The operation was aborted.');
+  error.name = 'AbortError';
+  return error;
+}
+
+function throwIfBatchAborted(signal: AbortSignal): void {
+  if (signal.aborted) {
+    throw createBatchAbortError();
+  }
+}
+
+function isParamSyncAlreadyRunningError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const message = err.message.toLowerCase();
+  return message.includes('active_sync_exists')
+    || message.includes('already running')
+    || message.includes('already exists')
+    || message.includes('已有')
+    || message.includes('正在同步');
+}
 
 // 筛选下拉框 name → 表格列 key 映射:列设置隐藏该列时,对应筛选下拉一并隐藏
 // (用户决策 2026-06-09)。searchText 无对应列、不入表 → 始终显示。
@@ -184,6 +250,35 @@ export default function DeviceList() {
     void navigate(`/device/detail/${device.sn}${suffix}`);
   }, [navigate, prefetchDeviceDetailEntry]);
 
+  const resolveNameSyncFromList = useCallback(async (device: Device, action: 'use_lmt' | 'use_omc' | 'ignore') => {
+    try {
+      await deviceApi.resolveNameSync(device.id, action);
+      void message.success(t('common.operationSuccess'));
+      void queryClient.invalidateQueries({ queryKey: ['devices'] });
+    } catch {
+      void message.error(t('common.operationFailed'));
+    }
+  }, [message, queryClient, t]);
+
+  const renderNameSyncActions = useCallback((device: Device) => (
+    <Space direction="vertical" size={8}>
+      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+        {t('device.nameSyncPending')}
+      </Typography.Text>
+      <Space size={4}>
+        <Button size="small" type="primary" onClick={() => void resolveNameSyncFromList(device, 'use_lmt')}>
+          {t('device.nameSyncPending.useLmt')}
+        </Button>
+        <Button size="small" onClick={() => void resolveNameSyncFromList(device, 'use_omc')}>
+          {t('device.nameSyncPending.useOmc')}
+        </Button>
+        <Button size="small" onClick={() => void resolveNameSyncFromList(device, 'ignore')}>
+          {t('device.nameSyncPending.ignore')}
+        </Button>
+      </Space>
+    </Space>
+  ), [resolveNameSyncFromList, t]);
+
   const [currentPage, setCurrentPage] = useState(() => {
     const page = searchParams.get('page');
     return page ? parseInt(page, 10) : 1;
@@ -203,6 +298,13 @@ export default function DeviceList() {
   });
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [periodicSyncModalOpen, setPeriodicSyncModalOpen] = useState(false);
+  const [periodicSyncForm] = Form.useForm();
+  const { data: periodicSyncConfigs, isFetching: periodicSyncLoading } = useSysConfigsByCategory('device', periodicSyncModalOpen);
+  const batchUpdateSysConfigs = useBatchUpdateSysConfigs();
+  const [optimisticParamSyncDeviceIds, setOptimisticParamSyncDeviceIds] = useState<Set<string>>(() => new Set());
+  const [optimisticAlarmSyncDeviceIds, setOptimisticAlarmSyncDeviceIds] = useState<Set<string>>(() => new Set());
+  const [periodicSyncWatchUntil, setPeriodicSyncWatchUntil] = useState(0);
 
   useEffect(() => {
     const params: Record<string, unknown> = {};
@@ -229,6 +331,23 @@ export default function DeviceList() {
     }
   }, [searchParams]);
 
+  useEffect(() => {
+    if (!periodicSyncModalOpen) return;
+    const values: Record<string, unknown> = { ...PERIODIC_PARAM_SYNC_DEFAULTS };
+    const hasMinuteInterval = (periodicSyncConfigs || []).some((cfg) => cfg.key === 'periodicSyncIntervalMinutes');
+    for (const item of periodicSyncConfigs || []) {
+      if (item.key in PERIODIC_PARAM_SYNC_DEFAULTS) {
+        values[item.key] = decodeSysConfigValue(item);
+      } else if (item.key === 'periodicSyncIntervalHours' && !hasMinuteInterval) {
+        const hours = decodeSysConfigValue(item);
+        if (typeof hours === 'number' && hours > 0) {
+          values.periodicSyncIntervalMinutes = hours * 60;
+        }
+      }
+    }
+    periodicSyncForm.setFieldsValue(values);
+  }, [periodicSyncModalOpen, periodicSyncConfigs, periodicSyncForm]);
+
   type TaskStatus = 'pending' | 'running' | 'success' | 'failed';
   interface LocalTask {
     id: string;
@@ -249,14 +368,26 @@ export default function DeviceList() {
   const [collectTasks, setCollectTasks] = useState<LocalTask[]>([]);
   const [collectDrawerTitle, setCollectDrawerTitle] = useState('');
   const [batchAlarmSyncRunning, setBatchAlarmSyncRunning] = useState(false);
+  const [batchParamSyncRunning, setBatchParamSyncRunning] = useState(false);
+  const [gpsSyncConfirmDevice, setGpsSyncConfirmDevice] = useState<Device | null>(null);
+
+  const clearOptimisticParamSyncDevice = useCallback((deviceId: string) => {
+    setOptimisticParamSyncDeviceIds((prev) => removeParamSyncOptimisticDeviceId(prev, deviceId));
+  }, []);
+
+  const clearOptimisticAlarmSyncDevice = useCallback((deviceId: string) => {
+    setOptimisticAlarmSyncDeviceIds((prev) => removeParamSyncOptimisticDeviceId(prev, deviceId));
+  }, []);
 
   const [logModalOpen, setLogModalOpen] = useState(false);
   const [currentLogTask, setCurrentLogTask] = useState<LocalTask | null>(null);
   const alarmSyncBatchAbortRef = useRef<AbortController | null>(null);
+  const paramSyncBatchAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     return () => {
       alarmSyncBatchAbortRef.current?.abort();
+      paramSyncBatchAbortRef.current?.abort();
     };
   }, []);
 
@@ -374,18 +505,85 @@ export default function DeviceList() {
     } as Parameters<typeof useDeviceList>[0];
   }, [filterParams, groupsResp?.groups, currentPage, pageSize]);
 
+  const paramSyncPolling = periodicSyncWatchUntil > 0 || optimisticParamSyncDeviceIds.size > 0;
   const { data, isLoading, isFetching, refetch } = useDeviceList(queryParams, {
-    refetchInterval: autoRefresh ? refreshInterval * 1000 : undefined,
+    refetchInterval: autoRefresh ? refreshInterval * 1000 : (paramSyncPolling ? PARAM_SYNC_ACTIVE_REFETCH_MS : undefined),
   });
+  const acceptLocationSync = useCallback(async (record: Device) => {
+    const reportedVersion = record.locationSync.reported?.version;
+    if (reportedVersion == null) {
+      void message.error(t('device.gpsSyncNoReport'));
+      return;
+    }
+    try {
+      const result = await deviceApi.acceptLocationSync(record.id, reportedVersion);
+      queryClient.setQueriesData<DeviceListResponse>(
+        { queryKey: ['devices', 'list'] },
+        (previous) => applyLocationSyncResultToList(previous, record.id, result),
+      );
+      queryClient.setQueryData<Device | null>(['devices', 'detail', record.id], (previous) => (
+        previous ? applyLocationSyncResult(previous, result) : previous
+      ));
+      queryClient.setQueryData<Device | null>(['devices', 'sn', record.sn], (previous) => (
+        previous ? applyLocationSyncResult(previous, result) : previous
+      ));
+      void message.success(t('device.gpsSyncSuccess'));
+    } catch (error: unknown) {
+      const status = (error as { response?: { status?: number } })?.response?.status;
+      void message.error(
+        status === 409
+          ? t('device.gpsSyncConflict')
+          : status === 403
+            ? t('device.gpsSyncForbidden')
+            : t('device.gpsSyncFailed'),
+      );
+      return;
+    }
+
+    // The promotion has already succeeded at this point. A list refresh is
+    // best-effort so a transient query failure cannot be reported as a failed
+    // GPS synchronization or leave the user unsure whether the action applied.
+    try {
+      const refreshResult = await refetch();
+      if (refreshResult.isError) {
+        void message.warning(t('device.gpsSyncRefreshFailed'));
+      }
+    } catch {
+      void message.warning(t('device.gpsSyncRefreshFailed'));
+    }
+  }, [message, queryClient, refetch, t]);
+
+  const renderLocationCell = useCallback((value: number | null | undefined, record: Device) => {
+    const showSyncIndicator = shouldShowLocationSyncIndicator(record.locationSync);
+    const displayValue = value == null ? '--' : value;
+    if (!showSyncIndicator) return displayValue;
+    return (
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 2,
+          whiteSpace: 'nowrap',
+          fontVariantNumeric: 'tabular-nums',
+        }}
+      >
+        <GpsSyncTrigger
+          label={t('device.gpsSyncAction')}
+          onClick={() => setGpsSyncConfirmDevice(record)}
+        />
+        {displayValue}
+      </span>
+    );
+  }, [t]);
   const [refreshSpinnerActive, setRefreshSpinnerActive] = useState(false);
   const refreshSpinStartedAtRef = useRef<number | null>(null);
   const refreshSpinTimeoutRef = useRef<number | null>(null);
   const batchReboot = useBatchRebootDevices();
   const updateDevice = useUpdateDevice();
   const triggerAlarmSync = useTriggerAlarmSync();
-  const alarmCountQuery = useAlarmCountWithDeviceListInvalidation();
+  const syncDeviceParams = useSyncDeviceParams();
+  useAlarmCountWithDeviceListInvalidation();
   const createUfteTask = useCreateUnifiedFileTransferTask();
-  const downloadStationLog = useDownloadStationLog();
   const taskNameUser = currentUser?.username || currentUser?.displayName || 'user';
   // 性能优化：使用 useMemo 避免每次渲染创建新引用，防止下游 callback/useMemo 依赖变化
   const devices = useMemo(
@@ -398,6 +596,12 @@ export default function DeviceList() {
   );
   const total = data?.total ?? 0;
   const stats = useMemo(() => data?.stats ?? { total: 0, online: 0, offline: 0, alarmed: 0, online_count: 0, offline_count: 0 }, [data?.stats]);
+
+  useEffect(() => {
+    if (periodicSyncWatchUntil <= Date.now()) return;
+    const timeout = window.setTimeout(() => setPeriodicSyncWatchUntil(0), periodicSyncWatchUntil - Date.now());
+    return () => window.clearTimeout(timeout);
+  }, [periodicSyncWatchUntil]);
 
   useEffect(() => {
     if (!autoRefresh) return;
@@ -772,7 +976,7 @@ export default function DeviceList() {
   // T-0162: 优先用 online_count / offline_count（与 backend DeviceListStats 1:1）；
   // 老 stats.online / stats.offline 字段在新前端不再使用（仅 mapListResponse 内部
   // 当 fallback 保留），新 UI 直读 stats.online_count。
-  const activeAlarmCount = alarmCountQuery.data?.total_active ?? stats.alarmed;
+  const activeAlarmCount = stats.alarmed;
   const statsItems = useMemo(() => [
     { label: t('device.count.total'), value: stats.total },
     { label: t('status.online'), value: stats.online_count ?? stats.online ?? 0, color: '#52C41A' },
@@ -828,6 +1032,10 @@ export default function DeviceList() {
         void message.warning(t('task.status.running'));
         return;
       }
+      if (actionKey === 'batch-param-sync' && batchParamSyncRunning) {
+        void message.warning(t('task.status.running'));
+        return;
+      }
       modal.confirm({
         title: t('common.confirm'),
         content: t('device.batch.actionConfirm', { action: actionLabel, count: ids.length }),
@@ -852,8 +1060,19 @@ export default function DeviceList() {
                 task: newTasks[index],
               }))
               : [];
+            const paramSyncEntries = actionKey === 'batch-param-sync'
+              ? selectedDevices.map((device, index) => ({
+                device,
+                task: newTasks[index],
+                parameterPaths: getDeviceListParamSyncPaths(device),
+              }))
+              : [];
             const runnableAlarmSyncEntries = alarmSyncEntries.filter(({ device, task }) => device.isOnline && Boolean(task.sn));
             const runnableAlarmSyncRowIds = new Set(runnableAlarmSyncEntries.map(({ task }) => task.id));
+            const runnableParamSyncEntries = paramSyncEntries.filter(({ device, task, parameterPaths }) =>
+              device.isOnline && Boolean(task.sn) && parameterPaths.length > 0
+            );
+            const runnableParamSyncRowIds = new Set(runnableParamSyncEntries.map(({ task }) => task.id));
 
             if (actionKey === 'batch-log-collect') {
               try {
@@ -870,8 +1089,10 @@ export default function DeviceList() {
                   deviceCount: selectedDevices.length,
                   executionMode: 'immediate',
                 });
-                void message.success(t('ufte.taskCreatedAndNavigate'));
-                navigate('/transfer/center?category=station_log&typeCode=RUNTIME_LOG_COLLECT');
+                void message.success({
+                  content: t('device.action.logCollectTriggered'),
+                  duration: 5,
+                });
               } catch {
                 void message.error(t('common.operationFailed'));
               }
@@ -899,12 +1120,35 @@ export default function DeviceList() {
                   message: t('task.status.running'),
                 };
               }));
+            } else if (actionKey === 'batch-param-sync') {
+              const timestamp = new Date().toISOString();
+              setCollectTasks(newTasks.map((task) => {
+                if (!runnableParamSyncRowIds.has(task.id)) {
+                  const entry = paramSyncEntries.find(({ task: rowTask }) => rowTask.id === task.id);
+                  const reason = entry?.device.isOnline === false
+                    ? t('device.batch.paramSync.onlyOnline')
+                    : t('device.batch.paramSync.noSupportedParams');
+                  return {
+                    ...task,
+                    status: 'failed' as TaskStatus,
+                    progress: 100,
+                    message: reason,
+                    logContent: `[${timestamp}] ERROR: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${task.sn}\n[${timestamp}] ERROR: ${reason}`,
+                  };
+                }
+                return {
+                  ...task,
+                  status: 'running' as TaskStatus,
+                  progress: 10,
+                  message: t('task.status.running'),
+                };
+              }));
             } else {
               setCollectTasks(newTasks);
             }
             setCollectDrawerOpen(true);
 
-            if (actionKey !== 'batch-alarm-sync') {
+            if (actionKey !== 'batch-alarm-sync' && actionKey !== 'batch-param-sync') {
               newTasks.forEach((task, index) => {
                 setTimeout(() => {
                   setCollectTasks((prev) => prev.map((item) =>
@@ -959,7 +1203,14 @@ export default function DeviceList() {
                 return;
               }
 
-		      setBatchAlarmSyncRunning(true);
+              setBatchAlarmSyncRunning(true);
+              setOptimisticAlarmSyncDeviceIds((prev) => {
+                const next = new Set(prev);
+                for (const { device } of runnableAlarmSyncEntries) {
+                  next.add(device.id);
+                }
+                return next;
+              });
               const abortController = new AbortController();
               alarmSyncBatchAbortRef.current = abortController;
 
@@ -967,7 +1218,7 @@ export default function DeviceList() {
                 const results = await mapWithConcurrencyLimit(
                   runnableAlarmSyncEntries,
                   ALARM_SYNC_BATCH_CONCURRENCY,
-                  async ({ task }) => {
+                  async ({ device, task }) => {
                     const taskId = task.id;
                     const sn = task.sn;
                     try {
@@ -1001,11 +1252,13 @@ export default function DeviceList() {
                           logContent: `[${timestamp}] INFO: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${sn}\n[${timestamp}] INFO: alarm sync completed and persisted\n[${timestamp}] INFO: ${t('task.log.success')}`,
                         } : item
                       ));
+                      clearOptimisticAlarmSyncDevice(device.id);
                       return true;
                     } catch (err) {
                       if (isAbortError(err)) {
                         throw err;
                       }
+                      clearOptimisticAlarmSyncDevice(device.id);
                       const timestamp = new Date().toISOString();
                       const errMsg = err instanceof Error ? err.message : t('task.log.failed');
                       setCollectTasks((prev) => prev.map((item) =>
@@ -1042,8 +1295,146 @@ export default function DeviceList() {
                 }
               } finally {
                 setBatchAlarmSyncRunning(false);
+                setOptimisticAlarmSyncDeviceIds(new Set());
                 if (alarmSyncBatchAbortRef.current === abortController) {
                   alarmSyncBatchAbortRef.current = null;
+                }
+              }
+            } else if (actionKey === 'batch-param-sync') {
+              if (runnableParamSyncEntries.length === 0) {
+                void message.warning(t('device.batch.paramSync.noRunnableDevices'));
+                setSelectedRowKeys([]);
+                return;
+              }
+
+              setBatchParamSyncRunning(true);
+              setOptimisticParamSyncDeviceIds((prev) => {
+                const next = new Set(prev);
+                for (const { device } of runnableParamSyncEntries) {
+                  next.add(device.id);
+                }
+                return next;
+              });
+              const abortController = new AbortController();
+              paramSyncBatchAbortRef.current = abortController;
+
+              try {
+                const results = await mapWithConcurrencyLimit(
+                  runnableParamSyncEntries,
+                  PARAM_SYNC_BATCH_CONCURRENCY,
+                  async ({ device, task, parameterPaths }) => {
+                    const timestamp = new Date().toISOString();
+                    try {
+                      throwIfBatchAborted(abortController.signal);
+                      setCollectTasks((prev) => prev.map((item) =>
+                        item.id === task.id ? {
+                          ...item,
+                          status: 'running',
+                          progress: 30,
+                          message: t('task.status.running'),
+                        } : item
+                      ));
+                      const result = await syncDeviceParams.mutateAsync({ deviceId: device.id, parameterPaths });
+                      throwIfBatchAborted(abortController.signal);
+                      if (!result.requestId) {
+                        throw new Error(t('device.batch.paramSync.requestUnavailable'));
+                      }
+                      const taskCountText = result.taskCount !== undefined
+                        ? `, queued ${result.taskCount} task(s)`
+                        : '';
+                      setCollectTasks((prev) => prev.map((item) =>
+                        item.id === task.id ? {
+                          ...item,
+                          status: 'running',
+                          progress: 60,
+                          message: t('device.batch.paramSync.waitingDevice'),
+                          logContent: `[${timestamp}] INFO: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${device.sn}\n[${timestamp}] INFO: paramsync request accepted, ${parameterPaths.length} list path(s) requested${taskCountText}`,
+                        } : item
+                      ));
+                      const terminalRequest = await deviceApi.waitForParameterSyncRequest(result.requestId, {
+                        signal: abortController.signal,
+                        onPoll: (request) => {
+                          setCollectTasks((prev) => prev.map((item) => {
+                            if (item.id !== task.id) return item;
+                            if (request.status === 'running') {
+                              return { ...item, status: 'running', progress: Math.max(item.progress, 70), message: t('device.batch.paramSync.waitingDevice') };
+                            }
+                            return item;
+                          }));
+                        },
+                      });
+                      if (terminalRequest.status !== 'succeeded' || terminalRequest.resultCode === 'NO_STORABLE_PATH') {
+                        throw new Error(terminalRequest.errorMessage || terminalRequest.resultCode || terminalRequest.status);
+                      }
+                      throwIfBatchAborted(abortController.signal);
+                      await queryClient.invalidateQueries({ queryKey: ['devices'] });
+                      throwIfBatchAborted(abortController.signal);
+                      clearOptimisticParamSyncDevice(device.id);
+                      setCollectTasks((prev) => prev.map((item) =>
+                        item.id === task.id ? {
+                          ...item,
+                          status: 'success',
+                          progress: 100,
+                          message: t('task.status.completed'),
+                          logContent: `[${timestamp}] INFO: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${device.sn}\n[${timestamp}] INFO: paramsync completed, ${parameterPaths.length} list path(s) requested${taskCountText}\n[${timestamp}] INFO: ${t('task.log.success')}`,
+                        } : item
+                      ));
+                      return true;
+                    } catch (err) {
+                      if (isAbortError(err)) {
+                        throw err;
+                      }
+                      const alreadyRunning = isParamSyncAlreadyRunningError(err);
+                      if (alreadyRunning) {
+                        const skippedMessage = t('device.batch.paramSync.alreadyRunning');
+                        clearOptimisticParamSyncDevice(device.id);
+                        setCollectTasks((prev) => prev.map((item) =>
+                          item.id === task.id ? {
+                            ...item,
+                            status: 'success',
+                            progress: 100,
+                            message: skippedMessage,
+                            logContent: `[${timestamp}] INFO: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${device.sn}\n[${timestamp}] INFO: ${skippedMessage}`,
+                          } : item
+                        ));
+                        return true;
+                      }
+                      const errMsg = err instanceof Error ? err.message : t('task.log.failed');
+                      clearOptimisticParamSyncDevice(device.id);
+                      setCollectTasks((prev) => prev.map((item) =>
+                        item.id === task.id ? {
+                          ...item,
+                          status: 'failed',
+                          progress: 100,
+                          message: t('common.failed'),
+                          logContent: `[${timestamp}] ERROR: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${device.sn}\n[${timestamp}] ERROR: ${errMsg}`,
+                        } : item
+                      ));
+                      throw err;
+                    }
+                  },
+                );
+
+                const aborted = abortController.signal.aborted
+                  || results.some((result) => result.status === 'rejected' && isAbortError(result.reason));
+                if (aborted) {
+                  return;
+                }
+
+                const succeededCount = results.filter((result) => result.status === 'fulfilled').length;
+                const failedCount = newTasks.length - succeededCount;
+                if (succeededCount > 0 && failedCount === 0) {
+                  void message.success(t('device.batch.paramSync.success', { count: succeededCount }));
+                } else if (succeededCount > 0) {
+                  void message.warning(t('device.batch.paramSync.partialResult', { success: succeededCount, failed: failedCount }));
+                } else {
+                  void message.error(t('common.operationFailed'));
+                }
+              } finally {
+                setBatchParamSyncRunning(false);
+                setOptimisticParamSyncDeviceIds(new Set());
+                if (paramSyncBatchAbortRef.current === abortController) {
+                  paramSyncBatchAbortRef.current = null;
                 }
               }
             } else {
@@ -1057,16 +1448,19 @@ export default function DeviceList() {
     [
       appLocale,
       batchAlarmSyncRunning,
+      batchParamSyncRunning,
       batchReboot,
+      clearOptimisticAlarmSyncDevice,
+      clearOptimisticParamSyncDevice,
       createUfteTask,
       devices,
       message,
       modal,
-      navigate,
       queryClient,
       t,
       taskNameUser,
       triggerAlarmSync,
+      syncDeviceParams,
       waitForDeviceTaskTerminal,
     ]
   );
@@ -1224,11 +1618,11 @@ export default function DeviceList() {
   // ™ 判定口径由 frontend-core/utils/activationStatus.ts 统一控管——
   // V1 列表与详情统一调用同一函数，
   // 在上层各自渲染 Tag/文本。修改判定请只改 utility。
-  const renderActivationStatus = useCallback((opState: string | undefined | null) => {
-    const status = activationStatusOf(opState);
+  const renderActivationStatus = useCallback((opState: string | undefined | null, isOnline: boolean | undefined | null) => {
+    const status = displayActivationStatusOf(opState, isOnline);
     if (status == null) return '-';
     const isActive = status === 'active';
-    const label = activationStatusLabelOf(opState, opStateDict?.sysDictionaryDetails, {
+    const label = displayActivationStatusLabelOf(opState, isOnline, opStateDict?.sysDictionaryDetails, {
       active: t('status.active'),
       inactive: t('status.inactive'),
     }, appLocale);
@@ -1264,16 +1658,63 @@ export default function DeviceList() {
         key: 'connStatus',
         title: t('device.connStatus'),
         dataIndex: 'connStatus',
-        width: 100,
+        width: 125,
         fixed: 'left',
         group: 'common',
         render: (_val, record) => {
           const mappedStatus = mapConnStatus(record.connStatus);
+          const syncing = mappedStatus === 'online' && (
+            record.paramSyncRunning
+            || optimisticParamSyncDeviceIds.has(record.id)
+            || optimisticAlarmSyncDeviceIds.has(record.id)
+          );
           return (
-            <StatusIndicator
-              status={mappedStatus}
-              text={mappedStatus === 'online' ? t('status.online') : t('status.offline')}
-            />
+            <Space size={6} wrap={false}>
+              <StatusIndicator
+                status={mappedStatus}
+                text={mappedStatus === 'online' ? t('status.online') : t('status.offline')}
+              />
+              {syncing && (
+                <Tooltip title={t('device.periodicParamSync.running')}>
+                  <Tag
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 22,
+                      height: 22,
+                      padding: 0,
+                      marginInlineEnd: 0,
+                      color: '#1677ff',
+                      background: '#e6f4ff',
+                      borderColor: '#91caff',
+                    }}
+                  >
+                    <span
+                      style={{
+                        position: 'relative',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 16,
+                        height: 16,
+                      }}
+                    >
+                      <LinkOutlined style={{ fontSize: 11, color: '#0958d9' }} />
+                      <SyncOutlined
+                        spin
+                        style={{
+                          position: 'absolute',
+                          inset: 0,
+                          fontSize: 16,
+                          color: '#1677ff',
+                        }}
+                      />
+                    </span>
+                  </Tag>
+                </Tooltip>
+              )}
+            </Space>
           );
         },
       },
@@ -1323,9 +1764,9 @@ export default function DeviceList() {
               {record.deviceName || '-'}
             </span>
             {record.nameSyncPending && (
-              <Tooltip title={t('device.nameSyncPending')}>
-                <Badge status="error" />
-              </Tooltip>
+              <Popover content={renderNameSyncActions(record)} trigger="click" placement="bottomLeft">
+                <Badge status="error" style={{ cursor: 'pointer' }} onClick={(event) => event.stopPropagation()} />
+              </Popover>
             )}
           </Space>
         ),
@@ -1424,6 +1865,32 @@ export default function DeviceList() {
         render: (_val, record) => fmtTime(record.offlineTime),
       },
       {
+        key: 'lastParamSyncAt',
+        title: t('device.lastParamSyncAt'),
+        dataIndex: 'lastParamSyncAt',
+        width: 170,
+        group: 'common',
+        render: (_val, record) => {
+          const syncText = record.lastParamSyncAt ? fmtTime(record.lastParamSyncAt) : t('device.paramTree.neverSynced');
+          return (
+            <Tooltip title={record.lastParamSyncAt ? t('device.paramSync.lastSyncedAt', { time: fmtTime(record.lastParamSyncAt) }) : syncText}>
+              <span
+                style={{
+                  display: 'inline-block',
+                  maxWidth: 150,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  verticalAlign: 'middle',
+                }}
+              >
+                {syncText}
+              </span>
+            </Tooltip>
+          );
+        },
+      },
+      {
         key: 'onlineDuration',
         title: t('device.onlineDuration'),
         dataIndex: 'onlineDuration',
@@ -1460,7 +1927,31 @@ export default function DeviceList() {
         width: 140,
         group: 'common',
         // 激活状态 = 设备是否曾首次上线（op_state），与在线/小区状态正交。
-        render: (_val, record) => renderActivationStatus(record.opState),
+        render: (_val, record) => renderActivationStatus(record.opState, record.isOnline),
+      },
+      {
+        key: 'mmeStatus',
+        title: t('device.mmeStatus'),
+        dataIndex: 'mmeStatus',
+        width: 130,
+        group: 'common',
+        render: (_val, record) => mmeStatusForDevice(record) || '-',
+      },
+      {
+        key: 'amfStatus',
+        title: t('device.amfStatus'),
+        dataIndex: 'amfStatus',
+        width: 130,
+        group: 'common',
+        render: (_val, record) => amfStatusForDevice(record) || '-',
+      },
+      {
+        key: 'bscLinkStatus',
+        title: t('device.bscLinkStatus'),
+        dataIndex: 'bscLinkStatus',
+        width: 140,
+        group: 'common',
+        render: (_val, record) => bscLinkStatusForDevice(record) || '-',
       },
       {
         key: 'ueCount',
@@ -1493,12 +1984,16 @@ export default function DeviceList() {
         hidden: true,
         group: 'common',
         // 原始 JSP: 支持多小区 "on,off,on"，汇总 + [N/M] Popover
-        render: (_val, record) => renderMultiCellStatus(
-          record.rfStatus,
-          ['on', '1', '3'],
-          { on: t('status.rfOn'), off: t('status.rfOff'), title: t('device.multiCellStatus') },
-          { on: 'success', off: 'error', mixed: 'warning' },
-        ),
+        render: (_val, record) => {
+          const rfStatus = formatDeviceRFStatus(record, record.rfStatus);
+          if (rfStatus === '-') return '-';
+          return renderMultiCellStatus(
+            rfStatus,
+            ['on', '1', '3'],
+            { on: t('status.rfOn'), off: t('status.rfOff'), title: t('device.multiCellStatus') },
+            { on: 'success', off: 'error', mixed: 'warning' },
+          );
+        },
       },
       {
         key: 'syncStatus',
@@ -1550,25 +2045,7 @@ export default function DeviceList() {
         width: 130,
         hidden: true,
         group: 'common',
-        render: (_val, record) => {
-          const v = record.longitude;
-          if (v === null || v === undefined) return '--';
-          if (record.networkType !== 'eNB') return v;
-          return (
-            <Space size={4}>
-              <Popconfirm
-                title={`${t('device.longitude')}: ${record.longitude ?? '--'}   ${t('device.latitude')}: ${record.latitude ?? '--'}   ${t('device.gpsHeight')}(m): ${record.gpsHeight ?? '--'}`}
-                description={t('device.gpsInconsistent')}
-                onConfirm={() => void message.success(t('device.gpsSyncSuccess'))}
-                okText={t('common.confirm')}
-                cancelText={t('common.cancel')}
-              >
-                <WarningOutlined style={{ color: '#faad14', cursor: 'pointer' }} />
-              </Popconfirm>
-              {v}
-            </Space>
-          );
-        },
+        render: (_val, record) => renderLocationCell(record.longitude, record),
       },
       {
         key: 'latitude',
@@ -1577,25 +2054,7 @@ export default function DeviceList() {
         width: 130,
         hidden: true,
         group: 'common',
-        render: (_val, record) => {
-          const v = record.latitude;
-          if (v === null || v === undefined) return '--';
-          if (record.networkType !== 'eNB') return v;
-          return (
-            <Space size={4}>
-              <Popconfirm
-                title={`${t('device.longitude')}: ${record.longitude ?? '--'}   ${t('device.latitude')}: ${record.latitude ?? '--'}   ${t('device.gpsHeight')}(m): ${record.gpsHeight ?? '--'}`}
-                description={t('device.gpsInconsistent')}
-                onConfirm={() => void message.success(t('device.gpsSyncSuccess'))}
-                okText={t('common.confirm')}
-                cancelText={t('common.cancel')}
-              >
-                <WarningOutlined style={{ color: '#faad14', cursor: 'pointer' }} />
-              </Popconfirm>
-              {v}
-            </Space>
-          );
-        },
+        render: (_val, record) => renderLocationCell(record.latitude, record),
       },
       {
         key: 'gpsHeight',
@@ -1604,25 +2063,7 @@ export default function DeviceList() {
         width: 120,
         hidden: true,
         group: 'common',
-        render: (_val, record) => {
-          const v = record.gpsHeight;
-          if (v === null || v === undefined) return '--';
-          if (record.networkType !== 'eNB') return v;
-          return (
-            <Space size={4}>
-              <Popconfirm
-                title={`${t('device.longitude')}: ${record.longitude ?? '--'}   ${t('device.latitude')}: ${record.latitude ?? '--'}   ${t('device.gpsHeight')}(m): ${record.gpsHeight ?? '--'}`}
-                description={t('device.gpsInconsistent')}
-                onConfirm={() => void message.success(t('device.gpsSyncSuccess'))}
-                okText={t('common.confirm')}
-                cancelText={t('common.cancel')}
-              >
-                <WarningOutlined style={{ color: '#faad14', cursor: 'pointer' }} />
-              </Popconfirm>
-              {v}
-            </Space>
-          );
-        },
+        render: (_val, record) => renderLocationCell(record.gpsHeight, record),
       },
       {
         key: 'gpsSatelliteCount',
@@ -1702,14 +2143,14 @@ export default function DeviceList() {
           );
         },
       },
-      { key: 'pci', title: 'PCI', dataIndex: 'pci', width: 80, hidden: true, group: 'common' },
-      { key: 'tac', title: 'TAC', dataIndex: 'tac', width: 80, hidden: true, group: 'common' },
-      { key: 'band', title: 'Band', dataIndex: 'band', width: 100, hidden: true, group: 'common' },
-      { key: 'dlEarfcn', title: t('device.dlEarfcn'), dataIndex: 'dlEarfcn', width: 110, hidden: true, group: 'common' },
-      { key: 'ulEarfcn', title: t('device.ulEarfcn'), dataIndex: 'ulEarfcn', width: 110, hidden: true, group: 'common' },
+      { key: 'pci', title: 'PCI', dataIndex: 'pci', width: 80, hidden: true, group: 'common', render: (value, record) => formatDeviceRadioField(record, 'pci', value) },
+      { key: 'tac', title: 'TAC', dataIndex: 'tac', width: 80, hidden: true, group: 'common', render: (value, record) => formatDeviceRadioField(record, 'tac', value) },
+      { key: 'band', title: 'Band', dataIndex: 'band', width: 100, hidden: true, group: 'common', render: (value, record) => formatDeviceRadioField(record, 'band', value) },
+      { key: 'dlEarfcn', title: t('device.dlEarfcn'), dataIndex: 'dlEarfcn', width: 110, hidden: true, group: 'common', render: (value, record) => formatDeviceRadioField(record, 'dlEarfcn', value) },
+      { key: 'ulEarfcn', title: t('device.ulEarfcn'), dataIndex: 'ulEarfcn', width: 110, hidden: true, group: 'common', render: (value, record) => formatDeviceRadioField(record, 'ulEarfcn', value) },
       // 基站类型(networkModel)暂时隐藏：当前 LTE/NR/双模 推导口径未与产品对齐;恢复时取消下行注释。
       // { key: 'networkModel', title: t('device.networkModel'), dataIndex: 'networkModel', width: 110, hidden: true, group: 'common' },
-      { key: 'txPower', title: 'Tx Power', dataIndex: 'txPower', width: 100, hidden: true, group: 'common' },
+      { key: 'txPower', title: 'Tx Power', dataIndex: 'txPower', width: 100, hidden: true, group: 'common', render: (value, record) => formatDeviceRadioField(record, 'txPower', value) },
       {
         key: 'halobFlag',
         title: 'HaloB',
@@ -1732,36 +2173,9 @@ export default function DeviceList() {
         render: (_val, record) => fmtStatus(record.adminState, adminStateStatusMap),
       },
       { key: 'ipsecAddr', title: t('device.ipsecAddr'), dataIndex: 'ipsecAddr', width: 140, hidden: true, mono: true, group: 'common' },
-      {
-        key: 'latestLog',
-        title: t('device.latestLog'),
-        dataIndex: 'id',
-        width: 100,
-        hidden: true,
-        group: 'common',
-        render: (_val, record) => (
-          <Button
-            type="link"
-            size="small"
-            loading={downloadStationLog.isPending}
-            onClick={async () => {
-              const res = await stationLogApi.list({ deviceId: record.id, logType: 'running', page: 1, pageSize: 1 });
-              const log = res.items[0];
-              if (!log) {
-                void message.info(t('device.noLogFile'));
-                return;
-              }
-              downloadStationLog.mutate(log.id);
-            }}
-          >
-            {t('common.download')}
-          </Button>
-        ),
-      },
-
     ],
     // remarkHeaderRender 暂从 dep 列表移除：remark 列定义已注释，恢复时同步加回。
-    [navigate, openDeviceDetail, prefetchDeviceDetailEntry, t, fmtTime, fmtDuration, fmtStatus, adminStateStatusMap, renderMultiCellStatus, renderActivationStatus, message, downloadStationLog, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails, editingInstallAddressId, editingInstallAddressValue, savingInstallAddressId, saveInstallAddressEdit, cancelInstallAddressEdit, startInstallAddressEdit]
+    [navigate, openDeviceDetail, prefetchDeviceDetailEntry, t, fmtTime, fmtDuration, fmtStatus, adminStateStatusMap, renderMultiCellStatus, renderActivationStatus, message, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails, editingInstallAddressId, editingInstallAddressValue, savingInstallAddressId, saveInstallAddressEdit, cancelInstallAddressEdit, startInstallAddressEdit, optimisticParamSyncDeviceIds, optimisticAlarmSyncDeviceIds, renderLocationCell]
   );
 
   // ─── 列表导出(用户决策 2026-06-02) ──────────────────────────────────────
@@ -1775,6 +2189,8 @@ export default function DeviceList() {
       switch (key) {
         case 'connStatus':
           return mapConnStatus(record.connStatus) === 'online' ? t('status.online') : t('status.offline');
+        case 'lastParamSyncAt':
+          return record.lastParamSyncAt ? fmtTime(record.lastParamSyncAt) : t('device.paramTree.neverSynced');
         case 'alarmLevel':
           return getSeverityLabel(record.alarmLevel);
         case 'onlineTime':
@@ -1807,11 +2223,20 @@ export default function DeviceList() {
           return v === -1 || v == null ? '--' : String(v);
         }
         case 'opState': {
-          return activationStatusLabelOf(record.opState, opStateDict?.sysDictionaryDetails, {
+          return displayActivationStatusLabelOf(record.opState, record.isOnline, opStateDict?.sysDictionaryDetails, {
             active: t('status.active'),
             inactive: t('status.inactive'),
           }, appLocale) || '-';
         }
+        case 'rfStatus':
+          return record.rfStatus || '';
+        case 'pci':
+        case 'tac':
+        case 'band':
+        case 'dlEarfcn':
+        case 'ulEarfcn':
+        case 'txPower':
+          return formatDeviceRadioField(record, key, record[key]);
         default: {
           const v = dataIndex ? (record as unknown as Record<string, unknown>)[dataIndex] : undefined;
           if (Array.isArray(v)) return v.join(', ');
@@ -1894,6 +2319,34 @@ export default function DeviceList() {
     [columns, message, t, fetchAllFilteredDevices, formatExportCell]
   );
 
+  const handleSavePeriodicSync = useCallback(async () => {
+    if (periodicSyncLoading) {
+      void message.warning(t('common.loading'));
+      return;
+    }
+    let values: Record<string, unknown>;
+    try {
+      values = (await periodicSyncForm.validateFields()) as Record<string, unknown>;
+    } catch {
+      void message.error(t('common.formValidationFailed'));
+      return;
+    }
+    try {
+      await batchUpdateSysConfigs.mutateAsync({
+        category: 'device',
+        items: buildBatchItems(values, periodicSyncConfigs),
+      });
+      if (values.periodicSyncEnabled === true) {
+        setPeriodicSyncWatchUntil(Date.now() + PERIODIC_SYNC_WATCH_MS);
+        void refetch();
+      }
+      void message.success(t('device.periodicParamSync.saveSuccess'));
+      setPeriodicSyncModalOpen(false);
+    } catch (err) {
+      void message.error(err instanceof Error ? err.message : t('sysconfig.error.saveFailed'));
+    }
+  }, [batchUpdateSysConfigs, message, periodicSyncConfigs, periodicSyncForm, periodicSyncLoading, refetch, t]);
+
   const batchActions = useMemo((): BatchAction[] => [
     {
       key: 'batch-reboot',
@@ -1916,6 +2369,13 @@ export default function DeviceList() {
       disabled: batchAlarmSyncRunning,
       onClick: (keys) => handleBatchAction(t('device.action.alarmSync'), keys, 'batch-alarm-sync'),
     },
+    {
+      key: 'batch-param-sync',
+      label: t('device.action.paramSync'),
+      icon: <SyncOutlined />,
+      disabled: batchParamSyncRunning,
+      onClick: (keys) => handleBatchAction(t('device.action.paramSync'), keys, 'batch-param-sync'),
+    },
     // 恢复默认配置已隐藏
     // {
     //   key: 'batch-reset-config',
@@ -1924,41 +2384,16 @@ export default function DeviceList() {
     //   danger: true,
     //   onClick: (keys) => handleBatchAction(t('device.action.resetConfig'), keys, 'batch-reset-config'),
     // },
-  ], [batchAlarmSyncRunning, handleBatchAction, t]);
+  ], [batchAlarmSyncRunning, batchParamSyncRunning, handleBatchAction, t]);
 
   // 任务面板表格列定义
   const taskColumns: ColumnsType<LocalTask> = useMemo(() => [
-    {
-      title: t('table.action'),
-      key: 'action',
-      width: 70,
-      fixed: 'left',
-      render: (_: unknown, record: LocalTask) => {
-        // 只有收集操作（hasDetail=true）且完成或失败状态才显示查看按钮
-        if (!record.hasDetail) return null;
-        if (record.status !== 'success' && record.status !== 'failed') return null;
-        return (
-          <Button
-            type="link"
-            size="small"
-            icon={<EyeOutlined />}
-            onClick={() => handleViewLog(record)}
-            style={{ padding: 0, fontSize: 12 }}
-          >
-            {t('common.view')}
-          </Button>
-        );
-      },
-    },
     {
       title: 'SN',
       dataIndex: 'sn',
       key: 'sn',
       width: 140,
       ellipsis: true,
-      render: (sn: string) => (
-        <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{sn}</span>
-      ),
     },
     {
       title: t('alarm.deviceName'),
@@ -1966,13 +2401,6 @@ export default function DeviceList() {
       key: 'deviceName',
       ellipsis: true,
       width: 120,
-    },
-    {
-      title: t('table.type'),
-      dataIndex: 'type',
-      key: 'type',
-      width: 100,
-      ellipsis: true,
     },
     {
       title: t('table.status'),
@@ -2043,6 +2471,47 @@ export default function DeviceList() {
     </Modal>
   );
 
+  const periodicSyncModal = (
+    <Modal
+      open={periodicSyncModalOpen}
+      title={t('device.periodicParamSync.title')}
+      onCancel={() => setPeriodicSyncModalOpen(false)}
+      onOk={() => void handleSavePeriodicSync()}
+      okText={t('common.save')}
+      cancelText={t('common.cancel')}
+      confirmLoading={batchUpdateSysConfigs.isPending}
+      okButtonProps={{ disabled: periodicSyncLoading }}
+      destroyOnHidden
+    >
+      <Typography.Paragraph type="secondary" style={{ marginBottom: 16, fontSize: 12 }}>
+        {t('device.periodicParamSync.desc')}
+      </Typography.Paragraph>
+      <Form
+        form={periodicSyncForm}
+        layout="vertical"
+        size="small"
+        disabled={periodicSyncLoading || batchUpdateSysConfigs.isPending}
+        initialValues={PERIODIC_PARAM_SYNC_DEFAULTS}
+      >
+        <Form.Item name="periodicSyncEnabled" valuePropName="checked">
+          <Checkbox>{t('system.device.periodicSync.enabledLabel')}</Checkbox>
+        </Form.Item>
+        <Form.Item label={t('system.device.periodicSync.intervalPrefix')} name="periodicSyncIntervalMinutes" rules={[{ required: true, type: 'number', min: 1, max: 10080 }]}>
+          <InputNumber min={1} max={10080} addonAfter={t('device.periodicParamSync.minuteUnit')} style={{ width: '100%' }} />
+        </Form.Item>
+        <Form.Item label={t('system.device.periodicSync.batchSizePrefix')} name="periodicSyncBatchSize" rules={[{ required: true, type: 'number', min: 1, max: 1000 }]}>
+          <InputNumber min={1} max={1000} addonAfter={t('device.periodicParamSync.deviceUnit')} style={{ width: '100%' }} />
+        </Form.Item>
+        <Form.Item label={t('system.device.periodicSync.maxConcurrentPrefix')} name="periodicSyncMaxConcurrent" rules={[{ required: true, type: 'number', min: 1, max: 50 }]}>
+          <InputNumber min={1} max={50} style={{ width: '100%' }} />
+        </Form.Item>
+        <Form.Item label={t('system.device.periodicSync.staggerPrefix')} name="periodicSyncStaggerWindowMinutes" rules={[{ required: true, type: 'number', min: 0, max: 120 }]} style={{ marginBottom: 0 }}>
+          <InputNumber min={0} max={120} addonAfter={t('device.periodicParamSync.minuteUnit')} style={{ width: '100%' }} />
+        </Form.Item>
+      </Form>
+    </Modal>
+  );
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <div style={{ flex: '1 1 100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
@@ -2083,6 +2552,9 @@ export default function DeviceList() {
               selectable
               selectedRowKeys={selectedRowKeys}
               onSelectionChange={(keys) => setSelectedRowKeys(keys)}
+              getCheckboxProps={(record) => ({
+                disabled: !record.isOnline,
+              })}
               total={total}
               pageSize={pageSize}
               currentPage={currentPage}
@@ -2092,6 +2564,15 @@ export default function DeviceList() {
               }}
               batchActions={batchActions}
               onRefresh={handleManualRefresh}
+              extraToolbarAfterBatch={(
+                <Button
+                  size="small"
+                  icon={<ClockCircleOutlined />}
+                  onClick={() => setPeriodicSyncModalOpen(true)}
+                >
+                  {t('device.action.autoParamSync')}
+                </Button>
+              )}
               extraToolbarRight={(
                 <Space size={8}>
                   <Button
@@ -2213,6 +2694,17 @@ export default function DeviceList() {
       </Modal>
 
       {exportConfirmModal}
+      {periodicSyncModal}
+      <GpsSyncConfirmModal
+        open={gpsSyncConfirmDevice != null}
+        device={gpsSyncConfirmDevice}
+        onCancel={() => setGpsSyncConfirmDevice(null)}
+        onConfirm={() => {
+          const device = gpsSyncConfirmDevice;
+          setGpsSyncConfirmDevice(null);
+          if (device) void acceptLocationSync(device);
+        }}
+      />
     </div>
   );
 }

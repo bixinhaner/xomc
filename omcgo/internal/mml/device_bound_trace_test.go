@@ -50,6 +50,117 @@ func TestDeviceTaskRowToResultMap_DeviceBoundPlanTrace(t *testing.T) {
 	}
 }
 
+func TestDeviceTaskRowToResultMap_MultiSNRawLineOmitsDeviceList(t *testing.T) {
+	task := &MMLTask{
+		ExecuteMode: TaskExecuteModeDeviceBound,
+		PlanItems: []MMLPlanItem{
+			{
+				LineNo:   1,
+				DeviceSN: "SN001",
+				Order:    1,
+				RawLine:  "LST Device.DeviceInfo.SoftwareVersion;SN001,SN002",
+				Command: map[string]interface{}{
+					"command_code":   "RAW LST",
+					"operation_type": "LST",
+				},
+			},
+		},
+	}
+	row := DeviceTaskResultRowView{
+		DeviceTaskID: "device-task-1",
+		DeviceSN:     "SN001",
+		Status:       "completed",
+		CommandIndex: 0,
+	}
+
+	got := deviceTaskRowToResultMap(row, task)
+	if got["mml_script"] != "LST Device.DeviceInfo.SoftwareVersion" {
+		t.Fatalf("mml_script = %v, want LST Device.DeviceInfo.SoftwareVersion", got["mml_script"])
+	}
+}
+
+func TestDeviceTaskRowToResultMap_DeviceBoundExpandedCommandTrace(t *testing.T) {
+	task := &MMLTask{
+		ExecuteMode: TaskExecuteModeDeviceBound,
+		PlanItems: []MMLPlanItem{
+			{
+				LineNo:   4,
+				DeviceSN: "SN001",
+				Order:    3,
+				RawLine:  "ADD Device.X.:NAME=foo;SN001",
+				Command: map[string]interface{}{
+					"command_code":   "RAW ADD",
+					"operation_type": "ADD",
+				},
+			},
+			{
+				LineNo:   5,
+				DeviceSN: "SN001",
+				Order:    4,
+				RawLine:  "RMV Device.X.9999.;SN001",
+				Command: map[string]interface{}{
+					"command_code":   "RAW RMV",
+					"operation_type": "RMV",
+				},
+			},
+		},
+		Commands: []map[string]interface{}{
+			{
+				"command_code":   "RAW ADD",
+				"operation_type": "ADD",
+				"plan_line_no":   float64(4),
+				"plan_order":     float64(3),
+				"plan_raw_line":  "ADD Device.X.:NAME=foo;SN001",
+				"plan_device_sn": "SN001",
+			},
+			{
+				"command_code":    "RAW MOD",
+				"operation_type":  "MOD",
+				"compound_phase":  "spv_after_add",
+				"compound_parent": "RAW ADD",
+				"plan_line_no":    float64(4),
+				"plan_order":      float64(3),
+				"plan_raw_line":   "ADD Device.X.:NAME=foo;SN001",
+				"plan_device_sn":  "SN001",
+				"parameters":      map[string]interface{}{"Device.X.{NEW}.NAME": "foo"},
+				"param_paths":     []interface{}{"Device.X.{NEW}.NAME"},
+				"plan_sort_order": float64(3001),
+			},
+			{
+				"command_code":   "RAW RMV",
+				"operation_type": "RMV",
+				"plan_line_no":   float64(5),
+				"plan_order":     float64(4),
+				"plan_raw_line":  "RMV Device.X.9999.;SN001",
+				"plan_device_sn": "SN001",
+			},
+		},
+	}
+	row := DeviceTaskResultRowView{
+		DeviceTaskID: "device-task-spv-after-add",
+		DeviceSN:     "SN001",
+		Status:       "completed",
+		CommandIndex: 1,
+	}
+
+	got := deviceTaskRowToResultMap(row, task)
+	if got["command_code"] != "RAW MOD" {
+		t.Fatalf("command_code = %v, want RAW MOD", got["command_code"])
+	}
+	if got["operation_type"] != "MOD" {
+		t.Fatalf("operation_type = %v, want MOD", got["operation_type"])
+	}
+	if got["plan_line_no"] != 4 {
+		t.Fatalf("plan_line_no = %v, want source ADD line 4", got["plan_line_no"])
+	}
+	if got["plan_raw_line"] != "ADD Device.X.:NAME=foo;SN001" {
+		t.Fatalf("plan_raw_line = %v, want ADD raw line", got["plan_raw_line"])
+	}
+	if got["mml_script"] != "ADD Device.X.:NAME=foo" {
+		t.Fatalf("mml_script = %v, want original ADD script line", got["mml_script"])
+	}
+}
+
 func TestDeviceTaskRowToResultMap_CommonCommandScriptText(t *testing.T) {
 	task := &MMLTask{
 		ExecuteMode: TaskExecuteModeCommon,

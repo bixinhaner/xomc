@@ -88,6 +88,8 @@ function generateDevice(index: number): Device {
   const gnbIdVal = isNR ? String(50000 + index) : '';
   const pciVal = String(Math.floor(Math.random() * 504));
   const earfcn = String(Math.floor(Math.random() * 65535));
+  const longitude = randomOffset(city.lng, 0.5);
+  const latitude = randomOffset(city.lat, 0.5);
 
   return {
     id: `dev-${String(index + 1).padStart(4, '0')}`,
@@ -109,8 +111,15 @@ function generateDevice(index: number): Device {
     ipAddress: generateIP(),
     subnet: pickRandom(city.subnets),
     site: `${city.name}站点${String((index % 20) + 1).padStart(2, '0')}`,
-    longitude: randomOffset(city.lng, 0.5),
-    latitude: randomOffset(city.lat, 0.5),
+    longitude,
+    latitude,
+    locationSync: {
+      status: 'initialized',
+      accepted: { longitude, latitude },
+      reported: null,
+      distanceMeters: null,
+      heightDiffMeters: null,
+    },
     softwareVersion: pickRandom(softwareVersions),
     createTime: randomDate(365),
     oui: `${vendors[0]}-OUI`,
@@ -142,6 +151,7 @@ function generateDevice(index: number): Device {
     // Issue #758: 设备名称同步
     nameSyncPending: index % 10 === 0, // 每 10 个设备模拟一个待同步
     lmtDeviceName: index % 10 === 0 ? `LMT-${city.name}-${index}` : '',
+    paramSyncRunning: index % 17 === 0,
 
     enbId: enbIdVal,
     cellId: String(Math.floor(Math.random() * 256)),
@@ -286,6 +296,8 @@ const beijingDevices: Device[] = Array.from({ length: 50 }, (_, i) => {
   const gnbIdVal = isNR ? String(50000 + index) : '';
   const pciVal = String(Math.floor(Math.random() * 504));
   const earfcn = String(Math.floor(Math.random() * 65535));
+  const longitude = randomOffset(beijingCity.lng, 0.5);
+  const latitude = randomOffset(beijingCity.lat, 0.5);
 
   return {
     id: `dev-${String(index + 1).padStart(4, '0')}`,
@@ -307,8 +319,15 @@ const beijingDevices: Device[] = Array.from({ length: 50 }, (_, i) => {
     ipAddress: generateIP(),
     subnet: pickRandom(beijingCity.subnets),
     site: `${beijingCity.name}站点${String((i % 20) + 1).padStart(2, '0')}`,
-    longitude: randomOffset(beijingCity.lng, 0.5),
-    latitude: randomOffset(beijingCity.lat, 0.5),
+    longitude,
+    latitude,
+    locationSync: {
+      status: 'initialized',
+      accepted: { longitude, latitude },
+      reported: null,
+      distanceMeters: null,
+      heightDiffMeters: null,
+    },
     softwareVersion: pickRandom(softwareVersions),
     createTime: randomDate(365),
     oui: `${vendors[0]}-OUI`,
@@ -339,6 +358,7 @@ const beijingDevices: Device[] = Array.from({ length: 50 }, (_, i) => {
     // Issue #758: 设备名称同步
     nameSyncPending: i % 10 === 0,
     lmtDeviceName: i % 10 === 0 ? `LMT-北京-${i}` : '',
+    paramSyncRunning: i % 17 === 0,
 
     enbId: enbIdVal,
     cellId: String(Math.floor(Math.random() * 256)),

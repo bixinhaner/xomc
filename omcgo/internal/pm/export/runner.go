@@ -213,6 +213,7 @@ func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, []Wide
 		IncludeCell:                   true,
 		MissingMetricValuePlaceholder: missingMetricValuePlaceholder,
 	}
+	deviceViewLayout := dashboardLayout
 	kpiQueryLayout := csvLayout{
 		FirstColHeader:                deviceHeader,
 		Locale:                        loc,
@@ -223,38 +224,45 @@ func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, []Wide
 	case SourceDashboard:
 		return r.buildDashboardLikeSource(ctx, task, loc, dashboardLayout)
 
+	case SourceDeviceView:
+		return r.buildDashboardLikeSource(ctx, task, loc, deviceViewLayout)
+
 	case SourceKpiQuery:
 		return r.buildDashboardLikeSource(ctx, task, loc, kpiQueryLayout)
 
-	case SourceAdhoc:
-		taskID, startTime, endTime, err := parseAdhocParams(task.Params)
-		if err != nil {
-			return nil, nil, csvLayout{}, err
-		}
-		// 先查任务聚合维度、圈选设备数和配置指标集：决定首列表头 / 对象名解析口径，
-		// 并确保全量落库模式下导出仍只包含任务配置的 N 个指标。
-		// pm_tasks 在主库（PgPool），用 taskMetaDB 读；adhoc 结果表查询走 adhocDB（TsPool）。
-		meta, derr := loadAdhocTaskMeta(ctx, r.taskMetaDB, taskID)
-		if derr != nil {
-			return nil, nil, csvLayout{}, derr
-		}
-		keys, kerr := discoverAdhocColumns(ctx, r.adhocDB, taskID, meta.metricPaths, startTime, endTime)
-		if kerr != nil {
-			return nil, nil, csvLayout{}, kerr
-		}
-		cols := newNameResolver(r.adhocDB, loc).resolveColumns(ctx, keys)
-		layout := csvLayout{
-			FirstColHeader:                adhocFirstColHeader(meta.dimension, loc),
-			Locale:                        loc,
-			IncludeTechnology:             meta.dimension == "device_group", // 设备组维度按制式分行，导出补「制式」列（与页面表格一致）
-			IncludeCell:                   adhocIncludesCell(meta.dimension),
-			MissingMetricValuePlaceholder: missingMetricValuePlaceholder,
-		}
-		return newAdhocSource(r.adhocDB, taskID, meta.metricPaths, startTime, endTime, meta.dimension, meta.deviceCount), cols, layout, nil
+	case SourcePMDashboard, SourceAdhocResult:
+		return r.buildAdhocResultSource(ctx, task, loc)
 
 	default:
 		return nil, nil, csvLayout{}, fmt.Errorf("export runner: unsupported source_type %q", task.SourceType)
 	}
+}
+
+func (r *Runner) buildAdhocResultSource(ctx context.Context, task *Task, loc appcontext.Locale) (RowSource, []WideColumn, csvLayout, error) {
+	taskID, startTime, endTime, err := parseAdhocParams(task.Params)
+	if err != nil {
+		return nil, nil, csvLayout{}, err
+	}
+	// 先查任务聚合维度、圈选设备数和配置指标集：决定首列表头 / 对象名解析口径，
+	// 并确保全量落库模式下导出仍只包含任务配置的 N 个指标。
+	// pm_tasks 在主库（PgPool），用 taskMetaDB 读；adhoc 结果表查询走 adhocDB（TsPool）。
+	meta, derr := loadAdhocTaskMeta(ctx, r.taskMetaDB, taskID)
+	if derr != nil {
+		return nil, nil, csvLayout{}, derr
+	}
+	keys, kerr := discoverAdhocColumns(ctx, r.adhocDB, taskID, meta.metricPaths, startTime, endTime)
+	if kerr != nil {
+		return nil, nil, csvLayout{}, kerr
+	}
+	cols := newNameResolver(r.adhocDB, loc).resolveColumns(ctx, keys)
+	layout := csvLayout{
+		FirstColHeader:                adhocFirstColHeader(meta.dimension, loc),
+		Locale:                        loc,
+		IncludeTechnology:             meta.dimension == "device_group", // 设备组维度按制式分行，导出补「制式」列（与页面表格一致）
+		IncludeCell:                   adhocIncludesCell(meta.dimension),
+		MissingMetricValuePlaceholder: missingMetricValuePlaceholder,
+	}
+	return newAdhocSource(r.adhocDB, taskID, meta.metricPaths, startTime, endTime, meta.dimension, meta.deviceCount, loc), cols, layout, nil
 }
 
 func (r *Runner) buildDashboardLikeSource(ctx context.Context, task *Task, loc appcontext.Locale, layout csvLayout) (RowSource, []WideColumn, csvLayout, error) {
@@ -262,6 +270,7 @@ func (r *Runner) buildDashboardLikeSource(ctx context.Context, task *Task, loc a
 	if err != nil {
 		return nil, nil, csvLayout{}, err
 	}
+	req = normalizeStoredResultExportRequest(req)
 	dim := req.Dimension
 	if dim == "" {
 		dim = aggregator.DimensionDevice
@@ -270,6 +279,17 @@ func (r *Runner) buildDashboardLikeSource(ctx context.Context, task *Task, loc a
 	if terr != nil {
 		return nil, nil, csvLayout{}, terr
 	}
+	if shouldAutoDiscoverExportSkeleton(task.SourceType, req) {
+		if r.aggr == nil {
+			return nil, nil, csvLayout{}, fmt.Errorf("aggregator not wired for kpi query skeleton export")
+		}
+		discovered, aerr := r.aggr.DiscoverObjectLDNs(ctx, req)
+		if aerr != nil {
+			return nil, nil, csvLayout{}, aerr
+		}
+		req.ObjectLDNs = discovered
+		objectLDNs = discovered
+	}
 	// 发现列集（编号+类型，与设备/小区无关）→ 解析本地化列名。
 	keys, derr := discoverMetricColumns(ctx, r.metricDB, table, req.MetricPaths, req.StartTime, req.EndTime)
 	if derr != nil {
@@ -277,14 +297,36 @@ func (r *Runner) buildDashboardLikeSource(ctx context.Context, task *Task, loc a
 	}
 	cols := newNameResolver(r.metricDB, loc).resolveColumns(ctx, keys)
 
-	// device 维度且表含行级 id → (time,id) keyset 直查；否则（聚合维度 / 无 id 的 device 表）走聚合批次游标。
-	if dim == aggregator.DimensionDevice && tableHasIDColumn(table) {
-		return newDashboardDeviceSource(r.metricDB, table, req, objectLDNs), cols, layout, nil
+	// 普通 device 导出只读取已经落库的 KPI/counter 结果，不进入 aggregator.Query 的
+	// KPI 现场重算路径。含行级 id 的表用 (time,id) keyset；无 id 的日/周/月表用稳定排序 offset。
+	if dim == aggregator.DimensionDevice {
+		var src RowSource
+		if tableHasIDColumn(table) {
+			src = newDashboardDeviceSource(r.metricDB, table, req, objectLDNs)
+		} else {
+			src = newDashboardDeviceOffsetSource(r.metricDB, table, req, objectLDNs)
+		}
+		if shouldFillExportSkeleton(task.SourceType, req) {
+			src = newFillEmptySource(src, req)
+		}
+		return src, cols, layout, nil
 	}
 	if r.aggr == nil {
 		return nil, nil, csvLayout{}, fmt.Errorf("aggregator not wired for dashboard aggregate export")
 	}
-	return newDashboardAggregateSource(r.aggr, req, objectLDNs), cols, layout, nil
+	src := RowSource(newDashboardAggregateSource(r.aggr, req, objectLDNs))
+	if shouldFillExportSkeleton(task.SourceType, req) {
+		src = newFillEmptySource(src, req)
+	}
+	return src, cols, layout, nil
+}
+
+func shouldAutoDiscoverExportSkeleton(source SourceType, req aggregator.QueryRequest) bool {
+	return source == SourceKpiQuery && aggregator.CanAutoDiscoverObjectSkeletonRequest(req)
+}
+
+func shouldFillExportSkeleton(source SourceType, req aggregator.QueryRequest) bool {
+	return source == SourceKpiQuery && aggregator.IsExplicitObjectSkeletonRequest(req)
 }
 
 type adhocTaskMeta struct {

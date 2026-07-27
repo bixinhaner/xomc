@@ -530,6 +530,24 @@
       "document": "api-docs/post.devices.batch_import.json"
     },
     {
+      "operationId": "post.devices.batch_preregister",
+      "method": "POST",
+      "path": "/api/v1/devices/batch-preregister",
+      "title": "设备 - 批量preregister",
+      "summary": "设备 - 批量preregister",
+      "description": "设备：处理批量preregister相关数据 Handler: BatchPreRegisterDevices handles POST /api/v1/devices/batch-preregister.\n\n用于批量开站规划场景：在设备 Bootstrap 到达前，预先录入 SN 列表和设备名称。\n已存在的 SN 仅更新名称/备注；不存在的 SN 新建设备（lifecycle='registered'）。\n新建设备不写入任何分组，自然落在\"未分组\"视图，source_type 显示 Auto。",
+      "intents": [
+        "设备 - 批量preregister",
+        "设备：处理批量preregister相关数据 Handler: BatchPreRegisterDevices handles POST /api/v1/devices/batch-preregister.\n\n用于批量开站规划场景：在设备 Bootstrap 到达前，预先录入 SN 列表和设备名称。\n已存在的 SN 仅更新名称/备注；不存在的 SN 新建设备（lifecycle='registered'）。\n新建设备不写入任何分组，自然落在\"未分组\"视图，source_type 显示 Auto。",
+        "devices",
+        "设备",
+        "batch-preregister",
+        "batch preregister"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.devices.batch_preregister.json"
+    },
+    {
       "operationId": "post.devices.batch_reboot",
       "method": "POST",
       "path": "/api/v1/devices/batch-reboot",

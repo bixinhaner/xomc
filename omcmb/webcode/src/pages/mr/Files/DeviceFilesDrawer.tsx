@@ -11,9 +11,11 @@ import { type Dayjs } from 'dayjs';
 import type { ColumnsType } from 'antd/es/table';
 import { useT } from '@/hooks/useT';
 import { useMRFiles, useDownloadMRFile } from '@core/hooks/api/useMR';
+import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
 import type { MRFileItem, MRFileDeviceItem } from '@core/services/api/mrApi';
 import { useBatchDownloadWithMessage } from '@/hooks/useBatchDownloadWithMessage';
 import { formatSystemTime } from '@core/utils/systemTime';
+import { toTransferSystemTimeRange } from '../../transfer/transferTime';
 
 const mrTypeColor: Record<string, string> = { MRO: 'blue', MRE: 'green', MRS: 'orange' };
 
@@ -31,6 +33,7 @@ interface Props {
 
 export default function DeviceFilesDrawer({ open, device, onClose }: Props) {
   const t = useT();
+  const systemTimezone = useSystemTimezoneValue();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [range, setRange] = useState<[Dayjs, Dayjs] | null>(null);
@@ -50,11 +53,9 @@ export default function DeviceFilesDrawer({ open, device, onClose }: Props) {
       page,
       pageSize,
       deviceSn: device.deviceSn,
-      timeRange: range
-        ? ([range[0].toISOString(), range[1].toISOString()] as [string, string])
-        : undefined,
+      timeRange: toTransferSystemTimeRange(range, systemTimezone),
     };
-  }, [device, page, pageSize, range]);
+  }, [device, page, pageSize, range, systemTimezone]);
 
   const { data, isLoading } = useMRFiles(
     queryParams ?? { page: 1, pageSize: 20, deviceSn: '' },

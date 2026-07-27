@@ -6,19 +6,30 @@
  *   - 不传/false 时仍渲染「设备类型」下拉（向后兼容 KPIQuery 可切换行为）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { App } from 'antd';
 
-// 捕获 useIndicatorList 收到的 deviceType。
-const useIndicatorListSpy = vi.fn();
+// 捕获 useIndicatorList / useAllIndicators 收到的参数。
+const { useIndicatorListSpy, useAllIndicatorsSpy, indicatorListData, allIndicatorsData } = vi.hoisted(() => ({
+  useIndicatorListSpy: vi.fn(),
+  useAllIndicatorsSpy: vi.fn(),
+  indicatorListData: { items: [] as unknown[], total: 0 },
+  allIndicatorsData: { items: [] as unknown[], total: 0 },
+}));
 
 vi.mock('@core/hooks/api/useIndicatorsLibrary', () => {
   // 稳定引用：组件内有按 data 身份做的 render-phase 同步，mock 每次返回新对象会在多次
   // rerender 时把它放大成无限渲染（生产用真 React Query 数据稳定，不触发）。
-  const STABLE = { data: { items: [], total: 0 }, isLoading: false };
+  const STABLE = { data: indicatorListData, isLoading: false };
+  const ALL_STABLE = { data: allIndicatorsData, isLoading: false };
   return {
     useIndicatorList: (deviceType: unknown, params: unknown) => {
       useIndicatorListSpy(deviceType, params);
       return STABLE;
+    },
+    useAllIndicators: (deviceType: unknown, options: unknown) => {
+      useAllIndicatorsSpy(deviceType, options);
+      return ALL_STABLE;
     },
   };
 });
@@ -31,7 +42,7 @@ import { zhCN } from '@core/i18n';
 function wrapIntl(node: React.ReactElement) {
   return (
     <IntlProvider locale="zh-CN" defaultLocale="zh-CN" messages={zhCN}>
-      {node}
+      <App>{node}</App>
     </IntlProvider>
   );
 }
@@ -45,6 +56,11 @@ function renderModal(props: Partial<React.ComponentProps<typeof MetricPickerModa
 describe('MetricPickerModal 制式锁定', () => {
   beforeEach(() => {
     useIndicatorListSpy.mockClear();
+    useAllIndicatorsSpy.mockClear();
+    indicatorListData.items = [];
+    indicatorListData.total = 0;
+    allIndicatorsData.items = [];
+    allIndicatorsData.total = 0;
   });
 
   it('lockDeviceType=true 时隐藏「设备类型」下拉，按 initialDeviceType 锁死取数', () => {
@@ -83,6 +99,11 @@ describe('MetricPickerModal 制式锁定', () => {
 describe('MetricPickerModal 已选回显', () => {
   beforeEach(() => {
     useIndicatorListSpy.mockClear();
+    useAllIndicatorsSpy.mockClear();
+    indicatorListData.items = [];
+    indicatorListData.total = 0;
+    allIndicatorsData.items = [];
+    allIndicatorsData.total = 0;
   });
 
   // 回归：与制式同款「组件常驻不卸载」问题——内部 selected 仅首挂载赋值一次。
@@ -111,5 +132,262 @@ describe('MetricPickerModal 已选回显', () => {
     // 重开：必须回显模板 B 的指标，且不残留模板 A 的指标
     expect(screen.getByText('C000030170')).toBeTruthy();
     expect(screen.queryByText('C000080007')).toBeNull();
+  });
+});
+
+describe('MetricPickerModal 搜索状态', () => {
+  beforeEach(() => {
+    useIndicatorListSpy.mockClear();
+    useAllIndicatorsSpy.mockClear();
+    indicatorListData.items = [];
+    indicatorListData.total = 0;
+    allIndicatorsData.items = [];
+    allIndicatorsData.total = 0;
+  });
+
+  it('关闭后重开会清空上次搜索词并回到第一页', () => {
+    const { rerender } = render(
+      wrapIntl(<MetricPickerModal open onClose={() => {}} onConfirm={() => {}} />),
+    );
+    const input = screen.getByPlaceholderText('按指标路径 / 中文名 搜索') as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: 'availability' } });
+    fireEvent.click(screen.getByRole('button', { name: /搜\s*索/ }));
+
+    expect(useIndicatorListSpy.mock.calls.at(-1)?.[1]).toMatchObject({
+      keyword: 'availability',
+      page: 1,
+    });
+
+    rerender(
+      wrapIntl(<MetricPickerModal open={false} onClose={() => {}} onConfirm={() => {}} />),
+    );
+    rerender(
+      wrapIntl(<MetricPickerModal open onClose={() => {}} onConfirm={() => {}} />),
+    );
+
+    const reopenedInput = screen.getByPlaceholderText('按指标路径 / 中文名 搜索') as HTMLInputElement;
+    expect(reopenedInput.value).toBe('');
+    expect(useIndicatorListSpy.mock.calls.at(-1)?.[1]).toMatchObject({
+      keyword: undefined,
+      page: 1,
+    });
+  });
+});
+
+describe('MetricPickerModal 选择数量限制', () => {
+  beforeEach(() => {
+    useIndicatorListSpy.mockClear();
+    useAllIndicatorsSpy.mockClear();
+    indicatorListData.items = [];
+    indicatorListData.total = 0;
+    allIndicatorsData.items = [];
+    allIndicatorsData.total = 0;
+  });
+
+  it('默认不限制选择数量，由复用页面自行决定上限', () => {
+    const onConfirm = vi.fn();
+    renderModal({ initialSelected: Array.from({ length: 51 }, (_, i) => `K-${i + 1}`), onConfirm });
+
+    fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
+
+    expect(onConfirm).toHaveBeenCalledWith(
+      Array.from({ length: 51 }, (_, i) => `K-${i + 1}`),
+      expect.any(Object),
+    );
+  });
+
+  it('已选指标正好 50 个时，点击确定可以提交', () => {
+    const onConfirm = vi.fn();
+    const selected = Array.from({ length: 50 }, (_, i) => `K-${i + 1}`);
+    renderModal({ initialSelected: selected, maxSelected: 50, onConfirm });
+
+    fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
+
+    expect(onConfirm).toHaveBeenCalledWith(selected, expect.any(Object));
+  });
+
+  it('已选指标超过 50 个时，点击确定不提交', () => {
+    const onConfirm = vi.fn();
+    renderModal({ initialSelected: Array.from({ length: 51 }, (_, i) => `K-${i + 1}`), maxSelected: 50, onConfirm });
+
+    fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
+
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+});
+
+describe('MetricPickerModal 批量输入指标 ID', () => {
+  beforeEach(() => {
+    useIndicatorListSpy.mockClear();
+    useAllIndicatorsSpy.mockClear();
+    indicatorListData.items = [];
+    indicatorListData.total = 0;
+    allIndicatorsData.items = [
+      {
+        id: 'C000060011',
+        name: 'rrc_att',
+        cnName: 'RRC请求次数',
+        enName: 'RRC Attempts',
+        isCounter: true,
+        deviceType: 'ENB',
+      },
+      {
+        id: 'K900010002',
+        name: 'availability',
+        cnName: '可用率',
+        enName: 'Availability',
+        isCounter: false,
+        deviceType: 'ENB',
+      },
+    ];
+    allIndicatorsData.total = 2;
+  });
+
+  it('默认不显示批量输入入口，由调用页显式开启', () => {
+    renderModal();
+
+    expect(screen.queryByRole('button', { name: /批量输入/ })).toBeNull();
+  });
+
+  it('enabled-only 模式下列表和批量候选都只请求已启用指标', () => {
+    renderModal({ enableBatchInput: true, onlyEnabledIndicators: true });
+
+    expect(useIndicatorListSpy.mock.calls.at(-1)?.[1]).toMatchObject({
+      isEnabled: true,
+    });
+    expect(useAllIndicatorsSpy.mock.calls.at(-1)?.[1]).toMatchObject({
+      enabled: true,
+      isEnabled: true,
+    });
+  });
+
+  it('只把全量真实指标库里存在的 ID 加入已选，并忽略不存在 ID', async () => {
+    const onConfirm = vi.fn();
+    renderModal({ initialSelected: ['EXISTING'], onConfirm, enableBatchInput: true });
+
+    fireEvent.click(screen.getByRole('button', { name: /批量输入/ }));
+    const input = await screen.findByPlaceholderText(/K000000001/);
+    fireEvent.change(input, {
+      target: { value: 'K900010002，UNKNOWN\nC000060011 K900010002' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /加入已选/ }));
+    fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
+
+    expect(onConfirm).toHaveBeenCalledWith(
+      ['EXISTING', 'K900010002', 'C000060011'],
+      expect.objectContaining({
+        K900010002: '可用率',
+        C000060011: 'RRC请求次数',
+      }),
+    );
+  });
+
+  it('enabled-only 模式下，批量输入只允许加入已启用候选里的 ID', async () => {
+    const onConfirm = vi.fn();
+    allIndicatorsData.items = [
+      {
+        id: 'K900010002',
+        name: 'availability',
+        cnName: '可用率',
+        enName: 'Availability',
+        isCounter: false,
+        deviceType: 'ENB',
+      },
+    ];
+    allIndicatorsData.total = 1;
+
+    renderModal({ onConfirm, enableBatchInput: true, onlyEnabledIndicators: true });
+
+    fireEvent.click(screen.getByRole('button', { name: /批量输入/ }));
+    const input = await screen.findByPlaceholderText(/K000000001/);
+    fireEvent.change(input, {
+      target: { value: 'K900010002 C000060011' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /加入已选/ }));
+    fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
+
+    expect(onConfirm).toHaveBeenCalledWith(
+      ['K900010002'],
+      expect.objectContaining({ K900010002: '可用率' }),
+    );
+  });
+
+  it('enabled-only 模式下，已有不可选指标不会被确认提交', () => {
+    const onConfirm = vi.fn();
+    renderModal({
+      initialSelected: ['DISABLED_METRIC'],
+      enableBatchInput: true,
+      onlyEnabledIndicators: true,
+      onConfirm,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
+
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it('全部 ID 不存在时不改变原已选', async () => {
+    const onConfirm = vi.fn();
+    renderModal({ initialSelected: ['EXISTING'], onConfirm, enableBatchInput: true });
+
+    fireEvent.click(screen.getByRole('button', { name: /批量输入/ }));
+    const input = await screen.findByPlaceholderText(/K000000001/);
+    fireEvent.change(input, {
+      target: { value: 'UNKNOWN-1 UNKNOWN-2' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /加入已选/ }));
+    fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
+
+    expect(onConfirm).toHaveBeenCalledWith(['EXISTING'], expect.any(Object));
+  });
+
+  it('批量输入同样受 maxSelected 上限限制', async () => {
+    const onConfirm = vi.fn();
+    renderModal({ initialSelected: ['EXISTING'], maxSelected: 2, onConfirm, enableBatchInput: true });
+
+    fireEvent.click(screen.getByRole('button', { name: /批量输入/ }));
+    const input = await screen.findByPlaceholderText(/K000000001/);
+    fireEvent.change(input, {
+      target: { value: 'K900010002 C000060011' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /加入已选/ }));
+    fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
+
+    expect(onConfirm).toHaveBeenCalledWith(['EXISTING', 'K900010002'], expect.any(Object));
+  });
+});
+
+describe('MetricPickerModal 指标级别列', () => {
+  beforeEach(() => {
+    useIndicatorListSpy.mockClear();
+    useAllIndicatorsSpy.mockClear();
+    indicatorListData.items = [
+      {
+        id: 'K-BOTH',
+        name: 'rrc_sr',
+        cnName: 'RRC连接成功率',
+        enName: 'RRC Success Rate',
+        indicatorLevel: 'both',
+        isCounter: false,
+        deviceType: 'ENB',
+      },
+    ];
+    indicatorListData.total = 1;
+    allIndicatorsData.items = [];
+    allIndicatorsData.total = 0;
+  });
+
+  it('ENB/GSM 指标选择列表显示“指标级别”列并把 both 显示为“设备级 / PLMN级”', () => {
+    renderModal({ initialDeviceType: 'ENB' });
+
+    expect(screen.getAllByText('指标级别').length).toBeGreaterThan(0);
+    expect(screen.getByText('设备级 / PLMN级')).toBeTruthy();
+  });
+
+  it('GNB 指标选择列表暂不显示“指标级别”列', () => {
+    renderModal({ initialDeviceType: 'GNB' });
+
+    expect(screen.queryByText('指标级别')).toBeNull();
   });
 });

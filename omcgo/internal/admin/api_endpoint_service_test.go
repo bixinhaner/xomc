@@ -11,6 +11,17 @@ import (
 	"go.uber.org/zap"
 )
 
+type recordingBuiltInPermissionReconciler struct {
+	calls  int
+	result BuiltInAPIPermissionGrantResult
+	err    error
+}
+
+func (r *recordingBuiltInPermissionReconciler) ReconcileBuiltInAPIPermissions(context.Context) (BuiltInAPIPermissionGrantResult, error) {
+	r.calls++
+	return r.result, r.err
+}
+
 func strPtr(s string) *string { return &s }
 
 // TestUpdateApiEndpoint_PathMethodPassThrough 验证：
@@ -210,5 +221,91 @@ func TestSyncApiEndpointsPassesReadableDescription(t *testing.T) {
 	}
 	if result.Created != 1 || result.Updated != 0 || result.Total != 1 {
 		t.Fatalf("unexpected sync result: %+v", result)
+	}
+}
+
+func TestSyncApiEndpointsReconcilesBuiltInPermissions(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	repo := NewMockApiEndpointRepository(ctrl)
+	repo.EXPECT().
+		Upsert(
+			gomock.Any(),
+			"/api/v1/admin/sysConfig/apply-batches/:id",
+			"GET",
+			gomock.Any(),
+			gomock.Any(),
+			"sysConfig",
+		).
+		Return(true, nil)
+
+	reconciler := &recordingBuiltInPermissionReconciler{}
+	svc := NewApiEndpointService(repo, zap.NewNop())
+	svc.SetBuiltInPermissionReconciler(reconciler)
+
+	_, err := svc.SyncApiEndpoints(context.Background(), []gin.RouteInfo{{
+		Method: "GET",
+		Path:   "/api/v1/admin/sysConfig/apply-batches/:id",
+	}})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if reconciler.calls != 1 {
+		t.Fatalf("reconcile calls = %d, want 1", reconciler.calls)
+	}
+}
+
+func TestSyncApiEndpointsReturnsBuiltInPermissionReconcileError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	repo := NewMockApiEndpointRepository(ctrl)
+	repo.EXPECT().
+		Upsert(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(false, nil)
+
+	reconciler := &recordingBuiltInPermissionReconciler{err: errors.New("database unavailable")}
+	svc := NewApiEndpointService(repo, zap.NewNop())
+	svc.SetBuiltInPermissionReconciler(reconciler)
+
+	_, err := svc.SyncApiEndpoints(context.Background(), []gin.RouteInfo{{
+		Method: "GET",
+		Path:   "/api/v1/admin/sysConfig",
+	}})
+
+	if err == nil {
+		t.Fatal("expected reconcile error, got nil")
+	}
+	if !errors.Is(err, reconciler.err) {
+		t.Fatalf("error = %v, want wrapped %v", err, reconciler.err)
+	}
+}
+
+func TestSyncApiEndpointsReturnsRouteUpsertError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	repoErr := errors.New("database unavailable")
+	repo := NewMockApiEndpointRepository(ctrl)
+	repo.EXPECT().
+		Upsert(gomock.Any(), "/api/v1/admin/new-route", "GET", gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(false, repoErr)
+
+	reconciler := &recordingBuiltInPermissionReconciler{}
+	svc := NewApiEndpointService(repo, zap.NewNop())
+	svc.SetBuiltInPermissionReconciler(reconciler)
+
+	_, err := svc.SyncApiEndpoints(context.Background(), []gin.RouteInfo{{
+		Method: "GET",
+		Path:   "/api/v1/admin/new-route",
+	}})
+
+	if !errors.Is(err, repoErr) {
+		t.Fatalf("error = %v, want wrapped %v", err, repoErr)
+	}
+	if reconciler.calls != 0 {
+		t.Fatalf("reconcile calls = %d, want 0 after route persistence failure", reconciler.calls)
 	}
 }

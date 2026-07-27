@@ -14,10 +14,11 @@ import (
 const (
 	// #168：24h→4h，与命令实际生命周期匹配，抑制 Redis 工作集增长（2.36G 撑爆事故的增长真因
 	// 之一就是 24h 任务态累积）。被淘汰/过期的任务态以 PG 双写为权威源，可重建。
-	taskDetailTTL    = 4 * time.Hour // 任务详情 TTL
-	cwmpMappingTTL   = 4 * time.Hour // CWMP ID → Task ID 映射 TTL
-	queuePeekLimit   = 32
-	queueScoreFactor = 1e13
+	taskDetailTTL     = 4 * time.Hour // 任务详情 TTL
+	cwmpMappingTTL    = 4 * time.Hour // CWMP ID → Task ID 映射 TTL
+	queuePeekLimit    = 32
+	queuePopScanLimit = 256
+	queueScoreFactor  = 1e13
 )
 
 // RedisTaskQueue 实现 TaskQueue 接口
@@ -101,63 +102,81 @@ func (q *RedisTaskQueue) Push(ctx context.Context, task *Task) error {
 func (q *RedisTaskQueue) Pop(ctx context.Context, deviceSN string) (*Task, error) {
 	queueKey := q.queueKey(deviceSN)
 
-	// 获取 score 较小的一批元素，跳过尚未到 next_attempt_at 的延迟重试任务。
-	results, err := q.client.ZRangeWithScores(ctx, queueKey, 0, queuePeekLimit-1).Result()
-	if err != nil {
-		return nil, fmt.Errorf("zrange: %w", err)
-	}
-
-	if len(results) == 0 {
-		return nil, nil // 队列为空
-	}
-
-	taskIDs := make([]string, 0, len(results))
-	for _, result := range results {
-		taskID, ok := result.Member.(string)
-		if !ok {
-			continue
-		}
-		taskIDs = append(taskIDs, taskID)
-	}
-	if len(taskIDs) == 0 {
-		return nil, nil
-	}
-
-	// 批量获取任务详情，选出第一个已到可出队时间的任务。
-	pipe := q.client.Pipeline()
-	cmds := make([]*redis.StringCmd, len(taskIDs))
-	for i, taskID := range taskIDs {
-		cmds[i] = pipe.HGet(ctx, q.taskKey(taskID), "data")
-	}
-	if _, err = pipe.Exec(ctx); err != nil && err != redis.Nil {
-		return nil, fmt.Errorf("pop task: %w", err)
-	}
-
-	now := time.Now()
-	for i, cmd := range cmds {
-		taskData, err := cmd.Result()
+	scanned := 0
+	for scanned < queuePopScanLimit {
+		// 任务详情和设备队列使用不同 Redis key；在 Cluster 模式下不能放进同一个
+		// Lua 脚本访问。详情可以跨 slot 批量读取，最终通过 ZREM 的返回值原子抢占：
+		// 只有真正删除队列成员的调用者可以返回该任务。
+		results, err := q.client.ZRangeWithScores(ctx, queueKey, 0, queuePeekLimit-1).Result()
 		if err != nil {
-			if i == 0 {
+			return nil, fmt.Errorf("zrange: %w", err)
+		}
+		if len(results) == 0 {
+			return nil, nil
+		}
+
+		taskIDs := make([]string, 0, len(results))
+		for _, result := range results {
+			taskID, ok := result.Member.(string)
+			if ok {
+				taskIDs = append(taskIDs, taskID)
+			}
+		}
+		if len(taskIDs) == 0 {
+			return nil, nil
+		}
+
+		pipe := q.client.Pipeline()
+		cmds := make([]*redis.StringCmd, len(taskIDs))
+		for i, taskID := range taskIDs {
+			cmds[i] = pipe.HGet(ctx, q.taskKey(taskID), "data")
+		}
+		if _, err = pipe.Exec(ctx); err != nil && err != redis.Nil {
+			return nil, fmt.Errorf("pop task details: %w", err)
+		}
+
+		removedOrContended := false
+		now := time.Now()
+		for i, cmd := range cmds {
+			taskData, err := cmd.Result()
+			if err == redis.Nil {
+				if _, remErr := q.client.ZRem(ctx, queueKey, taskIDs[i]).Result(); remErr != nil {
+					return nil, fmt.Errorf("remove stale queue member: %w", remErr)
+				}
+				removedOrContended = true
+				continue
+			}
+			if err != nil {
 				return nil, fmt.Errorf("get task data: %w", err)
 			}
-			continue
-		}
 
-		var task Task
-		if err := json.Unmarshal([]byte(taskData), &task); err != nil {
-			if i == 0 {
-				return nil, fmt.Errorf("unmarshal task: %w", err)
+			var task Task
+			if err := json.Unmarshal([]byte(taskData), &task); err != nil {
+				if _, remErr := q.client.ZRem(ctx, queueKey, taskIDs[i]).Result(); remErr != nil {
+					return nil, fmt.Errorf("remove malformed queue member: %w", remErr)
+				}
+				removedOrContended = true
+				continue
 			}
-			continue
-		}
-		if !task.IsReadyForAttempt(now) {
-			continue
+			if !task.IsReadyForAttempt(now) {
+				continue
+			}
+
+			removed, err := q.client.ZRem(ctx, queueKey, taskIDs[i]).Result()
+			if err != nil {
+				return nil, fmt.Errorf("claim popped task: %w", err)
+			}
+			if removed == 1 {
+				return &task, nil
+			}
+			// 另一个实例已抢到该任务；重新读取队首，不能返回同一份详情。
+			removedOrContended = true
 		}
 
-		if err := q.client.ZRem(ctx, queueKey, taskIDs[i]).Err(); err != nil {
-			return nil, fmt.Errorf("remove popped task: %w", err)
+		scanned += len(taskIDs)
+		if !removedOrContended {
+			return nil, nil
 		}
-		return &task, nil
 	}
 
 	return nil, nil
@@ -228,22 +247,23 @@ func (q *RedisTaskQueue) Update(ctx context.Context, task *Task) error {
 		return fmt.Errorf("marshal task: %w", err)
 	}
 
-	// 更新任务详情
-	err = q.client.HSet(ctx, q.taskKey(task.ID), "data", taskData).Err()
-	if err != nil {
-		return fmt.Errorf("update task: %w", err)
-	}
-
-	// 如果任务状态变回 pending，需要重新入队
+	// Keep the detail hash and executable queue membership consistent. A task is
+	// executable iff it is pending; every other state must remove any stale
+	// sorted-set member left by recovery, cancellation, or a concurrent terminal
+	// transition.
+	pipe := q.client.Pipeline()
+	pipe.HSet(ctx, q.taskKey(task.ID), "data", taskData)
 	if task.Status == TaskStatusPending {
 		score := queueScore(task)
-		err = q.client.ZAdd(ctx, q.queueKey(task.DeviceSN), redis.Z{
+		pipe.ZAdd(ctx, q.queueKey(task.DeviceSN), redis.Z{
 			Score:  score,
 			Member: task.ID,
-		}).Err()
-		if err != nil {
-			return fmt.Errorf("requeue task: %w", err)
-		}
+		})
+	} else {
+		pipe.ZRem(ctx, q.queueKey(task.DeviceSN), task.ID)
+	}
+	if _, err = pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("update task: %w", err)
 	}
 
 	return nil

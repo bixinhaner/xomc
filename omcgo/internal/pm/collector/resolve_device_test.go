@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/reliability"
 )
 
 // fakeDeviceLookup lets tests script GetBySerialNumber outcomes.
@@ -87,15 +88,17 @@ func TestResolveDevice_emptySNErrors(t *testing.T) {
 }
 
 func TestResolveDevice_deviceNotFoundErrors(t *testing.T) {
-	// Transient: device row not yet inserted. Returning error makes the
-	// runner retry; by the time the retry fires the inform/registration
-	// usually landed.
+	// 2026-07-21 产品决策：设备不在注册表就直接拒绝、不重试（不是竞态兜底）。
+	// 断言错误包装了 reliability.ErrPermanent，使 Runner/EventBus 立即终止而不是
+	// 重试 5 次后再丢弃。
 	c := &PMCollector{logger: zap.NewNop(), deviceLookup: &fakeDeviceLookup{dev: nil}}
 	payload := &FileReceivedPayload{DeviceSN: "UnknownSN"}
 
 	err := c.resolveDevice(context.Background(), payload)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "device not found")
+	assert.True(t, errors.Is(err, reliability.ErrPermanent),
+		"device-not-found must be permanent so the runner/event bus stop retrying immediately")
 }
 
 func TestResolveDevice_lookupErrorPropagates(t *testing.T) {
@@ -105,4 +108,6 @@ func TestResolveDevice_lookupErrorPropagates(t *testing.T) {
 	err := c.resolveDevice(context.Background(), payload)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "PG down")
+	assert.False(t, errors.Is(err, reliability.ErrPermanent),
+		"infra lookup failures must stay retryable, unlike a confirmed device-not-found")
 }

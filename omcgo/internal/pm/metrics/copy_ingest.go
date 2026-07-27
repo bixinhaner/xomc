@@ -8,8 +8,19 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
+	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
 )
+
+var (
+	// AggregationOutboxEnabled 允许纯入库压测显式关闭 outbox；生产默认开启。
+	AggregationOutboxEnabled = true
+	// AggregationMaxEventBytes 必须不超过 NATS max_payload。
+	AggregationMaxEventBytes = 8 << 20
+)
+
+var ErrSourceContentChanged = fmt.Errorf("PM source identity content changed")
 
 // FileMarker 是 pm_files 幂等标记的最小字段集（copy-direct 入库路径用）。
 //
@@ -19,16 +30,17 @@ import (
 //   - 需要强制重灌某文件时，先删其 pm_files 标记行（device_sn+file_name）再重新 publish 事件。
 //   - 源文件仍留在 MinIO（入库后不删），故标记被清后总可重放重建。
 type FileMarker struct {
-	ID           uuid.UUID
-	DeviceID     uuid.UUID
-	DeviceSN     string
-	Carrier      string
-	Technology   string
-	FileName     string
-	FileSize     int64
-	CollectTime  time.Time
-	MinioPath    string
-	CounterCount int
+	ID            uuid.UUID
+	DeviceID      uuid.UUID
+	DeviceSN      string
+	Carrier       string
+	Technology    string
+	FileName      string
+	FileSize      int64
+	CollectTime   time.Time
+	MinioPath     string
+	ContentSHA256 []byte
+	CounterCount  int
 }
 
 // MetricFromCounter 把 model.PMCounter 转 PMMetric。
@@ -109,7 +121,7 @@ func MetricFromKPIValue(v model.KPIValue) PMMetric {
 	}
 	endTime := v.Time
 	startTime := endTime.Add(-granularity15MinDuration)
-	return PMMetric{
+	m := PMMetric{
 		DeviceOUI:   v.OUI,
 		DeviceSN:    v.DeviceSN,
 		MetricPath:  v.IndicatorID,
@@ -123,6 +135,11 @@ func MetricFromKPIValue(v model.KPIValue) PMMetric {
 		ObjectLDN: ldn,
 		Extra:     extra,
 	}
+	if v.StatisType != "" {
+		st := StatisType(v.StatisType)
+		m.StatisType = &st
+	}
+	return m
 }
 
 // CopyIngest 原子写入一个 PM 文件的全部 metric 行 + pm_files 幂等标记（copy-direct 写路径）。
@@ -144,22 +161,7 @@ func MetricFromKPIValue(v model.KPIValue) PMMetric {
 // 必已落盘，崩溃只会落在"提交前"从而重投重做。（删 uq_pm_metrics_natural 后 plain COPY 不再受
 // 唯一索引约束，文件内重复自然键已由 dedupeByNaturalKey 折叠。）
 func (r *PgRepository) CopyIngest(ctx context.Context, marker FileMarker, counters []model.PMCounter, kpis []model.KPIValue) (ingested bool, err error) {
-	ms := make([]PMMetric, 0, len(counters)+len(kpis))
-	for _, c := range counters {
-		ms = append(ms, MetricFromCounter(c))
-	}
-	for _, k := range kpis {
-		ms = append(ms, MetricFromKPIValue(k))
-	}
-	// 文件内按自然键去重（last-wins），复刻旧 UPSERT 的 ON CONFLICT DO UPDATE"后写覆盖"语义：
-	// 删 uq_pm_metrics_natural 后 plain COPY 不再因重复键失败，但若同一文件出现重复自然键（多个
-	// 上报名经白名单改写命中同一 IndicatorID、或厂商把同 measType 重复上报），不折叠会写成两行 →
-	// 读侧 SUM 重复计数。先在内存折叠成一行（取最后值）避免文件内 double-count。
-	ms = dedupeByNaturalKey(ms)
-	rows, err := buildRows(ms)
-	if err != nil {
-		return false, err
-	}
+	measurements := BuildSparseMeasurements(counters, kpis)
 
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -174,30 +176,118 @@ func (r *PgRepository) CopyIngest(ctx context.Context, marker FileMarker, counte
 	if id == uuid.Nil {
 		id = uuid.New()
 	}
-	ct, err := tx.Exec(ctx,
-		`INSERT INTO pm_files (id, device_id, device_sn, carrier, technology, file_name, file_size,
-		                       collect_time, minio_path, parsed, counter_count, created_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,true,$10,NOW())
-		 ON CONFLICT (device_sn, file_name) DO NOTHING`,
-		id, marker.DeviceID, marker.DeviceSN, marker.Carrier, marker.Technology, marker.FileName,
-		marker.FileSize, marker.CollectTime, marker.MinioPath, marker.CounterCount)
-	if err != nil {
-		return false, fmt.Errorf("insert pm_files marker: %w", err)
+	if len(marker.ContentSHA256) != 32 {
+		return false, fmt.Errorf("copy-ingest marker content SHA-256 must be 32 bytes")
 	}
-	if ct.RowsAffected() == 0 {
-		// 标记冲突：该文件已入库 → 跳过（回滚，不写 metrics）。
+	if _, err := tx.Exec(ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,
+		marker.DeviceSN+"\x1f"+marker.FileName); err != nil {
+		return false, fmt.Errorf("lock pm_files source identity: %w", err)
+	}
+	var existingID uuid.UUID
+	var existingDigest []byte
+	findErr := tx.QueryRow(ctx, `
+		SELECT id,content_sha256 FROM pm_files
+		 WHERE device_sn=$1 AND file_name=$2
+		 FOR UPDATE`, marker.DeviceSN, marker.FileName).Scan(&existingID, &existingDigest)
+	switch {
+	case findErr == nil && string(existingDigest) == string(marker.ContentSHA256):
 		return false, nil
-	}
-
-	if len(rows) > 0 {
-		if _, err := tx.CopyFrom(ctx, pgx.Identifier{"pm_metrics"}, pmMetricsColumns, pgx.CopyFromRows(rows)); err != nil {
-			return false, classifyInsertError(err)
+	case findErr == nil:
+		return false, fmt.Errorf("%w: device_sn=%s file_name=%s",
+			ErrSourceContentChanged, marker.DeviceSN, marker.FileName)
+	case findErr != pgx.ErrNoRows:
+		return false, fmt.Errorf("lookup pm_files marker: %w", findErr)
+	default:
+		ct, err := tx.Exec(ctx,
+			`INSERT INTO pm_files (id, device_id, device_sn, carrier, technology, file_name, file_size,
+			                       collect_time, minio_path, content_sha256, parsed, parsed_at,
+			                       counter_count, created_at)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,now(),$11,NOW())
+			 ON CONFLICT DO NOTHING`,
+			id, marker.DeviceID, marker.DeviceSN, marker.Carrier, marker.Technology, marker.FileName,
+			marker.FileSize, marker.CollectTime, marker.MinioPath, marker.ContentSHA256, marker.CounterCount)
+		if err != nil {
+			return false, fmt.Errorf("insert pm_files marker: %w", err)
 		}
+		if ct.RowsAffected() == 0 {
+			// A concurrent transaction or a differently named copy with the same
+			// device/content digest already committed.
+			return false, nil
+		}
+	}
+	batchID := uuid.New()
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO pm_ingest_batches (ingest_batch_id, source_file_id, status) VALUES ($1,$2,'building')`,
+		batchID, id); err != nil {
+		return false, fmt.Errorf("insert pm ingest batch: %w", err)
+	}
+	if err := writeSparseMeasurements(ctx, tx, &id, &batchID, measurements); err != nil {
+		return false, classifyInsertError(err)
+	}
+	if AggregationOutboxEnabled {
+		payload, err := buildAggregationEvent(marker, id, batchID, measurements)
+		if err != nil {
+			return false, err
+		}
+		if err := pmstream.InsertOutbox(ctx, tx, payload, AggregationMaxEventBytes); err != nil {
+			return false, err
+		}
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE pm_ingest_batches SET status='committed', committed_at=now() WHERE ingest_batch_id=$1`,
+		batchID); err != nil {
+		return false, fmt.Errorf("commit pm ingest batch: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, classifyInsertError(err)
 	}
 	return true, nil
+}
+
+func buildAggregationEvent(
+	marker FileMarker,
+	sourceFileID, ingestBatchID uuid.UUID,
+	measurements []SparseMeasurement,
+) (event.PMAggregationNormalizedPayload, error) {
+	payload := event.PMAggregationNormalizedPayload{
+		SchemaVersion: pmstream.SchemaVersion,
+		EventID:       uuid.New(), SourceFileID: sourceFileID, IngestBatchID: ingestBatchID,
+		DeviceID: marker.DeviceID, DeviceSN: marker.DeviceSN,
+		Technology: marker.Technology,
+	}
+	for _, measurement := range measurements {
+		if payload.DeviceOUI == "" {
+			payload.DeviceOUI = measurement.DeviceOUI
+		}
+		if payload.WindowStart.IsZero() {
+			payload.WindowStart = measurement.StartTime.UTC()
+			payload.WindowEnd = measurement.EndTime.UTC()
+		} else if !payload.WindowStart.Equal(measurement.StartTime.UTC()) ||
+			!payload.WindowEnd.Equal(measurement.EndTime.UTC()) {
+			return event.PMAggregationNormalizedPayload{},
+				fmt.Errorf("PM aggregation event contains multiple collection windows")
+		}
+		normalized := event.PMAggregationMeasurement{
+			ObjectLDN: measurement.ObjectLDN, CounterGroup: measurement.CounterGroup,
+		}
+		for _, value := range measurement.Values {
+			normalized.Metrics = append(normalized.Metrics, event.PMAggregationMetric{
+				MetricPath: value.Path, MetricType: string(value.MetricType),
+				StatisType: value.StatisType, Value: value.Value,
+			})
+		}
+		if len(normalized.Metrics) > 0 {
+			payload.Measurements = append(payload.Measurements, normalized)
+		}
+	}
+	if len(payload.Measurements) == 0 {
+		// A committed empty PM file still needs a valid event for observability,
+		// but it contributes to no task and therefore carries its marker time.
+		payload.WindowEnd = marker.CollectTime.UTC().Truncate(15 * time.Minute)
+		payload.WindowStart = payload.WindowEnd.Add(-15 * time.Minute)
+	}
+	return payload, nil
 }
 
 // dedupeByNaturalKey 把同自然键的多条 PMMetric 折叠成一条（保留切片中最后出现的那条），

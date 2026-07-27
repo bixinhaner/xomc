@@ -36,7 +36,8 @@ func TestParseDashboardParams_Full(t *testing.T) {
 	assert.False(t, req.StartTime.IsZero())
 	assert.False(t, req.EndTime.IsZero())
 	assert.Equal(t, 0, req.Limit) // 去 limit 全量
-	// A1：object_ldns 白名单单独返回（QueryRequest 无此字段）。
+	assert.Equal(t, []string{"Cellid=1,PLMN=00101"}, req.ObjectLDNs)
+	// A1：保留旧返回值给导出直查路径，同时 QueryRequest 也带同一份白名单供补骨架复用。
 	assert.Equal(t, []string{"Cellid=1,PLMN=00101"}, objectLDNs)
 }
 

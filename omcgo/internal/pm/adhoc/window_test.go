@@ -22,10 +22,10 @@ import (
 // byKey 命中则返回对应水位；未命中返回 ErrWatermarkNotFound（模拟「上游该粒度尚未卷完任何格」）。
 // 记录最近一次读取的 (粒度, 层级)，便于断言维度→层级映射。
 type stubWatermark struct {
-	byKey       map[wmKey]time.Time
-	lastGran    metrics.Granularity
-	lastLevel   aggregator.WatermarkLevel
-	getErr      error // 非 nil 时所有 Get 返回此错误（模拟读取出错）
+	byKey     map[wmKey]time.Time
+	lastGran  metrics.Granularity
+	lastLevel aggregator.WatermarkLevel
+	getErr    error // 非 nil 时所有 Get 返回此错误（模拟读取出错）
 }
 
 type wmKey struct {
@@ -81,6 +81,65 @@ func TestTruncateBucketStart_NilLocDefaultsUTC(t *testing.T) {
 	assert.True(t, got.Equal(want), "got %v want %v", got, want)
 }
 
+func TestNextBucketStart_PerGranularity(t *testing.T) {
+	loc := time.UTC
+	cases := []struct {
+		name   string
+		g      metrics.Granularity
+		bucket time.Time
+		want   time.Time
+	}{
+		{
+			name:   "15min",
+			g:      metrics.Granularity15Min,
+			bucket: time.Date(2026, 7, 18, 9, 0, 0, 0, loc),
+			want:   time.Date(2026, 7, 18, 9, 15, 0, 0, loc),
+		},
+		{
+			name:   "hourly",
+			g:      metrics.GranularityHourly,
+			bucket: time.Date(2026, 7, 18, 9, 0, 0, 0, loc),
+			want:   time.Date(2026, 7, 18, 10, 0, 0, 0, loc),
+		},
+		{
+			name:   "daily",
+			g:      metrics.GranularityDaily,
+			bucket: time.Date(2026, 7, 18, 0, 0, 0, 0, loc),
+			want:   time.Date(2026, 7, 19, 0, 0, 0, 0, loc),
+		},
+		{
+			name:   "weekly",
+			g:      metrics.GranularityWeekly,
+			bucket: time.Date(2026, 7, 13, 0, 0, 0, 0, loc),
+			want:   time.Date(2026, 7, 20, 0, 0, 0, 0, loc),
+		},
+		{
+			name:   "monthly jul",
+			g:      metrics.GranularityMonthly,
+			bucket: time.Date(2026, 7, 1, 0, 0, 0, 0, loc),
+			want:   time.Date(2026, 8, 1, 0, 0, 0, 0, loc),
+		},
+		{
+			name:   "monthly jan",
+			g:      metrics.GranularityMonthly,
+			bucket: time.Date(2026, 1, 1, 0, 0, 0, 0, loc),
+			want:   time.Date(2026, 2, 1, 0, 0, 0, 0, loc),
+		},
+		{
+			name:   "monthly feb",
+			g:      metrics.GranularityMonthly,
+			bucket: time.Date(2026, 2, 1, 0, 0, 0, 0, loc),
+			want:   time.Date(2026, 3, 1, 0, 0, 0, 0, loc),
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := nextBucketStart(c.g, c.bucket)
+			assert.True(t, got.Equal(c.want), "got %v want %v", got, c.want)
+		})
+	}
+}
+
 func TestIsContinuous(t *testing.T) {
 	nonZero := time.Date(2026, 6, 16, 10, 0, 0, 0, time.UTC)
 
@@ -92,24 +151,64 @@ func TestIsContinuous(t *testing.T) {
 	assert.False(t, isContinuous(&Task{Mode: ModeOneshot, WindowStart: nonZero, WindowEnd: nonZero}))
 }
 
-// 成功路径：持续任务目标桶 == 对应水位的桶起点（上游已确定卷完的最新一格）。
+// 成功路径：持续任务查询窗口 == [对应水位桶起点, 下一桶起点)。
 func TestQueryAndConvert_ContinuousTargetsWatermarkBucket(t *testing.T) {
-	loc := time.UTC
-	wmBucket := time.Date(2026, 6, 16, 17, 0, 0, 0, loc) // 上游小时·设备级水位停在 17:00
+	loc := time.FixedZone("CST", 8*3600)
+	cases := []struct {
+		name string
+		gran metrics.Granularity
+		wm   time.Time
+		want time.Time
+	}{
+		{
+			name: "hourly",
+			gran: metrics.GranularityHourly,
+			wm:   time.Date(2026, 6, 16, 17, 0, 0, 0, loc),
+			want: time.Date(2026, 6, 16, 18, 0, 0, 0, loc),
+		},
+		{
+			name: "daily",
+			gran: metrics.GranularityDaily,
+			wm:   time.Date(2026, 7, 18, 0, 0, 0, 0, loc),
+			want: time.Date(2026, 7, 19, 0, 0, 0, 0, loc),
+		},
+		{
+			name: "weekly",
+			gran: metrics.GranularityWeekly,
+			wm:   time.Date(2026, 7, 13, 0, 0, 0, 0, loc),
+			want: time.Date(2026, 7, 20, 0, 0, 0, 0, loc),
+		},
+		{
+			name: "monthly-jan",
+			gran: metrics.GranularityMonthly,
+			wm:   time.Date(2026, 1, 1, 0, 0, 0, 0, loc),
+			want: time.Date(2026, 2, 1, 0, 0, 0, 0, loc),
+		},
+		{
+			name: "monthly-feb",
+			gran: metrics.GranularityMonthly,
+			wm:   time.Date(2026, 2, 1, 0, 0, 0, 0, loc),
+			want: time.Date(2026, 3, 1, 0, 0, 0, 0, loc),
+		},
+	}
 
-	aggr := &stubAggr{}
-	wm := &stubWatermark{byKey: map[wmKey]time.Time{
-		{metrics.GranularityHourly, aggregator.WatermarkLevelDevice}: wmBucket,
-	}}
-	e := NewExecutor(aggr, &stubRepo{}, nil, nil).SetLocation(loc).SetWatermarkReader(wm)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			aggr := &stubAggr{}
+			wm := &stubWatermark{byKey: map[wmKey]time.Time{
+				{c.gran, aggregator.WatermarkLevelDevice}: c.wm,
+			}}
+			e := NewExecutor(aggr, &stubRepo{}, nil, nil).SetLocation(loc).SetWatermarkReader(wm)
 
-	task := &Task{ID: uuid.New(), Mode: ModeContinuous, Granularities: []string{"hourly"}}
-	_, err := e.queryAndConvert(context.Background(), task, metrics.GranularityHourly)
-	require.NoError(t, err)
+			task := &Task{ID: uuid.New(), Mode: ModeContinuous, Granularities: []string{string(c.gran)}}
+			_, err := e.queryAndConvert(context.Background(), task, c.gran)
+			require.NoError(t, err)
 
-	// 目标桶 start==end==水位桶起点 → time 过滤只命中这一格。
-	assert.True(t, aggr.lastReq.StartTime.Equal(wmBucket), "start 应=水位桶 %v，实际 %v", wmBucket, aggr.lastReq.StartTime)
-	assert.True(t, aggr.lastReq.EndTime.Equal(wmBucket), "end 应=水位桶 %v，实际 %v", wmBucket, aggr.lastReq.EndTime)
+			// 目标桶用半开窗口 [bucket, nextBucket)，避免 [bucket,bucket) 空区间。
+			assert.True(t, aggr.lastReq.StartTime.Equal(c.wm), "start 应=水位桶 %v，实际 %v", c.wm, aggr.lastReq.StartTime)
+			assert.True(t, aggr.lastReq.EndTime.Equal(c.want), "end 应=水位下一桶 %v，实际 %v", c.want, aggr.lastReq.EndTime)
+		})
+	}
 }
 
 // 不扑空：水位未到（无该粒度水位）→ 本格不取数（aggregator 不被调用、无结果）。
@@ -145,6 +244,56 @@ func TestQueryAndConvert_ContinuousAdvancesOnEmptyBucketWatermark(t *testing.T) 
 	assert.Empty(t, rows, "空格无数据行")
 	// 目标桶仍精确落在水位格（游标照进，未被空格挡住）。
 	assert.True(t, aggr.lastReq.StartTime.Equal(emptyBucket), "目标桶应=空格水位 %v，实际 %v", emptyBucket, aggr.lastReq.StartTime)
+	assert.True(t, aggr.lastReq.EndTime.Equal(emptyBucket.Add(time.Hour)), "目标窗口结束应=下一小时桶")
+}
+
+// GSM 最近桶没有数据时也应正常查询半开窗口并返回空结果，不能因为空结果卡住。
+func TestQueryAndConvert_ContinuousGSMEmptyBucketUsesHalfOpenWindow(t *testing.T) {
+	loc := time.UTC
+	cases := []struct {
+		name   string
+		gran   metrics.Granularity
+		bucket time.Time
+		want   time.Time
+	}{
+		{
+			name:   "15min",
+			gran:   metrics.Granularity15Min,
+			bucket: time.Date(2026, 7, 18, 9, 15, 0, 0, loc),
+			want:   time.Date(2026, 7, 18, 9, 30, 0, 0, loc),
+		},
+		{
+			name:   "hourly",
+			gran:   metrics.GranularityHourly,
+			bucket: time.Date(2026, 7, 18, 9, 0, 0, 0, loc),
+			want:   time.Date(2026, 7, 18, 10, 0, 0, 0, loc),
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			aggr := &stubAggr{}
+			wm := &stubWatermark{byKey: map[wmKey]time.Time{
+				{c.gran, aggregator.WatermarkLevelDevice}: c.bucket,
+			}}
+			e := NewExecutor(aggr, &stubRepo{}, nil, nil).SetLocation(loc).SetWatermarkReader(wm)
+
+			task := &Task{
+				ID:            uuid.New(),
+				Mode:          ModeContinuous,
+				Dimension:     DimensionNetwork,
+				Technology:    "gsm",
+				Granularities: []string{string(c.gran)},
+			}
+			rows, err := e.queryAndConvert(context.Background(), task, c.gran)
+			require.NoError(t, err)
+
+			assert.Empty(t, rows)
+			assert.Equal(t, []string{"gsm"}, aggr.lastReq.Technologies)
+			assert.True(t, aggr.lastReq.StartTime.Equal(c.bucket), "start 应=GSM 空桶水位")
+			assert.True(t, aggr.lastReq.EndTime.Equal(c.want), "end 应=下一桶")
+		})
+	}
 }
 
 // 维度→层级：device_group 维度看组级水位。
@@ -164,6 +313,7 @@ func TestQueryAndConvert_ContinuousDeviceGroupUsesGroupWatermark(t *testing.T) {
 
 	assert.Equal(t, aggregator.WatermarkLevelGroup, wm.lastLevel, "device_group 维度应读组级水位")
 	assert.True(t, aggr.lastReq.StartTime.Equal(groupBucket), "目标桶应=组级水位 %v", groupBucket)
+	assert.True(t, aggr.lastReq.EndTime.Equal(groupBucket.Add(time.Hour)), "目标窗口结束应=下一小时桶")
 }
 
 // 维度→层级：device/band/network/product/aggregate_group 维度均看设备级水位。
@@ -192,6 +342,7 @@ func TestQueryAndConvert_ContinuousNonGroupDimsUseDeviceWatermark(t *testing.T) 
 
 			assert.Equal(t, aggregator.WatermarkLevelDevice, wm.lastLevel, "%s 维度应读设备级水位", dim)
 			assert.True(t, aggr.lastReq.StartTime.Equal(devBucket), "%s 目标桶应=设备级水位 %v", dim, devBucket)
+			assert.True(t, aggr.lastReq.EndTime.Equal(devBucket.Add(time.Hour)), "%s 目标窗口结束应=下一小时桶", dim)
 		})
 	}
 }

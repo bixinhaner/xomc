@@ -3,6 +3,8 @@ package appconfig
 import (
 	"fmt"
 	"strings"
+
+	"github.com/minio/minio-go/v7/pkg/s3utils"
 )
 
 // Validatable is implemented by config types that support self-validation.
@@ -42,7 +44,13 @@ func (c *AppConfig) Validate() error {
 	if err := c.ParamRegistry.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
+	if err := c.ParamSync.validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
 	if err := c.Notification.validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
+	if err := c.MinIO.Buckets.validateConfigBackup(); err != nil {
 		errs = append(errs, err.Error())
 	}
 
@@ -75,11 +83,17 @@ func (c *ACSConfig) Validate() error {
 	if err := c.Metrics.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
+	if err := c.ParamSync.validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
 	if c.Session.Timeout > 0 && c.Session.MaxConcurrent <= 0 {
 		errs = append(errs, "session.max_concurrent must be > 0 when session is configured")
 	}
 	if c.Auth.Mode != "" && c.Auth.Mode != "digest" && c.Auth.Mode != "basic" && c.Auth.Mode != "none" {
 		errs = append(errs, fmt.Sprintf("auth.mode must be digest, basic, or none, got %q", c.Auth.Mode))
+	}
+	if err := c.MinIO.Buckets.validateConfigBackup(); err != nil {
+		errs = append(errs, err.Error())
 	}
 
 	if len(errs) > 0 {
@@ -107,9 +121,25 @@ func (c *WorkerConfig) Validate() error {
 	if err := c.Metrics.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
+	if err := c.ParamSync.validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
+	if err := c.MinIO.Buckets.validateConfigBackup(); err != nil {
+		errs = append(errs, err.Error())
+	}
 
 	if len(errs) > 0 {
 		return fmt.Errorf("config validation failed:\n  - %s", strings.Join(errs, "\n  - "))
+	}
+	return nil
+}
+
+func (c BucketConfig) validateConfigBackup() error {
+	if c.ConfigBackup == "" {
+		return nil
+	}
+	if err := s3utils.CheckValidBucketNameStrict(c.ConfigBackup); err != nil {
+		return fmt.Errorf("minio.buckets.config_backup must be a valid S3 bucket name: %w", err)
 	}
 	return nil
 }
@@ -220,6 +250,65 @@ func (c ParamRegistryConfig) validate() error {
 	}
 	if c.DiscoveredTTL < 0 {
 		return fmt.Errorf("param_registry.discovered_ttl must not be negative, got %s", c.DiscoveredTTL)
+	}
+	return nil
+}
+
+func (c ParamSyncConfig) validate() error {
+	if c.RoutingMode != "" {
+		switch c.RoutingMode {
+		case "legacy", "durable_shadow", "durable", "closed":
+		default:
+			return fmt.Errorf("param_sync.routing_mode must be one of legacy, durable_shadow, durable, closed, got %q", c.RoutingMode)
+		}
+	}
+	if c.ManualOfflineMode != "" && c.ManualOfflineMode != "queue" && c.ManualOfflineMode != "reject" {
+		return fmt.Errorf("param_sync.manual_offline_mode must be queue or reject, got %q", c.ManualOfflineMode)
+	}
+	if c.CanaryPercent < 0 || c.CanaryPercent > 100 {
+		return fmt.Errorf("param_sync.canary_percent must be between 0 and 100, got %d", c.CanaryPercent)
+	}
+	if c.ResultConsumerShardCount < 0 {
+		return fmt.Errorf("param_sync.result_consumer_shard_count must not be negative, got %d", c.ResultConsumerShardCount)
+	}
+	if c.ResultConsumerQueueDepth < 0 {
+		return fmt.Errorf("param_sync.result_consumer_queue_depth must not be negative, got %d", c.ResultConsumerQueueDepth)
+	}
+	if c.ResultConsumerPullBatchSize < 0 {
+		return fmt.Errorf("param_sync.result_consumer_pull_batch_size must not be negative, got %d", c.ResultConsumerPullBatchSize)
+	}
+	if c.ResultConsumerPullConcurrency < 0 {
+		return fmt.Errorf("param_sync.result_consumer_pull_concurrency must not be negative, got %d", c.ResultConsumerPullConcurrency)
+	}
+	if c.ResultConsumerAckWait < 0 {
+		return fmt.Errorf("param_sync.result_consumer_ack_wait must not be negative, got %s", c.ResultConsumerAckWait)
+	}
+	if c.ResultConsumerMaxAckPending < 0 {
+		return fmt.Errorf("param_sync.result_consumer_max_ack_pending must not be negative, got %d", c.ResultConsumerMaxAckPending)
+	}
+	if c.RecoveryRunLimit < 0 {
+		return fmt.Errorf("param_sync.recovery_run_limit must not be negative, got %d", c.RecoveryRunLimit)
+	}
+	if c.RecoveryTaskLimitPerRun < 0 {
+		return fmt.Errorf("param_sync.recovery_task_limit_per_run must not be negative, got %d", c.RecoveryTaskLimitPerRun)
+	}
+	if c.RecoveryTaskBudget < 0 {
+		return fmt.Errorf("param_sync.recovery_task_budget must not be negative, got %d", c.RecoveryTaskBudget)
+	}
+	if !c.RunEnabled {
+		if c.ResultConsumerEnabled || c.StagingEnabled || c.CanaryPercent != 0 {
+			return fmt.Errorf("param_sync consumer, staging, and canary settings require run_enabled=true")
+		}
+		return nil
+	}
+	if !c.ResultConsumerEnabled {
+		return fmt.Errorf("param_sync.result_consumer_enabled must be true when run_enabled=true")
+	}
+	if !c.StagingEnabled {
+		return fmt.Errorf("param_sync.staging_enabled must be true when run_enabled=true")
+	}
+	if c.CanaryPercent <= 0 {
+		return fmt.Errorf("param_sync.canary_percent must be greater than 0 when run_enabled=true")
 	}
 	return nil
 }

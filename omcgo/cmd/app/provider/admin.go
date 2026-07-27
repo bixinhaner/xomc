@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/admin/loginpwd"
 	"github.com/omcgo/omcgo/internal/agentconfig"
@@ -39,7 +40,8 @@ func initAdminModule(c *Container) error {
 	adminService := admin.NewAdminService(userRepo, roleRepo, menuRepo, auditRepo, jwtService, logger)
 	adminService.SetTokenRevoker(tokenRevoker)
 	// PRD §10 DoD：失效失败计数器 omc_perm_cache_invalidate_failed_total。
-	adminService.SetMetrics(admin.NewAdminMetrics(c.MetricsReg))
+	adminMetrics := admin.NewAdminMetrics(c.MetricsReg)
+	adminService.SetMetrics(adminMetrics)
 	adminHandler := admin.NewHandler(adminService, logger)
 
 	// 共享 SecurityPolicy 实例 — sys_configs (category='security') 全部字段
@@ -169,6 +171,21 @@ func initAdminModule(c *Container) error {
 	// System config module
 	sysConfigRepo := admin.NewPgSysConfigRepository(c.PgPool)
 	sysConfigService := admin.NewSysConfigService(sysConfigRepo)
+	sysConfigService.SetApplyObserver(func(observation admin.ConfigApplyObservation) {
+		adminMetrics.ObserveConfigApply(observation)
+		fields := []zap.Field{
+			zap.String("batch_id", observation.BatchID.String()),
+			zap.String("category", observation.Category),
+			zap.String("target", observation.Target),
+			zap.Int("attempts", observation.Attempts),
+			zap.String("result", observation.Result),
+		}
+		if observation.Err != nil {
+			logger.Error("system config apply attempt failed", append(fields, zap.Error(observation.Err))...)
+			return
+		}
+		logger.Info("system config apply attempt completed", fields...)
+	})
 	sysConfigHandler := admin.NewSysConfigHandler(sysConfigService)
 	agentConfigHTTPClient := &http.Client{Timeout: 10 * time.Second}
 	agentConfigService := agentconfig.NewService(sysConfigRepo, sysConfigService, agentConfigHTTPClient, logger)
@@ -203,18 +220,17 @@ func initAdminModule(c *Container) error {
 	})
 	// issue #649：注册安全设置类 BatchUpsert 前置校验器（含 defaultPasswd 强度校验）。
 	admin.RegisterSecurityValidators(sysConfigService, securityPolicy)
-	if c.EventBus != nil {
-		sysConfigService.RegisterSavedHook(func(ctx context.Context, category string) {
-			evt, err := event.NewEvent(event.SubjectSysConfigSaved, event.SysConfigSavedPayload{Category: category})
-			if err != nil {
-				logger.Warn("build sys config saved event", zap.String("category", category), zap.Error(err))
-				return
-			}
-			if err := c.EventBus.Publish(ctx, event.SubjectSysConfigSaved, evt); err != nil {
-				logger.Warn("publish sys config saved event", zap.String("category", category), zap.Error(err))
-			}
-		})
-	}
+	// ACS 上传/下发地址会直接下发到设备；保存前校验 HTTP(S) URL 与安全路径。
+	// 运营商生产网普遍使用私网地址，可达性由实际基站网络拓扑保证，不能按 IP 类型阻断。
+	sysConfigService.RegisterValidator(transfercfg.Category, transfercfg.KeyUploadBaseURL, transfercfg.ValidateBaseURL)
+	sysConfigService.RegisterValidator(transfercfg.Category, transfercfg.KeyDownloadBaseURL, transfercfg.ValidateBaseURL)
+	sysConfigService.RegisterValidator(transfercfg.Category, transfercfg.KeyUploadPath, transfercfg.ValidateServicePath)
+	sysConfigService.RegisterValidator(transfercfg.Category, transfercfg.KeyDownloadPath, transfercfg.ValidateServicePath)
+	sysConfigService.RegisterApplyHandler(
+		transfercfg.Category,
+		"acs_transfer_event_delivery",
+		newACSConfigDeliveryHandler(c.EventBus),
+	)
 
 	// 暴露到 Container 让其他模块（如 provision.PeriodicSyncPolicy）也能挂 hook。
 	c.SysConfigSvc = sysConfigService
@@ -231,11 +247,13 @@ func initAdminModule(c *Container) error {
 	// API Endpoint module
 	apiEndpointRepo := admin.NewPgApiEndpointRepository(c.PgPool)
 	apiEndpointService := admin.NewApiEndpointService(apiEndpointRepo, logger)
+	apiEndpointService.SetBuiltInPermissionReconciler(roleRepo)
 	adminHandler.SetApiEndpointService(apiEndpointService)
 
 	// Store handlers for route registration
 	c.adminHandlerDeps = &adminHandlerDeps{
 		adminHandler:       adminHandler,
+		apiEndpointService: apiEndpointService,
 		apiKeyHandler:      apiKeyHandler,
 		dictHandler:        dictHandler,
 		sysConfigHandler:   sysConfigHandler,
@@ -254,6 +272,27 @@ func initAdminModule(c *Container) error {
 
 	logger.Info("admin/RBAC module initialized")
 	return nil
+}
+
+func newACSConfigDeliveryHandler(bus event.EventBus) admin.ConfigApplyHandler {
+	return func(ctx context.Context, work admin.ConfigApplyWork) (map[string]any, error) {
+		if bus == nil {
+			return nil, fmt.Errorf("publish ACS transfer config event: event bus is unavailable")
+		}
+		payload := event.SysConfigSavedPayload{
+			Category:      transfercfg.Category,
+			BatchID:       work.Batch.ID,
+			ConfigVersion: work.Batch.ConfigVersion,
+		}
+		evt, err := event.NewEvent(event.SubjectSysConfigSaved, payload)
+		if err != nil {
+			return nil, fmt.Errorf("build ACS transfer config event: %w", err)
+		}
+		if err := bus.Publish(ctx, event.SubjectSysConfigSaved, evt); err != nil {
+			return nil, fmt.Errorf("publish ACS transfer config event: %w", err)
+		}
+		return map[string]any{"delivery": "published", "event_id": evt.ID}, nil
+	}
 }
 
 // roleAffectedQueryAdapter 把 *admin.PgRoleRepository.ListRolesByGroupIDs 的
@@ -276,6 +315,7 @@ func (a *roleAffectedQueryAdapter) ListRolesByGroupIDs(ctx context.Context, grou
 
 type adminHandlerDeps struct {
 	adminHandler       *admin.Handler
+	apiEndpointService apiEndpointSyncer
 	apiKeyHandler      *admin.APIKeyHandler
 	dictHandler        *admin.DictionaryHandler
 	sysConfigHandler   *admin.SysConfigHandler

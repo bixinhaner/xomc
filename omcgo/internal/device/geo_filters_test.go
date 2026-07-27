@@ -11,11 +11,8 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
-// Issue #490 回归：DefaultLevel2GroupID（「未分组设备」伪节点）必须在 service
-// 层被剥离为 includeUngrouped 分支，repository 才能用 NOT EXISTS 子查询命中真正
-// 没有 device_group_members 行的设备。同样的 group_ids 字符串列表里可能混入空串
-// 与真实 UUID，本测试覆盖所有组合，防止 repository 收到 "" 走 dg.id IN ('')
-// 的退化语义。
+// 默认 L2 组是一个真实分组 ID；只有空字符串用于兼容历史无归属数据兜底。
+// 本测试防止 repository 收到 "" 走 dg.id IN (”) 的退化语义。
 func TestSplitGeoGroupIDs(t *testing.T) {
 	tests := []struct {
 		name             string
@@ -36,10 +33,10 @@ func TestSplitGeoGroupIDs(t *testing.T) {
 			wantIncludeUngro: false,
 		},
 		{
-			name:             "仅未分组伪节点：includeUngrouped=true 真实 ID 为 nil",
+			name:             "默认组 ID 保留为真实分组",
 			in:               []string{global.DefaultLevel2GroupID},
-			wantRealIDs:      nil,
-			wantIncludeUngro: true,
+			wantRealIDs:      []string{global.DefaultLevel2GroupID},
+			wantIncludeUngro: false,
 		},
 		{
 			name:             "仅真实分组",
@@ -48,7 +45,7 @@ func TestSplitGeoGroupIDs(t *testing.T) {
 			wantIncludeUngro: false,
 		},
 		{
-			name: "真实分组 + 未分组伪节点混合：分流",
+			name: "真实分组 + 默认组混合：都保留为真实分组",
 			in: []string{
 				"4e04dc11-aaaa-bbbb-cccc-000000000001",
 				global.DefaultLevel2GroupID,
@@ -56,27 +53,28 @@ func TestSplitGeoGroupIDs(t *testing.T) {
 			},
 			wantRealIDs: []string{
 				"4e04dc11-aaaa-bbbb-cccc-000000000001",
+				global.DefaultLevel2GroupID,
 				"4e04dc11-aaaa-bbbb-cccc-000000000002",
 			},
-			wantIncludeUngro: true,
+			wantIncludeUngro: false,
 		},
 		{
-			name:             "空字符串必须被丢弃：避免 dg.id IN ('') 退化",
+			name:             "空字符串转历史无归属兜底：避免 dg.id IN ('') 退化",
 			in:               []string{"", "4e04dc11-aaaa-bbbb-cccc-000000000001", ""},
 			wantRealIDs:      []string{"4e04dc11-aaaa-bbbb-cccc-000000000001"},
-			wantIncludeUngro: false,
+			wantIncludeUngro: true,
 		},
 		{
-			name:             "全是空字符串：等价于无过滤",
+			name:             "全是空字符串：历史无归属兜底",
 			in:               []string{"", ""},
 			wantRealIDs:      nil,
-			wantIncludeUngro: false,
+			wantIncludeUngro: true,
 		},
 		{
-			name:             "重复的未分组伪节点：只置一次 includeUngrouped",
+			name:             "重复的默认组 ID：仍按真实分组传入",
 			in:               []string{global.DefaultLevel2GroupID, global.DefaultLevel2GroupID},
-			wantRealIDs:      nil,
-			wantIncludeUngro: true,
+			wantRealIDs:      []string{global.DefaultLevel2GroupID, global.DefaultLevel2GroupID},
+			wantIncludeUngro: false,
 		},
 	}
 

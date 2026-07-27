@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/omcgo/omcgo/internal/acs/transfercfg"
+	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/pkg/soap"
 )
 
@@ -55,6 +56,8 @@ func NewDispatcher(cfgs ...DispatcherConfig) *Dispatcher {
 	d.Register("Upload", &UploadHandler{})
 	d.Register("Reboot", &RebootHandler{})
 	d.Register("FactoryReset", &FactoryResetHandler{})
+	d.Register("X_BAICELLS_COM_PasswordReset", &ResetLMTPasswordHandler{})
+	d.Register("X_COMMON_COM_PasswordReset", &ResetLMTPasswordHandler{})
 	d.Register("GetParameterAttributes", &GetParameterAttributesHandler{})
 	d.Register("SetParameterAttributes", &SetParameterAttributesHandler{})
 	d.Register("GetRPCMethods", &GetRPCMethodsHandler{})
@@ -200,9 +203,22 @@ func (h *DownloadHandler) BuildRequest(cmd *Command) ([]byte, error) {
 	// Username / Password 不再自动从 transfercfg.Download 注入——产品线要求 Download
 	// 不走 HTTP Basic Auth（与 Upload 对齐），CPE 拿到的 <cwmp:Username></cwmp:Username>
 	// 应该是空标签。Params.URL 上层若已显式塞凭据走透传；空字符串则渲染成空标签。
+	params.URL = appconfig.NormalizeConfigBackupReference(params.URL)
 	current := h.currentSettings()
 	if current.BaseURL != "" && params.URL != "" && !strings.Contains(params.URL, "://") {
-		params.URL = strings.TrimRight(current.BaseURL, "/") + current.Path + "/" + params.URL
+		servicePath := current.Path
+		if servicePath == "" {
+			servicePath = "/smallcell/FileDownloadService"
+		}
+		objectPath := strings.Trim(params.URL, "/")
+		if objectPath == "" {
+			return nil, fmt.Errorf("build Download URL: object path is required")
+		}
+		builtURL, err := transfercfg.BuildURL(current.BaseURL, servicePath, strings.Split(objectPath, "/"), nil)
+		if err != nil {
+			return nil, fmt.Errorf("build Download URL: %w", err)
+		}
+		params.URL = builtURL
 	}
 
 	return soap.RenderResponse(soap.DownloadTmpl, params)
@@ -244,6 +260,13 @@ type FactoryResetHandler struct{}
 func (h *FactoryResetHandler) BuildRequest(cmd *Command) ([]byte, error) {
 	data := soap.FactoryResetData{ID: cmd.CWMPID}
 	return soap.RenderResponse(soap.FactoryResetTmpl, data)
+}
+
+type ResetLMTPasswordHandler struct{}
+
+func (h *ResetLMTPasswordHandler) BuildRequest(cmd *Command) ([]byte, error) {
+	data := soap.ResetLMTPasswordData{ID: cmd.CWMPID, Method: cmd.Method, CommandKey: cmd.CommandKey}
+	return soap.RenderResponse(soap.ResetLMTPasswordTmpl, data)
 }
 
 // GetRPCMethodsHandler 处理 GetRPCMethods RPC（TR-069 §A.3.1.2）。

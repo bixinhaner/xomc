@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from 'react';
-import { Alert, Button, Card, Col, Form, Input, Row, Select, Space, Spin, Table, Tag, Tooltip, Typography, message, notification } from 'antd';
+import { Alert, AutoComplete, Button, Card, Checkbox, Col, Form, Input, Row, Select, Space, Spin, Switch, Table, Tag, Tooltip, Typography, message, notification } from 'antd';
 import type { FormInstance } from 'antd';
 import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, DeleteOutlined, PlusOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { useParameterSchema, useSearchParameters, useUpdateParameters } from '@core/hooks/api/useDeviceParameters';
+import { deviceParameterApi } from '@core/services/api/deviceParameterApi';
 import { useDeviceTaskStatus } from '@core/hooks/api/useDeviceTask';
 import { notificationKeys } from '@core/hooks/api/useNotificationCenter';
-import { useRenameDevice } from '@core/hooks/api/useDevices';
-import { useDeviceNameSyncMode } from '@core/hooks/api/useDeviceNameSyncMode';
 import { getTimezoneAliasOptions, mapTimezoneAliasToDisplay } from '@core/utils/timezoneAliasConfig';
 import {
   feedbackKey,
@@ -21,8 +20,13 @@ import {
   applyInstanceContext,
   getEffectiveEnumMeta,
   getFeedbackScopeContext,
+  isBscCodecSupportParam,
   localizeEnumLabel,
+  normalizeBscCodecSupportValue,
+  parseQuickSettingsMultiCheckboxValue,
   resolveQuickSettingsParameterType,
+  serializeBscCodecSupportValue,
+  serializeQuickSettingsMultiCheckboxValue,
   validateMmeIp,
   validateMmeIpPlmnLimit,
   validateMmeIpPlmnRows,
@@ -32,13 +36,59 @@ import {
 } from './validators';
 import { inferDeviceTimeMode, isNrNetworkType, mapDeviceTimeModeLabel } from './deviceTimeMode';
 import { formatDeviceFaultBrief } from './MultiInstanceTable';
+import {
+  parsePlmnList,
+  serializePlmnList,
+  validatePlmnList,
+  type PlmnListValidationError,
+  type PlmnRow,
+} from './plmnList';
+import {
+  canApplySubmittedReadback,
+  ParameterReadbackTimeoutError,
+  waitForExpectedParameterValues,
+} from './parameterReadback';
 import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
 const ERROR_FEEDBACK_DURATION_SECONDS = 2;
 
-// FAPService.1 HNBName 标准路径：命中此 path 的字段走 rename 接口（不走普通 SPV 下发）
-const HNB_NAME_PATH = 'Device.Services.FAPService.1.AccessMgmt.LTE.HNBName';
+const BM_GSM_CELL_OP_STATE_PATTERN = /^Device\.Services\.GsmBTSCellDT\.\d+\.OpState$/;
+const BITMASK_SELECT_PATHS = new Set([
+  'Device.FAP.Synchronization.PpsTimeMode',
+  'Device.FAP.GNSS.SyncSource',
+]);
+const BM_PPS_TIME_MODE_PATH = 'Device.FAP.Synchronization.PpsTimeMode';
+const BM_GNSS_SYNC_SOURCE_PATH = 'Device.FAP.GNSS.SyncSource';
+const BM_PTP_CONFIG_PREFIX = 'Device.FAP.PTP1588.';
+const BM_GNSS_SYNC_SOURCE_BITS = {
+  GPS: '1',
+  GLONASS: '2',
+  GALILEO: '4',
+  BEIDOU: '8',
+  QZSS: '16',
+} as const;
+const BM_GNSS_EXCLUSIVE_BITS = new Set<string>([
+  BM_GNSS_SYNC_SOURCE_BITS.GLONASS,
+  BM_GNSS_SYNC_SOURCE_BITS.BEIDOU,
+  BM_GNSS_SYNC_SOURCE_BITS.GALILEO,
+]);
+const GNB_GPS_SYNC_SOURCE_PATH = 'Device.FAP.GPS.SyncSource';
+const GNB_GNSS_SYNC_SOURCE_VALUES = {
+  GPS: 'GPS',
+  GLONASS: 'GLONASS',
+  GALILEO: 'GALILEO',
+  BEIDOU: 'BEIDOU',
+  QZSS: 'QZSS',
+} as const;
+const GNB_GNSS_EXCLUSIVE_VALUES = new Set<string>([
+  GNB_GNSS_SYNC_SOURCE_VALUES.GLONASS,
+  GNB_GNSS_SYNC_SOURCE_VALUES.BEIDOU,
+  GNB_GNSS_SYNC_SOURCE_VALUES.GALILEO,
+]);
+const GNB_FORCED_SYNC_PATH = 'Device.DeviceInfo.iForcedSyncControlSwitch';
+const GNB_SYNC_MODE_GNSS_VALUES = new Set(['GPS_PPS', 'LOCAL_CLOCK_HOLDOVER_GPS_PPS', 'GPS_AND_PTP', '1']);
+const GNB_SYNC_MODE_PTP_VALUES = new Set(['1588_PPS', 'GPS_AND_PTP', '2']);
 
 type TFn = (id: string, values?: Record<string, string | number>) => string;
 
@@ -148,35 +198,143 @@ function FrequencyDisplay({ form, locale }: { form: FormInstance; locale: 'zh-CN
   );
 }
 
-// BoundRuRouteIndexDisplay: BM GSM 专属。监听表单 GsmCellWithRuRelation,
-// 用其值作为 RU 实例 idx,从外部传入的 ruRouteByIdx 中取出 RouteIndex 显示。
-function BoundRuRouteIndexDisplay({
+function TransmissionPowerInput({
+  countField,
+  powerField,
+  disabled,
+  placeholder,
+}: {
+  countField: string;
+  powerField: string;
+  disabled: boolean;
+  placeholder?: string;
+}) {
+  return (
+    <Space.Compact style={{ width: '100%' }}>
+      <Form.Item name={countField} noStyle>
+        <Input disabled={disabled} suffix="*" style={{ width: 72 }} />
+      </Form.Item>
+      <Form.Item name={powerField} noStyle>
+        <Input disabled={disabled} placeholder={placeholder} style={{ width: '100%' }} />
+      </Form.Item>
+    </Space.Compact>
+  );
+}
+
+function GsmRuRelationInput({
+  error,
+  ruRouteItemByIdx,
+}: {
+  error?: string;
+  ruRouteItemByIdx: Map<string, ParameterSchemaItem>;
+}) {
+  const t = useT();
+  const routeOptions = useMemo(() => (
+    Array.from(ruRouteItemByIdx.entries())
+      .sort(([a], [b]) => Number(a) - Number(b))
+      .map(([idx, item]) => {
+        const reportedValue = item.currentValue == null ? '' : String(item.currentValue).trim();
+        return {
+          label: reportedValue ? `RU ${idx} -> ${reportedValue}` : `RU ${idx} -> ${t('device.cell.notReported')}`,
+          value: reportedValue,
+        };
+      })
+      .filter((o) => o.value)
+  ), [ruRouteItemByIdx, t]);
+  return (
+    <Col span={8}>
+      <Form.Item
+        label="Route Index (绑定 RU)"
+        name="GsmCellWithRuRelation"
+        validateStatus={error ? 'error' : undefined}
+        help={error}
+      >
+        <AutoComplete
+          options={routeOptions}
+          optionFilterProp="label"
+          placeholder={t('device.cell.notReported')}
+        />
+      </Form.Item>
+    </Col>
+  );
+}
+
+// RouteIndexInput: BM LTE 小区专属。写回自身 LteCellWithRuList。
+// 输入框支持从 RU RouteIndex 候选选择,也支持用户直接手动输入。
+function RouteIndexInput({
   form,
-  ruRouteByIdx,
+  ruRouteItemByIdx,
   locale,
+  fieldName,
+  boundRuFieldName,
+  currentRuIdx,
+  disabled,
+  error,
 }: {
   form: FormInstance;
-  ruRouteByIdx: Map<string, string>;
+  ruRouteItemByIdx: Map<string, ParameterSchemaItem>;
   locale: 'zh-CN' | 'en-US';
+  fieldName: string;
+  boundRuFieldName?: string;
+  currentRuIdx?: string;
+  disabled: boolean;
+  error?: string;
 }) {
   void locale;
   const t = useT();
-  const ruRel = Form.useWatch('GsmCellWithRuRelation', form);
-  const ruIdx = ruRel == null ? '' : String(ruRel).trim();
-  const routeIndex = ruIdx && ruRouteByIdx.has(ruIdx) ? ruRouteByIdx.get(ruIdx)! : '-';
+  const lastAutoRouteValueRef = useRef('');
+  const watchedRuRel = Form.useWatch(boundRuFieldName ?? '__unusedRouteIndexBoundRu', form);
+  const ruIdx = currentRuIdx ?? (watchedRuRel == null ? '' : String(watchedRuRel).trim());
+  const routeItem = ruIdx ? ruRouteItemByIdx.get(ruIdx) : undefined;
+  const routeValue = (() => {
+    const reportedValue = routeItem?.currentValue == null ? '' : String(routeItem.currentValue).trim();
+    return reportedValue;
+  })();
+  const routeOptions = useMemo(() => (
+    Array.from(ruRouteItemByIdx.entries())
+      .sort(([a], [b]) => Number(a) - Number(b))
+      .map(([idx, item]) => {
+        const reportedValue = item.currentValue == null ? '' : String(item.currentValue).trim();
+        const value = reportedValue;
+        return {
+          label: value ? `RU ${idx} -> ${value}` : `RU ${idx} -> ${t('device.cell.notReported')}`,
+          value,
+        };
+      })
+      .filter((o) => o.value)
+  ), [boundRuFieldName, ruRouteItemByIdx, t]);
   const labelText = t('device.cell.routeIndexBoundRu');
-  const display = ruIdx ? `RU ${ruIdx} → ${routeIndex}` : '-';
+  useEffect(() => {
+    if (!boundRuFieldName) return;
+    const currentValue = form.getFieldValue(fieldName);
+    const currentText = currentValue == null ? '' : String(currentValue);
+    const lastAutoValue = lastAutoRouteValueRef.current;
+    if (currentText === '' || currentText === lastAutoValue) {
+      form.setFieldValue(fieldName, routeValue);
+      lastAutoRouteValueRef.current = routeValue;
+    }
+  }, [boundRuFieldName, fieldName, form, routeValue]);
+
+  const writable = !disabled && (boundRuFieldName ? Boolean(ruIdx) : true);
   return (
     <Col span={8}>
       <Form.Item
         label={
           <Space size={4}>
             <span>{labelText}</span>
-            <Text type="secondary" style={{ fontSize: 12 }}>{t('device.cell.readonly')}</Text>
+            {ruIdx && <Text type="secondary" style={{ fontSize: 12 }}>{`RU ${ruIdx}`}</Text>}
+            {!writable && <Text type="secondary" style={{ fontSize: 12 }}>{t('device.cell.readonly')}</Text>}
           </Space>
         }
+        name={fieldName}
+        validateStatus={error ? 'error' : undefined}
+        help={error}
       >
-        <Input value={display} disabled />
+        <AutoComplete
+          disabled={!writable}
+          options={routeOptions}
+          optionFilterProp="label"
+        />
       </Form.Item>
     </Col>
   );
@@ -255,30 +413,6 @@ function CellIdDerivedDisplay({ form, locale }: { form: FormInstance; locale: 'z
   );
 }
 
-// AntennaPortsAs2T4RDisplay: 由 AntennaPortsCount 派生 2T4R 开关(2 -> OFF, 4 -> ON)。
-function AntennaPortsAs2T4RDisplay({ form, locale }: { form: FormInstance; locale: 'zh-CN' | 'en-US' }) {
-  void locale;
-  const t = useT();
-  const ports = Form.useWatch('AntennaPortsCount', form);
-  const n = Number(ports);
-  const labelText = t('device.cell.switch2T4R');
-  const v = n === 4 ? 'ON' : n === 2 ? 'OFF' : '-';
-  return (
-    <Col span={8}>
-      <Form.Item
-        label={
-          <Space size={4}>
-            <span>{labelText}</span>
-            <Text type="secondary" style={{ fontSize: 12 }}>{t('device.cell.readonly')}</Text>
-          </Space>
-        }
-      >
-        <Input value={v} disabled />
-      </Form.Item>
-    </Col>
-  );
-}
-
 function formatTime(at: number): string {
   const d = new Date(at);
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -287,6 +421,12 @@ function formatTime(at: number): string {
 
 function isNtpServerPath(path: string): boolean {
   return /^Device\.Time\.NTPServer\d+$/.test(path);
+}
+
+function isValidNtpServerValue(raw: unknown): boolean {
+  const value = String(raw ?? '').trim();
+  if (!value) return false;
+  return !['0.0.0.0', '::', '::0', '0:0:0:0:0:0:0:0'].includes(value);
 }
 
 /** T-0146:状态机 Tag 显示规则。 */
@@ -329,6 +469,240 @@ function appendCurrentOptionWithLabel(
   return [{ value: currentValue, label: currentLabel || currentValue }, ...options];
 }
 
+function appendCurrentEnumOption(
+  options: Array<{ value: string; label: string }>,
+  rawValue: unknown,
+  xmlOptions?: Array<{ value: string; label: string }>,
+): Array<{ value: string; label: string }> {
+  const normalized = normalizeEnumValue(rawValue, xmlOptions);
+  if (!normalized || options.some((option) => option.value === normalized)) {
+    return options;
+  }
+  return [{ value: normalized, label: normalized }, ...options];
+}
+
+function isBitmaskSelectPath(path: string): boolean {
+  return BITMASK_SELECT_PATHS.has(path);
+}
+
+function isBmPtpConfigPath(path: string): boolean {
+  return path.startsWith(BM_PTP_CONFIG_PREFIX);
+}
+
+function isGnbPtpConfigPath(path: string): boolean {
+  return path.startsWith(BM_PTP_CONFIG_PREFIX);
+}
+
+function isGnbCommonSyncPath(path: string): boolean {
+  return path === GNB_FORCED_SYNC_PATH;
+}
+
+function isBmGnssSyncSourcePath(path: string): boolean {
+  return path === BM_GNSS_SYNC_SOURCE_PATH;
+}
+
+function isStringMultiSelectPath(path: string): boolean {
+  return path === GNB_GPS_SYNC_SOURCE_PATH;
+}
+
+function normalizeStringMultiSelectValue(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return raw.map((item) => String(item ?? '').trim()).filter(Boolean);
+  }
+  return String(raw ?? '')
+    .split('_')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function serializeStringMultiSelectValue(raw: unknown): string {
+  return normalizeStringMultiSelectValue(raw).join('_');
+}
+
+function isSwitchPath(path: string): boolean {
+  return path === GNB_FORCED_SYNC_PATH || BM_GSM_CELL_OP_STATE_PATTERN.test(path);
+}
+
+function normalizeSwitchValue(raw: unknown): boolean {
+  if (typeof raw === 'boolean') {
+    return raw;
+  }
+  const value = String(raw ?? '').trim().toLowerCase();
+  if (!value) return true;
+  return value === '1' || value === 'true' || value === 'on';
+}
+
+function serializeSwitchValue(raw: unknown): string {
+  return normalizeSwitchValue(raw) ? '1' : '0';
+}
+
+function normalizeSwitchComparableValue(raw: unknown): string {
+  return serializeSwitchValue(raw);
+}
+
+function bitmaskHasBit(raw: unknown, bit: number): boolean {
+  const numeric = Number(String(raw ?? '').trim());
+  return Number.isInteger(numeric) && (numeric & bit) !== 0;
+}
+
+function normalizeBitmaskValue(raw: unknown): string {
+  const numeric = Number(String(raw ?? '').trim());
+  if (!Number.isFinite(numeric) || numeric < 0) return '';
+  return String(numeric);
+}
+
+function normalizeBitmaskBits(raw: unknown, allowedValues: string[]): string[] {
+  const allowed = new Set(allowedValues);
+  if (Array.isArray(raw)) {
+    return raw
+      .map((item) => String(item ?? '').trim())
+      .filter((item, idx, arr) => item && allowed.has(item) && arr.indexOf(item) === idx);
+  }
+
+  const text = String(raw ?? '').trim();
+  if (!text) return [];
+  if (text.includes(',')) {
+    return text
+      .split(',')
+      .map((item) => item.trim())
+      .filter((item, idx, arr) => item && allowed.has(item) && arr.indexOf(item) === idx);
+  }
+
+  const numeric = Number(text);
+  if (!Number.isFinite(numeric) || numeric <= 0) return [];
+  return allowedValues.filter((value) => {
+    const bit = Number(value);
+    return Number.isFinite(bit) && bit > 0 && (numeric & bit) !== 0;
+  });
+}
+
+function isConstrainedGnssSyncSourcePath(path: string): boolean {
+  return path === BM_GNSS_SYNC_SOURCE_PATH || path === GNB_GPS_SYNC_SOURCE_PATH;
+}
+
+function getGnssExclusiveValues(path: string): Set<string> {
+  return path === BM_GNSS_SYNC_SOURCE_PATH ? BM_GNSS_EXCLUSIVE_BITS : GNB_GNSS_EXCLUSIVE_VALUES;
+}
+
+function getGnssQzssValue(path: string): string {
+  return path === BM_GNSS_SYNC_SOURCE_PATH ? BM_GNSS_SYNC_SOURCE_BITS.QZSS : GNB_GNSS_SYNC_SOURCE_VALUES.QZSS;
+}
+
+function normalizeConstrainedGnssSyncSourceValue(raw: unknown, allowedValues: string[], path: string): string[] {
+  return path === BM_GNSS_SYNC_SOURCE_PATH
+    ? normalizeBitmaskBits(raw, allowedValues)
+    : normalizeStringMultiSelectValue(raw).filter((item, idx, arr) => allowedValues.includes(item) && arr.indexOf(item) === idx);
+}
+
+function normalizeConstrainedGnssSyncSourceChange(
+  raw: unknown,
+  previous: string[],
+  allowedValues: string[],
+  path: string,
+): { value: string[]; errorKey?: string } {
+  const allowed = new Set(allowedValues);
+  let value = normalizeConstrainedGnssSyncSourceValue(raw, allowedValues, path);
+  const exclusiveValues = getGnssExclusiveValues(path);
+
+  const exclusive = value.filter((item) => exclusiveValues.has(item));
+  if (exclusive.length > 1) {
+    const addedExclusive = exclusive.filter((item) => !previous.includes(item));
+    const keep = addedExclusive.at(-1) ?? exclusive.at(-1);
+    value = value.filter((item) => !exclusiveValues.has(item) || item === keep);
+  }
+
+  if (value.includes(getGnssQzssValue(path)) && value.length === 1) {
+    return { value: [], errorKey: 'device.cell.syncSourceQzssAlone' };
+  }
+
+  return {
+    value: value.filter((item, idx, arr) => allowed.has(item) && arr.indexOf(item) === idx),
+  };
+}
+
+function buildBitmaskCombinationOptions(
+  values: string[],
+  labels: string[],
+  locale: 'zh-CN' | 'en-US',
+): Array<{ value: string; label: string }> {
+  const baseOptions = values.map((value, idx) => ({
+    value,
+    label: localizeEnumLabel(labels[idx] || value, value, locale),
+  })).filter((option) => {
+    const bit = Number(option.value);
+    return Number.isFinite(bit) && bit > 0;
+  });
+  const options: Array<{ value: string; label: string }> = [];
+  const visit = (start: number, count: number, mask: number, parts: string[]) => {
+    if (parts.length === count) {
+      options.push({ value: String(mask), label: parts.join('+') });
+      return;
+    }
+    for (let i = start; i < baseOptions.length; i += 1) {
+      const option = baseOptions[i];
+      visit(i + 1, count, mask | Number(option.value), [...parts, option.label]);
+    }
+  };
+  for (let count = 1; count <= baseOptions.length; count += 1) {
+    visit(0, count, 0, []);
+  }
+  return options;
+}
+
+function serializeBitmaskValue(raw: unknown): string {
+  const values = Array.isArray(raw) ? raw : raw == null || raw === '' ? [] : [raw];
+  const mask = values.reduce((acc, value) => {
+    const bit = Number(String(value ?? '').trim());
+    return Number.isFinite(bit) && bit > 0 ? acc | bit : acc;
+  }, 0);
+  return String(mask);
+}
+
+function serializeConstrainedGnssSyncSourceValue(raw: unknown, path: string): string {
+  return path === BM_GNSS_SYNC_SOURCE_PATH
+    ? serializeBitmaskValue(raw)
+    : serializeStringMultiSelectValue(raw);
+}
+
+function validateBitmaskValue(value: string, allowedValues: string[], minValue?: number, maxValue?: number): string | null {
+  if (!value) return '请输入值';
+  const numeric = Number(value);
+  if (!Number.isInteger(numeric) || numeric < 0) return '请输入非负整数';
+  if (minValue !== undefined && numeric < minValue) return `最小值为 ${minValue}`;
+  if (maxValue !== undefined && numeric > maxValue) return `最大值为 ${maxValue}`;
+
+  const allowedMask = allowedValues.reduce((acc, raw) => {
+    const bit = Number(String(raw ?? '').trim());
+    return Number.isInteger(bit) && bit > 0 ? acc | bit : acc;
+  }, 0);
+  if (allowedMask <= 0) return null;
+  if (numeric <= 0 || (numeric & ~allowedMask) !== 0) {
+    return `允许的组合: ${allowedValues.join(', ')}`;
+  }
+  return null;
+}
+
+function validateConstrainedGnssSyncSourceValue(value: string, allowedValues: string[], path: string, t: TFn): string | null {
+  const selected = normalizeConstrainedGnssSyncSourceValue(value, allowedValues, path);
+  if (selected.length === 0) return t('device.cell.syncSourceRequired');
+  if (selected.filter((item) => getGnssExclusiveValues(path).has(item)).length > 1) {
+    return t('device.cell.syncSourceExclusive');
+  }
+  if (selected.includes(getGnssQzssValue(path)) && selected.length === 1) {
+    return t('device.cell.syncSourceQzssAlone');
+  }
+  return null;
+}
+
+function formValueEquals(left: unknown, right: unknown): boolean {
+  if (Array.isArray(left) || Array.isArray(right)) {
+    const leftValues = Array.isArray(left) ? left : left == null ? [] : [left];
+    const rightValues = Array.isArray(right) ? right : right == null ? [] : [right];
+    return leftValues.map(String).join(',') === rightValues.map(String).join(',');
+  }
+  return left === right;
+}
+
 function formatTimeZoneDisplay(value: string): string {
   const normalized = String(value ?? '').trim();
   if (!normalized) return '';
@@ -352,7 +726,7 @@ interface BindSelectOption {
 type BindSelectValueMode = 'path' | 'ip';
 
 interface SpecialFieldConfig {
-  kind: 'input' | 'mme-ip-plmn-table' | 'bind-select';
+  kind: 'input' | 'mme-ip-plmn-table' | 'plmn-list-table' | 'bind-select';
   configPath: string;
   displayPath?: string;
   bindValueMode?: BindSelectValueMode;
@@ -375,6 +749,128 @@ interface MmeIpPlmnTableProps {
   disabled?: boolean;
   locale: 'zh-CN' | 'en-US';
   maxRows?: number;
+}
+
+interface PlmnListTableProps {
+  value?: PlmnRow[];
+  onChange?: (value: PlmnRow[]) => void;
+  disabled?: boolean;
+  maxRows?: number;
+}
+
+function isPlmnRows(value: unknown): value is PlmnRow[] {
+  return Array.isArray(value)
+    && value.every((item) => item && typeof item === 'object' && 'plmn' in item);
+}
+
+function toPlmnRows(value: unknown): PlmnRow[] {
+  if (isPlmnRows(value)) {
+    return value.map((row, index) => ({
+      key: row.key || `plmn-${index}`,
+      plmn: String(row.plmn ?? ''),
+    }));
+  }
+  return parsePlmnList(value);
+}
+
+function plmnValidationMessage(
+  error: PlmnListValidationError | null,
+  maxRows: number,
+  t: TFn,
+): string | null {
+  if (error === 'format') return t('device.cell.plmnFormatInvalid');
+  if (error === 'duplicate') return t('device.cell.plmnDuplicate');
+  if (error === 'limit') return t('device.cell.plmnLimitReached', { max: maxRows });
+  return null;
+}
+
+function PlmnListTable({
+  value = [],
+  onChange,
+  disabled = false,
+  maxRows = 6,
+}: PlmnListTableProps) {
+  const t = useT();
+  const rows = isPlmnRows(value) ? value : [];
+  const configuredCount = rows.filter((row) => String(row.plmn ?? '').trim()).length;
+  const maxReached = configuredCount >= maxRows;
+
+  const updateRow = (key: string, plmn: string) => {
+    onChange?.(rows.map((row) => (row.key === key ? { ...row, plmn } : row)));
+  };
+
+  const addRow = () => {
+    if (maxReached) {
+      message.warning(t('device.cell.plmnLimitReached', { max: maxRows }));
+      return;
+    }
+    onChange?.([
+      ...rows,
+      { key: `plmn-${Date.now()}-${rows.length}`, plmn: '' },
+    ]);
+  };
+
+  const columns = [
+    {
+      title: 'PLMN',
+      dataIndex: 'plmn',
+      key: 'plmn',
+      render: (_: unknown, row: PlmnRow) => {
+        const invalid = Boolean(row.plmn.trim()) && !/^\d{5,6}$/.test(row.plmn.trim());
+        return (
+          <Tooltip title={invalid ? t('device.cell.plmnFormatInvalid') : ''}>
+            <Input
+              value={row.plmn}
+              disabled={disabled}
+              status={invalid ? 'error' : undefined}
+              placeholder="46000"
+              onChange={(event) => updateRow(row.key, event.target.value)}
+            />
+          </Tooltip>
+        );
+      },
+    },
+    {
+      title: t('table.operation'),
+      key: 'actions',
+      width: 80,
+      render: (_: unknown, row: PlmnRow) => (
+        <Button
+          danger
+          type="text"
+          icon={<DeleteOutlined />}
+          disabled={disabled}
+          onClick={() => onChange?.(rows.filter((item) => item.key !== row.key))}
+        />
+      ),
+    },
+  ];
+
+  return (
+    <Space orientation="vertical" style={{ width: '100%' }} size={8}>
+      <Table<PlmnRow>
+        size="small"
+        rowKey="key"
+        pagination={false}
+        dataSource={rows}
+        columns={columns}
+      />
+      <Button
+        type="dashed"
+        block
+        icon={<PlusOutlined />}
+        onClick={addRow}
+        disabled={disabled || maxReached}
+      >
+        {t('device.cell.addRow')}
+      </Button>
+      <Alert
+        type={maxReached ? 'warning' : 'info'}
+        showIcon
+        message={t('device.cell.plmnLimitHint', { max: maxRows })}
+      />
+    </Space>
+  );
 }
 
 function normalizeMmeIpPlmnRows(rows: MmeIpPlmnRow[]): MmeIpPlmnRow[] {
@@ -552,6 +1048,13 @@ function buildSpecialFieldConfig(
       forceWritable: true,
     };
   }
+  if (groupId === 'enb-plmn' && paramName === 'ExistPlmnidList') {
+    return {
+      kind: 'plmn-list-table',
+      configPath: applyInstanceContext('Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.ExistPlmnidList', instanceContext),
+      forceWritable: true,
+    };
+  }
   if (groupId === 'gnb-core' && paramName === 'gNBName') {
     return {
       kind: 'input',
@@ -651,14 +1154,13 @@ function findRawValueBySuffix(parameters: DeviceParameter[] | undefined, suffix:
 export default function CellParameterForm({ deviceId, active = true, group, instanceContext, locale, onIpsecControlChange }: CellParameterFormProps) {
   const t = useT();
   const [form] = Form.useForm();
-  const latestLocalEditAtRef = useRef(0);
+  const gnssSyncSourceRef = useRef<string[]>([]);
   const watchedLocalTimeZoneName = Form.useWatch('LocalTimeZoneName', form);
   const watchedIpsecEnable = Form.useWatch('IPSEC_ENABLE', form);
+  const watchedPpsTimeMode = Form.useWatch('PpsTimeMode', form);
   const dlSubCarrierSpacing = Form.useWatch('DLSubCarrierSpacing', form);
   const ulSubCarrierSpacing = Form.useWatch('ULSubCarrierSpacing', form);
   const updateMutation = useUpdateParameters();
-  const renameMutation = useRenameDevice(deviceId);
-  const nameSyncMode = useDeviceNameSyncMode();
   const queryClient = useQueryClient();
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const feedbackScope = useMemo(() => getFeedbackScopeContext(group.id, instanceContext), [group.id, instanceContext]);
@@ -676,15 +1178,27 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
   });
   const setFeedback = useQuickSettingsFeedbackStore((s) => s.setFeedback);
   const patchFeedback = useQuickSettingsFeedbackStore((s) => s.patchFeedback);
-  const clearFeedback = useQuickSettingsFeedbackStore((s) => s.clearFeedback);
   const draft = useQuickSettingsFeedbackStore((s) => s.drafts[fbKey]);
+  const draftRevision = useQuickSettingsFeedbackStore((s) => s.draftRevisions[fbKey] ?? 0);
   const setDraftField = useQuickSettingsFeedbackStore((s) => s.setDraftField);
   const clearDraft = useQuickSettingsFeedbackStore((s) => s.clearDraft);
   const isDeviceTimeGroup = group.id === 'device-time';
+  const isBmSyncSourceGroup = group.id === 'bm-sync-source';
+  const isGnbSyncSourceGroup = group.id === 'gnb-sync-source';
   const preferSchemaCurrentValue = isDeviceTimeGroup
+    || isGnbSyncSourceGroup
     || group.id === 'device-ipsec-control'
+    || group.id === 'enb-plmn'
     || group.id === 'enb-mme'
     || group.id === 'gnb-core';
+  const isEffectiveBitmaskPath = useCallback(
+    (path: string) => !isGnbSyncSourceGroup && isBitmaskSelectPath(path),
+    [isGnbSyncSourceGroup],
+  );
+  const isConstrainedGnssSyncSourceSelectPath = useCallback(
+    (path: string) => (isBmSyncSourceGroup || isGnbSyncSourceGroup) && isConstrainedGnssSyncSourcePath(path),
+    [isBmSyncSourceGroup, isGnbSyncSourceGroup],
+  );
   const effectiveParams = useMemo<QuickSettingsParam[]>(() => {
     if (!isDeviceTimeGroup || group.params.some((param) => param.name === 'Enable')) {
       return group.params;
@@ -717,13 +1231,13 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
   // 注：useParameterSchema 接受 pathPrefix，前缀匹配即可；这里以分组共用前缀粗查再过滤
   // 为简化，取 group 中 standardPath 的公共前缀作 pathPrefix
   const commonPrefix = useMemo(
-    () => (isDeviceTimeGroup ? '' : commonPathPrefix(effectiveParams.map((p) => resolveReadPath(p.standardPath || '')))),
-    [isDeviceTimeGroup, effectiveParams, resolveReadPath],
+    () => (isDeviceTimeGroup || isGnbSyncSourceGroup ? '' : commonPathPrefix(effectiveParams.map((p) => resolveReadPath(p.standardPath || '')))),
+    [isDeviceTimeGroup, isGnbSyncSourceGroup, effectiveParams, resolveReadPath],
   );
   const { data: schemaResp, isLoading: isCommonSchemaLoading, refetch: refetchCommonSchema } = useParameterSchema(
     deviceId,
     commonPrefix,
-    active && !isDeviceTimeGroup,
+    active && !isDeviceTimeGroup && !isGnbSyncSourceGroup,
   );
   const { data: deviceTimeSchemaResp, isLoading: isDeviceTimeSchemaLoading, refetch: refetchDeviceTimeSchema } = useParameterSchema(
     deviceId,
@@ -774,6 +1288,42 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
     200,
     active && group.id === 'device-time',
   );
+  const { data: bmPpsTimeModeParams } = useSearchParameters(
+    deviceId,
+    isBmSyncSourceGroup ? BM_PPS_TIME_MODE_PATH : '',
+    20,
+    active && isBmSyncSourceGroup,
+  );
+  const { data: bmGnssSyncSourceParams } = useSearchParameters(
+    deviceId,
+    isBmSyncSourceGroup ? BM_GNSS_SYNC_SOURCE_PATH : '',
+    20,
+    active && isBmSyncSourceGroup,
+  );
+  const { data: bmPtpConfigParams } = useSearchParameters(
+    deviceId,
+    isBmSyncSourceGroup ? BM_PTP_CONFIG_PREFIX : '',
+    50,
+    active && isBmSyncSourceGroup,
+  );
+  const {
+    data: gnbSyncFapSchemaResp,
+    isLoading: isGnbSyncFapSchemaLoading,
+    refetch: refetchGnbSyncFapSchema,
+  } = useParameterSchema(
+    deviceId,
+    'Device.FAP.',
+    active && isGnbSyncSourceGroup,
+  );
+  const {
+    data: gnbSyncDeviceInfoSchemaResp,
+    isLoading: isGnbSyncDeviceInfoSchemaLoading,
+    refetch: refetchGnbSyncDeviceInfoSchema,
+  } = useParameterSchema(
+    deviceId,
+    'Device.DeviceInfo.',
+    active && isGnbSyncSourceGroup,
+  );
   const { data: ipsecControlParams } = useSearchParameters(
     deviceId,
     group.id === 'device-ipsec-control' ? (effectiveParams[0]?.standardPath || 'IPSEC_ENABLE') : '',
@@ -781,18 +1331,78 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
     active && group.id === 'device-ipsec-control',
   );
   const visibleParams = useMemo(() => {
+    if (isBmSyncSourceGroup) {
+      const ppsValue = watchedPpsTimeMode
+        ?? draft?.PpsTimeMode
+        ?? bmPpsTimeModeParams?.find((item) => item.parameterPath === BM_PPS_TIME_MODE_PATH)?.parameterValue;
+      const showGnssSyncSource = bitmaskHasBit(ppsValue, 1);
+      const showPtpConfig = bitmaskHasBit(ppsValue, 2);
+      return effectiveParams.filter((param) => {
+        const path = param.standardPath || '';
+        if (!showGnssSyncSource && isBmGnssSyncSourcePath(path)) {
+          return false;
+        }
+        if (!showPtpConfig && isBmPtpConfigPath(path)) {
+          return false;
+        }
+        return true;
+      });
+    }
+    if (isGnbSyncSourceGroup) {
+      const modeValue = watchedPpsTimeMode
+        ?? draft?.PpsTimeMode
+        ?? gnbSyncFapSchemaResp?.parameters.find((item) => item.path === BM_PPS_TIME_MODE_PATH)?.currentValue;
+      const mode = String(modeValue ?? '');
+      const showGnssFields = GNB_SYNC_MODE_GNSS_VALUES.has(mode);
+      const showPtpFields = GNB_SYNC_MODE_PTP_VALUES.has(mode);
+      return effectiveParams.filter((param) => {
+        if (param.name === 'PpsTimeMode') {
+          return true;
+        }
+        const path = resolveReadPath(param.standardPath || '');
+        if (path === GNB_GPS_SYNC_SOURCE_PATH) {
+          return showGnssFields;
+        }
+        if (isGnbPtpConfigPath(path)) {
+          return showPtpFields;
+        }
+        if (isGnbCommonSyncPath(path)) {
+          return showGnssFields || showPtpFields;
+        }
+        return false;
+      });
+    }
     if (!isDeviceTimeGroup || deviceTimeParams === undefined) {
       return effectiveParams;
     }
-    const availableTimePaths = new Set(deviceTimeParams.map((item) => item.parameterPath));
+    if (deviceTimeParams.length === 0) {
+      return effectiveParams;
+    }
+    const availableTimeParams = new Map(deviceTimeParams.map((item) => [item.parameterPath, item.parameterValue]));
     return effectiveParams.filter((param) => {
       const path = param.standardPath || '';
       if (!isNtpServerPath(path)) {
         return true;
       }
-      return availableTimePaths.has(path);
+      return isValidNtpServerValue(availableTimeParams.get(path));
     });
-  }, [deviceTimeParams, effectiveParams, isDeviceTimeGroup]);
+  }, [bmPpsTimeModeParams, deviceTimeParams, draft, effectiveParams, gnbSyncFapSchemaResp, isBmSyncSourceGroup, isDeviceTimeGroup, isGnbSyncSourceGroup, watchedPpsTimeMode, resolveReadPath]);
+  const visibleParamNameSet = useMemo(
+    () => new Set(visibleParams.map((param) => param.name)),
+    [visibleParams],
+  );
+  const isGsmCell = group.id === 'gsm-cell';
+  const isLteCellGroup = group.id === 'enb-cell';
+  const hasGsmRuRelation = visibleParamNameSet.has('GsmCellWithRuRelation');
+  const hasGsmTxAntNum = visibleParamNameSet.has('GsmTxAntNum');
+  const hasLteRuRouteIndex = visibleParamNameSet.has('LteCellWithRuList');
+  const hasLteAntennaPortsCount = visibleParamNameSet.has('AntennaPortsCount');
+  const isBmGsmCell = isGsmCell && hasGsmRuRelation;
+  const isBmLteCell = isLteCellGroup && hasLteRuRouteIndex;
+  const isHiddenTransmissionCountParam = useCallback((name: string) => (
+    (isBmGsmCell && hasGsmTxAntNum && name === 'GsmTxAntNum') ||
+    (isBmLteCell && hasLteAntennaPortsCount && name === 'AntennaPortsCount')
+  ), [hasGsmTxAntNum, hasLteAntennaPortsCount, isBmGsmCell, isBmLteCell]);
   // XML 驱动的 extraInfoPath:在某个字段下方以小字展示另一个只读参数当前值(范围提示)。
   // 由 quicksettings XML 在 <param> 上声明 extraInfoPath="Device.X.Y",前端按该路径拉 schema,
   // 把 currentValue 按 [lo ~ hi] 格式渲染到对应 Form.Item 的 extra 槽位。
@@ -842,13 +1452,12 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
     return m;
   }, [visibleParams, extraInfoValueByPath]);
 
-  // BM GSM 专属:并行拉 RU 节点 schema,用于在 gsm-cell 表单中展示"绑定 RU 的 Route Index"。
+  // BM 小区专属:并行拉 RU 节点 schema,用于 GSM/LTE Route Index 候选。
   // 拉取与主 schema 解耦,避免污染 commonPrefix 退化成 Device. 触发全量拉取。
-  const isGsmCell = group.id === 'gsm-cell';
   const { data: ruSchemaResp } = useParameterSchema(
     deviceId,
     'Device.DeviceInfo.RU.',
-    active && isGsmCell,
+    active && (isBmGsmCell || isBmLteCell),
   );
   const effectiveSchemaParameters = useMemo(
     () => (isDeviceTimeGroup
@@ -856,23 +1465,31 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         ...(deviceTimeSchemaResp?.parameters ?? []),
         ...(managementServerSchemaResp?.parameters ?? []),
       ]
+      : isGnbSyncSourceGroup
+      ? [
+        ...(gnbSyncFapSchemaResp?.parameters ?? []),
+        ...(gnbSyncDeviceInfoSchemaResp?.parameters ?? []),
+      ]
       : (schemaResp?.parameters ?? [])),
-    [isDeviceTimeGroup, deviceTimeSchemaResp, managementServerSchemaResp, schemaResp],
+    [isDeviceTimeGroup, isGnbSyncSourceGroup, deviceTimeSchemaResp, managementServerSchemaResp, gnbSyncFapSchemaResp, gnbSyncDeviceInfoSchemaResp, schemaResp],
   );
   const isSchemaLoading = isDeviceTimeGroup
     ? (isDeviceTimeSchemaLoading || isManagementServerSchemaLoading)
+    : isGnbSyncSourceGroup
+    ? (isGnbSyncFapSchemaLoading || isGnbSyncDeviceInfoSchemaLoading)
     : isCommonSchemaLoading;
   const hasSchemaData = isDeviceTimeGroup
     ? Boolean(deviceTimeSchemaResp && managementServerSchemaResp)
+    : isGnbSyncSourceGroup
+    ? Boolean(gnbSyncFapSchemaResp && gnbSyncDeviceInfoSchemaResp)
     : Boolean(schemaResp);
-  const ruRouteByIdx = useMemo(() => {
-    const map = new Map<string, string>();
+  const ruRouteItemByIdx = useMemo(() => {
+    const map = new Map<string, ParameterSchemaItem>();
     ruSchemaResp?.parameters.forEach((p) => {
       // 形如 Device.DeviceInfo.RU.<n>.RouteIndex
       const m = /^Device\.DeviceInfo\.RU\.(\d+)\.RouteIndex$/.exec(p.path);
       if (m) {
-        const v = p.currentValue ?? '';
-        map.set(m[1], typeof v === 'string' ? v : String(v));
+        map.set(m[1], p);
       }
     });
     return map;
@@ -885,11 +1502,21 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
   }, [effectiveSchemaParameters]);
   const rawParameterByPath = useMemo(() => {
     const map = new Map<string, DeviceParameter>();
-    for (const item of [...(mmeIpPlmnParams ?? []), ...(nrCommonParams ?? []), ...(nrNguParams ?? []), ...(nrNguFallbackParams ?? []), ...(deviceTimeParams ?? []), ...(ipsecControlParams ?? [])]) {
+    for (const item of [
+      ...(mmeIpPlmnParams ?? []),
+      ...(nrCommonParams ?? []),
+      ...(nrNguParams ?? []),
+      ...(nrNguFallbackParams ?? []),
+      ...(deviceTimeParams ?? []),
+      ...(bmPpsTimeModeParams ?? []),
+      ...(bmGnssSyncSourceParams ?? []),
+      ...(bmPtpConfigParams ?? []),
+      ...(ipsecControlParams ?? []),
+    ]) {
       map.set(item.parameterPath, item);
     }
     return map;
-  }, [mmeIpPlmnParams, nrCommonParams, nrNguParams, nrNguFallbackParams, deviceTimeParams, ipsecControlParams]);
+  }, [mmeIpPlmnParams, nrCommonParams, nrNguParams, nrNguFallbackParams, deviceTimeParams, bmPpsTimeModeParams, bmGnssSyncSourceParams, bmPtpConfigParams, ipsecControlParams]);
   const timeZoneParam = useMemo(
     () => visibleParams.find((param) => param.name === 'LocalTimeZoneName'),
     [visibleParams],
@@ -1009,12 +1636,33 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
     if (!hasSchemaData) return;
     visibleParams.forEach((p) => {
       const currentValue = form.getFieldValue(p.name);
+      const draftPath = resolveReadPath(p.standardPath || '');
+      const draftItem = schemaByPath.get(draftPath);
+      const enumValuesForPath = p.enumOptions?.map((option) => option.value) ?? draftItem?.constraints?.enumValues ?? [];
       if (draft && draft[p.name] !== undefined) {
-        const nextValue = resolveRuntimeSpecialConfig(p.name)?.kind === 'mme-ip-plmn-table'
+        const specialKind = resolveRuntimeSpecialConfig(p.name)?.kind;
+        const nextValue = specialKind === 'mme-ip-plmn-table'
           ? toMmeIpPlmnRows(draft[p.name])
+          : specialKind === 'plmn-list-table'
+          ? toPlmnRows(draft[p.name])
+          : isConstrainedGnssSyncSourceSelectPath(draftPath)
+          ? normalizeConstrainedGnssSyncSourceValue(draft[p.name], enumValuesForPath, draftPath)
+          : isEffectiveBitmaskPath(draftPath)
+          ? normalizeBitmaskValue(draft[p.name])
+          : p.type === 'multiCheckbox'
+          ? isBscCodecSupportParam(p.standardPath ?? p.name)
+            ? normalizeBscCodecSupportValue(draft[p.name])
+            : parseQuickSettingsMultiCheckboxValue(draft[p.name])
+          : isStringMultiSelectPath(draftPath)
+          ? normalizeStringMultiSelectValue(draft[p.name])
+          : isSwitchPath(draftPath)
+          ? normalizeSwitchValue(draft[p.name])
           : String(draft[p.name] ?? '');
-        if (currentValue !== nextValue) {
+        if (!formValueEquals(currentValue, nextValue)) {
           form.setFieldValue(p.name, nextValue);
+        }
+        if (isConstrainedGnssSyncSourceSelectPath(draftPath)) {
+          gnssSyncSourceRef.current = Array.isArray(nextValue) ? nextValue.map(String) : [];
         }
         return;
       }
@@ -1037,6 +1685,11 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
           ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
           : (rawItem?.parameterValue ?? item?.currentValue ?? '');
         form.setFieldValue(p.name, toMmeIpPlmnRows(raw));
+      } else if (special?.kind === 'plmn-list-table') {
+        const raw = preferSchemaCurrentValue
+          ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
+          : (rawItem?.parameterValue ?? item?.currentValue ?? '');
+        form.setFieldValue(p.name, toPlmnRows(raw));
       } else {
         // 这些分组会同时读 search + schema。优先采用 schema 当前值，避免 search 缓存
         // 在 refreshTick remount 后短暂覆盖刚回读的新值。
@@ -1055,16 +1708,37 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         ) {
           raw = String(instanceContext.fapInstance);
         }
-        form.setFieldValue(
-          p.name,
-          normalizeEnumValue(
-            raw,
-            isDeviceTimeGroup && p.name === 'Enable' ? deviceTimeModeOptions : p.enumOptions,
-          ),
-        );
+        const enumOptions = isDeviceTimeGroup && p.name === 'Enable' ? deviceTimeModeOptions : p.enumOptions;
+        const allowedEnumValues = enumOptions?.map((option) => option.value) ?? item?.constraints?.enumValues ?? [];
+        if (isConstrainedGnssSyncSourceSelectPath(path)) {
+          const nextValue = normalizeConstrainedGnssSyncSourceValue(raw, allowedEnumValues, path);
+          form.setFieldValue(p.name, nextValue);
+          gnssSyncSourceRef.current = nextValue;
+        } else if (isEffectiveBitmaskPath(path)) {
+          form.setFieldValue(p.name, normalizeBitmaskValue(raw));
+        } else if (p.type === 'multiCheckbox') {
+          form.setFieldValue(
+            p.name,
+            isBscCodecSupportParam(path)
+              ? normalizeBscCodecSupportValue(raw)
+              : parseQuickSettingsMultiCheckboxValue(raw),
+          );
+        } else if (isStringMultiSelectPath(path)) {
+          form.setFieldValue(p.name, normalizeStringMultiSelectValue(raw));
+        } else if (isSwitchPath(path)) {
+          form.setFieldValue(p.name, normalizeSwitchValue(raw));
+        } else {
+          form.setFieldValue(
+            p.name,
+            normalizeEnumValue(
+              raw,
+              enumOptions,
+            ),
+          );
+        }
       }
     });
-  }, [hasSchemaData, visibleParams, instanceContext, form, schemaByPath, rawParameterByPath, draft, resolveRuntimeSpecialConfig, mmeIpPlmnParams, nrNguParams, nrNguFallbackParams, preferSchemaCurrentValue, isDeviceTimeGroup, deviceTimeModeOptionsKey]);
+  }, [hasSchemaData, visibleParams, instanceContext, form, schemaByPath, rawParameterByPath, draft, resolveRuntimeSpecialConfig, mmeIpPlmnParams, nrNguParams, nrNguFallbackParams, preferSchemaCurrentValue, isDeviceTimeGroup, deviceTimeModeOptionsKey, isEffectiveBitmaskPath, isConstrainedGnssSyncSourceSelectPath]);
 
   const handleSave = async () => {
     const values = form.getFieldsValue() as Record<string, unknown>;
@@ -1097,28 +1771,86 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
           continue;
         }
       }
+      if (special?.kind === 'plmn-list-table') {
+        const normalizedRows = toPlmnRows(values[p.name]);
+        values[p.name] = normalizedRows;
+        const maxRows = p.maxValue ?? 6;
+        const validationError = plmnValidationMessage(
+          validatePlmnList(normalizedRows, maxRows),
+          maxRows,
+          t,
+        );
+        if (validationError) {
+          errors[p.name] = validationError;
+          continue;
+        }
+      }
 
+      const isBitmaskField = isEffectiveBitmaskPath(path);
+      const isMultiCheckboxField = p.type === 'multiCheckbox';
+      const isCodecSupportField = isMultiCheckboxField && isBscCodecSupportParam(path);
+      const isStringMultiSelectField = isStringMultiSelectPath(path);
+      const isSwitchField = isSwitchPath(path);
       const newVal = special?.kind === 'mme-ip-plmn-table'
         ? serializeMmeIpPlmnList(toMmeIpPlmnRows(values[p.name]))
+        : special?.kind === 'plmn-list-table'
+        ? serializePlmnList(toPlmnRows(values[p.name]))
+        : isBitmaskField
+        ? serializeBitmaskValue(values[p.name])
+        : isMultiCheckboxField
+        ? isCodecSupportField
+          ? serializeBscCodecSupportValue(values[p.name])
+          : serializeQuickSettingsMultiCheckboxValue(values[p.name])
+        : isStringMultiSelectField
+        ? serializeStringMultiSelectValue(values[p.name])
+        : isSwitchField
+        ? serializeSwitchValue(values[p.name])
         : String(values[p.name] ?? '');
-      const oldVal = special?.kind === 'mme-ip-plmn-table'
+      const rawOldVal = special?.kind === 'mme-ip-plmn-table'
         ? (preferSchemaCurrentValue
           ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
           : (rawItem?.parameterValue ?? item?.currentValue ?? ''))
         : (preferSchemaCurrentValue
           ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
           : (rawItem?.parameterValue ?? item?.currentValue ?? ''));
+      const oldVal = isSwitchField
+        ? normalizeSwitchComparableValue(rawOldVal)
+        : isMultiCheckboxField
+        ? isCodecSupportField
+          ? serializeBscCodecSupportValue(rawOldVal)
+          : serializeQuickSettingsMultiCheckboxValue(rawOldVal)
+        : rawOldVal;
       if (newVal === oldVal) continue;
 
       const parameterType = resolveQuickSettingsParameterType(p.type, item?.type, rawItem?.parameterType);
-      const err = validateValue(newVal, parameterType, item?.constraints);
+      const allowedValues = p.enumOptions?.map((option) => option.value) ?? item?.constraints?.enumValues ?? [];
+      const err = isHiddenTransmissionCountParam(p.name)
+        ? null
+        : isBitmaskField
+        ? isConstrainedGnssSyncSourceSelectPath(path)
+          ? validateConstrainedGnssSyncSourceValue(newVal, allowedValues, path, t)
+          : validateBitmaskValue(
+          newVal,
+          allowedValues,
+          item?.constraints?.minValue,
+          item?.constraints?.maxValue,
+        )
+        : isConstrainedGnssSyncSourceSelectPath(path)
+        ? validateConstrainedGnssSyncSourceValue(newVal, allowedValues, path, t)
+        : isStringMultiSelectField
+        ? null
+        : isMultiCheckboxField
+        ? validateValue(newVal, parameterType, item?.constraints)
+        : isSwitchField
+        ? null
+        : validateValue(newVal, parameterType, item?.constraints);
       if (err) {
         errors[p.name] = err;
         continue;
       }
       // XML 驱动的 extraInfoPath 范围校验:超出 [min, max] 阻断保存。
       const extraBounds = extraInfoBoundsByName.get(p.name);
-      if (extraBounds) {
+      if (!isHiddenTransmissionCountParam(p.name) && extraBounds) {
         const rangeErr = validateExtraInfoBounds(newVal, extraBounds);
         if (rangeErr) {
           errors[p.name] = rangeErr;
@@ -1144,51 +1876,26 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
     }
 
     setFieldErrors({});
-    // 识别 FAPService.1 HNBName → 改走 rename 接口（不走普通 SPV 下发）
-    const hnbUpdate = updates.find((u) => u.parameterPath === HNB_NAME_PATH);
-    const regularUpdates = hnbUpdate
-      ? updates.filter((u) => u.parameterPath !== HNB_NAME_PATH)
-      : updates;
+    const submittedDraftRevision = useQuickSettingsFeedbackStore.getState().draftRevisions[fbKey] ?? 0;
     try {
-      let renameTaskId: string | undefined;
-      if (hnbUpdate) {
-        const renameResult = await renameMutation.mutateAsync(hnbUpdate.parameterValue);
-        renameTaskId = renameResult.taskId;
-      }
-      if (regularUpdates.length > 0) {
-        const result = await updateMutation.mutateAsync({ deviceId, parameters: regularUpdates });
-        latestLocalEditAtRef.current = 0;
-        message.success({
-          content: t('device.cell.saveSuccessMsg', { count: updates.length }),
-          duration: 6,
-        });
-        setFeedback(fbKey, {
-          kind: 'cell',
-          submitStatus: 'queued',
-          taskId: result.taskId,
-          count: updates.length,
-          at: Date.now(),
-        });
-      } else if (hnbUpdate) {
-        // 只有 rename：auto_omc_to_lmt 可能返回设备侧 taskId；prompt / 仅 OMC 侧成功则无任务进度。
-        latestLocalEditAtRef.current = 0;
-        message.success({
-          content: t('device.cell.saveSuccessMsg', { count: 1 }),
-          duration: 6,
-        });
-        if (renameTaskId) {
-          setFeedback(fbKey, {
-            kind: 'cell',
-            submitStatus: 'queued',
-            taskId: renameTaskId,
-            count: 1,
-            at: Date.now(),
-          });
-        } else {
-          clearFeedback(fbKey);
-          clearDraft(fbKey);
-        }
-      }
+      // 快速设置始终修改设备/LMT 侧参数。HNBName、gNBName 与其他参数一样
+      // 通过 SetParameterValues 下发，不得转成网管设备改名操作。
+      const result = await updateMutation.mutateAsync({ deviceId, parameters: updates });
+      message.success({
+        content: t('device.cell.saveSuccessMsg', { count: updates.length }),
+        duration: 6,
+      });
+      setFeedback(fbKey, {
+        kind: 'cell',
+        submitStatus: 'queued',
+        taskId: result.taskId,
+        count: updates.length,
+        at: Date.now(),
+        expectedReadback: Object.fromEntries(
+          updates.map((update) => [update.parameterPath, update.parameterValue]),
+        ),
+        submittedDraftRevision,
+      });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       notification.error({
@@ -1220,31 +1927,95 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
   useEffect(() => {
     if (!active) return;
     if (!lastTask || !['completed', 'failed', 'expired', 'cancelled'].includes(lastTask.status)) return;
-    if ((lastSubmit?.at ?? 0) < latestLocalEditAtRef.current) return;
+    // 非成功终态必须保留本地草稿，供用户修正后重试；失败提示由下方独立 effect 负责。
+    if (lastTask.status !== 'completed') return;
+    if (!canApplySubmittedReadback({
+      taskId: lastTask.id,
+      syncedForTaskId: lastSubmit?.syncedForTaskId,
+      submittedDraftRevision: lastSubmit?.submittedDraftRevision,
+      currentDraftRevision: draftRevision,
+    })) return;
     let cancelled = false;
+    const abortController = new AbortController();
     void (async () => {
-      const refreshedSchemaByPath = new Map<string, ParameterSchemaItem>();
-      try {
+      let refreshedSchemaByPath = new Map<string, ParameterSchemaItem>();
+      const fetchRefreshedSchema = async (): Promise<Map<string, ParameterSchemaItem>> => {
+        deviceParameterApi.invalidateParameterSchemaCache(deviceId);
+        await Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: ['devices', 'parameters', 'search', deviceId],
+            refetchType: 'none',
+          }),
+          queryClient.invalidateQueries({
+            queryKey: ['devices', 'parameter-schema', deviceId],
+            refetchType: 'none',
+          }),
+        ]);
+        const nextSchemaByPath = new Map<string, ParameterSchemaItem>();
         if (isDeviceTimeGroup) {
           const [refreshedDeviceTime, refreshedManagementServer] = await Promise.all([
             refetchDeviceTimeSchema(),
             refetchManagementServerSchema(),
           ]);
           for (const item of refreshedDeviceTime.data?.parameters ?? []) {
-            refreshedSchemaByPath.set(item.path, item);
+            nextSchemaByPath.set(item.path, item);
           }
           for (const item of refreshedManagementServer.data?.parameters ?? []) {
-            refreshedSchemaByPath.set(item.path, item);
+            nextSchemaByPath.set(item.path, item);
+          }
+        } else if (isGnbSyncSourceGroup) {
+          const [refreshedGnbSyncFap, refreshedGnbSyncDeviceInfo] = await Promise.all([
+            refetchGnbSyncFapSchema(),
+            refetchGnbSyncDeviceInfoSchema(),
+          ]);
+          for (const item of refreshedGnbSyncFap.data?.parameters ?? []) {
+            nextSchemaByPath.set(item.path, item);
+          }
+          for (const item of refreshedGnbSyncDeviceInfo.data?.parameters ?? []) {
+            nextSchemaByPath.set(item.path, item);
           }
         } else {
           const refreshed = await refetchCommonSchema();
           for (const item of refreshed.data?.parameters ?? []) {
-            refreshedSchemaByPath.set(item.path, item);
+            nextSchemaByPath.set(item.path, item);
           }
         }
+        return nextSchemaByPath;
+      };
+      try {
+        const expectedReadback = new Map(Object.entries(lastSubmit?.expectedReadback ?? {}));
+        if (group.id === 'enb-mme' && expectedReadback.size > 0) {
+          // SPV completed 只代表设备接受设置。后端自动 GPV 落库前 schema 仍可能是旧值，
+          // 因此持续读取目标 path，只有实际观察到本次提交值才允许覆盖表单和清理草稿。
+          await waitForExpectedParameterValues({
+            expected: expectedReadback,
+            read: async () => {
+              refreshedSchemaByPath = await fetchRefreshedSchema();
+              return new Map(
+                Array.from(refreshedSchemaByPath.entries()).map(([path, item]) => [
+                  path,
+                  String(item.currentValue ?? ''),
+                ]),
+              );
+            },
+            intervalMs: 500,
+            timeoutMs: 30_000,
+            signal: abortController.signal,
+          });
+        } else {
+          // 其它既有快速设置分组保持原有刷新节奏；Issue 158 的 MME 路径不再依赖该固定延时。
+          await new Promise((resolve) => window.setTimeout(resolve, 500));
+          if (cancelled) return;
+          refreshedSchemaByPath = await fetchRefreshedSchema();
+        }
       } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') return;
         if (!cancelled) {
-          const errMsg = err instanceof Error ? err.message : String(err);
+          const errMsg = err instanceof ParameterReadbackTimeoutError
+            ? t('device.cell.readbackPendingTimeout')
+            : err instanceof Error
+            ? err.message
+            : String(err);
           notification.error({
             message: t('device.multi.readbackFailed', { group: group.titleZh }),
             description: errMsg,
@@ -1254,13 +2025,35 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         return;
       }
       if (cancelled) return;
+      const currentDraftRevision = useQuickSettingsFeedbackStore.getState().draftRevisions[fbKey] ?? 0;
+      if (!canApplySubmittedReadback({
+        taskId: lastTask.id,
+        syncedForTaskId: lastSubmit?.syncedForTaskId,
+        submittedDraftRevision: lastSubmit?.submittedDraftRevision,
+        currentDraftRevision,
+      })) return;
       const nextValues: Record<string, unknown> = {};
       for (const p of effectiveParams) {
         const special = resolveRuntimeSpecialConfig(p.name);
         const path = special?.configPath ?? resolveReadPath(p.standardPath || '');
         const refreshedValue = refreshedSchemaByPath.get(path)?.currentValue ?? '';
+        const allowedEnumValues = p.enumOptions?.map((option) => option.value) ?? refreshedSchemaByPath.get(path)?.constraints?.enumValues ?? [];
         nextValues[p.name] = special?.kind === 'mme-ip-plmn-table'
           ? toMmeIpPlmnRows(refreshedValue)
+          : special?.kind === 'plmn-list-table'
+          ? toPlmnRows(refreshedValue)
+          : isConstrainedGnssSyncSourceSelectPath(path)
+            ? normalizeConstrainedGnssSyncSourceValue(refreshedValue, allowedEnumValues, path)
+          : isEffectiveBitmaskPath(path)
+            ? normalizeBitmaskValue(refreshedValue)
+          : p.type === 'multiCheckbox'
+            ? isBscCodecSupportParam(path)
+              ? normalizeBscCodecSupportValue(refreshedValue)
+              : parseQuickSettingsMultiCheckboxValue(refreshedValue)
+          : isStringMultiSelectPath(path)
+            ? normalizeStringMultiSelectValue(refreshedValue)
+          : isSwitchPath(path)
+            ? normalizeSwitchValue(refreshedValue)
           : normalizeEnumValue(
             refreshedValue,
             isDeviceTimeGroup && p.name === 'Enable' ? deviceTimeModeOptions : p.enumOptions,
@@ -1276,13 +2069,19 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
       if (Object.keys(changedValues).length > 0) {
         form.setFieldsValue(changedValues);
       }
+      const syncSourceValue = nextValues.SyncSource;
+      if (Array.isArray(syncSourceValue)) {
+        gnssSyncSourceRef.current = syncSourceValue.map(String);
+      }
+      patchFeedback(fbKey, { syncedForTaskId: lastTask.id });
       clearDraft(fbKey);
       setFieldErrors({});
     })();
     return () => {
       cancelled = true;
+      abortController.abort();
     };
-  }, [active, lastTask?.id, lastTask?.status, lastSubmit?.at, refetchCommonSchema, refetchDeviceTimeSchema, refetchManagementServerSchema, effectiveParams, instanceContext, form, clearDraft, fbKey, group.titleZh, resolveRuntimeSpecialConfig, t, isDeviceTimeGroup, deviceTimeModeOptionsKey, queryClient, deviceId]);
+  }, [active, lastTask?.id, lastTask?.status, lastSubmit?.at, lastSubmit?.expectedReadback, lastSubmit?.submittedDraftRevision, lastSubmit?.syncedForTaskId, draftRevision, refetchCommonSchema, refetchDeviceTimeSchema, refetchManagementServerSchema, refetchGnbSyncFapSchema, refetchGnbSyncDeviceInfoSchema, effectiveParams, instanceContext, form, clearDraft, patchFeedback, fbKey, group.id, group.titleZh, resolveRuntimeSpecialConfig, t, isDeviceTimeGroup, isGnbSyncSourceGroup, deviceTimeModeOptionsKey, queryClient, deviceId, isEffectiveBitmaskPath, isConstrainedGnssSyncSourceSelectPath]);
 
   // T-0146:基站应答失败时弹一次 notification(只在 status 第一次变成 failed 时触发,避免重复弹)
   // notifiedFailedTaskId 同样存 store —— 切顶层 tab 再切回不会重复弹。
@@ -1352,13 +2151,37 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         form={form}
         layout="vertical"
         onValuesChange={(changedValues) => {
-          latestLocalEditAtRef.current = Date.now();
           // 同步到 store draft，跨顶层 TabBar 切走切回可恢复
           for (const [name, value] of Object.entries(changedValues)) {
             const p = visibleParams.find((q) => q.name === name);
             const special = p ? resolveRuntimeSpecialConfig(p.name) : undefined;
+            const path = p ? (special?.configPath ?? resolveReadPath(p.standardPath || '')) : '';
+            const item = path ? schemaByPath.get(path) : undefined;
+            const allowedEnumValues = p?.enumOptions?.map((option) => option.value) ?? item?.constraints?.enumValues ?? [];
+            if (p && isConstrainedGnssSyncSourceSelectPath(path)) {
+              const normalized = normalizeConstrainedGnssSyncSourceChange(value, gnssSyncSourceRef.current, allowedEnumValues, path);
+              changedValues[name] = normalized.value;
+              form.setFieldValue(name, normalized.value);
+              gnssSyncSourceRef.current = normalized.value;
+              setDraftField(fbKey, name, serializeConstrainedGnssSyncSourceValue(normalized.value, path));
+              if (normalized.errorKey) {
+                message.warning(t(normalized.errorKey));
+              }
+              continue;
+            }
             if (special?.kind === 'mme-ip-plmn-table') {
               setDraftField(fbKey, name, toMmeIpPlmnRows(value));
+            } else if (special?.kind === 'plmn-list-table') {
+              setDraftField(fbKey, name, serializePlmnList(toPlmnRows(value)));
+            } else if (p?.type === 'multiCheckbox') {
+              const normalized = isBscCodecSupportParam(path)
+                ? normalizeBscCodecSupportValue(value)
+                : parseQuickSettingsMultiCheckboxValue(value);
+              changedValues[name] = normalized;
+              if (!formValueEquals(form.getFieldValue(name), normalized)) {
+                form.setFieldValue(name, normalized);
+              }
+              setDraftField(fbKey, name, normalized.join('-'));
             } else {
               setDraftField(fbKey, name, String(value ?? ''));
             }
@@ -1401,30 +2224,73 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
             for (const [name, value] of Object.entries(changedValues)) {
               const p = visibleParams.find((q) => q.name === name);
               if (!p) continue;
+              if (isHiddenTransmissionCountParam(name)) {
+                delete next[name];
+                continue;
+              }
               const special = resolveRuntimeSpecialConfig(name);
               const path = special?.configPath ?? resolveReadPath(p.standardPath || '');
               const sItem = schemaByPath.get(path);
               const normalizedValue = special?.kind === 'mme-ip-plmn-table'
                 ? serializeMmeIpPlmnList(toMmeIpPlmnRows(value))
+                : special?.kind === 'plmn-list-table'
+                ? serializePlmnList(toPlmnRows(value))
+                : isEffectiveBitmaskPath(path)
+                ? serializeBitmaskValue(value)
+                : p.type === 'multiCheckbox'
+                ? isBscCodecSupportParam(path)
+                  ? serializeBscCodecSupportValue(value)
+                  : serializeQuickSettingsMultiCheckboxValue(value)
+                : isStringMultiSelectPath(path)
+                ? serializeStringMultiSelectValue(value)
+                : isSwitchPath(path)
+                ? serializeSwitchValue(value)
                 : String(value ?? '');
-              const err = validateValue(
-                normalizedValue,
-                (sItem?.type as never) ?? 'string',
-                sItem?.constraints,
-              );
+              const allowedValues = p.enumOptions?.map((option) => option.value) ?? sItem?.constraints?.enumValues ?? [];
+              const err = special?.kind === 'plmn-list-table'
+                ? null
+                : isEffectiveBitmaskPath(path)
+                ? isConstrainedGnssSyncSourceSelectPath(path)
+                  ? validateConstrainedGnssSyncSourceValue(normalizedValue, allowedValues, path, t)
+                  : validateBitmaskValue(
+                  normalizedValue,
+                  allowedValues,
+                  sItem?.constraints?.minValue,
+                  sItem?.constraints?.maxValue,
+                )
+                : isConstrainedGnssSyncSourceSelectPath(path)
+                ? validateConstrainedGnssSyncSourceValue(normalizedValue, allowedValues, path, t)
+                : isStringMultiSelectPath(path)
+                ? null
+                : p.type === 'multiCheckbox'
+                ? validateValue(normalizedValue, (sItem?.type as never) ?? 'string', sItem?.constraints)
+                : isSwitchPath(path)
+                ? null
+                : validateValue(
+                  normalizedValue,
+                  (sItem?.type as never) ?? 'string',
+                  sItem?.constraints,
+                );
               const mmeLimitErr = special?.kind === 'mme-ip-plmn-table'
                 ? validateMmeIpPlmnLimit(toMmeIpPlmnRows(value), p.maxValue)
                 : null;
               const mmeRowsErr = special?.kind === 'mme-ip-plmn-table'
                 ? validateMmeIpPlmnRows(toMmeIpPlmnRows(value))
                 : null;
+              const plmnRowsErr = special?.kind === 'plmn-list-table'
+                ? plmnValidationMessage(
+                  validatePlmnList(toPlmnRows(value), p.maxValue ?? 6),
+                  p.maxValue ?? 6,
+                  t,
+                )
+                : null;
               // XML 驱动的 extraInfoPath 范围校验:在 schema 校验之后追加;
               // schema 已报错时优先展示 schema 错误,避免双错信息互盖。
               const extraBounds = extraInfoBoundsByName.get(name);
-              const rangeErr = !err && !mmeRowsErr && !mmeLimitErr && extraBounds
+              const rangeErr = !err && !mmeRowsErr && !mmeLimitErr && !plmnRowsErr && extraBounds
                 ? validateExtraInfoBounds(normalizedValue, extraBounds)
                 : null;
-              const finalErr = err ?? mmeRowsErr ?? mmeLimitErr ?? rangeErr;
+              const finalErr = err ?? mmeRowsErr ?? mmeLimitErr ?? plmnRowsErr ?? rangeErr;
               if (finalErr) next[name] = finalErr;
               else delete next[name];
               // 镜像字段同时清/重新校验（值刚被程序性写入，旧 error 应失效）
@@ -1492,6 +2358,16 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
         })()}
         <Row gutter={16}>
           {visibleParams.map((p) => {
+            if (isBmGsmCell && p.name === 'GsmCellWithRuRelation') {
+              return null;
+            }
+            if (
+              (isBmGsmCell && hasGsmTxAntNum && p.name === 'GsmTxAntNum') ||
+              (isBmLteCell && hasLteAntennaPortsCount && p.name === 'AntennaPortsCount') ||
+              (isBmLteCell && p.name === 'LteCellWithRuList')
+            ) {
+              return null;
+            }
             if (isDeviceTimeGroup && (p.name === 'LocalTimeZoneName' || p.name === 'Enable')) {
               return null;
             }
@@ -1525,13 +2401,18 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
             const renderFrequencyAfter =
               (group.id === 'gsm-cell' || group.id === 'bts-cell-info') &&
               p.name === 'CurrentArfcn';
-            // BM GSM 专属:在 BscSelect 后插入"绑定 RU 的 Route Index"派生行。
-            const renderRuRouteAfter = isGsmCell && p.name === 'BscSelect';
+            // BM 小区专属:在发射功率后插入"绑定 RU 的 Route Index"。
+            // GSM 直接编辑 GsmCellWithRuRelation 原值;LTE 仍编辑 LteCellWithRuList。
+            const renderGsmRuRelationAfter = isBmGsmCell && p.name === 'GsmBtsRFPower';
+            const renderRuRouteAfter = isBmLteCell && p.name === 'PowerClass';
             // BM LTE 派生显示:Frequency / Cell ID / 2T4R 开关。
-            const isLteCell = group.id === 'enb-cell';
+            const isLteCell = isLteCellGroup;
             const renderLteFreqAfter = isLteCell && p.name === 'DLEarfcn';
             const renderCellIdAfter = isLteCell && p.name === 'ECI';
-            const render2T4RAfter = isLteCell && p.name === 'AntennaPortsCount';
+            const isTransmissionPowerField =
+              (isBmGsmCell && hasGsmTxAntNum && p.name === 'GsmBtsRFPower') ||
+              (isBmLteCell && hasLteAntennaPortsCount && p.name === 'PowerClass');
+            const transmissionCountField = isBmGsmCell ? 'GsmTxAntNum' : 'AntennaPortsCount';
             const isDeviceTimeParam = group.id === 'device-time';
             const isIpsecControlParam = group.id === 'device-ipsec-control';
             const writable = (isDeviceTimeParam || isIpsecControlParam)
@@ -1543,14 +2424,12 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                 ?? rawItem?.writable
                 ?? item?.writable
                 ?? false);
-            // 策略联动：auto_lmt_to_omc 下 FAPService.1 HNBName 禁用（引导在 LMT 侧改名）
-            const resolvedStdPath = special?.configPath ?? resolveReadPath(p.standardPath || '');
-            const lmtLocked = resolvedStdPath === HNB_NAME_PATH && nameSyncMode === 'auto_lmt_to_omc';
-            const finalWritable = lmtLocked ? false : writable;
+            const finalWritable = p.readonly ? false : writable;
             const error = fieldErrors[p.name];
-            // XML hideRangeHint="true" 时不在 label 后展示 schema 推导的 [min ~ max]
+            const isSwitchField = isSwitchPath(path);
+            // XML hideRangeHint="true" 或 Switch 字段时不在 label 后展示 schema 推导的 [min ~ max]
             // (字典范围与业务允许值不一致的字段如 Band:字典 1..maxInt,业务允许集只有少数频段)。
-            const constraintHint = p.hideRangeHint ? '' : formatConstraintHint(item, t);
+            const constraintHint = p.hideRangeHint || isSwitchField ? '' : formatConstraintHint(item, t);
             const currentBindPath = String(form.getFieldValue(p.name) ?? rawItem?.parameterValue ?? item?.currentValue ?? '');
             const resolvedDisplayValue = displayValue || (special?.bindValueMode === 'ip' ? currentBindPath : bindIpByPath.get(currentBindPath)) || '';
             // XML 驱动:若 param 在 quicksettings XML 上声明了 extraInfoPath,
@@ -1559,11 +2438,10 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
             const extraInfoFormatted = extraInfoRaw ? formatExtraInfoRange(extraInfoRaw) : '';
             const label = (
               <Space size={4}>
-                <span style={special?.kind === 'mme-ip-plmn-table' ? { whiteSpace: 'nowrap' } : undefined}>
+                <span style={special?.kind === 'mme-ip-plmn-table' || special?.kind === 'plmn-list-table' ? { whiteSpace: 'nowrap' } : undefined}>
                   {locale === 'zh-CN' ? p.titleZh : p.titleEn}
                 </span>
-                {lmtLocked && <Text type="secondary" style={{ fontSize: 12 }}>{t('device.cell.lmtLockedHint')}</Text>}
-                {!lmtLocked && !writable && <Text type="secondary" style={{ fontSize: 12 }}>{t('device.cell.readonly')}</Text>}
+                {(!writable || p.readonly) && <Text type="secondary" style={{ fontSize: 12 }}>{t('device.cell.readonly')}</Text>}
                 {constraintHint && (
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {constraintHint}
@@ -1604,8 +2482,32 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
               ? xmlEnumLabels
               : (enumMeta?.labels ?? []);
             const isEnum = !special && effectiveEnumValues.length > 0;
+            const isBitmaskEnum = isEnum && isEffectiveBitmaskPath(path);
+            const isConstrainedGnssSyncSourceEnum = isEnum && isConstrainedGnssSyncSourceSelectPath(path);
+            const isStringMultiSelectEnum = isEnum && isStringMultiSelectPath(path);
+            const isMultiCheckbox = !special && p.type === 'multiCheckbox';
+            const isCodecSupport = isMultiCheckbox && isBscCodecSupportParam(path);
+            const baseEnumOptions = isBitmaskEnum
+              ? isConstrainedGnssSyncSourceEnum
+                ? effectiveEnumValues.map((v, idx) => ({
+                  value: v,
+                  label: localizeEnumLabel(effectiveEnumLabels[idx] || v, v, locale),
+                }))
+                : buildBitmaskCombinationOptions(effectiveEnumValues, effectiveEnumLabels, locale)
+              : effectiveEnumValues.map((v, idx) => ({
+                value: v,
+                label: localizeEnumLabel(effectiveEnumLabels[idx] || v, v, locale),
+              }));
+            const currentRawValue = preferSchemaCurrentValue
+              ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
+              : (rawItem?.parameterValue ?? item?.currentValue ?? '');
+            const enumOptions = isEnum && !isBitmaskEnum && !isStringMultiSelectEnum
+              ? appendCurrentEnumOption(baseEnumOptions, currentRawValue, p.enumOptions)
+              : baseEnumOptions;
             const extra = special?.kind === 'mme-ip-plmn-table'
               ? t('device.cell.mmeIpPlmnExtra')
+              : special?.kind === 'plmn-list-table'
+              ? t('device.cell.plmnListExtra')
               : undefined;
             const effectiveBindOptions = special?.kind === 'bind-select'
               ? appendCurrentBindOption(
@@ -1615,15 +2517,24 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                 )
               : [];
             const input = (
-              <Col span={special?.kind === 'mme-ip-plmn-table' ? 24 : 8} key={p.name}>
+              <Col span={special?.kind === 'mme-ip-plmn-table' || special?.kind === 'plmn-list-table' ? 24 : 8} key={p.name}>
                 <Form.Item
-                  label={special?.kind === 'mme-ip-plmn-table' ? undefined : label}
-                  name={p.name}
+                  label={special?.kind === 'mme-ip-plmn-table' || special?.kind === 'plmn-list-table' ? undefined : label}
+                  name={isTransmissionPowerField ? undefined : p.name}
+                  valuePropName={!isTransmissionPowerField && isSwitchField ? 'checked' : undefined}
+                  normalize={isCodecSupport ? normalizeBscCodecSupportValue : undefined}
                   validateStatus={error ? 'error' : undefined}
                   help={error}
                   extra={extra}
                 >
-                  {special?.kind === 'bind-select' ? (
+                  {isTransmissionPowerField ? (
+                    <TransmissionPowerInput
+                      countField={transmissionCountField}
+                      powerField={p.name}
+                      disabled={!finalWritable}
+                      placeholder={special?.placeholder || item?.defaultValue || (!finalWritable ? '未上报' : '')}
+                    />
+                  ) : special?.kind === 'bind-select' ? (
                     <Select
                       disabled={!finalWritable}
                       showSearch
@@ -1637,14 +2548,34 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
                       locale={locale}
                       maxRows={p.maxValue}
                     />
+                  ) : special?.kind === 'plmn-list-table' ? (
+                    <PlmnListTable
+                      disabled={!finalWritable}
+                      maxRows={p.maxValue ?? 6}
+                    />
+                  ) : isSwitchField ? (
+                    <Switch
+                      disabled={!finalWritable}
+                      checkedChildren={t('common.on')}
+                      unCheckedChildren={t('common.off')}
+                    />
+                  ) : isMultiCheckbox ? (
+                    <Checkbox.Group
+                      disabled={!finalWritable}
+                      options={(p.checkboxOptions ?? []).map((v) => ({
+                        value: v,
+                        label: v,
+                        disabled: isCodecSupport && v === 'fr',
+                      }))}
+                    />
                   ) : isEnum ? (
                     <Select
+                      mode={isStringMultiSelectEnum || isConstrainedGnssSyncSourceEnum ? 'multiple' : undefined}
                       disabled={!finalWritable}
                       placeholder={item?.defaultValue || ''}
-                      options={effectiveEnumValues.map((v, idx) => ({
-                        value: v,
-                        label: localizeEnumLabel(effectiveEnumLabels[idx] || v, v, locale),
-                      }))}
+                      showSearch={isBitmaskEnum}
+                      optionFilterProp="label"
+                      options={enumOptions}
                     />
                   ) : (
                     <Input disabled={!finalWritable} placeholder={special?.placeholder || item?.defaultValue || (!finalWritable ? '未上报' : '')} />
@@ -1660,7 +2591,22 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
             ) : renderRuRouteAfter ? (
               <Fragment key={p.name}>
                 {input}
-                <BoundRuRouteIndexDisplay form={form} ruRouteByIdx={ruRouteByIdx} locale={locale} />
+                <RouteIndexInput
+                  form={form}
+                  ruRouteItemByIdx={ruRouteItemByIdx}
+                  locale={locale}
+                  fieldName="LteCellWithRuList"
+                  disabled={false}
+                  error={fieldErrors.LteCellWithRuList}
+                />
+              </Fragment>
+            ) : renderGsmRuRelationAfter ? (
+              <Fragment key={p.name}>
+                {input}
+                <GsmRuRelationInput
+                  error={fieldErrors.GsmCellWithRuRelation}
+                  ruRouteItemByIdx={ruRouteItemByIdx}
+                />
               </Fragment>
             ) : renderLteFreqAfter ? (
               <Fragment key={p.name}>
@@ -1671,11 +2617,6 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
               <Fragment key={p.name}>
                 {input}
                 <CellIdDerivedDisplay form={form} locale={locale} />
-              </Fragment>
-            ) : render2T4RAfter ? (
-              <Fragment key={p.name}>
-                {input}
-                <AntennaPortsAs2T4RDisplay form={form} locale={locale} />
               </Fragment>
             ) : input;
           })}

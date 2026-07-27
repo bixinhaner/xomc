@@ -1,17 +1,38 @@
 package aggregator
 
 import (
+	"context"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
+
+func TestRawAwareDeviceSelectUsesCorrectPhysicalSource(t *testing.T) {
+	req := QueryRequest{MetricPaths: []string{"C1"}}
+	rawSQL, _, err := newRawAwareDeviceSelect(
+		storage.Psql, "pm_metrics", req, deviceTableColumns...,
+	).ToSql()
+	require.NoError(t, err)
+	assert.Contains(t, rawSQL, "FROM pm_measurement_anchors")
+	assert.NotContains(t, rawSQL, "FROM pm_hourly_bucket_versions")
+
+	hourlySQL, _, err := newRawAwareDeviceSelect(
+		storage.Psql, "pm_metrics_hourly", req, deviceTableColumns...,
+	).ToSql()
+	require.NoError(t, err)
+	assert.Contains(t, hourlySQL, "FROM pm_hourly_bucket_versions")
+	assert.Contains(t, hourlySQL, "ver.status")
+	assert.NotContains(t, hourlySQL, "FROM pm_measurement_anchors")
+}
 
 func Test_applyScalarFilters_TimeRangeIsHalfOpen(t *testing.T) {
 	start := time.Date(2026, 7, 6, 16, 0, 0, 0, time.UTC)
@@ -24,6 +45,44 @@ func Test_applyScalarFilters_TimeRangeIsHalfOpen(t *testing.T) {
 	assert.Contains(t, sql, "time < $2")
 	assert.NotContains(t, sql, "time <= $2")
 	assert.Equal(t, []any{start, end}, args)
+}
+
+func Test_queryProductTable_TimeRangeIsHalfOpen(t *testing.T) {
+	start := time.Date(2026, 7, 13, 9, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)
+	db := &recordingDB{results: []pgx.Rows{&fakeRows{}}}
+	a := New(db, nil, nil)
+
+	_, err := a.queryProductTable(context.Background(), "pm_metrics_hourly", QueryRequest{
+		Granularity: metrics.GranularityHourly,
+		StartTime:   start,
+		EndTime:     end,
+	})
+	require.NoError(t, err)
+	require.Len(t, db.sqls, 1)
+	assert.Contains(t, db.sqls[0], "m.time >= $2")
+	assert.Contains(t, db.sqls[0], "m.time < $3")
+	assert.NotContains(t, db.sqls[0], "m.time <= $3")
+	assert.Equal(t, []any{"hourly", start, end}, db.argsLog[0])
+}
+
+func Test_queryBandTable_TimeRangeIsHalfOpen(t *testing.T) {
+	start := time.Date(2026, 7, 13, 9, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)
+	db := &recordingDB{results: []pgx.Rows{&fakeRows{}}}
+	a := New(db, nil, nil)
+
+	_, err := a.queryBandTable(context.Background(), "pm_metrics_hourly", QueryRequest{
+		Granularity: metrics.GranularityHourly,
+		StartTime:   start,
+		EndTime:     end,
+	})
+	require.NoError(t, err)
+	require.Len(t, db.sqls, 1)
+	assert.Contains(t, db.sqls[0], "m.time >= $2")
+	assert.Contains(t, db.sqls[0], "m.time < $3")
+	assert.NotContains(t, db.sqls[0], "m.time <= $3")
+	assert.Equal(t, []any{"hourly", start, end}, db.argsLog[0])
 }
 
 // SelectTable 10 case：5 粒度 × 2 维度。15min × device_group 必须返 ErrUnsupportedQuery。
@@ -104,6 +163,70 @@ func Test_buildDeviceTableSQL_PreservesWhereFilters(t *testing.T) {
 	assert.Contains(t, sql, "metric_path IN")
 	assert.Contains(t, sql, "metric_type =")
 	assert.Contains(t, sql, "granularity =")
+}
+
+func Test_buildDeviceTableSQL_BindsMetricPathToInferredMetricTypeWhenTypeAbsent(t *testing.T) {
+	sql, args, err := buildDeviceTableSQL("pm_metrics", QueryRequest{
+		DeviceSNs:   []string{"SN-1"},
+		MetricPaths: []string{" K900010015 ", "C000060216"},
+		Granularity: metrics.Granularity15Min,
+	})
+	require.NoError(t, err)
+
+	assert.Contains(t, sql, "metric_path =")
+	assert.Contains(t, sql, "metric_type =")
+	assert.Contains(t, sql, " OR ")
+	assert.Contains(t, args, "K900010015")
+	assert.Contains(t, args, "kpi")
+	assert.Contains(t, args, "C000060216")
+	assert.Contains(t, args, "counter")
+}
+
+func Test_buildDeviceTableSQL_PageByPivotRowPagesKeysThenReturnsAllMetrics(t *testing.T) {
+	sql, args, err := buildDeviceTableSQL("pm_metrics", QueryRequest{
+		Granularity:    metrics.Granularity15Min,
+		DeviceSNs:      []string{"SN-1", "SN-2"},
+		MetricPaths:    []string{"K1", "K2"},
+		PageByPivotRow: true,
+		Limit:          50,
+		Offset:         100,
+	})
+	require.NoError(t, err)
+
+	assert.Contains(t, sql, "WITH dedup AS")
+	assert.Contains(t, sql, "page_keys AS")
+	assert.Contains(t, sql, "SELECT DISTINCT device_oui, device_sn, COALESCE(object_ldn, '') AS object_ldn, granularity, \"time\"")
+	assert.Contains(t, sql, "JOIN page_keys pk")
+	assert.Contains(t, sql, "AND pk.\"time\" = d.\"time\"")
+	assert.Contains(t, sql, "ORDER BY \"time\" DESC, device_sn ASC, object_ldn ASC")
+	assert.Contains(t, sql, "ORDER BY d.\"time\" DESC, d.device_sn ASC, COALESCE(d.object_ldn, '') ASC, d.metric_path ASC")
+	assert.Contains(t, sql, "LIMIT $")
+	assert.Contains(t, sql, "OFFSET $")
+	assert.Equal(t, 50, args[len(args)-2])
+	assert.Equal(t, 100, args[len(args)-1])
+}
+
+func Test_buildDeviceTableSQL_PageByPivotRowSkeletonPagesKeysWithoutMetricFilter(t *testing.T) {
+	metricType := metrics.MetricTypeKPI
+	sql, args, err := buildDeviceTableSQL("pm_metrics", QueryRequest{
+		Granularity:    metrics.Granularity15Min,
+		DeviceSNs:      []string{"SN-1"},
+		MetricPaths:    []string{"K1"},
+		MetricType:     &metricType,
+		ObjectLDNs:     []string{"Cellid=1,PLMN=46000"},
+		StartTime:      time.Date(2026, 7, 16, 11, 0, 0, 0, time.UTC),
+		EndTime:        time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC),
+		PageByPivotRow: true,
+		Limit:          1,
+	})
+	require.NoError(t, err)
+
+	pageKeysAt := strings.Index(sql, "page_keys AS")
+	require.NotEqual(t, -1, pageKeysAt)
+	pageKeySQL := sql[pageKeysAt:]
+	assert.NotContains(t, pageKeySQL, "metric_path IN")
+	assert.NotContains(t, pageKeySQL, "metric_type =")
+	assert.Equal(t, 1, args[len(args)-1])
 }
 
 func Test_SelectTable_UnknownGranularity(t *testing.T) {
@@ -190,16 +313,19 @@ func Test_applyCommonFilters_TechnologyDeviceSubquery_Unaffected(t *testing.T) {
 	assert.Contains(t, args, []string{"nr"})
 }
 
-// 设备维度（applyDeviceFilters）制式过滤同样走设备编号子查询，分流不破坏既有行为。
-func Test_applyDeviceFilters_TechnologyDeviceSubquery_Unaffected(t *testing.T) {
+// 设备维度（applyDeviceFilters）带 device_sn + technology 时先收窄用户选中的设备集合。
+func Test_applyDeviceFilters_TechnologyNarrowsSelectedDeviceSNsFirst(t *testing.T) {
 	q := QueryRequest{
 		DeviceSNs:    []string{"SN1"},
 		Technologies: []string{"lte"},
 	}
 	qb := storage.Psql.Select("metric_path").From("pm_metrics_hourly")
-	sql, _, err := applyDeviceFilters(qb, q).ToSql()
+	sql, args, err := applyDeviceFilters(qb, q).ToSql()
 	require.NoError(t, err)
-	assert.Contains(t, sql, "(device_oui, device_sn) IN (SELECT oui, serial_number FROM device_dim WHERE technology = ANY(")
+	assert.Contains(t, sql, "(device_oui, device_sn) IN (SELECT oui, serial_number FROM device_dim WHERE serial_number = ANY(")
+	assert.Contains(t, sql, "AND technology = ANY(")
+	assert.Contains(t, args, []string{"SN1"})
+	assert.Contains(t, args, []string{"lte"})
 }
 
 // #64 设备维度可见分组：applyCommonFilters 按 device_sn 两层子查询 fail-closed 收口。

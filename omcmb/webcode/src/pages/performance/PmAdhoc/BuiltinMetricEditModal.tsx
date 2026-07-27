@@ -8,12 +8,21 @@
 
 import { useMemo, useState, useEffect } from 'react';
 import { useIntl } from 'react-intl';
-import { Alert, Modal, Select, Space, Spin, Tag, Transfer, message } from 'antd';
+import { ImportOutlined } from '@ant-design/icons';
+import { Alert, Button, Modal, Select, Space, Spin, Tag, Transfer, message } from 'antd';
+import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
 import { useUpdatePmAdhoc } from '@core/hooks/api/usePmAdhoc';
 import { useIndicatorCandidates } from '@core/hooks/api/usePerformance';
 import type { IndicatorCandidate } from '@core/services/api/pmApi';
 import type { AdhocTask } from '@core/types/pmAdhoc';
 import type { DeviceType } from '@core/types/indicatorLibrary';
+import { formatIndicatorLevel, shouldShowIndicatorLevel } from '@core/utils/indicatorLevelDisplay';
+import {
+  MetricBatchInputModal,
+  formatMetricIdSamples,
+  type MetricBatchSelectionResult,
+} from '@/components/MetricPickerModal';
+import { resolveLimitedTransferSelection } from './selectionLimit';
 
 // 制式 → 指标库 deviceType（与向导一致）。
 const TECH_TO_DEVICE_TYPE: Record<string, DeviceType> = {
@@ -27,6 +36,7 @@ interface MetricTransferItem {
   id: string;
   name: string;
   isCounter: boolean;
+  indicatorLevel?: string;
   searchText: string;
 }
 
@@ -42,12 +52,14 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
 
   const [metricPaths, setMetricPaths] = useState<string[]>([]);
   const [metricTypeFilter, setMetricTypeFilter] = useState<'all' | 'kpi' | 'counter'>('all');
+  const [metricBatchOpen, setMetricBatchOpen] = useState(false);
 
   // 打开/切换任务时预填当前指标集。
   useEffect(() => {
     if (open && task) {
       setMetricPaths([...task.metricPaths]);
       setMetricTypeFilter('all');
+      setMetricBatchOpen(false);
     }
   }, [open, task]);
 
@@ -55,6 +67,7 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
   const deviceType = TECH_TO_DEVICE_TYPE[task?.technology ?? ''] ?? 'ENB';
   const { data: candidates, isLoading } = useIndicatorCandidates(deviceType, {
     includeCounters: true,
+    enabledOnly: true,
   });
   const indicatorItems = useMemo<IndicatorCandidate[]>(() => candidates ?? [], [candidates]);
 
@@ -74,6 +87,7 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
           id: ind.id,
           name: ind.cnName || ind.name,
           isCounter: ind.isCounter,
+          indicatorLevel: ind.indicatorLevel,
           searchText: `${ind.id} ${ind.name} ${ind.cnName}`.toLowerCase(),
         })),
     [indicatorItems, metricTypeFilter, selectedKeySet],
@@ -86,10 +100,30 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
           ? intl.formatMessage({ id: 'perf.adhoc.metricTagCounter' })
           : intl.formatMessage({ id: 'perf.adhoc.metricTagKpi' })}
       </Tag>
+      {shouldShowIndicatorLevel(deviceType) && (
+        <Tag color="default" style={{ marginInlineEnd: 0 }}>
+          {formatIndicatorLevel(item.indicatorLevel, (id) => intl.formatMessage({ id }))}
+        </Tag>
+      )}
       <span style={{ color: '#999' }}>{item.id}</span>
       <span>{item.name}</span>
     </Space>
   );
+
+  const warnMetricLimitExceeded = (count: number) => {
+    if (count <= PM_QUERY_SELECTION_LIMIT) return false;
+    message.warning(intl.formatMessage(
+      { id: 'perf.picker.metricLimitExceeded' },
+      { max: PM_QUERY_SELECTION_LIMIT, count },
+    ));
+    return true;
+  };
+
+  const limitMetricKeys = (keys: React.Key[]) => {
+    const result = resolveLimitedTransferSelection(metricPaths, keys, PM_QUERY_SELECTION_LIMIT);
+    if (result.exceeded) warnMetricLimitExceeded(result.count);
+    return result.next;
+  };
 
   const handleOk = async () => {
     if (!task) return;
@@ -97,6 +131,7 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
       message.error(intl.formatMessage({ id: 'perf.adhoc.editMetricEmpty' }));
       return;
     }
+    if (warnMetricLimitExceeded(metricPaths.length)) return;
     try {
       await updateMut.mutateAsync({ id: task.id, input: { metricPaths } });
       message.success(intl.formatMessage({ id: 'perf.adhoc.editMetricSaved' }));
@@ -145,12 +180,19 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
               { label: intl.formatMessage({ id: 'perf.adhoc.metricTypeCounter' }), value: 'counter' },
             ]}
           />
+          <Button
+            icon={<ImportOutlined />}
+            onClick={() => setMetricBatchOpen(true)}
+            disabled={isLoading}
+          >
+            {intl.formatMessage({ id: 'perf.metricBatchInput.title' })}
+          </Button>
         </Space>
         <Spin spinning={isLoading}>
           <Transfer<MetricTransferItem>
             dataSource={transferItems}
             targetKeys={metricPaths}
-            onChange={(keys: React.Key[]) => setMetricPaths(keys.map(String))}
+            onChange={(keys: React.Key[]) => setMetricPaths(limitMetricKeys(keys))}
             render={renderItem}
             showSearch
             filterOption={(inputValue, item) => {
@@ -167,6 +209,37 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
         <div style={{ color: '#888' }}>
           {intl.formatMessage({ id: 'perf.adhoc.metricSelectedCount' }, { count: metricPaths.length })}
         </div>
+        <MetricBatchInputModal
+          open={metricBatchOpen}
+          candidates={indicatorItems}
+          currentSelected={metricPaths}
+          maxSelected={PM_QUERY_SELECTION_LIMIT}
+          loading={isLoading}
+          onCancel={() => setMetricBatchOpen(false)}
+          onApply={(result: MetricBatchSelectionResult) => {
+            setMetricPaths(result.nextSelected);
+            setMetricBatchOpen(false);
+            message.success(intl.formatMessage(
+              { id: 'perf.metricBatchInput.importSuccess' },
+              { added: result.addedIds.length, total: result.nextSelected.length },
+            ));
+            if (result.invalidIds.length > 0) {
+              message.warning(intl.formatMessage(
+                { id: 'perf.metricBatchInput.notFound' },
+                { count: result.invalidIds.length, ids: formatMetricIdSamples(result.invalidIds) },
+              ));
+            }
+            if (result.limitExceeded) {
+              message.warning(intl.formatMessage(
+                { id: 'perf.metricBatchInput.truncated' },
+                {
+                  max: PM_QUERY_SELECTION_LIMIT,
+                  count: result.omittedValidIds.length,
+                },
+              ));
+            }
+          }}
+        />
       </Space>
     </Modal>
   );

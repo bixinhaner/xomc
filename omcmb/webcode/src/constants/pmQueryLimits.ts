@@ -1,0 +1,1 @@
+export const PM_QUERY_SELECTION_LIMIT = 50;

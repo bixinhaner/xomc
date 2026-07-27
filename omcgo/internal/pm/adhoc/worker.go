@@ -120,9 +120,9 @@ func (w *Worker) runOne(ctx context.Context, task *Task) {
 			zap.String("task_id", task.ID.String()),
 			zap.String("status", string(finalStatus)),
 			zap.Error(updateErr))
+	} else {
+		w.executor.PublishCompleted(context.Background(), task.ID, finalStatus, rowsTotal, errMsg)
 	}
-
-	w.executor.PublishCompleted(context.Background(), task.ID, finalStatus, rowsTotal, errMsg)
 	w.logger.Info("adhoc task finished",
 		zap.String("task_id", task.ID.String()),
 		zap.String("status", string(finalStatus)),
@@ -206,8 +206,8 @@ func (w *Worker) finishRun(ctx context.Context, runID uuid.UUID, status Status, 
 // 多 worker 实例都跑此扫描器无害（同 task 多 worker 同时更新 scheduled→pending
 // 是幂等的 — UPDATE WHERE status='scheduled' 只匹配一次）。
 type ContinuousScheduler struct {
-	repo     ContinuousRepository // 缩小依赖契约，便于单测
-	gate     WatermarkGate        // #528 P3：追平上界由真实水位决定（nil 退化为旧墙钟上界）
+	repo      ContinuousRepository  // 缩小依赖契约，便于单测
+	gate      WatermarkGate         // #528 P3：追平上界由真实水位决定（nil 退化为旧墙钟上界）
 	loc       func() *time.Location // #528 P3：daily/weekly/monthly 桶对齐用业务时区
 	tickEvery time.Duration
 	parser    cron.Parser
@@ -341,7 +341,9 @@ func (s *ContinuousScheduler) sweepOnce(ctx context.Context, now time.Time) {
 			continue
 		}
 		// #528 P3：追平上界由真实水位决定，而非墙钟。
-		// 该 cron 触发窗口 next 要处理的数据桶 = next 之前那一格（其桶尾正好对齐 next）。
+		// 该 cron 触发窗口 next 要处理的数据桶 = next 所在业务桶之前的上一格。
+		// continuous cron 通常在桶边界之后延迟几分钟触发（如 weekly 周一 00:15），
+		// 因此不能按 next 所属桶直接归桶，否则会把“上一周”误判成“本周”。
 		// 仅当该桶 ≤ 对应 (粒度,层级) 水位时才放行 —— 水位没卷到的格（含全新环境的史前空格、
 		// 以及「上一格刚结束但上游卷数据未跑完」的 #479 半成品格）一律不进入追平队列、不空磨。
 		if !s.watermarkAllows(ctx, t, next) {
@@ -391,8 +393,10 @@ func (s *ContinuousScheduler) watermarkAllows(ctx context.Context, t ContinuousT
 		return true
 	}
 	loc := s.schedulerLoc()
-	// next 是桶边界（cron cadence 与粒度对齐）；它收口的那一格起点 = next 前一纳秒所属的格起点。
-	targetBucket := truncateBucketStart(g, next.Add(-time.Nanosecond), loc)
+	// next 是 cron 触发时刻；continuous cron 通常延迟到桶边界后几分钟触发。
+	// 本次应处理刚结束的上一桶，而不是 next 所属的当前桶。
+	fireBucket := truncateBucketStart(g, next, loc)
+	targetBucket := previousBucketStart(g, fireBucket)
 	level := watermarkLevelForDimension(t.Dimension)
 	wmBucket, ok := s.gate.CompletedBucketStart(ctx, g, level)
 	if !ok {

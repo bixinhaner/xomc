@@ -9,8 +9,11 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	_ "time/tzdata" // T-0192 兜底：内嵌 IANA 时区库，万一 base 镜像无 /usr/share/zoneinfo 也不静默回落 UTC
+
+	"golang.org/x/sync/singleflight"
 
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/acs/transfercfg"
@@ -23,6 +26,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/rawarchive"
 	"github.com/omcgo/omcgo/internal/core/reliability"
 	"github.com/omcgo/omcgo/internal/core/reliability/dlq"
@@ -98,18 +102,50 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	defer w.Logger.Sync()
 	w.Logger.Info("omcgo-worker starting", zap.String("config", cfgPath))
 
-	// 启动时把 device_tasks 里仍为 pending 的任务重灌进 Redis 设备队列。
-	// ZScore 去重保证多 Worker/多次重启都不会重复入队；sent 任务不在此路径，
-	// 由 CPE 重连时的 RecoverPendingTasks 走陈旧阈值恢复。
-	if _, err := w.TaskService.RestorePendingQueues(ctx, 0); err != nil {
-		w.Logger.Warn("restore pending task queues failed", zap.Error(err))
-	}
-
 	// Register all event subscribers
 	registerSubscribers(w, &cfg)
 
+	// 启动时把 device_tasks 里仍为 pending 的任务重灌进 Redis 设备队列。
+	// 大库冷启动时即使有专用索引，恢复也可能受机械盘或 autovacuum 影响；放到后台
+	// 执行，避免历史任务积压阻塞 metrics/healthz 和 PM 消费者启动。ZScore 去重保证
+	// 多 Worker/多次重启都不会重复入队；sent 任务仍由 CPE 重连恢复路径处理。
+	restoreCtx, cancelRestore := context.WithCancel(ctx)
+	w.GS.Register("pending-queue-restore", 1, func(context.Context) error {
+		cancelRestore()
+		return nil
+	})
+	startPendingQueueRestore(restoreCtx, func(ctx context.Context) (task.RestoreStats, error) {
+		return w.TaskService.RestorePendingQueues(ctx, 0)
+	}, w.Logger)
+
 	w.Logger.Info("omcgo-worker ready, waiting for events...")
 	return w.WaitAndShutdown(nil)
+}
+
+// startPendingQueueRestore 异步执行启动期 pending 队列恢复，返回只读完成信号供测试
+// 和未来编排使用。恢复失败只降级告警，不影响 worker 健康端点和其它消费者。
+func startPendingQueueRestore(
+	ctx context.Context,
+	restore func(context.Context) (task.RestoreStats, error),
+	logger *zap.Logger,
+) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		stats, err := restore(ctx)
+		if err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Warn("restore pending task queues failed", zap.Error(err))
+			}
+			return
+		}
+		logger.Info("restore pending task queues completed",
+			zap.Int("scanned", stats.Scanned),
+			zap.Int("pushed", stats.Pushed),
+			zap.Int("skipped", stats.Skipped),
+			zap.Int("failed", stats.Failed))
+	}()
+	return done
 }
 
 func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
@@ -199,6 +235,9 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// T-0164 G1 真机闭环：acs.upload.Handler 发的瘦 payload 只带 device_sn，
 	// 由 collector 用同一个 deviceRepo 反查补齐 UUID / OUI / carrier / technology。
 	pmCollector.SetDeviceLookup(pmDeviceRepo)
+	// 已完成入库的同名文件重投时，在读取 MinIO 前按文件 marker 幂等短路。
+	// 原始 .xml 可能已被归档器改名为 .xml.gz，不能依赖旧对象仍然存在。
+	pmCollector.SetFileMarkerLookup(pmFileStore)
 
 	// T-0164 G1 BUG-6 真根因复盘 / 方案 D：collector 用指标库白名单过滤孤儿 counter。
 	// 复用 pmKPIRouter 的 LookupByDevice：route.Counters[].ReportKey 即设备所属产品在
@@ -207,6 +246,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// filterByWhitelist 本阶段 fail-open（lookup 失败 / 空集合时跳过过滤，避免误删）；#866
 	// normalizeResults 会在写入前要求 Unit/StatisType 齐全，缺失时失败并暴露。
 	pmCollector.SetCounterWhitelist(&routerCounterWhitelist{r: pmKPIRouter, log: logger})
+	pmCollector.SetEnabledIndicatorLookup(newEnabledIndicatorLookup(indicator.NewPgEnabledRepository(w.PgPool)))
 	pmResultNormSysCfg := admin.NewPgSysConfigRepository(w.PgPool)
 	pmCollector.SetNumberProcessLookup(func(ctx context.Context) (string, error) {
 		row, err := pmResultNormSysCfg.GetByKey(ctx, resultnorm.ConfigCategory, resultnorm.ConfigKey)
@@ -228,15 +268,33 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	pmCollector.SetRunner(pmRunner)
 
 	// PM 入库进程内并发：NATS push 订阅 async 回调单 goroutine 串行（单订阅只用 ~1 核）。
-	// 配 N 个订阅共享 durable consumer 吃满 worker 多核。<=0 回退 GOMAXPROCS（容器 CPU 配额），上限 16。
+	// 配 N 个订阅共享 durable consumer 吃满 worker 多核。<=0 回退 GOMAXPROCS（容器 CPU 配额）。
+	// 上限 32（2026-07-21 压测实测：20000 设备规模下旧上限 16 把并发顶死，worker CPU 却只用了
+	// ~30%（远未跑满）；提到 32 后隔离测量消费吞吐从约10/s提升到约20-27/s，稳定验证有效。
+	// 已同步把 tsdb 连接池上限从 25 提到 40，避免瓶颈从「并发数」转移到「DB 连接池耗尽」。
 	pmConcurrency := cfg.PMConsumerConcurrency
 	if pmConcurrency <= 0 {
 		pmConcurrency = runtime.GOMAXPROCS(0)
 	}
-	if pmConcurrency > 16 {
-		pmConcurrency = 16
+	if pmConcurrency > 32 {
+		pmConcurrency = 32
 	}
 	pmCollector.SetConcurrency(pmConcurrency)
+	// 服务端 durable consumer 的 MaxAckPending 必须与实际处理能力绑定。默认 1000 会在
+	// 机械盘过载时把大量消息同时推到 worker，形成重投和内存/IO 放大。
+	if setter, ok := w.EventBus.(interface {
+		SetQueueTuning(string, event.QueueTuning)
+	}); ok {
+		maxAckPending := pmConcurrency * 4
+		if maxAckPending < 16 {
+			maxAckPending = 16
+		}
+		setter.SetQueueTuning(event.SubjectPMFileReceived, event.QueueTuning{
+			AckWait:       2 * time.Minute,
+			MaxDeliver:    5,
+			MaxAckPending: maxAckPending,
+		})
+	}
 
 	// PM 指标大批量写异步提交（synchronous_commit=off）：PM 数据可从 MinIO 重建，换写吞吐。
 	// 注意：仅作用于 metrics.batchInsertCopy 等旁路；copy-direct 主路径 CopyIngest 刻意忽略它以保证
@@ -361,6 +419,24 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 		logger.Warn("subscribe reboot task closer", zap.Error(err))
 	}
 	logger.Info("reboot task closer started")
+
+	// PROVISION drain consumer（F09 自动开站暂不支持）：provision.Engine 仍会发布
+	// provision.started/completed/failed/step.done，但 PROVISION 是 WorkQueue 流——没有
+	// 任何 consumer ack 时消息会一直堆到 MaxAge（72h）才过期，期间在 nats jsz 里表现为
+	// 持续增长的积压（实测 2 万+条无人消费）。在功能正式落地前，用一个 no-op drain
+	// consumer 把 provision.* 全部 ack 掉，保持 workqueue 清空、监控干净。
+	// 用单个 `provision.>` 通配 consumer 覆盖整条流（WorkQueue 流不允许同一 filter subject
+	// 挂多个 consumer；通配即流本身的 subject，最稳）。功能上线时删掉此处、换成真正的订阅者即可。
+	if _, err := w.EventBus.QueueSubscribe("provision.>", "provision-drain",
+		func(_ context.Context, evt event.Event) error {
+			logger.Debug("provision event drained (auto-provisioning not yet supported)",
+				zap.String("subject", evt.Subject), zap.String("event_id", evt.ID))
+			return nil
+		}); err != nil {
+		logger.Warn("subscribe provision drain consumer", zap.Error(err))
+	} else {
+		logger.Info("provision drain consumer started (no-op ack; auto-provisioning not yet supported)")
+	}
 
 	// T-0157 C5: 消息中心 task 订阅器 — 监听 task.created/completed/failed 事件，按 user_id
 	// 隔离写 notifications 表，dedup_key=task.ID 保证同 task 多次状态变更 upsert 同一行。
@@ -638,11 +714,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	pmTz.shutdownOnCtx(pipeCtx)
 	pmTz.startReloadPoller(pipeCtx, defaultReloadPollInterval)
 	startPMAggregatorPipeline(pipeCtx, w, pmKPIRouter, pmTz, exportBucket)
-
-	// T-0164-P7 / G7：自定义聚合任务（oneshot + continuous）。
-	// 复用同一 kpiRouter；4 个 worker 抢 pm_tasks 中 task_subtype='adhoc_aggregation' 的 pending 行；
-	// continuous scheduler 单 goroutine 每分钟扫 scheduled 任务切回 pending。
-	startPMAdhocPipeline(pipeCtx, w, pmKPIRouter, cfg, pmTz)
+	startPMAggregationStream(pipeCtx, w, pmTz)
 
 	// M3: 周期备份调度器 + 任务 reaper（event-loss 兜底恢复）
 	backupScheduleRepo := backup.NewPgScheduleRepository(w.PgPool)
@@ -682,11 +754,9 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// T-0184: adhoc 过期任务定义清理 cron(每天 03:00)。
 	// 删 mode='oneshot' 且 is_builtin=false 且 created_at < now()-expire_days 天 的任务定义行；
 	// 只删 pm_tasks 行,绝不碰结果表 pm_adhoc_aggregation_results(两层口径分离,设计 §2.3)。
-	startPMAdhocExpireCleanup(w, logger)
-
 	// #779: 回收站自动移入 cron（每天 00:10，与 UI 配置说明对齐）。
 	// 读取 sys_configs device:deviceOfflineEnable / deviceOfflineSaveDay，
-	// 满足离线天数阈值的设备批量软删除（deleted_by='system:auto_recycle'）。
+	// 满足离线天数阈值的设备批量软删除（deleted_by='system'，executor='system:auto_recycle'）。
 	startAutoRecycleCron(w, logger)
 
 	// KPI/时序库物理分离：worker 把主库维度表周期刷入时序库影子维度表，
@@ -1138,6 +1208,134 @@ func (a *routerCounterWhitelist) LookupCounters(ctx context.Context, deviceSN st
 		}
 	}
 	return out, nil
+}
+
+const defaultEnabledIndicatorCacheTTL = 5 * time.Minute
+
+type enabledIndicatorRepository interface {
+	ListAll(ctx context.Context, dt indicator.DeviceType) ([]string, error)
+}
+
+type enabledIndicatorCacheEntry struct {
+	indicators map[string]struct{}
+	expiresAt  time.Time
+}
+
+type enabledIndicatorLookup struct {
+	repo enabledIndicatorRepository
+	ttl  time.Duration
+	now  func() time.Time
+
+	mu    sync.RWMutex
+	cache map[indicator.DeviceType]enabledIndicatorCacheEntry
+	loads singleflight.Group
+}
+
+func newEnabledIndicatorLookup(repo enabledIndicatorRepository) *enabledIndicatorLookup {
+	return &enabledIndicatorLookup{
+		repo:  repo,
+		ttl:   defaultEnabledIndicatorCacheTTL,
+		now:   time.Now,
+		cache: make(map[indicator.DeviceType]enabledIndicatorCacheEntry),
+	}
+}
+
+func (l *enabledIndicatorLookup) LookupEnabledIndicators(ctx context.Context, technology string) (map[string]struct{}, error) {
+	dt, err := indicatorDeviceTypeFromTechnology(technology)
+	if err != nil {
+		return nil, err
+	}
+	now := l.nowTime()
+	if cached, ok := l.lookupCache(dt, now); ok {
+		return cached, nil
+	}
+
+	value, err, _ := l.loads.Do(string(dt), func() (interface{}, error) {
+		now := l.nowTime()
+		if cached, ok := l.lookupCache(dt, now); ok {
+			return cached, nil
+		}
+		if l.repo == nil {
+			return nil, fmt.Errorf("enabled PM indicator repository is not configured")
+		}
+		ids, err := l.repo.ListAll(ctx, dt)
+		if err != nil {
+			return nil, fmt.Errorf("list enabled PM indicators (%s): %w", dt, err)
+		}
+		out := make(map[string]struct{})
+		for _, id := range ids {
+			if id != "" {
+				out[id] = struct{}{}
+			}
+		}
+		l.storeCache(dt, out, now.Add(l.ttlDuration()))
+		return cloneIndicatorSet(out), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	indicators, ok := value.(map[string]struct{})
+	if !ok {
+		return nil, fmt.Errorf("enabled PM indicator cache returned unexpected type %T", value)
+	}
+	return cloneIndicatorSet(indicators), nil
+}
+
+func (l *enabledIndicatorLookup) lookupCache(dt indicator.DeviceType, now time.Time) (map[string]struct{}, bool) {
+	l.mu.RLock()
+	entry, ok := l.cache[dt]
+	l.mu.RUnlock()
+	if !ok || now.After(entry.expiresAt) {
+		return nil, false
+	}
+	return cloneIndicatorSet(entry.indicators), true
+}
+
+func (l *enabledIndicatorLookup) storeCache(dt indicator.DeviceType, indicators map[string]struct{}, expiresAt time.Time) {
+	l.mu.Lock()
+	if l.cache == nil {
+		l.cache = make(map[indicator.DeviceType]enabledIndicatorCacheEntry)
+	}
+	l.cache[dt] = enabledIndicatorCacheEntry{
+		indicators: cloneIndicatorSet(indicators),
+		expiresAt:  expiresAt,
+	}
+	l.mu.Unlock()
+}
+
+func (l *enabledIndicatorLookup) ttlDuration() time.Duration {
+	if l.ttl <= 0 {
+		return defaultEnabledIndicatorCacheTTL
+	}
+	return l.ttl
+}
+
+func (l *enabledIndicatorLookup) nowTime() time.Time {
+	if l.now == nil {
+		return time.Now()
+	}
+	return l.now()
+}
+
+func cloneIndicatorSet(in map[string]struct{}) map[string]struct{} {
+	out := make(map[string]struct{}, len(in))
+	for id := range in {
+		out[id] = struct{}{}
+	}
+	return out
+}
+
+func indicatorDeviceTypeFromTechnology(technology string) (indicator.DeviceType, error) {
+	switch model.NormalizeTechnology(technology) {
+	case model.TechLTE:
+		return indicator.DeviceTypeENB, nil
+	case model.TechNR:
+		return indicator.DeviceTypeGNB, nil
+	case model.TechGSM:
+		return indicator.DeviceTypeGSM, nil
+	default:
+		return "", fmt.Errorf("unsupported PM technology for enabled indicators: %q", technology)
+	}
 }
 
 func parseStringSlice(s string) []string {

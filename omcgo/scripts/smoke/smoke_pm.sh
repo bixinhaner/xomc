@@ -309,7 +309,7 @@ check_list_or_empty "导出文件列表可查" "data.items"
 
 EXPORT_PARAMS="{}"
 [ -n "$ADHOC_ID" ] && EXPORT_PARAMS="{\"task_id\":\"${ADHOC_ID}\"}"
-req POST "/api/v1/pm/exports" "{\"source_type\":\"adhoc\",\"task_name\":\"${SMOKE_TAG}-exp\",\"params\":${EXPORT_PARAMS}}"
+req POST "/api/v1/pm/exports" "{\"source_type\":\"adhoc_result\",\"task_name\":\"${SMOKE_TAG}-exp\",\"params\":${EXPORT_PARAMS}}"
 check_status "导出任务创建" 201
 EXPORT_ID=$(jget data.id)
 check_field "导出创建返回 id" "data.id"

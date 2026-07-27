@@ -64,6 +64,26 @@ func TestBMNeighborListHasPrivateArfcnAlias(t *testing.T) {
 	t.Fatalf("expected BM.xml to define alias %s -> %s", privatePath, standardPath)
 }
 
+func TestMLQPLMNListObjectIsWritable(t *testing.T) {
+	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "MLQ.xml")
+	body, err := os.ReadFile(xmlPath)
+	require.NoError(t, err)
+
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal(body, &doc))
+
+	const path = "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList."
+	for _, object := range doc.Objects {
+		if object.StandardPath == path {
+			assert.Equal(t, path, object.Name)
+			assert.Equal(t, "READ_WRITE", object.Access)
+			return
+		}
+	}
+
+	t.Fatalf("expected MLQ.xml to define writable PLMNList object at %s", path)
+}
+
 func TestBMUpTimeUsesStandardPath(t *testing.T) {
 	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BM.xml")
 	body, err := os.ReadFile(xmlPath)
@@ -106,6 +126,33 @@ func TestBaiBNQGNBNameIsWritableNRCommonPath(t *testing.T) {
 	}
 
 	t.Fatalf("expected BaiBNQ.xml to define writable gNBName mapping at %s", path)
+}
+
+func TestBaiBNQTopLevelDeviceInfoUsesStandardPaths(t *testing.T) {
+	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BaiBNQ.xml")
+	body, err := os.ReadFile(xmlPath)
+	require.NoError(t, err)
+
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal(body, &doc))
+
+	want := map[string]string{
+		"Device.DeviceInfo.HardwareVersion": "Device.DeviceInfo.HardwareVersion",
+		"Device.DeviceInfo.ModelName":       "Device.DeviceInfo.ModelName",
+		"Device.DeviceInfo.SoftwareVersion": "Device.DeviceInfo.SoftwareVersion",
+		"Device.DeviceInfo.UpTime":          "Device.DeviceInfo.UpTime",
+	}
+	got := make(map[string]string, len(want))
+	for _, param := range doc.Params {
+		if _, ok := want[param.Name]; ok {
+			got[param.Name] = param.StandardPath
+		}
+	}
+
+	for privatePath, standardPath := range want {
+		require.Contains(t, got, privatePath, "expected BaiBNQ.xml to define %s", privatePath)
+		assert.Equal(t, standardPath, got[privatePath])
+	}
 }
 
 func TestBaiBNQNguBindInterfaceAndFallbackAreWritable(t *testing.T) {
@@ -196,4 +243,30 @@ func TestBaiBNQLTEIdleReselectionCarrierRanges(t *testing.T) {
 		assert.Equal(t, expectation.min, param.Min, leaf)
 		assert.Equal(t, expectation.max, param.Max, leaf)
 	}
+}
+
+func TestNormalizeEnumCSV_ReplacesFullWidthComma(t *testing.T) {
+	assert.Equal(t, "PSK,SIM,CERT,OTHER", normalizeEnumCSV(" PSK，SIM, ，CERT，OTHER "))
+}
+
+func TestXMLParamEntryCarriesValueRules(t *testing.T) {
+	const snippet = `<?xml version="1.0"?>
+<parameterModel paramModel="TestModel">
+  <parameters>
+    <param name="Device.Test.Value" standardPath="Device.Test.Value"
+      type="STRING" min="1" max="8" defaultValue="abc"
+      validationPattern="/^abc/" enumValues="a,b" enumLabels="A,B"/>
+  </parameters>
+</parameterModel>`
+
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal([]byte(snippet), &doc))
+	require.Len(t, doc.Params, 1)
+	entry := doc.Params[0]
+	assert.Equal(t, "1", entry.Min)
+	assert.Equal(t, "8", entry.Max)
+	assert.Equal(t, "abc", entry.DefaultValue)
+	assert.Equal(t, "/^abc/", entry.ValidationPattern)
+	assert.Equal(t, "a,b", entry.EnumValues)
+	assert.Equal(t, "A,B", entry.EnumLabels)
 }

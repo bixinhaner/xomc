@@ -137,6 +137,104 @@ func TestMapDeviceItem_ConfigRestore_EmptyDestVersionShowsEmptyTargetFile(t *tes
 	assert.Empty(t, item.TargetFile, "未写回前 TargetFile 保持空（不应回退用 parent.FileName）")
 }
 
+func TestMapDeviceItem_FaultLogQuotaDeletedFileIsShownWithoutDownloadURL(t *testing.T) {
+	svc := newServiceForMap(t)
+	catalog := mustCatalog(t, "FAULT_LOG_COLLECT")
+	parent := &software.UpgradeTask{
+		ID:       uuid.New(),
+		TaskName: "fault-log-task",
+		TaskType: software.TaskTypeLogCollect,
+	}
+	const fileName = "ErrorLog_20260715.1432 0800_dieLog(1).tar.gz"
+	sub := software.UpgradeSubTaskWithTaskName{
+		UpgradeSubTask: software.UpgradeSubTask{
+			ID:        uuid.New(),
+			TaskID:    parent.ID,
+			DeviceID:  uuid.New(),
+			DeviceSN:  "SN-QUOTA-1",
+			Status:    software.UpgradeCompleted,
+			UpdatedAt: coremodel.Time(time.Date(2026, 7, 15, 16, 8, 0, 0, time.UTC)),
+		},
+		TaskName: "fault-log-task",
+	}
+	cache := map[uuid.UUID]*coremodel.Device{
+		sub.DeviceID: {ID: sub.DeviceID, SerialNumber: "SN-QUOTA-1", ProductClass: "BSC"},
+	}
+	svc.SetFileLandedLookup(func(_ context.Context, sn, mainTaskID string) (string, bool, error) {
+		assert.Equal(t, "SN-QUOTA-1", sn)
+		assert.Equal(t, parent.ID.String(), mainTaskID)
+		return fileName, true, nil
+	})
+	svc.SetFileDeletedLookup(func(_ context.Context, sn, mainTaskID, targetFile string) (bool, error) {
+		assert.Equal(t, "SN-QUOTA-1", sn)
+		assert.Equal(t, parent.ID.String(), mainTaskID)
+		assert.Equal(t, fileName, targetFile)
+		return true, nil
+	})
+	downloadLookupCalled := false
+	svc.SetDownloadURLLookup(func(context.Context, string, string) (string, error) {
+		downloadLookupCalled = true
+		return "http://example.invalid/download", nil
+	})
+
+	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
+	require.NoError(t, err)
+	assert.Equal(t, "ended", item.Status)
+	assert.Equal(t, fileName, item.TargetFile, "配额清理后仍应展示文件名")
+	assert.True(t, item.FileDeleted, "配额清理后的文件需要显式告诉前端已删除")
+	assert.Empty(t, item.DownloadURL, "已被配额清理的文件不能再返回下载链接")
+	assert.False(t, downloadLookupCalled, "已删除文件不应再尝试生成 presigned URL")
+}
+
+func TestMapDeviceItem_RuntimeLogDeletedFileIsShownWithoutDownloadURL(t *testing.T) {
+	svc := newServiceForMap(t)
+	catalog := mustCatalog(t, "RUNTIME_LOG_COLLECT")
+	parent := &software.UpgradeTask{
+		ID:       uuid.New(),
+		TaskName: "runtime-log-task",
+		TaskType: software.TaskTypeLogCollect,
+	}
+	const fileName = "runtime-SN-QUOTA-2.tar.gz"
+	sub := software.UpgradeSubTaskWithTaskName{
+		UpgradeSubTask: software.UpgradeSubTask{
+			ID:        uuid.New(),
+			TaskID:    parent.ID,
+			DeviceID:  uuid.New(),
+			DeviceSN:  "SN-QUOTA-2",
+			Status:    software.UpgradeCompleted,
+			UpdatedAt: coremodel.Time(time.Date(2026, 7, 17, 11, 0, 0, 0, time.UTC)),
+		},
+		TaskName: "runtime-log-task",
+	}
+	cache := map[uuid.UUID]*coremodel.Device{
+		sub.DeviceID: {ID: sub.DeviceID, SerialNumber: "SN-QUOTA-2", ProductClass: "BSC"},
+	}
+	svc.SetFileLandedLookup(func(_ context.Context, sn, mainTaskID string) (string, bool, error) {
+		assert.Equal(t, "SN-QUOTA-2", sn)
+		assert.Equal(t, parent.ID.String(), mainTaskID)
+		return fileName, true, nil
+	})
+	svc.SetFileDeletedLookup(func(_ context.Context, sn, mainTaskID, targetFile string) (bool, error) {
+		assert.Equal(t, "SN-QUOTA-2", sn)
+		assert.Equal(t, parent.ID.String(), mainTaskID)
+		assert.Equal(t, fileName, targetFile)
+		return true, nil
+	})
+	downloadLookupCalled := false
+	svc.SetDownloadURLLookup(func(context.Context, string, string) (string, error) {
+		downloadLookupCalled = true
+		return "http://example.invalid/download", nil
+	})
+
+	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
+	require.NoError(t, err)
+	assert.Equal(t, "ended", item.Status)
+	assert.Equal(t, fileName, item.TargetFile)
+	assert.True(t, item.FileDeleted, "运行日志元数据标记删除后也需要告诉前端")
+	assert.Empty(t, item.DownloadURL)
+	assert.False(t, downloadLookupCalled, "已删除运行日志不应再尝试生成 presigned URL")
+}
+
 // 以下两测覆盖 issue #195：上报时间只在文件真正上报成功（终态 ended）时才填。
 // sub_task.updated_at 在子任务生成 / 中间状态流转时都会刷新，但那不是
 // "文件上报成功"时刻——直接拿 updated_at 会在任务刚创建时就显示一个误导值。
@@ -168,7 +266,7 @@ func TestMapDeviceItem_ReportTime_EmptyBeforeSuccess(t *testing.T) {
 	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
 	require.NoError(t, err)
 	assert.NotEqual(t, "ended", item.Status, "前置：该子任务尚未到成功终态")
-	assert.Empty(t, item.LastReportAt, "未到成功终态时上报时间必须为空")
+	assert.Nil(t, item.LastReportAt, "未到成功终态时上报时间必须为空")
 }
 
 // 死判 filled-on-success：上报成功终态，上报时间被填为 updated_at。
@@ -198,7 +296,7 @@ func TestMapDeviceItem_ReportTime_FilledOnSuccess(t *testing.T) {
 	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
 	require.NoError(t, err)
 	assert.Equal(t, "ended", item.Status, "前置：该子任务已到成功终态")
-	assert.Equal(t, reportedAt.Format(time.RFC3339), item.LastReportAt, "成功终态时上报时间应填为 updated_at")
+	assertTimePtrEqual(t, reportedAt, item.LastReportAt, "成功终态时上报时间应填为 updated_at")
 }
 
 // 以下两测覆盖 issue #655：三皮肤设备列表新增「开始时间 / 结束时间」两列，
@@ -233,8 +331,8 @@ func TestMapDeviceItem_StartedAndEndedAt_InProgress(t *testing.T) {
 	}
 	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
 	require.NoError(t, err)
-	assert.Equal(t, startedAt.Format(time.RFC3339), item.StartedAt, "首次进入执行态后 StartedAt 应有值")
-	assert.Empty(t, item.EndedAt, "未到终态时 EndedAt 必须为空")
+	assertTimePtrEqual(t, startedAt, item.StartedAt, "首次进入执行态后 StartedAt 应有值")
+	assert.Nil(t, item.EndedAt, "未到终态时 EndedAt 必须为空")
 }
 
 // ended：started_at + completed_at 都已写 → 两字段都有值且不相等。
@@ -268,9 +366,9 @@ func TestMapDeviceItem_StartedAndEndedAt_Ended(t *testing.T) {
 	}
 	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
 	require.NoError(t, err)
-	assert.Equal(t, startedAt.Format(time.RFC3339), item.StartedAt)
-	assert.Equal(t, completedAt.Format(time.RFC3339), item.EndedAt)
-	assert.NotEqual(t, item.StartedAt, item.EndedAt, "StartedAt 与 EndedAt 必须能区分开（避免回归到都用 updated_at）")
+	assertTimePtrEqual(t, startedAt, item.StartedAt)
+	assertTimePtrEqual(t, completedAt, item.EndedAt)
+	assert.False(t, item.StartedAt.Equal(*item.EndedAt), "StartedAt 与 EndedAt 必须能区分开（避免回归到都用 updated_at）")
 }
 
 // pending：未进入执行态 → 两字段都为空。
@@ -298,8 +396,8 @@ func TestMapDeviceItem_StartedAndEndedAt_Pending(t *testing.T) {
 	}
 	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
 	require.NoError(t, err)
-	assert.Empty(t, item.StartedAt, "pending 态 StartedAt 必须为空")
-	assert.Empty(t, item.EndedAt, "pending 态 EndedAt 必须为空")
+	assert.Nil(t, item.StartedAt, "pending 态 StartedAt 必须为空")
+	assert.Nil(t, item.EndedAt, "pending 态 EndedAt 必须为空")
 }
 
 // issue #655 追加：被操作者主动终止的子任务在执行态之前被叫停 → repo 只写了
@@ -336,8 +434,8 @@ func TestMapDeviceItem_Terminated_StartedAtFallbackAndFailureReason(t *testing.T
 	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
 	require.NoError(t, err)
 	assert.Equal(t, "terminated", item.Result, "前置：terminated 走的是 result=terminated 分支")
-	assert.Equal(t, completedAt.Format(time.RFC3339), item.EndedAt)
-	assert.Equal(t, item.EndedAt, item.StartedAt, "terminated 且 StartedAt 空时应兜底 = EndedAt")
+	assertTimePtrEqual(t, completedAt, item.EndedAt)
+	assertTimePtrEqual(t, completedAt, item.StartedAt, "terminated 且 StartedAt 空时应兜底 = EndedAt")
 	assert.Equal(t, "终止", item.FailureReason, "terminated 且 FailureReason 空时应兜底为「终止」")
 	assert.Equal(t, "task terminated by operator", item.FailureDetail, "FailureDetail 保持设备原始 ErrorMessage 不动")
 }
@@ -375,7 +473,7 @@ func TestMapDeviceItem_Terminated_PreserveExistingStartedAt(t *testing.T) {
 	}
 	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
 	require.NoError(t, err)
-	assert.Equal(t, startedAt.Format(time.RFC3339), item.StartedAt, "已有真实 started_at 时不应被 endedAt 覆盖")
-	assert.Equal(t, completedAt.Format(time.RFC3339), item.EndedAt)
-	assert.NotEqual(t, item.StartedAt, item.EndedAt)
+	assertTimePtrEqual(t, startedAt, item.StartedAt, "已有真实 started_at 时不应被 endedAt 覆盖")
+	assertTimePtrEqual(t, completedAt, item.EndedAt)
+	assert.False(t, item.StartedAt.Equal(*item.EndedAt))
 }

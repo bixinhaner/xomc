@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -19,9 +20,15 @@ import (
 	pmaggregator "github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
+	"github.com/omcgo/omcgo/internal/pm/metrics"
 	"github.com/omcgo/omcgo/internal/topology"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+)
+
+const (
+	activeUEKPIAlias = "UE_ACTIVE"
+	activeUEKPIID    = "KGNB0568"
 )
 
 // FrontendDeviceStats matches the frontend's expected device_stats format.
@@ -58,6 +65,7 @@ type KPIDelta struct {
 	ChangePercent float64 `json:"change_percent"` // 变化百分比，正数表示增长
 	Trend         string  `json:"trend"`          // "up" | "down" | "stable"
 	CompareType   string  `json:"compare_type"`   // "yesterday" | "last_week"
+	HasComparison bool    `json:"has_comparison"` // 是否存在有效的非零历史基线
 }
 
 // DashboardSummary is the aggregated dashboard response.
@@ -124,7 +132,7 @@ type AlarmTypePieEntry struct {
 
 // KPITimeSeriesEntry represents a single data point within a named KPI series.
 type KPITimeSeriesEntry struct {
-	Time  string      `json:"time"`
+	Time  time.Time   `json:"time"`
 	Value jsonx.Float `json:"value"`
 }
 
@@ -147,13 +155,23 @@ type Service struct {
 	// 给 GetKPIDefinitions（issue #213 Phase1）按别名表的 K 编号反查中文名与单位用。
 	// 可能为 nil（测试 / 退化场景）：此时 GetKPIDefinitions 仅返回别名表静态元数据，不富化。
 	indicatorRepo indicator.IndicatorRepository
+	// enabledIndicatorRepo 读取 enabled_pm_indicators_*，用于保存首页 KPI 布局时拒绝未启用指标。
+	// 生产由 NewService 基于主库 PgPool 注入；nil 时跳过校验（测试/退化场景）。
+	enabledIndicatorRepo indicator.EnabledIndicatorRepository
 	// pmAggregator 复用 PM 的 network 维度查询链路，为首页 KPI 折线图提供 counter-first KPI 重算口径。
 	// 可能为 nil（部分测试场景）：运行时应由 provider 注入，缺失时 KPI 时序查询返回配置错误。
-	pmAggregator *pmaggregator.Aggregator
+	pmAggregator dashboardKPIAggregator
 	// layoutRepo 是 issue #213 S1 全局 KPI 首页布局（dashboard_kpi_layouts）读写仓库。
 	// 可能为 nil（部分测试场景）：此时 GetKPILayout 回退内置默认，SaveKPILayout 报错。
 	layoutRepo KPILayoutRepository
 	logger     *zap.Logger
+}
+
+// dashboardKPIAggregator is the narrow PM query capability used by dashboard
+// time-series. Keeping this boundary small also makes query-granularity
+// regressions observable in service tests.
+type dashboardKPIAggregator interface {
+	Query(context.Context, pmaggregator.QueryRequest) ([]pmaggregator.Row, error)
 }
 
 // NewService creates a new dashboard service.
@@ -182,6 +200,7 @@ func NewService(
 	// 全局 KPI 布局仓库走主库（dashboard_kpi_layouts 在主库）。pgPool 为 nil 时（测试）留空。
 	if pgPool != nil {
 		s.layoutRepo = NewKPILayoutRepository(pgPool)
+		s.enabledIndicatorRepo = indicator.NewPgEnabledRepository(pgPool)
 	}
 	return s
 }
@@ -210,7 +229,7 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 	// 导致 KPI 卡与同页柱图数字漂移。
 	g.Go(func() error {
 		if err := s.pgPool.QueryRow(gctx, summaryDeviceCountsQuery).Scan(&totalDevices, &onlineDevices); err != nil {
-			s.logger.Warn("dashboard: device counts query failed", zap.Error(err))
+			logDashboardQueryFailure(s.logger, "dashboard: device counts query failed", err)
 			totalDevices = 0
 			onlineDevices = 0
 		}
@@ -221,7 +240,7 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 	g.Go(func() error {
 		stats, err := s.alarmStore.Statistics(gctx, alarm.AlarmFilter{})
 		if err != nil {
-			s.logger.Warn("dashboard: alarm stats failed", zap.Error(err))
+			logDashboardQueryFailure(s.logger, "dashboard: alarm stats failed", err)
 			rawAlarmStats = &alarm.AlarmStatistics{
 				BySeverity: make(map[model.AlarmSeverity]int64),
 				ByType:     make(map[string]int64),
@@ -246,7 +265,7 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 		}
 		rows, err := s.tsPool.Query(gctx, query, args...)
 		if err != nil {
-			s.logger.Warn("dashboard: latest kpi query failed", zap.Error(err))
+			logDashboardQueryFailure(s.logger, "dashboard: latest kpi query failed", err)
 			return nil
 		}
 		defer rows.Close()
@@ -265,7 +284,7 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 			})
 		}
 		if err := rows.Err(); err != nil {
-			s.logger.Warn("dashboard: iterate latest kpi rows failed", zap.Error(err))
+			logDashboardQueryFailure(s.logger, "dashboard: iterate latest kpi rows failed", err)
 		}
 		return nil
 	})
@@ -279,7 +298,7 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 		filter.SortDir = "desc"
 		result, err := s.alarmStore.ListActive(gctx, filter)
 		if err != nil {
-			s.logger.Warn("dashboard: recent alarms failed", zap.Error(err))
+			logDashboardQueryFailure(s.logger, "dashboard: recent alarms failed", err)
 			rawAlarms = []model.Alarm{}
 			return nil
 		}
@@ -298,7 +317,7 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 			return nil
 		}
 		if err := s.pgPool.QueryRow(gctx, query, args...).Scan(&alarmDeviceCount); err != nil {
-			s.logger.Warn("dashboard: alarm device count failed", zap.Error(err))
+			logDashboardQueryFailure(s.logger, "dashboard: alarm device count failed", err)
 		}
 		return nil
 	})
@@ -328,9 +347,7 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 	// Map KPI values to named fields (use latest value per KPI name)
 	for _, v := range rawKPIValues {
 		key := v.KPIName
-		if _, exists := summary.KPIOverview[key]; !exists {
-			summary.KPIOverview[key] = v.KPIValue
-		}
+		setDashboardKPIOverviewValue(summary.KPIOverview, key, v.KPIValue)
 	}
 
 	// Map recent alarms to frontend format (aggregate by device)
@@ -359,9 +376,28 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 	}
 
 	// Calculate KPI deltas (trend data for cards)
-	summary.KPIDeltas = s.calculateKPIDeltas(ctx, totalDevices, summary.AlarmStats.Total)
+	currentActiveUE, hasCurrentActiveUE := summary.KPIOverview[activeUEKPIAlias]
+	summary.KPIDeltas = s.calculateKPIDeltas(
+		ctx,
+		totalDevices,
+		summary.AlarmStats.Total,
+		currentActiveUE,
+		hasCurrentActiveUE,
+	)
 
 	return summary, nil
+}
+
+func setDashboardKPIOverviewValue(overview map[string]float64, key string, value float64) {
+	if _, exists := overview[key]; !exists {
+		overview[key] = value
+	}
+	// PM 规范化入库使用指标编号作为 metric_path；Dashboard 对外继续提供稳定的展示别名。
+	if key == activeUEKPIID {
+		if _, exists := overview[activeUEKPIAlias]; !exists {
+			overview[activeUEKPIAlias] = value
+		}
+	}
 }
 
 func severityToLabel(s model.AlarmSeverity) string {
@@ -423,45 +459,91 @@ func derefOrEmpty(s *string) string {
 
 // calculateKPIDeltas calculates trend data for dashboard KPI cards.
 // Compares current values with previous period (yesterday for real-time metrics, last week for daily metrics).
-func (s *Service) calculateKPIDeltas(ctx context.Context, currentTotalDevices int64, currentTotalAlarms int64) map[string]KPIDelta {
+func (s *Service) calculateKPIDeltas(
+	ctx context.Context,
+	currentTotalDevices int64,
+	currentTotalAlarms int64,
+	currentActiveUE float64,
+	hasCurrentActiveUE bool,
+) map[string]KPIDelta {
 	now := time.Now()
-	yesterdayStart := now.Add(-24 * time.Hour).Truncate(24 * time.Hour)
-	yesterdayEnd := yesterdayStart.Add(24 * time.Hour)
-	lastWeekStart := now.Add(-7 * 24 * time.Hour).Truncate(24 * time.Hour)
-	lastWeekEnd := lastWeekStart.Add(24 * time.Hour)
+	windows := dashboardKPIDeltaWindows(now)
 
 	deltas := make(map[string]KPIDelta)
 
 	// 1. Total devices trend (compare with last week same time)
-	prevTotalDevices, err := s.countDevicesAtTime(ctx, lastWeekEnd)
-	if err == nil && prevTotalDevices > 0 {
-		deltas["total_devices"] = computeKPIDelta(float64(currentTotalDevices), float64(prevTotalDevices), "last_week")
-	} else {
-		// Fallback: no trend data if query fails
-		deltas["total_devices"] = KPIDelta{
-			CurrentValue:  float64(currentTotalDevices),
-			PreviousValue: 0,
-			ChangePercent: 0,
-			Trend:         "stable",
-			CompareType:   "last_week",
-		}
+	prevTotalDevices, err := s.countDevicesAtTime(ctx, windows.DeviceCompareAt)
+	if err != nil {
+		logDashboardQueryFailure(s.logger, "dashboard: previous device count unavailable", err)
 	}
+	deltas["total_devices"] = computeKPIDelta(
+		float64(currentTotalDevices),
+		float64(prevTotalDevices),
+		err == nil,
+		"last_week",
+	)
 
 	// 2. Active alarms trend (compare with yesterday)
-	prevTotalAlarms, err := s.countAlarmsAtTime(ctx, yesterdayEnd)
-	if err == nil {
-		deltas["active_alarms"] = computeKPIDelta(float64(currentTotalAlarms), float64(prevTotalAlarms), "yesterday")
-	} else {
-		deltas["active_alarms"] = KPIDelta{
-			CurrentValue:  float64(currentTotalAlarms),
-			PreviousValue: 0,
-			ChangePercent: 0,
-			Trend:         "stable",
-			CompareType:   "yesterday",
+	prevTotalAlarms, err := s.countAlarmsAtTime(ctx, windows.AlarmCompareAt)
+	if err != nil {
+		logDashboardQueryFailure(s.logger, "dashboard: previous alarm count unavailable", err)
+	}
+	deltas["active_alarms"] = computeKPIDelta(
+		float64(currentTotalAlarms),
+		float64(prevTotalAlarms),
+		err == nil,
+		"yesterday",
+	)
+
+	// 3. Active UE trend. Current value comes from the latest KPI overview sample;
+	// the baseline reuses the dashboard network KPI time-series data chain.
+	deltas[activeUEKPIAlias] = computeKPIDelta(currentActiveUE, 0, false, "last_week")
+	if hasCurrentActiveUE {
+		currentEntries, currentErr := s.queryNetworkKPISeries(
+			ctx,
+			activeUEKPIID,
+			windows.UECurrentStart,
+			windows.UECurrentEnd,
+		)
+		if currentErr != nil {
+			logDashboardQueryFailure(s.logger, "dashboard: current active UE comparison unavailable", currentErr)
+		}
+		previousEntries, previousErr := s.queryNetworkKPISeries(
+			ctx,
+			activeUEKPIID,
+			windows.UEPreviousStart,
+			windows.UEPreviousEnd,
+		)
+		if previousErr != nil {
+			logDashboardQueryFailure(s.logger, "dashboard: previous active UE comparison unavailable", previousErr)
+		}
+		if currentErr == nil && previousErr == nil {
+			deltas[activeUEKPIAlias] = computeSeriesKPIDelta(currentEntries, previousEntries, "last_week")
 		}
 	}
 
 	return deltas
+}
+
+type kpiDeltaWindows struct {
+	DeviceCompareAt time.Time
+	AlarmCompareAt  time.Time
+	UECurrentStart  time.Time
+	UECurrentEnd    time.Time
+	UEPreviousStart time.Time
+	UEPreviousEnd   time.Time
+}
+
+func dashboardKPIDeltaWindows(now time.Time) kpiDeltaWindows {
+	currentStart := dashboardStartOfDay(now)
+	return kpiDeltaWindows{
+		DeviceCompareAt: now.AddDate(0, 0, -7),
+		AlarmCompareAt:  now.AddDate(0, 0, -1),
+		UECurrentStart:  currentStart,
+		UECurrentEnd:    now,
+		UEPreviousStart: currentStart.AddDate(0, 0, -7),
+		UEPreviousEnd:   now.AddDate(0, 0, -7),
+	}
 }
 
 // summaryDeviceCountsQuery 给 dashboard /summary 接口的 KPI 卡用：取设备总数 +
@@ -484,13 +566,21 @@ const countDevicesAtTimeQuery = `
 	  AND (deleted_at IS NULL OR deleted_at > $1)
 `
 
-// countAlarmsAtTimeQuery 重建时刻 t 的活跃告警数：raised_at 在 t 之前，且
-// 截至 t 未被清除。alarms_history 在时序库（tsPool）上，是 7d chunk 的超表。
-const countAlarmsAtTimeQuery = `
-	SELECT COUNT(*)
+// 当前仍未清除的告警只存在主库 alarms_active；只要在 t 前发生，它在 t 时刻就是活跃告警。
+const listActiveAlarmIDsAtTimeQuery = `
+	SELECT id
+	FROM alarms_active
+	WHERE raised_at <= $1
+`
+
+// 已清除告警会从 alarms_active 搬到时序库 alarms_history。只有在 t 之后才清除的记录，
+// 在 t 时刻仍属于活跃告警。两表由告警清除链路迁移，稳定状态下互斥。
+const countHistoricalAlarmsAtTimeQuery = `
+	SELECT COUNT(DISTINCT alarm_id)
 	FROM alarms_history
 	WHERE raised_at <= $1
-	  AND (cleared_at IS NULL OR cleared_at > $1)
+	  AND cleared_at > $1
+	  AND NOT (alarm_id = ANY($2::uuid[]))
 `
 
 // countDevicesAtTime 返回时刻 t 在网设备总数（含历史已下线但当时尚在网的）。
@@ -509,35 +599,55 @@ func (s *Service) countDevicesAtTime(ctx context.Context, t time.Time) (int64, e
 // countAlarmsAtTime 返回时刻 t 的活跃告警数（已 raise 未 clear）。
 // 用于 dashboard KPI 卡片的同环比对比。
 func (s *Service) countAlarmsAtTime(ctx context.Context, t time.Time) (int64, error) {
+	if s.pgPool == nil {
+		return 0, fmt.Errorf("countAlarmsAtTime: pgPool not configured")
+	}
 	if s.tsPool == nil {
 		return 0, fmt.Errorf("countAlarmsAtTime: tsPool not configured")
 	}
-	var n int64
-	if err := s.tsPool.QueryRow(ctx, countAlarmsAtTimeQuery, t).Scan(&n); err != nil {
-		return 0, fmt.Errorf("countAlarmsAtTime: %w", err)
+	rows, err := s.pgPool.Query(ctx, listActiveAlarmIDsAtTimeQuery, t)
+	if err != nil {
+		return 0, fmt.Errorf("countAlarmsAtTime active: %w", err)
 	}
-	return n, nil
+	defer rows.Close()
+	activeIDs := make([]uuid.UUID, 0)
+	seenActiveIDs := make(map[uuid.UUID]struct{})
+	for rows.Next() {
+		var alarmID uuid.UUID
+		if err := rows.Scan(&alarmID); err != nil {
+			return 0, fmt.Errorf("countAlarmsAtTime scan active: %w", err)
+		}
+		if _, exists := seenActiveIDs[alarmID]; exists {
+			continue
+		}
+		seenActiveIDs[alarmID] = struct{}{}
+		activeIDs = append(activeIDs, alarmID)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("countAlarmsAtTime iterate active: %w", err)
+	}
+	var historicalCount int64
+	if err := s.tsPool.QueryRow(ctx, countHistoricalAlarmsAtTimeQuery, t, activeIDs).Scan(&historicalCount); err != nil {
+		return 0, fmt.Errorf("countAlarmsAtTime history: %w", err)
+	}
+	return int64(len(activeIDs)) + historicalCount, nil
 }
 
 // computeKPIDelta calculates delta values for a single KPI metric.
-func computeKPIDelta(current, previous float64, compareType string) KPIDelta {
+func computeKPIDelta(current, previous float64, hasComparison bool, compareType string) KPIDelta {
 	delta := KPIDelta{
 		CurrentValue:  current,
 		PreviousValue: previous,
 		CompareType:   compareType,
+		Trend:         "stable",
 	}
 
-	if previous == 0 {
-		// Avoid division by zero
-		if current > 0 {
-			delta.ChangePercent = 100
-			delta.Trend = "up"
-		} else {
-			delta.ChangePercent = 0
-			delta.Trend = "stable"
-		}
+	// 百分比变化必须有真实且非零的历史基线。缺样本、查询失败或历史值为 0
+	// 都不能被解释成“增长 100%”。
+	if !hasComparison || previous == 0 {
 		return delta
 	}
+	delta.HasComparison = true
 
 	delta.ChangePercent = ((current - previous) / previous) * 100
 
@@ -552,6 +662,28 @@ func computeKPIDelta(current, previous float64, compareType string) KPIDelta {
 	}
 
 	return delta
+}
+
+func averageKPITrendEntries(entries []KPITrendEntry) (float64, bool) {
+	var sum float64
+	count := 0
+	for _, entry := range entries {
+		if math.IsNaN(entry.Value) || math.IsInf(entry.Value, 0) {
+			continue
+		}
+		sum += entry.Value
+		count++
+	}
+	if count == 0 {
+		return 0, false
+	}
+	return sum / float64(count), true
+}
+
+func computeSeriesKPIDelta(currentEntries, previousEntries []KPITrendEntry, compareType string) KPIDelta {
+	current, hasCurrent := averageKPITrendEntries(currentEntries)
+	previous, hasPrevious := averageKPITrendEntries(previousEntries)
+	return computeKPIDelta(current, previous, hasCurrent && hasPrevious, compareType)
 }
 
 // alarmTrendByDateQuery 按天分级统计告警数。调用侧只用固定表名格式化，不接收用户输入。
@@ -759,7 +891,7 @@ func (s *Service) GetKPITrendComparison(ctx context.Context, kpiName string, com
 func (s *Service) GetRegionStats(ctx context.Context) ([]RegionStatEntry, error) {
 	groups, err := s.groupRepo.GetTree(ctx)
 	if err != nil {
-		s.logger.Warn("dashboard: get group tree failed", zap.Error(err))
+		logDashboardQueryFailure(s.logger, "dashboard: get group tree failed", err)
 		return []RegionStatEntry{}, nil
 	}
 	if len(groups) == 0 {
@@ -774,8 +906,8 @@ func (s *Service) GetRegionStats(ctx context.Context) ([]RegionStatEntry, error)
 
 		deviceIDs, err := s.groupRepo.ListDeviceIDs(ctx, g.ID)
 		if err != nil {
-			s.logger.Warn("dashboard: list device IDs for group failed",
-				zap.String("group", g.Name), zap.Error(err))
+			logDashboardQueryFailure(s.logger, "dashboard: list device IDs for group failed", err,
+				zap.String("group", g.Name))
 			entries = append(entries, entry)
 			continue
 		}
@@ -798,8 +930,8 @@ func (s *Service) GetRegionStats(ctx context.Context) ([]RegionStatEntry, error)
 					return nil
 				}
 				if err := s.pgPool.QueryRow(gctx, onlineQuery, args...).Scan(&entry.OnlineCount); err != nil {
-					s.logger.Warn("dashboard: count online devices failed",
-						zap.String("group", entry.Region), zap.Error(err))
+					logDashboardQueryFailure(s.logger, "dashboard: count online devices failed", err,
+						zap.String("group", entry.Region))
 				}
 				return nil
 			})
@@ -815,8 +947,8 @@ func (s *Service) GetRegionStats(ctx context.Context) ([]RegionStatEntry, error)
 					return nil
 				}
 				if err := s.pgPool.QueryRow(gctx, alarmQuery, args...).Scan(&entry.AlarmCount); err != nil {
-					s.logger.Warn("dashboard: count group alarms failed",
-						zap.String("group", entry.Region), zap.Error(err))
+					logDashboardQueryFailure(s.logger, "dashboard: count group alarms failed", err,
+						zap.String("group", entry.Region))
 				}
 				return nil
 			})
@@ -911,11 +1043,11 @@ func (s *Service) GetAlarmTypePie(ctx context.Context) ([]AlarmTypePieEntry, err
 // GetKPITimeSeries returns time-series data for multiple KPI names within a time range.
 //
 // 取数源：复用 PM Aggregator 的 network 维度查询链路。
-// 历史完整桶读 hourly；当前整点缺点时，补最近一小时 15min 尾部窗口。
+// 历史完整桶读 hourly；点位时间与性能仪表板一致，使用桶起点。
 // KPI 派生指标先聚合 counter 依赖，再在时间桶内按公式重算；dashboard 不直接平均 KPI 行。
 //
 // 查询键：前端传指标编号（K/C 编号），直接查 metric_path。
-func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, startTime, endTime time.Time) (KPITimeSeriesResponse, error) {
+func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, technology model.Technology, granularity metrics.Granularity, startTime, endTime time.Time) (KPITimeSeriesResponse, error) {
 	result := make(KPITimeSeriesResponse, len(kpiNames))
 
 	if len(kpiNames) == 0 {
@@ -938,14 +1070,20 @@ func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, start
 	}
 
 	// 取全网时序：走 PM Aggregator 的 network 维度，保持与 PM 查询页一致的 KPI 重算口径。
-	points, err := s.fetchNetworkKCodeSeries(ctx, kcodes, startTime, endTime)
+	var points []networkSeriesPoint
+	var err error
+	if granularity == metrics.GranularityDaily {
+		points, err = s.fetchNetworkKCodeDailySeries(ctx, kcodes, technology, startTime, endTime)
+	} else {
+		points, err = s.fetchNetworkKCodeSeries(ctx, kcodes, technology, startTime, endTime)
+	}
 	if err != nil {
 		return nil, err
 	}
 
 	for _, p := range points {
 		entry := KPITimeSeriesEntry{
-			Time:  p.time.Format(time.RFC3339),
+			Time:  p.time,
 			Value: p.value,
 		}
 		// 按指标编号直接回填。
@@ -953,6 +1091,28 @@ func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, start
 	}
 
 	return result, nil
+}
+
+func (s *Service) fetchNetworkKCodeDailySeries(ctx context.Context, kcodes []string, technology model.Technology, startTime, endTime time.Time) ([]networkSeriesPoint, error) {
+	if s.pmAggregator == nil {
+		return nil, fmt.Errorf("dashboard network KPI aggregator not configured")
+	}
+	rows, err := s.pmAggregator.Query(ctx, buildNetworkKPIDailySeriesRequest(kcodes, technology, startTime, endTime))
+	if err != nil {
+		return nil, fmt.Errorf("query dashboard network daily kpi series: %w", err)
+	}
+	return sortAndDedupeNetworkSeriesPoints(networkRowsToDailySeriesPoints(rows, startTime, endTime)), nil
+}
+
+func networkRowsToDailySeriesPoints(rows []pmaggregator.Row, startTime, endTime time.Time) []networkSeriesPoint {
+	points := make([]networkSeriesPoint, 0, len(rows))
+	for _, r := range rows {
+		if r.Time.Before(startTime) || !r.Time.Before(endTime) {
+			continue
+		}
+		points = append(points, networkSeriesPoint{code: r.MetricPath, time: r.Time, value: r.MetricValue})
+	}
+	return points
 }
 
 // networkSeriesPoint 是全网时序的一行（指标编号 + 图表点位时间 + 值），供 GetKPITimeSeries 回填用。
@@ -963,89 +1123,34 @@ type networkSeriesPoint struct {
 }
 
 // fetchNetworkKCodeSeries 读多个指标编号的首页全网时序。
-// 历史完整桶读 hourly 聚合表；若当前已过整点但该整点缺点，则补最近一小时 15min 尾部窗口。
-// 两条路径都走 PM Aggregator 的 network 查询，counter 聚合与 KPI 重算口径保持一致。
-func (s *Service) fetchNetworkKCodeSeries(ctx context.Context, kcodes []string, startTime, endTime time.Time) ([]networkSeriesPoint, error) {
+// 读 hourly 聚合表，并保持与性能仪表板相同的完整桶口径。
+func (s *Service) fetchNetworkKCodeSeries(ctx context.Context, kcodes []string, technology model.Technology, startTime, endTime time.Time) ([]networkSeriesPoint, error) {
 	if s.pmAggregator == nil {
 		return nil, fmt.Errorf("dashboard network KPI aggregator not configured")
 	}
 
-	// 对外图表时间用 EndTime。为了让 startTime 本身可作为第一个点位，需要多取前一个小时桶，
-	// 再在 networkRowsToSeriesPoints 里按展示时间裁剪回用户请求窗口。
-	hourlyStart := startTime.Add(-time.Hour)
-	rows, err := s.pmAggregator.Query(ctx, buildNetworkKPIHourlySeriesRequest(kcodes, hourlyStart, endTime))
+	rows, err := s.pmAggregator.Query(ctx, buildNetworkKPIHourlySeriesRequest(kcodes, technology, startTime, endTime))
 	if err != nil {
 		return nil, fmt.Errorf("query dashboard network kpi series: %w", err)
 	}
 
-	points := networkRowsToSeriesPoints(rows, startTime, endTime)
-	points, err = s.appendLatestHour15MinTail(ctx, points, kcodes, startTime, endTime)
-	if err != nil {
-		return nil, err
-	}
-	return sortAndDedupeNetworkSeriesPoints(points), nil
+	return sortAndDedupeNetworkSeriesPoints(networkRowsToSeriesPoints(rows, startTime, endTime)), nil
 }
 
-// networkRowsToSeriesPoints 将 Aggregator 行转成首页图表点位。Aggregator 的 time 是桶起点；首页折线图
-// 需要在整点过后显示到该整点，所以优先使用 end_time 作为点位时间。
+// networkRowsToSeriesPoints 使用 PM 桶起点作为图表点位，与性能仪表板保持一致。
 func networkRowsToSeriesPoints(rows []pmaggregator.Row, startTime, endTime time.Time) []networkSeriesPoint {
 	points := make([]networkSeriesPoint, 0, len(rows))
 	for _, r := range rows {
-		displayTime := r.EndTime
-		if displayTime.IsZero() {
-			displayTime = r.Time
-		}
-		if displayTime.Before(startTime) || displayTime.After(endTime) {
+		if r.Time.Before(startTime) || !r.Time.Before(endTime) {
 			continue
 		}
 		points = append(points, networkSeriesPoint{
 			code:  r.MetricPath,
-			time:  displayTime,
+			time:  r.Time,
 			value: r.MetricValue,
 		})
 	}
 	return points
-}
-
-func (s *Service) appendLatestHour15MinTail(ctx context.Context, points []networkSeriesPoint, kcodes []string, startTime, endTime time.Time) ([]networkSeriesPoint, error) {
-	targetHour := endTime.Truncate(time.Hour)
-	if targetHour.Before(startTime) || targetHour.After(endTime) {
-		return points, nil
-	}
-
-	missingCodes := missingCodesAt(points, kcodes, targetHour)
-	if len(missingCodes) == 0 {
-		return points, nil
-	}
-
-	tailStart := targetHour.Add(-time.Hour)
-	if tailStart.Before(startTime) {
-		tailStart = startTime
-	}
-	// 15min 原始行的 time 是桶起点。为了能补出 targetHour 这个结束点，查询窗口需要覆盖
-	// [targetHour-15min,targetHour) 这条原始桶；取最近一小时可同时覆盖聚合任务轻微滞后的尾部。
-	tailQueryStart := tailStart.Add(-15 * time.Minute)
-	rows, err := s.pmAggregator.Query(ctx, buildNetworkKPI15MinSeriesRequest(missingCodes, tailQueryStart, targetHour))
-	if err != nil {
-		return nil, fmt.Errorf("query dashboard network kpi latest-hour tail: %w", err)
-	}
-	return append(points, networkRowsToSeriesPoints(rows, startTime, endTime)...), nil
-}
-
-func missingCodesAt(points []networkSeriesPoint, kcodes []string, t time.Time) []string {
-	has := make(map[string]struct{}, len(points))
-	for _, p := range points {
-		if p.time.Equal(t) {
-			has[p.code] = struct{}{}
-		}
-	}
-	missing := make([]string, 0, len(kcodes))
-	for _, code := range kcodes {
-		if _, ok := has[code]; !ok {
-			missing = append(missing, code)
-		}
-	}
-	return missing
 }
 
 func sortAndDedupeNetworkSeriesPoints(points []networkSeriesPoint) []networkSeriesPoint {
@@ -1076,7 +1181,7 @@ func (s *Service) queryNetworkKPISeries(ctx context.Context, kpiName string, sta
 	kcodes := []string{kpiName}
 
 	// 与 GetKPITimeSeries 同源：通过 PM Aggregator 做 network 维度 hourly 查询与 KPI 重算。
-	points, err := s.fetchNetworkKCodeSeries(ctx, kcodes, startTime, endTime)
+	points, err := s.fetchNetworkKCodeSeries(ctx, kcodes, "", startTime, endTime)
 	if err != nil {
 		return nil, fmt.Errorf("query network kpi series: %w", err)
 	}

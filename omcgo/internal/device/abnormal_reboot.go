@@ -22,7 +22,7 @@ type AbnormalRebootSnapshot struct {
 	DeviceID            uuid.UUID
 	DeviceSN            string
 	DeviceName          string
-	DeviceType          string // eNB / gNB
+	DeviceType          string // eNB / gNB / GSM
 	IsGNB               bool
 	OperateIP           string
 	SoftwareVersion     string
@@ -51,7 +51,7 @@ type BootEventSnapshot struct {
 	DeviceID        uuid.UUID
 	DeviceSN        string
 	DeviceName      string
-	DeviceType      string // eNB / gNB
+	DeviceType      string // eNB / gNB / GSM
 	IsGNB           bool
 	OperateIP       string
 	SoftwareVersion string

@@ -3,17 +3,23 @@
 package carrier
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
+// ErrAmbiguousCarrier 表示设备身份同时命中多个运营商，调用方必须要求
+// 显式 carrier 或提供可唯一识别的 ProductClass，禁止选择注册顺序首项。
+var ErrAmbiguousCarrier = errors.New("carrier is ambiguous for device identity")
+
 // CarrierRegistry 管理运营商适配器的注册和查找。
 // 各微服务在启动时初始化一个全局 Registry，并依次注册 cmcc/ctcc/cucc 适配器。
 // 运行时不允许修改，所有读操作并发安全。
 type CarrierRegistry struct {
 	carriers map[model.CarrierCode]Carrier
+	order    []model.CarrierCode
 	mu       sync.RWMutex
 }
 
@@ -28,6 +34,9 @@ func NewRegistry() *CarrierRegistry {
 func (r *CarrierRegistry) Register(carrier Carrier) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if _, exists := r.carriers[carrier.Code()]; !exists {
+		r.order = append(r.order, carrier.Code())
+	}
 	r.carriers[carrier.Code()] = carrier
 }
 
@@ -60,7 +69,7 @@ func (r *CarrierRegistry) All() []Carrier {
 }
 
 // DefaultCarrier returns the fallback carrier code used when a device's
-// carrier cannot be resolved from its OUI (see ResolveByOUI).
+// carrier cannot be resolved from its device identity (see ResolveByIdentity).
 //
 // #17: previously the default was a hardcoded model.CarrierCMCC constant at the
 // InformHandler wiring site, coupling device registration to a single carrier.
@@ -98,19 +107,62 @@ func (r *CarrierRegistry) SupportsMRType(code model.CarrierCode, mrType model.MR
 	return c.SupportsMRType(mrType)
 }
 
-// ResolveByOUI attempts to identify the carrier by matching a device OUI
-// against known OUI-ProductClass combinations across all registered carriers.
-// Returns the first matching carrier code, or empty string if no match.
+// ResolveByOUI identifies a carrier only when the OUI belongs to exactly one
+// registered carrier. Shared vendor OUIs return an empty code so callers do not
+// silently assign the device to the first registered carrier.
 func (r *CarrierRegistry) ResolveByOUI(oui string) model.CarrierCode {
+	code, err := r.ResolveByIdentity(oui, "")
+	if err != nil {
+		return ""
+	}
+	return code
+}
+
+// ResolveByIdentity identifies a carrier from the complete TR-069 device
+// identity. ProductClass disambiguates vendor OUIs shared by multiple carrier
+// profiles. Unknown OUIs return ("", nil) so deployment-level fallback remains
+// possible; ambiguous identities return ErrAmbiguousCarrier and must not fall
+// back to a default carrier.
+func (r *CarrierRegistry) ResolveByIdentity(oui, productClass string) (model.CarrierCode, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	for _, c := range r.carriers {
+
+	ouiMatches := make(map[model.CarrierCode]struct{})
+	exactMatches := make(map[model.CarrierCode]struct{})
+	for _, code := range r.order {
+		c := r.carriers[code]
 		for _, tech := range c.SupportedTechnologies() {
 			for _, info := range c.KnownOUIProductClasses(tech) {
-				if info.OUI == oui {
-					return c.Code()
+				if info.OUI != oui {
+					continue
+				}
+				ouiMatches[code] = struct{}{}
+				if productClass != "" && info.ProductClass == productClass {
+					exactMatches[code] = struct{}{}
 				}
 			}
+		}
+	}
+
+	if len(exactMatches) == 1 {
+		return firstCarrierInRegistrationOrder(r.order, exactMatches), nil
+	}
+	if len(exactMatches) > 1 {
+		return "", fmt.Errorf("%w: oui=%q product_class=%q", ErrAmbiguousCarrier, oui, productClass)
+	}
+	if len(ouiMatches) == 1 {
+		return firstCarrierInRegistrationOrder(r.order, ouiMatches), nil
+	}
+	if len(ouiMatches) > 1 {
+		return "", fmt.Errorf("%w: oui=%q product_class=%q", ErrAmbiguousCarrier, oui, productClass)
+	}
+	return "", nil
+}
+
+func firstCarrierInRegistrationOrder(order []model.CarrierCode, matches map[model.CarrierCode]struct{}) model.CarrierCode {
+	for _, code := range order {
+		if _, ok := matches[code]; ok {
+			return code
 		}
 	}
 	return ""

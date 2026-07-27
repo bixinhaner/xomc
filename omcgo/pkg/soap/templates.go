@@ -26,23 +26,24 @@ var soapFuncMap = template.FuncMap{
 
 // Pre-compiled SOAP response templates.
 var (
-	InformResponseTmpl         *template.Template
-	GetParameterValuesTmpl     *template.Template
-	SetParameterValuesTmpl     *template.Template
-	GetParameterNamesTmpl      *template.Template
-	AddObjectTmpl              *template.Template
-	DeleteObjectTmpl           *template.Template
-	DownloadTmpl               *template.Template
-	UploadTmpl                 *template.Template
-	RebootTmpl                 *template.Template
-	FactoryResetTmpl           *template.Template
-	ScheduleInformTmpl         *template.Template
-	FaultResponseTmpl          *template.Template
-	TransferCompleteRespTmpl              *template.Template
-	AutonomousTransferCompleteRespTmpl    *template.Template
-	GetParameterAttributesTmpl            *template.Template
-	SetParameterAttributesTmpl            *template.Template
-	GetRPCMethodsTmpl                     *template.Template
+	InformResponseTmpl                 *template.Template
+	GetParameterValuesTmpl             *template.Template
+	SetParameterValuesTmpl             *template.Template
+	GetParameterNamesTmpl              *template.Template
+	AddObjectTmpl                      *template.Template
+	DeleteObjectTmpl                   *template.Template
+	DownloadTmpl                       *template.Template
+	UploadTmpl                         *template.Template
+	RebootTmpl                         *template.Template
+	FactoryResetTmpl                   *template.Template
+	ResetLMTPasswordTmpl               *template.Template
+	ScheduleInformTmpl                 *template.Template
+	FaultResponseTmpl                  *template.Template
+	TransferCompleteRespTmpl           *template.Template
+	AutonomousTransferCompleteRespTmpl *template.Template
+	GetParameterAttributesTmpl         *template.Template
+	SetParameterAttributesTmpl         *template.Template
+	GetRPCMethodsTmpl                  *template.Template
 )
 
 func init() {
@@ -56,6 +57,7 @@ func init() {
 	UploadTmpl = template.Must(template.New("Upload").Funcs(soapFuncMap).Parse(uploadXML))
 	RebootTmpl = template.Must(template.New("Reboot").Parse(rebootXML))
 	FactoryResetTmpl = template.Must(template.New("FactoryReset").Parse(factoryResetXML))
+	ResetLMTPasswordTmpl = template.Must(template.New("X_BAICELLS_COM_PasswordReset").Funcs(soapFuncMap).Parse(resetLMTPasswordXML))
 	ScheduleInformTmpl = template.Must(template.New("ScheduleInform").Parse(scheduleInformXML))
 	FaultResponseTmpl = template.Must(template.New("Fault").Parse(faultResponseXML))
 	TransferCompleteRespTmpl = template.Must(template.New("TransferCompleteResponse").Parse(transferCompleteResponseXML))
@@ -162,6 +164,13 @@ type UploadData struct {
 
 type RebootData struct {
 	ID             string
+	CommandKey     string
+	NoMoreRequests int // 0=more requests coming, 1=last request
+}
+
+type ResetLMTPasswordData struct {
+	ID             string
+	Method         string
 	CommandKey     string
 	NoMoreRequests int // 0=more requests coming, 1=last request
 }
@@ -331,6 +340,11 @@ const rebootXML = soapEnvelopeOpen +
 const factoryResetXML = soapEnvelopeOpen +
 	`<cwmp:FactoryReset/>` + soapEnvelopeClose
 
+const resetLMTPasswordXML = soapEnvelopeOpen +
+	`<cwmp:{{.Method}}>` +
+	`<CommandKey>{{.CommandKey | xmlescape}}</CommandKey>` +
+	`</cwmp:{{.Method}}>` + soapEnvelopeClose
+
 // TR-069 §A.3.1.2 GetRPCMethods 请求：空标签，无参数；
 // 响应由 CPE 返回 supported methods 列表（由 ACS 的 inform/response 处理回路读取）。
 const getRPCMethodsXML = soapEnvelopeOpen +
@@ -381,4 +395,3 @@ const setParameterAttributesXML = soapEnvelopeOpen +
 	`</SetParameterAttributesStruct>{{end}}` +
 	`</ParameterList>` +
 	`</cwmp:SetParameterAttributes>` + soapEnvelopeClose
-

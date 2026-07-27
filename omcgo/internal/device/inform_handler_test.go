@@ -330,8 +330,52 @@ func TestResolveCarrier_RegistryMatch(t *testing.T) {
 	})
 	h := NewInformHandler(svc, registry, model.CarrierCMCC, zap.NewNop())
 
-	result := h.resolveCarrier("AABBCC")
+	result, err := h.resolveCarrier("AABBCC", "SmallCell")
+	require.NoError(t, err)
 	assert.Equal(t, model.CarrierCTCC, result)
+}
+
+func TestResolveCarrier_DisambiguatesSharedOUIByProductClass(t *testing.T) {
+	svc := newInfTestDeviceService(&infMockDeviceRepo{}, &infMockParamRepo{})
+	registry := carrier.NewRegistry()
+	registry.Register(&infMockCarrier{
+		code:         model.CarrierCMCC,
+		technologies: []model.Technology{model.TechLTE},
+		ouiProducts: map[model.Technology][]carrier.OUIProductClassInfo{
+			model.TechLTE: {{OUI: "AABBCC", ProductClass: "SmallCell-LTE"}},
+		},
+	})
+	registry.Register(&infMockCarrier{
+		code:         model.CarrierCTCC,
+		technologies: []model.Technology{model.TechLTE},
+		ouiProducts: map[model.Technology][]carrier.OUIProductClassInfo{
+			model.TechLTE: {{OUI: "AABBCC", ProductClass: "eSmallCell-LTE"}},
+		},
+	})
+	h := NewInformHandler(svc, registry, model.CarrierCMCC, zap.NewNop())
+
+	result, err := h.resolveCarrier("AABBCC", "eSmallCell-LTE")
+	require.NoError(t, err)
+	assert.Equal(t, model.CarrierCTCC, result)
+}
+
+func TestResolveCarrier_DoesNotFallbackForAmbiguousSharedOUI(t *testing.T) {
+	svc := newInfTestDeviceService(&infMockDeviceRepo{}, &infMockParamRepo{})
+	registry := carrier.NewRegistry()
+	for _, code := range []model.CarrierCode{model.CarrierCMCC, model.CarrierCTCC} {
+		registry.Register(&infMockCarrier{
+			code:         code,
+			technologies: []model.Technology{model.TechLTE},
+			ouiProducts: map[model.Technology][]carrier.OUIProductClassInfo{
+				model.TechLTE: {{OUI: "AABBCC", ProductClass: string(code) + "-product"}},
+			},
+		})
+	}
+	h := NewInformHandler(svc, registry, model.CarrierCMCC, zap.NewNop())
+
+	result, err := h.resolveCarrier("AABBCC", "")
+	assert.Empty(t, result)
+	assert.ErrorIs(t, err, carrier.ErrAmbiguousCarrier)
 }
 
 func TestResolveCarrier_DefaultFallback(t *testing.T) {
@@ -346,7 +390,8 @@ func TestResolveCarrier_DefaultFallback(t *testing.T) {
 	})
 	h := NewInformHandler(svc, registry, model.CarrierCMCC, zap.NewNop())
 
-	result := h.resolveCarrier("UNKNOWN_OUI")
+	result, err := h.resolveCarrier("UNKNOWN_OUI", "Unknown")
+	require.NoError(t, err)
 	assert.Equal(t, model.CarrierCMCC, result)
 }
 
@@ -354,7 +399,8 @@ func TestResolveCarrier_NilRegistry(t *testing.T) {
 	svc := newInfTestDeviceService(&infMockDeviceRepo{}, &infMockParamRepo{})
 	h := NewInformHandler(svc, nil, model.CarrierCUCC, zap.NewNop())
 
-	result := h.resolveCarrier("AABBCC")
+	result, err := h.resolveCarrier("AABBCC", "SmallCell")
+	require.NoError(t, err)
 	assert.Equal(t, model.CarrierCUCC, result)
 }
 
@@ -373,7 +419,9 @@ func TestResolveCarrier_RegistryDerivedDefault(t *testing.T) {
 		"registry without CMCC must derive a deterministic default, not hardcode CMCC")
 
 	h := NewInformHandler(svc, registry, defaultCarrier, zap.NewNop())
-	assert.Equal(t, model.CarrierCTCC, h.resolveCarrier("UNKNOWN_OUI"),
+	resolved, err := h.resolveCarrier("UNKNOWN_OUI", "Unknown")
+	require.NoError(t, err)
+	assert.Equal(t, model.CarrierCTCC, resolved,
 		"unresolved OUI must fall back to the registry-derived default carrier")
 }
 
@@ -402,6 +450,134 @@ func TestHandleBootstrap_Success(t *testing.T) {
 	assert.Equal(t, "AABBCC", createdDevice.OUI)
 	assert.Equal(t, model.CarrierCMCC, createdDevice.Carrier)
 	assert.Equal(t, model.DeviceActive, createdDevice.Status)
+}
+
+func TestHandleBootstrap_NewDevicePublishesCreated(t *testing.T) {
+	deviceRepo := &infMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, _ string) (*model.Device, error) {
+			return nil, nil
+		},
+	}
+	bus := event.NewChannelEventBus(16, zap.NewNop())
+	defer bus.Close()
+	received := make(chan event.Event, 1)
+	_, err := bus.Subscribe(event.SubjectDeviceRegistered, func(_ context.Context, evt event.Event) error {
+		received <- evt
+		return nil
+	})
+	require.NoError(t, err)
+
+	svc := NewDeviceService(deviceRepo, &infMockParamRepo{}, nil, bus, zap.NewNop())
+	h := NewInformHandler(svc, nil, model.CarrierCMCC, zap.NewNop())
+	evt, err := event.NewEvent(event.SubjectDeviceBootstrap, sampleInformPayload("SN-BOOT-CREATED"))
+	require.NoError(t, err)
+
+	require.NoError(t, h.handleBootstrap(context.Background(), evt))
+
+	select {
+	case published := <-received:
+		assert.Equal(t, evt.ID, published.ID)
+		var payload struct {
+			DeviceID uuid.UUID `json:"device_id"`
+			Created  bool      `json:"created"`
+		}
+		require.NoError(t, published.DecodePayload(&payload))
+		assert.NotEqual(t, uuid.Nil, payload.DeviceID)
+		assert.True(t, payload.Created)
+	case <-time.After(time.Second):
+		t.Fatal("expected device.registered event")
+	}
+}
+
+func TestHandleBootstrap_DeviceRegisteredPublishFailureIsRetryable(t *testing.T) {
+	deviceRepo := &infMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, _ string) (*model.Device, error) {
+			return nil, nil
+		},
+	}
+	bus := event.NewChannelEventBus(16, zap.NewNop())
+	require.NoError(t, bus.Close())
+	svc := NewDeviceService(deviceRepo, &infMockParamRepo{}, nil, bus, zap.NewNop())
+	h := NewInformHandler(svc, nil, model.CarrierCMCC, zap.NewNop())
+	evt, err := event.NewEvent(event.SubjectDeviceBootstrap, sampleInformPayload("SN-BOOT-PUBLISH-FAIL"))
+	require.NoError(t, err)
+
+	err = h.handleBootstrap(context.Background(), evt)
+
+	require.ErrorIs(t, err, event.ErrBusClosed)
+}
+
+func TestHandleBootstrap_AmbiguousSharedOUIDoesNotRegisterDevice(t *testing.T) {
+	var createCalled bool
+	deviceRepo := &infMockDeviceRepo{
+		createFn: func(_ context.Context, _ *model.Device) error {
+			createCalled = true
+			return nil
+		},
+	}
+	svc := newInfTestDeviceService(deviceRepo, &infMockParamRepo{})
+	registry := carrier.NewRegistry()
+	for _, code := range []model.CarrierCode{model.CarrierCMCC, model.CarrierCTCC} {
+		registry.Register(&infMockCarrier{
+			code:         code,
+			technologies: []model.Technology{model.TechLTE},
+			ouiProducts: map[model.Technology][]carrier.OUIProductClassInfo{
+				model.TechLTE: {{OUI: "AABBCC", ProductClass: string(code) + "-product"}},
+			},
+		})
+	}
+	h := NewInformHandler(svc, registry, model.CarrierCMCC, zap.NewNop())
+
+	payload := sampleInformPayload("SN-SHARED-AMBIGUOUS")
+	payload.DeviceId.ProductClass = ""
+	evt, err := event.NewEvent(event.SubjectDeviceBootstrap, payload)
+	require.NoError(t, err)
+
+	err = h.handleBootstrap(context.Background(), evt)
+	assert.ErrorIs(t, err, carrier.ErrAmbiguousCarrier)
+	assert.False(t, createCalled)
+}
+
+func TestHandleBootstrap_ExistingDeviceKeepsStoredCarrierForAmbiguousIdentity(t *testing.T) {
+	existing := &model.Device{
+		ID:           uuid.New(),
+		SerialNumber: "SN-SHARED-EXISTING",
+		OUI:          "AABBCC",
+		ProductClass: "legacy-product",
+		Carrier:      model.CarrierCTCC,
+		Technology:   model.TechLTE,
+		Status:       model.DeviceActive,
+	}
+	deviceRepo := &infMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, _ string) (*model.Device, error) {
+			return existing, nil
+		},
+		updateFn: func(_ context.Context, device *model.Device) error {
+			assert.Equal(t, model.CarrierCTCC, device.Carrier)
+			return nil
+		},
+	}
+	svc := newInfTestDeviceService(deviceRepo, &infMockParamRepo{})
+	registry := carrier.NewRegistry()
+	for _, code := range []model.CarrierCode{model.CarrierCMCC, model.CarrierCTCC} {
+		registry.Register(&infMockCarrier{
+			code:         code,
+			technologies: []model.Technology{model.TechLTE},
+			ouiProducts: map[model.Technology][]carrier.OUIProductClassInfo{
+				model.TechLTE: {{OUI: "AABBCC", ProductClass: string(code) + "-product"}},
+			},
+		})
+	}
+	h := NewInformHandler(svc, registry, model.CarrierCMCC, zap.NewNop())
+
+	payload := sampleInformPayload(existing.SerialNumber)
+	payload.DeviceId.ProductClass = "legacy-product"
+	evt, err := event.NewEvent(event.SubjectDeviceBootstrap, payload)
+	require.NoError(t, err)
+
+	err = h.handleBootstrap(context.Background(), evt)
+	require.NoError(t, err)
+	assert.Equal(t, model.CarrierCTCC, existing.Carrier)
 }
 
 func TestHandleRebootComplete_NormalReboot(t *testing.T) {
@@ -571,6 +747,172 @@ func TestHandleRebootComplete_AutoRegisterWhenMissing(t *testing.T) {
 	assert.True(t, created, "expected auto-register to call Create")
 }
 
+func TestHandleRebootComplete_AutoRegisterPublishFailureIsRetryable(t *testing.T) {
+	deviceRepo := &infMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, _ string) (*model.Device, error) {
+			return nil, nil
+		},
+	}
+	bus := event.NewChannelEventBus(16, zap.NewNop())
+	require.NoError(t, bus.Close())
+	svc := NewDeviceService(deviceRepo, &infMockParamRepo{}, nil, bus, zap.NewNop())
+	h := NewInformHandler(svc, nil, model.CarrierCMCC, zap.NewNop())
+	payload := sampleInformPayload("SN-REBOOT-PUBLISH-FAIL")
+	payload.Events = []string{tr069.EventBoot}
+	evt, err := event.NewEvent(event.SubjectDeviceRebootComplete, payload)
+	require.NoError(t, err)
+
+	err = h.handleRebootComplete(context.Background(), evt)
+
+	require.ErrorIs(t, err, event.ErrBusClosed)
+}
+
+func TestHandleRebootComplete_NormalRecordUsesPreRebootDeviceSnapshot(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &infMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{
+				ID:              deviceID,
+				SerialNumber:    sn,
+				DeviceName:      "BSC-before-reboot",
+				OUI:             "AABBCC",
+				Carrier:         model.CarrierCMCC,
+				Technology:      model.TechGSM,
+				Status:          model.DeviceActive,
+				LifecycleState:  model.LifecycleCommissioned,
+				IsOnline:        true,
+				IPAddress:       "172.21.172.109",
+				FirmwareVersion: "BaiBS_before",
+				InformInterval:  300,
+			}, nil
+		},
+		updateFn: func(_ context.Context, device *model.Device) error {
+			assert.Equal(t, "BaiBS_after", device.FirmwareVersion)
+			return nil
+		},
+		recordBootFn: func(_ context.Context, _ string, _ time.Time) (int, error) {
+			return 4, nil
+		},
+	}
+
+	rec := &infMockBootEventRecorder{}
+	svc := NewDeviceService(deviceRepo, &infMockParamRepo{}, nil, nil, zap.NewNop())
+	svc.SetBootEventRecorder(rec)
+	h := NewInformHandler(svc, nil, model.CarrierCMCC, zap.NewNop())
+
+	payload := sampleInformPayload("SN-PRE-REBOOT-NORMAL")
+	payload.Events = []string{tr069.EventBoot}
+	payload.ParameterList = []tr069.ParameterValueStruct{
+		{Name: "Device.DeviceInfo.SoftwareVersion", Value: "BaiBS_after"},
+		{Name: "Device.ManagementServer.ConnectionRequestURL", Value: "http://10.0.0.2:7547"},
+		{Name: "Device.DeviceInfo.ModelName", Value: "PicoCell-LTE"},
+	}
+	evt, err := event.NewEvent(event.SubjectDeviceRebootComplete, payload)
+	require.NoError(t, err)
+
+	err = h.handleRebootComplete(context.Background(), evt)
+	require.NoError(t, err)
+
+	require.Len(t, rec.calls, 1)
+	assert.Equal(t, "BaiBS_before", rec.calls[0].SoftwareVersion)
+	assert.Equal(t, "172.21.172.109", rec.calls[0].OperateIP)
+	assert.Equal(t, "GSM", rec.calls[0].DeviceType)
+	assert.Equal(t, "BSC-before-reboot", rec.calls[0].DeviceName)
+}
+
+func TestHandleRebootComplete_AbnormalRecordUsesPreRebootDeviceSnapshot(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &infMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{
+				ID:              deviceID,
+				SerialNumber:    sn,
+				DeviceName:      "BSC-before-abnormal",
+				OUI:             "AABBCC",
+				Carrier:         model.CarrierCMCC,
+				Technology:      model.TechGSM,
+				Status:          model.DeviceActive,
+				LifecycleState:  model.LifecycleCommissioned,
+				IsOnline:        true,
+				IPAddress:       "172.21.172.110",
+				FirmwareVersion: "BaiBS_before_abnormal",
+				InformInterval:  300,
+			}, nil
+		},
+		updateFn: func(_ context.Context, device *model.Device) error {
+			assert.Equal(t, "BaiBS_after_abnormal", device.FirmwareVersion)
+			return nil
+		},
+		recordBootFn: func(_ context.Context, _ string, _ time.Time) (int, error) {
+			return 6, nil
+		},
+	}
+
+	rec := &infMockAbnormalRebootRecorder{}
+	svc := NewDeviceService(deviceRepo, &infMockParamRepo{}, nil, nil, zap.NewNop())
+	svc.SetAbnormalRebootRecorder(rec)
+	h := NewInformHandler(svc, nil, model.CarrierCMCC, zap.NewNop())
+
+	payload := sampleInformPayload("SN-PRE-REBOOT-ABNORMAL")
+	payload.Events = []string{tr069.EventBoot}
+	payload.ParameterList = []tr069.ParameterValueStruct{
+		{Name: "Device.DeviceInfo.SoftwareVersion", Value: "BaiBS_after_abnormal"},
+		{Name: "Device.ManagementServer.ConnectionRequestURL", Value: "http://10.0.0.3:7547"},
+		{Name: "Device.DeviceInfo.ModelName", Value: "PicoCell-LTE"},
+		{Name: HaltReasonMainPath, Value: "halt_reboot"},
+	}
+	evt, err := event.NewEvent(event.SubjectDeviceRebootComplete, payload)
+	require.NoError(t, err)
+
+	err = h.handleRebootComplete(context.Background(), evt)
+	require.NoError(t, err)
+
+	require.Len(t, rec.calls, 1)
+	assert.Equal(t, "BaiBS_before_abnormal", rec.calls[0].SoftwareVersion)
+	assert.Equal(t, "172.21.172.110", rec.calls[0].OperateIP)
+	assert.Equal(t, "GSM", rec.calls[0].DeviceType)
+	assert.Equal(t, "BSC-before-abnormal", rec.calls[0].DeviceName)
+}
+
+type infMockAbnormalRebootRecorder struct {
+	calls []AbnormalRebootSnapshot
+}
+
+func (m *infMockAbnormalRebootRecorder) RecordAbnormalReboot(_ context.Context, snap AbnormalRebootSnapshot) error {
+	m.calls = append(m.calls, snap)
+	return nil
+}
+
+func TestRecordBootFromInform_GSMAbnormalSnapshotUsesGSMDeviceType(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &infMockDeviceRepo{
+		recordBootFn: func(_ context.Context, _ string, _ time.Time) (int, error) {
+			return 9, nil
+		},
+	}
+	rec := &infMockAbnormalRebootRecorder{}
+	svc := NewDeviceService(deviceRepo, &infMockParamRepo{}, nil, nil, zap.NewNop())
+	svc.SetAbnormalRebootRecorder(rec)
+
+	params := []tr069.ParameterValueStruct{
+		{Name: HaltReasonMainPath, Value: "halt_reboot"},
+	}
+	_, err := svc.RecordBootFromInform(context.Background(), &model.Device{
+		ID:              deviceID,
+		SerialNumber:    "SN-GSM-ABNORMAL",
+		Technology:      model.TechGSM,
+		DeviceName:      "BSC-1",
+		IPAddress:       "172.21.172.109",
+		FirmwareVersion: "BaiBS_AGC_2.1.7.9",
+	}, []string{tr069.EventBoot}, params, 300)
+	require.NoError(t, err)
+
+	require.Len(t, rec.calls, 1)
+	assert.Equal(t, "GSM", rec.calls[0].DeviceType)
+	assert.False(t, rec.calls[0].IsGNB)
+	assert.Equal(t, "172.21.172.109", rec.calls[0].OperateIP)
+}
+
 // infMockBootEventRecorder 记录 RecordBootEvent 被调用次数与最后一次快照，
 // 供 issue #212 死判用例断言 "写一条重启记录"。
 type infMockBootEventRecorder struct {
@@ -580,6 +922,36 @@ type infMockBootEventRecorder struct {
 func (m *infMockBootEventRecorder) RecordBootEvent(_ context.Context, snap BootEventSnapshot) error {
 	m.calls = append(m.calls, snap)
 	return nil
+}
+
+func TestRecordBootFromInform_GSMNormalSnapshotUsesGSMDeviceType(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &infMockDeviceRepo{
+		recordBootFn: func(_ context.Context, _ string, _ time.Time) (int, error) {
+			return 5, nil
+		},
+	}
+	rec := &infMockBootEventRecorder{}
+	svc := NewDeviceService(deviceRepo, &infMockParamRepo{}, nil, nil, zap.NewNop())
+	svc.SetBootEventRecorder(rec)
+
+	params := []tr069.ParameterValueStruct{
+		{Name: "Device.DeviceInfo.SoftwareVersion", Value: "BSC_2.0.5"},
+	}
+	_, err := svc.RecordBootFromInform(context.Background(), &model.Device{
+		ID:              deviceID,
+		SerialNumber:    "SN-GSM-NORMAL",
+		Technology:      model.TechGSM,
+		DeviceName:      "BSC-2",
+		IPAddress:       "10.10.3.48",
+		FirmwareVersion: "BSC_2.0.5",
+	}, []string{tr069.EventBoot}, params, 100)
+	require.NoError(t, err)
+
+	require.Len(t, rec.calls, 1)
+	assert.Equal(t, "GSM", rec.calls[0].DeviceType)
+	assert.False(t, rec.calls[0].IsGNB)
+	assert.Equal(t, "10.10.3.48", rec.calls[0].OperateIP)
 }
 
 // issue #212 死判：设备初始在线，收到 BOOT（1 BOOT）时必须无条件强制走出
@@ -771,6 +1143,51 @@ func TestHandlePeriodic_DeletedDeviceSkipsAutoRegister(t *testing.T) {
 	err = h.handlePeriodic(context.Background(), evt)
 	require.NoError(t, err)
 	assert.False(t, createCalled, "recycle-bin device must not be auto-registered")
+}
+
+func TestHandlePeriodic_AutoRegisterPublishFailureIsRetryable(t *testing.T) {
+	deviceRepo := &infMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, _ string) (*model.Device, error) {
+			return nil, nil
+		},
+	}
+	bus := event.NewChannelEventBus(16, zap.NewNop())
+	require.NoError(t, bus.Close())
+	svc := NewDeviceService(deviceRepo, &infMockParamRepo{}, nil, bus, zap.NewNop())
+	h := NewInformHandler(svc, nil, model.CarrierCMCC, zap.NewNop())
+	payload := sampleInformPayload("SN-PERIODIC-PUBLISH-FAIL")
+	payload.Events = []string{"2 PERIODIC"}
+	evt, err := event.NewEvent(event.SubjectDevicePeriodic, payload)
+	require.NoError(t, err)
+
+	err = h.handlePeriodic(context.Background(), evt)
+
+	require.ErrorIs(t, err, event.ErrBusClosed)
+}
+
+func TestHandlePeriodic_StaleCacheAutoRegisterPublishFailureIsRetryable(t *testing.T) {
+	lookupCount := 0
+	deviceRepo := &infMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			lookupCount++
+			if lookupCount == 1 {
+				return &model.Device{ID: uuid.New(), SerialNumber: sn}, nil
+			}
+			return nil, nil
+		},
+	}
+	bus := event.NewChannelEventBus(16, zap.NewNop())
+	require.NoError(t, bus.Close())
+	svc := NewDeviceService(deviceRepo, &infMockParamRepo{}, nil, bus, zap.NewNop())
+	h := NewInformHandler(svc, nil, model.CarrierCMCC, zap.NewNop())
+	payload := sampleInformPayload("SN-PERIODIC-STALE-PUBLISH-FAIL")
+	payload.Events = []string{"2 PERIODIC"}
+	evt, err := event.NewEvent(event.SubjectDevicePeriodic, payload)
+	require.NoError(t, err)
+
+	err = h.handlePeriodic(context.Background(), evt)
+
+	require.ErrorIs(t, err, event.ErrBusClosed)
 }
 
 func TestHandlePeriodic_Success(t *testing.T) {

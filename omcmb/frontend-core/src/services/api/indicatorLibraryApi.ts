@@ -201,14 +201,13 @@ function mapFormula(b: BackendFormula): PlatformFormula {
 //   en_name←enName, cn_name←cnName, group_id←groupId(必填三件套，device_type 由 query 注入),
 //   data_type←dataType, unit_id←unit, is_counter←isCounter, arithmetic←arithmetic,
 //   statis_type←statisType, product_types←productClass, indicator_level←indicatorLevel,
-//   en_description/cn_description←enDescription/cnDescription, operator_code←operatorCode, id←id。
+//   en_description/cn_description←enDescription/cnDescription, operator_code←operatorCode。
 // 旧 bug：发了 counter_type/unit/product_type/name（后端不识别）→ 建/改必失败。
 // undefined 字段不发，保持向后兼容（PUT 部分更新）。
 function indicatorPayload(
   input: CreateIndicatorInput | UpdateIndicatorInput
 ): Record<string, unknown> {
   const p: Record<string, unknown> = {};
-  if ('id' in input && input.id !== undefined) p.id = input.id;
   if (input.cnName !== undefined) p.cn_name = input.cnName;
   if (input.enName !== undefined) p.en_name = input.enName;
   if (input.groupId !== undefined) p.group_id = input.groupId;
@@ -238,7 +237,6 @@ function indicatorPayload(
 
 function groupPayload(input: CreateGroupInput | UpdateGroupInput): Record<string, unknown> {
   const p: Record<string, unknown> = {};
-  if ('id' in input && input.id !== undefined) p.id = input.id;
   // 后端 Create/UpdateGroupRequest 用 en_name/cn_name（无 name 字段）；name 同时写入两者。
   if (input.name !== undefined) {
     p.en_name = input.name;
@@ -261,7 +259,7 @@ export const indicatorLibraryApi = {
     if (filter?.operatorCode) params.operatorCode = filter.operatorCode;
     if (filter?.productClass) params.productClass = filter.productClass;
     if (filter?.indicatorLevel) params.indicatorLevel = filter.indicatorLevel;
-    if (filter?.isEnabled !== undefined) params.isEnabled = filter.isEnabled;
+    if (filter?.isEnabled !== undefined) params.isEnabled = filter.isEnabled ? '1' : '0';
     if (filter?.isCounter !== undefined) params.isCounter = filter.isCounter;
     if (filter?.platformName) params.platformName = filter.platformName;
     if (filter?.page) params.page = filter.page;

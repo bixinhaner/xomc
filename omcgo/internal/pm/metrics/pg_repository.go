@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/Masterminds/squirrel"
@@ -112,31 +111,9 @@ func (r *PgRepository) Insert(ctx context.Context, m PMMetric) error {
 	return r.BatchInsert(ctx, []PMMetric{m})
 }
 
-// pmMetricsColumns 是 pm_metrics 的写入列序（COPY 与 INSERT 共用，顺序必须与
-// buildRows / buildBatchInsertSQL 一致）。
-var pmMetricsColumns = []string{
-	"id", "device_oui", "device_sn", "metric_path", "metric_type", "metric_value",
-	"statis_type", "granularity", "time", "start_time", "end_time",
-	"ingest_time", "object_ldn", "extra",
-}
-
-// batchInsertThreshold 是切换到 COPY 暂存表路径的批量阈值。
-//
-// 小批量（单文件 KPI 计算、补单条）走原 VALUES 多行 INSERT —— 一次 round-trip、
-// 直接带 ON CONFLICT、无建表开销，对几行到几十行最快。大批量（PM 文件解析后的
-// 几百~几千条 counter）走 COPY 暂存表 + INSERT...SELECT...ON CONFLICT —— COPY 二进制
-// 协议批量灌库远快于把成千上万个占位符塞进单条 VALUES（旧实现随行数线性膨胀 SQL 文本
-// 与参数数组，本质 O(n) 文本拼接 + 单条巨型语句解析）。
-//
-// 阈值取 50：低于此用 VALUES 省去建表两条额外语句；高于此 COPY 的吞吐优势盖过建表开销。
-const batchInsertThreshold = 50
-
-// BulkAsyncCommit 控制大批量 COPY 路径是否对本事务 SET LOCAL synchronous_commit = off。
-//
-// PM 指标（counter / KPI）原文件留在 MinIO 可重建，关掉 WAL 同步落盘等待能显著提吞吐
-// （崩溃最多丢"已提交但未刷盘"的最后几 ms PM 行，对 15min 粒度统计数据可接受）。
-// 默认 false（durable，安全）；由 worker 按 pm_async_commit=true 显式开启（进程级，仅影响
-// 该进程的 PM 写）。仅作用于 COPY 大批量路径的事务，不影响小批量 VALUES 与其它写。
+// BulkAsyncCommit is retained as a configuration compatibility knob. Sparse
+// file ingestion is always durably committed because its local file ledger and
+// values form one idempotency transaction.
 var BulkAsyncCommit = false
 
 // BatchInsert 批量插入 —— plain INSERT，不带 ON CONFLICT（migration 000042 删 uq_pm_metrics_natural
@@ -161,58 +138,18 @@ func (r *PgRepository) BatchInsert(ctx context.Context, ms []PMMetric) error {
 	if len(ms) == 0 {
 		return nil
 	}
-	if len(ms) >= batchInsertThreshold {
-		return r.batchInsertCopy(ctx, ms)
-	}
-	return r.batchInsertValues(ctx, ms)
-}
-
-// batchInsertValues 走 VALUES 多行 INSERT（小批量路径，plain INSERT 无 ON CONFLICT）。
-func (r *PgRepository) batchInsertValues(ctx context.Context, ms []PMMetric) error {
-	sql, args, err := buildBatchInsertSQL(ms)
+	measurements, err := BuildSparseMeasurementsFromMetrics(ms)
 	if err != nil {
 		return err
 	}
-	if _, err := r.pool.Exec(ctx, sql, args...); err != nil {
-		return classifyInsertError(err)
-	}
-	return nil
-}
-
-// batchInsertCopy 走 CopyFrom 二进制协议直灌 pm_metrics（大批量路径）。
-//
-// migration 000042 删自然键唯一索引后无需 ON CONFLICT，故省掉旧实现的 TEMP 暂存表 +
-// INSERT...SELECT 两段式（那只是为了在不支持 ON CONFLICT 的 COPY 上拿幂等），直接 COPY 进
-// pm_metrics —— 与 CopyIngest 的写法一致，更少一次全量数据搬运。
-func (r *PgRepository) batchInsertCopy(ctx context.Context, ms []PMMetric) error {
-	rows, err := buildRows(ms)
-	if err != nil {
-		return err
-	}
-
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("begin pm_metrics copy tx: %w", err)
+		return fmt.Errorf("begin sparse metric insert: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-
-	// PM 写吞吐优化：PM 指标可从 MinIO 原文件重建，故关掉本事务的 WAL 同步落盘等待，
-	// 提交不再阻塞在 fsync 上（崩溃最多丢已提交未刷盘的最后几 ms 行）。SET LOCAL 只作用本
-	// 事务，不污染连接后续复用。默认关闭（BulkAsyncCommit=false），worker 显式开启。
-	if BulkAsyncCommit {
-		if _, err := tx.Exec(ctx, "SET LOCAL synchronous_commit = off"); err != nil {
-			return fmt.Errorf("set local synchronous_commit: %w", err)
-		}
-	}
-
-	if _, err := tx.CopyFrom(ctx,
-		pgx.Identifier{"pm_metrics"},
-		pmMetricsColumns,
-		pgx.CopyFromRows(rows),
-	); err != nil {
+	if err := writeSparseMeasurements(ctx, tx, nil, nil, measurements); err != nil {
 		return classifyInsertError(err)
 	}
-
 	if err := tx.Commit(ctx); err != nil {
 		return classifyInsertError(err)
 	}
@@ -226,21 +163,11 @@ func InsertRowsTx(ctx context.Context, tx pgx.Tx, ms []PMMetric) error {
 	if len(ms) == 0 {
 		return nil
 	}
-	rows, err := buildRows(ms)
+	measurements, err := BuildSparseMeasurementsFromMetrics(ms)
 	if err != nil {
 		return err
 	}
-	if len(ms) >= batchInsertThreshold {
-		if _, err := tx.CopyFrom(ctx, pgx.Identifier{"pm_metrics"}, pmMetricsColumns, pgx.CopyFromRows(rows)); err != nil {
-			return classifyInsertError(err)
-		}
-		return nil
-	}
-	sql, args, err := buildBatchInsertSQL(ms)
-	if err != nil {
-		return err
-	}
-	if _, err := tx.Exec(ctx, sql, args...); err != nil {
+	if err := writeSparseMeasurements(ctx, tx, nil, nil, measurements); err != nil {
 		return classifyInsertError(err)
 	}
 	return nil
@@ -268,97 +195,15 @@ func isLateArrivalError(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == sqlstateFeatureNotSupported
 }
 
-// metricRowValues 把单条 PMMetric 归一化为与 pmMetricsColumns 等长、等序的列值数组。
-// 落值规则（id 缺省生成 / ingest 缺省 NOW / time 缺省取 start_time（#479，桶起点语义）/ object_ldn nil → ” /
-// extra map → JSONB bytes）在 VALUES INSERT 与 COPY 两条路径间共享，保证两路写出的行
-// 完全一致。
-func metricRowValues(m PMMetric) ([]any, error) {
-	id := m.ID
-	if id == uuid.Nil {
-		id = uuid.New()
-	}
-	ingest := m.IngestTime
-	if ingest.IsZero() {
-		ingest = time.Now()
-	}
-	// #479 改动二：time 语义统一为桶起点（= start_time）。缺省时取 start_time（非旧的 end_time），
-	// 保证 time == start_time 不变量；start_time 也为零时才退化到 end_time（防御，避免写零时刻）。
-	t := m.Time
-	if t.IsZero() {
-		t = m.StartTime
-	}
-	if t.IsZero() {
-		t = m.EndTime
-	}
-	var statis interface{}
-	if m.StatisType != nil {
-		statis = string(*m.StatisType)
-	}
-	// object_ldn 列 NOT NULL DEFAULT ''（migration 000171）：
-	// nil/空指针统一落 ''，与 UNIQUE 索引语义一致。
-	ldn := ""
-	if m.ObjectLDN != nil {
-		ldn = *m.ObjectLDN
-	}
-	var extra interface{}
-	if len(m.Extra) > 0 {
-		b, err := json.Marshal(m.Extra)
-		if err != nil {
-			return nil, fmt.Errorf("marshal pm_metrics extra: %w", err)
-		}
-		extra = b
-	}
-	var metricValue any = m.MetricValue
-	if math.IsNaN(m.MetricValue) {
-		metricValue = nil
-	}
-	return []any{
-		id, m.DeviceOUI, m.DeviceSN, m.MetricPath, string(m.MetricType), metricValue,
-		statis, string(m.Granularity), t, m.StartTime, m.EndTime,
-		ingest, ldn, extra,
-	}, nil
-}
-
-// buildRows 把 PMMetric 切片转为 COPY 用的二维行数组（列序 = pmMetricsColumns）。
-func buildRows(ms []PMMetric) ([][]any, error) {
-	rows := make([][]any, 0, len(ms))
-	for _, m := range ms {
-		vals, err := metricRowValues(m)
-		if err != nil {
-			return nil, err
-		}
-		rows = append(rows, vals)
-	}
-	return rows, nil
-}
-
-// buildBatchInsertSQL 构造 pm_metrics 批量 plain INSERT SQL（migration 000042 删唯一索引后无
-// ON CONFLICT 子句）。抽出供单测使用，运行期由 batchInsertValues 调用（小批量路径）。
-func buildBatchInsertSQL(ms []PMMetric) (string, []any, error) {
-	ib := storage.Psql.Insert("pm_metrics").Columns(pmMetricsColumns...)
-	for _, m := range ms {
-		vals, err := metricRowValues(m)
-		if err != nil {
-			return "", nil, err
-		}
-		ib = ib.Values(vals...)
-	}
-	sql, args, err := ib.ToSql()
-	if err != nil {
-		return "", nil, fmt.Errorf("build pm_metrics insert: %w", err)
-	}
-	return sql, args, nil
-}
-
 // buildQuerySQL 构造 pm_metrics 查询 SQL。LIMIT 经 clampLimit 强制收口，
 // 保证任何输入（包括 Limit<=0 或超大值）都生成有上界的查询，防 OOM。
 // 抽出供单测验证 LIMIT 边界，运行期由 Query 调用。
 func buildQuerySQL(q QueryRequest) (string, []any, error) {
-	qb := storage.Psql.Select(
+	qb := newLogicalPMSelect(q,
 		"id", "device_oui", "device_sn", "metric_path", "metric_type", "metric_value",
 		"statis_type", "granularity", "time", "start_time", "end_time",
 		"ingest_time", "object_ldn", "extra",
-	).From("pm_metrics")
+	)
 
 	qb = applyFilters(qb, q)
 	qb = qb.OrderBy("time DESC")
@@ -420,7 +265,7 @@ func (r *PgRepository) Query(ctx context.Context, q QueryRequest) ([]PMMetric, e
 
 // Count 按条件统计。
 func (r *PgRepository) Count(ctx context.Context, q QueryRequest) (int64, error) {
-	qb := storage.Psql.Select("COUNT(*)").From("pm_metrics")
+	qb := newLogicalPMSelect(q, "COUNT(*)")
 	qb = applyFilters(qb, q)
 	sql, args, err := qb.ToSql()
 	if err != nil {
@@ -431,6 +276,37 @@ func (r *PgRepository) Count(ctx context.Context, q QueryRequest) (int64, error)
 		return 0, fmt.Errorf("count pm_metrics: %w", err)
 	}
 	return total, nil
+}
+
+// newLogicalPMSelect avoids expanding every member of every historical metric
+// set when callers request explicit paths. The dictionary is resolved first and
+// only matching IDs are tested against each candidate anchor's immutable set.
+// Broad unfiltered requests retain the compatibility view.
+func newLogicalPMSelect(q QueryRequest, columns ...string) squirrel.SelectBuilder {
+	if len(q.MetricPaths) == 0 {
+		return storage.Psql.Select(columns...).From("pm_metrics")
+	}
+	targeted := storage.Psql.Select(
+		"md5(a.anchor_id::text || ':' || d.metric_id::text)::uuid AS id",
+		"COALESCE(dev.oui,'')::text AS device_oui",
+		"COALESCE(dev.serial_number,f.device_sn)::text AS device_sn",
+		"d.metric_path", "d.metric_type", "v.metric_value", "d.statis_type", "a.granularity",
+		`a."time"`, "a.start_time", "a.end_time",
+		"COALESCE(b.committed_at,f.created_at,now()) AS ingest_time",
+		"a.object_ldn",
+		`jsonb_strip_nulls(jsonb_build_object(
+			'device_id',a.device_dim_id::text,'counter_group',a.counter_group,
+			'carrier',COALESCE(dev.carrier,f.carrier),
+			'technology',COALESCE(dev.technology,f.technology))) AS extra`,
+	).From("pm_measurement_anchors a").
+		Join("pm_metric_sets s ON s.metric_set_id=a.metric_set_id").
+		Join("pm_metric_dictionary d ON d.metric_id=ANY(s.metric_ids)").
+		LeftJoin(`pm_metric_values v ON v."time"=a."time" AND v.anchor_id=a.anchor_id AND v.metric_id=d.metric_id`).
+		LeftJoin("pm_files f ON f.id=a.source_file_id").
+		LeftJoin("pm_ingest_batches b ON b.ingest_batch_id=a.ingest_batch_id").
+		LeftJoin("device_dim dev ON dev.id=a.device_dim_id").
+		Where(squirrel.Eq{"d.metric_path": q.MetricPaths})
+	return storage.Psql.Select(columns...).FromSelect(targeted, "pm_metrics")
 }
 
 func applyFilters(qb squirrel.SelectBuilder, q QueryRequest) squirrel.SelectBuilder {
@@ -468,7 +344,7 @@ func applyFilters(qb squirrel.SelectBuilder, q QueryRequest) squirrel.SelectBuil
 		qb = qb.Where(squirrel.GtOrEq{"time": q.StartTime})
 	}
 	if !q.EndTime.IsZero() {
-		qb = qb.Where(squirrel.LtOrEq{"time": q.EndTime})
+		qb = qb.Where(squirrel.Lt{"time": q.EndTime})
 	}
 	// #64 设备组数据权限：pm_metrics 以 device_sn 为设备键，按可见分组 fail-closed 收口。
 	// nil（超管）不过滤；[] 直接 WHERE FALSE；[g...] 经 device_sn → devices → 组成员子查询限定。

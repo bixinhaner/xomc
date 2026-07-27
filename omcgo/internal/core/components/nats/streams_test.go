@@ -3,6 +3,7 @@ package nats
 import (
 	"strings"
 	"testing"
+	"time"
 
 	gonats "github.com/nats-io/nats.go"
 )
@@ -15,6 +16,45 @@ func subjectMatchesStream(subject, pattern string) bool {
 		return strings.HasPrefix(subject, prefix)
 	}
 	return subject == pattern
+}
+
+func TestDefaultStreams_PMAggregationTieredRetention(t *testing.T) {
+	expected := map[string]struct {
+		age     time.Duration
+		subject string
+	}{
+		"PM_AGG_15M":    {age: 2 * time.Hour, subject: "pmaggregation.15m.normalized"},
+		"PM_AGG_HOURLY": {age: 48 * time.Hour, subject: "pmaggregation.hourly.rollup"},
+		"PM_AGG_DAILY":  {age: 40 * 24 * time.Hour, subject: "pmaggregation.daily.rollup"},
+	}
+	found := map[string]bool{}
+	for _, stream := range DefaultStreams() {
+		want, ok := expected[stream.Name]
+		if !ok {
+			continue
+		}
+		found[stream.Name] = true
+		if stream.Retention != gonats.LimitsPolicy {
+			t.Fatalf("%s retention = %v, want LimitsPolicy", stream.Name, stream.Retention)
+		}
+		if stream.MaxAge != want.age {
+			t.Fatalf("%s max age = %v, want %v", stream.Name, stream.MaxAge, want.age)
+		}
+		if stream.MaxBytes <= 0 {
+			t.Fatalf("%s must have a hard byte limit", stream.Name)
+		}
+		if stream.Compression != gonats.S2Compression {
+			t.Fatalf("%s compression = %v, want S2", stream.Name, stream.Compression)
+		}
+		if !subjectMatchesStream(want.subject, stream.Subjects[0]) {
+			t.Fatalf("%s subject not covered by %v", want.subject, stream.Subjects)
+		}
+	}
+	for name := range expected {
+		if !found[name] {
+			t.Fatalf("%s stream is not registered", name)
+		}
+	}
 }
 
 func subjectCovered(subject string, streams []StreamDef) bool {
@@ -78,5 +118,42 @@ func TestDefaultStreams_NamesUnique(t *testing.T) {
 			t.Errorf("duplicate stream name %q in DefaultStreams", s.Name)
 		}
 		seen[s.Name] = true
+	}
+}
+
+func TestDefaultStreams_PMAllowsDirectLookupForQueueHealth(t *testing.T) {
+	for _, stream := range DefaultStreams() {
+		if stream.Name == "PM" {
+			if !stream.AllowDirect {
+				t.Fatal("PM stream must allow direct subject-filtered lookup for queue health")
+			}
+			return
+		}
+	}
+	t.Fatal("PM stream is not registered")
+}
+
+func TestEnableDirectLookupRunsBeforeRetentionRebuildPolicy(t *testing.T) {
+	pm := StreamDef{Name: "PM", Retention: gonats.WorkQueuePolicy, AllowDirect: true}
+	info := &gonats.StreamInfo{Config: gonats.StreamConfig{
+		Name:        "PM",
+		Retention:   gonats.LimitsPolicy,
+		AllowDirect: false,
+	}}
+	updated := false
+
+	err := enableDirectLookup(pm, info, func(config *gonats.StreamConfig) (*gonats.StreamInfo, error) {
+		updated = true
+		if !config.AllowDirect {
+			t.Fatal("AllowDirect must be enabled even when retention rebuild is disabled")
+		}
+		return &gonats.StreamInfo{Config: *config}, nil
+	})
+
+	if err != nil {
+		t.Fatalf("enable direct lookup: %v", err)
+	}
+	if !updated {
+		t.Fatal("direct lookup upgrade was not attempted")
 	}
 }

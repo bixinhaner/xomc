@@ -53,7 +53,6 @@ export interface AgentAdminConfigUpdate {
   enabled?: boolean;
   agentStudioBaseUrl?: string;
   agentStudioServiceToken?: string;
-  connectorSlug?: string;
   allowedMethods?: string[];
   blockedPathPrefixes?: string[];
   toolTimeoutSeconds?: number;

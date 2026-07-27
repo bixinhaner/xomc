@@ -19,6 +19,7 @@ import { applyInstanceContext, type QuickSettingsInstanceContext } from './valid
 import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
+const BM_RU_ROUTE_INDEX_PREFIX = 'Device.DeviceInfo.RU.';
 
 const ENB_IPSEC_CONTROL_GROUP: QuickSettingsGroup = {
   id: 'device-ipsec-control',
@@ -95,7 +96,7 @@ function QuickSettingsGroupGate({ active, eager = false, title, children }: Quic
           observer.disconnect();
         }
       },
-      { rootMargin: '600px 0px' },
+      { rootMargin: '160px 0px' },
     );
     observer.observe(node);
     return () => observer.disconnect();
@@ -112,6 +113,34 @@ function QuickSettingsGroupGate({ active, eager = false, title, children }: Quic
   );
 }
 
+function useDeferredActive(active: boolean): boolean {
+  const [deferredActive, setDeferredActive] = useState(false);
+
+  useEffect(() => {
+    if (!active) {
+      setDeferredActive(false);
+      return;
+    }
+
+    let cancelled = false;
+    let raf1 = 0;
+    let raf2 = 0;
+    raf1 = window.requestAnimationFrame(() => {
+      raf2 = window.requestAnimationFrame(() => {
+        if (!cancelled) setDeferredActive(true);
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(raf1);
+      window.cancelAnimationFrame(raf2);
+    };
+  }, [active]);
+
+  return deferredActive;
+}
+
 function normalizeQuickSettingsNetworkType(networkType: string): string {
   switch (networkType) {
     case 'eNB':
@@ -126,7 +155,7 @@ function normalizeQuickSettingsNetworkType(networkType: string): string {
 const LTE_NUM_OF_CELLS_PATH = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.CA.PARAMS.NumOfCells';
 const HIDDEN_GROUP_IDS = new Set(['device-sync']);
 const DEVICE_LEVEL_IPSEC_GROUP_IDS = new Set(['device-ipsec', 'gnb-ipsec']);
-const OUTER_GROUP_IDS = new Set(['device-time', 'device-ipsec-control', 'device-ipsec', 'gnb-ipsec']);
+const OUTER_GROUP_IDS = new Set(['device-time', 'bm-sync-source', 'gnb-sync-source', 'device-ipsec-control', 'device-ipsec', 'gnb-ipsec']);
 // BSC 设备 BTS 多实例父路径。额外的顶部 ＋/✖ 按钮调用 AddObject/DeleteObject
 // 在该路径下管理 BTS 实例。
 const BSC_BTS_OBJECT_PREFIX = 'DeviceGSM.Bts.';
@@ -151,6 +180,7 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
   const t = useT();
   const locale: 'zh-CN' | 'en-US' = intl.locale === 'en-US' ? 'en-US' : 'zh-CN';
   const normalizedNetworkType = normalizeQuickSettingsNetworkType(networkType);
+  const queryActive = useDeferredActive(active);
   const [ipsecControlValue, setIpsecControlValue] = useState<string | undefined>(undefined);
 
   // LTE 选择 FAPService，NR 选择 CellConfig 小区实例。
@@ -193,7 +223,7 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
     bmTech,
     hasBmGsmGroups: bmHasGsmGroups,
     hasBmLteGroups: bmHasLteGroups,
-    enabled: active,
+    enabled: queryActive,
   });
 
   const {
@@ -320,7 +350,7 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
     return (
       <QuickSettingsGroupGate
         key={`${group.id}::gate::${keySuffix}`}
-        active={active}
+        active={queryActive}
         eager={eager}
         title={title}
       >
@@ -378,6 +408,12 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
           paths.add(applyInstanceContext(param.extraInfoPath, instanceContext));
         }
       }
+      const hasBmRuRouteBinding = group.params.some((param) => (
+        param.name === 'GsmCellWithRuRelation' || param.name === 'LteCellWithRuList'
+      ));
+      if (hasBmRuRouteBinding) {
+        paths.add(BM_RU_ROUTE_INDEX_PREFIX);
+      }
       // 某些 quicksettings XML 会遗漏 Device.Time.Enable 的标准路径声明，
       // 这里兜底补齐，确保头部“刷新”一定会同步 NTP 开关值。
       if (group.id === 'device-time') {
@@ -400,7 +436,7 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
   // BSC 下拉显示 "实例号 · IpaUnitId=xxx"，让运维能直接看出 BTS 与 IPA 单元映射。
   // 复用 useResolvedCellInstances 已经发过的同一份 schema 查询（react-query
   // 按 (deviceId, 'DeviceGSM.Bts.') key 去重，不会额外触发请求）。
-  const { data: bscBtsSchema } = useParameterSchema(deviceId, BSC_BTS_OBJECT_PREFIX, active && isBSC);
+  const { data: bscBtsSchema } = useParameterSchema(deviceId, BSC_BTS_OBJECT_PREFIX, queryActive && isBSC);
   const bscBtsIpaUnitIdByInstance = useMemo(() => {
     const m = new Map<number, string>();
     if (!isBSC || !bscBtsSchema) return m;

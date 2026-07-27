@@ -16,7 +16,10 @@ tsdb:
   # KPI/时序库物理分离：指向独立时序库实例 postgres-tsdb（凭据/主机由 deploy/.env 经 compose 注入 ${POSTGRES_TSDB_*}/${TSDB_HOST}）。
   dsn: "postgres://${POSTGRES_TSDB_USER}:${POSTGRES_TSDB_PASSWORD}@${TSDB_HOST}:5432/${POSTGRES_TSDB_DB}?sslmode=disable"
   # 连接池核定（#24）：KPI 聚合写时序，TS 池温和上调 20→25。
-  max_conns: 25
+  # 2026-07-21 压测实测：pm_consumer_concurrency 从16上调到32后，同批最多32个PM
+  # COPY 事务并发占用连接，25 conns 会成为新瓶颈，同步上调 25→40（其余聚合/告警
+  # /MR 等 worker 后台任务共享同一池，40 仍留有余量，不是 PM 独占）。
+  max_conns: 40
   min_conns: 5
   max_conn_lifetime: 30m
   max_conn_idle_time: 5m
@@ -31,6 +34,14 @@ redis:
   password: ""
   db: 0
   pool_size: 100
+
+# Reliable parameter-sync data plane. Production requires migration 000021.
+param_sync:
+  run_enabled: true
+  result_consumer_enabled: true
+  staging_enabled: true
+  canary_percent: 100
+  legacy_fallback_enabled: false
 
 nats:
   url: "nats://nats:4222"
@@ -54,11 +65,19 @@ minio:
 
 # PM 文件入库消费者的进程内并发订阅数（pm.file.received → 解析入库）。
 # 共享 durable consumer "pm-workers" 由 JetStream 负载均衡，吃满 worker 多核。
-# <=0 回退 GOMAXPROCS（容器 CPU 配额），上限 16；按 worker CPU 核数设置。
-pm_consumer_concurrency: 0
+# <=0 回退 GOMAXPROCS（容器 CPU 配额），上限 32。
+# 2026-07-21 压测实测（20000 设备规模）：初次显式设为 16（旧上限）验证消费吞吐翻倍
+# （~10/s→~20/s）且 worker CPU 仍有余量（~30%），随即代码上限从 16 上调到 32
+# （见 cmd/worker/main.go 注释），这里同步跟上；tsdb.max_conns 已同步从 25 提到 40
+# 避免连接池变成新瓶颈。
+pm_consumer_concurrency: 32
 
 # PM 指标大批量写关掉 WAL 同步落盘（synchronous_commit=off）换吞吐：PM 数据可从 MinIO 重建。
 # 默认 false（durable）；写吞吐瓶颈下置 true。
+# 2026-07-21 压测实测（20000设备/32并发）过 true：tsdb pg_stat_activity 观测到 WALWrite
+# 等待，但隔离对比测试（同批次分别测 async_commit 单独开/关）显示吞吐差异在噪音范围内
+# （压测环境生产速率本身波动过大，未能得出确认的收益），故保持默认 false，不在此环境
+# 下强行开启一个效果不确定的开关。
 pm_async_commit: false
 
 # KPI 计算取数：false=内存 counter 直接算（默认，省每文件回读）；true=DB 回读（同窗多文件部署）。

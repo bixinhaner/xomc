@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/omcgo/omcgo/internal/config/parammodel"
@@ -55,6 +56,26 @@ type SyncService struct {
 	config               appconfig.AutoSyncConfig
 	batchSize            int
 	logger               *zap.Logger
+	durableStarter       DurableParamSyncStarter
+}
+
+// DurableParamSyncStarter lets the reliable request/run data plane take over a
+// deterministic canary without coupling provision to the paramsync package.
+type DurableParamSyncStarter interface {
+	StartDurableSync(ctx context.Context, dev *model.Device, sourceID, reason string, parameterPaths []string) (handled bool, taskCount int, err error)
+}
+
+func (s *SyncService) SetDurableStarter(starter DurableParamSyncStarter) *SyncService {
+	s.durableStarter = starter
+	return s
+}
+
+type syncGPVOpenGuard interface {
+	HasOpenSyncGPVTasksByDevice(ctx context.Context, deviceSN string) (bool, error)
+}
+
+type syncGPVDeviceLocker interface {
+	AcquireSyncGPVDeviceLock(ctx context.Context, deviceSN string) (release func(), err error)
 }
 
 // SetRedisClient 注入 Redis 客户端供 Path B 同步 reason 标签传递与差异日志使用（T-0123/T-0127）。
@@ -74,7 +95,7 @@ type ParamSyncWriter interface {
 // DeviceInfoRefresher 在 Path B 参数全量落库后，把 device_parameters 投影刷新到
 // device_info，避免列表/详情读取到旧快照。
 type DeviceInfoRefresher interface {
-	SyncFromParameters(ctx context.Context, deviceID uuid.UUID, carrierCode model.CarrierCode, tech model.Technology) ([]string, error)
+	SyncFromParameters(ctx context.Context, deviceID uuid.UUID, carrierCode model.CarrierCode, tech model.Technology, productClass string) ([]string, error)
 }
 
 // PathBSyncTaskReader 查询某设备是否仍有未完成的 sync-gpv 任务。
@@ -190,7 +211,7 @@ func (s *SyncService) StartSync(ctx context.Context, dev *model.Device, paramPat
 //
 // 批次划分（object_param_classifier 引入）：
 //   - 标量参数（无尾点）按 s.batchSize 批量打包，效率优先
-//   - 已展开的实例级对象前缀（如 DeviceGSM.Bts.1.）按 NATS payload 预算自适应合批
+//   - 已展开的实例级对象前缀（如 DeviceGSM.Bts.1.）按 5MB NATS payload 预算自适应合批
 //   - 其它对象前缀（尾点 "."，CPE 枚举实例）每条独立成批 size=1
 //
 // 普通对象前缀单独成批的原因：CPE 展开对象前缀返回所有当前实例的所有参数，单个对象就可能
@@ -200,20 +221,21 @@ func (s *SyncService) StartSync(ctx context.Context, dev *model.Device, paramPat
 //
 // 已展开实例级对象不同：DeviceGSM.Bts.1. 这种 path 只会返回单实例子树，响应规模稳定，
 // 可按保守字节估算合批以降低 BSC 256 BTS 场景的串行往返数，同时把估算 NATS payload
-// 控制在 1MB 以下。
+// 控制在 5MB 以下。
 //
 // commandKey 一律用 "sync-gpv-{sn}-{i}" 前缀。该前缀同时是 ACS handler 判定
 // "本任务允许 Fault 自愈"和 Path B "允许 reconcile" 的关键标识。
 //
-// ExpiresIn=syncGPVTaskExpiresIn（1800s）：BSC 等慢设备一次 sync 会产生 200+ object
-// 前缀 task（DeviceGSM.Bts.{1..254}.），ACS 在 inform session 内串行 push，按 ~1 task/s
-// 估算 250 task 需要 4~5 分钟才能消化完，跨越多次 inform 周期才能完成。沿用全局默认
-// 120s 时后半批 task 会被 sweeper 抢先标 expired，导致部分实例无法落库（首次同步缺数）。
+// ExpiresIn=syncGPVTaskExpiresIn（1800s）：保留给慢设备/异常大对象的多批兜底窗口。
+// 常规 BSC BTS 对象在 5MB 预算内会一次整对象同步，不再产生 200+ 个实例 task。
 //
 // 返回入队成功的 task ID 列表，调用方可用于追溯/北向返回。
 func (s *SyncService) EnqueueGPVBatches(ctx context.Context, deviceSN string, paramPaths []string, sourceID string) ([]string, error) {
 	if deviceSN == "" {
 		return nil, fmt.Errorf("EnqueueGPVBatches: empty deviceSN")
+	}
+	if strings.TrimSpace(sourceID) == "" {
+		sourceID = uuid.NewString()
 	}
 	batches := buildGPVBatches(paramPaths, s.batchSize)
 	taskIDs := make([]string, 0, len(batches))
@@ -312,16 +334,16 @@ func (s *SyncService) CompleteSyncLog(ctx context.Context, deviceID uuid.UUID) e
 }
 
 const (
-	// natsMaxPayloadBytes 对齐 NATS 默认 max_payload=1MB。GPV 批量估算必须低于该值。
-	natsMaxPayloadBytes = 1 << 20
+	// natsMaxPayloadBytes 对齐 NATS max_payload=5MB。GPV 批量估算必须低于该值。
+	natsMaxPayloadBytes = 5 * 1024 * 1024
 
-	// gpvNATSPayloadBudgetBytes 只使用 75% 的 NATS 默认上限，给事件 envelope、JSON 元数据、
+	// gpvNATSPayloadBudgetBytes 只使用 75% 的 NATS 上限，给事件 envelope、JSON 元数据、
 	// 参数名长度波动和设备返回值波动留余量。
-	gpvNATSPayloadBudgetBytes = 768 * 1024
+	gpvNATSPayloadBudgetBytes = natsMaxPayloadBytes * 3 / 4
 
 	// expandedObjectPrefixPayloadEstimateBytes 是单个已展开实例级 object GPV 响应的保守估算。
-	// BSC BTS 实测约 70 字段，按 avgFieldBytes=60 约 4KB；这里按 12KB 计，64 个实例
-	// 约 768KB，仍低于 1MB 并保留 envelope/JSON 元数据余量。
+	// BSC BTS 实测约 70 字段，按 avgFieldBytes=60 约 4KB；这里按 12KB 计，256 个实例
+	// 约 3MB，仍低于 5MB 并保留 envelope/JSON 元数据余量。
 	expandedObjectPrefixPayloadEstimateBytes = 12 * 1024
 )
 
@@ -351,6 +373,12 @@ func buildGPVBatches(prefixes []string, batchSize int) [][]string {
 	}
 	batches = append(batches, batchPaths(instanceObjects, instanceObjectBatchSize)...)
 	return batches
+}
+
+// PathBGPVBatches exposes the established Path B GPV isolation and payload
+// budgeting rules to the durable parameter-sync scheduler.
+func PathBGPVBatches(prefixes []string, batchSize int) [][]string {
+	return buildGPVBatches(prefixes, batchSize)
 }
 
 func maxExpandedObjectPrefixesPerGPV() int {

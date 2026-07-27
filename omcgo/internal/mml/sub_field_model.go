@@ -68,19 +68,22 @@ type MMLCommandSubFieldEnriched struct {
 	MMLCommandSubField
 
 	// 从 join mml_params 拿到的通用元数据（前端 SubFieldChecklist / SubFieldInputList 渲染依据）
-	Tr069Path          string            `json:"tr069_path"`
-	ValueType          string            `json:"value_type"`
-	AccessType         string            `json:"access_type"`
-	IsObject           bool              `json:"is_object"`
-	SupportsAdd        bool              `json:"supports_add"`
-	SupportsDelete     bool              `json:"supports_delete"`
-	ChangeApplies      string            `json:"change_applies"`
-	ConstraintTextI18n map[string]string `json:"constraint_text_i18n"`
-	DefaultValue       *string           `json:"default_value,omitempty"`
-	JsRegex            *string           `json:"js_regex,omitempty"`
-	// MinValue 是 standard_params.min_value（数值范围下界）。MML 控制台「命令参数」
-	// 在 MOD/ADD 填值时用作标量参数的默认值（值默认取 min_value）。可为空（无范围约束）。
+	Tr069Path          string               `json:"tr069_path"`
+	ValueType          string               `json:"value_type"`
+	AccessType         string               `json:"access_type"`
+	IsObject           bool                 `json:"is_object"`
+	SupportsAdd        bool                 `json:"supports_add"`
+	SupportsDelete     bool                 `json:"supports_delete"`
+	ChangeApplies      string               `json:"change_applies"`
+	ConstraintTextI18n map[string]string    `json:"constraint_text_i18n"`
+	DefaultValue       *string              `json:"default_value,omitempty"`
+	JsRegex            *string              `json:"js_regex,omitempty"`
+	ValidationPattern  *string              `json:"validation_pattern,omitempty"`
+	EnumOptions        []MMLParamEnumOption `json:"enum_options,omitempty"`
+	// MinValue/MaxValue 优先来自当前 paramModel 的 param_mappings，缺失时回退
+	// standard_params。MML 控制台「命令参数」在 MOD/ADD 填值时用作范围校验和兼容默认值。
 	MinValue *int64 `json:"min_value,omitempty"`
+	MaxValue *int64 `json:"max_value,omitempty"`
 	// ParamNameI18n 是 mml_params.name_i18n（全局默认 label，LabelI18n 为空时兜底）
 	ParamNameI18n map[string]string `json:"param_name_i18n,omitempty"`
 	// Description 是 standard_params.description（TR-181 path 中文含义说明，
@@ -105,4 +108,10 @@ type MMLCommandSubFieldEnriched struct {
 	// 细粒度展示用。仅 admin ListAdminByCommand 填充；console 路径不写。
 	SupportedModelCount int `json:"supported_model_count"`
 	TotalModelCount     int `json:"total_model_count"`
+}
+
+// MMLParamEnumOption 是参数模型枚举值及其展示标签。
+type MMLParamEnumOption struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
 }

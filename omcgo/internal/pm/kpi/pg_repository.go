@@ -54,8 +54,9 @@ func (r *PgKPIRepository) BatchInsert(ctx context.Context, values []model.KPIVal
 //   - 原子：DELETE 与 INSERT 同事务，INSERT 失败整体回滚，旧 KPI 行不丢（修复非原子崩溃窗口）。
 //   - 并发安全：pg_advisory_xact_lock 按 (oui,sn,cellID,end_time) 串行化同范围并发重算，杜绝两次
 //     重算交错（各自 DELETE 后各自 INSERT）产生重复行。锁随事务结束自动释放。
+//
 // scope DELETE 限定单设备单窗口，走 idx_pm_metrics_device_time 定位，删唯一索引后依然高效。
-// object_ldn 列 NOT NULL DEFAULT ''，cellID="" 对应 object_ldn=''（与写入侧 nil→'' 一致）。
+// object_ldn 列 NOT NULL DEFAULT ”，cellID="" 对应 object_ldn=”（与写入侧 nil→” 一致）。
 func (r *PgKPIRepository) ReplaceForRecompute(ctx context.Context, oui, deviceSN, cellID string, endTime time.Time, values []model.KPIValue) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -74,11 +75,7 @@ func (r *PgKPIRepository) ReplaceForRecompute(ctx context.Context, oui, deviceSN
 		return fmt.Errorf("acquire recompute lock (sn=%s cell=%s): %w", deviceSN, cellID, err)
 	}
 
-	if _, err := tx.Exec(ctx,
-		`DELETE FROM pm_metrics
-		 WHERE device_oui = $1 AND device_sn = $2 AND object_ldn = $3
-		   AND metric_type = 'kpi' AND granularity = '15min' AND end_time = $4`,
-		oui, deviceSN, cellID, endTime); err != nil {
+	if err := metrics.DeleteKPIAnchorsTx(ctx, tx, oui, deviceSN, cellID, endTime); err != nil {
 		return fmt.Errorf("delete kpi for recompute (sn=%s cell=%s): %w", deviceSN, cellID, err)
 	}
 

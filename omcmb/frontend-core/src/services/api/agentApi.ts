@@ -7,12 +7,23 @@ import type {
   AgentRuntimeServerConfig,
   AgentVisibilityConfig,
 } from '../../types/agentConfig';
+import type { AgentArtifactRef, AgentAttachmentRef, AgentPanelMessage } from '../../agentkit';
+
+export interface AgentConversationHistory {
+  conversationId: string;
+  messages: Array<Omit<AgentPanelMessage, 'createdAt'> & { createdAt: string | number }>;
+}
 
 export interface AgentApi {
   getVisibilityConfig(): Promise<AgentVisibilityConfig>;
   getRuntimeConfig(): Promise<AgentRuntimeServerConfig>;
   getConversation(): Promise<AgentConversation>;
   startConversation(): Promise<AgentConversation>;
+  getConversationMessages(): Promise<AgentConversationHistory>;
+  uploadAttachment(file: File): Promise<AgentAttachmentRef>;
+  removeAttachment(attachmentId: string): Promise<void>;
+  cancelRun(runId: string): Promise<boolean>;
+  getArtifactContent(artifact: AgentArtifactRef, disposition: 'inline' | 'attachment'): Promise<Blob>;
   getAdminConfig(): Promise<AgentAdminConfig>;
   saveAdminConfig(payload: AgentAdminConfigUpdate): Promise<AgentAdminConfig>;
   testAdminConfig(payload: AgentAdminConfigUpdate): Promise<AgentProvisionResult>;
@@ -34,6 +45,34 @@ export const agentApi: AgentApi = {
   },
   async startConversation() {
     const { data } = await http.post<AgentConversation>('/agent/conversation');
+    return data;
+  },
+  async getConversationMessages() {
+    const { data } = await http.get<AgentConversationHistory>('/agent/conversation/messages');
+    return data;
+  },
+  async uploadAttachment(file) {
+    const form = new FormData();
+    form.append('file', file);
+    const { data } = await http.post<{ attachment: AgentAttachmentRef }>('/agent/attachments', form, {
+      headers: { 'Content-Type': undefined },
+      timeout: 60000,
+    });
+    return data.attachment;
+  },
+  async removeAttachment(attachmentId) {
+    await http.delete(`/agent/attachments/${encodeURIComponent(attachmentId)}`);
+  },
+  async cancelRun(runId) {
+    const { data } = await http.post<{ cancelled: boolean }>(`/agent/runs/${encodeURIComponent(runId)}/cancel`);
+    return data.cancelled;
+  },
+  async getArtifactContent(artifact, disposition) {
+    const { data } = await http.get<Blob>(`/agent/artifacts/${encodeURIComponent(artifact.artifactId)}/content`, {
+      params: { disposition },
+      responseType: 'blob',
+      timeout: 60000,
+    });
     return data;
   },
   async getAdminConfig() {

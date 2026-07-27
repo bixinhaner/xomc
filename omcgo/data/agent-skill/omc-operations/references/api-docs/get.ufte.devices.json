@@ -5,12 +5,12 @@
   "path": "/api/v1/ufte/devices",
   "handler": "github.com/omcgo/omcgo/internal/ufte.(*Handler).ListDevices-fm",
   "category": "ufte",
-  "title": "ufte - 列表",
-  "summary": "ufte - 列表",
-  "description": "ufte：按筛选条件查询资源列表",
+  "title": "查询传输任务设备执行明细与失败原因",
+  "summary": "查询传输任务设备执行明细与失败原因",
+  "description": "可按 taskId、category、typeCode 和 status 筛选；失败记录返回 failureReason 和设备上报的原始 failureDetail，适用于日志收集、升级、备份和恢复任务排障。",
   "intents": [
-    "ufte - 列表",
-    "ufte：按筛选条件查询资源列表",
+    "查询传输任务设备执行明细与失败原因",
+    "可按 taskId、category、typeCode 和 status 筛选；失败记录返回 failureReason 和设备上报的原始 failureDetail，适用于日志收集、升级、备份和恢复任务排障。",
     "ufte",
     "devices"
   ],
@@ -29,7 +29,9 @@
       "in": "query",
       "required": false,
       "type": "string",
+      "description": "业务分类，如日志收集 station_log。",
       "schema": {
+        "description": "业务分类，如日志收集 station_log。",
         "type": "string"
       }
     },
@@ -38,7 +40,9 @@
       "in": "query",
       "required": false,
       "type": "string",
+      "description": "匹配任务名、设备名、设备 SN 或产品类型。",
       "schema": {
+        "description": "匹配任务名、设备名、设备 SN 或产品类型。",
         "type": "string"
       }
     },
@@ -87,7 +91,9 @@
       "in": "query",
       "required": false,
       "type": "string",
+      "description": "设备执行状态；failed 用于定位失败记录。",
       "schema": {
+        "description": "设备执行状态；failed 用于定位失败记录。",
         "type": "string"
       }
     },
@@ -107,7 +113,9 @@
       "in": "query",
       "required": false,
       "type": "string",
+      "description": "任务类型，如 RUNTIME_LOG_COLLECT。",
       "schema": {
+        "description": "任务类型，如 RUNTIME_LOG_COLLECT。",
         "type": "string"
       }
     }

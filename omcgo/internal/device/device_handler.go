@@ -26,8 +26,9 @@ type VisibleGroupsResolver interface {
 
 // Handler provides HTTP handlers for device management REST API.
 type Handler struct {
-	service     *DeviceService
-	permService VisibleGroupsResolver
+	service         *DeviceService
+	permService     VisibleGroupsResolver
+	locationSyncSvc *LocationSyncService
 }
 
 // authorizeDeviceAccess 是所有"按 ID 直读"设备端点共享的越权（IDOR）守卫。
@@ -72,6 +73,10 @@ func NewHandler(service *DeviceService) *Handler {
 // SetPermissionService sets the data permission service for group-based filtering.
 func (h *Handler) SetPermissionService(ps VisibleGroupsResolver) {
 	h.permService = ps
+}
+
+func (h *Handler) SetLocationSyncService(service *LocationSyncService) {
+	h.locationSyncSvc = service
 }
 
 // resolveVisibleDeviceGrants 解析调用者可见设备数据权限（三态：nil 超管 / [] 无权限 / [grant...] 限定）。
@@ -148,14 +153,81 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		devices.PUT("/:id", h.UpdateDevice)
 		devices.DELETE("/:id", h.DeleteDevice)
 		devices.POST("/:id/reboot", h.RebootDevice)
+		devices.POST("/:id/password/reset", h.ResetLMTPassword)
 		// T-0126: 旧 /param-sync (Path A) 已下线，替换为 /sync-params (Path B + reason="manual")
 		devices.POST("/:id/sync-params", h.SyncDeviceParams)
+		devices.POST("/:id/location-sync/accept", h.AcceptLocationSync)
 		devices.PUT("/:id/rf-switch", h.SetRFSwitch)
 		// Issue #758: 设备名称同步人工处理端点
 		devices.POST("/:id/resolve-name-sync", h.ResolveNameSync)
 		// 网管侧手动改基站名（即时下发）
 		devices.POST("/:id/rename", h.RenameDevice)
 	}
+}
+
+type AcceptLocationRequest struct {
+	ReportedVersion int64 `json:"reported_version" binding:"required"`
+}
+
+func locationSyncAuditDetails(result *LocationSync, reportedVersion int64) map[string]interface{} {
+	details := map[string]interface{}{"operation": "location_sync_accept", "reported_version": reportedVersion}
+	if result == nil {
+		return details
+	}
+	if result.AcceptedBefore != nil {
+		details["accepted_before"] = map[string]float64{
+			"latitude":  result.AcceptedBefore.Latitude,
+			"longitude": result.AcceptedBefore.Longitude,
+		}
+	}
+	if result.Accepted != nil {
+		details["accepted_after"] = map[string]float64{
+			"latitude":  result.Accepted.Latitude,
+			"longitude": result.Accepted.Longitude,
+		}
+	}
+	return details
+}
+
+// AcceptLocationSync promotes the latest device-reported GPS coordinates to
+// the OMC accepted coordinates after an optimistic version check.
+func (h *Handler) AcceptLocationSync(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	if !authorizeDeviceAccess(c, h.service, h.permService, id) {
+		return
+	}
+	if h.locationSyncSvc == nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, commonerrors.ErrInternal)
+		return
+	}
+
+	var req AcceptLocationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	result, err := h.locationSyncSvc.Accept(c.Request.Context(), id, req.ReportedVersion)
+
+	entry := admin.AuditContextFromGin(c)
+	entry.Action = audit.ActionConfig
+	entry.ResourceType = audit.ResourceDevice
+	entry.ResourceID = id.String()
+	entry.Details = locationSyncAuditDetails(result, req.ReportedVersion)
+	entry.Success = err == nil
+	if err != nil {
+		entry.ErrorMessage = err.Error()
+	}
+	audit.LogAsync(entry)
+
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	response.OK(c, result)
 }
 
 // CreateDeviceRequest defines the request body for creating a device.
@@ -522,6 +594,35 @@ func (h *Handler) RebootDevice(c *gin.Context) {
 	response.OKWithStatus(c, http.StatusAccepted, gin.H{"message": "reboot command queued"})
 }
 
+// ResetLMTPassword handles POST /api/v1/devices/:id/password/reset.
+func (h *Handler) ResetLMTPassword(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	if !authorizeDeviceAccess(c, h.service, h.permService, id) {
+		return
+	}
+
+	result, err := h.service.ResetLMTPassword(c.Request.Context(), id, admin.UserIDStringFromCtx(c))
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	body := gin.H{
+		"message":         "password reset command queued",
+		"parameters":      0,
+		"reboot_required": false,
+	}
+	if result != nil && result.TaskID != "" {
+		body["task_id"] = result.TaskID
+	}
+	response.OKWithStatus(c, http.StatusAccepted, body)
+}
+
 // parseGeoStatusFilter 把前端 GIS 的三档 status（onlineActive/onlineInactive/offline）翻译为
 // 后端 model.DeviceStatus 列表。ListGeo 与 GetGeoStats 共用此 helper，保证两接口语义对齐。
 // 空串返回 nil 表示不施加状态过滤。
@@ -739,12 +840,12 @@ func (h *Handler) SyncDeviceParams(c *gin.Context) {
 	// 给前端 toast 与 API 契约。
 	sourceID := uuid.New().String()
 	displaySourceID := fmt.Sprintf("manual:%s", sourceID)
-	used, dev, gpvTaskCount, err := h.service.SyncDeviceParamsManual(c.Request.Context(), id, sourceID, req.ParameterPaths)
+	start, dev, err := h.service.SyncDeviceParamsManualDetailed(c.Request.Context(), id, sourceID, req.ParameterPaths)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	if !used {
+	if start == nil || !start.Used {
 		// Path B 不可用 — 设备 productClass 未路由到 product / MappingSet 为空
 		response.OKWithStatus(c, http.StatusServiceUnavailable, gin.H{
 			"status":    "unavailable",
@@ -758,15 +859,23 @@ func (h *Handler) SyncDeviceParams(c *gin.Context) {
 	if dev != nil {
 		deviceSN = dev.SerialNumber
 	}
-	response.OKWithStatus(c, http.StatusAccepted, gin.H{
-		"status":                "queued",
+	payload := gin.H{
+		"status":                start.Status,
 		"source_id":             displaySourceID,
+		"result_code":           start.ResultCode,
 		"device_id":             id.String(),
 		"serial_number":         deviceSN,
 		"force":                 req.Force,
 		"parameter_paths_count": len(req.ParameterPaths),
-		"gpv_task_count":        gpvTaskCount,
-	})
+		"gpv_task_count":        start.TaskCount,
+	}
+	if start.RequestID != uuid.Nil {
+		payload["request_id"] = start.RequestID
+	}
+	if start.RunID != nil && *start.RunID != uuid.Nil {
+		payload["run_id"] = start.RunID
+	}
+	response.OKWithStatus(c, http.StatusAccepted, payload)
 }
 
 // SetRFSwitch handles PUT /api/v1/devices/:id/rf-switch.

@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
+	"github.com/omcgo/omcgo/internal/pm/aggregator"
 )
 
 // ── stub repo / uploader / source ────────────────────────────────────────────
@@ -169,33 +170,37 @@ func newTestTask(src SourceType) *Task {
 
 // #38：adhoc 导出必须从任务元数据读取配置指标集，并传到表头发现与流式数据源。
 func TestRunner_BuildSource_AdhocUsesTaskMetricPaths(t *testing.T) {
-	taskID := uuid.New()
-	metricPaths := []string{"KGSM0101", "KGSM0102"}
-	params, err := json.Marshal(AdhocParams{TaskID: taskID.String()})
-	require.NoError(t, err)
+	for _, source := range []SourceType{SourcePMDashboard, SourceAdhocResult} {
+		t.Run(string(source), func(t *testing.T) {
+			taskID := uuid.New()
+			metricPaths := []string{"KGSM0101", "KGSM0102"}
+			params, err := json.Marshal(AdhocParams{TaskID: taskID.String()})
+			require.NoError(t, err)
 
-	metaDB := &recordingExportQuerier{row: &exportMetaRow{
-		dimension:   "product",
-		deviceCount: 0,
-		metricPaths: metricPaths,
-	}}
-	adhocDB := &recordingExportQuerier{results: []pgx.Rows{
-		&adhocFakeRows{rows: [][]any{{"KGSM0101", "kpi"}, {"KGSM9999", "kpi"}}},
-		&adhocFakeRows{}, // 指标名解析查询无命中，回退编号本身。
-	}}
-	runner := NewRunner(RunnerDeps{AdhocDB: adhocDB, TaskMetaDB: metaDB})
+			metaDB := &recordingExportQuerier{row: &exportMetaRow{
+				dimension:   "product",
+				deviceCount: 0,
+				metricPaths: metricPaths,
+			}}
+			adhocDB := &recordingExportQuerier{results: []pgx.Rows{
+				&adhocFakeRows{rows: [][]any{{"KGSM0101", "kpi"}, {"KGSM9999", "kpi"}}},
+				&adhocFakeRows{}, // 指标名解析查询无命中，回退编号本身。
+			}}
+			runner := NewRunner(RunnerDeps{AdhocDB: adhocDB, TaskMetaDB: metaDB})
 
-	src, _, _, err := runner.buildSource(context.Background(), &Task{
-		ID:         uuid.New(),
-		SourceType: SourceAdhoc,
-		Params:     params,
-	})
-	require.NoError(t, err)
+			src, _, _, err := runner.buildSource(context.Background(), &Task{
+				ID:         uuid.New(),
+				SourceType: source,
+				Params:     params,
+			})
+			require.NoError(t, err)
 
-	assert.Contains(t, metaDB.queryRowSQL, "metric_paths")
-	require.NotEmpty(t, adhocDB.queries)
-	assert.Contains(t, adhocDB.queries[0].sql, "metric_path IN (")
-	assert.Equal(t, metricPaths, src.(*adhocSource).metricPaths)
+			assert.Contains(t, metaDB.queryRowSQL, "metric_paths")
+			require.NotEmpty(t, adhocDB.queries)
+			assert.Contains(t, adhocDB.queries[0].sql, "metric_path IN (")
+			assert.Equal(t, metricPaths, src.(*adhocSource).metricPaths)
+		})
+	}
 }
 
 func TestRunner_BuildSource_UsesStoredEnglishLocaleWithoutRequestContext(t *testing.T) {
@@ -212,7 +217,7 @@ func TestRunner_BuildSource_UsesStoredEnglishLocaleWithoutRequestContext(t *test
 
 	_, _, _, err := runner.buildSource(context.Background(), &Task{
 		ID:         uuid.New(),
-		SourceType: SourceAdhoc,
+		SourceType: SourceAdhocResult,
 		Params: []byte(fmt.Sprintf(
 			`{"task_id":%q,"locale":"en-US"}`,
 			taskID.String(),
@@ -221,6 +226,165 @@ func TestRunner_BuildSource_UsesStoredEnglishLocaleWithoutRequestContext(t *test
 	require.NoError(t, err)
 	require.Len(t, adhocDB.queries, 2)
 	assert.Contains(t, adhocDB.queries[1].sql, "COALESCE(NULLIF(en_name, ''), cn_name)")
+}
+
+func TestRunner_BuildSource_KpiQueryAutoDiscoversObjectLDNsForSkeletonExport(t *testing.T) {
+	start := time.Date(2026, 7, 14, 7, 0, 0, 0, time.UTC)
+	end := start.Add(30 * time.Minute)
+	params, err := json.Marshal(DashboardParams{
+		Granularity: "15min",
+		Dimension:   "device",
+		DeviceSNs:   []string{"SN1"},
+		MetricPaths: []string{"K001"},
+		StartTime:   start.Format(time.RFC3339),
+		EndTime:     end.Format(time.RFC3339),
+	})
+	require.NoError(t, err)
+
+	metricDB := &recordingExportQuerier{results: []pgx.Rows{
+		&adhocFakeRows{rows: [][]any{{"Cellid=1"}, {"Cellid=2"}}}, // DiscoverObjectLDNs
+		&adhocFakeRows{}, // 指标名解析无命中，列名回退指标编号
+	}}
+	runner := NewRunner(RunnerDeps{
+		MetricDB: metricDB,
+		Aggr:     aggregator.New(metricDB, nil, nil),
+	})
+
+	src, _, _, err := runner.buildSource(context.Background(), &Task{
+		ID:         uuid.New(),
+		SourceType: SourceKpiQuery,
+		Params:     params,
+	})
+	require.NoError(t, err)
+
+	filled, ok := src.(*fillEmptySource)
+	require.True(t, ok)
+	assert.Equal(t, []string{"Cellid=1", "Cellid=2"}, filled.req.ObjectLDNs)
+
+	deviceSrc, ok := filled.src.(*dashboardDeviceSource)
+	require.True(t, ok)
+	assert.Equal(t, []string{"Cellid=1", "Cellid=2"}, deviceSrc.objectLDNs)
+	require.NotEmpty(t, metricDB.queries)
+	assert.Contains(t, metricDB.queries[0].sql, "SELECT DISTINCT object_ldn")
+	assert.NotContains(t, metricDB.queries[0].sql, "metric_path", "当前指标完全没数据时也要能发现对象全集")
+}
+
+func TestRunner_BuildSource_DeviceKPIExportUsesStoredResultSource(t *testing.T) {
+	start := time.Date(2026, 7, 14, 7, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	params, err := json.Marshal(DashboardParams{
+		Granularity: "hourly",
+		Dimension:   "device",
+		DeviceSNs:   []string{"SN1"},
+		MetricPaths: []string{"K001"},
+		StartTime:   start.Format(time.RFC3339),
+		EndTime:     end.Format(time.RFC3339),
+	})
+	require.NoError(t, err)
+
+	metricDB := &recordingExportQuerier{results: []pgx.Rows{
+		&adhocFakeRows{}, // 指标名解析无命中，列名回退指标编号。
+	}}
+	runner := NewRunner(RunnerDeps{MetricDB: metricDB})
+
+	src, _, _, err := runner.buildSource(context.Background(), &Task{
+		ID:         uuid.New(),
+		SourceType: SourceDashboard,
+		Params:     params,
+	})
+	require.NoError(t, err)
+	_, ok := src.(*dashboardDeviceSource)
+	require.True(t, ok)
+}
+
+func TestRunner_BuildSource_MixedKpiCounterClearsSingleMetricTypeFilter(t *testing.T) {
+	start := time.Date(2026, 7, 14, 7, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	params, err := json.Marshal(DashboardParams{
+		Granularity: "hourly",
+		Dimension:   "device",
+		DeviceSNs:   []string{"SN1"},
+		MetricPaths: []string{"KGSM0101", "CGSM0010001"},
+		MetricType:  "kpi",
+		StartTime:   start.Format(time.RFC3339),
+		EndTime:     end.Format(time.RFC3339),
+	})
+	require.NoError(t, err)
+
+	metricDB := &recordingExportQuerier{results: []pgx.Rows{
+		&adhocFakeRows{},
+	}}
+	runner := NewRunner(RunnerDeps{MetricDB: metricDB})
+
+	src, _, _, err := runner.buildSource(context.Background(), &Task{
+		ID:         uuid.New(),
+		SourceType: SourceDeviceView,
+		Params:     params,
+	})
+	require.NoError(t, err)
+	deviceSrc, ok := src.(*dashboardDeviceSource)
+	require.True(t, ok)
+	assert.Nil(t, deviceSrc.req.MetricType)
+}
+
+func TestRunner_BuildSource_DeviceDailyKPIExportUsesStoredOffsetSource(t *testing.T) {
+	start := time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+	params, err := json.Marshal(DashboardParams{
+		Granularity: "daily",
+		Dimension:   "device",
+		DeviceSNs:   []string{"SN1"},
+		MetricPaths: []string{"KGSM0101"},
+		StartTime:   start.Format(time.RFC3339),
+		EndTime:     end.Format(time.RFC3339),
+	})
+	require.NoError(t, err)
+
+	metricDB := &recordingExportQuerier{results: []pgx.Rows{
+		&adhocFakeRows{},
+	}}
+	runner := NewRunner(RunnerDeps{MetricDB: metricDB})
+
+	src, _, _, err := runner.buildSource(context.Background(), &Task{
+		ID:         uuid.New(),
+		SourceType: SourceDashboard,
+		Params:     params,
+	})
+	require.NoError(t, err)
+	_, ok := src.(*dashboardDeviceOffsetSource)
+	require.True(t, ok)
+}
+
+func TestRunner_BuildSource_DeviceViewUsesDashboardLikeDeviceExport(t *testing.T) {
+	start := time.Date(2026, 7, 14, 7, 0, 0, 0, time.UTC)
+	end := start.Add(30 * time.Minute)
+	params, err := json.Marshal(DashboardParams{
+		Granularity: "15min",
+		Dimension:   "device",
+		DeviceSNs:   []string{"SN1"},
+		MetricPaths: []string{"C001"},
+		StartTime:   start.Format(time.RFC3339),
+		EndTime:     end.Format(time.RFC3339),
+	})
+	require.NoError(t, err)
+
+	metricDB := &recordingExportQuerier{results: []pgx.Rows{
+		&adhocFakeRows{}, // 指标名解析无命中，列名回退指标编号。
+	}}
+	runner := NewRunner(RunnerDeps{MetricDB: metricDB})
+
+	src, _, layout, err := runner.buildSource(context.Background(), &Task{
+		ID:         uuid.New(),
+		SourceType: SourceDeviceView,
+		Params:     params,
+	})
+	require.NoError(t, err)
+
+	_, ok := src.(*dashboardDeviceSource)
+	require.True(t, ok)
+	assert.True(t, layout.IncludeCell)
+	assert.False(t, layout.IncludeMeasurementObject)
+	assert.Equal(t, "设备 SN", layout.FirstColHeader)
 }
 
 // ── 预 running 守门：payload 坏 / 缺 task_id 直接返 error，不动任务 ─────────────

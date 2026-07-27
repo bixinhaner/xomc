@@ -47,3 +47,11 @@ type TaskService interface {
 	// sent 状态必须靠本方法在设备重连时恢复。
 	RecoverPendingTasks(ctx context.Context, deviceSN string) error
 }
+
+// GPVFaultRecoverer extends a durable parameter-sync run after a leaf-path
+// 9005 fault and before the original task becomes terminal.
+type GPVFaultRecoverer interface {
+	// A non-nil replacement with a non-nil error means the durable recovery
+	// committed but immediate queue admission failed; the outbox will retry.
+	Recover(ctx context.Context, original *task.Task, remaining []string) (*task.Task, error)
+}

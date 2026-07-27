@@ -8,7 +8,9 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
+  mapBackendAggregatedMeta,
   mapBackendAggregatedRow,
+  type BackendAggregatedResponse,
   type BackendAggregatedRow,
 } from '../pmDashboard';
 
@@ -71,5 +73,29 @@ describe('mapBackendAggregatedRow — 占位行 / 全零 UUID / 类型漂移', (
     );
     expect(r.metricType).toBe('kpi');
     expect(r.displayName).toBe('RRC 建立成功率');
+  });
+});
+
+describe('mapBackendAggregatedMeta — 请求范围和实际桶范围', () => {
+  it('保留后端返回的 requested / actual 时间范围', () => {
+    const resp: BackendAggregatedResponse = {
+      items: [],
+      total: 0,
+      requested_start_time: '2026-07-16T03:13:17Z',
+      requested_end_time: '2026-07-16T04:13:17Z',
+      actual_start_time: '2026-07-16T03:15:00Z',
+      actual_end_time: '2026-07-16T04:00:00Z',
+      granularity: '15min',
+      timezone: 'Asia/Shanghai',
+    };
+
+    expect(mapBackendAggregatedMeta(resp)).toEqual({
+      requestedStartTime: '2026-07-16T03:13:17Z',
+      requestedEndTime: '2026-07-16T04:13:17Z',
+      actualStartTime: '2026-07-16T03:15:00Z',
+      actualEndTime: '2026-07-16T04:00:00Z',
+      granularity: '15min',
+      timezone: 'Asia/Shanghai',
+    });
   });
 });

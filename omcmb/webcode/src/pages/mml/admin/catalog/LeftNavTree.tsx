@@ -13,7 +13,7 @@ import type { GroupTreeNode, GroupTreeCommand } from '@core/types/mmlConsole';
 import { useT } from '@/hooks/useT';
 
 // 2026-05-27 mml-admin-catalog-redesign-20260527 §3：左栏导航树。
-// 只渲染顶层 group（parentId==null）+ 其 commands；已有多层数据保留但不展示。
+// 渲染顶层 group 及其 children/commands；group children 用于展示二级标签。
 // 命令节点行内含 编辑/删除 链接（hover 浮现）；分组节点用 [⋯] dropdown 暴露
 // 编辑 / 新增命令 / 删除（删除受 commands.length===0 条件约束）。
 
@@ -37,12 +37,12 @@ export interface LeftNavTreeProps {
   extraNodes?: TreeDataNode[];
 }
 
-/** 仅返回顶层分组（parentId==null）。已有多层数据保留但不渲染。 */
+/** 仅挑出根分组；根分组下面的 children 会递归渲染。 */
 function filterTopLevelGroups(groups: GroupTreeNode[]): GroupTreeNode[] {
   return groups.filter((g) => !g.path.includes('.'));
 }
 
-/** 在分组及其命令中查找包含搜索词的子集（命中即保留分组+全量命令）。 */
+/** 在分组及其命令中查找包含搜索词的子集。 */
 function filterBySearch(
   groups: GroupTreeNode[],
   search: string,
@@ -51,7 +51,8 @@ function filterBySearch(
   const lower = search.toLowerCase();
   const hits: GroupTreeNode[] = [];
   const expandedHits: string[] = [];
-  groups.forEach((g) => {
+
+  const visit = (g: GroupTreeNode): GroupTreeNode | null => {
     const groupHit =
       g.displayName.toLowerCase().includes(lower) ||
       g.groupCode.toLowerCase().includes(lower);
@@ -61,15 +62,61 @@ function filterBySearch(
         c.commandCode.toLowerCase().includes(lower) ||
         c.logicalCode.toLowerCase().includes(lower),
     );
-    if (groupHit || matchedCmds.length > 0) {
-      hits.push({
+    const matchedChildren = (g.children ?? [])
+      .map(visit)
+      .filter((child): child is GroupTreeNode => Boolean(child));
+
+    if (groupHit || matchedCmds.length > 0 || matchedChildren.length > 0) {
+      expandedHits.push(`group:${g.id}`);
+      return {
         ...g,
         commands: groupHit ? g.commands : matchedCmds,
-      });
-      expandedHits.push(`group:${g.id}`);
+        children: groupHit ? g.children : matchedChildren,
+      };
     }
+    return null;
+  };
+
+  groups.forEach((g) => {
+    const hit = visit(g);
+    if (hit) hits.push(hit);
   });
   return { groups: hits, expandedHits };
+}
+
+const OPERATION_ORDER: Record<string, number> = {
+  ADD: 1,
+  RMV: 2,
+  MOD: 3,
+  LST: 4,
+};
+
+const DISPLAY_VERB_PREFIX = /^(查询|修改|添加|新增|删除|Query|Modify|Add|Delete)\s+/i;
+
+function operationOrder(op: string): number {
+  return OPERATION_ORDER[op] ?? 99;
+}
+
+function commandSectionKey(command: GroupTreeCommand): string {
+  return (
+    command.logicalName ||
+    command.displayName.replace(DISPLAY_VERB_PREFIX, '') ||
+    command.logicalCode ||
+    command.commandCode
+  );
+}
+
+function compareCommandsBySection(a: GroupTreeCommand, b: GroupTreeCommand): number {
+  const sectionCompare = commandSectionKey(a).localeCompare(
+    commandSectionKey(b),
+    'zh-CN',
+  );
+  if (sectionCompare !== 0) return sectionCompare;
+
+  const opCompare = operationOrder(a.operationType) - operationOrder(b.operationType);
+  if (opCompare !== 0) return opCompare;
+
+  return a.commandCode.localeCompare(b.commandCode);
 }
 
 export default function LeftNavTree({
@@ -85,7 +132,7 @@ export default function LeftNavTree({
 }: LeftNavTreeProps): React.ReactElement {
   const t = useT();
 
-  // 过滤掉子分组（只显示一级）+ 按搜索词过滤
+  // 从根分组开始渲染；子分组保留在 children 中递归展示。
   const topGroups = useMemo(() => filterTopLevelGroups(groups), [groups]);
   const { groups: visibleGroups, expandedHits } = useMemo(
     () => filterBySearch(topGroups, search),
@@ -103,7 +150,8 @@ export default function LeftNavTree({
       // 2026-05-27 用户决策:取消 catalog_protected 在 UI 上的锁定逻辑。
       // 权限由路由层 RBAC + 后端 API 校验决定,前端不再因 catalogProtected 拦截。
       // 删除按钮仍保留"分组含命令不能删除"约束(后端 ErrGroupNotEmpty 兜底)。
-      const hasCommands = (g.commands?.length ?? 0) > 0;
+      const hasCommands =
+        (g.commands?.length ?? 0) > 0 || (g.children?.length ?? 0) > 0;
       return [
         {
           key: 'editGroup',
@@ -140,9 +188,54 @@ export default function LeftNavTree({
     const sortedGroups = [...visibleGroups].sort(
       (a, b) => a.displayOrder - b.displayOrder,
     );
-    return sortedGroups.map((g) => {
-      const commands = [...(g.commands ?? [])].sort((a, b) =>
-        a.displayName.localeCompare(b.displayName),
+    const buildCommandNode = (c: GroupTreeCommand): TreeDataNode => ({
+      key: `cmd:${c.id}`,
+      title: (
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            width: '100%',
+          }}
+        >
+          <CodeOutlined />
+          <span
+            style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}
+          >
+            {c.displayName}
+          </span>
+          <Tooltip title={t('mml.admin.catalog.commands.edit')}>
+            <a
+              onClick={(e) => {
+                e.stopPropagation();
+                onCommandAction('editCommand', c);
+              }}
+              style={{ fontSize: 14, display: 'inline-flex' }}
+            >
+              <EditOutlined />
+            </a>
+          </Tooltip>
+          <Tooltip title={t('mml.admin.catalog.common.delete')}>
+            <a
+              onClick={(e) => {
+                e.stopPropagation();
+                onCommandAction('deleteCommand', c);
+              }}
+              style={{ fontSize: 14, color: '#ff4d4f', display: 'inline-flex' }}
+            >
+              <DeleteOutlined />
+            </a>
+          </Tooltip>
+        </span>
+      ),
+      isLeaf: true,
+    });
+
+    const buildGroupNode = (g: GroupTreeNode): TreeDataNode => {
+      const commands = [...(g.commands ?? [])].sort(compareCommandsBySection);
+      const childGroups = [...(g.children ?? [])].sort(
+        (a, b) => a.displayOrder - b.displayOrder,
       );
       return {
         key: `group:${g.id}`,
@@ -178,51 +271,14 @@ export default function LeftNavTree({
             </Dropdown>
           </span>
         ),
-        children: commands.map<TreeDataNode>((c) => ({
-          key: `cmd:${c.id}`,
-          title: (
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                width: '100%',
-              }}
-            >
-              <CodeOutlined />
-              <span
-                style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}
-              >
-                {c.displayName}
-              </span>
-              <Tooltip title={t('mml.admin.catalog.commands.edit')}>
-                <a
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onCommandAction('editCommand', c);
-                  }}
-                  style={{ fontSize: 14, display: 'inline-flex' }}
-                >
-                  <EditOutlined />
-                </a>
-              </Tooltip>
-              <Tooltip title={t('mml.admin.catalog.common.delete')}>
-                <a
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onCommandAction('deleteCommand', c);
-                  }}
-                  style={{ fontSize: 14, color: '#ff4d4f', display: 'inline-flex' }}
-                >
-                  <DeleteOutlined />
-                </a>
-              </Tooltip>
-            </span>
-          ),
-          isLeaf: true,
-        })),
+        children: [
+          ...childGroups.map(buildGroupNode),
+          ...commands.map(buildCommandNode),
+        ],
       };
-    });
+    };
+
+    return sortedGroups.map(buildGroupNode);
   }, [visibleGroups, buildGroupMenu, onGroupAction, onCommandAction, t]);
 
   // Customized 子树恒追加在分组之后；搜索时不参与 group 过滤（始终可达增删改入口）。

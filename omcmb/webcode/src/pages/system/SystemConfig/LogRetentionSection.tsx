@@ -9,8 +9,8 @@
 // 接入方式与 RetentionBackpressureSection 一致：复用 useSysConfigsByCategory + useBatchUpdateSysConfigs，
 // 每张卡片自管 form + 保存（一次保存 = 该分类一次 batch upsert，触发后端热加载）。
 
-import { useEffect, useMemo, useState } from 'react';
-import { Button, Card, Form, InputNumber, Switch, message, Spin } from 'antd';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Button, Card, Form, InputNumber, Switch, message, Spin } from 'antd';
 import {
   useSysConfigsByCategory,
   useBatchUpdateSysConfigs,
@@ -84,8 +84,20 @@ function CategoryConfigCard({ spec }: { spec: CardSpec }) {
   const [form] = Form.useForm<Record<string, number | boolean>>();
   const [submitting, setSubmitting] = useState(false);
 
-  const { data: configs, isLoading } = useSysConfigsByCategory(spec.category);
+  const {
+    data: configs,
+    isLoading,
+    isFetching,
+    isError,
+    isSuccess,
+    refetch,
+  } = useSysConfigsByCategory(spec.category);
   const { mutateAsync: batchUpdate } = useBatchUpdateSysConfigs();
+  const canEdit = isSuccess && !isFetching;
+  const canEditRef = useRef(canEdit);
+  useLayoutEffect(() => {
+    canEditRef.current = canEdit;
+  }, [canEdit]);
 
   const initialValues = useMemo<Record<string, number | boolean>>(() => {
     const out: Record<string, number | boolean> = {};
@@ -104,16 +116,36 @@ function CategoryConfigCard({ spec }: { spec: CardSpec }) {
   }, [configs, spec.fields]);
 
   useEffect(() => {
-    form.setFieldsValue(initialValues);
-  }, [form, initialValues]);
+    if (!isSuccess) return;
+    form.setFields(
+      spec.fields.map((field) => ({
+        name: field.key,
+        value: initialValues[field.key],
+        touched: false,
+      })),
+    );
+  }, [form, initialValues, isSuccess, spec.fields]);
 
   const handleSave = async () => {
+    if (!canEditRef.current) {
+      message.error(t('empty.loadFailed'));
+      return;
+    }
     try {
       const values = await form.validateFields();
+      if (!canEditRef.current) {
+        message.error(t('empty.loadFailed'));
+        return;
+      }
+      const changedFields = spec.fields.filter((field) => form.isFieldTouched(field.key));
+      if (changedFields.length === 0) {
+        message.warning(t('sysconfig.warn.noSaveable'));
+        return;
+      }
       setSubmitting(true);
       await batchUpdate({
         category: spec.category,
-        items: spec.fields.map((f) => ({
+        items: changedFields.map((f) => ({
           key: f.key,
           value: encodeValue(values[f.key], f.type),
           value_type: f.type,
@@ -133,13 +165,23 @@ function CategoryConfigCard({ spec }: { spec: CardSpec }) {
       title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t(spec.titleKey)}</span>}
       style={{ marginBottom: 16 }}
       extra={
-        <Button size="small" type="primary" onClick={handleSave} loading={submitting}>
+        <Button size="small" type="primary" onClick={handleSave} loading={submitting} disabled={!canEdit}>
           {t('logCfg.save')}
         </Button>
       }
     >
       <div style={{ color: '#888', fontSize: 12, marginBottom: 12 }}>{t(spec.descKey)}</div>
-      <Spin spinning={isLoading}>
+      {isError && (
+        <Alert
+          type="error"
+          showIcon
+          title={t('empty.loadFailed')}
+          description={t('empty.loadFailedDesc')}
+          action={<Button size="small" onClick={() => void refetch()}>{t('common.retry')}</Button>}
+          style={{ marginBottom: 12 }}
+        />
+      )}
+      <Spin spinning={isLoading || isFetching}>
         <Form form={form} layout="vertical" size="small">
           {spec.fields.map((f) => (
             <Form.Item

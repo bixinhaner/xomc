@@ -1,0 +1,3 @@
+device,object,time,counter,value
+001122/serial-1,Cell=1,2026-07-24T00:00:00Z,Signal.RSRP,-95
+001122/serial-1,Cell=1,2026-07-24T00:00:00Z,Traffic.Bytes,

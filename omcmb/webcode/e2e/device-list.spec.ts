@@ -37,6 +37,56 @@ test.describe('Device List page', () => {
     await expect(rows.first()).toBeVisible({ timeout: 10_000 });
   });
 
+  test('日志收集下载列即使被旧列设置显式显示也不再出现', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('omc_col_vis_device-list-table', '[]');
+      localStorage.setItem('omc_col_order_device-list-table', JSON.stringify(['latestLog']));
+    });
+    await navigateTo(page, '/device/list');
+    await waitForPageLoad(page);
+
+    await expect(page.locator('.ant-table').first()).toBeVisible();
+    await expect(
+      page.getByRole('columnheader', { name: 'SN', exact: true }).first(),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('columnheader', { name: /运行日志|Runtime Log/ }),
+    ).toHaveCount(0);
+  });
+
+  test('日志收集触发成功后停留在设备列表并提示任务管理入口', async ({ page }) => {
+    await navigateTo(page, '/device/list');
+    await waitForPageLoad(page);
+
+    const rows = page.locator('.ant-table-tbody tr.ant-table-row');
+    await expect(rows.first()).toBeVisible({ timeout: 15_000 });
+    let selectedOnlineDevice = false;
+    for (let index = 0; index < await rows.count(); index += 1) {
+      const checkbox = rows.nth(index).locator('.ant-checkbox-input');
+      if (!(await checkbox.isDisabled())) {
+        await checkbox.check({ force: true });
+        selectedOnlineDevice = true;
+        break;
+      }
+    }
+    expect(selectedOnlineDevice).toBe(true);
+
+    const collectButton = page.getByRole('button', { name: /日志收集|Log Collect/ });
+    await expect(collectButton).toBeEnabled();
+    await collectButton.click();
+
+    const confirm = page.locator('.ant-modal-confirm');
+    await expect(confirm).toBeVisible();
+    await confirm.getByRole('button', { name: /确\s*认|Confirm/ }).click();
+
+    await expect(
+      page.getByText(
+        /日志收集已触发.*文件传输.*任务管理|Log collection triggered.*File Transfer.*Task Management/,
+      ),
+    ).toBeVisible();
+    await expect(page).toHaveURL(/\/device\/list(?:\?|$)/);
+  });
+
   test('should navigate to device detail when clicking a device', async ({ page }) => {
     await navigateTo(page, '/device/list');
     await waitForPageLoad(page);

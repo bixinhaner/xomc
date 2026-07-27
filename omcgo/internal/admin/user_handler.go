@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"regexp"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -14,18 +13,17 @@ import (
 	"github.com/omcgo/omcgo/internal/core/response"
 )
 
-// userContextWithOperator 把 gin.Context 中的认证信息复制到 context.Context，
-// 供 service 层取 operator_id 写审计字段（created_by / updated_by）。
+// userContextWithOperator 把 gin.Context 中的认证身份和可信请求元数据复制到
+// context.Context，供 service 层写 created_by / updated_by 和业务审计字段。
 func userContextWithOperator(c *gin.Context) context.Context {
-	ctx := c.Request.Context()
-	if v, ok := c.Get(CtxKeyUserID); ok {
-		ctx = context.WithValue(ctx, CtxKeyUserID, v)
+	ctx := contextWithAuditRequestMetadata(c)
+	for _, key := range []string{CtxKeyUserID, CtxKeyUsername} {
+		if v, ok := c.Get(key); ok {
+			ctx = context.WithValue(ctx, key, v)
+		}
 	}
 	return ctx
 }
-
-// usernameRegex 用户名格式校验：只允许字母、数字、下划线、减号（issue #686）。
-var usernameRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 func (h *Handler) CreateUser(c *gin.Context) {
 	var httpReq CreateUserHTTPRequest
@@ -33,11 +31,17 @@ func (h *Handler) CreateUser(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
+	phone, err := normalizeAndValidateUserPhone(httpReq.Phone)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	httpReq.Phone = phone
 
 	// issue #686：用户名格式校验（只允许字母、数字、下划线、减号）。
-	if !usernameRegex.MatchString(httpReq.Username) {
+	if err := validateUsername(httpReq.Username); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			errors.New("username can only contain letters, numbers, underscores and hyphens"))
+			err)
 		return
 	}
 
@@ -129,6 +133,14 @@ func (h *Handler) UpdateUser(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
+	phone, err := normalizeAndValidateUserPhone(dereferenceString(req.Phone))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	if req.Phone != nil {
+		req.Phone = &phone
+	}
 
 	user, err := h.service.UpdateUser(userContextWithOperator(c), id, req)
 	if err != nil {
@@ -138,6 +150,13 @@ func (h *Handler) UpdateUser(c *gin.Context) {
 	}
 
 	response.OK(c, user)
+}
+
+func dereferenceString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func (h *Handler) DeleteUser(c *gin.Context) {
@@ -235,7 +254,7 @@ func (h *Handler) ResetPassword(c *gin.Context) {
 		return
 	}
 
-	ctx := c.Request.Context()
+	ctx := userContextWithOperator(c)
 
 	// issue #649：UseDefaultPassword=true 时跳过密码字段解析与必填校验。
 	// service 层会从 sys_configs.security.defaultPasswd 取值并跳过强度校验。

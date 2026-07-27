@@ -55,6 +55,31 @@ func Test_AdminRepository_SQLNoLongerFiltersBySubFieldIsSupported(t *testing.T) 
 		"PR-C: ListEnrichedByCommand EXISTS subquery must include pm.is_supported = true")
 }
 
+func TestBuildEnumOptions_UsesValuesWhenLabelsMissing(t *testing.T) {
+	values := "PSK，SIM"
+	got := buildEnumOptions(&values, nil)
+	assert.Equal(t, []MMLParamEnumOption{
+		{Value: "PSK", Label: "PSK"},
+		{Value: "SIM", Label: "SIM"},
+	}, got)
+}
+
+func Test_AdminRepository_SQLIncludesModelValueRules(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	body, err := os.ReadFile(filepath.Join(filepath.Dir(thisFile), "admin_repository.go"))
+	require.NoError(t, err)
+	src := string(body)
+
+	assert.Contains(t, src, "model_pm.default_value")
+	assert.Contains(t, src, "model_pm.validation_pattern")
+	assert.Contains(t, src, "COALESCE(model_pm.min_value, sp.min_value)")
+	assert.Contains(t, src, "COALESCE(model_pm.max_value, sp.max_value)")
+	assert.Contains(t, src, "model_pm.enum_values")
+	assert.Contains(t, src, "model_pm.enum_labels")
+	assert.Contains(t, src, "ORDER BY (pm.source = 'custom') DESC")
+}
+
 // Test_ListByCommand_NoLongerFiltersBySubFieldIsSupported 集成测试：
 //
 // 同一 command_id 下既有 is_supported=true 又有 is_supported=false 的 sub_field 行，
@@ -159,6 +184,35 @@ func Test_ListEnrichedByCommand_NilParamModelReturnsAllSubFields(t *testing.T) {
 	}
 	assert.ElementsMatch(t, []string{"Device.NILPM.A", "Device.NILPM.B"}, gotPaths,
 		"paramModelID=nil should return all sub_fields regardless of csf.is_supported (PR-C)")
+}
+
+func Test_ListEnrichedByCommand_ReturnsStandardRange(t *testing.T) {
+	pool := newMMLTestPool(t)
+	if pool == nil {
+		return
+	}
+	ctx := context.Background()
+	fx := newMMLFixture(t, pool)
+	defer fx.cleanup()
+
+	commandID := fx.insertCommand("LST_STANDARD_RANGE", "chapter:RNG")
+	standardPath := "Device.Range." + uuid.NewString()
+	fx.insertSubField(commandID, standardPath, true, 1)
+	_, err := pool.Exec(ctx, `
+UPDATE standard_params
+   SET data_type = 'unsignedInt', min_value = 2, max_value = 32
+ WHERE standard_path = $1`, standardPath)
+	require.NoError(t, err)
+
+	repo := NewPgSubFieldRepository(pool)
+	rows, err := repo.ListEnrichedByCommand(ctx, commandID, nil)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "unsignedInt", rows[0].ValueType)
+	require.NotNil(t, rows[0].MinValue)
+	require.NotNil(t, rows[0].MaxValue)
+	assert.EqualValues(t, 2, *rows[0].MinValue)
+	assert.EqualValues(t, 32, *rows[0].MaxValue)
 }
 
 // T-0176-PR-E：MarkUnsupportedByStandardPath 写入真值源迁到 param_mappings；

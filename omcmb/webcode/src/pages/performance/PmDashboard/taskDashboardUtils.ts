@@ -18,6 +18,7 @@
 
 import type { AdhocResultRow, AdhocDimension } from '@core/types/pmAdhoc';
 import { isFinitePmMetricValue } from '@core/utils/pmMetricValue';
+import type { Locale } from '@core/types/common';
 
 export type MetricSeriesValue = number | '-';
 
@@ -82,25 +83,32 @@ export function seriesKeyOf(row: AdhocResultRow, dimension: AdhocDimension): str
  * PM-线名解析：name 为后端读时 JOIN 解析出的可读名（product 维度=产品名、device_group 维度=组名）。
  * 命中（非空）时显示可读名；缺失（脏数据/已删/NULL）回退现状的 id 前 8 位，保证不空白。
  */
-export function seriesLabelOf(key: string, dimension: AdhocDimension, name?: string): string {
+export function seriesLabelOf(
+  key: string,
+  dimension: AdhocDimension,
+  name?: string,
+  locale: Locale = 'zh-CN',
+): string {
+  const isEnglish = locale === 'en-US';
   switch (dimension) {
     case 'network':
-      return '全网';
+      return isEnglish ? 'Network' : '全网';
     case 'device':
       return key;
     case 'band': {
       const v = key.startsWith('Band=') ? key.slice('Band='.length) : key;
-      return `频段 ${v}`;
+      return `${isEnglish ? 'Band' : '频段'} ${v}`;
     }
     case 'device_group': {
-      if (name) return `设备组 ${name}`;
+      const prefix = isEnglish ? 'Device Group' : '设备组';
+      if (name) return `${prefix} ${name}`;
       const v = key.startsWith('DeviceGroup=') ? key.slice('DeviceGroup='.length) : key;
-      return `设备组 ${v.slice(0, 8)}`;
+      return `${prefix} ${v.slice(0, 8)}`;
     }
     case 'product':
-      return name ? `产品 ${name}` : `产品 ${key.slice(0, 8)}`;
+      return name ? `${isEnglish ? 'Product' : '产品'} ${name}` : `${isEnglish ? 'Product' : '产品'} ${key.slice(0, 8)}`;
     case 'aggregate_group':
-      return `聚合组 ${key}`;
+      return `${isEnglish ? 'Aggregate Group' : '聚合组'} ${key}`;
     default:
       return key;
   }
@@ -131,6 +139,7 @@ export function buildMetricCharts(
   rows: AdhocResultRow[],
   dimension: AdhocDimension,
   granularity: string,
+  locale: Locale = 'zh-CN',
 ): MetricChart[] {
   const filtered = rows.filter((r) => r.granularity === granularity);
   if (filtered.length === 0) return [];
@@ -180,7 +189,7 @@ export function buildMetricCharts(
           : dimension === 'device_group'
             ? r.deviceGroupName
             : undefined;
-      m.seriesName.set(key, seriesLabelOf(key, dimension, readableName));
+      m.seriesName.set(key, seriesLabelOf(key, dimension, readableName, locale));
     }
     // 同 (系列, 桶) 多行取后到值（正常一行一值）。
     if (isFinitePmMetricValue(r.metricValue)) {

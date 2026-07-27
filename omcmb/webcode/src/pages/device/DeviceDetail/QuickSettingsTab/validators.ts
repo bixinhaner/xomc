@@ -139,6 +139,7 @@ export interface QuickSettingsInstanceContext {
 
 const DEVICE_LEVEL_QUICK_SETTINGS_GROUP_IDS = new Set([
   'device-time',
+  'gnb-sync-source',
   'device-ipsec-control',
   'device-ipsec',
   'gnb-ipsec',
@@ -235,7 +236,41 @@ export function validateLteQOffsetValue(value: string): string | null {
   return null;
 }
 
+export function parseQuickSettingsMultiCheckboxValue(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item ?? '').trim()).filter(Boolean);
+  }
+  return String(value ?? '')
+    .split(/[,-]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+export function serializeQuickSettingsMultiCheckboxValue(value: unknown): string {
+  return parseQuickSettingsMultiCheckboxValue(value).join('-');
+}
+
+const BSC_CODEC_SUPPORT_OPTIONS = ['fr', 'hr', 'efr', 'amr'];
+
+export function isBscCodecSupportParam(nameOrPath?: string | null): boolean {
+  const raw = String(nameOrPath ?? '').trim();
+  return raw === 'CodecSupport' || /^DeviceGSM\.Bts\.(?:\{i\}|\d+)\.CodecSupport$/.test(raw);
+}
+
+export function normalizeBscCodecSupportValue(value: unknown): string[] {
+  const selected = new Set(parseQuickSettingsMultiCheckboxValue(value).map((item) => item.toLowerCase()));
+  selected.add('fr');
+  return BSC_CODEC_SUPPORT_OPTIONS.filter((item) => selected.has(item));
+}
+
+export function serializeBscCodecSupportValue(value: unknown): string {
+  return normalizeBscCodecSupportValue(value).filter((item) => item !== 'fr').join('-');
+}
+
 function toParameterType(type?: string | null): ParameterType | null {
+  if (String(type ?? '').trim() === 'multiCheckbox') {
+    return 'string';
+  }
   switch (String(type ?? '').trim()) {
     case 'string':
     case 'int':

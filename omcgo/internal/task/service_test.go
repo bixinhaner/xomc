@@ -109,16 +109,17 @@ func (m *mockTaskQueue) GetStaleSentTasks(ctx context.Context, deviceSN string, 
 
 // mockTaskRepository implements the methods of PgTaskRepository used by TaskService.
 type mockTaskRepository struct {
-	createFn           func(ctx context.Context, task *Task) error
-	updateFn           func(ctx context.Context, task *Task) error
-	getByIDFn          func(ctx context.Context, id string) (*Task, error)
-	getByCWMPIDFn      func(ctx context.Context, cwmpID string) (*Task, error)
-	deleteFn           func(ctx context.Context, id string) error
-	batchCreateFn      func(ctx context.Context, tasks []*Task) error
-	getHistoryFn       func(ctx context.Context, deviceSN string, opts *TaskHistoryOptions) ([]*Task, int64, error)
-	getPendingByDevFn  func(ctx context.Context, deviceSN string) ([]*Task, error)
-	countByStatusFn    func(ctx context.Context, deviceSN string) (map[TaskStatus]int64, error)
-	purgeOldTasksFn    func(ctx context.Context, before string) (int64, error)
+	createFn          func(ctx context.Context, task *Task) error
+	updateFn          func(ctx context.Context, task *Task) error
+	getByIDFn         func(ctx context.Context, id string) (*Task, error)
+	getByCWMPIDFn     func(ctx context.Context, cwmpID string) (*Task, error)
+	deleteFn          func(ctx context.Context, id string) error
+	batchCreateFn     func(ctx context.Context, tasks []*Task) error
+	getHistoryFn      func(ctx context.Context, deviceSN string, opts *TaskHistoryOptions) ([]*Task, int64, error)
+	getPendingByDevFn func(ctx context.Context, deviceSN string) ([]*Task, error)
+	listSentByDevFn   func(ctx context.Context, deviceSN string, sentBefore time.Time, limit int) ([]*Task, error)
+	countByStatusFn   func(ctx context.Context, deviceSN string) (map[TaskStatus]int64, error)
+	purgeOldTasksFn   func(ctx context.Context, before string) (int64, error)
 }
 
 func (m *mockTaskRepository) Create(ctx context.Context, task *Task) error {
@@ -177,6 +178,13 @@ func (m *mockTaskRepository) GetPendingByDevice(ctx context.Context, deviceSN st
 	return nil, nil
 }
 
+func (m *mockTaskRepository) ListSentByDeviceBefore(ctx context.Context, deviceSN string, sentBefore time.Time, limit int) ([]*Task, error) {
+	if m.listSentByDevFn != nil {
+		return m.listSentByDevFn(ctx, deviceSN, sentBefore, limit)
+	}
+	return nil, nil
+}
+
 func (m *mockTaskRepository) CountByStatus(ctx context.Context, deviceSN string) (map[TaskStatus]int64, error) {
 	if m.countByStatusFn != nil {
 		return m.countByStatusFn(ctx, deviceSN)
@@ -221,13 +229,17 @@ func newTestableService() *testableTaskService {
 // This is necessary because TaskService uses concrete types.
 
 func (ts *testableTaskService) CreateTask(ctx context.Context, req *CreateTaskRequest) (*Task, error) {
-	// T-0157 C1: 同步真实 TaskService.CreateTask 的默认超时兜底行为
+	// T-0157 C1: 同步真实 TaskService.CreateTask 的默认超时兜底行为。
 	if req.ExpiresIn == 0 && ts.svc.defaultExpiresIn > 0 {
 		req.ExpiresIn = ts.svc.defaultExpiresIn
 	}
 	task := NewTask(req)
 	if err := ts.repo.Create(ctx, task); err != nil {
 		return nil, fmt.Errorf("persist task: %w", err)
+	}
+	if req.FailImmediately {
+		ts.svc.notifyCompletion(ctx, task)
+		return task, nil
 	}
 	if err := ts.queue.Push(ctx, task); err != nil {
 		ts.repo.Delete(ctx, task.ID)
@@ -352,20 +364,19 @@ func (ts *testableTaskService) GetTaskStats(ctx context.Context, deviceSN string
 }
 
 func (ts *testableTaskService) RecoverPendingTasks(ctx context.Context, deviceSN string) error {
-	staleTasks, err := ts.queue.GetStaleSentTasks(ctx, deviceSN, "5m")
+	staleTasks, err := ts.repo.ListSentByDeviceBefore(ctx, deviceSN, time.Now(), recoverSentTaskBatchSize)
 	if err != nil {
 		return err
 	}
 	for _, task := range staleTasks {
 		if !task.CanRetry() {
-			ts.MarkTaskFailed(ctx, task.ID, 0, "exceeded max retries")
+			task.MarkFailed(0, "exceeded max retries")
+			ts.queue.Update(ctx, task)
+			ts.repo.Update(ctx, task)
 			continue
 		}
 		task.ResetForRetry()
 		if err := ts.queue.Update(ctx, task); err != nil {
-			continue
-		}
-		if err := ts.queue.Push(ctx, task); err != nil {
 			continue
 		}
 		ts.repo.Update(ctx, task)
@@ -376,6 +387,7 @@ func (ts *testableTaskService) RecoverPendingTasks(ctx context.Context, deviceSN
 func (ts *testableTaskService) BatchCreateTasks(ctx context.Context, reqs []*CreateTaskRequest) ([]*Task, error) {
 	var tasks []*Task
 	for _, req := range reqs {
+		ts.svc.applyDefaultExpiresIn(req)
 		tasks = append(tasks, NewTask(req))
 	}
 	if err := ts.repo.BatchCreate(ctx, tasks); err != nil {
@@ -383,6 +395,10 @@ func (ts *testableTaskService) BatchCreateTasks(ctx context.Context, reqs []*Cre
 	}
 	var pushed []*Task
 	for _, task := range tasks {
+		if task.Status == TaskStatusFailed {
+			ts.svc.notifyCompletion(ctx, task)
+			continue
+		}
 		if err := ts.queue.Push(ctx, task); err != nil {
 			continue
 		}
@@ -394,6 +410,14 @@ func (ts *testableTaskService) BatchCreateTasks(ctx context.Context, reqs []*Cre
 func (ts *testableTaskService) PurgeOldTasks(ctx context.Context, retentionDays int) (int64, error) {
 	before := time.Now().AddDate(0, 0, -retentionDays).Format(time.RFC3339)
 	return ts.repo.PurgeOldTasks(ctx, before)
+}
+
+type captureCompletionCallback struct {
+	tasks []*Task
+}
+
+func (c *captureCompletionCallback) OnTaskCompleted(_ context.Context, task *Task) {
+	c.tasks = append(c.tasks, task)
 }
 
 // --- Tests ---
@@ -832,7 +856,9 @@ func Test_RecoverPendingTasks_ResetsStale(t *testing.T) {
 		MaxRetries: 3,
 	}
 
-	ts.queue.getStaleSentTasksFn = func(ctx context.Context, deviceSN string, staleDuration string) ([]*Task, error) {
+	ts.repo.listSentByDevFn = func(ctx context.Context, deviceSN string, sentBefore time.Time, limit int) ([]*Task, error) {
+		assert.Equal(t, "SN001", deviceSN)
+		assert.Equal(t, recoverSentTaskBatchSize, limit)
 		return []*Task{staleTask}, nil
 	}
 
@@ -841,12 +867,6 @@ func Test_RecoverPendingTasks_ResetsStale(t *testing.T) {
 		updateCalled = true
 		assert.Equal(t, TaskStatusPending, task.Status)
 		assert.Equal(t, 1, task.RetryCount)
-		return nil
-	}
-
-	pushCalled := false
-	ts.queue.pushFn = func(ctx context.Context, task *Task) error {
-		pushCalled = true
 		return nil
 	}
 
@@ -860,7 +880,6 @@ func Test_RecoverPendingTasks_ResetsStale(t *testing.T) {
 	err := ts.RecoverPendingTasks(ctx, "SN001")
 	require.NoError(t, err)
 	assert.True(t, updateCalled, "should update task in queue")
-	assert.True(t, pushCalled, "should re-push task to queue")
 	assert.True(t, repoUpdated, "should sync to repo")
 }
 
@@ -877,22 +896,19 @@ func Test_RecoverPendingTasks_MarkExhaustedAsFailed(t *testing.T) {
 		MaxRetries: 3, // CanRetry() => false
 	}
 
-	ts.queue.getStaleSentTasksFn = func(ctx context.Context, deviceSN string, staleDuration string) ([]*Task, error) {
+	ts.repo.listSentByDevFn = func(ctx context.Context, deviceSN string, sentBefore time.Time, limit int) ([]*Task, error) {
 		return []*Task{exhaustedTask}, nil
 	}
 
-	markFailedCalled := false
-	ts.queue.markTaskFailedFn = func(ctx context.Context, taskID string, errorCode int, errorMsg string) error {
-		markFailedCalled = true
-		assert.Equal(t, "task-1", taskID)
-		assert.Equal(t, 0, errorCode)
-		assert.Contains(t, errorMsg, "exceeded max retries")
+	queueUpdated := false
+	ts.queue.updateFn = func(ctx context.Context, task *Task) error {
+		queueUpdated = true
+		assert.Equal(t, TaskStatusFailed, task.Status)
+		assert.Contains(t, task.ErrorMessage, "exceeded max retries")
 		return nil
 	}
-	ts.queue.getByIDFn = func(ctx context.Context, taskID string) (*Task, error) {
-		return exhaustedTask, nil
-	}
 	ts.repo.updateFn = func(ctx context.Context, task *Task) error {
+		assert.Equal(t, TaskStatusFailed, task.Status)
 		return nil
 	}
 
@@ -905,7 +921,7 @@ func Test_RecoverPendingTasks_MarkExhaustedAsFailed(t *testing.T) {
 	ctx := context.Background()
 	err := ts.RecoverPendingTasks(ctx, "SN001")
 	require.NoError(t, err)
-	assert.True(t, markFailedCalled, "should mark exhausted task as failed")
+	assert.True(t, queueUpdated, "should mark exhausted task as failed")
 	assert.False(t, pushCalled, "should not re-push exhausted task")
 }
 
@@ -937,6 +953,105 @@ func Test_BatchCreateTasks_Success(t *testing.T) {
 	assert.True(t, batchCreated)
 	assert.Len(t, tasks, 3)
 	assert.Equal(t, 3, pushCount)
+}
+
+func Test_BatchCreateTasks_FailImmediatelyPersistsTerminalTaskWithoutQueuePush(t *testing.T) {
+	ts := newTestableService()
+	var persisted []*Task
+	ts.repo.batchCreateFn = func(ctx context.Context, tasks []*Task) error {
+		persisted = append(persisted, tasks...)
+		return nil
+	}
+
+	pushCount := 0
+	ts.queue.pushFn = func(ctx context.Context, task *Task) error {
+		pushCount++
+		return nil
+	}
+
+	callback := &captureCompletionCallback{}
+	ts.svc.AddCompletionCallback(callback)
+
+	ctx := context.Background()
+	reqs := []*CreateTaskRequest{
+		{
+			DeviceSN:        "SN-OFF",
+			Method:          "Reboot",
+			FailImmediately: true,
+			FailReason:      "device offline",
+			SourceID:        "mml-task-1",
+			Source:          TaskSourceMML,
+		},
+	}
+
+	tasks, err := ts.BatchCreateTasks(ctx, reqs)
+	require.NoError(t, err)
+	require.Len(t, persisted, 1)
+	require.Len(t, tasks, 0, "immediate failures are persisted and completed, but not pushed to Redis")
+	assert.Equal(t, TaskStatusFailed, persisted[0].Status)
+	assert.Equal(t, "device offline", persisted[0].ErrorMessage)
+	assert.NotNil(t, persisted[0].CompletedAt)
+	assert.Equal(t, 0, pushCount)
+	require.Len(t, callback.tasks, 1)
+	assert.Equal(t, TaskStatusFailed, callback.tasks[0].Status)
+}
+
+func Test_BatchCreateTasks_MixedImmediateFailurePushesOnlyRunnableTasks(t *testing.T) {
+	ts := newTestableService()
+	var persisted []*Task
+	ts.repo.batchCreateFn = func(ctx context.Context, tasks []*Task) error {
+		persisted = append(persisted, tasks...)
+		return nil
+	}
+
+	var pushed []*Task
+	ts.queue.pushFn = func(ctx context.Context, task *Task) error {
+		pushed = append(pushed, task)
+		return nil
+	}
+
+	callback := &captureCompletionCallback{}
+	ts.svc.AddCompletionCallback(callback)
+
+	ctx := context.Background()
+	reqs := []*CreateTaskRequest{
+		{
+			DeviceSN: "SN-ON",
+			Method:   "Reboot",
+			SourceID: "mml-task-1",
+			Source:   TaskSourceMML,
+		},
+		{
+			DeviceSN:        "SN-OFF",
+			Method:          "Reboot",
+			FailImmediately: true,
+			FailReason:      "device offline",
+			SourceID:        "mml-task-1",
+			Source:          TaskSourceMML,
+		},
+	}
+
+	tasks, err := ts.BatchCreateTasks(ctx, reqs)
+	require.NoError(t, err)
+	require.Len(t, persisted, 2)
+	require.Len(t, tasks, 1, "only runnable tasks should be returned to fanout as queued work")
+	require.Len(t, pushed, 1, "online task should still be queued")
+	assert.Equal(t, "SN-ON", pushed[0].DeviceSN)
+	assert.Equal(t, TaskStatusPending, pushed[0].Status)
+
+	var offline *Task
+	for _, persistedTask := range persisted {
+		if persistedTask.DeviceSN == "SN-OFF" {
+			offline = persistedTask
+			break
+		}
+	}
+	require.NotNil(t, offline)
+	assert.Equal(t, TaskStatusFailed, offline.Status)
+	assert.Equal(t, "device offline", offline.ErrorMessage)
+	require.Len(t, callback.tasks, 1)
+	assert.Equal(t, "SN-OFF", callback.tasks[0].DeviceSN)
+	assert.Equal(t, TaskStatusFailed, callback.tasks[0].Status)
 }
 
 func Test_BatchCreateTasks_RepoFailure(t *testing.T) {

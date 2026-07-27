@@ -239,6 +239,7 @@ func TestPgTaskRepository_ListFiltersTaskOrigin(t *testing.T) {
 	require.Len(t, consoleList.Items, 1)
 	require.Equal(t, consoleTask.ID, consoleList.Items[0].ID)
 	require.Equal(t, TaskOriginConsole, consoleList.Items[0].TaskOrigin)
+	require.Empty(t, consoleList.Items[0].ScriptName)
 
 	scriptOrigin := TaskOriginScript
 	scriptList, err := taskRepo.List(ctx, TaskFilter{
@@ -250,6 +251,171 @@ func TestPgTaskRepository_ListFiltersTaskOrigin(t *testing.T) {
 	require.Len(t, scriptList.Items, 1)
 	require.Equal(t, scriptTask.ID, scriptList.Items[0].ID)
 	require.Equal(t, TaskOriginScript, scriptList.Items[0].TaskOrigin)
+	require.Equal(t, script.ScriptName, scriptList.Items[0].ScriptName)
+}
+
+func TestPgTaskRepository_ListFiltersScriptName(t *testing.T) {
+	pool := newMMLTestPool(t)
+	ctx := context.Background()
+	taskRepo := NewPgTaskRepository(pool)
+	scriptRepo := NewPgScriptRepository(pool)
+
+	matchingScript := &MMLScript{
+		ScriptName:        "script name filter 巡检 " + uuid.NewString(),
+		Content:           "LST DEVICE_INFO;SN-SCRIPT-A\n",
+		OriginalFilename:  "script-name-filter-a.txt",
+		ContentSHA256:     "sha-script-name-filter-a",
+		ValidationVersion: ValidationVersion,
+		Creator:           "repo-test",
+		Status:            ScriptActive,
+		Type:              ScriptTypeBatch,
+	}
+	otherScript := &MMLScript{
+		ScriptName:        "script name filter 配置 " + uuid.NewString(),
+		Content:           "LST DEVICE_INFO;SN-SCRIPT-B\n",
+		OriginalFilename:  "script-name-filter-b.txt",
+		ContentSHA256:     "sha-script-name-filter-b",
+		ValidationVersion: ValidationVersion,
+		Creator:           "repo-test",
+		Status:            ScriptActive,
+		Type:              ScriptTypeBatch,
+	}
+	require.NoError(t, scriptRepo.CreateImported(ctx, matchingScript))
+	require.NoError(t, scriptRepo.CreateImported(ctx, otherScript))
+	t.Cleanup(func() {
+		_ = scriptRepo.Delete(context.Background(), matchingScript.ID)
+		_ = scriptRepo.Delete(context.Background(), otherScript.ID)
+	})
+
+	matchingTask := &MMLTask{
+		TaskName:     "script-name matched task " + uuid.NewString(),
+		ScriptID:     &matchingScript.ID,
+		DeviceSNs:    []string{"SN-SCRIPT-A"},
+		Commands:     []map[string]interface{}{{"command_code": "LST DEVICE_INFO"}},
+		ExecuteMode:  TaskExecuteModeDeviceBound,
+		Status:       TaskCompleted,
+		Creator:      "repo-test",
+		ExecuteType:  ExecuteImmediate,
+		TotalDevices: 1,
+	}
+	otherTask := &MMLTask{
+		TaskName:     "script-name other task " + uuid.NewString(),
+		ScriptID:     &otherScript.ID,
+		DeviceSNs:    []string{"SN-SCRIPT-B"},
+		Commands:     []map[string]interface{}{{"command_code": "LST DEVICE_INFO"}},
+		ExecuteMode:  TaskExecuteModeDeviceBound,
+		Status:       TaskCompleted,
+		Creator:      "repo-test",
+		ExecuteType:  ExecuteImmediate,
+		TotalDevices: 1,
+	}
+	consoleTask := &MMLTask{
+		TaskName:     "script-name console task " + uuid.NewString(),
+		DeviceSNs:    []string{"SN-CONSOLE"},
+		Commands:     []map[string]interface{}{{"command_code": "LST DEVICE_INFO"}},
+		ExecuteMode:  TaskExecuteModeCommon,
+		Status:       TaskCompleted,
+		Creator:      "repo-test",
+		ExecuteType:  ExecuteImmediate,
+		TotalDevices: 1,
+	}
+	require.NoError(t, taskRepo.Create(ctx, matchingTask))
+	require.NoError(t, taskRepo.Create(ctx, otherTask))
+	require.NoError(t, taskRepo.Create(ctx, consoleTask))
+	t.Cleanup(func() {
+		_ = taskRepo.Delete(context.Background(), matchingTask.ID)
+		_ = taskRepo.Delete(context.Background(), otherTask.ID)
+		_ = taskRepo.Delete(context.Background(), consoleTask.ID)
+	})
+
+	scriptName := "巡检"
+	list, err := taskRepo.List(ctx, TaskFilter{
+		ListRequest: model.ListRequest{Page: 1, PageSize: 20},
+		ScriptName:  &scriptName,
+	})
+	require.NoError(t, err)
+	require.Len(t, list.Items, 1)
+	require.Equal(t, matchingTask.ID, list.Items[0].ID)
+	require.Equal(t, matchingScript.ScriptName, list.Items[0].ScriptName)
+	require.Equal(t, int64(1), list.Total)
+}
+
+func TestPgTaskRepository_ListIncludesLatestPeriodicRun(t *testing.T) {
+	pool := newMMLTestPool(t)
+	ctx := context.Background()
+	taskRepo := NewPgTaskRepository(pool)
+
+	taskName := "periodic latest run " + uuid.NewString()
+	parent := &MMLTask{
+		TaskName:     taskName,
+		DeviceSNs:    []string{"SN-PERIODIC-1", "SN-PERIODIC-2"},
+		Commands:     []map[string]interface{}{{"command_code": "LST DEVICE_INFO"}},
+		ExecuteMode:  TaskExecuteModeDeviceBound,
+		Status:       TaskCompleted,
+		Creator:      "repo-test",
+		ExecuteType:  ExecutePeriodic,
+		TotalDevices: 2,
+	}
+	require.NoError(t, taskRepo.Create(ctx, parent))
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), "DELETE FROM mml_tasks WHERE parent_task_id=$1", parent.ID)
+		_ = taskRepo.Delete(context.Background(), parent.ID)
+	})
+
+	firstResult := ResultSuccess
+	first := &MMLTask{
+		TaskName:         taskName,
+		DeviceSNs:        parent.DeviceSNs,
+		Commands:         parent.Commands,
+		ExecuteMode:      TaskExecuteModeDeviceBound,
+		Status:           TaskCompleted,
+		Creator:          "repo-test",
+		ExecuteType:      ExecuteImmediate,
+		PeriodicParentID: &parent.ID,
+		TotalDevices:     2,
+		SuccessCount:     2,
+		FailedCount:      0,
+		Result:           &firstResult,
+		StartedAt:        func() *time.Time { ts := time.Now().Add(-10 * time.Minute); return &ts }(),
+		FinishedAt:       func() *time.Time { ts := time.Now().Add(-9 * time.Minute); return &ts }(),
+	}
+	require.NoError(t, taskRepo.Create(ctx, first))
+
+	latestResult := ResultPartial
+	latest := &MMLTask{
+		TaskName:         taskName,
+		DeviceSNs:        parent.DeviceSNs,
+		Commands:         parent.Commands,
+		ExecuteMode:      TaskExecuteModeDeviceBound,
+		Status:           TaskCompleted,
+		Creator:          "repo-test",
+		ExecuteType:      ExecuteImmediate,
+		PeriodicParentID: &parent.ID,
+		TotalDevices:     2,
+		SuccessCount:     5,
+		FailedCount:      1,
+		Result:           &latestResult,
+		StartedAt:        func() *time.Time { ts := time.Now().Add(-2 * time.Minute); return &ts }(),
+		FinishedAt:       func() *time.Time { ts := time.Now().Add(-1 * time.Minute); return &ts }(),
+	}
+	require.NoError(t, taskRepo.Create(ctx, latest))
+
+	executeType := ExecutePeriodic
+	list, err := taskRepo.List(ctx, TaskFilter{
+		ListRequest: model.ListRequest{Page: 1, PageSize: 20},
+		TaskName:    &taskName,
+		ExecuteType: &executeType,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, list.Items, 1)
+	require.NotNil(t, list.Items[0].LatestRun)
+	require.Equal(t, latest.ID, list.Items[0].LatestRun.ID)
+	require.Equal(t, latest.SuccessCount, list.Items[0].LatestRun.SuccessCount)
+	require.Equal(t, latest.FailedCount, list.Items[0].LatestRun.FailedCount)
+	require.Equal(t, latest.Result, list.Items[0].LatestRun.Result)
+	require.Equal(t, 1, list.Items[0].LatestRun.CommandCount)
+	require.Equal(t, 0, list.Items[0].LatestRun.PlanItemCount)
 }
 
 func TestPgScriptRepository_ImportedReplaceAndMetadataAreAtomic(t *testing.T) {
@@ -333,9 +499,10 @@ func TestPgTaskRepository_ListUsesSummaryColumns(t *testing.T) {
 	require.NotContains(t, taskListColumns, "commands")
 	require.NotContains(t, taskListColumns, "plan_items")
 	require.NotContains(t, taskListColumns, "results")
-	require.Contains(t, taskListColumns, "total_devices")
-	require.Contains(t, taskListColumns, "success_count")
-	require.Contains(t, taskListColumns, "failed_count")
+	require.Contains(t, taskListColumns, "mml_scripts.script_name")
+	require.Contains(t, taskListColumns, "mml_tasks.total_devices")
+	require.Contains(t, taskListColumns, "mml_tasks.success_count")
+	require.Contains(t, taskListColumns, "mml_tasks.failed_count")
 }
 
 func TestPgTaskRepository_ProvidesLightweightResultStatsLookup(t *testing.T) {
@@ -386,6 +553,33 @@ SELECT c.command_code
 			}
 		})
 	}
+}
+
+func TestPgScriptValidationRepository_LoadStandardPathSupportMatchesTemplates(t *testing.T) {
+	pool := newMMLTestPool(t)
+	repo := NewPgScriptValidationRepository(pool)
+	ctx := context.Background()
+
+	const knownTemplate = "Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress"
+	var exists bool
+	err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM standard_params WHERE standard_path=$1)`, knownTemplate).Scan(&exists)
+	require.NoError(t, err)
+	if !exists {
+		t.Skipf("standard path fixture %s is not available", knownTemplate)
+	}
+
+	parameter := StandardPathLookup{Kind: StandardPathLookupParameter, Path: normalizeStandardPathTemplate("Device.IP.Interface.1.IPv4Address.3.IPAddress")}
+	addObject := StandardPathLookup{Kind: StandardPathLookupObject, Path: normalizeStandardPathTemplate("Device.IP.Interface.1.IPv4Address.")}
+	removeObject := StandardPathLookup{Kind: StandardPathLookupObject, Path: normalizeStandardPathTemplate("Device.IP.Interface.1.IPv4Address.3.")}
+	missing := StandardPathLookup{Kind: StandardPathLookupParameter, Path: normalizeStandardPathTemplate("Device.NotInStandardParams.1.Enable")}
+
+	support, err := repo.LoadStandardPathSupport(ctx, []StandardPathLookup{parameter, addObject, removeObject, missing})
+
+	require.NoError(t, err)
+	require.True(t, support[parameter.key()])
+	require.True(t, support[addObject.key()])
+	require.True(t, support[removeObject.key()])
+	require.False(t, support[missing.key()])
 }
 
 func TestPgScriptValidationRepository_MarksDuplicateVisibleCustomCodesAmbiguous(t *testing.T) {

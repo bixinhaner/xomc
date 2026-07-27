@@ -22,6 +22,7 @@ import {
 } from '@core/hooks/api/useIndicatorsLibrary';
 import type { DeviceType, IndicatorInfo } from '@core/types/indicatorLibrary';
 import IndicatorDrawer from './IndicatorDrawer';
+import { enabledIndicatorErrorMessage } from './enabledIndicatorErrors';
 import { makeSeqColumn } from '@/components/Table/seqColumn';
 import { useT } from '@/hooks/useT';
 
@@ -29,6 +30,7 @@ interface Filter {
   keyword?: string;
   platform?: string;  // 2026-05-29:由 URL ?platform= 注入并锁定;不在 UI 提供切换
   groupId?: string;
+  isEnabled?: boolean;
 }
 
 interface Props {
@@ -38,6 +40,7 @@ interface Props {
 
 // 启用状态走 default 行(XML 真相源)
 const OPERATOR_CODE = 'default';
+const NAME_COLUMN_WIDTH = 240;
 
 export default function IndicatorsByTech({ deviceType, filter }: Props) {
   const t = useT();
@@ -47,12 +50,14 @@ export default function IndicatorsByTech({ deviceType, filter }: Props) {
   // filter 任意变化即 reset page=1(避免分页 + 过滤错位返空)
   useEffect(() => {
     setPage(1);
-  }, [filter.keyword, filter.platform, filter.groupId, deviceType]);
+  }, [filter.keyword, filter.platform, filter.groupId, filter.isEnabled, deviceType]);
 
   const { data, isLoading } = useIndicatorList(deviceType, {
     keyword: filter.keyword || undefined,
     platformName: filter.platform || undefined,
     groupId: filter.groupId || undefined,
+    operatorCode: OPERATOR_CODE,
+    isEnabled: filter.isEnabled,
     page,
     pageSize,
   });
@@ -69,9 +74,8 @@ export default function IndicatorsByTech({ deviceType, filter }: Props) {
 
   const columns = [
     { title: 'ID', dataIndex: 'id', width: 150 },
-    { title: t('common.cnName'), dataIndex: 'cnName', width: 200, ellipsis: true },
-    // 英文名作为弹性列吸收剩余宽度(ellipsis 防溢出)
-    { title: t('common.enName'), dataIndex: 'enName', ellipsis: true },
+    { title: t('common.cnName'), dataIndex: 'cnName', width: NAME_COLUMN_WIDTH, ellipsis: true },
+    { title: t('common.enName'), dataIndex: 'enName', width: NAME_COLUMN_WIDTH, ellipsis: true },
     {
       title: t('common.group'),
       dataIndex: 'groupName',
@@ -105,7 +109,7 @@ export default function IndicatorsByTech({ deviceType, filter }: Props) {
               },
               {
                 onSettled: () => setPendingId(null),
-                onError: (e) => message.error((e as Error).message),
+                onError: (e) => message.error(enabledIndicatorErrorMessage(e, t)),
               }
             );
           }}

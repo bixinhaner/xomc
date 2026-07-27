@@ -25,7 +25,7 @@ func BucketAndCategory(ft tr069.FileType, buckets appconfig.BucketConfig) (bucke
 	case tr069.FileTypePatch:
 		return buckets.Firmware, "patch"
 	case tr069.FileTypeConfig:
-		return buckets.ConfigBackup, "backup"
+		return appconfig.NormalizeConfigBackupBucket(buckets.ConfigBackup), "backup"
 	case tr069.FileTypePM:
 		return buckets.PMFiles, ""
 	case tr069.FileTypeMR:
@@ -43,7 +43,7 @@ func BucketAndCategory(ft tr069.FileType, buckets appconfig.BucketConfig) (bucke
 	case tr069.FileTypeDataModel:
 		return buckets.Exchange, "datamodel"
 	case tr069.FileTypeSSLCert:
-		return buckets.ConfigBackup, "ssl-cert"
+		return appconfig.NormalizeConfigBackupBucket(buckets.ConfigBackup), "ssl-cert"
 	default:
 		return buckets.Logs, "unknown"
 	}

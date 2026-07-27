@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -95,6 +96,9 @@ func (s *PathTranslationService) TranslateTaskParams(ctx context.Context, t *tas
 	if !s.Enabled() || t == nil || len(t.Params) == 0 || !methodNeedsTranslation(t.Method) {
 		return t.Params, false
 	}
+	if taskParamsUsePrivatePathMode(t.Params) {
+		return t.Params, false
+	}
 
 	tr, ok := s.resolveTranslator(ctx, t.DeviceSN)
 	if !ok {
@@ -111,6 +115,16 @@ func (s *PathTranslationService) TranslateTaskParams(ctx context.Context, t *tas
 		return t.Params, false
 	}
 	return translated, true
+}
+
+func taskParamsUsePrivatePathMode(raw json.RawMessage) bool {
+	var payload struct {
+		PathMode string `json:"path_mode"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(payload.PathMode), "private")
 }
 
 // resolveTranslator 按设备 SN 解析出对应的 Translator（SN→product→param_model）。
@@ -212,14 +226,26 @@ func translateNamesArray(raw json.RawMessage, tr *parammodel.Translator) (json.R
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, fmt.Errorf("unmarshal names: %w", err)
 	}
-	for i, n := range p.Names {
-		if n == "" {
+	names := make([]string, 0, len(p.Names))
+	seen := make(map[string]struct{}, len(p.Names))
+	appendUnique := func(name string) {
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	for _, n := range p.Names {
+		candidates := tr.ToPrivateCandidates(n)
+		if len(candidates) == 0 {
+			appendUnique(n)
 			continue
 		}
-		if res := tr.ToPrivate(n); res.Found {
-			p.Names[i] = res.Translated
+		for _, candidate := range candidates {
+			appendUnique(candidate.Translated)
 		}
 	}
+	p.Names = names
 	return json.Marshal(p)
 }
 

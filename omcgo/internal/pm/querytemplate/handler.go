@@ -3,6 +3,7 @@ package querytemplate
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -15,10 +16,16 @@ import (
 	"github.com/omcgo/omcgo/internal/core/response"
 )
 
+const (
+	maxTemplateDeviceSNs   = 50
+	maxTemplateMetricPaths = 50
+)
+
 // Handler 是 T-0174 指标查询模板的 REST 入口。
 type Handler struct {
-	repo   Repository
-	logger *zap.Logger
+	repo                   Repository
+	enabledMetricValidator *EnabledMetricPayloadService
+	logger                 *zap.Logger
 }
 
 // NewHandler 构造 Handler。
@@ -27,6 +34,11 @@ func NewHandler(repo Repository, logger *zap.Logger) *Handler {
 		logger = zap.NewNop()
 	}
 	return &Handler{repo: repo, logger: logger.Named("pm.querytemplate")}
+}
+
+func (h *Handler) WithEnabledMetricPayloadService(svc *EnabledMetricPayloadService) *Handler {
+	h.enabledMetricValidator = svc
+	return h
 }
 
 // RegisterRoutes 挂载到 /api/v1（由调用方决定 group）。
@@ -181,6 +193,14 @@ func (h *Handler) Create(c *gin.Context) {
 	if len(payload) == 0 {
 		payload = []byte("{}")
 	}
+	if err := validatePayloadLimits(payload); err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.enabledMetricValidator.ValidatePayload(c.Request.Context(), payload); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
 	req := CreateRequest{
 		Name:        dto.Name,
 		Visibility:  visibility,
@@ -233,6 +253,14 @@ func (h *Handler) Update(c *gin.Context) {
 	}
 	req := UpdateRequest{Name: dto.Name, Description: dto.Description}
 	if len(dto.Payload) > 0 {
+		if err := validatePayloadLimits(dto.Payload); err != nil {
+			response.Fail(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := h.enabledMetricValidator.ValidatePayload(c.Request.Context(), dto.Payload); err != nil {
+			commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+			return
+		}
 		req.Payload = []byte(dto.Payload)
 	}
 	if dto.Visibility != nil {
@@ -332,4 +360,62 @@ func canWrite(t *Template, caller uuid.UUID, isSuperAdmin bool) bool {
 		return true
 	}
 	return t.CreatorID == caller
+}
+
+func validatePayloadLimits(payload []byte) error {
+	count, err := countPayloadStringArray(payload, "device_sns")
+	if err != nil {
+		return err
+	}
+	if count > maxTemplateDeviceSNs {
+		return fmt.Errorf("device_sns exceeds maximum of %d", maxTemplateDeviceSNs)
+	}
+	count, err = countPayloadStringArray(payload, "metric_paths")
+	if err != nil {
+		return err
+	}
+	if count > maxTemplateMetricPaths {
+		return fmt.Errorf("metric_paths exceeds maximum of %d", maxTemplateMetricPaths)
+	}
+	return nil
+}
+
+func countPayloadStringArray(payload []byte, key string) (int, error) {
+	values, err := payloadStringArray(payload, key)
+	if err != nil {
+		return 0, err
+	}
+	return len(values), nil
+}
+
+func payloadStringArray(payload []byte, key string) ([]string, error) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		return nil, fmt.Errorf("invalid payload")
+	}
+	field, ok := raw[key]
+	if !ok || len(field) == 0 || string(field) == "null" {
+		return nil, nil
+	}
+	var values []string
+	if err := json.Unmarshal(field, &values); err != nil {
+		return nil, fmt.Errorf("%s must be an array of strings", key)
+	}
+	return values, nil
+}
+
+func payloadString(payload []byte, key string) (string, error) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		return "", fmt.Errorf("invalid payload")
+	}
+	field, ok := raw[key]
+	if !ok || len(field) == 0 || string(field) == "null" {
+		return "", nil
+	}
+	var value string
+	if err := json.Unmarshal(field, &value); err != nil {
+		return "", fmt.Errorf("%s must be a string", key)
+	}
+	return value, nil
 }

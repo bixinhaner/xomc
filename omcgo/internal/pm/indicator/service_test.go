@@ -3,8 +3,11 @@ package indicator
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -19,6 +22,9 @@ import (
 // scopes by device type.
 type fakeIndicatorRepo struct {
 	items          []IndicatorListItem
+	listCalled     bool
+	listFilter     IndicatorListFilter
+	listResp       *model.ListResponse[IndicatorListItem]
 	listAllErr     error
 	listAllFilter  IndicatorListFilter
 	listAllCalled  bool
@@ -41,7 +47,12 @@ func (f *fakeIndicatorRepo) GetIDsByGroupID(ctx context.Context, dt DeviceType, 
 
 // ── unused stubs (interface satisfaction only) ──────────────────────────────
 func (f *fakeIndicatorRepo) List(ctx context.Context, filter IndicatorListFilter) (*model.ListResponse[IndicatorListItem], error) {
-	return nil, nil
+	f.listCalled = true
+	f.listFilter = filter
+	if f.listResp != nil {
+		return f.listResp, nil
+	}
+	return model.NewListResponse([]IndicatorListItem{}, 0, filter.Page, filter.PageSize), nil
 }
 func (f *fakeIndicatorRepo) GetByID(ctx context.Context, dt DeviceType, id string) (*PerfIndicator, error) {
 	return nil, nil
@@ -66,6 +77,41 @@ func (f *fakeIndicatorRepo) GetNextCounterID(ctx context.Context) (string, error
 }
 func (f *fakeIndicatorRepo) ListByIDs(ctx context.Context, dt DeviceType, ids []string) ([]*PerfIndicator, error) {
 	return nil, nil
+}
+
+type fakeEnabledRepo struct {
+	deleteCalls int
+	deletedIDs  []string
+}
+
+func (f *fakeEnabledRepo) List(context.Context, DeviceType, string) ([]string, error) {
+	return nil, nil
+}
+
+func (f *fakeEnabledRepo) BatchCreate(context.Context, DeviceType, string, []string, pgx.Tx) error {
+	return nil
+}
+
+func (f *fakeEnabledRepo) BatchDelete(_ context.Context, _ DeviceType, _ string, indicatorIDs []string, _ pgx.Tx) error {
+	f.deleteCalls++
+	f.deletedIDs = append([]string(nil), indicatorIDs...)
+	return nil
+}
+
+func (f *fakeEnabledRepo) Exists(context.Context, DeviceType, string, string) (bool, error) {
+	return false, nil
+}
+
+type fakeDashboardLayoutRef struct {
+	referenced []string
+	err        error
+}
+
+func (f fakeDashboardLayoutRef) ReferencedIndicators(context.Context, DeviceType, []string) ([]string, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return append([]string(nil), f.referenced...), nil
 }
 
 func item(id, arithmetic string) IndicatorListItem {
@@ -119,6 +165,83 @@ func TestBuildIDMap_BypassesGroupTable(t *testing.T) {
 	}
 	if _, ok := idMap["C000200015"]; !ok {
 		t.Error("idMap missing real counter C000200015")
+	}
+}
+
+func TestDisableIndicators_RejectsDashboardLayoutReferences(t *testing.T) {
+	enabledRepo := &fakeEnabledRepo{}
+	svc := &IndicatorManagementService{
+		enabledRepo:     enabledRepo,
+		dashboardLayout: fakeDashboardLayoutRef{referenced: []string{"K900010076"}},
+	}
+
+	err := svc.DisableIndicators(context.Background(), &EnableIndicatorsRequest{
+		DeviceType:   string(DeviceTypeENB),
+		OperatorCode: "default",
+		IndicatorIDs: []string{"K900010076"},
+	})
+
+	if !errors.Is(err, ErrIndicatorUsedByDashboardLayout) {
+		t.Fatalf("DisableIndicators error = %v, want ErrIndicatorUsedByDashboardLayout", err)
+	}
+	if !errors.Is(err, commonerrors.ErrInvalidInput) {
+		t.Fatalf("DisableIndicators error = %v, want ErrInvalidInput wrapper", err)
+	}
+	if enabledRepo.deleteCalls != 0 {
+		t.Fatalf("BatchDelete calls = %d, want 0 when dashboard references metric", enabledRepo.deleteCalls)
+	}
+}
+
+func TestDisableIndicators_AllowsWhenDashboardDoesNotReference(t *testing.T) {
+	enabledRepo := &fakeEnabledRepo{}
+	svc := &IndicatorManagementService{
+		enabledRepo:     enabledRepo,
+		dashboardLayout: fakeDashboardLayoutRef{},
+	}
+
+	err := svc.DisableIndicators(context.Background(), &EnableIndicatorsRequest{
+		DeviceType:   string(DeviceTypeENB),
+		OperatorCode: "default",
+		IndicatorIDs: []string{"K900010040"},
+	})
+
+	if err != nil {
+		t.Fatalf("DisableIndicators returned error: %v", err)
+	}
+	if enabledRepo.deleteCalls != 1 {
+		t.Fatalf("BatchDelete calls = %d, want 1", enabledRepo.deleteCalls)
+	}
+	if got := enabledRepo.deletedIDs; len(got) != 1 || got[0] != "K900010040" {
+		t.Fatalf("deleted IDs = %v, want [K900010040]", got)
+	}
+}
+
+func TestRESTHandler_ListIndicators_DefaultsOperatorCodeForEnabledFilter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &fakeIndicatorRepo{}
+	svc := &IndicatorManagementService{indicatorRepo: repo}
+	handler := NewRESTHandler(svc, nil, nil)
+	router := gin.New()
+	router.GET("/indicators", handler.ListIndicators)
+
+	req := httptest.NewRequest(http.MethodGet, "/indicators?deviceType=ENB&isEnabled=1", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if !repo.listCalled {
+		t.Fatal("ListIndicators must call repository List")
+	}
+	if repo.listFilter.OperatorCode == nil {
+		t.Fatal("operatorCode filter = nil, want default")
+	}
+	if got := *repo.listFilter.OperatorCode; got != "default" {
+		t.Fatalf("operatorCode filter = %q, want default", got)
+	}
+	if repo.listFilter.IsEnabled == nil || *repo.listFilter.IsEnabled != "1" {
+		t.Fatalf("isEnabled filter = %v, want 1", repo.listFilter.IsEnabled)
 	}
 }
 
@@ -196,10 +319,18 @@ func TestNormalizeDurationArithmetic_UsesRegisteredCounterPerDeviceType(t *testi
 }
 
 func TestNormalizeDurationArithmetic_ReplacesCompleteTokenOnly(t *testing.T) {
-	got := normalizeDurationArithmetic(DeviceTypeENB, "DurationValue+MyDuration+Duration")
-	want := "DurationValue+MyDuration+C000060273"
+	got := normalizeDurationArithmetic(DeviceTypeENB, "DurationValue+MyDuration+Duration+Duration_Seconds")
+	want := "DurationValue+MyDuration+C000060273+Duration_Seconds"
 	if got != want {
 		t.Fatalf("normalizeDurationArithmetic() = %q, want %q", got, want)
+	}
+}
+
+func TestCompileRuntimeArithmetic_UnknownDeviceTypeLeavesFormulaUnchanged(t *testing.T) {
+	formula := "C001/Duration+MyDuration"
+	got := CompileRuntimeArithmetic(DeviceType("UNKNOWN"), formula)
+	if got != formula {
+		t.Fatalf("CompileRuntimeArithmetic() = %q, want unchanged %q", got, formula)
 	}
 }
 
@@ -393,6 +524,23 @@ func TestUpsertPlatformFormula_CommitsThenInvalidatesRoute(t *testing.T) {
 	}
 	if len(triggers) != 1 || triggers[0] != RouteInvalidationTriggerFormulaWrite {
 		t.Fatalf("route invalidation triggers = %v, want [%s]", triggers, RouteInvalidationTriggerFormulaWrite)
+	}
+}
+
+func TestUpsertPlatformFormula_AcceptsDurationReservedWord(t *testing.T) {
+	platformRepo := &fakePlatformRepo{deleteRows: 1}
+	beginner := &fakeBeginner{tx: &fakeTx{}}
+	svc := newFormulaWriteTestService(platformRepo, beginner, nil)
+
+	out, err := svc.UpsertPlatformFormula(context.Background(), DeviceTypeENB, "K900000001", "BLQ", "C000200015/Duration*100")
+	if err != nil {
+		t.Fatalf("UpsertPlatformFormula returned error: %v", err)
+	}
+	if out.Formula != "C000200015/Duration*100" {
+		t.Fatalf("platform formula should keep editable Duration keyword, got %q", out.Formula)
+	}
+	if platformRepo.batchCalls != 1 {
+		t.Fatalf("batch create calls=%d, want 1", platformRepo.batchCalls)
 	}
 }
 

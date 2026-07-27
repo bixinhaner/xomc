@@ -29,10 +29,11 @@ type workerStubRepo struct {
 	inserted []ResultRow
 
 	// T-0186：运行记录捕获
-	insertedRuns  []TaskRun           // 跑前 INSERT 的 run（status=running 快照）
-	finishedRuns  []finishedRunRecord // 跑后 FinishRun 的终态
-	nextSeq       int                 // NextRunSeq 返回值（默认 1）
-	insertResults func([]ResultRow) error
+	insertedRuns            []TaskRun           // 跑前 INSERT 的 run（status=running 快照）
+	finishedRuns            []finishedRunRecord // 跑后 FinishRun 的终态
+	nextSeq                 int                 // NextRunSeq 返回值（默认 1）
+	insertResults           func([]ResultRow) error
+	updateStatusErrByStatus map[Status]error
 }
 
 type finishedRunRecord struct {
@@ -70,7 +71,7 @@ func (s *workerStubRepo) UpdateStatus(_ context.Context, id uuid.UUID, status St
 		id     uuid.UUID
 		status Status
 	}{id, status})
-	return nil
+	return s.updateStatusErrByStatus[status]
 }
 
 func (s *workerStubRepo) InsertResults(_ context.Context, rows []ResultRow) error {
@@ -139,7 +140,18 @@ func Test_Worker_OneshotSuccess_TerminalStatusSucceeded(t *testing.T) {
 	for _, e := range pub.events {
 		subjects = append(subjects, e.subject)
 	}
-	assert.Contains(t, subjects, SubjectCompleted)
+	assert.Contains(t, subjects, SubjectRealtimeCompleted)
+	for _, published := range pub.events {
+		if published.subject != SubjectRealtimeCompleted {
+			continue
+		}
+		payload, ok := published.payload.(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, task.ID.String(), payload["task_id"])
+		assert.Equal(t, string(StatusSucceeded), payload["status"])
+		assert.Equal(t, 0, payload["rows_total"])
+		assert.NotContains(t, payload, "error")
+	}
 }
 
 func Test_Worker_ContinuousSuccess_TerminalStatusScheduled(t *testing.T) {
@@ -159,6 +171,54 @@ func Test_Worker_ContinuousSuccess_TerminalStatusScheduled(t *testing.T) {
 
 	last := repo.statusUpdates[len(repo.statusUpdates)-1].status
 	assert.Equal(t, StatusScheduled, last, "continuous should end in scheduled")
+}
+
+func Test_Worker_DoesNotPublishCompletedWhenTerminalStatusPersistenceFails(t *testing.T) {
+	task := &Task{
+		ID:            uuid.New(),
+		Mode:          ModeOneshot,
+		Granularities: []string{"hourly"},
+	}
+	repo := &workerStubRepo{
+		pendingTasks: []*Task{task},
+		updateStatusErrByStatus: map[Status]error{
+			StatusSucceeded: errors.New("database unavailable"),
+		},
+	}
+	pub := &stubPublisher{}
+	executor := NewExecutor(&stubAggr{}, repo, pub, nil)
+	w := NewWorker(repo, executor, "test-worker-1", time.Millisecond, nil)
+
+	require.True(t, w.tryRunOne(context.Background()))
+
+	var subjects []string
+	for _, published := range pub.events {
+		subjects = append(subjects, published.subject)
+		assert.NotEqual(t, SubjectRealtimeCompleted, published.subject,
+			"unpersisted terminal status must not be broadcast")
+	}
+	assert.Contains(t, subjects, SubjectRealtimeProgress,
+		"the earlier persisted progress update should still be broadcast")
+}
+
+func Test_Worker_PublisherFailureDoesNotFailPersistedTerminalStatus(t *testing.T) {
+	task := &Task{
+		ID:            uuid.New(),
+		Mode:          ModeOneshot,
+		Granularities: []string{"hourly"},
+	}
+	repo := &workerStubRepo{pendingTasks: []*Task{task}}
+	pub := &stubPublisher{err: errors.New("realtime channel unavailable")}
+	executor := NewExecutor(&stubAggr{}, repo, pub, nil)
+	w := NewWorker(repo, executor, "test-worker-1", time.Millisecond, nil)
+
+	require.True(t, w.tryRunOne(context.Background()))
+
+	var statuses []Status
+	for _, update := range repo.statusUpdates {
+		statuses = append(statuses, update.status)
+	}
+	assert.Contains(t, statuses, StatusSucceeded)
 }
 
 // T-0186：成功路径写出一行 run 记录（status=running 入库 + succeeded 终态 + rows_total + window/粒度/维度快照）。
@@ -458,6 +518,91 @@ func Test_ContinuousScheduler_P3_479Regression_FiresAfterWatermarkAdvances(t *te
 
 	require.Len(t, repo.markedIDs, 1, "水位推进到该格后即放行")
 	assert.Equal(t, time.Date(2026, 5, 23, 3, 0, 0, 0, time.UTC), repo.markedFire[0])
+}
+
+// #124 回归：weekly continuous 在周一 00:15 延迟触发时，处理的是刚结束的上一周。
+// 测试环境口径：2026-07-20 00:15 应消费 weekly 水位 2026-07-13 00:00
+// （即 [2026-07-13, 2026-07-20)），不能误判成等待 2026-07-20 开始的本周。
+func Test_ContinuousScheduler_P3_WeeklyDelayedCronConsumesPreviousWeek(t *testing.T) {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+
+	repo := &schedRepoStub{
+		tasks: []ContinuousTask{{
+			ID:            "task-124",
+			CronExpr:      "15 0 * * 1",
+			LastFireAt:    time.Date(2026, 7, 19, 16, 31, 39, 0, loc),
+			Granularities: []string{string(metrics.GranularityWeekly)},
+			Dimension:     DimensionNetwork,
+		}},
+	}
+	gate := &gateStub{bucket: time.Date(2026, 7, 13, 0, 0, 0, 0, loc), ok: true}
+	s := NewContinuousScheduler(repo, time.Hour, nil).
+		SetWatermarkGate(gate).
+		SetLocationFunc(func() *time.Location { return loc })
+
+	s.sweepOnce(context.Background(), time.Date(2026, 7, 20, 0, 16, 0, 0, loc))
+
+	require.Len(t, repo.markedIDs, 1, "weekly 水位已到上一周桶，应放行本次周一 00:15 调度")
+	assert.Equal(t, ContinuousTaskID("task-124"), repo.markedIDs[0])
+	assert.Equal(t, time.Date(2026, 7, 20, 0, 15, 0, 0, loc), repo.markedFire[0])
+}
+
+func Test_ContinuousScheduler_P3_DailyAndMonthlyDelayedCronConsumePreviousBucket(t *testing.T) {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+
+	cases := []struct {
+		name        string
+		cron        string
+		granularity metrics.Granularity
+		lastFire    time.Time
+		now         time.Time
+		watermark   time.Time
+		wantFire    time.Time
+	}{
+		{
+			name:        "daily 00:10 consumes previous day",
+			cron:        "10 0 * * *",
+			granularity: metrics.GranularityDaily,
+			lastFire:    time.Date(2026, 7, 19, 0, 10, 0, 0, loc),
+			now:         time.Date(2026, 7, 20, 0, 11, 0, 0, loc),
+			watermark:   time.Date(2026, 7, 19, 0, 0, 0, 0, loc),
+			wantFire:    time.Date(2026, 7, 20, 0, 10, 0, 0, loc),
+		},
+		{
+			name:        "monthly 00:20 consumes previous month",
+			cron:        "20 0 1 * *",
+			granularity: metrics.GranularityMonthly,
+			lastFire:    time.Date(2026, 7, 1, 0, 20, 0, 0, loc),
+			now:         time.Date(2026, 8, 1, 0, 21, 0, 0, loc),
+			watermark:   time.Date(2026, 7, 1, 0, 0, 0, 0, loc),
+			wantFire:    time.Date(2026, 8, 1, 0, 20, 0, 0, loc),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &schedRepoStub{
+				tasks: []ContinuousTask{{
+					ID:            "task-delayed",
+					CronExpr:      tc.cron,
+					LastFireAt:    tc.lastFire,
+					Granularities: []string{string(tc.granularity)},
+					Dimension:     DimensionNetwork,
+				}},
+			}
+			gate := &gateStub{bucket: tc.watermark, ok: true}
+			s := NewContinuousScheduler(repo, time.Hour, nil).
+				SetWatermarkGate(gate).
+				SetLocationFunc(func() *time.Location { return loc })
+
+			s.sweepOnce(context.Background(), tc.now)
+
+			require.Len(t, repo.markedIDs, 1)
+			assert.Equal(t, tc.wantFire, repo.markedFire[0])
+		})
+	}
 }
 
 // 无水位记录（上游一格都没卷完 / 全新环境）→ gate 返回 ok=false → 不放行（不空磨史前格）。

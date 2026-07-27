@@ -10,6 +10,7 @@
  */
 
 import { generateTimeSeries } from '../utils';
+import type { KPIDelta } from '../../types/dashboard';
 
 // ============================================================================
 // 类型定义
@@ -42,23 +43,6 @@ export interface AlarmStats {
  */
 export interface KPIOverview {
   [key: string]: number | undefined;
-}
-
-/**
- * KPI 趋势增量数据
- * 用于 KPI 卡片显示趋势（上升/下降/稳定）
- */
-export interface KPIDelta {
-  /** 当前值 */
-  currentValue: number;
-  /** 对比周期的值 */
-  previousValue: number;
-  /** 变化百分比（正数表示增长） */
-  changePercent: number;
-  /** 趋势方向: "up" | "down" | "stable" */
-  trend: 'up' | 'down' | 'stable';
-  /** 对比类型: "yesterday" | "last_week" */
-  compareType: 'yesterday' | 'last_week';
 }
 
 /**
@@ -434,6 +418,7 @@ function generateKPIDeltas(currentTotalDevices: number, currentTotalAlarms: numb
     changePercent: ((currentTotalDevices - prevTotalDevices) / prevTotalDevices) * 100,
     trend: currentTotalDevices > prevTotalDevices ? 'up' : currentTotalDevices < prevTotalDevices ? 'down' : 'stable',
     compareType: 'last_week',
+    hasComparison: prevTotalDevices !== 0,
   };
 
   const alarmDelta: KPIDelta = {
@@ -442,6 +427,7 @@ function generateKPIDeltas(currentTotalDevices: number, currentTotalAlarms: numb
     changePercent: ((currentTotalAlarms - prevTotalAlarms) / prevTotalAlarms) * 100,
     trend: currentTotalAlarms > prevTotalAlarms ? 'up' : currentTotalAlarms < prevTotalAlarms ? 'down' : 'stable',
     compareType: 'yesterday',
+    hasComparison: prevTotalAlarms !== 0,
   };
 
   return {

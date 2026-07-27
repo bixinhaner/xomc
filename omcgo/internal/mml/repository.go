@@ -54,6 +54,10 @@ type TaskRepository interface {
 	Create(ctx context.Context, task *MMLTask) error
 	GetByID(ctx context.Context, id uuid.UUID) (*MMLTask, error)
 	GetByRequestID(ctx context.Context, creator, requestID string) (*MMLTask, error)
+	// GetActiveByScriptID returns one unfinished task for the script, if any.
+	// Active means pending/running/paused, including scheduled/periodic template
+	// tasks that have not reached a terminal state.
+	GetActiveByScriptID(ctx context.Context, scriptID uuid.UUID) (*MMLTask, error)
 	Update(ctx context.Context, task *MMLTask) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status TaskStatus) error
 	IncrementStats(ctx context.Context, id uuid.UUID, successDelta, failedDelta int) error
@@ -110,4 +114,5 @@ type CommandParamRepository interface {
 type ScriptValidationRepository interface {
 	LoadCommandsByCodes(ctx context.Context, codes []string, actor ValidationActor) (map[string]ValidationCommand, error)
 	LoadDevicesBySNs(ctx context.Context, sns []string) (map[string]*model.Device, error)
+	LoadStandardPathSupport(ctx context.Context, lookups []StandardPathLookup) (map[string]bool, error)
 }

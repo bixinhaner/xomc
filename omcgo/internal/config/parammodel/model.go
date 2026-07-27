@@ -9,6 +9,7 @@ package parammodel
 
 import (
 	"encoding/xml"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -36,16 +37,18 @@ type ParamModel struct {
 // 注意：discovered 表无 param_model_id 列；从 discovered 读出的 ParamMapping
 // 其 ParamModelID 为零值，调用方若需要可从 product.ParamModelID 反查。
 type ParamMapping struct {
-	ID              uuid.UUID
-	ParamModelID    uuid.UUID
-	StandardPath    string
-	PrivatePath     string
-	EntryType       string // "object" | "parameter"
-	Access          string
-	DataType        string
-	ChangeApplies   string
-	MinValue        *int64
-	MaxValue        *int64
+	ID                uuid.UUID
+	ParamModelID      uuid.UUID
+	StandardPath      string
+	PrivatePath       string
+	EntryType         string // "object" | "parameter"
+	Access            string
+	DataType          string
+	ChangeApplies     string
+	MinValue          *int64
+	MaxValue          *int64
+	DefaultValue      *string
+	ValidationPattern *string
 	// T-0158: 枚举值列表（CSV 字符串如 "0,1" / "25,50,75,100"），nil 表示非枚举类型。
 	// 类型按 type 字段解释：int / unsignedInt 用作下发值；string 也可枚举。
 	EnumValues *string
@@ -75,9 +78,9 @@ const (
 
 // MappingSet 是 Registry 一次取出的映射集合，承载双向翻译所需的全部数据。
 type MappingSet struct {
-	ProductID       uuid.UUID  // 仅 discovered 来源时有意义；default 时为零值
-	ParamModelID    uuid.UUID  // 默认映射的所属模型；discovered 来源会从 product 反查回填
-	SoftwareVersion string     // discovered 来源的 swVersion；default 时为空串
+	ProductID       uuid.UUID // 仅 discovered 来源时有意义；default 时为零值
+	ParamModelID    uuid.UUID // 默认映射的所属模型；discovered 来源会从 product 反查回填
+	SoftwareVersion string    // discovered 来源的 swVersion；default 时为空串
 	Source          MappingSource
 	Mappings        []ParamMapping // 原始顺序保留（供 P2-04 sync.go 去重前缀使用）
 }
@@ -102,6 +105,8 @@ type StandardParam struct {
 	ChangeApplies string
 	MinValue      *int64
 	MaxValue      *int64
+	UpdatedAt     time.Time
+	UpdatedFields []string
 }
 
 // ── XML 解析结构（设计 §1.7 格式 A 与 D）────────────────────────────────
@@ -118,13 +123,15 @@ type xmlParameterModel struct {
 // xmlParamEntry 同时复用于 <object> 与 <param>（字段集合一致，仅元素名不同）。
 // 注意：XML 中 <object> 用 name 属性、<param> 也用 name 属性；store 仅 <param> 出现。
 type xmlParamEntry struct {
-	Name          string `xml:"name,attr"`
-	StandardPath  string `xml:"standardPath,attr"`
-	Access        string `xml:"access,attr"`
-	DataType      string `xml:"type,attr"`
-	ChangeApplies string `xml:"changeApplies,attr"`
-	Min           string `xml:"min,attr"`
-	Max           string `xml:"max,attr"`
+	Name              string `xml:"name,attr"`
+	StandardPath      string `xml:"standardPath,attr"`
+	Access            string `xml:"access,attr"`
+	DataType          string `xml:"type,attr"`
+	ChangeApplies     string `xml:"changeApplies,attr"`
+	Min               string `xml:"min,attr"`
+	Max               string `xml:"max,attr"`
+	DefaultValue      string `xml:"defaultValue,attr"`
+	ValidationPattern string `xml:"validationPattern,attr"`
 	// T-0158: 枚举值 / 标签（CSV，如 "0,1" / "Macro,home"）。
 	// labels 与 values 一一对应；空 labels 时 UI 直接用 values 显示。
 	EnumValues string `xml:"enumValues,attr"`
@@ -137,10 +144,10 @@ type xmlParamEntry struct {
 
 // xmlStandardModel 解析 standard-model.xml（格式 D）。
 type xmlStandardModel struct {
-	XMLName     xml.Name           `xml:"standardModel"`
-	TotalPaths  int                `xml:"totalPaths,attr"`
-	Objects     []xmlStandardEntry `xml:"objects>object"`
-	Params      []xmlStandardEntry `xml:"parameters>param"`
+	XMLName    xml.Name           `xml:"standardModel"`
+	TotalPaths int                `xml:"totalPaths,attr"`
+	Objects    []xmlStandardEntry `xml:"objects>object"`
+	Params     []xmlStandardEntry `xml:"parameters>param"`
 }
 
 type xmlStandardEntry struct {

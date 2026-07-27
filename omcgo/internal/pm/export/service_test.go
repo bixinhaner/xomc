@@ -130,6 +130,49 @@ func TestService_Create_KpiQuerySourceType(t *testing.T) {
 	require.Len(t, enq.inserted, 1)
 }
 
+func TestService_Create_DeviceViewSourceType(t *testing.T) {
+	taskID := uuid.New()
+	repo := &stubRepo{createID: taskID, getTask: &Task{ID: taskID, Status: StatusPending, SourceType: SourceDeviceView}}
+	enq := &stubEnqueuer{insertID: uuid.New()}
+	svc := NewService(repo, enq)
+
+	task, err := svc.Create(context.Background(), CreateRequest{SourceType: SourceDeviceView})
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	require.NotNil(t, repo.created)
+	assert.Equal(t, SourceDeviceView, repo.created.SourceType)
+	require.Len(t, enq.inserted, 1)
+}
+
+func TestService_Create_AdhocResultSourceTypes(t *testing.T) {
+	for _, source := range []SourceType{SourcePMDashboard, SourceAdhocResult} {
+		t.Run(string(source), func(t *testing.T) {
+			taskID := uuid.New()
+			repo := &stubRepo{createID: taskID, getTask: &Task{ID: taskID, Status: StatusPending, SourceType: source}}
+			enq := &stubEnqueuer{insertID: uuid.New()}
+			svc := NewService(repo, enq)
+
+			task, err := svc.Create(context.Background(), CreateRequest{SourceType: source})
+			require.NoError(t, err)
+			require.NotNil(t, task)
+			require.NotNil(t, repo.created)
+			assert.Equal(t, source, repo.created.SourceType)
+			require.Len(t, enq.inserted, 1)
+		})
+	}
+}
+
+func TestService_Create_DeprecatedAdhocSourceTypeRejected(t *testing.T) {
+	repo := &stubRepo{}
+	enq := &stubEnqueuer{}
+	svc := NewService(repo, enq)
+
+	_, err := svc.Create(context.Background(), CreateRequest{SourceType: SourceType("adhoc")})
+	require.ErrorIs(t, err, ErrInvalidSourceType)
+	assert.Nil(t, repo.created)
+	assert.Empty(t, enq.inserted)
+}
+
 func TestService_Create_NilJobRepo_Rejects(t *testing.T) {
 	repo := &stubRepo{}
 	svc := NewService(repo, nil)
@@ -145,7 +188,7 @@ func TestService_Create_EnqueueFails_RollsBackRow(t *testing.T) {
 	enq := &stubEnqueuer{insertErr: errors.New("queue down")}
 	svc := NewService(repo, enq)
 
-	_, err := svc.Create(context.Background(), CreateRequest{SourceType: SourceAdhoc})
+	_, err := svc.Create(context.Background(), CreateRequest{SourceType: SourceAdhocResult})
 	require.Error(t, err)
 	// 入队失败后删除已落表的孤儿任务行
 	require.Len(t, repo.deleted, 1)

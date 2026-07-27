@@ -9,7 +9,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/admin"
+	"github.com/omcgo/omcgo/internal/pm/metrics"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -145,6 +147,58 @@ func TestDashHandler_KPITimeSeries_InvalidBothTimes(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+func TestDashHandler_KPITimeSeries_InvalidGranularity(t *testing.T) {
+	router, _ := dashHSetupRouter()
+	w := dashHDoRequest(router, http.MethodGet,
+		"/api/v1/dashboard/kpi-time-series?kpi_names=rrc&granularity=weekly")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestParseDashboardKPITechnology(t *testing.T) {
+	tests := []struct {
+		raw     string
+		wantErr bool
+	}{
+		{raw: ""},
+		{raw: "gsm"},
+		{raw: "GSM", wantErr: true},
+		{raw: "2g", wantErr: true},
+	}
+	for _, tt := range tests {
+		_, err := parseDashboardKPITechnology(tt.raw)
+		if tt.wantErr {
+			require.Error(t, err)
+		} else {
+			require.NoError(t, err)
+		}
+	}
+}
+
+func TestDashHandler_KPITimeSeries_RejectsNonIncreasingWindow(t *testing.T) {
+	router, _ := dashHSetupRouter()
+	w := dashHDoRequest(router, http.MethodGet,
+		"/api/v1/dashboard/kpi-time-series?kpi_names=rrc&start_time=2026-07-13T00:00:00Z&end_time=2026-07-13T00:00:00Z")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestParseDashboardKPIGranularity(t *testing.T) {
+	tests := []struct {
+		input   string
+		want    metrics.Granularity
+		wantErr bool
+	}{
+		{"", metrics.GranularityHourly, false},
+		{"hourly", metrics.GranularityHourly, false},
+		{"daily", metrics.GranularityDaily, false},
+		{"weekly", "", true},
+	}
+	for _, tt := range tests {
+		got, err := parseDashboardKPIGranularity(tt.input)
+		assert.Equal(t, tt.want, got)
+		assert.Equal(t, tt.wantErr, err != nil)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Tests: Widgets auth
 // ---------------------------------------------------------------------------
@@ -269,4 +323,3 @@ func TestDashHandler_GetUserID_InvalidType(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "/test", nil)
 	r.ServeHTTP(w, req)
 }
-

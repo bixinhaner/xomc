@@ -13,13 +13,43 @@ func main() {
 	var openAPIPath string
 	var sourceRoot string
 	var outputDir string
+	var packagePath string
 	var checkOnly bool
+	var contractsOnly bool
+	var checkContracts bool
 	flag.StringVar(&routesPath, "routes", "", "path to the live OMC handbook route export JSON")
 	flag.StringVar(&openAPIPath, "openapi", "api/openapi/openapi.yaml", "path to the OMC OpenAPI document")
 	flag.StringVar(&sourceRoot, "source-root", ".", "path to the omcgo source root")
 	flag.StringVar(&outputDir, "output", "data/agent-skill/omc-operations", "path to the omc-operations Skill")
+	flag.StringVar(&packagePath, "package", "internal/agentruntime/handbookasset/omc-api-handbook.tar.gz", "path to the embedded handbook data package")
 	flag.BoolVar(&checkOnly, "check", false, "validate existing generated files without rewriting them")
+	flag.BoolVar(&contractsOnly, "contracts-only", false, "refresh source-derived contracts and embedded package without a route export")
+	flag.BoolVar(&checkContracts, "check-contracts", false, "validate source-derived contracts and embedded package without rewriting them")
 	flag.Parse()
+
+	contractOptions := handbookgen.ContractOptions{
+		SourceRoot:  sourceRoot,
+		OpenAPIPath: openAPIPath,
+		OutputDir:   outputDir,
+		PackagePath: packagePath,
+	}
+	if contractsOnly || checkContracts {
+		if contractsOnly && checkContracts {
+			fail("-contracts-only and -check-contracts cannot be used together")
+		}
+		if checkContracts {
+			if err := handbookgen.CheckContracts(contractOptions); err != nil {
+				fail(err.Error())
+			}
+			fmt.Println("handbook contracts valid")
+			return
+		}
+		if err := handbookgen.SyncContracts(contractOptions); err != nil {
+			fail(err.Error())
+		}
+		fmt.Println("handbook contracts generated")
+		return
+	}
 
 	if routesPath == "" {
 		fail("-routes is required")
@@ -36,6 +66,9 @@ func main() {
 		if err := handbookgen.Check(outputDir, routes); err != nil {
 			fail(err.Error())
 		}
+		if err := handbookgen.CheckContracts(contractOptions); err != nil {
+			fail(err.Error())
+		}
 		fmt.Printf("handbook valid: %d operations, catalog %s\n", routes.TotalRoutes, routes.CatalogVersion)
 		return
 	}
@@ -46,6 +79,9 @@ func main() {
 		OutputDir:   outputDir,
 	})
 	if err != nil {
+		fail(err.Error())
+	}
+	if err := handbookgen.SyncContracts(contractOptions); err != nil {
 		fail(err.Error())
 	}
 	fmt.Printf("handbook generated: %d operations, %d categories, catalog %s\n", manifest.TotalOperations, len(manifest.Categories), manifest.CatalogVersion)

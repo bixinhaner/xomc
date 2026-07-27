@@ -29,6 +29,7 @@ services:
 
   redis-test:
     image: redis:7-alpine
+    command: redis-server --appendonly yes --appendfsync everysec --maxmemory 512mb --maxmemory-policy noeviction --auto-aof-rewrite-min-size 256mb --auto-aof-rewrite-percentage 300
     ports:
       - "6380:6379"
     healthcheck:
@@ -36,10 +37,23 @@ services:
       interval: 2s
       timeout: 5s
       retries: 5
+    tmpfs:
+      - /data
 
   nats-test:
     image: nats:2.10-alpine
-    entrypoint: ["/nats-server", "--js", "--store_dir=/tmp/nats", "-m", "8222"]
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        cat >/tmp/nats-server.conf <<'EOF'
+        jetstream {
+          store_dir: "/tmp/nats"
+        }
+        http_port: 8222
+        max_payload: 10485760
+        EOF
+        exec nats-server -c /tmp/nats-server.conf
     ports:
       - "4223:4222"
     healthcheck:
@@ -47,6 +61,8 @@ services:
       interval: 2s
       timeout: 5s
       retries: 5
+    tmpfs:
+      - /tmp/nats
 
   migrate-schema-test:
     build:
@@ -73,6 +89,7 @@ services:
     environment:
       TZ: "Asia/Shanghai"
       GOOSE_VERBOSITY: "1"
+      GOOSE_TABLE: "goose_db_version_seed"
     entrypoint: ["omcgo-migrate"]
     command: ["--dsn", "postgres://omcgo_test:omcgo_test@postgres-test:5432/omcgo_test?sslmode=disable", "--path", "/etc/omcgo/migrations/seed", "up"]
     volumes:

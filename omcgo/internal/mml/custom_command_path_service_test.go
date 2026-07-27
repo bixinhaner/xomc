@@ -3,6 +3,9 @@ package mml
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/google/uuid"
@@ -56,6 +59,39 @@ func privateCommandOwnedBy(ownerID uuid.UUID) *MMLCustomCommand {
 		ID: uuid.New(), CommandName: "X", CommandScope: "private",
 		Creator: "alice", OwnerUserID: &ownerID,
 	}
+}
+
+func TestService_ListCustomCommandPaths_PreservesStandardRange(t *testing.T) {
+	commandID := uuid.New()
+	minValue, maxValue := int64(1), int64(13)
+	want := []MMLCustomCommandPathView{{
+		CommandID:    commandID,
+		StandardPath: "Device.Radio.Channel",
+		DataType:     "unsignedInt",
+		MinValue:     &minValue,
+		MaxValue:     &maxValue,
+	}}
+	svc := newCRUDServiceWithRepo(&mockCustomCommandRepo{})
+	svc.SetCustomCommandPathRepo(&mockCustomCommandPathRepo{
+		listFn: func(_ context.Context, gotID uuid.UUID) ([]MMLCustomCommandPathView, error) {
+			require.Equal(t, commandID, gotID)
+			return want, nil
+		},
+	})
+
+	got, err := svc.ListCustomCommandPaths(context.Background(), commandID)
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+}
+
+func Test_CustomCommandPathRepository_SelectsStandardRange(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	body, err := os.ReadFile(filepath.Join(filepath.Dir(thisFile), "custom_command_path_repository.go"))
+	require.NoError(t, err)
+	src := string(body)
+	assert.Contains(t, src, "sp.min_value")
+	assert.Contains(t, src, "sp.max_value")
 }
 
 func TestService_BatchAddCustomCommandPaths_NonOwner_Forbidden(t *testing.T) {

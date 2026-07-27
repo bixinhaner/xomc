@@ -70,6 +70,8 @@ services:
       - "maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-64MB}"
       - "-c"
       - "max_wal_size=${PG_MAX_WAL_SIZE:-1GB}"
+      - "-c"
+      - "wal_compression=on"
     # 有状态服务给足 60s：checkpoint flush + WAL 落盘，避免被 SIGKILL 截断触发 recovery。
     stop_grace_period: 60s
     deploy:
@@ -77,13 +79,16 @@ services:
         limits:
           # resources.env 注入。缺省(#167 Step 0)：mem 2g→7g 容 max_connections=300(每连接
           # ~8-10MB,300×~10MB=3g + shared_buffers 1.8g + 余量)，与上方 -c 调优同源。
-          cpus: "${POSTGRES_CPUS:-2}"
+          # CPU 缺省 10 核，对齐 plan-resources.sh medium 档（32核/32G 目标机型，约总核数
+          # 1/3）。2026-07-23 10000 基站压测中，4 核配额时主库约 406% 持续触顶；
+          # 调至 10 核后与 TSDB/worker 配合，PM 队列约一分钟清零。
+          cpus: "${POSTGRES_CPUS:-10}"
           memory: "${POSTGRES_MEM:-7g}"
         reservations:
           cpus: "0.5"
           memory: 512m
     volumes:
-      - pgdata:/var/lib/postgresql/data    # 生产建议改为数据盘 bind mount，如 /data/omc/pg
+      - ${POSTGRES_DATA_PATH:-pgdata}:/var/lib/postgresql/data
       - /etc/localtime:/etc/localtime:ro
     networks:
       - omcgo-net
@@ -136,13 +141,16 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${TSDB_CPUS:-2}"
+          # CPU 缺省 16 核，对齐 plan-resources.sh medium 档（32核/32G 目标机型的
+          # 1/2）。2026-07-23 10000 基站压测中，10 核配额仍会在 PM 波峰触顶；
+          # 16 核配合 8 核 worker 后实际使用约 13-15 核，排空吞吐继续提升。
+          cpus: "${TSDB_CPUS:-16}"
           memory: "${TSDB_MEM:-7g}"
         reservations:
           cpus: "0.5"
           memory: 512m
     volumes:
-      - tsdbdata:/var/lib/postgresql/data   # 生产建议改为数据盘 bind mount，如 /data/omc/tsdb
+      - ${TSDB_DATA_PATH:-tsdbdata}:/var/lib/postgresql/data
       - /etc/localtime:/etc/localtime:ro
     networks:
       - omcgo-net
@@ -159,28 +167,26 @@ services:
       TZ: "Asia/Shanghai"
     ports:
       - "6379:6379"                        # 内网开放(0.0.0.0),供其它服务器直连
-    # maxmemory 2gb + allkeys-lru：Redis 无上限增长会撞 cgroup 触发 OOM。曾因数据集 2.36GB
-    # 远超 512m 限额，启动 load 即被 kill → 死循环、永不 healthy，拖垮 app/acs/worker。设
-    # maxmemory 上限 + LRU 淘汰（队列/会话等丢失可从 PG 双写或重新上报恢复）；容器 limit 抬到
-    # 3g（> maxmemory，给 AOF rewrite 的 fork COW 留余量）。
-    # maxmemory / 淘汰策略由 resources.env 注入。缺省(#167 Step 0)：policy allkeys-lru→volatile-lru
-    # （只淘汰带 TTL 的键，保护无 TTL 的命令队列；OMC 键均有 TTL，被淘汰可从 PG 双写/重报恢复）。
+    # PM 在线聚合窗口是运行期权威状态，必须 AOF everysec + noeviction。
+    # 内存不足时显式失败并告警，不能以 LRU 静默破坏窗口完整性。
     # 约束：limits.memory 须 ≥ maxmemory + 1GiB（AOF rewrite 的 fork COW 余量）。
     # --no-appendfsync-on-rewrite：rewrite 期不 fsync，削峰；--save ""：AOF 已开，关 RDB save
     # 点避免双 fork COW（重启恢复走 AOF）。
-    command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-2gb} --maxmemory-policy ${REDIS_MAXMEMORY_POLICY:-volatile-lru} --no-appendfsync-on-rewrite yes --save ""
+    # 256MiB + 300% 避免在线聚合高写入下频繁重写，AOF everysec 与 noeviction 保持不变。
+    command: redis-server --appendonly yes --appendfsync everysec --maxmemory ${REDIS_MAXMEMORY:-2gb} --maxmemory-policy noeviction --no-appendfsync-on-rewrite yes --save "" --auto-aof-rewrite-min-size 256mb --auto-aof-rewrite-percentage 300
     # AOF rewrite/fsync 落盘窗口
     stop_grace_period: 30s
     deploy:
       resources:
         limits:
-          cpus: "${REDIS_CPUS:-1}"
+          # CPU 1→2核对齐 plan-resources.sh medium 档（32核/32G 目标机型）。
+          cpus: "${REDIS_CPUS:-2}"
           memory: "${REDIS_MEM:-3g}"
         reservations:
           cpus: "0.25"
           memory: 256m
     volumes:
-      - redisdata:/data
+      - ${REDIS_DATA_PATH:-redisdata}:/data
       - /etc/localtime:/etc/localtime:ro
     networks:
       - omcgo-net
@@ -198,26 +204,42 @@ services:
     ports:
       - "4222:4222"                        # NATS 客户端,内网开放(0.0.0.0)
       - "127.0.0.1:8222:8222"              # NATS HTTP 监控,仅本机回环(运维 dashboard)
-    # 保持 NATS 默认 max_payload=1MB。Path B 同步对大对象
-    # (DeviceGSM.Bts. 等)走 instance 展开避免单事件超限。
-    command: --jetstream --store_dir /data --http_port 8222
+    # Path B 需要允许 DeviceGSM.Bts. 等对象一次返回全部实例。
+    # PM 标准事件上限 8MiB，预留 envelope 余量。
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        cat >/tmp/nats-server.conf <<'EOF'
+        jetstream {
+          store_dir: "/data"
+          max_memory_store: ${NATS_MAX_MEMORY_STORE:-134217728}
+        }
+        http_port: 8222
+        max_payload: 10485760
+        EOF
+        exec nats-server -c /tmp/nats-server.conf
     # JetStream store 落盘窗口
     stop_grace_period: 30s
     deploy:
       resources:
         limits:
+          # 内存 512m→1024m 对齐 plan-resources.sh medium 档（32核/32G 目标机型）。
           cpus: "${NATS_CPUS:-1}"
-          memory: "${NATS_MEM:-512m}"
+          memory: "${NATS_MEM:-1024m}"
         reservations:
           cpus: "0.25"
           memory: 256m
     volumes:
-      - natsdata:/data
+      - ${NATS_DATA_PATH:-natsdata}:/data
       - /etc/localtime:/etc/localtime:ro
     networks:
       - omcgo-net
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      # 百万级 JetStream backlog 恢复实测可接近 3 分钟；宽限期内保持 starting，
+      # 避免安装器把正常恢复误判为 unhealthy。
+      start_period: 5m
       interval: 5s
       timeout: 5s
       retries: 10
@@ -231,6 +253,13 @@ services:
     restart: unless-stopped
     environment:
       TZ: "Asia/Shanghai"
+      # PM/KPI 批量上报场景下会有成百上千个设备在同一 15min 窗口边界集中上传，
+      # 短时并发远超日常均值。MinIO 未显式配置时按容器可见 CPU 配额自动估算
+      # 并发请求上限，CPU 配额较小时该上限会保守到不足以扛住这种突发，进而对
+      # 超出部分返回 503 "Please reduce your request rate"（PM 文件因此丢失，
+      # 上报端通常不重试）。这里显式拉高上限，不再依赖按 CPU 配额的保守自动估算。
+      MINIO_API_REQUESTS_MAX: "${MINIO_API_REQUESTS_MAX:-6000}"
+      MINIO_API_REQUESTS_DEADLINE: "${MINIO_API_REQUESTS_DEADLINE:-2m}"
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       # MinIO 自带 Prometheus 指标端点 /minio/v2/metrics/*；public 模式免 token 抓取（T-0151）。
@@ -244,13 +273,14 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${MINIO_CPUS:-1}"
-          memory: "${MINIO_MEM:-1g}"
+          # CPU 1→4核对齐 plan-resources.sh medium 档（32核/32G 目标机型）。
+          cpus: "${MINIO_CPUS:-4}"
+          memory: "${MINIO_MEM:-4g}"
         reservations:
           cpus: "0.25"
-          memory: 512m
+          memory: 1g
     volumes:
-      - miniodata:/data
+      - ${MINIO_DATA_PATH:-miniodata}:/data
       - /etc/localtime:/etc/localtime:ro
     networks:
       - omcgo-net

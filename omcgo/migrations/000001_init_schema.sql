@@ -1,14 +1,12 @@
 -- +goose Up
--- 主库 consolidated baseline（KPI/时序库物理分离后；纯业务 schema，无 timescaledb 扩展；
--- 时序对象在 migrations/tsdb/000001_tsdb_schema.sql）。由全量迁移后的库 pg_dump 生成。
-
+-- 主库 consolidated baseline（2026-07-20；纯 PostgreSQL 16；时序对象位于 migrations/tsdb）。
 --
 -- PostgreSQL database dump
 --
 
 
--- Dumped from database version 16.11
--- Dumped by pg_dump version 16.11
+-- Dumped from database version 16.14
+-- Dumped by pg_dump version 16.14
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -319,8 +317,6 @@ $$;
 -- +goose StatementEnd
 
 
-SET default_tablespace = '';
-
 SET default_table_access_method = heap;
 
 --
@@ -623,11 +619,15 @@ CREATE TABLE public.async_jobs (
     lock_owner text,
     attempt integer DEFAULT 1 NOT NULL,
     max_attempts integer DEFAULT 3 NOT NULL,
+    recovery_count integer DEFAULT 0 NOT NULL,
+    last_recovered_at timestamp with time zone,
     payload jsonb,
     result jsonb,
     error_message text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    bucket_start timestamp with time zone,
+    bucket_end timestamp with time zone,
     CONSTRAINT async_jobs_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'running'::text, 'succeeded'::text, 'failed'::text, 'zombie'::text, 'canceled'::text])))
 );
 
@@ -658,6 +658,20 @@ COMMENT ON COLUMN public.async_jobs.heartbeat_at IS 'running 期间每 30s 更�
 --
 
 COMMENT ON COLUMN public.async_jobs.lock_owner IS 'worker 进程标识 hostname-pid，便于排查"哪个 worker 抢到任务"';
+
+
+--
+-- Name: COLUMN async_jobs.bucket_start; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.async_jobs.bucket_start IS 'Bucket job source window start, for idempotent enqueue.';
+
+
+--
+-- Name: COLUMN async_jobs.bucket_end; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.async_jobs.bucket_end IS 'Bucket job source window end, for idempotent enqueue.';
 
 
 --
@@ -748,7 +762,9 @@ CREATE TABLE public.backup_restore_file (
     operator_code character varying(8),
     update_time timestamp with time zone DEFAULT now() NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    task_id uuid
+    task_id uuid,
+    is_deleted boolean DEFAULT false NOT NULL,
+    deleted_at timestamp with time zone
 );
 
 
@@ -1116,6 +1132,47 @@ COMMENT ON COLUMN public.config_templates.auto_dispatch IS 'T-0120-b opt-in 自�
 
 
 --
+-- Name: dashboard_kpi_layouts; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.dashboard_kpi_layouts (
+    tech text NOT NULL,
+    layout jsonb DEFAULT '{"panels": []}'::jsonb NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_by uuid,
+    CONSTRAINT dashboard_kpi_layouts_tech_check CHECK ((tech = ANY (ARRAY['lte'::text, 'nr'::text, 'gsm'::text])))
+);
+
+
+--
+-- Name: TABLE dashboard_kpi_layouts; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.dashboard_kpi_layouts IS 'issue #213：Dashboard 首页 KPI 折线图区全局布局，按制式各一行（lte/nr/gsm），全局单套所有用户共享。';
+
+
+--
+-- Name: COLUMN dashboard_kpi_layouts.tech; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.dashboard_kpi_layouts.tech IS '制式主键：lte / nr / gsm。';
+
+
+--
+-- Name: COLUMN dashboard_kpi_layouts.layout; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.dashboard_kpi_layouts.layout IS '布局体 JSONB：panels 数组，每图含 title / metrics(symbolic key 列表) / x,y(网格位置) / w,h(网格大小) / chartType(预留，恒 line)。';
+
+
+--
+-- Name: COLUMN dashboard_kpi_layouts.updated_by; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.dashboard_kpi_layouts.updated_by IS '最近一次保存的管理员用户 ID（nullable：seed 灌入的初始行无来源用户）。';
+
+
+--
 -- Name: dashboard_widgets; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1199,10 +1256,19 @@ CREATE TABLE public.device_groups (
     name_i18n jsonb DEFAULT '{}'::jsonb NOT NULL,
     description_i18n jsonb DEFAULT '{}'::jsonb NOT NULL,
     remark_i18n jsonb DEFAULT '{}'::jsonb NOT NULL,
+    source_group_id uuid,
     CONSTRAINT chk_dg_level CHECK ((level = ANY (ARRAY[1, 2]))),
     CONSTRAINT chk_dg_level_parent CHECK ((((level = 1) AND (parent_id IS NULL)) OR ((level = 2) AND (parent_id IS NOT NULL)))),
-    CONSTRAINT chk_dg_matching_mode CHECK (((matching_mode IS NULL) OR ((matching_mode)::text = ANY (ARRAY[('deviceName'::character varying)::text, ('lac'::character varying)::text, ('tac'::character varying)::text, ('serialNumber'::character varying)::text]))))
+    CONSTRAINT chk_dg_matching_mode CHECK (((matching_mode IS NULL) OR ((matching_mode)::text = ANY (ARRAY[('deviceName'::character varying)::text, ('lac'::character varying)::text, ('tac'::character varying)::text, ('serialNumber'::character varying)::text])))),
+    CONSTRAINT device_groups_rule_source_not_self CHECK (((source_group_id IS NULL) OR (source_group_id <> id)))
 );
+
+
+--
+-- Name: COLUMN device_groups.source_group_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.device_groups.source_group_id IS 'Source L2 group for automatic matching; NULL disables legacy rules until configured.';
 
 
 --
@@ -1222,7 +1288,7 @@ CREATE TABLE public.device_info (
     freq_point character varying(32),
     bandwidth numeric(8,2),
     transmit_power numeric(8,2),
-    plmn character varying(32),
+    plmn character varying(40),
     rf_status character varying(20),
     cell_status character varying(20),
     mme_status character varying(20),
@@ -1254,8 +1320,22 @@ CREATE TABLE public.device_info (
     enb_id character varying(32),
     network_model character varying(16),
     lac character varying(16),
-    cumulative_online_duration bigint DEFAULT 0 NOT NULL
-);
+    cumulative_online_duration bigint DEFAULT 0 NOT NULL,
+    op_state character varying(8) DEFAULT '0'::character varying,
+    admin_state character varying(16),
+    ipsec_addr character varying(64),
+    bsc_select character varying(8),
+    oml_remote_ip character varying(45),
+    oml_remote_ip_bak character varying(45),
+    ipa_unit_id character varying(32),
+    ue_count integer DEFAULT 0,
+    active_alarm_count integer DEFAULT 0 NOT NULL,
+    name_sync_pending boolean DEFAULT false NOT NULL,
+    lmt_device_name character varying(255),
+    highest_alarm_severity smallint,
+    highest_severity_alarm_count smallint DEFAULT 0
+)
+WITH (autovacuum_vacuum_scale_factor='0.02', autovacuum_vacuum_threshold='200', autovacuum_analyze_scale_factor='0.02', autovacuum_analyze_threshold='200');
 
 
 --
@@ -1346,7 +1426,7 @@ COMMENT ON COLUMN public.device_info.bandwidth IS '工作带宽（MHz,小数支�
 -- Name: COLUMN device_info.transmit_power; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_info.transmit_power IS '发射功率（dBm）,对应 TR-181 FAPService.{i}.Capabilities.MaxTxPower。';
+COMMENT ON COLUMN public.device_info.transmit_power IS '发射功率（dBm），口径=参考信号功率（与 LMT 一致），来源 TR-181 FAPService.{i}.CellConfig.LTE.RAN.RF.ReferenceSignalPower（经 cmcc/ctcc carrier adapter 映射）。注：非硬件最大能力上限 MaxTxPower。';
 
 
 --
@@ -1581,6 +1661,69 @@ COMMENT ON COLUMN public.device_info.cumulative_online_duration IS '累计在线
 
 
 --
+-- Name: COLUMN device_info.op_state; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.device_info.op_state IS '激活状态:1=激活/0=未激活;由 InfoSyncer.CalcOpState 派生(等价 cell_status: 任一 cell active → "1")。与 first_online_time 派生口径解耦。';
+
+
+--
+-- Name: COLUMN device_info.admin_state; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.device_info.admin_state IS 'NR FAPControl AdminState ("1"=Locked, "2"=Unlocked, "3"=ShuttingDown), source Device.Services.FAPService.1.FAPControl.NR.RAN.Common.AdminState. NULL for LTE devices (use lock_status instead).';
+
+
+--
+-- Name: COLUMN device_info.ipsec_addr; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.device_info.ipsec_addr IS 'IPSec serving unit 1 tunnel address, source Device.DeviceInfo.SERVING_UNIT1_IPSEC_Address. "0.0.0.0" means tunnel not established.';
+
+
+--
+-- Name: COLUMN device_info.bsc_select; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.device_info.bsc_select IS 'GSM BSC primary/backup role from DeviceGSM.BscSelect ("0"=Master, "1"=Backup). BTS-only; LTE/NR stay NULL.';
+
+
+--
+-- Name: COLUMN device_info.oml_remote_ip; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.device_info.oml_remote_ip IS 'Abis OML primary BSC IP from DeviceGSM.OmlRemoteIp. BTS-only.';
+
+
+--
+-- Name: COLUMN device_info.oml_remote_ip_bak; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.device_info.oml_remote_ip_bak IS 'Abis OML backup BSC IP from DeviceGSM.OmlRemoteIpBak. BTS-only.';
+
+
+--
+-- Name: COLUMN device_info.ipa_unit_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.device_info.ipa_unit_id IS 'IPA unit ID from DeviceGSM.IpaUnitId, for example "9227-2". BTS-only.';
+
+
+--
+-- Name: COLUMN device_info.name_sync_pending; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.device_info.name_sync_pending IS '设备名称同步待处理标记（true=需人工确认，前端显示小红点）。Path B 同步检测到 LMT 名称与网管不一致且 prompt=true 时置 true；用户确认或下次同步名称一致时自动清 false。';
+
+
+--
+-- Name: COLUMN device_info.lmt_device_name; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.device_info.lmt_device_name IS '从 LMT 读取的设备名称（HNBName / gNBName）缓存。供前端在名称冲突时对比展示"LMT 名称"与"网管名称"。';
+
+
+--
 -- Name: device_licenses; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1603,6 +1746,32 @@ CREATE TABLE public.device_licenses (
     CONSTRAINT device_licenses_file_ext_check CHECK (((file_ext)::text = 'lic'::text)),
     CONSTRAINT device_licenses_source_check CHECK (((source)::text = 'manual_upload'::text))
 );
+
+
+--
+-- Name: device_location_observations; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.device_location_observations (
+    device_id uuid NOT NULL,
+    latitude double precision NOT NULL,
+    longitude double precision NOT NULL,
+    gps_height double precision,
+    observed_at timestamp with time zone NOT NULL,
+    version bigint DEFAULT 1 NOT NULL,
+    source_path text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT device_location_observations_latitude_check CHECK (((latitude >= ('-90'::integer)::double precision) AND (latitude <= (90)::double precision))),
+    CONSTRAINT device_location_observations_longitude_check CHECK (((longitude >= ('-180'::integer)::double precision) AND (longitude <= (180)::double precision))),
+    CONSTRAINT device_location_observations_version_check CHECK ((version > 0))
+);
+
+
+--
+-- Name: TABLE device_location_observations; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.device_location_observations IS '设备最新有效 GPS 观测值；不等同于网管已接受坐标';
 
 
 --
@@ -2849,7 +3018,10 @@ CREATE TABLE public.devices (
     last_param_sync_failed_at timestamp with time zone,
     last_param_sync_error text,
     last_offline_reason character varying(32),
-    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text])))
+    recycle_type character varying(16) DEFAULT ''::character varying NOT NULL,
+    recycle_executor character varying(128) DEFAULT ''::character varying NOT NULL,
+    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text]))),
+    CONSTRAINT devices_recycle_type_check CHECK (((recycle_type)::text = ANY ((ARRAY[''::character varying, 'manual'::character varying, 'auto'::character varying])::text[])))
 )
 PARTITION BY LIST (carrier);
 
@@ -3086,6 +3258,20 @@ COMMENT ON COLUMN public.devices.last_offline_reason IS '最近一次被标记�
 
 
 --
+-- Name: COLUMN devices.recycle_type; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.devices.recycle_type IS '移入回收站方式：manual 或 auto';
+
+
+--
+-- Name: COLUMN devices.recycle_executor; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.devices.recycle_executor IS '实际执行软删除的用户或系统任务标识';
+
+
+--
 -- Name: devices_cmcc; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -3125,8 +3311,12 @@ CREATE TABLE public.devices_cmcc (
     last_param_sync_failed_at timestamp with time zone,
     last_param_sync_error text,
     last_offline_reason character varying(32),
-    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text])))
-);
+    recycle_type character varying(16) DEFAULT ''::character varying NOT NULL,
+    recycle_executor character varying(128) DEFAULT ''::character varying NOT NULL,
+    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text]))),
+    CONSTRAINT devices_recycle_type_check CHECK (((recycle_type)::text = ANY ((ARRAY[''::character varying, 'manual'::character varying, 'auto'::character varying])::text[])))
+)
+WITH (autovacuum_vacuum_scale_factor='0.02', autovacuum_vacuum_threshold='200', autovacuum_analyze_scale_factor='0.02', autovacuum_analyze_threshold='200');
 
 
 --
@@ -3169,7 +3359,10 @@ CREATE TABLE public.devices_ctcc (
     last_param_sync_failed_at timestamp with time zone,
     last_param_sync_error text,
     last_offline_reason character varying(32),
-    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text])))
+    recycle_type character varying(16) DEFAULT ''::character varying NOT NULL,
+    recycle_executor character varying(128) DEFAULT ''::character varying NOT NULL,
+    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text]))),
+    CONSTRAINT devices_recycle_type_check CHECK (((recycle_type)::text = ANY ((ARRAY[''::character varying, 'manual'::character varying, 'auto'::character varying])::text[])))
 );
 
 
@@ -3213,7 +3406,10 @@ CREATE TABLE public.devices_cucc (
     last_param_sync_failed_at timestamp with time zone,
     last_param_sync_error text,
     last_offline_reason character varying(32),
-    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text])))
+    recycle_type character varying(16) DEFAULT ''::character varying NOT NULL,
+    recycle_executor character varying(128) DEFAULT ''::character varying NOT NULL,
+    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text]))),
+    CONSTRAINT devices_recycle_type_check CHECK (((recycle_type)::text = ANY ((ARRAY[''::character varying, 'manual'::character varying, 'auto'::character varying])::text[])))
 );
 
 
@@ -3257,7 +3453,10 @@ CREATE TABLE public.devices_other (
     last_param_sync_failed_at timestamp with time zone,
     last_param_sync_error text,
     last_offline_reason character varying(32),
-    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text])))
+    recycle_type character varying(16) DEFAULT ''::character varying NOT NULL,
+    recycle_executor character varying(128) DEFAULT ''::character varying NOT NULL,
+    CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text]))),
+    CONSTRAINT devices_recycle_type_check CHECK (((recycle_type)::text = ANY ((ARRAY[''::character varying, 'manual'::character varying, 'auto'::character varying])::text[])))
 );
 
 
@@ -3490,9 +3689,25 @@ CREATE TABLE public.firmware_versions (
     signature text,
     signature_alg character varying(32),
     public_key_id character varying(128),
+    product_id uuid,
+    product_ids uuid[] DEFAULT '{}'::uuid[] NOT NULL,
     CONSTRAINT chk_firmware_versions_file_type CHECK ((file_type = ANY (ARRAY[0, 1, 6]))),
     CONSTRAINT chk_firmware_versions_status CHECK (((status)::text = ANY (ARRAY[('active'::character varying)::text, ('deprecated'::character varying)::text, ('archived'::character varying)::text])))
 );
+
+
+--
+-- Name: COLUMN firmware_versions.product_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.firmware_versions.product_id IS '#492 固件所属产品（products.id）。上传选产品名 → 存此列；升级/库列表按产品名展示与过滤。';
+
+
+--
+-- Name: COLUMN firmware_versions.product_ids; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.firmware_versions.product_ids IS '#638 固件适用的多个产品 ID 列表（products.id）。上传支持多选；product_id 保留为兼容主产品=列表首项。列表/任务按产品过滤命中 ANY(product_ids)。';
 
 
 --
@@ -3708,6 +3923,34 @@ COMMENT ON COLUMN public.menus.permission_key IS '权限标识，格式: {module
 --
 
 COMMENT ON COLUMN public.menus.name_i18n IS '多语言译文 JSONB，键为 locale code（如 zh-CN/en-US），值为对应译文；NULL 表示未配置多语言，前端回退到 name 字段';
+
+
+--
+-- Name: mml_audit_log; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.mml_audit_log (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    task_id uuid,
+    command_code character varying(255),
+    operation_type character varying(20),
+    device_sn character varying(64),
+    parameters jsonb,
+    param_paths jsonb,
+    result_status character varying(20),
+    result_message text,
+    creator character varying(100),
+    duration_ms numeric(12,3),
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE mml_audit_log; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.mml_audit_log IS 'MML 命令执行审计日志。每次 ExecuteCommand 对每个 device+command 组合写一条记录，
+     记录下发时的参数、最终结果状态与耗时，供合规审计与运维回溯。';
 
 
 --
@@ -4087,6 +4330,28 @@ COMMENT ON COLUMN public.mml_custom_command.owner_user_id IS 'UUID FK → users.
 
 
 --
+-- Name: mml_custom_command_paths; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.mml_custom_command_paths (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    command_id uuid NOT NULL,
+    standard_path_id uuid NOT NULL,
+    default_selected boolean DEFAULT true NOT NULL,
+    sort_order integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE mml_custom_command_paths; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.mml_custom_command_paths IS 'issue #115 调整3：自定义命令↔标准路径精瘦关联表。仅存关联+排序+默认勾选；元数据与是否支持读时 JOIN standard_params/param_mappings，不重复落库。standard_path_id NOT NULL = path 仅来自字典。';
+
+
+--
 -- Name: mml_param_versions; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -4131,7 +4396,14 @@ CREATE TABLE public.mml_scripts (
     end_time timestamp with time zone,
     type character varying(20) DEFAULT 'manual'::character varying NOT NULL,
     progress numeric(5,2) DEFAULT 0 NOT NULL,
-    result jsonb DEFAULT '{}'::jsonb
+    result jsonb DEFAULT '{}'::jsonb,
+    import_session_id uuid DEFAULT gen_random_uuid() NOT NULL,
+    original_filename text DEFAULT ''::text NOT NULL,
+    content_sha256 text DEFAULT ''::text NOT NULL,
+    validation_version text DEFAULT ''::text NOT NULL,
+    validated_at timestamp with time zone,
+    plan_items jsonb DEFAULT '[]'::jsonb NOT NULL,
+    validation_summary jsonb DEFAULT '{}'::jsonb NOT NULL
 );
 
 
@@ -4189,7 +4461,13 @@ CREATE TABLE public.mml_tasks (
     scheduled_at timestamp with time zone,
     export_object text,
     device_export_objects jsonb DEFAULT '{}'::jsonb NOT NULL,
-    export_generated_at timestamp with time zone
+    export_generated_at timestamp with time zone,
+    execute_mode text DEFAULT 'common'::text NOT NULL,
+    plan_items jsonb DEFAULT '[]'::jsonb NOT NULL,
+    script_content_sha256 text DEFAULT ''::text NOT NULL,
+    script_validation_version text DEFAULT ''::text NOT NULL,
+    request_id text,
+    CONSTRAINT mml_tasks_execute_mode_check CHECK ((execute_mode = ANY (ARRAY['common'::text, 'device_bound'::text])))
 );
 
 
@@ -4240,6 +4518,51 @@ COMMENT ON COLUMN public.mml_tasks.path_translation_source IS 'T-0168: 任务级
 --
 
 COMMENT ON COLUMN public.mml_tasks.scheduled_at IS 'MML 任务计划执行时刻：execute_type=scheduled 时为一次性执行时间；execute_type=immediate / periodic / 立即派发场景为 NULL。Scheduler 与 next_trigger_at 配合使用（next_trigger_at 是滚动触发时间，scheduled_at 是原始计划时间，便于审计 / 列表展示）。';
+
+
+--
+-- Name: COLUMN mml_tasks.execute_mode; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.mml_tasks.execute_mode IS 'MML task execution mode: common broadcasts commands to selected devices; device_bound uses plan_items as the execution source.';
+
+
+--
+-- Name: COLUMN mml_tasks.plan_items; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.mml_tasks.plan_items IS 'Device-bound execution plan rows. Each row binds source line, device SN, per-device order, raw line, and normalized command JSON.';
+
+
+--
+-- Name: COLUMN mml_tasks.request_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.mml_tasks.request_id IS 'Client-generated idempotency key for task creation requests.';
+
+
+--
+-- Name: model_upload_intents; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.model_upload_intents (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    device_id uuid NOT NULL,
+    upload_task_id uuid NOT NULL,
+    discovery_log_id uuid,
+    source_event_id character varying(128) NOT NULL,
+    model_version character varying(128),
+    model_hash character varying(128),
+    status character varying(24) DEFAULT 'requested'::character varying NOT NULL,
+    failure_code character varying(64),
+    failure_message text,
+    attempts integer DEFAULT 0 NOT NULL,
+    next_attempt_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_error text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT model_upload_intents_status_chk CHECK (((status)::text = ANY ((ARRAY['requested'::character varying, 'uploaded'::character varying, 'not_supported'::character varying, 'failed'::character varying, 'sync_queued'::character varying, 'sync_submitted'::character varying, 'manual_review'::character varying])::text[])))
+);
 
 
 --
@@ -4375,12 +4698,6 @@ CREATE TABLE public.mr_device_mappings (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
-
-
---
--- mr_files：随「MR 也记录到时序库」迁至时序库 schema（migrations/tsdb/000001_tsdb_schema.sql），
--- 不再建于主库。MR 文件元数据 + mr_records 时序记录同库（TsPool），与 pm_files 一致。
---
 
 
 --
@@ -4792,7 +5109,7 @@ CREATE TABLE public.param_mappings (
     mirror_with character varying(256),
     source character varying(16) DEFAULT 'builtin'::character varying NOT NULL,
     CONSTRAINT param_mappings_entry_type_check CHECK (((entry_type)::text = ANY (ARRAY[('object'::character varying)::text, ('parameter'::character varying)::text]))),
-    CONSTRAINT param_mappings_source_check CHECK (((source)::text = ANY ((ARRAY['builtin'::character varying, 'custom'::character varying])::text[])))
+    CONSTRAINT param_mappings_source_check CHECK (((source)::text = ANY (ARRAY[('builtin'::character varying)::text, ('custom'::character varying)::text])))
 );
 
 
@@ -4891,6 +5208,267 @@ CREATE TABLE public.parameter_discovery_log (
 --
 
 COMMENT ON COLUMN public.parameter_discovery_log.param_model_id IS 'T-0098 参数模型解析结果；与 data_model_id 共存（旧通路）直至 P5 清理';
+
+
+--
+-- Name: parameter_sync_admission_reservations; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.parameter_sync_admission_reservations (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    request_id uuid NOT NULL,
+    admission_class character varying(32) NOT NULL,
+    bucket_id smallint NOT NULL,
+    reserved_runs integer DEFAULT 0 NOT NULL,
+    reserved_tasks integer DEFAULT 0 NOT NULL,
+    status character varying(16) DEFAULT 'reserved'::character varying NOT NULL,
+    lease_until timestamp with time zone DEFAULT now() NOT NULL,
+    released_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT parameter_sync_admission_reservation_counts_chk CHECK (((reserved_runs >= 0) AND (reserved_tasks >= 0))),
+    CONSTRAINT parameter_sync_admission_reservation_status_chk CHECK (((status)::text = ANY ((ARRAY['reserved'::character varying, 'released'::character varying, 'expired'::character varying])::text[])))
+);
+
+
+--
+-- Name: parameter_sync_admission_state; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.parameter_sync_admission_state (
+    admission_class character varying(32) NOT NULL,
+    bucket_id smallint NOT NULL,
+    active_run_limit integer DEFAULT 0 NOT NULL,
+    active_task_limit integer DEFAULT 0 NOT NULL,
+    missing_result_limit integer DEFAULT 0 NOT NULL,
+    create_rate_per_minute integer DEFAULT 0 NOT NULL,
+    reserved_runs integer DEFAULT 0 NOT NULL,
+    reserved_tasks integer DEFAULT 0 NOT NULL,
+    version bigint DEFAULT 0 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT parameter_sync_admission_bucket_chk CHECK ((bucket_id >= 0)),
+    CONSTRAINT parameter_sync_admission_class_chk CHECK (((admission_class)::text = ANY ((ARRAY['global'::character varying, 'model_upload'::character varying, 'periodic'::character varying, 'manual'::character varying])::text[]))),
+    CONSTRAINT parameter_sync_admission_counts_chk CHECK (((active_run_limit >= 0) AND (active_task_limit >= 0) AND (missing_result_limit >= 0) AND (create_rate_per_minute >= 0) AND (reserved_runs >= 0) AND (reserved_tasks >= 0)))
+);
+
+
+--
+-- Name: parameter_sync_device_state; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.parameter_sync_device_state (
+    device_id uuid NOT NULL,
+    consecutive_failures integer DEFAULT 0 NOT NULL,
+    last_attempt_at timestamp with time zone,
+    last_success_at timestamp with time zone,
+    last_failure_at timestamp with time zone,
+    next_auto_sync_at timestamp with time zone,
+    last_error text,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT parameter_sync_device_state_consecutive_failures_check CHECK ((consecutive_failures >= 0))
+);
+
+
+--
+-- Name: parameter_sync_event_failures; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.parameter_sync_event_failures (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    subject character varying(255) NOT NULL,
+    event_id character varying(128) NOT NULL,
+    device_id uuid,
+    device_sn character varying(64),
+    request_id uuid,
+    run_id uuid,
+    task_id uuid,
+    raw_payload jsonb DEFAULT '{}'::jsonb NOT NULL,
+    delivery_count integer DEFAULT 0 NOT NULL,
+    status character varying(24) DEFAULT 'pending'::character varying NOT NULL,
+    last_error text,
+    next_retry_at timestamp with time zone,
+    replayed_at timestamp with time zone,
+    recovered_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT parameter_sync_event_failure_status_chk CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'replayed'::character varying, 'recovered'::character varying, 'manual_review'::character varying])::text[])))
+);
+
+
+--
+-- Name: parameter_sync_outbox; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.parameter_sync_outbox (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    event_type character varying(64) NOT NULL,
+    aggregate_type character varying(32) NOT NULL,
+    aggregate_id uuid NOT NULL,
+    dedupe_key character varying(192) NOT NULL,
+    payload jsonb NOT NULL,
+    status character varying(24) DEFAULT 'pending'::character varying NOT NULL,
+    attempt_count integer DEFAULT 0 NOT NULL,
+    next_attempt_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_error text,
+    delivered_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT parameter_sync_outbox_attempt_chk CHECK ((attempt_count >= 0)),
+    CONSTRAINT parameter_sync_outbox_status_chk CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'delivering'::character varying, 'delivered'::character varying, 'failed'::character varying, 'dead'::character varying])::text[])))
+);
+
+
+--
+-- Name: parameter_sync_recovery_state; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.parameter_sync_recovery_state (
+    run_id uuid NOT NULL,
+    task_id uuid NOT NULL,
+    status character varying(24) DEFAULT 'pending'::character varying NOT NULL,
+    attempts integer DEFAULT 0 NOT NULL,
+    next_retry_at timestamp with time zone DEFAULT now() NOT NULL,
+    lease_token uuid,
+    lease_until timestamp with time zone,
+    last_error text,
+    claimed_at timestamp with time zone,
+    processed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT parameter_sync_recovery_status_chk CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'processing'::character varying, 'processed'::character varying, 'failed'::character varying, 'manual_review'::character varying])::text[])))
+);
+
+
+--
+-- Name: parameter_sync_request_bindings; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.parameter_sync_request_bindings (
+    request_id uuid NOT NULL,
+    run_id uuid NOT NULL,
+    provisioning_task_id uuid NOT NULL,
+    status character varying(24) DEFAULT 'waiting'::character varying NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    completed_at timestamp with time zone,
+    CONSTRAINT parameter_sync_bindings_status_chk CHECK (((status)::text = ANY ((ARRAY['waiting'::character varying, 'completed'::character varying, 'failed'::character varying, 'cancelled'::character varying])::text[])))
+);
+
+
+--
+-- Name: parameter_sync_requests; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.parameter_sync_requests (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    device_id uuid NOT NULL,
+    device_sn character varying(64) NOT NULL,
+    caller_type character varying(32) DEFAULT 'system'::character varying NOT NULL,
+    trigger_reason character varying(32) NOT NULL,
+    sync_scope character varying(24) NOT NULL,
+    requested_paths jsonb DEFAULT '[]'::jsonb NOT NULL,
+    status character varying(24) DEFAULT 'accepted'::character varying NOT NULL,
+    run_id uuid,
+    active_run_id uuid,
+    priority integer DEFAULT 10 NOT NULL,
+    next_attempt_at timestamp with time zone DEFAULT now() NOT NULL,
+    deadline_at timestamp with time zone,
+    idempotency_key character varying(160),
+    result_code character varying(64),
+    result_summary jsonb,
+    error_message text,
+    campaign_id uuid,
+    source_event_id character varying(128),
+    origin_event_type character varying(64),
+    model_upload_intent_id uuid,
+    model_upload_status character varying(24),
+    admission_class character varying(32),
+    admission_reason text,
+    admission_snapshot jsonb,
+    deduplicated_to_request_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    started_at timestamp with time zone,
+    completed_at timestamp with time zone,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT parameter_sync_requests_scope_chk CHECK (((sync_scope)::text = ANY ((ARRAY['full'::character varying, 'partial'::character varying, 'readback'::character varying, 'policy_probe'::character varying])::text[]))),
+    CONSTRAINT parameter_sync_requests_status_chk CHECK (((status)::text = ANY ((ARRAY['accepted'::character varying, 'queued'::character varying, 'running'::character varying, 'succeeded'::character varying, 'failed'::character varying, 'timed_out'::character varying, 'cancelled'::character varying, 'deduplicated'::character varying, 'rejected'::character varying])::text[]))),
+    CONSTRAINT parameter_sync_requests_trigger_reason_chk CHECK (((trigger_reason)::text = ANY ((ARRAY['bootstrap'::character varying, 'model_upload'::character varying, 'device_online'::character varying, 'firmware_changed'::character varying, 'periodic'::character varying, 'manual'::character varying, 'config_pull'::character varying, 'license'::character varying, 'spv_readback'::character varying, 'add_object_readback'::character varying, 'inform_period_probe'::character varying])::text[])))
+);
+
+
+--
+-- Name: parameter_sync_runs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.parameter_sync_runs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    request_id uuid NOT NULL,
+    device_id uuid NOT NULL,
+    device_sn character varying(64) NOT NULL,
+    trigger_reason character varying(32) NOT NULL,
+    sync_scope character varying(24) NOT NULL,
+    mapping_source character varying(128),
+    mapping_version character varying(128),
+    coverage jsonb DEFAULT '[]'::jsonb NOT NULL,
+    status character varying(24) DEFAULT 'planning'::character varying NOT NULL,
+    expected_task_count integer DEFAULT 0 NOT NULL,
+    terminal_task_count integer DEFAULT 0 NOT NULL,
+    processed_task_count integer DEFAULT 0 NOT NULL,
+    failed_task_count integer DEFAULT 0 NOT NULL,
+    error_message text,
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
+    completed_at timestamp with time zone,
+    version bigint DEFAULT 0 NOT NULL,
+    projection_status character varying(16) DEFAULT 'pending'::character varying NOT NULL,
+    projection_attempts integer DEFAULT 0 NOT NULL,
+    projection_error text,
+    projection_completed_at timestamp with time zone,
+    projection_lease_token uuid,
+    projection_lease_until timestamp with time zone,
+    projection_next_attempt_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT parameter_sync_runs_counts_chk CHECK (((expected_task_count >= 0) AND (terminal_task_count >= 0) AND (processed_task_count >= 0) AND (failed_task_count >= 0) AND (terminal_task_count <= expected_task_count) AND (processed_task_count <= terminal_task_count) AND (failed_task_count <= processed_task_count))),
+    CONSTRAINT parameter_sync_runs_scope_chk CHECK (((sync_scope)::text = ANY ((ARRAY['full'::character varying, 'partial'::character varying, 'readback'::character varying, 'policy_probe'::character varying])::text[]))),
+    CONSTRAINT parameter_sync_runs_status_chk CHECK (((status)::text = ANY ((ARRAY['planning'::character varying, 'enqueuing'::character varying, 'waiting_device'::character varying, 'executing'::character varying, 'processing'::character varying, 'cancelling'::character varying, 'succeeded'::character varying, 'failed'::character varying, 'cancelled'::character varying])::text[]))),
+    CONSTRAINT parameter_sync_runs_trigger_reason_chk CHECK (((trigger_reason)::text = ANY ((ARRAY['bootstrap'::character varying, 'model_upload'::character varying, 'device_online'::character varying, 'firmware_changed'::character varying, 'periodic'::character varying, 'manual'::character varying, 'config_pull'::character varying, 'license'::character varying, 'spv_readback'::character varying, 'add_object_readback'::character varying, 'inform_period_probe'::character varying])::text[])))
+);
+
+
+--
+-- Name: parameter_sync_staging_values; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.parameter_sync_staging_values (
+    run_id uuid NOT NULL,
+    parameter_path text NOT NULL,
+    private_path text NOT NULL,
+    value jsonb,
+    value_type character varying(64),
+    writable boolean DEFAULT false NOT NULL,
+    fap_instance integer DEFAULT 0 NOT NULL,
+    param_group character varying(32) DEFAULT 'other'::character varying NOT NULL,
+    coverage_scope text,
+    task_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: parameter_sync_task_results; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.parameter_sync_task_results (
+    run_id uuid NOT NULL,
+    task_id uuid NOT NULL,
+    event_id character varying(128) NOT NULL,
+    success boolean NOT NULL,
+    result_ref text,
+    status character varying(24) DEFAULT 'received'::character varying NOT NULL,
+    error_code character varying(64),
+    error_message text,
+    processed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT parameter_sync_task_results_status_chk CHECK (((status)::text = ANY ((ARRAY['received'::character varying, 'processed'::character varying, 'failed'::character varying])::text[])))
+);
 
 
 --
@@ -5066,6 +5644,49 @@ CREATE TABLE public.pm_adhoc_task_runs (
 
 
 --
+-- Name: pm_completion_watermarks; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.pm_completion_watermarks (
+    granularity text NOT NULL,
+    level text NOT NULL,
+    completed_bucket_start timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pm_completion_watermarks_granularity_check CHECK ((granularity = ANY (ARRAY['hourly'::text, 'daily'::text, 'weekly'::text, 'monthly'::text]))),
+    CONSTRAINT pm_completion_watermarks_level_check CHECK ((level = ANY (ARRAY['device'::text, 'group'::text])))
+);
+
+
+--
+-- Name: TABLE pm_completion_watermarks; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.pm_completion_watermarks IS '#528 PM 持续聚合完成水位：按 (粒度, 层级) 记录上游卷数据已成功处理完到哪一格起点（语义为「已处理」非「有数据」，空格也推进；只进不退）。';
+
+
+--
+-- Name: COLUMN pm_completion_watermarks.granularity; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.pm_completion_watermarks.granularity IS '聚合粒度：hourly/daily/weekly/monthly。';
+
+
+--
+-- Name: COLUMN pm_completion_watermarks.level; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.pm_completion_watermarks.level IS '完成层级：device（设备级）/ group（设备组级，链式产出，完成更晚）。';
+
+
+--
+-- Name: COLUMN pm_completion_watermarks.completed_bucket_start; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.pm_completion_watermarks.completed_bucket_start IS '已处理完成到的格起点（含），桶头时间戳；下游取「≤ 此值」的下一格。';
+
+
+--
 -- Name: pm_dashboards; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -5106,7 +5727,7 @@ CREATE TABLE public.pm_kpi_export_tasks (
     started_at timestamp with time zone,
     finished_at timestamp with time zone,
     expire_at timestamp with time zone,
-    CONSTRAINT pm_kpi_export_tasks_source_type_chk CHECK ((source_type = ANY (ARRAY['dashboard'::text, 'kpi_query'::text, 'adhoc'::text]))),
+    CONSTRAINT pm_kpi_export_tasks_source_type_chk CHECK ((source_type = ANY (ARRAY['dashboard'::text, 'device_view'::text, 'kpi_query'::text, 'pm_dashboard'::text, 'adhoc_result'::text]))),
     CONSTRAINT pm_kpi_export_tasks_status_chk CHECK ((status = ANY (ARRAY['pending'::text, 'running'::text, 'succeeded'::text, 'failed'::text])))
 );
 
@@ -5213,10 +5834,12 @@ CREATE TABLE public.pm_tasks (
     is_builtin boolean DEFAULT false NOT NULL,
     expire_days integer DEFAULT 60 NOT NULL,
     object_ldns text[],
+    visibility character varying(16) DEFAULT 'private'::character varying NOT NULL,
     CONSTRAINT chk_pm_tasks_continuous_cron CHECK (((mode IS DISTINCT FROM 'continuous'::text) OR (cron_expr IS NOT NULL))),
     CONSTRAINT chk_pm_tasks_dimension CHECK ((dimension = ANY (ARRAY['device'::text, 'aggregate_group'::text, 'device_group'::text, 'product'::text, 'band'::text, 'network'::text]))),
     CONSTRAINT chk_pm_tasks_mode CHECK (((mode IS NULL) OR (mode = ANY (ARRAY['oneshot'::text, 'continuous'::text])))),
-    CONSTRAINT chk_pm_tasks_technology CHECK (((technology IS NULL) OR (technology = ANY (ARRAY['lte'::text, 'nr'::text, 'gsm'::text]))))
+    CONSTRAINT chk_pm_tasks_technology CHECK (((technology IS NULL) OR (technology = ANY (ARRAY['lte'::text, 'nr'::text, 'gsm'::text])))),
+    CONSTRAINT chk_pm_tasks_visibility CHECK (((visibility)::text = ANY (ARRAY[('private'::character varying)::text, ('public'::character varying)::text])))
 );
 
 
@@ -5225,6 +5848,13 @@ CREATE TABLE public.pm_tasks (
 --
 
 COMMENT ON COLUMN public.pm_tasks.last_fire_at IS 'G7 continuous 任务上次 cron 触发时刻；ContinuousScheduler 写入，worker 不动。';
+
+
+--
+-- Name: COLUMN pm_tasks.visibility; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.pm_tasks.visibility IS 'PM adhoc 自定义聚合任务可见性：private=仅创建者/超管可见可操作；public=登录用户可见可操作。旧任务默认 private。';
 
 
 --
@@ -5256,7 +5886,7 @@ CREATE TABLE public.product_class_patterns (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     source character varying(16) DEFAULT 'builtin'::character varying NOT NULL,
-    CONSTRAINT product_class_patterns_source_check CHECK (((source)::text = ANY ((ARRAY['builtin'::character varying, 'custom'::character varying])::text[])))
+    CONSTRAINT product_class_patterns_source_check CHECK (((source)::text = ANY (ARRAY[('builtin'::character varying)::text, ('custom'::character varying)::text])))
 );
 
 
@@ -5290,7 +5920,8 @@ CREATE TABLE public.product_unsupported_paths (
     first_seen_at timestamp with time zone DEFAULT now() NOT NULL,
     last_seen_at timestamp with time zone DEFAULT now() NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    firmware_version character varying(128) DEFAULT ''::character varying NOT NULL
 );
 
 
@@ -5852,6 +6483,7 @@ CREATE TABLE public.standard_params (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     description text DEFAULT ''::text NOT NULL,
+    updated_fields text[] DEFAULT '{}'::text[] NOT NULL,
     CONSTRAINT standard_params_entry_type_check CHECK (((entry_type)::text = ANY (ARRAY[('object'::character varying)::text, ('parameter'::character varying)::text])))
 );
 
@@ -5868,6 +6500,13 @@ COMMENT ON TABLE public.standard_params IS 'T-0098 标准参数树（设计 §1.
 --
 
 COMMENT ON COLUMN public.standard_params.description IS 'TR-181 path 的中文含义说明（来自规范 JSON seed 的 params[].name 字段；前端 MML 控制台 path 行 tooltip / 行内提示用）';
+
+
+--
+-- Name: COLUMN standard_params.updated_fields; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.standard_params.updated_fields IS '最近一次人工编辑发生变化的字段名；新增及尚未人工编辑的记录为空数组';
 
 
 --
@@ -5947,6 +6586,55 @@ CREATE TABLE public.sys_configs (
 --
 
 COMMENT ON TABLE public.sys_configs IS '系统配置参数表';
+
+
+--
+-- Name: config_apply_versions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.config_apply_versions (
+    category character varying(64) NOT NULL,
+    config_version bigint DEFAULT 0 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: config_apply_batches; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.config_apply_batches (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    category character varying(64) NOT NULL,
+    config_version bigint NOT NULL,
+    status character varying(16) NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT chk_config_apply_batch_status CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('applying'::character varying)::text, ('applied'::character varying)::text, ('failed'::character varying)::text])))
+);
+
+
+--
+-- Name: config_apply_targets; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.config_apply_targets (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    batch_id uuid NOT NULL,
+    category character varying(64) NOT NULL,
+    target character varying(128) NOT NULL,
+    status character varying(16) NOT NULL,
+    attempts integer DEFAULT 0 NOT NULL,
+    applied_at timestamp with time zone,
+    last_error text DEFAULT ''::text NOT NULL,
+    expected_value jsonb DEFAULT '{}'::jsonb NOT NULL,
+    actual_value jsonb DEFAULT '{}'::jsonb NOT NULL,
+    lease_token uuid,
+    lease_expires_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT chk_config_apply_target_status CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('applying'::character varying)::text, ('applied'::character varying)::text, ('failed'::character varying)::text])))
+);
 
 
 --
@@ -6489,8 +7177,16 @@ CREATE TABLE public.ufte_task_types (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     firmware_file_type integer,
     sort_order integer DEFAULT 100 NOT NULL,
+    product_scope jsonb DEFAULT '[]'::jsonb NOT NULL,
     CONSTRAINT ufte_task_types_rpc_type_check CHECK ((rpc_type = ANY (ARRAY['DOWNLOAD'::text, 'UPLOAD'::text, 'SET_PARAM_VALUES'::text])))
 );
+
+
+--
+-- Name: COLUMN ufte_task_types.product_scope; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.ufte_task_types.product_scope IS '#492 适用产品：产品英文名列表（引用 products.product_name）。非空时设备匹配按产品名精确匹配，空则回退 platform_scope。';
 
 
 --
@@ -7310,6 +8006,14 @@ ALTER TABLE ONLY public.config_templates
 
 
 --
+-- Name: dashboard_kpi_layouts dashboard_kpi_layouts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.dashboard_kpi_layouts
+    ADD CONSTRAINT dashboard_kpi_layouts_pkey PRIMARY KEY (tech);
+
+
+--
 -- Name: dashboard_widgets dashboard_widgets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -7371,6 +8075,14 @@ ALTER TABLE ONLY public.device_info
 
 ALTER TABLE ONLY public.device_licenses
     ADD CONSTRAINT device_licenses_pkey PRIMARY KEY (serial_number);
+
+
+--
+-- Name: device_location_observations device_location_observations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.device_location_observations
+    ADD CONSTRAINT device_location_observations_pkey PRIMARY KEY (device_id);
 
 
 --
@@ -7918,6 +8630,14 @@ ALTER TABLE ONLY public.menus
 
 
 --
+-- Name: mml_audit_log mml_audit_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.mml_audit_log
+    ADD CONSTRAINT mml_audit_log_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: mml_catalog_link_health mml_catalog_link_health_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -7982,6 +8702,14 @@ ALTER TABLE ONLY public.mml_commands
 
 
 --
+-- Name: mml_custom_command_paths mml_custom_command_paths_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.mml_custom_command_paths
+    ADD CONSTRAINT mml_custom_command_paths_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: mml_param_versions mml_param_versions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -8014,6 +8742,14 @@ ALTER TABLE ONLY public.mml_custom_command
 
 
 --
+-- Name: model_upload_intents model_upload_intents_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.model_upload_intents
+    ADD CONSTRAINT model_upload_intents_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: mr_customize_task mr_customize_task_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -8035,11 +8771,6 @@ ALTER TABLE ONLY public.mr_customize_task_progress
 
 ALTER TABLE ONLY public.mr_device_mappings
     ADD CONSTRAINT mr_device_mappings_pkey PRIMARY KEY (id);
-
-
---
--- mr_files 约束/索引随表迁至时序库 schema（见 migrations/tsdb/000001_tsdb_schema.sql）。
---
 
 
 --
@@ -8243,6 +8974,94 @@ ALTER TABLE ONLY public.parameter_discovery_log
 
 
 --
+-- Name: parameter_sync_admission_reservations parameter_sync_admission_reservations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_admission_reservations
+    ADD CONSTRAINT parameter_sync_admission_reservations_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: parameter_sync_admission_state parameter_sync_admission_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_admission_state
+    ADD CONSTRAINT parameter_sync_admission_state_pkey PRIMARY KEY (admission_class, bucket_id);
+
+
+--
+-- Name: parameter_sync_device_state parameter_sync_device_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_device_state
+    ADD CONSTRAINT parameter_sync_device_state_pkey PRIMARY KEY (device_id);
+
+
+--
+-- Name: parameter_sync_event_failures parameter_sync_event_failures_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_event_failures
+    ADD CONSTRAINT parameter_sync_event_failures_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: parameter_sync_outbox parameter_sync_outbox_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_outbox
+    ADD CONSTRAINT parameter_sync_outbox_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: parameter_sync_recovery_state parameter_sync_recovery_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_recovery_state
+    ADD CONSTRAINT parameter_sync_recovery_state_pkey PRIMARY KEY (run_id, task_id);
+
+
+--
+-- Name: parameter_sync_request_bindings parameter_sync_request_bindings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_request_bindings
+    ADD CONSTRAINT parameter_sync_request_bindings_pkey PRIMARY KEY (request_id, provisioning_task_id);
+
+
+--
+-- Name: parameter_sync_requests parameter_sync_requests_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_requests
+    ADD CONSTRAINT parameter_sync_requests_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: parameter_sync_runs parameter_sync_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_runs
+    ADD CONSTRAINT parameter_sync_runs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: parameter_sync_staging_values parameter_sync_staging_values_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_staging_values
+    ADD CONSTRAINT parameter_sync_staging_values_pkey PRIMARY KEY (run_id, parameter_path);
+
+
+--
+-- Name: parameter_sync_task_results parameter_sync_task_results_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_task_results
+    ADD CONSTRAINT parameter_sync_task_results_pkey PRIMARY KEY (run_id, task_id);
+
+
+--
 -- Name: enabled_pm_indicators_enb pk_enabled_pm_indicators_enb; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -8376,6 +9195,14 @@ ALTER TABLE ONLY public.rela_platform_indicator_formula_gsm
 
 ALTER TABLE ONLY public.pm_adhoc_task_runs
     ADD CONSTRAINT pm_adhoc_task_runs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: pm_completion_watermarks pm_completion_watermarks_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pm_completion_watermarks
+    ADD CONSTRAINT pm_completion_watermarks_pkey PRIMARY KEY (granularity, level);
 
 
 --
@@ -8544,6 +9371,46 @@ ALTER TABLE ONLY public.roles
 
 ALTER TABLE ONLY public.roles
     ADD CONSTRAINT roles_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: config_apply_batches config_apply_batches_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.config_apply_batches
+    ADD CONSTRAINT config_apply_batches_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: config_apply_batches uq_config_apply_batch_version; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.config_apply_batches
+    ADD CONSTRAINT uq_config_apply_batch_version UNIQUE (category, config_version);
+
+
+--
+-- Name: config_apply_targets config_apply_targets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.config_apply_targets
+    ADD CONSTRAINT config_apply_targets_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: config_apply_targets uq_config_apply_target; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.config_apply_targets
+    ADD CONSTRAINT uq_config_apply_target UNIQUE (batch_id, target);
+
+
+--
+-- Name: config_apply_versions config_apply_versions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.config_apply_versions
+    ADD CONSTRAINT config_apply_versions_pkey PRIMARY KEY (category);
 
 
 --
@@ -8779,6 +9646,14 @@ ALTER TABLE ONLY public.upgrade_tasks
 
 
 --
+-- Name: mml_custom_command_paths uq_ccp_command_path; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.mml_custom_command_paths
+    ADD CONSTRAINT uq_ccp_command_path UNIQUE (command_id, standard_path_id);
+
+
+--
 -- Name: mml_command_sub_fields uq_command_mml_code; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -8827,6 +9702,22 @@ ALTER TABLE ONLY public.mml_param_versions
 
 
 --
+-- Name: model_upload_intents uq_model_upload_intents_device_task; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.model_upload_intents
+    ADD CONSTRAINT uq_model_upload_intents_device_task UNIQUE (device_id, upload_task_id);
+
+
+--
+-- Name: model_upload_intents uq_model_upload_intents_source_event; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.model_upload_intents
+    ADD CONSTRAINT uq_model_upload_intents_source_event UNIQUE (source_event_id);
+
+
+--
 -- Name: mr_customize_task_progress uq_mr_progress_task_cell; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -8835,11 +9726,35 @@ ALTER TABLE ONLY public.mr_customize_task_progress
 
 
 --
+-- Name: parameter_sync_admission_reservations uq_parameter_sync_admission_reservation_request; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_admission_reservations
+    ADD CONSTRAINT uq_parameter_sync_admission_reservation_request UNIQUE (request_id, admission_class);
+
+
+--
+-- Name: parameter_sync_event_failures uq_parameter_sync_event_failure_event; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_event_failures
+    ADD CONSTRAINT uq_parameter_sync_event_failure_event UNIQUE (subject, event_id);
+
+
+--
+-- Name: parameter_sync_outbox uq_parameter_sync_outbox_dedupe; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_outbox
+    ADD CONSTRAINT uq_parameter_sync_outbox_dedupe UNIQUE (dedupe_key);
+
+
+--
 -- Name: product_unsupported_paths uq_product_unsupported_path; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.product_unsupported_paths
-    ADD CONSTRAINT uq_product_unsupported_path UNIQUE (product_id, standard_path);
+    ADD CONSTRAINT uq_product_unsupported_path UNIQUE (product_id, firmware_version, standard_path);
 
 
 --
@@ -9576,6 +10491,20 @@ CREATE INDEX device_parameters_p31_parameter_value_device_id_idx ON public.devic
 
 
 --
+-- Name: idx_device_tasks_pending_created_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_device_tasks_pending_created_id ON ONLY public.device_tasks USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
+
+
+--
+-- Name: device_tasks_p00_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p00_created_at_id_idx ON public.device_tasks_p00 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
+
+
+--
 -- Name: idx_device_tasks_created_at; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -9702,6 +10631,13 @@ CREATE INDEX device_tasks_p00_status_idx ON public.device_tasks_p00 USING btree 
 
 
 --
+-- Name: device_tasks_p01_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p01_created_at_id_idx ON public.device_tasks_p01 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
+
+
+--
 -- Name: device_tasks_p01_created_at_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -9762,6 +10698,13 @@ CREATE INDEX device_tasks_p01_status_expires_at_idx ON public.device_tasks_p01 U
 --
 
 CREATE INDEX device_tasks_p01_status_idx ON public.device_tasks_p01 USING btree (status);
+
+
+--
+-- Name: device_tasks_p02_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p02_created_at_id_idx ON public.device_tasks_p02 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
 
 
 --
@@ -9828,6 +10771,13 @@ CREATE INDEX device_tasks_p02_status_idx ON public.device_tasks_p02 USING btree 
 
 
 --
+-- Name: device_tasks_p03_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p03_created_at_id_idx ON public.device_tasks_p03 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
+
+
+--
 -- Name: device_tasks_p03_created_at_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -9888,6 +10838,13 @@ CREATE INDEX device_tasks_p03_status_expires_at_idx ON public.device_tasks_p03 U
 --
 
 CREATE INDEX device_tasks_p03_status_idx ON public.device_tasks_p03 USING btree (status);
+
+
+--
+-- Name: device_tasks_p04_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p04_created_at_id_idx ON public.device_tasks_p04 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
 
 
 --
@@ -9954,6 +10911,13 @@ CREATE INDEX device_tasks_p04_status_idx ON public.device_tasks_p04 USING btree 
 
 
 --
+-- Name: device_tasks_p05_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p05_created_at_id_idx ON public.device_tasks_p05 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
+
+
+--
 -- Name: device_tasks_p05_created_at_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -10014,6 +10978,13 @@ CREATE INDEX device_tasks_p05_status_expires_at_idx ON public.device_tasks_p05 U
 --
 
 CREATE INDEX device_tasks_p05_status_idx ON public.device_tasks_p05 USING btree (status);
+
+
+--
+-- Name: device_tasks_p06_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p06_created_at_id_idx ON public.device_tasks_p06 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
 
 
 --
@@ -10080,6 +11051,13 @@ CREATE INDEX device_tasks_p06_status_idx ON public.device_tasks_p06 USING btree 
 
 
 --
+-- Name: device_tasks_p07_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p07_created_at_id_idx ON public.device_tasks_p07 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
+
+
+--
 -- Name: device_tasks_p07_created_at_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -10140,6 +11118,13 @@ CREATE INDEX device_tasks_p07_status_expires_at_idx ON public.device_tasks_p07 U
 --
 
 CREATE INDEX device_tasks_p07_status_idx ON public.device_tasks_p07 USING btree (status);
+
+
+--
+-- Name: device_tasks_p08_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p08_created_at_id_idx ON public.device_tasks_p08 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
 
 
 --
@@ -10206,6 +11191,13 @@ CREATE INDEX device_tasks_p08_status_idx ON public.device_tasks_p08 USING btree 
 
 
 --
+-- Name: device_tasks_p09_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p09_created_at_id_idx ON public.device_tasks_p09 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
+
+
+--
 -- Name: device_tasks_p09_created_at_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -10266,6 +11258,13 @@ CREATE INDEX device_tasks_p09_status_expires_at_idx ON public.device_tasks_p09 U
 --
 
 CREATE INDEX device_tasks_p09_status_idx ON public.device_tasks_p09 USING btree (status);
+
+
+--
+-- Name: device_tasks_p10_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p10_created_at_id_idx ON public.device_tasks_p10 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
 
 
 --
@@ -10332,6 +11331,13 @@ CREATE INDEX device_tasks_p10_status_idx ON public.device_tasks_p10 USING btree 
 
 
 --
+-- Name: device_tasks_p11_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p11_created_at_id_idx ON public.device_tasks_p11 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
+
+
+--
 -- Name: device_tasks_p11_created_at_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -10392,6 +11398,13 @@ CREATE INDEX device_tasks_p11_status_expires_at_idx ON public.device_tasks_p11 U
 --
 
 CREATE INDEX device_tasks_p11_status_idx ON public.device_tasks_p11 USING btree (status);
+
+
+--
+-- Name: device_tasks_p12_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p12_created_at_id_idx ON public.device_tasks_p12 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
 
 
 --
@@ -10458,6 +11471,13 @@ CREATE INDEX device_tasks_p12_status_idx ON public.device_tasks_p12 USING btree 
 
 
 --
+-- Name: device_tasks_p13_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p13_created_at_id_idx ON public.device_tasks_p13 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
+
+
+--
 -- Name: device_tasks_p13_created_at_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -10521,6 +11541,13 @@ CREATE INDEX device_tasks_p13_status_idx ON public.device_tasks_p13 USING btree 
 
 
 --
+-- Name: device_tasks_p14_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p14_created_at_id_idx ON public.device_tasks_p14 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
+
+
+--
 -- Name: device_tasks_p14_created_at_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -10581,6 +11608,13 @@ CREATE INDEX device_tasks_p14_status_expires_at_idx ON public.device_tasks_p14 U
 --
 
 CREATE INDEX device_tasks_p14_status_idx ON public.device_tasks_p14 USING btree (status);
+
+
+--
+-- Name: device_tasks_p15_created_at_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX device_tasks_p15_created_at_id_idx ON public.device_tasks_p15 USING btree (created_at, id) WHERE ((status)::text = 'pending'::text);
 
 
 --
@@ -11347,6 +12381,13 @@ CREATE INDEX idx_async_jobs_zombie_check ON public.async_jobs USING btree (statu
 
 
 --
+-- Name: idx_async_jobs_hourly_failed_recovery; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_async_jobs_hourly_failed_recovery ON public.async_jobs USING btree (bucket_start, recovery_count, last_recovered_at) WHERE ((job_type = 'pm_aggregate_hourly'::text) AND (status = 'failed'::text) AND (bucket_start IS NOT NULL) AND (bucket_end IS NOT NULL));
+
+
+--
 -- Name: idx_audit_logs_action_time; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -11379,6 +12420,20 @@ CREATE INDEX idx_audit_logs_time ON public.audit_logs USING btree (created_at DE
 --
 
 CREATE INDEX idx_audit_logs_user_time ON public.audit_logs USING btree (user_id, created_at DESC);
+
+
+--
+-- Name: idx_backup_restore_file_active_fault_logs; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_backup_restore_file_active_fault_logs ON public.backup_restore_file USING btree (serial_number, update_time, id) WHERE ((is_deleted = false) AND ((object_path ~~ '%/fault/%'::text) OR (object_path ~~ 'fault/%'::text)));
+
+
+--
+-- Name: idx_backup_restore_file_active_station_logs_retention; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_backup_restore_file_active_station_logs_retention ON public.backup_restore_file USING btree (update_time, id) WHERE ((is_deleted = false) AND ((object_path ~~ '%/running/%'::text) OR (object_path ~~ 'running/%'::text) OR (object_path ~~ '%/fault/%'::text) OR (object_path ~~ 'fault/%'::text)));
 
 
 --
@@ -11463,6 +12518,13 @@ CREATE INDEX idx_backup_tasks_target_ids_gin ON public.backup_tasks USING gin (t
 --
 
 CREATE INDEX idx_backup_tasks_type ON public.backup_tasks USING btree (task_type);
+
+
+--
+-- Name: idx_ccp_command_sort; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ccp_command_sort ON public.mml_custom_command_paths USING btree (command_id, sort_order);
 
 
 --
@@ -11697,6 +12759,20 @@ CREATE INDEX idx_device_active_tasks_sub_task ON public.device_active_tasks USIN
 
 
 --
+-- Name: idx_device_groups_source_group_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_device_groups_source_group_id ON public.device_groups USING btree (source_group_id) WHERE (source_group_id IS NOT NULL);
+
+
+--
+-- Name: idx_device_info_active_alarm_count; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_device_info_active_alarm_count ON public.device_info USING btree (active_alarm_count) WHERE (active_alarm_count > 0);
+
+
+--
 -- Name: idx_device_info_alarm_severity; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -11760,6 +12836,20 @@ CREATE INDEX idx_device_info_mac_trgm ON public.device_info USING gin (mac publi
 
 
 --
+-- Name: idx_device_info_name_sync_pending; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_device_info_name_sync_pending ON public.device_info USING btree (device_id) WHERE (name_sync_pending = true);
+
+
+--
+-- Name: idx_device_info_op_state; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_device_info_op_state ON public.device_info USING btree (op_state);
+
+
+--
 -- Name: idx_device_info_pci; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -11788,6 +12878,13 @@ CREATE INDEX idx_device_info_rf_status ON public.device_info USING btree (rf_sta
 
 
 --
+-- Name: idx_device_info_ue_count; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_device_info_ue_count ON public.device_info USING btree (ue_count);
+
+
+--
 -- Name: idx_device_licenses_enb_name; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -11806,6 +12903,13 @@ CREATE INDEX idx_device_licenses_product_type ON public.device_licenses USING bt
 --
 
 CREATE INDEX idx_device_licenses_update_time ON public.device_licenses USING btree (update_time DESC);
+
+
+--
+-- Name: idx_device_location_observations_observed_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_device_location_observations_observed_at ON public.device_location_observations USING btree (device_id, observed_at DESC);
 
 
 --
@@ -12029,7 +13133,7 @@ CREATE INDEX idx_firmware_file_type_status ON public.firmware_versions USING btr
 -- Name: idx_firmware_unique_version; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX idx_firmware_unique_version ON public.firmware_versions USING btree (COALESCE(product_class, (''::character varying)::text), version, file_type);
+CREATE UNIQUE INDEX idx_firmware_unique_version ON public.firmware_versions USING btree (product_id, version, file_type);
 
 
 --
@@ -12037,6 +13141,20 @@ CREATE UNIQUE INDEX idx_firmware_unique_version ON public.firmware_versions USIN
 --
 
 CREATE INDEX idx_firmware_versions_compatible_oui_gin ON public.firmware_versions USING gin (compatible_oui);
+
+
+--
+-- Name: idx_firmware_versions_product_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_firmware_versions_product_id ON public.firmware_versions USING btree (product_id);
+
+
+--
+-- Name: idx_firmware_versions_product_ids_gin; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_firmware_versions_product_ids_gin ON public.firmware_versions USING gin (product_ids);
 
 
 --
@@ -12187,6 +13305,27 @@ CREATE INDEX idx_menus_type ON public.menus USING btree (type);
 
 
 --
+-- Name: idx_mml_audit_log_command_code; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_mml_audit_log_command_code ON public.mml_audit_log USING btree (command_code) WHERE (command_code IS NOT NULL);
+
+
+--
+-- Name: idx_mml_audit_log_device_sn_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_mml_audit_log_device_sn_created ON public.mml_audit_log USING btree (device_sn, created_at DESC);
+
+
+--
+-- Name: idx_mml_audit_log_task_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_mml_audit_log_task_id ON public.mml_audit_log USING btree (task_id) WHERE (task_id IS NOT NULL);
+
+
+--
 -- Name: idx_mml_catalog_link_health_unresolved; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -12334,10 +13473,24 @@ CREATE INDEX idx_mml_param_groups_version ON public.mml_command_groups USING btr
 
 
 --
+-- Name: idx_mml_scripts_content_sha256; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_mml_scripts_content_sha256 ON public.mml_scripts USING btree (content_sha256);
+
+
+--
 -- Name: idx_mml_scripts_last_run_at; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_mml_scripts_last_run_at ON public.mml_scripts USING btree (last_run_at DESC) WHERE (last_run_at IS NOT NULL);
+
+
+--
+-- Name: idx_mml_scripts_plan_items_gin; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_mml_scripts_plan_items_gin ON public.mml_scripts USING gin (plan_items jsonb_path_ops);
 
 
 --
@@ -12411,6 +13564,13 @@ CREATE INDEX idx_mml_tasks_parent_task ON public.mml_tasks USING btree (parent_t
 
 
 --
+-- Name: idx_mml_tasks_plan_items_gin; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_mml_tasks_plan_items_gin ON public.mml_tasks USING gin (plan_items jsonb_path_ops);
+
+
+--
 -- Name: idx_mml_tasks_results_gin; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -12432,8 +13592,10 @@ CREATE INDEX idx_mml_templates_scope_group ON public.mml_custom_command USING bt
 
 
 --
--- idx_mr_files_* 随 mr_files 表迁至时序库 schema（见 migrations/tsdb/000001_tsdb_schema.sql）。
+-- Name: idx_model_upload_intents_dispatch; Type: INDEX; Schema: public; Owner: -
 --
+
+CREATE INDEX idx_model_upload_intents_dispatch ON public.model_upload_intents USING btree (status, next_attempt_at, created_at);
 
 
 --
@@ -12955,6 +14117,139 @@ CREATE INDEX idx_param_models_active ON public.param_models USING btree (is_acti
 
 
 --
+-- Name: idx_parameter_sync_admission_reservations_bucket; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_admission_reservations_bucket ON public.parameter_sync_admission_reservations USING btree (admission_class, bucket_id, status);
+
+
+--
+-- Name: idx_parameter_sync_admission_reservations_due; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_admission_reservations_due ON public.parameter_sync_admission_reservations USING btree (status, lease_until, updated_at);
+
+
+--
+-- Name: idx_parameter_sync_bindings_run; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_bindings_run ON public.parameter_sync_request_bindings USING btree (run_id, status);
+
+
+--
+-- Name: idx_parameter_sync_device_state_due; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_device_state_due ON public.parameter_sync_device_state USING btree (next_auto_sync_at) WHERE (next_auto_sync_at IS NOT NULL);
+
+
+--
+-- Name: idx_parameter_sync_event_failures_replay; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_event_failures_replay ON public.parameter_sync_event_failures USING btree (status, next_retry_at, created_at);
+
+
+--
+-- Name: idx_parameter_sync_event_failures_run_task; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_event_failures_run_task ON public.parameter_sync_event_failures USING btree (run_id, task_id) WHERE ((run_id IS NOT NULL) OR (task_id IS NOT NULL));
+
+
+--
+-- Name: idx_parameter_sync_outbox_dispatch; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_outbox_dispatch ON public.parameter_sync_outbox USING btree (status, next_attempt_at, created_at) WHERE ((status)::text = ANY ((ARRAY['pending'::character varying, 'failed'::character varying])::text[]));
+
+
+--
+-- Name: idx_parameter_sync_outbox_ready_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_outbox_ready_created ON public.parameter_sync_outbox USING btree (created_at, id) WHERE ((status)::text = ANY ((ARRAY['pending'::character varying, 'failed'::character varying])::text[]));
+
+
+--
+-- Name: idx_parameter_sync_recovery_claim; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_recovery_claim ON public.parameter_sync_recovery_state USING btree (status, next_retry_at, lease_until, updated_at);
+
+
+--
+-- Name: idx_parameter_sync_requests_device_history; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_requests_device_history ON public.parameter_sync_requests USING btree (device_id, created_at DESC);
+
+
+--
+-- Name: idx_parameter_sync_requests_schedule; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_requests_schedule ON public.parameter_sync_requests USING btree (status, priority, next_attempt_at, created_at);
+
+
+--
+-- Name: idx_parameter_sync_requests_source_event; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_requests_source_event ON public.parameter_sync_requests USING btree (source_event_id) WHERE (source_event_id IS NOT NULL);
+
+
+--
+-- Name: idx_parameter_sync_runs_device_history; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_runs_device_history ON public.parameter_sync_runs USING btree (device_id, started_at DESC);
+
+
+--
+-- Name: idx_parameter_sync_runs_device_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_runs_device_status ON public.parameter_sync_runs USING btree (device_id, status, started_at DESC);
+
+
+--
+-- Name: idx_parameter_sync_runs_projection_due; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_runs_projection_due ON public.parameter_sync_runs USING btree (projection_next_attempt_at, completed_at, id) WHERE (((status)::text = 'succeeded'::text) AND ((sync_scope)::text = 'full'::text) AND ((projection_status)::text <> 'completed'::text));
+
+
+--
+-- Name: idx_parameter_sync_runs_projection_pending; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_runs_projection_pending ON public.parameter_sync_runs USING btree (completed_at, id) WHERE (((status)::text = 'succeeded'::text) AND ((sync_scope)::text = 'full'::text) AND ((projection_status)::text <> 'completed'::text));
+
+
+--
+-- Name: idx_parameter_sync_runs_request; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_runs_request ON public.parameter_sync_runs USING btree (request_id);
+
+
+--
+-- Name: idx_parameter_sync_task_results_event; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_task_results_event ON public.parameter_sync_task_results USING btree (event_id);
+
+
+--
+-- Name: idx_parameter_sync_task_results_status_time; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_task_results_status_time ON public.parameter_sync_task_results USING btree (status, created_at, processed_at);
+
+
+--
 -- Name: idx_pdl_device_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -13165,6 +14460,13 @@ CREATE INDEX idx_pm_tasks_subtype_status ON public.pm_tasks USING btree (task_su
 
 
 --
+-- Name: idx_pm_tasks_adhoc_visibility_creator; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pm_tasks_adhoc_visibility_creator ON public.pm_tasks USING btree (is_builtin, visibility, creator, task_name) WHERE (task_subtype = 'adhoc_aggregation'::text);
+
+
+--
 -- Name: idx_product_class_patterns_product; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -13183,6 +14485,13 @@ CREATE INDEX idx_product_class_patterns_sort ON public.product_class_patterns US
 --
 
 CREATE INDEX idx_product_unsupported_paths_product ON public.product_unsupported_paths USING btree (product_id);
+
+
+--
+-- Name: idx_product_unsupported_paths_product_firmware; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_product_unsupported_paths_product_firmware ON public.product_unsupported_paths USING btree (product_id, firmware_version) WHERE (read_unsupported = true);
 
 
 --
@@ -13470,6 +14779,27 @@ CREATE INDEX idx_station_fault_logs_device_sn ON public.station_fault_logs USING
 --
 
 CREATE INDEX idx_station_fault_logs_status ON public.station_fault_logs USING btree (record_status, collected_at DESC);
+
+
+--
+-- Name: idx_config_apply_targets_pending; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_config_apply_targets_pending ON public.config_apply_targets USING btree (status, updated_at) WHERE ((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('failed'::character varying)::text]));
+
+
+--
+-- Name: idx_config_apply_targets_recovering; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_config_apply_targets_recovering ON public.config_apply_targets USING btree (lease_expires_at) WHERE ((status)::text = 'applying'::text);
+
+
+--
+-- Name: uq_config_apply_target_running; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_config_apply_target_running ON public.config_apply_targets USING btree (category, target) WHERE ((status)::text = 'applying'::text);
 
 
 --
@@ -14033,6 +15363,13 @@ CREATE UNIQUE INDEX uniq_user_default_role ON public.user_roles USING btree (use
 
 
 --
+-- Name: uq_async_jobs_bucket; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_async_jobs_bucket ON public.async_jobs USING btree (job_type, bucket_start, bucket_end) WHERE ((bucket_start IS NOT NULL) AND (bucket_end IS NOT NULL));
+
+
+--
 -- Name: uq_mml_custom_command_private_name_per_owner; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -14047,8 +15384,59 @@ COMMENT ON INDEX public.uq_mml_custom_command_private_name_per_owner IS '用户�
 
 
 --
--- uq_mr_files_sn_filename 随 mr_files 表迁至时序库 schema（见 migrations/tsdb/000001_tsdb_schema.sql）。
+-- Name: uq_mml_scripts_creator_name_ci; Type: INDEX; Schema: public; Owner: -
 --
+
+CREATE UNIQUE INDEX uq_mml_scripts_creator_name_ci ON public.mml_scripts USING btree (COALESCE(creator, ''::character varying), lower(btrim((script_name)::text)));
+
+
+--
+-- Name: uq_mml_scripts_import_session_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_mml_scripts_import_session_id ON public.mml_scripts USING btree (import_session_id);
+
+
+--
+-- Name: uq_mml_tasks_active_root_script; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_mml_tasks_active_root_script ON public.mml_tasks USING btree (script_id) WHERE ((script_id IS NOT NULL) AND (parent_task_id IS NULL) AND ((status)::text = ANY ((ARRAY['pending'::character varying, 'running'::character varying, 'paused'::character varying])::text[])));
+
+
+--
+-- Name: INDEX uq_mml_tasks_active_root_script; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON INDEX public.uq_mml_tasks_active_root_script IS 'At most one unfinished top-level MML script task per script. Periodic child runs keep parent_task_id and are not constrained here.';
+
+
+--
+-- Name: uq_mml_tasks_creator_request_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_mml_tasks_creator_request_id ON public.mml_tasks USING btree (COALESCE(creator, ''::character varying), request_id) WHERE ((request_id IS NOT NULL) AND (btrim(request_id) <> ''::text));
+
+
+--
+-- Name: uq_parameter_sync_requests_idempotency; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_parameter_sync_requests_idempotency ON public.parameter_sync_requests USING btree (caller_type, idempotency_key) WHERE (idempotency_key IS NOT NULL);
+
+
+--
+-- Name: uq_parameter_sync_requests_model_upload_intent; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_parameter_sync_requests_model_upload_intent ON public.parameter_sync_requests USING btree (model_upload_intent_id) WHERE (model_upload_intent_id IS NOT NULL);
+
+
+--
+-- Name: uq_parameter_sync_runs_active_device; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_parameter_sync_runs_active_device ON public.parameter_sync_runs USING btree (device_id) WHERE ((status)::text = ANY ((ARRAY['planning'::character varying, 'enqueuing'::character varying, 'waiting_device'::character varying, 'executing'::character varying, 'processing'::character varying, 'cancelling'::character varying])::text[]));
 
 
 --
@@ -14955,6 +16343,13 @@ ALTER INDEX public.device_parameters_pkey ATTACH PARTITION public.device_paramet
 
 
 --
+-- Name: device_tasks_p00_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p00_created_at_id_idx;
+
+
+--
 -- Name: device_tasks_p00_created_at_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -15022,6 +16417,13 @@ ALTER INDEX public.idx_device_tasks_status_expires ATTACH PARTITION public.devic
 --
 
 ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_p00_status_idx;
+
+
+--
+-- Name: device_tasks_p01_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p01_created_at_id_idx;
 
 
 --
@@ -15095,6 +16497,13 @@ ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_
 
 
 --
+-- Name: device_tasks_p02_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p02_created_at_id_idx;
+
+
+--
 -- Name: device_tasks_p02_created_at_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -15162,6 +16571,13 @@ ALTER INDEX public.idx_device_tasks_status_expires ATTACH PARTITION public.devic
 --
 
 ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_p02_status_idx;
+
+
+--
+-- Name: device_tasks_p03_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p03_created_at_id_idx;
 
 
 --
@@ -15235,6 +16651,13 @@ ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_
 
 
 --
+-- Name: device_tasks_p04_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p04_created_at_id_idx;
+
+
+--
 -- Name: device_tasks_p04_created_at_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -15302,6 +16725,13 @@ ALTER INDEX public.idx_device_tasks_status_expires ATTACH PARTITION public.devic
 --
 
 ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_p04_status_idx;
+
+
+--
+-- Name: device_tasks_p05_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p05_created_at_id_idx;
 
 
 --
@@ -15375,6 +16805,13 @@ ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_
 
 
 --
+-- Name: device_tasks_p06_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p06_created_at_id_idx;
+
+
+--
 -- Name: device_tasks_p06_created_at_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -15442,6 +16879,13 @@ ALTER INDEX public.idx_device_tasks_status_expires ATTACH PARTITION public.devic
 --
 
 ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_p06_status_idx;
+
+
+--
+-- Name: device_tasks_p07_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p07_created_at_id_idx;
 
 
 --
@@ -15515,6 +16959,13 @@ ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_
 
 
 --
+-- Name: device_tasks_p08_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p08_created_at_id_idx;
+
+
+--
 -- Name: device_tasks_p08_created_at_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -15582,6 +17033,13 @@ ALTER INDEX public.idx_device_tasks_status_expires ATTACH PARTITION public.devic
 --
 
 ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_p08_status_idx;
+
+
+--
+-- Name: device_tasks_p09_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p09_created_at_id_idx;
 
 
 --
@@ -15655,6 +17113,13 @@ ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_
 
 
 --
+-- Name: device_tasks_p10_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p10_created_at_id_idx;
+
+
+--
 -- Name: device_tasks_p10_created_at_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -15722,6 +17187,13 @@ ALTER INDEX public.idx_device_tasks_status_expires ATTACH PARTITION public.devic
 --
 
 ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_p10_status_idx;
+
+
+--
+-- Name: device_tasks_p11_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p11_created_at_id_idx;
 
 
 --
@@ -15795,6 +17267,13 @@ ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_
 
 
 --
+-- Name: device_tasks_p12_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p12_created_at_id_idx;
+
+
+--
 -- Name: device_tasks_p12_created_at_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -15862,6 +17341,13 @@ ALTER INDEX public.idx_device_tasks_status_expires ATTACH PARTITION public.devic
 --
 
 ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_p12_status_idx;
+
+
+--
+-- Name: device_tasks_p13_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p13_created_at_id_idx;
 
 
 --
@@ -15935,6 +17421,13 @@ ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_
 
 
 --
+-- Name: device_tasks_p14_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p14_created_at_id_idx;
+
+
+--
 -- Name: device_tasks_p14_created_at_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -16002,6 +17495,13 @@ ALTER INDEX public.idx_device_tasks_status_expires ATTACH PARTITION public.devic
 --
 
 ALTER INDEX public.idx_device_tasks_status ATTACH PARTITION public.device_tasks_p14_status_idx;
+
+
+--
+-- Name: device_tasks_p15_created_at_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_device_tasks_pending_created_id ATTACH PARTITION public.device_tasks_p15_created_at_id_idx;
 
 
 --
@@ -17142,6 +18642,14 @@ ALTER TABLE ONLY public.device_groups
 
 
 --
+-- Name: device_groups device_groups_source_group_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.device_groups
+    ADD CONSTRAINT device_groups_source_group_id_fkey FOREIGN KEY (source_group_id) REFERENCES public.device_groups(id) ON DELETE SET NULL;
+
+
+--
 -- Name: device_registrations device_registrations_group_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -17163,6 +18671,22 @@ ALTER TABLE ONLY public.discovered_param_mappings
 
 ALTER TABLE ONLY public.fault_log_collect_sub_tasks
     ADD CONSTRAINT fault_log_collect_sub_tasks_task_id_fkey FOREIGN KEY (task_id) REFERENCES public.fault_log_collect_tasks(id) ON DELETE CASCADE;
+
+
+--
+-- Name: mml_custom_command_paths fk_ccp_command; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.mml_custom_command_paths
+    ADD CONSTRAINT fk_ccp_command FOREIGN KEY (command_id) REFERENCES public.mml_custom_command(id) ON DELETE CASCADE;
+
+
+--
+-- Name: mml_custom_command_paths fk_ccp_standard_path; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.mml_custom_command_paths
+    ADD CONSTRAINT fk_ccp_standard_path FOREIGN KEY (standard_path_id) REFERENCES public.standard_params(id) ON DELETE RESTRICT;
 
 
 --
@@ -17198,6 +18722,14 @@ ALTER TABLE ONLY public.products
 
 
 --
+-- Name: config_apply_targets config_apply_targets_batch_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.config_apply_targets
+    ADD CONSTRAINT config_apply_targets_batch_id_fkey FOREIGN KEY (batch_id) REFERENCES public.config_apply_batches(id) ON DELETE CASCADE;
+
+
+--
 -- Name: system_license_history fk_replaced_by; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -17227,6 +18759,14 @@ ALTER TABLE ONLY public.menus
 
 ALTER TABLE ONLY public.menus
     ADD CONSTRAINT menus_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: mml_audit_log mml_audit_log_task_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.mml_audit_log
+    ADD CONSTRAINT mml_audit_log_task_id_fkey FOREIGN KEY (task_id) REFERENCES public.mml_tasks(id) ON DELETE SET NULL;
 
 
 --
@@ -17395,6 +18935,78 @@ ALTER TABLE ONLY public.ops_templates
 
 ALTER TABLE ONLY public.param_mappings
     ADD CONSTRAINT param_mappings_param_model_id_fkey FOREIGN KEY (param_model_id) REFERENCES public.param_models(id) ON DELETE CASCADE;
+
+
+--
+-- Name: parameter_sync_admission_reservations parameter_sync_admission_reservations_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_admission_reservations
+    ADD CONSTRAINT parameter_sync_admission_reservations_request_id_fkey FOREIGN KEY (request_id) REFERENCES public.parameter_sync_requests(id) ON DELETE CASCADE;
+
+
+--
+-- Name: parameter_sync_request_bindings parameter_sync_request_bindings_provisioning_task_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_request_bindings
+    ADD CONSTRAINT parameter_sync_request_bindings_provisioning_task_id_fkey FOREIGN KEY (provisioning_task_id) REFERENCES public.provisioning_tasks(id) ON DELETE CASCADE;
+
+
+--
+-- Name: parameter_sync_request_bindings parameter_sync_request_bindings_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_request_bindings
+    ADD CONSTRAINT parameter_sync_request_bindings_request_id_fkey FOREIGN KEY (request_id) REFERENCES public.parameter_sync_requests(id) ON DELETE CASCADE;
+
+
+--
+-- Name: parameter_sync_request_bindings parameter_sync_request_bindings_run_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_request_bindings
+    ADD CONSTRAINT parameter_sync_request_bindings_run_id_fkey FOREIGN KEY (run_id) REFERENCES public.parameter_sync_runs(id) ON DELETE CASCADE;
+
+
+--
+-- Name: parameter_sync_requests parameter_sync_requests_active_run_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_requests
+    ADD CONSTRAINT parameter_sync_requests_active_run_fk FOREIGN KEY (active_run_id) REFERENCES public.parameter_sync_runs(id) ON DELETE SET NULL;
+
+
+--
+-- Name: parameter_sync_requests parameter_sync_requests_run_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_requests
+    ADD CONSTRAINT parameter_sync_requests_run_fk FOREIGN KEY (run_id) REFERENCES public.parameter_sync_runs(id) ON DELETE SET NULL;
+
+
+--
+-- Name: parameter_sync_runs parameter_sync_runs_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_runs
+    ADD CONSTRAINT parameter_sync_runs_request_id_fkey FOREIGN KEY (request_id) REFERENCES public.parameter_sync_requests(id) ON DELETE CASCADE;
+
+
+--
+-- Name: parameter_sync_staging_values parameter_sync_staging_values_run_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_staging_values
+    ADD CONSTRAINT parameter_sync_staging_values_run_id_fkey FOREIGN KEY (run_id) REFERENCES public.parameter_sync_runs(id) ON DELETE CASCADE;
+
+
+--
+-- Name: parameter_sync_task_results parameter_sync_task_results_run_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.parameter_sync_task_results
+    ADD CONSTRAINT parameter_sync_task_results_run_id_fkey FOREIGN KEY (run_id) REFERENCES public.parameter_sync_runs(id) ON DELETE CASCADE;
 
 
 --
@@ -17737,175 +19349,193 @@ ALTER TABLE ONLY public.users
 -- PostgreSQL database dump complete
 --
 
-
-
 SELECT pg_catalog.set_config('search_path', 'public', false);
 
---
--- issue #115 调整3（A1）：自定义命令↔标准路径精瘦关联表。
--- consolidated（2026-06-13）：原 migration 000046 折叠进基线。仅存关联+排序+默认勾选；
--- 元数据与是否支持读时 JOIN standard_params/param_mappings，不重复落库。
--- 放在 Up 段末尾：依赖的 mml_custom_command / standard_params 已在前文创建，内联 FK 可解析。
---
-CREATE TABLE IF NOT EXISTS public.mml_custom_command_paths (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    command_id uuid NOT NULL,
-    standard_path_id uuid NOT NULL,
-    default_selected boolean DEFAULT true NOT NULL,
-    sort_order integer DEFAULT 0 NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT mml_custom_command_paths_pkey PRIMARY KEY (id),
-    CONSTRAINT fk_ccp_command FOREIGN KEY (command_id)
-        REFERENCES public.mml_custom_command(id) ON DELETE CASCADE,
-    CONSTRAINT fk_ccp_standard_path FOREIGN KEY (standard_path_id)
-        REFERENCES public.standard_params(id) ON DELETE RESTRICT,
-    CONSTRAINT uq_ccp_command_path UNIQUE (command_id, standard_path_id)
+-- Consolidated from former incremental migrations: main schema 000003-000007
+
+ALTER TABLE param_mappings
+    ADD COLUMN IF NOT EXISTS default_value text,
+    ADD COLUMN IF NOT EXISTS validation_pattern text;
+
+ALTER TABLE discovered_param_mappings
+    ADD COLUMN IF NOT EXISTS default_value text,
+    ADD COLUMN IF NOT EXISTS validation_pattern text;
+
+COMMENT ON COLUMN param_mappings.default_value IS '参数模型 XML defaultValue；用于 MML 控制台默认填值提示';
+COMMENT ON COLUMN param_mappings.validation_pattern IS '参数模型 XML validationPattern；用于 MML 控制台输入校验';
+COMMENT ON COLUMN discovered_param_mappings.default_value IS '从 param_mappings 继承的 defaultValue';
+COMMENT ON COLUMN discovered_param_mappings.validation_pattern IS '从 param_mappings 继承的 validationPattern';
+
+ALTER TABLE parameter_sync_requests
+    DROP CONSTRAINT parameter_sync_requests_trigger_reason_chk,
+    ADD CONSTRAINT parameter_sync_requests_trigger_reason_chk
+        CHECK (trigger_reason::text = ANY (ARRAY[
+            'bootstrap', 'model_upload', 'device_online', 'firmware_changed',
+            'periodic', 'manual', 'config_pull', 'license', 'spv_readback',
+            'add_object_readback', 'inform_period_probe', 'device_registered',
+            'omc_upgrade'
+        ]::text[]));
+
+ALTER TABLE parameter_sync_runs
+    DROP CONSTRAINT parameter_sync_runs_trigger_reason_chk,
+    ADD CONSTRAINT parameter_sync_runs_trigger_reason_chk
+        CHECK (trigger_reason::text = ANY (ARRAY[
+            'bootstrap', 'model_upload', 'device_online', 'firmware_changed',
+            'periodic', 'manual', 'config_pull', 'license', 'spv_readback',
+            'add_object_readback', 'inform_period_probe', 'device_registered',
+            'omc_upgrade'
+        ]::text[]));
+
+-- Bounded recovery metadata for terminal hourly aggregation jobs.
+ALTER TABLE async_jobs
+    ADD COLUMN IF NOT EXISTS recovery_count integer NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS last_recovered_at timestamptz;
+
+CREATE INDEX IF NOT EXISTS idx_async_jobs_hourly_failed_recovery
+    ON async_jobs (bucket_start, recovery_count, last_recovered_at)
+    WHERE job_type = 'pm_aggregate_hourly'
+      AND status = 'failed'
+      AND bucket_start IS NOT NULL
+      AND bucket_end IS NOT NULL;
+
+-- PM 聚合正式切换：旧任务、运行记录和完成水位不迁移。
+DROP TRIGGER IF EXISTS trg_ops_pause_pm_natural_aggregation ON public.async_jobs;
+DROP TRIGGER IF EXISTS trg_ops_pause_pm_adhoc_aggregation ON public.pm_tasks;
+DROP FUNCTION IF EXISTS public.ops_pause_pm_natural_aggregation();
+DROP FUNCTION IF EXISTS public.ops_pause_pm_adhoc_aggregation();
+
+DELETE FROM public.async_jobs
+ WHERE job_type IN (
+    'pm_aggregate_hourly', 'pm_aggregate_daily', 'pm_aggregate_weekly', 'pm_aggregate_monthly',
+    'pm_aggregate_group_hourly', 'pm_aggregate_group_daily',
+    'pm_aggregate_group_weekly', 'pm_aggregate_group_monthly'
+ );
+DELETE FROM public.async_jobs_cron_state
+ WHERE job_type IN (
+    'pm_aggregate_hourly', 'pm_aggregate_daily', 'pm_aggregate_weekly', 'pm_aggregate_monthly',
+    'pm_aggregate_group_hourly', 'pm_aggregate_group_daily',
+    'pm_aggregate_group_weekly', 'pm_aggregate_group_monthly'
+ );
+
+TRUNCATE TABLE public.pm_adhoc_task_runs;
+TRUNCATE TABLE public.pm_tasks;
+DROP TABLE IF EXISTS public.pm_completion_watermarks;
+
+CREATE TABLE public.pm_aggregation_tasks (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    name varchar(200) NOT NULL,
+    enabled boolean NOT NULL DEFAULT true,
+    visibility varchar(16) NOT NULL DEFAULT 'private',
+    creator varchar(100) NOT NULL,
+    current_version_id uuid,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    deleted_at timestamptz,
+    CONSTRAINT chk_pm_aggregation_tasks_visibility
+        CHECK (visibility IN ('private', 'public'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_ccp_command_sort
-    ON public.mml_custom_command_paths (command_id, sort_order);
-
-COMMENT ON TABLE public.mml_custom_command_paths IS
-    'issue #115 调整3：自定义命令↔标准路径精瘦关联表。仅存关联+排序+默认勾选；元数据与是否支持读时 JOIN standard_params/param_mappings，不重复落库。standard_path_id NOT NULL = path 仅来自字典。';
-
--- issue #213 S1：Dashboard 首页 KPI 折线图区全局布局表（全局单套·按制式各一行 lte/nr/gsm）。
--- 原 000002_dashboard_kpi_layout.sql，2026-06-14 复合基线折叠进 Up 段末尾。
--- layout JSONB 形如 { "panels": [ {title, metrics[], x, y, w, h, chartType} ... ] }。
-CREATE TABLE IF NOT EXISTS public.dashboard_kpi_layouts (
-    tech       text PRIMARY KEY,
-    layout     jsonb NOT NULL DEFAULT '{"panels": []}'::jsonb,
-    updated_at timestamp with time zone NOT NULL DEFAULT now(),
-    updated_by uuid,
-    CONSTRAINT dashboard_kpi_layouts_tech_check CHECK (tech IN ('lte', 'nr', 'gsm'))
+CREATE TABLE public.pm_aggregation_task_versions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    task_id uuid NOT NULL REFERENCES public.pm_aggregation_tasks(id) ON DELETE CASCADE,
+    version_no integer NOT NULL,
+    enabled boolean NOT NULL,
+    effective_from timestamptz NOT NULL,
+    effective_to timestamptz,
+    technology varchar(16),
+    dimension varchar(32) NOT NULL,
+    granularities text[] NOT NULL,
+    object_ldns text[] NOT NULL DEFAULT '{}',
+    created_by varchar(100) NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT uq_pm_aggregation_task_versions UNIQUE (task_id, version_no),
+    CONSTRAINT chk_pm_aggregation_task_versions_time
+        CHECK (effective_to IS NULL OR effective_to >= effective_from),
+    CONSTRAINT chk_pm_aggregation_task_versions_technology
+        CHECK (technology IS NULL OR technology IN ('lte', 'nr', 'gsm')),
+    CONSTRAINT chk_pm_aggregation_task_versions_dimension
+        CHECK (dimension IN ('device', 'aggregate_group', 'device_group', 'product', 'band', 'network')),
+    CONSTRAINT chk_pm_aggregation_task_versions_granularities
+        CHECK (
+            cardinality(granularities) = 4
+            AND granularities @> ARRAY['hourly', 'daily', 'weekly', 'monthly']::text[]
+        )
 );
 
-COMMENT ON TABLE public.dashboard_kpi_layouts IS 'issue #213：Dashboard 首页 KPI 折线图区全局布局，按制式各一行（lte/nr/gsm），全局单套所有用户共享。';
-COMMENT ON COLUMN public.dashboard_kpi_layouts.tech IS '制式主键：lte / nr / gsm。';
-COMMENT ON COLUMN public.dashboard_kpi_layouts.layout IS '布局体 JSONB：panels 数组，每图含 title / metrics(symbolic key 列表) / x,y(网格位置) / w,h(网格大小) / chartType(预留，恒 line)。';
-COMMENT ON COLUMN public.dashboard_kpi_layouts.updated_by IS '最近一次保存的管理员用户 ID（nullable：seed 灌入的初始行无来源用户）。';
+ALTER TABLE public.pm_aggregation_tasks
+    ADD CONSTRAINT fk_pm_aggregation_tasks_current_version
+    FOREIGN KEY (current_version_id)
+    REFERENCES public.pm_aggregation_task_versions(id)
+    ON DELETE SET NULL
+    DEFERRABLE INITIALLY DEFERRED;
 
-
--- ============================================================
--- 2026-06-17 复合基线：以下增量折叠进 Up 段末尾（原独立迁移文件已删）。
--- 均为对现有表的幂等加列/改注释/改索引，CREATE/ALTER ... IF [NOT] EXISTS。
--- ============================================================
-
--- 原 000002_fix_transmit_power_comment.sql（#362：修正 transmit_power 列注释口径）
--- #362：修正 device_info.transmit_power 列 COMMENT。
--- 原 000001 baseline 注释把该列写成「对应 TR-181 FAPService.{i}.Capabilities.MaxTxPower」，
--- 但 MaxTxPower 是硬件最大能力上限(READ_ONLY)，而前端"发射功率"列与 LMT 口径是
--- 参考信号功率 ReferenceSignalPower(RW，小区实际工作功率)。已在 device_info_sync.go
--- 删除 universalInformMapping 对 transmit_power 的 MaxTxPower 覆盖，使 cmcc/ctcc adapter
--- 的 ReferenceSignalPower→transmit_power 成为唯一权威来源。此处同步修正列注释口径。
-COMMENT ON COLUMN public.device_info.transmit_power IS '发射功率（dBm），口径=参考信号功率（与 LMT 一致），来源 TR-181 FAPService.{i}.CellConfig.LTE.RAN.RF.ReferenceSignalPower（经 cmcc/ctcc carrier adapter 映射）。注：非硬件最大能力上限 MaxTxPower。';
-
-
--- 原 000003_add_device_info_op_state.sql（激活状态派生列 op_state + 索引）
--- 设备激活状态升级为派生列,语义改为"基站当前是否在运营"。
---
--- 新口径(取代历史 model.DeriveOpStateActivated(first_online_time)):
---   op_state = CalcCellStatus(params) == "normal" ? "1" : "0"
--- 即遍历该设备所有 FAPService.{i} 的 OpState/CellOpState trpath,任一 cell active
--- 即设备激活,否则未激活。设备级 OpState 与 cell_status 严格同源派生。
---
--- 与 first_online_time 派生口径的区别:
---   - 旧口径:激活是一次性单调持久事实(曾上线即激活,永不掉)
---   - 新口径:激活反映网元上报的实时运营态(基站全部小区下电/未启用即未激活)
--- 选择新口径是因为用户对"激活状态"的预期就是网元真实运营态,而非历史曾经露过头。
---
--- DEFAULT '0' 保证新加列对老行不报 NULL;首次 InfoSyncer 跑后立即被覆盖为真值。
--- 旧 model.DeriveOpStateActivated 函数保留(其它路径还在用),但 device_info_pg_repository
--- list 查询路径已切换到读 di.op_state。
-
-ALTER TABLE public.device_info
-    ADD COLUMN IF NOT EXISTS op_state character varying(8) DEFAULT '0';
-
-COMMENT ON COLUMN public.device_info.op_state IS '激活状态:1=激活/0=未激活;由 InfoSyncer.CalcOpState 派生(等价 cell_status: 任一 cell active → "1")。与 first_online_time 派生口径解耦。';
-
--- 设备列表"激活状态"过滤是常用项,加索引(同 cell_status)。
-CREATE INDEX IF NOT EXISTS idx_device_info_op_state ON public.device_info USING btree (op_state);
-
-
--- 原 000004_add_device_info_admin_ipsec.sql（admin_state / ipsec_addr 列）
-ALTER TABLE public.device_info
-    ADD COLUMN IF NOT EXISTS admin_state character varying(16),
-    ADD COLUMN IF NOT EXISTS ipsec_addr  character varying(64);
-
-COMMENT ON COLUMN public.device_info.admin_state IS
-    'NR FAPControl AdminState ("1"=Locked, "2"=Unlocked, "3"=ShuttingDown), source Device.Services.FAPService.1.FAPControl.NR.RAN.Common.AdminState. NULL for LTE devices (use lock_status instead).';
-
-COMMENT ON COLUMN public.device_info.ipsec_addr IS
-    'IPSec serving unit 1 tunnel address, source Device.DeviceInfo.SERVING_UNIT1_IPSEC_Address. "0.0.0.0" means tunnel not established.';
-
-
--- 原 000005_ufte_task_type_product_scope.sql（#492：ufte_task_types.product_scope）
--- #492：UFTE 模板「适用产品」对齐产品目录。
--- 新增 product_scope（产品英文名列表，引用 products.product_name）。语义：
---   · 非空 → 设备候选匹配按"设备 productClass → ProductRegistry → product.Name ∈ 列表"精确放行；
---   · 空   → 回退旧 platform_scope 子串 + tech 关键字匹配（灰度兼容，见 internal/ufte deviceMatchesTaskType）。
--- 制式(2G/4G/5G)由所选产品的 tech 派生，不再依赖硬编码 techHint。
--- 内置升级模板的初始 product_scope 由 seed/000013 按制式回填。
-ALTER TABLE public.ufte_task_types
-    ADD COLUMN IF NOT EXISTS product_scope jsonb NOT NULL DEFAULT '[]'::jsonb;
-
-COMMENT ON COLUMN public.ufte_task_types.product_scope IS
-    '#492 适用产品：产品英文名列表（引用 products.product_name）。非空时设备匹配按产品名精确匹配，空则回退 platform_scope。';
-
-
--- 原 000006_firmware_product_id.sql（#492：firmware_versions.product_id + 唯一索引改 product_id）
--- #492：固件库产品名中心化。固件改为关联产品（product_id → products.id），
--- 上传时选产品（前端按 product_id 提交、按产品名展示），不再以 product_class 为准。
--- 唯一约束从 (product_class, version, file_type) 改为 (product_id, version, file_type)：
--- 同一产品下 版本+文件类型 唯一；不同产品可同版本。product_class 列保留（设备侧
--- 下载/兼容仍可用），但产品归属以 product_id 为权威。历史行 product_id 为 NULL（不兼容历史，
--- PG 唯一索引中多个 NULL 互不冲突，建索引不会因旧行报错）。
-ALTER TABLE public.firmware_versions ADD COLUMN IF NOT EXISTS product_id uuid;
-CREATE INDEX IF NOT EXISTS idx_firmware_versions_product_id ON public.firmware_versions USING btree (product_id);
-
-DROP INDEX IF EXISTS idx_firmware_unique_version;
-CREATE UNIQUE INDEX idx_firmware_unique_version ON public.firmware_versions USING btree (product_id, version, file_type);
-
-COMMENT ON COLUMN public.firmware_versions.product_id IS '#492 固件所属产品（products.id）。上传选产品名 → 存此列；升级/库列表按产品名展示与过滤。';
-
-
--- BTS/GSM 专属 DeviceGSM.* 投影列（bsc_select / oml_remote_ip[_bak] / ipa_unit_id）。
--- 历史：原先作为独立增量 000005_gsm_status_fields.sql 存在，已合并进本基线后删除。
--- 全部 IF NOT EXISTS，幂等可重跑。
-ALTER TABLE public.device_info ADD COLUMN IF NOT EXISTS bsc_select        varchar(8);
-ALTER TABLE public.device_info ADD COLUMN IF NOT EXISTS oml_remote_ip     varchar(45);
-ALTER TABLE public.device_info ADD COLUMN IF NOT EXISTS oml_remote_ip_bak varchar(45);
-ALTER TABLE public.device_info ADD COLUMN IF NOT EXISTS ipa_unit_id       varchar(32);
-
-COMMENT ON COLUMN public.device_info.bsc_select        IS 'GSM BSC 主备角色（DeviceGSM.BscSelect："0"=Master / "1"=Backup）。BTS 设备专属，LTE/NR 为 NULL。';
-COMMENT ON COLUMN public.device_info.oml_remote_ip     IS 'Abis (OML) BSC 主 IP（DeviceGSM.OmlRemoteIp）。BTS 设备专属。';
-COMMENT ON COLUMN public.device_info.oml_remote_ip_bak IS 'Abis (OML) BSC 备 IP（DeviceGSM.OmlRemoteIpBak）。BTS 设备专属。';
-COMMENT ON COLUMN public.device_info.ipa_unit_id       IS 'IPA 单元 ID（DeviceGSM.IpaUnitId，如 "9227-2"）。BTS 设备专属。';
-
-
--- #528 P1 水位基建：PM 持续聚合「完成水位」表。
--- 历史：原先作为独立增量 000002_pm_completion_watermark.sql 存在，2026-06-22 折叠进本基线后删除。
-CREATE TABLE IF NOT EXISTS pm_completion_watermarks (
-    granularity            text        NOT NULL,
-    level                  text        NOT NULL,
-    completed_bucket_start timestamptz NOT NULL,
-    created_at             timestamptz NOT NULL DEFAULT now(),
-    updated_at             timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT pm_completion_watermarks_pkey PRIMARY KEY (granularity, level),
-    CONSTRAINT pm_completion_watermarks_granularity_check
-        CHECK (granularity = ANY (ARRAY['hourly'::text, 'daily'::text, 'weekly'::text, 'monthly'::text])),
-    CONSTRAINT pm_completion_watermarks_level_check
-        CHECK (level = ANY (ARRAY['device'::text, 'group'::text]))
+CREATE TABLE public.pm_aggregation_version_metrics (
+    task_version_id uuid NOT NULL
+        REFERENCES public.pm_aggregation_task_versions(id) ON DELETE CASCADE,
+    metric_id text NOT NULL,
+    metric_path text NOT NULL,
+    metric_type varchar(16) NOT NULL,
+    aggregation_op varchar(8) NOT NULL,
+    formula text NOT NULL DEFAULT '',
+    dependencies text[] NOT NULL DEFAULT '{}',
+    PRIMARY KEY (task_version_id, metric_id),
+    CONSTRAINT chk_pm_aggregation_version_metrics_type
+        CHECK (metric_type IN ('counter', 'kpi')),
+    CONSTRAINT chk_pm_aggregation_version_metrics_op
+        CHECK (aggregation_op IN ('sum', 'avg', 'min', 'max', 'formula'))
 );
 
-COMMENT ON TABLE pm_completion_watermarks IS
-    '#528 PM 持续聚合完成水位：按 (粒度, 层级) 记录上游卷数据已成功处理完到哪一格起点（语义为「已处理」非「有数据」，空格也推进；只进不退）。';
-COMMENT ON COLUMN pm_completion_watermarks.granularity IS '聚合粒度：hourly/daily/weekly/monthly。';
-COMMENT ON COLUMN pm_completion_watermarks.level IS '完成层级：device（设备级）/ group（设备组级，链式产出，完成更晚）。';
-COMMENT ON COLUMN pm_completion_watermarks.completed_bucket_start IS '已处理完成到的格起点（含），桶头时间戳；下游取「≤ 此值」的下一格。';
+CREATE TABLE public.pm_aggregation_version_counters (
+    task_version_id uuid NOT NULL
+        REFERENCES public.pm_aggregation_task_versions(id) ON DELETE CASCADE,
+    metric_path text NOT NULL,
+    aggregation_op varchar(8) NOT NULL,
+    PRIMARY KEY (task_version_id, metric_path),
+    CONSTRAINT chk_pm_aggregation_version_counters_op
+        CHECK (aggregation_op IN ('sum', 'avg', 'min', 'max'))
+);
+
+CREATE TABLE public.pm_aggregation_version_members (
+    task_version_id uuid NOT NULL
+        REFERENCES public.pm_aggregation_task_versions(id) ON DELETE CASCADE,
+    device_id uuid NOT NULL,
+    device_sn varchar(128) NOT NULL,
+    dimension_key text NOT NULL,
+    dimension_name text NOT NULL DEFAULT '',
+    object_ldn text NOT NULL DEFAULT '',
+    PRIMARY KEY (task_version_id, device_id, dimension_key, object_ldn)
+);
+
+CREATE INDEX idx_pm_aggregation_tasks_active
+    ON public.pm_aggregation_tasks (enabled, updated_at DESC)
+    WHERE deleted_at IS NULL;
+CREATE INDEX idx_pm_aggregation_tasks_creator
+    ON public.pm_aggregation_tasks (creator, visibility, updated_at DESC)
+    WHERE deleted_at IS NULL;
+CREATE INDEX idx_pm_aggregation_versions_effective
+    ON public.pm_aggregation_task_versions (effective_from, effective_to);
+CREATE INDEX idx_pm_aggregation_version_members_device
+    ON public.pm_aggregation_version_members (device_id, task_version_id);
+CREATE INDEX idx_pm_aggregation_version_metrics_path
+    ON public.pm_aggregation_version_metrics (metric_path, task_version_id);
+
+CREATE TRIGGER trigger_pm_aggregation_tasks_updated_at
+    BEFORE UPDATE ON public.pm_aggregation_tasks
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+ALTER TABLE public.pm_aggregation_task_versions
+    ADD COLUMN content_hash bytea;
+
+CREATE INDEX idx_pm_aggregation_task_versions_content_hash
+    ON public.pm_aggregation_task_versions (task_id, content_hash);
+
 
 -- +goose Down
 -- +goose StatementBegin
+CREATE SCHEMA goose_baseline_meta;
+ALTER TABLE public.goose_db_version SET SCHEMA goose_baseline_meta;
 DROP SCHEMA IF EXISTS public CASCADE;
 CREATE SCHEMA public;
+ALTER TABLE goose_baseline_meta.goose_db_version SET SCHEMA public;
+DROP SCHEMA goose_baseline_meta;
 -- +goose StatementEnd

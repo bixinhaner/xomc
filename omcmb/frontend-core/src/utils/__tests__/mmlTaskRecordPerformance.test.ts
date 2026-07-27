@@ -38,6 +38,7 @@ describe('MML task record result rendering contract', () => {
     expect(source).not.toContain("from '../Console/components/ResultTable'");
     expect(source).not.toContain("from '../Console/adapters'");
     expect(source).not.toContain('useMMLTaskById');
+    expect(source).not.toContain('useMMLTaskPolling');
   });
 
   it('keeps the v1 task detail view as a result table instead of an inline raw-output list', () => {

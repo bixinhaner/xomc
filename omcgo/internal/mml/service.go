@@ -16,6 +16,7 @@ import (
 
 	"github.com/omcgo/omcgo/global"
 	acsrpc "github.com/omcgo/omcgo/internal/acs/rpc"
+	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 )
@@ -47,8 +48,11 @@ type Service struct {
 	pathTranslator               PathTranslator               // R-9.3 per-device standardPath → privatePath 翻译；nil 时跳过
 	exporter                     *Exporter                    // 结果 CSV 导出（MinIO）；nil 时导出端点返回 503
 	// 参数路径 → 友好名（standard_params.description）解析，CSV「参数名称」列用；nil 时回退 param_refs。
-	pathNameResolver    func(ctx context.Context, paths []string) (map[string]string, error)
-	scriptImportService ScriptImportServiceAPI
+	pathNameResolver func(ctx context.Context, paths []string) (map[string]string, error)
+	// customCommandSupportedPaths 按产品参数模型解析自定义命令可用 path。
+	// 仅控制台携带 ProductID 时使用；管理端不传产品上下文，不裁剪模板。
+	customCommandSupportedPaths func(ctx context.Context, productID uuid.UUID) (map[string]struct{}, error)
+	scriptImportService         ScriptImportServiceAPI
 	// scriptExecutionValidator is optional because older deployments may not
 	// have the TXT validator wired yet. When present it performs the dynamic
 	// device/command checks immediately before an execution is persisted and
@@ -206,9 +210,17 @@ func (s *Service) SetRoleQuerier(rq RoleQuerier) {
 	s.roleQuerier = rq
 }
 
+// SetCustomCommandSupportedPathsResolver 注入产品参数模型支持 path 解析器。
+// 解析失败时控制台列表直接报错，避免回退展示跨产品模板。
+func (s *Service) SetCustomCommandSupportedPathsResolver(
+	resolver func(ctx context.Context, productID uuid.UUID) (map[string]struct{}, error),
+) {
+	s.customCommandSupportedPaths = resolver
+}
+
 // SetDeviceLookup 注入设备查询适配器，启用 R-8.4 product_class 一致性校验。
 // nil 时跳过（向后兼容）。
-// SetPathNameResolver 注入 standardPath → 友好名解析（standard_params.description），CSV 导出用。
+// SetPathNameResolver 注入按请求语言解析 standardPath → 友好名，供 CSV 导出使用。
 func (s *Service) SetPathNameResolver(fn func(ctx context.Context, paths []string) (map[string]string, error)) {
 	s.pathNameResolver = fn
 }
@@ -612,6 +624,7 @@ func (s *Service) ListScripts(ctx context.Context, filter ScriptFilter) (*model.
 // ExecuteRequest defines the parameters for executing an MML command.
 type ExecuteRequest struct {
 	CommandCode string                   `json:"command_code"`
+	CommandName string                   `json:"command_name,omitempty"`
 	DeviceSNs   []string                 `json:"device_sns"`
 	Parameters  map[string]interface{}   `json:"parameters"`
 	TaskName    string                   `json:"task_name"`
@@ -760,10 +773,14 @@ func stripDeviceSuffixFromMML(rawLine, deviceSN string) string {
 	if line == "" {
 		return ""
 	}
-	if deviceSN != "" {
-		suffix := ";" + strings.TrimSpace(deviceSN)
-		if strings.HasSuffix(line, suffix) {
-			line = strings.TrimSpace(strings.TrimSuffix(line, suffix))
+	if indexes, err := topLevelIndexes(line, ';'); err == nil && len(indexes) > 0 {
+		last := indexes[len(indexes)-1]
+		commandPart := strings.TrimSpace(line[:last])
+		devicePart := strings.TrimSpace(line[last+1:])
+		for _, sn := range strings.Split(devicePart, ",") {
+			if strings.TrimSpace(sn) == strings.TrimSpace(deviceSN) {
+				return commandPart
+			}
 		}
 	}
 	line = strings.TrimSuffix(line, ";")
@@ -1156,6 +1173,9 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 						"parameters":   req.Parameters,
 						"orphan":       true, // 标记孤儿，便于审计 / FE 提示
 					}
+					if name := strings.TrimSpace(req.CommandName); name != "" {
+						entry["command_name"] = name
+					}
 					if len(req.ParamPaths) > 0 {
 						entry["param_paths"] = req.ParamPaths
 					}
@@ -1171,6 +1191,7 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 					"command_code": cmd.CommandCode,
 					"rpc_method":   cmd.RPCMethod,
 					"parameters":   req.Parameters,
+					"command_name": localizedCommandName(ctx, cmd),
 				}
 				if len(req.ParamPaths) > 0 {
 					entry["param_paths"] = req.ParamPaths
@@ -1221,6 +1242,7 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 							"operation_type": op,
 							"param_paths":    []string{p},
 							"param_refs":     []MMLParamRef{{Tr069Path: p, ValueType: "string"}},
+							"command_name":   strings.TrimSpace(req.CommandName),
 						})
 					}
 					break
@@ -1235,6 +1257,7 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 					"operation_type": op,
 					"param_paths":    paths,
 					"param_refs":     synthRefs,
+					"command_name":   strings.TrimSpace(req.CommandName),
 				})
 			case "MOD":
 				// SetParameterValues 一定要有非空值。让 ParamCode == Tr069Path，
@@ -1254,6 +1277,7 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 							"param_paths":    []string{p},
 							"param_refs":     []MMLParamRef{{ParamCode: p, Tr069Path: p, ValueType: "string"}},
 							"parameters":     map[string]interface{}{p: values[i]},
+							"command_name":   strings.TrimSpace(req.CommandName),
 						})
 					}
 				} else {
@@ -1270,6 +1294,7 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 						"param_paths":    paths,
 						"param_refs":     synthRefs,
 						"parameters":     formValues,
+						"command_name":   strings.TrimSpace(req.CommandName),
 					})
 				}
 				// #196：MOD 后自动追加一条 LST 回读，核实基站是否真的改成功（自定义 / 指定参数 PATH
@@ -1289,6 +1314,7 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 					"operation_type": op,
 					"param_paths":    paths,
 					"parameters":     map[string]interface{}{"object_name": paths[0]},
+					"command_name":   strings.TrimSpace(req.CommandName),
 				})
 			case "RMV", "DEL":
 				if len(paths) > 1 {
@@ -1300,6 +1326,7 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 					"operation_type": op,
 					"param_paths":    paths,
 					"parameters":     map[string]interface{}{"object_name": paths[0]},
+					"command_name":   strings.TrimSpace(req.CommandName),
 				})
 			default:
 				return nil, fmt.Errorf("raw param_paths mode: unsupported operation_type %q (allowed: LST/DSP/MOD/ADD/RMV)", req.OperationType)
@@ -1825,13 +1852,19 @@ func (s *Service) enrichCommandNames(ctx context.Context, commands []map[string]
 	cache := make(map[string]string)
 	for _, cmd := range commands {
 		code, _ := cmd["command_code"].(string)
+		// 自定义/裸路径命令的名称由执行入口写入任务快照；不能被 command_code
+		// 查询失败或后续重建覆盖，否则详情页又会退回内部 RAW 命令码。
+		if existing := commandString(cmd, "command_name"); existing != "" &&
+			(strings.HasPrefix(strings.ToUpper(strings.TrimSpace(code)), "RAW ") || cmd["orphan"] == true) {
+			continue
+		}
 		if code == "" {
 			continue
 		}
 		name, cached := cache[code]
 		if !cached {
 			if c, err := s.cmdRepo.GetByCode(ctx, code); err == nil && c != nil {
-				name = c.CommandName
+				name = localizedCommandName(ctx, c)
 			}
 			cache[code] = name
 		}
@@ -1839,6 +1872,17 @@ func (s *Service) enrichCommandNames(ctx context.Context, commands []map[string]
 			cmd["command_name"] = name
 		}
 	}
+}
+
+// localizedCommandName 返回当前请求语言下的命令名；老数据缺少对应翻译时回退默认名称。
+func localizedCommandName(ctx context.Context, command *MMLCommand) string {
+	if command == nil {
+		return ""
+	}
+	if name := strings.TrimSpace(command.CommandNameI18n[string(appcontext.GetLocale(ctx))]); name != "" {
+		return name
+	}
+	return command.CommandName
 }
 
 // DeviceTaskPathMissAggregator 提供按 MML task ID 聚合 device_tasks 的
@@ -1874,6 +1918,10 @@ type DeviceTaskResultLister interface {
 
 type TaskResultStatsRepository interface {
 	GetResultStatsByID(ctx context.Context, id uuid.UUID) (*MMLTask, error)
+}
+
+type PeriodicChildTaskRepository interface {
+	GetLatestPeriodicChild(ctx context.Context, parentID uuid.UUID) (*MMLTask, error)
 }
 
 // DeviceTaskResultRowView 屏蔽 task 包内部 struct，让 mml 包不反向 import task 包。
@@ -2296,7 +2344,46 @@ func (s *Service) ListCustomCommands(ctx context.Context, filter CustomCommandFi
 			filter.VisibleGroupIDs = groupIDs
 		}
 	}
-	return s.customCommandRepo.List(ctx, filter)
+	result, err := s.customCommandRepo.List(ctx, filter)
+	if err != nil || filter.ProductID == nil {
+		return result, err
+	}
+	if s.customCommandSupportedPaths == nil {
+		return nil, fmt.Errorf("filter custom commands for product %s: supported paths resolver not configured", filter.ProductID)
+	}
+	supported, err := s.customCommandSupportedPaths(ctx, *filter.ProductID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve supported paths for product %s: %w", filter.ProductID, err)
+	}
+
+	// 当前控制台一次拉取最多 1000 条模板；先按产品支持集合裁 path，再删除无可用
+	// path 的模板，避免公有模板树残留“空节点”。
+	filtered := make([]MMLCustomCommand, 0, len(result.Items))
+	for _, command := range result.Items {
+		paths := make([]string, 0, len(command.ParamPaths))
+		for _, path := range command.ParamPaths {
+			path = strings.TrimSpace(path)
+			if path == "" {
+				continue
+			}
+			if _, ok := supported[path]; ok {
+				paths = append(paths, path)
+			}
+		}
+		if len(paths) == 0 {
+			continue
+		}
+		command.ParamPaths = paths
+		filtered = append(filtered, command)
+	}
+	result.Items = filtered
+	result.Total = int64(len(filtered))
+	if result.PageSize > 0 {
+		result.TotalPages = (len(filtered) + result.PageSize - 1) / result.PageSize
+	} else {
+		result.TotalPages = 0
+	}
+	return result, nil
 }
 
 // GetCustomCommand retrieves an MML custom command by ID.
@@ -2419,6 +2506,7 @@ func (s *Service) UpdateCustomCommand(
 	if !isOwnerOrSuper(existing, currentUserID, currentUsername, isSuperAdmin) {
 		return nil, fmt.Errorf("only creator or super_admin can update template: %w", commonerrors.ErrForbidden)
 	}
+	paramPathsProvided := cmd.ParamPaths != nil
 
 	// scope 在编辑模式下不允许变更（§2 D6）— 强制保留原值，防 UI 误传
 	cmd.CommandScope = existing.CommandScope
@@ -2459,6 +2547,7 @@ func (s *Service) UpdateCustomCommand(
 	if cmd.ParamPaths != nil {
 		existing.ParamPaths = cmd.ParamPaths
 	}
+	existing.ParamPathsProvided = paramPathsProvided
 
 	if err := s.customCommandRepo.Update(ctx, existing); err != nil {
 		// 并发 race 穿过查询预检后，私有 DB 兜底索引可能抛 23505 → 翻 409。
@@ -2703,16 +2792,19 @@ func (s *Service) GetTaskResults(ctx context.Context, id uuid.UUID, page, pageSi
 		pageSize = 20
 	}
 
-	// T-0168: 先拿 task 元数据用于装配 stats（即使 deviceTaskResultLister 注入也要这步）。
-	// PgTaskRepository 提供轻量查询，避免为结果页 stats 扫描/反序列化 mml_tasks.results。
-	taskMeta, taskErr := s.getTaskResultStats(ctx, id)
+	taskMeta, resultSourceID, taskErr := s.resolveTaskResultSource(ctx, id)
 	// taskErr 不阻塞主流程；找不到 task 让后续 device_tasks 查询自己处理
 	stats := buildTaskResultsStats(taskMeta, taskErr)
+	if taskErr == nil && taskMeta != nil {
+		// 结果接口不经过 GetTask，必须在这里也注入本地化的命令名，
+		// 否则任务详情页的结果行只能显示 command_code。
+		s.enrichCommandNames(ctx, taskMeta.Commands)
+	}
 
 	// 优先路径：从 device_tasks 拉真实执行结果（2026-05-23 修；执行结果实际写在
 	// device_tasks 表，mml_tasks.results 从未由 ACS 回写，老路径永远空）。
 	if s.deviceTaskResultLister != nil {
-		rows, total, err := s.deviceTaskResultLister.ListResultsBySourceID(ctx, id.String(), page, pageSize)
+		rows, total, err := s.deviceTaskResultLister.ListResultsBySourceID(ctx, resultSourceID.String(), page, pageSize)
 		if err != nil {
 			return nil, fmt.Errorf("list device task results: %w", err)
 		}
@@ -2726,7 +2818,7 @@ func (s *Service) GetTaskResults(ctx context.Context, id uuid.UUID, page, pageSi
 	}
 
 	// 兼容回退：装配器未注入时读老 JSONB（dev / 单测）。
-	t, err := s.taskRepo.GetByID(ctx, id)
+	t, err := s.taskRepo.GetByID(ctx, resultSourceID)
 	if err != nil {
 		return nil, fmt.Errorf("get mml task: %w", err)
 	}
@@ -2750,6 +2842,31 @@ func (s *Service) GetTaskResults(ctx context.Context, id uuid.UUID, page, pageSi
 	resp := model.NewListResponse(items, total, page, pageSize)
 	resp.Stats = stats
 	return resp, nil
+}
+
+func (s *Service) resolveTaskResultSource(ctx context.Context, id uuid.UUID) (*MMLTask, uuid.UUID, error) {
+	task, err := s.getTaskResultStats(ctx, id)
+	if err != nil {
+		return nil, id, err
+	}
+	if task == nil || task.ExecuteType != ExecutePeriodic || task.PeriodicParentID != nil {
+		return task, id, nil
+	}
+	childRepo, ok := s.taskRepo.(PeriodicChildTaskRepository)
+	if !ok {
+		return task, id, nil
+	}
+	child, err := childRepo.GetLatestPeriodicChild(ctx, id)
+	if err != nil {
+		if errors.Is(err, commonerrors.ErrNotFound) {
+			return task, id, nil
+		}
+		return nil, id, fmt.Errorf("get latest periodic child: %w", err)
+	}
+	if child == nil {
+		return task, id, nil
+	}
+	return child, child.ID, nil
 }
 
 func (s *Service) getTaskResultStats(ctx context.Context, id uuid.UUID) (*MMLTask, error) {
@@ -2813,27 +2930,13 @@ func deviceTaskRowToResultMap(row DeviceTaskResultRowView, task *MMLTask) map[st
 	}
 	var command map[string]interface{}
 	var rawLine string
-	if task != nil && task.ExecuteMode == TaskExecuteModeDeviceBound &&
-		row.CommandIndex >= 0 && row.CommandIndex < len(task.PlanItems) {
-		plan := task.PlanItems[row.CommandIndex]
-		command = plan.Command
-		rawLine = plan.RawLine
-		m["plan_line_no"] = plan.LineNo
-		m["plan_device_sn"] = plan.DeviceSN
-		m["plan_order"] = plan.Order
-		if plan.RawLine != "" {
-			m["plan_raw_line"] = plan.RawLine
-		}
-		if commandCode := commandString(plan.Command, "command_code"); commandCode != "" {
-			m["command_code"] = commandCode
-		}
-		if op := commandString(plan.Command, "operation_type"); op != "" {
-			m["operation_type"] = op
-		}
-	} else if task != nil && row.CommandIndex >= 0 && row.CommandIndex < len(task.Commands) {
+	if task != nil && row.CommandIndex >= 0 && row.CommandIndex < len(task.Commands) {
 		command = task.Commands[row.CommandIndex]
 		if commandCode := commandString(command, "command_code"); commandCode != "" {
 			m["command_code"] = commandCode
+		}
+		if commandName := commandString(command, "command_name"); commandName != "" {
+			m["command_name"] = commandName
 		}
 		if op := commandString(command, "operation_type"); op != "" {
 			m["operation_type"] = op
@@ -2850,6 +2953,26 @@ func deviceTaskRowToResultMap(row DeviceTaskResultRowView, task *MMLTask) map[st
 		}
 		if order, ok := command["plan_order"].(float64); ok && order > 0 {
 			m["plan_order"] = int(order)
+		}
+	} else if task != nil && task.ExecuteMode == TaskExecuteModeDeviceBound &&
+		row.CommandIndex >= 0 && row.CommandIndex < len(task.PlanItems) {
+		plan := task.PlanItems[row.CommandIndex]
+		command = plan.Command
+		rawLine = plan.RawLine
+		m["plan_line_no"] = plan.LineNo
+		m["plan_device_sn"] = plan.DeviceSN
+		m["plan_order"] = plan.Order
+		if plan.RawLine != "" {
+			m["plan_raw_line"] = plan.RawLine
+		}
+		if commandCode := commandString(plan.Command, "command_code"); commandCode != "" {
+			m["command_code"] = commandCode
+		}
+		if commandName := commandString(plan.Command, "command_name"); commandName != "" {
+			m["command_name"] = commandName
+		}
+		if op := commandString(plan.Command, "operation_type"); op != "" {
+			m["operation_type"] = op
 		}
 	}
 	if script := formatMMLScriptForResult(command, rawLine, row.DeviceSN); script != "" {

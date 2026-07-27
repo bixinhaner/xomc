@@ -23,6 +23,7 @@ import (
 	"context"
 	dbsql "database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -60,6 +61,36 @@ type PgQuerier interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// txBeginner 是 a.db 的可选能力：真实 *pgxpool.Pool 天然实现 Begin；单测用的简单
+// stub 不需要实现，execAggregateSQL 会自动退回不加 SET LOCAL 的普通 Exec（行为与
+// 改动前一致，无需改造现有测试 stub）。
+type txBeginner interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+}
+
+// execAggregateSQL 在独立事务内执行聚合 SQL。聚合内存使用数据库受控默认值；
+// 设备分批负责限制工作集，不再用 512MB SET LOCAL 掩盖无界扫描。
+func (a *Aggregator) execAggregateSQL(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	beginner, ok := a.db.(txBeginner)
+	if !ok {
+		return a.db.Exec(ctx, sql, args...)
+	}
+	tx, err := beginner.Begin(ctx)
+	if err != nil {
+		return pgconn.CommandTag{}, fmt.Errorf("begin aggregate tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	tag, err := tx.Exec(ctx, sql, args...)
+	if err != nil {
+		return pgconn.CommandTag{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return pgconn.CommandTag{}, fmt.Errorf("commit aggregate tx: %w", err)
+	}
+	return tag, nil
 }
 
 // Aggregator 是 G5 聚合主入口；线程安全，可被多个 asyncjob runner 共享。
@@ -141,7 +172,7 @@ func (a *Aggregator) AggregateCounters(ctx context.Context, source, target strin
 		return 0, err
 	}
 	sql, args := buildCountersSQLWithNumberProcess(source, target, w, numberProcess)
-	tag, err := a.db.Exec(ctx, sql, args...)
+	tag, err := a.execAggregateSQL(ctx, sql, args...)
 	if err != nil {
 		return 0, fmt.Errorf("aggregator.AggregateCounters %s→%s: %w", source, target, err)
 	}
@@ -220,15 +251,8 @@ func (a *Aggregator) AggregateKPIs(ctx context.Context, target string, w WindowS
 		}
 		batchDevs := devOrder[start:end]
 
-		// 整桶（本批设备）一次性载入：deviceKey → object_ldn → metric_path → value。
-		byDevice, err := a.loadCountersForDevices(ctx, target, batchDevs, w)
-		if err != nil {
-			// 整批载入失败：本批所有设备跳过不阻塞其余批（记 WARN 继续，沿用单设备失败语义）。
-			a.logger.Warn("batch load counters failed; skip device batch",
-				zap.Int("batch_devices", len(batchDevs)), zap.Error(err))
-			continue
-		}
-
+		formulaByDevice := make(map[deviceKey][]router.KPIDef, len(batchDevs))
+		directByDevice := make(map[deviceKey]map[string]router.KPIDef, len(batchDevs))
 		for _, dk := range batchDevs {
 			// KPI 路由按设备取一次（缺失/空 → 跳过整设备，沿用 WARN 跳过语义）。
 			route, err := a.kpiRouter.LookupByDevice(ctx, dk.sn)
@@ -241,6 +265,48 @@ func (a *Aggregator) AggregateKPIs(ctx context.Context, target string, w WindowS
 			if route == nil || len(route.KPIs) == 0 {
 				continue
 			}
+			formulaKPIs, directKPIs := splitKPIDefsByRollupMode(route.KPIs)
+			if len(formulaKPIs) > 0 {
+				formulaByDevice[dk] = formulaKPIs
+			}
+			for _, k := range directKPIs {
+				byPath := directByDevice[dk]
+				if byPath == nil {
+					byPath = make(map[string]router.KPIDef, len(directKPIs))
+					directByDevice[dk] = byPath
+				}
+				byPath[k.IndicatorID] = k
+			}
+		}
+
+		if len(directByDevice) > 0 {
+			directRows, err := a.loadRolledKPIValuesForDevices(ctx, batchDevs, directByDevice, w, numberProcess)
+			if err != nil {
+				a.logger.Warn("batch load rolled KPI values failed; skip direct KPI batch",
+					zap.Int("batch_devices", len(batchDevs)), zap.Error(err))
+			} else {
+				pending = append(pending, directRows...)
+			}
+		}
+
+		if len(formulaByDevice) == 0 {
+			continue
+		}
+
+		// 整桶（本批设备）一次性载入：deviceKey → object_ldn → metric_path → value。
+		byDevice, err := a.loadCountersForDevices(ctx, target, batchDevs, w)
+		if err != nil {
+			// 整批载入失败：本批所有设备跳过不阻塞其余批（记 WARN 继续，沿用单设备失败语义）。
+			a.logger.Warn("batch load counters failed; skip device batch",
+				zap.Int("batch_devices", len(batchDevs)), zap.Error(err))
+			continue
+		}
+
+		for _, dk := range batchDevs {
+			formulaKPIs := formulaByDevice[dk]
+			if len(formulaKPIs) == 0 {
+				continue
+			}
 			byObjectLdn := byDevice[dk]
 			if byObjectLdn == nil {
 				// 该设备列出了实体但整桶载入没拿到其计数器（数据态/竞态）→ 跳过不阻塞。
@@ -251,7 +317,7 @@ func (a *Aggregator) AggregateKPIs(ctx context.Context, target string, w WindowS
 
 			for _, ent := range devEntities[dk] {
 				counters := countersForEntity(byObjectLdn, ent.objectLdn)
-				rows, err := a.evalKPIs(ent, route.KPIs, counters, numberProcess)
+				rows, err := a.evalKPIs(ent, formulaKPIs, counters, numberProcess)
 				if err != nil {
 					return 0, fmt.Errorf("aggregator.AggregateKPIs normalize kpis: %w", err)
 				}
@@ -271,6 +337,26 @@ func (a *Aggregator) AggregateKPIs(ctx context.Context, target string, w WindowS
 // ── 内部 helper ───────────────────────────────────────────────────────────
 
 type deviceKey struct{ oui, sn string }
+
+func splitKPIDefsByRollupMode(kpis []router.KPIDef) (formula, direct []router.KPIDef) {
+	for _, k := range kpis {
+		if isDirectRollupStatisType(k.StatisType) {
+			direct = append(direct, k)
+		} else {
+			formula = append(formula, k)
+		}
+	}
+	return formula, direct
+}
+
+func isDirectRollupStatisType(statis string) bool {
+	switch strings.ToLower(strings.TrimSpace(statis)) {
+	case "avg", "sum", "max", "min":
+		return true
+	default:
+		return false
+	}
+}
 
 // entityKey 是 T-B KPI 聚合的最小实体粒度：设备 + 小区/PLMN（object_ldn）。
 // object_ldn=="" 即设备级实体（与 T-A 前行为一致，KPI 行 object_ldn 仍写空串）。
@@ -370,6 +456,68 @@ func (a *Aggregator) loadCountersForDevices(ctx context.Context, target string, 
 	return out, rows.Err()
 }
 
+func (a *Aggregator) loadRolledKPIValuesForDevices(
+	ctx context.Context,
+	devs []deviceKey,
+	defsByDevice map[deviceKey]map[string]router.KPIDef,
+	w WindowSpec,
+	numberProcess string,
+) ([]entityRow, error) {
+	if len(devs) == 0 || len(defsByDevice) == 0 {
+		return nil, nil
+	}
+	defSet := make(map[string]router.KPIDef)
+	for _, byPath := range defsByDevice {
+		for path, def := range byPath {
+			if _, exists := defSet[path]; exists {
+				continue
+			}
+			defSet[path] = def
+		}
+	}
+	defs := make([]router.KPIDef, 0, len(defSet))
+	for _, def := range defSet {
+		defs = append(defs, def)
+	}
+	sql, args := buildLoadRolledKPIValuesForDevicesSQL("pm_metrics", devs, defs, w)
+	rows, err := a.db.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("load 15min KPI values for direct rollup: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]entityRow, 0)
+	for rows.Next() {
+		var oui, sn, objectLdn, path, statis string
+		var val dbsql.NullFloat64
+		if err := rows.Scan(&oui, &sn, &objectLdn, &path, &val, &statis); err != nil {
+			return nil, fmt.Errorf("scan 15min KPI values for direct rollup: %w", err)
+		}
+		if !val.Valid {
+			continue
+		}
+		def, ok := defsByDevice[deviceKey{oui: oui, sn: sn}][path]
+		if !ok {
+			continue
+		}
+		normalized, err := resultnorm.Normalize(val.Float64, &resultnorm.Metadata{
+			Unit:       def.Unit,
+			StatisType: statis,
+		}, numberProcess)
+		if err != nil {
+			return nil, fmt.Errorf("normalize PM direct KPI rollup result %s: %w", path, err)
+		}
+		out = append(out, entityRow{
+			ent: entityKey{oui: oui, sn: sn, objectLdn: objectLdn},
+			row: kpiRow{path: path, value: normalized, stype: statis, unit: def.Unit},
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate 15min KPI values for direct rollup: %w", err)
+	}
+	return out, nil
+}
+
 // countersForEntity 组装某实体（object_ldn）算 KPI 的入参：每个 object_ldn 整串只取本行
 // 计数器，无论它是设备级（object_ldn==""）/ 基础小区
 // （Cellid=N，无 PLMN）/ PLMN 实体（Cellid=N,PLMN=M）/ 5G 切片 / GSM Uid 行——全部一视同仁。
@@ -436,7 +584,7 @@ func (a *Aggregator) evalKPIs(
 		if err != nil {
 			return nil, fmt.Errorf("normalize PM rollup KPI result %s: %w", k.IndicatorID, err)
 		}
-		rows = append(rows, kpiRow{path: k.IndicatorID, value: normalized, stype: statis})
+		rows = append(rows, kpiRow{path: k.IndicatorID, value: normalized, stype: statis, unit: k.Unit})
 	}
 	return rows, nil
 }
@@ -547,15 +695,36 @@ ON CONFLICT %s DO UPDATE SET
 
 func indicatorMetaSQL() string {
 	return `indicator_meta AS (
-    SELECT id, MIN(unit_id) AS unit_id, MIN(statis_type) AS statis_type
-    FROM (
-        SELECT id, unit_id, statis_type FROM perf_indicators_enb
+    WITH legacy_indicator_candidates AS (
+        SELECT id, unit_id, statis_type, 1 AS source_priority FROM perf_indicators_enb
         UNION ALL
-        SELECT id, unit_id, statis_type FROM perf_indicators_gnb
+        SELECT id, unit_id, statis_type, 2 AS source_priority FROM perf_indicators_gnb
         UNION ALL
-        SELECT id, unit_id, statis_type FROM perf_indicators_gsm
-    ) im
-    GROUP BY id
+        SELECT id, unit_id, statis_type, 3 AS source_priority FROM perf_indicators_gsm
+    ),
+    legacy_indicator_meta AS (
+        SELECT DISTINCT ON (id)
+               id,
+               NULLIF(btrim(unit_id), '') AS unit_id,
+               NULLIF(btrim(statis_type), '') AS statis_type
+        FROM legacy_indicator_candidates
+        ORDER BY id,
+                 (NULLIF(btrim(unit_id), '') IS NOT NULL
+                  AND NULLIF(btrim(statis_type), '') IS NOT NULL) DESC,
+                 source_priority
+    ),
+    dictionary_indicator_meta AS (
+        SELECT metric_path AS id,
+               NULLIF(btrim(unit), '') AS unit_id,
+               NULLIF(btrim(statis_type), '') AS statis_type
+        FROM pm_metric_dictionary
+        WHERE metric_type = 'counter'
+    )
+    SELECT COALESCE(d.id, l.id) AS id,
+           COALESCE(d.unit_id, l.unit_id) AS unit_id,
+           COALESCE(d.statis_type, l.statis_type) AS statis_type
+    FROM dictionary_indicator_meta d
+    FULL OUTER JOIN legacy_indicator_meta l ON l.id = d.id
 )`
 }
 
@@ -675,6 +844,56 @@ WHERE metric_type = 'counter'
   AND granularity = $1
   AND time = $2
   AND (device_oui, device_sn) IN (%s)`, target, joinComma(pairs))
+	return sql, args
+}
+
+func buildLoadRolledKPIValuesForDevicesSQL(source string, devs []deviceKey, defs []router.KPIDef, w WindowSpec) (string, []any) {
+	args := make([]any, 0, 2+len(defs)*2+len(devs)*2)
+	defRows := make([]string, 0, len(defs))
+	pos := 1
+	for _, def := range defs {
+		defRows = append(defRows, fmt.Sprintf("($%d, $%d)", pos, pos+1))
+		args = append(args, def.IndicatorID, strings.ToLower(strings.TrimSpace(def.StatisType)))
+		pos += 2
+	}
+	args = append(args, w.Start, w.End)
+	startPos := pos
+	endPos := pos + 1
+	pos += 2
+
+	pairs := make([]string, 0, len(devs))
+	for _, d := range devs {
+		pairs = append(pairs, fmt.Sprintf("($%d, $%d)", pos, pos+1))
+		args = append(args, d.oui, d.sn)
+		pos += 2
+	}
+
+	sql := fmt.Sprintf(`
+WITH kpi_defs(metric_path, statis_type) AS (
+    VALUES %s
+)
+SELECT
+    m.device_oui,
+    m.device_sn,
+    COALESCE(m.object_ldn, '') AS object_ldn,
+    m.metric_path,
+    CASE d.statis_type
+        WHEN 'sum' THEN SUM(m.metric_value)
+        WHEN 'avg' THEN AVG(m.metric_value)
+        WHEN 'max' THEN MAX(m.metric_value)
+        WHEN 'min' THEN MIN(m.metric_value)
+    END AS metric_value,
+    d.statis_type
+FROM %s m
+JOIN kpi_defs d ON d.metric_path = m.metric_path
+WHERE m.metric_type = 'kpi'
+  AND m.granularity = '15min'
+  AND m.time >= $%d
+  AND m.time <  $%d
+  AND d.statis_type IN ('sum','avg','max','min')
+  AND (m.device_oui, m.device_sn) IN (%s)
+GROUP BY m.device_oui, m.device_sn, COALESCE(m.object_ldn, ''), m.metric_path, d.statis_type`,
+		joinComma(defRows), source, startPos, endPos, joinComma(pairs))
 	return sql, args
 }
 
@@ -798,4 +1017,5 @@ type kpiRow struct {
 	path  string
 	value float64
 	stype string
+	unit  string
 }

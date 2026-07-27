@@ -11,32 +11,53 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
+const (
+	maxExportDeviceSNs   = 50
+	maxExportMetricPaths = 50
+)
+
 // DashboardParams 是 source_type=dashboard 时 pm_kpi_export_tasks.params(jsonb) 的字段集。
 //
 // 字段对齐仪表盘聚合查询入参（同 /pm/metrics/aggregated），导出时去掉 limit 全量取数。
 // 字段名沿用 REST query 的 snake_case，便于前端 T4 建任务时直接透传当前筛选。
 type DashboardParams struct {
-	Granularity  string   `json:"granularity"`
-	Dimension    string   `json:"dimension"`
-	DeviceOUIs   []string `json:"device_ouis"`
-	DeviceSNs    []string `json:"device_sns"`
+	Granularity    string   `json:"granularity"`
+	Dimension      string   `json:"dimension"`
+	DeviceOUIs     []string `json:"device_ouis"`
+	DeviceSNs      []string `json:"device_sns"`
 	DeviceGroupIDs []string `json:"device_group_ids"`
-	ProductIDs   []string `json:"product_ids"`
-	MetricPaths  []string `json:"metric_paths"`
-	MetricType   string   `json:"metric_type"`
-	Technologies []string `json:"technologies"`
-	StartTime    string   `json:"start_time"`
-	EndTime      string   `json:"end_time"`
+	ProductIDs     []string `json:"product_ids"`
+	MetricPaths    []string `json:"metric_paths"`
+	MetricType     string   `json:"metric_type"`
+	Technologies   []string `json:"technologies"`
+	StartTime      string   `json:"start_time"`
+	EndTime        string   `json:"end_time"`
 	// ObjectLDNs 是小区/PLMN 下钻白名单（A1）。空 = 不过滤，导该设备全部小区/PLMN；
 	// 非空 = 只导命中行，与仪表盘下钻定格口径一致。device 维度专属（聚合维度无意义）。
 	ObjectLDNs []string `json:"object_ldns"`
 }
 
-// AdhocParams 是 source_type=adhoc 时 params(jsonb) 的字段集。
+// AdhocParams 是 adhoc 结果类导出 params(jsonb) 的字段集。
 type AdhocParams struct {
 	TaskID    string `json:"task_id"`
 	StartTime string `json:"start_time"` // 可选二次时窗筛选
 	EndTime   string `json:"end_time"`
+}
+
+func validateDashboardExportLimits(raw []byte) error {
+	var p DashboardParams
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return fmt.Errorf("parse dashboard export params: %w", err)
+		}
+	}
+	if len(p.DeviceSNs) > maxExportDeviceSNs {
+		return fmt.Errorf("device_sns exceeds maximum of %d", maxExportDeviceSNs)
+	}
+	if len(p.MetricPaths) > maxExportMetricPaths {
+		return fmt.Errorf("metric_paths exceeds maximum of %d", maxExportMetricPaths)
+	}
+	return nil
 }
 
 // parseDashboardParams 把 params(jsonb) 解析成 aggregator.QueryRequest（去 limit/offset）
@@ -61,6 +82,7 @@ func parseDashboardParams(raw []byte) (aggregator.QueryRequest, []string, error)
 		DeviceSNs:    p.DeviceSNs,
 		MetricPaths:  p.MetricPaths,
 		Technologies: p.Technologies,
+		ObjectLDNs:   p.ObjectLDNs,
 	}
 	if p.MetricType != "" {
 		mt := metrics.MetricType(p.MetricType)

@@ -210,6 +210,24 @@ groups:
             Action: 检查 Redis 连通性与 kpi.router 日志；恢复后确认
                     omc_kpi_router_stale_evictions_total 增长且本告警自动解除。
 
+  - name: omc.pm_ingest
+    interval: 30s
+    rules:
+      - alert: PMCountersDiscoveredOutsideLibrary
+        expr: sum by (carrier, technology) (increase(omc_pm_discovered_counters_total[15m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 发现指标库外 counter（{{ $labels.carrier }}/{{ $labels.technology }}）"
+          description: |
+            最近 15 分钟持续发现指标库外 counter。这些值已被保留并进入动态登记，
+            没有被丢弃；告警表示厂家上报名或指标库配置发生漂移。
+            Action: 检查 worker 的 "preserved counters not in indicator library" 日志，
+                    核对对应产品指标库 report_key 并完成正式登记。
+
   - name: omc.meta
     interval: 30s
     rules:
@@ -301,3 +319,102 @@ groups:
             PM 文件处理 p95 耗时持续 10 分钟超过 60 秒。
             Impact: KPI 计算与时序数据入库滞后，性能看板不实时。
             Action: 看 worker CPU / TimescaleDB 写入压力；评估 PM 文件体积与并发。
+
+      - alert: OMCPMQueuePendingHigh
+        expr: omc_pm_queue_pending{subject="pm.file.received",durable="pm-workers"} >= 2000
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 队列 pending 持续达到背压高水位"
+          description: |
+            PM durable consumer 的待投递消息持续 10 分钟不少于 2000，
+            ACS 上传背压应已启动。检查 worker 吞吐、NATS durable 状态和 TimescaleDB 写入。
+
+      - alert: OMCPMQueueOldestAgeHigh
+        expr: omc_pm_queue_oldest_age_seconds{subject="pm.file.received",durable="pm-workers"} >= 600
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 队列最老消息持续超过 10 分钟"
+          description: |
+            最老待处理 PM 消息年龄达到背压高水位，说明处理延迟已影响数据时效。
+            联查 pending、redelivery、delivery/ack rate 和 worker 错误日志。
+
+      - alert: OMCPMQueueSampleStale
+        expr: time() - omc_pm_queue_sample_timestamp_seconds{subject="pm.file.received",durable="pm-workers"} > 300
+        for: 2m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 队列健康样本已陈旧"
+          description: |
+            ACS 背压超过 5 分钟没有消费到新鲜队列样本。若背压已经生效，
+            watchdog 会保守保持拒收状态。检查 NATS 管理查询、采样器日志与连接状态。
+
+      - alert: OMCPMQueueAckRateBelowDelivery
+        expr: |
+          max without (subject, durable) (
+            omc_pm_queue_ack_pending{subject="pm.file.received",durable="pm-workers"}
+          ) > 0
+          and acs_pm_queue_ack_rate < acs_pm_queue_delivery_rate
+          and acs_pm_queue_backlog_slope > 0
+          and max without (subject, durable) (
+            time() - omc_pm_queue_sample_timestamp_seconds{subject="pm.file.received",durable="pm-workers"}
+          ) < 60
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 确认速率持续低于 consumer 投递速率"
+          description: |
+            durable consumer 存在未确认消息，且 ack rate 持续低于 delivery rate，
+            backlog slope 同时为正。worker 已无法追平输入，需扩容或排查数据库瓶颈。
+
+      - alert: OMCPMStreamingAggregationNotReady
+        expr: omc_pm_aggregation_ready == 0
+        for: 2m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 在线聚合子系统未就绪"
+          description: |
+            原始 PM 入库进程仍可工作，但在线聚合启动检查未通过。
+            检查 Redis AOF/noeviction、NATS PM_AGGREGATION stream 和 worker 日志。
+
+      - alert: OMCPMStreamingAggregationOutboxErrors
+        expr: increase(omc_pm_aggregation_outbox_errors_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 聚合 Outbox 持续发布失败"
+          description: |
+            15 分钟原始数据已经提交，但标准聚合事件未能持续发布。
+            检查 NATS 连接、PM_AGGREGATION stream 和 outbox 待发布行。
+
+      - alert: OMCPMStreamingAggregationFinalizeErrors
+        expr: increase(omc_pm_aggregation_finalize_errors_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 聚合窗口持续落库失败"
+          description: |
+            Redis 窗口状态会保留并重试。检查 TimescaleDB、窗口 failed 状态和 Redis 内存；
+            禁止通过查询原始 PM 表进行人工补算。

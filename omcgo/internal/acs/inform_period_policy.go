@@ -139,6 +139,17 @@ func (p *InformPeriodPolicy) LoadConfig(ctx context.Context) InformPeriodConfig 
 	return cfg
 }
 
+func (p *InformPeriodPolicy) ShouldProbe(ctx context.Context, productClass string) bool {
+	if !p.Enabled() {
+		return false
+	}
+	cfg := p.LoadConfig(ctx)
+	if isCPEClassForInformPeriod(productClass) {
+		return cfg.CPEAdjustEnable
+	}
+	return cfg.ENBAdjustEnable
+}
+
 // EnqueueGPVTask 入队 GetParameterValues 任务查询设备当前心跳周期。
 //
 // 返回 error 仅用于日志记录，不阻塞 Inform 处理。

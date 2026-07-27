@@ -47,6 +47,20 @@ func (s *SyncService) PathBEnabled(ctx context.Context, dev *model.Device) bool 
 // 返回 (true, nil) 表示已切到 Path B；(false, nil) 表示无法走新栈，调用方应降级旧栈；
 // (false, err) 表示新栈选中后执行出错（不再降级，由 engine 处理）。
 func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sourceID string, opts ...PathBOption) (bool, int, error) {
+	var pbOpts pathBOptions
+	for _, opt := range opts {
+		opt(&pbOpts)
+	}
+	if s.durableStarter != nil {
+		// Transition rule: every trigger reaches the durable parameter_sync_*
+		// data plane first. Returning handled=false intentionally falls back to
+		// the legacy sync-gpv Path B pipeline for now; remove this fallback once
+		// param_sync_running has proven stable in production.
+		handled, taskCount, err := s.durableStarter.StartDurableSync(ctx, dev, sourceID, pbOpts.reason, pbOpts.parameterPaths)
+		if err != nil || handled {
+			return handled, taskCount, err
+		}
+	}
 	matchedProduct, ok := s.resolveMatchedProduct(ctx, dev)
 	if !ok {
 		return false, 0, nil
@@ -56,18 +70,42 @@ func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sou
 		return false, 0, nil
 	}
 
-	var pbOpts pathBOptions
-	for _, opt := range opts {
-		opt(&pbOpts)
+	fullSync := len(pbOpts.parameterPaths) == 0
+	if strings.TrimSpace(sourceID) == "" {
+		sourceID = uuid.NewString()
+	}
+	if pbOpts.reason != "manual" {
+		if locker, ok := s.taskSvc.(syncGPVDeviceLocker); ok {
+			release, lockErr := locker.AcquireSyncGPVDeviceLock(ctx, dev.SerialNumber)
+			if lockErr != nil {
+				return true, 0, fmt.Errorf("lock path-b sync start: %w", lockErr)
+			}
+			defer release()
+		}
+		if guard, ok := s.taskSvc.(syncGPVOpenGuard); ok {
+			hasOpen, guardErr := guard.HasOpenSyncGPVTasksByDevice(ctx, dev.SerialNumber)
+			if guardErr != nil {
+				return true, 0, fmt.Errorf("check path-b sync running: %w", guardErr)
+			}
+			if hasOpen {
+				if s.logger != nil {
+					s.logger.Info("path-b sync skipped: sync already running",
+						zap.String("device_sn", dev.SerialNumber),
+						zap.String("reason", pbOpts.reason),
+						zap.String("source_id", sourceID))
+				}
+				return true, 0, nil
+			}
+		}
 	}
 
 	effectiveMappings := set.Mappings
-	if len(pbOpts.parameterPaths) == 0 {
+	if fullSync {
 		effectiveMappings = s.filterReadUnsupportedMappings(ctx, matchedProduct.ID, effectiveMappings)
 	}
 
 	prefixes := extractStorablePrefixes(effectiveMappings)
-	if len(pbOpts.parameterPaths) > 0 {
+	if !fullSync {
 		prefixes = extractStorablePrefixesForStandardPaths(set.Mappings, pbOpts.parameterPaths)
 	}
 	if len(prefixes) == 0 {
@@ -84,22 +122,25 @@ func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sou
 		return true, 0, nil
 	}
 
-	// T-NATS-PAYLOAD: instance-level expansion 防大对象 GPV 响应撑爆 NATS 单事件上限。
-	// 估算 single-prefix 响应字节数 > expandThreshold (600KB) 时,把 object prefix
-	// "DeviceGSM.Bts." 展开成 ["DeviceGSM.Bts.1.", ..., "DeviceGSM.Bts.N."],
-	// 每条独立成批 GPV task (object 前缀 size=1)。详见 sync_pathb_expand.go 文件注释。
+	// T-NATS-PAYLOAD: 5MB payload 预算内保留 object-level GPV,让所有实例一次同步。
+	// 只有估算 single-prefix 响应字节数 > expandThreshold (5MB) 时,才把 object prefix
+	// 展开成 instance-level prefix 作为异常保护。详见 sync_pathb_expand.go 文件注释。
 	prefixes = s.expandLargeObjectPrefixes(ctx, dev.ID, set.Mappings, prefixes)
 
 	// T-0123: 提取 reason 写 Redis 临时映射供 HandleSyncResultPathB 完成时读取（TTL=10min 覆盖 GPV 上界）。
 	if pbOpts.reason != "" && s.redisClient != nil {
-		key := fmt.Sprintf("provision:syncreason:%s", dev.ID.String())
-		if err := s.redisClient.Set(ctx, key, pbOpts.reason, 10*time.Minute).Err(); err != nil {
+		runKey := fmt.Sprintf("provision:syncreason:%s", sourceID)
+		deviceKey := fmt.Sprintf("provision:syncreason:%s", dev.ID.String())
+		if err := s.redisClient.Set(ctx, runKey, pbOpts.reason, 10*time.Minute).Err(); err != nil {
 			// Reason 写入失败不阻断 sync，差异日志降级为 reason=unknown
 			s.logger.Warn("write path-b sync reason failed",
 				zap.String("device_sn", dev.SerialNumber),
+				zap.String("source_id", sourceID),
 				zap.String("reason", pbOpts.reason),
 				zap.Error(err))
 		}
+		// Backward-compatible device-scoped hint for older result paths and logs.
+		_ = s.redisClient.Set(ctx, deviceKey, pbOpts.reason, 10*time.Minute).Err()
 	}
 
 	gpvTaskCount := len(buildGPVBatches(prefixes, s.batchSize))
@@ -111,6 +152,7 @@ func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sou
 	s.logger.Info("path-b sync started",
 		zap.String("device_sn", dev.SerialNumber),
 		zap.String("source", string(set.Source)),
+		zap.String("source_id", sourceID),
 		zap.String("reason", pbOpts.reason),
 		zap.Int("requested_paths", len(pbOpts.parameterPaths)),
 		zap.Int("prefixes", len(prefixes)),
@@ -232,8 +274,9 @@ func (s *SyncService) HandleSyncResultPathB(ctx context.Context, dev *model.Devi
 	)
 
 	// T-0127: 差异日志 — 把"之前上报、本次未上报"的 standardPath 差集写应用日志。
-	// 分批 GPV 响应只覆盖局部子树；仅在整轮 sync-gpv 最后一批完成后再记录，避免中途噪声。
-	if !fullSyncTrigger || finalizeSync {
+	// 仅 full-sync 的 sync-gpv 收尾才记录。MML LST、SPV 后置 GPV、北向调试 GPV
+	// 都是局部读取，响应集合不代表设备全量参数，不能触发 param_sync_missing。
+	if fullSyncTrigger && finalizeSync {
 		s.logPathBSyncDiff(ctx, dev, prevPaths, params)
 	}
 
@@ -327,7 +370,7 @@ func (s *SyncService) finalizePathBSync(ctx context.Context, dev *model.Device) 
 		}
 	}
 	if s.deviceInfoRefresher != nil {
-		if _, err := s.deviceInfoRefresher.SyncFromParameters(ctx, dev.ID, dev.Carrier, dev.Technology); err != nil {
+		if _, err := s.deviceInfoRefresher.SyncFromParameters(ctx, dev.ID, dev.Carrier, dev.Technology, dev.ProductClass); err != nil {
 			s.logger.Warn("refresh device_info from parameters failed (non-fatal)",
 				zap.String("device_id", dev.ID.String()),
 				zap.String("device_sn", dev.SerialNumber),
@@ -852,6 +895,13 @@ func extractStorablePrefixes(mappings []parammodel.ParamMapping) []string {
 	return out
 }
 
+// PathBStorablePrefixes exposes the established Path B selection algorithm to
+// the durable parameter-sync scheduler. Keeping one implementation prevents
+// the legacy and durable schedulers from drifting on template normalization.
+func PathBStorablePrefixes(mappings []parammodel.ParamMapping) []string {
+	return extractStorablePrefixes(mappings)
+}
+
 func extractStorablePrefixesForStandardPaths(mappings []parammodel.ParamMapping, standardPaths []string) []string {
 	seen := make(map[string]struct{}, len(mappings))
 	for _, m := range mappings {
@@ -879,6 +929,12 @@ func extractStorablePrefixesForStandardPaths(mappings []parammodel.ParamMapping,
 		}
 	}
 	return out
+}
+
+// PathBStorablePrefixesForStandardPaths exposes the established scoped Path B
+// selection algorithm for partial/readback durable syncs.
+func PathBStorablePrefixesForStandardPaths(mappings []parammodel.ParamMapping, standardPaths []string) []string {
+	return extractStorablePrefixesForStandardPaths(mappings, standardPaths)
 }
 
 func scopedPrefixForStandardPaths(privatePath, standardPath string, targets []string) (string, bool) {
@@ -911,17 +967,58 @@ func instantiatePrivateObjectPrefix(privatePath, standardPath, targetPrefix stri
 	privateParts := strings.Split(strings.TrimSuffix(privatePath, "."), ".")
 	standardParts := strings.Split(strings.TrimSuffix(standardPath, "."), ".")
 	targetParts := strings.Split(strings.TrimSuffix(targetPrefix, "."), ".")
-	if len(targetParts) > len(privateParts) || len(targetParts) > len(standardParts) {
+	if len(targetParts) > len(standardParts) {
 		return privatePath
 	}
-	out := make([]string, len(targetParts))
+	instances := make([]string, 0, 2)
 	for i := range targetParts {
-		out[i] = privateParts[i]
 		if standardParts[i] == "{i}" && targetParts[i] != "{i}" {
-			out[i] = targetParts[i]
+			instances = append(instances, targetParts[i])
+		}
+	}
+	end := correspondingPathTemplateEnd(standardParts, privateParts, len(targetParts)-1)
+	if end < 0 {
+		return privatePath
+	}
+	out := append([]string(nil), privateParts[:end+1]...)
+	instanceIndex := 0
+	for i := range out {
+		if out[i] == "{i}" && instanceIndex < len(instances) {
+			out[i] = instances[instanceIndex]
+			instanceIndex++
 		}
 	}
 	return strings.Join(out, ".") + "."
+}
+
+func correspondingPathTemplateEnd(from, to []string, fromEnd int) int {
+	if fromEnd < 0 || fromEnd >= len(from) {
+		return -1
+	}
+	if from[fromEnd] == "{i}" {
+		ordinal := 0
+		for i := 0; i <= fromEnd; i++ {
+			if from[i] == "{i}" {
+				ordinal++
+			}
+		}
+		seen := 0
+		for i, part := range to {
+			if part == "{i}" {
+				seen++
+				if seen == ordinal {
+					return i
+				}
+			}
+		}
+		return -1
+	}
+	for i := len(to) - 1; i >= 0; i-- {
+		if to[i] == from[fromEnd] {
+			return i
+		}
+	}
+	return -1
 }
 
 func instantiatePrivatePathFromStandardTarget(privatePath, standardPath, target string) string {

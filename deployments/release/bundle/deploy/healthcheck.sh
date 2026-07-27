@@ -26,6 +26,17 @@ set -u
 
 DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_PROJECT="${COMPOSE_PROJECT:-omcgo}"
+SKIP_MONITORING=0
+if [ -f "$DEPLOY_DIR/monitoring-profile-lib.sh" ]; then
+  . "$DEPLOY_DIR/monitoring-profile-lib.sh"
+else
+  echo "  [FAIL] 缺 $DEPLOY_DIR/monitoring-profile-lib.sh"
+  exit 1
+fi
+monitoring_profile_apply_runtime "$DEPLOY_DIR/.env" "$SKIP_MONITORING" || {
+  echo "  [FAIL] 无法读取 monitoring profile"
+  exit 1
+}
 
 # docker compose 命令
 if docker compose version >/dev/null 2>&1; then
@@ -39,9 +50,12 @@ fi
 
 # 组装 -f 参数（按文件存在情况）
 COMPOSE_FILES=()
-for f in docker-compose.infra.yml docker-compose.app.yml docker-compose.web.yml docker-compose.monitoring.yml; do
+for f in docker-compose.infra.yml docker-compose.app.yml docker-compose.web.yml; do
   [ -f "$DEPLOY_DIR/$f" ] && COMPOSE_FILES+=( -f "$DEPLOY_DIR/$f" )
 done
+if [ "$SKIP_MONITORING" = 0 ] && [ -f "$DEPLOY_DIR/docker-compose.monitoring.yml" ]; then
+  COMPOSE_FILES+=( -f "$DEPLOY_DIR/docker-compose.monitoring.yml" )
+fi
 DC=( $COMPOSE -p "$COMPOSE_PROJECT" "${COMPOSE_FILES[@]}" )
 
 ok=0; fail=0
@@ -78,11 +92,14 @@ if [ -f "$DEPLOY_DIR/docker-compose.web.yml" ]; then
   check "web 容器 running" container_running web
 fi
 
-if [ -f "$DEPLOY_DIR/docker-compose.monitoring.yml" ]; then
+if [ -f "$DEPLOY_DIR/docker-compose.monitoring.yml" ] && [ "$SKIP_MONITORING" = 0 ]; then
   echo "== docker compose 监控容器 =="
-  for svc in prometheus alertmanager grafana loki tempo otelcol; do
+  for svc in prometheus alertmanager grafana loki tempo otelcol nats-exporter nginx-exporter node-exporter cadvisor; do
     check "$svc 容器 running" container_running "$svc"
   done
+  # otelcol-contrib 是 distroless 镜像，不能假设容器内有 shell/curl/wget。
+  # monitoring compose 将 health_check extension 仅映射到宿主回环供外部探测。
+  check "otelcol health extension (:13133)" curl -fsS http://127.0.0.1:13133/
 fi
 
 echo "== 服务健康端点 =="

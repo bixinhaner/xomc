@@ -444,8 +444,8 @@ func assembleRoute(
 			})
 			continue
 		}
-		// is_counter='0' → KPI，公式取编号版 arithmetic。
-		arithmetic := derefStr(ind.Arithmetic)
+		// is_counter='0' → KPI，公式取编号版 runtime arithmetic。
+		arithmetic := indicator.CompileRuntimeArithmetic(dt, derefStr(ind.Arithmetic))
 		if arithmetic == "" {
 			logger.Warn("indicator marked KPI but arithmetic (numbered formula) empty; skip",
 				zap.String("indicator_id", ind.ID),

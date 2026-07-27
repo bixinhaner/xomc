@@ -42,7 +42,12 @@ import {
 import KPICard from '@/components/KPICard';
 import BarChart from '@/components/Charts/BarChart';
 import EmptyState from '@/components/common/EmptyState';
-import { useDashboardData, useDeviceStatusByType } from '@core/hooks/api/useDashboard';
+import {
+  useDashboardDeviceStats,
+  useDashboardSummary,
+  useDeviceStatusByType,
+} from '@core/hooks/api/useDashboard';
+import { useDashboardRealtime } from '@core/hooks/api/useDashboardRealtime';
 import { DashboardKPIModules } from './DashboardKPIModules';
 import type { TechnologyType } from './kpi-config';
 import { useTechnologyDictionary } from '@/components/dashboard/useTechnologyDictionary';
@@ -55,11 +60,18 @@ import { useShallow } from 'zustand/react/shallow';
 import { isRouteAllowed } from '@core/utils/routeAccess';
 import { useT } from '@/hooks/useT';
 import { useThemeToken } from '@/hooks/useThemeToken';
-import { useQueryClient } from '@tanstack/react-query';
 import { TiltCard } from '@/components/Effects';
 import { isDynamicMenuEnabled } from '@/components/MenuBootstrap/featureFlag';
 import { useScrollReveal } from '@/hooks/useScrollReveal';
 import { formatTimeAgo } from '@core/utils/format';
+import {
+  createDashboardCardSnapshot,
+  readDashboardCardSnapshot,
+  resolveDashboardCardApiScope,
+  resolveDashboardCardDisplay,
+  writeDashboardCardSnapshot,
+} from '@core/utils/dashboardCardSnapshot';
+import { runDashboardSummaryRefresh } from '@core/utils/dashboardRefresh';
 
 const { Title, Text } = Typography;
 
@@ -103,12 +115,38 @@ const QUICK_ACCESS_ITEMS = [
 export default function DashboardPage() {
   const navigate = useNavigate();
   const openTab = useTabStore((s) => s.openTab);
-  const { data: dashboardData, isLoading } = useDashboardData();
+  const currentUser = useUserStore((state) => state.currentUser);
+  const currentUserId = currentUser?.id;
+  const dashboardApiScope = resolveDashboardCardApiScope(
+    import.meta.env.VITE_API_BASE_URL,
+    import.meta.env.VITE_API_PROXY_TARGET,
+    window.location.origin,
+  );
+  useDashboardRealtime();
+  const {
+    data: dashboardSummary,
+    dataUpdatedAt: dashboardUpdatedAt,
+    isFetching,
+    isPending,
+    refetch: refetchDashboardSummary,
+  } = useDashboardSummary(dashboardApiScope, currentUserId);
+  const { data: dashboardDeviceStats } = useDashboardDeviceStats(
+    dashboardApiScope,
+    currentUserId,
+  );
+  // 每次渲染读取一个小型快照，确保成功 effect 写入后，后续任意 Query 状态变化
+  // 都会拿到最近值；避免额外 state/effect 级联渲染，也不会跨用户复用。
+  const dashboardSnapshot = currentUserId
+    ? readDashboardCardSnapshot(
+      window.localStorage,
+      dashboardApiScope,
+      currentUserId,
+    )
+    : undefined;
   const alarmStoreCounts = useAlarmStore(useShallow((s) => s.counts));
   const t = useT();
   const locale = useAppStore((state) => state.locale);
   const token = useThemeToken();
-  const queryClient = useQueryClient();
 
   // 制式切换状态 - 默认使用LTE（符合验收标准：LTE 6个Panel作为主要展示）
   const [technology, setTechnology] = useState<TechnologyType>('lte');
@@ -127,12 +165,36 @@ export default function DashboardPage() {
   }, [techOptions, technology]);
 
   // 刷新提示状态
-  const [lastUpdateTime, setLastUpdateTime] = useState<Date>(new Date());
+  const lastUpdateTime = useMemo(
+    () => {
+      const lastUpdatedAt = dashboardUpdatedAt || dashboardSnapshot?.updatedAt;
+      return lastUpdatedAt ? new Date(lastUpdatedAt) : undefined;
+    },
+    [dashboardSnapshot?.updatedAt, dashboardUpdatedAt]
+  );
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [timeAgoText, setTimeAgoText] = useState('');
 
+  // 只在 Summary 成功返回后更新四张卡快照；pending/error 不用默认值覆盖历史成功值。
+  useEffect(() => {
+    if (!dashboardSummary || !currentUserId) return;
+
+    const updatedAt = dashboardUpdatedAt || Date.now();
+    const nextSnapshot = createDashboardCardSnapshot(dashboardSummary, updatedAt);
+    writeDashboardCardSnapshot(
+      window.localStorage,
+      dashboardApiScope,
+      currentUserId,
+      nextSnapshot
+    );
+  }, [currentUserId, dashboardApiScope, dashboardSummary, dashboardUpdatedAt]);
+
   // 更新时间倒计时文案
   useEffect(() => {
+    if (!lastUpdateTime) {
+      return undefined;
+    }
+
     const updateTime = () => {
       setTimeAgoText(formatTimeAgo(lastUpdateTime, t));
     };
@@ -148,19 +210,19 @@ export default function DashboardPage() {
     if (isRefreshing) return;
     setIsRefreshing(true);
     try {
-      await queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-      setLastUpdateTime(new Date());
+      await runDashboardSummaryRefresh(refetchDashboardSummary);
       message.success(t('dashboard.refreshSuccess'));
     } catch (error) {
       message.error(t('dashboard.refreshFailed'));
-      console.error('Dashboard refresh failed:', error);
+      if (import.meta.env.DEV) {
+        console.error('Dashboard refresh failed:', error);
+      }
     } finally {
       setTimeout(() => setIsRefreshing(false), 500);
     }
-  }, [queryClient, isRefreshing, t]);
+  }, [isRefreshing, refetchDashboardSummary, t]);
 
   // 获取当前登录用户信息
-  const currentUser = useUserStore((state) => state.currentUser);
   const menuLoaded = useMenuStore((state) => state.loaded);
   const routePaths = useMenuStore((state) => state.routePaths);
 
@@ -169,21 +231,24 @@ export default function DashboardPage() {
 
   // KPI values — 用真实数据；未就绪时回退 0（加载期由 KPICard 的 loading 态显示骨架，
   // 不再展示硬编码占位数字，避免硬刷新闪现假数。issue #370）
-  const totalDevices = dashboardData?.summary?.deviceCounts?.total ?? 0;
-  const onlineDevices = dashboardData?.summary?.deviceCounts?.online ?? 0;
-  const activeAlarms = dashboardData?.summary?.alarmCounts?.total ?? 0;
-  const runningTasks = dashboardData?.summary?.taskSummary?.running ?? 0;
+  const cardDisplay = resolveDashboardCardDisplay(
+    dashboardSummary,
+    dashboardSnapshot,
+    isPending
+  );
+  const totalDevices = dashboardDeviceStats?.total ?? cardDisplay.totalDevices;
+  const onlineDevices = dashboardDeviceStats?.online_count ?? cardDisplay.onlineDevices;
+  const activeAlarms = cardDisplay.activeAlarms;
+  const currentActiveUE = cardDisplay.activeUE;
+  const deviceCardsLoading = !dashboardDeviceStats && cardDisplay.loading;
+  const summaryCardsLoading = cardDisplay.loading;
+  const runningTasks = dashboardSummary?.taskSummary?.running ?? 0;
 
   // KPI trend data — 用于卡片显示趋势
-  const kpiDeltas = dashboardData?.summary?.kpiDeltas ?? {};
+  const kpiDeltas = dashboardSummary?.kpiDeltas ?? {};
   const totalDevicesDelta = kpiDeltas['total_devices'];
   const activeAlarmsDelta = kpiDeltas['active_alarms'];
   const ueTrendDelta = kpiDeltas['UE_ACTIVE'];
-
-  // UE 当前值 — 无数据时保持 undefined，UI 显示 '--' 区分"真 0"与"无数据"
-  const kpiSummary = dashboardData?.summary?.kpiSummary ?? {};
-  const ueRaw = kpiSummary['UE_ACTIVE'];
-  const currentActiveUE = typeof ueRaw === 'number' ? Math.floor(ueRaw) : undefined;
 
   const quickAccessItems = useMemo(
     () => QUICK_ACCESS_ITEMS.filter((item) =>
@@ -289,22 +354,25 @@ export default function DashboardPage() {
         <Title level={4} style={{ margin: 0 }}>
           {t('nav.dashboard')}
         </Title>
-        {/* 刷新控制栏 */}
-        {DASHBOARD_CONFIG.showRefreshControls && (
         <Space size="middle">
           <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-            {t('dashboard.lastUpdate')}: {timeAgoText || formatTimeAgo(lastUpdateTime, t)}
+            {t('dashboard.lastUpdate')}:{' '}
+            {lastUpdateTime
+              ? timeAgoText || formatTimeAgo(lastUpdateTime, t)
+              : '--'}
           </Typography.Text>
+          {/* 刷新按钮 */}
+          {DASHBOARD_CONFIG.showRefreshControls && (
           <Button
             icon={<ReloadOutlined />}
-            loading={isRefreshing || isLoading}
+            loading={isRefreshing || isFetching}
             onClick={handleManualRefresh}
             size="small"
           >
             {t('dashboard.refresh')}
           </Button>
+          )}
         </Space>
-        )}
       </div>
 
       {/* Row 1: KPI Cards */}
@@ -316,7 +384,9 @@ export default function DashboardPage() {
             icon={<AppstoreOutlined />}
             iconBgColor="#e6f4ff"
             iconColor={token.colorPrimary}
-            loading={isLoading}
+            loading={deviceCardsLoading}
+            hasComparison={totalDevicesDelta?.hasComparison === true}
+            unavailableText={t('dashboard.notComparable')}
             trend={totalDevicesDelta?.trend ?? 'stable'}
             delta={totalDevicesDelta?.changePercent !== undefined ? `${totalDevicesDelta.changePercent.toFixed(1)}%` : undefined}
             deltaLabel={totalDevicesDelta?.compareType === 'last_week' ? t('dashboard.vsLastWeek') : t('dashboard.vsYesterday')}
@@ -333,7 +403,7 @@ export default function DashboardPage() {
             icon={<WifiOutlined />}
             iconBgColor="#f6ffed"
             iconColor="#52C41A"
-            loading={isLoading}
+            loading={deviceCardsLoading}
             trend="up"
             delta={totalDevices > 0
               ? `${Math.round((onlineDevices / totalDevices) * 100)}%`
@@ -352,7 +422,9 @@ export default function DashboardPage() {
             icon={<AlertOutlined />}
             iconBgColor="#fff2f0"
             iconColor="#F5222D"
-            loading={isLoading}
+            loading={summaryCardsLoading}
+            hasComparison={activeAlarmsDelta?.hasComparison === true}
+            unavailableText={t('dashboard.notComparable')}
             trend={activeAlarmsDelta?.trend ?? 'stable'}
             delta={activeAlarmsDelta?.changePercent !== undefined ? `${activeAlarmsDelta.changePercent.toFixed(1)}%` : undefined}
             deltaLabel={activeAlarmsDelta?.compareType === 'yesterday' ? t('dashboard.vsYesterday') : t('dashboard.vsLastWeek')}
@@ -365,11 +437,13 @@ export default function DashboardPage() {
         <Col xs={24} sm={12} lg={6}>
           <KPICard
             title={t('dashboard.activeUE')}
-            value={currentActiveUE ?? '--'}
+            value={currentActiveUE}
             icon={<TeamOutlined />}
             iconBgColor="#f6ffed"
             iconColor="#10B981"
-            loading={isLoading}
+            loading={summaryCardsLoading}
+            hasComparison={ueTrendDelta?.hasComparison === true}
+            unavailableText={t('dashboard.notComparable')}
             trend={ueTrendDelta?.trend ?? 'stable'}
             delta={ueTrendDelta?.changePercent !== undefined ? `${ueTrendDelta.changePercent.toFixed(1)}%` : undefined}
             deltaLabel={ueTrendDelta?.changePercent !== undefined ? t('dashboard.vsLastWeek') : undefined}
@@ -384,7 +458,7 @@ export default function DashboardPage() {
             icon={<PlayCircleOutlined />}
             iconBgColor="#f9f0ff"
             iconColor="#722ED1"
-            loading={isLoading}
+            loading={isPending}
             trend="stable"
             minHeight={20}
             onClick={() => void navigate('/ops/tasks')}
@@ -467,9 +541,9 @@ export default function DashboardPage() {
             styles={{ body: { padding: '8px 0 0', flex: 1, display: 'flex', flexDirection: 'column' } }}
             style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
           >
-            {isLoading ? (
+            {isPending ? (
               <Spin
-                spinning={isLoading}
+                spinning={isPending}
                 style={{ height: 260, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               >
                 <div style={{ height: 260 }} />

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import {
   Alert,
   Button,
@@ -6,7 +6,6 @@ import {
   Checkbox,
   Form,
   Input,
-  InputNumber,
   Segmented,
   Select,
   Space,
@@ -31,6 +30,7 @@ import {
 } from '@core/hooks/api/useAgentConfig';
 import type { AgentAdminConfigUpdate } from '@core/types/agentConfig';
 import { useT } from '@/hooks/useT';
+import { AddonInput, AddonInputNumber } from '@/components/common/InputAddon';
 
 type AgentFormValues = AgentAdminConfigUpdate & {
   agentStudioServiceToken?: string;
@@ -66,6 +66,11 @@ export default function AgentSettings() {
   const testM = useTestAdminAgentConfig();
   const syncM = useSyncAdminAgentConfig();
   const config = configQ.data;
+  const canOperate = configQ.isSuccess && !configQ.isFetching && Boolean(config);
+  const canOperateRef = useRef(canOperate);
+  useLayoutEffect(() => {
+    canOperateRef.current = canOperate;
+  }, [canOperate]);
   const enabled = Form.useWatch('enabled', form);
   const allowedMethods = Form.useWatch('allowedMethods', form) ?? READ_ONLY_METHODS;
   const executionMode = allowedMethods.some((method) => method !== 'GET') ? 'write' : 'read';
@@ -76,7 +81,6 @@ export default function AgentSettings() {
       enabled: config.enabled,
       agentStudioBaseUrl: config.agentStudioBaseUrl,
       agentStudioServiceToken: '',
-      connectorSlug: config.connectorSlug,
       allowedMethods: config.policy.allowedMethods,
       blockedPathPrefixes: config.policy.blockedPathPrefixes,
       toolTimeoutSeconds: config.policy.toolTimeoutSeconds,
@@ -84,15 +88,22 @@ export default function AgentSettings() {
     });
   }, [config, form]);
 
+  const ensureCanOperate = () => {
+    if (canOperateRef.current) return true;
+    void message.error(t('empty.loadFailed'));
+    return false;
+  };
+
   const buildPayload = async (): Promise<AgentAdminConfigUpdate | null> => {
+    if (!ensureCanOperate()) return null;
     try {
       const values = await form.validateFields();
+      if (!ensureCanOperate()) return null;
       const token = values.agentStudioServiceToken?.trim();
       return {
         enabled: Boolean(values.enabled),
         agentStudioBaseUrl: values.agentStudioBaseUrl?.trim() ?? '',
         agentStudioServiceToken: token || undefined,
-        connectorSlug: values.connectorSlug?.trim() || undefined,
         allowedMethods: values.allowedMethods?.length ? values.allowedMethods : READ_ONLY_METHODS,
         blockedPathPrefixes: values.blockedPathPrefixes ?? [],
         toolTimeoutSeconds: values.toolTimeoutSeconds,
@@ -106,7 +117,7 @@ export default function AgentSettings() {
 
   const handleSave = async () => {
     const payload = await buildPayload();
-    if (!payload) return;
+    if (!payload || !ensureCanOperate()) return;
     try {
       await saveM.mutateAsync(payload);
       void message.success(t('system.agent.saveSuccess'));
@@ -117,7 +128,7 @@ export default function AgentSettings() {
 
   const handleTest = async () => {
     const payload = await buildPayload();
-    if (!payload) return;
+    if (!payload || !ensureCanOperate()) return;
     try {
       await testM.mutateAsync(payload);
       void message.success(t('system.agent.testSuccess'));
@@ -128,7 +139,7 @@ export default function AgentSettings() {
 
   const handleSync = async () => {
     const payload = await buildPayload();
-    if (!payload) return;
+    if (!payload || !ensureCanOperate()) return;
     try {
       await syncM.mutateAsync(payload);
       void message.success(t('system.agent.syncSuccess'));
@@ -148,12 +159,22 @@ export default function AgentSettings() {
   return (
     <Spin spinning={configQ.isLoading || configQ.isFetching}>
       <Form form={form} layout="vertical" size="small" initialValues={{ enabled: false }}>
+        {configQ.isError ? (
+          <Alert
+            type="error"
+            showIcon
+            style={{ marginBottom: 16 }}
+            title={t('empty.loadFailed')}
+            description={t('empty.loadFailedDesc')}
+            action={<Button onClick={() => void configQ.refetch()}>{t('common.retry')}</Button>}
+          />
+        ) : null}
         {config?.lastError ? (
           <Alert
             type="error"
             showIcon
             style={{ marginBottom: 16 }}
-            message={t('system.agent.lastError')}
+            title={t('system.agent.lastError')}
             description={config.lastError}
           />
         ) : null}
@@ -168,7 +189,7 @@ export default function AgentSettings() {
             label={t('system.agent.agentStudioBaseUrl')}
             rules={[urlRule]}
           >
-            <Input placeholder="https://agent.example.com" />
+            <Input placeholder="https://agent.example.com" autoComplete="off" />
           </Form.Item>
           <Form.Item
             name="agentStudioServiceToken"
@@ -195,8 +216,11 @@ export default function AgentSettings() {
           >
             <Input.Password placeholder={t('system.agent.serviceTokenPlaceholder')} autoComplete="new-password" />
           </Form.Item>
-          <Form.Item name="connectorSlug" label={t('system.agent.connectorSlug')}>
-            <Input placeholder="external-agent-..." />
+          <Form.Item
+            label={t('system.agent.connectorSlug')}
+            extra={t('system.agent.connectorSlugManaged')}
+          >
+            <Input value={config?.connectorSlug ?? ''} readOnly />
           </Form.Item>
         </Card>
 
@@ -205,7 +229,7 @@ export default function AgentSettings() {
           title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.agent.section.runtime')}</span>}
           style={{ marginBottom: 16 }}
         >
-          <Space direction="vertical" style={{ width: '100%' }} size={12}>
+          <Space orientation="vertical" style={{ width: '100%' }} size={12}>
             <Space>
               <Typography.Text type="secondary">{t('system.agent.status')}</Typography.Text>
               <Tag color={statusColor(config?.status ?? 'not_configured')}>
@@ -217,7 +241,7 @@ export default function AgentSettings() {
                 </Typography.Text>
               ) : null}
             </Space>
-            <Input
+            <AddonInput
               readOnly
               addonBefore={t('system.agent.connectorId')}
               value={config?.connectorId || t('system.agent.emptyValue')}
@@ -230,7 +254,7 @@ export default function AgentSettings() {
                 />
               }
             />
-            <Input
+            <AddonInput
               readOnly
               addonBefore={t('system.agent.runtimeStreamUrl')}
               value={config?.runtimeStreamUrl || t('system.agent.emptyValue')}
@@ -250,7 +274,7 @@ export default function AgentSettings() {
           size="small"
           title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.agent.section.security')}</span>}
         >
-          <Space direction="vertical" style={{ width: '100%' }} size={14}>
+          <Space orientation="vertical" style={{ width: '100%' }} size={14}>
             <Form.Item name="enabled" label={t('system.agent.visible')} valuePropName="checked" style={{ marginBottom: 0 }}>
               <Switch />
             </Form.Item>
@@ -287,14 +311,19 @@ export default function AgentSettings() {
                 label={t('system.agent.maxResponseBytes')}
                 rules={[{ type: 'number', min: 4096, max: 4194304 }]}
               >
-                <InputNumber min={4096} max={4194304} step={4096} style={{ width: 180 }} />
+                <AddonInputNumber min={4096} max={4194304} step={4096} compactStyle={{ width: 180 }} />
               </Form.Item>
               <Form.Item
                 name="toolTimeoutSeconds"
                 label={t('system.agent.toolTimeoutSeconds')}
                 rules={[{ type: 'number', min: 1, max: 300 }]}
               >
-                <InputNumber min={1} max={300} style={{ width: 160 }} addonAfter={t('common.seconds')} />
+                <AddonInputNumber
+                  min={1}
+                  max={300}
+                  compactStyle={{ width: 160 }}
+                  addonAfter={t('common.seconds')}
+                />
               </Form.Item>
             </Space>
             <Form.Item name="blockedPathPrefixes" label={t('system.agent.blockedPathPrefixes')}>
@@ -305,7 +334,7 @@ export default function AgentSettings() {
                 options={(config?.policy.blockedPathPrefixes ?? []).map((value) => ({ label: value, value }))}
               />
             </Form.Item>
-            <Alert type="info" showIcon message={t('system.agent.securityHint')} />
+            <Alert type="info" showIcon title={t('system.agent.securityHint')} />
           </Space>
         </Card>
 
@@ -314,13 +343,19 @@ export default function AgentSettings() {
             <Button icon={<ReloadOutlined />} onClick={() => configQ.refetch()}>
               {t('system.agent.reset')}
             </Button>
-            <Button icon={<ApiOutlined />} loading={testM.isPending} onClick={handleTest}>
+            <Button icon={<ApiOutlined />} loading={testM.isPending} disabled={!canOperate} onClick={handleTest}>
               {t('system.agent.test')}
             </Button>
-            <Button icon={<SaveOutlined />} loading={saveM.isPending} onClick={handleSave}>
+            <Button icon={<SaveOutlined />} loading={saveM.isPending} disabled={!canOperate} onClick={handleSave}>
               {t('system.agent.save')}
             </Button>
-            <Button type="primary" icon={<CheckCircleOutlined />} loading={syncM.isPending} onClick={handleSync}>
+            <Button
+              type="primary"
+              icon={<CheckCircleOutlined />}
+              loading={syncM.isPending}
+              disabled={!canOperate}
+              onClick={handleSync}
+            >
               {t('system.agent.sync')}
             </Button>
           </Space>

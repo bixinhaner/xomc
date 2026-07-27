@@ -31,7 +31,9 @@
       "in": "query",
       "required": false,
       "type": "string",
+      "description": "业务分类，如日志收集 station_log。",
       "schema": {
+        "description": "业务分类，如日志收集 station_log。",
         "type": "string"
       }
     },
@@ -40,7 +42,9 @@
       "in": "query",
       "required": false,
       "type": "string",
+      "description": "匹配任务名、设备名、设备 SN 或产品类型。",
       "schema": {
+        "description": "匹配任务名、设备名、设备 SN 或产品类型。",
         "type": "string"
       }
     },
@@ -89,7 +93,9 @@
       "in": "query",
       "required": false,
       "type": "string",
+      "description": "设备执行状态；failed 用于定位失败记录。",
       "schema": {
+        "description": "设备执行状态；failed 用于定位失败记录。",
         "type": "string"
       }
     },
@@ -109,7 +115,9 @@
       "in": "query",
       "required": false,
       "type": "string",
+      "description": "任务类型，如 RUNTIME_LOG_COLLECT。",
       "schema": {
+        "description": "任务类型，如 RUNTIME_LOG_COLLECT。",
         "type": "string"
       }
     },

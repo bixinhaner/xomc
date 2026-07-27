@@ -10,6 +10,20 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
+func metricWithLDN(path, ldn string, setLDN bool) PMMetric {
+	t := time.Date(2026, 5, 25, 17, 0, 0, 0, time.UTC)
+	m := PMMetric{
+		DeviceOUI: "48BF74", DeviceSN: "1202000240194DP0015",
+		MetricPath: path, MetricType: MetricTypeCounter, MetricValue: 123,
+		Granularity: Granularity15Min, Time: t,
+		StartTime: t.Add(-15 * time.Minute), EndTime: t, IngestTime: t,
+	}
+	if setLDN {
+		m.ObjectLDN = &ldn
+	}
+	return m
+}
+
 // MetricFromKPIValue 必须给 KPI 行补出完整 15min 窗口（start = end - 15min），否则
 // pm_metrics.start_time == end_time，前端悬浮框「开始/结束」显示同一时刻（#199 / #208）。
 
@@ -46,6 +60,18 @@ func Test_MetricFromKPIValue_NoCellID_LdnNil(t *testing.T) {
 	assert.Equal(t, end.Add(-15*time.Minute), m.StartTime)
 	assert.Equal(t, end, m.EndTime)
 	assert.Equal(t, m.StartTime, m.Time, "不变量：time == start_time")
+}
+
+func Test_MetricFromKPIValue_CarriesStatisType(t *testing.T) {
+	m := MetricFromKPIValue(model.KPIValue{
+		Time:        time.Date(2026, 7, 20, 10, 15, 0, 0, time.UTC),
+		IndicatorID: "KAVG001",
+		KPIValue:    12.3,
+		StatisType:  "avg",
+	})
+
+	require.NotNil(t, m.StatisType)
+	assert.Equal(t, StatisAvg, *m.StatisType)
 }
 
 func Test_MetricFromCounter_StartWindow_NoRegression(t *testing.T) {

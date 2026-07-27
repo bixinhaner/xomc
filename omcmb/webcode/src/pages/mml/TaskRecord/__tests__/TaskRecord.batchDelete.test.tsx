@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Modal } from 'antd';
 import { IntlProvider } from 'react-intl';
 import type { Key, ReactNode } from 'react';
@@ -6,11 +6,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import zhCN from '@core/i18n/zh-CN';
 
 const mocks = vi.hoisted(() => ({
+  startTasks: vi.fn(),
   cancelTasks: vi.fn(),
   deleteTasks: vi.fn(),
+  getTaskResultsPage: vi.fn(),
   refetchTasks: vi.fn(),
+  useMMLTaskResults: vi.fn(),
   useMMLTasks: vi.fn(),
   taskItems: [] as Array<Record<string, unknown>>,
+  taskResultItems: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock('@core/hooks/api/useMML', () => ({
@@ -25,28 +29,37 @@ vi.mock('@core/hooks/api/useMML', () => ({
       refetch: mocks.refetchTasks,
     };
   },
-  useMMLTaskResults: () => ({
+  useMMLTaskResults: (
+    taskId: string | null,
+    page: number,
+    pageSize: number,
+    options?: { pollWhileTaskActive?: boolean },
+  ) => {
+    mocks.useMMLTaskResults({ taskId, page, pageSize, options });
+    return {
+      data: {
+        total: mocks.taskResultItems.length,
+        items: mocks.taskResultItems,
+      },
+      isLoading: false,
+      isFetching: false,
+    };
+  },
+  useMMLScriptRuns: () => ({
     data: {
-      total: 1,
-      items: [{
-        deviceTaskId: 'device-task-1',
-        deviceSn: 'SN001',
-        deviceName: '基站 A',
-        commandCode: 'LST DEVICE_INFO',
-        status: 'completed',
-        result: {
-          success: true,
-          rawOutput: '<cwmp:GetParameterValuesResponse />',
-          parsedData: null,
-          executionTime: 30,
-          timestamp: '2026-07-11T00:00:01Z',
-        },
-      }],
+      total: 0,
+      items: [],
     },
     isLoading: false,
   }),
+  getMMLTaskResultsPage: mocks.getTaskResultsPage,
+  useStartMMLTasks: () => ({ mutate: mocks.startTasks, isPending: false }),
   useCancelMMLTasks: () => ({ mutate: mocks.cancelTasks, isPending: false }),
   useDeleteMMLTasks: () => ({ mutate: mocks.deleteTasks, isPending: false }),
+}));
+
+vi.mock('@core/utils/saveBlob', () => ({
+  saveBlob: vi.fn(),
 }));
 
 vi.mock('@/components/FilterBar', () => ({
@@ -57,6 +70,7 @@ vi.mock('@/components/FilterBar', () => ({
     <div data-testid="filter-bar">
       <button onClick={() => onSearch({ taskOrigin: 'console' })} type="button">search-console</button>
       <button onClick={() => onSearch({ taskOrigin: 'script' })} type="button">search-script</button>
+      <button onClick={() => onSearch({ scriptName: ' 巡检脚本 ' })} type="button">search-script-name</button>
       <button onClick={onReset} type="button">reset</button>
     </div>
   ),
@@ -143,6 +157,7 @@ const confirmSpy = vi.spyOn(Modal, 'confirm').mockImplementation((config) => {
 });
 
 import TaskRecord from '..';
+import { saveBlob } from '@core/utils/saveBlob';
 
 function buildTask(overrides: Record<string, unknown> = {}) {
   return {
@@ -176,8 +191,42 @@ describe('TaskRecord batch delete and console task display', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.taskItems = [buildTask()];
+    mocks.taskResultItems = [{
+      deviceTaskId: 'device-task-1',
+      deviceSn: 'SN001',
+      deviceName: '基站 A',
+      commandCode: 'LST DEVICE_INFO',
+      status: 'completed',
+      result: {
+        success: true,
+        rawOutput: '<cwmp:GetParameterValuesResponse />',
+        parsedData: null,
+        executionTime: 30,
+        timestamp: '2026-07-11T00:00:01Z',
+      },
+    }];
+    mocks.startTasks.mockImplementation((_ids: string[], options?: { onSuccess?: () => void }) => options?.onSuccess?.());
     mocks.cancelTasks.mockImplementation((_ids: string[], options?: { onSuccess?: () => void }) => options?.onSuccess?.());
     mocks.deleteTasks.mockImplementation((_ids: string[], options?: { onSuccess?: () => void }) => options?.onSuccess?.());
+    mocks.getTaskResultsPage.mockResolvedValue({
+      total: 1,
+      page: 1,
+      pageSize: 100,
+      items: [{
+        deviceTaskId: 'device-task-1',
+        deviceSn: 'SN001',
+        deviceName: '基站 A',
+        commandCode: 'LST DEVICE_INFO',
+        status: 'completed',
+        result: {
+          success: true,
+          rawOutput: '<cwmp:GetParameterValuesResponse />',
+          parsedData: null,
+          executionTime: 30,
+          timestamp: '2026-07-11T00:00:01Z',
+        },
+      }],
+    });
     confirmSpy.mockClear();
   });
 
@@ -187,10 +236,297 @@ describe('TaskRecord batch delete and console task display', () => {
     expect(screen.getByText('控制台执行')).toBeInTheDocument();
 
     const viewButton = screen.getByRole('button', { name: '查看' });
+    expect(viewButton.textContent?.trim()).toBe('');
     fireEvent.click(viewButton);
 
     expect(screen.getByText('LST')).toBeInTheDocument();
     expect(screen.getByText('DEVICE_INFO')).toBeInTheDocument();
+  });
+
+  it('shows current script name for script task records and double dash for console records', () => {
+    mocks.taskItems = [
+      buildTask({
+        id: 'task-script-name-1',
+        taskName: '用户改过的任务名',
+        taskOrigin: 'script',
+        scriptName: '当前脚本名称',
+      }),
+      buildTask({
+        id: 'task-console-name-1',
+        taskName: '控制台任务',
+        taskOrigin: 'console',
+      }),
+    ];
+
+    const { container } = renderPage();
+
+    const scriptNameCells = Array.from(container.querySelectorAll('td[data-column-key="scriptName"]'))
+      .map((cell) => cell.textContent?.trim());
+    expect(scriptNameCells).toEqual(['当前脚本名称', '--']);
+  });
+
+  it('shows script task execution policy in the task detail', () => {
+    mocks.taskItems = [
+      buildTask({
+        id: 'task-script-policy-1',
+        taskName: '脚本周期任务',
+        taskOrigin: 'script',
+        executeType: 'periodic',
+        periodStart: '2026-07-18T01:00:00Z',
+        periodEnd: '2026-07-20T01:00:00Z',
+        periodTime: '02:30:00',
+        offlineRetry: true,
+        offlineRetryWait: 120,
+        failedRetry: true,
+        failedRetryCount: 2,
+        failedRetryInterval: 30,
+      }),
+    ];
+
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: '查看' }));
+
+    expect(screen.getByText('执行配置')).toBeInTheDocument();
+    expect(screen.getByText('执行方式')).toBeInTheDocument();
+    expect(screen.getAllByText('周期任务').length).toBeGreaterThan(0);
+    expect(screen.getByText('周期时间')).toBeInTheDocument();
+    expect(screen.getByText('02:30:00')).toBeInTheDocument();
+    expect(screen.getByText('离线等待重试')).toBeInTheDocument();
+    expect(screen.getByText('120 秒')).toBeInTheDocument();
+    expect(screen.getByText('失败重试')).toBeInTheDocument();
+    expect(screen.getByText('2 次 / 30 秒')).toBeInTheDocument();
+  });
+
+  it('updates the open task detail summary when polling refreshes the task row', () => {
+    mocks.taskItems = [
+      buildTask({
+        id: 'task-live-1',
+        taskName: '脚本任务',
+        taskOrigin: 'script',
+        status: 'running',
+        result: undefined,
+        totalDevices: 3,
+        successCount: 1,
+        failedCount: 0,
+      }),
+    ];
+
+    const { rerender } = renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: '查看' }));
+    expect(screen.getByText('状态: 执行中')).toBeInTheDocument();
+    expect(screen.getByText('成功：1')).toBeInTheDocument();
+
+    mocks.taskItems = [
+      buildTask({
+        id: 'task-live-1',
+        taskName: '脚本任务',
+        taskOrigin: 'script',
+        status: 'completed',
+        result: 'success',
+        totalDevices: 3,
+        successCount: 3,
+        failedCount: 0,
+      }),
+    ];
+
+    rerender(
+      <IntlProvider locale="zh-CN" defaultLocale="zh-CN" messages={zhCN}>
+        <TaskRecord />
+      </IntlProvider>,
+    );
+
+    expect(screen.getByText('状态: 已完成')).toBeInTheDocument();
+    expect(screen.getByText('成功：3')).toBeInTheDocument();
+    expect(screen.queryByText('状态: 执行中')).not.toBeInTheDocument();
+  });
+
+  it('does not keep task-active result polling alive from a stale detail row after the task leaves the list', () => {
+    mocks.taskItems = [
+      buildTask({
+        id: 'task-filtered-1',
+        taskName: '筛选中的任务',
+        taskOrigin: 'script',
+        status: 'running',
+        result: undefined,
+        totalDevices: 1,
+        successCount: 0,
+        failedCount: 0,
+      }),
+    ];
+    mocks.taskResultItems = [{
+      deviceTaskId: 'device-task-1',
+      deviceSn: 'SN001',
+      deviceName: '基站 A',
+      commandCode: 'LST DEVICE_INFO',
+      status: 'completed',
+      result: {
+        success: true,
+        rawOutput: '<cwmp:GetParameterValuesResponse />',
+        parsedData: null,
+        executionTime: 30,
+        timestamp: '2026-07-11T00:00:01Z',
+      },
+    }];
+
+    const { rerender } = renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: '查看' }));
+    expect(mocks.useMMLTaskResults).toHaveBeenLastCalledWith(expect.objectContaining({
+      taskId: 'task-filtered-1',
+      options: { pollWhileTaskActive: true },
+    }));
+
+    mocks.taskItems = [];
+
+    rerender(
+      <IntlProvider locale="zh-CN" defaultLocale="zh-CN" messages={zhCN}>
+        <TaskRecord />
+      </IntlProvider>,
+    );
+
+    expect(mocks.useMMLTaskResults).toHaveBeenLastCalledWith(expect.objectContaining({
+      taskId: 'task-filtered-1',
+      options: { pollWhileTaskActive: false },
+    }));
+  });
+
+  it('shows aggregate result and uses executable progress count in task list', () => {
+    mocks.taskItems = [
+      buildTask({
+        id: 'task-partial-1',
+        taskName: '脚本任务',
+        taskOrigin: 'script',
+        executeMode: 'device_bound',
+        commandCount: 5,
+        planItemCount: 4,
+        successCount: 4,
+        failedCount: 1,
+        result: 'partial',
+      }),
+    ];
+
+    const { container } = renderPage();
+
+    expect(container.querySelector('td[data-column-key="result"]')?.textContent).toContain('部分成功');
+    expect(container.querySelector('td[data-column-key="progress"]')?.textContent).toBe('5/5');
+  });
+
+  it('shows latest periodic run progress without the latest-run label in task list', () => {
+    mocks.taskItems = [
+      buildTask({
+        id: 'task-periodic-parent-1',
+        taskName: '周期主任务',
+        taskOrigin: 'script',
+        executeType: 'periodic',
+        successCount: 0,
+        failedCount: 0,
+        latestRun: {
+          id: 'task-periodic-child-1',
+          executeType: 'periodic',
+          executeMode: 'device_bound',
+          status: 'running',
+          totalDevices: 3,
+          successCount: 2,
+          failedCount: 0,
+          commandCount: 3,
+          planItemCount: 3,
+          createdAt: '2026-07-23T01:00:00Z',
+          updatedAt: '2026-07-23T01:01:00Z',
+        },
+      }),
+    ];
+
+    const { container } = renderPage();
+
+    const progressText = container.querySelector('td[data-column-key="progress"]')?.textContent;
+    expect(progressText).toBe('2/3');
+    expect(screen.queryByText('最近一次')).not.toBeInTheDocument();
+  });
+
+  it('does not render failed device task results as pending', () => {
+    mocks.taskResultItems = [{
+      deviceTaskId: 'device-task-failed',
+      deviceSn: 'SN002',
+      deviceName: '基站 B',
+      commandCode: 'RMV Device.X.9999.',
+      status: 'failed',
+      result: {
+        success: false,
+        rawOutput: '',
+        parsedData: null,
+        executionTime: 30,
+        timestamp: '2026-07-11T00:00:01Z',
+      },
+      failReason: 'instance does not exist',
+    }];
+
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: '查看' }));
+
+    expect(screen.queryByText('等待中')).not.toBeInTheDocument();
+    expect(screen.getAllByText('失败').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('exports the full viewed task result list as CSV', async () => {
+    mocks.taskItems = [buildTask({ id: 'task-script-1', taskName: '脚本任务', taskOrigin: 'script' })];
+    mocks.getTaskResultsPage.mockResolvedValueOnce({
+      total: 2,
+      page: 1,
+      pageSize: 100,
+      items: [
+        {
+          deviceTaskId: 'device-task-1',
+          deviceSn: 'SN,001',
+          deviceName: '基站 "A"',
+          planLineNo: 21,
+          planOrder: 1,
+          mmlScript: '=HYPERLINK("http://bad")',
+          status: 'completed',
+          request: { method: 'SetParameterValues', rawRequest: '<xml attr="1">x</xml>' },
+          result: {
+            success: true,
+            rawOutput: 'line1\nline2',
+            parsedData: null,
+            executionTime: 30,
+            timestamp: '2026-07-11T00:00:01Z',
+          },
+        },
+        {
+          deviceTaskId: 'device-task-2',
+          deviceSn: 'SN002',
+          deviceName: '基站 B',
+          commandCode: 'LST Device.DeviceInfo.SoftwareVersion',
+          status: 'completed',
+          result: {
+            success: true,
+            rawOutput: 'OK',
+            parsedData: null,
+            executionTime: 20,
+            timestamp: '2026-07-11T00:00:02Z',
+          },
+        },
+      ],
+    });
+
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: '查看' }));
+    fireEvent.click(screen.getByRole('button', { name: '导出 CSV' }));
+
+    await waitFor(() => expect(saveBlob).toHaveBeenCalled());
+    expect(mocks.getTaskResultsPage).toHaveBeenCalledWith('task-script-1', 1, 100);
+
+    const [content, filename, mime] = vi.mocked(saveBlob).mock.calls[0];
+    expect(filename).toMatch(/^mml-task-results-脚本任务-\d{8}-\d{6}\.csv$/);
+    expect(mime).toBe('text/csv;charset=utf-8');
+    expect(String(content)).toContain('\ufeff');
+    expect(String(content)).toContain('"SN,001"');
+    expect(String(content)).toContain('"基站 ""A"""');
+    expect(String(content)).toContain('"\'=HYPERLINK(""http://bad"")"');
+    expect(String(content)).toContain('"line1\nline2"');
   });
 
   it('supports deleting selected task records in batch', () => {
@@ -208,6 +544,118 @@ describe('TaskRecord batch delete and console task display', () => {
       ['task-console-1'],
       expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
     );
+  });
+
+  it('supports starting a suspended script task from the row actions', () => {
+    mocks.taskItems = [
+      buildTask({
+        id: 'task-suspended-1',
+        taskName: '挂起脚本任务',
+        taskOrigin: 'script',
+        executeType: 'suspended',
+        status: 'paused',
+      }),
+    ];
+
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: '执行任务' }));
+
+    expect(confirmSpy).toHaveBeenCalledWith(expect.objectContaining({
+      content: '确认执行该任务？等待中或已暂停任务会立即开始下发。',
+    }));
+    expect(mocks.startTasks).toHaveBeenCalledWith(
+      ['task-suspended-1'],
+      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+    );
+  });
+
+  it('supports terminating an active task from the row actions', () => {
+    mocks.taskItems = [
+      buildTask({
+        id: 'task-running-row-1',
+        taskName: '执行中脚本任务',
+        taskOrigin: 'script',
+        status: 'running',
+      }),
+    ];
+
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: '终止任务' }));
+
+    expect(confirmSpy).toHaveBeenCalledWith(expect.objectContaining({
+      content: '确认终止该任务？等待中、执行中或已暂停任务会变为已终止。',
+    }));
+    expect(mocks.cancelTasks).toHaveBeenCalledWith(
+      ['task-running-row-1'],
+      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+    );
+  });
+
+  it('keeps row execute and terminate icons visible but disabled when status does not allow them', () => {
+    mocks.taskItems = [
+      buildTask({
+        id: 'task-completed-row-1',
+        taskName: '完成任务',
+        taskOrigin: 'script',
+        status: 'completed',
+      }),
+    ];
+
+    renderPage();
+
+    const executeButton = screen.getByRole('button', { name: '执行任务' });
+    const terminateButton = screen.getByRole('button', { name: '终止任务' });
+
+    expect(executeButton).toBeDisabled();
+    expect(terminateButton).toBeDisabled();
+
+    fireEvent.click(executeButton);
+    fireEvent.click(terminateButton);
+
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(mocks.startTasks).not.toHaveBeenCalled();
+    expect(mocks.cancelTasks).not.toHaveBeenCalled();
+  });
+
+  it('supports starting selected pending or paused task records in batch', () => {
+    mocks.taskItems = [
+      buildTask({ id: 'task-pending-1', taskName: '等待任务', status: 'pending' }),
+      buildTask({ id: 'task-paused-1', taskName: '暂停任务', status: 'paused' }),
+    ];
+
+    renderPage();
+
+    expect(screen.getByRole('button', { name: /批量执行/ })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'select-task-pending-1' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'select-task-paused-1' }));
+    fireEvent.click(screen.getByRole('button', { name: /批量执行/ }));
+
+    expect(confirmSpy).toHaveBeenCalledWith(expect.objectContaining({
+      content: '确认执行选中的 2 条任务记录？等待中或已暂停任务会立即开始下发。',
+    }));
+    expect(mocks.startTasks).toHaveBeenCalledWith(
+      ['task-pending-1', 'task-paused-1'],
+      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+    );
+  });
+
+  it('blocks batch start when a selected task record is already finished', () => {
+    mocks.taskItems = [
+      buildTask({ id: 'task-paused-1', taskName: '暂停任务', status: 'paused' }),
+      buildTask({ id: 'task-completed-1', taskName: '完成任务', status: 'completed' }),
+    ];
+
+    renderPage();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'select-task-paused-1' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'select-task-completed-1' }));
+    fireEvent.click(screen.getByRole('button', { name: /批量执行/ }));
+
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(mocks.startTasks).not.toHaveBeenCalled();
   });
 
   it('supports cancelling selected active task records in batch', () => {
@@ -276,6 +724,16 @@ describe('TaskRecord batch delete and console task display', () => {
 
     expect(mocks.useMMLTasks).toHaveBeenLastCalledWith(expect.objectContaining({
       taskOrigin: 'console',
+    }));
+  });
+
+  it('passes script name through to the task list query', () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'search-script-name' }));
+
+    expect(mocks.useMMLTasks).toHaveBeenLastCalledWith(expect.objectContaining({
+      scriptName: '巡检脚本',
     }));
   });
 });

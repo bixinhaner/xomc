@@ -90,32 +90,45 @@ export function renderTaskStatus(status: UnifiedFileTransferTask['status'], t: T
   }
 }
 
+type BadgeStatus = 'success' | 'processing' | 'default' | 'error' | 'warning';
+
+function renderNoWrapDeviceStatus(status: BadgeStatus, text: ReactNode) {
+  return (
+    <span
+      data-testid="ufte-device-status"
+      style={{ display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap' }}
+    >
+      <Badge status={status} text={text} />
+    </span>
+  );
+}
+
 export function renderDeviceStatus(status: UnifiedFileTransferDeviceItem['status'], t: Translate) {
   switch (status) {
     case 'downloading':
       // 升级 / 回滚类 Download RPC：CPE 正在从 ACS 拉镜像 / 补丁文件
-      return <Badge status="processing" text={t('ufte.status.downloading')} />;
+      return renderNoWrapDeviceStatus('processing', t('ufte.status.downloading'));
     case 'uploading':
       // 备份 / 日志采集 Upload RPC：Upload 命令已派发，等 UploadResponse + CPE 通过 HTTP PUT
       // 把文件上传到 ACS（这两步在 TR-069 上紧贴，ACS 侧合并到同一段展示）
-      return <Badge status="processing" text={t('ufte.status.uploading')} />;
+      return renderNoWrapDeviceStatus('processing', t('ufte.status.uploading'));
     case 'awaiting_tc':
       // 备份 / 日志采集 Upload RPC：文件已落到 ACS MinIO（backup_restore_file 已 upsert），
       // 等 CPE 主动发 TransferComplete SOAP 来结束传输事务
-      return <Badge status="processing" text={t('ufte.status.awaitingTc')} />;
+      return renderNoWrapDeviceStatus('processing', t('ufte.status.awaitingTc'));
     case 'verifying':
-      return <Badge status="processing" text={t('ufte.status.verifying')} />;
+      return renderNoWrapDeviceStatus('processing', t('ufte.status.verifying'));
     // 设备子任务的 'suspended' 既可能是"用户挂起创建"也可能是"设备离线等待"，
     // 后者占比更高（设备 inform 间隔 5 min，挂起→开始时常碰到设备短暂掉线）。
     // 合并文案为"已挂起 / 待上线"，避免用户以为操作未生效。详见
     // docs/project/backup-display-fix-20260520.md F11。
     case 'suspended':
-      return <Badge status="warning" text={t('ufte.status.suspendedOrOffline')} />;
+      return renderNoWrapDeviceStatus('warning', t('ufte.status.suspendedOrOffline'));
     case 'ended':
-      return <Badge status="success" text={t('ufte.status.completed')} />;
+      return renderNoWrapDeviceStatus('success', t('ufte.status.completed'));
     case 'failed':
-      return <Badge status="error" text={t('ufte.status.failed')} />;
+      return renderNoWrapDeviceStatus('error', t('ufte.status.failed'));
     default:
-      return <Badge status="default" text={t('ufte.status.pending')} />;
+      return renderNoWrapDeviceStatus('default', t('ufte.status.pending'));
   }
 }

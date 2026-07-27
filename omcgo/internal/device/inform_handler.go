@@ -130,8 +130,22 @@ func (h *InformHandler) handleBootstrap(ctx context.Context, evt event.Event) er
 
 	inform := payloadToInform(payload)
 
-	// Determine carrier from OUI via registry, falling back to default
-	carrierCode := h.resolveCarrier(payload.DeviceId.OUI)
+	// Existing devices keep their persisted carrier. Only a genuinely new
+	// device is auto-classified from its TR-069 identity; this prevents a later
+	// Bootstrap with incomplete ProductClass from disrupting an onboarded site.
+	existing, err := h.service.GetBySerialNumber(ctx, payload.DeviceId.SerialNumber)
+	if err != nil {
+		return fmt.Errorf("lookup bootstrap device before carrier resolution: %w", err)
+	}
+	carrierCode := model.CarrierCode("")
+	if existing != nil {
+		carrierCode = existing.Carrier
+	} else {
+		carrierCode, err = h.resolveCarrier(payload.DeviceId.OUI, payload.DeviceId.ProductClass)
+		if err != nil {
+			return fmt.Errorf("resolve bootstrap carrier: %w", err)
+		}
+	}
 	h.logger.Info("handleBootstrap: carrier resolved",
 		zap.String("carrier", string(carrierCode)),
 		zap.String("oui", payload.DeviceId.OUI))
@@ -139,7 +153,7 @@ func (h *InformHandler) handleBootstrap(ctx context.Context, evt event.Event) er
 	h.logger.Info("handleBootstrap: calling DeviceService.RegisterFromInform",
 		zap.String("serial_number", payload.DeviceId.SerialNumber))
 
-	device, err := h.service.RegisterFromInform(ctx, inform, carrierCode)
+	registration, err := h.service.RegisterFromInformEvent(ctx, inform, carrierCode, evt.ID)
 	if errors.Is(err, commonerrors.ErrNotFound) {
 		h.logger.Info("handleBootstrap: device is in recycle bin, skipping auto-register",
 			zap.String("serial_number", payload.DeviceId.SerialNumber),
@@ -153,6 +167,7 @@ func (h *InformHandler) handleBootstrap(ctx context.Context, evt event.Event) er
 		)
 		return err
 	}
+	device := registration.Device
 
 	h.logger.Info("handleBootstrap: device registered successfully",
 		zap.String("device_id", device.ID.String()),
@@ -163,7 +178,9 @@ func (h *InformHandler) handleBootstrap(ctx context.Context, evt event.Event) er
 	// Always publish device.registered on BOOTSTRAP events,
 	// so that provisioning engine triggers auto-discovery/sync
 	// for both new and existing devices.
-	h.service.PublishDeviceRegistered(ctx, device)
+	if err := h.service.PublishDeviceRegistered(ctx, device, registration.Created, evt.ID); err != nil {
+		return fmt.Errorf("publish device.registered: %w", err)
+	}
 
 	return nil
 }
@@ -205,11 +222,15 @@ func (h *InformHandler) handleRebootComplete(ctx context.Context, evt event.Even
 	// 读取 DB 中存储的上次同步值，作为重启前设备运行时长（秒）写入重启记录。
 	// 新设备首次入网无历史记录时为 0，正常写入（显示为 '-'）。
 	var preRebootRunTime int64
+	var preRebootDevice *model.Device
 	if device == nil {
 		h.logger.Info("handleRebootComplete: device not found, auto-registering",
 			zap.String("serial_number", sn))
-		carrierCode := h.resolveCarrier(payload.DeviceId.OUI)
-		registered, regErr := h.service.RegisterFromInform(ctx, inform, carrierCode)
+		carrierCode, resolveErr := h.resolveCarrier(payload.DeviceId.OUI, payload.DeviceId.ProductClass)
+		if resolveErr != nil {
+			return fmt.Errorf("resolve reboot carrier: %w", resolveErr)
+		}
+		registration, regErr := h.service.RegisterFromInformEvent(ctx, inform, carrierCode, evt.ID)
 		if errors.Is(regErr, commonerrors.ErrNotFound) {
 			h.logger.Info("handleRebootComplete: device is in recycle bin, skipping auto-register",
 				zap.String("serial_number", sn),
@@ -221,13 +242,17 @@ func (h *InformHandler) handleRebootComplete(ctx context.Context, evt event.Even
 				zap.Error(regErr), zap.String("serial_number", sn))
 			return regErr
 		}
-		device = registered
+		device = registration.Device
 		// First-time registration via reboot_complete path is equivalent to bootstrap;
 		// publish device.registered so ProvisioningEngine can route productClass and
 		// kick off Path B/C (auto-sync / model upload).
-		h.service.PublishDeviceRegistered(ctx, device)
+		if err := h.service.PublishDeviceRegistered(ctx, device, registration.Created, evt.ID); err != nil {
+			return fmt.Errorf("publish device.registered after reboot auto-register: %w", err)
+		}
 	} else {
-		// 读重启前 run_time（在 UpdateFromInform 写入新值之前）。
+		// 读重启前快照（在 UpdateFromInform 写入新值之前）。
+		preRebootSnapshot := *device
+		preRebootDevice = &preRebootSnapshot
 		preRebootRunTime = h.service.GetDevicePreRebootRunTime(ctx, device.ID)
 
 		// issue #212：收到 BOOT 即无条件强制驱动一次 "下线 → 上线" 翻转。
@@ -249,7 +274,7 @@ func (h *InformHandler) handleRebootComplete(ctx context.Context, evt event.Even
 		}
 	}
 
-	if _, err := h.service.RecordBootFromInform(ctx, device, payload.Events, payload.ParameterList, preRebootRunTime); err != nil {
+	if _, err := h.service.recordBootFromInform(ctx, device, preRebootDevice, payload.Events, payload.ParameterList, preRebootRunTime); err != nil {
 		h.logger.Error("handleRebootComplete: RecordBootFromInform failed",
 			zap.Error(err), zap.String("serial_number", sn))
 		return err
@@ -289,8 +314,11 @@ func (h *InformHandler) handlePeriodic(ctx context.Context, evt event.Event) err
 		h.logger.Info("handlePeriodic: device not found, auto-registering",
 			zap.String("serial_number", sn))
 
-		carrierCode := h.resolveCarrier(payload.DeviceId.OUI)
-		registered, regErr := h.service.RegisterFromInform(ctx, inform, carrierCode)
+		carrierCode, resolveErr := h.resolveCarrier(payload.DeviceId.OUI, payload.DeviceId.ProductClass)
+		if resolveErr != nil {
+			return fmt.Errorf("resolve periodic carrier: %w", resolveErr)
+		}
+		registration, regErr := h.service.RegisterFromInformEvent(ctx, inform, carrierCode, evt.ID)
 		if errors.Is(regErr, commonerrors.ErrNotFound) {
 			h.logger.Info("handlePeriodic: device is in recycle bin, skipping auto-register",
 				zap.String("serial_number", sn),
@@ -302,11 +330,14 @@ func (h *InformHandler) handlePeriodic(ctx context.Context, evt event.Event) err
 				zap.Error(regErr), zap.String("serial_number", sn))
 			return regErr
 		}
+		registered := registration.Device
 		h.logger.Info("handlePeriodic: device auto-registered",
 			zap.String("device_id", registered.ID.String()),
 			zap.String("serial_number", registered.SerialNumber),
 			zap.String("carrier", string(carrierCode)))
-		h.service.PublishDeviceRegistered(ctx, registered)
+		if err := h.service.PublishDeviceRegistered(ctx, registered, registration.Created, evt.ID); err != nil {
+			return fmt.Errorf("publish device.registered after periodic auto-register: %w", err)
+		}
 		return nil
 	}
 
@@ -344,8 +375,11 @@ func (h *InformHandler) handlePeriodic(ctx context.Context, evt event.Event) err
 	if updated == nil {
 		h.logger.Info("handlePeriodic: stale cache fall-through, auto-registering",
 			zap.String("serial_number", sn))
-		carrierCode := h.resolveCarrier(payload.DeviceId.OUI)
-		registered, regErr := h.service.RegisterFromInform(ctx, inform, carrierCode)
+		carrierCode, resolveErr := h.resolveCarrier(payload.DeviceId.OUI, payload.DeviceId.ProductClass)
+		if resolveErr != nil {
+			return fmt.Errorf("resolve stale-cache carrier: %w", resolveErr)
+		}
+		registration, regErr := h.service.RegisterFromInformEvent(ctx, inform, carrierCode, evt.ID)
 		if errors.Is(regErr, commonerrors.ErrNotFound) {
 			h.logger.Info("handlePeriodic: recycle-bin device skipped during stale-cache fall-through",
 				zap.String("serial_number", sn),
@@ -357,7 +391,9 @@ func (h *InformHandler) handlePeriodic(ctx context.Context, evt event.Event) err
 				zap.Error(regErr), zap.String("serial_number", sn))
 			return regErr
 		}
-		h.service.PublishDeviceRegistered(ctx, registered)
+		if err := h.service.PublishDeviceRegistered(ctx, registration.Device, registration.Created, evt.ID); err != nil {
+			return fmt.Errorf("publish device.registered after stale-cache auto-register: %w", err)
+		}
 		return nil
 	}
 
@@ -402,15 +438,20 @@ func (h *InformHandler) triggerGroupAssign(device *model.Device) {
 	}()
 }
 
-// resolveCarrier resolves the carrier code by looking up the OUI in the
-// carrier registry's known OUI-ProductClass mappings. Falls back to defaultCarrier.
-func (h *InformHandler) resolveCarrier(oui string) model.CarrierCode {
+// resolveCarrier resolves the carrier from the complete TR-069 device
+// identity. Unknown identities retain the deployment default for historical
+// compatibility; ambiguous shared OUIs return an error and never fall back.
+func (h *InformHandler) resolveCarrier(oui, productClass string) (model.CarrierCode, error) {
 	if h.carrierRegistry != nil {
-		if code := h.carrierRegistry.ResolveByOUI(oui); code != "" {
-			return code
+		code, err := h.carrierRegistry.ResolveByIdentity(oui, productClass)
+		if err != nil {
+			return "", fmt.Errorf("resolve carrier by device identity: %w", err)
+		}
+		if code != "" {
+			return code, nil
 		}
 	}
-	return h.defaultCarrier
+	return h.defaultCarrier, nil
 }
 
 func payloadToInform(p InformEventPayload) *tr069.InformMessage {

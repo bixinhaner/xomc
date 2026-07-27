@@ -120,8 +120,13 @@ func Setup(r *gin.Engine, c *Container) error {
 		Init:    func() error { return initUFTEModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{
+		Name:    "paramsync",
+		Depends: []string{"device", "task", "paramregistry", "productregistry"},
+		Init:    func() error { return initParamSyncModule(c) },
+	})
+	graph.Add(components.ModuleInitializer{
 		Name:    "provision",
-		Depends: []string{"device", "config"},
+		Depends: []string{"device", "config", "paramsync"},
 		Init:    func() error { return initProvisionModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{
@@ -251,6 +256,15 @@ func Setup(r *gin.Engine, c *Container) error {
 		zap.Int("module_count", moduleCount),
 		zap.Duration("total_duration", time.Since(totalStart)),
 	)
+	if c.SysConfigSvc != nil {
+		stopRetry := c.SysConfigSvc.StartApplyRetry(15 * time.Second)
+		if c.GS != nil {
+			c.GS.Register("sys-config-apply-retry", 1, func(context.Context) error {
+				stopRetry()
+				return nil
+			})
+		}
+	}
 
 	// ===== Phase 2: 配置 Gin 中间件 =====
 	setupMiddleware(r, c)
@@ -375,10 +389,8 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// Helper: authenticated sub-group.
 	//
-	// 这里保留 helper 只是为了延续原来的路由组织方式；当前 API 不再做端点级
-	// 权限判断，路由组只要求完成认证。
-	// resource 参数保留供 30+ 调用点签名兼容，新版被忽略；helper 名留作"受保护
-	// 路由组"语义提示。
+	// RequireAPIPermission 按标准路由模板 + HTTP 方法执行端点级 Casbin 鉴权。
+	// resource 参数保留供现有调用点表达业务归属；实际权限键由路由模板和方法决定。
 	permGroup := func(_ string) *gin.RouterGroup {
 		g := v1.Group("")
 		g.Use(admin.RequireAPIPermission(ad.roleRepo))
@@ -389,7 +401,12 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	dh := c.deviceHandlerDeps
 	deviceHandler := device.NewHandler(c.DeviceService)
 	deviceHandler.SetPermissionService(c.PermService)
+	locationSyncRepo := device.NewPgLocationObservationRepository(c.PgPool)
+	deviceHandler.SetLocationSyncService(device.NewLocationSyncService(locationSyncRepo))
 	deviceHandler.RegisterRoutes(permGroup("devices"))
+	if c.miscDeps.paramSyncHandler != nil {
+		c.miscDeps.paramSyncHandler.RegisterRoutes(permGroup("devices"))
+	}
 
 	deviceInfoHandler := device.NewDeviceInfoHandler(c.DeviceService)
 	deviceInfoHandler.SetPermissionService(c.PermService)
@@ -702,7 +719,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	ad.apiKeyHandler.RegisterRoutes(v1)
 
 	// ----- Admin management routes -----
-	// 仍保留独立路由组，便于后续再收紧权限；当前只要求认证。
+	// 独立路由组统一执行端点级 API 权限校验。
 	adminGroup := v1.Group("/admin")
 	adminGroup.Use(admin.RequireAPIPermission(ad.roleRepo))
 	ad.adminHandler.RegisterAdminRoutes(adminGroup)
@@ -730,14 +747,20 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 		md.deadLetterHandler.RegisterRoutes(dlqAdmin)
 	}
 
+	// All optional modules have registered their routes at this point. Build the
+	// immutable Agent handbook from this instance's actual route inventory.
+	if err := agentRuntimeHandler.PrepareHandbook(); err != nil {
+		c.Logger.Warn("agent handbook preparation failed",
+			zap.Error(err),
+		)
+	}
+
 	// Inject gin routes into admin handler for SyncApiEndpoints
 	ad.adminHandler.SetGinRoutes(r.Routes())
 
 	// Auto-sync API endpoints from Gin routes at startup
 	if err := syncApiEndpoints(c, ad); err != nil {
-		c.Logger.Warn("api endpoint auto-sync failed, manual sync required",
-			zap.Error(err),
-		)
+		return fmt.Errorf("sync API endpoints and built-in permission baseline: %w", err)
 	}
 
 	return nil
@@ -753,8 +776,13 @@ func statusFromResults(results []components.ComponentHealth) string {
 	return "ok"
 }
 
-// syncApiEndpoints auto-syncs Gin routes into the api_endpoints table at startup.
-// Only runs if api_endpointService is available; failures are logged but non-fatal.
+// syncApiEndpoints auto-syncs Gin routes and the immutable built-in role
+// permission baseline before the HTTP server starts. Failure is fatal so the
+// process cannot advertise readiness while normal roles would receive 403s.
+type apiEndpointSyncer interface {
+	SyncApiEndpoints(context.Context, gin.RoutesInfo) (admin.SyncResult, error)
+}
+
 func syncApiEndpoints(c *Container, ad *adminHandlerDeps) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -764,11 +792,11 @@ func syncApiEndpoints(c *Container, ad *adminHandlerDeps) error {
 		return nil
 	}
 
-	svc := admin.NewApiEndpointService(
-		admin.NewPgApiEndpointRepository(c.PgPool),
-		c.Logger,
-	)
-	result, err := svc.SyncApiEndpoints(ctx, routes)
+	if ad.apiEndpointService == nil {
+		return fmt.Errorf("API endpoint sync service is not configured")
+	}
+
+	result, err := ad.apiEndpointService.SyncApiEndpoints(ctx, routes)
 	if err != nil {
 		return err
 	}

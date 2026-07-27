@@ -55,6 +55,7 @@ import { isBuiltInUser, isLdapUser } from '@core/types/system';
 import { useT } from '@/hooks/useT';
 import { toast } from '@/utils/toast';
 import { formatSystemTime } from '@core/utils/systemTime';
+import { isValidContactNumber, normalizeContactNumber } from './validation';
 
 export default function UserManagement() {
   const t = useT();
@@ -141,6 +142,17 @@ export default function UserManagement() {
     { value: 'locked', label: t('status.locked') },
   ], [t]);
 
+  const contactNumberRules = useMemo(() => [
+    {
+      validator(_: unknown, value: unknown) {
+        if (value === undefined || value === null || value === '') return Promise.resolve();
+        return isValidContactNumber(String(value))
+          ? Promise.resolve()
+          : Promise.reject(new Error(t('user.phoneFormatError')));
+      },
+    },
+  ], [t]);
+
   const createUser = useCreateUser();
   const updateUser = useUpdateUser();
   const deleteUsers = useDeleteUsers();
@@ -151,11 +163,10 @@ export default function UserManagement() {
   const batchAssignRoles = useBatchAssignRoles();
   const resetPassword = useResetPassword();
 
-  // Issue #649：拉安全设置取 defaultPasswd，决定「使用系统默认密码」开关
-  // 是否可用 + 占位文本。useSecuritySettings 走 30s 缓存（多组件共用）。
+  // 默认密码是 write-only：只根据后端 is_configured 决定开关是否可用，绝不读取原文。
+  // useSecuritySettings 走 30s 缓存（多组件共用）。
   const { settings: securitySettings, refetch: refetchSecurity } = useSecuritySettings();
-  const defaultPasswd = securitySettings?.raw.get('defaultPasswd') ?? '';
-  const hasDefaultPasswd = defaultPasswd !== '';
+  const hasDefaultPasswd = securitySettings?.defaultPasswordConfigured ?? false;
   // Issue #689: 动态密码长度校验，从 sys_configs 获取 pwdMinLength/pwdMaxLength
   const pwdMinLength = securitySettings?.pwdMinLength ?? 8;
   const pwdMaxLength = securitySettings?.pwdMaxLength ?? 32;
@@ -246,8 +257,8 @@ export default function UserManagement() {
       } = {
         username: vals.username as string,
         displayName: ((vals.displayName as string) || (vals.username as string)) ?? '',
-        email: (vals.email as string) || '',
-        phone: (vals.phone as string) || undefined,
+        email: (vals.email as string).trim(),
+        phone: vals.phone ? normalizeContactNumber(vals.phone as string) : undefined,
         description: (vals.description as string) || undefined,
         expireTime: expire ? expire.toISOString() : undefined,
         role: 'viewer' as UserRole,
@@ -277,8 +288,8 @@ export default function UserManagement() {
       const expire = vals.expireTime as dayjs.Dayjs | undefined;
       const data: Partial<User> = {
         displayName: (vals.displayName as string) || selectedUser.displayName,
-        email: (vals.email as string) || '',
-        phone: (vals.phone as string) || undefined,
+        email: (vals.email as string).trim(),
+        phone: vals.phone ? normalizeContactNumber(vals.phone as string) : undefined,
         description: (vals.description as string) ?? '',
         expireTime: expire ? expire.toISOString() : undefined,
         status: vals.status as UserStatus,
@@ -293,6 +304,7 @@ export default function UserManagement() {
             form.resetFields();
             setSelectedUser(null);
           },
+          onError: (err) => toast.error(err, t('common.error')),
         },
       );
     });
@@ -514,10 +526,16 @@ export default function UserManagement() {
                 title: t('common.confirm'),
                 content: user.status === 'active' ? t('user.confirmDisableUser') : t('user.confirmEnableUser'),
                 onOk: () => {
+                  const email = user.email?.trim();
+                  if (!email) {
+                    message.error(t('user.pleaseInputEmail'));
+                    return;
+                  }
                   updateUser.mutate(
-                    { id: user.id, data: { status: targetStatus } },
+                    { id: user.id, data: { email, status: targetStatus } },
                     {
                       onSuccess: () => message.success(t('common.success')),
+                      onError: (err) => toast.error(err, t('common.error')),
                     },
                   );
                 },
@@ -562,12 +580,12 @@ export default function UserManagement() {
             onClick: () => {
               setSelectedUser(user);
               // Issue #649：弹窗打开前 refetch 一次安全设置，避免 30s 缓存窗口内
-              // 默认密码刚改完拿到旧值。
-              void refetchSecurity();
-              // Issue #649：Switch 初值依赖当前 hasDefaultPasswd（有默认密码就默认
-              // 走「重置为默认」一键路径）。
-              setResetUseDefault(hasDefaultPasswd);
-              setResetPwdVisible(true);
+              // 默认密码刚改完拿到旧值。必须使用 refetch 返回的新状态，不能读取旧闭包。
+              setResetUseDefault(false);
+              void refetchSecurity().then((configured) => {
+                setResetUseDefault(configured);
+                setResetPwdVisible(true);
+              });
             },
           },
           { type: 'divider' },
@@ -880,10 +898,10 @@ export default function UserManagement() {
                 { pattern: /^[a-zA-Z0-9_-]{3,32}$/, message: t('user.userNameRule') },
               ]}
             >
-              <Input placeholder={t('user.form.username')} maxLength={32} />
+              <Input autoComplete="username" placeholder={t('user.form.username')} maxLength={32} />
             </Form.Item>
             {/* Issue #649：使用系统默认密码开关。默认关；ON 时下方两个密码框 disabled
-                + 不校验 rules；defaultPasswd 为空时开关 disabled + tooltip 引导。
+                + 不校验 rules；后端报告未配置时开关 disabled + tooltip 引导。
                 Switch 用 React useState 控制（不放进 Form.Item.name），靠父组件
                 re-render 驱动下方密码 Form.Item rules / disabled / placeholder 切换。 */}
             <Form.Item
@@ -927,9 +945,10 @@ export default function UserManagement() {
               }
             >
               <Input.Password
+                autoComplete="new-password"
                 placeholder={
                   createUseDefault
-                    ? defaultPasswd || t('user.password')
+                    ? t('system.user.defaultPasswordWillBeUsed')
                     : t('user.password')
                 }
                 maxLength={pwdMaxLength}
@@ -955,9 +974,10 @@ export default function UserManagement() {
               }
             >
               <Input.Password
+                autoComplete="new-password"
                 placeholder={
                   createUseDefault
-                    ? defaultPasswd || t('user.confirmPassword')
+                    ? t('system.user.defaultPasswordWillBeUsed')
                     : t('user.confirmPassword')
                 }
                 maxLength={20}
@@ -970,18 +990,21 @@ export default function UserManagement() {
             <Form.Item
               name="email"
               label={t('user.email')}
-              rules={[{ type: 'email', message: t('user.emailFormatError') }]}
+              normalize={(value) => typeof value === 'string' ? value.trim() : value}
+              rules={[
+                { required: true, message: t('user.pleaseInputEmail') },
+                { type: 'email', message: t('user.emailFormatError') },
+              ]}
             >
               <Input placeholder={t('user.email')} maxLength={50} />
             </Form.Item>
             <Form.Item
               name="phone"
               label={t('user.phone')}
-              rules={[
-                { pattern: /^1\d{10}$/, message: t('user.phoneFormatError') },
-              ]}
+              normalize={(value) => typeof value === 'string' ? normalizeContactNumber(value) : value}
+              rules={contactNumberRules}
             >
-              <Input placeholder={t('user.phone')} maxLength={11} />
+              <Input placeholder={t('user.phone')} maxLength={32} />
             </Form.Item>
             <Form.Item
               name="roleIds"
@@ -1055,18 +1078,21 @@ export default function UserManagement() {
           <Form.Item
             name="email"
             label={t('user.email')}
-            rules={[{ type: 'email', message: t('user.emailFormatError') }]}
+            normalize={(value) => typeof value === 'string' ? value.trim() : value}
+            rules={[
+              { required: true, message: t('user.pleaseInputEmail') },
+              { type: 'email', message: t('user.emailFormatError') },
+            ]}
           >
             <Input placeholder={t('user.email')} maxLength={50} />
           </Form.Item>
           <Form.Item
             name="phone"
             label={t('user.phone')}
-            rules={[
-              { pattern: /^1\d{10}$/, message: t('user.phoneFormatError') },
-            ]}
+            normalize={(value) => typeof value === 'string' ? normalizeContactNumber(value) : value}
+            rules={contactNumberRules}
           >
-            <Input placeholder={t('user.phone')} maxLength={11} />
+            <Input placeholder={t('user.phone')} maxLength={32} />
           </Form.Item>
           <Form.Item name="roleIds" label={t('user.form.role')}>
             <Select
@@ -1230,9 +1256,11 @@ export default function UserManagement() {
             }
           >
             <Input.Password
+              autoComplete="new-password"
+              visibilityToggle={false}
               placeholder={
                 resetUseDefault
-                  ? defaultPasswd || t('user.newPassword')
+                  ? t('system.user.defaultPasswordWillBeUsed')
                   : t('user.newPassword')
               }
               maxLength={pwdMaxLength}
@@ -1258,9 +1286,11 @@ export default function UserManagement() {
             }
           >
             <Input.Password
+              autoComplete="new-password"
+              visibilityToggle={false}
               placeholder={
                 resetUseDefault
-                  ? defaultPasswd || t('user.confirmPassword')
+                  ? t('system.user.defaultPasswordWillBeUsed')
                   : t('user.confirmPassword')
               }
               maxLength={20}

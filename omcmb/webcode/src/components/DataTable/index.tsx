@@ -48,6 +48,11 @@ export interface DataTableProps<T> {
   selectable?: boolean;
   selectedRowKeys?: React.Key[];
   onSelectionChange?: (keys: React.Key[], rows: T[]) => void;
+  getCheckboxProps?: TableProps<T>['rowSelection'] extends infer R
+    ? R extends { getCheckboxProps?: infer G }
+      ? G
+      : never
+    : never;
   /** 列设置隐藏列变化时回调:把当前隐藏列 key 抬给父组件(device list 据此联动隐藏对应筛选下拉)。 */
   onHiddenColumnsChange?: (hiddenKeys: string[]) => void;
   preserveSelectedRowKeys?: boolean;
@@ -118,6 +123,7 @@ function DataTable<T>(
     selectable = false,
     selectedRowKeys: controlledSelectedKeys,
     onSelectionChange,
+    getCheckboxProps,
     preserveSelectedRowKeys = false,
     total,
     pageSize = 20,
@@ -378,7 +384,7 @@ function DataTable<T>(
   const rowSelection: TableProps<T>['rowSelection'] = (selectable || showRowNumber)
     ? {
         fixed: true,
-        ...(selectable ? { selectedRowKeys, onChange: handleSelectionChange, preserveSelectedRowKeys } : {}),
+        ...(selectable ? { selectedRowKeys, onChange: handleSelectionChange, preserveSelectedRowKeys, getCheckboxProps } : {}),
         columnWidth: showRowNumber ? (selectable ? 90 : 60) : 40,
         renderCell: (_checked, _record, index, originNode) => {
           const rowNumber = (currentPage - 1) * pageSize + (index ?? 0) + 1;

@@ -112,8 +112,6 @@ type RoleDeviceGroupRepository interface {
 
 // RoleApiPermissionRepository manages role–API-endpoint associations.
 type RoleApiPermissionRepository interface {
-	// GetRoleApiEndpoints returns all (path, method) pairs granted to the given roles.
-	GetRoleApiEndpoints(ctx context.Context, roleNames []string) ([]RoleApiEndpoint, error)
 	// GetRoleApiEndpointIDs returns endpoint IDs granted to a role.
 	GetRoleApiEndpointIDs(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
 	// SetRoleApiEndpoints replaces the full set of API endpoint grants for a role.

@@ -1,5 +1,14 @@
 package event
 
+// Parameter synchronization events. Payloads contain durable identifiers and
+// result references only; raw SOAP/results remain in storage.
+const (
+	SubjectParamSyncTaskResult   = "param_sync.task.result"
+	SubjectParamSyncRequested    = "param_sync.requested"
+	SubjectParamSyncRunCompleted = "param_sync.run.completed"
+	SubjectParamSyncRunFailed    = "param_sync.run.failed"
+)
+
 // Device events
 //
 // 这类事件由 ACS Handler 在处理 CPE TR-069 Inform 报文时发布。
@@ -163,6 +172,20 @@ const (
 	// SubjectPMFileParsed 是 PM XML 解析完成后发布。
 	// 发布者：pm.Collector，订阅者：暂无（可用于选择性后续处理）
 	SubjectPMFileParsed = "pm.file.parsed"
+
+	// SubjectPMAggregationNormalized 承载已完成 15 分钟 Counter/KPI 计算的标准事件。
+	// ACK 后仅短期保留，供当前小时窗口恢复；日/周/月不再重放原始 15 分钟事件。
+	SubjectPMAggregationNormalized = "pmaggregation.15m.normalized"
+
+	// SubjectPMAggregationHourlyRollup 承载已发布小时窗口的紧凑 Counter 状态。
+	SubjectPMAggregationHourlyRollup = "pmaggregation.hourly.rollup"
+
+	// SubjectPMAggregationDailyRollup 承载已发布日窗口的紧凑 Counter 状态。
+	// 同一事件同时供周窗口和月窗口累计。
+	SubjectPMAggregationDailyRollup = "pmaggregation.daily.rollup"
+
+	// SubjectPMAggregationTaskVersionChanged 通知 worker 刷新不可变任务版本快照。
+	SubjectPMAggregationTaskVersionChanged = "pmaggregation.control.task_version.changed"
 )
 
 // MR events
@@ -391,7 +414,7 @@ const (
 const (
 	// SubjectLogFileReceived 是 CPE 上传运行日志（FileType "6"）或故障日志（FileType "8"/"RL"）
 	// 成功落 MinIO 后，由 acs/upload/handler.go 发布。
-	// 订阅者：stationlog.Service（创建 station_log_files 记录 + 故障日志配额清理）。
+	// 订阅者：stationlog.Service（运行日志入库；故障日志不写入重启记录）。
 	// Payload：LogFileReceivedPayload
 	SubjectLogFileReceived = "log.file.received"
 )

@@ -2,6 +2,7 @@ package mml
 
 import (
 	"encoding/json"
+	"strings"
 )
 
 // ============================================================
@@ -107,4 +108,79 @@ func parseTargetPathsJSON(raw []byte) []string {
 		return nil
 	}
 	return paths
+}
+
+// unsupportedPathFilter 是执行过程中按产品记录的运行时不支持 path 集合。
+// 它与 ParamModel 的静态支持集合叠加使用，保证命令树与参数列表使用同一口径。
+type unsupportedPathFilter struct {
+	read  map[string]struct{}
+	write map[string]struct{}
+}
+
+func newUnsupportedPathFilter(paths []UnsupportedPath) *unsupportedPathFilter {
+	if len(paths) == 0 {
+		return nil
+	}
+	filter := &unsupportedPathFilter{
+		read:  make(map[string]struct{}),
+		write: make(map[string]struct{}),
+	}
+	for _, path := range paths {
+		if path.Path == "" {
+			continue
+		}
+		if path.ReadUnsupported {
+			filter.read[path.Path] = struct{}{}
+		}
+		if path.WriteUnsupported {
+			filter.write[path.Path] = struct{}{}
+		}
+	}
+	if len(filter.read) == 0 && len(filter.write) == 0 {
+		return nil
+	}
+	return filter
+}
+
+func (f *unsupportedPathFilter) blocks(operationType, path string) bool {
+	if f == nil || path == "" {
+		return false
+	}
+	var blocked map[string]struct{}
+	if operationType == "LST" {
+		blocked = f.read
+	} else {
+		blocked = f.write
+	}
+	_, ok := blocked[path]
+	return ok
+}
+
+// countAvailableCommandPaths 计算命令在两套支持集合叠加后的最终可用 path 数。
+// ADD/RMV 的 target_object 没有逐 path 列表，因此按其对象前缀判断是否仍有可用子路径。
+func countAvailableCommandPaths(cmd GroupTreeCommand, supported *SupportedSet, blocked *unsupportedPathFilter) int {
+	switch cmd.OperationType {
+	case "LST", "MOD":
+		count := 0
+		for _, path := range parseTargetPathsJSON(cmd.TargetPathsRaw()) {
+			if supported.Contains(path) && !blocked.blocks(cmd.OperationType, path) {
+				count++
+			}
+		}
+		return count
+	case "ADD", "RMV":
+		if cmd.TargetObject == "" {
+			return 0
+		}
+		count := 0
+		for path := range supported.Paths {
+			if strings.HasPrefix(path, cmd.TargetObject) && !blocked.blocks(cmd.OperationType, path) {
+				count++
+			}
+		}
+		return count
+	default:
+		// mml_commands 当前约束为 LST/MOD/ADD/RMV；未知类型沿用兼容可见语义。
+		return 1
+	}
 }

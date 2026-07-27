@@ -79,6 +79,33 @@ function buildSeriesByMetric(rows: AdhocResultRow[], granularity: string): Adhoc
   return out;
 }
 
+function formatResultSummary(
+  intl: IntlShape,
+  task: { dimension: AdhocDimension; deviceSns: string[]; metricPaths: string[] },
+  granularities: string[],
+): string {
+  const showsSelectedDeviceCount = task.dimension === 'device' || task.dimension === 'aggregate_group';
+
+  if (!showsSelectedDeviceCount) {
+    return intl.formatMessage(
+      { id: 'perf.adhoc.resultSummaryWithoutDeviceCount' },
+      {
+        metricCount: task.metricPaths.length,
+        granCount: granularities.length,
+      },
+    );
+  }
+
+  return intl.formatMessage(
+    { id: 'perf.adhoc.resultSummary' },
+    {
+      deviceCount: task.deviceSns.length,
+      metricCount: task.metricPaths.length,
+      granCount: granularities.length,
+    },
+  );
+}
+
 // 结果表横表透视：把长表（每行一个数据点）摊成横表——同一 (设备 × 小区/PLMN × 时间) 行键凑一行，
 // 每个指标占一列，列名「编号(名·类型)」（与导出 CSV 横表同口径，列名自带中文，顺带解决"指标列显编号"）。
 interface WideMetricCol {
@@ -162,6 +189,11 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
   });
   const rows = resultsResp?.rows ?? [];
   const totalRows = resultsResp?.total ?? rows.length;
+  const incompleteRows = rows.filter((row) => row.complete === false);
+  const incompleteWindowCount = new Set(
+    incompleteRows.map((row) => `${row.taskVersionId}|${row.granularity}|${row.startTime}|${row.endTime}`),
+  ).size;
+  const missingSlotCount = incompleteRows.reduce((total, row) => total + (row.missingSlots ?? 0), 0);
   // T-0194：真实总数 > 返回行数 = 被 limit 截断，给诚实提示。
   const truncated = totalRows > rows.length;
 
@@ -175,14 +207,18 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
     setWindowRange(defaultWindowByGranularity(effectiveGran, systemTimezone));
   }, [effectiveGran, windowTouched, systemTimezone]);
 
-  // 导出（KPI-EXPORT adhoc 来源）：建后端异步任务 → 文件传输菜单下载，带当前二次时窗。
+  // 导出（KPI-EXPORT 自定义聚合任务结果来源）：建后端异步任务 → 文件传输菜单下载，带当前二次时窗。
   const createExport = useCreateKpiExport();
   const handleExport = () => {
     createExport.mutate(
       {
-        sourceType: 'adhoc',
+        sourceType: 'adhoc_result',
         params: buildAdhocExportParams({ taskId, startTime: startISO, endTime: endISO }),
-        taskName: defaultExportTaskName('adhoc'),
+        taskName: defaultExportTaskName('adhoc_result', new Date(), {
+          prefixLabel: intl.formatMessage({ id: 'kpiExport.fileName.prefix' }),
+          sourceLabel: intl.formatMessage({ id: 'kpiExport.source.adhocResult' }),
+          subjectName: taskQuery.data?.name,
+        }),
       },
       {
         onSuccess: () => message.success(intl.formatMessage({ id: 'kpiExport.export.submitted' })),
@@ -214,14 +250,7 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
   const summary = (
     <Space size={6} wrap>
       <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-        {intl.formatMessage(
-          { id: 'perf.adhoc.resultSummary' },
-          {
-            deviceCount: task.deviceSns.length,
-            metricCount: task.metricPaths.length,
-            granCount: granularities.length,
-          },
-        )}
+        {formatResultSummary(intl, task, granularities)}
       </Typography.Text>
       <DatePicker.RangePicker
         size="small"
@@ -285,6 +314,17 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
       )}
     />
   ) : null;
+  const incompleteAlert = incompleteRows.length > 0 ? (
+    <Alert
+      type="warning"
+      showIcon
+      style={{ marginBottom: 8 }}
+      message={intl.formatMessage(
+        { id: 'perf.adhoc.incompleteWindowTip' },
+        { windows: incompleteWindowCount, slots: missingSlotCount },
+      )}
+    />
+  ) : null;
 
   // 嵌入仪表盘 Panel：外层卡片由 Panel 提供，这里不再套 Card
   if (embedded) {
@@ -292,6 +332,7 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
       <div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>{summary}</div>
         {truncationAlert}
+        {incompleteAlert}
         {body}
       </div>
     );
@@ -316,6 +357,7 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
       extra={summary}
     >
       {truncationAlert}
+      {incompleteAlert}
       {body}
     </Card>
   );

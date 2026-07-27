@@ -48,6 +48,8 @@ export interface StandardParam {
   changeApplies: string;
   minValue?: string;
   maxValue?: string;
+  updatedAt: string;
+  updatedFields: string[];
 }
 
 // ISSUE-488: 标准参数树 dataType / changeApplies 枚举化 —— 共享业务模型。
@@ -62,9 +64,16 @@ export type StandardDataType = (typeof STANDARD_DATA_TYPES)[number];
 export const STANDARD_CHANGE_APPLIES = ['Immediate', 'OnReboot'] as const;
 export type StandardChangeApplies = (typeof STANDARD_CHANGE_APPLIES)[number];
 
-// min/max 是否按「字符串长度」语义（dataType==='string'）显示，否则按「数值取值」语义。
+// standard_params 存量同时存在规范小驼峰和历史大写/下划线值（如 STRING、
+// BOOLEAN、DATE_TIME、U_INT）。范围语义统一按大小写不敏感、忽略分隔符的 key
+// 判断；原始 dataType 仍原样保留给 UI 展示。
+function standardDataTypeKey(dataType?: string): string {
+  return (dataType ?? '').trim().replace(/[_\s-]/g, '').toLowerCase();
+}
+
+// min/max 是否按「字符串长度」语义显示，否则按「数值取值」语义。
 export function isStringDataType(dataType?: string): boolean {
-  return dataType === 'string';
+  return standardDataTypeKey(dataType) === 'string';
 }
 
 // min/max 取值范围语义分档（ISSUE-488 验收细化）：
@@ -73,14 +82,16 @@ export function isStringDataType(dataType?: string): boolean {
 //   'none'   = 无取值范围（boolean / dateTime）—— min/max 不适用，应禁用
 export type DataTypeRangeKind = 'length' | 'value' | 'none';
 export function dataTypeRangeKind(dataType?: string): DataTypeRangeKind {
-  if (dataType === 'string') return 'length';
-  if (dataType === 'boolean' || dataType === 'dateTime') return 'none';
+  const key = standardDataTypeKey(dataType);
+  if (key === 'string') return 'length';
+  if (key === 'boolean' || key === 'datetime') return 'none';
   return 'value';
 }
 
 // unsignedInt 取值下界为 0（无符号）。
 export function isUnsignedDataType(dataType?: string): boolean {
-  return dataType === 'unsignedInt';
+  const key = standardDataTypeKey(dataType);
+  return key === 'unsignedint' || key === 'uint';
 }
 
 export interface DiscoveredVersion {

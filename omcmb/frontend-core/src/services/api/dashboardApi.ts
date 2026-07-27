@@ -9,6 +9,7 @@ import type {
   BackendKPILayout,
   KPILayout,
   KPILayoutPanel,
+  DashboardKPIGranularity,
 } from '../../types/dashboard';
 import type { DashboardChartData } from '../../mock/data/dashboard';
 
@@ -59,6 +60,7 @@ interface BackendKPIDelta {
   change_percent: number;
   trend: string;  // "up" | "down" | "stable"
   compare_type: string;  // "yesterday" | "last_week"
+  has_comparison: boolean;
 }
 
 // Backend response types for Sprint 7 chart endpoints
@@ -185,6 +187,7 @@ function mapBackendSummary(b: BackendDashboardSummary): DashboardSummary {
         changePercent: delta.change_percent,
         trend: delta.trend as 'up' | 'down' | 'stable',
         compareType: delta.compare_type as 'yesterday' | 'last_week',
+        hasComparison: delta.has_comparison,
       };
       return acc;
     }, {} as Record<string, KPIDelta>),
@@ -453,7 +456,9 @@ export const dashboardApi = {
   async getKPITimeSeries(
     kpiNames?: string[],
     startTime?: string,
-    endTime?: string
+    endTime?: string,
+    granularity?: DashboardKPIGranularity,
+    technology?: string,
   ): Promise<DashboardChartData['kpiTimeSeries']> {
     const defaultNames = [
       'RRC_CONN_SETUP_SR',
@@ -470,6 +475,8 @@ export const dashboardApi = {
           kpi_names: names.join(','),
           ...(startTime ? { start_time: startTime } : {}),
           ...(endTime ? { end_time: endTime } : {}),
+          ...(granularity ? { granularity } : {}),
+          ...(technology ? { technology } : {}),
         },
       }
     );

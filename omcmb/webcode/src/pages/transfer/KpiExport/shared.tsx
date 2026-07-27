@@ -7,8 +7,10 @@ import type { KpiExportSource, KpiExportStatus, KpiExportTask } from '@core/type
 /** 来源标签 i18n key。 */
 export const SOURCE_LABEL_KEY: Record<KpiExportSource, string> = {
   dashboard: 'kpiExport.source.dashboard',
+  device_view: 'kpiExport.source.deviceView',
   kpi_query: 'kpiExport.source.kpiQuery',
-  adhoc: 'kpiExport.source.adhoc',
+  pm_dashboard: 'kpiExport.source.pmDashboard',
+  adhoc_result: 'kpiExport.source.adhocResult',
 };
 
 /** 状态 Tag 颜色 + i18n key。 */

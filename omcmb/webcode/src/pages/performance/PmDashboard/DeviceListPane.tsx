@@ -3,12 +3,12 @@
  *
  * 交互：
  *   - 制式 Segmented（默认 LTE；ENB/GNB/GSM）。
- *   - 设备多选（≤10，复用 KPIQuery/components/DevicePickerModal；超 10 拦截提示并截断）。
- *   - 指标可换（复用共享件 components/MetricPickerModal，initialDeviceType 随制式）；
+ *   - 设备多选（最多 50，复用 KPIQuery/components/DevicePickerModal；超限拦截提示并截断）。
+ *   - 指标可换（最多 50，复用共享件 components/MetricPickerModal，initialDeviceType 随制式）；
  *     默认集 = 选中制式的内置任务指标集（usePmAdhocList isBuiltin，按 technology 找一个取 metricPaths）。
  *     用户未手动改过指标时，切制式默认集随之切换；手动改过则保留用户选择。
  *   - 粒度选择（默认 15min）。
- *   - 共用三级筛选（DashboardFilterBar）：大时间段（默认近 7 天）+ 星期多选 + 小时段多选 + 周期对比开关（T-0189）。
+ *   - 共用三级筛选（DashboardFilterBar）：大时间段（15min 默认近 1 天）+ 星期多选 + 小时段多选 + 周期对比开关（T-0189）。
  *   - 出图：取数 useAggregatedMetricsByDevices → 星期/小时段前端筛 → buildDeviceMetricCharts → 每指标一张 ChartCard（每设备一条线）。
  *   - 周期对比开关打开：再拉上一周期窗口数据，套同口径星期/小时段，叠加虚线（T-0189）。
  *
@@ -34,15 +34,17 @@ import {
 } from 'antd';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { ReloadOutlined, LineChartOutlined, ExportOutlined } from '@ant-design/icons';
-import dayjs from 'dayjs';
 import {
   useAggregatedMetricsByDevices,
   useMetricObjectsByDevices,
 } from '@core/hooks/api/usePmQuery';
 import { usePmAdhocList } from '@core/hooks/api/usePmAdhoc';
 import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
+import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
 import type { DeviceType } from '@core/types/indicatorLibrary';
+import type { CreateKpiExportInput } from '@core/types/kpiExport';
 import type { Granularity } from '@core/types/pmDashboard';
+import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
 import DevicePickerModal from '../KPIQuery/components/DevicePickerModal';
 import MetricPickerModal from '@/components/MetricPickerModal';
 import ChartCard from './ChartCard';
@@ -54,9 +56,14 @@ import {
   ALL_HOURS,
   ALL_WEEKDAYS,
   attachCompareSeries,
-  extendChartsAxis,
   previousWindow,
 } from './dashboardFilterUtils';
+import {
+  actualRangeFromMeta,
+  buildDeviceViewRequestTimeWindow,
+  defaultRangeForGranularity,
+  toDeviceViewRequestRFC3339,
+} from './deviceListPaneTimeUtils';
 import {
   buildDashboardExportParams,
   validateDashboardExportSelection,
@@ -79,6 +86,19 @@ const TECH_TO_DEVICE_TYPE: Record<Tech, DeviceType> = {
   gsm: 'GSM',
 };
 
+export function buildDeviceViewExportInput(
+  selection: DashboardExportSelection,
+  prefixLabel: string,
+  sourceLabel: string,
+  now: Date = new Date(),
+): CreateKpiExportInput {
+  return {
+    sourceType: 'device_view',
+    params: buildDashboardExportParams(selection),
+    taskName: defaultExportTaskName('device_view', now, { prefixLabel, sourceLabel }),
+  };
+}
+
 // 粒度选项语料键（label 走 i18n，value 不变）。
 const GRANULARITY_MSG_IDS: { id: string; value: Granularity }[] = [
   { id: 'perf.dashboard.granular15min', value: '15min' },
@@ -88,11 +108,18 @@ const GRANULARITY_MSG_IDS: { id: string; value: Granularity }[] = [
   { id: 'perf.dashboard.granularMonthly', value: 'monthly' },
 ];
 
-const MAX_DEVICES = 10;
+export function isDeviceViewDeviceSelectionOverLimit(deviceSns: string[]): boolean {
+  return deviceSns.length > PM_QUERY_SELECTION_LIMIT;
+}
+
+export function isDeviceViewMetricSelectionOverLimit(metricPaths: string[]): boolean {
+  return metricPaths.length > PM_QUERY_SELECTION_LIMIT;
+}
 
 export default function DeviceListPane() {
   const intl = useIntl();
   const { message } = App.useApp();
+  const systemTimezone = useSystemTimezoneValue();
 
   const granularityOptions = useMemo(
     () =>
@@ -112,15 +139,34 @@ export default function DeviceListPane() {
   // 用户是否手动改过指标——改过则切制式不再覆盖默认集。
   const [metricsTouched, setMetricsTouched] = useState(false);
   const [granularity, setGranularity] = useState<Granularity>('15min');
+  const [rangeTouched, setRangeTouched] = useState(false);
   // 共用三级筛选 + 周期对比开关（大时间段 + 星期 + 小时段 + 对比）。
-  const [filter, setFilter] = useState<DashboardFilterValue>({
-    range: [dayjs().subtract(7, 'day'), dayjs()],
+  const [filter, setFilter] = useState<DashboardFilterValue>(() => ({
+    range: defaultRangeForGranularity('15min', systemTimezone),
     weekdays: [...ALL_WEEKDAYS],
     hours: [...ALL_HOURS],
     compare: false,
-  });
+  }));
+  const [defaultRangeKey, setDefaultRangeKey] = useState<{
+    granularity: Granularity;
+    systemTimezone?: string;
+  }>({ granularity: '15min', systemTimezone });
   const [devicePickerOpen, setDevicePickerOpen] = useState(false);
   const [metricPickerOpen, setMetricPickerOpen] = useState(false);
+
+  useEffect(() => {
+    if (
+      rangeTouched ||
+      (defaultRangeKey.granularity === granularity && defaultRangeKey.systemTimezone === systemTimezone)
+    ) {
+      return;
+    }
+    setDefaultRangeKey({ granularity, systemTimezone });
+    setFilter((cur) => ({
+      ...cur,
+      range: defaultRangeForGranularity(granularity, systemTimezone),
+    }));
+  }, [defaultRangeKey.granularity, defaultRangeKey.systemTimezone, granularity, rangeTouched, systemTimezone]);
 
   // ── 默认指标集：选中制式的内置任务指标集（单一真相源）─────────────────
   const { data: builtinTasks = [] } = usePmAdhocList({ isBuiltin: true });
@@ -160,20 +206,22 @@ export default function DeviceListPane() {
     if (!submitted) return null;
     return {
       granularity: submitted.granularity,
+      technology: tech,
       metricPaths: submitted.metricPaths,
       startTime: submitted.startTime,
       endTime: submitted.endTime,
       limit: 5000,
+      countMode: 'n_plus_one' as const,
       fillEmpty: true,
       // #599：星期/小时段后端过滤（全选不传 = 不过滤，向后兼容）。
       weekdays: submitted.weekdays.length < 7 ? submitted.weekdays : undefined,
       hours: submitted.hours.length < 24 ? submitted.hours : undefined,
     };
-  }, [submitted]);
+  }, [submitted, tech]);
 
   const {
     data: rawRows = [],
-    total: rawTotal,
+    meta: currentMeta,
     truncated,
     isLoading,
     isFetching,
@@ -186,20 +234,28 @@ export default function DeviceListPane() {
   );
 
   // 周期对比：上一周期窗口同样取数（同设备/指标/粒度，窗口换为 previousWindow）。
+  const actualRange = useMemo(() => actualRangeFromMeta(currentMeta), [currentMeta]);
   const prevParams = useMemo(() => {
     if (!submitted || !submitted.compare) return null;
+    const actualPrevRange = actualRange ? previousWindow(actualRange) : null;
     return {
       granularity: submitted.granularity,
+      technology: tech,
       metricPaths: submitted.metricPaths,
-      startTime: submitted.prevStartTime,
-      endTime: submitted.prevEndTime,
+      startTime: actualPrevRange
+        ? toDeviceViewRequestRFC3339(actualPrevRange[0], systemTimezone)
+        : submitted.prevStartTime,
+      endTime: actualPrevRange
+        ? toDeviceViewRequestRFC3339(actualPrevRange[1], systemTimezone)
+        : submitted.prevEndTime,
       limit: 5000,
+      countMode: 'n_plus_one' as const,
       fillEmpty: true,
       // #599：周期对比同口径传 weekdays/hours。
       weekdays: submitted.weekdays.length < 7 ? submitted.weekdays : undefined,
       hours: submitted.hours.length < 24 ? submitted.hours : undefined,
     };
-  }, [submitted]);
+  }, [actualRange, submitted, systemTimezone, tech]);
 
   const {
     data: rawPrevRows = [],
@@ -229,24 +285,19 @@ export default function DeviceListPane() {
   // 星期/小时段已由后端过滤（#599），前端只需按小区/PLMN 白名单即席过滤 + 转置分线。
   const charts = useMemo(() => {
     if (!submitted) return [];
-    const wd = new Set(submitted.weekdays);
-    const hr = new Set(submitted.hours);
     // T-0193：按小区/PLMN 白名单即席过滤，再转置分线。
     const curRows = filterRowsByObjectLdns(rawRows, submitted.allowedLdns);
-    // T-AXISFILL：转置出当前图集后立即扩轴（按 submitted 范围+粒度连续铺刻度、套星期/小时筛选、并集真实桶），
-    // 空刻度补 '-'，再挂周期对比（compare 按毫秒对齐到已扩展的 cur.buckets，prev 不单独扩轴）。
-    const cur = extendChartsAxis(buildDeviceMetricCharts(curRows, submitted.granularity), {
-      rangeStartMs: dayjs(submitted.startTime).valueOf(),
-      rangeEndMs: dayjs(submitted.endTime).valueOf(),
-      weekdays: wd,
-      hours: hr,
-      granularity: submitted.granularity,
-    });
+    // #88：设备性能查看不再由前端按请求范围生成桶轴；后端已按完整时间桶补齐，
+    // 前端只使用后端返回的 startTime 集合画图。
+    const cur = buildDeviceMetricCharts(curRows, submitted.granularity);
     if (!submitted.compare) return cur;
     const prevFilteredRows = filterRowsByObjectLdns(rawPrevRows, submitted.allowedLdns);
     const prev = buildDeviceMetricCharts(prevFilteredRows, submitted.granularity);
-    return attachCompareSeries(cur, prev, submitted.offsetMs, submitted.granularity);
-  }, [rawRows, rawPrevRows, submitted]);
+    const compareOffsetMs = actualRange
+      ? actualRange[1].valueOf() - actualRange[0].valueOf()
+      : submitted.offsetMs;
+    return attachCompareSeries(cur, prev, compareOffsetMs, submitted.granularity);
+  }, [actualRange, rawRows, rawPrevRows, submitted]);
 
   // ── 行为 ───────────────────────────────────────────────────────────
   const handleTechChange = (v: Tech) => {
@@ -256,6 +307,20 @@ export default function DeviceListPane() {
     setCellSel({}); // 设备清空 → 下钻选择重置（全选）。
   };
 
+  const handleGranularityChange = (next: Granularity) => {
+    setGranularity(next);
+  };
+
+  const handleFilterChange = (next: DashboardFilterValue) => {
+    if (
+      !next.range[0].isSame(filter.range[0]) ||
+      !next.range[1].isSame(filter.range[1])
+    ) {
+      setRangeTouched(true);
+    }
+    setFilter(next);
+  };
+
   // ── 导出（T4 dashboard 来源）：带当前筛选 POST 建任务，不卡页面 ──────────
   const createExport = useCreateKpiExport();
 
@@ -263,17 +328,22 @@ export default function DeviceListPane() {
   // A1：下钻定格的小区/PLMN 白名单一并带进导出（复用 handleQuery 的 getEffectiveLdns，空=不过滤）。
   const buildExportSelection = (): DashboardExportSelection => {
     const [start, end] = filter.range;
+    const actualExportRange = submitted ? actualRange : null;
     return {
       technology: tech,
-      deviceSns,
-      metricPaths,
-      granularity,
-      startTime: start.toISOString(),
-      endTime: end.toISOString(),
-      objectLdns: getEffectiveLdns(cellSel, objectsByDevice),
+      deviceSns: submitted?.deviceSns ?? deviceSns,
+      metricPaths: submitted?.metricPaths ?? metricPaths,
+      granularity: submitted?.granularity ?? granularity,
+      startTime: actualExportRange
+        ? toDeviceViewRequestRFC3339(actualExportRange[0], systemTimezone)
+        : submitted?.startTime ?? toDeviceViewRequestRFC3339(start, systemTimezone),
+      endTime: actualExportRange
+        ? toDeviceViewRequestRFC3339(actualExportRange[1], systemTimezone)
+        : submitted?.endTime ?? toDeviceViewRequestRFC3339(end, systemTimezone),
+      objectLdns: submitted?.allowedLdns ?? getEffectiveLdns(cellSel, objectsByDevice),
       // #599：导出与出图同口径。
-      weekdays: filter.weekdays,
-      hours: filter.hours,
+      weekdays: submitted?.weekdays ?? filter.weekdays,
+      hours: submitted?.hours ?? filter.hours,
     };
   };
 
@@ -285,11 +355,11 @@ export default function DeviceListPane() {
       return;
     }
     createExport.mutate(
-      {
-        sourceType: 'dashboard',
-        params: buildDashboardExportParams(sel),
-        taskName: defaultExportTaskName('dashboard'),
-      },
+      buildDeviceViewExportInput(
+        sel,
+        intl.formatMessage({ id: 'kpiExport.fileName.prefix' }),
+        intl.formatMessage({ id: 'kpiExport.source.deviceView' }),
+      ),
       {
         onSuccess: () => {
           message.success(intl.formatMessage({ id: 'kpiExport.export.submitted' }));
@@ -311,24 +381,38 @@ export default function DeviceListPane() {
       message.warning(intl.formatMessage({ id: 'perf.dashboard.selectAtLeastOneDevice' }));
       return;
     }
+    if (isDeviceViewDeviceSelectionOverLimit(deviceSns)) {
+      message.warning(intl.formatMessage(
+        { id: 'perf.picker.deviceLimitExceeded' },
+        { max: PM_QUERY_SELECTION_LIMIT, count: deviceSns.length },
+      ));
+      return;
+    }
     if (metricPaths.length === 0) {
       message.warning(intl.formatMessage({ id: 'perf.dashboard.selectAtLeastOneMetric' }));
       return;
     }
+    if (isDeviceViewMetricSelectionOverLimit(metricPaths)) {
+      message.warning(intl.formatMessage(
+        { id: 'perf.picker.metricLimitExceeded' },
+        { max: PM_QUERY_SELECTION_LIMIT, count: metricPaths.length },
+      ));
+      return;
+    }
     const [start, end] = filter.range;
-    const [prevStart, prevEnd] = previousWindow(filter.range);
+    const requestWindow = buildDeviceViewRequestTimeWindow(filter.range, systemTimezone);
     setSubmitted({
       deviceSns,
       metricPaths,
       granularity,
-      startTime: start.toISOString(),
-      endTime: end.toISOString(),
+      startTime: requestWindow.startTime,
+      endTime: requestWindow.endTime,
       weekdays: filter.weekdays,
       hours: filter.hours,
       compare: filter.compare,
       offsetMs: end.valueOf() - start.valueOf(),
-      prevStartTime: prevStart.toISOString(),
-      prevEndTime: prevEnd.toISOString(),
+      prevStartTime: requestWindow.prevStartTime,
+      prevEndTime: requestWindow.prevEndTime,
       // 定格当前下钻白名单（空=全选不过滤）。
       allowedLdns: getEffectiveLdns(cellSel, objectsByDevice),
     });
@@ -410,7 +494,7 @@ export default function DeviceListPane() {
             >
               <Radio.Group
                 value={granularity}
-                onChange={(e) => setGranularity(e.target.value)}
+                onChange={(e) => handleGranularityChange(e.target.value)}
                 options={granularityOptions}
                 optionType="button"
                 buttonStyle="solid"
@@ -436,7 +520,7 @@ export default function DeviceListPane() {
           )}
 
           <div style={{ marginTop: 16 }}>
-            <DashboardFilterBar value={filter} onChange={setFilter} />
+            <DashboardFilterBar value={filter} onChange={handleFilterChange} />
           </div>
 
           <div style={{ marginTop: 16 }}>
@@ -492,8 +576,11 @@ export default function DeviceListPane() {
               showIcon
               style={{ marginBottom: 12 }}
               message={intl.formatMessage(
-                { id: 'perf.dashboard.truncatedTip' },
-                { shown: rawRows.length, total: rawTotal },
+                { id: 'perf.dashboard.truncated' },
+              )}
+              description={intl.formatMessage(
+                { id: 'perf.dashboard.truncatedDesc' },
+                { limit: 5000 },
               )}
             />
           ) : null}
@@ -528,20 +615,21 @@ export default function DeviceListPane() {
         onClose={() => setDevicePickerOpen(false)}
         onConfirm={(sns) => {
           setCellSel({}); // 设备变更 → 重置下钻选择为全选。
-          if (sns.length > MAX_DEVICES) {
+          if (isDeviceViewDeviceSelectionOverLimit(sns)) {
             message.warning(
               intl.formatMessage(
-                { id: 'perf.dashboard.maxDevicesTruncated' },
-                { max: MAX_DEVICES },
+                { id: 'perf.picker.deviceLimitExceeded' },
+                { max: PM_QUERY_SELECTION_LIMIT, count: sns.length },
               ),
             );
-            setDeviceSns(sns.slice(0, MAX_DEVICES));
+            setDeviceSns(sns.slice(0, PM_QUERY_SELECTION_LIMIT));
           } else {
             setDeviceSns(sns);
           }
         }}
         initialSelected={deviceSns}
         technology={tech}
+        maxSelected={PM_QUERY_SELECTION_LIMIT}
       />
 
       <MetricPickerModal
@@ -554,6 +642,9 @@ export default function DeviceListPane() {
         initialSelected={metricPaths}
         initialDeviceType={TECH_TO_DEVICE_TYPE[tech]}
         lockDeviceType
+        maxSelected={PM_QUERY_SELECTION_LIMIT}
+        enableBatchInput
+        onlyEnabledIndicators
       />
     </div>
   );

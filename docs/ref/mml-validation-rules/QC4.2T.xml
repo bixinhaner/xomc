@@ -1,0 +1,309 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mmlParameterRules version="QC4.2T" pathField="NAME_PATH">
+  <summary parameterCount="4" parameterGroupCount="5" relationCount="4" />
+  <parameters>
+    <row path="InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.DRX.DRXEnabled" paramId="506254">
+      <field name="PARAM_ID">506254</field>
+      <field name="PARAM_NAME">DRX功能开关</field>
+      <field name="NAME_PATH">InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.DRX.DRXEnabled</field>
+      <field name="DFT_VALUE" />
+      <field name="V_TYPE">enum-{true,false}-{1,0}</field>
+      <field name="V_WRITABLE">-</field>
+      <field name="V_LST">N</field>
+      <field name="V_MOD">Y</field>
+      <field name="V_ADD">N</field>
+      <field name="V_RMV">N</field>
+      <field name="IS_LEAF">Y</field>
+      <field name="DISP_ORD">0</field>
+      <field name="STOP_SIGN">0</field>
+      <field name="MEMO" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="V_DYNAMIC">0</field>
+      <field name="PARAM_VERSION">QC4.2T</field>
+      <field name="MIB_DN">LTE_DRXE_ENABLED</field>
+      <field name="PARAM_NAME_EN">DRXEnabled</field>
+      <field name="MOBILE_SUPPORT">Y</field>
+      <field name="BROADBAND_SUPPORT">Y</field>
+      <field name="JS_REGEX" />
+      <field name="TITLE_CN" />
+      <field name="TITLE_EN" />
+      <field name="PLATFORM_SUPPORT" />
+      <field name="CN_EXPLANATION" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="EN_EXPLANATION" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="SOFTWARE_VERSION" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="second_confirm" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="confirm_en" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="confirm_cn" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <validation path="InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.DRX.DRXEnabled" frontEndRule="" backendRule="enum-{true,false}-{1,0}">
+        <lst supported="false" required="false" rawFlag="N" />
+        <rmv supported="false" required="false" rawFlag="N" />
+        <add supported="false" required="false" rawFlag="N" />
+        <mod supported="true" required="false" rawFlag="Y" />
+      </validation>
+    </row>
+    <row path="InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.ReportAmount" paramId="506256">
+      <field name="PARAM_ID">506256</field>
+      <field name="PARAM_NAME">reportAmount</field>
+      <field name="NAME_PATH">InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.ReportAmount</field>
+      <field name="DFT_VALUE" />
+      <field name="V_TYPE">enum-{0,1,2,4,8,16,32,64}-{0,1,2,4,8,16,32,64}</field>
+      <field name="V_WRITABLE">W</field>
+      <field name="V_LST">N</field>
+      <field name="V_MOD">Y</field>
+      <field name="V_ADD">N</field>
+      <field name="V_RMV">N</field>
+      <field name="IS_LEAF">Y</field>
+      <field name="DISP_ORD">0</field>
+      <field name="STOP_SIGN">0</field>
+      <field name="MEMO" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="V_DYNAMIC">0</field>
+      <field name="PARAM_VERSION">QC4.2T</field>
+      <field name="MIB_DN">LTE_RAN_REPORTAMOUNT</field>
+      <field name="PARAM_NAME_EN">reportAmount</field>
+      <field name="MOBILE_SUPPORT">Y</field>
+      <field name="BROADBAND_SUPPORT">Y</field>
+      <field name="JS_REGEX" />
+      <field name="TITLE_CN" />
+      <field name="TITLE_EN" />
+      <field name="PLATFORM_SUPPORT" />
+      <field name="CN_EXPLANATION" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="EN_EXPLANATION" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="SOFTWARE_VERSION" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="second_confirm" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="confirm_en" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="confirm_cn" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <validation path="InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.ReportAmount" frontEndRule="" backendRule="enum-{0,1,2,4,8,16,32,64}-{0,1,2,4,8,16,32,64}">
+        <lst supported="false" required="false" rawFlag="N" />
+        <rmv supported="false" required="false" rawFlag="N" />
+        <add supported="false" required="false" rawFlag="N" />
+        <mod supported="true" required="false" rawFlag="Y" />
+      </validation>
+    </row>
+    <row path="InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.X_QUALCOMM_THRESH_SERVING_LOWQ_R9" paramId="506255">
+      <field name="PARAM_ID">506255</field>
+      <field name="PARAM_NAME">qQualMinR9</field>
+      <field name="NAME_PATH">InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.X_QUALCOMM_THRESH_SERVING_LOWQ_R9</field>
+      <field name="DFT_VALUE" />
+      <field name="V_TYPE">int-[-1:31]</field>
+      <field name="V_WRITABLE">W</field>
+      <field name="V_LST">N</field>
+      <field name="V_MOD">Y</field>
+      <field name="V_ADD">N</field>
+      <field name="V_RMV">N</field>
+      <field name="IS_LEAF">Y</field>
+      <field name="DISP_ORD">0</field>
+      <field name="STOP_SIGN">0</field>
+      <field name="MEMO" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="V_DYNAMIC">0</field>
+      <field name="PARAM_VERSION">QC4.2T</field>
+      <field name="MIB_DN">LTE_X_QUALCOMM_R9</field>
+      <field name="PARAM_NAME_EN">qQualMinR9</field>
+      <field name="MOBILE_SUPPORT">Y</field>
+      <field name="BROADBAND_SUPPORT">Y</field>
+      <field name="JS_REGEX" />
+      <field name="TITLE_CN" />
+      <field name="TITLE_EN" />
+      <field name="PLATFORM_SUPPORT" />
+      <field name="CN_EXPLANATION" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="EN_EXPLANATION" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="SOFTWARE_VERSION" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="second_confirm" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="confirm_en" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="confirm_cn" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <validation path="InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.X_QUALCOMM_THRESH_SERVING_LOWQ_R9" frontEndRule="" backendRule="int-[-1:31]">
+        <lst supported="false" required="false" rawFlag="N" />
+        <rmv supported="false" required="false" rawFlag="N" />
+        <add supported="false" required="false" rawFlag="N" />
+        <mod supported="true" required="false" rawFlag="Y" />
+      </validation>
+    </row>
+    <row path="InternetGatewayDevice.X_QUALCOMM_eNodeBParams.X_QUALCOMM_load_configuration.X_QUALCOMM_Enable" paramId="506257">
+      <field name="PARAM_ID">506257</field>
+      <field name="PARAM_NAME">enable</field>
+      <field name="NAME_PATH">InternetGatewayDevice.X_QUALCOMM_eNodeBParams.X_QUALCOMM_load_configuration.X_QUALCOMM_Enable</field>
+      <field name="DFT_VALUE" />
+      <field name="V_TYPE">int-[0:1]</field>
+      <field name="V_WRITABLE">W</field>
+      <field name="V_LST">N</field>
+      <field name="V_MOD">Y</field>
+      <field name="V_ADD">N</field>
+      <field name="V_RMV">N</field>
+      <field name="IS_LEAF">Y</field>
+      <field name="DISP_ORD">0</field>
+      <field name="STOP_SIGN">0</field>
+      <field name="MEMO" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="V_DYNAMIC">0</field>
+      <field name="PARAM_VERSION">QC4.2T</field>
+      <field name="MIB_DN">LTE_X_QUALCOMM_Enable</field>
+      <field name="PARAM_NAME_EN">enable</field>
+      <field name="MOBILE_SUPPORT">Y</field>
+      <field name="BROADBAND_SUPPORT">Y</field>
+      <field name="JS_REGEX" />
+      <field name="TITLE_CN" />
+      <field name="TITLE_EN" />
+      <field name="PLATFORM_SUPPORT" />
+      <field name="CN_EXPLANATION" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="EN_EXPLANATION" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="SOFTWARE_VERSION" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="second_confirm" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="confirm_en" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="confirm_cn" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <validation path="InternetGatewayDevice.X_QUALCOMM_eNodeBParams.X_QUALCOMM_load_configuration.X_QUALCOMM_Enable" frontEndRule="" backendRule="int-[0:1]">
+        <lst supported="false" required="false" rawFlag="N" />
+        <rmv supported="false" required="false" rawFlag="N" />
+        <add supported="false" required="false" rawFlag="N" />
+        <mod supported="true" required="false" rawFlag="Y" />
+      </validation>
+    </row>
+  </parameters>
+  <parameterGroups>
+    <row>
+      <field name="id">401705</field>
+      <field name="param_name">参数配置</field>
+      <field name="keyword" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="v_lst" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="v_mod" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="v_add" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="v_rmv" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="parent_id">401504</field>
+      <field name="param_version">QC4.2T</field>
+      <field name="add_path" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="param_name_en">Parameter configuration</field>
+      <field name="mobile_support">Y</field>
+      <field name="broadband_support">Y</field>
+      <field name="platform_support" />
+      <field name="cell_number">1</field>
+      <field name="cell_index_location">0</field>
+      <field name="second_confirm" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="confirm_en" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="confirm_cn" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="dis_order">1</field>
+    </row>
+    <row>
+      <field name="id">401706</field>
+      <field name="param_name">DRX Enable</field>
+      <field name="keyword">DRX_ENABLE</field>
+      <field name="v_lst">Y</field>
+      <field name="v_mod">Y</field>
+      <field name="v_add">N</field>
+      <field name="v_rmv">N</field>
+      <field name="parent_id">401705</field>
+      <field name="param_version">QC4.2T</field>
+      <field name="add_path" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="param_name_en">DRX Enable</field>
+      <field name="mobile_support">Y</field>
+      <field name="broadband_support">Y</field>
+      <field name="platform_support" />
+      <field name="cell_number">1</field>
+      <field name="cell_index_location">0</field>
+      <field name="second_confirm" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="confirm_en" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="confirm_cn" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="dis_order">1</field>
+    </row>
+    <row>
+      <field name="id">401707</field>
+      <field name="param_name">lteMobilityIdleModeCommon</field>
+      <field name="keyword">MODE_COMMON</field>
+      <field name="v_lst">Y</field>
+      <field name="v_mod">Y</field>
+      <field name="v_add">N</field>
+      <field name="v_rmv">N</field>
+      <field name="parent_id">401705</field>
+      <field name="param_version">QC4.2T</field>
+      <field name="add_path" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="param_name_en">lteMobilityIdleModeCommon</field>
+      <field name="mobile_support">Y</field>
+      <field name="broadband_support">Y</field>
+      <field name="platform_support" />
+      <field name="cell_number">1</field>
+      <field name="cell_index_location">0</field>
+      <field name="second_confirm" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="confirm_en" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="confirm_cn" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="dis_order">1</field>
+    </row>
+    <row>
+      <field name="id">401708</field>
+      <field name="param_name">lteMobilityCoonModeEutra</field>
+      <field name="keyword">MODE_EUTRA</field>
+      <field name="v_lst">Y</field>
+      <field name="v_mod">Y</field>
+      <field name="v_add">N</field>
+      <field name="v_rmv">N</field>
+      <field name="parent_id">401705</field>
+      <field name="param_version">QC4.2T</field>
+      <field name="add_path" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="param_name_en">lteMobilityCoonModeEutra</field>
+      <field name="mobile_support">Y</field>
+      <field name="broadband_support">Y</field>
+      <field name="platform_support" />
+      <field name="cell_number">1</field>
+      <field name="cell_index_location">0</field>
+      <field name="second_confirm" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="confirm_en" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="confirm_cn" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="dis_order">1</field>
+    </row>
+    <row>
+      <field name="id">401709</field>
+      <field name="param_name">lteLoadConfiguration</field>
+      <field name="keyword">LOAD_CONFIGURATION</field>
+      <field name="v_lst">Y</field>
+      <field name="v_mod">Y</field>
+      <field name="v_add">N</field>
+      <field name="v_rmv">N</field>
+      <field name="parent_id">401705</field>
+      <field name="param_version">QC4.2T</field>
+      <field name="add_path" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="param_name_en">lteLoadConfiguration</field>
+      <field name="mobile_support">Y</field>
+      <field name="broadband_support">Y</field>
+      <field name="platform_support" />
+      <field name="cell_number">1</field>
+      <field name="cell_index_location">0</field>
+      <field name="second_confirm" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="confirm_en" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="confirm_cn" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+      <field name="dis_order">1</field>
+    </row>
+  </parameterGroups>
+  <relations>
+    <row>
+      <field name="param_group_id">401706</field>
+      <field name="param_id">506254</field>
+      <field name="software_version">QC4.2T</field>
+      <field name="display_order">1</field>
+      <field name="platform_support" />
+    </row>
+    <row>
+      <field name="param_group_id">401707</field>
+      <field name="param_id">506255</field>
+      <field name="software_version">QC4.2T</field>
+      <field name="display_order">1</field>
+      <field name="platform_support" />
+    </row>
+    <row>
+      <field name="param_group_id">401708</field>
+      <field name="param_id">506256</field>
+      <field name="software_version">QC4.2T</field>
+      <field name="display_order">1</field>
+      <field name="platform_support" />
+    </row>
+    <row>
+      <field name="param_group_id">401709</field>
+      <field name="param_id">506257</field>
+      <field name="software_version">QC4.2T</field>
+      <field name="display_order">1</field>
+      <field name="platform_support" />
+    </row>
+  </relations>
+  <frontendRules>
+    <row rule_id="FR-001"><field name="RULE_TYPE">input_validation</field><field name="RULE">自定义命令名：^[a-zA-Z0-9_]{1,50}$；NamePath 按操作类型校验非空、包含 .、{i} 禁止及结尾 . 要求</field><field name="SOURCE_FILE">OMCWebServer/src/main/webapp/WEB-INF/content/gnodeb/maintenance/mml.jsp</field><field name="SOURCE_LINE">879,3430-3485</field></row>
+    <row rule_id="FR-002"><field name="RULE_TYPE">conditional_validation</field><field name="CONDITION">当前版本 + LTE_REFERENCE_SIG_POWER/LTE_PHY_CELLID_LIST/LTE_SON_PRACH_ROOT_SEQUENCE_INDEX_LIST</field><field name="RULE">允许 a..b 范围格式；必须正好两个值且左值不得大于右值</field><field name="SOURCE_FILE">OMCWebServer/src/main/webapp/WEB-INF/content/gnodeb/maintenance/mml.jsp; OMCWebServer/src/main/webapp/js/utils.js</field><field name="SOURCE_LINE">1700,1837;549-580</field></row>
+    <row rule_id="FR-003"><field name="RULE_TYPE">input_validation</field><field name="PARAMETERS">Ipv4AddrArr;JS_REGEX=no_zh</field><field name="RULE">IPv4 列表用英文逗号分隔逐个校验；no_zh 使用前端禁止中文正则 ^(?:(?![\\u4E00-\\u9FA5]|[\\uFE30-\\uFFA0]).)+$</field><field name="SOURCE_FILE">OMCWebServer/src/main/webapp/WEB-INF/content/gnodeb/maintenance/mml.jsp</field><field name="SOURCE_LINE">1674-1676,1897-1926,2000-2010</field></row>
+    <row rule_id="FR-004"><field name="RULE_TYPE">conditional_required</field><field name="PARAMETERS">LTE_HALOB_ENABLE_STATE,LTE_HALOB_MODE,LTE_SMALLCELL_START_PCI,LTE_SMALLCELL_PCI_RANGE</field><field name="RULE">开启 HALOB 时 MODE 非空；MOD PCI_RANGE 时 start PCI + range 不得大于 503（低优先级）</field><field name="SOURCE_FILE">OMCWebServer/src/main/webapp/WEB-INF/content/gnodeb/maintenance/mml.jsp</field><field name="SOURCE_LINE">2388-2397,2590-2598</field></row>
+    <row rule_id="FR-005"><field name="RULE_TYPE">input_validation</field><field name="SCOPE">loaded_form_ADD_EUTRANNCELL</field><field name="PARAMETERS">LTE_NEIGH_LIST_LTE_CELL_CID,LTE_NEIGH_LIST_LTE_CELL_EARFCN,LTE_NEIGH_LIST_LTE_CELL_PHY_CELLID</field><field name="RULE">固定范围分别为 0..268435455、0..65535、0..503，且均为必填</field><field name="SOURCE_FILE">OMCWebServer/src/main/webapp/WEB-INF/content/cell/cellParam/config/addEUTRANNCELL.jsp</field><field name="SOURCE_LINE">14-32</field></row>
+    <row rule_id="FR-006"><field name="RULE_TYPE">version_ui_constraint</field><field name="SCOPE">parameter_panel</field><field name="RULE">硬件版本和命令名会影响参数控件是否显示、禁用及是否允许选择；该能力判断未由 XML 参数字段驱动</field><field name="SOURCE_FILE">OMCWebServer/src/main/webapp/WEB-INF/content/gnodeb/maintenance/mml.jsp</field><field name="SOURCE_LINE">1377-1504</field></row>
+    <row rule_id="FR-SECOND-ROUND"><field name="RULE_TYPE">frontend_parameter_rules</field><field name="SCOPE">concrete_parameters</field><field name="PARAMETERS">LTE_HOME_NODEB_NAME,TUNNEL_NAME,LEFTSOURCEIP,KEYLIFE,IKELIFETIME,REKEYMARGIN,DPDDELAY,KEYINGTRIES,USIM_ENABLE,IMSI,KEY,OPc,R_value,LTE_DL_EARFCN,LTE_UL_EARFCN,LTE_FREQ_BAND_INDICATOR,LTE_BANDS_SUPPORTED,LTE_DL_BANDWIDTH,LTE_UL_BANDWIDTH</field><field name="RULE">补充规则：LTE_HOME_NODEB_NAME 匹配 ^[A-Za-z]{1}[A-Za-z0-9_\-]{0,47}$；TUNNEL_NAME 必填且长度 1..14、匹配 ^\w+$；LEFTSOURCEIP 为合法 IPv4 或 %config；KEYLIFE、IKELIFETIME、REKEYMARGIN、DPDDELAY 为数字加时间单位；KEYINGTRIES 为数字或 %forever；KEYLIFE &gt;= 3*REKEYMARGIN，IKELIFETIME &gt;= KEYLIFE，REKEYMARGIN 按产品至少 5m 或 3m；USIM_ENABLE=1 时显示 IMSI、KEY、OPc、R_value，长度上限分别为 21、32、32、32；SASEnble=1 时禁用指定 LTE 频点、频段和带宽参数；BAIBLX1.0 不显示 LTE_BANDS_SUPPORTED</field><field name="SOURCE_FILE">OMCWebServer/src/main/webapp/WEB-INF/content/cell/cellParam/config/modCell.jsp; OMCWebServer/src/main/webapp/WEB-INF/content/cell/cellParam/config/addIpsecSetting.jsp; OMCWebServer/src/main/webapp/WEB-INF/content/cell/cellParam/config/modUSIM.jsp; OMCWebServer/src/main/webapp/WEB-INF/content/enodeb/monitor/setting/ipsec.jsp; OMCWebServer/src/main/webapp/WEB-INF/content/enodeb/monitor/setting/ipsec3.jsp</field><field name="SOURCE_LINE">modCell:39-47,249-275; addIpsecSetting:15-21,70-78,150-192,270-292; modUSIM:4-64; ipsec:722-800; ipsec3:709-783</field></row>
+  </frontendRules>
+</mmlParameterRules>

@@ -48,7 +48,11 @@ func adhocIncludesCell(dim string) bool { return dim == "device" }
 
 // adhocObjectLabel 按维度把分组键解析成可读对象名（与网页 buildResultsQuery + 前端 seriesLabel 同口径）。
 // 名缺失（脏数据 / 对象已删）回退 ID 前 8 位；前缀（DeviceGroup= / Band=）按维度剥离。
-func adhocObjectLabel(dim, oui, sn, productID, productName, objectLDN, groupName string, deviceCount int) string {
+func adhocObjectLabel(dim, oui, sn, productID, productName, objectLDN, groupName string, deviceCount int, locs ...appcontext.Locale) string {
+	loc := appcontext.LocaleZH
+	if len(locs) > 0 {
+		loc = locs[0]
+	}
 	switch dim {
 	case "device_group":
 		if groupName != "" {
@@ -65,8 +69,14 @@ func adhocObjectLabel(dim, oui, sn, productID, productName, objectLDN, groupName
 	case "band":
 		return strings.TrimPrefix(objectLDN, "Band=")
 	case "network":
+		if loc == appcontext.LocaleEN {
+			return "Network"
+		}
 		return "全网"
 	case "aggregate_group":
+		if loc == appcontext.LocaleEN {
+			return fmt.Sprintf("Aggregate Group (%d devices)", deviceCount)
+		}
 		return fmt.Sprintf("聚合组(%d个设备)", deviceCount)
 	default: // device：只用 SN，与页面表格「设备 SN」列一致
 		return deviceSNLabel(oui, sn)

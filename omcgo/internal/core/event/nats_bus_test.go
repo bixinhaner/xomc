@@ -4,13 +4,80 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats.go"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+
+	"github.com/omcgo/omcgo/internal/core/reliability"
 )
+
+type queueStatsReaderStub struct {
+	streamName string
+	streamErr  error
+
+	consumerInfo *nats.ConsumerInfo
+	consumerErr  error
+
+	streamInfo            *nats.StreamInfo
+	streamInfoErr         error
+	streamInfoCompletedAt time.Time
+	streamInfoDelay       time.Duration
+
+	nextMessage     *nats.RawStreamMsg
+	nextErr         error
+	nextStart       uint64
+	nextSubject     string
+	nextCalls       int
+	nextCompletedAt time.Time
+
+	calls int
+}
+
+func (s *queueStatsReaderStub) StreamNameBySubject(ctx context.Context, _ string) (string, error) {
+	s.calls++
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return s.streamName, s.streamErr
+}
+
+func (s *queueStatsReaderStub) ConsumerInfo(ctx context.Context, _, _ string) (*nats.ConsumerInfo, error) {
+	s.calls++
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return s.consumerInfo, s.consumerErr
+}
+
+func (s *queueStatsReaderStub) StreamInfo(ctx context.Context, _ string) (*nats.StreamInfo, error) {
+	s.calls++
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if s.streamInfoDelay > 0 {
+		time.Sleep(s.streamInfoDelay)
+	}
+	s.streamInfoCompletedAt = time.Now()
+	return s.streamInfo, s.streamInfoErr
+}
+
+func (s *queueStatsReaderStub) NextMessage(ctx context.Context, _ string, start uint64, subject string) (*nats.RawStreamMsg, error) {
+	s.calls++
+	s.nextCalls++
+	s.nextStart = start
+	s.nextSubject = subject
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.nextCompletedAt = time.Now()
+	return s.nextMessage, s.nextErr
+}
 
 // --- Constructor tests ---
 
@@ -25,6 +92,202 @@ func TestNewNATSEventBus_ReturnsNonNil(t *testing.T) {
 	assert.Nil(t, bus.js)
 	assert.NotNil(t, bus.logger)
 	assert.Nil(t, bus.subs)
+}
+
+func TestNATSEventBusQueueStats(t *testing.T) {
+	now := time.Now()
+	firstRetainedAt := now.Add(-3 * time.Minute)
+	tests := []struct {
+		name          string
+		consumer      *nats.ConsumerInfo
+		stream        *nats.StreamInfo
+		nextMessage   *nats.RawStreamMsg
+		nextErr       error
+		expectedStart uint64
+		assert        func(t *testing.T, stats QueueStats)
+	}{
+		{
+			name:     "empty stream has no oldest pending age",
+			consumer: &nats.ConsumerInfo{},
+			stream:   &nats.StreamInfo{State: nats.StreamState{}},
+			assert: func(t *testing.T, stats QueueStats) {
+				assert.Zero(t, stats.Pending)
+				assert.Zero(t, stats.AckPending)
+				assert.Zero(t, stats.Redelivered)
+				assert.Zero(t, stats.OldestPendingAge)
+				assert.Zero(t, stats.LastSequence)
+				assert.Zero(t, stats.AckSequence)
+			},
+		},
+		{
+			name: "pending age ignores older unrelated shared stream messages",
+			consumer: &nats.ConsumerInfo{
+				NumPending:     7,
+				NumAckPending:  2,
+				NumRedelivered: 3,
+				AckFloor:       nats.SequenceInfo{Consumer: 9, Stream: 11},
+				Delivered:      nats.SequenceInfo{Consumer: 18, Stream: 19},
+			},
+			stream: &nats.StreamInfo{State: nats.StreamState{
+				Msgs:      9,
+				FirstSeq:  12,
+				FirstTime: now.Add(-30 * time.Minute),
+				LastSeq:   20,
+			}},
+			nextMessage:   &nats.RawStreamMsg{Subject: SubjectPMFileReceived, Sequence: 14, Time: firstRetainedAt},
+			expectedStart: 12,
+			assert: func(t *testing.T, stats QueueStats) {
+				assert.Equal(t, uint64(7), stats.Pending)
+				assert.Equal(t, 2, stats.AckPending)
+				assert.Equal(t, 3, stats.Redelivered)
+				assert.InDelta(t, 3*time.Minute, stats.OldestPendingAge, float64(250*time.Millisecond))
+				assert.Equal(t, uint64(20), stats.LastSequence)
+				assert.Equal(t, uint64(11), stats.AckSequence)
+				assert.Equal(t, uint64(18), stats.DeliverySequence)
+				assert.Equal(t, uint64(9), stats.AckConsumerSequence)
+			},
+		},
+		{
+			name: "advanced and deleted first sequence uses next matching retained message",
+			consumer: &nats.ConsumerInfo{
+				NumPending: 3,
+				AckFloor:   nats.SequenceInfo{Stream: 4},
+			},
+			stream: &nats.StreamInfo{State: nats.StreamState{
+				Msgs:      3,
+				FirstSeq:  8,
+				FirstTime: now.Add(-30 * time.Minute),
+				LastSeq:   11,
+				Deleted:   []uint64{9},
+			}},
+			nextMessage:   &nats.RawStreamMsg{Subject: SubjectPMFileReceived, Sequence: 10, Time: now.Add(-time.Minute)},
+			expectedStart: 8,
+			assert: func(t *testing.T, stats QueueStats) {
+				assert.Equal(t, uint64(3), stats.Pending)
+				assert.InDelta(t, time.Minute, stats.OldestPendingAge, float64(250*time.Millisecond))
+				assert.Equal(t, uint64(11), stats.LastSequence)
+				assert.Equal(t, uint64(4), stats.AckSequence)
+			},
+		},
+		{
+			name: "ack only uses consumer acknowledgement floor as the bounded lookup start",
+			consumer: &nats.ConsumerInfo{
+				NumAckPending: 1,
+				AckFloor:      nats.SequenceInfo{Stream: 4},
+				Delivered:     nats.SequenceInfo{Stream: 10},
+			},
+			stream:        &nats.StreamInfo{State: nats.StreamState{FirstSeq: 3, LastSeq: 10}},
+			nextMessage:   &nats.RawStreamMsg{Subject: SubjectPMFileReceived, Sequence: 7, Time: now.Add(-2 * time.Minute)},
+			expectedStart: 5,
+			assert: func(t *testing.T, stats QueueStats) {
+				assert.Zero(t, stats.Pending)
+				assert.Equal(t, 1, stats.AckPending)
+				assert.InDelta(t, 2*time.Minute, stats.OldestPendingAge, float64(250*time.Millisecond))
+			},
+		},
+		{
+			name:          "no matching retained message has zero age",
+			consumer:      &nats.ConsumerInfo{NumPending: 1, Delivered: nats.SequenceInfo{Stream: 4}},
+			stream:        &nats.StreamInfo{State: nats.StreamState{FirstSeq: 1, LastSeq: 8}},
+			nextErr:       nats.ErrMsgNotFound,
+			expectedStart: 5,
+			assert: func(t *testing.T, stats QueueStats) {
+				assert.Zero(t, stats.OldestPendingAge)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := &queueStatsReaderStub{
+				streamName:      "PM",
+				consumerInfo:    tt.consumer,
+				streamInfo:      tt.stream,
+				streamInfoDelay: time.Millisecond,
+				nextMessage:     tt.nextMessage,
+				nextErr:         tt.nextErr,
+			}
+			bus := NewNATSEventBus(nil, nil, zap.NewNop())
+			bus.queueStatsReader = reader
+
+			stats, err := bus.QueueStats(context.Background(), SubjectPMFileReceived, "pm-workers")
+			require.NoError(t, err)
+			tt.assert(t, stats)
+			assert.False(t, stats.SampledAt.Before(reader.streamInfoCompletedAt), "sample timestamp must be at or after collection completes")
+			if reader.nextCalls > 0 {
+				assert.False(t, stats.SampledAt.Before(reader.nextCompletedAt), "sample timestamp must be at or after the oldest-message lookup completes")
+			}
+			if tt.expectedStart > 0 {
+				assert.Equal(t, tt.expectedStart, reader.nextStart)
+				assert.Equal(t, SubjectPMFileReceived, reader.nextSubject)
+			}
+		})
+	}
+}
+
+func TestNATSEventBusQueueStatsMissingConsumer(t *testing.T) {
+	bus := NewNATSEventBus(nil, nil, zap.NewNop())
+	bus.queueStatsReader = &queueStatsReaderStub{
+		streamName:  "PM",
+		consumerErr: nats.ErrConsumerNotFound,
+	}
+
+	_, err := bus.QueueStats(context.Background(), SubjectPMFileReceived, "pm-workers")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, nats.ErrConsumerNotFound)
+	assert.Contains(t, err.Error(), "load queue consumer info")
+}
+
+func TestNATSEventBusQueueStatsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	reader := &queueStatsReaderStub{}
+	bus := NewNATSEventBus(nil, nil, zap.NewNop())
+	bus.queueStatsReader = reader
+
+	_, err := bus.QueueStats(ctx, SubjectPMFileReceived, "pm-workers")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Zero(t, reader.calls, "a canceled context must not make NATS requests")
+}
+
+func TestNATSEventBusPendingCountUsesQueueStats(t *testing.T) {
+	bus := NewNATSEventBus(nil, nil, zap.NewNop())
+	bus.queueStatsReader = &queueStatsReaderStub{
+		streamName: "PM",
+		consumerInfo: &nats.ConsumerInfo{
+			NumPending:    7,
+			NumAckPending: 2,
+		},
+		streamInfo: &nats.StreamInfo{},
+	}
+
+	count, err := bus.PendingCount(SubjectPMFileReceived, "pm-workers")
+	require.NoError(t, err)
+	assert.Equal(t, uint64(9), count)
+}
+
+func TestNATSEventBusQueueStatsDoesNotObservePMMetricsDirectly(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	metrics := NewEventBusMetrics(reg)
+	bus := NewNATSEventBus(nil, nil, zap.NewNop())
+	bus.SetMetrics(metrics)
+	bus.queueStatsReader = &queueStatsReaderStub{
+		streamName: "PM",
+		consumerInfo: &nats.ConsumerInfo{
+			NumPending: 5,
+		},
+		streamInfo: &nats.StreamInfo{},
+	}
+
+	_, err := bus.QueueStats(context.Background(), SubjectPMFileReceived, "pm-workers")
+	require.NoError(t, err)
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	require.Len(t, families, 1)
+	assert.Equal(t, "omc_pm_queue_sample_timestamp_seconds", families[0].GetName())
+	assert.Zero(t, families[0].Metric[0].GetGauge().GetValue(),
+		"QueueStats itself must not turn an initialized timestamp into a successful observation")
 }
 
 // --- Event serialization round-trip ---
@@ -312,6 +575,118 @@ func TestDecideAck_ExtremeDeliveries_BackoffCapped(t *testing.T) {
 	assert.Greater(t, d.backoff, time.Duration(0))
 }
 
+func TestDecideAck_PermanentError_ReturnsTermRegardlessOfDeliveries(t *testing.T) {
+	// 包装了 reliability.ErrPermanent 的错误（如设备未注册）无论 deliveries 多少，
+	// 都应立即 Term，不走正常的指数退避 Nak 重投。
+	err := fmt.Errorf("device not found: %w", reliability.ErrPermanent)
+	d := decideAck(err, 1, 5)
+	assert.Equal(t, ackActionTerm, d.action)
+	assert.Zero(t, d.backoff)
+}
+
+func TestPullTuningForSubject_DefaultsAndOverride(t *testing.T) {
+	bus := NewNATSEventBus(nil, nil, zap.NewNop())
+
+	gpv := bus.pullTuningForSubject(SubjectCommandGetParamsResponse)
+	assert.Equal(t, 1, gpv.Concurrency)
+	assert.Equal(t, gpvPullBatchSize, gpv.BatchSize)
+	assert.Equal(t, gpvPullAckWait, gpv.AckWait)
+	assert.Equal(t, defaultPullMaxAckPending, gpv.MaxAckPending)
+
+	paramSync := bus.pullTuningForSubject(SubjectParamSyncTaskResult)
+	assert.Equal(t, paramSyncResultPullConcurrent, paramSync.Concurrency)
+	assert.Equal(t, paramSyncResultPullAckWait, paramSync.AckWait)
+	assert.Equal(t, paramSyncResultMaxAckPending, paramSync.MaxAckPending)
+
+	bus.SetPullTuning(SubjectParamSyncTaskResult, PullTuning{BatchSize: 12, Concurrency: 3, AckWait: 45 * time.Second, MaxAckPending: 99})
+	overridden := bus.pullTuningForSubject(SubjectParamSyncTaskResult)
+	assert.Equal(t, 12, overridden.BatchSize)
+	assert.Equal(t, 3, overridden.Concurrency)
+	assert.Equal(t, 45*time.Second, overridden.AckWait)
+	assert.Equal(t, 99, overridden.MaxAckPending)
+}
+
+func TestUpdatedPullConsumerConfig_OverwritesMutableTuning(t *testing.T) {
+	desired := PullTuning{BatchSize: 64, Concurrency: 64, AckWait: 2 * time.Minute, MaxAckPending: 512}
+	existing := &nats.ConsumerInfo{
+		Name:   "param-sync-results-pull",
+		Config: nats.ConsumerConfig{AckWait: 30 * time.Second, MaxAckPending: 2048},
+	}
+
+	got, changed := updatedPullConsumerConfig(existing, desired)
+
+	require.True(t, changed)
+	assert.Equal(t, "param-sync-results-pull", got.Durable)
+	assert.Equal(t, 2*time.Minute, got.AckWait)
+	assert.Equal(t, 512, got.MaxAckPending)
+}
+
+func TestUpdatedPullConsumerConfig_NoChangeWhenAlreadyAligned(t *testing.T) {
+	desired := PullTuning{BatchSize: 64, Concurrency: 64, AckWait: 2 * time.Minute, MaxAckPending: 512}
+	existing := &nats.ConsumerInfo{
+		Name:   "param-sync-results-pull",
+		Config: nats.ConsumerConfig{Durable: "param-sync-results-pull", AckWait: 2 * time.Minute, MaxAckPending: 512},
+	}
+
+	got, changed := updatedPullConsumerConfig(existing, desired)
+
+	require.False(t, changed)
+	assert.Equal(t, existing.Config, got)
+}
+
+func TestQueueTuningForSubjectDefaultsAndOverride(t *testing.T) {
+	bus := NewNATSEventBus(nil, nil, zap.NewNop())
+
+	got := bus.queueTuningForSubject(SubjectPMFileReceived)
+	assert.Equal(t, queueSubscribeAckWait, got.AckWait)
+	assert.Equal(t, maxDeliveries, got.MaxDeliver)
+	assert.Equal(t, defaultQueueMaxAckPending, got.MaxAckPending)
+
+	bus.SetQueueTuning(SubjectPMFileReceived, QueueTuning{
+		AckWait: 3 * time.Minute, MaxDeliver: 7, MaxAckPending: 16,
+	})
+	got = bus.queueTuningForSubject(SubjectPMFileReceived)
+	assert.Equal(t, 3*time.Minute, got.AckWait)
+	assert.Equal(t, 7, got.MaxDeliver)
+	assert.Equal(t, 16, got.MaxAckPending)
+}
+
+func TestUpdatedQueueConsumerConfigOverwritesMutableTuning(t *testing.T) {
+	desired := QueueTuning{AckWait: 2 * time.Minute, MaxDeliver: 5, MaxAckPending: 16}
+	existing := &nats.ConsumerInfo{
+		Name: "pm-workers",
+		Config: nats.ConsumerConfig{
+			AckWait: 30 * time.Second, MaxDeliver: -1, MaxAckPending: 1000,
+		},
+	}
+
+	got, changed := updatedQueueConsumerConfig(existing, desired)
+
+	require.True(t, changed)
+	assert.Equal(t, "pm-workers", got.Durable)
+	assert.Equal(t, desired.AckWait, got.AckWait)
+	assert.Equal(t, desired.MaxDeliver, got.MaxDeliver)
+	assert.Equal(t, desired.MaxAckPending, got.MaxAckPending)
+}
+
+func TestReconcilePullTuningWithExisting_NilKeepsDesired(t *testing.T) {
+	desired := PullTuning{BatchSize: 64, Concurrency: 64, AckWait: 2 * time.Minute, MaxAckPending: 512}
+
+	assert.Equal(t, desired, reconcilePullTuningWithExisting(desired, nil))
+}
+
+func TestReconcilePullTuningWithExisting_FallbackPreservesServerConsumerConfig(t *testing.T) {
+	desired := PullTuning{BatchSize: 64, Concurrency: 64, AckWait: 2 * time.Minute, MaxAckPending: 512}
+	existing := &nats.ConsumerInfo{Config: nats.ConsumerConfig{AckWait: 30 * time.Second, MaxAckPending: 2048}}
+
+	got := reconcilePullTuningWithExisting(desired, existing)
+
+	assert.Equal(t, desired.BatchSize, got.BatchSize)
+	assert.Equal(t, desired.Concurrency, got.Concurrency)
+	assert.Equal(t, 30*time.Second, got.AckWait)
+	assert.Equal(t, 2048, got.MaxAckPending)
+}
+
 // --- decodeEventBytes pure-function tests ---
 
 func TestDecodeEventBytes_ValidJSON(t *testing.T) {
@@ -344,17 +719,17 @@ func TestDecodeEventBytes_EmptyBytes_ReturnsError(t *testing.T) {
 func TestSubjectConstants_DotSeparated(t *testing.T) {
 	// All subjects should follow dot-separated naming convention
 	subjects := map[string]string{
-		"DeviceBootstrap":     SubjectDeviceBootstrap,
-		"DevicePeriodic":      SubjectDevicePeriodic,
+		"DeviceBootstrap":          SubjectDeviceBootstrap,
+		"DevicePeriodic":           SubjectDevicePeriodic,
 		"CommandGetParamsResponse": SubjectCommandGetParamsResponse,
 		"TaskCompleted":            SubjectTaskCompleted,
-		"PMFileReceived":      SubjectPMFileReceived,
-		"AlarmRaised":         SubjectAlarmRaised,
-		"ProvisionStarted":    SubjectProvisionStarted,
-		"FirmwareUploaded":    SubjectFirmwareUploaded,
-		"BackupTaskCreated":   SubjectBackupTaskCreated,
-		"OSSAlarmForward":     SubjectOSSAlarmForward,
-		"NEDirectRegister":    SubjectNEDirectRegister,
+		"PMFileReceived":           SubjectPMFileReceived,
+		"AlarmRaised":              SubjectAlarmRaised,
+		"ProvisionStarted":         SubjectProvisionStarted,
+		"FirmwareUploaded":         SubjectFirmwareUploaded,
+		"BackupTaskCreated":        SubjectBackupTaskCreated,
+		"OSSAlarmForward":          SubjectOSSAlarmForward,
+		"NEDirectRegister":         SubjectNEDirectRegister,
 	}
 
 	for name, subject := range subjects {
@@ -380,12 +755,25 @@ func TestPullDurableName_ShortName(t *testing.T) {
 	assert.Equal(t, "foo-pull", pullDurableName("foo"))
 }
 
-// --- pullBatchSizeForSubject tests ---
+// --- defaultPullTuningForSubject tests ---
 
-func TestPullBatchSizeForSubject_GPVSubject_Returns64(t *testing.T) {
-	assert.Equal(t, gpvPullBatchSize, pullBatchSizeForSubject(SubjectCommandGetParamsResponse))
+func TestDefaultPullTuningForSubject_GPVSubject_Returns64(t *testing.T) {
+	assert.Equal(t, gpvPullBatchSize, defaultPullTuningForSubject(SubjectCommandGetParamsResponse).BatchSize)
 }
 
-func TestPullBatchSizeForSubject_OtherSubject_Returns32(t *testing.T) {
-	assert.Equal(t, 32, pullBatchSizeForSubject("some.other.subject"))
+func TestDefaultPullTuningForSubject_OtherSubject_Returns32(t *testing.T) {
+	assert.Equal(t, 32, defaultPullTuningForSubject("some.other.subject").BatchSize)
+}
+
+func TestPullFetchBatchForAvailableSlots_LimitsFetchToFreeConcurrency(t *testing.T) {
+	assert.Equal(t, 64, pullFetchBatchForAvailableSlots(64, 64, 0))
+	assert.Equal(t, 1, pullFetchBatchForAvailableSlots(64, 64, 63))
+	assert.Equal(t, 0, pullFetchBatchForAvailableSlots(64, 64, 64))
+	assert.Equal(t, 8, pullFetchBatchForAvailableSlots(8, 64, 1))
+}
+
+func TestPullFetchBatchForAvailableSlots_InvalidInputsReturnZero(t *testing.T) {
+	assert.Equal(t, 0, pullFetchBatchForAvailableSlots(0, 64, 0))
+	assert.Equal(t, 0, pullFetchBatchForAvailableSlots(64, 0, 0))
+	assert.Equal(t, 0, pullFetchBatchForAvailableSlots(64, 64, 99))
 }

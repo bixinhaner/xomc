@@ -65,7 +65,24 @@ describe('ScriptExecutionDrawer', () => {
     vi.setSystemTime(new Date('2026-07-10T13:38:30+08:00'));
     renderDrawer({}, 'en-US');
 
-    expect(screen.getByLabelText('任务名称')).toHaveValue('巡检脚本_2026-07-10 13:38:30');
+    expect(screen.getByLabelText('Task Name')).toHaveValue('巡检脚本_2026-07-10 13:38:30');
+  });
+
+  it('localizes execution configuration controls in English', () => {
+    renderDrawer({}, 'en-US');
+
+    expect(screen.getByRole('dialog')).toHaveTextContent('Execute: 巡检脚本');
+    expect(screen.getByLabelText('Task Name')).toBeInTheDocument();
+    expect(screen.getByText('Execution Method')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Immediate' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Suspended' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Scheduled' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Periodic' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Offline Wait Retry' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Failure Retry' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Execute' })).toBeInTheDocument();
+    expect(screen.queryByText('执行方式')).not.toBeInTheDocument();
+    expect(screen.queryByText('立即')).not.toBeInTheDocument();
   });
 
   it('submits execution only once while the request is in flight', async () => {
@@ -90,6 +107,25 @@ describe('ScriptExecutionDrawer', () => {
         issues: [],
       },
     });
+  });
+
+  it('passes the created task to onSuccess after execution succeeds', async () => {
+    const onSuccess = vi.fn();
+    const task = { id: 'task-created-1', taskName: '巡检任务' };
+    mocks.execute.mockResolvedValue({
+      task,
+      validation: {
+        planItems: [],
+        summary: { totalLines: 1, validLines: 1, effectiveLines: 1, deviceCount: 1, errorCount: 0, warningCount: 0 },
+        issues: [],
+      },
+    });
+    renderDrawer({ onSuccess });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: '执行' }));
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledWith(task));
   });
 
   it('confirms server warnings and retries with confirmWarnings', async () => {
@@ -167,6 +203,49 @@ describe('ScriptExecutionDrawer', () => {
     await user.click(screen.getByRole('button', { name: '执行' }));
     expect(await screen.findByText('请选择执行时间')).toBeInTheDocument();
     expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it('only shows scheduling and retry inputs when their controlling options are selected', async () => {
+    renderDrawer();
+    const user = userEvent.setup();
+
+    expect(screen.queryByLabelText('执行时间')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('周期日期')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('周期时间')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('离线等待（秒）')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('失败重试次数')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('失败重试间隔（秒）')).not.toBeInTheDocument();
+
+    const retryOptionRow = screen.getByRole('group', { name: '重试选项' });
+    expect(retryOptionRow).toHaveStyle({ display: 'flex' });
+    expect(retryOptionRow).toContainElement(screen.getByRole('checkbox', { name: '离线等待重试' }));
+    expect(retryOptionRow).toContainElement(screen.getByRole('checkbox', { name: '失败重试' }));
+    const executionActions = screen.getByRole('group', { name: '执行操作' });
+    expect(executionActions).toHaveStyle({ marginTop: '20px' });
+    expect(executionActions).toHaveStyle({ paddingTop: '16px' });
+    expect(executionActions).toContainElement(screen.getByRole('button', { name: '执行' }));
+
+    await user.click(screen.getByRole('radio', { name: '定时' }));
+    expect(screen.getByLabelText('执行时间')).toBeInTheDocument();
+    expect(screen.queryByLabelText('周期日期')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('周期时间')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('radio', { name: '周期' }));
+    expect(screen.queryByLabelText('执行时间')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('周期日期')).toBeInTheDocument();
+    expect(screen.getByLabelText('周期时间')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('checkbox', { name: '离线等待重试' }));
+    expect(screen.getByLabelText('离线等待（秒）')).toBeInTheDocument();
+    await user.click(screen.getByRole('checkbox', { name: '离线等待重试' }));
+    expect(screen.queryByLabelText('离线等待（秒）')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('checkbox', { name: '失败重试' }));
+    expect(screen.getByLabelText('失败重试次数')).toBeInTheDocument();
+    expect(screen.getByLabelText('失败重试间隔（秒）')).toBeInTheDocument();
+    await user.click(screen.getByRole('checkbox', { name: '失败重试' }));
+    expect(screen.queryByLabelText('失败重试次数')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('失败重试间隔（秒）')).not.toBeInTheDocument();
   });
 
   it('does not confirm when typed validation contains both errors and warnings', async () => {

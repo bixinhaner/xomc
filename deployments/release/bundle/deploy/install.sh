@@ -67,6 +67,16 @@ if [ -f "$DEPLOY_DIR/data-upgrade-lib.sh" ]; then
 else
   die "缺 $DEPLOY_DIR/data-upgrade-lib.sh（data 升级保护库，由 build-release.sh 随包发布）" 1
 fi
+if [ -f "$DEPLOY_DIR/storage-paths-lib.sh" ]; then
+  . "$DEPLOY_DIR/storage-paths-lib.sh"
+else
+  die "缺 $DEPLOY_DIR/storage-paths-lib.sh（有状态服务数据路径库，由 build-release.sh 随包发布）" 1
+fi
+if [ -f "$DEPLOY_DIR/monitoring-profile-lib.sh" ]; then
+  . "$DEPLOY_DIR/monitoring-profile-lib.sh"
+else
+  die "缺 $DEPLOY_DIR/monitoring-profile-lib.sh（监控部署模式状态库，由 build-release.sh 随包发布）" 1
+fi
 
 # 升级时 deploy/.env 里【运维自定义】的键 —— 跨版本继承,不被新包默认值覆盖。
 # 注：6 个密钥键虽仍在此列（升级时把上一版有效凭证带进新 .env，供 ensure_secrets 首迁导入），
@@ -75,7 +85,7 @@ fi
 # 【版本相关】键(PROJECT_VERSION / IMAGE_*)不在此列,始终用新包值。
 # 注：POSTGRES_TSDB_USER/PASSWORD/DB（时序库凭据，#347）跨版本继承；TSDB_HOST 是 compose 服务名
 # （随包固定值），故【不】列入继承白名单，始终用新包值。
-ENV_PRESERVE_KEYS="POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB POSTGRES_TSDB_USER POSTGRES_TSDB_PASSWORD POSTGRES_TSDB_DB MINIO_ROOT_USER MINIO_ROOT_PASSWORD GRAFANA_ADMIN_USER GRAFANA_ADMIN_PASSWORD OMCGO_JWT_SECRET OMC_SHARED_SECRET OMC_PUBLIC_HOST"
+ENV_PRESERVE_KEYS="POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB POSTGRES_TSDB_USER POSTGRES_TSDB_PASSWORD POSTGRES_TSDB_DB MINIO_ROOT_USER MINIO_ROOT_PASSWORD GRAFANA_ADMIN_USER GRAFANA_ADMIN_PASSWORD OMCGO_JWT_SECRET OMC_SHARED_SECRET OMC_PUBLIC_HOST POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH"
 
 # merge_env_preserve <prev_env> <new_env>
 # 升级继承:以新包 .env 为基底(拿到新镜像 tag),把上一版 .env 中白名单键的值
@@ -585,6 +595,12 @@ ENV_FILE="$OMC_ROOT/current/deploy/.env"
 if [ -f "$ENV_FILE" ]; then
   set -a; source "$ENV_FILE"; set +a
 fi
+# 必须在 source .env 之后应用：旧 .env 可能显式写了 tracer=true。
+# 同时把安装 profile 持久化，供后续独立运行的 svc/healthcheck 使用。
+monitoring_profile_apply_install "$ENV_FILE" "$SKIP_MONITORING" ||
+  die "无法持久化 monitoring profile 到 $ENV_FILE" 1
+storage_prepare_configured_env_paths "$ENV_FILE" ||
+  die "有状态服务数据路径校验/创建失败；请检查 $ENV_FILE 中五个 *_DATA_PATH" 1
 
 if [ "$SKIP_INFRA" = 0 ]; then
   INFRA_IMAGES=("$IMAGE_POSTGRES" "${IMAGE_POSTGRES_TSDB:-}" "$IMAGE_REDIS" "$IMAGE_NATS" "$IMAGE_MINIO" "${IMAGE_NGINX:-}")

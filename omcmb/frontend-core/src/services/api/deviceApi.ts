@@ -1,5 +1,5 @@
 import http from '../http';
-import type { Device, NE, DeviceFilter, DeviceGroup, DeviceListResponse, DeviceListStats, DeviceStats, DeviceParameter, CreateDeviceInput, NameFilterItem, BatchImportRequest, BatchImportResponse, BatchPreRegisterRequest, BatchPreRegisterResponse } from '../../types/device';
+import type { Device, NE, DeviceFilter, DeviceGroup, DeviceListResponse, DeviceListStats, DeviceStats, DeviceParameter, CreateDeviceInput, NameFilterItem, BatchImportRequest, BatchImportResponse, BatchPreRegisterRequest, BatchPreRegisterResponse, LocationSync, ReportedLocation } from '../../types/device';
 import type { AntennaSector } from '../../types/map';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 import { normalizeDeviceSyncStatus } from '../../utils/deviceSyncStatus';
@@ -33,10 +33,13 @@ interface BackendDevice {
   site_id: string;
   latitude: number;
   longitude: number;
+  location_sync?: BackendLocationSync;
   created_at: string;
   updated_at: string;
   deleted_at?: string;
   deleted_by?: string;
+  recycle_type?: 'manual' | 'auto';
+  recycle_executor?: string;
 
   // --- 监控扩展字段 ---
   host_name?: string;
@@ -78,6 +81,8 @@ interface BackendDevice {
   // Issue #758：设备名称同步
   name_sync_pending?: boolean;
   lmt_device_name?: string;
+  param_sync_running?: boolean;
+  last_param_sync_at?: string;
 
   // Cell
   enb_id?: string;
@@ -173,6 +178,152 @@ interface BackendDevice {
   energy_saving?: string;
   gnb_topo_cellmgr?: string;
   ssl_cert_validity?: string;
+}
+
+interface BackendLocationSync {
+  status: LocationSync['status'];
+  accepted?: { latitude: number; longitude: number } | null;
+  reported?: {
+    latitude: number;
+    longitude: number;
+    gps_height?: number | null;
+    observed_at: string;
+    version: number;
+    source_path: string;
+  } | null;
+  distance_meters?: number | null;
+  height_diff_meters?: number | null;
+}
+
+function mapBackendLocationSync(value?: BackendLocationSync): LocationSync {
+  if (!value) {
+    return { status: 'no_report', accepted: null, reported: null, distanceMeters: null, heightDiffMeters: null };
+  }
+  const reported: ReportedLocation | null = value.reported
+    ? {
+        latitude: value.reported.latitude,
+        longitude: value.reported.longitude,
+        gpsHeight: value.reported.gps_height ?? null,
+        observedAt: value.reported.observed_at,
+        version: value.reported.version,
+        sourcePath: value.reported.source_path,
+      }
+    : null;
+  return {
+    status: value.status,
+    accepted: value.accepted ? { latitude: value.accepted.latitude, longitude: value.accepted.longitude } : null,
+    reported,
+    distanceMeters: value.distance_meters ?? null,
+    heightDiffMeters: value.height_diff_meters ?? null,
+  };
+}
+
+export interface ParameterSyncRequest {
+  id: string;
+  deviceId: string;
+  deviceSn: string;
+  triggerReason: string;
+  syncScope: string;
+  requestedPaths: string[];
+  status: string;
+  runId?: string;
+  activeRunId?: string;
+  resultCode?: string;
+  errorMessage?: string;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  updatedAt: string;
+}
+
+interface BackendParameterSyncRequest {
+  id: string;
+  device_id: string;
+  device_sn: string;
+  trigger_reason: string;
+  sync_scope: string;
+  requested_paths?: string[];
+  status: string;
+  run_id?: string;
+  active_run_id?: string;
+  result_code?: string;
+  error_message?: string;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+  updated_at: string;
+}
+
+const PARAMETER_SYNC_TERMINAL_STATUSES = new Set([
+  'succeeded',
+  'failed',
+  'timed_out',
+  'cancelled',
+  'deduplicated',
+  'rejected',
+]);
+
+function mapParameterSyncRequest(req: BackendParameterSyncRequest): ParameterSyncRequest {
+  return {
+    id: req.id,
+    deviceId: req.device_id,
+    deviceSn: req.device_sn,
+    triggerReason: req.trigger_reason,
+    syncScope: req.sync_scope,
+    requestedPaths: req.requested_paths ?? [],
+    status: req.status,
+    runId: req.run_id,
+    activeRunId: req.active_run_id,
+    resultCode: req.result_code,
+    errorMessage: req.error_message,
+    createdAt: req.created_at,
+    startedAt: req.started_at,
+    completedAt: req.completed_at,
+    updatedAt: req.updated_at,
+  };
+}
+
+function isParameterSyncTerminalStatus(status: string): boolean {
+  return PARAMETER_SYNC_TERMINAL_STATUSES.has(status);
+}
+
+function createAbortError(): Error {
+  if (typeof DOMException !== 'undefined') {
+    return new DOMException('The operation was aborted.', 'AbortError');
+  }
+  const error = new Error('The operation was aborted.');
+  error.name = 'AbortError';
+  return error;
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw createAbortError();
+  }
+}
+
+async function delay(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) {
+    await new Promise<void>((resolve) => {
+      globalThis.setTimeout(resolve, delayMs);
+    });
+    return;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const timerId = globalThis.setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, delayMs);
+
+    const onAbort = () => {
+      globalThis.clearTimeout(timerId);
+      signal.removeEventListener('abort', onAbort);
+      reject(createAbortError());
+    };
+
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 export interface BatchOperationResult {
@@ -331,6 +482,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
   // 在 site_name 未填的设备上显示空白（用户看到"未命名设备"会失去识别能力）。
   // 历史 mapper 中 name 字段已是这个回退，deviceName 字段当时填的空串 —— 现统一。
   const friendlyName = bd.device_name || bd.serial_number;
+  const networkType = toRadioMode(bd.technology);
 
   return {
     id: bd.id,
@@ -338,7 +490,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
     name: friendlyName,
     vendor: bd.manufacturer,
     productClass: bd.product_class,
-    networkType: toRadioMode(bd.technology),
+    networkType,
     deviceModel: bd.model_name,
     region: bd.device_name,
     stationId: bd.site_id,
@@ -367,6 +519,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
     site: bd.device_name,
     longitude: bd.longitude,
     latitude: bd.latitude,
+    locationSync: mapBackendLocationSync(bd.location_sync),
     softwareVersion: bd.firmware_version,
     createTime: bd.created_at,
 
@@ -406,6 +559,8 @@ function mapBackendDevice(bd: BackendDevice): Device {
     // Issue #758：设备名称同步
     nameSyncPending: bd.name_sync_pending ?? false,
     lmtDeviceName: bd.lmt_device_name || '',
+    paramSyncRunning: bd.param_sync_running ?? false,
+    lastParamSyncAt: bd.last_param_sync_at,
 
     enbId: bd.enb_id || '',
     cellId: bd.cell_id || '',
@@ -427,7 +582,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
     // T-XXX (Phase 5)：transmit_power 是后端实际字段 (NUMERIC 转 number)
     // 部分设备用 -1 表示未知/未上报，列表不应把占位值展示成真实 Tx Power。
     // tx_power 兼容旧字段名；fmtDuration 等渲染器接受 string，转字符串展示。
-    txPower: bd.transmit_power != null && bd.transmit_power >= 0 ? String(bd.transmit_power) : (bd.tx_power || ''),
+    txPower: bd.transmit_power != null && bd.transmit_power !== -1 ? String(bd.transmit_power) : (bd.tx_power || ''),
     band: bd.band || '',
     lac: bd.lac || '',
     arfcn: bd.arfcn || '',
@@ -438,8 +593,10 @@ function mapBackendDevice(bd: BackendDevice): Device {
     // 全部 inactive / 无 cell 数据 → "inactive"）。之前 T-0162 误以为后端不再透出此列写死 ''，导致 BTS 详情页「小区状态」恒为 '-'。
     cellStatus: bd.cell_status || '',
     opState: bd.op_state || 'unknown',
-    mmeStatus: bd.mme_status || '',
-    amfStatus: bd.amf_status || '',
+    // device_info.mme_status 是后端按制式归一的核心网状态：LTE=MME，NR=AMF。
+    // 这里按制式分流，避免 5G/2G 设备误显示 MME。
+    mmeStatus: networkType === 'eNB' ? bd.mme_status || '' : '',
+    amfStatus: networkType === 'gNB' ? bd.amf_status || bd.mme_status || '' : '',
     rfStatus: bd.rf_status || '',
     pmReportStatus: bd.pm_report_status || '',
     halobFlag: bd.halob_enabled ?? false,
@@ -491,6 +648,8 @@ function mapBackendDevice(bd: BackendDevice): Device {
     // 回收站扩展字段
     deletedAt: bd.deleted_at,
     deletedBy: bd.deleted_by,
+    recycleType: bd.recycle_type,
+    recycleExecutor: bd.recycle_executor,
   };
 }
 
@@ -536,9 +695,9 @@ export const deviceApi = {
     // Map frontend filter fields to backend query params
     const query: Record<string, unknown> = {
       page: params.page,
-      pageSize: params.pageSize,
-      sortField: params.sortField,
-      sortOrder: params.sortOrder,
+      page_size: params.pageSize,
+      sort_by: params.sortField,
+      sort_dir: params.sortOrder === 'ascend' ? 'asc' : params.sortOrder === 'descend' ? 'desc' : undefined,
     };
 
     if (params.name) query.search = params.name;
@@ -627,6 +786,13 @@ export const deviceApi = {
     } catch {
       return null;
     }
+  },
+
+  async acceptLocationSync(id: string, reportedVersion: number): Promise<LocationSync> {
+    const { data } = await http.post<BackendLocationSync>(`/devices/${id}/location-sync/accept`, {
+      reported_version: reportedVersion,
+    });
+    return mapBackendLocationSync(data);
   },
 
   async getBySn(sn: string): Promise<Device | null> {
@@ -734,7 +900,7 @@ export const deviceApi = {
   /**
    * 批量预登记：在设备 Bootstrap 到达前，按 SN 列表预先录入设备名称。
    * 已存在的 SN 只更新名称/备注；不存在的 SN 新建设备（lifecycle='registered'）。
-   * 新建设备不写入任何分组，自然落在「未分组」视图，source_type 显示 Auto。
+   * 新建设备由后端归入默认设备组或按规则归组，source_type 显示 Auto。
    */
   async batchPreRegisterDevices(payload: BatchPreRegisterRequest): Promise<BatchPreRegisterResponse> {
     const { data } = await http.post<BatchPreRegisterResponse>('/devices/batch-preregister', payload);
@@ -781,7 +947,7 @@ export const deviceApi = {
           nameI18n: g.name_i18n,
           descriptionI18n: g.description_i18n,
           remarkI18n: g.remark_i18n,
-          parentId: g.parent_id,
+          parentId: g.parent_id ?? null,
           deviceCount: g.device_count ?? 0,
           description: g.remark || g.description || '',
           builtIn: g.is_default ? 1 : 0,
@@ -796,7 +962,7 @@ export const deviceApi = {
       }
     }
     walk(data.items || []);
-    // 计算总设备数 = 已分组设备 + 未分组设备
+    // 计算总设备数 = 已分组设备 + 历史无归属设备
     const totalDevices = (data.stats?.grouped_devices ?? 0) + (data.stats?.ungrouped_devices ?? 0);
     return { groups: flat, stats: { totalDevices } };
   },
@@ -809,7 +975,7 @@ export const deviceApi = {
     remark_i18n?: Record<string, string>;
     parent_id?: string;
     remark?: string;
-    matching_mode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber';
+    matching_mode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber' | '';
     source_group_id?: string;
     name_rule_list?: NameFilterItem[];
     lac_list?: number[];
@@ -828,7 +994,7 @@ export const deviceApi = {
     remark_i18n?: Record<string, string>;
     parent_id?: string;
     remark?: string;
-    matching_mode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber';
+    matching_mode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber' | '';
     source_group_id?: string;
     name_rule_list?: NameFilterItem[];
     lac_list?: number[];
@@ -865,8 +1031,8 @@ export const deviceApi = {
     await http.post(`/devices/${id}/reboot`);
   },
 
-  // T-0126: 手动触发 Path B 全量参数同步（reason="manual"）。
-  // 替代旧 deviceParameterApi.syncParameters（Path A 已下线）。
+  // 手动触发 durable paramsync 参数同步（reason="manual"）。
+  // 后端当前复用 /devices/:id/sync-params 兼容端点；运行时由 paramSyncStarter 提交到 paramsync。
   // 后端 POST /api/v1/devices/:id/sync-params 响应 202 {status, source_id, device_id, serial_number, force}
   // force: 预留供未来节流绕过；当前 manual 端点天然不走节流。
   async syncDeviceParams(
@@ -875,15 +1041,22 @@ export const deviceApi = {
   ): Promise<{
     status: string;
     sourceId: string;
+    requestId?: string;
+    runId?: string;
+    resultCode?: string;
     deviceId: string;
     serialNumber: string;
     force: boolean;
     parameterPathsCount?: number;
+    taskCount?: number;
     gpvTaskCount?: number;
   }> {
     const { data } = await http.post<{
       status: string;
       source_id: string;
+      request_id?: string;
+      run_id?: string;
+      result_code?: string;
       device_id: string;
       serial_number: string;
       force: boolean;
@@ -895,12 +1068,44 @@ export const deviceApi = {
     return {
       status: data.status,
       sourceId: data.source_id,
+      requestId: data.request_id,
+      runId: data.run_id,
+      resultCode: data.result_code,
       deviceId: data.device_id,
       serialNumber: data.serial_number,
       force: data.force,
       parameterPathsCount: data.parameter_paths_count,
+      taskCount: data.gpv_task_count,
       gpvTaskCount: data.gpv_task_count,
     };
+  },
+
+  async getParameterSyncRequest(requestId: string): Promise<ParameterSyncRequest> {
+    const { data } = await http.get<BackendParameterSyncRequest>(`/parameter-sync/requests/${requestId}`);
+    return mapParameterSyncRequest(data);
+  },
+
+  async waitForParameterSyncRequest(
+    requestId: string,
+    options?: { timeoutMs?: number; intervalMs?: number; signal?: AbortSignal; onPoll?: (request: ParameterSyncRequest) => void },
+  ): Promise<ParameterSyncRequest> {
+    throwIfAborted(options?.signal);
+    const timeoutMs = options?.timeoutMs ?? 10 * 60 * 1000;
+    const intervalMs = options?.intervalMs ?? 2000;
+    const deadlineAt = Date.now() + timeoutMs;
+
+    while (true) {
+      throwIfAborted(options?.signal);
+      const request = await this.getParameterSyncRequest(requestId);
+      options?.onPoll?.(request);
+      if (isParameterSyncTerminalStatus(request.status)) {
+        return request;
+      }
+      if (Date.now() >= deadlineAt) {
+        throw new Error(`parameter sync request ${requestId} timed out`);
+      }
+      await delay(intervalMs, options?.signal);
+    }
   },
 
   async getNEList(params: { keyword?: string } & PageRequest): Promise<PageResponse<NE>> {

@@ -30,10 +30,12 @@ import {
   formatEnumDisplayValue,
   getEffectiveEnumMeta,
   getFeedbackScopeContext,
+  serializeQuickSettingsMultiCheckboxValue,
   validateLteQOffsetValue,
   validateValue,
   type QuickSettingsInstanceContext,
 } from './validators';
+import { buildEffectivePlmnRows, validatePlmnList } from './plmnList';
 
 import { useT } from '@/hooks/useT';
 
@@ -63,6 +65,13 @@ function normalizeIpsecEnableValue(value: unknown): string {
 
 function toDeviceIpsecEnableValue(value: unknown): string {
   return isEnabledValue(value) ? '1' : '0';
+}
+
+function normalizeComparableQuickSettingsValue(value: unknown, param?: QuickSettingsParam): string {
+  if (param?.type === 'multiCheckbox') {
+    return serializeQuickSettingsMultiCheckboxValue(value);
+  }
+  return String(value ?? '');
 }
 
 function isObjectInstanceNotFoundError(err: unknown): boolean {
@@ -1569,11 +1578,12 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     for (const [leaf, value] of Object.entries(edits)) {
       const item = schemaByPath.get(`${objectPath}${instId}.${leaf}`) ?? leafSchemaByLeaf.get(leaf);
       const param = groupParamByLeaf.get(leaf);
-      const oldVal = item?.currentValue ?? '';
-      if (value === oldVal) continue;
+      const nextValue = normalizeComparableQuickSettingsValue(value, param);
+      const oldVal = normalizeComparableQuickSettingsValue(item?.currentValue ?? '', param);
+      if (nextValue === oldVal) continue;
       updates.push({
         parameterPath: `${objectPath}${instId}.${leaf}`,
-        parameterValue: value,
+        parameterValue: nextValue,
         parameterType: effectiveParamType(item, param),
       });
     }
@@ -1708,17 +1718,18 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       }
 
       if (!targetInstanceId) {
-        pendingEdits[leaf] = value;
+        pendingEdits[leaf] = normalizeComparableQuickSettingsValue(value, param);
         continue;
       }
 
-      const oldVal = item?.currentValue ?? '';
-      if (value === oldVal) continue;
+      const nextValue = normalizeComparableQuickSettingsValue(value, param);
+      const oldVal = normalizeComparableQuickSettingsValue(item?.currentValue ?? '', param);
+      if (nextValue === oldVal) continue;
 
-      pendingEdits[leaf] = value;
+      pendingEdits[leaf] = nextValue;
       updates.push({
         parameterPath: `${objectPath}${targetInstanceId}.${leaf}`,
-        parameterValue: value,
+        parameterValue: nextValue,
         parameterType,
       });
     }
@@ -1862,6 +1873,33 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
         if (err) validationErrors.push(err);
       });
     });
+    if (group.id === 'enb-plmn') {
+      const finalPlmnRows = buildEffectivePlmnRows({
+        existingRows: instanceIds.map((instId) => ({
+          key: instId,
+          plmn: schemaByPath.get(`${objectPath}${instId}.PLMNID`)?.currentValue ?? '',
+        })),
+        deletedKeys: pendingDeletes,
+        editedValues: new Map(editedRows.map(([instId, state]) => [
+          instId,
+          state.edits.PLMNID
+            ?? schemaByPath.get(`${objectPath}${instId}.PLMNID`)?.currentValue
+            ?? '',
+        ])),
+        addedRows: addRows.map((row) => ({
+          key: row.tempId,
+          plmn: row.values.PLMNID ?? '',
+        })),
+      });
+      const plmnError = validatePlmnList(finalPlmnRows, group.maxInstances ?? 6);
+      if (plmnError === 'format') {
+        validationErrors.push(t('device.cell.plmnFormatInvalid'));
+      } else if (plmnError === 'duplicate') {
+        validationErrors.push(t('device.cell.plmnDuplicate'));
+      } else if (plmnError === 'limit') {
+        validationErrors.push(t('device.cell.plmnLimitReached', { max: group.maxInstances ?? 6 }));
+      }
+    }
 
     if (validationErrors.length > 0) {
       const detail = validationErrors.slice(0, 4).join('; ');
@@ -1996,8 +2034,11 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     deviceId,
     fbKey,
     group.titleZh,
+    group.id,
+    group.maxInstances,
     groupParamByLeaf,
     hideStaleInstance,
+    instanceIds,
     leafSchemaByLeaf,
     objectPath,
     pendingAdds,

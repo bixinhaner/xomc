@@ -2,6 +2,7 @@ package task
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -21,11 +22,12 @@ const (
 type TaskSource string
 
 const (
-	TaskSourceAPI       TaskSource = "api"       // REST API 创建
-	TaskSourceScheduler TaskSource = "scheduler" // 定时任务创建
-	TaskSourceSystem    TaskSource = "system"    // 系统内部创建
-	TaskSourceMML       TaskSource = "mml"       // MML 批量任务扇出
-	TaskSourceOps       TaskSource = "ops"       // F06 运维即时命令 (T-0102-c)
+	TaskSourceAPI       TaskSource = "api"        // REST API 创建
+	TaskSourceScheduler TaskSource = "scheduler"  // 定时任务创建
+	TaskSourceSystem    TaskSource = "system"     // 系统内部创建
+	TaskSourceMML       TaskSource = "mml"        // MML 批量任务扇出
+	TaskSourceOps       TaskSource = "ops"        // F06 运维即时命令 (T-0102-c)
+	TaskSourceParamSync TaskSource = "param_sync" // durable parameter-sync run task
 )
 
 // Task 表示一个设备任务
@@ -83,7 +85,7 @@ type Task struct {
 
 // CreateTaskRequest 创建任务请求
 type CreateTaskRequest struct {
-	DeviceSN  string          `json:"device_sn" binding:"required"`
+	DeviceSN  string          `json:"device_sn"`
 	Method    string          `json:"method" binding:"required"`
 	Params    json.RawMessage `json:"params"`
 	Priority  int             `json:"priority"`
@@ -108,6 +110,12 @@ type CreateTaskRequest struct {
 	HasPathTranslationMiss   bool   `json:"has_path_translation_miss"`
 	PathTranslationMissCount int    `json:"path_translation_miss_count"`
 	PathTranslationSource    string `json:"path_translation_source,omitempty"` // T-0168
+
+	// FailImmediately creates a terminal failed task row without enqueueing it.
+	// It is used by callers that already know an RPC cannot be delivered, such
+	// as an MML task targeting an offline device without offline-wait enabled.
+	FailImmediately bool   `json:"fail_immediately,omitempty"`
+	FailReason      string `json:"fail_reason,omitempty"`
 }
 
 // TaskHistoryOptions 任务历史查询选项
@@ -129,11 +137,25 @@ type TaskListResponse struct {
 
 // SyncGPVSummary summarizes the latest Path B GetParameterValues sync task group for a device.
 type SyncGPVSummary struct {
-	SourceID         string     `json:"source_id"`
-	TaskCount        int        `json:"task_count"`
-	FirstCreatedAt   time.Time  `json:"first_created_at"`
-	LastCompletedAt  *time.Time `json:"last_completed_at,omitempty"`
-	WallClockSeconds float64    `json:"wall_clock_seconds"`
+	SourceID            string           `json:"source_id"`
+	TaskCount           int              `json:"task_count"`
+	SuccessfulCommands  int              `json:"successful_commands"`
+	FailedCommands      int              `json:"failed_commands"`
+	RequestedPathCount  int              `json:"requested_path_count"`
+	SuccessfulPathCount int              `json:"successful_path_count"`
+	FailedPathCount     int              `json:"failed_path_count"`
+	FailedPaths         []SyncGPVFailure `json:"failed_paths,omitempty"`
+	FirstCreatedAt      time.Time        `json:"first_created_at"`
+	LastCompletedAt     *time.Time       `json:"last_completed_at,omitempty"`
+	WallClockSeconds    float64          `json:"wall_clock_seconds"`
+}
+
+type SyncGPVFailure struct {
+	Path       string `json:"path,omitempty"`
+	FaultCode  int    `json:"fault_code,omitempty"`
+	FaultText  string `json:"fault_text,omitempty"`
+	CommandKey string `json:"command_key,omitempty"`
+	Status     string `json:"status,omitempty"`
 }
 
 // NewTask 创建新任务
@@ -183,6 +205,13 @@ func NewTask(req *CreateTaskRequest) *Task {
 	}
 	if req.Source != "" {
 		task.Source = req.Source
+	}
+	if req.FailImmediately {
+		reason := req.FailReason
+		if reason == "" {
+			reason = "task failed before enqueue"
+		}
+		task.MarkFailed(0, reason)
 	}
 
 	return task
@@ -264,7 +293,22 @@ func (t *Task) MarkFailedWithResult(errorCode int, errorMessage string, result j
 func (t *Task) MarkExpired() {
 	now := time.Now()
 	t.Status = TaskStatusExpired
+	if t.Source == TaskSourceMML && t.ErrorMessage == "" {
+		t.ErrorMessage = t.commandTimeoutMessage()
+	}
 	t.CompletedAt = &now
+}
+
+func (t *Task) commandTimeoutMessage() string {
+	if t == nil || t.ExpiresAt == nil || t.CreatedAt.IsZero() {
+		return "执行命令超时"
+	}
+	timeout := t.ExpiresAt.Sub(t.CreatedAt)
+	seconds := int(timeout.Round(time.Second) / time.Second)
+	if seconds <= 0 {
+		return "执行命令超时"
+	}
+	return fmt.Sprintf("执行命令超时，超时时间 %d 秒", seconds)
 }
 
 // ResetForRetry 重置任务以进行重试

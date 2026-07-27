@@ -81,6 +81,20 @@ fi
 # compose 文件按存在性拼接（infra/app 必有；web/monitoring 看 skip flag 与存在性）
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR" || die "无法进入脚本目录：$SCRIPT_DIR"
+if [ -f "$SCRIPT_DIR/storage-paths-lib.sh" ]; then
+  . "$SCRIPT_DIR/storage-paths-lib.sh"
+else
+  die "缺 $SCRIPT_DIR/storage-paths-lib.sh"
+fi
+if [ -f "$SCRIPT_DIR/monitoring-profile-lib.sh" ]; then
+  . "$SCRIPT_DIR/monitoring-profile-lib.sh"
+else
+  die "缺 $SCRIPT_DIR/monitoring-profile-lib.sh"
+fi
+
+# 显式 flag 优先；无 flag 时读取 install.sh 持久化在 .env 的部署模式。
+monitoring_profile_apply_runtime ".env" "$SKIP_MONITORING" ||
+  die "无法读取 monitoring profile"
 
 COMPOSE_FILES=()
 [ -f docker-compose.infra.yml ] && COMPOSE_FILES+=( -f docker-compose.infra.yml )
@@ -111,6 +125,8 @@ case "$ACTION" in
     ;;
 
   start|up)
+    storage_prepare_configured_env_paths ".env" ||
+      die "有状态服务数据路径校验/创建失败；请检查 .env 中五个 *_DATA_PATH"
     if [ ${#TARGETS[@]} -gt 0 ]; then
       log "启动服务：${TARGETS[*]}"
       "${DC[@]}" up -d "${TARGETS[@]}"
@@ -131,6 +147,8 @@ case "$ACTION" in
     ;;
 
   restart)
+    storage_prepare_configured_env_paths ".env" ||
+      die "有状态服务数据路径校验/创建失败；请检查 .env 中五个 *_DATA_PATH"
     # 一次性迁移 job（run-once，跑完即 Exited）。对已退出容器执行 docker compose
     # restart 语义不对，且会脱离 depends_on 健康门控在错误时机被强行拉起。
     ONESHOT_RE='^(migrate-schema|migrate-seed-sql|migrate-seed)$'

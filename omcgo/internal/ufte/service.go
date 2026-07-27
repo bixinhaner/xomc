@@ -61,6 +61,10 @@ type Service struct {
 	// nil → DeviceItem.TargetFile / DownloadURL 永远留空。
 	fileLandedLookup func(ctx context.Context, sn, mainTaskID string) (fileName string, landed bool, err error)
 
+	// fileDeletedLookup 注入式回调：按 (sn, mainTaskID, fileName) 判断 UFTE 任务文件
+	// 元数据是否已标记删除。true 时前端保留文件名但禁用下载入口。
+	fileDeletedLookup func(ctx context.Context, sn, mainTaskID, fileName string) (bool, error)
+
 	// snapshotConfigRestoreDispatcher (T-0164)：CONFIG_RESTORE 任务的实际派发器。
 	// 接收设备 SN 列表，从 config_snapshots 表取每设备最新一份配置 → 缺失整批拒绝
 	// → 全部存在则创建 restore_tasks 主行 + 逐设备 Download device_tasks。
@@ -295,6 +299,12 @@ func (s *Service) SetDownloadURLLookup(fn func(ctx context.Context, sn, fileName
 // 不注入则 DeviceItem.TargetFile / DownloadURL 永远留空。
 func (s *Service) SetFileLandedLookup(fn func(ctx context.Context, sn, mainTaskID string) (fileName string, landed bool, err error)) {
 	s.fileLandedLookup = fn
+}
+
+// SetFileDeletedLookup 注入"按 (sn, mainTaskID, fileName) 判断文件元数据是否已标记删除"的回调。
+// 不注入则 DeviceItem.FileDeleted 始终为 false。
+func (s *Service) SetFileDeletedLookup(fn func(ctx context.Context, sn, mainTaskID, fileName string) (bool, error)) {
+	s.fileDeletedLookup = fn
 }
 
 func (s *Service) GetOverview(ctx context.Context) (*Overview, error) {
@@ -967,7 +977,7 @@ func (s *Service) ListTasks(ctx context.Context, filter TaskListFilter, visibleG
 		items = append(items, *mapped)
 	}
 	sort.Slice(items, func(i, j int) bool {
-		return items[i].CreatedAt > items[j].CreatedAt
+		return timePtrAfter(items[i].CreatedAt, items[j].CreatedAt)
 	})
 	return paginate(items, filter.Page, filter.PageSize), nil
 }
@@ -1129,7 +1139,7 @@ func (s *Service) collectFilteredDeviceItems(ctx context.Context, filter DeviceL
 	// 新建、未上报的设备为空串，倒序会把它们挤到列表最后（本次修复的 bug）。
 	// CreatedAt（子任务 created_at）建任务即有值且 NOT NULL，倒序即"最新建的在最上"。
 	sort.Slice(items, func(i, j int) bool {
-		return items[i].CreatedAt > items[j].CreatedAt
+		return timePtrAfter(items[i].CreatedAt, items[j].CreatedAt)
 	})
 	return items, nil
 }
@@ -1210,7 +1220,7 @@ func (s *Service) ListDeviceCandidates(ctx context.Context, filter DeviceCandida
 			TargetVersion:   "",
 			Status:          "pending",
 			Progress:        0,
-			LastReportAt:    formatTime(item.UpdatedAt),
+			LastReportAt:    optionalTimePtr(item.UpdatedAt),
 			OperatorScope:   "",
 		})
 	}
@@ -1421,10 +1431,10 @@ func (s *Service) mapTask(ctx context.Context, catalog []TaskType, task *softwar
 		CurrentStep:     stepForTask(typeDef, task.Status),
 		ExecutionMode:   executionModeForTask(task.Status, task.CreateStatus),
 		CreateUser:      task.CreateUser,
-		CreatedAt:       formatTime(time.Time(task.CreatedAt)),
-		StartedAt:       modelTimePtrToString(task.StartedAt),
-		EndedAt:         modelTimePtrToString(task.EndedAt),
-		ScheduledAt:     modelTimePtrToString(task.ScheduledAt),
+		CreatedAt:       optionalTimePtr(time.Time(task.CreatedAt)),
+		StartedAt:       modelTimePtrToTimePtr(task.StartedAt),
+		EndedAt:         modelTimePtrToTimePtr(task.EndedAt),
+		ScheduledAt:     modelTimePtrToTimePtr(task.ScheduledAt),
 		OperatorScope:   task.CreateUser,
 	}, nil
 }
@@ -1472,14 +1482,48 @@ func (s *Service) resolveTaskProductName(ctx context.Context, task *software.Upg
 	return ""
 }
 
-// modelTimePtrToString 把 *model.Time 格式化成前端期望的 ISO 字符串
-// （与 CreatedAt 同款 formatTime 路径），nil 时返回空串 → JSON omitempty 不输出。
-// 用于 Task.StartedAt / EndedAt / ScheduledAt 这类可空时间字段统一序列化。
-func modelTimePtrToString(t *coremodel.Time) string {
-	if t == nil {
-		return ""
+// normalizedTime 把 DB/model 读出的时间规范为 UTC instant。
+// 后续统一响应层会按系统时区转换展示；这里不能提前按容器本地时区格式化成字符串。
+func normalizedTime(t time.Time) time.Time {
+	if t.IsZero() {
+		return time.Time{}
 	}
-	return formatTime(time.Time(*t))
+	return t.UTC()
+}
+
+// modelTimePtrToTimePtr 保留可空语义，同时把时间规范为 UTC instant。
+// 用于 Task.StartedAt / EndedAt / ScheduledAt 这类可空时间字段；nil 时 JSON omitempty 不输出。
+func modelTimePtrToTimePtr(t *coremodel.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	value := normalizedTime(time.Time(*t))
+	if value.IsZero() {
+		return nil
+	}
+	return &value
+}
+
+func optionalTimePtr(t time.Time) *time.Time {
+	value := normalizedTime(t)
+	if value.IsZero() {
+		return nil
+	}
+	return &value
+}
+
+func isTaskLogCollectType(typeCode string) bool {
+	return typeCode == "RUNTIME_LOG_COLLECT" || typeCode == "FAULT_LOG_COLLECT"
+}
+
+func timePtrAfter(left, right *time.Time) bool {
+	if left == nil {
+		return false
+	}
+	if right == nil {
+		return true
+	}
+	return left.After(*right)
 }
 
 func (s *Service) mapDeviceItem(
@@ -1550,9 +1594,9 @@ func (s *Service) mapDeviceItem(
 		targetFile = subTask.DestVersion
 	}
 	fileLanded := false
+	mainTaskID := subTask.TaskID.String()
 	if typeDef.softwareTaskType == software.TaskTypeLogCollect && !isDirectDispatchFile &&
 		s.fileLandedLookup != nil && subTask.DeviceSN != "" {
-		mainTaskID := subTask.TaskID.String()
 		landedFile, landed, lookupErr := s.fileLandedLookup(ctx, subTask.DeviceSN, mainTaskID)
 		if lookupErr != nil {
 			s.logger.Debug("file landed lookup failed; treating as not-landed",
@@ -1584,6 +1628,20 @@ func (s *Service) mapDeviceItem(
 	if status == "ended" {
 		lastReport = time.Time(subTask.UpdatedAt)
 	}
+	fileDeleted := false
+	if isTaskLogCollectType(typeDef.TypeCode) && targetFile != "" && status == "ended" &&
+		s.fileDeletedLookup != nil && subTask.DeviceSN != "" {
+		deleted, lookupErr := s.fileDeletedLookup(ctx, subTask.DeviceSN, mainTaskID, targetFile)
+		if lookupErr != nil {
+			s.logger.Debug("file deleted lookup failed; treating as active",
+				zap.String("device_sn", subTask.DeviceSN),
+				zap.String("main_task_id", mainTaskID),
+				zap.String("target_file", targetFile),
+				zap.Error(lookupErr))
+		} else {
+			fileDeleted = deleted
+		}
+	}
 	// 完成态 LogCollect 类（备份等）且注入了下载回调时，拉取 1h presigned GET URL。
 	// 用 targetFile（设备实际上传文件名，从 fileLanded 反查得到）做 lookup key——
 	// 设备厂商命名不可预测，预渲染模板名匹配不上 MinIO 对象路径。
@@ -1591,7 +1649,7 @@ func (s *Service) mapDeviceItem(
 	// CONFIG_RESTORE / LICENSE_UPGRADE 是 ACS → 设备 的下行方向，downloadURLLookup
 	// 查的是设备上行的"已落地文件"，对它们语义不对——跳过，文件名以纯文本展示。
 	downloadURL := ""
-	if !isDirectDispatchFile && targetFile != "" && status == "ended" && s.downloadURLLookup != nil && subTask.DeviceSN != "" {
+	if !fileDeleted && !isDirectDispatchFile && targetFile != "" && status == "ended" && s.downloadURLLookup != nil && subTask.DeviceSN != "" {
 		url, lookupErr := s.downloadURLLookup(ctx, subTask.DeviceSN, targetFile)
 		if lookupErr != nil {
 			s.logger.Debug("download URL lookup failed; leaving blank",
@@ -1615,8 +1673,8 @@ func (s *Service) mapDeviceItem(
 		}
 	}
 
-	startedAt := modelTimePtrToString(subTask.StartedAt)
-	endedAt := modelTimePtrToString(subTask.CompletedAt)
+	startedAt := modelTimePtrToTimePtr(subTask.StartedAt)
+	endedAt := modelTimePtrToTimePtr(subTask.CompletedAt)
 	failureReason := subTask.FailureReason
 	// issue #655 追加：被操作者主动终止的子任务，多半在「未进入执行态」前就被叫停，
 	// 因此 sub_task.started_at 一般为空。前端列「开始时间 / 结束时间」只有结束、没开始
@@ -1625,7 +1683,7 @@ func (s *Service) mapDeviceItem(
 	// failure_reason 留空，前端「失败原因」列空着不够直观——补「终止」短标，CSV 走
 	// translateFailureReason 找不到映射会原样返回，三端口径一致。
 	if result == "terminated" {
-		if startedAt == "" && endedAt != "" {
+		if startedAt == nil && endedAt != nil {
 			startedAt = endedAt
 		}
 		if failureReason == "" {
@@ -1649,6 +1707,7 @@ func (s *Service) mapDeviceItem(
 		TargetVersion:   targetVersion,
 		TargetFile:      targetFile,
 		DownloadURL:     downloadURL,
+		FileDeleted:     fileDeleted,
 		Status:          status,
 		Result:          result,
 		Progress:        progressForDeviceStatus(status),
@@ -1658,8 +1717,8 @@ func (s *Service) mapDeviceItem(
 		// terminated 特例：startedAt 兜底 = endedAt，failureReason 兜底 = "终止"。
 		StartedAt:     startedAt,
 		EndedAt:       endedAt,
-		LastReportAt:  formatTime(lastReport),
-		CreatedAt:     formatTime(time.Time(subTask.CreatedAt)),
+		LastReportAt:  optionalTimePtr(lastReport),
+		CreatedAt:     optionalTimePtr(time.Time(subTask.CreatedAt)),
 		OperatorScope: parent.CreateUser,
 		FailureReason: failureReason,
 		FailureDetail: subTask.ErrorMessage,

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { login, logout } from './helpers/auth';
+import { login, logout, submitLoginForm } from './helpers/auth';
 
 test.describe('Authentication flow', () => {
   test('should display the login page with form fields', async ({ page }) => {
@@ -53,5 +53,21 @@ test.describe('Authentication flow', () => {
     // Then logout
     await logout(page);
     await expect(page).toHaveURL(/\/login/);
+  });
+
+  test('should open dashboard after logging in again from a manual logout', async ({ page }) => {
+    await login(page);
+    await page.goto('/device/list');
+    await expect(page).toHaveURL(/\/device\/list/);
+
+    await logout(page);
+    await submitLoginForm(page);
+
+    await expect(page).toHaveURL(/\/dashboard$/);
+    await expect(page.getByRole('tab', { name: /仪表板|Dashboard/i })).toBeVisible();
+    await expect(page.getByText(/总设备数|Total Devices/).first()).toBeVisible();
+    await expect(
+      page.getByPlaceholder(/SN \/ 名称 \/ IP \/ MAC \/ PCI|SN.*Name.*IP.*MAC.*PCI/i),
+    ).toHaveCount(0);
   });
 });

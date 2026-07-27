@@ -3,6 +3,7 @@ package topology
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
@@ -33,6 +34,16 @@ type GroupMatchEngine struct {
 	cron     *cron.Cron
 	sub      event.Subscription // device.registered
 	subAttrs event.Subscription // device.attributes.changed
+
+	// runMu 串行化 MatchGroup / ReEvaluateAll 两类全表/子集扫描查询。
+	//
+	// 背景（生产事故 20260717）：分组批量编辑时 fireGroupMatch 对每个分组各开一个
+	// goroutine 并发调 MatchGroup，一旦短时间内编辑的分组较多，就会有几十个几乎
+	// 相同的 devices LEFT JOIN device_info LEFT JOIN device_group_members 查询同时
+	// 打到 Postgres，互相卡在 LWLock 上排队，把 CPU 打到 4 核封顶。这些调用本身都
+	// 是后台异步触发、不阻塞 HTTP 响应，串行化不影响功能正确性，只是把「N 个并发
+	// 查询」变成「排队执行」，避免瞬时打满数据库。
+	runMu sync.Mutex
 }
 
 // NewGroupMatchEngine 构造分组匹配引擎。
@@ -47,6 +58,9 @@ func (e *GroupMatchEngine) SetEventBus(bus event.EventBus) { e.eventBus = bus }
 // 避免继续跨全部设备组搬迁设备。
 // 供 DeviceGroupService 在分组新增/编辑后异步调用。
 func (e *GroupMatchEngine) MatchGroup(ctx context.Context, groupID uuid.UUID) error {
+	e.runMu.Lock()
+	defer e.runMu.Unlock()
+
 	group, err := e.groupRepo.GetByID(ctx, groupID)
 	if err != nil {
 		return fmt.Errorf("get group for match: %w", err)
@@ -102,6 +116,9 @@ func (e *GroupMatchEngine) MatchGroup(ctx context.Context, groupID uuid.UUID) er
 // ReEvaluateAll 全量重评估：遍历所有设备，各自归入"最近编辑且命中"的 L2 分组。
 // 作为 cron @hourly 兜底，纠正心跳/事件路径可能的遗漏。
 func (e *GroupMatchEngine) ReEvaluateAll(ctx context.Context) error {
+	e.runMu.Lock()
+	defer e.runMu.Unlock()
+
 	devices, err := e.lister.ListAllForRuleEval(ctx)
 	if err != nil {
 		return fmt.Errorf("list devices for re-evaluate: %w", err)

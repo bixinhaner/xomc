@@ -379,11 +379,17 @@ SERVICE = ${OMCGO_SERVICE:-app}    # 由 Dockerfile ENV 预设
 
 ## 9. 数据持久化
 
+五个有状态服务均支持通过环境变量切换宿主机 bind mount：
+`POSTGRES_DATA_PATH`、`TSDB_DATA_PATH`、`REDIS_DATA_PATH`、`NATS_DATA_PATH`、
+`MINIO_DATA_PATH`。变量留空时仍使用下表命名卷，已有开发数据不会因升级被旁路；填写时
+必须使用绝对路径。切换已有数据前先停栈并完整复制，不能只修改变量后直接启动。
+
 ### 9.1 Docker 命名卷（自动管理）
 
 | 卷名         | 挂载路径                         | 存储内容              |
 |-------------|----------------------------------|----------------------|
 | `pgdata`    | postgres:/var/lib/postgresql/data | PostgreSQL 数据文件   |
+| `tsdbdata`  | postgres-tsdb:/var/lib/postgresql/data | TimescaleDB 时序数据 |
 | `redisdata` | redis:/data                      | Redis AOF 持久化文件  |
 | `natsdata`  | nats:/data                       | NATS JetStream 消息  |
 | `miniodata` | minio:/data                      | MinIO 对象文件        |
@@ -780,3 +786,58 @@ curl -fsS http://localhost:8081/healthz
 `reset-script-data` 的 `--apply` 必须同时带有精确确认串；PostgreSQL 清理由迁移负责，
 不会清理其他来源的设备任务。该迁移不提供数据恢复回滚，若发布中止只能恢复数据库快照，
 然后重新执行迁移前的验证和切换演练。
+### PM 稀疏存储与小时汇总
+
+新部署将 PM 真实值写入 `pm_metric_values`，缺失但受支持的指标由
+`pm_measurement_anchors` 和不可变指标集在查询时恢复。小时汇总按整桶版本发布：
+构建中的版本不可见，全部设备批次完成后一次切换为 active。
+
+- `PM_HOURLY_BATCH_DEVICES`：每个小时批次的设备数，默认 `2500`；该值已按 10000
+  基站压测下“一小时内完成”和 worker 1 GiB 内存限制联合校准。
+- `PM_LATE_DATA_WINDOW`：迟到数据与压缩安全窗口，默认 `168h`，不改变原 7 天压缩等待。
+
+### PM 在线流式聚合
+
+小时、日、周、月聚合由 worker 在 PM 文件完成 15 分钟 Counter/KPI 入库后直接消费同一份
+标准事件，不再回查原始 PM 表。任务创建或更新后从下一个完整聚合窗口生效，不补算历史。
+
+- Redis 必须开启 AOF、`appendfsync everysec` 和 `maxmemory-policy noeviction`；worker 启动时会校验。
+- `PM_AGGREGATION_ENABLED`：是否启用在线聚合，默认 `true`。
+- `PM_AGGREGATION_CLOSE_GRACE`：缺数据窗口的关闭宽限，默认 `5m`。
+- `PM_AGGREGATION_OUTBOX_BATCH`：发布/拉取批量，默认 `100`。
+- `PM_AGGREGATION_CONSUMER_CONCURRENCY`：标准事件消费并发，默认 `8`。
+- `PM_AGGREGATION_FINALIZE_CONCURRENCY`：窗口落库并发预算，默认 `4`。
+- `PM_AGGREGATION_MAX_EVENT_BYTES`：单个标准事件上限，默认 `8MiB`，必须小于 NATS `max_payload`。
+- `PM_AGGREGATION_WINDOW_TTL`：未知粒度的 Redis 窗口兜底 TTL；小时/日/周/月分别固定为
+  `4h`、`72h`、`14d`、`45d`。
+
+JetStream 按计算层级拆分，均使用 LimitsPolicy、S2 压缩、10GiB 硬容量上限和
+`DiscardOld`：`PM_AGG_15M` 保留 2 小时，`PM_AGG_HOURLY` 保留 48 小时，
+`PM_AGG_DAILY` 保留 40 天。15 分钟事件只进入小时窗口；小时完成后通过事务 outbox
+发布紧凑 Counter 状态给日窗口；日完成后发布紧凑 Counter 状态给周和月。周、月没有
+下游，不再产生 Rollup 事件。
+
+故障恢复顺序：先恢复 NATS 和 Redis，再启动 worker。小时窗口重放最近 2 小时的 15 分钟
+事件，日窗口重放小时 Rollup，周/月窗口重放日 Rollup；紧凑流不足时允许读取
+`pm_aggregation_counter_rollups` 快照，但正常计算不扫描原始 PM 表。无法恢复的窗口标为
+failed 并告警，不伪造完整结果。
+- PM 上传背压以 MinIO 所在文件系统的已用空间加“已接收但尚未物化”的 PM 文件预计
+  入库量计算；同文件系统上的 TSDB 临时文件、WAL 和文件预分配已包含在实际已用空间，
+  不重复累加。默认预计入库放大系数为保守的 `1.0`。
+- 数据库 release 默认只保留 warning/error/fatal，关闭 checkpoint、autovacuum、SQL、
+  慢查询、连接和临时文件逐条诊断日志；可用对应 `PG_LOG_*` / `TSDB_LOG_*` 环境变量临时开启。
+- PostgreSQL/TimescaleDB 的 Docker JSON 日志默认按 `20m × 5` 轮转。
+
+PM 重建是破坏性操作，但 **不得直接删除整个 TimescaleDB 数据卷**：该卷同时保存
+告警历史、MR、trace、adhoc、设备组汇总以及可能由用户维护的 KPI 定义。发布时应先备份
+这些非 PM 对象，再仅清理并重建下列 PM 对象：
+
+- `pm_files`、`pm_ingest_batches`、`pm_metric_dictionary`、`pm_metric_sets`；
+- `pm_measurement_anchors`、`pm_metric_values`；
+- `pm_hourly_bucket_versions`、`pm_hourly_rollup_batches`、
+  `pm_hourly_anchors`、`pm_hourly_values`；
+- 旧 PM 明细/小时对象（如目标环境仍为旧 schema）。
+
+执行前必须再次核对服务器、数据库和上述精确对象清单，并确认原始 PM 文件可重放。
+只有在已经单独备份并验证恢复所有非 PM 对象、且用户再次明确确认精确卷名时，才允许
+选择整卷重建；不得把主库业务数据卷纳入任何删除范围。

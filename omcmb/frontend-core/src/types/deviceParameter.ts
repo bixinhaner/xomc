@@ -57,6 +57,18 @@ export interface ParameterSyncStatus {
   lastSyncGpv?: {
     sourceId: string;
     taskCount: number;
+    successfulCommands: number;
+    failedCommands: number;
+    requestedPathCount: number;
+    successfulPathCount: number;
+    failedPathCount: number;
+    failedPaths?: Array<{
+      path: string;
+      faultCode?: number;
+      faultText?: string;
+      commandKey?: string;
+      status?: string;
+    }>;
     firstCreatedAt?: string;
     lastCompletedAt?: string;
     wallClockSeconds?: number;
@@ -67,6 +79,33 @@ export interface ParameterSyncStatus {
   lastParamSyncFailedAt?: string;
   /** 上次失败原因 (CPE Fault 文案 / task 超时 / SOAP 错误) */
   lastParamSyncError?: string;
+  stalledFinalizing?: boolean;
+  stalledReason?: string;
+  activeRun?: ParameterSyncRun;
+}
+
+export interface ParameterSyncRun {
+  id: string;
+  requestId: string;
+  status: 'planning' | 'enqueuing' | 'waiting_device' | 'executing' | 'processing' | 'cancelling' | 'succeeded' | 'failed' | 'cancelled';
+  syncScope: 'full' | 'partial' | 'readback' | 'policy_probe';
+  expectedTaskCount: number;
+  terminalTaskCount: number;
+  processedTaskCount: number;
+  failedTaskCount: number;
+  startedAt: string;
+  completedAt?: string;
+}
+
+export interface ParameterSyncRequest {
+  id: string;
+  runId?: string;
+  activeRunId?: string;
+  status: 'accepted' | 'queued' | 'running' | 'succeeded' | 'failed' | 'timed_out' | 'cancelled' | 'deduplicated' | 'rejected';
+  resultCode?: string;
+  errorMessage?: string;
+  createdAt: string;
+  completedAt?: string;
 }
 
 /** 参数查询过滤条件 */

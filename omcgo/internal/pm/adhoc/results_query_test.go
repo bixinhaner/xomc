@@ -47,7 +47,8 @@ func Test_buildResultsQuery_WithTimeRange(t *testing.T) {
 	}, 5000, 10)
 
 	assert.Contains(t, q, "AND r.time >= $2")
-	assert.Contains(t, q, "AND r.time <= $3")
+	assert.Contains(t, q, "AND r.time < $3")
+	assert.NotContains(t, q, "AND r.time <= $3")
 	assert.Contains(t, q, "LIMIT $4 OFFSET $5")
 	// args = [taskID, start(time.Time), end(time.Time), limit, offset]
 	if assert.Len(t, args, 5) {
@@ -167,7 +168,8 @@ func Test_buildResultsCountQuery_SameWhereAsData(t *testing.T) {
 	assert.Contains(t, q, "AND r.metric_path = $3")
 	assert.Contains(t, q, "AND r.granularity = $4")
 	assert.Contains(t, q, "AND r.time >= $5")
-	assert.Contains(t, q, "AND r.time <= $6")
+	assert.Contains(t, q, "AND r.time < $6")
+	assert.NotContains(t, q, "AND r.time <= $6")
 	assert.Contains(t, q, "AND r.object_ldn = ANY($7)")
 	// args = [taskID, SN, metricPath, granularity, start, end, ldns]，无 limit/offset 尾巴
 	assert.Len(t, args, 7)

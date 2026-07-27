@@ -198,10 +198,11 @@ describe('pmObject — deviceSnTail / buildDeviceSeriesName', () => {
     );
   });
 
-  it('buildDeviceSeriesName 5G → 尾号 · 5G 友好名', () => {
+  it('buildDeviceSeriesName 5G → 尾号 · 原始 objectLdn，保留 CUID/DUID 字段名', () => {
+    const ldn = 'Type=Cell,gNBID=1,NrCGI=2,CUID=3';
     expect(
-      buildDeviceSeriesName('SN-AAAAAA', 'Type=Cell,gNBID=1,NrCGI=2,CUID=3'),
-    ).toBe('AAAAAA · gNB1 · 小区2/3');
+      buildDeviceSeriesName('SN-AAAAAA', ldn),
+    ).toBe(`AAAAAA · ${ldn}`);
   });
 
   it('buildDeviceSeriesName GSM → 尾号 · GSM 友好名', () => {

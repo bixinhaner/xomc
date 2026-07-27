@@ -3,6 +3,7 @@ package device
 import (
 	"testing"
 
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -250,9 +251,32 @@ func TestCalcMMEStatus(t *testing.T) {
 			want: "disconnected",
 		},
 		{
-			name:   "fallback no active MME",
+			name:   "no MME parameters returns empty",
 			params: map[string]string{},
-			want:   "disconnected",
+			want:   "",
+		},
+		{
+			name: "BLQ legacy LTE path returns partial",
+			params: map[string]string{
+				"Device.Services.FAPService.1.CellConfig.LTE.MmePoolConfigParam.1.MME1Status": "1",
+			},
+			want: "partial",
+		},
+		{
+			name: "EPC and legacy paths for one instance count once",
+			params: map[string]string{
+				"Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.1.MME1Status": "1",
+				"Device.Services.FAPService.1.CellConfig.LTE.MmePoolConfigParam.1.MME1Status":     "1",
+			},
+			want: "partial",
+		},
+		{
+			name: "empty EPC placeholder falls back to legacy LTE path",
+			params: map[string]string{
+				"Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.1.MME1Status": " ",
+				"Device.Services.FAPService.1.CellConfig.LTE.MmePoolConfigParam.1.MME1Status":     "1",
+			},
+			want: "partial",
 		},
 		{
 			name: "fallback one active MME",
@@ -284,6 +308,17 @@ func TestCalcMMEStatus(t *testing.T) {
 			assert.Equal(t, tt.want, CalcMMEStatus(tt.params))
 		})
 	}
+}
+
+func TestCalcCoreNetworkStatusByTechnology(t *testing.T) {
+	params := map[string]string{
+		"Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus": "connected",
+		amfsStatusPath: "0.0.0.0=0;0.0.0.1=1",
+	}
+
+	assert.Equal(t, "connected", CalcCoreNetworkStatus(params, model.TechLTE))
+	assert.Equal(t, "connected", CalcCoreNetworkStatus(params, model.TechNR))
+	assert.Empty(t, CalcCoreNetworkStatus(params, model.TechGSM))
 }
 
 func TestCalcLicenseStatus(t *testing.T) {
@@ -491,53 +526,238 @@ func TestCalcGPSStatus(t *testing.T) {
 
 func TestCalcRFStatus(t *testing.T) {
 	tests := []struct {
-		name   string
-		params map[string]string
-		want   string
+		name         string
+		params       map[string]string
+		tech         model.Technology
+		productClass string
+		wantStatus   string
+		wantState    RFStatusProjectionState
 	}{
 		{
-			name:   "rf radio disabled",
-			params: map[string]string{"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable": "false"},
-			want:   "off",
+			name:         "rf radio disabled",
+			params:       map[string]string{"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable": "false"},
+			tech:         model.TechLTE,
+			productClass: "FAP/MLQ/SC",
+			wantStatus:   "off",
+			wantState:    RFStatusValid,
 		},
 		{
-			name: "rf radio enabled",
+			name:         "rf radio enabled",
+			tech:         model.TechLTE,
+			productClass: "FAP/MLQ/SC",
 			params: map[string]string{
 				"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable": "true",
 			},
-			want: "on",
+			wantStatus: "on",
+			wantState:  RFStatusValid,
 		},
 		{
-			name: "rf radio enable does not depend on admin state",
+			name:         "rf radio enable does not depend on admin state",
+			tech:         model.TechLTE,
+			productClass: "FAP/MLQ/SC",
 			params: map[string]string{
 				"Device.Services.FAPService.1.FAPControl.LTE.AdminState":               "false",
 				"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable": "true",
 			},
-			want: "on",
+			wantStatus: "on",
+			wantState:  RFStatusValid,
 		},
 		{
-			name: "legacy RFTxStatus fallback transmitting",
+			name:         "legacy RFTxStatus fallback transmitting",
+			tech:         model.TechLTE,
+			productClass: "FAP/MLQ/SC",
 			params: map[string]string{
 				"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.RFTxStatus": "1",
 			},
-			want: "on",
+			wantStatus: "on",
+			wantState:  RFStatusValid,
 		},
 		{
-			name: "legacy RFTxStatus fallback not transmitting",
+			name:         "legacy RFTxStatus fallback not transmitting",
+			tech:         model.TechLTE,
+			productClass: "FAP/MLQ/SC",
 			params: map[string]string{
 				"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.RFTxStatus": "0",
 			},
-			want: "error",
+			wantStatus: "off",
+			wantState:  RFStatusValid,
 		},
 		{
-			name:   "empty params",
-			params: map[string]string{},
-			want:   "off",
+			name:         "standard LTE FAPControl status",
+			tech:         model.TechLTE,
+			productClass: "FAP/MLQ/SC",
+			params: map[string]string{
+				"Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus": "true",
+			},
+			wantStatus: "on",
+			wantState:  RFStatusValid,
+		},
+		{
+			name: "standard NR cell status",
+			tech: model.TechNR,
+			params: map[string]string{
+				"Device.Services.FAPService.1.CellConfig.2.NR.RAN.rftxEnable": "1",
+			},
+			wantStatus: "on",
+			wantState:  RFStatusValid,
+		},
+		{
+			name:         "BaiBNQ SAS radio enable",
+			tech:         model.TechNR,
+			productClass: "FAP/BSC7040/SC",
+			params: map[string]string{
+				"Device.DeviceInfo.SAS.RadioEnable": "true",
+			},
+			wantStatus: "on",
+			wantState:  RFStatusValid,
+		},
+		{
+			name: "BaiBNQ cell SAS radio enable",
+			tech: model.TechNR,
+			params: map[string]string{
+				"Device.DeviceInfo.CellConfig.2.SAS.RadioEnable": "true",
+			},
+			wantStatus: "on",
+			wantState:  RFStatusValid,
+		},
+		{
+			name:         "unknown direct status falls back to valid SAS status",
+			tech:         model.TechNR,
+			productClass: "FAP/BSC7040/SC",
+			params: map[string]string{
+				"Device.Services.FAPService.1.CellConfig.1.NR.RAN.rftxEnable": "not-reported",
+				"Device.DeviceInfo.SAS.RadioEnable":                           "true",
+			},
+			wantStatus: "on",
+			wantState:  RFStatusValid,
+		},
+		{
+			name:         "GSM BTS RF state",
+			tech:         model.TechGSM,
+			productClass: "FAP/BTS",
+			params: map[string]string{
+				"Device.Services.GsmBTSCellDT.1.RfState": "1",
+			},
+			wantStatus: "on",
+			wantState:  RFStatusValid,
+		},
+		{
+			name: "multi cell NR status",
+			tech: model.TechNR,
+			params: map[string]string{
+				"Device.Services.FAPService.1.CellConfig.2.NR.RAN.rftxEnable": "0",
+				"Device.Services.FAPService.1.CellConfig.1.NR.RAN.rftxEnable": "1",
+			},
+			wantStatus: "on,off",
+			wantState:  RFStatusValid,
+		},
+		{
+			name:         "BAIBLQ SC ignores logical FAPService outside physical carrier range",
+			tech:         model.TechLTE,
+			productClass: "FAP/BAIBLQ/SC",
+			params: map[string]string{
+				"Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus": "true",
+				"Device.Services.FAPService.2.FAPControl.LTE.RFTxStatus": "true",
+			},
+			wantStatus: "on",
+			wantState:  RFStatusValid,
+		},
+		{
+			name:         "DC uses configured physical carriers and ignores higher logical instances",
+			tech:         model.TechLTE,
+			productClass: "FAP/MLN/DC",
+			params: map[string]string{
+				"Device.Services.FAPService.1.CellConfig.LTE.RAN.CA.PARAMS.NumOfCells": "2",
+				"Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus":               "true",
+				"Device.Services.FAPService.2.FAPControl.LTE.RFTxStatus":               "false",
+				"Device.Services.FAPService.3.FAPControl.LTE.RFTxStatus":               "true",
+				"Device.Services.FAPService.4.FAPControl.LTE.RFTxStatus":               "true",
+			},
+			wantStatus: "on,off",
+			wantState:  RFStatusValid,
+		},
+		{
+			name:         "DC missing a physical carrier is inconsistent",
+			tech:         model.TechLTE,
+			productClass: "FAP/MLN/DC",
+			params: map[string]string{
+				"Device.Services.FAPService.1.CellConfig.LTE.RAN.CA.PARAMS.NumOfCells": "2",
+				"Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus":               "true",
+			},
+			wantState: RFStatusInconsistent,
+		},
+		{
+			name:         "reported count conflicting with SC mode is inconsistent",
+			tech:         model.TechLTE,
+			productClass: "FAP/MLQ/SC",
+			params: map[string]string{
+				"Device.Services.FAPService.1.CellConfig.LTE.RAN.CA.PARAMS.NumOfCells": "2",
+				"Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus":               "true",
+				"Device.Services.FAPService.2.FAPControl.LTE.RFTxStatus":               "true",
+			},
+			wantState: RFStatusInconsistent,
+		},
+		{
+			name:         "CA without reported count stays unknown",
+			tech:         model.TechLTE,
+			productClass: "FAP/MLN/CA",
+			params: map[string]string{
+				"Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus": "true",
+				"Device.Services.FAPService.2.FAPControl.LTE.RFTxStatus": "true",
+			},
+			wantState: RFStatusUnknown,
+		},
+		{
+			name:         "BTS exposes one own RF despite duplicate logical services",
+			tech:         model.TechGSM,
+			productClass: "FAP/BTS",
+			params: map[string]string{
+				"Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus": "true",
+				"Device.Services.FAPService.2.FAPControl.LTE.RFTxStatus": "true",
+			},
+			wantStatus: "on",
+			wantState:  RFStatusValid,
+		},
+		{
+			name:         "BSC never projects child RF as its own",
+			tech:         model.TechGSM,
+			productClass: "FAP/PGSM",
+			params: map[string]string{
+				"Device.Services.GsmBTSCellDT.1.RfState":                 "1",
+				"Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus": "true",
+			},
+			wantState: RFStatusUnsupported,
+		},
+		{
+			name:         "duplicate values for one physical carrier conflict",
+			tech:         model.TechNR,
+			productClass: "FAP/BSC7040/SC",
+			params: map[string]string{
+				"Device.DeviceInfo.SAS.RadioEnable":  "true",
+				"Device.DeviceInfo.SAS.RadioEnable1": "false",
+			},
+			wantState: RFStatusInconsistent,
+		},
+		{
+			name: "unknown RF value",
+			tech: model.TechNR,
+			params: map[string]string{
+				"Device.DeviceInfo.SAS.RadioEnable": "not-reported",
+			},
+			wantState: RFStatusUnknown,
+		},
+		{
+			name:      "empty params",
+			params:    map[string]string{},
+			tech:      model.TechLTE,
+			wantState: RFStatusUnknown,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, CalcRFStatus(tt.params))
+			got := CalcRFStatus(tt.params, tt.tech, tt.productClass)
+			assert.Equal(t, tt.wantStatus, got.Status)
+			assert.Equal(t, tt.wantState, got.State)
 		})
 	}
 }

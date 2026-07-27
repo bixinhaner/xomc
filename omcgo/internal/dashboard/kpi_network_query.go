@@ -3,6 +3,7 @@ package dashboard
 import (
 	"time"
 
+	"github.com/omcgo/omcgo/internal/core/model"
 	pmaggregator "github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
@@ -15,20 +16,24 @@ import (
 
 // buildNetworkKPISeriesRequest 构造首页 KPI 折线图的全网查询请求。
 // KPI/counter 的口径细节交给 PM Aggregator 统一处理。
-func buildNetworkKPISeriesRequest(codes []string, granularity metrics.Granularity, startTime, endTime time.Time) pmaggregator.QueryRequest {
-	return pmaggregator.QueryRequest{
+func buildNetworkKPISeriesRequest(codes []string, technology model.Technology, granularity metrics.Granularity, startTime, endTime time.Time) pmaggregator.QueryRequest {
+	request := pmaggregator.QueryRequest{
 		Granularity: granularity,
 		Dimension:   pmaggregator.DimensionNetwork,
 		MetricPaths: append([]string(nil), codes...),
 		StartTime:   startTime,
 		EndTime:     endTime,
 	}
+	if technology != "" {
+		request.Technologies = []string{string(technology)}
+	}
+	return request
 }
 
-func buildNetworkKPIHourlySeriesRequest(codes []string, startTime, endTime time.Time) pmaggregator.QueryRequest {
-	return buildNetworkKPISeriesRequest(codes, metrics.GranularityHourly, startTime, endTime)
+func buildNetworkKPIHourlySeriesRequest(codes []string, technology model.Technology, startTime, endTime time.Time) pmaggregator.QueryRequest {
+	return buildNetworkKPISeriesRequest(codes, technology, metrics.GranularityHourly, startTime, endTime)
 }
 
-func buildNetworkKPI15MinSeriesRequest(codes []string, startTime, endTime time.Time) pmaggregator.QueryRequest {
-	return buildNetworkKPISeriesRequest(codes, metrics.Granularity15Min, startTime, endTime)
+func buildNetworkKPIDailySeriesRequest(codes []string, technology model.Technology, startTime, endTime time.Time) pmaggregator.QueryRequest {
+	return buildNetworkKPISeriesRequest(codes, technology, metrics.GranularityDaily, startTime, endTime)
 }

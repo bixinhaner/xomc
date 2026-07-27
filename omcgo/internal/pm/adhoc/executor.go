@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
-	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 	"github.com/omcgo/omcgo/internal/pm/resultnorm"
@@ -30,8 +29,7 @@ type WatermarkReader interface {
 	Get(ctx context.Context, gran metrics.Granularity, level aggregator.WatermarkLevel) (*aggregator.Watermark, error)
 }
 
-// ProgressPublisher 把进度事件发布到事件总线（SSE handler 订阅）。
-// 真实实现是 internal/core/event.EventBus 的 PublishObject 包装。
+// ProgressPublisher 把进度事件发布到实时广播通道。
 type ProgressPublisher interface {
 	Publish(ctx context.Context, subject string, payload any) error
 }
@@ -43,10 +41,10 @@ type NumberProcessLookup func(ctx context.Context) (string, error)
 // IndicatorMetadataLookup loads PM indicator metadata keyed by metric_path.
 type IndicatorMetadataLookup func(ctx context.Context, metricPaths []string) (map[string]resultnorm.Metadata, error)
 
-// 事件主题。SSE handler 订阅这两个主题。
+// Realtime 主题使用独立前缀，确保不被 pm.> JetStream WorkQueue 捕获。
 const (
-	SubjectProgress  = "pm.adhoc.progress"
-	SubjectCompleted = "pm.adhoc.completed"
+	SubjectRealtimeProgress  = "pm_realtime.adhoc.progress"
+	SubjectRealtimeCompleted = "pm_realtime.adhoc.completed"
 )
 
 // Executor 是 G7 任务执行核心。包多设备 × 多 metric × 多粒度的笛卡尔积聚合。
@@ -227,6 +225,7 @@ func (e *Executor) ExecuteOneshot(ctx context.Context, task *Task) (int, error) 
 		if err := e.repo.UpdateStatus(ctx, task.ID, StatusRunning, &progress, ""); err != nil {
 			e.logger.Warn("update progress failed",
 				zap.String("task_id", task.ID.String()), zap.Error(err))
+			continue
 		}
 		e.publishProgress(ctx, task.ID, progress, gStr, len(rows))
 	}
@@ -274,9 +273,10 @@ func (e *Executor) queryAndConvert(ctx context.Context, task *Task, g metrics.Gr
 			// 不扑空也不越过水位。游标由调度器按 last_fire_at 推进，下次 tick 水位到了再取。
 			return nil, nil
 		}
-		// 结果聚合表里桶行的 `time` 列即桶起点；StartTime==EndTime==桶起点 → 只命中这一格。
+		// aggregator.Query 对 `time` 列使用半开区间 [start, end)；end 必须推进到下一桶，
+		// 否则 [bucket, bucket) 会查不到任何水位桶行。
 		startTime = bucket
-		endTime = bucket
+		endTime = nextBucketStart(g, bucket)
 	}
 	req := aggregator.QueryRequest{
 		Granularity:  g,
@@ -492,7 +492,7 @@ func (e *Executor) publishProgress(ctx context.Context, taskID uuid.UUID, progre
 		"granularity": granularity,
 		"rows":        rows,
 	}
-	if err := e.publisher.Publish(ctx, SubjectProgress, payload); err != nil {
+	if err := e.publisher.Publish(ctx, SubjectRealtimeProgress, payload); err != nil {
 		e.logger.Warn("publish progress event failed",
 			zap.String("task_id", taskID.String()), zap.Error(err))
 	}
@@ -511,21 +511,8 @@ func (e *Executor) PublishCompleted(ctx context.Context, taskID uuid.UUID, statu
 	if errMsg != "" {
 		payload["error"] = errMsg
 	}
-	if err := e.publisher.Publish(ctx, SubjectCompleted, payload); err != nil {
+	if err := e.publisher.Publish(ctx, SubjectRealtimeCompleted, payload); err != nil {
 		e.logger.Warn("publish completed event failed",
 			zap.String("task_id", taskID.String()), zap.Error(err))
 	}
-}
-
-// EventBusPublisher 把 internal/core/event.EventBus 适配为 ProgressPublisher。
-type EventBusPublisher struct {
-	Bus event.EventBus
-}
-
-func (p *EventBusPublisher) Publish(ctx context.Context, subject string, payload any) error {
-	evt, err := event.NewEvent(subject, payload)
-	if err != nil {
-		return err
-	}
-	return p.Bus.Publish(ctx, subject, evt)
 }

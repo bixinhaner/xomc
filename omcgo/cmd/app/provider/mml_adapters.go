@@ -35,7 +35,7 @@ import (
 //
 // 翻译链路：product_class → ProductRegistry.MatchProductClass → product.id
 //
-//	→ ParamRegistry.Translator(productID, swVersion) → Translator.ToPrivate(path)
+//	→ ParamRegistry.Translator(productID, swVersion) → Translator.ToPrivateCandidates(path)
 //
 // T-0168 激进路线：MatchProductClass 返 ErrOrphan 时**不**返 error，构造
 // TranslationOutcome{ProductResolved=false, AggregateSource="orphan_passthrough"}
@@ -67,16 +67,18 @@ func NewMMLPathTranslator(products *product.Registry, params *parammodel.Registr
 // TranslateForDevice 实现 mml.PathTranslator 接口（T-0168 升级版）。
 //
 //	productClass → ProductRegistry.MatchProductClass → product.id
-//	→ ParamRegistry.Translator(productID, swVersion) → ToPrivate
+//	→ ParamRegistry.Translator(productID, swVersion) → ToPrivateCandidates
 //
 // 行为：
 //   - product 命中 + 单条 path 未命中 mapping → Source="passthrough"（Private=Standard）
 //   - product 命中 + path 命中 → Source=translator.Source()（discovered / default）
-//   - **product 未命中（ErrOrphan）→ 全部 path Source="orphan_passthrough"**（激进路线）
-//     + 触发 metrics.OrphanInc(productClass) + WARN log
+//   - **product 未命中（ErrOrphan）→ 全部 path Source="orphan_passthrough"**（激进路线），
+//     同时触发 metrics.OrphanInc(productClass) + WARN log
 //   - ParamRegistry 失败（ErrNoMapping / ErrNoParamModel）→ 全 passthrough（product 已识别）
+//   - 参数模型已去激活 → 返回错误，禁止 MML 通过 passthrough 绕过模型总开关
 //
-// 仅在以下场景返 error：未注入（products/params==nil）、Registry IO 错误（非 ErrOrphan）。
+// 仅在以下场景返 error：未注入（products/params==nil）、参数模型已去激活、
+// Registry IO 错误（非 ErrOrphan）。
 func (a *mmlPathTranslatorAdapter) TranslateForDevice(
 	ctx context.Context,
 	productClass, softwareVersion string,
@@ -87,6 +89,9 @@ func (a *mmlPathTranslatorAdapter) TranslateForDevice(
 	}
 
 	matchRes, err := a.products.MatchProductClass(ctx, productClass)
+	if errors.Is(err, product.ErrInactiveParamModel) {
+		return nil, fmt.Errorf("mml-translator-adapter: parameter model inactive for product_class %s: %w", productClass, err)
+	}
 	orphan := errors.Is(err, product.ErrOrphan) || (err == nil && (matchRes == nil || matchRes.Product == nil))
 	if err != nil && !errors.Is(err, product.ErrOrphan) {
 		return nil, fmt.Errorf("mml-translator-adapter: match product_class %s: %w", productClass, err)
@@ -113,6 +118,9 @@ func (a *mmlPathTranslatorAdapter) TranslateForDevice(
 
 	translator, err := a.params.Translator(ctx, matchRes.Product.ID, softwareVersion)
 	if err != nil {
+		if errors.Is(err, parammodel.ErrInactiveParamModel) {
+			return nil, fmt.Errorf("mml-translator-adapter: parameter model inactive for product_class %s: %w", productClass, err)
+		}
 		// ParamRegistry 失败：product 已识别，但 mapping 拿不到 → 全 passthrough
 		a.logger.Warn("translator unavailable, all paths passthrough",
 			zap.String("product_class", productClass),
@@ -138,8 +146,9 @@ func (a *mmlPathTranslatorAdapter) TranslateForDevice(
 	paths := make([]mml.TranslatedPath, 0, len(standardPaths))
 	missPaths := make([]string, 0)
 	for _, p := range standardPaths {
-		r := translator.ToPrivate(p)
-		if r.Found {
+		candidates := translator.ToPrivateCandidates(p)
+		if len(candidates) > 0 {
+			r := candidates[0]
 			paths = append(paths, mml.TranslatedPath{Standard: p, Private: r.Translated, Source: src})
 		} else {
 			missPaths = append(missPaths, p)

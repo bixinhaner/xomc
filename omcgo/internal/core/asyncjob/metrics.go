@@ -28,6 +28,9 @@ type Metrics struct {
 
 	// Catchup 启动期补跑次数（按 job_type）。worker/aggregator.go 调用。
 	Catchup *prometheus.CounterVec
+
+	// OldestPendingAge is the age of the oldest runnable pending task.
+	OldestPendingAge *prometheus.GaugeVec
 }
 
 // NewMetrics 构造并注册指标。
@@ -54,9 +57,13 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "omc_async_jobs_catchup_total",
 			Help: "Total async jobs enqueued by startup catchup by job_type",
 		}, []string{"job_type"}),
+		OldestPendingAge: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_async_jobs_oldest_pending_age_seconds",
+			Help: "Age in seconds of the oldest scheduled pending async job by job_type",
+		}, []string{"job_type"}),
 	}
 	if reg != nil {
-		reg.MustRegister(m.QueueDepth, m.Duration, m.Failed, m.Zombie, m.Catchup)
+		reg.MustRegister(m.QueueDepth, m.Duration, m.Failed, m.Zombie, m.Catchup, m.OldestPendingAge)
 	}
 	return m
 }
@@ -111,6 +118,10 @@ type QueueDepthSampler interface {
 	CountByJobTypeAndStatus(ctx context.Context) (map[string]map[string]int, error)
 }
 
+type oldestPendingAgeSampler interface {
+	OldestPendingAgeSeconds(ctx context.Context) (map[string]float64, error)
+}
+
 // RunQueueDepthSampler 启动 goroutine 定期采集 async_jobs 队列深度并更新 gauge。
 //
 // 调用方在 worker 启动期 `go asyncjob.RunQueueDepthSampler(ctx, repo, metrics, 30*time.Second, logger)`。
@@ -128,6 +139,8 @@ func RunQueueDepthSampler(ctx context.Context, repo QueueDepthSampler, m *Metric
 	if logger == nil {
 		logger = nopLogger{}
 	}
+	knownDepth := make(map[string][2]string)
+	knownAgeTypes := make(map[string]struct{})
 
 	sample := func() {
 		counts, err := repo.CountByJobTypeAndStatus(ctx)
@@ -135,9 +148,34 @@ func RunQueueDepthSampler(ctx context.Context, repo QueueDepthSampler, m *Metric
 			logger.Warn("queue depth sample failed", err)
 			return
 		}
+		currentDepth := make(map[string]struct{})
 		for jobType, byStatus := range counts {
 			for status, n := range byStatus {
 				m.SetQueueDepth(jobType, status, n)
+				key := jobType + "\x00" + status
+				currentDepth[key] = struct{}{}
+				knownDepth[key] = [2]string{jobType, status}
+			}
+		}
+		for key, labels := range knownDepth {
+			if _, ok := currentDepth[key]; !ok {
+				m.SetQueueDepth(labels[0], labels[1], 0)
+			}
+		}
+		if ageRepo, ok := repo.(oldestPendingAgeSampler); ok {
+			ages, err := ageRepo.OldestPendingAgeSeconds(ctx)
+			if err != nil {
+				logger.Warn("oldest pending age sample failed", err)
+				return
+			}
+			for jobType := range knownAgeTypes {
+				if _, ok := ages[jobType]; !ok {
+					m.OldestPendingAge.WithLabelValues(jobType).Set(0)
+				}
+			}
+			for jobType, seconds := range ages {
+				m.OldestPendingAge.WithLabelValues(jobType).Set(seconds)
+				knownAgeTypes[jobType] = struct{}{}
 			}
 		}
 	}

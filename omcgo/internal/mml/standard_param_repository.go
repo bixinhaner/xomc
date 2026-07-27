@@ -44,8 +44,8 @@ type StandardParamView struct {
 // StandardParamFilter 决定 List 的过滤维度。Search 走 ILIKE %q%。
 // EntryType 空字符串 = 不过滤；为 'parameter' / 'object' 时仅返该类型。
 type StandardParamFilter struct {
-	Search    string
-	EntryType string
+	Search    string `form:"q"`
+	EntryType string `form:"entry_type"`
 	model.ListRequest
 }
 

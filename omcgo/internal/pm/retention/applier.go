@@ -2,7 +2,9 @@ package retention
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/jackc/pgx/v5"
@@ -11,19 +13,14 @@ import (
 	"go.uber.org/zap"
 )
 
-// hypertableTables maps PolicyKey to the hypertables it governs.
-// Only hypertable keys are listed; ordinary tables (daily/weekly/monthly) are
-// managed by the cleanup_runner cron and are not covered here.
-//
-// 注：migrations/tsdb 中共有 4 张 hypertable，此处仅列 3 张：
-//   pm_metrics                  ← KeyRaw15MinDays
-//   pm_metrics_hourly           ← KeyHourlyDays
-//   pm_group_metrics_hourly     ← KeyHourlyDays
-//   pm_adhoc_aggregation_results ← 有意跳过：retention 365d hardcode 于 migration，
-//                                   无 UI 配置键，不受本 applier 管辖。
+// hypertableTables maps policies that can be expressed as one TimescaleDB
+// drop_after value. The mixed-granularity result hypertable is cleaned by the
+// worker because each granularity has a different configured lifetime.
 var hypertableTables = map[PolicyKey][]string{
-	KeyRaw15MinDays: {"public.pm_metrics"},
-	KeyHourlyDays:   {"public.pm_metrics_hourly", "public.pm_group_metrics_hourly"},
+	KeyRaw15MinDays: {
+		"public.pm_measurement_anchors",
+		"public.pm_metric_values",
+	},
 }
 
 // retentionQuerier is the minimal DB interface required by PMRetentionApplier,
@@ -32,16 +29,27 @@ var hypertableTables = map[PolicyKey][]string{
 type retentionQuerier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	BeginTx(ctx context.Context, txOptions pgx.TxOptions) (pgx.Tx, error)
 }
 
+type retentionPolicyQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+const retentionPolicyDropAfterSQL = `
+SELECT COALESCE(config ->> 'drop_after', '')
+FROM timescaledb_information.jobs
+WHERE proc_name = 'policy_retention'
+  AND format('%I.%I', hypertable_schema, hypertable_name) = $1`
+
 // PMRetentionApplier 对 TimescaleDB 的 retention policy 做 remove+add 幂等更新。
-// 仅操作 hypertable（pm_metrics、pm_metrics_hourly、pm_group_metrics_hourly）；
-// daily/weekly/monthly 为普通表，由 cleanup_runner cron 处理，不在本 applier 范畴。
+// 仅操作允许自动清理的 hypertable；原始稀疏表由 worker 做水位安全清理，
+// daily/weekly/monthly 由 cleanup_runner cron 处理，均不在本 applier 范畴。
 type PMRetentionApplier struct {
-	db          retentionQuerier
-	logger      *zap.Logger
-	tsdbOnce    sync.Once // TimescaleDB 扩展存在性只需检查一次
-	tsdbAbsent  bool      // true 表示确认 timescaledb 未安装，跳过所有 policy 调用
+	db         retentionQuerier
+	logger     *zap.Logger
+	tsdbOnce   sync.Once // TimescaleDB 扩展存在性只需检查一次
+	tsdbAbsent bool      // true 表示确认 timescaledb 未安装，跳过所有 policy 调用
 }
 
 // NewPMRetentionApplier 创建 PMRetentionApplier。
@@ -77,28 +85,91 @@ func (a *PMRetentionApplier) Apply(ctx context.Context, table string, days int) 
 		return fmt.Errorf("invalid retention days for %s: %w", table, err)
 	}
 
+	if a.db == nil {
+		return fmt.Errorf("retention database is nil")
+	}
 	if !a.checkTimescaleDB(ctx) {
 		a.logger.Warn("timescaledb extension not found, skip retention policy update",
 			zap.String("table", table))
 		return nil
 	}
 
-	if _, err := a.db.Exec(ctx, "SELECT remove_retention_policy($1, if_exists => TRUE)", table); err != nil {
-		return fmt.Errorf("remove retention policy for %s: %w", table, err)
+	return a.applyPoliciesAtomic(ctx, map[string]int{table: days})
+}
+
+func (a *PMRetentionApplier) applyPoliciesAtomic(ctx context.Context, policies map[string]int) error {
+	tx, err := a.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin retention policy transaction: %w", err)
 	}
-	interval := fmt.Sprintf("%d days", days)
-	// 不使用 if_not_exists => TRUE：若 remove 未生效仍存在旧 policy，add 应当报错而非静默跳过。
-	if _, err := a.db.Exec(ctx, "SELECT add_retention_policy($1, $2::interval)", table, interval); err != nil {
-		return fmt.Errorf("add retention policy for %s: %w", table, err)
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	tables := make([]string, 0, len(policies))
+	for table := range policies {
+		tables = append(tables, table)
 	}
-	a.logger.Info("PM retention policy updated", zap.String("table", table), zap.Int("days", days))
+	sort.Strings(tables)
+	for _, table := range tables {
+		days := policies[table]
+		if _, _, err := retentionPolicyDropAfter(ctx, tx, table); err != nil {
+			return fmt.Errorf("read existing retention policy for %s: %w", table, err)
+		}
+		if _, err := tx.Exec(ctx, "SELECT remove_retention_policy($1, if_exists => TRUE)", table); err != nil {
+			return fmt.Errorf("remove retention policy for %s: %w", table, err)
+		}
+		interval := fmt.Sprintf("%d days", days)
+		if _, err := tx.Exec(ctx, "SELECT add_retention_policy($1, $2::interval)", table, interval); err != nil {
+			return fmt.Errorf("add retention policy for %s: %w", table, err)
+		}
+		actualDropAfter, policyExists, err := retentionPolicyDropAfter(ctx, tx, table)
+		if err != nil {
+			return fmt.Errorf("post-check retention policy for %s: %w", table, err)
+		}
+		if !policyExists || actualDropAfter != interval {
+			return fmt.Errorf("post-check retention policy for %s: expected drop_after %q, got %q", table, interval, actualDropAfter)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit retention policy transaction: %w", err)
+	}
+	committed = true
+	for _, table := range tables {
+		a.logger.Info("PM retention policy updated", zap.String("table", table), zap.Int("days", policies[table]))
+	}
 	return nil
 }
 
-// ApplyAll 是 ReloadListener 回调实现，批量更新 changed keys 对应的 hypertable retention policy。
-// 仅 KeyRaw15MinDays 和 KeyHourlyDays 对应 hypertable；其余 key（daily/weekly/monthly）忽略，
-// 由 cleanup_runner 按天数清理。
+func retentionPolicyDropAfter(ctx context.Context, q retentionPolicyQuerier, table string) (string, bool, error) {
+	var dropAfter string
+	err := q.QueryRow(ctx, retentionPolicyDropAfterSQL, table).Scan(&dropAfter)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return dropAfter, true, nil
+}
+
+// ApplyAll 是兼容旧 ReloadListener 的回调入口。新代码应使用 ApplyAllWithError
+// 持久化并重试错误；此处保留日志行为，避免破坏既有启动期接线。
 func (a *PMRetentionApplier) ApplyAll(ctx context.Context, current map[PolicyKey]int, changed []PolicyKey) {
+	if err := a.ApplyAllWithError(ctx, current, changed); err != nil {
+		a.logger.Warn("PMRetentionApplier.ApplyAll: failed to apply retention policy", zap.Error(err))
+	}
+}
+
+// ApplyAllWithError 批量更新 changed keys 对应的 hypertable retention policy，并返回第一个错误。
+// 调用方可将错误持久化为配置应用失败状态，而不是只记录日志后报告保存成功。
+// 原始稀疏表按 raw_15min_days 自动 drop chunk；混合粒度结果和 Counter
+// 快照由 cleanup_runner 按 granularity 分批清理。
+func (a *PMRetentionApplier) ApplyAllWithError(ctx context.Context, current map[PolicyKey]int, changed []PolicyKey) error {
+	policies := make(map[string]int)
 	for _, k := range changed {
 		tables, ok := hypertableTables[k]
 		if !ok {
@@ -106,15 +177,24 @@ func (a *PMRetentionApplier) ApplyAll(ctx context.Context, current map[PolicyKey
 		}
 		days, ok := current[k]
 		if !ok {
-			a.logger.Warn("PMRetentionApplier.ApplyAll: missing days for key",
-				zap.String("key", string(k)))
-			continue
+			return fmt.Errorf("PMRetentionApplier.ApplyAllWithError: missing days for key %s", k)
 		}
 		for _, table := range tables {
-			if err := a.Apply(ctx, table, days); err != nil {
-				a.logger.Warn("PMRetentionApplier.ApplyAll: failed to apply retention policy",
-					zap.String("table", table), zap.Int("days", days), zap.Error(err))
-			}
+			policies[table] = days
 		}
 	}
+	if len(policies) == 0 {
+		return nil
+	}
+	if a.db == nil {
+		return fmt.Errorf("retention database is nil")
+	}
+	if !a.checkTimescaleDB(ctx) {
+		a.logger.Warn("timescaledb extension not found, skip retention policy update")
+		return nil
+	}
+	if err := a.applyPoliciesAtomic(ctx, policies); err != nil {
+		return fmt.Errorf("apply retention policies atomically: %w", err)
+	}
+	return nil
 }

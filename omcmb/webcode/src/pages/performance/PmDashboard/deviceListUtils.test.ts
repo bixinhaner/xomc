@@ -135,6 +135,43 @@ describe('buildDeviceMetricCharts — 设备级转置', () => {
     expect(charts[0].series[0].values).toEqual([0, 1, 2]);
   });
 
+  it('只使用后端返回桶，不按未对齐查询开始时间自行生成时间轴', () => {
+    const rows: AggregatedRow[] = [
+      row({
+        deviceSn: 'SN-A',
+        metricPath: 'M1',
+        startTime: '2026-07-16T03:15:00Z',
+        endTime: '2026-07-16T03:30:00Z',
+        metricValue: 1,
+      }),
+      row({
+        deviceSn: 'SN-A',
+        metricPath: 'M1',
+        startTime: '2026-07-16T03:30:00Z',
+        endTime: '2026-07-16T03:45:00Z',
+        metricValue: null,
+        filled: true,
+      }),
+      row({
+        deviceSn: 'SN-A',
+        metricPath: 'M1',
+        startTime: '2026-07-16T03:45:00Z',
+        endTime: '2026-07-16T04:00:00Z',
+        metricValue: 3,
+      }),
+    ];
+
+    const charts = buildDeviceMetricCharts(rows, '15min');
+
+    expect(charts[0].buckets).toEqual([
+      '2026-07-16T03:15:00Z',
+      '2026-07-16T03:30:00Z',
+      '2026-07-16T03:45:00Z',
+    ]);
+    expect(charts[0].buckets).not.toContain('2026-07-16T03:13:17Z');
+    expect(charts[0].series[0].values).toEqual([1, '-', 3]);
+  });
+
   it('displayName 取行的 displayName，缺则回退 metricPath', () => {
     const rows: AggregatedRow[] = [
       row({ metricPath: 'K900010015', displayName: '上行流量', startTime: 'T1' }),
@@ -164,6 +201,24 @@ describe('buildDeviceMetricCharts — T-0193 按设备+小区/PLMN 分线', () =
     // 友好名：设备尾号（末6位）· 小区 · PLMN
     expect(charts[0].series[0].name).toBe('DP0015 · 小区111172245 · PLMN46068');
     expect(charts[0].series[1].name).toBe('DP0015 · 小区111172246 · PLMN46068');
+  });
+
+  it('5G CU/DU 同 NrCGI 同 PLMN → 系列名保留完整原始 objectLdn，避免 CUID/DUID 被压成重复名', () => {
+    const cuLdn = 'Type=Cell,Mode=SA,gNBID=25,NrCGI=401,CUID=1,PLMNID=00101';
+    const duLdn = 'Type=Cell,Mode=SA,gNBID=25,NrCGI=401,DUID=1,PLMNID=00101';
+    const rows: AggregatedRow[] = [
+      row({ deviceSn: '1202000240194DP0015', metricPath: 'M1', startTime: 'T1', metricValue: 1, objectLdn: cuLdn }),
+      row({ deviceSn: '1202000240194DP0015', metricPath: 'M1', startTime: 'T1', metricValue: 2, objectLdn: duLdn }),
+    ];
+
+    const charts = buildDeviceMetricCharts(rows, '15min');
+
+    expect(charts[0].series).toHaveLength(2);
+    expect(charts[0].series[0].name).toBe(`DP0015 · ${cuLdn}`);
+    expect(charts[0].series[1].name).toBe(`DP0015 · ${duLdn}`);
+    expect(charts[0].series[0].name).not.toBe(charts[0].series[1].name);
+    expect(charts[0].series[0].name).toContain('CUID=1');
+    expect(charts[0].series[1].name).toContain('DUID=1');
   });
 
   it('多设备 × 多小区 → 设备×小区笛卡尔分线（4 条）', () => {
@@ -218,6 +273,22 @@ describe('buildDeviceMetricCharts — T-0193 按设备+小区/PLMN 分线', () =
     expect(charts[0].series[0].key).toBe(`SN-AAAAAA|${LDN1}`);
     expect(charts[0].buckets).toEqual(['T1', 'T2']);
     expect(charts[0].series[0].values).toEqual([1, '-']);
+  });
+
+  it('带 object_ldn 的 fill_empty 骨架行 → 已选 object 保留为独立断线 series', () => {
+    const rows: AggregatedRow[] = [
+      row({ deviceSn: '1202000240194DP0015', metricPath: 'K900010052', startTime: 'T1', metricValue: 12.3, objectLdn: LDN1 }),
+      row({ deviceSn: '1202000240194DP0015', metricPath: 'K900010052', startTime: 'T1', metricValue: null, filled: true, objectLdn: LDN2 }),
+    ];
+
+    const charts = buildDeviceMetricCharts(rows, '15min');
+
+    expect(charts[0].series.map((s) => s.key)).toEqual([
+      `1202000240194DP0015|${LDN1}`,
+      `1202000240194DP0015|${LDN2}`,
+    ]);
+    expect(charts[0].series[0].values).toEqual([12.3]);
+    expect(charts[0].series[1].values).toEqual(['-']);
   });
 });
 

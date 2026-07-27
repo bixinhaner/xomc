@@ -2,10 +2,15 @@ import React from 'react';
 import type { FormInstance } from 'antd';
 import type { NameFilterItem, GroupItem } from './types';
 import type { AddGroupFormValues } from './useGroupActions';
+import { getRecordI18n } from '@core/utils/i18nText';
+import { useAppStore } from '@core/store/appStore';
+import { UNASSIGNED_GROUP_ID } from '@core/utils/deviceGroupTargets';
 import AddGroupDrawer from './AddGroupDrawer';
 import EditGroupModal from './EditGroupModal';
 import AddChildGroupDrawer from './AddChildGroupDrawer';
 import EditLevel2GroupDrawer from './EditLevel2GroupDrawer';
+
+const DEFAULT_ROOT_GROUP_ID = '00000000-0000-0000-0000-000000000001';
 
 export interface GroupDialogsProps {
   // Add Level-1 Group Drawer
@@ -24,8 +29,9 @@ export interface GroupDialogsProps {
 
   // Add Child Group (Level-2) Drawer
   addChildDrawerOpen: boolean;
-  addChildForm: FormInstance<{ name_i18n?: Record<string, string>; matchingMode: 'deviceName' | 'lac' | 'tac' | 'serialNumber'; tacRag: string; sourceGroupId?: string; serialNumbers?: string }>;
+  addChildForm: FormInstance<{ name_i18n?: Record<string, string>; autoAssignEnabled?: boolean; matchingMode: 'deviceName' | 'lac' | 'tac' | 'serialNumber'; tacRag: string; sourceGroupId?: string; serialNumbers?: string }>;
   addChildParentName?: string;
+  autoAssignEnabled?: boolean;
   matchingMode: string | undefined;
   nameFilters: NameFilterItem[];
   onAddChildDrawerClose: () => void;
@@ -38,8 +44,9 @@ export interface GroupDialogsProps {
   // Edit Level-2 Group Drawer
   editLevel2DrawerOpen: boolean;
   editLevel2GroupId?: string;
-  editLevel2Form: FormInstance<{ name_i18n?: Record<string, string>; matchingMode: 'deviceName' | 'lac' | 'tac' | 'serialNumber'; tacRag: string; sourceGroupId?: string; serialNumbers?: string }>;
+  editLevel2Form: FormInstance<{ name_i18n?: Record<string, string>; autoAssignEnabled?: boolean; matchingMode: 'deviceName' | 'lac' | 'tac' | 'serialNumber'; tacRag: string; sourceGroupId?: string; serialNumbers?: string }>;
   editLevel2ParentName?: string;
+  editLevel2AutoAssignEnabled?: boolean;
   editLevel2MatchingMode: string | undefined;
   editLevel2NameFilters: NameFilterItem[];
   onEditLevel2DrawerClose: () => void;
@@ -67,6 +74,7 @@ export default function GroupDialogs({
   addChildDrawerOpen,
   addChildForm,
   addChildParentName,
+  autoAssignEnabled,
   matchingMode,
   nameFilters,
   onAddChildDrawerClose,
@@ -79,6 +87,7 @@ export default function GroupDialogs({
   editLevel2GroupId,
   editLevel2Form,
   editLevel2ParentName,
+  editLevel2AutoAssignEnabled,
   editLevel2MatchingMode,
   editLevel2NameFilters,
   onEditLevel2DrawerClose,
@@ -86,6 +95,17 @@ export default function GroupDialogs({
   onEditLevel2NameFiltersChange,
   t,
 }: GroupDialogsProps) {
+  const locale = useAppStore((s) => s.locale);
+  const getGroupName = (group: GroupItem): string => getBuiltInGroupName(group, t) ||
+    getRecordI18n(group as unknown as Record<string, unknown>, 'name', locale) ||
+    group.name;
+  const getSourceGroupOptionLabel = (group: GroupItem): string => {
+    const parent = groups.find((item) => item.id === group.parentId);
+    const parentName = parent ? getGroupName(parent) : '';
+    const groupName = getGroupName(group);
+    return parentName ? `${parentName} / ${groupName}` : groupName;
+  };
+
   return (
     <>
       <AddGroupDrawer
@@ -111,12 +131,13 @@ export default function GroupDialogs({
         open={addChildDrawerOpen}
         form={addChildForm}
         parentGroupName={addChildParentName}
+        autoAssignEnabled={Boolean(autoAssignEnabled)}
         matchingMode={matchingMode}
         nameFilters={nameFilters}
         sourceGroupOptions={groups
-          .filter((group) => group.parentId !== null)
+          .filter((group) => group.parentId != null)
           .map((group) => ({
-            label: `${groups.find((parent) => parent.id === group.parentId)?.name ?? ''} / ${group.name}`,
+            label: getSourceGroupOptionLabel(group),
             value: group.id,
           }))}
         onClose={onAddChildDrawerClose}
@@ -132,12 +153,13 @@ export default function GroupDialogs({
         open={editLevel2DrawerOpen}
         form={editLevel2Form}
         parentGroupName={editLevel2ParentName}
+        autoAssignEnabled={Boolean(editLevel2AutoAssignEnabled)}
         matchingMode={editLevel2MatchingMode}
         nameFilters={editLevel2NameFilters}
         sourceGroupOptions={groups
-          .filter((group) => group.parentId !== null && group.id !== editLevel2GroupId)
+          .filter((group) => group.parentId != null && group.id !== editLevel2GroupId)
           .map((group) => ({
-            label: `${groups.find((parent) => parent.id === group.parentId)?.name ?? ''} / ${group.name}`,
+            label: getSourceGroupOptionLabel(group),
             value: group.id,
           }))}
         onClose={onEditLevel2DrawerClose}
@@ -147,4 +169,10 @@ export default function GroupDialogs({
       />
     </>
   );
+}
+
+function getBuiltInGroupName(group: GroupItem, t: (id: string) => string): string {
+  const isDefaultGroup = group.id === DEFAULT_ROOT_GROUP_ID || group.id === UNASSIGNED_GROUP_ID;
+  if (!isDefaultGroup) return '';
+  return t('device.defaultGroupName');
 }

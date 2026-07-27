@@ -2,6 +2,8 @@ package provider
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 
 	"go.uber.org/zap"
 
@@ -38,9 +40,25 @@ func initAlarmRetentionModule(c *Container) error {
 	}
 
 	if c.SysConfigSvc != nil {
-		c.SysConfigSvc.RegisterSavedHook(svc.OnSysConfigSaved)
+		c.SysConfigSvc.RegisterValidator(alarm.HistoryRetentionCategory, alarm.HistoryRetentionKey, func(value string) error {
+			days, err := strconv.Atoi(value)
+			if err != nil {
+				return fmt.Errorf("alarm history retention must be an integer number of days: %w", err)
+			}
+			if days < alarm.MinHistoryRetentionDays || days > alarm.MaxHistoryRetentionDays {
+				return fmt.Errorf("alarm history retention days must be between %d and %d", alarm.MinHistoryRetentionDays, alarm.MaxHistoryRetentionDays)
+			}
+			return nil
+		})
+		c.SysConfigSvc.RegisterApplyHandler(alarm.HistoryRetentionCategory, "alarm_history_retention", func(ctx context.Context, _ admin.ConfigApplyWork) (map[string]any, error) {
+			err := svc.ApplyForSysConfigCategory(ctx, alarm.HistoryRetentionCategory)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"alarm_history_retention_days": svc.CurrentDays()}, nil
+		})
 	} else {
-		logger.Warn("SysConfigSvc not wired, alarm history retention won't auto-reload on sys_configs save")
+		logger.Warn("SysConfigSvc not wired, alarm history retention won't apply on sys_configs save")
 	}
 
 	c.AlarmHistoryRetentionSvc = svc

@@ -16,6 +16,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { useNavigate, useParams } from 'react-router-dom';
+import { ImportOutlined } from '@ant-design/icons';
 import {
   Alert,
   Button,
@@ -34,19 +35,27 @@ import {
 } from 'antd';
 import dayjs from 'dayjs';
 import { InputAddon } from '@/components/common/InputAddon';
+import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
 import { useCreatePmAdhoc, useUpdatePmAdhoc, usePmAdhocDetail } from '@core/hooks/api/usePmAdhoc';
 import { useDeviceList } from '@core/hooks/api/useDevices';
 import { useMetricObjectsByDevices } from '@core/hooks/api/usePmQuery';
 import { useIndicatorCandidates } from '@core/hooks/api/usePerformance';
 import type { IndicatorCandidate } from '@core/services/api/pmApi';
-import type { AdhocDimension, AdhocMode } from '@core/types/pmAdhoc';
+import type { AdhocDimension, AdhocMode, AdhocVisibility } from '@core/types/pmAdhoc';
 import type { DeviceType } from '@core/types/indicatorLibrary';
-import { isGranularityDimensionSupported } from '@core/utils/pmAdhocConstraints';
+import { formatIndicatorLevel, shouldShowIndicatorLevel } from '@core/utils/indicatorLevelDisplay';
 import CellDrilldownSelector from '../PmDashboard/CellDrilldownSelector';
 import { getEffectiveLdns, type CellSelection } from '../PmDashboard/cellDrilldownUtils';
+import {
+  MetricBatchInputModal,
+  formatMetricIdSamples,
+  type MetricBatchSelectionResult,
+} from '@/components/MetricPickerModal';
+import { resolveLimitedTransferSelection } from './selectionLimit';
 
 // 制式（含 GSM，networkType 过滤直接用小写值）
 type WizardTech = 'lte' | 'nr' | 'gsm';
+const ROLLUP_GRANULARITIES = ['hourly', 'daily', 'weekly', 'monthly'];
 
 // 制式 → 指标库 deviceType（大写枚举）。
 const TECH_TO_DEVICE_TYPE: Record<WizardTech, DeviceType> = {
@@ -68,8 +77,13 @@ interface MetricTransferItem {
   name: string;
   cnName: string;
   isCounter: boolean;
+  indicatorLevel?: string;
   // 搜索用拼接串（编号 + 中英文名），小写。
   searchText: string;
+}
+
+function isSameStringArray(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
 export default function PmAdhocWizard() {
@@ -82,7 +96,7 @@ export default function PmAdhocWizard() {
   const updateMut = useUpdatePmAdhoc();
   const { data: editTask } = usePmAdhocDetail(editId);
 
-  // 制式 / 维度 / 粒度选项：value 不变，仅 label / hint 走 i18n。
+  // 制式 / 维度选项：value 不变，仅 label / hint 走 i18n。
   const TECH_OPTIONS = useMemo<{ label: string; value: WizardTech }[]>(
     () => [
       { label: intl.formatMessage({ id: 'perf.adhoc.techLte' }), value: 'lte' },
@@ -123,7 +137,6 @@ export default function PmAdhocWizard() {
     [intl],
   );
 
-  // #669：自定义聚合任务下线 15min，最细粒度限定 hourly（详见 pmAdhocConstraints.ts）。
   const GRANULARITY_OPTIONS = useMemo(
     () => [
       { label: intl.formatMessage({ id: 'perf.adhoc.granularHourly' }), value: 'hourly' },
@@ -139,8 +152,9 @@ export default function PmAdhocWizard() {
   // ① 基本信息
   const [name, setName] = useState('');
   const [technology, setTechnology] = useState<WizardTech>('lte');
-  const [mode, setMode] = useState<AdhocMode>('oneshot');
+  const [mode] = useState<AdhocMode>('continuous');
   const [expireDays, setExpireDays] = useState<number>(60);
+  const [visibility, setVisibility] = useState<AdhocVisibility>('private');
 
   // ② 聚合范围
   const [dimension, setDimension] = useState<AdhocDimension>('network');
@@ -152,9 +166,9 @@ export default function PmAdhocWizard() {
   const [metricPaths, setMetricPaths] = useState<string[]>([]);
   // 穿梭框候选侧类型筛选：all=全部 / kpi=只看 KPI(K) / counter=只看计数(C)。
   const [metricTypeFilter, setMetricTypeFilter] = useState<'all' | 'kpi' | 'counter'>('all');
+  const [metricBatchOpen, setMetricBatchOpen] = useState(false);
 
-  // ④ 聚合设置
-  const [granularity, setGranularity] = useState<string>('hourly');
+  // ④ 聚合设置（小时、天、周、月由后端固定产出）
   const [window, setWindow] = useState<[dayjs.Dayjs, dayjs.Dayjs]>([
     dayjs().subtract(1, 'day'),
     dayjs(),
@@ -173,14 +187,11 @@ export default function PmAdhocWizard() {
     if (editTask.technology === 'lte' || editTask.technology === 'nr' || editTask.technology === 'gsm') {
       setTechnology(editTask.technology);
     }
-    setMode(editTask.mode);
     setExpireDays(editTask.expireDays || 60);
+    setVisibility(editTask.visibility ?? 'private');
     setDimension(editTask.dimension);
     setSelectedSns(editTask.deviceSns ?? []);
     setMetricPaths(editTask.metricPaths ?? []);
-    if (editTask.granularities && editTask.granularities.length > 0) {
-      setGranularity(editTask.granularities[0]);
-    }
     if (editTask.mode === 'oneshot' && editTask.windowStart && editTask.windowEnd) {
       const ws = dayjs(editTask.windowStart);
       const we = dayjs(editTask.windowEnd);
@@ -218,6 +229,7 @@ export default function PmAdhocWizard() {
   const deviceType = TECH_TO_DEVICE_TYPE[technology];
   const { data: candidates, isLoading: indicatorsLoading } = useIndicatorCandidates(deviceType, {
     includeCounters: true,
+    enabledOnly: true,
   });
   const indicatorItems = useMemo<IndicatorCandidate[]>(() => candidates ?? [], [candidates]);
   // 完整 lookup（id → 候选项），用于已选侧渲染与确认页指标名解析——不受类型筛选影响（D5）。
@@ -247,6 +259,7 @@ export default function PmAdhocWizard() {
           name: ind.cnName || ind.name,
           cnName: ind.cnName,
           isCounter: ind.isCounter,
+          indicatorLevel: ind.indicatorLevel,
           searchText: `${ind.id} ${ind.name} ${ind.cnName}`.toLowerCase(),
         })),
     [indicatorItems, metricTypeFilter, selectedKeySet],
@@ -254,17 +267,48 @@ export default function PmAdhocWizard() {
 
   // ── 步骤校验（决定"下一步"是否可点 / 提交是否可点）──────────────────────
   const step1Valid = name.trim().length > 0;
-  const step2Valid = needsDevicePick ? selectedSns.length > 0 : true;
-  const step3Valid = metricPaths.length >= 1;
+  const step2Valid = needsDevicePick
+    ? selectedSns.length > 0 && selectedSns.length <= PM_QUERY_SELECTION_LIMIT
+    : true;
+  const step3Valid = metricPaths.length >= 1 && metricPaths.length <= PM_QUERY_SELECTION_LIMIT;
   const step4Valid =
-    granularity.length > 0 &&
-    // #669：兜底——15min 已从粒度选项删除，但编辑模式遇旧任务仍可能传入 15min，由此拦截。
-    isGranularityDimensionSupported(granularity, dimension) &&
-    (mode === 'continuous' || (window[0] && window[1] && window[1].isAfter(window[0])));
+    mode === 'continuous' || (window[0] && window[1] && window[1].isAfter(window[0]));
 
   const canNext = [step1Valid, step2Valid, step3Valid, step4Valid][current];
 
+  const warnDeviceLimitExceeded = (count: number) => {
+    if (count <= PM_QUERY_SELECTION_LIMIT) return false;
+    message.warning(intl.formatMessage(
+      { id: 'perf.picker.deviceLimitExceeded' },
+      { max: PM_QUERY_SELECTION_LIMIT, count },
+    ));
+    return true;
+  };
+
+  const warnMetricLimitExceeded = (count: number) => {
+    if (count <= PM_QUERY_SELECTION_LIMIT) return false;
+    message.warning(intl.formatMessage(
+      { id: 'perf.picker.metricLimitExceeded' },
+      { max: PM_QUERY_SELECTION_LIMIT, count },
+    ));
+    return true;
+  };
+
+  const resolveDeviceKeys = (keys: React.Key[]) => {
+    const result = resolveLimitedTransferSelection(selectedSns, keys, PM_QUERY_SELECTION_LIMIT);
+    if (result.exceeded) warnDeviceLimitExceeded(result.count);
+    return result.next;
+  };
+
+  const resolveMetricKeys = (keys: React.Key[]) => {
+    const result = resolveLimitedTransferSelection(metricPaths, keys, PM_QUERY_SELECTION_LIMIT);
+    if (result.exceeded) warnMetricLimitExceeded(result.count);
+    return result.next;
+  };
+
   const handleSubmit = async () => {
+    if (needsDevicePick && warnDeviceLimitExceeded(selectedSns.length)) return;
+    if (warnMetricLimitExceeded(metricPaths.length)) return;
     if (!step1Valid || !step2Valid || !step3Valid || !step4Valid) {
       message.error(intl.formatMessage({ id: 'perf.adhoc.checkStepsIncomplete' }));
       return;
@@ -284,7 +328,8 @@ export default function PmAdhocWizard() {
             name: name.trim(),
             deviceSns: needsDevicePick ? selectedSns : [],
             metricPaths,
-            granularities: [granularity],
+            granularities: ROLLUP_GRANULARITIES,
+            visibility,
             windowStart: mode === 'oneshot' ? window[0].toISOString() : undefined,
             windowEnd: mode === 'oneshot' ? window[1].toISOString() : undefined,
             objectLdns: objectLdns.length > 0 ? objectLdns : undefined,
@@ -301,7 +346,8 @@ export default function PmAdhocWizard() {
         technology,
         deviceSns: needsDevicePick ? selectedSns : [],
         metricPaths,
-        granularities: [granularity],
+        granularities: ROLLUP_GRANULARITIES,
+        visibility,
         // oneshot 带 window；continuous 不带（后端开窗滚动）
         windowStart: mode === 'oneshot' ? window[0].toISOString() : undefined,
         windowEnd: mode === 'oneshot' ? window[1].toISOString() : undefined,
@@ -334,6 +380,19 @@ export default function PmAdhocWizard() {
         />
       </div>
       <div>
+        <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldVisibility' })}</div>
+        <Radio.Group
+          optionType="button"
+          buttonStyle="solid"
+          value={visibility}
+          onChange={(e) => setVisibility(e.target.value as AdhocVisibility)}
+          options={[
+            { label: intl.formatMessage({ id: 'perf.adhoc.visibilityPrivate' }), value: 'private' },
+            { label: intl.formatMessage({ id: 'perf.adhoc.visibilityPublic' }), value: 'public' },
+          ]}
+        />
+      </div>
+      <div>
         <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldTechReq' })}</div>
         {/* T-0194 编辑模式：制式锁定只读（建后不可改） */}
         <Radio.Group
@@ -363,10 +422,8 @@ export default function PmAdhocWizard() {
           optionType="button"
           buttonStyle="solid"
           value={mode}
-          disabled={isEdit}
-          onChange={(e) => setMode(e.target.value as AdhocMode)}
+          disabled
           options={[
-            { label: intl.formatMessage({ id: 'perf.adhoc.modeOneshotFull' }), value: 'oneshot' },
             { label: intl.formatMessage({ id: 'perf.adhoc.modeContinuousFull' }), value: 'continuous' },
           ]}
         />
@@ -412,10 +469,6 @@ export default function PmAdhocWizard() {
             onChange={(e) => {
               const next = e.target.value as AdhocDimension;
               setDimension(next);
-              // #669：编辑模式遇旧 15min 任务，切维度时一并回落 hourly（新建路径已无 15min 选项）。
-              if (!isGranularityDimensionSupported(granularity, next)) {
-                setGranularity('hourly');
-              }
             }}
           >
             <Space orientation="vertical">
@@ -441,8 +494,11 @@ export default function PmAdhocWizard() {
                 dataSource={deviceItems}
                 targetKeys={selectedSns}
                 onChange={(keys: React.Key[]) => {
-                  setSelectedSns(keys.map(String));
-                  setCellSel({}); // 设备集变更 → 下钻选择重置（全选）。
+                  const nextSelectedSns = resolveDeviceKeys(keys);
+                  if (!isSameStringArray(selectedSns, nextSelectedSns)) {
+                    setSelectedSns(nextSelectedSns);
+                    setCellSel({}); // 设备集变更 → 下钻选择重置（全选）。
+                  }
                 }}
                 render={(item) => item.title}
                 showSearch
@@ -493,6 +549,11 @@ export default function PmAdhocWizard() {
           ? intl.formatMessage({ id: 'perf.adhoc.metricTagCounter' })
           : intl.formatMessage({ id: 'perf.adhoc.metricTagKpi' })}
       </Tag>
+      {shouldShowIndicatorLevel(deviceType) && (
+        <Tag color="default" style={{ marginInlineEnd: 0 }}>
+          {formatIndicatorLevel(item.indicatorLevel, (id) => intl.formatMessage({ id }))}
+        </Tag>
+      )}
       <span style={{ color: '#999' }}>{item.id}</span>
       <span>{item.name}</span>
     </Space>
@@ -522,12 +583,24 @@ export default function PmAdhocWizard() {
             { label: intl.formatMessage({ id: 'perf.adhoc.metricTypeCounter' }), value: 'counter' },
           ]}
         />
+        <Button
+          icon={<ImportOutlined />}
+          onClick={() => setMetricBatchOpen(true)}
+          disabled={indicatorsLoading}
+        >
+          {intl.formatMessage({ id: 'perf.metricBatchInput.title' })}
+        </Button>
       </Space>
       <Spin spinning={indicatorsLoading}>
         <Transfer<MetricTransferItem>
           dataSource={metricTransferItems}
           targetKeys={metricPaths}
-          onChange={(keys: React.Key[]) => setMetricPaths(keys.map(String))}
+          onChange={(keys: React.Key[]) => {
+            const nextMetricPaths = resolveMetricKeys(keys);
+            if (!isSameStringArray(metricPaths, nextMetricPaths)) {
+              setMetricPaths(nextMetricPaths);
+            }
+          }}
           render={renderMetricItem}
           showSearch
           // 类型筛选已下移到 dataSource 层预过滤（见 metricTransferItems）；此处 filterOption
@@ -550,26 +623,49 @@ export default function PmAdhocWizard() {
       <div style={{ color: '#888' }}>
         {intl.formatMessage({ id: 'perf.adhoc.metricSelectedCount' }, { count: metricPaths.length })}
       </div>
+      <MetricBatchInputModal
+        open={metricBatchOpen}
+        candidates={indicatorItems}
+        currentSelected={metricPaths}
+        maxSelected={PM_QUERY_SELECTION_LIMIT}
+        loading={indicatorsLoading}
+        onCancel={() => setMetricBatchOpen(false)}
+        onApply={(result: MetricBatchSelectionResult) => {
+          setMetricPaths(result.nextSelected);
+          setMetricBatchOpen(false);
+          message.success(intl.formatMessage(
+            { id: 'perf.metricBatchInput.importSuccess' },
+            { added: result.addedIds.length, total: result.nextSelected.length },
+          ));
+          if (result.invalidIds.length > 0) {
+            message.warning(intl.formatMessage(
+              { id: 'perf.metricBatchInput.notFound' },
+              { count: result.invalidIds.length, ids: formatMetricIdSamples(result.invalidIds) },
+            ));
+          }
+          if (result.limitExceeded) {
+            message.warning(intl.formatMessage(
+              { id: 'perf.metricBatchInput.truncated' },
+              {
+                max: PM_QUERY_SELECTION_LIMIT,
+                count: result.omittedValidIds.length,
+              },
+            ));
+          }
+        }}
+      />
     </Space>
   );
 
   const renderStep4 = () => (
     <Space orientation="vertical" size="large" style={{ width: '100%', maxWidth: 560 }}>
       <div>
-        <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldGranReq' })}</div>
-        {/* #669：自定义聚合任务最细粒度限定 hourly，15min 选项已从数组中移除。 */}
-        <Radio.Group
-          optionType="button"
-          buttonStyle="solid"
-          value={granularity}
-          onChange={(e) => setGranularity(e.target.value)}
-        >
-          {GRANULARITY_OPTIONS.map((g) => (
-            <Radio.Button key={g.value} value={g.value}>
-              {g.label}
-            </Radio.Button>
-          ))}
-        </Radio.Group>
+        <Alert
+          type="info"
+          showIcon
+          title={intl.formatMessage({ id: 'perf.adhoc.fixedRollupLabel' })}
+          description={intl.formatMessage({ id: 'perf.adhoc.fixedRollupDesc' })}
+        />
       </div>
       {mode === 'oneshot' ? (
         <div>
@@ -596,9 +692,13 @@ export default function PmAdhocWizard() {
 
   const renderStep5 = () => {
     const effectiveLdns = needsDevicePick ? getEffectiveLdns(cellSel, objectsByDevice) : [];
-    const metricNames = metricPaths.map((id) => {
+    const metricSummaries = metricPaths.map((id) => {
       const ind = indicatorById.get(id);
-      return ind ? `${ind.id} ${ind.cnName || ind.name}`.trim() : id;
+      return {
+        id,
+        label: ind ? `${ind.id} ${ind.cnName || ind.name}`.trim() : id,
+        level: ind?.indicatorLevel,
+      };
     });
     return (
       <Descriptions bordered column={1} size="middle">
@@ -612,6 +712,15 @@ export default function PmAdhocWizard() {
           ) : (
             <Tag>{intl.formatMessage({ id: 'perf.adhoc.modeOneshotFull' })}</Tag>
           )}
+        </Descriptions.Item>
+        <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmVisibility' })}>
+          <Tag color={visibility === 'public' ? 'green' : undefined}>
+            {intl.formatMessage({
+              id: visibility === 'public'
+                ? 'perf.adhoc.visibilityPublic'
+                : 'perf.adhoc.visibilityPrivate',
+            })}
+          </Tag>
         </Descriptions.Item>
         {mode === 'oneshot' && (
           <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmExpireDays' })}>
@@ -646,10 +755,16 @@ export default function PmAdhocWizard() {
           </Descriptions.Item>
         )}
         <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmMetric' })}>
-          {metricNames.length > 0 ? (
+          {metricSummaries.length > 0 ? (
             <Space size={[4, 4]} wrap>
-              {metricNames.map((m) => (
-                <Tag key={m}>{m}</Tag>
+              {metricSummaries.map((m) => (
+                <Tag key={m.id}>
+                  {m.label}
+                  {shouldShowIndicatorLevel(deviceType) && intl.formatMessage(
+                    { id: 'perf.query.indicatorLevelInline' },
+                    { level: formatIndicatorLevel(m.level, (id) => intl.formatMessage({ id })) },
+                  )}
+                </Tag>
               ))}
             </Space>
           ) : (
@@ -657,7 +772,9 @@ export default function PmAdhocWizard() {
           )}
         </Descriptions.Item>
         <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmGranularity' })}>
-          {GRANULARITY_OPTIONS.find((g) => g.value === granularity)?.label ?? granularity}
+          <Space size={[4, 4]} wrap>
+            {GRANULARITY_OPTIONS.map((g) => <Tag key={g.value}>{g.label}</Tag>)}
+          </Space>
         </Descriptions.Item>
         {mode === 'oneshot' && (
           <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmTimeRange' })}>

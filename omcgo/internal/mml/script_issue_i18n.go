@@ -18,6 +18,7 @@ var scriptIssueDisplayMessages = map[string]scriptIssueDisplayText{
 	"MML_LINE_FORMAT_INVALID":                {zh: "命令格式不正确", en: "Command format is invalid"},
 	"MML_DEVICE_SN_REQUIRED":                 {zh: "命令末尾必须使用 ;设备SN", en: "Command must end with ;device SN"},
 	"MML_DEVICE_SN_MULTIPLE":                 {zh: "每行只能填写一个设备SN", en: "Each line may contain only one device SN"},
+	"MML_DEVICE_SN_DUPLICATE":                {zh: "同一行存在重复设备SN", en: "The same line contains duplicate device SNs"},
 	"MML_COMMAND_NOT_FOUND":                  {zh: "当前用户不可用该命令", en: "The command is not available to the current user"},
 	"MML_COMMAND_AMBIGUOUS":                  {zh: "命令配置重复，请联系管理员处理", en: "Multiple visible commands use this command code"},
 	"MML_COMMAND_DISABLED":                   {zh: "命令已停用", en: "The command is disabled"},

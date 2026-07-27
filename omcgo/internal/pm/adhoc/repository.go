@@ -16,6 +16,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
+	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
 )
 
 // Repository 是 G7 adhoc 任务的持久化接口。
@@ -108,6 +109,12 @@ type PgRepository struct {
 	// nil 安全：不注入则 last_fire_at 留 NULL（退化到 created_at），行为不回归。
 	watermarks WatermarkReader
 	loc        func() *time.Location // #528 P3：初始游标桶对齐用业务时区
+	streamRepo streamingTaskRepository
+}
+
+type streamingTaskRepository interface {
+	Save(context.Context, pmstream.SaveTaskRequest) (*pmstream.TaskVersionSnapshot, error)
+	Delete(context.Context, uuid.UUID) error
 }
 
 // NewPgRepository 创建 PgRepository。
@@ -115,6 +122,16 @@ type PgRepository struct {
 // pgPool=主库（pm_tasks/pm_adhoc_task_runs），tsPool=时序库（pm_adhoc_aggregation_results）。
 func NewPgRepository(pgPool, tsPool *pgxpool.Pool) *PgRepository {
 	return &PgRepository{pool: pgPool, tsPool: tsPool, loc: func() *time.Location { return time.UTC }}
+}
+
+// SetStreamingRepository 把现有任务 CRUD 接到新的不可变版本控制面。
+func (r *PgRepository) SetStreamingRepository(repo streamingTaskRepository) *PgRepository {
+	r.streamRepo = repo
+	return r
+}
+
+func (r *PgRepository) HasStreamingRepository() bool {
+	return r.streamRepo != nil
 }
 
 // SetWatermarkReader 注入「上游完成水位」读取器（#528 P3，新建持续任务初始游标用）。
@@ -179,7 +196,7 @@ var taskCols = []string{
 	"id", "task_name", "task_subtype", "mode", "cron_expr",
 	"device_sns", "metric_paths", "granularities",
 	"window_start", "window_end", "dimension", "technology", "is_builtin", "expire_days",
-	"status", "progress",
+	"visibility", "status", "progress",
 	"creator", "created_at", "updated_at",
 	"object_ldns", // T-0193：小区/PLMN 白名单（TEXT[]，NULL=不过滤）
 }
@@ -201,6 +218,7 @@ func (r *PgRepository) Create(ctx context.Context, req CreateRequest) (uuid.UUID
 	if expireDays <= 0 {
 		expireDays = 60 // 默认 60 天（约束任务定义层，与结果数据 PM 保留期分离）
 	}
+	visibility := normalizeVisibility(req.Visibility)
 	// #528 P3：持续任务初始游标 = 建任务时刻当前对应水位桶起点（从「现在」起算，不回扫历史）。
 	// 取不到水位（上游尚未卷完 / 未注入读取器）→ last_fire_at 留 NULL，退化到 created_at，
 	// 水位 gate 仍兜底挡史前格，安全。oneshot 任务无 cron 调度，初始游标无意义。
@@ -215,13 +233,13 @@ func (r *PgRepository) Create(ctx context.Context, req CreateRequest) (uuid.UUID
 			"task_name", "task_type", "task_subtype", "mode", "cron_expr",
 			"device_sns", "metric_paths", "granularities",
 			"window_start", "window_end", "dimension", "technology", "is_builtin", "expire_days",
-			"status", "progress", "creator", "object_ldns", "last_fire_at",
+			"visibility", "status", "progress", "creator", "object_ldns", "last_fire_at",
 		).
 		Values(
 			req.Name, "extraction", TaskSubtype, string(req.Mode), nullableString(req.CronExpr),
 			deviceSNsJSON, req.MetricPaths, req.Granularities,
 			nullableTime(req.WindowStart), nullableTime(req.WindowEnd), string(dim), nullableTech(req.Technology), req.IsBuiltin, expireDays,
-			string(StatusPending), 0, req.Creator, nullableStrSlice(req.ObjectLDNs), initialFire,
+			string(visibility), string(StatusScheduled), 0, req.Creator, nullableStrSlice(req.ObjectLDNs), initialFire,
 		).
 		Suffix("RETURNING id").
 		ToSql()
@@ -232,6 +250,16 @@ func (r *PgRepository) Create(ctx context.Context, req CreateRequest) (uuid.UUID
 	if err := r.pool.QueryRow(ctx, q, args...).Scan(&id); err != nil {
 		return uuid.Nil, fmt.Errorf("adhoc.Create: insert: %w", err)
 	}
+	if r.streamRepo != nil {
+		task, loadErr := r.Get(ctx, id)
+		if loadErr != nil {
+			return uuid.Nil, loadErr
+		}
+		if syncErr := r.syncStreamingTask(ctx, task, true); syncErr != nil {
+			_, _ = r.pool.Exec(ctx, "DELETE FROM pm_tasks WHERE id=$1", id)
+			return uuid.Nil, syncErr
+		}
+	}
 	return id, nil
 }
 
@@ -241,6 +269,17 @@ func (r *PgRepository) Create(ctx context.Context, req CreateRequest) (uuid.UUID
 // 自建任务（false）SET 全部可编辑字段。mode/technology/dimension/is_builtin/expire_days 永不进 SET。
 // 按 id + task_subtype='adhoc_aggregation' 限定；行不存在返 ErrNotFound。
 func (r *PgRepository) Update(ctx context.Context, id uuid.UUID, req UpdateRequest) error {
+	if !req.IsBuiltin && req.Mode == ModeContinuous && req.ResetCursor {
+		if bucket, ok := r.initialCursorForContinuous(ctx, CreateRequest{
+			Mode:          ModeContinuous,
+			Granularities: req.Granularities,
+			Dimension:     req.Dimension,
+		}); ok {
+			req.LastFireAt = bucket
+		} else {
+			req.LastFireAt = time.Now().UTC()
+		}
+	}
 	q, args, err := buildUpdateSQL(id, req)
 	if err != nil {
 		return fmt.Errorf("adhoc.Update: build SQL: %w", err)
@@ -252,13 +291,23 @@ func (r *PgRepository) Update(ctx context.Context, id uuid.UUID, req UpdateReque
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
+	if r.streamRepo != nil {
+		task, loadErr := r.Get(ctx, id)
+		if loadErr != nil {
+			return loadErr
+		}
+		if syncErr := r.syncStreamingTask(ctx, task, task.Status != StatusCanceled); syncErr != nil {
+			return syncErr
+		}
+	}
 	return nil
 }
 
 // buildUpdateSQL 构建编辑任务的 UPDATE SQL（T-0194）。抽出便于单测断言守门口径（哪些列进 SET）。
 //
 // 内置（IsBuiltin=true）：只 SET metric_paths + updated_at。
-// 自建（false）：额外 SET task_name/device_sns(JSONB)/granularities/object_ldns/window_start/window_end。
+// 自建（false）：额外 SET task_name/device_sns(JSONB)/granularities/cron_expr/object_ldns/window_start/window_end。
+// 自建 oneshot 的执行输入变化时，已执行完成的 succeeded/failed 任务重新排队为 pending；pending/running 保持原状态。
 // mode/technology/dimension/is_builtin/expire_days 永不进 SET。
 func buildUpdateSQL(id uuid.UUID, req UpdateRequest) (string, []any, error) {
 	qb := storage.Psql.Update("pm_tasks").
@@ -274,9 +323,19 @@ func buildUpdateSQL(id uuid.UUID, req UpdateRequest) (string, []any, error) {
 			Set("task_name", req.Name).
 			Set("device_sns", deviceSNsJSON).
 			Set("granularities", req.Granularities).
+			Set("cron_expr", nullableString(req.CronExpr)).
+			Set("visibility", string(normalizeVisibility(req.Visibility))).
 			Set("object_ldns", nullableStrSlice(req.ObjectLDNs)).
 			Set("window_start", nullableTime(req.WindowStart)).
 			Set("window_end", nullableTime(req.WindowEnd))
+		if req.Mode == ModeOneshot && req.RequeueTerminal {
+			qb = qb.
+				Set("status", sq.Expr("CASE WHEN status IN ('succeeded','failed') THEN 'pending' ELSE status END")).
+				Set("progress", sq.Expr("CASE WHEN status IN ('succeeded','failed') THEN 0 ELSE progress END"))
+		}
+		if req.ResetCursor {
+			qb = qb.Set("last_fire_at", nullableTime(req.LastFireAt))
+		}
 	}
 	return qb.ToSql()
 }
@@ -301,29 +360,7 @@ func (r *PgRepository) Get(ctx context.Context, id uuid.UUID) (*Task, error) {
 }
 
 func (r *PgRepository) List(ctx context.Context, filter ListFilter) ([]Task, error) {
-	qb := storage.Psql.Select(taskCols...).
-		From("pm_tasks").
-		Where(sq.Eq{"task_subtype": TaskSubtype}).
-		OrderBy("task_name ASC")
-	if filter.Mode != nil {
-		qb = qb.Where(sq.Eq{"mode": string(*filter.Mode)})
-	}
-	if filter.Status != nil {
-		qb = qb.Where(sq.Eq{"status": string(*filter.Status)})
-	}
-	if filter.Creator != "" {
-		qb = qb.Where(sq.Eq{"creator": filter.Creator})
-	}
-	if filter.IsBuiltin != nil {
-		qb = qb.Where(sq.Eq{"is_builtin": *filter.IsBuiltin})
-	}
-	if filter.Limit > 0 {
-		qb = qb.Limit(uint64(filter.Limit))
-	}
-	if filter.Offset > 0 {
-		qb = qb.Offset(uint64(filter.Offset))
-	}
-	q, args, err := qb.ToSql()
+	q, args, err := buildListSQL(filter)
 	if err != nil {
 		return nil, fmt.Errorf("adhoc.List: build SQL: %w", err)
 	}
@@ -341,6 +378,43 @@ func (r *PgRepository) List(ctx context.Context, filter ListFilter) ([]Task, err
 		out = append(out, *t)
 	}
 	return out, rows.Err()
+}
+
+func buildListSQL(filter ListFilter) (string, []any, error) {
+	qb := storage.Psql.Select(taskCols...).
+		From("pm_tasks").
+		Where(sq.Eq{"task_subtype": TaskSubtype}).
+		OrderBy("task_name ASC")
+	if filter.Mode != nil {
+		qb = qb.Where(sq.Eq{"mode": string(*filter.Mode)})
+	}
+	if filter.Status != nil {
+		qb = qb.Where(sq.Eq{"status": string(*filter.Status)})
+	}
+	if filter.Creator != "" {
+		qb = qb.Where(sq.Eq{"creator": filter.Creator})
+	}
+	if filter.IsBuiltin != nil {
+		qb = qb.Where(sq.Eq{"is_builtin": *filter.IsBuiltin})
+	}
+	if !filter.IncludeAll {
+		qb = qb.Where(visibleTaskExpr(filter.CurrentUser))
+	}
+	if filter.Limit > 0 {
+		qb = qb.Limit(uint64(filter.Limit))
+	}
+	if filter.Offset > 0 {
+		qb = qb.Offset(uint64(filter.Offset))
+	}
+	return qb.ToSql()
+}
+
+func visibleTaskExpr(currentUser string) sq.Sqlizer {
+	return sq.Or{
+		sq.Eq{"is_builtin": true},
+		sq.Eq{"visibility": string(VisibilityPublic)},
+		sq.Eq{"creator": currentUser},
+	}
 }
 
 func (r *PgRepository) Cancel(ctx context.Context, id uuid.UUID) error {
@@ -372,6 +446,15 @@ RETURNING status`
 		}
 		return fmt.Errorf("adhoc.Cancel: %w", err)
 	}
+	if r.streamRepo != nil {
+		task, loadErr := r.Get(ctx, id)
+		if loadErr != nil {
+			return loadErr
+		}
+		if syncErr := r.syncStreamingTask(ctx, task, false); syncErr != nil {
+			return syncErr
+		}
+	}
 	return nil
 }
 
@@ -402,6 +485,15 @@ RETURNING status`
 			return "", ErrNotCanceled
 		}
 		return "", fmt.Errorf("adhoc.Resume: %w", err)
+	}
+	if r.streamRepo != nil {
+		task, loadErr := r.Get(ctx, id)
+		if loadErr != nil {
+			return "", loadErr
+		}
+		if syncErr := r.syncStreamingTask(ctx, task, true); syncErr != nil {
+			return "", syncErr
+		}
 	}
 	return Status(newStatus), nil
 }
@@ -439,6 +531,11 @@ WHERE id = $1
 			return ErrBuiltinNotDeletable
 		}
 		return ErrNotTerminal
+	}
+	if r.streamRepo != nil {
+		if err := r.streamRepo.Delete(ctx, id); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
 	}
 	return nil
 }
@@ -790,6 +887,7 @@ func scanTask(row rowScanner) (*Task, error) {
 	var technology *string
 	var isBuiltin bool
 	var expireDays int
+	var visibility string
 	var status string
 	var creator *string
 	var objectLDNs []string // T-0193：白名单列，NULL → nil（不过滤）
@@ -797,7 +895,7 @@ func scanTask(row rowScanner) (*Task, error) {
 	err := row.Scan(
 		&t.ID, &t.Name, &subtype, &mode, &cronExpr,
 		&deviceSNsJSON, &metricPaths, &granularities,
-		&windowStart, &windowEnd, &dimension, &technology, &isBuiltin, &expireDays, &status, &t.Progress,
+		&windowStart, &windowEnd, &dimension, &technology, &isBuiltin, &expireDays, &visibility, &status, &t.Progress,
 		&creator, &t.CreatedAt, &t.UpdatedAt, &objectLDNs,
 	)
 	if err != nil {
@@ -809,6 +907,7 @@ func scanTask(row rowScanner) (*Task, error) {
 	}
 	t.IsBuiltin = isBuiltin
 	t.ExpireDays = expireDays
+	t.Visibility = normalizeVisibility(Visibility(visibility))
 	if mode != nil {
 		t.Mode = Mode(*mode)
 	}
@@ -854,6 +953,13 @@ func nullableString(s *string) any {
 		return nil
 	}
 	return *s
+}
+
+func normalizeVisibility(v Visibility) Visibility {
+	if v == VisibilityPublic {
+		return VisibilityPublic
+	}
+	return VisibilityPrivate
 }
 
 // nullableStrSlice 把 nil / 空切片映射为 SQL NULL（T-0193 object_ldns 列）。

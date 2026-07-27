@@ -153,12 +153,13 @@ func (m *mockScriptRepo) List(ctx context.Context, filter ScriptFilter) (*model.
 }
 
 type mockTaskRepo struct {
-	createFn       func(ctx context.Context, task *MMLTask) error
-	getByIDFn      func(ctx context.Context, id uuid.UUID) (*MMLTask, error)
-	updateFn       func(ctx context.Context, task *MMLTask) error
-	updateStatusFn func(ctx context.Context, id uuid.UUID, status TaskStatus) error
-	deleteFn       func(ctx context.Context, id uuid.UUID) error
-	listFn         func(ctx context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error)
+	createFn                 func(ctx context.Context, task *MMLTask) error
+	getByIDFn                func(ctx context.Context, id uuid.UUID) (*MMLTask, error)
+	getLatestPeriodicChildFn func(ctx context.Context, parentID uuid.UUID) (*MMLTask, error)
+	updateFn                 func(ctx context.Context, task *MMLTask) error
+	updateStatusFn           func(ctx context.Context, id uuid.UUID, status TaskStatus) error
+	deleteFn                 func(ctx context.Context, id uuid.UUID) error
+	listFn                   func(ctx context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error)
 }
 
 func (m *mockTaskRepo) Create(ctx context.Context, task *MMLTask) error {
@@ -176,6 +177,17 @@ func (m *mockTaskRepo) GetByID(ctx context.Context, id uuid.UUID) (*MMLTask, err
 }
 
 func (m *mockTaskRepo) GetByRequestID(context.Context, string, string) (*MMLTask, error) {
+	return nil, commonerrors.ErrNotFound
+}
+
+func (m *mockTaskRepo) GetLatestPeriodicChild(ctx context.Context, parentID uuid.UUID) (*MMLTask, error) {
+	if m.getLatestPeriodicChildFn != nil {
+		return m.getLatestPeriodicChildFn(ctx, parentID)
+	}
+	return nil, commonerrors.ErrNotFound
+}
+
+func (m *mockTaskRepo) GetActiveByScriptID(context.Context, uuid.UUID) (*MMLTask, error) {
 	return nil, commonerrors.ErrNotFound
 }
 
@@ -1022,6 +1034,52 @@ func TestService_ExecuteCommand_DeviceBoundRawAddPathExpandsFollowUpValues(t *te
 	require.Len(t, refs, 2)
 	assert.Equal(t, "Device.IP.Interface.1.IPv4Address.{NEW}.IPAddress", refs[0].Tr069Path)
 	assert.Equal(t, "Device.IP.Interface.1.IPv4Address.{NEW}.SubnetMask", refs[1].Tr069Path)
+}
+
+func TestService_ExecuteCommand_PrivateRawPathCarriesPathModeToPayload(t *testing.T) {
+	var capturedTask *MMLTask
+	taskRepo := &mockTaskRepo{
+		createFn: func(ctx context.Context, task *MMLTask) error {
+			capturedTask = task
+			task.ID = uuid.New()
+			return nil
+		},
+	}
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
+
+	_, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		ExecuteMode: "device_bound",
+		TaskName:    "private raw path",
+		Creator:     "admin",
+		PlanItems: []MMLPlanItem{{
+			LineNo:   1,
+			DeviceSN: "SN001",
+			Order:    1,
+			RawLine:  "LST PRIVATE:VendorRoot.DeviceInfo.X_PRIVATE_NotRegistered;SN001",
+			Command: map[string]interface{}{
+				"command_code":   "RAW LST",
+				"operation_type": "LST",
+				"param_paths":    []string{"VendorRoot.DeviceInfo.X_PRIVATE_NotRegistered"},
+				"parameters":     map[string]interface{}{},
+				"raw_path_mode":  rawPathModePrivate,
+			},
+		}},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, capturedTask)
+	require.Len(t, capturedTask.Commands, 1)
+	refs := paramRefsFromEntry(capturedTask.Commands[0])
+	require.Len(t, refs, 1)
+	require.Equal(t, rawPathModePrivate, refs[0].PathMode)
+	payload, err := BuildTR069Params(
+		capturedTask.Commands[0]["rpc_method"].(string),
+		refs,
+		commandAnyMap(capturedTask.Commands[0], "parameters"),
+		capturedTask.Commands[0]["operation_type"].(string),
+	)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"path_mode":"private","names":["VendorRoot.DeviceInfo.X_PRIVATE_NotRegistered"]}`, string(payload))
 }
 
 func TestService_ExecuteCommand_RejectsMoreThan200Devices(t *testing.T) {
@@ -1922,6 +1980,41 @@ func TestService_ListCustomCommands_RBAC_NoQuerierInjected_FallbackToCreatorOnly
 		"RoleQuerier 未注入时不应触发派生 — VisibleGroupIDs 须为空")
 	assert.Equal(t, "admin_a", *captured.Creator,
 		"无 RoleQuerier 场景下纯 creator-self 过滤（向后兼容）")
+}
+
+func TestService_ListCustomCommands_FiltersPathsByProductModel(t *testing.T) {
+	productID := uuid.New()
+	unsupportedOnly := MMLCustomCommand{
+		ID:         uuid.New(),
+		ParamPaths: []string{"Device.DeviceInfo.dxp.omc"},
+	}
+	mixed := MMLCustomCommand{
+		ID:         uuid.New(),
+		ParamPaths: []string{"Device.DeviceInfo.dxp.omc", "Device.DeviceInfo.ModelName"},
+	}
+	repo := &mockCustomCommandRepo{
+		listFn: func(_ context.Context, filter CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error) {
+			require.Equal(t, productID, *filter.ProductID)
+			return model.NewListResponse([]MMLCustomCommand{
+				unsupportedOnly,
+				mixed,
+			}, 2, 1, 100), nil
+		},
+	}
+	svc := newCustomCmdServiceForRBAC(repo, nil)
+	svc.SetCustomCommandSupportedPathsResolver(func(context.Context, uuid.UUID) (map[string]struct{}, error) {
+		return map[string]struct{}{"Device.DeviceInfo.ModelName": {}}, nil
+	})
+
+	got, err := svc.ListCustomCommands(context.Background(), CustomCommandFilter{
+		ProductID:   &productID,
+		ListRequest: model.ListRequest{Page: 1, PageSize: 100},
+	})
+	require.NoError(t, err)
+	require.Len(t, got.Items, 1)
+	assert.Equal(t, mixed.ID, got.Items[0].ID)
+	assert.Equal(t, []string{"Device.DeviceInfo.ModelName"}, got.Items[0].ParamPaths)
+	assert.Equal(t, int64(1), got.Total)
 }
 
 // assertError 是测试用 sentinel error，避免引入 errors 包仅为构造常量错误。

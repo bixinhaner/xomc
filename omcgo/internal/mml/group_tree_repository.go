@@ -53,6 +53,7 @@ type GroupTreeCommand struct {
 	RPCMethod        string            `json:"rpc_method"`
 	RequireConfirm   bool              `json:"require_confirm"`
 	TargetObject     string            `json:"target_object,omitempty"`
+	TargetPaths      []string          `json:"target_paths,omitempty"`
 	Source           string            `json:"source"`
 	CatalogProtected bool              `json:"catalog_protected"`
 	// InstanceRangeMeta 是 spec §R-4.1.1 每层 {i} 占位符的取值范围 metadata，
@@ -79,7 +80,10 @@ func (c *GroupTreeCommand) TargetPathsRaw() []byte { return c.rawTargetPaths }
 
 // SetTargetPathsRaw 由 repository 调用时填入。导出 setter 让 repository（同 pkg）
 // 在 BuildTree 时塞值；外部 pkg 不需要。
-func (c *GroupTreeCommand) SetTargetPathsRaw(raw []byte) { c.rawTargetPaths = raw }
+func (c *GroupTreeCommand) SetTargetPathsRaw(raw []byte) {
+	c.rawTargetPaths = raw
+	c.TargetPaths = parseTargetPathsJSON(raw)
+}
 
 // GroupTreeRepository 提供命令树查询能力。
 type GroupTreeRepository interface {
@@ -104,7 +108,7 @@ var _ GroupTreeRepository = (*PgGroupTreeRepository)(nil)
 
 // BuildTree 单 SQL JOIN 抓 groups + commands，Go 侧按 path 分层组装。
 //
-// SQL 侧 WHERE 已过滤为 "chapter:" 前缀的章节行 + 子树命令；Go 侧仅做层级组装
+// SQL 侧 WHERE 已过滤为 standard chapter 树 + admin 分组；Go 侧仅做层级组装
 // 与排序，不再做章节合成或 family 推断。
 func (r *PgGroupTreeRepository) BuildTree(ctx context.Context, rootCode, lang string) ([]GroupTreeNode, error) {
 	if lang == "" {
@@ -181,7 +185,7 @@ func (r *PgGroupTreeRepository) BuildTree(ctx context.Context, rootCode, lang st
 // rootCode 为空时拉所有 chapter 子树；非空时按 LTREE @> 拉指定子树。
 //
 // 过滤规则:
-//   - standard 来源:LIKE 'chapter:%'(spec v2.3 §R-1)
+//   - standard 来源:chapter_code 非空的标准章节树（含 chapter 顶层和标准二级分组）
 //   - admin 来源:全部纳入(2026-05-27 修复;此前 admin 在 mml/admin/catalog 页面
 //     新建的分组因不带 chapter: 前缀被排除,创建后看不见)
 func (r *PgGroupTreeRepository) queryGroupsAndCommands(ctx context.Context, rootCode string) ([]groupTreeRow, error) {
@@ -212,11 +216,37 @@ SELECT
     --   冻结待 PR-F DROP，读路径不再依赖。
     COALESCE(c.target_paths, '[]'::jsonb) AS target_paths
 FROM mml_command_groups g
-LEFT JOIN mml_commands c ON c.group_id = g.id
+LEFT JOIN mml_commands c ON c.group_id = g.id AND c.deprecated_at IS NULL
 WHERE g.path IS NOT NULL
-  AND (g.group_code LIKE 'chapter:%%' OR g.source = 'admin')
+  AND g.deleted_at IS NULL
+  AND g.deprecated_at IS NULL
+  AND (
+    (g.source = 'standard' AND COALESCE(g.chapter_code, '') <> '')
+    OR g.source = 'admin'
+  )
 %s
-ORDER BY g.path, g.display_order, c.operation_type, c.command_code`
+ORDER BY g.path,
+         g.display_order,
+         CASE
+             WHEN g.group_code = 'MML350_G_INTERFACE_BINDING'
+              AND c.command_code = 'LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NRCU' THEN 1
+             WHEN g.group_code = 'MML350_G_INTERFACE_BINDING'
+              AND c.command_code = 'MOD MML350_INTERFACE_BINDING_F' THEN 2
+             WHEN g.group_code = 'MML350_G_INTERFACE_BINDING'
+              AND c.command_code = 'LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NGAPMGMT' THEN 3
+             WHEN g.group_code = 'MML350_G_INTERFACE_BINDING'
+              AND c.command_code = 'MOD MML350_INTERFACE_BINDING_NG' THEN 4
+             ELSE 99
+         END,
+         regexp_replace(COALESCE(c.command_code, ''), '^(LST|MOD|ADD|RMV)[[:space:]]+', ''),
+         CASE c.operation_type
+             WHEN 'LST' THEN 1
+             WHEN 'MOD' THEN 2
+             WHEN 'ADD' THEN 3
+             WHEN 'RMV' THEN 4
+             ELSE 99
+         END,
+         c.command_code`
 
 	var whereParts []string
 	var args []any
@@ -422,11 +452,44 @@ func chapterSortKey(chapter string) string {
 
 func sortCommandsByLogicalCode(cmds []GroupTreeCommand) {
 	sortSlice(cmds, func(a, b GroupTreeCommand) bool {
-		if a.LogicalCode != b.LogicalCode {
-			return a.LogicalCode < b.LogicalCode
+		al, bl := commandLogicalSortKey(a), commandLogicalSortKey(b)
+		if al != bl {
+			return al < bl
 		}
-		return a.OperationType < b.OperationType
+		ao, bo := operationSortRank(a.OperationType), operationSortRank(b.OperationType)
+		if ao != bo {
+			return ao < bo
+		}
+		return a.CommandCode < b.CommandCode
 	})
+}
+
+func commandLogicalSortKey(cmd GroupTreeCommand) string {
+	if key := strings.TrimSpace(cmd.LogicalName); key != "" {
+		return key
+	}
+	if key := strings.TrimSpace(cmd.LogicalNameI18n["zh-CN"]); key != "" {
+		return key
+	}
+	if key := strings.TrimSpace(cmd.LogicalNameI18n["en-US"]); key != "" {
+		return key
+	}
+	return strings.TrimSpace(cmd.LogicalCode)
+}
+
+func operationSortRank(op string) int {
+	switch op {
+	case "ADD":
+		return 1
+	case "RMV":
+		return 2
+	case "MOD":
+		return 3
+	case "LST":
+		return 4
+	default:
+		return 99
+	}
 }
 
 // sortSlice generic helper using sort.SliceStable（避免 generics import 复杂度）。

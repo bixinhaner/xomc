@@ -48,12 +48,12 @@ describe('kpiExportApi.create', () => {
 
   it('taskName 缺省时不带 task_name（后端自动生成）', async () => {
     postMock.mockResolvedValue({
-      data: { id: 'x', task_name: 'auto', source_type: 'adhoc', format: 'csv', status: 'pending', create_user: 'a', created_at: 'c' },
+      data: { id: 'x', task_name: 'auto', source_type: 'adhoc_result', format: 'csv', status: 'pending', create_user: 'a', created_at: 'c' },
     });
-    await kpiExportApi.create({ sourceType: 'adhoc', params: {} });
+    await kpiExportApi.create({ sourceType: 'adhoc_result', params: {} });
     const [, payload] = postMock.mock.calls[0];
     expect('task_name' in payload).toBe(false);
-    expect(payload.source_type).toBe('adhoc');
+    expect(payload.source_type).toBe('adhoc_result');
   });
 });
 
@@ -73,10 +73,10 @@ describe('kpiExportApi.listTasks / listFiles', () => {
 
   it('listFiles 打 /pm/exports/files + source_type 过滤', async () => {
     getMock.mockResolvedValue({ data: { items: [] } });
-    await kpiExportApi.listFiles({ sourceType: 'adhoc' });
+    await kpiExportApi.listFiles({ sourceType: 'pm_dashboard' });
     const [url, opts] = getMock.mock.calls[0];
     expect(url).toBe('/pm/exports/files');
-    expect(opts.params.source_type).toBe('adhoc');
+    expect(opts.params.source_type).toBe('pm_dashboard');
   });
 
   it('items 缺失时返空数组（无崩溃）', async () => {

@@ -53,11 +53,16 @@ export interface CommandParamPath {
   writable: boolean;
   /** 该 path 末级是否为多实例对象（standard_params.entry_type='object'） */
   isObject: boolean;
-  /** standard_params.min_value：MOD/ADD 填值时该标量参数的默认值 */
+	/** 当前参数模型 min/max；缺失时由后端回退 standard_params。 */
   minValue?: number;
+  maxValue?: number;
   valueType?: string;
   defaultValue?: string;
+  validationPattern?: string;
+  enumOptions?: Array<{ value: string; label: string }>;
   description?: string;
+  /** MML 配置中的默认勾选标记；兼容数据缺失时按 false 处理。 */
+  defaultSelected?: boolean;
 }
 
 /**
@@ -104,6 +109,7 @@ export interface ResultRow {
   planOrder?: number;
   planRawLine?: string;
   commandCode?: string;
+  commandName?: string;
   deviceSn: string;
   /** 设备任务 ID（= device_tasks.id；逐 PATH 时为该设备父任务 ID） */
   deviceTaskId: string;
@@ -166,7 +172,7 @@ export type ExecRequest =
       values?: Record<string, string>;
       /** RMV 删除的实例号 */
       instance?: number;
-      /** 父级 `.{i}.` 实例选择器（key=i01/i02…，value=具体实例号，默认 1） */
+      /** 父级 `.{i}.` 实例选择器（key=i01/i02…；查询可空，写类默认 1） */
       instanceSelectors?: Record<string, string>;
       /** 下发方式：whole=整体一条 RPC；single-path=逐 PATH 每 path 一条 RPC（成败独立） */
       execMode?: ExecMode;

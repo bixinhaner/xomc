@@ -19,10 +19,16 @@ type NATSClient struct {
 
 // StreamDef defines a JetStream stream.
 type StreamDef struct {
-	Name      string
-	Subjects  []string
-	Retention nats.RetentionPolicy
+	Name        string
+	Subjects    []string
+	Retention   nats.RetentionPolicy
+	AllowDirect bool
+	MaxAge      time.Duration
+	MaxBytes    int64
+	Compression nats.StoreCompression
 }
+
+const pmAggregationStreamMaxBytes int64 = 10 << 30
 
 // DefaultStreams 列出所有 JetStream 流。每条流以一个点分前缀吸纳一类事件，
 // 最大存活 72 小时。扩展新事件前缀时，务必在此注册对应 Stream，否则发布
@@ -42,7 +48,45 @@ func DefaultStreams() []StreamDef {
 		{Name: "DEVICE", Subjects: []string{"device.>"}, Retention: nats.InterestPolicy},
 		{Name: "COMMAND", Subjects: []string{"command.>"}, Retention: nats.InterestPolicy},
 		{Name: "TASK", Subjects: []string{"task.>"}, Retention: nats.InterestPolicy},
-		{Name: "PM", Subjects: []string{"pm.>"}, Retention: nats.WorkQueuePolicy},
+		// Parameter-sync task results and run terminal events fan out to the
+		// result processor, provisioning bindings, and operational consumers.
+		{Name: "PARAM_SYNC", Subjects: []string{"param_sync.>"}, Retention: nats.InterestPolicy},
+		// Queue health needs one subject-filtered, read-only raw-message lookup
+		// to calculate oldest pm.file.received age without confusing it with
+		// other pm.> subjects in this shared stream.
+		{Name: "PM", Subjects: []string{"pm.>"}, Retention: nats.WorkQueuePolicy, AllowDirect: true},
+		{
+			Name:        "PM_AGG_15M",
+			Subjects:    []string{"pmaggregation.15m.>"},
+			Retention:   nats.LimitsPolicy,
+			AllowDirect: true,
+			MaxAge:      2 * time.Hour,
+			MaxBytes:    pmAggregationStreamMaxBytes,
+			Compression: nats.S2Compression,
+		},
+		{
+			Name:        "PM_AGG_HOURLY",
+			Subjects:    []string{"pmaggregation.hourly.>"},
+			Retention:   nats.LimitsPolicy,
+			AllowDirect: true,
+			MaxAge:      48 * time.Hour,
+			MaxBytes:    pmAggregationStreamMaxBytes,
+			Compression: nats.S2Compression,
+		},
+		{
+			Name:        "PM_AGG_DAILY",
+			Subjects:    []string{"pmaggregation.daily.>"},
+			Retention:   nats.LimitsPolicy,
+			AllowDirect: true,
+			MaxAge:      40 * 24 * time.Hour,
+			MaxBytes:    pmAggregationStreamMaxBytes,
+			Compression: nats.S2Compression,
+		},
+		{
+			Name:      "PM_AGG_CONTROL",
+			Subjects:  []string{"pmaggregation.control.>"},
+			Retention: nats.InterestPolicy,
+		},
 		{Name: "MR", Subjects: []string{"mr.>"}, Retention: nats.WorkQueuePolicy},
 		{Name: "ALARM", Subjects: []string{"alarm.>"}, Retention: nats.WorkQueuePolicy},
 		{Name: "OSS", Subjects: []string{"oss.>"}, Retention: nats.WorkQueuePolicy},
@@ -122,6 +166,17 @@ func (c *NATSClient) EnsureStreams(ctx context.Context, allowRebuild bool) error
 			return fmt.Errorf("get stream info %s: %w", def.Name, err)
 		}
 
+		if err := enableDirectLookup(def, info, func(config *nats.StreamConfig) (*nats.StreamInfo, error) {
+			return c.JS.UpdateStream(config)
+		}); err != nil {
+			return err
+		}
+		if err := reconcileStreamLimits(def, info, func(config *nats.StreamConfig) (*nats.StreamInfo, error) {
+			return c.JS.UpdateStream(config)
+		}); err != nil {
+			return err
+		}
+
 		if info.Config.Retention == def.Retention {
 			continue
 		}
@@ -184,14 +239,67 @@ func (c *NATSClient) EnsureStreams(ctx context.Context, allowRebuild bool) error
 	return nil
 }
 
+func reconcileStreamLimits(
+	def StreamDef,
+	info *nats.StreamInfo,
+	update func(*nats.StreamConfig) (*nats.StreamInfo, error),
+) error {
+	if info == nil {
+		return nil
+	}
+	config := info.Config
+	changed := false
+	if def.MaxAge > 0 && config.MaxAge != def.MaxAge {
+		config.MaxAge = def.MaxAge
+		changed = true
+	}
+	if def.MaxBytes > 0 && config.MaxBytes != def.MaxBytes {
+		config.MaxBytes = def.MaxBytes
+		changed = true
+	}
+	if def.Compression != nats.NoCompression && config.Compression != def.Compression {
+		config.Compression = def.Compression
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	if _, err := update(&config); err != nil {
+		return fmt.Errorf("update stream limits for %s: %w", def.Name, err)
+	}
+	return nil
+}
+
+// enableDirectLookup is intentionally independent of retention reconciliation:
+// AllowDirect is a safe in-place read capability, while a retention mismatch
+// may be left unchanged in production when stream rebuilding is disabled.
+func enableDirectLookup(def StreamDef, info *nats.StreamInfo, update func(*nats.StreamConfig) (*nats.StreamInfo, error)) error {
+	if !def.AllowDirect || info == nil || info.Config.AllowDirect {
+		return nil
+	}
+	config := info.Config
+	config.AllowDirect = true
+	if _, err := update(&config); err != nil {
+		return fmt.Errorf("enable direct message lookup for stream %s: %w", def.Name, err)
+	}
+	return nil
+}
+
 func (c *NATSClient) createStream(def StreamDef) error {
+	maxAge := def.MaxAge
+	if maxAge <= 0 {
+		maxAge = 72 * time.Hour
+	}
 	_, err := c.JS.AddStream(&nats.StreamConfig{
-		Name:      def.Name,
-		Subjects:  def.Subjects,
-		Retention: def.Retention,
-		MaxAge:    72 * time.Hour,
-		Storage:   nats.FileStorage,
-		Replicas:  1, // single node for dev; set 3 for production
+		Name:        def.Name,
+		Subjects:    def.Subjects,
+		Retention:   def.Retention,
+		MaxAge:      maxAge,
+		MaxBytes:    def.MaxBytes,
+		Storage:     nats.FileStorage,
+		Replicas:    1, // single node for dev; set 3 for production
+		AllowDirect: def.AllowDirect,
+		Compression: def.Compression,
 	})
 	if err != nil {
 		return fmt.Errorf("create stream %s: %w", def.Name, err)

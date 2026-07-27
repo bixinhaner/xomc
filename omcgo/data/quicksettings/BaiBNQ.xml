@@ -94,7 +94,7 @@
     <param name="Pat2NrofUplinkSymbols" titleZh="Pattern2 上行特殊符号数" titleEn="Pattern2 UL Symbols"
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern2.NrofUplinkSymbols"/>
   </group>
-       <group id="device-time" titleZh="NTP" titleEn="NTP">
+  <group id="device-time" titleZh="NTP" titleEn="NTP">
         <param name="Enable" titleZh="NTP 模式" titleEn="NTP Mode"
                        standardPath="Device.Time.Enable">
                 <option value="1" label="NTP Client"/>
@@ -112,6 +112,77 @@
            standardPath="Device.Time.NTPServer4"/>
     <param name="NTPServer5" titleZh="NTP 服务器 5" titleEn="NTP Server 5"
            standardPath="Device.Time.NTPServer5"/>
+  </group>
+
+  <group id="gnb-sync-source" titleZh="同步源设置" titleEn="Sync Source Settings">
+    <param name="PpsTimeMode" titleZh="模式" titleEn="Mode" type="string"
+           standardPath="Device.FAP.Synchronization.PpsTimeMode">
+      <option value="FREE_OSCILLATION" label="FREE_OSCILLATION"/>
+      <option value="GPS_PPS" label="GPS_PPS"/>
+      <option value="LOCAL_CLOCK_HOLDOVER_GPS_PPS" label="LOCAL_CLOCK_HOLDOVER_GPS_PPS"/>
+      <option value="OCXO_PPS" label="OCXO_PPS"/>
+      <option value="1588_PPS" label="1588_PPS"/>
+      <option value="GPS_AND_PTP" label="GPS_AND_PTP"/>
+    </param>
+    <param name="SyncSource" titleZh="同步源" titleEn="Sync Source" type="string"
+           standardPath="Device.FAP.GPS.SyncSource">
+      <option value="GPS" label="GPS"/>
+      <option value="GLONASS" label="GLONASS"/>
+      <option value="BEIDOU" label="BEIDOU"/>
+      <option value="GALILEO" label="GALILEO"/>
+      <option value="QZSS" label="QZSS"/>
+    </param>
+    <param name="ForcedSync" titleZh="强制同步" titleEn="Forced Sync" type="unsignedInt"
+           standardPath="Device.DeviceInfo.iForcedSyncControlSwitch" defaultValue="1" hideRangeHint="true">
+      <option value="1" label="1"/>
+      <option value="0" label="0"/>
+    </param>
+    <param name="PTPSyncStatus" titleZh="同步状态" titleEn="Sync Status" type="string" readonly="true"
+           standardPath="Device.FAP.PTP1588.SyncStatus"/>
+    <param name="PTPProfile" titleZh="协议类型" titleEn="Profile" type="string"
+           standardPath="Device.FAP.PTP1588.Profile">
+      <option value="1588v2" label="1588v2"/>
+    </param>
+    <param name="PTPDomain" titleZh="域号" titleEn="Domain" type="string"
+           standardPath="Device.FAP.PTP1588.Domain"/>
+    <param name="PTPTransmode" titleZh="传输模式" titleEn="Transmission Mode" type="string"
+           standardPath="Device.FAP.PTP1588.Transmode">
+      <option value="L2" label="L2"/>
+      <option value="L3" label="L3"/>
+    </param>
+    <param name="PTPInterface" titleZh="接口" titleEn="Interface" type="string"
+           standardPath="Device.FAP.PTP1588.Interface">
+      <option value="eth-WAN" label="eth-WAN"/>
+      <option value="eth0" label="eth0"/>
+      <option value="eth1" label="eth1"/>
+    </param>
+    <param name="PTPUnicastMode" titleZh="单播使能" titleEn="Unicast Mode" type="string"
+           standardPath="Device.FAP.PTP1588.UnicastMode">
+      <option value="0" label="组播"/>
+      <option value="1" label="单播"/>
+    </param>
+    <param name="PTPSyncInterval" titleZh="同步请求间隔" titleEn="Sync Interval" type="string"
+           standardPath="Device.FAP.PTP1588.SyncInterval">
+      <option value="-7" label="-7"/>
+      <option value="-6" label="-6"/>
+      <option value="-5" label="-5"/>
+      <option value="-4" label="-4"/>
+      <option value="-3" label="-3"/>
+      <option value="-2" label="-2"/>
+      <option value="-1" label="-1"/>
+      <option value="0" label="0"/>
+    </param>
+    <param name="PTPDelayInterval" titleZh="时延请求间隔" titleEn="Delay Interval" type="string"
+           standardPath="Device.FAP.PTP1588.DelayInterval">
+      <option value="-7" label="-7"/>
+      <option value="-6" label="-6"/>
+      <option value="-5" label="-5"/>
+      <option value="-4" label="-4"/>
+      <option value="-3" label="-3"/>
+      <option value="-2" label="-2"/>
+      <option value="-1" label="-1"/>
+      <option value="0" label="0"/>
+    </param>
   </group>
 
        <group id="device-ipsec-control" titleZh="IPSec 配置" titleEn="IPSec Config">

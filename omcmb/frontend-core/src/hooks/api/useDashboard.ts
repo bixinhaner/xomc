@@ -10,8 +10,13 @@ import type {
   UseKPITrendComparisonV2Result,
   UseMultiKPITrendComparisonResult,
   KPILayoutPanel,
+  DashboardKPIGranularity,
 } from '../../types/dashboard';
 import { useMemo, useEffect } from 'react';
+import { useSystemTimezone, useSystemTimezoneValue } from './useSystemTimezone';
+import { fetchDeviceList } from './useDevices';
+import { nowInSystemTimezone } from '../../utils/systemTime';
+import dayjs from 'dayjs';
 
 // ============================================================================
 // 类型别名
@@ -22,9 +27,79 @@ type KPITimeSeriesParams = {
   kpi_names: string[];
   start_time: string;
   end_time: string;
+  granularity?: DashboardKPIGranularity;
+  technology?: string;
 };
 
 const api = createApiSwitchWithMock(dashboardService, dashboardApi);
+
+export function buildDashboardKPIQueryKey(params?: Partial<KPITimeSeriesParams>) {
+  return ['dashboard', 'kpi-time-series', params] as const;
+}
+
+interface DashboardKPITimeSeriesClient {
+  getKPITimeSeries(
+    kpiNames?: string[],
+    startTime?: string,
+    endTime?: string,
+    granularity?: DashboardKPIGranularity,
+    technology?: string,
+  ): Promise<DashboardChartData['kpiTimeSeries']>;
+}
+
+export function buildDashboardKPIQueryOptions(
+  params?: Partial<KPITimeSeriesParams>,
+  enabled = true,
+  client: DashboardKPITimeSeriesClient = api,
+) {
+  return {
+    queryKey: buildDashboardKPIQueryKey(params),
+    queryFn: () => client.getKPITimeSeries(
+      params?.kpi_names,
+      params?.start_time,
+      params?.end_time,
+      params?.granularity,
+      params?.technology,
+    ),
+    enabled: enabled && Boolean(params?.kpi_names?.length),
+    staleTime: 30000,
+  };
+}
+
+function dashboardNow(now: Date, systemTimezone?: string) {
+  const value = dayjs(now);
+  if (systemTimezone) {
+    const zoned = value.tz(systemTimezone);
+    if (zoned.isValid()) return zoned;
+  }
+  return value.utc();
+}
+
+export function buildDashboardDayRanges(now: Date, systemTimezone?: string) {
+  const currentEnd = dashboardNow(now, systemTimezone);
+  const currentStart = currentEnd.startOf('day');
+  const compareStart = currentStart.subtract(1, 'day');
+  return {
+    current: { start_time: currentStart.format(), end_time: currentEnd.format() },
+    compare: { start_time: compareStart.format(), end_time: currentStart.format() },
+  };
+}
+
+export function buildDashboardWeekRange(now: Date, systemTimezone?: string) {
+  const end = dashboardNow(now, systemTimezone).startOf('day');
+  const start = end.subtract(7, 'day');
+  return {
+    start_time: start.format(),
+    end_time: end.format(),
+    // 查询只取七个已完成自然日；横轴额外保留今天，让用户看清数据滚动到何处。
+    // 今天尚无 daily 桶时，图表会映射为 null，不补零也不画假点。
+    dateKeys: Array.from({ length: 8 }, (_, index) => start.add(index, 'day').format('YYYY-MM-DD')),
+  };
+}
+
+export function isDashboardBusinessTimezoneReady(systemTimezone?: string): boolean {
+  return Boolean(systemTimezone?.trim());
+}
 
 export interface DashboardDataResponse {
   summary: DashboardSummary;
@@ -40,10 +115,31 @@ export function useDashboardData() {
   });
 }
 
-export function useDashboardSummary() {
+export function useDashboardSummary(apiScope: string, userScope: string | undefined) {
   return useQuery({
-    queryKey: ['dashboard', 'summary'],
+    queryKey: ['dashboard', 'summary', apiScope, userScope],
     queryFn: () => api.getSummary(),
+    enabled: Boolean(userScope),
+  });
+}
+
+/**
+ * Dashboard 设备卡片复用设备列表的全量 stats，避免被重型 Summary 的告警、
+ * KPI 和历史趋势查询阻塞。无筛选参数时与设备列表首页统计口径及数据权限一致。
+ */
+export function useDashboardDeviceStats(apiScope: string, userScope: string | undefined) {
+  return useQuery({
+    queryKey: ['dashboard', 'device-stats', apiScope, userScope],
+    queryFn: async () => {
+      const { stats } = await fetchDeviceList({ page: 1, pageSize: 1 });
+      if (stats.online_count + stats.offline_count !== stats.total) {
+        throw new Error('device list returned incomplete page-level stats');
+      }
+      return stats;
+    },
+    enabled: Boolean(userScope),
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: 'always',
   });
 }
 
@@ -162,15 +258,12 @@ export function useKPITimeSeries(
     kpi_names?: string[];
     start_time?: string;
     end_time?: string;
+    granularity?: DashboardKPIGranularity;
+    technology?: string;
   },
   enabled = true
 ) {
-  return useQuery({
-    queryKey: ['dashboard', 'kpi-time-series', params],
-    queryFn: () => api.getKPITimeSeries(params?.kpi_names, params?.start_time, params?.end_time),
-    enabled: enabled && Boolean(params?.kpi_names?.length),
-    staleTime: 30000,
-  });
+  return useQuery(buildDashboardKPIQueryOptions(params, enabled));
 }
 
 /**
@@ -464,50 +557,40 @@ export function useKPITrendComparisonV2(
 export function useMultiKPITrendComparison(
   kpiNames: string[],
   compareWith: 'yesterday' | 'last_week' = 'yesterday',
-  enabled = true
+  enabled = true,
+  windowDateKey?: string,
+  technology?: string,
 ): UseMultiKPITrendComparisonResult {
+  const systemTimezone = useSystemTimezoneValue();
   // 1. 计算时间范围参数（支持多个 KPI）
   const { currentParams, compareParams } = useMemo(() => {
-    const now = new Date();
-    let currentStart: Date;
-    let compareStart: Date;
-    let compareEnd: Date;
-
     if (compareWith === 'yesterday') {
-      currentStart = new Date(now);
-      currentStart.setHours(0, 0, 0, 0);
-      compareStart = new Date(currentStart);
-      compareStart.setDate(compareStart.getDate() - 1);
-      compareEnd = new Date(compareStart);
-      compareEnd.setHours(23, 59, 59, 999);
-    } else {
-      const weekday = now.getDay() || 7;
-      const currentMonday = new Date(now);
-      currentMonday.setDate(now.getDate() - weekday + 1);
-      currentMonday.setHours(0, 0, 0, 0);
-      currentStart = currentMonday;
-
-      compareStart = new Date(currentMonday);
-      compareStart.setDate(compareStart.getDate() - 7);
-      compareEnd = new Date(compareStart);
-      compareEnd.setDate(compareEnd.getDate() + 6);
-      compareEnd.setHours(23, 59, 59, 999);
+      const ranges = buildDashboardDayRanges(new Date(), systemTimezone);
+      return {
+        currentParams: { kpi_names: kpiNames, technology, ...ranges.current },
+        compareParams: { kpi_names: kpiNames, technology, ...ranges.compare },
+      };
     }
+    const now = nowInSystemTimezone(systemTimezone);
+    const weekday = now.day() || 7;
+    const currentMonday = now.subtract(weekday - 1, 'day').startOf('day');
+    const compareStart = currentMonday.subtract(7, 'day');
 
     return {
       currentParams: {
         kpi_names: kpiNames,
-        start_time: currentStart.toISOString(),
-        end_time: now.toISOString(),
+        start_time: currentMonday.format(),
+        end_time: now.format(),
+        technology,
       },
       compareParams: {
         kpi_names: kpiNames,
-        start_time: compareStart.toISOString(),
-        end_time: compareEnd.toISOString(),
+        start_time: compareStart.format(),
+        end_time: currentMonday.format(),
+        technology,
       },
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kpiNames.join(','), compareWith]);
+  }, [kpiNames, compareWith, systemTimezone, windowDateKey, technology]);
 
   // 2. 两次请求获取所有 KPI 的时序数据
   const currentTimeSeries = useKPITimeSeries(currentParams, enabled);
@@ -538,6 +621,39 @@ export function useMultiKPITrendComparison(
       ...(compareTimeSeries.error ? [compareTimeSeries.error] : []),
     ],
   };
+}
+
+export function useMultiKPIWeekSeries(
+  kpiNames: string[],
+  enabled = true,
+  windowDateKey?: string,
+  technology?: string,
+) {
+  // 周窗口依赖业务自然日，必须直接订阅已鉴权的时区查询结果，不能只读可能尚未
+  // 初始化的 store 缓存，否则首次请求会回落 UTC，daily 点整体左移一天。
+  const { systemTimezone } = useSystemTimezone();
+  const window = useMemo(() => {
+    const range = buildDashboardWeekRange(new Date(), systemTimezone);
+    return { startTime: range.start_time, endTime: range.end_time, dateKeys: range.dateKeys };
+  }, [systemTimezone, windowDateKey]);
+
+  const query = useKPITimeSeries({
+    kpi_names: kpiNames,
+    start_time: window.startTime,
+    end_time: window.endTime,
+    granularity: 'daily',
+    technology,
+  }, enabled && isDashboardBusinessTimezoneReady(systemTimezone));
+
+  const data = useMemo(() => {
+    if (!query.data) return undefined;
+    return kpiNames.reduce<MultiTrendComparisonData>((acc, name) => {
+      acc[name] = calculateTrendComparison(query.data, {}, name, 'last_week');
+      return acc;
+    }, {});
+  }, [kpiNames, query.data]);
+
+  return { data, isLoading: query.isLoading, error: query.error, dateKeys: window.dateKeys };
 }
 
 // ============================================================================

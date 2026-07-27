@@ -14,6 +14,8 @@ import (
 
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
+	pmkpi "github.com/omcgo/omcgo/internal/pm/kpi"
+	pmrouter "github.com/omcgo/omcgo/internal/pm/kpi/router"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 	"github.com/omcgo/omcgo/internal/pm/resultnorm"
 )
@@ -77,7 +79,10 @@ func TestIngestViaCopy_NormalizesCounterValuesBeforeCopyIngest(t *testing.T) {
 		"C.MISSING": {IndicatorID: "C-MISSING", ReportKey: "C.MISSING", Unit: "number", StatisType: "sum"},
 	}
 
-	err := c.ingestViaCopy(ctx, trace.SpanFromContext(ctx), time.Now(), time.Now(), 123, uuid.New(), payload, content, allow)
+	err := c.ingestViaCopy(
+		ctx, trace.SpanFromContext(ctx), time.Now(), time.Now(), 123, uuid.New(),
+		payload, content, allow, make([]byte, 32),
+	)
 
 	require.NoError(t, err)
 	require.Len(t, copyIngestor.counters, 3)
@@ -85,6 +90,155 @@ func TestIngestViaCopy_NormalizesCounterValuesBeforeCopyIngest(t *testing.T) {
 	assert.Equal(t, float64(4), copyIngestor.counters[1].CounterValue)
 	assert.Equal(t, "C-MISSING", copyIngestor.counters[2].CounterName)
 	assert.True(t, math.IsNaN(copyIngestor.counters[2].CounterValue), "缺值补齐应发生在真实值规范化之后")
+}
+
+func TestIngestViaCopy_Filters15MinRowsByEnabledIndicatorsAfterKPICalculation(t *testing.T) {
+	ctx := context.Background()
+	end := time.Date(2026, 7, 6, 14, 15, 0, 0, time.UTC)
+	copyIngestor := &recordingCopyIngestor{}
+	engine := pmkpi.NewKPIEngine(nil, nil, staticKPIRouter{route: &pmrouter.KPIRoute{
+		KPIs: []pmrouter.KPIDef{{
+			IndicatorID:  "K0001",
+			Name:         "K.Enabled",
+			Formula:      "C0001/C0002*100",
+			Dependencies: []string{"C0001", "C0002"},
+			StatisType:   "pct",
+			Unit:         "%",
+		}},
+	}}, zap.NewNop())
+	c := &PMCollector{
+		kpiEngine:    engine,
+		copyIngestor: copyIngestor,
+		eventBus:     noopEventBus{},
+		logger:       zap.NewNop(),
+		enabledIndicators: fakeEnabledIndicators{set: map[string]struct{}{
+			"C0001": {},
+			"K0001": {},
+		}},
+		numberProcessLookup: func(context.Context) (string, error) {
+			return resultnorm.NumberProcessNone, nil
+		},
+	}
+
+	content := &PMFileContent{
+		CollectTime: end,
+		Counters: []model.PMCounter{
+			{
+				Time:         end,
+				DeviceID:     uuid.New(),
+				OUI:          "48BF74",
+				DeviceSN:     "SN-1",
+				CellID:       "Cellid=1",
+				CounterGroup: "C",
+				CounterName:  "C0001",
+				CounterValue: 10,
+				Granularity:  15,
+				Unit:         "number",
+				StatisType:   "sum",
+			},
+			{
+				Time:         end,
+				DeviceID:     uuid.New(),
+				OUI:          "48BF74",
+				DeviceSN:     "SN-1",
+				CellID:       "Cellid=1",
+				CounterGroup: "C",
+				CounterName:  "C0002",
+				CounterValue: 20,
+				Granularity:  15,
+				Unit:         "number",
+				StatisType:   "sum",
+			},
+		},
+	}
+	payload := &FileReceivedPayload{
+		MinIOPath:  "pm/A20260706.xml",
+		DeviceID:   uuid.NewString(),
+		DeviceOUI:  "48BF74",
+		DeviceSN:   "SN-1",
+		Carrier:    "cmcc",
+		Technology: "lte",
+	}
+	allow := map[string]CounterMeta{
+		"C.KEEP": {IndicatorID: "C0001", ReportKey: "C.KEEP", Unit: "number", StatisType: "sum"},
+		"C.DEP":  {IndicatorID: "C0002", ReportKey: "C.DEP", Unit: "number", StatisType: "sum"},
+	}
+
+	err := c.ingestViaCopy(
+		ctx, trace.SpanFromContext(ctx), time.Now(), time.Now(), 123, uuid.New(),
+		payload, content, allow, make([]byte, 32),
+	)
+
+	require.NoError(t, err)
+	require.Len(t, copyIngestor.counters, 1, "未启用依赖 counter 可参与 KPI 计算，但自身不落 15min counter 行")
+	assert.Equal(t, "C0001", copyIngestor.counters[0].CounterName)
+	require.Len(t, copyIngestor.kpis, 1)
+	assert.Equal(t, "K0001", copyIngestor.kpis[0].IndicatorID)
+	assert.InDelta(t, 50, copyIngestor.kpis[0].KPIValue, 1e-9)
+}
+
+func TestIngestViaCopy_EmptyEnabledSetWritesNoRows(t *testing.T) {
+	ctx := context.Background()
+	copyIngestor := &recordingCopyIngestor{}
+	c := &PMCollector{
+		copyIngestor:      copyIngestor,
+		eventBus:          noopEventBus{},
+		logger:            zap.NewNop(),
+		enabledIndicators: fakeEnabledIndicators{set: map[string]struct{}{}},
+	}
+	content := &PMFileContent{
+		CollectTime: time.Date(2026, 7, 6, 14, 15, 0, 0, time.UTC),
+		Counters: []model.PMCounter{{
+			CounterName:  "C0001",
+			CounterValue: 1,
+			Unit:         "number",
+			StatisType:   "sum",
+		}},
+	}
+	payload := &FileReceivedPayload{MinIOPath: "pm/A20260706.xml", DeviceSN: "SN-1", Carrier: "cmcc", Technology: "lte"}
+	allow := map[string]CounterMeta{
+		"C0001": {IndicatorID: "C0001", ReportKey: "C0001", Unit: "number", StatisType: "sum"},
+	}
+
+	err := c.ingestViaCopy(
+		ctx, trace.SpanFromContext(ctx), time.Now(), time.Now(), 123, uuid.New(),
+		payload, content, allow, make([]byte, 32),
+	)
+
+	require.NoError(t, err)
+	assert.True(t, copyIngestor.called, "空启用集代表全部禁用，应完成文件 marker 写入而不是跳过 CopyIngest")
+	assert.Empty(t, copyIngestor.counters)
+	assert.Empty(t, copyIngestor.kpis)
+}
+
+func TestIngestViaCopy_EnabledIndicatorLookupFailureFailsFile(t *testing.T) {
+	ctx := context.Background()
+	copyIngestor := &recordingCopyIngestor{}
+	c := &PMCollector{
+		copyIngestor:      copyIngestor,
+		eventBus:          noopEventBus{},
+		logger:            zap.NewNop(),
+		enabledIndicators: fakeEnabledIndicators{err: assert.AnError},
+	}
+	content := &PMFileContent{
+		CollectTime: time.Date(2026, 7, 6, 14, 15, 0, 0, time.UTC),
+		Counters: []model.PMCounter{{
+			CounterName: "C0001",
+			Unit:        "number",
+			StatisType:  "sum",
+		}},
+	}
+	payload := &FileReceivedPayload{MinIOPath: "pm/A20260706.xml", DeviceSN: "SN-1", Carrier: "cmcc", Technology: "lte"}
+
+	err := c.ingestViaCopy(
+		ctx, trace.SpanFromContext(ctx), time.Now(), time.Now(), 123, uuid.New(),
+		payload, content, nil, make([]byte, 32),
+	)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "lookup enabled PM indicators")
+	assert.False(t, copyIngestor.called)
+	assert.Empty(t, copyIngestor.counters)
 }
 
 func TestNormalizeResults_NormalizesKPIValuesAndFailsMissingMetadata(t *testing.T) {
@@ -113,12 +267,24 @@ func TestNormalizeResults_NormalizesKPIValuesAndFailsMissingMetadata(t *testing.
 	assert.Contains(t, err.Error(), "C-MISSING")
 }
 
+func TestNormalizeResults_PreservesUnknownCounterWithoutMetadata(t *testing.T) {
+	c := &PMCollector{}
+	counters := []model.PMCounter{{CounterName: "Vendor.New.Counter", CounterValue: 12.345}}
+
+	err := c.normalizeResults(context.Background(), counters, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, 12.345, counters[0].CounterValue)
+}
+
 type recordingCopyIngestor struct {
+	called   bool
 	counters []model.PMCounter
 	kpis     []model.KPIValue
 }
 
 func (r *recordingCopyIngestor) CopyIngest(_ context.Context, _ metrics.FileMarker, counters []model.PMCounter, kpis []model.KPIValue) (bool, error) {
+	r.called = true
 	r.counters = append([]model.PMCounter(nil), counters...)
 	r.kpis = append([]model.KPIValue(nil), kpis...)
 	return false, nil
@@ -141,3 +307,21 @@ func (noopEventBus) Close() error { return nil }
 type noopSubscription struct{}
 
 func (noopSubscription) Unsubscribe() error { return nil }
+
+type fakeEnabledIndicators struct {
+	set map[string]struct{}
+	err error
+}
+
+func (f fakeEnabledIndicators) LookupEnabledIndicators(context.Context, string) (map[string]struct{}, error) {
+	return f.set, f.err
+}
+
+type staticKPIRouter struct {
+	route *pmrouter.KPIRoute
+	err   error
+}
+
+func (s staticKPIRouter) LookupByDevice(context.Context, string) (*pmrouter.KPIRoute, error) {
+	return s.route, s.err
+}

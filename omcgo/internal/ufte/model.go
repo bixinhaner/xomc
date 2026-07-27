@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/omcgo/omcgo/internal/core/appconfig"
 	coremodel "github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/software"
 )
@@ -75,24 +76,24 @@ type Task struct {
 	// 与 DeviceItem.ProductName 同口径；解析不到（task.product_class 是「4G eNB」这种宽泛
 	// 类别 / 未注册）时由 mapTask 回退查任一子任务设备的 productClass 再解析，仍无果则空串
 	// → 前端 fallback 到 ProductType。修复 #682：任务列表「产品名称」误显示 firmware.product_class。
-	ProductName   string `json:"productName,omitempty"`
-	IsKeepConfig  bool   `json:"isKeepConfig,omitempty"`
-	Status        string `json:"status"`
-	Result        string `json:"result,omitempty"`
-	Progress      int    `json:"progress"`
-	TotalCount    int    `json:"totalCount"`
-	SuccessCount  int    `json:"successCount"`
-	FailCount     int    `json:"failCount"`
-	CurrentStep   string `json:"currentStep"`
-	ExecutionMode string `json:"executionMode"`
-	CreateUser    string `json:"createUser"`
-	CreatedAt     string `json:"createdAt"`
+	ProductName   string     `json:"productName,omitempty"`
+	IsKeepConfig  bool       `json:"isKeepConfig,omitempty"`
+	Status        string     `json:"status"`
+	Result        string     `json:"result,omitempty"`
+	Progress      int        `json:"progress"`
+	TotalCount    int        `json:"totalCount"`
+	SuccessCount  int        `json:"successCount"`
+	FailCount     int        `json:"failCount"`
+	CurrentStep   string     `json:"currentStep"`
+	ExecutionMode string     `json:"executionMode"`
+	CreateUser    string     `json:"createUser"`
+	CreatedAt     *time.Time `json:"createdAt,omitempty"`
 	// StartedAt 任务真正开始下发（状态首次进入 in_progress 时由 PG repo 自动写入 upgrade_tasks.started_at）；未开始时为空 → JSON omitempty 不输出。
-	StartedAt string `json:"startedAt,omitempty"`
+	StartedAt *time.Time `json:"startedAt,omitempty"`
 	// EndedAt 任务到达终态（ended / 含成功/失败/终止）时由 PG repo 自动写入 upgrade_tasks.ended_at；未结束时为空。
-	EndedAt       string `json:"endedAt,omitempty"`
-	ScheduledAt   string `json:"scheduledAt,omitempty"`
-	OperatorScope string `json:"operatorScope"`
+	EndedAt       *time.Time `json:"endedAt,omitempty"`
+	ScheduledAt   *time.Time `json:"scheduledAt,omitempty"`
+	OperatorScope string     `json:"operatorScope"`
 }
 
 type DeviceItem struct {
@@ -118,29 +119,31 @@ type DeviceItem struct {
 	// DownloadURL 是 CPE 上传完成、ACS 落 MinIO 后的 1h presigned GET 链接；
 	// 仅当子任务已 ended 且 backup_restore_file 元数据存在时填充，否则留空。
 	DownloadURL string `json:"downloadUrl,omitempty"`
+	// FileDeleted 表示 TargetFile 对应的日志文件已被站点日志配额软删。
+	// 前端仍展示文件名，但不可点击下载，并提示清理原因。
+	FileDeleted bool   `json:"fileDeleted,omitempty"`
 	Status      string `json:"status"`
 	Result      string `json:"result,omitempty"`
 	Progress    int    `json:"progress"`
 	// StartedAt 子任务首次进入执行态（downloading/uploading/rebooting/verifying）时由 PG repo
 	// 写入 upgrade_sub_tasks.started_at；未开始为空 → JSON omitempty 不输出。
 	// 三皮肤设备列表「开始时间」列展示。
-	StartedAt string `json:"startedAt,omitempty"`
+	StartedAt *time.Time `json:"startedAt,omitempty"`
 	// EndedAt 子任务到达终态（completed/failed/terminated）时由 PG repo 写入
 	// upgrade_sub_tasks.completed_at；未结束为空。三皮肤设备列表「结束时间」列展示。
-	EndedAt string `json:"endedAt,omitempty"`
+	EndedAt *time.Time `json:"endedAt,omitempty"`
 	// LastReportAt 仅在子任务到达上报成功终态（ended）时填 sub_task.updated_at；
 	// 历史字段，CSV 导出 / 北向 API 仍依赖，前端三皮肤设备列表已改用 StartedAt + EndedAt
 	// 展示，不再直接用本字段（见 issue #655）。
-	LastReportAt string `json:"lastReportAt"`
+	LastReportAt *time.Time `json:"lastReportAt,omitempty"`
 	// CreatedAt 是设备子任务的创建时刻（设备加入任务的时间），仅用于列表稳定排序。
 	// 不能用 LastReportAt 排序：它只在上报成功终态才有值（见 mapDeviceItem / issue #195），
 	// 未上报设备为空串，倒序会把新建任务的设备挤到列表最后。
-	CreatedAt     string `json:"createdAt"`
-	OperatorScope string `json:"operatorScope"`
-	FailureReason string `json:"failureReason,omitempty"`
+	CreatedAt     *time.Time `json:"createdAt,omitempty"`
+	OperatorScope string     `json:"operatorScope"`
+	FailureReason string     `json:"failureReason,omitempty"`
 	// FailureDetail 是设备失败时的详细错误描述（含 FaultCode + FaultString 原文），
-	// 比如 TC 失败时填："Upgrade failed, there is FaultString in TransferComplete msg.
-	// FaultCode: 0, FaultString: httpUpload OM Http Put Upload stat file error"。
+	// 比如 TC 失败时填："FaultCode: 0, FaultString: httpUpload OM Http Put Upload stat file error"。
 	// 前端「设备失败信息」列展示原文，比单看 i18n 化的 FailureReason code（如 "TC_FAULT"）
 	// 更便于排查厂商侧故障。
 	FailureDetail string `json:"failureDetail,omitempty"`
@@ -192,19 +195,19 @@ type TaskTypeWriteRequest struct {
 }
 
 type TaskListFilter struct {
-	Status   string `form:"status"`
-	TypeCode string `form:"typeCode"`
-	Keyword  string `form:"keyword"`
-	Category string `form:"category"`
+	Status   string `form:"status"`   // 任务状态：pending、in_progress、suspended、ended。
+	TypeCode string `form:"typeCode"` // 任务类型，如 RUNTIME_LOG_COLLECT。
+	Keyword  string `form:"keyword"`  // 匹配任务名称、类型显示名或产品类型。
+	Category string `form:"category"` // 业务分类，如日志收集 station_log。
 	Page     int    `form:"page"`
 	PageSize int    `form:"page_size"`
 }
 
 type DeviceListFilter struct {
-	Status      string `form:"status"`
-	TypeCode    string `form:"typeCode"`
-	Keyword     string `form:"keyword"`
-	Category    string `form:"category"`
+	Status      string `form:"status"`   // 设备执行状态；failed 用于定位失败记录。
+	TypeCode    string `form:"typeCode"` // 任务类型，如 RUNTIME_LOG_COLLECT。
+	Keyword     string `form:"keyword"`  // 匹配任务名、设备名、设备 SN 或产品类型。
+	Category    string `form:"category"` // 业务分类，如日志收集 station_log。
 	ProductType string `form:"productType"`
 	// ProductName #524：设备列表筛选改按产品名（DeviceItem.ProductName 由 mapDeviceItem
 	// 经 productNameLookup 回填）。前端「产品名称」下拉传此参数；与 ProductType(productClass)
@@ -458,12 +461,12 @@ func builtInTaskTypes() []TaskType {
 			// "X_COM_Log.FaultLogURL"，CPE 回 "Empty parameter list" 因为该路径在 CPE 数据
 			// 模型里不存在，已对齐字典。
 			URLTemplate:            "Device.DeviceInfo.FaultLogURL",
-			TargetFileNameTemplate: "fault-{task_id8}-{sn}.tar.gz",
-			FileNameTemplate:       "fault-{task_id8}-{sn}.tar.gz",
+			TargetFileNameTemplate: "fault-{sn}-{timestamp}.tar.gz",
+			FileNameTemplate:       "fault-{sn}-{timestamp}.tar.gz",
 			// TransportPath 是 SPV 下发给 CPE 的 URL 路径模板。{id} = 主任务 UUID（与
-			// 文件名 fault-{task_id8}-{sn}.tar.gz 的 task_id8 同源；ACS upload handler
-			// 用它做 task 子目录隔离同设备多次任务）；{sn} = 设备 SN；{fileName} 留空
-			// 让 CPE 自行决定上传名。
+			// ACS upload handler 发布事件时写入的 task_id 同源）；{sn} = 设备 SN；
+			// {fileName} 留空让 CPE 自行决定上传名。ACS 落 MinIO 前会二次命名为
+			// fault-{sn}-{yyyyMMddHHmmssSSS}.tar.gz，避免额外 taskId8 目录。
 			TransportPath:    "/smallcell/FileUploadService?fileType=RL&id={id}&sn={sn}&fileName=",
 			LastEditor:       "system",
 			UpdatedAt:        now,
@@ -538,10 +541,10 @@ func builtInTaskTypes() []TaskType {
 			FileType:               "10 <OUI> Configuration File",
 			FileTypeLabel:          "10 <OUI> Configuration File",
 			FileTypeEditable:       false,
-			URLTemplate:            "config_backup/{object_path}",
+			URLTemplate:            "config-backup/{object_path}",
 			TargetFileNameTemplate: "{file_name}",
 			FileNameTemplate:       "{file_name}",
-			TransportPath:          "/smallcell/FileDownloadService/config_backup/{object_path}",
+			TransportPath:          "/smallcell/FileDownloadService/config-backup/{object_path}",
 			LastEditor:             "system",
 			UpdatedAt:              now,
 			// 走 LogCollect 桶以便复用 ufte.loadAllTasks 的 typeSet 过滤，
@@ -768,9 +771,8 @@ func progressForDeviceStatus(status string) int {
 }
 
 // renderUFTEFileNameTemplate replaces {task_id8} 与 {sn} 占位符为运行时实际值。
-// 与 software/executor.go ExecuteOneUpload 渲染逻辑保持完全一致——后者把渲染结果
-// 拼到 Upload URL filename= 参数，CPE 上传时 ACS 就用这个名字落 MinIO。
-// 因此这里的渲染产物 = backup_restore_file.file_name 自然键，可用于反查元数据。
+// 运行日志、配置备份等同步模板可用它预览文件名；FAULT_LOG_COLLECT 完成后改从
+// backup_restore_file 按 (sn, task_id) 反查 ACS 二次命名的真实落地文件名。
 func renderUFTEFileNameTemplate(tmpl string, taskID uuid.UUID, sn string) string {
 	if tmpl == "" {
 		return ""
@@ -810,6 +812,8 @@ func materializeTaskTypes(stored []TaskType) []TaskType {
 		item.StepChain = normalizeStringSlice(item.StepChain)
 		item.PlatformScope = normalizeStringSlice(item.PlatformScope)
 		item.Products = normalizeStringSlice(item.Products)
+		item.URLTemplate = appconfig.NormalizeConfigBackupReference(item.URLTemplate)
+		item.TransportPath = appconfig.NormalizeConfigBackupReference(item.TransportPath)
 		item.FirmwareFileType = normalizeTaskTypeFirmwareFileType(item.RPCType, item.FirmwareFileType, item.FileType)
 		if base, ok := defaultByCode[item.TypeCode]; ok {
 			item.BuiltIn = item.BuiltIn || base.BuiltIn

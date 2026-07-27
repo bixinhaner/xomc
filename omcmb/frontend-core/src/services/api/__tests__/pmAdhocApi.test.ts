@@ -12,10 +12,15 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// 用 vi.hoisted 让 mock 工厂能安全引用 getMock/deleteMock（vi.mock 被提升到文件顶部）。
-const { getMock, deleteMock } = vi.hoisted(() => ({ getMock: vi.fn(), deleteMock: vi.fn() }));
+// 用 vi.hoisted 让 mock 工厂能安全引用 mock fn（vi.mock 被提升到文件顶部）。
+const { getMock, postMock, patchMock, deleteMock } = vi.hoisted(() => ({
+  getMock: vi.fn(),
+  postMock: vi.fn(),
+  patchMock: vi.fn(),
+  deleteMock: vi.fn(),
+}));
 vi.mock('../../http', () => ({
-  default: { get: getMock, post: vi.fn(), patch: vi.fn(), delete: deleteMock },
+  default: { get: getMock, post: postMock, patch: patchMock, delete: deleteMock },
 }));
 
 import { pmAdhocApi } from '../pmAdhocApi';
@@ -23,8 +28,40 @@ import { pmAdhocApi } from '../pmAdhocApi';
 beforeEach(() => {
   getMock.mockReset();
   getMock.mockResolvedValue({ data: { items: [], total: 0 } });
+  postMock.mockReset();
+  postMock.mockResolvedValue({ data: { id: 'created-task' } });
+  patchMock.mockReset();
+  patchMock.mockResolvedValue({ data: { id: 'updated-task' } });
   deleteMock.mockReset();
   deleteMock.mockResolvedValue({ data: { deleted: true } });
+});
+
+describe('pmAdhocApi.create / update — 可见性字段透传', () => {
+  it('create 将 public visibility 发给后端', async () => {
+    await pmAdhocApi.create({
+      name: '公开聚合',
+      mode: 'oneshot',
+      deviceSns: [],
+      metricPaths: ['K0001'],
+      granularities: ['hourly'],
+      visibility: 'public',
+    });
+
+    const [url, payload] = postMock.mock.calls[0];
+    expect(url).toBe('/pm/adhoc/tasks');
+    expect(payload.visibility).toBe('public');
+  });
+
+  it('update 将 private visibility 发给后端', async () => {
+    await pmAdhocApi.update('task-1', {
+      metricPaths: ['K0001'],
+      visibility: 'private',
+    });
+
+    const [url, payload] = patchMock.mock.calls[0];
+    expect(url).toBe('/pm/adhoc/tasks/task-1');
+    expect(payload.visibility).toBe('private');
+  });
 });
 
 describe('pmAdhocApi.results — 维度子集过滤 query（手动 snake_case，CSV 形态）', () => {

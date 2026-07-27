@@ -1,27 +1,26 @@
 package provision
 
-// sync_pathb_expand.go - Path B 同步的 instance-level 展开。
+// sync_pathb_expand.go - Path B 同步的大对象 5MB payload 保护。
 //
 // 背景: Path B 把 storable 前缀整批 GPV 入队让 CPE 一次返回某对象全部实例
-// (省去 GPN)。但部分对象(典型: DeviceGSM.Bts. 254 实例 × 70 字段)单次响应
+// (省去 GPN)。此前部分对象(典型: DeviceGSM.Bts. 254 实例 × 70 字段)单次响应
 // ParameterValueStruct 数量达 17791 项,序列化进 NATS 事件 ~1.5MB,超过
 // NATS 默认 max_payload=1MB → publish 直接失败,整条事件丢弃,订阅者
 // (device-rpc-resp-sub / provision) 收不到 → device_parameters 一条不落 →
 // 前端 BTS 选择器永远显示空。
 //
-// 治本方案: 对估算"单 prefix 响应字节数 > 阈值"的 object prefix,在入队前
-// 展开成 instance-level prefix 列表(["DeviceGSM.Bts.1.", "DeviceGSM.Bts.2.",
-// ..., "DeviceGSM.Bts.N."]),每个 instance prefix 单独入队 GPV task。CPE 收到
-// instance prefix 后只返回该实例的 ~70 字段(~5KB),稳稳在 1MB 之内。
+// 当前方案: NATS max_payload 提升到 5MB,Path B 优先保留 object-level prefix,
+// 让 CPE 一次返回对象下所有实例。只有估算单 prefix 响应超过 5MB 时,才退回
+// instance-level prefix 列表(["DeviceGSM.Bts.1.", "DeviceGSM.Bts.2.", ...])
+// 作为异常保护。
 //
 // hint 估算策略(优先级从高到低):
 //  1. DB 已有 max instance 号(滚动学习,首次同步后越来越准)
 //  2. 无历史实例号时使用 hintFloor 兜底
 //  3. 硬上限 maxHintCap=512 (防 estimate 异常膨胀)
 //
-// DeviceGSM.Bts.0.* 是站级参数,不是 BTS 实例。GSM BTS 在没有历史实例号时按设备
-// 支持的最大 BTS 数展开,并由 buildGPVBatches 按 NATS 预算分组获取,
-// 避免整对象 GPV 大包超过 NATS max_payload。
+// DeviceGSM.Bts.0.* 是站级参数,不是 BTS 实例。GSM BTS 在 5MB 预算内保持整对象
+// GPV,避免 1..256 实例分批造成同步积压。
 //
 // 弱化语义(Phase 1): 如果实例从 CPE 物理移除(如 BTS.5 下架),DB 残留 Bts.5 不会
 // 被自动删除(因为 instance-level reconcile 范围被限定到当前实例内部)。前端会
@@ -46,20 +45,16 @@ const (
 	avgFieldBytes = 60
 
 	// expandThreshold: 单 object prefix 估算响应字节数超过此阈值即触发展开。
-	// NATS 默认 max_payload=1MB,留 ~40% 给事件 envelope(headers + meta) 后实际事件
-	// 上限 ~600KB。比这个再小没必要(标量批 50 项 × 60B = 3KB,远未到阈值)。
-	expandThreshold = 600 * 1024
+	// 对齐 NATS max_payload=5MB。DeviceGSM.Bts. 254/256 实例的典型响应约
+	// 1.5MB,应保持一次整对象同步。
+	expandThreshold = 5 * 1024 * 1024
 
 	// hintFloor: 首次同步无 DB 历史时,instance 展开数兜底值。
 	//
 	// 取值 256 来源:
 	//  - BSC 设备支持的最大 BTS 实例数 256,首次同步无历史实例号时必须能覆盖;
-	//  - 历史曾用 32,导致 BSC `DeviceGSM.Bts.` cold-start estBytes ≈ 96KB << 600KB
-	//    阈值 → 不展开 → CPE 一次返回 ~1.5MB SOAP body → ACS publishRPCResponseEvent
-	//    触发 NATS `maximum payload exceeded` → 事件丢失 → device_parameters 无 BTS
-	//    实例参数 → 前端 BSC QuickSettings 临区/TRX 空白(死锁: DB 永远学不到 hint);
-	//  - 展开后的 DeviceGSM.Bts.{1..256}. 会由 buildGPVBatches 按响应 payload 预算
-	//    分组获取,不存在的实例由 ACS 9005 恢复逻辑容错。
+	//  - 若未来对象估算超过 5MB 需要展开,这个值仍作为 cold-start 覆盖范围;
+	//  - 不存在的实例由 ACS 9005 恢复逻辑容错。
 	hintFloor = 256
 
 	// maxHintCap: instance 展开数硬上限,防 DB 历史异常(如残留古老脏数据)导致估算

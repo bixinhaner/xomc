@@ -5,6 +5,7 @@ import { normalizePmMetricValue } from '../utils/pmMetricValue';
  */
 
 export type AdhocMode = 'oneshot' | 'continuous';
+export type AdhocVisibility = 'private' | 'public';
 
 /**
  * 聚合维度（T-0185 扩展至 6 维，对齐后端 binding oneof）：
@@ -47,6 +48,7 @@ export interface AdhocTask {
   isBuiltin: boolean;
   // 非持续型过期天数（T-0182，默认 60）
   expireDays: number;
+  visibility: AdhocVisibility;
   status: AdhocStatus;
   progress: number;
   creator: string;
@@ -63,7 +65,8 @@ export interface CreateAdhocTaskInput {
   cronExpr?: string;
   deviceSns: string[];
   metricPaths: string[];
-  granularities: string[];
+  /** Fixed by the service to hourly/daily/weekly/monthly. */
+  granularities?: string[];
   // T-0185：window 仅 oneshot 必填；continuous 不传 → 后端开窗滚动聚合。
   windowStart?: string;
   windowEnd?: string;
@@ -71,6 +74,7 @@ export interface CreateAdhocTaskInput {
   technology?: string;
   isBuiltin?: boolean;
   expireDays?: number;
+  visibility?: AdhocVisibility;
   // T-0193 小区/PLMN 白名单（完整 object_ldn 字符串数组）。空/缺 = 不传 → 全小区（现状语义）。
   objectLdns?: string[];
 }
@@ -86,6 +90,7 @@ export interface UpdateAdhocTaskInput {
   deviceSns?: string[];
   metricPaths: string[];
   granularities?: string[];
+  visibility?: AdhocVisibility;
   objectLdns?: string[];
   windowStart?: string;
   windowEnd?: string;
@@ -128,6 +133,9 @@ export interface AdhocResultRow {
   // device_group 任务才有 deviceGroupName；缺失则空，前端图例回退 id 前 8 位）。
   productName?: string;
   deviceGroupName?: string;
+  taskVersionId?: string;
+  complete?: boolean;
+  missingSlots?: number;
 }
 
 /**
@@ -179,6 +187,7 @@ export interface BackendAdhocTask {
   technology?: string;
   is_builtin?: boolean;
   expire_days?: number;
+  visibility?: string;
   status: string;
   progress: number;
   creator: string;
@@ -208,6 +217,9 @@ export interface BackendAdhocResultRow {
   // PM-线名解析：后端读时 JOIN 解析出的可读名（缺失则 omitempty 不下发）。
   product_name?: string;
   device_group_name?: string;
+  task_version_id?: string;
+  complete?: boolean;
+  missing_slots?: number;
 }
 
 export interface BackendAdhocTaskRun {
@@ -261,6 +273,7 @@ export function mapBackendAdhocTask(b: BackendAdhocTask): AdhocTask {
     technology: b.technology,
     isBuiltin: b.is_builtin ?? false,
     expireDays: b.expire_days ?? 60,
+    visibility: b.visibility === 'public' ? 'public' : 'private',
     status: b.status as AdhocStatus,
     progress: b.progress,
     creator: b.creator,
@@ -289,5 +302,8 @@ export function mapBackendAdhocResult(b: BackendAdhocResultRow): AdhocResultRow 
     objectLdn: b.object_ldn || undefined,
     productName: b.product_name || undefined,
     deviceGroupName: b.device_group_name || undefined,
+    taskVersionId: b.task_version_id || undefined,
+    complete: b.complete ?? false,
+    missingSlots: b.missing_slots ?? 0,
   };
 }

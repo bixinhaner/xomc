@@ -30,7 +30,11 @@ import type {
   FlatGroupTreeResponse,
   SearchCommand,
 } from '../../types/mmlConsole';
-import type { MMLTask } from '../../types/mml';
+import type { MMLCustomCommandPathDef, MMLTask } from '../../types/mml';
+import {
+  MML_CONSOLE_SUB_FIELDS_QUERY_KEY,
+  MML_CUSTOM_COMMAND_PATHS_QUERY_KEY,
+} from './mmlQueryKeys';
 
 /**
  * 命令分组树。
@@ -44,12 +48,13 @@ import type { MMLTask } from '../../types/mml';
 export function useGroupTree(
   root?: string,
   lang: string = 'zh-CN',
-  productClass?: string
+  productClass?: string,
+  deviceKey?: string,
 ): ReturnType<typeof useQuery<GroupTreeNode[]>> {
-  // T-0172: productClass 加入 queryKey 让设备/产品切换时自动重取
+  // T-0172/T-0170: 产品/设备上下文加入 queryKey，切换设备时重取同源过滤树。
   return useQuery({
-    queryKey: ['mml', 'console', 'group-tree', root ?? '', lang, productClass ?? ''],
-    queryFn: () => mmlApi.buildGroupTree(root, lang, productClass),
+    queryKey: ['mml', 'console', 'group-tree', root ?? '', lang, productClass ?? '', deviceKey ?? ''],
+    queryFn: () => mmlApi.buildGroupTree(root, lang, productClass, deviceKey),
     staleTime: 30 * 60 * 1000,
   });
 }
@@ -62,11 +67,13 @@ export function useGroupTree(
  * staleTime 同为 30min。
  */
 export function useGroupTreeFlat(
-  lang: string = 'zh-CN'
+  lang: string = 'zh-CN',
+  productClass?: string,
+  deviceKey?: string,
 ): ReturnType<typeof useQuery<FlatGroupTreeResponse>> {
   return useQuery({
-    queryKey: ['mml', 'console', 'group-tree', 'flat', lang],
-    queryFn: () => mmlApi.buildGroupTreeFlat(lang),
+    queryKey: ['mml', 'console', 'group-tree', 'flat', lang, productClass ?? '', deviceKey ?? ''],
+    queryFn: () => mmlApi.buildGroupTreeFlat(lang, productClass, deviceKey),
     staleTime: 30 * 60 * 1000,
   });
 }
@@ -80,12 +87,30 @@ export function useGroupTreeFlat(
 export function useCommandSubFields(
   commandId: string | undefined,
   lang: string = 'zh-CN',
-  deviceKey?: string
+  deviceKey?: string,
+  productClass?: string,
 ): ReturnType<typeof useQuery<SubFieldDef[]>> {
   return useQuery({
-    // T-0170: queryKey 含 deviceKey 让缓存按设备隔离 — 切设备会重新拉对应 paramModel 的 sub_field
-    queryKey: ['mml', 'console', 'sub-fields', commandId ?? '', lang, deviceKey ?? ''],
-    queryFn: () => mmlApi.getCommandSubFields(commandId!, lang, deviceKey),
+    // T-0170: queryKey 含设备/产品上下文，让切换目标后重新拉对应支持集合的 sub_field。
+    queryKey: [
+      ...MML_CONSOLE_SUB_FIELDS_QUERY_KEY,
+      commandId ?? '',
+      lang,
+      deviceKey ?? '',
+      productClass ?? '',
+    ],
+    queryFn: () => mmlApi.getCommandSubFields(commandId!, lang, deviceKey, productClass),
+    staleTime: 30 * 60 * 1000,
+    enabled: Boolean(commandId),
+  });
+}
+
+export function useCustomCommandPaths(
+  commandId?: string,
+): ReturnType<typeof useQuery<MMLCustomCommandPathDef[]>> {
+  return useQuery({
+    queryKey: [...MML_CUSTOM_COMMAND_PATHS_QUERY_KEY, commandId ?? ''],
+    queryFn: () => mmlApi.getTemplatePaths(commandId!),
     staleTime: 30 * 60 * 1000,
     enabled: Boolean(commandId),
   });

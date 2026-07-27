@@ -99,26 +99,8 @@ func (r *Registry) GetByProduct(ctx context.Context, productID uuid.UUID, swVers
 		return nil, ErrProductGetterUnset
 	}
 
-	// Step 1: discovered（L1 → L2 → DB）
-	discovered, err := r.loadDiscovered(ctx, productID, swVersion)
-	if err != nil {
-		return nil, err
-	}
-	if len(discovered) > 0 {
-		r.metrics.lookupDiscovered()
-		// 反查 product 仅为回填 ParamModelID，便于上游链路追踪。
-		// product 不存在或 paramModelID 为 nil 都不阻塞 discovered 路径。
-		paramModelID := r.lookupParamModelID(ctx, productID)
-		return &MappingSet{
-			ProductID:       productID,
-			ParamModelID:    paramModelID,
-			SoftwareVersion: swVersion,
-			Source:          MappingSourceDiscovered,
-			Mappings:        discovered,
-		}, nil
-	}
-
-	// Step 2: 降级 default。需先反查 product.ParamModelID
+	// 模型总开关必须在 discovered/default 的 L1/L2 缓存之前检查，否则去激活后
+	// 已缓存的映射仍可被设备翻译和 MML 使用。
 	prod, err := r.products.GetProductByID(ctx, productID)
 	if err != nil {
 		return nil, fmt.Errorf("lookup product %s: %w", productID, err)
@@ -131,7 +113,27 @@ func (r *Registry) GetByProduct(ctx context.Context, productID uuid.UUID, swVers
 		r.metrics.lookupMiss()
 		return nil, ErrNoParamModel
 	}
+	if err := r.requireActiveParamModel(ctx, *prod.ParamModelID); err != nil {
+		return nil, err
+	}
 
+	// Step 1: discovered（L1 → L2 → DB）
+	discovered, err := r.loadDiscovered(ctx, productID, swVersion)
+	if err != nil {
+		return nil, err
+	}
+	if len(discovered) > 0 {
+		r.metrics.lookupDiscovered()
+		return &MappingSet{
+			ProductID:       productID,
+			ParamModelID:    *prod.ParamModelID,
+			SoftwareVersion: swVersion,
+			Source:          MappingSourceDiscovered,
+			Mappings:        discovered,
+		}, nil
+	}
+
+	// Step 2: 降级 default。
 	defaults, err := r.loadDefault(ctx, *prod.ParamModelID)
 	if err != nil {
 		return nil, err
@@ -163,6 +165,9 @@ func (r *Registry) GetByParamModel(ctx context.Context, paramModelID uuid.UUID) 
 	defer func() { r.metrics.lookupDuration.Observe(time.Since(t0).Seconds()) }()
 
 	r.ensureFresh(ctx)
+	if err := r.requireActiveParamModel(ctx, paramModelID); err != nil {
+		return nil, err
+	}
 
 	defaults, err := r.loadDefault(ctx, paramModelID)
 	if err != nil {
@@ -178,6 +183,18 @@ func (r *Registry) GetByParamModel(ctx context.Context, paramModelID uuid.UUID) 
 		Source:       MappingSourceDefault,
 		Mappings:     defaults,
 	}, nil
+}
+
+func (r *Registry) requireActiveParamModel(ctx context.Context, paramModelID uuid.UUID) error {
+	active, err := r.repo.IsParamModelActive(ctx, paramModelID)
+	if err != nil {
+		return fmt.Errorf("check param model %s active: %w", paramModelID, err)
+	}
+	if !active {
+		r.metrics.lookupMiss()
+		return ErrInactiveParamModel
+	}
+	return nil
 }
 
 // Translator 是 GetByProduct + NewTranslator 的组合捷径；调用方典型用法。
@@ -369,17 +386,4 @@ func (r *Registry) loadDefault(ctx context.Context, paramModelID uuid.UUID) ([]P
 			zap.Int("count", len(rows)))
 	}
 	return rows, nil
-}
-
-// lookupParamModelID 反查 product.ParamModelID；失败或为 nil 时返回 uuid.Nil。
-// 仅供日志/元数据回填，不影响 discovered 命中路径。
-func (r *Registry) lookupParamModelID(ctx context.Context, productID uuid.UUID) uuid.UUID {
-	if r.products == nil {
-		return uuid.Nil
-	}
-	prod, err := r.products.GetProductByID(ctx, productID)
-	if err != nil || prod == nil || prod.ParamModelID == nil {
-		return uuid.Nil
-	}
-	return *prod.ParamModelID
 }

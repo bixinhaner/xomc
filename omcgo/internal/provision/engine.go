@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,6 +52,16 @@ type deviceCacheInvalidator interface {
 	Delete(ctx context.Context, sn string)
 }
 
+// RegisteredDeviceSyncStarter submits the Issue #148 new-device trigger
+// directly to the durable parameter-sync data plane.
+type RegisteredDeviceSyncStarter interface {
+	StartRegisteredDeviceSync(
+		ctx context.Context,
+		dev *model.Device,
+		sourceID string,
+	) error
+}
+
 type ProvisioningEngine struct {
 	taskRepo           ProvisioningTaskRepository
 	deviceService      *device.DeviceService
@@ -61,16 +72,18 @@ type ProvisioningEngine struct {
 	deduper            *event.Deduper
 	modelUploadService *ModelUploadService
 	syncService        *SyncService
+	registeredSync     RegisteredDeviceSyncStarter
 	productRegistry    productClassMatcher
 	productRepo        productBinder
 	// deviceCache 在 lazy bind 写库成功后失效 SN 缓存。
 	// nil 表示禁用（不影响主流程，仅留下 stale 缓存的可能 — admin 改 productClass 时
 	// 见 §C C2 修复路径）。T-0176-PR-D 注入。
-	deviceCache deviceCacheInvalidator
-	redisClient redis.UniversalClient
-	metrics     *Metrics
-	config      appconfig.ProvisionConfig
-	logger      *zap.Logger
+	deviceCache          deviceCacheInvalidator
+	redisClient          redis.UniversalClient
+	metrics              *Metrics
+	config               appconfig.ProvisionConfig
+	paramSyncRoutingMode string
+	logger               *zap.Logger
 
 	gpvWorkersOnce sync.Once
 	gpvWorkerChans []chan gpvWorkItem
@@ -107,6 +120,29 @@ func (e *ProvisioningEngine) SetModelUploadService(svc *ModelUploadService) {
 // SetSyncService sets the sync service for parameter synchronization.
 func (e *ProvisioningEngine) SetSyncService(svc *SyncService) {
 	e.syncService = svc
+}
+
+func (e *ProvisioningEngine) SetRegisteredDeviceSyncStarter(starter RegisteredDeviceSyncStarter) {
+	e.registeredSync = starter
+}
+
+// SetParamSyncRoutingMode configures the P0 routing gate. Empty keeps the
+// legacy-compatible behavior for tests and older local configurations; a
+// production deployment should explicitly use closed, durable_shadow, or
+// durable before enabling the new request path.
+func (e *ProvisioningEngine) SetParamSyncRoutingMode(mode string) {
+	e.paramSyncRoutingMode = strings.TrimSpace(mode)
+}
+
+func (e *ProvisioningEngine) blocksLegacyParamSync(entry string) bool {
+	switch e.paramSyncRoutingMode {
+	case "durable_shadow", "durable", "closed":
+		e.logger.Info("parameter sync legacy entry blocked by routing mode",
+			zap.String("entry", entry), zap.String("routing_mode", e.paramSyncRoutingMode))
+		return true
+	default:
+		return false
+	}
 }
 
 // SetRedisClient 注入 Redis 客户端供 device.online 节流与 Path B 同步差异日志使用（T-0123）。
@@ -271,6 +307,7 @@ type bootstrapEvent struct {
 	ProductClass string    `json:"product_class"`
 	Carrier      string    `json:"carrier"`
 	Technology   string    `json:"technology"`
+	Created      bool      `json:"created"`
 }
 
 // Subscribe registers the engine to listen for bootstrap and model file events.
@@ -296,6 +333,14 @@ func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
 		return err
 	}
 	e.logger.Info("provisioning engine subscribed to device.registered events")
+
+	if _, err := bus.QueueSubscribe(
+		event.SubjectDeviceRegistered,
+		"device-registered-param-sync",
+		e.handleRegisteredDeviceSyncEvent,
+	); err != nil {
+		return fmt.Errorf("subscribe registered-device parameter sync: %w", err)
+	}
 
 	// Subscribe to datamodel.file.received for Path C model upload processing.
 	if _, err := bus.QueueSubscribe(event.SubjectDataModelFileReceived, "provision-model-upload", func(ctx context.Context, evt event.Event) error {
@@ -409,10 +454,13 @@ func (e *ProvisioningEngine) HandleDeviceOnline(ctx context.Context, evt device.
 	// silent skip 任何 err，不阻塞 Path B 同步主流程。
 	e.bindDeviceProductIfNeeded(ctx, dev)
 
-	// SourceID 是裸 UUID（写入 device_tasks.source_id UUID 列做溯源）；reason="device_online"
-	// 通过 WithReason 走 Redis 通道传给 HandleSyncResultPathB 打差异日志（T-0127）。
-	sourceID := evt.DeviceID.String()
-	used, _, err := e.syncService.StartPathBSync(ctx, dev, sourceID, WithReason("device_online"))
+	// Empty sourceID lets SyncService allocate a per-run UUID. Do not reuse
+	// device_id here, otherwise multiple automatic sync rounds share one
+	// source_id and their open tasks contaminate each other.
+	if e.blocksLegacyParamSync("device_online") {
+		return nil
+	}
+	used, gpvTaskCount, err := e.syncService.StartPathBSync(ctx, dev, "", WithReason("device_online"))
 	if err != nil {
 		e.logger.Warn("device.online: StartPathBSync failed",
 			zap.String("device_id", evt.DeviceID.String()),
@@ -424,10 +472,17 @@ func (e *ProvisioningEngine) HandleDeviceOnline(ctx context.Context, evt device.
 			zap.String("device_id", evt.DeviceID.String()))
 		return nil
 	}
+	if gpvTaskCount == 0 {
+		e.logger.Info("device.online: Path B sync skipped (already running or no GPV task)",
+			zap.String("device_id", evt.DeviceID.String()),
+			zap.String("serial_number", evt.SerialNumber))
+		return nil
+	}
 
 	e.logger.Info("device.online: Path B sync initiated",
 		zap.String("device_id", evt.DeviceID.String()),
 		zap.String("serial_number", evt.SerialNumber),
+		zap.Int("gpv_tasks", gpvTaskCount),
 	)
 	return nil
 }
@@ -437,14 +492,8 @@ func (e *ProvisioningEngine) HandleDeviceOnline(ctx context.Context, evt device.
 // 流程（设计方案 §3.2）：
 //  1. Redis 串行锁 SetNX provision:firmware_handling:{deviceID} TTL=10min — 防设备升级期间
 //     不稳定 swVersion 多次 Inform 引发并发交集。锁不主动释放，TTL 自然过期。
-//  2. 预设 reason hint Set provision:syncreason:{deviceID}="firmware_changed" TTL=10min —
-//     让 handleDataModelFileReceived 内 auto-sync Path B 完成时差异日志能读到正确 reason。
-//  3. 调 modelUploadService.RequestModelUpload → 入队 Upload(FileType=11) → 异步回到
-//     handleDataModelFileReceived → IntersectCPEModel 写新代次 discovered_param_mappings →
-//     auto-sync Path B（reason 由 hint 决定）。
-//  4. 若 RequestModelUpload 返 log.Status=DiscoveryCompleted（enable_filetype11=false 跳过）
-//     或 err 不为 nil → 兜底直接调 StartPathBSync(WithReason("firmware_changed"))，
-//     用 default 映射全量同步（旧 standardPath 不删除，漂移由 T-0127 差异日志记录）。
+//  2. 调 modelUploadService.RequestModelUploadWithParamSync(syncOnTerminal=false)
+//     仅刷新模型/设备元数据；FirmwareChanged 不创建参数同步 request/run/task。
 func (e *ProvisioningEngine) HandleFirmwareChanged(ctx context.Context, evt device.DeviceFirmwareChangedEvent) error {
 	ctx, span := tracing.StartSpan(ctx, tracing.ProvisionTracerName, "Provision HandleFirmwareChanged",
 		attribute.String("provision.device_sn", evt.SerialNumber),
@@ -467,17 +516,7 @@ func (e *ProvisioningEngine) HandleFirmwareChanged(ctx context.Context, evt devi
 		}
 	}
 
-	// 2. 预设 reason hint：让 Upload 完成后 handleDataModelFileReceived auto-sync 也能读到正确 reason
-	if e.redisClient != nil {
-		reasonKey := fmt.Sprintf("provision:syncreason:%s", evt.DeviceID.String())
-		if err := e.redisClient.Set(ctx, reasonKey, "firmware_changed", 10*time.Minute).Err(); err != nil {
-			e.logger.Warn("firmware.changed reason hint write failed",
-				zap.String("device_id", evt.DeviceID.String()),
-				zap.Error(err))
-		}
-	}
-
-	// 3. 查 device
+	// 2. 查 device
 	dev, err := e.deviceService.GetDevice(ctx, evt.DeviceID)
 	if err != nil {
 		e.logger.Warn("firmware.changed: lookup device failed",
@@ -494,55 +533,25 @@ func (e *ProvisioningEngine) HandleFirmwareChanged(ctx context.Context, evt devi
 	// T-0176-PR-D 懒补 product 绑定（设备升级后 productClass 不变但历史 orphan 此刻有机会路由）。
 	e.bindDeviceProductIfNeeded(ctx, dev)
 
-	// 4. 调 RequestModelUpload：log.Status=Discovering → Upload 真入队（handleDataModelFileReceived 会自动触发 Path B）；
-	//    log.Status=Completed (enable_filetype11=false) 或 err → 走 step 5 兜底
-	// SourceID 是裸 UUID 写入 device_tasks.source_id；reason="firmware_changed" 走 Redis 通道。
-	sourceID := evt.DeviceID.String()
-	var modelUploadEnqueued bool
+	sourceID := uuid.NewString()
 	if e.modelUploadService != nil {
-		log, uploadErr := e.modelUploadService.RequestModelUpload(ctx, dev, sourceID)
+		log, uploadErr := e.modelUploadService.RequestModelUploadWithParamSync(ctx, dev, sourceID, false)
 		if uploadErr != nil {
-			e.logger.Warn("firmware.changed: RequestModelUpload failed, fallback to direct Path B",
+			e.logger.Warn("firmware.changed: RequestModelUpload failed",
 				zap.String("device_id", evt.DeviceID.String()),
 				zap.Error(uploadErr))
 		} else if log != nil && log.Status == DiscoveryDiscovering {
-			modelUploadEnqueued = true
-			e.logger.Info("firmware.changed: model upload enqueued (Path B will be triggered after Upload completes)",
+			e.logger.Info("firmware.changed: model upload enqueued",
 				zap.String("device_id", evt.DeviceID.String()),
 				zap.String("discovery_id", log.ID.String()),
 				zap.String("old_version", evt.OldVersion),
 				zap.String("new_version", evt.NewVersion))
 		} else if log != nil {
-			e.logger.Info("firmware.changed: model upload skipped, will fallback to direct Path B",
+			e.logger.Info("firmware.changed: model upload skipped",
 				zap.String("device_id", evt.DeviceID.String()),
 				zap.String("discovery_status", string(log.Status)),
 				zap.String("discovery_message", log.ErrorMessage))
 		}
-	}
-
-	// 5. 兜底 Path B：当 Upload 未真正入队（enable_filetype11=false / err / modelUploadService nil）时
-	//    直接全量同步使用 default 映射；reason 标签已由 step 2 预设
-	if !modelUploadEnqueued {
-		if e.syncService == nil {
-			e.logger.Debug("firmware.changed: syncService nil, skipping Path B fallback",
-				zap.String("device_id", evt.DeviceID.String()))
-			return nil
-		}
-		used, _, syncErr := e.syncService.StartPathBSync(ctx, dev, sourceID, WithReason("firmware_changed"))
-		if syncErr != nil {
-			e.logger.Warn("firmware.changed: direct Path B fallback failed",
-				zap.String("device_id", evt.DeviceID.String()),
-				zap.Error(syncErr))
-			return nil
-		}
-		if !used {
-			e.logger.Debug("firmware.changed: Path B fallback skipped (no MappingSet)",
-				zap.String("device_id", evt.DeviceID.String()))
-			return nil
-		}
-		e.logger.Info("firmware.changed: direct Path B fallback initiated",
-			zap.String("device_id", evt.DeviceID.String()),
-			zap.String("serial_number", evt.SerialNumber))
 	}
 
 	return nil
@@ -634,7 +643,7 @@ func (e *ProvisioningEngine) HandleBootstrap(ctx context.Context, evt bootstrapE
 	}
 
 	// Path B: AutoSync enabled + paramMapping available → sync via GPV.
-	if e.config.AutoSync.Enabled && e.syncService != nil && e.syncService.PathBEnabled(ctx, dev) {
+	if e.config.AutoSync.Enabled && e.syncService != nil && e.syncService.PathBEnabled(ctx, dev) && !e.blocksLegacyParamSync("bootstrap") {
 		return e.handleAutoSync(ctx, task, dev)
 	}
 
@@ -648,6 +657,45 @@ func (e *ProvisioningEngine) HandleBootstrap(ctx context.Context, evt bootstrapE
 		zap.String("device_sn", evt.SerialNumber),
 	)
 	return e.failTask(ctx, task, fmt.Errorf("no provisioning path for device %s", evt.SerialNumber))
+}
+
+func (e *ProvisioningEngine) handleRegisteredDeviceSyncEvent(ctx context.Context, evt event.Event) error {
+	var registered bootstrapEvent
+	if err := evt.DecodePayload(&registered); err != nil {
+		return fmt.Errorf("decode registered-device sync event: %w", err)
+	}
+	if !registered.Created ||
+		e.paramSyncRoutingMode != "durable" ||
+		e.registeredSync == nil {
+		return nil
+	}
+	dev, err := e.deviceService.GetDevice(ctx, registered.DeviceID)
+	if err != nil {
+		return fmt.Errorf("get registered device for parameter sync: %w", err)
+	}
+	if dev == nil {
+		return nil
+	}
+	return e.startRegisteredDeviceSync(ctx, registered, dev)
+}
+
+func (e *ProvisioningEngine) startRegisteredDeviceSync(
+	ctx context.Context,
+	evt bootstrapEvent,
+	dev *model.Device,
+) error {
+	if !evt.Created || e.paramSyncRoutingMode != "durable" || e.registeredSync == nil {
+		return nil
+	}
+	err := e.registeredSync.StartRegisteredDeviceSync(
+		ctx,
+		dev,
+		"device_registered:"+dev.ID.String(),
+	)
+	if err != nil {
+		return fmt.Errorf("start registered-device parameter sync: %w", err)
+	}
+	return nil
 }
 
 // handleTemplateProvisioning executes the classic provisioning flow (Path A).
@@ -726,12 +774,15 @@ func (e *ProvisioningEngine) handleModelUpload(ctx context.Context, task *Provis
 // handleAutoSync initiates Path B parameter value synchronization.
 func (e *ProvisioningEngine) handleAutoSync(ctx context.Context, task *ProvisioningTask,
 	dev *model.Device) error {
+	if e.blocksLegacyParamSync("bootstrap") {
+		return nil
+	}
 
 	if err := e.transitionTask(ctx, task, StateSyncing); err != nil {
 		return e.failTask(ctx, task, fmt.Errorf("transition to syncing: %w", err))
 	}
 
-	used, _, err := e.syncService.StartPathBSync(ctx, dev, task.ID.String())
+	used, _, err := e.syncService.StartPathBSync(ctx, dev, task.ID.String(), WithReason("bootstrap"))
 	if err != nil {
 		return e.failTask(ctx, task, fmt.Errorf("start path-b sync: %w", err))
 	}
@@ -821,7 +872,7 @@ func (e *ProvisioningEngine) transitionTask(ctx context.Context, task *Provision
 //   - **completed**：当前不在此回调内推进 ProvisioningTask（多个子任务/响应分摊推进
 //     由 HandleRPCResult 和 handleGPVResponse 各自路径处理）；此回调只对 failed 兜底。
 func (e *ProvisioningEngine) OnTaskCompleted(ctx context.Context, t *task.Task) {
-	if t == nil || t.SourceID == "" {
+	if t == nil {
 		return
 	}
 	if t.Status == task.TaskStatusCompleted {
@@ -829,6 +880,9 @@ func (e *ProvisioningEngine) OnTaskCompleted(ctx context.Context, t *task.Task) 
 		return
 	}
 	if t.Status != task.TaskStatusFailed && t.Status != task.TaskStatusExpired {
+		return
+	}
+	if t.SourceID == "" {
 		return
 	}
 	ptID, err := uuid.Parse(t.SourceID)
@@ -1021,29 +1075,6 @@ func (e *ProvisioningEngine) handleDataModelFileReceived(ctx context.Context, ev
 		zap.String("device_sn", payload.DeviceSN),
 	)
 
-	// After discovered mappings written, auto-sync via Path B if enabled.
-	if e.syncService != nil && e.config.AutoSync.Enabled {
-		// 反查 active provisioning_task 作为 sourceID，让 task.failed 能联动它（D2）
-		var sourceID string
-		if pt, _ := e.taskRepo.GetByDeviceID(ctx, dev.ID); pt != nil {
-			sourceID = pt.ID.String()
-		}
-		if used, _, syncErr := e.syncService.StartPathBSync(ctx, dev, sourceID); syncErr != nil {
-			e.logger.Warn("path-b auto-sync after model upload failed",
-				zap.Error(syncErr),
-				zap.String("device_sn", payload.DeviceSN),
-			)
-		} else if used {
-			e.logger.Info("path-b auto-sync initiated after model upload",
-				zap.String("device_sn", payload.DeviceSN),
-			)
-		} else {
-			e.logger.Info("path-b auto-sync skipped (mapping unavailable)",
-				zap.String("device_sn", payload.DeviceSN),
-			)
-		}
-	}
-
 	return nil
 }
 
@@ -1052,6 +1083,8 @@ type gpvResponsePayload struct {
 	DeviceSN        string                       `json:"device_sn"`
 	Method          string                       `json:"method"`
 	CommandKey      string                       `json:"command_key,omitempty"`
+	TaskSource      task.TaskSource              `json:"task_source,omitempty"`
+	TaskSourceID    string                       `json:"task_source_id,omitempty"`
 	ParameterValues []tr069.ParameterValueStruct `json:"parameter_values"`
 }
 
@@ -1154,6 +1187,17 @@ func (e *ProvisioningEngine) handleGPVResponse(ctx context.Context, evt event.Ev
 }
 
 func (e *ProvisioningEngine) handleGPVPayload(ctx context.Context, payload gpvResponsePayload) error {
+	// Durable parameter-sync owns its result persistence and finalization. The
+	// legacy provisioning consumer must not write the same response directly to
+	// device_parameters or update last_param_sync_at. CommandKey is retained as
+	// a compatibility guard for fault events emitted by older ACS instances.
+	if payload.TaskSource == task.TaskSourceParamSync || strings.HasPrefix(payload.CommandKey, "param-sync-") {
+		e.logger.Debug("skip durable parameter-sync response in legacy Path B",
+			zap.String("device_sn", payload.DeviceSN),
+			zap.String("task_source_id", payload.TaskSourceID),
+		)
+		return nil
+	}
 	e.logger.Info("received GPV response",
 		zap.String("device_sn", payload.DeviceSN),
 		zap.Int("parameter_count", len(payload.ParameterValues)),

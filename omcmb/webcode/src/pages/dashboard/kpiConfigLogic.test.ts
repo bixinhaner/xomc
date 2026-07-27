@@ -115,25 +115,107 @@ describe('working panels 与存盘形状互转', () => {
 describe('panel 增删改（不可变更新）', () => {
   const base: WorkingPanel[] = toWorkingPanels([panel({ title: 'A' }), panel({ title: 'B', x: 6 })]);
 
-  it('addPanel 追加空图：半宽、无指标、line、落到现有图下方', () => {
+  it('addPanel 把新图置首，旧图按视觉顺序依次后移一个展示位', () => {
     const next = addPanel(base, '新图');
     expect(next.length).toBe(3);
-    const added = next[2];
+    const added = next[0];
     expect(added.title).toBe('新图');
     expect(added.metrics).toEqual([]);
+    expect(added.x).toBe(0);
+    expect(added.y).toBe(0);
     expect(added.w).toBe(HALF_WIDTH);
     expect(added.h).toBe(DEFAULT_HEIGHT);
     expect(added.chartType).toBe('line');
-    // 落到最大底边（base 两图 y=0 h=8 → bottom 8）
-    expect(added.y).toBe(8);
+
+    // 新图占左上角，原第一张图 A 移到右上，B 再移到下一行左侧。
+    expect(next.slice(1).map((p) => p.title)).toEqual(['A', 'B']);
+    expect(next[1]).toMatchObject({ x: HALF_WIDTH, y: 0, w: 6, h: 8 });
+    expect(next[2]).toMatchObject({ x: 0, y: DEFAULT_HEIGHT, w: 6, h: 8 });
     // 不可变：原数组未变
     expect(base.length).toBe(2);
+    expect(base.map((p) => p.y)).toEqual([0, 0]);
+  });
+
+  it('addPanel 向空布局新增时直接放在左上角', () => {
+    const next = addPanel([], '第一张图');
+    expect(next).toHaveLength(1);
+    expect(next[0]).toMatchObject({ title: '第一张图', x: 0, y: 0 });
+  });
+
+  it('addPanel 连续新增时最后新增的图始终排在第一', () => {
+    const once = addPanel(base, '新图 1');
+    const twice = addPanel(once, '新图 2');
+    expect(twice.map((p) => p.title)).toEqual(['新图 2', '新图 1', 'A', 'B']);
+    expect(twice.map((p) => [p.x, p.y])).toEqual([
+      [0, 0],
+      [HALF_WIDTH, 0],
+      [0, DEFAULT_HEIGHT],
+      [HALF_WIDTH, DEFAULT_HEIGHT],
+    ]);
+  });
+
+  it('addPanel 以旧布局的 y/x 视觉顺序为准，不受数组存储顺序影响', () => {
+    const existing = toWorkingPanels([
+      panel({ title: '可用性', x: HALF_WIDTH, y: 0 }),
+      panel({ title: '业务量', x: 0, y: 0 }),
+      panel({ title: '利用率', x: 0, y: DEFAULT_HEIGHT }),
+    ]);
+
+    const next = addPanel(existing, '新图');
+
+    expect(next.map((p) => p.title)).toEqual(['新图', '业务量', '可用性', '利用率']);
+    expect(next.map((p) => [p.x, p.y])).toEqual([
+      [0, 0],
+      [HALF_WIDTH, 0],
+      [0, DEFAULT_HEIGHT],
+      [HALF_WIDTH, DEFAULT_HEIGHT],
+    ]);
+  });
+
+  it('applyGridLayout 忽略缺少当前卡片的过期布局回调', () => {
+    const current = addPanel(base, '新图');
+    const staleLayout = toGridLayout(base);
+
+    const next = applyGridLayout(current, staleLayout);
+
+    expect(next).toEqual(current);
+    expect(next.map((p) => [p.title, p.x, p.y])).toEqual([
+      ['新图', 0, 0],
+      ['A', HALF_WIDTH, 0],
+      ['B', 0, DEFAULT_HEIGHT],
+    ]);
+  });
+
+  it('applyGridLayout 忽略仍包含已删除卡片的过期布局回调', () => {
+    const withNewPanel = addPanel(base, '新图');
+    const current = removePanel(withNewPanel, withNewPanel[0].id);
+    const staleLayout = toGridLayout(withNewPanel);
+
+    const next = applyGridLayout(current, staleLayout);
+
+    expect(next).toEqual(current);
+    expect(next.map((p) => [p.title, p.x, p.y])).toEqual([
+      ['A', 0, 0],
+      ['B', HALF_WIDTH, 0],
+    ]);
   });
 
   it('removePanel 按 id 删除', () => {
     const next = removePanel(base, base[0].id);
     expect(next.map((p) => p.title)).toEqual(['B']);
     expect(base.length).toBe(2);
+  });
+
+  it('removePanel 删除左上图后按剩余数组顺序重新从左上补位', () => {
+    const withNewPanel = addPanel(base, '新图');
+
+    const next = removePanel(withNewPanel, withNewPanel[0].id);
+
+    expect(next.map((p) => p.title)).toEqual(['A', 'B']);
+    expect(next.map((p) => [p.x, p.y])).toEqual([
+      [0, 0],
+      [HALF_WIDTH, 0],
+    ]);
   });
 
   it('removePanel 删不存在 id → 原样（边界）', () => {
@@ -171,13 +253,22 @@ describe('网格坐标回写', () => {
       { i: working[0].id, x: 3, y: 5, w: 12, h: 10 },
       { i: working[1].id, x: 6, y: 0, w: 6, h: 8 },
     ]);
-    expect(moved[0]).toMatchObject({ x: 3, y: 5, w: 12, h: 10, title: 'A' });
-    expect(moved[0].metrics).toEqual(['M1']);
-    expect(moved[1]).toMatchObject({ x: 6, y: 0, w: 6, h: 8 });
+    expect(moved[0]).toMatchObject({ x: 6, y: 0, w: 6, h: 8, title: 'B' });
+    expect(moved[1]).toMatchObject({ x: 3, y: 5, w: 12, h: 10, title: 'A' });
+    expect(moved[1].metrics).toEqual(['M1']);
   });
 
-  it('applyGridLayout 对 layout 里缺失的 id 保持原样（竞态边界）', () => {
+  it('applyGridLayout 对 layout 里缺失的 id 整次忽略（竞态边界）', () => {
     const result = applyGridLayout(working, [{ i: working[0].id, x: 1, y: 1, w: 6, h: 8 }]);
-    expect(result[1]).toMatchObject({ x: 6, y: 0 }); // B 未在 layout 中 → 不变
+    expect(result).toEqual(working);
+  });
+
+  it('applyGridLayout 按回写后的 y/x 同步数组顺序', () => {
+    const moved = applyGridLayout(working, [
+      { i: working[0].id, x: 6, y: 0, w: 6, h: 8 },
+      { i: working[1].id, x: 0, y: 0, w: 6, h: 8 },
+    ]);
+
+    expect(moved.map((p) => p.title)).toEqual(['B', 'A']);
   });
 });

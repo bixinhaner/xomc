@@ -1,6 +1,132 @@
 package pm
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"fmt"
+	"sync"
+
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
+)
+
+const (
+	discoveredCountersMetricName = "omc_pm_discovered_counters_total"
+	discoveredCountersMetricHelp = "PM counters discovered outside the indicator library and preserved for dynamic registration, by reason."
+	droppedCountersMetricName    = "omc_pm_dropped_counters_total"
+	droppedCountersMetricHelp    = "Deprecated alias of omc_pm_discovered_counters_total; counters are preserved, not dropped. Remove after one release."
+)
+
+type discoveredCounterLabels struct {
+	carrier    string
+	technology string
+	reason     string
+}
+
+// discoveredCounterVec owns one backing value per label set and emits both the
+// canonical metric and its one-release deprecated alias from the same locked
+// snapshot. A single prometheus.CounterVec per name cannot provide that
+// guarantee because registry gathering may interleave with sequential Add
+// calls.
+type discoveredCounterVec struct {
+	mu             sync.Mutex
+	discoveredDesc *prometheus.Desc
+	droppedDesc    *prometheus.Desc
+	values         map[discoveredCounterLabels]float64
+}
+
+func newDiscoveredCounterVec() *discoveredCounterVec {
+	labels := []string{"carrier", "technology", "reason"}
+	return &discoveredCounterVec{
+		discoveredDesc: prometheus.NewDesc(
+			discoveredCountersMetricName,
+			discoveredCountersMetricHelp,
+			labels,
+			nil,
+		),
+		droppedDesc: prometheus.NewDesc(
+			droppedCountersMetricName,
+			droppedCountersMetricHelp,
+			labels,
+			nil,
+		),
+		values: make(map[discoveredCounterLabels]float64),
+	}
+}
+
+func (v *discoveredCounterVec) WithLabelValues(labelValues ...string) prometheus.Counter {
+	if len(labelValues) != 3 {
+		panic(fmt.Sprintf("inconsistent label cardinality: expected 3 label values but got %d", len(labelValues)))
+	}
+	labels := discoveredCounterLabels{
+		carrier:    labelValues[0],
+		technology: labelValues[1],
+		reason:     labelValues[2],
+	}
+	v.mu.Lock()
+	if _, ok := v.values[labels]; !ok {
+		v.values[labels] = 0
+	}
+	v.mu.Unlock()
+	return &discoveredCounter{vec: v, labels: labels}
+}
+
+func (v *discoveredCounterVec) Describe(ch chan<- *prometheus.Desc) {
+	ch <- v.discoveredDesc
+	ch <- v.droppedDesc
+}
+
+func (v *discoveredCounterVec) Collect(ch chan<- prometheus.Metric) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	for labels, value := range v.values {
+		labelValues := []string{labels.carrier, labels.technology, labels.reason}
+		ch <- prometheus.MustNewConstMetric(v.discoveredDesc, prometheus.CounterValue, value, labelValues...)
+		ch <- prometheus.MustNewConstMetric(v.droppedDesc, prometheus.CounterValue, value, labelValues...)
+	}
+}
+
+type discoveredCounter struct {
+	vec    *discoveredCounterVec
+	labels discoveredCounterLabels
+}
+
+func (c *discoveredCounter) Desc() *prometheus.Desc {
+	return c.vec.discoveredDesc
+}
+
+func (c *discoveredCounter) Write(out *dto.Metric) error {
+	c.vec.mu.Lock()
+	value := c.vec.values[c.labels]
+	c.vec.mu.Unlock()
+	return prometheus.MustNewConstMetric(
+		c.vec.discoveredDesc,
+		prometheus.CounterValue,
+		value,
+		c.labels.carrier,
+		c.labels.technology,
+		c.labels.reason,
+	).Write(out)
+}
+
+func (c *discoveredCounter) Describe(ch chan<- *prometheus.Desc) {
+	ch <- c.vec.discoveredDesc
+}
+
+func (c *discoveredCounter) Collect(ch chan<- prometheus.Metric) {
+	ch <- c
+}
+
+func (c *discoveredCounter) Inc() {
+	c.Add(1)
+}
+
+func (c *discoveredCounter) Add(value float64) {
+	if value < 0 {
+		panic("counter cannot decrease in value")
+	}
+	c.vec.mu.Lock()
+	c.vec.values[c.labels] += value
+	c.vec.mu.Unlock()
+}
 
 // PMMetrics holds Prometheus metrics for the PM collection module.
 type PMMetrics struct {
@@ -17,16 +143,21 @@ type PMMetrics struct {
 	// 标签 carrier × technology 便于定位哪类设备频繁补传历史数据。
 	LateArrivalFilesTotal *prometheus.CounterVec
 
-	// issue #20: PM 文件解析后被指标库白名单丢弃的孤儿 counter 数。
-	// 此前 collector 仅 log Info「filtered orphan counters」，无可观测信号——厂家
-	// 上报名漂移 / 指标库未注册导致大批 counter 被静默丢弃时是运维盲区。reason 标签：
+	// PM 文件解析后发现但未登记在指标库的 counter 数。配置外 counter 会被保留，
+	// 并由稀疏入库链路登记最小字典记录。reason 标签：
 	//   - "whitelist_miss" 命中白名单但 report_key 未注册（厂家上报名不在指标库）
 	// 持续增长说明某产品的指标库注册缺失或厂家上报名变更，需补库或纠正 report_key。
-	DroppedCountersTotal *prometheus.CounterVec
+	DiscoveredCountersTotal *discoveredCounterVec
+
+	// Deprecated: one-release compatibility alias for DiscoveredCountersTotal.
+	// Both fields reference one collector/backing state so gathered snapshots
+	// remain identical until the alias is removed in the next release.
+	DroppedCountersTotal *discoveredCounterVec
 }
 
 // NewPMMetrics creates and registers PM metrics.
 func NewPMMetrics(reg prometheus.Registerer) *PMMetrics {
+	discoveredCounters := newDiscoveredCounterVec()
 	m := &PMMetrics{
 		FilesProcessedTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "omc_pm_files_processed_total",
@@ -46,12 +177,16 @@ func NewPMMetrics(reg prometheus.Registerer) *PMMetrics {
 			Name: "omc_pm_late_arrival_files_total",
 			Help: "PM files skipped because late-arriving data hit a compressed TimescaleDB chunk (UPSERT unsupported).",
 		}, []string{"carrier", "technology"}),
-		DroppedCountersTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "omc_pm_dropped_counters_total",
-			Help: "PM counters dropped after parsing, by reason (e.g. whitelist_miss = report_key not registered in indicator library).",
-		}, []string{"carrier", "technology", "reason"}),
+		DiscoveredCountersTotal: discoveredCounters,
+		DroppedCountersTotal:    discoveredCounters,
 	}
 
-	reg.MustRegister(m.FilesProcessedTotal, m.ProcessingDurationSecs, m.ReportDelaySeconds, m.LateArrivalFilesTotal, m.DroppedCountersTotal)
+	reg.MustRegister(
+		m.FilesProcessedTotal,
+		m.ProcessingDurationSecs,
+		m.ReportDelaySeconds,
+		m.LateArrivalFilesTotal,
+		m.DiscoveredCountersTotal,
+	)
 	return m
 }

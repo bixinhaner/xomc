@@ -38,13 +38,17 @@ func Test_queryAggregateGroupTable_SQLShape(t *testing.T) {
 	require.GreaterOrEqual(t, len(db.sqls), 1, "主查询")
 
 	sql := db.sqls[0]
-	assert.NotContains(t, sql, "object_ldn",
-		"aggregate_group 应单条聚合，SQL 不应再含 object_ldn（SELECT 或 GROUP BY）")
+	assert.Contains(t, sql,
+		`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`,
+		"聚合前应按设备自然键保留最新补报")
+	assert.Contains(t, sql, "ingest_time DESC")
 	// 分组键只剩三列。
-	gb := sql[strings.Index(sql, "GROUP BY"):]
+	gb := sql[strings.LastIndex(sql, "GROUP BY"):]
 	assert.Contains(t, gb, "metric_path")
 	assert.Contains(t, gb, "granularity")
 	assert.Contains(t, gb, "time")
+	assert.NotContains(t, gb, "object_ldn",
+		"物理目标查询可在内层保留实体键，外层聚合不得按 object_ldn 分组")
 }
 
 // Test_queryAggregateGroupTable_CollapsesAllCells：多设备多小区在 DB 端按

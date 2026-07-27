@@ -1,8 +1,13 @@
-import { Descriptions, Modal, Space, Tag, Typography } from 'antd';
+import { Descriptions, Modal, Space, Tag, Typography, Button, App } from 'antd';
+import { ExportOutlined } from '@ant-design/icons';
 
 import type { QueryTemplate } from '@core/types/pmQuery';
+import { useAllIndicators } from '@core/hooks/api/useIndicatorsLibrary';
+import { formatIndicatorLevel, shouldShowIndicatorLevel } from '@core/utils/indicatorLevelDisplay';
+import { saveBlob } from '@core/utils/saveBlob';
 import { useT } from '@/hooks/useT';
 import dayjs from 'dayjs';
+import { buildTemplateMetricExportFilename, buildTemplateMetricExportText } from './templateMetricExport';
 
 const { Text } = Typography;
 
@@ -13,9 +18,18 @@ interface QueryTemplateDetailModalProps {
   onClose: () => void;
 }
 
-export default function QueryTemplateDetailModal({ open, template, metricLabels, onClose }: QueryTemplateDetailModalProps) {
+export default function QueryTemplateDetailModal(props: QueryTemplateDetailModalProps) {
+  if (!props.template) return null;
+
+  return <QueryTemplateDetailModalContent {...props} template={props.template} />;
+}
+
+function QueryTemplateDetailModalContent({ open, template, metricLabels, onClose }: QueryTemplateDetailModalProps & { template: QueryTemplate }) {
   const t = useT();
-  if (!template) return null;
+  const { message } = App.useApp();
+  const deviceType = template.payload.deviceType ?? 'ENB';
+  const { data: indicatorsData } = useAllIndicators(deviceType);
+  const indicatorById = new Map((indicatorsData?.items ?? []).map((ind) => [ind.id, ind]));
 
   const range = template.payload.timeRangePreset === 'custom'
     ? [template.payload.absoluteStart, template.payload.absoluteEnd].filter(Boolean).join(' — ') || '-'
@@ -28,9 +42,35 @@ export default function QueryTemplateDetailModal({ open, template, metricLabels,
     monthly: 'perf.dashboard.granularMonthly',
   };
   const formatTimestamp = (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm:ss');
+  const handleExportMetrics = () => {
+    if (template.payload.metricPaths.length === 0) {
+      message.warning(t('perf.kpiQuery.exportMetricsEmpty'));
+      return;
+    }
+    saveBlob(
+      buildTemplateMetricExportText(template),
+      buildTemplateMetricExportFilename(template),
+      'text/plain;charset=utf-8',
+    );
+    message.success(t('perf.kpiQuery.exportMetricsSuccess', { count: template.payload.metricPaths.length }));
+  };
 
   return (
-    <Modal title={t('perf.kpiQuery.detail.title')} open={open} onCancel={onClose} footer={null} width={720} destroyOnHidden>
+    <Modal
+      title={t('perf.kpiQuery.detail.title')}
+      open={open}
+      onCancel={onClose}
+      footer={[
+        <Button key="export" icon={<ExportOutlined />} onClick={handleExportMetrics}>
+          {t('perf.kpiQuery.exportMetrics')}
+        </Button>,
+        <Button key="close" type="primary" onClick={onClose}>
+          {t('common.close')}
+        </Button>,
+      ]}
+      width={720}
+      destroyOnHidden
+    >
       <Descriptions bordered size="small" column={1}>
         <Descriptions.Item label={t('perf.kpiQuery.templateName')}>{template.name}</Descriptions.Item>
         <Descriptions.Item label={t('perf.kpiQuery.visibility')}>
@@ -48,7 +88,21 @@ export default function QueryTemplateDetailModal({ open, template, metricLabels,
         <Descriptions.Item label={t('perf.kpiQuery.metric')}>
           {template.payload.metricPaths.length === 0
             ? '-'
-            : <Space wrap>{template.payload.metricPaths.map((path) => <Tag key={path}>{metricLabels[path] ?? path}</Tag>)}</Space>}
+            : (
+                <Space wrap>
+                  {template.payload.metricPaths.map((path) => {
+                    const indicator = indicatorById.get(path);
+                    return (
+                      <Tag key={path}>
+                        {metricLabels[path] ?? path}
+                        {shouldShowIndicatorLevel(deviceType) && t('perf.query.indicatorLevelInline', {
+                          level: formatIndicatorLevel(indicator?.indicatorLevel, t),
+                        })}
+                      </Tag>
+                    );
+                  })}
+                </Space>
+              )}
         </Descriptions.Item>
         <Descriptions.Item label={t('perf.granularity')}>
           {t(granularityLabels[template.payload.granularity] ?? template.payload.granularity)}

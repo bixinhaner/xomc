@@ -10,6 +10,7 @@ import {
   useMoveDevices,
   useAddDevicesToGroup,
   useDeleteDevices,
+  usePermanentDeleteDevices,
   useBatchRebootDevices,
   useUpdateDevice,
 } from '@core/hooks/api/useDevices';
@@ -48,7 +49,11 @@ export default function DeviceGrouping() {
   const { fromRecord } = useI18nText();
   const locale = useAppStore((s) => s.locale);
   const { modal, message } = App.useApp();
-  const { data: groupsData, refetch: refetchGroups } = useDeviceGroups();
+  const {
+    data: groupsData,
+    isFetching: isFetchingGroups,
+    refetch: refetchGroups,
+  } = useDeviceGroups();
   const groups = groupsData?.groups ?? [];
   const totalDevicesFromStats = groupsData?.stats?.totalDevices ?? 0;
 
@@ -71,6 +76,7 @@ export default function DeviceGrouping() {
   const moveDevicesMutation = useMoveDevices();
   const addDevicesToGroupMutation = useAddDevicesToGroup();
   const deleteDevicesMutation = useDeleteDevices();
+  const permanentDeleteDevicesMutation = usePermanentDeleteDevices();
   // batchRebootMutation 暂未使用，保留 hook 触发以便后续启用而不破坏依赖图
   const _batchRebootMutation = useBatchRebootDevices();
   const updateDeviceMutation = useUpdateDevice();
@@ -106,7 +112,12 @@ export default function DeviceGrouping() {
       ...filteredExportParams,
     } as DeviceQueryParams;
   }, [currentPage, pageSize, filteredExportParams]);
-  const { data: deviceData, isLoading, refetch } = useDeviceList(queryParams);
+  const {
+    data: deviceData,
+    isLoading,
+    isFetching: isFetchingDevices,
+    refetch,
+  } = useDeviceList(queryParams);
   const devices: Device[] = useMemo(
     () => withDeviceGroupDisplayName(deviceData?.items ?? [], groups, locale),
     [deviceData?.items, groups, locale]
@@ -218,11 +229,26 @@ export default function DeviceGrouping() {
   );
 
   const targetGroupOptions = useMemo(
-    () =>
-      // 一级分组(root)是容器不作目标；内置默认节点的 label 与树保持一致，
-      // 但仍带 isRemove 标记，供弹窗提示其"移出分组"语义。
-      buildGroupTargetOptions(groups, getParentName, getGroupName),
-    [groups, getParentName, getGroupName]
+    () => {
+      const selectedGroupIds = selectedDevices
+        .map((device) => device.groupId)
+        .filter((groupId): groupId is string => Boolean(groupId));
+      const firstSelectedGroupId = selectedGroupIds[0];
+      const commonSelectedGroupId =
+        selectedGroupIds.length === selectedDevices.length &&
+        firstSelectedGroupId &&
+        selectedGroupIds.every((groupId) => groupId === firstSelectedGroupId)
+          ? firstSelectedGroupId
+          : undefined;
+      const currentLevel2GroupId = selectedGroup?.parentId ? selectedGroup.id : undefined;
+      const excludedCurrentGroupId = commonSelectedGroupId ?? currentLevel2GroupId;
+
+      // 一级分组(root)是容器不作目标；设备已在的同一分组也不再作为移动目标。
+      return buildGroupTargetOptions(groups, getParentName, getGroupName, {
+        excludeGroupIds: [excludedCurrentGroupId],
+      });
+    },
+    [groups, getParentName, getGroupName, selectedDevices, selectedGroup]
   );
 
   // ── Group / Device action hooks ──
@@ -232,6 +258,7 @@ export default function DeviceGrouping() {
     modal,
     message,
     t,
+    locale,
     selectedGroupId,
     setSelectedGroupId,
     createGroupMutation: createGroupMutation as unknown as Parameters<typeof useGroupActions>[0]['createGroupMutation'],
@@ -281,6 +308,7 @@ export default function DeviceGrouping() {
     refetch,
     refetchGroups,
     deleteDevicesMutation,
+    permanentDeleteDevicesMutation,
     setSelectedDeviceIds,
     onMoveToGroup: deviceActions.open.move,
   });
@@ -302,6 +330,10 @@ export default function DeviceGrouping() {
     setCurrentPage(1);
     clearDeviceSelection();
   }, [clearDeviceSelection]);
+
+  const handleRefresh = useCallback(async () => {
+    await Promise.all([refetchGroups(), refetch()]);
+  }, [refetchGroups, refetch]);
 
   const handleExportClick = useCallback(() => {
     setExportScope(selectedDeviceIds.length > 0 ? 'selected' : (hasSearchFilter ? 'filtered' : 'groupAll'));
@@ -379,6 +411,7 @@ export default function DeviceGrouping() {
           devices={devices}
           total={total}
           loading={isLoading}
+          refreshing={isFetchingGroups || isFetchingDevices}
           selectedDeviceIds={selectedDeviceIds}
           currentPage={currentPage}
           pageSize={pageSize}
@@ -391,6 +424,7 @@ export default function DeviceGrouping() {
             setPageSize(size);
           }}
           onSearch={handleSearch}
+          onRefresh={handleRefresh}
           onExport={handleExportClick}
           onImport={handleImport}
           onDownloadTemplate={handleDownloadTemplate}
@@ -449,6 +483,7 @@ export default function DeviceGrouping() {
         addChildDrawerOpen={groupActions.state.addChildDrawerOpen}
         addChildForm={groupActions.forms.addChildForm}
         addChildParentName={groupActions.state.addChildParentName}
+        autoAssignEnabled={groupActions.state.autoAssignEnabled}
         matchingMode={groupActions.state.matchingMode}
         nameFilters={childNameFilters.filters}
         onAddChildDrawerClose={groupActions.close.addChild}
@@ -461,6 +496,7 @@ export default function DeviceGrouping() {
         editLevel2GroupId={groupActions.state.editLevel2GroupId ?? undefined}
         editLevel2Form={groupActions.forms.editLevel2Form}
         editLevel2ParentName={groupActions.state.editLevel2ParentName}
+        editLevel2AutoAssignEnabled={groupActions.state.editLevel2AutoAssignEnabled}
         editLevel2MatchingMode={groupActions.state.editLevel2MatchingMode}
         editLevel2NameFilters={editLevel2NameFilters.filters}
         onEditLevel2DrawerClose={groupActions.close.editLevel2}

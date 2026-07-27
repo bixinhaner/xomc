@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/csv"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/google/uuid"
@@ -25,6 +24,7 @@ type IndicatorManagementService struct {
 	templateRel      TemplateRelRepository
 	custNameRepo     CustNameRepository
 	thresholdRepo    IndicatorThresholdRepository
+	dashboardLayout  DashboardLayoutReferenceChecker
 	pool             transactionBeginner
 	redis            redis.UniversalClient
 	routeInvalidator RouteInvalidator
@@ -33,6 +33,11 @@ type IndicatorManagementService struct {
 
 type transactionBeginner interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
+}
+
+// DashboardLayoutReferenceChecker checks whether dashboard KPI layouts reference PM indicators.
+type DashboardLayoutReferenceChecker interface {
+	ReferencedIndicators(ctx context.Context, dt DeviceType, indicatorIDs []string) ([]string, error)
 }
 
 // RouteInvalidationTrigger 是 indicator 包暴露给 provider 的低基数失效来源。
@@ -73,6 +78,11 @@ func NewIndicatorManagementService(
 		redis:         rdb,
 		logger:        logger,
 	}
+}
+
+func (s *IndicatorManagementService) WithDashboardLayoutReferenceChecker(checker DashboardLayoutReferenceChecker) *IndicatorManagementService {
+	s.dashboardLayout = checker
+	return s
 }
 
 func (s *IndicatorManagementService) WithRouteInvalidator(invalidator RouteInvalidator) *IndicatorManagementService {
@@ -503,6 +513,8 @@ func (s *IndicatorManagementService) DeletePlatformFormula(ctx context.Context, 
 
 // ── Enable/Disable ────────────────────────────────────────────────────────────
 
+var ErrIndicatorUsedByDashboardLayout = fmt.Errorf("%w: indicator is used by dashboard KPI layout", commonerrors.ErrInvalidInput)
+
 func (s *IndicatorManagementService) EnableIndicators(ctx context.Context, req *EnableIndicatorsRequest) error {
 	dt, err := ParseDeviceType(req.DeviceType)
 	if err != nil {
@@ -516,6 +528,9 @@ func (s *IndicatorManagementService) DisableIndicators(ctx context.Context, req 
 	if err != nil {
 		return fmt.Errorf("parse device type: %w", err)
 	}
+	if err := s.ensureNotReferencedByDashboardLayout(ctx, dt, req.IndicatorIDs); err != nil {
+		return err
+	}
 	return s.enabledRepo.BatchDelete(ctx, dt, req.OperatorCode, req.IndicatorIDs, nil)
 }
 
@@ -527,6 +542,20 @@ func (s *IndicatorManagementService) GetEnabledIndicatorIDs(ctx context.Context,
 
 func (s *IndicatorManagementService) IsIndicatorInTemplate(ctx context.Context, indicatorID string) (bool, error) {
 	return s.templateRel.ExistsByIndicatorID(ctx, indicatorID)
+}
+
+func (s *IndicatorManagementService) ensureNotReferencedByDashboardLayout(ctx context.Context, dt DeviceType, indicatorIDs []string) error {
+	if s.dashboardLayout == nil || len(indicatorIDs) == 0 {
+		return nil
+	}
+	referenced, err := s.dashboardLayout.ReferencedIndicators(ctx, dt, indicatorIDs)
+	if err != nil {
+		return fmt.Errorf("check dashboard KPI layout references: %w", err)
+	}
+	if len(referenced) > 0 {
+		return fmt.Errorf("%w: %v", ErrIndicatorUsedByDashboardLayout, referenced)
+	}
+	return nil
 }
 
 // ── Export ────────────────────────────────────────────────────────────────────
@@ -658,25 +687,12 @@ func updateAffectsRoute(req *UpdateIndicatorRequest) bool {
 		req.StatisType != nil
 }
 
-var durationTokenPattern = regexp.MustCompile(`\bDuration\b`)
-
 // normalizeDurationArithmetic 把页面公式编辑器的友好关键字 Duration 转成当前制式
 // 已登记的「统计时长」合成 Counter 编号。KPI 路由/表达式引擎只消费编号公式；若把
 // Duration 原样落库，它会成为永远缺失的依赖，最终 KPI 无值（#27）。只替换完整 token，
 // 避免误改 DurationValue/MyDuration 等合法标识符。
 func normalizeDurationArithmetic(dt DeviceType, arithmetic string) string {
-	var durationID string
-	switch dt {
-	case DeviceTypeENB:
-		durationID = "C000060273"
-	case DeviceTypeGNB:
-		durationID = "C010120025"
-	case DeviceTypeGSM:
-		durationID = "CGSM0080001"
-	default:
-		return arithmetic
-	}
-	return durationTokenPattern.ReplaceAllString(arithmetic, durationID)
+	return CompileRuntimeArithmetic(dt, arithmetic)
 }
 
 func normalizePlatformFormulaInput(platform, formula string) (string, string, error) {

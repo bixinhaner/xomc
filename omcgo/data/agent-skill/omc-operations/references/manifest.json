@@ -1,13 +1,13 @@
 {
   "schemaVersion": "1.0",
-  "catalogVersion": "2cfad43927ded505",
-  "totalOperations": 686,
+  "catalogVersion": "c5520e0cc595082e",
+  "totalOperations": 689,
   "searchIndex": "api-index.jsonl",
   "categories": [
     {
       "id": "agent",
       "title": "agent",
-      "count": 7,
+      "count": 9,
       "file": "api-categories/agent.json"
     },
     {
@@ -121,7 +121,7 @@
     {
       "id": "devices",
       "title": "设备",
-      "count": 49,
+      "count": 50,
       "file": "api-categories/devices.json"
     },
     {

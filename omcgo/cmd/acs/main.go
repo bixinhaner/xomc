@@ -30,6 +30,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/health"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/paramsync"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/trace"
@@ -174,6 +175,9 @@ func runACS(cmd *cobra.Command, args []string) error {
 	// 但这里独立组装是为了让 ACS HTTP server（非 metrics 端口）也能直接探测。
 	deps.ReadinessCheckers = buildACSReadinessCheckers(inf)
 	deps.PathTranslator = pathTranslator
+	deps.GPVFaultRecoverer = paramsync.NewGPVFaultRecoverer(inf.PgPool, taskService)
+	deps.DurableReadbackEnabled = cfg.ParamSync.RunEnabled && cfg.ParamSync.ResultConsumerEnabled &&
+		cfg.ParamSync.StagingEnabled && cfg.ParamSync.CanaryPercent == 100
 
 	// #746: 心跳周期自动调整策略 — BOOTSTRAP/BOOT 时 GPV 查询当前值，与配置目标比较后 SPV 调整。
 	// 依赖 sys_configs(device.enbInformPeriodAdjustEnable/enbInformPeriod/cpeInformPeriodAdjustEnable/cpeInformPeriod)。
@@ -213,6 +217,23 @@ func runACS(cmd *cobra.Command, args []string) error {
 
 	deps.RPCDispatcher = rpc.NewDispatcher(rpc.DispatcherConfig{TransferConfigProvider: transferPolicy})
 
+	// PM queue-health metrics have an independent lifecycle: they must continue
+	// to sample when uploads/backpressure are disabled or when MinIO/TSDB is not
+	// configured. The NATS bus owns metric observation so disk projections only
+	// consume aggregate counts and cannot duplicate samples.
+	var pmQueueHealthSampler *event.QueueHealthSampler
+	if samplerBus, ok := inf.EventBus.(interface {
+		NewQueueHealthSampler(interval time.Duration) *event.QueueHealthSampler
+	}); ok {
+		queueHealthCtx, queueHealthCancel := context.WithCancel(context.Background())
+		pmQueueHealthSampler = samplerBus.NewQueueHealthSampler(30 * time.Second)
+		go pmQueueHealthSampler.Run(queueHealthCtx)
+		inf.GS.Register("pm-queue-health-sampler", 1, func(context.Context) error {
+			queueHealthCancel()
+			return nil
+		})
+	}
+
 	// Setup upload handler for CPE file upload (PM/MR/DataModel files).
 	if inf.MinIO != nil {
 		tokenMgr := upload.NewTokenManager(cfg.Upload.TokenSecret, cfg.Upload.TokenTTL)
@@ -229,6 +250,16 @@ func runACS(cmd *cobra.Command, args []string) error {
 		)
 		uploadHandler.SetRuntimeProvider(transferPolicy)
 
+		// PM 上传去重：压测观测到 omc_pm_files_processed_total{status=duplicate}
+		// 占比约78%，CPE 网络抖动短时间内重复 PUT 同一份文件是主因。复用
+		// internal/core/event.Deduper（与 app/worker 里 transfer/事件去重同款
+		// Redis SETNX + TTL、fail-open），namespace 用 "acs-pm-upload" 与其他
+		// 用途区隔，避免 key 冲突。inf.Redis 为 nil（未配置 Redis）时 Deduper 本身
+		// 会在 SetNX 出错时 fail-open，不影响上传主流程。
+		if inf.Redis != nil {
+			uploadHandler.SetPMUploadDedup(event.NewDeduper(inf.Redis, 24*time.Hour, inf.Logger.Named("pm-upload-dedup")))
+		}
+
 		// issue #318：PM 上传背压 watchdog。磁盘（查 MinIO 集群指标端点，同栈内网免鉴权）+ CPU
 		// （host loadavg ÷ 核数）超高水位时拒收 PM 上传（设备重传不丢数据），回落自动恢复。配置
 		// 走 sys_configs(acs.backpressure)，经 SubjectSysConfigSaved 热刷新；GS 注册优雅关停。
@@ -240,12 +271,36 @@ func runACS(cmd *cobra.Command, args []string) error {
 			}
 			return row.Value, true
 		}
+		var pmPendingCount upload.PendingCountFunc
+		if pmQueueHealthSampler != nil {
+			// Keep the projection's aggregate-count interface for this release,
+			// while reusing the independent sampler's last successful snapshot.
+			pmPendingCount = func(context.Context) (uint64, error) {
+				return pmQueueHealthSampler.ProjectionPendingCount()
+			}
+		}
 		bpWatchdog := upload.NewWatchdog(
 			bpLookup,
-			upload.NewMinIODiskUsage(upload.MinIOMetricsURL(cfg.MinIO.Endpoint, cfg.MinIO.UseSSL), 5*time.Second, nil),
+			upload.NewProjectedMinIODiskUsage(
+				upload.MinIOMetricsURL(cfg.MinIO.Endpoint, cfg.MinIO.UseSSL),
+				5*time.Second,
+				nil,
+				upload.NewDatabasePendingProjection(inf.TsPool, pmPendingCount, 1),
+			),
 			upload.NewBackpressureMetrics(inf.MetricsReg),
 			inf.Logger.Named("backpressure"),
 		)
+		queueBackpressure := cfg.Backpressure.Defaults()
+		bpWatchdog.SetQueueThresholdDefaults(
+			queueBackpressure.QueuePendingHigh,
+			queueBackpressure.QueuePendingLow,
+			queueBackpressure.QueueOldestHigh,
+			queueBackpressure.QueueOldestLow,
+			queueBackpressure.QueueSlopeWindow,
+		)
+		if pmQueueHealthSampler != nil {
+			bpWatchdog.SetQueueStatsSource(pmQueueHealthSampler)
+		}
 		uploadHandler.SetBackpressureGate(bpWatchdog)
 		// watchdog 周期性自刷新 sys_configs(acs.backpressure) 阈值（见 Watchdog.sample）——
 		// 不订阅 SubjectSysConfigSaved：ACS 的 JetStream workqueue 流上该 subject 已被

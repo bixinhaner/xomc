@@ -58,8 +58,10 @@ const (
 	// 区分「手填 vs 默认密码」两条路径。
 	ActionUserCreate = "user_create"
 	// ActionPasswordReset covers admin-initiated password reset (issue #649).
-	// 区别于用户自助改密（不入 audit）；含硬规则强制改密 + 旧 token 立即失效（OWASP A07）。
+	// 区别于用户自助改密；含硬规则强制改密 + 旧 token 立即失效（OWASP A07）。
 	ActionPasswordReset = "password_reset"
+	// ActionPasswordChange covers authenticated users changing their own password.
+	ActionPasswordChange = "password_change"
 )
 
 // ResourceType constants identify the entity an action targets.

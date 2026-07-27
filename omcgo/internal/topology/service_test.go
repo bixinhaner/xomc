@@ -32,6 +32,7 @@ type mockGroupRepo struct {
 	batchAddDevicesFn            func(ctx context.Context, groupID uuid.UUID, deviceIDs []uuid.UUID) (int64, error)
 	moveDevicesFn                func(ctx context.Context, deviceIDs []uuid.UUID, targetGroupID uuid.UUID) (int64, error)
 	removeDevicesFromAllGroupsFn func(ctx context.Context, deviceIDs []uuid.UUID) (int64, error)
+	invalidateCountsCalls        int
 }
 
 func (m *mockGroupRepo) Create(ctx context.Context, group *DeviceGroup) error {
@@ -166,11 +167,25 @@ func (m *mockGroupRepo) ClearBoundRule(_ context.Context, _ uuid.UUID) error {
 func (m *mockGroupRepo) UpdateBoundRule(_ context.Context, _, _ uuid.UUID) error {
 	return nil
 }
+func (m *mockGroupRepo) InvalidateDeviceGroupCounts() {
+	m.invalidateCountsCalls++
+}
 
 // --- Helper ---
 
 func newTestGroupService(repo *mockGroupRepo) *DeviceGroupService {
 	return NewDeviceGroupService(repo, nil, nil, zap.NewNop())
+}
+
+func TestDeviceGroupService_CreateGroup_InvalidatesTreeCache(t *testing.T) {
+	repo := &mockGroupRepo{}
+
+	_, err := newTestGroupService(repo).CreateGroup(context.Background(), CreateGroupRequest{
+		Name: "new-root",
+	}, "tester")
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, repo.invalidateCountsCalls)
 }
 
 func TestDeviceGroupService_CreateGroup_PersistsRuleSource(t *testing.T) {
@@ -507,9 +522,9 @@ func TestDeviceGroupService_MoveDevices_ValidInputSucceeds(t *testing.T) {
 	assert.Zero(t, affected) // mock MoveDevices 返回 0
 }
 
-// --- Tests: issue #478 移动/添加到「未分组设备」内置节点 = 移出分组 ---
+// --- Tests: default L2 group is a real target group ---
 
-// 成功路径：移到真实分组 → 走 UPSERT（repo.MoveDevices），不触碰移出分组路径。
+// 成功路径：移到真实分组 → 走 UPSERT（repo.MoveDevices），不触碰清空归属兜底路径。
 func TestDeviceGroupService_MoveDevices_RealGroup_UpsertsRecord(t *testing.T) {
 	var moveCalled, removeAllCalled bool
 	devA, devB := uuid.New(), uuid.New()
@@ -537,27 +552,29 @@ func TestDeviceGroupService_MoveDevices_RealGroup_UpsertsRecord(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), affected)
 	assert.True(t, moveCalled, "移到真实分组应走 UPSERT")
-	assert.False(t, removeAllCalled, "移到真实分组不应触发移出分组")
+	assert.False(t, removeAllCalled, "移到真实分组不应清空全部归属")
 }
 
-// 特例路径：移到「未分组设备」内置节点(...0002) → 删全部归属记录（移出分组），
-// 不走 UPSERT，且不校验目标分组存在（虚拟节点）。
-func TestDeviceGroupService_MoveDevices_UnassignedNode_RemovesAllMemberships(t *testing.T) {
+// 默认 L2 组(...0002) 是真实设备组：移动到默认组应走 UPSERT。
+func TestDeviceGroupService_MoveDevices_DefaultGroup_UpsertsRecord(t *testing.T) {
 	var moveCalled, removeAllCalled, getByIDCalled bool
 	devA, devB := uuid.New(), uuid.New()
+	defaultGroup := uuid.MustParse(global.DefaultLevel2GroupID)
 
 	svc := newTestGroupService(&mockGroupRepo{
-		getByIDFn: func(_ context.Context, _ uuid.UUID) (*DeviceGroup, error) {
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*DeviceGroup, error) {
 			getByIDCalled = true
-			return &DeviceGroup{}, nil
+			assert.Equal(t, defaultGroup, id)
+			return &DeviceGroup{ID: id, IsDefault: true}, nil
 		},
-		moveDevicesFn: func(_ context.Context, _ []uuid.UUID, _ uuid.UUID) (int64, error) {
+		moveDevicesFn: func(_ context.Context, deviceIDs []uuid.UUID, target uuid.UUID) (int64, error) {
 			moveCalled = true
-			return 0, nil
+			assert.Equal(t, defaultGroup, target)
+			assert.ElementsMatch(t, []uuid.UUID{devA, devB}, deviceIDs)
+			return int64(len(deviceIDs)), nil
 		},
 		removeDevicesFromAllGroupsFn: func(_ context.Context, deviceIDs []uuid.UUID) (int64, error) {
 			removeAllCalled = true
-			assert.ElementsMatch(t, []uuid.UUID{devA, devB}, deviceIDs)
 			return int64(len(deviceIDs)), nil
 		},
 	})
@@ -567,10 +584,10 @@ func TestDeviceGroupService_MoveDevices_UnassignedNode_RemovesAllMemberships(t *
 		DeviceIDs:     []string{devA.String(), devB.String()},
 	})
 	require.NoError(t, err)
-	assert.Equal(t, int64(2), affected, "应返回删除的归属记录数")
-	assert.True(t, removeAllCalled, "移到未分组节点应删全部归属记录")
-	assert.False(t, moveCalled, "移到未分组节点不应走 UPSERT")
-	assert.False(t, getByIDCalled, "未分组虚拟节点不应校验目标分组存在")
+	assert.Equal(t, int64(2), affected)
+	assert.True(t, getByIDCalled, "默认组应按真实分组校验存在")
+	assert.True(t, moveCalled, "移到默认组应走 UPSERT")
+	assert.False(t, removeAllCalled, "移到默认组不应删除全部归属记录")
 }
 
 // BatchAddDevices 成功路径：加入真实分组 → 走 UPSERT。
@@ -598,40 +615,43 @@ func TestDeviceGroupService_BatchAddDevices_RealGroup_UpsertsRecord(t *testing.T
 	assert.False(t, removeAllCalled)
 }
 
-// BatchAddDevices 特例路径：加入「未分组设备」内置节点 → 删全部归属记录。
-func TestDeviceGroupService_BatchAddDevices_UnassignedNode_RemovesAllMemberships(t *testing.T) {
+// BatchAddDevices：加入默认 L2 组 → 走 UPSERT。
+func TestDeviceGroupService_BatchAddDevices_DefaultGroup_UpsertsRecord(t *testing.T) {
 	var addCalled, removeAllCalled bool
 	devs := []uuid.UUID{uuid.New(), uuid.New()}
-	unassigned := uuid.MustParse(global.DefaultLevel2GroupID)
+	defaultGroup := uuid.MustParse(global.DefaultLevel2GroupID)
 
 	svc := newTestGroupService(&mockGroupRepo{
-		batchAddDevicesFn: func(_ context.Context, _ uuid.UUID, _ []uuid.UUID) (int64, error) {
+		batchAddDevicesFn: func(_ context.Context, group uuid.UUID, deviceIDs []uuid.UUID) (int64, error) {
 			addCalled = true
-			return 0, nil
+			assert.Equal(t, defaultGroup, group)
+			assert.ElementsMatch(t, devs, deviceIDs)
+			return int64(len(deviceIDs)), nil
 		},
 		removeDevicesFromAllGroupsFn: func(_ context.Context, deviceIDs []uuid.UUID) (int64, error) {
 			removeAllCalled = true
-			assert.ElementsMatch(t, devs, deviceIDs)
 			return int64(len(deviceIDs)), nil
 		},
 	})
 
-	affected, err := svc.BatchAddDevices(context.Background(), unassigned, devs)
+	affected, err := svc.BatchAddDevices(context.Background(), defaultGroup, devs)
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), affected)
-	assert.True(t, removeAllCalled, "加入未分组节点应删全部归属记录")
-	assert.False(t, addCalled, "加入未分组节点不应走 UPSERT")
+	assert.True(t, addCalled, "加入默认组应走 UPSERT")
+	assert.False(t, removeAllCalled, "加入默认组不应删除全部归属记录")
 }
 
-// AddDevice（legacy 单设备）特例路径：加入「未分组设备」内置节点 → 删该设备全部归属记录。
-func TestDeviceGroupService_AddDevice_UnassignedNode_RemovesAllMemberships(t *testing.T) {
+// AddDevice（legacy 单设备）：加入默认 L2 组 → 走 UPSERT。
+func TestDeviceGroupService_AddDevice_DefaultGroup_UpsertsRecord(t *testing.T) {
 	var addCalled, removeAllCalled bool
 	dev := uuid.New()
-	unassigned := uuid.MustParse(global.DefaultLevel2GroupID)
+	defaultGroup := uuid.MustParse(global.DefaultLevel2GroupID)
 
 	svc := newTestGroupService(&mockGroupRepo{
-		addDeviceFn: func(_ context.Context, _, _ uuid.UUID) error {
+		addDeviceFn: func(_ context.Context, group, deviceID uuid.UUID) error {
 			addCalled = true
+			assert.Equal(t, defaultGroup, group)
+			assert.Equal(t, dev, deviceID)
 			return nil
 		},
 		removeDevicesFromAllGroupsFn: func(_ context.Context, deviceIDs []uuid.UUID) (int64, error) {
@@ -641,10 +661,10 @@ func TestDeviceGroupService_AddDevice_UnassignedNode_RemovesAllMemberships(t *te
 		},
 	})
 
-	err := svc.AddDevice(context.Background(), unassigned, dev)
+	err := svc.AddDevice(context.Background(), defaultGroup, dev)
 	require.NoError(t, err)
-	assert.True(t, removeAllCalled, "加入未分组节点应删全部归属记录")
-	assert.False(t, addCalled, "加入未分组节点不应走 UPSERT")
+	assert.True(t, addCalled, "加入默认组应走 UPSERT")
+	assert.False(t, removeAllCalled, "加入默认组不应删除全部归属记录")
 }
 
 // AddDevice 成功路径：加入真实分组 → 走 UPSERT。

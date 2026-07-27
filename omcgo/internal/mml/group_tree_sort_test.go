@@ -3,6 +3,7 @@ package mml
 import (
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -64,4 +65,82 @@ func TestChapterSortKey(t *testing.T) {
 
 	// 空 chapter：高位 sentinel，排末位
 	assert.Equal(t, "~~~~~", chapterSortKey(""))
+}
+
+func TestSortCommandsByLogicalCode_SectionThenOperation(t *testing.T) {
+	cmds := []GroupTreeCommand{
+		{CommandCode: "RMV PLMN_LIST", LogicalCode: "PLMN_LIST", LogicalName: "PLMN列表", OperationType: "RMV"},
+		{CommandCode: "LST SECURITY_GATEWAY", LogicalCode: "SECURITY_GATEWAY", LogicalName: "安全网关", OperationType: "LST"},
+		{CommandCode: "MOD PLMN_LIST", LogicalCode: "PLMN_LIST", LogicalName: "PLMN列表", OperationType: "MOD"},
+		{CommandCode: "ADD PLMN_LIST", LogicalCode: "PLMN_LIST", LogicalName: "PLMN列表", OperationType: "ADD"},
+		{CommandCode: "LST PLMN_LIST", LogicalCode: "PLMN_LIST", LogicalName: "PLMN列表", OperationType: "LST"},
+		{CommandCode: "MOD SECURITY_GATEWAY", LogicalCode: "SECURITY_GATEWAY", LogicalName: "安全网关", OperationType: "MOD"},
+	}
+
+	sortCommandsByLogicalCode(cmds)
+
+	got := make([]string, len(cmds))
+	for i, cmd := range cmds {
+		got[i] = cmd.CommandCode
+	}
+	assert.Equal(t, []string{
+		"ADD PLMN_LIST",
+		"RMV PLMN_LIST",
+		"MOD PLMN_LIST",
+		"LST PLMN_LIST",
+		"MOD SECURITY_GATEWAY",
+		"LST SECURITY_GATEWAY",
+	}, got)
+}
+
+func TestSortCommandsByLogicalCode_UsesLogicalNameBeforeCode(t *testing.T) {
+	cmds := []GroupTreeCommand{
+		{CommandCode: "LST SI_SUB_05", LogicalCode: "SI_SUB_05", LogicalName: "5G邻区参数管理", OperationType: "LST"},
+		{CommandCode: "ADD NR_CELL", LogicalCode: "NR_CELL", LogicalName: "5G邻区参数管理", OperationType: "ADD"},
+		{CommandCode: "RMV NR_CELL", LogicalCode: "NR_CELL", LogicalName: "5G邻区参数管理", OperationType: "RMV"},
+		{CommandCode: "MOD SI_SUB_05", LogicalCode: "SI_SUB_05", LogicalName: "5G邻区参数管理", OperationType: "MOD"},
+	}
+
+	sortCommandsByLogicalCode(cmds)
+
+	got := make([]string, len(cmds))
+	for i, cmd := range cmds {
+		got[i] = cmd.CommandCode
+	}
+	assert.Equal(t, []string{
+		"ADD NR_CELL",
+		"RMV NR_CELL",
+		"MOD SI_SUB_05",
+		"LST SI_SUB_05",
+	}, got)
+}
+
+func TestSortFlatCommandOrder_GroupsSameLogicalName(t *testing.T) {
+	addGSM := uuid.New()
+	rmvGSM := uuid.New()
+	lstGSM := uuid.New()
+	modGSM := uuid.New()
+	addNR := uuid.New()
+	order := []uuid.UUID{addGSM, rmvGSM, addNR, lstGSM, modGSM}
+	cmds := map[uuid.UUID]*flatCmdAcc{
+		addGSM: {commandCode: "ADD INTER_RAT_CELL_GSM", nameZh: "GSM邻区参数管理", op: "ADD"},
+		rmvGSM: {commandCode: "RMV INTER_RAT_CELL_GSM", nameZh: "GSM邻区参数管理", op: "RMV"},
+		lstGSM: {commandCode: "LST SI_SUB_04", nameZh: "GSM邻区参数管理", op: "LST"},
+		modGSM: {commandCode: "MOD SI_SUB_04", nameZh: "GSM邻区参数管理", op: "MOD"},
+		addNR:  {commandCode: "ADD INTER_RAT_CELL_NR", nameZh: "NR邻区参数管理", op: "ADD"},
+	}
+
+	sortFlatCommandOrder(order, cmds)
+
+	got := make([]string, len(order))
+	for i, id := range order {
+		got[i] = cmds[id].commandCode
+	}
+	assert.Equal(t, []string{
+		"ADD INTER_RAT_CELL_GSM",
+		"RMV INTER_RAT_CELL_GSM",
+		"MOD SI_SUB_04",
+		"LST SI_SUB_04",
+		"ADD INTER_RAT_CELL_NR",
+	}, got)
 }

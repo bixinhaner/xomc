@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, Checkbox, DatePicker, Drawer, Form, Input, InputNumber, Modal, Radio, Space, TimePicker, Typography, message } from 'antd';
 import type { Dayjs } from 'dayjs';
-import type { MMLExecuteType, MMLScript, MMLScriptImportValidation, MMLScriptExecutionInput } from '@core/types/mml';
+import type { MMLExecuteType, MMLScript, MMLScriptImportValidation, MMLScriptExecutionInput, MMLTask } from '@core/types/mml';
 import { useCreateMMLScriptExecution } from '@core/hooks/api/useMML';
+import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
+import { toSystemTimezoneRFC3339 } from '@core/utils/systemTime';
+import { useT } from '@/hooks/useT';
 import ScriptImportPreview from './ScriptImportPreview';
 import { buildMmlScriptExecutionTaskName } from '../utils/defaultTaskName';
 
@@ -10,7 +13,7 @@ export interface ScriptExecutionDrawerProps {
   open: boolean;
   script: MMLScript | null;
   onClose: () => void;
-  onSuccess?: () => void;
+  onSuccess?: (task: MMLTask) => void;
 }
 
 interface ExecutionForm {
@@ -37,6 +40,7 @@ function validationFromError(error: unknown): MMLScriptImportValidation | undefi
 }
 
 export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess }: ScriptExecutionDrawerProps) {
+  const t = useT();
   const [form] = Form.useForm<ExecutionForm>();
   const [validation, setValidation] = useState<MMLScriptImportValidation | null>(null);
   const [errorMessages, setErrorMessages] = useState<string[]>([]);
@@ -45,7 +49,20 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
   const submittingRef = useRef(false);
   const requestIdRef = useRef('');
   const executionMutation = useCreateMMLScriptExecution();
+  const systemTimezone = useSystemTimezoneValue();
   const executeType = Form.useWatch('executeType', form);
+  const offlineRetry = Form.useWatch('offlineRetry', form);
+  const failedRetry = Form.useWatch('failedRetry', form);
+  const isScheduledExecution = executeType === 'scheduled';
+  const isPeriodicExecution = executeType === 'periodic';
+  const showOfflineRetryWait = Boolean(offlineRetry);
+  const showFailedRetryInputs = Boolean(failedRetry);
+  const executeTypeOptions = [
+    { value: 'immediate', label: t('mml.scriptExecution.executeType.immediate') },
+    { value: 'suspended', label: t('mml.scriptExecution.executeType.suspended') },
+    { value: 'scheduled', label: t('mml.scriptExecution.executeType.scheduled') },
+    { value: 'periodic', label: t('mml.scriptExecution.executeType.periodic') },
+  ];
 
   useEffect(() => {
     if (!open) return;
@@ -68,19 +85,19 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
       if (resultValidation.summary.warningCount > 0 || resultValidation.issues.some((issue) => issue.severity === 'warning')) {
         setValidation(resultValidation); setWarningValues({ ...input, requestId }); return;
       }
-      setValidation(null); onSuccess?.(); onClose();
+      setValidation(null); onSuccess?.(result.task); onClose();
     } catch (error) {
       const errorValidation = validationFromError(error);
       if (errorValidation) {
         setValidation(errorValidation);
-        setErrorMessages(errorValidation.issues.filter((issue) => issue.severity === 'error').map((issue) => issue.displayMessage || issue.message || '校验未通过'));
+        setErrorMessages(errorValidation.issues.filter((issue) => issue.severity === 'error').map((issue) => issue.displayMessage || issue.message || t('mml.scriptImport.issueFallback')));
         const hasValidationErrors = errorValidation.summary.errorCount > 0 || errorValidation.issues.some((issue) => issue.severity === 'error');
         if (!hasValidationErrors && (errorValidation.summary.warningCount > 0 || errorValidation.issues.some((issue) => issue.severity === 'warning'))) {
           setWarningValues({ ...input, requestId });
           return;
         }
       }
-      void message.error(error instanceof Error ? error.message : '执行校验失败');
+      void message.error(error instanceof Error ? error.message : t('mml.scriptExecution.validationFailed'));
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -108,10 +125,23 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
       }
     }
     const input: MMLScriptExecutionInput = {
-      taskName: values.taskName.trim(), executeType: values.executeType, scheduledAt: values.scheduledAt?.toISOString(),
-      periodStart: values.periodRange?.[0]?.toISOString(), periodEnd: values.periodRange?.[1]?.toISOString(), periodTime: values.periodTime?.format('HH:mm:ss'),
-      offlineRetry: values.offlineRetry, offlineRetryWait: values.offlineRetryWait, failedRetry: values.failedRetry,
-      failedRetryCount: values.failedRetryCount, failedRetryInterval: values.failedRetryInterval,
+      taskName: values.taskName.trim(),
+      executeType: values.executeType,
+      scheduledAt: values.executeType === 'scheduled'
+        ? toSystemTimezoneRFC3339(values.scheduledAt, systemTimezone) ?? values.scheduledAt?.toISOString()
+        : undefined,
+      periodStart: values.executeType === 'periodic'
+        ? toSystemTimezoneRFC3339(values.periodRange?.[0], systemTimezone) ?? values.periodRange?.[0]?.toISOString()
+        : undefined,
+      periodEnd: values.executeType === 'periodic'
+        ? toSystemTimezoneRFC3339(values.periodRange?.[1], systemTimezone) ?? values.periodRange?.[1]?.toISOString()
+        : undefined,
+      periodTime: values.executeType === 'periodic' ? values.periodTime?.format('HH:mm:ss') : undefined,
+      offlineRetry: values.offlineRetry,
+      offlineRetryWait: values.offlineRetryWait,
+      failedRetry: values.failedRetry,
+      failedRetryCount: values.failedRetryCount,
+      failedRetryInterval: values.failedRetryInterval,
     };
     await execute(input);
   };
@@ -123,27 +153,49 @@ export default function ScriptExecutionDrawer({ open, script, onClose, onSuccess
   };
 
   return (
-    <Drawer open={open} onClose={onClose} title={script ? `执行：${script.scriptName}` : '执行脚本'} width={520} destroyOnHidden>
+    <Drawer open={open} onClose={onClose} title={script ? t('mml.scriptExecution.titleWithName', { name: script.scriptName }) : t('mml.scriptExecution.title')} width={520} destroyOnHidden>
       <Form form={form} layout="vertical">
-        <Form.Item label="任务名称" name="taskName" rules={[{ required: true, message: '请输入任务名称' }]}><Input /></Form.Item>
-        <Form.Item label="执行方式" name="executeType"><Radio.Group options={[{ value: 'immediate', label: '立即' }, { value: 'suspended', label: '挂起' }, { value: 'scheduled', label: '定时' }, { value: 'periodic', label: '周期' }]} /></Form.Item>
-        <Form.Item label="执行时间" name="scheduledAt" rules={executeType === 'scheduled' ? [{ required: true, message: '请选择执行时间' }] : []}><DatePicker showTime style={{ width: '100%' }} /></Form.Item>
-        {executeType === 'periodic' ? <>
-          <Form.Item label="周期日期" name="periodRange" rules={[{ required: true, message: '请选择周期日期范围' }]}><DatePicker.RangePicker style={{ width: '100%' }} /></Form.Item>
-          <Form.Item label="周期时间" name="periodTime" rules={[{ required: true, message: '请选择周期执行时间' }]}><TimePicker style={{ width: '100%' }} /></Form.Item>
+        <Form.Item label={t('mml.taskName')} name="taskName" rules={[{ required: true, message: t('mml.inputTaskNameRequired') }]}><Input /></Form.Item>
+        <Form.Item label={t('mml.executeMethod')} name="executeType"><Radio.Group options={executeTypeOptions} /></Form.Item>
+        {isScheduledExecution ? (
+          <Form.Item label={t('mml.executionTime')} name="scheduledAt" rules={[{ required: true, message: t('mml.scriptExecution.selectExecutionTime') }]}><DatePicker showTime style={{ width: '100%' }} /></Form.Item>
+        ) : null}
+        {isPeriodicExecution ? <>
+          <Form.Item label={t('mml.scriptExecution.periodDate')} name="periodRange" rules={[{ required: true, message: t('mml.scriptExecution.selectPeriodDateRange') }]}><DatePicker.RangePicker style={{ width: '100%' }} /></Form.Item>
+          <Form.Item label={t('mml.periodTime')} name="periodTime" rules={[{ required: true, message: t('mml.scriptExecution.selectPeriodTime') }]}><TimePicker style={{ width: '100%' }} /></Form.Item>
         </> : null}
         <Space direction="vertical" style={{ width: '100%' }}>
-          <Form.Item name="offlineRetry" valuePropName="checked" noStyle><Checkbox>离线等待重试</Checkbox></Form.Item>
-          <Form.Item name="offlineRetryWait" label="离线等待（秒）"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>
-          <Form.Item name="failedRetry" valuePropName="checked" noStyle><Checkbox>失败重试</Checkbox></Form.Item>
-          <Form.Item name="failedRetryCount" label="失败重试次数"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
-          <Form.Item name="failedRetryInterval" label="失败重试间隔（秒）"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>
+          <div
+            aria-label={t('mml.scriptExecution.retryOptions')}
+            role="group"
+            style={{ display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}
+          >
+            <Form.Item name="offlineRetry" valuePropName="checked" noStyle><Checkbox>{t('mml.offlineRetryPolicy')}</Checkbox></Form.Item>
+            <Form.Item name="failedRetry" valuePropName="checked" noStyle><Checkbox>{t('mml.failedRetryPolicy')}</Checkbox></Form.Item>
+          </div>
+          {showOfflineRetryWait ? (
+            <Form.Item name="offlineRetryWait" label={t('mml.scriptExecution.offlineRetryWaitSeconds')}><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>
+          ) : null}
+          {showFailedRetryInputs ? <>
+            <Form.Item name="failedRetryCount" label={t('mml.scriptExecution.failedRetryCount')}><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
+            <Form.Item name="failedRetryInterval" label={t('mml.scriptExecution.failedRetryIntervalSeconds')}><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>
+          </> : null}
         </Space>
-        <Button aria-label="执行" type="primary" htmlType="button" loading={executionMutation.isPending || submitting} disabled={executionMutation.isPending || submitting} onClick={() => void submit()}>执行</Button>
+        <div
+          aria-label={t('mml.scriptExecution.executionActions')}
+          role="group"
+          style={{
+            marginTop: 20,
+            paddingTop: 16,
+            borderTop: '1px solid rgba(5, 5, 5, 0.06)',
+          }}
+        >
+          <Button aria-label={t('mml.script.action.execute')} type="primary" htmlType="button" loading={executionMutation.isPending || submitting} disabled={executionMutation.isPending || submitting} onClick={() => void submit()}>{t('mml.script.action.execute')}</Button>
+        </div>
       </Form>
       {errorMessages.length ? <Typography.Text type="danger">{errorMessages.join(', ')}</Typography.Text> : null}
       {validation ? <ScriptImportPreview validation={validation} /> : null}
-      <Modal open={Boolean(warningValues)} title="校验发现警告" onCancel={() => setWarningValues(null)} onOk={confirmWarnings} okText="确认执行" cancelText="取消">请确认后继续执行。</Modal>
+      <Modal open={Boolean(warningValues)} title={t('mml.scriptImport.warningTitle')} onCancel={() => setWarningValues(null)} onOk={confirmWarnings} okText={t('mml.console.confirmExecute')} cancelText={t('common.cancel')}>{t('mml.scriptExecution.confirmWarnings')}</Modal>
     </Drawer>
   );
 }

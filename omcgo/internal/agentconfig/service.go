@@ -96,22 +96,24 @@ func (s *Service) GetVisibilityConfig(ctx context.Context) (*VisibilityConfig, e
 }
 
 func (s *Service) GetRuntimeTarget(ctx context.Context) (*RuntimeTarget, error) {
-	cfg, err := s.GetAdminConfig(ctx)
+	values, err := s.loadValues(ctx)
 	if err != nil {
 		return nil, err
 	}
+	cfg := adminConfigFromValues(values)
 	instanceName, instanceNameIsDefault := s.loadInstanceName(ctx)
 	enabled := cfg.Enabled && cfg.Status == StatusConnected && cfg.AgentStudioBaseURL != "" && cfg.ConnectorID != ""
 	return &RuntimeTarget{
-		Enabled:               enabled,
-		AgentStudioBaseURL:    cfg.AgentStudioBaseURL,
-		ConnectorSlug:         cfg.ConnectorSlug,
-		ConnectorID:           cfg.ConnectorID,
-		Status:                cfg.Status,
-		LastError:             cfg.LastError,
-		InstanceName:          instanceName,
-		InstanceNameIsDefault: instanceNameIsDefault,
-		Policy:                cfg.Policy,
+		Enabled:                 enabled,
+		AgentStudioBaseURL:      cfg.AgentStudioBaseURL,
+		AgentStudioServiceToken: strings.TrimSpace(values[KeyAgentStudioServiceToken]),
+		ConnectorSlug:           cfg.ConnectorSlug,
+		ConnectorID:             cfg.ConnectorID,
+		Status:                  cfg.Status,
+		LastError:               cfg.LastError,
+		InstanceName:            instanceName,
+		InstanceNameIsDefault:   instanceNameIsDefault,
+		Policy:                  cfg.Policy,
 	}, nil
 }
 
@@ -219,6 +221,14 @@ func (s *Service) loadValues(ctx context.Context) (map[string]string, error) {
 	for _, row := range rows {
 		values[row.Key] = row.Value
 	}
+	if strings.TrimSpace(values[KeyAgentStudioBaseURL]) == "" {
+		values[KeyAgentStudioBaseURL] = DefaultAgentStudioBaseURL
+	}
+	if strings.TrimSpace(values[KeyAgentStudioServiceToken]) == "" {
+		values[KeyAgentStudioServiceToken] = DefaultAgentStudioServiceToken
+	}
+	// Connector provisioning is shared infrastructure, not an instance-level user choice.
+	values[KeyConnectorSlug] = DefaultConnectorSlug
 	return values, nil
 }
 
@@ -260,12 +270,6 @@ func (s *Service) mergeSettings(ctx context.Context, req UpdateRequest) (map[str
 	}
 	if req.AgentStudioServiceToken != nil && strings.TrimSpace(*req.AgentStudioServiceToken) != "" {
 		settings.AgentStudioServiceToken = strings.TrimSpace(*req.AgentStudioServiceToken)
-	}
-	if req.ConnectorSlug != nil {
-		settings.ConnectorSlug = strings.TrimSpace(*req.ConnectorSlug)
-	}
-	if settings.ConnectorSlug == "" {
-		settings.ConnectorSlug = defaultConnectorSlug()
 	}
 	if req.AllowedMethods != nil {
 		settings.Policy.AllowedMethods = normalizeMethods(*req.AllowedMethods)
@@ -555,10 +559,6 @@ func normalizeHTTPURL(value string) (string, error) {
 	u.RawQuery = ""
 	u.Fragment = ""
 	return strings.TrimRight(u.String(), "/"), nil
-}
-
-func defaultConnectorSlug() string {
-	return "external-agent-connector"
 }
 
 func isDefaultOMCName(value string) bool {

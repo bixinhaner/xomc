@@ -8,6 +8,14 @@ import type { ParameterUpdateRequest } from '@core/types/deviceParameter';
 import type { QuickSettingsGroup, QuickSettingsParam } from '@core/types/quicksettings';
 import { feedbackKey, useQuickSettingsFeedbackStore } from '@core/store/quickSettingsFeedbackStore';
 import { BSC_BTS_FEEDBACK_GROUP_ID } from './bscBtsFeedback';
+import {
+  isBscCodecSupportParam,
+  normalizeBscCodecSupportValue,
+  parseQuickSettingsMultiCheckboxValue,
+  resolveQuickSettingsParameterType,
+  serializeBscCodecSupportValue,
+  serializeQuickSettingsMultiCheckboxValue,
+} from './validators';
 
 const { Text } = Typography;
 
@@ -53,11 +61,9 @@ const DEFAULT_VALUES: Record<string, string> = {
   MsMaxPower: '31',
   GprsMode: 'none',
   NeighborListMode: 'automatic',
-  // CodecSupport / handover 不预填:osmo-bsc 对 "fr,hr,efr,amr"(Invalid para)与
-  // "Allow"(Value failed verification)会 9007 拒,前端 backend MappingValidator 又
-  // 放行(字符串/枚举 backend 校验都通过)→ 每次新增都必然 SPV 失败 → 触发自动回滚,
-  // UX 上表现为"永远新增不成功"。改为空让用户主动选,或由 AddObject 后设备保留默认值。
-  CodecSupport: '',
+  // CodecSupport 页面展示 fr 必选,但下发时只发送 hr/efr/amr 的增量组合。
+  // 设备 Get 会自动带回 fr；直接 Set fr 或 fr-* 会被 9007 拒绝。
+  CodecSupport: 'fr',
   handover: '',
   HandoverAlgorithm: '1',
   'handover1.window.rxlev.averaging': '10',
@@ -133,6 +139,33 @@ function validateField(param: QuickSettingsParam | undefined, value: string): st
     if (param.maxValue !== undefined && n > param.maxValue) return `不能大于 ${param.maxValue}`;
   }
   return '';
+}
+
+export function serializeBscBtsAddDeviceValue(param: QuickSettingsParam | undefined, value: string): string {
+  const raw = String(value ?? '').trim();
+  if (!param) return raw;
+  if (param.type === 'multiCheckbox') {
+    if (isBscCodecSupportParam(param.standardPath ?? param.name)) {
+      return serializeBscCodecSupportValue(raw);
+    }
+    if (raw === '') return raw;
+    return serializeQuickSettingsMultiCheckboxValue(raw);
+  }
+  if (raw === '') return raw;
+  if (param.type === 'enum' && param.enumOptions && param.enumOptions.length > 0) {
+    const direct = param.enumOptions.find((o) => o.value === raw);
+    if (direct) return direct.value;
+    const ci = raw.toLowerCase();
+    const byValue = param.enumOptions.find((o) => o.value.toLowerCase() === ci);
+    if (byValue) return byValue.value;
+    const byLabel = param.enumOptions.find((o) => String(o.label ?? '').toLowerCase() === ci);
+    if (byLabel) return byLabel.value;
+  }
+  return raw;
+}
+
+export function resolveBscBtsAddParameterType(param: QuickSettingsParam | undefined): ParameterUpdateRequest['parameterType'] {
+  return resolveQuickSettingsParameterType(param?.type);
 }
 
 /** Range hint:与截图风格一致 "Range: lo-hi Integer"。 */
@@ -283,13 +316,12 @@ export default function BscBtsAddModal({
     // 2) SetParameterValues:仅下发用户填了值的字段(空字符串跳过,避免覆盖设备侧默认值)
     const updates: ParameterUpdateRequest[] = [];
     for (const leaf of VISIBLE_LEAVES) {
-      const value = (values[leaf] ?? '').trim();
-      if (value === '') continue;
       const param = leafIndex.get(leaf);
+      const value = serializeBscBtsAddDeviceValue(param, values[leaf] ?? '');
+      if (value === '') continue;
       const seg = leafPathSegment(param, leaf);
       const path = `${BSC_BTS_OBJECT_PREFIX}${newInstanceNumber}.${seg}`;
-      const type: ParameterUpdateRequest['parameterType'] =
-        (param?.type as ParameterUpdateRequest['parameterType']) || 'string';
+      const type = resolveBscBtsAddParameterType(param);
       updates.push({ parameterPath: path, parameterValue: value, parameterType: type });
     }
 
@@ -416,15 +448,21 @@ export default function BscBtsAddModal({
           if (param?.type === 'multiCheckbox') {
             const opts = param.checkboxOptions ?? [];
             const selected = value
-              ? value.split(',').map((s) => s.trim()).filter(Boolean)
+              ? isBscCodecSupportParam(param.standardPath ?? param.name)
+                ? normalizeBscCodecSupportValue(value)
+                : parseQuickSettingsMultiCheckboxValue(value)
               : [];
+            const isCodecSupport = isBscCodecSupportParam(param.standardPath ?? param.name);
             return (
               <div key={leaf} style={{ minWidth: 0 }}>
                 {labelNode}
                 <Checkbox.Group
                   value={selected}
-                  options={opts.map((v) => ({ value: v, label: v }))}
-                  onChange={(vals) => setValue(leaf, (vals as string[]).join(','))}
+                  options={opts.map((v) => ({ value: v, label: v, disabled: isCodecSupport && v === 'fr' }))}
+                  onChange={(vals) => setValue(
+                    leaf,
+                    (isCodecSupport ? normalizeBscCodecSupportValue(vals) : (vals as string[])).join('-'),
+                  )}
                 />
                 {hintNode}
                 {errNode}

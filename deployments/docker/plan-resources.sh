@@ -105,32 +105,39 @@ floori() { awk -v x="$1" 'BEGIN{printf "%d", int(x)}'; }
 # 1. 探测「容器可用天花板」—— 优先 docker info（= VM 上限 / 宿主总量）
 # ---------------------------------------------------------------------------
 sep "1/4 探测 Docker 引擎可用资源"
-OS="$(uname -s)"
 VM_CPU=0; VM_MEM_MIB=0; DISK_FREE_GIB=0
 DETECT_SRC="docker info"
 
-if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-  VM_CPU="$(docker info --format '{{.NCPU}}' 2>/dev/null || echo 0)"
-  _mb="$(docker info --format '{{.MemTotal}}' 2>/dev/null || echo 0)"
-  VM_MEM_MIB="$(awk -v b="$_mb" 'BEGIN{printf "%d", b/1024/1024}')"
-  # docker root 盘可用空间（Docker Desktop 下为 VM 盘；Linux 下为 /var/lib/docker 所在盘）
-  DOCKER_ROOT="$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)"
-  DISK_FREE_GIB="$(df -g "$DOCKER_ROOT" 2>/dev/null | awk 'NR==2{print $4}' || echo 0)"
-  [ -z "$DISK_FREE_GIB" ] && DISK_FREE_GIB="$(df -BG "$DOCKER_ROOT" 2>/dev/null | awk 'NR==2{gsub(/G/,"");print $4}' || echo 0)"
+if [ -n "${OMC_PROBE_CPU:-}" ] && [ -n "${OMC_PROBE_MEM_TOTAL_MIB:-}" ]; then
+  # what-if / CI 探测值是完整输入，不能再依赖 docker、uname 或 sysctl。
+  VM_CPU="$OMC_PROBE_CPU"
+  VM_MEM_MIB="$OMC_PROBE_MEM_TOTAL_MIB"
+  DETECT_SRC="OMC_PROBE_* 覆盖"
 else
-  # docker 不可用：回退到宿主探测（仅供预览；实际容器仍受 docker 引擎限制）
-  DETECT_SRC="宿主探测（docker 不可用，仅预览）"
-  warn "docker 引擎不可达——回退宿主探测；实际请在 docker 可用时重跑以读 VM 真实上限。"
-  if [ "$OS" = "Linux" ]; then
-    VM_CPU="$(nproc)"
-    VM_MEM_MIB="$(awk '/^MemTotal:/ {printf "%d", $2/1024}' /proc/meminfo)"
-    DISK_FREE_GIB="$(df -BG /var/lib/docker 2>/dev/null | awk 'NR==2{gsub(/G/,"");print $4}' || echo 0)"
-  elif [ "$OS" = "Darwin" ]; then
-    VM_CPU="$(sysctl -n hw.ncpu)"
-    VM_MEM_MIB="$(sysctl -n hw.memsize | awk '{printf "%d", $1/1024/1024}')"
-    warn "macOS 物理内存 ≠ Docker VM 上限；按物理算会超分，请在 docker 可用时重跑。"
+  OS="$(uname -s)"
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    VM_CPU="$(docker info --format '{{.NCPU}}' 2>/dev/null || echo 0)"
+    _mb="$(docker info --format '{{.MemTotal}}' 2>/dev/null || echo 0)"
+    VM_MEM_MIB="$(awk -v b="$_mb" 'BEGIN{printf "%d", b/1024/1024}')"
+    # docker root 盘可用空间（Docker Desktop 下为 VM 盘；Linux 下为 /var/lib/docker 所在盘）
+    DOCKER_ROOT="$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)"
+    DISK_FREE_GIB="$(df -g "$DOCKER_ROOT" 2>/dev/null | awk 'NR==2{print $4}' || echo 0)"
+    [ -z "$DISK_FREE_GIB" ] && DISK_FREE_GIB="$(df -BG "$DOCKER_ROOT" 2>/dev/null | awk 'NR==2{gsub(/G/,"");print $4}' || echo 0)"
   else
-    die "不支持的系统：$OS" 2
+    # docker 不可用：回退到宿主探测（仅供预览；实际容器仍受 docker 引擎限制）
+    DETECT_SRC="宿主探测（docker 不可用，仅预览）"
+    warn "docker 引擎不可达——回退宿主探测；实际请在 docker 可用时重跑以读 VM 真实上限。"
+    if [ "$OS" = "Linux" ]; then
+      VM_CPU="$(nproc)"
+      VM_MEM_MIB="$(awk '/^MemTotal:/ {printf "%d", $2/1024}' /proc/meminfo)"
+      DISK_FREE_GIB="$(df -BG /var/lib/docker 2>/dev/null | awk 'NR==2{gsub(/G/,"");print $4}' || echo 0)"
+    elif [ "$OS" = "Darwin" ]; then
+      VM_CPU="$(sysctl -n hw.ncpu)"
+      VM_MEM_MIB="$(sysctl -n hw.memsize | awk '{printf "%d", $1/1024/1024}')"
+      warn "macOS 物理内存 ≠ Docker VM 上限；按物理算会超分，请在 docker 可用时重跑。"
+    else
+      die "不支持的系统：$OS" 2
+    fi
   fi
 fi
 
@@ -221,7 +228,7 @@ if [ "$MAXIMIZE" = 1 ]; then
   WORKER_MEM=$(clampm 10 4096 24576)   # PM/MR XML 解析最吃内存
   ACS_MEM=$(clampm 6 4096 16384)       # TR-069 长连接会话堆
   APP_MEM=$(clampm 3 2048 8192)
-  MINIO_MEM=$(clampm 5 2048 8192)
+  MINIO_MEM=$(clampm 5 4096 8192)      # 对象存储；压测实测高并发 PM/MR 上传下内存可占满 1-2GiB，下限对齐 ACS/worker（2026-07-21）
   NATS_MEM=$(clampm 3 1024 4096)
   REDIS_MEM=$(clampm 2 1024 4096)      # OMC redis 实占极小，cap 给余量即可
   WEB_MEM=512
@@ -262,6 +269,9 @@ CPU_worker=$(cpu_share 0.6 2); CPU_acs=$(cpu_share 0.35 2); CPU_app=$(cpu_share 
 CPU_redis=$(cpu_share 0.15 1); CPU_nats=$(cpu_share 0.15 1)
 CPU_minio=$(cpu_share 0.15 1); CPU_web=$(cpu_share 0.1 1)
 fi
+
+# 两种规划模式都在最终 NATS_MEM 确定后统一派生，避免 maximize 分支漏定义。
+NATS_MAX_MEMORY_STORE=$(( NATS_MEM * 1024 * 1024 / 4 ))
 
 # ---- 联动派生 ----
 gomemlimit() { pct "$1" 90; }                          # GOMEMLIMIT = 0.90 × 内存限额（软限）
@@ -447,7 +457,7 @@ fi
   echo "REDIS_MAXMEMORY=${REDIS_MAXMEM}mb"; echo "REDIS_MAXMEMORY_POLICY=allkeys-lru"
   echo ""
   echo "# ── NATS / MinIO / Web ──"
-  echo "NATS_CPUS=$CPU_nats";     echo "NATS_MEM=${NATS_MEM}m"
+  echo "NATS_CPUS=$CPU_nats";     echo "NATS_MEM=${NATS_MEM}m"; echo "NATS_MAX_MEMORY_STORE=$NATS_MAX_MEMORY_STORE"
   echo "MINIO_CPUS=$CPU_minio";   echo "MINIO_MEM=${MINIO_MEM}m"
   echo "WEB_CPUS=$CPU_web";       echo "WEB_MEM=${WEB_MEM}m"
   echo ""

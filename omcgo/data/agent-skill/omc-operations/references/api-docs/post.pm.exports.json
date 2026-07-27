@@ -40,6 +40,7 @@
         "source_type": {
           "enum": [
             "dashboard",
+            "kpi_query",
             "adhoc"
           ],
           "type": "string"

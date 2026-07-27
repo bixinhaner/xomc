@@ -36,6 +36,12 @@ const defaultWakeConcurrency = 256
 // not a 500.
 var ErrQueueFull = errors.New("device task queue at capacity")
 
+// ErrTaskNotPending means a Redis queue entry lost the PostgreSQL pending-state
+// fence before ACS could send it. Callers should discard the stale execution
+// copy and continue with the next queued task instead of aborting the CWMP
+// session.
+var ErrTaskNotPending = errors.New("task is no longer pending")
+
 // ErrTaskNotFound is returned when a task ID does not resolve to an existing
 // task (e.g. cancelling / marking a non-existent task). It wraps the core
 // errors.ErrNotFound sentinel so that handlers mapping via
@@ -79,7 +85,7 @@ type TaskService struct {
 	eventBus     event.EventBus
 	logger       *zap.Logger
 
-	// defaultExpiresIn: T-0157 C1 — CreateTask 兜底默认超时秒数。
+	// defaultExpiresIn: T-0157 C1 — device task 创建兜底默认超时秒数。
 	// 调用方语义见 appconfig.TaskConfig.DefaultExpiresInSeconds。0 表示未配置（不兜底）。
 	defaultExpiresIn int
 
@@ -203,7 +209,7 @@ func (s *TaskService) SetMaxQueueDepth(n int) {
 	s.maxQueueDepth = n
 }
 
-// SetDefaultExpiresIn 配置 CreateTask 的默认超时兜底秒数（T-0157 C1）。
+// SetDefaultExpiresIn 配置 device task 创建的默认超时兜底秒数（T-0157 C1）。
 // 仅当 CreateTaskRequest.ExpiresIn == 0 时生效；调用方显式传 0 等价于声明"永不超时"
 // 但本兜底仍会覆盖（如需真正永不超时，调用方需显式传一个极大值如 86400）。
 // 负值或 0 表示不启用兜底，等价于历史行为。
@@ -212,6 +218,12 @@ func (s *TaskService) SetDefaultExpiresIn(seconds int) {
 		seconds = 0
 	}
 	s.defaultExpiresIn = seconds
+}
+
+func (s *TaskService) applyDefaultExpiresIn(req *CreateTaskRequest) {
+	if req != nil && req.ExpiresIn == 0 && s.defaultExpiresIn > 0 {
+		req.ExpiresIn = s.defaultExpiresIn
+	}
 }
 
 // CreateTask 创建新任务
@@ -224,7 +236,7 @@ func (s *TaskService) CreateTask(ctx context.Context, req *CreateTaskRequest) (*
 
 	// issue #7: 每设备 pending 队列深度背压 —— 防止面向不可达 / 不可信设备的任务
 	// 无界堆积耗尽 Redis/PG。命中上限直接拒绝（不落库、不入队），调用方按 429 处理。
-	if s.maxQueueDepth > 0 {
+	if !req.FailImmediately && s.maxQueueDepth > 0 {
 		depth, err := s.queue.Len(ctx, req.DeviceSN)
 		if err != nil {
 			return nil, fmt.Errorf("check queue depth: %w", err)
@@ -239,9 +251,7 @@ func (s *TaskService) CreateTask(ctx context.Context, req *CreateTaskRequest) (*
 	}
 
 	// T-0157 C1: 兜底默认超时（调用方未传 → 用配置默认；保留显式覆盖能力）
-	if req.ExpiresIn == 0 && s.defaultExpiresIn > 0 {
-		req.ExpiresIn = s.defaultExpiresIn
-	}
+	s.applyDefaultExpiresIn(req)
 
 	task := NewTask(req)
 
@@ -250,6 +260,11 @@ func (s *TaskService) CreateTask(ctx context.Context, req *CreateTaskRequest) (*
 		// T-0157 C6: 入队失败兜底 → 写一条 status=failed 的消息（避免用户感知"点了没反应"）
 		s.notifyCreateFailure(ctx, task, err)
 		return nil, fmt.Errorf("persist task: %w", err)
+	}
+	if req.FailImmediately {
+		s.recordCompletion(task, TaskStatusFailed)
+		s.notifyCompletion(ctx, task)
+		return task, nil
 	}
 
 	// 2. 推送到 Redis 队列
@@ -362,7 +377,82 @@ func (s *TaskService) PopTask(ctx context.Context, deviceSN string) (*Task, erro
 
 // GetQueueLength 获取队列长度
 func (s *TaskService) GetQueueLength(ctx context.Context, deviceSN string) (int64, error) {
+	if s.repo != nil {
+		count, err := s.repo.CountOpenByDevice(ctx, deviceSN, time.Now())
+		if err == nil {
+			return count, nil
+		}
+		logger.L(ctx).Warn("count open tasks from pg failed, falling back to redis queue length",
+			zap.String("device_sn", deviceSN),
+			zap.Error(err))
+	}
 	return s.queue.Len(ctx, deviceSN)
+}
+
+// ReleasePlannedTask is the single execution-plane admission path for a task
+// whose durable row was created by an upstream transactional planner. It owns
+// queue capacity enforcement, idempotent Redis admission, metrics and wake-up,
+// while the planner remains responsible only for the business plan.
+func (s *TaskService) ReleasePlannedTask(ctx context.Context, planned *Task) (bool, error) {
+	return s.releasePlannedTask(ctx, planned, true)
+}
+
+// ReleasePlannedTaskWithoutWake admits a durable planned task without sending
+// a per-task Connection Request. Batch dispatchers use it to enqueue all work
+// for one device first and then wake that device once via WakePlannedDevice.
+func (s *TaskService) ReleasePlannedTaskWithoutWake(ctx context.Context, planned *Task) (bool, error) {
+	return s.releasePlannedTask(ctx, planned, false)
+}
+
+func (s *TaskService) releasePlannedTask(ctx context.Context, planned *Task, wake bool) (bool, error) {
+	if planned == nil || planned.Status != TaskStatusPending {
+		return false, nil
+	}
+	exists, err := s.queue.Exists(ctx, planned.DeviceSN, planned.ID)
+	if err != nil {
+		return false, fmt.Errorf("check planned task queue membership: %w", err)
+	}
+	if exists {
+		return true, nil
+	}
+	if s.maxQueueDepth > 0 {
+		depth, err := s.queue.Len(ctx, planned.DeviceSN)
+		if err != nil {
+			return false, fmt.Errorf("check planned task queue depth: %w", err)
+		}
+		if depth >= int64(s.maxQueueDepth) {
+			return false, fmt.Errorf("device %s: %w", planned.DeviceSN, ErrQueueFull)
+		}
+	}
+	if err := s.queue.Push(ctx, planned); err != nil {
+		return false, fmt.Errorf("release planned task: %w", err)
+	}
+	if s.metrics != nil {
+		s.metrics.PendingTotal.Inc()
+	}
+	if wake {
+		s.wakeDevice(planned.DeviceSN)
+	}
+	return true, nil
+}
+
+// WakePlannedDevice performs the single best-effort wake after a batch of
+// durable tasks has been admitted to the execution queue.
+func (s *TaskService) WakePlannedDevice(deviceSN string) {
+	s.wakeDevice(deviceSN)
+}
+
+// EvictPlannedTask removes an unreleased/cancelled planned task from the
+// execution plane. It is deliberately idempotent so an outbox cancellation can
+// safely race an earlier enqueue delivery or be replayed after Redis recovery.
+func (s *TaskService) EvictPlannedTask(ctx context.Context, planned *Task) error {
+	if planned == nil {
+		return nil
+	}
+	if err := s.queue.Delete(ctx, planned.ID); err != nil {
+		return fmt.Errorf("evict planned task: %w", err)
+	}
+	return nil
 }
 
 func (s *TaskService) LatestOpenTaskByDeviceAndMethod(ctx context.Context, deviceSN, method, description string) (*Task, error) {
@@ -389,23 +479,50 @@ func (s *TaskService) LatestSyncGPVSummaryByDevice(ctx context.Context, deviceSN
 	return s.repo.LatestSyncGPVSummaryByDevice(ctx, deviceSN)
 }
 
+func (s *TaskService) CountOpenSyncGPVByDevice(ctx context.Context, deviceSN string) (int64, error) {
+	if s.repo == nil {
+		return 0, nil
+	}
+	return s.repo.CountOpenSyncGPVByDevice(ctx, deviceSN)
+}
+
+func (s *TaskService) HasOpenSyncGPVTasksByDevice(ctx context.Context, deviceSN string) (bool, error) {
+	if s.repo == nil {
+		return false, nil
+	}
+	return s.repo.HasOpenSyncGPVTasksByDevice(ctx, deviceSN)
+}
+
+func (s *TaskService) AcquireSyncGPVDeviceLock(ctx context.Context, deviceSN string) (func(), error) {
+	if s.repo == nil {
+		return func() {}, nil
+	}
+	return s.repo.AcquireSyncGPVDeviceLock(ctx, deviceSN)
+}
+
 // MarkTaskSent 标记任务已发送
 func (s *TaskService) MarkTaskSent(ctx context.Context, taskID, cwmpID string) error {
+	if s.repo != nil {
+		acquired, err := s.repo.MarkSentIfPending(ctx, taskID, cwmpID, time.Now())
+		if err != nil {
+			return err
+		}
+		if !acquired {
+			// The queue may still contain a stale copy after the PG task or its
+			// durable run became terminal. Drop it here so every subsequent Inform
+			// does not pop and reject the same task forever.
+			if err := s.queue.Delete(ctx, taskID); err != nil {
+				return fmt.Errorf("task %s is no longer pending; remove stale queue copy: %w", taskID, err)
+			}
+			return fmt.Errorf("task %s: %w", taskID, ErrTaskNotPending)
+		}
+	}
 	// 更新 Redis
 	if err := s.queue.MarkTaskSent(ctx, taskID, cwmpID); err != nil {
-		return fmt.Errorf("mark task sent in queue: %w", err)
-	}
-
-	// 同步更新 PostgreSQL
-	task, err := s.queue.GetByID(ctx, taskID)
-	if err != nil {
-		return fmt.Errorf("get sent task: %w", err)
-	}
-	if task != nil {
-		if err := s.repo.Update(ctx, task); err != nil {
-			s.recordDualWriteFail("sync_sent")
-			logger.L(ctx).Error("sync task to db", zap.Error(err), zap.String("task_id", taskID))
+		if s.repo != nil {
+			return s.releaseUnwrittenSendClaim(ctx, taskID, cwmpID, err)
 		}
+		return fmt.Errorf("mark task sent in queue: %w", err)
 	}
 
 	logger.L(ctx).Info("task sent",
@@ -413,6 +530,37 @@ func (s *TaskService) MarkTaskSent(ctx context.Context, taskID, cwmpID string) e
 		zap.String("cwmp_id", cwmpID))
 
 	return nil
+}
+
+func (s *TaskService) releaseUnwrittenSendClaim(ctx context.Context, taskID, cwmpID string, cause error) error {
+	released, err := s.repo.ReleaseSentClaimIfUnwritten(ctx, taskID, cwmpID)
+	if err != nil {
+		s.recordDualWriteFail("release_send_claim")
+		return errors.Join(fmt.Errorf("mark task sent in queue: %w", cause), err)
+	}
+	if !released {
+		return errors.Join(
+			fmt.Errorf("mark task sent in queue: %w", cause),
+			fmt.Errorf("task %s send claim changed before compensation", taskID),
+		)
+	}
+
+	var repairErrs []error
+	if err := s.queue.DeleteCWMPIDMapping(ctx, cwmpID); err != nil {
+		repairErrs = append(repairErrs, fmt.Errorf("delete unwritten cwmp mapping: %w", err))
+	}
+	pending, err := s.repo.GetByID(ctx, taskID)
+	if err != nil {
+		repairErrs = append(repairErrs, fmt.Errorf("load released task send claim: %w", err))
+	} else if pending != nil {
+		if err := s.queue.Update(ctx, pending); err != nil {
+			repairErrs = append(repairErrs, fmt.Errorf("restore released task queue entry: %w", err))
+		}
+	}
+	if len(repairErrs) > 0 {
+		s.recordDualWriteFail("release_send_claim_queue")
+	}
+	return errors.Join(append([]error{fmt.Errorf("mark task sent in queue: %w", cause)}, repairErrs...)...)
 }
 
 // MarkTaskCompleted 标记任务完成
@@ -658,11 +806,16 @@ func (s *TaskService) GetTaskHistory(ctx context.Context, deviceSN string, opts 
 	}, nil
 }
 
-// RecoverPendingTasks 恢复未完成任务（CPE 重连时调用）
-// 检查 sent 状态超过指定时间的任务，重置为 pending
+const recoverSentTaskBatchSize = 500
+
+// RecoverPendingTasks 恢复未完成任务（CPE 重连/新 Inform 时调用）。
+//
+// 新 Inform 表示 CPE 已开启新的 CWMP 会话；上一会话里仍处于 sent 的 RPC
+// 不会再返回响应。如果继续等待 5 分钟 stale 阈值，参数同步页面会在“待处理 N 次 GPV”
+// 上无谓卡住。sent 任务已从 Redis 队列弹出，所以这里以 PG 为准取回同设备 sent 任务，
+// 并按重试预算恢复为 pending，让当前会话可以继续 PopTask。
 func (s *TaskService) RecoverPendingTasks(ctx context.Context, deviceSN string) error {
-	// 获取 sent 状态超过 5 分钟的任务
-	staleTasks, err := s.queue.GetStaleSentTasks(ctx, deviceSN, "5m")
+	staleTasks, err := s.repo.ListSentByDeviceBefore(ctx, deviceSN, time.Now(), recoverSentTaskBatchSize)
 	if err != nil {
 		return fmt.Errorf("get stale tasks: %w", err)
 	}
@@ -670,9 +823,23 @@ func (s *TaskService) RecoverPendingTasks(ctx context.Context, deviceSN string) 
 	for _, task := range staleTasks {
 		if !task.CanRetry() {
 			// 超过最大重试次数，标记为失败
-			if err := s.MarkTaskFailed(ctx, task.ID, 0, "exceeded max retries"); err != nil {
-				logger.L(ctx).Error("mark task failed", zap.Error(err), zap.String("task_id", task.ID))
+			oldCWMPID := task.CWMPID
+			task.MarkFailed(0, "exceeded max retries")
+			if oldCWMPID != "" {
+				if err := s.queue.DeleteCWMPIDMapping(ctx, oldCWMPID); err != nil {
+					logger.L(ctx).Warn("delete stale cwmp mapping", zap.Error(err), zap.String("task_id", task.ID), zap.String("cwmp_id", oldCWMPID))
+				}
 			}
+			if err := s.queue.Update(ctx, task); err != nil {
+				logger.L(ctx).Error("mark exhausted task failed in queue", zap.Error(err), zap.String("task_id", task.ID))
+				continue
+			}
+			if err := s.repo.Update(ctx, task); err != nil {
+				s.recordDualWriteFail("sync_terminal")
+				logger.L(ctx).Error("sync exhausted task to db", zap.Error(err), zap.String("task_id", task.ID))
+			}
+			s.recordCompletion(task, TaskStatusFailed)
+			s.notifyCompletion(ctx, task)
 			continue
 		}
 		if interval := task.RetryInterval(); interval > 0 && task.SentAt != nil {
@@ -687,22 +854,23 @@ func (s *TaskService) RecoverPendingTasks(ctx context.Context, deviceSN string) 
 		}
 
 		// 重置任务状态
+		oldCWMPID := task.CWMPID
 		task.ResetForRetry()
+		if oldCWMPID != "" {
+			if err := s.queue.DeleteCWMPIDMapping(ctx, oldCWMPID); err != nil {
+				logger.L(ctx).Warn("delete stale cwmp mapping", zap.Error(err), zap.String("task_id", task.ID), zap.String("cwmp_id", oldCWMPID))
+			}
+		}
 
-		// 更新 Redis
+		// 更新 Redis；Update 会在 pending 状态下重新加入设备队列 ZSET。
 		if err := s.queue.Update(ctx, task); err != nil {
 			logger.L(ctx).Error("reset stale task", zap.Error(err), zap.String("task_id", task.ID))
 			continue
 		}
 
-		// 重新入队
-		if err := s.queue.Push(ctx, task); err != nil {
-			logger.L(ctx).Error("requeue task", zap.Error(err), zap.String("task_id", task.ID))
-			continue
-		}
-
 		// 同步 PostgreSQL
 		if err := s.repo.Update(ctx, task); err != nil {
+			s.recordDualWriteFail("sync_retry")
 			logger.L(ctx).Error("sync task to db", zap.Error(err), zap.String("task_id", task.ID))
 		}
 
@@ -882,6 +1050,7 @@ func (s *TaskService) RetryTask(ctx context.Context, task *Task) error {
 func (s *TaskService) BatchCreateTasks(ctx context.Context, reqs []*CreateTaskRequest) ([]*Task, error) {
 	var tasks []*Task
 	for _, req := range reqs {
+		s.applyDefaultExpiresIn(req)
 		task := NewTask(req)
 		tasks = append(tasks, task)
 	}
@@ -895,6 +1064,11 @@ func (s *TaskService) BatchCreateTasks(ctx context.Context, reqs []*CreateTaskRe
 	wakeDevices := make(map[string]struct{})
 	var pushed []*Task
 	for _, task := range tasks {
+		if task.Status == TaskStatusFailed {
+			s.recordCompletion(task, TaskStatusFailed)
+			s.notifyCompletion(ctx, task)
+			continue
+		}
 		if err := s.queue.Push(ctx, task); err != nil {
 			logger.L(ctx).Error("enqueue task", zap.Error(err), zap.String("task_id", task.ID))
 			continue

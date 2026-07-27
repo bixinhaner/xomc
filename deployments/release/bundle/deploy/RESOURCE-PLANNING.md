@@ -51,11 +51,15 @@
 ### 3.1 空闲预算（口径 = 空闲优先）
 
 ```
-OS 保留      = max(2 GiB, 总内存 × 15%)          # 留给内核/dockerd/其它系统进程
+OS 保留      = clamp(总内存 / 8, 下限 4 GiB, 上限 16 GiB)   # 留给内核/dockerd/其它系统进程
 其它项目预留 = Σ(非omcgo容器 mem_limit − 当前用量)   # 替别的项目留出它们能涨到的余量
 内存空闲预算 = MemAvailable − OS保留 − 其它项目预留
-CPU 空闲预算 = nproc − 主机保留(1) − max(其它容器CPU, ⌈load15⌉)   # 仅作下限参考，限额可突发超分
+主机 CPU 保留 = clamp(核数 / 8, 下限 4 核, 上限 12 核)
+CPU 空闲预算 = nproc − 主机CPU保留 − max(其它容器CPU, ⌈load15⌉)   # 仅作下限参考，限额可突发超分
 ```
+
+保留量随主机规模缩放：32核/32GiB → 保留4核/4GiB（业务28核/28GiB）；64核/64GiB → 保留8核/8GiB；
+再大依此类推，CPU 封顶 12 核（≥96核触顶）、内存封顶 16GiB（≥128GiB 触顶）。
 
 `MemAvailable` 是关键：它已经扣掉了别的项目**当前**占用的内存；再减去它们「声明了上限但还没用满」
 的部分，就得到 OMC 真正能安全吃下的空闲量。共享主机由此天然防超分。
@@ -66,7 +70,10 @@ CPU 空闲预算 = nproc − 主机保留(1) − max(其它容器CPU, ⌈load15�
 **正好重演它要修的那个 OOM**。所以改为：
 
 1. **先发下限**：每个组件先拿到 100k 基线 `floor`（绝不低于）。
-2. **门禁**：`Σfloor`（含监控）就是最低门槛；`空闲预算 < Σfloor` → **die + 给建议最低配**，不硬塞。
+2. **门禁（带容忍度）**：`Σfloor`（含监控）是最低门槛；`--floor-tolerance-pct`（默认 30）
+   划出一个缓冲带——缺口在容忍度内（即 `空闲预算 ≥ Σfloor × (1 − 容忍度%)`）只降级为
+   **WARN + 按下限分配**（不再向上伸缩），不阻断部署；缺口超过容忍度才 **die + 给建议最低配**。
+   压测/生产实测组件很少同时打满 floor，留一点容忍度换可用性，比直接拒绝部署更实用。
 3. **再分余量**：`剩余 = 空闲预算 − Σfloor`，按权重分给可伸缩组件，每个**封顶到 `ceiling`**。
 4. **全量记账**：nats/minio/web/monitoring 也计入预算；最后校验 `Σ限额 ≤ 空闲预算`。
 
@@ -76,14 +83,14 @@ CPU 空闲预算 = nproc − 主机保留(1) − max(其它容器CPU, ⌈load15�
 
 | 组件 | floor | ceiling | 余量权重 | 依据 |
 |------|------:|--------:|:-------:|------|
-| app | 768 | 1536 | 10% | 非设备量驱动（运维UI+OSS轮询），最先让出预算 |
-| acs | 1024 | 2048 | 15% | TR-069 最热堆（1万并发会话+20万限流器映射+50MB SOAP体）；1M 走横向多副本 |
+| app | 1536 | 3072 | 10% | 非设备量驱动（运维UI+OSS轮询），最先让出预算；线上巡检发现 995MiB 配额下常驻内存已到 88%，floor/ceil 上调留余量 |
+| acs | 4096 | 6144 | 18% | TR-069 最热堆（1万并发会话+20万限流器映射+50MB SOAP体）；1M 走横向多副本；omc78 压测实测 max_inflight 调大后并发 PM 上传缓冲内存需求上升，1-2GiB 下触发 cgroup OOMKilled 循环重启，floor 提到 4GiB（2026-07-21）|
 | worker | 1024 | 2048 | 25% | PM/MR XML 解析最吃内存（111→1111 文件/s）；1M 走横向 |
 | **postgres** | **5120** | 16384 | 25% | **须容 `max_connections=200`**（180池+余量）：shared_buffers+maint+200×(10+work_mem) 须舒适放进限额 |
 | **postgres-tsdb** | **4096** | 12288 | 22% | **时序库（#347）独立 TimescaleDB 实例**：PM COPY 入库 + KPI 聚合写主要在此；与主库分别计入预算，防双 PG 同机超分 OOM。同源派生 `TSDB_*`（shared_buffers 25% 等），`max_connections=300` 与主库对齐（实际池仅 ~65，余量充足） |
 | redis | 3072 | 8192 | 15% | appendonly；限额须 ≥ maxmemory + 1GiB（AOF rewrite 的 fork COW 余量） |
 | nats | 512 | 2048 | 5% | JetStream file store |
-| minio | 1024 | 2048 | 5% | 存储型，瓶颈在磁盘非内存 |
+| minio | 3072 | 4096 | 8% | 对象存储；压测发现按可见CPU配额自动估算的并发上限过于保守，且线上巡检 2.5GiB 配额下已到 88%，floor/ceil 上调留余量 |
 | web | 512 | 512 | 0% | nginx 静态+反代，固定 |
 | monitoring | 4224（固定块） | — | — | prometheus/loki/tempo/otelcol/grafana/alertmgr/exporters；`--skip-monitoring` 整块去除 |
 
@@ -114,9 +121,24 @@ CPU 空闲预算 = nproc − 主机保留(1) − max(其它容器CPU, ⌈load15�
 | medium | ≥ 24 GiB | 100k 满突发 / 300-500k | 单机 + pgbouncer + acs/worker ×2-3（Phase 2/手动） |
 | large | ≥ 48 GiB | 1M | **多机**：acs/worker ×6-8 + pgbouncer + Redis 拆分；脚本仅规划单机切片并告警 |
 
-**最低配置门禁**：`空闲预算 < Σfloor` 直接 `die`，给出检测值 vs 需求值 + 建议最低配 +
-逃生口（`--skip-monitoring` 约降到 20 GiB / `--assume-dedicated` / 释放其它项目）。
-全栈推荐底线 **≥ 28 GiB**，`--skip-monitoring` 约 **20 GiB**（#347 起含独立时序库 postgres-tsdb，较单 PG 时上调约 4 GiB）。
+medium/large 档按 2026-07-23 的 10000 基站压测热点分配 CPU：`POSTGRES_CPUS`
+取宿主总核数三分之一、`TSDB_CPUS` 取二分之一、`WORKER_CPUS` 取四分之一，
+均向下取整且最低 2 核。当前 32 核 / 32 GiB 生产机型因此得到 10/16/8。
+
+依据：数据库原 4 核配额下主库约 406%、TimescaleDB 约 376% 持续接近上限；
+调整为 10/10/3 后数据库瓶颈打开，但 worker 持续触及 3 核。worker 3→5 核使
+PM backlog 峰值从约 6511 降到 4491（约 -31%），排空速度从约 18-20 条/s 提升到
+约 25-29 条/s；继续将 worker/TSDB 调为 8/16 后，预热结束的完成速率约
+45-56 条/s，TimescaleDB 实际使用约 13-15 核，宿主 load 峰值约 24/32，且均无
+重投、OOM 或业务处理错误。CPU limit 是上限而非预留，三者限额之和允许超过物理
+核数，由调度器按实时负载共享。
+
+**最低配置门禁（带 30% 容忍度）**：`空闲预算 < Σfloor` 时，缺口 ≤ `--floor-tolerance-pct`
+（默认 30%）先降级为 WARN 按下限分配放行；缺口超过容忍度才 `die`，给出检测值 vs 需求值 +
+建议最低配 + 逃生口（`--skip-monitoring` 约降到 20 GiB / `--assume-dedicated` / 释放其它
+项目 / 调大 `--floor-tolerance-pct`）。全栈推荐底线 **≥ 28 GiB**，`--skip-monitoring` 约
+**20 GiB**（#347 起含独立时序库 postgres-tsdb，较单 PG 时上调约 4 GiB）；容忍度带内
+（如 32 核/31 GiB 机器）仍可放行，但各组件同时打满 limit 时有 OOM 风险，建议尽快扩容内存。
 
 > **1M 明确超出单机范围**（~3333 会话/s + ~1111 PM 文件/s），脚本检出 large 档时
 > 给多机拓扑建议而非假装单机能扛。
@@ -204,8 +226,53 @@ OMC_PROBE_CPU=32 OMC_PROBE_MEM_TOTAL_MIB=65536 OMC_PROBE_MEM_AVAIL_MIB=61440 \
   并约束单文件解析体积上限。
 - task：`taskDetailTTL`/`cwmpMappingTTL` 24h→2-4h（治 Redis 数据集增长的真因）。
 - 监控告警：`redis used_memory>70%`、`pg numbackends>0.8×max_connections`、容器 `OOMKilled` 计数。
-- 数据盘：`pgdata`/`miniodata` 改 bind-mount 到独立数据盘；MinIO 桶生命周期过期。
+- 数据盘：已支持通过 `.env` 的五个 `*_DATA_PATH` 把有状态服务 bind-mount 到独立数据盘；
+  迁移步骤见下节。MinIO 桶生命周期过期仍需另行配置。
 - 300k+ 规模：引入 pgbouncer（transaction pooling）作为 acs/worker 加副本的前置条件。
+
+### 有状态服务拆盘与迁移
+
+可独立配置：
+
+| 服务 | `.env` 键 | 容器目录 |
+|---|---|---|
+| PostgreSQL | `POSTGRES_DATA_PATH` | `/var/lib/postgresql/data` |
+| TimescaleDB | `TSDB_DATA_PATH` | `/var/lib/postgresql/data` |
+| Redis | `REDIS_DATA_PATH` | `/data` |
+| NATS JetStream | `NATS_DATA_PATH` | `/data` |
+| MinIO | `MINIO_DATA_PATH` | `/data` |
+
+键留空时继续使用 `pgdata/tsdbdata/redisdata/natsdata/miniodata` 命名卷，保证升级不隐式
+切换数据。`plan-resources.sh` 按可用空间选择最大的本地持久文件系统，只补空值并提示人工
+拆盘；它不复制数据。建议 NVMe A 放 TimescaleDB、NVMe B 放主库、SSD/NVMe C 放 MinIO，
+Redis/NATS 放剩余低延迟设备。只有一块 SSD/NVMe 时可先全部迁入，寻道等待会下降，但五个
+服务仍会争用同一设备。
+
+存量迁移必须停服逐项执行，以下以主库为例，其他组件只替换卷名和目标目录：
+
+```bash
+cd /opt/omc/current/deploy
+bash svc.sh stop
+SRC="$(docker volume inspect -f '{{.Mountpoint}}' omcgo_pgdata)"
+DEST=/mnt/nvme-b/omc-data/postgres
+install -d "$DEST"
+rsync -aHAX --numeric-ids "$SRC"/ "$DEST"/
+du -sb "$SRC" "$DEST"
+# 编辑 .env：POSTGRES_DATA_PATH=/mnt/nvme-b/omc-data/postgres
+docker compose -p omcgo --env-file .env --env-file resources.env \
+  -f docker-compose.infra.yml -f docker-compose.app.yml config >/dev/null
+bash svc.sh up
+docker compose -p omcgo --env-file .env --env-file resources.env \
+  -f docker-compose.infra.yml -f docker-compose.app.yml ps
+```
+
+验收数据库 `pg_isready`、Redis `PING`、NATS `/healthz`、MinIO `/minio/health/live` 和业务
+健康接口后，旧卷/旧目录至少保留一个观察周期。回滚时停服、清空对应 `*_DATA_PATH` 或改回
+旧路径，再启动。禁止在容器写入期间直接复制 PostgreSQL/WAL、Redis AOF 或 JetStream。
+
+当前压测旋转盘读取等待约 154 ms、末段 iowait 约 61%。SSD/NVMe 一般可把介质等待降到低
+毫秒级，独立设备还能降低队列深度和 checkpoint、PM COPY、MinIO 上传、AOF、JetStream
+之间的相互阻塞；实际收益必须在真实硬件迁移后复测，不承诺固定倍数。
 
 ---
 
@@ -214,6 +281,6 @@ OMC_PROBE_CPU=32 OMC_PROBE_MEM_TOTAL_MIB=65536 OMC_PROBE_MEM_AVAIL_MIB=61440 \
 | 场景 | 结果 |
 |------|------|
 | 8c/16g, `--skip-monitoring` | 恰好贴下限（Σ13.0/预算13.0），PG 饱和告警正确触发 |
-| 16c/32g 近空闲 | medium 档，余量按权重分配，Σ23.8 ≤ 预算25.2 |
-| 64c/128g | large 档，各组件封顶 ceiling，余 62.7 GiB 不分配 + 多机拓扑告警 |
+| 32c/32g 近空闲 | medium 档，主库/TimescaleDB/worker CPU=10/16/8，内存按权重分配 |
+| 64c/128g | large 档，主库/TimescaleDB/worker CPU=21/32/16，内存封顶 ceiling + 多机拓扑告警 |
 | 11g 可用的繁忙主机 | 命中门禁，die + 建议 ≥23 GiB + 逃生口 |

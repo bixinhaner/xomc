@@ -23,6 +23,7 @@
  */
 
 import type { QueryTemplatePayload } from '../types/pmQuery';
+import type { KpiExportSource } from '../types/kpiExport';
 import { deviceTypeToNetworkTech } from '../types/indicatorLibrary';
 
 /** 仪表盘导出的当前筛选快照（设备列表 Pane 的提交态）。 */
@@ -113,17 +114,46 @@ export function validateDashboardExportSelection(
   return null;
 }
 
-/** 默认导出任务名：KPI导出_{来源}_{时间戳}。后端不传也会自动生成，这里前端给个可读名。 */
+interface ExportTaskNameOptions {
+  /** 当前 locale 下的文件名前缀，必须由 i18n 词条传入。 */
+  prefixLabel?: string;
+  /** 当前 locale 下的来源展示名，必须由 i18n 词条传入。 */
+  sourceLabel?: string;
+  /** 当前导出对象的页面可见名称，例如 adhoc 任务 / 聚合模板名称。 */
+  subjectName?: string;
+}
+
+function safeFilenamePart(value: string): string {
+  return value
+    .trim()
+    .split('')
+    .map((ch) => {
+      const code = ch.charCodeAt(0);
+      return code <= 31 || code === 127 || /[\\/:*?"<>|;]/.test(ch) ? '_' : ch;
+    })
+    .join('')
+    .replace(/\s+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+/** 默认导出任务名。自定义聚合结果导出会带上当前任务名，便于任务列表和下载文件反查来源。 */
 export function defaultExportTaskName(
-  source: 'dashboard' | 'kpi_query' | 'adhoc',
+  source: KpiExportSource,
   now: Date = new Date(),
+  options: ExportTaskNameOptions = {},
 ): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   const ts = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(
     now.getHours(),
   )}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-  const label = source === 'dashboard' ? '仪表盘' : source === 'kpi_query' ? '指标查询' : '任务结果';
-  return `KPI导出_${label}_${ts}`;
+  const prefix = safeFilenamePart(options.prefixLabel || 'kpi_export');
+  const label = safeFilenamePart(options.sourceLabel || source);
+  const subject = options.subjectName ? safeFilenamePart(options.subjectName) : '';
+  const parts = [prefix, label];
+  if (subject) parts.push(subject);
+  parts.push(ts);
+  return parts.join('_');
 }
 
 /**

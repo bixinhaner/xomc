@@ -48,6 +48,7 @@ import {
   useUnifiedFileTransferTasks,
   useUnifiedFileTransferTaskTypes,
 } from '@core/hooks/api/useUnifiedFileTransfer';
+import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
 import { useSoftwareVersions } from '@core/hooks/api/useSoftware';
 import { useProductList } from '@core/hooks/api/useProducts';
 import { unifiedFileTransferApi } from '@core/services/api/unifiedFileTransferApi';
@@ -88,8 +89,18 @@ import {
   renderTaskStatus,
 } from '../shared.render';
 import { resolveAutoSelectedCategory } from './categorySelection';
+import { resolveTargetFileDisplay } from './targetFileDisplay';
+import {
+  resolveTaskTypeFilterValue,
+  shouldShowTaskTypeFilter,
+} from './taskTypeFilterSelection';
 import type { TransferStepId } from '@core/types/unifiedFileTransfer';
-import { formatSystemTime } from '@core/utils/systemTime';
+import { formatSystemTime, nowInSystemTimezone } from '@core/utils/systemTime';
+import {
+  isTransferSystemDateBefore,
+  isTransferSystemTimeAfter,
+  toTransferSystemTimeRFC3339,
+} from '../transferTime';
 
 const { Text, Title } = Typography;
 
@@ -183,6 +194,7 @@ type TaskFormValues = CreateUnifiedFileTransferTaskInput & {
 
 export default function FileTransferCenter() {
   const t = useT();
+  const systemTimezone = useSystemTimezoneValue();
   const queryClient = useQueryClient();
   // 任务名称自动填充用：取登录用户名拼前缀，displayName / username 哪个有用哪个。
   const currentUser = useUserStore((s) => s.currentUser);
@@ -190,11 +202,11 @@ export default function FileTransferCenter() {
   const appLocale = useAppStore((s) => s.locale);
 
   // #375: 自注册「任务管理」页签。v1 多页签机制下激活页签标题取自 tabStore 的
-  // 激活 tab.label；从设备列表「日志收集」navigate('/transfer/center?...') 直跳进
-  // 本页时没有任何 openTab，AppShell 的 syncActiveTabPath 又被同 pathname 守卫拦截
-  // （旧激活 tab 是 /device/list），导致激活页签标题仍停留在「设备列表」、内容却已
-  // 是本页。仿 DeviceDetail 在自身 effect 里 openTab 自注册，覆盖任何入口（设备列表
-  // 跳入 / 北向直链 / 侧栏点击均命中同一页签）。
+  // 激活 tab.label；从其它页面通过 navigate('/transfer/center?...') 直跳进本页时
+  // 没有任何 openTab，AppShell 的 syncActiveTabPath 又被同 pathname 守卫拦截
+  // （旧激活 tab 仍是来源页面），导致激活页签标题未更新、内容却已是本页。仿
+  // DeviceDetail 在自身 effect 里 openTab 自注册，覆盖任何入口（页面内跳转 /
+  // 北向直链 / 侧栏点击均命中同一页签）。
   const location = useLocation();
   const openTab = useTabStore((s) => s.openTab);
   const flatMenus = useMenuStore((s) => s.flatMenus);
@@ -248,15 +260,15 @@ export default function FileTransferCenter() {
       },
     ];
   }, [taskTypes, t]);
-  // URL 参数初始化：?category=...&typeCode=... 用于外部 deep link（如
-  // 设备列表批量"日志收集"自动跳到 station_log + RUNTIME_LOG_COLLECT tab）。
+  // URL 参数初始化：?category=...&typeCode=... 用于外部 deep link，直接定位到
+  // 指定分类及任务类型。
   const [urlSearchParams] = useSearchParams();
   const [selectedCategory, setSelectedCategory] = useState(() => urlSearchParams.get('category') ?? '');
   // #127：标记 selectedCategory 是否来自用户主动选择（点击 Tab / URL deep link）。
   // 首屏 task-types 未返回时 categories 只含虚拟分类，自动选中会落在 'mr_measurement'；
   // 真实分类到达后仅当用户没主动选过时才回退，不覆盖用户选择。
   const categoryManuallyPickedRef = useRef(Boolean(urlSearchParams.get('category')));
-  const [selectedTypeCode, setSelectedTypeCode] = useState(() => urlSearchParams.get('typeCode') ?? '');
+  const [selectedTypeCode, setSelectedTypeCode] = useState<string | undefined>(() => urlSearchParams.get('typeCode') || undefined);
   const [taskPage, setTaskPage] = useState(1);
   const [taskPageSize, setTaskPageSize] = useState(10);
   const [taskKeyword, setTaskKeyword] = useState('');
@@ -367,6 +379,10 @@ export default function FileTransferCenter() {
       value: item.typeCode,
     })),
     [filteredTaskTypes, t],
+  );
+  const showTaskTypeFilter = useMemo(
+    () => shouldShowTaskTypeFilter(filteredTaskTypes),
+    [filteredTaskTypes],
   );
 
   // EXECUTION_MODE_OPTIONS 常量已下线 —— 改用 getExecutionModeOptions(t) 适配 i18n
@@ -617,9 +633,8 @@ export default function FileTransferCenter() {
       const i18nLabel = t(`software.failureCode.${codeOrRaw}` as Parameters<typeof t>[0]);
       const display = i18nLabel && i18nLabel !== `software.failureCode.${codeOrRaw}` ? i18nLabel : value;
       // 设备厂商原始 fault（FaultCode + FaultString）放 Tooltip 里——i18n label 只看到统一
-      // 错误码描述，hover 后能拿到设备端原文（如 "Upgrade failed, there is FaultString in
-      // TransferComplete msg. FaultCode: 0, FaultString: httpUpload OM Http Put Upload stat
-      // file error"），方便厂商侧排查。
+      // 错误码描述，hover 后能拿到设备端原文（如 "FaultCode: 0, FaultString: httpUpload OM
+      // Http Put Upload stat file error"），方便厂商侧排查。
       const detail = record.failureDetail;
       const text = <span style={{ color: '#ff4d4f' }}>{display}</span>;
       if (!detail || detail === display) return text;
@@ -850,13 +865,9 @@ export default function FileTransferCenter() {
   }, [categories, selectedCategory]);
 
   useEffect(() => {
-    const preferredType = filteredTaskTypes[0];
-    if (!preferredType) {
-      setSelectedTypeCode('');
-      return;
-    }
-    if (!filteredTaskTypes.some((item) => item.typeCode === selectedTypeCode)) {
-      setSelectedTypeCode(preferredType.typeCode);
+    const nextTypeCode = resolveTaskTypeFilterValue(filteredTaskTypes, selectedTypeCode);
+    if (nextTypeCode !== selectedTypeCode) {
+      setSelectedTypeCode(nextTypeCode);
     }
   }, [filteredTaskTypes, selectedTypeCode]);
 
@@ -1222,19 +1233,23 @@ export default function FileTransferCenter() {
         key: 'targetVersion',
         width: 240,
         render: (_, record) => {
-          const file = record.targetFile?.trim();
-          if (!file) {
+          const fileState = resolveTargetFileDisplay(record, t('ufte.file.cleanedByQuota'));
+          if (!fileState.file) {
             return '-';
           }
-          const inner = record.downloadUrl ? (
-            <a href={record.downloadUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-block', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'bottom' }}>
-              {file}
+          const inner = fileState.deleted ? (
+            <Text disabled ellipsis style={{ maxWidth: 220, cursor: 'not-allowed' }}>
+              {fileState.file}
+            </Text>
+          ) : fileState.downloadUrl ? (
+            <a href={fileState.downloadUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-block', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'bottom' }}>
+              {fileState.file}
             </a>
           ) : (
-            <Text type="secondary" ellipsis style={{ maxWidth: 220 }}>{file}</Text>
+            <Text type="secondary" ellipsis style={{ maxWidth: 220 }}>{fileState.file}</Text>
           );
           return (
-            <Tooltip title={file} placement="topLeft">
+            <Tooltip title={fileState.tooltip} placement="topLeft">
               {inner}
             </Tooltip>
           );
@@ -1289,7 +1304,6 @@ export default function FileTransferCenter() {
     setDrawerDevicePage(1);
     setDrawerDeviceKeyword('');
     setDrawerDeviceKeywordInput('');
-    setSelectedTypeCode(nextTypeCode);
     setTaskDrawerOpen(true);
   };
 
@@ -1378,11 +1392,11 @@ export default function FileTransferCenter() {
       creatingTaskRef.current = false;
       return;
     }
-    // scheduledAt 在表单里是 dayjs 实例，发请求前转 ISO 字符串（后端 RFC3339 解析）。
+    // scheduledAt 在表单里是 dayjs 实例，发请求前按系统时区附加偏移（后端 RFC3339 解析）。
     // 非 scheduled 模式 form 不会渲染这个字段 → values.scheduledAt 为 undefined，直接传不影响。
     const rawScheduledAt = (values as { scheduledAt?: unknown }).scheduledAt;
     const scheduledAtIso = values.executionMode === 'scheduled' && rawScheduledAt
-      ? (dayjs.isDayjs(rawScheduledAt) ? rawScheduledAt : dayjs(rawScheduledAt as string)).toISOString()
+      ? toTransferSystemTimeRFC3339(rawScheduledAt, systemTimezone)
       : undefined;
     void createTaskMutation
       .mutateAsync({
@@ -1488,12 +1502,16 @@ export default function FileTransferCenter() {
                         onSearch={(value) => setTaskKeyword(value.trim())}
                         style={{ width: 280 }}
                       />
-                      <Select
-                        value={selectedTypeCode}
-                        onChange={(value) => setSelectedTypeCode(value)}
-                        options={taskTypeOptions}
-                        style={{ width: 260 }}
-                      />
+                      {showTaskTypeFilter ? (
+                        <Select
+                          allowClear
+                          placeholder={t('ufte.filter.templateName')}
+                          value={selectedTypeCode}
+                          onChange={(value) => setSelectedTypeCode(value)}
+                          options={taskTypeOptions}
+                          style={{ width: 260 }}
+                        />
+                      ) : null}
                       <Select
                         allowClear
                         placeholder={t('ufte.filter.status')}
@@ -1588,12 +1606,16 @@ export default function FileTransferCenter() {
                         onSearch={(value) => setDeviceKeyword(value.trim())}
                         style={{ width: 280 }}
                       />
-                      <Select
-                        value={selectedTypeCode}
-                        onChange={(value) => setSelectedTypeCode(value)}
-                        options={taskTypeOptions}
-                        style={{ width: 260 }}
-                      />
+                      {showTaskTypeFilter ? (
+                        <Select
+                          allowClear
+                          placeholder={t('ufte.filter.templateName')}
+                          value={selectedTypeCode}
+                          onChange={(value) => setSelectedTypeCode(value)}
+                          options={taskTypeOptions}
+                          style={{ width: 260 }}
+                        />
+                      ) : null}
                       <Select
                         allowClear
                         showSearch
@@ -2009,7 +2031,7 @@ export default function FileTransferCenter() {
           {/*
             定时执行：仅 executionMode='scheduled' 时显示日期选择器；其它模式 form value 留空。
             shouldUpdate 监听 executionMode 字段变化决定是否渲染。校验：必填 + 大于当前时间。
-            提交时 handleCreateTask 走 form.getFieldValue('scheduledAt')（dayjs 对象）→ .toISOString()。
+            提交时 handleCreateTask 走 form.getFieldValue('scheduledAt')（dayjs 对象）→ 按系统时区附加偏移。
           */}
           <Form.Item noStyle shouldUpdate={(prev, curr) => prev.executionMode !== curr.executionMode}>
             {({ getFieldValue }) =>
@@ -2022,8 +2044,7 @@ export default function FileTransferCenter() {
                     {
                       validator: (_, value) => {
                         if (!value) return Promise.resolve();
-                        const target = dayjs.isDayjs(value) ? value : dayjs(value);
-                        return target.isAfter(dayjs())
+                        return isTransferSystemTimeAfter(value, nowInSystemTimezone(systemTimezone), systemTimezone)
                           ? Promise.resolve()
                           : Promise.reject(new Error(t('ufte.form.scheduledAt.future')));
                       },
@@ -2035,7 +2056,7 @@ export default function FileTransferCenter() {
                     format="YYYY-MM-DD HH:mm:ss"
                     style={{ width: 240 }}
                     placeholder={t('ufte.form.scheduledAt.placeholder')}
-                    disabledDate={(current) => current && current.isBefore(dayjs().startOf('day'))}
+                    disabledDate={(current) => Boolean(current && isTransferSystemDateBefore(current, nowInSystemTimezone(systemTimezone), systemTimezone))}
                   />
                 </Form.Item>
               ) : null

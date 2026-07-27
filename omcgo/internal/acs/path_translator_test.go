@@ -133,6 +133,88 @@ func TestTranslateTaskParams_TranslatesGPVNames(t *testing.T) {
 	}, got.Names)
 }
 
+func TestTranslateTaskParams_ExpandsQueryPrefixCandidates(t *testing.T) {
+	dev := &coremodel.Device{ProductClass: "X-BLQ", FirmwareVersion: "1.0.0"}
+	modelID := uuid.New()
+	prod := &product.Product{ID: uuid.New(), ParamModelID: &modelID}
+	tr := buildTranslator(t, map[string]string{
+		"Device.Services.FAPService.{i}.CellConfig.LTE.ParamA": "Device.VendorA.FAPService.{i}.CellConfig.LTE.ParamA",
+		"Device.Services.FAPService.{i}.CellConfig.NR.ParamB":  "InternetGatewayDevice.Services.FAPService.{i}.CellConfig.NR.ParamB",
+	})
+	s := NewPathTranslationService(
+		&stubDeviceLookup{dev: dev},
+		&stubProductMatcher{res: &product.MatchResult{Product: prod}},
+		&stubTranslatorFactory{tr: tr},
+		zap.NewNop(),
+	)
+
+	for _, method := range []string{"GetParameterValues", "GetParameterAttributes"} {
+		t.Run(method, func(t *testing.T) {
+			in := json.RawMessage(`{"names":["Device.Services.FAPService."]}`)
+			tk := &task.Task{ID: "t1", DeviceSN: "SN1", Method: method, Params: in}
+
+			out, changed := s.TranslateTaskParams(context.Background(), tk)
+
+			require.True(t, changed)
+			var got struct {
+				Names []string `json:"names"`
+			}
+			require.NoError(t, json.Unmarshal(out, &got))
+			require.Equal(t, []string{
+				"Device.VendorA.FAPService.",
+				"InternetGatewayDevice.Services.FAPService.",
+			}, got.Names)
+		})
+	}
+}
+
+func TestTranslateTaskParams_DeduplicatesExpandedNames(t *testing.T) {
+	dev := &coremodel.Device{ProductClass: "X-BLQ", FirmwareVersion: "1.0.0"}
+	modelID := uuid.New()
+	prod := &product.Product{ID: uuid.New(), ParamModelID: &modelID}
+	tr := buildTranslator(t, map[string]string{
+		"Device.Services.FAPService.{i}.CellConfig.LTE.ParamA": "Device.VendorA.FAPService.{i}.CellConfig.LTE.ParamA",
+		"Device.Services.FAPService.{i}.CellConfig.NR.ParamB":  "InternetGatewayDevice.Services.FAPService.{i}.CellConfig.NR.ParamB",
+		"Device.Alias.": "Device.VendorA.FAPService.",
+	})
+	s := NewPathTranslationService(
+		&stubDeviceLookup{dev: dev},
+		&stubProductMatcher{res: &product.MatchResult{Product: prod}},
+		&stubTranslatorFactory{tr: tr},
+		zap.NewNop(),
+	)
+	in := json.RawMessage(`{"names":["Device.Services.FAPService.","Device.Alias.","Device.Unknown.","Device.Services.FAPService."]}`)
+	tk := &task.Task{ID: "t1", DeviceSN: "SN1", Method: "GetParameterValues", Params: in}
+
+	out, changed := s.TranslateTaskParams(context.Background(), tk)
+
+	require.True(t, changed)
+	var got struct {
+		Names []string `json:"names"`
+	}
+	require.NoError(t, json.Unmarshal(out, &got))
+	require.Equal(t, []string{
+		"Device.VendorA.FAPService.",
+		"InternetGatewayDevice.Services.FAPService.",
+		"Device.Unknown.",
+	}, got.Names)
+}
+
+func TestTranslateTaskParams_SkipsPrivatePathMode(t *testing.T) {
+	called := false
+	dev := &stubDeviceLookup{dev: &coremodel.Device{ProductClass: "X-BLQ", FirmwareVersion: "1.0.0"}}
+	wrapped := devLookupCounter{inner: dev, called: &called}
+	s := NewPathTranslationService(wrapped, &stubProductMatcher{}, &stubTranslatorFactory{}, zap.NewNop())
+	in := json.RawMessage(`{"path_mode":"private","names":["InternetGatewayDevice.DeviceInfo.X_VENDOR_NotRegistered"]}`)
+	tk := &task.Task{ID: "t1", DeviceSN: "SN1", Method: "GetParameterValues", Params: in}
+
+	out, changed := s.TranslateTaskParams(context.Background(), tk)
+
+	require.False(t, changed)
+	assert.JSONEq(t, string(in), string(out))
+	assert.False(t, called, "private path mode should bypass translator lookup")
+}
+
 // issue #424：响应方向（私有→标准）回译，与出站 TranslateTaskParams 对称。
 func TestTranslateResponseNames_PrivateToStandard(t *testing.T) {
 	dev := &coremodel.Device{ProductClass: "X-BLQ", FirmwareVersion: "1.0.0"}

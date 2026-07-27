@@ -17,10 +17,10 @@ import (
 
 // issue #320：基站日志保留。此前仅有「故障日志全局 20 文件 FIFO 配额」（无时间维度），
 // 现按用户要求两者并存：
-//   - 按时间保留（默认 60 天）：worker 每日 cron 清理 station_fault_logs + station_running_logs
-//     中 created_at 早于 cutoff 的记录（删 MinIO 对象 + 软删 PG 行）。
-//   - 文件数配额（默认 20，可配 / 0=禁用）：事件驱动的 enforceFaultLogQuota 兜底，防单设备
-//     短时间刷爆。
+//   - 按时间保留（默认 60 天）：worker 每日 cron 清理运行日志 + 故障日志在 OMC 中的过期文件，
+//     覆盖 station_fault_logs / station_running_logs 旧表，以及文件任务元数据 backup_restore_file。
+//   - 文件数配额（默认 20，可配 / 0=禁用）：仅故障日志文件数，事件驱动清理 backup_restore_file
+//     中 logs/fault 文件，防单设备短时间刷爆。
 //
 // 配置全部落 sys_configs（category=stationlog.retention），TTL 缓存避免每文件查库。
 
@@ -98,6 +98,16 @@ func (p *RetentionPolicy) MaxFileCountPerDevice(ctx context.Context) int {
 	return pc
 }
 
+// InvalidateCache 让下一次读取立即回源 sys_configs，用于配置保存后的热生效。
+func (p *RetentionPolicy) InvalidateCache() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.loadedAt = time.Time{}
+	p.mu.Unlock()
+}
+
 func (p *RetentionPolicy) get(ctx context.Context) (days, count int) {
 	days, count, _ = p.getAll(ctx)
 	return days, count
@@ -150,6 +160,19 @@ type cleanupStore interface {
 	MarkDeleted(ctx context.Context, id uuid.UUID) error
 }
 
+// TaskLogFile 是文件任务上报到 backup_restore_file 的运行/故障日志文件清理投影。
+type TaskLogFile struct {
+	ID         int64
+	Bucket     string
+	ObjectPath string
+}
+
+// TaskLogStore 是 CleanupRunner 清理文件任务日志元数据需要的仓库子集。
+type TaskLogStore interface {
+	ListExpiredTaskLogs(ctx context.Context, cutoff time.Time, limit int) ([]TaskLogFile, error)
+	MarkTaskLogDeleted(ctx context.Context, id int64) error
+}
+
 // objectRemover 是 CleanupRunner 删 MinIO 对象需要的子集。*minio.Client 满足。
 type objectRemover interface {
 	RemoveObject(ctx context.Context, bucket, object string, opts minio.RemoveObjectOptions) error
@@ -159,14 +182,15 @@ type objectRemover interface {
 const JobTypeStationLogCleanup = "stationlog_retention_cleanup"
 
 // CleanupRunner 是基站日志按时间保留清理任务（asyncjob.JobRunner，#320）。每日 cron 触发，
-// 删除 fault + running 两表中 created_at 早于 cutoff 的记录（MinIO 对象 + PG 软删）。
+// 删除 fault + running 旧表和文件任务元数据中早于 cutoff 的日志文件（MinIO 对象 + PG 软删）。
 // 失败只 warn、不阻塞其它记录/表。
 type CleanupRunner struct {
-	fault   cleanupStore
-	running cleanupStore
-	remover objectRemover
-	policy  *RetentionPolicy
-	logger  *zap.Logger
+	fault    cleanupStore
+	running  cleanupStore
+	taskLogs TaskLogStore
+	remover  objectRemover
+	policy   *RetentionPolicy
+	logger   *zap.Logger
 }
 
 // NewCleanupRunner 构造基站日志清理 runner。
@@ -183,10 +207,19 @@ func NewCleanupRunner(fault, running cleanupStore, remover objectRemover, policy
 	}
 }
 
+// SetTaskLogStore 注入文件任务日志元数据清理仓库。该仓库只参与 max_retention_days
+// 时间清理；故障日志文件数配额仍由文件接收路径单独执行。
+func (r *CleanupRunner) SetTaskLogStore(store TaskLogStore) {
+	if r == nil {
+		return
+	}
+	r.taskLogs = store
+}
+
 // JobType 实现 asyncjob.JobRunner。
 func (r *CleanupRunner) JobType() string { return JobTypeStationLogCleanup }
 
-// Run 清理两表过保留期记录。
+// Run 清理过保留期记录。
 func (r *CleanupRunner) Run(ctx context.Context, _ *asyncjob.Job) (json.RawMessage, error) {
 	days := r.policy.MaxRetentionDays(ctx)
 	if days < minRetentionDays {
@@ -197,12 +230,15 @@ func (r *CleanupRunner) Run(ctx context.Context, _ *asyncjob.Job) (json.RawMessa
 
 	faultDel := r.cleanupTable(ctx, "station_fault_logs", r.fault, cutoff)
 	runningDel := r.cleanupTable(ctx, "station_running_logs", r.running, cutoff)
+	taskLogDel := r.cleanupTaskLogs(ctx, cutoff)
 
 	r.logger.Info("stationlog retention cleanup done",
 		zap.Int("days", days), zap.Time("cutoff", cutoff),
-		zap.Int("fault_deleted", faultDel), zap.Int("running_deleted", runningDel))
+		zap.Int("fault_deleted", faultDel), zap.Int("running_deleted", runningDel),
+		zap.Int("task_log_deleted", taskLogDel))
 	return json.Marshal(map[string]any{
 		"days": days, "fault_deleted": faultDel, "running_deleted": runningDel,
+		"task_log_deleted": taskLogDel,
 	})
 }
 
@@ -253,5 +289,50 @@ func (r *CleanupRunner) cleanupTable(ctx context.Context, table string, store cl
 		}
 	}
 	r.logger.Warn("stationlog cleanup hit max batches; remaining cleaned next run", zap.String("table", table))
+	return total
+}
+
+func (r *CleanupRunner) cleanupTaskLogs(ctx context.Context, cutoff time.Time) int {
+	if r.taskLogs == nil {
+		return 0
+	}
+	const batchSize = 500
+	const maxBatches = 40
+
+	total := 0
+	for batch := 0; batch < maxBatches; batch++ {
+		select {
+		case <-ctx.Done():
+			return total
+		default:
+		}
+		expired, err := r.taskLogs.ListExpiredTaskLogs(ctx, cutoff, batchSize)
+		if err != nil {
+			r.logger.Warn("list expired task log files failed; stop table", zap.Error(err))
+			return total
+		}
+		if len(expired) == 0 {
+			return total
+		}
+		progressed := 0
+		for _, old := range expired {
+			if r.remover != nil && old.Bucket != "" && old.ObjectPath != "" {
+				if rmErr := r.remover.RemoveObject(ctx, old.Bucket, old.ObjectPath, minio.RemoveObjectOptions{}); rmErr != nil {
+					r.logger.Warn("remove expired task log object",
+						zap.Int64("id", old.ID), zap.String("path", old.ObjectPath), zap.Error(rmErr))
+				}
+			}
+			if mErr := r.taskLogs.MarkTaskLogDeleted(ctx, old.ID); mErr != nil {
+				r.logger.Warn("mark expired task log deleted", zap.Int64("id", old.ID), zap.Error(mErr))
+				continue
+			}
+			total++
+			progressed++
+		}
+		if progressed == 0 || len(expired) < batchSize {
+			return total
+		}
+	}
+	r.logger.Warn("stationlog cleanup hit max batches; remaining task logs cleaned next run")
 	return total
 }

@@ -13,8 +13,8 @@ import (
 
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/acs/transfercfg"
-	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
 	devtask "github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/ufte"
@@ -76,14 +76,19 @@ func selectBackupType(productClass string) *BackupTypeSpec {
 // 设备 SN、任务 ID 和文件名构造 ACS 上传 URL。
 // URL 中的 fileType 参数来自 spec.URLFileTypeParam（如 CONFIGBACKUP_XML / CONFIGBACKUP_NV），
 // upload handler 通过该参数路由到 config_backup bucket。
-func buildBackupUploadURL(upload transfercfg.UploadSettings, spec *BackupTypeSpec, sn, taskID, filename string) string {
-	baseURL := strings.TrimRight(upload.BaseURL, "/")
-	path := upload.Path
-	if path == "" {
-		path = "/smallcell/FileUploadService"
+func buildBackupUploadURL(upload transfercfg.UploadSettings, spec *BackupTypeSpec, sn, taskID, filename string) (string, error) {
+	servicePath := upload.Path
+	if servicePath == "" {
+		servicePath = "/smallcell/FileUploadService"
 	}
-	return fmt.Sprintf("%s%s?fileType=%s&sn=%s&taskId=%s&filename=%s",
-		baseURL, path, spec.URLFileTypeParam, sn, taskID, filename)
+	if err := transfercfg.ValidateServicePath(servicePath); err != nil {
+		return "", fmt.Errorf("validate backup upload service path: %w", err)
+	}
+	query := "fileType=" + url.QueryEscape(spec.URLFileTypeParam) +
+		"&sn=" + url.QueryEscape(sn) +
+		"&taskId=" + url.QueryEscape(taskID) +
+		"&filename=" + url.QueryEscape(filename)
+	return transfercfg.BuildTemplateURL(upload.BaseURL, servicePath+"?"+query)
 }
 
 // BackupExecutor subscribes to backup.task.created events and executes
@@ -208,7 +213,11 @@ func (e *BackupExecutor) resolveUploadTarget(ctx context.Context, spec *BackupTy
 	if e.transferProvider != nil {
 		uploadSettings = e.transferProvider.Snapshot(ctx).Upload
 	}
-	return buildBackupUploadURL(uploadSettings, spec, dev.SerialNumber, task.ID.String(), targetFilename), uploadSettings.Username, uploadSettings.Password, nil
+	uploadURL, err := buildBackupUploadURL(uploadSettings, spec, dev.SerialNumber, task.ID.String(), targetFilename)
+	if err != nil {
+		return "", "", "", fmt.Errorf("build ACS backup upload URL: %w", err)
+	}
+	return uploadURL, uploadSettings.Username, uploadSettings.Password, nil
 }
 
 // Subscribe registers the executor to listen for backup task created events.

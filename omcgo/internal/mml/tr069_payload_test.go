@@ -68,6 +68,20 @@ func TestBuildTR069Params_GetParameterValues_DedupesPaths(t *testing.T) {
 	assert.Equal(t, []string{"Device.X.Y", "Device.X.Z"}, got.Names)
 }
 
+func TestBuildTR069Params_PrivatePathModeBypassesKnownRootFilter(t *testing.T) {
+	refs := []MMLParamRef{{
+		ParamCode: "P",
+		Tr069Path: "VendorRoot.DeviceInfo.X_PRIVATE_NotRegistered",
+		ValueType: "string",
+		PathMode:  rawPathModePrivate,
+	}}
+
+	payload, err := BuildTR069Params("GetParameterValues", refs, nil, "LST")
+
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"path_mode":"private","names":["VendorRoot.DeviceInfo.X_PRIVATE_NotRegistered"]}`, string(payload))
+}
+
 func TestBuildTR069Params_GetParameterValues_NoRefs(t *testing.T) {
 	_, err := BuildTR069Params("GetParameterValues", nil, nil, "LST")
 	require.Error(t, err)
@@ -122,8 +136,8 @@ func TestBuildTR069Params_SetParameterValues_AllEmpty(t *testing.T) {
 func TestBuildTR069Params_SetParameterValues_UnknownCodes(t *testing.T) {
 	refs := deviceInfoRefs()
 	formValues := map[string]interface{}{
-		"NOT_A_REAL_CODE": "xxx",          // 没绑定，跳过
-		"DEVICEGSM_MCC":   "460",          // OK
+		"NOT_A_REAL_CODE": "xxx", // 没绑定，跳过
+		"DEVICEGSM_MCC":   "460", // OK
 	}
 	payload, err := BuildTR069Params("SetParameterValues", refs, formValues, "MOD")
 	require.NoError(t, err)

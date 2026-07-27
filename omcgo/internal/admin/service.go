@@ -61,11 +61,17 @@ var (
 // 删除保护的兜底口径：即便某环境 roles.is_system 标记被错误改写（issue #136 的
 // operator/viewer 历史误标 false），这三个内置角色仍不可删除。与 seed/000036
 // 把 is_system 收紧为 true 形成双重保护（白名单 + is_system 双重判定）。
-var builtInRoleIDs = map[uuid.UUID]struct{}{
-	uuid.MustParse("10000000-0000-0000-0000-000000000001"): {}, // admin
-	uuid.MustParse("10000000-0000-0000-0000-000000000002"): {}, // operator
-	uuid.MustParse("10000000-0000-0000-0000-000000000003"): {}, // viewer
-}
+var (
+	builtInAdminRoleID    = uuid.MustParse("10000000-0000-0000-0000-000000000001")
+	builtInOperatorRoleID = uuid.MustParse("10000000-0000-0000-0000-000000000002")
+	builtInViewerRoleID   = uuid.MustParse("10000000-0000-0000-0000-000000000003")
+
+	builtInRoleIDs = map[uuid.UUID]struct{}{
+		builtInAdminRoleID:    {},
+		builtInOperatorRoleID: {},
+		builtInViewerRoleID:   {},
+	}
+)
 
 // isBuiltInRole 判定给定角色 ID 是否为固定内置角色。
 func isBuiltInRole(id uuid.UUID) bool {
@@ -512,33 +518,31 @@ func (s *AdminService) resolveAdminInjectedPassword(useDefault bool, plain strin
 // auditUserCreateSuccess 写一条用户创建成功的审计日志。
 // details.used_default_password 让审计端可区分两条路径，便于合规追溯。
 func (s *AdminService) auditUserCreateSuccess(ctx context.Context, req CreateUserRequest, user *User) {
-	audit.Log(ctx, audit.Entry{
-		UserID:       operatorIDFromContext(ctx),
-		Action:       audit.ActionUserCreate,
-		ResourceType: audit.ResourceUser,
-		ResourceID:   user.ID.String(),
-		Success:      true,
-		Details: map[string]interface{}{
-			"used_default_password": req.UseDefaultPassword,
-			"target_user_id":        user.ID.String(),
-			"target_username":       req.Username,
-		},
-	})
+	entry := auditEntryFromContext(ctx)
+	entry.Action = audit.ActionUserCreate
+	entry.ResourceType = audit.ResourceUser
+	entry.ResourceID = user.ID.String()
+	entry.Success = true
+	entry.Details = map[string]interface{}{
+		"used_default_password": req.UseDefaultPassword,
+		"target_user_id":        user.ID.String(),
+		"target_username":       req.Username,
+	}
+	audit.Log(ctx, entry)
 }
 
 // auditUserCreateFailure 写一条用户创建失败的审计日志（密码强度/默认密码未设置/落库失败等）。
 func (s *AdminService) auditUserCreateFailure(ctx context.Context, req CreateUserRequest, err error) {
-	audit.Log(ctx, audit.Entry{
-		UserID:       operatorIDFromContext(ctx),
-		Action:       audit.ActionUserCreate,
-		ResourceType: audit.ResourceUser,
-		Success:      false,
-		ErrorMessage: err.Error(),
-		Details: map[string]interface{}{
-			"used_default_password": req.UseDefaultPassword,
-			"target_username":       req.Username,
-		},
-	})
+	entry := auditEntryFromContext(ctx)
+	entry.Action = audit.ActionUserCreate
+	entry.ResourceType = audit.ResourceUser
+	entry.Success = false
+	entry.ErrorMessage = err.Error()
+	entry.Details = map[string]interface{}{
+		"used_default_password": req.UseDefaultPassword,
+		"target_username":       req.Username,
+	}
+	audit.Log(ctx, entry)
 }
 
 // UpdateUser updates an existing user.
@@ -999,35 +1003,33 @@ func (s *AdminService) ResetPassword(ctx context.Context, id uuid.UUID, req Rese
 
 // auditPasswordResetSuccess 写一条管理员重置密码成功的审计日志。
 func (s *AdminService) auditPasswordResetSuccess(ctx context.Context, targetID uuid.UUID, username string, usedDefault bool) {
-	audit.Log(ctx, audit.Entry{
-		UserID:       operatorIDFromContext(ctx),
-		Action:       audit.ActionPasswordReset,
-		ResourceType: audit.ResourceUser,
-		ResourceID:   targetID.String(),
-		Success:      true,
-		Details: map[string]interface{}{
-			"used_default_password": usedDefault,
-			"target_user_id":        targetID.String(),
-			"target_username":       username,
-		},
-	})
+	entry := auditEntryFromContext(ctx)
+	entry.Action = audit.ActionPasswordReset
+	entry.ResourceType = audit.ResourceUser
+	entry.ResourceID = targetID.String()
+	entry.Success = true
+	entry.Details = map[string]interface{}{
+		"used_default_password": usedDefault,
+		"target_user_id":        targetID.String(),
+		"target_username":       username,
+	}
+	audit.Log(ctx, entry)
 }
 
 // auditPasswordResetFailure 写一条管理员重置密码失败的审计日志
 // （LDAP 拒绝 / 内置用户拒绝 / 默认密码未设置 / 强度不通过 / 落库失败等）。
 func (s *AdminService) auditPasswordResetFailure(ctx context.Context, targetID uuid.UUID, username string, usedDefault bool, err error) {
-	audit.Log(ctx, audit.Entry{
-		UserID:       operatorIDFromContext(ctx),
-		Action:       audit.ActionPasswordReset,
-		ResourceType: audit.ResourceUser,
-		ResourceID:   targetID.String(),
-		Success:      false,
-		ErrorMessage: err.Error(),
-		Details: map[string]interface{}{
-			"used_default_password": usedDefault,
-			"target_username":       username,
-		},
-	})
+	entry := auditEntryFromContext(ctx)
+	entry.Action = audit.ActionPasswordReset
+	entry.ResourceType = audit.ResourceUser
+	entry.ResourceID = targetID.String()
+	entry.Success = false
+	entry.ErrorMessage = err.Error()
+	entry.Details = map[string]interface{}{
+		"used_default_password": usedDefault,
+		"target_username":       username,
+	}
+	audit.Log(ctx, entry)
 }
 
 // LockUser disables a user account by setting its status to disabled.
@@ -1590,8 +1592,45 @@ func (s *AdminService) GetUserMenuTreeByRole(ctx context.Context, userID uuid.UU
 	if err != nil {
 		return nil, err
 	}
+	if !isBuiltInRole(roleID) {
+		allMenus, err := s.menuRepo.GetAllActive(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("load active menus for custom role: %w", err)
+		}
+		menus = includeButtonsUnderGrantedMenus(menus, allMenus)
+	}
 	// GetByRole 已按 parent/sort 排序但未组装成树。
 	return buildMenuTree(menus), nil
+}
+
+// includeButtonsUnderGrantedMenus derives effective operation permissions for
+// custom roles. The role editor exposes menu permissions only, so granting a
+// page menu also grants its active button children without changing role_menus.
+func includeButtonsUnderGrantedMenus(granted, all []Menu) []Menu {
+	grantedMenuIDs := make(map[uuid.UUID]struct{}, len(granted))
+	seen := make(map[uuid.UUID]struct{}, len(granted))
+	result := append([]Menu(nil), granted...)
+	for _, menu := range granted {
+		seen[menu.ID] = struct{}{}
+		if menu.Type == MenuTypeMenu {
+			grantedMenuIDs[menu.ID] = struct{}{}
+		}
+	}
+
+	for _, menu := range all {
+		if menu.Type != MenuTypeButton || menu.ParentID == nil {
+			continue
+		}
+		if _, ok := grantedMenuIDs[*menu.ParentID]; !ok {
+			continue
+		}
+		if _, ok := seen[menu.ID]; ok {
+			continue
+		}
+		result = append(result, menu)
+		seen[menu.ID] = struct{}{}
+	}
+	return result
 }
 
 // ==================== Password Change ====================
@@ -1620,11 +1659,17 @@ type ChangePasswordHTTPRequest struct {
 }
 
 // ChangePassword verifies the old password and updates to the new one.
-func (s *AdminService) ChangePassword(ctx context.Context, userID uuid.UUID, req ChangePasswordRequest) error {
+func (s *AdminService) ChangePassword(ctx context.Context, userID uuid.UUID, req ChangePasswordRequest) (retErr error) {
+	username := ""
+	defer func() {
+		s.auditPasswordChange(ctx, userID, username, retErr)
+	}()
+
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("get user: %w", err)
 	}
+	username = user.Username
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.OldPassword)); err != nil {
 		return commonerrors.NewBusinessError(7020, "old password is incorrect", commonerrors.ErrUnauthorized)
@@ -1641,10 +1686,42 @@ func (s *AdminService) ChangePassword(ctx context.Context, userID uuid.UUID, req
 		return fmt.Errorf("hash new password: %w", err)
 	}
 
+	// 先建立撤销屏障，避免密码已经更新后因 Redis 故障返回失败，导致用户继续
+	// 使用已经失效的旧密码重试。更新成功后再刷新一次时间戳，覆盖并发登录窗口。
+	if s.revoker != nil {
+		if err := s.revoker.Revoke(ctx, userID); err != nil {
+			return fmt.Errorf("revoke tokens before password change: %w", err)
+		}
+	}
 	if err := s.userRepo.UpdatePassword(ctx, userID, string(newHash)); err != nil {
 		return fmt.Errorf("update password: %w", err)
 	}
+	if s.revoker != nil {
+		if err := s.revoker.Revoke(ctx, userID); err != nil {
+			s.logger.Error("refresh token revocation after password change failed",
+				zap.String("user_id", userID.String()), zap.Error(err))
+		}
+	}
 	return nil
+}
+
+func (s *AdminService) auditPasswordChange(ctx context.Context, targetID uuid.UUID, username string, err error) {
+	entry := auditEntryFromContext(ctx)
+	entry.Action = audit.ActionPasswordChange
+	entry.ResourceType = audit.ResourceUser
+	entry.ResourceID = targetID.String()
+	entry.Success = err == nil
+	entry.Details = map[string]interface{}{
+		"success":        err == nil,
+		"target_user_id": targetID.String(),
+	}
+	if username != "" {
+		entry.Details["target_username"] = username
+	}
+	if err != nil {
+		entry.ErrorMessage = err.Error()
+	}
+	audit.Log(ctx, entry)
 }
 
 // ==================== Role User List ====================

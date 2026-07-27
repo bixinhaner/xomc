@@ -115,6 +115,7 @@ func (s *Sequencer) OnTaskCompleted(ctx context.Context, t *task.Task) {
 			zap.String("device_sn", t.DeviceSN),
 			zap.Int("next_cmd_idx", nextIdx),
 			zap.Error(err))
+		s.failAndContinueSkippedCommand(ctx, mmlTask, t, nextIdx, err.Error())
 		return
 	}
 	if nextReq == nil {
@@ -125,15 +126,7 @@ func (s *Sequencer) OnTaskCompleted(ctx context.Context, t *task.Task) {
 			zap.String("device_sn", t.DeviceSN),
 			zap.Int("skipped_cmd_idx", nextIdx),
 		)
-		// 模拟 nextIdx 的"虚拟完成"事件，递归找 nextIdx+1
-		s.OnTaskCompleted(ctx, &task.Task{
-			Source:       task.TaskSourceMML,
-			SourceID:     t.SourceID,
-			DeviceSN:     t.DeviceSN,
-			DeviceIndex:  t.DeviceIndex,
-			CommandIndex: nextIdx,
-			Status:       task.TaskStatusFailed,
-		})
+		s.failAndContinueSkippedCommand(ctx, mmlTask, t, nextIdx, "MML command could not be converted to a device task")
 		return
 	}
 
@@ -153,6 +146,94 @@ func (s *Sequencer) OnTaskCompleted(ctx context.Context, t *task.Task) {
 		zap.String("next_device_task_id", created.ID),
 		zap.String("method", nextReq.Method),
 	)
+}
+
+func (s *Sequencer) failAndContinueSkippedCommand(ctx context.Context, mmlTask *MMLTask, prev *task.Task, skippedIdx int, reason string) {
+	req := s.failedCommandRequest(mmlTask, prev, skippedIdx, reason)
+	created, err := s.enqueuer.CreateTask(ctx, req)
+	if err != nil {
+		s.logger.Error("sequencer: record skipped command failure failed; falling back to virtual continuation",
+			zap.String("mml_task_id", req.SourceID),
+			zap.String("device_sn", req.DeviceSN),
+			zap.Int("skipped_cmd_idx", skippedIdx),
+			zap.Error(err),
+		)
+		s.continueAfterSkippedCommand(ctx, mmlTask, prev, skippedIdx)
+		return
+	}
+	s.logger.Info("sequencer: skipped command recorded as failed",
+		zap.String("mml_task_id", req.SourceID),
+		zap.String("device_sn", req.DeviceSN),
+		zap.Int("skipped_cmd_idx", skippedIdx),
+		zap.String("device_task_id", created.ID),
+		zap.String("method", req.Method),
+	)
+}
+
+func (s *Sequencer) failedCommandRequest(mmlTask *MMLTask, prev *task.Task, cmdIdx int, reason string) *task.CreateTaskRequest {
+	cmd := map[string]interface{}{}
+	if mmlTask != nil && cmdIdx >= 0 && cmdIdx < len(mmlTask.Commands) {
+		cmd = mmlTask.Commands[cmdIdx]
+	}
+	method := commandString(cmd, "rpc_method")
+	if method == "" {
+		method = "InvalidMMLCommand"
+	}
+	commandCode := commandString(cmd, "command_code")
+	description := "MML command failed before enqueue"
+	if commandCode != "" {
+		description = fmt.Sprintf("MML %s", commandCode)
+	}
+	if mmlTask != nil && mmlTask.TaskName != "" {
+		description = fmt.Sprintf("%s: %s", description, mmlTask.TaskName)
+	}
+	sourceID := prev.SourceID
+	if sourceID == "" && mmlTask != nil {
+		sourceID = mmlTask.ID.String()
+	}
+	creator := ""
+	if mmlTask != nil {
+		creator = mmlTask.Creator
+	}
+	maxRetries := 0
+	payload, _ := json.Marshal(map[string]interface{}{
+		"command":     cmd,
+		"skip_reason": reason,
+		"skipped":     true,
+	})
+	return &task.CreateTaskRequest{
+		DeviceSN:    prev.DeviceSN,
+		Method:      method,
+		Params:      payload,
+		Priority:    10,
+		Source:      task.TaskSourceMML,
+		CreatorID:   creator,
+		Description: description,
+		MaxRetries:  &maxRetries,
+
+		SourceID:     sourceID,
+		CommandIndex: cmdIdx,
+		DeviceIndex:  prev.DeviceIndex,
+
+		FailImmediately: true,
+		FailReason:      reason,
+	}
+}
+
+func (s *Sequencer) continueAfterSkippedCommand(ctx context.Context, mmlTask *MMLTask, prev *task.Task, skippedIdx int) {
+	virtual := &task.Task{
+		Source:       task.TaskSourceMML,
+		SourceID:     prev.SourceID,
+		DeviceSN:     prev.DeviceSN,
+		DeviceIndex:  prev.DeviceIndex,
+		CommandIndex: skippedIdx,
+		Status:       task.TaskStatusFailed,
+	}
+	if skippedIdx >= 0 && skippedIdx < len(mmlTask.Commands) {
+		virtual.Method = commandString(mmlTask.Commands[skippedIdx], "rpc_method")
+	}
+	// 模拟 skippedIdx 的"虚拟完成"事件，递归找 skippedIdx+1。
+	s.OnTaskCompleted(ctx, virtual)
 }
 
 // buildNextRequest 用 fanouter 的逻辑构造单条 device_task 请求。

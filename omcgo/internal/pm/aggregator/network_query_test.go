@@ -38,10 +38,11 @@ func Test_queryNetworkTable_SQLShape(t *testing.T) {
 
 	sql := db.sqls[0]
 	// 分组键仅 metric_path/granularity/time（全网无实体键）
-	assert.Contains(t, sql, "GROUP BY metric_path, granularity, time")
-	assert.NotContains(t, sql, "object_ldn", "全网汇总不带 object_ldn 实体键")
+	groupBy := sql[strings.LastIndex(sql, "GROUP BY"):]
+	assert.Contains(t, groupBy, "GROUP BY metric_path, granularity, time")
+	assert.NotContains(t, groupBy, "object_ldn", "全网汇总不按 object_ldn 分组")
 	assert.NotContains(t, sql, "product_id", "全网汇总不带 product_id 分组")
-	assert.NotContains(t, sql, "device_sn", "全网汇总不带 device_sn 分组")
+	assert.NotContains(t, groupBy, "device_sn", "全网汇总不按 device_sn 分组")
 	// statis_type 路由算子在
 	assert.Contains(t, sql, "WHEN 'sum' THEN SUM(metric_value)")
 }
@@ -122,9 +123,13 @@ func Test_Query_NetworkDimension_EmptyMetricPaths_AggregatesAllCounters(t *testi
 	assert.True(t, hasNonSelect, "非精选 counter C999999999 被全网聚合出")
 }
 
-// kpiMetaRow 是 resolveAllDerivedKPIs SELECT 的一行（id, statis_type, arithmetic）。
+// kpiMetaRow 是 resolveAllDerivedKPIs SELECT 的一行（id, statis_type, arithmetic, device_type）。
 func kpiMetaRow(id, statis, arithmetic string) []any {
-	return []any{id, statis, arithmetic}
+	return []any{id, statis, arithmetic, "ENB"}
+}
+
+func kpiMetaRowForDeviceType(id, statis, arithmetic, deviceType string) []any {
+	return []any{id, statis, arithmetic, deviceType}
 }
 
 // Test_Query_NetworkDimension_RecomputeAllKPIs（KPI-ALL-IND 收口修复）：
@@ -172,6 +177,24 @@ func Test_Query_NetworkDimension_RecomputeAllKPIs(t *testing.T) {
 	assert.Equal(t, 2, counters, "全部 counter 行都落库")
 	assert.Equal(t, 1, kpis, "派生 KPI 被重算产出一行")
 	assert.InDelta(t, 0.8, kpiVal, 1e-9, "KPI=C11/C12=80/100=0.8（全网 counter 汇总后按公式重算）")
+}
+
+func TestResolveAllDerivedKPIs_CompilesGSMDurationRuntimeArithmetic(t *testing.T) {
+	db := &recordingDB{
+		results: []pgx.Rows{
+			&fakeRows{rows: [][]any{
+				kpiMetaRowForDeviceType("KGSM0109", "pct", "(1-(CGSM0040005)/(CGSM0040003*Duration))*100", "GSM"),
+			}},
+		},
+	}
+	a := New(db, nil, nil)
+
+	kpis := a.resolveAllDerivedKPIs(context.Background())
+
+	require.Len(t, kpis, 1)
+	assert.Equal(t, "(1-(CGSM0040005)/(CGSM0040003*CGSM0080001))*100", kpis[0].formula)
+	assert.ElementsMatch(t, []string{"CGSM0040005", "CGSM0040003", "CGSM0080001"}, kpis[0].deps)
+	assert.NotContains(t, kpis[0].deps, "Duration")
 }
 
 // Test_Query_NetworkDimension_RecomputeAllKPIs_NoKPIMeta（失败/降级路径）：

@@ -133,6 +133,9 @@ components:
 	var firstIndexEntry OperationSummary
 	require.NoError(t, json.Unmarshal([]byte(indexLines[0]), &firstIndexEntry))
 	require.Equal(t, "get.devices.by_id", firstIndexEntry.OperationID)
+	require.Contains(t, firstIndexEntry.SearchTerms, "verbose")
+	require.Contains(t, firstIndexEntry.SearchTerms, "Device")
+	require.Contains(t, firstIndexEntry.SearchTerms, "name")
 
 	var getDoc map[string]any
 	readJSONFile(t, filepath.Join(output, "references", "api-docs", "get.devices.by_id.json"), &getDoc)
@@ -180,12 +183,63 @@ components:
 	require.Len(t, operations, 2)
 	require.Equal(t, "get.devices.by_id", operations[0].(map[string]any)["operationId"])
 	require.Equal(t, "api-docs/get.devices.by_id.json", operations[0].(map[string]any)["document"])
+	require.NotContains(t, operations[0].(map[string]any), "searchTerms")
 
 	require.NoError(t, Check(output, exported))
 	firstHash := treeHash(t, filepath.Join(output, "references"))
 	_, err = Generate(Options{Routes: exported, OpenAPIPath: openAPIPath, SourceRoot: sourceRoot, OutputDir: output})
 	require.NoError(t, err)
 	require.Equal(t, firstHash, treeHash(t, filepath.Join(output, "references")))
+}
+
+func TestGoSourceSummaryAndSearchTermsImproveGenericRoutes(t *testing.T) {
+	temp := t.TempDir()
+	sourceRoot := filepath.Join(temp, "source")
+	output := filepath.Join(temp, "skill")
+	require.NoError(t, os.MkdirAll(filepath.Join(sourceRoot, "internal", "transfer"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(sourceRoot, "internal", "transfer", "handler.go"), []byte(`package transfer
+
+import "github.com/gin-gonic/gin"
+
+type Handler struct{}
+type Filter struct {
+	Status string `+"`form:\"status\"`"+` // Device execution status such as failed.
+	TypeCode string `+"`form:\"typeCode\"`"+` // Runtime log collection type RUNTIME_LOG_COLLECT.
+}
+
+// ListDevices handles transfer task execution details.
+//
+// @Summary 查询传输任务设备执行明细与失败原因
+// @Description Failed records include failureReason and failureDetail for log collection diagnosis.
+func (h *Handler) ListDevices(c *gin.Context) {
+	var filter Filter
+	_ = c.ShouldBindQuery(&filter)
+}
+`), 0o644))
+
+	routes := RouteExport{
+		SchemaVersion: SchemaVersion, CatalogVersion: "catalog", TotalRoutes: 1,
+		Routes: []Route{{
+			OperationID: "get.transfer.devices", Method: "GET", Path: "/api/v1/transfer/devices",
+			Handler: "github.com/omcgo/omcgo/internal/transfer.(*Handler).ListDevices-fm",
+			Title:   "transfer - 列表", Summary: "transfer - 列表", Description: "transfer：按筛选条件查询资源列表",
+			Category: "transfer", Risk: "read",
+		}},
+	}
+	_, err := Generate(Options{Routes: routes, SourceRoot: sourceRoot, OutputDir: output})
+	require.NoError(t, err)
+
+	var document OperationDocument
+	readJSONFile(t, filepath.Join(output, "references", "api-docs", "get.transfer.devices.json"), &document)
+	require.Equal(t, "查询传输任务设备执行明细与失败原因", document.Summary)
+	require.Equal(t, "Failed records include failureReason and failureDetail for log collection diagnosis.", document.Description)
+
+	lines := nonEmptyLines(t, filepath.Join(output, "references", "api-index.jsonl"))
+	var summary OperationSummary
+	require.NoError(t, json.Unmarshal([]byte(lines[0]), &summary))
+	require.Contains(t, summary.SearchTerms, "status")
+	require.Contains(t, summary.SearchTerms, "Device execution status such as failed.")
+	require.Contains(t, summary.SearchTerms, "typeCode")
 }
 
 func TestGenerateRejectsDuplicateOperationIDs(t *testing.T) {
@@ -268,6 +322,11 @@ func (h *Handler) Embedded(c *gin.Context) {
 	filter := EmbeddedFilter{}
 	_ = c.ShouldBindQuery(&filter)
 }
+
+// List godoc
+// @Summary Query inventory
+// @Param status query string false "Device status"
+func (h *Handler) Documented(c *gin.Context) {}
 `
 	require.NoError(t, os.WriteFile(filepath.Join(packageDir, "handler.go"), []byte(source), 0o644))
 	analyzer, err := newGoSourceAnalyzer(root)
@@ -278,6 +337,10 @@ func (h *Handler) Embedded(c *gin.Context) {
 
 	embedded := analyzer.analyze("github.com/omcgo/omcgo/internal/inventory.(*Handler).Embedded-fm")
 	require.Equal(t, []string{"page", "page_size", "status"}, parameterNames(embedded.QueryParams))
+
+	documented := analyzer.analyze("github.com/omcgo/omcgo/internal/inventory.(*Handler).Documented-fm")
+	require.Equal(t, "Query inventory", documented.Summary)
+	require.Empty(t, documented.Description, "structured Swagger directives must not leak into the description")
 }
 
 func TestGoSourceAnalyzerResolvesImportedQueryStruct(t *testing.T) {

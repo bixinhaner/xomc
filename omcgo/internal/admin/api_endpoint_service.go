@@ -16,8 +16,13 @@ import (
 
 // ApiEndpointService provides CRUD and sync operations for API endpoints.
 type ApiEndpointService struct {
-	repo   ApiEndpointRepository
-	logger *zap.Logger
+	repo                  ApiEndpointRepository
+	builtInPermReconciler BuiltInAPIPermissionReconciler
+	logger                *zap.Logger
+}
+
+type BuiltInAPIPermissionReconciler interface {
+	ReconcileBuiltInAPIPermissions(context.Context) (BuiltInAPIPermissionGrantResult, error)
 }
 
 // NewApiEndpointService creates a new ApiEndpointService.
@@ -26,6 +31,12 @@ func NewApiEndpointService(repo ApiEndpointRepository, logger *zap.Logger) *ApiE
 		repo:   repo,
 		logger: logger.Named("api-endpoint-service"),
 	}
+}
+
+// SetBuiltInPermissionReconciler wires the immutable built-in role baseline
+// maintenance into both startup and manually triggered endpoint synchronization.
+func (s *ApiEndpointService) SetBuiltInPermissionReconciler(reconciler BuiltInAPIPermissionReconciler) {
+	s.builtInPermReconciler = reconciler
 }
 
 // ListApiEndpoints retrieves a paginated, filtered list of API endpoints.
@@ -100,18 +111,25 @@ func (s *ApiEndpointService) SyncApiEndpoints(ctx context.Context, routes gin.Ro
 
 		created, err := s.repo.Upsert(ctx, route.Path, route.Method, name, description, apiGroup)
 		if err != nil {
-			s.logger.Warn("failed to upsert route",
-				zap.String("path", route.Path),
-				zap.String("method", route.Method),
-				zap.Error(err),
-			)
-			continue
+			return result, fmt.Errorf("upsert API endpoint %s %s: %w", route.Method, route.Path, err)
 		}
 		if created {
 			result.Created++
 		} else {
 			result.Updated++
 		}
+	}
+
+	if s.builtInPermReconciler != nil {
+		grants, err := s.builtInPermReconciler.ReconcileBuiltInAPIPermissions(ctx)
+		if err != nil {
+			return result, fmt.Errorf("reconcile built-in API permissions: %w", err)
+		}
+		s.logger.Info("reconciled built-in API permission baseline",
+			zap.Int64("admin_grants_added", grants.Admin),
+			zap.Int64("operator_grants_added", grants.Operator),
+			zap.Int64("viewer_grants_added", grants.Viewer),
+		)
 	}
 
 	s.logger.Info("synced api endpoints",

@@ -20,6 +20,7 @@ package backup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/minio/minio-go/v7"
@@ -63,6 +64,9 @@ func (m *PolicyMonitor) RunStorageCheckOnce(ctx context.Context) (int64, error) 
 
 	policy, err := m.policyService.Get(ctx)
 	if err != nil {
+		if isStorageCheckCancellation(err) {
+			return 0, fmt.Errorf("get backup policy: %w", err)
+		}
 		m.metrics.RecordStorageCheck("failure")
 		return 0, fmt.Errorf("get backup policy: %w", err)
 	}
@@ -89,6 +93,9 @@ func (m *PolicyMonitor) RunStorageCheckOnce(ctx context.Context) (int64, error) 
 
 	used, err := m.sumBucketUsage(ctx)
 	if err != nil {
+		if isStorageCheckCancellation(err) {
+			return 0, fmt.Errorf("sum backup bucket usage: %w", err)
+		}
 		// Review fix HIGH-2: record metric + log warn at the function level so
 		// direct callers (tests, future ops endpoints) see context without
 		// digging into the cron closure's outer warn. The error is still
@@ -163,6 +170,10 @@ func (m *PolicyMonitor) RunStorageCheckOnce(ctx context.Context) (int64, error) 
 		m.metrics.RecordStorageThresholdAlarm("skipped")
 		return used, nil
 	}
+}
+
+func isStorageCheckCancellation(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // sumBucketUsage iterates the canonical backup bucket and returns the total

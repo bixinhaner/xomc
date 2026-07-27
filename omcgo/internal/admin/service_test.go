@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -259,6 +260,7 @@ func (m *mockAuditRepo) List(ctx context.Context, filter AuditLogFilter) (*model
 
 type mockMenuRepo struct {
 	getAllActiveFn func(ctx context.Context) ([]Menu, error)
+	getByRoleFn    func(ctx context.Context, roleID uuid.UUID) ([]Menu, error)
 	setRoleMenusFn func(ctx context.Context, roleID uuid.UUID, menuIDs []uuid.UUID, operatorID uuid.UUID) error
 }
 
@@ -277,7 +279,10 @@ func (m *mockMenuRepo) Delete(_ context.Context, _ []uuid.UUID) error { return n
 func (m *mockMenuRepo) GetTree(_ context.Context, _ *MenuStatus) ([]Menu, error) {
 	return nil, nil
 }
-func (m *mockMenuRepo) GetByRole(_ context.Context, _ uuid.UUID) ([]Menu, error) {
+func (m *mockMenuRepo) GetByRole(ctx context.Context, roleID uuid.UUID) ([]Menu, error) {
+	if m.getByRoleFn != nil {
+		return m.getByRoleFn(ctx, roleID)
+	}
 	return nil, nil
 }
 func (m *mockMenuRepo) GetByUser(_ context.Context, _ uuid.UUID) ([]Menu, error) {
@@ -1027,6 +1032,125 @@ func TestAdminService_CreateUser_UseDefaultPassword_SkipsStrengthValidation(t *t
 	assert.NoError(t, bcrypt.CompareHashAndPassword([]byte(created.PasswordHash), []byte("OMC@1")))
 }
 
+// --- ChangePassword ---
+
+func TestAdminService_ChangePassword_RevokesExistingTokens(t *testing.T) {
+	userID := uuid.New()
+	userRepo := &mockUserRepo{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*User, error) {
+			assert.Equal(t, userID, id)
+			return &User{
+				ID:           userID,
+				Username:     "admin",
+				PasswordHash: hashPassword("Old@123456"),
+			}, nil
+		},
+		updatePasswordFn: func(_ context.Context, id uuid.UUID, passwordHash string) error {
+			assert.Equal(t, userID, id)
+			assert.NoError(t, bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte("New@123456")))
+			return nil
+		},
+	}
+	svc, _, mr := newServiceWithPolicyAndRevoker(t, userRepo, &mockRoleRepo{}, map[string]string{
+		"security.passwordContent": "true",
+		"security.pwdMinLength":    "8",
+	})
+
+	err := svc.ChangePassword(context.Background(), userID, ChangePasswordRequest{
+		OldPassword: "Old@123456",
+		NewPassword: "New@123456",
+	})
+	require.NoError(t, err)
+	assert.True(t, mr.Exists("auth:revoked_at:user:"+userID.String()),
+		"自助改密成功后必须撤销该用户已有 token")
+}
+
+func TestAdminService_ChangePassword_RevokeFailureDoesNotChangePassword(t *testing.T) {
+	userID := uuid.New()
+	updateCalled := false
+	userRepo := &mockUserRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*User, error) {
+			return &User{ID: userID, Username: "admin", PasswordHash: hashPassword("Old@123456")}, nil
+		},
+		updatePasswordFn: func(_ context.Context, _ uuid.UUID, _ string) error {
+			updateCalled = true
+			return nil
+		},
+	}
+	svc, _, mr := newServiceWithPolicyAndRevoker(t, userRepo, &mockRoleRepo{}, nil)
+	mr.Close()
+
+	err := svc.ChangePassword(context.Background(), userID, ChangePasswordRequest{
+		OldPassword: "Old@123456",
+		NewPassword: "New@123456",
+	})
+	require.Error(t, err)
+	assert.False(t, updateCalled, "撤销基础设施不可用时不得先修改密码再返回失败")
+}
+
+func TestAdminService_ChangePassword_AuditsSuccessWithoutPasswords(t *testing.T) {
+	userID := uuid.New()
+	userRepo := &mockUserRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*User, error) {
+			return &User{ID: userID, Username: "admin", PasswordHash: hashPassword("Old@123456")}, nil
+		},
+	}
+	logs, fn := auditCollector()
+	svc, auditRepo, _ := newServiceWithPolicyAndRevoker(t, userRepo, &mockRoleRepo{}, nil)
+	auditRepo.createFn = fn
+	ctx := context.WithValue(context.Background(), CtxKeyUserID, userID)
+	ctx = context.WithValue(ctx, CtxKeyUsername, "admin")
+	ctx = context.WithValue(ctx, auditRequestMetadataContextKey{}, auditRequestMetadata{
+		IPAddress: "10.10.30.155",
+		UserAgent: "change-password-test",
+	})
+
+	err := svc.ChangePassword(ctx, userID, ChangePasswordRequest{
+		OldPassword: "Old@123456",
+		NewPassword: "New@123456",
+	})
+	require.NoError(t, err)
+	require.Len(t, *logs, 1)
+	log := (*logs)[0]
+	assert.Equal(t, "password_change", log.Action)
+	assert.Equal(t, "admin", log.Username)
+	assert.Equal(t, "10.10.30.155", log.IPAddress)
+	assert.Equal(t, "change-password-test", log.UserAgent)
+	assert.Equal(t, userID.String(), log.ResourceID)
+	assert.Equal(t, true, log.Details["success"])
+	assert.Equal(t, userID.String(), log.Details["target_user_id"])
+	serialized := fmt.Sprintf("%+v", log)
+	assert.NotContains(t, serialized, "Old@123456")
+	assert.NotContains(t, serialized, "New@123456")
+}
+
+func TestAdminService_ChangePassword_AuditsFailureWithoutPasswords(t *testing.T) {
+	userID := uuid.New()
+	userRepo := &mockUserRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*User, error) {
+			return &User{ID: userID, Username: "admin", PasswordHash: hashPassword("Correct@123456")}, nil
+		},
+	}
+	logs, fn := auditCollector()
+	svc, auditRepo, _ := newServiceWithPolicyAndRevoker(t, userRepo, &mockRoleRepo{}, nil)
+	auditRepo.createFn = fn
+
+	err := svc.ChangePassword(context.Background(), userID, ChangePasswordRequest{
+		OldPassword: "Wrong@123456",
+		NewPassword: "New@123456",
+	})
+	require.Error(t, err)
+	require.Len(t, *logs, 1)
+	log := (*logs)[0]
+	assert.Equal(t, "password_change_failed", log.Action)
+	assert.Equal(t, false, log.Details["success"])
+	assert.Equal(t, userID.String(), log.Details["target_user_id"])
+	serialized := fmt.Sprintf("%+v", log)
+	assert.NotContains(t, serialized, "Wrong@123456")
+	assert.NotContains(t, serialized, "New@123456")
+	assert.NotContains(t, serialized, "Correct@123456")
+}
+
 // --- ResetPassword ---
 
 func TestAdminService_ResetPassword_LDAP_Rejects(t *testing.T) {
@@ -1197,6 +1321,89 @@ func TestAdminService_ResetPassword_RevokerNotInjected_StillSucceeds(t *testing.
 
 	err := svc.ResetPassword(context.Background(), target, ResetPasswordRequest{UseDefaultPassword: true})
 	require.NoError(t, err, "revoker 未注入时仍应成功（fail-safe）")
+}
+
+func TestAdminService_GetUserMenuTreeByRole_CustomRoleIncludesButtonsUnderGrantedMenu(t *testing.T) {
+	userID := uuid.New()
+	roleID := uuid.New()
+	directoryID := uuid.New()
+	menuID := uuid.New()
+	executeButtonID := uuid.New()
+
+	assignedMenus := []Menu{
+		{ID: directoryID, Type: MenuTypeDirectory, PermissionKey: "mml"},
+		{ID: menuID, Type: MenuTypeMenu, PermissionKey: "mml:console", ParentID: &directoryID},
+	}
+	allMenus := append(append([]Menu{}, assignedMenus...), Menu{
+		ID:            executeButtonID,
+		Type:          MenuTypeButton,
+		PermissionKey: "mml:console:execute",
+		ParentID:      &menuID,
+		Status:        MenuStatusNormal,
+		ShowStatus:    MenuShow,
+	})
+
+	menuRepo := &mockMenuRepo{
+		getByRoleFn: func(_ context.Context, gotRoleID uuid.UUID) ([]Menu, error) {
+			require.Equal(t, roleID, gotRoleID)
+			return assignedMenus, nil
+		},
+		getAllActiveFn: func(context.Context) ([]Menu, error) {
+			return allMenus, nil
+		},
+	}
+	userRepo := &mockUserRepo{
+		getByIDFn: func(_ context.Context, gotUserID uuid.UUID) (*User, error) {
+			require.Equal(t, userID, gotUserID)
+			return &User{ID: userID, Source: UserSourceAdmin}, nil
+		},
+	}
+	svc := newTestService(userRepo, &mockRoleRepo{}, &mockAuditRepo{})
+	svc.menuRepo = menuRepo
+
+	tree, err := svc.GetUserMenuTreeByRole(context.Background(), userID, roleID)
+	require.NoError(t, err)
+	require.Len(t, tree, 1)
+	require.Len(t, tree[0].Children, 1)
+	require.Len(t, tree[0].Children[0].Children, 1)
+	assert.Equal(t, executeButtonID, tree[0].Children[0].Children[0].ID)
+}
+
+func TestAdminService_GetUserMenuTreeByRole_BuiltInRoleKeepsExplicitButtons(t *testing.T) {
+	userID := uuid.New()
+	roleID := uuid.MustParse(builtinViewerRoleID)
+	directoryID := uuid.New()
+	menuID := uuid.New()
+	exportButtonID := uuid.New()
+
+	menuRepo := &mockMenuRepo{
+		getByRoleFn: func(_ context.Context, gotRoleID uuid.UUID) ([]Menu, error) {
+			require.Equal(t, roleID, gotRoleID)
+			return []Menu{
+				{ID: directoryID, Type: MenuTypeDirectory, PermissionKey: "mml"},
+				{ID: menuID, Type: MenuTypeMenu, PermissionKey: "mml:console", ParentID: &directoryID},
+				{ID: exportButtonID, Type: MenuTypeButton, PermissionKey: "mml:console:export", ParentID: &menuID},
+			}, nil
+		},
+		getAllActiveFn: func(context.Context) ([]Menu, error) {
+			t.Fatal("built-in roles must not derive additional button permissions")
+			return nil, nil
+		},
+	}
+	userRepo := &mockUserRepo{
+		getByIDFn: func(context.Context, uuid.UUID) (*User, error) {
+			return &User{ID: userID, Source: UserSourceAdmin}, nil
+		},
+	}
+	svc := newTestService(userRepo, &mockRoleRepo{}, &mockAuditRepo{})
+	svc.menuRepo = menuRepo
+
+	tree, err := svc.GetUserMenuTreeByRole(context.Background(), userID, roleID)
+	require.NoError(t, err)
+	require.Len(t, tree, 1)
+	require.Len(t, tree[0].Children, 1)
+	require.Len(t, tree[0].Children[0].Children, 1)
+	assert.Equal(t, exportButtonID, tree[0].Children[0].Children[0].ID)
 }
 
 // --- sys_config validator ---

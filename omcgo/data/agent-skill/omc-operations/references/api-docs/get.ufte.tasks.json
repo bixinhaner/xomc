@@ -5,12 +5,12 @@
   "path": "/api/v1/ufte/tasks",
   "handler": "github.com/omcgo/omcgo/internal/ufte.(*Handler).ListTasks-fm",
   "category": "ufte",
-  "title": "ufte - 列表",
-  "summary": "ufte - 列表",
-  "description": "ufte：按筛选条件查询资源列表",
+  "title": "查询传输中心任务",
+  "summary": "查询传输中心任务",
+  "description": "查询统一文件传输任务汇总；日志收集任务使用 category=station_log 和 typeCode=RUNTIME_LOG_COLLECT，结束任务的 result 可区分成功、部分成功和失败。",
   "intents": [
-    "ufte - 列表",
-    "ufte：按筛选条件查询资源列表",
+    "查询传输中心任务",
+    "查询统一文件传输任务汇总；日志收集任务使用 category=station_log 和 typeCode=RUNTIME_LOG_COLLECT，结束任务的 result 可区分成功、部分成功和失败。",
     "ufte",
     "tasks"
   ],
@@ -29,7 +29,9 @@
       "in": "query",
       "required": false,
       "type": "string",
+      "description": "业务分类，如日志收集 station_log。",
       "schema": {
+        "description": "业务分类，如日志收集 station_log。",
         "type": "string"
       }
     },
@@ -38,7 +40,9 @@
       "in": "query",
       "required": false,
       "type": "string",
+      "description": "匹配任务名称、类型显示名或产品类型。",
       "schema": {
+        "description": "匹配任务名称、类型显示名或产品类型。",
         "type": "string"
       }
     },
@@ -67,7 +71,9 @@
       "in": "query",
       "required": false,
       "type": "string",
+      "description": "任务状态：pending、in_progress、suspended、ended。",
       "schema": {
+        "description": "任务状态：pending、in_progress、suspended、ended。",
         "type": "string"
       }
     },
@@ -76,7 +82,9 @@
       "in": "query",
       "required": false,
       "type": "string",
+      "description": "任务类型，如 RUNTIME_LOG_COLLECT。",
       "schema": {
+        "description": "任务类型，如 RUNTIME_LOG_COLLECT。",
         "type": "string"
       }
     }

@@ -1,4 +1,4 @@
-import { rfStatusLabelOf, rfStatusOf } from '../rfStatus';
+import { displayRFStatusLabelOf, displayRFStatusOf, rfStatusLabelOf, rfStatusOf } from '../rfStatus';
 
 describe('rfStatusOf', () => {
   it('normalizes MLN-style numeric values to switch states', () => {
@@ -40,5 +40,15 @@ describe('rfStatusLabelOf', () => {
 
   it('uses the error label when provided', () => {
     expect(rfStatusLabelOf('error', labels)).toBe('异常');
+  });
+
+  it('keeps the last reported RF state independent of management connectivity', () => {
+    expect(displayRFStatusOf('1', false)).toBe('on');
+    expect(displayRFStatusLabelOf('1', false, labels)).toBe('射频开');
+  });
+
+  it('keeps missing RF state unknown for both online and offline devices', () => {
+    expect(displayRFStatusOf('', true)).toBeNull();
+    expect(displayRFStatusOf('', false)).toBeNull();
   });
 });

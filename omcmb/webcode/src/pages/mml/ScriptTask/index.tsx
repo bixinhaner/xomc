@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import type { Key } from 'react';
-import { Button, Descriptions, Drawer, Dropdown, Empty, Form, Input, Modal, Space, Spin, Typography, message } from 'antd';
+import { useNavigate } from 'react-router-dom';
+import { Button, Descriptions, Drawer, Dropdown, Empty, Form, Input, Modal, Space, Spin, Tooltip, Typography, message } from 'antd';
 import type { MenuProps } from 'antd';
 import { DeleteOutlined, DownloadOutlined, EditOutlined, EyeOutlined, MoreOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons';
-import dayjs from 'dayjs';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
@@ -11,14 +11,13 @@ import SearchInput from '@/components/SearchInput';
 import { useT } from '@/hooks/useT';
 import type { MMLScript } from '@core/types/mml';
 import { useMMLScripts, useMMLScriptById, useUpdateMMLScript, useDeleteMMLScripts } from '@core/hooks/api/useMML';
+import { formatSystemTime } from '@core/utils/systemTime';
 import ScriptImportModal from './ScriptImportModal';
 import ScriptExecutionDrawer from './ScriptExecutionDrawer';
 import ScriptImportPreview from './ScriptImportPreview';
 
 function formatTime(iso?: string | null): string {
-  if (!iso) return '-';
-  const value = dayjs(iso);
-  return value.isValid() ? value.format('YYYY-MM-DD HH:mm:ss') : '-';
+  return formatSystemTime(iso);
 }
 
 function downloadScript(script: MMLScript) {
@@ -30,6 +29,7 @@ interface BasicForm { scriptName: string; description: string; }
 
 export default function ScriptTask() {
   const t = useT();
+  const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [search, setSearch] = useState('');
@@ -114,7 +114,9 @@ export default function ScriptTask() {
           { key: 'delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true, onClick: confirmDelete },
         ];
         return <Space size={4}>
-          <Button type="link" size="small" aria-label={t('mml.script.action.execute')} icon={<PlayCircleOutlined />} onClick={(event) => { event.stopPropagation(); setExecScript(record); }}>{t('mml.script.action.execute')}</Button>
+          <Tooltip title={t('mml.script.action.execute')}>
+            <Button type="link" size="small" aria-label={t('mml.script.action.execute')} icon={<PlayCircleOutlined />} onClick={(event) => { event.stopPropagation(); setExecScript(record); }} />
+          </Tooltip>
           <Dropdown menu={{ items }} trigger={['click']}>
             <Button type="text" size="small" aria-label={t('mml.script.action.more')} icon={<MoreOutlined />} onClick={(event) => event.stopPropagation()} />
           </Dropdown>
@@ -176,7 +178,15 @@ export default function ScriptTask() {
         {detailScript.validationSummary ? <ScriptImportPreview validation={{ planItems: detailScript.planItems ?? [], issues: detailScript.validationIssues ?? [], summary: detailScript.validationSummary, originalFilename: detailScript.originalFilename }} /> : null}
       </Space></Spin> : null}
     </Drawer>
-    <ScriptExecutionDrawer open={Boolean(execScript)} script={execScript} onClose={() => setExecScript(null)} onSuccess={() => void refetch()} />
+    <ScriptExecutionDrawer
+      open={Boolean(execScript)}
+      script={execScript}
+      onClose={() => setExecScript(null)}
+      onSuccess={() => {
+        void refetch();
+        void navigate('/mml/task-records');
+      }}
+    />
     <Modal title={t('mml.script.editBasicInfo')} open={Boolean(editing)} onCancel={closeBasic} onOk={() => void saveBasic()} confirmLoading={updateMutation.isPending} okText={t('common.save')} cancelText={t('common.cancel')}>
       <Form form={basicForm} layout="vertical"><Form.Item label={t('mml.scriptName')} name="scriptName" rules={[{ required: true, message: t('mml.inputScriptName') }]}><Input /></Form.Item><Form.Item label={t('mml.description')} name="description"><Input /></Form.Item></Form>
     </Modal>

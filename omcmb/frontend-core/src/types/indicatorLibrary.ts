@@ -63,8 +63,9 @@ export interface PlatformFormula {
 }
 
 export interface CreateIndicatorInput {
-  id: string;
   name: string;
+  // create 接口由后端生成真实 ID。id 仅为兼容历史调用方/测试输入，真实 API 序列化会丢弃。
+  id?: string;
   cnName?: string;
   enName?: string;
   groupId?: string;
@@ -166,8 +167,9 @@ export const INDICATOR_TYPE_OPTIONS = [
 export type IndicatorTypeValue = (typeof INDICATOR_TYPE_OPTIONS)[number]['value'];
 
 export interface CreateGroupInput {
-  id: string;
   name: string;
+  // create 接口由后端生成真实 ID。id 仅为兼容历史调用方/测试输入，真实 API 序列化会丢弃。
+  id?: string;
   parentId?: string;
   description?: string;
   operatorCode?: string;

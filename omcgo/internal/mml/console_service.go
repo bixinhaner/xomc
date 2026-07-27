@@ -37,17 +37,21 @@ type ConsoleService struct {
 	flatTreeRepo FlatGroupTreeRepository
 	// searchRepo 是 Bundle C 新增的命令搜索仓储；nil 表示未装配（503）。
 	searchRepo SearchRepository
-	// T-0170: 注入"device key (SN 或 UUID) → paramModelID"反查闭包；nil 时退化为全集（admin 视图）。
+	// T-0170: 注入"device key (SN 或 UUID) → paramModelID"反查闭包；设备过滤请求未装配时
+	// 返回错误，避免把未过滤全集当成设备可用命令。
 	// 设计哲学：param_mappings 是 product 实际支持 path 的真值源；缺映射 = 不支持。
 	resolveParamModelByDevice func(ctx context.Context, deviceKey string) (*uuid.UUID, error)
-	// T-0172: 注入 productClass → SupportedSet 反查。nil 时 BuildGroupTreeFiltered
-	// 退化为原 BuildGroupTree（不过滤）。设计同 resolveParamModelByDevice 通过闭包
-	// 解耦 product / parammodel 包依赖。
+	// T-0172: 注入 productClass → SupportedSet 反查。productClass 过滤请求未装配时
+	// 返回错误。设计同 resolveParamModelByDevice 通过闭包解耦 product / parammodel 包依赖。
 	supportedPathsRepo SupportedPathsRepository
 	// resolvePathsByParamModel 按 paramModelID 从 ParamRegistry（Redis L1→L2→DB）
 	// 取 supported paths；用于 deviceKey 分支（productClass 分支直接用 SupportedSet.Paths）。
-	// nil 时 deviceKey 分支退化为全集（admin 视图等价）。
+	// 未装配时 deviceKey 过滤请求返回错误。
 	resolvePathsByParamModel func(ctx context.Context, paramModelID uuid.UUID) (map[string]struct{}, error)
+	// resolveSupportedSetForDevice 按具体设备解析 supported set。新装配路径会使用
+	// product_id/product_class + firmware_version，和执行期 path translator 的
+	// ParamRegistry.GetByProduct 口径一致；未装配时回退到上面的 paramModel 默认映射。
+	resolveSupportedSetForDevice func(ctx context.Context, deviceKey string) (*SupportedSet, error)
 
 	// 产品（product_id）不支持 path 自学习表查询 + deviceSN→product_id 解析闭包（兼容旧入参）。
 	// 供 GetUnsupportedPaths 给前端「选择命令 / 配置参数」按读/写过滤展示；nil 时返回空集。
@@ -83,38 +87,136 @@ func (s *ConsoleService) BuildGroupTree(ctx context.Context, rootCode, lang stri
 // BuildGroupTreeFiltered 在 BuildGroupTree 之上按 productClass 过滤命令：
 //   - LST/MOD：target_paths 中至少 1 条在 supported set → 显示
 //   - ADD/RMV：supported set 中存在以 target_object 为前缀的 path → 显示
-//   - 孤儿设备（productClass 未匹配产品）：全部命令显示，每条标 unsupported
+//   - 孤儿设备（productClass 未匹配产品）：返回空树，禁止展示未过滤全集
 //   - 空 group（过滤后 0 命令且无 children）：从结果中剔除
 //
 // 在每条留下的命令上挂 SupportedPathCount / UnsupportedPaths / ProductResolved 标注。
 //
-// productClass 为空 / supportedPathsRepo 未装配时退化为 BuildGroupTree。
+// productClass 为空时退化为 BuildGroupTree；productClass 非空但产品/ParamModel
+// 未解析成功时返回空树，解析错误直接返回错误，禁止展示未过滤全集。
 func (s *ConsoleService) BuildGroupTreeFiltered(ctx context.Context, rootCode, lang, productClass string) ([]GroupTreeNode, error) {
 	tree, err := s.treeRepo.BuildTree(ctx, rootCode, lang)
 	if err != nil {
 		return nil, err
 	}
-	if productClass == "" || s.supportedPathsRepo == nil {
+	if productClass == "" {
 		return tree, nil
+	}
+	if s.supportedPathsRepo == nil {
+		return nil, fmt.Errorf("resolve supported paths for product_class %q: repository not configured", productClass)
 	}
 	supported, err := s.supportedPathsRepo.ResolveByProductClass(ctx, productClass)
 	if err != nil {
 		return nil, fmt.Errorf("resolve supported paths for product_class %q: %w", productClass, err)
 	}
-	filterTreeInPlace(tree, supported)
+	if supported == nil || !supported.ProductResolved {
+		return []GroupTreeNode{}, nil
+	}
+	if supported.Paths == nil {
+		supported.Paths = map[string]struct{}{}
+	}
+	blocked, err := s.unsupportedPathsForProduct(ctx, supported.ProductID)
+	if err != nil {
+		return nil, err
+	}
+	filterTreeInPlace(tree, supported, blocked)
 	tree = pruneEmptyGroups(tree)
 	return tree, nil
 }
 
-// filterTreeInPlace 递归遍历 tree，按 supported 给每个 command 加标注，
-// 隐藏 visible=false 的命令。原 slice 被改动（in-place）。
-func filterTreeInPlace(nodes []GroupTreeNode, supported *SupportedSet) {
+// BuildGroupTreeFilteredByDevice 在命令树上按 deviceKey 对应的 ParamModel 支持集合过滤。
+// 与 GetCommandSubFields 使用同一条 ParamRegistry（Redis L1/L2，DB fallback）路径，
+// 保证左侧命令树与右侧参数列表使用相同的产品支持参数口径。
+//
+// deviceKey 解析失败或 ParamRegistry 失败时返回错误，禁止把未过滤的完整命令树
+// 当成产品可用命令展示。设备未解析到产品/ParamModel 时返回空树。
+func (s *ConsoleService) BuildGroupTreeFilteredByDevice(
+	ctx context.Context, rootCode, lang, deviceKey string,
+) ([]GroupTreeNode, error) {
+	if deviceKey == "" {
+		return s.treeRepo.BuildTree(ctx, rootCode, lang)
+	}
+	supported, err := s.resolveSupportedSetByDevice(ctx, deviceKey)
+	if err != nil {
+		return nil, err
+	}
+	if supported == nil || !supported.ProductResolved {
+		return []GroupTreeNode{}, nil
+	}
+
+	tree, err := s.treeRepo.BuildTree(ctx, rootCode, lang)
+	if err != nil {
+		return nil, err
+	}
+	blocked, err := s.unsupportedPathsForDevice(ctx, deviceKey)
+	if err != nil {
+		return nil, err
+	}
+	filterTreeInPlace(tree, supported, blocked)
+	return pruneEmptyGroups(tree), nil
+}
+
+// resolveSupportedSetByDevice 通过设备 → 产品 ParamModel → ParamRegistry 解析支持集合。
+// 返回 ProductResolved=false 表示设备、产品或 ParamModel 未解析成功；这不是错误，
+// 调用方应展示空的产品相关结果，而不是放行完整 catalog。
+func (s *ConsoleService) resolveSupportedSetByDevice(
+	ctx context.Context, deviceKey string,
+) (*SupportedSet, error) {
+	if s.resolveSupportedSetForDevice != nil {
+		supported, err := s.resolveSupportedSetForDevice(ctx, deviceKey)
+		if err != nil {
+			return nil, fmt.Errorf("resolve supported paths by device %q: %w", deviceKey, err)
+		}
+		if supported != nil && supported.Paths == nil {
+			supported.Paths = map[string]struct{}{}
+		}
+		return supported, nil
+	}
+	if s.resolveParamModelByDevice == nil {
+		return nil, fmt.Errorf("resolve param_model by device %q: resolver not configured", deviceKey)
+	}
+	paramModelID, err := s.resolveParamModelByDevice(ctx, deviceKey)
+	if err != nil {
+		return nil, fmt.Errorf("resolve param_model by device %q: %w", deviceKey, err)
+	}
+	if paramModelID == nil {
+		return &SupportedSet{ProductResolved: false, Paths: map[string]struct{}{}}, nil
+	}
+	if s.resolvePathsByParamModel == nil {
+		return nil, fmt.Errorf("resolve supported paths by param_model %s: resolver not configured", paramModelID)
+	}
+	supportedPaths, err := s.resolvePathsByParamModel(ctx, *paramModelID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve supported paths by param_model %s: %w", paramModelID, err)
+	}
+	if supportedPaths == nil {
+		supportedPaths = map[string]struct{}{}
+	}
+	return &SupportedSet{
+		ParamModelID:    paramModelID,
+		ProductResolved: true,
+		Paths:           supportedPaths,
+	}, nil
+}
+
+// filterTreeInPlace 递归遍历 tree，按静态 ParamModel 支持集合和运行时不支持 path
+// 集合给每个 command 加标注，隐藏最终无可用 path 的命令。原 slice 被改动（in-place）。
+func filterTreeInPlace(nodes []GroupTreeNode, supported *SupportedSet, blocked *unsupportedPathFilter) {
 	for i := range nodes {
 		kept := nodes[i].Commands[:0]
 		for _, cmd := range nodes[i].Commands {
 			ann := AnnotateCommand(cmd.OperationType, cmd.TargetPathsRaw(), cmd.TargetObject, supported)
 			if !ann.Visible {
 				continue
+			}
+			if blocked != nil {
+				available := countAvailableCommandPaths(cmd, supported, blocked)
+				if cmd.OperationType == "LST" || cmd.OperationType == "MOD" {
+					ann.SupportedPathCount = available
+				}
+				if available == 0 {
+					continue
+				}
 			}
 			// 复制标注到响应字段（指针字段允许 omitempty 不出现在未过滤路径上）
 			supported := ann.SupportedPathCount
@@ -125,8 +227,30 @@ func filterTreeInPlace(nodes []GroupTreeNode, supported *SupportedSet) {
 			kept = append(kept, cmd)
 		}
 		nodes[i].Commands = kept
-		filterTreeInPlace(nodes[i].Children, supported)
+		filterTreeInPlace(nodes[i].Children, supported, blocked)
 	}
+}
+
+func (s *ConsoleService) unsupportedPathsForProduct(ctx context.Context, productID *uuid.UUID) (*unsupportedPathFilter, error) {
+	if s.unsupportedRepo == nil || productID == nil {
+		return nil, nil
+	}
+	paths, err := s.unsupportedRepo.ListByProduct(ctx, *productID)
+	if err != nil {
+		return nil, fmt.Errorf("list unsupported paths for product %s: %w", productID, err)
+	}
+	return newUnsupportedPathFilter(paths), nil
+}
+
+func (s *ConsoleService) unsupportedPathsForDevice(ctx context.Context, deviceKey string) (*unsupportedPathFilter, error) {
+	if s.unsupportedRepo == nil || s.productIDByDev == nil {
+		return nil, nil
+	}
+	productID, err := s.productIDByDev(ctx, deviceKey)
+	if err != nil {
+		return nil, fmt.Errorf("resolve product_id for unsupported paths on device %q: %w", deviceKey, err)
+	}
+	return s.unsupportedPathsForProduct(ctx, productID)
 }
 
 // pruneEmptyGroups 递归剔除"自身无命令且子树也全空"的 group（含 chapter 顶层）。
@@ -145,15 +269,23 @@ func pruneEmptyGroups(nodes []GroupTreeNode) []GroupTreeNode {
 }
 
 // SetSupportedPathsRepository 注入 productClass → SupportedSet 反查仓储（T-0172）。
-// 不注入时 BuildGroupTreeFiltered 退化为 BuildGroupTree。
+// 未注入时带 productClass 的 BuildGroupTreeFiltered 返回错误；不带产品上下文的
+// admin 调用仍由 BuildGroupTree 返回全集。
 func (s *ConsoleService) SetSupportedPathsRepository(repo SupportedPathsRepository) {
 	s.supportedPathsRepo = repo
 }
 
 // SetParamModelPathsResolver 注入 paramModelID → supported paths 反查，供 deviceKey 分支使用。
-// 不注入时 deviceKey 分支退化为全集（admin 视图等价）。
+// 未注入时带 deviceKey 的过滤请求返回错误。
 func (s *ConsoleService) SetParamModelPathsResolver(fn func(ctx context.Context, paramModelID uuid.UUID) (map[string]struct{}, error)) {
 	s.resolvePathsByParamModel = fn
+}
+
+// SetDeviceSupportedPathsResolver 注入 deviceKey → SupportedSet 反查，供具体设备选择
+// 分支使用。provider 中应走 ParamRegistry.GetByProduct(productID, firmwareVersion)，
+// 保持命令选择弹窗和 MML 执行期 path translator 的 supported 口径一致。
+func (s *ConsoleService) SetDeviceSupportedPathsResolver(fn func(ctx context.Context, deviceKey string) (*SupportedSet, error)) {
+	s.resolveSupportedSetForDevice = fn
 }
 
 // SetFlatTreeRepo 装配 Task #4 扁平命令树仓储。不走构造函数以避免贩及
@@ -169,7 +301,8 @@ func (s *ConsoleService) SetSearchRepo(repo SearchRepository) {
 
 // SetParamModelByDeviceResolver 注入 deviceKey → paramModelID 反查（T-0170）。
 // deviceKey 可以是 serial_number 或 UUID（resolver 自行判定）。
-// 不注入时 sub_field 端点不按设备过滤（admin 视图等价）。
+// 未注入时带 deviceKey 的 sub_field 请求返回错误；不带过滤上下文的 admin
+// 请求仍返回全集。
 func (s *ConsoleService) SetParamModelByDeviceResolver(fn func(ctx context.Context, deviceKey string) (*uuid.UUID, error)) {
 	s.resolveParamModelByDevice = fn
 }
@@ -296,28 +429,115 @@ func (s *ConsoleService) BuildFlatGroupTree(ctx context.Context) ([]FlatGroup, e
 	return s.flatTreeRepo.BuildFlatTree(ctx)
 }
 
+// BuildFlatGroupTreeFiltered 返回按产品支持集合裁剪后的 flat 命令树。
+// LST/MOD 只保留与 supported paths 的交集；ADD/RMV 保留目标对象前缀命中的命令。
+// productClass/deviceKey 任一传入即启用过滤，两者都为空时保持 admin/浏览视图全集。
+func (s *ConsoleService) BuildFlatGroupTreeFiltered(
+	ctx context.Context, productClass, deviceKey string,
+) ([]FlatGroup, error) {
+	groups, err := s.BuildFlatGroupTree(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if productClass == "" && deviceKey == "" {
+		return groups, nil
+	}
+
+	var supported *SupportedSet
+	if deviceKey != "" {
+		supported, err = s.resolveSupportedSetByDevice(ctx, deviceKey)
+	} else {
+		if s.supportedPathsRepo == nil {
+			return nil, fmt.Errorf("resolve supported paths for product_class %q: repository not configured", productClass)
+		}
+		supported, err = s.supportedPathsRepo.ResolveByProductClass(ctx, productClass)
+		if err != nil {
+			return nil, fmt.Errorf("resolve supported paths for product_class %q: %w", productClass, err)
+		}
+		if supported != nil && supported.Paths == nil {
+			supported.Paths = map[string]struct{}{}
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	if supported == nil || !supported.ProductResolved {
+		return []FlatGroup{}, nil
+	}
+	return filterFlatGroupTree(groups, supported), nil
+}
+
+func filterFlatGroupTree(groups []FlatGroup, supported *SupportedSet) []FlatGroup {
+	filteredGroups := make([]FlatGroup, 0, len(groups))
+	for _, group := range groups {
+		filteredCommands := make([]FlatCommand, 0, len(group.Commands))
+		for _, command := range group.Commands {
+			filtered, visible := filterFlatCommand(command, supported)
+			if visible {
+				filteredCommands = append(filteredCommands, filtered)
+			}
+		}
+		if len(filteredCommands) > 0 {
+			group.Commands = filteredCommands
+			filteredGroups = append(filteredGroups, group)
+		}
+	}
+	return filteredGroups
+}
+
+func filterFlatCommand(command FlatCommand, supported *SupportedSet) (FlatCommand, bool) {
+	switch paths := command.ObjectPath.(type) {
+	case []string:
+		kept := make([]string, 0, len(paths))
+		for _, path := range paths {
+			if supported.Contains(path) {
+				kept = append(kept, path)
+			}
+		}
+		command.ObjectPath = kept
+		return command, len(kept) > 0
+	case []ModParamPath:
+		kept := make([]ModParamPath, 0, len(paths))
+		for _, path := range paths {
+			if supported.Contains(path.Path) {
+				kept = append(kept, path)
+			}
+		}
+		command.ObjectPath = kept
+		return command, len(kept) > 0
+	case string:
+		return command, supported.HasPathWithPrefix(paths)
+	default:
+		return command, false
+	}
+}
+
 // SubFieldDTO 是 GET /mml/commands/:id/sub-fields 端点的响应单元。
 // 包装 MMLCommandSubFieldEnriched 加 lang 派生顶级 label / constraint_text。
 type SubFieldDTO struct {
-	ID                 uuid.UUID         `json:"id"`
-	CommandID          uuid.UUID         `json:"command_id"`
-	ParamID            uuid.UUID         `json:"param_id"`
-	MMLCode            string            `json:"mml_code"`
-	Label              string            `json:"label"` // lang 派生
-	LabelI18n          map[string]string `json:"label_i18n"`
-	Tr069Path          string            `json:"tr069_path"`
-	ValueType          string            `json:"value_type"`
-	AccessType         string            `json:"access_type"`
-	IsObject           bool              `json:"is_object"`
-	SupportsAdd        bool              `json:"supports_add"`
-	SupportsDelete     bool              `json:"supports_delete"`
-	ChangeApplies      string            `json:"change_applies"`
-	ConstraintText     string            `json:"constraint_text"`
-	ConstraintTextI18n map[string]string `json:"constraint_text_i18n"`
-	DefaultValue       *string           `json:"default_value,omitempty"`
-	JsRegex            *string           `json:"js_regex,omitempty"`
-	// MinValue 是 standard_params.min_value：MML 控制台 MOD/ADD 填值时标量参数默认值。
+	ID                 uuid.UUID            `json:"id"`
+	CommandID          uuid.UUID            `json:"command_id"`
+	ParamID            uuid.UUID            `json:"param_id"`
+	MMLCode            string               `json:"mml_code"`
+	Label              string               `json:"label"` // lang 派生
+	LabelI18n          map[string]string    `json:"label_i18n"`
+	Tr069Path          string               `json:"tr069_path"`
+	ValueType          string               `json:"value_type"`
+	AccessType         string               `json:"access_type"`
+	IsObject           bool                 `json:"is_object"`
+	SupportsAdd        bool                 `json:"supports_add"`
+	SupportsDelete     bool                 `json:"supports_delete"`
+	ChangeApplies      string               `json:"change_applies"`
+	ConstraintText     string               `json:"constraint_text"`
+	ConstraintTextI18n map[string]string    `json:"constraint_text_i18n"`
+	DefaultValue       *string              `json:"default_value,omitempty"`
+	JsRegex            *string              `json:"js_regex,omitempty"`
+	ValidationPattern  *string              `json:"validation_pattern,omitempty"`
+	EnumOptions        []MMLParamEnumOption `json:"enum_options,omitempty"`
+	// MinValue/MaxValue 优先来自当前 paramModel 的 param_mappings，缺失时回退
+	// standard_params；MML 控制台 MOD/ADD 用它们做范围校验和兼容默认值。
 	MinValue        *int64 `json:"min_value,omitempty"`
+	MaxValue        *int64 `json:"max_value,omitempty"`
 	DefaultSelected bool   `json:"default_selected"`
 	IsRequired      bool   `json:"is_required"`
 	SortOrder       int    `json:"sort_order"`
@@ -335,66 +555,58 @@ type SubFieldDTO struct {
 //  2. productClass 为空 + deviceKey 非空 → resolveParamModelByDevice
 //     · 孤儿(silent skip:SN 不存在 / dev.ProductClass="" / 孤儿 productClass / 无 paramModel)
 //     → 返空集 []（与分支 1 对齐）
-//     · 真实错误（DB / 网络）→ log warn 后退化全集（容错，避免硬错误反馈给前端）
-//  3. 两者都空（或 resolver 未装配）→ admin 视图全集
+//     · 真实错误（DB / 网络 / Redis）→ 返回错误，禁止退化为未过滤全集
+//  3. 两者都空 → admin 视图全集
 //
-// console 前端始终传 productClass(走分支 1);omcctl / admin 工具用 deviceKey(走分支 2)。
-//
-// console 前端始终传 productClass（来自 productClassFilter dropdown），
-// omcctl / admin 工具用 deviceKey。
+// 控制台可通过 productClass 或 deviceKey 进入产品过滤分支；admin 工具只有在
+// 两者都不传时才读取全集。
 func (s *ConsoleService) GetCommandSubFields(ctx context.Context, commandID uuid.UUID, deviceKey, productClass, lang string) ([]SubFieldDTO, error) {
 	if lang == "" {
 		lang = "zh-CN"
 	}
-	var paramModelID *uuid.UUID
 	// supportedPaths 是 Redis（ParamRegistry L1→L2→DB）取出的该产品支持路径集。
 	// nil 表示 admin 全集（不过滤）；非 nil 时 Go 层做交集，不再走 SQL EXISTS 过滤。
 	var supportedPaths map[string]struct{}
-	if productClass != "" && s.supportedPathsRepo != nil {
+	var paramModelID *uuid.UUID
+	if productClass != "" {
+		if s.supportedPathsRepo == nil {
+			return nil, fmt.Errorf("resolve supported paths for product_class %q: repository not configured", productClass)
+		}
 		set, err := s.supportedPathsRepo.ResolveByProductClass(ctx, productClass)
 		if err != nil {
-			s.logger.Warn("resolve productClass for sub_fields failed, fallback to deviceKey",
-				zap.String("product_class", productClass), zap.Error(err))
-		} else if set != nil {
-			if !set.ProductResolved || set.ParamModelID == nil {
-				// 孤儿:命令在树里已被 hide,但前端可能通过搜索/深链点到该叶子;
-				// 返空集与"无可执行 path"语义一致。
-				return []SubFieldDTO{}, nil
-			}
-			paramModelID = set.ParamModelID
-			// SupportedSet.Paths 已由 ParamRegistry 经 Redis L1→L2→DB 取得，直接复用。
-			supportedPaths = set.Paths
+			return nil, fmt.Errorf("resolve supported paths for product_class %q: %w", productClass, err)
 		}
-	}
-	if paramModelID == nil && deviceKey != "" && s.resolveParamModelByDevice != nil {
+		if set == nil || !set.ProductResolved || set.ParamModelID == nil {
+			// 孤儿:命令在树里已被 hide,但前端可能通过搜索/深链点到该叶子;
+			// 返空集与"无可执行 path"语义一致。
+			return []SubFieldDTO{}, nil
+		}
+		// SupportedSet.Paths 已由 ParamRegistry 经 Redis L1→L2→DB 取得，直接复用。
+		supportedPaths = set.Paths
+		paramModelID = set.ParamModelID
+		if supportedPaths == nil {
+			supportedPaths = map[string]struct{}{}
+		}
+	} else if deviceKey != "" {
 		// T-0170: deviceKey-based 反查（productClass 未提供时的兼容路径）。
-		// 闭包返回值分类(modules.go 实际实现):
-		//   - (nil, nil)   silent skip:SN 不存在 / dev.ProductClass="" / 孤儿 productClass / 无 paramModel
-		//   - (nil, err)   真实错误(DB / 网络等)
-		//   - (*uuid, nil) 正常
-		pmID, err := s.resolveParamModelByDevice(ctx, deviceKey)
+		set, err := s.resolveSupportedSetByDevice(ctx, deviceKey)
 		if err != nil {
-			// 容错:真实错误退化全集,不让前端因暂时故障看到空集误以为"无 path 可执行"。
-			s.logger.Warn("resolve param_model by device failed, fallback to unfiltered",
-				zap.String("device_key", deviceKey), zap.Error(err))
-		} else if pmID == nil {
+			return nil, err
+		}
+		if set == nil || !set.ProductResolved {
 			// 孤儿 silent skip → 与分支 1 对齐,返空集。
 			return []SubFieldDTO{}, nil
 		}
-		paramModelID = pmID
-		// deviceKey 分支：通过注入的 resolver 从 ParamRegistry（Redis L1→L2→DB）取路径集。
-		if paramModelID != nil && s.resolvePathsByParamModel != nil {
-			paths, pathErr := s.resolvePathsByParamModel(ctx, *paramModelID)
-			if pathErr != nil {
-				s.logger.Warn("resolve paths by param_model failed, fallback to unfiltered",
-					zap.String("param_model_id", paramModelID.String()), zap.Error(pathErr))
-			} else {
-				supportedPaths = paths
-			}
-		}
+		supportedPaths = set.Paths
+		// 具体设备场景的 supported set 可能包含设备已上报但尚未回填到
+		// param_mappings/discovered_param_mappings 的 path。这里必须取命令
+		// sub_fields 全集，再在 Go 层与 supportedPaths 求交集；否则
+		// ListEnrichedByCommand 的 paramModel SQL EXISTS 会提前把这些 path 裁掉。
+		paramModelID = nil
 	}
-	// 取命令 sub_fields 全集（不带 SQL param_mappings 过滤），在 Go 层按 Redis 路径集过滤。
-	enriched, err := s.subFieldRepo.ListEnrichedByCommand(ctx, commandID, nil)
+	// 取命令 sub_fields；产品上下文下仍可让 SQL 按模型支持状态预过滤。
+	// 具体设备上下文下取全集，由 Go 层使用设备 supportedPaths 做最终交集。
+	enriched, err := s.subFieldRepo.ListEnrichedByCommand(ctx, commandID, paramModelID)
 	if err != nil {
 		return nil, fmt.Errorf("list enriched sub_fields: %w", err)
 	}
@@ -424,7 +636,10 @@ func (s *ConsoleService) GetCommandSubFields(ctx context.Context, commandID uuid
 			ConstraintText:     pickI18n(e.ConstraintTextI18n, lang, "", "", ""),
 			DefaultValue:       e.DefaultValue,
 			JsRegex:            e.JsRegex,
+			ValidationPattern:  e.ValidationPattern,
+			EnumOptions:        e.EnumOptions,
 			MinValue:           e.MinValue,
+			MaxValue:           e.MaxValue,
 			DefaultSelected:    e.DefaultSelected,
 			IsRequired:         e.IsRequired,
 			SortOrder:          e.SortOrder,

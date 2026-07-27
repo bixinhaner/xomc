@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -260,6 +261,31 @@ func TestRedisQueue_PushAndPop_PriorityOrder(t *testing.T) {
 	assert.Nil(t, empty)
 }
 
+func TestRedisQueue_UpdateTerminalTaskRemovesQueueMembership(t *testing.T) {
+	q, _ := newRedisQueueWithMini(t)
+	ctx := context.Background()
+
+	tk := newTaskForQueue("t-terminal", "SN-TERMINAL", "GetParameterValues")
+	require.NoError(t, q.Push(ctx, tk))
+	require.EqualValues(t, 1, mustQueueLen(t, q, ctx, tk.DeviceSN))
+
+	tk.MarkFailed(0, "exceeded max retries")
+	require.NoError(t, q.Update(ctx, tk))
+
+	require.Zero(t, mustQueueLen(t, q, ctx, tk.DeviceSN), "terminal task must not remain executable")
+	stored, err := q.GetByID(ctx, tk.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	require.Equal(t, TaskStatusFailed, stored.Status)
+}
+
+func mustQueueLen(t *testing.T, q *RedisTaskQueue, ctx context.Context, deviceSN string) int64 {
+	t.Helper()
+	n, err := q.Len(ctx, deviceSN)
+	require.NoError(t, err)
+	return n
+}
+
 func TestRedisQueue_PopSkipsFutureNextAttempt(t *testing.T) {
 	q, _ := newRedisQueueWithMini(t)
 	ctx := context.Background()
@@ -288,6 +314,50 @@ func TestRedisQueue_PopSkipsFutureNextAttempt(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, third)
 	assert.Equal(t, "t-delayed", third.ID)
+}
+
+func TestRedisQueue_PopConcurrentSameDeviceReturnsTaskOnce(t *testing.T) {
+	q, _ := newRedisQueueWithMini(t)
+	ctx := context.Background()
+
+	require.NoError(t, q.Push(ctx, newTaskForQueue("t-race", "SN-RACE", "GetParameterValues")))
+
+	const workers = 16
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	gotIDs := make(chan string, workers)
+	errs := make(chan error, workers)
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			got, err := q.Pop(ctx, "SN-RACE")
+			if err != nil {
+				errs <- err
+				return
+			}
+			if got != nil {
+				gotIDs <- got.ID
+			}
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+	close(gotIDs)
+	close(errs)
+
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	var ids []string
+	for id := range gotIDs {
+		ids = append(ids, id)
+	}
+	require.Len(t, ids, 1, "concurrent Pop calls must not dispatch the same task twice")
+	assert.Equal(t, "t-race", ids[0])
 }
 
 func TestRedisQueue_Peek(t *testing.T) {
@@ -496,6 +566,29 @@ func TestRedisQueue_GetStaleSentTasks_EmptyQueue(t *testing.T) {
 	assert.Empty(t, stales)
 }
 
+func TestRedisQueue_Pop_RemovesMissingDetailAndContinues(t *testing.T) {
+	q, m := newRedisQueueWithMini(t)
+	ctx := context.Background()
+
+	ghost := newTaskForQueue("t-ghost-pop", "SN-POP-MISS", "GetParameterValues")
+	good := newTaskForQueue("t-good-pop", "SN-POP-MISS", "GetParameterValues")
+	ghost.Priority = 1
+	good.Priority = 2
+
+	require.NoError(t, q.Push(ctx, ghost))
+	require.NoError(t, q.Push(ctx, good))
+	m.Del(q.taskKey(ghost.ID))
+
+	got, err := q.Pop(ctx, "SN-POP-MISS")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, good.ID, got.ID)
+
+	exists, err := q.Exists(ctx, "SN-POP-MISS", ghost.ID)
+	require.NoError(t, err)
+	assert.False(t, exists)
+}
+
 // TestRedisQueue_GetStaleSentTasks_MissingDetail 覆盖 #16 批量 pipeline 的部分 key 缺失分支：
 // 队列里有任务 ID，但其详情 Hash 已被删（TTL 过期），pipeline 单条返回 redis.Nil，
 // 应跳过该条而非整体失败，其余陈旧任务仍正常返回。
@@ -590,8 +683,12 @@ func TestRedisQueue_PopMissingDetails(t *testing.T) {
 	m.Del("acs:task:t-corrupt")
 
 	got, err := q.Pop(ctx, "SN-COR")
-	assert.Error(t, err)
+	assert.NoError(t, err)
 	assert.Nil(t, got)
+
+	exists, err := q.Exists(ctx, "SN-COR", tk.ID)
+	require.NoError(t, err)
+	assert.False(t, exists)
 }
 
 func TestRedisQueue_GetByIDCorruptJSON(t *testing.T) {

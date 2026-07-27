@@ -42,6 +42,10 @@ type syncGPVSummaryReader interface {
 	LatestSyncGPVSummaryByDevice(ctx context.Context, deviceSN string) (*task.SyncGPVSummary, error)
 }
 
+type syncGPVOpenCounter interface {
+	CountOpenSyncGPVByDevice(ctx context.Context, deviceSN string) (int64, error)
+}
+
 // NewParameterTreeHandler creates a new parameter tree handler.
 func NewParameterTreeHandler(
 	deviceService *DeviceService,
@@ -467,7 +471,21 @@ func (h *ParameterTreeHandler) GetSyncStatus(c *gin.Context) {
 	dev, _ := h.deviceService.GetDevice(c.Request.Context(), id)
 	var pendingCommands int64
 	if taskSvc := h.deviceService.GetTaskService(); taskSvc != nil && dev != nil {
-		pendingCommands, _ = taskSvc.GetQueueLength(c.Request.Context(), dev.SerialNumber)
+		if counter, ok := taskSvc.(syncGPVOpenCounter); ok {
+			count, err := counter.CountOpenSyncGPVByDevice(c.Request.Context(), dev.SerialNumber)
+			if err == nil {
+				pendingCommands = count
+			} else {
+				if h.logger != nil {
+					h.logger.Warn("count open sync-gpv tasks failed, falling back to queue length",
+						zap.String("device_sn", dev.SerialNumber),
+						zap.Error(err))
+				}
+				pendingCommands, _ = taskSvc.GetQueueLength(c.Request.Context(), dev.SerialNumber)
+			}
+		} else {
+			pendingCommands, _ = taskSvc.GetQueueLength(c.Request.Context(), dev.SerialNumber)
+		}
 	}
 
 	// 二态: syncing(队列有 pending task) / idle(其余)。"上次同步时间"由
@@ -488,10 +506,16 @@ func (h *ParameterTreeHandler) GetSyncStatus(c *gin.Context) {
 		if summaryReader, ok := taskSvc.(syncGPVSummaryReader); ok {
 			if summary, err := summaryReader.LatestSyncGPVSummaryByDevice(c.Request.Context(), dev.SerialNumber); err == nil && summary != nil {
 				lastSync := gin.H{
-					"source_id":          summary.SourceID,
-					"task_count":         summary.TaskCount,
-					"first_created_at":   summary.FirstCreatedAt,
-					"wall_clock_seconds": summary.WallClockSeconds,
+					"source_id":             summary.SourceID,
+					"task_count":            summary.TaskCount,
+					"successful_commands":   summary.SuccessfulCommands,
+					"failed_commands":       summary.FailedCommands,
+					"requested_path_count":  summary.RequestedPathCount,
+					"successful_path_count": summary.SuccessfulPathCount,
+					"failed_path_count":     summary.FailedPathCount,
+					"failed_paths":          summary.FailedPaths,
+					"first_created_at":      summary.FirstCreatedAt,
+					"wall_clock_seconds":    summary.WallClockSeconds,
 				}
 				if summary.LastCompletedAt != nil {
 					lastSync["last_completed_at"] = summary.LastCompletedAt

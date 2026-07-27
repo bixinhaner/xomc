@@ -367,11 +367,48 @@
   background: var(--agent-panel-accent-soft);
 }
 
-.body {
+.bodyShell {
+  position: relative;
   min-height: 0;
   flex: 1;
+}
+
+.body {
+  height: 100%;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 18px 16px 14px;
+  scrollbar-gutter: stable;
+}
+
+.messageList {
+  min-height: 100%;
+}
+
+.jumpToLatest {
+  position: absolute;
+  right: 22px;
+  bottom: 14px;
+  z-index: 2;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid var(--agent-panel-accent-border);
+  border-radius: 999px;
+  background: var(--agent-panel-menu-bg);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.24);
+  color: var(--agent-panel-accent);
+  cursor: pointer;
+}
+
+.jumpToLatest:hover {
+  background: var(--agent-panel-accent-soft);
+}
+
+.jumpToLatest:focus-visible {
+  outline: 2px solid var(--agent-panel-accent);
+  outline-offset: 2px;
 }
 
 .empty {
@@ -667,7 +704,7 @@
 }
 
 .bubble {
-  max-width: 292px;
+  min-width: 0;
   border: 1px solid var(--agent-panel-border-soft);
   border-radius: 8px;
   background: var(--agent-panel-surface);
@@ -679,10 +716,12 @@
 }
 
 .assistantMessage .bubble {
+  width: min(640px, calc(100% - 40px));
   white-space: normal;
 }
 
 .userMessage .bubble {
+  max-width: min(78%, 520px);
   border-color: var(--agent-panel-accent-border);
   background: var(--agent-panel-user-bg);
   color: var(--agent-panel-text-strong);
@@ -1375,23 +1414,80 @@
   display: grid;
   flex-shrink: 0;
   grid-template-columns: 1fr 44px;
+  align-items: end;
   gap: 10px;
   border-top: 1px solid var(--agent-panel-border-soft);
   padding: 16px;
 }
 
-.composer input {
+.composer > .fileRows {
+  grid-column: 1 / -1;
+}
+
+.composerRow {
+  display: grid;
   min-width: 0;
-  height: 44px;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: end;
+  gap: 6px;
   border: 1px solid var(--agent-panel-border-muted);
   border-radius: 8px;
   background: var(--agent-panel-input-bg);
-  color: var(--agent-panel-text);
-  outline: none;
-  padding: 0 12px;
+  padding-left: 6px;
 }
 
-.composer input:focus {
+.hiddenFileInput {
+  display: none;
+}
+
+.attachBtn,
+.fileAction {
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--agent-panel-text-muted);
+  cursor: pointer;
+}
+
+.attachBtn {
+  width: 34px;
+  height: 42px;
+  font-size: 17px;
+}
+
+.attachBtn:hover,
+.fileAction:hover {
+  color: var(--agent-panel-accent);
+}
+
+.attachBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.composer textarea {
+  min-width: 0;
+  min-height: 44px;
+  max-height: 120px;
+  field-sizing: content;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--agent-panel-text);
+  outline: none;
+  overflow-y: auto;
+  padding: 10px 12px;
+  resize: none;
+  font: inherit;
+  line-height: 22px;
+}
+
+.composer textarea:focus {
+  border-color: transparent;
+}
+
+.composerRow:focus-within {
   border-color: var(--agent-panel-accent);
 }
 
@@ -1403,6 +1499,88 @@
   background: #1677ff;
   color: #fff;
   font-size: 18px;
+}
+
+.stopBtn {
+  background: var(--agent-panel-surface-strong);
+  color: var(--agent-panel-accent);
+  border: 1px solid var(--agent-panel-accent);
+}
+
+.userContent {
+  display: grid;
+  gap: 10px;
+}
+
+.fileRows,
+.artifacts {
+  display: grid;
+  gap: 6px;
+}
+
+.artifacts {
+  margin-top: 14px;
+  border-top: 1px solid var(--agent-panel-border-soft);
+  padding-top: 10px;
+}
+
+.artifactHeading {
+  color: var(--agent-panel-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.fileRow {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--agent-panel-border-soft);
+  border-radius: 6px;
+  background: var(--agent-panel-surface);
+  padding: 7px 8px;
+}
+
+.fileIcon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--agent-panel-accent) 10%, transparent);
+  color: var(--agent-panel-accent);
+}
+
+.fileMeta {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.fileMeta strong {
+  overflow: hidden;
+  color: var(--agent-panel-text-body);
+  font-size: 13px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileMeta small {
+  color: var(--agent-panel-text-muted);
+  font-size: 11px;
+}
+
+.fileActions {
+  display: flex;
+  gap: 2px;
+}
+
+.fileAction {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
 }
 
 @media (max-width: 767px) {

@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Button, Drawer, Form, Input, Radio, Select, Typography } from 'antd';
+import { Button, Drawer, Form, Input, Radio, Select, Switch, Typography } from 'antd';
 import type { FormInstance } from 'antd';
 import type { NameFilterItem } from './types';
 import { generateOperators } from './types';
@@ -9,9 +9,10 @@ const { Text } = Typography;
 
 export interface AddChildGroupDrawerProps {
   open: boolean;
-  form: FormInstance<{ name?: string; matchingMode: 'deviceName' | 'lac' | 'tac' | 'serialNumber'; tacRag: string; sourceGroupId?: string; serialNumbers?: string }>;
+  form: FormInstance<{ name?: string; autoAssignEnabled?: boolean; matchingMode: 'deviceName' | 'lac' | 'tac' | 'serialNumber'; tacRag: string; sourceGroupId?: string; serialNumbers?: string }>;
   /** 上级（一级）分组名称，只读展示，自动填充。 */
   parentGroupName?: string;
+  autoAssignEnabled: boolean;
   matchingMode: string | undefined;
   nameFilters: NameFilterItem[];
   sourceGroupOptions: Array<{ label: string; value: string }>;
@@ -31,6 +32,7 @@ export default function AddChildGroupDrawer({
   open,
   form,
   parentGroupName,
+  autoAssignEnabled,
   matchingMode,
   nameFilters,
   sourceGroupOptions,
@@ -104,85 +106,98 @@ export default function AddChildGroupDrawer({
             {t('device.matchRuleDesc')}
           </Text>
           <Form.Item
-            name="sourceGroupId"
-            label={t('device.rules.sourceGroup')}
-            rules={[{ required: true, message: t('device.rules.sourceGroupRequired') }]}
+            name="autoAssignEnabled"
+            label={t('device.rules.autoAssign')}
+            valuePropName="checked"
             style={{ marginBottom: 12 }}
           >
-            <Select
-              showSearch
-              optionFilterProp="label"
-              options={sourceGroupOptions}
-              placeholder={t('device.rules.sourceGroupPlaceholder')}
-            />
-          </Form.Item>
-          <Form.Item name="matchingMode" label={t('device.rules.matchingMode')} style={{ marginBottom: 12 }}>
-            <Radio.Group onChange={onMatchingModeChange}>
-              <Radio value="deviceName">{t('device.rules.deviceName')}</Radio>
-              <Radio value="lac">LAC</Radio>
-              <Radio value="tac">TAC</Radio>
-              <Radio value="serialNumber">{t('device.rules.serialNumber')}</Radio>
-            </Radio.Group>
+            <Switch checkedChildren={t('common.enabled')} unCheckedChildren={t('common.disabled')} />
           </Form.Item>
 
-          {/* Device name filter conditions */}
-          {matchingMode === 'deviceName' && (
+          {autoAssignEnabled && (
             <>
-              <Form.Item label={<FilterConditionLabel t={t} />} style={{ marginBottom: 0 }}>
-                <NameFilterEditor
-                  filters={nameFilters}
-                  onAdd={onAddFilter}
-                  onRemove={onRemoveFilter}
-                  onUpdate={onUpdateFilter}
-                  t={t}
+              <Form.Item
+                name="sourceGroupId"
+                label={t('device.rules.sourceGroup')}
+                rules={[{ required: true, message: t('device.rules.sourceGroupRequired') }]}
+                style={{ marginBottom: 12 }}
+              >
+                <Select
+                  showSearch
+                  optionFilterProp="label"
+                  options={sourceGroupOptions}
+                  placeholder={t('device.rules.sourceGroupPlaceholder')}
                 />
               </Form.Item>
+              <Form.Item name="matchingMode" label={t('device.rules.matchingMode')} style={{ marginBottom: 12 }}>
+                <Radio.Group onChange={onMatchingModeChange}>
+                  <Radio value="deviceName">{t('device.rules.deviceName')}</Radio>
+                  <Radio value="lac">LAC</Radio>
+                  <Radio value="tac">TAC</Radio>
+                  <Radio value="serialNumber">{t('device.rules.serialNumber')}</Radio>
+                </Radio.Group>
+              </Form.Item>
 
-              {/* Preview condition description */}
-              {previewText && (
-                <div
-                  style={{
-                    marginTop: 12,
-                    color: 'var(--color-text-tertiary)',
-                    fontSize: 12,
-                    padding: '8px 12px',
-                    background: 'var(--color-bg-container)',
-                    borderRadius: 4,
-                    wordBreak: 'break-all',
-                    border: '1px solid var(--color-border-secondary)',
-                  }}
+              {/* Device name filter conditions */}
+              {matchingMode === 'deviceName' && (
+                <>
+                  <Form.Item label={<FilterConditionLabel t={t} />} style={{ marginBottom: 0 }}>
+                    <NameFilterEditor
+                      filters={nameFilters}
+                      onAdd={onAddFilter}
+                      onRemove={onRemoveFilter}
+                      onUpdate={onUpdateFilter}
+                      t={t}
+                    />
+                  </Form.Item>
+
+                  {/* Preview condition description */}
+                  {previewText && (
+                    <div
+                      style={{
+                        marginTop: 12,
+                        color: 'var(--color-text-tertiary)',
+                        fontSize: 12,
+                        padding: '8px 12px',
+                        background: 'var(--color-bg-container)',
+                        borderRadius: 4,
+                        wordBreak: 'break-all',
+                        border: '1px solid var(--color-border-secondary)',
+                      }}
+                    >
+                      {previewText}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* TAC/LAC input */}
+              {(matchingMode === 'tac' || matchingMode === 'lac') && (
+                <Form.Item
+                  name="tacRag"
+                  label={matchingMode === 'tac' ? 'TAC' : 'LAC'}
+                  style={{ marginBottom: 0 }}
+                  extra={
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {t('device.rules.formatRange', { range: '0-65535' })}
+                    </Text>
+                  }
                 >
-                  {previewText}
-                </div>
+                  <Input placeholder="eg: 1,2,3,1-3" maxLength={50} />
+                </Form.Item>
+              )}
+              {matchingMode === 'serialNumber' && (
+                <Form.Item
+                  name="serialNumbers"
+                  label={t('device.rules.serialNumber')}
+                  rules={[{ required: true, message: t('device.rules.serialNumberRequired') }]}
+                  style={{ marginBottom: 0 }}
+                  extra={<Text type="secondary" style={{ fontSize: 12 }}>{t('device.rules.serialNumberHint')}</Text>}
+                >
+                  <Input.TextArea rows={3} maxLength={2000} />
+                </Form.Item>
               )}
             </>
-          )}
-
-          {/* TAC/LAC input */}
-          {(matchingMode === 'tac' || matchingMode === 'lac') && (
-            <Form.Item
-              name="tacRag"
-              label={matchingMode === 'tac' ? 'TAC' : 'LAC'}
-              style={{ marginBottom: 0 }}
-              extra={
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  {t('device.rules.formatRange', { range: '0-65535' })}
-                </Text>
-              }
-            >
-              <Input placeholder="eg: 1,2,3,1-3" maxLength={50} />
-            </Form.Item>
-          )}
-          {matchingMode === 'serialNumber' && (
-            <Form.Item
-              name="serialNumbers"
-              label={t('device.rules.serialNumber')}
-              rules={[{ required: true, message: t('device.rules.serialNumberRequired') }]}
-              style={{ marginBottom: 0 }}
-              extra={<Text type="secondary" style={{ fontSize: 12 }}>{t('device.rules.serialNumberHint')}</Text>}
-            >
-              <Input.TextArea rows={3} maxLength={2000} />
-            </Form.Item>
           )}
         </div>
       </Form>

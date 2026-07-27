@@ -123,13 +123,14 @@ func (s *pgDeviceQueryService) ListMetricObjects(ctx context.Context, deviceSNs,
 // 抽出便于单测断言（device 过滤 + 制式过滤 + distinct）。
 func buildObjectsQuery(deviceSNs, technologies []string) (string, []any) {
 	q := `SELECT DISTINCT object_ldn
-FROM pm_metrics
-WHERE device_sn = ANY($1)
-  AND object_ldn <> ''`
+FROM pm_measurement_anchors a
+JOIN device_dim d ON d.id=a.device_dim_id
+WHERE d.serial_number = ANY($1)
+  AND a.object_ldn <> ''`
 	args := []any{deviceSNs}
 	if len(technologies) > 0 {
 		q += `
-  AND (device_oui, device_sn) IN (SELECT oui, serial_number FROM device_dim WHERE technology = ANY($2))`
+  AND d.technology = ANY($2)`
 		args = append(args, technologies)
 	}
 	q += `

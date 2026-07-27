@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -58,6 +59,12 @@ type QueryRequest struct {
 	VisibleGroups []uuid.UUID
 	Limit         int
 	Offset        int
+	// PageByPivotRow 让 device 维度的 Limit/Offset 作用在透视表行 key 上，而不是原始长表行上。
+	// key = device_oui + device_sn + object_ldn + granularity + time；随后再取这些 key 下的全部指标行。
+	PageByPivotRow bool
+	// PivotRowKeys 是 page_by=pivot_row + fill_empty 时当前页的透视行边界。
+	// 它只用于补骨架，避免 FillEmptyBuckets 在分页后重新扩成完整时间窗。
+	PivotRowKeys []PivotRowKey
 	// Weekdays #599：星期过滤（0=周日..6=周六，对齐 PostgreSQL EXTRACT(dow)）。
 	// 空/全选 = 不过滤。筛的是 start_time 的星期几。
 	Weekdays []int
@@ -78,6 +85,14 @@ type QueryRequest struct {
 	// 仅经 queryWithKPIRecompute 的维度（product/band/device_group/aggregate_group/network）生效；
 	// device 维度由执行器在请求侧把 MetricPaths 直接灌成已启用集（设备级 KPI 已算好，无需重算）。
 	StoreAllEnabled bool
+}
+
+type PivotRowKey struct {
+	DeviceOUI   string
+	DeviceSN    string
+	ObjectLDN   string
+	Granularity metrics.Granularity
+	Time        time.Time
 }
 
 // Row 是 Aggregator.Query 的输出行。device 维度填 DeviceOUI/DeviceSN/ObjectLDN；
@@ -147,10 +162,8 @@ func (a *Aggregator) Query(ctx context.Context, q QueryRequest) ([]Row, error) {
 	case DimensionNetwork:
 		rows, err = a.queryWithKPIRecompute(ctx, table, q, a.queryNetworkTable)
 	default:
-		// device 维度直接读设备级聚合表（counter / KPI 行都是设备自己算好的，无需跨维重算）。
-		// #532 P2 store-all-by-enabled：device 维度不走重算 wrapper，故在入口把已启用集直接
-		// 灌成 MetricPaths（既存 counter 行 + 设备级已算好的 KPI 行都按已启用集筛取落库）；
-		// 已启用集为空时降级为不下推过滤（取设备表全部，不丢行）。
+		// 设备维度的 KPI/counter 已在写入侧落库。页面直查时不能进入现场 KPI 重算路径，
+		// 否则会把用户选中的少量设备放大成重算大查询。
 		if q.StoreAllEnabled && len(q.MetricPaths) == 0 {
 			if enabled := a.resolveEnabledIndicators(ctx, q.Technologies); len(enabled) > 0 {
 				q.MetricPaths = enabled
@@ -169,7 +182,7 @@ func (a *Aggregator) Query(ctx context.Context, q QueryRequest) ([]Row, error) {
 // 用于截断诚实提示（T-0194 C2）：handler 拿它和实际返回行数比，命中 limit 时前端提示「已截断」。
 //
 // 各维度的「行」口径与 Query 一致：
-//   - device：直接表行（无聚合），COUNT(*)。
+//   - device：与 Query 一样按自然键保留最新补报后计数。
 //   - device_group / aggregate_group / product / band / network：现场 GROUP BY 后的分组数，
 //     故 COUNT(*) FROM (<同 Query 的 GROUP BY 子查询，去 ORDER BY/LIMIT/OFFSET>) sub。
 //
@@ -186,12 +199,22 @@ func (a *Aggregator) Count(ctx context.Context, q QueryRequest) (int, error) {
 	// Count 不分页：清掉 Limit/Offset，避免被带进子查询。
 	q.Limit = 0
 	q.Offset = 0
+	if q.Dimension != DimensionDevice && usesKPIQueryPath(q) {
+		return a.countByQueryResult(ctx, q)
+	}
 
 	switch q.Dimension {
 	case DimensionDevice:
-		qb := storage.Psql.Select("COUNT(*)").From(table)
-		qb = applyDeviceFilters(qb, q)
-		return a.scanCount(ctx, qb)
+		if q.PageByPivotRow {
+			return a.countDevicePivotRows(ctx, table, q)
+		}
+		inner := newRawAwareDeviceSelect(storage.Psql, table, q, "1").
+			Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
+		inner = applyDeviceFilters(inner, q)
+		inner = inner.OrderBy(
+			"device_oui", "device_sn", "metric_path", "granularity", `"time"`, "object_ldn", "ingest_time DESC",
+		)
+		return a.scanCountSub(ctx, inner)
 	case DimensionDeviceGroup:
 		inner := storage.Psql.Select("1").From(table)
 		inner = applyGroupFilters(inner, q)
@@ -199,13 +222,13 @@ func (a *Aggregator) Count(ctx context.Context, q QueryRequest) (int, error) {
 		inner = inner.GroupBy("device_group_id", "technology", "metric_path", "granularity", "time")
 		return a.scanCountSub(ctx, inner)
 	case DimensionAggregateGroup:
-		inner := storage.Psql.Select("1").From(table)
+		inner := newRawAwareDeviceSelect(storage.Psql, table, q, "1")
 		inner = applyDeviceFilters(inner, q)
 		// 单条聚合：分组键不含 object_ldn（与 queryAggregateGroupTable 一致），保证截断计数口径相符。
 		inner = inner.GroupBy("metric_path", "granularity", "time")
 		return a.scanCountSub(ctx, inner)
 	case DimensionNetwork:
-		inner := storage.Psql.Select("1").From(table)
+		inner := newRawAwareDeviceSelect(storage.Psql, table, q, "1")
 		inner = applyCommonFilters(inner, q)
 		inner = inner.GroupBy("metric_path", "granularity", "time")
 		return a.scanCountSub(ctx, inner)
@@ -219,6 +242,103 @@ func (a *Aggregator) Count(ctx context.Context, q QueryRequest) (int, error) {
 		}
 		return len(rows), nil
 	}
+}
+
+func usesKPIQueryPath(q QueryRequest) bool {
+	if q.RecomputeAllKPIs || q.StoreAllEnabled {
+		return true
+	}
+	if q.MetricType != nil && *q.MetricType == metrics.MetricTypeKPI && len(q.MetricPaths) > 0 {
+		return true
+	}
+	return hasKPIIndicatorPath(q.MetricPaths)
+}
+
+func hasKPIIndicatorPath(paths []string) bool {
+	for _, path := range paths {
+		if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(path)), "K") {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *Aggregator) countByQueryResult(ctx context.Context, q QueryRequest) (int, error) {
+	countReq := q
+	countReq.Limit = 0
+	countReq.Offset = 0
+	rows, err := a.Query(ctx, countReq)
+	if err != nil {
+		return 0, fmt.Errorf("aggregator.Count query KPI rollup rows: %w", err)
+	}
+	if !q.PageByPivotRow {
+		return len(rows), nil
+	}
+	seen := make(map[PivotRowKey]struct{}, len(rows))
+	for _, row := range rows {
+		objectLDN := ""
+		if row.ObjectLDN != nil {
+			objectLDN = *row.ObjectLDN
+		}
+		seen[PivotRowKey{
+			DeviceOUI:   row.DeviceOUI,
+			DeviceSN:    row.DeviceSN,
+			ObjectLDN:   objectLDN,
+			Granularity: row.Granularity,
+			Time:        row.Time,
+		}] = struct{}{}
+	}
+	return len(seen), nil
+}
+
+// DiscoverObjectLDNs 返回同设备、同时间窗下实际出现过的 object_ldn 列表。
+// 用于 "全部小区" 查询补骨架：请求未显式传 object_ldns 时，后端从同一粒度表发现展示全集。
+// 指标过滤在这里刻意清空，否则当前指标完全无数据时无法发现 object 集合。
+func (a *Aggregator) DiscoverObjectLDNs(ctx context.Context, q QueryRequest) ([]string, error) {
+	if q.Dimension == "" {
+		q.Dimension = DimensionDevice
+	}
+	if !CanAutoDiscoverObjectSkeletonRequest(q) {
+		return nil, nil
+	}
+	table, err := SelectTable(q.Granularity, q.Dimension)
+	if err != nil {
+		return nil, err
+	}
+	discoverReq := q
+	discoverReq.MetricPaths = nil
+	discoverReq.MetricType = nil
+	discoverReq.ObjectLDNs = nil
+	discoverReq.Limit = 0
+	discoverReq.Offset = 0
+
+	qb := storage.Psql.Select("DISTINCT object_ldn").
+		From(table).
+		Where("object_ldn <> ''").
+		OrderBy("object_ldn")
+	qb = applyDeviceFilters(qb, discoverReq)
+	sqlStr, args, err := qb.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("aggregator.DiscoverObjectLDNs build: %w", err)
+	}
+	rows, err := a.db.Query(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, fmt.Errorf("aggregator.DiscoverObjectLDNs exec: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]string, 0)
+	for rows.Next() {
+		var ldn string
+		if err := rows.Scan(&ldn); err != nil {
+			return nil, fmt.Errorf("aggregator.DiscoverObjectLDNs scan: %w", err)
+		}
+		out = append(out, ldn)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("aggregator.DiscoverObjectLDNs rows: %w", err)
+	}
+	return out, nil
 }
 
 func (a *Aggregator) scanCount(ctx context.Context, qb sq.SelectBuilder) (int, error) {
@@ -351,8 +471,24 @@ func (a *Aggregator) queryAggregateGroupTable(ctx context.Context, table string,
 		"MIN(start_time) AS start_time",
 		"MIN(end_time) AS end_time",
 		"MAX(ingest_time) AS ingest_time",
-	).From(table)
-	qb = applyDeviceFilters(qb, q)
+	)
+	// Raw rows can overlap when a device retransmits the same natural
+	// measurement window under another file name. Match the device query's
+	// last-write-wins semantics before aggregating across devices and objects.
+	if table == "pm_metrics" || (table == "pm_metrics_hourly" && len(q.MetricPaths) > 0) {
+		inner := newRawAwareDeviceSelect(storage.Psql, table, q,
+			"device_oui", "device_sn", "metric_path", "metric_type", "metric_value",
+			"statis_type", "granularity", "time", "start_time", "end_time", "ingest_time", "object_ldn",
+		).Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
+		inner = applyDeviceFilters(inner, q)
+		inner = inner.OrderBy(
+			"device_oui", "device_sn", "metric_path", "granularity", `"time"`, "object_ldn", "ingest_time DESC",
+		)
+		qb = qb.FromSelect(inner, "m")
+	} else {
+		qb = qb.From(table)
+		qb = applyDeviceFilters(qb, q)
+	}
 	qb = qb.GroupBy("metric_path", "granularity", "time")
 	qb = qb.OrderBy("time DESC")
 	if q.Limit > 0 {
@@ -402,6 +538,58 @@ var deviceTableColumns = []string{
 	"statis_type", "granularity", "time", "start_time", "end_time", "ingest_time", "object_ldn", "extra",
 }
 
+func newRawAwareDeviceSelect(
+	builder sq.StatementBuilderType,
+	table string,
+	q QueryRequest,
+	columns ...string,
+) sq.SelectBuilder {
+	if len(q.MetricPaths) == 0 || (table != "pm_metrics" && table != "pm_metrics_hourly") {
+		return builder.Select(columns...).From(table)
+	}
+	var targeted sq.SelectBuilder
+	if table == "pm_metrics" {
+		targeted = builder.Select(
+			"COALESCE(dev.oui,'')::text AS device_oui",
+			"COALESCE(dev.serial_number,f.device_sn)::text AS device_sn",
+			"d.metric_path", "d.metric_type", "v.metric_value", "d.statis_type", "a.granularity",
+			`a."time"`, "a.start_time", "a.end_time",
+			"COALESCE(b.committed_at,f.created_at,now()) AS ingest_time",
+			"a.object_ldn",
+			`jsonb_strip_nulls(jsonb_build_object(
+				'device_id',a.device_dim_id::text,'counter_group',a.counter_group,
+				'carrier',COALESCE(dev.carrier,f.carrier),
+				'technology',COALESCE(dev.technology,f.technology))) AS extra`,
+		).From("pm_measurement_anchors a").
+			Join("pm_metric_sets s ON s.metric_set_id=a.metric_set_id").
+			Join("pm_metric_dictionary d ON d.metric_id=ANY(s.metric_ids)").
+			LeftJoin(`pm_metric_values v ON v."time"=a."time" AND v.anchor_id=a.anchor_id AND v.metric_id=d.metric_id`).
+			LeftJoin("pm_files f ON f.id=a.source_file_id").
+			LeftJoin("pm_ingest_batches b ON b.ingest_batch_id=a.ingest_batch_id").
+			LeftJoin("device_dim dev ON dev.id=a.device_dim_id")
+	} else {
+		targeted = builder.Select(
+			"COALESCE(dev.oui,'')::text AS device_oui",
+			"COALESCE(dev.serial_number,'')::text AS device_sn",
+			"d.metric_path", "d.metric_type", "v.metric_value", "d.statis_type", "a.granularity",
+			`a."time"`, "a.start_time", "a.end_time",
+			"COALESCE(ver.published_at,ver.created_at) AS ingest_time",
+			"a.object_ldn",
+			`jsonb_strip_nulls(jsonb_build_object(
+				'device_id',a.device_dim_id::text,'counter_group',a.counter_group,
+				'carrier',dev.carrier,'technology',dev.technology)) AS extra`,
+		).From("pm_hourly_bucket_versions ver").
+			Join("pm_hourly_anchors a ON a.bucket_version=ver.bucket_version").
+			Join("pm_metric_sets s ON s.metric_set_id=a.metric_set_id").
+			Join("pm_metric_dictionary d ON d.metric_id=ANY(s.metric_ids)").
+			LeftJoin(`pm_hourly_values v ON v.bucket_version=a.bucket_version AND v."time"=a."time" AND v.anchor_id=a.anchor_id AND v.metric_id=d.metric_id`).
+			LeftJoin("device_dim dev ON dev.id=a.device_dim_id").
+			Where(sq.Eq{"ver.status": "active"})
+	}
+	targeted = targeted.Where(sq.Eq{"d.metric_path": q.MetricPaths})
+	return builder.Select(columns...).FromSelect(targeted, "pm_metrics")
+}
+
 // buildDeviceTableSQL 构造 device 维度直读 pm_metrics 的去重查询（纯函数，便于单测）。
 //
 // 同窗口多文件去重（#208 数值偏差）：删 uq_pm_metrics_natural（#256）后，同设备同 15min 窗口但
@@ -412,9 +600,11 @@ var deviceTableColumns = []string{
 // 一层恢复原有「time DESC + Limit/Offset」语义。WHERE/参数绑定（applyDeviceFilters）全部留在内层、
 // 保持不变。
 func buildDeviceTableSQL(table string, q QueryRequest) (string, []any, error) {
-	inner := storage.Psql.Select(deviceTableColumns...).
-		Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`).
-		From(table)
+	if q.PageByPivotRow {
+		return buildDevicePivotRowPageSQL(table, q)
+	}
+	inner := newRawAwareDeviceSelect(storage.Psql, table, q, deviceTableColumns...).
+		Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
 	inner = applyDeviceFilters(inner, q)
 	inner = inner.OrderBy(
 		"device_oui", "device_sn", "metric_path", "granularity", `"time"`, "object_ldn", "ingest_time DESC",
@@ -429,6 +619,162 @@ func buildDeviceTableSQL(table string, q QueryRequest) (string, []any, error) {
 		qb = qb.Offset(uint64(q.Offset))
 	}
 	return qb.ToSql()
+}
+
+func buildDevicePivotRowPageSQL(table string, q QueryRequest) (string, []any, error) {
+	builder := sq.StatementBuilder.PlaceholderFormat(sq.Question)
+	inner := newRawAwareDeviceSelect(builder, table, q, deviceTableColumns...).
+		Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
+	inner = applyDeviceFilters(inner, q)
+	inner = inner.OrderBy(
+		"device_oui", "device_sn", "metric_path", "granularity", `"time"`, "object_ldn", "ingest_time DESC",
+	)
+	innerSQL, args, err := inner.ToSql()
+	if err != nil {
+		return "", nil, err
+	}
+
+	pageReq := q
+	if IsExplicitObjectSkeletonRequest(q) {
+		pageReq.MetricPaths = nil
+		pageReq.MetricType = nil
+	}
+	pageInner := newRawAwareDeviceSelect(builder, table, pageReq, deviceTableColumns...).
+		Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
+	pageInner = applyDeviceFilters(pageInner, pageReq)
+	pageInner = pageInner.OrderBy(
+		"device_oui", "device_sn", "metric_path", "granularity", `"time"`, "object_ldn", "ingest_time DESC",
+	)
+	pageInnerSQL, pageArgs, err := pageInner.ToSql()
+	if err != nil {
+		return "", nil, err
+	}
+	args = append(args, pageArgs...)
+
+	limitSQL := ""
+	if q.Limit > 0 {
+		args = append(args, q.Limit)
+		limitSQL = "\n  LIMIT ?"
+	}
+	offsetSQL := ""
+	if q.Offset > 0 {
+		args = append(args, q.Offset)
+		offsetSQL = "\n  OFFSET ?"
+	}
+
+	sqlStr := fmt.Sprintf(`
+WITH dedup AS (
+  %s
+),
+page_keys AS (
+  SELECT DISTINCT device_oui, device_sn, COALESCE(object_ldn, '') AS object_ldn, granularity, "time"
+  FROM (
+    %s
+  ) pk_dedup
+  ORDER BY "time" DESC, device_sn ASC, object_ldn ASC%s%s
+)
+SELECT %s
+FROM dedup d
+JOIN page_keys pk
+  ON pk.device_oui = d.device_oui
+ AND pk.device_sn = d.device_sn
+ AND pk.object_ldn = COALESCE(d.object_ldn, '')
+ AND pk.granularity = d.granularity
+ AND pk."time" = d."time"
+ORDER BY d."time" DESC, d.device_sn ASC, COALESCE(d.object_ldn, '') ASC, d.metric_path ASC`,
+		innerSQL, pageInnerSQL, limitSQL, offsetSQL, prefixedColumns("d", deviceTableColumns))
+	sqlStr, err = sq.Dollar.ReplacePlaceholders(sqlStr)
+	if err != nil {
+		return "", nil, err
+	}
+	return sqlStr, args, nil
+}
+
+func (a *Aggregator) DevicePivotRowKeys(ctx context.Context, q QueryRequest) ([]PivotRowKey, error) {
+	if q.Dimension == "" {
+		q.Dimension = DimensionDevice
+	}
+	table, err := SelectTable(q.Granularity, q.Dimension)
+	if err != nil {
+		return nil, err
+	}
+	sqlStr, args, err := buildDevicePivotRowKeysSQL(table, q)
+	if err != nil {
+		return nil, fmt.Errorf("aggregator.DevicePivotRowKeys build: %w", err)
+	}
+	rows, err := a.db.Query(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, fmt.Errorf("aggregator.DevicePivotRowKeys query %s: %w", table, err)
+	}
+	defer rows.Close()
+
+	out := make([]PivotRowKey, 0)
+	for rows.Next() {
+		var key PivotRowKey
+		var granularity string
+		if err := rows.Scan(&key.DeviceOUI, &key.DeviceSN, &key.ObjectLDN, &granularity, &key.Time); err != nil {
+			return nil, fmt.Errorf("aggregator.DevicePivotRowKeys scan %s: %w", table, err)
+		}
+		key.Granularity = metrics.Granularity(granularity)
+		out = append(out, key)
+	}
+	return out, rows.Err()
+}
+
+func buildDevicePivotRowKeysSQL(table string, q QueryRequest) (string, []any, error) {
+	builder := sq.StatementBuilder.PlaceholderFormat(sq.Question)
+	pageReq := q
+	if IsExplicitObjectSkeletonRequest(q) {
+		pageReq.MetricPaths = nil
+		pageReq.MetricType = nil
+	}
+	inner := newRawAwareDeviceSelect(builder, table, pageReq, deviceTableColumns...).
+		Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
+	inner = applyDeviceFilters(inner, pageReq)
+	inner = inner.OrderBy(
+		"device_oui", "device_sn", "metric_path", "granularity", `"time"`, "object_ldn", "ingest_time DESC",
+	)
+	innerSQL, args, err := inner.ToSql()
+	if err != nil {
+		return "", nil, err
+	}
+	limitSQL := ""
+	if q.Limit > 0 {
+		args = append(args, q.Limit)
+		limitSQL = "\nLIMIT ?"
+	}
+	offsetSQL := ""
+	if q.Offset > 0 {
+		args = append(args, q.Offset)
+		offsetSQL = "\nOFFSET ?"
+	}
+	sqlStr := fmt.Sprintf(`SELECT DISTINCT device_oui, device_sn, COALESCE(object_ldn, '') AS object_ldn, granularity, "time"
+FROM (
+  %s
+) dedup
+ORDER BY "time" DESC, device_sn ASC, object_ldn ASC%s%s`, innerSQL, limitSQL, offsetSQL)
+	sqlStr, err = sq.Dollar.ReplacePlaceholders(sqlStr)
+	if err != nil {
+		return "", nil, err
+	}
+	return sqlStr, args, nil
+}
+
+func prefixedColumns(prefix string, cols []string) string {
+	out := make([]string, 0, len(cols))
+	for _, col := range cols {
+		out = append(out, prefix+"."+col)
+	}
+	return strings.Join(out, ", ")
+}
+
+func (a *Aggregator) countDevicePivotRows(ctx context.Context, table string, q QueryRequest) (int, error) {
+	keySub := newRawAwareDeviceSelect(
+		storage.Psql, table, q,
+		"device_oui", "device_sn", "COALESCE(object_ldn, '') AS object_ldn", "granularity", `"time"`,
+	).Distinct()
+	keySub = applyDeviceFilters(keySub, q)
+	return a.scanCountSub(ctx, keySub)
 }
 
 func (a *Aggregator) queryDeviceTable(ctx context.Context, table string, q QueryRequest) ([]Row, error) {
@@ -573,7 +919,7 @@ func (a *Aggregator) queryProductTable(ctx context.Context, table string, q Quer
 		where = append(where, fmt.Sprintf("m.time >= %s", add(q.StartTime)))
 	}
 	if !q.EndTime.IsZero() {
-		where = append(where, fmt.Sprintf("m.time <= %s", add(q.EndTime)))
+		where = append(where, fmt.Sprintf("m.time < %s", add(q.EndTime)))
 	}
 	if len(q.ProductIDs) > 0 {
 		where = append(where, fmt.Sprintf("d.product_id = ANY(%s)", add(q.ProductIDs)))
@@ -687,13 +1033,11 @@ func (a *Aggregator) queryNetworkTable(ctx context.Context, table string, q Quer
 	)
 	// 15min raw 表可能存在同设备同对象同窗口重复上报；network 汇总前按 device 直读口径
 	// 保留最新 ingest 行，避免首页尾部补点把重复 raw 行计入全网 counter。
-	if table == "pm_metrics" {
-		inner := storage.Psql.Select(
+	if table == "pm_metrics" || (table == "pm_metrics_hourly" && len(q.MetricPaths) > 0) {
+		inner := newRawAwareDeviceSelect(storage.Psql, table, q,
 			"device_oui", "device_sn", "metric_path", "metric_type", "metric_value",
 			"statis_type", "granularity", "time", "start_time", "end_time", "ingest_time", "object_ldn",
-		).
-			Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`).
-			From(table)
+		).Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
 		inner = applyCommonFilters(inner, q)
 		inner = inner.OrderBy(
 			"device_oui", "device_sn", "metric_path", "granularity", `"time"`, "object_ldn", "ingest_time DESC",
@@ -817,7 +1161,7 @@ func (a *Aggregator) queryBandTable(ctx context.Context, table string, q QueryRe
 		where = append(where, fmt.Sprintf("m.time >= %s", add(q.StartTime)))
 	}
 	if !q.EndTime.IsZero() {
-		where = append(where, fmt.Sprintf("m.time <= %s", add(q.EndTime)))
+		where = append(where, fmt.Sprintf("m.time < %s", add(q.EndTime)))
 	}
 	if len(q.Technologies) > 0 {
 		where = append(where, fmt.Sprintf("d.technology = ANY(%s)", add(q.Technologies)))
@@ -939,6 +1283,18 @@ func joinOr(conds []string) string {
 // ── 过滤条件 ───────────────────────────────────────────────────────────────
 
 func applyDeviceFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
+	if len(q.DeviceSNs) > 0 && len(q.Technologies) > 0 {
+		if len(q.DeviceOUIs) > 0 {
+			qb = qb.Where(sq.Eq{"device_oui": q.DeviceOUIs})
+		}
+		qb = qb.Where(
+			"(device_oui, device_sn) IN (SELECT oui, serial_number FROM device_dim WHERE serial_number = ANY(?) AND technology = ANY(?))",
+			q.DeviceSNs,
+			q.Technologies,
+		)
+		q.Technologies = nil
+		return applyCommonFilters(qb, q)
+	}
 	if len(q.DeviceOUIs) > 0 && len(q.DeviceSNs) > 0 {
 		n := len(q.DeviceOUIs)
 		if len(q.DeviceSNs) < n {
@@ -983,7 +1339,28 @@ func applyGroupFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
 // device_group 走直接列筛）。
 func applyScalarFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
 	if len(q.MetricPaths) > 0 {
-		qb = qb.Where(sq.Eq{"metric_path": q.MetricPaths})
+		if q.MetricType == nil {
+			or := sq.Or{}
+			for _, raw := range q.MetricPaths {
+				path := strings.TrimSpace(raw)
+				if path == "" {
+					continue
+				}
+				if mt, ok := metricTypeFromIndicatorPath(path); ok {
+					or = append(or, sq.And{
+						sq.Eq{"metric_path": path},
+						sq.Eq{"metric_type": string(mt)},
+					})
+				} else {
+					or = append(or, sq.Eq{"metric_path": path})
+				}
+			}
+			if len(or) > 0 {
+				qb = qb.Where(or)
+			}
+		} else {
+			qb = qb.Where(sq.Eq{"metric_path": q.MetricPaths})
+		}
 	}
 	if q.MetricType != nil {
 		qb = qb.Where(sq.Eq{"metric_type": string(*q.MetricType)})
@@ -1011,6 +1388,17 @@ func applyScalarFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
 		qb = qb.Where(sq.Eq{"object_ldn": q.ObjectLDNs})
 	}
 	return qb
+}
+
+func metricTypeFromIndicatorPath(path string) (metrics.MetricType, bool) {
+	switch {
+	case strings.HasPrefix(strings.ToUpper(strings.TrimSpace(path)), "K"):
+		return metrics.MetricTypeKPI, true
+	case strings.HasPrefix(strings.ToUpper(strings.TrimSpace(path)), "C"):
+		return metrics.MetricTypeCounter, true
+	default:
+		return "", false
+	}
 }
 
 // applyCommonFilters 设备维度表（device / aggregate_group / network）公共过滤：标量过滤 +

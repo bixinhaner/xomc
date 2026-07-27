@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -18,7 +19,6 @@ import (
 
 	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
-	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/jsonx"
 	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
@@ -26,18 +26,24 @@ import (
 
 // Handler 是 G7 adhoc 任务的 REST 入口。
 type Handler struct {
-	repo   Repository
-	pool   *pgxpool.Pool // results 查询 + SSE backplane（直接 SQL，避免再加一层 repository）
-	bus    event.EventBus
-	logger *zap.Logger
+	repo                   Repository
+	pool                   *pgxpool.Pool // results 查询（直接 SQL，避免再加一层 repository）
+	hub                    *ProgressHub
+	enabledMetricValidator *EnabledMetricSelectionService
+	logger                 *zap.Logger
 }
 
 // NewHandler 构造 Handler。
-func NewHandler(repo Repository, pool *pgxpool.Pool, bus event.EventBus, logger *zap.Logger) *Handler {
+func NewHandler(repo Repository, pool *pgxpool.Pool, hub *ProgressHub, logger *zap.Logger) *Handler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Handler{repo: repo, pool: pool, bus: bus, logger: logger.Named("pm.adhoc.handler")}
+	return &Handler{repo: repo, pool: pool, hub: hub, logger: logger.Named("pm.adhoc.handler")}
+}
+
+func (h *Handler) WithEnabledMetricSelectionService(svc *EnabledMetricSelectionService) *Handler {
+	h.enabledMetricValidator = svc
+	return h
 }
 
 // RegisterRoutes 把 6 个 REST 端点挂到 router group（不带 /pm 前缀，由调用方决定 group）。
@@ -53,8 +59,6 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		adhoc.DELETE("/tasks/:id/definition", h.Delete) // #392：硬删终态自建任务定义行
 		adhoc.GET("/tasks/:id/results", h.Results)
 		adhoc.GET("/tasks/:id/filter-options", h.FilterOptions) // PM-DASH-DIMFILTER：按维度列出可筛子集选项
-		adhoc.GET("/tasks/:id/runs", h.Runs)                    // T-0186：运行历史
-		adhoc.GET("/tasks/:id/progress", h.Progress)            // SSE
 	}
 }
 
@@ -62,13 +66,13 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 
 type createRequestDTO struct {
 	Name     string `json:"name" binding:"required"`
-	Mode     string `json:"mode" binding:"required,oneof=oneshot continuous"`
+	Mode     string `json:"mode" binding:"required,oneof=continuous"`
 	CronExpr string `json:"cron_expr"`
 	// T-0185：device_sns 仅在 device/aggregate_group 维度必填（向导期放宽）；
 	// network/product/band/device_group 维度按制式全量聚合，不限设备，device_sns 可空。
 	DeviceSNs     []string `json:"device_sns"`
 	MetricPaths   []string `json:"metric_paths" binding:"required,min=1"`
-	Granularities []string `json:"granularities" binding:"required,min=1"`
+	Granularities []string `json:"granularities"`
 	// T-0193：小区/PLMN 白名单（完整 object_ldn 字符串）。可选，不传/空 = 全小区（向后兼容）。
 	// 仅 device/aggregate_group 维度生效；其他维度忽略（不落库、不报错）。
 	ObjectLDNs []string `json:"object_ldns"`
@@ -84,6 +88,8 @@ type createRequestDTO struct {
 	IsBuiltin bool `json:"is_builtin"`
 	// 非持续型过期天数（T-0182，默认 60）
 	ExpireDays int `json:"expire_days" binding:"omitempty,min=1"`
+	// visibility：private（默认，仅创建者/超管可见可操作）/ public（登录用户可见可操作）
+	Visibility string `json:"visibility" binding:"omitempty,oneof=private public"`
 }
 
 type taskResponseDTO struct {
@@ -101,6 +107,7 @@ type taskResponseDTO struct {
 	Technology    string    `json:"technology,omitempty"`
 	IsBuiltin     bool      `json:"is_builtin"`
 	ExpireDays    int       `json:"expire_days"`
+	Visibility    string    `json:"visibility"`
 	Status        string    `json:"status"`
 	Progress      int       `json:"progress"`
 	Creator       string    `json:"creator"`
@@ -131,6 +138,7 @@ func taskToDTO(ctx context.Context, t *Task) taskResponseDTO {
 		Technology:    t.Technology,
 		IsBuiltin:     t.IsBuiltin,
 		ExpireDays:    t.ExpireDays,
+		Visibility:    string(normalizeVisibility(t.Visibility)),
 		Status:        string(t.Status),
 		Progress:      t.Progress,
 		Creator:       t.Creator,
@@ -148,43 +156,31 @@ func (h *Handler) Create(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	// 单粒度（设计 §2.4/§2.6 单选一个；要别的粒度另建任务）。保留数组结构不动 executor 循环。
-	if len(req.Granularities) != 1 {
-		response.Fail(c, http.StatusBadRequest, "granularities must contain exactly one value (single granularity per task)")
-		return
-	}
+	req.Granularities = aggregationRollupGranularityStrings()
 	dim := Dimension(req.Dimension)
 	if dim == "" {
 		dim = DimensionDevice
 	}
 	// #669：粒度前置守门——15min 已整组下线（详见 unsupportedGranularity 注释）。
 	// 保留 dim 入参以便日后扩展新的（粒度,维度）限制。
-	if msg := unsupportedGranularity(req.Granularities[0], dim); msg != "" {
-		response.Fail(c, http.StatusBadRequest, msg)
-		return
-	}
 	// T-0185：device_sns 仅 device/aggregate_group（自选设备）维度必填；其余维度按制式全量聚合。
 	if (dim == DimensionDevice || dim == DimensionAggregateGroup) && len(req.DeviceSNs) == 0 {
 		response.Fail(c, http.StatusBadRequest, "device_sns is required for device/aggregate_group dimension")
 		return
 	}
-	// T-0185：oneshot 必须给有效时间窗（end > start）；continuous 留空 → NULL 开窗滚动聚合。
-	if Mode(req.Mode) == ModeOneshot {
-		if !req.WindowEnd.After(req.WindowStart) {
-			response.Fail(c, http.StatusBadRequest, "window_end must be after window_start for oneshot task")
-			return
-		}
-	} else {
-		// continuous：忽略传入窗口，强制开窗（与内置任务一致，每次滚动聚合最新可用桶）。
-		req.WindowStart = time.Time{}
-		req.WindowEnd = time.Time{}
-	}
+	// 在线聚合只从下一个完整窗口开始，不接受历史执行时间窗。
+	req.WindowStart = time.Time{}
+	req.WindowEnd = time.Time{}
 	// 制式过滤：建任务拒跨制式 —— 选定制式后，范围内的设备必须全部属于该制式（设计 §2.5）。
 	if req.Technology != "" && len(req.DeviceSNs) > 0 {
 		if err := h.rejectCrossTechnology(c.Request.Context(), req.Technology, req.DeviceSNs); err != nil {
 			response.Fail(c, http.StatusBadRequest, err.Error())
 			return
 		}
+	}
+	if err := h.enabledMetricValidator.ValidateTechnology(c.Request.Context(), req.Technology, req.MetricPaths); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
 	}
 	// T-0185：continuous 任务的 cron 由粒度自动派生（向导不暴露 cron 字段）；显式传 cron 则尊重。
 	cronExpr := req.CronExpr
@@ -216,6 +212,7 @@ func (h *Handler) Create(c *gin.Context) {
 		Technology:    req.Technology,
 		IsBuiltin:     req.IsBuiltin,
 		ExpireDays:    req.ExpireDays,
+		Visibility:    Visibility(req.Visibility),
 		Creator:       creator,
 	})
 	if err != nil {
@@ -308,12 +305,13 @@ WHERE serial_number = ANY($1)`
 	return nil
 }
 
-// List GET /pm/adhoc/tasks?mode=&status=&limit=&offset=&all=true
+// List GET /pm/adhoc/tasks?mode=&status=&limit=&offset=
 //
-// T-0164 收尾 G7-Gap-7：默认按 creator=current_user 过滤（"我的任务"），
-// admin 角色传 ?all=true 可看全部任务（运维 / 审计场景）。
+// 默认返回：内置任务 + 当前用户 private 自定义任务 + 所有 public 自定义任务。
+// 超管（source='builtIn'）由后端登录态自动识别，可看全部任务（运维 / 审计场景）。
 func (h *Handler) List(c *gin.Context) {
-	filter := ListFilter{Limit: 50}
+	currentUser := extractCreator(c)
+	filter := ListFilter{Limit: 50, CurrentUser: currentUser}
 	if v := c.Query("mode"); v != "" {
 		m := Mode(v)
 		filter.Mode = &m
@@ -323,13 +321,7 @@ func (h *Handler) List(c *gin.Context) {
 		filter.Status = &s
 	}
 
-	// T-0164 收尾 G7-Gap-7：creator 过滤
-	// - 默认按当前用户过滤（"我的任务"）
-	// - admin 角色传 ?all=true 可看全部
-	// - 显式传 ?creator=xxx 时尊重（向后兼容老 client + 运维筛查特定用户场景）
 	// T-0184：内置任务过滤（前端分"内置区"/"自建区"）。
-	//   ?is_builtin=true  → 只看内置 12 个预置任务（全用户可见，不按 creator 过滤）
-	//   ?is_builtin=false → 只看自建任务（仍按 creator 默认过滤）
 	var builtinOnly bool
 	if v := c.Query("is_builtin"); v != "" {
 		b := v == "true"
@@ -337,20 +329,9 @@ func (h *Handler) List(c *gin.Context) {
 		builtinOnly = b
 	}
 
-	currentUser := extractCreator(c)
-	all := c.Query("all") == "true"
-	switch {
-	case builtinOnly:
-		// 内置任务无 per-user 归属，全用户共享可见 → 不按 creator 过滤
-		filter.Creator = ""
-	case c.Query("creator") != "":
+	filter.IncludeAll = isAdmin(c)
+	if !builtinOnly && c.Query("creator") != "" {
 		filter.Creator = c.Query("creator")
-	case all && isAdmin(c):
-		// admin + 显式 ?all=true → 不过滤
-		filter.Creator = ""
-	default:
-		// 默认按当前用户过滤
-		filter.Creator = currentUser
 	}
 	if v := c.Query("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
@@ -390,6 +371,10 @@ func (h *Handler) Get(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
+	if !canViewTask(t, extractCreator(c), isAdmin(c)) {
+		response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
+		return
+	}
 	response.OK(c, taskToDTO(c.Request.Context(), t))
 }
 
@@ -405,6 +390,7 @@ type updateRequestDTO struct {
 	ObjectLDNs    []string  `json:"object_ldns"`
 	WindowStart   time.Time `json:"window_start"`
 	WindowEnd     time.Time `json:"window_end"`
+	Visibility    string    `json:"visibility" binding:"omitempty,oneof=private public"`
 }
 
 // Update PATCH /pm/adhoc/tasks/:id
@@ -435,7 +421,7 @@ func (h *Handler) Update(c *gin.Context) {
 		return
 	}
 
-	// #652：自建任务归属权校验（编辑）—— 仅创建者或超管可编辑。
+	// 自建任务权限：private 仅创建者或超管；public 允许其他登录用户编辑。
 	if !existing.IsBuiltin {
 		if !canOperate(existing, extractCreator(c), isAdmin(c)) {
 			response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
@@ -445,26 +431,25 @@ func (h *Handler) Update(c *gin.Context) {
 
 	upd := UpdateRequest{
 		IsBuiltin:   existing.IsBuiltin,
+		Mode:        existing.Mode,
+		Dimension:   existing.Dimension,
 		MetricPaths: req.MetricPaths,
 	}
 
+	if err := h.enabledMetricValidator.ValidateTechnology(c.Request.Context(), existing.Technology, req.MetricPaths); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
 	if !existing.IsBuiltin {
-		// 自建任务：复用创建校验。
-		// 单粒度（设计 §2.4/§2.6）。
-		if len(req.Granularities) != 1 {
-			response.Fail(c, http.StatusBadRequest, "granularities must contain exactly one value (single granularity per task)")
-			return
-		}
+		// 聚合任务固定产出小时、天、周、月，粒度不再是用户可编辑字段。
+		req.Granularities = aggregationRollupGranularityStrings()
 		// device_sns 仅 device/aggregate_group 维度必填（沿用既有维度，不可改）。
 		dim := existing.Dimension
 		if dim == "" {
 			dim = DimensionDevice
 		}
 		// #669：编辑自建任务时同样守门粒度——15min 已整组下线，不允许把任意维度的任务粒度改回 15min。
-		if msg := unsupportedGranularity(req.Granularities[0], dim); msg != "" {
-			response.Fail(c, http.StatusBadRequest, msg)
-			return
-		}
 		if (dim == DimensionDevice || dim == DimensionAggregateGroup) && len(req.DeviceSNs) == 0 {
 			response.Fail(c, http.StatusBadRequest, "device_sns is required for device/aggregate_group dimension")
 			return
@@ -494,9 +479,19 @@ func (h *Handler) Update(c *gin.Context) {
 		upd.Name = req.Name
 		upd.DeviceSNs = req.DeviceSNs
 		upd.Granularities = req.Granularities
+		upd.Visibility = existing.Visibility
+		if req.Visibility != "" {
+			upd.Visibility = Visibility(req.Visibility)
+		}
+		if existing.Mode == ModeContinuous {
+			cronExpr := cronForGranularity(req.Granularities[0])
+			upd.CronExpr = &cronExpr
+			upd.ResetCursor = !sameFirstGranularity(existing.Granularities, req.Granularities)
+		}
 		upd.ObjectLDNs = objectLDNs
 		upd.WindowStart = req.WindowStart
 		upd.WindowEnd = req.WindowEnd
+		upd.RequeueTerminal = existing.Mode == ModeOneshot && oneshotExecutionInputsChanged(existing, req, objectLDNs)
 	}
 
 	if err := h.repo.Update(c.Request.Context(), id, upd); err != nil {
@@ -510,6 +505,26 @@ func (h *Handler) Update(c *gin.Context) {
 	response.OK(c, gin.H{"id": id.String()})
 }
 
+func aggregationRollupGranularityStrings() []string {
+	return []string{"hourly", "daily", "weekly", "monthly"}
+}
+
+func sameFirstGranularity(a, b []string) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return len(a) == len(b)
+	}
+	return a[0] == b[0]
+}
+
+func oneshotExecutionInputsChanged(existing *Task, req updateRequestDTO, objectLDNs []string) bool {
+	return !slices.Equal(existing.DeviceSNs, req.DeviceSNs) ||
+		!slices.Equal(existing.MetricPaths, req.MetricPaths) ||
+		!slices.Equal(existing.Granularities, req.Granularities) ||
+		!slices.Equal(existing.ObjectLDNs, objectLDNs) ||
+		!existing.WindowStart.Equal(req.WindowStart) ||
+		!existing.WindowEnd.Equal(req.WindowEnd)
+}
+
 // Cancel DELETE /pm/adhoc/tasks/:id
 func (h *Handler) Cancel(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
@@ -517,7 +532,7 @@ func (h *Handler) Cancel(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "invalid id")
 		return
 	}
-	// #652：先取任务做归属权校验（取消）—— 自建任务仅创建者或超管可取消。
+	// 取消会中断正在执行/排期的任务，仍限定创建者或超管。
 	existing, err := h.repo.Get(c.Request.Context(), id)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -528,7 +543,7 @@ func (h *Handler) Cancel(c *gin.Context) {
 		return
 	}
 	if !existing.IsBuiltin {
-		if !canOperate(existing, extractCreator(c), isAdmin(c)) {
+		if !canCancelTask(existing, extractCreator(c), isAdmin(c)) {
 			response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
 			return
 		}
@@ -559,7 +574,7 @@ func (h *Handler) Resume(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "invalid id")
 		return
 	}
-	// #652：先取任务做归属权校验（恢复）—— 自建任务仅创建者或超管可恢复。
+	// 自建任务权限：private 仅创建者或超管；public 允许其他登录用户恢复。
 	existing, err := h.repo.Get(c.Request.Context(), id)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -603,7 +618,7 @@ func (h *Handler) Delete(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "invalid id")
 		return
 	}
-	// #652：先取任务做归属权校验（删除）—— 自建任务仅创建者或超管可删除。
+	// 自建任务权限：private 仅创建者或超管；public 允许其他登录用户删除。
 	existing, err := h.repo.Get(c.Request.Context(), id)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -613,7 +628,6 @@ func (h *Handler) Delete(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	// #652：自建任务归属权校验（删除）—— 仅创建者或超管可删除。
 	// 内置任务不做归属权校验（由 repo.Delete 的 is_builtin 守门拦截）。
 	if !existing.IsBuiltin {
 		if !canOperate(existing, extractCreator(c), isAdmin(c)) {
@@ -708,7 +722,7 @@ WHERE r.task_id = $1`
 	}
 	if f.EndTime != "" {
 		if t, err := time.Parse(time.RFC3339, f.EndTime); err == nil {
-			q += fmt.Sprintf(" AND r.time <= $%d", pos)
+			q += fmt.Sprintf(" AND r.time < $%d", pos)
 			args = append(args, t)
 			pos++
 		}
@@ -787,7 +801,7 @@ func buildResultsCountQuery(taskID uuid.UUID, f resultsFilter) (string, []any) {
 	}
 	if f.EndTime != "" {
 		if t, err := time.Parse(time.RFC3339, f.EndTime); err == nil {
-			q += fmt.Sprintf(" AND r.time <= $%d", pos)
+			q += fmt.Sprintf(" AND r.time < $%d", pos)
 			args = append(args, t)
 			pos++
 		}
@@ -846,8 +860,8 @@ func (h *Handler) Results(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	// #652：自建任务结果读权限校验 —— 内置任务全员可读，自建任务仅创建者或超管可读。
-	if !canViewResults(task, extractCreator(c), isAdmin(c)) {
+	// 结果读权限与任务查看权限一致。
+	if !canViewTask(task, extractCreator(c), isAdmin(c)) {
 		response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
 		return
 	}
@@ -913,14 +927,17 @@ func (h *Handler) Results(c *gin.Context) {
 		MetricType  string `json:"metric_type"`
 		// MetricValue 用 jsonx.Float（底层 float64）兜底非有限值（NaN/Inf → null），
 		// 避免单个 NaN 行致整批 JSON 编码失败、返回空 body（issue #387）。
-		MetricValue jsonx.Float `json:"metric_value"`
-		StatisType  *string     `json:"statis_type,omitempty"`
-		Granularity string      `json:"granularity"`
-		Time        time.Time   `json:"time"`
-		StartTime   time.Time   `json:"start_time"`
-		EndTime     time.Time   `json:"end_time"`
-		IngestTime  time.Time   `json:"ingest_time"`
-		ObjectLDN   *string     `json:"object_ldn,omitempty"`
+		MetricValue   jsonx.Float `json:"metric_value"`
+		StatisType    *string     `json:"statis_type,omitempty"`
+		Granularity   string      `json:"granularity"`
+		Time          time.Time   `json:"time"`
+		StartTime     time.Time   `json:"start_time"`
+		EndTime       time.Time   `json:"end_time"`
+		IngestTime    time.Time   `json:"ingest_time"`
+		ObjectLDN     *string     `json:"object_ldn,omitempty"`
+		TaskVersionID string      `json:"task_version_id,omitempty"`
+		Complete      bool        `json:"complete"`
+		MissingSlots  int64       `json:"missing_slots"`
 	}
 	items := make([]resultDTO, 0)
 	for rows.Next() {
@@ -940,6 +957,17 @@ func (h *Handler) Results(c *gin.Context) {
 		}
 		dto.ID = resultID.String()
 		dto.TaskID = taskID.String()
+		var aggregateMeta struct {
+			TaskVersionID string `json:"task_version_id"`
+			Complete      bool   `json:"complete"`
+			MissingSlots  int64  `json:"missing_slots"`
+		}
+		if len(extraBytes) > 0 {
+			_ = json.Unmarshal(extraBytes, &aggregateMeta)
+			dto.TaskVersionID = aggregateMeta.TaskVersionID
+			dto.Complete = aggregateMeta.Complete
+			dto.MissingSlots = aggregateMeta.MissingSlots
+		}
 		if productID != nil && *productID != uuid.Nil {
 			dto.ProductID = productID.String()
 		}
@@ -1118,8 +1146,8 @@ func (h *Handler) FilterOptions(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	// #652：筛选选项属于结果数据的衍生视图，与 Results 同口径做读权限校验。
-	if !canViewResults(task, extractCreator(c), isAdmin(c)) {
+	// 筛选选项属于结果数据的衍生视图，与 Results 同口径做读权限校验。
+	if !canViewTask(task, extractCreator(c), isAdmin(c)) {
 		response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
 		return
 	}
@@ -1272,7 +1300,7 @@ func (h *Handler) Runs(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	if !canViewResults(task, extractCreator(c), isAdmin(c)) {
+	if !canViewTask(task, extractCreator(c), isAdmin(c)) {
 		response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
 		return
 	}
@@ -1302,101 +1330,163 @@ func (h *Handler) Runs(c *gin.Context) {
 
 // Progress GET /pm/adhoc/tasks/:id/progress（SSE）
 //
-// 订阅 pm.adhoc.progress 与 pm.adhoc.completed 主题，过滤匹配 task_id 的事件流给客户端。
-// 客户端 EventSource 'progress'/'completed' 事件名分别接收。
+// 认证授权通过后只订阅当前 APP 实例的本地 ProgressHub。上游 Core NATS 订阅
+// 由 APP 启动期的 ProgressBridge 统一持有，不随 HTTP 连接数量增长。
 func (h *Handler) Progress(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid id")
 		return
 	}
-	if h.bus == nil {
-		response.Fail(c, http.StatusServiceUnavailable, "event bus not wired")
+	task, err := h.repo.Get(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			response.Fail(c, http.StatusNotFound, "task not found")
+			return
+		}
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
+	if !canViewTask(task, extractCreator(c), isAdmin(c)) {
+		response.Fail(c, http.StatusForbidden, "permission denied: not task owner")
+		return
+	}
+	if h.hub == nil {
+		response.Fail(c, http.StatusServiceUnavailable, "progress hub not wired")
+		return
+	}
+	if _, ok := c.Writer.(http.Flusher); !ok {
+		response.Fail(c, http.StatusInternalServerError, "streaming unsupported")
+		return
+	}
+
+	events, unsubscribe := h.hub.Subscribe(id.String())
+	defer unsubscribe()
 
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
 	c.Writer.Header().Set("X-Accel-Buffering", "no") // nginx 不缓冲
 
-	taskID := id.String()
-	flusher, ok := c.Writer.(http.Flusher)
-	if !ok {
-		response.Fail(c, http.StatusInternalServerError, "streaming unsupported")
-		return
-	}
-
-	makeHandler := func(eventName string) event.EventHandler {
-		return func(ctx context.Context, evt event.Event) error {
-			var payload map[string]any
-			if err := evt.DecodePayload(&payload); err != nil {
-				return nil // 忽略解析错误，不阻塞订阅链
-			}
-			tid, _ := payload["task_id"].(string)
-			if tid != taskID {
-				return nil
-			}
-			data, _ := json.Marshal(payload)
-			h.writeSSE(c.Writer.(io.Writer), eventName, data)
-			flusher.Flush()
-			return nil
+	// SSE 必须越过 http.Server 的全响应 WriteTimeout，否则默认 30 秒后连接被切断。
+	if rc := http.NewResponseController(c.Writer); rc != nil {
+		if err := rc.SetWriteDeadline(time.Time{}); err != nil {
+			h.logger.Warn("clear adhoc progress SSE write deadline failed",
+				zap.String("task_id", id.String()), zap.Error(err))
 		}
 	}
 
-	subProgress, err := h.bus.Subscribe(SubjectProgress, makeHandler("progress"))
-	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+	// 立即提交状态和真正的 SSE comment，避免 EventSource/onopen 等到首个业务事件。
+	c.Status(http.StatusOK)
+	if err := writeSSEString(c.Writer, ":connected\n\n"); err != nil {
 		return
 	}
-	defer subProgress.Unsubscribe()
-
-	subCompleted, err := h.bus.Subscribe(SubjectCompleted, makeHandler("completed"))
-	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+	if err := flushSSE(c.Writer); err != nil {
 		return
 	}
-	defer subCompleted.Unsubscribe()
 
-	// 等客户端断开。SSE 心跳每 30s 发个 comment 防代理超时。
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
+		case event, ok := <-events:
+			if !ok {
+				return
+			}
+			if err := h.writeSSE(c.Writer, event.Name, event.Data); err != nil {
+				return
+			}
+			if err := flushSSE(c.Writer); err != nil {
+				return
+			}
+			if event.Name == "completed" {
+				return
+			}
 		case <-c.Request.Context().Done():
 			return
 		case <-ticker.C:
-			h.writeSSE(c.Writer.(io.Writer), "", []byte(": keep-alive"))
-			flusher.Flush()
+			if err := writeSSEString(c.Writer, ":keepalive\n\n"); err != nil {
+				return
+			}
+			if err := flushSSE(c.Writer); err != nil {
+				return
+			}
 		}
 	}
 }
 
-func (h *Handler) writeSSE(w io.Writer, eventName string, data []byte) {
-	if eventName != "" {
-		_, _ = w.Write([]byte("event: " + eventName + "\n"))
-	}
-	_, _ = w.Write([]byte("data: "))
-	_, _ = w.Write(data)
-	_, _ = w.Write([]byte("\n\n"))
+func flushSSE(w http.ResponseWriter) error {
+	return http.NewResponseController(w).Flush()
 }
 
-// canOperate 判断当前用户对自建任务有无操作权限（编辑/取消/删除）。
-// 超管可操作任意自建任务；普通用户只能操作自己创建的任务。
+func (h *Handler) writeSSE(w io.Writer, eventName string, data []byte) error {
+	if eventName != "" {
+		if err := writeSSEString(w, "event: "+eventName+"\n"); err != nil {
+			return err
+		}
+	}
+	if err := writeSSEString(w, "data: "); err != nil {
+		return err
+	}
+	if err := writeSSEBytes(w, data); err != nil {
+		return err
+	}
+	return writeSSEString(w, "\n\n")
+}
+
+func writeSSEString(w io.Writer, data string) error {
+	n, err := io.WriteString(w, data)
+	if err != nil {
+		return err
+	}
+	if n != len(data) {
+		return io.ErrShortWrite
+	}
+	return nil
+}
+
+func writeSSEBytes(w io.Writer, data []byte) error {
+	n, err := w.Write(data)
+	if err != nil {
+		return err
+	}
+	if n != len(data) {
+		return io.ErrShortWrite
+	}
+	return nil
+}
+
+// canOperate 判断当前用户对自建任务有无管理权限（编辑/恢复/删除）。
+// 超管可操作任意自建任务；public 自建任务允许登录用户操作；private 仅创建者可操作。
 func canOperate(task *Task, currentUser string, admin bool) bool {
+	if admin {
+		return true
+	}
+	if normalizeVisibility(task.Visibility) == VisibilityPublic {
+		return true
+	}
+	return task.Creator == currentUser
+}
+
+// canCancelTask 判断当前用户能否取消任务。
+// 取消会影响正在执行/排期中的任务，只允许创建者或超管执行。
+func canCancelTask(task *Task, currentUser string, admin bool) bool {
 	if admin {
 		return true
 	}
 	return task.Creator == currentUser
 }
 
-// canViewResults 判断当前用户对任务结果有无读权限。
-// 内置任务全员可读；自建任务仅创建者或超管可读。
-func canViewResults(task *Task, currentUser string, admin bool) bool {
+// canViewTask 判断当前用户对任务定义、结果和运行信息有无读权限。
+// 内置任务全员可读；public 自建任务全员可读；private 自建任务仅创建者或超管可读。
+func canViewTask(task *Task, currentUser string, admin bool) bool {
 	if task.IsBuiltin {
 		return true
 	}
 	if admin {
+		return true
+	}
+	if normalizeVisibility(task.Visibility) == VisibilityPublic {
 		return true
 	}
 	return task.Creator == currentUser
@@ -1413,10 +1503,8 @@ func extractCreator(c *gin.Context) string {
 	return "anonymous"
 }
 
-// isAdmin 判断当前用户是否 admin / super_admin（T-0164 收尾 G7-Gap-7 用，决定 ?all=true 是否生效）。
-//
-// admin.AuthMiddleware 注入的 context key（roles / is_super_admin / user role）；
-// 任一为真即视为有权限看全部任务。
+// isAdmin 判断当前用户是否具备全局管理员视角。
+// 内置超管（source='builtIn' 派生 is_super_admin）和 admin / super_admin 角色都可查看全部任务。
 func isAdmin(c *gin.Context) bool {
 	if v, ok := c.Get("is_super_admin"); ok {
 		if b, ok := v.(bool); ok && b {

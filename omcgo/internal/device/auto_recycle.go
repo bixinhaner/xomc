@@ -13,11 +13,10 @@ import (
 // AutoRecycleDeleter 能将设备批量软删除的最小接口（由 *PgDeviceRepository 满足）。
 type AutoRecycleDeleter interface {
 	FindOfflineForRecycle(ctx context.Context, olderThan time.Time, limit int) ([]uuid.UUID, error)
-	BatchDelete(ctx context.Context, ids []uuid.UUID, deletedBy string) (int64, error)
+	BatchDeleteWithMetadata(ctx context.Context, ids []uuid.UUID, metadata RecycleMetadata) (int64, error)
 }
 
-// SysConfigLookupFn 从 sys_configs 读取 (category, key) → value 的函数签名，
-// 与 transfercfg.SysConfigLookup 同形（避免跨包引用）。
+// SysConfigLookupFn 从 sys_configs 读取 (category, key) → value 的函数签名。
 type SysConfigLookupFn func(ctx context.Context, category, key string) (value string, found bool)
 
 // AutoRecycleJob 回收站自动移入定时任务。
@@ -26,7 +25,7 @@ type SysConfigLookupFn func(ctx context.Context, category, key string) (value st
 //  2. 读取 sys_configs device:deviceOfflineSaveDay（离线天数阈值）
 //  3. 开关 false 时跳过
 //  4. 查询 is_online=false AND last_inform_at < now()-N days AND deleted_at IS NULL 设备
-//  5. 批量软删除（deleted_by='system:auto_recycle'）
+//  5. 批量软删除（deleted_by='system'，executor='system:auto_recycle'）
 //
 // 单实例假设：当前仅单 worker 部署，无并发锁保护；横扩前需补 PG advisory lock。
 type AutoRecycleJob struct {
@@ -86,6 +85,11 @@ func (j *AutoRecycleJob) Run(ctx context.Context) (int64, error) {
 	}
 
 	cutoff := time.Now().AddDate(0, 0, -days)
+	metadata := RecycleMetadata{
+		DeletedBy: "system",
+		Type:      RecycleTypeAuto,
+		Executor:  "system:auto_recycle",
+	}
 	j.logger.Info("auto recycle starting",
 		zap.Int("offline_days", days),
 		zap.Time("cutoff", cutoff))
@@ -101,7 +105,7 @@ func (j *AutoRecycleJob) Run(ctx context.Context) (int64, error) {
 			break
 		}
 
-		deleted, delErr := j.deviceOps.BatchDelete(ctx, ids, "system:auto_recycle")
+		deleted, delErr := j.deviceOps.BatchDeleteWithMetadata(ctx, ids, metadata)
 		if delErr != nil {
 			return totalDeleted, fmt.Errorf("batch delete offline devices: %w", delErr)
 		}

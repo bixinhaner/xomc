@@ -1,10 +1,13 @@
 package dashboard
 
 import (
+	"math"
 	"testing"
+	"time"
 
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -175,9 +178,15 @@ func TestCountDevicesAtTimeQuery(t *testing.T) {
 }
 
 func TestCountAlarmsAtTimeQuery(t *testing.T) {
-	assert.Contains(t, countAlarmsAtTimeQuery, "FROM alarms_history")
-	assert.Contains(t, countAlarmsAtTimeQuery, "raised_at <= $1")
-	assert.Contains(t, countAlarmsAtTimeQuery, "cleared_at IS NULL OR cleared_at > $1")
+	assert.Contains(t, listActiveAlarmIDsAtTimeQuery, "SELECT id")
+	assert.NotContains(t, listActiveAlarmIDsAtTimeQuery, "SELECT alarm_id")
+	assert.Contains(t, listActiveAlarmIDsAtTimeQuery, "FROM alarms_active")
+	assert.Contains(t, listActiveAlarmIDsAtTimeQuery, "raised_at <= $1")
+	assert.Contains(t, countHistoricalAlarmsAtTimeQuery, "FROM alarms_history")
+	assert.Contains(t, countHistoricalAlarmsAtTimeQuery, "COUNT(DISTINCT alarm_id)")
+	assert.Contains(t, countHistoricalAlarmsAtTimeQuery, "raised_at <= $1")
+	assert.Contains(t, countHistoricalAlarmsAtTimeQuery, "cleared_at > $1")
+	assert.Contains(t, countHistoricalAlarmsAtTimeQuery, "ANY($2::uuid[])")
 }
 
 // summaryDeviceCountsQuery 是 /summary 接口 KPI 卡的设备总数 + 在线数取数 SQL。
@@ -193,3 +202,85 @@ func TestSummaryDeviceCountsQuery(t *testing.T) {
 	assert.Contains(t, summaryDeviceCountsQuery, "deleted_at IS NULL")
 }
 
+func TestComputeKPIDeltaRequiresComparableBaseline(t *testing.T) {
+	t.Run("无历史基线时明确标记不可比较且不伪造百分比", func(t *testing.T) {
+		got := computeKPIDelta(12, 0, false, "last_week")
+
+		assert.False(t, got.HasComparison)
+		assert.Zero(t, got.ChangePercent)
+		assert.Equal(t, "stable", got.Trend)
+	})
+
+	t.Run("存在非零历史基线时计算真实变化", func(t *testing.T) {
+		got := computeKPIDelta(12, 10, true, "last_week")
+
+		assert.True(t, got.HasComparison)
+		assert.InDelta(t, 20, got.ChangePercent, 0.001)
+		assert.Equal(t, "up", got.Trend)
+	})
+
+	t.Run("零值历史样本不能作为百分比基线", func(t *testing.T) {
+		got := computeKPIDelta(12, 0, true, "yesterday")
+
+		assert.False(t, got.HasComparison)
+		assert.Zero(t, got.ChangePercent)
+	})
+}
+
+func TestAverageKPITrendEntries(t *testing.T) {
+	avg, ok := averageKPITrendEntries([]KPITrendEntry{{Value: 8}, {Value: 12}})
+	assert.True(t, ok)
+	assert.Equal(t, 10.0, avg)
+
+	_, ok = averageKPITrendEntries(nil)
+	assert.False(t, ok)
+
+	avg, ok = averageKPITrendEntries([]KPITrendEntry{
+		{Value: math.NaN()},
+		{Value: math.Inf(1)},
+		{Value: 9},
+	})
+	assert.True(t, ok)
+	assert.Equal(t, 9.0, avg)
+
+	_, ok = averageKPITrendEntries([]KPITrendEntry{{Value: math.NaN()}, {Value: math.Inf(-1)}})
+	assert.False(t, ok)
+}
+
+func TestSetDashboardKPIOverviewValueMapsActiveUEIndicatorID(t *testing.T) {
+	overview := map[string]float64{}
+	setDashboardKPIOverviewValue(overview, activeUEKPIID, 17)
+
+	assert.Equal(t, 17.0, overview[activeUEKPIID])
+	assert.Equal(t, 17.0, overview[activeUEKPIAlias])
+}
+
+func TestDashboardKPIDeltaWindowsUseLocalCalendarBoundaries(t *testing.T) {
+	location, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	now := time.Date(2026, 7, 21, 19, 15, 0, 0, location)
+
+	windows := dashboardKPIDeltaWindows(now)
+
+	assert.Equal(t, time.Date(2026, 7, 14, 19, 15, 0, 0, location), windows.DeviceCompareAt)
+	assert.Equal(t, time.Date(2026, 7, 20, 19, 15, 0, 0, location), windows.AlarmCompareAt)
+	assert.Equal(t, time.Date(2026, 7, 21, 0, 0, 0, 0, location), windows.UECurrentStart)
+	assert.Equal(t, now, windows.UECurrentEnd)
+	assert.Equal(t, time.Date(2026, 7, 14, 0, 0, 0, 0, location), windows.UEPreviousStart)
+	assert.Equal(t, time.Date(2026, 7, 14, 19, 15, 0, 0, location), windows.UEPreviousEnd)
+}
+
+func TestComputeSeriesKPIDeltaUsesSameAggregationOnBothPeriods(t *testing.T) {
+	got := computeSeriesKPIDelta(
+		[]KPITrendEntry{{Value: 12}, {Value: 18}},
+		[]KPITrendEntry{{Value: 8}, {Value: 12}},
+		"last_week",
+	)
+	assert.True(t, got.HasComparison)
+	assert.Equal(t, 15.0, got.CurrentValue)
+	assert.Equal(t, 10.0, got.PreviousValue)
+	assert.Equal(t, 50.0, got.ChangePercent)
+
+	missing := computeSeriesKPIDelta(nil, []KPITrendEntry{{Value: 10}}, "last_week")
+	assert.False(t, missing.HasComparison)
+}

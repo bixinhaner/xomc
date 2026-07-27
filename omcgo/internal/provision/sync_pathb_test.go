@@ -19,6 +19,8 @@ import (
 	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/mml"
+	"github.com/omcgo/omcgo/internal/product"
+	"github.com/omcgo/omcgo/pkg/tr069"
 )
 
 type fakeUnsupportedPathRepo struct {
@@ -35,6 +37,58 @@ func (f *fakeUnsupportedPathRepo) ListByProduct(_ context.Context, _ uuid.UUID) 
 		return nil, f.err
 	}
 	return append([]mml.UnsupportedPath(nil), f.items...), nil
+}
+
+type fakeProductRepoForPathB struct {
+	products map[uuid.UUID]*product.Product
+	patterns []product.ProductClassPattern
+}
+
+func (f *fakeProductRepoForPathB) ListActivePatterns(_ context.Context) ([]product.ProductClassPattern, error) {
+	return append([]product.ProductClassPattern(nil), f.patterns...), nil
+}
+
+func (f *fakeProductRepoForPathB) GetProductByID(_ context.Context, id uuid.UUID) (*product.Product, error) {
+	if f.products == nil {
+		return nil, nil
+	}
+	return f.products[id], nil
+}
+
+func (f *fakeProductRepoForPathB) ListProducts(context.Context) ([]*product.Product, error) {
+	out := make([]*product.Product, 0, len(f.products))
+	for _, p := range f.products {
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+func (f *fakeProductRepoForPathB) FetchIndicatorPlatformsByDeviceType(context.Context, string) (map[string]struct{}, error) {
+	return map[string]struct{}{}, nil
+}
+
+func (f *fakeProductRepoForPathB) FetchAlarmNeTypes(context.Context) (map[string]struct{}, error) {
+	return map[string]struct{}{}, nil
+}
+
+type fakeParamModelRepoForPathB struct {
+	defaultByModel map[uuid.UUID][]parammodel.ParamMapping
+	discovered     map[string][]parammodel.ParamMapping
+}
+
+func (f *fakeParamModelRepoForPathB) IsParamModelActive(_ context.Context, _ uuid.UUID) (bool, error) {
+	return true, nil
+}
+
+func (f *fakeParamModelRepoForPathB) ListMappingsByParamModel(_ context.Context, paramModelID uuid.UUID) ([]parammodel.ParamMapping, error) {
+	return append([]parammodel.ParamMapping(nil), f.defaultByModel[paramModelID]...), nil
+}
+
+func (f *fakeParamModelRepoForPathB) ListDiscoveredMappings(_ context.Context, productID uuid.UUID, swVersion string) ([]parammodel.ParamMapping, error) {
+	if f.discovered == nil {
+		return nil, nil
+	}
+	return append([]parammodel.ParamMapping(nil), f.discovered[productID.String()+"|"+swVersion]...), nil
 }
 
 func TestExtractStorablePrefixes_HappyPath(t *testing.T) {
@@ -165,6 +219,40 @@ func TestExtractStorablePrefixesForStandardPaths_KeepsConcreteBSCInstance(t *tes
 		"DeviceGSM.Bts.255.handover1.target.rxlev.threshold",
 	}, got)
 	assert.NotContains(t, got, "DeviceGSM.Bts.")
+}
+
+func TestExtractStorablePrefixesForStandardPaths_GPSTranslatesStandardTargets(t *testing.T) {
+	mappings := []parammodel.ParamMapping{
+		{
+			PrivatePath:  "Device.FAP.GPS.LockedLongitude",
+			StandardPath: "Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude",
+			IsStorable:   true,
+			IsSupported:  true,
+			EntryType:    "parameter",
+		},
+		{
+			PrivatePath:  "Device.FAP.GPS.LockedLatitude2",
+			StandardPath: "Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude2",
+			IsStorable:   true,
+			IsSupported:  true,
+			EntryType:    "parameter",
+		},
+	}
+
+	got := extractStorablePrefixesForStandardPaths(mappings, []string{
+		"Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude",
+		"Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude2",
+	})
+	sort.Strings(got)
+	assert.Equal(t, []string{
+		"Device.FAP.GPS.LockedLatitude2",
+		"Device.FAP.GPS.LockedLongitude",
+	}, got)
+
+	// 局部同步接口按 standardPath 过滤；把 privatePath 当请求目标会筛不到映射。
+	assert.Empty(t, extractStorablePrefixesForStandardPaths(mappings, []string{
+		"Device.FAP.GPS.LockedLongitude",
+	}))
 }
 
 func TestExtractStorablePrefixes_AllUnsupported_Empty(t *testing.T) {
@@ -401,6 +489,31 @@ func newDiffTestService(t *testing.T, paths []string, paramErr error) (*SyncServ
 		logger:      logger,
 	}
 	return svc, recorded, mr
+}
+
+func enablePathBRegistryForTest(t *testing.T, svc *SyncService, productClass string, mappings []parammodel.ParamMapping) {
+	t.Helper()
+	ctx := context.Background()
+	productID := uuid.New()
+	paramModelID := uuid.New()
+	prodRepo := &fakeProductRepoForPathB{
+		products: map[uuid.UUID]*product.Product{
+			productID: {ID: productID, Name: "test product", ParamModelID: &paramModelID},
+		},
+		patterns: []product.ProductClassPattern{
+			{ID: uuid.New(), ProductID: productID, ProductClass: "^" + productClass + "$", SortOrder: 1, IsActive: true},
+		},
+	}
+	prodReg := product.NewRegistry(prodRepo, product.NopCache{}, product.NewRegistryMetrics(nil), zap.NewNop())
+	require.NoError(t, prodReg.Refresh(ctx))
+
+	paramRepo := &fakeParamModelRepoForPathB{
+		defaultByModel: map[uuid.UUID][]parammodel.ParamMapping{
+			paramModelID: mappings,
+		},
+	}
+	paramReg := parammodel.NewRegistry(paramRepo, parammodel.NopCache{}, prodReg, parammodel.NewRegistryMetrics(nil), zap.NewNop())
+	svc.WithParamRegistry(paramReg, prodReg, true)
 }
 
 // ---------------------------------------------------------------------------
@@ -683,6 +796,40 @@ func TestLogPathBSyncDiff_ReasonUnknownWhenRedisKeyAbsent(t *testing.T) {
 		"Redis 无 reason key 时应降级为 unknown")
 }
 
+func TestHandleSyncResultPathB_NonFullGPVSkipsMissingDiffLog(t *testing.T) {
+	svc, recorded, _ := newDiffTestService(t, []string{
+		"Device.DeviceInfo.SoftwareVersion",
+		"Device.DeviceInfo.SerialNumber",
+	}, nil)
+	enablePathBRegistryForTest(t, svc, "FAP/test", []parammodel.ParamMapping{
+		{
+			StandardPath: "Device.DeviceInfo.SoftwareVersion",
+			PrivatePath:  "Device.DeviceInfo.SoftwareVersion",
+			IsStorable:   true,
+			IsSupported:  true,
+			EntryType:    "parameter",
+			Access:       "readOnly",
+		},
+	})
+	dev := &model.Device{
+		ID:              uuid.New(),
+		SerialNumber:    "SN-MML-GPV",
+		ProductClass:    "FAP/test",
+		FirmwareVersion: "1.0",
+		Carrier:         model.CarrierCMCC,
+		Technology:      model.TechNR,
+	}
+
+	handled, err := svc.HandleSyncResultPathB(context.Background(), dev, []tr069.ParameterValueStruct{
+		{Name: "Device.DeviceInfo.SoftwareVersion", Value: "BNW_3.9.12", Type: "xsd:string"},
+	}, "")
+
+	require.NoError(t, err)
+	assert.True(t, handled)
+	assert.Empty(t, recorded.FilterMessage("param_sync_missing").All(),
+		"非 sync-gpv-* 的局部 GPV（如 MML 单路径 LST）不应触发全量缺失差异日志")
+}
+
 func TestSnapshotStandardPaths_ReturnsNilOnError(t *testing.T) {
 	svc, _, _ := newDiffTestService(t, nil, errors.New("db down"))
 	got := svc.snapshotStandardPaths(context.Background(), uuid.New())
@@ -737,19 +884,19 @@ func (f *fakeParamSyncWriter) callCount() int {
 
 type fakeDeviceInfoRefresher struct{}
 
-func (f *fakeDeviceInfoRefresher) SyncFromParameters(_ context.Context, _ uuid.UUID, _ model.CarrierCode, _ model.Technology) ([]string, error) {
+func (f *fakeDeviceInfoRefresher) SyncFromParameters(_ context.Context, _ uuid.UUID, _ model.CarrierCode, _ model.Technology, _ string) ([]string, error) {
 	return nil, nil
 }
 
 type fakePathBSyncTaskReader struct {
-	hasOpen bool
-	err     error
-	calls   []string
+	hasIncomplete bool
+	err           error
+	calls         []string
 }
 
 func (f *fakePathBSyncTaskReader) HasIncompleteSyncGPVTasksByDevice(_ context.Context, deviceSN string) (bool, error) {
 	f.calls = append(f.calls, deviceSN)
-	return f.hasOpen, f.err
+	return f.hasIncomplete, f.err
 }
 
 func TestSetParamSyncWriter_ChainableReturnsSyncService(t *testing.T) {
@@ -808,14 +955,14 @@ func TestShouldFinalizePathBSync_NonFullSyncBypassesPendingCounter(t *testing.T)
 
 func TestShouldFinalizePathBSync_UsesTaskReaderWhenAvailable(t *testing.T) {
 	svc, _, _ := newDiffTestService(t, nil, nil)
-	reader := &fakePathBSyncTaskReader{hasOpen: true}
+	reader := &fakePathBSyncTaskReader{hasIncomplete: true}
 	svc.SetPathBSyncTaskReader(reader)
 	dev := &model.Device{ID: uuid.New(), SerialNumber: "SN-reader"}
 
 	assert.False(t, svc.shouldFinalizePathBSync(context.Background(), dev, "sync-gpv-sn-0"))
 	assert.Equal(t, []string{"SN-reader"}, reader.calls)
 
-	reader.hasOpen = false
+	reader.hasIncomplete = false
 	assert.True(t, svc.shouldFinalizePathBSync(context.Background(), dev, "sync-gpv-sn-1"))
 }
 
@@ -823,7 +970,7 @@ func TestHandleSyncResultPathB_EmptyFullSyncWaitsForRemainingTasks(t *testing.T)
 	svc, _, _ := newDiffTestService(t, nil, nil)
 	writer := &fakeParamSyncWriter{}
 	svc.SetParamSyncWriter(writer)
-	reader := &fakePathBSyncTaskReader{hasOpen: true}
+	reader := &fakePathBSyncTaskReader{hasIncomplete: true}
 	svc.SetPathBSyncTaskReader(reader)
 	dev := &model.Device{ID: uuid.New(), SerialNumber: "SN-empty", Carrier: model.CarrierCMCC, Technology: model.TechNR}
 

@@ -615,6 +615,153 @@ func TestHandleRPCResult_TaskNotFound(t *testing.T) {
 // do not require real DataModelRegistry / ConfigTemplateService backends)
 // ---------------------------------------------------------------------------
 
+type registeredDeviceSyncCall struct {
+	deviceID uuid.UUID
+	sourceID string
+}
+
+type fakeRegisteredDeviceSyncStarter struct {
+	calls []registeredDeviceSyncCall
+	errs  []error
+}
+
+func (f *fakeRegisteredDeviceSyncStarter) StartRegisteredDeviceSync(
+	_ context.Context,
+	dev *model.Device,
+	sourceID string,
+) error {
+	f.calls = append(f.calls, registeredDeviceSyncCall{deviceID: dev.ID, sourceID: sourceID})
+	if len(f.errs) > 0 {
+		err := f.errs[0]
+		f.errs = f.errs[1:]
+		return err
+	}
+	return nil
+}
+
+func TestProvisioningEngine_Subscribe_RegisteredSyncRetriesSubmitFailure(t *testing.T) {
+	deviceID := uuid.New()
+	devRepo := &mockDeviceRepo{
+		GetByIDFn: func(context.Context, uuid.UUID) (*model.Device, error) {
+			return &model.Device{ID: deviceID, SerialNumber: "SN-REGISTERED-RETRY"}, nil
+		},
+	}
+	h := newEngineHarness(devRepo)
+	starter := &fakeRegisteredDeviceSyncStarter{
+		errs: []error{errors.New("temporary submit failure"), nil},
+	}
+	h.engine.SetParamSyncRoutingMode("durable")
+	h.engine.SetRegisteredDeviceSyncStarter(starter)
+
+	var syncHandler event.EventHandler
+	h.eventBus.QueueSubscribeFn = func(subject, queue string, handler event.EventHandler) (event.Subscription, error) {
+		if subject == event.SubjectDeviceRegistered && queue == "device-registered-param-sync" {
+			syncHandler = handler
+		}
+		return &mockSubscription{}, nil
+	}
+	require.NoError(t, h.engine.Subscribe(h.eventBus))
+	require.NotNil(t, syncHandler)
+	evt, err := event.NewEvent(event.SubjectDeviceRegistered, bootstrapEvent{
+		DeviceID: deviceID, SerialNumber: "SN-REGISTERED-RETRY", Created: true,
+	})
+	require.NoError(t, err)
+
+	require.Error(t, syncHandler(context.Background(), evt))
+	require.NoError(t, syncHandler(context.Background(), evt))
+	require.Len(t, starter.calls, 2)
+	assert.Equal(t, "device_registered:"+deviceID.String(), starter.calls[1].sourceID)
+}
+
+func TestHandleRegisteredDeviceSyncEvent_DeletedBeforeConsumptionIsSkipped(t *testing.T) {
+	h := newEngineHarness(&mockDeviceRepo{
+		GetByIDFn: func(context.Context, uuid.UUID) (*model.Device, error) {
+			return nil, nil
+		},
+	})
+	starter := &fakeRegisteredDeviceSyncStarter{}
+	h.engine.SetParamSyncRoutingMode("durable")
+	h.engine.SetRegisteredDeviceSyncStarter(starter)
+	evt, err := event.NewEvent(event.SubjectDeviceRegistered, bootstrapEvent{
+		DeviceID: uuid.New(), SerialNumber: "SN-DELETED-BEFORE-SYNC", Created: true,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, h.engine.handleRegisteredDeviceSyncEvent(context.Background(), evt))
+	assert.Empty(t, starter.calls)
+}
+
+func TestHandleRegisteredDeviceSyncEvent_CreatedDeviceDurableModeStartsSync(t *testing.T) {
+	h := newFullEngineHarness()
+	deviceID := uuid.New()
+	h.devRepo.GetByIDFn = func(context.Context, uuid.UUID) (*model.Device, error) {
+		return &model.Device{
+			ID:           deviceID,
+			SerialNumber: "SN-REGISTERED-SYNC",
+			Carrier:      model.CarrierCMCC,
+			Technology:   model.TechLTE,
+			ProductClass: "SmallCell-LTE",
+		}, nil
+	}
+	starter := &fakeRegisteredDeviceSyncStarter{}
+	h.engine.SetParamSyncRoutingMode("durable")
+	h.engine.SetRegisteredDeviceSyncStarter(starter)
+
+	evt, err := event.NewEvent(event.SubjectDeviceRegistered, bootstrapEvent{
+		DeviceID:     deviceID,
+		SerialNumber: "SN-REGISTERED-SYNC",
+		ProductClass: "SmallCell-LTE",
+		Created:      true,
+	})
+	require.NoError(t, err)
+
+	err = h.engine.handleRegisteredDeviceSyncEvent(context.Background(), evt)
+	require.NoError(t, err)
+	require.Len(t, starter.calls, 1)
+	assert.Equal(t, deviceID, starter.calls[0].deviceID)
+	assert.Equal(t, "device_registered:"+deviceID.String(), starter.calls[0].sourceID)
+}
+
+func TestHandleRegisteredDeviceSyncEvent_ExistingDeviceDoesNotStartSync(t *testing.T) {
+	h := newFullEngineHarness()
+	deviceID := uuid.New()
+	h.devRepo.GetByIDFn = func(context.Context, uuid.UUID) (*model.Device, error) {
+		return &model.Device{ID: deviceID, SerialNumber: "SN-EXISTING"}, nil
+	}
+	starter := &fakeRegisteredDeviceSyncStarter{}
+	h.engine.SetParamSyncRoutingMode("durable")
+	h.engine.SetRegisteredDeviceSyncStarter(starter)
+
+	evt, err := event.NewEvent(event.SubjectDeviceRegistered, bootstrapEvent{
+		DeviceID: deviceID, SerialNumber: "SN-EXISTING", Created: false,
+	})
+	require.NoError(t, err)
+
+	err = h.engine.handleRegisteredDeviceSyncEvent(context.Background(), evt)
+	require.NoError(t, err)
+	assert.Empty(t, starter.calls)
+}
+
+func TestHandleRegisteredDeviceSyncEvent_CreatedDeviceClosedModeDoesNotStartSync(t *testing.T) {
+	h := newFullEngineHarness()
+	deviceID := uuid.New()
+	h.devRepo.GetByIDFn = func(context.Context, uuid.UUID) (*model.Device, error) {
+		return &model.Device{ID: deviceID, SerialNumber: "SN-CLOSED"}, nil
+	}
+	starter := &fakeRegisteredDeviceSyncStarter{}
+	h.engine.SetParamSyncRoutingMode("closed")
+	h.engine.SetRegisteredDeviceSyncStarter(starter)
+
+	evt, err := event.NewEvent(event.SubjectDeviceRegistered, bootstrapEvent{
+		DeviceID: deviceID, SerialNumber: "SN-CLOSED", Created: true,
+	})
+	require.NoError(t, err)
+
+	err = h.engine.handleRegisteredDeviceSyncEvent(context.Background(), evt)
+	require.NoError(t, err)
+	assert.Empty(t, starter.calls)
+}
+
 func TestHandleBootstrap_CreateTaskError(t *testing.T) {
 	devRepo := &mockDeviceRepo{}
 	h := newEngineHarness(devRepo)
@@ -1203,6 +1350,30 @@ func TestHandleGPVResponse_EmptySyncGPVStillFinalizesPathB(t *testing.T) {
 	assert.Error(t, redisErr, "pending batch key should be cleared after final empty sync-gpv response")
 }
 
+func TestHandleGPVResponse_ParamSyncSourceSkipsLegacyPath(t *testing.T) {
+	lookupCount := 0
+	deviceRepo := &mockDeviceRepo{
+		GetBySerialNumberFn: func(_ context.Context, _ string) (*model.Device, error) {
+			lookupCount++
+			return &model.Device{ID: uuid.New(), SerialNumber: "SN-DURABLE-SYNC"}, nil
+		},
+	}
+	h := newEngineHarness(deviceRepo)
+
+	evt, err := event.NewEvent(event.SubjectCommandGetParamsResponse, map[string]interface{}{
+		"device_sn":        "SN-DURABLE-SYNC",
+		"method":           "GetParameterValuesResponse",
+		"command_key":      "param-sync-00000000-0000-0000-0000-000000000001-0",
+		"task_source":      task.TaskSourceParamSync,
+		"task_source_id":   "00000000-0000-0000-0000-000000000001",
+		"parameter_values": []map[string]any{{"name": "Device.Test.Value", "value": "1"}},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, h.engine.handleGPVResponse(context.Background(), evt))
+	assert.Zero(t, lookupCount, "durable parameter-sync responses must not enter legacy Path B")
+}
+
 func TestOnTaskCompleted_RecoveredSyncGPVExhausted_FinalizesPathB(t *testing.T) {
 	deviceID := uuid.New()
 	deviceSN := "SN-GPV-RECOVERED"
@@ -1223,7 +1394,7 @@ func TestOnTaskCompleted_RecoveredSyncGPVExhausted_FinalizesPathB(t *testing.T) 
 	writer := &fakeParamSyncWriter{}
 	h.engine.SetSyncService((&SyncService{logger: zap.NewNop()}).
 		SetParamSyncWriter(writer).
-		SetPathBSyncTaskReader(&fakePathBSyncTaskReader{hasOpen: false}))
+		SetPathBSyncTaskReader(&fakePathBSyncTaskReader{hasIncomplete: false}))
 
 	h.engine.OnTaskCompleted(context.Background(), &task.Task{
 		ID:         "task-recovered-final",
@@ -1266,7 +1437,7 @@ func TestOnTaskCompleted_RecoveredSyncGPVWithRemaining_DoesNotFinalize(t *testin
 }
 
 // ---------------------------------------------------------------------------
-// Tests: T-0125 HandleFirmwareChanged — Redis 串行锁 + reason hint + fallback Path B
+// Tests: T-0125 HandleFirmwareChanged — Redis 串行锁 + model refresh without parameter sync
 // ---------------------------------------------------------------------------
 
 func TestHandleFirmwareChanged_RedisSerialLockSkipsConcurrent(t *testing.T) {
@@ -1304,7 +1475,7 @@ func TestHandleFirmwareChanged_RedisSerialLockSkipsConcurrent(t *testing.T) {
 	assert.Equal(t, firstLookup, lookupCount, "second call within 10min should be skipped by serial lock")
 }
 
-func TestHandleFirmwareChanged_WritesReasonHintToRedis(t *testing.T) {
+func TestHandleFirmwareChanged_DoesNotWriteParamSyncReasonHint(t *testing.T) {
 	deviceID := uuid.New()
 	deviceRepo := &mockDeviceRepo{
 		GetByIDFn: func(_ context.Context, _ uuid.UUID) (*model.Device, error) {
@@ -1322,10 +1493,8 @@ func TestHandleFirmwareChanged_WritesReasonHintToRedis(t *testing.T) {
 	err := engine.HandleFirmwareChanged(context.Background(), evt)
 	require.NoError(t, err)
 
-	// 验证 reason hint 写入 Redis
-	val, getErr := mr.Get("provision:syncreason:" + deviceID.String())
-	require.NoError(t, getErr)
-	assert.Equal(t, "firmware_changed", val, "reason hint 应写入 Redis 供 handleDataModelFileReceived auto-sync 读取")
+	_, getErr := mr.Get("provision:syncreason:" + deviceID.String())
+	assert.Error(t, getErr, "firmware changed must not arm a parameter-sync reason hint")
 }
 
 func TestHandleFirmwareChanged_DeviceNotFound_NoOp(t *testing.T) {

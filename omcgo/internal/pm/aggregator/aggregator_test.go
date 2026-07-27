@@ -41,8 +41,9 @@ func Test_buildCountersSQL_HourlyFromPmMetrics(t *testing.T) {
 	assert.Contains(t, sql, "WHEN 'min' THEN MIN(m.metric_value)")
 	// 结果值规范化：写入前必须解析指标元数据，并按 unit/statis_type + number 配置处理。
 	assert.Contains(t, sql, "WITH indicator_meta AS")
-	assert.Contains(t, sql, "SELECT id, MIN(unit_id) AS unit_id, MIN(statis_type) AS statis_type")
-	assert.Contains(t, sql, "GROUP BY id")
+	assert.Contains(t, sql, "dictionary_indicator_meta AS")
+	assert.Contains(t, sql, "COALESCE(d.unit_id, l.unit_id)")
+	assert.Contains(t, sql, "COALESCE(d.statis_type, l.statis_type)")
 	assert.Contains(t, sql, "LEFT JOIN indicator_meta im ON im.id = m.metric_path")
 	assert.Contains(t, sql, "missing PM indicator metadata for")
 	assert.Contains(t, sql, "WHEN btrim(im.unit_id) = 'number'")
@@ -429,6 +430,17 @@ func Test_buildDeviceGroupSQL_IntervalFilterUsesPartitionColumn_NotStartTime(t *
 	}
 	sql, _ := buildDeviceGroupSQL("pm_metrics_hourly", "pm_group_metrics_hourly", w)
 	assert.Contains(t, sql, "WITH indicator_meta AS")
+	assert.Contains(t, sql, "legacy_indicator_meta AS")
+	assert.Contains(t, sql, "dictionary_indicator_meta AS")
+	assert.Contains(t, sql, "SELECT metric_path AS id,")
+	assert.Contains(t, sql, "NULLIF(btrim(unit), '') AS unit_id")
+	assert.Contains(t, sql, "FROM pm_metric_dictionary")
+	assert.Contains(t, sql, "WHERE metric_type = 'counter'")
+	assert.Contains(t, sql, "FULL OUTER JOIN legacy_indicator_meta")
+	assert.Contains(t, sql, "COALESCE(d.unit_id, l.unit_id)")
+	assert.Contains(t, sql, "COALESCE(d.statis_type, l.statis_type)")
+	assert.NotContains(t, sql, "MIN(unit_id)")
+	assert.NotContains(t, sql, "MIN(statis_type)")
 	assert.Contains(t, sql, "LEFT JOIN indicator_meta im ON im.id = m.metric_path")
 	assert.Contains(t, sql, "missing PM indicator metadata for")
 	assert.Contains(t, sql, "WHEN btrim(im.unit_id) = 'number'")
@@ -549,6 +561,20 @@ func scanInto(row []any, dest []any) error {
 			} else {
 				v := row[i].(string)
 				*dp = &v
+			}
+		case **uuid.UUID:
+			if row[i] == nil {
+				*dp = nil
+			} else {
+				switch v := row[i].(type) {
+				case uuid.UUID:
+					*dp = &v
+				case string:
+					id := uuid.MustParse(v)
+					*dp = &id
+				default:
+					return errors.New("scanInto: unsupported nullable uuid source")
+				}
 			}
 		case *uuid.UUID:
 			switch v := row[i].(type) {
@@ -746,8 +772,7 @@ func Test_AggregateKPIs_NormalizesBeforeInsert(t *testing.T) {
 				return &fakeRows{rows: [][]any{{"A", "S1", ""}}}, nil
 			case 2:
 				return &fakeRows{rows: [][]any{
-					{"A", "S1", "", "numerator", float64(5)},
-					{"A", "S1", "", "denominator", float64(2)},
+					{"A", "S1", "", "Knumber", float64(2.5), "avg"},
 				}}, nil
 			}
 			return nil, errors.New("unexpected Query")
@@ -764,6 +789,105 @@ func Test_AggregateKPIs_NormalizesBeforeInsert(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, db.execArgs, 9)
 	assert.Equal(t, float64(2.5), db.execArgs[3], "avg KPI 即使 unit=number 也必须保留平均值小数")
+}
+
+func Test_AggregateKPIs_AvgDerivedRollsUpExisting15MinKPIValues(t *testing.T) {
+	rt := &router.KPIRoute{
+		KPIs: []router.KPIDef{
+			{
+				IndicatorID:  "KAVG001",
+				Name:         "AverageKPI",
+				Unit:         "number",
+				StatisType:   "avg",
+				Formula:      "numerator / denominator",
+				Dependencies: []string{"numerator", "denominator"},
+			},
+		},
+	}
+	kr := &stubKPIRouter{byDevice: map[string]*router.KPIRoute{"S1": rt}}
+
+	queryCalls := 0
+	db := &stubDB{
+		execTag: pgconn.NewCommandTag("INSERT 0 1"),
+		queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+			queryCalls++
+			switch queryCalls {
+			case 1:
+				return &fakeRows{rows: [][]any{{"A", "S1", ""}}}, nil
+			case 2:
+				assert.Contains(t, sql, "FROM pm_metrics m", "avg/sum/max/min KPI 应从 15min KPI 源表聚合")
+				assert.Contains(t, sql, "m.metric_type = 'kpi'")
+				assert.Contains(t, sql, "WHEN 'avg' THEN AVG(m.metric_value)")
+				assert.NotContains(t, sql, "numerator", "avg 派生 KPI 不应按公式依赖 counter 重算")
+				return &fakeRows{rows: [][]any{
+					{"A", "S1", "", "KAVG001", float64(40), "avg"},
+				}}, nil
+			}
+			return nil, errors.New("unexpected Query")
+		},
+	}
+
+	a := New(db, kr, nil)
+	w := WindowSpec{
+		Granularity: metrics.GranularityDaily,
+		Start:       time.Date(2026, 5, 22, 0, 0, 0, 0, time.UTC),
+		End:         time.Date(2026, 5, 23, 0, 0, 0, 0, time.UTC),
+	}
+	n, err := a.AggregateKPIs(context.Background(), "pm_metrics_daily", w)
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+	require.Len(t, db.execArgs, 9)
+	assert.Equal(t, "KAVG001", db.execArgs[2])
+	assert.Equal(t, float64(40), db.execArgs[3])
+	assert.Equal(t, "avg", db.execArgs[4])
+	assert.Equal(t, "daily", db.execArgs[5])
+}
+
+func Test_AggregateKPIs_DirectRollupDoesNotWriteKPIOutsideDeviceRoute(t *testing.T) {
+	avgRoute := &router.KPIRoute{
+		KPIs: []router.KPIDef{{
+			IndicatorID: "KAVG001",
+			Name:        "AverageKPI",
+			Unit:        "number",
+			StatisType:  "avg",
+			Formula:     "numerator / denominator",
+		}},
+	}
+	kr := &stubKPIRouter{byDevice: map[string]*router.KPIRoute{
+		"S1": avgRoute,
+		"S2": {KPIs: nil},
+	}}
+
+	queryCalls := 0
+	db := &stubDB{
+		execTag: pgconn.NewCommandTag("INSERT 0 1"),
+		queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+			queryCalls++
+			switch queryCalls {
+			case 1:
+				return &fakeRows{rows: [][]any{{"A", "S1", ""}, {"A", "S2", ""}}}, nil
+			case 2:
+				return &fakeRows{rows: [][]any{
+					{"A", "S1", "", "KAVG001", float64(40), "avg"},
+					{"A", "S2", "", "KAVG001", float64(90), "avg"},
+				}}, nil
+			}
+			return nil, errors.New("unexpected Query")
+		},
+	}
+
+	a := New(db, kr, nil)
+	w := WindowSpec{
+		Granularity: metrics.GranularityHourly,
+		Start:       time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+		End:         time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+	}
+	n, err := a.AggregateKPIs(context.Background(), "pm_metrics_hourly", w)
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+	require.Len(t, db.execArgs, 9)
+	assert.Equal(t, "S1", db.execArgs[1])
+	assert.Equal(t, float64(40), db.execArgs[3])
 }
 
 // ---------------------------------------------------------------------------

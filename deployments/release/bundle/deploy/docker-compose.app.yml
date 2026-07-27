@@ -135,9 +135,10 @@ services:
       resources:
         limits:
           # 资源限额由 plan-resources.sh 生成的 resources.env 经 --env-file 注入；
-          # 缺省 = 历史字面量，未跑 plan-resources.sh 的部署行为不变。
+          # 缺省对齐 plan-resources.sh medium 档（32核/32G 目标机型），未跑脚本的
+          # 部署也有合理开箱起点；机型差异较大仍建议实跑 plan-resources.sh 精确适配。
           cpus: "${APP_CPUS:-2}"
-          memory: "${APP_MEM:-1g}"
+          memory: "${APP_MEM:-1536m}"
         reservations:
           cpus: "0.5"
           memory: 512m
@@ -145,10 +146,13 @@ services:
       TZ: "Asia/Shanghai"
       OMCGO_ENV: ${OMCGO_ENV}
       OMCGO_SERVICE: app
-      # Go 运行时上限（resources.env 注入）。缺省(#167 Step 0)：GOMEMLIMIT off→900MiB(≈0.9×1g 内存
+      # 默认完整生产栈启用 tracing；install/svc --skip-monitoring 会显式置 false，
+      # 保证没有 otelcol 时回到 Go 端 no-op provider。
+      OMCGO_TRACER_ENABLED: "${OMCGO_TRACER_ENABLED:-}"
+      # Go 运行时上限（resources.env 注入）。缺省：GOMEMLIMIT off→1382MiB(≈0.9×1536m 内存
       # 默认,软限须 < limits.memory)，把硬 OOM-kill 换成 GC 背压(纯安全网)。GOMAXPROCS 空则
       # Go 1.25 自动按 cgroup CPU 配额推导。
-      GOMEMLIMIT: "${APP_GOMEMLIMIT:-900MiB}"
+      GOMEMLIMIT: "${APP_GOMEMLIMIT:-1382MiB}"
       GOMAXPROCS: "${APP_GOMAXPROCS:-}"
       # 配置凭据单一真值源 = deploy/.env；app.prod.yaml 用 ${VAR} 引用，Load() 解析前展开。
       POSTGRES_USER: ${POSTGRES_USER}
@@ -200,18 +204,23 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${ACS_CPUS:-2}"
-          memory: "${ACS_MEM:-1g}"
+          # 缺省对齐 plan-resources.sh medium 档（32核/32G 目标机型）；ACS 是 TR-069
+          # 长连接最热的组件，2 核在万级并发会话下富余很小。
+          cpus: "${ACS_CPUS:-5}"
+          memory: "${ACS_MEM:-4g}"
         reservations:
           cpus: "0.5"
-          memory: 512m
+          memory: 1g
     environment:
       TZ: "Asia/Shanghai"
       OMCGO_ENV: ${OMCGO_ENV}
       OMCGO_SERVICE: acs
+      OMCGO_TRACER_ENABLED: "${OMCGO_TRACER_ENABLED:-}"
       # Go 运行时上限（resources.env 注入）；ACS 堆压力最大，GOMEMLIMIT 价值最高。
-      # 缺省(#167) off→900MiB(≈0.9×1g)。
-      GOMEMLIMIT: "${ACS_GOMEMLIMIT:-900MiB}"
+      # 缺省(#167) off→3600MiB(≈0.9×4g)。压测实测 1g 在 max_inflight 调大后并发
+      # PM 上传缓冲内存需求上升，触发 cgroup OOMKilled 循环重启（RestartCount 短时间
+      # 内飙升上百次），故默认下限提到 4g（2026-07-21）。
+      GOMEMLIMIT: "${ACS_GOMEMLIMIT:-3600MiB}"
       GOMAXPROCS: "${ACS_GOMAXPROCS:-}"
       # 配置凭据单一真值源 = deploy/.env；acs.prod.yaml 用 ${VAR} 引用，Load() 解析前展开。
       POSTGRES_USER: ${POSTGRES_USER}
@@ -258,8 +267,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${WORKER_CPUS:-1.5}"
-          memory: "${WORKER_MEM:-768m}"
+          # 缺省 8 核，对齐 plan-resources.sh medium 档（32核/32G 目标机型的 1/4）。
+          # 2026-07-23 10000 基站压测：3→5 核使 backlog 峰值下降约31%、排空提升
+          # 约35%-45%；继续用 8 核并把 TSDB 提到16核后，预热后吞吐约45-56条/s。
+          cpus: "${WORKER_CPUS:-8}"
+          memory: "${WORKER_MEM:-1024m}"
         reservations:
           cpus: "0.5"
           memory: 384m
@@ -267,10 +279,18 @@ services:
       TZ: "Asia/Shanghai"
       OMCGO_ENV: ${OMCGO_ENV}
       OMCGO_SERVICE: worker
+      OMCGO_TRACER_ENABLED: "${OMCGO_TRACER_ENABLED:-}"
       # Go 运行时上限（resources.env 注入）；worker PM/MR 解析吃内存，GOMEMLIMIT 兜底 OOM。
-      # 缺省(#167) off→690MiB(≈0.9×768m)。
-      GOMEMLIMIT: "${WORKER_GOMEMLIMIT:-690MiB}"
+      # 缺省 off→921MiB(≈0.9×1024m)。
+      GOMEMLIMIT: "${WORKER_GOMEMLIMIT:-921MiB}"
       GOMAXPROCS: "${WORKER_GOMAXPROCS:-}"
+      PM_AGGREGATION_ENABLED: "${PM_AGGREGATION_ENABLED:-true}"
+      PM_AGGREGATION_CLOSE_GRACE: "${PM_AGGREGATION_CLOSE_GRACE:-5m}"
+      PM_AGGREGATION_OUTBOX_BATCH: "${PM_AGGREGATION_OUTBOX_BATCH:-100}"
+      PM_AGGREGATION_CONSUMER_CONCURRENCY: "${PM_AGGREGATION_CONSUMER_CONCURRENCY:-8}"
+      PM_AGGREGATION_FINALIZE_CONCURRENCY: "${PM_AGGREGATION_FINALIZE_CONCURRENCY:-4}"
+      PM_AGGREGATION_MAX_EVENT_BYTES: "${PM_AGGREGATION_MAX_EVENT_BYTES:-8388608}"
+      PM_AGGREGATION_WINDOW_TTL: "${PM_AGGREGATION_WINDOW_TTL:-1080h}"
       # 配置凭据单一真值源 = deploy/.env；worker.prod.yaml 用 ${VAR} 引用，Load() 解析前展开。
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}

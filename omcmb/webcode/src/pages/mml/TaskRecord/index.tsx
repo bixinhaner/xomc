@@ -1,9 +1,8 @@
 import { useState, useMemo, useCallback } from 'react';
 import type { Key } from 'react';
-import { Button, Empty, Modal, Pagination, Popover, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
-import { DeleteOutlined, ProfileOutlined, StopOutlined } from '@ant-design/icons';
+import { Button, Descriptions, Empty, Modal, Pagination, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { DeleteOutlined, DownloadOutlined, PlayCircleOutlined, ProfileOutlined, StopOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import dayjs from 'dayjs';
 
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
@@ -22,16 +21,24 @@ import type {
 import {
   useMMLTasks,
   useMMLTaskResults,
+  useMMLScriptRuns,
+  useStartMMLTasks,
   useCancelMMLTasks,
   useDeleteMMLTasks,
 } from '@core/hooks/api/useMML';
 import { getMmlTaskProgress } from '@core/utils/mmlTaskProgress';
+import { formatSystemTime } from '@core/utils/systemTime';
 import {
   parseMmlDeviceTaskResult,
   type ParsedMmlResult,
   type ParsedParamValue,
 } from '@core/utils/mmlResultParser';
-import { parseMmlCommandDisplay } from '@core/utils/mmlCommandDisplay';
+import {
+  downloadMmlTaskResultsCsv,
+  fetchAllMmlTaskResults,
+} from './taskResultCsv';
+import { taskResultCommandText } from './taskResultCommand';
+import MmlCommandDisplay from '../components/MmlCommandDisplay';
 
 // -------------------------------------------------------------------------
 // Display mappings — mml_tasks columns
@@ -58,20 +65,27 @@ const TASK_STATUS_TAGS: Record<MMLTaskStatus, { color: string; key: string }> = 
   failed:    { color: 'error',      key: 'mml.failedStatus' },
 };
 
+const TASK_RESULT_TAGS: Record<NonNullable<MMLTask['result']>, { color: string; key: string }> = {
+  success: { color: 'success', key: 'status.success' },
+  partial: { color: 'warning', key: 'mml.partialSuccess' },
+  failed: { color: 'error', key: 'status.failed' },
+};
+
 const TASK_RESULT_PAGE_SIZE = 20;
+const STARTABLE_TASK_STATUSES = new Set<MMLTaskStatus>(['pending', 'paused']);
 const CANCELLABLE_TASK_STATUSES = new Set<MMLTaskStatus>(['pending', 'running', 'paused']);
+const TASK_DETAIL_ACTIVE_STATUSES = new Set<MMLTaskStatus>(['pending', 'running', 'paused']);
 
 const DEVICE_RESULT_STATUS_TAGS: Record<string, { color: string; key: string }> = {
   pending: { color: 'default', key: 'mml.pendingStatus' },
   running: { color: 'processing', key: 'mml.runningStatus' },
   completed: { color: 'success', key: 'mml.completedStatus' },
   failed: { color: 'error', key: 'mml.failedStatus' },
+  expired: { color: 'error', key: 'mml.failedStatus' },
 };
 
 function formatTime(iso?: string | null): string {
-  if (!iso) return '-';
-  const d = dayjs(iso);
-  return d.isValid() ? d.format('YYYY-MM-DD HH:mm:ss') : '-';
+  return formatSystemTime(iso);
 }
 
 function stringifyMessagePayload(payload: unknown): string {
@@ -118,26 +132,6 @@ function hasMessageText(row: DeviceTaskResultItem | null): boolean {
   return Boolean(requestMessageText(row) || responseMessageText(row));
 }
 
-function resultCommandText(row: DeviceTaskResultItem): string {
-  return row.mmlScript || row.planRawLine || row.commandCode || '-';
-}
-
-function operationColor(operation: string): string {
-  switch (operation.toUpperCase()) {
-    case 'LST':
-      return 'blue';
-    case 'MOD':
-      return 'green';
-    case 'ADD':
-      return 'purple';
-    case 'DEL':
-    case 'RMV':
-      return 'orange';
-    default:
-      return 'default';
-  }
-}
-
 function parsedResult(row: DeviceTaskResultItem | null): ParsedMmlResult | null {
   if (!row?.result?.parsedData) return null;
   return parseMmlDeviceTaskResult(row.result.parsedData);
@@ -167,6 +161,106 @@ function parsedResultSummary(parsed: ParsedMmlResult, t: (key: string, values?: 
   }
 }
 
+function renderDeviceResult(row: DeviceTaskResultItem, t: (key: string) => string) {
+  const status = row.status ?? '';
+  if (status && status !== 'completed') {
+    const tag = DEVICE_RESULT_STATUS_TAGS[status];
+    return tag ? <Tag color={tag.color}>{t(tag.key)}</Tag> : <Tag>{status}</Tag>;
+  }
+  const ok = Boolean(row.result?.success);
+  return <Tag color={ok ? 'success' : 'error'}>{ok ? t('status.success') : t('status.failed')}</Tag>;
+}
+
+function renderTaskResult(result: MMLTask['result'], t: (key: string) => string) {
+  if (!result) return '-';
+  const tag = TASK_RESULT_TAGS[result];
+  return tag ? <Tag color={tag.color}>{t(tag.key)}</Tag> : <Tag>{result}</Tag>;
+}
+
+function isPeriodicParentTask(task: MMLTask | null | undefined) {
+  return task?.executeType === 'periodic' && !task.parentTaskId;
+}
+
+function renderTaskProgress(task: MMLTask, t: (key: string) => string) {
+  const progress = getMmlTaskProgress(task);
+  if (progress.kind === 'awaiting_first_run') {
+    return (
+      <Space orientation="vertical" size={2}>
+        <Tag color="default">{t('mml.awaitingFirstRun')}</Tag>
+        {task.nextTriggerAt ? (
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {t('mml.nextTriggerAt')}: {formatTime(task.nextTriggerAt)}
+          </Typography.Text>
+        ) : null}
+      </Space>
+    );
+  }
+  return `${progress.done}/${progress.total}`;
+}
+
+function secondsText(seconds: number | undefined, t: (key: string, values?: Record<string, string | number>) => string) {
+  return t('mml.secondsValue', { seconds: seconds ?? 0 });
+}
+
+function buildScriptExecutionPolicyItems(
+  task: MMLTask,
+  t: (key: string, values?: Record<string, string | number>) => string,
+) {
+  const executeTypeTag = EXECUTE_TYPE_TAGS[task.executeType];
+  const items = [
+    {
+      key: 'executeType',
+      label: t('mml.executeMethod'),
+      children: executeTypeTag ? t(executeTypeTag.key) : task.executeType || '-',
+    },
+  ];
+
+  if (task.executeType === 'scheduled') {
+    items.push({
+      key: 'scheduledAt',
+      label: t('mml.scheduledAt'),
+      children: formatTime(task.scheduledAt),
+    });
+  }
+
+  if (task.executeType === 'periodic') {
+    items.push(
+      {
+        key: 'periodStart',
+        label: t('mml.periodStart'),
+        children: formatTime(task.periodStart),
+      },
+      {
+        key: 'periodEnd',
+        label: t('mml.periodEnd'),
+        children: formatTime(task.periodEnd),
+      },
+      {
+        key: 'periodTime',
+        label: t('mml.periodTime'),
+        children: task.periodTime || '-',
+      },
+    );
+  }
+
+  items.push(
+    {
+      key: 'offlineRetry',
+      label: t('mml.offlineRetryPolicy'),
+      children: task.offlineRetry ? secondsText(task.offlineRetryWait, t) : t('common.disabled'),
+    },
+    {
+      key: 'failedRetry',
+      label: t('mml.failedRetryPolicy'),
+      children: task.failedRetry
+        ? t('mml.retryCountAndInterval', { count: task.failedRetryCount ?? 0, seconds: task.failedRetryInterval ?? 0 })
+        : t('common.disabled'),
+    },
+  );
+
+  return items;
+}
+
 export default function TaskRecord() {
   const t = useT();
 
@@ -175,6 +269,7 @@ export default function TaskRecord() {
   const [pageSize, setPageSize] = useState(50);
   const [filters, setFilters] = useState<{
     taskName?: string;
+    scriptName?: string;
     taskOrigin?: string;
     status?: string;
     executeType?: string;
@@ -185,12 +280,14 @@ export default function TaskRecord() {
     page,
     pageSize,
     taskName: filters.taskName,
+    scriptName: filters.scriptName,
     taskOrigin: filters.taskOrigin && filters.taskOrigin !== 'all' ? filters.taskOrigin : undefined,
     status: filters.status && filters.status !== 'all' ? filters.status : undefined,
     executeType: filters.executeType && filters.executeType !== 'all' ? filters.executeType : undefined,
     result: filters.result && filters.result !== 'all' ? filters.result : undefined,
   });
   const tasks = useMemo(() => data?.items ?? [], [data]);
+  const startMutation = useStartMMLTasks();
   const cancelMutation = useCancelMMLTasks();
   const deleteMutation = useDeleteMMLTasks();
   const [selectedTaskIds, setSelectedTaskIds] = useState<Key[]>([]);
@@ -202,6 +299,12 @@ export default function TaskRecord() {
       label: t('mml.taskName'),
       type: 'input',
       placeholder: t('mml.inputTaskNameRequired'),
+    },
+    {
+      name: 'scriptName',
+      label: t('mml.scriptName'),
+      type: 'input',
+      placeholder: t('mml.inputScriptName'),
     },
     {
       name: 'taskOrigin',
@@ -260,6 +363,7 @@ export default function TaskRecord() {
     setPage(1);
     setFilters({
       taskName: typeof values.taskName === 'string' ? values.taskName.trim() : undefined,
+      scriptName: typeof values.scriptName === 'string' ? values.scriptName.trim() : undefined,
       taskOrigin: typeof values.taskOrigin === 'string' ? values.taskOrigin : undefined,
       status: typeof values.status === 'string' ? values.status : undefined,
       executeType: typeof values.executeType === 'string' ? values.executeType : undefined,
@@ -272,12 +376,59 @@ export default function TaskRecord() {
     setPage(1);
   }, []);
 
-  const confirmBatchCancel = () => {
-    const ids = selectedTaskIds.map(String);
+  const selectedTaskStatus = useCallback((id: string): MMLTaskStatus | undefined => {
+    return tasks.find((task) => task.id === id)?.status ?? selectedTaskStatusById[id];
+  }, [selectedTaskStatusById, tasks]);
+
+  const clearSelectedTasks = useCallback((ids: string[]) => {
+    const removed = new Set(ids);
+    setSelectedTaskIds((prev) => prev.filter((id) => !removed.has(String(id))));
+    setSelectedTaskStatusById((prev) => {
+      const next = { ...prev };
+      ids.forEach((id) => { delete next[id]; });
+      return next;
+    });
+  }, []);
+
+  const confirmStartTasks = useCallback((ids: string[]) => {
     if (ids.length === 0) return;
-    const currentTaskById = new Map(tasks.map((task) => [task.id, task]));
+    const nonStartableCount = ids.filter((id) => {
+      const status = selectedTaskStatus(id);
+      return !status || !STARTABLE_TASK_STATUSES.has(status);
+    }).length;
+    if (nonStartableCount > 0) {
+      void message.warning(t('mml.batchStartInvalidTasksBlocked', { count: nonStartableCount }));
+      return;
+    }
+    Modal.confirm({
+      title: t('mml.confirmStartTitle'),
+      content: ids.length === 1 ? t('mml.confirmStartTask') : t('mml.confirmBatchStartTasks', { count: ids.length }),
+      okText: t('mml.executeTask'),
+      cancelText: t('common.cancel'),
+      onOk: () => new Promise<void>((resolve, reject) => {
+        startMutation.mutate(ids, {
+          onSuccess: () => {
+            clearSelectedTasks(ids);
+            void refetch();
+            void message.success(t('mml.batchStartSuccess', { count: ids.length }));
+            resolve();
+          },
+          onError: (error) => {
+            const detail = getErrorMessage(error) || t('common.unknown');
+            clearSelectedTasks(ids);
+            void refetch();
+            void message.error(t('mml.batchStartFailed', { error: detail }));
+            reject(error);
+          },
+        });
+      }),
+    });
+  }, [clearSelectedTasks, refetch, selectedTaskStatus, startMutation, t]);
+
+  const confirmCancelTasks = useCallback((ids: string[]) => {
+    if (ids.length === 0) return;
     const nonCancellableCount = ids.filter((id) => {
-      const status = currentTaskById.get(id)?.status ?? selectedTaskStatusById[id];
+      const status = selectedTaskStatus(id);
       return !status || !CANCELLABLE_TASK_STATUSES.has(status);
     }).length;
     if (nonCancellableCount > 0) {
@@ -286,23 +437,21 @@ export default function TaskRecord() {
     }
     Modal.confirm({
       title: t('mml.confirmCancelTitle'),
-      content: t('mml.confirmBatchCancelTasks', { count: ids.length }),
+      content: ids.length === 1 ? t('mml.confirmCancelTask') : t('mml.confirmBatchCancelTasks', { count: ids.length }),
       okText: t('mml.terminateTask'),
       cancelText: t('common.cancel'),
       okButtonProps: { danger: true },
       onOk: () => new Promise<void>((resolve, reject) => {
         cancelMutation.mutate(ids, {
           onSuccess: () => {
-            setSelectedTaskIds([]);
-            setSelectedTaskStatusById({});
+            clearSelectedTasks(ids);
             void refetch();
             void message.success(t('mml.batchCancelSuccess', { count: ids.length }));
             resolve();
           },
           onError: (error) => {
             const detail = getErrorMessage(error) || t('common.unknown');
-            setSelectedTaskIds([]);
-            setSelectedTaskStatusById({});
+            clearSelectedTasks(ids);
             void refetch();
             void message.error(t('mml.batchCancelFailed', { error: detail }));
             reject(error);
@@ -310,6 +459,14 @@ export default function TaskRecord() {
         });
       }),
     });
+  }, [cancelMutation, clearSelectedTasks, refetch, selectedTaskStatus, t]);
+
+  const confirmBatchStart = () => {
+    confirmStartTasks(selectedTaskIds.map(String));
+  };
+
+  const confirmBatchCancel = () => {
+    confirmCancelTasks(selectedTaskIds.map(String));
   };
 
   const confirmBatchDelete = () => {
@@ -357,79 +514,61 @@ export default function TaskRecord() {
   const [detailRow, setDetailRow] = useState<DeviceTaskResultItem | null>(null);
   const [rawRow, setRawRow] = useState<DeviceTaskResultItem | null>(null);
   const [resultPage, setResultPage] = useState(1);
-  const { data: resultsData, isLoading: resultsLoading } = useMMLTaskResults(viewing?.id ?? null, resultPage, TASK_RESULT_PAGE_SIZE);
+  const [exportingResults, setExportingResults] = useState(false);
+  const viewingTaskId = viewing?.id ?? null;
+  const viewedTaskFromList = useMemo(() => {
+    if (!viewingTaskId) return null;
+    return tasks.find((task) => task.id === viewingTaskId) ?? null;
+  }, [tasks, viewingTaskId]);
+  const viewedTask = viewedTaskFromList ?? viewing;
+  const isViewingPeriodicParent = isPeriodicParentTask(viewedTask);
+  const scriptRunsParams = useMemo(() => ({ page: 1, pageSize: 100 }), []);
+  const {
+    data: scriptRunsData,
+    isLoading: scriptRunsLoading,
+  } = useMMLScriptRuns(
+    isViewingPeriodicParent && viewedTask?.scriptId ? viewedTask.scriptId : '',
+    scriptRunsParams,
+  );
+  const periodicRuns = useMemo(
+    () => (scriptRunsData?.items ?? []).filter((task) => task.parentTaskId === viewedTask?.id),
+    [scriptRunsData, viewedTask?.id],
+  );
+  const latestPeriodicRun = periodicRuns[0] ?? null;
+  const isViewedTaskActive = Boolean(
+    viewedTaskFromList && TASK_DETAIL_ACTIVE_STATUSES.has(viewedTaskFromList.status)
+  );
+  const {
+    data: resultsData,
+    isLoading: resultsLoading,
+    isFetching: resultsFetching,
+  } = useMMLTaskResults(viewingTaskId, resultPage, TASK_RESULT_PAGE_SIZE, {
+    pollWhileTaskActive: isViewedTaskActive,
+  });
 
   const resultRows = useMemo<DeviceTaskResultItem[]>(
     () => (resultsData?.items ?? []),
     [resultsData]
   );
 
-  const renderCommandCompact = useCallback((command: string, maxTargetWidth = 220) => {
-    const parsed = parseMmlCommandDisplay(command);
-    const paramsContent = parsed.parameterCount > 0 ? (
-      <div style={{ width: 520, maxWidth: '70vw' }}>
-        <Space size={6} style={{ marginBottom: 8 }}>
-          {parsed.operation ? <Tag color={operationColor(parsed.operation)}>{parsed.operation}</Tag> : null}
-          <Typography.Text strong>{parsed.target || parsed.commandHead}</Typography.Text>
-        </Space>
-        <div
-          style={{
-            maxHeight: 280,
-            overflow: 'auto',
-            border: '1px solid var(--color-border-secondary, rgba(128,128,128,0.24))',
-            borderRadius: 6,
-          }}
-        >
-          {parsed.params.map((param, index) => (
-            <div
-              key={`${param.key}-${index}`}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '190px minmax(0, 1fr)',
-                gap: 12,
-                padding: '7px 10px',
-                borderBottom: '1px solid var(--color-border-secondary, rgba(128,128,128,0.24))',
-              }}
-            >
-              <Typography.Text code style={{ fontSize: 12, wordBreak: 'break-all' }}>
-                {param.key}
-              </Typography.Text>
-              <Typography.Text style={{ fontSize: 12, wordBreak: 'break-all' }}>
-                {param.value || '-'}
-              </Typography.Text>
-            </div>
-          ))}
-        </div>
-      </div>
-    ) : null;
-
-    return (
-      <Space size={6} wrap={false} style={{ maxWidth: '100%' }}>
-        {parsed.operation ? (
-          <Tag color={operationColor(parsed.operation)} style={{ marginInlineEnd: 0, flex: '0 0 auto' }}>
-            {parsed.operation}
-          </Tag>
-        ) : null}
-        <Tooltip title={parsed.parameterCount > 0 ? undefined : command}>
-          <Typography.Text style={{ minWidth: 0, maxWidth: maxTargetWidth }} ellipsis>
-            {parsed.target || parsed.commandHead || command}
-          </Typography.Text>
-        </Tooltip>
-        {paramsContent ? (
-          <Popover
-            title={t('mml.scriptParamsTitle')}
-            content={paramsContent}
-            trigger="click"
-            placement="bottomLeft"
-          >
-            <Button type="link" size="small" style={{ padding: 0, flex: '0 0 auto' }}>
-              {t('mml.scriptParamsCount', { count: parsed.parameterCount })}
-            </Button>
-          </Popover>
-        ) : null}
-      </Space>
-    );
-  }, [t]);
+  const exportViewedTaskResults = useCallback(async () => {
+    if (!viewedTask) return;
+    setExportingResults(true);
+    try {
+      const rows = await fetchAllMmlTaskResults(viewedTask.id);
+      if (rows.length === 0) {
+        void message.warning(t('common.noDataToExport'));
+        return;
+      }
+      downloadMmlTaskResultsCsv(viewedTask, rows, t);
+      void message.success(t('mml.taskRecord.exportCsvSuccess', { count: rows.length }));
+    } catch (error) {
+      const detail = getErrorMessage(error) || t('common.unknown');
+      void message.error(t('mml.taskRecord.exportCsvFailed', { error: detail }));
+    } finally {
+      setExportingResults(false);
+    }
+  }, [t, viewedTask]);
 
   const parsedParamColumns: ColumnsType<ParsedParamValue> = useMemo(() => [
     {
@@ -451,6 +590,63 @@ export default function TaskRecord() {
         <Typography.Text style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>
           {value || '-'}
         </Typography.Text>
+      ),
+    },
+  ], [t]);
+
+  const periodicRunColumns: ColumnsType<MMLTask> = useMemo(() => [
+    {
+      key: 'createdAt',
+      title: t('mml.createTime'),
+      dataIndex: 'createdAt',
+      width: 160,
+      render: (value: unknown) => formatTime(value as string | undefined),
+    },
+    {
+      key: 'status',
+      title: t('mml.status'),
+      dataIndex: 'status',
+      width: 110,
+      render: (value: unknown) => {
+        const tag = TASK_STATUS_TAGS[value as MMLTaskStatus];
+        return tag ? <Tag color={tag.color}>{t(tag.key)}</Tag> : <Tag>{String(value || '-')}</Tag>;
+      },
+    },
+    {
+      key: 'result',
+      title: t('mml.result'),
+      dataIndex: 'result',
+      width: 120,
+      render: (value: unknown) => renderTaskResult(value as MMLTask['result'], t),
+    },
+    {
+      key: 'progress',
+      title: t('mml.progress'),
+      width: 100,
+      render: (_: unknown, task) => renderTaskProgress(task, t),
+    },
+    {
+      key: 'startedAt',
+      title: t('mml.startTime'),
+      dataIndex: 'startedAt',
+      width: 160,
+      render: (value: unknown) => formatTime(value as string | undefined),
+    },
+    {
+      key: 'operation',
+      title: t('table.operation'),
+      width: 90,
+      render: (_: unknown, task) => (
+        <Button
+          type="link"
+          size="small"
+          onClick={() => {
+            setResultPage(1);
+            setViewing(task);
+          }}
+        >
+          {t('mml.viewThisRun')}
+        </Button>
       ),
     },
   ], [t]);
@@ -481,7 +677,7 @@ export default function TaskRecord() {
       title: t('mml.resultCommand'),
       width: 360,
       render: (_: unknown, row) => {
-        const command = resultCommandText(row);
+        const command = taskResultCommandText(row) || '-';
         return (
           <Space orientation="vertical" size={2} style={{ width: '100%' }}>
             {row.planLineNo ? (
@@ -490,7 +686,7 @@ export default function TaskRecord() {
                 {row.planOrder ? ` / ${row.planOrder}` : ''}
               </Typography.Text>
             ) : null}
-            {renderCommandCompact(command, 180)}
+            <MmlCommandDisplay command={command} maxTargetWidth={180} />
           </Space>
         );
       },
@@ -509,11 +705,7 @@ export default function TaskRecord() {
       key: 'result',
       title: t('mml.result'),
       width: 100,
-      render: (_: unknown, row) => {
-        if (row.status && row.status !== 'completed') return <Tag>{t('mml.pendingStatus')}</Tag>;
-        const ok = Boolean(row.result?.success);
-        return <Tag color={ok ? 'success' : 'error'}>{ok ? t('status.success') : t('status.failed')}</Tag>;
-      },
+      render: (_: unknown, row) => renderDeviceResult(row, t),
     },
     {
       key: 'failReason',
@@ -576,30 +768,81 @@ export default function TaskRecord() {
       width: 160,
       render: (value: unknown) => formatTime(value as string | undefined),
     },
-  ], [renderCommandCompact, t]);
+  ], [t]);
 
   const columns: DataTableColumn<MMLTask>[] = useMemo(() => [
     {
       key: 'operation',
       title: t('table.operation'),
-      dataIndex: 'id',
-      width: 90,
-      render: (_: unknown, record: MMLTask) => (
-        <Button
-          aria-label={t('common.view')}
-          type="link"
-          size="small"
-          icon={<ProfileOutlined />}
-          onClick={() => {
-            setResultPage(1);
-            setViewing(record);
-          }}
-        >
-          {t('common.view')}
-        </Button>
-      ),
+      width: 132,
+      render: (_: unknown, record: MMLTask) => {
+        const startable = STARTABLE_TASK_STATUSES.has(record.status);
+        const cancellable = CANCELLABLE_TASK_STATUSES.has(record.status);
+        return (
+          <Space size={4} wrap={false}>
+            <Tooltip title={t('common.view')}>
+              <Button
+                aria-label={t('common.view')}
+                type="link"
+                size="small"
+                icon={<ProfileOutlined />}
+                onClick={() => {
+                  setResultPage(1);
+                  setViewing(record);
+                }}
+              />
+            </Tooltip>
+            <Tooltip title={t('mml.executeTask')}>
+              <Button
+                aria-label={t('mml.executeTask')}
+                type="link"
+                size="small"
+                disabled={!startable}
+                icon={<PlayCircleOutlined />}
+                onClick={() => {
+                  if (startable) {
+                    confirmStartTasks([record.id]);
+                  }
+                }}
+              />
+            </Tooltip>
+            <Tooltip title={t('mml.terminateTask')}>
+              <Button
+                aria-label={t('mml.terminateTask')}
+                danger
+                type="link"
+                size="small"
+                disabled={!cancellable}
+                icon={<StopOutlined />}
+                onClick={() => {
+                  if (cancellable) {
+                    confirmCancelTasks([record.id]);
+                  }
+                }}
+              />
+            </Tooltip>
+          </Space>
+        );
+      },
     },
     { key: 'taskName', title: t('mml.taskName'), dataIndex: 'taskName', ellipsis: true },
+    {
+      key: 'scriptName',
+      title: t('mml.scriptName'),
+      dataIndex: 'scriptName',
+      width: 180,
+      ellipsis: true,
+      render: (_: unknown, record: MMLTask) => {
+        if (record.taskOrigin !== 'script' || !record.scriptName) return '--';
+        return (
+          <Tooltip title={record.scriptName}>
+            <Typography.Text style={{ maxWidth: 160 }} ellipsis>
+              {record.scriptName}
+            </Typography.Text>
+          </Tooltip>
+        );
+      },
+    },
     { key: 'creator',  title: t('mml.creator'),  dataIndex: 'creator', width: 100 },
     {
       key: 'taskOrigin',
@@ -635,13 +878,17 @@ export default function TaskRecord() {
       },
     },
     {
+      key: 'result',
+      title: t('mml.result'),
+      dataIndex: 'result',
+      width: 110,
+      render: (val: unknown) => renderTaskResult(val as MMLTask['result'], t),
+    },
+    {
       key: 'progress',
       title: t('mml.progress'),
-      width: 100,
-      render: (_: unknown, record: MMLTask) => {
-        const { done, total } = getMmlTaskProgress(record);
-        return `${done}/${total}`;
-      },
+      width: 130,
+      render: (_: unknown, record: MMLTask) => renderTaskProgress(record, t),
     },
     {
       key: 'startedAt',
@@ -664,7 +911,7 @@ export default function TaskRecord() {
       width: 160,
       render: (val: unknown) => formatTime(val as string),
     },
-  ], [t]);
+  ], [confirmCancelTasks, confirmStartTasks, t]);
 
   return (
     <ListPageLayout title={t('nav.mml.taskRecord')}>
@@ -675,6 +922,14 @@ export default function TaskRecord() {
         onReset={handleReset}
       />
       <Space size={8} wrap style={{ marginBottom: 12 }}>
+        <Button
+          disabled={selectedTaskIds.length === 0}
+          icon={<PlayCircleOutlined />}
+          loading={startMutation.isPending}
+          onClick={confirmBatchStart}
+        >
+          {t('mml.batchStartTasks')}
+        </Button>
         <Button
           disabled={selectedTaskIds.length === 0}
           icon={<StopOutlined />}
@@ -731,11 +986,11 @@ export default function TaskRecord() {
         onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
         onRefresh={() => void refetch()}
         hideToolbar
-        scroll={{ x: 1200 }}
+        scroll={{ x: 1380 }}
       />
 
       <Modal
-        title={viewing ? t('mml.executionResult', { name: viewing.taskName || viewing.id }) : t('common.view')}
+        title={viewedTask ? t('mml.executionResult', { name: viewedTask.taskName || viewedTask.id }) : t('common.view')}
         open={Boolean(viewing)}
         onCancel={() => {
           setViewing(null);
@@ -752,24 +1007,84 @@ export default function TaskRecord() {
         width={1180}
         destroyOnHidden
       >
-        {viewing && (
+        {viewedTask && (
           <div style={{ minHeight: 360 }}>
             <Space wrap size={[8, 8]} style={{ marginBottom: 12 }}>
-              <Tag>{t('mml.status')}: {t(TASK_STATUS_TAGS[viewing.status]?.key ?? 'mml.status')}</Tag>
-              <Tag>{t('mml.taskOrigin')}: {t(TASK_ORIGIN_TAGS[viewing.taskOrigin]?.key ?? 'mml.taskOrigin')}</Tag>
-              <Tag>{t('mml.deviceCountLabel')}{viewing.totalDevices ?? 0}</Tag>
-              <Tag>{t('mml.successCountLabel')}{viewing.successCount ?? 0}</Tag>
-              <Tag>{t('mml.failedCountLabel')}{viewing.failedCount ?? 0}</Tag>
+              <Tag>{t('mml.status')}: {t(TASK_STATUS_TAGS[viewedTask.status]?.key ?? 'mml.status')}</Tag>
+              <Tag>{t('mml.taskOrigin')}: {t(TASK_ORIGIN_TAGS[viewedTask.taskOrigin]?.key ?? 'mml.taskOrigin')}</Tag>
+              <Tag>{t('mml.deviceCountLabel')}{viewedTask.totalDevices ?? 0}</Tag>
+              {isViewingPeriodicParent ? (
+                <>
+                  <Tag>{t('mml.periodicRunCount', { count: periodicRuns.length })}</Tag>
+                  <Tag>
+                    {t('mml.latestRun')}: {latestPeriodicRun?.result
+                      ? t(TASK_RESULT_TAGS[latestPeriodicRun.result]?.key ?? 'mml.result')
+                      : '-'}
+                  </Tag>
+                </>
+              ) : (
+                <>
+                  <Tag>{t('mml.successCountLabel')}{viewedTask.successCount ?? 0}</Tag>
+                  <Tag>{t('mml.failedCountLabel')}{viewedTask.failedCount ?? 0}</Tag>
+                </>
+              )}
+              <Button
+                aria-label={t('mml.taskRecord.exportCsv')}
+                size="small"
+                icon={<DownloadOutlined />}
+                loading={exportingResults}
+                onClick={() => void exportViewedTaskResults()}
+              >
+                {t('mml.taskRecord.exportCsv')}
+              </Button>
             </Space>
 
-            {resultRows.length === 0 && !resultsLoading ? (
+            {viewedTask.taskOrigin === 'script' ? (
+              <div style={{ marginBottom: 12 }}>
+                <Typography.Text strong>{t('mml.executionPolicy')}</Typography.Text>
+                <Descriptions
+                  size="small"
+                  column={2}
+                  items={buildScriptExecutionPolicyItems(viewedTask, t)}
+                  style={{ marginTop: 8 }}
+                />
+              </div>
+            ) : null}
+
+            {isViewingPeriodicParent ? (
+              <div style={{ marginBottom: 12 }}>
+                <Space wrap size={[8, 8]} style={{ marginBottom: 8 }}>
+                  <Typography.Text strong>{t('mml.periodicRuns')}</Typography.Text>
+                  <Tag color="purple">{t('mml.periodicRunCount', { count: periodicRuns.length })}</Tag>
+                  {latestPeriodicRun ? (
+                    <Typography.Text type="secondary">
+                      {t('mml.showingLatestRunResults', {
+                        time: formatTime(latestPeriodicRun.startedAt || latestPeriodicRun.createdAt),
+                      })}
+                    </Typography.Text>
+                  ) : null}
+                </Space>
+                <Table<MMLTask>
+                  size="small"
+                  columns={periodicRunColumns}
+                  dataSource={periodicRuns}
+                  loading={scriptRunsLoading}
+                  pagination={false}
+                  rowKey="id"
+                  scroll={{ x: 880, y: 180 }}
+                  locale={{ emptyText: t('mml.noExecutionResult') }}
+                />
+              </div>
+            ) : null}
+
+            {resultRows.length === 0 && !resultsLoading && !resultsFetching ? (
               <Empty description={t('mml.noExecutionResult')} />
             ) : (
               <Table<DeviceTaskResultItem>
                 size="small"
                 columns={resultColumns}
                 dataSource={resultRows}
-                loading={resultsLoading}
+                loading={resultsLoading || resultsFetching}
                 pagination={false}
                 rowKey={(row, index) => row.deviceTaskId || `${row.deviceSn}-${row.commandIndex ?? index}`}
                 scroll={{ x: 1520, y: 360 }}
@@ -804,7 +1119,7 @@ export default function TaskRecord() {
             <Space wrap size={[8, 8]}>
               <Tag>{t('mml.resultDeviceCode')}: {detailRow.deviceSn || '-'}</Tag>
               {detailRow.deviceName ? <Tag>{t('mml.deviceName')}: {detailRow.deviceName}</Tag> : null}
-              <Tag>{t('mml.resultCommand')}: {resultCommandText(detailRow)}</Tag>
+              <Tag>{t('mml.resultCommand')}: {taskResultCommandText(detailRow) || '-'}</Tag>
               <Tag color={detailRow.result?.success ? 'success' : 'error'}>
                 {detailRow.result?.success ? t('status.success') : t('status.failed')}
               </Tag>
@@ -864,7 +1179,7 @@ export default function TaskRecord() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: '100%' }}>
               <Typography.Text type="secondary">{t('mml.resultCommand')}:</Typography.Text>
               <div style={{ minWidth: 0, flex: 1 }}>
-                {renderCommandCompact(resultCommandText(rawRow), 360)}
+                <MmlCommandDisplay command={taskResultCommandText(rawRow) || '-'} maxTargetWidth={360} />
               </div>
             </div>
             {[

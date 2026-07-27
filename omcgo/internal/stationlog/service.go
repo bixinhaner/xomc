@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -31,8 +32,8 @@ type minioObjectClient interface {
 }
 
 // Service 基站日志采集服务，负责：
-//  1. 订阅 SubjectLogFileReceived 事件，按日志类型写入对应表
-//  2. 故障日志配额管理（全局最多 FaultLogMaxCount 条，超出删除最旧文件）
+//  1. 订阅 SubjectLogFileReceived 事件，将运行日志写入 station_running_logs
+//  2. 记录 1 BOOT + HaltReason 识别出的异常重启事实
 //  3. 对外提供日志文件查询和预签名下载 URL
 //
 // runningRepo 对应 station_running_logs（运行日志）；
@@ -149,15 +150,11 @@ func (s *Service) RecordAbnormalReboot(ctx context.Context, snap device.Abnormal
 	return nil
 }
 
-// HandleLogFileReceived 处理 SubjectLogFileReceived 事件，按日志类型写入对应表。
+// HandleLogFileReceived 处理 SubjectLogFileReceived 事件。
 //
-// 故障日志（LogTypeFault）路径有两种补完模式：
-//  1. T-0158 识别即落库链路：device.RecordBootFromInform 已经写过一条 detected 记录，
-//     这里通过 LatestDetectedByDeviceSN 找到它并 UpdateFile 推进到 file_received；
-//  2. 兼容旧链路：若找不到 detected 占位记录（例如 ACS 直传文件没经过 1 BOOT 识别），
-//     INSERT 一行新记录（记录 status 由 Create 默认推断为 file_received）。
-//
-// 运行日志（LogTypeRunning）始终走旧 INSERT 路径。
+// 运行日志（LogTypeRunning）写入 station_running_logs。
+// 故障日志（LogTypeFault）属于文件传输任务链路；重启记录只记录正常/异常重启事实，
+// 不承载故障日志附件，因此这里不更新 station_fault_logs。
 func (s *Service) HandleLogFileReceived(ctx context.Context, evt event.Event) error {
 	var p LogFileReceivedPayload
 	if err := evt.DecodePayload(&p); err != nil {
@@ -166,6 +163,15 @@ func (s *Service) HandleLogFileReceived(ctx context.Context, evt event.Event) er
 	}
 
 	logType := fileTypeToLogType(p.FileType)
+	p.DeviceSN = strings.TrimSpace(p.DeviceSN)
+	if logType == LogTypeFault {
+		s.logger.Info("ignore fault log file for reboot records",
+			zap.String("device_sn", p.DeviceSN),
+			zap.String("file_name", p.FileName),
+			zap.String("path", p.ObjectPath),
+		)
+		return nil
+	}
 
 	// 从文件名解析到的 device_sn 可能为空（非标准命名），此时跳过设备关联
 	var deviceID *uuid.UUID
@@ -175,30 +181,6 @@ func (s *Service) HandleLogFileReceived(ctx context.Context, evt event.Event) er
 		}
 	}
 
-	// 故障日志优先尝试补全 detected 占位记录
-	if logType == LogTypeFault && p.DeviceSN != "" {
-		if faultRepo, ok := s.faultRepo.(FaultExtraRepository); ok {
-			detected, lookupErr := faultRepo.LatestDetectedByDeviceSN(ctx, p.DeviceSN)
-			if lookupErr != nil {
-				s.logger.Warn("lookup detected fault log", zap.String("device_sn", p.DeviceSN), zap.Error(lookupErr))
-			} else if detected != nil {
-				if err := faultRepo.UpdateFile(ctx, detected.ID, p.FileName, p.ObjectPath, p.Bucket, p.FileSize); err != nil {
-					return fmt.Errorf("update fault log file: %w", err)
-				}
-				s.logger.Info("station fault log promoted to file_received",
-					zap.String("id", detected.ID.String()),
-					zap.String("device_sn", p.DeviceSN),
-					zap.String("path", p.ObjectPath),
-				)
-				if err := s.enforceFaultLogQuota(ctx, detected.DeviceID); err != nil {
-					s.logger.Warn("enforce fault log quota", zap.Error(err))
-				}
-				return nil
-			}
-		}
-	}
-
-	// 兜底：INSERT 新记录
 	f := &LogFile{
 		DeviceID:    deviceID,
 		DeviceSN:    p.DeviceSN,
@@ -220,14 +202,6 @@ func (s *Service) HandleLogFileReceived(ctx context.Context, evt event.Event) er
 		zap.String("device_sn", p.DeviceSN),
 		zap.String("path", p.ObjectPath),
 	)
-
-	// 故障日志：执行全局配额管理
-	if logType == LogTypeFault {
-		if err := s.enforceFaultLogQuota(ctx, deviceID); err != nil {
-			// 配额清理失败不影响主流程，只记录警告
-			s.logger.Warn("enforce fault log quota", zap.Error(err))
-		}
-	}
 
 	return nil
 }

@@ -9,6 +9,12 @@ export interface CellFeedback {
   at: number;
   errorMsg?: string;
   notifiedFailedTaskId?: string;
+  /** 本次 SPV 实际下发的 path/value；需要设备回读核实时用于判断何时可以清理草稿。 */
+  expectedReadback?: Record<string, string>;
+  /** 提交瞬间的草稿修订号；回读时若已变化，说明用户又进行了编辑。 */
+  submittedDraftRevision?: number;
+  /** 终态任务的回读结果已安全回填，避免组件重挂载后重复消费。 */
+  syncedForTaskId?: string;
 }
 
 export interface MultiPendingAddRow {
@@ -53,7 +59,10 @@ export interface MultiFeedback {
 export type Feedback = CellFeedback | MultiFeedback;
 
 export interface QuickSettingsSyncMonitor {
+  scope?: 'quickSettings' | 'license';
   sourceId?: string;
+  requestId?: string;
+  runId?: string;
   lastParamSyncAt?: string;
   lastParamSyncFailedAt?: string;
   targetCount: number;
@@ -96,6 +105,8 @@ interface FeedbackState {
    * 保存成功后由调用方 clearDraft 清掉。
    */
   drafts: Record<string, Record<string, QuickSettingsDraftValue>>;
+  /** 每次用户草稿写入都递增；独立于 drafts 保留，以识别提交后的新编辑。 */
+  draftRevisions: Record<string, number>;
   /**
    * 强制 remount 计数器，按 deviceId 索引。
    * 头部"刷新"按钮 bump 后，QuickSettingsTab 把它拼进子组件 key，触发 CellParameterForm / MultiInstanceTable
@@ -131,6 +142,7 @@ export const useQuickSettingsFeedbackStore = create<FeedbackState>()(
     (set, get) => ({
       entries: {},
       drafts: {},
+      draftRevisions: {},
       refreshTicks: {},
       quickSettingsSyncs: {},
       lastScopedSyncs: {},
@@ -154,6 +166,7 @@ export const useQuickSettingsFeedbackStore = create<FeedbackState>()(
       clearByDevice: (deviceId) => {
         const next: Record<string, Feedback> = {};
         const nextDrafts: Record<string, Record<string, QuickSettingsDraftValue>> = {};
+        const nextDraftRevisions: Record<string, number> = {};
         const prefix = `${deviceId}::`;
         for (const [k, v] of Object.entries(get().entries)) {
           if (!k.startsWith(prefix)) next[k] = v;
@@ -161,21 +174,35 @@ export const useQuickSettingsFeedbackStore = create<FeedbackState>()(
         for (const [k, v] of Object.entries(get().drafts)) {
           if (!k.startsWith(prefix)) nextDrafts[k] = v;
         }
-        set({ entries: next, drafts: nextDrafts });
+        for (const [k, v] of Object.entries(get().draftRevisions)) {
+          if (!k.startsWith(prefix)) nextDraftRevisions[k] = v;
+        }
+        set({ entries: next, drafts: nextDrafts, draftRevisions: nextDraftRevisions });
       },
 
       clearDraftsByDevice: (deviceId) => {
         const nextDrafts: Record<string, Record<string, QuickSettingsDraftValue>> = {};
+        const nextDraftRevisions = { ...get().draftRevisions };
         const prefix = `${deviceId}::`;
         for (const [k, v] of Object.entries(get().drafts)) {
-          if (!k.startsWith(prefix)) nextDrafts[k] = v;
+          if (k.startsWith(prefix)) {
+            nextDraftRevisions[k] = (nextDraftRevisions[k] ?? 0) + 1;
+          } else {
+            nextDrafts[k] = v;
+          }
         }
-        set({ drafts: nextDrafts });
+        set({ drafts: nextDrafts, draftRevisions: nextDraftRevisions });
       },
 
       setDraftField: (key, name, value) => {
         const cur = get().drafts[key] ?? {};
-        set({ drafts: { ...get().drafts, [key]: { ...cur, [name]: value } } });
+        set({
+          drafts: { ...get().drafts, [key]: { ...cur, [name]: value } },
+          draftRevisions: {
+            ...get().draftRevisions,
+            [key]: (get().draftRevisions[key] ?? 0) + 1,
+          },
+        });
       },
 
       clearDraft: (key) => {
@@ -239,10 +266,11 @@ export const useQuickSettingsFeedbackStore = create<FeedbackState>()(
       // quickSettingsSyncs 是"正在运行的任务监控"，刷新页面后这些 monitor 已失效；
       // 让 QuickSettingsSyncWatcher 重水合时拿到 startedAt 远早于实际终态时间戳，
       // 会按时钟容差误判一次 success → 弹无关 toast。partialize 显式排除该字段，
-      // 让它只在内存中存在；其它字段（entries/drafts/refreshTicks/lastScopedSyncs）继续持久化。
+      // 让它只在内存中存在；其它字段（entries/drafts/draftRevisions/refreshTicks/lastScopedSyncs）继续持久化。
       partialize: (state) => ({
         entries: state.entries,
         drafts: state.drafts,
+        draftRevisions: state.draftRevisions,
         refreshTicks: state.refreshTicks,
         lastScopedSyncs: state.lastScopedSyncs,
       }),

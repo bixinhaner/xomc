@@ -1,0 +1,1031 @@
+chapter_code,group_name,source,sheet,category,path,param_name,zh,access,type
+SG,SCTP参数管理,NR,SN,SCTP参数管理,Device.Services.FAPService.{i}.Transport.SCTP.Assoc.{i}.AdministrativeState,AdministrativeState,管理状态,RW,string(64)
+SG,SCTP参数管理,NR,SN,SCTP参数管理,Device.Services.FAPService.{i}.Transport.SCTP.Assoc.{i}.OperationalState,OperationalState,运行状态,R,string(64)
+SG,SCTP参数管理,NR,SN,SCTP参数管理,Device.Services.FAPService.{i}.Transport.SCTP.Dscp,Dscp,偶联使用的DSCP,RW,unsignedInt[0:63]
+SG,SCTP参数管理,NR,SN,SCTP参数管理,Device.Services.FAPService.{i}.Transport.SCTP.Enable,Enable,使能开关,RW,boolean
+SG,SCTP参数管理,NR,SN,SCTP参数管理,Device.Services.FAPService.{i}.Transport.SCTP.HBInterval,HBInterval,心跳时间间隔,RW,unsignedInt[1:]
+SG,SCTP参数管理,NR,SN,SCTP参数管理,Device.Services.FAPService.{i}.Transport.SCTP.MaxAssociationRetransmits,MaxAssociationRetransmits,本端的最大连续重传数目,RW,unsignedInt
+SG,SCTP参数管理,NR,SN,SCTP参数管理,Device.Services.FAPService.{i}.Transport.SCTP.MaxInitRetransmits,MaxInitRetransmits,最大初始重传数,RW,unsignedInt
+SG,SCTP参数管理,NR,SN,SCTP参数管理,Device.Services.FAPService.{i}.Transport.SCTP.MaxPathRetransmits,MaxPathRetransmits,最大重传次数,RW,unsignedInt
+SG,SCTP参数管理,NR,SN,SCTP参数管理,Device.Services.FAPService.{i}.Transport.SCTP.RTOInitial,RTOInitial,重传超时的初始值,RW,unsignedInt
+SG,SCTP参数管理,NR,SN,SCTP参数管理,Device.Services.FAPService.{i}.Transport.SCTP.RTOMax,RTOMax,重传超时的最大值,RW,unsignedInt
+SG,SCTP参数管理,NR,SN,SCTP参数管理,Device.Services.FAPService.{i}.Transport.SCTP.RTOMin,RTOMin,重传超时的最小值,RW,unsignedInt
+SG,SCTP参数管理,NR,SN,SCTP参数管理,Device.Services.FAPService.{i}.Transport.SCTP.ValCookieLife,ValCookieLife,有效cookie的生命周期,RW,unsignedInt
+SH,RAN协议栈参数,LTE,SH,RRC参数管理（RRC计时器）,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N310,N310,T310定时器,RW,"unsignedInt[1:4, 6, 8, 10, 20]"
+SH,RAN协议栈参数,LTE,SH,RRC参数管理（RRC计时器）,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N311,N311,T311定时器,RW,"unsignedInt[1:6, 8, 10]"
+SH,RAN协议栈参数,LTE,SH,RRC参数管理（RRC计时器）,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T300,T300,T300定时器,RW,string(64)
+SH,RAN协议栈参数,LTE,SH,RRC参数管理（RRC计时器）,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T301,T301,T301定时器,RW,string(64)
+SH,RAN协议栈参数,LTE,SH,RRC参数管理（RRC计时器）,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T302,T302,T302定时器,RW,unsignedInt[1:16]
+SH,RAN协议栈参数,LTE,SH,RRC参数管理（RRC计时器）,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304EUTRA,T304EUTRA,T304(EUTRA)定时器,RW,string(64)
+SH,RAN协议栈参数,LTE,SH,RRC参数管理（RRC计时器）,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304IRAT,T304IRAT,T304(异系统)定时器,RW,string(64)
+SH,RAN协议栈参数,LTE,SH,RRC参数管理（RRC计时器）,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T310,T310,T310定时器,RW,"unsignedInt[0,50,100,200,500,1000,2000]"
+SH,RAN协议栈参数,LTE,SH,RRC参数管理（RRC计时器）,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T311,T311,T311定时器,RW,string(64)
+SH,RAN协议栈参数,LTE,SH,RRC参数管理（RRC计时器）,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T320,T320,T320定时器,RW,"unsignedInt[5, 10, 20, 30, 60, 120, 180]"
+SH,RAN协议栈参数,NR,SK,PDCP参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PDCP.{i}.DiscardTimer,DiscardTimer,PDCP层SDU丢弃时间,RW,"unsignedInt[10,20,30,40,50,60,75,100,150,200,250,300,500,750,1500,0x0000FFFF]"
+SH,RAN协议栈参数,NR,SK,PDCP参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PDCP.{i}.PdcpSnSizeDL,PdcpSnSizeDL,PDCP层DL SN号长度中的SN长度,RW,"unsignedInt[12,18]"
+SH,RAN协议栈参数,NR,SK,PDCP参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PDCP.{i}.PdcpSnSizeUL,PdcpSnSizeUL,PDCP层UL SN号长度中的SN长度,RW,"unsignedInt[12,18]"
+SH,RAN协议栈参数,NR,SK,PDCP参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PDCP.{i}.QCI,QCI,PDCP层UL SN号长度中的QCI,RW,unsignedInt[0:255]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.Antenna.NumOfRxAntenna,NumOfRxAntenna,接收通道数,RW,unsignedInt[1:6]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.Antenna.NumOfTxAntenna,NumOfTxAntenna,发射通道数,RW,unsignedInt[1:6]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.Bandwidth,Bandwidth,BWP带宽（下行）,RW,"unsignedInt[5,10,15,20,25,30,40,50,60,80,90,100]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.CyclicPrefix,CyclicPrefix,循环前缀（下行）,RW,string(64)
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.DlBWPId,DlBWPId,下行BWP标识符,RW,unsignedInt[0:4]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.CommonControlResourceSet.CceRegMappingType.InterleaverSize,InterleaverSize,交织长度,RW,unsignedInt[0:2]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.CommonControlResourceSet.CceRegMappingType.RegBundleSize,RegBundleSize,REG绑定大小,RW,unsignedInt[0:2]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.CommonControlResourceSet.CceRegMappingType.RegType,RegType,CCE-REG映射类型,RW,unsignedInt[0:1]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.CommonControlResourceSet.CceRegMappingType.ShiftIndex,ShiftIndex,转换索引,RW,"unsignedInt[0:274,0x00000FFF]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.CommonControlResourceSet.ControlResourceSetId,ControlResourceSetId,控制资源集ID,RW,unsignedInt[0:11]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.CommonControlResourceSet.Duration,Duration,符号数,RW,unsignedInt[1:3]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.CommonControlResourceSet.FrequencyDomainResources,FrequencyDomainResources,控制资源集频域范围,RW,string(45)
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.CommonControlResourceSet.PdcchDMRSScramblingID,PdcchDMRSScramblingID,PDCCH DMRS加扰ID,RW,"unsignedInt[0:65535,0x0FFFFFFF]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.CommonControlResourceSet.PrecoderGranularity,PrecoderGranularity,预编码粒度,RW,unsignedInt[0:1]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.CommonSearchSpaceList.{i}.ControlResourceSetId,ControlResourceSetId,控制资源集ID,RW,unsignedInt[0:11]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.CommonSearchSpaceList.{i}.DciFormat00And10En,DciFormat00And10En,公共搜索空间DCI格式开关,RW,unsignedInt[0:1]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.CommonSearchSpaceList.{i}.Duration,Duration,监测时隙数目,RW,"unsignedInt[2:2559,0x00000FFF]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.CommonSearchSpaceList.{i}.MonitoringSlotOffset,MonitoringSlotOffset,监测周期偏置,RW,unsignedInt[0:2559]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.CommonSearchSpaceList.{i}.MonitoringSlotPeriodicity,MonitoringSlotPeriodicity,搜索空间周期,RW,"unsignedInt[1,2,4,5,10,16,20,40,80,160,320,640,1280,2560,0x00000FFF]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.CommonSearchSpaceList.{i}.MonitoringSymbolsWithinSlot,MonitoringSymbolsWithinSlot,监测符号位置,RW,unsignedInt[0:16383]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.CommonSearchSpaceList.{i}.SearchSpaceId,SearchSpaceId,搜索空间ID,RW,unsignedInt[0:39]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.CommonSearchSpaceList.{i}.SearchSpaceType,SearchSpaceType,搜索空间类型,RW,unsignedInt[0:1]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.CommonSearchSpaceList.{i}.UeSpecificDciFormats,UeSpecificDciFormats,UE专用DCI格式,RW,unsignedInt[0:1]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.CommonSearchSpaceList.{i}.nrofCandidates.AggregationLevel1,AggregationLevel1,聚合等级1,RW,unsignedInt[0:7]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.CommonSearchSpaceList.{i}.nrofCandidates.AggregationLevel16,AggregationLevel16,聚合等级16,RW,unsignedInt[0:7]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.CommonSearchSpaceList.{i}.nrofCandidates.AggregationLevel2,AggregationLevel2,聚合等级2,RW,unsignedInt[0:7]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.CommonSearchSpaceList.{i}.nrofCandidates.AggregationLevel4,AggregationLevel4,聚合等级4,RW,unsignedInt[0:7]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.CommonSearchSpaceList.{i}.nrofCandidates.AggregationLevel8,AggregationLevel8,聚合等级8,RW,unsignedInt[0:7]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.PDCCHConfigCommon.ControlResourceSetZero,ControlResourceSetZero,CORESET#0,RW,"unsignedInt[0:15,0x00000FFF]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.PDCCHConfigCommon.PagingSearchSpace,PagingSearchSpace,寻呼搜索空间,RW,"unsignedInt[0:39, 0x00000FFF]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.PDCCHConfigCommon.RaSearchSpace,RaSearchSpace,随机接入搜索空间,RW,"unsignedInt[0:39, 0x00000FFF]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.PDCCHConfigCommon.SearchSpaceOtherSystemInformation,SearchSpaceOtherSystemInformation,其它SI搜索空间,RW,"unsignedInt[0:39, 0x00000FFF]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.PDCCHConfigCommon.SearchSpaceSIB1,SearchSpaceSIB1,SIB1搜索空间,RW,"unsignedInt[0:39,0x00000FFF]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDCCH.PDCCHConfigCommon.SearchSpaceZero,SearchSpaceZero,搜索空间#0,RW,"unsignedInt[0:15,0x00000FFF]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDSCH.DlAdditionalDmrsPos,DlAdditionalDmrsPos,下行Additional DMRS位置,RW,unsignedInt[0:3]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDSCH.DlDmrsMaxLength,DlDmrsMaxLength,下行DMRS最大符号个数,RW,"unsignedInt[1,2]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDSCH.PDSCHTimeDomainResourceAllocationList.{i}.K0,K0,PDCCH到PDSCH调度延迟,RW,"unsignedInt[0:32,0x00000FFF]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDSCH.PDSCHTimeDomainResourceAllocationList.{i}.MappingType,MappingType,PDSCH映射类型,RW,unsignedInt[0:1]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.PDSCH.PDSCHTimeDomainResourceAllocationList.{i}.StartSymbolAndLength,StartSymbolAndLength,PDSCH起始符号和长度,RW,unsignedInt[0:127]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.StartPrbPosition,StartPrbPosition,起始PRB位置（下行）,RW,unsignedInt[0:273]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.{i}.SubcarrierSpacing,SubcarrierSpacing,BWP子载波间隔（下行）,RW,unsignedInt[0:4]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.Bandwidth,Bandwidth,BWP带宽（上行）,RW,"unsignedInt[5,10,15,20,25,30,40,50,60,80,90,100]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.ConfiguredGrantConfig.PowerControlLoopToUse,PowerControlLoopToUse,PUSCH免授权和SPS时功率调整因子索引,RW,"unsignedInt[1,2]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.CyclicPrefix,CyclicPrefix,循环前缀（上行）,RW,string(64)
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.PUCCH.PucchRBNum,PucchRBNum,长格式PUCCH的RB个数,RW,unsignedInt[1:16]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.PUCCHConfigCommon.HoppingId,HoppingId,PUCCH加扰ID,RW,"unsignedInt[0:1023,0x00000FFF]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.PUCCHConfigCommon.P0nominal,P0nominal,PUCCH功率值P0,RW,int[-202:24]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.PUCCHConfigCommon.PucchGroupHopping,PucchGroupHopping,PUCCH组跳频开关,RW,unsignedInt[0:2]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.PUCCHConfigCommon.PucchResourceCommon,PucchResourceCommon,PUCCH公共资源,RW,"unsignedInt[0:15,0x00000FFF]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.PUCCHPowerControl.DeltaFPUCCHf0,DeltaFPUCCHf0,PUCCH Format 0功率偏移,RW,int[-16:15]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.PUCCHPowerControl.DeltaFPUCCHf1,DeltaFPUCCHf1,PUCCH Format 1功率偏移,RW,int[-16:15]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.PUCCHPowerControl.DeltaFPUCCHf2,DeltaFPUCCHf2,PUCCH Format 2功率偏移,RW,int[-16:15]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.PUCCHPowerControl.DeltaFPUCCHf3,DeltaFPUCCHf3,PUCCH Format 3功率偏移,RW,int[-16:15]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.PUCCHPowerControl.DeltaFPUCCHf4,DeltaFPUCCHf4,PUCCH Format 4功率偏移,RW,int[-16:15]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.PUCCHPowerControl.PucchPcSwitch,PucchPcSwitch,上行PUCCH闭环功控开关,RW,"unsignedInt[1,2]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.PUSCH.UlAdditionalDmrsPos,UlAdditionalDmrsPos,上行Additional DMRS位置,RW,unsignedInt[0:3]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.PUSCH.UlDmrsMaxLength,UlDmrsMaxLength,上行行DMRS最大符号个数,RW,unsignedInt[1:2]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.PUSCH.UlTimeAlignmentTimer,UlTimeAlignmentTimer,上行时间对齐定时器,RW,string
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.PUSCHConfigCommon.GroupHoppingEnabledTransformPrecoding,GroupHoppingEnabledTransformPrecoding,序列组跳频开关,RW,unsignedInt[0:1]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.PUSCHConfigCommon.Msg3DeltaPreamble,Msg3DeltaPreamble,MSG3与preamble之间发送功率的偏移值,RW,"int[-1:6,0x00000FFF]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.PUSCHConfigCommon.P0NominalWithGrant,P0NominalWithGrant,PUSCH功率值P0,RW,"int[-202:24,0x00000FFF]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.PUSCHPowerControl.DeltaMCS,DeltaMCS,MCS功率补偿,RW,"unsignedInt[1,2]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.PUSCHPowerControl.Msg3Alpha,Msg3Alpha,MSG3时的路损补偿因子,RW,string
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.PUSCHPowerControl.P0NominalWithoutGrant,P0NominalWithoutGrant,免授权或SPS调度时PUSCH小区级的期望接收功率,RW,int[-202:24]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.PUSCHPowerControl.PuschPcSwitch,PuschPcSwitch,上行PUSCH闭环功控开关,RW,"unsignedInt[1,2]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.PUSCHPowerControl.TwoPUSCHPCAdjustmentStates,TwoPUSCHPCAdjustmentStates,PUSCH功率调整因子类型,RW,"unsignedInt[1,2]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.PUSCHTimeDomainAllocationList.{i}.K2,K2,PDCCH到PUSCH调度延迟,RW,"unsignedInt[0:32, 0x00000FFF]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.PUSCHTimeDomainAllocationList.{i}.MappingType,MappingType,PUSCH映射类型,RW,unsignedInt[0:1]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.PUSCHTimeDomainAllocationList.{i}.StartSymbolAndLength,StartSymbolAndLength,PUSCH起始符号和长度,RW,unsignedInt[0:127]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.RACHConfigCommon.CBPreamblesPerSSB,CBPreamblesPerSSB,SSB对应前导码个数,RW,unsignedInt[0:16]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.RACHConfigCommon.MessagePowerOffsetGroupB,MessagePowerOffsetGroupB,Preamble码选择门限值,RW,unsignedInt[0:7]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.RACHConfigCommon.Msg1SubcarrierSpacing,Msg1SubcarrierSpacing,msg1子载波间隔,RW,"unsignedInt[0:4,0x0000000F]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.RACHConfigCommon.Msg3TransformPrecoder,Msg3Transform Precoder,Msg3预编码,RW,unsignedInt[0:1]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.RACHConfigCommon.NumberOfRAPreamblesGroupA,NumberOfRAPreamblesGroupA,GroupA中Preamble码个数,RW,unsignedInt[1:64]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.RACHConfigCommon.RaContentionResolutionTimer,RaContentionResolutionTimer,随机接入竞争窗长,RW,unsignedInt[0:7]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.RACHConfigCommon.RaMsg3SizeGroupA,RaMsg3SizeGroupA,Msg3 GroupA大小门限,RW,unsignedInt[0:9]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.RACHConfigCommon.RestrictedSetConfig,RestrictedSetConfig,限制集配置参数,RW,unsignedInt[0:2]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.RACHConfigCommon.RootSequenceIndex,RootSequenceIndex,根序列索引,RW,unsignedInt[0:837]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.RACHConfigCommon.RootType,RootType,根序列类型,RW,unsignedInt[0:1]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.RACHConfigCommon.RsrpThresholdSSB,RsrpThresholdSSB,随机接入SSB RSRP门限,RW,"unsignedInt[0:127, 0x00000FFF]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.RACHConfigCommon.SSBPerRACHOccasionChoice,SSBPerRACHOccasionChoice,PRACH对应SSB个数,RW,"unsignedInt[0:7,0x0000000F]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.RACHConfigCommon.TotalNumberOfRAPreambles,TotalNumberOfRAPreambles,Preamble码个数,RW,"unsignedInt[1:63,0x00000FFF]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.RACHConfigGeneric.Msg1FDM,Msg1FDM,PRACH频域资源个数,RW,unsignedInt[0:3]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.RACHConfigGeneric.Msg1FrequencyStart,Msg1FrequencyStart,PRACH频域起始位置,RW,unsignedInt[0:274]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.RACHConfigGeneric.PowerRampingStep,PowerRampingStep,前导爬坡步长,RW,unsignedInt[0:3]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.RACHConfigGeneric.PrachConfigurationIndex,PrachConfigurationIndex,PRACH时域配置,RW,unsignedInt[0:255]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.RACHConfigGeneric.PreambleReceivedTargetPower,PreambleReceivedTargetPower,前导目标接收功率,RW,int[-202:-60]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.RACHConfigGeneric.PreambleTransMax,PreambleTransMax,最大前导发送次数,RW,unsignedInt[0:10]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.RACHConfigGeneric.RaResponseWindow,RaResponseWindow,RAR窗长,RW,unsignedInt[0:7]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.RACHConfigGeneric.ZeroCorrelationZoneConfig,ZeroCorrelationZoneConfig,Ncs值,RW,unsignedInt[0:15]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.SrsAlpha,SrsAlpha,SRS路损因子,RW,unsignedInt[1:8]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.SrsP0,SrsP0,SRS的目标接收功率,RW,int[-202:24]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.SrsPowerControlAdjustmentStates,SrsPowerControlAdjustmentStates,SRS功率控制调整状态,RW,string
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.StartPrbPosition,StartPrbPosition,起始PRB位置（上行）,RW,unsignedInt[0:273]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.SubcarrierSpacing,SubcarrierSpacing,BWP子载波间隔（上行）,RW,unsignedInt[0:4]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.UlBWPId,UlBWPId,上行BWP标识符,RW,unsignedInt[0:4]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.DmrsTypeAPosition,DmrsTypeAPosition,DMRS TypeA位置,RW,unsignedInt[0:1]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.MultiFrequencyBandListNRSIB.{i}.FreqBandIndicatorNR,FreqBandIndicatorNR,NR频段指示,RW,unsignedInt[1:1024]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.OffsetToPointA,OffsetToPointA,SSB的PRB0中子载波0位置与PointA之间偏移值,R,unsignedInt[0:2199]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.CarrierBandwidth,CarrierBandwidth,带宽值(下行),RW,unsignedInt[1:275]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.OffsetToCarrier,OffsetToCarrier,载波偏置(下行),RW,unsignedInt[0:2199]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.SubcarrierSpacing,SubcarrierSpacing,子载波间隔(下行),RW,unsignedInt[0:4]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoULSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.CarrierBandwidth,CarrierBandwidth,带宽值(上行),RW,unsignedInt[1:275]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoULSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.OffsetToCarrier,OffsetToCarrier,载波偏置(上行),RW,unsignedInt[0:2199]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoULSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.SubcarrierSpacing,SubcarrierSpacing,子载波间隔(上行),RW,unsignedInt[0:4]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.PUSCH.PuschTpcAccumulation,PuschTpcAccumulation,PUSCH累积式功控开关,RW,boolean
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.SSB.SsbPeriodicityServingCell,SsbPeriodicityServingCell,SSB周期,RW,unsignedInt[0:5]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.SSB.SsbPositionsInBurst.InOneGroup,InOneGroup,SSB索引bit位,RW,string(8)
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.SSB.SsbSubcarrierOffset,SsbSubcarrierOffset,SSB子载波偏置,R,unsignedInt[0:15]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.SubCarrierSpacingCommon,SubCarrierSpacingCommon,公共子载波间隔,RW,string(64)
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.ReferenceSubcarrierSpacing,ReferenceSubcarrierSpacing,参考子载波间隔,RW,unsignedInt[0:4]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern1.DlULTransmissionPeriodicity,DlULTransmissionPeriodicity,模式1的传输周期,RW,unsignedInt[0:7]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern1.NrofDownlinkSlots,NrofDownlinkSlots,模式1的连续下行时隙数,RW,unsignedInt[0:320]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern1.NrofDownlinkSymbols,NrofDownlinkSymbols,模式1的连续下行符号数,RW,unsignedInt[0:13]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern1.NrofUplinkSlots,NrofUplinkSlots,模式1的连续上行时隙数,RW,unsignedInt[0:320]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern1.NrofUplinkSymbols,NrofUplinkSymbols,模式1的连续上行符号数,RW,unsignedInt[0:13]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern2.DlULTransmissionPeriodicity,DlULTransmissionPeriodicity,模式2的传输周期,RW,"unsignedInt[0:7,4095]"
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern2.NrofDownlinkSlots,NrofDownlinkSlots,模式2的连续下行时隙数,RW,unsignedInt[0:320]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern2.NrofDownlinkSymbols,NrofDownlinkSymbols,模式2的连续下行符号数,RW,unsignedInt[0:13]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern2.NrofUplinkSlots,NrofUplinkSlots,模式2的连续上行时隙数,RW,unsignedInt[0:320]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern2.NrofUplinkSymbols,NrofUplinkSymbols,模式2的连续上行符号数,RW,unsignedInt[0:13]
+SH,RAN协议栈参数,NR,SK,物理层参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TimeAlignmentTimerCommon,TimeAlignmentTimerCommon,上行提前量,RW,string(64)
+SH,RAN协议栈参数,NR,SK,RLC参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RLC.{i}.DlRlcSnSize,DlRlcSnSize,下行RLC序列号长度,RW,"unsignedInt[6,12,18]"
+SH,RAN协议栈参数,NR,SK,RLC参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RLC.{i}.GNBRlcReassemblyTimer,GNBRlcReassemblyTimer,GNBRLC重组定时器,RW,"unsignedInt[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100,110,120,130,140,150,160,170,180,190,200,0x0000FFFF]"
+SH,RAN协议栈参数,NR,SK,RLC参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RLC.{i}.QCI,QCI,RLC层QCI,RW,unsignedInt[0:255]
+SH,RAN协议栈参数,NR,SK,RLC参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RLC.{i}.RlcMode,RlcMode,RLC工作模式,RW,"unsignedInt[1,2]"
+SH,RAN协议栈参数,NR,SK,RLC参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RLC.{i}.UlRlcSnSize,UlRlcSnSize,上行RLC序列号长度,RW,"unsignedInt[6,12,18]"
+SH,RAN协议栈参数,NR,SK,RRC参数管理（RRC计时器）,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RRCTimers.N310,N310,N310定时器,RW,unsignedInt[0:7]
+SH,RAN协议栈参数,NR,SK,RRC参数管理（RRC计时器）,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RRCTimers.N311,N311,N311定时器,RW,unsignedInt[0:7]
+SH,RAN协议栈参数,NR,SK,RRC参数管理（RRC计时器）,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RRCTimers.T300,T300,T300定时器,RW,unsignedInt[0:7]
+SH,RAN协议栈参数,NR,SK,RRC参数管理（RRC计时器）,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RRCTimers.T301,T301,T301定时器,RW,unsignedInt[0:7]
+SH,RAN协议栈参数,NR,SK,RRC参数管理（RRC计时器）,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RRCTimers.T302,T302,T302定时器,RW,unsignedInt[1:16]
+SH,RAN协议栈参数,NR,SK,RRC参数管理（RRC计时器）,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RRCTimers.T304,T304,T304定时器,RW,unsignedInt[0:7]
+SH,RAN协议栈参数,NR,SK,RRC参数管理（RRC计时器）,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RRCTimers.T310,T310,T310定时器,RW,unsignedInt[0:6]
+SH,RAN协议栈参数,NR,SK,RRC参数管理（RRC计时器）,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RRCTimers.T311,T311,T311定时器,RW,unsignedInt[0:6]
+SH,RAN协议栈参数,NR,SK,RRC参数管理（RRC计时器）,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RRCTimers.T319,T319,T319定时器,RW,unsignedInt[0:7]
+SH,RAN协议栈参数,NR,SK,RRC参数管理（RRC计时器）,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RRCTimers.T320,T320,T320定时器,RW,unsignedInt[0:6]
+SH,RAN协议栈参数,NR,SK,RNAU周期,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RRCTimers.T380,T380,T380定时器,RW,unsignedInt[0:7]
+SI,邻区参数管理,LTE,SI,NR邻区参数管理,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.CID,CID,邻区CID,RW,unsignedLong[1:68719476735]
+SI,邻区参数管理,LTE,SI,NR邻区参数管理,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.GnbIdLen,GnbIdLen,邻区GnbId长度,RW,unsignedInt[22:32]
+SI,邻区参数管理,LTE,SI,NR邻区参数管理,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.NRband,NRband_r15,Nr频段,RW,unsignedInt[1:1024]
+SI,邻区参数管理,LTE,SI,NR邻区参数管理,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.NeighType,NeighType,邻区类型,RW,unsignedInt[0，1，2]
+SI,邻区参数管理,LTE,SI,NR邻区参数管理,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.PLMNID,PLMNID,邻区PLMN ID,RW,string(6)
+SI,邻区参数管理,LTE,SI,NR邻区参数管理,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.PhyCellID,PhyCellID,邻区物理小区ID,RW,unsignedInt[0:1007]
+SI,邻区参数管理,LTE,SI,NR邻区参数管理,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.Qoffset,QOffset,小区特定偏移量,RW,"int[-24:-8, -6:6, 8:24]"
+SI,邻区参数管理,LTE,SI,NR邻区参数管理,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.SsbFrequency,SsbFrequency,SSB频点号,RW,unsignedInt[0:3279165]
+SI,邻区参数管理,LTE,SI,NR邻区参数管理,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.SsbOffset,SsbOffset_r15,SSB偏移,RW,unsignedInt[0..159]
+SI,邻区参数管理,LTE,SI,NR邻区参数管理,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.SsbPeriodicity,SsbPeriodicity_r15,SSB周期,RW,"unsignedInt[5,10,20,40,80,160]"
+SI,邻区参数管理,LTE,SI,NR邻区参数管理,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.Ssb_Duration,Ssb_Duration_r15,ssb_Duration_r15,RW,"unsignedInt[1,2,3,4,5]"
+SI,邻区参数管理,LTE,SI,NR邻区参数管理,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.TAC,TAC,邻区TAC,RW,unsignedInt[0:16777215]
+SI,邻区参数管理,NR,SL,LTE邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell.{i}.Blacklisted,Blacklisted,禁止切换标识,RW,boolean
+SI,邻区参数管理,NR,SL,LTE邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell.{i}.CID,CID,邻区CID,RW,unsignedInt[1:268435455]
+SI,邻区参数管理,NR,SL,LTE邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell.{i}.CIO,CIO,小区独立偏移量,RW,"int[-24:-8, -6:6, 8:24]"
+SI,邻区参数管理,NR,SL,LTE邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell.{i}.EUTRACarrierARFCN,EUTRACarrierARFCN,邻区EARFCN,RW,unsignedInt[0:65535]
+SI,邻区参数管理,NR,SL,LTE邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell.{i}.EnbType,EnbType,邻区基站类型,RW,unsignedInt
+SI,邻区参数管理,NR,SL,LTE邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell.{i}.NoHOEnable,NoHOEnable,禁止切换标识,RW,boolean
+SI,邻区参数管理,NR,SL,LTE邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell.{i}.NoRemoveEnable,NoRemoveEnable,禁止删除标识,RW,boolean
+SI,邻区参数管理,NR,SL,LTE邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell.{i}.PLMNID,PLMNID,邻区PLMN ID,RW,string(6)
+SI,邻区参数管理,NR,SL,LTE邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell.{i}.PhyCellID,PhyCellID,邻区PCI,RW,unsignedInt[0:503]
+SI,邻区参数管理,NR,SL,LTE邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell.{i}.QQualMinOffsetCell,QQualMinOffsetCell,小区专用最低接入信号质量偏移值,RW,"unsignedInt[1:8, 0x0000000F]"
+SI,邻区参数管理,NR,SL,LTE邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell.{i}.QRxLevMinOffsetCell,QRxLevMinOffsetCell,小区专用最小接收电平偏移量,RW,"unsignedInt[1:8, 0x0000000F]"
+SI,邻区参数管理,NR,SL,LTE邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell.{i}.Qoffset,Qoffset,小区特定偏移量,RW,"int[-24:-8, -6:6, 8:24]"
+SI,邻区参数管理,NR,SL,LTE邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell.{i}.TAC,TAC,邻区TAC,RW,unsignedInt[0:65535]
+SI,邻区参数管理,NR,SL,LTE邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell.{i}.TcRAT,TcRAT,LTE小区制式,RW,"unsignedInt[1,2]"
+SI,邻区参数管理,NR,SL,5G邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.{i}.CID,CID,邻区CID,RW,unsignedLong[1:68719476735]
+SI,邻区参数管理,NR,SL,5G邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.{i}.CIO,CIO,小区独立偏移量,RW,"int[-24:-8, -6:6, 8:24]"
+SI,邻区参数管理,NR,SL,5G邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.{i}.NRCarrierARFCN,NRCarrierARFCN,NR邻区载频的ARFCN,RW,unsignedInt[0:3279165]
+SI,邻区参数管理,NR,SL,5G邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.{i}.NoHOEnable,NoHOEnable,禁止切换标识,RW,boolean
+SI,邻区参数管理,NR,SL,5G邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.{i}.NoRemoveEnable,NoRemoveEnable,禁止删除标识,RW,boolean
+SI,邻区参数管理,NR,SL,5G邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.{i}.NoXnEnable,NoXnEnable,禁止建立Xn标识,RW,boolean
+SI,邻区参数管理,NR,SL,5G邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.{i}.PLMNID,PLMNID,邻区PLMN ID,RW,string(6)
+SI,邻区参数管理,NR,SL,5G邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.{i}.PhyCellID,PhyCellID,邻区物理小区ID,RW,unsignedInt[0:1007]
+SI,邻区参数管理,NR,SL,5G邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.{i}.QQualMinOffsetCell,QQualMinOffsetCell,小区专用最低接入信号质量偏移值,RW,"unsignedInt[1:8, 0x0000000F]"
+SI,邻区参数管理,NR,SL,5G邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.{i}.QRxLevMinOffsetCell,QRxLevMinOffsetCell,小区专用最小接收电平偏移量,RW,"unsignedInt[1:8,0x0000000F]"
+SI,邻区参数管理,NR,SL,5G邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.{i}.Qoffset,Qoffset,小区特定偏移量,RW,"int[-24:-8, -6:6, 8:24]"
+SI,邻区参数管理,NR,SL,5G邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.{i}.TAC,TAC,邻区TAC,RW,unsignedInt[0:16777215]
+SI,邻区参数管理,NR,SL,5G邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.{i}.gNBIdLength,gNBIdLength,邻区gNBId长度,RW,unsignedInt[22:32]
+SI,邻区参数管理,NR,SL,5G邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.{i}.ssbFrequency,ssbFrequency,SSB频点号,RW,unsignedInt[0:3279165]
+SI,邻区参数管理,NR,SL,5G邻区参数管理,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.{i}.ssbSubcarrierSpacing,ssbSubcarrierSpacing,SSB子载波间隔,RW,unsignedInt[0:4]
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.1.A1ThresholdRSRP,A1ThresholdRSRP,A1事件RSRP门限,RW,unsignedInt[0:97]
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.1.A1ThresholdRSRQ,A1ThresholdRSRQ,A1事件RSRQ门限,RW,unsignedInt[0:34]
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.1.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.1.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.1.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.1.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.1.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.1.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000, 3600000]"
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.1.ReportQuantity,ReportQuantity,上报量,RW,string
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.1.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.1.TriggerQuantity,TriggerQuantity,触发量,RW,string
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.2.A1ThresholdRSRP,A1ThresholdRSRP,A1事件RSRP门限,RW,unsignedInt[0:97]
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.2.A1ThresholdRSRQ,A1ThresholdRSRQ,A1事件RSRQ门限,RW,unsignedInt[0:34]
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.2.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.2.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.2.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.2.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.2.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.2.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000, 3600000]"
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.2.ReportQuantity,ReportQuantity,上报量,RW,string
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.2.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.2.TriggerQuantity,TriggerQuantity,触发量,RW,string
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.3.A1ThresholdRSRP,A1ThresholdRSRP,A1事件RSRP门限,RW,unsignedInt[0:97]
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.3.A1ThresholdRSRQ,A1ThresholdRSRQ,A1事件RSRQ门限,RW,unsignedInt[0:34]
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.3.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.3.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.3.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.3.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.3.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.3.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000, 3600000]"
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.3.ReportQuantity,ReportQuantity,上报量,RW,string
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.3.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,LTE,SJ,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.3.TriggerQuantity,TriggerQuantity,触发量,RW,string
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.1.A2ThresholdRSRP,A2ThresholdRSRP,A2事件RSRP门限,RW,unsignedInt[0:97]
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.1.A2ThresholdRSRQ,A2ThresholdRSRQ,A2事件RSRQ门限,RW,unsignedInt[0:34]
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.1.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.1.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.1.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.1.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.1.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.1.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000, 3600000]"
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.1.ReportQuantity,ReportQuantity,上报量,RW,string
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.1.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.1.TriggerQuantity,TriggerQuantity,触发量,RW,string
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.2.A2ThresholdRSRP,A2ThresholdRSRP,A2事件RSRP门限,RW,unsignedInt[0:97]
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.2.A2ThresholdRSRQ,A2ThresholdRSRQ,A2事件RSRQ门限,RW,unsignedInt[0:34]
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.2.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.2.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.2.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.2.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.2.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.2.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000, 3600000]"
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.2.ReportQuantity,ReportQuantity,上报量,RW,string
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.2.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.2.TriggerQuantity,TriggerQuantity,触发量,RW,string
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.3.A2ThresholdRSRP,A2ThresholdRSRP,A2事件RSRP门限,RW,unsignedInt[0:97]
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.3.A2ThresholdRSRQ,A2ThresholdRSRQ,A2事件RSRQ门限,RW,unsignedInt[0:34]
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.3.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.3.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.3.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.3.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.3.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.3.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000, 3600000]"
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.3.ReportQuantity,ReportQuantity,上报量,RW,string
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.3.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.3.TriggerQuantity,TriggerQuantity,触发量,RW,string
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.4.A2ThresholdRSRP,A2ThresholdRSRP,A2事件RSRP门限,RW,unsignedInt[0:97]
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.4.A2ThresholdRSRQ,A2ThresholdRSRQ,A2事件RSRQ门限,RW,unsignedInt[0:34]
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.4.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.4.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.4.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.4.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.4.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.4.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000, 3600000]"
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.4.ReportQuantity,ReportQuantity,上报量,RW,string
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.4.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.4.TriggerQuantity,TriggerQuantity,触发量,RW,string
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.5.A2ThresholdRSRP,A2ThresholdRSRP,A2事件RSRP门限,RW,unsignedInt[0:97]
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.5.A2ThresholdRSRQ,A2ThresholdRSRQ,A2事件RSRQ门限,RW,unsignedInt[0:34]
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.5.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.5.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.5.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.5.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.5.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.5.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000, 3600000]"
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.5.ReportQuantity,ReportQuantity,上报量,RW,string
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.5.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,LTE,SJ,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.5.TriggerQuantity,TriggerQuantity,触发量,RW,string
+SJ,移动性参数管理,LTE,SJ,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.1.A3Offset,A3Offset,A3事件门限,RW,int[-30:30]
+SJ,移动性参数管理,LTE,SJ,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.1.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,LTE,SJ,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.1.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,LTE,SJ,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.1.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,LTE,SJ,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.1.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,LTE,SJ,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.1.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,LTE,SJ,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.1.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000, 3600000]"
+SJ,移动性参数管理,LTE,SJ,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.1.ReportOnLeave,ReportOnLeave,A3事件离开上报指示,RW,boolean
+SJ,移动性参数管理,LTE,SJ,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.1.ReportQuantity,ReportQuantity,上报量,RW,string
+SJ,移动性参数管理,LTE,SJ,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.1.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,LTE,SJ,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.1.TriggerQuantity,TriggerQuantity,触发量,RW,string
+SJ,移动性参数管理,LTE,SJ,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.2.A3Offset,A3Offset,A3事件门限,RW,int[-30:30]
+SJ,移动性参数管理,LTE,SJ,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.2.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,LTE,SJ,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.2.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,LTE,SJ,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.2.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,LTE,SJ,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.2.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,LTE,SJ,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.2.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,LTE,SJ,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.2.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000, 3600000]"
+SJ,移动性参数管理,LTE,SJ,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.2.ReportOnLeave,ReportOnLeave,A3事件离开上报指示,RW,boolean
+SJ,移动性参数管理,LTE,SJ,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.2.ReportQuantity,ReportQuantity,上报量,RW,string
+SJ,移动性参数管理,LTE,SJ,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.2.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,LTE,SJ,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.2.TriggerQuantity,TriggerQuantity,触发量,RW,string
+SJ,移动性参数管理,LTE,SJ,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.1.A4ThresholdRSRP,A4ThresholdRSRP,A4事件RSRP门限,RW,unsignedInt[0:97]
+SJ,移动性参数管理,LTE,SJ,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.1.A4ThresholdRSRQ,A4ThresholdRSRQ,A4事件RSRQ门限,RW,unsignedInt[0:34]
+SJ,移动性参数管理,LTE,SJ,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.1.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,LTE,SJ,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.1.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:34]
+SJ,移动性参数管理,LTE,SJ,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.1.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,LTE,SJ,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.1.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,LTE,SJ,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.1.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,LTE,SJ,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.1.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000, 3600000]"
+SJ,移动性参数管理,LTE,SJ,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.1.ReportQuantity,ReportQuantity,上报量,RW,string
+SJ,移动性参数管理,LTE,SJ,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.1.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,LTE,SJ,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.1.TriggerQuantity,TriggerQuantity,触发量,RW,string
+SJ,移动性参数管理,LTE,SJ,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.1.A5Threshold1RSRP,A5Threshold1RSRP,A5事件RSRP门限1,RW,unsignedInt[0:97]
+SJ,移动性参数管理,LTE,SJ,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.1.A5Threshold1RSRQ,A5Threshold1RSRQ,A5事件RSRQ门限1,RW,unsignedInt[0:34]
+SJ,移动性参数管理,LTE,SJ,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.1.A5Threshold2RSRP,A5Threshold2RSRP,A5事件RSRP门限2,RW,unsignedInt[0:97]
+SJ,移动性参数管理,LTE,SJ,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.1.A5Threshold2RSRQ,A5Threshold2RSRQ,A5事件RSRQ门限2,RW,unsignedInt[0:34]
+SJ,移动性参数管理,LTE,SJ,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.1.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,LTE,SJ,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.1.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,LTE,SJ,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.1.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,LTE,SJ,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.1.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,LTE,SJ,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.1.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,LTE,SJ,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.1.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000, 3600000]"
+SJ,移动性参数管理,LTE,SJ,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.1.ReportQuantity,ReportQuantity,上报量,RW,string
+SJ,移动性参数管理,LTE,SJ,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.1.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,LTE,SJ,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.1.TriggerQuantity,TriggerQuantity,触发量,RW,string
+SJ,移动性参数管理,LTE,SJ,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.1.B1ThresholdCDMA2000,B1ThresholdCDMA2000,B1事件门限(CDMA2000),RW,int[-5:91]
+SJ,移动性参数管理,LTE,SJ,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.1.B1ThresholdGERAN,B1ThresholdGERAN,B1事件门限(GERAN),RW,unsignedInt[0:63]
+SJ,移动性参数管理,LTE,SJ,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.1.B1ThresholdUTRAEcN0,B1ThresholdUTRAEcN0,B1事件EcN0门限(UTRA),RW,unsignedInt[0:49]
+SJ,移动性参数管理,LTE,SJ,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.1.B1ThresholdUTRARSCP,B1ThresholdUTRARSCP,B1事件RSCP门限(UTRA),RW,int[-5:91]
+SJ,移动性参数管理,LTE,SJ,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.1.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,LTE,SJ,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.1.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,LTE,SJ,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.1.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,LTE,SJ,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.1.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,LTE,SJ,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.1.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,LTE,SJ,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.1.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000, 3600000]"
+SJ,移动性参数管理,LTE,SJ,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.1.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,LTE,SJ,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.2.B1ThresholdCDMA2000,B1ThresholdCDMA2000,B1事件门限(CDMA2000),RW,int[-5:91]
+SJ,移动性参数管理,LTE,SJ,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.2.B1ThresholdGERAN,B1ThresholdGERAN,B1事件门限(GERAN),RW,unsignedInt[0:63]
+SJ,移动性参数管理,LTE,SJ,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.2.B1ThresholdUTRAEcN0,B1ThresholdUTRAEcN0,B1事件EcN0门限(UTRA),RW,unsignedInt[0:49]
+SJ,移动性参数管理,LTE,SJ,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.2.B1ThresholdUTRARSCP,B1ThresholdUTRARSCP,B1事件RSCP门限(UTRA),RW,int[-5:91]
+SJ,移动性参数管理,LTE,SJ,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.2.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,LTE,SJ,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.2.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,LTE,SJ,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.2.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,LTE,SJ,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.2.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,LTE,SJ,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.2.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,LTE,SJ,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.2.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000, 3600000]"
+SJ,移动性参数管理,LTE,SJ,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.2.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,LTE,SJ,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.B2Threshold1EutraRSRP,B2Threshold1EutraRSRP,B2事件RSRP门限(EUTRA),RW,unsignedInt[0:97]
+SJ,移动性参数管理,LTE,SJ,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.B2Threshold1EutraRSRQ,B2Threshold1EutraRSRQ,B2事件RSRQ门限(EUTRA),RW,unsignedInt[0:34]
+SJ,移动性参数管理,LTE,SJ,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.B2Threshold2CDMA2000,B2Threshold2CDMA2000,B2事件门限(CDMA2000),RW,unsignedInt[0:63]
+SJ,移动性参数管理,LTE,SJ,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.B2Threshold2GERAN,B2Threshold2GERAN,B2事件门限(GERAN),RW,unsignedInt[0:63]
+SJ,移动性参数管理,LTE,SJ,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.B2Threshold2UTRAEcN0,B2Threshold2UTRAEcN0,B2事件EcN0门限(UTRA),RW,unsignedInt[0:49]
+SJ,移动性参数管理,LTE,SJ,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.B2Threshold2UTRARSCP,B2Threshold2UTRARSCP,B2触发RSCP门限(UTRA),RW,int[-5:91]
+SJ,移动性参数管理,LTE,SJ,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,LTE,SJ,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,LTE,SJ,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,LTE,SJ,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,LTE,SJ,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,LTE,SJ,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000, 3600000]"
+SJ,移动性参数管理,LTE,SJ,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,LTE,SJ,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.2.B2Threshold1EutraRSRP,B2Threshold1EutraRSRP,B2事件RSRP门限(EUTRA),RW,unsignedInt[0:97]
+SJ,移动性参数管理,LTE,SJ,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.2.B2Threshold1EutraRSRQ,B2Threshold1EutraRSRQ,B2事件RSRQ门限(EUTRA),RW,unsignedInt[0:34]
+SJ,移动性参数管理,LTE,SJ,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.2.B2Threshold2CDMA2000,B2Threshold2CDMA2000,B2事件门限(CDMA2000),RW,unsignedInt[0:63]
+SJ,移动性参数管理,LTE,SJ,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.2.B2Threshold2GERAN,B2Threshold2GERAN,B2事件门限(GERAN),RW,unsignedInt[0:63]
+SJ,移动性参数管理,LTE,SJ,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.2.B2Threshold2UTRAEcN0,B2Threshold2UTRAEcN0,B2事件EcN0门限(UTRA),RW,unsignedInt[0:49]
+SJ,移动性参数管理,LTE,SJ,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.2.B2Threshold2UTRARSCP,B2Threshold2UTRARSCP,B2触发RSCP门限(UTRA),RW,int[-5:91]
+SJ,移动性参数管理,LTE,SJ,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.2.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,LTE,SJ,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.2.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,LTE,SJ,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.2.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,LTE,SJ,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.2.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,LTE,SJ,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.2.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,LTE,SJ,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.2.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000, 3600000]"
+SJ,移动性参数管理,LTE,SJ,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.2.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,LTE,SJ,异频重选参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QQualMinR9Reselection,QQualMinR9Reselection,小区重选最低接入信号质量,RW,int[-34:-3]
+SJ,移动性参数管理,LTE,SJ,异频重选参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThreshXHighQR9,ThreshXHighQR9,异频频点RSRQ高优先级重选门限,RW,unsignedInt[0:31]
+SJ,移动性参数管理,LTE,SJ,异频重选参数,Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThreshXLowQR9,ThreshXLowQR9,异频频点RSRQ低优先级重选门限,RW,unsignedInt[0:31]
+SJ,移动性参数管理,NR,SM,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.1.B1ThresholdEUTRARsrp,B1ThresholdEUTRARsrp,B1事件RSRP门限(EUTRA-rsrp),RW,unsignedInt[0:97]
+SJ,移动性参数管理,NR,SM,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.1.B1ThresholdEUTRARsrq,B1ThresholdEUTRARsrq,B1事件RSRQ门限(EUTRA-rsrq),RW,unsignedInt[0:34]
+SJ,移动性参数管理,NR,SM,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.1.B1ThresholdEUTRASinr,B1ThresholdEUTRASinr,B1事件SINR门限(EUTRA-sinr),RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.1.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,NR,SM,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.1.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,NR,SM,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.1.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,NR,SM,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.1.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,NR,SM,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.1.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,NR,SM,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.1.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 20480，40960，60000, 360000, 720000, 1800000]"
+SJ,移动性参数管理,NR,SM,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.1.ReportOnLeave,ReportOnLeave,B1事件离开上报指示,RW,boolean
+SJ,移动性参数管理,NR,SM,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.1.ReportQuantity,ReportQuantity,上报量,RW,string
+SJ,移动性参数管理,NR,SM,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.1.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,NR,SM,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.1.TriggerQuantity,TriggerQuantity,控制门限信号类型,RW,string
+SJ,移动性参数管理,NR,SM,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.B1ThresholdEUTRARsrp,B1ThresholdEUTRARsrp,B1事件RSRP门限(EUTRA-rsrp),RW,unsignedInt[0:97]
+SJ,移动性参数管理,NR,SM,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.B1ThresholdEUTRARsrq,B1ThresholdEUTRARsrq,B1事件RSRQ门限(EUTRA-rsrq),RW,unsignedInt[0:34]
+SJ,移动性参数管理,NR,SM,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.B1ThresholdEUTRASinr,B1ThresholdEUTRASinr,B1事件SINR门限(EUTRA-sinr),RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,NR,SM,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,NR,SM,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,NR,SM,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,NR,SM,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,NR,SM,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000]"
+SJ,移动性参数管理,NR,SM,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.ReportOnLeave,ReportOnLeave,B1事件离开上报指示,RW,boolean
+SJ,移动性参数管理,NR,SM,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.ReportQuantity,ReportQuantity,上报量,RW,string
+SJ,移动性参数管理,NR,SM,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,NR,SM,B1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.TriggerQuantity,TriggerQuantity,控制门限信号类型,RW,string
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.B2Threshold1RSRP,B2Threshold1RSRP,B2事件RSRP门限(NR-rsrp),RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.B2Threshold1RSRQ,B2Threshold1RSRQ,B2事件RSRQ门限(NR-rsrq),RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.B2Threshold1SINR,B2Threshold1SINR,B2事件RSRQ门限(NR-sinr),RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.B2Threshold2EUTRARSRP,B2Threshold2EUTRARSRP,B2事件门限(EUTRA-RSRP),RW,unsignedInt[0:97]
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.B2Threshold2EUTRARSRQ,B2Threshold2EUTRARSRQ,B2事件门限(EUTRA-RSRQ),RW,unsignedInt[0:34]
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.B2Threshold2EUTRASINR,B2Threshold2EUTRASINR,B2事件门限(EUTRA-SINR),RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 20480，40960，60000, 360000, 720000, 1800000]"
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.ReportOnLeave,ReportOnLeave,B2事件离开上报指示,RW,boolean
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.ReportQuantity,ReportQuantity,上报量,RW,string
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.1.TriggerQuantity,TriggerQuantity,控制门限信号类型,RW,string
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.B2Threshold1RSRP,B2Threshold1RSRP,B2事件RSRP门限(NR-rsrp),RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.B2Threshold1RSRQ,B2Threshold1RSRQ,B2事件RSRQ门限(NR-rsrq),RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.B2Threshold1SINR,B2Threshold1SINR,B2事件RSRQ门限(NR-sinr),RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.B2Threshold2EUTRARSRP,B2Threshold2EUTRARSRP,B2事件门限(EUTRA-RSRP),RW,unsignedInt[0:97]
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.B2Threshold2EUTRARSRQ,B2Threshold2EUTRARSRQ,B2事件门限(EUTRA-RSRQ),RW,unsignedInt[0:34]
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.B2Threshold2EUTRASINR,B2Threshold2EUTRASINR,B2事件门限(EUTRA-SINR),RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000]"
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.ReportOnLeave,ReportOnLeave,B2事件离开上报指示,RW,boolean
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.ReportQuantity,ReportQuantity,上报量,RW,string
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,NR,SM,B2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.TriggerQuantity,TriggerQuantity,控制门限信号类型,RW,string
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.1.A1ThresholdRSRP,A1ThresholdRSRP,A1事件RSRP门限,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.1.A1ThresholdRSRQ,A1ThresholdRSRQ,A1事件RSRQ门限,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.1.A1ThresholdSINR,A1ThresholdSINR,A1事件SINR门限,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.1.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.1.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.1.IncludeBeamMeasurements,IncludeBeamMeasurements,波束赋形测量指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.1.MaxNrofRSIndexToReport,MaxNrofRSIndexToReport,RS测量上报资源最大个数,RW,"unsignedInt[1:32,0x0000FFFF]"
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.1.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.1.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.1.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.1.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000]"
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.1.ReportOnLeave,ReportOnLeave,A1事件离开上报指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.1.ReportQuantityCell,ReportQuantityCell,上报量,RW,string
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.1.RptQuantityRsIndex,RptQuantityRsIndex,A1事件RS测量上报量,RW,string
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.1.RsType,RsType,测量类型指示,RW,string
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.1.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.1.TriggerQuantity,TriggerQuantity,控制门限信号类型,RW,string
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.2.A1ThresholdRSRP,A1ThresholdRSRP,A1事件RSRP门限,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.2.A1ThresholdRSRQ,A1ThresholdRSRQ,A1事件RSRQ门限,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.2.A1ThresholdSINR,A1ThresholdSINR,A1事件SINR门限,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.2.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.2.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.2.IncludeBeamMeasurements,IncludeBeamMeasurements,波束赋形测量指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.2.MaxNrofRSIndexToReport,MaxNrofRSIndexToReport,RS测量上报资源最大个数,RW,"unsignedInt[1:32,0x0000FFFF]"
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.2.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.2.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.2.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.2.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000]"
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.2.ReportOnLeave,ReportOnLeave,A1事件离开上报指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.2.ReportQuantityCell,ReportQuantityCell,上报量,RW,string
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.2.RptQuantityRsIndex,RptQuantityRsIndex,A1事件RS测量上报量,RW,string
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.2.RsType,RsType,测量类型指示,RW,string
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.2.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.2.TriggerQuantity,TriggerQuantity,控制门限信号类型,RW,string
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.{i}.A1ThresholdRSRP,A1ThresholdRSRP,A1事件RSRP门限,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.{i}.A1ThresholdRSRQ,A1ThresholdRSRQ,A1事件RSRQ门限,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.{i}.A1ThresholdSINR,A1ThresholdSINR,A1事件SINR门限,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.{i}.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.{i}.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.{i}.IncludeBeamMeasurements,IncludeBeamMeasurements,波束赋形测量指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.{i}.MaxNrofRSIndexToReport,MaxNrofRSIndexToReport,RS测量上报资源最大个数,RW,"unsignedInt[1:32,0x0000FFFF]"
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.{i}.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.{i}.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.{i}.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.{i}.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 20480，40960，60000, 360000, 720000, 1800000]"
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.{i}.ReportOnLeave,ReportOnLeave,A1事件离开上报指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.{i}.ReportQuantityCell,ReportQuantityCell,上报量,RW,string
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.{i}.RptQuantityRsIndex,RptQuantityRsIndex,A1事件RS测量上报量,RW,string
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.{i}.RsType,RsType,测量类型指示,RW,string
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.{i}.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,NR,SM,A1事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A1MeasureCtrl.{i}.TriggerQuantity,TriggerQuantity,控制门限信号类型,RW,string
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.1.A2ThresholdRSRP,A2ThresholdRSRP,A2事件RSRP门限,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.1.A2ThresholdRSRQ,A2ThresholdRSRQ,A2事件RSRQ门限,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.1.A2ThresholdSINR,A2ThresholdSINR,A2事件SINR门限,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.1.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.1.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.1.IncludeBeamMeasurements,IncludeBeamMeasurements,波束赋形测量指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.1.MaxNrofRSIndexToReport,MaxNrofRSIndexToReport,RS测量上报资源最大个数,RW,"unsignedInt[1:32,0x0000FFFF]"
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.1.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.1.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.1.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.1.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000]"
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.1.ReportOnLeave,ReportOnLeave,A2事件离开上报指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.1.ReportQuantityCell,ReportQuantityCell,上报量,RW,string
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.1.RptQuantityRsIndex,RptQuantityRsIndex,A2事件RS测量上报量,RW,string
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.1.RsType,RsType,测量类型指示,RW,string
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.1.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.1.TriggerQuantity,TriggerQuantity,控制门限信号类型,RW,string
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.2.A2ThresholdRSRP,A2ThresholdRSRP,A2事件RSRP门限,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.2.A2ThresholdRSRQ,A2ThresholdRSRQ,A2事件RSRQ门限,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.2.A2ThresholdSINR,A2ThresholdSINR,A2事件SINR门限,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.2.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.2.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.2.IncludeBeamMeasurements,IncludeBeamMeasurements,波束赋形测量指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.2.MaxNrofRSIndexToReport,MaxNrofRSIndexToReport,RS测量上报资源最大个数,RW,"unsignedInt[1:32,0x0000FFFF]"
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.2.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.2.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.2.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.2.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000]"
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.2.ReportOnLeave,ReportOnLeave,A2事件离开上报指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.2.ReportQuantityCell,ReportQuantityCell,上报量,RW,string
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.2.RptQuantityRsIndex,RptQuantityRsIndex,A2事件RS测量上报量,RW,string
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.2.RsType,RsType,测量类型指示,RW,string
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.2.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.2.TriggerQuantity,TriggerQuantity,控制门限信号类型,RW,string
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.{i}.A2ThresholdRSRP,A2ThresholdRSRP,A2事件RSRP门限,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.{i}.A2ThresholdRSRQ,A2ThresholdRSRQ,A2事件RSRQ门限,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.{i}.A2ThresholdSINR,A2ThresholdSINR,A2事件SINR门限,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.{i}.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.{i}.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.{i}.IncludeBeamMeasurements,IncludeBeamMeasurements,波束赋形测量指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.{i}.MaxNrofRSIndexToReport,MaxNrofRSIndexToReport,RS测量上报资源最大个数,RW,"unsignedInt[1:32,0x0000FFFF]"
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.{i}.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.{i}.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.{i}.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.{i}.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000]"
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.{i}.ReportOnLeave,ReportOnLeave,A2事件离开上报指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.{i}.ReportQuantityCell,ReportQuantityCell,上报量,RW,string
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.{i}.RptQuantityRsIndex,RptQuantityRsIndex,A2事件RS测量上报量,RW,string
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.{i}.RsType,RsType,测量类型指示,RW,string
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.{i}.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,NR,SM,A2事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A2MeasureCtrl.{i}.TriggerQuantity,TriggerQuantity,控制门限信号类型,RW,string
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.1.A3OffsetRSRP,A3OffsetRSRP,A3事件RSRP门限,RW,int[-30:30]
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.1.A3OffsetRSRQ,A3OffsetRSRQ,A3事件RSRQ门限,RW,int[-30:30]
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.1.A3OffsetSINR,A3OffsetSINR,A3事件SINR门限,RW,int[-30:30]
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.1.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.1.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.1.IncludeBeamMeasurements,IncludeBeamMeasurements,波束赋形测量指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.1.MaxNrofRSIndexToReport,MaxNrofRSIndexToReport,RS测量上报资源最大个数,RW,"unsignedInt[1:32,0x0000FFFF]"
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.1.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.1.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.1.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.1.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000]"
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.1.ReportOnLeave,ReportOnLeave,A3事件离开上报指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.1.ReportQuantityCell,ReportQuantityCell,上报量,RW,string
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.1.RptQuantityRsIndex,RptQuantityRsIndex,A3事件RS测量上报量,RW,string
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.1.RsType,RsType,测量类型指示,RW,string
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.1.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.1.TriggerQuantity,TriggerQuantity,控制门限信号类型,RW,string
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.1.UseWhiteCellList,UseWhiteCellList,小区测量白名单指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.2.A3OffsetRSRP,A3OffsetRSRP,A3事件RSRP门限,RW,int[-30:30]
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.2.A3OffsetRSRQ,A3OffsetRSRQ,A3事件RSRQ门限,RW,int[-30:30]
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.2.A3OffsetSINR,A3OffsetSINR,A3事件SINR门限,RW,int[-30:30]
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.2.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.2.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.2.IncludeBeamMeasurements,IncludeBeamMeasurements,波束赋形测量指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.2.MaxNrofRSIndexToReport,MaxNrofRSIndexToReport,RS测量上报资源最大个数,RW,"unsignedInt[1:32,0x0000FFFF]"
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.2.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.2.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.2.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.2.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000]"
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.2.ReportOnLeave,ReportOnLeave,A3事件离开上报指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.2.ReportQuantityCell,ReportQuantityCell,上报量,RW,string
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.2.RptQuantityRsIndex,RptQuantityRsIndex,A3事件RS测量上报量,RW,string
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.2.RsType,RsType,测量类型指示,RW,string
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.2.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.2.TriggerQuantity,TriggerQuantity,控制门限信号类型,RW,string
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.2.UseWhiteCellList,UseWhiteCellList,小区测量白名单指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.{i}.A3OffsetRSRP,A3OffsetRSRP,A3事件RSRP门限,RW,int[-30:30]
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.{i}.A3OffsetRSRQ,A3OffsetRSRQ,A3事件RSRQ门限,RW,int[-30:30]
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.{i}.A3OffsetSINR,A3OffsetSINR,A3事件SINR门限,RW,int[-30:30]
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.{i}.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.{i}.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.{i}.IncludeBeamMeasurements,IncludeBeamMeasurements,波束赋形测量指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.{i}.MaxNrofRSIndexToReport,MaxNrofRSIndexToReport,RS测量上报资源最大个数,RW,"unsignedInt[1:32,0x0000FFFF]"
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.{i}.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.{i}.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.{i}.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.{i}.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 20480，40960，60000, 360000, 720000, 1800000]"
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.{i}.ReportOnLeave,ReportOnLeave,A3事件离开上报指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.{i}.ReportQuantityCell,ReportQuantityCell,上报量,RW,string
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.{i}.RptQuantityRsIndex,RptQuantityRsIndex,A3事件RS测量上报量,RW,string
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.{i}.RsType,RsType,测量类型指示,RW,string
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.{i}.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.{i}.TriggerQuantity,TriggerQuantity,控制门限信号类型,RW,string
+SJ,移动性参数管理,NR,SM,A3事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A3MeasureCtrl.{i}.UseWhiteCellList,UseWhiteCellList,小区测量白名单指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.1.A4ThresholdRSRP,A4ThresholdRSRP,A4事件RSRP门限,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.1.A4ThresholdRSRQ,A4ThresholdRSRQ,A4事件RSRQ门限,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.1.A4ThresholdSINR,A4ThresholdSINR,A4事件SINR门限,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.1.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.1.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.1.IncludeBeamMeasurements,IncludeBeamMeasurements,波束赋形测量指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.1.MaxNrofRSIndexToReport,MaxNrofRSIndexToReport,RS测量上报资源最大个数,RW,"unsignedInt[1:32,0x0000FFFF]"
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.1.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.1.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.1.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.1.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000]"
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.1.ReportOnLeave,ReportOnLeave,A4事件离开上报指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.1.ReportQuantityCell,ReportQuantityCell,上报量,RW,string
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.1.RptQuantityRsIndex,RptQuantityRsIndex,A4事件RS测量上报量,RW,string
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.1.RsType,RsType,测量类型指示,RW,string
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.1.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.1.TriggerQuantity,TriggerQuantity,控制门限信号类型,RW,string
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.1.UseWhiteCellList,UseWhiteCellList,小区测量白名单指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.{i}.A4ThresholdRSRP,A4ThresholdRSRP,A4事件RSRP门限,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.{i}.A4ThresholdRSRQ,A4ThresholdRSRQ,A4事件RSRQ门限,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.{i}.A4ThresholdSINR,A4ThresholdSINR,A4事件SINR门限,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.{i}.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.{i}.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.{i}.IncludeBeamMeasurements,IncludeBeamMeasurements,波束赋形测量指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.{i}.MaxNrofRSIndexToReport,MaxNrofRSIndexToReport,RS测量上报资源最大个数,RW,"unsignedInt[1:32,0x0000FFFF]"
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.{i}.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.{i}.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.{i}.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.{i}.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 20480，40960，60000, 360000, 720000, 1800000]"
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.{i}.ReportOnLeave,ReportOnLeave,A4事件离开上报指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.{i}.ReportQuantityCell,ReportQuantityCell,上报量,RW,string
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.{i}.RptQuantityRsIndex,RptQuantityRsIndex,A4事件RS测量上报量,RW,string
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.{i}.RsType,RsType,测量类型指示,RW,string
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.{i}.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.{i}.TriggerQuantity,TriggerQuantity,控制门限信号类型,RW,string
+SJ,移动性参数管理,NR,SM,A4事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A4MeasureCtrl.{i}.UseWhiteCellList,UseWhiteCellList,小区测量白名单指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.1.A5Threshold1RSRP,A5Threshold1RSRP,A5事件RSRP门限1,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.1.A5Threshold1RSRQ,A5Threshold1RSRQ,A5事件RSRQ门限1,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.1.A5Threshold1SINR,A5Threshold1SINR,A5事件SINR门限1,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.1.A5Threshold2RSRP,A5Threshold2RSRP,A5事件RSRP门限2,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.1.A5Threshold2RSRQ,A5Threshold2RSRQ,A5事件RSRQ门限2,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.1.A5Threshold2SINR,A5Threshold2SINR,A5事件SINR门限2,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.1.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.1.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.1.IncludeBeamMeasurements,IncludeBeamMeasurements,波束赋形测量指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.1.MaxNrofRSIndexToReport,MaxNrofRSIndexToReport,RS测量上报资源最大个数,RW,"unsignedInt[1:32,0x0000FFFF]"
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.1.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.1.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.1.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.1.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 60000, 360000, 720000, 1800000]"
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.1.ReportOnLeave,ReportOnLeave,A5事件离开上报指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.1.ReportQuantityCell,ReportQuantityCell,上报量,RW,string
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.1.RptQuantityRsIndex,RptQuantityRsIndex,A5事件RS测量上报量,RW,string
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.1.RsType,RsType,测量类型指示,RW,string
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.1.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.1.TriggerQuantity1,TriggerQuantity1,控制门限信号类型,RW,string
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.1.TriggerQuantity2,TriggerQuantity2,控制门限信号类型,RW,string
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.1.UseWhiteCellList,UseWhiteCellList,小区测量白名单指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.{i}.A5Threshold1RSRP,A5Threshold1RSRP,A5事件RSRP门限1,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.{i}.A5Threshold1RSRQ,A5Threshold1RSRQ,A5事件RSRQ门限1,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.{i}.A5Threshold1SINR,A5Threshold1SINR,A5事件SINR门限1,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.{i}.A5Threshold2RSRP,A5Threshold2RSRP,A5事件RSRP门限2,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.{i}.A5Threshold2RSRQ,A5Threshold2RSRQ,A5事件RSRQ门限2,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.{i}.A5Threshold2SINR,A5Threshold2SINR,A5事件SINR门限2,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.{i}.Enable,Enable,使能开关,RW,boolean
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.{i}.Hysteresis,Hysteresis,迟滞值,RW,unsignedInt[0:30]
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.{i}.IncludeBeamMeasurements,IncludeBeamMeasurements,波束赋形测量指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.{i}.MaxNrofRSIndexToReport,MaxNrofRSIndexToReport,RS测量上报资源最大个数,RW,"unsignedInt[1:32,0x0000FFFF]"
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.{i}.MaxReportCells,MaxReportCells,最大上报小区数,RW,unsignedInt[1:8]
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.{i}.MeasurePurpose,MeasurePurpose,测量目的,R,unsignedInt[1:100]
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.{i}.ReportAmount,ReportAmount,上报次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.{i}.ReportInterval,ReportInterval,上报间隔,RW,"unsignedInt[120, 240, 480, 640, 1024, 2048, 5120, 10240, 20480，40969，60000, 360000, 720000, 1800000]"
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.{i}.ReportOnLeave,ReportOnLeave,A5事件离开上报指示,RW,boolean
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.{i}.ReportQuantityCell,ReportQuantityCell,上报量,RW,string
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.{i}.RptQuantityRsIndex,RptQuantityRsIndex,A5事件RS测量上报量,RW,string
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.{i}.RsType,RsType,测量类型指示,RW,string
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.{i}.TimeToTrigger,TimeToTrigger,触发时间,RW,"unsignedInt[0,40, 64, 80,100,128, 160,256,320, 480, 512, 640, 1024,1280,2560,5120]"
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.{i}.TriggerQuantity1,TriggerQuantity1,控制门限信号类型,RW,string
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.{i}.TriggerQuantity2,TriggerQuantity2,控制门限信号类型,RW,string
+SJ,移动性参数管理,NR,SM,A5事件测量控制参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.A5MeasureCtrl.{i}.UseWhiteCellList,UseWhiteCellList,小区测量白名单指示,RW,boolean
+SJ,移动性参数管理,NR,SM,公共切换参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.MeasureCtrl.Smeasure,Smeasure,测量启动门限,RW,unsignedInt[0:127]
+SJ,移动性参数管理,NR,SM,周期性测量的配置,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.PeriodMeasCtrl.{i}.MaxReportCells,MaxReportCells,小区的最大数目,RW,unsignedInt[1:8]
+SJ,移动性参数管理,NR,SM,周期性测量的配置,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.PeriodMeasCtrl.{i}.MeasurePurpose,MeasurePurpose,测量目的,RW,unsignedInt[1:4]
+SJ,移动性参数管理,NR,SM,周期性测量的配置,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.PeriodMeasCtrl.{i}.ReportAmount,ReportAmount,测量报告次数,RW,"unsignedInt[0:2, 4, 8, 16, 32, 64]"
+SJ,移动性参数管理,NR,SM,周期性测量的配置,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.PeriodMeasCtrl.{i}.ReportInterval,ReportInterval,周期性测量报告,RW,"unsignedInt[120,240,480,640,1024, 2048, 5120, 10240,20480,40960,60000,360000, 720000,1800000]"
+SJ,移动性参数管理,NR,SM,周期性测量的配置,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.PeriodMeasCtrl.{i}.ReportQuantity,ReportQuantity,上报量,RW,string
+SJ,移动性参数管理,NR,SM,报告CGI的测量配置,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.ReportCGI.{i}.PhysCellId,PhysCellId,小区ID,RW,unsignedInt[0:1007]
+SJ,移动性参数管理,NR,SM,重选公共参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.Common.IntraFreqReselection,IntraFreqReselection,同频重选指示,RW,boolean
+SJ,移动性参数管理,NR,SM,重选公共参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.Common.NrofSSBlocksToAverage,NrofSSBlocksToAverage,小区测量平均SSB数,RW,"unsignedInt[2:16,0x00000FFF]"
+SJ,移动性参数管理,NR,SM,重选公共参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.Common.Qhyst,Qhyst,服务小区重选迟滞值,RW,unsignedInt[0:15]
+SJ,移动性参数管理,NR,SM,重选公共参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.Common.TEvaluation,TEvaluation,允许小区重选的间隔时间,RW,unsignedInt[0:4]
+SJ,移动性参数管理,NR,SM,重选公共参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.Common.THystNormal,THystNormal,正常状态附加判决时长,RW,unsignedInt[0:4]
+SJ,移动性参数管理,NR,SM,重选公共参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.Common.ThresholdRSRP,ThresholdRSRP,RSRP门限值,RW,"unsignedInt[0:127,0x00000FFF]"
+SJ,移动性参数管理,NR,SM,重选公共参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.Common.ThresholdRSRQ,ThresholdRSRQ,RSRQ门限值,RW,"unsignedInt[0:127,0x00000FFF]"
+SJ,移动性参数管理,NR,SM,重选公共参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.Common.ThresholdSINR,ThresholdSINR,SINR门限值,RW,"unsignedInt[0:127,0x00000FFF]"
+SJ,移动性参数管理,NR,SM,异系统重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.EUTRA.Carrier.{i}.AllowedMeasBandwidth,AllowedMeasBandwidth,最大允许测量带宽,RW,string(64)
+SJ,移动性参数管理,NR,SM,异系统重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.EUTRA.Carrier.{i}.BlackPhysCellIdRange,BlackPhysCellIdRange,物理小区ID步进,RW,unsignedInt[0~13，0x0FFFFFFF]
+SJ,移动性参数管理,NR,SM,异系统重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.EUTRA.Carrier.{i}.BlackPhysCellIdStart,BlackPhysCellIdStart,物理小区ID起始位置,RW,unsignedInt[0:503]
+SJ,移动性参数管理,NR,SM,异系统重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.EUTRA.Carrier.{i}.CellReselectionPriority,CellReselectionPriority,EUTRAN频点重选优先级,RW,unsignedInt[0:7]
+SJ,移动性参数管理,NR,SM,异系统重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.EUTRA.Carrier.{i}.EUTRACarrierARFCN,EUTRACarrierARFCN,邻区EARFCN,RW,unsignedInt[0:65535]
+SJ,移动性参数管理,NR,SM,异系统重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.EUTRA.Carrier.{i}.PMaxEUTRA,PMaxEUTRA,EUTRAN最大允许发射功率,RW,int[-30:33]
+SJ,移动性参数管理,NR,SM,异系统重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.EUTRA.Carrier.{i}.PresenceAntennaPort1,PresenceAntennaPort1,指示是否所有邻小区使用天线端口1,RW,boolean
+SJ,移动性参数管理,NR,SM,异系统重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.EUTRA.Carrier.{i}.QQualMin,QQualMin,EUTRAN最低接入信号质量,RW,int[-34:-3]
+SJ,移动性参数管理,NR,SM,异系统重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.EUTRA.Carrier.{i}.QRxLevMin,QRxLevMin,EUTRAN最低接收电平,RW,int[-70:-22]
+SJ,移动性参数管理,NR,SM,异系统重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.EUTRA.Carrier.{i}.ThreshXHigh,ThreshXHigh,EUTRAN频点高优先级重选门限,RW,unsignedInt[0:31]
+SJ,移动性参数管理,NR,SM,异系统重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.EUTRA.Carrier.{i}.ThreshXHighQ,ThreshXHighQ,EUTRAN频点高优先级重选门限,RW,unsignedInt[0:31]
+SJ,移动性参数管理,NR,SM,异系统重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.EUTRA.Carrier.{i}.ThreshXLow,ThreshXLow,EUTRAN频点低优先级重选门限,RW,unsignedInt[0:31]
+SJ,移动性参数管理,NR,SM,异系统重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.EUTRA.Carrier.{i}.ThreshXLowQ,ThreshXLowQ,EUTRAN频点低优先级重选门限,RW,unsignedInt[0:31]
+SJ,移动性参数管理,NR,SM,异系统重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.EUTRA.TReselectionEUTRA,TReselectionEUTRA,EUTRA小区重选时间,RW,unsignedInt[0:7]
+SJ,移动性参数管理,NR,SM,异频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.BlackPhysCellIdRange,BlackPhysCellIdRange,物理小区ID步进,RW,unsignedInt[0:14]
+SJ,移动性参数管理,NR,SM,异频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.BlackPhysCellIdStart,BlackPhysCellIdStart,物理小区ID起始位置,RW,unsignedInt[0:1007]
+SJ,移动性参数管理,NR,SM,异频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.CellReselectionPriority,CellReselectionPriority,重选优先级,RW,unsignedInt[0:7]
+SJ,移动性参数管理,NR,SM,异频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.CellReselectionSubPriority,CellReselectionSubPriority,异频重选优先级附加值,RW,unsignedInt[0:3]
+SJ,移动性参数管理,NR,SM,异频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.DeriveSSBIndexFromCell,DeriveSSBIndexFromCell,通过SSB获取定时指示,RW,boolean
+SJ,移动性参数管理,NR,SM,异频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.DlCarrierFreq,DlCarrierFreq,载波频率,RW,unsignedInt[0:3279165]
+SJ,移动性参数管理,NR,SM,异频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.NrofSSBlocksToAverage,NrofSSBlocksToAverage,小区测量平均SSB数,RW,"unsignedInt[2:16,0x00000FFF]"
+SJ,移动性参数管理,NR,SM,异频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.Pmax,PMax,UE允许最大发射功率,RW,"int[-30:33,0x0FFFFFFF]"
+SJ,移动性参数管理,NR,SM,异频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QOffsetFreq,QOffsetFreq,重选专用偏移量,RW,"int[-24:-8, -6:6, 8:24]"
+SJ,移动性参数管理,NR,SM,异频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QQualMin,QQualMin,异频小区重选时，最低接入信号质量,RW,"int[-43:-12,0x0FFFFFFF]"
+SJ,移动性参数管理,NR,SM,异频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QRxLevMin,QRxLevMin,"异频小区重选时，最小接
+收电平。",RW,int[-70:-22]
+SJ,移动性参数管理,NR,SM,异频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.SsbSubcarrierSpacing,SsbSubcarrierSpacing,SSB子载波间隔,RW,unsignedInt[0:4]
+SJ,移动性参数管理,NR,SM,异频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.TReselectionNR,TReselectionNR,异频小区重选时间,RW,unsignedInt[0:7]
+SJ,移动性参数管理,NR,SM,异频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThreshXHighP,ThreshXHighP,高优先级重选门限,RW,unsignedInt[0:31]
+SJ,移动性参数管理,NR,SM,异频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThreshXHighQ,ThreshXHighQ,高优先级重选门限,RW,unsignedInt[0:31]
+SJ,移动性参数管理,NR,SM,异频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThreshXLowP,ThreshXLowP,低优先级重选门限,RW,unsignedInt[0:31]
+SJ,移动性参数管理,NR,SM,异频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThreshXLowQ,ThreshXLowQ,低优先级重选门限,RW,unsignedInt[0:31]
+SJ,移动性参数管理,NR,SM,异频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThresholdRSRP,ThresholdRSRP,RSRP门限值,RW,"unsignedInt[0:127,0x00000FFF]"
+SJ,移动性参数管理,NR,SM,异频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThresholdRSRQ,ThresholdRSRQ,RSRQ门限值,RW,"unsignedInt[0:127,0x00000FFF]"
+SJ,移动性参数管理,NR,SM,异频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThresholdSINR,ThresholdSINR,SINR门限值,RW,"unsignedInt[0:127,0x00000FFF]"
+SJ,移动性参数管理,NR,SM,同频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.IntraFreq.BlackPhysCellIdRange,BlackPhysCellIdRange,物理小区ID步进,RW,unsignedInt[0:14]
+SJ,移动性参数管理,NR,SM,同频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.IntraFreq.BlackPhysCellIdStart,BlackPhysCellIdStart,物理小区ID起始位置,RW,unsignedInt[0:1007]
+SJ,移动性参数管理,NR,SM,同频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.IntraFreq.CellReselectionPriority,CellReselectionPriority,同频小区重选优先级,RW,unsignedInt[0:7]
+SJ,移动性参数管理,NR,SM,同频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.IntraFreq.CellReselectionSubPriority,CellReselectionSubPriority,同频小区重选优先级附加值,RW,unsignedInt[0:3]
+SJ,移动性参数管理,NR,SM,同频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.IntraFreq.DeriveSSBIndexFromCell,DeriveSSBIndexFromCell,指示UE能否根据服务小区来获取邻小区的SSB索引号,RW,boolean
+SJ,移动性参数管理,NR,SM,同频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.IntraFreq.Pmax,Pmax,UE允许最大发射功率,RW,"int[-30:33,0x0FFFFFFF]"
+SJ,移动性参数管理,NR,SM,同频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.IntraFreq.QQualMinSIB1,QQualMinSIB1,小区选择最低接入信号质量,RW,"int[-34:-3,0x0FFFFFFF]"
+SJ,移动性参数管理,NR,SM,同频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.IntraFreq.QQualMinSIB2,QQualMinSIB2,小区重选最低接入信号质量,RW,"int[-43:-12,0x0FFFFFFF]"
+SJ,移动性参数管理,NR,SM,同频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.IntraFreq.QRxLevMinOffset,QRxLevMinOffset,最小接收电平偏移量,RW,unsignedInt[1:8]
+SJ,移动性参数管理,NR,SM,同频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.IntraFreq.QRxLevMinSIB1,QRxLevMinSIB1,服务小区最小接收电平,RW,int[-70:-22]
+SJ,移动性参数管理,NR,SM,同频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.IntraFreq.QRxLevMinSIB2,QRxLevMinSIB2,同频邻区最小接收电平,RW,int[-70:-22]
+SJ,移动性参数管理,NR,SM,同频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.IntraFreq.Qoffsettemp,QOffsettemp,小区临时偏移量,RW,unsignedInt[1:15]
+SJ,移动性参数管理,NR,SM,同频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.IntraFreq.Qqualminoffset,Qqualminoffset,小区选择最低接入信号质量偏移值,RW,unsignedInt[0:8]
+SJ,移动性参数管理,NR,SM,同频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.IntraFreq.SIntraSearchP,SIntraSearchP,同频测量启动门限RSRP,RW,unsignedInt[0:31]
+SJ,移动性参数管理,NR,SM,同频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.IntraFreq.SIntraSearchQ,SIntraSearchQ,同频测量启动门限RSRQ,RW,"unsignedInt[0:31,0x0FFFFFFF]"
+SJ,移动性参数管理,NR,SM,同频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.IntraFreq.SNonIntraSearchP,SNonIntraSearchP,同频RSRP测量启动门限,RW,"unsignedInt[0:31,0x0FFFFFFF]"
+SJ,移动性参数管理,NR,SM,同频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.IntraFreq.SNonIntraSearchQ,SNonIntraSearchQ,同频RSRQ测量启动门限,RW,"unsignedInt[0:31,0x0FFFFFFF]"
+SJ,移动性参数管理,NR,SM,同频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.IntraFreq.TReselectionNR,TReselectionNR,同频小区重选时间,RW,unsignedInt[0:7]
+SJ,移动性参数管理,NR,SM,同频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.IntraFreq.ThreshServingLowP,ThreshServingLowP,低优先级重选门限,RW,unsignedInt[0:31]
+SJ,移动性参数管理,NR,SM,同频重选参数,Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.IntraFreq.ThreshServingLowQ,ThreshServingLowQ,服务频点低优先级RSRQ重选门限,RW,"unsignedInt[0:31,0x0FFFFFFF]"
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.ANR.A3RSRPOffset,A3RSRPOffset,邻区添加相对电平强度,RW,unsignedInt[0:127]
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.ANR.AutoAdjustEnable,AutoAdjustEnable,邻区属性自动调整的使能开关,RW,boolean
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.ANR.AutoRemoveEnable,AutoRemoveEnable,邻区自动删除的使能开关,RW,boolean
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.ANR.AutoRemoveMaxCell,AutoRemoveMaxCell,邻区自动删除功能单周期内可删除最大个数,RW,unsignedInt
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.ANR.AutoRemovePeriod,AutoRemovePeriod,邻区自动删除功能触发周期,RW,unsignedInt
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.ANR.BiNRCellEnable,BiNRCellEnable,ANR双向邻区添加开关,RW,boolean
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.ANR.BlackList.HOSuccessThreshold,HOSuccessThreshold,邻区被设为黑名单的切换成功率门限,RW,unsignedInt[0:100]
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.ANR.BlackList.NoHOThreshold,NoHOThreshold,邻区被设为黑名单的切换次数门限,RW,unsignedInt
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.ANR.EUTRANEnable,EUTRANEnable,E-UTRAN异系统ANR算法开关,RW,boolean
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.ANR.Enable,Enable,ANR算法总开关,RW,boolean
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.ANR.InterFeqCandidateARFCNList,InterFeqCandidateARFCNList,SSB频点号,RW,string(64)
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.ANR.InterFeqEnable,InterFeqEnable,NR异频ANR算法开关,RW,boolean
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.ANR.KPIPeriod,KPIPeriod,邻区优化KPI统计周期,RW,unsignedInt
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.ANR.RSRPReferenceEnable,RSRPReferenceEnable,事件性MR添加邻区依照绝对电平开关,RW,boolean
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.ANR.RSRPThreshold,RSRPThreshold,邻区添加绝对电平强度,RW,unsignedInt[0:127]
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.ARFCNEnable,ARFCNEnable,频点自配置算法开关,RW,boolean
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.CandidateARFCNList,CandidateARFCNList,候选频点列表,RW,string(64)
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.CandidatePCIList,CandidatePCIList,候选PCI列表,RW,string(64)
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.LTESnifferChannelList,LTESnifferChannelList,LTE侦听频点列表,RW,string(64)
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.LTESnifferFreqBandList,LTESnifferFreqBandList,LTE侦听频段列表,RW,string(64)
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.MROEnable,MROEnable,邻区鲁棒性优化功能开关,RW,boolean
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.MaxLTENeighbourCellNum,MaxLTENeighbourCellNum,最大LTE邻区数,RW,unsignedInt
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.MaxNRNeighbourCellNum,MaxNRNeighbourCellNum,最大NR邻区数,RW,unsignedInt
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.NRSnifferChannelList,NRSnifferChannelList,NR侦听频点列表,RW,string(64)
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.NRSnifferFreqBandList,NRSnifferFreqBandList,NR侦听频段列表,RW,string(64)
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.PCI.Enable,Enable,PCI冲突和混淆检测功能开关,RW,boolean
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.PCIOptEnable,PCIOptEnable,PCI自优化算法开关,RW,boolean
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.PCIReconfigWaitTime,PCIReconfigWaitTime,PCI重配等待定时器,RW,unsignedInt
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.PowerEnable,PowerEnable,功率自配置算法开关,RW,boolean
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.ReSynCellEnable,ReSynCellEnable,重新同步小区使能开关,RW,boolean
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.SHEnable,SHEnable,自治愈功能开关,RW,boolean
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.SONSysMode,SONSysMode,SON系统模式,RW,string
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.SONWorkMode,SONWorkMode,SON模式设置,RW,string
+SK,SON参数管理,NR,SG,SON参数管理,Device.Services.FAPService.{i}.FAPControl.NR.SelfConfig.SONConfigParam.SyncMode,SyncMode,时钟同步模式,R,string(64)
+SL,WAN口配置参数管理,LTE,SL,vlan子接口配置参数管理,Device.Ethernet.Interface.{i}.VlanInterface.{i}.Enable,Enable,启用或禁用该接口,RW,boolean
+SP,MR参数管理,NR,SR,MR参数管理,Device.FAP.MRMgmt.Config.{i}.MRNCGIList,MRNCGIList,MR小区列表,RW,string
+SP,MR参数管理,NR,SR,MR参数管理,Device.FAP.MRMgmt.Config.{i}.UserLabel,UserLabel,用户友好名,RW,string
+SR,扩展型一体化皮基站参数,LTE,SR,主机单元（MU）设备信息参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.3GPPSpecVersion,3GPPSpecVersion,3GPP协议版本,R,string
+SR,扩展型一体化皮基站参数,LTE,SR,主机单元（MU）设备信息参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.DataModelSpecVersion,DataModelSpecVersion,数据模型版本,R,string
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-扩展单元（EU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.DLCRCSum,DLCRCSum,扩展单元下行误码率,R,string(64)
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-扩展单元（EU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.HardwareVersion,HardwareVersion,硬件版本,R,string(64)
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-扩展单元（EU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.Manufacturer,Manufacturer,制造商,R,string(64)
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-扩展单元（EU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.ManufacturerOUI,ManufacturerOUI,制造商OUI,R,string(6)
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-扩展单元（EU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.ModelName,ModelName,设备型号,R,string(64)
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-扩展单元（EU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.ProvisioningCode,ProvisioningCode,供应商代号,R,string(64)
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-远端单元（RU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.DateOfManufacture,DateOfManufacture,生产日期,R,dateTime
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-远端单元（RU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.FrequencyBand,FrequencyBand,支持频段,RW,string
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-远端单元（RU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.HardwareVersion,HardwareVersion,硬件版本,R,string(64)
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-远端单元（RU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.Manufacturer,Manufacturer,制造商,R,string(64)
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-远端单元（RU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.ManufacturerOUI,ManufacturerOUI,制造商OUI,R,string(6)
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-远端单元（RU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.ModelName,ModelName,设备型号,R,string(64)
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-远端单元（RU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.ProvisioningCode,ProvisioningCode,供应商代号,R,string(64)
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-远端单元（RU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.RFChannel.{i}.NoisePwdBm,NoisePwdBm,底噪,R,string
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-远端单元（RU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.RFChannel.{i}.TxGain,TxGain,下行发射功率增益,RW,string
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-远端单元（RU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.RFTxStatus,RFTxStatus,射频状态,RW,boolean
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-远端单元（RU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.Reboot,Reboot,重启开关,RW,boolean
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-远端单元（RU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.RouteIndex,RouteIndex,射频单元路由指示,R,string(64)
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-远端单元（RU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.SerialNumber,SerialNumber,序列号,R,string(64)
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-远端单元（RU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.SoftwareVersion,SoftwareVersion,软件版本,R,string(64)
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-远端单元（RU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.Status,Status,状态,R,unsignedInt[1:3]
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-远端单元（RU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.SwUpgrade.FailureCause,FailureCause,升级失败原因,R,string(512)
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-远端单元（RU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.SwUpgrade.Stage,Stage,升级阶段,R,unsignedInt[1:5]
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-远端单元（RU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.SwUpgrade.Status,Status,状态,R,unsignedInt[1:3]
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-远端单元（RU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.UserLabel,UserLabel,用户友好名,RW,string
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-远端单元（RU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.VendorUnitFamilyType,VendorUnitFamilyType,归属类型,R,string
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-远端单元（RU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.VendorUnitTypeNumber,VendorUnitTypeNumber,资产单元类型版本号,R,string
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-扩展单元（EU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.Reboot,Reboot,重启开关,RW,boolean
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-扩展单元（EU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RouteIndex,RouteIndex,扩展单元路由指示,R,string(64)
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-扩展单元（EU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.SerialNumber,SerialNumber,序列号,R,string(64)
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-扩展单元（EU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.SoftwareVersion,SoftwareVersion,软件版本,R,string(64)
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-扩展单元（EU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.Status,Status,状态,R,unsignedInt[1:3]
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-扩展单元（EU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.SwUpgrade.FailureCause,FailureCause,升级失败原因,R,string(512)
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-扩展单元（EU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.SwUpgrade.Stage,Stage,升级阶段,R,unsignedInt[1:5]
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-扩展单元（EU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.SwUpgrade.Status,Status,状态,R,unsignedInt[1:3]
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-扩展单元（EU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.ULCRCSum,ULCRCSum,扩展单元上行误码率,R,string(64)
+SR,扩展型一体化皮基站参数,LTE,SR,扩展型皮站-扩展单元（EU）参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.UserLabel,UserLabel,用户友好名,RW,string
+SR,扩展型一体化皮基站参数,LTE,SR,主机单元（MU）设备信息参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.FirstUseDate,FirstUseDate,首次使用日期,R,dateTime
+SR,扩展型一体化皮基站参数,LTE,SR,主机单元（MU）设备信息参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.HardwareVersion,HardwareVersion,硬件版本,R,string(64)
+SR,扩展型一体化皮基站参数,LTE,SR,主机单元（MU）设备信息参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.Manufacturer,Manufacturer,制造商,R,string(64)
+SR,扩展型一体化皮基站参数,LTE,SR,主机单元（MU）设备信息参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.ManufacturerOUI,ManufacturerOUI,制造商OUI,R,string(6)
+SR,扩展型一体化皮基站参数,LTE,SR,主机单元（MU）设备信息参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.ModelName,ModelName,设备型号,R,string(64)
+SR,扩展型一体化皮基站参数,LTE,SR,主机单元（MU）设备信息参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.PackPosition,PackPosition,板卡位置,R,string(64)
+SR,扩展型一体化皮基站参数,LTE,SR,主机单元（MU）设备信息参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.ProvisioningCode,ProvisioningCode,供应商代号,R,string(64)
+SR,扩展型一体化皮基站参数,LTE,SR,主机单元（MU）设备信息参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.Reboot,Reboot,重启开关,RW,boolean
+SR,扩展型一体化皮基站参数,LTE,SR,主机单元（MU）设备信息参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.SerialNumber,SerialNumber,序列号,R,string(64)
+SR,扩展型一体化皮基站参数,LTE,SR,主机单元（MU）设备信息参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.SlotsOccupied,SlotsOccupied,占用槽位,R,string(64)
+SR,扩展型一体化皮基站参数,LTE,SR,主机单元（MU）设备信息参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.SoftwareVersion,SoftwareVersion,软件版本,R,string(64)
+SR,扩展型一体化皮基站参数,LTE,SR,主机单元（MU）设备信息参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.Status,Status,板卡状态,R,unsignedInt[1:3]
+SR,扩展型一体化皮基站参数,LTE,SR,主机单元（MU）设备信息参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.SwUpgrade.Stage,Stage,升级阶段,R,unsignedInt[1:5]
+SR,扩展型一体化皮基站参数,LTE,SR,主机单元（MU）设备信息参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.UpTime,UpTime,运行时间,R,unsignedInt
+SR,扩展型一体化皮基站参数,LTE,SR,主机单元（MU）设备信息参数管理,Device.DeviceInfo.MU.{i}.Slot.{i}.VendorUnitFamilyType,VendorUnitFamilyType,板卡类型,R,string(64)
+SH_NR,本地分流规则,NR,SH,DNS分流规则参数管理,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.DnsRules.Enable,Enable,DNS规则开关,RW,boolean
+SH_NR,本地分流规则,NR,SH,DNS分流规则参数管理,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.DnsRules.RuleList.{i}.DomainIpList.{i}.DomainIp,DomainIp,IP地址,RW,string(40)
+SH_NR,本地分流规则,NR,SH,DNS分流规则参数管理,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.DnsRules.RuleList.{i}.DomainName,DomainName,域名,RW,string(128)
+SH_NR,本地分流规则,NR,SH,本地分流规则开关,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.Enable,Enable,本地分流规则总开关,RW,boolean
+SH_NR,本地分流规则,NR,SH,IP五元组分流规则参数管理,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.IpRules.Enable,Enable,IP五元组规则开关,RW,boolean
+SH_NR,本地分流规则,NR,SH,IP五元组分流规则参数管理,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.IpRules.RuleList.{i}.IPversion,Ipversion,IP版本,RW,unsignedInt[1:2]
+SH_NR,本地分流规则,NR,SH,IP五元组分流规则参数管理,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.IpRules.RuleList.{i}.ProtocolType,ProtocolType,传输协议,RW,string
+SH_NR,本地分流规则,NR,SH,IP五元组分流规则参数管理,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.IpRules.RuleList.{i}.SourceIP,SourceIP,源端IP地址,RW,string(15)
+SH_NR,本地分流规则,NR,SH,IP五元组分流规则参数管理,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.IpRules.RuleList.{i}.SourceIPv6,SourceIPv6,源端IPv6地址,RW,string(64)
+SH_NR,本地分流规则,NR,SH,IP五元组分流规则参数管理,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.IpRules.RuleList.{i}.SourceMask,SourceMask,源端子网掩码,RW,string(15)
+SH_NR,本地分流规则,NR,SH,IP五元组分流规则参数管理,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.IpRules.RuleList.{i}.SourcePort,SourcePort,源端端口,RW,string
+SH_NR,本地分流规则,NR,SH,IP五元组分流规则参数管理,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.IpRules.RuleList.{i}.SourcePrefixLength,SourcePrefixLength,源端前缀长度,RW,unsignedInt[1:128]
+SH_NR,本地分流规则,NR,SH,IP五元组分流规则参数管理,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.IpRules.RuleList.{i}.TargetIP,TargetIP,目的端IP地址,RW,string(15)
+SH_NR,本地分流规则,NR,SH,IP五元组分流规则参数管理,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.IpRules.RuleList.{i}.TargetIPv6,TargetIPv6,目的端IPv6地址,RW,string(64)
+SH_NR,本地分流规则,NR,SH,IP五元组分流规则参数管理,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.IpRules.RuleList.{i}.TargetMask,TargetMask,目的端子网掩码,RW,string(15)
+SH_NR,本地分流规则,NR,SH,IP五元组分流规则参数管理,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.IpRules.RuleList.{i}.TargetPort,TargetPort,目的端端口,RW,string
+SH_NR,本地分流规则,NR,SH,IP五元组分流规则参数管理,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.IpRules.RuleList.{i}.TargetPrefixLength,TargetPrefixLength,目的端前缀长度,RW,unsignedInt[1:128]
+SH_NR,本地分流规则,NR,SH,NSSAI分流规则参数管理,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.NssaiRules.Enable,Enable,NSSAI规则开关,RW,boolean
+SH_NR,本地分流规则,NR,SH,NSSAI分流规则参数管理,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.NssaiRules.RuleList.{i}.SNSSAI,SNSSAI,SNSSAI,RW,unsignedInt[0:‭4294967295‬]
+SH_NR,本地分流规则,NR,SH,PLMN分流规则参数管理,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.PlmnRules.Enable,Enable,PLMN规则开关,RW,boolean
+SH_NR,本地分流规则,NR,SH,PLMN分流规则参数管理,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.PlmnRules.RuleList.{i}.PLMNID,PLMNID,小区PLMNID,RW,string(6)
+SH_NR,本地分流规则,NR,SH,流量限制分流规则参数管理,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.TrafficRules.RuleList.{i}.CycleFrom,CycleFrom,限制周期启始时间,RW,dateTime
+SH_NR,本地分流规则,NR,SH,流量限制分流规则参数管理,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.TrafficRules.RuleList.{i}.CycleTo,CycleTo,限制周期终止时间,RW,dateTime
+SH_NR,本地分流规则,NR,SH,流量限制分流规则参数管理,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.TrafficRules.RuleList.{i}.DLRateLimit,DLRateLimit,下行速率,RW,unsignedInt[8:261120]
+SH_NR,本地分流规则,NR,SH,流量限制分流规则参数管理,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.TrafficRules.RuleList.{i}.ServerIP,ServerIP,服务器IP,RW,string(64)
+SH_NR,本地分流规则,NR,SH,流量限制分流规则参数管理,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.TrafficRules.RuleList.{i}.TrafficLimit,TrafficLimit,流量限制,RW,unsignedInt[0:4294967295]
+SH_NR,本地分流规则,NR,SH,流量限制分流规则参数管理,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.TrafficRules.RuleList.{i}.ULRateLimit,ULRateLimit,上行速率,RW,unsignedInt[8:261120]
+SH_NR,本地分流规则,NR,SH,分流规则流量统计,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.TrafficStatistics.Dns.{i}.DomainIpList.{i}.DomainIp,DomainIp,IP地址,R,string(64)
+SH_NR,本地分流规则,NR,SH,分流规则流量统计,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.TrafficStatistics.Dns.{i}.DomainName,DomainName,域名,R,string(128)
+SH_NR,本地分流规则,NR,SH,分流规则流量统计,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.TrafficStatistics.Dns.{i}.Throughput,Thoughput,流量,RW,string
+SH_NR,本地分流规则,NR,SH,分流规则流量统计,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.TrafficStatistics.IP.{i}.IPAddress,IPAddress,IP地址,R,string(64)
+SH_NR,本地分流规则,NR,SH,分流规则流量统计,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.TrafficStatistics.IP.{i}.Throughput,Thoughput,流量,RW,string
+SH_NR,本地分流规则,NR,SH,分流规则流量统计,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.TrafficStatistics.Nssai.{i}.SNSSAI,SNSSAI,SNSSAI,R,unsignedInt[0:‭4294967295‬]
+SH_NR,本地分流规则,NR,SH,分流规则流量统计,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.TrafficStatistics.Nssai.{i}.Throughput,Thoughput,流量,RW,string
+SH_NR,本地分流规则,NR,SH,分流规则流量统计,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.TrafficStatistics.Plmn.{i}.PLMNID,PLMNID,小区PLMNID,R,string(6)
+SH_NR,本地分流规则,NR,SH,分流规则流量统计,Device.Services.FAPService.{i}.FAPControl.LocalBreakout.TrafficStatistics.Plmn.{i}.Throughput,Thoughput,流量,RW,string
+SI_NR,基站能力参数管理,NR,SI,NNSF参数管理,Device.Services.FAPService.{i}.Capabilities.NR.NNSFSupported,NNSFSupported,负载均衡参数,RW,boolean
+ST_NR,软采规则,NR,ST,软采采集用户配置策略,Device.FAP.SCMgmt.Config.{i}.MaxUEs,MaxUEs,SC采集最大UE数,RW,unsignedInt
+ST_NR,软采规则,NR,ST,软采对等网元采集模式,Device.FAP.SCMgmt.Config.{i}.P2PNEMode,P2PNEMode,对等网元采集模式,RW,unsignedInt[0:2]
+ST_NR,软采规则,NR,ST,采集时间配置策略,Device.FAP.SCMgmt.Config.{i}.SCDatePeriod,SCDatePeriod,周期软采起止日期,RW,string
+ST_NR,软采规则,NR,ST,软采参数管理,Device.FAP.SCMgmt.Config.{i}.SCEnable,SCEnable,软采功能开关,RW,boolean
+ST_NR,软采规则,NR,ST,软采参数管理,Device.FAP.SCMgmt.Config.{i}.SCGID,SCGID,网管编号,R,string
+ST_NR,软采规则,NR,ST,软采参数管理,Device.FAP.SCMgmt.Config.{i}.SCIPAddress,SCIPAddress,软采服务器IP地址,RW,string(64)
+ST_NR,软采规则,NR,ST,软采参数管理,Device.FAP.SCMgmt.Config.{i}.SCLoginID,SCLoginID,软采链路认证ID,RW,string(256)
+ST_NR,软采规则,NR,ST,软采参数管理,Device.FAP.SCMgmt.Config.{i}.SCNCGIList,SCNCGIList,软采开关小区列表,RW,string
+ST_NR,软采规则,NR,ST,软采参数管理,Device.FAP.SCMgmt.Config.{i}.SCPassword,SCPassword,密码,RW,string(256)
+ST_NR,软采规则,NR,ST,软采参数管理,Device.FAP.SCMgmt.Config.{i}.SCPort,SCPort,软采服务器端口,RW,string
+ST_NR,软采规则,NR,ST,采集时间配置策略,Device.FAP.SCMgmt.Config.{i}.SCSamplingBeginTime,SCSamplingBeginTime,连续软采开始时间,RW,dateTime
+ST_NR,软采规则,NR,ST,采集时间配置策略,Device.FAP.SCMgmt.Config.{i}.SCSamplingEndTime,SCSamplingEndTime,连续软采结束时间,RW,dateTime
+ST_NR,软采规则,NR,ST,采集时间配置策略,Device.FAP.SCMgmt.Config.{i}.SCSamplingTimeType,SCSamplingTimeType,软采采集时间类型,RW,unsignedInt[0:2]
+ST_NR,软采规则,NR,ST,采集时间配置策略,Device.FAP.SCMgmt.Config.{i}.SCTimePeriod1,SCTimePeriod1,周期软采起止时间1,RW,string
+ST_NR,软采规则,NR,ST,采集时间配置策略,Device.FAP.SCMgmt.Config.{i}.SCTimePeriod2,SCTimePeriod2,周期软采起止时间2,RW,string
+ST_NR,软采规则,NR,ST,采集时间配置策略,Device.FAP.SCMgmt.Config.{i}.SCTimePeriod3,SCTimePeriod3,周期软采起止时间3,RW,string
+ST_NR,软采规则,NR,ST,采集时间配置策略,Device.FAP.SCMgmt.Config.{i}.SCTimePeriod4,SCTimePeriod4,周期软采起止时间4,RW,string
+ST_NR,软采规则,NR,ST,采集时间配置策略,Device.FAP.SCMgmt.Config.{i}.SCTimePeriod5,SCTimePeriod5,周期软采起止时间5,RW,string
+ST_NR,软采规则,NR,ST,Uu-extend参数采集周期,Device.FAP.SCMgmt.Config.{i}.SamplePeriod,SamplePeriod,SC采样周期,RW,unsignedInt
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuAllEnable,UuAllEnable,Uu口软采开启所有信令消息,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuCounterCheckEnable,UuCounterCheckEnable,UuCounterCheck信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuCounterCheckResponseEnable,UuCounterCheckResponseEnable,UuCounterCheckResponse信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuDLInformationTransferEnable,UuDLInformationTransferEnable,UuDLInformationTransfer信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuEnable,UuEnable,Uu口软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu-extend口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuExtendAllEnable,UuExtendAllEnable,Uu-Extend口软采开启所有信令消息,RW,boolean
+ST_NR,软采规则,NR,ST,Uu-extend口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuExtendCQIEnable,UuExtendCQIEnable,Uu-ExtendCQI信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu-extend口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuExtendDtchPrbAssnDlEnable,UuExtendDtchPrbAssnDlEnable,Uu-ExtendDtchPrbAssnDl信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu-extend口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuExtendDtchPrbAssnUlEnable,UuExtendDtchPrbAssnUlEnable,Uu-ExtendDtchPrbAssnUl信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu-extend口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuExtendDtchPrbTotDlEnable,UuExtendDtchPrbTotDlEnable,Uu-ExtendDtchPrbTotDl信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu-extend口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuExtendDtchPrbTotUlEnable,UuExtendDtchPrbTotUlEnable,Uu-ExtendDtchPrbTotUl信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu-extend口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuExtendEnable,UuExtendEnable,Uu-Extend口软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu-extend口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuExtendPHREnable,UuExtendPHREnable,Uu-ExtendPHR信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu-extend口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuExtendTAEnable,UuExtendTAEnable,Uu-ExtendTA信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu-extend口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuExtendULSINREnable,UuExtendULSINREnable,Uu-ExtendULSINR信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu-extend口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuExtendgNBReceivedInterfereEnable,UuExtendgNBReceivedInterfereEnable,Uu-ExtendgNBReceivedInterfere信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuLocationMeasurementIndicationEnable,UuLocationMeasurementIndicationEnable,UuLocationMeasurementIndication信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuMeasurementReportEnable,UuMeasurementReportEnable,UuMeasurementReport信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuMobilityFromNRCommandEnable,UuMobilityFromNRCommandEnable,UuMobilityFromNRCommand 信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuRRCReconfigurationCompleteEnable,UuRRCReconfigurationCompleteEnable,UuRRCReconfiguration Complete信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuRRCReconfigurationEnable,UuRRCReconfigurationEnable,UuRRCReconfiguration信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuRRCReestablishmentCompleteEnable,UuRRCReestablishmentCompleteEnable,UuRRCReestablishmentComplete信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuRRCReestablishmentEnable,UuRRCReestablishmentEnable,UuRRCReestablishment信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuRRCReestablishmentRequestEnable,UuRRCReestablishmentRequestEnable,UuRRCReestablishmentRequest信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuRRCRejectEnable,UuRRCRejectEnable,UuRRCReject信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuRRCReleaseEnable,UuRRCReleaseEnable,UuRRCRelease信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuRRCResumeCompleteEnable,UuRRCResumeCompleteEnable,UuRRCResumeComplete信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuRRCResumeEnable,UuRRCResumeEnable,UuRRCResume信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuRRCResumeRequestEnable,UuRRCResumeRequestEnable,UuRRCResumeRequest信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuRRCSetupCompleteEnable,UuRRCSetupCompleteEnable,UuRRCSetupComplete信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuRRCSetupEnable,UuRRCSetupEnable,UuRRCSetup信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuRRCSetupRequestEnable,UuRRCSetupRequestEnable,UuRRCSetupRequest信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuSCGFailureInformationNREnable,UuSCGFailureInformationNREnable,UuSCGFailureInformationNR信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuSecurityModeCommandEnable,UuSecurityModeCommandEnable,UuSecurityModeCommand信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuSecurityModeCompleteEnable,UuSecurityModeCompleteEnable,UuSecurityModeComplete信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuSecurityModeFailureEnable,UuSecurityModeFailureEnable,UuSecurityModeFailure信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuUEAssistanceInformationEnable,UuUEAssistanceInformationEnable,UuUEAssistanceInformation信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuUECapabilityEnquiryEnable,UuUECapabilityEnquiryEnable,UuUECapabilityEnquiry信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuUECapabilityInformationEnable,UuUECapabilityInformationEnable,UuUECapabilityInformation信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Uu口采集配置策略,Device.FAP.SCMgmt.Config.{i}.UuULInformationTransferEnable,UuULInformationTransferEnable,UuULInformationTransfer信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2AllEnable,X2AllEnable,X2口软采开启所有信令消息,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2E-UTRA-NRCELLRESOURCECOORDINATIONREQUESTEnable,X2E-UTRA-NRCELLRESOURCECOORDINATIONREQUESTEnable,X2E-UTRA-NRCELLRESOURCECOORDINATIONREQUEST信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2E-UTRA-NRCELLRESOURCECOORDINATIONRESPONSEEnable,X2E-UTRA-NRCELLRESOURCECOORDINATIONRESPONSEEnable,X2E-UTRA-NRCELLRESOURCECOORDINATIONRESPONSE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2EN-DCCELLACTIVATIONFAILUREEnable,X2EN-DCCELLACTIVATIONFAILUREEnable,X2EN-DCCELLACTIVATIONFAILURE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2EN-DCCELLACTIVATIONREQUESTEnable,X2EN-DCCELLACTIVATIONREQUESTEnable,X2EN-DCCELLACTIVATIONREQUEST信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2EN-DCCELLACTIVATIONRESPONSEEnable,X2EN-DCCELLACTIVATIONRESPONSEEnable,X2EN-DCCELLACTIVATIONRESPONSE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2EN-DCCONFIGURATIONUPDATEACKNOWLEDGEEnable,X2EN-DCCONFIGURATIONUPDATEACKNOWLEDGEEnable,X2EN-DCCONFIGURATIONUPDATEACKNOWLEDGE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2EN-DCCONFIGURATIONUPDATEEnable,X2EN-DCCONFIGURATIONUPDATEEnable,X2EN-DCCONFIGURATIONUPDATE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2EN-DCCONFIGURATIONUPDATEFAILUREEnable,X2EN-DCCONFIGURATIONUPDATEFAILUREEnable,X2EN-DCCONFIGURATIONUPDATEFAILURE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2EN-DCX2SETUPFAILUREEnable,X2EN-DCX2SETUPFAILUREEnable,X2EN-DCX2SETUPFAILURE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2EN-DCX2SETUPREQUESTEnable,X2EN-DCX2SETUPREQUESTEnable,X2EN-DCX2SETUPREQUEST信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2EN-DCX2SETUPRESPONSEEnable,X2EN-DCX2SETUPRESPONSEEnable,X2EN-DCX2SETUPRESPONSE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2Enable,X2Enable,X2口软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2PARTIALRESETCONFIRMEnable,X2PARTIALRESETCONFIRMEnable,X2PARTIALRESETCONFIRM信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2PARTIALRESETREQUIREDEnable,X2PARTIALRESETREQUIREDEnable,X2PARTIALRESETREQUIRED信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2RRCTRANSFEREnable,X2RRCTRANSFEREnable,X2RRCTRANSFER信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2SECONDARYRATDATAUSAGEREPORTEnable,X2SECONDARYRATDATAUSAGEREPORTEnable,X2SECONDARYRATDATAUSAGEREPORT信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2SGNBACTIVITYNOTIFICATIONEnable,X2SGNBACTIVITYNOTIFICATIONEnable,X2SGNBACTIVITYNOTIFICATION信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2SGNBADDITIONREQUESTACKNOWLEDGEEnable,X2SGNBADDITIONREQUESTACKNOWLEDGEEnable,X2SGNBADDITIONREQUESTACKNOWLEDGE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2SGNBADDITIONREQUESTEnable,X2SGNBADDITIONREQUESTEnable,X2SGNBADDITIONREQUEST信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2SGNBADDITIONREQUESTREJECTEnable,X2SGNBADDITIONREQUESTREJECTEnable,X2SGNBADDITIONREQUESTREJECT信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2SGNBCHANGECONFIRMEnable,X2SGNBCHANGECONFIRMEnable,X2SGNBCHANGECONFIRM信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2SGNBCHANGEREFUSEEnable,X2SGNBCHANGEREFUSEEnable,X2SGNBCHANGEREFUSE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2SGNBCHANGEREQUIREDEnable,X2SGNBCHANGEREQUIREDEnable,X2SGNBCHANGEREQUIRED信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2SGNBCOUNTERCHECKREQUESTEnable,X2SGNBCOUNTERCHECKREQUESTEnable,X2SGNBCOUNTERCHECKREQUEST信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2SGNBMODIFICATIONCONFIRMEnable,X2SGNBMODIFICATIONCONFIRMEnable,X2SGNBMODIFICATIONCONFIRM信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2SGNBMODIFICATIONREFUSEEnable,X2SGNBMODIFICATIONREFUSEEnable,X2SGNBMODIFICATIONREFUSE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2SGNBMODIFICATIONREQUESTACKNOWLEDGEEnable,X2SGNBMODIFICATIONREQUESTACKNOWLEDGEEnable,X2SGNBMODIFICATIONREQUESTACKNOWLEDGE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2SGNBMODIFICATIONREQUESTEnable,X2SGNBMODIFICATIONREQUESTEnable,X2SGNBMODIFICATIONREQUEST信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2SGNBMODIFICATIONREQUESTREJECTEnable,X2SGNBMODIFICATIONREQUESTREJECTEnable,X2SGNBMODIFICATIONREQUESTREJECT信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2SGNBMODIFICATIONREQUIREDEnable,X2SGNBMODIFICATIONREQUIREDEnable,X2SGNBMODIFICATIONREQUIRED信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2SGNBRECONFIGURATIONCOMPLETEEnable,X2SGNBRECONFIGURATIONCOMPLETEEnable,X2SGNBRECONFIGURATIONCOMPLETE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2SGNBRELEASECONFIRMEnable,X2SGNBRELEASECONFIRMEnable,X2SGNBRELEASECONFIRM信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2SGNBRELEASEREQUESTACKNOWLEDGEEnable,X2SGNBRELEASEREQUESTACKNOWLEDGEEnable,X2SGNBRELEASEREQUESTACKNOWLEDGE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2SGNBRELEASEREQUESTEnable,X2SGNBRELEASEREQUESTEnable,X2SGNBRELEASEREQUEST信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2SGNBRELEASEREQUESTREJECTEnable,X2SGNBRELEASEREQUESTREJECTEnable,X2SGNBRELEASEREQUESTREJECT信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,X2口采集配置策略,Device.FAP.SCMgmt.Config.{i}.X2SGNBRELEASEREQUIREDEnable,X2SGNBRELEASEREQUIREDEnable,X2SGNBRELEASEREQUIRED信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnACTIVITYNOTIFICATIONEnable,XnACTIVITYNOTIFICATIONEnable,XnACTIVITYNOTIFICATION信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnAllEnable,XnAllEnable,Xn口软采开启所有信令消息,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnCELLACTIVATIONFAILUREEnable,XnCELLACTIVATIONFAILUREEnable,XnCELLACTIVATIONFAILURE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnCELLACTIVATIONREQUESTEnable,XnCELLACTIVATIONREQUESTEnable,XnCELLACTIVATIONREQUEST信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnCELLACTIVATIONRESPONSEEnable,XnCELLACTIVATIONRESPONSEEnable,XnCELLACTIVATIONRESPONSE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnE-UTRA-NRCELLRESOURCECOORDINATIONREQUESTEnable,XnE-UTRA-NRCELLRESOURCECOORDINATIONREQUESTEnable,XnE-UTRA-NRCELLRESOURCECOORDINATIONREQUEST信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnE-UTRA-NRCELLRESOURCECOORDINATIONRESPONSEEnable,XnE-UTRA-NRCELLRESOURCECOORDINATIONRESPONSEEnable,XnE-UTRA-NRCELLRESOURCECOORDINATIONRESPONSE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnERRORINDICATIONEnable,XnERRORINDICATIONEnable,XnERRORINDICATION信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnEnable,XnEnable,Xn口软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnHANDOVERCANCELEnable,XnHANDOVERCANCELEnable,XnHANDOVERCANCEL信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnHANDOVERPREPARATIONFAILUREEnable,XnHANDOVERPREPARATIONFAILUREEnable,XnHANDOVERPREPARATIONFAILURE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnHANDOVERREQUESTACKNOWLEDGEEnable,XnHANDOVERREQUESTACKNOWLEDGEEnable,XnHANDOVERREQUESTACKNOWLEDGE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnHANDOVERREQUESTEnable,XnHANDOVERREQUESTEnable,XnHANDOVERREQUEST信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnNG-RANNODECONFIGURATIONUPDATEACKNOWLEDGEEnable,XnNG-RANNODECONFIGURATIONUPDATEACKNOWLEDGEEnable,XnNG-RANNODECONFIGURATIONUPDATEACKNOWLEDGE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnNG-RANNODECONFIGURATIONUPDATEEnable,XnNG-RANNODECONFIGURATIONUPDATEEnable,XnNG-RANNODECONFIGURATIONUPDATE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnNG-RANNODECONFIGURATIONUPDATEFAILUREEnable,XnNG-RANNODECONFIGURATIONUPDATEFAILUREEnable,XnNG-RANNODECONFIGURATIONUPDATEFAILURE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnNOTIFICATIONCONTROLINDICATIONEnable,XnNOTIFICATIONCONTROLINDICATIONEnable,XnNOTIFICATIONCONTROLINDICATION信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnRANPAGINGEnable,XnRANPAGINGEnable,XnRANPAGING信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnRESETREQUESTEnable,XnRESETREQUESTEnable,XnRESETREQUEST信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnRESETRESPONSEEnable,XnRESETRESPONSEEnable,XnRESETRESPONSE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnRETRIEVEUECONTEXTFAILUREEnable,XnRETRIEVEUECONTEXTFAILUREEnable,XnRETRIEVEUECONTEXTFAILURE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnRETRIEVEUECONTEXTREQUESTEnable,XnRETRIEVEUECONTEXTREQUESTEnable,XnRETRIEVEUECONTEXTREQUEST信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnRETRIEVEUECONTEXTRESPONSEEnable,XnRETRIEVEUECONTEXTRESPONSEEnable,XnRETRIEVEUECONTEXTRESPONSE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnRRCTRANSFEREnable,XnRRCTRANSFEREnable,XnRRCTRANSFER信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnS-NODEADDITIONREQUESTACKNOWLEDGEEnable,XnS-NODEADDITIONREQUESTACKNOWLEDGEEnable,XnS-NODEADDITIONREQUESTACKNOWLEDGE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnS-NODEADDITIONREQUESTEnable,XnS-NODEADDITIONREQUESTEnable,XnS-NODEADDITIONREQUEST信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnS-NODEADDITIONREQUESTREJECTEnable,XnS-NODEADDITIONREQUESTREJECTEnable,XnS-NODEADDITIONREQUESTREJECT信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnS-NODECHANGECONFIRMEnable,XnS-NODECHANGECONFIRMEnable,XnS-NODECHANGECONFIRM信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnS-NODECHANGEREFUSEEnable,XnS-NODECHANGEREFUSEEnable,XnS-NODECHANGEREFUSE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnS-NODECHANGEREQUIREDEnable,XnS-NODECHANGEREQUIREDEnable,XnS-NODECHANGEREQUIRED信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnS-NODECOUNTERCHECKREQUESTEnable,XnS-NODECOUNTERCHECKREQUESTEnable,XnS-NODECOUNTERCHECKREQUEST信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnS-NODEMODIFICATIONCONFIRMEnable,XnS-NODEMODIFICATIONCONFIRMEnable,XnS-NODEMODIFICATIONCONFIRM信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnS-NODEMODIFICATIONREFUSEEnable,XnS-NODEMODIFICATIONREFUSEEnable,XnS-NODEMODIFICATIONREFUSE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnS-NODEMODIFICATIONREQUESTACKNOWLEDGEEnable,XnS-NODEMODIFICATIONREQUESTACKNOWLEDGEEnable,XnS-NODEMODIFICATIONREQUESTACKNOWLEDGEEnableE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnS-NODEMODIFICATIONREQUESTEnable,XnS-NODEMODIFICATIONREQUESTEnable,XnS-NODEMODIFICATIONREQUEST信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnS-NODEMODIFICATIONREQUESTREJECTEnable,XnS-NODEMODIFICATIONREQUESTREJECTEnable,XnS-NODEMODIFICATIONREQUESTREJECT信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnS-NODEMODIFICATIONREQUIREDEnable,XnS-NODEMODIFICATIONREQUIREDEnable,XnS-NODEMODIFICATIONREQUIRED信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnS-NODERELEASECONFIRMEnable,XnS-NODERELEASECONFIRMEnable,XnS-NODERELEASECONFIRM信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnS-NODERELEASEREJECTEnable,XnS-NODERELEASEREJECTEnable,XnS-NODERELEASEREJECT信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnS-NODERELEASEREQUESTACKNOWLEDGEEnable,XnS-NODERELEASEREQUESTACKNOWLEDGEEnable,XnS-NODERELEASEREQUESTACKNOWLEDGE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnS-NODERELEASEREQUESTEnable,XnS-NODERELEASEREQUESTEnable,XnS-NODERELEASEREQUEST信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnS-NODERELEASEREQUIREDEnable,XnS-NODERELEASEREQUIREDEnable,XnS-NODERELEASEREQUIRED信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnSENBRECONFIGURATIONCOMPLETEEnable,XnSENBRECONFIGURATIONCOMPLETEEnable,XnSENBRECONFIGURATIONCOMPLETE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnSNSTATUSTRANSFEREnable,XnSNSTATUSTRANSFEREnable,XnSNSTATUSTRANSFER信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnUADDRESSINDICATIONEnable,XnUADDRESSINDICATIONEnable,XnUADDRESSINDICATIONEnable信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnUEContextReleaseEnable,XnUEContextReleaseEnable,XnUEContextRelease信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnXNREMOVALFAILUREEnable,XnXNREMOVALFAILUREEnable,XnXNREMOVALFAILURE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnXNREMOVALREQUESTEnable,XnXNREMOVALREQUESTEnable,XnXNREMOVALREQUEST信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnXNREMOVALRESPONSEEnable,XnXNREMOVALRESPONSEEnable,XnXNREMOVALRESPONSE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnXNSETUPFAILUREEnable,XnXNSETUPFAILUREEnable,XnXNSETUPFAILURE信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnXNSETUPREQUESTEnable,XnXNSETUPREQUESTEnable,XnXNSETUPREQUEST信令软采开关,RW,boolean
+ST_NR,软采规则,NR,ST,Xn口采集配置策略,Device.FAP.SCMgmt.Config.{i}.XnXNSETUPRESPONSEEnable,XnXNSETUPRESPONSEEnable,XnXNSETUPRESPONSE信令软采开关,RW,boolean

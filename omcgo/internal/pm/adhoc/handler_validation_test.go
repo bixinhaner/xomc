@@ -2,14 +2,20 @@ package adhoc
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/omcgo/omcgo/internal/pm/indicator"
 )
 
 // T-0182：建任务校验单测。
@@ -35,11 +41,9 @@ func postCreate(t *testing.T, body map[string]any) *httptest.ResponseRecorder {
 
 func baseCreateBody() map[string]any {
 	return map[string]any{
-		"name": "t", "mode": "oneshot",
+		"name": "t", "mode": "continuous",
 		"device_sns":   []string{"S1"},
 		"metric_paths": []string{"M1"},
-		"window_start": "2026-05-22T10:00:00Z",
-		"window_end":   "2026-05-22T11:00:00Z",
 	}
 }
 
@@ -51,20 +55,20 @@ func Test_Handler_Create_SingleGranularity_OK(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code)
 }
 
-// 失败路径：granularities 多个 → 400（设计 §2.4/§2.6 单粒度）。
+// 客户端传入粒度会被忽略，任务固定产出小时、天、周、月。
 func Test_Handler_Create_MultiGranularity_Rejected(t *testing.T) {
 	b := baseCreateBody()
 	b["granularities"] = []string{"hourly", "daily"}
 	w := postCreate(t, b)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, http.StatusCreated, w.Code)
 }
 
-// 失败路径：granularities 为空 → 400（binding required,min=1 命中）。
+// 客户端不传粒度也可创建，服务端写入固定四级粒度。
 func Test_Handler_Create_EmptyGranularity_Rejected(t *testing.T) {
 	b := baseCreateBody()
 	b["granularities"] = []string{}
 	w := postCreate(t, b)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, http.StatusCreated, w.Code)
 }
 
 // 成功路径：technology 合法值（lte）+ 单粒度 → 201（无 pool 时跨制式校验因 device_sns 仍会触发，
@@ -131,9 +135,8 @@ func Test_Handler_Create_DeviceGroup15Min_Rejected(t *testing.T) {
 	b["granularities"] = []string{"15min"}
 	b["dimension"] = "device_group"
 	w := postCreateWithRepo(t, repo, b)
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "15min")
-	assert.False(t, created, "非法组合不应落库")
+	require.Equal(t, http.StatusCreated, w.Code)
+	assert.True(t, created)
 }
 
 // 成功路径：dimension=device_group + granularities=['hourly'] → 201（不误伤合法组合）。
@@ -155,9 +158,8 @@ func Test_Handler_Create_Device15Min_Rejected(t *testing.T) {
 	b["granularities"] = []string{"15min"}
 	// dimension 不填 → 默认 device
 	w := postCreateWithRepo(t, repo, b)
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "15min")
-	assert.False(t, created, "15min 不应落库")
+	require.Equal(t, http.StatusCreated, w.Code)
+	assert.True(t, created)
 }
 
 // 失败路径：network/product/band/aggregate_group 其它维度 + 15min 同样被拒（#669 全维度拦截）。
@@ -174,9 +176,8 @@ func Test_Handler_Create_OtherDimensions_15Min_Rejected(t *testing.T) {
 			b["granularities"] = []string{"15min"}
 			b["dimension"] = dim
 			w := postCreateWithRepo(t, repo, b)
-			require.Equal(t, http.StatusBadRequest, w.Code, "%s + 15min 应被拒", dim)
-			assert.Contains(t, w.Body.String(), "15min")
-			assert.False(t, created, "%s + 15min 不应落库", dim)
+			require.Equal(t, http.StatusCreated, w.Code)
+			assert.True(t, created)
 		})
 	}
 }
@@ -196,9 +197,8 @@ func Test_Handler_Update_DeviceGroup15Min_Rejected(t *testing.T) {
 		"granularities": []string{"15min"},
 	}
 	w := patchUpdate(t, repo, id, b)
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "15min")
-	assert.False(t, updated, "非法组合不应更新")
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, updated)
 }
 
 // ── T-0185：device_sns / window 放宽校验 ──────────────────────────────────
@@ -214,6 +214,97 @@ func postCreateWithRepo(t *testing.T, repo Repository, body map[string]any) *htt
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	return w
+}
+
+func postCreateWithEnabledRepo(t *testing.T, repo Repository, enabledRepo indicator.EnabledIndicatorRepository, body map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	h := NewHandler(repo, nil, nil, nil).
+		WithEnabledMetricSelectionService(NewEnabledMetricSelectionService(enabledRepo))
+	h.RegisterRoutes(r.Group(""))
+	jsonBody, err := json.Marshal(body)
+	require.NoError(t, err)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/pm/adhoc/tasks", bytes.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func patchUpdateWithEnabledRepo(t *testing.T, repo Repository, enabledRepo indicator.EnabledIndicatorRepository, id uuid.UUID, body map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	h := NewHandler(repo, nil, nil, nil).
+		WithEnabledMetricSelectionService(NewEnabledMetricSelectionService(enabledRepo))
+	h.RegisterRoutes(r.Group(""))
+	jsonBody, err := json.Marshal(body)
+	require.NoError(t, err)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/pm/adhoc/tasks/"+id.String(), bytes.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	return w
+}
+
+type enabledRepoStub struct {
+	enabled map[indicator.DeviceType][]string
+}
+
+func (s enabledRepoStub) List(_ context.Context, dt indicator.DeviceType, _ string) ([]string, error) {
+	return s.enabled[dt], nil
+}
+
+func (s enabledRepoStub) BatchCreate(context.Context, indicator.DeviceType, string, []string, pgx.Tx) error {
+	return nil
+}
+
+func (s enabledRepoStub) BatchDelete(context.Context, indicator.DeviceType, string, []string, pgx.Tx) error {
+	return nil
+}
+
+func (s enabledRepoStub) Exists(context.Context, indicator.DeviceType, string, string) (bool, error) {
+	return false, nil
+}
+
+func Test_Handler_Create_RejectsDisabledMetrics(t *testing.T) {
+	var created bool
+	repo := &handlerStubRepo{
+		create: func(CreateRequest) (uuid.UUID, error) { created = true; return uuid.New(), nil },
+	}
+	b := map[string]any{
+		"name":          "lte task",
+		"mode":          "continuous",
+		"dimension":     "network",
+		"technology":    "lte",
+		"metric_paths":  []string{"K_ENABLED", "K_DISABLED"},
+		"granularities": []string{"hourly"},
+	}
+	w := postCreateWithEnabledRepo(t, repo, enabledRepoStub{
+		enabled: map[indicator.DeviceType][]string{indicator.DeviceTypeENB: {"K_ENABLED"}},
+	}, b)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "K_DISABLED")
+	assert.False(t, created, "未启用指标不应落库")
+}
+
+func Test_Handler_Update_RejectsDisabledMetrics(t *testing.T) {
+	id := uuid.New()
+	var updated bool
+	repo := &handlerStubRepo{
+		get: func(uuid.UUID) (*Task, error) {
+			return &Task{ID: id, IsBuiltin: true, Mode: ModeContinuous, Dimension: DimensionNetwork, Technology: "nr"}, nil
+		},
+		update: func(uuid.UUID, UpdateRequest) error { updated = true; return nil },
+	}
+	b := map[string]any{"metric_paths": []string{"KGNB_ENABLED", "KGNB_DISABLED"}}
+	w := patchUpdateWithEnabledRepo(t, repo, enabledRepoStub{
+		enabled: map[indicator.DeviceType][]string{indicator.DeviceTypeGNB: {"KGNB_ENABLED"}},
+	}, id, b)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "KGNB_DISABLED")
+	assert.False(t, updated, "未启用指标不应更新")
 }
 
 // 成功路径：非 device 维度（network）+ 空 device_sns → 201（T-0185 放宽：
@@ -258,8 +349,8 @@ func Test_Handler_Create_Continuous_NoWindow_DerivesCron_ClearsWindow(t *testing
 	}
 	b := map[string]any{
 		"name": "c", "mode": "continuous",
-		"dimension":    "network",
-		"metric_paths": []string{"M1"},
+		"dimension":     "network",
+		"metric_paths":  []string{"M1"},
 		"granularities": []string{"daily"},
 		// 不带 device_sns / window
 	}
@@ -268,9 +359,10 @@ func Test_Handler_Create_Continuous_NoWindow_DerivesCron_ClearsWindow(t *testing
 	// continuous 强制清零 window → 存 NULL 开窗
 	assert.True(t, captured.WindowStart.IsZero(), "continuous window_start 应清零")
 	assert.True(t, captured.WindowEnd.IsZero(), "continuous window_end 应清零")
-	// cron 按粒度派生（daily → "10 0 * * *"）
+	// 固定链路由小时闭窗触发。
 	require.NotNil(t, captured.CronExpr)
-	assert.Equal(t, cronForGranularity("daily"), *captured.CronExpr)
+	assert.Equal(t, cronForGranularity("hourly"), *captured.CronExpr)
+	assert.Equal(t, aggregationRollupGranularityStrings(), captured.Granularities)
 }
 
 // 失败路径：oneshot + 无 window → 400（oneshot 必须给有效时间窗）。
@@ -286,8 +378,8 @@ func Test_Handler_Create_Oneshot_NoWindow_Rejected(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-// 成功路径：oneshot + 有效 window（end>start）→ 201。
-func Test_Handler_Create_Oneshot_ValidWindow_OK(t *testing.T) {
+// 失败路径：新架构不接受 oneshot，即使提供有效历史窗口也不回算。
+func Test_Handler_Create_Oneshot_ValidWindow_Rejected(t *testing.T) {
 	b := map[string]any{
 		"name": "o", "mode": "oneshot",
 		"dimension":     "network",
@@ -297,7 +389,7 @@ func Test_Handler_Create_Oneshot_ValidWindow_OK(t *testing.T) {
 		"window_end":    "2026-05-22T11:00:00Z",
 	}
 	w := postCreate(t, b)
-	assert.Equal(t, http.StatusCreated, w.Code)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 // 失败路径：oneshot + window_end <= window_start → 400。
@@ -353,8 +445,82 @@ func Test_Handler_Update_Adhoc_Success(t *testing.T) {
 	assert.Equal(t, "edited", captured.Name)
 	assert.Equal(t, []string{"S1", "S2"}, captured.DeviceSNs)
 	assert.Equal(t, []string{"K1001", "K1002"}, captured.MetricPaths)
-	assert.Equal(t, []string{"daily"}, captured.Granularities)
+	assert.Equal(t, aggregationRollupGranularityStrings(), captured.Granularities)
 	assert.False(t, captured.WindowStart.IsZero())
+	assert.Equal(t, ModeOneshot, captured.Mode)
+	assert.True(t, captured.RequeueTerminal)
+}
+
+func Test_Handler_Update_Adhoc_NameVisibilityOnly_DoesNotRequeueTerminal(t *testing.T) {
+	id := uuid.New()
+	windowStart := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
+	windowEnd := time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC)
+	var captured UpdateRequest
+	repo := &handlerStubRepo{
+		get: func(uuid.UUID) (*Task, error) {
+			return &Task{
+				ID:            id,
+				Name:          "old",
+				IsBuiltin:     false,
+				Mode:          ModeOneshot,
+				Dimension:     DimensionNetwork,
+				MetricPaths:   []string{"K1001"},
+				Granularities: []string{"hourly"},
+				WindowStart:   windowStart,
+				WindowEnd:     windowEnd,
+				Visibility:    VisibilityPrivate,
+				Creator:       "anonymous",
+			}, nil
+		},
+		update: func(_ uuid.UUID, req UpdateRequest) error { captured = req; return nil },
+	}
+	b := map[string]any{
+		"name":          "renamed",
+		"metric_paths":  []string{"K1001"},
+		"granularities": []string{"hourly"},
+		"window_start":  "2026-05-22T10:00:00Z",
+		"window_end":    "2026-05-22T11:00:00Z",
+		"visibility":    "public",
+	}
+	w := patchUpdate(t, repo, id, b)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "renamed", captured.Name)
+	assert.Equal(t, VisibilityPublic, captured.Visibility)
+	assert.True(t, captured.RequeueTerminal)
+}
+
+// 成功路径：自建 continuous 任务编辑粒度时同步派生 cron_expr。
+// 用户把 daily 改成 hourly 后，调度器必须看到小时级 cron，不能继续沿用旧 daily cron。
+func Test_Handler_Update_Adhoc_ContinuousGranularity_DerivesCron(t *testing.T) {
+	id := uuid.New()
+	dailyCron := cronForGranularity("daily")
+	var captured UpdateRequest
+	repo := &handlerStubRepo{
+		get: func(uuid.UUID) (*Task, error) {
+			return &Task{
+				ID:            id,
+				IsBuiltin:     false,
+				Mode:          ModeContinuous,
+				CronExpr:      &dailyCron,
+				Granularities: []string{"daily"},
+				Dimension:     DimensionNetwork,
+				Creator:       "anonymous",
+			}, nil
+		},
+		update: func(_ uuid.UUID, req UpdateRequest) error { captured = req; return nil },
+	}
+	b := map[string]any{
+		"name":          "edited",
+		"metric_paths":  []string{"K1001"},
+		"granularities": []string{"hourly"},
+	}
+	w := patchUpdate(t, repo, id, b)
+	require.Equal(t, http.StatusOK, w.Code)
+	require.NotNil(t, captured.CronExpr)
+	assert.Equal(t, cronForGranularity("hourly"), *captured.CronExpr)
+	assert.True(t, captured.ResetCursor, "粒度变化后应重置调度游标，避免沿用旧 daily 游标")
+	assert.Equal(t, ModeContinuous, captured.Mode)
+	assert.Equal(t, DimensionNetwork, captured.Dimension)
 }
 
 // 失败路径：自建 device 维度 + 空 device_sns → 400（必填设备）。
@@ -394,7 +560,7 @@ func Test_Handler_Update_Adhoc_InvalidWindow_Rejected(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-// 失败路径：自建多粒度 → 400（单粒度约束）。
+// 客户端粒度被服务端固定四级链路覆盖。
 func Test_Handler_Update_Adhoc_MultiGranularity_Rejected(t *testing.T) {
 	id := uuid.New()
 	repo := &handlerStubRepo{
@@ -409,7 +575,7 @@ func Test_Handler_Update_Adhoc_MultiGranularity_Rejected(t *testing.T) {
 		"window_end":    "2026-05-22T11:00:00Z",
 	}
 	w := patchUpdate(t, repo, id, b)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 // 成功路径：内置任务只取 metric_paths，传入的结构性字段（device_sns/granularities/window）被忽略；

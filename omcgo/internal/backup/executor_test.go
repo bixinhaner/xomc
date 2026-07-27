@@ -17,6 +17,55 @@ import (
 	"go.uber.org/zap"
 )
 
+func TestBuildBackupUploadURL_PreservesPrefixAndEncodesBusinessQuery(t *testing.T) {
+	got, err := buildBackupUploadURL(
+		transfercfg.UploadSettings{
+			BaseURL: "https://edge.example.com:9443/omc/",
+			Path:    "/smallcell/FileUploadService",
+		},
+		&BackupTypeSpec{URLFileTypeParam: "CONFIGBACKUP_XML"},
+		"SN 100&1",
+		"task/100",
+		"配置 a&b.xml",
+	)
+	require.NoError(t, err)
+	require.Equal(t,
+		"https://edge.example.com:9443/omc/smallcell/FileUploadService?fileType=CONFIGBACKUP_XML&sn=SN+100%261&taskId=task%2F100&filename=%E9%85%8D%E7%BD%AE+a%26b.xml",
+		got,
+	)
+}
+
+func TestBuildBackupUploadURL_PreservesNVFilenameAsLastParameter(t *testing.T) {
+	got, err := buildBackupUploadURL(
+		transfercfg.UploadSettings{BaseURL: "http://172.17.9.239:8081"},
+		&BackupTypeSpec{URLFileTypeParam: "CONFIGBACKUP_NV"},
+		"SN100",
+		"task-100",
+		"backup.nv",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t,
+		"http://172.17.9.239:8081/smallcell/FileUploadService?fileType=CONFIGBACKUP_NV&sn=SN100&taskId=task-100&filename=backup.nv",
+		got,
+	)
+}
+
+func TestBuildBackupUploadURL_ProductionAllowsDeviceReachablePrivateBase(t *testing.T) {
+	t.Setenv("OMCGO_ENV", "production")
+
+	got, err := buildBackupUploadURL(
+		transfercfg.UploadSettings{BaseURL: "http://172.17.9.239:8081"},
+		&BackupTypeSpec{URLFileTypeParam: "CONFIGBACKUP_XML"},
+		"SN100",
+		"task-100",
+		"backup.xml",
+	)
+
+	require.NoError(t, err)
+	require.Contains(t, got, "http://172.17.9.239:8081/smallcell/FileUploadService")
+}
+
 // ---------------------------------------------------------------------------
 // Mocks (prefixed with exec to avoid collision with service_test.go)
 // ---------------------------------------------------------------------------
@@ -210,7 +259,7 @@ func (m *execFTPConfigRepo) List(_ context.Context, _ FTPConfigFilter) (*model.L
 // ---------------------------------------------------------------------------
 
 func newTestExecutor(taskRepo *execTaskRepo, deviceRepo *execDeviceRepo, cmdQ *execCmdQueue) *BackupExecutor {
-	return &BackupExecutor{
+	executor := &BackupExecutor{
 		taskRepo:   taskRepo,
 		deviceRepo: deviceRepo,
 		taskSvc:    cmdQ,
@@ -218,6 +267,13 @@ func newTestExecutor(taskRepo *execTaskRepo, deviceRepo *execDeviceRepo, cmdQ *e
 		eventBus:   event.NewChannelEventBus(16, zap.NewNop()),
 		logger:     zap.NewNop(),
 	}
+	executor.SetTransferProvider(&execTransferProvider{
+		upload: transfercfg.UploadSettings{
+			BaseURL: "http://acs.test:7557",
+			Path:    "/smallcell/FileUploadService",
+		},
+	})
+	return executor
 }
 
 func TestHandleTask_PendingToRunning(t *testing.T) {

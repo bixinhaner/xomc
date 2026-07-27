@@ -1,27 +1,23 @@
 /**
  * LicenseParamsTab — DeviceDetail "License 参数" tab。
  *
- * 后端 GET/POST /devices/:id/license-params；Q3 设计：刷新按钮"手动刷新"，
- * 点击 = 下发 GPV 任务 + 立刻 refetch 一次当前 DB 值。无轮询、无进度条；
- * 用户需再点一次刷新（或离开页面再回来）才能看到 CPE 响应回来的新值。
+ * 后端 GET /devices/:id/license-params；刷新动作由 DeviceDetail 页头统一派发，
+ * 与快速设置复用同一套参数同步队列、轮询和缓存失效逻辑。
  *
  * 替换 DeviceDetail/index.tsx 里的硬编码 mock license tab。
  */
-import { useMemo } from 'react';
-import { Alert, Button, Card, Empty, Spin, Table, Typography, message } from 'antd';
-import { ReloadOutlined } from '@ant-design/icons';
+import { useEffect, useMemo } from 'react';
+import { Alert, Card, Empty, Spin, Table, Typography } from 'antd';
 
 import { useT } from '@/hooks/useT';
-import {
-  useDeviceLicenseParams,
-  useRefreshDeviceLicenseParams,
-} from '@core/hooks/api/useDeviceLicenseParams';
+import { useDeviceLicenseParams } from '@core/hooks/api/useDeviceLicenseParams';
 import type { DeviceLicenseParam } from '@core/services/api/deviceLicenseParamApi';
 
 const { Text } = Typography;
 
 interface LicenseParamsTabProps {
   deviceId: string;
+  onSyncTargetPathsChange?: (paths: string[]) => void;
 }
 
 interface LicenseRow {
@@ -90,45 +86,19 @@ function buildLicenseRows(items: DeviceLicenseParam[]): LicenseRow[] {
     }));
 }
 
-function extractBizCode(err: unknown): number {
-  if (!err || typeof err !== 'object') return 0;
-  const e = err as Record<string, unknown>;
-  if (typeof e.bizCode === 'number') return e.bizCode;
-  const resp = e.response as Record<string, unknown> | undefined;
-  if (resp && typeof resp === 'object') {
-    const data = resp.data as Record<string, unknown> | undefined;
-    if (data && typeof data === 'object') {
-      if (typeof data.biz_code === 'number') return data.biz_code;
-      if (typeof data.bizCode === 'number') return data.bizCode;
-    }
-  }
-  return 0;
-}
-
-export default function LicenseParamsTab({ deviceId }: LicenseParamsTabProps) {
+export default function LicenseParamsTab({ deviceId, onSyncTargetPathsChange }: LicenseParamsTabProps) {
   const t = useT();
   const listQuery = useDeviceLicenseParams(deviceId);
-  const refreshMutation = useRefreshDeviceLicenseParams(deviceId);
 
-  const handleRefresh = () => {
-    refreshMutation.mutate(undefined, {
-      onSuccess: () => {
-        void message.success(t('device.licenseParam.refreshHint'));
-      },
-      onError: (err) => {
-        // 后端 ErrCodeRuleTaskRunning 复用为"刷新进行中"标识
-        const code = extractBizCode(err);
-        const msg = err instanceof Error ? err.message : '';
-        if (code === 1205 || msg.includes('license refresh already running')) {
-          void message.warning(t('device.licenseParam.refreshThrottled'));
-          return;
-        }
-        void message.error(msg ? `${t('device.licenseParam.refreshFailed')}: ${msg}` : t('device.licenseParam.refreshFailed'));
-      },
-    });
-  };
+  const items = useMemo(() => listQuery.data?.items ?? [], [listQuery.data?.items]);
+  const licenseParamPaths = useMemo(
+    () => Array.from(new Set(items.map((item) => item.standardPath).filter(Boolean))),
+    [items],
+  );
+  useEffect(() => {
+    onSyncTargetPathsChange?.(licenseParamPaths);
+  }, [licenseParamPaths, onSyncTargetPathsChange]);
 
-  const items = listQuery.data?.items ?? [];
   const rows = useMemo(() => buildLicenseRows(items), [items]);
   const columns = useMemo(
     () => [
@@ -184,15 +154,6 @@ export default function LicenseParamsTab({ deviceId }: LicenseParamsTabProps) {
     <Card
       variant="borderless"
       title={t('device.licenseParam.title')}
-      extra={
-        <Button
-          icon={<ReloadOutlined />}
-          onClick={handleRefresh}
-          loading={refreshMutation.isPending || listQuery.isFetching}
-        >
-          {t('device.licenseParam.refresh')}
-        </Button>
-      }
     >
       {listQuery.isError ? (
         <Alert

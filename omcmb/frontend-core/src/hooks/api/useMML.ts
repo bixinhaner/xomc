@@ -1,11 +1,47 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { MMLScript, MMLCustomCommand, MMLImportedScriptCreateInput, MMLImportedScriptReplaceInput, MMLScriptExecutionInput, MMLScriptImportValidation } from '../../types/mml';
-import type { PageRequest } from '../../types/pagination';
+import type {
+  DeviceResultStatus,
+  DeviceTaskResultItem,
+  MMLScript,
+  MMLCustomCommand,
+  MMLImportedScriptCreateInput,
+  MMLImportedScriptReplaceInput,
+  MMLScriptExecutionInput,
+  MMLScriptImportValidation,
+  MMLTask,
+  MMLTaskResultsStats,
+  MMLTaskStatus,
+} from '../../types/mml';
+import type { PageRequest, PageResponse } from '../../types/pagination';
 import { mmlService } from '../../mock/services/mmlService';
 import { MMLScriptImportApiError, mmlApi } from '../../services/api/mmlApi';
 import { createApiSwitch } from '../../services/apiSwitch';
+import {
+  MML_CUSTOM_COMMAND_PATHS_QUERY_KEY,
+  MML_CUSTOM_COMMANDS_QUERY_KEY,
+} from './mmlQueryKeys';
 
 const api = createApiSwitch(mmlService, mmlApi);
+
+export const MML_TASK_LIST_ACTIVE_REFETCH_INTERVAL_MS = 3000;
+export const MML_TASK_RESULTS_ACTIVE_REFETCH_INTERVAL_MS = 3000;
+const MML_TASK_LIST_ACTIVE_STATUSES = new Set<MMLTaskStatus>(['pending', 'running', 'paused']);
+const MML_TASK_RESULT_ACTIVE_STATUSES = new Set<DeviceResultStatus>(['pending', 'running']);
+
+export function getMMLTasksRefetchInterval(data?: { items?: Array<Pick<MMLTask, 'status'>> }) {
+  const hasActiveTask = data?.items?.some((task) => MML_TASK_LIST_ACTIVE_STATUSES.has(task.status)) ?? false;
+  return hasActiveTask ? MML_TASK_LIST_ACTIVE_REFETCH_INTERVAL_MS : false;
+}
+
+export function getMMLTaskResultsRefetchInterval(
+  data?: { items?: Array<Pick<DeviceTaskResultItem, 'status'>> },
+  pollWhileTaskActive = false,
+) {
+  const hasActiveResult = data?.items?.some((row) => (
+    row.status ? MML_TASK_RESULT_ACTIVE_STATUSES.has(row.status) : false
+  )) ?? false;
+  return pollWhileTaskActive || hasActiveResult ? MML_TASK_RESULTS_ACTIVE_REFETCH_INTERVAL_MS : false;
+}
 
 export function useMMLCommands(params: { keyword?: string; category?: string } & PageRequest) {
   return useQuery({
@@ -41,11 +77,13 @@ export function useMMLScriptById(id: string) {
 }
 
 export function useMMLTasks(
-  params: PageRequest & { status?: string; executeType?: string; result?: string; taskName?: string; taskOrigin?: string }
+  params: PageRequest & { status?: string; executeType?: string; result?: string; taskName?: string; scriptName?: string; taskOrigin?: string }
 ) {
   return useQuery({
     queryKey: ['mml', 'tasks', params],
     queryFn: () => api.getTasks(params),
+    refetchInterval: (query) => getMMLTasksRefetchInterval(query.state.data),
+    refetchIntervalInBackground: false,
   });
 }
 
@@ -218,6 +256,16 @@ export function useStartMMLTask() {
   });
 }
 
+export function useStartMMLTasks() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => api.startTasks(ids),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['mml', 'tasks'] });
+    },
+  });
+}
+
 export function usePauseMMLTask() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -285,12 +333,30 @@ export function useMMLTaskPolling(taskId: string | null, enabled: boolean) {
   });
 }
 
-export function useMMLTaskResults(taskId: string | null, page = 1, pageSize = 50) {
+export function useMMLTaskResults(
+  taskId: string | null,
+  page = 1,
+  pageSize = 50,
+  options?: { pollWhileTaskActive?: boolean },
+) {
   return useQuery({
     queryKey: ['mml', 'tasks', taskId, 'results', page, pageSize],
     queryFn: () => api.getTaskResults(taskId!, page, pageSize),
     enabled: Boolean(taskId),
+    refetchInterval: (query) => getMMLTaskResultsRefetchInterval(
+      query.state.data,
+      options?.pollWhileTaskActive ?? false,
+    ),
+    refetchIntervalInBackground: false,
   });
+}
+
+export function getMMLTaskResultsPage(
+  taskId: string,
+  page: number,
+  pageSize: number,
+): Promise<PageResponse<DeviceTaskResultItem, MMLTaskResultsStats>> {
+  return api.getTaskResults(taskId, page, pageSize);
 }
 
 // --- Template hooks ---
@@ -311,6 +377,8 @@ export function useCreateMMLTemplate() {
       api.createTemplate(data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['mml', 'templates'] });
+      void queryClient.invalidateQueries({ queryKey: MML_CUSTOM_COMMANDS_QUERY_KEY });
+      void queryClient.invalidateQueries({ queryKey: MML_CUSTOM_COMMAND_PATHS_QUERY_KEY });
     },
   });
 }
@@ -322,6 +390,8 @@ export function useUpdateMMLTemplate() {
       api.updateTemplate(id, data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['mml', 'templates'] });
+      void queryClient.invalidateQueries({ queryKey: MML_CUSTOM_COMMANDS_QUERY_KEY });
+      void queryClient.invalidateQueries({ queryKey: MML_CUSTOM_COMMAND_PATHS_QUERY_KEY });
     },
   });
 }
@@ -332,6 +402,8 @@ export function useDeleteMMLTemplate() {
     mutationFn: (id: string) => api.deleteTemplate(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['mml', 'templates'] });
+      void queryClient.invalidateQueries({ queryKey: MML_CUSTOM_COMMANDS_QUERY_KEY });
+      void queryClient.invalidateQueries({ queryKey: MML_CUSTOM_COMMAND_PATHS_QUERY_KEY });
     },
   });
 }
@@ -342,6 +414,8 @@ export function useCloneMMLTemplate() {
     mutationFn: (id: string) => api.cloneTemplate(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['mml', 'templates'] });
+      void queryClient.invalidateQueries({ queryKey: MML_CUSTOM_COMMANDS_QUERY_KEY });
+      void queryClient.invalidateQueries({ queryKey: MML_CUSTOM_COMMAND_PATHS_QUERY_KEY });
     },
   });
 }

@@ -18,15 +18,21 @@ import (
 // 调用侧（设备 Bootstrap 路径）应捕获此错误，把设备视为孤儿待人工绑定（设计 §4.3.1）。
 var ErrOrphan = errors.New("productClass matched no pattern (orphan device)")
 
+// ErrInactiveParamModel 表示 productClass 命中了产品规则，但产品关联的参数模型已停用。
+// 它包装 ErrOrphan，使既有设备接入调用方继续把该设备视为未识别；需要禁止透传的
+// 调用方（例如 MML）可优先判断本错误并采取更严格的处理。
+var ErrInactiveParamModel = fmt.Errorf("%w: matched product parameter model is inactive", ErrOrphan)
+
 // compiledPattern 是 product_class_patterns 行的运行时表示。
 //
 // regex 在 Refresh 时一次性编译；编译失败的行会被 WARN 跳过（避免单条坏正则瘫痪 Registry，
 // 设计决策：S2 设计备忘 #4）。
 type compiledPattern struct {
-	regex     *regexp.Regexp
-	productID uuid.UUID
-	raw       string
-	sortOrder int
+	regex              *regexp.Regexp
+	productID          uuid.UUID
+	raw                string
+	sortOrder          int
+	paramModelInactive bool
 }
 
 // Registry 是 productClass → Product 路由的核心组件（设计 §4.3.1）。
@@ -130,10 +136,11 @@ func (r *Registry) refresh(ctx context.Context, bumpVersion bool) error {
 			continue
 		}
 		compiled = append(compiled, compiledPattern{
-			regex:     re,
-			productID: row.ProductID,
-			raw:       row.ProductClass,
-			sortOrder: row.SortOrder,
+			regex:              re,
+			productID:          row.ProductID,
+			raw:                row.ProductClass,
+			sortOrder:          row.SortOrder,
+			paramModelInactive: row.ParamModelInactive,
 		})
 	}
 	r.patterns.Store(&compiled)
@@ -237,6 +244,9 @@ func (r *Registry) MatchProductClass(ctx context.Context, productClass string) (
 		r.metrics.matchOrphan()
 		return nil, ErrOrphan
 	}
+	if entry.ParamModelInactive {
+		return result, ErrInactiveParamModel
+	}
 	r.metrics.matchHit()
 	return result, nil
 }
@@ -263,12 +273,16 @@ func (r *Registry) materializeFromEntry(ctx context.Context, entry *ProductClass
 			zap.String("matched_pattern", entry.MatchedPattern))
 		return nil, fmt.Errorf("cached match references missing product %s", entry.MatchedProductID)
 	}
-	r.metrics.matchHit()
-	return &MatchResult{
+	result := &MatchResult{
 		Product:        prod,
 		MatchedPattern: entry.MatchedPattern,
 		GlobalOrder:    entry.GlobalSortOrder,
-	}, nil
+	}
+	if entry.ParamModelInactive {
+		return result, ErrInactiveParamModel
+	}
+	r.metrics.matchHit()
+	return result, nil
 }
 
 // matchPatternsSlow 走全表 regex 扫描的兜底路径，返回缓存条目 + MatchResult（仅 hit）。
@@ -295,11 +309,12 @@ func (r *Registry) matchPatternsSlow(ctx context.Context, productClass string, c
 			continue
 		}
 		entry := &ProductClassCacheEntry{
-			MatchedProductID: prod.ID,
-			Orphan:           false,
-			MatchedPattern:   p.raw,
-			GlobalSortOrder:  p.sortOrder,
-			CacheVersion:     currentVer,
+			MatchedProductID:   prod.ID,
+			Orphan:             false,
+			ParamModelInactive: p.paramModelInactive,
+			MatchedPattern:     p.raw,
+			GlobalSortOrder:    p.sortOrder,
+			CacheVersion:       currentVer,
 		}
 		return entry, &MatchResult{
 			Product:        prod,

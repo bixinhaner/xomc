@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Avatar, Space, Modal, Form, Input, App, Alert, Button } from 'antd';
 import {
   UserOutlined,
@@ -16,6 +17,7 @@ import { adminApi } from '@core/services/api/adminApi';
 import styles from './Header.module.css';
 
 export default function UserDropdown() {
+  const navigate = useNavigate();
   const popupContainerRef = useRef<HTMLSpanElement>(null);
   const token = useThemeToken();
   const currentUser = useUserStore((s) => s.currentUser);
@@ -50,7 +52,7 @@ export default function UserDropdown() {
       message.success(t('user.passwordChanged'));
       setChangePwdVisible(false);
       pwdForm.resetFields();
-      // Issue #649：改密成功后清除标记 + 强制 logout（后端已吚销旧 token）
+      // 改密成功后，后端已撤销服务端旧 token；前端退出用于清理本地认证状态。
       setMustChangePassword(false);
       // 欢迎重新登录
       setTimeout(() => logout(), 1500);
@@ -89,10 +91,15 @@ export default function UserDropdown() {
     };
   }, [menuOpen]);
 
+  const handleManualLogout = () => {
+    navigate('/login', { flushSync: true, replace: true, state: null });
+    logout();
+  };
+
   const handleMenuClick = (key: 'logout' | 'switchLang' | 'changePassword') => {
     setMenuOpen(false);
     if (key === 'logout') {
-      logout();
+      handleManualLogout();
     } else if (key === 'switchLang') {
       toggleLocale();
     } else if (key === 'changePassword') {
@@ -202,7 +209,7 @@ export default function UserDropdown() {
         cancelButtonProps={mustChangePassword ? { style: { display: 'none' } } : undefined}
         footer={mustChangePassword ? (_close, { OkBtn }) => (
           <Space>
-            <Button danger onClick={() => { setMustChangePassword(false); logout(); }}>
+            <Button danger onClick={() => { setMustChangePassword(false); handleManualLogout(); }}>
               {t('user.logout')}
             </Button>
             <OkBtn />
@@ -218,6 +225,9 @@ export default function UserDropdown() {
             style={{ marginBottom: 16 }}
           />
         )}
+        <div style={{ marginBottom: 16, color: token.colorTextSecondary }}>
+          {t('user.currentAccount', { username: currentUser?.username ?? '-' })}
+        </div>
         <Form form={pwdForm} layout="vertical" style={{ marginTop: 16 }}>
           <Form.Item
             name="oldPassword"

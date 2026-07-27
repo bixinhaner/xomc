@@ -15,17 +15,22 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/omcgo/omcgo/internal/acs/transfercfg"
+	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/backup"
 )
+
+type downloadObjectClient interface {
+	GetObject(ctx context.Context, bucketName, objectName string, opts minio.GetObjectOptions) (*minio.Object, error)
+}
 
 // Handler handles HTTP file download requests from CPE devices.
 // Endpoint: GET /smallcell/FileDownloadService/{bucket}/{objectPath...}
 // Authentication: HTTP Basic Auth with global credentials from config.
 // CPE accesses this endpoint using the URL and credentials provided in the Download SOAP RPC.
 type Handler struct {
-	minioClient     *minio.Client
+	minioClient     downloadObjectClient
 	logger          *zap.Logger
 	username        string
 	password        string
@@ -45,7 +50,7 @@ type Handler struct {
 }
 
 // NewHandler creates a new download handler.
-func NewHandler(minioClient *minio.Client, username, password string, logger *zap.Logger) *Handler {
+func NewHandler(minioClient downloadObjectClient, username, password string, logger *zap.Logger) *Handler {
 	return &Handler{
 		minioClient: minioClient,
 		username:    username,
@@ -141,6 +146,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
 	}
+	bucket = appconfig.NormalizeConfigBackupBucket(bucket)
 
 	// Fetch object from MinIO
 	obj, err := h.minioClient.GetObject(r.Context(), bucket, objectPath, minio.GetObjectOptions{})

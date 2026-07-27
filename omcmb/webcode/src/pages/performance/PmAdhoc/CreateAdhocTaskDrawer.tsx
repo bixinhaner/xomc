@@ -13,12 +13,9 @@ import { Alert, Button, DatePicker, Drawer, Form, Input, Select, Switch, message
 import dayjs from 'dayjs';
 import { useCreatePmAdhoc } from '@core/hooks/api/usePmAdhoc';
 import type { AdhocMode } from '@core/types/pmAdhoc';
+import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
 
-// 纯枚举（label = value），不译，保持原样。
-const GRANULARITY_OPTIONS = ['hourly', 'daily', 'weekly', 'monthly'].map((g) => ({
-  label: g,
-  value: g,
-}));
+const ROLLUP_GRANULARITIES = ['hourly', 'daily', 'weekly', 'monthly'];
 
 export interface CreateAdhocPreset {
   name?: string;
@@ -33,7 +30,6 @@ interface CreateForm {
   cronExpr?: string;
   deviceSns: string; // csv
   metricPaths: string; // csv
-  granularities: string[];
   window: [dayjs.Dayjs, dayjs.Dayjs];
   aggregateGroup: boolean;
 }
@@ -43,6 +39,15 @@ interface Props {
   preset?: CreateAdhocPreset;
   onClose: () => void;
   onCreated?: (taskId: string) => void;
+}
+
+function parseCsvList(value: string): string[] {
+  return Array.from(new Set(
+    value
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  ));
 }
 
 export function CreateAdhocTaskDrawer({ open, preset, onClose, onCreated }: Props) {
@@ -65,7 +70,6 @@ export function CreateAdhocTaskDrawer({ open, preset, onClose, onCreated }: Prop
       mode: 'oneshot',
       deviceSns: (preset?.deviceSns ?? []).join(', '),
       metricPaths: (preset?.metricPaths ?? []).join(', '),
-      granularities: preset?.granularities && preset.granularities.length > 0 ? preset.granularities : ['hourly'],
       window: [dayjs().subtract(1, 'day'), dayjs()],
       aggregateGroup: false,
     });
@@ -73,19 +77,31 @@ export function CreateAdhocTaskDrawer({ open, preset, onClose, onCreated }: Prop
 
   const handleCreate = async () => {
     const v = await form.validateFields();
+    const deviceSns = parseCsvList(v.deviceSns);
+    const metricPaths = parseCsvList(v.metricPaths);
+
+    if (deviceSns.length > PM_QUERY_SELECTION_LIMIT) {
+      message.warning(intl.formatMessage(
+        { id: 'perf.picker.deviceLimitExceeded' },
+        { max: PM_QUERY_SELECTION_LIMIT, count: deviceSns.length },
+      ));
+      return;
+    }
+    if (metricPaths.length > PM_QUERY_SELECTION_LIMIT) {
+      message.warning(intl.formatMessage(
+        { id: 'perf.picker.metricLimitExceeded' },
+        { max: PM_QUERY_SELECTION_LIMIT, count: metricPaths.length },
+      ));
+      return;
+    }
+
     const task = await createMut.mutateAsync({
       name: v.name,
       mode: v.mode,
       cronExpr: v.cronExpr,
-      deviceSns: v.deviceSns
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean),
-      metricPaths: v.metricPaths
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean),
-      granularities: v.granularities,
+      deviceSns,
+      metricPaths,
+      granularities: ROLLUP_GRANULARITIES,
       windowStart: v.window[0].toISOString(),
       windowEnd: v.window[1].toISOString(),
       dimension: v.aggregateGroup ? 'aggregate_group' : 'device',
@@ -160,13 +176,13 @@ export function CreateAdhocTaskDrawer({ open, preset, onClose, onCreated }: Prop
         >
           <Input placeholder={intl.formatMessage({ id: 'perf.adhoc.metricPathsPlaceholder' })} />
         </Form.Item>
-        <Form.Item
-          label={intl.formatMessage({ id: 'perf.adhoc.granMultiLabel' })}
-          name="granularities"
-          rules={[{ required: true }]}
-        >
-          <Select mode="multiple" options={GRANULARITY_OPTIONS} />
-        </Form.Item>
+        <Alert
+          type="info"
+          showIcon
+          title={intl.formatMessage({ id: 'perf.adhoc.fixedRollupLabel' })}
+          description={intl.formatMessage({ id: 'perf.adhoc.fixedRollupDesc' })}
+          style={{ marginBottom: 16 }}
+        />
         <Form.Item label={intl.formatMessage({ id: 'perf.adhoc.windowLabel' })} name="window" rules={[{ required: true }]}>
           <DatePicker.RangePicker showTime style={{ width: '100%' }} />
         </Form.Item>

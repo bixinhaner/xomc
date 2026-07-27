@@ -21,7 +21,8 @@ export const OMC_NAME_CONFIG_KEY = 'mrOMCName';
  *   - 配置为空 / 未配置 / 拉取失败 → 返回 undefined，由各消费方自行回退到默认名
  *     （v1 i18n app.title / v2 'OMC · v2' / v3 'STARFORGE'），避免空白标题。
  *
- * 失败安全：网络 / 401 / 解析失败 → undefined（retry:false，不阻塞登录页渲染）。
+ * 失败安全：网络 / 401 / 解析失败由 React Query 记录为 error，data 保持 undefined
+ * （retry:false，不阻塞登录页渲染）。
  *
  * 副作用：拉到值后同步写入 appStore.omcName（Zustand persist），让下次冷启动 /
  * 登录后能在请求 resolve 前先用 localStorage 缓存名即时渲染，避免标题闪烁。
@@ -29,15 +30,9 @@ export const OMC_NAME_CONFIG_KEY = 'mrOMCName';
 export function usePublicOmcName(enabled = true): { omcName: string | undefined } {
   const setOmcName = useAppStore((s) => s.setOmcName);
 
-  const { data } = useQuery<SysConfigItem[] | undefined>({
+  const { data } = useQuery<SysConfigItem[]>({
     queryKey: ['public', 'sysConfig', 'basic'],
-    queryFn: async () => {
-      try {
-        return await adminApi.getPublicSysConfigsByCategory('basic');
-      } catch {
-        return undefined; // 失败安全 — 让消费方走默认名
-      }
-    },
+    queryFn: () => adminApi.getPublicSysConfigsByCategory('basic'),
     enabled,
     staleTime: 5 * 60_000,
     retry: false,

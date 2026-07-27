@@ -43,6 +43,7 @@ type RPCResponseSubscriber struct {
 	paramRepo         DeviceParameterRepository
 	infoRefresher     rpcResponseDeviceInfoRefresher
 	deviceWriter      DeviceSyncFailureWriter // migration 000146: 写 last_param_sync_failed_at + error
+	taskEnqueuer      task.Enqueuer
 	logger            *zap.Logger
 
 	subscriptions []event.Subscription
@@ -74,7 +75,7 @@ type RPCDeviceLookup interface {
 }
 
 type rpcResponseDeviceInfoRefresher interface {
-	SyncFromParameters(ctx context.Context, deviceID uuid.UUID, carrierCode model.CarrierCode, tech model.Technology) ([]string, error)
+	SyncFromParameters(ctx context.Context, deviceID uuid.UUID, carrierCode model.CarrierCode, tech model.Technology, productClass string) ([]string, error)
 }
 
 // NewRPCResponseSubscriber 构造订阅者。Start() 时才真正订阅 bus。
@@ -88,6 +89,7 @@ func NewRPCResponseSubscriber(
 	paramRepo DeviceParameterRepository,
 	infoRefresher rpcResponseDeviceInfoRefresher,
 	deviceWriter DeviceSyncFailureWriter,
+	taskEnqueuer task.Enqueuer,
 	logger *zap.Logger,
 ) *RPCResponseSubscriber {
 	return &RPCResponseSubscriber{
@@ -98,6 +100,7 @@ func NewRPCResponseSubscriber(
 		paramRepo:         paramRepo,
 		infoRefresher:     infoRefresher,
 		deviceWriter:      deviceWriter,
+		taskEnqueuer:      taskEnqueuer,
 		logger:            logger.Named("device-rpc-resp-sub"),
 	}
 }
@@ -151,6 +154,9 @@ func (s *RPCResponseSubscriber) handleSyncTaskFailed(ctx context.Context, evt ev
 	if t.Method == "DeleteObject" && isDeleteObjectAlreadyGone(t.ErrorMessage) {
 		return s.handleDeleteObjectAlreadyGone(ctx, &t)
 	}
+	if err := s.handlePasswordResetFallback(ctx, &t); err != nil {
+		return err
+	}
 	if s.deviceWriter == nil {
 		return nil
 	}
@@ -180,6 +186,49 @@ func (s *RPCResponseSubscriber) handleSyncTaskFailed(ctx context.Context, evt ev
 		zap.String("task_id", t.ID),
 		zap.String("command_key", t.CommandKey),
 		zap.String("error", errMsg))
+	return nil
+}
+
+func (s *RPCResponseSubscriber) handlePasswordResetFallback(ctx context.Context, t *task.Task) error {
+	if t == nil || s.taskEnqueuer == nil {
+		return nil
+	}
+	if t.Method != resetLMTPasswordMethod {
+		return nil
+	}
+	if strings.HasPrefix(t.CommandKey, resetLMTPasswordFallbackPrefix) {
+		return nil
+	}
+	paramsJSON, err := json.Marshal(map[string]string{
+		"message_type": resetLMTPasswordFallbackMethod,
+		"fallback_of":  t.ID,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal password reset fallback params: %w", err)
+	}
+	commandKey := fmt.Sprintf("%s%s", resetLMTPasswordFallbackPrefix, uuid.New().String()[:8])
+	created, err := s.taskEnqueuer.CreateTask(ctx, &task.CreateTaskRequest{
+		DeviceSN:    t.DeviceSN,
+		Method:      resetLMTPasswordFallbackMethod,
+		Params:      paramsJSON,
+		Priority:    t.Priority,
+		CommandKey:  commandKey,
+		Source:      t.Source,
+		CreatorID:   t.CreatorID,
+		Description: "reset LMT password fallback",
+	})
+	if err != nil {
+		s.logger.Warn("enqueue password reset fallback failed",
+			zap.String("device_sn", t.DeviceSN),
+			zap.String("task_id", t.ID),
+			zap.Error(err))
+		return err
+	}
+	s.logger.Info("password reset fallback queued",
+		zap.String("device_sn", t.DeviceSN),
+		zap.String("failed_task_id", t.ID),
+		zap.String("fallback_task_id", created.ID),
+		zap.String("fallback_method", resetLMTPasswordFallbackMethod))
 	return nil
 }
 
@@ -304,6 +353,10 @@ func (s *RPCResponseSubscriber) handleGPVResponse(ctx context.Context, evt event
 	}
 	deviceSN, _ := payload["device_sn"].(string)
 	if deviceSN == "" {
+		return nil
+	}
+	if source, _ := payload["task_source"].(string); source == string(task.TaskSourceParamSync) {
+		// paramsync.ResultConsumer is the sole writer for durable sync runs.
 		return nil
 	}
 
@@ -432,7 +485,7 @@ func (s *RPCResponseSubscriber) persist(
 		return err
 	}
 	if refreshInfo && s.infoRefresher != nil {
-		if _, err := s.infoRefresher.SyncFromParameters(ctx, device.ID, device.Carrier, device.Technology); err != nil {
+		if _, err := s.infoRefresher.SyncFromParameters(ctx, device.ID, device.Carrier, device.Technology, device.ProductClass); err != nil {
 			s.logger.Warn("refresh device_info snapshot after rpc response persist failed",
 				zap.String("device_id", device.ID.String()),
 				zap.String("device_sn", device.SerialNumber),

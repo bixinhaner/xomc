@@ -84,10 +84,12 @@ func TestHandler_ScriptImportTemplate(t *testing.T) {
 	require.Contains(t, rec.Header().Get("Content-Disposition"), "MMLTemplate.txt")
 	require.Equal(t, "zh-CN", rec.Header().Get("Content-Language"))
 	require.Contains(t, rec.Body.String(), "使用标准 PATH")
+	require.Contains(t, rec.Body.String(), "PRIVATE:")
 	require.Contains(t, rec.Body.String(), "支持操作")
 	require.NotContains(t, rec.Body.String(), "DEL")
 	require.NotContains(t, rec.Body.String(), "PATH:")
-	require.Contains(t, rec.Body.String(), "RMV Device.IP.Interface.1.IPv4Address.3.;DEVICE_SN")
+	require.Contains(t, rec.Body.String(), "# RMV Device.IP.Interface.1.IPv4Address.3.;DEVICE_SN")
+	require.Contains(t, rec.Body.String(), "# LST Device.DeviceInfo.SoftwareVersion;DEVICE_SN,SECOND_SN")
 }
 
 func TestHandler_ScriptImportTemplateEnglish(t *testing.T) {
@@ -102,11 +104,13 @@ func TestHandler_ScriptImportTemplateEnglish(t *testing.T) {
 	body := rec.Body.String()
 	require.Contains(t, body, "MML TXT Script Template")
 	require.Contains(t, body, "Supported operations")
-	require.Contains(t, body, "Use standard PATH")
+	require.Contains(t, body, "Standard PATH")
+	require.Contains(t, body, "PRIVATE:")
 	require.NotContains(t, body, "DEL")
 	require.NotContains(t, body, "支持操作")
 	require.NotContains(t, body, "PATH:")
-	require.Contains(t, body, "RMV Device.IP.Interface.1.IPv4Address.3.;DEVICE_SN")
+	require.Contains(t, body, "# RMV Device.IP.Interface.1.IPv4Address.3.;DEVICE_SN")
+	require.Contains(t, body, "# LST Device.DeviceInfo.SoftwareVersion;DEVICE_SN,SECOND_SN")
 }
 
 func TestHandler_ValidateScriptImport_RejectsNonTXT(t *testing.T) {

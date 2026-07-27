@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/omcgo/omcgo/global"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
@@ -170,6 +171,15 @@ func TestScanGeoDeviceRow_NullableJoinColumns(t *testing.T) {
 	assert.Nil(t, d.MAC)
 	assert.Nil(t, d.PCI)
 	assert.Nil(t, d.DeviceName)
+}
+
+// TestGetCoordinatesQueryUsesDeviceAlias guards the shared notDeleted predicate,
+// which references d.deleted_at. The FROM clause must therefore declare alias d.
+func TestGetCoordinatesQueryUsesDeviceAlias(t *testing.T) {
+	query, _, err := buildGetCoordinatesQuery(uuid.New())
+	require.NoError(t, err)
+	assert.Contains(t, query, "FROM devices d")
+	assert.Contains(t, query, "d.deleted_at")
 }
 
 // ---------------------------------------------------------------------------
@@ -347,6 +357,12 @@ func TestDeviceWithInfoSelectColumns_AlarmAggregation(t *testing.T) {
 	assert.Contains(t, joined, "31004", "warning 需兼容 31004 编码")
 	assert.Contains(t, joined, "AS alarm_severity", "派生列别名仍为 alarm_severity（前端契约不变）")
 	assert.Contains(t, joined, "aa.active_alarm_count", "必须暴露活动告警数列")
+	assert.Contains(t, joined, "d.last_param_sync_at", "列表 DTO 必须暴露最近参数同步完成时间")
+	assert.Contains(t, joined, "AS param_sync_running", "列表 DTO 必须暴露参数同步动态状态列")
+	assert.Contains(t, joined, "parameter_sync_requests", "durable paramsync 请求未终态时应显示同步中")
+	assert.Contains(t, joined, "parameter_sync_runs", "durable paramsync 运行未终态时应显示同步中")
+	assert.NotContains(t, joined, "device_tasks dt", "旧 Path B sync-gpv 任务已废弃，动态状态不得依赖 device_tasks")
+	assert.NotContains(t, joined, "sync-gpv-", "动态状态只认 durable parameter_sync_* 数据面")
 	assert.NotContains(t, joined, "di.alarm_severity",
 		"#361：列表 select 不再读无人维护的 di.alarm_severity 冗余列")
 
@@ -376,4 +392,103 @@ func TestBuildRecycleBinListBuilders_SearchIncludesMACInListAndCount(t *testing.
 	assert.Contains(t, countSQL, "di.mac ILIKE", "分页总数口径必须与列表查询一致")
 	assert.Equal(t, []interface{}{"%48:BF%", "%48:BF%", "%48:BF%"}, listArgs)
 	assert.Equal(t, listArgs, countArgs)
+}
+
+func TestBuildRecycleBinListBuilders_GroupFilterUsesPreservedMemberships(t *testing.T) {
+	groupID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	listBuilder, countBuilder := buildRecycleBinListBuilders(RecycleBinFilter{
+		GroupID: &groupID,
+	})
+
+	listSQL, listArgs, err := listBuilder.ToSql()
+	require.NoError(t, err)
+	countSQL, countArgs, err := countBuilder.ToSql()
+	require.NoError(t, err)
+
+	assert.Contains(t, listSQL, "LEFT JOIN device_group_members dgm ON d.id = dgm.device_id")
+	assert.Contains(t, listSQL, "dgm.group_id = $1")
+	assert.Contains(t, countSQL, "JOIN device_group_members dgm ON d.id = dgm.device_id")
+	assert.Contains(t, countSQL, "dgm.group_id = $1")
+	assert.Equal(t, []interface{}{groupID.String()}, listArgs)
+	assert.Equal(t, listArgs, countArgs)
+}
+
+func TestBuildRecycleBinListBuilders_DefaultGroupIncludesLegacyUngroupedDevices(t *testing.T) {
+	groupID := uuid.MustParse(global.DefaultLevel2GroupID)
+	listBuilder, countBuilder := buildRecycleBinListBuilders(RecycleBinFilter{
+		GroupID: &groupID,
+	})
+
+	listSQL, _, err := listBuilder.ToSql()
+	require.NoError(t, err)
+	countSQL, _, err := countBuilder.ToSql()
+	require.NoError(t, err)
+
+	assert.Contains(t, listSQL, "dgm.group_id = $1")
+	assert.Contains(t, listSQL, ungroupedDevicesWhere)
+	assert.Contains(t, countSQL, "LEFT JOIN device_group_members dgm ON d.id = dgm.device_id")
+	assert.Contains(t, countSQL, "dgm.group_id = $1")
+	assert.Contains(t, countSQL, ungroupedDevicesWhere)
+}
+
+func TestApplyDeviceGroupFilter_DefaultGroupIncludesLegacyUngroupedDevices(t *testing.T) {
+	defaultGroup := uuid.MustParse(global.DefaultLevel2GroupID)
+	builder := sq.Select("d.id").
+		From("devices d").
+		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
+		PlaceholderFormat(sq.Dollar)
+
+	got := applyDeviceGroupFilter(builder, DeviceFilter{GroupID: &defaultGroup})
+	sql, args, err := got.ToSql()
+	require.NoError(t, err)
+
+	assert.Contains(t, sql, "dgm.group_id IN ($1)")
+	assert.Contains(t, sql, ungroupedDevicesWhere)
+	assert.Equal(t, []interface{}{defaultGroup}, args)
+}
+
+func TestApplyDeviceGroupFilter_RealGroupDoesNotIncludeLegacyUngroupedDevices(t *testing.T) {
+	groupID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	builder := sq.Select("d.id").
+		From("devices d").
+		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
+		PlaceholderFormat(sq.Dollar)
+
+	got := applyDeviceGroupFilter(builder, DeviceFilter{GroupID: &groupID})
+	sql, args, err := got.ToSql()
+	require.NoError(t, err)
+
+	assert.Contains(t, sql, "dgm.group_id IN ($1)")
+	assert.NotContains(t, sql, ungroupedDevicesWhere)
+	assert.Equal(t, []interface{}{groupID}, args)
+}
+
+func TestRecycleBinSelectColumns_ExposeStableRecycleMetadata(t *testing.T) {
+	joined := strings.Join(recycleBinSelectColumns(), "\n")
+
+	assert.Equal(t, len(deviceWithInfoSelectColumns()), len(recycleBinSelectColumns()),
+		"回收站复用 scanDeviceWithInfoRow，SELECT 列数必须与共享 scanner 对齐")
+	assert.Contains(t, joined, "d.recycle_type")
+	assert.Contains(t, joined, "d.recycle_executor")
+	assert.Contains(t, joined, "d.last_param_sync_at")
+	assert.Contains(t, joined, "FALSE AS param_sync_running")
+	assert.Contains(t, joined, "d.deleted_at - d.last_inform_at",
+		"离线时长必须固定在移入回收站时刻，不能随查询时间继续增长")
+	assert.NotContains(t, joined, "NOW() - di.last_offline_time",
+		"回收站离线时长不得使用当前时间动态重算")
+}
+
+func TestRecycleBinListIncludesLocationObservationColumnsForSharedScanner(t *testing.T) {
+	joined := strings.Join(recycleBinSelectColumns(), "\n")
+	assert.Contains(t, joined, "dlo.latitude AS reported_latitude")
+	assert.Contains(t, joined, "dlo.longitude AS reported_longitude")
+	assert.Contains(t, joined, "dlo.gps_height AS reported_gps_height")
+	assert.Contains(t, joined, "dlo.observed_at AS reported_observed_at")
+	assert.Contains(t, joined, "dlo.version AS reported_version")
+	assert.Contains(t, joined, "dlo.source_path AS reported_source_path")
+
+	listBuilder, _ := buildRecycleBinListBuilders(RecycleBinFilter{})
+	listSQL, _, err := listBuilder.ToSql()
+	require.NoError(t, err)
+	assert.Contains(t, listSQL, "LEFT JOIN device_location_observations dlo ON d.id = dlo.device_id")
 }

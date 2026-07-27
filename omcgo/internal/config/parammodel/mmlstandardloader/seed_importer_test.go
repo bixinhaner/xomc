@@ -10,7 +10,8 @@ import (
 )
 
 // TestSmokeSeedDerivation: 在 cmcc_tdlte_v23.json 上验证：
-//   - 18 chapter / 71 command / 624 param 数量精确匹配
+//   - 18 chapter / 71 command / 614 param 数量精确匹配
+//     （RRCTimers 的 10 个 LTE 计时器参数已归入专用 RRC 计时器命令，避免 FAP_SERVICE 重复）
 //   - LST 总生成；MOD 仅在含 RW 时；ADD/RMV 双门槛
 //   - logical_code 全集唯一
 func TestSmokeSeedDerivation(t *testing.T) {
@@ -28,8 +29,8 @@ func TestSmokeSeedDerivation(t *testing.T) {
 	if got := seed.CountCommands(); got != 71 {
 		t.Errorf("seed commands: got %d, want 71", got)
 	}
-	if got := seed.CountParams(); got != 624 {
-		t.Errorf("seed params: got %d, want 624", got)
+	if got := seed.CountParams(); got != 614 {
+		t.Errorf("seed params: got %d, want 614", got)
 	}
 
 	derived := DeriveCommandsFromSeed(seed)

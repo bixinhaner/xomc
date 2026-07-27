@@ -40,14 +40,15 @@ import (
 	"time"
 
 	"github.com/minio/minio-go/v7"
+	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"go.uber.org/zap"
 )
 
 // ObjectIO is the narrow MinIO contract Reencryptor consumes for byte-level
-// object reads + writes. *minio.Client satisfies this naturally; defined
-// consumer-side so test mocks stay tiny.
+// object reads + writes. The CLI adapts *minio.Client to this stream-oriented
+// interface; consumer-side definition keeps tests and callers small.
 type ObjectIO interface {
-	GetObject(ctx context.Context, bucket, key string, opts minio.GetObjectOptions) (*minio.Object, error)
+	GetObject(ctx context.Context, bucket, key string, opts minio.GetObjectOptions) (io.ReadCloser, error)
 	PutObject(ctx context.Context, bucket, key string, reader io.Reader, size int64, opts minio.PutObjectOptions) (minio.UploadInfo, error)
 }
 
@@ -121,6 +122,7 @@ func NewReencryptor(cfg ReencryptorConfig) (*Reencryptor, error) {
 	if cfg.Bucket == "" {
 		return nil, errors.New("reencryptor: bucket is required")
 	}
+	cfg.Bucket = appconfig.NormalizeConfigBackupBucket(cfg.Bucket)
 	if cfg.TargetKekID == "" && cfg.KeyProvider != nil {
 		// Operator may want to migrate INTO empty-id (legacy slot).
 		// Allow but require explicit empty string — already the zero value.

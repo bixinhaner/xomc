@@ -3,12 +3,14 @@ package export
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	"github.com/omcgo/omcgo/internal/core/jsonx"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
@@ -102,6 +104,66 @@ func (s *dashboardDeviceSource) Next(ctx context.Context) ([]ExportRow, bool, er
 	return out, false, nil
 }
 
+type dashboardDeviceOffsetSource struct {
+	db         PgQuerier
+	table      string
+	req        aggregator.QueryRequest
+	objectLDNs []string
+	offset     int
+	done       bool
+}
+
+func newDashboardDeviceOffsetSource(db PgQuerier, table string, req aggregator.QueryRequest, objectLDNs []string) *dashboardDeviceOffsetSource {
+	return &dashboardDeviceOffsetSource{db: db, table: table, req: req, objectLDNs: objectLDNs}
+}
+
+func (s *dashboardDeviceOffsetSource) Next(ctx context.Context) ([]ExportRow, bool, error) {
+	if s.done {
+		return nil, true, nil
+	}
+	sqlStr, args := buildDeviceOffsetSQL(s.table, s.req, s.objectLDNs, s.offset, batchSize)
+	rows, err := s.db.Query(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, false, fmt.Errorf("export dashboard device query %s: %w", s.table, err)
+	}
+	defer rows.Close()
+
+	out := make([]ExportRow, 0, batchSize)
+	n := 0
+	for rows.Next() {
+		var oui, sn, metricPath, metricType, gran string
+		var statis, ldn *string
+		var value jsonx.Float
+		var tm, st, et time.Time
+		if err := rows.Scan(&oui, &sn, &metricPath, &metricType, &value, &statis, &gran, &tm, &st, &et, &ldn); err != nil {
+			return nil, false, fmt.Errorf("export dashboard device scan %s: %w", s.table, err)
+		}
+		out = append(out, ExportRow{
+			Device:      deviceSNLabel(oui, sn),
+			CellPLMN:    derefStr(ldn),
+			MetricCode:  metricPath,
+			MetricType:  metricType,
+			Granularity: gran,
+			Time:        tm,
+			StartTime:   st,
+			EndTime:     et,
+			Value:       float64(value),
+			StatisType:  derefStr(statis),
+		})
+		n++
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, fmt.Errorf("export dashboard device rows %s: %w", s.table, err)
+	}
+
+	if n < batchSize {
+		s.done = true
+	} else {
+		s.offset += batchSize
+	}
+	return out, false, nil
+}
+
 // ── dashboard 聚合维度：批次游标兜底（含 KPI 反算） ─────────────────────────
 //
 // group/product/band/network 维度在 aggregator.Query 内现场 GROUP BY + KPI 反算，无行级 id，
@@ -163,6 +225,10 @@ func aggregatorRowToExport(r aggregator.Row) ExportRow {
 	if device == "" && r.ProductID != uuid.Nil {
 		device = "Product=" + r.ProductID.String()
 	}
+	value := float64(r.MetricValue)
+	if r.Filled {
+		value = math.NaN()
+	}
 	return ExportRow{
 		Device:      device,
 		CellPLMN:    derefStr(r.ObjectLDN),
@@ -173,9 +239,132 @@ func aggregatorRowToExport(r aggregator.Row) ExportRow {
 		Time:        r.Time,
 		StartTime:   r.StartTime,
 		EndTime:     r.EndTime,
-		Value:       float64(r.MetricValue),
+		Value:       value,
 		StatisType:  statisStr(r.StatisType),
 	}
+}
+
+type fillEmptySource struct {
+	src    RowSource
+	req    aggregator.QueryRequest
+	rows   []ExportRow
+	i      int
+	loaded bool
+}
+
+func newFillEmptySource(src RowSource, req aggregator.QueryRequest) *fillEmptySource {
+	return &fillEmptySource{src: src, req: req}
+}
+
+func (s *fillEmptySource) Next(ctx context.Context) ([]ExportRow, bool, error) {
+	if !s.loaded {
+		if err := s.load(ctx); err != nil {
+			return nil, false, err
+		}
+	}
+	if s.i >= len(s.rows) {
+		return nil, true, nil
+	}
+	end := s.i + batchSize
+	if end > len(s.rows) {
+		end = len(s.rows)
+	}
+	out := s.rows[s.i:end]
+	s.i = end
+	return out, false, nil
+}
+
+func (s *fillEmptySource) load(ctx context.Context) error {
+	s.loaded = true
+	var rows []ExportRow
+	for {
+		batch, done, err := s.src.Next(ctx)
+		if err != nil {
+			return err
+		}
+		rows = append(rows, batch...)
+		if done {
+			break
+		}
+	}
+	aggRows := make([]aggregator.Row, 0, len(rows))
+	for _, r := range rows {
+		aggRows = append(aggRows, exportRowToAggregator(r))
+	}
+	filled := aggregator.FillEmptyBuckets(aggRows, s.req)
+	out := make([]ExportRow, 0, len(filled))
+	for _, r := range filled {
+		out = append(out, aggregatorRowToExport(r))
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if !out[i].Time.Equal(out[j].Time) {
+			return out[i].Time.Before(out[j].Time)
+		}
+		if out[i].Device != out[j].Device {
+			return out[i].Device < out[j].Device
+		}
+		if out[i].CellPLMN != out[j].CellPLMN {
+			return out[i].CellPLMN < out[j].CellPLMN
+		}
+		return out[i].MetricCode < out[j].MetricCode
+	})
+	s.rows = out
+	return nil
+}
+
+func exportRowToAggregator(r ExportRow) aggregator.Row {
+	var objectLDN *string
+	if r.CellPLMN != "" {
+		ldn := r.CellPLMN
+		objectLDN = &ldn
+	}
+	mt := metrics.MetricType(r.MetricType)
+	if mt == "" {
+		if strings.HasPrefix(r.MetricCode, "K") {
+			mt = metrics.MetricTypeKPI
+		} else {
+			mt = metrics.MetricTypeCounter
+		}
+	}
+	return aggregator.Row{
+		DeviceSN:    r.Device,
+		MetricPath:  r.MetricCode,
+		DisplayName: r.MetricName,
+		MetricType:  mt,
+		MetricValue: jsonx.Float(r.Value),
+		Granularity: metrics.Granularity(r.Granularity),
+		Time:        r.Time,
+		StartTime:   r.StartTime,
+		EndTime:     r.EndTime,
+		ObjectLDN:   objectLDN,
+	}
+}
+
+func normalizeStoredResultExportRequest(req aggregator.QueryRequest) aggregator.QueryRequest {
+	if len(req.MetricPaths) == 0 || req.MetricType == nil {
+		return req
+	}
+	var inferred *metrics.MetricType
+	for _, raw := range req.MetricPaths {
+		path := strings.TrimSpace(raw)
+		if path == "" {
+			continue
+		}
+		mt := metricTypeFromPath(path)
+		if inferred == nil {
+			v := mt
+			inferred = &v
+			continue
+		}
+		if *inferred != mt {
+			req.MetricType = nil
+			return req
+		}
+	}
+	if inferred != nil && *inferred != *req.MetricType {
+		req.MetricType = nil
+	}
+	return req
 }
 
 // statisStr 把 *metrics.StatisType 解引用成字符串（nil → 空串）。
@@ -199,6 +388,7 @@ type adhocSource struct {
 	endTime     time.Time
 	dimension   string
 	deviceCount int
+	locale      appcontext.Locale
 
 	curTime time.Time
 	curID   uuid.UUID
@@ -206,8 +396,12 @@ type adhocSource struct {
 	done    bool
 }
 
-func newAdhocSource(db PgQuerier, taskID uuid.UUID, metricPaths []string, startTime, endTime time.Time, dimension string, deviceCount int) *adhocSource {
-	return &adhocSource{db: db, taskID: taskID, metricPaths: metricPaths, startTime: startTime, endTime: endTime, dimension: dimension, deviceCount: deviceCount}
+func newAdhocSource(db PgQuerier, taskID uuid.UUID, metricPaths []string, startTime, endTime time.Time, dimension string, deviceCount int, locs ...appcontext.Locale) *adhocSource {
+	loc := appcontext.LocaleZH
+	if len(locs) > 0 {
+		loc = locs[0]
+	}
+	return &adhocSource{db: db, taskID: taskID, metricPaths: metricPaths, startTime: startTime, endTime: endTime, dimension: dimension, deviceCount: deviceCount, locale: loc}
 }
 
 func (s *adhocSource) Next(ctx context.Context) ([]ExportRow, bool, error) {
@@ -239,7 +433,7 @@ func (s *adhocSource) Next(ctx context.Context) ([]ExportRow, bool, error) {
 			return nil, false, fmt.Errorf("export adhoc scan: %w", err)
 		}
 		device := adhocObjectLabel(s.dimension, oui, sn, derefStr(productID), derefStr(productName),
-			derefStr(ldn), derefStr(groupName), s.deviceCount)
+			derefStr(ldn), derefStr(groupName), s.deviceCount, s.locale)
 		cell := ""
 		if s.dimension == "device" {
 			cell = derefStr(ldn)
@@ -323,10 +517,14 @@ func requestedMetricColumns(metricPaths []string) []colKey {
 }
 
 func metricColumnType(code string) string {
-	if strings.HasPrefix(strings.ToUpper(code), "C") {
-		return string(metrics.MetricTypeCounter)
+	return string(metricTypeFromPath(code))
+}
+
+func metricTypeFromPath(code string) metrics.MetricType {
+	if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(code)), "C") {
+		return metrics.MetricTypeCounter
 	}
-	return string(metrics.MetricTypeKPI)
+	return metrics.MetricTypeKPI
 }
 
 // discoverAdhocColumns 发现 adhoc 源的指标列集，按编号升序。

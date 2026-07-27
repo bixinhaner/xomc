@@ -143,9 +143,14 @@ func (h *RESTHandler) ListIndicators(c *gin.Context) {
 	if v := strings.TrimSpace(c.Query("keyword")); v != "" {
 		filter.Keyword = &v
 	}
-	if v := strings.TrimSpace(c.Query("operatorCode")); v != "" {
-		filter.OperatorCode = &v
+	operatorCode := strings.TrimSpace(c.Query("operatorCode"))
+	if operatorCode == "" {
+		operatorCode = strings.TrimSpace(c.Query("operator_code"))
 	}
+	if operatorCode == "" {
+		operatorCode = "default"
+	}
+	filter.OperatorCode = &operatorCode
 	if v := strings.TrimSpace(c.Query("productType")); v != "" {
 		filter.ProductType = &v
 	}
@@ -471,7 +476,7 @@ func (h *RESTHandler) SetEnabled(c *gin.Context) {
 		err = h.svc.DisableIndicators(c.Request.Context(), r)
 	}
 	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 	response.OK(c, gin.H{"updated": len(req.IndicatorIDs), "operator_code": op, "enable": req.Enable})
