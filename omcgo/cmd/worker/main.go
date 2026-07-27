@@ -715,6 +715,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	pmTz.startReloadPoller(pipeCtx, defaultReloadPollInterval)
 	startPMAggregatorPipeline(pipeCtx, w, pmKPIRouter, pmTz, exportBucket)
 	startPMAggregationStream(pipeCtx, w, pmTz)
+	startRawObjectCleanup(pipeCtx, w, cfg)
 
 	// M3: 周期备份调度器 + 任务 reaper（event-loss 兜底恢复）
 	backupScheduleRepo := backup.NewPgScheduleRepository(w.PgPool)

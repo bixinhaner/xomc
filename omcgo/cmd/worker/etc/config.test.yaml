@@ -58,6 +58,17 @@ minio:
     exchange: "omc-exchange"
     ui_assets: "ui-assets"
 
+raw_cleanup:
+  enabled: true
+  mode: shadow
+  batch_size: 100
+  min_rate: 5
+  max_rate: 100
+  rate_headroom: 1.5
+  recalculate_interval: 5m
+  object_timeout: 10s
+  prometheus_url: "http://prometheus:9090"
+
 # T-0157 C2: 任务过期扫描器配置
 task:
   default_expires_in_seconds: 120
