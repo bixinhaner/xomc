@@ -2,7 +2,7 @@
  * T-0185：自定义聚合任务「新建向导」整页 5 步。
  *
  * 顶部横向 antd Steps，5 步：
- *   ① 基本信息   — 任务名 / 制式（LTE/NR/GSM）/ 持续性（持续·非持续）/ 过期天数（仅非持续）
+ *   ① 基本信息   — 任务名 / 制式（LTE/NR/GSM）
  *   ② 聚合范围   — 维度 5 选；自选设备按制式过滤多选到 SN；network/band 无需选；
  *                  device_group/product 全量聚合不给子选（给说明文案）
  *   ③ 指标选择   — 按制式 → deviceType 列指标库多选（收集指标 id = K/C 码，min 1）
@@ -438,24 +438,6 @@ export default function PmAdhocWizard() {
           </div>
         )}
       </div>
-      <div>
-        <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldModeReq' })}</div>
-        {/* T-0194 编辑模式：模式锁定只读（变更会翻转时窗↔cron 语义） */}
-        <Radio.Group
-          optionType="button"
-          buttonStyle="solid"
-          value={mode}
-          disabled
-          options={[
-            { label: intl.formatMessage({ id: 'perf.adhoc.modeContinuousFull' }), value: 'continuous' },
-          ]}
-        />
-        {isEdit && (
-          <div style={{ marginTop: 6, color: '#999', fontSize: 12 }}>
-            {intl.formatMessage({ id: 'perf.adhoc.editLockedMode' })}
-          </div>
-        )}
-      </div>
       {mode === 'oneshot' && (
         <div>
           <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldExpireDays' })}</div>
@@ -746,13 +728,6 @@ export default function PmAdhocWizard() {
           {name || <Tag>{intl.formatMessage({ id: 'perf.adhoc.confirmNotFilled' })}</Tag>}
         </Descriptions.Item>
         <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmTech' })}>{technology.toUpperCase()}</Descriptions.Item>
-        <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmMode' })}>
-          {mode === 'continuous' ? (
-            <Tag color="purple">{intl.formatMessage({ id: 'perf.adhoc.modeContinuousFull' })}</Tag>
-          ) : (
-            <Tag>{intl.formatMessage({ id: 'perf.adhoc.modeOneshotFull' })}</Tag>
-          )}
-        </Descriptions.Item>
         <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmVisibility' })}>
           <Tag color={visibility === 'public' ? 'green' : undefined}>
             {intl.formatMessage({

@@ -43,7 +43,6 @@ import {
   type AdhocLiveProgress,
 } from '@core/hooks/api/useAdhocProgress';
 import type {
-  AdhocMode,
   AdhocStatus,
   AdhocTask,
   AdhocTaskRun,
@@ -284,17 +283,6 @@ function TaskTable({
   const columns: ColumnsType<AdhocTask> = useMemo(
     () => [
       { title: intl.formatMessage({ id: 'perf.adhoc.colName' }), dataIndex: 'name' },
-      {
-        title: intl.formatMessage({ id: 'perf.adhoc.colMode' }),
-        dataIndex: 'mode',
-        width: 90,
-        render: (m: AdhocMode) =>
-          m === 'continuous' ? (
-            <Tag color="purple">{intl.formatMessage({ id: 'perf.adhoc.modeContinuous' })}</Tag>
-          ) : (
-            <Tag>{intl.formatMessage({ id: 'perf.adhoc.modeOneshot' })}</Tag>
-          ),
-      },
       {
         title: intl.formatMessage({ id: 'perf.adhoc.colStatus' }),
         dataIndex: 'status',
@@ -613,11 +601,6 @@ export default function PmAdhocPage() {
         {selectedTask && (
           <>
             <Descriptions size="small" column={2} bordered style={{ marginBottom: 16 }}>
-              <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.descMode' })}>
-                {selectedTask.mode === 'continuous'
-                  ? intl.formatMessage({ id: 'perf.adhoc.modeContinuous' })
-                  : intl.formatMessage({ id: 'perf.adhoc.modeOneshot' })}
-              </Descriptions.Item>
               <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.descDimension' })}>
                 {dimensionLabel(intl, selectedTask.dimension)}
               </Descriptions.Item>
