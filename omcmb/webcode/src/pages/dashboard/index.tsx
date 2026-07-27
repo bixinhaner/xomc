@@ -80,6 +80,7 @@ const DASHBOARD_CONFIG = {
   showRunningTasks: false,        // 任务执行中
   showRefreshControls: false,     // 刷新控制栏
   showDeviceMap: false,           // 设备地图
+  showUserProfileAndQuickAccess: false, // 用户信息与快速入口（暂不展示）
 } as const;
 
 /** 格式化最后登录时间 */
@@ -578,7 +579,8 @@ export default function DashboardPage() {
       </Row>
 
       {/* Row 4: User Profile + Quick Access */}
-      <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="3">
+      {DASHBOARD_CONFIG.showUserProfileAndQuickAccess && (
+        <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="3">
         <Col xs={24} lg={6} style={{ display: 'flex' }}>
           <TiltCard maxTilt={8} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
           <Card
@@ -721,7 +723,8 @@ export default function DashboardPage() {
           </Card>
           </TiltCard>
         </Col>
-      </Row>
+        </Row>
+      )}
     </div>
   );
 }

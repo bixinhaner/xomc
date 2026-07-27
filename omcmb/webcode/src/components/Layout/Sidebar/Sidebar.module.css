@@ -22,11 +22,12 @@
   background-color: var(--color-sidebar-bg);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   overflow: hidden;
+  transition: padding 300ms ease-in-out;
 }
 
 .logoAreaCollapsed {
-  justify-content: center;
-  padding: 0;
+  justify-content: flex-start;
+  padding: 0 18px;
 }
 
 .logoMark {
@@ -92,14 +93,19 @@
   font-weight: 510;
 }
 
-/* Fix icon centering when sidebar is collapsed */
+/* Ant Menu defaults collapsed inline menus to 80px, while our sidebar is 64px. */
+.sidebar :global(.ant-menu-inline-collapsed) {
+  width: 100% !important;
+}
+
 .sidebar :global(.ant-menu-inline-collapsed) :global(.ant-menu-item),
 .sidebar :global(.ant-menu-inline-collapsed) :global(.ant-menu-submenu-title) {
-  padding: 0 !important;
-  padding-inline: 0 !important;
+  width: auto !important;
+  padding: 0 16px !important;
+  padding-inline: 16px !important;
   display: flex !important;
   align-items: center !important;
-  justify-content: center !important;
+  justify-content: flex-start !important;
 }
 
 .sidebar :global(.ant-menu-inline-collapsed) :global(.ant-menu-title-content) {
@@ -199,6 +205,11 @@
   font-size: 13px;
   color: var(--color-sidebar-text, #8a8f98) !important;
   background-color: transparent !important;
+  transition:
+    transform 200ms,
+    background 200ms,
+    color 200ms,
+    padding-inline 300ms ease-in-out !important;
 }
 
 /* Second-level submenu titles need a stronger visual indent than the parent group. */

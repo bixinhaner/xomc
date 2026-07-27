@@ -1,7 +1,6 @@
 import {
   act,
   cleanup,
-  fireEvent,
   render,
   screen,
   waitFor,
@@ -243,6 +242,21 @@ describe('DashboardPage card snapshot integration', () => {
       'summary failed',
     );
     expect(refetch).toHaveBeenCalledWith({ throwOnError: true });
+  });
+
+  it('does not render the temporarily hidden profile and quick-access cards', () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <DashboardPage />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.queryByText('User A')).not.toBeInTheDocument();
+    expect(screen.queryByText('dashboard.quickAccess')).not.toBeInTheDocument();
   });
 
   it('uses device-list stats for device cards without changing other Summary cards', () => {
@@ -570,94 +584,4 @@ describe('DashboardPage card snapshot integration', () => {
     );
   });
 
-  it('shows only production-ready quick access entries allowed for a normal admin', () => {
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <DashboardPage />
-      </QueryClientProvider>,
-    );
-
-    [
-      'nav.device.ne',
-      'nav.device.monitor',
-      'nav.device.commission',
-      'nav.device.stats',
-      'nav.log.system',
-      'nav.product.kpiLibrary',
-    ].forEach((label) => {
-      expect(screen.queryByText(label)).not.toBeInTheDocument();
-    });
-
-    [
-      'nav.device.list',
-      'nav.alarm.current',
-      'nav.alarm.statistics',
-      'nav.alarm.rules',
-      'nav.system.users',
-    ].forEach((label) => {
-      expect(screen.getByText(label)).toBeInTheDocument();
-    });
-  });
-
-  it('opens the official product KPI library only for a super admin', () => {
-    useUserStore.setState({
-      currentUser: {
-        ...user,
-        isSuperAdmin: true,
-        source: 'builtIn',
-      },
-      isAuthenticated: true,
-    });
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <DashboardPage />
-      </QueryClientProvider>,
-    );
-
-    expect(screen.queryByText('nav.performance.kpiStandard')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText('nav.product.kpiLibrary'));
-
-    expect(navigationMocks.openTab).toHaveBeenCalledWith({
-      key: '/product/kpi-library',
-      label: 'nav.product.kpiLibrary',
-      path: '/product/kpi-library',
-      closable: true,
-      labelRaw: false,
-    });
-    expect(navigationMocks.navigate).toHaveBeenCalledWith('/product/kpi-library');
-  });
-
-  it('opens a tab before navigating from quick access', () => {
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <DashboardPage />
-      </QueryClientProvider>,
-    );
-
-    fireEvent.click(screen.getByText('nav.device.list'));
-
-    expect(navigationMocks.openTab).toHaveBeenCalledWith({
-      key: '/device/list',
-      label: 'nav.device.list',
-      path: '/device/list',
-      closable: true,
-      labelRaw: false,
-    });
-    expect(navigationMocks.navigate).toHaveBeenCalledWith('/device/list');
-    expect(navigationMocks.openTab.mock.invocationCallOrder[0]).toBeLessThan(
-      navigationMocks.navigate.mock.invocationCallOrder[0],
-    );
-  });
 });
