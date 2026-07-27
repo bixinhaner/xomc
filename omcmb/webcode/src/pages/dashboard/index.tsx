@@ -105,7 +105,14 @@ const QUICK_ACCESS_ITEMS = [
   { labelKey: 'nav.device.ne',         icon: <ApartmentOutlined />,   path: '/device/ne',                 color: '#52C41A', productionReady: false },
   { labelKey: 'nav.device.monitor',    icon: <MonitorOutlined />,     path: '/device/monitor',            color: '#722ED1', productionReady: false },
   { labelKey: 'nav.device.commission', icon: <RocketOutlined />,      path: '/device/commission',         color: '#13C2C2', productionReady: false },
-  { labelKey: 'nav.performance.kpiStandard', icon: <ThunderboltOutlined />, path: '/performance/kpi-standard', color: '#EB2F96', productionReady: true },
+  {
+    labelKey: 'nav.product.kpiLibrary',
+    icon: <ThunderboltOutlined />,
+    path: '/product/kpi-library',
+    color: '#EB2F96',
+    productionReady: true,
+    requireSuperAdmin: true,
+  },
   { labelKey: 'nav.device.stats',      icon: <CloudServerOutlined />, path: '/device/stats',              color: '#2F54EB', productionReady: false },
   { labelKey: 'nav.alarm.rules',       icon: <SettingOutlined />,     path: '/alarm/rules',               color: '#8C8C8C', productionReady: true },
   { labelKey: 'nav.log.system',        icon: <FileTextOutlined />,    path: '/log/system',                color: '#595959', productionReady: false },
@@ -251,14 +258,17 @@ export default function DashboardPage() {
   const ueTrendDelta = kpiDeltas['UE_ACTIVE'];
 
   const quickAccessItems = useMemo(
-    () => QUICK_ACCESS_ITEMS.filter((item) =>
-      item.productionReady && isRouteAllowed(item.path, {
-        role: currentUser?.role,
-        isSuperAdmin: currentUser?.isSuperAdmin,
-        routePaths,
-        dynamicEnabled: isDynamicMenuEnabled(),
-        menuLoaded,
-      })
+    () => QUICK_ACCESS_ITEMS.filter(
+      (item) =>
+        item.productionReady
+        && (!item.requireSuperAdmin || currentUser?.isSuperAdmin === true)
+        && isRouteAllowed(item.path, {
+          role: currentUser?.role,
+          isSuperAdmin: currentUser?.isSuperAdmin,
+          routePaths,
+          dynamicEnabled: isDynamicMenuEnabled(),
+          menuLoaded,
+        }),
     ),
     [currentUser?.role, currentUser?.isSuperAdmin, routePaths, menuLoaded]
   );

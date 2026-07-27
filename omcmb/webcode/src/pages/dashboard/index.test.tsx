@@ -570,7 +570,7 @@ describe('DashboardPage card snapshot integration', () => {
     );
   });
 
-  it('shows only production-ready quick access entries', () => {
+  it('shows only production-ready quick access entries allowed for a normal admin', () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -587,6 +587,7 @@ describe('DashboardPage card snapshot integration', () => {
       'nav.device.commission',
       'nav.device.stats',
       'nav.log.system',
+      'nav.product.kpiLibrary',
     ].forEach((label) => {
       expect(screen.queryByText(label)).not.toBeInTheDocument();
     });
@@ -595,12 +596,43 @@ describe('DashboardPage card snapshot integration', () => {
       'nav.device.list',
       'nav.alarm.current',
       'nav.alarm.statistics',
-      'nav.performance.kpiStandard',
       'nav.alarm.rules',
       'nav.system.users',
     ].forEach((label) => {
       expect(screen.getByText(label)).toBeInTheDocument();
     });
+  });
+
+  it('opens the official product KPI library only for a super admin', () => {
+    useUserStore.setState({
+      currentUser: {
+        ...user,
+        isSuperAdmin: true,
+        source: 'builtIn',
+      },
+      isAuthenticated: true,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <DashboardPage />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.queryByText('nav.performance.kpiStandard')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('nav.product.kpiLibrary'));
+
+    expect(navigationMocks.openTab).toHaveBeenCalledWith({
+      key: '/product/kpi-library',
+      label: 'nav.product.kpiLibrary',
+      path: '/product/kpi-library',
+      closable: true,
+      labelRaw: false,
+    });
+    expect(navigationMocks.navigate).toHaveBeenCalledWith('/product/kpi-library');
   });
 
   it('opens a tab before navigating from quick access', () => {
