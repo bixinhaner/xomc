@@ -252,3 +252,28 @@ func Test_buildResultsCountQuery_EmptyTaskMetricPathsNoFilter(t *testing.T) {
 	assert.NotContains(t, q, "r.metric_path = ANY")
 	assert.Equal(t, []any{id}, args)
 }
+
+// #185：展示侧扩展显示白名单时，会先按当前过滤条件发现结果里真实出现过的版本输出指标。
+func Test_buildResultMetricScopeQuery_UsesSameResultFiltersWithoutTaskMetricGate(t *testing.T) {
+	id := uuid.New()
+	q, args, err := buildResultMetricScopeQuery(id, resultsFilter{
+		MetricPath:  "C000000005",
+		Granularity: "hourly",
+		StartTime:   "2026-07-27T18:00:00+08:00",
+		EndTime:     "2026-07-27T22:00:00+08:00",
+		// 原任务指标白名单不能参与这次发现，否则新增进版本输出清单的指标仍会被挡掉。
+		TaskMetricPaths: []string{"K-OLD"},
+	})
+
+	assert.NoError(t, err)
+	assert.Contains(t, q, "SELECT DISTINCT r.metric_path")
+	assert.Contains(t, q, "AND r.metric_path = $2")
+	assert.Contains(t, q, "AND r.granularity = $3")
+	assert.Contains(t, q, "AND r.time >= $4")
+	assert.Contains(t, q, "AND r.time < $5")
+	assert.NotContains(t, q, "r.metric_path = ANY")
+	assert.Contains(t, q, "ORDER BY r.metric_path")
+	assert.Len(t, args, 5)
+	assert.Equal(t, id.String(), args[0])
+	assert.Equal(t, "C000000005", args[1])
+}

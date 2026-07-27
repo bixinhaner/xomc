@@ -17,7 +17,15 @@ func (r *PgRepository) syncStreamingTask(ctx context.Context, task *Task, enable
 	if r.streamRepo == nil || task == nil {
 		return nil
 	}
-	rules, err := r.resolveStreamingRules(ctx, task.Technology, task.MetricPaths)
+	enabledPaths, err := r.resolveEnabledStreamingMetricPaths(ctx, task.Technology)
+	if err != nil {
+		return err
+	}
+	rules, err := r.resolveStreamingRules(
+		ctx,
+		task.Technology,
+		streamingOutputMetricPaths(task.MetricPaths, enabledPaths),
+	)
 	if err != nil {
 		return err
 	}
@@ -132,6 +140,87 @@ SELECT id, COALESCE(is_counter, '0'), COALESCE(statis_type, ''), COALESCE(arithm
 		rules = append(rules, rule)
 	}
 	return rules, nil
+}
+
+func (r *PgRepository) resolveEnabledStreamingMetricPaths(
+	ctx context.Context,
+	technology string,
+) ([]string, error) {
+	deviceTypes, err := streamingEnabledDeviceTypes(technology)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{})
+	var paths []string
+	for _, deviceType := range deviceTypes {
+		table := deviceType.EnabledTable()
+		query, args, buildErr := storage.Psql.Select("DISTINCT indicator_id").
+			From(table).
+			Where(sq.Eq{"operator_code": "default"}).
+			OrderBy("indicator_id").
+			ToSql()
+		if buildErr != nil {
+			return nil, fmt.Errorf("build PM aggregation enabled metric SQL: %w", buildErr)
+		}
+		rows, queryErr := r.pool.Query(ctx, query, args...)
+		if queryErr != nil {
+			return nil, fmt.Errorf("resolve PM aggregation enabled metrics from %s: %w", table, queryErr)
+		}
+		for rows.Next() {
+			var path string
+			if err := rows.Scan(&path); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan PM aggregation enabled metric from %s: %w", table, err)
+			}
+			if path == "" {
+				continue
+			}
+			if _, exists := seen[path]; exists {
+				continue
+			}
+			seen[path] = struct{}{}
+			paths = append(paths, path)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("iterate PM aggregation enabled metrics from %s: %w", table, err)
+		}
+		rows.Close()
+	}
+	return paths, nil
+}
+
+func streamingEnabledDeviceTypes(technology string) ([]indicator.DeviceType, error) {
+	if technology != "" {
+		deviceType, err := indicatorDeviceTypeForTechnology(technology)
+		if err != nil {
+			return nil, err
+		}
+		return []indicator.DeviceType{deviceType}, nil
+	}
+	return []indicator.DeviceType{
+		indicator.DeviceTypeENB,
+		indicator.DeviceTypeGNB,
+		indicator.DeviceTypeGSM,
+	}, nil
+}
+
+func streamingOutputMetricPaths(taskPaths, enabledPaths []string) []string {
+	seen := make(map[string]struct{}, len(taskPaths)+len(enabledPaths))
+	out := make([]string, 0, len(taskPaths)+len(enabledPaths))
+	for _, paths := range [][]string{taskPaths, enabledPaths} {
+		for _, path := range paths {
+			if path == "" {
+				continue
+			}
+			if _, exists := seen[path]; exists {
+				continue
+			}
+			seen[path] = struct{}{}
+			out = append(out, path)
+		}
+	}
+	return out
 }
 
 func (r *PgRepository) resolveStreamingCounters(

@@ -20,12 +20,13 @@ type BuiltinReconcileResult struct {
 }
 
 type BuiltinReconciler struct {
-	list            func(context.Context) ([]Task, error)
-	resolveRules    func(context.Context, string, []string) ([]pmstream.MetricRule, error)
-	resolveCounters func(context.Context, string, []pmstream.MetricRule) ([]pmstream.CounterRule, error)
-	resolveMembers  func(context.Context, *Task) ([]pmstream.TaskMember, error)
-	save            func(context.Context, pmstream.SaveTaskRequest) (*pmstream.TaskVersionSnapshot, error)
-	now             func() time.Time
+	list                      func(context.Context) ([]Task, error)
+	resolveEnabledMetricPaths func(context.Context, string) ([]string, error)
+	resolveRules              func(context.Context, string, []string) ([]pmstream.MetricRule, error)
+	resolveCounters           func(context.Context, string, []pmstream.MetricRule) ([]pmstream.CounterRule, error)
+	resolveMembers            func(context.Context, *Task) ([]pmstream.TaskMember, error)
+	save                      func(context.Context, pmstream.SaveTaskRequest) (*pmstream.TaskVersionSnapshot, error)
+	now                       func() time.Time
 }
 
 var hiddenDeviceBuiltinTaskIDs = map[string]uuid.UUID{
@@ -40,9 +41,10 @@ func NewBuiltinReconciler(repo *PgRepository) *BuiltinReconciler {
 			builtin := true
 			return repo.List(ctx, ListFilter{IsBuiltin: &builtin, IncludeAll: true})
 		},
-		resolveRules:    repo.resolveStreamingRules,
-		resolveCounters: repo.resolveStreamingCounters,
-		resolveMembers:  repo.resolveStreamingMembers,
+		resolveEnabledMetricPaths: repo.resolveEnabledStreamingMetricPaths,
+		resolveRules:              repo.resolveStreamingRules,
+		resolveCounters:           repo.resolveStreamingCounters,
+		resolveMembers:            repo.resolveStreamingMembers,
 		save: func(ctx context.Context, req pmstream.SaveTaskRequest) (*pmstream.TaskVersionSnapshot, error) {
 			if repo.streamRepo == nil {
 				return nil, errors.New("PM streaming task repository is not configured")
@@ -105,7 +107,15 @@ func builtinReconcileError(task *Task, err error) error {
 }
 
 func (r *BuiltinReconciler) saveStreamingDefinition(ctx context.Context, task *Task, effectiveFrom time.Time) (bool, bool, error) {
-	rules, resolveErr := r.resolveRules(ctx, task.Technology, task.MetricPaths)
+	outputMetricPaths := task.MetricPaths
+	if r.resolveEnabledMetricPaths != nil {
+		enabledPaths, resolveErr := r.resolveEnabledMetricPaths(ctx, task.Technology)
+		if resolveErr != nil {
+			return false, false, resolveErr
+		}
+		outputMetricPaths = streamingOutputMetricPaths(task.MetricPaths, enabledPaths)
+	}
+	rules, resolveErr := r.resolveRules(ctx, task.Technology, outputMetricPaths)
 	if resolveErr != nil {
 		return false, false, resolveErr
 	}

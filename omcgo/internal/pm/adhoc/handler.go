@@ -961,12 +961,20 @@ func (h *Handler) Results(c *gin.Context) {
 		// 故不能按逗号切分（issue #401：切分后两段都匹配不上完整存储值 → 0 行）。
 		// 改走纯重复参数形态 ?object_ldns=a&object_ldns=b，整值保留不拆。
 		SubsetLDNs: parseRepeatedQuery(c, "object_ldns"),
-		// #532：任务配置指标集（显示侧收口）。让「配置指标=显示范围」落在显示阶段——
-		// 与用户临时选的 metric_path 各自独立成子句、AND 取交集。空（历史/边界任务）= 不过滤（向后兼容）。
-		TaskMetricPaths: task.MetricPaths,
 		// #599：星期/小时段后端过滤（全选/空 = 不过滤，向后兼容）。
 		Weekdays: parseCSVIntQuery(c, "weekdays"),
 		Hours:    parseCSVIntQuery(c, "hours"),
+	}
+	// #185：流式内置任务的实际输出清单是「任务配置指标 + 启用指标」。
+	// 结果展示仍要保留 #532 的显示侧收口，但收口集合必须跟随版本输出结果扩展，
+	// 否则 C000000005 这类已启用 counter 已落库却会被 task.metric_paths 挡掉。
+	if len(task.MetricPaths) > 0 {
+		resultPaths, err := h.repo.ListResultMetricPaths(c.Request.Context(), id, filter)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+			return
+		}
+		filter.TaskMetricPaths = streamingOutputMetricPaths(task.MetricPaths, resultPaths)
 	}
 	q, args := buildResultsQuery(id, filter, limit, offset)
 

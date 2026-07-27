@@ -127,7 +127,7 @@ func buildAdhocKeysetSQL(taskID uuid.UUID, metricPaths []string, startTime, endT
 		b = b.Where(sq.GtOrEq{"r.time": startTime})
 	}
 	if !endTime.IsZero() {
-		b = b.Where(sq.LtOrEq{"r.time": endTime})
+		b = b.Where(sq.Lt{"r.time": endTime})
 	}
 	if started {
 		b = b.Where(sq.Expr(`("r"."time", r.id) > (?, ?)`, curTime, curID))
@@ -169,10 +169,23 @@ func buildAdhocDistinctMetricsSQL(taskID uuid.UUID, metricPaths []string, start,
 		b = b.Where(sq.GtOrEq{"time": start})
 	}
 	if !end.IsZero() {
-		b = b.Where(sq.LtOrEq{"time": end})
+		b = b.Where(sq.Lt{"time": end})
 	}
 	q, args, _ := b.ToSql()
 	return q, args
+}
+
+func buildAdhocResultMetricScopeSQL(taskID uuid.UUID, startTime, endTime time.Time) (string, []any, error) {
+	b := storage.Psql.Select("DISTINCT metric_path").
+		From("pm_adhoc_aggregation_results").
+		Where(sq.Eq{"task_id": taskID})
+	if !startTime.IsZero() {
+		b = b.Where(sq.GtOrEq{"time": startTime})
+	}
+	if !endTime.IsZero() {
+		b = b.Where(sq.Lt{"time": endTime})
+	}
+	return b.OrderBy("metric_path").ToSql()
 }
 
 // applyDeviceExportFilters 复刻 aggregator 的 device 维度过滤（成对 OUI/SN + 公共过滤），

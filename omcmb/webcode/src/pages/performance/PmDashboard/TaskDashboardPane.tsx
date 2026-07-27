@@ -25,7 +25,7 @@ import { nowInSystemTimezone, toSystemTimezoneRFC3339 } from '@core/utils/system
 import { buildAdhocExportParams, defaultExportTaskName } from '@core/utils/kpiExportParams';
 import { useTechnologyDictionary } from '@core/hooks/api/useTechnologyDictionary';
 import { displayAdhocTaskName } from '../adhocTaskDisplay';
-import { buildMetricCharts, filterChartsByMetricPaths } from './taskDashboardUtils';
+import { buildMetricCharts } from './taskDashboardUtils';
 import ChartCard from './ChartCard';
 import DashboardFilterBar, { type DashboardFilterValue } from './DashboardFilterBar';
 import {
@@ -177,16 +177,13 @@ export default function TaskDashboardPane({ taskId }: Props) {
 
   const charts = useMemo(() => {
     if (!taskQuery.data || !effectiveGran || !submitted) return [];
-    // T-0194：按任务已选指标清单过滤出图（空清单则不过滤，兜底全画），让"指标数 X"与出图数一致。
-    const metricPaths = taskQuery.data.metricPaths;
+    // #185：任务配置指标集不再等同于最终输出指标集；后端结果已按任务指标 ∪ 启用指标收口。
+    // 这里直接画结果里真实出现的指标，避免把启用指标再次按旧任务配置裁掉。
     // #599：后端已按 weekdays/hours 过滤，前端只需扩轴（轴刻度仍按完整范围铺、再套星期/小时剔除空桶）。
     const weekdaySet = new Set(submitted.weekdays);
     const hourSet = new Set(submitted.hours);
     const cur = extendChartsAxis(
-      filterChartsByMetricPaths(
-        buildMetricCharts(rawRows, taskQuery.data.dimension, effectiveGran, chartLocale),
-        metricPaths,
-      ),
+      buildMetricCharts(rawRows, taskQuery.data.dimension, effectiveGran, chartLocale),
       {
         rangeStartMs: submitted.rangeStartMs,
         rangeEndMs: submitted.rangeEndMs,
@@ -196,10 +193,7 @@ export default function TaskDashboardPane({ taskId }: Props) {
       },
     );
     if (!submitted.compare) return cur;
-    const prev = filterChartsByMetricPaths(
-      buildMetricCharts(rawPrevRows, taskQuery.data.dimension, effectiveGran, chartLocale),
-      metricPaths,
-    );
+    const prev = buildMetricCharts(rawPrevRows, taskQuery.data.dimension, effectiveGran, chartLocale);
     return attachCompareSeries(cur, prev, submitted.offsetMs, effectiveGran);
   }, [
     rawRows,
