@@ -344,12 +344,7 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
       title={
         <span>
           {task.name}
-          <Tag color="purple" style={{ marginLeft: 8 }}>
-            {task.mode === 'continuous'
-              ? intl.formatMessage({ id: 'perf.adhoc.modeContinuous' })
-              : intl.formatMessage({ id: 'perf.adhoc.modeOneshot' })}
-          </Tag>
-          <Tag color={task.status === 'succeeded' ? 'success' : task.status === 'failed' ? 'error' : 'processing'}>
+          <Tag color={task.status === 'succeeded' ? 'success' : task.status === 'failed' ? 'error' : 'processing'} style={{ marginLeft: 8 }}>
             {task.status}
           </Tag>
         </span>

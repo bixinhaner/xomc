@@ -90,6 +90,7 @@ export const pmAdhocApi = {
       expire_days: input.expireDays,
       visibility: input.visibility,
     };
+    if (input.plannedEndAt !== undefined) payload.planned_end_at = input.plannedEndAt;
     if (input.windowStart) payload.window_start = input.windowStart;
     if (input.windowEnd) payload.window_end = input.windowEnd;
     // T-0193：小区/PLMN 白名单——非空才透传（空=不过滤，保持现状语义）。
@@ -110,6 +111,7 @@ export const pmAdhocApi = {
       payload.granularities = ['hourly', 'daily', 'weekly', 'monthly'];
     }
     if (input.visibility !== undefined) payload.visibility = input.visibility;
+    if (input.plannedEndAt !== undefined) payload.planned_end_at = input.plannedEndAt;
     if (input.windowStart) payload.window_start = input.windowStart;
     if (input.windowEnd) payload.window_end = input.windowEnd;
     if (input.objectLdns && input.objectLdns.length > 0) {
@@ -200,6 +202,7 @@ const mockTasks: AdhocTask[] = [
     technology: 'lte',
     isBuiltin: false,
     expireDays: 60,
+    plannedEndAt: '2026-06-22T01:00:00Z',
     visibility: 'private',
     status: 'succeeded',
     progress: 100,
@@ -237,6 +240,7 @@ export const pmAdhocMock: typeof pmAdhocApi = {
       technology: input.technology,
       isBuiltin: input.isBuiltin ?? false,
       expireDays: input.expireDays ?? 60,
+      plannedEndAt: input.plannedEndAt,
       visibility: input.visibility ?? 'private',
       objectLdns: input.objectLdns && input.objectLdns.length > 0 ? input.objectLdns : undefined,
       status: 'pending',
@@ -256,6 +260,7 @@ export const pmAdhocMock: typeof pmAdhocApi = {
       if (input.deviceSns !== undefined) t.deviceSns = input.deviceSns;
       if (input.granularities !== undefined) t.granularities = input.granularities;
       if (input.visibility !== undefined) t.visibility = input.visibility;
+      if (input.plannedEndAt !== undefined) t.plannedEndAt = input.plannedEndAt;
       if (input.windowStart !== undefined) t.windowStart = input.windowStart;
       if (input.windowEnd !== undefined) t.windowEnd = input.windowEnd;
       t.objectLdns = input.objectLdns && input.objectLdns.length > 0 ? input.objectLdns : undefined;

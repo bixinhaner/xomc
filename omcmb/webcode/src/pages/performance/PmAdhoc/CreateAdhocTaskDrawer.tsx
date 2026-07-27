@@ -7,12 +7,12 @@
  * preset 入参支持从 panel 配置预填（G6-Gap-12 跳转场景）。
  */
 
-import { useEffect, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
-import { Alert, Button, DatePicker, Drawer, Form, Input, Select, Switch, message } from 'antd';
+import { Alert, Button, DatePicker, Drawer, Form, Input, Switch, message } from 'antd';
 import dayjs from 'dayjs';
 import { useCreatePmAdhoc } from '@core/hooks/api/usePmAdhoc';
-import type { AdhocMode } from '@core/types/pmAdhoc';
+import type { CreateAdhocTaskInput } from '@core/types/pmAdhoc';
 import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
 
 const ROLLUP_GRANULARITIES = ['hourly', 'daily', 'weekly', 'monthly'];
@@ -26,11 +26,9 @@ export interface CreateAdhocPreset {
 
 interface CreateForm {
   name: string;
-  mode: AdhocMode;
-  cronExpr?: string;
   deviceSns: string; // csv
   metricPaths: string; // csv
-  window: [dayjs.Dayjs, dayjs.Dayjs];
+  plannedEndAt?: dayjs.Dayjs | null;
   aggregateGroup: boolean;
 }
 
@@ -54,25 +52,18 @@ export function CreateAdhocTaskDrawer({ open, preset, onClose, onCreated }: Prop
   const intl = useIntl();
   const [form] = Form.useForm<CreateForm>();
   const createMut = useCreatePmAdhoc();
-
-  const MODE_OPTIONS = useMemo<{ label: string; value: AdhocMode }[]>(
-    () => [
-      { label: intl.formatMessage({ id: 'perf.adhoc.modeOneshotOpt' }), value: 'oneshot' },
-      { label: intl.formatMessage({ id: 'perf.adhoc.modeContinuousOpt' }), value: 'continuous' },
-    ],
-    [intl],
-  );
+  const [plannedEndTouched, setPlannedEndTouched] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     form.setFieldsValue({
       name: preset?.name ?? '',
-      mode: 'oneshot',
       deviceSns: (preset?.deviceSns ?? []).join(', '),
       metricPaths: (preset?.metricPaths ?? []).join(', '),
-      window: [dayjs().subtract(1, 'day'), dayjs()],
+      plannedEndAt: dayjs().add(30, 'day'),
       aggregateGroup: false,
     });
+    setPlannedEndTouched(false);
   }, [open, preset, form]);
 
   const handleCreate = async () => {
@@ -95,17 +86,18 @@ export function CreateAdhocTaskDrawer({ open, preset, onClose, onCreated }: Prop
       return;
     }
 
-    const task = await createMut.mutateAsync({
+    const input: CreateAdhocTaskInput = {
       name: v.name,
-      mode: v.mode,
-      cronExpr: v.cronExpr,
+      mode: 'continuous',
       deviceSns,
       metricPaths,
       granularities: ROLLUP_GRANULARITIES,
-      windowStart: v.window[0].toISOString(),
-      windowEnd: v.window[1].toISOString(),
       dimension: v.aggregateGroup ? 'aggregate_group' : 'device',
-    });
+    };
+    if (plannedEndTouched) {
+      input.plannedEndAt = v.plannedEndAt ? v.plannedEndAt.toISOString() : null;
+    }
+    const task = await createMut.mutateAsync(input);
     message.success(intl.formatMessage({ id: 'perf.adhoc.taskCreated' }));
     onClose();
     form.resetFields();
@@ -146,22 +138,6 @@ export function CreateAdhocTaskDrawer({ open, preset, onClose, onCreated }: Prop
         <Form.Item label={intl.formatMessage({ id: 'perf.adhoc.drawerTaskName' })} name="name" rules={[{ required: true }]}>
           <Input />
         </Form.Item>
-        <Form.Item label={intl.formatMessage({ id: 'perf.adhoc.drawerMode' })} name="mode" rules={[{ required: true }]}>
-          <Select options={MODE_OPTIONS} />
-        </Form.Item>
-        <Form.Item shouldUpdate={(p, c) => p.mode !== c.mode}>
-          {() =>
-            form.getFieldValue('mode') === 'continuous' ? (
-              <Form.Item
-                label={intl.formatMessage({ id: 'perf.adhoc.cronLabel' })}
-                name="cronExpr"
-                rules={[{ required: true, message: intl.formatMessage({ id: 'perf.adhoc.cronRequired' }) }]}
-              >
-                <Input placeholder={intl.formatMessage({ id: 'perf.adhoc.cronPlaceholder' })} />
-              </Form.Item>
-            ) : null
-          }
-        </Form.Item>
         <Form.Item
           label={intl.formatMessage({ id: 'perf.adhoc.deviceSnsLabel' })}
           name="deviceSns"
@@ -183,8 +159,16 @@ export function CreateAdhocTaskDrawer({ open, preset, onClose, onCreated }: Prop
           description={intl.formatMessage({ id: 'perf.adhoc.fixedRollupDesc' })}
           style={{ marginBottom: 16 }}
         />
-        <Form.Item label={intl.formatMessage({ id: 'perf.adhoc.windowLabel' })} name="window" rules={[{ required: true }]}>
-          <DatePicker.RangePicker showTime style={{ width: '100%' }} />
+        <Form.Item
+          label={intl.formatMessage({ id: 'perf.adhoc.fieldPlannedEndAt' })}
+          name="plannedEndAt"
+        >
+          <DatePicker
+            showTime
+            style={{ width: '100%' }}
+            disabledDate={(currentDate) => Boolean(currentDate && currentDate.isBefore(dayjs().startOf('day')))}
+            onChange={() => setPlannedEndTouched(true)}
+          />
         </Form.Item>
         <Form.Item
           label={intl.formatMessage({ id: 'perf.adhoc.aggregateGroupLabel' })}

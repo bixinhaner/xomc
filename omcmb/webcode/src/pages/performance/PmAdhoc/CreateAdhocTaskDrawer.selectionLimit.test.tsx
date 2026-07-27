@@ -57,4 +57,21 @@ describe('CreateAdhocTaskDrawer selection limits', () => {
       expect(createMutateAsync).not.toHaveBeenCalled();
     });
   });
+
+  it('未手动修改计划结束时间时不提交 plannedEndAt，由后端按创建时间默认', async () => {
+    createMutateAsync.mockResolvedValue({ id: 'created-task' });
+    renderDrawer({
+      name: '默认计划结束任务',
+      deviceSns: ['SN-1'],
+      metricPaths: ['K0001'],
+      granularities: ['hourly'],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /创\s*建/ }));
+
+    await waitFor(() => {
+      expect(createMutateAsync).toHaveBeenCalled();
+    });
+    expect(createMutateAsync.mock.calls[0][0]).not.toHaveProperty('plannedEndAt');
+  });
 });

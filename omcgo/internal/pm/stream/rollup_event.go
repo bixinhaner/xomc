@@ -132,7 +132,8 @@ func rollupContributions(
 			return nil, err
 		}
 		if parent.Start.Before(version.EffectiveFrom) ||
-			(version.EffectiveTo != nil && !parent.Start.Before(*version.EffectiveTo)) {
+			(version.EffectiveTo != nil && !parent.Start.Before(*version.EffectiveTo)) ||
+			(version.PlannedEndAt != nil && !parent.Start.Before(*version.PlannedEndAt)) {
 			continue
 		}
 		incomplete := payload.SourceIncompleteSlots
