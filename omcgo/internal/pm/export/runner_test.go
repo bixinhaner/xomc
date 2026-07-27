@@ -228,7 +228,42 @@ func TestRunner_BuildSource_UsesStoredEnglishLocaleWithoutRequestContext(t *test
 	assert.Contains(t, adhocDB.queries[1].sql, "COALESCE(NULLIF(en_name, ''), cn_name)")
 }
 
-func TestRunner_BuildSource_KpiQueryAutoDiscoversObjectLDNsForSkeletonExport(t *testing.T) {
+func TestRunner_BuildSource_KpiQueryDoesNotCreateSyntheticSkeletonRows(t *testing.T) {
+	start := time.Date(2026, 7, 14, 7, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	params, err := json.Marshal(DashboardParams{
+		Granularity: "hourly",
+		Dimension:   "device",
+		DeviceSNs:   []string{"SN1"},
+		MetricPaths: []string{"K001"},
+		StartTime:   start.Format(time.RFC3339),
+		EndTime:     end.Format(time.RFC3339),
+	})
+	require.NoError(t, err)
+
+	metricDB := &recordingExportQuerier{results: []pgx.Rows{
+		&adhocFakeRows{}, // 指标名解析无命中，列名回退指标编号
+	}}
+	runner := NewRunner(RunnerDeps{
+		MetricDB: metricDB,
+		Aggr:     aggregator.New(metricDB, nil, nil),
+	})
+
+	src, _, _, err := runner.buildSource(context.Background(), &Task{
+		ID:         uuid.New(),
+		SourceType: SourceKpiQuery,
+		Params:     params,
+	})
+	require.NoError(t, err)
+
+	deviceSrc, ok := src.(*dashboardDeviceSource)
+	require.True(t, ok)
+	assert.Empty(t, deviceSrc.objectLDNs)
+	require.NotEmpty(t, metricDB.queries)
+	assert.NotContains(t, metricDB.queries[0].sql, "SELECT DISTINCT object_ldn")
+}
+
+func TestRunner_BuildSource_KpiQueryPreservesNonHourlySkeletonExport(t *testing.T) {
 	start := time.Date(2026, 7, 14, 7, 0, 0, 0, time.UTC)
 	end := start.Add(30 * time.Minute)
 	params, err := json.Marshal(DashboardParams{

@@ -419,6 +419,20 @@
               "access": "R",
               "type": "boolean",
               "constraints": {}
+            },
+            {
+              "path": "Device.ManagementServer.sslStatus.endDate",
+              "name": "SSL状态结束时间",
+              "access": "R",
+              "type": "string",
+              "constraints": {}
+            },
+            {
+              "path": "Device.ManagementServer.sslStatus.startDate",
+              "name": "SSL状态开始时间",
+              "access": "R",
+              "type": "string",
+              "constraints": {}
             }
           ]
         }

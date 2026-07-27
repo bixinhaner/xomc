@@ -6,11 +6,13 @@
  * 不涉及设备/粒度/时窗——内置任务结构性字段不可改。
  */
 
+import type { CSSProperties } from 'react';
 import { useMemo, useState, useEffect } from 'react';
 import { useIntl } from 'react-intl';
 import { ImportOutlined } from '@ant-design/icons';
-import { Alert, Button, Modal, Select, Space, Spin, Tag, Transfer, message } from 'antd';
+import { Alert, Button, Modal, Select, Space, Spin, Tag, Tooltip, Transfer, message } from 'antd';
 import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
+import { SIDEBAR_WIDTH } from '@/theme/tokens';
 import { useUpdatePmAdhoc } from '@core/hooks/api/usePmAdhoc';
 import { useIndicatorCandidates } from '@core/hooks/api/usePerformance';
 import type { IndicatorCandidate } from '@core/services/api/pmApi';
@@ -29,6 +31,44 @@ const TECH_TO_DEVICE_TYPE: Record<string, DeviceType> = {
   lte: 'ENB',
   nr: 'GNB',
   gsm: 'GSM',
+};
+
+const METRIC_MODAL_RIGHT_GUTTER = 24;
+const METRIC_MODAL_WIDTH = `calc(100vw - ${SIDEBAR_WIDTH + METRIC_MODAL_RIGHT_GUTTER}px)`;
+const METRIC_MODAL_STYLE: CSSProperties = {
+  marginLeft: SIDEBAR_WIDTH,
+  marginRight: METRIC_MODAL_RIGHT_GUTTER,
+  maxWidth: METRIC_MODAL_WIDTH,
+};
+const METRIC_TRANSFER_SECTION_STYLE: CSSProperties = {
+  flex: '1 1 0',
+  minWidth: 0,
+  height: 480,
+};
+const METRIC_TRANSFER_LIST_STYLE: CSSProperties = {
+  overflowX: 'auto',
+};
+const METRIC_TRANSFER_ITEM_STYLE: CSSProperties = {
+  minWidth: '100%',
+  width: 'max-content',
+};
+const METRIC_TRANSFER_ITEM_CONTENT_STYLE: CSSProperties = {
+  flex: '0 0 auto',
+  minWidth: 'max-content',
+  overflow: 'visible',
+  textOverflow: 'clip',
+  whiteSpace: 'nowrap',
+};
+const METRIC_ROW_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  minWidth: '100%',
+  width: 'max-content',
+};
+const METRIC_TEXT_STYLE: CSSProperties = {
+  flex: '0 0 auto',
+  whiteSpace: 'nowrap',
 };
 
 interface MetricTransferItem {
@@ -93,22 +133,35 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
     [indicatorItems, metricTypeFilter, selectedKeySet],
   );
 
-  const renderItem = (item: MetricTransferItem) => (
-    <Space size={6}>
-      <Tag color={item.isCounter ? 'blue' : 'orange'} style={{ marginInlineEnd: 0 }}>
-        {item.isCounter
-          ? intl.formatMessage({ id: 'perf.adhoc.metricTagCounter' })
-          : intl.formatMessage({ id: 'perf.adhoc.metricTagKpi' })}
-      </Tag>
-      {shouldShowIndicatorLevel(deviceType) && (
-        <Tag color="default" style={{ marginInlineEnd: 0 }}>
-          {formatIndicatorLevel(item.indicatorLevel, (id) => intl.formatMessage({ id }))}
-        </Tag>
-      )}
-      <span style={{ color: '#999' }}>{item.id}</span>
-      <span>{item.name}</span>
-    </Space>
-  );
+  const renderItem = (item: MetricTransferItem) => {
+    const typeLabel = item.isCounter
+      ? intl.formatMessage({ id: 'perf.adhoc.metricTagCounter' })
+      : intl.formatMessage({ id: 'perf.adhoc.metricTagKpi' });
+    const levelLabel = shouldShowIndicatorLevel(deviceType)
+      ? formatIndicatorLevel(item.indicatorLevel, (id) => intl.formatMessage({ id }))
+      : '';
+    const tooltipTitle = [typeLabel, levelLabel, item.id, item.name].filter(Boolean).join(' ');
+
+    return {
+      label: (
+        <Tooltip title={tooltipTitle} placement="topLeft">
+          <span style={METRIC_ROW_STYLE}>
+            <Tag color={item.isCounter ? 'blue' : 'orange'} style={{ flex: '0 0 auto', marginInlineEnd: 0 }}>
+              {typeLabel}
+            </Tag>
+            {shouldShowIndicatorLevel(deviceType) && (
+              <Tag color="default" style={{ flex: '0 0 auto', marginInlineEnd: 0 }}>
+                {levelLabel}
+              </Tag>
+            )}
+            <span style={{ flex: '0 0 auto', color: '#999' }}>{item.id}</span>
+            <span style={METRIC_TEXT_STYLE}>{item.name}</span>
+          </span>
+        </Tooltip>
+      ),
+      value: tooltipTitle,
+    };
+  };
 
   const warnMetricLimitExceeded = (count: number) => {
     if (count <= PM_QUERY_SELECTION_LIMIT) return false;
@@ -154,7 +207,8 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
       onCancel={onClose}
       onOk={handleOk}
       confirmLoading={updateMut.isPending}
-      width={820}
+      width={METRIC_MODAL_WIDTH}
+      style={METRIC_MODAL_STYLE}
       destroyOnHidden
     >
       <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
@@ -203,7 +257,13 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
               intl.formatMessage({ id: 'perf.adhoc.transferAvailableMetric' }),
               intl.formatMessage({ id: 'perf.adhoc.transferSelectedMetric' }),
             ]}
-            listStyle={{ width: 360, height: 380 }}
+            style={{ width: '100%' }}
+            styles={{
+              section: METRIC_TRANSFER_SECTION_STYLE,
+              list: METRIC_TRANSFER_LIST_STYLE,
+              item: METRIC_TRANSFER_ITEM_STYLE,
+              itemContent: METRIC_TRANSFER_ITEM_CONTENT_STYLE,
+            }}
           />
         </Spin>
         <div style={{ color: '#888' }}>

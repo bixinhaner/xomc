@@ -396,7 +396,14 @@ export const routes: RouteObject[] = [
       { path: 'product/products',       element: withSuspense(ProductsPage) },
       { path: 'product/param-model',    element: withSuspense(ParamModelPage) },
       { path: 'product/standard-params', element: withSuspense(StandardParamsPage) },
-      { path: 'product/kpi-library',    element: withSuspense(KpiLibraryPage) },
+      {
+        path: 'product/kpi-library',
+        element: (
+          <PrivateRoute requireSuperAdmin>
+            {withSuspense(KpiLibraryPage)}
+          </PrivateRoute>
+        ),
+      },
       { path: 'product/alarm-library',  element: withSuspense(AlarmLibraryPage) },
       { path: 'product/orphan-devices', element: withSuspense(OrphanDevicesPage) },
 

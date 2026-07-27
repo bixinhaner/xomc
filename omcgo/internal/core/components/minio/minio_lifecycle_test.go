@@ -48,8 +48,14 @@ type fakeLifecycleClient struct {
 	configs        map[string]*lifecycle.Configuration
 	failDesiredOn  string
 	failRollbackOn string
+	failRemoveOn   string
 	setCalls       []string
 	cancelApply    context.CancelFunc
+}
+
+func (f *fakeLifecycleClient) RemoveBucketLifecycle(_ context.Context, bucket string) error {
+	delete(f.configs, bucket)
+	return nil
 }
 
 func (f *fakeLifecycleClient) GetBucketLifecycle(_ context.Context, bucket string) (*lifecycle.Configuration, error) {
@@ -63,6 +69,9 @@ func (f *fakeLifecycleClient) GetBucketLifecycle(_ context.Context, bucket strin
 func (f *fakeLifecycleClient) SetBucketLifecycle(ctx context.Context, bucket string, config *lifecycle.Configuration) error {
 	days := lifecycleDays(config)
 	f.setCalls = append(f.setCalls, bucket)
+	if bucket == f.failRemoveOn && config.Empty() {
+		return errors.New("injected remove failure")
+	}
 	if bucket == f.failDesiredOn && lifecycleDays(config) == 60 {
 		if f.cancelApply != nil {
 			f.cancelApply()
@@ -122,6 +131,41 @@ func TestApplyRawFileLifecycleRollsBackEarlierBucketsOnFailure(t *testing.T) {
 	require.Equal(t, 14, lifecycleDays(client.configs["pm-files"]),
 		"a partial update must restore the earlier bucket's lifecycle")
 	require.Equal(t, 14, lifecycleDays(client.configs["mr-files"]))
+}
+
+func TestRemoveRawFileLifecycleRulesPreservesUnrelatedRules(t *testing.T) {
+	client := &fakeLifecycleClient{configs: map[string]*lifecycle.Configuration{
+		"pm-files": {Rules: []lifecycle.Rule{
+			{ID: "omc-raw-expire-60d", Status: "Enabled"},
+			{ID: "operator-noncurrent", Status: "Enabled"},
+		}},
+	}}
+	require.NoError(t, removeRawFileLifecycleRules(t.Context(), client, []string{"pm-files"}))
+	require.Len(t, client.configs["pm-files"].Rules, 1)
+	require.Equal(t, "operator-noncurrent", client.configs["pm-files"].Rules[0].ID)
+}
+
+func TestEnsureRawFileLifecyclePreservesUnrelatedRules(t *testing.T) {
+	client := &fakeLifecycleClient{configs: map[string]*lifecycle.Configuration{
+		"pm-files": {Rules: []lifecycle.Rule{{ID: "operator-noncurrent", Status: "Enabled"}}},
+	}}
+	require.NoError(t, ensureRawFileLifecycle(t.Context(), client, "pm-files", 60))
+	require.Len(t, client.configs["pm-files"].Rules, 2)
+	require.Equal(t, "operator-noncurrent", client.configs["pm-files"].Rules[0].ID)
+	require.True(t, rawFileLifecycleMatches(client.configs["pm-files"], 60))
+}
+
+func TestRemoveRawFileLifecycleRulesRollsBackEarlierBucketOnFailure(t *testing.T) {
+	client := &fakeLifecycleClient{
+		configs: map[string]*lifecycle.Configuration{
+			"pm-files": rawFileLifecycleConfig(60),
+			"mr-files": rawFileLifecycleConfig(60),
+		},
+		failRemoveOn: "mr-files",
+	}
+	require.Error(t, removeRawFileLifecycleRules(t.Context(), client, []string{"pm-files", "mr-files"}))
+	require.True(t, rawFileLifecycleMatches(client.configs["pm-files"], 60))
+	require.True(t, rawFileLifecycleMatches(client.configs["mr-files"], 60))
 }
 
 func lifecycleDays(config *lifecycle.Configuration) int {

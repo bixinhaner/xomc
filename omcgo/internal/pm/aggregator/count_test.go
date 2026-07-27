@@ -71,6 +71,31 @@ func Test_Count_Device_PageByPivotRowCountsDistinctPivotKeys(t *testing.T) {
 	assert.NotContains(t, gotSQL, "metric_path, granularity, time")
 }
 
+func Test_Count_Device_HourlyMetricPathsUsesHourlyView(t *testing.T) {
+	var gotSQL string
+	db := &stubDB{}
+	db.queryRowFn = func(ctx context.Context, sql string, args ...any) pgx.Row {
+		gotSQL = sql
+		return countRow{n: 1}
+	}
+	a := New(db, nil, nil)
+
+	n, err := a.Count(context.Background(), QueryRequest{
+		Granularity: metrics.GranularityHourly,
+		Dimension:   DimensionDevice,
+		DeviceSNs:   []string{"SN-1"},
+		MetricPaths: []string{"C1"},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+	assert.Contains(t, gotSQL, "FROM pm_metrics_hourly")
+	assert.Contains(t, gotSQL, "metric_path =")
+	assert.NotContains(t, gotSQL, "pm_hourly_bucket_versions")
+	assert.NotContains(t, gotSQL, "pm_hourly_anchors")
+	assert.NotContains(t, gotSQL, "pm_hourly_values")
+}
+
 // device_group 维度：GROUP BY 子查询包成 COUNT(*) FROM (...) sub，数的是分组数。
 func Test_Count_DeviceGroup_SubqueryCount(t *testing.T) {
 	var gotSQL string

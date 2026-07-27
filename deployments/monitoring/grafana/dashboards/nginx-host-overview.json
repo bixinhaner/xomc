@@ -120,6 +120,48 @@
         {"expr": "node_load5", "legendFormat": "load5"},
         {"expr": "node_load15", "legendFormat": "load15"}
       ]
+    },
+    {
+      "title": "磁盘 I/O 活动时钟占比（不是饱和度）",
+      "description": "Linux 5.x 的 io_time 表示采样时钟内发生过 I/O 完成/启动的时间占比；小对象连续 I/O 可接近 100%，必须结合 await 与平均队列判断是否饱和。",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 36},
+      "targets": [
+        {"expr": "clamp_max(rate(node_disk_io_time_seconds_total{device!~\"loop.*|ram.*\"}[5m]) * 100, 100)", "legendFormat": "{{device}} activity"},
+        {"expr": "avg(rate(node_cpu_seconds_total{mode=\"iowait\"}[5m])) * 100", "legendFormat": "host iowait"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}}
+    },
+    {
+      "title": "磁盘吞吐量与 IOPS",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 36},
+      "targets": [
+        {"expr": "rate(node_disk_read_bytes_total{device!~\"loop.*|ram.*\"}[5m])", "legendFormat": "{{device}} read bytes/s"},
+        {"expr": "rate(node_disk_written_bytes_total{device!~\"loop.*|ram.*\"}[5m])", "legendFormat": "{{device}} write bytes/s"},
+        {"expr": "rate(node_disk_reads_completed_total{device!~\"loop.*|ram.*\"}[5m])", "legendFormat": "{{device}} read IOPS"},
+        {"expr": "rate(node_disk_writes_completed_total{device!~\"loop.*|ram.*\"}[5m])", "legendFormat": "{{device}} write IOPS"}
+      ]
+    },
+    {
+      "title": "磁盘平均等待与队列深度",
+      "description": "await 按完成操作数计算；平均队列来自 weighted io time。活动时间高但 await/队列低时，磁盘仍有余量。",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 44},
+      "targets": [
+        {"expr": "1000 * (rate(node_disk_read_time_seconds_total{device!~\"loop.*|ram.*\"}[5m]) + rate(node_disk_write_time_seconds_total{device!~\"loop.*|ram.*\"}[5m])) / clamp_min(rate(node_disk_reads_completed_total{device!~\"loop.*|ram.*\"}[5m]) + rate(node_disk_writes_completed_total{device!~\"loop.*|ram.*\"}[5m]), 0.001)", "legendFormat": "{{device}} await ms"},
+        {"expr": "rate(node_disk_io_time_weighted_seconds_total{device!~\"loop.*|ram.*\"}[5m])", "legendFormat": "{{device}} avg queue"}
+      ]
+    },
+    {
+      "title": "MinIO Scanner 扫描速率",
+      "description": "持续小对象扫描会消耗随机读 IOPS；与磁盘 read IOPS 同步升高时可用于确认 scanner 影响。",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 44},
+      "targets": [
+        {"expr": "sum(rate(minio_node_scanner_objects_scanned[5m]))", "legendFormat": "objects/s"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
     }
   ],
   "schemaVersion": 39,

@@ -64,41 +64,23 @@ func newRawAwareExportSelect(
 	req aggregator.QueryRequest,
 	columns ...string,
 ) sq.SelectBuilder {
-	if len(req.MetricPaths) == 0 || (table != "pm_metrics" && table != "pm_metrics_hourly") {
+	if len(req.MetricPaths) == 0 || table != "pm_metrics" {
 		return storage.Psql.Select(columns...).From(table)
 	}
-	var targeted sq.SelectBuilder
-	if table == "pm_metrics" {
-		targeted = storage.Psql.Select(
-			"md5(a.anchor_id::text||':'||d.metric_id::text)::uuid AS id",
-			"COALESCE(dev.oui,'')::text AS device_oui",
-			"COALESCE(dev.serial_number,f.device_sn)::text AS device_sn",
-			"d.metric_path", "d.metric_type", "v.metric_value", "d.statis_type", "a.granularity",
-			`a."time"`, "a.start_time", "a.end_time",
-			"COALESCE(b.committed_at,f.created_at,now()) AS ingest_time", "a.object_ldn",
-		).From("pm_measurement_anchors a").
-			Join("pm_metric_sets s ON s.metric_set_id=a.metric_set_id").
-			Join("pm_metric_dictionary d ON d.metric_id=ANY(s.metric_ids)").
-			LeftJoin(`pm_metric_values v ON v."time"=a."time" AND v.anchor_id=a.anchor_id AND v.metric_id=d.metric_id`).
-			LeftJoin("pm_files f ON f.id=a.source_file_id").
-			LeftJoin("pm_ingest_batches b ON b.ingest_batch_id=a.ingest_batch_id").
-			LeftJoin("device_dim dev ON dev.id=a.device_dim_id")
-	} else {
-		targeted = storage.Psql.Select(
-			"md5(a.bucket_version::text||':'||a.anchor_id::text||':'||d.metric_id::text)::uuid AS id",
-			"COALESCE(dev.oui,'')::text AS device_oui",
-			"COALESCE(dev.serial_number,'')::text AS device_sn",
-			"d.metric_path", "d.metric_type", "v.metric_value", "d.statis_type", "a.granularity",
-			`a."time"`, "a.start_time", "a.end_time",
-			"COALESCE(ver.published_at,ver.created_at) AS ingest_time", "a.object_ldn",
-		).From("pm_hourly_bucket_versions ver").
-			Join("pm_hourly_anchors a ON a.bucket_version=ver.bucket_version").
-			Join("pm_metric_sets s ON s.metric_set_id=a.metric_set_id").
-			Join("pm_metric_dictionary d ON d.metric_id=ANY(s.metric_ids)").
-			LeftJoin(`pm_hourly_values v ON v.bucket_version=a.bucket_version AND v."time"=a."time" AND v.anchor_id=a.anchor_id AND v.metric_id=d.metric_id`).
-			LeftJoin("device_dim dev ON dev.id=a.device_dim_id").
-			Where(sq.Eq{"ver.status": "active"})
-	}
+	targeted := storage.Psql.Select(
+		"md5(a.anchor_id::text||':'||d.metric_id::text)::uuid AS id",
+		"COALESCE(dev.oui,'')::text AS device_oui",
+		"COALESCE(dev.serial_number,f.device_sn)::text AS device_sn",
+		"d.metric_path", "d.metric_type", "v.metric_value", "d.statis_type", "a.granularity",
+		`a."time"`, "a.start_time", "a.end_time",
+		"COALESCE(b.committed_at,f.created_at,now()) AS ingest_time", "a.object_ldn",
+	).From("pm_measurement_anchors a").
+		Join("pm_metric_sets s ON s.metric_set_id=a.metric_set_id").
+		Join("pm_metric_dictionary d ON d.metric_id=ANY(s.metric_ids)").
+		LeftJoin(`pm_metric_values v ON v."time"=a."time" AND v.anchor_id=a.anchor_id AND v.metric_id=d.metric_id`).
+		LeftJoin("pm_files f ON f.id=a.source_file_id").
+		LeftJoin("pm_ingest_batches b ON b.ingest_batch_id=a.ingest_batch_id").
+		LeftJoin("device_dim dev ON dev.id=a.device_dim_id")
 	targeted = targeted.Where(sq.Eq{"d.metric_path": req.MetricPaths})
 	return storage.Psql.Select(columns...).FromSelect(targeted, table)
 }

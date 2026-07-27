@@ -144,7 +144,7 @@ services:
     # PM 在线聚合窗口是运行期权威状态，禁止淘汰；AOF everysec 保证进程重启可恢复。
     # 内存不足必须告警和扩容，不能通过 LRU 静默损坏窗口。
     # 提高 rewrite 阈值，避免高频聚合写入下小 AOF 约每分钟重写一次。
-    command: redis-server --appendonly yes --appendfsync everysec --maxmemory ${REDIS_MAXMEMORY:-2gb} --maxmemory-policy noeviction --auto-aof-rewrite-min-size 256mb --auto-aof-rewrite-percentage 300
+    command: redis-server --appendonly yes --appendfsync everysec --maxmemory ${REDIS_MAXMEMORY:-2gb} --maxmemory-policy noeviction --auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500
     volumes:
       - ${REDIS_DATA_PATH:-redisdata}:/data
       - /etc/localtime:/etc/localtime:ro
@@ -214,6 +214,8 @@ services:
       TZ: "Asia/Shanghai"
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
+      # 海量小对象场景降低后台 scanner 对随机读 IOPS 的持续争抢；生命周期仍正常执行。
+      MINIO_SCANNER_SPEED: "slowest"
       # MinIO 自带 Prometheus 指标端点 /minio/v2/metrics/*；public 模式免 token 抓取（T-0151）。
       MINIO_PROMETHEUS_AUTH_TYPE: "public"
     ports:

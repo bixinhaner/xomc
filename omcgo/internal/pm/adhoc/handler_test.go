@@ -751,6 +751,30 @@ func Test_Handler_Results_BuiltinTask_PermissionPasses(t *testing.T) {
 	r.ServeHTTP(w, req)
 }
 
+func Test_backfillAdhocResultDisplayMetadata_FillsUnitAndOmitsEmpty(t *testing.T) {
+	items := []adhocResultDTO{
+		{MetricPath: "K001"},
+		{MetricPath: "K002"},
+		{MetricPath: "K404"},
+	}
+	backfillAdhocResultDisplayMetadata(items, map[string]indicatorDisplayMetadata{
+		"K001": {DisplayName: "RRC 成功率", Unit: " % "},
+		"K002": {DisplayName: "上行流量", Unit: "   "},
+	})
+
+	assert.Equal(t, "RRC 成功率", items[0].DisplayName)
+	assert.Equal(t, "%", items[0].Unit)
+	assert.Equal(t, "上行流量", items[1].DisplayName)
+	assert.Empty(t, items[1].Unit)
+	assert.Equal(t, "K404", items[2].DisplayName)
+	assert.Empty(t, items[2].Unit)
+
+	payload, err := json.Marshal(items)
+	require.NoError(t, err)
+	assert.Contains(t, string(payload), `"unit":"%"`)
+	assert.NotContains(t, string(payload), `"unit":""`)
+}
+
 // FilterOptions：非 owner 普通用户访问他人自建任务的筛选选项 → 403。
 func Test_Handler_FilterOptions_NonOwner_Forbidden(t *testing.T) {
 	taskID := uuid.New()

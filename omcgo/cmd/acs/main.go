@@ -257,7 +257,7 @@ func runACS(cmd *cobra.Command, args []string) error {
 		// 用途区隔，避免 key 冲突。inf.Redis 为 nil（未配置 Redis）时 Deduper 本身
 		// 会在 SetNX 出错时 fail-open，不影响上传主流程。
 		if inf.Redis != nil {
-			uploadHandler.SetPMUploadDedup(event.NewDeduper(inf.Redis, 24*time.Hour, inf.Logger.Named("pm-upload-dedup")))
+			uploadHandler.SetPMUploadDedup(event.NewDeduper(inf.Redis, cfg.Upload.EffectivePMDedupTTL(), inf.Logger.Named("pm-upload-dedup")))
 		}
 
 		// issue #318：PM 上传背压 watchdog。磁盘（查 MinIO 集群指标端点，同栈内网免鉴权）+ CPU

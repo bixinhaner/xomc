@@ -1,4 +1,10 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useUserStore } from '@core/store/userStore';
@@ -49,13 +55,24 @@ const dashboardMocks = vi.hoisted(() => ({
   useDashboardRealtime: vi.fn(),
 }));
 
+const navigationMocks = vi.hoisted(() => ({
+  navigate: vi.fn(),
+  openTab: vi.fn(),
+}));
+
 vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-router-dom')>();
   return {
     ...actual,
-    useNavigate: () => vi.fn(),
+    useNavigate: () => navigationMocks.navigate,
   };
 });
+
+vi.mock('@core/store/tabStore', () => ({
+  useTabStore: (
+    selector: (state: { openTab: typeof navigationMocks.openTab }) => unknown,
+  ) => selector({ openTab: navigationMocks.openTab }),
+}));
 
 vi.mock('@core/hooks/api/useDashboard', () => ({
   useDashboardSummary: dashboardMocks.useDashboardSummary,
@@ -184,6 +201,8 @@ const successfulSummary: DashboardSummary = {
 describe('DashboardPage card snapshot integration', () => {
   beforeEach(() => {
     window.localStorage.clear();
+    navigationMocks.navigate.mockReset();
+    navigationMocks.openTab.mockReset();
     dashboardMocks.summaryResult = {
       data: undefined,
       dataUpdatedAt: 0,
@@ -223,6 +242,21 @@ describe('DashboardPage card snapshot integration', () => {
       'summary failed',
     );
     expect(refetch).toHaveBeenCalledWith({ throwOnError: true });
+  });
+
+  it('does not render the temporarily hidden profile and quick-access cards', () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <DashboardPage />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.queryByText('User A')).not.toBeInTheDocument();
+    expect(screen.queryByText('dashboard.quickAccess')).not.toBeInTheDocument();
   });
 
   it('uses device-list stats for device cards without changing other Summary cards', () => {
@@ -549,4 +583,5 @@ describe('DashboardPage card snapshot integration', () => {
       userB.id,
     );
   });
+
 });

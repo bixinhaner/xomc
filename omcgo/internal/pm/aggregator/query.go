@@ -544,48 +544,27 @@ func newRawAwareDeviceSelect(
 	q QueryRequest,
 	columns ...string,
 ) sq.SelectBuilder {
-	if len(q.MetricPaths) == 0 || (table != "pm_metrics" && table != "pm_metrics_hourly") {
+	if len(q.MetricPaths) == 0 || table != "pm_metrics" {
 		return builder.Select(columns...).From(table)
 	}
-	var targeted sq.SelectBuilder
-	if table == "pm_metrics" {
-		targeted = builder.Select(
-			"COALESCE(dev.oui,'')::text AS device_oui",
-			"COALESCE(dev.serial_number,f.device_sn)::text AS device_sn",
-			"d.metric_path", "d.metric_type", "v.metric_value", "d.statis_type", "a.granularity",
-			`a."time"`, "a.start_time", "a.end_time",
-			"COALESCE(b.committed_at,f.created_at,now()) AS ingest_time",
-			"a.object_ldn",
-			`jsonb_strip_nulls(jsonb_build_object(
-				'device_id',a.device_dim_id::text,'counter_group',a.counter_group,
-				'carrier',COALESCE(dev.carrier,f.carrier),
-				'technology',COALESCE(dev.technology,f.technology))) AS extra`,
-		).From("pm_measurement_anchors a").
-			Join("pm_metric_sets s ON s.metric_set_id=a.metric_set_id").
-			Join("pm_metric_dictionary d ON d.metric_id=ANY(s.metric_ids)").
-			LeftJoin(`pm_metric_values v ON v."time"=a."time" AND v.anchor_id=a.anchor_id AND v.metric_id=d.metric_id`).
-			LeftJoin("pm_files f ON f.id=a.source_file_id").
-			LeftJoin("pm_ingest_batches b ON b.ingest_batch_id=a.ingest_batch_id").
-			LeftJoin("device_dim dev ON dev.id=a.device_dim_id")
-	} else {
-		targeted = builder.Select(
-			"COALESCE(dev.oui,'')::text AS device_oui",
-			"COALESCE(dev.serial_number,'')::text AS device_sn",
-			"d.metric_path", "d.metric_type", "v.metric_value", "d.statis_type", "a.granularity",
-			`a."time"`, "a.start_time", "a.end_time",
-			"COALESCE(ver.published_at,ver.created_at) AS ingest_time",
-			"a.object_ldn",
-			`jsonb_strip_nulls(jsonb_build_object(
-				'device_id',a.device_dim_id::text,'counter_group',a.counter_group,
-				'carrier',dev.carrier,'technology',dev.technology)) AS extra`,
-		).From("pm_hourly_bucket_versions ver").
-			Join("pm_hourly_anchors a ON a.bucket_version=ver.bucket_version").
-			Join("pm_metric_sets s ON s.metric_set_id=a.metric_set_id").
-			Join("pm_metric_dictionary d ON d.metric_id=ANY(s.metric_ids)").
-			LeftJoin(`pm_hourly_values v ON v.bucket_version=a.bucket_version AND v."time"=a."time" AND v.anchor_id=a.anchor_id AND v.metric_id=d.metric_id`).
-			LeftJoin("device_dim dev ON dev.id=a.device_dim_id").
-			Where(sq.Eq{"ver.status": "active"})
-	}
+	targeted := builder.Select(
+		"COALESCE(dev.oui,'')::text AS device_oui",
+		"COALESCE(dev.serial_number,f.device_sn)::text AS device_sn",
+		"d.metric_path", "d.metric_type", "v.metric_value", "d.statis_type", "a.granularity",
+		`a."time"`, "a.start_time", "a.end_time",
+		"COALESCE(b.committed_at,f.created_at,now()) AS ingest_time",
+		"a.object_ldn",
+		`jsonb_strip_nulls(jsonb_build_object(
+			'device_id',a.device_dim_id::text,'counter_group',a.counter_group,
+			'carrier',COALESCE(dev.carrier,f.carrier),
+			'technology',COALESCE(dev.technology,f.technology))) AS extra`,
+	).From("pm_measurement_anchors a").
+		Join("pm_metric_sets s ON s.metric_set_id=a.metric_set_id").
+		Join("pm_metric_dictionary d ON d.metric_id=ANY(s.metric_ids)").
+		LeftJoin(`pm_metric_values v ON v."time"=a."time" AND v.anchor_id=a.anchor_id AND v.metric_id=d.metric_id`).
+		LeftJoin("pm_files f ON f.id=a.source_file_id").
+		LeftJoin("pm_ingest_batches b ON b.ingest_batch_id=a.ingest_batch_id").
+		LeftJoin("device_dim dev ON dev.id=a.device_dim_id")
 	targeted = targeted.Where(sq.Eq{"d.metric_path": q.MetricPaths})
 	return builder.Select(columns...).FromSelect(targeted, "pm_metrics")
 }

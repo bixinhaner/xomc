@@ -41,6 +41,7 @@ func TestIntegrationCopyIngestStoresSparseValuesAndLogicalMissingRows(t *testing
 		Carrier: "cmcc", Technology: "lte", FileName: deviceID.String() + ".xml",
 		CollectTime: end, MinioPath: "integration/" + deviceID.String(),
 		ContentSHA256: make([]byte, 32),
+		RawCompressed: true,
 	}
 	counters := []model.PMCounter{
 		{DeviceID: deviceID, OUI: "INT002", DeviceSN: sn, CounterGroup: "INT", CounterName: "CSPARSE1", CounterValue: 7, StatisType: "sum", Granularity: 15, Time: end},
@@ -50,6 +51,11 @@ func TestIntegrationCopyIngestStoresSparseValuesAndLogicalMissingRows(t *testing
 	ingested, err := repo.CopyIngest(ctx, marker, counters, nil)
 	require.NoError(t, err)
 	require.True(t, ingested)
+	var rawCompressed bool
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT raw_compressed FROM pm_files WHERE id=$1`, marker.ID,
+	).Scan(&rawCompressed))
+	require.True(t, rawCompressed)
 
 	type dictionaryVersion struct {
 		path      string

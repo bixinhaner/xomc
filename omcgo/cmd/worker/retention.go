@@ -16,9 +16,9 @@ import (
 	"github.com/omcgo/omcgo/internal/stationlog"
 )
 
-// startPMRetentionCleanup wires configured cleanup for PM metadata, compact
-// Counter snapshots and mixed-granularity aggregation results. Raw sparse
-// hypertables use TimescaleDB drop-chunk policies applied by app startup.
+// startPMRetentionCleanup wires configured cleanup for compact Counter snapshots
+// and mixed-granularity aggregation results. pm_files/pm_ingest_batches belong
+// to the exact-path raw object cleaner; sparse hypertables use drop-chunk policy.
 //
 // 装配：
 //  1. retention.Service（worker 进程本地实例，复用 app 端 SysConfigRepository → sys_configs 读取）

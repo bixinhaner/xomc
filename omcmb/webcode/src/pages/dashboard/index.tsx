@@ -80,6 +80,7 @@ const DASHBOARD_CONFIG = {
   showRunningTasks: false,        // 任务执行中
   showRefreshControls: false,     // 刷新控制栏
   showDeviceMap: false,           // 设备地图
+  showUserProfileAndQuickAccess: false, // 用户信息与快速入口（暂不展示）
 } as const;
 
 /** 格式化最后登录时间 */
@@ -99,17 +100,24 @@ function formatLastLogin(lastLoginTime: string | undefined, locale: 'zh-CN' | 'e
 }
 
 const QUICK_ACCESS_ITEMS = [
-  { labelKey: 'nav.device.list',       icon: <AppstoreOutlined />,    path: '/device/list',               color: '#1677FF' },
-  { labelKey: 'nav.alarm.current',     icon: <AlertOutlined />,       path: '/alarm/current',             color: '#F5222D' },
-  { labelKey: 'nav.alarm.statistics',  icon: <DashboardOutlined />,   path: '/alarm/statistics',          color: '#FA8C16' },
-  { labelKey: 'nav.device.ne',         icon: <ApartmentOutlined />,   path: '/device/ne',                 color: '#52C41A' },
-  { labelKey: 'nav.device.monitor',    icon: <MonitorOutlined />,     path: '/device/monitor',            color: '#722ED1' },
-  { labelKey: 'nav.device.commission', icon: <RocketOutlined />,      path: '/device/commission',         color: '#13C2C2' },
-  { labelKey: 'nav.performance.kpiStandard', icon: <ThunderboltOutlined />, path: '/performance/kpi-standard', color: '#EB2F96' },
-  { labelKey: 'nav.device.stats',      icon: <CloudServerOutlined />, path: '/device/stats',              color: '#2F54EB' },
-  { labelKey: 'nav.alarm.rules',       icon: <SettingOutlined />,     path: '/alarm/rules',               color: '#8C8C8C' },
-  { labelKey: 'nav.log.system',        icon: <FileTextOutlined />,    path: '/log/system',                color: '#595959' },
-  { labelKey: 'nav.system.users',      icon: <TeamOutlined />,        path: '/system/users',              color: '#D46B08' },
+  { labelKey: 'nav.device.list',       icon: <AppstoreOutlined />,    path: '/device/list',               color: '#1677FF', productionReady: true },
+  { labelKey: 'nav.alarm.current',     icon: <AlertOutlined />,       path: '/alarm/current',             color: '#F5222D', productionReady: true },
+  { labelKey: 'nav.alarm.statistics',  icon: <DashboardOutlined />,   path: '/alarm/statistics',          color: '#FA8C16', productionReady: true },
+  { labelKey: 'nav.device.ne',         icon: <ApartmentOutlined />,   path: '/device/ne',                 color: '#52C41A', productionReady: false },
+  { labelKey: 'nav.device.monitor',    icon: <MonitorOutlined />,     path: '/device/monitor',            color: '#722ED1', productionReady: false },
+  { labelKey: 'nav.device.commission', icon: <RocketOutlined />,      path: '/device/commission',         color: '#13C2C2', productionReady: false },
+  {
+    labelKey: 'nav.product.kpiLibrary',
+    icon: <ThunderboltOutlined />,
+    path: '/product/kpi-library',
+    color: '#EB2F96',
+    productionReady: true,
+    requireSuperAdmin: true,
+  },
+  { labelKey: 'nav.device.stats',      icon: <CloudServerOutlined />, path: '/device/stats',              color: '#2F54EB', productionReady: false },
+  { labelKey: 'nav.alarm.rules',       icon: <SettingOutlined />,     path: '/alarm/rules',               color: '#8C8C8C', productionReady: true },
+  { labelKey: 'nav.log.system',        icon: <FileTextOutlined />,    path: '/log/system',                color: '#595959', productionReady: false },
+  { labelKey: 'nav.system.users',      icon: <TeamOutlined />,        path: '/system/users',              color: '#D46B08', productionReady: true },
 ];
 
 export default function DashboardPage() {
@@ -251,14 +259,17 @@ export default function DashboardPage() {
   const ueTrendDelta = kpiDeltas['UE_ACTIVE'];
 
   const quickAccessItems = useMemo(
-    () => QUICK_ACCESS_ITEMS.filter((item) =>
-      isRouteAllowed(item.path, {
-        role: currentUser?.role,
-        isSuperAdmin: currentUser?.isSuperAdmin,
-        routePaths,
-        dynamicEnabled: isDynamicMenuEnabled(),
-        menuLoaded,
-      })
+    () => QUICK_ACCESS_ITEMS.filter(
+      (item) =>
+        item.productionReady
+        && (!item.requireSuperAdmin || currentUser?.isSuperAdmin === true)
+        && isRouteAllowed(item.path, {
+          role: currentUser?.role,
+          isSuperAdmin: currentUser?.isSuperAdmin,
+          routePaths,
+          dynamicEnabled: isDynamicMenuEnabled(),
+          menuLoaded,
+        }),
     ),
     [currentUser?.role, currentUser?.isSuperAdmin, routePaths, menuLoaded]
   );
@@ -568,7 +579,8 @@ export default function DashboardPage() {
       </Row>
 
       {/* Row 4: User Profile + Quick Access */}
-      <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="3">
+      {DASHBOARD_CONFIG.showUserProfileAndQuickAccess && (
+        <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="3">
         <Col xs={24} lg={6} style={{ display: 'flex' }}>
           <TiltCard maxTilt={8} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
           <Card
@@ -658,7 +670,16 @@ export default function DashboardPage() {
               ) : quickAccessItems.map((item) => (
                 <div
                   key={item.path}
-                  onClick={() => void navigate(item.path)}
+                  onClick={() => {
+                    openTab({
+                      key: item.path,
+                      label: item.labelKey,
+                      path: item.path,
+                      closable: true,
+                      labelRaw: false,
+                    });
+                    void navigate(item.path);
+                  }}
                   style={{
                     display: 'flex',
                     flexDirection: 'column',
@@ -702,7 +723,8 @@ export default function DashboardPage() {
           </Card>
           </TiltCard>
         </Col>
-      </Row>
+        </Row>
+      )}
     </div>
   );
 }

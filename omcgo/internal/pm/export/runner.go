@@ -14,6 +14,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
 	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
+	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
 // taskRepo 是 Runner 操作导出任务表的契约（载任务 + 三态切换），便于单测 stub。
@@ -322,11 +323,18 @@ func (r *Runner) buildDashboardLikeSource(ctx context.Context, task *Task, loc a
 }
 
 func shouldAutoDiscoverExportSkeleton(source SourceType, req aggregator.QueryRequest) bool {
-	return source == SourceKpiQuery && aggregator.CanAutoDiscoverObjectSkeletonRequest(req)
+	// Hourly KPI query export must match the query page table. The page exports
+	// the submitted filter result rows, not a synthetic full time/object skeleton.
+	return source == SourceKpiQuery &&
+		req.Granularity != metrics.GranularityHourly &&
+		aggregator.CanAutoDiscoverObjectSkeletonRequest(req)
 }
 
 func shouldFillExportSkeleton(source SourceType, req aggregator.QueryRequest) bool {
-	return source == SourceKpiQuery && aggregator.IsExplicitObjectSkeletonRequest(req)
+	// Keep hourly export row counts aligned with the visible KPI query result.
+	return source == SourceKpiQuery &&
+		req.Granularity != metrics.GranularityHourly &&
+		aggregator.IsExplicitObjectSkeletonRequest(req)
 }
 
 type adhocTaskMeta struct {
