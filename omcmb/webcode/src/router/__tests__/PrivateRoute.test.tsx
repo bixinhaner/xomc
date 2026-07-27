@@ -7,6 +7,10 @@ interface UserStoreShape {
   accessToken: string | null;
   refreshToken: string | null;
   isTokenExpired: () => boolean;
+  currentUser?: {
+    role: string;
+    isSuperAdmin?: boolean;
+  };
 }
 
 let userStoreState: UserStoreShape;
@@ -17,19 +21,20 @@ vi.mock('@core/store/userStore', () => ({
 
 import PrivateRoute from '../PrivateRoute';
 
-function renderRoute(initialPath = '/protected') {
+function renderRoute(initialPath = '/protected', requireSuperAdmin = false) {
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
       <Routes>
         <Route
           path="/protected"
           element={
-            <PrivateRoute>
+            <PrivateRoute requireSuperAdmin={requireSuperAdmin}>
               <div data-testid="protected">secret</div>
             </PrivateRoute>
           }
         />
         <Route path="/login" element={<div data-testid="login">login page</div>} />
+        <Route path="/403" element={<div data-testid="forbidden">forbidden</div>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -94,5 +99,35 @@ describe('PrivateRoute', () => {
     };
     renderRoute();
     expect(screen.getByTestId('login')).toBeInTheDocument();
+  });
+
+  it('redirects a normal admin away from a super-admin-only route', () => {
+    userStoreState = {
+      isAuthenticated: true,
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      isTokenExpired: () => false,
+      currentUser: { role: 'admin', isSuperAdmin: false },
+    };
+
+    renderRoute('/protected', true);
+
+    expect(screen.getByTestId('forbidden')).toBeInTheDocument();
+    expect(screen.queryByTestId('protected')).not.toBeInTheDocument();
+  });
+
+  it('renders a super-admin-only route for a super admin', () => {
+    userStoreState = {
+      isAuthenticated: true,
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      isTokenExpired: () => false,
+      currentUser: { role: 'admin', isSuperAdmin: true },
+    };
+
+    renderRoute('/protected', true);
+
+    expect(screen.getByTestId('protected')).toBeInTheDocument();
+    expect(screen.queryByTestId('forbidden')).not.toBeInTheDocument();
   });
 });
