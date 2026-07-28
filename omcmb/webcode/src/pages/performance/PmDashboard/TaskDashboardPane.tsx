@@ -19,14 +19,21 @@ import {
   usePmAdhocFilterOptions,
   usePmAdhocResults,
 } from '@core/hooks/api/usePmAdhoc';
+import { useIndicatorCandidates } from '@core/hooks/api/usePerformance';
 import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
 import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
 import { nowInSystemTimezone, toSystemTimezoneRFC3339 } from '@core/utils/systemTime';
 import { buildAdhocExportParams, defaultExportTaskName } from '@core/utils/kpiExportParams';
-import { useTechnologyDictionary } from '@core/hooks/api/useTechnologyDictionary';
+import {
+  isKnownTechnology,
+  technologyToDeviceType,
+  useTechnologyDictionary,
+} from '@core/hooks/api/useTechnologyDictionary';
 import { displayAdhocTaskName } from '../adhocTaskDisplay';
 import {
   buildMetricCharts,
+  buildTrustedSeriesIdentities,
+  ensureConfiguredMetricCharts,
   filterChartsByMetricPaths,
   filterRowsByMetricPaths,
 } from './taskDashboardUtils';
@@ -67,6 +74,13 @@ export default function TaskDashboardPane({ taskId }: Props) {
     GRAN_MSG_IDS[g] ? intl.formatMessage({ id: GRAN_MSG_IDS[g] }) : g;
   const taskQuery = usePmAdhocDetail(taskId);
   const dimension = taskQuery.data?.dimension;
+  const taskDeviceType = isKnownTechnology(taskQuery.data?.technology)
+    ? technologyToDeviceType(taskQuery.data.technology)
+    : undefined;
+  const { data: metricCandidates } = useIndicatorCandidates(taskDeviceType, {
+    includeCounters: true,
+    enabledOnly: false,
+  });
 
   // ── 共用三级筛选 + 周期对比开关（本 Pane 持状态，驱动取数 + 二拉）──────
   // #563：默认范围按系统时区「当前时刻」，与图表 X 轴同一参照系。
@@ -178,6 +192,27 @@ export default function TaskDashboardPane({ taskId }: Props) {
   const [activeGran, setActiveGran] = useState<string | undefined>(undefined);
   const effectiveGran = activeGran && granularities.includes(activeGran) ? activeGran : granularities[0];
   const chartLocale = intl.locale === 'en-US' ? 'en-US' : 'zh-CN';
+  const metricDisplayNames = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const metric of metricCandidates ?? []) {
+      const name =
+        chartLocale === 'en-US'
+          ? metric.enName || metric.cnName || metric.name
+          : metric.cnName || metric.enName || metric.name;
+      map.set(metric.id, name);
+    }
+    return map;
+  }, [chartLocale, metricCandidates]);
+  const seriesLabels = useMemo(
+    () => ({
+      network: intl.formatMessage({ id: 'perf.adhoc.colObject.network' }),
+      band: intl.formatMessage({ id: 'perf.adhoc.colObject.band' }),
+      deviceGroup: intl.formatMessage({ id: 'perf.adhoc.colObject.deviceGroup' }),
+      product: intl.formatMessage({ id: 'perf.adhoc.colObject.product' }),
+      aggregateGroup: intl.formatMessage({ id: 'perf.adhoc.colObject.aggregateGroup' }),
+    }),
+    [intl],
+  );
 
   const charts = useMemo(() => {
     if (!taskQuery.data || !effectiveGran || !submitted) return [];
@@ -186,13 +221,40 @@ export default function TaskDashboardPane({ taskId }: Props) {
     const taskMetricPaths = taskQuery.data.metricPaths;
     const visibleRows = filterRowsByMetricPaths(rawRows, taskMetricPaths);
     const visiblePrevRows = filterRowsByMetricPaths(rawPrevRows, taskMetricPaths);
+    const selectedSeriesKeys =
+      taskQuery.data.dimension === 'product'
+        ? submitted.productIds
+        : taskQuery.data.dimension === 'device_group' || taskQuery.data.dimension === 'band'
+          ? submitted.objectLdns
+          : undefined;
+    const trustedSeries = buildTrustedSeriesIdentities(
+      taskQuery.data.dimension,
+      {
+        deviceSns: taskQuery.data.deviceSns,
+        objectLdns: taskQuery.data.objectLdns,
+        filterOptions: filterOpts?.options,
+        selectedKeys: selectedSeriesKeys,
+      },
+      seriesLabels,
+    );
     // #599：后端已按 weekdays/hours 过滤，前端只需扩轴（轴刻度仍按完整范围铺、再套星期/小时剔除空桶）。
     const weekdaySet = new Set(submitted.weekdays);
     const hourSet = new Set(submitted.hours);
     const cur = extendChartsAxis(
-      filterChartsByMetricPaths(
-        buildMetricCharts(visibleRows, taskQuery.data.dimension, effectiveGran, chartLocale),
+      ensureConfiguredMetricCharts(
+        filterChartsByMetricPaths(
+          buildMetricCharts(
+            visibleRows,
+            taskQuery.data.dimension,
+            effectiveGran,
+            chartLocale,
+            metricDisplayNames,
+          ),
+          taskMetricPaths,
+        ),
         taskMetricPaths,
+        trustedSeries,
+        metricDisplayNames,
       ),
       {
         rangeStartMs: submitted.rangeStartMs,
@@ -200,12 +262,24 @@ export default function TaskDashboardPane({ taskId }: Props) {
         weekdays: weekdaySet,
         hours: hourSet,
         granularity: effectiveGran,
+        systemTimezone,
       },
     );
     if (!submitted.compare) return cur;
-    const prev = filterChartsByMetricPaths(
-      buildMetricCharts(visiblePrevRows, taskQuery.data.dimension, effectiveGran, chartLocale),
+    const prev = ensureConfiguredMetricCharts(
+      filterChartsByMetricPaths(
+        buildMetricCharts(
+          visiblePrevRows,
+          taskQuery.data.dimension,
+          effectiveGran,
+          chartLocale,
+          metricDisplayNames,
+        ),
+        taskMetricPaths,
+      ),
       taskMetricPaths,
+      trustedSeries,
+      metricDisplayNames,
     );
     return attachCompareSeries(cur, prev, submitted.offsetMs, effectiveGran);
   }, [
@@ -215,6 +289,10 @@ export default function TaskDashboardPane({ taskId }: Props) {
     effectiveGran,
     submitted,
     chartLocale,
+    metricDisplayNames,
+    filterOpts?.options,
+    seriesLabels,
+    systemTimezone,
   ]);
 
   // ── 导出：性能仪表盘任务图表来源，复用 adhoc 结果参数和后端 CSV 链路 ──────────

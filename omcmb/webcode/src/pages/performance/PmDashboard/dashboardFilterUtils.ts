@@ -12,8 +12,10 @@
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
 import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
 
 dayjs.extend(utc);
+dayjs.extend(timezone);
 import type { AdhocDimension } from '@core/types/pmAdhoc';
 import type { MetricChart, MetricSeries, MetricSeriesValue } from './taskDashboardUtils';
 
@@ -289,7 +291,7 @@ export function attachCompareSeries(
 
 /**
  * T-AXISFILL 横轴铺满后处理入参：
- *   - rangeStartMs / rangeEndMs：所选时间范围（毫秒，含两端），界定生成刻度铺到多远。
+ *   - rangeStartMs / rangeEndMs：所选 SQL 时间窗口（毫秒，[start,end)），界定生成刻度铺到多远。
  *   - weekdays / hours：与 filterRowsByWeekdayHour 同口径的星期/小时筛选集合。
  *   - granularity：粒度（决定步长 / 月日历平移 / 未知退化）。
  */
@@ -299,17 +301,52 @@ export interface AxisFillOptions {
   weekdays: Set<number>;
   hours: Set<number>;
   granularity: string;
+  /** OMC 系统时区；星期/小时裁剪与空轴钟面都不得依赖浏览器本地时区。 */
+  systemTimezone?: string | null;
 }
 
 /**
  * 星期 + 小时段裁刻度：与 filterRowsByWeekdayHour 完全同口径（全选短路、否则本地时区 day()/hour()）。
  * 全选（两集合都覆盖全集）→ 直接通过。无效毫秒 → 不通过（跳过）。
  */
-function passesWeekdayHour(ms: number, weekdays: Set<number>, hours: Set<number>): boolean {
+function inSystemTimezone(ms: number, systemTimezone?: string | null): Dayjs {
+  try {
+    return dayjs(ms).tz(systemTimezone?.trim() || 'UTC');
+  } catch {
+    return dayjs(ms).utc();
+  }
+}
+
+/**
+ * 在 OMC 系统时区的墙上日历中步进，并重新按同一 IANA zone 解析目标钟面。
+ * dayjs.tz(...).add(...) 会保留旧 offset；跨 DST 后必须重解析，否则 00:00 会漂移。
+ */
+function addSystemCalendar(
+  ms: number,
+  amount: number,
+  unit: 'day' | 'month',
+  systemTimezone?: string | null,
+): number {
+  const zone = systemTimezone?.trim() || 'UTC';
+  try {
+    const shiftedWall = dayjs(ms).tz(zone).add(amount, unit).format('YYYY-MM-DDTHH:mm:ss.SSS');
+    return dayjs.tz(shiftedWall, zone).valueOf();
+  } catch {
+    const shiftedWall = dayjs(ms).utc().add(amount, unit).format('YYYY-MM-DDTHH:mm:ss.SSS');
+    return dayjs.tz(shiftedWall, 'UTC').valueOf();
+  }
+}
+
+function passesWeekdayHour(
+  ms: number,
+  weekdays: Set<number>,
+  hours: Set<number>,
+  systemTimezone?: string | null,
+): boolean {
   const allWeekdays = weekdays.size >= 7;
   const allHours = hours.size >= 24;
   if (allWeekdays && allHours) return true;
-  const d = dayjs(ms);
+  const d = inSystemTimezone(ms, systemTimezone);
   if (!d.isValid()) return false;
   if (!allWeekdays && !weekdays.has(d.day())) return false;
   if (!allHours && !hours.has(d.hour())) return false;
@@ -321,24 +358,31 @@ function passesWeekdayHour(ms: number, weekdays: Set<number>, hours: Set<number>
  * "按范围+粒度连续推出全部应有刻度、套星期/小时筛选裁、并集真实桶"，空刻度补 '-'。
  *
  * 算法（spec §4.2 / 账本设计决策 8 步）：
- *   1. 空图（buckets 为空）→ 原样返回（不强造轴）。
+ *   1. 空图（buckets 为空）→ 以查询窗口起点为相位锚点生成轴，让配置内无结果指标仍有空图。
  *   2. 建真实桶毫秒 → 原索引映射（无效串跳过）。
  *   3. 全无效串 → 原样返回（防 Math.min 空集得 Infinity）。
  *   4. 相位锚点 = 全部真实桶 ms 的最小值（最早真实桶），生成刻度天然同相位。
- *   5. 连续生成刻度（已套范围 + 星期/小时裁）：
+ *   5. 按 [start,end) 连续生成刻度（已套范围 + 星期/小时裁）：
  *      - 固定步长粒度：先算覆盖 rangeStart 的起始 k（可负），逐步加 step 到超 rangeEnd。
  *      - monthly：以锚点为基准 dayjs(anchorMs).add(k,'month') 双向平移覆盖范围。
  *      - 未知粒度：不生成（退化为仅真实桶，安全兜底）。
- *   6. 并集兜底：最终轴 ms = 生成(已裁) ∪ 全部真实桶 ms，升序去重（真实桶永不丢）。
+ *   6. 并集兜底：最终轴 ms = 生成(已裁、end-exclusive) ∪ 全部真实桶 ms，
+ *      升序去重（历史真实桶即使异常落在 end 也不静默丢弃）。
  *   7. 按新轴 ms 重对齐 buckets/bucketEnds/各线 values：命中真实→原桶串/原 end/原值；
  *      空刻度→桶串=dayjs(ms).toISOString()、end=下一刻度ms 或 ms+step（monthly add(1,'month')）的 ISO、各线值 '-'。
  *   8. 返回 {...chart, buckets, bucketEnds, series}（不动 compare 字段，pipeline 保证扩轴在 attach 之前）。
  */
 export function extendChartAxis(chart: MetricChart, opts: AxisFillOptions): MetricChart {
-  // 1. 空图跳过。
-  if (chart.buckets.length === 0) return chart;
+  const {
+    rangeStartMs,
+    rangeEndMs,
+    weekdays,
+    hours,
+    granularity,
+    systemTimezone,
+  } = opts;
 
-  // 2. 真实桶 ms → 原索引。
+  // 1-2. 真实桶 ms → 原索引；完全无桶时后续以查询窗口起点为可信相位。
   const realMsToIdx = new Map<number, number>();
   chart.buckets.forEach((b, i) => {
     const ms = dayjs(b).valueOf();
@@ -346,44 +390,87 @@ export function extendChartAxis(chart: MetricChart, opts: AxisFillOptions): Metr
     if (!realMsToIdx.has(ms)) realMsToIdx.set(ms, i);
   });
 
-  // 3. 全无效串 → 原样返回。
-  if (realMsToIdx.size === 0) return chart;
+  // 3. 有桶但全部是无效时间串时原样返回，避免用窗口轴掩盖坏数据。
+  if (chart.buckets.length > 0 && realMsToIdx.size === 0) return chart;
 
-  // 4. 相位锚点 = 最早真实桶。
-  const anchorMs = Math.min(...realMsToIdx.keys());
+  // 4. 相位锚点 = 最早真实桶；完全无结果时使用查询窗口起点。
+  const anchorMs = realMsToIdx.size > 0
+    ? Math.min(...realMsToIdx.keys())
+    : rangeStartMs;
 
-  const { rangeStartMs, rangeEndMs, weekdays, hours, granularity } = opts;
-  const step = granularityStepMs(granularity);
+  // 15min/hourly 是绝对时长；daily/weekly/monthly 必须按系统时区墙上日历推进。
+  const fixedStep =
+    granularity === '15min' || granularity === 'hourly'
+      ? granularityStepMs(granularity)
+      : undefined;
+  const calendarStep =
+    granularity === 'daily'
+      ? { amount: 1, unit: 'day' as const }
+      : granularity === 'weekly'
+        ? { amount: 7, unit: 'day' as const }
+        : granularity === 'monthly'
+          ? { amount: 1, unit: 'month' as const }
+          : undefined;
 
   // 5. 连续生成刻度（已套范围 + 星期/小时裁）。
   const generated = new Set<number>();
+  const generatedNext = new Map<number, number>();
   const addIfPasses = (ms: number) => {
-    if (ms < rangeStartMs || ms > rangeEndMs) return;
-    if (!passesWeekdayHour(ms, weekdays, hours)) return;
+    // 与 results SQL 保持 [start,end)：end 只表示窗口边界，不是一个可出图桶。
+    if (ms < rangeStartMs || ms >= rangeEndMs) return;
+    if (!passesWeekdayHour(ms, weekdays, hours, systemTimezone)) return;
     generated.add(ms);
   };
-  if (step !== undefined) {
+  if (fixedStep !== undefined) {
     // 固定步长粒度：先算覆盖 rangeStart 的起始 k（可负）。
-    const kStart = Math.floor((rangeStartMs - anchorMs) / step);
-    for (let ms = anchorMs + kStart * step; ms <= rangeEndMs; ms += step) {
+    const kStart = Math.floor((rangeStartMs - anchorMs) / fixedStep);
+    for (let ms = anchorMs + kStart * fixedStep; ms < rangeEndMs; ms += fixedStep) {
       addIfPasses(ms);
+      if (generated.has(ms)) generatedNext.set(ms, ms + fixedStep);
     }
-  } else if (granularity === 'monthly') {
-    // monthly：以锚点为基准日历平移，双向覆盖范围。
-    for (let k = 0; ; k += 1) {
-      const ms = dayjs(anchorMs).add(k, 'month').valueOf();
-      if (ms > rangeEndMs) break;
-      addIfPasses(ms);
+  } else if (calendarStep) {
+    let index = 0;
+    let cursor = anchorMs;
+    while (cursor > rangeStartMs) {
+      index -= 1;
+      const previous = addSystemCalendar(
+        anchorMs,
+        index * calendarStep.amount,
+        calendarStep.unit,
+        systemTimezone,
+      );
+      if (previous >= cursor) break;
+      cursor = previous;
     }
-    for (let k = -1; ; k -= 1) {
-      const ms = dayjs(anchorMs).add(k, 'month').valueOf();
-      if (ms < rangeStartMs) break;
-      addIfPasses(ms);
+    while (cursor <= rangeStartMs) {
+      const next = addSystemCalendar(
+        anchorMs,
+        (index + 1) * calendarStep.amount,
+        calendarStep.unit,
+        systemTimezone,
+      );
+      if (next > rangeStartMs || next <= cursor) break;
+      index += 1;
+      cursor = next;
+    }
+    while (cursor < rangeEndMs) {
+      addIfPasses(cursor);
+      index += 1;
+      const next = addSystemCalendar(
+        anchorMs,
+        index * calendarStep.amount,
+        calendarStep.unit,
+        systemTimezone,
+      );
+      if (next <= cursor) break;
+      if (generated.has(cursor)) generatedNext.set(cursor, next);
+      cursor = next;
     }
   }
   // 未知粒度：不生成，退化为仅真实桶。
 
-  // 6. 并集兜底：生成(已裁) ∪ 全部真实桶，升序去重。
+  // 6. 并集兜底：生成(已裁、end-exclusive) ∪ 全部真实桶，升序去重。
+  // 真实桶来自后端，哪怕是历史异常边界值也不静默丢弃；[start,end) 只约束前端生成的空桶。
   const axisMs = Array.from(new Set<number>([...generated, ...realMsToIdx.keys()])).sort(
     (a, b) => a - b,
   );
@@ -399,13 +486,30 @@ export function extendChartAxis(chart: MetricChart, opts: AxisFillOptions): Metr
     }
     // 'Z' 后缀 → offset 0（默认值已满足）
   }
+  const formatGeneratedTime = (ms: number): string => {
+    if (systemTimezone?.trim()) {
+      return inSystemTimezone(ms, systemTimezone).format('YYYY-MM-DDTHH:mm:ssZ');
+    }
+    return dayjs(ms).utcOffset(fillOffsetMin).format('YYYY-MM-DDTHH:mm:ssZ');
+  };
 
   // 7. 按新轴 ms 重对齐。
   const nextStepEndMs = (ms: number, idx: number): number => {
+    // synthetic 桶的结束必须是自身粒度边界；星期/小时裁剪后的下一个可见桶可能隔数日。
+    const generatedBucketEnd = generatedNext.get(ms);
+    if (generatedBucketEnd !== undefined) return generatedBucketEnd;
+    // 非 synthetic（真实桶）沿用原有相邻轴/粒度 fallback 语义。
     const next = axisMs[idx + 1];
     if (next !== undefined) return next;
-    if (step !== undefined) return ms + step;
-    if (granularity === 'monthly') return dayjs(ms).add(1, 'month').valueOf();
+    if (fixedStep !== undefined) return ms + fixedStep;
+    if (calendarStep) {
+      return addSystemCalendar(
+        ms,
+        calendarStep.amount,
+        calendarStep.unit,
+        systemTimezone,
+      );
+    }
     return ms + APPROX_MONTH_MS;
   };
   const buckets: string[] = [];
@@ -416,8 +520,8 @@ export function extendChartAxis(chart: MetricChart, opts: AxisFillOptions): Metr
       buckets.push(chart.buckets[realIdx]);
       bucketEnds.push(chart.bucketEnds[realIdx] ?? '');
     } else {
-      buckets.push(dayjs(ms).utcOffset(fillOffsetMin).format('YYYY-MM-DDTHH:mm:ssZ'));
-      bucketEnds.push(dayjs(nextStepEndMs(ms, idx)).utcOffset(fillOffsetMin).format('YYYY-MM-DDTHH:mm:ssZ'));
+      buckets.push(formatGeneratedTime(ms));
+      bucketEnds.push(formatGeneratedTime(nextStepEndMs(ms, idx)));
     }
   });
   const series: MetricSeries[] = chart.series.map((s) => ({

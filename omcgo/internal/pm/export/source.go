@@ -499,7 +499,16 @@ func discoverMetricColumns(ctx context.Context, db PgQuerier, table string, req 
 }
 
 func requestedMetricColumns(metricPaths []string) []colKey {
-	out := make([]colKey, 0, len(metricPaths))
+	normalized := normalizeMetricPaths(metricPaths)
+	out := make([]colKey, 0, len(normalized))
+	for _, code := range normalized {
+		out = append(out, colKey{code: code, mtype: metricColumnType(code)})
+	}
+	return out
+}
+
+func normalizeMetricPaths(metricPaths []string) []string {
+	var out []string
 	seen := make(map[string]struct{}, len(metricPaths))
 	for _, raw := range metricPaths {
 		code := strings.TrimSpace(raw)
@@ -510,7 +519,7 @@ func requestedMetricColumns(metricPaths []string) []colKey {
 			continue
 		}
 		seen[code] = struct{}{}
-		out = append(out, colKey{code: code, mtype: metricColumnType(code)})
+		out = append(out, code)
 	}
 	return out
 }
@@ -526,8 +535,13 @@ func metricTypeFromPath(code string) metrics.MetricType {
 	return metrics.MetricTypeKPI
 }
 
-// discoverAdhocColumns 发现 adhoc 源的指标列集，按编号升序。
+// discoverAdhocColumns 发现 adhoc/性能仪表盘源的指标列集。
+// 任务 meta.metricPaths 有有效值时，它是列全集的真值源：保序去重，当前筛选零行也保留列。
+// nil/空/全空白仅用于兼容历史任务，回退结果表 DISTINCT 发现。
 func discoverAdhocColumns(ctx context.Context, db PgQuerier, taskID uuid.UUID, metricPaths []string, filter adhocExportFilter) ([]colKey, error) {
+	if configured := requestedMetricColumns(metricPaths); len(configured) > 0 {
+		return configured, nil
+	}
 	sqlStr, args := buildAdhocDistinctMetricsSQL(taskID, metricPaths, filter)
 	rows, err := db.Query(ctx, sqlStr, args...)
 	if err != nil {

@@ -253,7 +253,9 @@ func (r *Runner) buildAdhocResultSource(ctx context.Context, task *Task, loc app
 	if derr != nil {
 		return nil, nil, csvLayout{}, derr
 	}
-	keys, kerr := discoverAdhocColumns(ctx, r.adhocDB, filter.TaskID, meta.metricPaths, filter)
+	// 列发现与真实行查询必须共享同一规范化指标集，避免表头与数据 SQL 因空格/重复/全空白分叉。
+	metricPaths := normalizeMetricPaths(meta.metricPaths)
+	keys, kerr := discoverAdhocColumns(ctx, r.adhocDB, filter.TaskID, metricPaths, filter)
 	if kerr != nil {
 		return nil, nil, csvLayout{}, kerr
 	}
@@ -265,7 +267,7 @@ func (r *Runner) buildAdhocResultSource(ctx context.Context, task *Task, loc app
 		IncludeCell:                   adhocIncludesCell(meta.dimension),
 		MissingMetricValuePlaceholder: missingMetricValuePlaceholder,
 	}
-	return newAdhocSource(r.adhocDB, filter.TaskID, meta.metricPaths, filter, meta.dimension, meta.deviceCount, loc), cols, layout, nil
+	return newAdhocSource(r.adhocDB, filter.TaskID, metricPaths, filter, meta.dimension, meta.deviceCount, loc), cols, layout, nil
 }
 
 func (r *Runner) buildDashboardLikeSource(ctx context.Context, task *Task, loc appcontext.Locale, layout csvLayout) (RowSource, []WideColumn, csvLayout, error) {

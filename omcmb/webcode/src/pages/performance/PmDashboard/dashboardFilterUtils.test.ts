@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
 import {
   ALL_HOURS,
   ALL_WEEKDAYS,
@@ -14,6 +16,9 @@ import {
   previousWindow,
 } from './dashboardFilterUtils';
 import type { MetricChart, MetricSeries, MetricSeriesValue } from './taskDashboardUtils';
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 // 本地时区构造行：用 dayjs 本地构造再取 ISO，过滤口径与读回口径一致，不受 CI TZ 影响。
 function rowAt(local: string) {
@@ -293,6 +298,68 @@ describe('attachCompareSeries', () => {
     expect(out[0].compareSeries).toBeUndefined();
   });
 
+  it("当前周期完全无结果、上一周期有结果时保留图卡并显示对比线，当前值为 '-'", () => {
+    const currentEmpty = extendChartAxis(
+      chart('M1', [], [{ key: 'SN-A', name: 'SN-A', values: [] }]),
+      {
+        rangeStartMs: dayjs('2026-05-25T10:00:00Z').valueOf(),
+        rangeEndMs: dayjs('2026-05-25T11:00:00Z').valueOf(),
+        weekdays: new Set(ALL_WEEKDAYS),
+        hours: new Set(ALL_HOURS),
+        granularity: 'hourly',
+      },
+    );
+    const prev = [
+      chart('M1', ['2026-05-25T09:00:00Z'], [
+        { key: 'SN-A', name: 'SN-A', values: [9] },
+      ]),
+    ];
+
+    const out = attachCompareSeries([currentEmpty], prev, 3600_000, 'hourly');
+
+    expect(out).toHaveLength(1);
+    expect(out[0].series[0].values).toEqual(['-']);
+    expect(out[0].compareSeries?.[0].values).toEqual([9]);
+  });
+
+  it("当前周期有结果、上一周期空骨架时保留当前值，对比值为 '-'", () => {
+    const current = [
+      chart('M1', ['2026-05-25T10:00:00Z'], [
+        { key: 'SN-A', name: 'SN-A', values: [7] },
+      ]),
+    ];
+    const prevEmpty = [
+      chart('M1', [], [{ key: 'SN-A', name: 'SN-A', values: [] }]),
+    ];
+
+    const out = attachCompareSeries(current, prevEmpty, 3600_000, 'hourly');
+
+    expect(out[0].series[0].values).toEqual([7]);
+    expect(out[0].compareSeries?.[0].values).toEqual(['-']);
+  });
+
+  it("当前和上一周期都为空时仍保留空图，双方值都为 '-'", () => {
+    const currentEmpty = extendChartAxis(
+      chart('M1', [], [{ key: 'SN-A', name: 'SN-A', values: [] }]),
+      {
+        rangeStartMs: dayjs('2026-05-25T10:00:00Z').valueOf(),
+        rangeEndMs: dayjs('2026-05-25T11:00:00Z').valueOf(),
+        weekdays: new Set(ALL_WEEKDAYS),
+        hours: new Set(ALL_HOURS),
+        granularity: 'hourly',
+        systemTimezone: 'UTC',
+      },
+    );
+    const prevEmpty = [
+      chart('M1', [], [{ key: 'SN-A', name: 'SN-A', values: [] }]),
+    ];
+
+    const out = attachCompareSeries([currentEmpty], prevEmpty, 3600_000, 'hourly');
+
+    expect(out[0].series[0].values).toEqual(['-']);
+    expect(out[0].compareSeries?.[0].values).toEqual(['-']);
+  });
+
   it('空集合不抛错', () => {
     expect(() => attachCompareSeries([], [], 0, 'hourly')).not.toThrow();
     expect(attachCompareSeries([], [], 0, 'hourly')).toEqual([]);
@@ -319,8 +386,187 @@ describe('extendChartAxis（横轴铺满 + 空点如实显示）', () => {
   const allWd = new Set(ALL_WEEKDAYS);
   const allHr = new Set(ALL_HOURS);
 
+  it.each([
+    ['15min', '2026-05-25T00:00:00Z', '2026-05-25T00:30:00Z', 2],
+    ['hourly', '2026-05-25T00:00:00Z', '2026-05-25T02:00:00Z', 2],
+    ['daily', '2026-05-25T00:00:00Z', '2026-05-27T00:00:00Z', 2],
+    ['weekly', '2026-05-04T00:00:00Z', '2026-05-18T00:00:00Z', 2],
+    ['monthly', '2026-01-01T00:00:00Z', '2026-04-01T00:00:00Z', 3],
+  ])(
+    "%s 完全无结果时按 SQL [start,end) 生成空轴，所有点为 '-'",
+    (granularity, start, end, expectedBuckets) => {
+      const out = extendChartAxis(chart([], []), {
+        rangeStartMs: dayjs(start).valueOf(),
+        rangeEndMs: dayjs(end).valueOf(),
+        weekdays: allWd,
+        hours: allHr,
+        granularity,
+        systemTimezone: 'UTC',
+      });
+
+      expect(out.buckets).toHaveLength(expectedBuckets);
+      expect(out.buckets.every((bucket) => dayjs(bucket).valueOf() < dayjs(end).valueOf())).toBe(true);
+      expect(out.series[0].values).toEqual(Array(expectedBuckets).fill('-'));
+      expect(out.series[0].values).not.toContain(0);
+    },
+  );
+
+  it('零长度窗口不生成空桶', () => {
+    const instant = dayjs('2026-05-25T00:00:00Z').valueOf();
+    const out = extendChartAxis(chart([], []), {
+      rangeStartMs: instant,
+      rangeEndMs: instant,
+      weekdays: allWd,
+      hours: allHr,
+      granularity: 'hourly',
+      systemTimezone: 'UTC',
+    });
+
+    expect(out.buckets).toEqual([]);
+    expect(out.series[0].values).toEqual([]);
+  });
+
+  it('空轴的星期/小时裁剪按 OMC systemTimezone，不按浏览器本地时区', () => {
+    const originalTimezone = process.env.TZ;
+    process.env.TZ = 'America/Los_Angeles';
+    try {
+      // 2026-05-24 15:00Z = 东京周一 00:00；洛杉矶为周日 08:00。
+      const start = dayjs('2026-05-24T15:00:00Z').valueOf();
+      const out = extendChartAxis(chart([], []), {
+        rangeStartMs: start,
+        rangeEndMs: start + 24 * 60 * 60 * 1000,
+        weekdays: new Set([1]),
+        hours: new Set([0]),
+        granularity: 'daily',
+        systemTimezone: 'Asia/Tokyo',
+      });
+
+      expect(out.buckets).toHaveLength(1);
+      expect(dayjs(out.buckets[0]).valueOf()).toBe(start);
+    } finally {
+      if (originalTimezone === undefined) {
+        delete process.env.TZ;
+      } else {
+        process.env.TZ = originalTimezone;
+      }
+    }
+  });
+
+  it.each([
+    ['春季跳时', '2026-03-07T00:00:00', '2026-03-11T00:00:00', 4],
+    ['秋季回拨', '2026-10-31T00:00:00', '2026-11-03T00:00:00', 3],
+  ])(
+    'America/New_York daily 跨%s仍逐日保持墙上 00:00，hours=[0] 不丢桶',
+    (_caseName, startWall, endWall, expectedBuckets) => {
+      const systemTimezone = 'America/New_York';
+      const out = extendChartAxis(chart([], []), {
+        rangeStartMs: dayjs.tz(startWall, systemTimezone).valueOf(),
+        rangeEndMs: dayjs.tz(endWall, systemTimezone).valueOf(),
+        weekdays: allWd,
+        hours: new Set([0]),
+        granularity: 'daily',
+        systemTimezone,
+      });
+
+      expect(out.buckets).toHaveLength(expectedBuckets);
+      expect(out.buckets.map((bucket) => dayjs(bucket).tz(systemTimezone).hour())).toEqual(
+        Array(expectedBuckets).fill(0),
+      );
+      expect(out.bucketEnds.map((end) => dayjs(end).tz(systemTimezone).hour())).toEqual(
+        Array(expectedBuckets).fill(0),
+      );
+    },
+  );
+
+  it('America/New_York monthly 跨春季 DST 仍逐月保持墙上 00:00，hours=[0] 不丢桶', () => {
+    const systemTimezone = 'America/New_York';
+    const out = extendChartAxis(chart([], []), {
+      rangeStartMs: dayjs.tz('2026-02-01T00:00:00', systemTimezone).valueOf(),
+      rangeEndMs: dayjs.tz('2026-06-01T00:00:00', systemTimezone).valueOf(),
+      weekdays: allWd,
+      hours: new Set([0]),
+      granularity: 'monthly',
+      systemTimezone,
+    });
+
+    expect(out.buckets).toHaveLength(4);
+    expect(out.buckets.map((bucket) => dayjs(bucket).tz(systemTimezone).format('MM-DD HH:mm'))).toEqual([
+      '02-01 00:00',
+      '03-01 00:00',
+      '04-01 00:00',
+      '05-01 00:00',
+    ]);
+    expect(out.bucketEnds.map((end) => dayjs(end).tz(systemTimezone).hour())).toEqual([0, 0, 0, 0]);
+  });
+
+  it('UTC daily 仅保留周一时，synthetic 5/18 桶结束仍是 5/19 而不是下个可见周一', () => {
+    const out = extendChartAxis(chart([], []), {
+      rangeStartMs: dayjs('2026-05-18T00:00:00Z').valueOf(),
+      rangeEndMs: dayjs('2026-06-01T00:00:00Z').valueOf(),
+      weekdays: new Set([1]),
+      hours: new Set([0]),
+      granularity: 'daily',
+      systemTimezone: 'UTC',
+    });
+
+    expect(out.buckets.map((bucket) => dayjs(bucket).format('YYYY-MM-DD'))).toEqual([
+      '2026-05-18',
+      '2026-05-25',
+    ]);
+    expect(out.bucketEnds.map((end) => dayjs(end).format('YYYY-MM-DD'))).toEqual([
+      '2026-05-19',
+      '2026-05-26',
+    ]);
+  });
+
+  it.each([
+    ['春季跳时', '2026-03-08T00:00:00', '2026-03-16T00:00:00', 23],
+    ['秋季回拨', '2026-11-01T00:00:00', '2026-11-09T00:00:00', 25],
+  ])(
+    'America/New_York daily %s：筛选后桶 end 仍为下一墙上日，实际时长符合 DST',
+    (_caseName, startWall, endWall, expectedHours) => {
+      const systemTimezone = 'America/New_York';
+      const out = extendChartAxis(chart([], []), {
+        rangeStartMs: dayjs.tz(startWall, systemTimezone).valueOf(),
+        rangeEndMs: dayjs.tz(endWall, systemTimezone).valueOf(),
+        weekdays: new Set([0]),
+        hours: new Set([0]),
+        granularity: 'daily',
+        systemTimezone,
+      });
+
+      const firstStart = dayjs(out.buckets[0]).valueOf();
+      const firstEnd = dayjs(out.bucketEnds[0]).valueOf();
+      expect(dayjs(out.bucketEnds[0]).tz(systemTimezone).hour()).toBe(0);
+      expect((firstEnd - firstStart) / (60 * 60 * 1000)).toBe(expectedHours);
+    },
+  );
+
+  it.each([
+    ['15min', '2026-05-18T00:45:00Z', '2026-05-18T01:00:00Z'],
+    ['hourly', '2026-05-18T00:00:00Z', '2026-05-18T01:00:00Z'],
+  ])(
+    '%s 筛选后 synthetic bucket end 仍是自身粒度边界，不拉长到下一可见小时',
+    (granularity, targetBucket, expectedEnd) => {
+      const out = extendChartAxis(chart([], []), {
+        rangeStartMs: dayjs('2026-05-18T00:00:00Z').valueOf(),
+        rangeEndMs: dayjs('2026-05-18T03:00:00Z').valueOf(),
+        weekdays: allWd,
+        hours: new Set([0, 2]),
+        granularity,
+        systemTimezone: 'UTC',
+      });
+      const index = out.buckets.findIndex(
+        (bucket) => dayjs(bucket).valueOf() === dayjs(targetBucket).valueOf(),
+      );
+
+      expect(index).toBeGreaterThanOrEqual(0);
+      expect(dayjs(out.bucketEnds[index]).valueOf()).toBe(dayjs(expectedEnd).valueOf());
+    },
+  );
+
   it('① 连续生成：稀疏真实桶 + 跨多刻度 → 补齐范围内全部应有刻度，无数据刻度值为 "-"', () => {
-    // daily 粒度，范围 5/25~5/28（含两端），真实只有 5/25 与 5/28。
+    // daily 粒度，窗口 [5/25,5/28)，真实数据异常地还带一条恰落 end 的 5/28 历史行。
     const b25 = dayjs('2026-05-25 00:00').toISOString();
     const b28 = dayjs('2026-05-28 00:00').toISOString();
     const out = extendChartAxis(chart([b25, b28], [10, 40]), {
@@ -330,7 +576,7 @@ describe('extendChartAxis（横轴铺满 + 空点如实显示）', () => {
       hours: allHr,
       granularity: 'daily',
     });
-    // 5/25 5/26 5/27 5/28 共 4 刻度。
+    // 前端只生成 5/25~5/27；真实 5/28 由并集兜底保留，共 4 刻度。
     expect(out.buckets).toHaveLength(4);
     const days = out.buckets.map((b) => dayjs(b).date());
     expect(days).toEqual([25, 26, 27, 28]);
@@ -350,6 +596,7 @@ describe('extendChartAxis（横轴铺满 + 空点如实显示）', () => {
       weekdays: new Set([1]),
       hours: allHr,
       granularity: 'daily',
+      systemTimezone: 'Asia/Shanghai',
     });
     // 全部刻度都是周一。
     out.buckets.forEach((b) => expect(dayjs(b).day()).toBe(1));
@@ -384,14 +631,15 @@ describe('extendChartAxis（横轴铺满 + 空点如实显示）', () => {
   });
 
   it('④ 月粒度：按自然月推刻度，不漂出月界', () => {
-    // monthly 锚点 1/31；范围 1/31~4/30。日历平移应落到 1/31、2/28、3/31、4/30（不变成固定 30 天漂移）。
+    // monthly 锚点 1/31；范围 [1/31,5/1)。日历平移应落到 1/31、2/28、3/31、4/30。
     const b0131 = dayjs('2026-01-31 00:00').toISOString();
     const out = extendChartAxis(chart([b0131], [7]), {
       rangeStartMs: ms('2026-01-31 00:00'),
-      rangeEndMs: ms('2026-04-30 00:00'),
+      rangeEndMs: ms('2026-05-01 00:00'),
       weekdays: allWd,
       hours: allHr,
       granularity: 'monthly',
+      systemTimezone: 'Asia/Shanghai',
     });
     // 各刻度落在各自然月末（dayjs add month 对月末做钳位）。
     const months = out.buckets.map((b) => dayjs(b).month()); // 0=1月
@@ -405,16 +653,16 @@ describe('extendChartAxis（横轴铺满 + 空点如实显示）', () => {
     expect(dayjs(out.buckets[febIdx]).month()).toBe(1);
   });
 
-  it('⑤ 空图跳过：空 buckets → 原样返回、不报错、不强造轴', () => {
-    const empty = chart([], []);
-    const out = extendChartAxis(empty, {
+  it('⑤ 有桶但时间串全无效时原样返回，避免掩盖坏数据', () => {
+    const invalid = chart(['not-a-time'], [5]);
+    const out = extendChartAxis(invalid, {
       rangeStartMs: ms('2026-05-25 00:00'),
       rangeEndMs: ms('2026-05-28 00:00'),
       weekdays: allWd,
       hours: allHr,
       granularity: 'daily',
     });
-    expect(out).toBe(empty); // 同引用，原样返回
+    expect(out).toBe(invalid);
   });
 
   it('未知粒度退化为仅真实桶（安全兜底，不报错）', () => {
