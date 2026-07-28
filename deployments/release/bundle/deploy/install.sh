@@ -795,6 +795,15 @@ sep "8/9 启动业务 + web + 监控"
 log "${DC[*]} up -d"
 "${DC[@]}" up -d
 
+# 监控配置均从 release 目录 bind mount。升级切换 current 软链后，存量容器的
+# mount namespace 仍指向上一版真实目录；仅执行普通 up -d 不会重建镜像未变化
+# 的监控容器，导致新告警/采集/Grafana 配置实际上未加载。只重建有配置挂载的
+# 六个监控服务，--no-deps 避免连带重启 PostgreSQL/Redis 等基础设施。
+if [ "$SKIP_MONITORING" = 0 ]; then
+  log "刷新监控配置 bind mount（Prometheus / Alertmanager / Loki / Tempo / OTel / Grafana）..."
+  "${DC[@]}" up -d --force-recreate --no-deps prometheus alertmanager loki tempo otelcol grafana
+fi
+
 log "等待业务容器启动（10s）..."
 sleep 10
 
