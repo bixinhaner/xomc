@@ -94,20 +94,20 @@
       "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}}
     },
     {
-      "title": "容器 CPU（按容器名）",
+      "title": "容器 CPU（按容器 ID）",
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
       "targets": [
-        {"expr": "sum by (name) (rate(container_cpu_usage_seconds_total{name!=\"\"}[1m]))", "legendFormat": "{{name}}"}
+        {"expr": "sum by (container_id) (rate(container_cpu_usage_seconds_total{container_id=~\"/docker/.+\"}[1m]))", "legendFormat": "{{container_id}}"}
       ],
       "fieldConfig": {"defaults": {"unit": "percentunit"}}
     },
     {
-      "title": "容器内存（按容器名）",
+      "title": "容器内存（按容器 ID）",
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 28},
       "targets": [
-        {"expr": "sum by (name) (container_memory_working_set_bytes{name!=\"\"})", "legendFormat": "{{name}}"}
+        {"expr": "sum by (container_id) (container_memory_working_set_bytes{container_id=~\"/docker/.+\"})", "legendFormat": "{{container_id}}"}
       ],
       "fieldConfig": {"defaults": {"unit": "bytes"}}
     },
@@ -120,8 +120,18 @@
         {"expr": "node_load5", "legendFormat": "load5"},
         {"expr": "node_load15", "legendFormat": "load15"}
       ]
+    },
+    {
+      "title": "主机磁盘 inode 使用率（按挂载点）",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 36},
+      "targets": [
+        {"expr": "100 - (node_filesystem_files_free{fstype!~\"tmpfs|overlay|squashfs\"} / node_filesystem_files{fstype!~\"tmpfs|overlay|squashfs\"} * 100)", "legendFormat": "{{mountpoint}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}}
     }
   ],
+  "refresh": "30s",
   "schemaVersion": 39,
   "tags": ["omcgo", "nginx", "host", "container"],
   "templating": {

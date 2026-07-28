@@ -7,7 +7,7 @@
   "graphTooltip": 1,
   "id": null,
   "links": [],
-  "__comment": "饱和度面板以 cAdvisor container_spec_*（运行时真实 deploy.resources.limits）为分母，自动跟随 resources.env。哨兵 < 64e9 过滤掉未设限容器（spec_limit==整机内存）避免失真。容器正则只取 app/acs/worker，天然排除一次性 migrate-* 任务。",
+  "__comment": "饱和度面板以 cAdvisor container_spec_*（运行时真实 deploy.resources.limits）为分母，自动跟随 resources.env。哨兵 < 64e9 过滤掉未设限容器（spec_limit==整机内存）避免失真。cAdvisor 的 Compose service 标签由 Prometheus metric relabel 规范化；只取 app/acs/worker，天然排除一次性 migrate-* 任务。",
   "panels": [
     {
       "title": "OMC 进程在线（app/acs/worker）",
@@ -23,7 +23,7 @@
       "type": "stat",
       "gridPos": {"h": 4, "w": 5, "x": 4, "y": 0},
       "targets": [
-        {"expr": "max(sum by (name) (rate(container_cpu_usage_seconds_total{name=~\"(omcgo|docker)-(app|acs|worker)-.*\"}[$__rate_interval])) / (sum by (name) (container_spec_cpu_quota{name=~\"(omcgo|docker)-(app|acs|worker)-.*\"} > 0) / sum by (name) (container_spec_cpu_period{name=~\"(omcgo|docker)-(app|acs|worker)-.*\"})))", "legendFormat": "max"}
+        {"expr": "max(sum by (service) (rate(container_cpu_usage_seconds_total{service=~\"app|acs|worker\"}[$__rate_interval])) / (sum by (service) (container_spec_cpu_quota{service=~\"app|acs|worker\"} > 0) / sum by (service) (container_spec_cpu_period{service=~\"app|acs|worker\"})))", "legendFormat": "max"}
       ],
       "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1, "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "orange", "value": 0.8}, {"color": "red", "value": 0.9}]}}}
     },
@@ -32,7 +32,7 @@
       "type": "stat",
       "gridPos": {"h": 4, "w": 5, "x": 9, "y": 0},
       "targets": [
-        {"expr": "max(sum by (name) (container_memory_working_set_bytes{name=~\"(omcgo|docker)-(app|acs|worker)-.*\"}) / (sum by (name) (container_spec_memory_limit_bytes{name=~\"(omcgo|docker)-(app|acs|worker)-.*\"}) < 64e9))", "legendFormat": "max"}
+        {"expr": "max(sum by (service) (container_memory_working_set_bytes{service=~\"app|acs|worker\"}) / (sum by (service) (container_spec_memory_limit_bytes{service=~\"app|acs|worker\"}) < 64e9))", "legendFormat": "max"}
       ],
       "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1, "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "orange", "value": 0.8}, {"color": "red", "value": 0.9}]}}}
     },
@@ -46,11 +46,11 @@
       "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1, "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "orange", "value": 0.8}, {"color": "red", "value": 0.95}]}}}
     },
     {
-      "title": "容器重启次数（1h）",
+      "title": "容器重启次数（当前范围）",
       "type": "stat",
       "gridPos": {"h": 4, "w": 5, "x": 19, "y": 0},
       "targets": [
-        {"expr": "sum(changes(container_start_time_seconds{name=~\"(omcgo|docker)-(app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web)-.*\"}[1h]))", "legendFormat": "restarts"}
+        {"expr": "sum(changes(container_start_time_seconds{service=~\"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web\"}[$__range]))", "legendFormat": "restarts"}
       ],
       "fieldConfig": {"defaults": {"unit": "short", "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "orange", "value": 1}, {"color": "red", "value": 3}]}}}
     },
@@ -58,19 +58,19 @@
     {
       "title": "容器 CPU 饱和度（占限额 %，按容器）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
       "targets": [
-        {"expr": "sum by (name) (rate(container_cpu_usage_seconds_total{name=~\"(omcgo|docker)-(app|acs|worker)-.*\"}[$__rate_interval])) / (sum by (name) (container_spec_cpu_quota{name=~\"(omcgo|docker)-(app|acs|worker)-.*\"} > 0) / sum by (name) (container_spec_cpu_period{name=~\"(omcgo|docker)-(app|acs|worker)-.*\"}))", "legendFormat": "{{name}}"}
+        {"expr": "sum by (service) (rate(container_cpu_usage_seconds_total{service=~\"app|acs|worker\"}[$__rate_interval])) / (sum by (service) (container_spec_cpu_quota{service=~\"app|acs|worker\"} > 0) / sum by (service) (container_spec_cpu_period{service=~\"app|acs|worker\"}))", "legendFormat": "{{service}}"}
       ],
       "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 0.8}, {"color": "red", "value": 0.9}]}}}
     },
     {
       "title": "容器 CPU 使用 vs 限额（核）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
       "targets": [
-        {"expr": "sum by (name) (rate(container_cpu_usage_seconds_total{name=~\"(omcgo|docker)-(app|acs|worker)-.*\"}[$__rate_interval]))", "legendFormat": "{{name}} 用量"},
-        {"expr": "sum by (name) (container_spec_cpu_quota{name=~\"(omcgo|docker)-(app|acs|worker)-.*\"} > 0) / sum by (name) (container_spec_cpu_period{name=~\"(omcgo|docker)-(app|acs|worker)-.*\"})", "legendFormat": "{{name}} 限额"}
+        {"expr": "sum by (service) (rate(container_cpu_usage_seconds_total{service=~\"app|acs|worker\"}[$__rate_interval]))", "legendFormat": "{{service}} 用量"},
+        {"expr": "sum by (service) (container_spec_cpu_quota{service=~\"app|acs|worker\"} > 0) / sum by (service) (container_spec_cpu_period{service=~\"app|acs|worker\"})", "legendFormat": "{{service}} 限额"}
       ],
       "fieldConfig": {"defaults": {"unit": "short"}}
     },
@@ -78,19 +78,19 @@
     {
       "title": "容器内存饱和度（占限额 %，按容器）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
       "targets": [
-        {"expr": "sum by (name) (container_memory_working_set_bytes{name=~\"(omcgo|docker)-(app|acs|worker)-.*\"}) / (sum by (name) (container_spec_memory_limit_bytes{name=~\"(omcgo|docker)-(app|acs|worker)-.*\"}) < 64e9)", "legendFormat": "{{name}}"}
+        {"expr": "sum by (service) (container_memory_working_set_bytes{service=~\"app|acs|worker\"}) / (sum by (service) (container_spec_memory_limit_bytes{service=~\"app|acs|worker\"}) < 64e9)", "legendFormat": "{{service}}"}
       ],
       "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 0.8}, {"color": "red", "value": 0.9}]}}}
     },
     {
       "title": "容器内存 使用 vs 限额（working set 对硬 OOM 线）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
       "targets": [
-        {"expr": "sum by (name) (container_memory_working_set_bytes{name=~\"(omcgo|docker)-(app|acs|worker)-.*\"})", "legendFormat": "{{name}} 用量"},
-        {"expr": "sum by (name) (container_spec_memory_limit_bytes{name=~\"(omcgo|docker)-(app|acs|worker)-.*\"}) < 64e9", "legendFormat": "{{name}} 限额"}
+        {"expr": "sum by (service) (container_memory_working_set_bytes{service=~\"app|acs|worker\"})", "legendFormat": "{{service}} 用量"},
+        {"expr": "sum by (service) (container_spec_memory_limit_bytes{service=~\"app|acs|worker\"}) < 64e9", "legendFormat": "{{service}} 限额"}
       ],
       "fieldConfig": {"defaults": {"unit": "bytes"}}
     },
@@ -98,27 +98,47 @@
     {
       "title": "容器 CPU CFS 限流比（撞 CPU 限额）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
       "targets": [
-        {"expr": "rate(container_cpu_cfs_throttled_periods_total{name=~\"(omcgo|docker)-(app|acs|worker)-.*\"}[$__rate_interval]) / rate(container_cpu_cfs_periods_total{name=~\"(omcgo|docker)-(app|acs|worker)-.*\"}[$__rate_interval])", "legendFormat": "{{name}}"}
+        {"expr": "sum by (service) (rate(container_cpu_cfs_throttled_periods_total{service=~\"app|acs|worker\"}[$__rate_interval])) / sum by (service) (rate(container_cpu_cfs_periods_total{service=~\"app|acs|worker\"}[$__rate_interval]))", "legendFormat": "{{service}}"}
       ],
       "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 0.25}]}}}
     },
     {
       "title": "容器网络收发（按容器）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
       "targets": [
-        {"expr": "sum by (name) (rate(container_network_receive_bytes_total{name=~\"(omcgo|docker)-(app|acs|worker)-.*\"}[$__rate_interval]))", "legendFormat": "{{name}} rx"},
-        {"expr": "sum by (name) (rate(container_network_transmit_bytes_total{name=~\"(omcgo|docker)-(app|acs|worker)-.*\"}[$__rate_interval]))", "legendFormat": "{{name}} tx"}
+        {"expr": "sum by (service) (rate(container_network_receive_bytes_total{service=~\"app|acs|worker\"}[$__rate_interval]))", "legendFormat": "{{service}} rx"},
+        {"expr": "sum by (service) (rate(container_network_transmit_bytes_total{service=~\"app|acs|worker\"}[$__rate_interval]))", "legendFormat": "{{service}} tx"}
       ],
       "fieldConfig": {"defaults": {"unit": "Bps"}}
     },
 
     {
+      "title": "容器 OOM 事件（当前范围）",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 32},
+      "targets": [
+        {"expr": "sum by (service) (increase(container_oom_events_total{service=~\"app|acs|worker\"}[$__range]))", "legendFormat": "{{service}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}}
+    },
+    {
+      "title": "容器块 IO 读写（按服务）",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 32},
+      "targets": [
+        {"expr": "sum by (service) (rate(container_fs_reads_bytes_total{service=~\"app|acs|worker\"}[$__rate_interval]))", "legendFormat": "{{service}} read"},
+        {"expr": "sum by (service) (rate(container_fs_writes_bytes_total{service=~\"app|acs|worker\"}[$__rate_interval]))", "legendFormat": "{{service}} write"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "Bps", "min": 0}}
+    },
+
+    {
       "title": "Go 协程数（按服务）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 28},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 40},
       "targets": [
         {"expr": "go_goroutines{job=~\"omc-.*\"}", "legendFormat": "{{deployment_unit}}"}
       ],
@@ -127,7 +147,7 @@
     {
       "title": "Go 堆 vs 软限（占 GOMEMLIMIT %）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 28},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 40},
       "targets": [
         {"expr": "go_memstats_heap_inuse_bytes{job=~\"omc-.*\"} / (go_gc_gomemlimit_bytes{job=~\"omc-.*\"} < 64e9)", "legendFormat": "{{deployment_unit}}"}
       ],
@@ -136,7 +156,7 @@
     {
       "title": "GC 暂停耗时速率（按服务）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 28},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 40},
       "targets": [
         {"expr": "rate(go_gc_duration_seconds_sum{job=~\"omc-.*\"}[$__rate_interval])", "legendFormat": "{{deployment_unit}}"}
       ],
@@ -146,7 +166,7 @@
     {
       "title": "pgxpool 使用率（按服务/池）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 36},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 48},
       "targets": [
         {"expr": "pgxpool_in_use{job=~\"omc-.*\"} / pgxpool_max{job=~\"omc-.*\"}", "legendFormat": "{{deployment_unit}}/{{pool}}"}
       ],
@@ -155,7 +175,7 @@
     {
       "title": "Redis 连接池使用率（按服务）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 36},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 48},
       "targets": [
         {"expr": "redis_pool_in_use{job=~\"omc-.*\"} / redis_pool_max{job=~\"omc-.*\"}", "legendFormat": "{{deployment_unit}}"}
       ],
@@ -164,13 +184,14 @@
     {
       "title": "进程文件描述符使用率（按服务）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 36},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 48},
       "targets": [
         {"expr": "process_open_fds{job=~\"omc-.*\"} / process_max_fds{job=~\"omc-.*\"}", "legendFormat": "{{deployment_unit}}"}
       ],
       "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}}
     }
   ],
+  "refresh": "30s",
   "schemaVersion": 39,
   "tags": ["omcgo", "resources", "runtime", "limits"],
   "templating": {

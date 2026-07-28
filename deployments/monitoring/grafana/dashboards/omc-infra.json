@@ -113,30 +113,30 @@
     },
 
     {
-      "title": "依赖容器 CPU 饱和度（占限额 %，按容器）",
+      "title": "依赖容器 CPU 饱和度（占限额 %，按服务）",
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
       "targets": [
-        {"expr": "sum by (name) (rate(container_cpu_usage_seconds_total{name=~\"(omcgo|docker)-(postgres|postgres-tsdb|redis|nats|minio|web)-.*\"}[$__rate_interval])) / (sum by (name) (container_spec_cpu_quota{name=~\"(omcgo|docker)-(postgres|postgres-tsdb|redis|nats|minio|web)-.*\"} > 0) / sum by (name) (container_spec_cpu_period{name=~\"(omcgo|docker)-(postgres|postgres-tsdb|redis|nats|minio|web)-.*\"}))", "legendFormat": "{{name}}"}
+        {"expr": "sum by (service) (rate(container_cpu_usage_seconds_total{service=~\"postgres|postgres-tsdb|redis|nats|minio|web\"}[$__rate_interval])) / (sum by (service) (container_spec_cpu_quota{service=~\"postgres|postgres-tsdb|redis|nats|minio|web\"} > 0) / sum by (service) (container_spec_cpu_period{service=~\"postgres|postgres-tsdb|redis|nats|minio|web\"}))", "legendFormat": "{{service}}"}
       ],
       "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 0.8}, {"color": "red", "value": 0.9}]}}}
     },
     {
-      "title": "依赖容器内存饱和度（占限额 %，按容器）",
+      "title": "依赖容器内存饱和度（占限额 %，按服务）",
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
       "targets": [
-        {"expr": "sum by (name) (container_memory_working_set_bytes{name=~\"(omcgo|docker)-(postgres|postgres-tsdb|redis|nats|minio|web)-.*\"}) / (sum by (name) (container_spec_memory_limit_bytes{name=~\"(omcgo|docker)-(postgres|postgres-tsdb|redis|nats|minio|web)-.*\"}) < 64e9)", "legendFormat": "{{name}}"}
+        {"expr": "sum by (service) (container_memory_working_set_bytes{service=~\"postgres|postgres-tsdb|redis|nats|minio|web\"}) / (sum by (service) (container_spec_memory_limit_bytes{service=~\"postgres|postgres-tsdb|redis|nats|minio|web\"}) < 64e9)", "legendFormat": "{{service}}"}
       ],
       "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 0.8}, {"color": "red", "value": 0.9}]}}}
     },
 
     {
-      "title": "监控栈容器内存（按容器）",
+      "title": "监控栈容器内存（按服务）",
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 28},
       "targets": [
-        {"expr": "sum by (name) (container_memory_working_set_bytes{name=~\"(omcgo|docker)-(prometheus|grafana|loki|tempo|otelcol|alertmanager|cadvisor)-.*\"})", "legendFormat": "{{name}}"}
+        {"expr": "sum by (service) (container_memory_working_set_bytes{service=~\"prometheus|grafana|loki|tempo|otelcol|alertmanager|cadvisor\"})", "legendFormat": "{{service}}"}
       ],
       "fieldConfig": {"defaults": {"unit": "bytes"}}
     },
@@ -150,6 +150,7 @@
       "fieldConfig": {"defaults": {"unit": "short"}}
     }
   ],
+  "refresh": "30s",
   "schemaVersion": 39,
   "tags": ["omcgo", "infra", "dependencies"],
   "templating": {
