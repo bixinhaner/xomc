@@ -226,11 +226,11 @@ func (h *Handler) canAccessAdhocExport(c *gin.Context, params []byte) (bool, err
 	if h.adhocTasks == nil {
 		return false, errAdhocPermissionCheckerUnavailable
 	}
-	taskID, _, _, err := parseAdhocParams(params)
+	filter, err := parseAdhocParams(params)
 	if err != nil {
 		return false, fmt.Errorf("%w: %v", errInvalidAdhocExportParams, err)
 	}
-	task, err := h.adhocTasks.Get(c.Request.Context(), taskID)
+	task, err := h.adhocTasks.Get(c.Request.Context(), filter.TaskID)
 	if err != nil {
 		return false, err
 	}

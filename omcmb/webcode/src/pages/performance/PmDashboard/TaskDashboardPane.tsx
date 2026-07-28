@@ -25,7 +25,11 @@ import { nowInSystemTimezone, toSystemTimezoneRFC3339 } from '@core/utils/system
 import { buildAdhocExportParams, defaultExportTaskName } from '@core/utils/kpiExportParams';
 import { useTechnologyDictionary } from '@core/hooks/api/useTechnologyDictionary';
 import { displayAdhocTaskName } from '../adhocTaskDisplay';
-import { buildMetricCharts } from './taskDashboardUtils';
+import {
+  buildMetricCharts,
+  filterChartsByMetricPaths,
+  filterRowsByMetricPaths,
+} from './taskDashboardUtils';
 import ChartCard from './ChartCard';
 import DashboardFilterBar, { type DashboardFilterValue } from './DashboardFilterBar';
 import {
@@ -177,13 +181,19 @@ export default function TaskDashboardPane({ taskId }: Props) {
 
   const charts = useMemo(() => {
     if (!taskQuery.data || !effectiveGran || !submitted) return [];
-    // #185：任务配置指标集不再等同于最终输出指标集；后端结果已按任务指标 ∪ 启用指标收口。
-    // 这里直接画结果里真实出现的指标，避免把启用指标再次按旧任务配置裁掉。
+    // #192：右侧图表严格按任务 metric_paths 展示。即使后端历史行或异常返回带出额外指标，
+    // 也不能生成配置外图表；先滤原始行，避免额外指标污染固定 legend 全集。
+    const taskMetricPaths = taskQuery.data.metricPaths;
+    const visibleRows = filterRowsByMetricPaths(rawRows, taskMetricPaths);
+    const visiblePrevRows = filterRowsByMetricPaths(rawPrevRows, taskMetricPaths);
     // #599：后端已按 weekdays/hours 过滤，前端只需扩轴（轴刻度仍按完整范围铺、再套星期/小时剔除空桶）。
     const weekdaySet = new Set(submitted.weekdays);
     const hourSet = new Set(submitted.hours);
     const cur = extendChartsAxis(
-      buildMetricCharts(rawRows, taskQuery.data.dimension, effectiveGran, chartLocale),
+      filterChartsByMetricPaths(
+        buildMetricCharts(visibleRows, taskQuery.data.dimension, effectiveGran, chartLocale),
+        taskMetricPaths,
+      ),
       {
         rangeStartMs: submitted.rangeStartMs,
         rangeEndMs: submitted.rangeEndMs,
@@ -193,7 +203,10 @@ export default function TaskDashboardPane({ taskId }: Props) {
       },
     );
     if (!submitted.compare) return cur;
-    const prev = buildMetricCharts(rawPrevRows, taskQuery.data.dimension, effectiveGran, chartLocale);
+    const prev = filterChartsByMetricPaths(
+      buildMetricCharts(visiblePrevRows, taskQuery.data.dimension, effectiveGran, chartLocale),
+      taskMetricPaths,
+    );
     return attachCompareSeries(cur, prev, submitted.offsetMs, effectiveGran);
   }, [
     rawRows,
@@ -215,12 +228,11 @@ export default function TaskDashboardPane({ taskId }: Props) {
       taskId,
       startTime: exportStart,
       endTime: exportEnd,
+      productIds: submitted?.productIds ?? productIds,
+      objectLdns: submitted?.objectLdns ?? objectLdns,
+      weekdays: submitted?.weekdays ?? filter.weekdays,
+      hours: submitted?.hours ?? filter.hours,
     });
-    // #599：weekdays/hours 传入导出 params（后端导出时按同口径过滤）。
-    const wd = submitted?.weekdays ?? filter.weekdays;
-    const hr = submitted?.hours ?? filter.hours;
-    if (wd.length > 0 && wd.length < 7) exportParams.weekdays = wd;
-    if (hr.length > 0 && hr.length < 24) exportParams.hours = hr;
     createExport.mutate(
       {
         sourceType: 'pm_dashboard',

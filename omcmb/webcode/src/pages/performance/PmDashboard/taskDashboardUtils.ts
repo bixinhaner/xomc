@@ -126,8 +126,29 @@ export function filterChartsByMetricPaths(
   metricPaths: string[] | undefined,
 ): MetricChart[] {
   if (!metricPaths || metricPaths.length === 0) return charts;
+  const byMetric = new Map(charts.map((c) => [c.metricPath, c]));
+  const out: MetricChart[] = [];
+  const seen = new Set<string>();
+  metricPaths.forEach((metricPath) => {
+    if (seen.has(metricPath)) return;
+    seen.add(metricPath);
+    const chart = byMetric.get(metricPath);
+    if (chart) out.push(chart);
+  });
+  return out;
+}
+
+/**
+ * #192：按任务 metric_paths 过滤原始结果行。必须在 buildMetricCharts 前执行，
+ * 防止配置外指标参与 device_group/product 等维度的固定 legend 全集。
+ */
+export function filterRowsByMetricPaths(
+  rows: AdhocResultRow[],
+  metricPaths: string[] | undefined,
+): AdhocResultRow[] {
+  if (!metricPaths || metricPaths.length === 0) return rows;
   const set = new Set(metricPaths);
-  return charts.filter((c) => set.has(c.metricPath));
+  return rows.filter((row) => set.has(row.metricPath));
 }
 
 /**

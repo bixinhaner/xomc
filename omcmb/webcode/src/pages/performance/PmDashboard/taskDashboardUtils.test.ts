@@ -5,6 +5,7 @@ import {
   seriesLabelOf,
   buildMetricCharts,
   filterChartsByMetricPaths,
+  filterRowsByMetricPaths,
 } from './taskDashboardUtils';
 
 // 构造结果行的小工厂——只填测试关心的字段，其余给确定默认值。
@@ -322,9 +323,12 @@ describe('filterChartsByMetricPaths — T-0194 按任务已选指标过滤出图
   ];
   const charts = buildMetricCharts(rows, 'device', 'hourly');
 
-  it('只保留清单内的图（数量与清单一致）', () => {
+  it('只保留清单内的图，并按任务配置顺序返回', () => {
     const out = filterChartsByMetricPaths(charts, ['K1', 'K3']);
     expect(out.map((c) => c.metricPath)).toEqual(['K1', 'K3']);
+
+    const reordered = filterChartsByMetricPaths(charts, ['K3', 'K1']);
+    expect(reordered.map((c) => c.metricPath)).toEqual(['K3', 'K1']);
   });
 
   it('清单为空 → 不过滤（兜底全画）', () => {
@@ -338,5 +342,59 @@ describe('filterChartsByMetricPaths — T-0194 按任务已选指标过滤出图
   it('清单含不存在的指标 → 只画命中的、不报错', () => {
     const out = filterChartsByMetricPaths(charts, ['K2', 'K999']);
     expect(out.map((c) => c.metricPath)).toEqual(['K2']);
+  });
+
+  it('内置-产品-eNB 14 指标验收：额外结果指标不会让右侧图表超过 14 个', () => {
+    const taskMetrics = Array.from({ length: 14 }, (_, index) => `K-ENB-${String(index + 1).padStart(2, '0')}`);
+    const rows = [
+      ...taskMetrics.map((metricPath) => row({ metricPath, productId: 'prod-1', startTime: 't0', metricValue: 1 })),
+      row({ metricPath: 'K-EXTRA-1', productId: 'prod-1', startTime: 't0', metricValue: 9 }),
+      row({ metricPath: 'C-EXTRA-2', productId: 'prod-1', startTime: 't0', metricValue: 10 }),
+    ];
+
+    const out = filterChartsByMetricPaths(
+      buildMetricCharts(filterRowsByMetricPaths(rows, taskMetrics), 'product', 'hourly'),
+      taskMetrics,
+    );
+
+    expect(out).toHaveLength(14);
+    expect(out.map((c) => c.metricPath)).toEqual(taskMetrics);
+  });
+});
+
+describe('filterRowsByMetricPaths — #192 按任务已选指标过滤原始结果行', () => {
+  it('配置外结果行不会进入出图数据源', () => {
+    const rows = [
+      row({ metricPath: 'K1', deviceSn: 'SN-A' }),
+      row({ metricPath: 'K2', deviceSn: 'SN-A' }),
+      row({ metricPath: 'K-EXTRA', deviceSn: 'SN-A' }),
+    ];
+
+    const out = filterRowsByMetricPaths(rows, ['K1', 'K2']);
+
+    expect(out.map((r) => r.metricPath)).toEqual(['K1', 'K2']);
+  });
+
+  it('先滤原始行可防止额外指标污染固定 legend 全集', () => {
+    const rows = [
+      row({ metricPath: 'K1', objectLdn: 'DeviceGroup=GA', deviceGroupName: '华东', startTime: 't0', metricValue: 1 }),
+      row({ metricPath: 'K-EXTRA', objectLdn: 'DeviceGroup=GB', deviceGroupName: '华南', startTime: 't0', metricValue: 9 }),
+    ];
+
+    const charts = buildMetricCharts(
+      filterRowsByMetricPaths(rows, ['K1']),
+      'device_group',
+      'hourly',
+    );
+
+    expect(charts.map((c) => c.metricPath)).toEqual(['K1']);
+    expect(charts[0].series.map((s) => s.key)).toEqual(['DeviceGroup=GA']);
+  });
+
+  it('清单为空或 undefined 时保留原始行，兼容历史边界任务', () => {
+    const rows = [row({ metricPath: 'K1' }), row({ metricPath: 'K2' })];
+
+    expect(filterRowsByMetricPaths(rows, [])).toBe(rows);
+    expect(filterRowsByMetricPaths(rows, undefined)).toBe(rows);
   });
 });

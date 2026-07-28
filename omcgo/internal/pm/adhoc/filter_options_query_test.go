@@ -13,7 +13,7 @@ import (
 // product 维度：DISTINCT product_id + LEFT JOIN products，按 product_id 收口，无 LIMIT。
 func Test_buildFilterOptionsQuery_Product(t *testing.T) {
 	id := uuid.New()
-	q, args, supported := buildFilterOptionsQuery(DimensionProduct, id)
+	q, args, supported := buildFilterOptionsQuery(DimensionProduct, id, nil)
 
 	assert.True(t, supported)
 	assert.Contains(t, q, "SELECT DISTINCT r.product_id, p.product_name")
@@ -29,7 +29,7 @@ func Test_buildFilterOptionsQuery_Product(t *testing.T) {
 // device_group 维度：DISTINCT object_ldn + LEFT JOIN device_groups（'DeviceGroup='||id 比对），无 LIMIT。
 func Test_buildFilterOptionsQuery_DeviceGroup(t *testing.T) {
 	id := uuid.New()
-	q, args, supported := buildFilterOptionsQuery(DimensionDeviceGroup, id)
+	q, args, supported := buildFilterOptionsQuery(DimensionDeviceGroup, id, nil)
 
 	assert.True(t, supported)
 	assert.Contains(t, q, "SELECT DISTINCT r.object_ldn, g.name")
@@ -44,7 +44,7 @@ func Test_buildFilterOptionsQuery_DeviceGroup(t *testing.T) {
 // band 维度：DISTINCT object_ldn，按 Band= 前缀收口，无 JOIN、无 LIMIT。
 func Test_buildFilterOptionsQuery_Band(t *testing.T) {
 	id := uuid.New()
-	q, args, supported := buildFilterOptionsQuery(DimensionBand, id)
+	q, args, supported := buildFilterOptionsQuery(DimensionBand, id, nil)
 
 	assert.True(t, supported)
 	assert.Contains(t, q, "SELECT DISTINCT r.object_ldn")
@@ -59,10 +59,23 @@ func Test_buildFilterOptionsQuery_Band(t *testing.T) {
 func Test_buildFilterOptionsQuery_UnsupportedDimensions(t *testing.T) {
 	id := uuid.New()
 	for _, dim := range []Dimension{DimensionDevice, DimensionAggregateGroup, DimensionNetwork} {
-		q, args, supported := buildFilterOptionsQuery(dim, id)
+		q, args, supported := buildFilterOptionsQuery(dim, id, nil)
 		assert.False(t, supported, "dimension %s should not be filterable", dim)
 		assert.Empty(t, q, "dimension %s should produce no SQL", dim)
 		assert.Nil(t, args, "dimension %s should produce no args", dim)
+	}
+}
+
+func Test_buildFilterOptionsQuery_FilterByTaskMetricPaths(t *testing.T) {
+	id := uuid.New()
+	metrics := []string{"K1", "K2"}
+
+	for _, dim := range []Dimension{DimensionProduct, DimensionDeviceGroup, DimensionBand} {
+		q, args, supported := buildFilterOptionsQuery(dim, id, metrics)
+
+		assert.True(t, supported, "dimension %s should be filterable", dim)
+		assert.Contains(t, q, "AND r.metric_path = ANY($2)")
+		assert.Equal(t, []any{id, metrics}, args)
 	}
 }
 

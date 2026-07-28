@@ -81,6 +81,24 @@ describe('buildAdhocExportParams', () => {
       end_time: '2026-06-05T00:00:00.000Z',
     });
   });
+
+  it('性能仪表盘导出带上当前子集、星期和小时筛选', () => {
+    expect(
+      buildAdhocExportParams({
+        taskId: 'task-1',
+        productIds: ['prod-1'],
+        objectLdns: ['DeviceGroup=group-1,Tech=lte'],
+        weekdays: [1, 2],
+        hours: [8, 9],
+      }),
+    ).toEqual({
+      task_id: 'task-1',
+      product_ids: ['prod-1'],
+      object_ldns: ['DeviceGroup=group-1,Tech=lte'],
+      weekdays: [1, 2],
+      hours: [8, 9],
+    });
+  });
 });
 
 describe('validateDashboardExportSelection', () => {
