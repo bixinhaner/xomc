@@ -1,0 +1,57 @@
+# Stable logical storage series for Grafana and the future admission
+# evaluator. The source series remain visible when a target is not mapped;
+# these rules intentionally emit no sample instead of manufacturing zero.
+groups:
+  - name: omc.storage.targets
+    interval: 30s
+    rules:
+      - record: omc_storage_capacity_bytes
+        expr: node_filesystem_size_bytes{job="node",mountpoint="/",fstype!~"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs(\\..*)?|fuse(\\..*)?"}
+        labels:
+          target_type: application
+          target_id: root
+          write_scope: all
+
+      - record: omc_storage_used_bytes
+        expr: node_filesystem_size_bytes{job="node",mountpoint="/",fstype!~"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs(\\..*)?|fuse(\\..*)?"} - node_filesystem_avail_bytes{job="node",mountpoint="/",fstype!~"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs(\\..*)?|fuse(\\..*)?"}
+        labels:
+          target_type: application
+          target_id: root
+          write_scope: all
+
+      - record: omc_storage_used_ratio
+        expr: 1 - (node_filesystem_avail_bytes{job="node",mountpoint="/",fstype!~"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs(\\..*)?|fuse(\\..*)?"} / node_filesystem_size_bytes{job="node",mountpoint="/",fstype!~"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs(\\..*)?|fuse(\\..*)?"})
+        labels:
+          target_type: application
+          target_id: root
+          write_scope: all
+
+      - record: omc_storage_capacity_bytes
+        expr: minio_cluster_capacity_usable_total_bytes
+        labels:
+          target_type: minio
+          target_id: minio-data
+          write_scope: all
+
+      - record: omc_storage_used_bytes
+        expr: minio_cluster_capacity_usable_total_bytes - minio_cluster_capacity_usable_free_bytes
+        labels:
+          target_type: minio
+          target_id: minio-data
+          write_scope: all
+
+      - record: omc_storage_used_ratio
+        expr: 1 - (minio_cluster_capacity_usable_free_bytes / minio_cluster_capacity_usable_total_bytes)
+        labels:
+          target_type: minio
+          target_id: minio-data
+          write_scope: all
+
+      # The existing backup policy poller already exposes the canonical
+      # config-backup bucket. Keep it under the same fixed category contract;
+      # additional bucket collectors may add the other allowlisted categories
+      # without exposing arbitrary object paths as labels.
+      - record: omc_minio_bucket_usage_bytes
+        expr: omc_backup_storage_used_bytes
+        labels:
+          category: config-backup

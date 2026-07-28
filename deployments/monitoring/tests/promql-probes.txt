@@ -67,9 +67,9 @@ increase(omc_pm_queue_sample_failures_total{subject="pm.file.received",durable="
 Expected: sampling failures in the last five minutes. ZERO means successful sampling; NO-DATA means the observer metric itself is unavailable.
 
 ## Storage write protection (NO-DATA until Task 8 exposes the metric; MUST-HAVE after that)
-omc_storage_write_protection_active
+omc_storage_admission_state
 Expected: protection state: 0 permits writes, 1 blocks writes. Before the exporter exists the panel must show NO-DATA, never 0.
 
 ## Storage write rejections (NO-DATA until Task 8 exposes the metric; MUST-HAVE after that)
-increase(omc_storage_write_rejections_total[5m])
+increase(omc_storage_write_rejected_total[5m])
 Expected: rejected writes in the last five minutes. ZERO means no rejected writes; NO-DATA means telemetry is unavailable, not that writes were accepted.

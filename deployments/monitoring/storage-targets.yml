@@ -10,11 +10,11 @@ version: 1
 storage_targets:
   # The application can write logs, uploads and temporary files to the host
   # filesystem visible at these paths.
-  - target_type: host_filesystem
-    target_id: app-root
+  - target_type: application
+    target_id: root
     mountpoint: /
     write_scope: [log, upload, report, trace, all]
-    components: [application]
+    components: [application, logs, uploads]
 
   # Named Docker volumes are physically stored below Docker's data root. Keep
   # the logical volume names so operators can distinguish PostgreSQL, MinIO
@@ -23,7 +23,7 @@ storage_targets:
     target_id: docker-data
     mountpoint: /var/lib/docker
     write_scope: [database, queue, object, monitoring, all]
-    components: [pgdata, tsdbdata, redisdata, natsdata, miniodata]
+    components: [pgdata, tsdbdata, redisdata, natsdata, miniodata, prometheusdata, alertmanagerdata, grafanadata, lokidata, tempodata, promtaildata, omcgo-secrets]
 
   - target_type: database
     target_id: postgres-data
@@ -84,6 +84,27 @@ storage_targets:
     write_scope: [monitoring]
     components: [grafana]
 
+  - target_type: monitoring
+    target_id: alertmanager-data
+    mountpoint: /var/lib/docker
+    container_path: /alertmanager
+    volume: alertmanagerdata
+    write_scope: [monitoring]
+    retention: 15d
+    components: [alertmanager]
+
+  # Kept for migration visibility. Promtail is no longer started by the
+  # current compose stack, but its named volume must not be mistaken for an
+  # unaccounted data directory during upgrade/cleanup.
+  - target_type: monitoring
+    target_id: promtail-data
+    mountpoint: /var/lib/docker
+    container_path: /promtail
+    volume: promtaildata
+    write_scope: [log]
+    retention: 7d
+    components: [promtail, legacy]
+
 # Bucket labels are deliberately a fixed business taxonomy. The values are
 # the default MinIO bucket names in cmd/{app,acs,worker}/etc/config.*.yaml;
 # deployments may override the physical name without creating arbitrary
@@ -116,3 +137,12 @@ minio_buckets:
   - category: trace
     bucket: trace-bulk
     write_scope: [trace]
+  - category: file-bundles
+    bucket: file-bundles
+    write_scope: [report, download]
+  - category: config-snapshots
+    bucket: config-snapshots
+    write_scope: [backup]
+  - category: device-licenses
+    bucket: device-licenses
+    write_scope: [firmware]

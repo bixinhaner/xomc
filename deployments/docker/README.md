@@ -38,7 +38,7 @@
 | `postgres`  | timescale/timescaledb:latest-pg16 | `5432:5432`   | 主数据库（含 TimescaleDB 时序扩展）        |
 | `redis`     | redis:7-alpine           | `6379:6379`                | 缓存 / Session / 分布式锁                 |
 | `nats`      | nats:2.10-alpine         | `4222:4222`, `8222:8222`   | 消息队列（JetStream 模式），8222 为监控端口 |
-| `minio`     | minio/minio:latest       | `9000:9000`, `9001:9001`   | 对象存储，9001 为 Web 控制台              |
+| `minio`     | `minio/minio:RELEASE.2024-06-13T22-53-53Z` | `9000:9000`, `9001:9001`   | 对象存储，9001 为 Web 控制台              |
 | `migrate`   | Dockerfile.app           | —（一次性任务）             | 启动时执行数据库迁移，成功后退出            |
 | `acs`       | Dockerfile.acs           | `9095:9090` (metrics), `7557:7557` | ACS 服务，处理 TR-069 CWMP 设备通信。metrics 让出宿主 9090 给 Prometheus |
 | `app`       | Dockerfile.app           | `18081:8081` (host loopback), `9091:9091` (metrics) | REST API 管理面服务，业务流量通过 Nginx 代理 |
@@ -212,7 +212,7 @@ OMCGO_JWT_SECRET=your-strong-secret-here
 
 ### 6.4 minio（对象存储）
 
-- **镜像**：`minio/minio:latest`
+- **镜像**：`minio/minio:RELEASE.2024-06-13T22-53-53Z`（可用 `IMAGE_MINIO` 显式覆盖）
 - **端口**：`9000`（S3 API），`9001`（Web 控制台）
 - **数据卷**：`miniodata:/data`
 - **Web 控制台**：`http://localhost:9001`（账号 `minioadmin` / `minioadmin`）

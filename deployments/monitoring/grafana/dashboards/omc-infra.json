@@ -155,7 +155,7 @@
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 36},
       "targets": [
-        {"expr": "1 - (node_filesystem_avail_bytes{job=\"node\",fstype!~\"tmpfs|overlay|squashfs|ramfs|erofs\"} / node_filesystem_size_bytes{job=\"node\",fstype!~\"tmpfs|overlay|squashfs|ramfs|erofs\"})", "legendFormat": "{{mountpoint}} {{device}}"}
+        {"expr": "1 - (node_filesystem_avail_bytes{job=\"node\",fstype!~\"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs(\\\\..*)?|fuse(\\\\..*)?\"} / node_filesystem_size_bytes{job=\"node\",fstype!~\"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs(\\\\..*)?|fuse(\\\\..*)?\"})", "legendFormat": "{{mountpoint}} {{device}}"}
       ],
       "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1, "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "orange", "value": 0.8}, {"color": "red", "value": 0.9}]}}}
     },
@@ -164,7 +164,7 @@
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 36},
       "targets": [
-        {"expr": "1 - (node_filesystem_files_free{job=\"node\",fstype!~\"tmpfs|overlay|squashfs|ramfs|erofs\"} / node_filesystem_files{job=\"node\",fstype!~\"tmpfs|overlay|squashfs|ramfs|erofs\"})", "legendFormat": "{{mountpoint}} {{device}}"}
+        {"expr": "1 - (node_filesystem_files_free{job=\"node\",fstype!~\"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs(\\\\..*)?|fuse(\\\\..*)?\"} / node_filesystem_files{job=\"node\",fstype!~\"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs(\\\\..*)?|fuse(\\\\..*)?\"})", "legendFormat": "{{mountpoint}} {{device}}"}
       ],
       "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1, "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "orange", "value": 0.8}, {"color": "red", "value": 0.95}]}}}
     },
@@ -173,7 +173,7 @@
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 44},
       "targets": [
-        {"expr": "predict_linear(node_filesystem_avail_bytes{job=\"node\",fstype!~\"tmpfs|overlay|squashfs|ramfs|erofs\"}[6h], 4 * 3600)", "legendFormat": "{{mountpoint}} {{device}}"}
+        {"expr": "predict_linear(node_filesystem_avail_bytes{job=\"node\",fstype!~\"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs(\\\\..*)?|fuse(\\\\..*)?\"}[6h], 4 * 3600)", "legendFormat": "{{mountpoint}} {{device}}"}
       ],
       "fieldConfig": {"defaults": {"unit": "bytes", "min": 0}}
     },
@@ -189,14 +189,13 @@
       "fieldConfig": {"defaults": {"unit": "bytes", "min": 0}}
     },
     {
-      "title": "MinIO 使用率与 ILM 待处理",
+      "title": "MinIO 使用率",
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 52},
       "targets": [
-        {"expr": "1 - (minio_cluster_capacity_usable_free_bytes / minio_cluster_capacity_usable_total_bytes)", "legendFormat": "capacity used ratio"},
-        {"expr": "minio_node_ilm_expiry_pending_tasks", "legendFormat": "ILM pending"}
+        {"expr": "1 - (minio_cluster_capacity_usable_free_bytes / minio_cluster_capacity_usable_total_bytes)", "legendFormat": "capacity used ratio"}
       ],
-      "fieldConfig": {"defaults": {"unit": "short", "min": 0}}
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}}
     },
     {
       "title": "NATS JetStream 积压",
@@ -206,6 +205,24 @@
         {"expr": "omc_nats_consumer_pending", "legendFormat": "{{stream}}/{{durable}} pending"},
         {"expr": "omc_nats_consumer_ack_pending", "legendFormat": "{{stream}}/{{durable}} ack pending"},
         {"expr": "omc_nats_consumer_oldest_age_seconds", "legendFormat": "{{stream}}/{{durable}} oldest age"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}}
+    },
+    {
+      "title": "MinIO 业务桶容量（固定分类）",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 60},
+      "targets": [
+        {"expr": "omc_minio_bucket_usage_bytes{category=~\"pm|mr|firmware|config-backup|logs|reports|exchange|ui-assets|trace|file-bundles|config-snapshots|device-licenses\"}", "legendFormat": "{{category}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "bytes", "min": 0}}
+    },
+    {
+      "title": "MinIO ILM 待处理",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 60},
+      "targets": [
+        {"expr": "minio_node_ilm_expiry_pending_tasks", "legendFormat": "ILM pending"}
       ],
       "fieldConfig": {"defaults": {"unit": "short", "min": 0}}
     }

@@ -8,6 +8,7 @@ set -u
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 targets="$repo_root/deployments/monitoring/storage-targets.yml"
+recording_rules="$repo_root/deployments/monitoring/alerts/storage-recording.yml"
 failures=0
 
 fail() {
@@ -22,11 +23,11 @@ else
   grep -Eq '^storage_targets:$' "$targets" || fail "storage_targets section is missing"
   grep -Eq '^minio_buckets:$' "$targets" || fail "minio_buckets section is missing"
 
-  for target_id in app-root docker-data postgres-data postgres-tsdb-data minio-data prometheus-data loki-data tempo-data grafana-data; do
+  for target_id in root docker-data postgres-data postgres-tsdb-data minio-data prometheus-data loki-data tempo-data grafana-data alertmanager-data promtail-data; do
     grep -Eq "^[[:space:]]+target_id: ${target_id}$" "$targets" || fail "target_id is missing: ${target_id}"
   done
 
-  for category in pm mr firmware config-backup logs reports exchange ui-assets trace; do
+  for category in pm mr firmware config-backup logs reports exchange ui-assets trace file-bundles config-snapshots device-licenses; do
     grep -Eq "^[[:space:]]+- category: ${category}$" "$targets" || fail "MinIO category is missing: ${category}"
   done
 
@@ -34,6 +35,16 @@ else
   grep -Eq '^[[:space:]]+container_path: /prometheus$' "$targets" || fail "Prometheus data path is missing"
   grep -Eq '^[[:space:]]+container_path: /loki$' "$targets" || fail "Loki data path is missing"
   grep -Eq '^[[:space:]]+container_path: /var/tempo$' "$targets" || fail "Tempo data path is missing"
+fi
+
+if [[ ! -f "$recording_rules" ]]; then
+  fail "storage recording rules are missing"
+else
+  grep -Eq '^      - record: omc_storage_capacity_bytes$' "$recording_rules" || fail "capacity recording rule is missing"
+  grep -Eq '^      - record: omc_storage_used_ratio$' "$recording_rules" || fail "usage ratio recording rule is missing"
+  grep -Eq '^      - record: omc_minio_bucket_usage_bytes$' "$recording_rules" || fail "MinIO bucket recording rule is missing"
+  grep -Eq '^          target_type: application$' "$recording_rules" || fail "application target label is missing"
+  grep -Eq '^          target_type: minio$' "$recording_rules" || fail "MinIO target label is missing"
 fi
 
 if (( failures > 0 )); then

@@ -209,7 +209,10 @@ services:
       retries: 5
 
   minio:
-    image: minio/minio:latest
+    # Pin the image because the dashboard uses the MinIO metrics-v2 names;
+    # metrics-v3 renames the capacity series. Upgrade only with a metrics
+    # compatibility check and an explicit IMAGE_MINIO override in release.
+    image: ${IMAGE_MINIO:-minio/minio:RELEASE.2024-06-13T22-53-53Z}
     environment:
       TZ: "Asia/Shanghai"
       MINIO_ROOT_USER: minioadmin
