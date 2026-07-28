@@ -116,6 +116,21 @@ func (l PersistentQueueLabels) Values() [3]string {
 	return [3]string{l.queue, l.status, l.result}
 }
 
+// LabelValues returns only values accepted by the persistent-queue label
+// contract, in queue/status/result order. The result label is omitted when it
+// is not used by the metric. Zero-value or otherwise invalid labels cannot be
+// passed to a Prometheus vector through this method.
+func (l PersistentQueueLabels) LabelValues() ([]string, error) {
+	if _, err := NewPersistentQueueLabels(l.queue, l.status, l.result); err != nil {
+		return nil, err
+	}
+	values := []string{l.queue, l.status}
+	if l.result != "" {
+		values = append(values, l.result)
+	}
+	return values, nil
+}
+
 // TaskMetrics holds Prometheus metrics for the task queue module.
 //
 // P4 扩展（docs/design/mml-task-flow-design-20260424.md §3.3 C10）：

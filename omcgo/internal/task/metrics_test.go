@@ -135,3 +135,14 @@ func TestPersistentQueueLabelsExposeOnlyValidatedValues(t *testing.T) {
 	names[0] = "device-sn-001"
 	assert.Equal(t, "device_tasks", PersistentQueueNames()[0], "queue registry must not be externally mutable")
 }
+
+func TestPersistentQueueLabelsOnlyProduceValidatedMetricValues(t *testing.T) {
+	labels, err := NewPersistentQueueLabels("device_tasks", "failed", "failed")
+	require.NoError(t, err)
+	values, err := labels.LabelValues()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"device_tasks", "failed", "failed"}, values)
+
+	_, err = (PersistentQueueLabels{}).LabelValues()
+	require.Error(t, err)
+}
