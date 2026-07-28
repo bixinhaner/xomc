@@ -68,6 +68,46 @@ func TestBuildTR069Params_GetParameterValues_DedupesPaths(t *testing.T) {
 	assert.Equal(t, []string{"Device.X.Y", "Device.X.Z"}, got.Names)
 }
 
+func TestBuildTR069Params_GetParameterValues_KeepsStandardPathForACSTranslation(t *testing.T) {
+	refs := []MMLParamRef{
+		{
+			ParamCode:         "LICENSE_AUTHOR",
+			Tr069Path:         "Device.Services.FAPService.1.FAPControl.LTE.LICENSE.Author",
+			PrivatePath:       "Device.FAP.License.Author",
+			TranslationSource: "translated",
+			ValueType:         "string",
+		},
+		{
+			ParamCode:         "LICENSE_CAPACITY_VALUE",
+			Tr069Path:         "Device.Services.FAPService.1.FAPControl.LTE.LICENSE.Capacity.1.Value",
+			PrivatePath:       "Device.FAP.License.LicenseItem.1.Value",
+			TranslationSource: "translated",
+			ValueType:         "string",
+		},
+	}
+
+	payload, err := BuildTR069Params("GetParameterValues", refs, nil, "LST")
+
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"names":["Device.Services.FAPService.1.FAPControl.LTE.LICENSE.Author","Device.Services.FAPService.1.FAPControl.LTE.LICENSE.Capacity.1.Value"]}`, string(payload))
+	assert.NotContains(t, string(payload), "path_mode")
+}
+
+func TestBuildTR069Params_GetParameterValues_TreatsStandardInstanceRefAsCollectionPartialPath(t *testing.T) {
+	refs := []MMLParamRef{{
+		ParamCode:         "CAPACITY_INSTANCE",
+		Tr069Path:         "Device.Services.FAPService.1.FAPControl.LTE.LICENSE.Capacity.1",
+		PrivatePath:       "Device.FAP.License.LicenseItem.1",
+		TranslationSource: "translated",
+		ValueType:         "string",
+	}}
+
+	payload, err := BuildTR069Params("GetParameterValues", refs, nil, "LST")
+
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"names":["Device.Services.FAPService.1.FAPControl.LTE.LICENSE.Capacity."]}`, string(payload))
+}
+
 func TestBuildTR069Params_PrivatePathModeBypassesKnownRootFilter(t *testing.T) {
 	refs := []MMLParamRef{{
 		ParamCode: "P",
@@ -120,6 +160,22 @@ func TestBuildTR069Params_SetParameterValues(t *testing.T) {
 	assert.Equal(t, "xsd:string", byName["Device.X_BAICELLS_LTE.GsmMcc"].Type)
 	assert.Equal(t, "8", byName["Device.X_BAICELLS_LTE.NriBitLen"].Value)
 	assert.Equal(t, "xsd:int", byName["Device.X_BAICELLS_LTE.NriBitLen"].Type)
+}
+
+func TestBuildTR069Params_SetParameterValues_KeepsStandardPathForACSTranslation(t *testing.T) {
+	refs := []MMLParamRef{{
+		ParamCode:         "LICENSE_CODE",
+		Tr069Path:         "Device.Services.FAPService.1.FAPControl.LTE.LICENSE.Code",
+		PrivatePath:       "Device.FAP.License.Code",
+		TranslationSource: "translated",
+		ValueType:         "string",
+	}}
+
+	payload, err := BuildTR069Params("SetParameterValues", refs, map[string]interface{}{"LICENSE_CODE": "abc"}, "MOD")
+
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"values":[{"name":"Device.Services.FAPService.1.FAPControl.LTE.LICENSE.Code","value":"abc","type":"xsd:string"}]}`, string(payload))
+	assert.NotContains(t, string(payload), "path_mode")
 }
 
 func TestBuildTR069Params_SetParameterValues_AllEmpty(t *testing.T) {

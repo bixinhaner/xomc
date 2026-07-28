@@ -57,13 +57,13 @@ func TestTranslator_ToStandard_HitAndMiss(t *testing.T) {
 }
 
 func TestTranslator_PlaceholderMismatchSkipped(t *testing.T) {
-	// standard 1 个 {i}，private 0 个 → 跳过
+	// private 需要比 standard 更多实例号 → 跳过
 	set := &MappingSet{
 		ParamModelID: uuid.New(),
 		Source:       MappingSourceDefault,
 		Mappings: []ParamMapping{
 			mkMapping("Device.OK.{i}.X", "Device.Priv.{i}.X"), // ok
-			mkMapping("Device.Bad.{i}.X", "Device.Priv.X"),    // 跳过
+			mkMapping("Device.Bad.X", "Device.Priv.{i}.X"),    // 跳过
 		},
 	}
 	tr := NewTranslator(set, NewRegistryMetrics(nil), nil)
@@ -122,13 +122,49 @@ func TestValidatePlaceholders(t *testing.T) {
 		{"A", "a", true},
 		{"A.{i}", "a.{i}", true},
 		{"A.{i}.B.{i}", "a.{i}.b.{i}", true},
-		{"A.{i}", "a", false},
+		{"A.{i}", "a", true},
 		{"A", "a.{i}", false},
-		{"A.{i}.B.{i}", "a.{i}", false},
+		{"A.{i}.B.{i}", "a.{i}", true},
 	}
 	for _, c := range cases {
 		assert.Equal(t, c.ok, validatePlaceholders(c.std, c.priv), "%s vs %s", c.std, c.priv)
 	}
+}
+
+func TestTranslator_ToPrivate_AllowsStandardToHaveExtraInstance(t *testing.T) {
+	set := &MappingSet{
+		Source: MappingSourceDefault,
+		Mappings: []ParamMapping{
+			mkMapping(
+				"Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Author",
+				"Device.FAP.License.Author",
+			),
+		},
+	}
+	tr := NewTranslator(set, NewRegistryMetrics(nil), nil)
+	require.Equal(t, 0, tr.SkippedCount())
+
+	got := tr.ToPrivate("Device.Services.FAPService.1.FAPControl.LTE.LICENSE.Author")
+	require.True(t, got.Found)
+	assert.Equal(t, "Device.FAP.License.Author", got.Translated)
+}
+
+func TestTranslator_ToPrivate_DropsLeadingExtraInstanceNumbers(t *testing.T) {
+	set := &MappingSet{
+		Source: MappingSourceDefault,
+		Mappings: []ParamMapping{
+			mkMapping(
+				"Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity.{i}.Value",
+				"Device.FAP.License.LicenseItem.{i}.Value",
+			),
+		},
+	}
+	tr := NewTranslator(set, NewRegistryMetrics(nil), nil)
+	require.Equal(t, 0, tr.SkippedCount())
+
+	got := tr.ToPrivate("Device.Services.FAPService.1.FAPControl.LTE.LICENSE.Capacity.7.Value")
+	require.True(t, got.Found)
+	assert.Equal(t, "Device.FAP.License.LicenseItem.7.Value", got.Translated)
 }
 
 func TestParamModelLabel(t *testing.T) {
@@ -490,7 +526,7 @@ func TestSubstituteInstanceNumbers(t *testing.T) {
 			"", false},
 		{"extra_instance_number",
 			[]string{"5"}, "X.Y",
-			"", false},
+			"X.Y", true},
 		{"empty_destination",
 			[]string{"5"}, "", "", false},
 	}

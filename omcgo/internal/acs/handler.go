@@ -678,13 +678,14 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 	if err != nil {
 		log.Error("pop sendable task from queue", zap.Error(err))
 	} else if taskItem != nil {
+		originalParams := append(json.RawMessage(nil), taskItem.Params...)
 		// standardPath → privatePath 翻译（T-XXX：翻译职责从 App fanout 迁移到 ACS）
 		h.translateTaskParamsInPlace(r.Context(), taskItem, log)
 
 		// 更新会话状态
 		session.State = StateRPCPending
 		session.LastRPC = taskItem.Method
-		session.LastCommandParams = taskItem.Params
+		session.LastCommandParams = originalParams
 		session.LastTaskID = taskItem.ID
 		session.LastTaskCWMPID = cwmpID
 		session.RPCCount++
@@ -883,7 +884,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 					for i, pv := range pvs {
 						names[i] = pv.Name
 					}
-					stdNames, _ := h.pathTranslator.TranslateResponseNames(r.Context(), taskItem.DeviceSN, names)
+					stdNames, _ := h.pathTranslator.TranslateResponseNamesForRequest(r.Context(), taskItem.DeviceSN, names, session.LastCommandParams)
 					std := make([]tr069.ParameterValueStruct, len(pvs))
 					for i, pv := range pvs {
 						std[i] = tr069.ParameterValueStruct{Name: stdNames[i], Value: pv.Value, Type: pv.Type}

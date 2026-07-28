@@ -119,7 +119,9 @@ func (s *ConsoleService) BuildGroupTreeFiltered(ctx context.Context, rootCode, l
 	if err != nil {
 		return nil, err
 	}
-	filterTreeInPlace(tree, supported, blocked)
+	if err := s.filterTreeInPlace(ctx, tree, supported, blocked, supported.ParamModelID); err != nil {
+		return nil, err
+	}
 	tree = pruneEmptyGroups(tree)
 	return tree, nil
 }
@@ -152,7 +154,9 @@ func (s *ConsoleService) BuildGroupTreeFilteredByDevice(
 	if err != nil {
 		return nil, err
 	}
-	filterTreeInPlace(tree, supported, blocked)
+	if err := s.filterTreeInPlace(ctx, tree, supported, blocked, nil); err != nil {
+		return nil, err
+	}
 	return pruneEmptyGroups(tree), nil
 }
 
@@ -199,9 +203,16 @@ func (s *ConsoleService) resolveSupportedSetByDevice(
 	}, nil
 }
 
-// filterTreeInPlace 递归遍历 tree，按静态 ParamModel 支持集合和运行时不支持 path
-// 集合给每个 command 加标注，隐藏最终无可用 path 的命令。原 slice 被改动（in-place）。
-func filterTreeInPlace(nodes []GroupTreeNode, supported *SupportedSet, blocked *unsupportedPathFilter) {
+// filterTreeInPlace 递归遍历 tree，按静态 ParamModel 支持集合、运行时不支持 path
+// 和命令实际 sub_fields 交集给 command 加标注，隐藏最终无可用参数的命令。
+// 原 slice 被改动（in-place）。
+func (s *ConsoleService) filterTreeInPlace(
+	ctx context.Context,
+	nodes []GroupTreeNode,
+	supported *SupportedSet,
+	blocked *unsupportedPathFilter,
+	paramModelID *uuid.UUID,
+) error {
 	for i := range nodes {
 		kept := nodes[i].Commands[:0]
 		for _, cmd := range nodes[i].Commands {
@@ -209,7 +220,20 @@ func filterTreeInPlace(nodes []GroupTreeNode, supported *SupportedSet, blocked *
 			if !ann.Visible {
 				continue
 			}
-			if blocked != nil {
+			countedSubFields := false
+			if s.subFieldRepo != nil && supported != nil && supported.ProductResolved &&
+				(cmd.OperationType == "LST" || cmd.OperationType == "MOD") {
+				available, err := s.availableCommandSubFieldCount(ctx, cmd, supported, blocked, paramModelID)
+				if err != nil {
+					return err
+				}
+				countedSubFields = true
+				ann.SupportedPathCount = available
+				if available == 0 {
+					continue
+				}
+			}
+			if blocked != nil && !countedSubFields {
 				available := countAvailableCommandPaths(cmd, supported, blocked)
 				if cmd.OperationType == "LST" || cmd.OperationType == "MOD" {
 					ann.SupportedPathCount = available
@@ -227,8 +251,31 @@ func filterTreeInPlace(nodes []GroupTreeNode, supported *SupportedSet, blocked *
 			kept = append(kept, cmd)
 		}
 		nodes[i].Commands = kept
-		filterTreeInPlace(nodes[i].Children, supported, blocked)
+		if err := s.filterTreeInPlace(ctx, nodes[i].Children, supported, blocked, paramModelID); err != nil {
+			return err
+		}
 	}
+	return nil
+}
+
+func (s *ConsoleService) availableCommandSubFieldCount(
+	ctx context.Context,
+	cmd GroupTreeCommand,
+	supported *SupportedSet,
+	blocked *unsupportedPathFilter,
+	paramModelID *uuid.UUID,
+) (int, error) {
+	enriched, err := s.subFieldRepo.ListEnrichedByCommand(ctx, cmd.ID, paramModelID)
+	if err != nil {
+		return 0, fmt.Errorf("list sub_fields for command %s: %w", cmd.ID, err)
+	}
+	count := 0
+	for _, field := range enriched {
+		if supported.Contains(field.Tr069Path) && !blocked.blocks(cmd.OperationType, field.Tr069Path) {
+			count++
+		}
+	}
+	return count, nil
 }
 
 func (s *ConsoleService) unsupportedPathsForProduct(ctx context.Context, productID *uuid.UUID) (*unsupportedPathFilter, error) {
@@ -444,9 +491,7 @@ func (s *ConsoleService) BuildFlatGroupTreeFiltered(
 	}
 
 	var supported *SupportedSet
-	if deviceKey != "" {
-		supported, err = s.resolveSupportedSetByDevice(ctx, deviceKey)
-	} else {
+	if productClass != "" {
 		if s.supportedPathsRepo == nil {
 			return nil, fmt.Errorf("resolve supported paths for product_class %q: repository not configured", productClass)
 		}
@@ -457,6 +502,8 @@ func (s *ConsoleService) BuildFlatGroupTreeFiltered(
 		if supported != nil && supported.Paths == nil {
 			supported.Paths = map[string]struct{}{}
 		}
+	} else if deviceKey != "" {
+		supported, err = s.resolveSupportedSetByDevice(ctx, deviceKey)
 	}
 	if err != nil {
 		return nil, err
