@@ -2,7 +2,7 @@
 
 **日期：** 2026-07-28
 
-**状态：** 已确认方向，待实施计划
+**状态：** 修订设计已确认，待实施计划同步
 
 **范围：** 首页 `/api/v1/dashboard/summary`、`/api/v1/dashboard/kpi-time-series` 及其监控保护
 
@@ -28,7 +28,7 @@
 ## 2. 目标
 
 1. 首页 KPI 查询完全退出原始 PM 明细扫描和在线全网汇总链路。
-2. 首页保持现有产品口径，只开放小时、天粒度；不增加 15 分钟或周粒度入口。
+2. 首页明确开放小时、天、周三种粒度，分别直接读取现有 hourly、daily、weekly 全网结果；不增加 15 分钟入口。
 3. 直接复用现有 eNB、gNB、GSM 小时、天、周全网聚合结果，不新增第二套结果表或聚合任务。
 4. 为 Dashboard 增加查询超时、并发限制、同请求合并和短缓存，限制异常请求的影响范围。
 5. 补齐慢查询、Dashboard 延迟、聚合完整性和 TSDB 资源告警。
@@ -66,11 +66,17 @@ Dashboard 新增专用只读 Repository，唯一读取源为现有全网聚合�
 - `dimension = 'network'`；
 - 制式映射为 `eNB → lte`、`gNB → nr`、`GSM → gsm`；
 - 使用现有内置全网任务 ID，不在 Dashboard 中重复硬编码；
-- 粒度仅接受 `hourly`、`daily`；
+- 粒度接受 `hourly`、`daily`、`weekly`；
 - 指标通过 `metric_path` 精确过滤；
 - 时间范围通过 `window_start >= start`、`window_start < end` 过滤。
 
-现有 `weekly` 结果继续保留并由原有功能使用，但本次不暴露到首页。
+首页三种模式与物理粒度严格一一对应：
+
+- 小时模式读取 `hourly`，展示最近 24 小时；
+- 天模式读取 `daily`，展示最近 30 天；
+- 周模式读取 `weekly`，展示最近 12 周。
+
+禁止用 hourly 在前端拼 daily，也禁止用 daily 拼 weekly。默认进入小时模式。
 
 ### 5.2 版本去重
 
@@ -89,9 +95,10 @@ technology + granularity + metric_path + window_start
 `/api/v1/dashboard/kpi-time-series` 保持当前请求与响应契约：
 
 - 一个请求批量携带多个 KPI 编号；
-- 当前期和对比期分别形成有界查询；
+- 页面每次只查询当前选中粒度对应的一个连续时间窗，不再为“昨日/上周”额外发送第二个对比请求；
 - 小时请求只读全网小时结果；
 - 天请求只读全网天结果；
+- 周请求只读全网周结果；
 - 返回前按 `metric_path, window_start` 排序；
 - 缺失桶不填造假零值，沿用空点语义。
 
@@ -133,7 +140,7 @@ WHERE dimension = 'network';
 
 ## 6. 缺失与完整性语义
 
-切换前必须核验首页使用的全部 KPI 在 LTE、NR、GSM 对应小时和天结果中的覆盖情况。
+切换前必须核验首页使用的全部 KPI 在 LTE、NR、GSM 对应小时、天、周结果中的覆盖情况。
 
 - 结果存在：直接返回。
 - 单个 KPI 或窗口缺失：返回空点，同时增加缺失指标并触发告警。
@@ -163,19 +170,21 @@ WHERE dimension = 'network';
 
 - 对 endpoint、制式、粒度、排序后的 KPI 列表和时间范围生成规范化 key；
 - 同一 key 的并发请求只执行一次数据库查询；
-- summary 使用 30 秒短缓存；
-- KPI 时序使用 60 秒短缓存；
-- 新全网窗口发布后主动失效相关缓存；
-- 查询失败时只允许返回不超过 5 分钟的最近成功缓存，并通过响应头标记 stale；
+- summary 和 KPI 时序 fresh cache 均使用 4 分 30 秒；
+- Dashboard 不再订阅 PM、告警或其他 SSE 事件，不通过事件主动失效缓存；
+- 缓存 generation 失效能力保留为内部管理手段，但不连接首页事件刷新链路；
+- 查询失败时只允许返回不超过 15 分钟的最近成功缓存，并通过响应头标记 stale；
 - 缓存不是数据源，进程重启后允许自然丢失。
 
 ### 7.4 前端请求治理
 
-- 删除 KPI 历史查询当前 60 秒固定轮询；
-- 页面重新聚焦或收到新聚合窗口通知时刷新；
-- 当前期和对比期分别批量查询，不按 KPI 面板拆成多组重复请求；
+- 首页所有 summary 和 KPI 请求统一每 5 分钟轮询一次；
+- 页面隐藏时暂停轮询；恢复可见后立即刷新一次并重新计算 5 分钟周期；
+- 不使用 PM、告警或其他 SSE 事件即时刷新首页；
+- 原“日 / 周”对比切换替换为“小时 / 天 / 周”粒度切换；图表展示该粒度最近 24 小时、30 天或 12 周的一条连续趋势；
+- 小时、天、周模式分别按当前制式和当前粒度批量查询，不发送额外对比期请求，也不按 KPI 面板拆成多组重复请求；
 - 超时、503 和 429 不进行自动重试风暴；
-- 保持已有小时、天选择和响应展示契约。
+- 首页切换项明确为“小时 / 天 / 周”，默认小时；切换粒度时立即查询一次对应范围。
 
 ## 8. 可观测性
 
@@ -220,6 +229,10 @@ pm_network_rollup_lag_seconds{technology,granularity}
 | DashboardKPIResultMissing | 任一制式/粒度缺失持续 10m | warning |
 | PMNetworkRollupLagHigh | 小时结果延迟 > 90m 持续 10m | warning |
 | PMNetworkRollupLagCritical | 小时结果延迟 > 120m 持续 5m | critical |
+| PMNetworkDailyRollupLagHigh | 天结果延迟 > 36h 持续 30m | warning |
+| PMNetworkDailyRollupLagCritical | 天结果延迟 > 48h 持续 15m | critical |
+| PMNetworkWeeklyRollupLagHigh | 周结果延迟 > 8d 持续 1h | warning |
+| PMNetworkWeeklyRollupLagCritical | 周结果延迟 > 10d 持续 30m | critical |
 | TSDBTempWriteHigh | 临时写入速率 > 10 MiB/s 持续 5m | warning |
 | TSDBTempWriteCritical | 临时写入速率 > 50 MiB/s 持续 5m | critical |
 
@@ -240,11 +253,12 @@ pm_network_rollup_lag_seconds{technology,granularity}
 - Repository SQL 形状测试：必须过滤 network、task、technology、granularity、metric path 和窗口；
 - 版本重叠测试：同一窗口只返回最新结果；
 - LTE、NR、GSM 映射测试；
-- hourly、daily 路由测试；15min、weekly 在首页接口继续被拒绝；
+- hourly、daily、weekly 路由测试；15min 在首页接口继续被拒绝；
 - summary 每指标最新窗口测试；
 - 缺失、不完整和空结果测试；
 - timeout、并发拒绝、singleflight、缓存命中和 stale 返回测试；
-- 前端假定时器测试：不存在 60 秒固定轮询，不自动重试重型请求；
+- 前端假定时器测试：5 分钟前不重复请求，到点只发一次批量请求；隐藏页面暂停，恢复页面立即刷新；不存在 SSE 即时刷新；
+- 小时 24 小时、天 30 天、周 12 周的时间范围和图表桶映射测试；
 - API 契约回归测试：字段、时间和空数组语义不变。
 
 ### 9.2 性能门禁
@@ -252,11 +266,12 @@ pm_network_rollup_lag_seconds{technology,granularity}
 在隔离的生产规模副本验证：
 
 - 原始规模至少等价于 10,000 台设备和 3 亿条 value；
-- 查询 16 个 KPI 的今天/昨天小时对比；
-- 查询相同 KPI 的天粒度范围；
+- 查询 16 个 KPI 的最近 24 小时；
+- 查询相同 KPI 的最近 30 天；
+- 查询相同 KPI 的最近 12 周；
 - 数据库暖态 P95 < 200 ms；
 - API P95 < 1 s；
-- 10 个客户端并发时无原始表访问、无临时文件、无查询堆积；
+- 10 个客户端在同一 5 分钟边界并发刷新时无原始表访问、无临时文件、无查询堆积；
 - 查询计划只访问全网预聚合结果及其索引；
 - TSDB CPU 和磁盘增量处于可接受范围，不出现 incident 同类尖峰。
 
@@ -265,7 +280,7 @@ pm_network_rollup_lag_seconds{technology,granularity}
 ## 10. 上线与回滚
 
 1. 先上线指标、告警和 Dashboard 读路径开关，保持旧路径不被流量调用。
-2. 在生产只读核验 LTE、NR、GSM 小时/天结果覆盖和时间新鲜度。
+2. 在生产只读核验 LTE、NR、GSM 小时/天/周结果覆盖和时间新鲜度。
 3. 在隔离副本完成数值、执行计划和并发门禁。
 4. 小流量启用新 Repository，观察 Dashboard 延迟、缺失率、TSDB CPU、临时写入和磁盘 I/O。
 5. 全量切换后删除旧首页原始查询入口，避免未来误用。
@@ -277,8 +292,8 @@ pm_network_rollup_lag_seconds{technology,granularity}
 本改造只有同时满足以下条件才算根治：
 
 1. Dashboard KPI 两个接口的执行路径中不存在原始 PM 明细访问。
-2. eNB、gNB、GSM 现有全网小时/天结果成为首页唯一数据源。
-3. 首页 16 个 KPI 当前期和对比期数据正确且无粒度变化。
+2. eNB、gNB、GSM 现有全网小时/天/周结果成为首页唯一数据源。
+3. 首页 16 个 KPI 在小时 24 小时、天 30 天、周 12 周三种模式下数据正确，且没有前端跨粒度换算。
 4. 并发刷新不会造成 TSDB CPU、临时写入或磁盘 I/O 尖峰。
 5. 查询超时、并发拒绝、慢查询、聚合延迟和资源异常均可观测并可告警。
 6. 预聚合结果缺失时系统快速失败或返回受控空数据，不触发原始扫描。
