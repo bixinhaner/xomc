@@ -93,7 +93,7 @@
         {"expr": "sum by (service) (rate(container_cpu_usage_seconds_total{service=~\"app|acs|worker\"}[1m]))", "legendFormat": "{{service}}"}
       ],
       "fieldConfig": {
-        "defaults": {"unit": "percentunit"}
+        "defaults": {"unit": "cores"}
       }
     },
     {
