@@ -103,12 +103,35 @@ func TestTaskMetrics_PersistentQueueMetricContract(t *testing.T) {
 		"trace_export",
 		"backup_tasks",
 		"dead_letters",
-	}, PersistentQueueNames)
+	}, PersistentQueueNames())
 	assert.Equal(t, "pending", PersistentQueueMetricPending)
 	assert.Equal(t, "oldest_age_seconds", PersistentQueueMetricOldestAgeSeconds)
 	assert.Equal(t, "failed_total", PersistentQueueMetricFailedTotal)
 	assert.Equal(t, "dead_letter_total", PersistentQueueMetricDeadLetterTotal)
 	assert.Equal(t, "processed_total", PersistentQueueMetricProcessedTotal)
 	assert.Equal(t, "observer_failures_total", PersistentQueueMetricObserverFailuresTotal)
-	assert.Equal(t, []string{"pending", "sent", "running", "succeeded", "failed", "dead_letter"}, PersistentQueueStatuses)
+	assert.Equal(t, []string{"pending", "sent", "running", "succeeded", "failed", "dead_letter"}, PersistentQueueStatuses())
+}
+
+func TestPersistentQueueLabelsRejectUnregisteredValues(t *testing.T) {
+	for name, values := range map[string][3]string{
+		"queue":  {"device-sn-001", "pending", ""},
+		"status": {"device_tasks", "redis-key:abc", ""},
+		"result": {"device_tasks", "succeeded", "/object/path/file"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := NewPersistentQueueLabels(values[0], values[1], values[2])
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestPersistentQueueLabelsExposeOnlyValidatedValues(t *testing.T) {
+	labels, err := NewPersistentQueueLabels("device_tasks", "pending", "")
+	require.NoError(t, err)
+	assert.Equal(t, [3]string{"device_tasks", "pending", ""}, labels.Values())
+
+	names := PersistentQueueNames()
+	names[0] = "device-sn-001"
+	assert.Equal(t, "device_tasks", PersistentQueueNames()[0], "queue registry must not be externally mutable")
 }

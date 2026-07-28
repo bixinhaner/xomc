@@ -1,19 +1,46 @@
 package task
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"fmt"
 
-// PersistentQueueNames is the bounded queue dimension for the unified
-// persistent-queue metrics. Values must be registered queue names, never a
-// device identity, complete Redis key, object path, or database row ID.
-var PersistentQueueNames = []string{
-	"device_tasks",
-	"async_jobs",
-	"parameter_sync_outbox",
-	"northbound_outbox",
-	"pm_kpi_export",
-	"trace_export",
-	"backup_tasks",
-	"dead_letters",
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+// PersistentQueueName constants are the bounded queue dimension for the
+// unified persistent-queue metrics. Values must be registered queue names,
+// never a device identity, complete Redis key, object path, or database row ID.
+const (
+	PersistentQueueDeviceTasks         = "device_tasks"
+	PersistentQueueAsyncJobs           = "async_jobs"
+	PersistentQueueParameterSyncOutbox = "parameter_sync_outbox"
+	PersistentQueueNorthboundOutbox    = "northbound_outbox"
+	PersistentQueuePMKPIExport         = "pm_kpi_export"
+	PersistentQueueTraceExport         = "trace_export"
+	PersistentQueueBackupTasks         = "backup_tasks"
+	PersistentQueueDeadLetters         = "dead_letters"
+	PersistentQueueStatusPending       = "pending"
+	PersistentQueueStatusSent          = "sent"
+	PersistentQueueStatusRunning       = "running"
+	PersistentQueueStatusSucceeded     = "succeeded"
+	PersistentQueueStatusFailed        = "failed"
+	PersistentQueueStatusDeadLetter    = "dead_letter"
+	PersistentQueueResultSucceeded     = "succeeded"
+	PersistentQueueResultFailed        = "failed"
+)
+
+// PersistentQueueNames returns a fresh copy so callers cannot mutate the
+// registry used by future metric constructors.
+func PersistentQueueNames() []string {
+	return []string{
+		PersistentQueueDeviceTasks,
+		PersistentQueueAsyncJobs,
+		PersistentQueueParameterSyncOutbox,
+		PersistentQueueNorthboundOutbox,
+		PersistentQueuePMKPIExport,
+		PersistentQueueTraceExport,
+		PersistentQueueBackupTasks,
+		PersistentQueueDeadLetters,
+	}
 }
 
 // Persistent queue metric suffixes are shared by PM, task, and storage-backed
@@ -27,10 +54,19 @@ const (
 	PersistentQueueMetricObserverFailuresTotal = "observer_failures_total"
 )
 
-// PersistentQueueStatuses is the only status vocabulary for queue snapshots.
-// Empty queues are represented by pending=0; observer failures retain the
-// previous value and increment observer_failures_total instead of becoming 0.
-var PersistentQueueStatuses = []string{"pending", "sent", "running", "succeeded", "failed", "dead_letter"}
+// PersistentQueueStatuses returns a fresh copy of the only status vocabulary
+// for queue snapshots. Empty queues are represented by pending=0; observer
+// failures retain the previous value and increment observer_failures_total.
+func PersistentQueueStatuses() []string {
+	return []string{
+		PersistentQueueStatusPending,
+		PersistentQueueStatusSent,
+		PersistentQueueStatusRunning,
+		PersistentQueueStatusSucceeded,
+		PersistentQueueStatusFailed,
+		PersistentQueueStatusDeadLetter,
+	}
+}
 
 // Persistent queue labels are deliberately bounded. Do not add device_sn,
 // redis_key, object_path, row ID, or other per-item dimensions.
@@ -39,6 +75,46 @@ const (
 	PersistentQueueLabelStatus = "status"
 	PersistentQueueLabelResult = "result"
 )
+
+// PersistentQueueLabels contains only validated bounded label values. New
+// persistent-queue metric constructors should obtain labels through
+// NewPersistentQueueLabels rather than accepting arbitrary strings.
+type PersistentQueueLabels struct {
+	queue  string
+	status string
+	result string
+}
+
+// NewPersistentQueueLabels rejects unregistered queue, status, and result
+// values before they can become Prometheus label values. result may be empty
+// for metrics that do not use the result dimension.
+func NewPersistentQueueLabels(queue, status, result string) (PersistentQueueLabels, error) {
+	if !isPersistentQueueValue(queue, PersistentQueueNames()) {
+		return PersistentQueueLabels{}, fmt.Errorf("invalid persistent queue %q", queue)
+	}
+	if !isPersistentQueueValue(status, PersistentQueueStatuses()) {
+		return PersistentQueueLabels{}, fmt.Errorf("invalid persistent queue status %q", status)
+	}
+	if result != "" && result != PersistentQueueResultSucceeded && result != PersistentQueueResultFailed {
+		return PersistentQueueLabels{}, fmt.Errorf("invalid persistent queue result %q", result)
+	}
+	return PersistentQueueLabels{queue: queue, status: status, result: result}, nil
+}
+
+func isPersistentQueueValue(value string, registered []string) bool {
+	for _, candidate := range registered {
+		if value == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+// Values returns the validated queue, status, and optional result values in
+// the order used by the bounded label contract.
+func (l PersistentQueueLabels) Values() [3]string {
+	return [3]string{l.queue, l.status, l.result}
+}
 
 // TaskMetrics holds Prometheus metrics for the task queue module.
 //
