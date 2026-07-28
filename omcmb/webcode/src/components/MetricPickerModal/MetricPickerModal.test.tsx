@@ -6,7 +6,7 @@
  *   - 不传/false 时仍渲染「设备类型」下拉（向后兼容 KPIQuery 可切换行为）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App } from 'antd';
 
 // 捕获 useIndicatorList / useAllIndicators 收到的参数。
@@ -132,6 +132,93 @@ describe('MetricPickerModal 已选回显', () => {
     // 重开：必须回显模板 B 的指标，且不残留模板 A 的指标
     expect(screen.getByText('C000030170')).toBeTruthy();
     expect(screen.queryByText('C000080007')).toBeNull();
+  });
+
+  it('直接勾选当前表格指标后，「已选指标」显示 ID 和名称', () => {
+    indicatorListData.items = [
+      {
+        id: 'K900010002',
+        name: 'availability',
+        cnName: '可用率',
+        enName: 'Availability',
+        isCounter: false,
+        deviceType: 'ENB',
+      },
+    ];
+    indicatorListData.total = 1;
+
+    renderModal();
+
+    fireEvent.click(screen.getAllByRole('checkbox')[1]);
+
+    expect(screen.getByText('K900010002 可用率')).toBeTruthy();
+  });
+
+  it('搜索后勾选指标，「已选指标」显示 ID 和名称', () => {
+    indicatorListData.items = [
+      {
+        id: 'K900010021',
+        name: 'handoverSuccess',
+        cnName: 'eNB间切换成功率-切出',
+        enName: 'Handover Success',
+        isCounter: false,
+        deviceType: 'ENB',
+      },
+    ];
+    indicatorListData.total = 1;
+
+    renderModal();
+
+    fireEvent.change(screen.getByPlaceholderText('按指标路径 / 中文名 搜索'), {
+      target: { value: 'K900010021' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /搜\s*索/ }));
+    fireEvent.click(screen.getAllByRole('checkbox')[1]);
+
+    expect(useIndicatorListSpy.mock.calls.at(-1)?.[1]).toMatchObject({
+      keyword: 'K900010021',
+      page: 1,
+    });
+    expect(screen.getByText('K900010021 eNB间切换成功率-切出')).toBeTruthy();
+  });
+
+  it('模板回填的预选指标带 initialLabels 时，「已选指标」显示 ID 和名称', () => {
+    renderModal({
+      initialSelected: ['K-1'],
+      initialLabels: {
+        'K-1': '小区可用率',
+      },
+    });
+
+    expect(screen.getByText('K-1 小区可用率')).toBeTruthy();
+  });
+
+  it('超过 10 个已选指标时，悬浮明细显示 ID 和名称', async () => {
+    const selected = Array.from({ length: 11 }, (_, i) => `K-${i + 1}`);
+    const initialLabels = Object.fromEntries(
+      selected.map((id, i) => [id, `指标${i + 1}`]),
+    );
+    renderModal({ initialSelected: selected, initialLabels });
+
+    fireEvent.mouseEnter(screen.getByText(/选择指标（已选 11 个） ···/));
+
+    await waitFor(() => {
+      expect(screen.getByText('1. K-1 指标1')).toBeTruthy();
+      expect(screen.getByText('11. K-11 指标11')).toBeTruthy();
+    });
+  });
+
+  it('名称缺失或等于 ID 时，「已选指标」只显示 ID', () => {
+    renderModal({
+      initialSelected: ['K-NO-LABEL', 'K-SAME-LABEL'],
+      initialLabels: {
+        'K-SAME-LABEL': 'K-SAME-LABEL',
+      },
+    });
+
+    expect(screen.getByText('K-NO-LABEL')).toBeTruthy();
+    expect(screen.getByText('K-SAME-LABEL')).toBeTruthy();
+    expect(screen.queryByText('K-SAME-LABEL K-SAME-LABEL')).toBeNull();
   });
 });
 

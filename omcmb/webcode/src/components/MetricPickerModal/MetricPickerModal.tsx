@@ -50,6 +50,10 @@ function metricLabelOf(r: IndicatorInfo, en: boolean): string {
   return en ? r.enName || r.id : r.cnName || r.enName || r.id;
 }
 
+function formatMetricDisplay(id: string, label?: string): string {
+  return label && label !== id ? `${id} ${label}` : id;
+}
+
 interface MetricPickerModalProps {
   open: boolean;
   onClose: () => void;
@@ -293,7 +297,17 @@ export default function MetricPickerModal({
     preserveSelectedRowKeys: true,
     onChange: (keys: React.Key[]) => {
       if (warnIfTooManySelected(keys.length)) return;
-      setSelected(keys as string[]);
+      const nextSelected = keys as string[];
+      const nextSelectedSet = new Set(nextSelected);
+      setSelected(nextSelected);
+      setLabelMap((prev) => {
+        const next = { ...prev };
+        for (const item of items) {
+          const id = metricValueOf(item);
+          if (nextSelectedSet.has(id)) next[id] = metricLabelOf(item, isEn);
+        }
+        return next;
+      });
     },
   };
 
@@ -411,7 +425,7 @@ export default function MetricPickerModal({
                 // ≤10 个：逐个展示可删除 tag
                 <div style={{ lineHeight: '28px' }}>
                   {selected.map((path) => {
-                    const label = labelMap[path] ?? path;
+                    const label = formatMetricDisplay(path, labelMap[path]);
                     return (
                       <Tag
                         key={path}
@@ -440,7 +454,7 @@ export default function MetricPickerModal({
                   title={
                     <div style={{ maxHeight: 300, overflowY: 'auto' }}>
                       {selected.map((path, i) => (
-                        <div key={path}>{i + 1}. {labelMap[path] ?? path}</div>
+                        <div key={path}>{i + 1}. {formatMetricDisplay(path, labelMap[path])}</div>
                       ))}
                     </div>
                   }

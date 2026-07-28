@@ -117,6 +117,10 @@ const DEFAULT_PAYLOAD: QueryTemplatePayload = {
 
 const DEFAULT_PIVOT_PAGE_SIZE = 50;
 
+function formatMetricDisplay(id: string, label?: string): string {
+  return label && label !== id ? `${id} ${label}` : id;
+}
+
 const createDefaultTemplatePayload = (): QueryTemplatePayload => ({
   ...DEFAULT_PAYLOAD,
   deviceSns: [...DEFAULT_PAYLOAD.deviceSns],
@@ -574,7 +578,7 @@ export default function KPIQuery() {
     }
   };
 
-  // 「已选 N 个」摘要：KPI 用友好名（metricLabels）替代编号显示。
+  // 「已选 N 个」摘要：统一显示指标 ID + 友好名，查询参数仍只使用 ID。
   const metricSummary = (paths: string[], head: number): string =>
     paths.length === 0
       ? ''
@@ -582,7 +586,7 @@ export default function KPIQuery() {
           count: paths.length,
           items: paths
             .slice(0, head)
-            .map((p) => metricLabels[p] ?? p)
+            .map((p) => formatMetricDisplay(p, metricLabels[p]))
             .join(', ') + (paths.length > head ? ' ...' : ''),
         });
 
@@ -1089,6 +1093,7 @@ export default function KPIQuery() {
             }
           }}
           initialSelected={pickerTarget === 'modal' ? saveForm.payload.metricPaths : payload.metricPaths}
+          initialLabels={metricLabels}
           initialDeviceType={
             (pickerTarget === 'modal' ? saveForm.payload.deviceType : payload.deviceType) ?? 'ENB'
           }
