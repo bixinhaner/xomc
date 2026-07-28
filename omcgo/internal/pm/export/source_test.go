@@ -16,7 +16,9 @@ import (
 )
 
 func TestDiscoverMetricColumns_UsesRequestedMetricPaths(t *testing.T) {
-	keys, err := discoverMetricColumns(context.Background(), nil, "pm_metrics", []string{"K002", "C001", "K002", ""}, zeroTime(), zeroTime())
+	keys, err := discoverMetricColumns(context.Background(), nil, "pm_metrics", aggregator.QueryRequest{
+		MetricPaths: []string{"K002", "C001", "K002", ""},
+	})
 	require.NoError(t, err)
 
 	assert.Equal(t, []colKey{

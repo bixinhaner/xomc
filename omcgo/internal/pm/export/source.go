@@ -485,11 +485,11 @@ type colKey struct {
 // discoverMetricColumns 发现 dashboard 源（device / aggregate 维度）的指标列集。
 // 前端明确传 metric_paths 时，导出列必须按请求全集保留：页面 fill_empty 会让“窗口内无真实行但已选择”的指标仍显示为占位列。
 // 未传 metric_paths（全量导出）才回退到数据侧 DISTINCT 发现。
-func discoverMetricColumns(ctx context.Context, db PgQuerier, table string, metricPaths []string, start, end time.Time) ([]colKey, error) {
-	if len(metricPaths) > 0 {
-		return requestedMetricColumns(metricPaths), nil
+func discoverMetricColumns(ctx context.Context, db PgQuerier, table string, req aggregator.QueryRequest) ([]colKey, error) {
+	if len(req.MetricPaths) > 0 {
+		return requestedMetricColumns(req.MetricPaths), nil
 	}
-	sqlStr, args := buildDistinctMetricsSQL(table, metricPaths, start, end)
+	sqlStr, args := buildDistinctMetricsSQLForRequest(table, req)
 	rows, err := db.Query(ctx, sqlStr, args...)
 	if err != nil {
 		return nil, fmt.Errorf("export discover columns %s: %w", table, err)

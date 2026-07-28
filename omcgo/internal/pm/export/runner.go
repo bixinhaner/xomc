@@ -14,6 +14,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
 	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
+	"github.com/omcgo/omcgo/internal/pm/calendarfilter"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
@@ -244,6 +245,7 @@ func (r *Runner) buildAdhocResultSource(ctx context.Context, task *Task, loc app
 	if err != nil {
 		return nil, nil, csvLayout{}, err
 	}
+	filter.CalendarTimezone = calendarfilter.ProviderName(ctx, r.timezone)
 	// 先查任务聚合维度、圈选设备数和配置指标集：决定首列表头 / 对象名解析口径，
 	// 并确保全量落库模式下导出仍只包含任务配置的 N 个指标。
 	// pm_tasks 在主库（PgPool），用 taskMetaDB 读；adhoc 结果表查询走 adhocDB（TsPool）。
@@ -271,6 +273,7 @@ func (r *Runner) buildDashboardLikeSource(ctx context.Context, task *Task, loc a
 	if err != nil {
 		return nil, nil, csvLayout{}, err
 	}
+	req.CalendarTimezone = calendarfilter.ProviderName(ctx, r.timezone)
 	req = normalizeStoredResultExportRequest(req)
 	dim := req.Dimension
 	if dim == "" {
@@ -292,7 +295,7 @@ func (r *Runner) buildDashboardLikeSource(ctx context.Context, task *Task, loc a
 		objectLDNs = discovered
 	}
 	// 发现列集（编号+类型，与设备/小区无关）→ 解析本地化列名。
-	keys, derr := discoverMetricColumns(ctx, r.metricDB, table, req.MetricPaths, req.StartTime, req.EndTime)
+	keys, derr := discoverMetricColumns(ctx, r.metricDB, table, req)
 	if derr != nil {
 		return nil, nil, csvLayout{}, derr
 	}

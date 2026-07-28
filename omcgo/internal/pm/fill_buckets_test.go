@@ -335,14 +335,15 @@ func Test_fillEmptyBuckets_ExplicitObjectLDNsUseCompleteAlignedBuckets(t *testin
 	objectLDN := "Cellid=1,PLMN=46000"
 
 	rows := fillEmptyBuckets(nil, aggregator.QueryRequest{
-		Dimension:   aggregator.DimensionDevice,
-		Granularity: metrics.Granularity15Min,
-		DeviceOUIs:  []string{"48BF74"},
-		DeviceSNs:   []string{"1202000240194DP0015"},
-		MetricPaths: []string{"K900010052"},
-		ObjectLDNs:  []string{objectLDN},
-		StartTime:   start,
-		EndTime:     end,
+		Dimension:        aggregator.DimensionDevice,
+		Granularity:      metrics.Granularity15Min,
+		DeviceOUIs:       []string{"48BF74"},
+		DeviceSNs:        []string{"1202000240194DP0015"},
+		MetricPaths:      []string{"K900010052"},
+		ObjectLDNs:       []string{objectLDN},
+		StartTime:        start,
+		EndTime:          end,
+		CalendarTimezone: time.Local.String(),
 	})
 
 	require.Len(t, rows, 3)
@@ -365,15 +366,16 @@ func Test_fillEmptyBuckets_PageByPivotRowUsesOnlyCurrentPageKeys(t *testing.T) {
 	object2 := "Cellid=2,PLMN=46000"
 
 	rows := fillEmptyBuckets(nil, aggregator.QueryRequest{
-		Dimension:      aggregator.DimensionDevice,
-		Granularity:    metrics.Granularity15Min,
-		DeviceOUIs:     []string{"48BF74"},
-		DeviceSNs:      []string{"1202000240194DP0015"},
-		MetricPaths:    []string{"K900010052"},
-		ObjectLDNs:     []string{object1, object2},
-		StartTime:      first,
-		EndTime:        second.Add(15 * time.Minute),
-		PageByPivotRow: true,
+		Dimension:        aggregator.DimensionDevice,
+		Granularity:      metrics.Granularity15Min,
+		DeviceOUIs:       []string{"48BF74"},
+		DeviceSNs:        []string{"1202000240194DP0015"},
+		MetricPaths:      []string{"K900010052"},
+		ObjectLDNs:       []string{object1, object2},
+		StartTime:        first,
+		EndTime:          second.Add(15 * time.Minute),
+		PageByPivotRow:   true,
+		CalendarTimezone: time.Local.String(),
 		PivotRowKeys: []aggregator.PivotRowKey{
 			{
 				DeviceOUI:   "48BF74",
@@ -412,13 +414,14 @@ func Test_fillEmptyBuckets_FiltersRealRowsOutsideCompleteBucketWindow(t *testing
 			ObjectLDN:   &objectLDN,
 		},
 	}, aggregator.QueryRequest{
-		Dimension:   aggregator.DimensionDevice,
-		Granularity: metrics.Granularity15Min,
-		DeviceSNs:   []string{"SN1"},
-		MetricPaths: []string{"K1"},
-		ObjectLDNs:  []string{objectLDN},
-		StartTime:   start,
-		EndTime:     end,
+		Dimension:        aggregator.DimensionDevice,
+		Granularity:      metrics.Granularity15Min,
+		DeviceSNs:        []string{"SN1"},
+		MetricPaths:      []string{"K1"},
+		ObjectLDNs:       []string{objectLDN},
+		StartTime:        start,
+		EndTime:          end,
+		CalendarTimezone: time.Local.String(),
 	})
 
 	for _, row := range rows {
@@ -432,12 +435,13 @@ func Test_BuildBucketWindow_ReportsRequestedAndActualRange(t *testing.T) {
 	end := time.Date(2026, 7, 16, 12, 13, 17, 0, time.Local)
 
 	win := aggregator.BuildBucketWindow(aggregator.QueryRequest{
-		Granularity: metrics.Granularity15Min,
-		DeviceSNs:   []string{"SN1"},
-		MetricPaths: []string{"K1"},
-		ObjectLDNs:  []string{"Cellid=1"},
-		StartTime:   start,
-		EndTime:     end,
+		Granularity:      metrics.Granularity15Min,
+		DeviceSNs:        []string{"SN1"},
+		MetricPaths:      []string{"K1"},
+		ObjectLDNs:       []string{"Cellid=1"},
+		StartTime:        start,
+		EndTime:          end,
+		CalendarTimezone: time.Local.String(),
 	})
 
 	assert.Equal(t, start, win.RequestedStartTime)
@@ -453,13 +457,14 @@ func Test_BuildBucketWindow_IgnoresCalendarFiltersForActualRange(t *testing.T) {
 	end := time.Date(2026, 7, 16, 13, 13, 17, 0, time.Local)
 
 	win := aggregator.BuildBucketWindow(aggregator.QueryRequest{
-		Granularity: metrics.Granularity15Min,
-		DeviceSNs:   []string{"SN1"},
-		MetricPaths: []string{"K1"},
-		ObjectLDNs:  []string{"Cellid=1"},
-		StartTime:   start,
-		EndTime:     end,
-		Hours:       []int{12},
+		Granularity:      metrics.Granularity15Min,
+		DeviceSNs:        []string{"SN1"},
+		MetricPaths:      []string{"K1"},
+		ObjectLDNs:       []string{"Cellid=1"},
+		StartTime:        start,
+		EndTime:          end,
+		Hours:            []int{12},
+		CalendarTimezone: time.Local.String(),
 	})
 
 	assert.Equal(t, "11:15", win.ActualStartTime.In(time.Local).Format("15:04"))
@@ -472,15 +477,16 @@ func Test_fillEmptyBuckets_CalendarFiltersUseLocalBucketTime(t *testing.T) {
 	objectLDN := "Cellid=1,PLMN=46000"
 
 	rows := fillEmptyBuckets(nil, aggregator.QueryRequest{
-		Dimension:   aggregator.DimensionDevice,
-		Granularity: metrics.Granularity15Min,
-		DeviceOUIs:  []string{"48BF74"},
-		DeviceSNs:   []string{"1202000240194DP0015"},
-		MetricPaths: []string{"K900010052"},
-		ObjectLDNs:  []string{objectLDN},
-		StartTime:   start.UTC(),
-		EndTime:     end.UTC(),
-		Hours:       []int{11},
+		Dimension:        aggregator.DimensionDevice,
+		Granularity:      metrics.Granularity15Min,
+		DeviceOUIs:       []string{"48BF74"},
+		DeviceSNs:        []string{"1202000240194DP0015"},
+		MetricPaths:      []string{"K900010052"},
+		ObjectLDNs:       []string{objectLDN},
+		StartTime:        start.UTC(),
+		EndTime:          end.UTC(),
+		Hours:            []int{11},
+		CalendarTimezone: time.Local.String(),
 	})
 
 	require.Len(t, rows, 3)
@@ -489,6 +495,36 @@ func Test_fillEmptyBuckets_CalendarFiltersUseLocalBucketTime(t *testing.T) {
 		got = append(got, row.StartTime.In(time.Local).Format("15:04"))
 	}
 	assert.Equal(t, []string{"11:15", "11:30", "11:45"}, got)
+}
+
+func Test_fillEmptyBuckets_CalendarFiltersUseRequestTimezone(t *testing.T) {
+	shanghai, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	start := time.Date(2026, 7, 27, 16, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	objectLDN := "Cellid=1,PLMN=46000"
+	req := aggregator.QueryRequest{
+		Dimension:        aggregator.DimensionDevice,
+		Granularity:      metrics.GranularityHourly,
+		DeviceOUIs:       []string{"48BF74"},
+		DeviceSNs:        []string{"1202000240194DP0015"},
+		MetricPaths:      []string{"K900010052"},
+		ObjectLDNs:       []string{objectLDN},
+		StartTime:        start,
+		EndTime:          end,
+		Weekdays:         []int{2},
+		CalendarTimezone: shanghai.String(),
+	}
+
+	rows := fillEmptyBuckets(nil, req)
+
+	require.Len(t, rows, 1)
+	assert.True(t, rows[0].StartTime.Equal(start))
+	assert.Equal(t, "2026-07-28 00:00", rows[0].StartTime.In(shanghai).Format("2006-01-02 15:04"))
+	win := aggregator.BuildBucketWindow(req)
+	assert.True(t, win.ActualStartTime.Equal(start))
+	assert.True(t, win.ActualEndTime.Equal(end))
+	assert.Equal(t, "Asia/Shanghai", win.Timezone)
 }
 
 func Test_fillEmptyBuckets_ExplicitObjectSkeletonRequest(t *testing.T) {
