@@ -16,7 +16,7 @@
 - 指标缺失、采集失败、队列为空三种状态必须可区分：空队列输出 0，采集失败保留失败/新鲜度指标，查询无 series 时 Grafana 明确显示 No data。
 - Prometheus rules 是告警事实源，Grafana 只展示状态和历史；Alertmanager 负责通知，不在 Grafana JSON 中复制告警判定逻辑。
 - 磁盘写入保护只拦截 OMC 业务可控写入，不能宣称阻止 PostgreSQL WAL、Docker daemon、Prometheus/Loki/Tempo 内部写入；日志在策略允许时执行降级，错误日志、安全审计和写入保护审计不可静默丢失。
-- 三条 Goose 迁移流独立编号：主库 schema 使用 `migrations/000002`，seed 使用 `migrations/seed/000002`；TSDB 只有在实际增加时序对象时才增加 `migrations/tsdb/000002`。
+- 三条 Goose 迁移流独立编号：主库 schema 使用 `migrations/000002`，seed 按现有 `000002` 之后使用 `migrations/seed/000003`；TSDB 只有在实际增加时序对象时才增加 `migrations/tsdb/000002`。
 - 前端所有用户可见文字进入中英文 i18n；页面、菜单和浏览器验收以 `omcmb/webcode` 的 V1 实际路由和 DOM 为准。
 
 ---
@@ -357,7 +357,7 @@ cd omcgo && go test ./internal/acs/upload ./internal/transfer ./internal/core/st
 - Modify: `omcgo/cmd/app/provider/router.go`
 - Modify: `omcgo/cmd/app/provider/modules.go`
 - Modify: `omcgo/internal/admin/permission_service.go`
-- Create: `omcgo/migrations/seed/000002_storage_protection_permissions.sql`
+- Create: `omcgo/migrations/seed/000003_storage_protection_permissions.sql`
 - Create: `omcgo/internal/storageprotection/handler_test.go`
 - Create: `omcgo/internal/storageprotection/service_test.go`
 
@@ -523,4 +523,3 @@ Task 8            Task 9
 - 每个 Task 或同一批次内的垂直切片使用一个 Conventional Commit，提交信息使用中文并包含能力范围，例如 `feat: 增加 NATS 队列积压监控`。
 - Dashboard、Prometheus rules、Go 指标和前端页面必须与对应测试同一提交，避免出现“面板先合入但指标尚未存在”的中间状态。
 - 迁移、RBAC seed、后端 API、前端页面和 runbook 必须在发布清单中成组核对；不直接推送或合并主分支。
-

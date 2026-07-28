@@ -15,6 +15,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/storageprotection"
 )
 
 // prettyXML 用的正则，编译期初始化避免热路径反复编译。
@@ -35,18 +36,23 @@ var (
 //
 // 单 worker 实例顺序处理；多 worker 实例由 WorkQueuePolicy 自动 fan-out。
 type Exporter struct {
-	repo     Repository
-	bulk     *BulkStore // 用于回读外置报文（可 nil — 任务里若有 external 报文则该 job 失败）
-	minio    *minio.Client
-	bucket   string // exchange bucket 名（M2 默认 omc-exchange）
-	logger   *zap.Logger
-	queueName string
+	repo             Repository
+	bulk             *BulkStore // 用于回读外置报文（可 nil — 任务里若有 external 报文则该 job 失败）
+	minio            *minio.Client
+	bucket           string // exchange bucket 名（M2 默认 omc-exchange）
+	logger           *zap.Logger
+	queueName        string
+	storageAdmission storageprotection.WriteAdmission
 
 	pageSize int
 	maxRows  int // 单文件硬上限，超过 → failed（M3 切流式分片导出）
 
 	completed uint64
 	failed    uint64
+}
+
+func (e *Exporter) SetStorageAdmission(admission storageprotection.WriteAdmission) {
+	e.storageAdmission = admission
 }
 
 // ExporterConfig 配置。
@@ -158,6 +164,17 @@ func (e *Exporter) run(ctx context.Context, jobID uuid.UUID) {
 	// 破坏 SigV4 签名（实测 403 SignatureDoesNotMatch），所以在上传源对象时
 	// 就定 octet-stream 一劳永逸。
 	key := fmt.Sprintf("trace-export/%s.xml", job.ID.String())
+	if e.storageAdmission != nil {
+		decision, admissionErr := e.storageAdmission.Check(ctx, storageprotection.TargetMinIO, "minio-data", storageprotection.WriteScopeTrace)
+		if admissionErr != nil {
+			e.failJob(ctx, job, fmt.Sprintf("storage admission check: %v", admissionErr))
+			return
+		}
+		if !decision.Allowed {
+			e.failJob(ctx, job, fmt.Sprintf("storage write protected: %s", decision.Reason))
+			return
+		}
+	}
 	if _, err := e.minio.PutObject(ctx, e.bucket, key,
 		bytes.NewReader(xml), int64(len(xml)),
 		minio.PutObjectOptions{ContentType: "application/octet-stream"}); err != nil {
@@ -367,4 +384,3 @@ func prettyXML(xml string) string {
 	}
 	return strings.TrimRight(result, "\n")
 }
-

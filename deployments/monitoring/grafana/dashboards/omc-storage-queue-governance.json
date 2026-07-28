@@ -1,0 +1,94 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "存储目标使用率",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {"expr": "omc_storage_used_ratio", "legendFormat": "{{target_type}}/{{target_id}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}}
+    },
+    {
+      "title": "MinIO 业务分类容量",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {"expr": "omc_minio_bucket_usage_bytes", "legendFormat": "{{category}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "bytes", "min": 0}}
+    },
+    {
+      "title": "NATS JetStream 积压",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {"expr": "omc_nats_consumer_pending", "legendFormat": "{{stream}}/{{durable}} pending"},
+        {"expr": "omc_nats_consumer_ack_pending", "legendFormat": "{{stream}}/{{durable}} ack pending"},
+        {"expr": "omc_nats_consumer_oldest_age_seconds", "legendFormat": "{{stream}}/{{durable}} oldest age"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}}
+    },
+    {
+      "title": "Redis cmdq/taskq 积压",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {"expr": "omc_redis_task_queue_length_total", "legendFormat": "{{queue_family}} length"},
+        {"expr": "omc_redis_task_queue_active_devices", "legendFormat": "{{queue_family}} active devices"},
+        {"expr": "omc_redis_task_queue_max_length", "legendFormat": "{{queue_family}} max length"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}}
+    },
+    {
+      "title": "Redis 最老任务年龄",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "targets": [
+        {"expr": "omc_redis_task_queue_oldest_age_seconds", "legendFormat": "{{queue_family}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s", "min": 0}}
+    },
+    {
+      "title": "PostgreSQL 持久化队列",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "targets": [
+        {"expr": "sum by (queue, status) (omc_persistent_queue_pending)", "legendFormat": "{{queue}}/{{status}}"},
+        {"expr": "omc_persistent_queue_dead_letter_total", "legendFormat": "{{queue}} dead letter"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}}
+    },
+    {
+      "title": "持久化队列最老任务",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+      "targets": [
+        {"expr": "omc_persistent_queue_oldest_age_seconds", "legendFormat": "{{queue}}/{{status}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s", "min": 0}}
+    },
+    {
+      "title": "写入保护状态",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+      "targets": [
+        {"expr": "omc_storage_admission_state", "legendFormat": "{{target_id}} state"},
+        {"expr": "increase(omc_storage_write_rejected_total[5m])", "legendFormat": "{{target_id}} rejected/5m"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}}
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["omcgo", "storage", "queue", "governance"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "title": "OMC - 存储与队列治理",
+  "uid": "omc-storage-queue-governance"
+}

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/storage"
+	"github.com/omcgo/omcgo/internal/storageprotection"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"go.uber.org/zap"
 )
@@ -63,7 +65,8 @@ type Handler struct {
 	// 不做去重（等价于原有行为）。复用 internal/core/event.Deduper（Redis SETNX +
 	// TTL，fail-open），key 用 (device_sn, filename) 而不是 event ID——要拦的是
 	// "同一份文件被多次上传"，此时还没有 event，天然不能用 event ID 去重。
-	pmDedup *event.Deduper
+	pmDedup          *event.Deduper
+	storageAdmission storageprotection.WriteAdmission
 }
 
 // NewHandler creates a new upload Handler.
@@ -97,6 +100,10 @@ func (h *Handler) SetRuntimeProvider(provider transfercfg.Provider) {
 // SetBackpressureGate 注入 PM 上传背压门闸（#318）。nil-safe：未注入时不做背压。
 func (h *Handler) SetBackpressureGate(gate BackpressureGate) {
 	h.backpressure = gate
+}
+
+func (h *Handler) SetStorageAdmission(admission storageprotection.WriteAdmission) {
+	h.storageAdmission = admission
 }
 
 // SetPMUploadDedup 注入 PM 上传去重器。nil-safe：未注入时不做去重（原有行为）。
@@ -439,6 +446,31 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		body = bytes.NewReader(buffered)
 		contentLength = int64(len(buffered))
+	}
+
+	if h.storageAdmission != nil {
+		scope := storageprotection.WriteScopeUpload
+		switch ft {
+		case tr069.FileTypePM:
+			scope = storageprotection.WriteScopePM
+		case tr069.FileTypeMR:
+			scope = storageprotection.WriteScopeMR
+		case tr069.FileTypeConfig:
+			scope = storageprotection.WriteScopeBackup
+		}
+		decision, admissionErr := h.storageAdmission.Check(ctx, storageprotection.TargetMinIO, "minio-data", scope)
+		if admissionErr != nil {
+			h.logger.Error("storage write admission check failed", zap.Error(admissionErr), zap.String("scope", string(scope)))
+			http.Error(w, "storage admission unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if !decision.Allowed {
+			if decision.RetryAfter > 0 {
+				w.Header().Set("Retry-After", strconv.Itoa(int(decision.RetryAfter.Seconds())))
+			}
+			http.Error(w, "storage write protected", http.StatusInsufficientStorage)
+			return
+		}
 	}
 
 	startUpload := time.Now()

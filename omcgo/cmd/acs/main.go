@@ -32,6 +32,7 @@ import (
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/paramsync"
 	"github.com/omcgo/omcgo/internal/product"
+	"github.com/omcgo/omcgo/internal/storageprotection"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/trace"
 	"github.com/spf13/cobra"
@@ -103,6 +104,25 @@ func runACS(cmd *cobra.Command, args []string) error {
 		taskService.SetEventBus(inf.EventBus)
 	}
 	inf.Logger.Info("task service initialized")
+
+	// ACS owns the CPE upload write path, so it must perform the same storage
+	// admission check as the app/worker processes before MinIO PutObject.
+	prometheusURL := os.Getenv("OMCGO_SYSTEM_INFO_PROMETHEUS_URL")
+	if prometheusURL == "" {
+		prometheusURL = "http://prometheus:9090"
+	}
+	storageCollector := components.NewPrometheusStorageCollector(prometheusURL, 2*time.Second, time.Minute, nil)
+	storageAdmission := storageprotection.NewService(
+		storageprotection.NewPgRepository(inf.PgPool),
+		storageprotection.NewCollectorUsageProvider(storageCollector),
+		storageprotection.NewMetrics(inf.MetricsReg),
+		inf.Logger,
+	)
+	storageAdmission.Start(context.Background(), 30*time.Second)
+	inf.GS.Register("storage-protection", 1, func(context.Context) error {
+		storageAdmission.Stop()
+		return nil
+	})
 
 	// 日志轮转可配 watcher：让 acs 自身日志文件（acs.log / protocol.log）的大小/间隔/个数/过期可在
 	// 系统配置页里调（category=log.rotation，≤1 分钟生效）。与 app/worker 各自起一份管自己的日志。
@@ -249,6 +269,7 @@ func runACS(cmd *cobra.Command, args []string) error {
 			inf.EventBus, inf.Logger,
 		)
 		uploadHandler.SetRuntimeProvider(transferPolicy)
+		uploadHandler.SetStorageAdmission(storageAdmission)
 
 		// PM 上传去重：压测观测到 omc_pm_files_processed_total{status=duplicate}
 		// 占比约78%，CPE 网络抖动短时间内重复 PUT 同一份文件是主因。复用

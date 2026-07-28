@@ -736,6 +736,9 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- System log routes (require admin permission) -----
 	ad.logHandler.RegisterRoutes(adminGroup)
+	if c.StorageProtectionHandler != nil {
+		c.StorageProtectionHandler.RegisterRoutes(adminGroup)
+	}
 
 	// ----- Dead-letter queue admin routes (T-0012 / R-106) -----
 	// adminGroup already enforces RBAC users:admin; dead-letter handler nests

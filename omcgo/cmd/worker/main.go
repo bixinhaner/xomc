@@ -602,6 +602,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	if w.MinIO != nil && cfg.MinIO.Buckets.Exchange != "" {
 		traceExporter := trace.NewExporter(traceRepo, traceBulk, w.MinIO,
 			trace.DefaultExporterConfig(cfg.MinIO.Buckets.Exchange), logger)
+		traceExporter.SetStorageAdmission(w.StorageProtection)
 		if _, err := traceExporter.Subscribe(w.EventBus); err != nil {
 			logger.Warn("subscribe trace exporter", zap.Error(err))
 		} else {
@@ -622,6 +623,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 		w.MinIO, reportBucket,
 		w.EventBus, logger,
 	)
+	reportGenerator.SetStorageAdmission(w.StorageProtection)
 	if err := reportGenerator.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe report generator", zap.Error(err))
 	}

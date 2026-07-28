@@ -15,19 +15,25 @@ import (
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
+	"github.com/omcgo/omcgo/internal/storageprotection"
 )
 
 // ReportGenerator subscribes to report.generate.requested events and
 // produces JSON report files stored in MinIO.
 type ReportGenerator struct {
-	recordRepo RecordRepository
-	defRepo    DefinitionRepository
-	kpiRepo    kpi.KPIRepository
-	alarmStore alarm.AlarmStore
-	minioClient *minio.Client
-	reportBkt   string
-	eventBus    event.EventBus
-	logger      *zap.Logger
+	recordRepo       RecordRepository
+	defRepo          DefinitionRepository
+	kpiRepo          kpi.KPIRepository
+	alarmStore       alarm.AlarmStore
+	minioClient      *minio.Client
+	reportBkt        string
+	eventBus         event.EventBus
+	logger           *zap.Logger
+	storageAdmission storageprotection.WriteAdmission
+}
+
+func (g *ReportGenerator) SetStorageAdmission(admission storageprotection.WriteAdmission) {
+	g.storageAdmission = admission
 }
 
 // NewReportGenerator creates a new ReportGenerator.
@@ -106,14 +112,14 @@ func (g *ReportGenerator) handleGenerateRequest(ctx context.Context, evt event.E
 
 	// Build the full report JSON
 	reportJSON := map[string]interface{}{
-		"report_name":    record.ReportName,
-		"report_type":    def.ReportType,
-		"period":         record.Period,
-		"generated_at":   time.Now().UTC().Format(time.RFC3339),
-		"definition_id":  def.ID.String(),
-		"kpi_codes":      def.KPICodes,
-		"device_groups":  def.DeviceGroups,
-		"data":           reportData,
+		"report_name":   record.ReportName,
+		"report_type":   def.ReportType,
+		"period":        record.Period,
+		"generated_at":  time.Now().UTC().Format(time.RFC3339),
+		"definition_id": def.ID.String(),
+		"kpi_codes":     def.KPICodes,
+		"device_groups": def.DeviceGroups,
+		"data":          reportData,
 	}
 
 	jsonBytes, err := json.MarshalIndent(reportJSON, "", "  ")
@@ -127,6 +133,15 @@ func (g *ReportGenerator) handleGenerateRequest(ctx context.Context, evt event.E
 	// Upload to MinIO
 	objectPath := fmt.Sprintf("reports/%s/%s/%s.json", def.ID.String(), record.Period, record.ID.String())
 	reader := bytes.NewReader(jsonBytes)
+	if g.storageAdmission != nil {
+		decision, admissionErr := g.storageAdmission.Check(ctx, storageprotection.TargetMinIO, "minio-data", storageprotection.WriteScopeReport)
+		if admissionErr != nil {
+			return fmt.Errorf("storage admission check: %w", admissionErr)
+		}
+		if !decision.Allowed {
+			return fmt.Errorf("storage write protected: %s", decision.Reason)
+		}
+	}
 	_, err = g.minioClient.PutObject(ctx, g.reportBkt, objectPath, reader, int64(len(jsonBytes)),
 		minio.PutObjectOptions{ContentType: "application/json"})
 	if err != nil {

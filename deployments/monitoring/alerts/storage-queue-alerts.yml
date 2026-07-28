@@ -1,0 +1,126 @@
+# Storage and persistent-queue alert policy. Prometheus is the source of truth;
+# Grafana only renders these alert states and their history.
+groups:
+  - name: omc.queue_governance
+    interval: 30s
+    rules:
+      - alert: RedisTaskQueueBacklogHigh
+        expr: sum by (queue_family) (omc_redis_task_queue_length_total) > 1000
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: redis
+        annotations:
+          summary: "Redis {{ $labels.queue_family }} 队列积压超过 1000"
+          description: "Redis {{ $labels.queue_family }} 聚合积压已持续 10 分钟超过阈值；检查设备在线率、ACS 消费和单设备最大队列。"
+
+      - alert: RedisTaskQueueOldestAgeHigh
+        expr: max by (queue_family) (omc_redis_task_queue_oldest_age_seconds) > 900
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: redis
+        annotations:
+          summary: "Redis {{ $labels.queue_family }} 最老任务超过 15 分钟"
+          description: "Redis 队列最老任务年龄持续升高；检查 ACS worker、设备连接和 Redis 观测状态。"
+
+      - alert: RedisTaskQueueObserverUnavailable
+        expr: omc_redis_task_queue_up == 0
+        for: 5m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: redis
+        annotations:
+          summary: "Redis {{ $labels.queue_family }} 队列观测不可用"
+          description: "Redis 队列业务快照已停止更新，面板中的数值不能解释为空队列；检查 Redis 连接、SCAN 上限和观测失败计数。"
+
+      - alert: PersistentQueueBacklogHigh
+        expr: sum by (queue) (omc_persistent_queue_pending{status=~"pending|sent|running"}) > 1000
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: postgres
+        annotations:
+          summary: "PostgreSQL 持久化队列 {{ $labels.queue }} 积压超过 1000"
+          description: "固定队列积压持续超过阈值；检查对应 worker、数据库连接池和死信数量。"
+
+      - alert: PersistentQueueObserverUnavailable
+        expr: omc_persistent_queue_up == 0
+        for: 5m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: postgres
+        annotations:
+          summary: "PostgreSQL 持久化队列 {{ $labels.queue }} 观测不可用"
+          description: "数据库队列查询失败或超时；业务 gauge 保留上次值，不能按 0 处理。"
+
+      - alert: NATSConsumerBacklogHigh
+        expr: max by (stream, durable) (omc_nats_consumer_pending) > 1000
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: nats
+        annotations:
+          summary: "NATS {{ $labels.stream }}/{{ $labels.durable }} pending 超过 1000"
+          description: "JetStream consumer backlog 持续增长；检查订阅者、Ack 和 worker 消费速率。"
+
+      - alert: NATSConsumerObserverUnavailable
+        expr: omc_nats_consumer_up == 0
+        for: 5m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: nats
+        annotations:
+          summary: "NATS {{ $labels.stream }}/{{ $labels.durable }} 观测不可用"
+          description: "NATS backlog 的业务快照已过期；检查 JetStream API、连接和固定 consumer 配置。"
+
+      - alert: StorageCapacityWarning
+        expr: omc_storage_used_ratio > 0.8
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: storage
+        annotations:
+          summary: "存储目标 {{ $labels.target_id }} 使用率超过 80%"
+          description: "检查 MinIO、日志、上报文件和监控数据清理状态；必要时扩容。"
+
+      - alert: StorageCapacityCritical
+        expr: omc_storage_used_ratio > 0.9
+        for: 5m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: storage
+        annotations:
+          summary: "存储目标 {{ $labels.target_id }} 使用率超过 90%"
+          description: "达到默认阻断阈值；确认 OMC 写入保护状态和被拒绝写入计数。"
+
+      - alert: StorageWriteAdmissionBlocked
+        expr: omc_storage_admission_state == 1
+        for: 2m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: storage
+        annotations:
+          summary: "存储写入保护已阻断 {{ $labels.target_id }}"
+          description: "OMC 业务写入已被策略阻断；处理容量或等待策略恢复阈值生效。"
+
+      - alert: StorageWriteRejected
+        expr: increase(omc_storage_write_rejected_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: storage
+        annotations:
+          summary: "OMC 业务写入被拒绝"
+          description: "最近 5 分钟存在磁盘写入保护拒绝；按 write_scope 定位日志、上报文件或其它业务写入。"

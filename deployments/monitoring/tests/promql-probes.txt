@@ -66,6 +66,14 @@ Expected: Redis SCAN failures in the last five minutes. ZERO means successful ob
 pg_stat_database_numbackends
 Expected: active database backends. NO-DATA means the PostgreSQL receiver/remote-write path is unavailable; 0 is a real measured idle state.
 
+## PostgreSQL persistent queues (MUST-HAVE after the OMC observer starts)
+omc_persistent_queue_pending{queue=~"device_tasks|async_jobs|parameter_sync_outbox|northbound_outbox|pm_kpi_export|trace_export|backup_tasks|dead_letters"}
+Expected: fixed queue/status backlog. ZERO means a real empty queue; NO-DATA means the observer or database is unavailable.
+
+## PostgreSQL persistent queue observer failures (MUST-HAVE after the observer starts)
+increase(omc_persistent_queue_observer_failures_total{queue=~"device_tasks|async_jobs|parameter_sync_outbox|northbound_outbox|pm_kpi_export|trace_export|backup_tasks|dead_letters"}[5m])
+Expected: observation failures by fixed queue. ZERO means successful observation; NO-DATA means the observer metric is unavailable.
+
 ## PM durable queue (MUST-HAVE after Worker starts)
 omc_pm_queue_pending{subject="pm.file.received",durable="pm-workers"}
 Expected: PM consumer pending count. ZERO means Worker observed an empty durable queue; NO-DATA means sampling is unavailable and must remain visible as No data.

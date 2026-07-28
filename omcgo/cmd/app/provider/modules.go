@@ -58,6 +58,7 @@ import (
 	"github.com/omcgo/omcgo/internal/report"
 	"github.com/omcgo/omcgo/internal/software"
 	"github.com/omcgo/omcgo/internal/stationlog"
+	"github.com/omcgo/omcgo/internal/storageprotection"
 	"github.com/omcgo/omcgo/internal/syslog"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/topology"
@@ -834,7 +835,25 @@ func initTaskModule(c *Container) error {
 	logger := c.Logger.Named("task")
 
 	taskService := c.TaskSvc
-	taskService.SetMetrics(task.NewTaskMetrics(c.MetricsReg))
+	taskMetrics := task.NewTaskMetrics(c.MetricsReg)
+	taskService.SetMetrics(taskMetrics)
+	redisQueueObserver := task.NewRedisQueueObserver(c.Redis, taskMetrics, 30*time.Second, logger)
+	redisQueueObserver.Start(context.Background())
+	if c.GS != nil {
+		c.GS.Register("redis-task-queue-observer", 1, func(context.Context) error {
+			redisQueueObserver.Stop()
+			return nil
+		})
+	}
+	persistentQueueMetrics := components.NewPersistentQueueMetrics(c.MetricsReg)
+	persistentQueueObserver := components.NewPersistentQueueObserver(c.PgPool, persistentQueueMetrics, 30*time.Second, logger)
+	persistentQueueObserver.Start(context.Background())
+	if c.GS != nil {
+		c.GS.Register("persistent-queue-observer", 1, func(context.Context) error {
+			persistentQueueObserver.Stop()
+			return nil
+		})
+	}
 
 	// Wire Connection Request into TaskService
 	udpSender := connreq.NewUDPSender(c.StunStore, c.Cfg.ConnReq.SharedSecret, c.Logger)
@@ -1523,6 +1542,29 @@ func initInteropModule(c *Container) error {
 // initMiscModules 初始化其余小型模块。
 func initMiscModules(c *Container) error {
 	logger := c.Logger
+	if c.StorageProtection == nil {
+		prometheusURL := os.Getenv("OMCGO_SYSTEM_INFO_PROMETHEUS_URL")
+		if prometheusURL == "" {
+			prometheusURL = "http://prometheus:9090"
+		}
+		storageCollector := components.NewPrometheusStorageCollector(prometheusURL, 2*time.Second, time.Minute, nil)
+		storageProtection := storageprotection.NewService(
+			storageprotection.NewPgRepository(c.PgPool),
+			storageprotection.NewCollectorUsageProvider(storageCollector),
+			storageprotection.NewMetrics(c.MetricsReg),
+			logger,
+		)
+		storageProtection.Start(context.Background(), 30*time.Second)
+		c.StorageCollector = storageCollector
+		c.StorageProtection = storageProtection
+		c.StorageProtectionHandler = storageprotection.NewHandler(storageProtection)
+		if c.GS != nil {
+			c.GS.Register("storage-protection", 1, func(context.Context) error {
+				storageProtection.Stop()
+				return nil
+			})
+		}
+	}
 
 	// Syslog module
 	syslogRepo := syslog.NewPgSyslogRepository(c.PgPool)
@@ -1546,6 +1588,7 @@ func initMiscModules(c *Container) error {
 	// File Manager module
 	fileRepo := filemanager.NewPgFileRepository(c.PgPool)
 	fileService := filemanager.NewFileService(fileRepo, c.MinIO, c.Cfg.MinIO.Buckets.ConfigBackup, c.TaskSvc, logger)
+	fileService.SetStorageAdmission(c.StorageProtection)
 	c.miscDeps.fileHandler = filemanager.NewHandler(fileService, logger)
 	logger.Info("file manager module initialized")
 
@@ -2411,13 +2454,9 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 
 	// System Info endpoint
 	c.miscDeps.sysInfoHandler = components.NewSystemInfoHandler(c.PgPool, c.Redis, logger)
-	prometheusURL := os.Getenv("OMCGO_SYSTEM_INFO_PROMETHEUS_URL")
-	if prometheusURL == "" {
-		prometheusURL = "http://prometheus:9090"
+	if c.StorageCollector != nil {
+		c.miscDeps.sysInfoHandler.SetStorageCollector(c.StorageCollector)
 	}
-	c.miscDeps.sysInfoHandler.SetStorageCollector(
-		components.NewPrometheusStorageCollector(prometheusURL, 2*time.Second, time.Minute, nil),
-	)
 
 	// PM threshold
 	c.miscDeps.thresholdRepo = pm.NewPgThresholdRepository(c.PgPool)

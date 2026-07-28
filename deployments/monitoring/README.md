@@ -17,7 +17,8 @@ deployments/monitoring/
 │   ├── omc-rules.yml             # starter 告警规则（三进程存活）
 │   ├── connection-pool-alerts.yml
 │   ├── infra-alerts.yml          # pg/redis/nats/minio 基础服务（T-0155 P2b 改写）
-│   └── otelcol-alerts.yml        # otelcol 自身管道健康（T-0155 收尾）
+│   ├── otelcol-alerts.yml        # otelcol 自身管道健康（T-0155 收尾）
+│   └── storage-queue-alerts.yml  # 存储与 Redis/NATS/PG 队列治理
 ├── loki/
 │   └── loki-config.yml           # Loki 单节点 filesystem 存储 + 7d retention
 ├── promtail/                      # 旧 Promtail 配置（T-0155 P3 后已下线，保留作历史参考）
@@ -42,7 +43,8 @@ deployments/monitoring/
 │   │   │   └── tempo.yml         # 自动注册 Tempo 数据源 + trace-to-logs 跳 Loki
 │   │   └── dashboards/default.yml
 │   └── dashboards/
-│       └── omc-overview.json
+│       ├── omc-overview.json
+│       └── omc-storage-queue-governance.json
 ├── grafana-dashboard.json        # 历史 dashboard 原件
 └── README.md                     # 本文件
 ```
@@ -216,6 +218,21 @@ Prometheus 仍从 node-exporter 的 `mountpoint`、容量和 inode 指标，以�
 cluster endpoint 获取实测值。目标未配置、采集失败或样本过期时，Grafana 必须显示
 No data / unavailable，不能用 `0` 代替。部署到非默认 Docker data root 时，应同时
 更新 `storage-targets.yml` 的 `mountpoint`，再由 OMC 写入保护模块读取同一映射。
+
+## 队列治理观测
+
+OMC 业务观测器在 app/worker 启动时分别采集 Redis 和 PostgreSQL 持久化队列：
+
+- Redis 使用 `SCAN`，固定 `queue_family=cmdq|taskq`，输出总长度、活动设备数、最大队列长度、最老任务年龄、扫描耗时和失败状态；设备 SN 只用于内部查询，不进入指标标签。
+- PostgreSQL 使用固定 SQL 采集 `device_tasks`、`async_jobs`、parameter-sync/northbound outbox、PM 导出、Trace 导出、备份任务和 dead letters；查询失败保留上次业务快照，并将 `*_up=0`、失败计数递增。
+- Grafana 总览为 `OMC - 存储与队列治理`（UID `omc-storage-queue-governance`）；应用内 Go Channel、worker 内存切片、SSE 缓存等不纳入队列积压指标。
+
+新增 dashboard 或队列指标后，先执行：
+
+```bash
+deployments/monitoring/tests/validate-dashboards.sh
+jq empty deployments/monitoring/grafana/dashboards/*.json
+```
 
 ## 加新告警规则
 

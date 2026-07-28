@@ -181,6 +181,24 @@ type TaskMetrics struct {
 	//   - "reconcile_repair" Reconciler 把 PG 滞后态同步到 Redis 终态
 	// 让"系统自愈了多少次"可观测——平时应为 0/低频，突增说明上游有故障在被兜底掩盖。
 	RecoveryActionTotal *prometheus.CounterVec
+
+	// RedisPGDiff 是最近一次 Redis↔PostgreSQL 对账发现的任务分叉数量。
+	RedisPGDiff prometheus.Gauge
+
+	// QueueWriteFailuresTotal 是持久化队列双写失败的统一指标。DualWriteFailTotal
+	// 保留兼容现有告警和看板，两个指标在同一失败点递增。
+	QueueWriteFailuresTotal *prometheus.CounterVec
+
+	// Redis 队列聚合观测指标。queue_family 只允许 cmdq/taskq，禁止设备 SN、完整
+	// Redis key 等高基数标签。
+	RedisTaskQueueLengthTotal       *prometheus.GaugeVec
+	RedisTaskQueueActiveDevices     *prometheus.GaugeVec
+	RedisTaskQueueMaxLength         *prometheus.GaugeVec
+	RedisTaskQueueOldestAgeSeconds  *prometheus.GaugeVec
+	RedisTaskQueueScanDuration      *prometheus.GaugeVec
+	RedisTaskQueueScanFailuresTotal *prometheus.CounterVec
+	RedisTaskQueueUp                *prometheus.GaugeVec
+	RedisTaskQueueSampleTimestamp   *prometheus.GaugeVec
 }
 
 // NewTaskMetrics creates and registers task metrics.
@@ -224,9 +242,58 @@ func NewTaskMetrics(reg prometheus.Registerer) *TaskMetrics {
 			Help: "Tasks detected stale (PG active vs Redis terminal divergence), counted at detection regardless of repair outcome.",
 		}),
 		RecoveryActionTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "omc_tasks_recovery_action_total",
+			Name: "omc_task_queue_recovery_action_total",
 			Help: "Self-healing recovery actions executed, by action (restore_pending/reconcile_repair).",
 		}, []string{"action"}),
+		RedisPGDiff: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "omc_task_queue_redis_pg_diff",
+			Help: "Number of task state divergences observed during the latest Redis to PostgreSQL reconciliation round.",
+		}),
+		QueueWriteFailuresTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_task_queue_write_failures_total",
+			Help: "Persistent task queue dual-write failures by operation.",
+		}, []string{"operation"}),
+		RedisTaskQueueLengthTotal: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_redis_task_queue_length_total",
+			Help: "Total number of entries in Redis task queues by bounded queue family.",
+		}, []string{"queue_family"}),
+		RedisTaskQueueActiveDevices: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_redis_task_queue_active_devices",
+			Help: "Number of non-empty Redis device queues by bounded queue family.",
+		}, []string{"queue_family"}),
+		RedisTaskQueueMaxLength: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_redis_task_queue_max_length",
+			Help: "Largest Redis device queue length observed by bounded queue family.",
+		}, []string{"queue_family"}),
+		RedisTaskQueueOldestAgeSeconds: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_redis_task_queue_oldest_age_seconds",
+			Help: "Age in seconds of the oldest Redis task with a readable task detail, by queue family.",
+		}, []string{"queue_family"}),
+		RedisTaskQueueScanDuration: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_redis_task_queue_scan_duration_seconds",
+			Help: "Duration of the latest Redis queue SCAN by bounded queue family.",
+		}, []string{"queue_family"}),
+		RedisTaskQueueScanFailuresTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_redis_task_queue_scan_failures_total",
+			Help: "Redis queue observation failures by bounded queue family.",
+		}, []string{"queue_family"}),
+		RedisTaskQueueUp: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_redis_task_queue_up",
+			Help: "Whether the latest Redis queue observation succeeded, by bounded queue family.",
+		}, []string{"queue_family"}),
+		RedisTaskQueueSampleTimestamp: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_redis_task_queue_sample_timestamp_seconds",
+			Help: "Unix timestamp of the latest Redis queue observation, by bounded queue family.",
+		}, []string{"queue_family"}),
+	}
+	for _, family := range []string{redisQueueFamilyCommand, redisQueueFamilyTask} {
+		m.RedisTaskQueueLengthTotal.WithLabelValues(family).Set(0)
+		m.RedisTaskQueueActiveDevices.WithLabelValues(family).Set(0)
+		m.RedisTaskQueueMaxLength.WithLabelValues(family).Set(0)
+		m.RedisTaskQueueOldestAgeSeconds.WithLabelValues(family).Set(0)
+		m.RedisTaskQueueScanDuration.WithLabelValues(family).Set(0)
+		m.RedisTaskQueueUp.WithLabelValues(family).Set(0)
+		m.RedisTaskQueueSampleTimestamp.WithLabelValues(family).Set(0)
 	}
 
 	reg.MustRegister(
@@ -240,6 +307,16 @@ func NewTaskMetrics(reg prometheus.Registerer) *TaskMetrics {
 		m.BacklogTotal,
 		m.StaleDetectedTotal,
 		m.RecoveryActionTotal,
+		m.RedisPGDiff,
+		m.QueueWriteFailuresTotal,
+		m.RedisTaskQueueLengthTotal,
+		m.RedisTaskQueueActiveDevices,
+		m.RedisTaskQueueMaxLength,
+		m.RedisTaskQueueOldestAgeSeconds,
+		m.RedisTaskQueueScanDuration,
+		m.RedisTaskQueueScanFailuresTotal,
+		m.RedisTaskQueueUp,
+		m.RedisTaskQueueSampleTimestamp,
 	)
 	return m
 }
