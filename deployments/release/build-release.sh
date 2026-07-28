@@ -38,7 +38,9 @@ source "$SCRIPT_DIR/release.conf"
 log()  { echo -e "\033[1;32m[release]\033[0m $*"; }
 warn() { echo -e "\033[1;33m[release][警告]\033[0m $*" >&2; }
 die()  { echo -e "\033[1;31m[release][错误]\033[0m $*" >&2; exit 1; }
-iso_time() { date -u '+%Y-%m-%dT%H:%M:%SZ'; }
+# 使用构建机当地时间，并保留时区偏移（例如 +08:00），避免与版本目录中的
+# 本地时间戳（YYYYMMDD-HHMM）相差数小时。
+iso_time() { date -Is; }
 
 # ── 参数解析 ────────────────────────────────────────────────────────────
 VERSION=""
