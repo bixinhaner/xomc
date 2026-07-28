@@ -6,15 +6,16 @@
  *   - 不传/false 时仍渲染「设备类型」下拉（向后兼容 KPIQuery 可切换行为）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App } from 'antd';
 
 // 捕获 useIndicatorList / useAllIndicators 收到的参数。
-const { useIndicatorListSpy, useAllIndicatorsSpy, indicatorListData, allIndicatorsData } = vi.hoisted(() => ({
+const { useIndicatorListSpy, useAllIndicatorsSpy, indicatorListData, allIndicatorsData, enabledIndicatorsData } = vi.hoisted(() => ({
   useIndicatorListSpy: vi.fn(),
   useAllIndicatorsSpy: vi.fn(),
   indicatorListData: { items: [] as unknown[], total: 0 },
   allIndicatorsData: { items: [] as unknown[], total: 0 },
+  enabledIndicatorsData: { items: [] as unknown[], total: 0 },
 }));
 
 vi.mock('@core/hooks/api/useIndicatorsLibrary', () => {
@@ -22,14 +23,15 @@ vi.mock('@core/hooks/api/useIndicatorsLibrary', () => {
   // rerender 时把它放大成无限渲染（生产用真 React Query 数据稳定，不触发）。
   const STABLE = { data: indicatorListData, isLoading: false };
   const ALL_STABLE = { data: allIndicatorsData, isLoading: false };
+  const ENABLED_STABLE = { data: enabledIndicatorsData, isLoading: false };
   return {
     useIndicatorList: (deviceType: unknown, params: unknown) => {
       useIndicatorListSpy(deviceType, params);
       return STABLE;
     },
-    useAllIndicators: (deviceType: unknown, options: unknown) => {
+    useAllIndicators: (deviceType: unknown, options: { isEnabled?: boolean } | undefined) => {
       useAllIndicatorsSpy(deviceType, options);
-      return ALL_STABLE;
+      return options?.isEnabled ? ENABLED_STABLE : ALL_STABLE;
     },
   };
 });
@@ -61,6 +63,8 @@ describe('MetricPickerModal 制式锁定', () => {
     indicatorListData.total = 0;
     allIndicatorsData.items = [];
     allIndicatorsData.total = 0;
+    enabledIndicatorsData.items = [];
+    enabledIndicatorsData.total = 0;
   });
 
   it('lockDeviceType=true 时隐藏「设备类型」下拉，按 initialDeviceType 锁死取数', () => {
@@ -104,6 +108,8 @@ describe('MetricPickerModal 已选回显', () => {
     indicatorListData.total = 0;
     allIndicatorsData.items = [];
     allIndicatorsData.total = 0;
+    enabledIndicatorsData.items = [];
+    enabledIndicatorsData.total = 0;
   });
 
   // 回归：与制式同款「组件常驻不卸载」问题——内部 selected 仅首挂载赋值一次。
@@ -133,6 +139,198 @@ describe('MetricPickerModal 已选回显', () => {
     expect(screen.getByText('C000030170')).toBeTruthy();
     expect(screen.queryByText('C000080007')).toBeNull();
   });
+
+  it('直接勾选当前表格指标后，「已选指标」显示 ID 和名称', () => {
+    indicatorListData.items = [
+      {
+        id: 'K900010002',
+        name: 'availability',
+        cnName: '可用率',
+        enName: 'Availability',
+        isCounter: false,
+        deviceType: 'ENB',
+      },
+    ];
+    indicatorListData.total = 1;
+
+    renderModal();
+
+    fireEvent.click(screen.getAllByRole('checkbox')[1]);
+
+    expect(screen.getByLabelText('K900010002 可用率')).toBeTruthy();
+  });
+
+  it('搜索后勾选指标，「已选指标」显示 ID 和名称', () => {
+    indicatorListData.items = [
+      {
+        id: 'K900010021',
+        name: 'handoverSuccess',
+        cnName: 'eNB间切换成功率-切出',
+        enName: 'Handover Success',
+        isCounter: false,
+        deviceType: 'ENB',
+      },
+    ];
+    indicatorListData.total = 1;
+
+    renderModal();
+
+    fireEvent.change(screen.getByPlaceholderText('按指标路径 / 中文名 搜索'), {
+      target: { value: 'K900010021' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /搜\s*索/ }));
+    fireEvent.click(screen.getAllByRole('checkbox')[1]);
+
+    expect(useIndicatorListSpy.mock.calls.at(-1)?.[1]).toMatchObject({
+      keyword: 'K900010021',
+      page: 1,
+    });
+    expect(screen.getByLabelText('K900010021 eNB间切换成功率-切出')).toBeTruthy();
+  });
+
+  it('模板回填的预选指标带 initialLabels 时，「已选指标」显示 ID 和名称', () => {
+    renderModal({
+      initialSelected: ['K-1'],
+      initialLabels: {
+        'K-1': '小区可用率',
+      },
+    });
+
+    expect(screen.getByLabelText('K-1 小区可用率')).toBeTruthy();
+  });
+
+  it('预选指标没有 initialLabels 时，用全量指标表异步补齐「已选指标」名称', async () => {
+    const onConfirm = vi.fn();
+    const props: React.ComponentProps<typeof MetricPickerModal> = {
+      open: true,
+      onClose: () => {},
+      onConfirm,
+      initialSelected: ['K-ASYNC'],
+      enableBatchInput: true,
+    };
+    const { rerender } = render(wrapIntl(<MetricPickerModal {...props} />));
+
+    expect(screen.getByText('K-ASYNC')).toBeTruthy();
+    expect(screen.queryByLabelText('K-ASYNC 全量回填指标')).toBeNull();
+
+    allIndicatorsData.items = [
+      {
+        id: 'K-ASYNC',
+        name: 'async_metric',
+        cnName: '全量回填指标',
+        enName: 'Async Metric',
+        isCounter: false,
+        deviceType: 'ENB',
+      },
+    ];
+    allIndicatorsData.total = 1;
+    rerender(wrapIntl(<MetricPickerModal {...props} />));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('K-ASYNC 全量回填指标')).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
+    expect(onConfirm).toHaveBeenCalledWith(
+      ['K-ASYNC'],
+      expect.objectContaining({ 'K-ASYNC': '全量回填指标' }),
+    );
+  });
+
+  it('同一批预选指标关闭后重开，仍用全量指标表补齐「已选指标」名称', async () => {
+    const selected = ['K-REOPEN'];
+    allIndicatorsData.items = [
+      {
+        id: 'K-REOPEN',
+        name: 'reopen_metric',
+        cnName: '重开回填指标',
+        enName: 'Reopen Metric',
+        isCounter: false,
+        deviceType: 'ENB',
+      },
+    ];
+    allIndicatorsData.total = 1;
+
+    const props: React.ComponentProps<typeof MetricPickerModal> = {
+      open: true,
+      onClose: () => {},
+      onConfirm: () => {},
+      initialSelected: selected,
+      enableBatchInput: true,
+    };
+    const { rerender } = render(wrapIntl(<MetricPickerModal {...props} />));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('K-REOPEN 重开回填指标')).toBeTruthy();
+    });
+
+    rerender(wrapIntl(<MetricPickerModal {...props} open={false} />));
+    rerender(wrapIntl(<MetricPickerModal {...props} open />));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('K-REOPEN 重开回填指标')).toBeTruthy();
+    });
+  });
+
+  it('仅启用指标列表缺少预选指标时，仍用整库指标表补齐「已选指标」名称', async () => {
+    enabledIndicatorsData.items = [
+      {
+        id: 'K-ENABLED',
+        name: 'enabled_metric',
+        cnName: '启用指标',
+        enName: 'Enabled Metric',
+        isCounter: false,
+        deviceType: 'ENB',
+      },
+    ];
+    enabledIndicatorsData.total = 1;
+    allIndicatorsData.items = [
+      {
+        id: 'C-FULL-LABEL',
+        name: 'full_label_metric',
+        cnName: '整库回填指标',
+        enName: 'Full Label Metric',
+        isCounter: true,
+        deviceType: 'ENB',
+      },
+    ];
+    allIndicatorsData.total = 1;
+
+    renderModal({
+      initialSelected: ['C-FULL-LABEL'],
+      enableBatchInput: true,
+      onlyEnabledIndicators: true,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('C-FULL-LABEL 整库回填指标')).toBeTruthy();
+    });
+  });
+
+  it('超过 10 个已选指标时，已选列表仍显示 ID 和名称', async () => {
+    const selected = Array.from({ length: 11 }, (_, i) => `K-${i + 1}`);
+    const initialLabels = Object.fromEntries(
+      selected.map((id, i) => [id, `指标${i + 1}`]),
+    );
+    renderModal({ initialSelected: selected, initialLabels });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('K-1 指标1')).toBeTruthy();
+      expect(screen.getByLabelText('K-11 指标11')).toBeTruthy();
+    });
+  });
+
+  it('名称缺失或等于 ID 时，「已选指标」只显示 ID', () => {
+    renderModal({
+      initialSelected: ['K-NO-LABEL', 'K-SAME-LABEL'],
+      initialLabels: {
+        'K-SAME-LABEL': 'K-SAME-LABEL',
+      },
+    });
+
+    expect(screen.getByText('K-NO-LABEL')).toBeTruthy();
+    expect(screen.getByText('K-SAME-LABEL')).toBeTruthy();
+    expect(screen.queryByText('K-SAME-LABEL K-SAME-LABEL')).toBeNull();
+  });
 });
 
 describe('MetricPickerModal 搜索状态', () => {
@@ -143,6 +341,8 @@ describe('MetricPickerModal 搜索状态', () => {
     indicatorListData.total = 0;
     allIndicatorsData.items = [];
     allIndicatorsData.total = 0;
+    enabledIndicatorsData.items = [];
+    enabledIndicatorsData.total = 0;
   });
 
   it('关闭后重开会清空上次搜索词并回到第一页', () => {
@@ -183,6 +383,8 @@ describe('MetricPickerModal 选择数量限制', () => {
     indicatorListData.total = 0;
     allIndicatorsData.items = [];
     allIndicatorsData.total = 0;
+    enabledIndicatorsData.items = [];
+    enabledIndicatorsData.total = 0;
   });
 
   it('默认不限制选择数量，由复用页面自行决定上限', () => {
@@ -242,6 +444,8 @@ describe('MetricPickerModal 批量输入指标 ID', () => {
       },
     ];
     allIndicatorsData.total = 2;
+    enabledIndicatorsData.items = [...allIndicatorsData.items];
+    enabledIndicatorsData.total = allIndicatorsData.total;
   });
 
   it('默认不显示批量输入入口，由调用页显式开启', () => {
@@ -256,10 +460,14 @@ describe('MetricPickerModal 批量输入指标 ID', () => {
     expect(useIndicatorListSpy.mock.calls.at(-1)?.[1]).toMatchObject({
       isEnabled: true,
     });
-    expect(useAllIndicatorsSpy.mock.calls.at(-1)?.[1]).toMatchObject({
-      enabled: true,
-      isEnabled: true,
-    });
+    expect(useAllIndicatorsSpy.mock.calls.some((call) => {
+      const options = call[1] as { enabled?: boolean; isEnabled?: boolean };
+      return options.enabled === true && options.isEnabled === true;
+    })).toBe(true);
+    expect(useAllIndicatorsSpy.mock.calls.some((call) => {
+      const options = call[1] as { enabled?: boolean; isEnabled?: boolean };
+      return options.enabled === true && options.isEnabled === undefined;
+    })).toBe(true);
   });
 
   it('只把全量真实指标库里存在的 ID 加入已选，并忽略不存在 ID', async () => {
@@ -285,7 +493,7 @@ describe('MetricPickerModal 批量输入指标 ID', () => {
 
   it('enabled-only 模式下，批量输入只允许加入已启用候选里的 ID', async () => {
     const onConfirm = vi.fn();
-    allIndicatorsData.items = [
+    enabledIndicatorsData.items = [
       {
         id: 'K900010002',
         name: 'availability',
@@ -295,7 +503,19 @@ describe('MetricPickerModal 批量输入指标 ID', () => {
         deviceType: 'ENB',
       },
     ];
-    allIndicatorsData.total = 1;
+    enabledIndicatorsData.total = 1;
+    allIndicatorsData.items = [
+      ...enabledIndicatorsData.items,
+      {
+        id: 'C000060011',
+        name: 'rrc_att',
+        cnName: 'RRC请求次数',
+        enName: 'RRC Attempts',
+        isCounter: true,
+        deviceType: 'ENB',
+      },
+    ];
+    allIndicatorsData.total = 2;
 
     renderModal({ onConfirm, enableBatchInput: true, onlyEnabledIndicators: true });
 
@@ -311,6 +531,35 @@ describe('MetricPickerModal 批量输入指标 ID', () => {
       ['K900010002'],
       expect.objectContaining({ K900010002: '可用率' }),
     );
+  });
+
+  it('enabled-only 模式下，整库名称兜底不让不可选指标被确认提交', () => {
+    const onConfirm = vi.fn();
+    enabledIndicatorsData.items = [];
+    enabledIndicatorsData.total = 0;
+    allIndicatorsData.items = [
+      {
+        id: 'DISABLED_METRIC',
+        name: 'disabled_metric',
+        cnName: '不可选指标',
+        enName: 'Disabled Metric',
+        isCounter: false,
+        deviceType: 'ENB',
+      },
+    ];
+    allIndicatorsData.total = 1;
+
+    renderModal({
+      initialSelected: ['DISABLED_METRIC'],
+      enableBatchInput: true,
+      onlyEnabledIndicators: true,
+      onConfirm,
+    });
+
+    expect(screen.getByLabelText('DISABLED_METRIC 不可选指标')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
+
+    expect(onConfirm).not.toHaveBeenCalled();
   });
 
   it('enabled-only 模式下，已有不可选指标不会被确认提交', () => {
@@ -376,6 +625,8 @@ describe('MetricPickerModal 指标级别列', () => {
     indicatorListData.total = 1;
     allIndicatorsData.items = [];
     allIndicatorsData.total = 0;
+    enabledIndicatorsData.items = [];
+    enabledIndicatorsData.total = 0;
   });
 
   it('ENB/GSM 指标选择列表显示“指标级别”列并把 both 显示为“设备级 / PLMN级”', () => {

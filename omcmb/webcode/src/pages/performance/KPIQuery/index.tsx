@@ -117,6 +117,10 @@ const DEFAULT_PAYLOAD: QueryTemplatePayload = {
 
 const DEFAULT_PIVOT_PAGE_SIZE = 50;
 
+function formatMetricDisplay(id: string, label?: string): string {
+  return label && label !== id ? `${id} ${label}` : id;
+}
+
 const createDefaultTemplatePayload = (): QueryTemplatePayload => ({
   ...DEFAULT_PAYLOAD,
   deviceSns: [...DEFAULT_PAYLOAD.deviceSns],
@@ -574,7 +578,7 @@ export default function KPIQuery() {
     }
   };
 
-  // 「已选 N 个」摘要：KPI 用友好名（metricLabels）替代编号显示。
+  // 「已选 N 个」摘要：统一显示指标 ID + 友好名，查询参数仍只使用 ID。
   const metricSummary = (paths: string[], head: number): string =>
     paths.length === 0
       ? ''
@@ -582,9 +586,18 @@ export default function KPIQuery() {
           count: paths.length,
           items: paths
             .slice(0, head)
-            .map((p) => metricLabels[p] ?? p)
+            .map((p) => formatMetricDisplay(p, metricLabels[p]))
             .join(', ') + (paths.length > head ? ' ...' : ''),
         });
+
+  const metricSummaryTooltip = (paths: string[]) =>
+    paths.length === 0 ? undefined : (
+      <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+        {paths.map((path, index) => (
+          <div key={path}>{index + 1}. {formatMetricDisplay(path, metricLabels[path])}</div>
+        ))}
+      </div>
+    );
 
   // ── 渲染辅助 ─────────────────────────────────────────────────────
   const renderTemplateItem = (tpl: QueryTemplate) => {
@@ -883,11 +896,17 @@ export default function KPIQuery() {
 
                 <Form.Item label={t('perf.kpiQuery.metric')} style={{ marginBottom: 0 }}>
                   <Space.Compact style={{ width: 360 }}>
-                    <Input
-                      readOnly
-                      value={metricSummary(payload.metricPaths, 2)}
-                      placeholder={t('perf.kpiQuery.selectMetricPlaceholder')}
-                    />
+                    <Tooltip
+                      title={metricSummaryTooltip(payload.metricPaths)}
+                      placement="topLeft"
+                      overlayStyle={{ maxWidth: 520 }}
+                    >
+                      <Input
+                        readOnly
+                        value={metricSummary(payload.metricPaths, 2)}
+                        placeholder={t('perf.kpiQuery.selectMetricPlaceholder')}
+                      />
+                    </Tooltip>
                     <Button
                       disabled={!hasAvailableDeviceTypes}
                       onClick={() => { setPickerTarget('main'); setMetricPickerOpen(true); }}
@@ -1089,6 +1108,7 @@ export default function KPIQuery() {
             }
           }}
           initialSelected={pickerTarget === 'modal' ? saveForm.payload.metricPaths : payload.metricPaths}
+          initialLabels={metricLabels}
           initialDeviceType={
             (pickerTarget === 'modal' ? saveForm.payload.deviceType : payload.deviceType) ?? 'ENB'
           }
@@ -1233,11 +1253,17 @@ export default function KPIQuery() {
 
             <Form.Item label={t('perf.kpiQuery.metric')} style={{ marginBottom: 0 }}>
               <Space.Compact style={{ width: '100%' }}>
-                <Input
-                  readOnly
-                  value={metricSummary(saveForm.payload.metricPaths, 3)}
-                  placeholder={t('perf.kpiQuery.selectMetricPlaceholder')}
-                />
+                <Tooltip
+                  title={metricSummaryTooltip(saveForm.payload.metricPaths)}
+                  placement="topLeft"
+                  overlayStyle={{ maxWidth: 520 }}
+                >
+                  <Input
+                    readOnly
+                    value={metricSummary(saveForm.payload.metricPaths, 3)}
+                    placeholder={t('perf.kpiQuery.selectMetricPlaceholder')}
+                  />
+                </Tooltip>
                 <Button
                   onClick={() => {
                     setPickerTarget('modal');
