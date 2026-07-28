@@ -1,0 +1,63 @@
+# Resource, queue, and storage-protection PromQL probes
+#
+# Run a probe through Prometheus first, for example:
+# curl -sG http://localhost:9090/api/v1/query --data-urlencode 'query=<PROMQL>' | jq
+#
+# Semantics:
+# - MUST-HAVE: after the named exporter/service is running, the query must return
+#   at least one series. An empty result is a collection/configuration failure.
+# - NO-DATA: the panel must visibly show "No data". It must not render an empty
+#   result as 0, because that hides unavailable telemetry or an unavailable service.
+# - ZERO: a returned sample with value 0 is a real measured empty/clear state.
+
+## Host CPU (MUST-HAVE: node_exporter)
+100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+Expected: CPU utilization percent. NO-DATA means node_exporter is unavailable; 0 is valid idle host.
+
+## Host memory (MUST-HAVE: node_exporter)
+1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)
+Expected: host memory utilization ratio. NO-DATA means node_exporter is unavailable; 0 is valid.
+
+## Host filesystem (MUST-HAVE: node_exporter)
+1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"})
+Expected: persistent filesystem utilization ratio. NO-DATA means the filesystem/node exporter is unavailable; 0 is valid free usage.
+
+## cAdvisor container CPU (MUST-HAVE when containers are running)
+sum by (name) (rate(container_cpu_usage_seconds_total{name!=""}[5m]))
+Expected: per-container CPU cores used. NO-DATA means cAdvisor/container discovery is unavailable; 0 is valid idle container.
+
+## cAdvisor container memory (MUST-HAVE when containers are running)
+sum by (name) (container_memory_working_set_bytes{name!=""})
+Expected: per-container working set bytes. NO-DATA means cAdvisor/container discovery is unavailable; 0 is not a substitute for absent telemetry.
+
+## MinIO (MUST-HAVE after MinIO is started)
+minio_cluster_capacity_usable_free_bytes
+Expected: usable free bytes. NO-DATA means MinIO metrics are unavailable; zero is a real full-capacity condition.
+
+## NATS JetStream / PM transport (MUST-HAVE after the PM consumer exists)
+nats_jetstream_consumer_num_pending{stream="omcgo"}
+Expected: pending messages by consumer. ZERO means an empty consumer backlog; NO-DATA means NATS metrics or the consumer are unavailable.
+
+## Redis (MUST-HAVE after otelcol Redis receiver is connected)
+redis_memory_used_bytes
+Expected: used bytes. NO-DATA means the Redis receiver/remote-write path is unavailable; 0 is valid only when Prometheus returned a real sample.
+
+## PostgreSQL (MUST-HAVE after otelcol PostgreSQL receiver is connected)
+pg_stat_database_numbackends
+Expected: active database backends. NO-DATA means the PostgreSQL receiver/remote-write path is unavailable; 0 is a real measured idle state.
+
+## PM durable queue (MUST-HAVE after Worker starts)
+omc_pm_queue_pending{subject="pm.file.received",durable="pm-workers"}
+Expected: PM consumer pending count. ZERO means Worker observed an empty durable queue; NO-DATA means sampling is unavailable and must remain visible as No data.
+
+## PM durable queue sample failure (MUST-HAVE after Worker starts)
+increase(omc_pm_queue_sample_failures_total{subject="pm.file.received",durable="pm-workers"}[5m])
+Expected: sampling failures in the last five minutes. ZERO means successful sampling; NO-DATA means the observer metric itself is unavailable.
+
+## Storage write protection (NO-DATA until Task 8 exposes the metric; MUST-HAVE after that)
+omc_storage_write_protection_active
+Expected: protection state: 0 permits writes, 1 blocks writes. Before the exporter exists the panel must show NO-DATA, never 0.
+
+## Storage write rejections (NO-DATA until Task 8 exposes the metric; MUST-HAVE after that)
+increase(omc_storage_write_rejections_total[5m])
+Expected: rejected writes in the last five minutes. ZERO means no rejected writes; NO-DATA means telemetry is unavailable, not that writes were accepted.

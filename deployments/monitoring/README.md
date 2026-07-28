@@ -235,6 +235,46 @@ redis    :6379 ──┘  └─ transform/promote_pg_resource ──┘
 3. 30s 内 Grafana provisioner 自动加载（`updateIntervalSeconds`）。
 4. 注意 dashboard 顶部 `uid` 字段必须唯一，否则会覆盖已有 dashboard。
 
+提交前先运行静态入口，新增的 JSON 会被自动发现；四个现有 provisioned
+dashboard 缺失、JSON 无效、UID 重复，或仍使用
+`namespace="omcgo"` / `name=~` 失效筛选时都会失败：
+
+```bash
+chmod +x deployments/monitoring/tests/validate-dashboards.sh
+deployments/monitoring/tests/validate-dashboards.sh
+```
+
+`tests/promql-probes.txt` 是资源、队列和写入保护的查询清单。它不是 dashboard
+或告警规则的替代品；其中标为 `MUST-HAVE` 的 probe 在对应 exporter/service 启动后
+必须返回时间序列。
+
+### PromQL 到浏览器的验证顺序
+
+每次改动 PromQL、Grafana panel 或指标导出时，必须按以下顺序验收：
+
+1. 先经 Prometheus `/api/v1/query` 验证查询本身。例如：
+
+   ```bash
+   curl -sG http://localhost:9090/api/v1/query \
+     --data-urlencode 'query=omc_pm_queue_pending{subject="pm.file.received",durable="pm-workers"}' \
+     | jq
+   ```
+
+2. 再在 Grafana 的对应 panel 中确认同一时间范围、数据源和 legend 显示的值与
+   Prometheus 返回一致。
+3. 最后在浏览器打开实际 provisioned dashboard，确认 panel 已加载、No data 和
+   错误状态可见、刷新后仍保持正确。**不得只因 JSON 中存在 panel 就判定功能完成。**
+
+应用进程内部内存队列不纳入这些 queue probes：包括 Go Channel、Worker Channel、
+参数同步内存 Channel、Trace 本地 Capture Queue，以及其他没有持久化权威来源的临时
+缓冲。诊断这类队列应使用进程运行时指标或日志，不应伪造成持久化队列的 Prometheus
+时间序列。
+
+面板和告警必须区分三种状态：Prometheus 返回一个值为 `0` 的样本，才是队列为空、
+没有拒绝写入或资源使用为零的真实 `zero`；查询没有返回时间序列时必须显示 `No data`，
+不能补零；Prometheus、exporter 或 Grafana 查询报错时是 `failure`，应显示错误并排查
+采集链路。写入保护指标在 Task 8 暴露前允许 `No data`，但不得据此推断写入被允许。
+
 ## 生产部署注意事项
 
 > 本目录的所有配置仅适用于 **dev 环境**。生产部署前必须修改：
