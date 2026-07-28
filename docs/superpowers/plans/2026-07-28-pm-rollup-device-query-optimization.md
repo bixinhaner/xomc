@@ -38,7 +38,7 @@
 - Consumes: `newRawAwareDeviceSelect(builder, table, q, columns...) sq.SelectBuilder`
 - Produces: 四种上卷粒度直接查询底表的回归契约
 
-- [ ] **Step 1: 写四粒度物理路由测试**
+- [x] **Step 1: 写四粒度物理路由测试**
 
 将现有 `TestRawAwareDeviceSelectUsesCorrectPhysicalSource` 扩展为表驱动测试。对 hourly、daily、weekly、monthly 分别构造请求并断言：
 
@@ -51,7 +51,7 @@ assert.Contains(t, sql, "r.granularity =")
 
 同时保留 15 分钟分支读取 `pm_measurement_anchors` 的断言。
 
-- [ ] **Step 2: 写过滤下推与投影兼容测试**
+- [x] **Step 2: 写过滤下推与投影兼容测试**
 
 构造包含 OUI、SN、制式、KPI、时间窗、对象和可见分组的小时请求，调用 `buildDeviceTableSQL`，使用手工推导的 SQL 片段断言：
 
@@ -68,11 +68,11 @@ assert.NotContains(t, sql, "FROM pm_metrics_hourly")
 
 并核对参数中仍含设备、制式、指标、时间、对象和可见分组。
 
-- [ ] **Step 3: 写非设备查询不改变的回归测试**
+- [x] **Step 3: 写非设备查询不改变的回归测试**
 
 调用 `newRawAwareDeviceSelect` 时传入非设备快表名，断言仍从传入表读取；保留 `SelectTable` 对 product、band、network 的既有路由测试，证明本次没有改变它们的表名契约。
 
-- [ ] **Step 4: 运行目标测试并确认 RED**
+- [x] **Step 4: 运行目标测试并确认 RED**
 
 Run:
 
@@ -96,7 +96,7 @@ Expected: FAIL；现有代码仍包含 `FROM pm_metrics_hourly`，没有 `FROM p
   - `newRolledUpDeviceSelect(builder sq.StatementBuilderType, q QueryRequest, columns ...string) sq.SelectBuilder`
   - 可同时为 `a.device_dim_id` 和 `r.dimension_key` 生成设备 ID 预过滤的内部辅助逻辑
 
-- [ ] **Step 1: 增加上卷表识别**
+- [x] **Step 1: 增加上卷表识别**
 
 实现严格白名单：
 
@@ -113,7 +113,7 @@ func isRolledUpDeviceTable(table string) bool {
 
 不能根据任意字符串拼接表名。
 
-- [ ] **Step 2: 增加统一结果表投影**
+- [x] **Step 2: 增加统一结果表投影**
 
 `newRolledUpDeviceSelect` 从 `pm_aggregation_results r` 投影与 `deviceTableColumns` 完全相同的列名：
 
@@ -129,7 +129,7 @@ r.window_start AS time
 r.window_start AS start_time
 r.window_end AS end_time
 r.created_at AS ingest_time
-NULLIF(r.object_ldn, '') AS object_ldn
+r.object_ldn AS object_ldn
 jsonb_build_object(
   'task_id', r.task_id,
   'task_version_id', r.task_version_id,
@@ -140,7 +140,7 @@ jsonb_build_object(
 
 基础条件固定为 `r.dimension = 'device'`。请求的设备、粒度、指标、时间和对象条件通过列别名可见的内层选择器处理，确保全部位于外层 `DISTINCT ON` 之前。
 
-- [ ] **Step 3: 将设备 UUID 预过滤应用到上卷结果**
+- [x] **Step 3: 将设备 UUID 预过滤应用到上卷结果**
 
 复用当前 `deviceDimIDPrefilter` 的设备选择语义，将目标列参数化：
 
@@ -150,7 +150,7 @@ func deviceDimIDPrefilter(column string, q QueryRequest) (string, []any, bool)
 
 15 分钟传 `a.device_dim_id` 并生成 `SELECT id`；上卷传 `r.dimension_key` 并生成 `SELECT id::text`。OUI/SN 成对、SN+制式、仅 OUI、仅 SN 四种分支保持与 `applyDeviceFilters` 一致。
 
-- [ ] **Step 4: 接入数据源路由**
+- [x] **Step 4: 接入数据源路由**
 
 `newRawAwareDeviceSelect` 的顺序固定为：
 
@@ -160,7 +160,7 @@ func deviceDimIDPrefilter(column string, q QueryRequest) (string, []any, bool)
 
 上卷分支返回带别名的子查询，使现有 `applyDeviceFilters`、`DISTINCT ON`、透视分页和 `queryDeviceTable` 无需改变。
 
-- [ ] **Step 5: 运行目标测试并确认 GREEN**
+- [x] **Step 5: 运行目标测试并确认 GREEN**
 
 Run:
 
@@ -171,7 +171,7 @@ go test ./internal/pm/aggregator -run 'TestRawAwareDeviceSelect|Test_buildDevice
 
 Expected: PASS。
 
-- [ ] **Step 6: 运行聚合包测试**
+- [x] **Step 6: 运行聚合包测试**
 
 Run:
 
@@ -192,7 +192,7 @@ Expected: PASS。
 - Consumes: 已完成的查询优化
 - Produces: 可部署构建、线上性能证据和更新后的 MR
 
-- [ ] **Step 1: 格式化并检查差异**
+- [x] **Step 1: 格式化并检查差异**
 
 Run:
 
@@ -204,7 +204,7 @@ git diff --stat
 
 Expected: 无格式或空白错误，改动仅限计划范围。
 
-- [ ] **Step 2: 统一执行后端构建与测试**
+- [x] **Step 2: 统一执行后端构建与测试**
 
 Run:
 
@@ -216,7 +216,7 @@ go test ./...
 
 Expected: 两条命令均 exit 0。
 
-- [ ] **Step 3: 验证前端类型契约**
+- [x] **Step 3: 验证前端类型契约**
 
 Run:
 

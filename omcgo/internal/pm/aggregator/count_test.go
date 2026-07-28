@@ -36,7 +36,9 @@ func Test_Count_Device(t *testing.T) {
 	assert.Equal(t, 1234, n)
 	assert.True(t, strings.HasPrefix(strings.TrimSpace(gotSQL), "SELECT COUNT(*)"), gotSQL)
 	assert.Contains(t, gotSQL, "SELECT DISTINCT ON (device_oui, device_sn, metric_path, granularity, \"time\", object_ldn) 1")
-	assert.Contains(t, gotSQL, "pm_metrics_hourly")
+	assert.Contains(t, gotSQL, "FROM pm_aggregation_results r")
+	assert.Contains(t, gotSQL, "r.dimension_key IN (SELECT id::text FROM device_dim")
+	assert.NotContains(t, gotSQL, "FROM pm_metrics_hourly")
 	assert.NotContains(t, gotSQL, "LIMIT")
 	assert.NotContains(t, gotSQL, "OFFSET")
 	assert.Contains(t, gotSQL, "ORDER BY device_oui, device_sn, metric_path, granularity, \"time\", object_ldn, ingest_time DESC")
@@ -100,7 +102,7 @@ func Test_Count_Device_ExplicitObjectSkeletonReadsAnchorsWithoutMetricExpansion(
 	assert.NotContains(t, gotSQL, "pm_metric_values")
 }
 
-func Test_Count_Device_HourlyMetricPathsUsesHourlyView(t *testing.T) {
+func Test_Count_Device_HourlyMetricPathsUsesAggregationResults(t *testing.T) {
 	var gotSQL string
 	db := &stubDB{}
 	db.queryRowFn = func(ctx context.Context, sql string, args ...any) pgx.Row {
@@ -118,7 +120,9 @@ func Test_Count_Device_HourlyMetricPathsUsesHourlyView(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, 1, n)
-	assert.Contains(t, gotSQL, "FROM pm_metrics_hourly")
+	assert.Contains(t, gotSQL, "FROM pm_aggregation_results r")
+	assert.Contains(t, gotSQL, "r.dimension_key IN (SELECT id::text FROM device_dim")
+	assert.NotContains(t, gotSQL, "FROM pm_metrics_hourly")
 	assert.Contains(t, gotSQL, "metric_path =")
 	assert.NotContains(t, gotSQL, "pm_hourly_bucket_versions")
 	assert.NotContains(t, gotSQL, "pm_hourly_anchors")
@@ -242,6 +246,7 @@ func Test_DiscoverObjectLDNs_RolledUpReadsAggregationResults(t *testing.T) {
 	assert.Equal(t, []string{"Cellid=1"}, ldns)
 	assert.Contains(t, gotSQL, "FROM pm_aggregation_results r")
 	assert.Contains(t, gotSQL, "dimension =")
+	assert.Contains(t, gotSQL, "r.dimension_key IN (SELECT id::text FROM device_dim")
 	assert.Contains(t, gotSQL, "granularity =")
 	assert.Contains(t, gotSQL, "window_start")
 	assert.Contains(t, gotSQL, "device_sn")
