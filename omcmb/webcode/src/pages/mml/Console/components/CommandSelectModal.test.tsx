@@ -75,6 +75,8 @@ const fixtures = vi.hoisted(() => {
       | undefined,
     unsupportedPathsFetching: false,
     unsupportedPathsError: false,
+    groupTreeCalls: [] as unknown[][],
+    subFieldCalls: [] as unknown[][],
     groupTree: [
       {
         id: 'group-1',
@@ -87,12 +89,17 @@ const fixtures = vi.hoisted(() => {
 });
 
 vi.mock('@core/hooks/api/useMmlConsole', () => ({
-  useGroupTree: () =>
-    ({ data: fixtures.groupTree, isLoading: false }) as unknown as ReturnType<typeof useGroupTree>,
-  useCommandSubFields: (id?: string) =>
-    ({ data: id ? fixtures.subFields : undefined, isFetching: false }) as unknown as ReturnType<
+  useGroupTree: (...args: unknown[]) => {
+    fixtures.groupTreeCalls.push(args);
+    return ({ data: fixtures.groupTree, isLoading: false }) as unknown as ReturnType<typeof useGroupTree>;
+  },
+  useCommandSubFields: (...args: unknown[]) => {
+    fixtures.subFieldCalls.push(args);
+    const id = args[0] as string | undefined;
+    return ({ data: id ? fixtures.subFields : undefined, isFetching: false }) as unknown as ReturnType<
       typeof useCommandSubFields
-    >,
+    >;
+  },
   useCustomCommandPaths: (id?: string) =>
     ({ data: id ? fixtures.customPaths : undefined, isFetching: false }) as unknown as ReturnType<
       typeof useCustomCommandPaths
@@ -131,6 +138,8 @@ afterEach(() => {
   fixtures.unsupportedPaths = [];
   fixtures.unsupportedPathsFetching = false;
   fixtures.unsupportedPathsError = false;
+  fixtures.groupTreeCalls = [];
+  fixtures.subFieldCalls = [];
 });
 
 function makeCommandItem(id: string, operationType: 'LST' | 'MOD'): CommandItem {
@@ -173,6 +182,15 @@ function renderModal(props: Partial<ModalProps> = {}) {
 }
 
 describe('CommandSelectModal', () => {
+  it('requests command tree and sub-fields with productClass context', async () => {
+    renderModal({ productClass: 'FAP/BU1810' });
+    fireEvent.click(document.querySelector('.ant-tree-switcher')!);
+    fireEvent.click(await screen.findByText('查询设备信息'));
+
+    expect(fixtures.groupTreeCalls).toContainEqual([undefined, 'zh-CN', 'FAP/BU1810', 'device-1']);
+    expect(fixtures.subFieldCalls).toContainEqual(['lst-1', 'zh-CN', 'device-1', 'FAP/BU1810']);
+  });
+
   it('filters standard commands by target path', async () => {
     renderModal();
 
