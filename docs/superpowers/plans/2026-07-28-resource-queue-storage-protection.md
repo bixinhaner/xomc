@@ -357,7 +357,7 @@ cd omcgo && go test ./internal/acs/upload ./internal/transfer ./internal/core/st
 - Modify: `omcgo/cmd/app/provider/router.go`
 - Modify: `omcgo/cmd/app/provider/modules.go`
 - Modify: `omcgo/internal/admin/permission_service.go`
-- Create: `omcgo/migrations/seed/000003_storage_protection_permissions.sql`
+- Create: `omcgo/migrations/seed/000006_storage_protection_menu.sql`
 - Create: `omcgo/internal/storageprotection/handler_test.go`
 - Create: `omcgo/internal/storageprotection/service_test.go`
 
