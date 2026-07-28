@@ -384,8 +384,7 @@ type adhocSource struct {
 	db          PgQuerier
 	taskID      uuid.UUID
 	metricPaths []string
-	startTime   time.Time
-	endTime     time.Time
+	filter      adhocExportFilter
 	dimension   string
 	deviceCount int
 	locale      appcontext.Locale
@@ -396,19 +395,19 @@ type adhocSource struct {
 	done    bool
 }
 
-func newAdhocSource(db PgQuerier, taskID uuid.UUID, metricPaths []string, startTime, endTime time.Time, dimension string, deviceCount int, locs ...appcontext.Locale) *adhocSource {
+func newAdhocSource(db PgQuerier, taskID uuid.UUID, metricPaths []string, filter adhocExportFilter, dimension string, deviceCount int, locs ...appcontext.Locale) *adhocSource {
 	loc := appcontext.LocaleZH
 	if len(locs) > 0 {
 		loc = locs[0]
 	}
-	return &adhocSource{db: db, taskID: taskID, metricPaths: metricPaths, startTime: startTime, endTime: endTime, dimension: dimension, deviceCount: deviceCount, locale: loc}
+	return &adhocSource{db: db, taskID: taskID, metricPaths: metricPaths, filter: filter, dimension: dimension, deviceCount: deviceCount, locale: loc}
 }
 
 func (s *adhocSource) Next(ctx context.Context) ([]ExportRow, bool, error) {
 	if s.done {
 		return nil, true, nil
 	}
-	sqlStr, args := buildAdhocKeysetSQL(s.taskID, s.metricPaths, s.startTime, s.endTime, s.started, s.curTime, s.curID, batchSize)
+	sqlStr, args := buildAdhocKeysetSQL(s.taskID, s.metricPaths, s.filter, s.started, s.curTime, s.curID, batchSize)
 	rows, err := s.db.Query(ctx, sqlStr, args...)
 	if err != nil {
 		return nil, false, fmt.Errorf("export adhoc query: %w", err)
@@ -528,8 +527,8 @@ func metricTypeFromPath(code string) metrics.MetricType {
 }
 
 // discoverAdhocColumns 发现 adhoc 源的指标列集，按编号升序。
-func discoverAdhocColumns(ctx context.Context, db PgQuerier, taskID uuid.UUID, metricPaths []string, start, end time.Time) ([]colKey, error) {
-	sqlStr, args := buildAdhocDistinctMetricsSQL(taskID, metricPaths, start, end)
+func discoverAdhocColumns(ctx context.Context, db PgQuerier, taskID uuid.UUID, metricPaths []string, filter adhocExportFilter) ([]colKey, error) {
+	sqlStr, args := buildAdhocDistinctMetricsSQL(taskID, metricPaths, filter)
 	rows, err := db.Query(ctx, sqlStr, args...)
 	if err != nil {
 		return nil, fmt.Errorf("export discover adhoc columns: %w", err)

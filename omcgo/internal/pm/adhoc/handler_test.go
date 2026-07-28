@@ -759,6 +759,34 @@ func Test_Handler_Results_BuiltinTask_PermissionPasses(t *testing.T) {
 	r.ServeHTTP(w, req)
 }
 
+// #192：Results 的显示/API 范围必须直接取任务 metric_paths，不能再查询结果表并入额外指标。
+func Test_Handler_Results_UsesTaskMetricPathsWithoutResultExpansion(t *testing.T) {
+	taskID := uuid.New()
+	repo := &handlerStubRepo{
+		get: func(id uuid.UUID) (*Task, error) {
+			return &Task{
+				ID:          taskID,
+				IsBuiltin:   true,
+				Creator:     "system",
+				MetricPaths: []string{"K1", "K2"},
+			}, nil
+		},
+		resultMetricPathsFn: func(uuid.UUID, resultsFilter) ([]string, error) {
+			t.Fatal("Results must not expand task metric_paths from stored result metrics")
+			return nil, nil
+		},
+	}
+	r := newTestRouterWithUser(repo, "bob", false)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/pm/adhoc/tasks/"+taskID.String()+"/results", nil)
+	defer func() {
+		_ = recover()
+		assert.NotEqual(t, http.StatusForbidden, w.Code)
+	}()
+	r.ServeHTTP(w, req)
+}
+
 func Test_backfillAdhocResultDisplayMetadata_FillsUnitAndOmitsEmpty(t *testing.T) {
 	items := []adhocResultDTO{
 		{MetricPath: "K001"},

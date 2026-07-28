@@ -168,14 +168,20 @@ func newTestTask(src SourceType) *Task {
 	return &Task{ID: uuid.New(), SourceType: src, Params: []byte(`{}`)}
 }
 
-// #38/#185：adhoc 导出必须从任务元数据读取配置指标集，并并入实际版本输出指标后传到表头发现与流式数据源。
-func TestRunner_BuildSource_AdhocUsesTaskAndResultMetricPaths(t *testing.T) {
+// #192：adhoc/性能仪表盘导出必须从任务元数据读取配置指标集，不能并入结果表里额外出现的指标。
+func TestRunner_BuildSource_AdhocUsesOnlyTaskMetricPaths(t *testing.T) {
 	for _, source := range []SourceType{SourcePMDashboard, SourceAdhocResult} {
 		t.Run(string(source), func(t *testing.T) {
 			taskID := uuid.New()
+			productID := uuid.New()
 			metricPaths := []string{"KGSM0101", "KGSM0102"}
-			wantMetricPaths := []string{"KGSM0101", "KGSM0102", "C000000005"}
-			params, err := json.Marshal(AdhocParams{TaskID: taskID.String()})
+			params, err := json.Marshal(AdhocParams{
+				TaskID:     taskID.String(),
+				ProductIDs: []string{productID.String()},
+				ObjectLDNs: []string{"DeviceGroup=11111111-1111-1111-1111-111111111111,Tech=lte"},
+				Weekdays:   []int{1, 2},
+				Hours:      []int{8, 9},
+			})
 			require.NoError(t, err)
 
 			metaDB := &recordingExportQuerier{row: &exportMetaRow{
@@ -184,7 +190,6 @@ func TestRunner_BuildSource_AdhocUsesTaskAndResultMetricPaths(t *testing.T) {
 				metricPaths: metricPaths,
 			}}
 			adhocDB := &recordingExportQuerier{results: []pgx.Rows{
-				&adhocFakeRows{rows: [][]any{{"KGSM0101"}, {"C000000005"}}}, // #185：版本输出指标发现
 				&adhocFakeRows{rows: [][]any{{"KGSM0101", "kpi"}, {"KGSM9999", "kpi"}}},
 				&adhocFakeRows{}, // 指标名解析查询无命中，回退编号本身。
 			}}
@@ -198,10 +203,18 @@ func TestRunner_BuildSource_AdhocUsesTaskAndResultMetricPaths(t *testing.T) {
 			require.NoError(t, err)
 
 			assert.Contains(t, metaDB.queryRowSQL, "metric_paths")
-			require.Len(t, adhocDB.queries, 3)
-			assert.Contains(t, adhocDB.queries[0].sql, "SELECT DISTINCT metric_path")
-			assert.Contains(t, adhocDB.queries[1].sql, "metric_path IN (")
-			assert.Equal(t, wantMetricPaths, src.(*adhocSource).metricPaths)
+			require.Len(t, adhocDB.queries, 2)
+			assert.Contains(t, adhocDB.queries[0].sql, "SELECT DISTINCT r.metric_path")
+			assert.Contains(t, adhocDB.queries[0].sql, "metric_path IN (")
+			assert.Contains(t, adhocDB.queries[0].args, "KGSM0101")
+			assert.Contains(t, adhocDB.queries[0].args, "KGSM0102")
+			assert.NotContains(t, adhocDB.queries[0].args, "C000000005")
+			adhocSrc := src.(*adhocSource)
+			assert.Equal(t, metricPaths, adhocSrc.metricPaths)
+			assert.Equal(t, []uuid.UUID{productID}, adhocSrc.filter.ProductIDs)
+			assert.Equal(t, []string{"DeviceGroup=11111111-1111-1111-1111-111111111111,Tech=lte"}, adhocSrc.filter.ObjectLDNs)
+			assert.Equal(t, []int{1, 2}, adhocSrc.filter.Weekdays)
+			assert.Equal(t, []int{8, 9}, adhocSrc.filter.Hours)
 		})
 	}
 }
@@ -213,7 +226,6 @@ func TestRunner_BuildSource_UsesStoredEnglishLocaleWithoutRequestContext(t *test
 		metricPaths: []string{"KGSM0143"},
 	}}
 	adhocDB := &recordingExportQuerier{results: []pgx.Rows{
-		&adhocFakeRows{rows: [][]any{{"KGSM0143"}}},
 		&adhocFakeRows{rows: [][]any{{"KGSM0143", "kpi"}}},
 		&adhocFakeRows{},
 	}}
@@ -228,8 +240,8 @@ func TestRunner_BuildSource_UsesStoredEnglishLocaleWithoutRequestContext(t *test
 		)),
 	})
 	require.NoError(t, err)
-	require.Len(t, adhocDB.queries, 3)
-	assert.Contains(t, adhocDB.queries[2].sql, "COALESCE(NULLIF(en_name, ''), cn_name)")
+	require.Len(t, adhocDB.queries, 2)
+	assert.Contains(t, adhocDB.queries[1].sql, "COALESCE(NULLIF(en_name, ''), cn_name)")
 }
 
 func TestRunner_BuildSource_KpiQueryDoesNotCreateSyntheticSkeletonRows(t *testing.T) {

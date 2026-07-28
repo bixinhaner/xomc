@@ -965,16 +965,10 @@ func (h *Handler) Results(c *gin.Context) {
 		Weekdays: parseCSVIntQuery(c, "weekdays"),
 		Hours:    parseCSVIntQuery(c, "hours"),
 	}
-	// #185：流式内置任务的实际输出清单是「任务配置指标 + 启用指标」。
-	// 结果展示仍要保留 #532 的显示侧收口，但收口集合必须跟随版本输出结果扩展，
-	// 否则 C000000005 这类已启用 counter 已落库却会被 task.metric_paths 挡掉。
+	// #192：展示/API 查询范围严格等于任务配置 metric_paths。后台允许多算多存，
+	// 但 /results、分页 COUNT、页面图表、周期对比和导出都不能返回配置外指标。
 	if len(task.MetricPaths) > 0 {
-		resultPaths, err := h.repo.ListResultMetricPaths(c.Request.Context(), id, filter)
-		if err != nil {
-			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
-			return
-		}
-		filter.TaskMetricPaths = streamingOutputMetricPaths(task.MetricPaths, resultPaths)
+		filter.TaskMetricPaths = task.MetricPaths
 	}
 	q, args := buildResultsQuery(id, filter, limit, offset)
 
@@ -1136,7 +1130,13 @@ type filterOptionDTO struct {
 //   - band：DISTINCT object_ldn（频段无现成名，label 给原值，可读化交前端）
 //
 // 三条 SQL 均无 LIMIT/OFFSET —— 选项是与结果分页/上限完全解耦的权威全量子集（不被结果上限截断）。
-func buildFilterOptionsQuery(dim Dimension, taskID uuid.UUID) (string, []any, bool) {
+func buildFilterOptionsQuery(dim Dimension, taskID uuid.UUID, metricPaths []string) (string, []any, bool) {
+	args := []any{taskID}
+	metricClause := ""
+	if len(metricPaths) > 0 {
+		metricClause = " AND r.metric_path = ANY($2)"
+		args = append(args, metricPaths)
+	}
 	switch dim {
 	case DimensionProduct:
 		// 查询跑在 TsPool；products 改读本库影子表 product_dim。
@@ -1145,7 +1145,8 @@ SELECT DISTINCT r.product_id, p.product_name
 FROM pm_adhoc_aggregation_results r
 LEFT JOIN product_dim p ON p.id = r.product_id
 WHERE r.task_id = $1 AND r.product_id IS NOT NULL
-ORDER BY p.product_name`, []any{taskID}, true
+` + metricClause + `
+ORDER BY p.product_name`, args, true
 	case DimensionDeviceGroup:
 		// 查询跑在 TsPool；device_groups 改读本库影子表 device_group_dim。
 		return `
@@ -1153,13 +1154,15 @@ SELECT DISTINCT r.object_ldn, g.name
 FROM pm_adhoc_aggregation_results r
 LEFT JOIN device_group_dim g ON ('DeviceGroup=' || g.id::text) = split_part(r.object_ldn, ',', 1)
 WHERE r.task_id = $1 AND r.object_ldn LIKE 'DeviceGroup=%'
-ORDER BY g.name`, []any{taskID}, true
+` + metricClause + `
+ORDER BY g.name`, args, true
 	case DimensionBand:
 		return `
 SELECT DISTINCT r.object_ldn
 FROM pm_adhoc_aggregation_results r
 WHERE r.task_id = $1 AND r.object_ldn LIKE 'Band=%'
-ORDER BY r.object_ldn`, []any{taskID}, true
+` + metricClause + `
+ORDER BY r.object_ldn`, args, true
 	default:
 		// device / aggregate_group / network：无可筛子集
 		return "", nil, false
@@ -1198,7 +1201,7 @@ func (h *Handler) FilterOptions(c *gin.Context) {
 	}
 
 	options := make([]filterOptionDTO, 0)
-	q, args, supported := buildFilterOptionsQuery(dim, id)
+	q, args, supported := buildFilterOptionsQuery(dim, id, task.MetricPaths)
 	if supported {
 		rows, err := h.pool.Query(c.Request.Context(), q, args...)
 		if err != nil {
