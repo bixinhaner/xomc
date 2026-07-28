@@ -4,10 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
 )
 
@@ -25,13 +23,6 @@ type BuiltinReconciler struct {
 	resolveCounters func(context.Context, string, []pmstream.MetricRule) ([]pmstream.CounterRule, error)
 	resolveMembers  func(context.Context, *Task) ([]pmstream.TaskMember, error)
 	save            func(context.Context, pmstream.SaveTaskRequest) (*pmstream.TaskVersionSnapshot, error)
-	now             func() time.Time
-}
-
-var hiddenDeviceBuiltinTaskIDs = map[string]uuid.UUID{
-	"lte": uuid.MustParse("0184dddd-0005-4000-8000-000000000001"),
-	"nr":  uuid.MustParse("0184dddd-0005-4000-8000-000000000002"),
-	"gsm": uuid.MustParse("0184dddd-0005-4000-8000-000000000003"),
 }
 
 func NewBuiltinReconciler(repo *PgRepository) *BuiltinReconciler {
@@ -78,24 +69,6 @@ func (r *BuiltinReconciler) Reconcile(ctx context.Context) (BuiltinReconcileResu
 		if changed {
 			result.Changed++
 		}
-		hidden, ok := hiddenDeviceDefinition(task)
-		if !ok {
-			continue
-		}
-		result.Definitions++
-		empty, changed, saveErr = r.saveStreamingDefinition(ctx, &hidden, hiddenDeviceEffectiveFrom(r.currentTime()))
-		if saveErr != nil {
-			result.Failed++
-			reconcileErrors = append(reconcileErrors, builtinReconcileError(&hidden, saveErr))
-			continue
-		}
-		result.Saved++
-		if empty {
-			result.Empty++
-		}
-		if changed {
-			result.Changed++
-		}
 	}
 	return result, errors.Join(reconcileErrors...)
 }
@@ -132,37 +105,4 @@ func (r *BuiltinReconciler) saveStreamingDefinition(ctx context.Context, task *T
 		return false, false, saveErr
 	}
 	return len(members) == 0, snapshot != nil && snapshot.NewVersion, nil
-}
-
-func (r *BuiltinReconciler) currentTime() time.Time {
-	if r.now != nil {
-		return r.now().UTC()
-	}
-	return time.Now().UTC()
-}
-
-func hiddenDeviceEffectiveFrom(now time.Time) time.Time {
-	return now.UTC().Truncate(time.Hour)
-}
-
-func hiddenDeviceDefinition(source *Task) (Task, bool) {
-	if source.Dimension != DimensionNetwork || source.Technology == "" {
-		return Task{}, false
-	}
-	technology := strings.ToLower(source.Technology)
-	taskID, ok := hiddenDeviceBuiltinTaskIDs[technology]
-	if !ok {
-		taskID = uuid.NewSHA1(uuid.NameSpaceOID, []byte("omcgo.pm.hidden-device."+technology))
-	}
-	creator := source.Creator
-	if creator == "" {
-		creator = "system"
-	}
-	return Task{
-		ID: taskID, Name: "内置-设备-" + strings.ToUpper(technology),
-		Mode: ModeContinuous, MetricPaths: append([]string(nil), source.MetricPaths...),
-		Dimension: DimensionDevice, Technology: source.Technology,
-		IsBuiltin: true, Visibility: VisibilityPrivate, Status: source.Status,
-		Creator: creator, ExpireDays: source.ExpireDays,
-	}, true
 }

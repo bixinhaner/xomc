@@ -22,12 +22,3 @@ func TestWindowForUsesBusinessTimezoneBoundaries(t *testing.T) {
 	require.Equal(t, time.Date(2026, 6, 30, 16, 0, 0, 0, time.UTC), monthly.Start)
 	require.Equal(t, time.Date(2026, 7, 31, 16, 0, 0, 0, time.UTC), monthly.End)
 }
-
-func TestExpectedSlotsCountsMembersAndQuarterHours(t *testing.T) {
-	window := Window{
-		Start: time.Date(2026, 7, 25, 0, 0, 0, 0, time.UTC),
-		End:   time.Date(2026, 7, 25, 1, 0, 0, 0, time.UTC),
-	}
-	require.EqualValues(t, 40, expectedSlots(window, 10))
-	require.Zero(t, expectedSlots(window, 0))
-}

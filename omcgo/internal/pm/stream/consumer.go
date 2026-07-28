@@ -2,7 +2,9 @@ package stream
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/omcgo/omcgo/internal/core/event"
@@ -107,6 +109,15 @@ func (c *Consumer) handleRollup(ctx context.Context, envelope event.Event) error
 	contributions, err := rollupContributions(payload, version, c.matcher.location)
 	if err != nil {
 		return fmt.Errorf("build PM parent rollup contributions: %w", err)
+	}
+	if isDeviceHourPayload(payload, current) {
+		ruleContributions, matchErr := matchDeviceHourRules(
+			payload, current, c.matcher.location,
+		)
+		if matchErr != nil {
+			return fmt.Errorf("match device-hour aggregation rules: %w", matchErr)
+		}
+		contributions = append(contributions, ruleContributions...)
 	}
 	if err := c.processContributions(ctx, contributions); err != nil {
 		if c.metrics != nil {
@@ -245,19 +256,45 @@ func (s *TimeoutScanner) Run(ctx context.Context) {
 }
 
 func (s *TimeoutScanner) runOnce(ctx context.Context) error {
-	windows, err := s.windows.ListDueByGranularity(
-		ctx, time.Now().UTC(), s.graceByGranularity, s.grace, 100,
-	)
-	if err != nil {
-		return err
-	}
-	for _, window := range windows {
-		if err := s.finalizer.Finalize(ctx, window.Key, CloseTimeout); err != nil {
-			s.logger.Warn("finalize timed out PM aggregation window",
-				zap.String("task_version_id", window.Key.TaskVersionID.String()),
-				zap.Time("window_start", window.Key.Start),
-				zap.Error(err))
+	const pageSize = 200
+	now := time.Now().UTC()
+	var after *WindowKey
+	var finalizeErrors []error
+	for {
+		windows, err := s.windows.ListDueByGranularityAfter(
+			ctx, now, s.graceByGranularity, s.grace, after, pageSize,
+		)
+		if err != nil {
+			return err
+		}
+		if len(windows) == 0 {
+			break
+		}
+		var wg sync.WaitGroup
+		var errorMu sync.Mutex
+		for _, window := range windows {
+			window := window
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := s.finalizer.Finalize(ctx, window.Key, CloseTimeout); err != nil {
+					s.logger.Warn("finalize timed out PM aggregation window",
+						zap.String("task_version_id", window.Key.TaskVersionID.String()),
+						zap.String("entity_key", window.Key.EntityKey),
+						zap.Time("window_start", window.Key.Start),
+						zap.Error(err))
+					errorMu.Lock()
+					finalizeErrors = append(finalizeErrors, err)
+					errorMu.Unlock()
+				}
+			}()
+		}
+		wg.Wait()
+		last := windows[len(windows)-1].Key
+		after = &last
+		if len(windows) < pageSize {
+			break
 		}
 	}
-	return nil
+	return errors.Join(finalizeErrors...)
 }

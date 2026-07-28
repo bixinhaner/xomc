@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -47,7 +48,7 @@ func TestBuildRollupPayloadsCarriesOnlyCompactCounters(t *testing.T) {
 	}
 	key := WindowKey{
 		TaskID: taskID, TaskVersionID: versionID, Granularity: GranularityHourly,
-		Start: start, End: start.Add(time.Hour),
+		EntityKey: "network", Start: start, End: start.Add(time.Hour),
 	}
 
 	first, err := buildRollupPayloads(key, CloseComplete, state, version, 500)
@@ -62,6 +63,96 @@ func TestBuildRollupPayloadsCarriesOnlyCompactCounters(t *testing.T) {
 	require.Equal(t, 10.0, first[0].Values[0].Sum)
 	require.Equal(t, int64(4), first[0].Values[0].Count)
 	require.True(t, first[0].Values[0].Composed)
+	encoded, err := json.Marshal(first[0])
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "DimensionKey")
+	require.NotContains(t, string(encoded), "source_expected_slots")
+}
+
+func TestBuildRollupPayloadsTimeoutClosePreservesDataCompleteness(t *testing.T) {
+	start := time.Date(2026, 7, 28, 8, 0, 0, 0, time.UTC)
+	version := &TaskVersionSnapshot{
+		TaskID: uuid.New(), VersionID: uuid.New(), Enabled: true,
+		Counters: map[string]CounterRule{
+			"C1": {MetricPath: "C1", Aggregation: AggregationSum},
+		},
+	}
+	key := WindowKey{
+		TaskID: version.TaskID, TaskVersionID: version.VersionID,
+		EntityKey: "network", Granularity: GranularityHourly,
+		Start: start, End: start.Add(time.Hour),
+	}
+	state := WindowState{
+		ExpectedSlots: 4, ReceivedSlots: 4,
+		Accumulators: []Accumulator{{
+			Definition: ContributionValue{
+				Dimension: DimensionNetwork, DimensionKey: "network",
+				MetricPath: "C1", MetricType: "counter", Operation: AggregationSum,
+			},
+			Sum: 10, Count: 4, Min: 1, Max: 4,
+		}},
+	}
+
+	payloads, err := buildRollupPayloads(key, CloseTimeout, state, version, 500)
+
+	require.NoError(t, err)
+	require.Len(t, payloads, 1)
+	require.True(t, payloads[0].Complete)
+}
+
+func TestBuildDeviceRollupPayloadUsesWindowEntity(t *testing.T) {
+	start := time.Date(2026, 7, 28, 8, 0, 0, 0, time.UTC)
+	firstDevice := uuid.New()
+	version := &TaskVersionSnapshot{
+		TaskID: uuid.New(), VersionID: uuid.New(), Enabled: true, DevicePipeline: true,
+		RollupVersionID: uuid.New(),
+		Counters:        map[string]CounterRule{"C1": {MetricPath: "C1", Aggregation: AggregationSum}},
+	}
+	accumulator := func(deviceID uuid.UUID) Accumulator {
+		return Accumulator{
+			Definition: ContributionValue{
+				Dimension: DimensionDevice, DimensionKey: deviceID.String(),
+				MetricPath: "C1", MetricType: "counter", Operation: AggregationSum,
+			},
+			Sum: 10, Count: 4, Min: 1, Max: 4,
+		}
+	}
+	state := WindowState{
+		ExpectedSlots: 4, ReceivedSlots: 4,
+		Accumulators: []Accumulator{accumulator(firstDevice)},
+	}
+	key := WindowKey{
+		TaskID: version.TaskID, TaskVersionID: version.VersionID,
+		EntityKey:   firstDevice.String(),
+		Granularity: GranularityHourly, Start: start, End: start.Add(time.Hour),
+	}
+
+	payloads, err := buildRollupPayloads(key, CloseComplete, state, version, 500)
+
+	require.NoError(t, err)
+	require.Len(t, payloads, 1)
+	require.Equal(t, firstDevice.String(), payloads[0].EntityKey)
+	require.Equal(t, version.RollupVersionID, payloads[0].TaskVersionID)
+	for _, payload := range payloads {
+		require.Equal(t, 1, payload.ChunkCount)
+		require.Len(t, payload.Values, 1)
+	}
+}
+
+func TestChunkRollupValuesHonorsEncodedByteLimit(t *testing.T) {
+	values := []ContributionValue{
+		{Dimension: DimensionDevice, DimensionKey: "a", MetricPath: "C1", MetricType: "counter", Count: 1, Composed: true},
+		{Dimension: DimensionDevice, DimensionKey: "b", MetricPath: "C2", MetricType: "counter", Count: 1, Composed: true},
+	}
+	first, err := json.Marshal(values[0])
+	require.NoError(t, err)
+
+	chunks, err := chunkRollupValues(values, 500, len(first)+3)
+
+	require.NoError(t, err)
+	require.Len(t, chunks, 2)
+	require.Len(t, chunks[0], 1)
+	require.Len(t, chunks[1], 1)
 }
 
 func TestRollupContributionsHourlyToDailyAndDailyToWeekMonth(t *testing.T) {
@@ -87,6 +178,7 @@ func TestRollupContributionsHourlyToDailyAndDailyToWeekMonth(t *testing.T) {
 	hourly := RollupPayload{
 		SchemaVersion: SchemaVersion, EventID: uuid.New(), TaskID: taskID,
 		TaskVersionID: versionID, SourceGranularity: GranularityHourly,
+		EntityKey:   deviceID.String(),
 		WindowStart: start, WindowEnd: start.Add(time.Hour),
 		SourceExpectedSlots: 4, SourceReceivedSlots: 4, Complete: true,
 		ChunkCount: 1, Values: []ContributionValue{value},
@@ -96,6 +188,8 @@ func TestRollupContributionsHourlyToDailyAndDailyToWeekMonth(t *testing.T) {
 	require.Len(t, daily, 1)
 	require.Equal(t, GranularityDaily, daily[0].Key.Granularity)
 	require.Equal(t, int64(24), daily[0].ExpectedSlots)
+	require.Equal(t, hourly.EntityKey, daily[0].Key.EntityKey)
+	require.Equal(t, hourly.SourceExpectedSlots, daily[0].SourceExpectedSlots)
 
 	dailyPayload := hourly
 	dailyPayload.EventID = uuid.New()
@@ -109,4 +203,46 @@ func TestRollupContributionsHourlyToDailyAndDailyToWeekMonth(t *testing.T) {
 	require.Equal(t, GranularityMonthly, parents[1].Key.Granularity)
 	require.Equal(t, int64(7), parents[0].ExpectedSlots)
 	require.Equal(t, int64(31), parents[1].ExpectedSlots)
+}
+
+func TestRollupContributionsClipsRuleDayAtVersionBoundary(t *testing.T) {
+	day := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
+	change := day.Add(13 * time.Hour)
+	oldVersion := &TaskVersionSnapshot{
+		TaskID: uuid.New(), VersionID: uuid.New(), Enabled: true,
+		EffectiveFrom: day.Add(-24 * time.Hour), EffectiveTo: &change,
+		Granularities: []Granularity{GranularityHourly, GranularityDaily},
+	}
+	newVersion := &TaskVersionSnapshot{
+		TaskID: uuid.New(), VersionID: uuid.New(), Enabled: true,
+		EffectiveFrom: change,
+		Granularities: []Granularity{GranularityHourly, GranularityDaily},
+	}
+	payloadFor := func(version *TaskVersionSnapshot, start time.Time) RollupPayload {
+		return RollupPayload{
+			SchemaVersion: SchemaVersion, EventID: uuid.New(),
+			TaskID: version.TaskID, TaskVersionID: version.VersionID,
+			SourceGranularity: GranularityHourly, EntityKey: "network",
+			WindowStart: start, WindowEnd: start.Add(time.Hour),
+			SourceExpectedSlots: 1, SourceReceivedSlots: 1, Complete: true,
+			ChunkCount: 1,
+			Values: []ContributionValue{{
+				Dimension: DimensionNetwork, DimensionKey: "network",
+				MetricPath: "C1", MetricType: "counter", Operation: AggregationSum,
+				Sum: 1, Count: 1, Min: 1, Max: 1, Composed: true,
+			}},
+		}
+	}
+
+	oldContributions, err := rollupContributions(
+		payloadFor(oldVersion, change.Add(-time.Hour)), oldVersion, time.UTC,
+	)
+	require.NoError(t, err)
+	newContributions, err := rollupContributions(
+		payloadFor(newVersion, change), newVersion, time.UTC,
+	)
+	require.NoError(t, err)
+
+	require.EqualValues(t, 13, oldContributions[0].ExpectedSlots)
+	require.EqualValues(t, 11, newContributions[0].ExpectedSlots)
 }

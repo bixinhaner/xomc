@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBuiltinReconcileIntervalIsFiveMinutes(t *testing.T) {
-	require.Equal(t, 5*time.Minute, pmBuiltinReconcileInterval)
+func TestRuleCatalogRefreshIsMetadataOnlyFiveMinuteCadence(t *testing.T) {
+	require.Equal(t, 5*time.Minute, pmRuleCatalogRefreshInterval)
 }
 
 func TestRunBuiltinReconcileReloadsSnapshotAfterChangedVersion(t *testing.T) {

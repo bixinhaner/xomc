@@ -213,7 +213,7 @@ func saveEffectiveFrom(req SaveTaskRequest, now time.Time) time.Time {
 	if !req.EffectiveFrom.IsZero() {
 		return req.EffectiveFrom.UTC()
 	}
-	return now.UTC().Truncate(slotDuration).Add(slotDuration)
+	return now.UTC().Truncate(time.Hour).Add(time.Hour)
 }
 
 func shouldAdjustEffectiveFrom(

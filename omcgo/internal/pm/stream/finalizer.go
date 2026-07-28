@@ -137,7 +137,7 @@ func (f *Finalizer) writeFinal(
 	if err != nil {
 		return err
 	}
-	finalMetrics, formulaIncomplete, err := buildFinalizedMetrics(version, state)
+	finalMetrics, _, err := buildFinalizedMetrics(version, state)
 	if err != nil {
 		return err
 	}
@@ -150,7 +150,7 @@ func (f *Finalizer) writeFinal(
 	childrenComplete := state.ReceivedSlots >= state.ExpectedSlots
 	missing := max64(0, sourceExpected-sourceReceived)
 	dataComplete := childrenComplete && missing == 0 &&
-		state.SourceIncompleteSlots == 0 && !formulaIncomplete
+		state.SourceIncompleteSlots == 0
 
 	claimSQL, claimArgs, err := storage.Psql.Update("pm_aggregation_windows").
 		Set("status", "finalizing").
@@ -182,7 +182,7 @@ func (f *Finalizer) writeFinal(
 		}
 	}
 
-	complete := reason == CloseComplete && dataComplete
+	complete := dataComplete
 	resultCount := 0
 	for start := 0; start < len(finalMetrics); start += finalResultBatchSize {
 		end := start + finalResultBatchSize
@@ -206,7 +206,7 @@ func (f *Finalizer) writeFinal(
 				definition.ObjectLDN, definition.DeviceOUI, definition.DeviceSN,
 				definition.Technology, metric.MetricID, definition.MetricPath,
 				metric.MetricType, string(metric.Operation), metric.Value,
-				metric.SampleCount, complete, missing,
+				metric.SampleCount, complete && metric.FormulaComplete, missing,
 			)
 		}
 		query, args, buildErr := builder.Suffix(`

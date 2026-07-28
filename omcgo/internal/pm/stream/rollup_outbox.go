@@ -22,6 +22,14 @@ type RollupOutboxRecord struct {
 	Payload RollupPayload
 }
 
+var maxRollupEventBytes = DefaultConfig().MaxEventBytes
+
+func SetMaxRollupEventBytes(limit int) {
+	if limit > 0 {
+		maxRollupEventBytes = limit
+	}
+}
+
 type RollupOutboxRepository struct {
 	pool *pgxpool.Pool
 }
@@ -38,18 +46,24 @@ func insertRollupTx(ctx context.Context, tx pgx.Tx, payload RollupPayload) error
 	if err != nil {
 		return fmt.Errorf("marshal PM compact rollup: %w", err)
 	}
+	if len(data) > maxRollupEventBytes {
+		return fmt.Errorf(
+			"PM compact rollup is %d bytes, exceeds limit %d",
+			len(data), maxRollupEventBytes,
+		)
+	}
 	subject := event.SubjectPMAggregationHourlyRollup
 	if payload.SourceGranularity == GranularityDaily {
 		subject = event.SubjectPMAggregationDailyRollup
 	}
 	snapshotSQL, snapshotArgs, err := storage.Psql.Insert("pm_aggregation_counter_rollups").
 		Columns(
-			"event_id", "task_id", "task_version_id", "granularity",
+			"event_id", "task_id", "task_version_id", "entity_key", "granularity",
 			"window_start", "window_end", "chunk_index", "chunk_count",
 			"complete", "payload",
 		).
 		Values(
-			payload.EventID, payload.TaskID, payload.TaskVersionID,
+			payload.EventID, payload.TaskID, payload.TaskVersionID, payload.EntityKey,
 			string(payload.SourceGranularity), payload.WindowStart, payload.WindowEnd,
 			payload.ChunkIndex, payload.ChunkCount, payload.Complete, json.RawMessage(data),
 		).
@@ -157,6 +171,7 @@ func (r *RollupOutboxRepository) DeletePublishedBefore(ctx context.Context, befo
 func (r *RollupOutboxRepository) ListSnapshots(
 	ctx context.Context,
 	taskVersionID uuid.UUID,
+	entityKey string,
 	granularity Granularity,
 	start, end time.Time,
 ) ([]RollupPayload, error) {
@@ -164,6 +179,7 @@ func (r *RollupOutboxRepository) ListSnapshots(
 		From("pm_aggregation_counter_rollups").
 		Where(sq.Eq{
 			"task_version_id": taskVersionID,
+			"entity_key":      entityKey,
 			"granularity":     string(granularity),
 		}).
 		Where(sq.GtOrEq{"window_start": start}).

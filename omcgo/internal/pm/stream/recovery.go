@@ -9,7 +9,6 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/omcgo/omcgo/internal/core/event"
-	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
@@ -17,6 +16,15 @@ const (
 	aggregationRawStreamName    = "PM_AGG_15M"
 	aggregationHourlyStreamName = "PM_AGG_HOURLY"
 	aggregationDailyStreamName  = "PM_AGG_DAILY"
+)
+
+type recoverySource string
+
+const (
+	recoveryRaw15m      recoverySource = "raw_15m"
+	recoveryDeviceHours recoverySource = "device_hours"
+	recoveryHourly      recoverySource = "hourly"
+	recoveryDaily       recoverySource = "daily"
 )
 
 type Recovery struct {
@@ -47,25 +55,68 @@ func NewRecovery(
 }
 
 func (r *Recovery) RestoreActiveWindows(ctx context.Context) error {
-	active, err := r.windows.ListActive(ctx, 10000)
-	if err != nil {
-		return err
-	}
-	for _, record := range active {
-		if _, err := r.store.Read(ctx, record.Key); err == nil {
-			continue
-		} else if !errors.Is(err, redis.Nil) {
-			return err
+	var restoreErrors []error
+	var cursor *WindowKey
+	missing := make(map[recoverySource][]WindowKey)
+	const pageSize = uint64(1000)
+	for {
+		active, err := r.windows.ListActiveAfter(ctx, cursor, pageSize)
+		if err != nil {
+			return errors.Join(append(restoreErrors, err)...)
 		}
-		if err := r.ReplayWindow(ctx, record.Key); err != nil {
-			_ = r.windows.MarkFailed(ctx, record.Key, err)
-			r.logger.Error("restore PM aggregation window from NATS",
-				zap.String("task_version_id", record.Key.TaskVersionID.String()),
-				zap.Time("window_start", record.Key.Start),
-				zap.Error(err))
+		for _, record := range active {
+			exists, existsErr := r.store.Exists(ctx, record.Key)
+			if existsErr != nil {
+				restoreErrors = append(restoreErrors, existsErr)
+				r.logger.Error("check PM aggregation window before recovery",
+					zap.String("task_version_id", record.Key.TaskVersionID.String()),
+					zap.String("entity_key", record.Key.EntityKey),
+					zap.Time("window_start", record.Key.Start),
+					zap.Error(existsErr))
+				continue
+			}
+			if exists {
+				continue
+			}
+			source, sourceErr := r.recoverySourceFor(record.Key)
+			if sourceErr != nil {
+				restoreErrors = append(restoreErrors, sourceErr)
+				_ = r.windows.MarkFailed(ctx, record.Key, sourceErr)
+				continue
+			}
+			missing[source] = append(missing[source], record.Key)
+		}
+		if len(active) < int(pageSize) {
+			break
+		}
+		last := active[len(active)-1].Key
+		cursor = &last
+	}
+	for source, keys := range missing {
+		matched, replayErr := r.replayWindowBatch(ctx, source, keys)
+		if replayErr != nil {
+			restoreErrors = append(restoreErrors, replayErr)
+		}
+		for _, key := range keys {
+			if _, ok := matched[windowRecoveryID(key)]; ok {
+				continue
+			}
+			missingErr := fmt.Errorf(
+				"no retained %s PM events matched active %s window %s",
+				source, key.Granularity, key.EntityKey,
+			)
+			if replayErr != nil {
+				missingErr = fmt.Errorf("%w: %v", missingErr, replayErr)
+			}
+			_ = r.windows.MarkFailed(ctx, key, missingErr)
+			r.logger.Error("restore PM aggregation window",
+				zap.String("task_version_id", key.TaskVersionID.String()),
+				zap.String("entity_key", key.EntityKey),
+				zap.Time("window_start", key.Start),
+				zap.Error(missingErr))
 		}
 	}
-	return nil
+	return errors.Join(restoreErrors...)
 }
 
 func (r *Recovery) Run(ctx context.Context, interval time.Duration) {
@@ -90,54 +141,99 @@ func (r *Recovery) ReplayWindow(ctx context.Context, key WindowKey) error {
 	if r.js == nil {
 		return errors.New("PM aggregation recovery JetStream is nil")
 	}
-	if key.Granularity == GranularityHourly {
-		return r.replayRawWindow(ctx, key)
+	source, err := r.recoverySourceFor(key)
+	if err != nil {
+		return err
 	}
-	return r.replayRollupWindow(ctx, key)
+	matched, err := r.replayWindowBatch(ctx, source, []WindowKey{key})
+	if err != nil {
+		return err
+	}
+	if _, ok := matched[windowRecoveryID(key)]; !ok {
+		return fmt.Errorf("no retained %s PM events matched active window", source)
+	}
+	return nil
 }
 
-func (r *Recovery) replayRawWindow(ctx context.Context, key WindowKey) error {
+func (r *Recovery) recoverySourceFor(key WindowKey) (recoverySource, error) {
+	current := r.snapshot.Current()
+	if current == nil {
+		return "", fmt.Errorf("PM aggregation task snapshot missing")
+	}
+	version := current.ByVersion[key.TaskVersionID]
+	switch key.Granularity {
+	case GranularityHourly:
+		if version != nil && version.DevicePipeline {
+			return recoveryRaw15m, nil
+		}
+		return recoveryDeviceHours, nil
+	case GranularityDaily:
+		return recoveryHourly, nil
+	case GranularityWeekly, GranularityMonthly:
+		return recoveryDaily, nil
+	default:
+		return "", fmt.Errorf("unsupported PM aggregation recovery granularity %q", key.Granularity)
+	}
+}
+
+func (r *Recovery) replayWindowBatch(
+	ctx context.Context,
+	source recoverySource,
+	keys []WindowKey,
+) (map[string]struct{}, error) {
+	matched := make(map[string]struct{}, len(keys))
+	if len(keys) == 0 {
+		return matched, nil
+	}
+	if r.js == nil {
+		return matched, errors.New("PM aggregation recovery JetStream is nil")
+	}
+	wanted := make(map[string]struct{}, len(keys))
+	start := keys[0].Start
+	for _, key := range keys {
+		wanted[windowRecoveryID(key)] = struct{}{}
+		if key.Start.Before(start) {
+			start = key.Start
+		}
+	}
+	streamName, subject := aggregationRawStreamName, event.SubjectPMAggregationNormalized
+	if source == recoveryDeviceHours || source == recoveryHourly {
+		streamName, subject = aggregationHourlyStreamName, event.SubjectPMAggregationHourlyRollup
+	} else if source == recoveryDaily {
+		streamName, subject = aggregationDailyStreamName, event.SubjectPMAggregationDailyRollup
+	}
 	subscription, err := r.js.PullSubscribe(
-		event.SubjectPMAggregationNormalized,
-		"",
-		nats.BindStream(aggregationRawStreamName),
-		nats.StartTime(key.Start),
+		subject, "", nats.BindStream(streamName), nats.StartTime(start),
 		nats.AckNone(),
 	)
 	if err != nil {
-		return fmt.Errorf("create PM aggregation replay consumer: %w", err)
+		return matched, fmt.Errorf("create PM aggregation batch replay consumer: %w", err)
 	}
 	defer func() { _ = subscription.Unsubscribe() }()
 
-	matched := 0
 	for {
 		messages, fetchErr := subscription.Fetch(256, nats.MaxWait(time.Second))
 		if fetchErr != nil && !errors.Is(fetchErr, nats.ErrTimeout) {
-			return fmt.Errorf("fetch PM aggregation replay messages: %w", fetchErr)
+			return matched, fmt.Errorf("fetch PM aggregation batch replay messages: %w", fetchErr)
 		}
 		for _, message := range messages {
 			var envelope event.Event
 			if err := json.Unmarshal(message.Data, &envelope); err != nil {
-				return fmt.Errorf("decode replay PM aggregation envelope: %w", err)
+				return matched, fmt.Errorf("decode replay PM aggregation envelope: %w", err)
 			}
-			var payload event.PMAggregationNormalizedPayload
-			if err := envelope.DecodePayload(&payload); err != nil {
-				return fmt.Errorf("decode replay PM aggregation payload: %w", err)
-			}
-			contributions, err := r.matcher.MatchGranularity(
-				payload, r.snapshot.Current(), GranularityHourly,
-			)
-			if err != nil {
-				return err
+			contributions, decodeErr := r.recoveryContributions(source, envelope)
+			if decodeErr != nil {
+				return matched, decodeErr
 			}
 			for _, contribution := range contributions {
-				if !sameWindowKey(contribution.Key, key) {
+				id := windowRecoveryID(contribution.Key)
+				if _, ok := wanted[id]; !ok {
 					continue
 				}
 				if _, err := r.store.Accumulate(ctx, contribution); err != nil {
-					return err
+					return matched, err
 				}
-				matched++
+				matched[id] = struct{}{}
 			}
 		}
 		if errors.Is(fetchErr, nats.ErrTimeout) || len(messages) == 0 {
@@ -145,117 +241,53 @@ func (r *Recovery) replayRawWindow(ctx context.Context, key WindowKey) error {
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return matched, ctx.Err()
 		default:
 		}
 	}
-	if matched == 0 {
-		return fmt.Errorf("no retained 15-minute PM events matched active hourly window")
-	}
-	return nil
+	return matched, nil
 }
 
-func (r *Recovery) replayRollupWindow(ctx context.Context, key WindowKey) error {
-	streamName := aggregationHourlyStreamName
-	subject := event.SubjectPMAggregationHourlyRollup
-	if key.Granularity == GranularityWeekly || key.Granularity == GranularityMonthly {
-		streamName = aggregationDailyStreamName
-		subject = event.SubjectPMAggregationDailyRollup
+func (r *Recovery) recoveryContributions(
+	source recoverySource,
+	envelope event.Event,
+) ([]Contribution, error) {
+	current := r.snapshot.Current()
+	if current == nil {
+		return nil, fmt.Errorf("PM aggregation task snapshot missing")
 	}
-	subscription, err := r.js.PullSubscribe(
-		subject,
-		"",
-		nats.BindStream(streamName),
-		nats.StartTime(key.Start),
-		nats.AckNone(),
+	if source == recoveryRaw15m {
+		var payload event.PMAggregationNormalizedPayload
+		if err := envelope.DecodePayload(&payload); err != nil {
+			return nil, fmt.Errorf("decode replay PM aggregation payload: %w", err)
+		}
+		return r.matcher.MatchGranularity(payload, current, GranularityHourly)
+	}
+	var payload RollupPayload
+	if err := envelope.DecodePayload(&payload); err != nil {
+		return nil, fmt.Errorf("decode compact rollup replay payload: %w", err)
+	}
+	if source == recoveryDeviceHours {
+		if !isDeviceHourPayload(payload, current) {
+			return nil, nil
+		}
+		return matchDeviceHourRules(payload, current, r.matcher.location)
+	}
+	return rollupContributions(
+		payload, current.ByVersion[payload.TaskVersionID], r.matcher.location,
 	)
-	if err != nil {
-		return fmt.Errorf("create PM compact rollup replay consumer: %w", err)
-	}
-	defer func() { _ = subscription.Unsubscribe() }()
+}
 
-	matched := 0
-	for {
-		messages, fetchErr := subscription.Fetch(256, nats.MaxWait(time.Second))
-		if fetchErr != nil && !errors.Is(fetchErr, nats.ErrTimeout) {
-			return fmt.Errorf("fetch PM compact rollup replay messages: %w", fetchErr)
-		}
-		for _, message := range messages {
-			var envelope event.Event
-			if err := json.Unmarshal(message.Data, &envelope); err != nil {
-				return fmt.Errorf("decode compact rollup replay envelope: %w", err)
-			}
-			var payload RollupPayload
-			if err := envelope.DecodePayload(&payload); err != nil {
-				return fmt.Errorf("decode compact rollup replay payload: %w", err)
-			}
-			current := r.snapshot.Current()
-			if current == nil {
-				return fmt.Errorf("PM aggregation task snapshot missing")
-			}
-			contributions, err := rollupContributions(
-				payload, current.ByVersion[payload.TaskVersionID], r.matcher.location,
-			)
-			if err != nil {
-				return err
-			}
-			for _, contribution := range contributions {
-				if !sameWindowKey(contribution.Key, key) {
-					continue
-				}
-				if _, err := r.store.Accumulate(ctx, contribution); err != nil {
-					return err
-				}
-				matched++
-			}
-		}
-		if errors.Is(fetchErr, nats.ErrTimeout) || len(messages) == 0 {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-	}
-	if matched == 0 {
-		source := GranularityHourly
-		if key.Granularity == GranularityWeekly || key.Granularity == GranularityMonthly {
-			source = GranularityDaily
-		}
-		snapshots, err := r.rollups.ListSnapshots(
-			ctx, key.TaskVersionID, source, key.Start, key.End,
-		)
-		if err != nil {
-			return err
-		}
-		current := r.snapshot.Current()
-		for _, payload := range snapshots {
-			contributions, err := rollupContributions(
-				payload, current.ByVersion[payload.TaskVersionID], r.matcher.location,
-			)
-			if err != nil {
-				return err
-			}
-			for _, contribution := range contributions {
-				if !sameWindowKey(contribution.Key, key) {
-					continue
-				}
-				if _, err := r.store.Accumulate(ctx, contribution); err != nil {
-					return err
-				}
-				matched++
-			}
-		}
-	}
-	if matched == 0 {
-		return fmt.Errorf("no compact PM rollups matched active %s window", key.Granularity)
-	}
-	return nil
+func windowRecoveryID(key WindowKey) string {
+	return fmt.Sprintf(
+		"%s\x1f%s\x1f%s\x1f%d",
+		key.TaskVersionID, key.EntityKey, key.Granularity, key.Start.UTC().UnixNano(),
+	)
 }
 
 func sameWindowKey(left, right WindowKey) bool {
 	return left.TaskVersionID == right.TaskVersionID &&
+		left.EntityKey == right.EntityKey &&
 		left.Granularity == right.Granularity &&
 		left.Start.Equal(right.Start)
 }

@@ -7,12 +7,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSaveEffectiveFromDefaultsToNextSlot(t *testing.T) {
+func TestSaveEffectiveFromDefaultsToNextNaturalHour(t *testing.T) {
 	now := time.Date(2026, 7, 27, 6, 4, 30, 0, time.UTC)
 
 	got := saveEffectiveFrom(SaveTaskRequest{}, now)
 
-	require.True(t, got.Equal(time.Date(2026, 7, 27, 6, 15, 0, 0, time.UTC)))
+	require.True(t, got.Equal(time.Date(2026, 7, 27, 7, 0, 0, 0, time.UTC)))
 }
 
 func TestSaveEffectiveFromUsesExplicitTime(t *testing.T) {
