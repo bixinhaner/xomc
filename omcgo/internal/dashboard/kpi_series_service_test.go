@@ -75,3 +75,16 @@ func TestGetKPITimeSeriesReturnsPublishedValuesWithoutFillingMissingBuckets(t *t
 	require.Empty(t, got["K2"], "missing buckets and metrics must remain empty")
 	require.Len(t, reader.queries, 1, "reader errors or gaps must never trigger a fallback query")
 }
+
+func TestCloneKPITimeSeriesResponsePreservesEmptyArrays(t *testing.T) {
+	source := KPITimeSeriesResponse{
+		"K_WITH_DATA": {{Time: time.Now(), Value: jsonx.Float(42)}},
+		"K_NO_DATA":   {},
+	}
+
+	cloned := cloneKPITimeSeriesResponse(source)
+
+	require.NotNil(t, cloned["K_NO_DATA"], "JSON contract requires [] instead of null")
+	require.Empty(t, cloned["K_NO_DATA"])
+	require.Equal(t, source["K_WITH_DATA"], cloned["K_WITH_DATA"])
+}

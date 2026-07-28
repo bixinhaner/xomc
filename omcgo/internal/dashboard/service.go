@@ -1426,7 +1426,9 @@ func dashboardSeriesCacheKey(kpiNames []string, technology model.Technology, gra
 func cloneKPITimeSeriesResponse(source KPITimeSeriesResponse) KPITimeSeriesResponse {
 	clone := make(KPITimeSeriesResponse, len(source))
 	for name, entries := range source {
-		clone[name] = append([]KPITimeSeriesEntry(nil), entries...)
+		clonedEntries := make([]KPITimeSeriesEntry, len(entries))
+		copy(clonedEntries, entries)
+		clone[name] = clonedEntries
 	}
 	return clone
 }
