@@ -23,7 +23,7 @@ import {
   theme,
   App,
 } from 'antd';
-import { SearchOutlined, ClearOutlined, ImportOutlined } from '@ant-design/icons';
+import { SearchOutlined, ClearOutlined, ImportOutlined, CloseOutlined } from '@ant-design/icons';
 import { useAllIndicators, useIndicatorList } from '@core/hooks/api/useIndicatorsLibrary';
 import type { DeviceType, IndicatorInfo } from '@core/types/indicatorLibrary';
 import { useAppStore } from '@core/store/appStore';
@@ -421,53 +421,46 @@ export default function MetricPickerModal({
                 <Text type="secondary" style={{ lineHeight: '28px' }}>
                   {intl.formatMessage({ id: 'perf.picker.noSelectedMetric' })}
                 </Text>
-              ) : selected.length <= 10 ? (
-                // ≤10 个：逐个展示可删除 tag
-                <div style={{ lineHeight: '28px' }}>
+              ) : (
+                <div style={{ maxHeight: 160, overflowY: 'auto' }}>
                   {selected.map((path) => {
-                    const label = formatMetricDisplay(path, labelMap[path]);
+                    const name = labelMap[path];
+                    const hasName = Boolean(name && name !== path);
                     return (
-                      <Tag
+                      <div
                         key={path}
-                        closable
-                        onClose={() => setSelected(selected.filter((p) => p !== path))}
+                        title={formatMetricDisplay(path, name)}
+                        aria-label={formatMetricDisplay(path, name)}
                         style={{
-                          marginBottom: 4,
-                          maxWidth: 200,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          display: 'inline-block',
-                          verticalAlign: 'middle',
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: 8,
+                          minHeight: 30,
+                          padding: '3px 0',
+                          borderBottom: `1px solid ${token.colorBorderSecondary}`,
                         }}
                       >
-                        <Tooltip title={label.length > 10 ? label : undefined}>
-                          {label}
+                        <Text code style={{ flex: '0 0 116px', lineHeight: '24px' }}>
+                          {path}
+                        </Text>
+                        {hasName ? (
+                          <Text style={{ flex: 1, minWidth: 0, lineHeight: '24px', wordBreak: 'break-word' }}>
+                            {name}
+                          </Text>
+                        ) : null}
+                        <Tooltip title={intl.formatMessage({ id: 'common.delete' })}>
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<CloseOutlined />}
+                            onClick={() => setSelected(selected.filter((p) => p !== path))}
+                            style={{ flex: '0 0 auto' }}
+                          />
                         </Tooltip>
-                      </Tag>
+                      </div>
                     );
                   })}
                 </div>
-              ) : (
-                // >10 个：折叠为一个 tag，hover 展示全部名称
-                <Tooltip
-                  title={
-                    <div style={{ maxHeight: 300, overflowY: 'auto' }}>
-                      {selected.map((path, i) => (
-                        <div key={path}>{i + 1}. {formatMetricDisplay(path, labelMap[path])}</div>
-                      ))}
-                    </div>
-                  }
-                  overlayStyle={{ maxWidth: 320 }}
-                >
-                  <Tag
-                    style={{ cursor: 'default', marginBottom: 4, fontSize: 13, padding: '2px 10px' }}
-                    color="blue"
-                  >
-                    {intl.formatMessage({ id: 'perf.picker.metricTitle' }, { count: selected.length })}
-                    {' '}···
-                  </Tag>
-                </Tooltip>
               )}
             </div>
           </div>

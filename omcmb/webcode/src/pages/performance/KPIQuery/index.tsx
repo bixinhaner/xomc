@@ -590,6 +590,15 @@ export default function KPIQuery() {
             .join(', ') + (paths.length > head ? ' ...' : ''),
         });
 
+  const metricSummaryTooltip = (paths: string[]) =>
+    paths.length === 0 ? undefined : (
+      <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+        {paths.map((path, index) => (
+          <div key={path}>{index + 1}. {formatMetricDisplay(path, metricLabels[path])}</div>
+        ))}
+      </div>
+    );
+
   // ── 渲染辅助 ─────────────────────────────────────────────────────
   const renderTemplateItem = (tpl: QueryTemplate) => {
     const canEdit = isSuperAdmin || tpl.creatorId === currentUser?.id;
@@ -887,11 +896,17 @@ export default function KPIQuery() {
 
                 <Form.Item label={t('perf.kpiQuery.metric')} style={{ marginBottom: 0 }}>
                   <Space.Compact style={{ width: 360 }}>
-                    <Input
-                      readOnly
-                      value={metricSummary(payload.metricPaths, 2)}
-                      placeholder={t('perf.kpiQuery.selectMetricPlaceholder')}
-                    />
+                    <Tooltip
+                      title={metricSummaryTooltip(payload.metricPaths)}
+                      placement="topLeft"
+                      overlayStyle={{ maxWidth: 520 }}
+                    >
+                      <Input
+                        readOnly
+                        value={metricSummary(payload.metricPaths, 2)}
+                        placeholder={t('perf.kpiQuery.selectMetricPlaceholder')}
+                      />
+                    </Tooltip>
                     <Button
                       disabled={!hasAvailableDeviceTypes}
                       onClick={() => { setPickerTarget('main'); setMetricPickerOpen(true); }}
@@ -1238,11 +1253,17 @@ export default function KPIQuery() {
 
             <Form.Item label={t('perf.kpiQuery.metric')} style={{ marginBottom: 0 }}>
               <Space.Compact style={{ width: '100%' }}>
-                <Input
-                  readOnly
-                  value={metricSummary(saveForm.payload.metricPaths, 3)}
-                  placeholder={t('perf.kpiQuery.selectMetricPlaceholder')}
-                />
+                <Tooltip
+                  title={metricSummaryTooltip(saveForm.payload.metricPaths)}
+                  placement="topLeft"
+                  overlayStyle={{ maxWidth: 520 }}
+                >
+                  <Input
+                    readOnly
+                    value={metricSummary(saveForm.payload.metricPaths, 3)}
+                    placeholder={t('perf.kpiQuery.selectMetricPlaceholder')}
+                  />
+                </Tooltip>
                 <Button
                   onClick={() => {
                     setPickerTarget('modal');

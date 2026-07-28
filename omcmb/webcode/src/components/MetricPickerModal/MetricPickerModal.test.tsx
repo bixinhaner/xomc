@@ -151,7 +151,7 @@ describe('MetricPickerModal 已选回显', () => {
 
     fireEvent.click(screen.getAllByRole('checkbox')[1]);
 
-    expect(screen.getByText('K900010002 可用率')).toBeTruthy();
+    expect(screen.getByLabelText('K900010002 可用率')).toBeTruthy();
   });
 
   it('搜索后勾选指标，「已选指标」显示 ID 和名称', () => {
@@ -179,7 +179,7 @@ describe('MetricPickerModal 已选回显', () => {
       keyword: 'K900010021',
       page: 1,
     });
-    expect(screen.getByText('K900010021 eNB间切换成功率-切出')).toBeTruthy();
+    expect(screen.getByLabelText('K900010021 eNB间切换成功率-切出')).toBeTruthy();
   });
 
   it('模板回填的预选指标带 initialLabels 时，「已选指标」显示 ID 和名称', () => {
@@ -190,21 +190,19 @@ describe('MetricPickerModal 已选回显', () => {
       },
     });
 
-    expect(screen.getByText('K-1 小区可用率')).toBeTruthy();
+    expect(screen.getByLabelText('K-1 小区可用率')).toBeTruthy();
   });
 
-  it('超过 10 个已选指标时，悬浮明细显示 ID 和名称', async () => {
+  it('超过 10 个已选指标时，已选列表仍显示 ID 和名称', async () => {
     const selected = Array.from({ length: 11 }, (_, i) => `K-${i + 1}`);
     const initialLabels = Object.fromEntries(
       selected.map((id, i) => [id, `指标${i + 1}`]),
     );
     renderModal({ initialSelected: selected, initialLabels });
 
-    fireEvent.mouseEnter(screen.getByText(/选择指标（已选 11 个） ···/));
-
     await waitFor(() => {
-      expect(screen.getByText('1. K-1 指标1')).toBeTruthy();
-      expect(screen.getByText('11. K-11 指标11')).toBeTruthy();
+      expect(screen.getByLabelText('K-1 指标1')).toBeTruthy();
+      expect(screen.getByLabelText('K-11 指标11')).toBeTruthy();
     });
   });
 
