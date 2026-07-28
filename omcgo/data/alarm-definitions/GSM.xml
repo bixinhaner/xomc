@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<alarmModel neType="GSM" deviceType="2" totalCount="5">
+    <alarms>
+        <alarm identifier="60001" cnName="网络断开或者abis配置有问题（remote ip、ipa unit-id等）" enName="Abis link error" severity="Critical" eventType="30000" cnProbableCause="网络断开或者abis配置有问题（remote ip、ipa unit-id等）" enProbableCause="Abis link error" cnSuggestion="检查网络和abis配置（remote ip、ipa unit-id等）" enSuggestion="Check Abis link net state and configurations" isShow="Y" />
+        <alarm identifier="60002" cnName="网络断开" enName="A link error" severity="Critical" eventType="30000" cnProbableCause="网络断开" enProbableCause="A link error" cnSuggestion="检查网络" enSuggestion="Check A link net state and config" isShow="Y" />
+        <alarm identifier="60003" cnName="BTS不可用" enName="BTS unavailable" severity="Major" eventType="30003" cnProbableCause="BTS不可用" enProbableCause="BTS unavailable" cnSuggestion="检查BTS的TRX参数配置" enSuggestion="Check the TRX parameter Settings of the BTS" isShow="Y" />
+        <alarm identifier="60004" cnName="网络断开" enName="BSC MASTER A link error" severity="Critical" eventType="30000" cnProbableCause="网络断开" enProbableCause="BSC MASTER A link error" cnSuggestion="检查网络" enSuggestion="Check A link net state and config" isShow="Y" />
+        <alarm identifier="60005" cnName="网络断开" enName="BSC BACKUP A link error" severity="Critical" eventType="30000" cnProbableCause="网络断开" enProbableCause="BSC BACKUP A link error" cnSuggestion="检查网络" enSuggestion="Check A link net state and config" isShow="Y" />
+    </alarms>
+</alarmModel>

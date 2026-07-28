@@ -260,9 +260,28 @@ describe('dashboardApi — 图表数据映射', () => {
     expect(out[0]).toEqual({ region: '华东', total: 100, online: 70, offline: 30 });
   });
 
-  it('getTopAlarmDevices：从 summary.recent_alarms 提取，缺省（null）兜空数组', async () => {
-    getMock.mockResolvedValue({ data: { recent_alarms: null } });
+  it('getTopAlarmDevices：请求专用端点并映射四级当前告警数量', async () => {
+    getMock.mockResolvedValue({
+      data: [{
+        device_sn: '460001234567890',
+        technology: 'lte',
+        alarm_count: 10,
+        critical: 4,
+        major: 3,
+        minor: 2,
+        warning: 1,
+      }],
+    });
     const out = await dashboardApi.getTopAlarmDevices();
-    expect(out).toEqual([]);
+    expect(getMock.mock.calls[0][0]).toBe('/dashboard/top-alarm-devices');
+    expect(out).toEqual([{
+      deviceSN: '460001234567890',
+      technology: 'lte',
+      alarmCount: 10,
+      critical: 4,
+      major: 3,
+      minor: 2,
+      warning: 1,
+    }]);
   });
 });

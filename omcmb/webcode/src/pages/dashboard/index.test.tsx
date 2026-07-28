@@ -118,7 +118,7 @@ vi.mock('./DashboardKPIModules', () => ({
   DashboardKPIModules: () => <div data-testid="dashboard-kpi-modules" />,
 }));
 
-vi.mock('@/components/dashboard/useTechnologyDictionary', () => ({
+vi.mock('@core/hooks/api/useTechnologyDictionary', () => ({
   useTechnologyDictionary: () => ({ options: [] }),
 }));
 

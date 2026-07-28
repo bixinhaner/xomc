@@ -24,6 +24,8 @@ import { buildAdhocExportParams, defaultExportTaskName } from '@core/utils/kpiEx
 import { adhocIncludesCell, adhocObjectHeaderKey, adhocObjectName, adhocTechnology, objectKeyOf } from './adhocObjectColumn';
 import { formatSystemTime, nowInSystemTimezone, toSystemTimezoneRFC3339 } from '@core/utils/systemTime';
 import { buildAdhocChartOption, type AdhocMetricSeries } from './adhocChartOption';
+import { useTechnologyDictionary } from '@core/hooks/api/useTechnologyDictionary';
+import { displayAdhocTaskName } from '../adhocTaskDisplay';
 
 // 按粒度算默认时窗：覆盖最近 7 天，但粒度粗于"天"时至少 7 个周期。
 // 15min / hourly / daily → 7 天；weekly → 7 周；monthly → 7 月。end 取系统时区当前时刻。
@@ -172,6 +174,7 @@ function buildWideTable(
 
 export function AdhocResultPanel({ taskId, embedded = false }: Props) {
   const intl = useIntl();
+  const { labelForTechnology } = useTechnologyDictionary();
   const taskQuery = usePmAdhocDetail(taskId);
   // #563：筛选器按系统时区展示和序列化，与图表 X 轴统一参照系。
   const systemTimezone = useSystemTimezoneValue();
@@ -343,13 +346,8 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
       size="small"
       title={
         <span>
-          {task.name}
-          <Tag color="purple" style={{ marginLeft: 8 }}>
-            {task.mode === 'continuous'
-              ? intl.formatMessage({ id: 'perf.adhoc.modeContinuous' })
-              : intl.formatMessage({ id: 'perf.adhoc.modeOneshot' })}
-          </Tag>
-          <Tag color={task.status === 'succeeded' ? 'success' : task.status === 'failed' ? 'error' : 'processing'}>
+          {displayAdhocTaskName(task, labelForTechnology)}
+          <Tag color={task.status === 'succeeded' ? 'success' : task.status === 'failed' ? 'error' : 'processing'} style={{ marginLeft: 8 }}>
             {task.status}
           </Tag>
         </span>
@@ -377,6 +375,7 @@ function GranularityView({
   dimension: AdhocDimension;
 }) {
   const intl = useIntl();
+  const { labelForTechnology } = useTechnologyDictionary();
   const series = useMemo(() => buildSeriesByMetric(rows, granularity), [rows, granularity]);
   const { columns: metricCols, data: wideData } = useMemo(
     () => buildWideTable(rows, granularity, intl, taskDeviceSns, dimension),
@@ -420,9 +419,9 @@ function GranularityView({
                 {
                   title: intl.formatMessage({ id: 'perf.adhoc.colTechnology' }),
                   key: '__tech',
-                  width: 100,
+                  width: 140,
                   render: (_: unknown, r: WideResultRow) =>
-                    r.technology ? <Tag>{r.technology}</Tag> : '-',
+                    r.technology ? <Tag>{labelForTechnology(r.technology.toLowerCase())}</Tag> : '-',
                 },
               ]
             : []),

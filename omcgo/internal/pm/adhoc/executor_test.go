@@ -80,6 +80,9 @@ func (s *stubRepo) FinishRun(context.Context, uuid.UUID, Status, int, string) er
 func (s *stubRepo) ListRuns(context.Context, uuid.UUID, int, int) ([]TaskRun, error) {
 	return nil, nil
 }
+func (s *stubRepo) ListResultMetricPaths(context.Context, uuid.UUID, resultsFilter) ([]string, error) {
+	return nil, nil
+}
 
 type stubPublisher struct {
 	mu     sync.Mutex

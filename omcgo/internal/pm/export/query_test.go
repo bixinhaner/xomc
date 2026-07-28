@@ -185,7 +185,8 @@ func TestBuildAdhocKeysetSQL_WithTimeWindow(t *testing.T) {
 	et := time.Now()
 	q, _ := buildAdhocKeysetSQL(id, nil, st, et, false, time.Time{}, uuid.Nil, 100)
 	assert.Contains(t, q, "r.time >=")
-	assert.Contains(t, q, "r.time <=")
+	assert.Contains(t, q, "r.time < ")
+	assert.NotContains(t, q, "r.time <=")
 }
 
 // #38：adhoc 底层可全存该制式全部已启用指标，但导出表头和数据都只能包含任务配置指标集。
@@ -241,4 +242,22 @@ func TestBuildAdhocDistinctMetricsSQL(t *testing.T) {
 	assert.Contains(t, q, "FROM pm_adhoc_aggregation_results")
 	assert.Contains(t, q, "task_id")
 	assert.Equal(t, id.String(), args[0])
+}
+
+func TestBuildAdhocResultMetricScopeSQL_UsesHalfOpenWindow(t *testing.T) {
+	id := uuid.New()
+	st := time.Now().Add(-time.Hour)
+	et := time.Now()
+
+	q, args, err := buildAdhocResultMetricScopeSQL(id, st, et)
+
+	assert.NoError(t, err)
+	assert.Contains(t, q, "SELECT DISTINCT metric_path")
+	assert.Contains(t, q, "time >= ")
+	assert.Contains(t, q, "time < ")
+	assert.NotContains(t, q, "time <=")
+	assert.Len(t, args, 3)
+	assert.Equal(t, id.String(), args[0])
+	assert.Equal(t, st, args[1])
+	assert.Equal(t, et, args[2])
 }

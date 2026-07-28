@@ -10,15 +10,9 @@ import { useIntl } from 'react-intl';
 import { Space, Spin, Tag, Typography } from 'antd';
 import { useIndicatorCandidates } from '@core/hooks/api/usePerformance';
 import type { IndicatorCandidate } from '@core/services/api/pmApi';
-import type { DeviceType } from '@core/types/indicatorLibrary';
 import { useAppStore } from '@core/store/appStore';
 import { formatIndicatorLevel, shouldShowIndicatorLevel } from '@core/utils/indicatorLevelDisplay';
-
-const TECH_TO_DEVICE_TYPE: Record<string, DeviceType> = {
-  lte: 'ENB',
-  nr: 'GNB',
-  gsm: 'GSM',
-};
+import { isKnownTechnology, technologyToDeviceType } from '@core/hooks/api/useTechnologyDictionary';
 
 interface Props {
   metricPaths: string[];
@@ -29,7 +23,7 @@ export default function SelectedMetricsTags({ metricPaths, technology }: Props) 
   const intl = useIntl();
   const isEn = useAppStore((s) => s.locale) === 'en-US';
   // 无制式（不限）时无法定位单一指标库 → 直接显编号（回退语义，不报错）。
-  const deviceType = technology ? TECH_TO_DEVICE_TYPE[technology] : undefined;
+  const deviceType = isKnownTechnology(technology) ? technologyToDeviceType(technology) : undefined;
   const { data: candidates, isLoading } = useIndicatorCandidates(deviceType, {
     includeCounters: true,
   });

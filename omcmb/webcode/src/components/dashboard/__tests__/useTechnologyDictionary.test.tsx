@@ -21,7 +21,11 @@ vi.mock('@core/hooks/api/useSystem', () => ({
   useDictionary: (...args: unknown[]) => useDictionaryMock(...args),
 }));
 
-import { useTechnologyDictionary } from '../useTechnologyDictionary';
+import {
+  deviceTypeToTechnology,
+  technologyToDeviceType,
+  useTechnologyDictionary,
+} from '../useTechnologyDictionary';
 
 function wrap(locale = 'zh-CN') {
   return ({ children }: { children: ReactNode }) => (
@@ -125,5 +129,45 @@ describe('useTechnologyDictionary', () => {
     );
     const { result } = renderHook(() => useTechnologyDictionary(), { wrapper: wrap() });
     expect(result.current.options.map((o) => o.value)).toEqual(['lte', 'nr']);
+  });
+
+  it('只读 label 可使用禁用字典项；字典缺失时回退到原值大写', () => {
+    useDictionaryMock.mockReturnValue(
+      ok([
+        { id: 1, value: 'lte', label: 'eNB(LTE)', sort: 1, status: true },
+        { id: 2, value: 'nr', label: 'gNB(NR)', sort: 2, status: false },
+      ]),
+    );
+    const { result } = renderHook(() => useTechnologyDictionary(), { wrapper: wrap() });
+
+    expect(result.current.options.map((o) => o.value)).toEqual(['lte']);
+    expect(result.current.labelForTechnology('nr')).toBe('gNB(NR)');
+    expect(result.current.labelForTechnology('gsm')).toBe('GSM');
+    expect(result.current.labelForTechnology(undefined)).toBe('—');
+    expect(result.current.labelForRadioMode('gNB')).toBe('gNB(NR)');
+    expect(result.current.labelForRadioMode('legacy')).toBe('legacy');
+  });
+
+  it('deviceTypeOptions 复用字典 label，并保持 ENB/GNB/GSM 内部映射', () => {
+    useDictionaryMock.mockReturnValue(
+      ok([
+        { id: 2, value: 'nr', label: 'gNB(NR)', sort: 2, status: true },
+        { id: 3, value: 'gsm', label: 'GSM', sort: 3, status: true },
+        { id: 1, value: 'lte', label: 'eNB(LTE)', sort: 1, status: true },
+      ]),
+    );
+    const { result } = renderHook(() => useTechnologyDictionary(), { wrapper: wrap() });
+
+    expect(result.current.deviceTypeOptions).toEqual([
+      { value: 'ENB', label: 'eNB(LTE)', sort: 1, technology: 'lte' },
+      { value: 'GNB', label: 'gNB(NR)', sort: 2, technology: 'nr' },
+      { value: 'GSM', label: 'GSM', sort: 3, technology: 'gsm' },
+    ]);
+    expect(technologyToDeviceType('lte')).toBe('ENB');
+    expect(technologyToDeviceType('nr')).toBe('GNB');
+    expect(technologyToDeviceType('gsm')).toBe('GSM');
+    expect(deviceTypeToTechnology('ENB')).toBe('lte');
+    expect(deviceTypeToTechnology('GNB')).toBe('nr');
+    expect(deviceTypeToTechnology('GSM')).toBe('gsm');
   });
 });

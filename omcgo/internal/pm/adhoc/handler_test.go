@@ -18,15 +18,16 @@ import (
 
 // handlerStubRepo 仅实现 Create/List/Get/Cancel/Update，不依赖 DB。
 type handlerStubRepo struct {
-	mu       sync.Mutex
-	tasks    map[uuid.UUID]*Task
-	create   func(CreateRequest) (uuid.UUID, error)
-	cancel   func(uuid.UUID) error
-	get      func(uuid.UUID) (*Task, error)       // T-0194：注入既有任务（含 is_builtin/mode/technology）
-	update   func(uuid.UUID, UpdateRequest) error // T-0194：捕获更新入参
-	listFn   func(ListFilter) ([]Task, error)
-	deleteFn func(uuid.UUID) error           // #392：注入删除结果（区分终态/内置/非终态）
-	resumeFn func(uuid.UUID) (Status, error) // #674：注入恢复结果
+	mu                  sync.Mutex
+	tasks               map[uuid.UUID]*Task
+	create              func(CreateRequest) (uuid.UUID, error)
+	cancel              func(uuid.UUID) error
+	get                 func(uuid.UUID) (*Task, error)       // T-0194：注入既有任务（含 is_builtin/mode/technology）
+	update              func(uuid.UUID, UpdateRequest) error // T-0194：捕获更新入参
+	listFn              func(ListFilter) ([]Task, error)
+	deleteFn            func(uuid.UUID) error           // #392：注入删除结果（区分终态/内置/非终态）
+	resumeFn            func(uuid.UUID) (Status, error) // #674：注入恢复结果
+	resultMetricPathsFn func(uuid.UUID, resultsFilter) ([]string, error)
 }
 
 func (s *handlerStubRepo) Create(_ context.Context, req CreateRequest) (uuid.UUID, error) {
@@ -43,7 +44,8 @@ func (s *handlerStubRepo) Create(_ context.Context, req CreateRequest) (uuid.UUI
 		ID: id, Name: req.Name, Mode: req.Mode, CronExpr: req.CronExpr,
 		DeviceSNs: req.DeviceSNs, MetricPaths: req.MetricPaths, Granularities: req.Granularities,
 		WindowStart: req.WindowStart, WindowEnd: req.WindowEnd, Status: StatusPending,
-		Creator: req.Creator, Visibility: normalizeVisibility(req.Visibility), CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		PlannedEndAt: req.PlannedEndAt,
+		Creator:      req.Creator, Visibility: normalizeVisibility(req.Visibility), CreatedAt: time.Now(), UpdatedAt: time.Now(),
 	}
 	return id, nil
 }
@@ -132,6 +134,12 @@ func (s *handlerStubRepo) FinishRun(context.Context, uuid.UUID, Status, int, str
 	return nil
 }
 func (s *handlerStubRepo) ListRuns(context.Context, uuid.UUID, int, int) ([]TaskRun, error) {
+	return nil, nil
+}
+func (s *handlerStubRepo) ListResultMetricPaths(_ context.Context, id uuid.UUID, filter resultsFilter) ([]string, error) {
+	if s.resultMetricPathsFn != nil {
+		return s.resultMetricPathsFn(id, filter)
+	}
 	return nil, nil
 }
 

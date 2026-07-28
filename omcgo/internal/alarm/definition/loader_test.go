@@ -3,6 +3,7 @@ package definition
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -59,45 +60,104 @@ func TestResolveSources_MissingDir(t *testing.T) {
 
 func TestValidateAlarmIdentifiers(t *testing.T) {
 	tests := []struct {
-		name    string
-		alarms  []xmlAlarm
-		seen    map[string]string
-		wantErr string
+		name     string
+		alarms   []xmlAlarm
+		seen     map[string]seenAlarmIdentifier
+		filename string
+		neType   string
+		wantErr  string
 	}{
 		{
 			name:   "accepts unique identifiers",
 			alarms: []xmlAlarm{{Identifier: "1001"}, {Identifier: "1002"}},
-			seen:   map[string]string{"999": "ENB.xml"},
+			seen: map[string]seenAlarmIdentifier{
+				"999": {Filename: "ENB.xml", NeType: "ENB", Alarm: xmlAlarm{Identifier: "999"}},
+			},
 		},
 		{
 			name:    "rejects empty library",
 			alarms:  []xmlAlarm{},
-			seen:    map[string]string{},
+			seen:    map[string]seenAlarmIdentifier{},
 			wantErr: "contains no alarm definitions",
 		},
 		{
 			name:    "rejects missing identifier",
 			alarms:  []xmlAlarm{{Identifier: ""}},
-			seen:    map[string]string{},
+			seen:    map[string]seenAlarmIdentifier{},
 			wantErr: "without identifier",
 		},
 		{
 			name:    "rejects duplicate identifier in XML",
 			alarms:  []xmlAlarm{{Identifier: "1001"}, {Identifier: "1001"}},
-			seen:    map[string]string{},
+			seen:    map[string]seenAlarmIdentifier{},
 			wantErr: "duplicated in NEW.xml",
 		},
 		{
-			name:    "rejects identifier owned by another library",
-			alarms:  []xmlAlarm{{Identifier: "1001"}},
-			seen:    map[string]string{"1001": "ENB.xml"},
+			name:   "accepts unchanged GSM definitions retained in legacy ENB",
+			alarms: []xmlAlarm{{Identifier: "60001"}},
+			seen: map[string]seenAlarmIdentifier{
+				"60001": {Filename: "ENB.xml", NeType: "ENB", Alarm: xmlAlarm{Identifier: "60001"}},
+			},
+			filename: "GSM.xml",
+		},
+		{
+			name:   "rejects changed GSM definition retained in legacy ENB",
+			alarms: []xmlAlarm{{Identifier: "60001", CnName: "新版"}},
+			seen: map[string]seenAlarmIdentifier{
+				"60001": {Filename: "ENB.xml", NeType: "ENB", Alarm: xmlAlarm{Identifier: "60001", CnName: "现网定制"}},
+			},
+			filename: "GSM.xml",
+			wantErr:  "conflicts with ENB.xml",
+		},
+		{
+			name:   "rejects legacy ENB file with customized ne type",
+			alarms: []xmlAlarm{{Identifier: "60001"}},
+			seen: map[string]seenAlarmIdentifier{
+				"60001": {Filename: "ENB.xml", NeType: "CUSTOM", Alarm: xmlAlarm{Identifier: "60001"}},
+			},
+			filename: "GSM.xml",
+			wantErr:  "conflicts with ENB.xml",
+		},
+		{
+			name:   "rejects lowercase legacy ENB ne type",
+			alarms: []xmlAlarm{{Identifier: "60001"}},
+			seen: map[string]seenAlarmIdentifier{
+				"60001": {Filename: "ENB.xml", NeType: "enb", Alarm: xmlAlarm{Identifier: "60001"}},
+			},
+			filename: "GSM.xml",
+			wantErr:  "conflicts with ENB.xml",
+		},
+		{
+			name:   "rejects lowercase current GSM ne type",
+			alarms: []xmlAlarm{{Identifier: "60001"}},
+			seen: map[string]seenAlarmIdentifier{
+				"60001": {Filename: "ENB.xml", NeType: "ENB", Alarm: xmlAlarm{Identifier: "60001"}},
+			},
+			filename: "GSM.xml",
+			neType:   "gsm",
+			wantErr:  "conflicts with ENB.xml",
+		},
+		{
+			name:   "rejects identifier owned by another library",
+			alarms: []xmlAlarm{{Identifier: "1001"}},
+			seen: map[string]seenAlarmIdentifier{
+				"1001": {Filename: "ENB.xml", NeType: "ENB", Alarm: xmlAlarm{Identifier: "1001"}},
+			},
 			wantErr: "conflicts with ENB.xml",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateAlarmIdentifiers(tt.alarms, tt.seen, "NEW.xml")
+			filename := tt.filename
+			if filename == "" {
+				filename = "NEW.xml"
+			}
+			neType := tt.neType
+			if neType == "" {
+				neType = strings.TrimSuffix(filename, filepath.Ext(filename))
+			}
+			err := validateAlarmIdentifiers(tt.alarms, tt.seen, filename, neType)
 			if tt.wantErr == "" {
 				require.NoError(t, err)
 				return

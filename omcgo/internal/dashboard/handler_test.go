@@ -66,6 +66,15 @@ func TestDashHandler_RegisterRoutes_MethodNotAllowed(t *testing.T) {
 	assert.NotEqual(t, http.StatusOK, w.Code)
 }
 
+func TestDashHandler_TopAlarmDevicesRequiresVisibilityContext(t *testing.T) {
+	router, handler := dashHSetupRouter()
+	handler.SetPermissionService(dashVisibleGroupsResolver{})
+
+	w := dashHDoRequest(router, http.MethodGet, "/api/v1/dashboard/top-alarm-devices")
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
 // ---------------------------------------------------------------------------
 // Tests: AlarmTrend parameter validation
 // ---------------------------------------------------------------------------

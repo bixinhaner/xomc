@@ -35,8 +35,7 @@ func NewHandler(service *Service, permChecker admin.PermissionChecker) *Handler 
 	return &Handler{service: service, permChecker: permChecker}
 }
 
-// SetPermissionService injects the device-group visibility resolver used by
-// active alarm inventory charts.
+// SetPermissionService injects device-group visibility for scoped dashboard alarm queries.
 func (h *Handler) SetPermissionService(perm authz.VisibleGroupsResolver) {
 	h.resolver = authz.NewResolver(perm)
 }
@@ -70,7 +69,22 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		dashboard.GET("/alarm-efficiency", h.GetAlarmEfficiency)
 		dashboard.GET("/alarm-heatmap", h.GetAlarmHeatmap)
 		dashboard.GET("/alarm-heatmap-by-severity", h.GetAlarmHeatmapBySeverity)
+		dashboard.GET("/top-alarm-devices", h.GetTopAlarmDevices)
 	}
+}
+
+// GetTopAlarmDevices handles GET /api/v1/dashboard/top-alarm-devices.
+func (h *Handler) GetTopAlarmDevices(c *gin.Context) {
+	visibleGroups, ok := h.resolver.FromContext(c)
+	if !ok {
+		return
+	}
+	devices, err := h.service.GetTopAlarmDevices(c.Request.Context(), visibleGroups)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	response.OK(c, devices)
 }
 
 // GetSummary handles GET /api/v1/dashboard/summary.

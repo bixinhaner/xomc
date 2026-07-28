@@ -17,21 +17,19 @@ import { useUpdatePmAdhoc } from '@core/hooks/api/usePmAdhoc';
 import { useIndicatorCandidates } from '@core/hooks/api/usePerformance';
 import type { IndicatorCandidate } from '@core/services/api/pmApi';
 import type { AdhocTask } from '@core/types/pmAdhoc';
-import type { DeviceType } from '@core/types/indicatorLibrary';
 import { formatIndicatorLevel, shouldShowIndicatorLevel } from '@core/utils/indicatorLevelDisplay';
+import {
+  isKnownTechnology,
+  technologyToDeviceType,
+  useTechnologyDictionary,
+} from '@core/hooks/api/useTechnologyDictionary';
 import {
   MetricBatchInputModal,
   formatMetricIdSamples,
   type MetricBatchSelectionResult,
 } from '@/components/MetricPickerModal';
 import { resolveLimitedTransferSelection } from './selectionLimit';
-
-// 制式 → 指标库 deviceType（与向导一致）。
-const TECH_TO_DEVICE_TYPE: Record<string, DeviceType> = {
-  lte: 'ENB',
-  nr: 'GNB',
-  gsm: 'GSM',
-};
+import { displayAdhocTaskName } from '../adhocTaskDisplay';
 
 const METRIC_MODAL_RIGHT_GUTTER = 24;
 const METRIC_MODAL_WIDTH = `calc(100vw - ${SIDEBAR_WIDTH + METRIC_MODAL_RIGHT_GUTTER}px)`;
@@ -88,6 +86,7 @@ interface Props {
 
 export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
   const intl = useIntl();
+  const { labelForTechnology } = useTechnologyDictionary();
   const updateMut = useUpdatePmAdhoc();
 
   const [metricPaths, setMetricPaths] = useState<string[]>([]);
@@ -104,7 +103,10 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
   }, [open, task]);
 
   // 内置任务 technology 决定候选 deviceType；无制式（理论上内置都有）回退 ENB。
-  const deviceType = TECH_TO_DEVICE_TYPE[task?.technology ?? ''] ?? 'ENB';
+  const taskTechnology = task?.technology;
+  const deviceType = isKnownTechnology(taskTechnology)
+    ? technologyToDeviceType(taskTechnology)
+    : 'ENB';
   const { data: candidates, isLoading } = useIndicatorCandidates(deviceType, {
     includeCounters: true,
     enabledOnly: true,
@@ -200,7 +202,10 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
     <Modal
       title={
         task
-          ? intl.formatMessage({ id: 'perf.adhoc.editMetricTitle' }, { name: task.name })
+          ? intl.formatMessage(
+              { id: 'perf.adhoc.editMetricTitle' },
+              { name: displayAdhocTaskName(task, labelForTechnology) },
+            )
           : intl.formatMessage({ id: 'perf.adhoc.editMetricTitleDefault' })
       }
       open={open}
@@ -217,7 +222,7 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
           showIcon
           message={intl.formatMessage(
             { id: 'perf.adhoc.editMetricHint' },
-            { tech: (task?.technology ?? '').toUpperCase(), deviceType },
+            { tech: labelForTechnology(task?.technology), deviceType },
           )}
         />
         <Space size="middle" align="center">

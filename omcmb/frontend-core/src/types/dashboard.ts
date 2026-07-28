@@ -136,9 +136,11 @@ export interface RegionDeviceStats {
 export interface TopAlarmDevice {
   deviceSN: string;
   technology: string;
-  deviceName: string;
   alarmCount: number;
-  severity: string;
+  critical: number;
+  major: number;
+  minor: number;
+  warning: number;
 }
 
 /**

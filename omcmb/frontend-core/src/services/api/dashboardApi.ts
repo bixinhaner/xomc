@@ -44,6 +44,16 @@ interface BackendRecentAlarm {
   severity: string;
 }
 
+interface BackendTopAlarmDevice {
+  device_sn: string;
+  technology: string;
+  alarm_count: number;
+  critical: number;
+  major: number;
+  minor: number;
+  warning: number;
+}
+
 interface BackendDashboardSummary {
   device_stats: BackendDeviceStats;
   alarm_stats: BackendAlarmStats;
@@ -200,15 +210,17 @@ function mapBackendSummary(b: BackendDashboardSummary): DashboardSummary {
   };
 }
 
-function mapRecentAlarmsToTopDevices(
-  recentAlarms: BackendRecentAlarm[]
+function mapTopAlarmDevices(
+  devices: BackendTopAlarmDevice[]
 ): DashboardChartData['topAlarmDevices'] {
-  return recentAlarms.map((a) => ({
-    deviceSN: a.device_sn,
-    technology: a.technology,
-    deviceName: a.device_name,
-    alarmCount: a.alarm_count,
-    severity: a.severity,
+  return devices.map((device) => ({
+    deviceSN: device.device_sn,
+    technology: device.technology,
+    alarmCount: device.alarm_count,
+    critical: device.critical,
+    major: device.major,
+    minor: device.minor,
+    warning: device.warning,
   }));
 }
 
@@ -408,12 +420,12 @@ export const dashboardApi = {
     return data;
   },
 
-  /** Top alarm devices — extracted from /dashboard/summary recent_alarms */
+  /** Top alarm devices from current uncleared alarms */
   async getTopAlarmDevices(): Promise<DashboardChartData['topAlarmDevices']> {
-    const { data } = await http.get<BackendDashboardSummary>(
-      '/dashboard/summary'
+    const { data } = await http.get<BackendTopAlarmDevice[]>(
+      '/dashboard/top-alarm-devices'
     );
-    return mapRecentAlarmsToTopDevices(data.recent_alarms || []);
+    return mapTopAlarmDevices(data || []);
   },
 
   /** KPI trend from GET /dashboard/kpi-trend */
