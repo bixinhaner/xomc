@@ -795,19 +795,33 @@ sep "8/9 启动业务 + web + 监控"
 log "${DC[*]} up -d"
 "${DC[@]}" up -d
 
-log "等待业务容器启动（10s）..."
-sleep 10
+log "等待业务容器启动（最多 90s，健康检查每 5s 重试）..."
+HEALTHCHECK_TIMEOUT=90
+HEALTHCHECK_INTERVAL=5
+HEALTHCHECK_WAIT=0
+HEALTHCHECK_LOG="$(mktemp)"
+HEALTH_OK=0
+while [ "$HEALTHCHECK_WAIT" -lt "$HEALTHCHECK_TIMEOUT" ]; do
+  if bash "$OMC_ROOT/current/deploy/healthcheck.sh" >"$HEALTHCHECK_LOG" 2>&1; then
+    HEALTH_OK=1
+    break
+  fi
+  sleep "$HEALTHCHECK_INTERVAL"
+  HEALTHCHECK_WAIT=$((HEALTHCHECK_WAIT + HEALTHCHECK_INTERVAL))
+done
 
 # =============================================================================
 # Step 9. healthcheck
 # =============================================================================
 sep "9/9 健康检查"
 
-if bash "$OMC_ROOT/current/deploy/healthcheck.sh"; then
-  HEALTH_OK=1
+if [ "$HEALTH_OK" -eq 1 ]; then
+  cat "$HEALTHCHECK_LOG"
 else
-  HEALTH_OK=0
+  cat "$HEALTHCHECK_LOG"
+  warn "健康检查在 ${HEALTHCHECK_TIMEOUT}s 内未通过"
 fi
+rm -f "$HEALTHCHECK_LOG"
 
 echo
 sep "部署完成"
