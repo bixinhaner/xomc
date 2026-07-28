@@ -19,15 +19,23 @@ Expected: CPU utilization percent. NO-DATA means node_exporter is unavailable; 0
 Expected: host memory utilization ratio. NO-DATA means node_exporter is unavailable; 0 is valid.
 
 ## Host filesystem (MUST-HAVE: node_exporter)
-1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"})
+1 - (node_filesystem_avail_bytes{job="node",fstype!~"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs.*|fuse.*"} / node_filesystem_size_bytes{job="node",fstype!~"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs.*|fuse.*"})
 Expected: persistent filesystem utilization ratio. NO-DATA means the filesystem/node exporter is unavailable; 0 is valid free usage.
 
+## Host filesystem inode usage (MUST-HAVE: node_exporter)
+1 - (node_filesystem_files_free{job="node",fstype!~"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs.*|fuse.*"} / node_filesystem_files{job="node",fstype!~"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs.*|fuse.*"})
+Expected: inode utilization by mountpoint. NO-DATA means inode telemetry is unavailable; 0 is a real measured empty inode state.
+
+## Host filesystem exhaustion forecast (MUST-HAVE: node_exporter)
+predict_linear(node_filesystem_avail_bytes{job="node",fstype!~"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs.*|fuse.*"}[6h], 4 * 3600)
+Expected: predicted available bytes four hours ahead. A value below zero indicates likely exhaustion; NO-DATA is not zero.
+
 ## cAdvisor container CPU (MUST-HAVE when containers are running)
-sum by (name) (rate(container_cpu_usage_seconds_total{name!=""}[5m]))
+sum by (service) (rate(container_cpu_usage_seconds_total{service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"}[5m]))
 Expected: per-container CPU cores used. NO-DATA means cAdvisor/container discovery is unavailable; 0 is valid idle container.
 
 ## cAdvisor container memory (MUST-HAVE when containers are running)
-sum by (name) (container_memory_working_set_bytes{name!=""})
+sum by (service) (container_memory_working_set_bytes{service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"})
 Expected: per-container working set bytes. NO-DATA means cAdvisor/container discovery is unavailable; 0 is not a substitute for absent telemetry.
 
 ## MinIO (MUST-HAVE after MinIO is started)
