@@ -139,12 +139,23 @@ export default function MetricPickerModal({
     enabled: open && (enableBatchInput || onlyEnabledIndicators),
     isEnabled: onlyEnabledIndicators ? true : undefined,
   });
+  const { data: allLabelIndicatorsData } = useAllIndicators(deviceType, {
+    enabled: open && onlyEnabledIndicators,
+  });
 
   const items = useMemo(() => data?.items ?? [], [data]);
-  const allItems = useMemo(() => allIndicatorsData?.items ?? [], [allIndicatorsData]);
+  const allItems = useMemo(() => allIndicatorsData?.items ?? [], [allIndicatorsData?.items]);
+  const labelItems = useMemo(
+    () => (onlyEnabledIndicators ? (allLabelIndicatorsData?.items ?? allItems) : allItems),
+    [allItems, allLabelIndicatorsData?.items, onlyEnabledIndicators],
+  );
   const allItemById = useMemo(
     () => new Map(allItems.map((item) => [metricValueOf(item), item])),
     [allItems],
+  );
+  const labelItemById = useMemo(
+    () => new Map(labelItems.map((item) => [metricValueOf(item), item])),
+    [labelItems],
   );
   const total = data?.total ?? 0;
 
@@ -175,6 +186,35 @@ export default function MetricPickerModal({
       setLabelMap((prev) => {
         const next = { ...prev };
         for (const it of items) next[metricValueOf(it)] = metricLabelOf(it, isEn);
+        return next;
+      });
+    }
+  }
+
+  // 全量指标表用于补齐「已选」里当前页之外的预选指标名称。
+  // onlyEnabledIndicators 下，候选/校验仍用启用指标表；显示名称可用整库兜底。
+  // 仅同步当前 selected，避免把整张指标库都塞进 labelMap；语言切换时按当前语言刷新。
+  const [seenLabelItems, setSeenLabelItems] = useState<IndicatorInfo[] | null>(null);
+  const [seenAllItemsIsEn, setSeenAllItemsIsEn] = useState<boolean | null>(null);
+  const [seenAllItemsOpen, setSeenAllItemsOpen] = useState<boolean | null>(null);
+  const [seenSelectedForAllItems, setSeenSelectedForAllItems] = useState<string[] | null>(null);
+  if (
+    seenLabelItems !== labelItems ||
+    seenAllItemsIsEn !== isEn ||
+    seenAllItemsOpen !== open ||
+    seenSelectedForAllItems !== selected
+  ) {
+    setSeenLabelItems(labelItems);
+    setSeenAllItemsIsEn(isEn);
+    setSeenAllItemsOpen(open);
+    setSeenSelectedForAllItems(selected);
+    if (open && labelItems.length > 0 && selected.length > 0) {
+      setLabelMap((prev) => {
+        const next = { ...prev };
+        for (const id of selected) {
+          const item = labelItemById.get(id);
+          if (item) next[id] = metricLabelOf(item, isEn);
+        }
         return next;
       });
     }
