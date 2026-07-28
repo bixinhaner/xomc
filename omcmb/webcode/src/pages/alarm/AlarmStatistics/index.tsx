@@ -1,6 +1,7 @@
 import { useMemo, useState, useCallback, useEffect, type ReactNode } from 'react';
 import { Card, Col, Row, Typography, DatePicker, Radio, Space, Button, Switch, Tag, Tooltip, Spin } from 'antd';
 import type { Dayjs } from 'dayjs';
+import type { CallbackDataParams } from 'echarts/types/dist/shared';
 import dayjs from 'dayjs';
 import { ReloadOutlined, SyncOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import PieChart, { type PieDataItem } from '@/components/Charts/PieChart';
@@ -15,6 +16,11 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import EfficiencyCard from './EfficiencyCard';
 import AlarmHeatmap from './AlarmHeatmap';
+import {
+  buildTopAlarmDeviceChart,
+  escapeChartTooltipText,
+  SEVERITY_COLORS,
+} from './alarmCharts';
 import { buildDrillDownSearch } from '../drillDown';
 
 // 扩展的饼图数据项，包含严重度信息
@@ -23,24 +29,6 @@ interface AlarmPieDataItem extends PieDataItem {
 }
 
 const { Title } = Typography;
-
-// 告警级别颜色 - 电信行业标准配色（符合3GPP TMF642规范）
-/* eslint-disable react-refresh/only-export-components */
-export const SEVERITY_COLORS = {
-  critical: '#F5222D', // 紧急 - 标准红色
-  major: '#FA8C16',    // 重要 - 橙色
-  minor: '#FADB14',    // 次要 - 黄色
-  warning: '#1677FF',  // 警告 - 蓝色
-};
-
-// 告警级别颜色数组（用于图表系列）
-export const SEVERITY_COLOR_ARRAY = [
-  SEVERITY_COLORS.critical,
-  SEVERITY_COLORS.major,
-  SEVERITY_COLORS.minor,
-  SEVERITY_COLORS.warning,
-];
-/* eslint-enable react-refresh/only-export-components */
 
 // 时间范围选项
 type TimeRange = '7days' | '30days' | 'custom';
@@ -274,39 +262,33 @@ function TopAlarmDevicesChart({
   t: (key: string) => string;
   onDrillDown?: (deviceSN: string) => void;
 }) {
-  const topDevices = useMemo(() => {
-    if (!devicesData || devicesData.length === 0) return [];
-    // 取Top 10设备，按告警数量降序排序
-    return [...devicesData]
-      .sort((a, b) => (b.alarmCount || 0) - (a.alarmCount || 0))
-      .slice(0, 10);
-  }, [devicesData]);
-
-  const deviceLabels = useMemo(() => {
-    return topDevices.map((d) => {
-      // 格式化设备标识：技术类型-设备SN后4位
-      const snSuffix = d.deviceSN?.slice(-4) || '????';
-      const techPrefix = d.technology === 'lte' ? 'LTE'
-        : d.technology === 'nr' ? '5G'
-        : d.technology === 'gsm' ? 'GSM'
-        : d.technology?.toUpperCase() || 'UNK';
-      return `${techPrefix}-${snSuffix}`;
-    });
-  }, [topDevices]);
-
-  const series = useMemo(() => {
-    return [{
-      name: t('alarm.stats.alarmCount'),
-      data: topDevices.map((d) => d.alarmCount || 0),
-      color: SEVERITY_COLORS.major,
-    }];
-  }, [topDevices, t]);
+  const chart = useMemo(() => buildTopAlarmDeviceChart(devicesData, {
+    critical: t('alarm.severity.critical'),
+    major: t('alarm.severity.major'),
+    minor: t('alarm.severity.minor'),
+    warning: t('alarm.severity.warning'),
+  }), [devicesData, t]);
 
   const handleBarClick = useCallback((index: number) => {
-    if (onDrillDown && topDevices[index]?.deviceSN) {
-      onDrillDown(topDevices[index].deviceSN!);
+    if (onDrillDown && chart.devices[index]?.deviceSN) {
+      onDrillDown(chart.devices[index].deviceSN);
     }
-  }, [onDrillDown, topDevices]);
+  }, [onDrillDown, chart.devices]);
+
+  const tooltipFormatter = useCallback((params: CallbackDataParams | CallbackDataParams[]) => {
+    const items = Array.isArray(params) ? params : [params];
+    const index = items[0]?.dataIndex;
+    const device = typeof index === 'number' ? chart.devices[index] : undefined;
+    if (!device) return '';
+    return [
+      `<strong>${escapeChartTooltipText(device.deviceSN)}</strong>`,
+      `${t('alarm.severity.critical')}: ${device.critical}`,
+      `${t('alarm.severity.major')}: ${device.major}`,
+      `${t('alarm.severity.minor')}: ${device.minor}`,
+      `${t('alarm.severity.warning')}: ${device.warning}`,
+      `${t('alarm.statistics.total')}: ${device.alarmCount}`,
+    ].join('<br/>');
+  }, [chart.devices, t]);
 
   if (isError) {
     return (
@@ -324,7 +306,7 @@ function TopAlarmDevicesChart({
     );
   }
 
-  if (!topDevices || topDevices.length === 0) {
+  if (chart.devices.length === 0) {
     return (
       <Card
         title={<span style={{ fontSize: 14, fontWeight: 500 }}>{t('alarm.stats.topDevices')}</span>}
@@ -344,12 +326,14 @@ function TopAlarmDevicesChart({
     >
       <BarChart
         title=""
-        xData={deviceLabels}
-        series={series}
+        xData={chart.labels}
+        series={chart.series}
         height="100%"
         horizontal
         barWidth={16}
-        borderRadius={4}
+        borderRadius={0}
+        showLegend
+        tooltipFormatter={tooltipFormatter}
         onClick={handleBarClick}
       />
     </Card>

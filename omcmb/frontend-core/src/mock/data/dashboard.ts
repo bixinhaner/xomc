@@ -114,9 +114,11 @@ export interface RegionDeviceStats {
 export interface TopAlarmDevice {
   deviceSN: string;
   technology: string;
-  deviceName: string;
   alarmCount: number;
-  severity: string;
+  critical: number;
+  major: number;
+  minor: number;
+  warning: number;
 }
 
 /**
@@ -343,13 +345,21 @@ function generateRegionStats(): RegionDeviceStats[] {
  * 生成 Top 告警设备
  */
 function generateTopAlarmDevices(): TopAlarmDevice[] {
-  return TOP_ALARM_DEVICE_SEEDS.map((seed) => ({
-    deviceSN: seed.deviceSN,
-    technology: seed.technology,
-    deviceName: seed.deviceSN,
-    alarmCount: randomInt(3, 10),
-    severity: seed.severity,
-  }));
+  return TOP_ALARM_DEVICE_SEEDS.map((seed) => {
+    const critical = randomInt(0, 3);
+    const major = randomInt(1, 4);
+    const minor = randomInt(0, 3);
+    const warning = randomInt(0, 2);
+    return {
+      deviceSN: seed.deviceSN,
+      technology: seed.technology,
+      alarmCount: critical + major + minor + warning,
+      critical,
+      major,
+      minor,
+      warning,
+    };
+  });
 }
 
 /**
