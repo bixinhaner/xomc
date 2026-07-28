@@ -105,6 +105,9 @@ scrape_configs:
           - "node-exporter:9100"
         labels:
           service: "node"
+    # Logical data-volume identity is maintained in storage-targets.yml. Do
+    # not add target labels here: node-exporter already owns mountpoint/device
+    # labels and missing mappings must remain visible as no-data, not zero.
 
   # ── 容器资源（cAdvisor：各容器 CPU / 内存 / 网络 / 磁盘）──────────────
   - job_name: "cadvisor"

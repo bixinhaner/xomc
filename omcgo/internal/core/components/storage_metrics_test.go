@@ -2,6 +2,7 @@ package components
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -54,6 +55,7 @@ func TestPrometheusStorageCollectorReturnsRealSourceSpecificMetrics(t *testing.T
 
 	host := requireStorageMetric(t, metrics, "host_filesystem")
 	require.Equal(t, "prometheus/node_exporter", host.Source)
+	require.Equal(t, "host-node-exporter-9100--dev-vda1-ext4", host.ID, "legacy host metric ID must remain stable")
 	require.Equal(t, "/", host.MountPath)
 	require.Equal(t, uint64(1000), requireValue(t, host.TotalBytes))
 	require.Equal(t, uint64(750), requireValue(t, host.UsedBytes))
@@ -164,12 +166,39 @@ func TestBuildHostFilesystemMetricsRequiresExactLabelMatch(t *testing.T) {
 		value:  250, at: now,
 	}}
 
-	metrics := buildHostFilesystemMetrics(sizes, available, nil, nil, nil)
+	metrics := buildHostFilesystemMetrics(sizes, available, nil, nil, nil, nil)
 	require.Len(t, metrics, 2)
 	for _, metric := range metrics {
 		require.Equal(t, "unavailable", metric.Status)
 		require.Nil(t, metric.UsedPercent)
 	}
+}
+
+func TestBuildHostFilesystemMetricsKeepsBytesWhenInodeQueriesFail(t *testing.T) {
+	now := time.Now().UTC()
+	labels := map[string]string{"instance": "node:9100", "device": "/dev/vda1", "mountpoint": "/", "fstype": "ext4"}
+	metrics := buildHostFilesystemMetrics(
+		[]prometheusSample{{labels: labels, value: 1000, at: now}},
+		[]prometheusSample{{labels: labels, value: 250, at: now}},
+		nil, nil, nil, errors.New("files query failed"),
+	)
+
+	require.Len(t, metrics, 1)
+	require.Equal(t, "available", metrics[0].Status)
+	require.Equal(t, uint64(1000), requireValue(t, metrics[0].TotalBytes))
+	require.Equal(t, uint64(750), requireValue(t, metrics[0].UsedBytes))
+	require.Nil(t, metrics[0].TotalInodes)
+	require.Contains(t, metrics[0].Error, "inode metrics unavailable")
+}
+
+func TestErrorsJoinHardFailureWinsOverStale(t *testing.T) {
+	stale := &staleSourceError{at: time.Now().UTC(), err: errors.New("stale source")}
+	err := errorsJoin(stale, errors.New("HTTP 503"))
+	metric := unavailableStorageMetric("host-filesystem", "host_filesystem", "Host filesystems", "prometheus/node_exporter", err)
+
+	require.Equal(t, "unavailable", metric.Status)
+	require.Nil(t, metric.CollectedAt)
+	require.Contains(t, metric.Error, "HTTP 503")
 }
 
 func TestBuildHostFilesystemMetricsDeduplicatesBindMountsOfSameDevice(t *testing.T) {
@@ -186,7 +215,7 @@ func TestBuildHostFilesystemMetricsDeduplicatesBindMountsOfSameDevice(t *testing
 
 	metrics := buildHostFilesystemMetrics(
 		[]prometheusSample{sample("/var/lib", 1000), sample("/var/lib/docker", 1000)},
-		[]prometheusSample{sample("/var/lib", 250), sample("/var/lib/docker", 250)}, nil, nil, nil,
+		[]prometheusSample{sample("/var/lib", 250), sample("/var/lib/docker", 250)}, nil, nil, nil, nil,
 	)
 	require.Len(t, metrics, 1)
 	require.Equal(t, "/var/lib", metrics[0].MountPath)
@@ -231,12 +260,15 @@ func TestCollectAppFilesystemMetricIncludesInodesAndTargetDimensions(t *testing.
 func TestStorageCompositeTimestampUsesOldestInputSample(t *testing.T) {
 	newer := time.Date(2026, time.July, 21, 2, 30, 0, 0, time.UTC)
 	older := newer.Add(-5 * time.Second)
+	inodeOlder := older.Add(-5 * time.Second)
 	labels := map[string]string{"instance": "node:9100", "device": "/dev/vda1", "mountpoint": "/", "fstype": "ext4"}
 	host := buildHostFilesystemMetrics(
 		[]prometheusSample{{labels: labels, value: 1000, at: newer}},
-		[]prometheusSample{{labels: labels, value: 250, at: older}}, nil, nil, nil,
+		[]prometheusSample{{labels: labels, value: 250, at: older}},
+		[]prometheusSample{{labels: labels, value: 800, at: inodeOlder}},
+		[]prometheusSample{{labels: labels, value: 200, at: inodeOlder}}, nil, nil,
 	)
-	require.Equal(t, older, *host[0].CollectedAt)
+	require.Equal(t, inodeOlder, *host[0].CollectedAt)
 
 	minio := buildMinIOMetric(
 		[]prometheusSample{{value: 2000, at: newer}},

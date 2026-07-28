@@ -1,0 +1,118 @@
+# OMC storage target contract.
+#
+# This file is deployment metadata, not a Prometheus scrape configuration. The
+# application/OMC admission controller and the dashboard build consume it to
+# give the same logical target a stable identity. Prometheus still obtains the
+# measured capacity from node-exporter/MinIO metrics; an absent target mapping
+# must never be rendered as zero capacity.
+version: 1
+
+storage_targets:
+  # The application can write logs, uploads and temporary files to the host
+  # filesystem visible at these paths.
+  - target_type: host_filesystem
+    target_id: app-root
+    mountpoint: /
+    write_scope: [log, upload, report, trace, all]
+    components: [application]
+
+  # Named Docker volumes are physically stored below Docker's data root. Keep
+  # the logical volume names so operators can distinguish PostgreSQL, MinIO
+  # and monitoring data even when they share one host filesystem.
+  - target_type: host_filesystem
+    target_id: docker-data
+    mountpoint: /var/lib/docker
+    write_scope: [database, queue, object, monitoring, all]
+    components: [pgdata, tsdbdata, redisdata, natsdata, miniodata]
+
+  - target_type: database
+    target_id: postgres-data
+    mountpoint: /var/lib/docker
+    container_path: /var/lib/postgresql/data
+    volume: pgdata
+    write_scope: [database]
+    components: [postgres]
+
+  - target_type: database
+    target_id: postgres-tsdb-data
+    mountpoint: /var/lib/docker
+    container_path: /var/lib/postgresql/data
+    volume: tsdbdata
+    write_scope: [database, pm, mr]
+    components: [postgres-tsdb]
+
+  - target_type: minio
+    target_id: minio-data
+    mountpoint: /var/lib/docker
+    container_path: /data
+    volume: miniodata
+    write_scope: [upload, pm, mr, firmware, backup, report, trace, all]
+    components: [minio]
+
+  - target_type: monitoring
+    target_id: prometheus-data
+    mountpoint: /var/lib/docker
+    container_path: /prometheus
+    volume: prometheusdata
+    write_scope: [monitoring]
+    retention: 15d
+    components: [prometheus]
+
+  - target_type: monitoring
+    target_id: loki-data
+    mountpoint: /var/lib/docker
+    container_path: /loki
+    volume: lokidata
+    write_scope: [log]
+    retention: 7d
+    components: [loki]
+
+  - target_type: monitoring
+    target_id: tempo-data
+    mountpoint: /var/lib/docker
+    container_path: /var/tempo
+    volume: tempodata
+    write_scope: [trace]
+    retention: 24h
+    components: [tempo]
+
+  - target_type: monitoring
+    target_id: grafana-data
+    mountpoint: /var/lib/docker
+    container_path: /var/lib/grafana
+    volume: grafanadata
+    write_scope: [monitoring]
+    components: [grafana]
+
+# Bucket labels are deliberately a fixed business taxonomy. The values are
+# the default MinIO bucket names in cmd/{app,acs,worker}/etc/config.*.yaml;
+# deployments may override the physical name without creating arbitrary
+# Prometheus label values or exposing object paths.
+minio_buckets:
+  - category: pm
+    bucket: pm-files
+    write_scope: [pm]
+  - category: mr
+    bucket: mr-files
+    write_scope: [mr]
+  - category: firmware
+    bucket: firmware
+    write_scope: [firmware]
+  - category: config-backup
+    bucket: config-backup
+    write_scope: [backup]
+  - category: logs
+    bucket: logs
+    write_scope: [log]
+  - category: reports
+    bucket: reports
+    write_scope: [report]
+  - category: exchange
+    bucket: omc-exchange
+    write_scope: [exchange]
+  - category: ui-assets
+    bucket: ui-assets
+    write_scope: [ui]
+  - category: trace
+    bucket: trace-bulk
+    write_scope: [trace]

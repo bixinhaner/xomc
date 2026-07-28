@@ -5032,6 +5032,7 @@ const messages: Record<string, string> = {
   'system.dashboard.disk':                   'Disk',
   'system.dashboard.storage':                '真实存储指标',
   'system.dashboard.storage.used':           '逻辑占用',
+  'system.dashboard.storage.stale':          '数据已过期，暂不可用',
   'system.dashboard.storage.kind.app_filesystem': '应用可见文件系统',
   'system.dashboard.storage.kind.host_filesystem': '宿主机文件系统',
   'system.dashboard.storage.kind.minio_cluster': 'MinIO 集群容量',

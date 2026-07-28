@@ -5003,6 +5003,7 @@ const messages: Record<string, string> = {
   'system.dashboard.disk':                   'Disk',
   'system.dashboard.storage':                'Storage metrics',
   'system.dashboard.storage.used':           'Logical usage',
+  'system.dashboard.storage.stale':          'Data is stale and temporarily unavailable',
   'system.dashboard.storage.kind.app_filesystem': 'Application-visible filesystem',
   'system.dashboard.storage.kind.host_filesystem': 'Host filesystem',
   'system.dashboard.storage.kind.minio_cluster': 'MinIO cluster capacity',

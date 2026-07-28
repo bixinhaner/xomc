@@ -147,7 +147,7 @@ func (c *PrometheusStorageCollector) collectUncached(ctx context.Context, now ti
 	databaseSizes, databaseErr := c.query(ctx, pgSizeQuery, pgSizeTimeQuery, now)
 
 	metrics := make([]StorageMetric, 0, len(sizes)+3)
-	metrics = append(metrics, buildHostFilesystemMetrics(sizes, available, files, filesFree, errorsJoin(sizeErr, availableErr, filesErr, filesFreeErr))...)
+	metrics = append(metrics, buildHostFilesystemMetrics(sizes, available, files, filesFree, errorsJoin(sizeErr, availableErr), errorsJoin(filesErr, filesFreeErr))...)
 	metrics = append(metrics, buildMinIOMetric(minioTotal, minioFree, errorsJoin(minioTotalErr, minioFreeErr)))
 	metrics = append(metrics, buildDatabaseMetrics(databaseSizes, databaseErr)...)
 	return metrics
@@ -270,9 +270,9 @@ func prometheusLabelsKey(labels map[string]string) string {
 	return builder.String()
 }
 
-func buildHostFilesystemMetrics(sizes, available, files, filesFree []prometheusSample, queryErr error) []StorageMetric {
-	if queryErr != nil {
-		return []StorageMetric{unavailableStorageMetric("host-filesystem", "host_filesystem", "Host filesystems", "prometheus/node_exporter", queryErr)}
+func buildHostFilesystemMetrics(sizes, available, files, filesFree []prometheusSample, byteErr, inodeErr error) []StorageMetric {
+	if byteErr != nil {
+		return []StorageMetric{unavailableStorageMetric("host-filesystem", "host_filesystem", "Host filesystems", "prometheus/node_exporter", byteErr)}
 	}
 	type pair struct{ size, available, files, filesFree *prometheusSample }
 	pairs := make(map[string]*pair)
@@ -321,15 +321,23 @@ func buildHostFilesystemMetrics(sizes, available, files, filesFree []prometheusS
 		avail := uint64(pair.available.value)
 		used := total - avail
 		pct := math.Round(float64(used)*10000/float64(total)) / 100
-		collectedAt := oldestTime(pair.size.at, pair.available.at)
+		collectedAt := oldestNonZeroTime(pair.size.at, pair.available.at)
+		legacyDeviceKey := pair.size.labels["instance"] + "\x00" + pair.size.labels["device"] + "\x00" + pair.size.labels["fstype"]
 		deviceKey := pair.size.labels["instance"] + "\x00" + strings.Trim(pair.size.labels["device"], "/") + "\x00" + pair.size.labels["fstype"]
 		metric := StorageMetric{
-			ID: "host-" + safeMetricID(deviceKey), Kind: "host_filesystem", Label: pair.size.labels["mountpoint"],
+			ID: "host-" + safeMetricID(legacyDeviceKey), Kind: "host_filesystem", Label: pair.size.labels["mountpoint"],
 			Source: "prometheus/node_exporter", MountPath: pair.size.labels["mountpoint"], Mountpoint: pair.size.labels["mountpoint"], Instance: pair.size.labels["instance"],
 			TargetType: "host_filesystem", TargetID: "host-" + safeMetricID(deviceKey),
 			TotalBytes: &total, UsedBytes: &used, AvailableBytes: &avail, UsedPercent: &pct,
 			CollectedAt: &collectedAt, Status: "available",
 		}
+		if pair.files != nil {
+			collectedAt = oldestNonZeroTime(collectedAt, pair.files.at)
+		}
+		if pair.filesFree != nil {
+			collectedAt = oldestNonZeroTime(collectedAt, pair.filesFree.at)
+		}
+		metric.CollectedAt = &collectedAt
 		if pair.files != nil && pair.filesFree != nil && pair.files.value >= pair.filesFree.value && pair.files.value > 0 {
 			totalInodes := uint64(pair.files.value)
 			availableInodes := uint64(pair.filesFree.value)
@@ -337,6 +345,8 @@ func buildHostFilesystemMetrics(sizes, available, files, filesFree []prometheusS
 			inodePercent := math.Round(float64(usedInodes)*10000/float64(totalInodes)) / 100
 			metric.TotalInodes, metric.UsedInodes, metric.AvailableInodes = &totalInodes, &usedInodes, &availableInodes
 			metric.UsedInodePercent = &inodePercent
+		} else if inodeErr != nil {
+			metric.Error = fmt.Errorf("inode metrics unavailable: %w", inodeErr).Error()
 		}
 		current, exists := bestByDevice[deviceKey]
 		if !exists || betterMountPath(metric.MountPath, current.MountPath) {
@@ -429,20 +439,32 @@ func (e *staleSourceError) Unwrap() error { return e.err }
 
 func errorsJoin(errs ...error) error {
 	parts := make([]string, 0, len(errs))
+	var staleErr *staleSourceError
+	var hardErr error
 	for _, err := range errs {
 		if err != nil {
 			parts = append(parts, err.Error())
+			var candidate *staleSourceError
+			if errors.As(err, &candidate) {
+				if staleErr == nil {
+					staleErr = candidate
+				}
+			} else if hardErr == nil {
+				hardErr = err
+			}
 		}
 	}
 	if len(parts) == 0 {
 		return nil
 	}
-	for _, err := range errs {
-		if err != nil {
-			return fmt.Errorf("%s: %w", strings.Join(parts, "; "), err)
-		}
+	message := strings.Join(parts, "; ")
+	if hardErr != nil {
+		return fmt.Errorf("%s: %w", message, hardErr)
 	}
-	return fmt.Errorf("%s", strings.Join(parts, "; "))
+	if staleErr != nil {
+		return fmt.Errorf("%s: %w", message, staleErr)
+	}
+	return fmt.Errorf("%s", message)
 }
 
 func safeMetricID(value string) string {
@@ -456,4 +478,17 @@ func oldestTime(left, right time.Time) time.Time {
 		return left
 	}
 	return right
+}
+
+func oldestNonZeroTime(times ...time.Time) time.Time {
+	var oldest time.Time
+	for _, candidate := range times {
+		if candidate.IsZero() {
+			continue
+		}
+		if oldest.IsZero() || candidate.Before(oldest) {
+			oldest = candidate
+		}
+	}
+	return oldest
 }

@@ -11,6 +11,7 @@ receiver + loki exporter 链路承担。
 ```
 deployments/monitoring/
 ├── prometheus.yml                # Prometheus 主配置（scrape + 告警路由）
+├── storage-targets.yml           # 数据卷/MinIO 逻辑目标映射（部署契约）
 ├── alertmanager.yml              # AlertManager 路由 + receiver（占位 webhook）
 ├── alerts/
 │   ├── omc-rules.yml             # starter 告警规则（三进程存活）
@@ -205,6 +206,17 @@ redis    :6379 ──┘  └─ transform/promote_pg_resource ──┘
 > 不影响监控栈自身 healthy。启动 `app/acs/worker` 三进程后，target 会在
 > 一个 scrape interval（15s）内变为 `up`。
 
+## 存储目标映射
+
+`storage-targets.yml` 是部署侧的逻辑目标契约，不会被 Prometheus 当作
+scrape target 自动加载。它把 PostgreSQL、MinIO、Prometheus、Loki、Tempo
+等 named volume 映射到宿主机文件系统，并限制 MinIO bucket 只使用固定业务分类。
+
+Prometheus 仍从 node-exporter 的 `mountpoint`、容量和 inode 指标，以及 MinIO
+cluster endpoint 获取实测值。目标未配置、采集失败或样本过期时，Grafana 必须显示
+No data / unavailable，不能用 `0` 代替。部署到非默认 Docker data root 时，应同时
+更新 `storage-targets.yml` 的 `mountpoint`，再由 OMC 写入保护模块读取同一映射。
+
 ## 加新告警规则
 
 1. 在 `alerts/` 目录下新增 `*.yml`（按业务域命名，例：`acs-session.yml`、`f04-alarm.yml`）。
@@ -242,6 +254,13 @@ dashboard 缺失、JSON 无效、UID 重复，或仍使用
 ```bash
 chmod +x deployments/monitoring/tests/validate-dashboards.sh
 deployments/monitoring/tests/validate-dashboards.sh
+```
+
+同时校验存储目标契约及固定 MinIO bucket 分类：
+
+```bash
+chmod +x deployments/monitoring/tests/validate-storage-targets.sh
+deployments/monitoring/tests/validate-storage-targets.sh
 ```
 
 `tests/promql-probes.txt` 是资源、队列和写入保护的查询清单。它不是 dashboard
