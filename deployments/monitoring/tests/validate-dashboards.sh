@@ -16,7 +16,8 @@ required_dashboards=(
 )
 
 failures=0
-declare -A uid_files=()
+uid_values=()
+uid_paths=()
 dashboards=()
 
 fail() {
@@ -70,10 +71,17 @@ for dashboard in "${dashboards[@]}"; do
     fail "$relative_path has no non-empty top-level uid"
     continue
   }
-  if [[ -n ${uid_files[$uid]+x} ]]; then
-    fail "duplicate dashboard uid '$uid': ${uid_files[$uid]} and $relative_path"
-  else
-    uid_files[$uid]=$relative_path
+  duplicate_uid=false
+  for uid_index in "${!uid_values[@]}"; do
+    if [[ "${uid_values[$uid_index]}" == "$uid" ]]; then
+      fail "duplicate dashboard uid '$uid': ${uid_paths[$uid_index]} and $relative_path"
+      duplicate_uid=true
+      break
+    fi
+  done
+  if [[ "$duplicate_uid" == false ]]; then
+    uid_values+=("$uid")
+    uid_paths+=("$relative_path")
   fi
 
   strings=$(jq -r '.. | strings' "$dashboard")
@@ -91,4 +99,4 @@ if (( failures > 0 )); then
 fi
 
 printf 'Dashboard validation passed: %d dashboard(s), %d unique UID(s).\n' \
-  "${#dashboards[@]}" "${#uid_files[@]}"
+  "${#dashboards[@]}" "${#uid_values[@]}"
