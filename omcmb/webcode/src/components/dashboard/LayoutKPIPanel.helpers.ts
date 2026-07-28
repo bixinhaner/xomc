@@ -7,6 +7,7 @@
  */
 
 import type { MultiTrendComparisonData } from '@core/types/dashboard';
+import type { DashboardKPIGranularity } from '@core/types/dashboard';
 import type { LineSeries } from '@/components/Charts/LineChart';
 import type { ResolvedMetricMeta } from './useMetricMetadata';
 import { formatSystemDate, formatSystemTimeOnly } from '@core/utils/systemTime';
@@ -27,15 +28,24 @@ export const KPI_METRIC_PALETTE: readonly string[] = [
 export const KPI_COMPARE_LINE_COLOR = '#999999';
 export const KPI_WEEK_LINE_COLOR = '#1677FF';
 
+export type KPIChartWindow = DashboardKPIGranularity | 'yesterday' | 'last_week';
+
 export function shouldShowKPIChartLegend(
-  compareWindow: 'yesterday' | 'last_week',
+  compareWindow: KPIChartWindow,
   metricCount: number,
 ): boolean {
-  return compareWindow !== 'last_week' || metricCount > 1;
+  return !['hourly', 'daily', 'weekly', 'last_week'].includes(compareWindow)
+    || metricCount > 1;
 }
 
 function toWeekDateKey(time: string): string {
   return formatSystemDate(time, { placeholder: time.slice(0, 10) });
+}
+
+function toDirectBucketKey(time: string, granularity: DashboardKPIGranularity): string {
+  const date = toWeekDateKey(time);
+  if (granularity !== 'hourly') return date;
+  return `${date}T${formatSystemTimeOnly(time).slice(0, 2)}`;
 }
 
 /**
@@ -61,13 +71,41 @@ export function buildSeries(
   compareLabel: string,
   resolveMeta: (key: string) => ResolvedMetricMeta,
   palette: readonly string[] = KPI_METRIC_PALETTE,
-  compareWindow: 'yesterday' | 'last_week' = 'yesterday',
+  compareWindow: KPIChartWindow = 'yesterday',
   weekDateKeys: string[] = [],
 ): { series: LineSeries[]; weekXData?: string[]; weekXDataFull?: string[] } {
   if (metricKeys.length === 0) return { series: [] };
 
   const showCompare = metricKeys.length === 1;
   const out: LineSeries[] = [];
+
+  if (compareWindow === 'hourly' || compareWindow === 'daily' || compareWindow === 'weekly') {
+    const axisLabels = weekDateKeys.map((key) => (
+      compareWindow === 'hourly'
+        ? `${key.slice(5, 10).replace('-', '/')} ${key.slice(11)}:00`
+        : key.slice(5).replace('-', '/')
+    ));
+    metricKeys.forEach((metricKey, idx) => {
+      const comparison = trendData?.[metricKey];
+      const meta = resolveMeta(metricKey);
+      const conv = meta.conversion || 1;
+      const byBucket = new Map(
+        (comparison?.current ?? []).map((point) => [
+          toDirectBucketKey(point.time, compareWindow),
+          point.value * conv,
+        ]),
+      );
+      out.push({
+        name: meta.name,
+        data: weekDateKeys.map((key) => byBucket.get(key) ?? null),
+        color: showCompare
+          ? KPI_WEEK_LINE_COLOR
+          : palette[idx % palette.length] ?? KPI_METRIC_PALETTE[0],
+        unit: meta.unit,
+      });
+    });
+    return { series: out, weekXData: axisLabels, weekXDataFull: weekDateKeys };
+  }
 
   if (compareWindow === 'last_week') {
     const weekXDataFull = weekDateKeys;

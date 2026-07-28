@@ -227,3 +227,25 @@ describe('buildSeries — rolling week 模式', () => {
     expect(shouldShowKPIChartLegend('yesterday', 1)).toBe(true);
   });
 });
+
+describe('buildSeries — direct rollup windows', () => {
+  it('小时、天、周都只展示后端对应粒度返回的当前序列', () => {
+    const bucketKeys = ['2026-07-06', '2026-07-13'];
+    const direct = buildSeries(
+      ['K900010015'],
+      weekTrendData,
+      [],
+      'unused',
+      'unused',
+      fakeResolveMeta,
+      undefined,
+      'weekly',
+      bucketKeys,
+    );
+
+    expect(direct.series).toHaveLength(1);
+    expect(direct.series[0].data).toEqual([3.23, null]);
+    expect(direct.weekXDataFull).toEqual(bucketKeys);
+    expect(shouldShowKPIChartLegend('weekly', 1)).toBe(false);
+  });
+});

@@ -158,6 +158,28 @@ func TestBackpressureConfigDefaults(t *testing.T) {
 	assert.Equal(t, time.Minute, clamped.QueueOldestLow)
 }
 
+func TestDashboardConfigDefaults(t *testing.T) {
+	cfg := (DashboardConfig{}).Defaults()
+	assert.Equal(t, 3*time.Second, cfg.QueryTimeout)
+	assert.Equal(t, 2500*time.Millisecond, cfg.StatementTimeout)
+	assert.Equal(t, 4, cfg.MaxConcurrent)
+	assert.Equal(t, 100*time.Millisecond, cfg.QueueTimeout)
+	assert.Equal(t, 4*time.Minute+30*time.Second, cfg.FreshCacheTTL)
+	assert.Equal(t, 15*time.Minute, cfg.StaleTTL)
+}
+
+func TestDashboardConfigValidateRejectsUnsafeBounds(t *testing.T) {
+	tests := []DashboardConfig{
+		{QueryTimeout: 2 * time.Second, StatementTimeout: 3 * time.Second, MaxConcurrent: 4, QueueTimeout: time.Second, FreshCacheTTL: time.Minute, StaleTTL: 15 * time.Minute},
+		{QueryTimeout: 3 * time.Second, StatementTimeout: 2 * time.Second, MaxConcurrent: 0, QueueTimeout: time.Second, FreshCacheTTL: time.Minute, StaleTTL: 15 * time.Minute},
+		{QueryTimeout: 3 * time.Second, StatementTimeout: 2 * time.Second, MaxConcurrent: 4, QueueTimeout: time.Second, FreshCacheTTL: 5 * time.Minute, StaleTTL: 15 * time.Minute},
+		{QueryTimeout: 3 * time.Second, StatementTimeout: 2 * time.Second, MaxConcurrent: 4, QueueTimeout: time.Second, FreshCacheTTL: 4 * time.Minute, StaleTTL: 5 * time.Minute},
+	}
+	for _, cfg := range tests {
+		require.Error(t, cfg.Validate())
+	}
+}
+
 func TestLoad_ValidatesConfig(t *testing.T) {
 	// Write a minimal valid config to a temp file, then load it.
 	// This tests that Load() calls Validate() automatically.

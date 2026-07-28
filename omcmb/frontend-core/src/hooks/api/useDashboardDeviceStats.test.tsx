@@ -44,7 +44,7 @@ describe('useDashboardDeviceStats', () => {
     vi.restoreAllMocks();
   });
 
-  it('reuses unfiltered device-list stats with an independent 60-second query', async () => {
+  it('reuses unfiltered device-list stats with the dashboard five-minute polling policy', async () => {
     const response: DeviceListResponse = {
       items: [],
       total: deviceStats.total,
@@ -79,8 +79,10 @@ describe('useDashboardDeviceStats', () => {
         'user-a',
       ],
     });
-    expect(query?.options.refetchInterval).toBe(60_000);
-    expect(query?.options.refetchOnWindowFocus).toBe('always');
+    expect(query?.options.refetchInterval).toBe(300_000);
+    expect(query?.options.refetchIntervalInBackground).toBe(false);
+    expect(query?.options.refetchOnWindowFocus).toBe(false);
+    expect(query?.options.refetchOnReconnect).toBe(false);
   });
 
   it('does not request device stats before the current user is available', () => {

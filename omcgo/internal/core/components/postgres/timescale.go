@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 )
 
@@ -14,7 +15,18 @@ import (
 // TimescaleDB-enabled database.
 // If logger is provided and LogSQL is enabled, SQL queries will be logged.
 func NewTimescalePool(ctx context.Context, cfg appconfig.PostgresConfig, log *zap.Logger) (*pgxpool.Pool, error) {
-	pool, err := NewPostgresPool(ctx, cfg, log)
+	return NewTimescalePoolWithRegisterer(ctx, cfg, log, nil)
+}
+
+// NewTimescalePoolWithRegisterer creates a TimescaleDB pool and exposes the
+// same slow-query metrics as the primary PostgreSQL pool.
+func NewTimescalePoolWithRegisterer(
+	ctx context.Context,
+	cfg appconfig.PostgresConfig,
+	log *zap.Logger,
+	reg prometheus.Registerer,
+) (*pgxpool.Pool, error) {
+	pool, err := NewPostgresPoolWithRegisterer(ctx, cfg, log, reg)
 	if err != nil {
 		return nil, fmt.Errorf("create timescale pool: %w", err)
 	}

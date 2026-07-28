@@ -137,6 +137,14 @@ services:
       - "max_wal_size=${TSDB_MAX_WAL_SIZE:-4GB}"
       - "-c"
       - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "shared_preload_libraries=timescaledb,pg_stat_statements"
+      - "-c"
+      - "track_io_timing=${TSDB_TRACK_IO_TIMING:-on}"
+      - "-c"
+      - "log_min_duration_statement=${TSDB_LOG_MIN_DURATION_STATEMENT:-1000}"
+      - "-c"
+      - "log_temp_files=${TSDB_LOG_TEMP_FILES:-0}"
     stop_grace_period: 60s
     deploy:
       resources:

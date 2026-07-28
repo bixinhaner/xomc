@@ -5,55 +5,73 @@ import (
 	"testing"
 	"time"
 
-	pmaggregator "github.com/omcgo/omcgo/internal/pm/aggregator"
+	"github.com/omcgo/omcgo/internal/core/jsonx"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 	"github.com/stretchr/testify/require"
 )
 
-type recordingDashboardKPIAggregator struct {
-	requests []pmaggregator.QueryRequest
-	rows     []pmaggregator.Row
+type recordingNetworkRollupReader struct {
+	queries []NetworkRollupQuery
+	points  []NetworkRollupPoint
+	err     error
 }
 
-func (a *recordingDashboardKPIAggregator) Query(_ context.Context, request pmaggregator.QueryRequest) ([]pmaggregator.Row, error) {
-	a.requests = append(a.requests, request)
-	return a.rows, nil
+func (r *recordingNetworkRollupReader) ListSeries(_ context.Context, query NetworkRollupQuery) ([]NetworkRollupPoint, error) {
+	r.queries = append(r.queries, query)
+	return r.points, r.err
 }
 
-func TestFetchNetworkKCodeSeries_DoesNotQuery15MinTailWhenHourlyBucketMissing(t *testing.T) {
-	aggregator := &recordingDashboardKPIAggregator{}
-	service := &Service{pmAggregator: aggregator}
-	start := time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC)
-	end := start.Add(2*time.Hour + 30*time.Minute)
-
-	points, err := service.fetchNetworkKCodeSeries(context.Background(), []string{"K1"}, "", start, end)
-
-	require.NoError(t, err)
-	require.Empty(t, points)
-	require.Len(t, aggregator.requests, 1)
-	require.Equal(t, metrics.GranularityHourly, aggregator.requests[0].Granularity)
+func (r *recordingNetworkRollupReader) ListLatestHourly(context.Context, time.Time, time.Time) ([]NetworkRollupPoint, error) {
+	return r.points, r.err
 }
 
 func TestGetKPITimeSeries_RoutesRequestedGranularity(t *testing.T) {
 	start := time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC)
-	end := start.Add(24 * time.Hour)
+	end := start.Add(12 * 7 * 24 * time.Hour)
 
 	for _, granularity := range []metrics.Granularity{
 		metrics.GranularityHourly,
 		metrics.GranularityDaily,
+		metrics.GranularityWeekly,
 	} {
 		t.Run(string(granularity), func(t *testing.T) {
-			aggregator := &recordingDashboardKPIAggregator{}
-			service := &Service{pmAggregator: aggregator}
+			reader := &recordingNetworkRollupReader{}
+			service := &Service{networkRollups: reader}
 
 			_, err := service.GetKPITimeSeries(
-				context.Background(), []string{"K1"}, "", granularity, start, end,
+				context.Background(), []string{"K1"}, model.TechLTE, granularity, start, end,
 			)
 
 			require.NoError(t, err)
-			require.Len(t, aggregator.requests, 1)
-			require.Equal(t, granularity, aggregator.requests[0].Granularity)
-			require.Equal(t, pmaggregator.DimensionNetwork, aggregator.requests[0].Dimension)
+			require.Len(t, reader.queries, 1)
+			require.Equal(t, granularity, reader.queries[0].Granularity)
+			require.Equal(t, model.TechLTE, reader.queries[0].Technology)
+			require.Equal(t, []string{"K1"}, reader.queries[0].MetricPaths)
 		})
 	}
+}
+
+func TestGetKPITimeSeriesReturnsPublishedValuesWithoutFillingMissingBuckets(t *testing.T) {
+	start := time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC)
+	reader := &recordingNetworkRollupReader{points: []NetworkRollupPoint{
+		{
+			Technology: model.TechNR, MetricPath: "K1",
+			Granularity: metrics.GranularityWeekly,
+			WindowStart: start.Add(7 * 24 * time.Hour), WindowEnd: start.Add(14 * 24 * time.Hour),
+			Value: jsonx.Float(42), Complete: false, MissingSlots: 1,
+		},
+	}}
+	service := &Service{networkRollups: reader}
+
+	got, err := service.GetKPITimeSeries(
+		context.Background(), []string{"K1", "K2"}, model.TechNR,
+		metrics.GranularityWeekly, start, start.Add(12*7*24*time.Hour),
+	)
+
+	require.NoError(t, err)
+	require.Len(t, got["K1"], 1)
+	require.Equal(t, jsonx.Float(42), got["K1"][0].Value)
+	require.Empty(t, got["K2"], "missing buckets and metrics must remain empty")
+	require.Len(t, reader.queries, 1, "reader errors or gaps must never trigger a fallback query")
 }

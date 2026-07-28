@@ -459,7 +459,7 @@ export interface KPITimeSeriesParams {
   granularity?: DashboardKPIGranularity;
 }
 
-export type DashboardKPIGranularity = 'hourly' | 'daily';
+export type DashboardKPIGranularity = 'hourly' | 'daily' | 'weekly';
 
 /**
  * 时间范围计算结果（内部使用）

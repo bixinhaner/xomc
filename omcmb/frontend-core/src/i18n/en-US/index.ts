@@ -3029,6 +3029,7 @@ const messages: Record<string, string> = {
   // Dashboard视图模式 - v2.0新增
   'dashboard.viewMode.day':    'Day',
   'dashboard.viewMode.week':   'Week',
+  'dashboard.viewMode.hour':   'Hour',
 
   // Dashboard提示信息 - v2.0新增
   'dashboard.selectTimeRange': 'Please select time range',
@@ -8309,6 +8310,7 @@ const messages: Record<string, string> = {
   'dashboard.kpiPanel.empty.title':      'No aggregated data yet',
   'dashboard.kpiPanel.empty.hint':       'Network-wide metrics refresh hourly on the hour; freshly ingested data appears after the next hour mark or once raw-detail fallback kicks in.',
   'dashboard.kpiPanel.empty.lastWeekHint': 'No historical aggregated data for the selected comparison period; please check with ops to confirm last week\'s batch job completed.',
+  'dashboard.kpiPanel.empty.rollupHint': 'No hourly, daily, or weekly rollup data is available in this window. Check the aggregation jobs.',
 
   // qa-614 c5 — software firmware/upgrade (#369 / #371 / #379)
   'software.firmware.selectOrInputProductClass': 'Select or enter product type',

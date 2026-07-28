@@ -34,6 +34,14 @@ tsdb:
   log_sql_params: false
   log_sql_slow_threshold: 1000
 
+dashboard:
+  query_timeout: 3s
+  statement_timeout: 2500ms
+  max_concurrent: 4
+  queue_timeout: 100ms
+  fresh_cache_ttl: 4m30s
+  stale_ttl: 15m
+
 redis:
   addrs:
     - "redis:6379"
