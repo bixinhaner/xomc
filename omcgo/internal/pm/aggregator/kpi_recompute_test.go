@@ -198,7 +198,9 @@ func Test_Query_DerivedAvgKPI_DeviceReadsStoredRows(t *testing.T) {
 	require.NotNil(t, rows[0].StatisType)
 	assert.Equal(t, metrics.StatisAvg, *rows[0].StatisType)
 	require.Len(t, db.sqls, 2)
-	assert.Contains(t, db.sqls[0], "FROM pm_metrics_daily", "device daily KPI 应直接读已落库 daily 表")
+	assert.Contains(t, db.sqls[0], "FROM pm_aggregation_results r", "device daily KPI 应直接读统一上卷结果表")
+	assert.NotContains(t, db.sqls[0], "FROM pm_metrics_daily", "device daily KPI 不应经过全量去重兼容视图")
+	assert.Contains(t, db.sqls[0], "r.dimension_key IN (SELECT id::text FROM device_dim", "device direct KPI 应按设备 UUID 预过滤")
 	assert.Contains(t, db.sqls[0], "SELECT oui, serial_number FROM device_dim WHERE serial_number = ANY(", "device direct KPI 应先收窄用户选中的设备")
 	assert.Contains(t, db.sqls[0], "AND technology = ANY(", "device direct KPI 应保留制式过滤")
 	assert.Contains(t, db.sqls[0], "device_sn IN (SELECT serial_number FROM devices WHERE id IN (SELECT device_id FROM device_group_members WHERE group_id IN (", "device direct KPI 应保留可见分组过滤")
@@ -232,7 +234,8 @@ func Test_Query_DerivedAvgKPI_DeviceInfersKPIPathWithoutMetricTypeFromStoredRows
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Len(t, db.sqls, 2)
-	assert.Contains(t, db.sqls[0], "FROM pm_metrics_daily")
+	assert.Contains(t, db.sqls[0], "FROM pm_aggregation_results r")
+	assert.NotContains(t, db.sqls[0], "FROM pm_metrics_daily")
 	assert.Contains(t, db.sqls[0], "metric_path =")
 	assert.NotContains(t, db.sqls[0], "FROM pm_metrics m")
 }
@@ -259,7 +262,8 @@ func Test_Count_DerivedAvgKPI_DeviceCountsDirectRollupRows(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, n)
 	require.Len(t, db.sqls, 1)
-	assert.Contains(t, db.sqls[0], "FROM pm_metrics_daily")
+	assert.Contains(t, db.sqls[0], "FROM pm_aggregation_results r")
+	assert.NotContains(t, db.sqls[0], "FROM pm_metrics_daily")
 	assert.NotContains(t, db.sqls[0], "FROM pm_metrics m")
 }
 

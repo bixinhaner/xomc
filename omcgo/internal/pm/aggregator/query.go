@@ -379,7 +379,7 @@ func newDeviceObjectSource(builder sq.StatementBuilderType, q QueryRequest) sq.S
 			From("pm_measurement_anchors a").
 			Join("device_dim dev ON dev.id = a.device_dim_id")
 	default:
-		return builder.Select(
+		source := builder.Select(
 			"r.object_ldn AS object_ldn",
 			"r.device_oui AS device_oui",
 			"r.device_sn AS device_sn",
@@ -389,7 +389,14 @@ func newDeviceObjectSource(builder sq.StatementBuilderType, q QueryRequest) sq.S
 			"r.window_start AS start_time",
 		).
 			From("pm_aggregation_results r").
-			Where(sq.Eq{"r.dimension": string(DimensionDevice)})
+			Where(sq.Eq{
+				"r.dimension":   string(DimensionDevice),
+				"r.granularity": string(q.Granularity),
+			})
+		if frag, args, ok := deviceDimIDPrefilter("r.dimension_key", "id::text", q); ok {
+			source = source.Where(frag, args...)
+		}
+		return source
 	}
 }
 
@@ -611,6 +618,11 @@ func newRawAwareDeviceSelect(
 	q QueryRequest,
 	columns ...string,
 ) sq.SelectBuilder {
+	rolledGranularity, isRolledUpTable := rolledUpDeviceGranularity(table)
+	isDeviceDimension := q.Dimension == "" || q.Dimension == DimensionDevice
+	if isRolledUpTable && isDeviceDimension {
+		return newRolledUpDeviceSelect(builder, rolledGranularity, q, columns...)
+	}
 	if len(q.MetricPaths) == 0 || table != "pm_metrics" {
 		return builder.Select(columns...).From(table)
 	}
@@ -642,7 +654,60 @@ func newRawAwareDeviceSelect(
 	// 下推命中索引的等价谓词，把 anchors 扫描收窄到目标设备。device_dim 保留软删行
 	// （tsdbsync/runner.go），不会漏历史设备；仅当从未同步过 device_dim（理论上不应发生）
 	// 时才可能收窄过头，落回 f.device_sn 兜底路径——比原先「必现的全表 JOIN 超时」风险小得多。
-	if frag, args, ok := deviceDimIDPrefilter(q); ok {
+	if frag, args, ok := deviceDimIDPrefilter("a.device_dim_id", "id", q); ok {
+		targeted = targeted.Where(frag, args...)
+	}
+	return builder.Select(columns...).FromSelect(targeted, "pm_metrics")
+}
+
+func rolledUpDeviceGranularity(table string) (metrics.Granularity, bool) {
+	switch table {
+	case "pm_metrics_hourly":
+		return metrics.GranularityHourly, true
+	case "pm_metrics_daily":
+		return metrics.GranularityDaily, true
+	case "pm_metrics_weekly":
+		return metrics.GranularityWeekly, true
+	case "pm_metrics_monthly":
+		return metrics.GranularityMonthly, true
+	default:
+		return "", false
+	}
+}
+
+// newRolledUpDeviceSelect 绕过 pm_metrics_{hourly,daily,weekly,monthly} 兼容视图。
+// 兼容视图会先对全体设备做 DISTINCT ON，外层设备过滤无法下推；这里先按统一结果表的
+// dimension_key 和 granularity 收口，再投影成原查询契约，由调用方在 DISTINCT ON 前继续
+// 追加指标、时间、对象和权限过滤。
+func newRolledUpDeviceSelect(
+	builder sq.StatementBuilderType,
+	granularity metrics.Granularity,
+	q QueryRequest,
+	columns ...string,
+) sq.SelectBuilder {
+	targeted := builder.Select(
+		"r.device_oui AS device_oui",
+		"r.device_sn AS device_sn",
+		"r.metric_path AS metric_path",
+		"r.metric_type AS metric_type",
+		"r.metric_value AS metric_value",
+		"r.aggregation_op::text AS statis_type",
+		"r.granularity::text AS granularity",
+		`r.window_start AS "time"`,
+		"r.window_start AS start_time",
+		"r.window_end AS end_time",
+		"r.created_at AS ingest_time",
+		"r.object_ldn AS object_ldn",
+		`jsonb_build_object(
+			'task_id',r.task_id,'task_version_id',r.task_version_id,
+			'complete',r.complete,'missing_slots',r.missing_slots) AS extra`,
+	).
+		From("pm_aggregation_results r").
+		Where(sq.Eq{
+			"r.dimension":   string(DimensionDevice),
+			"r.granularity": string(granularity),
+		})
+	if frag, args, ok := deviceDimIDPrefilter("r.dimension_key", "id::text", q); ok {
 		targeted = targeted.Where(frag, args...)
 	}
 	return builder.Select(columns...).FromSelect(targeted, "pm_metrics")
@@ -650,16 +715,18 @@ func newRawAwareDeviceSelect(
 
 // deviceDimIDPrefilter 把 QueryRequest 里的设备过滤（DeviceOUIs/DeviceSNs/Technologies）
 // 镜像映射成一段基于 device_dim 的子查询谓词，供 newRawAwareDeviceSelect 提前收口
-// a.device_dim_id。分支与 applyDeviceFilters 一一对应，纯粹是同一批过滤条件的等价改写
-// （不引入新语义），未传任何设备过滤时返回 ok=false（全网/全量查询没有可收窄的设备集）。
-func deviceDimIDPrefilter(q QueryRequest) (string, []any, bool) {
+// 原始锚点的 a.device_dim_id 或统一结果的 r.dimension_key。deviceIDColumn 和 idProjection
+// 只由内部固定调用点传入，不接收外部输入。分支与 applyDeviceFilters 一一对应，纯粹是
+// 同一批过滤条件的等价改写（不引入新语义），未传设备过滤时返回 ok=false。
+func deviceDimIDPrefilter(deviceIDColumn, idProjection string, q QueryRequest) (string, []any, bool) {
+	prefix := deviceIDColumn + " IN (SELECT " + idProjection + " FROM device_dim WHERE "
 	switch {
 	case len(q.DeviceSNs) > 0 && len(q.Technologies) > 0:
 		if len(q.DeviceOUIs) > 0 {
-			return "a.device_dim_id IN (SELECT id FROM device_dim WHERE serial_number = ANY(?) AND technology = ANY(?) AND oui = ANY(?))",
+			return prefix + "serial_number = ANY(?) AND technology = ANY(?) AND oui = ANY(?))",
 				[]any{q.DeviceSNs, q.Technologies, q.DeviceOUIs}, true
 		}
-		return "a.device_dim_id IN (SELECT id FROM device_dim WHERE serial_number = ANY(?) AND technology = ANY(?))",
+		return prefix + "serial_number = ANY(?) AND technology = ANY(?))",
 			[]any{q.DeviceSNs, q.Technologies}, true
 	case len(q.DeviceOUIs) > 0 && len(q.DeviceSNs) > 0:
 		n := len(q.DeviceOUIs)
@@ -668,7 +735,7 @@ func deviceDimIDPrefilter(q QueryRequest) (string, []any, bool) {
 		}
 		var b strings.Builder
 		args := make([]any, 0, n*2)
-		b.WriteString("a.device_dim_id IN (SELECT id FROM device_dim WHERE ")
+		b.WriteString(prefix)
 		for i := 0; i < n; i++ {
 			if i > 0 {
 				b.WriteString(" OR ")
@@ -679,9 +746,9 @@ func deviceDimIDPrefilter(q QueryRequest) (string, []any, bool) {
 		b.WriteString(")")
 		return b.String(), args, true
 	case len(q.DeviceOUIs) > 0:
-		return "a.device_dim_id IN (SELECT id FROM device_dim WHERE oui = ANY(?))", []any{q.DeviceOUIs}, true
+		return prefix + "oui = ANY(?))", []any{q.DeviceOUIs}, true
 	case len(q.DeviceSNs) > 0:
-		return "a.device_dim_id IN (SELECT id FROM device_dim WHERE serial_number = ANY(?))", []any{q.DeviceSNs}, true
+		return prefix + "serial_number = ANY(?))", []any{q.DeviceSNs}, true
 	default:
 		return "", nil, false
 	}
