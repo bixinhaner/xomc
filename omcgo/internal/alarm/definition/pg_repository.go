@@ -398,7 +398,7 @@ func (r *PgRepository) UnknownStats(ctx context.Context, productID *uuid.UUID, d
 // 按 (ne_type, loaded_from) 双键聚合;COUNT FILTER 一次扫表算 4 个严重级计数。
 // loaded_from NULL 通过 COALESCE 为 ” 归到"未知 XML 来源"行。
 //
-// 期望规模 ~442 行 7 个 ne_type → 7-14 行返回,无需分页。
+// 期望规模 ~442 行 8 个 ne_type → 8-16 行返回,无需分页。
 func (r *PgRepository) ListNeTypes(ctx context.Context) ([]NeTypeStat, error) {
 	const aggSQL = `
 SELECT d.ne_type,
@@ -449,7 +449,7 @@ func scanOneResolved(row pgx.Row) (*ResolvedDefinition, error) {
 	var rd ResolvedDefinition
 	var (
 		cnName, enName, cnProbCause, enProbCause, description *string
-		eventType                                            *int
+		eventType                                             *int
 	)
 	if err := row.Scan(
 		&rd.ID, &rd.Identifier, &rd.NeType, &cnName, &enName,

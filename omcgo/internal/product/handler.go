@@ -1185,7 +1185,7 @@ func (h *Handler) ListIndicatorPlatforms(c *gin.Context) {
 }
 
 // ListAlarmNeTypes GET /api/v1/products/alarm-ne-types
-// 返回 alarm_definitions.ne_type 字典（如 ENB / GNB / OMC / EPC / EGW / CPE / UPS）。
+// 返回 alarm_definitions.ne_type 字典（如 ENB / GSM / GNB / OMC / EPC / EGW / CPE / UPS）。
 func (h *Handler) ListAlarmNeTypes(c *gin.Context) {
 	items, err := h.repo.ListAlarmNeTypes(c.Request.Context())
 	if err != nil {

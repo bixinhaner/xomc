@@ -2,7 +2,7 @@
 //
 // P1-06 阶段交付：
 //   - model.go    XML 解析结构 + 领域类型
-//   - loader.go   实现 dictloader.Loader — 启动期 7 个 ne_type XML 加载
+//   - loader.go   实现 dictloader.Loader — 启动期 8 个 ne_type XML 加载
 //
 // Phase 2/3 接力：Registry sync.Map + 接收路径 fallback + handler（设计 §3.3-§3.5）。
 package definition
@@ -39,7 +39,7 @@ type SeverityLevel struct {
 	DisplayOrder int       `json:"display_order"`
 }
 
-// xmlAlarmModel 解析 7 个 ne_type 的 alarm xml（设计 §3.4）。
+// xmlAlarmModel 解析 8 个 ne_type 的 alarm xml（设计 §3.4）。
 type xmlAlarmModel struct {
 	XMLName    xml.Name   `xml:"alarmModel"`
 	NeType     string     `xml:"neType,attr"`
