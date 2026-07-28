@@ -1788,6 +1788,7 @@ func initMiscModules(c *Container) error {
 		}
 
 		var productID uuid.UUID
+		var productTech string
 		var paramModelID *uuid.UUID
 		if dev.ProductID != nil {
 			p, err := c.ProductRegistry.GetProductByID(ctx, *dev.ProductID)
@@ -1796,6 +1797,7 @@ func initMiscModules(c *Container) error {
 			}
 			if p != nil {
 				productID = p.ID
+				productTech = p.Tech
 				paramModelID = p.ParamModelID
 			}
 		}
@@ -1814,6 +1816,7 @@ func initMiscModules(c *Container) error {
 			if errors.Is(err, product.ErrInactiveParamModel) {
 				if mr != nil && mr.Product != nil {
 					productID = mr.Product.ID
+					productTech = mr.Product.Tech
 					paramModelID = mr.Product.ParamModelID
 				}
 				var pidPtr *uuid.UUID
@@ -1824,6 +1827,7 @@ func initMiscModules(c *Container) error {
 				return &mml.SupportedSet{
 					ProductClass:    dev.ProductClass,
 					ProductID:       pidPtr,
+					ProductTech:     productTech,
 					ParamModelID:    paramModelID,
 					ProductResolved: true,
 					Paths:           map[string]struct{}{},
@@ -1836,6 +1840,7 @@ func initMiscModules(c *Container) error {
 				return &mml.SupportedSet{ProductResolved: false, Paths: map[string]struct{}{}}, nil
 			}
 			productID = mr.Product.ID
+			productTech = mr.Product.Tech
 			paramModelID = mr.Product.ParamModelID
 		}
 		if paramModelID == nil {
@@ -1843,6 +1848,7 @@ func initMiscModules(c *Container) error {
 			return &mml.SupportedSet{
 				ProductClass:    dev.ProductClass,
 				ProductID:       &pid,
+				ProductTech:     productTech,
 				ProductResolved: false,
 				Paths:           map[string]struct{}{},
 			}, nil
@@ -1858,6 +1864,7 @@ func initMiscModules(c *Container) error {
 				return &mml.SupportedSet{
 					ProductClass:    dev.ProductClass,
 					ProductID:       &pid,
+					ProductTech:     productTech,
 					ParamModelID:    &pmID,
 					ProductResolved: true,
 					Paths:           map[string]struct{}{},
@@ -1899,6 +1906,7 @@ SELECT DISTINCT regexp_replace(parameter_path::text, '\.[0-9]+\.', '.{i}.', 'g')
 		return &mml.SupportedSet{
 			ProductClass:    dev.ProductClass,
 			ProductID:       &pid,
+			ProductTech:     productTech,
 			ParamModelID:    &pmID,
 			ProductResolved: true,
 			Paths:           paths,
@@ -1984,6 +1992,7 @@ SELECT DISTINCT regexp_replace(parameter_path::text, '\.[0-9]+\.', '.{i}.', 'g')
 				if mr != nil && mr.Product != nil {
 					productID := mr.Product.ID
 					set.ProductID = &productID
+					set.ProductTech = mr.Product.Tech
 					if mr.Product.ParamModelID != nil {
 						paramModelID := *mr.Product.ParamModelID
 						set.ParamModelID = &paramModelID
@@ -2018,6 +2027,7 @@ SELECT DISTINCT regexp_replace(parameter_path::text, '\.[0-9]+\.', '.{i}.', 'g')
 					return &mml.SupportedSet{
 						ProductClass:    productClass,
 						ProductID:       &productID,
+						ProductTech:     mr.Product.Tech,
 						ParamModelID:    &paramModelID,
 						ProductResolved: true,
 						Paths:           map[string]struct{}{},
@@ -2036,6 +2046,7 @@ SELECT DISTINCT regexp_replace(parameter_path::text, '\.[0-9]+\.', '.{i}.', 'g')
 			return &mml.SupportedSet{
 				ProductClass:    productClass,
 				ProductID:       &productID,
+				ProductTech:     mr.Product.Tech,
 				ParamModelID:    &paramModelID,
 				ProductResolved: true,
 				Paths:           paths,

@@ -248,6 +248,63 @@ func TestTranslateResponseNames_PrivateToStandard(t *testing.T) {
 	assert.Equal(t, "X_COM_VENDOR.WiFi.SSID.", in[0])
 }
 
+func TestTranslateResponseNamesForRequest_PreservesConcreteRequestedStandardPath(t *testing.T) {
+	dev := &coremodel.Device{ProductClass: "X-BNQ", FirmwareVersion: "1.0.0"}
+	modelID := uuid.New()
+	prod := &product.Product{ID: uuid.New(), ParamModelID: &modelID}
+	tr := buildTranslator(t, map[string]string{
+		"Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Author": "Device.FAP.License.Author",
+	})
+	s := NewPathTranslationService(
+		&stubDeviceLookup{dev: dev},
+		&stubProductMatcher{res: &product.MatchResult{Product: prod}},
+		&stubTranslatorFactory{tr: tr},
+		zap.NewNop(),
+	)
+
+	requestParams := json.RawMessage(`{"names":["Device.Services.FAPService.1.FAPControl.LTE.LICENSE.Author"]}`)
+	out, changed := s.TranslateResponseNamesForRequest(
+		context.Background(),
+		"SN1",
+		[]string{"Device.FAP.License.Author"},
+		requestParams,
+	)
+
+	require.True(t, changed)
+	assert.Equal(t, []string{"Device.Services.FAPService.1.FAPControl.LTE.LICENSE.Author"}, out)
+	assert.NotContains(t, out[0], "{i}")
+}
+
+func TestTranslateResponseNamesForRequest_PreservesConcreteRequestedStandardPrefix(t *testing.T) {
+	dev := &coremodel.Device{ProductClass: "X-BNQ", FirmwareVersion: "1.0.0"}
+	modelID := uuid.New()
+	prod := &product.Product{ID: uuid.New(), ParamModelID: &modelID}
+	tr := buildTranslator(t, map[string]string{
+		"Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Author": "Device.FAP.License.Author",
+		"Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Code":   "Device.FAP.License.Code",
+	})
+	s := NewPathTranslationService(
+		&stubDeviceLookup{dev: dev},
+		&stubProductMatcher{res: &product.MatchResult{Product: prod}},
+		&stubTranslatorFactory{tr: tr},
+		zap.NewNop(),
+	)
+
+	requestParams := json.RawMessage(`{"names":["Device.Services.FAPService.1.FAPControl.LTE.LICENSE."]}`)
+	out, changed := s.TranslateResponseNamesForRequest(
+		context.Background(),
+		"SN1",
+		[]string{"Device.FAP.License.Author", "Device.FAP.License.Code"},
+		requestParams,
+	)
+
+	require.True(t, changed)
+	assert.Equal(t, []string{
+		"Device.Services.FAPService.1.FAPControl.LTE.LICENSE.Author",
+		"Device.Services.FAPService.1.FAPControl.LTE.LICENSE.Code",
+	}, out)
+}
+
 func TestTranslateResponseNames_PassthroughWhenDisabled(t *testing.T) {
 	s := NewPathTranslationService(nil, nil, nil, zap.NewNop())
 	in := []string{"a", "b"}

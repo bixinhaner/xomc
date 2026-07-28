@@ -222,8 +222,8 @@ func buildParameterNames(paramRefs []MMLParamRef) (json.RawMessage, error) {
 	pathMode := pathModeFromRefs(paramRefs, nil)
 	raw := make([]string, 0, len(paramRefs))
 	for _, ref := range paramRefs {
-		if ref.Tr069Path != "" {
-			raw = append(raw, ref.Tr069Path)
+		if path := effectiveParamReadPath(ref, pathMode); path != "" {
+			raw = append(raw, path)
 		}
 	}
 	// Sprint B Q-V3-2: 展开 {i} 路径为 partial path（在合规校验之前）。
@@ -284,17 +284,18 @@ func buildParameterValues(paramRefs []MMLParamRef, formValues map[string]interfa
 			continue
 		}
 		ref, ok := refsByCode[code]
-		if !ok || ref.Tr069Path == "" {
+		path := effectiveParamPath(ref, pathMode)
+		if !ok || path == "" {
 			unknown = append(unknown, code)
 			continue
 		}
 		// 写类参数路径同样必须合规（占位符未替换的 path 写下去 CPE 也会拒）
-		if reason := validatePathForMode(ref.Tr069Path, pathMode); reason != "" {
-			skipped = append(skipped, SkippedPath{Path: ref.Tr069Path, Reason: reason})
+		if reason := validatePathForMode(path, pathMode); reason != "" {
+			skipped = append(skipped, SkippedPath{Path: path, Reason: reason})
 			continue
 		}
 		values = append(values, valueEntry{
-			Name:  ref.Tr069Path,
+			Name:  path,
 			Value: strVal,
 			Type:  xsdType(ref.ValueType),
 		})
@@ -325,13 +326,14 @@ func buildSetAttributes(paramRefs []MMLParamRef, formValues map[string]interface
 	}
 	entries := make([]attrEntry, 0, len(paramRefs))
 	for _, ref := range paramRefs {
-		if ref.Tr069Path == "" {
+		path := effectiveParamPath(ref, pathMode)
+		if path == "" {
 			continue
 		}
-		if reason := validatePathForMode(ref.Tr069Path, pathMode); reason != "" {
+		if reason := validatePathForMode(path, pathMode); reason != "" {
 			continue // 不合规路径直接跳过
 		}
-		entries = append(entries, attrEntry{Name: ref.Tr069Path})
+		entries = append(entries, attrEntry{Name: path})
 	}
 	if len(entries) == 0 {
 		return nil, fmt.Errorf("%w: SetParameterAttributes resolved 0 legal paths", ErrNoUsableParams)
@@ -346,8 +348,8 @@ func buildGetParameterNames(paramRefs []MMLParamRef, formValues map[string]inter
 	var path string
 	if p, ok := formValues["path"].(string); ok && p != "" {
 		path = p
-	} else if len(paramRefs) > 0 && paramRefs[0].Tr069Path != "" {
-		path = paramRefs[0].Tr069Path
+	} else if len(paramRefs) > 0 {
+		path = effectiveParamPath(paramRefs[0], pathMode)
 	}
 	if path == "" {
 		return nil, fmt.Errorf("%w: GetParameterNames requires path", ErrNoUsableParams)
@@ -383,8 +385,8 @@ func buildObjectName(paramRefs []MMLParamRef, formValues map[string]interface{})
 	var name string
 	if v, ok := formValues["object_name"].(string); ok && v != "" {
 		name = v
-	} else if len(paramRefs) > 0 && paramRefs[0].Tr069Path != "" {
-		name = paramRefs[0].Tr069Path
+	} else if len(paramRefs) > 0 {
+		name = effectiveParamPath(paramRefs[0], pathMode)
 	}
 	if name == "" {
 		return nil, fmt.Errorf("%w: AddObject/DeleteObject requires object_name", ErrNoUsableParams)
@@ -398,6 +400,85 @@ func buildObjectName(paramRefs []MMLParamRef, formValues map[string]interface{})
 			ErrNoUsableParams, name, reason)
 	}
 	return marshalPathPayload(map[string]interface{}{"object_name": name}, pathMode)
+}
+
+func effectiveParamPath(ref MMLParamRef, pathMode string) string {
+	if normalizeRawPathMode(pathMode) == rawPathModePrivate {
+		if path := strings.TrimSpace(ref.PrivatePath); path != "" {
+			return path
+		}
+	}
+	return strings.TrimSpace(ref.Tr069Path)
+}
+
+func effectiveParamReadPath(ref MMLParamRef, pathMode string) string {
+	path := effectiveParamPath(ref, pathMode)
+	if path == "" {
+		return ""
+	}
+	if normalizeRawPathMode(pathMode) != rawPathModePrivate && isInstanceObjectRef(ref) && !strings.HasSuffix(path, ".") {
+		return objectCollectionPath(path)
+	}
+	if normalizeRawPathMode(pathMode) == rawPathModePrivate && isPrivateInstanceObjectRef(ref) && !strings.HasSuffix(path, ".") {
+		return objectCollectionPath(path)
+	}
+	return path
+}
+
+func privatePathOrStandard(ref MMLParamRef) string {
+	if path := strings.TrimSpace(ref.PrivatePath); path != "" {
+		return path
+	}
+	return strings.TrimSpace(ref.Tr069Path)
+}
+
+func isPrivateInstanceObjectRef(ref MMLParamRef) bool {
+	return isInstancePath(privatePathOrStandard(ref))
+}
+
+func objectCollectionPath(path string) string {
+	path = strings.TrimSuffix(strings.TrimSpace(path), ".")
+	parts := strings.Split(path, ".")
+	if len(parts) == 0 {
+		return path
+	}
+	last := parts[len(parts)-1]
+	if last == "{i}" || isDigits(last) {
+		return strings.Join(parts[:len(parts)-1], ".") + "."
+	}
+	return path + "."
+}
+
+func isInstanceObjectRef(ref MMLParamRef) bool {
+	return isInstancePath(ref.Tr069Path)
+}
+
+func isInstancePath(path string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false
+	}
+	path = strings.TrimSuffix(path, ".")
+	if strings.HasSuffix(path, ".{i}") {
+		return true
+	}
+	parts := strings.Split(path, ".")
+	if len(parts) == 0 {
+		return false
+	}
+	return isDigits(parts[len(parts)-1])
+}
+
+func isDigits(last string) bool {
+	if last == "" {
+		return false
+	}
+	for _, r := range last {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func pathModeFromRefs(paramRefs []MMLParamRef, formValues map[string]interface{}) string {

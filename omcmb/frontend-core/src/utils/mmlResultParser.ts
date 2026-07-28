@@ -37,6 +37,13 @@ export interface ParsedMmlResult {
   instanceNumber?: number;
 }
 
+const MAX_DOM_PARSE_XML_CHARS = 500_000;
+
+export interface ParseMmlResultOptions {
+  /** Limit parsed GPV params for summary/table views. Omitted means keep full parser semantics. */
+  maxParams?: number;
+}
+
 /** ACS 写入 device_tasks.result 的 shape（与 handler.go resultMap 保持一致）。 */
 interface DeviceTaskResultEnvelope {
   method?: string;
@@ -53,7 +60,7 @@ interface DeviceTaskResultEnvelope {
  * 解析 SSE frame.result。返回 null 表示当前结果非 RPC 响应形态（或缺
  * raw_response），调用方应回退到原始 JSON dump。
  */
-export function parseMmlDeviceTaskResult(result: unknown): ParsedMmlResult | null {
+export function parseMmlDeviceTaskResult(result: unknown, options: ParseMmlResultOptions = {}): ParsedMmlResult | null {
   if (!result || typeof result !== 'object') return null;
   const r = result as DeviceTaskResultEnvelope;
   if (!r.raw_response || typeof r.raw_response !== 'string') return null;
@@ -69,10 +76,11 @@ export function parseMmlDeviceTaskResult(result: unknown): ParsedMmlResult | nul
     if (Array.isArray(std) && std.length > 0) {
       const params = std
         .filter((p) => p && typeof p.name === 'string' && p.name)
+        .slice(0, options.maxParams)
         .map((p) => ({ name: p.name, value: String(p.value ?? ''), type: p.type }));
       if (params.length > 0) return { kind: 'gpv', params };
     }
-    return { kind: 'gpv', params: parseGPVResponse(xml) };
+    return { kind: 'gpv', params: parseGPVResponse(xml, options) };
   }
   if (method.includes('SetParameterValuesResponse')) {
     return { kind: 'spv', status: parseStatusFromResponse(xml) };
@@ -100,7 +108,10 @@ export function parseMmlDeviceTaskResult(result: unknown): ParsedMmlResult | nul
  * 提取 GetParameterValuesResponse 里所有 ParameterValueStruct。
  * 用 local-name 匹配以避开 cwmp: / SOAP-ENV: 等不同命名空间前缀。
  */
-function parseGPVResponse(xml: string): ParsedParamValue[] {
+function parseGPVResponse(xml: string, options: ParseMmlResultOptions = {}): ParsedParamValue[] {
+  if (xml.length > MAX_DOM_PARSE_XML_CHARS) {
+    return parseGPVResponseLight(xml, options.maxParams);
+  }
   if (typeof DOMParser === 'undefined') return [];
   let doc: Document;
   try {
@@ -122,8 +133,47 @@ function parseGPVResponse(xml: string): ParsedParamValue[] {
     const value = (valEl?.textContent ?? '').trim();
     const type = valEl ? readTypeAttr(valEl) : undefined;
     out.push({ name, value, type });
+    if (options.maxParams && out.length >= options.maxParams) break;
   }
   return out;
+}
+
+function parseGPVResponseLight(xml: string, limit?: number): ParsedParamValue[] {
+  const out: ParsedParamValue[] = [];
+  const structRe = /<(?:[\w-]+:)?ParameterValueStruct\b[^>]*>([\s\S]*?)<\/(?:[\w-]+:)?ParameterValueStruct>/g;
+  let match: RegExpExecArray | null;
+  while ((match = structRe.exec(xml))) {
+    const block = match[1];
+    const name = readXmlTagText(block, 'Name');
+    if (!name) continue;
+    const value = readXmlTagText(block, 'Value') ?? '';
+    const type = readValueType(block);
+    out.push({ name, value, type });
+    if (limit && out.length >= limit) break;
+  }
+  return out;
+}
+
+function readXmlTagText(block: string, tag: string): string | undefined {
+  const re = new RegExp(`<(?:[\\w-]+:)?${tag}\\b[^>]*>([\\s\\S]*?)<\\/(?:[\\w-]+:)?${tag}>`);
+  const m = block.match(re);
+  return m ? decodeXmlText(m[1].trim()) : undefined;
+}
+
+function readValueType(block: string): string | undefined {
+  const m = block.match(/<(?:[\w-]+:)?Value\b([^>]*)>/);
+  const attrs = m?.[1] ?? '';
+  const type = attrs.match(/\b(?:xsi:)?type=["']([^"']+)["']/);
+  return type?.[1];
+}
+
+function decodeXmlText(value: string): string {
+  return value
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
 }
 
 /** 从 xsi:type / type 属性里读取类型（xsi 命名空间不同实现）。 */
