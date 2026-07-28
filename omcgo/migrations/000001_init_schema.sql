@@ -345,7 +345,7 @@ CREATE TABLE public.alarm_definitions (
 -- Name: TABLE alarm_definitions; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.alarm_definitions IS 'T-0098 告警定义主表（设计 §3.2.2）；442 行典型规模，由 7 个 ne_type XML 文件载入';
+COMMENT ON TABLE public.alarm_definitions IS 'T-0098 告警定义主表（设计 §3.2.2）；442 行典型规模，由 8 个 ne_type XML 文件载入';
 
 
 --
@@ -359,7 +359,7 @@ COMMENT ON COLUMN public.alarm_definitions.identifier IS '告警全局唯一标�
 -- Name: COLUMN alarm_definitions.ne_type; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.alarm_definitions.ne_type IS '网元类型：ENB / GNB / OMC / EPC / EGW / CPE / UPS';
+COMMENT ON COLUMN public.alarm_definitions.ne_type IS '网元类型：ENB / GSM / GNB / OMC / EPC / EGW / CPE / UPS';
 
 
 --
