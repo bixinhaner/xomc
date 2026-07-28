@@ -240,23 +240,18 @@ func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, []Wide
 }
 
 func (r *Runner) buildAdhocResultSource(ctx context.Context, task *Task, loc appcontext.Locale) (RowSource, []WideColumn, csvLayout, error) {
-	taskID, startTime, endTime, err := parseAdhocParams(task.Params)
+	filter, err := parseAdhocParams(task.Params)
 	if err != nil {
 		return nil, nil, csvLayout{}, err
 	}
 	// 先查任务聚合维度、圈选设备数和配置指标集：决定首列表头 / 对象名解析口径，
 	// 并确保全量落库模式下导出仍只包含任务配置的 N 个指标。
 	// pm_tasks 在主库（PgPool），用 taskMetaDB 读；adhoc 结果表查询走 adhocDB（TsPool）。
-	meta, derr := loadAdhocTaskMeta(ctx, r.taskMetaDB, taskID)
+	meta, derr := loadAdhocTaskMeta(ctx, r.taskMetaDB, filter.TaskID)
 	if derr != nil {
 		return nil, nil, csvLayout{}, derr
 	}
-	metricPaths, merr := expandAdhocResultMetricPaths(ctx, r.adhocDB, taskID, meta.metricPaths, startTime, endTime)
-	if merr != nil {
-		return nil, nil, csvLayout{}, merr
-	}
-	meta.metricPaths = metricPaths
-	keys, kerr := discoverAdhocColumns(ctx, r.adhocDB, taskID, meta.metricPaths, startTime, endTime)
+	keys, kerr := discoverAdhocColumns(ctx, r.adhocDB, filter.TaskID, meta.metricPaths, filter)
 	if kerr != nil {
 		return nil, nil, csvLayout{}, kerr
 	}
@@ -268,7 +263,7 @@ func (r *Runner) buildAdhocResultSource(ctx context.Context, task *Task, loc app
 		IncludeCell:                   adhocIncludesCell(meta.dimension),
 		MissingMetricValuePlaceholder: missingMetricValuePlaceholder,
 	}
-	return newAdhocSource(r.adhocDB, taskID, meta.metricPaths, startTime, endTime, meta.dimension, meta.deviceCount, loc), cols, layout, nil
+	return newAdhocSource(r.adhocDB, filter.TaskID, meta.metricPaths, filter, meta.dimension, meta.deviceCount, loc), cols, layout, nil
 }
 
 func (r *Runner) buildDashboardLikeSource(ctx context.Context, task *Task, loc appcontext.Locale, layout csvLayout) (RowSource, []WideColumn, csvLayout, error) {
@@ -364,52 +359,6 @@ func loadAdhocTaskMeta(ctx context.Context, db PgQuerier, taskID uuid.UUID) (adh
 		meta.dimension = "device"
 	}
 	return meta, nil
-}
-
-func expandAdhocResultMetricPaths(ctx context.Context, db PgQuerier, taskID uuid.UUID, taskMetricPaths []string, startTime, endTime time.Time) ([]string, error) {
-	if len(taskMetricPaths) == 0 || db == nil {
-		return taskMetricPaths, nil
-	}
-	q, args, err := buildAdhocResultMetricScopeSQL(taskID, startTime, endTime)
-	if err != nil {
-		return nil, fmt.Errorf("build export adhoc result metric scope query: %w", err)
-	}
-	rows, err := db.Query(ctx, q, args...)
-	if err != nil {
-		return nil, fmt.Errorf("query export adhoc result metric scope: %w", err)
-	}
-	defer rows.Close()
-
-	resultPaths := make([]string, 0)
-	for rows.Next() {
-		var path string
-		if err := rows.Scan(&path); err != nil {
-			return nil, fmt.Errorf("scan export adhoc result metric scope: %w", err)
-		}
-		resultPaths = append(resultPaths, path)
-	}
-	if rows.Err() != nil {
-		return nil, fmt.Errorf("iterate export adhoc result metric scope: %w", rows.Err())
-	}
-	return mergeMetricPaths(taskMetricPaths, resultPaths), nil
-}
-
-func mergeMetricPaths(primary, extra []string) []string {
-	out := make([]string, 0, len(primary)+len(extra))
-	seen := make(map[string]struct{}, len(primary)+len(extra))
-	for _, paths := range [][]string{primary, extra} {
-		for _, path := range paths {
-			if path == "" {
-				continue
-			}
-			if _, ok := seen[path]; ok {
-				continue
-			}
-			seen[path] = struct{}{}
-			out = append(out, path)
-		}
-	}
-	return out
 }
 
 // objectPath 约定 object path：kpi-export/{task_id}/kpi_{source}_{timestamp}.csv（设计 §5.6）。

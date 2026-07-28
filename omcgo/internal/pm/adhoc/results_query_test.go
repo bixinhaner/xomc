@@ -244,6 +244,38 @@ func Test_buildResultsCountQuery_FilterByTaskMetricPaths(t *testing.T) {
 	}
 }
 
+func Test_buildResultsQueryAndCountQuery_UseSameMetricScopeWithDashboardFilters(t *testing.T) {
+	id := uuid.New()
+	f := resultsFilter{
+		Granularity:     "hourly",
+		StartTime:       "2026-07-27T18:00:00+08:00",
+		EndTime:         "2026-07-27T22:00:00+08:00",
+		ProductIDs:      []string{"11111111-1111-1111-1111-111111111111"},
+		TaskMetricPaths: []string{"K1", "K2"},
+		Weekdays:        []int{1, 2, 3},
+		Hours:           []int{8, 9},
+	}
+
+	dataSQL, dataArgs := buildResultsQuery(id, f, 100, 0)
+	countSQL, countArgs := buildResultsCountQuery(id, f)
+
+	for _, want := range []string{
+		"AND r.granularity = $2",
+		"AND r.time >= $3",
+		"AND r.time < $4",
+		"AND r.product_id = ANY($5)",
+		"AND r.metric_path = ANY($6)",
+		"AND EXTRACT(dow FROM r.start_time)::int = ANY($7)",
+		"AND EXTRACT(hour FROM r.start_time)::int = ANY($8)",
+	} {
+		assert.Contains(t, dataSQL, want)
+		assert.Contains(t, countSQL, want)
+	}
+	assert.Contains(t, dataSQL, "ORDER BY r.time DESC LIMIT $9 OFFSET $10")
+	assert.NotContains(t, countSQL, "ORDER BY")
+	assert.Equal(t, dataArgs[:len(dataArgs)-2], countArgs)
+}
+
 // count 空配置回退：与数据查询一致，配置集为空时不过滤。
 func Test_buildResultsCountQuery_EmptyTaskMetricPathsNoFilter(t *testing.T) {
 	id := uuid.New()

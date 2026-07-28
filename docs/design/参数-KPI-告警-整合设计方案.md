@@ -14,7 +14,7 @@
 |------|---------|-------|-----------|
 | **参数模型** | TR-069 标准路径 ↔ 私有路径映射 + 路由 | 9 产品 + 2 路由 + 1 标准 | provision / sync / interop / device |
 | **KPI 指标库** | Counter / KPI 定义 + 平台公式 + 功能集树 | 8 ENB + 1 GSM + 1 GNB | pm 性能管理 / worker |
-| **告警库** | 告警标识 → 名称 / 严重级 / 原因 / 建议 | 7 网元类型 | alarm 告警接收路径 |
+| **告警库** | 告警标识 → 名称 / 严重级 / 原因 / 建议 | 8 网元类型 | alarm 告警接收路径 |
 
 ### 0.2 共同特征 — "为什么是一个功能"
 
@@ -48,7 +48,7 @@ omcgo/
 │   │   ├── enb/  (8 个平台 XML — BAIBLQ 已合并到 BLQ)
 │   │   ├── GSM.xml
 │   │   └── GNB.xml
-│   └── alarm-definitions/                   # 7 网元 XML
+│   └── alarm-definitions/                   # 8 网元 XML
 ├── internal/
 │   ├── core/dictloader/                     # 共享基础设施（4 文件）
 │   ├── config/parammodel/                   # 参数模型（9 文件）
@@ -1187,14 +1187,14 @@ flowchart TB
 
 #### 3.2.2 `alarm_definitions` — 告警定义（442 行）
 
-> **设计抉择**：单表 + ne_type 列 vs 七张独立表。
-> 选择单表的原因：(1) 数据规模小（442 行），独立表带来的隔离收益不大；(2) 七种网元类型字段完全相同，没有像 KPI GNB 那样的字段差异；(3) 跨网元类型查询（如"所有 Critical 告警"）在单表上一次查询即可。
+> **设计抉择**：单表 + ne_type 列 vs 八张独立表。
+> 选择单表的原因：(1) 数据规模小（442 行），独立表带来的隔离收益不大；(2) 八种网元类型字段完全相同，没有像 KPI GNB 那样的字段差异；(3) 跨网元类型查询（如"所有 Critical 告警"）在单表上一次查询即可。
 
 | 列 | 类型 | 说明 |
 |---|---|---|
 | id | UUID PK | |
 | identifier | VARCHAR(32) NOT NULL | 告警唯一标识（如 "10001"），全局唯一 |
-| ne_type | VARCHAR(16) NOT NULL | ENB / GNB / OMC / EPC / EGW / CPE / UPS |
+| ne_type | VARCHAR(16) NOT NULL | ENB / GSM / GNB / OMC / EPC / EGW / CPE / UPS |
 | cn_name / en_name | VARCHAR(256) | |
 | severity_id | UUID FK → alarm_severity_levels | |
 | event_type | INT | 事件类型 |
@@ -1218,7 +1218,7 @@ internal/alarm/definition/
 ├── repository.go    # 接口
 ├── pg_repository.go # PostgreSQL 实现
 ├── handler.go       # HTTP 端点
-├── loader.go        # XML 加载（7 个网元类型）
+├── loader.go        # XML 加载（8 个网元类型）
 ├── registry.go      # 内存索引：identifier → AlarmDefinition
 └── cache.go         # Redis 缓存
 ```
@@ -1267,7 +1267,8 @@ Registry 通过 `sync.Map` 全量驻留 442 条定义（数据规模小，无内
 
 ```
 data/alarm-definitions/
-├── ENB.xml   (217 条)
+├── ENB.xml   (212 条)
+├── GSM.xml   (5 条)
 ├── GNB.xml   (108 条)
 ├── OMC.xml   (28 条)
 ├── EPC.xml   (52 条)
@@ -1280,7 +1281,7 @@ data/alarm-definitions/
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
-<alarmModel neType="ENB" totalCount="217">
+<alarmModel neType="ENB" totalCount="212">
     <alarms>
         <alarm
             identifier="10001"
@@ -1825,8 +1826,8 @@ omcgo/data/
 │   │       ENB_DEFAULT_098.xml / ENB_DEFAULT_181.xml / MLN.xml / MLQ.xml
 │   ├── GSM.xml
 │   └── GNB.xml
-└── alarm-definitions/             # 7 文件
-    ├── ENB.xml / GNB.xml / OMC.xml / EPC.xml / EGW.xml / CPE.xml / UPS.xml
+└── alarm-definitions/             # 8 文件
+    ├── ENB.xml / GSM.xml / GNB.xml / OMC.xml / EPC.xml / EGW.xml / CPE.xml / UPS.xml
 ```
 
 > XML 数据由独立离线脚本从外部数据源（旧 MongoDB / MySQL 系统）生成。脚本不在主仓库追踪，生成产物随代码提交。**外部数据源连接信息属于离线工具配置，不在本设计文档范围内**。
@@ -2062,7 +2063,7 @@ omcmb/frontend-core/src/i18n/zh-CN/nav.ts / en-US/nav.ts   # 5 个新 i18n key�
 omcgo/data/param-mappings/      (11 XML = 9 paramModel + 1 standard + 1 products
                                   ※ 旧 product-name-routing.xml + param-model-routing.xml 已合并为 products.xml)
 omcgo/data/indicator-library/   (10 XML = 8 ENB + GSM + GNB；BAIBLQ.xml 已合并入 BLQ.xml)
-omcgo/data/alarm-definitions/   (7 XML)
+omcgo/data/alarm-definitions/   (8 XML = ENB + GSM + GNB + OMC + EPC + EGW + CPE + UPS)
 ```
 
 ---
@@ -2170,7 +2171,7 @@ omcgo/data/alarm-definitions/   (7 XML)
 
 | 风险/取舍 | 决策 | 理由 |
 |----------|-----|------|
-| 告警单表 vs 七张独立表 | 单表 | 442 行规模小、字段完全相同、跨网元查询常见 |
+| 告警单表 vs 八张独立表 | 单表 | 442 行规模小、字段完全相同、跨网元查询常见 |
 | 告警是否保留 device_type 列 | 删除 | 旧系统 device_type 与 ne_type 部分重叠（device_type=0 既是 ENB 又是 OMC，存在歧义），OMC 内部告警识别只用 identifier，ne_type 已足够展示分类。未来北向接口需要时由导出适配层根据 ne_type 反向映射 |
 | 严重级表是否允许编辑 | **完全只读** | 4 级（Critical/Major/Minor/Warning + 31001-31004）是行业标准，开放编辑反而引入不一致风险 |
 | 未识别告警处理粒度 | **产品级开关 `enable_unknown_alarm`（默认 false）**；不做系统级开关 | 不同厂商/产品对未知 identifier 的处置策略差异大；默认严格丢弃避免淹没活动告警表，宽松模式按需开启；运维可通过 `unknown-stats` 端点持续治理告警库覆盖率 |

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<alarmModel neType="ENB" deviceType="0,1" totalCount="217">
+<alarmModel neType="ENB" deviceType="0,1" totalCount="212">
     <alarms>
         <alarm identifier="100671499" cnName="SCTP断链告警" enName="SCTP Link Down" severity="Critical" eventType="30000" cnProbableCause="传输异常或者配置错误" enProbableCause="Connection Establishment Error" cnSuggestion="检查sctp对端地址是否可达" enSuggestion="" isShow="N" />
         <alarm identifier="100671500" cnName="S1AP链路建立失败告警" enName="S1AP Link Establishment Failure" severity="Critical" eventType="30004" cnProbableCause="传输异常或者配置错误" enProbableCause="Communication Protocol Error" cnSuggestion="检查配置是否与MME不匹配。" enSuggestion="" isShow="N" />
@@ -213,10 +213,5 @@
         <alarm identifier="11472" cnName="LMT短期连续输错密码" enName="LMT short-term continuous wrong password" severity="Major" eventType="30002" cnProbableCause="LMT短期连续输错密码" enProbableCause="LMT short-term continuous wrong password" cnSuggestion="确认是否有人员尝试非法登录" enSuggestion="Verify that no one is attempting to log in illegally" isShow="Y" />
         <alarm identifier="32" cnName="SAS异常告警" enName="SAS Abnormal alarm" severity="Critical" eventType="30003" cnProbableCause="SAS异常告警" enProbableCause="SAS Abnormal alarm" cnSuggestion="参考SAS日志" enSuggestion="Refer to SAS log" isShow="Y" />
         <alarm identifier="33" cnName="SAS异常告警" enName="SAS Abnormal alarm" severity="Critical" eventType="30003" cnProbableCause="SAS异常告警" enProbableCause="SAS Abnormal alarm" cnSuggestion="参考SAS日志" enSuggestion="Refer to SAS log" isShow="Y" />
-        <alarm identifier="60001" cnName="网络断开或者abis配置有问题（remote ip、ipa unit-id等）" enName="Abis link error" severity="Critical" eventType="30000" cnProbableCause="网络断开或者abis配置有问题（remote ip、ipa unit-id等）" enProbableCause="Abis link error" cnSuggestion="检查网络和abis配置（remote ip、ipa unit-id等）" enSuggestion="Check Abis link net state and configurations" isShow="Y" />
-        <alarm identifier="60002" cnName="网络断开" enName="A link error" severity="Critical" eventType="30000" cnProbableCause="网络断开" enProbableCause="A link error" cnSuggestion="检查网络" enSuggestion="Check A link net state and config" isShow="Y" />
-        <alarm identifier="60003" cnName="BTS不可用" enName="BTS unavailable" severity="Major" eventType="30003" cnProbableCause="BTS不可用" enProbableCause="BTS unavailable" cnSuggestion="检查BTS的TRX参数配置" enSuggestion="Check the TRX parameter Settings of the BTS" isShow="Y" />
-        <alarm identifier="60004" cnName="网络断开" enName="BSC MASTER A link error" severity="Critical" eventType="30000" cnProbableCause="网络断开" enProbableCause="BSC MASTER A link error" cnSuggestion="检查网络" enSuggestion="Check A link net state and config" isShow="Y" />
-        <alarm identifier="60005" cnName="网络断开" enName="BSC BACKUP A link error" severity="Critical" eventType="30000" cnProbableCause="网络断开" enProbableCause="BSC BACKUP A link error" cnSuggestion="检查网络" enSuggestion="Check A link net state and config" isShow="Y" />
     </alarms>
 </alarmModel>

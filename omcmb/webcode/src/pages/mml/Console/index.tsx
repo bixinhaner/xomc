@@ -79,6 +79,8 @@ export default function MMLConsole() {
   const [selectedSns, setSelectedSns] = useState<string[]>([]);
   // 所选产品 ID（设备弹框强制同一产品）：用于「选择命令 / 配置参数」按产品拉不支持 path 过滤。
   const [selectedProductId, setSelectedProductId] = useState<string>('');
+  // 所选产品类型：命令树 / 参数列表按 param_mappings 权威支持集合过滤。
+  const [selectedProductClass, setSelectedProductClass] = useState<string>('');
   const [command, setCommand] = useState<CommandItem | null>(null);
   const [selectedPathKeys, setSelectedPathKeys] = useState<string[]>([]);
   const [config, setConfig] = useState<ExecRequest | null>(null);
@@ -510,11 +512,25 @@ export default function MMLConsole() {
         open={deviceModalOpen}
         value={selectedSns}
         onCancel={() => setDeviceModalOpen(false)}
-        onConfirm={(sns, productId) => {
+        onConfirm={(sns, productId, productClass) => {
+          const sameDevices =
+            sns.length === selectedSns.length &&
+            sns.every((sn, index) => sn === selectedSns[index]);
+          const sameProduct = productId === selectedProductId;
+          const sameProductClass = productClass === selectedProductClass;
+          const contextChanged = !sameDevices || !sameProduct || !sameProductClass;
           setSelectedSns(sns);
           setSelectedProductId(productId);
+          setSelectedProductClass(productClass);
+          if (contextChanged) {
+            setCommand(null);
+            setSelectedPathKeys([]);
+            setConfig(null);
+            setConfigTouched(false);
+            setConfigMode('standard');
+          }
           setDeviceModalOpen(false);
-          if (!command) setCommandModalOpen(true);
+          if (!command || contextChanged) setCommandModalOpen(true);
         }}
       />
 
@@ -523,6 +539,7 @@ export default function MMLConsole() {
         value={command}
         selectedPathKeys={selectedPathKeys}
         deviceSn={selectedSns[0]}
+        productClass={selectedProductClass}
         productId={selectedProductId}
         onCancel={() => setCommandModalOpen(false)}
         onConfirm={(cmd, pathKeys) => {

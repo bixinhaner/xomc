@@ -69,8 +69,9 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 		return rep, fmt.Errorf("alarm_severity_levels empty (P1-04 seed not loaded?)")
 	}
 
-	// 跨文件 identifier 去重：first-seen 胜出，重复 identifier 记录 error 并跳过
-	seenIdentifier := make(map[string]string, 512)
+	// 跨文件 identifier 去重：记录来源和实际入库字段，用于识别一次性的 ENB→GSM
+	// 内置定义迁移兼容；其余重复 identifier 仍然硬失败。
+	seenIdentifier := make(map[string]seenAlarmIdentifier, 512)
 
 	for _, src := range sources {
 		rep.FilesScanned++
@@ -138,7 +139,7 @@ func (l *Loader) resolveSources() ([]alarmFileSource, error) {
 	return out, nil
 }
 
-func (l *Loader) loadAlarmFile(ctx context.Context, path, loadedFrom string, severityMap map[string]string, seen map[string]string) (int, error) {
+func (l *Loader) loadAlarmFile(ctx context.Context, path, loadedFrom string, severityMap map[string]string, seen map[string]seenAlarmIdentifier) (int, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return 0, fmt.Errorf("read %s: %w", path, err)
@@ -153,8 +154,17 @@ func (l *Loader) loadAlarmFile(ctx context.Context, path, loadedFrom string, sev
 		neType = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 		neType = strings.ToUpper(neType)
 	}
-	if err := validateAlarmIdentifiers(doc.Alarms, seen, filepath.Base(path)); err != nil {
+	if err := validateAlarmIdentifiers(doc.Alarms, seen, filepath.Base(path), neType); err != nil {
 		return 0, err
+	}
+	for _, alarm := range doc.Alarms {
+		if first, ok := seen[strings.TrimSpace(alarm.Identifier)]; ok &&
+			isLegacyGSMReclassificationDuplicate(alarm, first, filepath.Base(path), neType) {
+			l.logger.Warn("accept legacy ENB to GSM alarm reclassification",
+				zap.String("identifier", alarm.Identifier),
+				zap.String("from", first.Filename),
+				zap.String("to", filepath.Base(path)))
+		}
 	}
 
 	tx, err := l.pool.Begin(ctx)
@@ -173,7 +183,11 @@ func (l *Loader) loadAlarmFile(ctx context.Context, path, loadedFrom string, sev
 	}
 	for _, a := range doc.Alarms {
 		if a.Identifier != "" {
-			seen[a.Identifier] = filepath.Base(path)
+			seen[a.Identifier] = seenAlarmIdentifier{
+				Filename: filepath.Base(path),
+				NeType:   neType,
+				Alarm:    a,
+			}
 		}
 	}
 	l.logger.Info("alarm file loaded",
@@ -186,7 +200,38 @@ func (l *Loader) loadAlarmFile(ctx context.Context, path, loadedFrom string, sev
 // validateAlarmIdentifiers 在写库前检查同一 XML 和跨 XML 的 identifier 冲突。
 // identifier 是 alarm_definitions 的全局唯一键，Registry 也仅按 identifier 查询；
 // 继续跳过重复项会让新导入的库没有任何可展示行却误报导入成功。
-func validateAlarmIdentifiers(alarms []xmlAlarm, seen map[string]string, filename string) error {
+type seenAlarmIdentifier struct {
+	Filename string
+	NeType   string
+	Alarm    xmlAlarm
+}
+
+var gsmReclassifiedAlarmIdentifiers = map[string]struct{}{
+	"60001": {},
+	"60002": {},
+	"60003": {},
+	"60004": {},
+	"60005": {},
+}
+
+// isLegacyGSMReclassificationDuplicate 只兼容 #189 的一次性数据归属迁移：
+// 升级时安装器会保留运维修改过的旧 ENB.xml，同时补入新版 GSM.xml。若旧 ENB 中
+// 仍保留原样的 60001-60005，则允许后加载的 GSM.xml 通过并由 UPSERT 将最终归属改为
+// GSM。只要文件对、identifier 或任一实际入库字段不匹配，仍按真实跨库冲突拒绝。
+func isLegacyGSMReclassificationDuplicate(alarm xmlAlarm, first seenAlarmIdentifier, filename, neType string) bool {
+	if !strings.EqualFold(first.Filename, "ENB.xml") || !strings.EqualFold(filename, "GSM.xml") {
+		return false
+	}
+	if first.NeType != "ENB" || neType != "GSM" {
+		return false
+	}
+	if _, ok := gsmReclassifiedAlarmIdentifiers[strings.TrimSpace(alarm.Identifier)]; !ok {
+		return false
+	}
+	return first.Alarm == alarm
+}
+
+func validateAlarmIdentifiers(alarms []xmlAlarm, seen map[string]seenAlarmIdentifier, filename, neType string) error {
 	if len(alarms) == 0 {
 		return fmt.Errorf("alarm XML %s contains no alarm definitions", filename)
 	}
@@ -197,8 +242,9 @@ func validateAlarmIdentifiers(alarms []xmlAlarm, seen map[string]string, filenam
 		if identifier == "" {
 			return fmt.Errorf("alarm XML %s contains an alarm without identifier", filename)
 		}
-		if firstFile, ok := seen[identifier]; ok {
-			return fmt.Errorf("alarm identifier %q in %s conflicts with %s", identifier, filename, firstFile)
+		if first, ok := seen[identifier]; ok &&
+			!isLegacyGSMReclassificationDuplicate(a, first, filename, neType) {
+			return fmt.Errorf("alarm identifier %q in %s conflicts with %s", identifier, filename, first.Filename)
 		}
 		if _, ok := local[identifier]; ok {
 			return fmt.Errorf("alarm identifier %q is duplicated in %s", identifier, filename)

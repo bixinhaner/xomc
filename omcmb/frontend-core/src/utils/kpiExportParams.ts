@@ -55,6 +55,14 @@ export interface AdhocExportSelection {
   startTime?: string;
   /** 可选大时间段止（ISO8601）。 */
   endTime?: string;
+  /** product 维度子集。空/缺席 = 不过滤。 */
+  productIds?: string[];
+  /** device_group/band 维度子集。空/缺席 = 不过滤。 */
+  objectLdns?: string[];
+  /** #599：星期过滤（0=周日..6=周六）。全选/缺席 = 不过滤。 */
+  weekdays?: number[];
+  /** #599：小时段过滤（0..23）。全选/缺席 = 不过滤。 */
+  hours?: number[];
 }
 
 /**
@@ -97,6 +105,10 @@ export function buildAdhocExportParams(
   };
   if (sel.startTime) params.start_time = sel.startTime;
   if (sel.endTime) params.end_time = sel.endTime;
+  if (sel.productIds && sel.productIds.length > 0) params.product_ids = sel.productIds;
+  if (sel.objectLdns && sel.objectLdns.length > 0) params.object_ldns = sel.objectLdns;
+  if (sel.weekdays && sel.weekdays.length > 0 && sel.weekdays.length < 7) params.weekdays = sel.weekdays;
+  if (sel.hours && sel.hours.length > 0 && sel.hours.length < 24) params.hours = sel.hours;
   return params;
 }
 
