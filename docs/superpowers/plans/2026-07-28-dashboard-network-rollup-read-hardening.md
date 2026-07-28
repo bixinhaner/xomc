@@ -2,15 +2,17 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 让首页 summary 和 KPI 时序直接读取现有 eNB、gNB、GSM 全网小时/天预聚合结果，彻底移除首页原始 PM 扫描与即席全网汇总，并用超时、并发限制、慢查询监控和资源告警把线上影响限制在可控范围内。
+**Goal:** 让首页 summary 和 KPI 时序直接读取现有 eNB、gNB、GSM 全网小时/天/周预聚合结果，彻底移除首页原始 PM 扫描与即席全网汇总，并用 5 分钟固定刷新、超时、并发限制、慢查询监控和资源告警把线上影响限制在可控范围内。
 
-**Architecture:** 在 Dashboard 内建立只读 `NetworkRollupReader`，以 `pm_aggregation_results` 的 `dimension='network'` 结果作为唯一 PM 数据源；Service 通过带 singleflight、短缓存、stale 缓存和有界并发的 `KPIQueryGuard` 调用 Repository。首页仍只接受 hourly/daily，缺失时返回空点或可识别错误，绝不回退原始表。全网小时/天发布事件精准失效缓存；应用、PostgreSQL、容器指标统一进入现有 Prometheus/Grafana 告警链路。
+**Architecture:** 在 Dashboard 内建立只读 `NetworkRollupReader`，以 `pm_aggregation_results` 的 `dimension='network'` 结果作为唯一 PM 数据源；Service 通过带 singleflight、4 分 30 秒 fresh cache、15 分钟 stale cache 和有界并发的 `KPIQueryGuard` 调用 Repository。首页明确接受 hourly/daily/weekly，分别展示最近 24 小时、30 天、12 周，缺失时返回空点或可识别错误，绝不回退原始表。前端仅按 5 分钟固定周期刷新，不订阅事件即时刷新；应用、PostgreSQL、容器指标统一进入现有 Prometheus/Grafana 告警链路。
 
 **Tech Stack:** Go、pgx/pgxpool、Squirrel、x/sync/singleflight、Prometheus client、PostgreSQL/TimescaleDB、OpenTelemetry Collector、Prometheus/Alertmanager、Grafana、React Query、Vitest
 
 ## Global Constraints
 
-- 首页只保留 `hourly`、`daily`；不增加 15 分钟或周粒度入口。
+- 首页只保留 `hourly`、`daily`、`weekly`；不增加 15 分钟粒度入口。
+- 首页默认 hourly，展示范围固定为 hourly 24 小时、daily 30 天、weekly 12 周；三种模式不得跨粒度拼接。
+- 首页只每 5 分钟定时刷新；页面隐藏暂停，恢复可见立即刷新；不做 PM、告警或其他事件即时刷新。
 - 直接复用 LTE/eNB、NR/gNB、GSM 已有全网上卷任务和 `pm_aggregation_results`；不新增聚合任务、结果表或 Dashboard 内补算。
 - `/dashboard/summary` 和 `/dashboard/kpi-time-series` 的 PM 路径不得读取 `pm_metric_values`、`pm_measurement_anchors`、`pm_metric_dictionary`、`pm_metrics_*` 兼容视图，也不得调用 PM Aggregator 的即席 network 聚合。
 - 预聚合缺失、不完整、超时或过载时不得回退原始表；只能返回空点、最近成功 stale 缓存或明确的 503/504。
@@ -28,7 +30,7 @@
   - 定义 `NetworkRollupReader`、查询参数、结果点和 TSDB 只读实现。
   - 只查询 network 维度全网任务，SQL 内完成最新版本去重和数据库 statement timeout。
 - Create: `omcgo/internal/dashboard/network_rollup_repository_test.go`
-  - 锁定 SQL 物理数据源、过滤条件、版本去重、小时/天粒度和拒绝非法粒度。
+  - 锁定 SQL 物理数据源、过滤条件、版本去重、小时/天/周粒度和拒绝 15 分钟粒度。
 - Modify: `omcgo/internal/pm/stream/device_pipeline.go`
   - 导出内置全网任务 ID 查询函数，Dashboard 不复制 UUID 常量。
 - Modify: `omcgo/internal/pm/stream/device_pipeline_test.go`
@@ -37,7 +39,7 @@
   - 用 `NetworkRollupReader` 替换 `dashboardKPIAggregator`。
   - summary 和时序统一消费最终全网结果。
 - Modify: `omcgo/internal/dashboard/kpi_series_service_test.go`
-  - 用 fake reader 覆盖小时、天、当前期/对比期、缺失桶、不完整窗口和无回退。
+  - 用 fake reader 覆盖小时、天、周、单一连续时间窗、缺失桶、不完整窗口和无回退。
 - Delete: `omcgo/internal/dashboard/kpi_network_query.go`
 - Delete: `omcgo/internal/dashboard/kpi_network_query_test.go`
 - Delete: `omcgo/internal/dashboard/kpi_summary_query.go`
@@ -57,15 +59,13 @@
   - 将过载/超时映射为 503/504；stale 设置响应头；过载设置 `Retry-After: 1`。
 - Modify: `omcgo/internal/dashboard/handler_test.go`
   - 锁定 HTTP 状态、响应头和原有 JSON 契约。
-- Modify: `omcgo/internal/dashboard/sse_notifier.go`
-  - 仅在内置全网小时/天结果发布后失效 KPI 缓存并通知页面。
-- Create: `omcgo/internal/dashboard/sse_notifier_test.go`
-  - 证明 PM 文件解析和设备级上卷不再触发 Dashboard 刷新。
+- Delete: `omcgo/internal/dashboard/sse_notifier.go`
+  - 删除 Dashboard 事件即时刷新实现。
 
 ### Configuration and wiring
 
 - Modify: `omcgo/internal/core/appconfig/config.go`
-  - 增加 `DashboardConfig` 及其 `Defaults()`，设置 3s/2.5s/4/100ms/30s/60s/5m 默认值。
+  - 增加 `DashboardConfig` 及其 `Defaults()`，设置 3s/2.5s/4/100ms/4m30s/15m 默认值。
 - Modify: `omcgo/internal/core/appconfig/validate.go`
   - 校验超时、并发和 TTL 边界。
 - Modify: `omcgo/internal/core/appconfig/validate_test.go`
@@ -77,7 +77,7 @@
 - Modify: `omcgo/cmd/app/etc/config.prod.yaml`
   - 显式记录 Dashboard 保护参数。
 - Modify: `omcgo/cmd/app/provider/modules.go`
-  - 注入 reader、guard、metrics，并在 service 建好后构造 SSE notifier。
+  - 注入 reader、guard、metrics，并移除 Dashboard SSE notifier 注册。
 
 ### Database, monitoring and frontend
 
@@ -101,16 +101,22 @@
 - Modify: `deployments/monitoring/grafana/dashboards/omc-infra.json`
   - 在 `y=36` 起新增 TSDB 临时写入、长查询、CPU/内存和磁盘读写四块面板。
 - Modify: `omcmb/frontend-core/src/hooks/api/useDashboard.ts`
-  - 禁止固定轮询和自动重试重查询，保留窗口聚焦与 SSE 刷新。
+  - 统一 5 分钟可见页轮询，禁止自动重试和 SSE 刷新；周模式直传 weekly。
 - Modify: `omcmb/webcode/src/components/dashboard/useKPIPanelData.ts`
-  - 删除遗留的 60 秒 per-KPI 轮询。
+  - 将遗留轮询改为同一 5 分钟策略。
+- Modify: `omcmb/webcode/src/pages/dashboard/DashboardKPIModules.tsx`
+- Modify: `omcmb/webcode/src/components/dashboard/LayoutKPIPanel.tsx`
+- Modify: `omcmb/webcode/src/components/dashboard/LayoutKPIPanel.helpers.ts`
+  - 把“日/周对比”替换为“小时/天/周”粒度切换，并渲染单一连续趋势。
+- Modify: `omcmb/webcode/src/components/dashboard/__tests__/LayoutKPIPanel.buildSeries.test.ts`
+  - 覆盖 24 小时、30 天、12 周桶映射和缺失空点。
 - Modify: `omcmb/webcode/src/test/useDashboard.test.ts`
   - 假定时器验证不轮询、不重试、仍批量查询。
 
 ### Verification and runbook
 
 - Create: `omcgo/scripts/verify-dashboard-network-rollups.sql`
-  - 上线前检查三制式、首页 KPI、小时/天窗口、完整性和延迟。
+  - 上线前检查三制式、首页 KPI、小时/天/周窗口、完整性和延迟。
 - Create: `docs/operations/dashboard-network-rollup-rollout.md`
   - 记录发布顺序、观察项、停止条件和回滚方式。
 - Create: `docs/superpowers/evidence/2026-07-28-dashboard-network-rollup-validation.md`
@@ -225,7 +231,7 @@ WHERE r.dimension = 'network'
 覆盖：
 
 - LTE、NR、GSM 使用 Task 1 的任务 ID；
-- 仅 `hourly`、`daily` 可用；
+- 仅 `hourly`、`daily`、`weekly` 可用，15 分钟和未知粒度直接返回参数错误；
 - 空指标列表、开始时间不早于结束时间、未知制式直接返回参数错误且不触库；
 - metric paths 去空、去重、排序，保证稳定 SQL 参数和缓存 key；
 - `ListLatestHourly` 固定 network/hourly/KPI 类型，在 24 小时窗口内按 `technology + metric_path` 取 `window_start, created_at` 最新记录。
@@ -304,7 +310,8 @@ git commit -m "feat(dashboard): 增加全网预聚合只读仓库"
 
 - hourly 请求只读 hourly；
 - daily 请求只读 daily；
-- 当前期和对比期各产生一个批量查询，不按 KPI 拆分；
+- weekly 请求只读 weekly；
+- 每次只产生当前粒度的一个批量查询，不发送额外对比期请求，也不按 KPI 拆分；
 - LTE/NR/GSM 正确透传；
 - 结果按 metric path/window 排序；
 - 缺失桶保持缺失，不补 0；
@@ -324,7 +331,7 @@ Expected: FAIL，Service 仍依赖 `dashboardKPIAggregator`。
 
 - [ ] **Step 3: 替换 Service 依赖和 helper**
 
-删除 `dashboardKPIAggregator` 字段；`fetchNetworkKCodeSeries` 与 daily 分支直接构造 `NetworkRollupQuery`。公式 KPI 与直接 KPI 一律把 Repository 返回值视为最终值，不调用 `Aggregator.Query`，不再在 Dashboard 内做公式或 sum/avg/min/max。
+删除 `dashboardKPIAggregator` 字段；hourly、daily、weekly 三个分支直接构造 `NetworkRollupQuery`。公式 KPI 与直接 KPI 一律把 Repository 返回值视为最终值，不调用 `Aggregator.Query`，不再在 Dashboard 内做公式或 sum/avg/min/max。
 
 同步让 `GetKPITrendComparison` 和 Active UE delta 复用新 helper。旧 `/dashboard/kpi-trend` 若未经过这些 helper，保持现状但不得被首页新代码调用。
 
@@ -438,8 +445,7 @@ type KPIQueryGuardConfig struct {
     QueryTimeout  time.Duration
     MaxConcurrent int
     QueueTimeout  time.Duration
-    SummaryTTL    time.Duration
-    SeriesTTL     time.Duration
+    FreshTTL      time.Duration
     StaleTTL      time.Duration
 }
 
@@ -463,10 +469,10 @@ type KPIQueryMetadata struct {
 
 使用 fake clock 验证：
 
-- summary fresh 30s、series fresh 60s；
+- summary 和 series fresh 均为 4m30s；
 - key 包含 endpoint、technology、granularity、排序去重后的指标、UTC start/end；
 - fresh 命中不触发 loader；
-- loader 失败或过载时只返回年龄不超过 5m 的最近成功值并标记 `Stale=true`；
+- loader 失败或过载时只返回年龄不超过 15m 的最近成功值并标记 `Stale=true`；
 - 超过 stale TTL 后返回原错误；
 - `Invalidate()` 清 fresh 和 stale，下一次必须重新读取；
 - 失败结果不写入成功缓存。
@@ -500,7 +506,7 @@ Expected: FAIL，guard 尚不存在。
 
 - [ ] **Step 5: 接入 summary 和时序**
 
-Service 只通过 guard 调 reader。summary key 固定 endpoint `summary`；时序 key 固定 `series`。对比期仍是独立 key，重复客户端会被合并。
+Service 只通过 guard 调 reader。summary key 固定 endpoint `summary`；时序 key 固定 `series`。hourly、daily、weekly 的 granularity 与时间窗进入独立 key，重复客户端会被合并。
 
 - [ ] **Step 6: 运行测试确认 GREEN 和 race 安全**
 
@@ -541,8 +547,7 @@ type DashboardConfig struct {
     StatementTimeout time.Duration `mapstructure:"statement_timeout"`
     MaxConcurrent   int           `mapstructure:"max_concurrent"`
     QueueTimeout    time.Duration `mapstructure:"queue_timeout"`
-    SummaryCacheTTL time.Duration `mapstructure:"summary_cache_ttl"`
-    SeriesCacheTTL  time.Duration `mapstructure:"series_cache_ttl"`
+    FreshCacheTTL   time.Duration `mapstructure:"fresh_cache_ttl"`
     StaleTTL        time.Duration `mapstructure:"stale_ttl"`
 }
 ```
@@ -557,12 +562,11 @@ dashboard:
   statement_timeout: 2500ms
   max_concurrent: 4
   queue_timeout: 100ms
-  summary_cache_ttl: 30s
-  series_cache_ttl: 60s
-  stale_ttl: 5m
+  fresh_cache_ttl: 4m30s
+  stale_ttl: 15m
 ```
 
-校验规则：所有 duration > 0；statement timeout < query timeout；max concurrent 在 1..64；stale TTL 不短于两个 fresh TTL。测试环境变量 `OMCGO_DASHBOARD_MAX_CONCURRENT=2` 能覆盖 YAML。
+校验规则：所有 duration > 0；statement timeout < query timeout；max concurrent 在 1..64；fresh cache TTL < 5 分钟轮询周期；stale TTL 不短于两个 fresh TTL。测试环境变量 `OMCGO_DASHBOARD_MAX_CONCURRENT=2` 能覆盖 YAML。
 
 - [ ] **Step 2: 运行测试确认 RED**
 
@@ -587,10 +591,9 @@ Expected: FAIL，配置尚不存在。
 2. `dashboard.NewMetrics(c.MetricsReg)`；
 3. `dashboard.NewKPIQueryGuard(...)`；
 4. `dashboard.NewService(...)`；
-5. `dashboard.NewSSENotifier(..., dashboardService)` 并订阅；
-6. 创建 handler。
+5. 创建 handler。
 
-移除 `dashPMAggregator` 注入，indicator repository 仍保留给 KPI 定义接口。
+移除 `dashPMAggregator` 注入和 Dashboard SSE notifier 注册，indicator repository 仍保留给 KPI 定义接口。
 
 - [ ] **Step 5: 运行测试确认 GREEN 和编译**
 
@@ -654,7 +657,7 @@ pm_network_rollup_lag_seconds{technology,granularity}
 - stale success → 200，`X-OMC-Data-Stale: true`；
 - fresh success 不设置 stale 头；
 - 现有 JSON 字段、空数组和 granularity 校验不变；
-- weekly/15min 仍为 400。
+- weekly 返回 200 并读取 weekly；15min 仍为 400。
 
 - [ ] **Step 3: 运行测试确认 RED**
 
@@ -689,31 +692,17 @@ git add omcgo/internal/dashboard
 git commit -m "feat(dashboard): 暴露查询保护与完整性指标"
 ```
 
-### Task 8: 用全网窗口发布事件精准刷新，移除 PM 文件刷新风暴
+### Task 8: 移除 Dashboard 事件即时刷新
 
 **Files:**
-- Modify: `omcgo/internal/dashboard/sse_notifier.go`
-- Create: `omcgo/internal/dashboard/sse_notifier_test.go`
+- Delete: `omcgo/internal/dashboard/sse_notifier.go`
+- Modify: `omcgo/cmd/app/provider/modules.go`
+- Modify: `omcmb/webcode/src/pages/dashboard/index.tsx`
+- Modify: `omcmb/webcode/src/pages/dashboard/index.test.tsx`
 
-**Interfaces:**
+- [ ] **Step 1: 写无事件刷新失败测试**
 
-```go
-type KPIQueryInvalidator interface {
-    InvalidateKPIQueries()
-}
-```
-
-- [ ] **Step 1: 写事件过滤失败测试**
-
-覆盖：
-
-- `SubjectPMFileParsed` 不再订阅、不发布 `dashboard_update`；
-- 告警 raised/cleared 仍发布更新，但不清 PM KPI 缓存；
-- 内置 LTE/NR/GSM task 的 hourly/daily rollup 解码后失效缓存并发布一次更新；
-- 设备级 task 或随机 task UUID 的 rollup 不失效、不发布；
-- 非法 payload 记录 warning，不 panic、不发布。
-
-测试 payload 使用 `pmstream.RollupPayload` 的紧凑 JSON 字段，尤其是 `rid`。
+在页面测试中断言首页不调用 `useDashboardRealtime`；在 provider 测试或源码边界测试中断言 `initDashboardModule` 不构造、不订阅 `NewSSENotifier`。事件总线与 SSE 基础设施继续供其他模块使用，本任务只删除 Dashboard notifier。
 
 - [ ] **Step 2: 运行测试确认 RED**
 
@@ -721,21 +710,16 @@ Run:
 
 ```bash
 cd omcgo
-go test ./internal/dashboard -run TestSSENotifier
+go test ./cmd/app/provider -run TestDashboardModuleDoesNotSubscribeRealtime
+cd ../omcmb
+npm run test --workspace webcode -- src/pages/dashboard/index.test.tsx
 ```
 
-Expected: FAIL，当前仍订阅 `PMFileParsed`。
+Expected: FAIL，当前 provider 和页面仍接入 Dashboard SSE。
 
-- [ ] **Step 3: 修改订阅和 invalidator**
+- [ ] **Step 3: 删除 Dashboard notifier 和页面订阅**
 
-订阅：
-
-- `SubjectAlarmRaised`
-- `SubjectAlarmCleared`
-- `SubjectPMAggregationHourlyRollup`
-- `SubjectPMAggregationDailyRollup`
-
-rollup handler 只比较 Task 1 导出的三个 task ID。全网结果发布后调用 `InvalidateKPIQueries()`，再通过现有 debounce/SSE 通知前端。
+删除 `sse_notifier.go`，从 `initDashboardModule` 删除构造、Subscribe 和 graceful shutdown 注册；从首页 `index.tsx` 删除 `useDashboardRealtime()`。不得删除共享 MessageHub、其他模块 notifier 或通用 SSE 路由。
 
 - [ ] **Step 4: 运行测试确认 GREEN**
 
@@ -743,7 +727,9 @@ Run:
 
 ```bash
 cd omcgo
-go test ./internal/dashboard -run TestSSENotifier
+go test ./cmd/app/provider -run TestDashboardModuleDoesNotSubscribeRealtime
+cd ../omcmb
+npm run test --workspace webcode -- src/pages/dashboard/index.test.tsx
 ```
 
 Expected: PASS。
@@ -751,33 +737,41 @@ Expected: PASS。
 - [ ] **Step 5: 提交**
 
 ```bash
-git add omcgo/internal/dashboard/sse_notifier.go omcgo/internal/dashboard/sse_notifier_test.go
-git commit -m "fix(dashboard): 按全网窗口发布精准刷新"
+git add -A omcgo/internal/dashboard/sse_notifier.go omcgo/cmd/app/provider/modules.go omcmb/webcode/src/pages/dashboard/index.tsx omcmb/webcode/src/pages/dashboard/index.test.tsx
+git commit -m "fix(dashboard): 移除首页事件即时刷新"
 ```
 
-### Task 9: 清除前端固定轮询和重试风暴
+### Task 9: 实现三粒度展示和 5 分钟固定刷新
 
 **Files:**
 - Modify: `omcmb/frontend-core/src/hooks/api/useDashboard.ts`
 - Modify: `omcmb/webcode/src/components/dashboard/useKPIPanelData.ts`
 - Modify: `omcmb/webcode/src/test/useDashboard.test.ts`
+- Modify: `omcmb/webcode/src/pages/dashboard/DashboardKPIModules.tsx`
+- Modify: `omcmb/webcode/src/components/dashboard/LayoutKPIPanel.tsx`
+- Modify: `omcmb/webcode/src/components/dashboard/LayoutKPIPanel.helpers.ts`
+- Modify: `omcmb/webcode/src/components/dashboard/__tests__/LayoutKPIPanel.buildSeries.test.ts`
 
 **Interfaces:**
 - Existing: `buildDashboardKPIQueryOptions`
-- Existing: `useMultiKPITrendComparison`
-- Existing: `useDashboardRealtime`
+- Produces: `type DashboardGranularity = 'hourly' | 'daily' | 'weekly'`
+- Produces: `buildDashboardRange(granularity, now, timezone)`
 
 - [ ] **Step 1: 写前端失败测试**
 
 在 `useDashboard.test.ts` 用假定时器和 API mock 断言：
 
-- 首次渲染当前期和对比期最多各一个批量请求；
-- 推进 60s、120s 不新增请求；
+- 默认 hourly，首次渲染只发一个最近 24 小时批量请求；
+- daily 发送最近 30 个业务自然日且 `granularity=daily`；
+- weekly 发送最近 12 个业务自然周且 `granularity=weekly`，不得转换为 daily；
+- 推进到 299999ms 不新增请求，推进到 300000ms 只新增一次；
+- `document.hidden=true` 时暂停，恢复可见后立即刷新一次并重置周期；
 - 503/504/429 不自动 retry；
-- window focus 允许刷新；
-- `dashboard_update` debounce 后失效并刷新；
-- weekly UI 模式仍转换成 daily 请求，不向 API 发送 weekly；
-- 请求不产生 15min。
+- 不因 `dashboard_update`、alarm 或 PM 事件刷新；
+- summary 与 KPI 使用同一 5 分钟策略；
+- 请求永不产生 15min。
+
+在 `LayoutKPIPanel.buildSeries.test.ts` 断言 hourly 24 点、daily 30 点、weekly 12 点按后端业务时区桶起点映射，缺失桶为 `null`，不做 hourly→daily 或 daily→weekly 聚合。
 
 - [ ] **Step 2: 运行测试确认 RED**
 
@@ -785,41 +779,52 @@ Run:
 
 ```bash
 cd omcmb
-npm run test --workspace webcode -- src/test/useDashboard.test.ts
+npm run test --workspace webcode -- src/test/useDashboard.test.ts src/components/dashboard/__tests__/LayoutKPIPanel.buildSeries.test.ts
 ```
 
-Expected: 至少固定轮询或 retry 断言 FAIL。
+Expected: 当前 60 秒轮询、daily 周拼接和日/周对比 UI 至少一项 FAIL。
 
-- [ ] **Step 3: 修改 React Query 选项**
+- [ ] **Step 3: 实现范围、查询和图表粒度**
 
-`buildDashboardKPIQueryOptions` 显式设置：
+定义唯一 `DashboardGranularity`。`buildDashboardRange` 使用系统业务时区计算：
+
+- hourly: `end=当前小时之后的整点边界`，`start=end-24h`；
+- daily: `end=下一业务自然日零点`，`start=end-30d`；
+- weekly: `end=下一个业务周一零点`，`start=end-12周`。
+
+`DashboardKPIModules` 保存一个页面级 granularity，默认 hourly；`LayoutKPIPanel` 显示“小时/天/周” Segmented，不再显示昨日/上周对比。全页汇总当前制式指标后只发一个当前粒度批量请求。helpers 直接把后端点映射到对应 24/30/12 桶。
+
+- [ ] **Step 4: 统一 5 分钟 React Query 选项**
+
+summary、KPI 时序和遗留 hook 统一设置：
 
 ```ts
 retry: false,
-refetchInterval: false,
+refetchInterval: 5 * 60 * 1000,
 refetchIntervalInBackground: false,
-refetchOnWindowFocus: true,
+refetchOnWindowFocus: 'always',
+staleTime: 4.5 * 60 * 1000,
 ```
 
-保留 `staleTime: 30_000` 和当前批量请求结构。删除 `useKPIPanelData.ts` 内 `refetchInterval: 60_000`；若该遗留 hook 已无引用，单独确认后删除 hook，而不是保留危险默认。
+不要挂 `useDashboardRealtime`。React Query 在页面不可见时自然暂停 interval；恢复可见通过 focus 立即刷新。若遗留 `useKPIPanelData.ts` 已无引用，确认后删除；否则改为共享常量，禁止保留 60 秒。
 
-- [ ] **Step 4: 运行测试和类型检查**
+- [ ] **Step 5: 运行测试和类型检查**
 
 Run:
 
 ```bash
 cd omcmb
-npm run test --workspace webcode -- src/test/useDashboard.test.ts
+npm run test --workspace webcode -- src/test/useDashboard.test.ts src/components/dashboard/__tests__/LayoutKPIPanel.buildSeries.test.ts
 npm run typecheck
 ```
 
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 6: 提交**
 
 ```bash
-git add omcmb/frontend-core/src/hooks/api/useDashboard.ts omcmb/webcode/src/components/dashboard/useKPIPanelData.ts omcmb/webcode/src/test/useDashboard.test.ts
-git commit -m "fix(dashboard): 移除 KPI 固定轮询与自动重试"
+git add -A omcmb/frontend-core/src/hooks/api/useDashboard.ts omcmb/webcode/src/components/dashboard omcmb/webcode/src/pages/dashboard/DashboardKPIModules.tsx omcmb/webcode/src/test/useDashboard.test.ts
+git commit -m "feat(dashboard): 增加三粒度五分钟刷新"
 ```
 
 ### Task 10: 补齐 TSDB 慢查询、临时写入和资源采集
@@ -964,6 +969,22 @@ PMNetworkRollupLagCritical:
   pm_network_rollup_lag_seconds{granularity="hourly"} > 7200
   for: 5m, severity: critical
 
+PMNetworkDailyRollupLagHigh:
+  pm_network_rollup_lag_seconds{granularity="daily"} > 129600
+  for: 30m, severity: warning
+
+PMNetworkDailyRollupLagCritical:
+  pm_network_rollup_lag_seconds{granularity="daily"} > 172800
+  for: 15m, severity: critical
+
+PMNetworkWeeklyRollupLagHigh:
+  pm_network_rollup_lag_seconds{granularity="weekly"} > 691200
+  for: 1h, severity: warning
+
+PMNetworkWeeklyRollupLagCritical:
+  pm_network_rollup_lag_seconds{granularity="weekly"} > 864000
+  for: 30m, severity: critical
+
 TSDBTempWriteHigh:
   rate(pg_stat_database_temp_bytes{instance="postgres-tsdb"}[5m]) > 10 * 1024 * 1024
   for: 5m, severity: warning
@@ -1030,8 +1051,8 @@ git commit -m "feat(monitoring): 增加 Dashboard 与 TSDB 资源告警"
 脚本必须输出：
 
 - 三个内置 task ID 在 `pm_aggregation_results` 的 technology/granularity 行数；
-- 每种制式 hourly/daily 最新 `window_start` 与 lag；
-- 首页布局所需 metric path 在最近 24 小时 hourly 和最近 7 天 daily 的缺失清单；
+- 每种制式 hourly/daily/weekly 最新 `window_start` 与 lag；
+- 首页布局所需 metric path 在最近 24 小时 hourly、最近 30 天 daily 和最近 12 周 weekly 的缺失清单；
 - `complete=false` 或 `missing_slots>0` 清单；
 - 重复逻辑窗口按 `technology, granularity, metric_path, window_start` 分组的版本数；
 - 推荐查询的 `EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT)`。
@@ -1169,8 +1190,8 @@ psql "$TSDB_DSN" -v ON_ERROR_STOP=1 -f omcgo/scripts/verify-dashboard-network-ro
 
 Expected:
 
-- LTE/NR/GSM 的首页 KPI hourly/daily 缺失清单为空；
-- 最新 hourly lag < 90m；
+- LTE/NR/GSM 的首页 KPI hourly/daily/weekly 缺失清单为空；
+- 最新 hourly lag < 90m、daily lag < 36h、weekly lag < 8d；
 - 不完整窗口清单符合业务已知状态，否则停止；
 - EXPLAIN 只访问 `pm_aggregation_results` 与 `idx_pm_aggregation_results_dashboard_network`；
 - `Buffers: temp` 为 0。
@@ -1179,8 +1200,9 @@ Expected:
 
 隔离副本原始规模至少等价于 10,000 设备、3 亿条 value。对 16 KPI 执行：
 
-- 今天/昨天 hourly 对比；
-- daily 时间范围；
+- 最近 24 小时 hourly；
+- 最近 30 天 daily；
+- 最近 12 周 weekly；
 - 10 个客户端并发；
 - 冷缓存一次、暖缓存至少 100 次。
 
@@ -1215,7 +1237,7 @@ Expected:
 
 - Dashboard P95 < 1s；
 - timeout/rejected 无增长；
-- stale 只在预期切换窗口出现；
+- stale 只在 TSDB 查询失败或过载时出现且年龄不超过 15 分钟；
 - TSDB temp write rate 接近 0；
 - CPU 未持续超过 70%；
 - rollup lag < 90m；
@@ -1233,7 +1255,7 @@ git commit -m "test(dashboard): 记录全网预聚合性能验收"
 
 ## Plan Self-Review Checklist
 
-- [ ] Design coverage: summary、KPI 时序、三制式、小时/天、禁止 15 分钟/周、无 raw fallback、超时、并发、慢查询、资源告警全部有实施任务和验证。
+- [ ] Design coverage: summary、KPI 时序、三制式、小时/天/周、禁止 15 分钟、5 分钟固定刷新、无事件即时刷新、无 raw fallback、超时、并发、慢查询、资源告警全部有实施任务和验证。
 - [ ] Data ownership: Dashboard 只读现有 network 结果；任务 UUID 由 PM stream 单一入口提供；未新增聚合体系。
 - [ ] Type consistency: technology 使用 `model.Technology`，granularity 使用 `metrics.Granularity`，task/version 使用 `uuid.UUID`，时间统一 UTC。
 - [ ] Failure semantics: 503/504/stale/empty/missing/incomplete 的 API、日志和指标语义均被测试。
@@ -1242,7 +1264,7 @@ git commit -m "test(dashboard): 记录全网预聚合性能验收"
 - [ ] Placeholder scan:
 
 ```bash
-rg -n 'T[B]D|T[O]DO|F[I]XME|待[补]|占[位]|<[^>]+>' docs/superpowers/plans/2026-07-28-dashboard-network-rollup-read-hardening.md
+rg -n 'T[B]D|T[O]DO|F[I]XME|待[补]|占[位]' docs/superpowers/plans/2026-07-28-dashboard-network-rollup-read-hardening.md
 ```
 
 Expected: 无输出。
