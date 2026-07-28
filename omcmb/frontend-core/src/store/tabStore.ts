@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { TabItem } from '../types/common';
+import { performancePageKeyFromPath, usePmPageStateStore } from './pmPageStateStore';
 
 export type { TabItem };
 
@@ -22,6 +23,14 @@ function dedupeTabsByExactPath(tabs: TabItem[]) {
   }
 
   return { deduped, removedKeyToKeptKey };
+}
+
+function clearClosedPerformanceTabStates(closedTabs: TabItem[]) {
+  const pageKeys = closedTabs
+    .map((tab) => performancePageKeyFromPath(tab.path))
+    .filter((pageKey): pageKey is string => Boolean(pageKey));
+  if (pageKeys.length === 0) return;
+  usePmPageStateStore.getState().clearPageStates(pageKeys);
 }
 
 // 仪表板 tab 的稳定标识。使用 'dashboard'（与 navConfig 中其他菜单项的 key 命名风格一致）。
@@ -105,7 +114,10 @@ export const useTabStore = create<TabState>()(
             (t) => t.key !== DASHBOARD_TAB_KEY && t.key !== get().activeTabKey
           );
           if (removeIdx !== -1) {
-            newTabs.splice(removeIdx, 1);
+            const [closedTab] = newTabs.splice(removeIdx, 1);
+            if (closedTab) {
+              clearClosedPerformanceTabStates([closedTab]);
+            }
           }
         }
         set({ tabs: newTabs, activeTabKey: tab.key });
@@ -115,6 +127,7 @@ export const useTabStore = create<TabState>()(
         const { tabs, activeTabKey } = get();
         if (key === DASHBOARD_TAB_KEY) return;
         const index = tabs.findIndex((t) => t.key === key);
+        const closedTab = tabs[index];
         const newTabs = tabs.filter((t) => t.key !== key);
         let newActiveKey = activeTabKey;
         if (activeTabKey === key) {
@@ -122,24 +135,34 @@ export const useTabStore = create<TabState>()(
           const next = newTabs[index];
           newActiveKey = (next ?? prev)?.key ?? DASHBOARD_TAB_KEY;
         }
+        if (closedTab) {
+          clearClosedPerformanceTabStates([closedTab]);
+        }
         set({ tabs: newTabs, activeTabKey: newActiveKey });
       },
 
       closeOtherTabs: (key) => {
         const { tabs } = get();
         const newTabs = tabs.filter((t) => !t.closable || t.key === key);
+        const closedTabs = tabs.filter((tab) => !newTabs.includes(tab));
+        clearClosedPerformanceTabStates(closedTabs);
         set({ tabs: newTabs, activeTabKey: key });
       },
 
       closeAllTabs: () => {
+        const { tabs } = get();
+        clearClosedPerformanceTabStates(tabs.filter((tab) => tab.closable));
         set({ tabs: [DASHBOARD_TAB], activeTabKey: DASHBOARD_TAB_KEY });
       },
 
       closeTabsToRight: (key) => {
         const { tabs, activeTabKey } = get();
         const index = tabs.findIndex((t) => t.key === key);
+        if (index === -1) return;
         const newTabs = tabs.slice(0, index + 1);
+        const closedTabs = tabs.slice(index + 1);
         const stillActive = newTabs.find((t) => t.key === activeTabKey);
+        clearClosedPerformanceTabStates(closedTabs);
         set({ tabs: newTabs, activeTabKey: stillActive ? activeTabKey : key });
       },
 
