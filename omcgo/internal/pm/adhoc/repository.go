@@ -79,6 +79,9 @@ type Repository interface {
 
 	// ListRuns 按 task_id 取运行历史，倒序 started_at，支持 limit/offset。
 	ListRuns(ctx context.Context, taskID uuid.UUID, limit, offset int) ([]TaskRun, error)
+
+	// ListResultMetricPaths 按结果过滤条件发现任务结果中真实出现过的指标。
+	ListResultMetricPaths(ctx context.Context, taskID uuid.UUID, filter resultsFilter) ([]string, error)
 }
 
 // Errors
@@ -132,6 +135,75 @@ func (r *PgRepository) SetStreamingRepository(repo streamingTaskRepository) *PgR
 
 func (r *PgRepository) HasStreamingRepository() bool {
 	return r.streamRepo != nil
+}
+
+func (r *PgRepository) ListResultMetricPaths(ctx context.Context, taskID uuid.UUID, filter resultsFilter) ([]string, error) {
+	if r.tsPool == nil {
+		return nil, errors.New("adhoc: tsdb pool is not configured")
+	}
+	query, args, err := buildResultMetricScopeQuery(taskID, filter)
+	if err != nil {
+		return nil, fmt.Errorf("build adhoc result metric scope query: %w", err)
+	}
+	rows, err := r.tsPool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query adhoc result metric scope: %w", err)
+	}
+	defer rows.Close()
+
+	paths := make([]string, 0)
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return nil, fmt.Errorf("scan adhoc result metric scope: %w", err)
+		}
+		paths = append(paths, path)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate adhoc result metric scope: %w", err)
+	}
+	return paths, nil
+}
+
+func buildResultMetricScopeQuery(taskID uuid.UUID, f resultsFilter) (string, []any, error) {
+	b := storage.Psql.Select("DISTINCT r.metric_path").
+		From("pm_adhoc_aggregation_results r").
+		Where(sq.Eq{"r.task_id": taskID})
+	if f.DeviceSN != "" {
+		b = b.Where(sq.Eq{"r.device_sn": f.DeviceSN})
+	}
+	if f.MetricPath != "" {
+		b = b.Where(sq.Eq{"r.metric_path": f.MetricPath})
+	}
+	if f.Granularity != "" {
+		b = b.Where(sq.Eq{"r.granularity": f.Granularity})
+	}
+	if f.StartTime != "" {
+		if t, err := time.Parse(time.RFC3339, f.StartTime); err == nil {
+			b = b.Where(sq.GtOrEq{"r.time": t})
+		}
+	}
+	if f.EndTime != "" {
+		if t, err := time.Parse(time.RFC3339, f.EndTime); err == nil {
+			b = b.Where(sq.Lt{"r.time": t})
+		}
+	}
+	if len(f.ObjectLDNs) > 0 {
+		b = b.Where(sq.Eq{"r.object_ldn": f.ObjectLDNs})
+	}
+	if len(f.ProductIDs) > 0 {
+		b = b.Where(sq.Eq{"r.product_id": f.ProductIDs})
+	}
+	if len(f.SubsetLDNs) > 0 {
+		b = b.Where(sq.Eq{"r.object_ldn": f.SubsetLDNs})
+	}
+	if len(f.Weekdays) > 0 && len(f.Weekdays) < 7 {
+		b = b.Where(sq.Expr("EXTRACT(dow FROM r.start_time)::int = ANY(?)", f.Weekdays))
+	}
+	if len(f.Hours) > 0 && len(f.Hours) < 24 {
+		b = b.Where(sq.Expr("EXTRACT(hour FROM r.start_time)::int = ANY(?)", f.Hours))
+	}
+	return b.OrderBy("r.metric_path").ToSql()
 }
 
 // SetWatermarkReader 注入「上游完成水位」读取器（#528 P3，新建持续任务初始游标用）。

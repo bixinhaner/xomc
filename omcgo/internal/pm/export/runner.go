@@ -251,6 +251,11 @@ func (r *Runner) buildAdhocResultSource(ctx context.Context, task *Task, loc app
 	if derr != nil {
 		return nil, nil, csvLayout{}, derr
 	}
+	metricPaths, merr := expandAdhocResultMetricPaths(ctx, r.adhocDB, taskID, meta.metricPaths, startTime, endTime)
+	if merr != nil {
+		return nil, nil, csvLayout{}, merr
+	}
+	meta.metricPaths = metricPaths
 	keys, kerr := discoverAdhocColumns(ctx, r.adhocDB, taskID, meta.metricPaths, startTime, endTime)
 	if kerr != nil {
 		return nil, nil, csvLayout{}, kerr
@@ -359,6 +364,52 @@ func loadAdhocTaskMeta(ctx context.Context, db PgQuerier, taskID uuid.UUID) (adh
 		meta.dimension = "device"
 	}
 	return meta, nil
+}
+
+func expandAdhocResultMetricPaths(ctx context.Context, db PgQuerier, taskID uuid.UUID, taskMetricPaths []string, startTime, endTime time.Time) ([]string, error) {
+	if len(taskMetricPaths) == 0 || db == nil {
+		return taskMetricPaths, nil
+	}
+	q, args, err := buildAdhocResultMetricScopeSQL(taskID, startTime, endTime)
+	if err != nil {
+		return nil, fmt.Errorf("build export adhoc result metric scope query: %w", err)
+	}
+	rows, err := db.Query(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query export adhoc result metric scope: %w", err)
+	}
+	defer rows.Close()
+
+	resultPaths := make([]string, 0)
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return nil, fmt.Errorf("scan export adhoc result metric scope: %w", err)
+		}
+		resultPaths = append(resultPaths, path)
+	}
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("iterate export adhoc result metric scope: %w", rows.Err())
+	}
+	return mergeMetricPaths(taskMetricPaths, resultPaths), nil
+}
+
+func mergeMetricPaths(primary, extra []string) []string {
+	out := make([]string, 0, len(primary)+len(extra))
+	seen := make(map[string]struct{}, len(primary)+len(extra))
+	for _, paths := range [][]string{primary, extra} {
+		for _, path := range paths {
+			if path == "" {
+				continue
+			}
+			if _, ok := seen[path]; ok {
+				continue
+			}
+			seen[path] = struct{}{}
+			out = append(out, path)
+		}
+	}
+	return out
 }
 
 // objectPath 约定 object path：kpi-export/{task_id}/kpi_{source}_{timestamp}.csv（设计 §5.6）。

@@ -22,3 +22,20 @@ func TestValidateSaveTaskAllowsEmptyMembershipSnapshot(t *testing.T) {
 
 	require.NoError(t, validateSaveTask(req))
 }
+
+func TestValidateSaveTaskAllowsKPIDependencyCounterOutsideOutputMetrics(t *testing.T) {
+	req := SaveTaskRequest{
+		Name: "内置-全网-LTE", Enabled: true, Visibility: "public", Creator: "system",
+		Technology: "lte", Dimension: DimensionNetwork,
+		Granularities: []Granularity{
+			GranularityHourly, GranularityDaily, GranularityWeekly, GranularityMonthly,
+		},
+		Metrics: []MetricRule{{
+			MetricID: "K1", MetricPath: "K1", MetricType: "kpi",
+			Aggregation: AggregationFormula, Formula: "C_DEP", Dependencies: []string{"C_DEP"},
+		}},
+		Counters: []CounterRule{{MetricPath: "C_DEP", Aggregation: AggregationSum}},
+	}
+
+	require.NoError(t, validateSaveTask(req))
+}
