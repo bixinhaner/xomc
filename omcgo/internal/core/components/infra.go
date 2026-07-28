@@ -179,8 +179,10 @@ func (inf *Infra) ConnectNATS(ctx context.Context, cfg appconfig.NATSConfig) err
 	inf.Health.Register("nats", func(ctx context.Context) error {
 		return client.HealthCheck()
 	})
-	// 连接资源指标（nats_conn_status / nats_reconnect_total / nats_msgs_*）。
-	// RegisterMetrics 在装计数回调的同时保留 NewNATSClient 的「重连」日志。
+	// 连接资源指标（nats_conn_status / nats_reconnect_total / nats_msgs_*）及
+	// 固定 JetStream stream/consumer 积压指标（omc_nats_*）。RegisterMetrics
+	// 使用同一个 NATSClient.JS 启动两类观测，ConnMetrics.Stop 会先停止队列
+	// observer，再由 GracefulShutdown 关闭 NATS 连接，避免查询协程泄漏。
 	natsConnMetrics := client.RegisterMetrics(inf.MetricsReg)
 	inf.GS.Register("nats-conn-metrics", 1, func(context.Context) error { natsConnMetrics.Stop(); return nil })
 

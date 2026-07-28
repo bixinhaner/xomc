@@ -3,6 +3,7 @@ package nats
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -15,6 +16,9 @@ type NATSClient struct {
 	Conn   *nats.Conn
 	JS     nats.JetStreamContext
 	logger *zap.Logger
+
+	metricsMu sync.Mutex
+	metrics   *ConnMetrics
 }
 
 // StreamDef defines a JetStream stream.
@@ -87,14 +91,14 @@ func DefaultStreams() []StreamDef {
 			Subjects:  []string{"pmaggregation.control.>"},
 			Retention: nats.InterestPolicy,
 		},
-		{Name: "MR", Subjects: []string{"mr.>"}, Retention: nats.WorkQueuePolicy},
+		{Name: "MR", Subjects: []string{"mr.>"}, Retention: nats.WorkQueuePolicy, AllowDirect: true},
 		{Name: "ALARM", Subjects: []string{"alarm.>"}, Retention: nats.WorkQueuePolicy},
 		{Name: "OSS", Subjects: []string{"oss.>"}, Retention: nats.WorkQueuePolicy},
 		{Name: "PROVISION", Subjects: []string{"provision.>"}, Retention: nats.WorkQueuePolicy},
 		{Name: "DATAMODEL", Subjects: []string{"datamodel.>"}, Retention: nats.WorkQueuePolicy},
 		{Name: "SOFTWARE", Subjects: []string{"firmware.>", "upgrade.>"}, Retention: nats.WorkQueuePolicy},
-		{Name: "BACKUP", Subjects: []string{"backup.>"}, Retention: nats.WorkQueuePolicy},
-		{Name: "REPORT", Subjects: []string{"report.>"}, Retention: nats.WorkQueuePolicy},
+		{Name: "BACKUP", Subjects: []string{"backup.>"}, Retention: nats.WorkQueuePolicy, AllowDirect: true},
+		{Name: "REPORT", Subjects: []string{"report.>"}, Retention: nats.WorkQueuePolicy, AllowDirect: true},
 		{Name: "NEDIRECT", Subjects: []string{"nedirect.>"}, Retention: nats.WorkQueuePolicy},
 		{Name: "SYS", Subjects: []string{"sys.>"}, Retention: nats.WorkQueuePolicy},
 		// 基站日志采集（运行日志 FileType 6 / 故障日志 8）：stationlog 单 consumer
@@ -107,8 +111,8 @@ func DefaultStreams() []StreamDef {
 		// TRACE_MSG 走 WorkQueuePolicy — worker QueueSubscribe 群组消费 + 批量落库。
 		// TRACE_EXPORT 走 WorkQueuePolicy — worker 单 consumer 顺序执行异步导出。
 		{Name: "TRACE_TASK", Subjects: []string{"trace.task.>"}, Retention: nats.InterestPolicy},
-		{Name: "TRACE_MSG", Subjects: []string{"trace.message.>"}, Retention: nats.WorkQueuePolicy},
-		{Name: "TRACE_EXPORT", Subjects: []string{"trace.export.>"}, Retention: nats.WorkQueuePolicy},
+		{Name: "TRACE_MSG", Subjects: []string{"trace.message.>"}, Retention: nats.WorkQueuePolicy, AllowDirect: true},
+		{Name: "TRACE_EXPORT", Subjects: []string{"trace.export.>"}, Retention: nats.WorkQueuePolicy, AllowDirect: true},
 	}
 }
 
@@ -320,6 +324,12 @@ func (c *NATSClient) HealthCheck() error {
 
 // Close drains and closes the NATS connection.
 func (c *NATSClient) Close() {
+	c.metricsMu.Lock()
+	metrics := c.metrics
+	c.metricsMu.Unlock()
+	if metrics != nil {
+		metrics.Stop()
+	}
 	if c.Conn != nil {
 		c.Conn.Drain()
 	}

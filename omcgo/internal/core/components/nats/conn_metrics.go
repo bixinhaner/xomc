@@ -17,6 +17,12 @@ import (
 // RegisterConnMetrics 只装一个「计数」型重连回调，会覆盖 NewNATSClient 的日志回调；
 // 这里随后重装一个组合回调（计数 + 日志），让指标与重连可观测性两者都不丢失。
 func (c *NATSClient) RegisterMetrics(reg prometheus.Registerer) *ConnMetrics {
+	c.metricsMu.Lock()
+	defer c.metricsMu.Unlock()
+	if c.metrics != nil {
+		return c.metrics
+	}
+
 	cm := RegisterConnMetrics(c.Conn, reg)
 	c.Conn.SetReconnectHandler(func(nc *nats.Conn) {
 		cm.IncReconnect()
@@ -24,6 +30,10 @@ func (c *NATSClient) RegisterMetrics(reg prometheus.Registerer) *ConnMetrics {
 			c.logger.Info("NATS reconnected", zap.String("url", nc.ConnectedUrl()))
 		}
 	})
+	queueMetrics := NewQueueMetrics(c.JS, reg, c.logger)
+	queueMetrics.Start()
+	cm.attachQueueMetrics(queueMetrics)
+	c.metrics = cm
 	return cm
 }
 
@@ -66,9 +76,14 @@ type ConnMetrics struct {
 	cancel   context.CancelFunc
 	stopped  chan struct{}
 	stopOnce sync.Once
+	queue    *QueueMetrics
 
 	lastIn  uint64
 	lastOut uint64
+}
+
+func (c *ConnMetrics) attachQueueMetrics(queue *QueueMetrics) {
+	c.queue = queue
 }
 
 // ConnMetricsOption 配置 ConnMetrics 行为。
@@ -213,6 +228,9 @@ func (c *ConnMetrics) IncReconnect() {
 // Stop 停止后台采样并等待 goroutine 退出。可重复调用。
 func (c *ConnMetrics) Stop() {
 	c.stopOnce.Do(func() {
+		if c.queue != nil {
+			c.queue.Stop()
+		}
 		if c.cancel != nil {
 			c.cancel()
 		}
