@@ -7754,8 +7754,6 @@ const messages: Record<string, string> = {
   'perf.dashboard.loadingResult':        'Loading result...',
   'perf.dashboard.taskUnavailable':      'Task unavailable',
   'perf.dashboard.taskUnavailableDesc':  'The task has been deleted or its results have passed the retention period.',
-  'perf.dashboard.modeContinuous':       'Continuous',
-  'perf.dashboard.modeOneshot':          'One-shot',
   'perf.dashboard.metricCount':          '{count} metrics',
   'perf.dashboard.truncated':            'Results may be incomplete',
   'perf.dashboard.truncatedDesc':        'The result rows matched for this time window have reached the limit ({limit} rows), so the chart may not include all data. Please narrow the time window or reduce metrics/series.',

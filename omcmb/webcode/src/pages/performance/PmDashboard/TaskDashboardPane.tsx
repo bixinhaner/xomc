@@ -11,7 +11,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useIntl } from 'react-intl';
-import { Alert, App, Button, Card, Empty, Segmented, Space, Tag, Typography } from 'antd';
+import { Alert, App, Button, Card, Empty, Segmented, Space, Typography } from 'antd';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { ExportOutlined, LineChartOutlined } from '@ant-design/icons';
 import {
@@ -291,11 +291,6 @@ export default function TaskDashboardPane({ taskId }: Props) {
         >
           <Space size={8} wrap>
             <Typography.Text strong>{displayAdhocTaskName(task, labelForTechnology)}</Typography.Text>
-            <Tag color="purple">
-              {task.mode === 'continuous'
-                ? intl.formatMessage({ id: 'perf.dashboard.modeContinuous' })
-                : intl.formatMessage({ id: 'perf.dashboard.modeOneshot' })}
-            </Tag>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               {intl.formatMessage(
                 { id: 'perf.dashboard.metricCount' },
