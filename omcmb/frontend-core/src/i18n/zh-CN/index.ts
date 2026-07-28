@@ -7789,8 +7789,6 @@ const messages: Record<string, string> = {
   'perf.dashboard.loadingResult':        '加载结果...',
   'perf.dashboard.taskUnavailable':      '任务不可用',
   'perf.dashboard.taskUnavailableDesc':  '任务已被删除或结果已超出保留期。',
-  'perf.dashboard.modeContinuous':       '持续',
-  'perf.dashboard.modeOneshot':          '单次',
   'perf.dashboard.metricCount':          '{count} 指标',
   'perf.dashboard.truncated':            '结果可能不全',
   'perf.dashboard.truncatedDesc':        '本次时间段命中的结果行已达上限（{limit} 行），图中可能未包含全部数据。请缩小时间段或减少指标/系列。',
