@@ -5,6 +5,7 @@ import {
   seriesLabelOf,
   buildMetricCharts,
   buildTrustedSeriesIdentities,
+  formatMetricChartDisplayName,
   ensureConfiguredMetricCharts,
   filterChartsByMetricPaths,
   filterRowsByMetricPaths,
@@ -107,6 +108,24 @@ describe('seriesLabelOf — 系列标签', () => {
 });
 
 describe('buildMetricCharts — 转置', () => {
+  it('图标题同时展示指标名称和指标 ID', () => {
+    const rows = [row({ metricPath: 'K001', displayName: 'RRC 成功率', startTime: 't0', metricValue: 1 })];
+    const charts = buildMetricCharts(rows, 'network', 'hourly');
+    expect(charts[0].displayName).toBe('RRC 成功率（K001）');
+  });
+
+  it('结果行名称等于指标 ID 时，用指标库名称兜底生成图标题', () => {
+    const rows = [row({ metricPath: 'C001', displayName: 'C001', startTime: 't0', metricValue: 1 })];
+    const charts = buildMetricCharts(
+      rows,
+      'network',
+      'hourly',
+      'zh-CN',
+      new Map([['C001', '上行流量原始计数']]),
+    );
+    expect(charts[0].displayName).toBe('上行流量原始计数（C001）');
+  });
+
   it('按指标分图：N 指标 → N 张图', () => {
     const rows = [
       row({ metricPath: 'M1', startTime: 't0', metricValue: 1 }),
@@ -217,7 +236,7 @@ describe('buildMetricCharts — 转置', () => {
   it('displayName 回填系列名（network 仍用维度标签）', () => {
     const rows = [row({ metricPath: 'K001', displayName: 'RRC 成功率', startTime: 't0', metricValue: 1 })];
     const charts = buildMetricCharts(rows, 'network', 'hourly');
-    expect(charts[0].displayName).toBe('RRC 成功率');
+    expect(charts[0].displayName).toBe('RRC 成功率（K001）');
     expect(charts[0].series[0].name).toBe('全网');
   });
   it('同一指标多行单位一致时，图表保留该单位', () => {
@@ -376,18 +395,28 @@ describe('ensureConfiguredMetricCharts — #198 任务指标空图骨架', () =>
       charts,
       ['K1', 'K2', 'K1'],
       [{ key: 'SN-A', name: 'SN-A' }],
+      new Map([['K2', 'VoLTE 接通率']]),
     );
 
     expect(out.map((chart) => chart.metricPath)).toEqual(['K1', 'K2']);
     expect(out[0].series[0].values).toEqual([7]);
     expect(out[1]).toMatchObject({
       metricPath: 'K2',
-      displayName: 'K2',
+      displayName: 'VoLTE 接通率（K2）',
       buckets: [],
       bucketEnds: [],
       series: [{ key: 'SN-A', name: 'SN-A', values: [] }],
     });
     expect(out[1].series.flatMap((series) => series.values)).not.toContain(0);
+  });
+});
+
+describe('formatMetricChartDisplayName — 指标标题统一格式', () => {
+  it('有名称时显示 名称（ID），名称缺失或等于 ID 时只显示 ID', () => {
+    expect(formatMetricChartDisplayName('K001', 'RRC 成功率')).toBe('RRC 成功率（K001）');
+    expect(formatMetricChartDisplayName('K001', 'K001')).toBe('K001');
+    expect(formatMetricChartDisplayName('K001', '  ')).toBe('K001');
+    expect(formatMetricChartDisplayName('K001')).toBe('K001');
   });
 });
 

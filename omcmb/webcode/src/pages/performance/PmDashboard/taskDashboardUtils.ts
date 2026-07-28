@@ -50,6 +50,8 @@ export interface MetricChart {
   compareBucketEnds?: string[];
 }
 
+export type MetricDisplayNameMap = ReadonlyMap<string, string>;
+
 export interface MetricSeriesIdentity {
   key: string;
   name: string;
@@ -68,6 +70,25 @@ export interface SeriesLabelPrefixes {
   deviceGroup: string;
   product: string;
   aggregateGroup: string;
+}
+
+export function formatMetricChartDisplayName(
+  metricPath: string,
+  displayName?: string,
+): string {
+  const name = displayName?.trim();
+  if (!name || name === metricPath) return metricPath;
+  return `${name}（${metricPath}）`;
+}
+
+function metricChartDisplayNameOf(
+  metricPath: string,
+  displayName: string | undefined,
+  metricDisplayNames?: MetricDisplayNameMap,
+): string {
+  const name = displayName?.trim();
+  if (name && name !== metricPath) return formatMetricChartDisplayName(metricPath, name);
+  return formatMetricChartDisplayName(metricPath, metricDisplayNames?.get(metricPath));
 }
 
 function trustedSeriesLabelOf(
@@ -155,6 +176,7 @@ export function ensureConfiguredMetricCharts(
   charts: MetricChart[],
   metricPaths: string[] | undefined,
   seriesIdentities: MetricSeriesIdentity[],
+  metricDisplayNames?: MetricDisplayNameMap,
 ): MetricChart[] {
   if (!metricPaths || metricPaths.length === 0) return charts;
   const byMetric = new Map(charts.map((chart) => [chart.metricPath, chart]));
@@ -170,7 +192,7 @@ export function ensureConfiguredMetricCharts(
     }
     out.push({
       metricPath,
-      displayName: metricPath,
+      displayName: formatMetricChartDisplayName(metricPath, metricDisplayNames?.get(metricPath)),
       buckets: [],
       bucketEnds: [],
       series: seriesIdentities.map(({ key, name }) => ({ key, name, values: [] })),
@@ -291,6 +313,7 @@ export function buildMetricCharts(
   dimension: AdhocDimension,
   granularity: string,
   locale: Locale = 'zh-CN',
+  metricDisplayNames?: MetricDisplayNameMap,
 ): MetricChart[] {
   const filtered = rows.filter((r) => r.granularity === granularity);
   if (filtered.length === 0) return [];
@@ -317,7 +340,7 @@ export function buildMetricCharts(
     let m = byMetric.get(r.metricPath);
     if (!m) {
       m = {
-        displayName: r.displayName || r.metricPath,
+        displayName: metricChartDisplayNameOf(r.metricPath, r.displayName, metricDisplayNames),
         unit: undefined,
         unitConflict: false,
         buckets: new Set(),

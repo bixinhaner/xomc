@@ -19,11 +19,16 @@ import {
   usePmAdhocFilterOptions,
   usePmAdhocResults,
 } from '@core/hooks/api/usePmAdhoc';
+import { useIndicatorCandidates } from '@core/hooks/api/usePerformance';
 import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
 import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
 import { nowInSystemTimezone, toSystemTimezoneRFC3339 } from '@core/utils/systemTime';
 import { buildAdhocExportParams, defaultExportTaskName } from '@core/utils/kpiExportParams';
-import { useTechnologyDictionary } from '@core/hooks/api/useTechnologyDictionary';
+import {
+  isKnownTechnology,
+  technologyToDeviceType,
+  useTechnologyDictionary,
+} from '@core/hooks/api/useTechnologyDictionary';
 import { displayAdhocTaskName } from '../adhocTaskDisplay';
 import {
   buildMetricCharts,
@@ -69,6 +74,13 @@ export default function TaskDashboardPane({ taskId }: Props) {
     GRAN_MSG_IDS[g] ? intl.formatMessage({ id: GRAN_MSG_IDS[g] }) : g;
   const taskQuery = usePmAdhocDetail(taskId);
   const dimension = taskQuery.data?.dimension;
+  const taskDeviceType = isKnownTechnology(taskQuery.data?.technology)
+    ? technologyToDeviceType(taskQuery.data.technology)
+    : undefined;
+  const { data: metricCandidates } = useIndicatorCandidates(taskDeviceType, {
+    includeCounters: true,
+    enabledOnly: false,
+  });
 
   // ── 共用三级筛选 + 周期对比开关（本 Pane 持状态，驱动取数 + 二拉）──────
   // #563：默认范围按系统时区「当前时刻」，与图表 X 轴同一参照系。
@@ -180,6 +192,17 @@ export default function TaskDashboardPane({ taskId }: Props) {
   const [activeGran, setActiveGran] = useState<string | undefined>(undefined);
   const effectiveGran = activeGran && granularities.includes(activeGran) ? activeGran : granularities[0];
   const chartLocale = intl.locale === 'en-US' ? 'en-US' : 'zh-CN';
+  const metricDisplayNames = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const metric of metricCandidates ?? []) {
+      const name =
+        chartLocale === 'en-US'
+          ? metric.enName || metric.cnName || metric.name
+          : metric.cnName || metric.enName || metric.name;
+      map.set(metric.id, name);
+    }
+    return map;
+  }, [chartLocale, metricCandidates]);
   const seriesLabels = useMemo(
     () => ({
       network: intl.formatMessage({ id: 'perf.adhoc.colObject.network' }),
@@ -220,11 +243,18 @@ export default function TaskDashboardPane({ taskId }: Props) {
     const cur = extendChartsAxis(
       ensureConfiguredMetricCharts(
         filterChartsByMetricPaths(
-          buildMetricCharts(visibleRows, taskQuery.data.dimension, effectiveGran, chartLocale),
+          buildMetricCharts(
+            visibleRows,
+            taskQuery.data.dimension,
+            effectiveGran,
+            chartLocale,
+            metricDisplayNames,
+          ),
           taskMetricPaths,
         ),
         taskMetricPaths,
         trustedSeries,
+        metricDisplayNames,
       ),
       {
         rangeStartMs: submitted.rangeStartMs,
@@ -238,11 +268,18 @@ export default function TaskDashboardPane({ taskId }: Props) {
     if (!submitted.compare) return cur;
     const prev = ensureConfiguredMetricCharts(
       filterChartsByMetricPaths(
-        buildMetricCharts(visiblePrevRows, taskQuery.data.dimension, effectiveGran, chartLocale),
+        buildMetricCharts(
+          visiblePrevRows,
+          taskQuery.data.dimension,
+          effectiveGran,
+          chartLocale,
+          metricDisplayNames,
+        ),
         taskMetricPaths,
       ),
       taskMetricPaths,
       trustedSeries,
+      metricDisplayNames,
     );
     return attachCompareSeries(cur, prev, submitted.offsetMs, effectiveGran);
   }, [
@@ -252,6 +289,7 @@ export default function TaskDashboardPane({ taskId }: Props) {
     effectiveGran,
     submitted,
     chartLocale,
+    metricDisplayNames,
     filterOpts?.options,
     seriesLabels,
     systemTimezone,
