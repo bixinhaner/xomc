@@ -287,6 +287,7 @@
         <indicator id="KGNB0568" groupId="3aa8d56f20205678977003cf6ab17081" enName="UE_ACTIVE" reportKey="UE_ACTIVE" cnName="活跃UE数" isBuildIn="1" isCounter="0" unitId="number" statisType="avg" arithmetic="C010070014" formula="RRC.NbrMeanActiveUE" />
         <indicator id="KGNB0569" groupId="3aa8d56f20205678977003cf6ab17081" enName="UE_PEAK" reportKey="UE_PEAK" cnName="峰值UE数" isBuildIn="1" isCounter="0" unitId="number" statisType="max" arithmetic="C010070015" formula="RRC.NbrMaxActiveUE" />
         <indicator id="C010120025" groupId="f942ce91d529d43aaf1521067a058828" enName="OTHER.StatisDuration" reportKey="OTHER.StatisDuration" cnName="统计时长" isBuildIn="1" isCounter="1" dataType="int" unitId="s" statisType="sum" arithmetic="C010120025" formula="OTHER.StatisDuration" />
-        <indicator id="KGNB0570" groupId="3aa8d56f20205678977003cf6ab17081" enName="Cell Availability Rate" reportKey="Cell Availability Rate" cnName="小区可用率" isBuildIn="1" isCounter="0" unitId="%" statisType="pct" arithmetic="OTHER.CellServiceTime/C010120025*100" formula="OTHER.CellServiceTime/OTHER.StatisDuration*100" />
+        <indicator id="C010120026" groupId="f942ce91d529d43aaf1521067a058828" enName="OTHER.CellServiceTime" reportKey="OTHER.CellServiceTime" cnName="小区在服时长" isBuildIn="1" isCounter="1" dataType="int" unitId="s" statisType="sum" arithmetic="C010120026" formula="OTHER.CellServiceTime" />
+        <indicator id="KGNB0570" groupId="3aa8d56f20205678977003cf6ab17081" enName="Cell Availability Rate" reportKey="Cell Availability Rate" cnName="小区可用率" isBuildIn="1" isCounter="0" unitId="%" statisType="pct" arithmetic="C010120026/C010120025*100" formula="OTHER.CellServiceTime/OTHER.StatisDuration*100" />
     </indicators>
 </indicatorModel>
