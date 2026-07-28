@@ -2,6 +2,44 @@ package task
 
 import "github.com/prometheus/client_golang/prometheus"
 
+// PersistentQueueNames is the bounded queue dimension for the unified
+// persistent-queue metrics. Values must be registered queue names, never a
+// device identity, complete Redis key, object path, or database row ID.
+var PersistentQueueNames = []string{
+	"device_tasks",
+	"async_jobs",
+	"parameter_sync_outbox",
+	"northbound_outbox",
+	"pm_kpi_export",
+	"trace_export",
+	"backup_tasks",
+	"dead_letters",
+}
+
+// Persistent queue metric suffixes are shared by PM, task, and storage-backed
+// queue observers. Units are encoded in the suffix where applicable.
+const (
+	PersistentQueueMetricPending               = "pending"
+	PersistentQueueMetricOldestAgeSeconds      = "oldest_age_seconds"
+	PersistentQueueMetricFailedTotal           = "failed_total"
+	PersistentQueueMetricDeadLetterTotal       = "dead_letter_total"
+	PersistentQueueMetricProcessedTotal        = "processed_total"
+	PersistentQueueMetricObserverFailuresTotal = "observer_failures_total"
+)
+
+// PersistentQueueStatuses is the only status vocabulary for queue snapshots.
+// Empty queues are represented by pending=0; observer failures retain the
+// previous value and increment observer_failures_total instead of becoming 0.
+var PersistentQueueStatuses = []string{"pending", "sent", "running", "succeeded", "failed", "dead_letter"}
+
+// Persistent queue labels are deliberately bounded. Do not add device_sn,
+// redis_key, object_path, row ID, or other per-item dimensions.
+const (
+	PersistentQueueLabelQueue  = "queue"
+	PersistentQueueLabelStatus = "status"
+	PersistentQueueLabelResult = "result"
+)
+
 // TaskMetrics holds Prometheus metrics for the task queue module.
 //
 // P4 扩展（docs/design/mml-task-flow-design-20260424.md §3.3 C10）：

@@ -249,6 +249,39 @@ redis    :6379 ──┘  └─ transform/promote_pg_resource ──┘
 
 ## 与 omcgo 的指标契约
 
+### 资源与队列指标契约（Task 1）
+
+后续资源监控、队列观测器和 Grafana 面板必须复用下面的命名、标签和语义。
+`queue`、`status`、`result`、`subject`、`durable` 只能取配置或代码中登记的有限枚举；
+不得把 device SN、完整 Redis key、对象路径、数据库 row ID 或请求 ID 作为标签。
+
+| 指标后缀/指标 | 标签 | 单位 | 空值/0 语义 | 采集失败语义 |
+|---|---|---|---|---|
+| `pending` | `queue,status` | 条 | 队列为空时为真实 `0` | 保留上次值 |
+| `oldest_age_seconds` | `queue,status` | 秒 | 无积压时为真实 `0` | 保留上次值 |
+| `failed_total` | `queue` | 次 | 尚无失败时可从 `0` 开始 | 观测失败不冒充业务失败 |
+| `dead_letter_total` | `queue` | 条 | 无死信时为真实 `0` | 保留上次值并记录观测失败 |
+| `processed_total` | `queue,result` | 次 | 尚未处理时可从 `0` 开始 | 观测失败不冒充处理结果 |
+| `observer_failures_total` | `queue` | 次 | 尚无失败时可从 `0` 开始 | 每次查询/采集失败递增 |
+| `omc_pm_queue_pending` | `subject,durable` | 条 | Worker 启动和空队列均为真实 `0` | 保留上次值 |
+| `omc_pm_queue_oldest_age_seconds` | `subject,durable` | 秒 | 无积压时为真实 `0` | 保留上次值 |
+| `omc_pm_queue_sample_failures_total` | `subject,durable` | 次 | 尚无失败时可从 `0` 开始 | 失败时递增 |
+
+统一持久化队列目录固定为：`device_tasks`、`async_jobs`、
+`parameter_sync_outbox`、`northbound_outbox`、`pm_kpi_export`、`trace_export`、
+`backup_tasks`、`dead_letters`。状态值固定为 `pending`、`sent`、`running`、
+`succeeded`、`failed`、`dead_letter`；`processed_total` 的 `result` 使用
+`succeeded` 或 `failed`。
+
+查询语义必须区分“真实 0”和“不可用”：PromQL 返回存在且值为 `0` 的时间序列，
+表示观测器成功采集到空队列；查询失败、序列缺失或样本过期表示指标不可用，面板和告警
+不得把它转换成 `0`。NATS/PM 等观测器应保留上次业务值，并递增对应的
+`*_observer_failures_total` 或 `omc_pm_queue_sample_failures_total`。
+
+本期明确排除应用进程内部内存队列：Go Channel、Worker Channel、参数同步内存
+Channel、Trace 本地 Capture Queue，以及其他仅存在于进程内且没有持久化权威来源的
+临时缓冲。它们不创建 Prometheus 队列时间序列；如需诊断，应使用进程级运行时指标或日志。
+
 omcgo 三进程通过以下端口暴露 `/metrics`（容器内）：
 
 | 进程 | metrics 端口 | 验证 |

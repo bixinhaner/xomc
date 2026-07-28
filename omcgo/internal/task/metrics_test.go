@@ -69,3 +69,46 @@ func TestTaskMetrics_LifecycleObservability(t *testing.T) {
 	assert.Equal(t, float64(1),
 		testutil.ToFloat64(m.RecoveryActionTotal.WithLabelValues(RecoveryActionReconcileRepair)))
 }
+
+func TestTaskMetrics_ContractUsesOnlyLowCardinalityLabels(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewTaskMetrics(reg)
+
+	m.CompletedTotal.WithLabelValues("mml", "completed").Inc()
+	m.DurationSeconds.WithLabelValues("mml").Observe(1)
+	m.NoHandlerTotal.WithLabelValues("unknown-source").Inc()
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		for _, metric := range family.Metric {
+			for _, label := range metric.Label {
+				assert.NotContains(t, label.GetName(), "device_sn")
+				assert.NotContains(t, label.GetName(), "redis_key")
+				assert.NotContains(t, label.GetName(), "object_path")
+				assert.NotContains(t, label.GetValue(), "device-sn-001")
+				assert.NotContains(t, label.GetValue(), "redis:acs:taskq:")
+			}
+		}
+	}
+}
+
+func TestTaskMetrics_PersistentQueueMetricContract(t *testing.T) {
+	assert.Equal(t, []string{
+		"device_tasks",
+		"async_jobs",
+		"parameter_sync_outbox",
+		"northbound_outbox",
+		"pm_kpi_export",
+		"trace_export",
+		"backup_tasks",
+		"dead_letters",
+	}, PersistentQueueNames)
+	assert.Equal(t, "pending", PersistentQueueMetricPending)
+	assert.Equal(t, "oldest_age_seconds", PersistentQueueMetricOldestAgeSeconds)
+	assert.Equal(t, "failed_total", PersistentQueueMetricFailedTotal)
+	assert.Equal(t, "dead_letter_total", PersistentQueueMetricDeadLetterTotal)
+	assert.Equal(t, "processed_total", PersistentQueueMetricProcessedTotal)
+	assert.Equal(t, "observer_failures_total", PersistentQueueMetricObserverFailuresTotal)
+	assert.Equal(t, []string{"pending", "sent", "running", "succeeded", "failed", "dead_letter"}, PersistentQueueStatuses)
+}

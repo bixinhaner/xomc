@@ -10,6 +10,14 @@ import (
 // (issue #20). Before this, max-retries termination and parse-drop were only
 // logged at ERROR level — a消息被吞掉后没有任何可告警信号，运维只能事后翻日志。
 //
+// 指标契约：subject 和 durable 只能来自已注册的固定业务枚举；禁止把
+// device SN、完整 Redis key 或对象路径放入标签。单位和空值语义如下：
+//   - *_pending、*_ack_pending、*_redelivered 是 gauge，单位为消息数，空队列明确暴露 0。
+//   - *_oldest_age_seconds 是 gauge，单位为秒；无积压时为 0。
+//   - *_sequence 是 gauge，单位为 JetStream sequence；采集失败保留上次值。
+//   - *_sample_timestamp_seconds 是 gauge，单位为 Unix 秒；采集失败不更新。
+//   - *_sample_failures_total 是 counter；采集失败时递增，不能用 0 伪造成功。
+//
 // 指标语义（按 subject 维度，低基数 = 业务主题固定枚举）：
 //   - DeliveryTotal{subject,outcome}  每条消息的最终处置：
 //     outcome=ack         handler 成功，消息确认
