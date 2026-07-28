@@ -225,6 +225,26 @@
         {"expr": "minio_node_ilm_expiry_pending_tasks", "legendFormat": "ILM pending"}
       ],
       "fieldConfig": {"defaults": {"unit": "short", "min": 0}}
+    },
+    {
+      "title": "Redis 任务队列积压",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 68},
+      "targets": [
+        {"expr": "omc_redis_task_queue_length_total", "legendFormat": "{{queue_family}} length"},
+        {"expr": "omc_redis_task_queue_active_devices", "legendFormat": "{{queue_family}} active devices"},
+        {"expr": "omc_redis_task_queue_max_length", "legendFormat": "{{queue_family}} max length"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}}
+    },
+    {
+      "title": "Redis 任务队列最老任务年龄",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 68},
+      "targets": [
+        {"expr": "omc_redis_task_queue_oldest_age_seconds", "legendFormat": "{{queue_family}} oldest age"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s", "min": 0}}
     }
   ],
   "refresh": "30s",

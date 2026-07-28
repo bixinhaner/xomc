@@ -54,6 +54,14 @@ Expected: observer query failures in the last five minutes. ZERO means successfu
 redis_memory_used_bytes
 Expected: used bytes. NO-DATA means the Redis receiver/remote-write path is unavailable; 0 is valid only when Prometheus returned a real sample.
 
+## Redis task queues (MUST-HAVE after the OMC Redis queue observer starts)
+omc_redis_task_queue_length_total{queue_family=~"cmdq|taskq"}
+Expected: aggregate task backlog by fixed queue family. ZERO means the scanned key set is empty; NO-DATA means Redis observation failed.
+
+## Redis task queue observer failures (MUST-HAVE after the observer starts)
+increase(omc_redis_task_queue_scan_failures_total{queue_family=~"cmdq|taskq"}[5m])
+Expected: Redis SCAN failures in the last five minutes. ZERO means successful observation; NO-DATA means observer telemetry is unavailable.
+
 ## PostgreSQL (MUST-HAVE after otelcol PostgreSQL receiver is connected)
 pg_stat_database_numbackends
 Expected: active database backends. NO-DATA means the PostgreSQL receiver/remote-write path is unavailable; 0 is a real measured idle state.
