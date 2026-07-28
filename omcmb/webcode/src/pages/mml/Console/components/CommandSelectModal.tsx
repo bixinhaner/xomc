@@ -51,6 +51,8 @@ interface CommandSelectModalProps {
    * 设备模型不支持的 path 不再展示（选择命令右侧预览 + 配置参数勾选列表均生效）。
    */
   deviceSn?: string;
+  /** 当前所选产品类型。优先用于命令树 / 参数列表过滤，口径与 param_mappings 执行校验一致。 */
+  productClass?: string;
   /**
    * 当前所选产品 ID（设备列表强制同一产品，见 DeviceSelectModal）。用于拉「产品不支持 path
    * 自学习表」，按命令读/写类型过滤：LST/DSP 隐藏 read 不支持的；MOD/ADD/RMV 隐藏 write 不支持的。
@@ -75,6 +77,7 @@ export default function CommandSelectModal({
   onConfirm,
   onGotoRawParams,
   deviceSn,
+  productClass,
   productId,
 }: CommandSelectModalProps) {
   const { locale } = useI18nText();
@@ -102,8 +105,8 @@ export default function CommandSelectModal({
     }
   }
 
-  // 命令树和右侧 sub-fields 使用同一个设备支持集合；设备切换会重新加载两者。
-  const { data: treeNodes, isLoading: treeLoading } = useGroupTree(undefined, locale, undefined, deviceSn);
+  // 命令树和右侧 sub-fields 使用同一个产品类型支持集合；设备 SN 仅作兼容兜底。
+  const { data: treeNodes, isLoading: treeLoading } = useGroupTree(undefined, locale, productClass, deviceSn);
   const { commands: customCommands } = useCustomCommands(productId);
 
   // 产品参数模型过滤由 /mml/templates?product_id= 完成；这里继续叠加运行时
@@ -252,6 +255,7 @@ export default function CommandSelectModal({
     selectedStandardId,
     locale,
     deviceSn,
+    productClass,
   );
   const { data: customPathDefs, isFetching: customPathsLoading } = useCustomCommandPaths(
     selectedCustomId ?? undefined,
