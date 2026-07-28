@@ -67,6 +67,24 @@ vi.mock('@core/hooks/api/useAdhocProgress', () => ({
   useAdhocProgressStream: () => new Map(),
 }));
 
+vi.mock('@core/hooks/api/useTechnologyDictionary', () => ({
+  useTechnologyDictionary: () => ({
+    options: [
+      { label: 'eNB(LTE)', value: 'lte', sort: 1 },
+      { label: 'gNB(NR)', value: 'nr', sort: 2 },
+      { label: 'GSM', value: 'gsm', sort: 3 },
+    ],
+    deviceTypeOptions: [
+      { label: 'eNB(LTE)', value: 'ENB', sort: 1, technology: 'lte' },
+      { label: 'gNB(NR)', value: 'GNB', sort: 2, technology: 'nr' },
+      { label: 'GSM', value: 'GSM', sort: 3, technology: 'gsm' },
+    ],
+    labelForTechnology: (tech?: string | null) => (tech ? tech.toUpperCase() : '—'),
+    labelForRadioMode: (radioMode?: string | null) => (radioMode ? radioMode : '—'),
+    isLoading: false,
+  }),
+}));
+
 vi.mock('@core/hooks/api/usePmAdhoc', () => ({
   usePmAdhocList: (opts?: { isBuiltin?: boolean }) => ({
     data: opts?.isBuiltin ? [] : customTasks,

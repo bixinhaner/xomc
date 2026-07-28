@@ -168,13 +168,20 @@ func newTestTask(src SourceType) *Task {
 	return &Task{ID: uuid.New(), SourceType: src, Params: []byte(`{}`)}
 }
 
-// #38：adhoc 导出必须从任务元数据读取配置指标集，并传到表头发现与流式数据源。
-func TestRunner_BuildSource_AdhocUsesTaskMetricPaths(t *testing.T) {
+// #192：adhoc/性能仪表盘导出必须从任务元数据读取配置指标集，不能并入结果表里额外出现的指标。
+func TestRunner_BuildSource_AdhocUsesOnlyTaskMetricPaths(t *testing.T) {
 	for _, source := range []SourceType{SourcePMDashboard, SourceAdhocResult} {
 		t.Run(string(source), func(t *testing.T) {
 			taskID := uuid.New()
+			productID := uuid.New()
 			metricPaths := []string{"KGSM0101", "KGSM0102"}
-			params, err := json.Marshal(AdhocParams{TaskID: taskID.String()})
+			params, err := json.Marshal(AdhocParams{
+				TaskID:     taskID.String(),
+				ProductIDs: []string{productID.String()},
+				ObjectLDNs: []string{"DeviceGroup=11111111-1111-1111-1111-111111111111,Tech=lte"},
+				Weekdays:   []int{1, 2},
+				Hours:      []int{8, 9},
+			})
 			require.NoError(t, err)
 
 			metaDB := &recordingExportQuerier{row: &exportMetaRow{
@@ -196,9 +203,18 @@ func TestRunner_BuildSource_AdhocUsesTaskMetricPaths(t *testing.T) {
 			require.NoError(t, err)
 
 			assert.Contains(t, metaDB.queryRowSQL, "metric_paths")
-			require.NotEmpty(t, adhocDB.queries)
+			require.Len(t, adhocDB.queries, 2)
+			assert.Contains(t, adhocDB.queries[0].sql, "SELECT DISTINCT r.metric_path")
 			assert.Contains(t, adhocDB.queries[0].sql, "metric_path IN (")
-			assert.Equal(t, metricPaths, src.(*adhocSource).metricPaths)
+			assert.Contains(t, adhocDB.queries[0].args, "KGSM0101")
+			assert.Contains(t, adhocDB.queries[0].args, "KGSM0102")
+			assert.NotContains(t, adhocDB.queries[0].args, "C000000005")
+			adhocSrc := src.(*adhocSource)
+			assert.Equal(t, metricPaths, adhocSrc.metricPaths)
+			assert.Equal(t, []uuid.UUID{productID}, adhocSrc.filter.ProductIDs)
+			assert.Equal(t, []string{"DeviceGroup=11111111-1111-1111-1111-111111111111,Tech=lte"}, adhocSrc.filter.ObjectLDNs)
+			assert.Equal(t, []int{1, 2}, adhocSrc.filter.Weekdays)
+			assert.Equal(t, []int{8, 9}, adhocSrc.filter.Hours)
 		})
 	}
 }

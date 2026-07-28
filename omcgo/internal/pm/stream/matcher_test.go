@@ -60,6 +60,44 @@ func TestMatcherUsesImmutableVersionWindowBoundary(t *testing.T) {
 	require.Equal(t, newID, contributions[0].Key.TaskVersionID)
 }
 
+func TestMatcherSkipsWindowsAtOrAfterPlannedEnd(t *testing.T) {
+	deviceID := uuid.New()
+	plannedEndAt := time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
+	version := &TaskVersionSnapshot{
+		TaskID: uuid.New(), VersionID: uuid.New(), Enabled: true, Technology: "lte",
+		Dimension: DimensionDevice, DevicePipeline: true,
+		Granularities: []Granularity{GranularityHourly},
+		EffectiveFrom: time.Date(2026, 7, 25, 0, 0, 0, 0, time.UTC),
+		PlannedEndAt:  &plannedEndAt,
+		Metrics: map[string]MetricRule{
+			"K001": {
+				MetricID: "K001", MetricPath: "K001", MetricType: "kpi",
+				Aggregation: AggregationFormula, Formula: "C001", Dependencies: []string{"C001"},
+			},
+		},
+		Counters: map[string]CounterRule{"C001": {MetricPath: "C001", Aggregation: AggregationSum}},
+		Members: map[uuid.UUID][]TaskMember{
+			deviceID: {{DeviceID: deviceID, DeviceSN: "SN-1", DimensionKey: deviceID.String(), DimensionName: "SN-1"}},
+		},
+	}
+	snapshot := BuildTaskSnapshot([]*TaskVersionSnapshot{version})
+	payload := validNormalizedEvent()
+	payload.DeviceID = deviceID
+	payload.DeviceSN = "SN-1"
+
+	payload.WindowStart = time.Date(2026, 7, 25, 1, 30, 0, 0, time.UTC)
+	payload.WindowEnd = payload.WindowStart.Add(slotDuration)
+	contributions, err := NewMatcher(time.UTC).Match(payload, snapshot)
+	require.NoError(t, err)
+	require.Len(t, contributions, 1)
+
+	payload.WindowStart = time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
+	payload.WindowEnd = payload.WindowStart.Add(slotDuration)
+	contributions, err = NewMatcher(time.UTC).Match(payload, snapshot)
+	require.NoError(t, err)
+	require.Empty(t, contributions)
+}
+
 func TestMatcherFiltersMetricAndObjectLDNWithoutDatabaseReads(t *testing.T) {
 	deviceID := uuid.New()
 	ldn := "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.1"

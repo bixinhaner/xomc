@@ -93,7 +93,8 @@ func (m *Matcher) MatchGranularity(
 				return nil, err
 			}
 			if window.Start.Before(version.EffectiveFrom) ||
-				(version.EffectiveTo != nil && !window.Start.Before(*version.EffectiveTo)) {
+				(version.EffectiveTo != nil && !window.Start.Before(*version.EffectiveTo)) ||
+				(version.PlannedEndAt != nil && !window.Start.Before(*version.PlannedEndAt)) {
 				continue
 			}
 			contribution := Contribution{

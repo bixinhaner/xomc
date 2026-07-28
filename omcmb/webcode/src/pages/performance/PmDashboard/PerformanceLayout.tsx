@@ -18,6 +18,8 @@ import { usePmAdhocList } from '@core/hooks/api/usePmAdhoc';
 import type { AdhocTask } from '@core/types/pmAdhoc';
 import EmptyState from '@/components/common/EmptyState';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
+import { useTechnologyDictionary } from '@core/hooks/api/useTechnologyDictionary';
+import { displayAdhocTaskName } from '../adhocTaskDisplay';
 import TaskDashboardPane from './TaskDashboardPane';
 
 interface TaskGroup {
@@ -29,6 +31,7 @@ interface TaskGroup {
 
 function TaskDashboardTab() {
   const intl = useIntl();
+  const { labelForTechnology } = useTechnologyDictionary();
   const [searchParams, setSearchParams] = useSearchParams();
   const taskId = searchParams.get('task') ?? undefined;
   const { token } = theme.useToken();
@@ -183,9 +186,6 @@ function TaskDashboardTab() {
                       }}
                     >
                       <Space size={4} style={{ width: '100%' }}>
-                        {t.technology && (
-                          <Tag style={{ marginRight: 0 }}>{t.technology.toUpperCase()}</Tag>
-                        )}
                         <span
                           style={{
                             flex: 1,
@@ -194,7 +194,7 @@ function TaskDashboardTab() {
                             whiteSpace: 'nowrap',
                           }}
                         >
-                          {t.name}
+                          {displayAdhocTaskName(t, labelForTechnology)}
                         </span>
                       </Space>
                     </div>

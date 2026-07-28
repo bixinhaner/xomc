@@ -266,7 +266,7 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       # 海量小对象场景降低后台 scanner 对随机读 IOPS 的持续争抢；生命周期仍正常执行。
-      MINIO_SCANNER_SPEED: "slow"
+      MINIO_SCANNER_SPEED: "slowest"
       # MinIO 自带 Prometheus 指标端点 /minio/v2/metrics/*；public 模式免 token 抓取（T-0151）。
       MINIO_PROMETHEUS_AUTH_TYPE: "public"
     ports:

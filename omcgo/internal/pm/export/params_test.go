@@ -65,19 +65,36 @@ func TestParseDashboardParams_BadGroupID(t *testing.T) {
 }
 
 func TestParseAdhocParams_OK(t *testing.T) {
-	taskID, st, et, err := parseAdhocParams([]byte(`{"task_id":"11111111-1111-1111-1111-111111111111","start_time":"2026-06-01T00:00:00Z"}`))
+	filter, err := parseAdhocParams([]byte(`{
+		"task_id":"11111111-1111-1111-1111-111111111111",
+		"start_time":"2026-06-01T00:00:00Z",
+		"product_ids":["22222222-2222-2222-2222-222222222222"],
+		"object_ldns":["DeviceGroup=33333333-3333-3333-3333-333333333333,Tech=lte"],
+		"weekdays":[1,2,3],
+		"hours":[8,9]
+	}`))
 	require.NoError(t, err)
-	assert.Equal(t, "11111111-1111-1111-1111-111111111111", taskID.String())
-	assert.False(t, st.IsZero())
-	assert.True(t, et.IsZero())
+	assert.Equal(t, "11111111-1111-1111-1111-111111111111", filter.TaskID.String())
+	assert.False(t, filter.StartTime.IsZero())
+	assert.True(t, filter.EndTime.IsZero())
+	require.Len(t, filter.ProductIDs, 1)
+	assert.Equal(t, "22222222-2222-2222-2222-222222222222", filter.ProductIDs[0].String())
+	assert.Equal(t, []string{"DeviceGroup=33333333-3333-3333-3333-333333333333,Tech=lte"}, filter.ObjectLDNs)
+	assert.Equal(t, []int{1, 2, 3}, filter.Weekdays)
+	assert.Equal(t, []int{8, 9}, filter.Hours)
 }
 
 func TestParseAdhocParams_MissingTaskID(t *testing.T) {
-	_, _, _, err := parseAdhocParams([]byte(`{}`))
+	_, err := parseAdhocParams([]byte(`{}`))
 	require.Error(t, err)
 }
 
 func TestParseAdhocParams_BadTaskID(t *testing.T) {
-	_, _, _, err := parseAdhocParams([]byte(`{"task_id":"nope"}`))
+	_, err := parseAdhocParams([]byte(`{"task_id":"nope"}`))
+	require.Error(t, err)
+}
+
+func TestParseAdhocParams_BadProductID(t *testing.T) {
+	_, err := parseAdhocParams([]byte(`{"task_id":"11111111-1111-1111-1111-111111111111","product_ids":["nope"]}`))
 	require.Error(t, err)
 }

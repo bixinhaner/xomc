@@ -23,7 +23,13 @@ import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
 import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
 import { nowInSystemTimezone, toSystemTimezoneRFC3339 } from '@core/utils/systemTime';
 import { buildAdhocExportParams, defaultExportTaskName } from '@core/utils/kpiExportParams';
-import { buildMetricCharts, filterChartsByMetricPaths } from './taskDashboardUtils';
+import { useTechnologyDictionary } from '@core/hooks/api/useTechnologyDictionary';
+import { displayAdhocTaskName } from '../adhocTaskDisplay';
+import {
+  buildMetricCharts,
+  filterChartsByMetricPaths,
+  filterRowsByMetricPaths,
+} from './taskDashboardUtils';
 import ChartCard from './ChartCard';
 import DashboardFilterBar, { type DashboardFilterValue } from './DashboardFilterBar';
 import {
@@ -53,6 +59,7 @@ const GRAN_MSG_IDS: Record<string, string> = {
 export default function TaskDashboardPane({ taskId }: Props) {
   const intl = useIntl();
   const { message } = App.useApp();
+  const { labelForTechnology } = useTechnologyDictionary();
   // #563：筛选器按系统时区展示和序列化，与图表 X 轴统一参照系。
   const systemTimezone = useSystemTimezoneValue();
   // 粒度短标签：有对应键走语料，无键回退原值（等价旧 GRAN_LABEL[g] ?? g）。
@@ -174,15 +181,18 @@ export default function TaskDashboardPane({ taskId }: Props) {
 
   const charts = useMemo(() => {
     if (!taskQuery.data || !effectiveGran || !submitted) return [];
-    // T-0194：按任务已选指标清单过滤出图（空清单则不过滤，兜底全画），让"指标数 X"与出图数一致。
-    const metricPaths = taskQuery.data.metricPaths;
+    // #192：右侧图表严格按任务 metric_paths 展示。即使后端历史行或异常返回带出额外指标，
+    // 也不能生成配置外图表；先滤原始行，避免额外指标污染固定 legend 全集。
+    const taskMetricPaths = taskQuery.data.metricPaths;
+    const visibleRows = filterRowsByMetricPaths(rawRows, taskMetricPaths);
+    const visiblePrevRows = filterRowsByMetricPaths(rawPrevRows, taskMetricPaths);
     // #599：后端已按 weekdays/hours 过滤，前端只需扩轴（轴刻度仍按完整范围铺、再套星期/小时剔除空桶）。
     const weekdaySet = new Set(submitted.weekdays);
     const hourSet = new Set(submitted.hours);
     const cur = extendChartsAxis(
       filterChartsByMetricPaths(
-        buildMetricCharts(rawRows, taskQuery.data.dimension, effectiveGran, chartLocale),
-        metricPaths,
+        buildMetricCharts(visibleRows, taskQuery.data.dimension, effectiveGran, chartLocale),
+        taskMetricPaths,
       ),
       {
         rangeStartMs: submitted.rangeStartMs,
@@ -194,8 +204,8 @@ export default function TaskDashboardPane({ taskId }: Props) {
     );
     if (!submitted.compare) return cur;
     const prev = filterChartsByMetricPaths(
-      buildMetricCharts(rawPrevRows, taskQuery.data.dimension, effectiveGran, chartLocale),
-      metricPaths,
+      buildMetricCharts(visiblePrevRows, taskQuery.data.dimension, effectiveGran, chartLocale),
+      taskMetricPaths,
     );
     return attachCompareSeries(cur, prev, submitted.offsetMs, effectiveGran);
   }, [
@@ -218,12 +228,11 @@ export default function TaskDashboardPane({ taskId }: Props) {
       taskId,
       startTime: exportStart,
       endTime: exportEnd,
+      productIds: submitted?.productIds ?? productIds,
+      objectLdns: submitted?.objectLdns ?? objectLdns,
+      weekdays: submitted?.weekdays ?? filter.weekdays,
+      hours: submitted?.hours ?? filter.hours,
     });
-    // #599：weekdays/hours 传入导出 params（后端导出时按同口径过滤）。
-    const wd = submitted?.weekdays ?? filter.weekdays;
-    const hr = submitted?.hours ?? filter.hours;
-    if (wd.length > 0 && wd.length < 7) exportParams.weekdays = wd;
-    if (hr.length > 0 && hr.length < 24) exportParams.hours = hr;
     createExport.mutate(
       {
         sourceType: 'pm_dashboard',
@@ -281,8 +290,7 @@ export default function TaskDashboardPane({ taskId }: Props) {
           style={{ width: '100%', justifyContent: 'space-between' }}
         >
           <Space size={8} wrap>
-            <Typography.Text strong>{task.name}</Typography.Text>
-            {task.technology && <Tag color="geekblue">{task.technology.toUpperCase()}</Tag>}
+            <Typography.Text strong>{displayAdhocTaskName(task, labelForTechnology)}</Typography.Text>
             <Tag color="purple">
               {task.mode === 'continuous'
                 ? intl.formatMessage({ id: 'perf.dashboard.modeContinuous' })

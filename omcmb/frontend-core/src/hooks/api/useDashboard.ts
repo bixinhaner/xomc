@@ -150,10 +150,14 @@ export function useDashboardChartData() {
   });
 }
 
-export function useAlarmTrend(days = 7, enabled = true) {
+export function useAlarmTrend(
+  days = 7,
+  metric: 'raised' | 'active' = 'raised',
+  enabled = true,
+) {
   return useQuery({
-    queryKey: ['dashboard', 'alarm-trend', days],
-    queryFn: () => api.getAlarmTrend(days),
+    queryKey: ['dashboard', 'alarm-trend', days, metric],
+    queryFn: () => api.getAlarmTrend(days, metric),
     enabled,
   });
 }

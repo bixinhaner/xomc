@@ -82,7 +82,7 @@ contains "ACS access log 默认关闭" 'access_log off; # ACS 高频请求由应
 contains "本地 ACS access log 默认关闭" 'access_log off; # ACS 高频请求由应用指标观测，避免与数据盘竞争 IO' "$NGINX_LOCAL"
 contains "ACS 请求体不落临时文件" 'proxy_request_buffering off;' "$NGINX_DEFAULT"
 contains "本地 ACS 请求体不落临时文件" 'proxy_request_buffering off;' "$NGINX_LOCAL"
-contains "release MinIO scanner 降速" 'MINIO_SCANNER_SPEED: "slow"' "$RELEASE_COMPOSE"
+contains "release MinIO scanner 最低速" 'MINIO_SCANNER_SPEED: "slowest"' "$RELEASE_COMPOSE"
 contains "开发 MinIO scanner 最低速" 'MINIO_SCANNER_SPEED: "slowest"' "$DEV_COMPOSE"
 contains "release Redis AOF 基线增大" '--auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500' "$RELEASE_COMPOSE"
 contains "开发 Redis AOF 基线增大" '--auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500' "$DEV_COMPOSE"

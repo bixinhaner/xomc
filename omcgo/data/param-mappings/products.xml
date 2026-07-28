@@ -84,7 +84,7 @@
     <enableFileType11>true</enableFileType11>
     <deviceAttrsOverride access="false" min_value="false" max_value="false" change_applies="false" data_type="false" />
     <indicator deviceType="gsm" platform="BSC" />
-    <alarm neType="ENB" />
+    <alarm neType="GSM" />
     <patterns>
       <pattern globalOrder="8">^FAP/PGSM$</pattern>
     </patterns>
@@ -96,7 +96,7 @@
     <enableFileType11>true</enableFileType11>
     <deviceAttrsOverride access="false" min_value="false" max_value="false" change_applies="false" data_type="false" />
     <indicator deviceType="gsm" platform="BSC" />
-    <alarm neType="ENB" />
+    <alarm neType="GSM" />
     <patterns>
       <pattern globalOrder="9">^FAP/BTS$</pattern>
     </patterns>

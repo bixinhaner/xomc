@@ -240,18 +240,18 @@ func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, []Wide
 }
 
 func (r *Runner) buildAdhocResultSource(ctx context.Context, task *Task, loc appcontext.Locale) (RowSource, []WideColumn, csvLayout, error) {
-	taskID, startTime, endTime, err := parseAdhocParams(task.Params)
+	filter, err := parseAdhocParams(task.Params)
 	if err != nil {
 		return nil, nil, csvLayout{}, err
 	}
 	// 先查任务聚合维度、圈选设备数和配置指标集：决定首列表头 / 对象名解析口径，
 	// 并确保全量落库模式下导出仍只包含任务配置的 N 个指标。
 	// pm_tasks 在主库（PgPool），用 taskMetaDB 读；adhoc 结果表查询走 adhocDB（TsPool）。
-	meta, derr := loadAdhocTaskMeta(ctx, r.taskMetaDB, taskID)
+	meta, derr := loadAdhocTaskMeta(ctx, r.taskMetaDB, filter.TaskID)
 	if derr != nil {
 		return nil, nil, csvLayout{}, derr
 	}
-	keys, kerr := discoverAdhocColumns(ctx, r.adhocDB, taskID, meta.metricPaths, startTime, endTime)
+	keys, kerr := discoverAdhocColumns(ctx, r.adhocDB, filter.TaskID, meta.metricPaths, filter)
 	if kerr != nil {
 		return nil, nil, csvLayout{}, kerr
 	}
@@ -263,7 +263,7 @@ func (r *Runner) buildAdhocResultSource(ctx context.Context, task *Task, loc app
 		IncludeCell:                   adhocIncludesCell(meta.dimension),
 		MissingMetricValuePlaceholder: missingMetricValuePlaceholder,
 	}
-	return newAdhocSource(r.adhocDB, taskID, meta.metricPaths, startTime, endTime, meta.dimension, meta.deviceCount, loc), cols, layout, nil
+	return newAdhocSource(r.adhocDB, filter.TaskID, meta.metricPaths, filter, meta.dimension, meta.deviceCount, loc), cols, layout, nil
 }
 
 func (r *Runner) buildDashboardLikeSource(ctx context.Context, task *Task, loc appcontext.Locale, layout csvLayout) (RowSource, []WideColumn, csvLayout, error) {

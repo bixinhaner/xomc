@@ -188,7 +188,10 @@ export const dashboardService = {
     return { ...mockDashboardChartData };
   },
 
-  async getAlarmTrend(days = 7): Promise<DashboardChartData['alarmTrend']> {
+  async getAlarmTrend(
+    days = 7,
+    _metric: 'raised' | 'active' = 'raised',
+  ): Promise<DashboardChartData['alarmTrend']> {
     await delay(100, 200);
     return mockDashboardChartData.alarmTrend.slice(-days);
   },

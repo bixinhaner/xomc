@@ -9,6 +9,7 @@ import type { DeviceItem, DeviceStatus } from '../types';
 import { DEVICE_MODAL_PAGE_SIZE, MAX_SELECT_ALL } from '../constants';
 import { MML_PREVIEW_PAGE_SIZE_OPTIONS } from '@core/utils/mmlTaskScale';
 import { mapDeviceToItem } from '../adapters';
+import { scopeSelectedDeviceKeys } from '../deviceSelection';
 import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
@@ -29,8 +30,8 @@ interface DeviceSelectModalProps {
   /** 当前已选 SN（打开时回填） */
   value: string[];
   onCancel: () => void;
-  /** 确认：返回所选 SN + 所选产品 ID（设备列表强制同一产品，productId 用于不支持 path 过滤）。 */
-  onConfirm: (sns: string[], productId: string) => void;
+  /** 确认：返回所选 SN + 所选产品 ID / 产品类型（命令树与参数列表按 productClass 过滤）。 */
+  onConfirm: (sns: string[], productId: string, productClass: string) => void;
 }
 
 /**
@@ -57,6 +58,7 @@ export default function DeviceSelectModal({
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEVICE_MODAL_PAGE_SIZE);
   const [selected, setSelected] = useState<string[]>([]);
+  const [eligibleSelectedSns, setEligibleSelectedSns] = useState<string[]>([]);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [wasOpen, setWasOpen] = useState(false);
@@ -68,6 +70,7 @@ export default function DeviceSelectModal({
     setWasOpen(open);
     if (open) {
       setSelected(value);
+      setEligibleSelectedSns([]);
       setSnInput('');
       // §需求 2：沿用上次选择的产品 + 产品类型（无缓存时 product 由下方默认首个逻辑兜底）。
       setProductFilter(lastProductId);
@@ -137,22 +140,74 @@ export default function DeviceSelectModal({
     { page: 1, pageSize: MAX_SELECT_ALL, ...filterParams },
     { enabled: open },
   );
+  const { data: selectedScopeResp, isFetching: isFetchingSelectedScope } = useDeviceList(
+    {
+      page: 1,
+      pageSize: Math.max(selected.length, MAX_SELECT_ALL),
+      isOnline: true,
+      snList: selected,
+      ...(productApplied ? { productId: productApplied } : {}),
+    },
+    { enabled: open && selected.length > 0 && !!productApplied },
+  );
   const cappedFilteredSns = useMemo(
     () => (allResp?.items ?? []).slice(0, MAX_SELECT_ALL).map((d) => d.sn),
     [allResp],
   );
+  const cappedFilteredRows = useMemo(
+    () => (allResp?.items ?? []).slice(0, MAX_SELECT_ALL).map(mapDeviceToItem),
+    [allResp],
+  );
+  const selectedScopeSns = useMemo(
+    () => (selectedScopeResp?.items ?? []).map((d) => d.sn),
+    [selectedScopeResp],
+  );
+  const selectedScopeRows = useMemo(
+    () => (selectedScopeResp?.items ?? []).map(mapDeviceToItem),
+    [selectedScopeResp],
+  );
+  const eligibleDeviceBySn = useMemo(() => {
+    const m = new Map<string, DeviceItem>();
+    [...rows, ...cappedFilteredRows, ...selectedScopeRows].forEach((row) => m.set(row.sn, row));
+    return m;
+  }, [rows, cappedFilteredRows, selectedScopeRows]);
+  const visibleEligibleSns = useMemo(
+    () => Array.from(new Set([...rows.map((r) => r.sn), ...cappedFilteredSns, ...selectedScopeSns])),
+    [rows, cappedFilteredSns, selectedScopeSns],
+  );
+  const currentEligibleSns = useMemo(
+    () => Array.from(new Set([...eligibleSelectedSns, ...visibleEligibleSns])),
+    [eligibleSelectedSns, visibleEligibleSns],
+  );
+  const scopedSelected = useMemo(
+    () => scopeSelectedDeviceKeys(selected, currentEligibleSns),
+    [selected, currentEligibleSns],
+  );
+  const selectedProductClass = useMemo(
+    () =>
+      scopedSelected
+        .map((sn) => eligibleDeviceBySn.get(sn)?.productClass)
+        .find((productClass): productClass is string => Boolean(productClass)) ?? '',
+    [eligibleDeviceBySn, scopedSelected],
+  );
   const overLimit = total > MAX_SELECT_ALL;
   const allFilteredSelected =
-    cappedFilteredSns.length > 0 && cappedFilteredSns.every((sn) => selected.includes(sn));
-  const someSelected = selected.length > 0 && !allFilteredSelected;
+    cappedFilteredSns.length > 0 && cappedFilteredSns.every((sn) => scopedSelected.includes(sn));
+  const someSelected = scopedSelected.length > 0 && !allFilteredSelected;
 
   // 点「搜索」才把草稿筛选条件应用到查询（输入/选择不实时触发，§需求 1）。
   // BUG-03 修复：显式调用 refetch() 强制重新请求，绕过 React Query staleTime 缓存。
   const doSearch = (): void => {
+    const nextProduct = productFilter;
+    const productChanged = nextProduct !== productApplied;
     setSnKeyword(snInput.trim());
-    setProductApplied(productFilter);
+    setProductApplied(nextProduct);
     setClassApplied(classFilter);
     setSnListFilter([]); // 普通搜索退出批量输入模式
+    if (productChanged) {
+      setSelected([]);
+      setEligibleSelectedSns([]);
+    }
     setPage(1);
     // 强制刷新，即使 filterParams 未变也重新请求（用户体感：点搜索必有反应）。
     void refetch();
@@ -166,6 +221,7 @@ export default function DeviceSelectModal({
       .filter(Boolean);
     const uniqueInput = Array.from(new Set(sns));
     setSnListFilter(uniqueInput);
+    setEligibleSelectedSns([]);
     setSelected([]); // 清空选中的数据
     setSnInput('');
     setClassFilter(undefined);
@@ -201,11 +257,12 @@ export default function DeviceSelectModal({
           // §需求 2：记住本次选择的产品 + 产品类型，下次打开弹框沿用。
           lastProductId = productApplied;
           lastProductClass = classApplied;
-          onConfirm(selected, productApplied ?? '');
+          setSelected(scopedSelected);
+          onConfirm(scopedSelected, productApplied ?? '', selectedProductClass);
         }}
-        okText={t('mml.consoleV2.deviceSelect.okText', { count: selected.length })}
+        okText={t('mml.consoleV2.deviceSelect.okText', { count: scopedSelected.length })}
         cancelText={t('common.cancel')}
-        okButtonProps={{ disabled: selected.length === 0 }}
+        okButtonProps={{ disabled: scopedSelected.length === 0 || isFetchingSelectedScope || !selectedProductClass }}
         destroyOnHidden
       >
         <Space orientation="vertical" size={12} style={{ width: '100%' }}>
@@ -245,7 +302,7 @@ export default function DeviceSelectModal({
           </Space>
 
           <Space wrap>
-            <Badge status="processing" text={<Text>{t('mml.consoleV2.deviceSelect.selectedCount', { count: selected.length })}</Text>} />
+            <Badge status="processing" text={<Text>{t('mml.consoleV2.deviceSelect.selectedCount', { count: scopedSelected.length })}</Text>} />
             {snListFilter.length > 0 && (
               <Text type="secondary" style={{ fontSize: 12 }}>
                 {t('mml.consoleV2.deviceSelect.batchSummary', { count: snListFilter.length })}
@@ -259,7 +316,7 @@ export default function DeviceSelectModal({
                 {t('mml.consoleV2.deviceSelect.overLimit', { total, max: MAX_SELECT_ALL })}
               </Text>
             )}
-            {selected.length > 0 && (
+            {scopedSelected.length > 0 && (
               <Button type="link" size="small" onClick={() => setSelected([])}>
                 {t('mml.consoleV2.deviceSelect.clearSelected')}
               </Button>
@@ -273,15 +330,22 @@ export default function DeviceSelectModal({
             columns={columns}
             dataSource={rows}
             rowSelection={{
-              selectedRowKeys: selected,
-              onChange: (keys) => setSelected(keys as string[]),
+              selectedRowKeys: scopedSelected,
+              onChange: (keys) => {
+                const nextEligible = Array.from(new Set([...currentEligibleSns, ...visibleEligibleSns]));
+                setEligibleSelectedSns(nextEligible);
+                setSelected(scopeSelectedDeviceKeys(keys as string[], nextEligible));
+              },
               preserveSelectedRowKeys: true,
               // 表头全选接管为「筛选命中的全部数据（跨页，上限 200）」，而非仅当前页。
               columnTitle: (
                 <Checkbox
                   checked={allFilteredSelected}
                   indeterminate={someSelected}
-                  onChange={(e) => setSelected(e.target.checked ? cappedFilteredSns : [])}
+                  onChange={(e) => {
+                    setEligibleSelectedSns(cappedFilteredSns);
+                    setSelected(e.target.checked ? cappedFilteredSns : []);
+                  }}
                 />
               ),
             }}

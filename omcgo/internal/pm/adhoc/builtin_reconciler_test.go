@@ -70,10 +70,14 @@ func TestBuiltinReconcilerSavesEditedRuleWithoutHiddenDeviceTask(t *testing.T) {
 		list: func(context.Context) ([]Task, error) {
 			return []Task{task}, nil
 		},
+		resolveEnabledMetricPaths: func(_ context.Context, technology string) ([]string, error) {
+			require.Equal(t, "lte", technology)
+			return []string{"C000000005", "K-EDITED", ""}, nil
+		},
 		resolveRules: func(_ context.Context, technology string, paths []string) ([]pmstream.MetricRule, error) {
 			require.Equal(t, "lte", technology)
-			require.Equal(t, []string{"K-EDITED"}, paths)
-			return builtinRulesForTest(), nil
+			require.Equal(t, []string{"K-EDITED", "C000000005"}, paths)
+			return metricRulesForPaths(paths), nil
 		},
 		resolveCounters: func(context.Context, string, []pmstream.MetricRule) ([]pmstream.CounterRule, error) {
 			return builtinCountersForTest(), nil
@@ -103,7 +107,7 @@ func TestBuiltinReconcilerSavesEditedRuleWithoutHiddenDeviceTask(t *testing.T) {
 		pmstream.GranularityWeekly, pmstream.GranularityMonthly,
 	}, captured[0].Granularities)
 	require.Equal(t, networkMembers, captured[0].Members)
-	require.Equal(t, builtinRulesForTest(), captured[0].Metrics)
+	require.Equal(t, metricRulesForPaths([]string{"K-EDITED", "C000000005"}), captured[0].Metrics)
 	require.Equal(t, builtinCountersForTest(), captured[0].Counters)
 }
 
@@ -197,10 +201,18 @@ func builtinTaskForTest() Task {
 }
 
 func builtinRulesForTest() []pmstream.MetricRule {
-	return []pmstream.MetricRule{{
-		MetricID: "K1", MetricPath: "K1", MetricType: "counter",
-		Aggregation: pmstream.AggregationSum,
-	}}
+	return metricRulesForPaths([]string{"K1"})
+}
+
+func metricRulesForPaths(paths []string) []pmstream.MetricRule {
+	rules := make([]pmstream.MetricRule, 0, len(paths))
+	for _, path := range paths {
+		rules = append(rules, pmstream.MetricRule{
+			MetricID: path, MetricPath: path, MetricType: "counter",
+			Aggregation: pmstream.AggregationSum,
+		})
+	}
+	return rules
 }
 
 func builtinCountersForTest() []pmstream.CounterRule {

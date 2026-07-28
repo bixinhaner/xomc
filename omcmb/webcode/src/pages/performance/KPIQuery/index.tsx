@@ -8,7 +8,7 @@
  *   - 结果 → 透视表（行=时间 / 列=N 指标 / 单元格=值）
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Button,
@@ -66,7 +66,7 @@ import {
   buildDashboardExportParams,
 } from '@core/utils/kpiExportParams';
 import type { DeviceType } from '@core/types/indicatorLibrary';
-import { deviceTypeToNetworkTech } from '@core/types/indicatorLibrary';
+import { deviceTypeToTechnology, useTechnologyDictionary } from '@core/hooks/api/useTechnologyDictionary';
 import type { Granularity } from '@core/types/pmDashboard';
 import type {
   QueryTemplate,
@@ -106,12 +106,6 @@ const TIME_RANGE_OPTIONS: { labelKey: string; value: TimeRangePreset }[] = [
   { labelKey: 'perf.kpiQuery.range.custom', value: 'custom' },
 ];
 
-const DEVICE_TYPE_OPTIONS = [
-  { label: 'eNB', value: 'ENB' as const },
-  { label: 'gNB', value: 'GNB' as const },
-  { label: 'GSM', value: 'GSM' as const },
-];
-
 const DEFAULT_PAYLOAD: QueryTemplatePayload = {
   deviceSns: [],
   metricPaths: [],
@@ -122,6 +116,10 @@ const DEFAULT_PAYLOAD: QueryTemplatePayload = {
 };
 
 const DEFAULT_PIVOT_PAGE_SIZE = 50;
+
+function formatMetricDisplay(id: string, label?: string): string {
+  return label && label !== id ? `${id} ${label}` : id;
+}
 
 const createDefaultTemplatePayload = (): QueryTemplatePayload => ({
   ...DEFAULT_PAYLOAD,
@@ -157,6 +155,10 @@ export default function KPIQuery() {
   const isSuperAdmin = currentUser?.isSuperAdmin ?? false;
   // #459 子单 D：自定义时间范围按系统时区附加偏移后再发后端（后端按 RFC3339 解析为 UTC）。
   const systemTimezone = useSystemTimezoneValue();
+  const {
+    deviceTypeOptions,
+    isLoading: deviceTypeOptionsLoading,
+  } = useTechnologyDictionary();
 
   // ── 查询表单状态 ─────────────────────────────────────────────────
   const [payload, setPayload] = useState<QueryTemplatePayload>(DEFAULT_PAYLOAD);
@@ -220,11 +222,58 @@ export default function KPIQuery() {
   const [submittedRange, setSubmittedRange] = useState<{ start: string; end: string } | null>(null);
   const [pivotPage, setPivotPage] = useState(1);
   const [pivotPageSize, setPivotPageSize] = useState(DEFAULT_PIVOT_PAGE_SIZE);
+  const firstAvailableDeviceType = deviceTypeOptions[0]?.value;
+  const hasAvailableDeviceTypes = deviceTypeOptions.length > 0;
+  const isAvailableDeviceType = useCallback(
+    (deviceType?: DeviceType): boolean =>
+      Boolean(deviceType && deviceTypeOptions.some((option) => option.value === deviceType)),
+    [deviceTypeOptions],
+  );
+
+  useEffect(() => {
+    if (deviceTypeOptionsLoading || !firstAvailableDeviceType || isAvailableDeviceType(payload.deviceType)) {
+      return;
+    }
+    setPayload((current) => ({
+      ...current,
+      deviceType: firstAvailableDeviceType,
+      deviceSns: [],
+      metricPaths: [],
+    }));
+    setCellSel({});
+    setSubmittedCellSel({});
+  }, [deviceTypeOptionsLoading, firstAvailableDeviceType, isAvailableDeviceType, payload.deviceType]);
+
+  useEffect(() => {
+    if (
+      !saveForm.open ||
+      deviceTypeOptionsLoading ||
+      !firstAvailableDeviceType ||
+      isAvailableDeviceType(saveForm.payload.deviceType)
+    ) {
+      return;
+    }
+    setSaveForm((current) => ({
+      ...current,
+      payload: {
+        ...current.payload,
+        deviceType: firstAvailableDeviceType,
+        deviceSns: [],
+        metricPaths: [],
+      },
+    }));
+  }, [
+    saveForm.open,
+    saveForm.payload.deviceType,
+    deviceTypeOptionsLoading,
+    firstAvailableDeviceType,
+    isAvailableDeviceType,
+  ]);
 
   // #619：加载当前选中设备的可用小区列表（供 CellDrilldownSelector 展示选项）。
   const { byDevice } = useMetricObjectsByDevices(
     payload.deviceSns,
-    payload.deviceType ? deviceTypeToNetworkTech(payload.deviceType) : undefined,
+    payload.deviceType ? deviceTypeToTechnology(payload.deviceType) : undefined,
   );
 
   // #619：计算用户勾选的有效 object_ldn 白名单（全选/未选 = 空数组 = 不过滤）。
@@ -300,6 +349,9 @@ export default function KPIQuery() {
   };
 
   const handleQuery = () => {
+    if (!hasAvailableDeviceTypes || !isAvailableDeviceType(payload.deviceType)) {
+      return;
+    }
     if (payload.deviceSns.length === 0) {
       message.warning(t('perf.kpiQuery.selectDeviceRequired'));
       return;
@@ -526,7 +578,7 @@ export default function KPIQuery() {
     }
   };
 
-  // 「已选 N 个」摘要：KPI 用友好名（metricLabels）替代编号显示。
+  // 「已选 N 个」摘要：统一显示指标 ID + 友好名，查询参数仍只使用 ID。
   const metricSummary = (paths: string[], head: number): string =>
     paths.length === 0
       ? ''
@@ -534,9 +586,18 @@ export default function KPIQuery() {
           count: paths.length,
           items: paths
             .slice(0, head)
-            .map((p) => metricLabels[p] ?? p)
+            .map((p) => formatMetricDisplay(p, metricLabels[p]))
             .join(', ') + (paths.length > head ? ' ...' : ''),
         });
+
+  const metricSummaryTooltip = (paths: string[]) =>
+    paths.length === 0 ? undefined : (
+      <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+        {paths.map((path, index) => (
+          <div key={path}>{index + 1}. {formatMetricDisplay(path, metricLabels[path])}</div>
+        ))}
+      </div>
+    );
 
   // ── 渲染辅助 ─────────────────────────────────────────────────────
   const renderTemplateItem = (tpl: QueryTemplate) => {
@@ -797,10 +858,16 @@ export default function KPIQuery() {
               <Space wrap size="middle" align="start">
                 <Form.Item label={t('perf.kpiQuery.deviceType')} style={{ marginBottom: 0 }}>
                   <Select
-                    style={{ width: 120 }}
+                    style={{ width: 160 }}
                     value={payload.deviceType}
-                    onChange={(v) => setPayload({ ...payload, deviceType: v })}
-                    options={DEVICE_TYPE_OPTIONS}
+                    loading={deviceTypeOptionsLoading}
+                    disabled={!hasAvailableDeviceTypes}
+                    onChange={(v) => {
+                      setPayload({ ...payload, deviceType: v, deviceSns: [], metricPaths: [] });
+                      setCellSel({});
+                      setSubmittedCellSel({});
+                    }}
+                    options={deviceTypeOptions}
                   />
                 </Form.Item>
 
@@ -818,18 +885,34 @@ export default function KPIQuery() {
                       }
                       placeholder={t('perf.kpiQuery.selectDevicePlaceholder')}
                     />
-                    <Button onClick={() => { setPickerTarget('main'); setDevicePickerOpen(true); }}>{t('perf.kpiQuery.pickFromList')}</Button>
+                    <Button
+                      disabled={!hasAvailableDeviceTypes}
+                      onClick={() => { setPickerTarget('main'); setDevicePickerOpen(true); }}
+                    >
+                      {t('perf.kpiQuery.pickFromList')}
+                    </Button>
                   </Space.Compact>
                 </Form.Item>
 
                 <Form.Item label={t('perf.kpiQuery.metric')} style={{ marginBottom: 0 }}>
                   <Space.Compact style={{ width: 360 }}>
-                    <Input
-                      readOnly
-                      value={metricSummary(payload.metricPaths, 2)}
-                      placeholder={t('perf.kpiQuery.selectMetricPlaceholder')}
-                    />
-                    <Button onClick={() => { setPickerTarget('main'); setMetricPickerOpen(true); }}>{t('perf.kpiQuery.pickFromList')}</Button>
+                    <Tooltip
+                      title={metricSummaryTooltip(payload.metricPaths)}
+                      placement="topLeft"
+                      overlayStyle={{ maxWidth: 520 }}
+                    >
+                      <Input
+                        readOnly
+                        value={metricSummary(payload.metricPaths, 2)}
+                        placeholder={t('perf.kpiQuery.selectMetricPlaceholder')}
+                      />
+                    </Tooltip>
+                    <Button
+                      disabled={!hasAvailableDeviceTypes}
+                      onClick={() => { setPickerTarget('main'); setMetricPickerOpen(true); }}
+                    >
+                      {t('perf.kpiQuery.pickFromList')}
+                    </Button>
                   </Space.Compact>
                 </Form.Item>
 
@@ -882,7 +965,7 @@ export default function KPIQuery() {
                 <div style={{ marginTop: 12 }}>
                   <CellDrilldownSelector
                     deviceSns={payload.deviceSns}
-                    technology={payload.deviceType ? deviceTypeToNetworkTech(payload.deviceType) : undefined}
+                    technology={payload.deviceType ? deviceTypeToTechnology(payload.deviceType) : undefined}
                     value={cellSel}
                     onChange={setCellSel}
                   />
@@ -892,10 +975,16 @@ export default function KPIQuery() {
 
             <div style={{ flexShrink: 0, marginTop: 12, borderTop: `1px dashed ${token.colorBorderSecondary}`, paddingTop: 12 }}>
               <Space>
-                <Button type="primary" icon={<TableOutlined />} loading={aggFetching} onClick={handleQuery}>
+                <Button
+                  type="primary"
+                  icon={<TableOutlined />}
+                  loading={aggFetching}
+                  disabled={!hasAvailableDeviceTypes}
+                  onClick={handleQuery}
+                >
                   {t('common.query')}
                 </Button>
-                <Button icon={<SaveOutlined />} onClick={handleOpenSaveAsModal}>
+                <Button icon={<SaveOutlined />} disabled={!hasAvailableDeviceTypes} onClick={handleOpenSaveAsModal}>
                   {t('perf.kpiQuery.saveAsTemplate')}
                 </Button>
                 <Button
@@ -909,7 +998,12 @@ export default function KPIQuery() {
                 <Button
                   icon={<PlusOutlined />}
                   onClick={() => {
-                    setPayload(DEFAULT_PAYLOAD);
+                    setPayload({
+                      ...DEFAULT_PAYLOAD,
+                      deviceSns: [],
+                      metricPaths: [],
+                      deviceType: firstAvailableDeviceType ?? DEFAULT_PAYLOAD.deviceType,
+                    });
                     setCustomRange(null);
                     setTimeRangeDirty(false);
                     setCellSel({});
@@ -996,7 +1090,7 @@ export default function KPIQuery() {
           initialSelected={pickerTarget === 'modal' ? saveForm.payload.deviceSns : payload.deviceSns}
           // 外层「设备类型」是设备清单的唯一来源（#443）：按当前目标的 deviceType 映射制式，
           // 设备弹窗只列对应制式设备（main/modal 各按各自 deviceType）。
-          technology={deviceTypeToNetworkTech(
+          technology={deviceTypeToTechnology(
             (pickerTarget === 'modal' ? saveForm.payload.deviceType : payload.deviceType) ?? 'ENB',
           )}
           maxSelected={PM_QUERY_SELECTION_LIMIT}
@@ -1014,6 +1108,7 @@ export default function KPIQuery() {
             }
           }}
           initialSelected={pickerTarget === 'modal' ? saveForm.payload.metricPaths : payload.metricPaths}
+          initialLabels={metricLabels}
           initialDeviceType={
             (pickerTarget === 'modal' ? saveForm.payload.deviceType : payload.deviceType) ?? 'ENB'
           }
@@ -1080,12 +1175,17 @@ export default function KPIQuery() {
             <Space wrap size="middle" align="start" style={{ width: '100%' }}>
               <Form.Item label={t('perf.kpiQuery.deviceType')} style={{ marginBottom: 8 }}>
                 <Select
-                  style={{ width: 120 }}
+                  style={{ width: 160 }}
                   value={saveForm.payload.deviceType}
+                  loading={deviceTypeOptionsLoading}
+                  disabled={!hasAvailableDeviceTypes}
                   onChange={(v) =>
-                    setSaveForm((s) => ({ ...s, payload: { ...s.payload, deviceType: v } }))
+                    setSaveForm((s) => ({
+                      ...s,
+                      payload: { ...s.payload, deviceType: v, deviceSns: [], metricPaths: [] },
+                    }))
                   }
-                  options={DEVICE_TYPE_OPTIONS}
+                  options={deviceTypeOptions}
                 />
               </Form.Item>
 
@@ -1153,11 +1253,17 @@ export default function KPIQuery() {
 
             <Form.Item label={t('perf.kpiQuery.metric')} style={{ marginBottom: 0 }}>
               <Space.Compact style={{ width: '100%' }}>
-                <Input
-                  readOnly
-                  value={metricSummary(saveForm.payload.metricPaths, 3)}
-                  placeholder={t('perf.kpiQuery.selectMetricPlaceholder')}
-                />
+                <Tooltip
+                  title={metricSummaryTooltip(saveForm.payload.metricPaths)}
+                  placement="topLeft"
+                  overlayStyle={{ maxWidth: 520 }}
+                >
+                  <Input
+                    readOnly
+                    value={metricSummary(saveForm.payload.metricPaths, 3)}
+                    placeholder={t('perf.kpiQuery.selectMetricPlaceholder')}
+                  />
+                </Tooltip>
                 <Button
                   onClick={() => {
                     setPickerTarget('modal');

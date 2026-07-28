@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/omcgo/omcgo/internal/admin"
+	"github.com/omcgo/omcgo/internal/authz"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
@@ -19,7 +20,8 @@ import (
 
 // Handler provides REST API endpoints for dashboard.
 type Handler struct {
-	service *Service
+	service  *Service
+	resolver *authz.Resolver
 	// permChecker 用于存全局布局接口在 handler 层再校验一次管理员身份（issue #213 S1）。
 	// 复用 admin 的 PermissionChecker（Casbin 端点级权限点）+ 超管 IsSuperAdmin 旁路，
 	// 不发明新机制。可能为 nil（测试 / 旧 wiring）：此时存盘只认 super_admin。
@@ -31,6 +33,11 @@ type Handler struct {
 // permChecker 用于存全局 KPI 布局接口的管理员二次校验（可为 nil，仅认 super_admin）。
 func NewHandler(service *Service, permChecker admin.PermissionChecker) *Handler {
 	return &Handler{service: service, permChecker: permChecker}
+}
+
+// SetPermissionService injects device-group visibility for scoped dashboard alarm queries.
+func (h *Handler) SetPermissionService(perm authz.VisibleGroupsResolver) {
+	h.resolver = authz.NewResolver(perm)
 }
 
 // RegisterRoutes registers dashboard routes on the given router group.
@@ -62,7 +69,22 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		dashboard.GET("/alarm-efficiency", h.GetAlarmEfficiency)
 		dashboard.GET("/alarm-heatmap", h.GetAlarmHeatmap)
 		dashboard.GET("/alarm-heatmap-by-severity", h.GetAlarmHeatmapBySeverity)
+		dashboard.GET("/top-alarm-devices", h.GetTopAlarmDevices)
 	}
+}
+
+// GetTopAlarmDevices handles GET /api/v1/dashboard/top-alarm-devices.
+func (h *Handler) GetTopAlarmDevices(c *gin.Context) {
+	visibleGroups, ok := h.resolver.FromContext(c)
+	if !ok {
+		return
+	}
+	devices, err := h.service.GetTopAlarmDevices(c.Request.Context(), visibleGroups)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	response.OK(c, devices)
 }
 
 // GetSummary handles GET /api/v1/dashboard/summary.
@@ -75,7 +97,7 @@ func (h *Handler) GetSummary(c *gin.Context) {
 	response.OK(c, summary)
 }
 
-// GetAlarmTrend handles GET /api/v1/dashboard/alarm-trend?days=7.
+// GetAlarmTrend handles GET /api/v1/dashboard/alarm-trend?days=7&metric=raised.
 func (h *Handler) GetAlarmTrend(c *gin.Context) {
 	days := 7
 	if daysStr := c.Query("days"); daysStr != "" {
@@ -88,7 +110,26 @@ func (h *Handler) GetAlarmTrend(c *gin.Context) {
 		days = parsed
 	}
 
-	entries, err := h.service.GetAlarmTrend(c.Request.Context(), days)
+	metric := c.DefaultQuery("metric", "raised")
+	if metric != "raised" && metric != "active" {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("invalid metric parameter: %s", metric))
+		return
+	}
+
+	var (
+		entries []AlarmTrendEntry
+		err     error
+	)
+	if metric == "active" {
+		visibleGroups, ok := h.resolver.FromContext(c)
+		if !ok {
+			return
+		}
+		entries, err = h.service.GetActiveAlarmTrend(c.Request.Context(), days, visibleGroups)
+	} else {
+		entries, err = h.service.GetAlarmTrend(c.Request.Context(), days)
+	}
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return

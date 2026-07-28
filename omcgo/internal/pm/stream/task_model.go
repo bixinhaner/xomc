@@ -75,6 +75,7 @@ type SaveTaskRequest struct {
 	Members       []TaskMember
 	Now           time.Time
 	EffectiveFrom time.Time
+	PlannedEndAt  *time.Time
 }
 
 type TaskVersionSnapshot struct {
@@ -90,6 +91,7 @@ type TaskVersionSnapshot struct {
 	ObjectLDNs    map[string]struct{}
 	EffectiveFrom time.Time
 	EffectiveTo   *time.Time
+	PlannedEndAt  *time.Time
 	Metrics       map[string]MetricRule
 	Counters      map[string]CounterRule
 	Members       map[uuid.UUID][]TaskMember

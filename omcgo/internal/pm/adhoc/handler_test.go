@@ -18,15 +18,16 @@ import (
 
 // handlerStubRepo 仅实现 Create/List/Get/Cancel/Update，不依赖 DB。
 type handlerStubRepo struct {
-	mu       sync.Mutex
-	tasks    map[uuid.UUID]*Task
-	create   func(CreateRequest) (uuid.UUID, error)
-	cancel   func(uuid.UUID) error
-	get      func(uuid.UUID) (*Task, error)       // T-0194：注入既有任务（含 is_builtin/mode/technology）
-	update   func(uuid.UUID, UpdateRequest) error // T-0194：捕获更新入参
-	listFn   func(ListFilter) ([]Task, error)
-	deleteFn func(uuid.UUID) error           // #392：注入删除结果（区分终态/内置/非终态）
-	resumeFn func(uuid.UUID) (Status, error) // #674：注入恢复结果
+	mu                  sync.Mutex
+	tasks               map[uuid.UUID]*Task
+	create              func(CreateRequest) (uuid.UUID, error)
+	cancel              func(uuid.UUID) error
+	get                 func(uuid.UUID) (*Task, error)       // T-0194：注入既有任务（含 is_builtin/mode/technology）
+	update              func(uuid.UUID, UpdateRequest) error // T-0194：捕获更新入参
+	listFn              func(ListFilter) ([]Task, error)
+	deleteFn            func(uuid.UUID) error           // #392：注入删除结果（区分终态/内置/非终态）
+	resumeFn            func(uuid.UUID) (Status, error) // #674：注入恢复结果
+	resultMetricPathsFn func(uuid.UUID, resultsFilter) ([]string, error)
 }
 
 func (s *handlerStubRepo) Create(_ context.Context, req CreateRequest) (uuid.UUID, error) {
@@ -43,7 +44,8 @@ func (s *handlerStubRepo) Create(_ context.Context, req CreateRequest) (uuid.UUI
 		ID: id, Name: req.Name, Mode: req.Mode, CronExpr: req.CronExpr,
 		DeviceSNs: req.DeviceSNs, MetricPaths: req.MetricPaths, Granularities: req.Granularities,
 		WindowStart: req.WindowStart, WindowEnd: req.WindowEnd, Status: StatusPending,
-		Creator: req.Creator, Visibility: normalizeVisibility(req.Visibility), CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		PlannedEndAt: req.PlannedEndAt,
+		Creator:      req.Creator, Visibility: normalizeVisibility(req.Visibility), CreatedAt: time.Now(), UpdatedAt: time.Now(),
 	}
 	return id, nil
 }
@@ -132,6 +134,12 @@ func (s *handlerStubRepo) FinishRun(context.Context, uuid.UUID, Status, int, str
 	return nil
 }
 func (s *handlerStubRepo) ListRuns(context.Context, uuid.UUID, int, int) ([]TaskRun, error) {
+	return nil, nil
+}
+func (s *handlerStubRepo) ListResultMetricPaths(_ context.Context, id uuid.UUID, filter resultsFilter) ([]string, error) {
+	if s.resultMetricPathsFn != nil {
+		return s.resultMetricPathsFn(id, filter)
+	}
 	return nil, nil
 }
 
@@ -747,6 +755,34 @@ func Test_Handler_Results_BuiltinTask_PermissionPasses(t *testing.T) {
 		_ = recover()
 		assert.NotEqual(t, http.StatusForbidden, w.Code,
 			"内置任务普通用户读应放行，不应被 403 挡住")
+	}()
+	r.ServeHTTP(w, req)
+}
+
+// #192：Results 的显示/API 范围必须直接取任务 metric_paths，不能再查询结果表并入额外指标。
+func Test_Handler_Results_UsesTaskMetricPathsWithoutResultExpansion(t *testing.T) {
+	taskID := uuid.New()
+	repo := &handlerStubRepo{
+		get: func(id uuid.UUID) (*Task, error) {
+			return &Task{
+				ID:          taskID,
+				IsBuiltin:   true,
+				Creator:     "system",
+				MetricPaths: []string{"K1", "K2"},
+			}, nil
+		},
+		resultMetricPathsFn: func(uuid.UUID, resultsFilter) ([]string, error) {
+			t.Fatal("Results must not expand task metric_paths from stored result metrics")
+			return nil, nil
+		},
+	}
+	r := newTestRouterWithUser(repo, "bob", false)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/pm/adhoc/tasks/"+taskID.String()+"/results", nil)
+	defer func() {
+		_ = recover()
+		assert.NotEqual(t, http.StatusForbidden, w.Code)
 	}()
 	r.ServeHTTP(w, req)
 }

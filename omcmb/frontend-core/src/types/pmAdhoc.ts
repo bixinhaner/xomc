@@ -48,6 +48,8 @@ export interface AdhocTask {
   isBuiltin: boolean;
   // 非持续型过期天数（T-0182，默认 60）
   expireDays: number;
+  // 自建 continuous 任务计划结束时间；老任务/内置任务可能为空。
+  plannedEndAt?: string | null;
   visibility: AdhocVisibility;
   status: AdhocStatus;
   progress: number;
@@ -74,6 +76,7 @@ export interface CreateAdhocTaskInput {
   technology?: string;
   isBuiltin?: boolean;
   expireDays?: number;
+  plannedEndAt?: string | null;
   visibility?: AdhocVisibility;
   // T-0193 小区/PLMN 白名单（完整 object_ldn 字符串数组）。空/缺 = 不传 → 全小区（现状语义）。
   objectLdns?: string[];
@@ -92,6 +95,7 @@ export interface UpdateAdhocTaskInput {
   granularities?: string[];
   visibility?: AdhocVisibility;
   objectLdns?: string[];
+  plannedEndAt?: string | null;
   windowStart?: string;
   windowEnd?: string;
 }
@@ -188,6 +192,7 @@ export interface BackendAdhocTask {
   technology?: string;
   is_builtin?: boolean;
   expire_days?: number;
+  planned_end_at?: string;
   visibility?: string;
   status: string;
   progress: number;
@@ -275,6 +280,7 @@ export function mapBackendAdhocTask(b: BackendAdhocTask): AdhocTask {
     technology: b.technology,
     isBuiltin: b.is_builtin ?? false,
     expireDays: b.expire_days ?? 60,
+    plannedEndAt: b.planned_end_at || undefined,
     visibility: b.visibility === 'public' ? 'public' : 'private',
     status: b.status as AdhocStatus,
     progress: b.progress,

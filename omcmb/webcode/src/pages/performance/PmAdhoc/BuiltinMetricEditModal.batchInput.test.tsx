@@ -30,9 +30,30 @@ vi.mock('@core/hooks/api/usePerformance', () => ({
   },
 }));
 
+vi.mock('@core/hooks/api/useTechnologyDictionary', () => ({
+  isKnownTechnology: (value: unknown) => value === 'lte' || value === 'nr' || value === 'gsm',
+  technologyToDeviceType: (tech: string) => ({ lte: 'ENB', nr: 'GNB', gsm: 'GSM' })[tech],
+  useTechnologyDictionary: () => ({
+    options: [
+      { label: 'eNB(LTE)', value: 'lte', sort: 1 },
+      { label: 'gNB(NR)', value: 'nr', sort: 2 },
+      { label: 'GSM', value: 'gsm', sort: 3 },
+    ],
+    deviceTypeOptions: [
+      { label: 'eNB(LTE)', value: 'ENB', sort: 1, technology: 'lte' },
+      { label: 'gNB(NR)', value: 'GNB', sort: 2, technology: 'nr' },
+      { label: 'GSM', value: 'GSM', sort: 3, technology: 'gsm' },
+    ],
+    labelForTechnology: (tech?: string | null) =>
+      ({ lte: 'eNB(LTE)', nr: 'gNB(NR)', gsm: 'GSM' })[tech ?? ''] ?? (tech ? tech.toUpperCase() : '—'),
+    labelForRadioMode: (radioMode?: string | null) => (radioMode ? radioMode : '—'),
+    isLoading: false,
+  }),
+}));
+
 const task: AdhocTask = {
   id: 'builtin-1',
-  name: '内置聚合任务',
+  name: '内置-全网-LTE',
   mode: 'oneshot',
   deviceSns: [],
   metricPaths: ['K0001'],
@@ -72,6 +93,7 @@ describe('BuiltinMetricEditModal batch metric input', () => {
 
   it('adds valid metric IDs from batch input and ignores missing IDs before saving', async () => {
     renderModal();
+    expect(screen.getByText('编辑指标：内置-全网-eNB(LTE)')).toBeInTheDocument();
     expect(useIndicatorCandidatesSpy).toHaveBeenCalledWith(
       'ENB',
       expect.objectContaining({ includeCounters: true, enabledOnly: true }),

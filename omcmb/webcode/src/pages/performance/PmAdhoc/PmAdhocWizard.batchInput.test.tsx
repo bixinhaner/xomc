@@ -48,6 +48,26 @@ vi.mock('@core/hooks/api/usePerformance', () => ({
   },
 }));
 
+vi.mock('@core/hooks/api/useTechnologyDictionary', () => ({
+  useTechnologyDictionary: () => ({
+    options: [
+      { label: 'eNB(LTE)', value: 'lte', sort: 1 },
+      { label: 'gNB(NR)', value: 'nr', sort: 2 },
+      { label: 'GSM', value: 'gsm', sort: 3 },
+    ],
+    deviceTypeOptions: [
+      { label: 'eNB(LTE)', value: 'ENB', sort: 1, technology: 'lte' },
+      { label: 'gNB(NR)', value: 'GNB', sort: 2, technology: 'nr' },
+      { label: 'GSM', value: 'GSM', sort: 3, technology: 'gsm' },
+    ],
+    labelForTechnology: (tech?: string | null) =>
+      ({ lte: 'eNB(LTE)', nr: 'gNB(NR)', gsm: 'GSM' })[tech ?? ''] ?? (tech ? tech.toUpperCase() : '—'),
+    labelForRadioMode: (radioMode?: string | null) => (radioMode ? radioMode : '—'),
+    isLoading: false,
+  }),
+  technologyToDeviceType: (tech: string) => ({ lte: 'ENB', nr: 'GNB', gsm: 'GSM' })[tech],
+}));
+
 vi.mock('../PmDashboard/CellDrilldownSelector', () => ({
   default: () => <div data-testid="cell-drilldown-selector" />,
 }));
@@ -119,6 +139,32 @@ describe('PmAdhocWizard batch metric input', () => {
     expect(screen.getByText(`已选 ${PM_QUERY_SELECTION_LIMIT} 个指标`)).toBeInTheDocument();
   });
 
+  it('新建时未手动修改计划结束时间则交给后端按创建时间默认', async () => {
+    createMutateAsync.mockResolvedValue({ id: 'created-task' });
+    renderWizard();
+
+    fireEvent.change(screen.getByPlaceholderText('如：小时级 RRC 成功率'), {
+      target: { value: '默认计划结束任务' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /下一步/ }));
+    fireEvent.click(screen.getByRole('button', { name: /下一步/ }));
+
+    fireEvent.click(screen.getByRole('button', { name: /批量输入指标 ID/ }));
+    fireEvent.change(screen.getByPlaceholderText(/K000000001/), {
+      target: { value: 'K0001' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /加入已选/ }));
+
+    fireEvent.click(screen.getByRole('button', { name: /下一步/ }));
+    fireEvent.click(screen.getByRole('button', { name: /下一步/ }));
+    fireEvent.click(screen.getByRole('button', { name: /提\s*交/ }));
+
+    await waitFor(() => {
+      expect(createMutateAsync).toHaveBeenCalled();
+    });
+    expect(createMutateAsync.mock.calls[0][0]).not.toHaveProperty('plannedEndAt');
+  });
+
   it('does not allow an edited custom-device task with more than the PM query selection limit to leave the scope step', async () => {
     routeParams = { id: 'adhoc-over-limit' };
     adhocDetail = {
@@ -148,7 +194,7 @@ describe('PmAdhocWizard batch metric input', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: /下一步/ }));
 
-    expect(screen.getByText(`自选设备（LTE，已选 ${PM_QUERY_SELECTION_LIMIT + 1}）*`)).toBeInTheDocument();
+    expect(screen.getByText(`自选设备（eNB(LTE)，已选 ${PM_QUERY_SELECTION_LIMIT + 1}）*`)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /下一步/ })).toBeDisabled();
   });
 });
