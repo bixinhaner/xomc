@@ -13,8 +13,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/alarm"
+	"github.com/omcgo/omcgo/internal/authz"
 	"github.com/omcgo/omcgo/internal/core/jsonx"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/device"
 	pmaggregator "github.com/omcgo/omcgo/internal/pm/aggregator"
@@ -763,6 +765,225 @@ func (s *Service) queryAlarmTrendInto(ctx context.Context, pool *pgxpool.Pool, t
 		return fmt.Errorf("iterate alarm trend rows from %s: %w", tableName, err)
 	}
 	return nil
+}
+
+type alarmTrendSnapshot struct {
+	Date string
+	At   time.Time
+}
+
+type alarmTrendSnapshotCount struct {
+	Ordinal  int
+	Critical int64
+	Major    int64
+	Minor    int64
+	Warning  int64
+	AlarmIDs []uuid.UUID
+}
+
+func buildAlarmTrendSnapshots(now time.Time, days int) []alarmTrendSnapshot {
+	if days < 1 {
+		return nil
+	}
+
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	snapshots := make([]alarmTrendSnapshot, 0, days)
+	for offset := days - 1; offset >= 0; offset-- {
+		dayStart := today.AddDate(0, 0, -offset)
+		snapshotAt := dayStart.AddDate(0, 0, 1).Add(-time.Nanosecond)
+		if offset == 0 {
+			snapshotAt = now
+		}
+		snapshots = append(snapshots, alarmTrendSnapshot{
+			Date: dayStart.Format("2006-01-02"),
+			At:   snapshotAt,
+		})
+	}
+	return snapshots
+}
+
+func alarmTrendSnapshotSelect(idColumn string, includeAlarmIDs bool) sq.SelectBuilder {
+	columns := []string{
+		"snapshots.ordinality",
+		fmt.Sprintf("COUNT(DISTINCT %s) FILTER (WHERE alarm.severity IN (1, 31001)) AS critical", idColumn),
+		fmt.Sprintf("COUNT(DISTINCT %s) FILTER (WHERE alarm.severity IN (2, 31002)) AS major", idColumn),
+		fmt.Sprintf("COUNT(DISTINCT %s) FILTER (WHERE alarm.severity IN (3, 31003)) AS minor", idColumn),
+		fmt.Sprintf("COUNT(DISTINCT %s) FILTER (WHERE alarm.severity IN (4, 31004)) AS warning", idColumn),
+	}
+	if includeAlarmIDs {
+		columns = append(columns, fmt.Sprintf(
+			"COALESCE(array_agg(DISTINCT %s) FILTER (WHERE %s IS NOT NULL AND snapshots.ordinality = cardinality($1::timestamptz[])), '{}'::uuid[]) AS alarm_ids",
+			idColumn,
+			idColumn,
+		))
+	} else {
+		columns = append(columns, "'{}'::uuid[] AS alarm_ids")
+	}
+	return sq.Select(columns...).
+		From("unnest(?::timestamptz[]) WITH ORDINALITY AS snapshots(snapshot_at, ordinality)").
+		GroupBy("snapshots.ordinality").
+		OrderBy("snapshots.ordinality")
+}
+
+func buildActiveAlarmTrendSnapshotQuery(snapshotTimes []time.Time, visibleGroups []uuid.UUID) (string, []any, error) {
+	builder := alarmTrendSnapshotSelect("alarm.id", true).
+		LeftJoin("alarms_active alarm ON alarm.raised_at <= snapshots.snapshot_at")
+	builder = authz.ApplyDeviceVisibilityFilter(builder, "alarm.device_id", visibleGroups)
+	query, queryArgs, err := builder.PlaceholderFormat(sq.Dollar).ToSql()
+	return query, append([]any{snapshotTimes}, queryArgs...), err
+}
+
+func buildHistoryAlarmTrendSnapshotQuery(
+	snapshotTimes []time.Time,
+	visibleGroups []uuid.UUID,
+	activeIDs []uuid.UUID,
+) (string, []any, error) {
+	builder := alarmTrendSnapshotSelect("alarm.alarm_id", false).
+		LeftJoin(`alarms_history alarm
+			ON alarm.raised_at <= snapshots.snapshot_at
+			AND alarm.cleared_at > snapshots.snapshot_at`)
+	builder = authz.ApplyDeviceVisibilityFilter(builder, "alarm.device_id", visibleGroups)
+	builder = builder.Where(sq.Or{
+		sq.Expr("alarm.alarm_id IS NULL"),
+		sq.Expr("NOT (alarm.alarm_id = ANY(?::uuid[]))", activeIDs),
+	})
+	query, queryArgs, err := builder.PlaceholderFormat(sq.Dollar).ToSql()
+	return query, append([]any{snapshotTimes}, queryArgs...), err
+}
+
+func mergeAlarmTrendSnapshotCounts(entries []AlarmTrendEntry, counts []alarmTrendSnapshotCount) error {
+	for _, count := range counts {
+		index := count.Ordinal - 1
+		if index < 0 || index >= len(entries) {
+			return fmt.Errorf("alarm trend snapshot ordinal %d out of range", count.Ordinal)
+		}
+		entries[index].Critical += count.Critical
+		entries[index].Major += count.Major
+		entries[index].Minor += count.Minor
+		entries[index].Warning += count.Warning
+	}
+	return nil
+}
+
+func collectAlarmTrendSnapshotIDs(counts []alarmTrendSnapshotCount) []uuid.UUID {
+	seen := make(map[uuid.UUID]struct{})
+	ids := make([]uuid.UUID, 0)
+	for _, count := range counts {
+		for _, alarmID := range count.AlarmIDs {
+			if _, exists := seen[alarmID]; exists {
+				continue
+			}
+			seen[alarmID] = struct{}{}
+			ids = append(ids, alarmID)
+		}
+	}
+	return ids
+}
+
+func queryAlarmTrendSnapshotCounts(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	source string,
+	query string,
+	args []any,
+	expectedCount int,
+) ([]alarmTrendSnapshotCount, error) {
+	if pool == nil || expectedCount == 0 {
+		return nil, nil
+	}
+
+	rows, err := pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query active alarm trend from %s: %w", source, err)
+	}
+	defer rows.Close()
+
+	counts := make([]alarmTrendSnapshotCount, 0, expectedCount)
+	for rows.Next() {
+		var count alarmTrendSnapshotCount
+		if err := rows.Scan(
+			&count.Ordinal,
+			&count.Critical,
+			&count.Major,
+			&count.Minor,
+			&count.Warning,
+			&count.AlarmIDs,
+		); err != nil {
+			return nil, fmt.Errorf("scan active alarm trend row from %s: %w", source, err)
+		}
+		counts = append(counts, count)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate active alarm trend rows from %s: %w", source, err)
+	}
+	return counts, nil
+}
+
+// GetActiveAlarmTrend returns end-of-day active-alarm snapshots, using now for today's point.
+func (s *Service) GetActiveAlarmTrend(ctx context.Context, days int, visibleGroups []uuid.UUID) ([]AlarmTrendEntry, error) {
+	if days < 1 {
+		days = 7
+	}
+	if days > 365 {
+		days = 365
+	}
+
+	now := response.TimeInCurrentLocation(ctx, time.Now())
+	snapshots := buildAlarmTrendSnapshots(now, days)
+	entries := make([]AlarmTrendEntry, len(snapshots))
+	snapshotTimes := make([]time.Time, len(snapshots))
+	for index, snapshot := range snapshots {
+		entries[index].Date = snapshot.Date
+		snapshotTimes[index] = snapshot.At
+	}
+
+	activeQuery, activeArgs, err := buildActiveAlarmTrendSnapshotQuery(snapshotTimes, visibleGroups)
+	if err != nil {
+		return nil, fmt.Errorf("build active alarm trend query for alarms_active: %w", err)
+	}
+	activeCounts, err := queryAlarmTrendSnapshotCounts(
+		ctx,
+		s.pgPool,
+		"alarms_active",
+		activeQuery,
+		activeArgs,
+		len(snapshotTimes),
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := mergeAlarmTrendSnapshotCounts(entries, activeCounts); err != nil {
+		return nil, fmt.Errorf("merge active alarm trend from alarms_active: %w", err)
+	}
+
+	// Today's point deliberately comes only from alarms_active so it has the
+	// same inventory source as the current-alarm cards. Historical rows are
+	// only needed to reconstruct alarms that were still active on prior days.
+	historySnapshotTimes := snapshotTimes[:len(snapshotTimes)-1]
+	activeIDs := collectAlarmTrendSnapshotIDs(activeCounts)
+	historyQuery, historyArgs, err := buildHistoryAlarmTrendSnapshotQuery(
+		historySnapshotTimes,
+		visibleGroups,
+		activeIDs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build active alarm trend query for alarms_history: %w", err)
+	}
+	historyCounts, err := queryAlarmTrendSnapshotCounts(
+		ctx,
+		s.tsPool,
+		"alarms_history",
+		historyQuery,
+		historyArgs,
+		len(historySnapshotTimes),
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := mergeAlarmTrendSnapshotCounts(entries, historyCounts); err != nil {
+		return nil, fmt.Errorf("merge active alarm trend from alarms_history: %w", err)
+	}
+	return entries, nil
 }
 
 // GetDeviceStatus returns device counts grouped by status.

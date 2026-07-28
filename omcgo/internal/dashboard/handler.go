@@ -35,7 +35,7 @@ func NewHandler(service *Service, permChecker admin.PermissionChecker) *Handler 
 	return &Handler{service: service, permChecker: permChecker}
 }
 
-// SetPermissionService injects device-group visibility for scoped dashboard queries.
+// SetPermissionService injects device-group visibility for scoped dashboard alarm queries.
 func (h *Handler) SetPermissionService(perm authz.VisibleGroupsResolver) {
 	h.resolver = authz.NewResolver(perm)
 }
@@ -97,7 +97,7 @@ func (h *Handler) GetSummary(c *gin.Context) {
 	response.OK(c, summary)
 }
 
-// GetAlarmTrend handles GET /api/v1/dashboard/alarm-trend?days=7.
+// GetAlarmTrend handles GET /api/v1/dashboard/alarm-trend?days=7&metric=raised.
 func (h *Handler) GetAlarmTrend(c *gin.Context) {
 	days := 7
 	if daysStr := c.Query("days"); daysStr != "" {
@@ -110,7 +110,26 @@ func (h *Handler) GetAlarmTrend(c *gin.Context) {
 		days = parsed
 	}
 
-	entries, err := h.service.GetAlarmTrend(c.Request.Context(), days)
+	metric := c.DefaultQuery("metric", "raised")
+	if metric != "raised" && metric != "active" {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("invalid metric parameter: %s", metric))
+		return
+	}
+
+	var (
+		entries []AlarmTrendEntry
+		err     error
+	)
+	if metric == "active" {
+		visibleGroups, ok := h.resolver.FromContext(c)
+		if !ok {
+			return
+		}
+		entries, err = h.service.GetActiveAlarmTrend(c.Request.Context(), days, visibleGroups)
+	} else {
+		entries, err = h.service.GetAlarmTrend(c.Request.Context(), days)
+	}
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
