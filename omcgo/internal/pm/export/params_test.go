@@ -21,6 +21,8 @@ func TestParseDashboardParams_Full(t *testing.T) {
 		"technologies": ["lte"],
 		"start_time": "2026-06-01T00:00:00Z",
 		"end_time": "2026-06-02T00:00:00Z",
+		"weekdays": [1,2],
+		"hours": [8,9],
 		"object_ldns": ["Cellid=1,PLMN=00101"]
 	}`)
 	req, objectLDNs, err := parseDashboardParams(raw)
@@ -35,6 +37,8 @@ func TestParseDashboardParams_Full(t *testing.T) {
 	assert.Equal(t, []string{"lte"}, req.Technologies)
 	assert.False(t, req.StartTime.IsZero())
 	assert.False(t, req.EndTime.IsZero())
+	assert.Equal(t, []int{1, 2}, req.Weekdays)
+	assert.Equal(t, []int{8, 9}, req.Hours)
 	assert.Equal(t, 0, req.Limit) // 去 limit 全量
 	assert.Equal(t, []string{"Cellid=1,PLMN=00101"}, req.ObjectLDNs)
 	// A1：保留旧返回值给导出直查路径，同时 QueryRequest 也带同一份白名单供补骨架复用。

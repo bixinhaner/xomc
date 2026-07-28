@@ -9,6 +9,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
+	"github.com/omcgo/omcgo/internal/pm/calendarfilter"
 )
 
 // deviceSelectCols 是 device / adhoc 行级表流式取数的固定列序（与 Scan 一一对应）。
@@ -132,18 +133,34 @@ func buildAdhocKeysetSQL(taskID uuid.UUID, metricPaths []string, filter adhocExp
 // buildDistinctMetricsSQL 发现 dashboard 源的横表指标列集：DISTINCT(metric_path, metric_type)。
 // 指标的编号/类型与设备/小区无关，故只按 metric_paths（非空时）+ 时窗收口即得列全集（含 counter/kpi 类型）。
 func buildDistinctMetricsSQL(table string, metricPaths []string, start, end time.Time) (string, []any) {
+	return buildDistinctMetricsSQLForRequest(table, aggregator.QueryRequest{
+		MetricPaths: metricPaths,
+		StartTime:   start,
+		EndTime:     end,
+	})
+}
+
+func buildDistinctMetricsSQLForRequest(table string, req aggregator.QueryRequest) (string, []any) {
 	b := newRawAwareExportSelect(
-		table, aggregator.QueryRequest{MetricPaths: metricPaths},
+		table, aggregator.QueryRequest{MetricPaths: req.MetricPaths},
 		"DISTINCT metric_path", "metric_type",
 	)
-	if len(metricPaths) > 0 {
-		b = b.Where(sq.Eq{"metric_path": metricPaths})
+	if len(req.MetricPaths) > 0 {
+		b = b.Where(sq.Eq{"metric_path": req.MetricPaths})
 	}
-	if !start.IsZero() {
-		b = b.Where(sq.GtOrEq{"time": start})
+	if !req.StartTime.IsZero() {
+		b = b.Where(sq.GtOrEq{"time": req.StartTime})
 	}
-	if !end.IsZero() {
-		b = b.Where(sq.Lt{"time": end})
+	if !req.EndTime.IsZero() {
+		b = b.Where(sq.Lt{"time": req.EndTime})
+	}
+	if len(req.Weekdays) > 0 && len(req.Weekdays) < 7 {
+		b = b.Where(sq.Expr(calendarfilter.ExtractDOWPredicate("start_time"),
+			calendarfilter.NormalizeName(req.CalendarTimezone), req.Weekdays))
+	}
+	if len(req.Hours) > 0 && len(req.Hours) < 24 {
+		b = b.Where(sq.Expr(calendarfilter.ExtractHourPredicate("start_time"),
+			calendarfilter.NormalizeName(req.CalendarTimezone), req.Hours))
 	}
 	q, args, _ := b.ToSql()
 	return q, args
@@ -176,10 +193,12 @@ func applyAdhocExportFilters(b sq.SelectBuilder, metricPaths []string, filter ad
 		b = b.Where(sq.Eq{"r.object_ldn": filter.ObjectLDNs})
 	}
 	if len(filter.Weekdays) > 0 && len(filter.Weekdays) < 7 {
-		b = b.Where(sq.Expr("EXTRACT(dow FROM r.start_time)::int = ANY(?)", filter.Weekdays))
+		b = b.Where(sq.Expr(calendarfilter.ExtractDOWPredicate("r.start_time"),
+			calendarfilter.NormalizeName(filter.CalendarTimezone), filter.Weekdays))
 	}
 	if len(filter.Hours) > 0 && len(filter.Hours) < 24 {
-		b = b.Where(sq.Expr("EXTRACT(hour FROM r.start_time)::int = ANY(?)", filter.Hours))
+		b = b.Where(sq.Expr(calendarfilter.ExtractHourPredicate("r.start_time"),
+			calendarfilter.NormalizeName(filter.CalendarTimezone), filter.Hours))
 	}
 	return b
 }
@@ -241,6 +260,14 @@ func applyDeviceExportFilters(b sq.SelectBuilder, req aggregator.QueryRequest, o
 	}
 	if !req.EndTime.IsZero() {
 		b = b.Where(sq.Lt{"time": req.EndTime})
+	}
+	if len(req.Weekdays) > 0 && len(req.Weekdays) < 7 {
+		b = b.Where(sq.Expr(calendarfilter.ExtractDOWPredicate("start_time"),
+			calendarfilter.NormalizeName(req.CalendarTimezone), req.Weekdays))
+	}
+	if len(req.Hours) > 0 && len(req.Hours) < 24 {
+		b = b.Where(sq.Expr(calendarfilter.ExtractHourPredicate("start_time"),
+			calendarfilter.NormalizeName(req.CalendarTimezone), req.Hours))
 	}
 	if len(req.Technologies) > 0 {
 		// buildDeviceKeysetSQL 跑在 metricDB=TsPool（device 维度直查 pm_metrics/pm_metrics_hourly），

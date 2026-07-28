@@ -51,6 +51,37 @@ func Test_applyScalarFilters_TimeRangeIsHalfOpen(t *testing.T) {
 	assert.Equal(t, []any{start, end}, args)
 }
 
+func Test_applyScalarFilters_CalendarFiltersUseConfiguredTimezone(t *testing.T) {
+	shanghai, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	localMidnight := time.Date(2026, 7, 28, 0, 0, 0, 0, shanghai)
+	require.Equal(t, time.Tuesday, localMidnight.Weekday())
+	require.Equal(t, time.Monday, localMidnight.UTC().Weekday(), "UTC would misclassify this bucket as Monday")
+
+	qb := storage.Psql.Select("metric_path").From("pm_metrics_hourly")
+	sql, args, err := applyScalarFilters(qb, QueryRequest{
+		StartTime:        localMidnight,
+		EndTime:          localMidnight.Add(time.Hour),
+		Weekdays:         []int{2},
+		Hours:            []int{0},
+		CalendarTimezone: shanghai.String(),
+	}).ToSql()
+	require.NoError(t, err)
+
+	assert.Contains(t, sql, "EXTRACT(dow FROM (start_time AT TIME ZONE $3))::int = ANY($4)")
+	assert.Contains(t, sql, "EXTRACT(hour FROM (start_time AT TIME ZONE $5))::int = ANY($6)")
+	assert.NotContains(t, sql, "EXTRACT(dow FROM start_time)")
+	assert.NotContains(t, sql, "EXTRACT(hour FROM start_time)")
+	assert.Equal(t, []any{
+		localMidnight,
+		localMidnight.Add(time.Hour),
+		"Asia/Shanghai",
+		[]int{2},
+		"Asia/Shanghai",
+		[]int{0},
+	}, args)
+}
+
 func Test_queryProductTable_TimeRangeIsHalfOpen(t *testing.T) {
 	start := time.Date(2026, 7, 13, 9, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)

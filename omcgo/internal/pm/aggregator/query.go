@@ -15,6 +15,7 @@ import (
 	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	"github.com/omcgo/omcgo/internal/core/jsonx"
 	"github.com/omcgo/omcgo/internal/core/storage"
+	"github.com/omcgo/omcgo/internal/pm/calendarfilter"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
@@ -71,6 +72,9 @@ type QueryRequest struct {
 	// Hours #599：小时段过滤（0..23，对齐 PostgreSQL EXTRACT(hour)）。
 	// 空/全选 = 不过滤。筛的是 start_time 的整点小时。
 	Hours []int
+	// CalendarTimezone 是星期/小时筛选使用的系统时区 IANA 名称。
+	// 空时 Aggregator.Query/Count 会从注入的 TimezoneProvider 取值；无 provider 回落 UTC。
+	CalendarTimezone string
 	// RecomputeAllKPIs（KPI-ALL-IND）：全网/全聚任务放开到全库时置 true。聚合层在汇总
 	// 全部 counter 的同时，额外从指标库加载全库「派生 KPI」按公式重算并产出 KPI 行，
 	// 使「首页读现成全网预聚合表」时 KPI 也有线（否则全聚只产 counter 行、KPI 面板空线）。
@@ -141,6 +145,7 @@ type Row struct {
 //   - weekly × ...         → pm_metrics_weekly / pm_group_metrics_weekly
 //   - monthly × ...        → pm_metrics_monthly / pm_group_metrics_monthly
 func (a *Aggregator) Query(ctx context.Context, q QueryRequest) ([]Row, error) {
+	q = a.withCalendarTimezone(ctx, q)
 	if q.Dimension == "" {
 		q.Dimension = DimensionDevice
 	}
@@ -189,6 +194,7 @@ func (a *Aggregator) Query(ctx context.Context, q QueryRequest) ([]Row, error) {
 // KPI recompute 不改变分组身份（只把同 (object,time) 分组的 counter 行重算成 KPI 行），
 // 故总数以「存储层命中分组数」为准，是诚实的「DB 命中多少」。
 func (a *Aggregator) Count(ctx context.Context, q QueryRequest) (int, error) {
+	q = a.withCalendarTimezone(ctx, q)
 	if q.Dimension == "" {
 		q.Dimension = DimensionDevice
 	}
@@ -295,6 +301,7 @@ func (a *Aggregator) countByQueryResult(ctx context.Context, q QueryRequest) (in
 // 用于 "全部小区" 查询补骨架：请求未显式传 object_ldns 时，后端从同一粒度表发现展示全集。
 // 指标过滤在这里刻意清空，否则当前指标完全无数据时无法发现 object 集合。
 func (a *Aggregator) DiscoverObjectLDNs(ctx context.Context, q QueryRequest) ([]string, error) {
+	q = a.withCalendarTimezone(ctx, q)
 	if q.Dimension == "" {
 		q.Dimension = DimensionDevice
 	}
@@ -670,6 +677,7 @@ ORDER BY d."time" DESC, d.device_sn ASC, COALESCE(d.object_ldn, '') ASC, d.metri
 }
 
 func (a *Aggregator) DevicePivotRowKeys(ctx context.Context, q QueryRequest) ([]PivotRowKey, error) {
+	q = a.withCalendarTimezone(ctx, q)
 	if q.Dimension == "" {
 		q.Dimension = DimensionDevice
 	}
@@ -905,6 +913,14 @@ func (a *Aggregator) queryProductTable(ctx context.Context, table string, q Quer
 	}
 	if len(q.Technologies) > 0 {
 		where = append(where, fmt.Sprintf("d.technology = ANY(%s)", add(q.Technologies)))
+	}
+	if len(q.Weekdays) > 0 && len(q.Weekdays) < 7 {
+		where = append(where, fmt.Sprintf("EXTRACT(dow FROM (m.start_time AT TIME ZONE %s))::int = ANY(%s)",
+			add(calendarfilter.NormalizeName(q.CalendarTimezone)), add(q.Weekdays)))
+	}
+	if len(q.Hours) > 0 && len(q.Hours) < 24 {
+		where = append(where, fmt.Sprintf("EXTRACT(hour FROM (m.start_time AT TIME ZONE %s))::int = ANY(%s)",
+			add(calendarfilter.NormalizeName(q.CalendarTimezone)), add(q.Hours)))
 	}
 	// #64 设备组数据权限：JOIN devices 后按 m.device_sn 收口到可见分组（fail-closed）。
 	where = appendVisibleSNWhere(where, "m.device_sn", q.VisibleGroups, add)
@@ -1145,6 +1161,14 @@ func (a *Aggregator) queryBandTable(ctx context.Context, table string, q QueryRe
 	if len(q.Technologies) > 0 {
 		where = append(where, fmt.Sprintf("d.technology = ANY(%s)", add(q.Technologies)))
 	}
+	if len(q.Weekdays) > 0 && len(q.Weekdays) < 7 {
+		where = append(where, fmt.Sprintf("EXTRACT(dow FROM (m.start_time AT TIME ZONE %s))::int = ANY(%s)",
+			add(calendarfilter.NormalizeName(q.CalendarTimezone)), add(q.Weekdays)))
+	}
+	if len(q.Hours) > 0 && len(q.Hours) < 24 {
+		where = append(where, fmt.Sprintf("EXTRACT(hour FROM (m.start_time AT TIME ZONE %s))::int = ANY(%s)",
+			add(calendarfilter.NormalizeName(q.CalendarTimezone)), add(q.Hours)))
+	}
 	// #64 设备组数据权限：JOIN devices 后按 m.device_sn 收口到可见分组（fail-closed）。
 	where = appendVisibleSNWhere(where, "m.device_sn", q.VisibleGroups, add)
 	whereSQL := ""
@@ -1356,11 +1380,14 @@ func applyScalarFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
 		qb = qb.Where(sq.Lt{"time": q.EndTime})
 	}
 	// #599：星期/小时段后端过滤（全选/空 = 不加条件，向后兼容）。
+	// 按系统时区转成本地钟面后再判断，避免数据库会话时区把 +08 桶误判成 UTC 前一天/前一小时。
 	if len(q.Weekdays) > 0 && len(q.Weekdays) < 7 {
-		qb = qb.Where("EXTRACT(dow FROM start_time)::int = ANY(?)", q.Weekdays)
+		qb = qb.Where(calendarfilter.ExtractDOWPredicate("start_time"),
+			calendarfilter.NormalizeName(q.CalendarTimezone), q.Weekdays)
 	}
 	if len(q.Hours) > 0 && len(q.Hours) < 24 {
-		qb = qb.Where("EXTRACT(hour FROM start_time)::int = ANY(?)", q.Hours)
+		qb = qb.Where(calendarfilter.ExtractHourPredicate("start_time"),
+			calendarfilter.NormalizeName(q.CalendarTimezone), q.Hours)
 	}
 	// #619：测量对象（object_ldn）后端过滤（空 = 不过滤，向后兼容）。
 	if len(q.ObjectLDNs) > 0 {
