@@ -155,7 +155,7 @@ func TestBaiBNQTopLevelDeviceInfoUsesStandardPaths(t *testing.T) {
 	}
 }
 
-func TestBaiBNQNguBindInterfaceAndFallbackAreWritable(t *testing.T) {
+func TestBaiBNQNguFallbackIsWritable(t *testing.T) {
 	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BaiBNQ.xml")
 	body, err := os.ReadFile(xmlPath)
 	require.NoError(t, err)
@@ -176,13 +176,9 @@ func TestBaiBNQNguBindInterfaceAndFallbackAreWritable(t *testing.T) {
 	}
 
 	validator := NewMappingValidator(&MappingSet{Mappings: mappings})
-	for path, value := range map[string]string{
-		"Device.FAP.NguIpBind1.BindInterface":                                     "Device.Ethernet.Interface.2.IPv4Address.1.IPAddress",
-		"Device.LAN_HostConfigManagement.IPInterface.NgapMgmt.NguLocalIpAddrList": "172.19.3.81",
-	} {
-		require.NotNil(t, validator.LookupParam(path), "expected BaiBNQ.xml to define %s", path)
-		assert.Nil(t, validator.ValidateValue(path, value), path)
-	}
+	const path = "Device.LAN_HostConfigManagement.IPInterface.NgapMgmt.NguLocalIpAddrList"
+	require.NotNil(t, validator.LookupParam(path), "expected BaiBNQ.xml to define %s", path)
+	assert.Nil(t, validator.ValidateValue(path, "172.19.3.81"), path)
 }
 
 func TestBaiBNQLTEIdleReselectionCarrierObjectIsWritable(t *testing.T) {

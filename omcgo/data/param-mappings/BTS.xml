@@ -1,5 +1,5 @@
 <?xml version="1.0" ?>
-<parameterModel paramModel="BTS" totalEntries="279">
+<parameterModel paramModel="BTS" totalEntries="274">
     <objects>
         <object name="Device.FaultMgmt.CurrentAlarm." standardPath="Device.FaultMgmt.CurrentAlarm." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.FaultMgmt.ExpeditedEvent." standardPath="Device.FaultMgmt.ExpeditedEvent." access="READ_ONLY" changeApplies="Immediate"/>
@@ -28,7 +28,6 @@
         <param name="Device.FAP.GPS.altidute" standardPath="Device.DeviceInfo.AntennaInfo.Height" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="10"/>
         <param name="Device.FaultMgmt.CurrentAlarm.{i}.AdditionalInformation" standardPath="Device.FaultMgmt.CurrentAlarm.{i}.AdditionalInformation" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="256"/>
         <param name="Device.FaultMgmt.CurrentAlarm.{i}.AdditionalText" standardPath="Device.FaultMgmt.CurrentAlarm.{i}.AdditionalText" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="256"/>
-        <param name="Device.FaultMgmt.CurrentAlarm.{i}.AlarmChangedTime" standardPath="Device.FaultMgmt.CurrentAlarm.{i}.AlarmChangedTime" access="READ_ONLY" type="DATE_TIME" changeApplies="Immediate"/>
         <param name="Device.FaultMgmt.CurrentAlarm.{i}.AlarmIdentifier" standardPath="Device.FaultMgmt.CurrentAlarm.{i}.AlarmIdentifier" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64"/>
         <param name="Device.FaultMgmt.CurrentAlarm.{i}.AlarmRaisedTime" standardPath="Device.FaultMgmt.CurrentAlarm.{i}.AlarmRaisedTime" access="READ_ONLY" type="DATE_TIME" changeApplies="Immediate"/>
         <param name="Device.FaultMgmt.CurrentAlarm.{i}.EventType" standardPath="Device.FaultMgmt.CurrentAlarm.{i}.EventType" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64"/>
@@ -279,9 +278,5 @@
         <param name="Device.DeviceInfo.WAN_CONFIG9_V6_IPADDR" standardPath="Device.DeviceInfo.WAN_CONFIG9_V6_IPADDR" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.WAN_CONFIG9_V6_PREFIX" standardPath="Device.DeviceInfo.WAN_CONFIG9_V6_PREFIX" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="128"/>
         <param name="Device.DeviceInfo.WAN_CONFIG9_VLAN" standardPath="Device.DeviceInfo.WAN_CONFIG9_VLAN" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="4094"/>
-        <param name="DeviceGSM.BscSelect" standardPath="DeviceGSM.BscSelect" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="0,1" enumLabels="Master,Backup" defaultValue="0"/>
-        <param name="DeviceGSM.IpaUnitId" standardPath="DeviceGSM.IpaUnitId" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="16" defaultValue="0-0" validationPattern="/^([0-9]{1,4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])-(25[0-5]|2[0-4][0-9]|[01]?[0-9]{1,2})$/"/>
-        <param name="DeviceGSM.OmlRemoteIp" standardPath="DeviceGSM.OmlRemoteIp" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="256" defaultValue="0.0.0.0" validationPattern="/^(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/"/>
-        <param name="DeviceGSM.OmlRemoteIpBak" standardPath="DeviceGSM.OmlRemoteIpBak" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="256" validationPattern="/^(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/"/>
     </parameters>
 </parameterModel>
