@@ -3,6 +3,7 @@ package stream
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	_ "embed"
 	"encoding/base64"
 	"encoding/hex"
@@ -49,6 +50,14 @@ type WindowState struct {
 	SourceReceivedSlots   int64
 	SourceIncompleteSlots int64
 	Accumulators          []Accumulator
+	Entities              map[string]EntityCompleteness
+}
+
+type EntityCompleteness struct {
+	ReceivedSlots         int64
+	SourceExpectedSlots   int64
+	SourceReceivedSlots   int64
+	SourceIncompleteSlots int64
 }
 
 type RedisWindowStore struct {
@@ -106,7 +115,8 @@ func (s *RedisWindowStore) Accumulate(
 	if err := contribution.Validate(); err != nil {
 		return AccumulateResult{}, err
 	}
-	keys := redisKeys(contribution.Key)
+	shardCount := windowShardCount(contribution.ExpectedSlots, contribution.Key.Granularity)
+	keys := redisKeys(contribution.Key, shardCount)
 	args := []any{
 		contribution.SourceFileID,
 		contribution.DeviceID + "|" + contribution.SlotStart.UTC().Format(time.RFC3339Nano),
@@ -120,21 +130,35 @@ func (s *RedisWindowStore) Accumulate(
 		contribution.SourceIncompleteSlots,
 		contribution.RollupChunkIndex,
 		contribution.RollupChunkCount,
+		shardCount,
 	}
 	for _, value := range contribution.Values {
 		encoded, err := encodeDefinition(value)
 		if err != nil {
 			return AccumulateResult{}, err
 		}
+		definitionID, err := accumulatorDefinitionID(value)
+		if err != nil {
+			return AccumulateResult{}, err
+		}
+		entityKey := aggregationGroupKey(value)
+		if entityKey == "" {
+			entityKey = contribution.DeviceID
+		}
+		shard := windowShard(entityKey, shardCount)
 		sum, count, minValue, maxValue := value.Value, int64(1), value.Value, value.Value
 		if value.Composed {
 			sum, count, minValue, maxValue = value.Sum, value.Count, value.Min, value.Max
 		}
-		args = append(args, encoded, sum, count, minValue, maxValue)
+		args = append(args, definitionID, encoded, shard, sum, count, minValue, maxValue)
+	}
+	scriptKeys := []string{keys.seen, keys.slots, keys.meta, keys.entityMeta, keys.chunks}
+	for shard := 0; shard < shardCount; shard++ {
+		scriptKeys = append(scriptKeys, keys.acc[shard], keys.defs[shard])
 	}
 	raw, err := accumulateScript.Run(
 		ctx, s.client,
-		[]string{keys.seen, keys.slots, keys.meta, keys.acc, keys.chunks},
+		scriptKeys,
 		args...,
 	).Slice()
 	if err != nil {
@@ -168,23 +192,63 @@ func boolInt(value bool) int {
 }
 
 func (s *RedisWindowStore) Read(ctx context.Context, key WindowKey) (WindowState, error) {
-	keys := redisKeys(key)
-	pipe := s.client.Pipeline()
-	metaCmd := pipe.HGetAll(ctx, keys.meta)
-	accCmd := pipe.HGetAll(ctx, keys.acc)
-	if _, err := pipe.Exec(ctx); err != nil {
-		return WindowState{}, fmt.Errorf("read PM aggregation Redis window: %w", err)
+	rootKeys := redisKeys(key, 1)
+	meta, err := s.client.HMGet(
+		ctx, rootKeys.meta,
+		"expected_slots", "received_slots", "source_expected_slots",
+		"source_received_slots", "source_incomplete_slots", "shard_count",
+	).Result()
+	if err != nil {
+		return WindowState{}, fmt.Errorf("read PM aggregation Redis window metadata: %w", err)
 	}
-	meta := metaCmd.Val()
-	if len(meta) == 0 {
+	if len(meta) != 6 || meta[0] == nil {
 		return WindowState{}, redis.Nil
 	}
-	state := WindowState{}
-	state.ExpectedSlots, _ = strconv.ParseInt(meta["expected_slots"], 10, 64)
-	state.ReceivedSlots, _ = strconv.ParseInt(meta["received_slots"], 10, 64)
-	state.SourceExpectedSlots, _ = strconv.ParseInt(meta["source_expected_slots"], 10, 64)
-	state.SourceReceivedSlots, _ = strconv.ParseInt(meta["source_received_slots"], 10, 64)
-	state.SourceIncompleteSlots, _ = strconv.ParseInt(meta["source_incomplete_slots"], 10, 64)
+	state := WindowState{Entities: make(map[string]EntityCompleteness)}
+	state.ExpectedSlots = parseRedisInt(meta[0])
+	state.ReceivedSlots = parseRedisInt(meta[1])
+	state.SourceExpectedSlots = parseRedisInt(meta[2])
+	state.SourceReceivedSlots = parseRedisInt(meta[3])
+	state.SourceIncompleteSlots = parseRedisInt(meta[4])
+	shardCount := int(parseRedisInt(meta[5]))
+	if shardCount <= 0 || shardCount > maxWindowShards {
+		shardCount = 1
+	}
+	keys := redisKeys(key, shardCount)
+	var entityCursor uint64
+	for {
+		entityFields, next, scanErr := s.client.HScan(
+			ctx, keys.entityMeta, entityCursor, "", 1000,
+		).Result()
+		if scanErr != nil {
+			return WindowState{}, fmt.Errorf("scan PM aggregation entity completeness: %w", scanErr)
+		}
+		for index := 0; index+1 < len(entityFields); index += 2 {
+			field, raw := entityFields[index], entityFields[index+1]
+			suffixIndex := strings.LastIndexByte(field, '|')
+			if suffixIndex <= 0 {
+				continue
+			}
+			entityID, suffix := field[:suffixIndex], field[suffixIndex+1:]
+			item := state.Entities[entityID]
+			value, _ := strconv.ParseInt(raw, 10, 64)
+			switch suffix {
+			case "received":
+				item.ReceivedSlots = value
+			case "source_expected":
+				item.SourceExpectedSlots = value
+			case "source_received":
+				item.SourceReceivedSlots = value
+			case "source_incomplete":
+				item.SourceIncompleteSlots = value
+			}
+			state.Entities[entityID] = item
+		}
+		entityCursor = next
+		if entityCursor == 0 {
+			break
+		}
+	}
 
 	type partial struct {
 		def   ContributionValue
@@ -194,30 +258,79 @@ func (s *RedisWindowStore) Read(ctx context.Context, key WindowKey) (WindowState
 		max   float64
 	}
 	values := make(map[string]*partial)
-	for field, raw := range accCmd.Val() {
-		index := strings.LastIndexByte(field, '|')
-		if index <= 0 {
-			continue
-		}
-		base, suffix := field[:index], field[index+1:]
-		item := values[base]
-		if item == nil {
-			def, err := decodeDefinition(base)
-			if err != nil {
-				return WindowState{}, err
+	for shard := 0; shard < shardCount; shard++ {
+		var cursor uint64
+		for {
+			fields, next, scanErr := s.client.HScan(
+				ctx, keys.acc[shard], cursor, "", 1000,
+			).Result()
+			if scanErr != nil {
+				return WindowState{}, fmt.Errorf(
+					"scan PM aggregation Redis window shard %d: %w", shard, scanErr,
+				)
 			}
-			item = &partial{def: def}
-			values[base] = item
-		}
-		switch suffix {
-		case "sum":
-			item.sum, _ = strconv.ParseFloat(raw, 64)
-		case "count":
-			item.count, _ = strconv.ParseInt(raw, 10, 64)
-		case "min":
-			item.min, _ = strconv.ParseFloat(raw, 64)
-		case "max":
-			item.max, _ = strconv.ParseFloat(raw, 64)
+			missingDefinitions := make([]string, 0)
+			missingSet := make(map[string]struct{})
+			for index := 0; index+1 < len(fields); index += 2 {
+				field := fields[index]
+				suffixIndex := strings.LastIndexByte(field, '|')
+				if suffixIndex <= 0 {
+					continue
+				}
+				base := field[:suffixIndex]
+				if values[base] == nil {
+					if _, exists := missingSet[base]; !exists {
+						missingSet[base] = struct{}{}
+						missingDefinitions = append(missingDefinitions, base)
+					}
+				}
+			}
+			if len(missingDefinitions) > 0 {
+				definitions, getErr := s.client.HMGet(
+					ctx, keys.defs[shard], missingDefinitions...,
+				).Result()
+				if getErr != nil {
+					return WindowState{}, fmt.Errorf(
+						"read PM aggregation accumulator definitions: %w", getErr,
+					)
+				}
+				for index, base := range missingDefinitions {
+					if definitions[index] == nil {
+						return WindowState{}, fmt.Errorf(
+							"PM aggregation accumulator definition %s is missing", base,
+						)
+					}
+					encoded := fmt.Sprint(definitions[index])
+					def, decodeErr := decodeDefinition(encoded)
+					if decodeErr != nil {
+						return WindowState{}, decodeErr
+					}
+					values[base] = &partial{def: def}
+				}
+			}
+			for index := 0; index+1 < len(fields); index += 2 {
+				field, raw := fields[index], fields[index+1]
+				suffixIndex := strings.LastIndexByte(field, '|')
+				if suffixIndex <= 0 {
+					continue
+				}
+				base, suffix := field[:suffixIndex], field[suffixIndex+1:]
+				item := values[base]
+				switch suffix {
+				case "sum":
+					item.sum, _ = strconv.ParseFloat(raw, 64)
+				case "count":
+					item.count, _ = strconv.ParseInt(raw, 10, 64)
+				case "min":
+					item.min, _ = strconv.ParseFloat(raw, 64)
+				case "max":
+					item.max, _ = strconv.ParseFloat(raw, 64)
+				}
+			}
+			cursor = next
+			if cursor == 0 {
+				break
+			}
 		}
 	}
 	for _, item := range values {
@@ -226,6 +339,32 @@ func (s *RedisWindowStore) Read(ctx context.Context, key WindowKey) (WindowState
 		})
 	}
 	return state, nil
+}
+
+func parseRedisInt(value any) int64 {
+	switch typed := value.(type) {
+	case string:
+		parsed, _ := strconv.ParseInt(typed, 10, 64)
+		return parsed
+	case []byte:
+		parsed, _ := strconv.ParseInt(string(typed), 10, 64)
+		return parsed
+	case int64:
+		return typed
+	default:
+		return 0
+	}
+}
+
+// Exists checks only the bounded window metadata. Recovery must not deserialize
+// the accumulator payload merely to decide whether replay is necessary.
+func (s *RedisWindowStore) Exists(ctx context.Context, key WindowKey) (bool, error) {
+	keys := redisKeys(key, 1)
+	exists, err := s.client.Exists(ctx, keys.meta).Result()
+	if err != nil {
+		return false, fmt.Errorf("check PM aggregation Redis window metadata: %w", err)
+	}
+	return exists > 0, nil
 }
 
 type Lock struct {
@@ -239,7 +378,7 @@ func (s *RedisWindowStore) TryFinalizeLock(
 	key WindowKey,
 	ttl time.Duration,
 ) (*Lock, error) {
-	keys := redisKeys(key)
+	keys := redisKeys(key, 1)
 	tokenBytes := make([]byte, 16)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		return nil, fmt.Errorf("generate PM aggregation lock token: %w", err)
@@ -266,28 +405,54 @@ func (l *Lock) Release(ctx context.Context) error {
 }
 
 func (s *RedisWindowStore) Delete(ctx context.Context, key WindowKey) error {
-	keys := redisKeys(key)
-	if err := s.client.Del(ctx, keys.seen, keys.slots, keys.meta, keys.acc, keys.chunks).Err(); err != nil {
+	rootKeys := redisKeys(key, 1)
+	shardCountValue, err := s.client.HGet(ctx, rootKeys.meta, "shard_count").Int()
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return fmt.Errorf("read PM aggregation shard count before delete: %w", err)
+	}
+	if shardCountValue <= 0 || shardCountValue > maxWindowShards {
+		shardCountValue = 1
+	}
+	keys := redisKeys(key, shardCountValue)
+	deleteKeys := []string{
+		keys.seen, keys.slots, keys.meta, keys.entityMeta, keys.chunks, keys.lock,
+	}
+	deleteKeys = append(deleteKeys, keys.acc...)
+	deleteKeys = append(deleteKeys, keys.defs...)
+	if err := s.client.Del(ctx, deleteKeys...).Err(); err != nil {
 		return fmt.Errorf("delete PM aggregation Redis window: %w", err)
 	}
 	return nil
 }
 
 type windowRedisKeys struct {
-	seen, slots, meta, acc, chunks, lock string
+	seen, slots, meta, entityMeta, chunks, lock string
+	acc, defs                                   []string
 }
 
-func redisKeys(key WindowKey) windowRedisKeys {
+func redisKeys(key WindowKey, shardCount int) windowRedisKeys {
+	if shardCount <= 0 {
+		shardCount = 1
+	}
+	entityHash := sha256.Sum256([]byte(key.EntityKey))
 	tag := fmt.Sprintf(
-		"{%s:%s:%d}",
+		"{%s:%s:%d:%s}",
 		key.TaskVersionID.String(), key.Granularity, key.Start.UTC().Unix(),
+		hex.EncodeToString(entityHash[:8]),
 	)
 	prefix := "pmagg:" + tag
-	return windowRedisKeys{
+	keys := windowRedisKeys{
 		seen: prefix + ":seen", slots: prefix + ":slots",
-		meta: prefix + ":meta", acc: prefix + ":acc",
+		meta: prefix + ":meta", entityMeta: prefix + ":entities",
 		chunks: prefix + ":chunks", lock: prefix + ":finalize-lock",
 	}
+	keys.acc = make([]string, shardCount)
+	keys.defs = make([]string, shardCount)
+	for shard := 0; shard < shardCount; shard++ {
+		keys.acc[shard] = fmt.Sprintf("%s:acc:%03d", prefix, shard)
+		keys.defs[shard] = fmt.Sprintf("%s:defs:%03d", prefix, shard)
+	}
+	return keys
 }
 
 func encodeDefinition(value ContributionValue) (string, error) {

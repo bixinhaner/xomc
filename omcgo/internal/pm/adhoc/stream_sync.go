@@ -383,10 +383,12 @@ func (r *PgRepository) resolveDeviceGroupMembers(
 	task *Task,
 ) ([]pmstream.TaskMember, error) {
 	builder := storage.Psql.Select(
-		"d.id", "d.serial_number", "g.id", "g.name",
-	).From("device_group_members gm").
-		Join("devices d ON d.id = gm.device_id").
-		Join("device_groups g ON g.id = gm.group_id").
+		"d.id", "d.serial_number",
+		"COALESCE(g.id, '00000000-0000-4000-8000-000000000001'::uuid)",
+		"COALESCE(g.name, '未分组设备')",
+	).From("devices d").
+		LeftJoin("device_group_members gm ON gm.device_id = d.id").
+		LeftJoin("device_groups g ON g.id = gm.group_id").
 		Where("d.deleted_at IS NULL")
 	if task.Technology != "" {
 		builder = builder.Where(sq.Eq{"d.technology": task.Technology})

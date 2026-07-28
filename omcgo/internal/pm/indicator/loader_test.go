@@ -133,6 +133,7 @@ func TestStatisDurationAndCellAvailabilityRegistered(t *testing.T) {
 	cases := []struct {
 		tech       string
 		files      []string
+		serviceID  string
 		durationID string
 		availID    string
 		availArith string // 期望小区可用率公式（arithmetic，C 编号口径）
@@ -140,6 +141,7 @@ func TestStatisDurationAndCellAvailabilityRegistered(t *testing.T) {
 		{
 			tech:       "4G/ENB",
 			files:      []string{"enb/BLX.xml", "enb/BM.xml", "enb/MLQ.xml", "enb/BLQ.xml", "enb/MLN.xml"},
+			serviceID:  "C000060216",
 			durationID: "C000060273",
 			availID:    "K900010076",
 			availArith: "C000060216/C000060273*100",
@@ -147,21 +149,30 @@ func TestStatisDurationAndCellAvailabilityRegistered(t *testing.T) {
 		{
 			tech:       "5G/GNB",
 			files:      []string{"GNB.xml"},
+			serviceID:  "C010120026",
 			durationID: "C010120025",
 			availID:    "KGNB0570",
-			availArith: "OTHER.CellServiceTime/C010120025*100",
+			availArith: "C010120026/C010120025*100",
 		},
 		{
 			tech:       "GSM",
 			files:      []string{"GSM.xml"},
+			serviceID:  "CGSM0080002",
 			durationID: "CGSM0080001",
 			availID:    "KGSM0143",
-			availArith: "OTHER.CellServiceTime/CGSM0080001*100",
+			availArith: "CGSM0080002/CGSM0080001*100",
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.tech, func(t *testing.T) {
 			docs := parseLibFiles(t, c.files...)
+
+			// 在服时长：原始 PM Counter 必须有编号元数据，流式 KPI 才能严格解析依赖。
+			service, ok := findIndicatorByID(docs, c.serviceID)
+			require.True(t, ok, "%s 在服时长 %s 应登记", c.tech, c.serviceID)
+			assert.Equal(t, "1", service.IsCounter, "在服时长应为计数器")
+			assert.Equal(t, "sum", service.StatisType, "在服时长应累加")
+			assert.Equal(t, "OTHER.CellServiceTime", service.ReportKey)
 
 			// 统计时长：计数器 + sum + 合成（reportKey=OTHER.StatisDuration）。
 			dur, ok := findIndicatorByID(docs, c.durationID)

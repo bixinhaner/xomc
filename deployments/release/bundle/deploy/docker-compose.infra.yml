@@ -152,6 +152,9 @@ services:
     volumes:
       - ${TSDB_DATA_PATH:-tsdbdata}:/var/lib/postgresql/data
       - /etc/localtime:/etc/localtime:ro
+    # PostgreSQL parallel worker 的动态共享内存使用 /dev/shm；Docker 默认 64 MiB
+    # 容易在并行查询扩容时触发 SQLSTATE 53100。查询侧已轻量化，此处作为兜底。
+    shm_size: ${TSDB_SHM_SIZE:-512m}
     networks:
       - omcgo-net
     healthcheck:

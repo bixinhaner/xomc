@@ -118,6 +118,7 @@ type PgRepository struct {
 type streamingTaskRepository interface {
 	Save(context.Context, pmstream.SaveTaskRequest) (*pmstream.TaskVersionSnapshot, error)
 	Delete(context.Context, uuid.UUID) error
+	PurgeObsoleteBuiltinDeviceTasks(context.Context) (int, error)
 }
 
 // NewPgRepository 创建 PgRepository。

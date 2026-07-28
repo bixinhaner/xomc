@@ -17,6 +17,7 @@ type Window struct {
 type WindowKey struct {
 	TaskID        uuid.UUID
 	TaskVersionID uuid.UUID
+	EntityKey     string
 	Granularity   Granularity
 	Start         time.Time
 	End           time.Time
@@ -47,11 +48,4 @@ func WindowFor(slotStart time.Time, granularity Granularity, location *time.Loca
 		return Window{}, fmt.Errorf("unsupported PM aggregation granularity %q", granularity)
 	}
 	return Window{Start: start.UTC(), End: end.UTC()}, nil
-}
-
-func expectedSlots(window Window, memberCount int) int64 {
-	if memberCount <= 0 {
-		return 0
-	}
-	return int64(window.End.Sub(window.Start)/slotDuration) * int64(memberCount)
 }

@@ -95,4 +95,11 @@ type TaskVersionSnapshot struct {
 	Metrics       map[string]MetricRule
 	Counters      map[string]CounterRule
 	Members       map[uuid.UUID][]TaskMember
+	// DevicePipeline marks a synthetic catalog-backed version used by the
+	// fixed raw-to-hour device pipeline. Each definition has an immutable ID.
+	DevicePipeline bool
+	// DeviceRollup marks the stable hour-to-day-to-week/month lineage. It is
+	// indexed only by version ID and never matches raw PM events directly.
+	DeviceRollup    bool
+	RollupVersionID uuid.UUID
 }
