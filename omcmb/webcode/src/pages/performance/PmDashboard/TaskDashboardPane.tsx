@@ -291,7 +291,6 @@ export default function TaskDashboardPane({ taskId }: Props) {
         >
           <Space size={8} wrap>
             <Typography.Text strong>{displayAdhocTaskName(task, labelForTechnology)}</Typography.Text>
-            {task.technology && <Tag color="geekblue">{labelForTechnology(task.technology)}</Tag>}
             <Tag color="purple">
               {task.mode === 'continuous'
                 ? intl.formatMessage({ id: 'perf.dashboard.modeContinuous' })
