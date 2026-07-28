@@ -50,6 +50,135 @@ export interface MetricChart {
   compareBucketEnds?: string[];
 }
 
+export interface MetricSeriesIdentity {
+  key: string;
+  name: string;
+}
+
+export interface TrustedSeriesSources {
+  deviceSns?: string[];
+  objectLdns?: string[];
+  filterOptions?: Array<{ value: string; label: string }>;
+  selectedKeys?: string[];
+}
+
+export interface SeriesLabelPrefixes {
+  network: string;
+  band: string;
+  deviceGroup: string;
+  product: string;
+  aggregateGroup: string;
+}
+
+function trustedSeriesLabelOf(
+  key: string,
+  dimension: AdhocDimension,
+  labels: SeriesLabelPrefixes,
+  name?: string,
+): string {
+  switch (dimension) {
+    case 'network':
+      return labels.network;
+    case 'device':
+      return key;
+    case 'band': {
+      const value = key.startsWith('Band=') ? key.slice('Band='.length) : key;
+      return `${labels.band} ${value}`;
+    }
+    case 'device_group': {
+      if (name) return `${labels.deviceGroup} ${name}`;
+      const value = key.startsWith('DeviceGroup=')
+        ? key.slice('DeviceGroup='.length)
+        : key;
+      return `${labels.deviceGroup} ${value.slice(0, 8)}`;
+    }
+    case 'product':
+      if (name) {
+        return name.startsWith(`${labels.product} `) ? name : `${labels.product} ${name}`;
+      }
+      return `${labels.product} ${key.slice(0, 8)}`;
+    case 'aggregate_group':
+      return `${labels.aggregateGroup} ${key}`;
+    default:
+      return key;
+  }
+}
+
+/**
+ * #198：为“完全无结果”的图卡派生系列身份。
+ *
+ * 仅使用任务配置或 filter-options 这类可信骨架；无法确定身份时返回空数组，
+ * 禁止用 __unknown__ 之类的假系列冒充真实对象。
+ */
+export function buildTrustedSeriesIdentities(
+  dimension: AdhocDimension,
+  sources: TrustedSeriesSources,
+  labels: SeriesLabelPrefixes,
+): MetricSeriesIdentity[] {
+  if (dimension === 'network') {
+    return [{
+      key: '__network__',
+      name: trustedSeriesLabelOf('__network__', dimension, labels),
+    }];
+  }
+
+  let entries: Array<{ key: string; label?: string }>;
+  if (dimension === 'device') {
+    entries = (sources.deviceSns ?? []).map((key) => ({ key }));
+  } else if (dimension === 'aggregate_group') {
+    entries = (sources.objectLdns ?? []).map((key) => ({ key }));
+  } else {
+    const selected = new Set(sources.selectedKeys ?? []);
+    entries = (sources.filterOptions ?? [])
+      .filter((option) => selected.size === 0 || selected.has(option.value))
+      .map((option) => ({ key: option.value, label: option.label }));
+  }
+
+  const seen = new Set<string>();
+  return entries.flatMap(({ key, label }) => {
+    if (!key || seen.has(key)) return [];
+    seen.add(key);
+    return [{
+      key,
+      name: trustedSeriesLabelOf(key, dimension, labels, label),
+    }];
+  });
+}
+
+/**
+ * #198：任务配置是图卡全集的可信骨架，结果行只负责提供真实点。
+ *
+ * 某个 metric_path 在当前筛选/粒度完全没有结果行时，仍按任务配置生成空图卡；
+ * series 只保留身份且 values 为空，后续扩轴统一补 '-'，这里绝不制造 0 或结果行。
+ */
+export function ensureConfiguredMetricCharts(
+  charts: MetricChart[],
+  metricPaths: string[] | undefined,
+  seriesIdentities: MetricSeriesIdentity[],
+): MetricChart[] {
+  if (!metricPaths || metricPaths.length === 0) return charts;
+  const byMetric = new Map(charts.map((chart) => [chart.metricPath, chart]));
+  const seen = new Set<string>();
+  const out: MetricChart[] = [];
+  metricPaths.forEach((metricPath) => {
+    if (seen.has(metricPath)) return;
+    seen.add(metricPath);
+    const chart = byMetric.get(metricPath);
+    if (chart) {
+      out.push(chart);
+      return;
+    }
+    out.push({
+      metricPath,
+      displayName: metricPath,
+      buckets: [],
+      bucketEnds: [],
+      series: seriesIdentities.map(({ key, name }) => ({ key, name, values: [] })),
+    });
+  });
+  return out;
+}
+
 /**
  * 派生系列键：图内据此分多条线。维度决定取哪个字段。
  * network 维度恒为单线，返回固定键 '__network__'。
