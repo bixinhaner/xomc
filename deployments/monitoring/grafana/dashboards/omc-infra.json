@@ -197,6 +197,17 @@
         {"expr": "minio_node_ilm_expiry_pending_tasks", "legendFormat": "ILM pending"}
       ],
       "fieldConfig": {"defaults": {"unit": "short", "min": 0}}
+    },
+    {
+      "title": "NATS JetStream 积压",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 52},
+      "targets": [
+        {"expr": "omc_nats_consumer_pending", "legendFormat": "{{stream}}/{{durable}} pending"},
+        {"expr": "omc_nats_consumer_ack_pending", "legendFormat": "{{stream}}/{{durable}} ack pending"},
+        {"expr": "omc_nats_consumer_oldest_age_seconds", "legendFormat": "{{stream}}/{{durable}} oldest age"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}}
     }
   ],
   "refresh": "30s",

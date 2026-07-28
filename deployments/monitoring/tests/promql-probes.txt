@@ -42,9 +42,13 @@ Expected: per-container working set bytes. NO-DATA means cAdvisor/container disc
 minio_cluster_capacity_usable_free_bytes
 Expected: usable free bytes. NO-DATA means MinIO metrics are unavailable; zero is a real full-capacity condition.
 
-## NATS JetStream / PM transport (MUST-HAVE after the PM consumer exists)
-nats_jetstream_consumer_num_pending{stream="omcgo"}
-Expected: pending messages by consumer. ZERO means an empty consumer backlog; NO-DATA means NATS metrics or the consumer are unavailable.
+## NATS JetStream / PM transport (MUST-HAVE after the observer and PM consumer exist)
+omc_nats_consumer_pending{stream="omcgo",durable="pm-workers"}
+Expected: OMC observer pending messages by fixed stream/durable. ZERO means an empty consumer backlog; NO-DATA means the observer or consumer is unavailable.
+
+## NATS observer failures (MUST-HAVE after the observer starts)
+increase(omc_nats_observer_failures_total[5m])
+Expected: observer query failures in the last five minutes. ZERO means successful observation; NO-DATA means observer telemetry is unavailable.
 
 ## Redis (MUST-HAVE after otelcol Redis receiver is connected)
 redis_memory_used_bytes
