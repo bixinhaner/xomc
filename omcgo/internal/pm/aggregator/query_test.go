@@ -230,7 +230,33 @@ func Test_buildDeviceTableSQL_PageByPivotRowSkeletonPagesKeysWithoutMetricFilter
 	pageKeySQL := sql[pageKeysAt:]
 	assert.NotContains(t, pageKeySQL, "metric_path IN")
 	assert.NotContains(t, pageKeySQL, "metric_type =")
+	assert.Contains(t, pageKeySQL, "FROM pm_measurement_anchors a")
+	assert.Contains(t, pageKeySQL, "JOIN device_dim dev ON dev.id = a.device_dim_id")
+	assert.NotContains(t, pageKeySQL, "FROM pm_metrics ")
+	assert.NotContains(t, pageKeySQL, "pm_metric_dictionary")
+	assert.NotContains(t, pageKeySQL, "pm_metric_values")
 	assert.Equal(t, 1, args[len(args)-1])
+}
+
+func Test_buildDeviceTableSQL_RolledUpPivotSkeletonReadsAggregationResults(t *testing.T) {
+	sql, _, err := buildDeviceTableSQL("pm_metrics_daily", QueryRequest{
+		Granularity:    metrics.GranularityDaily,
+		DeviceSNs:      []string{"SN-1"},
+		MetricPaths:    []string{"K1"},
+		ObjectLDNs:     []string{"Cellid=1,PLMN=46000"},
+		StartTime:      time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+		EndTime:        time.Date(2026, 7, 8, 0, 0, 0, 0, time.UTC),
+		PageByPivotRow: true,
+		Limit:          10,
+	})
+	require.NoError(t, err)
+
+	pageKeysAt := strings.Index(sql, "page_keys AS")
+	require.NotEqual(t, -1, pageKeysAt)
+	pageKeySQL := sql[pageKeysAt:]
+	assert.Contains(t, pageKeySQL, "FROM pm_aggregation_results r")
+	assert.Contains(t, pageKeySQL, "dimension =")
+	assert.NotContains(t, pageKeySQL, "FROM pm_metrics_daily")
 }
 
 func Test_SelectTable_UnknownGranularity(t *testing.T) {

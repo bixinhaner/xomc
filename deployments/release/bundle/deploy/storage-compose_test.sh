@@ -72,6 +72,8 @@ contains "开发 NATS 默认命名卷" '${NATS_DATA_PATH:-natsdata}:/data' "$DEV
 contains "开发 MinIO 默认命名卷" '${MINIO_DATA_PATH:-miniodata}:/data' "$DEV_COMPOSE"
 
 echo "── 过载保护配置 ──"
+contains "release TimescaleDB 共享内存兜底" 'shm_size: ${TSDB_SHM_SIZE:-512m}' "$RELEASE_COMPOSE"
+contains "开发 TimescaleDB 共享内存兜底" 'shm_size: ${TSDB_SHM_SIZE:-512m}' "$DEV_COMPOSE"
 contains "release NATS 内存存储上限" 'max_memory_store: ${NATS_MAX_MEMORY_STORE:-134217728}' "$RELEASE_COMPOSE"
 contains "开发 NATS 内存存储上限" 'max_memory_store: ${NATS_MAX_MEMORY_STORE:-134217728}' "$DEV_COMPOSE"
 contains "release NATS 大积压恢复宽限" 'start_period: 5m' "$RELEASE_COMPOSE"
@@ -81,7 +83,7 @@ contains "本地 ACS access log 默认关闭" 'access_log off; # ACS 高频请�
 contains "ACS 请求体不落临时文件" 'proxy_request_buffering off;' "$NGINX_DEFAULT"
 contains "本地 ACS 请求体不落临时文件" 'proxy_request_buffering off;' "$NGINX_LOCAL"
 contains "release MinIO scanner 降速" 'MINIO_SCANNER_SPEED: "slow"' "$RELEASE_COMPOSE"
-contains "开发 MinIO scanner 降速" 'MINIO_SCANNER_SPEED: "slow"' "$DEV_COMPOSE"
+contains "开发 MinIO scanner 最低速" 'MINIO_SCANNER_SPEED: "slowest"' "$DEV_COMPOSE"
 contains "release Redis AOF 基线增大" '--auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500' "$RELEASE_COMPOSE"
 contains "开发 Redis AOF 基线增大" '--auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500' "$DEV_COMPOSE"
 contains "测试 Redis AOF 基线增大" '--auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500' "$TEST_COMPOSE"
