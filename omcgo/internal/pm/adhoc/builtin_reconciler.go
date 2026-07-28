@@ -23,6 +23,7 @@ type BuiltinReconciler struct {
 	resolveCounters func(context.Context, string, []pmstream.MetricRule) ([]pmstream.CounterRule, error)
 	resolveMembers  func(context.Context, *Task) ([]pmstream.TaskMember, error)
 	save            func(context.Context, pmstream.SaveTaskRequest) (*pmstream.TaskVersionSnapshot, error)
+	purgeObsolete   func(context.Context) (int, error)
 }
 
 func NewBuiltinReconciler(repo *PgRepository) *BuiltinReconciler {
@@ -40,11 +41,24 @@ func NewBuiltinReconciler(repo *PgRepository) *BuiltinReconciler {
 			}
 			return repo.streamRepo.Save(ctx, req)
 		},
+		purgeObsolete: func(ctx context.Context) (int, error) {
+			if repo.streamRepo == nil {
+				return 0, errors.New("PM streaming task repository is not configured")
+			}
+			return repo.streamRepo.PurgeObsoleteBuiltinDeviceTasks(ctx)
+		},
 	}
 }
 
 func (r *BuiltinReconciler) Reconcile(ctx context.Context) (BuiltinReconcileResult, error) {
 	var result BuiltinReconcileResult
+	if r.purgeObsolete != nil {
+		removed, err := r.purgeObsolete(ctx)
+		if err != nil {
+			return result, fmt.Errorf("purge obsolete built-in PM device tasks: %w", err)
+		}
+		result.Changed += removed
+	}
 	tasks, err := r.list(ctx)
 	if err != nil {
 		return result, fmt.Errorf("list builtin PM aggregation tasks: %w", err)

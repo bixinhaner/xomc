@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
@@ -35,4 +36,20 @@ func TestShouldAdjustEffectiveFromBackdatesInitialUnchangedVersion(t *testing.T)
 	require.False(t, shouldAdjustEffectiveFrom(req, 2, current, target))
 	require.False(t, shouldAdjustEffectiveFrom(req, 1, target, target))
 	require.False(t, shouldAdjustEffectiveFrom(req, 1, target.Add(-slotDuration), target))
+}
+
+func TestBuildPurgeObsoleteBuiltinDeviceTasksSQLTargetsOnlyLegacyIDs(t *testing.T) {
+	query, args, err := buildPurgeObsoleteBuiltinDeviceTasksSQL()
+
+	require.NoError(t, err)
+	require.Equal(
+		t,
+		"DELETE FROM pm_aggregation_tasks WHERE id IN ($1,$2,$3)",
+		query,
+	)
+	require.Equal(t, []interface{}{
+		uuid.MustParse("0184dddd-0005-4000-8000-000000000001"),
+		uuid.MustParse("0184dddd-0005-4000-8000-000000000002"),
+		uuid.MustParse("0184dddd-0005-4000-8000-000000000003"),
+	}, args)
 }

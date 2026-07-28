@@ -39,6 +39,25 @@ func TestBuiltinReconcilerSavesEmptyDefinitionForLaterMembershipRefresh(t *testi
 	require.Equal(t, 1, saveCalls)
 }
 
+func TestBuiltinReconcilerPurgesObsoleteHiddenDeviceDefinitions(t *testing.T) {
+	purgeCalls := 0
+	reconciler := &BuiltinReconciler{
+		purgeObsolete: func(context.Context) (int, error) {
+			purgeCalls++
+			return 3, nil
+		},
+		list: func(context.Context) ([]Task, error) {
+			return nil, nil
+		},
+	}
+
+	result, err := reconciler.Reconcile(context.Background())
+
+	require.NoError(t, err)
+	require.Equal(t, 1, purgeCalls)
+	require.Equal(t, 3, result.Changed)
+}
+
 func TestBuiltinReconcilerSavesEditedRuleWithoutHiddenDeviceTask(t *testing.T) {
 	task := builtinTaskForTest()
 	task.MetricPaths = []string{"K-EDITED"}
