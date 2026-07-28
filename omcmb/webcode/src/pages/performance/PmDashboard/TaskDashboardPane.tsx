@@ -9,11 +9,11 @@
  * 自动出图、固定布局，无手工拖拽。
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { Alert, App, Button, Card, Empty, Segmented, Space, Typography } from 'antd';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
-import { ExportOutlined, LineChartOutlined } from '@ant-design/icons';
+import { ExportOutlined, LineChartOutlined, ReloadOutlined } from '@ant-design/icons';
 import {
   usePmAdhocDetail,
   usePmAdhocFilterOptions,
@@ -22,8 +22,8 @@ import {
 import { useIndicatorCandidates } from '@core/hooks/api/usePerformance';
 import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
 import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
-import { nowInSystemTimezone, toSystemTimezoneRFC3339 } from '@core/utils/systemTime';
 import { buildAdhocExportParams, defaultExportTaskName } from '@core/utils/kpiExportParams';
+import { usePmPageStateStore } from '@core/store/pmPageStateStore';
 import {
   isKnownTechnology,
   technologyToDeviceType,
@@ -40,13 +40,21 @@ import {
 import ChartCard from './ChartCard';
 import DashboardFilterBar, { type DashboardFilterValue } from './DashboardFilterBar';
 import {
-  ALL_HOURS,
-  ALL_WEEKDAYS,
   attachCompareSeries,
   dimSelectionToParams,
   extendChartsAxis,
-  previousWindow,
 } from './dashboardFilterUtils';
+import {
+  buildDefaultTaskDashboardFilter,
+  buildSubmittedTaskDashboardQuery,
+  buildTaskDashboardStateSnapshot,
+  buildTaskDashboardTaskSwitchReset,
+  PM_DASHBOARD_PAGE_KEY,
+  restoredQueryDelayMs,
+  restoreTaskDashboardState,
+  type DashboardRangeMode,
+  type TaskDashboardSubmittedQuery,
+} from './taskDashboardState';
 
 interface Props {
   taskId: string;
@@ -84,25 +92,57 @@ export default function TaskDashboardPane({ taskId }: Props) {
 
   // ── 共用三级筛选 + 周期对比开关（本 Pane 持状态，驱动取数 + 二拉）──────
   // #563：默认范围按系统时区「当前时刻」，与图表 X 轴同一参照系。
-  const [filter, setFilter] = useState<DashboardFilterValue>(() => {
-    const now = nowInSystemTimezone(systemTimezone);
-    return {
-      range: [now.subtract(7, 'day'), now],
-      weekdays: [...ALL_WEEKDAYS],
-      hours: [...ALL_HOURS],
-      compare: false,
-    };
-  });
+  const restoredState = useMemo(
+    () => restoreTaskDashboardState(usePmPageStateStore.getState().getPageState(PM_DASHBOARD_PAGE_KEY), systemTimezone),
+    // 初次挂载恢复一次即可；后续由本组件继续托管和保存状态。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+  const skipNextSaveRef = useRef(false);
+  const restoredAppliesToTask = restoredState.taskId === taskId;
+  const [filter, setFilter] = useState<DashboardFilterValue>(() =>
+    restoredAppliesToTask
+      ? restoredState.filter
+      : buildDefaultTaskDashboardFilter(systemTimezone),
+  );
+  const [rangeMode, setRangeMode] = useState<DashboardRangeMode>(() =>
+    restoredAppliesToTask
+      ? restoredState.rangeMode
+      : { kind: 'relative', durationMs: 7 * 24 * 60 * 60 * 1000 },
+  );
+  const [activeGran, setActiveGran] = useState<string | undefined>(() =>
+    restoredAppliesToTask ? restoredState.activeGran : undefined,
+  );
 
   // ── PM-DASH-DIMFILTER 维度子集筛选（按维度动态显示产品/设备组/频段多选框）──────
   // dimSelected 是筛选框上选中的"分组键原值"（product 维度=product_id；device_group=DeviceGroup=<uuid>；band=Band=<值>）。
   // 切任务（taskId 变）即清空选中，避免上个任务的子集串到新任务——用 React 官方"渲染期调整 state"
   // 模式（记录上次 taskId，变化时同步重置），不放 effect 里 setState。
-  const [dimSelected, setDimSelected] = useState<string[]>([]);
+  const [dimSelected, setDimSelected] = useState<string[]>(() =>
+    restoredAppliesToTask ? restoredState.dimSelected : [],
+  );
+  const [submitted, setSubmitted] = useState<TaskDashboardSubmittedQuery | null>(() =>
+    restoredAppliesToTask ? restoredState.submitted : null,
+  );
+  const initialRestoredQueryDelayMs = restoredAppliesToTask && restoredState.submitted
+    ? restoredQueryDelayMs(restoredState.savedAt, Date.now())
+    : 0;
+  const [resultsQueryReady, setResultsQueryReady] = useState(initialRestoredQueryDelayMs === 0);
+  useEffect(() => {
+    if (initialRestoredQueryDelayMs <= 0) return undefined;
+    const timer = window.setTimeout(() => setResultsQueryReady(true), initialRestoredQueryDelayMs);
+    return () => window.clearTimeout(timer);
+  }, [initialRestoredQueryDelayMs]);
   const [prevTaskId, setPrevTaskId] = useState(taskId);
   if (taskId !== prevTaskId) {
+    const reset = buildTaskDashboardTaskSwitchReset(systemTimezone);
     setPrevTaskId(taskId);
-    setDimSelected([]);
+    setDimSelected(reset.dimSelected);
+    setFilter(reset.filter);
+    setRangeMode(reset.rangeMode);
+    setActiveGran(reset.activeGran);
+    setSubmitted(reset.submitted);
+    setResultsQueryReady(true);
   }
   const { data: filterOpts } = usePmAdhocFilterOptions(taskId, dimension);
   // 维度→入参映射（纯函数，便于单测）：product→productIds；device_group/band→objectLdns；空选不过滤。
@@ -110,52 +150,62 @@ export default function TaskDashboardPane({ taskId }: Props) {
 
   // #599：改为「点出图才查」模式——所有条件变化只更新本地暂存 state，
   // 点「出图」按钮时把暂存条件一次性提交（提交快照驱动 usePmAdhocResults）。
-  const [submitted, setSubmitted] = useState<{
-    startISO: string;
-    endISO: string;
-    productIds?: string[];
-    objectLdns?: string[];
-    weekdays: number[];
-    hours: number[];
-    compare: boolean;
-    offsetMs: number;
-    prevStartISO: string;
-    prevEndISO: string;
-    rangeStartMs: number;
-    rangeEndMs: number;
-  } | null>(null);
-
   const handleQuery = () => {
-    const [s, e] = filter.range;
-    const sISO = toSystemTimezoneRFC3339(s, systemTimezone) ?? s.toISOString();
-    const eISO = toSystemTimezoneRFC3339(e, systemTimezone) ?? e.toISOString();
-    const [ps, pe] = previousWindow(filter.range);
-    setSubmitted({
-      startISO: sISO,
-      endISO: eISO,
-      productIds,
-      objectLdns,
-      weekdays: filter.weekdays,
-      hours: filter.hours,
-      compare: filter.compare,
-      offsetMs: e.valueOf() - s.valueOf(),
-      prevStartISO: toSystemTimezoneRFC3339(ps, systemTimezone) ?? ps.toISOString(),
-      prevEndISO: toSystemTimezoneRFC3339(pe, systemTimezone) ?? pe.toISOString(),
-      rangeStartMs: s.valueOf(),
-      rangeEndMs: e.valueOf(),
-    });
+    setResultsQueryReady(true);
+    setSubmitted(buildSubmittedTaskDashboardQuery(filter, { productIds, objectLdns, systemTimezone }));
   };
 
-  // #599：选中任务后自动触发一次出图（用当前默认筛选条件查一次）。
-  // taskId 变化时（含首次加载）自动提交，用户不用手动点「出图」就能看到图。
   useEffect(() => {
-    handleQuery();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskId]);
+    if (skipNextSaveRef.current) {
+      skipNextSaveRef.current = false;
+      return;
+    }
+    usePmPageStateStore.getState().savePageState(
+      PM_DASHBOARD_PAGE_KEY,
+      buildTaskDashboardStateSnapshot({
+        taskId,
+        filter,
+        dimSelected,
+        activeGran,
+        rangeMode,
+        submitted,
+      }),
+    );
+  }, [activeGran, dimSelected, filter, rangeMode, submitted, taskId]);
+
+  const handleFilterChange = (next: DashboardFilterValue) => {
+    const rangeChanged =
+      next.range[0].valueOf() !== filter.range[0].valueOf() ||
+      next.range[1].valueOf() !== filter.range[1].valueOf();
+    if (rangeChanged) {
+      setRangeMode({ kind: 'absolute' });
+    }
+    setFilter(next);
+    setSubmitted(null);
+    setResultsQueryReady(true);
+  };
+
+  const handleDimChange = (next: string[]) => {
+    setDimSelected(next);
+    setSubmitted(null);
+    setResultsQueryReady(true);
+  };
+
+  const handleReset = () => {
+    const nextFilter = buildDefaultTaskDashboardFilter(systemTimezone);
+    setFilter(nextFilter);
+    setRangeMode({ kind: 'relative', durationMs: 7 * 24 * 60 * 60 * 1000 });
+    setDimSelected([]);
+    setActiveGran(undefined);
+    setSubmitted(null);
+    setResultsQueryReady(true);
+    skipNextSaveRef.current = true;
+    usePmPageStateStore.getState().clearPageState(PM_DASHBOARD_PAGE_KEY);
+  };
 
   // 大时间段驱动取数（后端按 time 窗口 + weekdays/hours 过滤）。仪表盘取较多结果行用于画线。
   const { data: rowsResp, isLoading: rowsLoading } = usePmAdhocResults(
-    submitted ? taskId : undefined,
+    submitted && resultsQueryReady ? taskId : undefined,
     {
       limit: RESULTS_LIMIT,
       startTime: submitted?.startISO,
@@ -169,7 +219,7 @@ export default function TaskDashboardPane({ taskId }: Props) {
   const rawRows = rowsResp?.rows ?? [];
   // 周期对比开关打开时再拉一次上一周期（同任务、上一周期窗口、同 weekdays/hours）。
   const { data: prevResp, isLoading: prevLoading } = usePmAdhocResults(
-    submitted?.compare ? taskId : undefined,
+    submitted?.compare && resultsQueryReady ? taskId : undefined,
     {
       limit: RESULTS_LIMIT,
       startTime: submitted?.prevStartISO,
@@ -189,7 +239,6 @@ export default function TaskDashboardPane({ taskId }: Props) {
     () => taskQuery.data?.granularities ?? [],
     [taskQuery.data?.granularities],
   );
-  const [activeGran, setActiveGran] = useState<string | undefined>(undefined);
   const effectiveGran = activeGran && granularities.includes(activeGran) ? activeGran : granularities[0];
   const chartLocale = intl.locale === 'en-US' ? 'en-US' : 'zh-CN';
   const metricDisplayNames = useMemo(() => {
@@ -299,17 +348,15 @@ export default function TaskDashboardPane({ taskId }: Props) {
   const createExport = useCreateKpiExport();
   const handleExport = () => {
     // #599：导出与出图同口径——用提交态的筛选快照（未出图时用当前 filter）。
-    const [s, e] = filter.range;
-    const exportStart = submitted?.startISO ?? (toSystemTimezoneRFC3339(s, systemTimezone) ?? s.toISOString());
-    const exportEnd = submitted?.endISO ?? (toSystemTimezoneRFC3339(e, systemTimezone) ?? e.toISOString());
+    const exportSubmitted = submitted ?? buildSubmittedTaskDashboardQuery(filter, { productIds, objectLdns, systemTimezone });
     const exportParams = buildAdhocExportParams({
       taskId,
-      startTime: exportStart,
-      endTime: exportEnd,
-      productIds: submitted?.productIds ?? productIds,
-      objectLdns: submitted?.objectLdns ?? objectLdns,
-      weekdays: submitted?.weekdays ?? filter.weekdays,
-      hours: submitted?.hours ?? filter.hours,
+      startTime: exportSubmitted.startISO,
+      endTime: exportSubmitted.endISO,
+      productIds: exportSubmitted.productIds,
+      objectLdns: exportSubmitted.objectLdns,
+      weekdays: exportSubmitted.weekdays,
+      hours: exportSubmitted.hours,
     });
     createExport.mutate(
       {
@@ -399,21 +446,28 @@ export default function TaskDashboardPane({ taskId }: Props) {
       <Card size="small" style={{ marginBottom: 12 }}>
         <DashboardFilterBar
           value={filter}
-          onChange={setFilter}
+          onChange={handleFilterChange}
           dimension={dimension}
           dimOptions={filterOpts?.options}
           dimSelected={dimSelected}
-          onDimChange={setDimSelected}
+          onDimChange={handleDimChange}
         />
-        <Button
-          type="primary"
-          icon={<LineChartOutlined />}
-          onClick={handleQuery}
-          loading={rowsLoading}
-          style={{ marginTop: 8 }}
-        >
-          {intl.formatMessage({ id: 'perf.dashboard.btnPlot' })}
-        </Button>
+        <Space style={{ marginTop: 8 }}>
+          <Button
+            type="primary"
+            icon={<LineChartOutlined />}
+            onClick={handleQuery}
+            loading={rowsLoading}
+          >
+            {intl.formatMessage({ id: 'perf.dashboard.btnPlot' })}
+          </Button>
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={handleReset}
+          >
+            {intl.formatMessage({ id: 'common.reset' })}
+          </Button>
+        </Space>
       </Card>
 
       {truncated && (
