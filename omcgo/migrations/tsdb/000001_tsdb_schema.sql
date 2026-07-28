@@ -951,6 +951,7 @@ CREATE TABLE public.pm_aggregation_counter_rollups (
     event_id uuid PRIMARY KEY,
     task_id uuid NOT NULL,
     task_version_id uuid NOT NULL,
+    entity_key text NOT NULL,
     granularity varchar(16) NOT NULL,
     window_start timestamptz NOT NULL,
     window_end timestamptz NOT NULL,
@@ -968,7 +969,7 @@ CREATE TABLE public.pm_aggregation_counter_rollups (
 );
 CREATE INDEX idx_pm_aggregation_counter_rollups_recovery
     ON public.pm_aggregation_counter_rollups (
-        task_version_id, granularity, window_start, chunk_index
+        task_version_id, entity_key, granularity, window_start, chunk_index
     );
 CREATE INDEX idx_pm_aggregation_counter_rollups_retention
     ON public.pm_aggregation_counter_rollups (granularity, window_start);
@@ -996,6 +997,7 @@ CREATE INDEX idx_pm_aggregation_rollup_outbox_retention
 CREATE TABLE public.pm_aggregation_windows (
     task_id uuid NOT NULL,
     task_version_id uuid NOT NULL,
+    entity_key text NOT NULL,
     granularity varchar(16) NOT NULL,
     window_start timestamptz NOT NULL,
     window_end timestamptz NOT NULL,
@@ -1014,7 +1016,7 @@ CREATE TABLE public.pm_aggregation_windows (
     published_at timestamptz,
     updated_at timestamptz NOT NULL DEFAULT now(),
     last_error text,
-    PRIMARY KEY (task_version_id, granularity, window_start),
+    PRIMARY KEY (task_version_id, entity_key, granularity, window_start),
     CONSTRAINT chk_pm_aggregation_windows_granularity
         CHECK (granularity IN ('hourly', 'daily', 'weekly', 'monthly')),
     CONSTRAINT chk_pm_aggregation_windows_status

@@ -186,9 +186,6 @@ function TaskDashboardTab() {
                       }}
                     >
                       <Space size={4} style={{ width: '100%' }}>
-                        {t.technology && (
-                          <Tag style={{ marginRight: 0 }}>{labelForTechnology(t.technology)}</Tag>
-                        )}
                         <span
                           style={{
                             flex: 1,

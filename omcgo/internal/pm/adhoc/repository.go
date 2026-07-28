@@ -15,6 +15,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
+	"github.com/omcgo/omcgo/internal/pm/calendarfilter"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
 )
@@ -112,12 +113,14 @@ type PgRepository struct {
 	// nil 安全：不注入则 last_fire_at 留 NULL（退化到 created_at），行为不回归。
 	watermarks WatermarkReader
 	loc        func() *time.Location // #528 P3：初始游标桶对齐用业务时区
+	timezone   calendarfilter.TimezoneProvider
 	streamRepo streamingTaskRepository
 }
 
 type streamingTaskRepository interface {
 	Save(context.Context, pmstream.SaveTaskRequest) (*pmstream.TaskVersionSnapshot, error)
 	Delete(context.Context, uuid.UUID) error
+	PurgeObsoleteBuiltinDeviceTasks(context.Context) (int, error)
 }
 
 // NewPgRepository 创建 PgRepository。
@@ -140,6 +143,9 @@ func (r *PgRepository) HasStreamingRepository() bool {
 func (r *PgRepository) ListResultMetricPaths(ctx context.Context, taskID uuid.UUID, filter resultsFilter) ([]string, error) {
 	if r.tsPool == nil {
 		return nil, errors.New("adhoc: tsdb pool is not configured")
+	}
+	if filter.CalendarTimezone == "" {
+		filter.CalendarTimezone = calendarfilter.ProviderName(ctx, r.timezone)
 	}
 	query, args, err := buildResultMetricScopeQuery(taskID, filter)
 	if err != nil {
@@ -198,12 +204,190 @@ func buildResultMetricScopeQuery(taskID uuid.UUID, f resultsFilter) (string, []a
 		b = b.Where(sq.Eq{"r.object_ldn": f.SubsetLDNs})
 	}
 	if len(f.Weekdays) > 0 && len(f.Weekdays) < 7 {
-		b = b.Where(sq.Expr("EXTRACT(dow FROM r.start_time)::int = ANY(?)", f.Weekdays))
+		b = b.Where(sq.Expr(calendarfilter.ExtractDOWPredicate("r.start_time"),
+			calendarfilter.NormalizeName(f.CalendarTimezone), f.Weekdays))
 	}
 	if len(f.Hours) > 0 && len(f.Hours) < 24 {
-		b = b.Where(sq.Expr("EXTRACT(hour FROM r.start_time)::int = ANY(?)", f.Hours))
+		b = b.Where(sq.Expr(calendarfilter.ExtractHourPredicate("r.start_time"),
+			calendarfilter.NormalizeName(f.CalendarTimezone), f.Hours))
 	}
 	return b.OrderBy("r.metric_path").ToSql()
+}
+
+// buildResultsQuery 纯函数：拼 adhoc results 查询 SQL + 占位参数。
+// 抽出来便于单测（带/不带大时间段两路）；时间段非法值容错忽略而非报错。
+func buildResultsQuery(taskID uuid.UUID, f resultsFilter, limit, offset int) (string, []any) {
+	// PM-线名解析：LEFT JOIN 在读时把分组键 ID 解析成可读名 —— product 维度按 product_id 取
+	// product_dim.product_name；device_group 维度按 'DeviceGroup='||id 比对 object_ldn 取 device_group_dim.name。
+	// 两 JOIN 都是 LEFT，互不影响（product 任务时组名 NULL、组任务时产品名 NULL）；名缺失（脏数据/已删）也返 NULL，前端回退 id 前 8 位。
+	// 查询跑在 TsPool（pm_adhoc_aggregation_results 在时序库），products/device_groups 改读本库影子表。
+	q := `
+SELECT r.id, r.task_id, r.device_oui, r.device_sn, r.product_id, r.metric_path, r.metric_type, r.metric_value,
+       r.statis_type, r.granularity, r.time, r.start_time, r.end_time, r.ingest_time, r.object_ldn, r.extra,
+       p.product_name, g.name AS device_group_name
+FROM pm_adhoc_aggregation_results r
+LEFT JOIN product_dim p ON p.id = r.product_id
+LEFT JOIN device_group_dim g ON ('DeviceGroup=' || g.id::text) = split_part(r.object_ldn, ',', 1)
+WHERE r.task_id = $1`
+	args := []any{taskID}
+	pos := 2
+	if f.DeviceSN != "" {
+		q += fmt.Sprintf(" AND r.device_sn = $%d", pos)
+		args = append(args, f.DeviceSN)
+		pos++
+	}
+	if f.MetricPath != "" {
+		q += fmt.Sprintf(" AND r.metric_path = $%d", pos)
+		args = append(args, f.MetricPath)
+		pos++
+	}
+	if f.Granularity != "" {
+		q += fmt.Sprintf(" AND r.granularity = $%d", pos)
+		args = append(args, f.Granularity)
+		pos++
+	}
+	// 可选大时间段过滤（页签1 仪表盘大时间段驱动取数）：start_time/end_time 用 RFC3339 解析，
+	// 命中则按 time 列窗口过滤，与现有 ORDER BY time DESC 同列；非法值忽略（容错而非 400）。
+	if f.StartTime != "" {
+		if t, err := time.Parse(time.RFC3339, f.StartTime); err == nil {
+			q += fmt.Sprintf(" AND r.time >= $%d", pos)
+			args = append(args, t)
+			pos++
+		}
+	}
+	if f.EndTime != "" {
+		if t, err := time.Parse(time.RFC3339, f.EndTime); err == nil {
+			q += fmt.Sprintf(" AND r.time < $%d", pos)
+			args = append(args, t)
+			pos++
+		}
+	}
+	// T-0193：任务小区/PLMN 白名单（查看级收口）。非空时只返回选中 object_ldn 行；
+	// 空 = 不过滤（全小区，向后兼容旧任务）。与上面"只看 N 指标"同层。
+	if len(f.ObjectLDNs) > 0 {
+		q += fmt.Sprintf(" AND r.object_ldn = ANY($%d)", pos)
+		args = append(args, f.ObjectLDNs)
+		pos++
+	}
+	// PM-DASH-DIMFILTER：仪表盘维度子集过滤（与上面任务白名单各自独立成子句，AND 取交集）。
+	// product 维度按 product_id 子集；device_group/band 维度按 object_ldn 子集。空 = 不过滤（向后兼容）。
+	if len(f.ProductIDs) > 0 {
+		q += fmt.Sprintf(" AND r.product_id = ANY($%d)", pos)
+		args = append(args, f.ProductIDs)
+		pos++
+	}
+	if len(f.SubsetLDNs) > 0 {
+		q += fmt.Sprintf(" AND r.object_ldn = ANY($%d)", pos)
+		args = append(args, f.SubsetLDNs)
+		pos++
+	}
+	// #532 显示侧收口：按任务配置指标集过滤（与用户临时选的 MetricPath 各自独立成子句、AND 取交集）。
+	// 空 = 不过滤（历史/边界任务向后兼容）。须与 buildResultsCountQuery 同口径，否则 count 与数据对不上。
+	if len(f.TaskMetricPaths) > 0 {
+		q += fmt.Sprintf(" AND r.metric_path = ANY($%d)", pos)
+		args = append(args, f.TaskMetricPaths)
+		pos++
+	}
+	// #599：星期/小时段后端过滤（EXTRACT(dow/hour FROM start_time)）。
+	// 全选（7 天/24 时）或空 = 不加条件（向后兼容）。
+	if len(f.Weekdays) > 0 && len(f.Weekdays) < 7 {
+		tzPos := pos
+		args = append(args, calendarfilter.NormalizeName(f.CalendarTimezone))
+		pos++
+		q += fmt.Sprintf(" AND EXTRACT(dow FROM (r.start_time AT TIME ZONE $%d))::int = ANY($%d)", tzPos, pos)
+		args = append(args, f.Weekdays)
+		pos++
+	}
+	if len(f.Hours) > 0 && len(f.Hours) < 24 {
+		tzPos := pos
+		args = append(args, calendarfilter.NormalizeName(f.CalendarTimezone))
+		pos++
+		q += fmt.Sprintf(" AND EXTRACT(hour FROM (r.start_time AT TIME ZONE $%d))::int = ANY($%d)", tzPos, pos)
+		args = append(args, f.Hours)
+		pos++
+	}
+	q += fmt.Sprintf(" ORDER BY r.time DESC LIMIT $%d OFFSET $%d", pos, pos+1)
+	args = append(args, limit, offset)
+	return q, args
+}
+
+// buildResultsCountQuery 纯函数：拼 adhoc results 的真实总数 COUNT(*) SQL + 占位参数。
+// 复用与 buildResultsQuery 完全相同的 WHERE 过滤（去掉 LEFT JOIN / ORDER BY / LIMIT / OFFSET），
+// 让 total 反映命中行真实总数（T-0194 截断诚实提示）。
+func buildResultsCountQuery(taskID uuid.UUID, f resultsFilter) (string, []any) {
+	q := `SELECT COUNT(*) FROM pm_adhoc_aggregation_results r WHERE r.task_id = $1`
+	args := []any{taskID}
+	pos := 2
+	if f.DeviceSN != "" {
+		q += fmt.Sprintf(" AND r.device_sn = $%d", pos)
+		args = append(args, f.DeviceSN)
+		pos++
+	}
+	if f.MetricPath != "" {
+		q += fmt.Sprintf(" AND r.metric_path = $%d", pos)
+		args = append(args, f.MetricPath)
+		pos++
+	}
+	if f.Granularity != "" {
+		q += fmt.Sprintf(" AND r.granularity = $%d", pos)
+		args = append(args, f.Granularity)
+		pos++
+	}
+	if f.StartTime != "" {
+		if t, err := time.Parse(time.RFC3339, f.StartTime); err == nil {
+			q += fmt.Sprintf(" AND r.time >= $%d", pos)
+			args = append(args, t)
+			pos++
+		}
+	}
+	if f.EndTime != "" {
+		if t, err := time.Parse(time.RFC3339, f.EndTime); err == nil {
+			q += fmt.Sprintf(" AND r.time < $%d", pos)
+			args = append(args, t)
+			pos++
+		}
+	}
+	if len(f.ObjectLDNs) > 0 {
+		q += fmt.Sprintf(" AND r.object_ldn = ANY($%d)", pos)
+		args = append(args, f.ObjectLDNs)
+		pos++
+	}
+	// PM-DASH-DIMFILTER：与 buildResultsQuery 同口径——同样的 ProductIDs / SubsetLDNs 子句，
+	// 否则 count 与数据对不上（T-0194 踩过）。
+	if len(f.ProductIDs) > 0 {
+		q += fmt.Sprintf(" AND r.product_id = ANY($%d)", pos)
+		args = append(args, f.ProductIDs)
+		pos++
+	}
+	if len(f.SubsetLDNs) > 0 {
+		q += fmt.Sprintf(" AND r.object_ldn = ANY($%d)", pos)
+		args = append(args, f.SubsetLDNs)
+		pos++
+	}
+	// #532：与 buildResultsQuery 同口径——同样的任务配置指标集子句，否则 count 与数据对不上。
+	if len(f.TaskMetricPaths) > 0 {
+		q += fmt.Sprintf(" AND r.metric_path = ANY($%d)", pos)
+		args = append(args, f.TaskMetricPaths)
+		pos++
+	}
+	// #599：与 buildResultsQuery 同口径——星期/小时段过滤。
+	if len(f.Weekdays) > 0 && len(f.Weekdays) < 7 {
+		tzPos := pos
+		args = append(args, calendarfilter.NormalizeName(f.CalendarTimezone))
+		pos++
+		q += fmt.Sprintf(" AND EXTRACT(dow FROM (r.start_time AT TIME ZONE $%d))::int = ANY($%d)", tzPos, pos)
+		args = append(args, f.Weekdays)
+		pos++
+	}
+	if len(f.Hours) > 0 && len(f.Hours) < 24 {
+		tzPos := pos
+		args = append(args, calendarfilter.NormalizeName(f.CalendarTimezone))
+		pos++
+		q += fmt.Sprintf(" AND EXTRACT(hour FROM (r.start_time AT TIME ZONE $%d))::int = ANY($%d)", tzPos, pos)
+		args = append(args, f.Hours)
+		pos++
+	}
+	return q, args
 }
 
 // SetWatermarkReader 注入「上游完成水位」读取器（#528 P3，新建持续任务初始游标用）。
@@ -227,6 +411,11 @@ func (r *PgRepository) SetLocationFunc(fn func() *time.Location) *PgRepository {
 	if fn != nil {
 		r.loc = fn
 	}
+	return r
+}
+
+func (r *PgRepository) SetTimezoneProvider(provider calendarfilter.TimezoneProvider) *PgRepository {
+	r.timezone = provider
 	return r
 }
 

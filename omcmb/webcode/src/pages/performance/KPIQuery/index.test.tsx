@@ -9,6 +9,7 @@ import KPIQuery from './index';
 const refetchAggSpy = vi.fn();
 const createTemplateSpy = vi.fn();
 const createExportSpy = vi.fn();
+const metricPickerRenderSpy = vi.hoisted(() => vi.fn());
 const technologyDictionaryState = vi.hoisted(() => {
   const defaultDictionary = {
     options: [
@@ -122,7 +123,10 @@ vi.mock('./components/DevicePickerModal', () => ({
 }));
 
 vi.mock('@/components/MetricPickerModal', () => ({
-  default: () => null,
+  default: (props: Record<string, unknown>) => {
+    metricPickerRenderSpy(props);
+    return null;
+  },
 }));
 
 vi.mock('./components/PivotTable', () => ({
@@ -132,7 +136,7 @@ vi.mock('./components/PivotTable', () => ({
 vi.mock('./templateMetricResolver', () => ({
   resolveTemplateMetricPaths: async (_deviceType: string, paths: string[]) => ({
     paths,
-    labels: {},
+    labels: paths.includes('K-1') ? { 'K-1': '小区可用率' } : {},
     ambiguous: [],
   }),
 }));
@@ -253,6 +257,7 @@ describe('KPIQuery 模板弹窗初始值', () => {
     refetchAggSpy.mockClear();
     createTemplateSpy.mockReset();
     createExportSpy.mockReset();
+    metricPickerRenderSpy.mockClear();
     technologyDictionaryState.current = technologyDictionaryState.defaultDictionary;
   });
 
@@ -272,7 +277,7 @@ describe('KPIQuery 模板弹窗初始值', () => {
     expect(within(dialog).getByPlaceholderText('点击右侧按钮选择指标')).toHaveValue('');
     expect(within(dialog).getByText('近 3 小时')).toBeTruthy();
     expect(within(dialog).queryByDisplayValue('已选 1 个：SN-OK')).toBeNull();
-    expect(within(dialog).queryByDisplayValue('已选 1 个：K-1')).toBeNull();
+    expect(within(dialog).queryByDisplayValue('已选 1 个：K-1 小区可用率')).toBeNull();
   });
 
   it('侧栏新建模板再次打开不会残留上一次输入', async () => {
@@ -317,7 +322,7 @@ describe('KPIQuery 模板弹窗初始值', () => {
 
     const dialog = await findModalByTitle('新建查询模板');
     expect(within(dialog).getByPlaceholderText('点击右侧按钮选择设备')).toHaveValue('已选 1 个：SN-OK');
-    expect(within(dialog).getByPlaceholderText('点击右侧按钮选择指标')).toHaveValue('已选 1 个：K-1');
+    expect(within(dialog).getByPlaceholderText('点击右侧按钮选择指标')).toHaveValue('已选 1 个：K-1 小区可用率');
     expect(within(dialog).getByText('近 1 小时')).toBeTruthy();
   });
 
@@ -331,7 +336,65 @@ describe('KPIQuery 模板弹窗初始值', () => {
     expect(within(dialog).getByDisplayValue('正常模板描述')).toBeTruthy();
     expect(within(dialog).getByLabelText('公共（所有人可见）')).toBeChecked();
     expect(within(dialog).getByPlaceholderText('点击右侧按钮选择设备')).toHaveValue('已选 1 个：SN-OK');
-    expect(within(dialog).getByPlaceholderText('点击右侧按钮选择指标')).toHaveValue('已选 1 个：K-1');
+    expect(within(dialog).getByPlaceholderText('点击右侧按钮选择指标')).toHaveValue('已选 1 个：K-1 小区可用率');
     expect(within(dialog).getByText('近 1 小时')).toBeTruthy();
+  });
+
+  it('指标摘要显示 ID 和名称，并把 metricLabels 传给指标选择弹窗', async () => {
+    renderPage();
+
+    fireEvent.click(screen.getByText('正常模板'));
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('已选 1 个：K-1 小区可用率')).toBeTruthy();
+    });
+
+    await waitFor(() => {
+      expect(metricPickerRenderSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          initialLabels: expect.objectContaining({ 'K-1': '小区可用率' }),
+        }),
+      );
+    });
+  });
+
+  it('保存模板和导出 payload 仍只携带指标 ID', async () => {
+    renderPage();
+
+    fireEvent.click(screen.getByText('正常模板'));
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('已选 1 个：K-1 小区可用率')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /存为模板/ }));
+    const dialog = await findModalByTitle('新建查询模板');
+    fireEvent.change(within(dialog).getByPlaceholderText('例如：eNB 基础 KPI'), {
+      target: { value: '复制正常模板' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: /保\s*存/ }));
+
+    await waitFor(() => {
+      expect(createTemplateSpy).toHaveBeenCalled();
+    });
+    const createInput = createTemplateSpy.mock.calls[0]?.[0];
+    expect(createInput.payload.metricPaths).toEqual(['K-1']);
+    expect(JSON.stringify(createInput.payload)).not.toContain('小区可用率');
+
+    fireEvent.click(screen.getByRole('button', { name: /查询$/ }));
+    await waitFor(() => {
+      expect(refetchAggSpy).toHaveBeenCalled();
+    });
+
+    const exportButton = screen.getByRole('button', { name: /导出 CSV/ });
+    await waitFor(() => {
+      expect(exportButton).not.toBeDisabled();
+    });
+    fireEvent.click(exportButton);
+
+    await waitFor(() => {
+      expect(createExportSpy).toHaveBeenCalled();
+    });
+    const exportInput = createExportSpy.mock.calls[0]?.[0];
+    expect(exportInput.params.metric_paths).toEqual(['K-1']);
+    expect(JSON.stringify(exportInput.params)).not.toContain('小区可用率');
   });
 });

@@ -30,14 +30,14 @@ func (r *WindowRepository) EnsureOpen(ctx context.Context, contribution Contribu
 	query, args, err := storage.Psql.Insert("pm_aggregation_windows").
 		Columns(
 			"task_id", "task_version_id", "granularity",
-			"window_start", "window_end", "expected_slots",
+			"entity_key", "window_start", "window_end", "expected_slots",
 		).
 		Values(
 			contribution.Key.TaskID, contribution.Key.TaskVersionID,
-			string(contribution.Key.Granularity), contribution.Key.Start,
+			string(contribution.Key.Granularity), contribution.Key.EntityKey, contribution.Key.Start,
 			contribution.Key.End, contribution.ExpectedSlots,
 		).
-		Suffix("ON CONFLICT (task_version_id, granularity, window_start) DO NOTHING").
+		Suffix("ON CONFLICT (task_version_id, entity_key, granularity, window_start) DO NOTHING").
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build ensure PM aggregation window SQL: %w", err)
@@ -58,6 +58,7 @@ func (r *WindowRepository) ObserveReceived(
 		Set("updated_at", time.Now().UTC()).
 		Where(sq.Eq{
 			"task_version_id": key.TaskVersionID,
+			"entity_key":      key.EntityKey,
 			"granularity":     string(key.Granularity),
 			"window_start":    key.Start,
 			"status":          "open",
@@ -97,7 +98,7 @@ func (r *WindowRepository) ListDue(
 	limit uint64,
 ) ([]WindowRecord, error) {
 	query, args, err := storage.Psql.Select(
-		"task_id", "task_version_id", "granularity", "window_start", "window_end",
+		"task_id", "task_version_id", "entity_key", "granularity", "window_start", "window_end",
 		"status", "expected_slots", "received_slots",
 	).From("pm_aggregation_windows").
 		Where(sq.Eq{"status": []string{"open", "failed"}}).
@@ -118,6 +119,19 @@ func (r *WindowRepository) ListDueByGranularity(
 	fallbackGrace time.Duration,
 	limit uint64,
 ) ([]WindowRecord, error) {
+	return r.ListDueByGranularityAfter(
+		ctx, now, graceByGranularity, fallbackGrace, nil, limit,
+	)
+}
+
+func (r *WindowRepository) ListDueByGranularityAfter(
+	ctx context.Context,
+	now time.Time,
+	graceByGranularity map[Granularity]time.Duration,
+	fallbackGrace time.Duration,
+	after *WindowKey,
+	limit uint64,
+) ([]WindowRecord, error) {
 	due := sq.Or{}
 	for _, granularity := range []Granularity{
 		GranularityHourly, GranularityDaily, GranularityWeekly, GranularityMonthly,
@@ -131,15 +145,22 @@ func (r *WindowRepository) ListDueByGranularity(
 			sq.LtOrEq{"window_end": now.Add(-grace)},
 		})
 	}
-	query, args, err := storage.Psql.Select(
-		"task_id", "task_version_id", "granularity", "window_start", "window_end",
+	builder := storage.Psql.Select(
+		"task_id", "task_version_id", "entity_key", "granularity", "window_start", "window_end",
 		"status", "expected_slots", "received_slots",
 	).From("pm_aggregation_windows").
 		Where(sq.Eq{"status": []string{"open", "failed"}}).
 		Where(due).
-		OrderBy("window_end").
+		OrderBy("window_end", "task_version_id", "entity_key", "granularity", "window_start").
 		Limit(limit).
-		ToSql()
+		PlaceholderFormat(sq.Dollar)
+	if after != nil {
+		builder = builder.Where(sq.Expr(
+			"(window_end, task_version_id, entity_key, granularity, window_start) > (?, ?, ?, ?, ?)",
+			after.End, after.TaskVersionID, after.EntityKey, string(after.Granularity), after.Start,
+		))
+	}
+	query, args, err := builder.ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build list due PM aggregation windows by granularity SQL: %w", err)
 	}
@@ -147,14 +168,29 @@ func (r *WindowRepository) ListDueByGranularity(
 }
 
 func (r *WindowRepository) ListActive(ctx context.Context, limit uint64) ([]WindowRecord, error) {
-	query, args, err := storage.Psql.Select(
-		"task_id", "task_version_id", "granularity", "window_start", "window_end",
+	return r.ListActiveAfter(ctx, nil, limit)
+}
+
+func (r *WindowRepository) ListActiveAfter(
+	ctx context.Context,
+	after *WindowKey,
+	limit uint64,
+) ([]WindowRecord, error) {
+	builder := storage.Psql.Select(
+		"task_id", "task_version_id", "entity_key", "granularity", "window_start", "window_end",
 		"status", "expected_slots", "received_slots",
 	).From("pm_aggregation_windows").
 		Where(sq.Eq{"status": []string{"open", "failed", "finalizing"}}).
-		OrderBy("window_start").
+		OrderBy("window_start", "task_version_id", "entity_key", "granularity").
 		Limit(limit).
-		ToSql()
+		PlaceholderFormat(sq.Dollar)
+	if after != nil {
+		builder = builder.Where(sq.Expr(
+			"(window_start, task_version_id, entity_key, granularity) > (?, ?, ?, ?)",
+			after.Start, after.TaskVersionID, after.EntityKey, string(after.Granularity),
+		))
+	}
+	query, args, err := builder.ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build list active PM aggregation windows SQL: %w", err)
 	}
@@ -175,7 +211,7 @@ func (r *WindowRepository) queryWindows(
 	for rows.Next() {
 		var record WindowRecord
 		if err := rows.Scan(
-			&record.Key.TaskID, &record.Key.TaskVersionID, &record.Key.Granularity,
+			&record.Key.TaskID, &record.Key.TaskVersionID, &record.Key.EntityKey, &record.Key.Granularity,
 			&record.Key.Start, &record.Key.End, &record.Status,
 			&record.ExpectedSlots, &record.ReceivedSlots,
 		); err != nil {
@@ -209,6 +245,7 @@ func (r *WindowRepository) MarkFailed(ctx context.Context, key WindowKey, cause 
 func windowKeyPredicate(key WindowKey) sq.Eq {
 	return sq.Eq{
 		"task_version_id": key.TaskVersionID,
+		"entity_key":      key.EntityKey,
 		"granularity":     string(key.Granularity),
 		"window_start":    key.Start,
 	}

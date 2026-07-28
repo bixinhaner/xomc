@@ -103,6 +103,10 @@ services:
     volumes:
       - ${TSDB_DATA_PATH:-tsdbdata}:/var/lib/postgresql/data
       - /etc/localtime:/etc/localtime:ro
+    # PostgreSQL 并行查询的动态共享内存使用 /dev/shm。Docker 默认 64 MiB 在多个
+    # parallel worker 同时扩容时会触发 SQLSTATE 53100；SQL 查询已做轻量化，这里
+    # 仍保留可调的容量作为其它合法并行查询的防护。
+    shm_size: ${TSDB_SHM_SIZE:-512m}
     # 写吞吐优化档同主库 postgres（PM copy 入库走本库，写压力主要在此）。
     # ↓ TSDB_* 旋钮由 resources.env 注入；不传 env 取 :- 默认 = 历史值（与主库同档）。
     command: ["postgres", "-c", "timezone=Asia/Shanghai", "-c", "log_timezone=Asia/Shanghai",

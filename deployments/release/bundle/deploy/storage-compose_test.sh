@@ -72,6 +72,8 @@ contains "开发 NATS 默认命名卷" '${NATS_DATA_PATH:-natsdata}:/data' "$DEV
 contains "开发 MinIO 默认命名卷" '${MINIO_DATA_PATH:-miniodata}:/data' "$DEV_COMPOSE"
 
 echo "── 过载保护配置 ──"
+contains "release TimescaleDB 共享内存兜底" 'shm_size: ${TSDB_SHM_SIZE:-512m}' "$RELEASE_COMPOSE"
+contains "开发 TimescaleDB 共享内存兜底" 'shm_size: ${TSDB_SHM_SIZE:-512m}' "$DEV_COMPOSE"
 contains "release NATS 内存存储上限" 'max_memory_store: ${NATS_MAX_MEMORY_STORE:-134217728}' "$RELEASE_COMPOSE"
 contains "开发 NATS 内存存储上限" 'max_memory_store: ${NATS_MAX_MEMORY_STORE:-134217728}' "$DEV_COMPOSE"
 contains "release NATS 大积压恢复宽限" 'start_period: 5m' "$RELEASE_COMPOSE"

@@ -19,8 +19,35 @@ type PgTaskRepository struct {
 	bus  event.EventBus
 }
 
+var obsoleteBuiltinDeviceTaskIDs = []uuid.UUID{
+	uuid.MustParse("0184dddd-0005-4000-8000-000000000001"),
+	uuid.MustParse("0184dddd-0005-4000-8000-000000000002"),
+	uuid.MustParse("0184dddd-0005-4000-8000-000000000003"),
+}
+
 func NewPgTaskRepository(pool *pgxpool.Pool, bus event.EventBus) *PgTaskRepository {
 	return &PgTaskRepository{pool: pool, bus: bus}
+}
+
+func buildPurgeObsoleteBuiltinDeviceTasksSQL() (string, []interface{}, error) {
+	return storage.Psql.Delete("pm_aggregation_tasks").
+		Where(sq.Eq{"id": obsoleteBuiltinDeviceTaskIDs}).
+		ToSql()
+}
+
+// PurgeObsoleteBuiltinDeviceTasks removes the three task rows used by the
+// retired hidden-device implementation. Device rollups are now synthesized
+// from the built-in network catalog and must not coexist with these records.
+func (r *PgTaskRepository) PurgeObsoleteBuiltinDeviceTasks(ctx context.Context) (int, error) {
+	query, args, err := buildPurgeObsoleteBuiltinDeviceTasksSQL()
+	if err != nil {
+		return 0, fmt.Errorf("build purge obsolete PM device tasks SQL: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("purge obsolete PM device tasks: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
 }
 
 func (r *PgTaskRepository) Save(ctx context.Context, req SaveTaskRequest) (*TaskVersionSnapshot, error) {
@@ -224,7 +251,7 @@ func saveEffectiveFrom(req SaveTaskRequest, now time.Time) time.Time {
 	if !req.EffectiveFrom.IsZero() {
 		return req.EffectiveFrom.UTC()
 	}
-	return now.UTC().Truncate(slotDuration).Add(slotDuration)
+	return now.UTC().Truncate(time.Hour).Add(time.Hour)
 }
 
 func nullablePtrTime(t *time.Time) any {

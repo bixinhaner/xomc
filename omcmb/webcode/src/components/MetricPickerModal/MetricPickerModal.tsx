@@ -23,7 +23,7 @@ import {
   theme,
   App,
 } from 'antd';
-import { SearchOutlined, ClearOutlined, ImportOutlined } from '@ant-design/icons';
+import { SearchOutlined, ClearOutlined, ImportOutlined, CloseOutlined } from '@ant-design/icons';
 import { useAllIndicators, useIndicatorList } from '@core/hooks/api/useIndicatorsLibrary';
 import type { DeviceType, IndicatorInfo } from '@core/types/indicatorLibrary';
 import { useAppStore } from '@core/store/appStore';
@@ -48,6 +48,10 @@ function metricValueOf(r: IndicatorInfo): string {
 // 中文态仍可回退英文名。
 function metricLabelOf(r: IndicatorInfo, en: boolean): string {
   return en ? r.enName || r.id : r.cnName || r.enName || r.id;
+}
+
+function formatMetricDisplay(id: string, label?: string): string {
+  return label && label !== id ? `${id} ${label}` : id;
 }
 
 interface MetricPickerModalProps {
@@ -135,12 +139,23 @@ export default function MetricPickerModal({
     enabled: open && (enableBatchInput || onlyEnabledIndicators),
     isEnabled: onlyEnabledIndicators ? true : undefined,
   });
+  const { data: allLabelIndicatorsData } = useAllIndicators(deviceType, {
+    enabled: open && onlyEnabledIndicators,
+  });
 
   const items = useMemo(() => data?.items ?? [], [data]);
-  const allItems = useMemo(() => allIndicatorsData?.items ?? [], [allIndicatorsData]);
+  const allItems = useMemo(() => allIndicatorsData?.items ?? [], [allIndicatorsData?.items]);
+  const labelItems = useMemo(
+    () => (onlyEnabledIndicators ? (allLabelIndicatorsData?.items ?? allItems) : allItems),
+    [allItems, allLabelIndicatorsData?.items, onlyEnabledIndicators],
+  );
   const allItemById = useMemo(
     () => new Map(allItems.map((item) => [metricValueOf(item), item])),
     [allItems],
+  );
+  const labelItemById = useMemo(
+    () => new Map(labelItems.map((item) => [metricValueOf(item), item])),
+    [labelItems],
   );
   const total = data?.total ?? 0;
 
@@ -171,6 +186,35 @@ export default function MetricPickerModal({
       setLabelMap((prev) => {
         const next = { ...prev };
         for (const it of items) next[metricValueOf(it)] = metricLabelOf(it, isEn);
+        return next;
+      });
+    }
+  }
+
+  // 全量指标表用于补齐「已选」里当前页之外的预选指标名称。
+  // onlyEnabledIndicators 下，候选/校验仍用启用指标表；显示名称可用整库兜底。
+  // 仅同步当前 selected，避免把整张指标库都塞进 labelMap；语言切换时按当前语言刷新。
+  const [seenLabelItems, setSeenLabelItems] = useState<IndicatorInfo[] | null>(null);
+  const [seenAllItemsIsEn, setSeenAllItemsIsEn] = useState<boolean | null>(null);
+  const [seenAllItemsOpen, setSeenAllItemsOpen] = useState<boolean | null>(null);
+  const [seenSelectedForAllItems, setSeenSelectedForAllItems] = useState<string[] | null>(null);
+  if (
+    seenLabelItems !== labelItems ||
+    seenAllItemsIsEn !== isEn ||
+    seenAllItemsOpen !== open ||
+    seenSelectedForAllItems !== selected
+  ) {
+    setSeenLabelItems(labelItems);
+    setSeenAllItemsIsEn(isEn);
+    setSeenAllItemsOpen(open);
+    setSeenSelectedForAllItems(selected);
+    if (open && labelItems.length > 0 && selected.length > 0) {
+      setLabelMap((prev) => {
+        const next = { ...prev };
+        for (const id of selected) {
+          const item = labelItemById.get(id);
+          if (item) next[id] = metricLabelOf(item, isEn);
+        }
         return next;
       });
     }
@@ -293,7 +337,17 @@ export default function MetricPickerModal({
     preserveSelectedRowKeys: true,
     onChange: (keys: React.Key[]) => {
       if (warnIfTooManySelected(keys.length)) return;
-      setSelected(keys as string[]);
+      const nextSelected = keys as string[];
+      const nextSelectedSet = new Set(nextSelected);
+      setSelected(nextSelected);
+      setLabelMap((prev) => {
+        const next = { ...prev };
+        for (const item of items) {
+          const id = metricValueOf(item);
+          if (nextSelectedSet.has(id)) next[id] = metricLabelOf(item, isEn);
+        }
+        return next;
+      });
     },
   };
 
@@ -407,53 +461,46 @@ export default function MetricPickerModal({
                 <Text type="secondary" style={{ lineHeight: '28px' }}>
                   {intl.formatMessage({ id: 'perf.picker.noSelectedMetric' })}
                 </Text>
-              ) : selected.length <= 10 ? (
-                // ≤10 个：逐个展示可删除 tag
-                <div style={{ lineHeight: '28px' }}>
+              ) : (
+                <div style={{ maxHeight: 160, overflowY: 'auto' }}>
                   {selected.map((path) => {
-                    const label = labelMap[path] ?? path;
+                    const name = labelMap[path];
+                    const hasName = Boolean(name && name !== path);
                     return (
-                      <Tag
+                      <div
                         key={path}
-                        closable
-                        onClose={() => setSelected(selected.filter((p) => p !== path))}
+                        title={formatMetricDisplay(path, name)}
+                        aria-label={formatMetricDisplay(path, name)}
                         style={{
-                          marginBottom: 4,
-                          maxWidth: 200,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          display: 'inline-block',
-                          verticalAlign: 'middle',
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: 8,
+                          minHeight: 30,
+                          padding: '3px 0',
+                          borderBottom: `1px solid ${token.colorBorderSecondary}`,
                         }}
                       >
-                        <Tooltip title={label.length > 10 ? label : undefined}>
-                          {label}
+                        <Text code style={{ flex: '0 0 116px', lineHeight: '24px' }}>
+                          {path}
+                        </Text>
+                        {hasName ? (
+                          <Text style={{ flex: 1, minWidth: 0, lineHeight: '24px', wordBreak: 'break-word' }}>
+                            {name}
+                          </Text>
+                        ) : null}
+                        <Tooltip title={intl.formatMessage({ id: 'common.delete' })}>
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<CloseOutlined />}
+                            onClick={() => setSelected(selected.filter((p) => p !== path))}
+                            style={{ flex: '0 0 auto' }}
+                          />
                         </Tooltip>
-                      </Tag>
+                      </div>
                     );
                   })}
                 </div>
-              ) : (
-                // >10 个：折叠为一个 tag，hover 展示全部名称
-                <Tooltip
-                  title={
-                    <div style={{ maxHeight: 300, overflowY: 'auto' }}>
-                      {selected.map((path, i) => (
-                        <div key={path}>{i + 1}. {labelMap[path] ?? path}</div>
-                      ))}
-                    </div>
-                  }
-                  overlayStyle={{ maxWidth: 320 }}
-                >
-                  <Tag
-                    style={{ cursor: 'default', marginBottom: 4, fontSize: 13, padding: '2px 10px' }}
-                    color="blue"
-                  >
-                    {intl.formatMessage({ id: 'perf.picker.metricTitle' }, { count: selected.length })}
-                    {' '}···
-                  </Tag>
-                </Tooltip>
               )}
             </div>
           </div>

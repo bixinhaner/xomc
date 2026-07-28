@@ -54,6 +54,31 @@ func TestBuildDeviceKeysetSQL_TimeWindowUsesExclusiveEnd(t *testing.T) {
 	assert.NotContains(t, q, "time <=")
 }
 
+func TestBuildDeviceKeysetSQL_CalendarFiltersUseSystemTimezone(t *testing.T) {
+	shanghai, err := time.LoadLocation("Asia/Shanghai")
+	assert.NoError(t, err)
+	localMidnight := time.Date(2026, 7, 28, 0, 0, 0, 0, shanghai)
+	assert.Equal(t, time.Tuesday, localMidnight.Weekday())
+	assert.Equal(t, time.Monday, localMidnight.UTC().Weekday())
+
+	req := aggregator.QueryRequest{
+		Granularity:      metrics.GranularityHourly,
+		StartTime:        localMidnight,
+		EndTime:          localMidnight.Add(time.Hour),
+		Weekdays:         []int{2},
+		Hours:            []int{0},
+		CalendarTimezone: shanghai.String(),
+	}
+	q, args := buildDeviceKeysetSQL("pm_metrics_hourly", req, nil, false, time.Time{}, uuid.Nil, 5000)
+
+	assert.Contains(t, q, "EXTRACT(dow FROM (start_time AT TIME ZONE")
+	assert.Contains(t, q, "EXTRACT(hour FROM (start_time AT TIME ZONE")
+	assert.NotContains(t, q, "EXTRACT(dow FROM start_time)")
+	assert.Contains(t, args, "Asia/Shanghai")
+	assert.Contains(t, args, []int{2})
+	assert.Contains(t, args, []int{0})
+}
+
 func TestBuildDeviceKeysetSQL_NextBatch_HasCursor(t *testing.T) {
 	req := aggregator.QueryRequest{Granularity: metrics.Granularity15Min}
 	cur := time.Now()
@@ -211,12 +236,13 @@ func TestBuildAdhocExportSQL_UsesDashboardFiltersForCSVContent(t *testing.T) {
 	id := uuid.New()
 	productID := uuid.New()
 	filter := adhocExportFilter{
-		StartTime:  time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC),
-		EndTime:    time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC),
-		ProductIDs: []uuid.UUID{productID},
-		ObjectLDNs: []string{"DeviceGroup=11111111-1111-1111-1111-111111111111,Tech=lte"},
-		Weekdays:   []int{1, 2},
-		Hours:      []int{8, 9},
+		StartTime:        time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC),
+		EndTime:          time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC),
+		ProductIDs:       []uuid.UUID{productID},
+		ObjectLDNs:       []string{"DeviceGroup=11111111-1111-1111-1111-111111111111,Tech=lte"},
+		Weekdays:         []int{1, 2},
+		Hours:            []int{8, 9},
+		CalendarTimezone: "Asia/Shanghai",
 	}
 	metricPaths := []string{"K1", "K2"}
 
@@ -229,14 +255,15 @@ func TestBuildAdhocExportSQL_UsesDashboardFiltersForCSVContent(t *testing.T) {
 		assert.Contains(t, sql, "r.time < ")
 		assert.Contains(t, sql, "r.product_id IN (")
 		assert.Contains(t, sql, "r.object_ldn IN (")
-		assert.Contains(t, sql, "EXTRACT(dow FROM r.start_time)::int = ANY")
-		assert.Contains(t, sql, "EXTRACT(hour FROM r.start_time)::int = ANY")
+		assert.Contains(t, sql, "EXTRACT(dow FROM (r.start_time AT TIME ZONE")
+		assert.Contains(t, sql, "EXTRACT(hour FROM (r.start_time AT TIME ZONE")
 	}
 	for _, args := range [][]any{dataArgs, headerArgs} {
 		assert.Contains(t, args, "K1")
 		assert.Contains(t, args, "K2")
 		assert.Contains(t, args, productID)
 		assert.Contains(t, args, filter.ObjectLDNs[0])
+		assert.Contains(t, args, "Asia/Shanghai")
 		assert.Contains(t, args, filter.Weekdays)
 		assert.Contains(t, args, filter.Hours)
 	}
@@ -258,6 +285,26 @@ func TestBuildDistinctMetricsSQL(t *testing.T) {
 	assert.Contains(t, q, "time < ")
 	assert.NotContains(t, q, "time <=")
 	assert.NotEmpty(t, args)
+}
+
+func TestBuildDistinctMetricsSQLForRequest_CalendarFiltersUseSystemTimezone(t *testing.T) {
+	shanghai, err := time.LoadLocation("Asia/Shanghai")
+	assert.NoError(t, err)
+	req := aggregator.QueryRequest{
+		StartTime:        time.Date(2026, 7, 28, 0, 0, 0, 0, shanghai),
+		EndTime:          time.Date(2026, 7, 28, 1, 0, 0, 0, shanghai),
+		Weekdays:         []int{2},
+		Hours:            []int{0},
+		CalendarTimezone: "Asia/Shanghai",
+	}
+
+	q, args := buildDistinctMetricsSQLForRequest("pm_metrics_hourly", req)
+
+	assert.Contains(t, q, "EXTRACT(dow FROM (start_time AT TIME ZONE")
+	assert.Contains(t, q, "EXTRACT(hour FROM (start_time AT TIME ZONE")
+	assert.Contains(t, args, "Asia/Shanghai")
+	assert.Contains(t, args, []int{2})
+	assert.Contains(t, args, []int{0})
 }
 
 // 空 metric_paths + 空时窗：仅 DISTINCT，无过滤谓词（边界）。
