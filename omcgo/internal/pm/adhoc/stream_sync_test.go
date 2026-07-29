@@ -31,6 +31,30 @@ func TestStreamingOutputMetricPathsSkipsEmptyPaths(t *testing.T) {
 	require.Equal(t, []string{"K_TASK", "K_ENABLED"}, got)
 }
 
+func TestStreamingTaskOutputMetricPathsCustomUsesOnlyTaskSelection(t *testing.T) {
+	got := streamingTaskOutputMetricPaths(
+		&Task{
+			IsBuiltin:   false,
+			MetricPaths: []string{"C000020013", "C000020014"},
+		},
+		[]string{"C000010228", "K_ENABLED"},
+	)
+
+	require.Equal(t, []string{"C000020013", "C000020014"}, got)
+}
+
+func TestStreamingTaskOutputMetricPathsBuiltinIncludesEnabledMetrics(t *testing.T) {
+	got := streamingTaskOutputMetricPaths(
+		&Task{
+			IsBuiltin:   true,
+			MetricPaths: []string{"K_TASK"},
+		},
+		[]string{"K_ENABLED", "K_TASK"},
+	)
+
+	require.Equal(t, []string{"K_TASK", "K_ENABLED"}, got)
+}
+
 func TestStreamingEnabledDeviceTypesUsesTaskTechnology(t *testing.T) {
 	got, err := streamingEnabledDeviceTypes("lte")
 

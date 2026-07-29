@@ -17,14 +17,18 @@ func (r *PgRepository) syncStreamingTask(ctx context.Context, task *Task, enable
 	if r.streamRepo == nil || task == nil {
 		return nil
 	}
-	enabledPaths, err := r.resolveEnabledStreamingMetricPaths(ctx, task.Technology)
-	if err != nil {
-		return err
+	outputMetricPaths := streamingTaskOutputMetricPaths(task, nil)
+	if task.IsBuiltin {
+		enabledPaths, err := r.resolveEnabledStreamingMetricPaths(ctx, task.Technology)
+		if err != nil {
+			return err
+		}
+		outputMetricPaths = streamingTaskOutputMetricPaths(task, enabledPaths)
 	}
 	rules, err := r.resolveStreamingRules(
 		ctx,
 		task.Technology,
-		streamingOutputMetricPaths(task.MetricPaths, enabledPaths),
+		outputMetricPaths,
 	)
 	if err != nil {
 		return err
@@ -52,6 +56,16 @@ func (r *PgRepository) syncStreamingTask(ctx context.Context, task *Task, enable
 		return fmt.Errorf("save PM streaming task version: %w", err)
 	}
 	return nil
+}
+
+func streamingTaskOutputMetricPaths(task *Task, enabledPaths []string) []string {
+	if task == nil {
+		return nil
+	}
+	if !task.IsBuiltin {
+		return streamingOutputMetricPaths(task.MetricPaths, nil)
+	}
+	return streamingOutputMetricPaths(task.MetricPaths, enabledPaths)
 }
 
 func streamingRollupGranularities() []pmstream.Granularity {
