@@ -59,6 +59,15 @@ for key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH NATS_DATA_PATH MINI
   contains "$key 升级继承" "$key" "$INSTALL"
 done
 
+echo "── 实例配置安全升级 ──"
+contains "install 加载实例配置升级库" 'config-upgrade-lib.sh' "$INSTALL"
+contains "普通升级迁移 ACS 历史默认值" 'upgrade_acs_session_limit' "$INSTALL"
+if bash "$RELEASE_DEPLOY/config-upgrade-lib_test.sh"; then
+  ok
+else
+  bad "ACS session limit config migration regression"
+fi
+
 echo "── install/svc 启动前准备路径 ──"
 contains "install 加载存储库" 'storage-paths-lib.sh' "$INSTALL"
 contains "install 准备目录" 'storage_prepare_configured_env_paths "$ENV_FILE"' "$INSTALL"

@@ -4,7 +4,7 @@
 
 **Goal:** 将生产 ACS 全局会话上限持久提升到 30,000，并验证 14:00 整点负载。
 
-**Architecture:** 保持 Redis 全局准入控制实现不变，只调整生产配置并用发布契约锁定。部署后通过配置启动日志、Redis 槽位、应用日志和 Prometheus/数据库指标联合验收。
+**Architecture:** 保持 Redis 全局准入控制实现不变，调整生产配置并用发布契约锁定；普通升级只定向迁移历史默认值，保留运维自定义配置。部署后通过配置启动日志、Redis 槽位、应用日志和 Prometheus/数据库指标联合验收。
 
 **Tech Stack:** Go、YAML、Bash、Docker Compose、Prometheus、PostgreSQL、Redis。
 
@@ -20,6 +20,9 @@
 
 **Files:**
 - Modify: `deployments/release/bundle/deploy/storage-compose_test.sh`
+- Create: `deployments/release/bundle/deploy/config-upgrade-lib.sh`
+- Create: `deployments/release/bundle/deploy/config-upgrade-lib_test.sh`
+- Modify: `deployments/release/bundle/deploy/install.sh`
 - Modify: `omcgo/cmd/acs/etc/config.prod.yaml`
 
 **Interfaces:**
@@ -31,6 +34,7 @@
 - [x] **Step 3: 将生产配置和容量注释改为 30,000**
 - [x] **Step 4: 重跑契约并确认通过**
 - [x] **Step 5: 运行后端构建、测试和前端类型检查**
+- [x] **Step 6: 普通升级仅迁移历史默认值并保留运维自定义值**
 
 ### Task 2: 部署与整点验证
 
@@ -46,3 +50,4 @@
 - [x] **Step 3: 运行健康检查**
 - [x] **Step 4: 采集 14:00–14:05 指标与日志**
 - [x] **Step 5: 对照通过条件给出结论**
+- [ ] **Step 6: 从已提交实现 SHA 重建并用普通升级路径重新部署**
