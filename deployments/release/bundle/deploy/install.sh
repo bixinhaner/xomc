@@ -67,6 +67,11 @@ if [ -f "$DEPLOY_DIR/data-upgrade-lib.sh" ]; then
 else
   die "缺 $DEPLOY_DIR/data-upgrade-lib.sh（data 升级保护库，由 build-release.sh 随包发布）" 1
 fi
+if [ -f "$DEPLOY_DIR/config-upgrade-lib.sh" ]; then
+  . "$DEPLOY_DIR/config-upgrade-lib.sh"
+else
+  die "缺 $DEPLOY_DIR/config-upgrade-lib.sh（实例配置升级库，由 build-release.sh 随包发布）" 1
+fi
 if [ -f "$DEPLOY_DIR/storage-paths-lib.sh" ]; then
   . "$DEPLOY_DIR/storage-paths-lib.sh"
 else
@@ -553,6 +558,20 @@ else
     warn "etc 已重置为新包模板 —— 请从 $BAK 取回已改口令 / JWT / TLS / 自定义项"
     warn "  参考 diff：diff -ru $BAK $OMC_ROOT/etc | less"
   else
+    if upgrade_acs_session_limit \
+      "$OMC_ROOT/etc/acs.prod.yaml" \
+      "$RELEASE_DIR/etc/acs.prod.yaml"; then
+      case "${ACS_SESSION_LIMIT_UPGRADE_RESULT:-noop}" in
+        migrated)
+          log "升级 ACS 会话容量：session.max_concurrent 10000 → 30000（其他实例配置保持不变）"
+          ;;
+        preserved)
+          log "ACS session.max_concurrent 为运维自定义值，升级时保持不变"
+          ;;
+      esac
+    else
+      warn "ACS session.max_concurrent 自动迁移失败，保留现网配置；请人工核对新包模板"
+    fi
     log "$OMC_ROOT/etc/ 已有实例配置，保留不覆盖（如需覆盖加 --overwrite-etc）"
   fi
 fi

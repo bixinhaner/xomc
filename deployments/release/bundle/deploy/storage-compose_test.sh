@@ -59,6 +59,15 @@ for key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH NATS_DATA_PATH MINI
   contains "$key 升级继承" "$key" "$INSTALL"
 done
 
+echo "── 实例配置安全升级 ──"
+contains "install 加载实例配置升级库" 'config-upgrade-lib.sh' "$INSTALL"
+contains "普通升级迁移 ACS 历史默认值" 'upgrade_acs_session_limit' "$INSTALL"
+if bash "$RELEASE_DEPLOY/config-upgrade-lib_test.sh"; then
+  ok
+else
+  bad "ACS session limit config migration regression"
+fi
+
 echo "── install/svc 启动前准备路径 ──"
 contains "install 加载存储库" 'storage-paths-lib.sh' "$INSTALL"
 contains "install 准备目录" 'storage_prepare_configured_env_paths "$ENV_FILE"' "$INSTALL"
@@ -127,7 +136,7 @@ for config in "$APP_PROD_CONFIG" "$ACS_PROD_CONFIG" "$WORKER_PROD_CONFIG"; do
 done
 contains "默认安装包含完整监控 compose" '[ "$SKIP_MONITORING" = 0 ] && COMPOSE_FILES+=( -f docker-compose.monitoring.yml )' "$INSTALL"
 contains "install 在 source 后应用监控 profile" 'monitoring_profile_apply_install "$ENV_FILE" "$SKIP_MONITORING"' "$INSTALL"
-contains "升级强制刷新监控配置 bind mount" '"${DC[@]}" up -d --force-recreate --no-deps prometheus alertmanager loki tempo otelcol grafana' "$INSTALL"
+contains "升级统一刷新完整 compose stack" '"${DC[@]}" up -d' "$INSTALL"
 contains "服务控制读取持久化监控 profile" 'monitoring_profile_apply_runtime ".env" "$SKIP_MONITORING"' "$SVC"
 contains "监控 profile 关闭 tracing" 'export OMCGO_TRACER_ENABLED=false' "$MONITORING_PROFILE_LIB"
 contains "业务容器 tracing 尊重配置与显式覆盖" 'OMCGO_TRACER_ENABLED: "${OMCGO_TRACER_ENABLED:-}"' "$RELEASE_APP_COMPOSE"
