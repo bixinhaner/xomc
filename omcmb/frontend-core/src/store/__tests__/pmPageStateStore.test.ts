@@ -145,10 +145,14 @@ describe('pmPageStateStore', () => {
     expect(isPerformanceTabPath('/performance')).toBe(true)
     expect(isPerformanceTabPath('/performance/device-view?tab=a')).toBe(true)
     expect(isPerformanceTabPath('/performance/pm-adhoc')).toBe(true)
+    expect(isPerformanceTabPath('/performance/pm-adhoc/new')).toBe(true)
+    expect(isPerformanceTabPath('/performance/pm-adhoc/adhoc-001/edit')).toBe(true)
     expect(isPerformanceTabPath('/performance/query')).toBe(true)
     expect(isPerformanceTabPath('/performance/task-config')).toBe(false)
     expect(isPerformanceTabPath('/device/performance-profile')).toBe(false)
     expect(performancePageKeyFromPath('/performance/query?template=daily')).toBe('/performance/query')
+    expect(performancePageKeyFromPath('/performance/pm-adhoc/new')).toBe('/performance/pm-adhoc')
+    expect(performancePageKeyFromPath('/performance/pm-adhoc/adhoc-001/edit')).toBe('/performance/pm-adhoc')
   })
 
   it('rejects state saves for unrelated performance management pages', () => {

@@ -104,13 +104,16 @@ function normalizePageKey(pageKey: string): string {
 }
 
 export function isPerformanceTabPath(path: string): boolean {
-  const basePath = normalizePageKey(path);
-  return PERFORMANCE_PAGE_KEYS.has(basePath);
+  return performancePageKeyFromPath(path) !== null;
 }
 
 export function performancePageKeyFromPath(path: string): string | null {
-  if (!isPerformanceTabPath(path)) return null;
-  return normalizePageKey(path);
+  const basePath = normalizePageKey(path);
+  if (PERFORMANCE_PAGE_KEYS.has(basePath)) return basePath;
+  if (basePath === '/performance/pm-adhoc/new' || /^\/performance\/pm-adhoc\/[^/]+\/edit$/.test(basePath)) {
+    return '/performance/pm-adhoc';
+  }
+  return null;
 }
 
 function requirePerformancePageKey(pageKey: string): string {

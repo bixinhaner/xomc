@@ -131,7 +131,6 @@ function rowFor(name: string): HTMLElement {
 describe('PmAdhoc visibility list actions', () => {
   it('shows visibility and applies public/private action rules in the custom task list', () => {
     renderPage();
-    fireEvent.click(screen.getByRole('tab', { name: '自建聚合任务' }));
 
     const publicCanceled = within(rowFor('公开已取消'));
     expect(publicCanceled.getByText('公开')).toBeInTheDocument();

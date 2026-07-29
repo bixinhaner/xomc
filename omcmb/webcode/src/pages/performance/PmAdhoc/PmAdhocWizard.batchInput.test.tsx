@@ -5,8 +5,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
 import zhCN from '@core/i18n/zh-CN';
+import { usePmPageStateStore } from '@core/store/pmPageStateStore';
 import type { AdhocTask } from '@core/types/pmAdhoc';
 import PmAdhocWizard from './PmAdhocWizard';
+import { getCustomWizardDraft, saveCustomWizardDraft } from './pmAdhocDraftState';
 
 const navigateSpy = vi.fn();
 const createMutateAsync = vi.fn();
@@ -87,6 +89,8 @@ describe('PmAdhocWizard batch metric input', () => {
     navigateSpy.mockReset();
     createMutateAsync.mockReset();
     useIndicatorCandidatesSpy.mockClear();
+    usePmPageStateStore.setState({ pages: {} });
+    sessionStorage.clear();
     routeParams = {};
     adhocDetail = undefined;
     indicatorCandidates = [
@@ -115,6 +119,32 @@ describe('PmAdhocWizard batch metric input', () => {
       'ENB',
       expect.objectContaining({ includeCounters: true, enabledOnly: true }),
     );
+  });
+
+  it('restores an unfinished custom task wizard draft', () => {
+    saveCustomWizardDraft({ mode: 'new' }, {
+      current: 0,
+      name: '恢复中的自建任务',
+      technology: 'nr',
+      expireDays: 60,
+      visibility: 'public',
+      dimension: 'network',
+      selectedSns: [],
+      cellSel: {},
+      metricPaths: ['K0001'],
+      metricTypeFilter: 'counter',
+      windowStart: '2026-07-28T00:00:00.000Z',
+      windowEnd: '2026-07-28T01:00:00.000Z',
+      plannedEndAt: '2026-08-28T00:00:00.000Z',
+      plannedEndTouched: true,
+      drilldownTouched: false,
+      originalObjectLdns: [],
+    });
+
+    renderWizard();
+
+    expect(screen.getByDisplayValue('恢复中的自建任务')).toBeInTheDocument();
+    expect(screen.getByText('公开')).toBeInTheDocument();
   });
 
   it('caps batch-added metrics at the PM query selection limit', () => {
@@ -163,6 +193,56 @@ describe('PmAdhocWizard batch metric input', () => {
       expect(createMutateAsync).toHaveBeenCalled();
     });
     expect(createMutateAsync.mock.calls[0][0]).not.toHaveProperty('plannedEndAt');
+    expect(getCustomWizardDraft({ mode: 'new' })).toBeUndefined();
+  });
+
+  it('restores an unfinished edit draft without being overwritten by server detail', async () => {
+    routeParams = { id: 'adhoc-editing' };
+    adhocDetail = {
+      id: 'adhoc-editing',
+      name: '服务端任务名',
+      mode: 'oneshot',
+      deviceSns: [],
+      metricPaths: ['K0001'],
+      granularities: ['hourly'],
+      windowStart: '2026-07-20T00:00:00Z',
+      windowEnd: '2026-07-20T01:00:00Z',
+      dimension: 'network',
+      technology: 'lte',
+      isBuiltin: false,
+      expireDays: 60,
+      visibility: 'private',
+      status: 'scheduled',
+      progress: 0,
+      creator: 'tester',
+      createdAt: '2026-07-20T00:00:00Z',
+      updatedAt: '2026-07-20T00:00:00Z',
+    };
+    saveCustomWizardDraft({ mode: 'edit', taskId: 'adhoc-editing' }, {
+      current: 0,
+      name: '未保存的编辑任务名',
+      technology: 'lte',
+      expireDays: 60,
+      visibility: 'public',
+      dimension: 'network',
+      selectedSns: [],
+      cellSel: {},
+      metricPaths: ['C0001'],
+      metricTypeFilter: 'counter',
+      windowStart: '2026-07-28T00:00:00.000Z',
+      windowEnd: '2026-07-28T01:00:00.000Z',
+      plannedEndAt: '2026-08-28T00:00:00.000Z',
+      plannedEndTouched: true,
+      drilldownTouched: false,
+      originalObjectLdns: [],
+    });
+
+    renderWizard();
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('未保存的编辑任务名')).toBeInTheDocument();
+    });
+    expect(screen.queryByDisplayValue('服务端任务名')).not.toBeInTheDocument();
   });
 
   it('does not allow an edited custom-device task with more than the PM query selection limit to leave the scope step', async () => {
