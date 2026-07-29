@@ -5,6 +5,7 @@ import { Form } from 'antd';
 import { IntlProvider } from 'react-intl';
 import { getMessages } from '@core/i18n';
 import TransferSettings from './TransferSettings';
+import { buildBatchItems } from './sysConfigSerialize';
 
 function TransferSettingsHarness({
   values,
@@ -73,6 +74,20 @@ describe('TransferSettings', () => {
       expect(form?.isFieldTouched('uploadBaseURL')).toBe(true);
       expect(form?.isFieldTouched('downloadBaseURL')).toBe(true);
     });
+
+    const values = await form!.validateFields(['uploadBaseURL', 'downloadBaseURL']);
+    expect(buildBatchItems(values, [])).toEqual([
+      {
+        key: 'uploadBaseURL',
+        value: 'http://172.24.224.251:8080',
+        value_type: 'string',
+      },
+      {
+        key: 'downloadBaseURL',
+        value: 'http://172.24.224.252:8080',
+        value_type: 'string',
+      },
+    ]);
   });
 
   it('逐字输入 IPv4 时不被 URL 解析器改写', async () => {
@@ -92,6 +107,56 @@ describe('TransferSettings', () => {
 
     expect(input).toHaveValue('172.24.224.251');
     expect(form?.getFieldValue('uploadBaseURL')).toBe('http://172.24.224.251:8080');
+  });
+
+  it('异常 URL 必须原样显示且不能通过表单校验', async () => {
+    let form: ReturnType<typeof Form.useForm>[0] | undefined;
+    const malformedURL = 'http:////172.24.224.251:8080';
+    render(
+      <TransferSettingsHarness
+        values={{ uploadBaseURL: malformedURL }}
+        onFormReady={(instance) => {
+          form = instance;
+        }}
+      />,
+    );
+
+    expect(screen.getByLabelText('上传服务IP')).toHaveValue(malformedURL);
+    expect(form).toBeDefined();
+    await expect(form!.validateFields(['uploadBaseURL'])).rejects.toBeDefined();
+  });
+
+  it('粘贴带双斜杠的主机内容时不生成隐藏的畸形 URL', async () => {
+    let form: ReturnType<typeof Form.useForm>[0] | undefined;
+    render(
+      <TransferSettingsHarness
+        values={{}}
+        onFormReady={(instance) => {
+          form = instance;
+        }}
+      />,
+    );
+
+    const malformedHost = '//172.24.224.251';
+    fireEvent.change(screen.getByLabelText('上传服务IP'), {
+      target: { value: malformedHost },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('上传服务IP')).toHaveValue(malformedHost);
+      expect(form?.getFieldValue('uploadBaseURL')).toBe(malformedHost);
+    });
+    await expect(form!.validateFields(['uploadBaseURL'])).rejects.toBeDefined();
+  });
+
+  it('标准地址控件限制最大宽度以让固定端口紧邻 IP', () => {
+    render(<TransferSettingsHarness values={{}} />);
+
+    const addressGroup = screen.getByLabelText('上传服务IP').closest('.ant-space-compact');
+    expect(addressGroup).toHaveStyle({
+      width: '100%',
+      maxWidth: '520px',
+    });
   });
 
   it('加载存量自定义地址和路径时不自动回写配置', async () => {
