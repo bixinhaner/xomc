@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -109,8 +110,8 @@ func (p *DefaultPlanner) Plan(ctx context.Context, cmd PlanCommand) (*Plan, erro
 		effectiveSet.Mappings = p.filterReadUnsupportedMappings(ctx, set)
 	}
 	requestedPaths := normalizeRequestedPaths(&effectiveSet, cmd.RequestedPaths)
-	prefixes := storablePrefixes(effectiveSet.Mappings, cmd.Scope, requestedPaths)
-	batches := buildBatches(prefixes, p.batchSize)
+	pathPlan := planStorablePaths(effectiveSet.Mappings, cmd.Scope, requestedPaths, cmd.Device)
+	batches := buildBatchesWithIsolation(pathPlan.Paths, pathPlan.Isolated, p.batchSize)
 	coverage := buildCoverage(effectiveSet.Mappings, cmd.Scope, requestedPaths)
 	plan := &Plan{
 		MappingSource: string(set.Source), MappingVersion: set.SoftwareVersion,
@@ -343,20 +344,147 @@ func normalizeRuntimePath(path string) string {
 	return strings.Join(parts, ".")
 }
 
-func storablePrefixes(mappings []parammodel.ParamMapping, scope SyncScope, requested []string) []string {
+const (
+	mlnDCProductClass         = "FAP/MLN/DC"
+	mlnDCRFStatusStandardPath = "Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus"
+	mlnDCRFStatusPrivatePath  = "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.AdminCellState"
+	mlnDCCarrierCount         = 2
+)
+
+type storablePathPlan struct {
+	Paths    []string
+	Isolated []string
+}
+
+func planStorablePaths(
+	mappings []parammodel.ParamMapping,
+	scope SyncScope,
+	requested []string,
+	device *model.Device,
+) storablePathPlan {
+	if !isMLNDCDeviceModel(device) || !hasMLNDCRFStatusMapping(mappings) {
+		return storablePathPlan{Paths: genericStorablePrefixes(mappings, scope, requested)}
+	}
+
+	otherMappings := make([]parammodel.ParamMapping, 0, len(mappings)-1)
+	for _, mapping := range mappings {
+		if !isMLNDCRFStatusMapping(mapping) {
+			otherMappings = append(otherMappings, mapping)
+		}
+	}
+	rfPaths := mlnDCRFStatusPaths(scope, requested, mlnDCCarrierCount)
+	paths := append(genericStorablePrefixes(otherMappings, scope, requested), rfPaths...)
+	return storablePathPlan{
+		Paths:    sortedUniquePaths(paths),
+		Isolated: rfPaths,
+	}
+}
+
+func genericStorablePrefixes(
+	mappings []parammodel.ParamMapping,
+	scope SyncScope,
+	requested []string,
+) []string {
 	if scope.IsFull() {
 		return provision.PathBStorablePrefixes(mappings)
 	}
 	return provision.PathBStorablePrefixesForStandardPaths(mappings, requested)
 }
 
+func isMLNDCDeviceModel(device *model.Device) bool {
+	return device != nil &&
+		strings.EqualFold(strings.TrimSpace(device.ProductClass), mlnDCProductClass)
+}
+
+func hasMLNDCRFStatusMapping(mappings []parammodel.ParamMapping) bool {
+	for _, mapping := range mappings {
+		if isMLNDCRFStatusMapping(mapping) {
+			return true
+		}
+	}
+	return false
+}
+
+func isMLNDCRFStatusMapping(mapping parammodel.ParamMapping) bool {
+	return mapping.IsStorable && mapping.IsSupported &&
+		mapping.StandardPath == mlnDCRFStatusStandardPath &&
+		mapping.PrivatePath == mlnDCRFStatusPrivatePath
+}
+
+func mlnDCRFStatusPaths(scope SyncScope, requested []string, carrierCount int) []string {
+	if carrierCount <= 0 {
+		return nil
+	}
+
+	paths := make([]string, 0, carrierCount)
+	for instance := 1; instance <= carrierCount; instance++ {
+		if !scope.IsFull() && !requestsMLNDCRFCarrier(requested, instance) {
+			continue
+		}
+		paths = append(paths, instantiatePathTemplate(mlnDCRFStatusPrivatePath, instance))
+	}
+	return paths
+}
+
+func requestsMLNDCRFCarrier(requested []string, instance int) bool {
+	standardPath := instantiatePathTemplate(mlnDCRFStatusStandardPath, instance)
+	for _, requestedPath := range requested {
+		concreteRequestedPath := instantiatePathTemplate(requestedPath, instance)
+		if concreteRequestedPath == standardPath ||
+			(strings.HasSuffix(concreteRequestedPath, ".") &&
+				strings.HasPrefix(standardPath, concreteRequestedPath)) {
+			return true
+		}
+	}
+	return false
+}
+
+func instantiatePathTemplate(path string, instance int) string {
+	return strings.Replace(path, "{i}", strconv.Itoa(instance), 1)
+}
+
+func sortedUniquePaths(paths []string) []string {
+	seen := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		if path != "" {
+			seen[path] = struct{}{}
+		}
+	}
+	result := make([]string, 0, len(seen))
+	for path := range seen {
+		result = append(result, path)
+	}
+	sort.Strings(result)
+	return result
+}
+
 func buildBatches(paths []string, batchSize int) []TaskBatch {
-	legacyBatches := provision.PathBGPVBatches(paths, batchSize)
-	batches := make([]TaskBatch, 0, len(legacyBatches))
+	return buildBatchesWithIsolation(paths, nil, batchSize)
+}
+
+func buildBatchesWithIsolation(paths, isolatedPaths []string, batchSize int) []TaskBatch {
+	isolated := make(map[string]struct{}, len(isolatedPaths))
+	for _, path := range isolatedPaths {
+		isolated[path] = struct{}{}
+	}
+	sharedPaths := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if _, found := isolated[path]; !found {
+			sharedPaths = append(sharedPaths, path)
+		}
+	}
+
+	legacyBatches := provision.PathBGPVBatches(sharedPaths, batchSize)
+	batches := make([]TaskBatch, 0, len(legacyBatches)+len(isolatedPaths))
 	for _, paths := range legacyBatches {
 		batchPaths := append([]string(nil), paths...)
 		batches = append(batches, TaskBatch{
 			Paths: batchPaths, EstimatedPayloadBytes: len(batchPaths) * defaultEstimatedPathBytes,
+		})
+	}
+	for _, path := range isolatedPaths {
+		batches = append(batches, TaskBatch{
+			Paths: []string{path}, EstimatedPayloadBytes: defaultEstimatedPathBytes,
 		})
 	}
 	return batches
