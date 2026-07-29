@@ -31,6 +31,42 @@ func TestStreamingOutputMetricPathsSkipsEmptyPaths(t *testing.T) {
 	require.Equal(t, []string{"K_TASK", "K_ENABLED"}, got)
 }
 
+func TestStreamingTaskOutputMetricPathsCustomUsesOnlyTaskSelection(t *testing.T) {
+	got := streamingTaskOutputMetricPaths(
+		&Task{
+			IsBuiltin:   false,
+			MetricPaths: []string{"C000020013", "C000020014"},
+		},
+		[]string{"C000010228", "K_ENABLED"},
+	)
+
+	require.Equal(t, []string{"C000020013", "C000020014"}, got)
+}
+
+func TestStreamingTaskOutputMetricPathsBuiltinIncludesEnabledMetrics(t *testing.T) {
+	got := streamingTaskOutputMetricPaths(
+		&Task{
+			IsBuiltin:   true,
+			MetricPaths: []string{"K_TASK"},
+		},
+		[]string{"K_ENABLED", "K_TASK"},
+	)
+
+	require.Equal(t, []string{"K_TASK", "K_ENABLED"}, got)
+}
+
+func TestShouldRejectEmptyStreamingMembersCustomOnly(t *testing.T) {
+	require.True(t, shouldRejectEmptyStreamingMembers(&Task{IsBuiltin: false}, nil))
+	require.False(t, shouldRejectEmptyStreamingMembers(&Task{IsBuiltin: true}, nil))
+	require.False(t, shouldRejectEmptyStreamingMembers(nil, nil))
+}
+
+func TestStreamingTaskCreatorDefaultsToSystem(t *testing.T) {
+	require.Equal(t, "system", streamingTaskCreator(nil))
+	require.Equal(t, "system", streamingTaskCreator(&Task{}))
+	require.Equal(t, "alice", streamingTaskCreator(&Task{Creator: "alice"}))
+}
+
 func TestStreamingEnabledDeviceTypesUsesTaskTechnology(t *testing.T) {
 	got, err := streamingEnabledDeviceTypes("lte")
 

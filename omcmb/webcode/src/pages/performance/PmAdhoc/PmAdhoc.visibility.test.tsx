@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { App } from 'antd';
 import { IntlProvider } from 'react-intl';
 import { describe, expect, it, vi } from 'vitest';

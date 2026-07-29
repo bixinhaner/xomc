@@ -145,10 +145,14 @@ describe('pmPageStateStore', () => {
     expect(isPerformanceTabPath('/performance')).toBe(true)
     expect(isPerformanceTabPath('/performance/device-view?tab=a')).toBe(true)
     expect(isPerformanceTabPath('/performance/pm-adhoc')).toBe(true)
+    expect(isPerformanceTabPath('/performance/pm-adhoc/new')).toBe(true)
+    expect(isPerformanceTabPath('/performance/pm-adhoc/adhoc-001/edit')).toBe(true)
     expect(isPerformanceTabPath('/performance/query')).toBe(true)
     expect(isPerformanceTabPath('/performance/task-config')).toBe(false)
     expect(isPerformanceTabPath('/device/performance-profile')).toBe(false)
     expect(performancePageKeyFromPath('/performance/query?template=daily')).toBe('/performance/query')
+    expect(performancePageKeyFromPath('/performance/pm-adhoc/new')).toBe('/performance/pm-adhoc')
+    expect(performancePageKeyFromPath('/performance/pm-adhoc/adhoc-001/edit')).toBe('/performance/pm-adhoc')
   })
 
   it('rejects state saves for unrelated performance management pages', () => {
@@ -267,6 +271,66 @@ describe('pmPageStateStore', () => {
 
     expect(useTabStore.getState().tabs.some((tab) => tab.key === 'pm-query')).toBe(false)
     expect(usePmPageStateStore.getState().getPageState('/performance/query')).toBeNull()
+  })
+
+  it('keeps the adhoc wizard child route in the same tab route group', () => {
+    useTabStore.getState().openTab({
+      key: 'pm-adhoc',
+      label: 'nav.performance.adhoc',
+      path: '/performance/pm-adhoc',
+      closable: true,
+    })
+
+    useTabStore.getState().syncActiveTabPath('/performance/pm-adhoc/new')
+
+    expect(useTabStore.getState().tabs.find((tab) => tab.key === 'pm-adhoc')?.path).toBe('/performance/pm-adhoc/new')
+
+    useTabStore.getState().openTab({
+      key: 'pm-dashboard',
+      label: 'nav.performance.dashboard',
+      path: '/performance',
+      closable: true,
+    })
+
+    expect(useTabStore.getState().activateByPath('/performance/pm-adhoc')).toBe(true)
+    expect(useTabStore.getState().activeTabKey).toBe('pm-adhoc')
+
+    useTabStore.getState().syncActiveTabPath('/performance/pm-adhoc/adhoc-001/edit')
+
+    expect(useTabStore.getState().tabs.find((tab) => tab.key === 'pm-adhoc')?.path).toBe(
+      '/performance/pm-adhoc/adhoc-001/edit',
+    )
+  })
+
+  it('clears adhoc draft state when closing an adhoc child-route tab', () => {
+    useTabStore.getState().openTab({
+      key: 'pm-adhoc',
+      label: 'nav.performance.adhoc',
+      path: '/performance/pm-adhoc/new',
+      closable: true,
+    })
+    usePmPageStateStore.getState().savePageState('/performance/pm-adhoc', {
+      view: {
+        adhocDrafts: {
+          custom: {
+            new: {
+              formValues: {
+                name: 'Issue210 草稿',
+                granularity: 'hourly',
+                dimension: 'device',
+                aggregation: 'avg',
+                metricPaths: ['pm.cpu.avg'],
+              },
+              currentStep: 2,
+            },
+          },
+        },
+      },
+    })
+
+    useTabStore.getState().closeTab('pm-adhoc')
+
+    expect(usePmPageStateStore.getState().getPageState('/performance/pm-adhoc')).toBeNull()
   })
 
   it('clears performance page states on logout and user switch', () => {
