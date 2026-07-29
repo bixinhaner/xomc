@@ -91,6 +91,44 @@ func TestENBReleaseCounterRegisteredAcrossRuntimeAndDeliveryCopies(t *testing.T)
 	}
 }
 
+func TestENBERABSetupCountersUsePMReportKeyCase(t *testing.T) {
+	files := []string{
+		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "BLQ.xml"),
+		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "ENB_DEFAULT_181.xml"),
+		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "MLN.xml"),
+		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "MLQ.xml"),
+		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "BM.xml"),
+		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "BLX.xml"),
+		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "ENB_DEFAULT_098.xml"),
+		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "BLQ.xml"),
+		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "ENB_DEFAULT_181.xml"),
+		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "MLN.xml"),
+		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "MLQ.xml"),
+		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "BM.xml"),
+		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "BLX.xml"),
+		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "ENB_DEFAULT_098.xml"),
+		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "BAIBLQ.xml"),
+	}
+	want := map[string]string{
+		"C000010070": "ERAB.EstabInitAttNbr.Sum",
+		"C000010106": "ERAB.EstabAddAttNbr.Sum",
+		"C000010116": "ERAB.EstabAddSuccNbr.Sum",
+	}
+
+	for _, file := range files {
+		t.Run(file, func(t *testing.T) {
+			var doc xmlIndicatorModel
+			require.NoError(t, readXML(file, &doc), file)
+			for id, reportKey := range want {
+				ind, ok := findIndicatorByID([]xmlIndicatorModel{doc}, id)
+				require.True(t, ok, "%s 中 %s 应存在", file, id)
+				assert.Equal(t, reportKey, ind.ReportKey, "%s reportKey 必须与 PM 原文字段大小写一致", id)
+				assert.Equal(t, reportKey, ind.EnName, "%s enName 必须与 PM 原文字段大小写一致", id)
+			}
+		})
+	}
+}
+
 // #98：reload 重灌 builtin 公式时，已被用户自定义公式覆盖的 (平台, 指标) 必须跳过，
 // 避免与保留下来的自定义行重复 / 覆盖用户意图。
 func TestExcludeCustomOverridden(t *testing.T) {
