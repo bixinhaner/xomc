@@ -2,6 +2,7 @@ package stream
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,13 +49,108 @@ func TestRedisWindowStoreAccumulateIsIdempotentAndComplete(t *testing.T) {
 	keys := redisKeys(key, 1)
 	fields, err := server.HKeys(keys.acc[0])
 	require.NoError(t, err)
-	require.NotEmpty(t, fields)
-	for _, field := range fields {
-		require.Less(t, len(field), 40, "accumulator fields must use compact IDs")
+	require.Len(t, fields, 1)
+	require.Less(t, len(fields[0]), 40, "accumulator fields must use compact IDs")
+	require.False(t, server.Exists(keys.defs[0]))
+}
+
+func TestRedisWindowStoreUsesOneCompactHashFieldPerMetric(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	store := NewRedisWindowStore(client, time.Hour)
+	start := time.Date(2026, 7, 29, 1, 0, 0, 0, time.UTC)
+	key := WindowKey{
+		TaskID: uuid.New(), TaskVersionID: uuid.New(), Granularity: GranularityHourly,
+		EntityKey: "network", Start: start, End: start.Add(time.Hour),
 	}
-	definitions, err := server.HKeys(keys.defs[0])
+	contribution := Contribution{
+		Key: key, SourceFileID: uuid.NewString(), DeviceID: uuid.NewString(),
+		SlotStart: start, ExpectedSlots: 1,
+		Values: []ContributionValue{
+			{
+				Dimension: DimensionNetwork, DimensionKey: "network",
+				MetricPath: "C001", MetricType: "counter", Operation: AggregationSum, Value: 12.5,
+			},
+			{
+				Dimension: DimensionNetwork, DimensionKey: "network",
+				MetricPath: "C002", MetricType: "counter", Operation: AggregationMax, Value: 7,
+			},
+		},
+	}
+
+	_, err := store.Accumulate(context.Background(), contribution)
 	require.NoError(t, err)
-	require.NotEmpty(t, definitions)
+
+	keys := redisKeys(key, 1)
+	fields, err := server.HKeys(keys.acc[0])
+	require.NoError(t, err)
+	require.Len(t, fields, len(contribution.Values))
+	for _, field := range fields {
+		require.NotContains(t, field, "|sum")
+		require.NotContains(t, field, "|count")
+		require.NotContains(t, field, "|min")
+		require.NotContains(t, field, "|max")
+		raw := server.HGet(keys.acc[0], field)
+		require.True(t, strings.HasPrefix(raw, compactAccumulatorVersion+"|"))
+	}
+	require.False(t, server.Exists(keys.defs[0]),
+		"new compact windows must not allocate a separate definitions hash")
+}
+
+func TestRedisWindowStoreMigratesLegacyAccumulatorOnFirstWrite(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	store := NewRedisWindowStore(client, time.Hour)
+	start := time.Date(2026, 7, 29, 2, 0, 0, 0, time.UTC)
+	key := WindowKey{
+		TaskID: uuid.New(), TaskVersionID: uuid.New(), Granularity: GranularityHourly,
+		EntityKey: "network", Start: start, End: start.Add(time.Hour),
+	}
+	value := ContributionValue{
+		Dimension: DimensionNetwork, DimensionKey: "network",
+		MetricPath: "C001", MetricType: "counter", Operation: AggregationSum,
+	}
+	id, err := accumulatorDefinitionID(value)
+	require.NoError(t, err)
+	encoded, err := encodeDefinition(value)
+	require.NoError(t, err)
+	keys := redisKeys(key, 1)
+	require.NoError(t, client.HSet(context.Background(), keys.meta, map[string]any{
+		"expected_slots": 1, "received_slots": 0, "source_expected_slots": 1,
+		"source_received_slots": 0, "source_incomplete_slots": 0, "shard_count": 1,
+	}).Err())
+	require.NoError(t, client.HSet(context.Background(), keys.defs[0], id, encoded).Err())
+	require.NoError(t, client.HSet(context.Background(), keys.acc[0], map[string]any{
+		id + "|sum": 10, id + "|count": 2, id + "|min": 3, id + "|max": 7,
+	}).Err())
+
+	before, err := store.Read(context.Background(), key)
+	require.NoError(t, err)
+	require.Len(t, before.Accumulators, 1)
+	require.Equal(t, 10.0, before.Accumulators[0].Sum)
+	require.EqualValues(t, 2, before.Accumulators[0].Count)
+
+	value.Value = 2
+	_, err = store.Accumulate(context.Background(), Contribution{
+		Key: key, SourceFileID: uuid.NewString(), DeviceID: uuid.NewString(),
+		SlotStart: start, ExpectedSlots: 1, Values: []ContributionValue{value},
+	})
+	require.NoError(t, err)
+
+	after, err := store.Read(context.Background(), key)
+	require.NoError(t, err)
+	require.Len(t, after.Accumulators, 1)
+	require.Equal(t, 12.0, after.Accumulators[0].Sum)
+	require.EqualValues(t, 3, after.Accumulators[0].Count)
+	require.Equal(t, 2.0, after.Accumulators[0].Min)
+	require.Equal(t, 7.0, after.Accumulators[0].Max)
+
+	fields, err := server.HKeys(keys.acc[0])
+	require.NoError(t, err)
+	require.Equal(t, []string{id}, fields)
+	raw := server.HGet(keys.acc[0], id)
+	require.True(t, strings.HasPrefix(raw, compactAccumulatorVersion+"|"))
+	require.False(t, server.Exists(keys.defs[0]))
 }
 
 func TestRedisWindowStoreCountsRollupSlotAfterAllChunks(t *testing.T) {

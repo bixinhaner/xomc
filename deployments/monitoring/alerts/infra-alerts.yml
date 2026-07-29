@@ -112,8 +112,22 @@ groups:
           summary: "Redis 内存使用接近 maxmemory（> 85%）"
           description: |
             Redis 已用内存超过 maxmemory 的 85%，持续 5 分钟。
-            Impact: 触及上限后按 maxmemory-policy 逐出 key，会话/缓存可能丢失。
-            Action: 查大 key 与 TTL 设置；评估调大 maxmemory。
+            Impact: 当前 noeviction 会拒绝新写入，PM 聚合窗口将无法累加并触发消息重投。
+            Action: 查 pmagg 大 key、活跃窗口数量与 TTL；按资源预算扩容或降低状态开销。
+
+      - alert: RedisMemoryCritical
+        expr: (redis_memory_used_bytes / redis_memory_max_bytes > 0.95) and (redis_memory_max_bytes > 0)
+        for: 1m
+        labels:
+          severity: critical
+          domain: omc
+          service: redis
+        annotations:
+          summary: "Redis 内存即将达到 maxmemory（> 95%）"
+          description: |
+            Redis 已用内存超过 maxmemory 的 95%。noeviction 会拒绝新写入，
+            PM 聚合状态、幂等键和运行时缓存都可能写入失败。
+            立即检查 pmagg 状态规模、异常恢复循环和 Redis 容量。
 
 # TODO（留 T-0153 续）：NATS JetStream 积压告警。
 # prometheus-nats-exporter 的 JetStream 指标名随 exporter 版本而异，需在监控栈

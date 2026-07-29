@@ -347,7 +347,7 @@ groups:
             联查 pending、redelivery、delivery/ack rate 和 worker 错误日志。
 
       - alert: OMCPMQueueSampleStale
-        expr: time() - omc_pm_queue_sample_timestamp_seconds{subject="pm.file.received",durable="pm-workers"} > 300
+        expr: time() - omc_pm_queue_sample_timestamp_seconds{deployment_unit="acs",subject="pm.file.received",durable="pm-workers"} > 300
         for: 2m
         labels:
           severity: critical
@@ -367,7 +367,7 @@ groups:
           and acs_pm_queue_ack_rate < acs_pm_queue_delivery_rate
           and acs_pm_queue_backlog_slope > 0
           and max without (subject, durable) (
-            time() - omc_pm_queue_sample_timestamp_seconds{subject="pm.file.received",durable="pm-workers"}
+            time() - omc_pm_queue_sample_timestamp_seconds{deployment_unit="acs",subject="pm.file.received",durable="pm-workers"}
           ) < 60
         for: 10m
         labels:
@@ -418,3 +418,16 @@ groups:
           description: |
             Redis 窗口状态会保留并重试。检查 TimescaleDB、窗口 failed 状态和 Redis 内存；
             禁止通过查询原始 PM 表进行人工补算。
+
+      - alert: OMCPMStreamingAggregationEventFailures
+        expr: increase(omc_pm_aggregation_events_failed_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 聚合事件持续处理失败"
+          description: |
+            Worker 在确认消息前持续处理失败，可能导致 NATS 重投和聚合窗口延迟。
+            检查 Redis maxmemory/OOM、TimescaleDB 写入、窗口恢复日志和 consumer redelivery。

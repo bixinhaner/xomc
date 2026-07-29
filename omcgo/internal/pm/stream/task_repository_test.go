@@ -53,3 +53,21 @@ func TestBuildPurgeObsoleteBuiltinDeviceTasksSQLTargetsOnlyLegacyIDs(t *testing.
 		uuid.MustParse("0184dddd-0005-4000-8000-000000000003"),
 	}, args)
 }
+
+func TestTaskMemberBatchesStayBelowPostgresParameterLimit(t *testing.T) {
+	members := make([]TaskMember, 2501)
+
+	batches := taskMemberBatches(members)
+
+	require.Len(t, batches, 3)
+	require.Len(t, batches[0], 1000)
+	require.Len(t, batches[1], 1000)
+	require.Len(t, batches[2], 501)
+	require.LessOrEqual(t, len(batches[0])*taskMemberColumnCount, 65535)
+	require.LessOrEqual(t, len(batches[1])*taskMemberColumnCount, 65535)
+	require.LessOrEqual(t, len(batches[2])*taskMemberColumnCount, 65535)
+}
+
+func TestTaskMemberBatchesHandleEmptyInput(t *testing.T) {
+	require.Empty(t, taskMemberBatches(nil))
+}
