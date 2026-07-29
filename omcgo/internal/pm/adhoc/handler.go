@@ -60,7 +60,8 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		adhoc.POST("/tasks", h.Create)
 		adhoc.GET("/tasks", h.List)
 		adhoc.GET("/tasks/:id", h.Get)
-		adhoc.PATCH("/tasks/:id", h.Update) // T-0194：编辑任务定义
+		adhoc.PUT("/tasks/:id", h.Update)   // #211：保存任务定义
+		adhoc.PATCH("/tasks/:id", h.Update) // T-0194：兼容旧编辑任务定义调用
 		adhoc.DELETE("/tasks/:id", h.Cancel)
 		adhoc.POST("/tasks/:id/resume", h.Resume)       // #674：恢复已取消任务
 		adhoc.DELETE("/tasks/:id/definition", h.Delete) // #392：硬删终态自建任务定义行
@@ -449,7 +450,7 @@ func (h *Handler) Get(c *gin.Context) {
 	response.OK(c, taskToDTO(c.Request.Context(), t))
 }
 
-// updateRequestDTO 是 PATCH /pm/adhoc/tasks/:id 的入参（T-0194）。
+// updateRequestDTO 是 PUT/PATCH /pm/adhoc/tasks/:id 的入参。
 //
 // 字段集与编辑能力对齐：自建任务可改 name/device_sns/metric_paths/granularities/object_ldns/window；
 // 内置任务只取 metric_paths（其余字段服务端忽略）。mode/technology/dimension/is_builtin/expire_days 不在此结构体，不可改。
@@ -465,7 +466,7 @@ type updateRequestDTO struct {
 	Visibility    string       `json:"visibility" binding:"omitempty,oneof=private public"`
 }
 
-// Update PATCH /pm/adhoc/tasks/:id
+// Update PUT/PATCH /pm/adhoc/tasks/:id
 //
 // 编辑任务定义（T-0194）。先取既有任务确定 is_builtin / mode / technology（结构性字段不可改，
 // 用既有值做校验基准）：

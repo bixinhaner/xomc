@@ -13,14 +13,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // 用 vi.hoisted 让 mock 工厂能安全引用 mock fn（vi.mock 被提升到文件顶部）。
-const { getMock, postMock, patchMock, deleteMock } = vi.hoisted(() => ({
+const { getMock, postMock, putMock, patchMock, deleteMock } = vi.hoisted(() => ({
   getMock: vi.fn(),
   postMock: vi.fn(),
+  putMock: vi.fn(),
   patchMock: vi.fn(),
   deleteMock: vi.fn(),
 }));
 vi.mock('../../http', () => ({
-  default: { get: getMock, post: postMock, patch: patchMock, delete: deleteMock },
+  default: { get: getMock, post: postMock, put: putMock, patch: patchMock, delete: deleteMock },
 }));
 
 import { pmAdhocApi } from '../pmAdhocApi';
@@ -30,6 +31,8 @@ beforeEach(() => {
   getMock.mockResolvedValue({ data: { items: [], total: 0 } });
   postMock.mockReset();
   postMock.mockResolvedValue({ data: { id: 'created-task' } });
+  putMock.mockReset();
+  putMock.mockResolvedValue({ data: { id: 'updated-task' } });
   patchMock.mockReset();
   patchMock.mockResolvedValue({ data: { id: 'updated-task' } });
   deleteMock.mockReset();
@@ -58,9 +61,11 @@ describe('pmAdhocApi.create / update — 可见性字段透传', () => {
       visibility: 'private',
     });
 
-    const [url, payload] = patchMock.mock.calls[0];
+    const [url, payload] = putMock.mock.calls[0];
     expect(url).toBe('/pm/adhoc/tasks/task-1');
+    expect(payload.metric_paths).toEqual(['K0001']);
     expect(payload.visibility).toBe('private');
+    expect(patchMock).not.toHaveBeenCalled();
   });
 
   it('create / update 透传计划结束时间为 planned_end_at', async () => {
@@ -77,7 +82,7 @@ describe('pmAdhocApi.create / update — 可见性字段透传', () => {
       metricPaths: ['K0001'],
       plannedEndAt: '2026-08-27T12:00:00.000Z',
     });
-    expect(patchMock.mock.calls[0][1].planned_end_at).toBe('2026-08-27T12:00:00.000Z');
+    expect(putMock.mock.calls[0][1].planned_end_at).toBe('2026-08-27T12:00:00.000Z');
   });
 
   it('create / update 透传计划结束时间清空值 null', async () => {
@@ -94,7 +99,7 @@ describe('pmAdhocApi.create / update — 可见性字段透传', () => {
       metricPaths: ['K0001'],
       plannedEndAt: null,
     });
-    expect(patchMock.mock.calls[0][1].planned_end_at).toBeNull();
+    expect(putMock.mock.calls[0][1].planned_end_at).toBeNull();
   });
 });
 

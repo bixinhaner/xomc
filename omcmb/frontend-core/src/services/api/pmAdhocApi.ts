@@ -117,7 +117,7 @@ export const pmAdhocApi = {
     if (input.objectLdns && input.objectLdns.length > 0) {
       payload.object_ldns = input.objectLdns;
     }
-    const { data } = await http.patch<{ id: string }>(`/pm/adhoc/tasks/${id}`, payload);
+    const { data } = await http.put<{ id: string }>(`/pm/adhoc/tasks/${id}`, payload);
     return data;
   },
   async cancel(id: string): Promise<void> {

@@ -8,6 +8,7 @@ import zhCN from '@core/i18n/zh-CN';
 import { usePmPageStateStore } from '@core/store/pmPageStateStore';
 import type { AdhocTask } from '@core/types/pmAdhoc';
 import BuiltinMetricEditModal from './BuiltinMetricEditModal';
+import { getBuiltinMetricDraft, saveBuiltinMetricDraft } from './pmAdhocDraftState';
 
 const updateMutateAsync = vi.fn();
 const useIndicatorCandidatesSpy = vi.fn();
@@ -169,6 +170,28 @@ describe('BuiltinMetricEditModal batch metric input', () => {
       expect(updateMutateAsync).toHaveBeenCalledWith({
         id: 'builtin-1',
         input: { metricPaths: ['K0001', 'C0001'] },
+      });
+    });
+  });
+
+  it('drops invisible restored builtin metric selections before saving again', async () => {
+    saveBuiltinMetricDraft({
+      taskId: 'builtin-1',
+      metricPaths: ['K0001', 'K-HIDDEN'],
+      metricTypeFilter: 'kpi',
+    });
+
+    renderModal();
+
+    await waitFor(() => {
+      expect(getBuiltinMetricDraft('builtin-1')?.metricPaths).toEqual(['K0001']);
+    });
+    fireEvent.click(screen.getByRole('button', { name: /保存/ }));
+
+    await waitFor(() => {
+      expect(updateMutateAsync).toHaveBeenCalledWith({
+        id: 'builtin-1',
+        input: { metricPaths: ['K0001'] },
       });
     });
   });

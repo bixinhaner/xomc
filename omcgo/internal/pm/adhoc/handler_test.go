@@ -480,7 +480,7 @@ func Test_Handler_Update_NonOwner_Forbidden(t *testing.T) {
 	}
 	jsonBody, _ := json.Marshal(body)
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/pm/adhoc/tasks/"+taskID.String(), bytes.NewReader(jsonBody))
+	req := httptest.NewRequest(http.MethodPut, "/pm/adhoc/tasks/"+taskID.String(), bytes.NewReader(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
@@ -518,7 +518,7 @@ func Test_Handler_Update_PublicNonOwner_Allowed(t *testing.T) {
 	}
 	jsonBody, _ := json.Marshal(body)
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/pm/adhoc/tasks/"+taskID.String(), bytes.NewReader(jsonBody))
+	req := httptest.NewRequest(http.MethodPut, "/pm/adhoc/tasks/"+taskID.String(), bytes.NewReader(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 

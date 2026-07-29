@@ -8,18 +8,43 @@ import zhCN from '@core/i18n/zh-CN';
 import { usePmPageStateStore } from '@core/store/pmPageStateStore';
 import type { AdhocTask } from '@core/types/pmAdhoc';
 import PmAdhocWizard from './PmAdhocWizard';
-import { getCustomWizardDraft, saveCustomWizardDraft } from './pmAdhocDraftState';
+import {
+  getCustomWizardDraft,
+  saveCustomWizardDraft,
+  type PmAdhocCustomWizardDraft,
+} from './pmAdhocDraftState';
 
 const navigateSpy = vi.fn();
 const createMutateAsync = vi.fn();
 let routeParams: { id?: string } = {};
 let adhocDetail: AdhocTask | undefined;
 const useIndicatorCandidatesSpy = vi.fn();
+let deviceListItems: { sn: string; name?: string; networkType: string }[] = [];
 
 let indicatorCandidates = [
   { id: 'K0001', name: 'availability', cnName: '可用率', enName: 'Availability', isCounter: false },
   { id: 'C0001', name: 'rrc_att', cnName: 'RRC请求次数', enName: 'RRC Attempts', isCounter: true },
 ];
+
+const customDraft: PmAdhocCustomWizardDraft = {
+  current: 0,
+  name: '恢复中的自建任务',
+  mode: 'continuous',
+  technology: 'lte',
+  expireDays: 60,
+  visibility: 'private',
+  dimension: 'network',
+  selectedSns: [],
+  cellSel: {},
+  metricPaths: ['K0001'],
+  metricTypeFilter: 'all',
+  windowStart: '2026-07-28T00:00:00.000Z',
+  windowEnd: '2026-07-28T01:00:00.000Z',
+  plannedEndAt: '2026-08-28T00:00:00.000Z',
+  plannedEndTouched: true,
+  drilldownTouched: false,
+  originalObjectLdns: [],
+};
 
 vi.mock('react-router-dom', () => ({
   useLocation: () => ({ pathname: routeParams.id ? `/performance/pm-adhoc/${routeParams.id}/edit` : '/performance/pm-adhoc/new', search: '' }),
@@ -34,7 +59,7 @@ vi.mock('@core/hooks/api/usePmAdhoc', () => ({
 }));
 
 vi.mock('@core/hooks/api/useDevices', () => ({
-  useDeviceList: () => ({ data: { items: [] }, isLoading: false }),
+  useDeviceList: () => ({ data: { items: deviceListItems }, isLoading: false }),
 }));
 
 vi.mock('@core/hooks/api/usePmQuery', () => ({
@@ -94,6 +119,7 @@ describe('PmAdhocWizard batch metric input', () => {
     sessionStorage.clear();
     routeParams = {};
     adhocDetail = undefined;
+    deviceListItems = [];
     indicatorCandidates = [
       { id: 'K0001', name: 'availability', cnName: '可用率', enName: 'Availability', isCounter: false },
       { id: 'C0001', name: 'rrc_att', cnName: 'RRC请求次数', enName: 'RRC Attempts', isCounter: true },
@@ -126,6 +152,7 @@ describe('PmAdhocWizard batch metric input', () => {
     saveCustomWizardDraft({ mode: 'new' }, {
       current: 0,
       name: '恢复中的自建任务',
+      mode: 'continuous',
       technology: 'nr',
       expireDays: 60,
       visibility: 'public',
@@ -146,6 +173,42 @@ describe('PmAdhocWizard batch metric input', () => {
 
     expect(screen.getByDisplayValue('恢复中的自建任务')).toBeInTheDocument();
     expect(screen.getByText('公开')).toBeInTheDocument();
+  });
+
+  it('clears a restored new task draft when returning to the list', () => {
+    saveCustomWizardDraft({ mode: 'new' }, {
+      ...customDraft,
+      name: '准备放弃的新建草稿',
+    });
+
+    renderWizard();
+    fireEvent.click(screen.getByRole('button', { name: /返回列表/ }));
+
+    expect(navigateSpy).toHaveBeenCalledWith('/performance/pm-adhoc');
+    expect(getCustomWizardDraft({ mode: 'new' })).toBeUndefined();
+  });
+
+  it('drops invisible restored devices and metrics before the draft can be saved again', async () => {
+    deviceListItems = [{ sn: 'SN-VISIBLE', name: '可见设备', networkType: 'lte' }];
+    saveCustomWizardDraft({ mode: 'new' }, {
+      ...customDraft,
+      current: 1,
+      dimension: 'aggregate_group',
+      selectedSns: ['SN-VISIBLE', 'SN-HIDDEN'],
+      cellSel: {
+        'SN-VISIBLE': ['Cell=1'],
+        'SN-HIDDEN': ['Cell=2'],
+      },
+      metricPaths: ['K0001', 'K-HIDDEN'],
+    });
+
+    renderWizard();
+
+    await waitFor(() => {
+      expect(getCustomWizardDraft({ mode: 'new' })?.selectedSns).toEqual(['SN-VISIBLE']);
+      expect(getCustomWizardDraft({ mode: 'new' })?.cellSel).toEqual({ 'SN-VISIBLE': ['Cell=1'] });
+      expect(getCustomWizardDraft({ mode: 'new' })?.metricPaths).toEqual(['K0001']);
+    });
   });
 
   it('caps batch-added metrics at the PM query selection limit', () => {
@@ -222,6 +285,7 @@ describe('PmAdhocWizard batch metric input', () => {
     saveCustomWizardDraft({ mode: 'edit', taskId: 'adhoc-editing' }, {
       current: 0,
       name: '未保存的编辑任务名',
+      mode: 'oneshot',
       technology: 'lte',
       expireDays: 60,
       visibility: 'public',

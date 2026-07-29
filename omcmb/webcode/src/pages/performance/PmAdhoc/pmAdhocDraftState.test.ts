@@ -4,6 +4,7 @@ import { usePmPageStateStore } from '@core/store/pmPageStateStore';
 import {
   clearBuiltinMetricDraft,
   clearCustomWizardDraft,
+  getActiveCustomWizard,
   getBuiltinMetricDraft,
   getCustomWizardDraft,
   PM_ADHOC_PAGE_KEY,
@@ -16,6 +17,7 @@ import {
 const customDraft: PmAdhocCustomWizardDraft = {
   current: 2,
   name: '未完成自建任务',
+  mode: 'continuous',
   technology: 'lte',
   expireDays: 60,
   visibility: 'private',
@@ -54,6 +56,7 @@ describe('pmAdhocDraftState', () => {
     expect(snapshot?.view).not.toHaveProperty('activeListArea');
     expect(snapshot?.view).not.toHaveProperty('builtinPagination');
     expect(getCustomWizardDraft({ mode: 'new' })?.name).toBe('未完成自建任务');
+    expect(getActiveCustomWizard()).toEqual({ mode: 'new' });
   });
 
   it('saves and clears edit wizard and builtin metric drafts', () => {
@@ -72,12 +75,14 @@ describe('pmAdhocDraftState', () => {
     );
     expect(bucket.activeBuiltinMetricTaskId).toBe('builtin-1');
     expect(getCustomWizardDraft({ mode: 'edit', taskId: 'custom-1' })?.name).toBe('编辑中的自建任务');
+    expect(getActiveCustomWizard()).toEqual({ mode: 'edit', taskId: 'custom-1' });
     expect(getBuiltinMetricDraft('builtin-1')?.metricPaths).toEqual(['K0001', 'C0001']);
 
     clearCustomWizardDraft({ mode: 'edit', taskId: 'custom-1' });
     clearBuiltinMetricDraft('builtin-1');
 
     expect(getCustomWizardDraft({ mode: 'edit', taskId: 'custom-1' })).toBeUndefined();
+    expect(getActiveCustomWizard()).toBeUndefined();
     expect(getBuiltinMetricDraft('builtin-1')).toBeUndefined();
   });
 });

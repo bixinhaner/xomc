@@ -60,7 +60,12 @@ import { CreateAdhocTaskDrawer, type CreateAdhocPreset } from './CreateAdhocTask
 import { AdhocResultPanel } from './AdhocResultPanel';
 import BuiltinMetricEditModal from './BuiltinMetricEditModal';
 import SelectedMetricsTags from './SelectedMetricsTags';
-import { clearActiveBuiltinMetricTaskId, getActiveBuiltinMetricTaskId } from './pmAdhocDraftState';
+import {
+  clearBuiltinMetricDraft,
+  clearCustomWizardDraft,
+  getActiveBuiltinMetricTaskId,
+  getActiveCustomWizard,
+} from './pmAdhocDraftState';
 
 const statusColor: Record<AdhocStatus, string> = {
   pending: 'default',
@@ -439,13 +444,30 @@ export default function PmAdhocPage() {
   const [builtinEditTask, setBuiltinEditTask] = useState<AdhocTask | null>(null);
 
   useEffect(() => {
+    const activeCustomWizard = getActiveCustomWizard();
+    if (!activeCustomWizard) return;
+    if (activeCustomWizard.mode === 'new') {
+      navigate('/performance/pm-adhoc/new');
+      return;
+    }
+    if (customLoading) return;
+    if (!customTasks.some((task) => task.id === activeCustomWizard.taskId)) {
+      clearCustomWizardDraft(activeCustomWizard);
+      return;
+    }
+    navigate(`/performance/pm-adhoc/${activeCustomWizard.taskId}/edit`);
+  }, [customLoading, customTasks, navigate]);
+
+  useEffect(() => {
     if (builtinEditTask || builtinLoading) return;
     const activeTaskId = getActiveBuiltinMetricTaskId();
     if (!activeTaskId) return;
     const activeTask = builtinTasks.find((task) => task.id === activeTaskId);
     if (activeTask) {
       setBuiltinEditTask(activeTask);
+      return;
     }
+    clearBuiltinMetricDraft(activeTaskId);
   }, [builtinEditTask, builtinLoading, builtinTasks]);
 
   // G6-Gap-12 联动：URL preset 触发自动打开 Drawer
@@ -548,7 +570,7 @@ export default function PmAdhocPage() {
         task={builtinEditTask}
         open
         onClose={() => {
-          clearActiveBuiltinMetricTaskId(builtinEditTask.id);
+          clearBuiltinMetricDraft(builtinEditTask.id);
           setBuiltinEditTask(null);
         }}
       />
