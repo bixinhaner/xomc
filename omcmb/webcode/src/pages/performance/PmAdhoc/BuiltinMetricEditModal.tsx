@@ -2,7 +2,7 @@
  * T-0194：内置任务「编辑指标」页面内编辑层。
  *
  * 仅含指标穿梭框（预填当前 metric_paths、按任务制式加载候选、含 all/kpi/counter 类型筛选），
- * 与向导第 3 步同口径。提交只改 metric_paths（调 PATCH，后端守门只取 metric_paths）。
+ * 与向导第 3 步同口径。提交只改 metric_paths（调 PUT，后端守门只取 metric_paths）。
  * 不涉及设备/粒度/时窗——内置任务结构性字段不可改。
  */
 
@@ -90,6 +90,7 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
   const [metricTypeFilter, setMetricTypeFilter] = useState<'all' | 'kpi' | 'counter'>('all');
   const [metricBatchOpen, setMetricBatchOpen] = useState(false);
   const [hydratedTaskId, setHydratedTaskId] = useState<string | null>(null);
+  const [restoredFromDraft, setRestoredFromDraft] = useState(false);
 
   // 打开/切换任务时预填当前指标集。
   useEffect(() => {
@@ -99,9 +100,11 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
       setMetricTypeFilter(restoredDraft?.metricTypeFilter ?? 'all');
       setMetricBatchOpen(false);
       setHydratedTaskId(task.id);
+      setRestoredFromDraft(Boolean(restoredDraft));
       return;
     }
     setHydratedTaskId(null);
+    setRestoredFromDraft(false);
   }, [open, task]);
 
   useEffect(() => {
@@ -123,6 +126,17 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
     enabledOnly: true,
   });
   const indicatorItems = useMemo<IndicatorCandidate[]>(() => candidates ?? [], [candidates]);
+  const indicatorIdSet = useMemo(
+    () => new Set(indicatorItems.map((indicator) => indicator.id)),
+    [indicatorItems],
+  );
+
+  useEffect(() => {
+    if (!open || !task || !restoredFromDraft || isLoading) return;
+    const nextMetricPaths = metricPaths.filter((metricPath) => indicatorIdSet.has(metricPath));
+    if (nextMetricPaths.length === metricPaths.length) return;
+    setMetricPaths(nextMetricPaths);
+  }, [indicatorIdSet, isLoading, metricPaths, open, restoredFromDraft, task]);
 
   const selectedKeySet = useMemo(() => new Set(metricPaths), [metricPaths]);
   const transferItems = useMemo<MetricTransferItem[]>(

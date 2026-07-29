@@ -83,7 +83,7 @@ export interface CreateAdhocTaskInput {
 }
 
 /**
- * 编辑任务入参（T-0194，PATCH /pm/adhoc/tasks/:id）。
+ * 编辑任务入参（T-0194/#211，PUT /pm/adhoc/tasks/:id；后端保留 PATCH 兼容）。
  *   - 自建任务：传 name/deviceSns/metricPaths/granularities/objectLdns/window。
  *   - 内置任务：只需传 metricPaths（其余字段后端忽略）。
  * mode/technology/dimension/isBuiltin 不可改，不在本结构体内。

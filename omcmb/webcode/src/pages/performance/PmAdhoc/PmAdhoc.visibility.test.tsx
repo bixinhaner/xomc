@@ -1,11 +1,17 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { App } from 'antd';
 import { IntlProvider } from 'react-intl';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import zhCN from '@core/i18n/zh-CN';
+import { usePmPageStateStore } from '@core/store/pmPageStateStore';
 import type { AdhocTask } from '@core/types/pmAdhoc';
 import PmAdhocPage from './index';
+import {
+  getBuiltinMetricDraft,
+  saveBuiltinMetricDraft,
+  saveCustomWizardDraft,
+} from './pmAdhocDraftState';
 
 const navigateSpy = vi.fn();
 const setSearchParamsSpy = vi.fn();
@@ -52,6 +58,7 @@ const customTasks: AdhocTask[] = [
     status: 'running',
   }),
 ];
+const builtinTasks: AdhocTask[] = [];
 
 vi.mock('react-router-dom', () => ({
   useNavigate: () => navigateSpy,
@@ -87,7 +94,7 @@ vi.mock('@core/hooks/api/useTechnologyDictionary', () => ({
 
 vi.mock('@core/hooks/api/usePmAdhoc', () => ({
   usePmAdhocList: (opts?: { isBuiltin?: boolean }) => ({
-    data: opts?.isBuiltin ? [] : customTasks,
+    data: opts?.isBuiltin ? builtinTasks : customTasks,
     isLoading: false,
   }),
   usePmAdhocDetail: () => ({ data: undefined }),
@@ -129,6 +136,14 @@ function rowFor(name: string): HTMLElement {
 }
 
 describe('PmAdhoc visibility list actions', () => {
+  beforeEach(() => {
+    navigateSpy.mockReset();
+    setSearchParamsSpy.mockReset();
+    usePmPageStateStore.setState({ pages: {} });
+    sessionStorage.clear();
+    builtinTasks.length = 0;
+  });
+
   it('shows visibility and applies public/private action rules in the custom task list', () => {
     renderPage();
 
@@ -150,5 +165,43 @@ describe('PmAdhoc visibility list actions', () => {
     expect(privateMine.getByText('bob')).toBeInTheDocument();
     expect(privateMine.getByText('编辑')).toBeInTheDocument();
     expect(privateMine.getByText('取消')).toBeInTheDocument();
+  });
+
+  it('restores an active new custom wizard from the PM page state bucket', () => {
+    saveCustomWizardDraft({ mode: 'new' }, {
+      current: 1,
+      name: '未完成新建任务',
+      mode: 'continuous',
+      technology: 'lte',
+      expireDays: 60,
+      visibility: 'private',
+      dimension: 'network',
+      selectedSns: [],
+      cellSel: {},
+      metricPaths: ['K0001'],
+      metricTypeFilter: 'all',
+      windowStart: '2026-07-28T00:00:00.000Z',
+      windowEnd: '2026-07-28T01:00:00.000Z',
+      plannedEndAt: null,
+      plannedEndTouched: false,
+      drilldownTouched: false,
+      originalObjectLdns: [],
+    });
+
+    renderPage();
+
+    expect(navigateSpy).toHaveBeenCalledWith('/performance/pm-adhoc/new');
+  });
+
+  it('clears a builtin metric draft when the saved task is no longer visible', () => {
+    saveBuiltinMetricDraft({
+      taskId: 'hidden-builtin',
+      metricPaths: ['K0001'],
+      metricTypeFilter: 'all',
+    });
+
+    renderPage();
+
+    expect(getBuiltinMetricDraft('hidden-builtin')).toBeUndefined();
   });
 });

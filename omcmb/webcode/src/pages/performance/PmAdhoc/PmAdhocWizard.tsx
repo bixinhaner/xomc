@@ -167,7 +167,7 @@ export default function PmAdhocWizard() {
   // ① 基本信息
   const [name, setName] = useState('');
   const [technology, setTechnology] = useState<WizardTech>('lte');
-  const [mode] = useState<AdhocMode>('continuous');
+  const [mode, setMode] = useState<AdhocMode>('continuous');
   const [expireDays, setExpireDays] = useState<number>(60);
   const [visibility, setVisibility] = useState<AdhocVisibility>('private');
 
@@ -196,10 +196,12 @@ export default function PmAdhocWizard() {
   const [drilldownTouched, setDrilldownTouched] = useState(false);
   const [originalObjectLdns, setOriginalObjectLdns] = useState<string[]>([]);
   const [draftHydrated, setDraftHydrated] = useState(false);
+  const [restoredFromDraft, setRestoredFromDraft] = useState(false);
 
   const applyDraft = (draft: PmAdhocCustomWizardDraft) => {
     setCurrent(draft.current);
     setName(draft.name);
+    setMode(draft.mode);
     setTechnology(draft.technology);
     setExpireDays(draft.expireDays);
     setVisibility(draft.visibility);
@@ -218,6 +220,7 @@ export default function PmAdhocWizard() {
     setPlannedEndTouched(draft.plannedEndTouched);
     setDrilldownTouched(draft.drilldownTouched);
     setOriginalObjectLdns(draft.originalObjectLdns);
+    setRestoredFromDraft(true);
   };
 
   // 编辑模式：详情到手后按各步初值预填（名称/制式/模式/维度/设备/指标/粒度/时窗）。
@@ -230,6 +233,7 @@ export default function PmAdhocWizard() {
     }
     setExpireDays(editTask.expireDays || 60);
     setVisibility(editTask.visibility ?? 'private');
+    setMode(editTask.mode === 'oneshot' ? 'oneshot' : 'continuous');
     setDimension(editTask.dimension);
     setSelectedSns(editTask.deviceSns ?? []);
     setMetricPaths(editTask.metricPaths ?? []);
@@ -266,6 +270,7 @@ export default function PmAdhocWizard() {
     saveCustomWizardDraft(draftKey, {
       current,
       name,
+      mode,
       technology,
       expireDays,
       visibility,
@@ -286,6 +291,7 @@ export default function PmAdhocWizard() {
     draftKey,
     current,
     name,
+    mode,
     technology,
     expireDays,
     visibility,
@@ -332,6 +338,28 @@ export default function PmAdhocWizard() {
     [deviceResp],
   );
 
+  useEffect(() => {
+    if (!draftHydrated || !restoredFromDraft || !needsDevicePick || devicesLoading) return;
+    const visibleDeviceSns = new Set(deviceItems.map((item) => item.key));
+    const nextSelectedSns = selectedSns.filter((sn) => visibleDeviceSns.has(sn));
+    if (isSameStringArray(selectedSns, nextSelectedSns)) return;
+    setSelectedSns(nextSelectedSns);
+    setCellSel((previous) => {
+      const nextCellSel: CellSelection = {};
+      for (const sn of nextSelectedSns) {
+        if (previous[sn]) nextCellSel[sn] = previous[sn];
+      }
+      return nextCellSel;
+    });
+  }, [
+    deviceItems,
+    devicesLoading,
+    draftHydrated,
+    needsDevicePick,
+    restoredFromDraft,
+    selectedSns,
+  ]);
+
   // T-0193：下钻白名单计算用的「按设备小区清单」（与选择器内部同 query key 去重，无额外请求）。
   const { byDevice: objectsByDevice } = useMetricObjectsByDevices(
     needsDevicePick ? selectedSns : [],
@@ -352,6 +380,13 @@ export default function PmAdhocWizard() {
     for (const ind of indicatorItems) m.set(ind.id, ind);
     return m;
   }, [indicatorItems]);
+
+  useEffect(() => {
+    if (!draftHydrated || !restoredFromDraft || indicatorsLoading) return;
+    const nextMetricPaths = metricPaths.filter((metricPath) => indicatorById.has(metricPath));
+    if (isSameStringArray(metricPaths, nextMetricPaths)) return;
+    setMetricPaths(nextMetricPaths);
+  }, [draftHydrated, indicatorById, indicatorsLoading, metricPaths, restoredFromDraft]);
   // Transfer dataSource：类型筛选在 dataSource 层预过滤（不靠 antd 的 filterOption——
   // 后者只在搜索框有输入时才被调用，空搜索下类型筛选会失效）。
   // 规则：保留「类型匹配」或「已被选中」的候选——已选项无论类型都进 dataSource，
@@ -493,6 +528,11 @@ export default function PmAdhocWizard() {
         ),
       );
     }
+  };
+
+  const handleBackToList = () => {
+    clearCustomWizardDraft(draftKey);
+    navigate('/performance/pm-adhoc');
   };
 
   // ── 各步内容 ──────────────────────────────────────────────────────────────
@@ -930,7 +970,7 @@ export default function PmAdhocWizard() {
         id: isEdit ? 'perf.adhoc.wizardEditTitle' : 'perf.adhoc.wizardTitle',
       })}
       extra={
-        <Button onClick={() => navigate('/performance/pm-adhoc')}>
+        <Button onClick={handleBackToList}>
           {intl.formatMessage({ id: 'perf.adhoc.backToList' })}
         </Button>
       }

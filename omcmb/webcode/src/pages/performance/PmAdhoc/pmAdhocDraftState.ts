@@ -1,6 +1,6 @@
 import type { JsonObject, PmPageStateSnapshot } from '@core/store/pmPageStateStore';
 import { usePmPageStateStore } from '@core/store/pmPageStateStore';
-import type { AdhocDimension, AdhocVisibility } from '@core/types/pmAdhoc';
+import type { AdhocDimension, AdhocMode, AdhocVisibility } from '@core/types/pmAdhoc';
 import type { TechnologyType } from '@core/types/technology';
 import type { CellSelection } from '../PmDashboard/cellDrilldownUtils';
 
@@ -12,6 +12,7 @@ export type CustomWizardDraftKey = { mode: 'new' } | { mode: 'edit'; taskId: str
 export interface PmAdhocCustomWizardDraft {
   current: number;
   name: string;
+  mode: AdhocMode;
   technology: TechnologyType;
   expireDays: number;
   visibility: AdhocVisibility;
@@ -37,6 +38,7 @@ export interface PmAdhocBuiltinMetricDraft {
 interface PmAdhocDraftBucket {
   customNew?: PmAdhocCustomWizardDraft;
   customEditById: Record<string, PmAdhocCustomWizardDraft>;
+  activeCustomWizard?: CustomWizardDraftKey;
   builtinMetricById: Record<string, PmAdhocBuiltinMetricDraft>;
   activeBuiltinMetricTaskId?: string;
 }
@@ -62,6 +64,7 @@ function asCustomDraft(value: unknown): PmAdhocCustomWizardDraft | undefined {
   if (!isPlainRecord(value)) return undefined;
   const technology = value.technology === 'nr' || value.technology === 'gsm' ? value.technology : 'lte';
   const visibility = value.visibility === 'public' ? 'public' : 'private';
+  const mode = value.mode === 'oneshot' ? 'oneshot' : 'continuous';
   const dimension = typeof value.dimension === 'string' ? value.dimension as AdhocDimension : 'network';
   const current = typeof value.current === 'number' && Number.isFinite(value.current)
     ? Math.min(Math.max(Math.floor(value.current), 0), 4)
@@ -69,6 +72,7 @@ function asCustomDraft(value: unknown): PmAdhocCustomWizardDraft | undefined {
   return {
     current,
     name: typeof value.name === 'string' ? value.name : '',
+    mode,
     technology,
     expireDays: typeof value.expireDays === 'number' && Number.isFinite(value.expireDays) ? value.expireDays : 60,
     visibility,
@@ -113,9 +117,21 @@ export function restorePmAdhocDraftBucket(snapshot: PmPageStateSnapshot | null):
       if (parsed) builtinMetricById[taskId] = parsed;
     }
   }
+  let activeCustomWizard: CustomWizardDraftKey | undefined;
+  if (isPlainRecord(rawBucket.activeCustomWizard)) {
+    if (rawBucket.activeCustomWizard.mode === 'new') {
+      activeCustomWizard = { mode: 'new' };
+    } else if (
+      rawBucket.activeCustomWizard.mode === 'edit' &&
+      typeof rawBucket.activeCustomWizard.taskId === 'string'
+    ) {
+      activeCustomWizard = { mode: 'edit', taskId: rawBucket.activeCustomWizard.taskId };
+    }
+  }
   return {
     customNew,
     customEditById,
+    activeCustomWizard,
     builtinMetricById,
     activeBuiltinMetricTaskId: typeof rawBucket.activeBuiltinMetricTaskId === 'string'
       ? rawBucket.activeBuiltinMetricTaskId
@@ -141,6 +157,9 @@ function toJsonBucket(bucket: PmAdhocDraftBucket): JsonObject {
   };
   if (bucket.customNew) {
     jsonBucket.customNew = bucket.customNew as unknown as JsonObject;
+  }
+  if (bucket.activeCustomWizard) {
+    jsonBucket.activeCustomWizard = bucket.activeCustomWizard as unknown as JsonObject;
   }
   if (bucket.activeBuiltinMetricTaskId) {
     jsonBucket.activeBuiltinMetricTaskId = bucket.activeBuiltinMetricTaskId;
@@ -174,10 +193,11 @@ export function getCustomWizardDraft(key: CustomWizardDraftKey): PmAdhocCustomWi
 export function saveCustomWizardDraft(key: CustomWizardDraftKey, draft: PmAdhocCustomWizardDraft) {
   updateBucket((bucket) => {
     if (key.mode === 'new') {
-      return { ...bucket, customNew: draft };
+      return { ...bucket, customNew: draft, activeCustomWizard: { mode: 'new' } };
     }
     return {
       ...bucket,
+      activeCustomWizard: { mode: 'edit', taskId: key.taskId },
       customEditById: {
         ...bucket.customEditById,
         [key.taskId]: draft,
@@ -190,10 +210,39 @@ export function clearCustomWizardDraft(key: CustomWizardDraftKey) {
   updateBucket((bucket) => {
     if (key.mode === 'new') {
       const { customNew: _customNew, ...rest } = bucket;
-      return rest;
+      return {
+        ...rest,
+        activeCustomWizard: bucket.activeCustomWizard?.mode === 'new' ? undefined : bucket.activeCustomWizard,
+      };
     }
     const { [key.taskId]: _draft, ...customEditById } = bucket.customEditById;
-    return { ...bucket, customEditById };
+    return {
+      ...bucket,
+      customEditById,
+      activeCustomWizard:
+        bucket.activeCustomWizard?.mode === 'edit' && bucket.activeCustomWizard.taskId === key.taskId
+          ? undefined
+          : bucket.activeCustomWizard,
+    };
+  });
+}
+
+export function getActiveCustomWizard(): CustomWizardDraftKey | undefined {
+  return restorePmAdhocDraftBucket(
+    usePmPageStateStore.getState().getPageState(PM_ADHOC_PAGE_KEY),
+  ).activeCustomWizard;
+}
+
+export function clearActiveCustomWizard(key?: CustomWizardDraftKey) {
+  updateBucket((bucket) => {
+    if (key) {
+      const active = bucket.activeCustomWizard;
+      const sameActive = active?.mode === key.mode && (
+        key.mode === 'new' || (active.mode === 'edit' && active.taskId === key.taskId)
+      );
+      if (!sameActive) return bucket;
+    }
+    return { ...bucket, activeCustomWizard: undefined };
   });
 }
 
