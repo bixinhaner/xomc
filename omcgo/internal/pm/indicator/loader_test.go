@@ -61,6 +61,36 @@ func TestSeedBaselineGNBDefaultEnabledMatchesGNBXML(t *testing.T) {
 	assert.Equal(t, want, got, "GNB 默认全部启用清单必须与 GNB.xml 保持一致")
 }
 
+func TestENBReleaseCounterRegisteredAcrossRuntimeAndDeliveryCopies(t *testing.T) {
+	for _, file := range []string{
+		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "BM.xml"),
+		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "MLN.xml"),
+		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "ENB_DEFAULT_098.xml"),
+		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "ENB_DEFAULT_181.xml"),
+		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "BM.xml"),
+		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "MLN.xml"),
+		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "ENB_DEFAULT_098.xml"),
+		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "ENB_DEFAULT_181.xml"),
+	} {
+		t.Run(file, func(t *testing.T) {
+			var doc xmlIndicatorModel
+			require.NoError(t, readXML(file, &doc), file)
+			var matches []xmlIndicator
+			for _, ind := range doc.Indicators {
+				if ind.ID == "C000010228" {
+					matches = append(matches, ind)
+				}
+			}
+			require.Len(t, matches, 1, "%s 中 C000010228 应存在且唯一", file)
+
+			ind := matches[0]
+			assert.Equal(t, "1", ind.IsCounter)
+			assert.Equal(t, "sum", ind.StatisType)
+			assert.Equal(t, "C000010228", ind.Arithmetic)
+		})
+	}
+}
+
 // #98：reload 重灌 builtin 公式时，已被用户自定义公式覆盖的 (平台, 指标) 必须跳过，
 // 避免与保留下来的自定义行重复 / 覆盖用户意图。
 func TestExcludeCustomOverridden(t *testing.T) {
