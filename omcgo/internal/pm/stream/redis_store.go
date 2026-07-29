@@ -43,6 +43,16 @@ type Accumulator struct {
 	Max        float64
 }
 
+const compactAccumulatorVersion = "v1"
+
+type compactAccumulator struct {
+	Definition ContributionValue
+	Sum        float64
+	Count      int64
+	Min        float64
+	Max        float64
+}
+
 type WindowState struct {
 	ExpectedSlots         int64
 	ReceivedSlots         int64
@@ -258,6 +268,7 @@ func (s *RedisWindowStore) Read(ctx context.Context, key WindowKey) (WindowState
 		max   float64
 	}
 	values := make(map[string]*partial)
+	compactIDs := make(map[string]struct{})
 	for shard := 0; shard < shardCount; shard++ {
 		var cursor uint64
 		for {
@@ -272,12 +283,26 @@ func (s *RedisWindowStore) Read(ctx context.Context, key WindowKey) (WindowState
 			missingDefinitions := make([]string, 0)
 			missingSet := make(map[string]struct{})
 			for index := 0; index+1 < len(fields); index += 2 {
-				field := fields[index]
+				field, raw := fields[index], fields[index+1]
 				suffixIndex := strings.LastIndexByte(field, '|')
 				if suffixIndex <= 0 {
+					item, decodeErr := decodeCompactAccumulator(raw)
+					if decodeErr != nil {
+						return WindowState{}, fmt.Errorf(
+							"decode compact PM aggregation accumulator %s: %w", field, decodeErr,
+						)
+					}
+					values[field] = &partial{
+						def: item.Definition, sum: item.Sum, count: item.Count,
+						min: item.Min, max: item.Max,
+					}
+					compactIDs[field] = struct{}{}
 					continue
 				}
 				base := field[:suffixIndex]
+				if _, compact := compactIDs[base]; compact {
+					continue
+				}
 				if values[base] == nil {
 					if _, exists := missingSet[base]; !exists {
 						missingSet[base] = struct{}{}
@@ -315,7 +340,13 @@ func (s *RedisWindowStore) Read(ctx context.Context, key WindowKey) (WindowState
 					continue
 				}
 				base, suffix := field[:suffixIndex], field[suffixIndex+1:]
+				if _, compact := compactIDs[base]; compact {
+					continue
+				}
 				item := values[base]
+				if item == nil {
+					continue
+				}
 				switch suffix {
 				case "sum":
 					item.sum, _ = strconv.ParseFloat(raw, 64)
@@ -467,6 +498,45 @@ func encodeDefinition(value ContributionValue) (string, error) {
 		return "", fmt.Errorf("marshal PM aggregation accumulator definition: %w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(data), nil
+}
+
+func decodeCompactAccumulator(raw string) (compactAccumulator, error) {
+	parts := strings.Split(raw, "|")
+	if len(parts) != 6 {
+		return compactAccumulator{}, fmt.Errorf(
+			"invalid compact accumulator field count %d", len(parts),
+		)
+	}
+	if parts[0] != compactAccumulatorVersion {
+		return compactAccumulator{}, fmt.Errorf("unsupported compact accumulator version %q", parts[0])
+	}
+	definition, err := decodeDefinition(parts[1])
+	if err != nil {
+		return compactAccumulator{}, err
+	}
+	sum, err := strconv.ParseFloat(parts[2], 64)
+	if err != nil {
+		return compactAccumulator{}, fmt.Errorf("parse compact accumulator sum: %w", err)
+	}
+	count, err := strconv.ParseInt(parts[3], 10, 64)
+	if err != nil {
+		return compactAccumulator{}, fmt.Errorf("parse compact accumulator count: %w", err)
+	}
+	minValue, err := strconv.ParseFloat(parts[4], 64)
+	if err != nil {
+		return compactAccumulator{}, fmt.Errorf("parse compact accumulator min: %w", err)
+	}
+	maxValue, err := strconv.ParseFloat(parts[5], 64)
+	if err != nil {
+		return compactAccumulator{}, fmt.Errorf("parse compact accumulator max: %w", err)
+	}
+	return compactAccumulator{
+		Definition: definition,
+		Sum:        sum,
+		Count:      count,
+		Min:        minValue,
+		Max:        maxValue,
+	}, nil
 }
 
 func decodeDefinition(value string) (ContributionValue, error) {
