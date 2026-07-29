@@ -443,7 +443,11 @@ func (e *ProvisioningEngine) HandleDeviceOnline(ctx context.Context, evt device.
 		}
 	}
 
-	if e.syncService == nil {
+	if e.paramSyncRoutingMode == "closed" {
+		if !e.closedMACSyncEnabled() {
+			return nil
+		}
+	} else if e.syncService == nil {
 		e.logger.Debug("device.online received but syncService unavailable, skipping",
 			zap.String("device_id", evt.DeviceID.String()))
 		return nil
@@ -469,6 +473,14 @@ func (e *ProvisioningEngine) HandleDeviceOnline(ctx context.Context, evt device.
 	// Empty sourceID lets SyncService allocate a per-run UUID. Do not reuse
 	// device_id here, otherwise multiple automatic sync rounds share one
 	// source_id and their open tasks contaminate each other.
+	if e.paramSyncRoutingMode == "closed" {
+		if err := e.startDeviceMACSync(ctx, dev); err != nil {
+			e.logger.Warn("device.online: start MAC sync failed",
+				zap.String("device_id", evt.DeviceID.String()),
+				zap.Error(err))
+		}
+		return nil
+	}
 	if e.blocksLegacyParamSync("device_online") {
 		return nil
 	}
@@ -544,6 +556,16 @@ func (e *ProvisioningEngine) HandleFirmwareChanged(ctx context.Context, evt devi
 
 	// T-0176-PR-D 懒补 product 绑定（设备升级后 productClass 不变但历史 orphan 此刻有机会路由）。
 	e.bindDeviceProductIfNeeded(ctx, dev)
+
+	// FirmwareChanged 与 device.online 二选一发布；升级 Inform 同时完成
+	// offline→active 时，需要在 closed 路由下补上同样的 MAC 刷新。
+	if evt.BecameOnline && e.closedMACSyncEnabled() {
+		if err := e.startDeviceMACSync(ctx, dev); err != nil {
+			e.logger.Warn("firmware.changed: start MAC sync failed",
+				zap.String("device_id", evt.DeviceID.String()),
+				zap.Error(err))
+		}
+	}
 
 	sourceID := uuid.NewString()
 	if e.modelUploadService != nil {
@@ -676,12 +698,9 @@ func (e *ProvisioningEngine) handleRegisteredDeviceSyncEvent(ctx context.Context
 	if err := evt.DecodePayload(&registered); err != nil {
 		return fmt.Errorf("decode registered-device sync event: %w", err)
 	}
-	if !registered.Created {
-		return nil
-	}
 	switch e.paramSyncRoutingMode {
 	case "durable":
-		if e.registeredSync == nil {
+		if !registered.Created || e.registeredSync == nil {
 			return nil
 		}
 	case "closed":
@@ -708,13 +727,10 @@ func (e *ProvisioningEngine) startRegisteredDeviceSync(
 	evt bootstrapEvent,
 	dev *model.Device,
 ) error {
-	if !evt.Created {
-		return nil
-	}
 	var err error
 	switch e.paramSyncRoutingMode {
 	case "durable":
-		if e.registeredSync == nil {
+		if !evt.Created || e.registeredSync == nil {
 			return nil
 		}
 		err = e.registeredSync.StartRegisteredDeviceSync(
@@ -723,21 +739,40 @@ func (e *ProvisioningEngine) startRegisteredDeviceSync(
 			"device_registered:"+dev.ID.String(),
 		)
 	case "closed":
-		if !e.config.AutoSync.Enabled ||
-			!e.config.AutoSync.SyncOnBootstrap ||
-			e.registeredMACSync == nil {
-			return nil
-		}
-		_, _, err = e.registeredMACSync.StartRegisteredDeviceMACSync(
-			ctx,
-			dev,
-			dev.ID.String(),
-		)
+		return e.startDeviceMACSync(ctx, dev)
 	default:
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("start registered-device parameter sync: %w", err)
+	}
+	return nil
+}
+
+func (e *ProvisioningEngine) closedMACSyncEnabled() bool {
+	return e.paramSyncRoutingMode == "closed" &&
+		e.config.AutoSync.Enabled &&
+		e.config.AutoSync.SyncOnBootstrap &&
+		e.registeredMACSync != nil
+}
+
+// startDeviceMACSync is the narrow Issue #219 compensation path. It refreshes
+// MAC once per registration/reconnect event so a hardware change is detected;
+// it never enters the durable/full parameter-sync route.
+func (e *ProvisioningEngine) startDeviceMACSync(
+	ctx context.Context,
+	dev *model.Device,
+) error {
+	if dev == nil || !e.closedMACSyncEnabled() {
+		return nil
+	}
+	_, _, err := e.registeredMACSync.StartRegisteredDeviceMACSync(
+		ctx,
+		dev,
+		uuid.NewString(),
+	)
+	if err != nil {
+		return fmt.Errorf("start device MAC sync: %w", err)
 	}
 	return nil
 }
