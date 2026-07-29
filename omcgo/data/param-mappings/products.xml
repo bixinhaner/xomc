@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <products totalProducts="15" totalPatterns="52" generatedAt="2026-05-06">
-  <!-- ============ 1. BAIBLQ 产品 ============ -->
-  <product name="BAIBLQ" vendor="Baicells" tech="4G" radioModes="SC">
-    <description>Baicells BAIBLQ</description>
+  <!-- ============ 1. BLQ 产品 ============ -->
+  <product name="BLQ" vendor="Baicells" tech="4G" radioModes="SC">
+    <description>Baicells BLQ</description>
     <paramModel>BLQ</paramModel>
     <enableFileType11>true</enableFileType11>
     <deviceAttrsOverride access="false" min_value="false" max_value="false" change_applies="false" data_type="false" />
@@ -24,8 +24,8 @@
       <pattern globalOrder="10">^FAP/BaiBLX-(QRTB|BLQ)/SC</pattern>
     </patterns>
   </product>
-  <!-- ============ 3. QRTB 系列 ============ -->
-  <product name="QRTB Series" vendor="Baicells" tech="4G" radioModes="SC,CA,DC">
+  <!-- ============ 3. QRTB 产品 ============ -->
+  <product name="QRTB" vendor="Baicells" tech="4G" radioModes="SC,CA,DC">
     <description>Baicells QRTB; supports SC/CA/DC radio modes</description>
     <paramModel>BLQ</paramModel>
     <enableFileType11>true</enableFileType11>
@@ -51,8 +51,8 @@
       <pattern globalOrder="3">^FAP/MLQ/SC$</pattern>
     </patterns>
   </product>
-  <!-- ============ 5. MLN 系列 ============ -->
-  <product name="MLN Series" vendor="Baicells" tech="4G" radioModes="SC,CA,DC">
+  <!-- ============ 5. MLN 产品 ============ -->
+  <product name="MLN" vendor="Baicells" tech="4G" radioModes="SC,CA,DC">
     <description>Baicells MLN; supports SC/CA/DC radio modes</description>
     <paramModel>MLN</paramModel>
     <enableFileType11>true</enableFileType11>
@@ -101,9 +101,9 @@
       <pattern globalOrder="9">^FAP/BTS$</pattern>
     </patterns>
   </product>
-  <!-- ============ 9. BaiBNQ 5G 产品 ============ -->
-  <product name="BaiBNQ 5G" vendor="Baicells" tech="5G" radioModes="">
-    <description>Baicells BaiBNQ; 5G NR base station; TR-069 parameters and KPI formulas use BaiBNQ</description>
+  <!-- ============ 9. BNQ 产品 ============ -->
+  <product name="BNQ" vendor="Baicells" tech="5G" radioModes="">
+    <description>Baicells BNQ; 5G NR base station; TR-069 parameters and KPI formulas use BaiBNQ</description>
     <paramModel>BaiBNQ</paramModel>
     <enableFileType11>true</enableFileType11>
     <deviceAttrsOverride access="false" min_value="false" max_value="false" change_applies="false" data_type="false" />

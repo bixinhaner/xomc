@@ -28,7 +28,7 @@ func TestRedisCache_RoundTrip(t *testing.T) {
 	pmID := uuid.New()
 	p := &Product{
 		ID:                  id,
-		Name:                "QRTB Series",
+		Name:                "QRTB",
 		Vendor:              "Baicells",
 		Tech:                "4G",
 		RadioModes:          "SC,CA",

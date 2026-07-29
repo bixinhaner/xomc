@@ -38,7 +38,7 @@ type Service struct {
 	deviceRepo      device.DeviceRepository
 	logger          *zap.Logger
 	// productTechLookup 为 nil 时设备过滤退化为旧关键字匹配；推荐生产部署一定注入,
-	// 否则像 FAP/BSC7041C243 这种 BaiBNQ 5G 产品因为字符串没 "5G/GNB/BBU" 关键字,
+	// 否则像 FAP/BSC7041C243 这种 BNQ 产品因为字符串没 "5G/GNB/BBU" 关键字,
 	// 5G 升级任务的设备候选会整批漏选（用户实测反馈过）。
 	productTechLookup ProductTechLookup
 	// productNameLookup 注入式：productClass → 产品英文名。nil 时 product_scope 匹配整批漏选
@@ -1371,7 +1371,7 @@ func parseTaskIDFilter(s string) (*uuid.UUID, error) {
 //     这种平台标签，与 productClass 大写后双向 Contains）—— matchesTaskTypeScope
 //     已实现这一段。
 //  2. techHint != nil 时，用 ProductRegistry 查 device.productClass → product.tech
-//     ("lte" / "nr" / "gsm")，与 techHint 严格相等才放行。这一步对了，BaiBNQ 5G 产品
+//     ("lte" / "nr" / "gsm")，与 techHint 严格相等才放行。这一步对了，BNQ 产品
 //     (pattern FAP/\w*BSC\w+, tech="nr") 在 5G 升级任务里就能命中，不再依赖
 //     "BSC" 是不是出现在关键字白名单。
 //  3. ProductRegistry 不可用 / productClass 字典里没注册 → 退回 matchesTaskTypeScope
