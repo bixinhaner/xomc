@@ -371,6 +371,42 @@ func TestMapDeviceItem_StartedAndEndedAt_Ended(t *testing.T) {
 	assert.False(t, item.StartedAt.Equal(*item.EndedAt), "StartedAt 与 EndedAt 必须能区分开（避免回归到都用 updated_at）")
 }
 
+func TestMapDeviceItem_ConfigRestoreCompletedBackfillsMissingStartedAt(t *testing.T) {
+	svc := newServiceForMap(t)
+	catalog := mustCatalog(t, "CONFIG_RESTORE")
+	parent := &software.UpgradeTask{
+		ID:               uuid.New(),
+		TaskName:         "restore-task",
+		TaskType:         software.TaskTypeLogCollect,
+		DownloadFileType: "10 <OUI> Configuration File",
+		ProductClass:     "4G eNB",
+	}
+	completedAt := time.Date(2026, 7, 28, 10, 30, 0, 0, time.UTC)
+	completedAtModel := coremodel.Time(completedAt)
+	sub := software.UpgradeSubTaskWithTaskName{
+		UpgradeSubTask: software.UpgradeSubTask{
+			ID:          uuid.New(),
+			TaskID:      parent.ID,
+			DeviceID:    uuid.New(),
+			DeviceSN:    "SN-217R",
+			Status:      software.UpgradeCompleted,
+			StartedAt:   nil,
+			CompletedAt: &completedAtModel,
+			UpdatedAt:   coremodel.Time(completedAt),
+			DestVersion: "snapshot_SN-217R.nv",
+		},
+		TaskName: "restore-task",
+	}
+	cache := map[uuid.UUID]*coremodel.Device{
+		sub.DeviceID: {ID: sub.DeviceID, SerialNumber: "SN-217R", ProductClass: "4G eNB"},
+	}
+	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
+	require.NoError(t, err)
+	assert.Equal(t, "ended", item.Status, "前置：配置恢复子任务已成功结束")
+	assertTimePtrEqual(t, completedAt, item.EndedAt)
+	assertTimePtrEqual(t, completedAt, item.StartedAt, "配置恢复历史数据 started_at 为空时不应在页面显示 '-'")
+}
+
 // pending：未进入执行态 → 两字段都为空。
 func TestMapDeviceItem_StartedAndEndedAt_Pending(t *testing.T) {
 	svc := newServiceForMap(t)
@@ -402,7 +438,7 @@ func TestMapDeviceItem_StartedAndEndedAt_Pending(t *testing.T) {
 
 // issue #655 追加：被操作者主动终止的子任务在执行态之前被叫停 → repo 只写了
 // completed_at(=EndedAt)，started_at 为空。mapDeviceItem 应兜底 StartedAt = EndedAt，
-// 同时 FailureReason 在 sub_task 为空时兜底为「终止」（与前端列展示对齐）。
+// 同时 FailureReason 在 sub_task 为空时兜底为稳定错误码（交给前端 i18n 展示）。
 func TestMapDeviceItem_Terminated_StartedAtFallbackAndFailureReason(t *testing.T) {
 	svc := newServiceForMap(t)
 	catalog := mustCatalog(t, "RUNTIME_LOG_COLLECT")
@@ -436,7 +472,7 @@ func TestMapDeviceItem_Terminated_StartedAtFallbackAndFailureReason(t *testing.T
 	assert.Equal(t, "terminated", item.Result, "前置：terminated 走的是 result=terminated 分支")
 	assertTimePtrEqual(t, completedAt, item.EndedAt)
 	assertTimePtrEqual(t, completedAt, item.StartedAt, "terminated 且 StartedAt 空时应兜底 = EndedAt")
-	assert.Equal(t, "终止", item.FailureReason, "terminated 且 FailureReason 空时应兜底为「终止」")
+	assert.Equal(t, "OPERATOR_TERMINATED", item.FailureReason, "terminated 且 FailureReason 空时应兜底为稳定错误码")
 	assert.Equal(t, "task terminated by operator", item.FailureDetail, "FailureDetail 保持设备原始 ErrorMessage 不动")
 }
 

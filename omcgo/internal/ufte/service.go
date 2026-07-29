@@ -38,7 +38,7 @@ type Service struct {
 	deviceRepo      device.DeviceRepository
 	logger          *zap.Logger
 	// productTechLookup 为 nil 时设备过滤退化为旧关键字匹配；推荐生产部署一定注入,
-	// 否则像 FAP/BSC7041C243 这种 BaiBNQ 5G 产品因为字符串没 "5G/GNB/BBU" 关键字,
+	// 否则像 FAP/BSC7041C243 这种 BNQ 产品因为字符串没 "5G/GNB/BBU" 关键字,
 	// 5G 升级任务的设备候选会整批漏选（用户实测反馈过）。
 	productTechLookup ProductTechLookup
 	// productNameLookup 注入式：productClass → 产品英文名。nil 时 product_scope 匹配整批漏选
@@ -752,6 +752,7 @@ func (s *Service) CreateTask(ctx context.Context, req CreateTaskRequest, createU
 			DownloadFileType: typeDef.FileType,
 			IsKeepConfig:     req.IsKeepConfig,
 			Concurrency:      req.Concurrency,
+			CreateUser:       createUser,
 			CreateSuspended:  createSuspended,
 			ScheduledAt:      scheduledAt,
 		})
@@ -838,6 +839,7 @@ func (s *Service) createConfigRestoreTask(
 		return nil, fmt.Errorf("dispatch CONFIG_RESTORE by snapshot: %w", err)
 	}
 	s.persistDispatchedFiles(ctx, "CONFIG_RESTORE", placeholder.ID, dispatchedFiles)
+	placeholder = s.finalizeDirectDispatchPlaceholder(ctx, placeholder, len(sns), "CONFIG_RESTORE")
 
 	catalog, _ := s.loadTaskTypeCatalog(ctx)
 	return s.mapTask(ctx, catalog, placeholder)
@@ -908,9 +910,47 @@ func (s *Service) createLicenseUpgradeTask(
 		return nil, fmt.Errorf("dispatch LICENSE_UPGRADE: %w", err)
 	}
 	s.persistDispatchedFiles(ctx, "LICENSE_UPGRADE", placeholder.ID, dispatchedFiles)
+	placeholder = s.finalizeDirectDispatchPlaceholder(ctx, placeholder, len(sns), "LICENSE_UPGRADE")
 
 	catalog, _ := s.loadTaskTypeCatalog(ctx)
 	return s.mapTask(ctx, catalog, placeholder)
+}
+
+func (s *Service) finalizeDirectDispatchPlaceholder(
+	ctx context.Context,
+	placeholder *software.UpgradeTask,
+	deviceCount int,
+	typeCode string,
+) *software.UpgradeTask {
+	if placeholder == nil || s.softwareService == nil {
+		return placeholder
+	}
+	if err := s.softwareService.FinalizePlaceholderTrackingTask(ctx, placeholder.ID, deviceCount); err != nil {
+		s.logger.Warn("finalize direct-dispatch placeholder failed",
+			zap.String("type_code", typeCode),
+			zap.String("task_id", placeholder.ID.String()),
+			zap.Error(err))
+		return placeholder
+	}
+
+	now := coremodel.Time(time.Now())
+	placeholder.Status = software.TaskInProgress
+	placeholder.StartedAt = &now
+	if s.taskRepo == nil {
+		return placeholder
+	}
+	refreshed, err := s.taskRepo.GetByID(ctx, placeholder.ID)
+	if err != nil {
+		s.logger.Warn("reload direct-dispatch placeholder failed",
+			zap.String("type_code", typeCode),
+			zap.String("task_id", placeholder.ID.String()),
+			zap.Error(err))
+		return placeholder
+	}
+	if refreshed == nil {
+		return placeholder
+	}
+	return refreshed
 }
 
 // persistDispatchedFiles 把 dispatcher 返回的 sn → 文件名映射写回 upgrade_sub_tasks.dest_version。
@@ -1331,7 +1371,7 @@ func parseTaskIDFilter(s string) (*uuid.UUID, error) {
 //     这种平台标签，与 productClass 大写后双向 Contains）—— matchesTaskTypeScope
 //     已实现这一段。
 //  2. techHint != nil 时，用 ProductRegistry 查 device.productClass → product.tech
-//     ("lte" / "nr" / "gsm")，与 techHint 严格相等才放行。这一步对了，BaiBNQ 5G 产品
+//     ("lte" / "nr" / "gsm")，与 techHint 严格相等才放行。这一步对了，BNQ 产品
 //     (pattern FAP/\w*BSC\w+, tech="nr") 在 5G 升级任务里就能命中，不再依赖
 //     "BSC" 是不是出现在关键字白名单。
 //  3. ProductRegistry 不可用 / productClass 字典里没注册 → 退回 matchesTaskTypeScope
@@ -1680,15 +1720,18 @@ func (s *Service) mapDeviceItem(
 	// 因此 sub_task.started_at 一般为空。前端列「开始时间 / 结束时间」只有结束、没开始
 	// 显示别扭——补一个 startedAt = endedAt 让两端对齐（语义上"在结束的同一刻被终止"）。
 	// failure_reason 同理：TerminateUpgrade 只写 error_message="task terminated by operator"，
-	// failure_reason 留空，前端「失败原因」列空着不够直观——补「终止」短标，CSV 走
-	// translateFailureReason 找不到映射会原样返回，三端口径一致。
+	// failure_reason 留空，前端「失败原因」列空着不够直观——补稳定 code，由前端 i18n
+	// 和 CSV 导出各自翻译，避免英文环境露中文。
 	if result == "terminated" {
 		if startedAt == nil && endedAt != nil {
 			startedAt = endedAt
 		}
 		if failureReason == "" {
-			failureReason = "终止"
+			failureReason = failureCodeOperatorTerminated
 		}
+	}
+	if isDirectDispatchFile && status == "ended" && startedAt == nil && endedAt != nil {
+		startedAt = endedAt
 	}
 
 	return &DeviceItem{
@@ -1714,7 +1757,8 @@ func (s *Service) mapDeviceItem(
 		// issue #655：StartedAt / EndedAt 直接透传 PG repo 写入的 sub_task.started_at /
 		// completed_at（见 pg_upgrade_repository.go UpdateStatusWithCode，COALESCE 守卫
 		// 首次执行态写一次后不再覆盖）。LastReportAt 保留兼容 CSV / 北向 API。
-		// terminated 特例：startedAt 兜底 = endedAt，failureReason 兜底 = "终止"。
+		// 特例：terminated 以及旧 CONFIG_RESTORE / LICENSE_UPGRADE 成功终态缺 started_at 时，
+		// startedAt 兜底 = endedAt，避免页面显示 "-".
 		StartedAt:     startedAt,
 		EndedAt:       endedAt,
 		LastReportAt:  optionalTimePtr(lastReport),

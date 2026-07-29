@@ -294,13 +294,13 @@ func TestWideCSVWriter_AggregateNoCellColumn(t *testing.T) {
 	require.NoError(t, err)
 	tm := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
 	// CellPLMN 给值也应被忽略（聚合维度无小区列）。
-	require.NoError(t, w.AddRow(ExportRow{Device: "BLX 产品", CellPLMN: "应忽略", Time: tm, StartTime: tm, EndTime: tm.Add(time.Hour), MetricCode: "C1", Value: 7}))
+	require.NoError(t, w.AddRow(ExportRow{Device: "BLX", CellPLMN: "应忽略", Time: tm, StartTime: tm, EndTime: tm.Add(time.Hour), MetricCode: "C1", Value: 7}))
 	require.NoError(t, w.Flush())
 	row := nthCSVRow(t, buf.Bytes(), 1)
 	// 列：开始时间 | 结束时间 | 产品 | C1 —— 无 Cell ID/PLMN 列。
 	assert.Equal(t, "2026-06-04 10:00:00", row[0]) // 开始时间
 	assert.Equal(t, "2026-06-04 11:00:00", row[1]) // 结束时间
-	assert.Equal(t, "BLX 产品", row[2])
+	assert.Equal(t, "BLX", row[2])
 	assert.Equal(t, "7", row[3]) // C1 值
 	assert.Len(t, row, 4)
 }

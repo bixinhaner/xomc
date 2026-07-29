@@ -334,6 +334,7 @@ func (h *Handler) CreateUpgradeTask(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
+	req.CreateUser = currentUsername(c)
 
 	// #59 Problem 4：逐设备归属校验——低权用户不得升级其可见设备组之外的设备
 	// （跨租户写）。任一 DeviceID 越界即整批 403。在调 service 之前拦截，避免越权
@@ -363,6 +364,15 @@ func (h *Handler) CreateUpgradeTask(c *gin.Context) {
 		return
 	}
 	response.OKWithStatus(c, http.StatusCreated, task)
+}
+
+func currentUsername(c *gin.Context) string {
+	if raw, ok := c.Get("username"); ok {
+		if name, ok := raw.(string); ok && name != "" {
+			return name
+		}
+	}
+	return "system"
 }
 
 func (h *Handler) SuspendUpgradeTask(c *gin.Context) {

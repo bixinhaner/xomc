@@ -7539,7 +7539,7 @@ const messages: Record<string, string> = {
   'mrTask.create.section.targetDevice': '目标设备',
   'mrTask.field.deviceSn':              '设备 SN',
   'mrTask.field.deviceName':            '设备名称',
-  'mrTask.field.productClass':          '产品型号',
+  'mrTask.field.productClass':          '产品名称',
   'mrTask.action.batchSnInput':         '批量 SN 输入',
   'mrTask.placeholder.deviceSearch':    '按 SN / 名称搜索',
   'mrTask.create.selectedDeviceCount':  '已选 {count} 台',

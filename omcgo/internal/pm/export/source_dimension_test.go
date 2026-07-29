@@ -145,13 +145,13 @@ func TestAdhocSource_NonDeviceGroupNoTechnology(t *testing.T) {
 // product 维度：首列取产品名。
 func TestAdhocSource_ProductLabel(t *testing.T) {
 	stub := &adhocStubQuerier{rows: [][]any{
-		adhocRow("", "", "C1", 1, nil, strptr("11112222-3333-4444"), strptr("BLX 产品"), nil),
+		adhocRow("", "", "C1", 1, nil, strptr("11112222-3333-4444"), strptr("BLX"), nil),
 	}}
 	src := newAdhocSource(stub, uuid.New(), nil, adhocExportFilter{}, "product", 0)
 	rows, _, err := src.Next(context.Background())
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	assert.Equal(t, "BLX 产品", rows[0].Device)
+	assert.Equal(t, "BLX", rows[0].Device)
 	assert.Equal(t, "", rows[0].CellPLMN)
 }
 
