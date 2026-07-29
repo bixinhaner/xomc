@@ -197,13 +197,16 @@ func (r *SyncRunner) runTable(ctx context.Context, dimTable string, fn func(cont
 	if ctx.Err() != nil {
 		return
 	}
+	started := time.Now()
 	n, err := fn(ctx)
 	if err != nil {
 		r.logger.Warn("shadow-dim table sync failed (other tables continue)",
-			zap.String("table", dimTable), zap.Error(err))
+			zap.String("table", dimTable), zap.Duration("took", time.Since(started)), zap.Error(err))
 		return
 	}
-	r.logger.Debug("shadow-dim table synced", zap.String("table", dimTable), zap.Int64("rows", n))
+	r.logger.Debug("shadow-dim table synced",
+		zap.String("table", dimTable), zap.Int64("rows", n),
+		zap.Duration("took", time.Since(started)))
 }
 
 // syncFullMirror 镜像同步：以【dst 影子表的列】为准，只从源表 SELECT dst 拥有的列，
@@ -435,6 +438,17 @@ func (r *SyncRunner) truncateAndCopy(ctx context.Context, dstTable string, cols 
 			return 0, fmt.Errorf("copy staging for %s: %w", dstTable, err)
 		}
 	}
+	stageIndexSQL, err := buildStageIndexSQL(stageTable, keyCols)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(ctx, stageIndexSQL); err != nil {
+		return 0, fmt.Errorf("index staging for %s: %w", dstTable, err)
+	}
+	analyzeSQL := "ANALYZE " + pgx.Identifier{stageTable}.Sanitize()
+	if _, err := tx.Exec(ctx, analyzeSQL); err != nil {
+		return 0, fmt.Errorf("analyze staging for %s: %w", dstTable, err)
+	}
 	upsertSQL, pruneSQL, err := buildMirrorMergeSQL(dstTable, stageTable, cols, keyCols)
 	if err != nil {
 		return 0, err
@@ -499,6 +513,19 @@ func containsAllColumns(cols, required []string) bool {
 	return true
 }
 
+func buildStageIndexSQL(stageTable string, keyCols []string) (string, error) {
+	if stageTable == "" || len(keyCols) == 0 {
+		return "", fmt.Errorf("staging index requires table and primary-key columns")
+	}
+	indexName := stageTable + "_mirror_pk"
+	return fmt.Sprintf(
+		"CREATE UNIQUE INDEX %s ON %s (%s)",
+		pgx.Identifier{indexName}.Sanitize(),
+		pgx.Identifier{stageTable}.Sanitize(),
+		strings.Join(quoteColumns(keyCols), ", "),
+	), nil
+}
+
 func buildMirrorMergeSQL(dstTable, stageTable string, cols, keyCols []string) (string, string, error) {
 	if len(cols) == 0 || len(keyCols) == 0 || !containsAllColumns(cols, keyCols) {
 		return "", "", fmt.Errorf("mirror merge requires selected primary-key columns")
@@ -533,7 +560,7 @@ func buildMirrorMergeSQL(dstTable, stageTable string, cols, keyCols []string) (s
 	matches := make([]string, 0, len(keyCols))
 	for _, key := range keyCols {
 		qkey := pgx.Identifier{key}.Sanitize()
-		matches = append(matches, fmt.Sprintf("d.%s IS NOT DISTINCT FROM s.%s", qkey, qkey))
+		matches = append(matches, fmt.Sprintf("d.%s = s.%s", qkey, qkey))
 	}
 	prune := fmt.Sprintf(
 		"DELETE FROM %s AS d WHERE NOT EXISTS (SELECT 1 FROM %s AS s WHERE %s)",

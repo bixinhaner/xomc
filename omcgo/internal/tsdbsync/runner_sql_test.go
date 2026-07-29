@@ -20,7 +20,8 @@ func TestBuildMirrorMergeSQLUsesIncrementalUpsertAndDelete(t *testing.T) {
 	assert.Contains(t, upsert, `IS DISTINCT FROM`)
 	assert.NotContains(t, strings.ToUpper(upsert), "TRUNCATE")
 	assert.Contains(t, prune, `DELETE FROM "alarm_definition_dim"`)
-	assert.Contains(t, prune, `IS NOT DISTINCT FROM`)
+	assert.Contains(t, prune, `d."id" = s."id"`)
+	assert.NotContains(t, prune, `IS NOT DISTINCT FROM`)
 }
 
 func TestBuildMirrorMergeSQLSupportsCompositePrimaryKey(t *testing.T) {
@@ -32,8 +33,18 @@ func TestBuildMirrorMergeSQLSupportsCompositePrimaryKey(t *testing.T) {
 	)
 	require.NoError(t, err)
 	assert.Contains(t, upsert, `ON CONFLICT ("group_id", "device_id") DO NOTHING`)
-	assert.Contains(t, prune, `d."group_id" IS NOT DISTINCT FROM s."group_id"`)
-	assert.Contains(t, prune, `d."device_id" IS NOT DISTINCT FROM s."device_id"`)
+	assert.Contains(t, prune, `d."group_id" = s."group_id"`)
+	assert.Contains(t, prune, `d."device_id" = s."device_id"`)
+}
+
+func TestBuildStageIndexSQLUsesCompositePrimaryKey(t *testing.T) {
+	sql, err := buildStageIndexSQL(
+		"sync_stage_device_group_member_dim",
+		[]string{"group_id", "device_id"},
+	)
+	require.NoError(t, err)
+	assert.Contains(t, sql, `CREATE UNIQUE INDEX`)
+	assert.Contains(t, sql, `ON "sync_stage_device_group_member_dim" ("group_id", "device_id")`)
 }
 
 func TestBuildMirrorMergeSQLRejectsMissingKeyColumn(t *testing.T) {
